@@ -58,7 +58,7 @@ npm install -g muaddib-scanner
 
 ### Depuis les sources
 ```bash
-git clone https://github.com/music-muse/muad-dib.git
+git clone https://github.com/DNSZLSK/muad-dib
 cd muad-dib
 npm install
 npm link
@@ -212,7 +212,7 @@ L'extension VS Code scanne automatiquement vos projets npm.
 Cherchez "MUAD'DIB" dans les Extensions VS Code, ou :
 
 ```bash
-ext install music-music.muaddib-security
+
 ```
 
 ### Commandes
@@ -300,7 +300,7 @@ Editez les fichiers YAML dans `iocs/` :
 
 ### Developper
 ```bash
-git clone https://github.com/music-muse/muad-dib.git
+git clone https://github.com/DNSZLSK/muad-dib
 cd muad-dib
 npm install
 npm test
@@ -309,7 +309,6 @@ npm test
 ## Communaute
 
 - Discord: https://discord.gg/y8zxSmue
-- Issues: https://github.com/music-muse/muad-dib/issues
 
 ---
 
