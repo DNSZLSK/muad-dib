@@ -1,14 +1,10 @@
 # Carnet de Bord - Projet MUAD'DIB
 
-**Auteur** : Kewin  
-**Periode** : 1er janvier 2026 - 8 janvier 2026 (8 jours)  
-**Statut** : MVP Fonctionnel + Extension VS Code publiee
-
 ---
 
 ## Genese du Projet
 
-### Le Contexte (1er janvier 2026)
+### Le Contexte
 
 En novembre 2025, un ver auto-replicatif appele **Shai-Hulud 2.0** a compromis **796 packages npm** totalisant plus de **20 millions de telechargements hebdomadaires**. Des projets majeurs comme Zapier, PostHog, Postman ont ete temporairement compromis, affectant plus de 25 000 depots GitHub.
 
@@ -24,7 +20,7 @@ Reference a Dune de Frank Herbert. Dans le roman, Muad'Dib est le nom Fremen de 
 
 ## Chronologie Detaillee
 
-### Jour 1 - 1er janvier 2026 : La Fondation
+### La Fondation
 
 **Session de 12h+ de developpement intensif**
 
@@ -83,7 +79,7 @@ lifecycle_script : "Verifier le script. Desactiver avec npm config set ignore-sc
 known_malicious  : "CRITIQUE: Supprimer immediatement. Regenerer tous les tokens."
 ```
 
-#### Commits du Jour 1
+#### Commits
 - `init: MUAD'DIB npm security scanner`
 - `feat: AST analysis with acorn`
 - `feat: IOC integration from Datadog/Wiz`
@@ -92,7 +88,7 @@ known_malicious  : "CRITIQUE: Supprimer immediatement. Regenerer tous les tokens
 
 ---
 
-### Jour 2 - 2 janvier 2026 : Features Avancees
+### Features Avancees
 
 #### Mode --explain avec MITRE ATT&CK
 
@@ -130,7 +126,7 @@ npm publish
 
 ---
 
-### Jour 3 - 3 janvier 2026 : Typosquatting + Scoring
+### Typosquatting + Scoring
 
 #### Detection Typosquatting (Levenshtein)
 
@@ -176,7 +172,7 @@ npm version patch && npm publish
 
 ---
 
-### Jour 4 - 3 janvier 2026 (soir) : Extension VS Code
+### Extension VS Code
 
 #### Marketplace Publication
 
@@ -186,7 +182,6 @@ L'extension VS Code permet :
 - Diagnostics inline dans package.json
 - Commandes palette (Ctrl+Shift+P)
 
-**Installation** : `ext install music-music.muaddib-security`
 
 #### Scraper Multi-Sources
 
@@ -203,7 +198,7 @@ muaddib scrape  # Met a jour la base IOCs
 
 ---
 
-### Jour 5-7 - 8 janvier 2026 : Validation et Polish
+### Validation et Polish
 
 #### Probleme : Trop de Faux Positifs
 
@@ -242,7 +237,7 @@ GitHub Advisory inclut des CVE/vulnerabilites, pas du malware. Ca generait des f
 // Utiliser npm audit ou Snyk pour les vulnerabilites
 ```
 
-#### Ajout Shai-Hulud v3 (28 decembre 2025)
+#### Ajout Shai-Hulud v3
 
 Nouvelle variante decouverte pendant le developpement :
 - Package : `@vietmoney/react-big-calendar@0.26.2`
@@ -277,8 +272,8 @@ Score Express app : 0/100 (CLEAN)
 
 ### Publications
 - **npm** : `muaddib` v1.0.6
-- **VS Code Marketplace** : `muaddib-security` v1.0.6
-- **GitHub** : github.com/music-muse/muad-dib
+- **VS Code Marketplace** : v1.0.6
+- **GitHub** : github.com/DNSZLSK/muad-dib
 
 ---
 
@@ -354,8 +349,6 @@ Le plus satisfaisant : voir le score passer de 126 alertes (faux positifs) a 1 a
 ## Liens
 
 - **npm** : https://www.npmjs.com/package/muaddib
-- **GitHub** : https://github.com/music-muse/muad-dib
-- **VS Code** : https://marketplace.visualstudio.com/items?itemName=music-music.muaddib-security
 - **Datadog IOCs** : https://securitylabs.datadoghq.com/articles/shai-hulud-2.0-npm-worm/
 - **Aikido Blog** : https://www.aikido.dev/blog/shai-hulud-strikes-again---the-golden-path
 
