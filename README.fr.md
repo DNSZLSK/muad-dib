@@ -73,6 +73,12 @@ npm link
 muaddib scan .
 muaddib scan /chemin/vers/projet
 ```
+### Mode interactif
+```bash
+muaddib
+```
+
+Lance un menu interactif pour vous guider a travers toutes les fonctionnalites.
 
 ### Score de risque
 

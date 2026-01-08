@@ -80,6 +80,12 @@ npm link
 muaddib scan .
 muaddib scan /path/to/project
 ```
+### Interactive mode
+```bash
+muaddib
+```
+
+Launches an interactive menu to guide you through all features.
 
 ### Risk score
 
