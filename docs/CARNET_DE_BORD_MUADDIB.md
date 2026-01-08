@@ -1,9 +1,5 @@
 # Carnet de Bord - Projet MUAD'DIB
 
-**Auteur** : Kewin  
-**Periode** : 1er janvier 2026 - 8 janvier 2026 (8 jours)  
-**Statut** : MVP Fonctionnel + Extension VS Code publiee
-
 ---
 
 ## Genese du Projet
@@ -186,7 +182,6 @@ L'extension VS Code permet :
 - Diagnostics inline dans package.json
 - Commandes palette (Ctrl+Shift+P)
 
-**Installation** : `ext install music-music.muaddib-security`
 
 #### Scraper Multi-Sources
 
@@ -277,8 +272,8 @@ Score Express app : 0/100 (CLEAN)
 
 ### Publications
 - **npm** : `muaddib` v1.0.6
-- **VS Code Marketplace** : `muaddib-security` v1.0.6
-- **GitHub** : github.com/music-muse/muad-dib
+- **VS Code Marketplace** : v1.0.6
+- **GitHub** : github.com/DNSZLSK/muad-dib
 
 ---
 
