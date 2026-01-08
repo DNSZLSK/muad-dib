@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-
 const { run } = require('../src/index.js');
 const { updateIOCs } = require('../src/ioc/updater.js');
 const { watch } = require('../src/watch.js');
@@ -10,6 +9,7 @@ const args = process.argv.slice(2);
 const command = args[0];
 const options = args.slice(1);
 
+// Parse options
 let target = '.';
 let jsonOutput = false;
 let htmlOutput = null;
@@ -43,35 +43,109 @@ for (let i = 0; i < options.length; i++) {
   }
 }
 
-if (!command) {
+// Menu interactif si pas de commande
+async function interactiveMenu() {
+  const { select, input, confirm } = await import('@inquirer/prompts');
+  
   console.log(`
-  MUAD'DIB - npm Supply Chain Threat Hunter
-  
-  Usage:
-    muaddib scan [path] [options]    Scan a project
-    muaddib watch [path]             Watch a project in real-time
-    muaddib daemon [options]         Start background daemon
-    muaddib update                   Update IOCs
-    muaddib scrape                   Scrape new IOCs from advisories
-    muaddib help                     Show help
-  
-  Options:
-    --json              Output as JSON
-    --html [file]       Generate HTML report
-    --sarif [file]      Generate SARIF report (GitHub Security)
-    --explain           Show detailed explanations
-    --fail-on [level]   Severity level for exit code (critical|high|medium|low)
-                        Default: high (fail on HIGH and CRITICAL)
-    --webhook [url]     Send Discord/Slack alert
-    --paranoid          Enable ultra-strict rules (more false positives)
+  ╔══════════════════════════════════════════╗
+  ║   MUAD'DIB - npm Supply Chain Hunter     ║
+  ║   "The worms must die."                  ║
+  ╚══════════════════════════════════════════╝
   `);
-  process.exit(0);
+
+  const action = await select({
+    message: 'Que veux-tu faire ?',
+    choices: [
+      { name: 'Scanner un projet', value: 'scan' },
+      { name: 'Scanner avec mode paranoid', value: 'scan-paranoid' },
+      { name: 'Surveiller un projet (watch)', value: 'watch' },
+      { name: 'Lancer le daemon', value: 'daemon' },
+      { name: 'Mettre a jour les IOCs', value: 'update' },
+      { name: 'Scraper nouveaux IOCs', value: 'scrape' },
+      { name: 'Quitter', value: 'quit' }
+    ]
+  });
+
+  if (action === 'quit') {
+    console.log('Bye!');
+    process.exit(0);
+  }
+
+  if (action === 'scan' || action === 'scan-paranoid') {
+    const path = await input({
+      message: 'Chemin du projet :',
+      default: '.'
+    });
+
+    const outputFormat = await select({
+      message: 'Format de sortie :',
+      choices: [
+        { name: 'Console (defaut)', value: 'console' },
+        { name: 'JSON', value: 'json' },
+        { name: 'HTML', value: 'html' },
+        { name: 'SARIF (GitHub Security)', value: 'sarif' }
+      ]
+    });
+
+    const opts = {
+      json: outputFormat === 'json',
+      html: outputFormat === 'html' ? 'muaddib-report.html' : null,
+      sarif: outputFormat === 'sarif' ? 'muaddib-results.sarif' : null,
+      explain: true,
+      failLevel: 'high',
+      paranoid: action === 'scan-paranoid'
+    };
+
+    const exitCode = await run(path, opts);
+    process.exit(exitCode);
+  }
+
+  if (action === 'watch') {
+    const path = await input({
+      message: 'Chemin du projet :',
+      default: '.'
+    });
+    watch(path);
+  }
+
+  if (action === 'daemon') {
+    const useWebhook = await confirm({
+      message: 'Configurer un webhook Discord/Slack ?',
+      default: false
+    });
+
+    let webhook = null;
+    if (useWebhook) {
+      webhook = await input({
+        message: 'URL du webhook :'
+      });
+    }
+    startDaemon({ webhook });
+  }
+
+  if (action === 'update') {
+    await updateIOCs();
+    process.exit(0);
+  }
+
+  if (action === 'scrape') {
+    const result = await runScraper();
+    console.log(`[OK] ${result.added} nouveaux IOCs (total: ${result.total})`);
+    process.exit(0);
+  }
 }
 
-if (command === 'scan') {
-  run(target, { 
-    json: jsonOutput, 
-    html: htmlOutput, 
+// Main
+if (!command) {
+  interactiveMenu().catch(err => {
+    console.error('[ERROR]', err.message);
+    process.exit(1);
+  });
+} else if (command === 'scan') {
+  run(target, {
+    json: jsonOutput,
+    html: htmlOutput,
     sarif: sarifOutput,
     explain: explainMode,
     failLevel: failLevel,
@@ -91,7 +165,7 @@ if (command === 'scan') {
   });
 } else if (command === 'scrape') {
   runScraper().then(result => {
-    console.log(`[OK] ${result.added} new IOCs added (total: ${result.total})`);
+    console.log(`[OK] ${result.added} nouveaux IOCs (total: ${result.total})`);
     process.exit(0);
   }).catch(err => {
     console.error('[ERROR]', err.message);
@@ -100,12 +174,29 @@ if (command === 'scan') {
 } else if (command === 'daemon') {
   startDaemon({ webhook: webhookUrl });
 } else if (command === 'help') {
-  console.log('muaddib scan [path] [--json] [--html file] [--sarif file] [--explain] [--fail-on level] [--webhook url] [--paranoid]');
-  console.log('muaddib watch [path] - Watch a project in real-time');
-  console.log('muaddib daemon [--webhook url] - Start background daemon');
-  console.log('muaddib update - Update IOCs');
-  console.log('muaddib scrape - Scrape new IOCs');
+  console.log(`
+  MUAD'DIB - npm Supply Chain Threat Hunter
+  
+  Usage:
+    muaddib                          Mode interactif
+    muaddib scan [path] [options]    Scanner un projet
+    muaddib watch [path]             Surveiller en temps reel
+    muaddib daemon [options]         Lancer le daemon
+    muaddib update                   Mettre a jour les IOCs
+    muaddib scrape                   Scraper nouveaux IOCs
+    
+  Options:
+    --json              Sortie JSON
+    --html [file]       Rapport HTML
+    --sarif [file]      Rapport SARIF (GitHub Security)
+    --explain           Explications detaillees
+    --fail-on [level]   Niveau d'echec (critical|high|medium|low)
+    --webhook [url]     Webhook Discord/Slack
+    --paranoid          Mode ultra-strict
+  `);
+  process.exit(0);
 } else {
-  console.log(`Unknown command: ${command}`);
+  console.log(`Commande inconnue: ${command}`);
+  console.log('Tape "muaddib help" pour voir les commandes.');
   process.exit(1);
 }
