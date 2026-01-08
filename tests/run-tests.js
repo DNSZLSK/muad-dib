@@ -226,7 +226,7 @@ test('TYPOSQUAT: Severity HIGH', () => {
 console.log('\n=== TESTS CLI ===\n');
 
 test('CLI: --help affiche usage', () => {
-  const output = runCommand('');
+  const output = runCommand('--help');
   assertIncludes(output, 'Usage', 'Devrait afficher usage');
 });
 

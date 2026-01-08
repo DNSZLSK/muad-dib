@@ -137,7 +137,30 @@ async function interactiveMenu() {
 }
 
 // Main
-if (!command) {
+if (!command || command === '--help' || command === '-h') {
+  if (command === '--help' || command === '-h') {
+    console.log(`
+  MUAD'DIB - npm Supply Chain Threat Hunter
+  
+  Usage:
+    muaddib                          Mode interactif
+    muaddib scan [path] [options]    Scanner un projet
+    muaddib watch [path]             Surveiller en temps reel
+    muaddib daemon [options]         Lancer le daemon
+    muaddib update                   Mettre a jour les IOCs
+    muaddib scrape                   Scraper nouveaux IOCs
+    
+  Options:
+    --json              Sortie JSON
+    --html [file]       Rapport HTML
+    --sarif [file]      Rapport SARIF (GitHub Security)
+    --explain           Explications detaillees
+    --fail-on [level]   Niveau d'echec (critical|high|medium|low)
+    --webhook [url]     Webhook Discord/Slack
+    --paranoid          Mode ultra-strict
+    `);
+    process.exit(0);
+  }
   interactiveMenu().catch(err => {
     console.error('[ERROR]', err.message);
     process.exit(1);
