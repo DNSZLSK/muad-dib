@@ -354,8 +354,6 @@ Le plus satisfaisant : voir le score passer de 126 alertes (faux positifs) a 1 a
 ## Liens
 
 - **npm** : https://www.npmjs.com/package/muaddib
-- **GitHub** : https://github.com/music-muse/muad-dib
-- **VS Code** : https://marketplace.visualstudio.com/items?itemName=music-music.muaddib-security
 - **Datadog IOCs** : https://securitylabs.datadoghq.com/articles/shai-hulud-2.0-npm-worm/
 - **Aikido Blog** : https://www.aikido.dev/blog/shai-hulud-strikes-again---the-golden-path
 
