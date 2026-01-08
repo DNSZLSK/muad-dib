@@ -4,5 +4,11 @@ vscode-extension/
 docs/
 .github/
 .git/
+.muaddib-cache/
 *.md
 !README.md
+MUADDIBLOGO.png
+rapport.html
+results.sarif
+index.html
+action/
