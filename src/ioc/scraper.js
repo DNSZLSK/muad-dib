@@ -213,51 +213,7 @@ async function scrapeDatadogIOCs() {
 }
 
 // ============================================
-// SOURCE 3: GitHub Security Advisories
-// ============================================
-async function _scrapeGitHubAdvisories() {
-  console.log('[SCRAPER] GitHub Security Advisories...');
-  const packages = [];
-  
-  try {
-    for (let page = 1; page <= 5; page++) {
-      const url = `https://api.github.com/advisories?ecosystem=npm&per_page=100&page=${page}`;
-      const { status, data } = await fetchJSON(url);
-      
-      if (status !== 200 || !Array.isArray(data)) break;
-      if (data.length === 0) break;
-      
-      for (const advisory of data) {
-        if (advisory.severity === 'critical' || advisory.severity === 'high') {
-          for (const vuln of advisory.vulnerabilities || []) {
-            if (vuln.package?.ecosystem === 'npm') {
-              packages.push({
-                id: advisory.ghsa_id || `GHSA-${Date.now()}`,
-                name: vuln.package.name,
-                version: vuln.vulnerable_version_range || '*',
-                severity: advisory.severity,
-                confidence: 'high',
-                source: 'github-advisory',
-                description: (advisory.summary || '').slice(0, 200),
-                references: [advisory.html_url].filter(Boolean),
-                mitre: 'T1195.002',
-                cve: advisory.cve_id
-              });
-            }
-          }
-        }
-      }
-    }
-    console.log(`[SCRAPER]   -> ${packages.length} packages trouves`);
-  } catch (e) {
-    console.log(`[SCRAPER]   -> Erreur: ${e.message}`);
-  }
-  
-  return packages;
-}
-
-// ============================================
-// SOURCE 4: OSV.dev (Open Source Vulnerabilities)
+// SOURCE 3: OSV.dev (Open Source Vulnerabilities)
 // ============================================
 async function scrapeOSV() {
   console.log('[SCRAPER] OSV.dev...');
@@ -265,14 +221,15 @@ async function scrapeOSV() {
   
   try {
     const queries = ['malware', 'malicious', 'supply chain'];
-    
-    for (const _q of queries) {
+    for (const query of queries) {
       const { status, data } = await fetchJSON('https://api.osv.dev/v1/query', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: { package: { ecosystem: 'npm' } }
+        body: { 
+          package: { ecosystem: 'npm' },
+          query: query
+        }
       });
-      
       if (status === 200 && data?.vulns) {
         for (const vuln of data.vulns) {
           for (const affected of vuln.affected || []) {
@@ -294,15 +251,15 @@ async function scrapeOSV() {
       }
     }
     console.log(`[SCRAPER]   -> ${packages.length} packages trouves`);
-  } catch (e) {
-    console.log(`[SCRAPER]   -> Erreur: ${e.message}`);
+  } catch (err) {
+    console.log(`[SCRAPER]   -> Erreur: ${err.message}`);
   }
   
   return packages;
 }
 
 // ============================================
-// SOURCE 5: Socket.dev reports (from static file)
+// SOURCE 4: Socket.dev reports (from static file)
 // ============================================
 async function scrapeSocketReports() {
   console.log('[SCRAPER] Socket.dev reports...');
@@ -328,7 +285,7 @@ async function scrapeSocketReports() {
 }
 
 // ============================================
-// SOURCE 6: Phylum Research (from static file)
+// SOURCE 5: Phylum Research (from static file)
 // ============================================
 async function scrapePhylum() {
   console.log('[SCRAPER] Phylum Research...');
@@ -354,7 +311,7 @@ async function scrapePhylum() {
 }
 
 // ============================================
-// SOURCE 7: npm removed packages (from static file)
+// SOURCE 6: npm removed packages (from static file)
 // ============================================
 async function scrapeNpmRemoved() {
   console.log('[SCRAPER] npm removed packages...');
@@ -381,7 +338,7 @@ async function scrapeNpmRemoved() {
 
 
 // ============================================
-// SOURCE 9: AlienVault OTX
+// SOURCE 7: AlienVault OTX
 // ============================================
 async function scrapeAlienVault() {
   console.log('[SCRAPER] AlienVault OTX...');
@@ -429,7 +386,7 @@ async function scrapeAlienVault() {
 }
 
 // ============================================
-// SOURCE 10: Aikido Intel
+// SOURCE 8: Aikido Intel
 // ============================================
 async function scrapeAikidoIntel() {
   console.log('[SCRAPER] Aikido Intel...');

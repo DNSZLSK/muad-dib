@@ -27,34 +27,45 @@ function formatDiscord(results) {
               : summary.riskLevel === 'LOW' ? 0x3498db
               : 0x2ecc71;
 
-  const _criticalThreats = threats
+  const criticalThreats = threats
     .filter(t => t.severity === 'CRITICAL')
     .slice(0, 5)
     .map(t => `- ${t.message}`)
     .join('\n');
+
+  const fields = [
+    {
+      name: 'Score de risque',
+      value: `**${summary.riskScore}/100** (${summary.riskLevel})`,
+      inline: true
+    },
+    {
+      name: 'Menaces',
+      value: `${summary.critical} CRITICAL\n${summary.high} HIGH\n${summary.medium} MEDIUM`,
+      inline: true
+    },
+    {
+      name: 'Total',
+      value: `**${summary.total}** menace(s)`,
+      inline: true
+    }
+  ];
+
+  // Ajouter les menaces critiques si présentes
+  if (criticalThreats) {
+    fields.push({
+      name: 'Menaces critiques',
+      value: criticalThreats || 'Aucune',
+      inline: false
+    });
+  }
 
   return {
     embeds: [{
       title: 'MUAD\'DIB Security Scan',
       description: `Scan de **${target}**`,
       color: color,
-      fields: [
-        {
-          name: 'Score de risque',
-          value: `**${summary.riskScore}/100** (${summary.riskLevel})`,
-          inline: true
-        },
-        {
-          name: 'Menaces',
-          value: `${summary.critical} CRITICAL\n${summary.high} HIGH\n${summary.medium} MEDIUM`,
-          inline: true
-        },
-        {
-          name: 'Total',
-          value: `**${summary.total}** menace(s)`,
-          inline: true
-        }
-      ],
+      fields: fields,
       footer: {
         text: 'MUAD\'DIB - Supply-chain threat detection'
       },
@@ -72,57 +83,68 @@ function formatSlack(results) {
               : summary.riskLevel === 'LOW' ? ':information_source:'
               : ':white_check_mark:';
 
-  const _criticalList = threats
+  const criticalList = threats
     .filter(t => t.severity === 'CRITICAL')
     .slice(0, 5)
     .map(t => `• ${t.message}`)
     .join('\n');
 
-  return {
-    blocks: [
-      {
-        type: 'header',
-        text: {
-          type: 'plain_text',
-          text: `${emoji} MUAD'DIB Security Scan`
-        }
-      },
-      {
-        type: 'section',
-        fields: [
-          {
-            type: 'mrkdwn',
-            text: `*Cible:*\n${target}`
-          },
-          {
-            type: 'mrkdwn',
-            text: `*Score:*\n${summary.riskScore}/100 (${summary.riskLevel})`
-          }
-        ]
-      },
-      {
-        type: 'section',
-        fields: [
-          {
-            type: 'mrkdwn',
-            text: `*CRITICAL:* ${summary.critical}`
-          },
-          {
-            type: 'mrkdwn',
-            text: `*HIGH:* ${summary.high}`
-          },
-          {
-            type: 'mrkdwn',
-            text: `*MEDIUM:* ${summary.medium}`
-          },
-          {
-            type: 'mrkdwn',
-            text: `*Total:* ${summary.total}`
-          }
-        ]
+  const blocks = [
+    {
+      type: 'header',
+      text: {
+        type: 'plain_text',
+        text: `${emoji} MUAD'DIB Security Scan`
       }
-    ]
-  };
+    },
+    {
+      type: 'section',
+      fields: [
+        {
+          type: 'mrkdwn',
+          text: `*Cible:*\n${target}`
+        },
+        {
+          type: 'mrkdwn',
+          text: `*Score:*\n${summary.riskScore}/100 (${summary.riskLevel})`
+        }
+      ]
+    },
+    {
+      type: 'section',
+      fields: [
+        {
+          type: 'mrkdwn',
+          text: `*CRITICAL:* ${summary.critical}`
+        },
+        {
+          type: 'mrkdwn',
+          text: `*HIGH:* ${summary.high}`
+        },
+        {
+          type: 'mrkdwn',
+          text: `*MEDIUM:* ${summary.medium}`
+        },
+        {
+          type: 'mrkdwn',
+          text: `*Total:* ${summary.total}`
+        }
+      ]
+    }
+  ];
+
+  // Ajouter les menaces critiques si présentes
+  if (criticalList) {
+    blocks.push({
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `*Menaces critiques:*\n${criticalList}`
+      }
+    });
+  }
+
+  return { blocks };
 }
 
 function formatGeneric(results) {

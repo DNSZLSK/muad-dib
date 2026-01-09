@@ -73,8 +73,8 @@ async function scanDependencies(targetPath) {
     if (fs.existsSync(pkgJsonPath)) {
       try {
         const pkgContent = fs.readFileSync(pkgJsonPath, 'utf8');
-        const pkgJson = JSON.parse(pkgContent);
-        const _scripts = pkgJson.scripts || {};
+
+
 
         // Verifie les marqueurs Shai-Hulud
         for (const marker of iocs.markers || []) {
