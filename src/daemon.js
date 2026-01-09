@@ -1,10 +1,8 @@
 const fs = require('fs');
 const path = require('path');
-const { spawn } = require('child_process');
 const { run } = require('./index.js');
 
 let webhookUrl = null;
-let watchedDirs = [];
 let isRunning = false;
 
 async function startDaemon(options = {}) {

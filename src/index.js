@@ -25,7 +25,7 @@ function scanParanoid(targetPath) {
       // Ignorer les URLs (contiennent souvent des patterns comme .git)
       const contentWithoutUrls = content.replace(/https?:\/\/[^\s"']+/g, '');
       
-      for (const [ruleKey, rule] of Object.entries(PARANOID_RULES)) {
+      for (const [, rule] of Object.entries(PARANOID_RULES)) {
         for (const pattern of rule.patterns) {
           if (contentWithoutUrls.includes(pattern)) {
             threats.push({
@@ -38,7 +38,7 @@ function scanParanoid(targetPath) {
           }
         }
       }
-    } catch (e) {
+    } catch {
       // Ignore read errors
     }
   }
@@ -59,7 +59,7 @@ function scanParanoid(targetPath) {
           scanFile(fullPath);
         }
       }
-    } catch (e) {
+    } catch {
       // Ignore walk errors
     }
   }

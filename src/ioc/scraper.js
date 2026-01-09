@@ -215,7 +215,7 @@ async function scrapeDatadogIOCs() {
 // ============================================
 // SOURCE 3: GitHub Security Advisories
 // ============================================
-async function scrapeGitHubAdvisories() {
+async function _scrapeGitHubAdvisories() {
   console.log('[SCRAPER] GitHub Security Advisories...');
   const packages = [];
   
@@ -266,7 +266,7 @@ async function scrapeOSV() {
   try {
     const queries = ['malware', 'malicious', 'supply chain'];
     
-    for (const q of queries) {
+    for (const _q of queries) {
       const { status, data } = await fetchJSON('https://api.osv.dev/v1/query', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

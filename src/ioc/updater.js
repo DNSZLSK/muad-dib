@@ -104,7 +104,7 @@ function fetchUrl(url) {
 function parseMuaddibFeed(data) {
   try {
     return JSON.parse(data);
-  } catch (e) {
+  } catch {
     return { packages: [], hashes: [], markers: [], files: [] };
   }
 }

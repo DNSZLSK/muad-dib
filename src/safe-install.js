@@ -1,6 +1,4 @@
 const { execSync } = require('child_process');
-const path = require('path');
-const fs = require('fs');
 const { loadCachedIOCs } = require('./ioc/updater.js');
 
 // Packages connus sûrs qui utilisent des patterns "suspects" légitimement
@@ -18,7 +16,7 @@ function checkIOCs(pkg, pkgName) {
   try {
     const iocs = loadCachedIOCs();
     return iocs.packages?.find(p => p.name === pkg || p.name === pkgName);
-  } catch (e) {
+  } catch {
     return null;
   }
 }
@@ -70,7 +68,7 @@ async function scanPackageRecursive(pkg, depth = 0, maxDepth = 3) {
   try {
     const infoRaw = execSync(`npm view ${pkg} --json 2>nul`, { encoding: 'utf8' });
     pkgInfo = JSON.parse(infoRaw);
-  } catch (e) {
+  } catch {
     if (depth === 0) console.log(`[!] Package ${pkg} introuvable sur npm`);
     return { safe: true };
   }
@@ -81,7 +79,6 @@ async function scanPackageRecursive(pkg, depth = 0, maxDepth = 3) {
   
   if (depNames.length > 0 && depth < maxDepth) {
     for (const depName of depNames) {
-      const depVersion = dependencies[depName];
       const depPkg = depName; // On check juste le nom, pas la version specifique
       
       const result = await scanPackageRecursive(depPkg, depth + 1, maxDepth);
@@ -111,53 +108,48 @@ async function safeInstall(packages, options = {}) {
   // Reset le cache pour chaque install
   scannedPackages.clear();
   
-  try {
-    for (const pkg of packages) {
-      const result = await scanPackageRecursive(pkg);
-      
-      if (!result.safe) {
-        console.log(`
+  for (const pkg of packages) {
+    const result = await scanPackageRecursive(pkg);
+    
+    if (!result.safe) {
+      console.log(`
 ╔══════════════════════════════════════════╗
 ║   [!] PACKAGE MALVEILLANT DETECTE        ║
 ╚══════════════════════════════════════════╝
 `);
-        if (result.depth > 0) {
-          console.log(`Package demande: ${pkg}`);
-          console.log(`Dependance malveillante: ${result.package} (profondeur: ${result.depth})`);
-        } else {
-          console.log(`Package: ${result.package}`);
-        }
-        console.log(`Source: ${result.source}`);
-        console.log(`Raison: ${result.description}`);
-        console.log('');
-        
-        if (!force) {
-          console.log('[!] Installation BLOQUEE.');
-          return { blocked: true, package: result.package, threats: [{ type: 'known_malicious', severity: 'CRITICAL', message: result.description }] };
-        } else {
-          console.log('[!] --force active, installation malgre les menaces...');
-        }
+      if (result.depth > 0) {
+        console.log(`Package demande: ${pkg}`);
+        console.log(`Dependance malveillante: ${result.package} (profondeur: ${result.depth})`);
+      } else {
+        console.log(`Package: ${result.package}`);
+      }
+      console.log(`Source: ${result.source}`);
+      console.log(`Raison: ${result.description}`);
+      console.log('');
+      
+      if (!force) {
+        console.log('[!] Installation BLOQUEE.');
+        return { blocked: true, package: result.package, threats: [{ type: 'known_malicious', severity: 'CRITICAL', message: result.description }] };
+      } else {
+        console.log('[!] --force active, installation malgre les menaces...');
       }
     }
-
-    // Tout est clean, installer pour de vrai
-    console.log('');
-    console.log('[*] Installation en cours...');
-    
-    let cmd = `npm install ${packages.join(' ')}`;
-    if (isDev) cmd += ' --save-dev';
-    if (isGlobal) cmd += ' -g';
-    
-    execSync(cmd, { stdio: 'inherit' });
-    
-    console.log('');
-    console.log('[OK] Installation terminee.');
-    
-    return { blocked: false };
-
-  } catch (e) {
-    throw e;
   }
+
+  // Tout est clean, installer pour de vrai
+  console.log('');
+  console.log('[*] Installation en cours...');
+  
+  let cmd = `npm install ${packages.join(' ')}`;
+  if (isDev) cmd += ' --save-dev';
+  if (isGlobal) cmd += ' -g';
+  
+  execSync(cmd, { stdio: 'inherit' });
+  
+  console.log('');
+  console.log('[OK] Installation terminee.');
+  
+  return { blocked: false };
 }
 
 module.exports = { safeInstall };

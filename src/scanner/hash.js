@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const crypto = require('crypto');
+const nodeCrypto = require('crypto');
 const { loadCachedIOCs } = require('../ioc/updater.js');
 
 async function scanHashes(targetPath) {
@@ -38,7 +38,7 @@ async function scanHashes(targetPath) {
 
 function computeHash(filePath) {
   const content = fs.readFileSync(filePath);
-  return crypto.createHash('sha256').update(content).digest('hex');
+  return nodeCrypto.createHash('sha256').update(content).digest('hex');
 }
 
 function findAllJsFiles(dir, results = []) {
@@ -57,7 +57,7 @@ function findAllJsFiles(dir, results = []) {
       } else if (item.endsWith('.js')) {
         results.push(fullPath);
       }
-    } catch (e) {
+    } catch {
       // Ignore les erreurs de permission
     }
   }

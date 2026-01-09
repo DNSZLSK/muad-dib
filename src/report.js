@@ -1,5 +1,4 @@
 const fs = require('fs');
-const path = require('path');
 
 function generateHTML(results) {
   const { target, timestamp, threats, summary } = results;

@@ -74,7 +74,7 @@ async function scanDependencies(targetPath) {
       try {
         const pkgContent = fs.readFileSync(pkgJsonPath, 'utf8');
         const pkgJson = JSON.parse(pkgContent);
-        const scripts = pkgJson.scripts || {};
+        const _scripts = pkgJson.scripts || {};
 
         // Verifie les marqueurs Shai-Hulud
         for (const marker of iocs.markers || []) {
@@ -90,7 +90,7 @@ async function scanDependencies(targetPath) {
 
         // Note: on ne signale plus les lifecycle scripts des dependances
         // Trop de faux positifs (esbuild, sharp, etc.)
-      } catch (e) {
+      } catch {
         // JSON parse error, skip
       }
     }
@@ -133,7 +133,7 @@ function listPackages(nodeModulesPath) {
           version: version
         });
       }
-    } catch (e) {
+    } catch {
       // Skip inaccessible
     }
   }
@@ -145,7 +145,7 @@ function getPackageVersion(pkgPath) {
   try {
     const pkgJson = JSON.parse(fs.readFileSync(path.join(pkgPath, 'package.json'), 'utf8'));
     return pkgJson.version || '*';
-  } catch (e) {
+  } catch {
     return '*';
   }
 }

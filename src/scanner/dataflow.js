@@ -16,7 +16,6 @@ async function analyzeDataFlow(targetPath) {
   for (const file of files) {
     const relativePath = path.relative(targetPath, file).replace(/\\/g, '/');
     
-    // Ignorer les fichiers de dev/build/scripts
     if (isDevFile(relativePath)) {
       continue;
     }
@@ -62,7 +61,7 @@ function analyzeFile(content, filePath, basePath) {
       sourceType: 'module',
       allowHashBang: true
     });
-  } catch (e) {
+  } catch {
     return threats;
   }
 
@@ -164,7 +163,6 @@ function isCredentialPath(arg, content) {
 
 function isSensitiveEnv(name) {
   const sensitive = ['TOKEN', 'SECRET', 'KEY', 'PASSWORD', 'CREDENTIAL', 'AUTH', 'NPM', 'AWS', 'AZURE', 'GCP'];
-  // Ignore GITHUB — trop de faux positifs dans les scripts de release
   return sensitive.some(s => name.toUpperCase().includes(s));
 }
 
@@ -186,7 +184,9 @@ function findJsFiles(dir, results = []) {
       } else if (item.endsWith('.js')) {
         results.push(fullPath);
       }
-    } catch (e) {}
+    } catch {
+      // Silently ignore permission errors
+    }
   }
 
   return results;

@@ -27,7 +27,7 @@ function formatDiscord(results) {
               : summary.riskLevel === 'LOW' ? 0x3498db
               : 0x2ecc71;
 
-  const criticalThreats = threats
+  const _criticalThreats = threats
     .filter(t => t.severity === 'CRITICAL')
     .slice(0, 5)
     .map(t => `- ${t.message}`)
@@ -72,7 +72,7 @@ function formatSlack(results) {
               : summary.riskLevel === 'LOW' ? ':information_source:'
               : ':white_check_mark:';
 
-  const criticalList = threats
+  const _criticalList = threats
     .filter(t => t.severity === 'CRITICAL')
     .slice(0, 5)
     .map(t => `• ${t.message}`)

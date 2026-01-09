@@ -92,7 +92,7 @@ function analyzeFile(content, filePath, basePath) {
       sourceType: 'module',
       allowHashBang: true
     });
-  } catch (e) {
+  } catch {
     if (content.length > 1000 && content.split('\n').length < 10) {
       threats.push({
         type: 'possible_obfuscation',
