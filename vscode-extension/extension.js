@@ -64,19 +64,25 @@ async function scanProject() {
         cmd += ` --webhook "${webhookUrl}"`;
       }
 
-      exec(cmd, { maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
-  try {
-    // Si pas de JSON valide, c'est que le scan est propre
-    if (!stdout || !stdout.trim().startsWith('{')) {
-      vscode.window.showInformationMessage('MUAD\'DIB: Aucune menace detectee');
-      diagnosticCollection.clear();
-      resolve();
-      return;
-    }
-    const result = JSON.parse(stdout);
-    displayResults(result, projectPath);
-  } catch (e) {
-          if (stdout.includes('Aucune menace')) {
+exec(cmd, { maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+        try {
+          // Extraire uniquement le JSON du stdout (ignorer les logs avant)
+          const jsonMatch = stdout.match(/\{[\s\S]*\}$/);
+          
+          if (!jsonMatch) {
+            // Pas de JSON = scan propre ou erreur
+            if (stdout.includes('Aucune menace') || stdout.includes('No threat')) {
+              vscode.window.showInformationMessage('MUAD\'DIB: Aucune menace detectee');
+              diagnosticCollection.clear();
+            }
+            resolve();
+            return;
+          }
+          
+          const result = JSON.parse(jsonMatch[0]);
+          displayResults(result, projectPath);
+        } catch (e) {
+          if (stdout.includes('Aucune menace') || stdout.includes('No threat')) {
             vscode.window.showInformationMessage('MUAD\'DIB: Aucune menace detectee');
             diagnosticCollection.clear();
           } else {
