@@ -44,7 +44,7 @@ for (let i = 0; i < options.length; i++) {
   }
 }
 
-// Menu interactif si pas de commande
+// Interactive menu
 async function interactiveMenu() {
   const { select, input, confirm } = await import('@inquirer/prompts');
   
@@ -56,15 +56,16 @@ async function interactiveMenu() {
   `);
 
   const action = await select({
-    message: 'Que veux-tu faire ?',
+    message: 'What do you want to do?',
     choices: [
-      { name: 'Scanner un projet', value: 'scan' },
-      { name: 'Scanner avec mode paranoid', value: 'scan-paranoid' },
-      { name: 'Surveiller un projet (watch)', value: 'watch' },
-      { name: 'Lancer le daemon', value: 'daemon' },
-      { name: 'Mettre a jour les IOCs', value: 'update' },
-      { name: 'Scraper nouveaux IOCs', value: 'scrape' },
-      { name: 'Quitter', value: 'quit' }
+      { name: 'Scan a project', value: 'scan' },
+      { name: 'Scan with paranoid mode', value: 'scan-paranoid' },
+      { name: 'Install packages (safe)', value: 'install' },
+      { name: 'Watch a project (real-time)', value: 'watch' },
+      { name: 'Start daemon', value: 'daemon' },
+      { name: 'Update IOCs', value: 'update' },
+      { name: 'Scrape new IOCs', value: 'scrape' },
+      { name: 'Quit', value: 'quit' }
     ]
   });
 
@@ -75,14 +76,14 @@ async function interactiveMenu() {
 
   if (action === 'scan' || action === 'scan-paranoid') {
     const path = await input({
-      message: 'Chemin du projet :',
+      message: 'Project path:',
       default: '.'
     });
 
     const outputFormat = await select({
-      message: 'Format de sortie :',
+      message: 'Output format:',
       choices: [
-        { name: 'Console (defaut)', value: 'console' },
+        { name: 'Console (default)', value: 'console' },
         { name: 'JSON', value: 'json' },
         { name: 'HTML', value: 'html' },
         { name: 'SARIF (GitHub Security)', value: 'sarif' }
@@ -102,9 +103,24 @@ async function interactiveMenu() {
     process.exit(exitCode);
   }
 
+  if (action === 'install') {
+    const pkgInput = await input({
+      message: 'Package(s) to install (space-separated):'
+    });
+    
+    const packages = pkgInput.split(' ').filter(p => p.trim());
+    if (packages.length === 0) {
+      console.log('No packages specified.');
+      process.exit(1);
+    }
+    
+    const result = await safeInstall(packages, {});
+    process.exit(result.blocked ? 1 : 0);
+  }
+
   if (action === 'watch') {
     const path = await input({
-      message: 'Chemin du projet :',
+      message: 'Project path:',
       default: '.'
     });
     watch(path);
@@ -112,14 +128,14 @@ async function interactiveMenu() {
 
   if (action === 'daemon') {
     const useWebhook = await confirm({
-      message: 'Configurer un webhook Discord/Slack ?',
+      message: 'Configure Discord/Slack webhook?',
       default: false
     });
 
     let webhook = null;
     if (useWebhook) {
       webhook = await input({
-        message: 'URL du webhook :'
+        message: 'Webhook URL:'
       });
     }
     startDaemon({ webhook });
@@ -132,35 +148,40 @@ async function interactiveMenu() {
 
   if (action === 'scrape') {
     const result = await runScraper();
-    console.log(`[OK] ${result.added} nouveaux IOCs (total: ${result.total})`);
+    console.log(`[OK] ${result.added} new IOCs (total: ${result.total})`);
     process.exit(0);
   }
 }
 
-// Main
-if (!command || command === '--help' || command === '-h') {
-  if (command === '--help' || command === '-h') {
-    console.log(`
+const helpText = `
   MUAD'DIB - npm Supply Chain Threat Hunter
   
   Usage:
-    muaddib                          Mode interactif
-    muaddib scan [path] [options]    Scanner un projet
-    muaddib watch [path]             Surveiller en temps reel
-    muaddib daemon [options]         Lancer le daemon
-    muaddib update                   Mettre a jour les IOCs
-    muaddib scrape                   Scraper nouveaux IOCs
-    muaddib install <pkg>            Installer apres scan (safe)
+    muaddib                          Interactive mode
+    muaddib scan [path] [options]    Scan a project
+    muaddib install <pkg> [options]  Safe install (scan before install)
+    muaddib watch [path]             Watch in real-time
+    muaddib daemon [options]         Start daemon
+    muaddib update                   Update IOCs
+    muaddib scrape                   Scrape new IOCs
     
   Options:
-    --json              Sortie JSON
-    --html [file]       Rapport HTML
-    --sarif [file]      Rapport SARIF (GitHub Security)
-    --explain           Explications detaillees
-    --fail-on [level]   Niveau d'echec (critical|high|medium|low)
-    --webhook [url]     Webhook Discord/Slack
-    --paranoid          Mode ultra-strict
-    `);
+    --json              JSON output
+    --html [file]       HTML report
+    --sarif [file]      SARIF report (GitHub Security)
+    --explain           Detailed explanations
+    --fail-on [level]   Fail level (critical|high|medium|low)
+    --webhook [url]     Discord/Slack webhook
+    --paranoid          Ultra-strict mode
+    --save-dev, -D      Install as dev dependency
+    -g, --global        Install globally
+    --force             Force install despite threats
+`;
+
+// Main
+if (!command || command === '--help' || command === '-h') {
+  if (command === '--help' || command === '-h') {
+    console.log(helpText);
     process.exit(0);
   }
   interactiveMenu().catch(err => {
@@ -190,7 +211,7 @@ if (!command || command === '--help' || command === '-h') {
   });
 } else if (command === 'scrape') {
   runScraper().then(result => {
-    console.log(`[OK] ${result.added} nouveaux IOCs (total: ${result.total})`);
+    console.log(`[OK] ${result.added} new IOCs (total: ${result.total})`);
     process.exit(0);
   }).catch(err => {
     console.error('[ERROR]', err.message);
@@ -219,29 +240,10 @@ if (!command || command === '--help' || command === '-h') {
     process.exit(1);
   });  
 } else if (command === 'help') {
-  console.log(`
-  MUAD'DIB - npm Supply Chain Threat Hunter
-  
-  Usage:
-    muaddib                          Mode interactif
-    muaddib scan [path] [options]    Scanner un projet
-    muaddib watch [path]             Surveiller en temps reel
-    muaddib daemon [options]         Lancer le daemon
-    muaddib update                   Mettre a jour les IOCs
-    muaddib scrape                   Scraper nouveaux IOCs
-    
-  Options:
-    --json              Sortie JSON
-    --html [file]       Rapport HTML
-    --sarif [file]      Rapport SARIF (GitHub Security)
-    --explain           Explications detaillees
-    --fail-on [level]   Niveau d'echec (critical|high|medium|low)
-    --webhook [url]     Webhook Discord/Slack
-    --paranoid          Mode ultra-strict
-  `);
+  console.log(helpText);
   process.exit(0);
 } else {
-  console.log(`Commande inconnue: ${command}`);
-  console.log('Tape "muaddib help" pour voir les commandes.');
+  console.log(`Unknown command: ${command}`);
+  console.log('Type "muaddib help" to see available commands.');
   process.exit(1);
 }
