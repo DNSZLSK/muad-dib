@@ -9,7 +9,8 @@
   "scripts": {
     "test": "node tests/run-tests.js",
     "scan": "node bin/muaddib.js scan .",
-    "update": "node bin/muaddib.js update"
+    "update": "node bin/muaddib.js update",
+    "lint": "eslint src bin --ext .js"
   },
   "keywords": [
     "security",
