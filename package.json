@@ -40,8 +40,11 @@
     "@vietmoney/react-big-calendar": "^0.0.1-security",
     "acorn": "^8.14.0",
     "acorn-walk": "^8.3.4",
+    "chalk": "^5.6.2",
+    "express": "^5.2.1",
     "is-odd": "^3.0.1",
     "js-yaml": "^4.1.0",
-    "lodash": "^4.17.21"
+    "lodash": "^4.17.21",
+    "yargs": "^18.0.0"
   }
 }

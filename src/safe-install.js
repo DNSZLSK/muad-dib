@@ -10,180 +10,134 @@ const TRUSTED_PACKAGES = [
   'jest', 'mocha', 'chai', 'sharp', 'bcrypt', 'argon2'
 ];
 
+// Cache pour eviter de scanner deux fois le meme package
+const scannedPackages = new Set();
+
+// Verifier si un package est dans les IOCs
+function checkIOCs(pkg, pkgName) {
+  try {
+    const iocs = loadCachedIOCs();
+    return iocs.packages?.find(p => p.name === pkg || p.name === pkgName);
+  } catch (e) {
+    return null;
+  }
+}
+
+// Scanner un package et ses dependances recursivement
+async function scanPackageRecursive(pkg, depth = 0, maxDepth = 3) {
+  const indent = '  '.repeat(depth);
+  const pkgName = pkg.replace(/^@[^/]+\//, '').split('@')[0];
+  
+  // Eviter les boucles infinies
+  if (scannedPackages.has(pkg) || scannedPackages.has(pkgName)) {
+    return { safe: true };
+  }
+  scannedPackages.add(pkg);
+  scannedPackages.add(pkgName);
+  
+  // Skip trusted packages
+  if (TRUSTED_PACKAGES.includes(pkgName)) {
+    if (depth === 0) console.log(`[OK] ${pkg} - Package de confiance`);
+    return { safe: true };
+  }
+  
+  // Limiter la profondeur
+  if (depth > maxDepth) {
+    return { safe: true };
+  }
+  
+  if (depth === 0) {
+    console.log(`[*] Analyse de ${pkg}...`);
+  } else {
+    console.log(`${indent}[*] Dependance: ${pkg}`);
+  }
+  
+  // Verifier IOCs
+  const malicious = checkIOCs(pkg, pkgName);
+  if (malicious) {
+    return {
+      safe: false,
+      package: pkg,
+      reason: 'known_malicious',
+      source: malicious.source || 'IOC Database',
+      description: malicious.description || 'Package malveillant connu',
+      depth
+    };
+  }
+  
+  // Recuperer les infos du package
+  let pkgInfo;
+  try {
+    const infoRaw = execSync(`npm view ${pkg} --json 2>nul`, { encoding: 'utf8' });
+    pkgInfo = JSON.parse(infoRaw);
+  } catch (e) {
+    if (depth === 0) console.log(`[!] Package ${pkg} introuvable sur npm`);
+    return { safe: true };
+  }
+  
+  // Scanner les dependances
+  const dependencies = pkgInfo.dependencies || {};
+  const depNames = Object.keys(dependencies);
+  
+  if (depNames.length > 0 && depth < maxDepth) {
+    for (const depName of depNames) {
+      const depVersion = dependencies[depName];
+      const depPkg = depName; // On check juste le nom, pas la version specifique
+      
+      const result = await scanPackageRecursive(depPkg, depth + 1, maxDepth);
+      if (!result.safe) {
+        return result;
+      }
+    }
+  }
+  
+  if (depth === 0) {
+    console.log(`[OK] ${pkg} - Aucune menace (${depNames.length} dependances scannees)`);
+  }
+  
+  return { safe: true };
+}
+
 async function safeInstall(packages, options = {}) {
   const { isDev, isGlobal, force } = options;
   
   console.log(`
 ╔══════════════════════════════════════════╗
 ║   MUAD'DIB Safe Install                  ║
-║   Scanning before installing...          ║
+║   Scanning packages + dependencies...    ║
 ╚══════════════════════════════════════════╝
 `);
 
-  const tempDir = path.join(process.cwd(), '.muaddib-temp');
+  // Reset le cache pour chaque install
+  scannedPackages.clear();
   
   try {
-    if (!fs.existsSync(tempDir)) {
-      fs.mkdirSync(tempDir, { recursive: true });
-    }
-
-    let blocked = false;
-    let blockedPkg = null;
-    let blockedThreats = [];
-
     for (const pkg of packages) {
-      const pkgName = pkg.replace(/^@[^/]+\//, '').split('@')[0];
+      const result = await scanPackageRecursive(pkg);
       
-      // Skip trusted packages
-      if (TRUSTED_PACKAGES.includes(pkgName)) {
-        console.log(`[OK] ${pkg} - Package de confiance`);
-        continue;
-      }
-
-      console.log(`[*] Analyse de ${pkg}...`);
-
-      // Verifier si le package est dans les IOCs connus
-      try {
-        const iocs = loadCachedIOCs();
-        const malicious = iocs.packages?.find(p => p.name === pkg || p.name === pkgName);
-        
-        if (malicious) {
-          console.log(`
-╔══════════════════════════════════════════╗
-║   [!] PACKAGE MALVEILLANT CONNU          ║
-╚══════════════════════════════════════════╝
-`);
-          console.log(`Package: ${pkg}`);
-          console.log(`Source: ${malicious.source || 'IOC Database'}`);
-          console.log(`Raison: ${malicious.description || 'Package malveillant connu'}`);
-          console.log('');
-          console.log('[!] Installation BLOQUEE.');
-          
-          fs.rmSync(tempDir, { recursive: true, force: true });
-          return { blocked: true, package: pkg, threats: [{ type: 'known_malicious', severity: 'CRITICAL', message: malicious.description }] };
-        }
-      } catch (e) {
-        // Ignore IOC check errors
-      }
-      
-      // Recuperer les infos du package
-      let pkgInfo;
-      try {
-        const infoRaw = execSync(`npm view ${pkg} --json 2>nul`, { encoding: 'utf8' });
-        pkgInfo = JSON.parse(infoRaw);
-      } catch (e) {
-        console.log(`[!] Package ${pkg} introuvable sur npm`);
-        continue;
-      }
-
-      // Telecharger le tarball
-      const tarball = pkgInfo.dist?.tarball;
-      if (!tarball) {
-        console.log(`[!] Impossible de recuperer ${pkg}`);
-        continue;
-      }
-
-      const safeName = pkg.replace(/[@/]/g, '-');
-      const tarPath = path.join(tempDir, `${safeName}.tgz`);
-      
-      try {
-        execSync(`curl -sL "${tarball}" -o "${tarPath}"`, { encoding: 'utf8' });
-      } catch (e) {
-        console.log(`[!] Erreur telechargement ${pkg}`);
-        continue;
-      }
-
-      // Extraire
-      const extractDir = path.join(tempDir, safeName);
-      if (!fs.existsSync(extractDir)) {
-        fs.mkdirSync(extractDir, { recursive: true });
-      }
-      
-      try {
-        execSync(`tar -xzf "${tarPath}" -C "${extractDir}"`, { encoding: 'utf8' });
-      } catch (e) {
-        console.log(`[!] Erreur extraction ${pkg}`);
-        continue;
-      }
-
-      // Scanner avec muaddib
-      const pkgDir = path.join(extractDir, 'package');
-      let scanResult;
-      
-      try {
-        const output = execSync(`node "${path.join(__dirname, '..', 'bin', 'muaddib.js')}" scan "${pkgDir}" --json`, { 
-          encoding: 'utf8',
-          stdio: ['pipe', 'pipe', 'pipe']
-        });
-        scanResult = JSON.parse(output);
-      } catch (e) {
-        // Si le scan échoue avec exit code > 0, c'est qu'il y a des menaces
-        if (e.stdout) {
-          try {
-            scanResult = JSON.parse(e.stdout);
-          } catch (parseErr) {
-            console.log(`[OK] ${pkg} - Scan termine`);
-            continue;
-          }
-        } else {
-          console.log(`[OK] ${pkg} - Aucune menace`);
-          continue;
-        }
-      }
-
-      // Filtrer les faux positifs connus
-      const realThreats = (scanResult.threats || []).filter(t => {
-        // Ignorer les fichiers .min.js pour l'obfuscation (c'est de la minification)
-        if (t.type === 'obfuscation_detected' && t.file?.endsWith('.min.js')) {
-          return false;
-        }
-        // Ignorer Function() dans les libs de templating
-        if (t.type === 'dangerous_call_function' && t.message?.includes('Function')) {
-          return false;
-        }
-        return true;
-      });
-
-      if (realThreats.length > 0) {
+      if (!result.safe) {
         console.log(`
 ╔══════════════════════════════════════════╗
-║   [!] MENACES DETECTEES                  ║
+║   [!] PACKAGE MALVEILLANT DETECTE        ║
 ╚══════════════════════════════════════════╝
 `);
-        console.log(`Package: ${pkg}`);
-        console.log(`Menaces: ${realThreats.length}`);
+        if (result.depth > 0) {
+          console.log(`Package demande: ${pkg}`);
+          console.log(`Dependance malveillante: ${result.package} (profondeur: ${result.depth})`);
+        } else {
+          console.log(`Package: ${result.package}`);
+        }
+        console.log(`Source: ${result.source}`);
+        console.log(`Raison: ${result.description}`);
         console.log('');
         
-        for (const threat of realThreats.slice(0, 5)) {
-          console.log(`  [${threat.severity}] ${threat.message}`);
-          if (threat.file) console.log(`           Fichier: ${threat.file}`);
-        }
-        
-        if (realThreats.length > 5) {
-          console.log(`  ... et ${realThreats.length - 5} autres`);
-        }
-        
         if (!force) {
-          console.log('');
-          console.log('[!] Installation BLOQUEE. Utilise --force pour ignorer.');
-          blocked = true;
-          blockedPkg = pkg;
-          blockedThreats = realThreats;
-          break;
+          console.log('[!] Installation BLOQUEE.');
+          return { blocked: true, package: result.package, threats: [{ type: 'known_malicious', severity: 'CRITICAL', message: result.description }] };
         } else {
-          console.log('');
           console.log('[!] --force active, installation malgre les menaces...');
         }
-      } else {
-        console.log(`[OK] ${pkg} - Aucune menace detectee`);
       }
-    }
-
-    // Nettoyer temp
-    fs.rmSync(tempDir, { recursive: true, force: true });
-
-    if (blocked) {
-      return { blocked: true, package: blockedPkg, threats: blockedThreats };
     }
 
     // Tout est clean, installer pour de vrai
@@ -202,9 +156,6 @@ async function safeInstall(packages, options = {}) {
     return { blocked: false };
 
   } catch (e) {
-    if (fs.existsSync(tempDir)) {
-      fs.rmSync(tempDir, { recursive: true, force: true });
-    }
     throw e;
   }
 }
