@@ -4,6 +4,7 @@ const { updateIOCs } = require('../src/ioc/updater.js');
 const { watch } = require('../src/watch.js');
 const { startDaemon } = require('../src/daemon.js');
 const { runScraper } = require('../src/ioc/scraper.js');
+const { safeInstall } = require('../src/safe-install.js');
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -149,6 +150,7 @@ if (!command || command === '--help' || command === '-h') {
     muaddib daemon [options]         Lancer le daemon
     muaddib update                   Mettre a jour les IOCs
     muaddib scrape                   Scraper nouveaux IOCs
+    muaddib install <pkg>            Installer apres scan (safe)
     
   Options:
     --json              Sortie JSON
@@ -196,6 +198,26 @@ if (!command || command === '--help' || command === '-h') {
   });
 } else if (command === 'daemon') {
   startDaemon({ webhook: webhookUrl });
+} else if (command === 'install' || command === 'i') {
+  const packages = options.filter(o => !o.startsWith('-'));
+  const isDev = options.includes('--save-dev') || options.includes('-D');
+  const isGlobal = options.includes('-g') || options.includes('--global');
+  const force = options.includes('--force');
+  
+  if (packages.length === 0) {
+    console.log('Usage: muaddib install <package> [<package>...] [--save-dev] [-g] [--force]');
+    process.exit(1);
+  }
+  
+  safeInstall(packages, { isDev, isGlobal, force }).then(result => {
+    if (result.blocked && !force) {
+      process.exit(1);
+    }
+    process.exit(0);
+  }).catch(err => {
+    console.error('[ERROR]', err.message);
+    process.exit(1);
+  });  
 } else if (command === 'help') {
   console.log(`
   MUAD'DIB - npm Supply Chain Threat Hunter
