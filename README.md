@@ -87,6 +87,15 @@ muaddib
 
 Launches an interactive menu to guide you through all features.
 
+### Safe install
+```bash
+muaddib install <package>
+muaddib install lodash axios --save-dev
+muaddib i express -g
+```
+
+Scans packages for threats BEFORE installing. Blocks known malicious packages.
+
 ### Risk score
 
 Each scan displays a 0-100 risk score:
@@ -228,8 +237,7 @@ The VS Code extension automatically scans your npm projects.
 
 ### Installation
 
-Search "MUAD'DIB" in VS Code Extensions, or:
-
+search "MUAD'DIB" in Extensions VS Code, or :
 ```bash
 marketplace.visualstudio.com/items?itemName=dnszlsk.muaddib-vscode
 ```

@@ -49,11 +49,11 @@ MUAD'DIB detecte ET guide votre reponse.
 
 ---
 
-## Installation
+### Installation
 
-### npm (recommande)
+Cherchez "MUAD'DIB" dans les Extensions VS Code, ou :
 ```bash
-npm install -g muaddib-scanner
+marketplace.visualstudio.com/items?itemName=dnszlsk.muaddib-vscode
 ```
 
 ### Depuis les sources
@@ -79,6 +79,15 @@ muaddib
 ```
 
 Lance un menu interactif pour vous guider a travers toutes les fonctionnalites.
+
+### Installation securisee
+```bash
+muaddib install <package>
+muaddib install lodash axios --save-dev
+muaddib i express -g
+```
+
+Scanne les packages AVANT installation. Bloque les packages malveillants connus.
 
 ### Score de risque
 
