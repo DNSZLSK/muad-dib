@@ -76,6 +76,52 @@
       margin-top: 2rem;
     }
 
+    .positioning {
+      background: #1f2937;
+      padding: 1.5rem;
+      border-radius: 8px;
+      margin: 1.5rem 0;
+    }
+
+    .positioning p {
+      margin: 0.5rem 0;
+    }
+
+    .positioning ul {
+      margin: 0.5rem 0;
+      padding-left: 1.5rem;
+    }
+
+    .positioning li {
+      margin: 0.3rem 0;
+    }
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 1rem;
+      margin: 1.5rem 0;
+    }
+
+    .feature-card {
+      background: #1f2937;
+      padding: 1rem;
+      border-radius: 8px;
+      border-left: 3px solid #e11d48;
+    }
+
+    .feature-card h3 {
+      margin: 0 0 0.5rem;
+      color: #f87171;
+      font-size: 1rem;
+    }
+
+    .feature-card p {
+      margin: 0;
+      color: #9ca3af;
+      font-size: 0.9rem;
+    }
+
     table {
       border-collapse: collapse;
       width: 100%;
@@ -119,72 +165,108 @@
       Supply-chain threat detection and response for npm.<br>
       Open-source CLI scanner and VS Code extension.
     </p>
-    <a href="https://github.com/DNSZLSK/muad-dib" target="_blank" class="github-link">View the project on GitHub</a>
+    <a href="https://github.com/DNSZLSK/muad-dib" target="_blank" class="github-link">View on GitHub</a>
   </header>
 
-  <!-- Main content from README -->
+  <!-- Main content -->
   <main>
     <h2>Why MUAD'DIB?</h2>
     <p>npm supply-chain attacks are exploding. Shai-Hulud compromised 25K+ repos in 2025. Existing tools detect threats but don't help you respond.</p>
     <p>MUAD'DIB detects AND guides your response.</p>
 
-    <h2>Features Comparison</h2>
-    <table>
-      <tr>
-        <th>Feature</th><th>MUAD'DIB</th><th>Socket</th><th>Snyk</th><th>Opengrep</th>
-      </tr>
-      <tr><td>IOC Detection</td><td>Yes</td><td>Yes</td><td>Yes</td><td>No</td></tr>
-      <tr><td>AST Analysis</td><td>Yes</td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
-      <tr><td>Dataflow Analysis</td><td>Yes</td><td>No</td><td>No</td><td>Yes</td></tr>
-      <tr><td>Typosquatting Detection</td><td>Yes</td><td>Yes</td><td>Yes</td><td>No</td></tr>
-      <tr><td>Response Playbooks</td><td>Yes</td><td>No</td><td>No</td><td>No</td></tr>
-      <tr><td>Risk Score</td><td>Yes</td><td>Yes</td><td>Yes</td><td>No</td></tr>
-      <tr><td>SARIF / GitHub Security</td><td>Yes</td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
-      <tr><td>MITRE ATT&CK Mapping</td><td>Yes</td><td>No</td><td>No</td><td>No</td></tr>
-      <tr><td>Discord/Slack Webhooks</td><td>Yes</td><td>No</td><td>No</td><td>No</td></tr>
-      <tr><td>VS Code Extension</td><td>Yes</td><td>Yes</td><td>Yes</td><td>No</td></tr>
-      <tr><td>Daemon Mode</td><td>Yes</td><td>No</td><td>No</td><td>No</td></tr>
-      <tr><td>100% Open Source</td><td>Yes</td><td>No</td><td>No</td><td>Yes</td></tr>
-    </table>
+    <h2>Positioning</h2>
+    <div class="positioning">
+      <p>MUAD'DIB is an <strong>educational tool</strong> and a <strong>free first line of defense</strong>. It detects <strong>known</strong> npm threats (930+ IOCs) and basic suspicious patterns.</p>
+      <p><strong>For enterprise protection</strong>, use:</p>
+      <ul>
+        <li><a href="https://socket.dev" target="_blank">Socket.dev</a> - ML behavioral analysis, cloud sandboxing</li>
+        <li><a href="https://snyk.io" target="_blank">Snyk</a> - Massive vulnerability database, CI/CD integrations</li>
+        <li><a href="https://opengrep.dev" target="_blank">Opengrep</a> - Advanced dataflow analysis, Semgrep rules</li>
+      </ul>
+      <p>MUAD'DIB does not replace these tools. It complements them for devs who want a quick, free check before installing an unknown package.</p>
+    </div>
+
+    <h2>Features</h2>
+    <div class="features-grid">
+      <div class="feature-card">
+        <h3>930+ IOCs</h3>
+        <p>Known malicious packages from Datadog, Socket, Phylum, OSV, Aikido, and more.</p>
+      </div>
+      <div class="feature-card">
+        <h3>AST Analysis</h3>
+        <p>Detects eval(), credential theft, env var exfiltration, reverse shells.</p>
+      </div>
+      <div class="feature-card">
+        <h3>Dataflow Analysis</h3>
+        <p>Detects when code reads credentials AND sends them over the network.</p>
+      </div>
+      <div class="feature-card">
+        <h3>Typosquatting Detection</h3>
+        <p>Levenshtein distance to catch lodahs, axois, expresss, etc.</p>
+      </div>
+      <div class="feature-card">
+        <h3>Docker Sandbox</h3>
+        <p>Analyze packages in isolated containers. Capture network, files, processes.</p>
+      </div>
+      <div class="feature-card">
+        <h3>MITRE ATT&CK Mapping</h3>
+        <p>Each detection mapped to MITRE techniques with response playbooks.</p>
+      </div>
+      <div class="feature-card">
+        <h3>Discord/Slack Webhooks</h3>
+        <p>Get alerts when threats are detected. Only sends on actual threats.</p>
+      </div>
+      <div class="feature-card">
+        <h3>VS Code Extension</h3>
+        <p>Auto-scan projects on open. Available on VS Code Marketplace.</p>
+      </div>
+    </div>
 
     <h2>Installation</h2>
     <p><strong>npm (recommended)</strong></p>
     <pre>npm install -g muaddib-scanner</pre>
 
     <p><strong>From source</strong></p>
-    <pre>
-git clone https://github.com/DNSZLSK/muad-dib.git
+    <pre>git clone https://github.com/DNSZLSK/muad-dib.git
 cd muad-dib
 npm install
-    </pre>
+npm link</pre>
 
     <h2>Usage</h2>
     <p><strong>Basic scan</strong></p>
-    <pre>
-muaddib scan .
-muaddib scan /path/to/project
-    </pre>
+    <pre>muaddib scan .
+muaddib scan /path/to/project</pre>
 
     <p><strong>Risk score</strong></p>
-    <pre>
-[SCORE] 58/100 [███████████░░░░░░░░░] HIGH
-    </pre>
+    <pre>[SCORE] 58/100 [███████████░░░░░░░░░] HIGH</pre>
 
-    <p><strong>Explain mode</strong></p>
-    <pre>
-muaddib scan . --explain
-    </pre>
+    <p><strong>Docker Sandbox</strong></p>
+    <pre>muaddib sandbox suspicious-package</pre>
 
-    <h2>Detected attacks</h2>
+    <p><strong>Safe install</strong></p>
+    <pre>muaddib install lodash axios --save-dev</pre>
+
+    <p><strong>Webhooks</strong></p>
+    <pre>muaddib scan . --webhook "https://discord.com/api/webhooks/..."</pre>
+
+    <h2>Detected Attacks</h2>
     <table>
       <tr><th>Campaign</th><th>Packages</th><th>Status</th></tr>
-      <tr><td>Shai-Hulud v1</td><td>@ctrl/tinycolor, ng2-file-upload</td><td>Detected</td></tr>
-      <tr><td>Shai-Hulud v2</td><td>@asyncapi/specs, posthog-node, kill-port</td><td>Detected</td></tr>
-      <tr><td>Shai-Hulud v3</td><td>@vietmoney/react-big-calendar</td><td>Detected</td></tr>
+      <tr><td>Shai-Hulud v1 (Sept 2025)</td><td>@ctrl/tinycolor, ng2-file-upload</td><td>Detected</td></tr>
+      <tr><td>Shai-Hulud v2 (Nov 2025)</td><td>@asyncapi/specs, posthog-node, kill-port</td><td>Detected</td></tr>
+      <tr><td>Shai-Hulud v3 (Dec 2025)</td><td>@vietmoney/react-big-calendar</td><td>Detected</td></tr>
       <tr><td>event-stream (2018)</td><td>flatmap-stream, event-stream</td><td>Detected</td></tr>
       <tr><td>Protestware</td><td>node-ipc, colors, faker</td><td>Detected</td></tr>
       <tr><td>Typosquats</td><td>crossenv, mongose, babelcli</td><td>Detected</td></tr>
     </table>
+
+    <h2>Links</h2>
+    <p>
+      <a href="https://github.com/DNSZLSK/muad-dib" target="_blank">GitHub</a> · 
+      <a href="https://www.npmjs.com/package/muaddib-scanner" target="_blank">npm</a> · 
+      <a href="https://marketplace.visualstudio.com/items?itemName=dnszlsk.muaddib-vscode" target="_blank">VS Code</a> · 
+      <a href="https://discord.gg/y8zxSmue" target="_blank">Discord</a>
+    </p>
 
   </main>
 
