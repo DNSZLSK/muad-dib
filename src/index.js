@@ -13,6 +13,7 @@ const { scanTyposquatting } = require('./scanner/typosquat.js');
 const { sendWebhook } = require('./webhook.js');
 const fs = require('fs');
 const path = require('path');
+const { scanGitHubActions } = require('./scanner/github-actions.js');
 
 // Scan paranoid mode
 function scanParanoid(targetPath) {
@@ -94,6 +95,9 @@ async function run(targetPath, options = {}) {
 
   const typosquatThreats = await scanTyposquatting(targetPath);
   threats.push(...typosquatThreats);
+
+  const ghActionsThreats = scanGitHubActions(targetPath);
+  threats.push(...ghActionsThreats);
 
   // Paranoid mode
   if (options.paranoid) {
