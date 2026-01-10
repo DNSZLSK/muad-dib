@@ -215,7 +215,7 @@ async function run(targetPath, options = {}) {
   }
 
   // Envoyer webhook si configure
-  if (options.webhook) {
+  if (options.webhook && threats.length > 0) {
     try {
       await sendWebhook(options.webhook, result);
       console.log(`[OK] Alerte envoyee au webhook`);
