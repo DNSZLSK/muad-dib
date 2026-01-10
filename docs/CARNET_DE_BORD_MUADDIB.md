@@ -72,6 +72,22 @@ Résultat : 54 faux positifs d'un coup. Le package `qs` (utilisé par Express) �
 
 J'ai dû retirer GitHub Advisory du scraper. MUAD'DIB est un scanner **anti-malware**, pas un scanner de vulnérabilités. Pour les CVE, il y a `npm audit` ou Snyk.
 
+### Le sandbox Docker
+
+Après l'analyse statique, j'ai voulu aller plus loin : exécuter le code suspect dans un environnement isolé pour voir ce qu'il fait vraiment.
+
+Le principe est simple :
+1. Créer un container Docker éphémère
+2. Installer le package dedans avec `npm install`
+3. Capturer les comportements avec `strace` et `tcpdump`
+4. Analyser : connexions réseau, accès fichiers sensibles, process suspects
+
+Premier test sur `lodash` : aucun comportement suspect. Normal, c'est clean.
+
+Le piège ? Les faux positifs. Mon premier scanner détectait "nc" (netcat) dans le nom de fichier `graceful-fs/clone.js`. J'ai dû affiner la détection pour chercher `/nc ` ou `netcat` en commande, pas en substring.
+
+Le sandbox ne remplace pas Socket ou Aikido qui font ça à grande échelle avec du ML. Mais pour un dev qui veut vérifier un package inconnu avant de l'installer, c'est déjà ça.
+
 ---
 
 ## Ce que j'ai appris
@@ -86,13 +102,15 @@ J'ai dû retirer GitHub Advisory du scraper. MUAD'DIB est un scanner **anti-malw
 
 **SARIF** : Le format standard pour les résultats de scanners de sécurité. Permet l'intégration native dans GitHub Security.
 
+**Docker et sandboxing** : Créer des containers éphémères pour analyser du code suspect. Utiliser `strace` pour tracer les appels système, `tcpdump` pour capturer le réseau.
+
 **Publication npm et VS Code Marketplace** : Tout le workflow : versioning, 2FA, tokens, métadonnées.
 
 ### Humainement
 
 Ce projet m'a fait réaliser qu'un dev solo peut avoir un impact réel en sécurité. Les outils commerciaux coûtent cher. Socket c'est gratuit pour l'open source, mais les features avancées sont payantes. MUAD'DIB ne les remplacera jamais, mais il offre une première ligne de défense gratuite.
 
-J'ai aussi appris à être honnête sur les limites d'un projet. MUAD'DIB détecte les menaces *connues*. Pour les zero-day, il faut des outils qui font de l'analyse dynamique, du sandboxing, des trucs qui demandent des ressources que je n'ai pas.
+J'ai aussi appris à être honnête sur les limites d'un projet. MUAD'DIB détecte les menaces *connues*. Pour les zero-day, il faut des outils qui font de l'analyse dynamique avancée, du ML, des trucs qui demandent des ressources que je n'ai pas.
 
 ---
 
@@ -102,19 +120,21 @@ J'ai aussi appris à être honnête sur les limites d'un projet. MUAD'DIB détec
 
 | Feature | Détails |
 |---------|---------|
-| CLI complète | scan, watch, update, scrape, daemon |
+| CLI complète | scan, watch, update, scrape, daemon, sandbox |
 | Base IOCs | 930+ packages malveillants |
 | Détection Shai-Hulud | v1, v2, v3 couverts |
 | Exports | JSON, HTML, SARIF |
 | Extension VS Code | Publiée sur Marketplace |
-| Webhooks | Discord / Slack |
+| Webhooks | Discord / Slack (envoi uniquement si menaces détectées) |
+| Docker Sandbox | Analyse comportementale isolée |
+| GitHub Actions Backdoor | Détection discussion.yaml (Shai-Hulud 2.0) |
 | Tests | 42 tests passants |
 
 ### Ce qui manque (honnêtement)
 
-**Pas de sandboxing** : Je ne lance jamais le code suspect. Socket le fait, c'est pour ça qu'ils peuvent détecter des comportements que je ne vois pas.
-
 **Pas de ML** : Mon analyse AST cherche des patterns codés en dur. Un attaquant qui obfusque différemment peut passer à travers.
+
+**Sandbox basique** : Le Docker sandbox capture réseau/fichiers/process, mais pas d'analyse TLS ni de désobfuscation automatique.
 
 **Dépendance aux sources tierces** : Si Datadog change son API, mon scraper casse.
 
@@ -131,10 +151,8 @@ J'ai aussi appris à être honnête sur les limites d'un projet. MUAD'DIB détec
 
 ## Conclusion
 
-MUAD'DIB n'est pas parfait. C'est un projet de formation, pas un produit enterprise. Mais il fonctionne pour ce qu'il est censé faire : détecter les menaces npm connues et guider la réponse.
+MUAD'DIB n'est pas parfait. C'est un projet de formation, pas un produit enterprise. Mais il fonctionne pour ce qu'il est censé faire : détecter les menaces npm connues, analyser les comportements suspects dans un sandbox, et guider la réponse.
 
-Le plus satisfaisant : voir le score passer de 126 alertes (faux positifs) à 1 alerte légitime sur React.js après une semaine d'itérations. C'est ça, le développement : tester, échouer, corriger, recommencer.
-
-Pour la v2, j'aimerais ajouter une vraie analyse dataflow et peut-être un mode sandbox minimal. On verra.
+Le plus satisfaisant : voir le score passer de 126 alertes (faux positifs) à 1 alerte légitime sur React.js après une semaine d'itérations. Et voir le sandbox Docker fonctionner du premier coup (après avoir fixé les permissions).
 
 *"Fear is the mind-killer. I will face my fear."* - Dune, Frank Herbert
