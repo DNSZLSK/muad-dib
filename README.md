@@ -24,7 +24,7 @@
 </p>
 
 <p align="center">
-  <a href="README.fr.md">Version francaise</a>
+  <a href="README.fr.md">Version française</a>
 </p>
 
 ---
@@ -35,22 +35,18 @@ npm supply-chain attacks are exploding. Shai-Hulud compromised 25K+ repos in 202
 
 MUAD'DIB detects AND guides your response.
 
-| Feature | MUAD'DIB | Socket | Snyk | Opengrep |
-|---------|----------|--------|------|----------|
-| IOC Detection | Yes | Yes | Yes | No |
-| AST Analysis | Yes | Yes | Yes | Yes |
-| Dataflow Analysis | Yes | No | No | Yes |
-| Typosquatting Detection | Yes | Yes | Yes | No |
-| Response Playbooks | Yes | No | No | No |
-| Risk Score | Yes | Yes | Yes | No |
-| SARIF / GitHub Security | Yes | Yes | Yes | Yes |
-| MITRE ATT&CK Mapping | Yes | No | No | No |
-| Discord/Slack Webhooks | Yes | No | No | No |
-| VS Code Extension | Yes | Yes | Yes | No |
-| Paranoid Mode | Yes | No | No | No |
-| Daemon Mode | Yes | No | No | No |
-| 100% Open Source | Yes | No | No | Yes |
-| Docker Sandbox | Yes | No | No | No |
+---
+
+## Positioning
+
+MUAD'DIB is an educational tool and a free first line of defense. It detects **known** npm threats (930+ IOCs) and basic suspicious patterns.
+
+**For enterprise protection**, use:
+- [Socket.dev](https://socket.dev) - ML behavioral analysis, cloud sandboxing
+- [Snyk](https://snyk.io) - Massive vulnerability database, CI/CD integrations
+- [Opengrep](https://opengrep.dev) - Advanced dataflow analysis, Semgrep rules
+
+MUAD'DIB does not replace these tools. It complements them for devs who want a quick, free check before installing an unknown package.
 
 ---
 
@@ -81,7 +77,9 @@ npm link
 muaddib scan .
 muaddib scan /path/to/project
 ```
+
 ### Interactive mode
+
 ```bash
 muaddib
 ```
@@ -89,6 +87,7 @@ muaddib
 Launches an interactive menu to guide you through all features.
 
 ### Safe install
+
 ```bash
 muaddib install <package>
 muaddib install lodash axios --save-dev
@@ -185,9 +184,8 @@ Fetches latest malicious packages from multiple threat intelligence sources:
 - AlienVault OTX
 - Aikido Intel
 
----
-
 ### Docker Sandbox
+
 ```bash
 muaddib sandbox <package-name>
 ```
@@ -198,10 +196,13 @@ Analyzes a package in an isolated Docker container. Captures:
 - Process spawns (detects reverse shells, curl/wget abuse)
 
 Requires Docker Desktop installed.
+
 ```bash
 muaddib sandbox lodash          # Safe package
 muaddib sandbox suspicious-pkg  # Analyze unknown package
 ```
+
+---
 
 ## Features
 
@@ -254,9 +255,10 @@ The VS Code extension automatically scans your npm projects.
 
 ### Installation
 
-search "MUAD'DIB" in Extensions VS Code, or :
+Search "MUAD'DIB" in VS Code Extensions, or:
+
 ```bash
-marketplace.visualstudio.com/items?itemName=dnszlsk.muaddib-vscode
+code --install-extension dnszlsk.muaddib-vscode
 ```
 
 ### Commands
@@ -313,6 +315,7 @@ MUAD'DIB Scanner
 +-- Pattern Matching (shell, scripts)
 +-- Typosquat Detection (Levenshtein)
 +-- Paranoid Mode (ultra-strict)
++-- Docker Sandbox (behavioral analysis)
 |
 v
 Dataflow Analysis (credential read -> network send)

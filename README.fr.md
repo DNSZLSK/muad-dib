@@ -5,7 +5,7 @@
 <h1 align="center">MUAD'DIB</h1>
 
 <p align="center">
-  <strong>Detection et reponse aux menaces supply-chain npm</strong>
+  <strong>Détection et réponse aux menaces supply-chain npm</strong>
 </p>
 
 <p align="center">
@@ -20,44 +20,46 @@
   <a href="#utilisation">Utilisation</a> |
   <a href="#features">Features</a> |
   <a href="#vs-code">VS Code</a> |
-  <a href="#discord">Discord</a>
+  <a href="#ci-cd">CI/CD</a>
+</p>
+
+<p align="center">
+  <a href="README.md">English version</a>
 </p>
 
 ---
 
 ## Pourquoi MUAD'DIB ?
 
-Les attaques supply chain npm explosent. Shai-Hulud a compromis 25K+ repos en 2025. Les outils existants detectent, mais n'aident pas a repondre.
+Les attaques supply-chain npm explosent. Shai-Hulud a compromis 25K+ repos en 2025. Les outils existants détectent, mais n'aident pas à répondre.
 
-MUAD'DIB detecte ET guide votre reponse.
-
-| Feature | MUAD'DIB | Socket | Snyk | Opengrep |
-|---------|----------|--------|------|----------|
-| Detection IOC | Oui | Oui | Oui | Non |
-| Analyse AST | Oui | Oui | Oui | Oui |
-| Analyse Dataflow | Oui | Non | Non | Oui |
-| Detection Typosquatting | Oui | Oui | Oui | Non |
-| Playbooks Reponse | Oui | Non | Non | Non |
-| Score de Risque | Oui | Oui | Oui | Non |
-| SARIF / GitHub Security | Oui | Oui | Oui | Oui |
-| Mapping MITRE ATT&CK | Oui | Non | Non | Non |
-| Webhooks Discord/Slack | Oui | Non | Non | Non |
-| Extension VS Code | Oui | Oui | Oui | Non |
-| Mode Paranoid | Oui | Non | Non | Non |
-| Mode Daemon | Oui | Non | Non | Non |
-| 100% Open Source | Oui | Non | Non | Oui |
-| Docker Sandbox | Yes | No | No | No |
+MUAD'DIB détecte ET guide votre réponse.
 
 ---
 
-### Installation
+## Positionnement
 
-Cherchez "MUAD'DIB" dans les Extensions VS Code, ou :
+MUAD'DIB est un outil éducatif et une première ligne de défense gratuite. Il détecte les menaces npm **connues** (930+ IOCs) et les patterns suspects basiques.
+
+**Pour une protection enterprise**, utilisez :
+- [Socket.dev](https://socket.dev) - Analyse comportementale ML, sandboxing cloud
+- [Snyk](https://snyk.io) - Base de vulnérabilités massive, intégrations CI/CD
+- [Opengrep](https://opengrep.dev) - Analyse dataflow avancée, règles Semgrep
+
+MUAD'DIB ne remplace pas ces outils. Il les complète pour les devs qui veulent une vérification rapide et gratuite avant d'installer un package inconnu.
+
+---
+
+## Installation
+
+### npm (recommandé)
+
 ```bash
-marketplace.visualstudio.com/items?itemName=dnszlsk.muaddib-vscode
+npm install -g muaddib-scanner
 ```
 
 ### Depuis les sources
+
 ```bash
 git clone https://github.com/DNSZLSK/muad-dib
 cd muad-dib
@@ -70,18 +72,22 @@ npm link
 ## Utilisation
 
 ### Scan basique
+
 ```bash
 muaddib scan .
 muaddib scan /chemin/vers/projet
 ```
+
 ### Mode interactif
+
 ```bash
 muaddib
 ```
 
-Lance un menu interactif pour vous guider a travers toutes les fonctionnalites.
+Lance un menu interactif pour vous guider à travers toutes les fonctionnalités.
 
-### Installation securisee
+### Installation sécurisée
+
 ```bash
 muaddib install <package>
 muaddib install lodash axios --save-dev
@@ -93,55 +99,63 @@ Scanne les packages AVANT installation. Bloque les packages malveillants connus.
 ### Score de risque
 
 Chaque scan affiche un score de risque 0-100 :
+
 ```
 [SCORE] 58/100 [***********---------] HIGH
 ```
 
-### Mode explain (details complets)
+### Mode explain (détails complets)
+
 ```bash
 muaddib scan . --explain
 ```
 
-Affiche pour chaque detection :
+Affiche pour chaque détection :
 - Rule ID
 - Technique MITRE ATT&CK
-- References (articles, CVEs)
-- Playbook de reponse
+- Références (articles, CVEs)
+- Playbook de réponse
 
 ### Export
+
 ```bash
 muaddib scan . --json > results.json     # JSON
 muaddib scan . --html rapport.html       # HTML
 muaddib scan . --sarif results.sarif     # SARIF (GitHub Security)
 ```
 
-### Seuil de severite
+### Seuil de sévérité
+
 ```bash
 muaddib scan . --fail-on critical  # Fail seulement sur CRITICAL
-muaddib scan . --fail-on high      # Fail sur HIGH et CRITICAL (defaut)
+muaddib scan . --fail-on high      # Fail sur HIGH et CRITICAL (défaut)
 muaddib scan . --fail-on medium    # Fail sur MEDIUM, HIGH, CRITICAL
 ```
 
 ### Mode paranoid
+
 ```bash
 muaddib scan . --paranoid
 ```
 
-Detection ultra-stricte avec moins de tolerance. Utile pour les projets critiques. Detecte tout acces reseau, execution de sous-processus, evaluation de code dynamique et acces aux fichiers sensibles.
+Détection ultra-stricte avec moins de tolérance. Utile pour les projets critiques. Détecte tout accès réseau, exécution de sous-processus, évaluation de code dynamique et accès aux fichiers sensibles.
 
 ### Webhook Discord/Slack
+
 ```bash
 muaddib scan . --webhook "https://discord.com/api/webhooks/..."
 ```
 
 Envoie une alerte avec le score et les menaces sur Discord ou Slack.
 
-### Surveillance temps reel
+### Surveillance temps réel
+
 ```bash
 muaddib watch .
 ```
 
 ### Mode daemon
+
 ```bash
 muaddib daemon
 muaddib daemon --webhook "https://discord.com/api/webhooks/..."
@@ -149,17 +163,19 @@ muaddib daemon --webhook "https://discord.com/api/webhooks/..."
 
 Surveille automatiquement tous les `npm install` et scanne les nouveaux packages.
 
-### Mise a jour des IOCs
+### Mise à jour des IOCs
+
 ```bash
 muaddib update
 ```
 
 ### Scraper de nouveaux IOCs
+
 ```bash
 muaddib scrape
 ```
 
-Recupere les derniers packages malveillants depuis plusieurs sources de threat intelligence :
+Récupère les derniers packages malveillants depuis plusieurs sources de threat intelligence :
 - Shai-Hulud 2.0 Detector (GitHub)
 - Datadog Security Labs
 - OSV.dev
@@ -168,62 +184,66 @@ Recupere les derniers packages malveillants depuis plusieurs sources de threat i
 - AlienVault OTX
 - Aikido Intel
 
----
-
 ### Sandbox Docker
+
 ```bash
 muaddib sandbox <nom-package>
 ```
 
-Analyse un package dans un container Docker isole. Capture :
-- Connexions reseau (detecte exfiltration vers hosts suspects)
-- Acces fichiers (detecte vol credentials : .npmrc, .ssh, .aws, .env)
-- Spawn de processus (detecte reverse shells, abus curl/wget)
+Analyse un package dans un container Docker isolé. Capture :
+- Connexions réseau (détecte exfiltration vers hosts suspects)
+- Accès fichiers (détecte vol credentials : .npmrc, .ssh, .aws, .env)
+- Spawn de processus (détecte reverse shells, abus curl/wget)
 
-Necessite Docker Desktop installe.
+Nécessite Docker Desktop installé.
+
 ```bash
 muaddib sandbox lodash          # Package safe
 muaddib sandbox suspicious-pkg  # Analyser un package inconnu
 ```
 
+---
+
 ## Features
 
-### Detection typosquatting
+### Détection typosquatting
 
-MUAD'DIB detecte les packages dont le nom ressemble a un package populaire :
+MUAD'DIB détecte les packages dont le nom ressemble à un package populaire :
+
 ```
-[HIGH] Package "lodahs" ressemble a "lodash" (swapped_chars). Possible typosquatting.
+[HIGH] Package "lodahs" ressemble à "lodash" (swapped_chars). Possible typosquatting.
 ```
 
 ### Analyse dataflow
 
-Detecte quand du code lit des credentials ET les envoie sur le reseau :
+Détecte quand du code lit des credentials ET les envoie sur le réseau :
+
 ```
-[CRITICAL] Flux suspect: lecture credentials (readFileSync, GITHUB_TOKEN) + envoi reseau (fetch)
+[CRITICAL] Flux suspect: lecture credentials (readFileSync, GITHUB_TOKEN) + envoi réseau (fetch)
 ```
 
-### Attaques detectees
+### Attaques détectées
 
 | Campagne | Packages | Status |
 |----------|----------|--------|
-| Shai-Hulud v1 (Sept 2025) | @ctrl/tinycolor, ng2-file-upload | Detecte |
-| Shai-Hulud v2 (Nov 2025) | @asyncapi/specs, posthog-node, kill-port | Detecte |
-| Shai-Hulud v3 (Dec 2025) | @vietmoney/react-big-calendar | Detecte |
-| event-stream (2018) | flatmap-stream, event-stream | Detecte |
-| eslint-scope (2018) | eslint-scope | Detecte |
-| Protestware | node-ipc, colors, faker | Detecte |
-| Typosquats | crossenv, mongose, babelcli | Detecte |
+| Shai-Hulud v1 (Sept 2025) | @ctrl/tinycolor, ng2-file-upload | Détecté |
+| Shai-Hulud v2 (Nov 2025) | @asyncapi/specs, posthog-node, kill-port | Détecté |
+| Shai-Hulud v3 (Dec 2025) | @vietmoney/react-big-calendar | Détecté |
+| event-stream (2018) | flatmap-stream, event-stream | Détecté |
+| eslint-scope (2018) | eslint-scope | Détecté |
+| Protestware | node-ipc, colors, faker | Détecté |
+| Typosquats | crossenv, mongose, babelcli | Détecté |
 
-### Techniques detectees
+### Techniques détectées
 
-| Technique | MITRE | Detection |
+| Technique | MITRE | Détection |
 |-----------|-------|-----------|
 | Vol credentials (.npmrc, .ssh) | T1552.001 | AST |
 | Exfiltration env vars | T1552.001 | AST |
-| Execution code distant | T1105 | Pattern |
+| Exécution code distant | T1105 | Pattern |
 | Reverse shell | T1059.004 | Pattern |
 | Dead man's switch | T1485 | Pattern |
-| Code obfusque | T1027 | Heuristiques |
+| Code obfusqué | T1027 | Heuristiques |
 | Typosquatting | T1195.002 | Levenshtein |
 | Supply chain compromise | T1195.002 | IOC matching |
 
@@ -238,7 +258,7 @@ L'extension VS Code scanne automatiquement vos projets npm.
 Cherchez "MUAD'DIB" dans les Extensions VS Code, ou :
 
 ```bash
-
+code --install-extension dnszlsk.muaddib-vscode
 ```
 
 ### Commandes
@@ -248,15 +268,16 @@ Cherchez "MUAD'DIB" dans les Extensions VS Code, ou :
 
 ### Configuration
 
-- `muaddib.autoScan` - Scanner automatiquement a l'ouverture (defaut: true)
+- `muaddib.autoScan` - Scanner automatiquement à l'ouverture (défaut: true)
 - `muaddib.webhookUrl` - URL webhook Discord/Slack
 - `muaddib.failLevel` - Niveau d'alerte (critical/high/medium/low)
 
 ---
 
-## Integration CI/CD
+## CI/CD
 
 ### GitHub Actions
+
 ```yaml
 name: Security Scan
 
@@ -285,6 +306,7 @@ Les alertes apparaissent dans Security > Code scanning alerts.
 ---
 
 ## Architecture
+
 ```
 MUAD'DIB Scanner
 |
@@ -293,6 +315,7 @@ MUAD'DIB Scanner
 +-- Pattern Matching (shell, scripts)
 +-- Typosquat Detection (Levenshtein)
 +-- Paranoid Mode (ultra-strict)
++-- Docker Sandbox (behavioral analysis)
 |
 v
 Dataflow Analysis (credential read -> network send)
@@ -311,6 +334,7 @@ Output (CLI, JSON, HTML, SARIF, Webhook)
 ### Ajouter des IOCs
 
 Editez les fichiers YAML dans `iocs/` :
+
 ```yaml
 - id: NEW-MALWARE-001
   name: "malicious-package"
@@ -324,7 +348,8 @@ Editez les fichiers YAML dans `iocs/` :
   mitre: T1195.002
 ```
 
-### Developper
+### Développer
+
 ```bash
 git clone https://github.com/DNSZLSK/muad-dib
 cd muad-dib
@@ -332,7 +357,9 @@ npm install
 npm test
 ```
 
-## Communaute
+---
+
+## Communauté
 
 - Discord: https://discord.gg/y8zxSmue
 
@@ -340,8 +367,8 @@ npm test
 
 ## Documentation
 
-- [Threat Model](docs/threat-model.md) - Ce que MUAD'DIB detecte et ne detecte pas
-- [IOCs YAML](iocs/) - Base de donnees des menaces
+- [Threat Model](docs/threat-model.md) - Ce que MUAD'DIB détecte et ne détecte pas
+- [IOCs YAML](iocs/) - Base de données des menaces
 
 ---
 
