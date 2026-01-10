@@ -169,6 +169,22 @@ Recupere les derniers packages malveillants depuis plusieurs sources de threat i
 
 ---
 
+### Sandbox Docker
+```bash
+muaddib sandbox <nom-package>
+```
+
+Analyse un package dans un container Docker isole. Capture :
+- Connexions reseau (detecte exfiltration vers hosts suspects)
+- Acces fichiers (detecte vol credentials : .npmrc, .ssh, .aws, .env)
+- Spawn de processus (detecte reverse shells, abus curl/wget)
+
+Necessite Docker Desktop installe.
+```bash
+muaddib sandbox lodash          # Package safe
+muaddib sandbox suspicious-pkg  # Analyser un package inconnu
+```
+
 ## Features
 
 ### Detection typosquatting
