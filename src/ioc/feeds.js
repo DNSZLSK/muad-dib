@@ -15,7 +15,22 @@ const KNOWN_MALICIOUS_HASHES = [
 const SUSPICIOUS_REPO_MARKERS = [
   'Sha1-Hulud',
   'Shai-Hulud',
-  'The Second Coming'
+  'The Second Coming',
+  'The Continued Coming',
+  'F**K Guillermo',
+  'F**K VERCEL',
+  'SHA1HULUD',
+  'Only Happy Girl',
+  'Goldox-T3chs',
+  'Free AI at api.airforce'
+];
+
+const SUSPICIOUS_FILES = [
+  'setup_bun.js',
+  'bun_environment.js',
+  'bun_installer.js',
+  'environment_source.js',
+  '.github/workflows/discussion.yaml'
 ];
 
 function isKnownMalicious(packageName) {
@@ -32,11 +47,17 @@ function hasSuspiciousMarker(text) {
   );
 }
 
+function isSuspiciousFile(filename) {
+  return SUSPICIOUS_FILES.some(f => filename.includes(f));
+}
+
 module.exports = { 
   isKnownMalicious, 
   isKnownMaliciousHash, 
   hasSuspiciousMarker,
+  isSuspiciousFile,
   KNOWN_MALICIOUS_PACKAGES,
   KNOWN_MALICIOUS_HASHES,
-  SUSPICIOUS_REPO_MARKERS
+  SUSPICIOUS_REPO_MARKERS,
+  SUSPICIOUS_FILES
 };
