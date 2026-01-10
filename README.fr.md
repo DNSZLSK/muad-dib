@@ -46,6 +46,7 @@ MUAD'DIB detecte ET guide votre reponse.
 | Mode Paranoid | Oui | Non | Non | Non |
 | Mode Daemon | Oui | Non | Non | Non |
 | 100% Open Source | Oui | Non | Non | Oui |
+| Docker Sandbox | Yes | No | No | No |
 
 ---
 
