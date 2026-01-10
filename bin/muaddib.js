@@ -5,6 +5,7 @@ const { watch } = require('../src/watch.js');
 const { startDaemon } = require('../src/daemon.js');
 const { runScraper } = require('../src/ioc/scraper.js');
 const { safeInstall } = require('../src/safe-install.js');
+const { buildSandboxImage, runSandbox } = require('../src/sandbox.js');
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -65,6 +66,7 @@ async function interactiveMenu() {
       { name: 'Start daemon', value: 'daemon' },
       { name: 'Update IOCs', value: 'update' },
       { name: 'Scrape new IOCs', value: 'scrape' },
+      { name: 'Sandbox analysis', value: 'sandbox' },
       { name: 'Quit', value: 'quit' }
     ]
   });
@@ -151,6 +153,21 @@ async function interactiveMenu() {
     console.log(`[OK] ${result.added} new IOCs (total: ${result.total})`);
     process.exit(0);
   }
+
+  if (action === 'sandbox') {
+    const packageName = await input({
+      message: 'Package name to analyze:'
+    });
+    
+    if (!packageName.trim()) {
+      console.log('No package specified.');
+      process.exit(1);
+    }
+    
+    await buildSandboxImage();
+    const results = await runSandbox(packageName.trim());
+    process.exit(results.suspicious ? 1 : 0);
+  }
 }
 
 const helpText = `
@@ -164,6 +181,7 @@ const helpText = `
     muaddib daemon [options]         Start daemon
     muaddib update                   Update IOCs
     muaddib scrape                   Scrape new IOCs
+    muaddib sandbox <pkg>            Analyse un package dans un container Docker isole
     
   Options:
     --json              JSON output
@@ -238,7 +256,23 @@ if (!command || command === '--help' || command === '-h') {
   }).catch(err => {
     console.error('[ERROR]', err.message);
     process.exit(1);
-  });  
+  });
+} else if (command === 'sandbox') {
+  const packageName = options[0];
+  if (!packageName) {
+    console.log('Usage: muaddib sandbox <package-name>');
+    process.exit(1);
+  }
+  
+  buildSandboxImage()
+    .then(() => runSandbox(packageName))
+    .then((results) => {
+      process.exit(results.suspicious ? 1 : 0);
+    })
+    .catch((err) => {
+      console.error('[ERROR]', err.message);
+      process.exit(1);
+    });
 } else if (command === 'help') {
   console.log(helpText);
   process.exit(0);
