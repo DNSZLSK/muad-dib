@@ -45,6 +45,7 @@
     "is-odd": "^3.0.1",
     "js-yaml": "^4.1.0",
     "lodash": "^4.17.21",
+    "muaddib-scanner": "^1.2.1",
     "yargs": "^18.0.0"
   },
   "devDependencies": {
