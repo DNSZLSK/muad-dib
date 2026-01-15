@@ -5,6 +5,30 @@ const path = require('path');
 const IOC_FILE = path.join(__dirname, 'data/iocs.json');
 const STATIC_IOCS_FILE = path.join(__dirname, 'data/static-iocs.json');
 
+// Domaines autorises pour les redirections (securite SSRF)
+const ALLOWED_REDIRECT_DOMAINS = [
+  'raw.githubusercontent.com',
+  'github.com',
+  'api.github.com',
+  'api.osv.dev',
+  'osv.dev',
+  'objects.githubusercontent.com'
+];
+
+/**
+ * Verifie si une URL de redirection est autorisee
+ * @param {string} redirectUrl - URL de redirection
+ * @returns {boolean} true si autorisee
+ */
+function isAllowedRedirect(redirectUrl) {
+  try {
+    const urlObj = new URL(redirectUrl);
+    return ALLOWED_REDIRECT_DOMAINS.includes(urlObj.hostname);
+  } catch {
+    return false;
+  }
+}
+
 // ============================================
 // UTILITY FUNCTIONS
 // ============================================
@@ -35,12 +59,17 @@ function fetchJSON(url, options = {}) {
     };
 
     const req = https.request(reqOptions, (res) => {
-      // Handle redirects
+      // Handle redirects (avec validation securite)
       if (res.statusCode === 301 || res.statusCode === 302) {
-        fetchJSON(res.headers.location, options).then(resolve).catch(reject);
+        const redirectUrl = res.headers.location;
+        if (!isAllowedRedirect(redirectUrl)) {
+          reject(new Error(`Redirection non autorisee vers: ${redirectUrl}`));
+          return;
+        }
+        fetchJSON(redirectUrl, options).then(resolve).catch(reject);
         return;
       }
-      
+
       let data = '';
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
@@ -79,12 +108,17 @@ function fetchText(url) {
     };
 
     const req = https.request(reqOptions, (res) => {
-      // Handle redirects
+      // Handle redirects (avec validation securite)
       if (res.statusCode === 301 || res.statusCode === 302) {
-        fetchText(res.headers.location).then(resolve).catch(reject);
+        const redirectUrl = res.headers.location;
+        if (!isAllowedRedirect(redirectUrl)) {
+          reject(new Error(`Redirection non autorisee vers: ${redirectUrl}`));
+          return;
+        }
+        fetchText(redirectUrl).then(resolve).catch(reject);
         return;
       }
-      
+
       let data = '';
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
@@ -97,7 +131,7 @@ function fetchText(url) {
       req.destroy();
       reject(new Error('Timeout'));
     });
-    
+
     req.end();
   });
 }

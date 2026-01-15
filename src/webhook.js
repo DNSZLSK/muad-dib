@@ -1,7 +1,66 @@
 const https = require('https');
 const http = require('http');
 
+// Domaines autorises pour les webhooks (securite SSRF)
+const ALLOWED_WEBHOOK_DOMAINS = [
+  'discord.com',
+  'discordapp.com',
+  'hooks.slack.com',
+  'webhook.site',           // Pour les tests
+  'requestbin.com'          // Pour les tests
+];
+
+/**
+ * Valide qu'une URL de webhook est autorisee
+ * @param {string} url - URL du webhook
+ * @returns {{valid: boolean, error?: string}} Resultat de validation
+ */
+function validateWebhookUrl(url) {
+  try {
+    const urlObj = new URL(url);
+
+    // Verifier le protocole (HTTPS obligatoire sauf localhost)
+    if (urlObj.protocol !== 'https:' && urlObj.hostname !== 'localhost') {
+      return { valid: false, error: 'HTTPS requis pour les webhooks' };
+    }
+
+    // Verifier que le domaine est autorise
+    const hostname = urlObj.hostname.toLowerCase();
+    const isAllowed = ALLOWED_WEBHOOK_DOMAINS.some(domain =>
+      hostname === domain || hostname.endsWith('.' + domain)
+    );
+
+    if (!isAllowed && hostname !== 'localhost') {
+      return { valid: false, error: `Domaine non autorise: ${hostname}. Domaines autorises: ${ALLOWED_WEBHOOK_DOMAINS.join(', ')}` };
+    }
+
+    // Bloquer les adresses IP privees (SSRF)
+    const privateIpPatterns = [
+      /^127\./,
+      /^10\./,
+      /^172\.(1[6-9]|2[0-9]|3[0-1])\./,
+      /^192\.168\./,
+      /^0\./,
+      /^169\.254\./
+    ];
+
+    if (privateIpPatterns.some(pattern => pattern.test(hostname))) {
+      return { valid: false, error: 'Adresses IP privees non autorisees' };
+    }
+
+    return { valid: true };
+  } catch (e) {
+    return { valid: false, error: `URL invalide: ${e.message}` };
+  }
+}
+
 async function sendWebhook(url, results) {
+  // Valider l'URL avant envoi
+  const validation = validateWebhookUrl(url);
+  if (!validation.valid) {
+    throw new Error(`Webhook bloque: ${validation.error}`);
+  }
+
   const isDiscord = url.includes('discord.com');
   const isSlack = url.includes('hooks.slack.com');
 
@@ -195,4 +254,4 @@ function send(url, payload) {
   });
 }
 
-module.exports = { sendWebhook };
+module.exports = { sendWebhook, validateWebhookUrl };

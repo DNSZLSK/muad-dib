@@ -601,6 +601,90 @@ test('REGRESSION: axios n\'est pas dans les IOCs', () => {
 });
 
 // ============================================
+// TESTS SECURITE - VALIDATION PACKAGES
+// ============================================
+
+console.log('\n=== TESTS SECURITE PACKAGES ===\n');
+
+test('SECURITE: isValidPackageName accepte lodash', () => {
+  const { isValidPackageName } = require('../src/safe-install.js');
+  assert(isValidPackageName('lodash'), 'lodash devrait etre valide');
+});
+
+test('SECURITE: isValidPackageName accepte @scope/package', () => {
+  const { isValidPackageName } = require('../src/safe-install.js');
+  assert(isValidPackageName('@types/node'), '@types/node devrait etre valide');
+});
+
+test('SECURITE: isValidPackageName rejette injection shell', () => {
+  const { isValidPackageName } = require('../src/safe-install.js');
+  assert(!isValidPackageName('foo; rm -rf /'), 'injection shell devrait etre invalide');
+});
+
+test('SECURITE: isValidPackageName rejette backticks', () => {
+  const { isValidPackageName } = require('../src/safe-install.js');
+  assert(!isValidPackageName('foo`whoami`'), 'backticks devrait etre invalide');
+});
+
+test('SECURITE: isValidPackageName rejette $(...)', () => {
+  const { isValidPackageName } = require('../src/safe-install.js');
+  assert(!isValidPackageName('foo$(cat /etc/passwd)'), '$() devrait etre invalide');
+});
+
+test('SECURITE: isValidPackageName rejette pipes', () => {
+  const { isValidPackageName } = require('../src/safe-install.js');
+  assert(!isValidPackageName('foo | cat /etc/passwd'), 'pipe devrait etre invalide');
+});
+
+// ============================================
+// TESTS SECURITE - WEBHOOK VALIDATION
+// ============================================
+
+console.log('\n=== TESTS SECURITE WEBHOOK ===\n');
+
+test('SECURITE: validateWebhookUrl accepte Discord', () => {
+  const { validateWebhookUrl } = require('../src/webhook.js');
+  const result = validateWebhookUrl('https://discord.com/api/webhooks/123/abc');
+  assert(result.valid, 'Discord webhook devrait etre valide');
+});
+
+test('SECURITE: validateWebhookUrl accepte Slack', () => {
+  const { validateWebhookUrl } = require('../src/webhook.js');
+  const result = validateWebhookUrl('https://hooks.slack.com/services/xxx/yyy');
+  assert(result.valid, 'Slack webhook devrait etre valide');
+});
+
+test('SECURITE: validateWebhookUrl rejette HTTP (non-HTTPS)', () => {
+  const { validateWebhookUrl } = require('../src/webhook.js');
+  const result = validateWebhookUrl('http://discord.com/api/webhooks/123');
+  assert(!result.valid, 'HTTP devrait etre rejete');
+});
+
+test('SECURITE: validateWebhookUrl rejette domaines non autorises', () => {
+  const { validateWebhookUrl } = require('../src/webhook.js');
+  const result = validateWebhookUrl('https://evil.com/steal');
+  assert(!result.valid, 'evil.com devrait etre rejete');
+});
+
+test('SECURITE: validateWebhookUrl rejette IP privees (127.x)', () => {
+  const { validateWebhookUrl } = require('../src/webhook.js');
+  const result = validateWebhookUrl('https://127.0.0.1:8080/webhook');
+  assert(!result.valid, '127.x devrait etre rejete');
+});
+
+test('SECURITE: validateWebhookUrl rejette IP privees (192.168.x)', () => {
+  const { validateWebhookUrl } = require('../src/webhook.js');
+  const result = validateWebhookUrl('https://192.168.1.1/webhook');
+  assert(!result.valid, '192.168.x devrait etre rejete');
+});
+
+test('SECURITE: validateWebhookUrl rejette IP privees (10.x)', () => {
+  const { validateWebhookUrl } = require('../src/webhook.js');
+  const result = validateWebhookUrl('https://10.0.0.1/webhook');
+  assert(!result.valid, '10.x devrait etre rejete');
+});
+
+// ============================================
 // RESULTATS
 // ============================================
 

@@ -1,5 +1,19 @@
-const { execSync } = require('child_process');
+const { spawnSync } = require('child_process');
 const { loadCachedIOCs } = require('./ioc/updater.js');
+
+// Regex pour valider les noms de packages npm (previent injection de commandes)
+const NPM_PACKAGE_REGEX = /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/;
+
+/**
+ * Valide qu'un nom de package est safe (pas d'injection de commandes)
+ * @param {string} pkgName - Nom du package
+ * @returns {boolean} true si valide
+ */
+function isValidPackageName(pkgName) {
+  // Retirer la version si presente
+  const nameOnly = pkgName.split('@').filter((p, i) => i === 0 || !p.match(/^\d/)).join('@');
+  return NPM_PACKAGE_REGEX.test(nameOnly) || (nameOnly.startsWith('@') && NPM_PACKAGE_REGEX.test(nameOnly));
+}
 
 // Packages connus sûrs qui utilisent des patterns "suspects" légitimement
 const TRUSTED_PACKAGES = [
@@ -224,12 +238,22 @@ async function scanPackageRecursive(pkg, depth = 0, maxDepth = 3) {
       depth
     };
   }
-  
-  // Recuperer les infos du package
+
+  // Valider le nom du package (securite: prevenir injection de commandes)
+  if (!isValidPackageName(pkgName)) {
+    console.log(`[!] Nom de package invalide: ${pkgName}`);
+    return { safe: false, package: pkgName, reason: 'invalid_name', source: 'validation', description: 'Nom de package invalide ou suspect', depth };
+  }
+
+  // Recuperer les infos du package (utilise spawnSync pour eviter injection)
   let pkgInfo;
   try {
-    const infoRaw = execSync(`npm view ${pkgName} --json 2>nul`, { encoding: 'utf8' });
-    pkgInfo = JSON.parse(infoRaw);
+    const result = spawnSync('npm', ['view', pkgName, '--json'], { encoding: 'utf8', shell: false });
+    if (result.status !== 0 || !result.stdout) {
+      if (depth === 0) console.log(`[!] Package ${pkgName} introuvable sur npm`);
+      return { safe: true };
+    }
+    pkgInfo = JSON.parse(result.stdout);
   } catch {
     if (depth === 0) console.log(`[!] Package ${pkgName} introuvable sur npm`);
     return { safe: true };
@@ -296,20 +320,35 @@ async function safeInstall(packages, options = {}) {
     }
   }
 
-  // Tout est clean, installer pour de vrai
+  // Valider tous les noms de packages avant installation
+  for (const pkg of packages) {
+    const pkgNameOnly = pkg.split('@').filter((p, i) => i === 0 || !p.match(/^\d/)).join('@');
+    if (!isValidPackageName(pkgNameOnly)) {
+      console.log(`[!] Nom de package invalide: ${pkg}`);
+      return { blocked: true, package: pkg, threats: [{ type: 'invalid_name', severity: 'HIGH', message: 'Nom de package invalide ou suspect' }] };
+    }
+  }
+
+  // Tout est clean, installer pour de vrai (utilise spawnSync pour eviter injection)
   console.log('');
   console.log('[*] Installation en cours...');
-  
-  let cmd = `npm install ${packages.join(' ')}`;
-  if (isDev) cmd += ' --save-dev';
-  if (isGlobal) cmd += ' -g';
-  
-  execSync(cmd, { stdio: 'inherit' });
-  
+
+  const npmArgs = ['install', ...packages];
+  if (isDev) npmArgs.push('--save-dev');
+  if (isGlobal) npmArgs.push('-g');
+
+  const result = spawnSync('npm', npmArgs, { stdio: 'inherit', shell: false });
+
+  if (result.status !== 0) {
+    console.log('');
+    console.log('[!] Erreur lors de l\'installation.');
+    return { blocked: false, error: true };
+  }
+
   console.log('');
   console.log('[OK] Installation terminee.');
-  
+
   return { blocked: false };
 }
 
-module.exports = { safeInstall, REHABILITATED_PACKAGES, checkRehabilitated };
+module.exports = { safeInstall, REHABILITATED_PACKAGES, checkRehabilitated, isValidPackageName };

@@ -35,7 +35,9 @@ async function runSandbox(packageName) {
     processes: [],
     fileAccess: [],
     suspicious: false,
-    threats: []
+    threats: [],
+    exitCode: null,
+    rawOutput: ''
   };
   
   return new Promise((resolve, reject) => {
@@ -50,12 +52,11 @@ async function runSandbox(packageName) {
       packageName
     ]);
     
-    let output = '';
     let currentSection = null;
-    
+
     proc.stdout.on('data', (data) => {
       const text = data.toString();
-      output += text;
+      results.rawOutput += text;
       process.stdout.write(text);
       
       // Parse sections
@@ -75,6 +76,9 @@ async function runSandbox(packageName) {
     });
     
     proc.on('close', (code) => {
+      // Store exit code
+      results.exitCode = code;
+
       // Analyze results
       results.suspicious = analyzeResults(results);
       
