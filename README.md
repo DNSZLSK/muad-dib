@@ -12,7 +12,7 @@
   <img src="https://img.shields.io/npm/v/muaddib-scanner" alt="npm version">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
   <img src="https://img.shields.io/badge/node-%3E%3D18-brightgreen" alt="Node">
-  <img src="https://img.shields.io/badge/IOCs-930%2B-red" alt="IOCs">
+  <img src="https://img.shields.io/badge/IOCs-1500%2B-red" alt="IOCs">
 </p>
 
 <p align="center">
@@ -39,7 +39,7 @@ MUAD'DIB detects AND guides your response.
 
 ## Positioning
 
-MUAD'DIB is an educational tool and a free first line of defense. It detects **known** npm threats (930+ IOCs) and basic suspicious patterns.
+MUAD'DIB is an educational tool and a free first line of defense. It detects **known** npm threats (1500+ IOCs) and basic suspicious patterns.
 
 **For enterprise protection**, use:
 - [Socket.dev](https://socket.dev) - ML behavioral analysis, cloud sandboxing
@@ -175,14 +175,13 @@ muaddib update
 muaddib scrape
 ```
 
-Fetches latest malicious packages from multiple threat intelligence sources:
-- Shai-Hulud 2.0 Detector (GitHub)
-- Datadog Security Labs
-- OSV.dev
-- Socket.dev reports
-- Phylum Research
-- AlienVault OTX
-- Aikido Intel
+Fetches latest malicious packages from multiple verified threat intelligence sources:
+- **GenSecAI Shai-Hulud 2.0 Detector** - Consolidated list of 700+ Shai-Hulud packages
+- **DataDog Security Labs** - Consolidated IOCs from multiple vendors
+- **OSSF Malicious Packages** - OpenSSF database (8000+ reports via OSV.dev)
+- **GitHub Advisory Database** - Malware-tagged advisories
+- **Snyk Known Malware** - Historical malware packages
+- **Static IOCs** - Socket.dev, Phylum, npm-removed packages
 
 ### Docker Sandbox
 
@@ -249,6 +248,21 @@ Detects when code reads credentials AND sends them over the network:
 
 ---
 
+## IOC Sources
+
+MUAD'DIB aggregates threat intelligence from verified sources only:
+
+| Source | Type | Coverage |
+|--------|------|----------|
+| [GenSecAI Shai-Hulud Detector](https://github.com/gensecaihq/Shai-Hulud-2.0-Detector) | GitHub | 700+ Shai-Hulud packages |
+| [DataDog Security Labs](https://github.com/DataDog/indicators-of-compromise) | GitHub | Consolidated IOCs from 7 vendors |
+| [OSSF Malicious Packages](https://github.com/ossf/malicious-packages) | OSV API | 8000+ malware reports |
+| [GitHub Advisory](https://github.com/advisories?query=type%3Amalware) | OSV API | Malware-tagged advisories |
+| Snyk Known Malware | Static | Historical attacks |
+| Socket.dev / Phylum | Static | Manual additions |
+
+---
+
 ## VS Code
 
 The VS Code extension automatically scans your npm projects.
@@ -310,7 +324,14 @@ Alerts appear in Security > Code scanning alerts.
 ```
 MUAD'DIB Scanner
 |
-+-- IOC Match (930+ packages, YAML/JSON DB)
++-- IOC Match (1500+ packages, JSON DB)
+|   +-- GenSecAI Shai-Hulud Detector
+|   +-- DataDog Consolidated IOCs
+|   +-- OSSF Malicious Packages (via OSV)
+|   +-- GitHub Advisory (malware)
+|   +-- Snyk Known Malware
+|   +-- Static IOCs (Socket, Phylum)
+|
 +-- AST Parse (acorn)
 +-- Pattern Matching (shell, scripts)
 +-- Typosquat Detection (Levenshtein)

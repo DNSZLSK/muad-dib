@@ -63,6 +63,7 @@
 
     .github-link:hover {
       background: #be123c;
+      text-decoration: none;
     }
 
     main {
@@ -122,6 +123,45 @@
       font-size: 0.9rem;
     }
 
+    .sources-section {
+      background: #1f2937;
+      padding: 1.5rem;
+      border-radius: 8px;
+      margin: 1.5rem 0;
+    }
+
+    .sources-section h3 {
+      color: #f87171;
+      margin: 0 0 1rem;
+    }
+
+    .source-item {
+      display: flex;
+      align-items: center;
+      padding: 0.5rem 0;
+      border-bottom: 1px solid #374151;
+    }
+
+    .source-item:last-child {
+      border-bottom: none;
+    }
+
+    .source-icon {
+      font-size: 1.2rem;
+      margin-right: 0.75rem;
+    }
+
+    .source-name {
+      color: #e5e7eb;
+      font-weight: bold;
+    }
+
+    .source-desc {
+      color: #9ca3af;
+      font-size: 0.85rem;
+      margin-left: 0.5rem;
+    }
+
     table {
       border-collapse: collapse;
       width: 100%;
@@ -153,6 +193,25 @@
       font-size: 0.9rem;
       border-top: 1px solid #1f2937;
     }
+
+    .badge {
+      display: inline-block;
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: bold;
+      margin-left: 0.5rem;
+    }
+
+    .badge-new {
+      background: #059669;
+      color: white;
+    }
+
+    .badge-count {
+      background: #e11d48;
+      color: white;
+    }
   </style>
 </head>
 <body>
@@ -176,7 +235,7 @@
 
     <h2>Positioning</h2>
     <div class="positioning">
-      <p>MUAD'DIB is an <strong>educational tool</strong> and a <strong>free first line of defense</strong>. It detects <strong>known</strong> npm threats (930+ IOCs) and basic suspicious patterns.</p>
+      <p>MUAD'DIB is an <strong>educational tool</strong> and a <strong>free first line of defense</strong>. It detects <strong>known</strong> npm threats (1500+ IOCs) and basic suspicious patterns.</p>
       <p><strong>For enterprise protection</strong>, use:</p>
       <ul>
         <li><a href="https://socket.dev" target="_blank">Socket.dev</a> - ML behavioral analysis, cloud sandboxing</li>
@@ -186,11 +245,46 @@
       <p>MUAD'DIB does not replace these tools. It complements them for devs who want a quick, free check before installing an unknown package.</p>
     </div>
 
+    <h2>IOC Sources <span class="badge badge-new">v3.0</span></h2>
+    <div class="sources-section">
+      <h3>Verified Threat Intelligence</h3>
+      <div class="source-item">
+        <span class="source-icon">🔥</span>
+        <span class="source-name">GenSecAI Shai-Hulud Detector</span>
+        <span class="source-desc">— Consolidated list of 700+ Shai-Hulud packages</span>
+      </div>
+      <div class="source-item">
+        <span class="source-icon">🐕</span>
+        <span class="source-name">DataDog Security Labs</span>
+        <span class="source-desc">— IOCs from 7 vendors (Wiz, ReversingLabs, StepSecurity...)</span>
+      </div>
+      <div class="source-item">
+        <span class="source-icon">🛡️</span>
+        <span class="source-name">OSSF Malicious Packages</span>
+        <span class="source-desc">— OpenSSF database with 8000+ malware reports</span>
+      </div>
+      <div class="source-item">
+        <span class="source-icon">🐙</span>
+        <span class="source-name">GitHub Advisory Database</span>
+        <span class="source-desc">— Malware-tagged security advisories</span>
+      </div>
+      <div class="source-item">
+        <span class="source-icon">🔒</span>
+        <span class="source-name">Snyk Known Malware</span>
+        <span class="source-desc">— Historical attacks (event-stream, protestware...)</span>
+      </div>
+      <div class="source-item">
+        <span class="source-icon">📁</span>
+        <span class="source-name">Static IOCs</span>
+        <span class="source-desc">— Socket.dev, Phylum, npm-removed packages</span>
+      </div>
+    </div>
+
     <h2>Features</h2>
     <div class="features-grid">
       <div class="feature-card">
-        <h3>930+ IOCs</h3>
-        <p>Known malicious packages from Datadog, Socket, Phylum, OSV, Aikido, and more.</p>
+        <h3>1500+ IOCs <span class="badge badge-count">+70%</span></h3>
+        <p>Known malicious packages from verified threat intelligence sources.</p>
       </div>
       <div class="feature-card">
         <h3>AST Analysis</h3>
@@ -240,6 +334,9 @@ muaddib scan /path/to/project</pre>
     <p><strong>Risk score</strong></p>
     <pre>[SCORE] 58/100 [███████████░░░░░░░░░] HIGH</pre>
 
+    <p><strong>Update IOCs</strong></p>
+    <pre>muaddib scrape    # Fetch latest from all sources</pre>
+
     <p><strong>Docker Sandbox</strong></p>
     <pre>muaddib sandbox suspicious-package</pre>
 
@@ -252,12 +349,12 @@ muaddib scan /path/to/project</pre>
     <h2>Detected Attacks</h2>
     <table>
       <tr><th>Campaign</th><th>Packages</th><th>Status</th></tr>
-      <tr><td>Shai-Hulud v1 (Sept 2025)</td><td>@ctrl/tinycolor, ng2-file-upload</td><td>Detected</td></tr>
-      <tr><td>Shai-Hulud v2 (Nov 2025)</td><td>@asyncapi/specs, posthog-node, kill-port</td><td>Detected</td></tr>
-      <tr><td>Shai-Hulud v3 (Dec 2025)</td><td>@vietmoney/react-big-calendar</td><td>Detected</td></tr>
-      <tr><td>event-stream (2018)</td><td>flatmap-stream, event-stream</td><td>Detected</td></tr>
-      <tr><td>Protestware</td><td>node-ipc, colors, faker</td><td>Detected</td></tr>
-      <tr><td>Typosquats</td><td>crossenv, mongose, babelcli</td><td>Detected</td></tr>
+      <tr><td>Shai-Hulud v1 (Sept 2025)</td><td>@ctrl/tinycolor, ng2-file-upload</td><td>✅ Detected</td></tr>
+      <tr><td>Shai-Hulud v2 (Nov 2025)</td><td>@asyncapi/specs, posthog-node, kill-port</td><td>✅ Detected</td></tr>
+      <tr><td>Shai-Hulud v3 (Dec 2025)</td><td>@vietmoney/react-big-calendar</td><td>✅ Detected</td></tr>
+      <tr><td>event-stream (2018)</td><td>flatmap-stream, event-stream</td><td>✅ Detected</td></tr>
+      <tr><td>Protestware</td><td>node-ipc, colors, faker</td><td>✅ Detected</td></tr>
+      <tr><td>Typosquats</td><td>crossenv, mongose, babelcli</td><td>✅ Detected</td></tr>
     </table>
 
     <h2>Links</h2>
