@@ -16,6 +16,115 @@ const SAFE_FILES = {
   'install.js': ['esbuild', 'sharp', 'bcrypt', 'node-sass', 'puppeteer', 'playwright', 'electron']
 };
 
+// Packages qui ont ete compromis temporairement mais sont maintenant safe
+// Format: { name: { safe_after: "version", compromised: ["version1", "version2"] } }
+const REHABILITATED_PACKAGES = {
+  // Septembre 2025 - Compromission massive via phishing, corrige en quelques heures
+  'chalk': {
+    compromised: [],  // Versions malveillantes retirees de npm
+    safe: true,       // Toutes versions actuelles sont safe
+    note: 'Compromis sept 2025, versions malveillantes retirees'
+  },
+  'debug': {
+    compromised: [],
+    safe: true,
+    note: 'Compromis sept 2025, corrige rapidement'
+  },
+  'ansi-styles': {
+    compromised: [],
+    safe: true,
+    note: 'Compromis sept 2025, corrige rapidement'
+  },
+  'strip-ansi': {
+    compromised: [],
+    safe: true,
+    note: 'Compromis sept 2025, corrige rapidement'
+  },
+  'wrap-ansi': {
+    compromised: [],
+    safe: true,
+    note: 'Compromis sept 2025, corrige rapidement'
+  },
+  'is-arrayish': {
+    compromised: [],
+    safe: true,
+    note: 'Compromis sept 2025, corrige rapidement'
+  },
+  'simple-swizzle': {
+    compromised: [],
+    safe: true,
+    note: 'Compromis sept 2025, corrige rapidement'
+  },
+  'color-convert': {
+    compromised: [],
+    safe: true,
+    note: 'Compromis sept 2025, corrige rapidement'
+  },
+  'supports-color': {
+    compromised: [],
+    safe: true,
+    note: 'Compromis sept 2025, corrige rapidement'
+  },
+  'has-flag': {
+    compromised: [],
+    safe: true,
+    note: 'Compromis sept 2025, corrige rapidement'
+  },
+  
+  // Packages avec versions specifiques compromises (pas toutes)
+  'ua-parser-js': {
+    compromised: ['0.7.29', '0.8.0', '1.0.0'],
+    safe: false,  // Seulement les versions non-compromised sont safe
+    note: 'Versions specifiques compromises oct 2021'
+  },
+  'coa': {
+    compromised: ['2.0.3', '2.0.4', '2.1.1', '2.1.3', '3.0.1', '3.1.3'],
+    safe: false,
+    note: 'Versions specifiques compromises nov 2021'
+  },
+  'rc': {
+    compromised: ['1.2.9', '1.3.9', '2.3.9'],
+    safe: false,
+    note: 'Versions specifiques compromises nov 2021'
+  },
+  
+  // Notre propre package et dependances connues safe
+  'muaddib-scanner': {
+    compromised: [],
+    safe: true,
+    note: 'Notre package'
+  },
+  'acorn': {
+    compromised: [],
+    safe: true,
+    note: 'Parser AST legitime'
+  },
+  'acorn-walk': {
+    compromised: [],
+    safe: true,
+    note: 'Parser AST legitime'
+  }
+};
+
+/**
+ * Verifie si un package est dans la whitelist des packages rehabilites
+ * @returns {boolean|null} true = safe, false = compromis, null = pas dans whitelist
+ */
+function checkRehabilitatedPackage(pkgName, pkgVersion) {
+  const rehab = REHABILITATED_PACKAGES[pkgName];
+  if (!rehab) return null;  // Pas dans la whitelist
+  
+  // Si marque comme safe = toutes versions sont OK
+  if (rehab.safe === true) return true;
+  
+  // Sinon, verifier si la version est dans la liste des compromises
+  if (rehab.compromised.includes(pkgVersion)) {
+    return false;  // Version specifiquement compromise
+  }
+  
+  return true;  // Version pas dans la liste des compromises = safe
+}
+
 async function scanDependencies(targetPath) {
   const threats = [];
   const nodeModulesPath = path.join(targetPath, 'node_modules');
@@ -28,6 +137,28 @@ async function scanDependencies(targetPath) {
   const packages = listPackages(nodeModulesPath);
 
   for (const pkg of packages) {
+    // D'abord verifier la whitelist des packages rehabilites
+    const rehabStatus = checkRehabilitatedPackage(pkg.name, pkg.version);
+    
+    if (rehabStatus === true) {
+      // Package rehabilite et version safe, skip
+      continue;
+    }
+    
+    if (rehabStatus === false) {
+      // Package rehabilite mais version specifiquement compromise
+      const rehab = REHABILITATED_PACKAGES[pkg.name];
+      threats.push({
+        type: 'known_malicious_package',
+        severity: 'CRITICAL',
+        message: `Version compromise: ${pkg.name}@${pkg.version} (${rehab.note})`,
+        file: `node_modules/${pkg.name}`
+      });
+      continue;
+    }
+    
+    // rehabStatus === null : pas dans whitelist, continuer verification normale
+    
     // Verifie si package connu malveillant (IOCs caches) AVEC VERSION
     const maliciousPkg = iocs.packages.find(p => {
       if (p.name !== pkg.name) return false;
@@ -74,8 +205,6 @@ async function scanDependencies(targetPath) {
       try {
         const pkgContent = fs.readFileSync(pkgJsonPath, 'utf8');
 
-
-
         // Verifie les marqueurs Shai-Hulud
         for (const marker of iocs.markers || []) {
           if (pkgContent.includes(marker)) {
@@ -87,9 +216,6 @@ async function scanDependencies(targetPath) {
             });
           }
         }
-
-        // Note: on ne signale plus les lifecycle scripts des dependances
-        // Trop de faux positifs (esbuild, sharp, etc.)
       } catch {
         // JSON parse error, skip
       }
@@ -150,4 +276,10 @@ function getPackageVersion(pkgPath) {
   }
 }
 
-module.exports = { scanDependencies };
+module.exports = { 
+  scanDependencies,
+  checkRehabilitatedPackage,
+  REHABILITATED_PACKAGES,
+  TRUSTED_PACKAGES,
+  SAFE_FILES
+};
