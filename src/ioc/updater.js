@@ -3,16 +3,12 @@ const path = require('path');
 const https = require('https');
 
 const CACHE_PATH = path.join(__dirname, '../../.muaddib-cache');
-const IOC_FILE = path.join(CACHE_PATH, 'iocs.json');
+const CACHE_IOC_FILE = path.join(CACHE_PATH, 'iocs.json');
+const LOCAL_IOC_FILE = path.join(__dirname, 'data/iocs.json');
 const { loadYAMLIOCs } = require('./yaml-loader.js');
 
-const EXTERNAL_FEEDS = [
-  {
-    name: 'muaddib-community',
-    url: 'https://raw.githubusercontent.com/DNSZLSK/muad-dib/master/data/iocs.json',
-    parser: parseMuaddibFeed
-  }
-];
+// Remote feed - only used as fallback if local scrape doesn't exist
+const REMOTE_FEED_URL = 'https://raw.githubusercontent.com/DNSZLSK/muad-dib/master/data/iocs.json';
 
 async function updateIOCs() {
   console.log('[MUADDIB] Mise a jour des IOCs...\n');
@@ -21,134 +17,149 @@ async function updateIOCs() {
     fs.mkdirSync(CACHE_PATH, { recursive: true });
   }
 
-  // Charger les IOCs depuis les fichiers YAML (incluant builtin.yaml)
+  // Priority 1: YAML files (builtin.yaml, etc.)
   const yamlIOCs = loadYAMLIOCs();
   
   const iocs = {
     packages: [...yamlIOCs.packages],
-    hashes: yamlIOCs.hashes.map(h => h.sha256),
-    markers: yamlIOCs.markers.map(m => m.pattern),
-    files: yamlIOCs.files.map(f => f.name)
+    hashes: yamlIOCs.hashes.map(function(h) { return h.sha256; }),
+    markers: yamlIOCs.markers.map(function(m) { return m.pattern; }),
+    files: yamlIOCs.files.map(function(f) { return f.name; })
   };
 
-  for (const feed of EXTERNAL_FEEDS) {
+  console.log('[INFO] YAML IOCs: ' + yamlIOCs.packages.length + ' packages');
+
+  // Priority 2: Local scraped IOCs (from muaddib scrape)
+  let localScrapedCount = 0;
+  if (fs.existsSync(LOCAL_IOC_FILE)) {
     try {
-      console.log(`[INFO] Telechargement depuis ${feed.name}...`);
-      const data = await fetchUrl(feed.url);
-      const externalIOCs = feed.parser(data);
-      
-      // Merge packages
-      for (const pkg of externalIOCs.packages || []) {
-        if (!iocs.packages.find(p => p.name === pkg.name && p.version === pkg.version)) {
-          iocs.packages.push(pkg);
-        }
-      }
-      
-      // Merge hashes
-      for (const hash of externalIOCs.hashes || []) {
-        if (!iocs.hashes.includes(hash)) {
-          iocs.hashes.push(hash);
-        }
-      }
-      
-      // Merge markers
-      for (const marker of externalIOCs.markers || []) {
-        if (!iocs.markers.includes(marker)) {
-          iocs.markers.push(marker);
-        }
-      }
-      
-      // Merge files
-      for (const file of externalIOCs.files || []) {
-        if (!iocs.files.includes(file)) {
-          iocs.files.push(file);
-        }
-      }
-      
-      console.log(`[OK] IOCs externes merges depuis ${feed.name}`);
-    } catch (err) {
-      console.log(`[WARN] Echec ${feed.name}: ${err.message}`);
+      const localIOCs = JSON.parse(fs.readFileSync(LOCAL_IOC_FILE, 'utf8'));
+      localScrapedCount = mergeIOCs(iocs, localIOCs);
+      console.log('[INFO] Local scraped IOCs: +' + localScrapedCount + ' packages');
+    } catch (e) {
+      console.log('[WARN] Erreur lecture IOCs locaux: ' + e.message);
     }
+  } else {
+    console.log('[INFO] Pas d\'IOCs locaux (lancez "muaddib scrape" pour en generer)');
   }
 
+  // Priority 3: Remote feed (fallback / additional source)
+  let remoteCount = 0;
+  try {
+    console.log('[INFO] Telechargement depuis GitHub...');
+    const remoteData = await fetchUrl(REMOTE_FEED_URL);
+    const remoteIOCs = JSON.parse(remoteData);
+    remoteCount = mergeIOCs(iocs, remoteIOCs);
+    console.log('[INFO] Remote IOCs: +' + remoteCount + ' packages');
+  } catch (e) {
+    console.log('[WARN] Echec telechargement distant: ' + e.message);
+    console.log('[INFO] Utilisation des IOCs locaux uniquement');
+  }
+
+  // Update metadata
   iocs.updated = new Date().toISOString();
 
-  fs.writeFileSync(IOC_FILE, JSON.stringify(iocs, null, 2));
-  console.log(`\n[OK] IOCs sauvegardes:`);
-  console.log(`     - ${iocs.packages.length} packages malveillants`);
-  console.log(`     - ${iocs.files.length} fichiers suspects`);
-  console.log(`     - ${iocs.hashes.length} hashes connus`);
-  console.log(`     - ${iocs.markers.length} marqueurs\n`);
+  // Save to cache
+  fs.writeFileSync(CACHE_IOC_FILE, JSON.stringify(iocs, null, 2));
+  
+  console.log('\n[OK] IOCs sauvegardes:');
+  console.log('     - ' + iocs.packages.length + ' packages malveillants');
+  console.log('     - ' + iocs.files.length + ' fichiers suspects');
+  console.log('     - ' + iocs.hashes.length + ' hashes connus');
+  console.log('     - ' + iocs.markers.length + ' marqueurs\n');
 
   return iocs;
 }
 
+/**
+ * Merge source IOCs into target without duplicates
+ * Returns number of packages added
+ */
+function mergeIOCs(target, source) {
+  let added = 0;
+  
+  // Merge packages
+  for (const pkg of source.packages || []) {
+    const exists = target.packages.find(function(p) {
+      return p.name === pkg.name && p.version === pkg.version;
+    });
+    if (!exists) {
+      target.packages.push(pkg);
+      added++;
+    }
+  }
+  
+  // Merge hashes
+  for (const hash of source.hashes || []) {
+    if (!target.hashes.includes(hash)) {
+      target.hashes.push(hash);
+    }
+  }
+  
+  // Merge markers
+  for (const marker of source.markers || []) {
+    if (!target.markers.includes(marker)) {
+      target.markers.push(marker);
+    }
+  }
+  
+  // Merge files
+  for (const file of source.files || []) {
+    if (!target.files.includes(file)) {
+      target.files.push(file);
+    }
+  }
+  
+  return added;
+}
+
 function fetchUrl(url) {
-  return new Promise((resolve, reject) => {
-    https.get(url, (res) => {
+  return new Promise(function(resolve, reject) {
+    https.get(url, function(res) {
+      // Handle redirects
       if (res.statusCode === 301 || res.statusCode === 302) {
         fetchUrl(res.headers.location).then(resolve).catch(reject);
         return;
       }
       if (res.statusCode !== 200) {
-        reject(new Error(`HTTP ${res.statusCode}`));
+        reject(new Error('HTTP ' + res.statusCode));
         return;
       }
       let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => resolve(data));
+      res.on('data', function(chunk) { data += chunk; });
+      res.on('end', function() { resolve(data); });
     }).on('error', reject);
   });
 }
 
-function parseMuaddibFeed(data) {
-  try {
-    return JSON.parse(data);
-  } catch {
-    return { packages: [], hashes: [], markers: [], files: [] };
-  }
-}
-
 function loadCachedIOCs() {
-  // Priorite 1 : IOCs YAML locaux
+  // Priority 1: YAML IOCs
   const yamlIOCs = loadYAMLIOCs();
   
-  // Priorite 2 : Cache telecharge
-  let cachedIOCs = { packages: [], hashes: [], markers: [], files: [] };
-  if (fs.existsSync(IOC_FILE)) {
-    cachedIOCs = JSON.parse(fs.readFileSync(IOC_FILE, 'utf8'));
-  }
-  
-  // Merge : YAML + Cache
   const merged = {
     packages: [...yamlIOCs.packages],
-    hashes: yamlIOCs.hashes.map(h => h.sha256),
-    markers: yamlIOCs.markers.map(m => m.pattern),
-    files: yamlIOCs.files.map(f => f.name)
+    hashes: yamlIOCs.hashes.map(function(h) { return h.sha256; }),
+    markers: yamlIOCs.markers.map(function(m) { return m.pattern; }),
+    files: yamlIOCs.files.map(function(f) { return f.name; })
   };
   
-  // Ajouter les IOCs du cache sans doublons
-  for (const pkg of cachedIOCs.packages || []) {
-    if (!merged.packages.find(p => p.name === pkg.name)) {
-      merged.packages.push(pkg);
+  // Priority 2: Local scraped IOCs
+  if (fs.existsSync(LOCAL_IOC_FILE)) {
+    try {
+      const localIOCs = JSON.parse(fs.readFileSync(LOCAL_IOC_FILE, 'utf8'));
+      mergeIOCs(merged, localIOCs);
+    } catch {
+      // Ignore errors
     }
   }
   
-  for (const hash of cachedIOCs.hashes || []) {
-    if (!merged.hashes.includes(hash)) {
-      merged.hashes.push(hash);
-    }
-  }
-  
-  for (const marker of cachedIOCs.markers || []) {
-    if (!merged.markers.includes(marker)) {
-      merged.markers.push(marker);
-    }
-  }
-  
-  for (const file of cachedIOCs.files || []) {
-    if (!merged.files.includes(file)) {
-      merged.files.push(file);
+  // Priority 3: Cached IOCs (from previous update)
+  if (fs.existsSync(CACHE_IOC_FILE)) {
+    try {
+      const cachedIOCs = JSON.parse(fs.readFileSync(CACHE_IOC_FILE, 'utf8'));
+      mergeIOCs(merged, cachedIOCs);
+    } catch {
+      // Ignore errors
     }
   }
   
