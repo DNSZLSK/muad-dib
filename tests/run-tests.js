@@ -366,6 +366,241 @@ test('MITRE: T1041 - Exfiltration', () => {
 });
 
 // ============================================
+// TESTS WHITELIST / REHABILITATED PACKAGES
+// ============================================
+
+console.log('\n=== TESTS WHITELIST ===\n');
+
+test('WHITELIST: chalk est dans REHABILITATED_PACKAGES', () => {
+  const { REHABILITATED_PACKAGES } = require('../src/safe-install.js');
+  assert(REHABILITATED_PACKAGES['chalk'], 'chalk devrait etre dans REHABILITATED_PACKAGES');
+  assert(REHABILITATED_PACKAGES['chalk'].safe === true, 'chalk.safe devrait etre true');
+});
+
+test('WHITELIST: debug est dans REHABILITATED_PACKAGES', () => {
+  const { REHABILITATED_PACKAGES } = require('../src/safe-install.js');
+  assert(REHABILITATED_PACKAGES['debug'], 'debug devrait etre dans REHABILITATED_PACKAGES');
+  assert(REHABILITATED_PACKAGES['debug'].safe === true, 'debug.safe devrait etre true');
+});
+
+test('WHITELIST: ua-parser-js a des versions compromises specifiques', () => {
+  const { REHABILITATED_PACKAGES } = require('../src/safe-install.js');
+  const uap = REHABILITATED_PACKAGES['ua-parser-js'];
+  assert(uap, 'ua-parser-js devrait etre dans REHABILITATED_PACKAGES');
+  assert(uap.safe === false, 'ua-parser-js.safe devrait etre false');
+  assert(uap.compromised.includes('0.7.29'), 'Devrait inclure 0.7.29');
+  assert(uap.compromised.includes('0.8.0'), 'Devrait inclure 0.8.0');
+  assert(uap.compromised.includes('1.0.0'), 'Devrait inclure 1.0.0');
+});
+
+test('WHITELIST: checkRehabilitated retourne safe pour chalk', () => {
+  const { checkRehabilitated } = require('../src/safe-install.js');
+  const result = checkRehabilitated('chalk', '5.4.0');
+  assert(result !== null, 'chalk devrait etre reconnu');
+  assert(result.safe === true, 'chalk devrait etre safe');
+});
+
+test('WHITELIST: checkRehabilitated retourne unsafe pour ua-parser-js@0.7.29', () => {
+  const { checkRehabilitated } = require('../src/safe-install.js');
+  const result = checkRehabilitated('ua-parser-js', '0.7.29');
+  assert(result !== null, 'ua-parser-js devrait etre reconnu');
+  assert(result.safe === false, 'ua-parser-js@0.7.29 devrait etre unsafe');
+});
+
+test('WHITELIST: checkRehabilitated retourne safe pour ua-parser-js@0.7.35', () => {
+  const { checkRehabilitated } = require('../src/safe-install.js');
+  const result = checkRehabilitated('ua-parser-js', '0.7.35');
+  assert(result !== null, 'ua-parser-js devrait etre reconnu');
+  assert(result.safe === true, 'ua-parser-js@0.7.35 devrait etre safe');
+});
+
+test('WHITELIST: checkRehabilitated retourne null pour package inconnu', () => {
+  const { checkRehabilitated } = require('../src/safe-install.js');
+  const result = checkRehabilitated('some-random-package', '1.0.0');
+  assert(result === null, 'Package inconnu devrait retourner null');
+});
+
+// ============================================
+// TESTS IOC LOADING
+// ============================================
+
+console.log('\n=== TESTS IOC LOADING ===\n');
+
+test('IOC: loadCachedIOCs retourne des packages', () => {
+  const { loadCachedIOCs } = require('../src/ioc/updater.js');
+  const iocs = loadCachedIOCs();
+  assert(iocs.packages, 'Devrait avoir packages');
+  assert(iocs.packages.length > 0, 'Devrait avoir au moins un package');
+});
+
+test('IOC: loadCachedIOCs retourne des hashes', () => {
+  const { loadCachedIOCs } = require('../src/ioc/updater.js');
+  const iocs = loadCachedIOCs();
+  assert(iocs.hashes, 'Devrait avoir hashes');
+});
+
+test('IOC: loadCachedIOCs retourne des markers', () => {
+  const { loadCachedIOCs } = require('../src/ioc/updater.js');
+  const iocs = loadCachedIOCs();
+  assert(iocs.markers, 'Devrait avoir markers');
+  assert(iocs.markers.length > 0, 'Devrait avoir au moins un marker');
+});
+
+test('IOC: Typosquats ont version wildcard', () => {
+  const { loadCachedIOCs } = require('../src/ioc/updater.js');
+  const iocs = loadCachedIOCs();
+  const typosquats = iocs.packages.filter(p => p.source === 'typosquat');
+  assert(typosquats.length > 0, 'Devrait avoir des typosquats');
+  const allWildcard = typosquats.every(p => p.version === '*');
+  assert(allWildcard, 'Tous les typosquats devraient avoir version *');
+});
+
+test('IOC: Packages historiques ont versions specifiques', () => {
+  const { loadCachedIOCs } = require('../src/ioc/updater.js');
+  const iocs = loadCachedIOCs();
+  const eventStream = iocs.packages.find(p => p.name === 'event-stream');
+  assert(eventStream, 'event-stream devrait etre dans les IOCs');
+  assert(eventStream.version === '3.3.6', 'event-stream devrait avoir version 3.3.6');
+});
+
+// ============================================
+// TESTS IOC MATCHING
+// ============================================
+
+console.log('\n=== TESTS IOC MATCHING ===\n');
+
+test('IOC MATCH: Version wildcard matche toutes versions', () => {
+  const iocs = { packages: [{ name: 'malicious-pkg', version: '*' }] };
+  const pkg = { name: 'malicious-pkg', version: '1.2.3' };
+  const match = iocs.packages.find(p => {
+    if (p.name !== pkg.name) return false;
+    if (p.version === '*') return true;
+    return p.version === pkg.version;
+  });
+  assert(match, 'Wildcard devrait matcher');
+});
+
+test('IOC MATCH: Version specifique matche uniquement cette version', () => {
+  const iocs = { packages: [{ name: 'some-pkg', version: '1.0.0' }] };
+  
+  const pkg1 = { name: 'some-pkg', version: '1.0.0' };
+  const match1 = iocs.packages.find(p => p.name === pkg1.name && (p.version === '*' || p.version === pkg1.version));
+  assert(match1, 'Version exacte devrait matcher');
+  
+  const pkg2 = { name: 'some-pkg', version: '1.0.1' };
+  const match2 = iocs.packages.find(p => p.name === pkg2.name && (p.version === '*' || p.version === pkg2.version));
+  assert(!match2, 'Version differente ne devrait pas matcher');
+});
+
+// ============================================
+// TESTS SCRAPER / DATA
+// ============================================
+
+console.log('\n=== TESTS SCRAPER / DATA ===\n');
+
+test('SCRAPER: Module charge sans erreur', () => {
+  const { runScraper } = require('../src/ioc/scraper.js');
+  assert(typeof runScraper === 'function', 'runScraper devrait etre une fonction');
+});
+
+test('SCRAPER: data/iocs.json existe et est valide', () => {
+  const iocsPath = path.join(__dirname, '..', 'data', 'iocs.json');
+  assert(fs.existsSync(iocsPath), 'data/iocs.json devrait exister');
+  const content = fs.readFileSync(iocsPath, 'utf8');
+  const iocs = JSON.parse(content);
+  assert(iocs.packages, 'Devrait avoir packages');
+  assert(Array.isArray(iocs.packages), 'packages devrait etre un array');
+});
+
+test('SCRAPER: IOCs ont les champs requis', () => {
+  const iocs = require('../data/iocs.json');
+  const sample = iocs.packages[0];
+  assert(sample.name, 'IOC devrait avoir name');
+  assert(sample.version, 'IOC devrait avoir version');
+  assert(sample.source, 'IOC devrait avoir source');
+});
+
+test('SCRAPER: Au moins 900 IOCs', () => {
+  const iocs = require('../data/iocs.json');
+  assert(iocs.packages.length >= 900, `Devrait avoir au moins 900 IOCs, a ${iocs.packages.length}`);
+});
+
+// ============================================
+// TESTS YAML LOADER
+// ============================================
+
+console.log('\n=== TESTS YAML LOADER ===\n');
+
+test('YAML: builtin.yaml existe', () => {
+  const builtinPath = path.join(__dirname, '..', 'iocs', 'builtin.yaml');
+  assert(fs.existsSync(builtinPath), 'iocs/builtin.yaml devrait exister');
+});
+
+test('YAML: loadYAMLIOCs retourne des packages', () => {
+  const { loadYAMLIOCs } = require('../src/ioc/yaml-loader.js');
+  const iocs = loadYAMLIOCs();
+  assert(iocs.packages, 'Devrait avoir packages');
+  assert(iocs.packages.length > 0, 'Devrait avoir au moins un package');
+});
+
+test('YAML: Contient Shai-Hulud packages', () => {
+  const { loadYAMLIOCs } = require('../src/ioc/yaml-loader.js');
+  const iocs = loadYAMLIOCs();
+  const shaiHulud = iocs.packages.filter(p => p.source && p.source.includes('shai-hulud'));
+  assert(shaiHulud.length > 0, 'Devrait avoir des packages Shai-Hulud');
+});
+
+test('YAML: Contient markers Shai-Hulud', () => {
+  const { loadYAMLIOCs } = require('../src/ioc/yaml-loader.js');
+  const iocs = loadYAMLIOCs();
+  assert(iocs.markers, 'Devrait avoir markers');
+  const hasShaiHulud = iocs.markers.some(m => m.pattern && m.pattern.includes('Shai-Hulud'));
+  assert(hasShaiHulud, 'Devrait avoir marker Shai-Hulud');
+});
+
+// ============================================
+// TESTS NON-REGRESSION
+// ============================================
+
+console.log('\n=== TESTS NON-REGRESSION ===\n');
+
+test('REGRESSION: chalk ne doit pas bloquer (rehabilite)', () => {
+  const { checkRehabilitated } = require('../src/safe-install.js');
+  const result = checkRehabilitated('chalk', '5.4.0');
+  assert(result && result.safe === true, 'chalk ne doit pas bloquer');
+});
+
+test('REGRESSION: debug ne doit pas bloquer (rehabilite)', () => {
+  const { checkRehabilitated } = require('../src/safe-install.js');
+  const result = checkRehabilitated('debug', '4.3.0');
+  assert(result && result.safe === true, 'debug ne doit pas bloquer');
+});
+
+test('REGRESSION: lodash n\'est pas dans les IOCs', () => {
+  const iocs = require('../data/iocs.json');
+  const lodash = iocs.packages.find(p => p.name === 'lodash');
+  assert(!lodash, 'lodash ne devrait pas etre dans les IOCs');
+});
+
+test('REGRESSION: loadash (typosquat) EST dans les IOCs', () => {
+  const iocs = require('../data/iocs.json');
+  const loadash = iocs.packages.find(p => p.name === 'loadash');
+  assert(loadash, 'loadash (typosquat) devrait etre dans les IOCs');
+});
+
+test('REGRESSION: express n\'est pas dans les IOCs', () => {
+  const iocs = require('../data/iocs.json');
+  const express = iocs.packages.find(p => p.name === 'express');
+  assert(!express, 'express ne devrait pas etre dans les IOCs');
+});
+
+test('REGRESSION: axios n\'est pas dans les IOCs', () => {
+  const iocs = require('../data/iocs.json');
+  const axios = iocs.packages.find(p => p.name === 'axios');
+  assert(!axios, 'axios ne devrait pas etre dans les IOCs');
+});
+
+// ============================================
 // RESULTATS
 // ============================================
 
