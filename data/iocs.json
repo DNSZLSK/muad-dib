@@ -1,6 +1,6 @@
 {
   "version": "1.1.0",
-  "updated": "2026-01-13T19:40:32.808Z",
+  "updated": "2026-01-15T08:11:49.747Z",
   "description": "IOCs communautaires MUAD'DIB - Contribuez via PR",
   "packages": [
     {
@@ -11845,6 +11845,53 @@
       "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
       "references": [
         "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "GHSA-4x49-vf9v-38px",
+      "name": "debug",
+      "version": "4.4.2",
+      "severity": "high",
+      "confidence": "medium",
+      "source": "osv",
+      "description": "debug@4.4.2 contains malware after npm account takeover",
+      "references": [
+        "https://github.com/debug-js/debug/security/advisories/GHSA-4x49-vf9v-38px",
+        "https://nvd.nist.gov/vuln/detail/CVE-2025-59144",
+        "https://github.com/debug-js/debug/issues/1005",
+        "https://github.com/debug-js/debug",
+        "https://socket.dev/blog/npm-author-qix-compromised-in-major-supply-chain-attack",
+        "https://www.aikido.dev/blog/npm-debug-and-chalk-packages-compromised",
+        "https://www.ox.security/blog/npm-packages-compromised"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "MAL-2025-46969",
+      "name": "chalk",
+      "version": "5.6.1",
+      "severity": "high",
+      "confidence": "medium",
+      "source": "osv",
+      "description": "Malicious code in chalk (npm)",
+      "references": [
+        "https://www.aikido.dev/blog/npm-debug-and-chalk-packages-compromised",
+        "https://www.bleepingcomputer.com/news/security/hackers-hijack-npm-packages-with-2-billion-weekly-downloads-in-supply-chain-attack/",
+        "https://github.com/advisories/GHSA-2v46-p5h4-248w"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "AIKIDO-proto-tinker-wc",
+      "name": "proto-tinker-wc",
+      "version": "0.1.87",
+      "severity": "high",
+      "confidence": "high",
+      "source": "aikido-intel",
+      "description": "Detected by Aikido Intel supply chain analysis",
+      "references": [
+        "https://www.aikido.dev/blog/npm-debug-and-chalk-packages-compromised"
       ],
       "mitre": "T1195.002"
     }

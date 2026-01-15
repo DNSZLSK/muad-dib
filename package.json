@@ -42,7 +42,7 @@
     "acorn-walk": "^8.3.4",
     "chalk": "^5.6.2",
     "js-yaml": "^4.1.0",
-    "muaddib-scanner": "^1.2.1",
+    "muaddib-scanner": "^1.2.2",
     "yargs": "^18.0.0"
   },
   "devDependencies": {
