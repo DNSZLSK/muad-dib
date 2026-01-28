@@ -132,17 +132,28 @@ function fetchUrl(url) {
   });
 }
 
+// Cache pour eviter de recharger les IOCs a chaque appel
+let cachedIOCsResult = null;
+let cachedIOCsTime = 0;
+const CACHE_TTL = 60000; // 1 minute
+
 function loadCachedIOCs() {
+  // Retourner le cache si encore valide
+  const now = Date.now();
+  if (cachedIOCsResult && (now - cachedIOCsTime) < CACHE_TTL) {
+    return cachedIOCsResult;
+  }
+
   // Priority 1: YAML IOCs
   const yamlIOCs = loadYAMLIOCs();
-  
+
   const merged = {
     packages: [...yamlIOCs.packages],
     hashes: yamlIOCs.hashes.map(function(h) { return h.sha256; }),
     markers: yamlIOCs.markers.map(function(m) { return m.pattern; }),
     files: yamlIOCs.files.map(function(f) { return f.name; })
   };
-  
+
   // Priority 2: Local scraped IOCs
   if (fs.existsSync(LOCAL_IOC_FILE)) {
     try {
@@ -152,7 +163,7 @@ function loadCachedIOCs() {
       // Ignore errors
     }
   }
-  
+
   // Priority 3: Cached IOCs (from previous update)
   if (fs.existsSync(CACHE_IOC_FILE)) {
     try {
@@ -162,8 +173,61 @@ function loadCachedIOCs() {
       // Ignore errors
     }
   }
-  
-  return merged;
+
+  // Creer structures optimisees pour lookup O(1)
+  const optimized = createOptimizedIOCs(merged);
+
+  // Mettre en cache
+  cachedIOCsResult = optimized;
+  cachedIOCsTime = now;
+
+  return optimized;
+}
+
+/**
+ * Cree des structures optimisees pour recherche O(1)
+ * @param {Object} iocs - IOCs bruts
+ * @returns {Object} IOCs avec Map/Set pour lookup rapide
+ */
+function createOptimizedIOCs(iocs) {
+  // Map pour les packages: "name" -> [{ version, source, ... }]
+  const packagesMap = new Map();
+  // Set pour les packages wildcard (toutes versions malveillantes)
+  const wildcardPackages = new Set();
+
+  for (const pkg of iocs.packages) {
+    if (pkg.version === '*') {
+      wildcardPackages.add(pkg.name);
+    }
+
+    if (!packagesMap.has(pkg.name)) {
+      packagesMap.set(pkg.name, []);
+    }
+    packagesMap.get(pkg.name).push(pkg);
+  }
+
+  // Set pour les hashes (lookup O(1))
+  const hashesSet = new Set(iocs.hashes);
+
+  // Set pour les markers
+  const markersSet = new Set(iocs.markers);
+
+  // Set pour les fichiers suspects
+  const filesSet = new Set(iocs.files);
+
+  return {
+    // Structures optimisees
+    packagesMap,
+    wildcardPackages,
+    hashesSet,
+    markersSet,
+    filesSet,
+    // Arrays originaux pour compatibilite
+    packages: iocs.packages,
+    hashes: iocs.hashes,
+    markers: iocs.markers,
+    files: iocs.files
+  };
 }
 
 module.exports = { updateIOCs, loadCachedIOCs };

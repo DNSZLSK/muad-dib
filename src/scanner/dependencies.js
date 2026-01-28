@@ -158,16 +158,30 @@ async function scanDependencies(targetPath) {
     }
     
     // rehabStatus === null : pas dans whitelist, continuer verification normale
-    
+
     // Verifie si package connu malveillant (IOCs caches) AVEC VERSION
-    const maliciousPkg = iocs.packages.find(p => {
-      if (p.name !== pkg.name) return false;
-      // Si version "*" dans IOC = toutes versions sont malveillantes
-      if (p.version === '*') return true;
-      // Sinon compare la version exacte
-      return p.version === pkg.version;
-    });
-    
+    // Utilise Map/Set pour lookup O(1) au lieu de O(n)
+    let maliciousPkg = null;
+
+    // Check 1: Package avec wildcard (toutes versions malveillantes)
+    if (iocs.wildcardPackages && iocs.wildcardPackages.has(pkg.name)) {
+      const pkgList = iocs.packagesMap.get(pkg.name);
+      maliciousPkg = pkgList ? pkgList.find(p => p.version === '*') : null;
+    }
+    // Check 2: Version specifique via Map
+    else if (iocs.packagesMap && iocs.packagesMap.has(pkg.name)) {
+      const pkgList = iocs.packagesMap.get(pkg.name);
+      maliciousPkg = pkgList.find(p => p.version === pkg.version);
+    }
+    // Fallback: recherche lineaire (compatibilite ancienne API)
+    else if (!iocs.packagesMap) {
+      maliciousPkg = iocs.packages.find(p => {
+        if (p.name !== pkg.name) return false;
+        if (p.version === '*') return true;
+        return p.version === pkg.version;
+      });
+    }
+
     if (maliciousPkg) {
       threats.push({
         type: 'known_malicious_package',
@@ -182,12 +196,18 @@ async function scanDependencies(targetPath) {
     if (TRUSTED_PACKAGES.includes(pkg.name)) continue;
 
     // Verifie les fichiers suspects (IOCs caches) avec whitelist
-    for (const suspFile of iocs.files || []) {
+    // Utilise Set ou Array selon la structure disponible
+    const suspiciousFiles = iocs.filesSet || iocs.files || [];
+    const filesToCheck = suspiciousFiles instanceof Set
+      ? Array.from(suspiciousFiles)
+      : suspiciousFiles;
+
+    for (const suspFile of filesToCheck) {
       // Skip si fichier legitime pour ce package
       if (SAFE_FILES[suspFile] && SAFE_FILES[suspFile].includes(pkg.name)) {
         continue;
       }
-      
+
       const filePath = path.join(pkg.path, suspFile);
       if (fs.existsSync(filePath)) {
         threats.push({
@@ -206,7 +226,13 @@ async function scanDependencies(targetPath) {
         const pkgContent = fs.readFileSync(pkgJsonPath, 'utf8');
 
         // Verifie les marqueurs Shai-Hulud
-        for (const marker of iocs.markers || []) {
+        // Utilise Set ou Array selon la structure disponible
+        const markers = iocs.markersSet || iocs.markers || [];
+        const markersToCheck = markers instanceof Set
+          ? Array.from(markers)
+          : markers;
+
+        for (const marker of markersToCheck) {
           if (pkgContent.includes(marker)) {
             threats.push({
               type: 'shai_hulud_marker',
