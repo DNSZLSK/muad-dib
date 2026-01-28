@@ -114,21 +114,105 @@ J'ai aussi appris à être honnête sur les limites d'un projet. MUAD'DIB détec
 
 ---
 
+## Audit et optimisations (Janvier 2026)
+
+### L'audit Claude Code
+
+Après la v1.2.5, j'ai demandé à Claude Code de faire un audit complet du projet. L'objectif : identifier ce qui manquait vraiment pour que MUAD'DIB soit "production-ready".
+
+Le constat était sans appel :
+- L'outil était techniquement solide mais manquait de **visibilité** (pas sur GitHub Marketplace, pas de badges)
+- Aucune feature **différenciante** par rapport à Snyk ou Socket
+- Les tests existaient mais sans **métriques de coverage**
+
+### Les optimisations techniques
+
+**Parallélisation des scanners** : Avant, les 9 scanners s'exécutaient séquentiellement. Maintenant ils tournent en parallèle avec `Promise.all()`. Gain de performance significatif sur les gros projets.
+
+**Structures de données optimisées** : Remplacement des tableaux par des `Map` et `Set` pour les lookups IOC. Passage de O(n) à O(1) pour la recherche de packages malveillants.
+
+**Cache SHA256** : Les hashes de fichiers sont maintenant cachés pour éviter de recalculer le même hash plusieurs fois dans un scan.
+
+**Protection symlinks** : Ajout de `lstatSync` pour détecter les liens symboliques et éviter les boucles infinies ou l'accès à des fichiers hors scope.
+
+**Fix XSS dans les rapports HTML** : Les données utilisateur sont maintenant échappées avec une fonction `escapeHtml()` dédiée.
+
+**Standardisation anglais** : Tous les messages de sortie sont maintenant en anglais pour la cohérence internationale.
+
+### La killer feature : `muaddib diff`
+
+C'est LA feature que personne d'autre n'a. Ni Snyk, ni Socket, ni npm audit.
+
+```bash
+muaddib diff v1.2.0
+```
+
+Compare les menaces entre la version actuelle et un commit/tag précédent. Affiche **uniquement les NOUVELLES menaces** introduites depuis cette référence.
+
+Pourquoi c'est important ? Parce qu'en vrai, les projets ont souvent de la dette technique de sécurité. Des alertes qu'on connaît mais qu'on n'a pas le temps de fixer. Avec `muaddib diff`, tu peux bloquer un PR uniquement si il **introduit** de nouveaux problèmes, sans être pollué par l'existant.
+
+L'implémentation était pas triviale :
+1. Cloner le repo dans un dossier temporaire
+2. Checkout le commit de référence
+3. Scanner les deux versions
+4. Comparer les menaces avec un ID unique (type + fichier + message)
+5. Afficher le delta
+
+### Intégration pre-commit hooks
+
+Pour que MUAD'DIB soit vraiment utile, il fallait qu'il s'intègre dans le workflow des devs. Pas juste un outil qu'on lance manuellement de temps en temps.
+
+J'ai ajouté le support pour trois systèmes de hooks :
+
+**Pre-commit framework** (le plus populaire) :
+```yaml
+repos:
+  - repo: https://github.com/DNSZLSK/muad-dib
+    rev: v1.2.7
+    hooks:
+      - id: muaddib-scan
+```
+
+**Husky** (très utilisé dans l'écosystème npm) :
+```bash
+npx husky add .husky/pre-commit "npx muaddib scan . --fail-on high"
+```
+
+**Git natif** :
+```bash
+muaddib init-hooks --type git
+```
+
+La commande `muaddib init-hooks` détecte automatiquement le système utilisé et configure le hook approprié.
+
+### Distribution et crédibilité
+
+**GitHub Action sur le Marketplace** : L'action existait mais n'était pas publiable. J'ai ajouté le branding (icône shield orange), les inputs/outputs documentés, et l'upload SARIF automatique.
+
+**Coverage avec Codecov** : Les 91 tests existaient mais personne ne pouvait voir le taux de couverture. Maintenant c'est visible avec un badge.
+
+**OpenSSF Scorecard** : Le workflow analyse automatiquement les bonnes pratiques de sécurité du projet et affiche un badge de crédibilité.
+
+---
+
 ## État actuel
 
 ### Ce qui fonctionne
 
 | Feature | Détails |
 |---------|---------|
-| CLI complète | scan, watch, update, scrape, daemon, sandbox |
-| Base IOCs | 930+ packages malveillants |
+| CLI complète | scan, watch, update, scrape, daemon, sandbox, **diff**, **init-hooks** |
+| Base IOCs | 1500+ packages malveillants |
 | Détection Shai-Hulud | v1, v2, v3 couverts |
 | Exports | JSON, HTML, SARIF |
 | Extension VS Code | Publiée sur Marketplace |
 | Webhooks | Discord / Slack (envoi uniquement si menaces détectées) |
 | Docker Sandbox | Analyse comportementale isolée |
 | GitHub Actions Backdoor | Détection discussion.yaml (Shai-Hulud 2.0) |
-| Tests | 42 tests passants |
+| **Diff entre versions** | Compare et montre uniquement les NOUVELLES menaces |
+| **Pre-commit hooks** | Support pre-commit, husky, git natif |
+| **GitHub Action Marketplace** | Avec inputs/outputs et SARIF auto |
+| Tests | **91 tests passants** |
 
 ### Ce qui manque (honnêtement)
 
@@ -137,6 +221,8 @@ J'ai aussi appris à être honnête sur les limites d'un projet. MUAD'DIB détec
 **Sandbox basique** : Le Docker sandbox capture réseau/fichiers/process, mais pas d'analyse TLS ni de désobfuscation automatique.
 
 **Dépendance aux sources tierces** : Si Datadog change son API, mon scraper casse.
+
+**Mono-langage** : npm uniquement. Pas de support PyPI, RubyGems, ou autres.
 
 ---
 

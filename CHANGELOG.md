@@ -7,19 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.7] - 2026-01-29
+
 ### Added
-- `muaddib diff` command - compare threats between versions/commits
-- `muaddib init-hooks` command - setup git pre-commit hooks
-- Pre-commit framework integration (`.pre-commit-hooks.yaml`)
-- Husky integration with `hooks/husky.js`
-- Native git hooks support
-- GitHub Action published to Marketplace with branding
-- SARIF output support in GitHub Action
-- Coverage reporting with c8 and Codecov
-- OpenSSF Scorecard workflow
+- **`muaddib diff` command** - Compare threats between versions/commits, shows only NEW threats
+- **`muaddib init-hooks` command** - Setup git pre-commit hooks automatically
+- **Pre-commit framework integration** - `.pre-commit-hooks.yaml` with 4 hook types
+- **Husky integration** - `hooks/husky.js` for npm-based projects
+- **Native git hooks** - `hooks/pre-commit` and `hooks/pre-commit-diff`
+- **GitHub Action on Marketplace** - Branding (shield icon), inputs/outputs, auto SARIF upload
+- **Coverage reporting** - c8 + Codecov integration with badge
+- **OpenSSF Scorecard** - Security best practices workflow with badge
+- 9 new tests for diff and hooks modules (total: 91 tests)
 
 ### Changed
 - Interactive menu now includes diff and init-hooks options
+- README updated with diff and pre-commit documentation
+- README.fr.md synchronized with English version
+
+### Performance
+- Parallelize all 9 scanners with `Promise.all()`
+- Optimize IOC lookups with Map/Set (O(1) instead of O(n))
+- Add SHA256 hash cache to avoid redundant calculations
+- Handle symlinks safely with `lstatSync`
+
+### Security
+- XSS protection in HTML report generation with `escapeHtml()`
+- Prevent command injection in safe-install
+- SSRF protection in webhook module with domain whitelist
+
+### Fixed
+- Standardize all output messages to English
 
 ## [1.2.6] - 2025-01-15
 
@@ -123,7 +141,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Obfuscation detection
 - Package.json lifecycle script analysis
 
-[Unreleased]: https://github.com/DNSZLSK/muad-dib/compare/v1.2.6...HEAD
+[Unreleased]: https://github.com/DNSZLSK/muad-dib/compare/v1.2.7...HEAD
+[1.2.7]: https://github.com/DNSZLSK/muad-dib/compare/v1.2.6...v1.2.7
 [1.2.6]: https://github.com/DNSZLSK/muad-dib/compare/v1.2.5...v1.2.6
 [1.2.5]: https://github.com/DNSZLSK/muad-dib/compare/v1.2.4...v1.2.5
 [1.2.4]: https://github.com/DNSZLSK/muad-dib/compare/v1.2.3...v1.2.4
