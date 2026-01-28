@@ -1,12 +1,42 @@
-name: 'MUADDIB Scanner'
-description: 'Detection et reponse aux attaques supply chain npm'
-author: 'MUADDIB Contributors'
+name: 'MUAD''DIB Scanner'
+description: 'Supply-chain threat detection and response for npm. Detects malicious packages, typosquatting, credential theft, and more.'
+author: 'DNSZLSK'
+
+branding:
+  icon: 'shield'
+  color: 'orange'
 
 inputs:
   path:
-    description: 'Chemin du projet a scanner'
+    description: 'Path to the project to scan'
     required: false
     default: '.'
+  fail-on:
+    description: 'Minimum severity to fail the workflow (critical, high, medium, low)'
+    required: false
+    default: 'high'
+  sarif:
+    description: 'Generate SARIF output file at this path'
+    required: false
+    default: ''
+  paranoid:
+    description: 'Enable paranoid mode for ultra-strict detection'
+    required: false
+    default: 'false'
+
+outputs:
+  sarif-file:
+    description: 'Path to the generated SARIF file (if sarif input was provided)'
+    value: ${{ steps.scan.outputs.sarif_file }}
+  risk-score:
+    description: 'Risk score from 0 to 100'
+    value: ${{ steps.scan.outputs.risk_score }}
+  threats-count:
+    description: 'Number of threats detected'
+    value: ${{ steps.scan.outputs.threats_count }}
+  exit-code:
+    description: 'Exit code of the scan (0 = clean, 1+ = threats found)'
+    value: ${{ steps.scan.outputs.exit_code }}
 
 runs:
   using: 'composite'
@@ -16,13 +46,52 @@ runs:
       with:
         node-version: '20'
 
-    - name: Install MUADDIB
+    - name: Install MUAD'DIB
       shell: bash
-      run: |
-        cd ${{ github.action_path }}
-        npm install
+      run: npm install -g muaddib-scanner
 
-    - name: Run MUADDIB scan
+    - name: Run MUAD'DIB scan
+      id: scan
       shell: bash
       run: |
-        node ${{ github.action_path }}/bin/muaddib.js scan ${{ inputs.path }}
+        # Build command
+        CMD="muaddib scan ${{ inputs.path }} --fail-on ${{ inputs.fail-on }}"
+
+        # Add SARIF output if requested
+        SARIF_PATH="${{ inputs.sarif }}"
+        if [ -n "$SARIF_PATH" ]; then
+          CMD="$CMD --sarif $SARIF_PATH"
+          echo "sarif_file=$SARIF_PATH" >> $GITHUB_OUTPUT
+        fi
+
+        # Add paranoid mode if enabled
+        if [ "${{ inputs.paranoid }}" = "true" ]; then
+          CMD="$CMD --paranoid"
+        fi
+
+        # Run scan and capture output
+        set +e
+        OUTPUT=$($CMD --json 2>&1)
+        EXIT_CODE=$?
+        set -e
+
+        # Extract metrics from JSON output
+        RISK_SCORE=$(echo "$OUTPUT" | grep -o '"score":[0-9]*' | head -1 | cut -d':' -f2 || echo "0")
+        THREATS_COUNT=$(echo "$OUTPUT" | grep -o '"threats":\[' | wc -l || echo "0")
+
+        echo "risk_score=$RISK_SCORE" >> $GITHUB_OUTPUT
+        echo "threats_count=$THREATS_COUNT" >> $GITHUB_OUTPUT
+        echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
+
+        # Re-run without --json for human-readable output
+        $CMD || true
+
+        # Exit with the original code
+        exit $EXIT_CODE
+
+    - name: Upload SARIF to GitHub Security
+      if: inputs.sarif != '' && always()
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ inputs.sarif }}
+      continue-on-error: true

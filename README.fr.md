@@ -9,7 +9,10 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/npm/v/muaddib-scanner" alt="npm version">
+  <a href="https://www.npmjs.com/package/muaddib-scanner"><img src="https://img.shields.io/npm/v/muaddib-scanner" alt="npm version"></a>
+  <a href="https://github.com/DNSZLSK/muad-dib/actions/workflows/scan.yml"><img src="https://github.com/DNSZLSK/muad-dib/actions/workflows/scan.yml/badge.svg" alt="CI"></a>
+  <a href="https://codecov.io/gh/DNSZLSK/muad-dib"><img src="https://codecov.io/gh/DNSZLSK/muad-dib/branch/master/graph/badge.svg" alt="Coverage"></a>
+  <a href="https://scorecard.dev/viewer/?uri=github.com/DNSZLSK/muad-dib"><img src="https://api.scorecard.dev/projects/github.com/DNSZLSK/muad-dib/badge" alt="OpenSSF Scorecard"></a>
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
   <img src="https://img.shields.io/badge/node-%3E%3D18-brightgreen" alt="Node">
   <img src="https://img.shields.io/badge/IOCs-1500%2B-red" alt="IOCs">
@@ -290,7 +293,9 @@ code --install-extension dnszlsk.muaddib-vscode
 
 ## CI/CD
 
-### GitHub Actions
+### GitHub Actions (Marketplace)
+
+Utilisez l'action officielle MUAD'DIB depuis le GitHub Marketplace :
 
 ```yaml
 name: Security Scan
@@ -305,15 +310,30 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: DNSZLSK/muad-dib@v1
         with:
-          node-version: '20'
-      - run: npm install -g muaddib-scanner
-      - run: muaddib scan . --sarif results.sarif
-      - uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: results.sarif
+          path: '.'
+          fail-on: 'high'
+          sarif: 'results.sarif'
 ```
+
+#### Inputs de l'action
+
+| Input | Description | Defaut |
+|-------|-------------|--------|
+| `path` | Chemin a scanner | `.` |
+| `fail-on` | Severite minimum pour echec (critical/high/medium/low) | `high` |
+| `sarif` | Chemin du fichier SARIF | `` |
+| `paranoid` | Activer detection ultra-stricte | `false` |
+
+#### Outputs de l'action
+
+| Output | Description |
+|--------|-------------|
+| `sarif-file` | Chemin du fichier SARIF genere |
+| `risk-score` | Score de risque (0-100) |
+| `threats-count` | Nombre de menaces detectees |
+| `exit-code` | Code de sortie (0 = clean) |
 
 Les alertes apparaissent dans Security > Code scanning alerts.
 

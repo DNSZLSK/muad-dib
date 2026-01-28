@@ -16,7 +16,17 @@ jobs:
           node-version: '20'
           cache: 'npm'
       - run: npm ci
-      - run: npm test
+      - run: npm install -g c8
+      - name: Run tests with coverage
+        run: c8 --reporter=lcov --reporter=text npm test
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage/lcov.info
+          fail_ci_if_error: false
+          verbose: true
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
   scan:
     runs-on: ubuntu-latest
