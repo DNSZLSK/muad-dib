@@ -6,6 +6,8 @@ const { startDaemon } = require('../src/daemon.js');
 const { runScraper } = require('../src/ioc/scraper.js');
 const { safeInstall } = require('../src/safe-install.js');
 const { buildSandboxImage, runSandbox } = require('../src/sandbox.js');
+const { diff, showRefs } = require('../src/diff.js');
+const { initHooks } = require('../src/hooks-init.js');
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -48,7 +50,7 @@ for (let i = 0; i < options.length; i++) {
 // Interactive menu
 async function interactiveMenu() {
   const { select, input, confirm } = await import('@inquirer/prompts');
-  
+
   console.log(`
   ╔══════════════════════════════════════════╗
   ║   MUAD'DIB - npm Supply Chain Hunter     ║
@@ -61,9 +63,11 @@ async function interactiveMenu() {
     choices: [
       { name: 'Scan a project', value: 'scan' },
       { name: 'Scan with paranoid mode', value: 'scan-paranoid' },
+      { name: 'Compare with previous version (diff)', value: 'diff' },
       { name: 'Install packages (safe)', value: 'install' },
       { name: 'Watch a project (real-time)', value: 'watch' },
       { name: 'Start daemon', value: 'daemon' },
+      { name: 'Setup git hooks', value: 'init-hooks' },
       { name: 'Update IOCs', value: 'update' },
       { name: 'Scrape new IOCs', value: 'scrape' },
       { name: 'Sandbox analysis', value: 'sandbox' },
@@ -158,31 +162,81 @@ async function interactiveMenu() {
     const packageName = await input({
       message: 'Package name to analyze:'
     });
-    
+
     if (!packageName.trim()) {
       console.log('No package specified.');
       process.exit(1);
     }
-    
+
     await buildSandboxImage();
     const results = await runSandbox(packageName.trim());
     process.exit(results.suspicious ? 1 : 0);
+  }
+
+  if (action === 'diff') {
+    const baseRef = await input({
+      message: 'Compare with (commit/tag/branch):',
+      default: 'HEAD~1'
+    });
+
+    const projectPath = await input({
+      message: 'Project path:',
+      default: '.'
+    });
+
+    const exitCode = await diff(projectPath, baseRef, { explain: true });
+    process.exit(exitCode);
+  }
+
+  if (action === 'init-hooks') {
+    const hookMode = await select({
+      message: 'Hook mode:',
+      choices: [
+        { name: 'Scan all threats', value: 'scan' },
+        { name: 'Diff only (block only NEW threats)', value: 'diff' }
+      ]
+    });
+
+    const hookType = await select({
+      message: 'Hook system:',
+      choices: [
+        { name: 'Auto-detect', value: 'auto' },
+        { name: 'Husky', value: 'husky' },
+        { name: 'pre-commit framework', value: 'pre-commit' },
+        { name: 'Native git hooks', value: 'git' }
+      ]
+    });
+
+    await initHooks('.', { type: hookType, mode: hookMode });
+    process.exit(0);
   }
 }
 
 const helpText = `
   MUAD'DIB - npm Supply Chain Threat Hunter
-  
+
   Usage:
     muaddib                          Interactive mode
     muaddib scan [path] [options]    Scan a project
+    muaddib diff <ref> [path]        Compare threats with a previous version
     muaddib install <pkg> [options]  Safe install (scan before install)
     muaddib watch [path]             Watch in real-time
     muaddib daemon [options]         Start daemon
+    muaddib init-hooks [options]     Setup git pre-commit hooks
     muaddib update                   Update IOCs
     muaddib scrape                   Scrape new IOCs
-    muaddib sandbox <pkg>            Analyze a package in an isolated Docker container
-    
+    muaddib sandbox <pkg>            Analyze in isolated Docker container
+
+  Diff Examples:
+    muaddib diff HEAD~1              Compare with previous commit
+    muaddib diff v1.2.0              Compare with tag
+    muaddib diff main                Compare with branch
+    muaddib diff abc1234 ./myproject Compare specific commit
+
+  Init-hooks Options:
+    --type [auto|husky|pre-commit|git]  Hook system (default: auto)
+    --mode [scan|diff]                  scan=all threats, diff=new only
+
   Options:
     --json              JSON output
     --html [file]       HTML report
@@ -273,6 +327,49 @@ if (!command || command === '--help' || command === '-h') {
       console.error('[ERROR]', err.message);
       process.exit(1);
     });
+} else if (command === 'diff') {
+  // Parse diff arguments: muaddib diff <ref> [path] [options]
+  const diffArgs = options.filter(o => !o.startsWith('-'));
+  const baseRef = diffArgs[0];
+  const diffTarget = diffArgs[1] || '.';
+
+  if (!baseRef) {
+    showRefs('.');
+    process.exit(0);
+  }
+
+  diff(diffTarget, baseRef, {
+    json: jsonOutput,
+    explain: explainMode,
+    failLevel: failLevel,
+    paranoid: paranoidMode
+  }).then(exitCode => {
+    process.exit(exitCode);
+  }).catch(err => {
+    console.error('[ERROR]', err.message);
+    process.exit(1);
+  });
+} else if (command === 'init-hooks') {
+  // Parse init-hooks arguments
+  let hookType = 'auto';
+  let hookMode = 'scan';
+
+  for (let i = 0; i < options.length; i++) {
+    if (options[i] === '--type' && options[i + 1]) {
+      hookType = options[i + 1];
+      i++;
+    } else if (options[i] === '--mode' && options[i + 1]) {
+      hookMode = options[i + 1];
+      i++;
+    }
+  }
+
+  initHooks(target, { type: hookType, mode: hookMode }).then(success => {
+    process.exit(success ? 0 : 1);
+  }).catch(err => {
+    console.error('[ERROR]', err.message);
+    process.exit(1);
+  });
 } else if (command === 'help') {
   console.log(helpText);
   process.exit(0);

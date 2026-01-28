@@ -685,6 +685,83 @@ test('SECURITY: validateWebhookUrl rejects private IPs (10.x)', () => {
 });
 
 // ============================================
+// DIFF MODULE TESTS
+// ============================================
+
+console.log('\n=== DIFF MODULE TESTS ===\n');
+
+test('DIFF: Module loads without error', () => {
+  const { diff, showRefs, isGitRepo } = require('../src/diff.js');
+  assert(typeof diff === 'function', 'diff should be a function');
+  assert(typeof showRefs === 'function', 'showRefs should be a function');
+  assert(typeof isGitRepo === 'function', 'isGitRepo should be a function');
+});
+
+test('DIFF: isGitRepo returns true for this repo', () => {
+  const { isGitRepo } = require('../src/diff.js');
+  const result = isGitRepo(path.join(__dirname, '..'));
+  assert(result === true, 'Should detect git repo');
+});
+
+test('DIFF: isGitRepo returns false for non-repo', () => {
+  const { isGitRepo } = require('../src/diff.js');
+  const result = isGitRepo('/tmp');
+  assert(result === false, 'Should not detect git repo in /tmp');
+});
+
+test('DIFF: getRecentRefs returns tags and commits', () => {
+  const { getRecentRefs } = require('../src/diff.js');
+  const refs = getRecentRefs(path.join(__dirname, '..'));
+  assert(refs.tags !== undefined, 'Should have tags array');
+  assert(refs.commits !== undefined, 'Should have commits array');
+  assert(refs.commits.length > 0, 'Should have at least one commit');
+});
+
+// ============================================
+// HOOKS INIT MODULE TESTS
+// ============================================
+
+console.log('\n=== HOOKS INIT MODULE TESTS ===\n');
+
+test('HOOKS: Module loads without error', () => {
+  const { initHooks, detectHookSystem } = require('../src/hooks-init.js');
+  assert(typeof initHooks === 'function', 'initHooks should be a function');
+  assert(typeof detectHookSystem === 'function', 'detectHookSystem should be a function');
+});
+
+test('HOOKS: detectHookSystem returns object with expected properties', () => {
+  const { detectHookSystem } = require('../src/hooks-init.js');
+  const result = detectHookSystem(path.join(__dirname, '..'));
+  assert(typeof result.husky === 'boolean', 'Should have husky property');
+  assert(typeof result.preCommit === 'boolean', 'Should have preCommit property');
+  assert(typeof result.gitHooks === 'boolean', 'Should have gitHooks property');
+});
+
+test('HOOKS: detectHookSystem detects git hooks directory', () => {
+  const { detectHookSystem } = require('../src/hooks-init.js');
+  const result = detectHookSystem(path.join(__dirname, '..'));
+  assert(result.gitHooks === true, 'Should detect .git/hooks directory');
+});
+
+// ============================================
+// CLI NEW COMMANDS TESTS
+// ============================================
+
+console.log('\n=== CLI NEW COMMANDS TESTS ===\n');
+
+test('CLI: diff command shows refs when no arg', () => {
+  const output = runCommand('diff');
+  assertIncludes(output, 'Available references', 'Should show available refs');
+  assertIncludes(output, 'Usage:', 'Should show usage');
+});
+
+test('CLI: init-hooks --help shows in help', () => {
+  const output = runCommand('--help');
+  assertIncludes(output, 'init-hooks', 'Should show init-hooks command');
+  assertIncludes(output, 'diff', 'Should show diff command');
+});
+
+// ============================================
 // RESULTS
 // ============================================
 

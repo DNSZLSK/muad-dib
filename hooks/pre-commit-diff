@@ -1,0 +1,22 @@
+#!/bin/sh
+# MUAD'DIB pre-commit hook with diff (only new threats)
+# This hook only blocks if NEW threats are introduced compared to the last commit
+# Install: cp hooks/pre-commit-diff .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+
+echo "[MUADDIB] Checking for new security threats..."
+
+# Run MUAD'DIB diff against last commit
+npx muaddib diff HEAD --fail-on high
+
+# Capture exit code
+EXIT_CODE=$?
+
+if [ $EXIT_CODE -ne 0 ]; then
+    echo ""
+    echo "[MUADDIB] Commit blocked: new security threats introduced!"
+    echo "[MUADDIB] Fix the new issues above or use --no-verify to bypass (not recommended)"
+    exit 1
+fi
+
+echo "[MUADDIB] No new threats introduced. Proceeding with commit."
+exit 0

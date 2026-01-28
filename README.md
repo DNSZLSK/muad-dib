@@ -204,6 +204,88 @@ muaddib sandbox lodash          # Safe package
 muaddib sandbox suspicious-pkg  # Analyze unknown package
 ```
 
+### Diff (compare versions)
+
+```bash
+muaddib diff <ref> [path]
+```
+
+Compare threats between the current version and a previous commit/tag. Shows only **NEW** threats introduced since the reference point.
+
+```bash
+muaddib diff HEAD~1             # Compare with previous commit
+muaddib diff v1.2.0             # Compare with tag
+muaddib diff main               # Compare with branch
+muaddib diff abc1234            # Compare with specific commit
+```
+
+Example output:
+```
+[MUADDIB DIFF] Comparing abc1234 -> def5678
+
+  Risk Score: 25 -> 45 (+20 worse)
+  Threats:    3 -> 5
+
+  NEW threats:     2
+  REMOVED threats: 0
+  Unchanged:       3
+
+  NEW THREATS (introduced since v1.2.0)
+  ─────────────────────────────────────
+  1. [HIGH] suspicious_dependency
+     Known malicious package detected
+     File: package.json
+```
+
+Use in CI to only fail on **new** threats, not existing technical debt:
+```yaml
+- run: muaddib diff ${{ github.event.pull_request.base.sha }} --fail-on high
+```
+
+### Pre-commit hooks
+
+```bash
+muaddib init-hooks [options]
+```
+
+Automatically scan before each commit. Supports multiple hook systems:
+
+```bash
+muaddib init-hooks                        # Auto-detect (husky/pre-commit/git)
+muaddib init-hooks --type husky           # Force husky
+muaddib init-hooks --type pre-commit      # Force pre-commit framework
+muaddib init-hooks --type git             # Force native git hooks
+muaddib init-hooks --mode diff            # Only block NEW threats
+```
+
+#### With pre-commit framework
+
+Add to `.pre-commit-config.yaml`:
+```yaml
+repos:
+  - repo: https://github.com/DNSZLSK/muad-dib
+    rev: v1.2.7
+    hooks:
+      - id: muaddib-scan        # Scan all threats
+      # - id: muaddib-diff      # Or: only new threats
+      # - id: muaddib-paranoid  # Or: ultra-strict mode
+```
+
+#### With husky
+
+```bash
+npx husky add .husky/pre-commit "npx muaddib scan . --fail-on high"
+# Or for diff mode:
+npx husky add .husky/pre-commit "npx muaddib diff HEAD --fail-on high"
+```
+
+#### Native git hooks
+
+```bash
+muaddib init-hooks --type git
+# Creates .git/hooks/pre-commit
+```
+
 ---
 
 ## Features

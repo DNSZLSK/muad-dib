@@ -204,6 +204,63 @@ muaddib sandbox lodash          # Package safe
 muaddib sandbox suspicious-pkg  # Analyser un package inconnu
 ```
 
+### Diff (comparer les versions)
+
+```bash
+muaddib diff <ref> [path]
+```
+
+Compare les menaces entre la version actuelle et un commit/tag precedent. Affiche uniquement les **NOUVELLES** menaces introduites depuis la reference.
+
+```bash
+muaddib diff HEAD~1             # Comparer avec le commit precedent
+muaddib diff v1.2.0             # Comparer avec un tag
+muaddib diff main               # Comparer avec une branche
+muaddib diff abc1234            # Comparer avec un commit specifique
+```
+
+Utilisez en CI pour ne bloquer que sur les **nouvelles** menaces :
+```yaml
+- run: muaddib diff ${{ github.event.pull_request.base.sha }} --fail-on high
+```
+
+### Hooks pre-commit
+
+```bash
+muaddib init-hooks [options]
+```
+
+Scanner automatiquement avant chaque commit. Supporte plusieurs systemes de hooks :
+
+```bash
+muaddib init-hooks                        # Auto-detect (husky/pre-commit/git)
+muaddib init-hooks --type husky           # Forcer husky
+muaddib init-hooks --type pre-commit      # Forcer pre-commit framework
+muaddib init-hooks --type git             # Forcer git hooks natifs
+muaddib init-hooks --mode diff            # Ne bloquer que les NOUVELLES menaces
+```
+
+#### Avec pre-commit framework
+
+Ajoutez a `.pre-commit-config.yaml`:
+```yaml
+repos:
+  - repo: https://github.com/DNSZLSK/muad-dib
+    rev: v1.2.7
+    hooks:
+      - id: muaddib-scan        # Scanner toutes les menaces
+      # - id: muaddib-diff      # Ou: seulement les nouvelles
+      # - id: muaddib-paranoid  # Ou: mode ultra-strict
+```
+
+#### Avec husky
+
+```bash
+npx husky add .husky/pre-commit "npx muaddib scan . --fail-on high"
+# Ou pour le mode diff:
+npx husky add .husky/pre-commit "npx muaddib diff HEAD --fail-on high"
+```
+
 ---
 
 ## Features

@@ -1,0 +1,22 @@
+#!/bin/sh
+# MUAD'DIB pre-commit hook
+# Install: cp hooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+# Or with husky: npx husky add .husky/pre-commit "npx muaddib scan . --fail-on high"
+
+echo "[MUADDIB] Running security scan before commit..."
+
+# Run MUAD'DIB scan
+npx muaddib scan . --fail-on high
+
+# Capture exit code
+EXIT_CODE=$?
+
+if [ $EXIT_CODE -ne 0 ]; then
+    echo ""
+    echo "[MUADDIB] Commit blocked: security threats detected!"
+    echo "[MUADDIB] Fix the issues above or use --no-verify to bypass (not recommended)"
+    exit 1
+fi
+
+echo "[MUADDIB] No threats detected. Proceeding with commit."
+exit 0

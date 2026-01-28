@@ -8,10 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `muaddib diff` command - compare threats between versions/commits
+- `muaddib init-hooks` command - setup git pre-commit hooks
+- Pre-commit framework integration (`.pre-commit-hooks.yaml`)
+- Husky integration with `hooks/husky.js`
+- Native git hooks support
 - GitHub Action published to Marketplace with branding
 - SARIF output support in GitHub Action
 - Coverage reporting with c8 and Codecov
 - OpenSSF Scorecard workflow
+
+### Changed
+- Interactive menu now includes diff and init-hooks options
 
 ## [1.2.6] - 2025-01-15
 

@@ -1,0 +1,41 @@
+# MUAD'DIB pre-commit hooks
+# https://pre-commit.com
+
+- id: muaddib-scan
+  name: MUAD'DIB Security Scan
+  description: Scan for npm supply-chain threats before commit
+  entry: muaddib scan
+  language: node
+  types: [javascript, json]
+  pass_filenames: false
+  args: ['--fail-on', 'high']
+  additional_dependencies: ['muaddib-scanner']
+
+- id: muaddib-scan-staged
+  name: MUAD'DIB Security Scan (staged files only)
+  description: Scan only staged files for npm supply-chain threats
+  entry: muaddib scan
+  language: node
+  types: [javascript, json]
+  pass_filenames: true
+  args: ['--fail-on', 'high']
+  additional_dependencies: ['muaddib-scanner']
+
+- id: muaddib-paranoid
+  name: MUAD'DIB Paranoid Scan
+  description: Ultra-strict security scan before commit
+  entry: muaddib scan
+  language: node
+  types: [javascript, json]
+  pass_filenames: false
+  args: ['--fail-on', 'medium', '--paranoid']
+  additional_dependencies: ['muaddib-scanner']
+
+- id: muaddib-diff
+  name: MUAD'DIB Diff Check
+  description: Check for new threats compared to last commit
+  entry: muaddib diff HEAD~1
+  language: node
+  pass_filenames: false
+  args: ['--fail-on', 'high']
+  additional_dependencies: ['muaddib-scanner']
