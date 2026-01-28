@@ -1,15 +1,16 @@
 const fs = require('fs');
+const { escapeHtml } = require('./utils.js');
 
 function generateHTML(results) {
   const { target, timestamp, threats, summary } = results;
 
   const threatRows = threats.map(t => `
-    <tr class="${t.severity.toLowerCase()}">
-      <td>${t.severity}</td>
-      <td>${t.type}</td>
-      <td>${t.message}</td>
-      <td>${t.file}</td>
-      <td>${t.playbook}</td>
+    <tr class="${escapeHtml(t.severity).toLowerCase()}">
+      <td>${escapeHtml(t.severity)}</td>
+      <td>${escapeHtml(t.type)}</td>
+      <td>${escapeHtml(t.message)}</td>
+      <td>${escapeHtml(t.file)}</td>
+      <td>${escapeHtml(t.playbook)}</td>
     </tr>
   `).join('');
 
@@ -133,8 +134,8 @@ function generateHTML(results) {
     ` : '<div class="ok">Aucune menace detectee</div>'}
 
     <div class="meta">
-      <p>Cible: ${target}</p>
-      <p>Date: ${timestamp}</p>
+      <p>Cible: ${escapeHtml(target)}</p>
+      <p>Date: ${escapeHtml(timestamp)}</p>
       <p>Genere par MUAD'DIB</p>
     </div>
   </div>

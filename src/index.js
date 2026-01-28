@@ -70,34 +70,40 @@ function scanParanoid(targetPath) {
 }
 
 async function run(targetPath, options = {}) {
-  const threats = [];
+  // Execution parallele de tous les scanners independants
+  const [
+    packageThreats,
+    shellThreats,
+    astThreats,
+    obfuscationThreats,
+    dependencyThreats,
+    hashThreats,
+    dataflowThreats,
+    typosquatThreats,
+    ghActionsThreats
+  ] = await Promise.all([
+    scanPackageJson(targetPath),
+    scanShellScripts(targetPath),
+    analyzeAST(targetPath),
+    Promise.resolve(detectObfuscation(targetPath)),
+    scanDependencies(targetPath),
+    scanHashes(targetPath),
+    analyzeDataFlow(targetPath),
+    scanTyposquatting(targetPath),
+    Promise.resolve(scanGitHubActions(targetPath))
+  ]);
 
-  const packageThreats = await scanPackageJson(targetPath);
-  threats.push(...packageThreats);
-
-  const shellThreats = await scanShellScripts(targetPath);
-  threats.push(...shellThreats);
-
-  const astThreats = await analyzeAST(targetPath);
-  threats.push(...astThreats);
-
-  const obfuscationThreats = detectObfuscation(targetPath);
-  threats.push(...obfuscationThreats);
-
-  const dependencyThreats = await scanDependencies(targetPath);
-  threats.push(...dependencyThreats);
-
-  const hashThreats = await scanHashes(targetPath);
-  threats.push(...hashThreats);
-
-  const dataflowThreats = await analyzeDataFlow(targetPath);
-  threats.push(...dataflowThreats);
-
-  const typosquatThreats = await scanTyposquatting(targetPath);
-  threats.push(...typosquatThreats);
-
-  const ghActionsThreats = scanGitHubActions(targetPath);
-  threats.push(...ghActionsThreats);
+  const threats = [
+    ...packageThreats,
+    ...shellThreats,
+    ...astThreats,
+    ...obfuscationThreats,
+    ...dependencyThreats,
+    ...hashThreats,
+    ...dataflowThreats,
+    ...typosquatThreats,
+    ...ghActionsThreats
+  ];
 
   // Paranoid mode
   if (options.paranoid) {

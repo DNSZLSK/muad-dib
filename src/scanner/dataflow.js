@@ -2,12 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const acorn = require('acorn');
 const walk = require('acorn-walk');
-
-const EXCLUDED_DIRS = [
-  'test', 'tests', 'node_modules', '.git', 'src', 'vscode-extension',
-  'scripts', 'bin', 'tools', 'build', 'dist', 'fixtures', 'examples',
-  '__tests__', '__mocks__', 'benchmark', 'benchmarks', 'docs', 'doc'
-];
+const { isDevFile, findJsFiles } = require('../utils.js');
 
 async function analyzeDataFlow(targetPath) {
   const threats = [];
@@ -15,40 +10,17 @@ async function analyzeDataFlow(targetPath) {
 
   for (const file of files) {
     const relativePath = path.relative(targetPath, file).replace(/\\/g, '/');
-    
+
     if (isDevFile(relativePath)) {
       continue;
     }
-    
+
     const content = fs.readFileSync(file, 'utf8');
     const fileThreats = analyzeFile(content, file, targetPath);
     threats.push(...fileThreats);
   }
 
   return threats;
-}
-
-function isDevFile(relativePath) {
-  const devPatterns = [
-    /^scripts\//,
-    /^bin\//,
-    /^tools\//,
-    /^build\//,
-    /^fixtures\//,
-    /^examples\//,
-    /^__tests__\//,
-    /^__mocks__\//,
-    /^benchmark/,
-    /^docs?\//,
-    /^compiler\//,
-    /^packages\/.*\/scripts\//,
-    /\.test\.js$/,
-    /\.spec\.js$/,
-    /test\.js$/,
-    /spec\.js$/
-  ];
-  
-  return devPatterns.some(pattern => pattern.test(relativePath));
 }
 
 function analyzeFile(content, filePath, basePath) {
@@ -164,32 +136,6 @@ function isCredentialPath(arg, content) {
 function isSensitiveEnv(name) {
   const sensitive = ['TOKEN', 'SECRET', 'KEY', 'PASSWORD', 'CREDENTIAL', 'AUTH', 'NPM', 'AWS', 'AZURE', 'GCP'];
   return sensitive.some(s => name.toUpperCase().includes(s));
-}
-
-function findJsFiles(dir, results = []) {
-  if (!fs.existsSync(dir)) return results;
-
-  const items = fs.readdirSync(dir);
-
-  for (const item of items) {
-    if (EXCLUDED_DIRS.includes(item)) continue;
-
-    const fullPath = path.join(dir, item);
-    
-    try {
-      const stat = fs.statSync(fullPath);
-      
-      if (stat.isDirectory()) {
-        findJsFiles(fullPath, results);
-      } else if (item.endsWith('.js')) {
-        results.push(fullPath);
-      }
-    } catch {
-      // Silently ignore permission errors
-    }
-  }
-
-  return results;
 }
 
 module.exports = { analyzeDataFlow };

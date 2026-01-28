@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const acorn = require('acorn');
 const walk = require('acorn-walk');
+const { isDevFile, findJsFiles } = require('../utils.js');
 
 const EXCLUDED_FILES = [
   'src/scanner/ast.js',
@@ -9,12 +10,6 @@ const EXCLUDED_FILES = [
   'src/scanner/package.js',
   'src/ioc/feeds.js',
   'src/response/playbooks.js'
-];
-
-const EXCLUDED_DIRS = [
-  'test', 'tests', 'node_modules', '.git', 'src', 'vscode-extension',
-  'scripts', 'bin', 'tools', 'build', 'dist', 'fixtures', 'examples',
-  '__tests__', '__mocks__', 'benchmark', 'benchmarks', 'docs', 'doc'
 ];
 
 const DANGEROUS_CALLS = [
@@ -61,26 +56,6 @@ async function analyzeAST(targetPath) {
   return threats;
 }
 
-function isDevFile(relativePath) {
-  const devPatterns = [
-    /^scripts\//,
-    /^bin\//,
-    /^tools\//,
-    /^build\//,
-    /^fixtures\//,
-    /^examples\//,
-    /^__tests__\//,
-    /^__mocks__\//,
-    /^benchmark/,
-    /^docs?\//,
-    /\.test\.js$/,
-    /\.spec\.js$/,
-    /test\.js$/,
-    /spec\.js$/
-  ];
-  
-  return devPatterns.some(pattern => pattern.test(relativePath));
-}
 
 function analyzeFile(content, filePath, basePath) {
   const threats = [];
@@ -178,29 +153,6 @@ function getCallName(node) {
     return node.callee.property.name;
   }
   return '';
-}
-
-function findJsFiles(dir) {
-  const results = [];
-  
-  if (!fs.existsSync(dir)) return results;
-  
-  const items = fs.readdirSync(dir);
-  
-  for (const item of items) {
-    if (EXCLUDED_DIRS.includes(item)) continue;
-    
-    const fullPath = path.join(dir, item);
-    const stat = fs.statSync(fullPath);
-    
-    if (stat.isDirectory()) {
-      results.push(...findJsFiles(fullPath));
-    } else if (item.endsWith('.js')) {
-      results.push(fullPath);
-    }
-  }
-  
-  return results;
 }
 
 module.exports = { analyzeAST };
