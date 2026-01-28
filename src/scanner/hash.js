@@ -3,17 +3,17 @@ const path = require('path');
 const nodeCrypto = require('crypto');
 const { loadCachedIOCs } = require('../ioc/updater.js');
 
-// Cache des hashes: filePath -> { hash, mtime }
+// Hash cache: filePath -> { hash, mtime }
 const hashCache = new Map();
 
-// Limite de profondeur pour eviter recursion infinie
+// Depth limit to avoid infinite recursion
 const MAX_DEPTH = 50;
 
 async function scanHashes(targetPath) {
   const threats = [];
   const iocs = loadCachedIOCs();
 
-  // Utilise Set pour lookup O(1) si disponible, sinon cree un Set
+  // Use Set for O(1) lookup if available, otherwise create a Set
   const knownHashes = iocs.hashesSet instanceof Set
     ? iocs.hashesSet
     : new Set(iocs.hashes || []);
@@ -28,7 +28,7 @@ async function scanHashes(targetPath) {
     return threats;
   }
 
-  // Set pour tracker les inodes visites (evite boucles symlinks)
+  // Set to track visited inodes (avoids symlink loops)
   const visitedInodes = new Set();
 
   const jsFiles = findAllJsFiles(nodeModulesPath, [], visitedInodes, 0);
@@ -40,7 +40,7 @@ async function scanHashes(targetPath) {
       threats.push({
         type: 'known_malicious_hash',
         severity: 'CRITICAL',
-        message: `Hash malveillant detecte: ${hash.substring(0, 16)}...`,
+        message: `Malicious hash detected: ${hash.substring(0, 16)}...`,
         file: path.relative(targetPath, file)
       });
     }
@@ -50,26 +50,26 @@ async function scanHashes(targetPath) {
 }
 
 /**
- * Calcule le hash SHA256 d'un fichier avec mise en cache
- * Le cache est invalide si le mtime du fichier change
- * @param {string} filePath - Chemin du fichier
- * @returns {string|null} Hash SHA256 ou null en cas d'erreur
+ * Computes the SHA256 hash of a file with caching
+ * Cache is invalidated if the file mtime changes
+ * @param {string} filePath - File path
+ * @returns {string|null} SHA256 hash or null on error
  */
 function computeHashCached(filePath) {
   try {
     const stat = fs.statSync(filePath);
     const mtime = stat.mtimeMs;
 
-    // Verifier le cache
+    // Check the cache
     const cached = hashCache.get(filePath);
     if (cached && cached.mtime === mtime) {
       return cached.hash;
     }
 
-    // Calculer le hash
+    // Compute the hash
     const hash = computeHash(filePath);
 
-    // Mettre en cache
+    // Store in cache
     hashCache.set(filePath, { hash, mtime });
 
     return hash;
@@ -79,9 +79,9 @@ function computeHashCached(filePath) {
 }
 
 /**
- * Calcule le hash SHA256 d'un fichier
- * @param {string} filePath - Chemin du fichier
- * @returns {string} Hash SHA256
+ * Computes the SHA256 hash of a file
+ * @param {string} filePath - File path
+ * @returns {string} SHA256 hash
  */
 function computeHash(filePath) {
   const content = fs.readFileSync(filePath);
@@ -89,15 +89,15 @@ function computeHash(filePath) {
 }
 
 /**
- * Recherche recursive de fichiers JS avec protection contre les symlinks
- * @param {string} dir - Repertoire a scanner
- * @param {string[]} results - Tableau accumulateur
- * @param {Set<number>} visitedInodes - Inodes deja visites
- * @param {number} depth - Profondeur actuelle
- * @returns {string[]} Liste des fichiers .js
+ * Recursive search for JS files with symlink protection
+ * @param {string} dir - Directory to scan
+ * @param {string[]} results - Accumulator array
+ * @param {Set<number>} visitedInodes - Already visited inodes
+ * @param {number} depth - Current depth
+ * @returns {string[]} List of .js files
  */
 function findAllJsFiles(dir, results = [], visitedInodes = new Set(), depth = 0) {
-  // Protection contre recursion infinie
+  // Protection against infinite recursion
   if (depth > MAX_DEPTH) {
     return results;
   }
@@ -111,22 +111,22 @@ function findAllJsFiles(dir, results = [], visitedInodes = new Set(), depth = 0)
       const fullPath = path.join(dir, item);
 
       try {
-        // Utiliser lstatSync pour detecter les symlinks SANS les suivre
+        // Use lstatSync to detect symlinks WITHOUT following them
         const lstat = fs.lstatSync(fullPath);
 
-        // Verifier si c'est un symlink
+        // Check if it's a symlink
         if (lstat.isSymbolicLink()) {
-          // Resoudre le symlink et verifier la cible
+          // Resolve the symlink and check the target
           try {
             const realPath = fs.realpathSync(fullPath);
             const realStat = fs.statSync(realPath);
 
-            // Verifier si on a deja visite cet inode (evite boucles)
+            // Check if we already visited this inode (avoids loops)
             if (visitedInodes.has(realStat.ino)) {
-              continue; // Boucle detectee, skip
+              continue; // Loop detected, skip
             }
 
-            // Si c'est un repertoire, le parcourir
+            // If it's a directory, traverse it
             if (realStat.isDirectory()) {
               visitedInodes.add(realStat.ino);
               findAllJsFiles(realPath, results, visitedInodes, depth + 1);
@@ -135,12 +135,12 @@ function findAllJsFiles(dir, results = [], visitedInodes = new Set(), depth = 0)
               results.push(realPath);
             }
           } catch {
-            // Symlink casse ou inaccessible, ignorer
+            // Broken or inaccessible symlink, ignore
           }
           continue;
         }
 
-        // Marquer l'inode comme visite
+        // Mark the inode as visited
         visitedInodes.add(lstat.ino);
 
         if (lstat.isDirectory()) {
@@ -149,25 +149,25 @@ function findAllJsFiles(dir, results = [], visitedInodes = new Set(), depth = 0)
           results.push(fullPath);
         }
       } catch {
-        // Ignore les erreurs de permission
+        // Ignore permission errors
       }
     }
   } catch {
-    // Ignore les erreurs de lecture du repertoire
+    // Ignore directory read errors
   }
 
   return results;
 }
 
 /**
- * Vide le cache des hashes (utile pour les tests)
+ * Clears the hash cache (useful for tests)
  */
 function clearHashCache() {
   hashCache.clear();
 }
 
 /**
- * Retourne la taille du cache (utile pour debug/monitoring)
+ * Returns the cache size (useful for debug/monitoring)
  * @returns {number}
  */
 function getHashCacheSize() {

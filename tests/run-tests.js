@@ -58,418 +58,418 @@ function runCommand(cmd) {
 }
 
 // ============================================
-// TESTS UNITAIRES - DETECTION AST
+// UNIT TESTS - AST DETECTION
 // ============================================
 
-console.log('\n=== TESTS AST ===\n');
+console.log('\n=== AST TESTS ===\n');
 
-test('AST: Detecte acces .npmrc', () => {
+test('AST: Detects .npmrc access', () => {
   const output = runScan(path.join(TESTS_DIR, 'ast'));
-  assertIncludes(output, '.npmrc', 'Devrait detecter .npmrc');
+  assertIncludes(output, '.npmrc', 'Should detect .npmrc');
 });
 
-test('AST: Detecte acces .ssh', () => {
+test('AST: Detects .ssh access', () => {
   const output = runScan(path.join(TESTS_DIR, 'ast'));
-  assertIncludes(output, '.ssh', 'Devrait detecter .ssh');
+  assertIncludes(output, '.ssh', 'Should detect .ssh');
 });
 
-test('AST: Detecte GITHUB_TOKEN', () => {
+test('AST: Detects GITHUB_TOKEN', () => {
   const output = runScan(path.join(TESTS_DIR, 'ast'));
-  assertIncludes(output, 'GITHUB_TOKEN', 'Devrait detecter GITHUB_TOKEN');
+  assertIncludes(output, 'GITHUB_TOKEN', 'Should detect GITHUB_TOKEN');
 });
 
-test('AST: Detecte NPM_TOKEN', () => {
+test('AST: Detects NPM_TOKEN', () => {
   const output = runScan(path.join(TESTS_DIR, 'ast'));
-  assertIncludes(output, 'NPM_TOKEN', 'Devrait detecter NPM_TOKEN');
+  assertIncludes(output, 'NPM_TOKEN', 'Should detect NPM_TOKEN');
 });
 
-test('AST: Detecte AWS_SECRET', () => {
+test('AST: Detects AWS_SECRET', () => {
   const output = runScan(path.join(TESTS_DIR, 'ast'));
-  assertIncludes(output, 'AWS_SECRET', 'Devrait detecter AWS_SECRET');
+  assertIncludes(output, 'AWS_SECRET', 'Should detect AWS_SECRET');
 });
 
-test('AST: Detecte eval()', () => {
+test('AST: Detects eval()', () => {
   const output = runScan(path.join(TESTS_DIR, 'ast'));
-  assertIncludes(output, 'eval', 'Devrait detecter eval');
+  assertIncludes(output, 'eval', 'Should detect eval');
 });
 
-test('AST: Detecte exec()', () => {
+test('AST: Detects exec()', () => {
   const output = runScan(path.join(TESTS_DIR, 'ast'));
-  assertIncludes(output, 'exec', 'Devrait detecter exec');
+  assertIncludes(output, 'exec', 'Should detect exec');
 });
 
-test('AST: Detecte new Function()', () => {
+test('AST: Detects new Function()', () => {
   const output = runScan(path.join(TESTS_DIR, 'ast'));
-  assertIncludes(output, 'Function', 'Devrait detecter Function');
+  assertIncludes(output, 'Function', 'Should detect Function');
 });
 
 // ============================================
-// TESTS UNITAIRES - DETECTION SHELL
+// UNIT TESTS - SHELL DETECTION
 // ============================================
 
-console.log('\n=== TESTS SHELL ===\n');
+console.log('\n=== SHELL TESTS ===\n');
 
-test('SHELL: Detecte curl | sh', () => {
+test('SHELL: Detects curl | sh', () => {
   const output = runScan(path.join(TESTS_DIR, 'shell'));
-  assertIncludes(output, 'curl', 'Devrait detecter curl | sh');
+  assertIncludes(output, 'curl', 'Should detect curl | sh');
 });
 
-test('SHELL: Detecte wget && chmod +x', () => {
+test('SHELL: Detects wget && chmod +x', () => {
   const output = runScan(path.join(TESTS_DIR, 'shell'));
-  assertIncludes(output, 'wget', 'Devrait detecter wget');
+  assertIncludes(output, 'wget', 'Should detect wget');
 });
 
-test('SHELL: Detecte reverse shell', () => {
+test('SHELL: Detects reverse shell', () => {
   const output = runScan(path.join(TESTS_DIR, 'shell'));
-  assertIncludes(output, 'reverse', 'Devrait detecter reverse shell');
+  assertIncludes(output, 'reverse', 'Should detect reverse shell');
 });
 
-test('SHELL: Detecte rm -rf $HOME', () => {
+test('SHELL: Detects rm -rf $HOME', () => {
   const output = runScan(path.join(TESTS_DIR, 'shell'));
-  assertIncludes(output, 'home', 'Devrait detecter suppression home');
+  assertIncludes(output, 'home', 'Should detect home deletion');
 });
 
 // ============================================
-// TESTS UNITAIRES - DETECTION OBFUSCATION
+// UNIT TESTS - OBFUSCATION DETECTION
 // ============================================
 
-console.log('\n=== TESTS OBFUSCATION ===\n');
+console.log('\n=== OBFUSCATION TESTS ===\n');
 
-test('OBFUSCATION: Detecte hex escapes massifs', () => {
+test('OBFUSCATION: Detects massive hex escapes', () => {
   const output = runScan(path.join(TESTS_DIR, 'obfuscation'));
-  assertIncludes(output, 'obfusc', 'Devrait detecter obfuscation');
+  assertIncludes(output, 'obfusc', 'Should detect obfuscation');
 });
 
-test('OBFUSCATION: Detecte variables _0x', () => {
+test('OBFUSCATION: Detects _0x variables', () => {
   const output = runScan(path.join(TESTS_DIR, 'obfuscation'));
-  assertIncludes(output, 'obfusc', 'Devrait detecter variables _0x');
+  assertIncludes(output, 'obfusc', 'Should detect _0x variables');
 });
 
 // ============================================
-// TESTS UNITAIRES - DETECTION DATAFLOW
+// UNIT TESTS - DATAFLOW DETECTION
 // ============================================
 
-console.log('\n=== TESTS DATAFLOW ===\n');
+console.log('\n=== DATAFLOW TESTS ===\n');
 
-test('DATAFLOW: Detecte credential read + network send', () => {
+test('DATAFLOW: Detects credential read + network send', () => {
   const output = runScan(path.join(TESTS_DIR, 'dataflow'));
-  assertIncludes(output, 'Flux suspect', 'Devrait detecter flux suspect');
+  assertIncludes(output, 'Suspicious flow', 'Should detect suspicious flow');
 });
 
-test('DATAFLOW: Detecte env read + fetch', () => {
+test('DATAFLOW: Detects env read + fetch', () => {
   const output = runScan(path.join(TESTS_DIR, 'dataflow'));
-  assertIncludes(output, 'CRITICAL', 'Devrait etre CRITICAL');
+  assertIncludes(output, 'CRITICAL', 'Should be CRITICAL');
 });
 
 // ============================================
-// TESTS UNITAIRES - DETECTION PACKAGE.JSON
+// UNIT TESTS - PACKAGE.JSON DETECTION
 // ============================================
 
-console.log('\n=== TESTS PACKAGE.JSON ===\n');
+console.log('\n=== PACKAGE.JSON TESTS ===\n');
 
-test('PACKAGE: Detecte preinstall suspect', () => {
+test('PACKAGE: Detects suspicious preinstall', () => {
   const output = runScan(path.join(TESTS_DIR, 'package'));
-  assertIncludes(output, 'preinstall', 'Devrait detecter preinstall');
+  assertIncludes(output, 'preinstall', 'Should detect preinstall');
 });
 
-test('PACKAGE: Detecte postinstall suspect', () => {
+test('PACKAGE: Detects suspicious postinstall', () => {
   const output = runScan(path.join(TESTS_DIR, 'package'));
-  assertIncludes(output, 'postinstall', 'Devrait detecter postinstall');
+  assertIncludes(output, 'postinstall', 'Should detect postinstall');
 });
 
 // ============================================
-// TESTS UNITAIRES - DETECTION MARQUEURS
+// UNIT TESTS - MARKER DETECTION
 // ============================================
 
-console.log('\n=== TESTS MARQUEURS ===\n');
+console.log('\n=== MARKER TESTS ===\n');
 
-test('MARQUEURS: Detecte Shai-Hulud', () => {
+test('MARKERS: Detects Shai-Hulud', () => {
   const output = runScan(path.join(TESTS_DIR, 'markers'));
-  assertIncludes(output, 'Shai-Hulud', 'Devrait detecter marqueur Shai-Hulud');
+  assertIncludes(output, 'Shai-Hulud', 'Should detect Shai-Hulud marker');
 });
 
-test('MARQUEURS: Detecte The Second Coming', () => {
+test('MARKERS: Detects The Second Coming', () => {
   const output = runScan(path.join(TESTS_DIR, 'markers'));
-  assertIncludes(output, 'Second Coming', 'Devrait detecter marqueur The Second Coming');
+  assertIncludes(output, 'Second Coming', 'Should detect The Second Coming marker');
 });
 
 // ============================================
-// TESTS UNITAIRES - DETECTION TYPOSQUATTING
+// UNIT TESTS - TYPOSQUATTING DETECTION
 // ============================================
 
-console.log('\n=== TESTS TYPOSQUATTING ===\n');
+console.log('\n=== TYPOSQUATTING TESTS ===\n');
 
-test('TYPOSQUAT: Detecte lodahs (lodash)', () => {
+test('TYPOSQUAT: Detects lodahs (lodash)', () => {
   const output = runScan(path.join(TESTS_DIR, 'typosquat'));
-  assertIncludes(output, 'lodahs', 'Devrait detecter lodahs');
+  assertIncludes(output, 'lodahs', 'Should detect lodahs');
 });
 
-test('TYPOSQUAT: Detecte axois (axios)', () => {
+test('TYPOSQUAT: Detects axois (axios)', () => {
   const output = runScan(path.join(TESTS_DIR, 'typosquat'));
-  assertIncludes(output, 'axois', 'Devrait detecter axois');
+  assertIncludes(output, 'axois', 'Should detect axois');
 });
 
-test('TYPOSQUAT: Detecte expres (express)', () => {
+test('TYPOSQUAT: Detects expres (express)', () => {
   const output = runScan(path.join(TESTS_DIR, 'typosquat'));
-  assertIncludes(output, 'expres', 'Devrait detecter expres');
+  assertIncludes(output, 'expres', 'Should detect expres');
 });
 
 test('TYPOSQUAT: Severity HIGH', () => {
   const output = runScan(path.join(TESTS_DIR, 'typosquat'));
-  assertIncludes(output, 'HIGH', 'Devrait etre HIGH');
+  assertIncludes(output, 'HIGH', 'Should be HIGH');
 });
 
 // ============================================
-// TESTS INTEGRATION - CLI
+// INTEGRATION TESTS - CLI
 // ============================================
 
-console.log('\n=== TESTS CLI ===\n');
+console.log('\n=== CLI TESTS ===\n');
 
-test('CLI: --help affiche usage', () => {
+test('CLI: --help displays usage', () => {
   const output = runCommand('--help');
-  assertIncludes(output, 'Usage', 'Devrait afficher usage');
+  assertIncludes(output, 'Usage', 'Should display usage');
 });
 
-test('CLI: --json retourne JSON valide', () => {
+test('CLI: --json returns valid JSON', () => {
   const output = runScan(path.join(TESTS_DIR, 'ast'), '--json');
   try {
     JSON.parse(output);
   } catch (e) {
-    throw new Error('Output JSON invalide');
+    throw new Error('Invalid JSON output');
   }
 });
 
-test('CLI: --sarif genere fichier SARIF', () => {
+test('CLI: --sarif generates SARIF file', () => {
   const sarifPath = path.join(__dirname, 'test-output.sarif');
   runScan(path.join(TESTS_DIR, 'ast'), `--sarif "${sarifPath}"`);
-  assert(fs.existsSync(sarifPath), 'Fichier SARIF non genere');
+  assert(fs.existsSync(sarifPath), 'SARIF file not generated');
   const content = fs.readFileSync(sarifPath, 'utf8');
   const sarif = JSON.parse(content);
-  assert(sarif.version === '2.1.0', 'Version SARIF incorrecte');
-  assert(sarif.runs && sarif.runs.length > 0, 'SARIF runs manquant');
+  assert(sarif.version === '2.1.0', 'Incorrect SARIF version');
+  assert(sarif.runs && sarif.runs.length > 0, 'SARIF runs missing');
   fs.unlinkSync(sarifPath);
 });
 
-test('CLI: --html genere fichier HTML', () => {
+test('CLI: --html generates HTML file', () => {
   const htmlPath = path.join(__dirname, 'test-output.html');
   runScan(path.join(TESTS_DIR, 'ast'), `--html "${htmlPath}"`);
-  assert(fs.existsSync(htmlPath), 'Fichier HTML non genere');
+  assert(fs.existsSync(htmlPath), 'HTML file not generated');
   const content = fs.readFileSync(htmlPath, 'utf8');
-  assertIncludes(content, 'MUAD', 'HTML devrait contenir MUAD');
-  assertIncludes(content, '<table>', 'HTML devrait contenir table');
+  assertIncludes(content, 'MUAD', 'HTML should contain MUAD');
+  assertIncludes(content, '<table>', 'HTML should contain table');
   fs.unlinkSync(htmlPath);
 });
 
-test('CLI: --explain affiche details', () => {
+test('CLI: --explain displays details', () => {
   const output = runScan(path.join(TESTS_DIR, 'ast'), '--explain');
-  assertIncludes(output, 'Rule ID', 'Devrait afficher Rule ID');
-  assertIncludes(output, 'MITRE', 'Devrait afficher MITRE');
-  assertIncludes(output, 'References', 'Devrait afficher References');
-  assertIncludes(output, 'Playbook', 'Devrait afficher Playbook');
+  assertIncludes(output, 'Rule ID', 'Should display Rule ID');
+  assertIncludes(output, 'MITRE', 'Should display MITRE');
+  assertIncludes(output, 'References', 'Should display References');
+  assertIncludes(output, 'Playbook', 'Should display Playbook');
 });
 
 test('CLI: --fail-on critical exit code correct', () => {
   try {
     execSync(`node "${BIN}" scan "${path.join(TESTS_DIR, 'dataflow')}" --fail-on critical`, { encoding: 'utf8' });
   } catch (e) {
-    assert(e.status === 1, 'Exit code devrait etre 1 pour 1 CRITICAL');
+    assert(e.status === 1, 'Exit code should be 1 for 1 CRITICAL');
     return;
   }
-  throw new Error('Devrait avoir exit code non-zero');
+  throw new Error('Should have non-zero exit code');
 });
 
 test('CLI: --fail-on high exit code correct', () => {
   try {
     execSync(`node "${BIN}" scan "${path.join(TESTS_DIR, 'ast')}" --fail-on high`, { encoding: 'utf8' });
   } catch (e) {
-    assert(e.status > 0, 'Exit code devrait etre > 0');
+    assert(e.status > 0, 'Exit code should be > 0');
     return;
   }
-  throw new Error('Devrait avoir exit code non-zero');
+  throw new Error('Should have non-zero exit code');
 });
 
 // ============================================
-// TESTS INTEGRATION - UPDATE
+// INTEGRATION TESTS - UPDATE
 // ============================================
 
-console.log('\n=== TESTS UPDATE ===\n');
+console.log('\n=== UPDATE TESTS ===\n');
 
-test('UPDATE: Telecharge et cache IOCs', () => {
+test('UPDATE: Downloads and caches IOCs', () => {
   const output = runCommand('update');
-  assertIncludes(output, 'IOCs sauvegardes', 'Devrait sauvegarder IOCs');
-  assertIncludes(output, 'packages malveillants', 'Devrait afficher nombre packages');
+  assertIncludes(output, 'IOCs saved', 'Should save IOCs');
+  assertIncludes(output, 'malicious packages', 'Should display package count');
 });
 
 // ============================================
-// TESTS FAUX POSITIFS
+// FALSE POSITIVES TESTS
 // ============================================
 
-console.log('\n=== TESTS FAUX POSITIFS ===\n');
+console.log('\n=== FALSE POSITIVES TESTS ===\n');
 
-test('FAUX POSITIFS: Projet propre = aucune menace', () => {
+test('FALSE POSITIVES: Clean project = no threats', () => {
   const output = runScan(path.join(TESTS_DIR, 'clean'));
-  assertIncludes(output, 'Aucune menace', 'Projet propre ne devrait pas avoir de menaces');
+  assertIncludes(output, 'No threats detected', 'Clean project should have no threats');
 });
 
-test('FAUX POSITIFS: Commentaires ignores', () => {
+test('FALSE POSITIVES: Comments ignored', () => {
   const output = runScan(path.join(TESTS_DIR, 'clean'));
-  assertNotIncludes(output, 'CRITICAL', 'Commentaires ne devraient pas declencher');
+  assertNotIncludes(output, 'CRITICAL', 'Comments should not trigger');
 });
 
 // ============================================
-// TESTS EDGE CASES
+// EDGE CASES TESTS
 // ============================================
 
-console.log('\n=== TESTS EDGE CASES ===\n');
+console.log('\n=== EDGE CASES TESTS ===\n');
 
-test('EDGE: Fichier vide ne crash pas', () => {
+test('EDGE: Empty file does not crash', () => {
   const output = runScan(path.join(TESTS_DIR, 'edge', 'empty'));
-  assert(output !== undefined, 'Ne devrait pas crasher sur fichier vide');
+  assert(output !== undefined, 'Should not crash on empty file');
 });
 
-test('EDGE: Fichier non-JS ignore', () => {
+test('EDGE: Non-JS file ignored', () => {
   const output = runScan(path.join(TESTS_DIR, 'edge', 'non-js'));
-  assertIncludes(output, 'Aucune menace', 'Fichiers non-JS ignores');
+  assertIncludes(output, 'No threats detected', 'Non-JS files should be ignored');
 });
 
-test('EDGE: Syntaxe JS invalide ne crash pas', () => {
+test('EDGE: Invalid JS syntax does not crash', () => {
   const output = runScan(path.join(TESTS_DIR, 'edge', 'invalid-syntax'));
-  assert(output !== undefined, 'Ne devrait pas crasher sur syntaxe invalide');
+  assert(output !== undefined, 'Should not crash on invalid syntax');
 });
 
-test('EDGE: Tres gros fichier ne timeout pas', () => {
+test('EDGE: Very large file does not timeout', () => {
   const start = Date.now();
   runScan(path.join(TESTS_DIR, 'edge', 'large-file'));
   const duration = Date.now() - start;
-  assert(duration < 30000, 'Ne devrait pas prendre plus de 30s');
+  assert(duration < 30000, 'Should not take more than 30s');
 });
 
 // ============================================
-// TESTS REGLES MITRE
+// MITRE RULES TESTS
 // ============================================
 
-console.log('\n=== TESTS MITRE ===\n');
+console.log('\n=== MITRE TESTS ===\n');
 
 test('MITRE: T1552.001 - Credentials in Files', () => {
   const output = runScan(path.join(TESTS_DIR, 'ast'), '--explain');
-  assertIncludes(output, 'T1552.001', 'Devrait mapper T1552.001');
+  assertIncludes(output, 'T1552.001', 'Should map T1552.001');
 });
 
 test('MITRE: T1059 - Command Execution', () => {
   const output = runScan(path.join(TESTS_DIR, 'ast'), '--explain');
-  assertIncludes(output, 'T1059', 'Devrait mapper T1059');
+  assertIncludes(output, 'T1059', 'Should map T1059');
 });
 
 test('MITRE: T1041 - Exfiltration', () => {
   const output = runScan(path.join(TESTS_DIR, 'dataflow'), '--explain');
-  assertIncludes(output, 'T1041', 'Devrait mapper T1041');
+  assertIncludes(output, 'T1041', 'Should map T1041');
 });
 
 // ============================================
-// TESTS WHITELIST / REHABILITATED PACKAGES
+// WHITELIST / REHABILITATED PACKAGES TESTS
 // ============================================
 
-console.log('\n=== TESTS WHITELIST ===\n');
+console.log('\n=== WHITELIST TESTS ===\n');
 
-test('WHITELIST: chalk est dans REHABILITATED_PACKAGES', () => {
+test('WHITELIST: chalk is in REHABILITATED_PACKAGES', () => {
   const { REHABILITATED_PACKAGES } = require('../src/safe-install.js');
-  assert(REHABILITATED_PACKAGES['chalk'], 'chalk devrait etre dans REHABILITATED_PACKAGES');
-  assert(REHABILITATED_PACKAGES['chalk'].safe === true, 'chalk.safe devrait etre true');
+  assert(REHABILITATED_PACKAGES['chalk'], 'chalk should be in REHABILITATED_PACKAGES');
+  assert(REHABILITATED_PACKAGES['chalk'].safe === true, 'chalk.safe should be true');
 });
 
-test('WHITELIST: debug est dans REHABILITATED_PACKAGES', () => {
+test('WHITELIST: debug is in REHABILITATED_PACKAGES', () => {
   const { REHABILITATED_PACKAGES } = require('../src/safe-install.js');
-  assert(REHABILITATED_PACKAGES['debug'], 'debug devrait etre dans REHABILITATED_PACKAGES');
-  assert(REHABILITATED_PACKAGES['debug'].safe === true, 'debug.safe devrait etre true');
+  assert(REHABILITATED_PACKAGES['debug'], 'debug should be in REHABILITATED_PACKAGES');
+  assert(REHABILITATED_PACKAGES['debug'].safe === true, 'debug.safe should be true');
 });
 
-test('WHITELIST: ua-parser-js a des versions compromises specifiques', () => {
+test('WHITELIST: ua-parser-js has specific compromised versions', () => {
   const { REHABILITATED_PACKAGES } = require('../src/safe-install.js');
   const uap = REHABILITATED_PACKAGES['ua-parser-js'];
-  assert(uap, 'ua-parser-js devrait etre dans REHABILITATED_PACKAGES');
-  assert(uap.safe === false, 'ua-parser-js.safe devrait etre false');
-  assert(uap.compromised.includes('0.7.29'), 'Devrait inclure 0.7.29');
-  assert(uap.compromised.includes('0.8.0'), 'Devrait inclure 0.8.0');
-  assert(uap.compromised.includes('1.0.0'), 'Devrait inclure 1.0.0');
+  assert(uap, 'ua-parser-js should be in REHABILITATED_PACKAGES');
+  assert(uap.safe === false, 'ua-parser-js.safe should be false');
+  assert(uap.compromised.includes('0.7.29'), 'Should include 0.7.29');
+  assert(uap.compromised.includes('0.8.0'), 'Should include 0.8.0');
+  assert(uap.compromised.includes('1.0.0'), 'Should include 1.0.0');
 });
 
-test('WHITELIST: checkRehabilitated retourne safe pour chalk', () => {
+test('WHITELIST: checkRehabilitated returns safe for chalk', () => {
   const { checkRehabilitated } = require('../src/safe-install.js');
   const result = checkRehabilitated('chalk', '5.4.0');
-  assert(result !== null, 'chalk devrait etre reconnu');
-  assert(result.safe === true, 'chalk devrait etre safe');
+  assert(result !== null, 'chalk should be recognized');
+  assert(result.safe === true, 'chalk should be safe');
 });
 
-test('WHITELIST: checkRehabilitated retourne unsafe pour ua-parser-js@0.7.29', () => {
+test('WHITELIST: checkRehabilitated returns unsafe for ua-parser-js@0.7.29', () => {
   const { checkRehabilitated } = require('../src/safe-install.js');
   const result = checkRehabilitated('ua-parser-js', '0.7.29');
-  assert(result !== null, 'ua-parser-js devrait etre reconnu');
-  assert(result.safe === false, 'ua-parser-js@0.7.29 devrait etre unsafe');
+  assert(result !== null, 'ua-parser-js should be recognized');
+  assert(result.safe === false, 'ua-parser-js@0.7.29 should be unsafe');
 });
 
-test('WHITELIST: checkRehabilitated retourne safe pour ua-parser-js@0.7.35', () => {
+test('WHITELIST: checkRehabilitated returns safe for ua-parser-js@0.7.35', () => {
   const { checkRehabilitated } = require('../src/safe-install.js');
   const result = checkRehabilitated('ua-parser-js', '0.7.35');
-  assert(result !== null, 'ua-parser-js devrait etre reconnu');
-  assert(result.safe === true, 'ua-parser-js@0.7.35 devrait etre safe');
+  assert(result !== null, 'ua-parser-js should be recognized');
+  assert(result.safe === true, 'ua-parser-js@0.7.35 should be safe');
 });
 
-test('WHITELIST: checkRehabilitated retourne null pour package inconnu', () => {
+test('WHITELIST: checkRehabilitated returns null for unknown package', () => {
   const { checkRehabilitated } = require('../src/safe-install.js');
   const result = checkRehabilitated('some-random-package', '1.0.0');
-  assert(result === null, 'Package inconnu devrait retourner null');
+  assert(result === null, 'Unknown package should return null');
 });
 
 // ============================================
-// TESTS IOC LOADING
+// IOC LOADING TESTS
 // ============================================
 
-console.log('\n=== TESTS IOC LOADING ===\n');
+console.log('\n=== IOC LOADING TESTS ===\n');
 
-test('IOC: loadCachedIOCs retourne des packages', () => {
+test('IOC: loadCachedIOCs returns packages', () => {
   const { loadCachedIOCs } = require('../src/ioc/updater.js');
   const iocs = loadCachedIOCs();
-  assert(iocs.packages, 'Devrait avoir packages');
-  assert(iocs.packages.length > 0, 'Devrait avoir au moins un package');
+  assert(iocs.packages, 'Should have packages');
+  assert(iocs.packages.length > 0, 'Should have at least one package');
 });
 
-test('IOC: loadCachedIOCs retourne des hashes', () => {
+test('IOC: loadCachedIOCs returns hashes', () => {
   const { loadCachedIOCs } = require('../src/ioc/updater.js');
   const iocs = loadCachedIOCs();
-  assert(iocs.hashes, 'Devrait avoir hashes');
+  assert(iocs.hashes, 'Should have hashes');
 });
 
-test('IOC: loadCachedIOCs retourne des markers', () => {
+test('IOC: loadCachedIOCs returns markers', () => {
   const { loadCachedIOCs } = require('../src/ioc/updater.js');
   const iocs = loadCachedIOCs();
-  assert(iocs.markers, 'Devrait avoir markers');
-  assert(iocs.markers.length > 0, 'Devrait avoir au moins un marker');
+  assert(iocs.markers, 'Should have markers');
+  assert(iocs.markers.length > 0, 'Should have at least one marker');
 });
 
-test('IOC: Typosquats ont version wildcard', () => {
+test('IOC: Typosquats have wildcard version', () => {
   const { loadCachedIOCs } = require('../src/ioc/updater.js');
   const iocs = loadCachedIOCs();
   const typosquats = iocs.packages.filter(p => p.source === 'typosquat');
-  assert(typosquats.length > 0, 'Devrait avoir des typosquats');
+  assert(typosquats.length > 0, 'Should have typosquats');
   const allWildcard = typosquats.every(p => p.version === '*');
-  assert(allWildcard, 'Tous les typosquats devraient avoir version *');
+  assert(allWildcard, 'All typosquats should have version *');
 });
 
-test('IOC: Packages historiques ont versions specifiques', () => {
+test('IOC: Historical packages have specific versions', () => {
   const { loadCachedIOCs } = require('../src/ioc/updater.js');
   const iocs = loadCachedIOCs();
   const eventStream = iocs.packages.find(p => p.name === 'event-stream');
-  assert(eventStream, 'event-stream devrait etre dans les IOCs');
-  assert(eventStream.version === '3.3.6', 'event-stream devrait avoir version 3.3.6');
+  assert(eventStream, 'event-stream should be in IOCs');
+  assert(eventStream.version === '3.3.6', 'event-stream should have version 3.3.6');
 });
 
 // ============================================
-// TESTS IOC MATCHING
+// IOC MATCHING TESTS
 // ============================================
 
-console.log('\n=== TESTS IOC MATCHING ===\n');
+console.log('\n=== IOC MATCHING TESTS ===\n');
 
-test('IOC MATCH: Version wildcard matche toutes versions', () => {
+test('IOC MATCH: Wildcard version matches all versions', () => {
   const iocs = { packages: [{ name: 'malicious-pkg', version: '*' }] };
   const pkg = { name: 'malicious-pkg', version: '1.2.3' };
   const match = iocs.packages.find(p => {
@@ -477,223 +477,223 @@ test('IOC MATCH: Version wildcard matche toutes versions', () => {
     if (p.version === '*') return true;
     return p.version === pkg.version;
   });
-  assert(match, 'Wildcard devrait matcher');
+  assert(match, 'Wildcard should match');
 });
 
-test('IOC MATCH: Version specifique matche uniquement cette version', () => {
+test('IOC MATCH: Specific version matches only that version', () => {
   const iocs = { packages: [{ name: 'some-pkg', version: '1.0.0' }] };
-  
+
   const pkg1 = { name: 'some-pkg', version: '1.0.0' };
   const match1 = iocs.packages.find(p => p.name === pkg1.name && (p.version === '*' || p.version === pkg1.version));
-  assert(match1, 'Version exacte devrait matcher');
-  
+  assert(match1, 'Exact version should match');
+
   const pkg2 = { name: 'some-pkg', version: '1.0.1' };
   const match2 = iocs.packages.find(p => p.name === pkg2.name && (p.version === '*' || p.version === pkg2.version));
-  assert(!match2, 'Version differente ne devrait pas matcher');
+  assert(!match2, 'Different version should not match');
 });
 
 // ============================================
-// TESTS SCRAPER / DATA
+// SCRAPER / DATA TESTS
 // ============================================
 
-console.log('\n=== TESTS SCRAPER / DATA ===\n');
+console.log('\n=== SCRAPER / DATA TESTS ===\n');
 
-test('SCRAPER: Module charge sans erreur', () => {
+test('SCRAPER: Module loads without error', () => {
   const { runScraper } = require('../src/ioc/scraper.js');
-  assert(typeof runScraper === 'function', 'runScraper devrait etre une fonction');
+  assert(typeof runScraper === 'function', 'runScraper should be a function');
 });
 
-test('SCRAPER: data/iocs.json existe et est valide', () => {
+test('SCRAPER: data/iocs.json exists and is valid', () => {
   const iocsPath = path.join(__dirname, '..', 'data', 'iocs.json');
-  assert(fs.existsSync(iocsPath), 'data/iocs.json devrait exister');
+  assert(fs.existsSync(iocsPath), 'data/iocs.json should exist');
   const content = fs.readFileSync(iocsPath, 'utf8');
   const iocs = JSON.parse(content);
-  assert(iocs.packages, 'Devrait avoir packages');
-  assert(Array.isArray(iocs.packages), 'packages devrait etre un array');
+  assert(iocs.packages, 'Should have packages');
+  assert(Array.isArray(iocs.packages), 'packages should be an array');
 });
 
-test('SCRAPER: IOCs ont les champs requis', () => {
+test('SCRAPER: IOCs have required fields', () => {
   const iocs = require('../data/iocs.json');
   const sample = iocs.packages[0];
-  assert(sample.name, 'IOC devrait avoir name');
-  assert(sample.version, 'IOC devrait avoir version');
-  assert(sample.source, 'IOC devrait avoir source');
+  assert(sample.name, 'IOC should have name');
+  assert(sample.version, 'IOC should have version');
+  assert(sample.source, 'IOC should have source');
 });
 
-test('SCRAPER: Au moins 900 IOCs', () => {
+test('SCRAPER: At least 900 IOCs', () => {
   const iocs = require('../data/iocs.json');
-  assert(iocs.packages.length >= 900, `Devrait avoir au moins 900 IOCs, a ${iocs.packages.length}`);
+  assert(iocs.packages.length >= 900, `Should have at least 900 IOCs, has ${iocs.packages.length}`);
 });
 
 // ============================================
-// TESTS YAML LOADER
+// YAML LOADER TESTS
 // ============================================
 
-console.log('\n=== TESTS YAML LOADER ===\n');
+console.log('\n=== YAML LOADER TESTS ===\n');
 
-test('YAML: builtin.yaml existe', () => {
+test('YAML: builtin.yaml exists', () => {
   const builtinPath = path.join(__dirname, '..', 'iocs', 'builtin.yaml');
-  assert(fs.existsSync(builtinPath), 'iocs/builtin.yaml devrait exister');
+  assert(fs.existsSync(builtinPath), 'iocs/builtin.yaml should exist');
 });
 
-test('YAML: loadYAMLIOCs retourne des packages', () => {
+test('YAML: loadYAMLIOCs returns packages', () => {
   const { loadYAMLIOCs } = require('../src/ioc/yaml-loader.js');
   const iocs = loadYAMLIOCs();
-  assert(iocs.packages, 'Devrait avoir packages');
-  assert(iocs.packages.length > 0, 'Devrait avoir au moins un package');
+  assert(iocs.packages, 'Should have packages');
+  assert(iocs.packages.length > 0, 'Should have at least one package');
 });
 
-test('YAML: Contient Shai-Hulud packages', () => {
+test('YAML: Contains Shai-Hulud packages', () => {
   const { loadYAMLIOCs } = require('../src/ioc/yaml-loader.js');
   const iocs = loadYAMLIOCs();
   const shaiHulud = iocs.packages.filter(p => p.source && p.source.includes('shai-hulud'));
-  assert(shaiHulud.length > 0, 'Devrait avoir des packages Shai-Hulud');
+  assert(shaiHulud.length > 0, 'Should have Shai-Hulud packages');
 });
 
-test('YAML: Contient markers Shai-Hulud', () => {
+test('YAML: Contains Shai-Hulud markers', () => {
   const { loadYAMLIOCs } = require('../src/ioc/yaml-loader.js');
   const iocs = loadYAMLIOCs();
-  assert(iocs.markers, 'Devrait avoir markers');
+  assert(iocs.markers, 'Should have markers');
   const hasShaiHulud = iocs.markers.some(m => m.pattern && m.pattern.includes('Shai-Hulud'));
-  assert(hasShaiHulud, 'Devrait avoir marker Shai-Hulud');
+  assert(hasShaiHulud, 'Should have Shai-Hulud marker');
 });
 
 // ============================================
-// TESTS NON-REGRESSION
+// NON-REGRESSION TESTS
 // ============================================
 
-console.log('\n=== TESTS NON-REGRESSION ===\n');
+console.log('\n=== NON-REGRESSION TESTS ===\n');
 
-test('REGRESSION: chalk ne doit pas bloquer (rehabilite)', () => {
+test('REGRESSION: chalk should not block (rehabilitated)', () => {
   const { checkRehabilitated } = require('../src/safe-install.js');
   const result = checkRehabilitated('chalk', '5.4.0');
-  assert(result && result.safe === true, 'chalk ne doit pas bloquer');
+  assert(result && result.safe === true, 'chalk should not block');
 });
 
-test('REGRESSION: debug ne doit pas bloquer (rehabilite)', () => {
+test('REGRESSION: debug should not block (rehabilitated)', () => {
   const { checkRehabilitated } = require('../src/safe-install.js');
   const result = checkRehabilitated('debug', '4.3.0');
-  assert(result && result.safe === true, 'debug ne doit pas bloquer');
+  assert(result && result.safe === true, 'debug should not block');
 });
 
-test('REGRESSION: lodash n\'est pas dans les IOCs', () => {
+test('REGRESSION: lodash is not in IOCs', () => {
   const iocs = require('../data/iocs.json');
   const lodash = iocs.packages.find(p => p.name === 'lodash');
-  assert(!lodash, 'lodash ne devrait pas etre dans les IOCs');
+  assert(!lodash, 'lodash should not be in IOCs');
 });
 
-test('REGRESSION: loadash (typosquat) EST dans les IOCs', () => {
+test('REGRESSION: loadash (typosquat) IS in IOCs', () => {
   const iocs = require('../data/iocs.json');
   const loadash = iocs.packages.find(p => p.name === 'loadash');
-  assert(loadash, 'loadash (typosquat) devrait etre dans les IOCs');
+  assert(loadash, 'loadash (typosquat) should be in IOCs');
 });
 
-test('REGRESSION: express n\'est pas dans les IOCs', () => {
+test('REGRESSION: express is not in IOCs', () => {
   const iocs = require('../data/iocs.json');
   const express = iocs.packages.find(p => p.name === 'express');
-  assert(!express, 'express ne devrait pas etre dans les IOCs');
+  assert(!express, 'express should not be in IOCs');
 });
 
-test('REGRESSION: axios n\'est pas dans les IOCs', () => {
+test('REGRESSION: axios is not in IOCs', () => {
   const iocs = require('../data/iocs.json');
   const axios = iocs.packages.find(p => p.name === 'axios');
-  assert(!axios, 'axios ne devrait pas etre dans les IOCs');
+  assert(!axios, 'axios should not be in IOCs');
 });
 
 // ============================================
-// TESTS SECURITE - VALIDATION PACKAGES
+// PACKAGE SECURITY TESTS
 // ============================================
 
-console.log('\n=== TESTS SECURITE PACKAGES ===\n');
+console.log('\n=== PACKAGE SECURITY TESTS ===\n');
 
-test('SECURITE: isValidPackageName accepte lodash', () => {
+test('SECURITY: isValidPackageName accepts lodash', () => {
   const { isValidPackageName } = require('../src/safe-install.js');
-  assert(isValidPackageName('lodash'), 'lodash devrait etre valide');
+  assert(isValidPackageName('lodash'), 'lodash should be valid');
 });
 
-test('SECURITE: isValidPackageName accepte @scope/package', () => {
+test('SECURITY: isValidPackageName accepts @scope/package', () => {
   const { isValidPackageName } = require('../src/safe-install.js');
-  assert(isValidPackageName('@types/node'), '@types/node devrait etre valide');
+  assert(isValidPackageName('@types/node'), '@types/node should be valid');
 });
 
-test('SECURITE: isValidPackageName rejette injection shell', () => {
+test('SECURITY: isValidPackageName rejects shell injection', () => {
   const { isValidPackageName } = require('../src/safe-install.js');
-  assert(!isValidPackageName('foo; rm -rf /'), 'injection shell devrait etre invalide');
+  assert(!isValidPackageName('foo; rm -rf /'), 'shell injection should be invalid');
 });
 
-test('SECURITE: isValidPackageName rejette backticks', () => {
+test('SECURITY: isValidPackageName rejects backticks', () => {
   const { isValidPackageName } = require('../src/safe-install.js');
-  assert(!isValidPackageName('foo`whoami`'), 'backticks devrait etre invalide');
+  assert(!isValidPackageName('foo`whoami`'), 'backticks should be invalid');
 });
 
-test('SECURITE: isValidPackageName rejette $(...)', () => {
+test('SECURITY: isValidPackageName rejects $(...)', () => {
   const { isValidPackageName } = require('../src/safe-install.js');
-  assert(!isValidPackageName('foo$(cat /etc/passwd)'), '$() devrait etre invalide');
+  assert(!isValidPackageName('foo$(cat /etc/passwd)'), '$() should be invalid');
 });
 
-test('SECURITE: isValidPackageName rejette pipes', () => {
+test('SECURITY: isValidPackageName rejects pipes', () => {
   const { isValidPackageName } = require('../src/safe-install.js');
-  assert(!isValidPackageName('foo | cat /etc/passwd'), 'pipe devrait etre invalide');
+  assert(!isValidPackageName('foo | cat /etc/passwd'), 'pipe should be invalid');
 });
 
 // ============================================
-// TESTS SECURITE - WEBHOOK VALIDATION
+// WEBHOOK SECURITY TESTS
 // ============================================
 
-console.log('\n=== TESTS SECURITE WEBHOOK ===\n');
+console.log('\n=== WEBHOOK SECURITY TESTS ===\n');
 
-test('SECURITE: validateWebhookUrl accepte Discord', () => {
+test('SECURITY: validateWebhookUrl accepts Discord', () => {
   const { validateWebhookUrl } = require('../src/webhook.js');
   const result = validateWebhookUrl('https://discord.com/api/webhooks/123/abc');
-  assert(result.valid, 'Discord webhook devrait etre valide');
+  assert(result.valid, 'Discord webhook should be valid');
 });
 
-test('SECURITE: validateWebhookUrl accepte Slack', () => {
+test('SECURITY: validateWebhookUrl accepts Slack', () => {
   const { validateWebhookUrl } = require('../src/webhook.js');
   const result = validateWebhookUrl('https://hooks.slack.com/services/xxx/yyy');
-  assert(result.valid, 'Slack webhook devrait etre valide');
+  assert(result.valid, 'Slack webhook should be valid');
 });
 
-test('SECURITE: validateWebhookUrl rejette HTTP (non-HTTPS)', () => {
+test('SECURITY: validateWebhookUrl rejects HTTP (non-HTTPS)', () => {
   const { validateWebhookUrl } = require('../src/webhook.js');
   const result = validateWebhookUrl('http://discord.com/api/webhooks/123');
-  assert(!result.valid, 'HTTP devrait etre rejete');
+  assert(!result.valid, 'HTTP should be rejected');
 });
 
-test('SECURITE: validateWebhookUrl rejette domaines non autorises', () => {
+test('SECURITY: validateWebhookUrl rejects unauthorized domains', () => {
   const { validateWebhookUrl } = require('../src/webhook.js');
   const result = validateWebhookUrl('https://evil.com/steal');
-  assert(!result.valid, 'evil.com devrait etre rejete');
+  assert(!result.valid, 'evil.com should be rejected');
 });
 
-test('SECURITE: validateWebhookUrl rejette IP privees (127.x)', () => {
+test('SECURITY: validateWebhookUrl rejects private IPs (127.x)', () => {
   const { validateWebhookUrl } = require('../src/webhook.js');
   const result = validateWebhookUrl('https://127.0.0.1:8080/webhook');
-  assert(!result.valid, '127.x devrait etre rejete');
+  assert(!result.valid, '127.x should be rejected');
 });
 
-test('SECURITE: validateWebhookUrl rejette IP privees (192.168.x)', () => {
+test('SECURITY: validateWebhookUrl rejects private IPs (192.168.x)', () => {
   const { validateWebhookUrl } = require('../src/webhook.js');
   const result = validateWebhookUrl('https://192.168.1.1/webhook');
-  assert(!result.valid, '192.168.x devrait etre rejete');
+  assert(!result.valid, '192.168.x should be rejected');
 });
 
-test('SECURITE: validateWebhookUrl rejette IP privees (10.x)', () => {
+test('SECURITY: validateWebhookUrl rejects private IPs (10.x)', () => {
   const { validateWebhookUrl } = require('../src/webhook.js');
   const result = validateWebhookUrl('https://10.0.0.1/webhook');
-  assert(!result.valid, '10.x devrait etre rejete');
+  assert(!result.valid, '10.x should be rejected');
 });
 
 // ============================================
-// RESULTATS
+// RESULTS
 // ============================================
 
 console.log('\n========================================');
-console.log(`RESULTATS: ${passed} passes, ${failed} echecs`);
+console.log(`RESULTS: ${passed} passed, ${failed} failed`);
 console.log('========================================\n');
 
 if (failures.length > 0) {
-  console.log('Echecs:');
+  console.log('Failures:');
   failures.forEach(f => {
     console.log(`  - ${f.name}: ${f.error}`);
   });

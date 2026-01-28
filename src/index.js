@@ -15,15 +15,47 @@ const fs = require('fs');
 const path = require('path');
 const { scanGitHubActions } = require('./scanner/github-actions.js');
 
-// Scan paranoid mode
+// ============================================
+// SCORING CONSTANTS
+// ============================================
+// Severity weights for risk score calculation (0-100)
+// These values determine the impact of each threat type on the final score.
+// Example: 4 CRITICAL threats = 100 (max score), 10 HIGH threats = 100
+const SEVERITY_WEIGHTS = {
+  // CRITICAL: Threats with immediate impact (active malware, data exfiltration)
+  // High weight because a single critical threat justifies immediate action
+  CRITICAL: 25,
+
+  // HIGH: Serious threats (dangerous code, known malicious dependencies)
+  // 10 HIGH threats reach the maximum score
+  HIGH: 10,
+
+  // MEDIUM: Potential threats (suspicious patterns, light obfuscation)
+  // Moderate impact, requires investigation but not necessarily malicious
+  MEDIUM: 3
+};
+
+// Thresholds for determining the overall risk level
+const RISK_THRESHOLDS = {
+  CRITICAL: 75,  // >= 75: Immediate action required
+  HIGH: 50,      // >= 50: Priority investigation
+  MEDIUM: 25     // >= 25: Monitor
+  // < 25 && > 0: LOW
+  // === 0: SAFE
+};
+
+// Maximum score (capped)
+const MAX_RISK_SCORE = 100;
+
+// Paranoid mode scanner
 function scanParanoid(targetPath) {
   const threats = [];
-  
+
   function scanFile(filePath) {
   try {
     const content = fs.readFileSync(filePath, 'utf8');
-    
-      // Ignorer les URLs (contiennent souvent des patterns comme .git)
+
+      // Ignore URLs (they often contain patterns like .git)
       const contentWithoutUrls = content.replace(/https?:\/\/[^\s"']+/g, '');
       
       for (const [, rule] of Object.entries(PARANOID_RULES)) {
@@ -70,7 +102,7 @@ function scanParanoid(targetPath) {
 }
 
 async function run(targetPath, options = {}) {
-  // Execution parallele de tous les scanners independants
+  // Parallel execution of all independent scanners
   const [
     packageThreats,
     shellThreats,
@@ -107,12 +139,12 @@ async function run(targetPath, options = {}) {
 
   // Paranoid mode
   if (options.paranoid) {
-    console.log('[PARANOID] Mode ultra-strict active\n');
+    console.log('[PARANOID] Ultra-strict mode enabled\n');
     const paranoidThreats = scanParanoid(targetPath);
     threats.push(...paranoidThreats);
   }
 
-  // Enrichir chaque menace avec les regles
+  // Enrich each threat with rules
   const enrichedThreats = threats.map(t => {
     const rule = getRule(t.type);
     return {
@@ -126,20 +158,20 @@ async function run(targetPath, options = {}) {
     };
   });
 
-  // Calculer le score de risque (0-100)
+  // Calculate risk score (0-100)
   const criticalCount = threats.filter(t => t.severity === 'CRITICAL').length;
   const highCount = threats.filter(t => t.severity === 'HIGH').length;
   const mediumCount = threats.filter(t => t.severity === 'MEDIUM').length;
-  
-  let riskScore = 0;
-  riskScore += criticalCount * 25;
-  riskScore += highCount * 10;
-  riskScore += mediumCount * 3;
-  riskScore = Math.min(100, riskScore);
 
-  const riskLevel = riskScore >= 75 ? 'CRITICAL' 
-                  : riskScore >= 50 ? 'HIGH'
-                  : riskScore >= 25 ? 'MEDIUM'
+  let riskScore = 0;
+  riskScore += criticalCount * SEVERITY_WEIGHTS.CRITICAL;
+  riskScore += highCount * SEVERITY_WEIGHTS.HIGH;
+  riskScore += mediumCount * SEVERITY_WEIGHTS.MEDIUM;
+  riskScore = Math.min(MAX_RISK_SCORE, riskScore);
+
+  const riskLevel = riskScore >= RISK_THRESHOLDS.CRITICAL ? 'CRITICAL'
+                  : riskScore >= RISK_THRESHOLDS.HIGH ? 'HIGH'
+                  : riskScore >= RISK_THRESHOLDS.MEDIUM ? 'MEDIUM'
                   : riskScore > 0 ? 'LOW'
                   : 'SAFE';
 
@@ -157,34 +189,34 @@ async function run(targetPath, options = {}) {
     }
   };
 
-  // Sortie JSON
+  // JSON output
   if (options.json) {
     console.log(JSON.stringify(result, null, 2));
   }
-  // Sortie HTML
+  // HTML output
   else if (options.html) {
     saveReport(result, options.html);
-    console.log(`[OK] Rapport HTML genere: ${options.html}`);
+    console.log(`[OK] HTML report generated: ${options.html}`);
   }
-  // Sortie SARIF
+  // SARIF output
   else if (options.sarif) {
     saveSARIF(result, options.sarif);
-    console.log(`[OK] Rapport SARIF genere: ${options.sarif}`);
+    console.log(`[OK] SARIF report generated: ${options.sarif}`);
   }
-  // Sortie explain
+  // Explain output
   else if (options.explain) {
-    console.log(`\n[MUADDIB] Scan de ${targetPath}\n`);
+    console.log(`\n[MUADDIB] Scanning ${targetPath}\n`);
 
     if (enrichedThreats.length === 0) {
-      console.log('[OK] Aucune menace detectee.\n');
+      console.log('[OK] No threats detected.\n');
     } else {
-      console.log(`[ALERTE] ${enrichedThreats.length} menace(s) detectee(s):\n`);
+      console.log(`[ALERT] ${enrichedThreats.length} threat(s) detected:\n`);
       enrichedThreats.forEach((t, i) => {
         console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
         console.log(`  ${i + 1}. [${t.severity}] ${t.rule_name}`);
         console.log(`     Rule ID:    ${t.rule_id}`);
-        console.log(`     Fichier:    ${t.file}`);
-        if (t.line) console.log(`     Ligne:      ${t.line}`);
+        console.log(`     File:       ${t.file}`);
+        if (t.line) console.log(`     Line:       ${t.line}`);
         console.log(`     Confidence: ${t.confidence}`);
         console.log(`     Message:    ${t.message}`);
         if (t.mitre) console.log(`     MITRE:      ${t.mitre} (https://attack.mitre.org/techniques/${t.mitre.replace('.', '/')})`);
@@ -197,24 +229,24 @@ async function run(targetPath, options = {}) {
       });
     }
   }
-  // Sortie normale
+  // Normal output
   else {
-    console.log(`\n[MUADDIB] Scan de ${targetPath}\n`);
+    console.log(`\n[MUADDIB] Scanning ${targetPath}\n`);
 
     const scoreBar = '█'.repeat(Math.floor(result.summary.riskScore / 5)) + '░'.repeat(20 - Math.floor(result.summary.riskScore / 5));
     console.log(`[SCORE] ${result.summary.riskScore}/100 [${scoreBar}] ${result.summary.riskLevel}\n`);
 
     if (threats.length === 0) {
-      console.log('[OK] Aucune menace detectee.\n');
+      console.log('[OK] No threats detected.\n');
     } else {
-      console.log(`[ALERTE] ${threats.length} menace(s) detectee(s):\n`);
+      console.log(`[ALERT] ${threats.length} threat(s) detected:\n`);
       threats.forEach((t, i) => {
         console.log(`  ${i + 1}. [${t.severity}] ${t.type}`);
         console.log(`     ${t.message}`);
-        console.log(`     Fichier: ${t.file}\n`);
+        console.log(`     File: ${t.file}\n`);
       });
 
-      console.log('[REPONSE] Recommandations:\n');
+      console.log('[RESPONSE] Recommendations:\n');
       threats.forEach(t => {
         const playbook = getPlaybook(t.type);
         if (playbook) {
@@ -224,17 +256,17 @@ async function run(targetPath, options = {}) {
     }
   }
 
-  // Envoyer webhook si configure
+  // Send webhook if configured
   if (options.webhook && threats.length > 0) {
     try {
       await sendWebhook(options.webhook, result);
-      console.log(`[OK] Alerte envoyee au webhook`);
+      console.log(`[OK] Alert sent to webhook`);
     } catch (err) {
-      console.log(`[WARN] Echec envoi webhook: ${err.message}`);
+      console.log(`[WARN] Webhook send failed: ${err.message}`);
     }
   }
 
-  // Calculer exit code selon le niveau de fail
+  // Calculate exit code based on fail level
   const failLevel = options.failLevel || 'high';
   const severityLevels = {
     critical: ['CRITICAL'],

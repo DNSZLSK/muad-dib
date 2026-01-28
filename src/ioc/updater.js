@@ -11,7 +11,7 @@ const { loadYAMLIOCs } = require('./yaml-loader.js');
 const REMOTE_FEED_URL = 'https://raw.githubusercontent.com/DNSZLSK/muad-dib/master/data/iocs.json';
 
 async function updateIOCs() {
-  console.log('[MUADDIB] Mise a jour des IOCs...\n');
+  console.log('[MUADDIB] Updating IOCs...\n');
 
   if (!fs.existsSync(CACHE_PATH)) {
     fs.mkdirSync(CACHE_PATH, { recursive: true });
@@ -37,23 +37,23 @@ async function updateIOCs() {
       localScrapedCount = mergeIOCs(iocs, localIOCs);
       console.log('[INFO] Local scraped IOCs: +' + localScrapedCount + ' packages');
     } catch (e) {
-      console.log('[WARN] Erreur lecture IOCs locaux: ' + e.message);
+      console.log('[WARN] Error reading local IOCs: ' + e.message);
     }
   } else {
-    console.log('[INFO] Pas d\'IOCs locaux (lancez "muaddib scrape" pour en generer)');
+    console.log('[INFO] No local IOCs (run "muaddib scrape" to generate them)');
   }
 
   // Priority 3: Remote feed (fallback / additional source)
   let remoteCount = 0;
   try {
-    console.log('[INFO] Telechargement depuis GitHub...');
+    console.log('[INFO] Downloading from GitHub...');
     const remoteData = await fetchUrl(REMOTE_FEED_URL);
     const remoteIOCs = JSON.parse(remoteData);
     remoteCount = mergeIOCs(iocs, remoteIOCs);
     console.log('[INFO] Remote IOCs: +' + remoteCount + ' packages');
   } catch (e) {
-    console.log('[WARN] Echec telechargement distant: ' + e.message);
-    console.log('[INFO] Utilisation des IOCs locaux uniquement');
+    console.log('[WARN] Remote download failed: ' + e.message);
+    console.log('[INFO] Using local IOCs only');
   }
 
   // Update metadata
@@ -62,11 +62,11 @@ async function updateIOCs() {
   // Save to cache
   fs.writeFileSync(CACHE_IOC_FILE, JSON.stringify(iocs, null, 2));
   
-  console.log('\n[OK] IOCs sauvegardes:');
-  console.log('     - ' + iocs.packages.length + ' packages malveillants');
-  console.log('     - ' + iocs.files.length + ' fichiers suspects');
-  console.log('     - ' + iocs.hashes.length + ' hashes connus');
-  console.log('     - ' + iocs.markers.length + ' marqueurs\n');
+  console.log('\n[OK] IOCs saved:');
+  console.log('     - ' + iocs.packages.length + ' malicious packages');
+  console.log('     - ' + iocs.files.length + ' suspicious files');
+  console.log('     - ' + iocs.hashes.length + ' known hashes');
+  console.log('     - ' + iocs.markers.length + ' markers\n');
 
   return iocs;
 }
@@ -132,13 +132,13 @@ function fetchUrl(url) {
   });
 }
 
-// Cache pour eviter de recharger les IOCs a chaque appel
+// Cache to avoid reloading IOCs on each call
 let cachedIOCsResult = null;
 let cachedIOCsTime = 0;
 const CACHE_TTL = 60000; // 1 minute
 
 function loadCachedIOCs() {
-  // Retourner le cache si encore valide
+  // Return cache if still valid
   const now = Date.now();
   if (cachedIOCsResult && (now - cachedIOCsTime) < CACHE_TTL) {
     return cachedIOCsResult;
@@ -174,10 +174,10 @@ function loadCachedIOCs() {
     }
   }
 
-  // Creer structures optimisees pour lookup O(1)
+  // Create optimized structures for O(1) lookup
   const optimized = createOptimizedIOCs(merged);
 
-  // Mettre en cache
+  // Store in cache
   cachedIOCsResult = optimized;
   cachedIOCsTime = now;
 
@@ -185,14 +185,14 @@ function loadCachedIOCs() {
 }
 
 /**
- * Cree des structures optimisees pour recherche O(1)
- * @param {Object} iocs - IOCs bruts
- * @returns {Object} IOCs avec Map/Set pour lookup rapide
+ * Creates optimized structures for O(1) lookup
+ * @param {Object} iocs - Raw IOCs
+ * @returns {Object} IOCs with Map/Set for fast lookup
  */
 function createOptimizedIOCs(iocs) {
-  // Map pour les packages: "name" -> [{ version, source, ... }]
+  // Map for packages: "name" -> [{ version, source, ... }]
   const packagesMap = new Map();
-  // Set pour les packages wildcard (toutes versions malveillantes)
+  // Set for wildcard packages (all versions malicious)
   const wildcardPackages = new Set();
 
   for (const pkg of iocs.packages) {
@@ -206,23 +206,23 @@ function createOptimizedIOCs(iocs) {
     packagesMap.get(pkg.name).push(pkg);
   }
 
-  // Set pour les hashes (lookup O(1))
+  // Set for hashes (O(1) lookup)
   const hashesSet = new Set(iocs.hashes);
 
-  // Set pour les markers
+  // Set for markers
   const markersSet = new Set(iocs.markers);
 
-  // Set pour les fichiers suspects
+  // Set for suspicious files
   const filesSet = new Set(iocs.files);
 
   return {
-    // Structures optimisees
+    // Optimized structures
     packagesMap,
     wildcardPackages,
     hashesSet,
     markersSet,
     filesSet,
-    // Arrays originaux pour compatibilite
+    // Original arrays for compatibility
     packages: iocs.packages,
     hashes: iocs.hashes,
     markers: iocs.markers,

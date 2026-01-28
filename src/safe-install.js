@@ -1,174 +1,174 @@
 const { spawnSync } = require('child_process');
 const { loadCachedIOCs } = require('./ioc/updater.js');
 
-// Regex pour valider les noms de packages npm (previent injection de commandes)
+// Regex to validate npm package names (prevents command injection)
 const NPM_PACKAGE_REGEX = /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/;
 
 /**
- * Valide qu'un nom de package est safe (pas d'injection de commandes)
- * @param {string} pkgName - Nom du package
- * @returns {boolean} true si valide
+ * Validates that a package name is safe (no command injection)
+ * @param {string} pkgName - Package name
+ * @returns {boolean} true if valid
  */
 function isValidPackageName(pkgName) {
-  // Retirer la version si presente
+  // Remove version if present
   const nameOnly = pkgName.split('@').filter((p, i) => i === 0 || !p.match(/^\d/)).join('@');
   return NPM_PACKAGE_REGEX.test(nameOnly) || (nameOnly.startsWith('@') && NPM_PACKAGE_REGEX.test(nameOnly));
 }
 
-// Packages connus sûrs qui utilisent des patterns "suspects" légitimement
+// Known safe packages that legitimately use "suspicious" patterns
 const TRUSTED_PACKAGES = [
   'lodash', 'underscore', 'express', 'react', 'vue', 'angular',
   'webpack', 'babel', 'typescript', 'esbuild', 'vite', 'rollup',
   'jest', 'mocha', 'chai', 'sharp', 'bcrypt', 'argon2'
 ];
 
-// Packages qui ont ete compromis temporairement mais sont maintenant safe
-// Ces packages ne seront PAS bloques (sauf versions specifiques compromises)
+// Packages that were temporarily compromised but are now safe
+// These packages will NOT be blocked (except specific compromised versions)
 const REHABILITATED_PACKAGES = {
-  // Septembre 2025 - Compromission massive via phishing, corrige en quelques heures
+  // September 2025 - Massive compromise via phishing, fixed within hours
   'chalk': {
     compromised: [],
     safe: true,
-    note: 'Compromis sept 2025, versions malveillantes retirees de npm'
+    note: 'Compromised Sept 2025, malicious versions removed from npm'
   },
   'debug': {
     compromised: [],
     safe: true,
-    note: 'Compromis sept 2025, corrige rapidement'
+    note: 'Compromised Sept 2025, quickly fixed'
   },
   'ansi-styles': {
     compromised: [],
     safe: true,
-    note: 'Compromis sept 2025, corrige rapidement'
+    note: 'Compromised Sept 2025, quickly fixed'
   },
   'strip-ansi': {
     compromised: [],
     safe: true,
-    note: 'Compromis sept 2025, corrige rapidement'
+    note: 'Compromised Sept 2025, quickly fixed'
   },
   'wrap-ansi': {
     compromised: [],
     safe: true,
-    note: 'Compromis sept 2025, corrige rapidement'
+    note: 'Compromised Sept 2025, quickly fixed'
   },
   'is-arrayish': {
     compromised: [],
     safe: true,
-    note: 'Compromis sept 2025, corrige rapidement'
+    note: 'Compromised Sept 2025, quickly fixed'
   },
   'simple-swizzle': {
     compromised: [],
     safe: true,
-    note: 'Compromis sept 2025, corrige rapidement'
+    note: 'Compromised Sept 2025, quickly fixed'
   },
   'color-convert': {
     compromised: [],
     safe: true,
-    note: 'Compromis sept 2025, corrige rapidement'
+    note: 'Compromised Sept 2025, quickly fixed'
   },
   'supports-color': {
     compromised: [],
     safe: true,
-    note: 'Compromis sept 2025, corrige rapidement'
+    note: 'Compromised Sept 2025, quickly fixed'
   },
   'has-flag': {
     compromised: [],
     safe: true,
-    note: 'Compromis sept 2025, corrige rapidement'
+    note: 'Compromised Sept 2025, quickly fixed'
   },
-  
-  // Packages avec versions specifiques compromises (pas toutes)
+
+  // Packages with specific compromised versions (not all)
   'ua-parser-js': {
     compromised: ['0.7.29', '0.8.0', '1.0.0'],
     safe: false,
-    note: 'Versions specifiques compromises oct 2021'
+    note: 'Specific versions compromised Oct 2021'
   },
   'coa': {
     compromised: ['2.0.3', '2.0.4', '2.1.1', '2.1.3', '3.0.1', '3.1.3'],
     safe: false,
-    note: 'Versions specifiques compromises nov 2021'
+    note: 'Specific versions compromised Nov 2021'
   },
   'rc': {
     compromised: ['1.2.9', '1.3.9', '2.3.9'],
     safe: false,
-    note: 'Versions specifiques compromises nov 2021'
+    note: 'Specific versions compromised Nov 2021'
   },
-  
-  // MUAD'DIB et dependances
+
+  // MUAD'DIB and dependencies
   'muaddib-scanner': {
     compromised: [],
     safe: true,
-    note: 'Notre package'
+    note: 'Our package'
   },
   'acorn': {
     compromised: [],
     safe: true,
-    note: 'Parser AST legitime'
+    note: 'Legitimate AST parser'
   },
   'acorn-walk': {
     compromised: [],
     safe: true,
-    note: 'Parser AST legitime'
+    note: 'Legitimate AST parser'
   },
   '@inquirer/prompts': {
     compromised: [],
     safe: true,
-    note: 'Dependance legitime'
+    note: 'Legitimate dependency'
   }
 };
 
-// Cache pour eviter de scanner deux fois le meme package
+// Cache to avoid scanning the same package twice
 const scannedPackages = new Set();
 
 /**
- * Verifie si un package est rehabilite (compromis temporairement puis corrige)
- * @returns {object|null} null si pas rehabilite, sinon {safe: bool, note: string}
+ * Checks if a package is rehabilitated (temporarily compromised then fixed)
+ * @returns {object|null} null if not rehabilitated, otherwise {safe: bool, note: string}
  */
 function checkRehabilitated(pkgName, pkgVersion) {
   const rehab = REHABILITATED_PACKAGES[pkgName];
   if (!rehab) return null;
-  
-  // Si marque comme safe = toutes versions actuelles sont OK
+
+  // If marked as safe = all current versions are OK
   if (rehab.safe === true) {
     return { safe: true, note: rehab.note };
   }
-  
-  // Sinon verifier si la version est dans la liste des compromises
+
+  // Otherwise check if the version is in the compromised list
   if (pkgVersion && rehab.compromised.includes(pkgVersion)) {
     return { safe: false, note: rehab.note };
   }
-  
-  // Version pas dans la liste des compromises = safe
+
+  // Version not in the compromised list = safe
   return { safe: true, note: rehab.note };
 }
 
-// Verifier si un package est dans les IOCs
+// Check if a package is in the IOCs
 function checkIOCs(pkg, pkgName, pkgVersion) {
-  // D'abord verifier la whitelist des packages rehabilites
+  // First check the whitelist of rehabilitated packages
   const rehabStatus = checkRehabilitated(pkgName, pkgVersion);
   if (rehabStatus) {
     if (rehabStatus.safe) {
-      return null; // Package rehabilite et safe, pas de menace
+      return null; // Rehabilitated and safe package, no threat
     } else {
-      // Version specifiquement compromise d'un package rehabilite
+      // Specifically compromised version of a rehabilitated package
       return {
         name: pkgName,
         source: 'rehabilitated-compromised',
-        description: `Version compromise: ${rehabStatus.note}`
+        description: `Compromised version: ${rehabStatus.note}`
       };
     }
   }
-  
-  // Pas dans la whitelist, verifier les IOCs
+
+  // Not in the whitelist, check the IOCs
   try {
     const iocs = loadCachedIOCs();
     const malicious = iocs.packages?.find(p => {
       if (p.name !== pkg && p.name !== pkgName) return false;
-      // Si version "*" dans IOC = toutes versions malveillantes
+      // If version "*" in IOC = all versions are malicious
       if (p.version === '*') return true;
-      // Si on a une version, comparer
+      // If we have a version, compare
       if (pkgVersion && p.version === pkgVersion) return true;
-      // Sinon, si pas de version specifiee et IOC a une version specifique, skip
+      // Otherwise, if no version specified and IOC has a specific version, skip
       return false;
     });
     return malicious || null;
@@ -177,15 +177,15 @@ function checkIOCs(pkg, pkgName, pkgVersion) {
   }
 }
 
-// Scanner un package et ses dependances recursivement
+// Scan a package and its dependencies recursively
 async function scanPackageRecursive(pkg, depth = 0, maxDepth = 3) {
   const indent = '  '.repeat(depth);
-  
-  // Extraire nom et version du package
+
+  // Extract name and version of the package
   let pkgName = pkg;
   let pkgVersion = null;
-  
-  // Gerer les scoped packages (@scope/name) et versions (@scope/name@version ou name@version)
+
+  // Handle scoped packages (@scope/name) and versions (@scope/name@version or name@version)
   if (pkg.startsWith('@')) {
     // Scoped package
     const parts = pkg.slice(1).split('@');
@@ -203,7 +203,7 @@ async function scanPackageRecursive(pkg, depth = 0, maxDepth = 3) {
   
   const pkgBaseName = pkgName.replace(/^@[^/]+\//, '');
   
-  // Eviter les boucles infinies
+  // Avoid infinite loops
   if (scannedPackages.has(pkgName)) {
     return { safe: true };
   }
@@ -211,22 +211,22 @@ async function scanPackageRecursive(pkg, depth = 0, maxDepth = 3) {
   
   // Skip trusted packages
   if (TRUSTED_PACKAGES.includes(pkgBaseName) || TRUSTED_PACKAGES.includes(pkgName)) {
-    if (depth === 0) console.log(`[OK] ${pkg} - Package de confiance`);
+    if (depth === 0) console.log(`[OK] ${pkg} - Trusted package`);
     return { safe: true };
   }
   
-  // Limiter la profondeur
+  // Limit the depth
   if (depth > maxDepth) {
     return { safe: true };
   }
   
   if (depth === 0) {
-    console.log(`[*] Analyse de ${pkg}...`);
+    console.log(`[*] Analyzing ${pkg}...`);
   } else {
-    console.log(`${indent}[*] Dependance: ${pkgName}`);
+    console.log(`${indent}[*] Dependency: ${pkgName}`);
   }
   
-  // Verifier IOCs (avec whitelist)
+  // Check IOCs (with whitelist)
   const malicious = checkIOCs(pkg, pkgName, pkgVersion);
   if (malicious) {
     return {
@@ -234,32 +234,32 @@ async function scanPackageRecursive(pkg, depth = 0, maxDepth = 3) {
       package: pkgName,
       reason: 'known_malicious',
       source: malicious.source || 'IOC Database',
-      description: malicious.description || 'Package malveillant connu',
+      description: malicious.description || 'Known malicious package',
       depth
     };
   }
 
-  // Valider le nom du package (securite: prevenir injection de commandes)
+  // Validate the package name (security: prevent command injection)
   if (!isValidPackageName(pkgName)) {
-    console.log(`[!] Nom de package invalide: ${pkgName}`);
-    return { safe: false, package: pkgName, reason: 'invalid_name', source: 'validation', description: 'Nom de package invalide ou suspect', depth };
+    console.log(`[!] Invalid package name: ${pkgName}`);
+    return { safe: false, package: pkgName, reason: 'invalid_name', source: 'validation', description: 'Invalid or suspicious package name', depth };
   }
 
-  // Recuperer les infos du package (utilise spawnSync pour eviter injection)
+  // Get the package info (uses spawnSync to avoid injection)
   let pkgInfo;
   try {
     const result = spawnSync('npm', ['view', pkgName, '--json'], { encoding: 'utf8', shell: false });
     if (result.status !== 0 || !result.stdout) {
-      if (depth === 0) console.log(`[!] Package ${pkgName} introuvable sur npm`);
+      if (depth === 0) console.log(`[!] Package ${pkgName} not found on npm`);
       return { safe: true };
     }
     pkgInfo = JSON.parse(result.stdout);
   } catch {
-    if (depth === 0) console.log(`[!] Package ${pkgName} introuvable sur npm`);
+    if (depth === 0) console.log(`[!] Package ${pkgName} not found on npm`);
     return { safe: true };
   }
   
-  // Scanner les dependances
+  // Scan the dependencies
   const dependencies = pkgInfo.dependencies || {};
   const depNames = Object.keys(dependencies);
   
@@ -273,7 +273,7 @@ async function scanPackageRecursive(pkg, depth = 0, maxDepth = 3) {
   }
   
   if (depth === 0) {
-    console.log(`[OK] ${pkg} - Aucune menace (${depNames.length} dependances scannees)`);
+    console.log(`[OK] ${pkg} - No threats (${depNames.length} dependencies scanned)`);
   }
   
   return { safe: true };
@@ -289,7 +289,7 @@ async function safeInstall(packages, options = {}) {
 ╚══════════════════════════════════════════╝
 `);
 
-  // Reset le cache pour chaque install
+  // Reset the cache for each install
   scannedPackages.clear();
   
   for (const pkg of packages) {
@@ -298,40 +298,40 @@ async function safeInstall(packages, options = {}) {
     if (!result.safe) {
       console.log(`
 ╔══════════════════════════════════════════╗
-║   [!] PACKAGE MALVEILLANT DETECTE        ║
+║   [!] MALICIOUS PACKAGE DETECTED         ║
 ╚══════════════════════════════════════════╝
 `);
       if (result.depth > 0) {
-        console.log(`Package demande: ${pkg}`);
-        console.log(`Dependance malveillante: ${result.package} (profondeur: ${result.depth})`);
+        console.log(`Requested package: ${pkg}`);
+        console.log(`Malicious dependency: ${result.package} (depth: ${result.depth})`);
       } else {
         console.log(`Package: ${result.package}`);
       }
       console.log(`Source: ${result.source}`);
-      console.log(`Raison: ${result.description}`);
+      console.log(`Reason: ${result.description}`);
       console.log('');
-      
+
       if (!force) {
-        console.log('[!] Installation BLOQUEE.');
+        console.log('[!] Installation BLOCKED.');
         return { blocked: true, package: result.package, threats: [{ type: 'known_malicious', severity: 'CRITICAL', message: result.description }] };
       } else {
-        console.log('[!] --force active, installation malgre les menaces...');
+        console.log('[!] --force enabled, installing despite threats...');
       }
     }
   }
 
-  // Valider tous les noms de packages avant installation
+  // Validate all package names before installation
   for (const pkg of packages) {
     const pkgNameOnly = pkg.split('@').filter((p, i) => i === 0 || !p.match(/^\d/)).join('@');
     if (!isValidPackageName(pkgNameOnly)) {
-      console.log(`[!] Nom de package invalide: ${pkg}`);
-      return { blocked: true, package: pkg, threats: [{ type: 'invalid_name', severity: 'HIGH', message: 'Nom de package invalide ou suspect' }] };
+      console.log(`[!] Invalid package name: ${pkg}`);
+      return { blocked: true, package: pkg, threats: [{ type: 'invalid_name', severity: 'HIGH', message: 'Invalid or suspicious package name' }] };
     }
   }
 
-  // Tout est clean, installer pour de vrai (utilise spawnSync pour eviter injection)
+  // Everything is clean, install for real (uses spawnSync to avoid injection)
   console.log('');
-  console.log('[*] Installation en cours...');
+  console.log('[*] Installation in progress...');
 
   const npmArgs = ['install', ...packages];
   if (isDev) npmArgs.push('--save-dev');
@@ -341,12 +341,12 @@ async function safeInstall(packages, options = {}) {
 
   if (result.status !== 0) {
     console.log('');
-    console.log('[!] Erreur lors de l\'installation.');
+    console.log('[!] Error during installation.');
     return { blocked: false, error: true };
   }
 
   console.log('');
-  console.log('[OK] Installation terminee.');
+  console.log('[OK] Installation complete.');
 
   return { blocked: false };
 }

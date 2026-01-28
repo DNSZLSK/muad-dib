@@ -98,7 +98,7 @@ function analyzeFile(content, filePath, basePath) {
     threats.push({
       type: 'suspicious_dataflow',
       severity: 'CRITICAL',
-      message: `Flux suspect: lecture credentials (${sources.map(s => s.name).join(', ')}) + envoi reseau (${sinks.map(s => s.name).join(', ')})`,
+      message: `Suspicious flow: credentials read (${sources.map(s => s.name).join(', ')}) + network send (${sinks.map(s => s.name).join(', ')})`,
       file: path.relative(basePath, filePath)
     });
   }

@@ -181,7 +181,7 @@ const helpText = `
     muaddib daemon [options]         Start daemon
     muaddib update                   Update IOCs
     muaddib scrape                   Scrape new IOCs
-    muaddib sandbox <pkg>            Analyse un package dans un container Docker isole
+    muaddib sandbox <pkg>            Analyze a package in an isolated Docker container
     
   Options:
     --json              JSON output

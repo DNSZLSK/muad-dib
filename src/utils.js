@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 
 /**
- * Repertoires exclus du scan (tests, build, etc.)
+ * Directories excluded from scanning (tests, build, etc.)
  */
 const EXCLUDED_DIRS = [
   'test', 'tests', 'node_modules', '.git', 'src', 'vscode-extension',
@@ -11,7 +11,7 @@ const EXCLUDED_DIRS = [
 ];
 
 /**
- * Patterns pour identifier les fichiers de dev/test
+ * Patterns to identify dev/test files
  */
 const DEV_PATTERNS = [
   /^scripts\//,
@@ -33,8 +33,8 @@ const DEV_PATTERNS = [
 ];
 
 /**
- * Verifie si un chemin correspond a un fichier de dev/test
- * @param {string} relativePath - Chemin relatif du fichier
+ * Checks if a path corresponds to a dev/test file
+ * @param {string} relativePath - Relative path of the file
  * @returns {boolean}
  */
 function isDevFile(relativePath) {
@@ -42,10 +42,10 @@ function isDevFile(relativePath) {
 }
 
 /**
- * Recherche recursive des fichiers JavaScript
- * @param {string} dir - Repertoire de depart
- * @param {string[]} [results=[]] - Tableau accumulateur (usage interne)
- * @returns {string[]} Liste des chemins de fichiers .js
+ * Recursively searches for JavaScript files
+ * @param {string} dir - Starting directory
+ * @param {string[]} [results=[]] - Accumulator array (internal use)
+ * @returns {string[]} List of .js file paths
  */
 function findJsFiles(dir, results = []) {
   if (!fs.existsSync(dir)) return results;
@@ -66,7 +66,7 @@ function findJsFiles(dir, results = []) {
         results.push(fullPath);
       }
     } catch {
-      // Ignore les erreurs de permission
+      // Ignore permission errors
     }
   }
 
@@ -74,9 +74,9 @@ function findJsFiles(dir, results = []) {
 }
 
 /**
- * Echappe les caracteres HTML pour prevenir les XSS
- * @param {string} str - Chaine a echapper
- * @returns {string} Chaine echappee
+ * Escapes HTML characters to prevent XSS
+ * @param {string} str - String to escape
+ * @returns {string} Escaped string
  */
 function escapeHtml(str) {
   if (str === null || str === undefined) return '';

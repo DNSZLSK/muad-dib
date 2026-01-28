@@ -1,40 +1,40 @@
 const https = require('https');
 const http = require('http');
 
-// Domaines autorises pour les webhooks (securite SSRF)
+// Allowed domains for webhooks (SSRF security)
 const ALLOWED_WEBHOOK_DOMAINS = [
   'discord.com',
   'discordapp.com',
   'hooks.slack.com',
-  'webhook.site',           // Pour les tests
-  'requestbin.com'          // Pour les tests
+  'webhook.site',           // For testing
+  'requestbin.com'          // For testing
 ];
 
 /**
- * Valide qu'une URL de webhook est autorisee
- * @param {string} url - URL du webhook
- * @returns {{valid: boolean, error?: string}} Resultat de validation
+ * Validates that a webhook URL is allowed
+ * @param {string} url - Webhook URL
+ * @returns {{valid: boolean, error?: string}} Validation result
  */
 function validateWebhookUrl(url) {
   try {
     const urlObj = new URL(url);
 
-    // Verifier le protocole (HTTPS obligatoire sauf localhost)
+    // Check protocol (HTTPS required except for localhost)
     if (urlObj.protocol !== 'https:' && urlObj.hostname !== 'localhost') {
-      return { valid: false, error: 'HTTPS requis pour les webhooks' };
+      return { valid: false, error: 'HTTPS required for webhooks' };
     }
 
-    // Verifier que le domaine est autorise
+    // Check that the domain is allowed
     const hostname = urlObj.hostname.toLowerCase();
     const isAllowed = ALLOWED_WEBHOOK_DOMAINS.some(domain =>
       hostname === domain || hostname.endsWith('.' + domain)
     );
 
     if (!isAllowed && hostname !== 'localhost') {
-      return { valid: false, error: `Domaine non autorise: ${hostname}. Domaines autorises: ${ALLOWED_WEBHOOK_DOMAINS.join(', ')}` };
+      return { valid: false, error: `Domain not allowed: ${hostname}. Allowed domains: ${ALLOWED_WEBHOOK_DOMAINS.join(', ')}` };
     }
 
-    // Bloquer les adresses IP privees (SSRF)
+    // Block private IP addresses (SSRF)
     const privateIpPatterns = [
       /^127\./,
       /^10\./,
@@ -45,20 +45,20 @@ function validateWebhookUrl(url) {
     ];
 
     if (privateIpPatterns.some(pattern => pattern.test(hostname))) {
-      return { valid: false, error: 'Adresses IP privees non autorisees' };
+      return { valid: false, error: 'Private IP addresses not allowed' };
     }
 
     return { valid: true };
   } catch (e) {
-    return { valid: false, error: `URL invalide: ${e.message}` };
+    return { valid: false, error: `Invalid URL: ${e.message}` };
   }
 }
 
 async function sendWebhook(url, results) {
-  // Valider l'URL avant envoi
+  // Validate URL before sending
   const validation = validateWebhookUrl(url);
   if (!validation.valid) {
-    throw new Error(`Webhook bloque: ${validation.error}`);
+    throw new Error(`Webhook blocked: ${validation.error}`);
   }
 
   const isDiscord = url.includes('discord.com');
@@ -94,27 +94,27 @@ function formatDiscord(results) {
 
   const fields = [
     {
-      name: 'Score de risque',
+      name: 'Risk Score',
       value: `**${summary.riskScore}/100** (${summary.riskLevel})`,
       inline: true
     },
     {
-      name: 'Menaces',
+      name: 'Threats',
       value: `${summary.critical} CRITICAL\n${summary.high} HIGH\n${summary.medium} MEDIUM`,
       inline: true
     },
     {
       name: 'Total',
-      value: `**${summary.total}** menace(s)`,
+      value: `**${summary.total}** threat(s)`,
       inline: true
     }
   ];
 
-  // Ajouter les menaces critiques si présentes
+  // Add critical threats if present
   if (criticalThreats) {
     fields.push({
-      name: 'Menaces critiques',
-      value: criticalThreats || 'Aucune',
+      name: 'Critical Threats',
+      value: criticalThreats || 'None',
       inline: false
     });
   }
@@ -122,7 +122,7 @@ function formatDiscord(results) {
   return {
     embeds: [{
       title: 'MUAD\'DIB Security Scan',
-      description: `Scan de **${target}**`,
+      description: `Scan of **${target}**`,
       color: color,
       fields: fields,
       footer: {
@@ -161,7 +161,7 @@ function formatSlack(results) {
       fields: [
         {
           type: 'mrkdwn',
-          text: `*Cible:*\n${target}`
+          text: `*Target:*\n${target}`
         },
         {
           type: 'mrkdwn',
@@ -192,13 +192,13 @@ function formatSlack(results) {
     }
   ];
 
-  // Ajouter les menaces critiques si présentes
+  // Add critical threats if present
   if (criticalList) {
     blocks.push({
       type: 'section',
       text: {
         type: 'mrkdwn',
-        text: `*Menaces critiques:*\n${criticalList}`
+        text: `*Critical Threats:*\n${criticalList}`
       }
     });
   }

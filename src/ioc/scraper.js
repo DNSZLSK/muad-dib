@@ -5,7 +5,7 @@ const path = require('path');
 const IOC_FILE = path.join(__dirname, 'data/iocs.json');
 const STATIC_IOCS_FILE = path.join(__dirname, 'data/static-iocs.json');
 
-// Domaines autorises pour les redirections (securite SSRF)
+// Allowed domains for redirections (SSRF security)
 const ALLOWED_REDIRECT_DOMAINS = [
   'raw.githubusercontent.com',
   'github.com',
@@ -16,9 +16,9 @@ const ALLOWED_REDIRECT_DOMAINS = [
 ];
 
 /**
- * Verifie si une URL de redirection est autorisee
- * @param {string} redirectUrl - URL de redirection
- * @returns {boolean} true si autorisee
+ * Checks if a redirect URL is allowed
+ * @param {string} redirectUrl - Redirect URL
+ * @returns {boolean} true if allowed
  */
 function isAllowedRedirect(redirectUrl) {
   try {
@@ -33,13 +33,80 @@ function isAllowedRedirect(redirectUrl) {
 // UTILITY FUNCTIONS
 // ============================================
 
+/**
+ * Parse a CSV line correctly handling commas within quoted fields
+ * Supports: "field1","field, with comma","field3"
+ * @param {string} line - CSV line to parse
+ * @returns {string[]} Array of fields
+ */
+function parseCSVLine(line) {
+  const fields = [];
+  let current = '';
+  let inQuotes = false;
+  let i = 0;
+
+  while (i < line.length) {
+    const char = line[i];
+
+    if (char === '"') {
+      // Handle escaped double quotes ("") within a field
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i += 2;
+        continue;
+      }
+      // Toggle quote mode
+      inQuotes = !inQuotes;
+      i++;
+      continue;
+    }
+
+    if (char === ',' && !inQuotes) {
+      // End of field
+      fields.push(current.trim());
+      current = '';
+      i++;
+      continue;
+    }
+
+    current += char;
+    i++;
+  }
+
+  // Add the last field
+  fields.push(current.trim());
+
+  return fields;
+}
+
+/**
+ * Parse a complete CSV file
+ * @param {string} csvContent - CSV content
+ * @param {boolean} [hasHeader=true] - If true, skip the first line
+ * @returns {string[][]} Array of parsed lines
+ */
+function parseCSV(csvContent, hasHeader = true) {
+  const lines = csvContent.split('\n').filter(l => l.trim());
+  const startIndex = hasHeader ? 1 : 0;
+  const results = [];
+
+  for (let i = startIndex; i < lines.length; i++) {
+    const parsed = parseCSVLine(lines[i]);
+    if (parsed.length > 0 && parsed[0]) {
+      results.push(parsed);
+    }
+  }
+
+  return results;
+}
+
 function loadStaticIOCs() {
   try {
     if (fs.existsSync(STATIC_IOCS_FILE)) {
       return JSON.parse(fs.readFileSync(STATIC_IOCS_FILE, 'utf8'));
     }
   } catch (e) {
-    console.log(`[WARN] Erreur chargement static-iocs.json: ${e.message}`);
+    console.log(`[WARN] Error loading static-iocs.json: ${e.message}`);
   }
   return { socket: [], phylum: [], npmRemoved: [] };
 }
@@ -59,11 +126,11 @@ function fetchJSON(url, options = {}) {
     };
 
     const req = https.request(reqOptions, (res) => {
-      // Handle redirects (avec validation securite)
+      // Handle redirects (with security validation)
       if (res.statusCode === 301 || res.statusCode === 302) {
         const redirectUrl = res.headers.location;
         if (!isAllowedRedirect(redirectUrl)) {
-          reject(new Error(`Redirection non autorisee vers: ${redirectUrl}`));
+          reject(new Error(`Unauthorized redirect to: ${redirectUrl}`));
           return;
         }
         fetchJSON(redirectUrl, options).then(resolve).catch(reject);
@@ -108,11 +175,11 @@ function fetchText(url) {
     };
 
     const req = https.request(reqOptions, (res) => {
-      // Handle redirects (avec validation securite)
+      // Handle redirects (with security validation)
       if (res.statusCode === 301 || res.statusCode === 302) {
         const redirectUrl = res.headers.location;
         if (!isAllowedRedirect(redirectUrl)) {
-          reject(new Error(`Redirection non autorisee vers: ${redirectUrl}`));
+          reject(new Error(`Unauthorized redirect to: ${redirectUrl}`));
           return;
         }
         fetchText(redirectUrl).then(resolve).catch(reject);
@@ -185,7 +252,7 @@ async function scrapeShaiHuludDetector() {
       console.log(`[SCRAPER]   ${packages.length} packages, ${hashes.length} hashes`);
     }
   } catch (e) {
-    console.log(`[SCRAPER]   Erreur: ${e.message}`);
+    console.log(`[SCRAPER]   Error: ${e.message}`);
   }
   
   return { packages, hashes };
@@ -205,28 +272,26 @@ async function scrapeDatadogIOCs() {
     const consolidatedResp = await fetchText(consolidatedUrl);
     
     if (consolidatedResp.status === 200 && consolidatedResp.data) {
-      const lines = consolidatedResp.data.split('\n').filter(l => l.trim());
-      // Format: package_name,versions,vendors
-      for (let i = 1; i < lines.length; i++) {
-        const parts = lines[i].split(',');
-        if (parts.length >= 1) {
-          const name = parts[0].trim().replace(/"/g, '');
-          const versions = parts[1] ? parts[1].trim().replace(/"/g, '') : '*';
-          const vendors = parts[2] ? parts[2].trim().replace(/"/g, '') : 'datadog';
-          
-          if (name && name !== 'package_name' && name !== 'name') {
-            packages.push({
-              id: `DATADOG-${name}`,
-              name: name,
-              version: versions || '*',
-              severity: 'critical',
-              confidence: 'high',
-              source: 'datadog-consolidated',
-              description: `Compromised package (sources: ${vendors})`,
-              references: ['https://securitylabs.datadoghq.com/articles/shai-hulud-2.0-npm-worm/'],
-              mitre: 'T1195.002'
-            });
-          }
+      // Format: package_name,versions,vendors (with comma handling in fields)
+      const rows = parseCSV(consolidatedResp.data, true);
+
+      for (const parts of rows) {
+        const name = parts[0] || '';
+        const versions = parts[1] || '*';
+        const vendors = parts[2] || 'datadog';
+
+        if (name && name !== 'package_name' && name !== 'name') {
+          packages.push({
+            id: `DATADOG-${name}`,
+            name: name,
+            version: versions || '*',
+            severity: 'critical',
+            confidence: 'high',
+            source: 'datadog-consolidated',
+            description: `Compromised package (sources: ${vendors})`,
+            references: ['https://securitylabs.datadoghq.com/articles/shai-hulud-2.0-npm-worm/'],
+            mitre: 'T1195.002'
+          });
         }
       }
       console.log(`[SCRAPER]   ${packages.length} packages (consolidated)`);
@@ -237,14 +302,15 @@ async function scrapeDatadogIOCs() {
     const ddResp = await fetchText(ddUrl);
     
     if (ddResp.status === 200 && ddResp.data) {
-      const lines = ddResp.data.split('\n').filter(l => l.trim());
+      // Parse with comma handling in quoted fields
+      const rows = parseCSV(ddResp.data, true);
       let ddCount = 0;
-      for (let i = 1; i < lines.length; i++) {
-        const parts = lines[i].split(',');
+
+      for (const parts of rows) {
         if (parts.length >= 2) {
-          const name = parts[0].trim().replace(/"/g, '');
-          const version = parts[1].trim().replace(/"/g, '');
-          
+          const name = parts[0] || '';
+          const version = parts[1] || '*';
+
           if (name && name !== 'package_name') {
             // Check if not already added
             if (!packages.find(p => p.name === name && p.version === version)) {
@@ -268,7 +334,7 @@ async function scrapeDatadogIOCs() {
     }
     
   } catch (e) {
-    console.log(`[SCRAPER]   Erreur: ${e.message}`);
+    console.log(`[SCRAPER]   Error: ${e.message}`);
   }
   
   return { packages, hashes: [] };
@@ -349,7 +415,7 @@ async function scrapeOSSFMaliciousPackages() {
     
     console.log(`[SCRAPER]   ${packages.length} packages`);
   } catch (e) {
-    console.log(`[SCRAPER]   Erreur: ${e.message}`);
+    console.log(`[SCRAPER]   Error: ${e.message}`);
   }
   
   return packages;
@@ -405,7 +471,7 @@ async function scrapeGitHubAdvisory() {
     
     console.log(`[SCRAPER]   ${packages.length} packages`);
   } catch (e) {
-    console.log(`[SCRAPER]   Erreur: ${e.message}`);
+    console.log(`[SCRAPER]   Error: ${e.message}`);
   }
   
   return packages;
@@ -552,7 +618,7 @@ async function runScraper() {
   const initialCount = existingIOCs.packages.length;
   const initialHashCount = existingIOCs.hashes ? existingIOCs.hashes.length : 0;
   
-  console.log('[INFO] IOCs existants: ' + initialCount + ' packages, ' + initialHashCount + ' hashes\n');
+  console.log('[INFO] Existing IOCs: ' + initialCount + ' packages, ' + initialHashCount + ' hashes\n');
   
   // Scrape all sources in parallel
   const results = await Promise.all([
@@ -648,18 +714,18 @@ async function runScraper() {
   
   // Display summary
   console.log('\n' + '='.repeat(60));
-  console.log('  RESULTATS');
+  console.log('  RESULTS');
   console.log('='.repeat(60));
-  console.log('  Packages avant:   ' + initialCount);
-  console.log('  Packages apres:   ' + existingIOCs.packages.length);
-  console.log('  Nouveaux:         +' + addedPackages);
-  console.log('  Hashes avant:     ' + initialHashCount);
-  console.log('  Hashes apres:     ' + (existingIOCs.hashes ? existingIOCs.hashes.length : 0));
-  console.log('  Nouveaux:         +' + addedHashes);
-  console.log('  Fichier:          ' + IOC_FILE);
+  console.log('  Packages before:  ' + initialCount);
+  console.log('  Packages after:   ' + existingIOCs.packages.length);
+  console.log('  New:              +' + addedPackages);
+  console.log('  Hashes before:    ' + initialHashCount);
+  console.log('  Hashes after:     ' + (existingIOCs.hashes ? existingIOCs.hashes.length : 0));
+  console.log('  New:              +' + addedHashes);
+  console.log('  File:             ' + IOC_FILE);
   
   // Stats by source
-  console.log('\n  Repartition par source:');
+  console.log('\n  Distribution by source:');
   const sourceCounts = {};
   for (const pkg of existingIOCs.packages) {
     sourceCounts[pkg.source] = (sourceCounts[pkg.source] || 0) + 1;

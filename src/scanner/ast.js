@@ -25,7 +25,7 @@ const SENSITIVE_STRINGS = [
   'Goldox-T3chs'
 ];
 
-// Strings qui ne sont PAS suspects
+// Strings that are NOT suspicious
 const SAFE_STRINGS = [
   'api.github.com',
   'registry.npmjs.org',
@@ -43,7 +43,7 @@ async function analyzeAST(targetPath) {
       continue;
     }
     
-    // Ignorer les fichiers dans les dossiers de dev
+    // Ignore files in dev folders
     if (isDevFile(relativePath)) {
       continue;
     }
@@ -72,7 +72,7 @@ function analyzeFile(content, filePath, basePath) {
       threats.push({
         type: 'possible_obfuscation',
         severity: 'MEDIUM',
-        message: 'Fichier difficilement parseable, possiblement obfusque.',
+        message: 'File difficult to parse, possibly obfuscated.',
         file: path.relative(basePath, filePath)
       });
     }
@@ -87,7 +87,7 @@ function analyzeFile(content, filePath, basePath) {
         threats.push({
           type: 'dangerous_call_' + callName.toLowerCase(),
           severity: 'HIGH',
-          message: `Appel dangereux "${callName}" detecte.`,
+          message: `Dangerous call "${callName}" detected.`,
           file: path.relative(basePath, filePath)
         });
       }
@@ -98,7 +98,7 @@ function analyzeFile(content, filePath, basePath) {
         threats.push({
           type: 'dangerous_call_function',
           severity: 'HIGH',
-          message: 'Appel dangereux "new Function()" detecte.',
+          message: 'Dangerous call "new Function()" detected.',
           file: path.relative(basePath, filePath)
         });
       }
@@ -106,7 +106,7 @@ function analyzeFile(content, filePath, basePath) {
 
     Literal(node) {
       if (typeof node.value === 'string') {
-        // Ignorer les strings safe
+        // Ignore safe strings
         if (SAFE_STRINGS.some(s => node.value.includes(s))) {
           return;
         }
@@ -116,7 +116,7 @@ function analyzeFile(content, filePath, basePath) {
             threats.push({
               type: 'sensitive_string',
               severity: 'HIGH',
-              message: `Reference a "${sensitive}" detectee.`,
+              message: `Reference to "${sensitive}" detected.`,
               file: path.relative(basePath, filePath)
             });
           }
@@ -134,7 +134,7 @@ function analyzeFile(content, filePath, basePath) {
           threats.push({
             type: 'env_access',
             severity: 'HIGH',
-            message: `Acces a variable sensible process.env.${envVar}.`,
+            message: `Access to sensitive variable process.env.${envVar}.`,
             file: path.relative(basePath, filePath)
           });
         }

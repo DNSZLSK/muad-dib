@@ -39,7 +39,7 @@ async function scanPackageJson(targetPath) {
       threats.push({
         type: 'lifecycle_script',
         severity: 'MEDIUM',
-        message: `Script "${scriptName}" detecte. Vecteur d'attaque courant.`,
+        message: `Script "${scriptName}" detected. Common attack vector.`,
         file: 'package.json'
       });
 
@@ -48,7 +48,7 @@ async function scanPackageJson(targetPath) {
           threats.push({
             type: name,
             severity: 'HIGH',
-            message: `Pattern dangereux "${name}" dans script "${scriptName}".`,
+            message: `Dangerous pattern "${name}" in script "${scriptName}".`,
             file: 'package.json'
           });
         }
@@ -78,7 +78,7 @@ async function scanPackageJson(targetPath) {
       threats.push({
         type: 'known_malicious_package',
         severity: 'CRITICAL',
-        message: `Dependance malveillante declaree: ${depName}@${depVersion} (source: ${malicious.source || 'IOC'})`,
+        message: `Malicious dependency declared: ${depName}@${depVersion} (source: ${malicious.source || 'IOC'})`,
         file: 'package.json'
       });
     }
