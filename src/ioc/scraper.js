@@ -265,7 +265,8 @@ async function scrapeShaiHuludDetector() {
 async function scrapeDatadogIOCs() {
   console.log('[SCRAPER] DataDog Security Labs IOCs...');
   const packages = [];
-  
+  const seen = new Set();
+
   try {
     // Consolidated file (multiple vendors)
     const consolidatedUrl = 'https://raw.githubusercontent.com/DataDog/indicators-of-compromise/main/shai-hulud-2.0/consolidated_iocs.csv';
@@ -281,6 +282,8 @@ async function scrapeDatadogIOCs() {
         const vendors = parts[2] || 'datadog';
 
         if (name && name !== 'package_name' && name !== 'name') {
+          const key = `${name}@${versions || '*'}`;
+          seen.add(key);
           packages.push({
             id: `DATADOG-${name}`,
             name: name,
@@ -312,8 +315,9 @@ async function scrapeDatadogIOCs() {
           const version = parts[1] || '*';
 
           if (name && name !== 'package_name') {
-            // Check if not already added
-            if (!packages.find(p => p.name === name && p.version === version)) {
+            const key = `${name}@${version}`;
+            if (!seen.has(key)) {
+              seen.add(key);
               packages.push({
                 id: `DATADOG-DD-${name}-${version}`.replace(/[^a-zA-Z0-9-]/g, '-'),
                 name: name,

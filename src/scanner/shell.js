@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { findFiles } = require('../utils.js');
 
 const MALICIOUS_PATTERNS = [
   { pattern: /curl.*\|.*sh/, name: 'curl_pipe_shell', severity: 'HIGH' },
@@ -15,8 +16,7 @@ const MALICIOUS_PATTERNS = [
 
 async function scanShellScripts(targetPath) {
   const threats = [];
-  
-  // Cherche les fichiers .sh
+
   const files = findFiles(targetPath, '.sh');
   
   for (const file of files) {
@@ -35,29 +35,6 @@ async function scanShellScripts(targetPath) {
   }
 
   return threats;
-}
-
-function findFiles(dir, extension) {
-  const results = [];
-  
-  if (!fs.existsSync(dir)) return results;
-  
-  const items = fs.readdirSync(dir);
-  
-  for (const item of items) {
-    if (item === 'node_modules' || item === '.git' || item === 'test' || item === 'tests' || item === 'src') continue;
-    
-    const fullPath = path.join(dir, item);
-    const stat = fs.statSync(fullPath);
-    
-    if (stat.isDirectory()) {
-      results.push(...findFiles(fullPath, extension));
-    } else if (item.endsWith(extension)) {
-      results.push(fullPath);
-    }
-  }
-  
-  return results;
 }
 
 module.exports = { scanShellScripts };

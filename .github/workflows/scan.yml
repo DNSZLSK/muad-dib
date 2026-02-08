@@ -16,6 +16,8 @@ jobs:
           node-version: '20'
           cache: 'npm'
       - run: npm ci
+      - name: Lint
+        run: npm run lint
       - run: npm install -g c8
       - name: Run tests with coverage
         run: c8 --reporter=lcov --reporter=text npm test

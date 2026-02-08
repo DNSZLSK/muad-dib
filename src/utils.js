@@ -42,12 +42,13 @@ function isDevFile(relativePath) {
 }
 
 /**
- * Recursively searches for JavaScript files
+ * Recursively searches for files with a given extension
  * @param {string} dir - Starting directory
+ * @param {string} extension - File extension to match (e.g. '.js', '.sh')
  * @param {string[]} [results=[]] - Accumulator array (internal use)
- * @returns {string[]} List of .js file paths
+ * @returns {string[]} List of matching file paths
  */
-function findJsFiles(dir, results = []) {
+function findFiles(dir, extension, results = []) {
   if (!fs.existsSync(dir)) return results;
 
   const items = fs.readdirSync(dir);
@@ -61,8 +62,8 @@ function findJsFiles(dir, results = []) {
       const stat = fs.statSync(fullPath);
 
       if (stat.isDirectory()) {
-        findJsFiles(fullPath, results);
-      } else if (item.endsWith('.js')) {
+        findFiles(fullPath, extension, results);
+      } else if (item.endsWith(extension)) {
         results.push(fullPath);
       }
     } catch {
@@ -71,6 +72,16 @@ function findJsFiles(dir, results = []) {
   }
 
   return results;
+}
+
+/**
+ * Recursively searches for JavaScript files
+ * @param {string} dir - Starting directory
+ * @param {string[]} [results=[]] - Accumulator array (internal use)
+ * @returns {string[]} List of .js file paths
+ */
+function findJsFiles(dir, results = []) {
+  return findFiles(dir, '.js', results);
 }
 
 /**
@@ -92,6 +103,7 @@ module.exports = {
   EXCLUDED_DIRS,
   DEV_PATTERNS,
   isDevFile,
+  findFiles,
   findJsFiles,
   escapeHtml
 };

@@ -7,7 +7,7 @@
     "muaddib": "bin/muaddib.js"
   },
   "scripts": {
-    "test": "node tests/run-tests.js",
+    "test": "c8 --reporter=text --reporter=lcov node tests/run-tests.js",
     "scan": "node bin/muaddib.js scan .",
     "update": "node bin/muaddib.js update",
     "lint": "eslint src bin --ext .js"
@@ -41,7 +41,7 @@
     "acorn": "8.14.0",
     "acorn-walk": "8.3.4",
     "chalk": "5.6.2",
-    "js-yaml": "4.1.0",
+    "js-yaml": "4.1.1",
     "yargs": "18.0.0"
   },
   "devDependencies": {

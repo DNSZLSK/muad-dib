@@ -5,7 +5,9 @@
       "Bash(find:*)",
       "Bash(wc:*)",
       "Bash(npm test)",
-      "Bash(node:*)"
+      "Bash(node:*)",
+      "Bash(npm install:*)",
+      "Bash(npm run lint:*)"
     ]
   }
 }

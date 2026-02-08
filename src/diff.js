@@ -95,13 +95,17 @@ function createTempCopyAtCommit(targetPath, commitHash) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-diff-'));
 
   try {
-    // Clone the repo to temp directory
-    execSync(`git clone --quiet "${targetPath}" "${tempDir}"`, {
+    // Shallow fetch: only retrieve the specific commit needed
+    execSync(`git init --quiet "${tempDir}"`, {
       stdio: ['pipe', 'pipe', 'pipe']
     });
 
-    // Checkout the specific commit
-    execSync(`git checkout --quiet ${commitHash}`, {
+    execSync(`git fetch --depth 1 "${targetPath}" ${commitHash}`, {
+      cwd: tempDir,
+      stdio: ['pipe', 'pipe', 'pipe']
+    });
+
+    execSync('git checkout --quiet FETCH_HEAD', {
       cwd: tempDir,
       stdio: ['pipe', 'pipe', 'pipe']
     });

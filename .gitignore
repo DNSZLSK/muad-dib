@@ -2,4 +2,9 @@ node_modules/
 .muaddib-cache/
 rapport.html
 *.log
+*.sarif
 .DS_Store
+coverage/
+.env
+.idea/
+.vscode/
