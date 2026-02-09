@@ -2,9 +2,9 @@
 
 **Scanner de sécurité npm contre les attaques supply-chain**
 
-DNSZLSK  
-Formation CDA - AFPA  
-Janvier 2026
+DNSZLSK
+Formation CDA - AFPA
+Janvier - Fevrier 2026
 
 ---
 
@@ -168,7 +168,7 @@ J'ai ajouté le support pour trois systèmes de hooks :
 ```yaml
 repos:
   - repo: https://github.com/DNSZLSK/muad-dib
-    rev: v1.2.7
+    rev: v1.4.1
     hooks:
       - id: muaddib-scan
 ```
@@ -189,19 +189,81 @@ La commande `muaddib init-hooks` détecte automatiquement le système utilisé e
 
 **GitHub Action sur le Marketplace** : L'action existait mais n'était pas publiable. J'ai ajouté le branding (icône shield orange), les inputs/outputs documentés, et l'upload SARIF automatique.
 
-**Coverage avec Codecov** : Les 91 tests existaient mais personne ne pouvait voir le taux de couverture. Maintenant c'est visible avec un badge.
+**Coverage avec Codecov** : Les tests existaient mais personne ne pouvait voir le taux de couverture. Maintenant c'est visible avec un badge.
 
 **OpenSSF Scorecard** : Le workflow analyse automatiquement les bonnes pratiques de sécurité du projet et affiche un badge de crédibilité.
 
 ---
 
-## État actuel
+## Hardening et testing avance (9 Fevrier 2026)
+
+### Double audit de securite
+
+La v1.3.0 etait fonctionnelle mais n'avait jamais subi d'audit de securite rigoureux. J'ai lance deux passes d'audit completes sur les 27 fichiers source :
+
+**Audit v1** : 33 issues trouvees et corrigees. Les plus critiques :
+- XSS dans les rapports HTML (donnees non echappees)
+- Injection de commande potentielle dans `safe-install.js`
+- Faux positifs sur les packages rehabilites (chalk, debug)
+- Absence de validation des URLs webhook
+
+**Audit v2** : 25 issues supplementaires. Les plus importantes :
+- **YAML unsafe loading** : `yaml.load()` sans `JSON_SCHEMA` permettait l'execution de tags `!!js/function`. Corrige avec `{ schema: yaml.JSON_SCHEMA }` sur les 3 appels.
+- **SSRF dans le fetcher IOC** : Les redirects HTTP n'etaient pas validees. Ajout de `isAllowedFetchRedirect()` avec whitelist de domaines et resolution des URLs relatives.
+- **18 regles manquantes** dans `rules/index.js` : Les playbooks existaient mais n'etaient pas mappes. Ajout de `curl_pipe_sh`, `netcat_shell`, `shai_hulud_backdoor`, etc.
+- **Performance** : Remplacement des `Array.find()` par des `Map`/`Set` pour lookup O(1) dans le merge IOC et le chargement YAML.
+
+Au total : **58 issues corrigees**, coverage montee de 52% a 80%.
+
+### Fuzzing (56 tests)
+
+Creation d'une suite de fuzz tests pour verifier la robustesse des parsers :
+- **YAML** : invalide, `!!js/function` bloque, vide, 10MB, unicode, null bytes, billion laughs, nesting 100 niveaux
+- **JSON** : invalide, vide, cles 10000 chars, valeurs null, types incorrects, 10000 deps, prototype pollution
+- **AST** : syntaxe invalide, binaire en .js, vide, commentaires seuls, null bytes, BOM, 100 niveaux de callbacks, ligne 500KB
+- **CLI** : arguments 10000 chars, paths unicode, injection shell `$(...)`, flags conflictuels
+
+Resultat : **56/56 pass**. Aucun crash, aucune exception non rattrapee.
+
+### Adversarial testing (15/15)
+
+Creation de 15 scenarios de packages malveillants realistes :
+1. `postinstall curl | sh`
+2. `preinstall` reverse shell
+3. `child_process.exec` + base64 + eval
+4. `readFileSync` credentials + fetch
+5. `process.env.NPM_TOKEN` exfiltration
+6. `eval()` avec concatenation dynamique
+7. `Buffer.from` base64 + eval
+8. `dns.lookup` exfiltration via env
+9. Typosquatting `lodahs`/`axois`/`expres`
+10. `.npmrc` read + HTTP POST
+11. `~/.ssh/id_rsa` vol de cle SSH
+12. Code obfusque `_0x` + hex escapes
+13. Webhook suspect dans postinstall
+14. Tampering package.json + vol credentials
+15. Prototype pollution + eval
+
+**Taux de detection : 15/15 (100%)**.
+
+### Integration Codecov et ESLint Security
+
+- **Codecov** : Workflow CI qui upload automatiquement le coverage. Badge visible dans les README.
+- **ESLint security** : `eslint-plugin-security` avec 14 regles. 105/108 findings sont des faux positifs attendus (acces fichiers dynamiques = coeur du metier). 3 vrais findings identifies (2 regex ReDoS potentielles, 1 variable morte).
+
+### Rapport d'audit PDF
+
+Generation du rapport `MUADDIB_Security_Audit_Report_v1.4.1.pdf` documentant l'ensemble des audits, corrections, et resultats de tests. Ce document sert de preuve de diligence securite.
+
+---
+
+## Etat actuel
 
 ### Ce qui fonctionne
 
 | Feature | Détails |
 |---------|---------|
-| CLI complète | scan, watch, update, scrape, daemon, sandbox, **diff**, **init-hooks** |
+| CLI complète | scan, watch, update, scrape, daemon, sandbox, **diff**, **init-hooks**, **remove-hooks** |
 | Base IOCs | 1500+ packages malveillants |
 | Détection Shai-Hulud | v1, v2, v3 couverts |
 | Exports | JSON, HTML, SARIF |
@@ -212,7 +274,9 @@ La commande `muaddib init-hooks` détecte automatiquement le système utilisé e
 | **Diff entre versions** | Compare et montre uniquement les NOUVELLES menaces |
 | **Pre-commit hooks** | Support pre-commit, husky, git natif |
 | **GitHub Action Marketplace** | Avec inputs/outputs et SARIF auto |
-| Tests | **91 tests passants** |
+| Version check | Notification automatique des nouvelles versions au demarrage |
+| Tests | **145 tests unitaires** + 56 fuzz + 15 adversariaux, **80% coverage** (Codecov) |
+| Audit securite | 2 audits complets, **58 issues corrigees**, [rapport PDF](MUADDIB_Security_Audit_Report_v1.4.1.pdf) |
 
 ### Ce qui manque (honnêtement)
 
