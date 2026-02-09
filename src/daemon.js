@@ -22,12 +22,20 @@ async function startDaemon(options = {}) {
 
   // Surveille le dossier courant
   const cwd = process.cwd();
-  watchDirectory(cwd);
+  const watchers = watchDirectory(cwd);
+
+  // Cleanup function to close all watchers
+  function cleanup() {
+    for (const w of watchers) {
+      try { w.close(); } catch { /* ignore */ }
+    }
+  }
 
   // Garde le processus actif
   process.on('SIGINT', () => {
     console.log('\n[DAEMON] Arret...');
     isRunning = false;
+    cleanup();
     process.exit(0);
   });
 
@@ -38,6 +46,7 @@ async function startDaemon(options = {}) {
 }
 
 function watchDirectory(dir) {
+  const watchers = [];
   const nodeModulesPath = path.join(dir, 'node_modules');
   const packageLockPath = path.join(dir, 'package-lock.json');
   const yarnLockPath = path.join(dir, 'yarn.lock');
@@ -46,21 +55,21 @@ function watchDirectory(dir) {
 
   // Surveille package-lock.json
   if (fs.existsSync(packageLockPath)) {
-    watchFile(packageLockPath, dir);
+    watchers.push(watchFile(packageLockPath, dir));
   }
 
   // Surveille yarn.lock
   if (fs.existsSync(yarnLockPath)) {
-    watchFile(yarnLockPath, dir);
+    watchers.push(watchFile(yarnLockPath, dir));
   }
 
   // Surveille node_modules
   if (fs.existsSync(nodeModulesPath)) {
-    watchNodeModules(nodeModulesPath, dir);
+    watchers.push(watchNodeModules(nodeModulesPath, dir));
   }
 
   // Surveille la creation de node_modules
-  fs.watch(dir, (eventType, filename) => {
+  const dirWatcher = fs.watch(dir, (eventType, filename) => {
     if (filename === 'node_modules' && eventType === 'rename') {
       const nmPath = path.join(dir, 'node_modules');
       if (fs.existsSync(nmPath)) {
@@ -73,25 +82,32 @@ function watchDirectory(dir) {
       triggerScan(dir);
     }
   });
+  watchers.push(dirWatcher);
+
+  return watchers;
 }
 
 function watchFile(filePath, projectDir) {
   let lastMtime = fs.statSync(filePath).mtime.getTime();
 
-  fs.watch(filePath, (eventType) => {
+  return fs.watch(filePath, (eventType) => {
     if (eventType === 'change') {
-      const currentMtime = fs.statSync(filePath).mtime.getTime();
-      if (currentMtime !== lastMtime) {
-        lastMtime = currentMtime;
-        console.log(`[DAEMON] ${path.basename(filePath)} modifie`);
-        triggerScan(projectDir);
+      try {
+        const currentMtime = fs.statSync(filePath).mtime.getTime();
+        if (currentMtime !== lastMtime) {
+          lastMtime = currentMtime;
+          console.log(`[DAEMON] ${path.basename(filePath)} modifie`);
+          triggerScan(projectDir);
+        }
+      } catch {
+        // File may have been deleted between watch trigger and stat
       }
     }
   });
 }
 
 function watchNodeModules(nodeModulesPath, projectDir) {
-  fs.watch(nodeModulesPath, { recursive: true }, (eventType, filename) => {
+  return fs.watch(nodeModulesPath, { recursive: true }, (eventType, filename) => {
     if (filename && filename.includes('package.json')) {
       console.log(`[DAEMON] Nouveau package detecte: ${filename}`);
       triggerScan(projectDir);

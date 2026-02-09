@@ -113,12 +113,17 @@ function mergeIOCs(target, source) {
   return added;
 }
 
-function fetchUrl(url) {
+function fetchUrl(url, redirectCount = 0) {
+  const MAX_REDIRECTS = 5;
   return new Promise(function(resolve, reject) {
     https.get(url, function(res) {
-      // Handle redirects
+      // Handle redirects with limit
       if (res.statusCode === 301 || res.statusCode === 302) {
-        fetchUrl(res.headers.location).then(resolve).catch(reject);
+        if (redirectCount >= MAX_REDIRECTS) {
+          reject(new Error('Too many redirects'));
+          return;
+        }
+        fetchUrl(res.headers.location, redirectCount + 1).then(resolve).catch(reject);
         return;
       }
       if (res.statusCode !== 200) {

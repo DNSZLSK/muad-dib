@@ -42,27 +42,68 @@ function isDevFile(relativePath) {
 }
 
 /**
- * Recursively searches for JavaScript files
+ * Generic recursive file finder with symlink protection and depth limit.
  * @param {string} dir - Starting directory
- * @param {string[]} [results=[]] - Accumulator array (internal use)
- * @returns {string[]} List of .js file paths
+ * @param {object} [options] - Options
+ * @param {string[]} [options.extensions=['.js']] - File extensions to match
+ * @param {string[]} [options.excludedDirs=EXCLUDED_DIRS] - Dirs to skip
+ * @param {number} [options.maxDepth=100] - Max recursion depth
+ * @param {string[]} [options.results=[]] - Accumulator (internal)
+ * @param {Set} [options.visitedInodes=new Set()] - Symlink loop detection
+ * @param {number} [options.depth=0] - Current depth (internal)
+ * @returns {string[]} List of matching file paths
  */
-function findJsFiles(dir, results = []) {
+function findFiles(dir, options = {}) {
+  const {
+    extensions = ['.js'],
+    excludedDirs = EXCLUDED_DIRS,
+    maxDepth = 100,
+    results = [],
+    visitedInodes = new Set(),
+    depth = 0
+  } = options;
+
+  if (depth > maxDepth) return results;
   if (!fs.existsSync(dir)) return results;
 
-  const items = fs.readdirSync(dir);
+  let items;
+  try {
+    items = fs.readdirSync(dir);
+  } catch {
+    return results;
+  }
 
   for (const item of items) {
-    if (EXCLUDED_DIRS.includes(item)) continue;
+    if (excludedDirs.includes(item)) continue;
 
     const fullPath = path.join(dir, item);
 
     try {
-      const stat = fs.statSync(fullPath);
+      const lstat = fs.lstatSync(fullPath);
 
-      if (stat.isDirectory()) {
-        findJsFiles(fullPath, results);
-      } else if (item.endsWith('.js')) {
+      // Symlink protection
+      if (lstat.isSymbolicLink()) {
+        try {
+          const realPath = fs.realpathSync(fullPath);
+          const realStat = fs.statSync(realPath);
+          if (visitedInodes.has(realStat.ino)) continue;
+          visitedInodes.add(realStat.ino);
+          if (realStat.isDirectory()) {
+            findFiles(realPath, { extensions, excludedDirs, maxDepth, results, visitedInodes, depth: depth + 1 });
+          } else if (extensions.some(ext => item.endsWith(ext))) {
+            results.push(realPath);
+          }
+        } catch {
+          // Broken symlink, skip
+        }
+        continue;
+      }
+
+      visitedInodes.add(lstat.ino);
+
+      if (lstat.isDirectory()) {
+        findFiles(fullPath, { extensions, excludedDirs, maxDepth, results, visitedInodes, depth: depth + 1 });
+      } else if (extensions.some(ext => item.endsWith(ext))) {
         results.push(fullPath);
       }
     } catch {
@@ -71,6 +112,16 @@ function findJsFiles(dir, results = []) {
   }
 
   return results;
+}
+
+/**
+ * Recursively searches for JavaScript files (convenience wrapper)
+ * @param {string} dir - Starting directory
+ * @param {string[]} [results=[]] - Accumulator array (internal use)
+ * @returns {string[]} List of .js file paths
+ */
+function findJsFiles(dir, results = []) {
+  return findFiles(dir, { extensions: ['.js'], results });
 }
 
 /**
@@ -88,10 +139,27 @@ function escapeHtml(str) {
     .replace(/'/g, '&#x27;');
 }
 
+/**
+ * Extracts the function/method name from a CallExpression AST node
+ * @param {object} node - AST CallExpression node
+ * @returns {string} Function name or empty string
+ */
+function getCallName(node) {
+  if (node.callee.type === 'Identifier') {
+    return node.callee.name;
+  }
+  if (node.callee.type === 'MemberExpression' && node.callee.property) {
+    return node.callee.property.name;
+  }
+  return '';
+}
+
 module.exports = {
   EXCLUDED_DIRS,
   DEV_PATTERNS,
   isDevFile,
+  findFiles,
   findJsFiles,
-  escapeHtml
+  escapeHtml,
+  getCallName
 };

@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const acorn = require('acorn');
 const walk = require('acorn-walk');
-const { isDevFile, findJsFiles } = require('../utils.js');
+const { isDevFile, findJsFiles, getCallName } = require('../utils.js');
 
 const EXCLUDED_FILES = [
   'src/scanner/ast.js',
@@ -63,7 +63,7 @@ function analyzeFile(content, filePath, basePath) {
 
   try {
     ast = acorn.parse(content, { 
-      ecmaVersion: 2022,
+      ecmaVersion: 2024,
       sourceType: 'module',
       allowHashBang: true
     });
@@ -143,16 +143,6 @@ function analyzeFile(content, filePath, basePath) {
   });
 
   return threats;
-}
-
-function getCallName(node) {
-  if (node.callee.type === 'Identifier') {
-    return node.callee.name;
-  }
-  if (node.callee.type === 'MemberExpression' && node.callee.property) {
-    return node.callee.property.name;
-  }
-  return '';
 }
 
 module.exports = { analyzeAST };

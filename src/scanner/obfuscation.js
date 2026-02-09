@@ -1,9 +1,12 @@
 const fs = require('fs');
 const path = require('path');
+const { findFiles } = require('../utils.js');
+
+const OBF_EXCLUDED_DIRS = ['test', 'tests', 'node_modules', '.git', 'src', 'vscode-extension'];
 
 function detectObfuscation(targetPath) {
   const threats = [];
-  const files = findJsFiles(targetPath);
+  const files = findFiles(targetPath, { extensions: ['.js'], excludedDirs: OBF_EXCLUDED_DIRS });
 
   for (const file of files) {
     const content = fs.readFileSync(file, 'utf8');
@@ -64,31 +67,6 @@ function detectObfuscation(targetPath) {
   }
 
   return threats;
-}
-
-const EXCLUDED_DIRS = ['test', 'tests', 'node_modules', '.git', 'src', 'vscode-extension'];
-
-function findJsFiles(dir) {
-  const results = [];
-  
-  if (!fs.existsSync(dir)) return results;
-  
-  const items = fs.readdirSync(dir);
-  
-  for (const item of items) {
-    if (EXCLUDED_DIRS.includes(item)) continue;
-    
-    const fullPath = path.join(dir, item);
-    const stat = fs.statSync(fullPath);
-    
-    if (stat.isDirectory()) {
-      results.push(...findJsFiles(fullPath));
-    } else if (item.endsWith('.js')) {
-      results.push(fullPath);
-    }
-  }
-  
-  return results;
 }
 
 module.exports = { detectObfuscation };

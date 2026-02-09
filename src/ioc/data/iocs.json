@@ -15976,6 +15976,1566 @@
         "https://snyk.io/advisor"
       ],
       "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@asyncapi/diff-0.5.2",
+      "name": "@asyncapi/diff",
+      "version": "0.5.2",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@asyncapi/dotnet-rabbitmq-template-1.0.2",
+      "name": "@asyncapi/dotnet-rabbitmq-template",
+      "version": "1.0.2",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@asyncapi/edavisualiser-1.2.2",
+      "name": "@asyncapi/edavisualiser",
+      "version": "1.2.2",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@asyncapi/generator-react-sdk-1.1.5",
+      "name": "@asyncapi/generator-react-sdk",
+      "version": "1.1.5",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@asyncapi/go-watermill-template-0.2.77",
+      "name": "@asyncapi/go-watermill-template",
+      "version": "0.2.77",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@asyncapi/html-template-3.3.3",
+      "name": "@asyncapi/html-template",
+      "version": "3.3.3",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@asyncapi/java-spring-cloud-stream-template-0.13.6",
+      "name": "@asyncapi/java-spring-cloud-stream-template",
+      "version": "0.13.6",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@asyncapi/java-template-0.3.6",
+      "name": "@asyncapi/java-template",
+      "version": "0.3.6",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@asyncapi/markdown-template-1.6.9",
+      "name": "@asyncapi/markdown-template",
+      "version": "1.6.9",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@asyncapi/modelina-cli-5.10.3",
+      "name": "@asyncapi/modelina-cli",
+      "version": "5.10.3",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@asyncapi/nodejs-template-3.0.6",
+      "name": "@asyncapi/nodejs-template",
+      "version": "3.0.6",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@asyncapi/nodejs-ws-template-0.10.2",
+      "name": "@asyncapi/nodejs-ws-template",
+      "version": "0.10.2",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@asyncapi/php-template-0.1.2",
+      "name": "@asyncapi/php-template",
+      "version": "0.1.2",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@asyncapi/problem-1.0.2",
+      "name": "@asyncapi/problem",
+      "version": "1.0.2",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@asyncapi/protobuf-schema-parser-3.6.1",
+      "name": "@asyncapi/protobuf-schema-parser",
+      "version": "3.6.1",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@asyncapi/python-paho-template-0.2.15",
+      "name": "@asyncapi/python-paho-template",
+      "version": "0.2.15",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@asyncapi/server-api-0.16.25",
+      "name": "@asyncapi/server-api",
+      "version": "0.16.25",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@asyncapi/specs-6.9.1",
+      "name": "@asyncapi/specs",
+      "version": "6.9.1",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@asyncapi/web-component-2.6.7",
+      "name": "@asyncapi/web-component",
+      "version": "2.6.7",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@dev-blinq/cucumber_client-1.0.739",
+      "name": "@dev-blinq/cucumber_client",
+      "version": "1.0.739",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@everreal/react-charts-2.0.2",
+      "name": "@everreal/react-charts",
+      "version": "2.0.2",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@ifelsedeveloper/protocol-contracts-svm-idl-0.1.3",
+      "name": "@ifelsedeveloper/protocol-contracts-svm-idl",
+      "version": "0.1.3",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@lessondesk/api-client-9.12.3",
+      "name": "@lessondesk/api-client",
+      "version": "9.12.3",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@postman/postman-mcp-cli-1.0.5",
+      "name": "@postman/postman-mcp-cli",
+      "version": "1.0.5",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@postman/tunnel-agent-0.6.7",
+      "name": "@postman/tunnel-agent",
+      "version": "0.6.7",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@tiaanduplessis/json-2.0.3",
+      "name": "@tiaanduplessis/json",
+      "version": "2.0.3",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@tiaanduplessis/react-progressbar-1.0.2",
+      "name": "@tiaanduplessis/react-progressbar",
+      "version": "1.0.2",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@varsityvibe/api-client-1.3.37",
+      "name": "@varsityvibe/api-client",
+      "version": "1.3.37",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@varsityvibe/validation-schemas-0.6.8",
+      "name": "@varsityvibe/validation-schemas",
+      "version": "0.6.8",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@voiceflow/anthropic-0.4.5",
+      "name": "@voiceflow/anthropic",
+      "version": "0.4.5",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@voiceflow/body-parser-1.21.3",
+      "name": "@voiceflow/body-parser",
+      "version": "1.21.3",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@voiceflow/circleci-config-sdk-orb-import-0.2.2",
+      "name": "@voiceflow/circleci-config-sdk-orb-import",
+      "version": "0.2.2",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@voiceflow/commitlint-config-2.6.2",
+      "name": "@voiceflow/commitlint-config",
+      "version": "2.6.2",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@voiceflow/eslint-config-7.16.5",
+      "name": "@voiceflow/eslint-config",
+      "version": "7.16.5",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@voiceflow/git-branch-check-1.4.4",
+      "name": "@voiceflow/git-branch-check",
+      "version": "1.4.4",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@voiceflow/husky-config-1.3.2",
+      "name": "@voiceflow/husky-config",
+      "version": "1.3.2",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@voiceflow/metrics-1.5.2",
+      "name": "@voiceflow/metrics",
+      "version": "1.5.2",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@voiceflow/nestjs-timeout-1.3.2",
+      "name": "@voiceflow/nestjs-timeout",
+      "version": "1.3.2",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@voiceflow/npm-package-json-lint-config-1.1.2",
+      "name": "@voiceflow/npm-package-json-lint-config",
+      "version": "1.1.2",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@voiceflow/prettier-config-1.10.2",
+      "name": "@voiceflow/prettier-config",
+      "version": "1.10.2",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@voiceflow/secrets-provider-1.9.3",
+      "name": "@voiceflow/secrets-provider",
+      "version": "1.9.3",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@voiceflow/semantic-release-config-1.4.2",
+      "name": "@voiceflow/semantic-release-config",
+      "version": "1.4.2",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@voiceflow/serverless-plugin-typescript-2.1.8",
+      "name": "@voiceflow/serverless-plugin-typescript",
+      "version": "2.1.8",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@voiceflow/stitches-react-2.3.3",
+      "name": "@voiceflow/stitches-react",
+      "version": "2.3.3",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@voiceflow/storybook-config-1.2.3",
+      "name": "@voiceflow/storybook-config",
+      "version": "1.2.3",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@voiceflow/stylelint-config-1.1.2",
+      "name": "@voiceflow/stylelint-config",
+      "version": "1.1.2",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@voiceflow/tsconfig-1.12.2",
+      "name": "@voiceflow/tsconfig",
+      "version": "1.12.2",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@voiceflow/verror-1.1.5",
+      "name": "@voiceflow/verror",
+      "version": "1.1.5",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@voiceflow/vitest-config-1.10.3",
+      "name": "@voiceflow/vitest-config",
+      "version": "1.10.3",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@voiceflow/widget-1.7.19",
+      "name": "@voiceflow/widget",
+      "version": "1.7.19",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@zapier/ai-actions-0.1.20",
+      "name": "@zapier/ai-actions",
+      "version": "0.1.20",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@zapier/ai-actions-react-0.1.14",
+      "name": "@zapier/ai-actions-react",
+      "version": "0.1.14",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@zapier/babel-preset-zapier-6.4.3",
+      "name": "@zapier/babel-preset-zapier",
+      "version": "6.4.3",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@zapier/browserslist-config-zapier-1.0.5",
+      "name": "@zapier/browserslist-config-zapier",
+      "version": "1.0.5",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@zapier/eslint-plugin-zapier-11.0.5",
+      "name": "@zapier/eslint-plugin-zapier",
+      "version": "11.0.5",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@zapier/mcp-integration-3.0.3",
+      "name": "@zapier/mcp-integration",
+      "version": "3.0.3",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@zapier/secret-scrubber-1.1.5",
+      "name": "@zapier/secret-scrubber",
+      "version": "1.1.5",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@zapier/spectral-api-ruleset-1.9.3",
+      "name": "@zapier/spectral-api-ruleset",
+      "version": "1.9.3",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@zapier/stubtree-0.1.4",
+      "name": "@zapier/stubtree",
+      "version": "0.1.4",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-@zapier/zapier-sdk-0.15.7",
+      "name": "@zapier/zapier-sdk",
+      "version": "0.15.7",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-asyncapi-preview-1.0.2",
+      "name": "asyncapi-preview",
+      "version": "1.0.2",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-axios-cancelable-1.0.2",
+      "name": "axios-cancelable",
+      "version": "1.0.2",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-barebones-css-1.1.4",
+      "name": "barebones-css",
+      "version": "1.1.4",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-bytecode-checker-cli-1.0.11",
+      "name": "bytecode-checker-cli",
+      "version": "1.0.11",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-bytecode-checker-cli-1.0.8",
+      "name": "bytecode-checker-cli",
+      "version": "1.0.8",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-count-it-down-1.0.2",
+      "name": "count-it-down",
+      "version": "1.0.2",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-create-hardhat3-app-1.1.4",
+      "name": "create-hardhat3-app",
+      "version": "1.1.4",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-dotnet-template-0.0.4",
+      "name": "dotnet-template",
+      "version": "0.0.4",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-evm-checkcode-cli-1.0.15",
+      "name": "evm-checkcode-cli",
+      "version": "1.0.15",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-flapstacks-1.0.2",
+      "name": "flapstacks",
+      "version": "1.0.2",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-flatten-unflatten-1.0.2",
+      "name": "flatten-unflatten",
+      "version": "1.0.2",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-fuzzy-finder-1.0.6",
+      "name": "fuzzy-finder",
+      "version": "1.0.6",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-gate-evm-tools-test-1.0.8",
+      "name": "gate-evm-tools-test",
+      "version": "1.0.8",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-gatsby-plugin-cname-1.0.2",
+      "name": "gatsby-plugin-cname",
+      "version": "1.0.2",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-github-action-for-generator-2.1.28",
+      "name": "github-action-for-generator",
+      "version": "2.1.28",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-gulp-inject-envs-1.2.2",
+      "name": "gulp-inject-envs",
+      "version": "1.2.2",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-haufe-axera-api-client-0.0.2",
+      "name": "haufe-axera-api-client",
+      "version": "0.0.2",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-httpness-1.0.3",
+      "name": "httpness",
+      "version": "1.0.3",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-image-to-uri-1.0.2",
+      "name": "image-to-uri",
+      "version": "1.0.2",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-jacob-zuma-1.0.2",
+      "name": "jacob-zuma",
+      "version": "1.0.2",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-kwami-1.5.9",
+      "name": "kwami",
+      "version": "1.5.9",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-license-o-matic-1.2.2",
+      "name": "license-o-matic",
+      "version": "1.2.2",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-lint-staged-imagemin-1.3.2",
+      "name": "lint-staged-imagemin",
+      "version": "1.3.2",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-nanoreset-7.0.2",
+      "name": "nanoreset",
+      "version": "7.0.2",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-next-circular-dependency-1.0.3",
+      "name": "next-circular-dependency",
+      "version": "1.0.3",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-next-simple-google-analytics-1.1.2",
+      "name": "next-simple-google-analytics",
+      "version": "1.1.2",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-next-styled-nprogress-1.0.5",
+      "name": "next-styled-nprogress",
+      "version": "1.0.5",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-obj-to-css-1.0.3",
+      "name": "obj-to-css",
+      "version": "1.0.3",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-pico-uid-1.0.4",
+      "name": "pico-uid",
+      "version": "1.0.4",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-react-hook-form-persist-3.0.2",
+      "name": "react-hook-form-persist",
+      "version": "3.0.2",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-react-native-datepicker-modal-1.3.2",
+      "name": "react-native-datepicker-modal",
+      "version": "1.3.2",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-react-native-email-2.1.2",
+      "name": "react-native-email",
+      "version": "2.1.2",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-react-native-fetch-2.0.2",
+      "name": "react-native-fetch",
+      "version": "2.0.2",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-react-native-get-pixel-dimensions-1.0.2",
+      "name": "react-native-get-pixel-dimensions",
+      "version": "1.0.2",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-react-native-jam-icons-1.0.2",
+      "name": "react-native-jam-icons",
+      "version": "1.0.2",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-react-native-log-level-1.2.2",
+      "name": "react-native-log-level",
+      "version": "1.2.2",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-react-native-phone-call-1.2.2",
+      "name": "react-native-phone-call",
+      "version": "1.2.2",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-redux-router-kit-1.2.4",
+      "name": "redux-router-kit",
+      "version": "1.2.4",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-sa-company-registration-number-regex-1.0.2",
+      "name": "sa-company-registration-number-regex",
+      "version": "1.0.2",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-sa-id-gen-1.0.5",
+      "name": "sa-id-gen",
+      "version": "1.0.5",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-set-nested-prop-2.0.2",
+      "name": "set-nested-prop",
+      "version": "2.0.2",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-shell-exec-1.1.4",
+      "name": "shell-exec",
+      "version": "1.1.4",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-skills-use-0.1.2",
+      "name": "skills-use",
+      "version": "0.1.2",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-svelte-toasty-1.1.3",
+      "name": "svelte-toasty",
+      "version": "1.1.3",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-template-lib-1.1.4",
+      "name": "template-lib",
+      "version": "1.1.4",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-tenacious-fetch-2.3.3",
+      "name": "tenacious-fetch",
+      "version": "2.3.3",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-test-foundry-app-1.0.2",
+      "name": "test-foundry-app",
+      "version": "1.0.2",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-test-foundry-app-1.0.3",
+      "name": "test-foundry-app",
+      "version": "1.0.3",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-test-foundry-app-1.0.4",
+      "name": "test-foundry-app",
+      "version": "1.0.4",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-test-hardhat-app-1.0.4",
+      "name": "test-hardhat-app",
+      "version": "1.0.4",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-typefence-1.2.3",
+      "name": "typefence",
+      "version": "1.2.3",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-upload-to-play-store-1.0.2",
+      "name": "upload-to-play-store",
+      "version": "1.0.2",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-url-encode-decode-1.0.2",
+      "name": "url-encode-decode",
+      "version": "1.0.2",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-wenk-1.0.9",
+      "name": "wenk",
+      "version": "1.0.9",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-zapier-async-storage-1.0.3",
+      "name": "zapier-async-storage",
+      "version": "1.0.3",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-zapier-platform-cli-18.0.4",
+      "name": "zapier-platform-cli",
+      "version": "18.0.4",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-zapier-platform-core-18.0.4",
+      "name": "zapier-platform-core",
+      "version": "18.0.4",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-zapier-platform-legacy-scripting-runner-4.0.4",
+      "name": "zapier-platform-legacy-scripting-runner",
+      "version": "4.0.4",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-zapier-platform-schema-18.0.4",
+      "name": "zapier-platform-schema",
+      "version": "18.0.4",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
+    },
+    {
+      "id": "SHAI-HULUD-zapier-scripts-7.8.4",
+      "name": "zapier-scripts",
+      "version": "7.8.4",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "shai-hulud-detector",
+      "description": "Compromised by Shai-Hulud 2.0 supply chain attack",
+      "references": [
+        "https://github.com/gensecaihq/Shai-Hulud-2.0-Detector"
+      ],
+      "mitre": "T1195.002"
     }
   ],
   "hashes": [
@@ -16004,7 +17564,7 @@
     "pigS3cr3ts.json"
   ],
   "files": [],
-  "updated": "2026-02-09T19:50:30.941Z",
+  "updated": "2026-02-09T21:29:10.442Z",
   "sources": [
     "shai-hulud-detector",
     "datadog-consolidated",

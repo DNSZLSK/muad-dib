@@ -28,7 +28,12 @@ async function scanPackageJson(targetPath) {
     return threats;
   }
 
-  const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+  let pkg;
+  try {
+    pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+  } catch {
+    return threats;
+  }
   const scripts = pkg.scripts || {};
 
   // Scan lifecycle scripts
@@ -68,9 +73,10 @@ async function scanPackageJson(targetPath) {
   for (const [depName, depVersion] of Object.entries(allDeps)) {
     const malicious = iocs.packages.find(p => {
       if (p.name !== depName) return false;
-      if (p.version === '*' || p.version === depVersion) return true;
-      // Check if declared version matches malicious version
-      if (depVersion.includes(p.version)) return true;
+      if (p.version === '*') return true;
+      // Exact version match only (strip semver range prefixes ^~>=)
+      const cleanVersion = depVersion.replace(/^[^0-9]*/, '');
+      if (p.version === cleanVersion || p.version === depVersion) return true;
       return false;
     });
 

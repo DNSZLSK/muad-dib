@@ -217,21 +217,23 @@ async function scrapeShaiHuludDetector() {
     const { status, data } = await fetchJSON(url);
     
     if (status === 200 && data) {
-      // Extract packages
+      // Extract packages — one IOC per version for correct matching
       const pkgList = data.packages || [];
       for (const pkg of pkgList) {
         const versions = pkg.affectedVersions || ['*'];
-        packages.push({
-          id: `SHAI-HULUD-${pkg.name}`,
-          name: pkg.name,
-          version: versions.join(', '),
-          severity: pkg.severity || 'critical',
-          confidence: 'high',
-          source: 'shai-hulud-detector',
-          description: 'Compromised by Shai-Hulud 2.0 supply chain attack',
-          references: ['https://github.com/gensecaihq/Shai-Hulud-2.0-Detector'],
-          mitre: 'T1195.002'
-        });
+        for (const ver of versions) {
+          packages.push({
+            id: `SHAI-HULUD-${pkg.name}-${ver}`,
+            name: pkg.name,
+            version: ver,
+            severity: pkg.severity || 'critical',
+            confidence: 'high',
+            source: 'shai-hulud-detector',
+            description: 'Compromised by Shai-Hulud 2.0 supply chain attack',
+            references: ['https://github.com/gensecaihq/Shai-Hulud-2.0-Detector'],
+            mitre: 'T1195.002'
+          });
+        }
       }
       
       // Extract hashes

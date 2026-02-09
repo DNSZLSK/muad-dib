@@ -4,6 +4,9 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 
+// Only allow safe characters in git refs (prevents command injection)
+const SAFE_REF_REGEX = /^[a-zA-Z0-9._\-/~^@{}:]+$/;
+
 /**
  * Get the list of commits/tags for comparison suggestions
  */
@@ -61,6 +64,9 @@ function getCurrentCommit(targetPath) {
  * Resolve a ref (tag, branch, commit) to a commit hash
  */
 function resolveRef(targetPath, ref) {
+  if (!SAFE_REF_REGEX.test(ref)) {
+    return null;
+  }
   try {
     return execSync(`git rev-parse ${ref}`, {
       cwd: targetPath,
@@ -92,11 +98,16 @@ function hasUncommittedChanges(targetPath) {
  * Create a temporary copy of the repo at a specific commit
  */
 function createTempCopyAtCommit(targetPath, commitHash) {
+  // Sanitize commitHash (should be a hex hash from resolveRef)
+  if (!SAFE_REF_REGEX.test(commitHash)) {
+    throw new Error('Invalid commit hash');
+  }
+
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-diff-'));
 
   try {
-    // Clone the repo to temp directory
-    execSync(`git clone --quiet "${targetPath}" "${tempDir}"`, {
+    // Clone the repo to temp directory (use -- to separate paths from options)
+    execSync(`git clone --quiet -- "${targetPath}" "${tempDir}"`, {
       stdio: ['pipe', 'pipe', 'pipe']
     });
 
@@ -107,10 +118,11 @@ function createTempCopyAtCommit(targetPath, commitHash) {
     });
 
     // Install dependencies if package.json exists
+    // --ignore-scripts prevents execution of malicious preinstall/postinstall
     const packageJsonPath = path.join(tempDir, 'package.json');
     if (fs.existsSync(packageJsonPath)) {
       try {
-        execSync('npm install --quiet --no-audit --no-fund', {
+        execSync('npm install --quiet --no-audit --no-fund --ignore-scripts', {
           cwd: tempDir,
           stdio: ['pipe', 'pipe', 'pipe'],
           timeout: 60000
@@ -192,25 +204,20 @@ function compareThreats(oldThreats, newThreats) {
  * Run scan and capture results (without console output)
  */
 async function runSilentScan(targetPath, options = {}) {
-  // Capture console.log output
   const originalLog = console.log;
   const logs = [];
-  console.log = (...args) => logs.push(args.join(' '));
-
   try {
+    console.log = (...args) => logs.push(args.join(' '));
     await run(targetPath, { ...options, json: true });
+  } finally {
     console.log = originalLog;
+  }
 
-    // Parse the JSON output
-    const jsonOutput = logs.join('\n');
-    try {
-      return JSON.parse(jsonOutput);
-    } catch {
-      return { threats: [], summary: { total: 0 } };
-    }
-  } catch (err) {
-    console.log = originalLog;
-    throw err;
+  const jsonOutput = logs.join('\n');
+  try {
+    return JSON.parse(jsonOutput);
+  } catch {
+    return { threats: [], summary: { total: 0 } };
   }
 }
 

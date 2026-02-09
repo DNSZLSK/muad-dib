@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { loadCachedIOCs } = require('../ioc/updater.js');
+const { REHABILITATED_PACKAGES } = require('../shared/constants.js');
 
 // Packages legitimes avec lifecycle scripts (ne pas alerter)
 const TRUSTED_PACKAGES = [
@@ -14,96 +15,6 @@ const TRUSTED_PACKAGES = [
 const SAFE_FILES = {
   'inject.js': ['async', 'awilix', 'inversify', 'bottlejs'],
   'install.js': ['esbuild', 'sharp', 'bcrypt', 'node-sass', 'puppeteer', 'playwright', 'electron']
-};
-
-// Packages qui ont ete compromis temporairement mais sont maintenant safe
-// Format: { name: { safe_after: "version", compromised: ["version1", "version2"] } }
-const REHABILITATED_PACKAGES = {
-  // Septembre 2025 - Compromission massive via phishing, corrige en quelques heures
-  'chalk': {
-    compromised: [],  // Versions malveillantes retirees de npm
-    safe: true,       // Toutes versions actuelles sont safe
-    note: 'Compromis sept 2025, versions malveillantes retirees'
-  },
-  'debug': {
-    compromised: [],
-    safe: true,
-    note: 'Compromis sept 2025, corrige rapidement'
-  },
-  'ansi-styles': {
-    compromised: [],
-    safe: true,
-    note: 'Compromis sept 2025, corrige rapidement'
-  },
-  'strip-ansi': {
-    compromised: [],
-    safe: true,
-    note: 'Compromis sept 2025, corrige rapidement'
-  },
-  'wrap-ansi': {
-    compromised: [],
-    safe: true,
-    note: 'Compromis sept 2025, corrige rapidement'
-  },
-  'is-arrayish': {
-    compromised: [],
-    safe: true,
-    note: 'Compromis sept 2025, corrige rapidement'
-  },
-  'simple-swizzle': {
-    compromised: [],
-    safe: true,
-    note: 'Compromis sept 2025, corrige rapidement'
-  },
-  'color-convert': {
-    compromised: [],
-    safe: true,
-    note: 'Compromis sept 2025, corrige rapidement'
-  },
-  'supports-color': {
-    compromised: [],
-    safe: true,
-    note: 'Compromis sept 2025, corrige rapidement'
-  },
-  'has-flag': {
-    compromised: [],
-    safe: true,
-    note: 'Compromis sept 2025, corrige rapidement'
-  },
-  
-  // Packages avec versions specifiques compromises (pas toutes)
-  'ua-parser-js': {
-    compromised: ['0.7.29', '0.8.0', '1.0.0'],
-    safe: false,  // Seulement les versions non-compromised sont safe
-    note: 'Versions specifiques compromises oct 2021'
-  },
-  'coa': {
-    compromised: ['2.0.3', '2.0.4', '2.1.1', '2.1.3', '3.0.1', '3.1.3'],
-    safe: false,
-    note: 'Versions specifiques compromises nov 2021'
-  },
-  'rc': {
-    compromised: ['1.2.9', '1.3.9', '2.3.9'],
-    safe: false,
-    note: 'Versions specifiques compromises nov 2021'
-  },
-  
-  // Notre propre package et dependances connues safe
-  'muaddib-scanner': {
-    compromised: [],
-    safe: true,
-    note: 'Notre package'
-  },
-  'acorn': {
-    compromised: [],
-    safe: true,
-    note: 'Parser AST legitime'
-  },
-  'acorn-walk': {
-    compromised: [],
-    safe: true,
-    note: 'Parser AST legitime'
-  }
 };
 
 /**

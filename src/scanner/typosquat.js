@@ -62,11 +62,11 @@ const WHITELIST = [
   'dotenv', 'dotenv-expand', 'env-cmd',
 
   // Packages Vite et outils associes
-  'vite', 'vitest', 'vitepress',
+  'vitest', 'vitepress',
   'eslint-config-prettier', 'eslint-plugin-prettier',
   'eslint-scope', 'eslint-visitor-keys',
-  'esbuild', 'esbuild-register',
-  'async', 'neo-async'
+  'esbuild-register',
+  'neo-async'
 ];
 
 
