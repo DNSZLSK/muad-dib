@@ -264,7 +264,7 @@ Add to `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/DNSZLSK/muad-dib
-    rev: v1.2.7
+    rev: v1.4.1
     hooks:
       - id: muaddib-scan        # Scan all threats
       # - id: muaddib-diff      # Or: only new threats
@@ -279,12 +279,24 @@ npx husky add .husky/pre-commit "npx muaddib scan . --fail-on high"
 npx husky add .husky/pre-commit "npx muaddib diff HEAD --fail-on high"
 ```
 
+#### Remove hooks
+
+```bash
+muaddib remove-hooks [path]
+```
+
+Removes all MUAD'DIB hooks (husky and git native).
+
 #### Native git hooks
 
 ```bash
 muaddib init-hooks --type git
 # Creates .git/hooks/pre-commit
 ```
+
+### Version check
+
+MUAD'DIB automatically checks for new versions on startup and notifies you if an update is available.
 
 ---
 
@@ -480,6 +492,13 @@ npm install
 npm test
 ```
 
+### Testing
+
+- **145 unit/integration tests** — 80% code coverage via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
+- **56 fuzz tests** — Malformed YAML, invalid JSON, binary files, ReDoS, unicode, 10MB inputs
+- **15 adversarial tests** — Simulated malicious packages, 15/15 detection rate
+- **ESLint security audit** — `eslint-plugin-security` with 14 rules enabled
+
 ---
 
 ## Community
@@ -491,6 +510,7 @@ npm test
 ## Documentation
 
 - [Threat Model](docs/threat-model.md) - What MUAD'DIB detects and doesn't detect
+- [Security Audit Report v1.4.1](docs/MUADDIB_Security_Audit_Report_v1.4.1.pdf) - Full security audit (58 issues fixed)
 - [IOCs YAML](iocs/) - Threat database
 
 ---

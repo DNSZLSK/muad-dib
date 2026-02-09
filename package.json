@@ -1,6 +1,6 @@
 {
   "name": "muaddib-scanner",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Supply-chain threat detection & response for npm",
   "main": "src/index.js",
   "bin": {
@@ -47,6 +47,7 @@
   "devDependencies": {
     "@eslint/js": "9.39.2",
     "eslint": "9.39.2",
+    "eslint-plugin-security": "^3.0.1",
     "globals": "17.3.0"
   }
 }
