@@ -20,9 +20,6 @@ const PLAYBOOKS = {
   npmrc_access:
     'Acces au fichier .npmrc detecte. Risque de vol de token npm. Regenerer le token.',
   
-  npmrc_read:
-    'Lecture du .npmrc. Regenerer immediatement: npm token revoke && npm login',
-  
   github_token_access:
     'Acces au GITHUB_TOKEN. Verifier les permissions. Regenerer si compromis.',
   
@@ -41,23 +38,14 @@ const PLAYBOOKS = {
   reverse_shell:
     'CRITIQUE: Reverse shell detecte. Machine potentiellement compromise. Isoler immediatement.',
   
-  netcat_shell:
-    'CRITIQUE: Shell netcat detecte. Machine potentiellement compromise. Isoler immediatement.',
-  
   home_deletion:
     'CRITIQUE: Tentative de suppression du repertoire home. Dead man\'s switch probable.',
-  
-  shred_home:
-    'CRITIQUE: Destruction de donnees detectee. Dead man\'s switch de Shai-Hulud.',
   
   curl_exfiltration:
     'Exfiltration de donnees via curl. Verifier les donnees envoyees et la destination.',
   
   ssh_access:
     'Acces aux cles SSH. Regenerer les cles si compromis: ssh-keygen -t ed25519',
-  
-  ssh_key_read:
-    'Lecture des cles SSH. Regenerer immediatement toutes les cles.',
   
   github_api_call:
     'Appel a l\'API GitHub. Verifier le contexte. Peut etre legitime ou exfiltration.',
@@ -68,9 +56,6 @@ const PLAYBOOKS = {
   exec_wget:
     'Execution de wget via child_process. Verifier l\'URL et les donnees.',
   
-  wget_chmod_exec:
-    'Telechargement et execution de binaire. Ne pas executer. Analyser le fichier.',
-
   known_malicious_package:
     'CRITIQUE: Supprimer immediatement. rm -rf node_modules && npm cache clean --force && npm install',
 

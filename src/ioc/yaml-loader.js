@@ -12,26 +12,34 @@ function loadYAMLIOCs() {
     files: []
   };
 
+  // Dedup sets for O(1) lookup during loading
+  const seenPkgs = new Set();
+  const seenHashes = new Set();
+  const seenMarkers = new Set();
+  const seenFiles = new Set();
+
   // Charger packages.yaml
-  loadPackagesYAML(path.join(IOCS_DIR, 'packages.yaml'), iocs);
-  
+  loadPackagesYAML(path.join(IOCS_DIR, 'packages.yaml'), iocs, seenPkgs);
+
   // Charger builtin.yaml (fallback)
-  loadBuiltinYAML(path.join(IOCS_DIR, 'builtin.yaml'), iocs);
+  loadBuiltinYAML(path.join(IOCS_DIR, 'builtin.yaml'), iocs, seenPkgs, seenHashes, seenMarkers, seenFiles);
 
   // Charger hashes.yaml
-  loadHashesYAML(path.join(IOCS_DIR, 'hashes.yaml'), iocs);
+  loadHashesYAML(path.join(IOCS_DIR, 'hashes.yaml'), iocs, seenHashes, seenMarkers, seenFiles);
 
   return iocs;
 }
 
-function loadPackagesYAML(filePath, iocs) {
+function loadPackagesYAML(filePath, iocs, seenPkgs) {
   if (!fs.existsSync(filePath)) return;
-  
+
   try {
-    const data = yaml.load(fs.readFileSync(filePath, 'utf8'));
+    const data = yaml.load(fs.readFileSync(filePath, 'utf8'), { schema: yaml.JSON_SCHEMA });
     if (data && data.packages) {
       for (const p of data.packages) {
-        if (!iocs.packages.find(x => x.name === p.name && x.version === p.version)) {
+        const key = p.name + '@' + p.version;
+        if (!seenPkgs.has(key)) {
+          seenPkgs.add(key);
           iocs.packages.push({
             id: p.id,
             name: p.name,
@@ -51,16 +59,18 @@ function loadPackagesYAML(filePath, iocs) {
   }
 }
 
-function loadBuiltinYAML(filePath, iocs) {
+function loadBuiltinYAML(filePath, iocs, seenPkgs, seenHashes, seenMarkers, seenFiles) {
   if (!fs.existsSync(filePath)) return;
-  
+
   try {
-    const data = yaml.load(fs.readFileSync(filePath, 'utf8'));
-    
+    const data = yaml.load(fs.readFileSync(filePath, 'utf8'), { schema: yaml.JSON_SCHEMA });
+
     // Packages
     if (data && data.packages) {
       for (const p of data.packages) {
-        if (!iocs.packages.find(x => x.name === p.name && x.version === p.version)) {
+        const key = p.name + '@' + p.version;
+        if (!seenPkgs.has(key)) {
+          seenPkgs.add(key);
           iocs.packages.push({
             id: `BUILTIN-${p.name}`,
             name: p.name,
@@ -75,12 +85,13 @@ function loadBuiltinYAML(filePath, iocs) {
         }
       }
     }
-    
+
     // Files
     if (data && data.files) {
       for (const f of data.files) {
         const fileName = typeof f === 'string' ? f : f.name;
-        if (!iocs.files.find(x => x.name === fileName)) {
+        if (!seenFiles.has(fileName)) {
+          seenFiles.add(fileName);
           iocs.files.push({
             id: `BUILTIN-FILE-${fileName}`,
             name: fileName,
@@ -92,12 +103,13 @@ function loadBuiltinYAML(filePath, iocs) {
         }
       }
     }
-    
+
     // Hashes
     if (data && data.hashes) {
       for (const h of data.hashes) {
         const hash = typeof h === 'string' ? h : h.sha256;
-        if (!iocs.hashes.find(x => x.sha256 === hash)) {
+        if (!seenHashes.has(hash)) {
+          seenHashes.add(hash);
           iocs.hashes.push({
             id: `BUILTIN-HASH-${hash.slice(0, 8)}`,
             sha256: hash,
@@ -109,12 +121,13 @@ function loadBuiltinYAML(filePath, iocs) {
         }
       }
     }
-    
+
     // Markers
     if (data && data.markers) {
       for (const m of data.markers) {
         const pattern = typeof m === 'string' ? m : m.pattern;
-        if (!iocs.markers.find(x => x.pattern === pattern)) {
+        if (!seenMarkers.has(pattern)) {
+          seenMarkers.add(pattern);
           iocs.markers.push({
             id: `BUILTIN-MARKER-${pattern.slice(0, 10)}`,
             pattern: pattern,
@@ -131,15 +144,16 @@ function loadBuiltinYAML(filePath, iocs) {
   }
 }
 
-function loadHashesYAML(filePath, iocs) {
+function loadHashesYAML(filePath, iocs, seenHashes, seenMarkers, seenFiles) {
   if (!fs.existsSync(filePath)) return;
-  
+
   try {
-    const data = yaml.load(fs.readFileSync(filePath, 'utf8'));
-    
+    const data = yaml.load(fs.readFileSync(filePath, 'utf8'), { schema: yaml.JSON_SCHEMA });
+
     if (data && data.hashes) {
       for (const h of data.hashes) {
-        if (!iocs.hashes.find(x => x.sha256 === h.sha256)) {
+        if (!seenHashes.has(h.sha256)) {
+          seenHashes.add(h.sha256);
           iocs.hashes.push({
             id: h.id,
             sha256: h.sha256,
@@ -153,10 +167,11 @@ function loadHashesYAML(filePath, iocs) {
         }
       }
     }
-    
+
     if (data && data.markers) {
       for (const m of data.markers) {
-        if (!iocs.markers.find(x => x.pattern === m.pattern)) {
+        if (!seenMarkers.has(m.pattern)) {
+          seenMarkers.add(m.pattern);
           iocs.markers.push({
             id: m.id,
             pattern: m.pattern,
@@ -168,10 +183,11 @@ function loadHashesYAML(filePath, iocs) {
         }
       }
     }
-    
+
     if (data && data.files) {
       for (const f of data.files) {
-        if (!iocs.files.find(x => x.name === f.name)) {
+        if (!seenFiles.has(f.name)) {
+          seenFiles.add(f.name);
           iocs.files.push({
             id: f.id,
             name: f.name,

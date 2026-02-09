@@ -10,10 +10,23 @@ function scanGitHubActions(targetPath) {
   }
   
   const files = fs.readdirSync(workflowsPath);
-  
+
   for (const file of files) {
     const filePath = path.join(workflowsPath, file);
-    const content = fs.readFileSync(filePath, 'utf8');
+
+    try {
+      const stat = fs.statSync(filePath);
+      if (!stat.isFile()) continue;
+    } catch {
+      continue;
+    }
+
+    let content;
+    try {
+      content = fs.readFileSync(filePath, 'utf8');
+    } catch {
+      continue; // Skip unreadable files
+    }
     
     // Détection du backdoor Shai-Hulud discussion.yaml
     if (file === 'discussion.yaml' || file === 'discussion.yml') {

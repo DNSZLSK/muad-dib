@@ -111,7 +111,9 @@ function loadStaticIOCs() {
   return { socket: [], phylum: [], npmRemoved: [] };
 }
 
-function fetchJSON(url, options = {}) {
+const MAX_REDIRECTS = 5;
+
+function fetchJSON(url, options = {}, redirectCount = 0) {
   return new Promise((resolve, reject) => {
     const urlObj = new URL(url);
     const reqOptions = {
@@ -126,14 +128,18 @@ function fetchJSON(url, options = {}) {
     };
 
     const req = https.request(reqOptions, (res) => {
-      // Handle redirects (with security validation)
+      // Handle redirects (with security validation and limit)
       if (res.statusCode === 301 || res.statusCode === 302) {
+        if (redirectCount >= MAX_REDIRECTS) {
+          reject(new Error('Too many redirects'));
+          return;
+        }
         const redirectUrl = res.headers.location;
         if (!isAllowedRedirect(redirectUrl)) {
           reject(new Error(`Unauthorized redirect to: ${redirectUrl}`));
           return;
         }
-        fetchJSON(redirectUrl, options).then(resolve).catch(reject);
+        fetchJSON(redirectUrl, options, redirectCount + 1).then(resolve).catch(reject);
         return;
       }
 
@@ -162,7 +168,7 @@ function fetchJSON(url, options = {}) {
   });
 }
 
-function fetchText(url) {
+function fetchText(url, redirectCount = 0) {
   return new Promise((resolve, reject) => {
     const urlObj = new URL(url);
     const reqOptions = {
@@ -175,14 +181,18 @@ function fetchText(url) {
     };
 
     const req = https.request(reqOptions, (res) => {
-      // Handle redirects (with security validation)
+      // Handle redirects (with security validation and limit)
       if (res.statusCode === 301 || res.statusCode === 302) {
+        if (redirectCount >= MAX_REDIRECTS) {
+          reject(new Error('Too many redirects'));
+          return;
+        }
         const redirectUrl = res.headers.location;
         if (!isAllowedRedirect(redirectUrl)) {
           reject(new Error(`Unauthorized redirect to: ${redirectUrl}`));
           return;
         }
-        fetchText(redirectUrl).then(resolve).catch(reject);
+        fetchText(redirectUrl, redirectCount + 1).then(resolve).catch(reject);
         return;
       }
 

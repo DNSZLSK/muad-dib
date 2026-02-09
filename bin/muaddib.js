@@ -8,7 +8,7 @@ const { runScraper } = require('../src/ioc/scraper.js');
 const { safeInstall } = require('../src/safe-install.js');
 const { buildSandboxImage, runSandbox } = require('../src/sandbox.js');
 const { diff, showRefs } = require('../src/diff.js');
-const { initHooks } = require('../src/hooks-init.js');
+const { initHooks, removeHooks } = require('../src/hooks-init.js');
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -238,6 +238,7 @@ const helpText = `
     muaddib watch [path]             Watch in real-time
     muaddib daemon [options]         Start daemon
     muaddib init-hooks [options]     Setup git pre-commit hooks
+    muaddib remove-hooks [path]      Remove MUAD'DIB git hooks
     muaddib update                   Update IOCs
     muaddib scrape                   Scrape new IOCs
     muaddib sandbox <pkg>            Analyze in isolated Docker container
@@ -380,6 +381,13 @@ if (!command || command === '--help' || command === '-h') {
   }
 
   initHooks(target, { type: hookType, mode: hookMode }).then(success => {
+    process.exit(success ? 0 : 1);
+  }).catch(err => {
+    console.error('[ERROR]', err.message);
+    process.exit(1);
+  });
+} else if (command === 'remove-hooks') {
+  removeHooks(target).then(success => {
     process.exit(success ? 0 : 1);
   }).catch(err => {
     console.error('[ERROR]', err.message);

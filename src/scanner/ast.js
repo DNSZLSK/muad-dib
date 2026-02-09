@@ -8,7 +8,6 @@ const EXCLUDED_FILES = [
   'src/scanner/ast.js',
   'src/scanner/shell.js',
   'src/scanner/package.js',
-  'src/ioc/feeds.js',
   'src/response/playbooks.js'
 ];
 
@@ -23,6 +22,12 @@ const SENSITIVE_STRINGS = [
   'Shai-Hulud',
   'The Second Coming',
   'Goldox-T3chs'
+];
+
+// Env var keywords to detect sensitive environment access (separate from SENSITIVE_STRINGS)
+const ENV_SENSITIVE_VARS = [
+  'TOKEN', 'SECRET', 'KEY', 'PASSWORD', 'CREDENTIAL',
+  'AUTH', 'NPM', 'AWS', 'GITHUB', 'SSH', 'NPMRC'
 ];
 
 // Strings that are NOT suspicious
@@ -130,7 +135,7 @@ function analyzeFile(content, filePath, basePath) {
         node.object?.property?.name === 'env'
       ) {
         const envVar = node.property?.name;
-        if (envVar && SENSITIVE_STRINGS.some(s => envVar.includes(s.replace('.', '')))) {
+        if (envVar && ENV_SENSITIVE_VARS.some(s => envVar.toUpperCase().includes(s))) {
           threats.push({
             type: 'env_access',
             severity: 'HIGH',

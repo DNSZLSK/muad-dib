@@ -70,6 +70,9 @@ const WHITELIST = [
 ];
 
 
+// Pre-computed lowercase versions for performance
+const POPULAR_PACKAGES_LOWER = POPULAR_PACKAGES.map(p => p.toLowerCase());
+
 // Seuil minimum de longueur pour eviter faux positifs
 const MIN_PACKAGE_LENGTH = 4;
 
@@ -125,15 +128,18 @@ function findTyposquatMatch(name) {
   // Ignore les packages avec suffixes legitimes courants
   if (isLegitimateVariant(nameLower)) return null;
 
-  for (const popular of POPULAR_PACKAGES) {
+  for (let i = 0; i < POPULAR_PACKAGES.length; i++) {
+    const popularLower = POPULAR_PACKAGES_LOWER[i];
+    const popular = POPULAR_PACKAGES[i];
+
     // Ignore si c'est exactement le meme
-    if (nameLower === popular.toLowerCase()) continue;
+    if (nameLower === popularLower) continue;
 
     // Ignore si le package populaire est trop court
     if (popular.length < MIN_PACKAGE_LENGTH) continue;
 
-    const distance = levenshteinDistance(nameLower, popular.toLowerCase());
-    
+    const distance = levenshteinDistance(nameLower, popularLower);
+
     // Distance de 1 = tres suspect (une seule lettre de difference)
     if (distance === 1) {
       return {

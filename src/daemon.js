@@ -31,18 +31,17 @@ async function startDaemon(options = {}) {
     }
   }
 
-  // Garde le processus actif
-  process.on('SIGINT', () => {
-    console.log('\n[DAEMON] Arret...');
-    isRunning = false;
-    cleanup();
-    process.exit(0);
+  // Keep process alive until SIGINT
+  await new Promise((resolve) => {
+    process.on('SIGINT', () => {
+      console.log('\n[DAEMON] Arret...');
+      isRunning = false;
+      cleanup();
+      resolve();
+    });
   });
 
-  // Boucle infinie
-  while (isRunning) {
-    await sleep(1000);
-  }
+  process.exit(0);
 }
 
 function watchDirectory(dir) {
@@ -55,12 +54,14 @@ function watchDirectory(dir) {
 
   // Surveille package-lock.json
   if (fs.existsSync(packageLockPath)) {
-    watchers.push(watchFile(packageLockPath, dir));
+    const w = watchFile(packageLockPath, dir);
+    if (w) watchers.push(w);
   }
 
   // Surveille yarn.lock
   if (fs.existsSync(yarnLockPath)) {
-    watchers.push(watchFile(yarnLockPath, dir));
+    const w = watchFile(yarnLockPath, dir);
+    if (w) watchers.push(w);
   }
 
   // Surveille node_modules
@@ -88,7 +89,12 @@ function watchDirectory(dir) {
 }
 
 function watchFile(filePath, projectDir) {
-  let lastMtime = fs.statSync(filePath).mtime.getTime();
+  let lastMtime;
+  try {
+    lastMtime = fs.statSync(filePath).mtime.getTime();
+  } catch {
+    return null; // File deleted between existsSync and statSync
+  }
 
   return fs.watch(filePath, (eventType) => {
     if (eventType === 'change') {
@@ -147,10 +153,6 @@ function triggerScan(dir) {
     console.log(`\n[DAEMON] ======================================\n`);
     console.log('[DAEMON] En attente de modifications...');
   }, 3000);
-}
-
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 module.exports = { startDaemon };

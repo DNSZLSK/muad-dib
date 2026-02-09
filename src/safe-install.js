@@ -13,7 +13,7 @@ const NPM_PACKAGE_REGEX = /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*
 function isValidPackageName(pkgName) {
   // Remove version if present
   const nameOnly = pkgName.split('@').filter((p, i) => i === 0 || !p.match(/^\d/)).join('@');
-  return NPM_PACKAGE_REGEX.test(nameOnly) || (nameOnly.startsWith('@') && NPM_PACKAGE_REGEX.test(nameOnly));
+  return NPM_PACKAGE_REGEX.test(nameOnly);
 }
 
 // Known safe packages that legitimately use "suspicious" patterns
@@ -164,8 +164,8 @@ async function scanPackageRecursive(pkg, depth = 0, maxDepth = 3) {
     }
     pkgInfo = JSON.parse(result.stdout);
   } catch {
-    if (depth === 0) console.log(`[!] Package ${pkgName} not found on npm`);
-    return { safe: true };
+    if (depth === 0) console.log(`[!] Invalid npm response for ${pkgName}`);
+    return { safe: false, package: pkgName, reason: 'invalid_npm_response', source: 'npm-registry', description: 'Invalid or unparseable npm response', depth };
   }
   
   // Scan the dependencies

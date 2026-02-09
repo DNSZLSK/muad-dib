@@ -72,58 +72,93 @@ async function updateIOCs() {
 }
 
 /**
- * Merge source IOCs into target without duplicates
- * Returns number of packages added
+ * Merge source IOCs into target without duplicates.
+ * Uses Sets for O(1) dedup. Lazily initializes _sets on target.
+ * Returns number of packages added.
  */
 function mergeIOCs(target, source) {
+  // Lazily initialize dedup sets on the target object
+  if (!target._pkgKeys) {
+    target._pkgKeys = new Set(target.packages.map(p => p.name + '@' + p.version));
+    target._hashSet = new Set(target.hashes);
+    target._markerSet = new Set(target.markers);
+    target._fileSet = new Set(target.files);
+  }
+
   let added = 0;
-  
+
   // Merge packages
   for (const pkg of source.packages || []) {
-    const exists = target.packages.find(function(p) {
-      return p.name === pkg.name && p.version === pkg.version;
-    });
-    if (!exists) {
+    const key = pkg.name + '@' + pkg.version;
+    if (!target._pkgKeys.has(key)) {
       target.packages.push(pkg);
+      target._pkgKeys.add(key);
       added++;
     }
   }
-  
+
   // Merge hashes
   for (const hash of source.hashes || []) {
-    if (!target.hashes.includes(hash)) {
+    if (!target._hashSet.has(hash)) {
       target.hashes.push(hash);
+      target._hashSet.add(hash);
     }
   }
-  
+
   // Merge markers
   for (const marker of source.markers || []) {
-    if (!target.markers.includes(marker)) {
+    if (!target._markerSet.has(marker)) {
       target.markers.push(marker);
+      target._markerSet.add(marker);
     }
   }
-  
+
   // Merge files
   for (const file of source.files || []) {
-    if (!target.files.includes(file)) {
+    if (!target._fileSet.has(file)) {
       target.files.push(file);
+      target._fileSet.add(file);
     }
   }
-  
+
   return added;
+}
+
+// Allowed redirect domains for fetchUrl (SSRF protection)
+const ALLOWED_FETCH_DOMAINS = [
+  'raw.githubusercontent.com',
+  'github.com',
+  'objects.githubusercontent.com'
+];
+
+function isAllowedFetchRedirect(redirectUrl, originalUrl) {
+  try {
+    // Handle relative URLs by resolving against original
+    const resolved = new URL(redirectUrl, originalUrl);
+    return ALLOWED_FETCH_DOMAINS.includes(resolved.hostname);
+  } catch {
+    return false;
+  }
 }
 
 function fetchUrl(url, redirectCount = 0) {
   const MAX_REDIRECTS = 5;
   return new Promise(function(resolve, reject) {
     https.get(url, function(res) {
-      // Handle redirects with limit
+      // Handle redirects with limit and domain validation
       if (res.statusCode === 301 || res.statusCode === 302) {
         if (redirectCount >= MAX_REDIRECTS) {
           reject(new Error('Too many redirects'));
           return;
         }
-        fetchUrl(res.headers.location, redirectCount + 1).then(resolve).catch(reject);
+        const redirectTarget = res.headers.location;
+        if (!isAllowedFetchRedirect(redirectTarget, url)) {
+          reject(new Error('Redirect to unauthorized domain: ' + redirectTarget));
+          return;
+        }
+        // Resolve relative URLs against original
+        const resolvedUrl = new URL(redirectTarget, url).href;
+        fetchUrl(resolvedUrl, redirectCount + 1).then(resolve).catch(reject);
         return;
       }
       if (res.statusCode !== 200) {

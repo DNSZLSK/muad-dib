@@ -193,6 +193,176 @@ const RULES = {
     ],
     mitre: 'T1195.002'
   },
+
+  // Package.json script patterns
+  curl_pipe_sh: {
+    id: 'MUADDIB-PKG-002',
+    name: 'Curl Pipe to Shell in Script',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Script lifecycle execute curl | sh - telechargement et execution de code distant',
+    references: ['https://blog.phylum.io/shai-hulud-npm-worm'],
+    mitre: 'T1105'
+  },
+  wget_pipe_sh: {
+    id: 'MUADDIB-PKG-003',
+    name: 'Wget Pipe to Shell in Script',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Script lifecycle execute wget | sh - telechargement et execution de code distant',
+    references: ['https://blog.phylum.io/shai-hulud-npm-worm'],
+    mitre: 'T1105'
+  },
+  eval_usage: {
+    id: 'MUADDIB-PKG-004',
+    name: 'Eval in Lifecycle Script',
+    severity: 'HIGH',
+    confidence: 'medium',
+    description: 'Utilisation de eval() dans un script lifecycle - execution de code dynamique',
+    references: ['https://owasp.org/www-community/attacks/Command_Injection'],
+    mitre: 'T1059.007'
+  },
+  child_process: {
+    id: 'MUADDIB-PKG-005',
+    name: 'Child Process in Lifecycle Script',
+    severity: 'HIGH',
+    confidence: 'medium',
+    description: 'Reference a child_process dans un script lifecycle',
+    references: ['https://owasp.org/www-community/attacks/Command_Injection'],
+    mitre: 'T1059'
+  },
+  npmrc_access: {
+    id: 'MUADDIB-PKG-006',
+    name: 'npmrc Access',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'Acces au fichier .npmrc detecte - risque de vol de token npm',
+    references: ['https://blog.phylum.io/shai-hulud-npm-worm'],
+    mitre: 'T1552.001'
+  },
+  github_token_access: {
+    id: 'MUADDIB-PKG-007',
+    name: 'GitHub Token Access',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'Acces au GITHUB_TOKEN detecte',
+    references: ['https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions'],
+    mitre: 'T1552.001'
+  },
+  aws_credential_access: {
+    id: 'MUADDIB-PKG-008',
+    name: 'AWS Credential Access',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'Acces aux credentials AWS detecte',
+    references: ['https://docs.aws.amazon.com/IAM/latest/UserGuide/best-practices.html'],
+    mitre: 'T1552.001'
+  },
+  base64_encoding: {
+    id: 'MUADDIB-PKG-009',
+    name: 'Base64 Encoding in Script',
+    severity: 'MEDIUM',
+    confidence: 'low',
+    description: 'Encodage base64 dans un script lifecycle - souvent utilise pour obfusquer du code malveillant',
+    references: ['https://attack.mitre.org/techniques/T1027/'],
+    mitre: 'T1027'
+  },
+
+  // Shell script patterns
+  curl_pipe_shell: {
+    id: 'MUADDIB-SHELL-004',
+    name: 'Curl Pipe to Shell',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Telechargement et execution via curl | sh dans un script shell',
+    references: ['https://blog.phylum.io/shai-hulud-npm-worm'],
+    mitre: 'T1105'
+  },
+  wget_chmod_exec: {
+    id: 'MUADDIB-SHELL-005',
+    name: 'Wget Download and Execute',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Telechargement et execution de binaire via wget + chmod',
+    references: ['https://blog.phylum.io/shai-hulud-npm-worm'],
+    mitre: 'T1105'
+  },
+  netcat_shell: {
+    id: 'MUADDIB-SHELL-006',
+    name: 'Netcat Shell',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Shell netcat detecte - acces distant non autorise',
+    references: ['https://attack.mitre.org/techniques/T1059/004/'],
+    mitre: 'T1059.004'
+  },
+  shred_home: {
+    id: 'MUADDIB-SHELL-007',
+    name: 'Home Directory Destruction',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Destruction de donnees (shred $HOME) - dead man\'s switch de Shai-Hulud',
+    references: ['https://www.wiz.io/blog/shai-hulud-npm-supply-chain-attack'],
+    mitre: 'T1485'
+  },
+  curl_exfiltration: {
+    id: 'MUADDIB-SHELL-008',
+    name: 'Data Exfiltration via Curl',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'Exfiltration de donnees via curl POST',
+    references: ['https://attack.mitre.org/techniques/T1041/'],
+    mitre: 'T1041'
+  },
+  ssh_access: {
+    id: 'MUADDIB-SHELL-009',
+    name: 'SSH Key Access',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'Acces aux cles SSH detecte',
+    references: ['https://attack.mitre.org/techniques/T1552/004/'],
+    mitre: 'T1552.004'
+  },
+
+  // AST additional patterns
+  possible_obfuscation: {
+    id: 'MUADDIB-OBF-002',
+    name: 'Possible Code Obfuscation',
+    severity: 'MEDIUM',
+    confidence: 'low',
+    description: 'Fichier potentiellement obfusque (parse echoue, code dense)',
+    references: ['https://attack.mitre.org/techniques/T1027/'],
+    mitre: 'T1027'
+  },
+  dangerous_call_function: {
+    id: 'MUADDIB-AST-005',
+    name: 'new Function() Constructor',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'Appel new Function() detecte - equivalent a eval()',
+    references: ['https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function/Function'],
+    mitre: 'T1059.007'
+  },
+
+  // GitHub Actions patterns
+  shai_hulud_backdoor: {
+    id: 'MUADDIB-GHA-001',
+    name: 'Shai-Hulud GitHub Actions Backdoor',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Backdoor Shai-Hulud dans GitHub Actions via workflow discussion.yaml sur self-hosted runner',
+    references: ['https://www.wiz.io/blog/shai-hulud-npm-supply-chain-attack'],
+    mitre: 'T1195.002'
+  },
+  workflow_injection: {
+    id: 'MUADDIB-GHA-002',
+    name: 'GitHub Actions Workflow Injection',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'Injection potentielle dans GitHub Actions via input non sanitise sur self-hosted runner',
+    references: ['https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions'],
+    mitre: 'T1195.002'
+  },
 };
 
 function getRule(type) {
