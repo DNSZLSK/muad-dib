@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx c8 node:*)",
+      "Bash(npx c8:*)",
+      "Bash(node bin/muaddib.js:*)"
+    ]
+  }
+}

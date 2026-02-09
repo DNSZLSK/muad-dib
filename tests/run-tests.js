@@ -762,19 +762,642 @@ test('CLI: init-hooks --help shows in help', () => {
 });
 
 // ============================================
-// RESULTS
+// CLI EXTENDED TESTS
 // ============================================
 
-console.log('\n========================================');
-console.log(`RESULTS: ${passed} passed, ${failed} failed`);
-console.log('========================================\n');
+console.log('\n=== CLI EXTENDED TESTS ===\n');
 
-if (failures.length > 0) {
-  console.log('Failures:');
-  failures.forEach(f => {
-    console.log(`  - ${f.name}: ${f.error}`);
-  });
-  console.log('');
+test('CLI-EXT: help command shows usage', () => {
+  const output = runCommand('help');
+  assertIncludes(output, 'Usage', 'Should display usage');
+  assertIncludes(output, 'muaddib scan', 'Should show scan');
+});
+
+test('CLI-EXT: unknown command shows error', () => {
+  const output = runCommand('blahblah');
+  assertIncludes(output, 'Unknown command', 'Should say Unknown command');
+});
+
+test('CLI-EXT: scan with --paranoid and --webhook', () => {
+  const output = runScan(path.join(TESTS_DIR, 'clean'), '--paranoid --webhook https://discord.com/api/webhooks/test');
+  assertIncludes(output, 'PARANOID', 'Should enable paranoid mode');
+});
+
+test('CLI-EXT: interactive mode errors without TTY', () => {
+  // Running muaddib with no command + piped stdin triggers interactiveMenu → catch
+  try {
+    execSync(`node "${BIN}"`, { encoding: 'utf8', timeout: 15000, input: '\n', stdio: ['pipe', 'pipe', 'pipe'] });
+  } catch (e) {
+    const output = (e.stdout || '') + (e.stderr || '');
+    assert(output.length > 0, 'Should produce output');
+    return;
+  }
+});
+
+test('CLI-EXT: diff with ref HEAD~1', () => {
+  const output = runCommand('diff HEAD~1 .');
+  assert(output !== undefined, 'Should not crash');
+});
+
+test('CLI-EXT: init-hooks with --type and --mode', () => {
+  const output = runCommand('init-hooks --type git --mode scan');
+  assert(output !== undefined, 'Should not crash');
+});
+
+test('CLI-EXT: install without packages shows usage', () => {
+  const output = runCommand('install');
+  assertIncludes(output, 'Usage', 'Should show install usage');
+});
+
+test('CLI-EXT: install blocks malicious package', () => {
+  const output = runCommand('install lodahs');
+  assertIncludes(output, 'MALICIOUS', 'Should detect malicious');
+});
+
+test('CLI-EXT: install alias i blocks malicious', () => {
+  const output = runCommand('i lodahs');
+  assertIncludes(output, 'MALICIOUS', 'Should detect via alias');
+});
+
+test('CLI-EXT: sandbox without package shows usage', () => {
+  const output = runCommand('sandbox');
+  assertIncludes(output, 'Usage', 'Should show sandbox usage');
+});
+
+test('CLI-EXT: sandbox with package errors without Docker', () => {
+  const output = runCommand('sandbox nonexistent-pkg-test');
+  assert(output.length > 0, 'Should produce output');
+});
+
+test('CLI-EXT: scrape command runs', () => {
+  const output = runCommand('scrape');
+  assert(output.length > 0, 'Should produce output');
+});
+
+// ============================================
+// DEPENDENCIES TESTS
+// ============================================
+
+console.log('\n=== DEPENDENCIES TESTS ===\n');
+
+const os = require('os');
+const {
+  scanDependencies,
+  checkRehabilitatedPackage
+} = require('../src/scanner/dependencies.js');
+const {
+  scanHashes,
+  computeHash,
+  computeHashCached,
+  clearHashCache,
+  getHashCacheSize
+} = require('../src/scanner/hash.js');
+const nodeCrypto = require('crypto');
+const { safeInstall } = require('../src/safe-install.js');
+
+function createTempPkg(packages) {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-test-'));
+  const nmDir = path.join(tmpDir, 'node_modules');
+  fs.mkdirSync(nmDir, { recursive: true });
+  for (const pkg of packages) {
+    const pkgDir = path.join(nmDir, ...pkg.name.split('/'));
+    fs.mkdirSync(pkgDir, { recursive: true });
+    if (!pkg.skipPkgJson) {
+      const content = pkg.rawPkgJson || JSON.stringify({
+        name: pkg.name,
+        version: pkg.version || '1.0.0'
+      });
+      fs.writeFileSync(path.join(pkgDir, 'package.json'), content);
+    }
+    if (pkg.files) {
+      for (const f of pkg.files) {
+        fs.writeFileSync(path.join(pkgDir, f.name), f.content || '');
+      }
+    }
+  }
+  return tmpDir;
 }
 
-process.exit(failed > 0 ? 1 : 0);
+function cleanupTemp(tmpDir) {
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+}
+
+// --- checkRehabilitatedPackage (lines 113-126) ---
+
+test('DEPS: checkRehabilitatedPackage null for unknown', () => {
+  assert(checkRehabilitatedPackage('unknown-xyz', '1.0.0') === null, 'Should return null');
+});
+
+test('DEPS: checkRehabilitatedPackage true for safe=true', () => {
+  assert(checkRehabilitatedPackage('chalk', '5.0.0') === true, 'chalk should be true');
+});
+
+test('DEPS: checkRehabilitatedPackage false for compromised version', () => {
+  assert(checkRehabilitatedPackage('ua-parser-js', '0.7.29') === false, 'Should be false');
+});
+
+test('DEPS: checkRehabilitatedPackage true for safe version of partial', () => {
+  assert(checkRehabilitatedPackage('ua-parser-js', '2.0.0') === true, 'Should be true');
+});
+
+// ============================================
+// HASH TESTS
+// ============================================
+
+console.log('\n=== HASH TESTS ===\n');
+
+test('HASH: computeHash returns valid SHA256', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-hash-'));
+  const tmpFile = path.join(tmpDir, 'test.js');
+  fs.writeFileSync(tmpFile, 'console.log("hello");');
+  const hash = computeHash(tmpFile);
+  assert(typeof hash === 'string' && hash.length === 64 && /^[0-9a-f]+$/.test(hash), 'Should be valid SHA256');
+  const expected = nodeCrypto.createHash('sha256').update(fs.readFileSync(tmpFile)).digest('hex');
+  assert(hash === expected, 'Should match Node crypto');
+  cleanupTemp(tmpDir);
+});
+
+test('HASH: computeHashCached computes and caches', () => {
+  clearHashCache();
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-hash-'));
+  const tmpFile = path.join(tmpDir, 'test.js');
+  fs.writeFileSync(tmpFile, 'var x = 1;');
+  const hash1 = computeHashCached(tmpFile);
+  assert(hash1 && hash1.length === 64, 'Should return hash');
+  assert(getHashCacheSize() > 0, 'Cache should have entry');
+  const hash2 = computeHashCached(tmpFile);
+  assert(hash1 === hash2, 'Should return cached hash');
+  cleanupTemp(tmpDir);
+  clearHashCache();
+});
+
+test('HASH: computeHashCached invalidates on mtime change', () => {
+  clearHashCache();
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-hash-'));
+  const tmpFile = path.join(tmpDir, 'test.js');
+  fs.writeFileSync(tmpFile, 'var a = 1;');
+  const hash1 = computeHashCached(tmpFile);
+  fs.writeFileSync(tmpFile, 'var a = 2;');
+  // Force different mtime to ensure cache invalidation
+  const future = new Date(Date.now() + 5000);
+  fs.utimesSync(tmpFile, future, future);
+  const hash2 = computeHashCached(tmpFile);
+  assert(hash1 !== hash2, 'Should recompute after file change');
+  cleanupTemp(tmpDir);
+  clearHashCache();
+});
+
+test('HASH: computeHashCached returns null for non-existent file', () => {
+  const result = computeHashCached('/nonexistent/path/file.js');
+  assert(result === null, 'Should return null');
+});
+
+test('HASH: clearHashCache and getHashCacheSize', () => {
+  clearHashCache();
+  assert(getHashCacheSize() === 0, 'Should be 0 after clear');
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-hash-'));
+  const tmpFile = path.join(tmpDir, 'test.js');
+  fs.writeFileSync(tmpFile, 'var y = 2;');
+  computeHashCached(tmpFile);
+  assert(getHashCacheSize() === 1, 'Should be 1');
+  clearHashCache();
+  assert(getHashCacheSize() === 0, 'Should be 0 after clear');
+  cleanupTemp(tmpDir);
+});
+
+// --- scanDependencies + listPackages + getPackageVersion (async) ---
+
+(async () => {
+  async function asyncTest(name, fn) {
+    try {
+      await fn();
+      console.log(`[PASS] ${name}`);
+      passed++;
+    } catch (e) {
+      console.log(`[FAIL] ${name}`);
+      console.log(`       ${e.message}`);
+      failures.push({ name, error: e.message });
+      failed++;
+    }
+  }
+
+  await asyncTest('DEPS: scanDependencies empty without node_modules', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-test-'));
+    try {
+      const threats = await scanDependencies(tmpDir);
+      assert(Array.isArray(threats) && threats.length === 0, 'Should be empty array');
+    } finally {
+      cleanupTemp(tmpDir);
+    }
+  });
+
+  await asyncTest('DEPS: scanDependencies skips rehabilitated safe pkg', async () => {
+    const tmpDir = createTempPkg([{ name: 'chalk', version: '5.4.0' }]);
+    try {
+      const threats = await scanDependencies(tmpDir);
+      const t = threats.filter(x => x.file && x.file.includes('chalk'));
+      assert(t.length === 0, 'chalk should not generate threats');
+    } finally {
+      cleanupTemp(tmpDir);
+    }
+  });
+
+  await asyncTest('DEPS: scanDependencies detects rehabilitated compromised version', async () => {
+    const tmpDir = createTempPkg([{ name: 'coa', version: '2.0.3' }]);
+    try {
+      const threats = await scanDependencies(tmpDir);
+      const t = threats.filter(x => x.message && x.message.includes('coa'));
+      assert(t.length > 0, 'Should detect coa@2.0.3');
+      assert(t[0].severity === 'CRITICAL', 'Should be CRITICAL');
+      assert(t[0].type === 'known_malicious_package', 'Should be known_malicious_package');
+    } finally {
+      cleanupTemp(tmpDir);
+    }
+  });
+
+  await asyncTest('DEPS: scanDependencies detects wildcard malicious pkg', async () => {
+    const tmpDir = createTempPkg([{ name: 'lodahs', version: '1.0.0' }]);
+    try {
+      const threats = await scanDependencies(tmpDir);
+      const t = threats.filter(x => x.message && x.message.includes('lodahs'));
+      assert(t.length > 0, 'Should detect lodahs');
+      assert(t[0].severity === 'CRITICAL', 'Should be CRITICAL');
+    } finally {
+      cleanupTemp(tmpDir);
+    }
+  });
+
+  await asyncTest('DEPS: scanDependencies detects specific version malicious pkg', async () => {
+    const tmpDir = createTempPkg([{ name: 'event-stream', version: '3.3.6' }]);
+    try {
+      const threats = await scanDependencies(tmpDir);
+      const t = threats.filter(x => x.message && x.message.includes('event-stream'));
+      assert(t.length > 0, 'Should detect event-stream@3.3.6');
+    } finally {
+      cleanupTemp(tmpDir);
+    }
+  });
+
+  await asyncTest('DEPS: scanDependencies skips trusted pkg for file checks', async () => {
+    const tmpDir = createTempPkg([
+      { name: 'esbuild', version: '0.19.0', files: [{ name: 'setup_bun.js' }] }
+    ]);
+    try {
+      const threats = await scanDependencies(tmpDir);
+      const t = threats.filter(x => x.type === 'suspicious_file' && x.file.includes('esbuild'));
+      assert(t.length === 0, 'esbuild should not trigger suspicious file');
+    } finally {
+      cleanupTemp(tmpDir);
+    }
+  });
+
+  await asyncTest('DEPS: scanDependencies detects suspicious file', async () => {
+    const tmpDir = createTempPkg([
+      { name: 'random-pkg-abc', version: '1.0.0', files: [{ name: 'setup_bun.js' }] }
+    ]);
+    try {
+      const threats = await scanDependencies(tmpDir);
+      const t = threats.filter(x => x.type === 'suspicious_file');
+      assert(t.length > 0, 'Should detect suspicious file');
+      assert(t[0].severity === 'HIGH', 'Should be HIGH');
+    } finally {
+      cleanupTemp(tmpDir);
+    }
+  });
+
+  await asyncTest('DEPS: scanDependencies detects Shai-Hulud marker', async () => {
+    const tmpDir = createTempPkg([{
+      name: 'evil-pkg-test',
+      version: '1.0.0',
+      rawPkgJson: JSON.stringify({ name: 'evil-pkg-test', version: '1.0.0', description: 'Shai-Hulud was here' })
+    }]);
+    try {
+      const threats = await scanDependencies(tmpDir);
+      const t = threats.filter(x => x.type === 'shai_hulud_marker');
+      assert(t.length > 0, 'Should detect Shai-Hulud marker');
+      assert(t[0].severity === 'CRITICAL', 'Should be CRITICAL');
+    } finally {
+      cleanupTemp(tmpDir);
+    }
+  });
+
+  await asyncTest('DEPS: listPackages handles scoped packages', async () => {
+    const tmpDir = createTempPkg([{ name: '@test-scope/test-pkg', version: '1.0.0' }]);
+    try {
+      const threats = await scanDependencies(tmpDir);
+      assert(Array.isArray(threats), 'Should handle scoped packages');
+    } finally {
+      cleanupTemp(tmpDir);
+    }
+  });
+
+  await asyncTest('DEPS: listPackages skips hidden directories', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-test-'));
+    fs.mkdirSync(path.join(tmpDir, 'node_modules', '.cache'), { recursive: true });
+    try {
+      const threats = await scanDependencies(tmpDir);
+      assert(Array.isArray(threats), 'Should skip hidden dirs');
+    } finally {
+      cleanupTemp(tmpDir);
+    }
+  });
+
+  await asyncTest('DEPS: listPackages skips non-directory items', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-test-'));
+    const nmDir = path.join(tmpDir, 'node_modules');
+    fs.mkdirSync(nmDir, { recursive: true });
+    fs.writeFileSync(path.join(nmDir, 'README.md'), 'hello');
+    try {
+      const threats = await scanDependencies(tmpDir);
+      assert(Array.isArray(threats), 'Should skip files');
+    } finally {
+      cleanupTemp(tmpDir);
+    }
+  });
+
+  await asyncTest('DEPS: getPackageVersion returns * without package.json', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-test-'));
+    fs.mkdirSync(path.join(tmpDir, 'node_modules', 'no-pkg-json'), { recursive: true });
+    try {
+      const threats = await scanDependencies(tmpDir);
+      assert(Array.isArray(threats), 'Should not crash');
+    } finally {
+      cleanupTemp(tmpDir);
+    }
+  });
+
+  await asyncTest('DEPS: getPackageVersion returns * for missing version field', async () => {
+    const tmpDir = createTempPkg([
+      { name: 'no-version-pkg', rawPkgJson: JSON.stringify({ name: 'no-version-pkg' }) }
+    ]);
+    try {
+      const threats = await scanDependencies(tmpDir);
+      assert(Array.isArray(threats), 'Should handle missing version');
+    } finally {
+      cleanupTemp(tmpDir);
+    }
+  });
+
+  // --- scanHashes async tests ---
+
+  await asyncTest('HASH: scanHashes empty without node_modules', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-hash-'));
+    try {
+      const threats = await scanHashes(tmpDir);
+      assert(Array.isArray(threats) && threats.length === 0, 'Should be empty');
+    } finally {
+      cleanupTemp(tmpDir);
+    }
+  });
+
+  await asyncTest('HASH: scanHashes traverses node_modules JS files', async () => {
+    clearHashCache();
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-hash-'));
+    const pkgDir = path.join(tmpDir, 'node_modules', 'test-pkg');
+    fs.mkdirSync(pkgDir, { recursive: true });
+    fs.writeFileSync(path.join(pkgDir, 'index.js'), 'module.exports = {};');
+    fs.writeFileSync(path.join(pkgDir, 'README.md'), '# Readme');
+    try {
+      const threats = await scanHashes(tmpDir);
+      assert(Array.isArray(threats), 'Should return array');
+    } finally {
+      cleanupTemp(tmpDir);
+      clearHashCache();
+    }
+  });
+
+  await asyncTest('HASH: scanHashes handles nested directories', async () => {
+    clearHashCache();
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-hash-'));
+    const nestedDir = path.join(tmpDir, 'node_modules', 'pkg', 'lib', 'utils');
+    fs.mkdirSync(nestedDir, { recursive: true });
+    fs.writeFileSync(path.join(nestedDir, 'helper.js'), 'function help() {}');
+    fs.writeFileSync(path.join(tmpDir, 'node_modules', 'pkg', 'index.js'), 'require("./lib/utils/helper");');
+    try {
+      const threats = await scanHashes(tmpDir);
+      assert(Array.isArray(threats), 'Should handle nested dirs');
+    } finally {
+      cleanupTemp(tmpDir);
+      clearHashCache();
+    }
+  });
+
+  await asyncTest('HASH: scanHashes respects MAX_DEPTH limit', async () => {
+    clearHashCache();
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-hash-'));
+    // Create 52 nested dirs to exceed MAX_DEPTH (50)
+    let deepDir = path.join(tmpDir, 'node_modules');
+    for (let i = 0; i < 52; i++) {
+      deepDir = path.join(deepDir, String(i));
+    }
+    fs.mkdirSync(deepDir, { recursive: true });
+    fs.writeFileSync(path.join(deepDir, 'deep.js'), 'var deep = true;');
+    try {
+      const threats = await scanHashes(tmpDir);
+      assert(Array.isArray(threats), 'Should handle deep nesting gracefully');
+    } finally {
+      cleanupTemp(tmpDir);
+      clearHashCache();
+    }
+  });
+
+  await asyncTest('HASH: scanHashes skips non-JS files', async () => {
+    clearHashCache();
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-hash-'));
+    const pkgDir = path.join(tmpDir, 'node_modules', 'txt-only');
+    fs.mkdirSync(pkgDir, { recursive: true });
+    fs.writeFileSync(path.join(pkgDir, 'data.txt'), 'not javascript');
+    fs.writeFileSync(path.join(pkgDir, 'config.json'), '{}');
+    try {
+      const threats = await scanHashes(tmpDir);
+      assert(Array.isArray(threats) && threats.length === 0, 'Should be empty for non-JS');
+    } finally {
+      cleanupTemp(tmpDir);
+      clearHashCache();
+    }
+  });
+
+  // ============================================
+  // SAFE INSTALL TESTS
+  // ============================================
+
+  console.log('\n=== SAFE INSTALL TESTS ===\n');
+
+  // Helper: run safeInstall with suppressed console output
+  async function quietSafeInstall(packages, options) {
+    const origLog = console.log;
+    console.log = () => {};
+    try {
+      return await safeInstall(packages, options);
+    } finally {
+      console.log = origLog;
+    }
+  }
+
+  await asyncTest('SAFE-INSTALL: blocks known malicious wildcard package', async () => {
+    const result = await quietSafeInstall(['lodahs']);
+    assert(result.blocked === true, 'Should be blocked');
+    assert(result.package === 'lodahs', 'Should identify lodahs');
+  });
+
+  await asyncTest('SAFE-INSTALL: blocks rehabilitated compromised version', async () => {
+    const result = await quietSafeInstall(['coa@2.0.3']);
+    assert(result.blocked === true, 'Should be blocked');
+    assert(result.package === 'coa', 'Should identify coa');
+  });
+
+  await asyncTest('SAFE-INSTALL: trusted package skips scan, cache prevents rescan', async () => {
+    // lodash is trusted → returns safe immediately
+    // second lodash → scannedPackages cache hit
+    // lodahs → malicious → blocks before npm install
+    const result = await quietSafeInstall(['lodash', 'lodash', 'lodahs']);
+    assert(result.blocked === true, 'Should be blocked by lodahs');
+    assert(result.package === 'lodahs', 'Should identify lodahs');
+  });
+
+  await asyncTest('SAFE-INSTALL: scoped package version parsing + invalid name', async () => {
+    const result = await quietSafeInstall(['@evil/foo;bar@1.0.0']);
+    assert(result.blocked === true, 'Should be blocked');
+  });
+
+  await asyncTest('SAFE-INSTALL: force mode continues then name validation blocks', async () => {
+    const result = await quietSafeInstall(['lodahs', 'foo;rm'], { force: true });
+    assert(result.blocked === true, 'Should be blocked by name validation');
+  });
+
+  await asyncTest('SAFE-INSTALL: rehabilitated safe package passes checkIOCs', async () => {
+    // chalk is rehabilitated (safe=true) → checkIOCs returns null
+    // then proceeds to npm view (read-only) → safe
+    // lodahs → blocks before npm install
+    const result = await quietSafeInstall(['chalk', 'lodahs']);
+    assert(result.blocked === true, 'Should be blocked by lodahs');
+    assert(result.package === 'lodahs', 'lodahs should be the blocker');
+  });
+
+  await asyncTest('SAFE-INSTALL: non-scoped package with version parsing', async () => {
+    // event-stream@3.3.6 is in IOCs with specific version
+    const result = await quietSafeInstall(['event-stream@3.3.6']);
+    assert(result.blocked === true, 'Should be blocked');
+  });
+
+  await asyncTest('SAFE-INSTALL: depth=0 console log for unknown safe pkg', async () => {
+    // Package not found on npm → npm view fails → returns safe
+    // Then lodahs blocks
+    const result = await quietSafeInstall(['zzz-nonexistent-pkg-99999', 'lodahs']);
+    assert(result.blocked === true, 'Should be blocked by lodahs');
+  });
+
+  // ============================================
+  // WEBHOOK EXTENDED TESTS
+  // ============================================
+
+  console.log('\n=== WEBHOOK EXTENDED TESTS ===\n');
+
+  const httpModule = require('http');
+  const { sendWebhook: sendWebhookFn, validateWebhookUrl: valUrl } = require('../src/webhook.js');
+
+  // Mock HTTP server on localhost (allowed by validateWebhookUrl)
+  const mockWebhookServer = await new Promise((resolve) => {
+    let lastPayload = null;
+    const srv = httpModule.createServer((req, res) => {
+      let body = '';
+      req.on('data', chunk => body += chunk);
+      req.on('end', () => {
+        try { lastPayload = JSON.parse(body); } catch { lastPayload = body; }
+        if (req.url.includes('/error')) {
+          res.writeHead(500);
+          res.end('error');
+        } else {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end('{"ok":true}');
+        }
+      });
+    });
+    srv.listen(0, 'localhost', () => {
+      resolve({ server: srv, port: srv.address().port, getPayload: () => lastPayload });
+    });
+  });
+  const webhookBase = `http://localhost:${mockWebhookServer.port}`;
+
+  const mockResults = {
+    target: '/test/project',
+    timestamp: new Date().toISOString(),
+    summary: { riskScore: 75, riskLevel: 'HIGH', critical: 2, high: 3, medium: 1, total: 6 },
+    threats: [
+      { type: 'suspicious_code', severity: 'CRITICAL', message: 'Critical threat found', file: 'evil.js' },
+      { type: 'known_malicious', severity: 'HIGH', message: 'High threat found', file: 'bad.js' }
+    ]
+  };
+
+  await asyncTest('WEBHOOK-EXT: validateWebhookUrl catch for invalid URL', async () => {
+    const r = valUrl('not-a-url');
+    assert(!r.valid, 'Should be invalid');
+    assert(r.error.includes('Invalid URL'), 'Should mention Invalid URL');
+  });
+
+  await asyncTest('WEBHOOK-EXT: validateWebhookUrl rejects 172.x', async () => {
+    const r = valUrl('https://172.16.0.1/webhook');
+    assert(!r.valid, 'Should reject 172.16.x');
+  });
+
+  await asyncTest('WEBHOOK-EXT: sendWebhook Discord format', async () => {
+    const r = await sendWebhookFn(`${webhookBase}/discord.com/api/webhooks/t`, mockResults);
+    assert(r.success === true, 'Should succeed');
+    const p = mockWebhookServer.getPayload();
+    assert(p.embeds && p.embeds[0].title.includes('MUAD'), 'Discord format');
+    assert(p.embeds[0].fields.length >= 3, 'Should have fields');
+  });
+
+  await asyncTest('WEBHOOK-EXT: sendWebhook Slack format', async () => {
+    const r = await sendWebhookFn(`${webhookBase}/hooks.slack.com/services/t`, mockResults);
+    assert(r.success === true, 'Should succeed');
+    const p = mockWebhookServer.getPayload();
+    assert(p.blocks && p.blocks.length >= 3, 'Slack format');
+  });
+
+  await asyncTest('WEBHOOK-EXT: sendWebhook Generic format', async () => {
+    const r = await sendWebhookFn(`${webhookBase}/generic`, mockResults);
+    assert(r.success === true, 'Should succeed');
+    const p = mockWebhookServer.getPayload();
+    assert(p.tool === 'MUADDIB', 'Generic format');
+    assert(Array.isArray(p.threats), 'Should have threats');
+  });
+
+  await asyncTest('WEBHOOK-EXT: sendWebhook rejects blocked URL', async () => {
+    try {
+      await sendWebhookFn('https://evil.com/steal', mockResults);
+      assert(false, 'Should throw');
+    } catch (e) {
+      assert(e.message.includes('Webhook blocked'), 'Should be blocked');
+    }
+  });
+
+  await asyncTest('WEBHOOK-EXT: send rejects on HTTP 500', async () => {
+    try {
+      await sendWebhookFn(`${webhookBase}/error`, mockResults);
+      assert(false, 'Should throw');
+    } catch (e) {
+      assert(e.message.includes('500'), 'Should mention 500');
+    }
+  });
+
+  mockWebhookServer.server.close();
+
+  // ============================================
+  // RESULTS
+  // ============================================
+
+  console.log('\n========================================');
+  console.log(`RESULTS: ${passed} passed, ${failed} failed`);
+  console.log('========================================\n');
+
+  if (failures.length > 0) {
+    console.log('Failures:');
+    failures.forEach(f => {
+      console.log(`  - ${f.name}: ${f.error}`);
+    });
+    console.log('');
+  }
+
+  process.exit(failed > 0 ? 1 : 0);
+})();
