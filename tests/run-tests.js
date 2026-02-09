@@ -1267,11 +1267,10 @@ test('HASH: clearHashCache and getHashCacheSize', () => {
 
   await asyncTest('SAFE-INSTALL: rehabilitated safe package passes checkIOCs', async () => {
     // chalk is rehabilitated (safe=true) → checkIOCs returns null
-    // then proceeds to npm view (read-only) → safe
-    // lodahs → blocks before npm install
+    // then proceeds to npm view + dependency scan
+    // lodahs → blocks (or a chalk dependency may block if npm view fails)
     const result = await quietSafeInstall(['chalk', 'lodahs']);
-    assert(result.blocked === true, 'Should be blocked by lodahs');
-    assert(result.package === 'lodahs', 'lodahs should be the blocker');
+    assert(result.blocked === true, 'Should be blocked');
   });
 
   await asyncTest('SAFE-INSTALL: non-scoped package with version parsing', async () => {
@@ -1280,11 +1279,10 @@ test('HASH: clearHashCache and getHashCacheSize', () => {
     assert(result.blocked === true, 'Should be blocked');
   });
 
-  await asyncTest('SAFE-INSTALL: depth=0 console log for unknown safe pkg', async () => {
-    // Package not found on npm → npm view fails → returns safe
-    // Then lodahs blocks
+  await asyncTest('SAFE-INSTALL: depth=0 unknown pkg blocked by npm view fail', async () => {
+    // Package not found on npm → npm view fails → returns safe: false (blocked)
     const result = await quietSafeInstall(['zzz-nonexistent-pkg-99999', 'lodahs']);
-    assert(result.blocked === true, 'Should be blocked by lodahs');
+    assert(result.blocked === true, 'Should be blocked');
   });
 
   // ============================================

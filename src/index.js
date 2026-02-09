@@ -32,7 +32,10 @@ const SEVERITY_WEIGHTS = {
 
   // MEDIUM: Potential threats (suspicious patterns, light obfuscation)
   // Moderate impact, requires investigation but not necessarily malicious
-  MEDIUM: 3
+  MEDIUM: 3,
+
+  // LOW: Informational findings, minimal impact on risk score
+  LOW: 1
 };
 
 // Thresholds for determining the overall risk level
@@ -52,12 +55,12 @@ function scanParanoid(targetPath) {
   const threats = [];
 
   function scanFile(filePath) {
-  try {
-    const content = fs.readFileSync(filePath, 'utf8');
+    try {
+      const content = fs.readFileSync(filePath, 'utf8');
 
       // Ignore URLs (they often contain patterns like .git)
       const contentWithoutUrls = content.replace(/https?:\/\/[^\s"']+/g, '');
-      
+
       for (const [, rule] of Object.entries(PARANOID_RULES)) {
         for (const pattern of rule.patterns) {
           if (contentWithoutUrls.includes(pattern)) {
@@ -75,15 +78,18 @@ function scanParanoid(targetPath) {
       // Ignore read errors
     }
   }
-  
+
   function walkDir(dir) {
     const excluded = ['node_modules', '.git', 'test', 'tests', 'src', 'vscode-extension', '.muaddib-cache', 'data', 'iocs'];
     try {
       const files = fs.readdirSync(dir);
       for (const file of files) {
         const fullPath = path.join(dir, file);
-        const stat = fs.statSync(fullPath);
-        
+        // Use lstatSync to avoid following symlinks
+        const stat = fs.lstatSync(fullPath);
+
+        if (stat.isSymbolicLink()) continue;
+
         if (stat.isDirectory()) {
           if (!excluded.includes(file)) {
             walkDir(fullPath);
@@ -96,7 +102,7 @@ function scanParanoid(targetPath) {
       // Ignore walk errors
     }
   }
-  
+
   walkDir(targetPath);
   return threats;
 }
@@ -162,11 +168,13 @@ async function run(targetPath, options = {}) {
   const criticalCount = threats.filter(t => t.severity === 'CRITICAL').length;
   const highCount = threats.filter(t => t.severity === 'HIGH').length;
   const mediumCount = threats.filter(t => t.severity === 'MEDIUM').length;
+  const lowCount = threats.filter(t => t.severity === 'LOW').length;
 
   let riskScore = 0;
   riskScore += criticalCount * SEVERITY_WEIGHTS.CRITICAL;
   riskScore += highCount * SEVERITY_WEIGHTS.HIGH;
   riskScore += mediumCount * SEVERITY_WEIGHTS.MEDIUM;
+  riskScore += lowCount * SEVERITY_WEIGHTS.LOW;
   riskScore = Math.min(MAX_RISK_SCORE, riskScore);
 
   const riskLevel = riskScore >= RISK_THRESHOLDS.CRITICAL ? 'CRITICAL'

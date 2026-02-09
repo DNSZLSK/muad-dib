@@ -1,4 +1,14 @@
+const fs = require('fs');
+const path = require('path');
 const { RULES } = require('./rules/index.js');
+
+const pkgVersion = (() => {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8')).version;
+  } catch {
+    return '0.0.0';
+  }
+})();
 
 function generateSARIF(results) {
   const sarif = {
@@ -9,7 +19,7 @@ function generateSARIF(results) {
         tool: {
           driver: {
             name: 'MUADDIB',
-            version: '1.0.0',
+            version: pkgVersion,
             informationUri: 'https://github.com/DNSZLSK/muad-dib',
             rules: Object.values(RULES).map(rule => ({
               id: rule.id,
@@ -65,7 +75,6 @@ function sarifLevel(severity) {
 }
 
 function saveSARIF(results, outputPath) {
-  const fs = require('fs');
   const sarif = generateSARIF(results);
   fs.writeFileSync(outputPath, JSON.stringify(sarif, null, 2));
   return outputPath;

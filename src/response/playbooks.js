@@ -109,6 +109,36 @@ const PLAYBOOKS = {
 
   typosquat_detected:
     'ATTENTION: Ce package a un nom tres similaire a un package populaire. Verifier que c\'est bien le bon package. Si erreur de frappe, corriger immediatement.',
+
+  dangerous_call_function:
+    'Appel new Function() detecte. Equivalent a eval(). Verifier la source des donnees.',
+
+  possible_obfuscation:
+    'Fichier potentiellement obfusque (parse echoue, code dense). Analyser manuellement.',
+
+  curl_pipe_shell:
+    'CRITIQUE: Telechargement et execution via curl | sh. Ne jamais executer. Inspecter l\'URL.',
+
+  wget_chmod_exec:
+    'CRITIQUE: Telechargement et execution via wget + chmod. Ne jamais executer. Inspecter le binaire.',
+
+  netcat_shell:
+    'CRITIQUE: Shell netcat detecte. Machine potentiellement compromise. Isoler immediatement.',
+
+  shred_home:
+    'CRITIQUE: Destruction de donnees detectee. Dead man\'s switch de Shai-Hulud. Isoler la machine.',
+
+  npmrc_read:
+    'Lecture du .npmrc. Regenerer immediatement: npm token revoke && npm login',
+
+  ssh_key_read:
+    'Lecture des cles SSH. Regenerer immediatement toutes les cles: ssh-keygen -t ed25519',
+
+  shai_hulud_backdoor:
+    'CRITIQUE: Backdoor Shai-Hulud dans GitHub Actions. Supprimer le workflow et auditer les runs precedents.',
+
+  workflow_injection:
+    'Injection potentielle dans GitHub Actions via input non sanitise sur self-hosted runner. Supprimer ou corriger le workflow.',
 };
 
 function getPlaybook(threatType) {

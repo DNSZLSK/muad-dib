@@ -1,5 +1,6 @@
 const { spawnSync } = require('child_process');
 const { loadCachedIOCs } = require('./ioc/updater.js');
+const { REHABILITATED_PACKAGES } = require('./shared/constants.js');
 
 // Regex to validate npm package names (prevents command injection)
 const NPM_PACKAGE_REGEX = /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/;
@@ -22,102 +23,10 @@ const TRUSTED_PACKAGES = [
   'jest', 'mocha', 'chai', 'sharp', 'bcrypt', 'argon2'
 ];
 
-// Packages that were temporarily compromised but are now safe
-// These packages will NOT be blocked (except specific compromised versions)
-const REHABILITATED_PACKAGES = {
-  // September 2025 - Massive compromise via phishing, fixed within hours
-  'chalk': {
-    compromised: [],
-    safe: true,
-    note: 'Compromised Sept 2025, malicious versions removed from npm'
-  },
-  'debug': {
-    compromised: [],
-    safe: true,
-    note: 'Compromised Sept 2025, quickly fixed'
-  },
-  'ansi-styles': {
-    compromised: [],
-    safe: true,
-    note: 'Compromised Sept 2025, quickly fixed'
-  },
-  'strip-ansi': {
-    compromised: [],
-    safe: true,
-    note: 'Compromised Sept 2025, quickly fixed'
-  },
-  'wrap-ansi': {
-    compromised: [],
-    safe: true,
-    note: 'Compromised Sept 2025, quickly fixed'
-  },
-  'is-arrayish': {
-    compromised: [],
-    safe: true,
-    note: 'Compromised Sept 2025, quickly fixed'
-  },
-  'simple-swizzle': {
-    compromised: [],
-    safe: true,
-    note: 'Compromised Sept 2025, quickly fixed'
-  },
-  'color-convert': {
-    compromised: [],
-    safe: true,
-    note: 'Compromised Sept 2025, quickly fixed'
-  },
-  'supports-color': {
-    compromised: [],
-    safe: true,
-    note: 'Compromised Sept 2025, quickly fixed'
-  },
-  'has-flag': {
-    compromised: [],
-    safe: true,
-    note: 'Compromised Sept 2025, quickly fixed'
-  },
+// REHABILITATED_PACKAGES imported from src/shared/constants.js (single source of truth)
 
-  // Packages with specific compromised versions (not all)
-  'ua-parser-js': {
-    compromised: ['0.7.29', '0.8.0', '1.0.0'],
-    safe: false,
-    note: 'Specific versions compromised Oct 2021'
-  },
-  'coa': {
-    compromised: ['2.0.3', '2.0.4', '2.1.1', '2.1.3', '3.0.1', '3.1.3'],
-    safe: false,
-    note: 'Specific versions compromised Nov 2021'
-  },
-  'rc': {
-    compromised: ['1.2.9', '1.3.9', '2.3.9'],
-    safe: false,
-    note: 'Specific versions compromised Nov 2021'
-  },
-
-  // MUAD'DIB and dependencies
-  'muaddib-scanner': {
-    compromised: [],
-    safe: true,
-    note: 'Our package'
-  },
-  'acorn': {
-    compromised: [],
-    safe: true,
-    note: 'Legitimate AST parser'
-  },
-  'acorn-walk': {
-    compromised: [],
-    safe: true,
-    note: 'Legitimate AST parser'
-  },
-  '@inquirer/prompts': {
-    compromised: [],
-    safe: true,
-    note: 'Legitimate dependency'
-  }
-};
-
-// Cache to avoid scanning the same package twice
+// Cache to avoid scanning the same package twice.
+// IMPORTANT: safeInstall() calls scannedPackages.clear() before each install session.
 const scannedPackages = new Set();
 
 /**
@@ -251,7 +160,7 @@ async function scanPackageRecursive(pkg, depth = 0, maxDepth = 3) {
     const result = spawnSync('npm', ['view', pkgName, '--json'], { encoding: 'utf8', shell: false });
     if (result.status !== 0 || !result.stdout) {
       if (depth === 0) console.log(`[!] Package ${pkgName} not found on npm`);
-      return { safe: true };
+      return { safe: false, package: pkgName, reason: 'npm_unreachable', source: 'npm-registry', description: 'Package not found on npm registry', depth };
     }
     pkgInfo = JSON.parse(result.stdout);
   } catch {

@@ -100,19 +100,19 @@ function generateHTML(results) {
     <div class="summary">
       <div class="summary-card total">
         <h3>TOTAL</h3>
-        <div class="value">${summary.total}</div>
+        <div class="value">${escapeHtml(summary.total)}</div>
       </div>
       <div class="summary-card critical">
         <h3>CRITICAL</h3>
-        <div class="value">${summary.critical}</div>
+        <div class="value">${escapeHtml(summary.critical)}</div>
       </div>
       <div class="summary-card high">
         <h3>HIGH</h3>
-        <div class="value">${summary.high}</div>
+        <div class="value">${escapeHtml(summary.high)}</div>
       </div>
       <div class="summary-card medium">
         <h3>MEDIUM</h3>
-        <div class="value">${summary.medium}</div>
+        <div class="value">${escapeHtml(summary.medium)}</div>
       </div>
     </div>
 

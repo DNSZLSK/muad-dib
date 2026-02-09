@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const acorn = require('acorn');
 const walk = require('acorn-walk');
-const { isDevFile, findJsFiles } = require('../utils.js');
+const { isDevFile, findJsFiles, getCallName } = require('../utils.js');
 
 async function analyzeDataFlow(targetPath) {
   const threats = [];
@@ -29,7 +29,7 @@ function analyzeFile(content, filePath, basePath) {
 
   try {
     ast = acorn.parse(content, {
-      ecmaVersion: 2022,
+      ecmaVersion: 2024,
       sourceType: 'module',
       allowHashBang: true
     });
@@ -46,7 +46,7 @@ function analyzeFile(content, filePath, basePath) {
       
       if (callName === 'readFileSync' || callName === 'readFile') {
         const arg = node.arguments[0];
-        if (arg && isCredentialPath(arg, content)) {
+        if (arg && isCredentialPath(arg)) {
           sources.push({
             type: 'credential_read',
             name: callName,
@@ -106,29 +106,23 @@ function analyzeFile(content, filePath, basePath) {
   return threats;
 }
 
-function getCallName(node) {
-  if (node.callee.type === 'Identifier') {
-    return node.callee.name;
-  }
-  if (node.callee.type === 'MemberExpression' && node.callee.property) {
-    return node.callee.property.name;
-  }
-  return '';
-}
-
-function isCredentialPath(arg, content) {
+function isCredentialPath(arg) {
   if (arg.type === 'Literal' && typeof arg.value === 'string') {
     const val = arg.value.toLowerCase();
-    return val.includes('.npmrc') || 
-           val.includes('.ssh') || 
+    return val.includes('.npmrc') ||
+           val.includes('.ssh') ||
            val.includes('.aws') ||
            val.includes('.gitconfig') ||
            val.includes('.env');
   }
-  if (arg.type === 'TemplateLiteral' || arg.type === 'BinaryExpression') {
-    return content.includes('.npmrc') || 
-           content.includes('.ssh') ||
-           content.includes('.aws');
+  if (arg.type === 'TemplateLiteral') {
+    // Check quasis (string parts) of template literal
+    const quasiText = (arg.quasis || []).map(q => q.value.raw).join('').toLowerCase();
+    return quasiText.includes('.npmrc') ||
+           quasiText.includes('.ssh') ||
+           quasiText.includes('.aws') ||
+           quasiText.includes('.gitconfig') ||
+           quasiText.includes('.env');
   }
   return false;
 }

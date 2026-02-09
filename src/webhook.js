@@ -1,13 +1,26 @@
 const https = require('https');
 const http = require('http');
+const dns = require('dns');
 
 // Allowed domains for webhooks (SSRF security)
 const ALLOWED_WEBHOOK_DOMAINS = [
   'discord.com',
   'discordapp.com',
-  'hooks.slack.com',
-  'webhook.site',           // For testing
-  'requestbin.com'          // For testing
+  'hooks.slack.com'
+];
+
+// Private IP ranges for SSRF protection (checked against resolved IPs)
+const PRIVATE_IP_PATTERNS = [
+  /^127\./,
+  /^10\./,
+  /^172\.(1[6-9]|2[0-9]|3[0-1])\./,
+  /^192\.168\./,
+  /^0\./,
+  /^169\.254\./,
+  /^::1$/,
+  /^::ffff:127\./,
+  /^fc00:/,
+  /^fe80:/
 ];
 
 /**
@@ -34,17 +47,8 @@ function validateWebhookUrl(url) {
       return { valid: false, error: `Domain not allowed: ${hostname}. Allowed domains: ${ALLOWED_WEBHOOK_DOMAINS.join(', ')}` };
     }
 
-    // Block private IP addresses (SSRF)
-    const privateIpPatterns = [
-      /^127\./,
-      /^10\./,
-      /^172\.(1[6-9]|2[0-9]|3[0-1])\./,
-      /^192\.168\./,
-      /^0\./,
-      /^169\.254\./
-    ];
-
-    if (privateIpPatterns.some(pattern => pattern.test(hostname))) {
+    // Block private IP addresses (SSRF) — checks literal IP hostnames
+    if (PRIVATE_IP_PATTERNS.some(pattern => pattern.test(hostname))) {
       return { valid: false, error: 'Private IP addresses not allowed' };
     }
 
@@ -59,6 +63,20 @@ async function sendWebhook(url, results) {
   const validation = validateWebhookUrl(url);
   if (!validation.valid) {
     throw new Error(`Webhook blocked: ${validation.error}`);
+  }
+
+  // DNS resolution check: verify the resolved IP is not private (SSRF via DNS rebinding)
+  const urlObj = new URL(url);
+  if (urlObj.hostname !== 'localhost') {
+    try {
+      const { address } = await dns.promises.lookup(urlObj.hostname);
+      if (PRIVATE_IP_PATTERNS.some(pattern => pattern.test(address))) {
+        throw new Error(`Webhook blocked: hostname ${urlObj.hostname} resolves to private IP ${address}`);
+      }
+    } catch (e) {
+      if (e.message.startsWith('Webhook blocked')) throw e;
+      throw new Error(`Webhook blocked: DNS resolution failed for ${urlObj.hostname}`);
+    }
   }
 
   const isDiscord = url.includes('discord.com');
@@ -248,6 +266,10 @@ function send(url, payload) {
       });
     });
 
+    req.setTimeout(10000, () => {
+      req.destroy();
+      reject(new Error('Webhook timeout after 10s'));
+    });
     req.on('error', reject);
     req.write(JSON.stringify(payload));
     req.end();

@@ -1,5 +1,8 @@
 const fs = require('fs');
 const path = require('path');
+const { findFiles } = require('../utils.js');
+
+const SHELL_EXCLUDED_DIRS = ['node_modules', '.git', 'test', 'tests', 'src'];
 
 const MALICIOUS_PATTERNS = [
   { pattern: /curl.*\|.*sh/, name: 'curl_pipe_shell', severity: 'HIGH' },
@@ -17,7 +20,7 @@ async function scanShellScripts(targetPath) {
   const threats = [];
   
   // Cherche les fichiers .sh
-  const files = findFiles(targetPath, '.sh');
+  const files = findFiles(targetPath, { extensions: ['.sh'], excludedDirs: SHELL_EXCLUDED_DIRS });
   
   for (const file of files) {
     const content = fs.readFileSync(file, 'utf8');
@@ -35,29 +38,6 @@ async function scanShellScripts(targetPath) {
   }
 
   return threats;
-}
-
-function findFiles(dir, extension) {
-  const results = [];
-  
-  if (!fs.existsSync(dir)) return results;
-  
-  const items = fs.readdirSync(dir);
-  
-  for (const item of items) {
-    if (item === 'node_modules' || item === '.git' || item === 'test' || item === 'tests' || item === 'src') continue;
-    
-    const fullPath = path.join(dir, item);
-    const stat = fs.statSync(fullPath);
-    
-    if (stat.isDirectory()) {
-      results.push(...findFiles(fullPath, extension));
-    } else if (item.endsWith(extension)) {
-      results.push(fullPath);
-    }
-  }
-  
-  return results;
 }
 
 module.exports = { scanShellScripts };
