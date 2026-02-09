@@ -12,3 +12,6 @@ rapport.html
 results.sarif
 index.html
 action/
+coverage/
+.claude/
+ults.sarif

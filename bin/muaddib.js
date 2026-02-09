@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+const { execSync } = require('child_process');
 const { run } = require('../src/index.js');
 const { updateIOCs } = require('../src/ioc/updater.js');
 const { watch } = require('../src/watch.js');
@@ -44,6 +45,20 @@ for (let i = 0; i < options.length; i++) {
     paranoidMode = true;
   } else if (!options[i].startsWith('-')) {
     target = options[i];
+  }
+}
+
+// Version check (non-blocking, skip for machine-readable output)
+if (!jsonOutput && !sarifOutput) {
+  try {
+    const currentVersion = require('../package.json').version;
+    const latest = execSync('npm view muaddib-scanner version', { timeout: 5000 }).toString().trim();
+    if (latest !== currentVersion) {
+      console.log(`\n[UPDATE] New version available: ${currentVersion} -> ${latest}`);
+      console.log(`  Run: npm install -g muaddib-scanner@latest\n`);
+    }
+  } catch {
+    // No network or npm unavailable, skip silently
   }
 }
 
