@@ -49,7 +49,8 @@ function isDevFile(relativePath) {
  * @param {string[]} [options.excludedDirs=EXCLUDED_DIRS] - Dirs to skip
  * @param {number} [options.maxDepth=100] - Max recursion depth
  * @param {string[]} [options.results=[]] - Accumulator (internal)
- * @param {Set} [options.visitedInodes=new Set()] - Symlink loop detection
+ * @param {Set} [options.visitedInodes=new Set()] - Symlink loop detection (note: inode tracking
+ *   is unreliable on Windows where stat.ino may be 0; maxDepth serves as fallback protection)
  * @param {number} [options.depth=0] - Current depth (internal)
  * @returns {string[]} List of matching file paths
  */

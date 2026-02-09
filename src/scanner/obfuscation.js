@@ -9,7 +9,12 @@ function detectObfuscation(targetPath) {
   const files = findFiles(targetPath, { extensions: ['.js'], excludedDirs: OBF_EXCLUDED_DIRS });
 
   for (const file of files) {
-    const content = fs.readFileSync(file, 'utf8');
+    let content;
+    try {
+      content = fs.readFileSync(file, 'utf8');
+    } catch {
+      continue; // Skip unreadable files
+    }
     const relativePath = path.relative(targetPath, file);
 
     const signals = [];

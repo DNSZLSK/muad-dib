@@ -47,6 +47,17 @@ async function scanDependencies(targetPath) {
 
   const packages = listPackages(nodeModulesPath);
 
+  // Pre-compute files and markers lists once (outside the loop)
+  const suspiciousFilesRaw = iocs.filesSet || iocs.files || [];
+  const filesToCheck = suspiciousFilesRaw instanceof Set
+    ? Array.from(suspiciousFilesRaw)
+    : suspiciousFilesRaw;
+
+  const markersRaw = iocs.markersSet || iocs.markers || [];
+  const markersToCheck = markersRaw instanceof Set
+    ? Array.from(markersRaw)
+    : markersRaw;
+
   for (const pkg of packages) {
     // D'abord verifier la whitelist des packages rehabilites
     const rehabStatus = checkRehabilitatedPackage(pkg.name, pkg.version);
@@ -107,12 +118,6 @@ async function scanDependencies(targetPath) {
     if (TRUSTED_PACKAGES.includes(pkg.name)) continue;
 
     // Verifie les fichiers suspects (IOCs caches) avec whitelist
-    // Utilise Set ou Array selon la structure disponible
-    const suspiciousFiles = iocs.filesSet || iocs.files || [];
-    const filesToCheck = suspiciousFiles instanceof Set
-      ? Array.from(suspiciousFiles)
-      : suspiciousFiles;
-
     for (const suspFile of filesToCheck) {
       // Skip si fichier legitime pour ce package
       if (SAFE_FILES[suspFile] && SAFE_FILES[suspFile].includes(pkg.name)) {
@@ -137,12 +142,6 @@ async function scanDependencies(targetPath) {
         const pkgContent = fs.readFileSync(pkgJsonPath, 'utf8');
 
         // Verifie les marqueurs Shai-Hulud
-        // Utilise Set ou Array selon la structure disponible
-        const markers = iocs.markersSet || iocs.markers || [];
-        const markersToCheck = markers instanceof Set
-          ? Array.from(markers)
-          : markers;
-
         for (const marker of markersToCheck) {
           if (pkgContent.includes(marker)) {
             threats.push({

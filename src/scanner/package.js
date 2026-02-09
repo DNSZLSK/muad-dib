@@ -71,14 +71,28 @@ async function scanPackageJson(targetPath) {
   };
 
   for (const [depName, depVersion] of Object.entries(allDeps)) {
-    const malicious = iocs.packages.find(p => {
-      if (p.name !== depName) return false;
-      if (p.version === '*') return true;
-      // Exact version match only (strip semver range prefixes ^~>=)
-      const cleanVersion = depVersion.replace(/^[^0-9]*/, '');
-      if (p.version === cleanVersion || p.version === depVersion) return true;
-      return false;
-    });
+    let malicious = null;
+
+    // Use optimized Map for O(1) lookup if available
+    if (iocs.packagesMap) {
+      if (iocs.wildcardPackages && iocs.wildcardPackages.has(depName)) {
+        const pkgList = iocs.packagesMap.get(depName);
+        malicious = pkgList ? pkgList.find(p => p.version === '*') : null;
+      } else if (iocs.packagesMap.has(depName)) {
+        const pkgList = iocs.packagesMap.get(depName);
+        const cleanVersion = depVersion.replace(/^[^0-9]*/, '');
+        malicious = pkgList.find(p => p.version === cleanVersion || p.version === depVersion);
+      }
+    } else {
+      // Fallback: linear search for compatibility
+      malicious = iocs.packages.find(p => {
+        if (p.name !== depName) return false;
+        if (p.version === '*') return true;
+        const cleanVersion = depVersion.replace(/^[^0-9]*/, '');
+        if (p.version === cleanVersion || p.version === depVersion) return true;
+        return false;
+      });
+    }
 
     if (malicious) {
       threats.push({

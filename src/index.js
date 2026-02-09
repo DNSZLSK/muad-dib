@@ -192,6 +192,7 @@ async function run(targetPath, options = {}) {
       critical: criticalCount,
       high: highCount,
       medium: mediumCount,
+      low: lowCount,
       riskScore: riskScore,
       riskLevel: riskLevel
     }

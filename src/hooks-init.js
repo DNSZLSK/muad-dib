@@ -2,6 +2,15 @@ const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
+// Read version from package.json for pre-commit config
+const PKG_VERSION = (() => {
+  try {
+    return 'v' + JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8')).version;
+  } catch {
+    return 'v1.0.0';
+  }
+})();
+
 /**
  * Detect which hook system is available
  */
@@ -131,7 +140,7 @@ async function initPreCommit(targetPath, mode) {
   const hookId = mode === 'diff' ? 'muaddib-diff' : 'muaddib-scan';
   const muaddibConfig = `
   - repo: https://github.com/DNSZLSK/muad-dib
-    rev: v1.2.7
+    rev: ${PKG_VERSION}
     hooks:
       - id: ${hookId}
 `;
