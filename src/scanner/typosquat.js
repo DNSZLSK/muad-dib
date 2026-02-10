@@ -1,5 +1,9 @@
 const fs = require('fs');
 const path = require('path');
+const { getPackageMetadata } = require('./npm-registry.js');
+
+// In-memory cache to avoid re-querying the same package in one scan
+const metadataCache = new Map();
 
 // Top 100 packages npm les plus populaires (cibles de typosquatting)
 const POPULAR_PACKAGES = [
@@ -76,6 +80,78 @@ const POPULAR_PACKAGES_LOWER = POPULAR_PACKAGES.map(p => p.toLowerCase());
 // Seuil minimum de longueur pour eviter faux positifs
 const MIN_PACKAGE_LENGTH = 4;
 
+const SEVERITY_ORDER = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
+
+function maxSeverity(a, b) {
+  return SEVERITY_ORDER.indexOf(a) >= SEVERITY_ORDER.indexOf(b) ? a : b;
+}
+
+async function getCachedMetadata(packageName) {
+  if (metadataCache.has(packageName)) {
+    return metadataCache.get(packageName);
+  }
+  const result = await getPackageMetadata(packageName);
+  metadataCache.set(packageName, result);
+  return result;
+}
+
+function scoreMetadata(meta) {
+  let score = 0;
+  let severity = 'HIGH'; // base severity from Levenshtein match
+
+  if (!meta) {
+    // Package not found on npm = suspect
+    return { score: 20, severity: 'HIGH', factors: ['not_on_npm'] };
+  }
+
+  const factors = [];
+
+  // 1. Age
+  if (meta.age_days !== null && meta.age_days < 7) {
+    score += 30;
+    severity = maxSeverity(severity, 'CRITICAL');
+    factors.push('age<7d');
+  } else if (meta.age_days !== null && meta.age_days < 30) {
+    score += 15;
+    severity = maxSeverity(severity, 'HIGH');
+    factors.push('age<30d');
+  }
+
+  // 2. Downloads
+  if (meta.weekly_downloads < 100) {
+    score += 25;
+    severity = maxSeverity(severity, 'HIGH');
+    factors.push('downloads<100');
+  } else if (meta.weekly_downloads < 1000) {
+    score += 10;
+    severity = maxSeverity(severity, 'MEDIUM');
+    factors.push('downloads<1000');
+  }
+
+  // 3. Author package count
+  if (meta.author_package_count <= 1) {
+    score += 20;
+    severity = maxSeverity(severity, 'HIGH');
+    factors.push('single_pkg_author');
+  }
+
+  // 4. No README
+  if (!meta.has_readme) {
+    score += 10;
+    severity = maxSeverity(severity, 'MEDIUM');
+    factors.push('no_readme');
+  }
+
+  // 5. No repository
+  if (!meta.has_repository) {
+    score += 10;
+    severity = maxSeverity(severity, 'MEDIUM');
+    factors.push('no_repo');
+  }
+
+  return { score, severity, factors };
+}
+
 async function scanTyposquatting(targetPath) {
   const threats = [];
   const packageJsonPath = path.join(targetPath, 'package.json');
@@ -92,22 +168,65 @@ async function scanTyposquatting(targetPath) {
     ...packageJson.optionalDependencies
   };
 
+  // Phase 1: Levenshtein matches (synchronous)
+  const candidates = [];
   for (const depName of Object.keys(dependencies)) {
     const match = findTyposquatMatch(depName);
     if (match) {
-      threats.push({
-        type: 'typosquat_detected',
-        severity: 'HIGH',
-        message: `Package "${depName}" ressemble a "${match.original}" (${match.type}). Possible typosquatting.`,
-        file: 'package.json',
-        details: {
-          suspicious: depName,
-          legitimate: match.original,
-          technique: match.type,
-          distance: match.distance
-        }
-      });
+      candidates.push({ depName, match });
     }
+  }
+
+  if (candidates.length === 0) return threats;
+
+  // Phase 2: API enrichment (parallel)
+  const metadataResults = await Promise.all(
+    candidates.map(c => getCachedMetadata(c.depName))
+  );
+
+  // Phase 3: Composite scoring
+  for (let i = 0; i < candidates.length; i++) {
+    const { depName, match } = candidates[i];
+    const meta = metadataResults[i];
+    const mf = scoreMetadata(meta);
+
+    const finalSeverity = maxSeverity('HIGH', mf.severity);
+
+    // Build detail message
+    let details;
+    if (!meta) {
+      details = 'Package not found on npm (suspect).';
+    } else {
+      details = 'Age: ' + meta.age_days + 'd'
+        + ', Downloads: ' + meta.weekly_downloads + '/week'
+        + ', Author packages: ' + meta.author_package_count
+        + ', No README: ' + !meta.has_readme
+        + ', No repo: ' + !meta.has_repository;
+    }
+
+    const confidence = mf.score >= 40 ? 'CRITICAL'
+      : mf.score >= 20 ? 'HIGH'
+      : mf.score > 0 ? 'MEDIUM'
+      : 'LOW';
+
+    const message = 'Package "' + depName + '" resembles "' + match.original
+      + '" (' + match.type + '). ' + details + '. Confidence: ' + confidence;
+
+    threats.push({
+      type: 'typosquat_detected',
+      severity: finalSeverity,
+      message: message,
+      file: 'package.json',
+      details: {
+        suspicious: depName,
+        legitimate: match.original,
+        technique: match.type,
+        distance: match.distance,
+        composite_score: mf.score,
+        factors: mf.factors,
+        metadata: meta
+      }
+    });
   }
 
   return threats;
@@ -234,4 +353,8 @@ function levenshteinDistance(a, b) {
   return matrix[b.length][a.length];
 }
 
-module.exports = { scanTyposquatting, levenshteinDistance };
+function clearMetadataCache() {
+  metadataCache.clear();
+}
+
+module.exports = { scanTyposquatting, levenshteinDistance, clearMetadataCache };

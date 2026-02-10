@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { findFiles } = require('../utils.js');
 
-const SHELL_EXCLUDED_DIRS = ['node_modules', '.git', 'test', 'tests', 'src'];
+const SHELL_EXCLUDED_DIRS = ['node_modules', '.git', 'test', 'tests', 'src', 'docker'];
 
 const MALICIOUS_PATTERNS = [
   { pattern: /curl.*\|.*sh/, name: 'curl_pipe_shell', severity: 'HIGH' },
