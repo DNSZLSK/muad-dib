@@ -120,6 +120,30 @@ const RULES = {
     ],
     mitre: 'T1195.002'
   },
+  pypi_malicious_package: {
+    id: 'MUADDIB-PYPI-001',
+    name: 'Malicious PyPI Package',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Package PyPI present dans la base IOC de packages malveillants connus (source: OSV)',
+    references: [
+      'https://osv.dev/',
+      'https://pypi.org/'
+    ],
+    mitre: 'T1195.002'
+  },
+  pypi_typosquat_detected: {
+    id: 'MUADDIB-PYPI-002',
+    name: 'PyPI Typosquatting Detected',
+    severity: 'HIGH',
+    confidence: 'medium',
+    description: 'Dependance PyPI suspecte de typosquatting d\'un package populaire (Levenshtein)',
+    references: [
+      'https://pypi.org/',
+      'https://blog.phylum.io/typosquatting-pypi'
+    ],
+    mitre: 'T1195.002'
+  },
   suspicious_file: {
     id: 'MUADDIB-DEP-002',
     name: 'Suspicious File in Dependency',

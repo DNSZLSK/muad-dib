@@ -310,13 +310,17 @@ function extractVersions(affected) {
 /**
  * Parse an OSV-format vulnerability entry into IOC packages.
  * Shared by OSSF and OSV sources.
+ * @param {Object} vuln - OSV vulnerability object
+ * @param {string} source - Source identifier
+ * @param {string} [ecosystem='npm'] - Target ecosystem ('npm' or 'PyPI')
  */
-function parseOSVEntry(vuln, source) {
+function parseOSVEntry(vuln, source, ecosystem) {
+  if (!ecosystem) ecosystem = 'npm';
   const packages = [];
   if (!vuln || !vuln.affected) return packages;
 
   for (const affected of vuln.affected) {
-    if (!affected.package || affected.package.ecosystem !== 'npm') continue;
+    if (!affected.package || affected.package.ecosystem !== ecosystem) continue;
 
     const pkgVersions = extractVersions(affected);
 
@@ -626,6 +630,55 @@ async function scrapeOSVDataDump() {
 }
 
 // ============================================
+// SOURCE 3c: OSV.dev PyPI data dump
+// Bulk zip download — PyPI malicious packages
+// ============================================
+async function scrapeOSVPyPIDataDump() {
+  console.log('[SCRAPER] OSV.dev PyPI data dump (all.zip)...');
+  const packages = [];
+
+  try {
+    console.log('[SCRAPER]   Downloading PyPI all.zip from GCS...');
+    const zipUrl = 'https://osv-vulnerabilities.storage.googleapis.com/PyPI/all.zip';
+    const zipBuffer = await fetchBuffer(zipUrl);
+    console.log('[SCRAPER]   Downloaded ' + Math.round(zipBuffer.length / 1024 / 1024) + 'MB');
+
+    const zip = new AdmZip(zipBuffer);
+    const entries = zip.getEntries();
+
+    let malCount = 0;
+    let skippedCount = 0;
+
+    for (const entry of entries) {
+      const name = entry.entryName;
+
+      // Only process MAL-*.json files (malware)
+      if (!name.startsWith('MAL-') || !name.endsWith('.json')) {
+        skippedCount++;
+        continue;
+      }
+
+      try {
+        const content = entry.getData().toString('utf8');
+        const vuln = JSON.parse(content);
+        const parsed = parseOSVEntry(vuln, 'osv-malicious-pypi', 'PyPI');
+        packages.push(...parsed);
+        malCount++;
+      } catch {
+        // Skip unparseable entries
+      }
+    }
+
+    console.log('[SCRAPER]   Processed ' + malCount + ' PyPI MAL-* entries (' + skippedCount + ' non-malware skipped)');
+    console.log('[SCRAPER]   ' + packages.length + ' PyPI packages extracted');
+  } catch (e) {
+    console.log('[SCRAPER]   Error: ' + e.message);
+  }
+
+  return packages;
+}
+
+// ============================================
 // SOURCE 4: GitHub Advisory Database (Malware)
 // ============================================
 async function scrapeGitHubAdvisory() {
@@ -813,16 +866,18 @@ async function runScraper() {
   }
 
   // Load existing IOCs
-  let existingIOCs = { packages: [], hashes: [], markers: [], files: [] };
+  let existingIOCs = { packages: [], pypi_packages: [], hashes: [], markers: [], files: [] };
   if (fs.existsSync(IOC_FILE)) {
     try {
       existingIOCs = JSON.parse(fs.readFileSync(IOC_FILE, 'utf8'));
+      if (!existingIOCs.pypi_packages) existingIOCs.pypi_packages = [];
     } catch {
       console.log('[WARN] IOCs file corrupted, resetting...');
     }
   }
 
   const initialCount = existingIOCs.packages.length;
+  const initialPyPICount = existingIOCs.pypi_packages.length;
   const initialHashCount = existingIOCs.hashes ? existingIOCs.hashes.length : 0;
 
   console.log('[INFO] Existing IOCs: ' + initialCount + ' packages, ' + initialHashCount + ' hashes\n');
@@ -831,7 +886,7 @@ async function runScraper() {
   // This returns knownIds so OSSF can skip already-known entries
   const osvResult = await scrapeOSVDataDump();
 
-  // Phase 2: All other sources in parallel
+  // Phase 2: All other sources in parallel (including PyPI dump)
   // OSSF receives knownIds from OSV to avoid redundant fetches
   const results = await Promise.all([
     scrapeShaiHuludDetector(),
@@ -839,7 +894,8 @@ async function runScraper() {
     scrapeOSSFMaliciousPackages(osvResult.knownIds),
     scrapeGitHubAdvisory(),
     scrapeStaticIOCs(),
-    scrapeSnykMalware()
+    scrapeSnykMalware(),
+    scrapeOSVPyPIDataDump()
   ]);
 
   const shaiHuludResult = results[0];
@@ -848,6 +904,7 @@ async function runScraper() {
   const githubPackages = results[3];
   const staticPackages = results[4];
   const snykPackages = results[5];
+  const pypiPackages = results[6];
 
   // Merge all scraped packages
   const allPackages = [
@@ -906,6 +963,29 @@ async function runScraper() {
   // Rebuild packages array from dedup map
   existingIOCs.packages = [...dedupMap.values()];
 
+  // PyPI deduplication (same logic, separate array)
+  const pypiDedupMap = new Map();
+  for (const pkg of existingIOCs.pypi_packages) {
+    const key = pkg.name + '@' + pkg.version;
+    pypiDedupMap.set(key, pkg);
+  }
+  let addedPyPIPackages = 0;
+  for (const pkg of pypiPackages) {
+    const key = pkg.name + '@' + pkg.version;
+    if (!pypiDedupMap.has(key)) {
+      pypiDedupMap.set(key, pkg);
+      addedPyPIPackages++;
+    } else {
+      const existing = pypiDedupMap.get(key);
+      const existingConf = CONFIDENCE_ORDER[existing.confidence] || 0;
+      const newConf = CONFIDENCE_ORDER[pkg.confidence] || 0;
+      if (newConf > existingConf) {
+        pypiDedupMap.set(key, pkg);
+      }
+    }
+  }
+  existingIOCs.pypi_packages = [...pypiDedupMap.values()];
+
   // Deduplicate and add new hashes
   const existingHashes = new Set(existingIOCs.hashes || []);
   let addedHashes = 0;
@@ -942,6 +1022,7 @@ async function runScraper() {
   existingIOCs.updated = new Date().toISOString();
   existingIOCs.sources = [
     'osv-malicious',
+    'osv-malicious-pypi',
     'ossf-malicious',
     'shai-hulud-detector',
     'datadog-consolidated',
@@ -964,19 +1045,25 @@ async function runScraper() {
   console.log('\n' + '='.repeat(60));
   console.log('  RESULTS');
   console.log('='.repeat(60));
-  console.log('  Packages before:  ' + initialCount);
-  console.log('  Packages after:   ' + existingIOCs.packages.length);
-  console.log('  New:              +' + addedPackages);
-  console.log('  Upgraded:         ' + upgradedPackages);
-  console.log('  Hashes before:    ' + initialHashCount);
+  console.log('  npm packages before:  ' + initialCount);
+  console.log('  npm packages after:   ' + existingIOCs.packages.length);
+  console.log('  New npm:              +' + addedPackages);
+  console.log('  Upgraded:             ' + upgradedPackages);
+  console.log('  PyPI packages before: ' + initialPyPICount);
+  console.log('  PyPI packages after:  ' + existingIOCs.pypi_packages.length);
+  console.log('  New PyPI:             +' + addedPyPIPackages);
+  console.log('  Hashes before:        ' + initialHashCount);
   console.log('  Hashes after:     ' + (existingIOCs.hashes ? existingIOCs.hashes.length : 0));
   console.log('  New hashes:       +' + addedHashes);
   console.log('  File:             ' + IOC_FILE);
 
-  // Stats by source
+  // Stats by source (npm + PyPI combined)
   console.log('\n  Distribution by source:');
   const sourceCounts = {};
   for (const pkg of existingIOCs.packages) {
+    sourceCounts[pkg.source] = (sourceCounts[pkg.source] || 0) + 1;
+  }
+  for (const pkg of existingIOCs.pypi_packages) {
     sourceCounts[pkg.source] = (sourceCounts[pkg.source] || 0) + 1;
   }
   const sortedSources = Object.entries(sourceCounts).sort(function(a, b) { return b[1] - a[1]; });
@@ -999,7 +1086,9 @@ async function runScraper() {
     total: existingIOCs.packages.length,
     upgraded: upgradedPackages,
     addedHashes: addedHashes,
-    totalHashes: existingIOCs.hashes ? existingIOCs.hashes.length : 0
+    totalHashes: existingIOCs.hashes ? existingIOCs.hashes.length : 0,
+    addedPyPI: addedPyPIPackages,
+    totalPyPI: existingIOCs.pypi_packages.length
   };
 }
 
