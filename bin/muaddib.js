@@ -242,6 +242,7 @@ const helpText = `
     muaddib update                   Update IOCs
     muaddib scrape                   Scrape new IOCs
     muaddib sandbox <pkg>            Analyze in isolated Docker container
+    muaddib version                  Show version
 
   Diff Examples:
     muaddib diff HEAD~1              Compare with previous commit
@@ -267,7 +268,11 @@ const helpText = `
 `;
 
 // Main
-if (!command || command === '--help' || command === '-h') {
+if (command === 'version' || command === '--version' || command === '-v') {
+  const pkg = require('../package.json');
+  console.log(`muaddib-scanner v${pkg.version}`);
+  process.exit(0);
+} else if (!command || command === '--help' || command === '-h') {
   if (command === '--help' || command === '-h') {
     console.log(helpText);
     process.exit(0);

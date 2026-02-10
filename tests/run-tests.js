@@ -103,6 +103,13 @@ test('AST: Detects new Function()', () => {
   assertIncludes(output, 'Function', 'Should detect Function');
 });
 
+test('AST: Dynamic env access flagged as MEDIUM', () => {
+  const output = runScan(path.join(TESTS_DIR, 'ast'), '--json');
+  const result = JSON.parse(output);
+  const dynamicEnv = result.threats.find(t => t.type === 'env_access' && t.severity === 'MEDIUM');
+  assert(dynamicEnv, 'Dynamic process.env[var] should be MEDIUM');
+});
+
 // ============================================
 // UNIT TESTS - SHELL DETECTION
 // ============================================
@@ -314,6 +321,11 @@ test('FALSE POSITIVES: Clean project = no threats', () => {
 test('FALSE POSITIVES: Comments ignored', () => {
   const output = runScan(path.join(TESTS_DIR, 'clean'));
   assertNotIncludes(output, 'CRITICAL', 'Comments should not trigger');
+});
+
+test('FALSE POSITIVES: Safe env vars (NODE_ENV, PORT, CI, etc.) not flagged', () => {
+  const output = runScan(path.join(TESTS_DIR, 'clean'));
+  assertNotIncludes(output, 'env_access', 'Safe env vars should not trigger env_access');
 });
 
 // ============================================
@@ -767,6 +779,19 @@ test('CLI: init-hooks --help shows in help', () => {
 
 console.log('\n=== CLI EXTENDED TESTS ===\n');
 
+test('CLI-EXT: version command shows version', () => {
+  const output = runCommand('version');
+  const pkg = require('../package.json');
+  assertIncludes(output, pkg.version, 'Should display version');
+  assertIncludes(output, 'muaddib-scanner', 'Should display package name');
+});
+
+test('CLI-EXT: --version flag shows version', () => {
+  const output = runCommand('--version');
+  const pkg = require('../package.json');
+  assertIncludes(output, pkg.version, 'Should display version');
+});
+
 test('CLI-EXT: help command shows usage', () => {
   const output = runCommand('help');
   assertIncludes(output, 'Usage', 'Should display usage');
@@ -776,6 +801,15 @@ test('CLI-EXT: help command shows usage', () => {
 test('CLI-EXT: unknown command shows error', () => {
   const output = runCommand('blahblah');
   assertIncludes(output, 'Unknown command', 'Should say Unknown command');
+});
+
+test('CLI-EXT: deduplication reduces duplicate alerts', () => {
+  const output = runScan(path.join(TESTS_DIR, 'ast'), '--json');
+  const result = JSON.parse(output);
+  // Verify no two threats have same file + type + message combination
+  const keys = result.threats.map(t => `${t.file}::${t.type}::${t.message}`);
+  const uniqueKeys = [...new Set(keys)];
+  assert(keys.length === uniqueKeys.length, 'All threats should be unique per file+type+message');
 });
 
 test('CLI-EXT: scan with --paranoid and --webhook', () => {

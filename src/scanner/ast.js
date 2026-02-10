@@ -24,10 +24,15 @@ const SENSITIVE_STRINGS = [
   'Goldox-T3chs'
 ];
 
+// Env vars that are safe and should NOT be flagged (common config/runtime vars)
+const SAFE_ENV_VARS = [
+  'NODE_ENV', 'PORT', 'HOST', 'HOSTNAME', 'PWD', 'HOME', 'PATH',
+  'LANG', 'TERM', 'CI', 'DEBUG', 'VERBOSE', 'LOG_LEVEL'
+];
+
 // Env var keywords to detect sensitive environment access (separate from SENSITIVE_STRINGS)
-const ENV_SENSITIVE_VARS = [
-  'TOKEN', 'SECRET', 'KEY', 'PASSWORD', 'CREDENTIAL',
-  'AUTH', 'NPM', 'AWS', 'GITHUB', 'SSH', 'NPMRC'
+const ENV_SENSITIVE_KEYWORDS = [
+  'TOKEN', 'SECRET', 'KEY', 'PASSWORD', 'CREDENTIAL', 'AUTH'
 ];
 
 // Strings that are NOT suspicious
@@ -134,14 +139,32 @@ function analyzeFile(content, filePath, basePath) {
         node.object?.object?.name === 'process' &&
         node.object?.property?.name === 'env'
       ) {
-        const envVar = node.property?.name;
-        if (envVar && ENV_SENSITIVE_VARS.some(s => envVar.toUpperCase().includes(s))) {
+        // Dynamic access: process.env[variable] — always flag as MEDIUM
+        if (node.computed) {
           threats.push({
             type: 'env_access',
-            severity: 'HIGH',
-            message: `Access to sensitive variable process.env.${envVar}.`,
+            severity: 'MEDIUM',
+            message: 'Dynamic access to process.env (variable key).',
             file: path.relative(basePath, filePath)
           });
+          return;
+        }
+
+        const envVar = node.property?.name;
+        if (envVar) {
+          // Skip safe/common env vars
+          if (SAFE_ENV_VARS.includes(envVar)) {
+            return;
+          }
+          // Flag only vars containing sensitive keywords
+          if (ENV_SENSITIVE_KEYWORDS.some(s => envVar.toUpperCase().includes(s))) {
+            threats.push({
+              type: 'env_access',
+              severity: 'HIGH',
+              message: `Access to sensitive variable process.env.${envVar}.`,
+              file: path.relative(basePath, filePath)
+            });
+          }
         }
       }
     }

@@ -150,8 +150,22 @@ async function run(targetPath, options = {}) {
     threats.push(...paranoidThreats);
   }
 
+  // Deduplicate: same file + same type + same message = show once with count
+  const deduped = [];
+  const seen = new Map();
+  for (const t of threats) {
+    const key = `${t.file}::${t.type}::${t.message}`;
+    if (seen.has(key)) {
+      seen.get(key).count++;
+    } else {
+      const entry = { ...t, count: 1 };
+      seen.set(key, entry);
+      deduped.push(entry);
+    }
+  }
+
   // Enrich each threat with rules
-  const enrichedThreats = threats.map(t => {
+  const enrichedThreats = deduped.map(t => {
     const rule = getRule(t.type);
     return {
       ...t,
@@ -164,11 +178,11 @@ async function run(targetPath, options = {}) {
     };
   });
 
-  // Calculate risk score (0-100)
-  const criticalCount = threats.filter(t => t.severity === 'CRITICAL').length;
-  const highCount = threats.filter(t => t.severity === 'HIGH').length;
-  const mediumCount = threats.filter(t => t.severity === 'MEDIUM').length;
-  const lowCount = threats.filter(t => t.severity === 'LOW').length;
+  // Calculate risk score (0-100) using deduplicated threats
+  const criticalCount = deduped.filter(t => t.severity === 'CRITICAL').length;
+  const highCount = deduped.filter(t => t.severity === 'HIGH').length;
+  const mediumCount = deduped.filter(t => t.severity === 'MEDIUM').length;
+  const lowCount = deduped.filter(t => t.severity === 'LOW').length;
 
   let riskScore = 0;
   riskScore += criticalCount * SEVERITY_WEIGHTS.CRITICAL;
@@ -188,7 +202,7 @@ async function run(targetPath, options = {}) {
     timestamp: new Date().toISOString(),
     threats: enrichedThreats,
     summary: {
-      total: threats.length,
+      total: deduped.length,
       critical: criticalCount,
       high: highCount,
       medium: mediumCount,
@@ -222,7 +236,8 @@ async function run(targetPath, options = {}) {
       console.log(`[ALERT] ${enrichedThreats.length} threat(s) detected:\n`);
       enrichedThreats.forEach((t, i) => {
         console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-        console.log(`  ${i + 1}. [${t.severity}] ${t.rule_name}`);
+        const countStr = t.count > 1 ? ` (x${t.count})` : '';
+        console.log(`  ${i + 1}. [${t.severity}] ${t.rule_name}${countStr}`);
         console.log(`     Rule ID:    ${t.rule_id}`);
         console.log(`     File:       ${t.file}`);
         if (t.line) console.log(`     Line:       ${t.line}`);
@@ -245,18 +260,19 @@ async function run(targetPath, options = {}) {
     const scoreBar = '█'.repeat(Math.floor(result.summary.riskScore / 5)) + '░'.repeat(20 - Math.floor(result.summary.riskScore / 5));
     console.log(`[SCORE] ${result.summary.riskScore}/100 [${scoreBar}] ${result.summary.riskLevel}\n`);
 
-    if (threats.length === 0) {
+    if (deduped.length === 0) {
       console.log('[OK] No threats detected.\n');
     } else {
-      console.log(`[ALERT] ${threats.length} threat(s) detected:\n`);
-      threats.forEach((t, i) => {
-        console.log(`  ${i + 1}. [${t.severity}] ${t.type}`);
+      console.log(`[ALERT] ${deduped.length} threat(s) detected:\n`);
+      deduped.forEach((t, i) => {
+        const countStr = t.count > 1 ? ` (x${t.count})` : '';
+        console.log(`  ${i + 1}. [${t.severity}] ${t.type}${countStr}`);
         console.log(`     ${t.message}`);
         console.log(`     File: ${t.file}\n`);
       });
 
       console.log('[RESPONSE] Recommendations:\n');
-      threats.forEach(t => {
+      deduped.forEach(t => {
         const playbook = getPlaybook(t.type);
         if (playbook) {
           console.log(`  -> ${playbook}\n`);
@@ -285,8 +301,8 @@ async function run(targetPath, options = {}) {
   };
   
   const levelsToCheck = severityLevels[failLevel] || severityLevels.high;
-  const failingThreats = threats.filter(t => levelsToCheck.includes(t.severity));
-  
+  const failingThreats = deduped.filter(t => levelsToCheck.includes(t.severity));
+
   return failingThreats.length;
 }
 
