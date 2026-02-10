@@ -91,6 +91,31 @@ function generateHTML(results) {
       color: #4ecdc4;
       font-size: 24px;
     }
+    .sandbox-section {
+      background: #16213e;
+      padding: 20px;
+      border-radius: 8px;
+      margin-top: 30px;
+      border-left: 4px solid #9b59b6;
+    }
+    .sandbox-section h2 {
+      color: #9b59b6;
+      margin-top: 0;
+    }
+    .sandbox-meta {
+      display: flex;
+      gap: 30px;
+      margin-bottom: 15px;
+    }
+    .sandbox-meta span {
+      color: #aaa;
+    }
+    .sandbox-finding {
+      padding: 8px 12px;
+      margin: 4px 0;
+      border-radius: 4px;
+      background: rgba(155, 89, 182, 0.1);
+    }
   </style>
 </head>
 <body>
@@ -132,6 +157,24 @@ function generateHTML(results) {
       </tbody>
     </table>
     ` : '<div class="ok">No threats detected</div>'}
+
+    ${results.sandbox ? `
+    <div class="sandbox-section">
+      <h2>[SANDBOX] Dynamic Analysis</h2>
+      <div class="sandbox-meta">
+        <span>Package: <strong>${escapeHtml(results.sandbox.package)}</strong></span>
+        <span>Score: <strong>${escapeHtml(String(results.sandbox.score))}/100</strong></span>
+        <span>Severity: <strong>${escapeHtml(results.sandbox.severity)}</strong></span>
+      </div>
+      ${results.sandbox.findings.length === 0
+        ? '<p style="color: #4ecdc4;">No suspicious behavior detected.</p>'
+        : results.sandbox.findings.map(f => `
+          <div class="sandbox-finding">
+            <strong>[${escapeHtml(f.severity)}]</strong> ${escapeHtml(f.type)}: ${escapeHtml(f.detail)}
+          </div>
+        `).join('')}
+    </div>
+    ` : ''}
 
     <div class="meta">
       <p>Target: ${escapeHtml(target)}</p>

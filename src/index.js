@@ -150,6 +150,27 @@ async function run(targetPath, options = {}) {
     threats.push(...paranoidThreats);
   }
 
+  // Sandbox integration
+  let sandboxData = null;
+  if (options.sandboxResult && options.sandboxResult.findings) {
+    const sr = options.sandboxResult;
+    const pkg = sr.raw_report?.package || 'unknown';
+    sandboxData = {
+      package: pkg,
+      score: sr.score,
+      severity: sr.severity,
+      findings: sr.findings
+    };
+    for (const f of sr.findings) {
+      threats.push({
+        type: 'sandbox_' + f.type,
+        severity: f.severity,
+        message: f.detail,
+        file: `[SANDBOX] ${pkg}`
+      });
+    }
+  }
+
   // Deduplicate: same file + same type + same message = show once with count
   const deduped = [];
   const seen = new Map();
@@ -209,7 +230,8 @@ async function run(targetPath, options = {}) {
       low: lowCount,
       riskScore: riskScore,
       riskLevel: riskLevel
-    }
+    },
+    sandbox: sandboxData
   };
 
   // JSON output
@@ -252,6 +274,22 @@ async function run(targetPath, options = {}) {
         console.log('');
       });
     }
+
+    // Sandbox section (explain)
+    if (sandboxData) {
+      console.log(`\n[SANDBOX] Dynamic analysis — ${sandboxData.package}`);
+      console.log(`  Score:    ${sandboxData.score}/100`);
+      console.log(`  Severity: ${sandboxData.severity}`);
+      if (sandboxData.findings.length === 0) {
+        console.log('  No suspicious behavior detected.\n');
+      } else {
+        console.log(`  ${sandboxData.findings.length} finding(s):`);
+        sandboxData.findings.forEach(f => {
+          console.log(`    [${f.severity}] ${f.type}: ${f.detail}`);
+        });
+        console.log('');
+      }
+    }
   }
   // Normal output
   else {
@@ -278,6 +316,22 @@ async function run(targetPath, options = {}) {
           console.log(`  -> ${playbook}\n`);
         }
       });
+    }
+
+    // Sandbox section (normal)
+    if (sandboxData) {
+      console.log(`[SANDBOX] Dynamic analysis — ${sandboxData.package}`);
+      console.log(`  Score:    ${sandboxData.score}/100`);
+      console.log(`  Severity: ${sandboxData.severity}`);
+      if (sandboxData.findings.length === 0) {
+        console.log('  No suspicious behavior detected.\n');
+      } else {
+        console.log(`  ${sandboxData.findings.length} finding(s):`);
+        sandboxData.findings.forEach(f => {
+          console.log(`    [${f.severity}] ${f.type}: ${f.detail}`);
+        });
+        console.log('');
+      }
     }
   }
 
