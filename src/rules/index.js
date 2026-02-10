@@ -363,6 +363,80 @@ const RULES = {
     references: ['https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions'],
     mitre: 'T1195.002'
   },
+
+  // Sandbox detections
+  sandbox_sensitive_file_read: {
+    id: 'MUADDIB-SANDBOX-001',
+    name: 'Sandbox: Sensitive File Read',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Package reads sensitive credential files during install',
+    references: ['https://blog.phylum.io/shai-hulud-npm-worm'],
+    mitre: 'T1552.001'
+  },
+  sandbox_sensitive_file_write: {
+    id: 'MUADDIB-SANDBOX-002',
+    name: 'Sandbox: Sensitive File Write',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Package writes to sensitive credential files during install',
+    references: ['https://blog.phylum.io/shai-hulud-npm-worm'],
+    mitre: 'T1565.001'
+  },
+  sandbox_suspicious_filesystem: {
+    id: 'MUADDIB-SANDBOX-003',
+    name: 'Sandbox: Suspicious Filesystem Change',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'Package creates files in suspicious system locations during install',
+    references: ['https://attack.mitre.org/techniques/T1543/'],
+    mitre: 'T1543'
+  },
+  sandbox_suspicious_dns: {
+    id: 'MUADDIB-SANDBOX-004',
+    name: 'Sandbox: Suspicious DNS Query',
+    severity: 'HIGH',
+    confidence: 'medium',
+    description: 'Package resolves non-registry domain during install',
+    references: ['https://attack.mitre.org/techniques/T1071/'],
+    mitre: 'T1071'
+  },
+  sandbox_suspicious_connection: {
+    id: 'MUADDIB-SANDBOX-005',
+    name: 'Sandbox: Suspicious Network Connection',
+    severity: 'HIGH',
+    confidence: 'medium',
+    description: 'Package makes TCP connection to non-registry host during install',
+    references: ['https://attack.mitre.org/techniques/T1071/'],
+    mitre: 'T1071'
+  },
+  sandbox_suspicious_process: {
+    id: 'MUADDIB-SANDBOX-006',
+    name: 'Sandbox: Dangerous Process Spawned',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Package spawns dangerous command during install (curl, wget, nc, etc.)',
+    references: ['https://attack.mitre.org/techniques/T1059/'],
+    mitre: 'T1059'
+  },
+  sandbox_unknown_process: {
+    id: 'MUADDIB-SANDBOX-007',
+    name: 'Sandbox: Unknown Process Spawned',
+    severity: 'MEDIUM',
+    confidence: 'low',
+    description: 'Package spawns unrecognized process during install',
+    references: ['https://attack.mitre.org/techniques/T1059/'],
+    mitre: 'T1059'
+  },
+  sandbox_timeout: {
+    id: 'MUADDIB-SANDBOX-008',
+    name: 'Sandbox: Container Timeout',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Package install exceeded sandbox timeout - possible infinite loop or resource exhaustion',
+    references: ['https://attack.mitre.org/techniques/T1499/'],
+    mitre: 'T1499'
+  },
 };
 
 function getRule(type) {

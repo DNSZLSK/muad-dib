@@ -1,7 +1,7 @@
 FROM node:20-alpine
 
 # Outils de monitoring
-RUN apk add --no-cache strace curl tcpdump
+RUN apk add --no-cache strace curl tcpdump coreutils findutils jq
 
 # User non-root
 RUN adduser -D sandboxuser
