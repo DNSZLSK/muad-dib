@@ -1,9 +1,12 @@
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
+const AdmZip = require('adm-zip');
 
 const IOC_FILE = path.join(__dirname, 'data/iocs.json');
+const COMPACT_IOC_FILE = path.join(__dirname, 'data/iocs-compact.json');
 const STATIC_IOCS_FILE = path.join(__dirname, 'data/static-iocs.json');
+const { generateCompactIOCs } = require('./updater.js');
 
 // Allowed domains for redirections (SSRF security)
 const ALLOWED_REDIRECT_DOMAINS = [
@@ -12,7 +15,9 @@ const ALLOWED_REDIRECT_DOMAINS = [
   'api.github.com',
   'api.osv.dev',
   'osv.dev',
-  'objects.githubusercontent.com'
+  'objects.githubusercontent.com',
+  'osv-vulnerabilities.storage.googleapis.com',
+  'storage.googleapis.com'
 ];
 
 /**
@@ -213,6 +218,128 @@ function fetchText(url, redirectCount = 0) {
   });
 }
 
+function fetchBuffer(url, redirectCount = 0) {
+  return new Promise((resolve, reject) => {
+    const urlObj = new URL(url);
+    const reqOptions = {
+      hostname: urlObj.hostname,
+      path: urlObj.pathname + urlObj.search,
+      method: 'GET',
+      headers: {
+        'User-Agent': 'MUADDIB-Scanner/3.0'
+      }
+    };
+
+    const req = https.request(reqOptions, (res) => {
+      if (res.statusCode === 301 || res.statusCode === 302) {
+        if (redirectCount >= MAX_REDIRECTS) {
+          reject(new Error('Too many redirects'));
+          return;
+        }
+        const redirectUrl = res.headers.location;
+        if (!isAllowedRedirect(redirectUrl)) {
+          reject(new Error('Unauthorized redirect to: ' + redirectUrl));
+          return;
+        }
+        fetchBuffer(redirectUrl, redirectCount + 1).then(resolve).catch(reject);
+        return;
+      }
+
+      if (res.statusCode !== 200) {
+        reject(new Error('HTTP ' + res.statusCode));
+        return;
+      }
+
+      const chunks = [];
+      res.on('data', chunk => chunks.push(chunk));
+      res.on('end', () => resolve(Buffer.concat(chunks)));
+    });
+
+    req.on('error', reject);
+    req.setTimeout(120000, () => {
+      req.destroy();
+      reject(new Error('Timeout'));
+    });
+
+    req.end();
+  });
+}
+
+// ============================================
+// SHARED HELPERS
+// ============================================
+
+const CONFIDENCE_ORDER = { 'high': 3, 'medium': 2, 'low': 1 };
+
+function createFreshness(source, confidence) {
+  return {
+    added_at: new Date().toISOString(),
+    source: source,
+    confidence: confidence || 'high'
+  };
+}
+
+/**
+ * Extract version list from an OSV affected entry.
+ * Returns explicit versions if available, otherwise ['*'].
+ */
+function extractVersions(affected) {
+  const versions = new Set();
+
+  if (affected.versions && affected.versions.length > 0) {
+    for (const v of affected.versions) {
+      versions.add(v);
+    }
+  }
+
+  if (affected.ranges) {
+    for (const range of affected.ranges) {
+      if (range.events) {
+        for (const event of range.events) {
+          if (event.introduced && event.introduced !== '0') {
+            versions.add(event.introduced);
+          }
+        }
+      }
+    }
+  }
+
+  return versions.size > 0 ? [...versions] : ['*'];
+}
+
+/**
+ * Parse an OSV-format vulnerability entry into IOC packages.
+ * Shared by OSSF and OSV sources.
+ */
+function parseOSVEntry(vuln, source) {
+  const packages = [];
+  if (!vuln || !vuln.affected) return packages;
+
+  for (const affected of vuln.affected) {
+    if (!affected.package || affected.package.ecosystem !== 'npm') continue;
+
+    const pkgVersions = extractVersions(affected);
+
+    for (const ver of pkgVersions) {
+      packages.push({
+        id: vuln.id || source + '-' + affected.package.name,
+        name: affected.package.name,
+        version: ver,
+        severity: 'critical',
+        confidence: 'high',
+        source: source,
+        description: (vuln.summary || vuln.details || 'Malicious package').slice(0, 200),
+        references: (vuln.references || []).map(r => r.url).slice(0, 3),
+        mitre: 'T1195.002',
+        published: vuln.published || vuln.modified || null,
+        freshness: createFreshness(source, 'high')
+      });
+    }
+  }
+
+  return packages;
+}
+
 // ============================================
 // SOURCE 1: GenSecAI Shai-Hulud 2.0 Detector
 // Consolidated list (700+ packages)
@@ -241,7 +368,8 @@ async function scrapeShaiHuludDetector() {
             source: 'shai-hulud-detector',
             description: 'Compromised by Shai-Hulud 2.0 supply chain attack',
             references: ['https://github.com/gensecaihq/Shai-Hulud-2.0-Detector'],
-            mitre: 'T1195.002'
+            mitre: 'T1195.002',
+            freshness: createFreshness('gensecai', 'high')
           });
         }
       }
@@ -302,7 +430,8 @@ async function scrapeDatadogIOCs() {
             source: 'datadog-consolidated',
             description: `Compromised package (sources: ${vendors})`,
             references: ['https://securitylabs.datadoghq.com/articles/shai-hulud-2.0-npm-worm/'],
-            mitre: 'T1195.002'
+            mitre: 'T1195.002',
+            freshness: createFreshness('datadog', 'high')
           });
         }
       }
@@ -335,7 +464,8 @@ async function scrapeDatadogIOCs() {
                 source: 'datadog-direct',
                 description: 'Manually confirmed by DataDog Security Labs',
                 references: ['https://securitylabs.datadoghq.com/articles/shai-hulud-2.0-npm-worm/'],
-                mitre: 'T1195.002'
+                mitre: 'T1195.002',
+                freshness: createFreshness('datadog', 'high')
               });
               ddCount++;
             }
@@ -354,83 +484,145 @@ async function scrapeDatadogIOCs() {
 
 // ============================================
 // SOURCE 3: OSSF Malicious Packages
-// Direct download from GitHub API
+// GitHub tree API + batch fetch with incremental SHA
 // ============================================
-async function scrapeOSSFMaliciousPackages() {
-  console.log('[SCRAPER] OSSF Malicious Packages...');
+async function scrapeOSSFMaliciousPackages(knownIds) {
+  console.log('[SCRAPER] OSSF Malicious Packages (GitHub tree)...');
   const packages = [];
-  
+  const knownIdSet = knownIds || new Set();
+
   try {
-    // Use GitHub API to list files in the npm malware directory
-    // We'll fetch the index file that lists all malware
-    const indexUrl = 'https://raw.githubusercontent.com/ossf/malicious-packages/main/osv/malicious/npm/index.json';
-    const indexResp = await fetchJSON(indexUrl);
-    
-    if (indexResp.status === 200 && indexResp.data) {
-      // If index exists, parse it
-      const entries = Array.isArray(indexResp.data) ? indexResp.data : [];
-      for (const entry of entries) {
-        if (entry.name) {
-          packages.push({
-            id: entry.id || `OSSF-${entry.name}`,
-            name: entry.name,
-            version: entry.version || '*',
-            severity: 'critical',
-            confidence: 'high',
-            source: 'ossf-malicious',
-            description: entry.summary || 'Malicious package from OSSF database',
-            references: ['https://github.com/ossf/malicious-packages'],
-            mitre: 'T1195.002'
-          });
-        }
+    // Step 1: Get recursive tree
+    const treeUrl = 'https://api.github.com/repos/ossf/malicious-packages/git/trees/main?recursive=1';
+    const { status, data } = await fetchJSON(treeUrl);
+
+    if (status !== 200 || !data || !data.tree) {
+      console.log('[SCRAPER]   Failed to get tree (HTTP ' + status + ')');
+      return packages;
+    }
+
+    // Incremental: compare tree SHA
+    const treeSha = data.sha;
+    const dataDir = path.join(__dirname, 'data');
+    if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+    const shaFile = path.join(dataDir, '.ossf-tree-sha');
+    let lastSha = null;
+    try { lastSha = fs.readFileSync(shaFile, 'utf8').trim(); } catch {}
+
+    if (lastSha === treeSha) {
+      console.log('[SCRAPER]   Tree unchanged (SHA: ' + treeSha.slice(0, 8) + '...), skipping fetch');
+      return packages;
+    }
+
+    // Step 2: Filter npm MAL-* entries
+    const npmMalFiles = data.tree.filter(function(entry) {
+      return entry.path.startsWith('osv/malicious/npm/')
+        && entry.path.endsWith('.json')
+        && entry.path.includes('/MAL-');
+    });
+
+    console.log('[SCRAPER]   Found ' + npmMalFiles.length + ' npm malware entries in tree');
+
+    // Step 3: Skip entries already known from OSV dump
+    const toFetch = npmMalFiles.filter(function(entry) {
+      // Extract MAL-XXXX-XXXX from filename
+      const filename = path.basename(entry.path, '.json');
+      return !knownIdSet.has(filename);
+    });
+
+    console.log('[SCRAPER]   ' + (npmMalFiles.length - toFetch.length) + ' already known from OSV, fetching ' + toFetch.length + ' new entries');
+
+    // Step 4: Batch fetch (50 concurrent, with small delay between batches for rate limit)
+    const BATCH_SIZE = 50;
+    for (let i = 0; i < toFetch.length; i += BATCH_SIZE) {
+      const batch = toFetch.slice(i, i + BATCH_SIZE);
+      const results = await Promise.all(batch.map(function(entry) {
+        const rawUrl = 'https://raw.githubusercontent.com/ossf/malicious-packages/main/' + entry.path;
+        return fetchJSON(rawUrl).catch(function() { return null; });
+      }));
+
+      for (const result of results) {
+        if (!result || result.status !== 200 || !result.data) continue;
+        const parsed = parseOSVEntry(result.data, 'ossf-malicious');
+        packages.push(...parsed);
       }
-    } else {
-      // Fallback: use OSV API to query for MAL- prefixed vulnerabilities
-      // This is limited but better than nothing
-      const ecosystems = ['npm'];
-      
-      for (const ecosystem of ecosystems) {
-        try {
-          const resp = await fetchJSON('https://api.osv.dev/v1/query', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: { package: { ecosystem } }
-          });
-          
-          if (resp.status === 200 && resp.data && resp.data.vulns) {
-            for (const vuln of resp.data.vulns) {
-              // Filter only malware (ID starts with MAL-)
-              if (vuln.id && vuln.id.startsWith('MAL-')) {
-                for (const affected of vuln.affected || []) {
-                  if (affected.package && affected.package.ecosystem === 'npm') {
-                    packages.push({
-                      id: vuln.id,
-                      name: affected.package.name,
-                      version: '*',
-                      severity: 'critical',
-                      confidence: 'high',
-                      source: 'ossf-malicious',
-                      description: (vuln.summary || vuln.details || 'Malicious package').slice(0, 200),
-                      references: (vuln.references || []).map(r => r.url).slice(0, 3),
-                      mitre: 'T1195.002'
-                    });
-                  }
-                }
-              }
-            }
-          }
-        } catch {
-          // Continue silently
-        }
+
+      // Progress
+      const progress = Math.min(i + BATCH_SIZE, toFetch.length);
+      process.stdout.write('\r[SCRAPER]   Fetched ' + progress + '/' + toFetch.length);
+
+      // Small delay between batches to respect rate limits
+      if (i + BATCH_SIZE < toFetch.length) {
+        await new Promise(function(r) { setTimeout(r, 100); });
       }
     }
-    
-    console.log(`[SCRAPER]   ${packages.length} packages`);
+
+    if (toFetch.length > 0) console.log('');
+
+    // Save tree SHA for next incremental run
+    try { fs.writeFileSync(shaFile, treeSha); } catch {}
+
+    console.log('[SCRAPER]   ' + packages.length + ' packages extracted');
   } catch (e) {
-    console.log(`[SCRAPER]   Error: ${e.message}`);
+    console.log('[SCRAPER]   Error: ' + e.message);
   }
-  
+
   return packages;
+}
+
+// ============================================
+// SOURCE 3b: OSV.dev npm data dump
+// Bulk zip download — primary volume source
+// ============================================
+async function scrapeOSVDataDump() {
+  console.log('[SCRAPER] OSV.dev npm data dump (all.zip)...');
+  const packages = [];
+  const knownIds = new Set();
+
+  try {
+    // Download the full npm zip (~50-100MB)
+    console.log('[SCRAPER]   Downloading all.zip from GCS...');
+    const zipUrl = 'https://osv-vulnerabilities.storage.googleapis.com/npm/all.zip';
+    const zipBuffer = await fetchBuffer(zipUrl);
+    console.log('[SCRAPER]   Downloaded ' + Math.round(zipBuffer.length / 1024 / 1024) + 'MB');
+
+    // Extract using adm-zip
+    const zip = new AdmZip(zipBuffer);
+    const entries = zip.getEntries();
+
+    let malCount = 0;
+    let skippedCount = 0;
+
+    for (const entry of entries) {
+      const name = entry.entryName;
+
+      // Only process MAL-*.json files (malware), skip GHSA-*, CVE-*, PYSEC-* etc.
+      if (!name.startsWith('MAL-') || !name.endsWith('.json')) {
+        skippedCount++;
+        continue;
+      }
+
+      try {
+        const content = entry.getData().toString('utf8');
+        const vuln = JSON.parse(content);
+        const parsed = parseOSVEntry(vuln, 'osv-malicious');
+        packages.push(...parsed);
+
+        // Track known IDs so OSSF can skip them
+        knownIds.add(vuln.id || path.basename(name, '.json'));
+        malCount++;
+      } catch {
+        // Skip unparseable entries
+      }
+    }
+
+    console.log('[SCRAPER]   Processed ' + malCount + ' MAL-* entries (' + skippedCount + ' non-malware skipped)');
+    console.log('[SCRAPER]   ' + packages.length + ' packages extracted');
+  } catch (e) {
+    console.log('[SCRAPER]   Error: ' + e.message);
+  }
+
+  return { packages, knownIds };
 }
 
 // ============================================
@@ -472,7 +664,8 @@ async function scrapeGitHubAdvisory() {
                   source: 'github-advisory',
                   description: (vuln.summary || 'Malicious package').slice(0, 200),
                   references: ['https://github.com/advisories/' + vuln.id],
-                  mitre: 'T1195.002'
+                  mitre: 'T1195.002',
+                  freshness: createFreshness('github-advisory', 'high')
                 });
               }
             }
@@ -509,7 +702,8 @@ async function scrapeStaticIOCs() {
       source: 'socket-dev',
       description: pkg.description || 'Malicious package reported by Socket.dev',
       references: ['https://socket.dev/npm/package/' + pkg.name],
-      mitre: 'T1195.002'
+      mitre: 'T1195.002',
+      freshness: createFreshness('socket', 'high')
     });
   }
   
@@ -524,7 +718,8 @@ async function scrapeStaticIOCs() {
       source: 'phylum',
       description: pkg.description || 'Malicious package reported by Phylum Research',
       references: ['https://blog.phylum.io'],
-      mitre: 'T1195.002'
+      mitre: 'T1195.002',
+      freshness: createFreshness('phylum', 'high')
     });
   }
   
@@ -539,7 +734,8 @@ async function scrapeStaticIOCs() {
       source: 'npm-removed',
       description: 'Removed from npm: ' + (pkg.reason || 'security violation'),
       references: ['https://www.npmjs.com/policies/security'],
-      mitre: 'T1195.002'
+      mitre: 'T1195.002',
+      freshness: createFreshness('npm-removed', 'medium')
     });
   }
   
@@ -592,7 +788,8 @@ async function scrapeSnykMalware() {
       source: 'snyk-known',
       description: pkg.description,
       references: ['https://snyk.io/advisor'],
-      mitre: 'T1195.002'
+      mitre: 'T1195.002',
+      freshness: createFreshness('snyk', 'high')
     });
   }
   
@@ -605,16 +802,16 @@ async function scrapeSnykMalware() {
 // ============================================
 async function runScraper() {
   console.log('\n' + '='.repeat(60));
-  console.log('  MUAD\'DIB IOC Scraper v3.0');
-  console.log('  Optimized sources - No dead links');
+  console.log('  MUAD\'DIB IOC Scraper v4.0');
+  console.log('  OSV + OSSF + GenSecAI + DataDog + Snyk');
   console.log('='.repeat(60) + '\n');
-  
+
   // Create data directory if needed
   const dataDir = path.dirname(IOC_FILE);
   if (!fs.existsSync(dataDir)) {
     fs.mkdirSync(dataDir, { recursive: true });
   }
-  
+
   // Load existing IOCs
   let existingIOCs = { packages: [], hashes: [], markers: [], files: [] };
   if (fs.existsSync(IOC_FILE)) {
@@ -624,33 +821,37 @@ async function runScraper() {
       console.log('[WARN] IOCs file corrupted, resetting...');
     }
   }
-  
-  const existingNames = new Set(existingIOCs.packages.map(p => p.name + '@' + p.version));
-  const existingHashes = new Set(existingIOCs.hashes || []);
+
   const initialCount = existingIOCs.packages.length;
   const initialHashCount = existingIOCs.hashes ? existingIOCs.hashes.length : 0;
-  
+
   console.log('[INFO] Existing IOCs: ' + initialCount + ' packages, ' + initialHashCount + ' hashes\n');
-  
-  // Scrape all sources in parallel
+
+  // Phase 1: OSV data dump first (bulk, primary source)
+  // This returns knownIds so OSSF can skip already-known entries
+  const osvResult = await scrapeOSVDataDump();
+
+  // Phase 2: All other sources in parallel
+  // OSSF receives knownIds from OSV to avoid redundant fetches
   const results = await Promise.all([
     scrapeShaiHuludDetector(),
     scrapeDatadogIOCs(),
-    scrapeOSSFMaliciousPackages(),
+    scrapeOSSFMaliciousPackages(osvResult.knownIds),
     scrapeGitHubAdvisory(),
     scrapeStaticIOCs(),
     scrapeSnykMalware()
   ]);
-  
+
   const shaiHuludResult = results[0];
   const datadogResult = results[1];
   const ossfPackages = results[2];
   const githubPackages = results[3];
   const staticPackages = results[4];
   const snykPackages = results[5];
-  
-  // Merge all packages
+
+  // Merge all scraped packages
   const allPackages = [
+    ...osvResult.packages,
     ...shaiHuludResult.packages,
     ...datadogResult.packages,
     ...ossfPackages,
@@ -658,25 +859,55 @@ async function runScraper() {
     ...staticPackages,
     ...snykPackages
   ];
-  
+
   // Merge all hashes
   const allHashes = [
     ...(shaiHuludResult.hashes || []),
     ...(datadogResult.hashes || [])
   ];
-  
-  // Deduplicate and add new packages
+
+  // Smart deduplication: build map of best entry per key
+  // For duplicates, keep the one with highest confidence, then most recent date
+  const dedupMap = new Map();
+
+  // Seed with existing IOCs
+  for (const pkg of existingIOCs.packages) {
+    const key = pkg.name + '@' + pkg.version;
+    dedupMap.set(key, pkg);
+  }
+
+  // Merge new IOCs with smart replacement
   let addedPackages = 0;
+  let upgradedPackages = 0;
   for (const pkg of allPackages) {
     const key = pkg.name + '@' + pkg.version;
-    if (!existingNames.has(key)) {
-      existingIOCs.packages.push(pkg);
-      existingNames.add(key);
+    if (!dedupMap.has(key)) {
+      dedupMap.set(key, pkg);
       addedPackages++;
+    } else {
+      const existing = dedupMap.get(key);
+      const existingConf = CONFIDENCE_ORDER[existing.confidence] || 0;
+      const newConf = CONFIDENCE_ORDER[pkg.confidence] || 0;
+      if (newConf > existingConf) {
+        dedupMap.set(key, pkg);
+        upgradedPackages++;
+      } else if (newConf === existingConf) {
+        // Same confidence: keep most recent
+        const existingDate = existing.published || (existing.freshness && existing.freshness.added_at) || '';
+        const newDate = pkg.published || (pkg.freshness && pkg.freshness.added_at) || '';
+        if (newDate > existingDate) {
+          dedupMap.set(key, pkg);
+          upgradedPackages++;
+        }
+      }
     }
   }
-  
+
+  // Rebuild packages array from dedup map
+  existingIOCs.packages = [...dedupMap.values()];
+
   // Deduplicate and add new hashes
+  const existingHashes = new Set(existingIOCs.hashes || []);
   let addedHashes = 0;
   for (const hash of allHashes) {
     if (!existingHashes.has(hash)) {
@@ -686,7 +917,7 @@ async function runScraper() {
       addedHashes++;
     }
   }
-  
+
   // Add Shai-Hulud markers if not present
   if (!existingIOCs.markers || existingIOCs.markers.length === 0) {
     existingIOCs.markers = [
@@ -706,24 +937,29 @@ async function runScraper() {
       'pigS3cr3ts.json'
     ];
   }
-  
+
   // Update metadata
   existingIOCs.updated = new Date().toISOString();
   existingIOCs.sources = [
+    'osv-malicious',
+    'ossf-malicious',
     'shai-hulud-detector',
     'datadog-consolidated',
     'datadog-direct',
-    'ossf-malicious',
     'github-advisory',
     'socket-dev',
     'phylum',
     'npm-removed',
     'snyk-known'
   ];
-  
-  // Save
+
+  // Save enriched (full) IOCs
   fs.writeFileSync(IOC_FILE, JSON.stringify(existingIOCs, null, 2));
-  
+
+  // Save compact IOCs (lightweight, shipped in npm)
+  const compactIOCs = generateCompactIOCs(existingIOCs);
+  fs.writeFileSync(COMPACT_IOC_FILE, JSON.stringify(compactIOCs));
+
   // Display summary
   console.log('\n' + '='.repeat(60));
   console.log('  RESULTS');
@@ -731,27 +967,37 @@ async function runScraper() {
   console.log('  Packages before:  ' + initialCount);
   console.log('  Packages after:   ' + existingIOCs.packages.length);
   console.log('  New:              +' + addedPackages);
+  console.log('  Upgraded:         ' + upgradedPackages);
   console.log('  Hashes before:    ' + initialHashCount);
   console.log('  Hashes after:     ' + (existingIOCs.hashes ? existingIOCs.hashes.length : 0));
-  console.log('  New:              +' + addedHashes);
+  console.log('  New hashes:       +' + addedHashes);
   console.log('  File:             ' + IOC_FILE);
-  
+
   // Stats by source
   console.log('\n  Distribution by source:');
   const sourceCounts = {};
   for (const pkg of existingIOCs.packages) {
     sourceCounts[pkg.source] = (sourceCounts[pkg.source] || 0) + 1;
   }
-  const sortedSources = Object.entries(sourceCounts).sort((a, b) => b[1] - a[1]);
+  const sortedSources = Object.entries(sourceCounts).sort(function(a, b) { return b[1] - a[1]; });
   for (const [source, count] of sortedSources) {
     console.log('     - ' + source + ': ' + count);
   }
-  
+
+  // Target check
+  const total = existingIOCs.packages.length;
+  if (total >= 5000) {
+    console.log('\n  [OK] Target reached: ' + total + ' IOCs (>= 5000)');
+  } else {
+    console.log('\n  [WARN] Target NOT reached: ' + total + ' IOCs (< 5000)');
+  }
+
   console.log('\n');
-  
-  return { 
-    added: addedPackages, 
+
+  return {
+    added: addedPackages,
     total: existingIOCs.packages.length,
+    upgraded: upgradedPackages,
     addedHashes: addedHashes,
     totalHashes: existingIOCs.hashes ? existingIOCs.hashes.length : 0
   };

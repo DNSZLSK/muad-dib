@@ -5,6 +5,7 @@ const https = require('https');
 const CACHE_PATH = path.join(__dirname, '../../.muaddib-cache');
 const CACHE_IOC_FILE = path.join(CACHE_PATH, 'iocs.json');
 const LOCAL_IOC_FILE = path.join(__dirname, 'data/iocs.json');
+const LOCAL_COMPACT_FILE = path.join(__dirname, 'data/iocs-compact.json');
 const { loadYAMLIOCs } = require('./yaml-loader.js');
 
 // Remote feed - only used as fallback if local scrape doesn't exist
@@ -59,9 +60,14 @@ async function updateIOCs() {
   // Update metadata
   iocs.updated = new Date().toISOString();
 
-  // Save to cache
+  // Save enriched to cache
   fs.writeFileSync(CACHE_IOC_FILE, JSON.stringify(iocs, null, 2));
-  
+
+  // Also save compact version to cache
+  const compactCachePath = path.join(CACHE_PATH, 'iocs-compact.json');
+  const compactIOCs = generateCompactIOCs(iocs);
+  fs.writeFileSync(compactCachePath, JSON.stringify(compactIOCs));
+
   console.log('\n[OK] IOCs saved:');
   console.log('     - ' + iocs.packages.length + ' malicious packages');
   console.log('     - ' + iocs.files.length + ' suspicious files');
@@ -194,11 +200,20 @@ function loadCachedIOCs() {
     files: yamlIOCs.files.map(function(f) { return f.name; })
   };
 
-  // Priority 2: Local scraped IOCs
+  // Priority 2: Local scraped IOCs (full enriched file)
   if (fs.existsSync(LOCAL_IOC_FILE)) {
     try {
       const localIOCs = JSON.parse(fs.readFileSync(LOCAL_IOC_FILE, 'utf8'));
       mergeIOCs(merged, localIOCs);
+    } catch {
+      // Ignore errors
+    }
+  } else if (fs.existsSync(LOCAL_COMPACT_FILE)) {
+    // Priority 2b: Compact file (shipped in npm, lightweight)
+    try {
+      const compactData = JSON.parse(fs.readFileSync(LOCAL_COMPACT_FILE, 'utf8'));
+      const expandedIOCs = expandCompactIOCs(compactData);
+      mergeIOCs(merged, expandedIOCs);
     } catch {
       // Ignore errors
     }
@@ -270,4 +285,84 @@ function createOptimizedIOCs(iocs) {
   };
 }
 
-module.exports = { updateIOCs, loadCachedIOCs };
+/**
+ * Generates a compact version of IOCs for shipping in npm.
+ * Format: wildcards as name array, versioned as name->versions map.
+ * ~5MB instead of ~112MB.
+ * @param {Object} fullIOCs - Full IOCs object with packages array
+ * @returns {Object} Compact IOCs
+ */
+function generateCompactIOCs(fullIOCs) {
+  const wildcards = [];
+  const versioned = {};
+  const severityOverrides = {};
+
+  for (const p of fullIOCs.packages || []) {
+    // Track non-critical severities as overrides
+    if (p.severity && p.severity !== 'critical') {
+      if (!severityOverrides[p.name]) severityOverrides[p.name] = {};
+      severityOverrides[p.name][p.version] = p.severity;
+    }
+
+    if (p.version === '*') {
+      wildcards.push(p.name);
+    } else {
+      if (!versioned[p.name]) versioned[p.name] = [];
+      versioned[p.name].push(p.version);
+    }
+  }
+
+  const compact = {
+    defaultSeverity: 'critical',
+    wildcards: wildcards,
+    versioned: versioned,
+    hashes: fullIOCs.hashes || [],
+    markers: fullIOCs.markers || [],
+    files: fullIOCs.files || [],
+    updated: fullIOCs.updated,
+    sources: fullIOCs.sources
+  };
+
+  if (Object.keys(severityOverrides).length > 0) {
+    compact.severityOverrides = severityOverrides;
+  }
+
+  return compact;
+}
+
+/**
+ * Expands compact IOCs back to standard packages array format.
+ * Used when loading the compact file for scanning.
+ * @param {Object} compact - Compact IOCs from generateCompactIOCs
+ * @returns {Object} Standard IOCs with packages array
+ */
+function expandCompactIOCs(compact) {
+  const packages = [];
+  const defaultSev = compact.defaultSeverity || 'critical';
+  const overrides = compact.severityOverrides || {};
+
+  // Expand wildcards
+  for (const name of compact.wildcards || []) {
+    const severity = (overrides[name] && overrides[name]['*']) || defaultSev;
+    packages.push({ name: name, version: '*', severity: severity });
+  }
+
+  // Expand versioned
+  for (const name of Object.keys(compact.versioned || {})) {
+    for (const version of compact.versioned[name]) {
+      const severity = (overrides[name] && overrides[name][version]) || defaultSev;
+      packages.push({ name: name, version: version, severity: severity });
+    }
+  }
+
+  return {
+    packages: packages,
+    hashes: compact.hashes || [],
+    markers: compact.markers || [],
+    files: compact.files || [],
+    updated: compact.updated,
+    sources: compact.sources
+  };
+}
+
+module.exports = { updateIOCs, loadCachedIOCs, generateCompactIOCs, expandCompactIOCs };

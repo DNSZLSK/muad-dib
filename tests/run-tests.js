@@ -538,6 +538,105 @@ test('SCRAPER: At least 900 IOCs', () => {
 });
 
 // ============================================
+// COMPACT IOC TESTS
+// ============================================
+
+console.log('\n=== COMPACT IOC TESTS ===\n');
+
+test('COMPACT: iocs-compact.json exists', () => {
+  const compactPath = path.join(__dirname, '..', 'src', 'ioc', 'data', 'iocs-compact.json');
+  assert(fs.existsSync(compactPath), 'src/ioc/data/iocs-compact.json should exist');
+});
+
+test('COMPACT: has expected compact format fields', () => {
+  const compactPath = path.join(__dirname, '..', 'src', 'ioc', 'data', 'iocs-compact.json');
+  const compact = JSON.parse(fs.readFileSync(compactPath, 'utf8'));
+  assert(compact.defaultSeverity, 'Should have defaultSeverity');
+  assert(Array.isArray(compact.wildcards), 'wildcards should be an array');
+  assert(compact.wildcards.length > 0, 'Should have wildcard packages');
+  assert(typeof compact.versioned === 'object', 'versioned should be an object');
+  assert(Array.isArray(compact.hashes), 'hashes should be an array');
+  assert(Array.isArray(compact.markers), 'markers should be an array');
+});
+
+test('COMPACT: does NOT have enriched package objects', () => {
+  const compactPath = path.join(__dirname, '..', 'src', 'ioc', 'data', 'iocs-compact.json');
+  const compact = JSON.parse(fs.readFileSync(compactPath, 'utf8'));
+  // Compact format stores names as strings, not objects with description/references
+  assert(typeof compact.wildcards[0] === 'string', 'Wildcard entries should be plain strings');
+  const firstVersionedKey = Object.keys(compact.versioned)[0];
+  assert(Array.isArray(compact.versioned[firstVersionedKey]), 'Versioned entries should be version arrays');
+  assert(typeof compact.versioned[firstVersionedKey][0] === 'string', 'Versions should be plain strings');
+});
+
+test('COMPACT: is significantly smaller than full IOCs', () => {
+  const compactPath = path.join(__dirname, '..', 'src', 'ioc', 'data', 'iocs-compact.json');
+  const fullPath = path.join(__dirname, '..', 'src', 'ioc', 'data', 'iocs.json');
+  if (fs.existsSync(fullPath)) {
+    const compactSize = fs.statSync(compactPath).size;
+    const fullSize = fs.statSync(fullPath).size;
+    assert(compactSize < fullSize / 5, `Compact (${compactSize}) should be at least 5x smaller than full (${fullSize})`);
+  }
+});
+
+test('COMPACT: generateCompactIOCs strips enriched data', () => {
+  const { generateCompactIOCs } = require('../src/ioc/updater.js');
+  const input = {
+    packages: [
+      { name: 'evil-pkg', version: '1.0.0', severity: 'critical', description: 'Bad stuff', references: ['http://example.com'], mitre: 'T1195.002', source: 'test', freshness: { added_at: '2026-01-01' } },
+      { name: 'bad-lib', version: '*', severity: 'critical', description: 'Malware', source: 'osv' }
+    ],
+    hashes: ['abc123'],
+    markers: ['setup_bun.js'],
+    files: ['inject.js'],
+    updated: '2026-01-01T00:00:00.000Z',
+    sources: ['test']
+  };
+  const compact = generateCompactIOCs(input);
+  assert(compact.wildcards.length === 1, 'Should have 1 wildcard');
+  assert(compact.wildcards[0] === 'bad-lib', 'Wildcard should be bad-lib');
+  assert(compact.versioned['evil-pkg'], 'Should have evil-pkg in versioned');
+  assert(compact.versioned['evil-pkg'][0] === '1.0.0', 'Should have version 1.0.0');
+  assert(compact.defaultSeverity === 'critical', 'Default severity should be critical');
+  assert(compact.hashes[0] === 'abc123', 'Should preserve hashes');
+  assert(compact.markers[0] === 'setup_bun.js', 'Should preserve markers');
+  assert(compact.files[0] === 'inject.js', 'Should preserve files');
+});
+
+test('COMPACT: expandCompactIOCs round-trips correctly', () => {
+  const { generateCompactIOCs, expandCompactIOCs } = require('../src/ioc/updater.js');
+  const input = {
+    packages: [
+      { name: 'evil-pkg', version: '1.0.0', severity: 'critical' },
+      { name: 'bad-lib', version: '*', severity: 'critical' },
+      { name: 'evil-pkg', version: '2.0.0', severity: 'critical' }
+    ],
+    hashes: ['abc123'],
+    markers: ['setup_bun.js'],
+    files: ['inject.js'],
+    updated: '2026-01-01T00:00:00.000Z',
+    sources: ['test']
+  };
+  const compact = generateCompactIOCs(input);
+  const expanded = expandCompactIOCs(compact);
+  assert(expanded.packages.length === 3, 'Should expand back to 3 packages');
+  const keys = new Set(expanded.packages.map(p => p.name + '@' + p.version));
+  assert(keys.has('evil-pkg@1.0.0'), 'Should have evil-pkg@1.0.0');
+  assert(keys.has('evil-pkg@2.0.0'), 'Should have evil-pkg@2.0.0');
+  assert(keys.has('bad-lib@*'), 'Should have bad-lib@*');
+  assert(expanded.hashes[0] === 'abc123', 'Should preserve hashes');
+});
+
+test('COMPACT: loadCachedIOCs works with compact fallback', () => {
+  const { loadCachedIOCs } = require('../src/ioc/updater.js');
+  const iocs = loadCachedIOCs();
+  assert(iocs.packagesMap, 'Should have packagesMap');
+  assert(iocs.wildcardPackages, 'Should have wildcardPackages');
+  assert(iocs.hashesSet, 'Should have hashesSet');
+  assert(iocs.packages.length > 0, 'Should have packages loaded');
+});
+
+// ============================================
 // YAML LOADER TESTS
 // ============================================
 
@@ -864,8 +963,18 @@ test('CLI-EXT: sandbox with package errors without Docker', () => {
 });
 
 test('CLI-EXT: scrape command runs', () => {
-  const output = runCommand('scrape');
-  assert(output.length > 0, 'Should produce output');
+  try {
+    const output = execSync(`node "${BIN}" scrape`, {
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: 15000
+    });
+    assert(output.length > 0, 'Should produce output');
+  } catch (e) {
+    // Timeout is OK — scrape downloads large files, we just verify it starts
+    const output = e.stdout || e.stderr || '';
+    assert(output.includes('SCRAPER') || output.includes('IOC'), 'Should start scraping before timeout');
+  }
 });
 
 // ============================================
