@@ -80,7 +80,7 @@ function scanParanoid(targetPath) {
   }
 
   function walkDir(dir) {
-    const excluded = ['node_modules', '.git', 'test', 'tests', 'src', 'vscode-extension', '.muaddib-cache', 'data', 'iocs'];
+    const excluded = ['node_modules', '.git', 'test', 'tests', 'src', 'vscode-extension', '.muaddib-cache', 'data', 'iocs', 'docker'];
     try {
       const files = fs.readdirSync(dir);
       for (const file of files) {

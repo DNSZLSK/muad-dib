@@ -7,7 +7,8 @@ const path = require('path');
 const EXCLUDED_DIRS = [
   'test', 'tests', 'node_modules', '.git', 'src', 'vscode-extension',
   'scripts', 'bin', 'tools', 'build', 'dist', 'fixtures', 'examples',
-  '__tests__', '__mocks__', 'benchmark', 'benchmarks', 'docs', 'doc'
+  '__tests__', '__mocks__', 'benchmark', 'benchmarks', 'docs', 'doc',
+  'docker'
 ];
 
 /**
