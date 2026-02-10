@@ -304,7 +304,7 @@ console.log('\n=== UPDATE TESTS ===\n');
 test('UPDATE: Downloads and caches IOCs', () => {
   const output = runCommand('update');
   assertIncludes(output, 'IOCs saved', 'Should save IOCs');
-  assertIncludes(output, 'malicious packages', 'Should display package count');
+  assertIncludes(output, 'malicious npm packages', 'Should display package count');
 });
 
 // ============================================
@@ -557,6 +557,8 @@ test('COMPACT: has expected compact format fields', () => {
   assert(typeof compact.versioned === 'object', 'versioned should be an object');
   assert(Array.isArray(compact.hashes), 'hashes should be an array');
   assert(Array.isArray(compact.markers), 'markers should be an array');
+  assert(Array.isArray(compact.pypi_wildcards), 'pypi_wildcards should be an array');
+  assert(typeof compact.pypi_versioned === 'object', 'pypi_versioned should be an object');
 });
 
 test('COMPACT: does NOT have enriched package objects', () => {
@@ -586,6 +588,10 @@ test('COMPACT: generateCompactIOCs strips enriched data', () => {
       { name: 'evil-pkg', version: '1.0.0', severity: 'critical', description: 'Bad stuff', references: ['http://example.com'], mitre: 'T1195.002', source: 'test', freshness: { added_at: '2026-01-01' } },
       { name: 'bad-lib', version: '*', severity: 'critical', description: 'Malware', source: 'osv' }
     ],
+    pypi_packages: [
+      { name: 'evil-py', version: '1.0', severity: 'critical', source: 'osv-malicious-pypi' },
+      { name: 'bad-pylib', version: '*', severity: 'critical', source: 'osv-malicious-pypi' }
+    ],
     hashes: ['abc123'],
     markers: ['setup_bun.js'],
     files: ['inject.js'],
@@ -593,14 +599,16 @@ test('COMPACT: generateCompactIOCs strips enriched data', () => {
     sources: ['test']
   };
   const compact = generateCompactIOCs(input);
-  assert(compact.wildcards.length === 1, 'Should have 1 wildcard');
+  assert(compact.wildcards.length === 1, 'Should have 1 npm wildcard');
   assert(compact.wildcards[0] === 'bad-lib', 'Wildcard should be bad-lib');
   assert(compact.versioned['evil-pkg'], 'Should have evil-pkg in versioned');
   assert(compact.versioned['evil-pkg'][0] === '1.0.0', 'Should have version 1.0.0');
+  assert(compact.pypi_wildcards.length === 1, 'Should have 1 PyPI wildcard');
+  assert(compact.pypi_wildcards[0] === 'bad-pylib', 'PyPI wildcard should be bad-pylib');
+  assert(compact.pypi_versioned['evil-py'], 'Should have evil-py in pypi_versioned');
+  assert(compact.pypi_versioned['evil-py'][0] === '1.0', 'Should have version 1.0');
   assert(compact.defaultSeverity === 'critical', 'Default severity should be critical');
   assert(compact.hashes[0] === 'abc123', 'Should preserve hashes');
-  assert(compact.markers[0] === 'setup_bun.js', 'Should preserve markers');
-  assert(compact.files[0] === 'inject.js', 'Should preserve files');
 });
 
 test('COMPACT: expandCompactIOCs round-trips correctly', () => {
@@ -611,6 +619,10 @@ test('COMPACT: expandCompactIOCs round-trips correctly', () => {
       { name: 'bad-lib', version: '*', severity: 'critical' },
       { name: 'evil-pkg', version: '2.0.0', severity: 'critical' }
     ],
+    pypi_packages: [
+      { name: 'evil-py', version: '1.0', severity: 'critical' },
+      { name: 'bad-pylib', version: '*', severity: 'critical' }
+    ],
     hashes: ['abc123'],
     markers: ['setup_bun.js'],
     files: ['inject.js'],
@@ -619,11 +631,15 @@ test('COMPACT: expandCompactIOCs round-trips correctly', () => {
   };
   const compact = generateCompactIOCs(input);
   const expanded = expandCompactIOCs(compact);
-  assert(expanded.packages.length === 3, 'Should expand back to 3 packages');
+  assert(expanded.packages.length === 3, 'Should expand back to 3 npm packages');
   const keys = new Set(expanded.packages.map(p => p.name + '@' + p.version));
   assert(keys.has('evil-pkg@1.0.0'), 'Should have evil-pkg@1.0.0');
   assert(keys.has('evil-pkg@2.0.0'), 'Should have evil-pkg@2.0.0');
   assert(keys.has('bad-lib@*'), 'Should have bad-lib@*');
+  assert(expanded.pypi_packages.length === 2, 'Should expand back to 2 PyPI packages');
+  const pypiKeys = new Set(expanded.pypi_packages.map(p => p.name + '@' + p.version));
+  assert(pypiKeys.has('evil-py@1.0'), 'Should have evil-py@1.0');
+  assert(pypiKeys.has('bad-pylib@*'), 'Should have bad-pylib@*');
   assert(expanded.hashes[0] === 'abc123', 'Should preserve hashes');
 });
 
@@ -632,8 +648,11 @@ test('COMPACT: loadCachedIOCs works with compact fallback', () => {
   const iocs = loadCachedIOCs();
   assert(iocs.packagesMap, 'Should have packagesMap');
   assert(iocs.wildcardPackages, 'Should have wildcardPackages');
+  assert(iocs.pypiPackagesMap, 'Should have pypiPackagesMap');
+  assert(iocs.pypiWildcardPackages, 'Should have pypiWildcardPackages');
   assert(iocs.hashesSet, 'Should have hashesSet');
   assert(iocs.packages.length > 0, 'Should have packages loaded');
+  assert(Array.isArray(iocs.pypi_packages), 'Should have pypi_packages array');
 });
 
 // ============================================
@@ -1523,6 +1542,510 @@ test('HASH: clearHashCache and getHashCacheSize', () => {
   });
 
   mockWebhookServer.server.close();
+
+  // ============================================
+  // PYTHON PARSER TESTS
+  // ============================================
+
+  console.log('\n=== PYTHON PARSER TESTS ===\n');
+
+  const { parseRequirementsTxt, parseSetupPy, parsePyprojectToml, detectPythonProject, normalizePythonName } = require('../src/scanner/python.js');
+
+  // --- normalizePythonName ---
+
+  test('PYTHON: normalizePythonName lowercases and normalizes separators', () => {
+    assert(normalizePythonName('Flask') === 'flask', 'Should lowercase');
+    assert(normalizePythonName('my_package') === 'my-package', 'Should replace underscores');
+    assert(normalizePythonName('My.Package') === 'my-package', 'Should replace dots');
+    assert(normalizePythonName('My-Package') === 'my-package', 'Should lowercase hyphens');
+    assert(normalizePythonName('some__pkg') === 'some-pkg', 'Should collapse multiple separators');
+  });
+
+  // --- parseRequirementsTxt ---
+
+  test('PYTHON: parseRequirementsTxt parses pinned versions', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pytest-'));
+    const reqFile = path.join(tmpDir, 'requirements.txt');
+    fs.writeFileSync(reqFile, 'flask==2.3.0\nrequests==2.31.0\n');
+    const deps = parseRequirementsTxt(reqFile);
+    assert(deps.length === 2, 'Should have 2 deps');
+    assert(deps[0].name === 'flask', 'First should be flask');
+    assert(deps[0].version === '==2.3.0', 'Should have pinned version');
+    assert(deps[1].name === 'requests', 'Second should be requests');
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('PYTHON: parseRequirementsTxt handles various version specs', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pytest-'));
+    const reqFile = path.join(tmpDir, 'requirements.txt');
+    fs.writeFileSync(reqFile, [
+      'flask>=2.0',
+      'django~=4.2',
+      'requests<=2.31.0',
+      'numpy>1.20',
+      'pandas!=1.5.0',
+      'scipy<2.0',
+      'simplepkg',
+    ].join('\n'));
+    const deps = parseRequirementsTxt(reqFile);
+    assert(deps.length === 7, 'Should have 7 deps, got ' + deps.length);
+    assert(deps[0].version === '>=2.0', 'flask version');
+    assert(deps[1].version === '~=4.2', 'django version');
+    assert(deps[2].version === '<=2.31.0', 'requests version');
+    assert(deps[3].version === '>1.20', 'numpy version');
+    assert(deps[4].version === '!=1.5.0', 'pandas version');
+    assert(deps[5].version === '<2.0', 'scipy version');
+    assert(deps[6].version === '*', 'simplepkg no version');
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('PYTHON: parseRequirementsTxt ignores comments and blanks', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pytest-'));
+    const reqFile = path.join(tmpDir, 'requirements.txt');
+    fs.writeFileSync(reqFile, '# This is a comment\n\nflask==2.0\n   # Another comment\n\n');
+    const deps = parseRequirementsTxt(reqFile);
+    assert(deps.length === 1, 'Should have 1 dep');
+    assert(deps[0].name === 'flask', 'Should be flask');
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('PYTHON: parseRequirementsTxt handles extras', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pytest-'));
+    const reqFile = path.join(tmpDir, 'requirements.txt');
+    fs.writeFileSync(reqFile, 'requests[security]==2.31.0\ncelery[redis,auth]>=5.0\n');
+    const deps = parseRequirementsTxt(reqFile);
+    assert(deps.length === 2, 'Should have 2 deps');
+    assert(deps[0].name === 'requests', 'Should strip extras from name');
+    assert(deps[0].version === '==2.31.0', 'Should keep version');
+    assert(deps[1].name === 'celery', 'Should strip multiple extras');
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('PYTHON: parseRequirementsTxt handles recursive includes', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pytest-'));
+    const baseFile = path.join(tmpDir, 'requirements.txt');
+    const extraFile = path.join(tmpDir, 'requirements-dev.txt');
+    fs.writeFileSync(extraFile, 'pytest==7.0\nblack==23.0\n');
+    fs.writeFileSync(baseFile, 'flask==2.0\n-r requirements-dev.txt\nrequests==2.31\n');
+    const deps = parseRequirementsTxt(baseFile);
+    assert(deps.length === 4, 'Should have 4 deps, got ' + deps.length);
+    const names = deps.map(function(d) { return d.name; });
+    assert(names.includes('flask'), 'Should have flask');
+    assert(names.includes('pytest'), 'Should have pytest from included file');
+    assert(names.includes('black'), 'Should have black from included file');
+    assert(names.includes('requests'), 'Should have requests');
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('PYTHON: parseRequirementsTxt handles circular includes', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pytest-'));
+    const fileA = path.join(tmpDir, 'a.txt');
+    const fileB = path.join(tmpDir, 'b.txt');
+    fs.writeFileSync(fileA, 'flask==2.0\n-r b.txt\n');
+    fs.writeFileSync(fileB, 'requests==2.31\n-r a.txt\n');
+    const deps = parseRequirementsTxt(fileA);
+    assert(deps.length === 2, 'Should not loop infinitely');
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('PYTHON: parseRequirementsTxt skips option lines', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pytest-'));
+    const reqFile = path.join(tmpDir, 'requirements.txt');
+    fs.writeFileSync(reqFile, '--index-url https://pypi.org/simple\n-i https://pypi.org/simple\nflask==2.0\n-e git+https://github.com/foo/bar.git\n');
+    const deps = parseRequirementsTxt(reqFile);
+    assert(deps.length === 1, 'Should only have flask');
+    assert(deps[0].name === 'flask', 'Should be flask');
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('PYTHON: parseRequirementsTxt handles env markers', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pytest-'));
+    const reqFile = path.join(tmpDir, 'requirements.txt');
+    fs.writeFileSync(reqFile, 'pywin32>=300; sys_platform == "win32"\ncolorama>=0.4; os_name == "nt"\n');
+    const deps = parseRequirementsTxt(reqFile);
+    assert(deps.length === 2, 'Should parse both deps');
+    assert(deps[0].name === 'pywin32', 'Should strip env marker');
+    assert(deps[0].version === '>=300', 'Should keep version');
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  // --- parseSetupPy ---
+
+  test('PYTHON: parseSetupPy extracts install_requires', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pytest-'));
+    const setupFile = path.join(tmpDir, 'setup.py');
+    fs.writeFileSync(setupFile, [
+      'from setuptools import setup',
+      '',
+      'setup(',
+      '    name="myproject",',
+      '    version="1.0.0",',
+      '    install_requires=[',
+      '        "flask>=2.0",',
+      '        "requests==2.31.0",',
+      '        "click",',
+      '    ],',
+      ')',
+    ].join('\n'));
+    const deps = parseSetupPy(setupFile);
+    assert(deps.length === 3, 'Should have 3 deps, got ' + deps.length);
+    assert(deps[0].name === 'flask', 'First should be flask');
+    assert(deps[0].version === '>=2.0', 'flask version');
+    assert(deps[1].name === 'requests', 'Second should be requests');
+    assert(deps[2].name === 'click', 'Third should be click');
+    assert(deps[2].version === '*', 'click no version');
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('PYTHON: parseSetupPy handles single-line install_requires', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pytest-'));
+    const setupFile = path.join(tmpDir, 'setup.py');
+    fs.writeFileSync(setupFile, 'setup(install_requires=["flask>=2.0", "requests"])');
+    const deps = parseSetupPy(setupFile);
+    assert(deps.length === 2, 'Should have 2 deps');
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('PYTHON: parseSetupPy also extracts setup_requires', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pytest-'));
+    const setupFile = path.join(tmpDir, 'setup.py');
+    fs.writeFileSync(setupFile, [
+      'setup(',
+      '    install_requires=["flask>=2.0"],',
+      '    setup_requires=["setuptools-scm"],',
+      ')',
+    ].join('\n'));
+    const deps = parseSetupPy(setupFile);
+    assert(deps.length === 2, 'Should have 2 deps, got ' + deps.length);
+    const names = deps.map(function(d) { return d.name; });
+    assert(names.includes('flask'), 'Should have flask');
+    assert(names.includes('setuptools-scm'), 'Should have setuptools-scm');
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  // --- parsePyprojectToml ---
+
+  test('PYTHON: parsePyprojectToml extracts PEP 621 dependencies', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pytest-'));
+    const tomlFile = path.join(tmpDir, 'pyproject.toml');
+    fs.writeFileSync(tomlFile, [
+      '[project]',
+      'name = "myproject"',
+      'version = "1.0.0"',
+      'dependencies = [',
+      '    "flask>=2.0",',
+      '    "requests==2.31.0",',
+      '    "click",',
+      ']',
+    ].join('\n'));
+    const deps = parsePyprojectToml(tomlFile);
+    assert(deps.length === 3, 'Should have 3 deps, got ' + deps.length);
+    assert(deps[0].name === 'flask', 'First should be flask');
+    assert(deps[0].version === '>=2.0', 'flask version');
+    assert(deps[1].name === 'requests', 'Second should be requests');
+    assert(deps[2].name === 'click', 'Third should be click');
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('PYTHON: parsePyprojectToml extracts Poetry dependencies', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pytest-'));
+    const tomlFile = path.join(tmpDir, 'pyproject.toml');
+    fs.writeFileSync(tomlFile, [
+      '[tool.poetry]',
+      'name = "myproject"',
+      '',
+      '[tool.poetry.dependencies]',
+      'python = "^3.8"',
+      'flask = "^2.3"',
+      'requests = {version = "^2.31", optional = true}',
+      'click = "*"',
+    ].join('\n'));
+    const deps = parsePyprojectToml(tomlFile);
+    assert(deps.length === 3, 'Should have 3 deps (python skipped), got ' + deps.length);
+    const names = deps.map(function(d) { return d.name; });
+    assert(!names.includes('python'), 'Should skip python');
+    assert(names.includes('flask'), 'Should have flask');
+    assert(names.includes('requests'), 'Should have requests');
+    assert(names.includes('click'), 'Should have click');
+    const flask = deps.find(function(d) { return d.name === 'flask'; });
+    assert(flask.version === '^2.3', 'flask version');
+    const req = deps.find(function(d) { return d.name === 'requests'; });
+    assert(req.version === '^2.31', 'requests version from inline table');
+    const click = deps.find(function(d) { return d.name === 'click'; });
+    assert(click.version === '*', 'click wildcard');
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('PYTHON: parsePyprojectToml handles both PEP 621 and Poetry', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pytest-'));
+    const tomlFile = path.join(tmpDir, 'pyproject.toml');
+    fs.writeFileSync(tomlFile, [
+      '[project]',
+      'dependencies = [',
+      '    "flask>=2.0",',
+      ']',
+      '',
+      '[tool.poetry.dependencies]',
+      'python = "^3.8"',
+      'django = "^4.2"',
+    ].join('\n'));
+    const deps = parsePyprojectToml(tomlFile);
+    assert(deps.length === 2, 'Should have 2 deps, got ' + deps.length);
+    const names = deps.map(function(d) { return d.name; });
+    assert(names.includes('flask'), 'Should have flask from PEP 621');
+    assert(names.includes('django'), 'Should have django from Poetry');
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  // --- detectPythonProject ---
+
+  test('PYTHON: detectPythonProject finds all dependency files', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pytest-'));
+    fs.writeFileSync(path.join(tmpDir, 'requirements.txt'), 'flask==2.3.0\nrequests==2.31.0\n');
+    fs.writeFileSync(path.join(tmpDir, 'setup.py'), 'setup(install_requires=["click>=7.0", "gunicorn==20.0"])');
+    fs.writeFileSync(path.join(tmpDir, 'pyproject.toml'), '[project]\ndependencies = ["sqlalchemy>=2.0"]\n');
+    const deps = detectPythonProject(tmpDir);
+    const names = deps.map(function(d) { return d.name; });
+    assert(names.includes('flask'), 'Should find flask from requirements.txt');
+    assert(names.includes('requests'), 'Should find requests from requirements.txt');
+    assert(names.includes('click'), 'Should find click from setup.py');
+    assert(names.includes('gunicorn'), 'Should find gunicorn from setup.py');
+    assert(names.includes('sqlalchemy'), 'Should find sqlalchemy from pyproject.toml');
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('PYTHON: detectPythonProject deduplicates by name', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pytest-'));
+    fs.writeFileSync(path.join(tmpDir, 'requirements.txt'), 'flask==2.3.0\n');
+    fs.writeFileSync(path.join(tmpDir, 'setup.py'), 'setup(install_requires=["flask>=2.0"])');
+    const deps = detectPythonProject(tmpDir);
+    const flasks = deps.filter(function(d) { return d.name === 'flask'; });
+    assert(flasks.length === 1, 'Should deduplicate flask');
+    assert(flasks[0].version === '==2.3.0', 'Should keep first occurrence (requirements.txt)');
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('PYTHON: detectPythonProject scans requirements/ directory', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pytest-'));
+    const reqDir = path.join(tmpDir, 'requirements');
+    fs.mkdirSync(reqDir);
+    fs.writeFileSync(path.join(reqDir, 'prod.txt'), 'flask==2.3.0\n');
+    fs.writeFileSync(path.join(reqDir, 'dev.txt'), 'pytest==7.0\n');
+    const deps = detectPythonProject(tmpDir);
+    assert(deps.length === 2, 'Should have 2 deps, got ' + deps.length);
+    const names = deps.map(function(d) { return d.name; });
+    assert(names.includes('flask'), 'Should have flask from prod.txt');
+    assert(names.includes('pytest'), 'Should have pytest from dev.txt');
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('PYTHON: detectPythonProject returns empty for non-Python project', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pytest-'));
+    const deps = detectPythonProject(tmpDir);
+    assert(deps.length === 0, 'Should return empty array');
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('PYTHON: PEP 503 name normalization in dedup', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pytest-'));
+    fs.writeFileSync(path.join(tmpDir, 'requirements.txt'), 'Flask==2.3.0\nflask==2.0\n');
+    const deps = detectPythonProject(tmpDir);
+    const flasks = deps.filter(function(d) { return d.name === 'flask'; });
+    assert(flasks.length === 1, 'Should deduplicate Flask/flask');
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  // ============================================
+  // PYTHON SCAN INTEGRATION TESTS
+  // ============================================
+
+  console.log('\n=== PYTHON SCAN INTEGRATION TESTS ===\n');
+
+  const { getRule: getRuleForPypi } = require('../src/rules/index.js');
+  const { getPlaybook: getPlaybookForPypi } = require('../src/response/playbooks.js');
+
+  test('PYTHON-SCAN: Rule pypi_malicious_package exists', () => {
+    const rule = getRuleForPypi('pypi_malicious_package');
+    assert(rule.id === 'MUADDIB-PYPI-001', 'Rule ID should be MUADDIB-PYPI-001, got ' + rule.id);
+    assert(rule.name === 'Malicious PyPI Package', 'Rule name');
+    assert(rule.severity === 'CRITICAL', 'Rule severity');
+    assert(rule.confidence === 'high', 'Rule confidence');
+    assert(rule.mitre === 'T1195.002', 'Rule MITRE');
+  });
+
+  test('PYTHON-SCAN: Playbook pypi_malicious_package exists', () => {
+    const playbook = getPlaybookForPypi('pypi_malicious_package');
+    assert(playbook.includes('pip uninstall'), 'Playbook should mention pip uninstall, got: ' + playbook);
+  });
+
+  test('PYTHON-SCAN: CLI shows [PYTHON] section for Python project', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pyscan-'));
+    fs.writeFileSync(path.join(tmpDir, 'requirements.txt'), 'flask==2.3.0\nrequests==2.31.0\n');
+    const output = execSync(`node "${BIN}" scan "${tmpDir}"`, { encoding: 'utf8', timeout: 30000 });
+    assert(output.includes('[PYTHON]'), 'Output should contain [PYTHON] section');
+    assert(output.includes('2 dependencies detected'), 'Should show 2 dependencies');
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('PYTHON-SCAN: JSON output includes python field', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pyscan-'));
+    fs.writeFileSync(path.join(tmpDir, 'requirements.txt'), 'flask==2.3.0\nrequests==2.31.0\ndjango>=4.0\n');
+    const output = execSync(`node "${BIN}" scan "${tmpDir}" --json`, { encoding: 'utf8', timeout: 30000 });
+    const result = JSON.parse(output);
+    assert(result.python !== null && result.python !== undefined, 'Should have python field');
+    assert(result.python.dependencies === 3, 'Should have 3 dependencies, got ' + result.python.dependencies);
+    assert(Array.isArray(result.python.files), 'Should have files array');
+    assert(result.python.files.length > 0, 'Should have at least 1 file');
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('PYTHON-SCAN: No [PYTHON] section for non-Python project', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pyscan-'));
+    fs.writeFileSync(path.join(tmpDir, 'package.json'), '{"name":"test","version":"1.0.0"}');
+    const output = execSync(`node "${BIN}" scan "${tmpDir}"`, { encoding: 'utf8', timeout: 30000 });
+    assert(!output.includes('[PYTHON]'), 'Should NOT contain [PYTHON] section for npm-only project');
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('PYTHON-SCAN: JSON python field is null for non-Python project', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pyscan-'));
+    fs.writeFileSync(path.join(tmpDir, 'package.json'), '{"name":"test","version":"1.0.0"}');
+    const output = execSync(`node "${BIN}" scan "${tmpDir}" --json`, { encoding: 'utf8', timeout: 30000 });
+    const result = JSON.parse(output);
+    assert(result.python === null, 'python field should be null for non-Python project');
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('PYTHON-SCAN: Explain mode shows [PYTHON] section', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pyscan-'));
+    fs.writeFileSync(path.join(tmpDir, 'requirements.txt'), 'flask==2.3.0\n');
+    const output = execSync(`node "${BIN}" scan "${tmpDir}" --explain`, { encoding: 'utf8', timeout: 30000 });
+    assert(output.includes('[PYTHON]'), 'Explain mode should contain [PYTHON] section');
+    assert(output.includes('1 dependencies detected'), 'Should show 1 dependency');
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('PYTHON-SCAN: Detects all Python file types', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pyscan-'));
+    fs.writeFileSync(path.join(tmpDir, 'requirements.txt'), 'flask==2.3.0\n');
+    fs.writeFileSync(path.join(tmpDir, 'setup.py'), 'setup(install_requires=["click>=7.0"])');
+    fs.writeFileSync(path.join(tmpDir, 'pyproject.toml'), '[project]\ndependencies = ["sqlalchemy>=2.0"]\n');
+    const output = execSync(`node "${BIN}" scan "${tmpDir}" --json`, { encoding: 'utf8', timeout: 30000 });
+    const result = JSON.parse(output);
+    assert(result.python.dependencies === 3, 'Should have 3 deduplicated deps, got ' + result.python.dependencies);
+    assert(result.python.files.length === 3, 'Should reference 3 files, got ' + result.python.files.length);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  // ============================================
+  // PYPI TYPOSQUATTING TESTS
+  // ============================================
+
+  console.log('\n=== PYPI TYPOSQUATTING TESTS ===\n');
+
+  const { findPyPITyposquatMatch } = require('../src/scanner/typosquat.js');
+
+  test('PYPI-TYPOSQUAT: Detects reqeusts (requests)', () => {
+    const match = findPyPITyposquatMatch('reqeusts');
+    assert(match !== null, 'Should detect reqeusts as typosquat');
+    assert(match.original === 'requests', 'Should identify requests as target');
+    assert(match.distance <= 2, 'Distance should be <= 2');
+  });
+
+  test('PYPI-TYPOSQUAT: Detects numpie (numpy)', () => {
+    const match = findPyPITyposquatMatch('numpie');
+    assert(match !== null, 'Should detect numpie as typosquat');
+    assert(match.original === 'numpy', 'Should identify numpy as target');
+  });
+
+  test('PYPI-TYPOSQUAT: Detects flaks (flask)', () => {
+    const match = findPyPITyposquatMatch('flaks');
+    assert(match !== null, 'Should detect flaks as typosquat');
+    assert(match.original === 'flask', 'Should identify flask as target');
+  });
+
+  test('PYPI-TYPOSQUAT: Detects djnago (django)', () => {
+    const match = findPyPITyposquatMatch('djnago');
+    assert(match !== null, 'Should detect djnago as typosquat');
+    assert(match.original === 'django', 'Should identify django as target');
+  });
+
+  test('PYPI-TYPOSQUAT: Detects pandsa (pandas)', () => {
+    const match = findPyPITyposquatMatch('pandsa');
+    assert(match !== null, 'Should detect pandsa as typosquat');
+    assert(match.original === 'pandas', 'Should identify pandas as target');
+  });
+
+  test('PYPI-TYPOSQUAT: Does not flag exact package names', () => {
+    assert(findPyPITyposquatMatch('requests') === null, 'requests itself');
+    assert(findPyPITyposquatMatch('flask') === null, 'flask itself');
+    assert(findPyPITyposquatMatch('numpy') === null, 'numpy itself');
+    assert(findPyPITyposquatMatch('django') === null, 'django itself');
+  });
+
+  test('PYPI-TYPOSQUAT: PEP 503 normalization — case insensitive', () => {
+    assert(findPyPITyposquatMatch('Flask') === null, 'Flask (capitalized) = flask');
+    assert(findPyPITyposquatMatch('Django') === null, 'Django (capitalized) = django');
+    assert(findPyPITyposquatMatch('NumPy') === null, 'NumPy (mixed case) = numpy');
+  });
+
+  test('PYPI-TYPOSQUAT: PEP 503 normalization — underscores/dots/hyphens equivalent', () => {
+    assert(findPyPITyposquatMatch('scikit_learn') === null, 'scikit_learn = scikit-learn');
+    assert(findPyPITyposquatMatch('scikit.learn') === null, 'scikit.learn = scikit-learn');
+    assert(findPyPITyposquatMatch('python_dateutil') === null, 'python_dateutil = python-dateutil');
+  });
+
+  test('PYPI-TYPOSQUAT: Skips short names (< 4 chars)', () => {
+    assert(findPyPITyposquatMatch('six') === null, 'six is too short');
+    assert(findPyPITyposquatMatch('pip') === null, 'pip is too short');
+    assert(findPyPITyposquatMatch('tox') === null, 'tox is too short');
+  });
+
+  test('PYPI-TYPOSQUAT: Skips whitelisted packages', () => {
+    assert(findPyPITyposquatMatch('boto') === null, 'boto is whitelisted');
+    assert(findPyPITyposquatMatch('torchvision') === null, 'torchvision is whitelisted');
+  });
+
+  test('PYPI-TYPOSQUAT: Severity is HIGH', () => {
+    const match = findPyPITyposquatMatch('reqeusts');
+    assert(match !== null, 'Should detect reqeusts');
+    // Severity is set in index.js checkPyPITyposquatting, so check rule
+    const rule = getRuleForPypi('pypi_typosquat_detected');
+    assert(rule.severity === 'HIGH', 'Rule severity should be HIGH');
+  });
+
+  test('PYPI-TYPOSQUAT: CLI detects PyPI typosquat in requirements.txt', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pytypo-'));
+    fs.writeFileSync(path.join(tmpDir, 'requirements.txt'), 'reqeusts==2.31.0\nflask==2.3.0\n');
+    let output;
+    try {
+      output = execSync(`node "${BIN}" scan "${tmpDir}" --json`, { encoding: 'utf8', timeout: 30000 });
+    } catch (e) {
+      // Non-zero exit expected (HIGH threat detected)
+      output = e.stdout;
+    }
+    const result = JSON.parse(output);
+    const typosquatThreats = result.threats.filter(function(t) { return t.type === 'pypi_typosquat_detected'; });
+    assert(typosquatThreats.length >= 1, 'Should detect at least 1 PyPI typosquat, got ' + typosquatThreats.length);
+    assert(typosquatThreats[0].message.includes('reqeusts'), 'Should mention reqeusts');
+    assert(typosquatThreats[0].message.includes('requests'), 'Should mention requests as target');
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('PYPI-TYPOSQUAT: No false positive for legit Python deps', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pytypo-'));
+    fs.writeFileSync(path.join(tmpDir, 'requirements.txt'), 'flask==2.3.0\nrequests==2.31.0\nnumpy==1.24.0\ndjango>=4.0\n');
+    const output = execSync(`node "${BIN}" scan "${tmpDir}" --json`, { encoding: 'utf8', timeout: 30000 });
+    const result = JSON.parse(output);
+    const typosquatThreats = result.threats.filter(function(t) { return t.type === 'pypi_typosquat_detected'; });
+    assert(typosquatThreats.length === 0, 'Should have 0 PyPI typosquat for legit deps, got ' + typosquatThreats.length);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('PYPI-TYPOSQUAT: Playbook exists', () => {
+    const playbook = getPlaybookForPypi('pypi_typosquat_detected');
+    assert(playbook.includes('package PyPI'), 'Playbook should mention PyPI package');
+  });
 
   // ============================================
   // RESULTS

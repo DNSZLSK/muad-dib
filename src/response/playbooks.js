@@ -59,6 +59,12 @@ const PLAYBOOKS = {
   known_malicious_package:
     'CRITIQUE: Supprimer immediatement. rm -rf node_modules && npm cache clean --force && npm install',
 
+  pypi_malicious_package:
+    'CRITIQUE: Supprimer immediatement. pip uninstall <package> && pip install -r requirements.txt',
+
+  pypi_typosquat_detected:
+    'Verifier que le nom du package PyPI est correct. Comparer avec le package populaire identifie.',
+
   lifecycle_script_dependency:
     'Verifier le contenu du script dans le package. Reinstaller avec --ignore-scripts si suspect.',
 

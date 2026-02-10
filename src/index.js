@@ -9,11 +9,13 @@ const { getPlaybook } = require('./response/playbooks.js');
 const { getRule, PARANOID_RULES } = require('./rules/index.js');
 const { saveReport } = require('./report.js');
 const { saveSARIF } = require('./sarif.js');
-const { scanTyposquatting } = require('./scanner/typosquat.js');
+const { scanTyposquatting, findPyPITyposquatMatch } = require('./scanner/typosquat.js');
 const { sendWebhook } = require('./webhook.js');
 const fs = require('fs');
 const path = require('path');
 const { scanGitHubActions } = require('./scanner/github-actions.js');
+const { detectPythonProject, normalizePythonName } = require('./scanner/python.js');
+const { loadCachedIOCs } = require('./ioc/updater.js');
 
 // ============================================
 // SCORING CONSTANTS
@@ -107,7 +109,87 @@ function scanParanoid(targetPath) {
   return threats;
 }
 
+/**
+ * Match detected Python dependencies against PyPI IOCs.
+ * @param {Array<{name: string, version: string, file: string}>} deps
+ * @param {string} targetPath
+ * @returns {Array} threats
+ */
+function matchPythonIOCs(deps, targetPath) {
+  if (deps.length === 0) return [];
+
+  const iocs = loadCachedIOCs();
+  const threats = [];
+
+  for (const dep of deps) {
+    const name = normalizePythonName(dep.name);
+    let malicious = null;
+
+    // Check wildcard (all versions malicious)
+    if (iocs.pypiWildcardPackages && iocs.pypiWildcardPackages.has(name)) {
+      const pkgList = iocs.pypiPackagesMap.get(name);
+      malicious = pkgList ? pkgList.find(p => p.version === '*') : { name, version: '*', severity: 'critical' };
+    }
+    // Check specific version via Map
+    else if (iocs.pypiPackagesMap && iocs.pypiPackagesMap.has(name)) {
+      const pkgList = iocs.pypiPackagesMap.get(name);
+      const cleanVersion = dep.version.replace(/^(==|>=|<=|~=|!=|>|<)/, '');
+      malicious = pkgList.find(p => p.version === cleanVersion || p.version === dep.version || p.version === '*');
+    }
+    // Fallback: linear search
+    else if (!iocs.pypiPackagesMap && iocs.pypi_packages) {
+      malicious = iocs.pypi_packages.find(p => {
+        if (normalizePythonName(p.name) !== name) return false;
+        if (p.version === '*') return true;
+        const cleanVersion = dep.version.replace(/^(==|>=|<=|~=|!=|>|<)/, '');
+        return p.version === cleanVersion || p.version === dep.version;
+      });
+    }
+
+    if (malicious) {
+      const severity = (malicious.severity || 'critical').toUpperCase();
+      const relFile = path.relative(targetPath, dep.file) || dep.file;
+      threats.push({
+        type: 'pypi_malicious_package',
+        severity: severity,
+        message: `Malicious PyPI package: ${dep.name}@${malicious.version} (source: ${malicious.source || 'OSV'})`,
+        file: relFile
+      });
+    }
+  }
+
+  return threats;
+}
+
+/**
+ * Check Python dependencies for PyPI typosquatting (Levenshtein only, no API).
+ * @param {Array<{name: string, version: string, file: string}>} deps
+ * @param {string} targetPath
+ * @returns {Array} threats
+ */
+function checkPyPITyposquatting(deps, targetPath) {
+  const threats = [];
+
+  for (const dep of deps) {
+    const match = findPyPITyposquatMatch(dep.name);
+    if (match) {
+      const relFile = path.relative(targetPath, dep.file) || dep.file;
+      threats.push({
+        type: 'pypi_typosquat_detected',
+        severity: 'HIGH',
+        message: `PyPI package "${dep.name}" resembles "${match.original}" (${match.type}, distance: ${match.distance})`,
+        file: relFile
+      });
+    }
+  }
+
+  return threats;
+}
+
 async function run(targetPath, options = {}) {
+  // Detect Python project (synchronous, fast file reads)
+  const pythonDeps = detectPythonProject(targetPath);
+
   // Parallel execution of all independent scanners
   const [
     packageThreats,
@@ -118,7 +200,9 @@ async function run(targetPath, options = {}) {
     hashThreats,
     dataflowThreats,
     typosquatThreats,
-    ghActionsThreats
+    ghActionsThreats,
+    pythonThreats,
+    pypiTyposquatThreats
   ] = await Promise.all([
     scanPackageJson(targetPath),
     scanShellScripts(targetPath),
@@ -128,7 +212,9 @@ async function run(targetPath, options = {}) {
     scanHashes(targetPath),
     analyzeDataFlow(targetPath),
     scanTyposquatting(targetPath),
-    Promise.resolve(scanGitHubActions(targetPath))
+    Promise.resolve(scanGitHubActions(targetPath)),
+    Promise.resolve(matchPythonIOCs(pythonDeps, targetPath)),
+    Promise.resolve(checkPyPITyposquatting(pythonDeps, targetPath))
   ]);
 
   const threats = [
@@ -140,7 +226,9 @@ async function run(targetPath, options = {}) {
     ...hashThreats,
     ...dataflowThreats,
     ...typosquatThreats,
-    ...ghActionsThreats
+    ...ghActionsThreats,
+    ...pythonThreats,
+    ...pypiTyposquatThreats
   ];
 
   // Paranoid mode
@@ -218,10 +306,18 @@ async function run(targetPath, options = {}) {
                   : riskScore > 0 ? 'LOW'
                   : 'SAFE';
 
+  // Python scan metadata
+  const pythonInfo = pythonDeps.length > 0 ? {
+    dependencies: pythonDeps.length,
+    files: [...new Set(pythonDeps.map(d => path.relative(targetPath, d.file) || d.file))],
+    threats: pythonThreats.length + pypiTyposquatThreats.length
+  } : null;
+
   const result = {
     target: targetPath,
     timestamp: new Date().toISOString(),
     threats: enrichedThreats,
+    python: pythonInfo,
     summary: {
       total: deduped.length,
       critical: criticalCount,
@@ -251,6 +347,15 @@ async function run(targetPath, options = {}) {
   // Explain output
   else if (options.explain) {
     console.log(`\n[MUADDIB] Scanning ${targetPath}\n`);
+
+    if (pythonInfo) {
+      console.log(`[PYTHON] ${pythonInfo.dependencies} dependencies detected (${pythonInfo.files.join(', ')})`);
+      if (pythonInfo.threats > 0) {
+        console.log(`[PYTHON] ${pythonInfo.threats} malicious PyPI package(s) found!\n`);
+      } else {
+        console.log(`[PYTHON] No known malicious PyPI packages.\n`);
+      }
+    }
 
     if (enrichedThreats.length === 0) {
       console.log('[OK] No threats detected.\n');
@@ -297,6 +402,15 @@ async function run(targetPath, options = {}) {
 
     const scoreBar = '█'.repeat(Math.floor(result.summary.riskScore / 5)) + '░'.repeat(20 - Math.floor(result.summary.riskScore / 5));
     console.log(`[SCORE] ${result.summary.riskScore}/100 [${scoreBar}] ${result.summary.riskLevel}\n`);
+
+    if (pythonInfo) {
+      console.log(`[PYTHON] ${pythonInfo.dependencies} dependencies detected (${pythonInfo.files.join(', ')})`);
+      if (pythonInfo.threats > 0) {
+        console.log(`[PYTHON] ${pythonInfo.threats} malicious PyPI package(s) found!\n`);
+      } else {
+        console.log(`[PYTHON] No known malicious PyPI packages.\n`);
+      }
+    }
 
     if (deduped.length === 0) {
       console.log('[OK] No threats detected.\n');

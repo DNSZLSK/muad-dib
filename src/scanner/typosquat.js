@@ -357,4 +357,97 @@ function clearMetadataCache() {
   metadataCache.clear();
 }
 
-module.exports = { scanTyposquatting, levenshteinDistance, clearMetadataCache };
+// ============================================
+// PyPI TYPOSQUATTING
+// ============================================
+
+// Top 50 PyPI packages les plus populaires (cibles de typosquatting)
+const POPULAR_PYPI_PACKAGES = [
+  'requests', 'flask', 'django', 'numpy', 'pandas', 'scipy', 'matplotlib',
+  'pillow', 'boto3', 'setuptools', 'pip', 'wheel', 'urllib3', 'certifi',
+  'six', 'python-dateutil', 'pyyaml', 'cryptography', 'jinja2', 'markupsafe',
+  'click', 'sqlalchemy', 'beautifulsoup4', 'lxml', 'pytest', 'coverage',
+  'tox', 'black', 'mypy', 'pylint', 'fastapi', 'uvicorn', 'gunicorn',
+  'celery', 'redis', 'psycopg2', 'pymongo', 'httpx', 'aiohttp', 'tornado',
+  'scrapy', 'selenium', 'paramiko', 'fabric', 'ansible', 'tensorflow',
+  'torch', 'scikit-learn', 'keras', 'transformers'
+];
+
+// PEP 503 normalization: case-insensitive, hyphens/underscores/dots equivalent
+function normalizePyPI(name) {
+  return name.toLowerCase().replace(/[-_.]+/g, '-');
+}
+
+// Pre-computed normalized versions for O(n) comparison
+const POPULAR_PYPI_NORMALIZED = POPULAR_PYPI_PACKAGES.map(normalizePyPI);
+
+// Set for O(1) exact-match check (skip popular packages themselves)
+const POPULAR_PYPI_SET = new Set(POPULAR_PYPI_NORMALIZED);
+
+// Legitimate PyPI packages that look like typosquats but are not
+const PYPI_WHITELIST = new Set([
+  'boto',              // legitimate AWS SDK predecessor of boto3
+  'torchvision',       // legitimate PyTorch ecosystem
+  'torchaudio',        // legitimate PyTorch ecosystem
+  'tensorflow-gpu',    // legitimate TF variant
+  'scikit-image',      // legitimate scikit ecosystem
+  'scikit-optimize',   // legitimate scikit ecosystem
+  'paramiko2',         // fork of paramiko
+]);
+
+const MIN_PYPI_LENGTH = 4;
+
+/**
+ * Find a PyPI typosquat match using PEP 503 normalization + Levenshtein.
+ * No npm-registry-style API scoring — just distance-based detection.
+ *
+ * @param {string} name - PyPI package name from dependency file
+ * @returns {{original: string, type: string, distance: number}|null}
+ */
+function findPyPITyposquatMatch(name) {
+  const normalized = normalizePyPI(name);
+
+  // Skip if it IS a popular package (exact match after normalization)
+  if (POPULAR_PYPI_SET.has(normalized)) return null;
+
+  // Skip whitelisted
+  if (PYPI_WHITELIST.has(normalized)) return null;
+
+  // Skip very short names (too many false positives)
+  if (normalized.length < MIN_PYPI_LENGTH) return null;
+
+  for (let i = 0; i < POPULAR_PYPI_PACKAGES.length; i++) {
+    const popularNorm = POPULAR_PYPI_NORMALIZED[i];
+    const popular = POPULAR_PYPI_PACKAGES[i];
+
+    // Skip exact match (after normalization)
+    if (normalized === popularNorm) continue;
+
+    // Skip short popular packages
+    if (popularNorm.length < MIN_PYPI_LENGTH) continue;
+
+    const distance = levenshteinDistance(normalized, popularNorm);
+
+    // Distance 1 = very suspect (one char difference)
+    if (distance === 1) {
+      return {
+        original: popular,
+        type: detectTyposquatType(normalized, popularNorm),
+        distance: distance
+      };
+    }
+
+    // Distance 2 only for longer packages (>= 5 chars)
+    if (distance === 2 && popularNorm.length >= 5) {
+      return {
+        original: popular,
+        type: detectTyposquatType(normalized, popularNorm),
+        distance: distance
+      };
+    }
+  }
+
+  return null;
+}
+
+module.exports = { scanTyposquatting, levenshteinDistance, clearMetadataCache, findPyPITyposquatMatch };
