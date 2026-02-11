@@ -265,6 +265,81 @@ function fetchBuffer(url, redirectCount = 0) {
   });
 }
 
+/**
+ * Download a large file with progress feedback (MB received every 5s).
+ * Used for bulk zip downloads (OSV npm/PyPI ~50-100MB each).
+ */
+function fetchBufferWithProgress(url, label, redirectCount = 0) {
+  return new Promise((resolve, reject) => {
+    const urlObj = new URL(url);
+    const reqOptions = {
+      hostname: urlObj.hostname,
+      path: urlObj.pathname + urlObj.search,
+      method: 'GET',
+      headers: {
+        'User-Agent': 'MUADDIB-Scanner/3.0'
+      }
+    };
+
+    const req = https.request(reqOptions, (res) => {
+      if (res.statusCode === 301 || res.statusCode === 302) {
+        if (redirectCount >= MAX_REDIRECTS) {
+          reject(new Error('Too many redirects'));
+          return;
+        }
+        const redirectUrl = res.headers.location;
+        if (!isAllowedRedirect(redirectUrl)) {
+          reject(new Error('Unauthorized redirect to: ' + redirectUrl));
+          return;
+        }
+        fetchBufferWithProgress(redirectUrl, label, redirectCount + 1).then(resolve).catch(reject);
+        return;
+      }
+
+      if (res.statusCode !== 200) {
+        reject(new Error('HTTP ' + res.statusCode));
+        return;
+      }
+
+      const totalSize = parseInt(res.headers['content-length'], 10) || 0;
+      const chunks = [];
+      let received = 0;
+      let lastLog = Date.now();
+
+      res.on('data', (chunk) => {
+        chunks.push(chunk);
+        received += chunk.length;
+        const now = Date.now();
+        if (now - lastLog >= 5000) {
+          const mb = (received / 1024 / 1024).toFixed(1);
+          if (totalSize > 0) {
+            const totalMb = (totalSize / 1024 / 1024).toFixed(1);
+            const pct = Math.round((received / totalSize) * 100);
+            process.stdout.write(`\r[SCRAPER]   ${label}: ${mb}MB / ${totalMb}MB (${pct}%)`);
+          } else {
+            process.stdout.write(`\r[SCRAPER]   ${label}: ${mb}MB received`);
+          }
+          lastLog = now;
+        }
+      });
+
+      res.on('end', () => {
+        const mb = (received / 1024 / 1024).toFixed(1);
+        process.stdout.write(`\r[SCRAPER]   ${label}: ${mb}MB — done\n`);
+        resolve(Buffer.concat(chunks));
+      });
+    });
+
+    req.on('error', reject);
+    req.setTimeout(300000, () => {
+      req.destroy();
+      reject(new Error('Timeout downloading ' + label));
+    });
+
+    req.end();
+  });
+}
+
 // ============================================
 // SHARED HELPERS
 // ============================================
@@ -585,10 +660,8 @@ async function scrapeOSVDataDump() {
 
   try {
     // Download the full npm zip (~50-100MB)
-    console.log('[SCRAPER]   Downloading all.zip from GCS...');
     const zipUrl = 'https://osv-vulnerabilities.storage.googleapis.com/npm/all.zip';
-    const zipBuffer = await fetchBuffer(zipUrl);
-    console.log('[SCRAPER]   Downloaded ' + Math.round(zipBuffer.length / 1024 / 1024) + 'MB');
+    const zipBuffer = await fetchBufferWithProgress(zipUrl, 'npm all.zip');
 
     // Extract using adm-zip
     const zip = new AdmZip(zipBuffer);
@@ -638,10 +711,8 @@ async function scrapeOSVPyPIDataDump() {
   const packages = [];
 
   try {
-    console.log('[SCRAPER]   Downloading PyPI all.zip from GCS...');
     const zipUrl = 'https://osv-vulnerabilities.storage.googleapis.com/PyPI/all.zip';
-    const zipBuffer = await fetchBuffer(zipUrl);
-    console.log('[SCRAPER]   Downloaded ' + Math.round(zipBuffer.length / 1024 / 1024) + 'MB');
+    const zipBuffer = await fetchBufferWithProgress(zipUrl, 'PyPI all.zip');
 
     const zip = new AdmZip(zipBuffer);
     const entries = zip.getEntries();
