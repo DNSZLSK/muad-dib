@@ -23,6 +23,7 @@ async function updateIOCs() {
   
   const iocs = {
     packages: [...yamlIOCs.packages],
+    pypi_packages: [],
     hashes: yamlIOCs.hashes.map(function(h) { return h.sha256; }),
     markers: yamlIOCs.markers.map(function(m) { return m.pattern; }),
     files: yamlIOCs.files.map(function(f) { return f.name; })
@@ -69,7 +70,8 @@ async function updateIOCs() {
   fs.writeFileSync(compactCachePath, JSON.stringify(compactIOCs));
 
   console.log('\n[OK] IOCs saved:');
-  console.log('     - ' + iocs.packages.length + ' malicious packages');
+  console.log('     - ' + iocs.packages.length + ' malicious npm packages');
+  console.log('     - ' + (iocs.pypi_packages || []).length + ' malicious PyPI packages');
   console.log('     - ' + iocs.files.length + ' suspicious files');
   console.log('     - ' + iocs.hashes.length + ' known hashes');
   console.log('     - ' + iocs.markers.length + ' markers\n');
@@ -86,6 +88,7 @@ function mergeIOCs(target, source) {
   // Lazily initialize dedup sets on the target object
   if (!target._pkgKeys) {
     target._pkgKeys = new Set(target.packages.map(p => p.name + '@' + p.version));
+    target._pypiPkgKeys = new Set((target.pypi_packages || []).map(p => p.name + '@' + p.version));
     target._hashSet = new Set(target.hashes);
     target._markerSet = new Set(target.markers);
     target._fileSet = new Set(target.files);
@@ -93,13 +96,23 @@ function mergeIOCs(target, source) {
 
   let added = 0;
 
-  // Merge packages
+  // Merge packages (npm)
   for (const pkg of source.packages || []) {
     const key = pkg.name + '@' + pkg.version;
     if (!target._pkgKeys.has(key)) {
       target.packages.push(pkg);
       target._pkgKeys.add(key);
       added++;
+    }
+  }
+
+  // Merge pypi_packages
+  if (!target.pypi_packages) target.pypi_packages = [];
+  for (const pkg of source.pypi_packages || []) {
+    const key = pkg.name + '@' + pkg.version;
+    if (!target._pypiPkgKeys.has(key)) {
+      target.pypi_packages.push(pkg);
+      target._pypiPkgKeys.add(key);
     }
   }
 
@@ -195,6 +208,7 @@ function loadCachedIOCs() {
 
   const merged = {
     packages: [...yamlIOCs.packages],
+    pypi_packages: [],
     hashes: yamlIOCs.hashes.map(function(h) { return h.sha256; }),
     markers: yamlIOCs.markers.map(function(m) { return m.pattern; }),
     files: yamlIOCs.files.map(function(f) { return f.name; })
@@ -245,7 +259,7 @@ function loadCachedIOCs() {
  * @returns {Object} IOCs with Map/Set for fast lookup
  */
 function createOptimizedIOCs(iocs) {
-  // Map for packages: "name" -> [{ version, source, ... }]
+  // Map for npm packages: "name" -> [{ version, source, ... }]
   const packagesMap = new Map();
   // Set for wildcard packages (all versions malicious)
   const wildcardPackages = new Set();
@@ -261,6 +275,21 @@ function createOptimizedIOCs(iocs) {
     packagesMap.get(pkg.name).push(pkg);
   }
 
+  // Map for PyPI packages: "name" -> [{ version, source, ... }]
+  const pypiPackagesMap = new Map();
+  const pypiWildcardPackages = new Set();
+
+  for (const pkg of iocs.pypi_packages || []) {
+    if (pkg.version === '*') {
+      pypiWildcardPackages.add(pkg.name);
+    }
+
+    if (!pypiPackagesMap.has(pkg.name)) {
+      pypiPackagesMap.set(pkg.name, []);
+    }
+    pypiPackagesMap.get(pkg.name).push(pkg);
+  }
+
   // Set for hashes (O(1) lookup)
   const hashesSet = new Set(iocs.hashes);
 
@@ -271,14 +300,19 @@ function createOptimizedIOCs(iocs) {
   const filesSet = new Set(iocs.files);
 
   return {
-    // Optimized structures
+    // Optimized structures (npm)
     packagesMap,
     wildcardPackages,
+    // Optimized structures (PyPI)
+    pypiPackagesMap,
+    pypiWildcardPackages,
+    // Shared
     hashesSet,
     markersSet,
     filesSet,
     // Original arrays for compatibility
     packages: iocs.packages,
+    pypi_packages: iocs.pypi_packages || [],
     hashes: iocs.hashes,
     markers: iocs.markers,
     files: iocs.files
@@ -298,7 +332,6 @@ function generateCompactIOCs(fullIOCs) {
   const severityOverrides = {};
 
   for (const p of fullIOCs.packages || []) {
-    // Track non-critical severities as overrides
     if (p.severity && p.severity !== 'critical') {
       if (!severityOverrides[p.name]) severityOverrides[p.name] = {};
       severityOverrides[p.name][p.version] = p.severity;
@@ -312,10 +345,25 @@ function generateCompactIOCs(fullIOCs) {
     }
   }
 
+  // PyPI compact (same structure, separate keys)
+  const pypiWildcards = [];
+  const pypiVersioned = {};
+
+  for (const p of fullIOCs.pypi_packages || []) {
+    if (p.version === '*') {
+      pypiWildcards.push(p.name);
+    } else {
+      if (!pypiVersioned[p.name]) pypiVersioned[p.name] = [];
+      pypiVersioned[p.name].push(p.version);
+    }
+  }
+
   const compact = {
     defaultSeverity: 'critical',
     wildcards: wildcards,
     versioned: versioned,
+    pypi_wildcards: pypiWildcards,
+    pypi_versioned: pypiVersioned,
     hashes: fullIOCs.hashes || [],
     markers: fullIOCs.markers || [],
     files: fullIOCs.files || [],
@@ -341,13 +389,13 @@ function expandCompactIOCs(compact) {
   const defaultSev = compact.defaultSeverity || 'critical';
   const overrides = compact.severityOverrides || {};
 
-  // Expand wildcards
+  // Expand npm wildcards
   for (const name of compact.wildcards || []) {
     const severity = (overrides[name] && overrides[name]['*']) || defaultSev;
     packages.push({ name: name, version: '*', severity: severity });
   }
 
-  // Expand versioned
+  // Expand npm versioned
   for (const name of Object.keys(compact.versioned || {})) {
     for (const version of compact.versioned[name]) {
       const severity = (overrides[name] && overrides[name][version]) || defaultSev;
@@ -355,8 +403,22 @@ function expandCompactIOCs(compact) {
     }
   }
 
+  // Expand PyPI wildcards
+  const pypiPackages = [];
+  for (const name of compact.pypi_wildcards || []) {
+    pypiPackages.push({ name: name, version: '*', severity: defaultSev });
+  }
+
+  // Expand PyPI versioned
+  for (const name of Object.keys(compact.pypi_versioned || {})) {
+    for (const version of compact.pypi_versioned[name]) {
+      pypiPackages.push({ name: name, version: version, severity: defaultSev });
+    }
+  }
+
   return {
     packages: packages,
+    pypi_packages: pypiPackages,
     hashes: compact.hashes || [],
     markers: compact.markers || [],
     files: compact.files || [],
