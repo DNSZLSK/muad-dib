@@ -87,7 +87,7 @@ async function scanDependencies(targetPath) {
     let maliciousPkg = null;
 
     // Check 1: Package avec wildcard (toutes versions malveillantes)
-    if (iocs.wildcardPackages && iocs.wildcardPackages.has(pkg.name)) {
+    if (iocs.wildcardPackages && iocs.wildcardPackages.has(pkg.name) && iocs.packagesMap) {
       const pkgList = iocs.packagesMap.get(pkg.name);
       maliciousPkg = pkgList ? pkgList.find(p => p.version === '*') : null;
     }

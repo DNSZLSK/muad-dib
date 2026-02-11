@@ -133,13 +133,13 @@ async function runSandbox(packageName, options = {}) {
       '--memory=512m',
       '--cpus=1',
       '--pids-limit=100',
-      '--cap-drop=ALL',
-      '--cap-add=SYS_PTRACE',
-      '--cap-add=NET_RAW'
+      '--cap-drop=ALL'
     ];
 
-    // Strict mode needs iptables → NET_ADMIN (run as non-root with setcap for iptables)
+    // Strict mode needs strace (SYS_PTRACE), packet capture (NET_RAW), and iptables (NET_ADMIN)
     if (strict) {
+      dockerArgs.push('--cap-add=SYS_PTRACE');
+      dockerArgs.push('--cap-add=NET_RAW');
       dockerArgs.push('--cap-add=NET_ADMIN');
     }
 

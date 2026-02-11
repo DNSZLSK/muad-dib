@@ -61,6 +61,15 @@ async function updateIOCs() {
     fs.mkdirSync(CACHE_PATH, { recursive: true });
   }
 
+  // Verify write permission before attempting save (CROSS-001)
+  try {
+    fs.accessSync(CACHE_PATH, fs.constants.W_OK);
+  } catch {
+    console.log('[WARN] Cache directory is not writable: ' + CACHE_PATH);
+    console.log('[WARN] IOCs loaded in memory but not persisted to disk.');
+    return { total: baseIOCs.packages.length, totalPyPI: (baseIOCs.pypi_packages || []).length };
+  }
+
   baseIOCs.updated = new Date().toISOString();
   baseIOCs.sources = ['compact', 'yaml', 'shai-hulud-detector', 'datadog'];
 
@@ -286,11 +295,13 @@ function createOptimizedIOCs(iocs) {
 function generateCompactIOCs(fullIOCs) {
   const wildcards = [];
   const versioned = {};
-  const severityOverrides = {};
+  const severityOverrides = Object.create(null);
+  const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
   for (const p of fullIOCs.packages || []) {
     if (p.severity && p.severity !== 'critical') {
-      if (!severityOverrides[p.name]) severityOverrides[p.name] = {};
+      if (DANGEROUS_KEYS.has(p.name) || DANGEROUS_KEYS.has(p.version)) continue;
+      if (!severityOverrides[p.name]) severityOverrides[p.name] = Object.create(null);
       severityOverrides[p.name][p.version] = p.severity;
     }
 

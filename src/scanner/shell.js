@@ -36,8 +36,13 @@ async function scanShellScripts(targetPath) {
       continue; // Skip unreadable files
     }
     
+    // Strip comment lines to avoid false positives on documentation
+    const activeContent = content.split('\n')
+      .filter(line => !line.trimStart().startsWith('#'))
+      .join('\n');
+
     for (const { pattern, name, severity } of MALICIOUS_PATTERNS) {
-      if (pattern.test(content)) {
+      if (pattern.test(activeContent)) {
         threats.push({
           type: name,
           severity: severity,

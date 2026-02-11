@@ -22,7 +22,12 @@ async function analyzeDataFlow(targetPath) {
       if (stat.size > MAX_FILE_SIZE) continue;
     } catch { continue; }
 
-    const content = fs.readFileSync(file, 'utf8');
+    let content;
+    try {
+      content = fs.readFileSync(file, 'utf8');
+    } catch {
+      continue;
+    }
     const fileThreats = analyzeFile(content, file, targetPath);
     threats.push(...fileThreats);
   }

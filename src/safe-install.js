@@ -141,12 +141,18 @@ async function scanPackageRecursive(pkg, depth = 0, maxDepth = 3) {
     return { safe: true };
   }
   
+  // Validate the package name first (security: prevent command injection)
+  if (!isValidPackageName(pkgName)) {
+    console.log(`[!] Invalid package name: ${pkgName}`);
+    return { safe: false, package: pkgName, reason: 'invalid_name', source: 'validation', description: 'Invalid or suspicious package name', depth };
+  }
+
   if (depth === 0) {
     console.log(`[*] Analyzing ${pkg}...`);
   } else {
     console.log(`${indent}[*] Dependency: ${pkgName}`);
   }
-  
+
   // Check IOCs (with whitelist)
   const malicious = checkIOCs(pkg, pkgName, pkgVersion);
   if (malicious) {
@@ -158,12 +164,6 @@ async function scanPackageRecursive(pkg, depth = 0, maxDepth = 3) {
       description: malicious.description || 'Known malicious package',
       depth
     };
-  }
-
-  // Validate the package name (security: prevent command injection)
-  if (!isValidPackageName(pkgName)) {
-    console.log(`[!] Invalid package name: ${pkgName}`);
-    return { safe: false, package: pkgName, reason: 'invalid_name', source: 'validation', description: 'Invalid or suspicious package name', depth };
   }
 
   // Get the package info (uses spawnSync to avoid injection)

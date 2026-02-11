@@ -5,6 +5,7 @@ const { getPackageMetadata } = require('./npm-registry.js');
 // In-memory cache to avoid re-querying the same package in one scan
 const metadataCache = new Map();
 const MAX_METADATA_CACHE_SIZE = 500;
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 // Top 100 packages npm les plus populaires (cibles de typosquatting)
 const POPULAR_PACKAGES = [
@@ -89,7 +90,12 @@ function maxSeverity(a, b) {
 
 async function getCachedMetadata(packageName) {
   if (metadataCache.has(packageName)) {
-    return metadataCache.get(packageName);
+    const entry = metadataCache.get(packageName);
+    // TTL check: evict stale entries
+    if (Date.now() - entry.ts < CACHE_TTL_MS) {
+      return entry.data;
+    }
+    metadataCache.delete(packageName);
   }
   const result = await getPackageMetadata(packageName);
   // Bounded cache: evict oldest entry if at limit
@@ -97,7 +103,7 @@ async function getCachedMetadata(packageName) {
     const firstKey = metadataCache.keys().next().value;
     metadataCache.delete(firstKey);
   }
-  metadataCache.set(packageName, result);
+  metadataCache.set(packageName, { data: result, ts: Date.now() });
   return result;
 }
 
