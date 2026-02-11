@@ -8,30 +8,77 @@ const LOCAL_COMPACT_FILE = path.join(__dirname, 'data/iocs-compact.json');
 const { loadYAMLIOCs } = require('./yaml-loader.js');
 
 async function updateIOCs() {
-  console.log('[MUADDIB] Updating IOCs via live scrape (OSV + OSSF + all sources)...\n');
+  console.log('[MUADDIB] Updating IOCs (fast mode)...\n');
 
-  // Run a full scrape — this downloads directly from OSV/OSSF/etc.
-  // and writes both iocs.json and iocs-compact.json
-  const { runScraper } = require('./scraper.js');
-  const result = await runScraper();
+  // Step 1: Load compact IOCs shipped in package (~225K IOCs)
+  let baseIOCs = { packages: [], pypi_packages: [], hashes: [], markers: [], files: [] };
 
-  // Also copy results to cache for loadCachedIOCs
+  if (fs.existsSync(LOCAL_COMPACT_FILE)) {
+    try {
+      const compactData = JSON.parse(fs.readFileSync(LOCAL_COMPACT_FILE, 'utf8'));
+      baseIOCs = expandCompactIOCs(compactData);
+      console.log('[1/4] Compact IOCs: ' + baseIOCs.packages.length + ' npm + ' + (baseIOCs.pypi_packages || []).length + ' PyPI');
+    } catch (e) {
+      console.log('[1/4] Error loading compact IOCs: ' + e.message);
+    }
+  } else {
+    console.log('[1/4] Compact IOCs not found (run "muaddib scrape" first for full data)');
+  }
+
+  // Step 2: Load YAML IOCs (builtin.yaml, packages.yaml, hashes.yaml)
+  const yamlIOCs = loadYAMLIOCs();
+  const yamlStandard = {
+    packages: yamlIOCs.packages || [],
+    pypi_packages: [],
+    hashes: (yamlIOCs.hashes || []).map(function(h) { return h.sha256; }),
+    markers: (yamlIOCs.markers || []).map(function(m) { return m.pattern; }),
+    files: (yamlIOCs.files || []).map(function(f) { return f.name; })
+  };
+  mergeIOCs(baseIOCs, yamlStandard);
+  console.log('[2/4] YAML IOCs: ' + yamlStandard.packages.length + ' packages, ' + yamlStandard.hashes.length + ' hashes');
+
+  // Step 3: Download additional IOCs from GitHub (GenSecAI + DataDog — small files, fast)
+  const { scrapeShaiHuludDetector, scrapeDatadogIOCs } = require('./scraper.js');
+  console.log('[3/4] Downloading GitHub IOCs...');
+
+  const [shaiHulud, datadog] = await Promise.all([
+    scrapeShaiHuludDetector(),
+    scrapeDatadogIOCs()
+  ]);
+
+  const githubIOCs = {
+    packages: [].concat(shaiHulud.packages, datadog.packages),
+    pypi_packages: [],
+    hashes: [].concat(shaiHulud.hashes || [], datadog.hashes || []),
+    markers: [],
+    files: []
+  };
+  mergeIOCs(baseIOCs, githubIOCs);
+  console.log('     +' + shaiHulud.packages.length + ' GenSecAI, +' + datadog.packages.length + ' DataDog');
+
+  // Step 4: Merge and save to cache
   if (!fs.existsSync(CACHE_PATH)) {
     fs.mkdirSync(CACHE_PATH, { recursive: true });
   }
 
-  if (fs.existsSync(LOCAL_IOC_FILE)) {
-    fs.copyFileSync(LOCAL_IOC_FILE, CACHE_IOC_FILE);
-  }
+  baseIOCs.updated = new Date().toISOString();
+  baseIOCs.sources = ['compact', 'yaml', 'shai-hulud-detector', 'datadog'];
 
-  const compactCachePath = path.join(CACHE_PATH, 'iocs-compact.json');
-  if (fs.existsSync(LOCAL_COMPACT_FILE)) {
-    fs.copyFileSync(LOCAL_COMPACT_FILE, compactCachePath);
-  }
+  // Clean internal dedup sets before serialization
+  delete baseIOCs._pkgKeys;
+  delete baseIOCs._pypiPkgKeys;
+  delete baseIOCs._hashSet;
+  delete baseIOCs._markerSet;
+  delete baseIOCs._fileSet;
 
-  console.log('\n[OK] IOCs updated: ' + result.total + ' npm + ' + result.totalPyPI + ' PyPI packages');
+  fs.writeFileSync(CACHE_IOC_FILE, JSON.stringify(baseIOCs));
 
-  return result;
+  const totalNpm = baseIOCs.packages.length;
+  const totalPyPI = (baseIOCs.pypi_packages || []).length;
+  console.log('[4/4] Saved to cache: ' + CACHE_IOC_FILE);
+  console.log('\n[OK] IOCs updated: ' + totalNpm + ' npm + ' + totalPyPI + ' PyPI packages');
+
+  return { total: totalNpm, totalPyPI: totalPyPI };
 }
 
 /**
