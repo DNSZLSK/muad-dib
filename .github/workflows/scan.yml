@@ -40,7 +40,8 @@ jobs:
         with:
           node-version: '20'
       - run: npm ci
-      - run: node bin/muaddib.js scan . --sarif results.sarif
+      - name: MUAD'DIB self-scan
+        run: node bin/muaddib.js scan . --sarif results.sarif --exclude tests --exclude docker
       - uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: results.sarif

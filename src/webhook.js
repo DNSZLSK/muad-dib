@@ -66,12 +66,15 @@ async function sendWebhook(url, results) {
   }
 
   // DNS resolution check: verify the resolved IP is not private (SSRF via DNS rebinding)
+  // Pin the resolved IP and use it for the actual connection (WHK-001)
   const urlObj = new URL(url);
+  let resolvedAddress;
   try {
     const { address } = await dns.promises.lookup(urlObj.hostname);
     if (PRIVATE_IP_PATTERNS.some(pattern => pattern.test(address))) {
       throw new Error(`Webhook blocked: hostname ${urlObj.hostname} resolves to private IP ${address}`);
     }
+    resolvedAddress = address;
   } catch (e) {
     if (e.message.startsWith('Webhook blocked')) throw e;
     throw new Error(`Webhook blocked: DNS resolution failed for ${urlObj.hostname}`);
@@ -90,7 +93,7 @@ async function sendWebhook(url, results) {
     payload = formatGeneric(results);
   }
 
-  return send(url, payload);
+  return send(url, payload, resolvedAddress);
 }
 
 function formatDiscord(results) {
@@ -239,21 +242,23 @@ function formatGeneric(results) {
 
 const MAX_RESPONSE_SIZE = 1024 * 1024; // 1MB
 
-function send(url, payload) {
+function send(url, payload, resolvedAddress) {
   return new Promise((resolve, reject) => {
     const urlObj = new URL(url);
     const protocol = urlObj.protocol === 'https:' ? https : http;
 
     const body = JSON.stringify(payload);
     const options = {
-      hostname: urlObj.hostname,
+      hostname: resolvedAddress || urlObj.hostname,
       port: urlObj.port || (urlObj.protocol === 'https:' ? 443 : 80),
       path: urlObj.pathname + urlObj.search,
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(body)
-      }
+        'Content-Length': Buffer.byteLength(body),
+        'Host': urlObj.hostname
+      },
+      servername: urlObj.hostname
     };
 
     const req = protocol.request(options, (res) => {

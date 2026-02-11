@@ -71,7 +71,10 @@ async function updateIOCs() {
   delete baseIOCs._markerSet;
   delete baseIOCs._fileSet;
 
-  fs.writeFileSync(CACHE_IOC_FILE, JSON.stringify(baseIOCs));
+  // Atomic write: write to .tmp then rename (UP-001)
+  const tmpFile = CACHE_IOC_FILE + '.tmp';
+  fs.writeFileSync(tmpFile, JSON.stringify(baseIOCs));
+  fs.renameSync(tmpFile, CACHE_IOC_FILE);
 
   const totalNpm = baseIOCs.packages.length;
   const totalPyPI = (baseIOCs.pypi_packages || []).length;
@@ -384,4 +387,9 @@ function expandCompactIOCs(compact) {
   };
 }
 
-module.exports = { updateIOCs, loadCachedIOCs, generateCompactIOCs, expandCompactIOCs };
+function invalidateCache() {
+  cachedIOCsResult = null;
+  cachedIOCsTime = 0;
+}
+
+module.exports = { updateIOCs, loadCachedIOCs, invalidateCache, generateCompactIOCs, expandCompactIOCs };

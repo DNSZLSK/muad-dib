@@ -29,10 +29,12 @@ function detectHookSystem(targetPath) {
 /**
  * Initialize hooks for a project
  */
+const VALID_MODES = ['scan', 'diff'];
+
 async function initHooks(targetPath, options = {}) {
   const resolvedPath = path.resolve(targetPath);
   const hookType = options.type || 'auto';
-  const mode = options.mode || 'scan'; // 'scan' or 'diff'
+  const mode = VALID_MODES.includes(options.mode) ? options.mode : 'scan';
 
   console.log('\n[MUADDIB] Initializing git hooks...\n');
 

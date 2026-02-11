@@ -18,7 +18,7 @@ function getRecentRefs(targetPath, limit = 10) {
       stdio: ['pipe', 'pipe', 'pipe']
     }).trim().split('\n').filter(Boolean).slice(0, 5);
 
-    const commits = execSync(`git log --oneline -${limit}`, {
+    const commits = execFileSync('git', ['log', '--oneline', `-${Number(limit) || 10}`], {
       cwd: targetPath,
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe']
@@ -106,8 +106,8 @@ function createTempCopyAtCommit(targetPath, commitHash) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-diff-'));
 
   try {
-    // Clone the repo to temp directory (use -- to separate paths from options)
-    execSync(`git clone --quiet -- "${targetPath}" "${tempDir}"`, {
+    // Clone the repo to temp directory (use execFileSync to prevent injection)
+    execFileSync('git', ['clone', '--quiet', '--', targetPath, tempDir], {
       stdio: ['pipe', 'pipe', 'pipe']
     });
 

@@ -4,6 +4,7 @@ const { getPackageMetadata } = require('./npm-registry.js');
 
 // In-memory cache to avoid re-querying the same package in one scan
 const metadataCache = new Map();
+const MAX_METADATA_CACHE_SIZE = 500;
 
 // Top 100 packages npm les plus populaires (cibles de typosquatting)
 const POPULAR_PACKAGES = [
@@ -91,6 +92,11 @@ async function getCachedMetadata(packageName) {
     return metadataCache.get(packageName);
   }
   const result = await getPackageMetadata(packageName);
+  // Bounded cache: evict oldest entry if at limit
+  if (metadataCache.size >= MAX_METADATA_CACHE_SIZE) {
+    const firstKey = metadataCache.keys().next().value;
+    metadataCache.delete(firstKey);
+  }
   metadataCache.set(packageName, result);
   return result;
 }
@@ -203,10 +209,16 @@ async function scanTyposquatting(targetPath) {
 
   if (candidates.length === 0) return threats;
 
-  // Phase 2: API enrichment (parallel)
-  const metadataResults = await Promise.all(
-    candidates.map(c => getCachedMetadata(c.depName))
-  );
+  // Phase 2: API enrichment (batched to avoid socket exhaustion)
+  const BATCH_SIZE = 10;
+  const metadataResults = [];
+  for (let i = 0; i < candidates.length; i += BATCH_SIZE) {
+    const batch = candidates.slice(i, i + BATCH_SIZE);
+    const batchResults = await Promise.all(
+      batch.map(c => getCachedMetadata(c.depName))
+    );
+    metadataResults.push(...batchResults);
+  }
 
   // Phase 3: Composite scoring
   for (let i = 0; i < candidates.length; i++) {

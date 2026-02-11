@@ -21,7 +21,7 @@ const SAFE_DOMAINS = [
 ];
 
 // IPs/ports excluded from connection findings (false positives)
-const SAFE_IPS = ['127.0.0.1', '0.0.0.0'];
+const SAFE_IPS = ['127.0.0.1'];
 const PROBE_PORTS = [65535]; // Node.js internal connectivity checks
 
 // Commands that are always suspicious in a sandbox

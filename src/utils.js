@@ -8,6 +8,20 @@ const path = require('path');
 const EXCLUDED_DIRS = ['node_modules', '.git', '.muaddib-cache'];
 
 /**
+ * Extra directories to exclude (set at runtime via --exclude flag).
+ * Merged into every findFiles() call on top of the caller's excludedDirs.
+ */
+let _extraExcludedDirs = [];
+
+function setExtraExcludes(dirs) {
+  _extraExcludedDirs = Array.isArray(dirs) ? dirs : [];
+}
+
+function getExtraExcludes() {
+  return _extraExcludedDirs;
+}
+
+/**
  * Patterns to identify dev/test files
  */
 const DEV_PATTERNS = [
@@ -64,6 +78,11 @@ function findFiles(dir, options = {}) {
   if (depth > maxDepth) return results;
   if (!fs.existsSync(dir)) return results;
 
+  // Merge runtime --exclude dirs so every scanner respects them
+  const allExcludedDirs = _extraExcludedDirs.length > 0
+    ? [...new Set([...excludedDirs, ..._extraExcludedDirs])]
+    : excludedDirs;
+
   let items;
   try {
     items = fs.readdirSync(dir);
@@ -72,7 +91,7 @@ function findFiles(dir, options = {}) {
   }
 
   for (const item of items) {
-    if (excludedDirs.includes(item)) continue;
+    if (allExcludedDirs.includes(item)) continue;
 
     const fullPath = path.join(dir, item);
 
@@ -210,5 +229,7 @@ module.exports = {
   findJsFiles,
   escapeHtml,
   getCallName,
-  Spinner
+  Spinner,
+  setExtraExcludes,
+  getExtraExcludes
 };
