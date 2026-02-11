@@ -52,12 +52,16 @@ const RISK_THRESHOLDS = {
 // Maximum score (capped)
 const MAX_RISK_SCORE = 100;
 
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+
 // Paranoid mode scanner
 function scanParanoid(targetPath) {
   const threats = [];
 
   function scanFile(filePath) {
     try {
+      const stat = fs.statSync(filePath);
+      if (stat.size > MAX_FILE_SIZE) return;
       const content = fs.readFileSync(filePath, 'utf8');
 
       // Ignore URLs (they often contain patterns like .git)
@@ -82,7 +86,7 @@ function scanParanoid(targetPath) {
   }
 
   function walkDir(dir) {
-    const excluded = ['node_modules', '.git', 'test', 'tests', 'src', 'vscode-extension', '.muaddib-cache', 'data', 'iocs', 'docker'];
+    const excluded = ['node_modules', '.git', '.muaddib-cache'];
     try {
       const files = fs.readdirSync(dir);
       for (const file of files) {
@@ -240,7 +244,7 @@ async function run(targetPath, options = {}) {
 
   // Sandbox integration
   let sandboxData = null;
-  if (options.sandboxResult && options.sandboxResult.findings) {
+  if (options.sandboxResult && Array.isArray(options.sandboxResult.findings)) {
     const sr = options.sandboxResult;
     const pkg = sr.raw_report?.package || 'unknown';
     sandboxData = {
@@ -451,7 +455,7 @@ async function run(targetPath, options = {}) {
   }
 
   // Send webhook if configured
-  if (options.webhook && threats.length > 0) {
+  if (options.webhook && enrichedThreats.length > 0) {
     try {
       await sendWebhook(options.webhook, result);
       console.log(`[OK] Alert sent to webhook`);
@@ -472,7 +476,7 @@ async function run(targetPath, options = {}) {
   const levelsToCheck = severityLevels[failLevel] || severityLevels.high;
   const failingThreats = deduped.filter(t => levelsToCheck.includes(t.severity));
 
-  return failingThreats.length;
+  return Math.min(failingThreats.length, 125);
 }
 
 module.exports = { run };

@@ -38,19 +38,23 @@
 
 | Technique | Raison |
 |-----------|--------|
-| Malware polymorphe avance | Sandbox basique, pas de ML |
-| Obfuscation avancee | Heuristiques limitees |
+| Malware polymorphe avance | Pas de ML/machine learning, patterns statiques uniquement |
+| Obfuscation avancee | Heuristiques limitees, pas de desobfuscation automatique du JS |
 | Zero-day (packages inconnus) | Base IOC reactive |
 | Attaques via binaires natifs | Pas d'analyse binaire |
 | Backdoors subtiles | Pas de review de code semantique |
 | Time bombs (declenchement differe) | Pas d'analyse temporelle |
+| Contenu TLS chiffre | Capture SNI et correlation DNS/TLS, mais pas d'interception MITM |
+| Ecosystemes non supportes | Limite a npm et PyPI (pas RubyGems, Maven, Go) |
+| Dashboard/API cloud | Outil CLI local uniquement |
 
 ### Faux negatifs potentiels
 
 - Code malveillant dans des fichiers non-JS/non-Python (WASM, binaires)
-- Exfiltration via DNS ou autres canaux couverts
-- Malware qui detecte l'environnement d'analyse
+- Exfiltration via canaux couverts (DNS tunneling, steganographie)
+- Malware qui detecte l'environnement d'analyse (anti-sandbox)
 - Attaques multi-etapes avec payload distant
+- Obfuscation JS avancee non couverte par les heuristiques
 
 ## Protections de securite internes
 

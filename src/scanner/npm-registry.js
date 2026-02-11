@@ -3,35 +3,71 @@ const DOWNLOADS_URL = 'https://api.npmjs.org/downloads/point/last-week';
 const SEARCH_URL = 'https://registry.npmjs.org/-/v1/search';
 
 const REQUEST_TIMEOUT = 10000; // 10 seconds
+const MAX_RETRIES = 3;
+const NPM_NAME_REGEX = /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/;
+
+/**
+ * Create a timeout signal, with fallback for older Node versions.
+ */
+function createTimeoutSignal(ms) {
+  if (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) {
+    return AbortSignal.timeout(ms);
+  }
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), ms);
+  return controller.signal;
+}
 
 async function fetchWithRetry(url) {
-  let response;
-  try {
-    response = await fetch(url, { signal: AbortSignal.timeout(REQUEST_TIMEOUT) });
-  } catch (err) {
-    if (err.name === 'TimeoutError') return null;
-    throw err;
-  }
+  let lastError = null;
 
-  // 404 = package doesn't exist
-  if (response.status === 404) return null;
-
-  // 429 = rate limit, retry once after 2s
-  if (response.status === 429) {
-    await new Promise(r => setTimeout(r, 2000));
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    let response;
     try {
-      response = await fetch(url, { signal: AbortSignal.timeout(REQUEST_TIMEOUT) });
+      response = await fetch(url, { signal: createTimeoutSignal(REQUEST_TIMEOUT) });
+    } catch (err) {
+      if (err.name === 'TimeoutError' || err.name === 'AbortError') return null;
+      lastError = err;
+      continue;
+    }
+
+    // 404 = package doesn't exist
+    if (response.status === 404) {
+      // Drain response body to free resources
+      try { await response.text(); } catch {}
+      return null;
+    }
+
+    // 429 = rate limit, respect Retry-After header
+    if (response.status === 429) {
+      try { await response.text(); } catch {}
+      const retryAfter = parseInt(response.headers.get('retry-after'), 10);
+      const delay = (retryAfter && retryAfter > 0 ? retryAfter * 1000 : 2000);
+      await new Promise(r => setTimeout(r, delay));
+      continue;
+    }
+
+    if (!response.ok) {
+      // Drain response body on errors
+      try { await response.text(); } catch {}
+      return null;
+    }
+
+    try {
+      return await response.json();
     } catch {
       return null;
     }
-    if (!response.ok) return null;
   }
 
-  if (!response.ok) return null;
-  return response.json();
+  if (lastError) throw lastError;
+  return null;
 }
 
 async function getPackageMetadata(packageName) {
+  // Validate package name before building URL
+  if (!NPM_NAME_REGEX.test(packageName)) return null;
+
   // 1. Registry metadata
   const registryUrl = REGISTRY_URL + '/' + encodeURIComponent(packageName);
   const meta = await fetchWithRetry(registryUrl);

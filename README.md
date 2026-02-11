@@ -202,10 +202,12 @@ muaddib sandbox <package-name>
 muaddib sandbox <package-name> --strict
 ```
 
-Analyzes a package in an isolated Docker container. Captures:
-- Network connections (detects exfiltration to suspicious hosts)
-- File access (detects credential theft: .npmrc, .ssh, .aws, .env)
-- Process spawns (detects reverse shells, curl/wget abuse)
+Analyzes a package in an isolated Docker container with multi-layer monitoring:
+- **System tracing** (strace): file access, process spawns, syscall monitoring
+- **Network capture** (tcpdump): DNS resolutions with resolved IPs, HTTP requests (method, host, path, body), TLS SNI detection
+- **Filesystem diff**: snapshot before/after install, detects files created in suspicious locations
+- **Data exfiltration detection**: 16 sensitive patterns (tokens, credentials, SSH keys, private keys, .env)
+- **Scoring engine**: 0-100 risk score based on behavioral severity
 
 Use `--strict` to block all non-essential outbound network traffic via iptables.
 

@@ -288,7 +288,7 @@ Apres le support npm, j'ai etendu MUAD'DIB pour scanner les projets Python :
 | Exports | JSON, HTML, SARIF |
 | Extension VS Code | Publiée sur Marketplace |
 | Webhooks | Discord / Slack (envoi uniquement si menaces détectées) |
-| Docker Sandbox | Analyse comportementale isolée |
+| Docker Sandbox | Analyse comportementale isolée (strace, tcpdump, filesystem diff, DNS/HTTP/TLS capture, 16 patterns exfiltration, mode strict iptables) |
 | GitHub Actions Backdoor | Détection discussion.yaml (Shai-Hulud 2.0) |
 | **Diff entre versions** | Compare et montre uniquement les NOUVELLES menaces |
 | **Pre-commit hooks** | Support pre-commit, husky, git natif |
@@ -299,13 +299,17 @@ Apres le support npm, j'ai etendu MUAD'DIB pour scanner les projets Python :
 
 ### Ce qui manque (honnêtement)
 
-**Pas de ML** : Mon analyse AST cherche des patterns codés en dur. Un attaquant qui obfusque différemment peut passer à travers.
+**Pas de ML/machine learning** : L'analyse repose sur des patterns statiques et des IOCs connus. Un attaquant qui obfusque différemment peut passer à travers.
 
-**Sandbox basique** : Le Docker sandbox capture réseau/fichiers/process, mais pas d'analyse TLS ni de désobfuscation automatique.
+**Pas d'interception TLS type MITM** : Le sandbox capture le SNI (Server Name Indication) et corrèle DNS/TLS, mais ne déchiffre pas le contenu des connexions HTTPS.
 
-**Dépendance aux sources tierces** : Si Datadog change son API, mon scraper casse.
+**Pas de désobfuscation automatique du JS** : Les heuristiques détectent les patterns d'obfuscation connus (_0x, hex escapes), mais pas de désobfuscation active.
 
-**Support limite a npm et PyPI** : Pas de support RubyGems, Maven, ou autres ecosystemes.
+**Dépendance aux APIs tierces** : Si DataDog, GitHub, ou OSV changent leurs APIs, le scraper casse.
+
+**Support limité à npm et PyPI** : Pas de support RubyGems, Maven, Go, ou autres écosystèmes.
+
+**Pas de dashboard web ni d'API cloud** : MUAD'DIB est un outil CLI local uniquement.
 
 ---
 

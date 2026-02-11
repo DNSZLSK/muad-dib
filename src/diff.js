@@ -1,4 +1,4 @@
-const { execSync } = require('child_process');
+const { execSync, execFileSync } = require('child_process');
 const { run } = require('./index.js');
 const path = require('path');
 const fs = require('fs');
@@ -68,7 +68,7 @@ function resolveRef(targetPath, ref) {
     return null;
   }
   try {
-    return execSync(`git rev-parse ${ref}`, {
+    return execFileSync('git', ['rev-parse', ref], {
       cwd: targetPath,
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe']
@@ -112,7 +112,7 @@ function createTempCopyAtCommit(targetPath, commitHash) {
     });
 
     // Checkout the specific commit
-    execSync(`git checkout --quiet ${commitHash}`, {
+    execFileSync('git', ['checkout', '--quiet', commitHash], {
       cwd: tempDir,
       stdio: ['pipe', 'pipe', 'pipe']
     });

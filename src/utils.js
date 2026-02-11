@@ -2,14 +2,10 @@ const fs = require('fs');
 const path = require('path');
 
 /**
- * Directories excluded from scanning (tests, build, etc.)
+ * Directories excluded from scanning.
+ * Only skip dependency/VCS/cache dirs - never skip user source code.
  */
-const EXCLUDED_DIRS = [
-  'test', 'tests', 'node_modules', '.git', 'src', 'vscode-extension',
-  'scripts', 'bin', 'tools', 'build', 'dist', 'fixtures', 'examples',
-  '__tests__', '__mocks__', 'benchmark', 'benchmarks', 'docs', 'doc',
-  'docker'
-];
+const EXCLUDED_DIRS = ['node_modules', '.git', '.muaddib-cache'];
 
 /**
  * Patterns to identify dev/test files
@@ -88,8 +84,8 @@ function findFiles(dir, options = {}) {
         try {
           const realPath = fs.realpathSync(fullPath);
           const realStat = fs.statSync(realPath);
-          if (visitedInodes.has(realStat.ino)) continue;
-          visitedInodes.add(realStat.ino);
+          if (realStat.ino !== 0 && visitedInodes.has(realStat.ino)) continue;
+          if (realStat.ino !== 0) visitedInodes.add(realStat.ino);
           if (realStat.isDirectory()) {
             findFiles(realPath, { extensions, excludedDirs, maxDepth, results, visitedInodes, depth: depth + 1 });
           } else if (extensions.some(ext => item.endsWith(ext))) {
@@ -101,7 +97,7 @@ function findFiles(dir, options = {}) {
         continue;
       }
 
-      visitedInodes.add(lstat.ino);
+      if (lstat.ino !== 0) visitedInodes.add(lstat.ino);
 
       if (lstat.isDirectory()) {
         findFiles(fullPath, { extensions, excludedDirs, maxDepth, results, visitedInodes, depth: depth + 1 });
@@ -172,6 +168,7 @@ class Spinner {
   start(text) {
     this._text = text;
     this._index = 0;
+    if (this._interval) clearInterval(this._interval);
     this._render();
     this._interval = setInterval(() => this._render(), 100);
     return this;

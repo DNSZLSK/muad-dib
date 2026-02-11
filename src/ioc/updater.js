@@ -148,7 +148,7 @@ function mergeIOCs(target, source) {
 // Cache to avoid reloading IOCs on each call
 let cachedIOCsResult = null;
 let cachedIOCsTime = 0;
-const CACHE_TTL = 60000; // 1 minute
+const CACHE_TTL = 10000; // 10 seconds
 
 function loadCachedIOCs() {
   // Return cache if still valid
@@ -343,8 +343,11 @@ function expandCompactIOCs(compact) {
   const defaultSev = compact.defaultSeverity || 'critical';
   const overrides = compact.severityOverrides || {};
 
-  // Expand npm wildcards
+  // Expand npm wildcards (deduplicate via Set)
+  const seenWildcards = new Set();
   for (const name of compact.wildcards || []) {
+    if (seenWildcards.has(name)) continue;
+    seenWildcards.add(name);
     const severity = (overrides[name] && overrides[name]['*']) || defaultSev;
     packages.push({ name: name, version: '*', severity: severity });
   }

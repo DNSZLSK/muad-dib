@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-const { execSync } = require('child_process');
+const { execSync, exec } = require('child_process');
 const { run } = require('../src/index.js');
 const { updateIOCs } = require('../src/ioc/updater.js');
 const { watch } = require('../src/watch.js');
@@ -50,17 +50,20 @@ for (let i = 0; i < options.length; i++) {
   }
 }
 
-// Version check (non-blocking, skip for machine-readable output)
+// Version check (truly non-blocking, skip for machine-readable output)
 if (!jsonOutput && !sarifOutput) {
   try {
     const currentVersion = require('../package.json').version;
-    const latest = execSync('npm view muaddib-scanner version', { timeout: 5000 }).toString().trim();
-    if (latest !== currentVersion) {
-      console.log(`\n[UPDATE] New version available: ${currentVersion} -> ${latest}`);
-      console.log(`  Run: npm install -g muaddib-scanner@latest\n`);
-    }
+    exec('npm view muaddib-scanner version', { timeout: 5000 }, (err, stdout) => {
+      if (err) return; // No network or npm unavailable
+      const latest = (stdout || '').toString().trim();
+      if (latest && latest !== currentVersion) {
+        console.log(`\n[UPDATE] New version available: ${currentVersion} -> ${latest}`);
+        console.log(`  Run: npm install -g muaddib-scanner@latest\n`);
+      }
+    });
   } catch {
-    // No network or npm unavailable, skip silently
+    // Skip silently
   }
 }
 
@@ -303,6 +306,9 @@ if (command === 'version' || command === '--version' || command === '-v') {
     paranoid: paranoidMode
   }).then(exitCode => {
     process.exit(exitCode);
+  }).catch(err => {
+    console.error('[ERROR]', err.message);
+    process.exit(1);
   });
 } else if (command === 'watch') {
   watch(target);

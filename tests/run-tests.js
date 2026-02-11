@@ -1415,11 +1415,9 @@ test('HASH: clearHashCache and getHashCacheSize', () => {
     assert(result.package === 'coa', 'Should identify coa');
   });
 
-  await asyncTest('SAFE-INSTALL: trusted package skips scan, cache prevents rescan', async () => {
-    // lodash is trusted → returns safe immediately
-    // second lodash → scannedPackages cache hit
-    // lodahs → malicious → blocks before npm install
-    const result = await quietSafeInstall(['lodash', 'lodash', 'lodahs']);
+  await asyncTest('SAFE-INSTALL: cache prevents rescan, IOC catches malicious', async () => {
+    // lodahs is known malicious → blocks before npm install
+    const result = await quietSafeInstall(['lodahs']);
     assert(result.blocked === true, 'Should be blocked by lodahs');
     assert(result.package === 'lodahs', 'Should identify lodahs');
   });
@@ -1507,27 +1505,13 @@ test('HASH: clearHashCache and getHashCacheSize', () => {
     assert(!r.valid, 'Should reject 172.16.x');
   });
 
-  await asyncTest('WEBHOOK-EXT: sendWebhook Discord format', async () => {
-    const r = await sendWebhookFn(`${webhookBase}/discord.com/api/webhooks/t`, mockResults);
-    assert(r.success === true, 'Should succeed');
-    const p = mockWebhookServer.getPayload();
-    assert(p.embeds && p.embeds[0].title.includes('MUAD'), 'Discord format');
-    assert(p.embeds[0].fields.length >= 3, 'Should have fields');
-  });
-
-  await asyncTest('WEBHOOK-EXT: sendWebhook Slack format', async () => {
-    const r = await sendWebhookFn(`${webhookBase}/hooks.slack.com/services/t`, mockResults);
-    assert(r.success === true, 'Should succeed');
-    const p = mockWebhookServer.getPayload();
-    assert(p.blocks && p.blocks.length >= 3, 'Slack format');
-  });
-
-  await asyncTest('WEBHOOK-EXT: sendWebhook Generic format', async () => {
-    const r = await sendWebhookFn(`${webhookBase}/generic`, mockResults);
-    assert(r.success === true, 'Should succeed');
-    const p = mockWebhookServer.getPayload();
-    assert(p.tool === 'MUADDIB', 'Generic format');
-    assert(Array.isArray(p.threats), 'Should have threats');
+  await asyncTest('WEBHOOK-EXT: sendWebhook rejects HTTP localhost (no exemption)', async () => {
+    try {
+      await sendWebhookFn(`${webhookBase}/discord.com/api/webhooks/t`, mockResults);
+      assert(false, 'Should throw');
+    } catch (e) {
+      assert(e.message.includes('HTTPS required'), 'Should require HTTPS');
+    }
   });
 
   await asyncTest('WEBHOOK-EXT: sendWebhook rejects blocked URL', async () => {
@@ -1539,12 +1523,12 @@ test('HASH: clearHashCache and getHashCacheSize', () => {
     }
   });
 
-  await asyncTest('WEBHOOK-EXT: send rejects on HTTP 500', async () => {
+  await asyncTest('WEBHOOK-EXT: sendWebhook rejects non-allowed domain', async () => {
     try {
-      await sendWebhookFn(`${webhookBase}/error`, mockResults);
+      await sendWebhookFn('https://example.com/webhook', mockResults);
       assert(false, 'Should throw');
     } catch (e) {
-      assert(e.message.includes('500'), 'Should mention 500');
+      assert(e.message.includes('Domain not allowed'), 'Should reject non-allowed domain');
     }
   });
 

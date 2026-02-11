@@ -193,11 +193,23 @@ fi
 exit 0
 `;
 
-  // Backup existing hook
+  // Backup existing hook (limit to 3 backups)
   if (fs.existsSync(preCommitPath)) {
     const backup = `${preCommitPath}.backup.${Date.now()}`;
     fs.copyFileSync(preCommitPath, backup);
     console.log(`[INFO] Backed up existing hook to ${backup}`);
+
+    // Cleanup old backups, keep only 3 most recent
+    try {
+      const hooksDir = path.dirname(preCommitPath);
+      const backups = fs.readdirSync(hooksDir)
+        .filter(f => f.startsWith('pre-commit.backup.'))
+        .sort()
+        .reverse();
+      for (const old of backups.slice(3)) {
+        fs.unlinkSync(path.join(hooksDir, old));
+      }
+    } catch { /* ignore cleanup errors */ }
   }
 
   fs.writeFileSync(preCommitPath, hookContent, { mode: 0o755 });

@@ -42,7 +42,7 @@ function generateSARIF(results) {
             network: results.sandbox.network || {}
           }
         } : {},
-        results: results.threats.map(threat => ({
+        results: (results.threats || []).map(threat => ({
           ruleId: threat.rule_id,
           level: sarifLevel(threat.severity),
           message: { text: threat.message },
@@ -50,7 +50,7 @@ function generateSARIF(results) {
             {
               physicalLocation: {
                 artifactLocation: {
-                  uri: threat.file,
+                  uri: encodeURI(threat.file || ''),
                   uriBaseId: '%SRCROOT%'
                 },
                 region: {
@@ -82,8 +82,15 @@ function sarifLevel(severity) {
 }
 
 function saveSARIF(results, outputPath) {
+  if (!outputPath || typeof outputPath !== 'string') {
+    throw new Error('Invalid output path for SARIF report');
+  }
   const sarif = generateSARIF(results);
-  fs.writeFileSync(outputPath, JSON.stringify(sarif, null, 2));
+  try {
+    fs.writeFileSync(outputPath, JSON.stringify(sarif, null, 2));
+  } catch (e) {
+    throw new Error(`Failed to write SARIF report to ${outputPath}: ${e.message}`);
+  }
   return outputPath;
 }
 

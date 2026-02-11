@@ -71,7 +71,7 @@ const REHABILITATED_PACKAGES = {
     note: 'Specific versions compromised Nov 2021'
   },
 
-  // MUAD'DIB and dependencies
+  // MUAD'DIB and dependencies (self-allowlisting — necessary to avoid self-flagging during scan)
   'muaddib-scanner': {
     compromised: [],
     safe: true,

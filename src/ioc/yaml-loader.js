@@ -37,6 +37,7 @@ function loadPackagesYAML(filePath, iocs, seenPkgs) {
     const data = yaml.load(fs.readFileSync(filePath, 'utf8'), { schema: yaml.JSON_SCHEMA });
     if (data && data.packages) {
       for (const p of data.packages) {
+        if (!p.name || typeof p.name !== 'string') continue;
         const key = p.name + '@' + p.version;
         if (!seenPkgs.has(key)) {
           seenPkgs.add(key);
@@ -68,6 +69,7 @@ function loadBuiltinYAML(filePath, iocs, seenPkgs, seenHashes, seenMarkers, seen
     // Packages
     if (data && data.packages) {
       for (const p of data.packages) {
+        if (!p.name || typeof p.name !== 'string') continue;
         const key = p.name + '@' + p.version;
         if (!seenPkgs.has(key)) {
           seenPkgs.add(key);
@@ -111,7 +113,7 @@ function loadBuiltinYAML(filePath, iocs, seenPkgs, seenHashes, seenMarkers, seen
         if (!seenHashes.has(hash)) {
           seenHashes.add(hash);
           iocs.hashes.push({
-            id: `BUILTIN-HASH-${hash.slice(0, 8)}`,
+            id: `BUILTIN-HASH-${hash.slice(0, 12)}`,
             sha256: hash,
             severity: 'critical',
             confidence: 'high',
@@ -204,14 +206,18 @@ function loadHashesYAML(filePath, iocs, seenHashes, seenMarkers, seenFiles) {
   }
 }
 
+let _cachedIOCStats = null;
+
 function getIOCStats() {
+  if (_cachedIOCStats) return _cachedIOCStats;
   const iocs = loadYAMLIOCs();
-  return {
+  _cachedIOCStats = {
     packages: iocs.packages.length,
     hashes: iocs.hashes.length,
     markers: iocs.markers.length,
     files: iocs.files.length
   };
+  return _cachedIOCStats;
 }
 
 module.exports = { loadYAMLIOCs, getIOCStats };

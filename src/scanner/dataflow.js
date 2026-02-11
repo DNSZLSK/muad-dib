@@ -31,7 +31,8 @@ function analyzeFile(content, filePath, basePath) {
     ast = acorn.parse(content, {
       ecmaVersion: 2024,
       sourceType: 'module',
-      allowHashBang: true
+      allowHashBang: true,
+      locations: true
     });
   } catch {
     return threats;
@@ -44,7 +45,8 @@ function analyzeFile(content, filePath, basePath) {
     CallExpression(node) {
       const callName = getCallName(node);
       
-      if (callName === 'readFileSync' || callName === 'readFile') {
+      if (callName === 'readFileSync' || callName === 'readFile' ||
+          callName === 'fs.readFileSync' || callName === 'fs.readFile') {
         const arg = node.arguments[0];
         if (arg && isCredentialPath(arg)) {
           sources.push({
@@ -95,9 +97,21 @@ function analyzeFile(content, filePath, basePath) {
   });
 
   if (sources.length > 0 && sinks.length > 0) {
+    // Determine severity by scope proximity: if source and sink are < 50 lines apart -> CRITICAL, else HIGH
+    let severity = 'HIGH';
+    for (const src of sources) {
+      for (const sink of sinks) {
+        if (src.line && sink.line && Math.abs(src.line - sink.line) < 50) {
+          severity = 'CRITICAL';
+          break;
+        }
+      }
+      if (severity === 'CRITICAL') break;
+    }
+
     threats.push({
       type: 'suspicious_dataflow',
-      severity: 'CRITICAL',
+      severity: severity,
       message: `Suspicious flow: credentials read (${sources.map(s => s.name).join(', ')}) + network send (${sinks.map(s => s.name).join(', ')})`,
       file: path.relative(basePath, filePath)
     });

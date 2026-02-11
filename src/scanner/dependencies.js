@@ -29,7 +29,7 @@ function checkRehabilitatedPackage(pkgName, pkgVersion) {
   if (rehab.safe === true) return true;
   
   // Sinon, verifier si la version est dans la liste des compromises
-  if (rehab.compromised.includes(pkgVersion)) {
+  if (rehab.compromised && rehab.compromised.includes(pkgVersion)) {
     return false;  // Version specifiquement compromise
   }
   
@@ -74,7 +74,8 @@ async function scanDependencies(targetPath) {
         type: 'known_malicious_package',
         severity: 'CRITICAL',
         message: `Version compromise: ${pkg.name}@${pkg.version} (${rehab.note})`,
-        file: `node_modules/${pkg.name}`
+        file: `node_modules/${pkg.name}`,
+        source: 'rehabilitated'
       });
       continue;
     }
@@ -93,7 +94,7 @@ async function scanDependencies(targetPath) {
     // Check 2: Version specifique via Map
     else if (iocs.packagesMap && iocs.packagesMap.has(pkg.name)) {
       const pkgList = iocs.packagesMap.get(pkg.name);
-      maliciousPkg = pkgList.find(p => p.version === pkg.version);
+      maliciousPkg = pkgList ? pkgList.find(p => p.version === pkg.version) : null;
     }
     // Fallback: recherche lineaire (compatibilite ancienne API)
     else if (!iocs.packagesMap) {
@@ -171,14 +172,17 @@ function listPackages(nodeModulesPath) {
     const itemPath = path.join(nodeModulesPath, item);
     
     try {
-      const stat = fs.statSync(itemPath);
+      const stat = fs.lstatSync(itemPath);
+      if (stat.isSymbolicLink()) continue;
       if (!stat.isDirectory()) continue;
 
       if (item.startsWith('@')) {
         const scopedItems = fs.readdirSync(itemPath);
         for (const scopedItem of scopedItems) {
           const scopedPath = path.join(itemPath, scopedItem);
-          if (fs.statSync(scopedPath).isDirectory()) {
+          const scopedStat = fs.lstatSync(scopedPath);
+          if (scopedStat.isSymbolicLink()) continue;
+          if (scopedStat.isDirectory()) {
             const version = getPackageVersion(scopedPath);
             packages.push({
               name: `${item}/${scopedItem}`,

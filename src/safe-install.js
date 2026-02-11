@@ -16,13 +16,6 @@ function isValidPackageName(pkgName) {
   return NPM_PACKAGE_REGEX.test(nameOnly);
 }
 
-// Known safe packages that legitimately use "suspicious" patterns
-const TRUSTED_PACKAGES = [
-  'lodash', 'underscore', 'express', 'react', 'vue', 'angular',
-  'webpack', 'babel', 'typescript', 'esbuild', 'vite', 'rollup',
-  'jest', 'mocha', 'chai', 'sharp', 'bcrypt', 'argon2'
-];
-
 // REHABILITATED_PACKAGES imported from src/shared/constants.js (single source of truth)
 
 // Cache to avoid scanning the same package twice.
@@ -78,12 +71,25 @@ function checkIOCs(pkg, pkgName, pkgVersion) {
     return { name: pkgName, source: 'ioc-unavailable', description: 'IOC database could not be loaded' };
   }
 
-  const malicious = iocs.packages?.find(p => {
-    if (p.name !== pkg && p.name !== pkgName) return false;
-    if (p.version === '*') return true;
-    if (pkgVersion && p.version === pkgVersion) return true;
-    return false;
-  });
+  // Use optimized Map/Set for O(1) lookup when available
+  let malicious = null;
+  if (iocs.packagesMap) {
+    if (iocs.wildcardPackages && iocs.wildcardPackages.has(pkgName)) {
+      const pkgList = iocs.packagesMap.get(pkgName);
+      malicious = pkgList ? pkgList.find(p => p.version === '*') : null;
+    } else if (iocs.packagesMap.has(pkgName)) {
+      const pkgList = iocs.packagesMap.get(pkgName);
+      malicious = pkgList.find(p => p.version === pkgVersion || p.version === '*');
+    }
+  } else {
+    // Fallback: linear search
+    malicious = iocs.packages?.find(p => {
+      if (p.name !== pkg && p.name !== pkgName) return false;
+      if (p.version === '*') return true;
+      if (pkgVersion && p.version === pkgVersion) return true;
+      return false;
+    });
+  }
   return malicious || null;
 }
 
@@ -118,12 +124,6 @@ async function scanPackageRecursive(pkg, depth = 0, maxDepth = 3) {
     return { safe: true };
   }
   scannedPackages.add(pkgName);
-  
-  // Skip trusted packages
-  if (TRUSTED_PACKAGES.includes(pkgBaseName) || TRUSTED_PACKAGES.includes(pkgName)) {
-    if (depth === 0) console.log(`[OK] ${pkg} - Trusted package`);
-    return { safe: true };
-  }
   
   // Limit the depth
   if (depth > maxDepth) {
@@ -175,7 +175,8 @@ async function scanPackageRecursive(pkg, depth = 0, maxDepth = 3) {
   
   if (depNames.length > 0 && depth < maxDepth) {
     for (const depName of depNames) {
-      const result = await scanPackageRecursive(depName, depth + 1, maxDepth);
+      const depSpec = dependencies[depName] ? depName + '@' + dependencies[depName] : depName;
+      const result = await scanPackageRecursive(depSpec, depth + 1, maxDepth);
       if (!result.safe) {
         return result;
       }
@@ -225,7 +226,11 @@ async function safeInstall(packages, options = {}) {
         console.log('[!] Installation BLOCKED.');
         return { blocked: true, package: result.package, threats: [{ type: 'known_malicious', severity: 'CRITICAL', message: result.description }] };
       } else {
-        console.log('[!] --force enabled, installing despite threats...');
+        console.log('╔══════════════════════════════════════════╗');
+        console.log('║   [!!!] WARNING: FORCE INSTALL ACTIVE    ║');
+        console.log('║   Known malicious package detected!       ║');
+        console.log('║   Installing despite security threats.    ║');
+        console.log('╚══════════════════════════════════════════╝');
       }
     }
   }

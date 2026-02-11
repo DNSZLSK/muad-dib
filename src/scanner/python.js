@@ -37,6 +37,9 @@ function parseRequirementsTxt(filePath, visited) {
     const includeMatch = line.match(/^(?:-r|--requirement)\s+(.+)$/);
     if (includeMatch) {
       const includePath = path.resolve(path.dirname(filePath), includeMatch[1].trim());
+      // Path traversal guard: ensure included file stays within the directory tree
+      const baseDir = path.resolve(path.dirname(filePath));
+      if (!includePath.startsWith(baseDir)) continue;
       const included = parseRequirementsTxt(includePath, visited);
       deps.push(...included);
       continue;
@@ -109,7 +112,12 @@ function parseRequirementLine(line) {
 function parseSetupPy(filePath) {
   if (!fs.existsSync(filePath)) return [];
 
-  const content = fs.readFileSync(filePath, 'utf8');
+  let content;
+  try {
+    content = fs.readFileSync(filePath, 'utf8');
+  } catch {
+    return [];
+  }
   const deps = [];
 
   // Match install_requires=[...] — handles multiline lists
@@ -148,10 +156,11 @@ function parseSetupPy(filePath) {
  */
 function extractStringItems(listBody) {
   const items = [];
-  const regex = /['"]([^'"]+)['"]/g;
+  const regex = /(?:'([^'\\]*(?:\\.[^'\\]*)*)'|"([^"\\]*(?:\\.[^"\\]*)*)")/g;
   let match;
   while ((match = regex.exec(listBody)) !== null) {
-    items.push(match[1].trim());
+    const value = (match[1] !== undefined ? match[1] : match[2]).trim();
+    if (value) items.push(value);
   }
   return items;
 }
@@ -171,7 +180,12 @@ function extractStringItems(listBody) {
 function parsePyprojectToml(filePath) {
   if (!fs.existsSync(filePath)) return [];
 
-  const content = fs.readFileSync(filePath, 'utf8');
+  let content;
+  try {
+    content = fs.readFileSync(filePath, 'utf8');
+  } catch {
+    return [];
+  }
   const deps = [];
 
   // --- PEP 621: [project] dependencies = [...] ---
@@ -217,8 +231,8 @@ function extractTomlArray(content, section, key) {
   for (const line of lines) {
     const trimmed = line.trim();
 
-    // Detect section headers
-    const sectionMatch = trimmed.match(/^\[([^\]]+)\]$/);
+    // Detect section headers (both [section] and [[section]])
+    const sectionMatch = trimmed.match(/^\[{1,2}([^\]]+)\]{1,2}$/);
     if (sectionMatch) {
       if (collecting) break; // Finished collecting if we hit a new section
       inSection = (sectionMatch[1].trim() === section);
@@ -273,8 +287,8 @@ function extractTomlTable(content, section) {
   for (const line of lines) {
     const trimmed = line.trim();
 
-    // Detect section headers
-    const sectionMatch = trimmed.match(/^\[([^\]]+)\]$/);
+    // Detect section headers (both [section] and [[section]])
+    const sectionMatch = trimmed.match(/^\[{1,2}([^\]]+)\]{1,2}$/);
     if (sectionMatch) {
       const sectionName = sectionMatch[1].trim();
       if (sectionName === section) {
@@ -289,8 +303,8 @@ function extractTomlTable(content, section) {
     if (!inSection) continue;
     if (!trimmed || trimmed.startsWith('#')) continue;
 
-    // Parse key = value
-    const kvMatch = trimmed.match(/^([a-zA-Z0-9_-]+)\s*=\s*(.+)$/);
+    // Parse key = value (extended to support dots in package names)
+    const kvMatch = trimmed.match(/^([a-zA-Z0-9_.][a-zA-Z0-9_.-]*)\s*=\s*(.+)$/);
     if (kvMatch) {
       pairs.push([kvMatch[1].trim(), kvMatch[2].trim()]);
     }

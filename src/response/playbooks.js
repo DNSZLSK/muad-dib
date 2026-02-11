@@ -130,6 +130,23 @@ const PLAYBOOKS = {
 
   workflow_injection:
     'Injection potentielle dans GitHub Actions via input non sanitise sur self-hosted runner. Supprimer ou corriger le workflow.',
+
+  sandbox_sensitive_file_read:
+    'CRITIQUE: Package lit des fichiers sensibles (credentials) lors de l\'installation. Ne pas installer. Supprimer immediatement.',
+  sandbox_sensitive_file_write:
+    'CRITIQUE: Package ecrit dans des fichiers sensibles lors de l\'installation. Considerer la machine compromise.',
+  sandbox_suspicious_filesystem:
+    'Package modifie des fichiers systeme lors de l\'installation. Analyser les chemins cibles.',
+  sandbox_suspicious_dns:
+    'Package resout des domaines non-registry lors de l\'installation. Verifier les domaines contactes.',
+  sandbox_suspicious_connection:
+    'Package etablit des connexions reseau suspectes lors de l\'installation. Analyser les destinations.',
+  sandbox_suspicious_process:
+    'CRITIQUE: Package execute des commandes dangereuses (curl, wget, nc) lors de l\'installation. Ne pas installer.',
+  sandbox_unknown_process:
+    'Package lance des processus inconnus lors de l\'installation. Verifier les commandes executees.',
+  sandbox_timeout:
+    'CRITIQUE: Le container sandbox a depasse le timeout. Possible boucle infinie ou consommation de ressources.',
 };
 
 function getPlaybook(threatType) {
