@@ -65,16 +65,18 @@ async function sendWebhook(url, results) {
     throw new Error(`Webhook blocked: ${validation.error}`);
   }
 
-  // DNS resolution check: verify the resolved IP is not private (SSRF via DNS rebinding)
-  // Pin the resolved IP and use it for the actual connection (WHK-001)
+  // DNS resolution check: verify ALL resolved IPs are not private (SSRF via DNS rebinding)
+  // Pin the first resolved IP and use it for the actual connection (WHK-001)
   const urlObj = new URL(url);
   let resolvedAddress;
   try {
-    const { address } = await dns.promises.lookup(urlObj.hostname);
-    if (PRIVATE_IP_PATTERNS.some(pattern => pattern.test(address))) {
-      throw new Error(`Webhook blocked: hostname ${urlObj.hostname} resolves to private IP ${address}`);
+    const addresses = await dns.promises.resolve4(urlObj.hostname);
+    for (const address of addresses) {
+      if (PRIVATE_IP_PATTERNS.some(pattern => pattern.test(address))) {
+        throw new Error(`Webhook blocked: hostname ${urlObj.hostname} resolves to private IP ${address}`);
+      }
     }
-    resolvedAddress = address;
+    resolvedAddress = addresses[0];
   } catch (e) {
     if (e.message.startsWith('Webhook blocked')) throw e;
     throw new Error(`Webhook blocked: DNS resolution failed for ${urlObj.hostname}`);

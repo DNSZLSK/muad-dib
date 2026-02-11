@@ -342,6 +342,12 @@ async function run(targetPath, options = {}) {
     sandbox: sandboxData
   };
 
+  // _capture mode: return result directly without printing (used by diff.js)
+  if (options._capture) {
+    setExtraExcludes([]);
+    return result;
+  }
+
   // JSON output
   if (options.json) {
     console.log(JSON.stringify(result, null, 2));

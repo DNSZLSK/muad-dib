@@ -14,7 +14,7 @@ const path = require('path');
  * @param {Set} [visited] - Already-visited files (cycle protection)
  * @returns {Array<{name: string, version: string, file: string}>}
  */
-function parseRequirementsTxt(filePath, visited) {
+function parseRequirementsTxt(filePath, visited, projectRoot) {
   if (!fs.existsSync(filePath)) return [];
 
   if (!visited) visited = new Set();
@@ -37,14 +37,14 @@ function parseRequirementsTxt(filePath, visited) {
     const includeMatch = line.match(/^(?:-r|--requirement)\s+(.+)$/);
     if (includeMatch) {
       const includePath = path.resolve(path.dirname(filePath), includeMatch[1].trim());
-      // Path traversal guard: ensure included file stays within the directory tree
+      // Path traversal guard: ensure included file stays within the project root
       // Use case-insensitive comparison on Windows (PY-01)
-      const baseDir = path.resolve(path.dirname(filePath));
+      const rootDir = projectRoot || path.resolve(path.dirname(filePath));
       const isWithin = process.platform === 'win32'
-        ? includePath.toLowerCase().startsWith(baseDir.toLowerCase())
-        : includePath.startsWith(baseDir);
+        ? includePath.toLowerCase().startsWith(rootDir.toLowerCase())
+        : includePath.startsWith(rootDir);
       if (!isWithin) continue;
-      const included = parseRequirementsTxt(includePath, visited);
+      const included = parseRequirementsTxt(includePath, visited, projectRoot);
       deps.push(...included);
       continue;
     }
@@ -356,10 +356,12 @@ function parsePoetryVersion(value) {
 function detectPythonProject(targetPath) {
   const deps = [];
 
+  const resolvedRoot = path.resolve(targetPath);
+
   // 1. requirements.txt at root
   const reqTxt = path.join(targetPath, 'requirements.txt');
   if (fs.existsSync(reqTxt)) {
-    deps.push(...parseRequirementsTxt(reqTxt));
+    deps.push(...parseRequirementsTxt(reqTxt, undefined, resolvedRoot));
   }
 
   // 2. requirements/*.txt (common pattern: requirements/dev.txt, requirements/prod.txt)
@@ -369,7 +371,7 @@ function detectPythonProject(targetPath) {
     for (const file of files) {
       if (file.endsWith('.txt')) {
         const reqFile = path.join(reqDir, file);
-        deps.push(...parseRequirementsTxt(reqFile));
+        deps.push(...parseRequirementsTxt(reqFile, undefined, resolvedRoot));
       }
     }
   }

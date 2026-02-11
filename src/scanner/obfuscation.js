@@ -38,23 +38,23 @@ function detectObfuscation(targetPath) {
       signals.push('long_single_lines');
     }
 
-    // 2. Hex escapes massifs
-    const hexMatches = content.match(/\\x[0-9a-fA-F]{2}/g) || [];
-    if (hexMatches.length > 20) {
+    // 2. Hex escapes massifs (iterative counting to avoid large match arrays)
+    const hexCount = countMatches(content, /\\x[0-9a-fA-F]{2}/g);
+    if (hexCount > 20) {
       score += 25;
       signals.push('hex_escapes');
     }
 
     // 3. Unicode escapes massifs
-    const unicodeMatches = content.match(/\\u[0-9a-fA-F]{4}/g) || [];
-    if (unicodeMatches.length > 20) {
+    const unicodeCount = countMatches(content, /\\u[0-9a-fA-F]{4}/g);
+    if (unicodeCount > 20) {
       score += 20;
       signals.push('unicode_escapes');
     }
 
     // 4. Variables style obfuscateur (_0x, _0xabc)
-    const obfuscatedVars = content.match(/\b_0x[a-f0-9]+\b/gi) || [];
-    if (obfuscatedVars.length > 5) {
+    const obfVarCount = countMatches(content, /\b_0x[a-f0-9]+\b/gi);
+    if (obfVarCount > 5) {
       score += 30;
       signals.push('obfuscated_variables');
     }
@@ -82,6 +82,15 @@ function detectObfuscation(targetPath) {
   }
 
   return threats;
+}
+
+/**
+ * Count regex matches without creating a full match array (avoids memory spikes on large files).
+ */
+function countMatches(str, regex) {
+  let count = 0;
+  while (regex.exec(str) !== null) count++;
+  return count;
 }
 
 /**

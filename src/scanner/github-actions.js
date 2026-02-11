@@ -2,6 +2,8 @@ const fs = require('fs');
 const path = require('path');
 
 const YAML_EXTENSIONS = ['.yml', '.yaml'];
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+const MAX_DEPTH = 10;
 
 function scanGitHubActions(targetPath) {
   const threats = [];
@@ -20,7 +22,8 @@ function scanGitHubActions(targetPath) {
   return threats;
 }
 
-function scanDirRecursive(dirPath, targetPath, threats) {
+function scanDirRecursive(dirPath, targetPath, threats, depth = 0) {
+  if (depth > MAX_DEPTH) return;
   let files;
   try { files = fs.readdirSync(dirPath); } catch { return; }
   const relDir = path.relative(targetPath, dirPath).replace(/\\/g, '/');
@@ -29,12 +32,14 @@ function scanDirRecursive(dirPath, targetPath, threats) {
     const filePath = path.join(dirPath, file);
 
     try {
-      const stat = fs.statSync(filePath);
+      const stat = fs.lstatSync(filePath);
+      if (stat.isSymbolicLink()) continue;
       if (stat.isDirectory()) {
-        scanDirRecursive(filePath, targetPath, threats);
+        scanDirRecursive(filePath, targetPath, threats, depth + 1);
         continue;
       }
       if (!stat.isFile()) continue;
+      if (stat.size > MAX_FILE_SIZE) continue;
     } catch {
       continue;
     }

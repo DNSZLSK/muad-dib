@@ -1,18 +1,18 @@
-const { execSync, execFileSync } = require('child_process');
+const { execFileSync } = require('child_process');
 const { run } = require('./index.js');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
 
 // Only allow safe characters in git refs (prevents command injection)
-const SAFE_REF_REGEX = /^[a-zA-Z0-9._\-/~^@{}:]+$/;
+const SAFE_REF_REGEX = /^[a-zA-Z0-9._\-/~^@{}]+$/;
 
 /**
  * Get the list of commits/tags for comparison suggestions
  */
 function getRecentRefs(targetPath, limit = 10) {
   try {
-    const tags = execSync('git tag --sort=-creatordate', {
+    const tags = execFileSync('git', ['tag', '--sort=-creatordate'], {
       cwd: targetPath,
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe']
@@ -35,7 +35,7 @@ function getRecentRefs(targetPath, limit = 10) {
  */
 function isGitRepo(targetPath) {
   try {
-    execSync('git rev-parse --git-dir', {
+    execFileSync('git', ['rev-parse', '--git-dir'], {
       cwd: targetPath,
       stdio: ['pipe', 'pipe', 'pipe']
     });
@@ -50,7 +50,7 @@ function isGitRepo(targetPath) {
  */
 function getCurrentCommit(targetPath) {
   try {
-    return execSync('git rev-parse HEAD', {
+    return execFileSync('git', ['rev-parse', 'HEAD'], {
       cwd: targetPath,
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe']
@@ -83,7 +83,7 @@ function resolveRef(targetPath, ref) {
  */
 function hasUncommittedChanges(targetPath) {
   try {
-    const status = execSync('git status --porcelain', {
+    const status = execFileSync('git', ['status', '--porcelain'], {
       cwd: targetPath,
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe']
@@ -122,7 +122,7 @@ function createTempCopyAtCommit(targetPath, commitHash) {
     const packageJsonPath = path.join(tempDir, 'package.json');
     if (fs.existsSync(packageJsonPath)) {
       try {
-        execSync('npm install --quiet --no-audit --no-fund --ignore-scripts', {
+        execFileSync('npm', ['install', '--quiet', '--no-audit', '--no-fund', '--ignore-scripts'], {
           cwd: tempDir,
           stdio: ['pipe', 'pipe', 'pipe'],
           timeout: 60000
@@ -204,21 +204,11 @@ function compareThreats(oldThreats, newThreats) {
  * Run scan and capture results (without console output)
  */
 async function runSilentScan(targetPath, options = {}) {
-  const originalLog = console.log;
-  const logs = [];
-  try {
-    console.log = (...args) => logs.push(args.join(' '));
-    await run(targetPath, { ...options, json: true });
-  } finally {
-    console.log = originalLog;
+  const result = await run(targetPath, { ...options, _capture: true });
+  if (result && typeof result === 'object' && result.threats) {
+    return result;
   }
-
-  const jsonOutput = logs.join('\n');
-  try {
-    return JSON.parse(jsonOutput);
-  } catch {
-    return { threats: [], summary: { total: 0 } };
-  }
+  return { threats: [], summary: { total: 0 } };
 }
 
 /**

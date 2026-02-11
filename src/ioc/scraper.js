@@ -29,6 +29,7 @@ const ALLOWED_REDIRECT_DOMAINS = [
 function isAllowedRedirect(redirectUrl) {
   try {
     const urlObj = new URL(redirectUrl);
+    if (urlObj.protocol !== 'https:') return false;
     return ALLOWED_REDIRECT_DOMAINS.includes(urlObj.hostname);
   } catch {
     return false;
@@ -153,16 +154,20 @@ function fetchJSON(url, options = {}, redirectCount = 0) {
 
       let data = '';
       let dataSize = 0;
+      let destroyed = false;
       res.on('data', chunk => {
+        if (destroyed) return;
         dataSize += chunk.length;
         if (dataSize > MAX_RESPONSE_SIZE) {
-          req.destroy();
+          destroyed = true;
+          res.destroy();
           reject(new Error('Response exceeded maximum size'));
           return;
         }
         data += chunk;
       });
       res.on('end', () => {
+        if (destroyed) return;
         try {
           resolve({ status: res.statusCode, data: JSON.parse(data) });
         } catch (e) {
@@ -990,6 +995,13 @@ async function runScraper() {
   const dataDir = path.dirname(IOC_FILE);
   if (!fs.existsSync(dataDir)) {
     fs.mkdirSync(dataDir, { recursive: true });
+  }
+
+  // Verify write permission (CROSS-001)
+  try {
+    fs.accessSync(dataDir, fs.constants.W_OK);
+  } catch {
+    throw new Error(`Data directory is not writable: ${dataDir}`);
   }
 
   // Load existing IOCs

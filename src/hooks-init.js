@@ -30,6 +30,10 @@ function detectHookSystem(targetPath) {
  * Initialize hooks for a project
  */
 const VALID_MODES = ['scan', 'diff'];
+const HOOK_COMMANDS = {
+  scan: 'npx muaddib scan . --fail-on high',
+  diff: 'npx muaddib diff HEAD --fail-on high'
+};
 
 async function initHooks(targetPath, options = {}) {
   const resolvedPath = path.resolve(targetPath);
@@ -105,9 +109,7 @@ async function initHusky(targetPath, mode) {
 
   // Create pre-commit hook
   const preCommitPath = path.join(huskyDir, 'pre-commit');
-  const command = mode === 'diff'
-    ? 'npx muaddib diff HEAD --fail-on high'
-    : 'npx muaddib scan . --fail-on high';
+  const command = HOOK_COMMANDS[mode];
 
   const hookContent = `#!/usr/bin/env sh
 . "$(dirname -- "$0")/_/husky.sh"
@@ -171,9 +173,7 @@ async function initGitHook(targetPath, mode) {
   }
 
   const preCommitPath = path.join(gitHooksDir, 'pre-commit');
-  const command = mode === 'diff'
-    ? 'npx muaddib diff HEAD --fail-on high'
-    : 'npx muaddib scan . --fail-on high';
+  const command = HOOK_COMMANDS[mode];
 
   const hookContent = `#!/bin/sh
 # MUAD'DIB pre-commit hook
