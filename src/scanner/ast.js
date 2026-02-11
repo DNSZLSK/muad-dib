@@ -4,6 +4,8 @@ const acorn = require('acorn');
 const walk = require('acorn-walk');
 const { isDevFile, findJsFiles, getCallName } = require('../utils.js');
 
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+
 const EXCLUDED_FILES = [
   'src/scanner/ast.js',
   'src/scanner/shell.js',
@@ -58,6 +60,11 @@ async function analyzeAST(targetPath) {
       continue;
     }
     
+    try {
+      const stat = fs.statSync(file);
+      if (stat.size > MAX_FILE_SIZE) continue;
+    } catch { continue; }
+
     const content = fs.readFileSync(file, 'utf8');
     const fileThreats = analyzeFile(content, file, targetPath);
     threats.push(...fileThreats);

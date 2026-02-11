@@ -11,6 +11,7 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
 async function scanHashes(targetPath) {
   const threats = [];
+  hashCache.clear(); // Clear stale cache between scans
   const iocs = loadCachedIOCs();
 
   // Use Set for O(1) lookup if available, otherwise create a Set

@@ -3,6 +3,7 @@ const path = require('path');
 const { findFiles } = require('../utils.js');
 
 const SHELL_EXCLUDED_DIRS = ['node_modules', '.git', '.muaddib-cache'];
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
 const MALICIOUS_PATTERNS = [
   { pattern: /curl.*\|.*sh/m, name: 'curl_pipe_shell', severity: 'HIGH' },
@@ -28,6 +29,8 @@ async function scanShellScripts(targetPath) {
   for (const file of files) {
     let content;
     try {
+      const stat = fs.statSync(file);
+      if (stat.size > MAX_FILE_SIZE) continue;
       content = fs.readFileSync(file, 'utf8');
     } catch {
       continue; // Skip unreadable files

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-const { execSync, exec } = require('child_process');
+const { exec } = require('child_process');
 const { run } = require('../src/index.js');
 const { updateIOCs } = require('../src/ioc/updater.js');
 const { watch } = require('../src/watch.js');
@@ -23,6 +23,7 @@ let explainMode = false;
 let failLevel = 'high';
 let webhookUrl = null;
 let paranoidMode = false;
+let excludeDirs = [];
 
 for (let i = 0; i < options.length; i++) {
   if (options[i] === '--json') {
@@ -41,6 +42,11 @@ for (let i = 0; i < options.length; i++) {
   } else if (options[i] === '--webhook') {
     webhookUrl = options[i + 1];
     i++;
+  } else if (options[i] === '--exclude') {
+    if (options[i + 1] && !options[i + 1].startsWith('-')) {
+      excludeDirs.push(options[i + 1]);
+      i++;
+    }
   } else if (options[i] === '--paranoid') {
     paranoidMode = true;
   } else if (options[i] === '--strict') {
@@ -276,6 +282,7 @@ const helpText = `
     --fail-on [level]   Fail level (critical|high|medium|low)
     --webhook [url]     Discord/Slack webhook
     --paranoid          Ultra-strict mode
+    --exclude [dir]     Exclude directory from scan (repeatable)
     --save-dev, -D      Install as dev dependency
     -g, --global        Install globally
     --force             Force install despite threats
@@ -303,7 +310,8 @@ if (command === 'version' || command === '--version' || command === '-v') {
     explain: explainMode,
     failLevel: failLevel,
     webhook: webhookUrl,
-    paranoid: paranoidMode
+    paranoid: paranoidMode,
+    exclude: excludeDirs
   }).then(exitCode => {
     process.exit(exitCode);
   }).catch(err => {
@@ -442,7 +450,7 @@ if (command === 'version' || command === '--version' || command === '-v') {
   console.log(helpText);
   process.exit(0);
 } else {
-  console.log(`Unknown command: ${command}`);
+  console.log(`Unknown command: ${String(command).replace(/[\x00-\x1f\x7f-\x9f]/g, '')}`);
   console.log('Type "muaddib help" to see available commands.');
   process.exit(1);
 }

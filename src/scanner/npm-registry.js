@@ -8,14 +8,15 @@ const NPM_NAME_REGEX = /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/;
 
 /**
  * Create a timeout signal, with fallback for older Node versions.
+ * Returns { signal, cleanup } — call cleanup() after fetch to prevent timer leaks.
  */
 function createTimeoutSignal(ms) {
   if (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) {
-    return AbortSignal.timeout(ms);
+    return { signal: AbortSignal.timeout(ms), cleanup: () => {} };
   }
   const controller = new AbortController();
-  setTimeout(() => controller.abort(), ms);
-  return controller.signal;
+  const timer = setTimeout(() => controller.abort(), ms);
+  return { signal: controller.signal, cleanup: () => clearTimeout(timer) };
 }
 
 async function fetchWithRetry(url) {
@@ -23,13 +24,17 @@ async function fetchWithRetry(url) {
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     let response;
+    const { signal, cleanup } = createTimeoutSignal(REQUEST_TIMEOUT);
     try {
-      response = await fetch(url, { signal: createTimeoutSignal(REQUEST_TIMEOUT) });
+      response = await fetch(url, { signal });
     } catch (err) {
+      cleanup();
       if (err.name === 'TimeoutError' || err.name === 'AbortError') return null;
       lastError = err;
       continue;
     }
+
+    cleanup();
 
     // 404 = package doesn't exist
     if (response.status === 404) {
@@ -38,11 +43,11 @@ async function fetchWithRetry(url) {
       return null;
     }
 
-    // 429 = rate limit, respect Retry-After header
+    // 429 = rate limit, respect Retry-After header (capped at 30s)
     if (response.status === 429) {
       try { await response.text(); } catch {}
       const retryAfter = parseInt(response.headers.get('retry-after'), 10);
-      const delay = (retryAfter && retryAfter > 0 ? retryAfter * 1000 : 2000);
+      const delay = Math.min(retryAfter && retryAfter > 0 ? retryAfter * 1000 : 2000, 30000);
       await new Promise(r => setTimeout(r, delay));
       continue;
     }
@@ -60,7 +65,7 @@ async function fetchWithRetry(url) {
     }
   }
 
-  if (lastError) throw lastError;
+  // Don't throw — return null to prevent crashing the scan pipeline (REG-02)
   return null;
 }
 

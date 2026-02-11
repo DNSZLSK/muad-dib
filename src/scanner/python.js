@@ -38,8 +38,12 @@ function parseRequirementsTxt(filePath, visited) {
     if (includeMatch) {
       const includePath = path.resolve(path.dirname(filePath), includeMatch[1].trim());
       // Path traversal guard: ensure included file stays within the directory tree
+      // Use case-insensitive comparison on Windows (PY-01)
       const baseDir = path.resolve(path.dirname(filePath));
-      if (!includePath.startsWith(baseDir)) continue;
+      const isWithin = process.platform === 'win32'
+        ? includePath.toLowerCase().startsWith(baseDir.toLowerCase())
+        : includePath.startsWith(baseDir);
+      if (!isWithin) continue;
       const included = parseRequirementsTxt(includePath, visited);
       deps.push(...included);
       continue;

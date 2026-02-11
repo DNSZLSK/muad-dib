@@ -16,6 +16,7 @@ const path = require('path');
 const { scanGitHubActions } = require('./scanner/github-actions.js');
 const { detectPythonProject, normalizePythonName } = require('./scanner/python.js');
 const { loadCachedIOCs } = require('./ioc/updater.js');
+const { setExtraExcludes, getExtraExcludes } = require('./utils.js');
 
 // ============================================
 // SCORING CONSTANTS
@@ -85,8 +86,9 @@ function scanParanoid(targetPath) {
     }
   }
 
-  function walkDir(dir) {
-    const excluded = ['node_modules', '.git', '.muaddib-cache'];
+  function walkDir(dir, depth) {
+    if (depth > 50) return; // Max depth guard (IDX-06)
+    const excluded = ['node_modules', '.git', '.muaddib-cache', ...getExtraExcludes()];
     try {
       const files = fs.readdirSync(dir);
       for (const file of files) {
@@ -98,7 +100,7 @@ function scanParanoid(targetPath) {
 
         if (stat.isDirectory()) {
           if (!excluded.includes(file)) {
-            walkDir(fullPath);
+            walkDir(fullPath, depth + 1);
           }
         } else if (file.endsWith('.js') || file.endsWith('.json') || file.endsWith('.sh')) {
           scanFile(fullPath);
@@ -109,7 +111,7 @@ function scanParanoid(targetPath) {
     }
   }
 
-  walkDir(targetPath);
+  walkDir(targetPath, 0);
   return threats;
 }
 
@@ -191,6 +193,11 @@ function checkPyPITyposquatting(deps, targetPath) {
 }
 
 async function run(targetPath, options = {}) {
+  // Apply --exclude dirs for this scan
+  if (options.exclude && options.exclude.length > 0) {
+    setExtraExcludes(options.exclude);
+  }
+
   // Detect Python project (synchronous, fast file reads)
   const pythonDeps = detectPythonProject(targetPath);
 
@@ -475,6 +482,9 @@ async function run(targetPath, options = {}) {
   
   const levelsToCheck = severityLevels[failLevel] || severityLevels.high;
   const failingThreats = deduped.filter(t => levelsToCheck.includes(t.severity));
+
+  // Clear runtime excludes
+  setExtraExcludes([]);
 
   return Math.min(failingThreats.length, 125);
 }

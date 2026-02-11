@@ -11,8 +11,19 @@ const NPM_PACKAGE_REGEX = /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*
  * @returns {boolean} true if valid
  */
 function isValidPackageName(pkgName) {
-  // Remove version if present
-  const nameOnly = pkgName.split('@').filter((p, i) => i === 0 || !p.match(/^\d/)).join('@');
+  // Remove version/tag suffix if present (e.g., pkg@1.0.0, @scope/pkg@latest)
+  let nameOnly;
+  if (pkgName.startsWith('@')) {
+    // Scoped package: @scope/name or @scope/name@version
+    const slashIdx = pkgName.indexOf('/');
+    if (slashIdx === -1) return false;
+    const afterSlash = pkgName.slice(slashIdx + 1);
+    const atIdx = afterSlash.indexOf('@');
+    nameOnly = atIdx === -1 ? pkgName : pkgName.slice(0, slashIdx + 1 + atIdx);
+  } else {
+    const atIdx = pkgName.indexOf('@');
+    nameOnly = atIdx === -1 ? pkgName : pkgName.slice(0, atIdx);
+  }
   return NPM_PACKAGE_REGEX.test(nameOnly);
 }
 
@@ -237,8 +248,7 @@ async function safeInstall(packages, options = {}) {
 
   // Validate all package names before installation
   for (const pkg of packages) {
-    const pkgNameOnly = pkg.split('@').filter((p, i) => i === 0 || !p.match(/^\d/)).join('@');
-    if (!isValidPackageName(pkgNameOnly)) {
+    if (!isValidPackageName(pkg)) {
       console.log(`[!] Invalid package name: ${pkg}`);
       return { blocked: true, package: pkg, threats: [{ type: 'invalid_name', severity: 'HIGH', message: 'Invalid or suspicious package name' }] };
     }

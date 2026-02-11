@@ -216,10 +216,9 @@ function getPackageVersion(pkgPath) {
   }
 }
 
-module.exports = { 
+module.exports = {
   scanDependencies,
   checkRehabilitatedPackage,
-  REHABILITATED_PACKAGES,
   TRUSTED_PACKAGES,
   SAFE_FILES
 };

@@ -74,13 +74,20 @@ async function scanPackageJson(targetPath) {
     console.log('[WARN] Failed to load IOCs: ' + e.message);
     return threats;
   }
-  const allDeps = {
-    ...pkg.dependencies,
-    ...pkg.devDependencies,
-    ...pkg.optionalDependencies,
-    ...pkg.peerDependencies,
-    ...pkg.bundledDependencies
-  };
+  const allDeps = {};
+  const depSources = [pkg.dependencies, pkg.devDependencies, pkg.optionalDependencies, pkg.peerDependencies];
+  for (const src of depSources) {
+    if (!src || typeof src !== 'object') continue;
+    for (const [key, value] of Object.entries(src)) {
+      if (!DANGEROUS_KEYS.has(key)) allDeps[key] = value;
+    }
+  }
+  // bundledDependencies is an array of package names, not an object
+  if (Array.isArray(pkg.bundledDependencies)) {
+    for (const name of pkg.bundledDependencies) {
+      if (typeof name === 'string' && !DANGEROUS_KEYS.has(name)) allDeps[name] = allDeps[name] || '*';
+    }
+  }
 
   for (const [depName, depVersion] of Object.entries(allDeps)) {
     if (DANGEROUS_KEYS.has(depName)) continue;

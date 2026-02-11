@@ -14,22 +14,33 @@ function scanGitHubActions(targetPath) {
 
   for (const dirPath of dirsToScan) {
     if (!fs.existsSync(dirPath)) continue;
+    scanDirRecursive(dirPath, targetPath, threats);
+  }
 
-    const files = fs.readdirSync(dirPath);
-    const relDir = path.relative(targetPath, dirPath).replace(/\\/g, '/');
+  return threats;
+}
 
-    for (const file of files) {
-      // Only process YAML files
-      if (!YAML_EXTENSIONS.some(ext => file.endsWith(ext))) continue;
+function scanDirRecursive(dirPath, targetPath, threats) {
+  let files;
+  try { files = fs.readdirSync(dirPath); } catch { return; }
+  const relDir = path.relative(targetPath, dirPath).replace(/\\/g, '/');
 
-      const filePath = path.join(dirPath, file);
+  for (const file of files) {
+    const filePath = path.join(dirPath, file);
 
-      try {
-        const stat = fs.statSync(filePath);
-        if (!stat.isFile()) continue;
-      } catch {
+    try {
+      const stat = fs.statSync(filePath);
+      if (stat.isDirectory()) {
+        scanDirRecursive(filePath, targetPath, threats);
         continue;
       }
+      if (!stat.isFile()) continue;
+    } catch {
+      continue;
+    }
+
+    // Only process YAML files
+    if (!YAML_EXTENSIONS.some(ext => file.endsWith(ext))) continue;
 
       let content;
       try {
@@ -39,7 +50,6 @@ function scanGitHubActions(targetPath) {
       }
 
       const relFile = `${relDir}/${file}`;
-      let reported = false;
 
       // Détection du backdoor Shai-Hulud discussion.yaml
       if (file === 'discussion.yaml' || file === 'discussion.yml') {
@@ -50,12 +60,11 @@ function scanGitHubActions(targetPath) {
             message: 'Backdoor Shai-Hulud détecté: workflow discussion.yaml avec injection via self-hosted runner',
             file: relFile
           });
-          reported = true;
         }
       }
 
-      // Détection générique de workflows suspects (use else if to prevent duplicates)
-      if (!reported && content.includes('runs-on: self-hosted')) {
+      // Détection générique de workflows suspects
+      if (content.includes('runs-on: self-hosted')) {
         if (content.includes('${{ github.event.') && (content.includes('.body') || content.includes('.title'))) {
           threats.push({
             type: 'workflow_injection',
@@ -63,23 +72,21 @@ function scanGitHubActions(targetPath) {
             message: 'Injection potentielle dans GitHub Actions: input non sanitisé sur self-hosted runner',
             file: relFile
           });
-          reported = true;
         }
       }
 
       // Detect github.head_ref injection vector (can be attacker-controlled)
-      if (!reported && content.includes('${{ github.head_ref')) {
+      if (content.includes('${{ github.head_ref')) {
         threats.push({
           type: 'workflow_injection',
           severity: 'HIGH',
           message: 'Potential injection: github.head_ref is attacker-controlled in pull_request workflows',
           file: relFile
         });
-        reported = true;
       }
 
       // Detect comment.body injection vector
-      if (!reported && content.includes('${{ github.event.comment.body')) {
+      if (content.includes('${{ github.event.comment.body')) {
         threats.push({
           type: 'workflow_injection',
           severity: 'HIGH',
@@ -88,9 +95,6 @@ function scanGitHubActions(targetPath) {
         });
       }
     }
-  }
-
-  return threats;
 }
 
 module.exports = { scanGitHubActions };
