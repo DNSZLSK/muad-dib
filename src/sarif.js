@@ -35,6 +35,13 @@ function generateSARIF(results) {
             }))
           }
         },
+        properties: results.sandbox ? {
+          sandbox: {
+            score: results.sandbox.score,
+            severity: results.sandbox.severity,
+            network: results.sandbox.network || {}
+          }
+        } : {},
         results: results.threats.map(threat => ({
           ruleId: threat.rule_id,
           level: sarifLevel(threat.severity),

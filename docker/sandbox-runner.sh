@@ -1,22 +1,47 @@
 #!/bin/sh
 PACKAGE="$1"
+MODE="${2:-permissive}"
 
 if [ -z "$PACKAGE" ]; then
-  echo "Usage: sandbox-runner.sh <package-name>" >&2
+  echo "Usage: sandbox-runner.sh <package-name> [permissive|strict]" >&2
   exit 1
 fi
 
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 START_MS=$(date +%s%3N 2>/dev/null || echo 0)
 
+# ── 0. Strict mode: iptables rules ──
+if [ "$MODE" = "strict" ]; then
+  echo "[SANDBOX] STRICT MODE — blocking non-essential network..." >&2
+  # Allow loopback
+  iptables -A OUTPUT -o lo -j ACCEPT 2>/dev/null
+  # Allow DNS (UDP 53)
+  iptables -A OUTPUT -p udp --dport 53 -j ACCEPT 2>/dev/null
+  # Allow registry.npmjs.org (resolve + allow)
+  REGISTRY_IPS=$(nslookup registry.npmjs.org 2>/dev/null | grep -E '^Address:' | tail -n+2 | awk '{print $2}')
+  for ip in $REGISTRY_IPS; do
+    iptables -A OUTPUT -d "$ip" -p tcp --dport 443 -j ACCEPT 2>/dev/null
+  done
+  # Log + reject everything else
+  iptables -A OUTPUT -j LOG --log-prefix "BLOCKED: " 2>/dev/null
+  iptables -A OUTPUT -j REJECT 2>/dev/null
+  echo "[SANDBOX] iptables rules applied." >&2
+fi
+
 # ── 1. Filesystem snapshot BEFORE install ──
 echo "[SANDBOX] Snapshot filesystem before install..." >&2
 find / -type f 2>/dev/null | sort > /tmp/fs-before.txt
 
-# ── 2. tcpdump in background (DNS + HTTP + HTTPS) ──
+# ── 2. tcpdump: separate captures for DNS, HTTP, TLS ──
 echo "[SANDBOX] Starting network capture..." >&2
-tcpdump -i any -nn 'port 53 or port 80 or port 443' -l > /tmp/network.log 2>/dev/null &
-TCPDUMP_PID=$!
+tcpdump -i any -nn 'port 53' -l > /tmp/dns.log 2>/dev/null &
+DNS_PID=$!
+tcpdump -i any -nn -A 'tcp port 80' -l > /tmp/http.log 2>/dev/null &
+HTTP_PID=$!
+tcpdump -i any -nn 'tcp port 443' -l > /tmp/tls.log 2>/dev/null &
+TLS_PID=$!
+tcpdump -i any -nn 'not port 53 and not port 80 and not port 443' -l > /tmp/other.log 2>/dev/null &
+OTHER_PID=$!
 sleep 1
 
 # ── 3. npm install with strace ──
@@ -31,16 +56,16 @@ echo "[SANDBOX] Snapshot filesystem after install..." >&2
 find / -type f 2>/dev/null | sort > /tmp/fs-after.txt
 
 # Stop tcpdump
-kill "$TCPDUMP_PID" 2>/dev/null
-wait "$TCPDUMP_PID" 2>/dev/null
+kill "$DNS_PID" "$HTTP_PID" "$TLS_PID" "$OTHER_PID" 2>/dev/null
+wait "$DNS_PID" "$HTTP_PID" "$TLS_PID" "$OTHER_PID" 2>/dev/null
 
 END_MS=$(date +%s%3N 2>/dev/null || echo 0)
 DURATION_MS=$((END_MS - START_MS))
 [ "$DURATION_MS" -lt 0 ] 2>/dev/null && DURATION_MS=0
 
-# ── 5. Filesystem diff (exclude /sandbox/node_modules/) ──
+# ── 5. Filesystem diff ──
 echo "[SANDBOX] Analyzing filesystem changes..." >&2
-comm -13 /tmp/fs-before.txt /tmp/fs-after.txt | grep -v '^/sandbox/node_modules/' | grep -v '^/tmp/fs-\|^/tmp/install.log\|^/tmp/network.log\|^/tmp/strace.log\|^/tmp/sensitive-\|^/tmp/suspicious-cmds\|^/tmp/connections.txt\|^/tmp/dns-queries\|^/tmp/fs-created\|^/tmp/fs-deleted' > /tmp/fs-created.txt
+comm -13 /tmp/fs-before.txt /tmp/fs-after.txt | grep -v '^/sandbox/node_modules/' | grep -v '^/tmp/' > /tmp/fs-created.txt
 comm -23 /tmp/fs-before.txt /tmp/fs-after.txt | grep -v '^/sandbox/node_modules/' > /tmp/fs-deleted.txt
 
 # ── 6. Parse strace ──
@@ -62,7 +87,7 @@ grep -E 'openat\(' /tmp/strace.log 2>/dev/null | \
   sed 's/.*openat([^,]*, "\([^"]*\)".*/\1/' | \
   sort -u > /tmp/sensitive-written.txt
 
-# 6c. Suspicious execve (exclude node, npm, npx, sh, git)
+# 6c. Suspicious execve
 grep 'execve(' /tmp/strace.log 2>/dev/null | \
   grep '= 0' | \
   grep -vE 'execve\("[^"]*/(node|npm|npx|sh|git)"' | \
@@ -83,21 +108,83 @@ grep 'connect(' /tmp/strace.log 2>/dev/null | \
   grep -v '^127\.' | \
   sort -u > /tmp/connections.txt
 
-# ── 7. Parse tcpdump ──
-echo "[SANDBOX] Parsing network capture..." >&2
+# ── 7. Parse DNS resolutions (query → answer pairs) ──
+echo "[SANDBOX] Parsing DNS resolutions..." >&2
 
-grep -oE '(A|AAAA)\? [^ ]+' /tmp/network.log 2>/dev/null | \
-  awk '{print $2}' | \
-  sed 's/\.$//' | \
-  sort -u > /tmp/dns-queries.txt
+# Extract DNS queries and answers from dns.log
+# Format: "domain query_type answer_ip"
+awk '
+/A\?/ { domain=$0; sub(/.*A\? /,"",domain); sub(/ .*$/,"",domain); gsub(/\.$/,"",domain); pending=domain }
+/A [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/ && pending {
+  ip=$0; sub(/.*A /,"",ip); sub(/ .*$/,"",ip);
+  print pending "\t" ip;
+  pending=""
+}
+' /tmp/dns.log 2>/dev/null | sort -u > /tmp/dns-resolutions.txt
 
-# ── 8. Build JSON with jq ──
+# Plain DNS query list (for backward compat)
+grep -oE '(A|AAAA)\? [^ ]+' /tmp/dns.log 2>/dev/null | \
+  awk '{print $2}' | sed 's/\.$//' | sort -u > /tmp/dns-queries.txt
+
+# ── 8. Parse HTTP requests ──
+echo "[SANDBOX] Parsing HTTP requests..." >&2
+
+# Extract HTTP method, host, path from http.log
+awk '
+/^[0-9].*length [0-9]/ { next }
+/(GET|POST|PUT|DELETE|PATCH) \// {
+  method=$0; sub(/.*((GET|POST|PUT|DELETE|PATCH)) /,"",method);
+  path=method; sub(/ .*$/,"",path);
+  meth=$0; match(meth,/(GET|POST|PUT|DELETE|PATCH)/); meth=substr(meth,RSTART,RLENGTH);
+  pending_method=meth; pending_path=path; pending_host=""; pending_body=""
+}
+/^Host:/ && pending_method { pending_host=$2; gsub(/\r/,"",pending_host) }
+/^\r?$/ && pending_method && pending_host {
+  print pending_method "\t" pending_host "\t" pending_path;
+  pending_method=""; pending_host=""; pending_path=""
+}
+' /tmp/http.log 2>/dev/null > /tmp/http-requests.txt
+
+# Extract HTTP body snippets for exfiltration detection
+awk '
+/^(POST|PUT|PATCH) / { capturing=1; body="" }
+capturing && /^[^\t]/ && !/^(GET|POST|PUT|DELETE|PATCH|HTTP|Host:|Content|Accept|User-Agent|Connection)/ {
+  if (length(body) < 500) body = body $0
+}
+/^\r?$/ && capturing { if (length(body)>0) print body; capturing=0; body="" }
+' /tmp/http.log 2>/dev/null > /tmp/http-bodies.txt
+
+# ── 9. Parse TLS connections (SNI via IP correlation) ──
+echo "[SANDBOX] Parsing TLS connections..." >&2
+
+# Map IPs to domains from DNS resolutions, then correlate with TLS IPs
+awk '{print $1}' /tmp/connections.txt 2>/dev/null | sort -u > /tmp/tls-ips.txt
+
+# Build domain→IP map, then find TLS connections
+awk -F'\t' '
+NR==FNR { ip_domain[$2]=$1; next }
+{ if ($1 in ip_domain) print ip_domain[$1] "\t" $1 "\t" $2 }
+' /tmp/dns-resolutions.txt /tmp/connections.txt 2>/dev/null | \
+  grep '	443$' | sort -u > /tmp/tls-connections.txt
+
+# ── 10. Blocked connections (strict mode) ──
+if [ "$MODE" = "strict" ]; then
+  dmesg 2>/dev/null | grep 'BLOCKED:' | \
+    sed -n 's/.*DST=\([^ ]*\).*DPT=\([^ ]*\).*/\1\t\2/p' | \
+    sort -u > /tmp/blocked.txt
+else
+  touch /tmp/blocked.txt
+fi
+
+# ── 11. Build JSON with jq ──
 echo "[SANDBOX] Building report..." >&2
 
 # Ensure all temp files exist
 touch /tmp/fs-created.txt /tmp/fs-deleted.txt /tmp/dns-queries.txt \
   /tmp/sensitive-read.txt /tmp/sensitive-written.txt \
-  /tmp/connections.txt /tmp/suspicious-cmds.txt /tmp/install.log
+  /tmp/connections.txt /tmp/suspicious-cmds.txt /tmp/install.log \
+  /tmp/dns-resolutions.txt /tmp/http-requests.txt /tmp/http-bodies.txt \
+  /tmp/tls-connections.txt /tmp/blocked.txt
 
 INSTALL_OUTPUT=$(head -c 5000 /tmp/install.log)
 
@@ -115,10 +202,29 @@ PROCS=$(jq -R -s 'split("\n") | map(select(length > 0)) | map(
   split("\t") | {command: .[1], pid: (.[0] | tonumber)}
 )' < /tmp/suspicious-cmds.txt)
 
-# ── Final JSON (ONLY output on stdout) ──
+DNS_RESOLUTIONS=$(jq -R -s 'split("\n") | map(select(length > 0)) | map(
+  split("\t") | {domain: .[0], ip: .[1]}
+)' < /tmp/dns-resolutions.txt)
+
+HTTP_REQUESTS=$(jq -R -s 'split("\n") | map(select(length > 0)) | map(
+  split("\t") | {method: .[0], host: .[1], path: .[2]}
+)' < /tmp/http-requests.txt)
+
+HTTP_BODIES=$(jq -R -s 'split("\n") | map(select(length > 0))' < /tmp/http-bodies.txt)
+
+TLS_CONNS=$(jq -R -s 'split("\n") | map(select(length > 0)) | map(
+  split("\t") | {domain: .[0], ip: .[1], port: (.[2] | tonumber)}
+)' < /tmp/tls-connections.txt)
+
+BLOCKED=$(jq -R -s 'split("\n") | map(select(length > 0)) | map(
+  split("\t") | {ip: .[0], port: (.[1] | tonumber)}
+)' < /tmp/blocked.txt)
+
+# ── Final JSON ──
 jq -n \
   --arg package "$PACKAGE" \
   --arg timestamp "$TIMESTAMP" \
+  --arg mode "$MODE" \
   --argjson duration "${DURATION_MS:-0}" \
   --argjson fs_created "$FS_CREATED" \
   --argjson fs_deleted "$FS_DELETED" \
@@ -127,11 +233,17 @@ jq -n \
   --argjson processes "$PROCS" \
   --argjson sensitive_read "$SENS_READ" \
   --argjson sensitive_written "$SENS_WRITTEN" \
+  --argjson dns_resolutions "$DNS_RESOLUTIONS" \
+  --argjson http_requests "$HTTP_REQUESTS" \
+  --argjson http_bodies "$HTTP_BODIES" \
+  --argjson tls_connections "$TLS_CONNS" \
+  --argjson blocked_connections "$BLOCKED" \
   --arg install_output "$INSTALL_OUTPUT" \
   --argjson exit_code "${EXIT_CODE:-1}" \
   '{
     package: $package,
     timestamp: $timestamp,
+    mode: $mode,
     duration_ms: $duration,
     filesystem: {
       created: $fs_created,
@@ -140,7 +252,12 @@ jq -n \
     },
     network: {
       dns_queries: $dns,
-      http_connections: $connections
+      dns_resolutions: $dns_resolutions,
+      http_connections: $connections,
+      http_requests: $http_requests,
+      http_bodies: $http_bodies,
+      tls_connections: $tls_connections,
+      blocked_connections: $blocked_connections
     },
     processes: {
       spawned: $processes
