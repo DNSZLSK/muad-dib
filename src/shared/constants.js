@@ -71,26 +71,11 @@ const REHABILITATED_PACKAGES = {
     note: 'Specific versions compromised Nov 2021'
   },
 
-  // MUAD'DIB and dependencies (self-allowlisting — necessary to avoid self-flagging during scan)
+  // MUAD'DIB self-allowlisting (only the tool itself, not deps — deps must pass IOC checks)
   'muaddib-scanner': {
     compromised: [],
     safe: true,
-    note: 'Our package'
-  },
-  'acorn': {
-    compromised: [],
-    safe: true,
-    note: 'Legitimate AST parser'
-  },
-  'acorn-walk': {
-    compromised: [],
-    safe: true,
-    note: 'Legitimate AST parser'
-  },
-  '@inquirer/prompts': {
-    compromised: [],
-    safe: true,
-    note: 'Legitimate dependency'
+    note: 'Our package — self-allowlisted to avoid self-flagging during scan'
   }
 };
 

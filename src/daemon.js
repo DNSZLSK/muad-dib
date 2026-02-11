@@ -133,25 +133,33 @@ function watchNodeModules(nodeModulesPath, projectDir) {
   return watcher;
 }
 
-let scanTimeout = null;
-let lastScanTime = 0;
+// Per-directory scan state to prevent cross-directory scan suppression
+const scanState = new Map();
+
+function getScanState(dir) {
+  if (!scanState.has(dir)) {
+    scanState.set(dir, { timeout: null, lastScanTime: 0 });
+  }
+  return scanState.get(dir);
+}
 
 function triggerScan(dir) {
   const now = Date.now();
-  
+  const state = getScanState(dir);
+
   // Debounce: attend 3 secondes avant de scanner
-  if (scanTimeout) {
-    clearTimeout(scanTimeout);
+  if (state.timeout) {
+    clearTimeout(state.timeout);
   }
 
   // Evite les scans trop frequents (minimum 10 secondes entre chaque)
-  if (now - lastScanTime < 10000) {
-    scanTimeout = setTimeout(() => triggerScan(dir), 10000 - (now - lastScanTime));
+  if (now - state.lastScanTime < 10000) {
+    state.timeout = setTimeout(() => triggerScan(dir), 10000 - (now - state.lastScanTime));
     return;
   }
 
-  scanTimeout = setTimeout(async () => {
-    lastScanTime = Date.now();
+  state.timeout = setTimeout(async () => {
+    state.lastScanTime = Date.now();
     console.log(`\n[DAEMON] ========== SCAN AUTOMATIQUE ==========`);
     console.log(`[DAEMON] Cible: ${dir}`);
     console.log(`[DAEMON] Heure: ${new Date().toLocaleTimeString()}\n`);

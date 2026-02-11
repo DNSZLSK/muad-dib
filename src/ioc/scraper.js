@@ -136,7 +136,7 @@ function fetchJSON(url, options = {}, redirectCount = 0) {
 
     const req = https.request(reqOptions, (res) => {
       // Handle redirects (with security validation and limit)
-      if (res.statusCode === 301 || res.statusCode === 302) {
+      if ([301, 302, 307, 308].includes(res.statusCode)) {
         res.resume(); // Drain old response before following redirect
         if (redirectCount >= MAX_REDIRECTS) {
           reject(new Error('Too many redirects'));
@@ -199,7 +199,7 @@ function fetchText(url, redirectCount = 0) {
 
     const req = https.request(reqOptions, (res) => {
       // Handle redirects (with security validation and limit)
-      if (res.statusCode === 301 || res.statusCode === 302) {
+      if ([301, 302, 307, 308].includes(res.statusCode)) {
         res.resume(); // Drain old response before following redirect
         if (redirectCount >= MAX_REDIRECTS) {
           reject(new Error('Too many redirects'));
@@ -253,7 +253,8 @@ function fetchBuffer(url, redirectCount = 0) {
     };
 
     const req = https.request(reqOptions, (res) => {
-      if (res.statusCode === 301 || res.statusCode === 302) {
+      if ([301, 302, 307, 308].includes(res.statusCode)) {
+        res.resume(); // Drain response body before following redirect
         if (redirectCount >= MAX_REDIRECTS) {
           reject(new Error('Too many redirects'));
           return;
@@ -268,6 +269,7 @@ function fetchBuffer(url, redirectCount = 0) {
       }
 
       if (res.statusCode !== 200) {
+        res.resume(); // Drain response body on error
         reject(new Error('HTTP ' + res.statusCode));
         return;
       }
@@ -313,7 +315,8 @@ function fetchBufferWithProgress(url, label, redirectCount = 0) {
     };
 
     const req = https.request(reqOptions, (res) => {
-      if (res.statusCode === 301 || res.statusCode === 302) {
+      if ([301, 302, 307, 308].includes(res.statusCode)) {
+        res.resume(); // Drain response body before following redirect
         if (redirectCount >= MAX_REDIRECTS) {
           reject(new Error('Too many redirects'));
           return;
@@ -328,6 +331,7 @@ function fetchBufferWithProgress(url, label, redirectCount = 0) {
       }
 
       if (res.statusCode !== 200) {
+        res.resume(); // Drain response body on error
         reject(new Error('HTTP ' + res.statusCode));
         return;
       }
