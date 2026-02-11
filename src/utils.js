@@ -156,6 +156,55 @@ function getCallName(node) {
   return '';
 }
 
+/**
+ * Minimal CLI spinner (npm/ora style, no external deps).
+ * Frames rotate every 100ms via setInterval.
+ * Uses ANSI escapes to clear/rewrite the current line.
+ */
+class Spinner {
+  constructor() {
+    this._frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+    this._index = 0;
+    this._interval = null;
+    this._text = '';
+  }
+
+  start(text) {
+    this._text = text;
+    this._index = 0;
+    this._render();
+    this._interval = setInterval(() => this._render(), 100);
+    return this;
+  }
+
+  update(text) {
+    this._text = text;
+  }
+
+  succeed(text) {
+    this._stop();
+    process.stdout.write('\r\x1b[K\x1b[32m\u2713\x1b[0m ' + text + '\n');
+  }
+
+  fail(text) {
+    this._stop();
+    process.stdout.write('\r\x1b[K\x1b[31m\u2717\x1b[0m ' + text + '\n');
+  }
+
+  _render() {
+    const frame = this._frames[this._index % this._frames.length];
+    process.stdout.write('\r\x1b[K' + frame + ' ' + this._text);
+    this._index++;
+  }
+
+  _stop() {
+    if (this._interval) {
+      clearInterval(this._interval);
+      this._interval = null;
+    }
+  }
+}
+
 module.exports = {
   EXCLUDED_DIRS,
   DEV_PATTERNS,
@@ -163,5 +212,6 @@ module.exports = {
   findFiles,
   findJsFiles,
   escapeHtml,
-  getCallName
+  getCallName,
+  Spinner
 };
