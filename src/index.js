@@ -9,11 +9,13 @@ const { getPlaybook } = require('./response/playbooks.js');
 const { getRule, PARANOID_RULES } = require('./rules/index.js');
 const { saveReport } = require('./report.js');
 const { saveSARIF } = require('./sarif.js');
-const { scanTyposquatting } = require('./scanner/typosquat.js');
+const { scanTyposquatting, findPyPITyposquatMatch } = require('./scanner/typosquat.js');
 const { sendWebhook } = require('./webhook.js');
 const fs = require('fs');
 const path = require('path');
 const { scanGitHubActions } = require('./scanner/github-actions.js');
+const { scanPython, normalizePyPI } = require('./scanner/python.js');
+const { loadCachedIOCs } = require('./ioc/updater.js');
 
 // ============================================
 // SCORING CONSTANTS
@@ -118,7 +120,8 @@ async function run(targetPath, options = {}) {
     hashThreats,
     dataflowThreats,
     typosquatThreats,
-    ghActionsThreats
+    ghActionsThreats,
+    pythonDeps
   ] = await Promise.all([
     scanPackageJson(targetPath),
     scanShellScripts(targetPath),
@@ -128,8 +131,20 @@ async function run(targetPath, options = {}) {
     scanHashes(targetPath),
     analyzeDataFlow(targetPath),
     scanTyposquatting(targetPath),
-    Promise.resolve(scanGitHubActions(targetPath))
+    Promise.resolve(scanGitHubActions(targetPath)),
+    Promise.resolve(scanPython(targetPath))
   ]);
+
+  // Python IOC matching + typosquatting
+  const pythonThreats = [];
+  let pythonInfo = null;
+  if (pythonDeps.length > 0) {
+    pythonInfo = { dependencies: pythonDeps, threats: [] };
+    const iocs = loadCachedIOCs();
+    pythonThreats.push(...matchPythonIOCs(pythonDeps, iocs));
+    pythonThreats.push(...checkPyPITyposquatting(pythonDeps));
+    pythonInfo.threats = pythonThreats;
+  }
 
   const threats = [
     ...packageThreats,
@@ -140,7 +155,8 @@ async function run(targetPath, options = {}) {
     ...hashThreats,
     ...dataflowThreats,
     ...typosquatThreats,
-    ...ghActionsThreats
+    ...ghActionsThreats,
+    ...pythonThreats
   ];
 
   // Paranoid mode
@@ -231,7 +247,8 @@ async function run(targetPath, options = {}) {
       riskScore: riskScore,
       riskLevel: riskLevel
     },
-    sandbox: sandboxData
+    sandbox: sandboxData,
+    python: pythonInfo
   };
 
   // JSON output
@@ -273,6 +290,16 @@ async function run(targetPath, options = {}) {
         console.log(`     Playbook:   ${t.playbook}`);
         console.log('');
       });
+    }
+
+    // Python section (explain)
+    if (pythonInfo) {
+      console.log(`\n[PYTHON] ${pythonInfo.dependencies.length} Python dependencies detected`);
+      if (pythonInfo.threats.length > 0) {
+        console.log(`  ${pythonInfo.threats.length} threat(s) found in Python dependencies`);
+      } else {
+        console.log('  No threats found in Python dependencies.');
+      }
     }
 
     // Sandbox section (explain)
@@ -318,6 +345,16 @@ async function run(targetPath, options = {}) {
       });
     }
 
+    // Python section (normal)
+    if (pythonInfo) {
+      console.log(`[PYTHON] ${pythonInfo.dependencies.length} Python dependencies detected`);
+      if (pythonInfo.threats.length > 0) {
+        console.log(`  ${pythonInfo.threats.length} threat(s) found in Python dependencies`);
+      } else {
+        console.log('  No threats found in Python dependencies.');
+      }
+    }
+
     // Sandbox section (normal)
     if (sandboxData) {
       console.log(`[SANDBOX] Dynamic analysis — ${sandboxData.package}`);
@@ -358,6 +395,59 @@ async function run(targetPath, options = {}) {
   const failingThreats = deduped.filter(t => levelsToCheck.includes(t.severity));
 
   return failingThreats.length;
+}
+
+// ============================================
+// PYTHON HELPERS
+// ============================================
+
+function matchPythonIOCs(pythonDeps, iocs) {
+  const threats = [];
+  for (const dep of pythonDeps) {
+    const normalized = normalizePyPI(dep.name);
+
+    // Check wildcard packages (all versions malicious)
+    if (iocs.wildcardPackages.has(dep.name) || iocs.wildcardPackages.has(normalized)) {
+      threats.push({
+        type: 'pypi_malicious_package',
+        severity: 'CRITICAL',
+        message: `Malicious PyPI package detected: ${dep.name} (source: ${dep.source})`,
+        file: dep.source
+      });
+      continue;
+    }
+
+    // Check versioned packages
+    const entries = iocs.packagesMap.get(dep.name) || iocs.packagesMap.get(normalized);
+    if (entries) {
+      const match = entries.find(e => e.version === '*' || e.version === dep.version);
+      if (match) {
+        threats.push({
+          type: 'pypi_malicious_package',
+          severity: 'CRITICAL',
+          message: `Malicious PyPI package detected: ${dep.name}@${dep.version} (source: ${dep.source})`,
+          file: dep.source
+        });
+      }
+    }
+  }
+  return threats;
+}
+
+function checkPyPITyposquatting(pythonDeps) {
+  const threats = [];
+  for (const dep of pythonDeps) {
+    const match = findPyPITyposquatMatch(dep.name);
+    if (match) {
+      threats.push({
+        type: 'pypi_typosquat_detected',
+        severity: 'HIGH',
+        message: `PyPI package "${dep.name}" resembles "${match.original}" (${match.type}, distance: ${match.distance})`,
+        file: dep.source
+      });
+    }
+  }
+  return threats;
 }
 
 module.exports = { run };

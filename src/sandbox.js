@@ -8,7 +8,23 @@ const CONTAINER_TIMEOUT = 120000; // 120 seconds
 const SAFE_DOMAINS = [
   'registry.npmjs.org',
   'github.com',
-  'objects.githubusercontent.com'
+  'objects.githubusercontent.com',
+  'api.github.com',
+  'raw.githubusercontent.com',
+  'googleapis.com',
+  'storage.googleapis.com',
+  'cloudflare.com',
+  'fastly.com',
+  'npmjs.com',
+  'yarnpkg.com'
+];
+
+// Patterns indicating data exfiltration in HTTP body/headers
+const EXFIL_PATTERNS = [
+  'token', 'password', 'passwd', 'secret', 'npmrc', '.ssh',
+  'AWS_SECRET', 'AWS_ACCESS', 'GITHUB_TOKEN', 'GH_TOKEN',
+  'NPM_TOKEN', 'authorization', 'credential', 'private_key',
+  'api_key', 'apikey'
 ];
 
 // IPs/ports excluded from connection findings (false positives)
@@ -78,7 +94,7 @@ async function buildSandboxImage() {
 
 // ── Run sandbox analysis ──
 
-async function runSandbox(packageName) {
+async function runSandbox(packageName, options = {}) {
   const cleanResult = { score: 0, severity: 'CLEAN', findings: [], raw_report: null, suspicious: false };
 
   if (!isDockerAvailable()) {
@@ -86,14 +102,15 @@ async function runSandbox(packageName) {
     return cleanResult;
   }
 
-  console.log(`[SANDBOX] Analyzing "${packageName}" in isolated container...`);
+  const mode = options.strict ? 'strict' : 'permissive';
+  console.log(`[SANDBOX] Analyzing "${packageName}" in isolated container (${mode} mode)...`);
 
   return new Promise((resolve) => {
     let stdout = '';
     let timedOut = false;
     const containerName = `muaddib-sandbox-${Date.now()}`;
 
-    const proc = spawn('docker', [
+    const dockerArgs = [
       'run',
       '--rm',
       `--name=${containerName}`,
@@ -103,10 +120,18 @@ async function runSandbox(packageName) {
       '--pids-limit=100',
       '--cap-drop=ALL',
       '--cap-add=SYS_PTRACE',
-      '--security-opt', 'no-new-privileges',
-      DOCKER_IMAGE,
-      packageName
-    ]);
+      '--cap-add=NET_RAW',
+      '--security-opt', 'no-new-privileges'
+    ];
+
+    // Strict mode needs iptables → NET_ADMIN + root
+    if (options.strict) {
+      dockerArgs.push('--cap-add=NET_ADMIN', '--user=root');
+    }
+
+    dockerArgs.push(DOCKER_IMAGE, packageName, mode);
+
+    const proc = spawn('docker', dockerArgs);
 
     // Timeout: kill container after 120s
     const timer = setTimeout(() => {
@@ -236,6 +261,21 @@ function scoreFindings(report) {
     findings.push({ type: 'suspicious_dns', severity: 'HIGH', detail: `DNS query to non-registry domain: ${domain}`, evidence: domain });
   }
 
+  // 4b. DNS resolutions — check resolved domains against whitelist
+  const seenDnsDomains = new Set();
+  for (const res of (report.network?.dns_resolutions || [])) {
+    const domain = res.query || res.domain;
+    if (!domain || seenDnsDomains.has(domain)) continue;
+    seenDnsDomains.add(domain);
+    if (isSafeDomain(domain)) continue;
+    // Only add if not already flagged by dns_queries above
+    const alreadyFlagged = (report.network?.dns_queries || []).includes(domain);
+    if (!alreadyFlagged) {
+      score += 20;
+      findings.push({ type: 'suspicious_dns', severity: 'HIGH', detail: `DNS resolution to non-whitelisted domain: ${domain} → ${res.answer || '?'}`, evidence: domain });
+    }
+  }
+
   // 5. TCP connections (exclude safe hosts, probe ports, localhost)
   for (const conn of (report.network?.http_connections || [])) {
     if (isSafeHost(conn.host)) continue;
@@ -243,6 +283,46 @@ function scoreFindings(report) {
     if (PROBE_PORTS.includes(conn.port)) continue;
     score += 25;
     findings.push({ type: 'suspicious_connection', severity: 'HIGH', detail: `TCP connection to ${conn.host}:${conn.port}`, evidence: `${conn.host}:${conn.port}` });
+  }
+
+  // 5b. TLS connections — flag non-whitelisted SNI
+  for (const tls of (report.network?.tls_connections || [])) {
+    const sni = tls.sni || 'unknown';
+    if (sni === 'unknown' || isSafeDomain(sni)) continue;
+    score += 10;
+    findings.push({ type: 'suspicious_tls', severity: 'MEDIUM', detail: `TLS connection to non-whitelisted domain: ${sni} (${tls.ip}:${tls.port})`, evidence: sni });
+  }
+
+  // 5c. HTTP requests — data exfiltration detection
+  for (const req of (report.network?.http_requests || [])) {
+    const host = req.host || '';
+    const body = (req.body_preview || '').toLowerCase();
+    const headers = (req.headers || '').toLowerCase();
+    const content = body + ' ' + headers;
+
+    // Check for sensitive patterns in body/headers
+    const matchedPatterns = EXFIL_PATTERNS.filter(p => content.includes(p.toLowerCase()));
+    if (matchedPatterns.length > 0) {
+      score += 50;
+      findings.push({
+        type: 'data_exfiltration',
+        severity: 'CRITICAL',
+        detail: `HTTP ${req.method} to ${host}${req.path} contains sensitive data: ${matchedPatterns.join(', ')}`,
+        evidence: `${req.method} ${host}${req.path} [${matchedPatterns.join(', ')}]`
+      });
+    }
+
+    // Non-whitelisted HTTP host
+    if (host && !isSafeDomain(host)) {
+      score += 15;
+      findings.push({ type: 'suspicious_http', severity: 'HIGH', detail: `HTTP ${req.method} to non-whitelisted host: ${host}${req.path}`, evidence: `${req.method} ${host}` });
+    }
+  }
+
+  // 5d. Blocked connections (strict mode)
+  for (const blocked of (report.network?.blocked_connections || [])) {
+    score += 15;
+    findings.push({ type: 'blocked_connection', severity: 'HIGH', detail: `Blocked outgoing connection to ${blocked.host}:${blocked.port}`, evidence: `${blocked.host}:${blocked.port}` });
   }
 
   // 6. Suspicious processes

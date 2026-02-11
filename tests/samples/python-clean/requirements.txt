@@ -1,0 +1,6 @@
+# Clean Python project
+requests==2.31.0
+flask>=2.0
+numpy
+pandas
+django>=4.0

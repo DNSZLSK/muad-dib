@@ -357,4 +357,74 @@ function clearMetadataCache() {
   metadataCache.clear();
 }
 
-module.exports = { scanTyposquatting, levenshteinDistance, clearMetadataCache };
+// ============================================
+// PyPI TYPOSQUATTING
+// ============================================
+
+const POPULAR_PYPI_PACKAGES = [
+  'requests', 'numpy', 'pandas', 'flask', 'django', 'scipy', 'matplotlib',
+  'pillow', 'sqlalchemy', 'beautifulsoup4', 'pytest', 'setuptools', 'wheel',
+  'boto3', 'cryptography', 'pyyaml', 'jinja2', 'click', 'celery', 'redis',
+  'fastapi', 'uvicorn', 'gunicorn', 'httpx', 'aiohttp', 'tornado',
+  'scrapy', 'selenium', 'playwright', 'pydantic', 'attrs', 'marshmallow',
+  'black', 'flake8', 'mypy', 'isort', 'pylint', 'bandit', 'tox',
+  'sphinx', 'mkdocs', 'coverage', 'faker', 'httpie', 'rich', 'typer',
+  'networkx', 'sympy', 'scikit-learn', 'tensorflow', 'pytorch'
+];
+
+function normalizePyPI(name) {
+  return name.toLowerCase().replace(/[-_.]+/g, '-');
+}
+
+const POPULAR_PYPI_NORMALIZED = POPULAR_PYPI_PACKAGES.map(normalizePyPI);
+const POPULAR_PYPI_SET = new Set(POPULAR_PYPI_NORMALIZED);
+
+const PYPI_WHITELIST = [
+  'boto', 'botocore', 'boto3', 'torchvision', 'torchaudio',
+  'scikit-image', 'scikit-optimize', 'flask-restful', 'flask-cors',
+  'django-rest-framework', 'django-cors-headers',
+  'pytest-cov', 'pytest-mock', 'pytest-asyncio',
+  'pydantic-settings', 'pydantic-core'
+];
+const PYPI_WHITELIST_NORMALIZED = new Set(PYPI_WHITELIST.map(normalizePyPI));
+
+function findPyPITyposquatMatch(name) {
+  const normalized = normalizePyPI(name);
+
+  // Skip if it IS a popular package
+  if (POPULAR_PYPI_SET.has(normalized)) return null;
+
+  // Skip whitelisted
+  if (PYPI_WHITELIST_NORMALIZED.has(normalized)) return null;
+
+  // Skip very short names
+  if (normalized.length < 4) return null;
+
+  for (let i = 0; i < POPULAR_PYPI_NORMALIZED.length; i++) {
+    const popular = POPULAR_PYPI_NORMALIZED[i];
+    if (normalized === popular) continue;
+    if (popular.length < 4) continue;
+
+    const distance = levenshteinDistance(normalized, popular);
+
+    if (distance === 1) {
+      return {
+        original: POPULAR_PYPI_PACKAGES[i],
+        type: detectTyposquatType(normalized, popular),
+        distance: distance
+      };
+    }
+
+    if (distance === 2 && popular.length >= 5) {
+      return {
+        original: POPULAR_PYPI_PACKAGES[i],
+        type: detectTyposquatType(normalized, popular),
+        distance: distance
+      };
+    }
+  }
+
+  return null;
+}
+
+module.exports = { scanTyposquatting, levenshteinDistance, clearMetadataCache, findPyPITyposquatMatch };

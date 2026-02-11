@@ -1,0 +1,6 @@
+# Test Python project
+requests==2.31.0
+flask>=2.0
+numpy
+reqeusts==1.0.0
+numpie==0.1

@@ -364,6 +364,32 @@ const RULES = {
     mitre: 'T1195.002'
   },
 
+  // PyPI detections
+  pypi_malicious_package: {
+    id: 'MUADDIB-PYPI-001',
+    name: 'Malicious PyPI Package',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Package PyPI present dans la base IOC de packages malveillants connus',
+    references: [
+      'https://blog.phylum.io/pypi-malware',
+      'https://socket.dev/npm/issue'
+    ],
+    mitre: 'T1195.002'
+  },
+  pypi_typosquat_detected: {
+    id: 'MUADDIB-PYPI-002',
+    name: 'PyPI Typosquatting Detected',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'Package PyPI avec un nom tres similaire a un package populaire. Possible typosquatting.',
+    references: [
+      'https://blog.phylum.io/pypi-malware',
+      'https://snyk.io/blog/typosquatting-attacks/'
+    ],
+    mitre: 'T1195.002'
+  },
+
   // Sandbox detections
   sandbox_sensitive_file_read: {
     id: 'MUADDIB-SANDBOX-001',

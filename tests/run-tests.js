@@ -1525,6 +1525,302 @@ test('HASH: clearHashCache and getHashCacheSize', () => {
   mockWebhookServer.server.close();
 
   // ============================================
+  // PYTHON PARSER TESTS
+  // ============================================
+
+  console.log('\n=== PYTHON PARSER TESTS ===\n');
+
+  const { scanPython, normalizePyPI } = require('../src/scanner/python.js');
+
+  await asyncTest('PYTHON: scanPython parses requirements.txt', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-py-'));
+    fs.writeFileSync(path.join(tmpDir, 'requirements.txt'), 'requests==2.31.0\nflask>=2.0\nnumpy\n');
+    try {
+      const deps = scanPython(tmpDir);
+      assert(deps.length === 3, `Should find 3 deps, found ${deps.length}`);
+      const requests = deps.find(d => d.name === 'requests');
+      assert(requests, 'Should find requests');
+      assert(requests.version === '2.31.0', 'requests version should be 2.31.0');
+      assert(requests.source === 'requirements.txt', 'Source should be requirements.txt');
+    } finally {
+      cleanupTemp(tmpDir);
+    }
+  });
+
+  await asyncTest('PYTHON: scanPython parses setup.py', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-py-'));
+    fs.writeFileSync(path.join(tmpDir, 'setup.py'), `
+from setuptools import setup
+setup(
+    name='myproject',
+    install_requires=[
+        'requests>=2.28',
+        'click',
+        'pydantic==1.10.0'
+    ]
+)
+`);
+    try {
+      const deps = scanPython(tmpDir);
+      assert(deps.length === 3, `Should find 3 deps, found ${deps.length}`);
+      const click = deps.find(d => d.name === 'click');
+      assert(click, 'Should find click');
+      assert(click.version === '*', 'click version should be *');
+      assert(click.source === 'setup.py', 'Source should be setup.py');
+    } finally {
+      cleanupTemp(tmpDir);
+    }
+  });
+
+  await asyncTest('PYTHON: scanPython parses pyproject.toml', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-py-'));
+    fs.writeFileSync(path.join(tmpDir, 'pyproject.toml'), `
+[project]
+name = "myproject"
+dependencies = [
+    "fastapi>=0.100",
+    "uvicorn",
+    "pydantic==2.0"
+]
+`);
+    try {
+      const deps = scanPython(tmpDir);
+      assert(deps.length === 3, `Should find 3 deps, found ${deps.length}`);
+      const fastapi = deps.find(d => d.name === 'fastapi');
+      assert(fastapi, 'Should find fastapi');
+      assert(fastapi.source === 'pyproject.toml', 'Source should be pyproject.toml');
+    } finally {
+      cleanupTemp(tmpDir);
+    }
+  });
+
+  await asyncTest('PYTHON: scanPython deduplicates across files', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-py-'));
+    fs.writeFileSync(path.join(tmpDir, 'requirements.txt'), 'requests==2.31.0\n');
+    fs.writeFileSync(path.join(tmpDir, 'setup.py'), `
+from setuptools import setup
+setup(install_requires=['requests>=2.28'])
+`);
+    try {
+      const deps = scanPython(tmpDir);
+      const requestsDeps = deps.filter(d => normalizePyPI(d.name) === 'requests');
+      assert(requestsDeps.length === 1, 'Should deduplicate requests');
+    } finally {
+      cleanupTemp(tmpDir);
+    }
+  });
+
+  await asyncTest('PYTHON: scanPython returns empty for non-Python project', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-py-'));
+    fs.writeFileSync(path.join(tmpDir, 'package.json'), '{"name":"test"}');
+    try {
+      const deps = scanPython(tmpDir);
+      assert(deps.length === 0, 'Should return empty');
+    } finally {
+      cleanupTemp(tmpDir);
+    }
+  });
+
+  await asyncTest('PYTHON: normalizePyPI handles PEP 503', async () => {
+    assert(normalizePyPI('My_Package.Name') === 'my-package-name', 'Should normalize');
+    assert(normalizePyPI('Flask') === 'flask', 'Should lowercase');
+    assert(normalizePyPI('scikit-learn') === 'scikit-learn', 'Should keep hyphens');
+    assert(normalizePyPI('scikit_learn') === 'scikit-learn', 'Should convert underscore to hyphen');
+  });
+
+  await asyncTest('PYTHON: scanPython ignores comments and -r includes', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-py-'));
+    fs.writeFileSync(path.join(tmpDir, 'requirements.txt'), '# comment\n-r base.txt\nrequests\n');
+    try {
+      const deps = scanPython(tmpDir);
+      assert(deps.length === 1, `Should find 1 dep, found ${deps.length}`);
+      assert(deps[0].name === 'requests', 'Should find requests');
+    } finally {
+      cleanupTemp(tmpDir);
+    }
+  });
+
+  // ============================================
+  // PYTHON IOC MATCHING TESTS
+  // ============================================
+
+  console.log('\n=== PYTHON IOC MATCHING TESTS ===\n');
+
+  await asyncTest('PYTHON-IOC: Detects malicious Python package from IOC wildcard', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-py-'));
+    // Use a known malicious package from IOC database (lodahs is npm but also tests the matching logic)
+    fs.writeFileSync(path.join(tmpDir, 'requirements.txt'), 'lodahs==1.0.0\n');
+    try {
+      const output = runScan(tmpDir, '--json');
+      const result = JSON.parse(output);
+      // lodahs is in the npm IOC database, Python scan should pick it up
+      const pypiThreats = result.threats.filter(t => t.type === 'pypi_malicious_package');
+      assert(pypiThreats.length > 0, 'Should detect lodahs as malicious via Python IOC matching');
+    } finally {
+      cleanupTemp(tmpDir);
+    }
+  });
+
+  await asyncTest('PYTHON-IOC: Clean Python project has no IOC threats', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-py-'));
+    fs.writeFileSync(path.join(tmpDir, 'requirements.txt'), 'requests==2.31.0\nflask>=2.0\n');
+    try {
+      const output = runScan(tmpDir, '--json');
+      const result = JSON.parse(output);
+      const pypiThreats = result.threats.filter(t => t.type === 'pypi_malicious_package');
+      assert(pypiThreats.length === 0, 'Clean Python project should have no IOC threats');
+    } finally {
+      cleanupTemp(tmpDir);
+    }
+  });
+
+  await asyncTest('PYTHON-IOC: JSON output has python field', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-py-'));
+    fs.writeFileSync(path.join(tmpDir, 'requirements.txt'), 'requests==2.31.0\n');
+    try {
+      const output = runScan(tmpDir, '--json');
+      const result = JSON.parse(output);
+      assert(result.python, 'Should have python field');
+      assert(result.python.dependencies, 'Should have dependencies');
+      assert(result.python.dependencies.length === 1, 'Should have 1 dependency');
+    } finally {
+      cleanupTemp(tmpDir);
+    }
+  });
+
+  await asyncTest('PYTHON-IOC: JSON output has no python field for non-Python project', async () => {
+    const output = runScan(path.join(TESTS_DIR, 'clean'), '--json');
+    const result = JSON.parse(output);
+    assert(result.python === null, 'Should have null python field');
+  });
+
+  // ============================================
+  // PYPI TYPOSQUATTING TESTS
+  // ============================================
+
+  console.log('\n=== PYPI TYPOSQUATTING TESTS ===\n');
+
+  const { findPyPITyposquatMatch } = require('../src/scanner/typosquat.js');
+
+  await asyncTest('PYPI-TYPO: Detects reqeusts (requests)', async () => {
+    const match = findPyPITyposquatMatch('reqeusts');
+    assert(match, 'Should detect reqeusts');
+    assert(match.original === 'requests', 'Should match requests');
+  });
+
+  await asyncTest('PYPI-TYPO: Detects numpie (numpy)', async () => {
+    const match = findPyPITyposquatMatch('numpie');
+    assert(match, 'Should detect numpie');
+    assert(match.original === 'numpy', 'Should match numpy');
+  });
+
+  await asyncTest('PYPI-TYPO: Detects djnago (django)', async () => {
+    const match = findPyPITyposquatMatch('djnago');
+    assert(match, 'Should detect djnago');
+    assert(match.original === 'django', 'Should match django');
+  });
+
+  await asyncTest('PYPI-TYPO: Detects flaask (flask)', async () => {
+    const match = findPyPITyposquatMatch('flaask');
+    assert(match, 'Should detect flaask');
+    assert(match.original === 'flask', 'Should match flask');
+  });
+
+  await asyncTest('PYPI-TYPO: Does NOT flag popular packages (requests)', async () => {
+    const match = findPyPITyposquatMatch('requests');
+    assert(match === null, 'requests should not be flagged');
+  });
+
+  await asyncTest('PYPI-TYPO: Does NOT flag popular packages (flask)', async () => {
+    const match = findPyPITyposquatMatch('flask');
+    assert(match === null, 'flask should not be flagged');
+  });
+
+  await asyncTest('PYPI-TYPO: Does NOT flag popular packages (black)', async () => {
+    const match = findPyPITyposquatMatch('black');
+    assert(match === null, 'black should not be flagged');
+  });
+
+  await asyncTest('PYPI-TYPO: Does NOT flag whitelisted packages', async () => {
+    const match = findPyPITyposquatMatch('pytest-cov');
+    assert(match === null, 'pytest-cov should not be flagged');
+  });
+
+  await asyncTest('PYPI-TYPO: PEP 503 normalization (underscores = hyphens)', async () => {
+    // scikit_learn should be normalized to scikit-learn and match the popular package
+    const match = findPyPITyposquatMatch('scikit_learn');
+    assert(match === null, 'scikit_learn should normalize to scikit-learn (popular)');
+  });
+
+  await asyncTest('PYPI-TYPO: CLI detects PyPI typosquat in requirements.txt', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-py-'));
+    fs.writeFileSync(path.join(tmpDir, 'requirements.txt'), 'reqeusts==1.0.0\n');
+    try {
+      const output = runScan(tmpDir, '--json');
+      const result = JSON.parse(output);
+      const typoThreats = result.threats.filter(t => t.type === 'pypi_typosquat_detected');
+      assert(typoThreats.length > 0, 'Should detect reqeusts as typosquat');
+      assert(typoThreats[0].severity === 'HIGH', 'Should be HIGH severity');
+    } finally {
+      cleanupTemp(tmpDir);
+    }
+  });
+
+  await asyncTest('PYPI-TYPO: CLI shows [PYTHON] section', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-py-'));
+    fs.writeFileSync(path.join(tmpDir, 'requirements.txt'), 'requests==2.31.0\n');
+    try {
+      const output = runScan(tmpDir);
+      assertIncludes(output, '[PYTHON]', 'Should show [PYTHON] section');
+      assertIncludes(output, '1 Python dependencies', 'Should show dep count');
+    } finally {
+      cleanupTemp(tmpDir);
+    }
+  });
+
+  await asyncTest('PYPI-TYPO: Multiple Python threats detected', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-py-'));
+    fs.writeFileSync(path.join(tmpDir, 'requirements.txt'), 'reqeusts==1.0.0\nnumpie==0.1\ndjnago==3.0\n');
+    try {
+      const output = runScan(tmpDir, '--json');
+      const result = JSON.parse(output);
+      const typoThreats = result.threats.filter(t => t.type === 'pypi_typosquat_detected');
+      assert(typoThreats.length >= 3, `Should detect at least 3 typosquats, found ${typoThreats.length}`);
+    } finally {
+      cleanupTemp(tmpDir);
+    }
+  });
+
+  await asyncTest('PYPI-TYPO: Clean Python project has no typosquat threats', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-py-'));
+    fs.writeFileSync(path.join(tmpDir, 'requirements.txt'), 'requests==2.31.0\nflask>=2.0\nnumpy\npandas\n');
+    try {
+      const output = runScan(tmpDir, '--json');
+      const result = JSON.parse(output);
+      const typoThreats = result.threats.filter(t => t.type === 'pypi_typosquat_detected');
+      assert(typoThreats.length === 0, 'Clean project should have no typosquat threats');
+    } finally {
+      cleanupTemp(tmpDir);
+    }
+  });
+
+  await asyncTest('PYPI-TYPO: Rules include MUADDIB-PYPI-001 and MUADDIB-PYPI-002', async () => {
+    const { getRule } = require('../src/rules/index.js');
+    const rule1 = getRule('pypi_malicious_package');
+    assert(rule1.id === 'MUADDIB-PYPI-001', 'Should have MUADDIB-PYPI-001');
+    const rule2 = getRule('pypi_typosquat_detected');
+    assert(rule2.id === 'MUADDIB-PYPI-002', 'Should have MUADDIB-PYPI-002');
+  });
+
+  await asyncTest('PYPI-TYPO: Playbooks include PyPI entries', async () => {
+    const { getPlaybook } = require('../src/response/playbooks.js');
+    const pb1 = getPlaybook('pypi_malicious_package');
+    assertIncludes(pb1, 'pip uninstall', 'Should mention pip uninstall');
+    const pb2 = getPlaybook('pypi_typosquat_detected');
+    assertIncludes(pb2, 'PyPI', 'Should mention PyPI');
+  });
+
+  // ============================================
   // RESULTS
   // ============================================
 

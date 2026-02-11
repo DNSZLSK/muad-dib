@@ -23,6 +23,7 @@ let explainMode = false;
 let failLevel = 'high';
 let webhookUrl = null;
 let paranoidMode = false;
+let sandboxStrict = false;
 
 for (let i = 0; i < options.length; i++) {
   if (options[i] === '--json') {
@@ -43,6 +44,8 @@ for (let i = 0; i < options.length; i++) {
     i++;
   } else if (options[i] === '--paranoid') {
     paranoidMode = true;
+  } else if (options[i] === '--sandbox-strict') {
+    sandboxStrict = true;
   } else if (!options[i].startsWith('-')) {
     target = options[i];
   }
@@ -183,8 +186,13 @@ async function interactiveMenu() {
       process.exit(1);
     }
 
+    const useStrict = await confirm({
+      message: 'Use strict mode? (block outgoing connections except DNS + npmjs.org)',
+      default: false
+    });
+
     await buildSandboxImage();
-    const results = await runSandbox(packageName.trim());
+    const results = await runSandbox(packageName.trim(), { strict: useStrict });
     process.exit(results.suspicious ? 1 : 0);
   }
 
@@ -241,7 +249,7 @@ const helpText = `
     muaddib remove-hooks [path]      Remove MUAD'DIB git hooks
     muaddib update                   Update IOCs
     muaddib scrape                   Scrape new IOCs
-    muaddib sandbox <pkg>            Analyze in isolated Docker container
+    muaddib sandbox <pkg> [options]  Analyze in isolated Docker container
     muaddib version                  Show version
 
   Diff Examples:
@@ -262,6 +270,7 @@ const helpText = `
     --fail-on [level]   Fail level (critical|high|medium|low)
     --webhook [url]     Discord/Slack webhook
     --paranoid          Ultra-strict mode
+    --sandbox-strict    Sandbox: block outgoing traffic (except DNS + npmjs.org)
     --save-dev, -D      Install as dev dependency
     -g, --global        Install globally
     --force             Force install despite threats
@@ -333,14 +342,14 @@ if (command === 'version' || command === '--version' || command === '-v') {
     process.exit(1);
   });
 } else if (command === 'sandbox') {
-  const packageName = options[0];
+  const packageName = options.filter(o => !o.startsWith('-'))[0];
   if (!packageName) {
-    console.log('Usage: muaddib sandbox <package-name>');
+    console.log('Usage: muaddib sandbox <package-name> [--sandbox-strict]');
     process.exit(1);
   }
-  
+
   buildSandboxImage()
-    .then(() => runSandbox(packageName))
+    .then(() => runSandbox(packageName, { strict: sandboxStrict }))
     .then((results) => {
       process.exit(results.suspicious ? 1 : 0);
     })

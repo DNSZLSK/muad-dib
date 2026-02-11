@@ -124,6 +124,12 @@ const PLAYBOOKS = {
 
   workflow_injection:
     'Injection potentielle dans GitHub Actions via input non sanitise sur self-hosted runner. Supprimer ou corriger le workflow.',
+
+  pypi_malicious_package:
+    'CRITIQUE: Package PyPI malveillant detecte. Supprimer immediatement: pip uninstall <package> && pip cache purge',
+
+  pypi_typosquat_detected:
+    'ATTENTION: Ce package PyPI a un nom tres similaire a un package populaire. Verifier que c\'est bien le bon package. Si erreur de frappe, corriger immediatement: pip install <bon-package>',
 };
 
 function getPlaybook(threatType) {
