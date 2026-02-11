@@ -6,7 +6,7 @@ const { watch } = require('../src/watch.js');
 const { startDaemon } = require('../src/daemon.js');
 const { runScraper } = require('../src/ioc/scraper.js');
 const { safeInstall } = require('../src/safe-install.js');
-const { buildSandboxImage, runSandbox } = require('../src/sandbox.js');
+const { buildSandboxImage, runSandbox, generateNetworkReport } = require('../src/sandbox.js');
 const { diff, showRefs } = require('../src/diff.js');
 const { initHooks, removeHooks } = require('../src/hooks-init.js');
 
@@ -43,6 +43,8 @@ for (let i = 0; i < options.length; i++) {
     i++;
   } else if (options[i] === '--paranoid') {
     paranoidMode = true;
+  } else if (options[i] === '--strict') {
+    // Sandbox strict mode flag (parsed here, used by sandbox commands)
   } else if (!options[i].startsWith('-')) {
     target = options[i];
   }
@@ -183,8 +185,16 @@ async function interactiveMenu() {
       process.exit(1);
     }
 
+    const useStrict = await confirm({
+      message: 'Enable strict mode? (blocks non-essential network)',
+      default: false
+    });
+
     await buildSandboxImage();
-    const results = await runSandbox(packageName.trim());
+    const results = await runSandbox(packageName.trim(), { strict: useStrict });
+    if (results.raw_report) {
+      console.log(generateNetworkReport(results.raw_report));
+    }
     process.exit(results.suspicious ? 1 : 0);
   }
 
@@ -241,7 +251,8 @@ const helpText = `
     muaddib remove-hooks [path]      Remove MUAD'DIB git hooks
     muaddib update                   Update IOCs
     muaddib scrape                   Scrape new IOCs
-    muaddib sandbox <pkg>            Analyze in isolated Docker container
+    muaddib sandbox <pkg> [--strict]  Analyze in isolated Docker container
+    muaddib sandbox-report <pkg>     Sandbox + detailed network report
     muaddib version                  Show version
 
   Diff Examples:
@@ -333,15 +344,38 @@ if (command === 'version' || command === '--version' || command === '-v') {
     process.exit(1);
   });
 } else if (command === 'sandbox') {
-  const packageName = options[0];
+  const sandboxOpts = options.filter(o => !o.startsWith('-'));
+  const packageName = sandboxOpts[0];
+  const strict = options.includes('--strict');
   if (!packageName) {
-    console.log('Usage: muaddib sandbox <package-name>');
+    console.log('Usage: muaddib sandbox <package-name> [--strict]');
     process.exit(1);
   }
-  
+
   buildSandboxImage()
-    .then(() => runSandbox(packageName))
+    .then(() => runSandbox(packageName, { strict }))
     .then((results) => {
+      process.exit(results.suspicious ? 1 : 0);
+    })
+    .catch((err) => {
+      console.error('[ERROR]', err.message);
+      process.exit(1);
+    });
+} else if (command === 'sandbox-report') {
+  const sandboxOpts = options.filter(o => !o.startsWith('-'));
+  const packageName = sandboxOpts[0];
+  const strict = options.includes('--strict');
+  if (!packageName) {
+    console.log('Usage: muaddib sandbox-report <package-name> [--strict]');
+    process.exit(1);
+  }
+
+  buildSandboxImage()
+    .then(() => runSandbox(packageName, { strict }))
+    .then((results) => {
+      if (results.raw_report) {
+        console.log(generateNetworkReport(results.raw_report));
+      }
       process.exit(results.suspicious ? 1 : 0);
     })
     .catch((err) => {
