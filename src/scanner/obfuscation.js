@@ -2,13 +2,23 @@ const fs = require('fs');
 const path = require('path');
 const { findFiles } = require('../utils.js');
 
-const OBF_EXCLUDED_DIRS = ['test', 'tests', 'node_modules', '.git', 'src', 'vscode-extension'];
+// node_modules NOT excluded: detect obfuscated code in dependencies
+const OBF_EXCLUDED_DIRS = ['.git', '.muaddib-cache'];
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
 function detectObfuscation(targetPath) {
   const threats = [];
   const files = findFiles(targetPath, { extensions: ['.js'], excludedDirs: OBF_EXCLUDED_DIRS });
 
   for (const file of files) {
+    // Skip files exceeding MAX_FILE_SIZE to avoid memory issues
+    try {
+      const stat = fs.statSync(file);
+      if (stat.size > MAX_FILE_SIZE) continue;
+    } catch {
+      continue;
+    }
+
     let content;
     try {
       content = fs.readFileSync(file, 'utf8');
@@ -49,8 +59,8 @@ function detectObfuscation(targetPath) {
       signals.push('obfuscated_variables');
     }
 
-    // 5. String arrays suspects
-    if (/var\s+\w+\s*=\s*\[(['"][^'"]{0,50}['"],?\s*){10,}\]/.test(content)) {
+    // 5. String arrays suspects (programmatic check to avoid ReDoS)
+    if (hasLargeStringArray(content)) {
       score += 25;
       signals.push('string_array');
     }
@@ -72,6 +82,37 @@ function detectObfuscation(targetPath) {
   }
 
   return threats;
+}
+
+/**
+ * Programmatic check for large string arrays (avoids ReDoS from nested regex quantifiers).
+ * Detects patterns like: var x = ["a", "b", "c", ...] with 10+ quoted items.
+ */
+function hasLargeStringArray(content) {
+  const lines = content.split('\n');
+  for (const line of lines) {
+    const varIdx = line.indexOf('var ');
+    if (varIdx === -1) continue;
+    const bracketIdx = line.indexOf('[', varIdx);
+    if (bracketIdx === -1) continue;
+    const closeBracketIdx = line.indexOf(']', bracketIdx);
+    if (closeBracketIdx === -1) continue;
+    const segment = line.slice(bracketIdx, closeBracketIdx + 1);
+    // Count quoted strings in the segment
+    let count = 0;
+    for (let i = 0; i < segment.length; i++) {
+      if (segment[i] === '"' || segment[i] === "'") {
+        const quote = segment[i];
+        const end = segment.indexOf(quote, i + 1);
+        if (end !== -1 && end - i - 1 <= 50) {
+          count++;
+          i = end;
+        }
+      }
+    }
+    if (count >= 10) return true;
+  }
+  return false;
 }
 
 module.exports = { detectObfuscation };

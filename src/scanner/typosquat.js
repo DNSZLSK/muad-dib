@@ -26,7 +26,7 @@ const POPULAR_PACKAGES = [
 ];
 
 // Packages legitimes courts ou qui ressemblent a des populaires
-const WHITELIST = [
+const WHITELIST = new Set([
   // Packages tres courts legitimes
   'qs', 'pg', 'ms', 'ws', 'ip', 'on', 'is', 'it', 'to', 'or', 'fs', 'os',
   'co', 'q', 'n', 'i', 'a', 'v', 'x', 'y', 'z',
@@ -71,7 +71,7 @@ const WHITELIST = [
   'eslint-scope', 'eslint-visitor-keys',
   'esbuild-register',
   'neo-async'
-];
+]);
 
 
 // Pre-computed lowercase versions for performance
@@ -152,21 +152,45 @@ function scoreMetadata(meta) {
   return { score, severity, factors };
 }
 
+const PROTO_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+/**
+ * Safely merge dependency objects, filtering out prototype pollution keys.
+ */
+function safeMerge(...objs) {
+  const result = {};
+  for (const obj of objs) {
+    if (!obj || typeof obj !== 'object') continue;
+    for (const [key, value] of Object.entries(obj)) {
+      if (!PROTO_KEYS.has(key)) {
+        result[key] = value;
+      }
+    }
+  }
+  return result;
+}
+
 async function scanTyposquatting(targetPath) {
   const threats = [];
+  metadataCache.clear();
   const packageJsonPath = path.join(targetPath, 'package.json');
 
   if (!fs.existsSync(packageJsonPath)) {
     return threats;
   }
 
-  const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
-  const dependencies = {
-    ...packageJson.dependencies,
-    ...packageJson.devDependencies,
-    ...packageJson.peerDependencies,
-    ...packageJson.optionalDependencies
-  };
+  let packageJson;
+  try {
+    packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+  } catch {
+    return threats;
+  }
+  const dependencies = safeMerge(
+    packageJson.dependencies,
+    packageJson.devDependencies,
+    packageJson.peerDependencies,
+    packageJson.optionalDependencies
+  );
 
   // Phase 1: Levenshtein matches (synchronous)
   const candidates = [];
@@ -200,8 +224,8 @@ async function scanTyposquatting(targetPath) {
       details = 'Age: ' + meta.age_days + 'd'
         + ', Downloads: ' + meta.weekly_downloads + '/week'
         + ', Author packages: ' + meta.author_package_count
-        + ', No README: ' + !meta.has_readme
-        + ', No repo: ' + !meta.has_repository;
+        + ', No README: ' + String(!meta.has_readme)
+        + ', No repo: ' + String(!meta.has_repository);
     }
 
     const confidence = mf.score >= 40 ? 'CRITICAL'
@@ -236,7 +260,7 @@ function findTyposquatMatch(name) {
   const nameLower = name.toLowerCase();
   
   // Ignore les packages whitelistes
-  if (WHITELIST.includes(nameLower)) return null;
+  if (WHITELIST.has(nameLower)) return null;
   
   // Ignore les packages scoped (@org/package)
   if (name.startsWith('@')) return null;
@@ -315,42 +339,41 @@ function detectTyposquatType(typo, original) {
   if (typo.length === original.length - 1) return 'missing_char';
   if (typo.length === original.length + 1) return 'extra_char';
   if (typo.length === original.length) {
-    let diffs = 0;
-    for (let i = 0; i < typo.length; i++) {
-      if (typo[i] !== original[i]) diffs++;
+    // Check for adjacent character swap
+    for (let i = 0; i < typo.length - 1; i++) {
+      if (typo[i] === original[i + 1] && typo[i + 1] === original[i]) {
+        // Verify remaining chars match
+        const before = typo.slice(0, i) === original.slice(0, i);
+        const after = typo.slice(i + 2) === original.slice(i + 2);
+        if (before && after) return 'swapped_chars';
+      }
     }
-    if (diffs === 2) return 'swapped_chars';
     return 'wrong_char';
   }
   return 'unknown';
 }
 
 function levenshteinDistance(a, b) {
-  const matrix = [];
+  // Two-row optimization: O(min(m,n)) space instead of O(m*n)
+  if (a.length < b.length) { const t = a; a = b; b = t; }
+  let prev = new Array(b.length + 1);
+  let curr = new Array(b.length + 1);
 
-  for (let i = 0; i <= b.length; i++) {
-    matrix[i] = [i];
-  }
+  for (let j = 0; j <= b.length; j++) prev[j] = j;
 
-  for (let j = 0; j <= a.length; j++) {
-    matrix[0][j] = j;
-  }
-
-  for (let i = 1; i <= b.length; i++) {
-    for (let j = 1; j <= a.length; j++) {
-      if (b.charAt(i - 1) === a.charAt(j - 1)) {
-        matrix[i][j] = matrix[i - 1][j - 1];
+  for (let i = 1; i <= a.length; i++) {
+    curr[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      if (a.charAt(i - 1) === b.charAt(j - 1)) {
+        curr[j] = prev[j - 1];
       } else {
-        matrix[i][j] = Math.min(
-          matrix[i - 1][j - 1] + 1,
-          matrix[i][j - 1] + 1,
-          matrix[i - 1][j] + 1
-        );
+        curr[j] = Math.min(prev[j - 1] + 1, curr[j - 1] + 1, prev[j] + 1);
       }
     }
+    const tmp = prev; prev = curr; curr = tmp;
   }
 
-  return matrix[b.length][a.length];
+  return prev[b.length];
 }
 
 function clearMetadataCache() {

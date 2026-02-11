@@ -118,6 +118,7 @@ function loadStaticIOCs() {
 }
 
 const MAX_REDIRECTS = 5;
+const MAX_RESPONSE_SIZE = 200 * 1024 * 1024; // 200MB
 
 function fetchJSON(url, options = {}, redirectCount = 0) {
   return new Promise((resolve, reject) => {
@@ -136,6 +137,7 @@ function fetchJSON(url, options = {}, redirectCount = 0) {
     const req = https.request(reqOptions, (res) => {
       // Handle redirects (with security validation and limit)
       if (res.statusCode === 301 || res.statusCode === 302) {
+        res.resume(); // Drain old response before following redirect
         if (redirectCount >= MAX_REDIRECTS) {
           reject(new Error('Too many redirects'));
           return;
@@ -150,7 +152,16 @@ function fetchJSON(url, options = {}, redirectCount = 0) {
       }
 
       let data = '';
-      res.on('data', chunk => data += chunk);
+      let dataSize = 0;
+      res.on('data', chunk => {
+        dataSize += chunk.length;
+        if (dataSize > MAX_RESPONSE_SIZE) {
+          req.destroy();
+          reject(new Error('Response exceeded maximum size'));
+          return;
+        }
+        data += chunk;
+      });
       res.on('end', () => {
         try {
           resolve({ status: res.statusCode, data: JSON.parse(data) });
@@ -165,11 +176,11 @@ function fetchJSON(url, options = {}, redirectCount = 0) {
       req.destroy();
       reject(new Error('Timeout'));
     });
-    
+
     if (options.body) {
       req.write(JSON.stringify(options.body));
     }
-    
+
     req.end();
   });
 }
@@ -189,6 +200,7 @@ function fetchText(url, redirectCount = 0) {
     const req = https.request(reqOptions, (res) => {
       // Handle redirects (with security validation and limit)
       if (res.statusCode === 301 || res.statusCode === 302) {
+        res.resume(); // Drain old response before following redirect
         if (redirectCount >= MAX_REDIRECTS) {
           reject(new Error('Too many redirects'));
           return;
@@ -203,7 +215,16 @@ function fetchText(url, redirectCount = 0) {
       }
 
       let data = '';
-      res.on('data', chunk => data += chunk);
+      let dataSize = 0;
+      res.on('data', chunk => {
+        dataSize += chunk.length;
+        if (dataSize > MAX_RESPONSE_SIZE) {
+          req.destroy();
+          reject(new Error('Response exceeded maximum size'));
+          return;
+        }
+        data += chunk;
+      });
       res.on('end', () => {
         resolve({ status: res.statusCode, data: data });
       });
@@ -252,7 +273,16 @@ function fetchBuffer(url, redirectCount = 0) {
       }
 
       const chunks = [];
-      res.on('data', chunk => chunks.push(chunk));
+      let received = 0;
+      res.on('data', chunk => {
+        received += chunk.length;
+        if (received > MAX_RESPONSE_SIZE) {
+          req.destroy();
+          reject(new Error('Response exceeded maximum size'));
+          return;
+        }
+        chunks.push(chunk);
+      });
       res.on('end', () => resolve(Buffer.concat(chunks)));
     });
 
@@ -313,6 +343,12 @@ function fetchBufferWithProgress(url, label, redirectCount = 0) {
       res.on('data', (chunk) => {
         chunks.push(chunk);
         received += chunk.length;
+        if (received > MAX_RESPONSE_SIZE) {
+          req.destroy();
+          spinner.fail('Download exceeded maximum size');
+          reject(new Error('Response exceeded maximum size'));
+          return;
+        }
         const mb = Math.round(received / 1024 / 1024);
         if (totalMb) {
           spinner.update('Downloading ' + label + '... ' + mb + 'MB/' + totalMb + 'MB');
@@ -627,7 +663,7 @@ async function scrapeOSSFMaliciousPackages(knownIds) {
       for (const result of results) {
         if (!result || result.status !== 200 || !result.data) continue;
         const parsed = parseOSVEntry(result.data, 'ossf-malicious');
-        packages.push(...parsed);
+        for (const p of parsed) packages.push(p);
       }
 
       // Progress
@@ -689,7 +725,7 @@ async function scrapeOSVDataDump() {
           const content = entry.getData().toString('utf8');
           const vuln = JSON.parse(content);
           const parsed = parseOSVEntry(vuln, 'osv-malicious');
-          packages.push(...parsed);
+          for (const p of parsed) packages.push(p);
 
           // Track known IDs so OSSF can skip them
           knownIds.add(vuln.id || path.basename(name, '.json'));
@@ -745,7 +781,7 @@ async function scrapeOSVPyPIDataDump() {
           const content = entry.getData().toString('utf8');
           const vuln = JSON.parse(content);
           const parsed = parseOSVEntry(vuln, 'osv-malicious-pypi', 'PyPI');
-          packages.push(...parsed);
+          for (const p of parsed) packages.push(p);
           malCount++;
         } catch {
           // Skip unparseable entries
@@ -1121,15 +1157,19 @@ async function runScraper() {
     'snyk-known'
   ];
 
-  // Save enriched (full) IOCs
+  // Save enriched (full) IOCs — atomic write via .tmp + rename
   const saveSpinner = new Spinner();
   saveSpinner.start('Saving IOCs...');
-  fs.writeFileSync(IOC_FILE, JSON.stringify(existingIOCs, null, 2));
+  const tmpIOCFile = IOC_FILE + '.tmp';
+  fs.writeFileSync(tmpIOCFile, JSON.stringify(existingIOCs, null, 2));
+  fs.renameSync(tmpIOCFile, IOC_FILE);
 
-  // Save compact IOCs (lightweight, shipped in npm)
+  // Save compact IOCs (lightweight, shipped in npm) — atomic write
   saveSpinner.update('Generating compact IOCs...');
   const compactIOCs = generateCompactIOCs(existingIOCs);
-  fs.writeFileSync(COMPACT_IOC_FILE, JSON.stringify(compactIOCs));
+  const tmpCompactFile = COMPACT_IOC_FILE + '.tmp';
+  fs.writeFileSync(tmpCompactFile, JSON.stringify(compactIOCs));
+  fs.renameSync(tmpCompactFile, COMPACT_IOC_FILE);
   saveSpinner.succeed('Saved IOCs + compact format');
 
   // Display summary

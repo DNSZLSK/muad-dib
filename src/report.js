@@ -215,8 +215,15 @@ function generateHTML(results) {
 }
 
 function saveReport(results, outputPath) {
+  if (!outputPath || typeof outputPath !== 'string') {
+    throw new Error('Invalid output path for HTML report');
+  }
   const html = generateHTML(results);
-  fs.writeFileSync(outputPath, html);
+  try {
+    fs.writeFileSync(outputPath, html);
+  } catch (e) {
+    throw new Error(`Failed to write HTML report to ${outputPath}: ${e.message}`);
+  }
   return outputPath;
 }
 

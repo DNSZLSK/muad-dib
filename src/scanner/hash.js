@@ -6,6 +6,8 @@ const { findFiles } = require('../utils.js');
 
 // Hash cache: filePath -> { hash, mtime }
 const hashCache = new Map();
+const MAX_CACHE_SIZE = 10000;
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
 async function scanHashes(targetPath) {
   const threats = [];
@@ -27,7 +29,7 @@ async function scanHashes(targetPath) {
   }
 
   // Use shared findFiles utility (with symlink protection and depth limit)
-  const jsFiles = findFiles(nodeModulesPath, { extensions: ['.js'], excludedDirs: [], maxDepth: 50 });
+  const jsFiles = findFiles(nodeModulesPath, { extensions: ['.js'], excludedDirs: [], maxDepth: 100 });
 
   for (const file of jsFiles) {
     const hash = computeHashCached(file);
@@ -54,6 +56,7 @@ async function scanHashes(targetPath) {
 function computeHashCached(filePath) {
   try {
     const stat = fs.statSync(filePath);
+    if (stat.size > MAX_FILE_SIZE) return null;
     const mtime = stat.mtimeMs;
 
     // Check the cache
@@ -64,6 +67,12 @@ function computeHashCached(filePath) {
 
     // Compute the hash
     const hash = computeHash(filePath);
+
+    // FIFO eviction if cache is full
+    if (hashCache.size >= MAX_CACHE_SIZE) {
+      const firstKey = hashCache.keys().next().value;
+      hashCache.delete(firstKey);
+    }
 
     // Store in cache
     hashCache.set(filePath, { hash, mtime });

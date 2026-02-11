@@ -3,11 +3,9 @@ const path = require('path');
 const { run } = require('./index.js');
 
 let webhookUrl = null;
-let isRunning = false;
 
 async function startDaemon(options = {}) {
   webhookUrl = options.webhook || null;
-  isRunning = true;
 
   console.log(`
 ╔════════════════════════════════════════════╗
@@ -33,9 +31,8 @@ async function startDaemon(options = {}) {
 
   // Keep process alive until SIGINT
   await new Promise((resolve) => {
-    process.on('SIGINT', () => {
+    process.once('SIGINT', () => {
       console.log('\n[DAEMON] Arret...');
-      isRunning = false;
       cleanup();
       resolve();
     });
@@ -70,6 +67,10 @@ function watchDirectory(dir) {
   }
 
   // Surveille la creation de node_modules
+  if (process.platform === 'linux') {
+    console.log('[DAEMON] Note: recursive fs.watch may not work on Linux');
+  }
+
   const dirWatcher = fs.watch(dir, (eventType, filename) => {
     if (filename === 'node_modules' && eventType === 'rename') {
       const nmPath = path.join(dir, 'node_modules');
@@ -82,6 +83,9 @@ function watchDirectory(dir) {
       console.log(`[DAEMON] ${filename} modifie, scan en cours...`);
       triggerScan(dir);
     }
+  });
+  dirWatcher.on('error', (err) => {
+    console.log(`[DAEMON] Watcher error on ${dir}: ${err.message}`);
   });
   watchers.push(dirWatcher);
 
@@ -96,7 +100,7 @@ function watchFile(filePath, projectDir) {
     return null; // File deleted between existsSync and statSync
   }
 
-  return fs.watch(filePath, (eventType) => {
+  const watcher = fs.watch(filePath, (eventType) => {
     if (eventType === 'change') {
       try {
         const currentMtime = fs.statSync(filePath).mtime.getTime();
@@ -110,15 +114,23 @@ function watchFile(filePath, projectDir) {
       }
     }
   });
+  watcher.on('error', (err) => {
+    console.log(`[DAEMON] Watcher error on ${filePath}: ${err.message}`);
+  });
+  return watcher;
 }
 
 function watchNodeModules(nodeModulesPath, projectDir) {
-  return fs.watch(nodeModulesPath, { recursive: true }, (eventType, filename) => {
+  const watcher = fs.watch(nodeModulesPath, { recursive: true }, (eventType, filename) => {
     if (filename && filename.includes('package.json')) {
       console.log(`[DAEMON] Nouveau package detecte: ${filename}`);
       triggerScan(projectDir);
     }
   });
+  watcher.on('error', (err) => {
+    console.log(`[DAEMON] Watcher error on ${nodeModulesPath}: ${err.message}`);
+  });
+  return watcher;
 }
 
 let scanTimeout = null;

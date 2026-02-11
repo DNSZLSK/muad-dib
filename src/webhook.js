@@ -32,18 +32,18 @@ function validateWebhookUrl(url) {
   try {
     const urlObj = new URL(url);
 
-    // Check protocol (HTTPS required except for localhost)
-    if (urlObj.protocol !== 'https:' && urlObj.hostname !== 'localhost') {
+    // Check protocol (HTTPS required, no exceptions)
+    if (urlObj.protocol !== 'https:') {
       return { valid: false, error: 'HTTPS required for webhooks' };
     }
 
-    // Check that the domain is allowed
+    // Check that the domain is allowed (no localhost exemption)
     const hostname = urlObj.hostname.toLowerCase();
     const isAllowed = ALLOWED_WEBHOOK_DOMAINS.some(domain =>
       hostname === domain || hostname.endsWith('.' + domain)
     );
 
-    if (!isAllowed && hostname !== 'localhost') {
+    if (!isAllowed) {
       return { valid: false, error: `Domain not allowed: ${hostname}. Allowed domains: ${ALLOWED_WEBHOOK_DOMAINS.join(', ')}` };
     }
 
@@ -67,16 +67,14 @@ async function sendWebhook(url, results) {
 
   // DNS resolution check: verify the resolved IP is not private (SSRF via DNS rebinding)
   const urlObj = new URL(url);
-  if (urlObj.hostname !== 'localhost') {
-    try {
-      const { address } = await dns.promises.lookup(urlObj.hostname);
-      if (PRIVATE_IP_PATTERNS.some(pattern => pattern.test(address))) {
-        throw new Error(`Webhook blocked: hostname ${urlObj.hostname} resolves to private IP ${address}`);
-      }
-    } catch (e) {
-      if (e.message.startsWith('Webhook blocked')) throw e;
-      throw new Error(`Webhook blocked: DNS resolution failed for ${urlObj.hostname}`);
+  try {
+    const { address } = await dns.promises.lookup(urlObj.hostname);
+    if (PRIVATE_IP_PATTERNS.some(pattern => pattern.test(address))) {
+      throw new Error(`Webhook blocked: hostname ${urlObj.hostname} resolves to private IP ${address}`);
     }
+  } catch (e) {
+    if (e.message.startsWith('Webhook blocked')) throw e;
+    throw new Error(`Webhook blocked: DNS resolution failed for ${urlObj.hostname}`);
   }
 
   const isDiscord = url.includes('discord.com');
@@ -239,24 +237,37 @@ function formatGeneric(results) {
   };
 }
 
+const MAX_RESPONSE_SIZE = 1024 * 1024; // 1MB
+
 function send(url, payload) {
   return new Promise((resolve, reject) => {
     const urlObj = new URL(url);
     const protocol = urlObj.protocol === 'https:' ? https : http;
 
+    const body = JSON.stringify(payload);
     const options = {
       hostname: urlObj.hostname,
       port: urlObj.port || (urlObj.protocol === 'https:' ? 443 : 80),
       path: urlObj.pathname + urlObj.search,
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body)
       }
     };
 
     const req = protocol.request(options, (res) => {
       let data = '';
-      res.on('data', chunk => data += chunk);
+      let size = 0;
+      res.on('data', chunk => {
+        size += chunk.length;
+        if (size > MAX_RESPONSE_SIZE) {
+          res.destroy();
+          reject(new Error('Webhook response exceeded 1MB limit'));
+          return;
+        }
+        data += chunk;
+      });
       res.on('end', () => {
         if (res.statusCode >= 200 && res.statusCode < 300) {
           resolve({ success: true, status: res.statusCode });
@@ -271,7 +282,7 @@ function send(url, payload) {
       reject(new Error('Webhook timeout after 10s'));
     });
     req.on('error', reject);
-    req.write(JSON.stringify(payload));
+    req.write(body);
     req.end();
   });
 }

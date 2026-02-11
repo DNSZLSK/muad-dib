@@ -464,7 +464,9 @@ const RULES = {
 };
 
 function getRule(type) {
-  return RULES[type] || {
+  if (RULES[type]) return RULES[type];
+  if (PARANOID_RULES[type]) return PARANOID_RULES[type];
+  return {
     id: 'MUADDIB-UNK-001',
     name: 'Unknown Threat',
     severity: 'MEDIUM',

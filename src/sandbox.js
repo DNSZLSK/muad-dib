@@ -29,16 +29,16 @@ const DANGEROUS_CMDS = ['curl', 'wget', 'nc', 'netcat', 'python', 'python3', 'ba
 
 // Patterns indicating data exfiltration in HTTP bodies
 const EXFIL_PATTERNS = [
-  { pattern: /NPM_TOKEN/i, label: 'npm token', severity: 'CRITICAL' },
-  { pattern: /GITHUB_TOKEN/i, label: 'GitHub token', severity: 'CRITICAL' },
-  { pattern: /AWS_SECRET/i, label: 'AWS credentials', severity: 'CRITICAL' },
+  { pattern: /\bNPM_TOKEN\b/i, label: 'npm token', severity: 'CRITICAL' },
+  { pattern: /\bGITHUB_TOKEN\b/i, label: 'GitHub token', severity: 'CRITICAL' },
+  { pattern: /\bAWS_SECRET/i, label: 'AWS credentials', severity: 'CRITICAL' },
   { pattern: /npmrc/i, label: '.npmrc content', severity: 'CRITICAL' },
-  { pattern: /ssh-rsa|ssh-ed25519/i, label: 'SSH key', severity: 'CRITICAL' },
+  { pattern: /\bssh-rsa\b|\bssh-ed25519\b/i, label: 'SSH key', severity: 'CRITICAL' },
   { pattern: /BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY/, label: 'private key', severity: 'CRITICAL' },
-  { pattern: /password/i, label: 'password', severity: 'CRITICAL' },
-  { pattern: /token/i, label: 'token', severity: 'CRITICAL' },
+  { pattern: /\bpassword\b/i, label: 'password', severity: 'CRITICAL' },
+  { pattern: /\btoken\b/i, label: 'token', severity: 'CRITICAL' },
   { pattern: /\/etc\/passwd/, label: 'passwd file', severity: 'HIGH' },
-  { pattern: /\.env/, label: '.env content', severity: 'HIGH' }
+  { pattern: /\.env\b/, label: '.env content', severity: 'HIGH' }
 ];
 
 // ── Docker availability checks ──
@@ -138,11 +138,12 @@ async function runSandbox(packageName, options = {}) {
       '--cap-add=NET_RAW'
     ];
 
-    // Strict mode needs iptables → NET_ADMIN + root
+    // Strict mode needs iptables → NET_ADMIN (run as non-root with setcap for iptables)
     if (strict) {
       dockerArgs.push('--cap-add=NET_ADMIN');
-      dockerArgs.push('--user=root');
     }
+
+    dockerArgs.push('--read-only');
 
     dockerArgs.push('--security-opt', 'no-new-privileges');
     dockerArgs.push(DOCKER_IMAGE);
@@ -167,8 +168,8 @@ async function runSandbox(packageName, options = {}) {
     });
 
     proc.stderr.on('data', (data) => {
-      // Forward sandbox progress logs
-      const text = data.toString();
+      // Forward sandbox progress logs (sanitize ANSI escape sequences)
+      const text = data.toString().replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
       for (const line of text.split('\n')) {
         if (line.includes('[SANDBOX]')) {
           console.log(line.trim());

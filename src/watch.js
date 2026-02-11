@@ -4,6 +4,7 @@ const { run } = require('./index.js');
 
 function watch(targetPath) {
   let debounceTimer = null;
+  const watchers = [];
 
   console.log(`[MUADDIB] Surveillance de ${targetPath}\n`);
   console.log('[INFO] Ctrl+C pour arreter\n');
@@ -25,7 +26,7 @@ function watch(targetPath) {
       if (process.platform === 'linux' && watchPath.includes('node_modules')) {
         console.log(`[WARN] recursive watch not supported on Linux for ${watchPath}`);
       }
-      fs.watch(watchPath, { recursive: true }, (eventType, filename) => {
+      const watcher = fs.watch(watchPath, { recursive: true }, (eventType, filename) => {
         if (debounceTimer) clearTimeout(debounceTimer);
 
         debounceTimer = setTimeout(() => {
@@ -34,9 +35,22 @@ function watch(targetPath) {
           run(targetPath, { json: false }).catch(err => console.error('[ERROR]', err.message));
         }, 1000);
       });
+      watcher.on('error', (err) => {
+        console.error(`[WARN] Watcher error on ${watchPath}: ${err.message}`);
+      });
+      watchers.push(watcher);
       console.log(`[WATCH] ${watchPath}`);
     }
   }
+
+  // Cleanup on SIGINT
+  process.once('SIGINT', () => {
+    console.log('\n[MUADDIB] Arret surveillance...');
+    for (const w of watchers) {
+      try { w.close(); } catch { /* ignore */ }
+    }
+    process.exit(0);
+  });
 }
 
 module.exports = { watch };

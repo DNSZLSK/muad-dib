@@ -6,7 +6,9 @@ const SUSPICIOUS_SCRIPTS = [
   'preinstall',
   'postinstall',
   'preuninstall',
-  'postuninstall'
+  'postuninstall',
+  'prepare',
+  'prepack'
 ];
 
 const DANGEROUS_PATTERNS = [
@@ -20,6 +22,8 @@ const DANGEROUS_PATTERNS = [
   { pattern: /base64/, name: 'base64_encoding' }
 ];
 
+const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype', 'toString', 'valueOf']);
+
 async function scanPackageJson(targetPath) {
   const threats = [];
   const pkgPath = path.join(targetPath, 'package.json');
@@ -31,7 +35,8 @@ async function scanPackageJson(targetPath) {
   let pkg;
   try {
     pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-  } catch {
+  } catch (e) {
+    console.log('[WARN] Failed to parse package.json: ' + e.message);
     return threats;
   }
   const scripts = pkg.scripts || {};
@@ -62,15 +67,23 @@ async function scanPackageJson(targetPath) {
   }
 
   // Scan declared dependencies against IOCs
-  const iocs = loadCachedIOCs();
+  let iocs;
+  try {
+    iocs = loadCachedIOCs();
+  } catch (e) {
+    console.log('[WARN] Failed to load IOCs: ' + e.message);
+    return threats;
+  }
   const allDeps = {
     ...pkg.dependencies,
     ...pkg.devDependencies,
     ...pkg.optionalDependencies,
-    ...pkg.peerDependencies
+    ...pkg.peerDependencies,
+    ...pkg.bundledDependencies
   };
 
   for (const [depName, depVersion] of Object.entries(allDeps)) {
+    if (DANGEROUS_KEYS.has(depName)) continue;
     let malicious = null;
 
     // Use optimized Map for O(1) lookup if available
@@ -80,15 +93,15 @@ async function scanPackageJson(targetPath) {
         malicious = pkgList ? pkgList.find(p => p.version === '*') : null;
       } else if (iocs.packagesMap.has(depName)) {
         const pkgList = iocs.packagesMap.get(depName);
-        const cleanVersion = depVersion.replace(/^[^0-9]*/, '');
+        const cleanVersion = depVersion.replace(/^[\^~>=<! ]+/, '');
         malicious = pkgList.find(p => p.version === cleanVersion || p.version === depVersion);
       }
-    } else {
+    } else if (iocs.packages) {
       // Fallback: linear search for compatibility
       malicious = iocs.packages.find(p => {
         if (p.name !== depName) return false;
         if (p.version === '*') return true;
-        const cleanVersion = depVersion.replace(/^[^0-9]*/, '');
+        const cleanVersion = depVersion.replace(/^[\^~>=<! ]+/, '');
         if (p.version === cleanVersion || p.version === depVersion) return true;
         return false;
       });
