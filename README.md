@@ -5,7 +5,7 @@
 <h1 align="center">MUAD'DIB</h1>
 
 <p align="center">
-  <strong>Supply-chain threat detection and response for npm</strong>
+  <strong>Supply-chain threat detection and response for npm & PyPI</strong>
 </p>
 
 <p align="center">
@@ -15,7 +15,7 @@
   <a href="https://scorecard.dev/viewer/?uri=github.com/DNSZLSK/muad-dib"><img src="https://api.scorecard.dev/projects/github.com/DNSZLSK/muad-dib/badge" alt="OpenSSF Scorecard"></a>
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
   <img src="https://img.shields.io/badge/node-%3E%3D18-brightgreen" alt="Node">
-  <img src="https://img.shields.io/badge/IOCs-1500%2B-red" alt="IOCs">
+  <img src="https://img.shields.io/badge/IOCs-225%2C000%2B-red" alt="IOCs">
 </p>
 
 <p align="center">
@@ -27,14 +27,14 @@
 </p>
 
 <p align="center">
-  <a href="README.fr.md">Version française</a>
+  <a href="README.fr.md">Version francaise</a>
 </p>
 
 ---
 
 ## Why MUAD'DIB?
 
-npm supply-chain attacks are exploding. Shai-Hulud compromised 25K+ repos in 2025. Existing tools detect threats but don't help you respond.
+npm and PyPI supply-chain attacks are exploding. Shai-Hulud compromised 25K+ repos in 2025. Existing tools detect threats but don't help you respond.
 
 MUAD'DIB detects AND guides your response.
 
@@ -42,7 +42,7 @@ MUAD'DIB detects AND guides your response.
 
 ## Positioning
 
-MUAD'DIB is an educational tool and a free first line of defense. It detects **known** npm threats (1500+ IOCs) and basic suspicious patterns.
+MUAD'DIB is an educational tool and a free first line of defense. It detects **known** npm and PyPI threats (225,000+ IOCs) and basic suspicious patterns.
 
 **For enterprise protection**, use:
 - [Socket.dev](https://socket.dev) - ML behavioral analysis, cloud sandboxing
@@ -81,6 +81,8 @@ muaddib scan .
 muaddib scan /path/to/project
 ```
 
+Scans both npm (package.json, node_modules) and Python (requirements.txt, setup.py, pyproject.toml) dependencies.
+
 ### Interactive mode
 
 ```bash
@@ -95,6 +97,7 @@ Launches an interactive menu to guide you through all features.
 muaddib install <package>
 muaddib install lodash axios --save-dev
 muaddib i express -g
+muaddib install suspicious-pkg --force    # Force install despite threats
 ```
 
 Scans packages for threats BEFORE installing. Blocks known malicious packages.
@@ -166,19 +169,25 @@ muaddib daemon --webhook "https://discord.com/api/webhooks/..."
 
 Automatically monitors all `npm install` commands and scans new packages.
 
-### Update IOCs
+### Update IOCs (fast, ~5 seconds)
 
 ```bash
 muaddib update
 ```
 
-### Scrape new IOCs
+Loads the 225,000+ IOCs shipped in the package, merges YAML IOCs and additional GitHub sources (GenSecAI, DataDog). Run this after `npm install` for an instant IOC refresh.
+
+### Scrape IOCs (full, ~5 minutes)
 
 ```bash
 muaddib scrape
 ```
 
-Fetches latest malicious packages from multiple verified threat intelligence sources:
+Full refresh from all primary sources. Downloads OSV bulk dumps for npm and PyPI (~100-200MB), OSSF, and all other sources. Run this when you want the absolute latest data.
+
+Sources:
+- **OSV.dev npm dump** - Bulk download of all MAL-* entries
+- **OSV.dev PyPI dump** - Bulk download of all PyPI MAL-* entries
 - **GenSecAI Shai-Hulud 2.0 Detector** - Consolidated list of 700+ Shai-Hulud packages
 - **DataDog Security Labs** - Consolidated IOCs from multiple vendors
 - **OSSF Malicious Packages** - OpenSSF database (8000+ reports via OSV.dev)
@@ -190,6 +199,7 @@ Fetches latest malicious packages from multiple verified threat intelligence sou
 
 ```bash
 muaddib sandbox <package-name>
+muaddib sandbox <package-name> --strict
 ```
 
 Analyzes a package in an isolated Docker container. Captures:
@@ -197,12 +207,23 @@ Analyzes a package in an isolated Docker container. Captures:
 - File access (detects credential theft: .npmrc, .ssh, .aws, .env)
 - Process spawns (detects reverse shells, curl/wget abuse)
 
+Use `--strict` to block all non-essential outbound network traffic via iptables.
+
 Requires Docker Desktop installed.
 
 ```bash
 muaddib sandbox lodash          # Safe package
 muaddib sandbox suspicious-pkg  # Analyze unknown package
 ```
+
+### Sandbox network report
+
+```bash
+muaddib sandbox-report <package-name>
+muaddib sandbox-report <package-name> --strict
+```
+
+Same as `sandbox` but displays a detailed network report: DNS resolutions, HTTP requests, TLS connections, blocked connections (strict mode), and data exfiltration alerts.
 
 ### Diff (compare versions)
 
@@ -231,7 +252,7 @@ Example output:
   Unchanged:       3
 
   NEW THREATS (introduced since v1.2.0)
-  ─────────────────────────────────────
+  ------------------------------------
   1. [HIGH] suspicious_dependency
      Known malicious package detected
      File: package.json
@@ -302,9 +323,29 @@ MUAD'DIB automatically checks for new versions on startup and notifies you if an
 
 ## Features
 
+### Python / PyPI support
+
+MUAD'DIB automatically detects and scans Python projects:
+
+- **requirements.txt** - All formats including `-r` recursive includes, extras, environment markers
+- **setup.py** - Extracts `install_requires` and `setup_requires`
+- **pyproject.toml** - PEP 621 dependencies and Poetry dependencies
+
+Python packages are checked against 14,000+ known malicious PyPI packages (from OSV.dev) and tested for typosquatting against popular PyPI packages (requests, numpy, flask, django, pandas, etc.) using PEP 503 name normalization.
+
+```
+[PYTHON] Detected Python project (3 dependency files)
+  requirements.txt: 12 packages
+  setup.py: 3 packages
+  pyproject.toml: 8 packages
+
+[CRITICAL] PyPI IOC match: malicious-pkg (all versions)
+[HIGH] PyPI typosquat: "reqeusts" looks like "requests"
+```
+
 ### Typosquatting detection
 
-MUAD'DIB detects packages with names similar to popular packages:
+MUAD'DIB detects packages with names similar to popular packages (npm and PyPI):
 
 ```
 [HIGH] Package "lodahs" looks like "lodash" (swapped_chars). Possible typosquatting.
@@ -317,6 +358,10 @@ Detects when code reads credentials AND sends them over the network:
 ```
 [CRITICAL] Suspicious flow: credential read (readFileSync, GITHUB_TOKEN) + network send (fetch)
 ```
+
+### GitHub Actions scanning
+
+Detects malicious patterns in `.github/workflows/` YAML files, including Shai-Hulud 2.0 backdoor indicators.
 
 ### Detected attacks
 
@@ -340,8 +385,10 @@ Detects when code reads credentials AND sends them over the network:
 | Reverse shell | T1059.004 | Pattern |
 | Dead man's switch | T1485 | Pattern |
 | Obfuscated code | T1027 | Heuristics |
-| Typosquatting | T1195.002 | Levenshtein |
+| Typosquatting (npm + PyPI) | T1195.002 | Levenshtein |
 | Supply chain compromise | T1195.002 | IOC matching |
+| PyPI malicious package | T1195.002 | IOC matching |
+| Sandbox behavioral analysis | Multiple | Docker + strace + tcpdump |
 
 ---
 
@@ -351,6 +398,8 @@ MUAD'DIB aggregates threat intelligence from verified sources only:
 
 | Source | Type | Coverage |
 |--------|------|----------|
+| [OSV.dev npm dump](https://osv.dev) | Bulk zip | 200,000+ npm MAL-* entries |
+| [OSV.dev PyPI dump](https://osv.dev) | Bulk zip | 14,000+ PyPI MAL-* entries |
 | [GenSecAI Shai-Hulud Detector](https://github.com/gensecaihq/Shai-Hulud-2.0-Detector) | GitHub | 700+ Shai-Hulud packages |
 | [DataDog Security Labs](https://github.com/DataDog/indicators-of-compromise) | GitHub | Consolidated IOCs from 7 vendors |
 | [OSSF Malicious Packages](https://github.com/ossf/malicious-packages) | OSV API | 8000+ malware reports |
@@ -438,7 +487,9 @@ Alerts appear in Security > Code scanning alerts.
 ```
 MUAD'DIB Scanner
 |
-+-- IOC Match (1500+ packages, JSON DB)
++-- IOC Match (225,000+ packages, JSON DB)
+|   +-- OSV.dev npm dump (200K+ MAL-* entries)
+|   +-- OSV.dev PyPI dump (14K+ MAL-* entries)
 |   +-- GenSecAI Shai-Hulud Detector
 |   +-- DataDog Consolidated IOCs
 |   +-- OSSF Malicious Packages (via OSV)
@@ -448,9 +499,11 @@ MUAD'DIB Scanner
 |
 +-- AST Parse (acorn)
 +-- Pattern Matching (shell, scripts)
-+-- Typosquat Detection (Levenshtein)
++-- Typosquat Detection (npm + PyPI, Levenshtein)
++-- Python Scanner (requirements.txt, setup.py, pyproject.toml)
++-- GitHub Actions Scanner
 +-- Paranoid Mode (ultra-strict)
-+-- Docker Sandbox (behavioral analysis)
++-- Docker Sandbox (behavioral analysis, network capture)
 |
 v
 Dataflow Analysis (credential read -> network send)
@@ -494,10 +547,10 @@ npm test
 
 ### Testing
 
-- **145 unit/integration tests** — 80% code coverage via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
-- **56 fuzz tests** — Malformed YAML, invalid JSON, binary files, ReDoS, unicode, 10MB inputs
-- **15 adversarial tests** — Simulated malicious packages, 15/15 detection rate
-- **ESLint security audit** — `eslint-plugin-security` with 14 rules enabled
+- **218 unit/integration tests** - 80% code coverage via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
+- **56 fuzz tests** - Malformed YAML, invalid JSON, binary files, ReDoS, unicode, 10MB inputs
+- **15 adversarial tests** - Simulated malicious packages, 15/15 detection rate
+- **ESLint security audit** - `eslint-plugin-security` with 14 rules enabled
 
 ---
 

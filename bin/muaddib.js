@@ -69,10 +69,10 @@ async function interactiveMenu() {
   const { select, input, confirm } = await import('@inquirer/prompts');
 
   console.log(`
-  ╔══════════════════════════════════════════╗
-  ║   MUAD'DIB - npm Supply Chain Hunter     ║
-  ║   "The worms must die."                  ║
-  ╚══════════════════════════════════════════╝
+  ╔═══════════════════════════════════════════════╗
+  ║   MUAD'DIB - npm & PyPI Supply Chain Hunter  ║
+  ║   "The worms must die."                      ║
+  ╚═══════════════════════════════════════════════╝
   `);
 
   const action = await select({
@@ -238,7 +238,7 @@ async function interactiveMenu() {
 }
 
 const helpText = `
-  MUAD'DIB - npm Supply Chain Threat Hunter
+  MUAD'DIB - npm & PyPI Supply Chain Threat Hunter
 
   Usage:
     muaddib                          Interactive mode

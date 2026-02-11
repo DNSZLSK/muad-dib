@@ -173,8 +173,8 @@ function loadCachedIOCs() {
     try {
       const localIOCs = JSON.parse(fs.readFileSync(LOCAL_IOC_FILE, 'utf8'));
       mergeIOCs(merged, localIOCs);
-    } catch {
-      // Ignore errors
+    } catch (e) {
+      console.log('[WARN] Failed to load IOC database (iocs.json): ' + e.message);
     }
   } else if (fs.existsSync(LOCAL_COMPACT_FILE)) {
     // Priority 2b: Compact file (shipped in npm, lightweight)
@@ -182,8 +182,8 @@ function loadCachedIOCs() {
       const compactData = JSON.parse(fs.readFileSync(LOCAL_COMPACT_FILE, 'utf8'));
       const expandedIOCs = expandCompactIOCs(compactData);
       mergeIOCs(merged, expandedIOCs);
-    } catch {
-      // Ignore errors
+    } catch (e) {
+      console.log('[WARN] Failed to load compact IOC database: ' + e.message);
     }
   }
 
@@ -192,8 +192,8 @@ function loadCachedIOCs() {
     try {
       const cachedIOCs = JSON.parse(fs.readFileSync(CACHE_IOC_FILE, 'utf8'));
       mergeIOCs(merged, cachedIOCs);
-    } catch {
-      // Ignore errors
+    } catch (e) {
+      console.log('[WARN] Failed to load cached IOCs: ' + e.message);
     }
   }
 
