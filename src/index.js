@@ -247,7 +247,8 @@ async function run(targetPath, options = {}) {
       package: pkg,
       score: sr.score,
       severity: sr.severity,
-      findings: sr.findings
+      findings: sr.findings,
+      network: sr.raw_report?.network || null
     };
     for (const f of sr.findings) {
       threats.push({

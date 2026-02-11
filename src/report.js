@@ -173,6 +173,34 @@ function generateHTML(results) {
             <strong>[${escapeHtml(f.severity)}]</strong> ${escapeHtml(f.type)}: ${escapeHtml(f.detail)}
           </div>
         `).join('')}
+
+      ${results.sandbox.network ? `
+      <h3 style="color: #9b59b6; margin-top: 20px;">Network Activity</h3>
+      ${(results.sandbox.network.dns_resolutions || []).length > 0 ? `
+        <h4 style="color: #aaa;">DNS Resolutions</h4>
+        ${results.sandbox.network.dns_resolutions.map(r => `
+          <div class="sandbox-finding">${escapeHtml(r.domain)} &rarr; ${escapeHtml(r.ip)}</div>
+        `).join('')}
+      ` : ''}
+      ${(results.sandbox.network.http_requests || []).length > 0 ? `
+        <h4 style="color: #aaa;">HTTP Requests</h4>
+        ${results.sandbox.network.http_requests.map(r => `
+          <div class="sandbox-finding">${escapeHtml(r.method)} ${escapeHtml(r.host)}${escapeHtml(r.path)}</div>
+        `).join('')}
+      ` : ''}
+      ${(results.sandbox.network.tls_connections || []).length > 0 ? `
+        <h4 style="color: #aaa;">TLS Connections</h4>
+        ${results.sandbox.network.tls_connections.map(t => `
+          <div class="sandbox-finding">${escapeHtml(t.domain)} (${escapeHtml(t.ip)}:${escapeHtml(String(t.port))})</div>
+        `).join('')}
+      ` : ''}
+      ${(results.sandbox.network.blocked_connections || []).length > 0 ? `
+        <h4 style="color: #e94560;">Blocked Connections</h4>
+        ${results.sandbox.network.blocked_connections.map(b => `
+          <div class="sandbox-finding" style="background: rgba(233,69,96,0.2);">[BLOCKED] ${escapeHtml(b.ip)}:${escapeHtml(String(b.port))}</div>
+        `).join('')}
+      ` : ''}
+      ` : ''}
     </div>
     ` : ''}
 

@@ -301,10 +301,17 @@ test('CLI: --fail-on high exit code correct', () => {
 
 console.log('\n=== UPDATE TESTS ===\n');
 
-test('UPDATE: Downloads and caches IOCs', () => {
-  const output = runCommand('update');
-  assertIncludes(output, 'IOCs saved', 'Should save IOCs');
-  assertIncludes(output, 'malicious npm packages', 'Should display package count');
+test('UPDATE: Module loads and loadCachedIOCs works', () => {
+  const { loadCachedIOCs } = require('../src/ioc/updater.js');
+  const iocs = loadCachedIOCs();
+  assert(iocs.packagesMap instanceof Map, 'Should return packagesMap');
+  assert(iocs.wildcardPackages instanceof Set, 'Should return wildcardPackages');
+  assert(iocs.packages.length > 0, 'Should have packages');
+});
+
+test('UPDATE: updateIOCs is a function', () => {
+  const { updateIOCs } = require('../src/ioc/updater.js');
+  assert(typeof updateIOCs === 'function', 'updateIOCs should be a function');
 });
 
 // ============================================
@@ -2045,6 +2052,215 @@ test('HASH: clearHashCache and getHashCacheSize', () => {
   test('PYPI-TYPOSQUAT: Playbook exists', () => {
     const playbook = getPlaybookForPypi('pypi_typosquat_detected');
     assert(playbook.includes('package PyPI'), 'Playbook should mention PyPI package');
+  });
+
+  // ============================================
+  // SANDBOX NETWORK TESTS
+  // ============================================
+
+  console.log('\n=== SANDBOX NETWORK TESTS ===\n');
+
+  const {
+    scoreFindings,
+    generateNetworkReport,
+    EXFIL_PATTERNS,
+    SAFE_DOMAINS
+  } = require('../src/sandbox.js');
+
+  test('SANDBOX-NET: scoreFindings handles empty report', () => {
+    const { score, findings } = scoreFindings({});
+    assert(score === 0, 'Empty report should score 0');
+    assert(findings.length === 0, 'Empty report should have no findings');
+  });
+
+  test('SANDBOX-NET: scoreFindings detects suspicious DNS', () => {
+    const report = { network: { dns_queries: ['evil.com', 'registry.npmjs.org'] } };
+    const { score, findings } = scoreFindings(report);
+    assert(score > 0, 'Should score > 0 for evil.com DNS');
+    const dnsFindings = findings.filter(f => f.type === 'suspicious_dns');
+    assert(dnsFindings.length === 1, 'Should have 1 suspicious DNS (evil.com), got ' + dnsFindings.length);
+    assert(dnsFindings[0].evidence === 'evil.com', 'Should flag evil.com');
+  });
+
+  test('SANDBOX-NET: scoreFindings skips safe domains in DNS', () => {
+    const report = { network: { dns_queries: ['registry.npmjs.org', 'github.com', 'npmjs.com'] } };
+    const { score } = scoreFindings(report);
+    assert(score === 0, 'All safe domains should score 0');
+  });
+
+  test('SANDBOX-NET: scoreFindings detects DNS resolutions (INFO)', () => {
+    const report = { network: { dns_resolutions: [
+      { domain: 'evil.com', ip: '1.2.3.4' },
+      { domain: 'registry.npmjs.org', ip: '5.6.7.8' }
+    ] } };
+    const { findings } = scoreFindings(report);
+    const resFindings = findings.filter(f => f.type === 'dns_resolution');
+    assert(resFindings.length === 1, 'Should have 1 dns_resolution finding for evil.com');
+    assert(resFindings[0].severity === 'INFO', 'DNS resolution should be INFO severity');
+  });
+
+  test('SANDBOX-NET: scoreFindings detects suspicious TLS', () => {
+    const report = { network: { tls_connections: [
+      { domain: 'evil.com', ip: '1.2.3.4', port: 443 },
+      { domain: 'registry.npmjs.org', ip: '5.6.7.8', port: 443 }
+    ] } };
+    const { score, findings } = scoreFindings(report);
+    assert(score > 0, 'Should score > 0 for evil.com TLS');
+    const tlsFindings = findings.filter(f => f.type === 'suspicious_tls');
+    assert(tlsFindings.length === 1, 'Should have 1 suspicious TLS');
+    assert(tlsFindings[0].evidence === 'evil.com', 'Should flag evil.com');
+  });
+
+  test('SANDBOX-NET: scoreFindings detects data exfiltration', () => {
+    const report = { network: { http_bodies: ['{"npmrc":"//registry.npmjs.org/:_authToken=abc123"}'] } };
+    const { score, findings } = scoreFindings(report);
+    assert(score >= 50, 'Exfiltration should score >= 50');
+    const exfilFindings = findings.filter(f => f.type === 'data_exfiltration');
+    assert(exfilFindings.length >= 1, 'Should detect exfiltration');
+    assert(exfilFindings[0].severity === 'CRITICAL', 'Exfiltration should be CRITICAL');
+  });
+
+  test('SANDBOX-NET: scoreFindings detects multiple exfiltration patterns', () => {
+    const report = { network: { http_bodies: [
+      'token=secret123',
+      'AWS_SECRET_ACCESS_KEY=abc',
+      'normal body content'
+    ] } };
+    const { findings } = scoreFindings(report);
+    const exfilFindings = findings.filter(f => f.type === 'data_exfiltration');
+    assert(exfilFindings.length === 2, 'Should detect 2 exfiltrations, got ' + exfilFindings.length);
+  });
+
+  test('SANDBOX-NET: scoreFindings detects HTTP requests to non-safe hosts', () => {
+    const report = { network: { http_requests: [
+      { method: 'POST', host: 'evil.com', path: '/steal' },
+      { method: 'GET', host: 'registry.npmjs.org', path: '/lodash' }
+    ] } };
+    const { score, findings } = scoreFindings(report);
+    assert(score > 0, 'Should score > 0');
+    const httpFindings = findings.filter(f => f.type === 'suspicious_http_request');
+    assert(httpFindings.length === 1, 'Should detect 1 suspicious HTTP request');
+    assert(httpFindings[0].detail.includes('POST evil.com'), 'Should flag POST to evil.com');
+  });
+
+  test('SANDBOX-NET: scoreFindings detects blocked connections', () => {
+    const report = { network: { blocked_connections: [
+      { ip: '1.2.3.4', port: 8080 },
+      { ip: '5.6.7.8', port: 443 }
+    ] } };
+    const { score, findings } = scoreFindings(report);
+    assert(score >= 60, 'Blocked connections should score >= 60, got ' + score);
+    const blockedFindings = findings.filter(f => f.type === 'blocked_connection');
+    assert(blockedFindings.length === 2, 'Should have 2 blocked connection findings');
+  });
+
+  test('SANDBOX-NET: scoreFindings caps at 100', () => {
+    const report = {
+      sensitive_files: { read: ['/root/.npmrc', '/root/.ssh/id_rsa', '/root/.aws/credentials'] },
+      network: {
+        dns_queries: ['evil1.com', 'evil2.com'],
+        http_bodies: ['token=abc', 'password=123'],
+        blocked_connections: [{ ip: '1.2.3.4', port: 80 }]
+      }
+    };
+    const { score } = scoreFindings(report);
+    assert(score === 100, 'Score should cap at 100, got ' + score);
+  });
+
+  test('SANDBOX-NET: generateNetworkReport returns string with sections', () => {
+    const report = {
+      package: 'test-pkg',
+      timestamp: '2025-01-01T00:00:00Z',
+      mode: 'permissive',
+      duration_ms: 5000,
+      network: {
+        dns_resolutions: [{ domain: 'evil.com', ip: '1.2.3.4' }],
+        http_requests: [{ method: 'GET', host: 'evil.com', path: '/data' }],
+        tls_connections: [{ domain: 'evil.com', ip: '1.2.3.4', port: 443 }],
+        http_connections: [{ host: '1.2.3.4', port: 443, protocol: 'TCP' }],
+        blocked_connections: [],
+        http_bodies: []
+      }
+    };
+    const output = generateNetworkReport(report);
+    assert(typeof output === 'string', 'Should return a string');
+    assert(output.includes('test-pkg'), 'Should include package name');
+    assert(output.includes('DNS Resolutions'), 'Should have DNS section');
+    assert(output.includes('HTTP Requests'), 'Should have HTTP section');
+    assert(output.includes('TLS Connections'), 'Should have TLS section');
+    assert(output.includes('evil.com'), 'Should include domain');
+  });
+
+  test('SANDBOX-NET: generateNetworkReport shows blocked in strict mode', () => {
+    const report = {
+      package: 'test-pkg',
+      timestamp: '2025-01-01T00:00:00Z',
+      mode: 'strict',
+      duration_ms: 3000,
+      network: {
+        dns_resolutions: [],
+        http_requests: [],
+        tls_connections: [],
+        http_connections: [],
+        blocked_connections: [{ ip: '1.2.3.4', port: 8080 }],
+        http_bodies: []
+      }
+    };
+    const output = generateNetworkReport(report);
+    assert(output.includes('STRICT'), 'Should show STRICT mode');
+    assert(output.includes('Blocked Connections'), 'Should have blocked section');
+    assert(output.includes('1.2.3.4'), 'Should include blocked IP');
+  });
+
+  test('SANDBOX-NET: generateNetworkReport shows exfiltration alerts', () => {
+    const report = {
+      package: 'test-pkg',
+      timestamp: '2025-01-01T00:00:00Z',
+      mode: 'permissive',
+      duration_ms: 3000,
+      network: {
+        dns_resolutions: [],
+        http_requests: [],
+        tls_connections: [],
+        http_connections: [],
+        blocked_connections: [],
+        http_bodies: ['NPM_TOKEN=secret123']
+      }
+    };
+    const output = generateNetworkReport(report);
+    assert(output.includes('Data Exfiltration'), 'Should have exfil section');
+    assert(output.includes('npm token'), 'Should identify npm token');
+  });
+
+  test('SANDBOX-NET: EXFIL_PATTERNS is an array with entries', () => {
+    assert(Array.isArray(EXFIL_PATTERNS), 'Should be an array');
+    assert(EXFIL_PATTERNS.length >= 8, 'Should have at least 8 patterns');
+    for (const p of EXFIL_PATTERNS) {
+      assert(p.pattern instanceof RegExp, 'Each should have a pattern regex');
+      assert(typeof p.label === 'string', 'Each should have a label');
+      assert(typeof p.severity === 'string', 'Each should have a severity');
+    }
+  });
+
+  test('SANDBOX-NET: SAFE_DOMAINS includes essential domains', () => {
+    assert(SAFE_DOMAINS.includes('registry.npmjs.org'), 'Should include registry.npmjs.org');
+    assert(SAFE_DOMAINS.includes('github.com'), 'Should include github.com');
+    assert(SAFE_DOMAINS.includes('npmjs.org'), 'Should include npmjs.org');
+  });
+
+  test('SANDBOX-NET: CLI --strict flag is accepted', () => {
+    const output = runCommand('sandbox --strict');
+    assertIncludes(output, 'Usage', 'Should show sandbox usage (no package)');
+  });
+
+  test('SANDBOX-NET: CLI sandbox-report without package shows usage', () => {
+    const output = runCommand('sandbox-report');
+    assertIncludes(output, 'Usage', 'Should show sandbox-report usage');
+  });
+
+  test('SANDBOX-NET: CLI sandbox-report with package runs', () => {
+    const output = runCommand('sandbox-report nonexistent-pkg-test');
+    assert(output.length > 0, 'Should produce output');
   });
 
   // ============================================

@@ -7,6 +7,7 @@ const IOC_FILE = path.join(__dirname, 'data/iocs.json');
 const COMPACT_IOC_FILE = path.join(__dirname, 'data/iocs-compact.json');
 const STATIC_IOCS_FILE = path.join(__dirname, 'data/static-iocs.json');
 const { generateCompactIOCs } = require('./updater.js');
+const { Spinner } = require('../utils.js');
 
 // Allowed domains for redirections (SSRF security)
 const ALLOWED_REDIRECT_DOMAINS = [
@@ -259,6 +260,78 @@ function fetchBuffer(url, redirectCount = 0) {
     req.setTimeout(120000, () => {
       req.destroy();
       reject(new Error('Timeout'));
+    });
+
+    req.end();
+  });
+}
+
+/**
+ * Download a large file with spinner progress (npm/ora style).
+ * Used for bulk zip downloads (OSV npm/PyPI ~50-100MB each).
+ */
+function fetchBufferWithProgress(url, label, redirectCount = 0) {
+  return new Promise((resolve, reject) => {
+    const urlObj = new URL(url);
+    const reqOptions = {
+      hostname: urlObj.hostname,
+      path: urlObj.pathname + urlObj.search,
+      method: 'GET',
+      headers: {
+        'User-Agent': 'MUADDIB-Scanner/3.0'
+      }
+    };
+
+    const req = https.request(reqOptions, (res) => {
+      if (res.statusCode === 301 || res.statusCode === 302) {
+        if (redirectCount >= MAX_REDIRECTS) {
+          reject(new Error('Too many redirects'));
+          return;
+        }
+        const redirectUrl = res.headers.location;
+        if (!isAllowedRedirect(redirectUrl)) {
+          reject(new Error('Unauthorized redirect to: ' + redirectUrl));
+          return;
+        }
+        fetchBufferWithProgress(redirectUrl, label, redirectCount + 1).then(resolve).catch(reject);
+        return;
+      }
+
+      if (res.statusCode !== 200) {
+        reject(new Error('HTTP ' + res.statusCode));
+        return;
+      }
+
+      const totalSize = parseInt(res.headers['content-length'], 10) || 0;
+      const totalMb = totalSize > 0 ? Math.round(totalSize / 1024 / 1024) : null;
+      const chunks = [];
+      let received = 0;
+
+      const spinner = new Spinner();
+      spinner.start('Downloading ' + label + '...');
+
+      res.on('data', (chunk) => {
+        chunks.push(chunk);
+        received += chunk.length;
+        const mb = Math.round(received / 1024 / 1024);
+        if (totalMb) {
+          spinner.update('Downloading ' + label + '... ' + mb + 'MB/' + totalMb + 'MB');
+        } else {
+          spinner.update('Downloading ' + label + '... ' + mb + 'MB');
+        }
+      });
+
+      res.on('end', () => {
+        const mb = Math.round(received / 1024 / 1024);
+        spinner.succeed('Downloaded ' + label + ' (' + mb + 'MB)');
+        resolve(Buffer.concat(chunks));
+      });
+    });
+
+    req.on('error', reject);
+    req.setTimeout(300000, () => {
+      req.destroy();
+      reject(new Error('Timeout downloading ' + label));
     });
 
     req.end();
@@ -538,6 +611,12 @@ async function scrapeOSSFMaliciousPackages(knownIds) {
 
     // Step 4: Batch fetch (50 concurrent, with small delay between batches for rate limit)
     const BATCH_SIZE = 50;
+    let fetchSpinner = null;
+    if (toFetch.length > 0) {
+      fetchSpinner = new Spinner();
+      fetchSpinner.start('Fetching OSSF entries... 0/' + toFetch.length);
+    }
+
     for (let i = 0; i < toFetch.length; i += BATCH_SIZE) {
       const batch = toFetch.slice(i, i + BATCH_SIZE);
       const results = await Promise.all(batch.map(function(entry) {
@@ -553,7 +632,7 @@ async function scrapeOSSFMaliciousPackages(knownIds) {
 
       // Progress
       const progress = Math.min(i + BATCH_SIZE, toFetch.length);
-      process.stdout.write('\r[SCRAPER]   Fetched ' + progress + '/' + toFetch.length);
+      fetchSpinner.update('Fetching OSSF entries... ' + progress + '/' + toFetch.length);
 
       // Small delay between batches to respect rate limits
       if (i + BATCH_SIZE < toFetch.length) {
@@ -561,12 +640,12 @@ async function scrapeOSSFMaliciousPackages(knownIds) {
       }
     }
 
-    if (toFetch.length > 0) console.log('');
+    if (fetchSpinner) {
+      fetchSpinner.succeed('Fetched OSSF entries: ' + packages.length + ' packages');
+    }
 
     // Save tree SHA for next incremental run
     try { fs.writeFileSync(shaFile, treeSha); } catch {}
-
-    console.log('[SCRAPER]   ' + packages.length + ' packages extracted');
   } catch (e) {
     console.log('[SCRAPER]   Error: ' + e.message);
   }
@@ -579,49 +658,53 @@ async function scrapeOSSFMaliciousPackages(knownIds) {
 // Bulk zip download — primary volume source
 // ============================================
 async function scrapeOSVDataDump() {
-  console.log('[SCRAPER] OSV.dev npm data dump (all.zip)...');
   const packages = [];
   const knownIds = new Set();
 
   try {
     // Download the full npm zip (~50-100MB)
-    console.log('[SCRAPER]   Downloading all.zip from GCS...');
     const zipUrl = 'https://osv-vulnerabilities.storage.googleapis.com/npm/all.zip';
-    const zipBuffer = await fetchBuffer(zipUrl);
-    console.log('[SCRAPER]   Downloaded ' + Math.round(zipBuffer.length / 1024 / 1024) + 'MB');
+    const zipBuffer = await fetchBufferWithProgress(zipUrl, 'npm all.zip');
 
     // Extract using adm-zip
     const zip = new AdmZip(zipBuffer);
     const entries = zip.getEntries();
+    const total = entries.length;
 
     let malCount = 0;
     let skippedCount = 0;
 
-    for (const entry of entries) {
+    const spinner = new Spinner();
+    spinner.start('Parsing npm entries... 0/' + total);
+
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i];
       const name = entry.entryName;
 
       // Only process MAL-*.json files (malware), skip GHSA-*, CVE-*, PYSEC-* etc.
       if (!name.startsWith('MAL-') || !name.endsWith('.json')) {
         skippedCount++;
-        continue;
+      } else {
+        try {
+          const content = entry.getData().toString('utf8');
+          const vuln = JSON.parse(content);
+          const parsed = parseOSVEntry(vuln, 'osv-malicious');
+          packages.push(...parsed);
+
+          // Track known IDs so OSSF can skip them
+          knownIds.add(vuln.id || path.basename(name, '.json'));
+          malCount++;
+        } catch {
+          // Skip unparseable entries
+        }
       }
 
-      try {
-        const content = entry.getData().toString('utf8');
-        const vuln = JSON.parse(content);
-        const parsed = parseOSVEntry(vuln, 'osv-malicious');
-        packages.push(...parsed);
-
-        // Track known IDs so OSSF can skip them
-        knownIds.add(vuln.id || path.basename(name, '.json'));
-        malCount++;
-      } catch {
-        // Skip unparseable entries
+      if ((i + 1) % 1000 === 0 || i === entries.length - 1) {
+        spinner.update('Parsing npm entries... ' + (i + 1) + '/' + total);
       }
     }
 
-    console.log('[SCRAPER]   Processed ' + malCount + ' MAL-* entries (' + skippedCount + ' non-malware skipped)');
-    console.log('[SCRAPER]   ' + packages.length + ' packages extracted');
+    spinner.succeed('Parsed npm entries: ' + malCount + ' MAL-* (' + skippedCount + ' skipped) \u2192 ' + packages.length + ' packages');
   } catch (e) {
     console.log('[SCRAPER]   Error: ' + e.message);
   }
@@ -634,43 +717,47 @@ async function scrapeOSVDataDump() {
 // Bulk zip download — PyPI malicious packages
 // ============================================
 async function scrapeOSVPyPIDataDump() {
-  console.log('[SCRAPER] OSV.dev PyPI data dump (all.zip)...');
   const packages = [];
 
   try {
-    console.log('[SCRAPER]   Downloading PyPI all.zip from GCS...');
     const zipUrl = 'https://osv-vulnerabilities.storage.googleapis.com/PyPI/all.zip';
-    const zipBuffer = await fetchBuffer(zipUrl);
-    console.log('[SCRAPER]   Downloaded ' + Math.round(zipBuffer.length / 1024 / 1024) + 'MB');
+    const zipBuffer = await fetchBufferWithProgress(zipUrl, 'PyPI all.zip');
 
     const zip = new AdmZip(zipBuffer);
     const entries = zip.getEntries();
+    const total = entries.length;
 
     let malCount = 0;
     let skippedCount = 0;
 
-    for (const entry of entries) {
+    const spinner = new Spinner();
+    spinner.start('Parsing PyPI entries... 0/' + total);
+
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i];
       const name = entry.entryName;
 
       // Only process MAL-*.json files (malware)
       if (!name.startsWith('MAL-') || !name.endsWith('.json')) {
         skippedCount++;
-        continue;
+      } else {
+        try {
+          const content = entry.getData().toString('utf8');
+          const vuln = JSON.parse(content);
+          const parsed = parseOSVEntry(vuln, 'osv-malicious-pypi', 'PyPI');
+          packages.push(...parsed);
+          malCount++;
+        } catch {
+          // Skip unparseable entries
+        }
       }
 
-      try {
-        const content = entry.getData().toString('utf8');
-        const vuln = JSON.parse(content);
-        const parsed = parseOSVEntry(vuln, 'osv-malicious-pypi', 'PyPI');
-        packages.push(...parsed);
-        malCount++;
-      } catch {
-        // Skip unparseable entries
+      if ((i + 1) % 1000 === 0 || i === entries.length - 1) {
+        spinner.update('Parsing PyPI entries... ' + (i + 1) + '/' + total);
       }
     }
 
-    console.log('[SCRAPER]   Processed ' + malCount + ' PyPI MAL-* entries (' + skippedCount + ' non-malware skipped)');
-    console.log('[SCRAPER]   ' + packages.length + ' PyPI packages extracted');
+    spinner.succeed('Parsed PyPI entries: ' + malCount + ' MAL-* (' + skippedCount + ' skipped) \u2192 ' + packages.length + ' packages');
   } catch (e) {
     console.log('[SCRAPER]   Error: ' + e.message);
   }
@@ -1035,11 +1122,15 @@ async function runScraper() {
   ];
 
   // Save enriched (full) IOCs
+  const saveSpinner = new Spinner();
+  saveSpinner.start('Saving IOCs...');
   fs.writeFileSync(IOC_FILE, JSON.stringify(existingIOCs, null, 2));
 
   // Save compact IOCs (lightweight, shipped in npm)
+  saveSpinner.update('Generating compact IOCs...');
   const compactIOCs = generateCompactIOCs(existingIOCs);
   fs.writeFileSync(COMPACT_IOC_FILE, JSON.stringify(compactIOCs));
+  saveSpinner.succeed('Saved IOCs + compact format');
 
   // Display summary
   console.log('\n' + '='.repeat(60));
@@ -1092,7 +1183,7 @@ async function runScraper() {
   };
 }
 
-module.exports = { runScraper };
+module.exports = { runScraper, scrapeShaiHuludDetector, scrapeDatadogIOCs };
 
 // Direct execution if called as CLI
 if (require.main === module) {

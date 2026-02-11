@@ -3,12 +3,21 @@ const path = require('path');
 
 const DOCKER_IMAGE = 'muaddib-sandbox';
 const CONTAINER_TIMEOUT = 120000; // 120 seconds
+const NPM_PACKAGE_REGEX = /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/;
 
 // Domains excluded from network findings (false positives)
 const SAFE_DOMAINS = [
   'registry.npmjs.org',
   'github.com',
-  'objects.githubusercontent.com'
+  'objects.githubusercontent.com',
+  'api.github.com',
+  'raw.githubusercontent.com',
+  'codeload.github.com',
+  'npmjs.com',
+  'npmjs.org',
+  'yarnpkg.com',
+  'googleapis.com',
+  'cloudflare.com'
 ];
 
 // IPs/ports excluded from connection findings (false positives)
@@ -17,6 +26,20 @@ const PROBE_PORTS = [65535]; // Node.js internal connectivity checks
 
 // Commands that are always suspicious in a sandbox
 const DANGEROUS_CMDS = ['curl', 'wget', 'nc', 'netcat', 'python', 'python3', 'bash', 'sh'];
+
+// Patterns indicating data exfiltration in HTTP bodies
+const EXFIL_PATTERNS = [
+  { pattern: /NPM_TOKEN/i, label: 'npm token', severity: 'CRITICAL' },
+  { pattern: /GITHUB_TOKEN/i, label: 'GitHub token', severity: 'CRITICAL' },
+  { pattern: /AWS_SECRET/i, label: 'AWS credentials', severity: 'CRITICAL' },
+  { pattern: /npmrc/i, label: '.npmrc content', severity: 'CRITICAL' },
+  { pattern: /ssh-rsa|ssh-ed25519/i, label: 'SSH key', severity: 'CRITICAL' },
+  { pattern: /BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY/, label: 'private key', severity: 'CRITICAL' },
+  { pattern: /password/i, label: 'password', severity: 'CRITICAL' },
+  { pattern: /token/i, label: 'token', severity: 'CRITICAL' },
+  { pattern: /\/etc\/passwd/, label: 'passwd file', severity: 'HIGH' },
+  { pattern: /\.env/, label: '.env content', severity: 'HIGH' }
+];
 
 // ── Docker availability checks ──
 
@@ -78,7 +101,7 @@ async function buildSandboxImage() {
 
 // ── Run sandbox analysis ──
 
-async function runSandbox(packageName) {
+async function runSandbox(packageName, options = {}) {
   const cleanResult = { score: 0, severity: 'CLEAN', findings: [], raw_report: null, suspicious: false };
 
   if (!isDockerAvailable()) {
@@ -86,14 +109,23 @@ async function runSandbox(packageName) {
     return cleanResult;
   }
 
-  console.log(`[SANDBOX] Analyzing "${packageName}" in isolated container...`);
+  const strict = options.strict || false;
+  const mode = strict ? 'strict' : 'permissive';
+
+  // Validate package name before passing to container
+  if (!NPM_PACKAGE_REGEX.test(packageName)) {
+    console.log('[SANDBOX] Invalid package name: ' + packageName);
+    return cleanResult;
+  }
+
+  console.log(`[SANDBOX] Analyzing "${packageName}" in isolated container (mode: ${mode})...`);
 
   return new Promise((resolve) => {
     let stdout = '';
     let timedOut = false;
     const containerName = `muaddib-sandbox-${Date.now()}`;
 
-    const proc = spawn('docker', [
+    const dockerArgs = [
       'run',
       '--rm',
       `--name=${containerName}`,
@@ -103,10 +135,21 @@ async function runSandbox(packageName) {
       '--pids-limit=100',
       '--cap-drop=ALL',
       '--cap-add=SYS_PTRACE',
-      '--security-opt', 'no-new-privileges',
-      DOCKER_IMAGE,
-      packageName
-    ]);
+      '--cap-add=NET_RAW'
+    ];
+
+    // Strict mode needs iptables → NET_ADMIN + root
+    if (strict) {
+      dockerArgs.push('--cap-add=NET_ADMIN');
+      dockerArgs.push('--user=root');
+    }
+
+    dockerArgs.push('--security-opt', 'no-new-privileges');
+    dockerArgs.push(DOCKER_IMAGE);
+    dockerArgs.push(packageName);
+    dockerArgs.push(mode);
+
+    const proc = spawn('docker', dockerArgs);
 
     // Timeout: kill container after 120s
     const timer = setTimeout(() => {
@@ -229,20 +272,63 @@ function scoreFindings(report) {
     }
   }
 
-  // 4. DNS queries (exclude safe domains)
+  // 4a. DNS queries (exclude safe domains)
   for (const domain of (report.network?.dns_queries || [])) {
     if (isSafeDomain(domain)) continue;
     score += 20;
     findings.push({ type: 'suspicious_dns', severity: 'HIGH', detail: `DNS query to non-registry domain: ${domain}`, evidence: domain });
   }
 
-  // 5. TCP connections (exclude safe hosts, probe ports, localhost)
+  // 4b. DNS resolutions — extra detail
+  for (const res of (report.network?.dns_resolutions || [])) {
+    if (isSafeDomain(res.domain)) continue;
+    // Already scored in 4a via dns_queries, but flag the resolution for reporting
+    findings.push({ type: 'dns_resolution', severity: 'INFO', detail: `${res.domain} → ${res.ip}`, evidence: `${res.domain}:${res.ip}` });
+  }
+
+  // 5a. TCP connections (exclude safe hosts, probe ports, localhost)
   for (const conn of (report.network?.http_connections || [])) {
     if (isSafeHost(conn.host)) continue;
     if (SAFE_IPS.includes(conn.host)) continue;
     if (PROBE_PORTS.includes(conn.port)) continue;
     score += 25;
     findings.push({ type: 'suspicious_connection', severity: 'HIGH', detail: `TCP connection to ${conn.host}:${conn.port}`, evidence: `${conn.host}:${conn.port}` });
+  }
+
+  // 5b. TLS connections — non-safe domains
+  for (const tls of (report.network?.tls_connections || [])) {
+    if (isSafeDomain(tls.domain)) continue;
+    score += 20;
+    findings.push({ type: 'suspicious_tls', severity: 'HIGH', detail: `TLS connection to ${tls.domain} (${tls.ip}:${tls.port})`, evidence: tls.domain });
+  }
+
+  // 5c. HTTP exfiltration detection — scan body snippets for sensitive data
+  for (const body of (report.network?.http_bodies || [])) {
+    for (const pat of EXFIL_PATTERNS) {
+      if (pat.pattern.test(body)) {
+        score += 50;
+        findings.push({
+          type: 'data_exfiltration',
+          severity: pat.severity,
+          detail: `HTTP body contains ${pat.label}`,
+          evidence: body.substring(0, 200)
+        });
+        break; // One match per body is enough
+      }
+    }
+  }
+
+  // 5d. HTTP requests to non-safe hosts
+  for (const req of (report.network?.http_requests || [])) {
+    if (isSafeDomain(req.host)) continue;
+    score += 20;
+    findings.push({ type: 'suspicious_http_request', severity: 'HIGH', detail: `${req.method} ${req.host}${req.path}`, evidence: `${req.method} ${req.host}${req.path}` });
+  }
+
+  // 5e. Blocked connections (strict mode)
+  for (const blocked of (report.network?.blocked_connections || [])) {
+    score += 30;
+    findings.push({ type: 'blocked_connection', severity: 'HIGH', detail: `Blocked outbound to ${blocked.ip}:${blocked.port}`, evidence: `${blocked.ip}:${blocked.port}` });
   }
 
   // 6. Suspicious processes
@@ -260,6 +346,117 @@ function scoreFindings(report) {
 
   score = Math.min(100, score);
   return { score, findings };
+}
+
+// ── Network report (detailed, colored) ──
+
+function generateNetworkReport(report) {
+  const lines = [];
+  const RED = '\x1b[31m';
+  const YELLOW = '\x1b[33m';
+  const GREEN = '\x1b[32m';
+  const CYAN = '\x1b[36m';
+  const MAGENTA = '\x1b[35m';
+  const BOLD = '\x1b[1m';
+  const DIM = '\x1b[2m';
+  const RESET = '\x1b[0m';
+
+  lines.push('');
+  lines.push(`${BOLD}${MAGENTA}╔══════════════════════════════════════════════════╗${RESET}`);
+  lines.push(`${BOLD}${MAGENTA}║   MUAD'DIB — Sandbox Network Report              ║${RESET}`);
+  lines.push(`${BOLD}${MAGENTA}╚══════════════════════════════════════════════════╝${RESET}`);
+  lines.push('');
+  lines.push(`  Package: ${BOLD}${report.package}${RESET}`);
+  lines.push(`  Mode:    ${report.mode === 'strict' ? RED + 'STRICT' : GREEN + 'permissive'}${RESET}`);
+  lines.push(`  Time:    ${report.timestamp}`);
+  lines.push(`  Duration: ${report.duration_ms}ms`);
+
+  // DNS Resolutions
+  const dnsRes = report.network?.dns_resolutions || [];
+  lines.push('');
+  lines.push(`${BOLD}${CYAN}── DNS Resolutions (${dnsRes.length}) ──${RESET}`);
+  if (dnsRes.length === 0) {
+    lines.push(`  ${DIM}No DNS resolutions captured${RESET}`);
+  } else {
+    for (const r of dnsRes) {
+      const safe = isSafeDomain(r.domain);
+      const icon = safe ? GREEN + '[OK]' : YELLOW + '[!!]';
+      lines.push(`  ${icon}${RESET} ${r.domain} → ${r.ip}`);
+    }
+  }
+
+  // HTTP Requests
+  const httpReqs = report.network?.http_requests || [];
+  lines.push('');
+  lines.push(`${BOLD}${CYAN}── HTTP Requests (${httpReqs.length}) ──${RESET}`);
+  if (httpReqs.length === 0) {
+    lines.push(`  ${DIM}No HTTP requests captured${RESET}`);
+  } else {
+    for (const req of httpReqs) {
+      const safe = isSafeDomain(req.host);
+      const icon = safe ? GREEN + '[OK]' : RED + '[!!]';
+      lines.push(`  ${icon}${RESET} ${req.method} ${req.host}${req.path}`);
+    }
+  }
+
+  // TLS Connections
+  const tlsConns = report.network?.tls_connections || [];
+  lines.push('');
+  lines.push(`${BOLD}${CYAN}── TLS Connections (${tlsConns.length}) ──${RESET}`);
+  if (tlsConns.length === 0) {
+    lines.push(`  ${DIM}No TLS connections captured${RESET}`);
+  } else {
+    for (const tls of tlsConns) {
+      const safe = isSafeDomain(tls.domain);
+      const icon = safe ? GREEN + '[OK]' : YELLOW + '[!!]';
+      lines.push(`  ${icon}${RESET} ${tls.domain} (${tls.ip}:${tls.port})`);
+    }
+  }
+
+  // Blocked Connections (strict mode)
+  const blocked = report.network?.blocked_connections || [];
+  if (blocked.length > 0) {
+    lines.push('');
+    lines.push(`${BOLD}${RED}── Blocked Connections (${blocked.length}) ──${RESET}`);
+    for (const b of blocked) {
+      lines.push(`  ${RED}[BLOCKED]${RESET} ${b.ip}:${b.port}`);
+    }
+  }
+
+  // Data Exfiltration Alerts
+  const bodies = report.network?.http_bodies || [];
+  const exfilAlerts = [];
+  for (const body of bodies) {
+    for (const pat of EXFIL_PATTERNS) {
+      if (pat.pattern.test(body)) {
+        exfilAlerts.push({ label: pat.label, severity: pat.severity, snippet: body.substring(0, 100) });
+        break;
+      }
+    }
+  }
+  if (exfilAlerts.length > 0) {
+    lines.push('');
+    lines.push(`${BOLD}${RED}── Data Exfiltration Alerts (${exfilAlerts.length}) ──${RESET}`);
+    for (const alert of exfilAlerts) {
+      lines.push(`  ${RED}[${alert.severity}]${RESET} ${alert.label} detected in HTTP body`);
+      lines.push(`    ${DIM}${alert.snippet}...${RESET}`);
+    }
+  }
+
+  // Raw TCP connections
+  const conns = report.network?.http_connections || [];
+  if (conns.length > 0) {
+    lines.push('');
+    lines.push(`${BOLD}${CYAN}── Raw TCP Connections (${conns.length}) ──${RESET}`);
+    for (const c of conns) {
+      const safe = isSafeHost(c.host);
+      const icon = safe ? GREEN + '[OK]' : YELLOW + '[!!]';
+      lines.push(`  ${icon}${RESET} ${c.host}:${c.port} (${c.protocol})`);
+    }
+  }
+
+  lines.push('');
+  return lines.join('\n');
 }
 
 // ── Helpers ──
@@ -285,11 +482,12 @@ function displayResults(result) {
   if (result.findings.length === 0) {
     console.log('[SANDBOX] No suspicious behavior detected.');
   } else {
-    console.log(`[SANDBOX] ${result.findings.length} finding(s):`);
-    for (const f of result.findings) {
+    const actionable = result.findings.filter(f => f.severity !== 'INFO');
+    console.log(`[SANDBOX] ${actionable.length} finding(s):`);
+    for (const f of actionable) {
       console.log(`  [${f.severity}] ${f.type}: ${f.detail}`);
     }
   }
 }
 
-module.exports = { buildSandboxImage, runSandbox };
+module.exports = { buildSandboxImage, runSandbox, scoreFindings, generateNetworkReport, EXFIL_PATTERNS, SAFE_DOMAINS };
