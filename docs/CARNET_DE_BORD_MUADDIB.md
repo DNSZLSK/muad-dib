@@ -1,6 +1,6 @@
 # Carnet de Bord - Projet MUAD'DIB
 
-**Scanner de sécurité npm contre les attaques supply-chain**
+**Scanner de sécurité npm & PyPI contre les attaques supply-chain**
 
 DNSZLSK
 Formation CDA - AFPA
@@ -38,7 +38,7 @@ Il avait raison. Les attaquants de Shai-Hulud utilisent des patterns connus. Pas
 
 Trois piliers :
 
-**1. Matching IOC** : Une base de 930+ packages malveillants connus. Si ton projet en utilise un, alerte immédiate.
+**1. Matching IOC** : Une base de 225 000+ packages malveillants connus. Si ton projet en utilise un, alerte immédiate.
 
 **2. Analyse AST** : Je parse le JavaScript avec acorn pour détecter les patterns suspects : `eval()`, `child_process`, lecture de `.npmrc`, etc.
 
@@ -257,14 +257,33 @@ Generation du rapport `MUADDIB_Security_Audit_Report_v1.4.1.pdf` documentant l'e
 
 ---
 
+## Support Python/PyPI (Fevrier 2026)
+
+### Ajout du support Python
+
+Apres le support npm, j'ai etendu MUAD'DIB pour scanner les projets Python :
+
+**Parsing des dependances** : `src/scanner/python.js` parse trois formats :
+- `requirements.txt` (y compris `-r` recursif, extras, markers)
+- `setup.py` (extraction `install_requires` et `setup_requires`)
+- `pyproject.toml` (PEP 621 et Poetry)
+
+**IOCs PyPI** : Le scraper telecharge le dump OSV PyPI (~14 000 packages malveillants MAL-*). Les packages sont verifies par nom exact avec normalisation PEP 503.
+
+**Typosquatting PyPI** : Detection des noms similaires aux packages populaires (requests, numpy, flask, django, pandas, etc.) avec distance de Levenshtein et normalisation PEP 503 (tirets, underscores, points sont equivalents).
+
+**Distinction update/scrape** : `muaddib update` est rapide (~5 secondes, charge les IOCs compacts du package + YAML + GitHub). `muaddib scrape` est complet (~5 minutes, telecharge les dumps OSV npm + PyPI + toutes les sources).
+
+---
+
 ## Etat actuel
 
 ### Ce qui fonctionne
 
 | Feature | Détails |
 |---------|---------|
-| CLI complète | scan, watch, update, scrape, daemon, sandbox, **diff**, **init-hooks**, **remove-hooks** |
-| Base IOCs | 1500+ packages malveillants |
+| CLI complète | scan, watch, update, scrape, install, safe-install, daemon, sandbox, **diff**, **init-hooks**, **remove-hooks** |
+| Base IOCs | 225 000+ npm + 14 000+ PyPI packages malveillants |
 | Détection Shai-Hulud | v1, v2, v3 couverts |
 | Exports | JSON, HTML, SARIF |
 | Extension VS Code | Publiée sur Marketplace |
@@ -275,7 +294,7 @@ Generation du rapport `MUADDIB_Security_Audit_Report_v1.4.1.pdf` documentant l'e
 | **Pre-commit hooks** | Support pre-commit, husky, git natif |
 | **GitHub Action Marketplace** | Avec inputs/outputs et SARIF auto |
 | Version check | Notification automatique des nouvelles versions au demarrage |
-| Tests | **145 tests unitaires** + 56 fuzz + 15 adversariaux, **80% coverage** (Codecov) |
+| Tests | **218 tests unitaires** + 56 fuzz + 15 adversariaux, **80% coverage** (Codecov) |
 | Audit securite | 2 audits complets, **58 issues corrigees**, [rapport PDF](MUADDIB_Security_Audit_Report_v1.4.1.pdf) |
 
 ### Ce qui manque (honnêtement)
@@ -286,7 +305,7 @@ Generation du rapport `MUADDIB_Security_Audit_Report_v1.4.1.pdf` documentant l'e
 
 **Dépendance aux sources tierces** : Si Datadog change son API, mon scraper casse.
 
-**Mono-langage** : npm uniquement. Pas de support PyPI, RubyGems, ou autres.
+**Support limite a npm et PyPI** : Pas de support RubyGems, Maven, ou autres ecosystemes.
 
 ---
 
@@ -301,7 +320,7 @@ Generation du rapport `MUADDIB_Security_Audit_Report_v1.4.1.pdf` documentant l'e
 
 ## Conclusion
 
-MUAD'DIB n'est pas parfait. C'est un projet de formation, pas un produit enterprise. Mais il fonctionne pour ce qu'il est censé faire : détecter les menaces npm connues, analyser les comportements suspects dans un sandbox, et guider la réponse.
+MUAD'DIB n'est pas parfait. C'est un projet de formation, pas un produit enterprise. Mais il fonctionne pour ce qu'il est censé faire : détecter les menaces npm et PyPI connues, analyser les comportements suspects dans un sandbox, et guider la réponse.
 
 Le plus satisfaisant : voir le score passer de 126 alertes (faux positifs) à 1 alerte légitime sur React.js après une semaine d'itérations. Et voir le sandbox Docker fonctionner du premier coup (après avoir fixé les permissions).
 

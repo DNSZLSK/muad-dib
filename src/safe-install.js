@@ -69,21 +69,22 @@ function checkIOCs(pkg, pkgName, pkgVersion) {
   }
 
   // Not in the whitelist, check the IOCs
+  let iocs;
   try {
-    const iocs = loadCachedIOCs();
-    const malicious = iocs.packages?.find(p => {
-      if (p.name !== pkg && p.name !== pkgName) return false;
-      // If version "*" in IOC = all versions are malicious
-      if (p.version === '*') return true;
-      // If we have a version, compare
-      if (pkgVersion && p.version === pkgVersion) return true;
-      // Otherwise, if no version specified and IOC has a specific version, skip
-      return false;
-    });
-    return malicious || null;
-  } catch {
-    return null;
+    iocs = loadCachedIOCs();
+  } catch (e) {
+    console.log('[WARN] IOC database unavailable: ' + e.message);
+    console.log('[WARN] Blocking install as a precaution. Run "muaddib update" to fix.');
+    return { name: pkgName, source: 'ioc-unavailable', description: 'IOC database could not be loaded' };
   }
+
+  const malicious = iocs.packages?.find(p => {
+    if (p.name !== pkg && p.name !== pkgName) return false;
+    if (p.version === '*') return true;
+    if (pkgVersion && p.version === pkgVersion) return true;
+    return false;
+  });
+  return malicious || null;
 }
 
 // Scan a package and its dependencies recursively

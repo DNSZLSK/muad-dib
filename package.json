@@ -1,7 +1,7 @@
 {
   "name": "muaddib-scanner",
   "version": "1.6.7",
-  "description": "Supply-chain threat detection & response for npm",
+  "description": "Supply-chain threat detection & response for npm & PyPI/Python",
   "main": "src/index.js",
   "bin": {
     "muaddib": "bin/muaddib.js"
@@ -15,13 +15,18 @@
   "keywords": [
     "security",
     "npm",
+    "pypi",
+    "python",
     "supply-chain",
     "malware",
     "scanner",
+    "typosquatting",
     "shai-hulud",
     "detection",
     "ast",
-    "sarif"
+    "sarif",
+    "sandbox",
+    "threat-intelligence"
   ],
   "author": "DNSZLSK",
   "license": "MIT",

@@ -2,15 +2,17 @@
 
 ## Ce que MUAD'DIB detecte
 
-### Attaques Supply Chain npm
+### Attaques Supply Chain npm & PyPI
 
 | Technique | Detection | Confidence |
 |-----------|-----------|------------|
-| Packages malveillants connus | Hash SHA256 + nom | HIGH |
+| Packages malveillants connus (npm) | Hash SHA256 + nom | HIGH |
 | Shai-Hulud v1/v2/v3 | Marqueurs + fichiers + comportements | HIGH |
 | event-stream (2018) | Nom + version | HIGH |
-| Typosquatting | Liste de packages connus | MEDIUM |
+| Typosquatting npm | Liste de packages connus | MEDIUM |
 | Protestware (node-ipc, colors) | Nom + version | HIGH |
+| Packages malveillants PyPI (14K+ depuis OSV dump) | Correspondance par nom | HIGH |
+| Typosquatting PyPI | Levenshtein + normalisation PEP 503 | MEDIUM |
 
 ### Comportements malveillants
 
@@ -36,7 +38,7 @@
 
 | Technique | Raison |
 |-----------|--------|
-| Malware polymorphe | Pas d'analyse dynamique |
+| Malware polymorphe avance | Sandbox basique, pas de ML |
 | Obfuscation avancee | Heuristiques limitees |
 | Zero-day (packages inconnus) | Base IOC reactive |
 | Attaques via binaires natifs | Pas d'analyse binaire |
@@ -45,7 +47,7 @@
 
 ### Faux negatifs potentiels
 
-- Code malveillant dans des fichiers non-JS (WASM, binaires)
+- Code malveillant dans des fichiers non-JS/non-Python (WASM, binaires)
 - Exfiltration via DNS ou autres canaux couverts
 - Malware qui detecte l'environnement d'analyse
 - Attaques multi-etapes avec payload distant
@@ -66,7 +68,7 @@
 |------------|--------|
 | SSRF protection | Les redirections HTTP du fetcher IOC sont validees via `isAllowedFetchRedirect()` avec whitelist de domaines autorises et resolution des URLs relatives |
 | Webhook timeout | Les envois webhook (Discord/Slack) sont limites en temps pour eviter les blocages sur des endpoints lents ou malveillants |
-| Fail-closed sur registry | Si le registre npm est injoignable lors d'un `muaddib install`, l'installation echoue par defaut plutot que de continuer sans verification |
+| Fail-closed sur registry | Si le registre npm est injoignable lors d'un `muaddib install`, l'installation echoue par defaut plutot que de continuer sans verification. `safe-install` bloque egalement si la base IOC est indisponible (design fail-closed) |
 
 ### Securite des installations
 
@@ -75,6 +77,7 @@
 | `--ignore-scripts` | Les `npm install` internes (sandbox, safe-install) utilisent le flag `--ignore-scripts` pour empecher l'execution de preinstall/postinstall malveillants |
 | Symlink protection | `lstatSync` est utilise pour detecter les liens symboliques et eviter les boucles infinies ou l'acces a des fichiers hors scope |
 | XSS dans rapports HTML | Les donnees utilisateur dans les rapports HTML sont echappees via `escapeHtml()` |
+| Docker sandbox | L'analyse sandbox valide le nom du package avant passage au container Docker |
 
 ## Resultats des tests adversariaux
 
@@ -110,12 +113,16 @@ Les parsers ont ete testes avec des inputs malformes :
 
 Resultat : **56/56 pass**. Aucun crash, aucune exception non rattrapee.
 
+### 218 tests unitaires
+
+Couverture complete des scanners, parsers, IOC matching, typosquatting, et integrations CLI.
+
 ## Hypotheses
 
-1. **Le code source est disponible** — MUAD'DIB analyse le code, pas les binaires
-2. **Les IOCs sont a jour** — La detection depend de la base IOC
-3. **L'attaquant utilise des techniques connues** — Zero-days passent a travers
-4. **Le scan est execute avant l'installation** — Apres `npm install`, c'est trop tard si preinstall a execute
+1. **Le code source est disponible** - MUAD'DIB analyse le code JS et les dependances Python, pas les binaires
+2. **Les IOCs sont a jour** - La detection depend de la base IOC
+3. **L'attaquant utilise des techniques connues** - Zero-days passent a travers
+4. **Le scan est execute avant l'installation** - Apres `npm install`, c'est trop tard si preinstall a execute
 
 ## Architecture de detection
 ```
@@ -136,6 +143,12 @@ Resultat : **56/56 pass**. Aucun crash, aucune exception non rattrapee.
 │         │                │                     │             │
 │         v                v                     v             │
 │  ┌─────────────────────────────────────────────────────────┐│
+│  │                  Python Scanner                           ││
+│  │  (requirements.txt, setup.py, pyproject.toml, PyPI IOC)  ││
+│  └─────────────────────────────────────────────────────────┘│
+│         │                │                     │             │
+│         v                v                     v             │
+│  ┌─────────────────────────────────────────────────────────┐│
 │  │                   Threat Enrichment                      ││
 │  │         (rules, MITRE ATT&CK, playbooks)                 ││
 │  └─────────────────────────────────────────────────────────┘│
@@ -148,7 +161,9 @@ Resultat : **56/56 pass**. Aucun crash, aucune exception non rattrapee.
 |-----------|----|--------------------|
 | Credentials in Files | T1552.001 | AST analysis |
 | Command and Scripting Interpreter | T1059 | Pattern matching |
-| Supply Chain Compromise | T1195.002 | IOC matching |
+| Supply Chain Compromise (npm) | T1195.002 | IOC matching |
+| PyPI Supply Chain Compromise | T1195.002 | IOC matching |
+| PyPI Typosquatting | T1195.002 | Levenshtein + PEP 503 |
 | Obfuscated Files | T1027 | Heuristics |
 | Exfiltration Over C2 Channel | T1041 | Dataflow analysis |
 | Data Destruction | T1485 | Pattern matching |

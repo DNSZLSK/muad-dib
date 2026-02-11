@@ -3,6 +3,7 @@ const path = require('path');
 
 const DOCKER_IMAGE = 'muaddib-sandbox';
 const CONTAINER_TIMEOUT = 120000; // 120 seconds
+const NPM_PACKAGE_REGEX = /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/;
 
 // Domains excluded from network findings (false positives)
 const SAFE_DOMAINS = [
@@ -110,6 +111,12 @@ async function runSandbox(packageName, options = {}) {
 
   const strict = options.strict || false;
   const mode = strict ? 'strict' : 'permissive';
+
+  // Validate package name before passing to container
+  if (!NPM_PACKAGE_REGEX.test(packageName)) {
+    console.log('[SANDBOX] Invalid package name: ' + packageName);
+    return cleanResult;
+  }
 
   console.log(`[SANDBOX] Analyzing "${packageName}" in isolated container (mode: ${mode})...`);
 
