@@ -1,6 +1,5 @@
 const fs = require('fs');
 const path = require('path');
-const https = require('https');
 
 const CACHE_PATH = path.join(__dirname, '../../.muaddib-cache');
 const CACHE_IOC_FILE = path.join(CACHE_PATH, 'iocs.json');
@@ -8,75 +7,31 @@ const LOCAL_IOC_FILE = path.join(__dirname, 'data/iocs.json');
 const LOCAL_COMPACT_FILE = path.join(__dirname, 'data/iocs-compact.json');
 const { loadYAMLIOCs } = require('./yaml-loader.js');
 
-// Remote feed - only used as fallback if local scrape doesn't exist
-const REMOTE_FEED_URL = 'https://raw.githubusercontent.com/DNSZLSK/muad-dib/master/data/iocs.json';
-
 async function updateIOCs() {
-  console.log('[MUADDIB] Updating IOCs...\n');
+  console.log('[MUADDIB] Updating IOCs via live scrape (OSV + OSSF + all sources)...\n');
 
+  // Run a full scrape — this downloads directly from OSV/OSSF/etc.
+  // and writes both iocs.json and iocs-compact.json
+  const { runScraper } = require('./scraper.js');
+  const result = await runScraper();
+
+  // Also copy results to cache for loadCachedIOCs
   if (!fs.existsSync(CACHE_PATH)) {
     fs.mkdirSync(CACHE_PATH, { recursive: true });
   }
 
-  // Priority 1: YAML files (builtin.yaml, etc.)
-  const yamlIOCs = loadYAMLIOCs();
-  
-  const iocs = {
-    packages: [...yamlIOCs.packages],
-    pypi_packages: [],
-    hashes: yamlIOCs.hashes.map(function(h) { return h.sha256; }),
-    markers: yamlIOCs.markers.map(function(m) { return m.pattern; }),
-    files: yamlIOCs.files.map(function(f) { return f.name; })
-  };
-
-  console.log('[INFO] YAML IOCs: ' + yamlIOCs.packages.length + ' packages');
-
-  // Priority 2: Local scraped IOCs (from muaddib scrape)
-  let localScrapedCount = 0;
   if (fs.existsSync(LOCAL_IOC_FILE)) {
-    try {
-      const localIOCs = JSON.parse(fs.readFileSync(LOCAL_IOC_FILE, 'utf8'));
-      localScrapedCount = mergeIOCs(iocs, localIOCs);
-      console.log('[INFO] Local scraped IOCs: +' + localScrapedCount + ' packages');
-    } catch (e) {
-      console.log('[WARN] Error reading local IOCs: ' + e.message);
-    }
-  } else {
-    console.log('[INFO] No local IOCs (run "muaddib scrape" to generate them)');
+    fs.copyFileSync(LOCAL_IOC_FILE, CACHE_IOC_FILE);
   }
 
-  // Priority 3: Remote feed (fallback / additional source)
-  let remoteCount = 0;
-  try {
-    console.log('[INFO] Downloading from GitHub...');
-    const remoteData = await fetchUrl(REMOTE_FEED_URL);
-    const remoteIOCs = JSON.parse(remoteData);
-    remoteCount = mergeIOCs(iocs, remoteIOCs);
-    console.log('[INFO] Remote IOCs: +' + remoteCount + ' packages');
-  } catch (e) {
-    console.log('[WARN] Remote download failed: ' + e.message);
-    console.log('[INFO] Using local IOCs only');
-  }
-
-  // Update metadata
-  iocs.updated = new Date().toISOString();
-
-  // Save enriched to cache
-  fs.writeFileSync(CACHE_IOC_FILE, JSON.stringify(iocs, null, 2));
-
-  // Also save compact version to cache
   const compactCachePath = path.join(CACHE_PATH, 'iocs-compact.json');
-  const compactIOCs = generateCompactIOCs(iocs);
-  fs.writeFileSync(compactCachePath, JSON.stringify(compactIOCs));
+  if (fs.existsSync(LOCAL_COMPACT_FILE)) {
+    fs.copyFileSync(LOCAL_COMPACT_FILE, compactCachePath);
+  }
 
-  console.log('\n[OK] IOCs saved:');
-  console.log('     - ' + iocs.packages.length + ' malicious npm packages');
-  console.log('     - ' + (iocs.pypi_packages || []).length + ' malicious PyPI packages');
-  console.log('     - ' + iocs.files.length + ' suspicious files');
-  console.log('     - ' + iocs.hashes.length + ' known hashes');
-  console.log('     - ' + iocs.markers.length + ' markers\n');
+  console.log('\n[OK] IOCs updated: ' + result.total + ' npm + ' + result.totalPyPI + ' PyPI packages');
 
-  return iocs;
+  return result;
 }
 
 /**
@@ -141,54 +96,6 @@ function mergeIOCs(target, source) {
   }
 
   return added;
-}
-
-// Allowed redirect domains for fetchUrl (SSRF protection)
-const ALLOWED_FETCH_DOMAINS = [
-  'raw.githubusercontent.com',
-  'github.com',
-  'objects.githubusercontent.com'
-];
-
-function isAllowedFetchRedirect(redirectUrl, originalUrl) {
-  try {
-    // Handle relative URLs by resolving against original
-    const resolved = new URL(redirectUrl, originalUrl);
-    return ALLOWED_FETCH_DOMAINS.includes(resolved.hostname);
-  } catch {
-    return false;
-  }
-}
-
-function fetchUrl(url, redirectCount = 0) {
-  const MAX_REDIRECTS = 5;
-  return new Promise(function(resolve, reject) {
-    https.get(url, function(res) {
-      // Handle redirects with limit and domain validation
-      if (res.statusCode === 301 || res.statusCode === 302) {
-        if (redirectCount >= MAX_REDIRECTS) {
-          reject(new Error('Too many redirects'));
-          return;
-        }
-        const redirectTarget = res.headers.location;
-        if (!isAllowedFetchRedirect(redirectTarget, url)) {
-          reject(new Error('Redirect to unauthorized domain: ' + redirectTarget));
-          return;
-        }
-        // Resolve relative URLs against original
-        const resolvedUrl = new URL(redirectTarget, url).href;
-        fetchUrl(resolvedUrl, redirectCount + 1).then(resolve).catch(reject);
-        return;
-      }
-      if (res.statusCode !== 200) {
-        reject(new Error('HTTP ' + res.statusCode));
-        return;
-      }
-      let data = '';
-      res.on('data', function(chunk) { data += chunk; });
-      res.on('end', function() { resolve(data); });
-    }).on('error', reject);
-  });
 }
 
 // Cache to avoid reloading IOCs on each call

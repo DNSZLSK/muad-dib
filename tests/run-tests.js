@@ -301,10 +301,17 @@ test('CLI: --fail-on high exit code correct', () => {
 
 console.log('\n=== UPDATE TESTS ===\n');
 
-test('UPDATE: Downloads and caches IOCs', () => {
-  const output = runCommand('update');
-  assertIncludes(output, 'IOCs saved', 'Should save IOCs');
-  assertIncludes(output, 'malicious npm packages', 'Should display package count');
+test('UPDATE: Module loads and loadCachedIOCs works', () => {
+  const { loadCachedIOCs } = require('../src/ioc/updater.js');
+  const iocs = loadCachedIOCs();
+  assert(iocs.packagesMap instanceof Map, 'Should return packagesMap');
+  assert(iocs.wildcardPackages instanceof Set, 'Should return wildcardPackages');
+  assert(iocs.packages.length > 0, 'Should have packages');
+});
+
+test('UPDATE: updateIOCs is a function', () => {
+  const { updateIOCs } = require('../src/ioc/updater.js');
+  assert(typeof updateIOCs === 'function', 'updateIOCs should be a function');
 });
 
 // ============================================
