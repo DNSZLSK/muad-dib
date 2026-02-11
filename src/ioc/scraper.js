@@ -1183,7 +1183,7 @@ async function runScraper() {
   };
 }
 
-module.exports = { runScraper };
+module.exports = { runScraper, scrapeShaiHuludDetector, scrapeDatadogIOCs };
 
 // Direct execution if called as CLI
 if (require.main === module) {
