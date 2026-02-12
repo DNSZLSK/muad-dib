@@ -25,8 +25,6 @@ jobs:
           files: ./coverage/lcov.info
           fail_ci_if_error: false
           verbose: true
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
   scan:
     runs-on: ubuntu-latest
