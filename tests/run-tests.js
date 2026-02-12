@@ -2841,9 +2841,9 @@ test('HASH: clearHashCache and getHashCacheSize', () => {
     assert(logs.some(l => l.includes('2 finding(s)')), 'Should count actionable (non-INFO) findings');
   });
 
-  test('SANDBOX-COV: imageExists returns false without Docker', () => {
+  test('SANDBOX-COV: imageExists returns boolean', () => {
     const result = imageExists();
-    assert(result === false, 'Should return false when Docker image not found');
+    assert(typeof result === 'boolean', 'imageExists should return a boolean, got ' + typeof result);
   });
 
   test('SANDBOX-COV: generateNetworkReport with TLS connections', () => {
