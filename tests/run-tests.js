@@ -3290,7 +3290,9 @@ test('HASH: clearHashCache and getHashCacheSize', () => {
   const {
     parseNpmResponse, parsePyPIRss, loadState, saveState, STATE_FILE,
     ALERTS_FILE, extractTarGz, getNpmTarballUrl, scanQueue,
-    appendAlert, timeoutPromise, stats, MAX_TARBALL_SIZE
+    appendAlert, timeoutPromise, stats, MAX_TARBALL_SIZE,
+    isSandboxEnabled, hasHighOrCritical,
+    getWebhookUrl, shouldSendWebhook, buildMonitorWebhookPayload
   } = require('../src/monitor.js');
 
   test('MONITOR: parseNpmResponse extracts packages and _updated timestamp', () => {
@@ -3565,6 +3567,266 @@ test('HASH: clearHashCache and getHashCacheSize', () => {
     assert(typeof stats.errors === 'number', 'stats.errors should be number');
     assert(typeof stats.totalTimeMs === 'number', 'stats.totalTimeMs should be number');
     assert(typeof stats.lastReportTime === 'number', 'stats.lastReportTime should be number');
+  });
+
+  // ============================================
+  // MONITOR PHASE 3 TESTS (Sandbox Integration)
+  // ============================================
+
+  console.log('\n=== MONITOR PHASE 3 TESTS ===\n');
+
+  test('MONITOR: hasHighOrCritical returns true for HIGH findings', () => {
+    const result = { summary: { total: 3, critical: 0, high: 2, medium: 1, low: 0 } };
+    assert(hasHighOrCritical(result) === true, 'Should return true when high > 0');
+  });
+
+  test('MONITOR: hasHighOrCritical returns true for CRITICAL findings', () => {
+    const result = { summary: { total: 1, critical: 1, high: 0, medium: 0, low: 0 } };
+    assert(hasHighOrCritical(result) === true, 'Should return true when critical > 0');
+  });
+
+  test('MONITOR: hasHighOrCritical returns false for LOW/MEDIUM only', () => {
+    const result = { summary: { total: 5, critical: 0, high: 0, medium: 3, low: 2 } };
+    assert(hasHighOrCritical(result) === false, 'Should return false when no HIGH/CRITICAL');
+  });
+
+  test('MONITOR: isSandboxEnabled defaults to true', () => {
+    const orig = process.env.MUADDIB_MONITOR_SANDBOX;
+    delete process.env.MUADDIB_MONITOR_SANDBOX;
+    try {
+      assert(isSandboxEnabled() === true, 'Should default to true when env not set');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_MONITOR_SANDBOX = orig;
+    }
+  });
+
+  test('MONITOR: isSandboxEnabled returns false when env=false', () => {
+    const orig = process.env.MUADDIB_MONITOR_SANDBOX;
+    process.env.MUADDIB_MONITOR_SANDBOX = 'false';
+    try {
+      assert(isSandboxEnabled() === false, 'Should return false when env is "false"');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_MONITOR_SANDBOX = orig;
+      else delete process.env.MUADDIB_MONITOR_SANDBOX;
+    }
+  });
+
+  test('MONITOR: isSandboxEnabled returns false when env=FALSE (case insensitive)', () => {
+    const orig = process.env.MUADDIB_MONITOR_SANDBOX;
+    process.env.MUADDIB_MONITOR_SANDBOX = 'FALSE';
+    try {
+      assert(isSandboxEnabled() === false, 'Should return false when env is "FALSE"');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_MONITOR_SANDBOX = orig;
+      else delete process.env.MUADDIB_MONITOR_SANDBOX;
+    }
+  });
+
+  test('MONITOR: isSandboxEnabled returns true when env=true', () => {
+    const orig = process.env.MUADDIB_MONITOR_SANDBOX;
+    process.env.MUADDIB_MONITOR_SANDBOX = 'true';
+    try {
+      assert(isSandboxEnabled() === true, 'Should return true when env is "true"');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_MONITOR_SANDBOX = orig;
+      else delete process.env.MUADDIB_MONITOR_SANDBOX;
+    }
+  });
+
+  test('MONITOR: sandbox condition requires all three flags', () => {
+    // Simulate the condition: hasHighOrCritical && isSandboxEnabled && sandboxAvailable
+    const monitor = require('../src/monitor.js');
+    const highResult = { summary: { total: 1, critical: 1, high: 0, medium: 0, low: 0 } };
+    const lowResult = { summary: { total: 2, critical: 0, high: 0, medium: 1, low: 1 } };
+
+    // Case 1: HIGH findings, sandbox enabled, docker available → should sandbox
+    const origEnv = process.env.MUADDIB_MONITOR_SANDBOX;
+    delete process.env.MUADDIB_MONITOR_SANDBOX;
+    monitor.sandboxAvailable = true;
+    const shouldSandbox1 = hasHighOrCritical(highResult) && isSandboxEnabled() && monitor.sandboxAvailable;
+    assert(shouldSandbox1 === true, 'Should sandbox with HIGH + enabled + docker');
+
+    // Case 2: LOW only findings → no sandbox
+    const shouldSandbox2 = hasHighOrCritical(lowResult) && isSandboxEnabled() && monitor.sandboxAvailable;
+    assert(shouldSandbox2 === false, 'Should NOT sandbox with LOW/MEDIUM only');
+
+    // Case 3: HIGH findings, sandbox disabled via env → no sandbox
+    process.env.MUADDIB_MONITOR_SANDBOX = 'false';
+    const shouldSandbox3 = hasHighOrCritical(highResult) && isSandboxEnabled() && monitor.sandboxAvailable;
+    assert(shouldSandbox3 === false, 'Should NOT sandbox when env=false');
+
+    // Case 4: HIGH findings, sandbox enabled, docker unavailable → no sandbox
+    delete process.env.MUADDIB_MONITOR_SANDBOX;
+    monitor.sandboxAvailable = false;
+    const shouldSandbox4 = hasHighOrCritical(highResult) && isSandboxEnabled() && monitor.sandboxAvailable;
+    assert(shouldSandbox4 === false, 'Should NOT sandbox when docker unavailable');
+
+    // Restore
+    if (origEnv !== undefined) process.env.MUADDIB_MONITOR_SANDBOX = origEnv;
+  });
+
+  test('MONITOR: alert includes sandbox field when sandbox result has score > 0', () => {
+    const sandboxResult = {
+      score: 60,
+      severity: 'HIGH',
+      findings: [{ type: 'suspicious_dns', severity: 'HIGH', detail: 'DNS to evil.com' }]
+    };
+    const alert = {
+      timestamp: new Date().toISOString(),
+      name: 'evil-pkg',
+      version: '1.0.0',
+      ecosystem: 'npm',
+      findings: [{ rule: 'ast_dangerous_call', severity: 'HIGH', file: 'index.js' }]
+    };
+    // Simulate the condition in scanPackage
+    if (sandboxResult && sandboxResult.score > 0) {
+      alert.sandbox = {
+        score: sandboxResult.score,
+        severity: sandboxResult.severity,
+        findings: sandboxResult.findings
+      };
+    }
+    assert(alert.sandbox, 'Alert should have sandbox field');
+    assert(alert.sandbox.score === 60, 'Sandbox score should be 60');
+    assert(alert.sandbox.severity === 'HIGH', 'Sandbox severity should be HIGH');
+    assert(alert.sandbox.findings.length === 1, 'Should have 1 sandbox finding');
+  });
+
+  test('MONITOR: alert has no sandbox field when score is 0', () => {
+    const sandboxResult = { score: 0, severity: 'CLEAN', findings: [] };
+    const alert = {
+      timestamp: new Date().toISOString(),
+      name: 'ok-pkg',
+      version: '1.0.0',
+      ecosystem: 'npm',
+      findings: [{ rule: 'ast_dangerous_call', severity: 'HIGH', file: 'index.js' }]
+    };
+    if (sandboxResult && sandboxResult.score > 0) {
+      alert.sandbox = {
+        score: sandboxResult.score,
+        severity: sandboxResult.severity,
+        findings: sandboxResult.findings
+      };
+    }
+    assert(!alert.sandbox, 'Alert should NOT have sandbox field when score=0');
+  });
+
+  // ============================================
+  // MONITOR PHASE 4 TESTS (Webhook Alerting)
+  // ============================================
+
+  console.log('\n=== MONITOR PHASE 4 TESTS ===\n');
+
+  test('MONITOR: getWebhookUrl returns null when env not set', () => {
+    const orig = process.env.MUADDIB_WEBHOOK_URL;
+    delete process.env.MUADDIB_WEBHOOK_URL;
+    try {
+      assert(getWebhookUrl() === null, 'Should return null when env not set');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
+    }
+  });
+
+  test('MONITOR: getWebhookUrl returns URL when env is set', () => {
+    const orig = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.slack.com/services/T00/B00/xxx';
+    try {
+      assert(getWebhookUrl() === 'https://hooks.slack.com/services/T00/B00/xxx', 'Should return the URL');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  test('MONITOR: shouldSendWebhook returns false when no URL configured', () => {
+    const orig = process.env.MUADDIB_WEBHOOK_URL;
+    delete process.env.MUADDIB_WEBHOOK_URL;
+    try {
+      const result = { summary: { total: 1, critical: 1, high: 0, medium: 0, low: 0 } };
+      assert(shouldSendWebhook(result, null) === false, 'Should return false without URL');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
+    }
+  });
+
+  test('MONITOR: shouldSendWebhook returns true for HIGH findings with URL', () => {
+    const orig = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.slack.com/test';
+    try {
+      const result = { summary: { total: 2, critical: 0, high: 2, medium: 0, low: 0 } };
+      assert(shouldSendWebhook(result, null) === true, 'Should return true for HIGH');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  test('MONITOR: shouldSendWebhook returns true for sandbox score > 50', () => {
+    const orig = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.slack.com/test';
+    try {
+      const result = { summary: { total: 2, critical: 0, high: 0, medium: 2, low: 0 } };
+      const sandbox = { score: 60, severity: 'HIGH', findings: [] };
+      assert(shouldSendWebhook(result, sandbox) === true, 'Should return true for sandbox score > 50');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  test('MONITOR: shouldSendWebhook returns false for LOW only and sandbox score <= 50', () => {
+    const orig = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.slack.com/test';
+    try {
+      const result = { summary: { total: 2, critical: 0, high: 0, medium: 1, low: 1 } };
+      const sandbox = { score: 30, severity: 'MEDIUM', findings: [] };
+      assert(shouldSendWebhook(result, sandbox) === false, 'Should return false for LOW/MEDIUM + low sandbox');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  test('MONITOR: buildMonitorWebhookPayload has correct structure', () => {
+    const result = {
+      summary: { total: 2, critical: 1, high: 1, medium: 0, low: 0 },
+      threats: [
+        { rule_id: 'MUADDIB-AST-001', type: 'ast_dangerous_call', severity: 'HIGH', file: 'index.js', message: 'eval()' },
+        { rule_id: 'MUADDIB-SHELL-001', type: 'shell_exec', severity: 'CRITICAL', file: 'run.sh', message: 'curl | sh' }
+      ]
+    };
+    const payload = buildMonitorWebhookPayload('evil-pkg', '1.0.0', 'npm', result, null);
+    assert(payload.event === 'malicious_package', 'event should be malicious_package');
+    assert(payload.package === 'evil-pkg', 'package should be evil-pkg');
+    assert(payload.version === '1.0.0', 'version should be 1.0.0');
+    assert(payload.ecosystem === 'npm', 'ecosystem should be npm');
+    assert(typeof payload.timestamp === 'string', 'timestamp should be string');
+    assert(payload.findings.length === 2, 'Should have 2 findings');
+    assert(payload.findings[0].rule === 'MUADDIB-AST-001', 'First finding rule should match');
+    assert(payload.findings[0].severity === 'HIGH', 'First finding severity should match');
+    assert(!payload.sandbox, 'Should have no sandbox field when null');
+  });
+
+  test('MONITOR: buildMonitorWebhookPayload includes sandbox when score > 0', () => {
+    const result = {
+      summary: { total: 1, critical: 1, high: 0, medium: 0, low: 0 },
+      threats: [{ rule_id: 'X', type: 'x', severity: 'CRITICAL', file: 'a.js', message: 'm' }]
+    };
+    const sandbox = { score: 75, severity: 'HIGH', findings: [{ type: 'suspicious_dns' }] };
+    const payload = buildMonitorWebhookPayload('bad-lib', '2.0.0', 'pypi', result, sandbox);
+    assert(payload.sandbox, 'Should have sandbox field');
+    assert(payload.sandbox.score === 75, 'Sandbox score should be 75');
+    assert(payload.sandbox.severity === 'HIGH', 'Sandbox severity should be HIGH');
+  });
+
+  test('MONITOR: buildMonitorWebhookPayload omits sandbox when score is 0', () => {
+    const result = {
+      summary: { total: 1, critical: 1, high: 0, medium: 0, low: 0 },
+      threats: [{ rule_id: 'X', type: 'x', severity: 'CRITICAL', file: 'a.js', message: 'm' }]
+    };
+    const sandbox = { score: 0, severity: 'CLEAN', findings: [] };
+    const payload = buildMonitorWebhookPayload('pkg', '1.0.0', 'npm', result, sandbox);
+    assert(!payload.sandbox, 'Should NOT have sandbox field when score=0');
   });
 
   // ============================================

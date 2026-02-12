@@ -12,6 +12,7 @@ rapport.html
 results.sarif
 index.html
 action/
+deploy/
 coverage/
 .claude/
 ults.sarif

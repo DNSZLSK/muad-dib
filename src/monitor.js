@@ -4,6 +4,8 @@ const path = require('path');
 const os = require('os');
 const { execSync } = require('child_process');
 const { run } = require('./index.js');
+const { runSandbox, isDockerAvailable } = require('./sandbox.js');
+const { sendWebhook } = require('./webhook.js');
 
 const STATE_FILE = path.join(__dirname, '..', 'data', 'monitor-state.json');
 const ALERTS_FILE = path.join(__dirname, '..', 'data', 'monitor-alerts.json');
@@ -25,6 +27,73 @@ const stats = {
 // --- Scan queue (FIFO, sequential) ---
 
 const scanQueue = [];
+
+// --- Sandbox integration ---
+
+let sandboxAvailable = false;
+
+function isSandboxEnabled() {
+  const env = process.env.MUADDIB_MONITOR_SANDBOX;
+  if (env !== undefined && env.toLowerCase() === 'false') return false;
+  return true;
+}
+
+function hasHighOrCritical(result) {
+  return result.summary.critical > 0 || result.summary.high > 0;
+}
+
+// --- Webhook alerting ---
+
+function getWebhookUrl() {
+  return process.env.MUADDIB_WEBHOOK_URL || null;
+}
+
+function shouldSendWebhook(result, sandboxResult) {
+  if (!getWebhookUrl()) return false;
+  if (hasHighOrCritical(result)) return true;
+  if (sandboxResult && sandboxResult.score > 50) return true;
+  return false;
+}
+
+function buildMonitorWebhookPayload(name, version, ecosystem, result, sandboxResult) {
+  const payload = {
+    event: 'malicious_package',
+    package: name,
+    version,
+    ecosystem,
+    timestamp: new Date().toISOString(),
+    findings: result.threats.map(t => ({
+      rule: t.rule_id || t.type,
+      severity: t.severity
+    }))
+  };
+  if (sandboxResult && sandboxResult.score > 0) {
+    payload.sandbox = {
+      score: sandboxResult.score,
+      severity: sandboxResult.severity
+    };
+  }
+  return payload;
+}
+
+async function trySendWebhook(name, version, ecosystem, result, sandboxResult) {
+  if (!shouldSendWebhook(result, sandboxResult)) return;
+  const url = getWebhookUrl();
+  const payload = buildMonitorWebhookPayload(name, version, ecosystem, result, sandboxResult);
+  // sendWebhook expects a results-like object; wrap payload for formatGeneric
+  const webhookData = {
+    target: `${ecosystem}/${name}@${version}`,
+    timestamp: payload.timestamp,
+    summary: result.summary,
+    threats: result.threats
+  };
+  try {
+    await sendWebhook(url, webhookData);
+    console.log(`[MONITOR] Webhook sent for ${name}@${version}`);
+  } catch (err) {
+    console.error(`[MONITOR] Webhook failed for ${name}@${version}: ${err.message}`);
+  }
+}
 
 // --- State persistence ---
 
@@ -218,11 +287,10 @@ async function scanPackage(name, version, ecosystem, tarballUrl) {
     const extractedDir = extractTarGz(tgzPath, tmpDir);
     const result = await run(extractedDir, { _capture: true });
 
-    stats.scanned++;
-    const elapsed = Date.now() - startTime;
-    stats.totalTimeMs += elapsed;
-
     if (result.summary.total === 0) {
+      stats.scanned++;
+      const elapsed = Date.now() - startTime;
+      stats.totalTimeMs += elapsed;
       stats.clean++;
       console.log(`[MONITOR] CLEAN: ${name}@${version} (0 findings, ${(elapsed / 1000).toFixed(1)}s)`);
     } else {
@@ -232,9 +300,26 @@ async function scanPackage(name, version, ecosystem, tarballUrl) {
       if (result.summary.high > 0) counts.push(`${result.summary.high} HIGH`);
       if (result.summary.medium > 0) counts.push(`${result.summary.medium} MEDIUM`);
       if (result.summary.low > 0) counts.push(`${result.summary.low} LOW`);
-      console.log(`[MONITOR] SUSPECT: ${name}@${version} (${counts.join(', ')}, ${(elapsed / 1000).toFixed(1)}s)`);
+      console.log(`[MONITOR] SUSPECT: ${name}@${version} (${counts.join(', ')})`);
 
-      appendAlert({
+      // Sandbox: run dynamic analysis on HIGH/CRITICAL findings
+      let sandboxResult = null;
+      if (hasHighOrCritical(result) && isSandboxEnabled() && sandboxAvailable) {
+        try {
+          console.log(`[MONITOR] SANDBOX: launching for ${name}@${version}...`);
+          sandboxResult = await runSandbox(name);
+          console.log(`[MONITOR] SANDBOX: ${name}@${version} → score: ${sandboxResult.score}, severity: ${sandboxResult.severity}`);
+        } catch (err) {
+          console.error(`[MONITOR] SANDBOX error for ${name}@${version}: ${err.message}`);
+        }
+      }
+
+      stats.scanned++;
+      const elapsed = Date.now() - startTime;
+      stats.totalTimeMs += elapsed;
+      console.log(`[MONITOR] ${name}@${version} total time: ${(elapsed / 1000).toFixed(1)}s`);
+
+      const alert = {
         timestamp: new Date().toISOString(),
         name,
         version,
@@ -244,7 +329,18 @@ async function scanPackage(name, version, ecosystem, tarballUrl) {
           severity: t.severity,
           file: t.file
         }))
-      });
+      };
+
+      if (sandboxResult && sandboxResult.score > 0) {
+        alert.sandbox = {
+          score: sandboxResult.score,
+          severity: sandboxResult.severity,
+          findings: sandboxResult.findings
+        };
+      }
+
+      appendAlert(alert);
+      await trySendWebhook(name, version, ecosystem, result, sandboxResult);
     }
   } catch (err) {
     stats.errors++;
@@ -441,6 +537,18 @@ async function startMonitor() {
 ╚════════════════════════════════════════════╝
   `);
 
+  // Check sandbox availability
+  if (isSandboxEnabled()) {
+    sandboxAvailable = isDockerAvailable();
+    if (sandboxAvailable) {
+      console.log('[MONITOR] Docker detected — sandbox enabled for HIGH/CRITICAL findings');
+    } else {
+      console.log('[MONITOR] WARNING: Docker not available — running static analysis only');
+    }
+  } else {
+    console.log('[MONITOR] Sandbox disabled (MUADDIB_MONITOR_SANDBOX=false)');
+  }
+
   const state = loadState();
   console.log(`[MONITOR] State loaded — npm startKey: ${state.npmLastKey || 'none'}, pypi last: ${state.pypiLastPackage || 'none'}`);
   console.log(`[MONITOR] Polling every ${POLL_INTERVAL / 1000}s. Ctrl+C to stop.\n`);
@@ -537,7 +645,15 @@ module.exports = {
   reportStats,
   stats,
   resolveTarballAndScan,
-  MAX_TARBALL_SIZE
+  MAX_TARBALL_SIZE,
+  isSandboxEnabled,
+  hasHighOrCritical,
+  get sandboxAvailable() { return sandboxAvailable; },
+  set sandboxAvailable(v) { sandboxAvailable = v; },
+  getWebhookUrl,
+  shouldSendWebhook,
+  buildMonitorWebhookPayload,
+  trySendWebhook
 };
 
 // Standalone entry point: node src/monitor.js
