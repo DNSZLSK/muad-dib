@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.18] - 2026-02-12
+
+### Changed
+- Update all documentation for v1.6.18 (README, SECURITY, CHANGELOG, CLAUDE.md)
+- 316 tests passing (was 296 in v1.6.11)
+- Add complete rule ID table to SECURITY.md
+- Add post-release documentation checklist to CLAUDE.md
+
+## [1.6.17] - 2026-02-12
+
+### Fixed
+- **AST scanner**: `eval('literal')` now LOW severity, `eval(variable)` stays HIGH
+- **AST scanner**: `Function('literal')` now LOW severity, `Function(variable)` now MEDIUM
+- **Obfuscation scanner**: hex/unicode escape sequences alone no longer trigger alerts
+- **Obfuscation scanner**: `.min.js` files with long single lines are now ignored
+- Validated 0 false positives on express, lodash, axios, react
+
+### Added
+- CLI spinner during scan for both CLI and interactive menu (TTY mode)
+
+## [1.6.16] - 2026-02-12
+
+### Changed
+- **Entropy scanner**: removed file-level entropy scan (MUADDIB-ENTROPY-002)
+- **Entropy scanner**: added JS obfuscation pattern detection (MUADDIB-ENTROPY-003) — detects _0x* variables, encoded string arrays, eval/Function with high-entropy content, long base64 payloads
+- **Entropy scanner**: string-level entropy (MUADDIB-ENTROPY-001) retained with threshold 5.5 bits + 50 chars minimum
+
+## [1.6.15] - 2026-02-12
+
+### Changed
+- Add CLAUDE.md for Claude Code guidance
+- Update logo, update scanner count to 12
+
+## [1.6.14] - 2026-02-12
+
+### Added
+- **Shannon entropy scanner** — string-level and file-level entropy analysis for obfuscation detection
+
+## [1.6.13] - 2026-02-12
+
+## [1.6.12] - 2026-02-12
+
+### Fixed
+- Documentation audit corrections (carnet de bord, compact IOC, CI pipeline)
+
 ## [1.6.11] - 2026-02-12
 
 ### Fixed
@@ -86,7 +131,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.5.0] - 2026-02-10
 
 ### Added
-- **Behavioral sandbox** — strace system tracing, tcpdump network capture, filesystem diff before/after install
+- **Behavioral sandbox (dynamic analysis)** — strace system tracing, tcpdump network capture, filesystem diff before/after install
 - JSON structured report for sandbox findings
 - Sandbox scoring engine (0-100 risk score)
 
@@ -272,7 +317,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Obfuscation detection
 - Package.json lifecycle script analysis
 
-[Unreleased]: https://github.com/DNSZLSK/muad-dib/compare/v1.6.11...HEAD
+[Unreleased]: https://github.com/DNSZLSK/muad-dib/compare/v1.6.18...HEAD
+[1.6.18]: https://github.com/DNSZLSK/muad-dib/compare/v1.6.17...v1.6.18
+[1.6.17]: https://github.com/DNSZLSK/muad-dib/compare/v1.6.16...v1.6.17
+[1.6.16]: https://github.com/DNSZLSK/muad-dib/compare/v1.6.15...v1.6.16
+[1.6.15]: https://github.com/DNSZLSK/muad-dib/compare/v1.6.14...v1.6.15
+[1.6.14]: https://github.com/DNSZLSK/muad-dib/compare/v1.6.13...v1.6.14
+[1.6.13]: https://github.com/DNSZLSK/muad-dib/compare/v1.6.12...v1.6.13
+[1.6.12]: https://github.com/DNSZLSK/muad-dib/compare/v1.6.11...v1.6.12
 [1.6.11]: https://github.com/DNSZLSK/muad-dib/compare/v1.6.10...v1.6.11
 [1.6.10]: https://github.com/DNSZLSK/muad-dib/compare/v1.6.8...v1.6.10
 [1.6.8]: https://github.com/DNSZLSK/muad-dib/compare/v1.6.7...v1.6.8

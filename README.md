@@ -30,7 +30,7 @@
 
 npm and PyPI supply-chain attacks are exploding. Shai-Hulud compromised 25K+ repos in 2025. Existing tools detect threats but don't help you respond.
 
-MUAD'DIB detects AND guides your response.
+MUAD'DIB combines static analysis + dynamic analysis (Docker sandbox) to detect threats AND guide your response.
 
 ---
 
@@ -196,7 +196,9 @@ muaddib sandbox <package-name>
 muaddib sandbox <package-name> --strict
 ```
 
-Analyzes a package in an isolated Docker container with multi-layer monitoring:
+Dynamic analysis: installs the package in an isolated Docker container and monitors runtime behavior via strace, tcpdump, and filesystem diffing.
+
+Multi-layer monitoring:
 - **System tracing** (strace): file access, process spawns, syscall monitoring
 - **Network capture** (tcpdump): DNS resolutions with resolved IPs, HTTP requests (method, host, path, body), TLS SNI detection
 - **Filesystem diff**: snapshot before/after install, detects files created in suspicious locations
@@ -281,7 +283,7 @@ Add to `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/DNSZLSK/muad-dib
-    rev: v1.6.11
+    rev: v1.6.18
     hooks:
       - id: muaddib-scan        # Scan all threats
       # - id: muaddib-diff      # Or: only new threats
@@ -381,11 +383,12 @@ Detects malicious patterns in `.github/workflows/` YAML files, including Shai-Hu
 | Reverse shell | T1059.004 | Pattern |
 | Dead man's switch | T1485 | Pattern |
 | Obfuscated code | T1027 | Heuristics |
-| Shannon entropy analysis | T1027 | Entropy calculation |
+| JS obfuscation patterns | T1027.002 | Pattern detection |
+| Shannon entropy (strings) | T1027 | Entropy calculation |
 | Typosquatting (npm + PyPI) | T1195.002 | Levenshtein |
 | Supply chain compromise | T1195.002 | IOC matching |
 | PyPI malicious package | T1195.002 | IOC matching |
-| Sandbox behavioral analysis | Multiple | Docker + strace + tcpdump |
+| Sandbox dynamic analysis | Multiple | Docker + strace + tcpdump |
 
 ---
 
@@ -494,12 +497,17 @@ MUAD'DIB Scanner
 |   +-- Snyk Known Malware
 |   +-- Static IOCs (Socket, Phylum)
 |
-+-- AST Parse (acorn)
-+-- Pattern Matching (shell, scripts)
-+-- Typosquat Detection (npm + PyPI, Levenshtein)
-+-- Python Scanner (requirements.txt, setup.py, pyproject.toml)
-+-- Shannon Entropy Analysis
-+-- GitHub Actions Scanner
++-- 12 Parallel Scanners
+|   +-- AST Parse (acorn) — eval/Function severity by argument type
+|   +-- Pattern Matching (shell, scripts)
+|   +-- Obfuscation Detection (skip .min.js, ignore hex/unicode alone)
+|   +-- Typosquat Detection (npm + PyPI, Levenshtein)
+|   +-- Python Scanner (requirements.txt, setup.py, pyproject.toml)
+|   +-- Shannon Entropy (string-level, 5.5 bits + 50 chars min)
+|   +-- JS Obfuscation Patterns (_0x* vars, encoded arrays, eval+entropy)
+|   +-- GitHub Actions Scanner
+|   +-- Package, Dependencies, Hash, npm-registry, Dataflow scanners
+|
 +-- Paranoid Mode (ultra-strict)
 +-- Docker Sandbox (behavioral analysis, network capture)
 |
@@ -545,9 +553,10 @@ npm test
 
 ### Testing
 
-- **296 unit/integration tests** - 80% code coverage via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
+- **316 unit/integration tests** - 80% code coverage via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
 - **56 fuzz tests** - Malformed YAML, invalid JSON, binary files, ReDoS, unicode, 10MB inputs
 - **15 adversarial tests** - Simulated malicious packages, 15/15 detection rate
+- **False positive validation** - 0 false positives on express, lodash, axios, react
 - **ESLint security audit** - `eslint-plugin-security` with 14 rules enabled
 
 ---

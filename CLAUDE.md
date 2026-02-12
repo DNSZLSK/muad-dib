@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-npm test          # Run all tests (custom framework, ~302 tests)
+npm test          # Run all tests (custom framework, ~316 tests)
 npm run lint      # ESLint with security plugin
 npm run scan      # Self-scan: node bin/muaddib.js scan .
 npm run update    # Download latest IOCs
@@ -67,6 +67,14 @@ Tests use a custom framework in `tests/run-tests.js` (no Jest). Test helpers:
 - **Symlink protection:** `findFiles` uses `lstatSync` + inode tracking (maxDepth fallback on Windows where ino=0)
 - **Python typosquat false positives:** Typosquat check must skip packages that ARE in the popular list to avoid false positives (flask↔black)
 - **Compact IOC format:** 87% of packages are wildcards (all versions malicious); `iocs.json` (112MB) is gitignored, `iocs-compact.json` (~5MB) is committed
+
+## Post-Release Documentation Checklist
+After every version bump / npm publish, update these files:
+- README.md: scanner count, test count, version number, feature list, badges
+- SECURITY.md: scanner/rule ID list, severity levels, any added/removed rules
+- CHANGELOG.md: new version entry with all changes
+- package.json version must match npm published version
+Never skip documentation updates when publishing a new version.
 
 ## Git Workflow
 
