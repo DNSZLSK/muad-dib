@@ -387,6 +387,7 @@ Detects malicious patterns in `.github/workflows/` YAML files, including Shai-Hu
 | Reverse shell | T1059.004 | Pattern |
 | Dead man's switch | T1485 | Pattern |
 | Obfuscated code | T1027 | Heuristics |
+| Shannon entropy analysis | T1027 | Entropy calculation |
 | Typosquatting (npm + PyPI) | T1195.002 | Levenshtein |
 | Supply chain compromise | T1195.002 | IOC matching |
 | PyPI malicious package | T1195.002 | IOC matching |
@@ -503,6 +504,7 @@ MUAD'DIB Scanner
 +-- Pattern Matching (shell, scripts)
 +-- Typosquat Detection (npm + PyPI, Levenshtein)
 +-- Python Scanner (requirements.txt, setup.py, pyproject.toml)
++-- Shannon Entropy Analysis
 +-- GitHub Actions Scanner
 +-- Paranoid Mode (ultra-strict)
 +-- Docker Sandbox (behavioral analysis, network capture)

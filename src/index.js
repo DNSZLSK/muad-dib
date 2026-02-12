@@ -16,6 +16,7 @@ const path = require('path');
 const { scanGitHubActions } = require('./scanner/github-actions.js');
 const { detectPythonProject, normalizePythonName } = require('./scanner/python.js');
 const { loadCachedIOCs } = require('./ioc/updater.js');
+const { scanEntropy } = require('./scanner/entropy.js');
 const { setExtraExcludes, getExtraExcludes } = require('./utils.js');
 
 // ============================================
@@ -213,7 +214,8 @@ async function run(targetPath, options = {}) {
     typosquatThreats,
     ghActionsThreats,
     pythonThreats,
-    pypiTyposquatThreats
+    pypiTyposquatThreats,
+    entropyThreats
   ] = await Promise.all([
     scanPackageJson(targetPath),
     scanShellScripts(targetPath),
@@ -225,7 +227,8 @@ async function run(targetPath, options = {}) {
     scanTyposquatting(targetPath),
     Promise.resolve(scanGitHubActions(targetPath)),
     Promise.resolve(matchPythonIOCs(pythonDeps, targetPath)),
-    Promise.resolve(checkPyPITyposquatting(pythonDeps, targetPath))
+    Promise.resolve(checkPyPITyposquatting(pythonDeps, targetPath)),
+    Promise.resolve(scanEntropy(targetPath))
   ]);
 
   const threats = [
@@ -239,7 +242,8 @@ async function run(targetPath, options = {}) {
     ...typosquatThreats,
     ...ghActionsThreats,
     ...pythonThreats,
-    ...pypiTyposquatThreats
+    ...pypiTyposquatThreats,
+    ...entropyThreats
   ];
 
   // Paranoid mode

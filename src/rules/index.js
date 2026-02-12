@@ -461,6 +461,26 @@ const RULES = {
     references: ['https://attack.mitre.org/techniques/T1499/'],
     mitre: 'T1499'
   },
+
+  // Entropy detections
+  high_entropy_string: {
+    id: 'MUADDIB-ENTROPY-001',
+    name: 'High Entropy String',
+    severity: 'MEDIUM',
+    confidence: 'medium',
+    description: 'Chaine a haute entropie detectee (base64, hex, payload chiffre). Souvent signe d\'obfuscation ou de donnees encodees.',
+    references: ['https://attack.mitre.org/techniques/T1027/'],
+    mitre: 'T1027'
+  },
+  high_entropy_file: {
+    id: 'MUADDIB-ENTROPY-002',
+    name: 'High Entropy File',
+    severity: 'MEDIUM',
+    confidence: 'low',
+    description: 'Fichier JS avec entropie globale elevee. Peut contenir du code obfusque, des payloads encodes ou des donnees compressees.',
+    references: ['https://attack.mitre.org/techniques/T1027/'],
+    mitre: 'T1027'
+  },
 };
 
 function getRule(type) {

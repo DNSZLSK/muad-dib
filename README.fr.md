@@ -387,6 +387,7 @@ Détecte les patterns malveillants dans les fichiers YAML `.github/workflows/`, 
 | Reverse shell | T1059.004 | Pattern |
 | Dead man's switch | T1485 | Pattern |
 | Code obfusqué | T1027 | Heuristiques |
+| Analyse entropie Shannon | T1027 | Calcul d'entropie |
 | Typosquatting (npm + PyPI) | T1195.002 | Levenshtein |
 | Supply chain compromise | T1195.002 | IOC matching |
 | Package PyPI malveillant | T1195.002 | IOC matching |
@@ -503,6 +504,7 @@ MUAD'DIB Scanner
 +-- Pattern Matching (shell, scripts)
 +-- Typosquat Detection (npm + PyPI, Levenshtein)
 +-- Python Scanner (requirements.txt, setup.py, pyproject.toml)
++-- Analyse Entropie Shannon
 +-- GitHub Actions Scanner
 +-- Paranoid Mode (ultra-strict)
 +-- Docker Sandbox (behavioral analysis, network capture)
