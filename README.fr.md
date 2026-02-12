@@ -1,11 +1,5 @@
 <p align="center">
-  <img src="assets/logo2removebg.png" alt="MUAD'DIB Logo" width="200">
-</p>
-
-<h1 align="center">MUAD'DIB</h1>
-
-<p align="center">
-  <strong>Détection et réponse aux menaces supply-chain npm & PyPI</strong>
+  <img src="assets/logo2removebg.png" alt="MUAD'DIB Logo" width="700">
 </p>
 
 <p align="center">
