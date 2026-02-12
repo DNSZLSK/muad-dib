@@ -164,7 +164,11 @@ Couverture complete des scanners, parsers, IOC matching, typosquatting, et integ
 | Technique | ID | Detection MUAD'DIB |
 |-----------|----|--------------------|
 | Credentials in Files | T1552.001 | AST analysis |
+| Private Keys (.ssh/id_rsa) | T1552.004 | AST analysis |
 | Command and Scripting Interpreter | T1059 | Pattern matching |
+| Unix Shell (reverse shell, netcat) | T1059.004 | Pattern matching |
+| JavaScript (eval, new Function) | T1059.007 | AST analysis |
+| Application Layer Protocol (DNS/HTTP) | T1071 | Sandbox network capture |
 | Supply Chain Compromise (npm) | T1195.002 | IOC matching |
 | PyPI Supply Chain Compromise | T1195.002 | IOC matching |
 | PyPI Typosquatting | T1195.002 | Levenshtein + PEP 503 |
@@ -172,6 +176,9 @@ Couverture complete des scanners, parsers, IOC matching, typosquatting, et integ
 | Exfiltration Over C2 Channel | T1041 | Dataflow analysis |
 | Data Destruction | T1485 | Pattern matching |
 | Ingress Tool Transfer | T1105 | Pattern matching |
+| Endpoint Denial of Service | T1499 | Sandbox timeout detection |
+| Create or Modify System Process | T1543 | Sandbox filesystem diff |
+| Stored Data Manipulation | T1565.001 | Sandbox file write detection |
 
 ## Recommandations
 

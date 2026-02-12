@@ -21,7 +21,7 @@
 <p align="center">
   <a href="#installation">Installation</a> |
   <a href="#utilisation">Utilisation</a> |
-  <a href="#features">Features</a> |
+  <a href="#fonctionnalités">Fonctionnalités</a> |
   <a href="#vs-code">VS Code</a> |
   <a href="#ci-cd">CI/CD</a>
 </p>
@@ -126,7 +126,7 @@ Affiche pour chaque détection :
 
 ```bash
 muaddib scan . --json > results.json     # JSON
-muaddib scan . --html rapport.html       # HTML
+muaddib scan . --html report.html        # HTML
 muaddib scan . --sarif results.sarif     # SARIF (GitHub Security)
 ```
 
@@ -287,7 +287,7 @@ Ajoutez à `.pre-commit-config.yaml` :
 ```yaml
 repos:
   - repo: https://github.com/DNSZLSK/muad-dib
-    rev: v1.4.1
+    rev: v1.6.11
     hooks:
       - id: muaddib-scan        # Scanner toutes les menaces
       # - id: muaddib-diff      # Ou: seulement les nouvelles
@@ -323,9 +323,9 @@ MUAD'DIB vérifie automatiquement les nouvelles versions au démarrage et vous n
 
 ---
 
-## Features
+## Fonctionnalités
 
-### Python / PyPI
+### Support Python / PyPI
 
 MUAD'DIB détecte et scanne automatiquement les projets Python :
 

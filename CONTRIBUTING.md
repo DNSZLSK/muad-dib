@@ -62,9 +62,16 @@ Open an issue with:
 ### 5. Report missed detections
 
 Open an issue with:
-- Malicious package name
+- Malicious package name (npm or PyPI)
 - What it does
 - Links to advisories
+
+### 6. Improve Python/PyPI support
+
+MUAD'DIB scans Python projects via `src/scanner/python.js` (requirements.txt, setup.py, pyproject.toml). PyPI IOCs come from the OSV dump (14,000+ malicious packages). To contribute:
+- Add PyPI IOCs to the YAML database
+- Improve Python dependency parsing in `src/scanner/python.js`
+- Add popular PyPI packages to the typosquatting whitelist in `src/scanner/typosquat.js`
 
 ## Development
 ```bash
