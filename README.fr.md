@@ -30,7 +30,7 @@
 
 Les attaques supply-chain npm et PyPI explosent. Shai-Hulud a compromis 25K+ repos en 2025. Les outils existants détectent, mais n'aident pas à répondre.
 
-MUAD'DIB détecte ET guide votre réponse.
+MUAD'DIB combine analyse statique + analyse dynamique (sandbox Docker) pour détecter les menaces ET guider votre réponse.
 
 ---
 
@@ -196,7 +196,9 @@ muaddib sandbox <nom-package>
 muaddib sandbox <nom-package> --strict
 ```
 
-Analyse un package dans un container Docker isolé avec monitoring multi-couches :
+Analyse dynamique : installe le package dans un container Docker isolé et surveille le comportement à l'exécution via strace, tcpdump et diff filesystem.
+
+Monitoring multi-couches :
 - **Traçage système** (strace) : accès fichiers, spawn de processus, monitoring syscalls
 - **Capture réseau** (tcpdump) : résolutions DNS avec IPs résolues, requêtes HTTP (méthode, host, path, body), détection TLS SNI
 - **Diff filesystem** : snapshot avant/après install, détecte les fichiers créés dans des emplacements suspects
@@ -385,7 +387,7 @@ Détecte les patterns malveillants dans les fichiers YAML `.github/workflows/`, 
 | Typosquatting (npm + PyPI) | T1195.002 | Levenshtein |
 | Supply chain compromise | T1195.002 | IOC matching |
 | Package PyPI malveillant | T1195.002 | IOC matching |
-| Analyse comportementale sandbox | Multiple | Docker + strace + tcpdump |
+| Sandbox analyse dynamique | Multiple | Docker + strace + tcpdump |
 
 ---
 

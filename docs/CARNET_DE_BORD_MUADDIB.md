@@ -72,7 +72,7 @@ Résultat : 54 faux positifs d'un coup. Le package `qs` (utilisé par Express) �
 
 J'ai dû retirer GitHub Advisory du scraper. MUAD'DIB est un scanner **anti-malware**, pas un scanner de vulnérabilités. Pour les CVE, il y a `npm audit` ou Snyk.
 
-### Le sandbox Docker
+### Le sandbox Docker (analyse dynamique)
 
 Après l'analyse statique, j'ai voulu aller plus loin : exécuter le code suspect dans un environnement isolé pour voir ce qu'il fait vraiment.
 
@@ -381,7 +381,7 @@ Toutes les docs sont maintenant synchronisees avec le code v1.6.11.
 | Exports | JSON, HTML, SARIF |
 | Extension VS Code | Publiée sur Marketplace |
 | Webhooks | Discord / Slack (envoi uniquement si menaces détectées) |
-| Docker Sandbox | Analyse comportementale isolée (strace, tcpdump, filesystem diff, DNS/HTTP/TLS capture, 16 patterns exfiltration, mode strict iptables) |
+| Docker Sandbox (analyse dynamique) | Analyse comportementale isolée (strace, tcpdump, filesystem diff, DNS/HTTP/TLS capture, 16 patterns exfiltration, mode strict iptables) |
 | GitHub Actions Backdoor | Détection discussion.yaml (Shai-Hulud 2.0) |
 | **Diff entre versions** | Compare et montre uniquement les NOUVELLES menaces |
 | **Pre-commit hooks** | Support pre-commit, husky, git natif |

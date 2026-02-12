@@ -82,7 +82,7 @@
 | `--ignore-scripts` | Les `npm install` internes (sandbox, safe-install) utilisent le flag `--ignore-scripts` pour empecher l'execution de preinstall/postinstall malveillants |
 | Symlink protection | `lstatSync` est utilise pour detecter les liens symboliques et eviter les boucles infinies ou l'acces a des fichiers hors scope |
 | XSS dans rapports HTML | Les donnees utilisateur dans les rapports HTML sont echappees via `escapeHtml()` |
-| Docker sandbox | L'analyse sandbox valide le nom du package avant passage au container Docker |
+| Docker sandbox (analyse dynamique) | L'analyse sandbox valide le nom du package avant passage au container Docker |
 
 ## Resultats des tests adversariaux
 
@@ -169,7 +169,7 @@ Couverture complete des scanners, parsers, IOC matching, typosquatting, et integ
 | Command and Scripting Interpreter | T1059 | Pattern matching |
 | Unix Shell (reverse shell, netcat) | T1059.004 | Pattern matching |
 | JavaScript (eval, new Function) | T1059.007 | AST analysis |
-| Application Layer Protocol (DNS/HTTP) | T1071 | Sandbox network capture |
+| Application Layer Protocol (DNS/HTTP) | T1071 | Sandbox dynamic analysis (network capture) |
 | Supply Chain Compromise (npm) | T1195.002 | IOC matching |
 | PyPI Supply Chain Compromise | T1195.002 | IOC matching |
 | PyPI Typosquatting | T1195.002 | Levenshtein + PEP 503 |
@@ -178,9 +178,9 @@ Couverture complete des scanners, parsers, IOC matching, typosquatting, et integ
 | Exfiltration Over C2 Channel | T1041 | Dataflow analysis |
 | Data Destruction | T1485 | Pattern matching |
 | Ingress Tool Transfer | T1105 | Pattern matching |
-| Endpoint Denial of Service | T1499 | Sandbox timeout detection |
-| Create or Modify System Process | T1543 | Sandbox filesystem diff |
-| Stored Data Manipulation | T1565.001 | Sandbox file write detection |
+| Endpoint Denial of Service | T1499 | Sandbox dynamic analysis (timeout detection) |
+| Create or Modify System Process | T1543 | Sandbox dynamic analysis (filesystem diff) |
+| Stored Data Manipulation | T1565.001 | Sandbox dynamic analysis (file write detection) |
 
 ## Recommandations
 
