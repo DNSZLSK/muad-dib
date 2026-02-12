@@ -7,6 +7,137 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.11] - 2026-02-12
+
+### Fixed
+- Remove Codecov token requirement for CI coverage uploads
+- Documentation corrections: SECURITY.md webhook domains, PyPI scope, version table, dependency count
+- Update test count (296) and scanner count (11) across all docs
+
+## [1.6.10] - 2026-02-12
+
+### Added
+- 296 tests total (73.75% coverage) — webhook 93%, sandbox 71%, hooks-init 81%
+- `--exclude` flag for scan command, CI self-scan excludes tests/ and docker/
+
+### Fixed
+- `imageExists` test works with or without Docker installed
+
+### Security
+- Audit v2: 27 HIGH issues corrected, CI self-scan with `--fail-on critical`
+- Audit v3: 21 HIGH issues corrected, 0 CRITICAL remaining
+
+## [1.6.8] - 2026-02-11
+
+### Fixed
+- Post-audit corrections: fail-closed design, warnings, package validation
+- Sync package-lock.json
+
+### Security
+- Complete security audit: 114 issues corrected across 5 waves
+
+## [1.6.7] - 2026-02-11
+
+### Fixed
+- Separate `muaddib update` (fast, ~5s, compact IOCs) and `muaddib scrape` (full, ~5min, OSV dumps)
+
+## [1.6.6] - 2026-02-11
+
+### Fixed
+- CLI spinner with npm-style progress for downloads and parsing
+
+## [1.6.5] - 2026-02-11
+
+### Fixed
+- `muaddib update` now triggers live scrape with progress feedback
+
+## [1.6.4] - 2026-02-11
+
+### Added
+- **Sandbox network analysis** — DNS/HTTP/TLS capture, data exfiltration detection (16 patterns), strict mode with iptables, network report command
+
+### Changed
+- Bump eslint to 10.0.0, @eslint/js to 10.0.1
+
+## [1.6.3] - 2026-02-11
+
+### Fixed
+- Minor fixes and improvements
+
+## [1.6.2] - 2026-02-11
+
+### Added
+- **Python/PyPI support** — `src/scanner/python.js` parses requirements.txt, setup.py, pyproject.toml
+- **PyPI IOC matching** — 10,000+ malicious PyPI packages from OSV dump
+- **PyPI typosquatting detection** — Levenshtein distance with PEP 503 name normalization
+- Python scan integration in main `Promise.all()` (11 scanners total)
+
+## [1.6.1] - 2026-02-10
+
+### Fixed
+- Exclude 111MB iocs.json from git tracking
+
+## [1.6.0] - 2026-02-10
+
+### Added
+- **IOC expansion to 225,000+ packages** — bulk OSV npm + PyPI dumps
+- **Multi-factor typosquatting** — npm registry API metadata, composite scoring engine, metadata cache
+
+## [1.5.0] - 2026-02-10
+
+### Added
+- **Behavioral sandbox** — strace system tracing, tcpdump network capture, filesystem diff before/after install
+- JSON structured report for sandbox findings
+- Sandbox scoring engine (0-100 risk score)
+
+## [1.4.3] - 2026-02-10
+
+### Fixed
+- Smart `env_access` detection to reduce false positives
+- Alert deduplication for repeated threats on same file
+- `muaddib version` command output
+
+## [1.4.2] - 2026-02-10
+
+### Added
+- Security audit report PDF (`docs/MUADDIB_Security_Audit_Report_v1.4.1.pdf`)
+- Updated README, threat-model, carnet de bord for v1.4.1
+
+## [1.4.1] - 2026-02-09
+
+### Security
+- Fix 25 remaining audit issues (5 high, 11 medium, 9 low)
+- YAML unsafe loading: enforce `JSON_SCHEMA` on all `yaml.load()` calls
+- SSRF protection in IOC fetcher with redirect validation
+- 18 missing rules added to `src/rules/index.js`
+
+## [1.4.0] - 2026-02-09
+
+### Security
+- Fix 30 audit issues (3 critical, 9 high, 11 medium, 10 low)
+- Total: **58 security issues fixed** across v1.4.0 and v1.4.1
+
+## [1.3.1] - 2026-02-09
+
+### Added
+- Codecov coverage upload in CI pipeline
+- 145 tests total (coverage improved from 52% to 81%)
+
+## [1.3.0] - 2026-02-09
+
+### Added
+- **SECURITY.md** — security policy, vulnerability reporting, SSRF/XSS protections documented
+- **Version check on startup** — notifies users of available updates
+- Dependabot configuration for automated dependency updates
+- GitHub Action moved to repository root for Marketplace publishing
+
+### Changed
+- Refactor: audit + quick wins (CVE fixes, DRY improvements, performance, tooling)
+- Bump acorn 8.14.0 → 8.15.0, js-yaml 4.1.0 → 4.1.1, @inquirer/prompts 8.1.0 → 8.2.0
+
+### Fixed
+- Clean gitignore, remove generated files from repository
+
 ## [1.2.7] - 2026-01-29
 
 ### Added
@@ -141,7 +272,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Obfuscation detection
 - Package.json lifecycle script analysis
 
-[Unreleased]: https://github.com/DNSZLSK/muad-dib/compare/v1.2.7...HEAD
+[Unreleased]: https://github.com/DNSZLSK/muad-dib/compare/v1.6.11...HEAD
+[1.6.11]: https://github.com/DNSZLSK/muad-dib/compare/v1.6.10...v1.6.11
+[1.6.10]: https://github.com/DNSZLSK/muad-dib/compare/v1.6.8...v1.6.10
+[1.6.8]: https://github.com/DNSZLSK/muad-dib/compare/v1.6.7...v1.6.8
+[1.6.7]: https://github.com/DNSZLSK/muad-dib/compare/v1.6.6...v1.6.7
+[1.6.6]: https://github.com/DNSZLSK/muad-dib/compare/v1.6.5...v1.6.6
+[1.6.5]: https://github.com/DNSZLSK/muad-dib/compare/v1.6.4...v1.6.5
+[1.6.4]: https://github.com/DNSZLSK/muad-dib/compare/v1.6.3...v1.6.4
+[1.6.3]: https://github.com/DNSZLSK/muad-dib/compare/v1.6.2...v1.6.3
+[1.6.2]: https://github.com/DNSZLSK/muad-dib/compare/v1.6.1...v1.6.2
+[1.6.1]: https://github.com/DNSZLSK/muad-dib/compare/v1.6.0...v1.6.1
+[1.6.0]: https://github.com/DNSZLSK/muad-dib/compare/v1.5.0...v1.6.0
+[1.5.0]: https://github.com/DNSZLSK/muad-dib/compare/v1.4.3...v1.5.0
+[1.4.3]: https://github.com/DNSZLSK/muad-dib/compare/v1.4.2...v1.4.3
+[1.4.2]: https://github.com/DNSZLSK/muad-dib/compare/v1.4.1...v1.4.2
+[1.4.1]: https://github.com/DNSZLSK/muad-dib/compare/v1.4.0...v1.4.1
+[1.4.0]: https://github.com/DNSZLSK/muad-dib/compare/v1.3.1...v1.4.0
+[1.3.1]: https://github.com/DNSZLSK/muad-dib/compare/v1.3.0...v1.3.1
+[1.3.0]: https://github.com/DNSZLSK/muad-dib/compare/v1.2.7...v1.3.0
 [1.2.7]: https://github.com/DNSZLSK/muad-dib/compare/v1.2.6...v1.2.7
 [1.2.6]: https://github.com/DNSZLSK/muad-dib/compare/v1.2.5...v1.2.6
 [1.2.5]: https://github.com/DNSZLSK/muad-dib/compare/v1.2.4...v1.2.5
