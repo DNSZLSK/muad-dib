@@ -21,7 +21,7 @@
 <p align="center">
   <a href="#installation">Installation</a> |
   <a href="#utilisation">Utilisation</a> |
-  <a href="#features">Features</a> |
+  <a href="#fonctionnalités">Fonctionnalités</a> |
   <a href="#vs-code">VS Code</a> |
   <a href="#ci-cd">CI/CD</a>
 </p>
@@ -126,7 +126,7 @@ Affiche pour chaque détection :
 
 ```bash
 muaddib scan . --json > results.json     # JSON
-muaddib scan . --html rapport.html       # HTML
+muaddib scan . --html report.html        # HTML
 muaddib scan . --sarif results.sarif     # SARIF (GitHub Security)
 ```
 
@@ -287,7 +287,7 @@ Ajoutez à `.pre-commit-config.yaml` :
 ```yaml
 repos:
   - repo: https://github.com/DNSZLSK/muad-dib
-    rev: v1.4.1
+    rev: v1.6.11
     hooks:
       - id: muaddib-scan        # Scanner toutes les menaces
       # - id: muaddib-diff      # Ou: seulement les nouvelles
@@ -323,9 +323,9 @@ MUAD'DIB vérifie automatiquement les nouvelles versions au démarrage et vous n
 
 ---
 
-## Features
+## Fonctionnalités
 
-### Python / PyPI
+### Support Python / PyPI
 
 MUAD'DIB détecte et scanne automatiquement les projets Python :
 
@@ -549,7 +549,7 @@ npm test
 
 ### Tests
 
-- **218 tests unitaires/intégration** - 80% coverage via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
+- **296 tests unitaires/intégration** - 80% coverage via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
 - **56 tests de fuzzing** - YAML malformé, JSON invalide, fichiers binaires, ReDoS, unicode, inputs 10MB
 - **15 tests adversariaux** - Packages malveillants simulés, taux de détection 15/15
 - **Audit ESLint sécurité** - `eslint-plugin-security` avec 14 règles activées
