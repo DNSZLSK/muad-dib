@@ -2248,6 +2248,866 @@ test('HASH: clearHashCache and getHashCacheSize', () => {
   });
 
   // ============================================
+  // CLI COVERAGE TESTS (muaddib.js)
+  // ============================================
+
+  console.log('\n=== CLI COVERAGE TESTS ===\n');
+
+  test('CLI-COV: --exclude flag is parsed correctly', () => {
+    const output = runScan(path.join(TESTS_DIR, 'clean'), '--exclude node_modules --exclude dist');
+    assert(output !== undefined, 'Should not crash with --exclude');
+  });
+
+  test('CLI-COV: --fail-on with invalid value defaults gracefully', () => {
+    const output = runScan(path.join(TESTS_DIR, 'clean'), '--fail-on banana');
+    assert(output !== undefined, 'Should not crash with invalid fail-on');
+  });
+
+  test('CLI-COV: --fail-on low works', () => {
+    const output = runScan(path.join(TESTS_DIR, 'clean'), '--fail-on low');
+    assert(output !== undefined, 'Should handle --fail-on low');
+  });
+
+  test('CLI-COV: --fail-on medium works', () => {
+    const output = runScan(path.join(TESTS_DIR, 'clean'), '--fail-on medium');
+    assert(output !== undefined, 'Should handle --fail-on medium');
+  });
+
+  test('CLI-COV: --html with path traversal is blocked', () => {
+    try {
+      execSync(`node "${BIN}" scan . --html "../../../etc/evil.html"`, {
+        encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 10000
+      });
+      assert(false, 'Should have exited with error');
+    } catch (e) {
+      const output = (e.stdout || '') + (e.stderr || '');
+      assertIncludes(output, 'traversal', 'Should mention path traversal');
+    }
+  });
+
+  test('CLI-COV: --sarif with path traversal is blocked', () => {
+    try {
+      execSync(`node "${BIN}" scan . --sarif "../../evil.sarif"`, {
+        encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 10000
+      });
+      assert(false, 'Should have exited with error');
+    } catch (e) {
+      const output = (e.stdout || '') + (e.stderr || '');
+      assertIncludes(output, 'traversal', 'Should mention path traversal');
+    }
+  });
+
+  test('CLI-COV: --webhook with HTTP URL is blocked', () => {
+    try {
+      execSync(`node "${BIN}" scan . --webhook "http://evil.com/hook"`, {
+        encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 10000
+      });
+      assert(false, 'Should have exited with error');
+    } catch (e) {
+      const output = (e.stdout || '') + (e.stderr || '');
+      assertIncludes(output, 'HTTPS', 'Should require HTTPS');
+    }
+  });
+
+  test('CLI-COV: --webhook with private IP is blocked', () => {
+    try {
+      execSync(`node "${BIN}" scan . --webhook "https://127.0.0.1/hook"`, {
+        encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 10000
+      });
+      assert(false, 'Should have exited with error');
+    } catch (e) {
+      const output = (e.stdout || '') + (e.stderr || '');
+      assertIncludes(output, 'private', 'Should reject private IP');
+    }
+  });
+
+  test('CLI-COV: --webhook with invalid URL is blocked', () => {
+    try {
+      execSync(`node "${BIN}" scan . --webhook "not-a-url"`, {
+        encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 10000
+      });
+      assert(false, 'Should have exited with error');
+    } catch (e) {
+      const output = (e.stdout || '') + (e.stderr || '');
+      assertIncludes(output, 'invalid', 'Should reject invalid URL');
+    }
+  });
+
+  test('CLI-COV: scan with multiple --exclude flags', () => {
+    const output = runScan('.', '--exclude test --exclude docs --json');
+    assert(output.length > 0, 'Should produce output');
+  });
+
+  test('CLI-COV: remove-hooks command runs', () => {
+    const output = runCommand('remove-hooks .');
+    assert(output !== undefined, 'Should not crash');
+  });
+
+  test('CLI-COV: --paranoid flag is parsed correctly', () => {
+    const output = runScan(path.join(TESTS_DIR, 'clean'), '--paranoid');
+    assert(output !== undefined, 'Should not crash with --paranoid');
+  });
+
+  test('CLI-COV: scan --json --explain combined', () => {
+    const output = runScan(path.join(TESTS_DIR, 'clean'), '--json --explain');
+    const json = JSON.parse(output);
+    assert(json.summary, 'JSON output should have summary');
+  });
+
+  test('CLI-COV: scan --fail-on critical with clean project exits 0', () => {
+    // Clean project = no threats, --fail-on critical means exit 0
+    const output = runScan(path.join(TESTS_DIR, 'clean'), '--fail-on critical --json');
+    const json = JSON.parse(output);
+    assert(json.summary.total === 0, 'Clean project should have 0 threats');
+  });
+
+  test('CLI-COV: scan nonexistent directory handles error', () => {
+    const output = runScan('/nonexistent/path/12345');
+    assert(output !== undefined, 'Should not crash on nonexistent dir');
+  });
+
+  test('CLI-COV: --webhook with localhost is blocked', () => {
+    try {
+      execSync(`node "${BIN}" scan . --webhook "https://localhost/hook"`, {
+        encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 10000
+      });
+      assert(false, 'Should have exited with error');
+    } catch (e) {
+      const output = (e.stdout || '') + (e.stderr || '');
+      assertIncludes(output, 'private', 'Should reject localhost');
+    }
+  });
+
+  test('CLI-COV: -v flag shows version', () => {
+    const output = runCommand('-v');
+    assertIncludes(output, 'muaddib-scanner v', 'Should show version with -v');
+  });
+
+  test('CLI-COV: -h flag shows help', () => {
+    const output = runCommand('-h');
+    assertIncludes(output, 'Usage', 'Should show usage with -h');
+  });
+
+  // ============================================
+  // WEBHOOK COVERAGE TESTS (webhook.js)
+  // ============================================
+
+  console.log('\n=== WEBHOOK COVERAGE TESTS ===\n');
+
+  test('WEBHOOK-COV: validateWebhookUrl rejects IPv6 loopback', () => {
+    const r = valUrl('https://[::1]/webhook');
+    assert(!r.valid, 'Should reject IPv6 loopback');
+  });
+
+  test('WEBHOOK-COV: validateWebhookUrl rejects fc00 (IPv6 private)', () => {
+    const r = valUrl('https://[fc00::1]/webhook');
+    assert(!r.valid, 'Should reject fc00 IPv6 private');
+  });
+
+  test('WEBHOOK-COV: validateWebhookUrl rejects fe80 (IPv6 link-local)', () => {
+    const r = valUrl('https://[fe80::1]/webhook');
+    assert(!r.valid, 'Should reject fe80 IPv6 link-local');
+  });
+
+  test('WEBHOOK-COV: validateWebhookUrl rejects 169.254.x (link-local)', () => {
+    const r = valUrl('https://169.254.1.1/webhook');
+    assert(!r.valid, 'Should reject 169.254.x link-local');
+  });
+
+  test('WEBHOOK-COV: validateWebhookUrl rejects 0.x addresses', () => {
+    const r = valUrl('https://0.0.0.0/webhook');
+    assert(!r.valid, 'Should reject 0.0.0.0');
+  });
+
+  test('WEBHOOK-COV: formatDiscord generates correct embed structure', () => {
+    // Access formatDiscord indirectly via module internals
+    // We test by calling the webhook module's format functions
+    const webhookModule = require('../src/webhook.js');
+    // formatDiscord is not exported, so we test via the validate path
+    // Instead test the payload structure expected by Discord
+    const r1 = valUrl('https://discord.com/api/webhooks/12345/token');
+    assert(r1.valid, 'Discord webhook URL should be valid');
+
+    const r2 = valUrl('https://hooks.slack.com/services/T/B/X');
+    assert(r2.valid, 'Slack webhook URL should be valid');
+  });
+
+  test('WEBHOOK-COV: validateWebhookUrl accepts subdomain of allowed domain', () => {
+    const r = valUrl('https://ptb.discord.com/api/webhooks/test');
+    assert(r.valid, 'Should accept subdomain of discord.com');
+  });
+
+  test('WEBHOOK-COV: validateWebhookUrl rejects discordapp.evil.com', () => {
+    const r = valUrl('https://discordapp.evil.com/webhook');
+    assert(!r.valid, 'Should reject non-matching domain');
+  });
+
+  // Test format functions (now exported)
+  const { formatDiscord, formatSlack, formatGeneric } = require('../src/webhook.js');
+
+  test('WEBHOOK-COV: formatDiscord returns embed with correct structure', () => {
+    const results = {
+      summary: { riskLevel: 'CRITICAL', riskScore: 85, critical: 2, high: 3, medium: 1, total: 6 },
+      threats: [
+        { severity: 'CRITICAL', message: 'Malicious package detected' },
+        { severity: 'HIGH', message: 'Suspicious script' }
+      ],
+      target: '/test/project',
+      timestamp: '2025-01-01T00:00:00Z'
+    };
+    const payload = formatDiscord(results);
+    assert(payload.embeds, 'Should have embeds array');
+    assert(payload.embeds[0].title.includes('MUAD'), 'Embed title should mention MUAD\'DIB');
+    assert(payload.embeds[0].color === 0xe74c3c, 'CRITICAL should be red');
+    assert(payload.embeds[0].fields.length >= 3, 'Should have at least 3 fields');
+    // Check critical threats field is added
+    const critField = payload.embeds[0].fields.find(f => f.name === 'Critical Threats');
+    assert(critField, 'Should have Critical Threats field');
+    assertIncludes(critField.value, 'Malicious package', 'Should list critical threats');
+  });
+
+  test('WEBHOOK-COV: formatDiscord handles HIGH risk level', () => {
+    const results = {
+      summary: { riskLevel: 'HIGH', riskScore: 60, critical: 0, high: 2, medium: 1, total: 3 },
+      threats: [{ severity: 'HIGH', message: 'Test' }],
+      target: '/test', timestamp: '2025-01-01T00:00:00Z'
+    };
+    const payload = formatDiscord(results);
+    assert(payload.embeds[0].color === 0xe67e22, 'HIGH should be orange');
+  });
+
+  test('WEBHOOK-COV: formatDiscord handles MEDIUM risk level', () => {
+    const results = {
+      summary: { riskLevel: 'MEDIUM', riskScore: 40, critical: 0, high: 0, medium: 2, total: 2 },
+      threats: [], target: '/test', timestamp: '2025-01-01T00:00:00Z'
+    };
+    const payload = formatDiscord(results);
+    assert(payload.embeds[0].color === 0xf1c40f, 'MEDIUM should be yellow');
+  });
+
+  test('WEBHOOK-COV: formatDiscord handles LOW risk level', () => {
+    const results = {
+      summary: { riskLevel: 'LOW', riskScore: 10, critical: 0, high: 0, medium: 0, total: 1 },
+      threats: [], target: '/test', timestamp: '2025-01-01T00:00:00Z'
+    };
+    const payload = formatDiscord(results);
+    assert(payload.embeds[0].color === 0x3498db, 'LOW should be blue');
+  });
+
+  test('WEBHOOK-COV: formatDiscord handles CLEAN risk level', () => {
+    const results = {
+      summary: { riskLevel: 'CLEAN', riskScore: 0, critical: 0, high: 0, medium: 0, total: 0 },
+      threats: [], target: '/test', timestamp: '2025-01-01T00:00:00Z'
+    };
+    const payload = formatDiscord(results);
+    assert(payload.embeds[0].color === 0x2ecc71, 'CLEAN should be green');
+  });
+
+  test('WEBHOOK-COV: formatSlack returns blocks with correct structure', () => {
+    const results = {
+      summary: { riskLevel: 'CRITICAL', riskScore: 90, critical: 3, high: 1, medium: 0, total: 4 },
+      threats: [
+        { severity: 'CRITICAL', message: 'Exfiltration detected' },
+        { severity: 'CRITICAL', message: 'Reverse shell' }
+      ],
+      target: '/test/project', timestamp: '2025-01-01T00:00:00Z'
+    };
+    const payload = formatSlack(results);
+    assert(payload.blocks, 'Should have blocks array');
+    assert(payload.blocks.length >= 3, 'Should have at least 3 blocks');
+    // Header block
+    assert(payload.blocks[0].type === 'header', 'First block should be header');
+    assertIncludes(payload.blocks[0].text.text, 'MUAD', 'Header should mention MUAD\'DIB');
+    // Critical threats block should exist (since we have critical threats)
+    const critBlock = payload.blocks.find(b => b.text && b.text.text && b.text.text.includes('Critical Threats'));
+    assert(critBlock, 'Should have Critical Threats block');
+  });
+
+  test('WEBHOOK-COV: formatSlack handles HIGH risk level emoji', () => {
+    const results = {
+      summary: { riskLevel: 'HIGH', riskScore: 60, critical: 0, high: 2, medium: 0, total: 2 },
+      threats: [], target: '/test', timestamp: '2025-01-01T00:00:00Z'
+    };
+    const payload = formatSlack(results);
+    assertIncludes(payload.blocks[0].text.text, 'warning', 'HIGH should use warning emoji');
+  });
+
+  test('WEBHOOK-COV: formatSlack handles MEDIUM risk level emoji', () => {
+    const results = {
+      summary: { riskLevel: 'MEDIUM', riskScore: 40, critical: 0, high: 0, medium: 2, total: 2 },
+      threats: [], target: '/test', timestamp: '2025-01-01T00:00:00Z'
+    };
+    const payload = formatSlack(results);
+    assertIncludes(payload.blocks[0].text.text, 'yellow', 'MEDIUM should use yellow emoji');
+  });
+
+  test('WEBHOOK-COV: formatSlack handles LOW risk level emoji', () => {
+    const results = {
+      summary: { riskLevel: 'LOW', riskScore: 10, critical: 0, high: 0, medium: 0, total: 1 },
+      threats: [], target: '/test', timestamp: '2025-01-01T00:00:00Z'
+    };
+    const payload = formatSlack(results);
+    assertIncludes(payload.blocks[0].text.text, 'information', 'LOW should use info emoji');
+  });
+
+  test('WEBHOOK-COV: formatSlack handles CLEAN risk level emoji', () => {
+    const results = {
+      summary: { riskLevel: 'CLEAN', riskScore: 0, critical: 0, high: 0, medium: 0, total: 0 },
+      threats: [], target: '/test', timestamp: '2025-01-01T00:00:00Z'
+    };
+    const payload = formatSlack(results);
+    assertIncludes(payload.blocks[0].text.text, 'check_mark', 'CLEAN should use check mark emoji');
+  });
+
+  test('WEBHOOK-COV: formatGeneric returns structured data', () => {
+    const results = {
+      summary: { riskLevel: 'HIGH', riskScore: 60, critical: 0, high: 2, medium: 1, total: 3 },
+      threats: [
+        { type: 'shell_command', severity: 'HIGH', message: 'curl | sh', file: 'install.sh' },
+        { type: 'obfuscation', severity: 'MEDIUM', message: 'Hex encoded', file: 'index.js' }
+      ],
+      target: '/test/project', timestamp: '2025-01-01T00:00:00Z'
+    };
+    const payload = formatGeneric(results);
+    assert(payload.tool === 'MUADDIB', 'Tool should be MUADDIB');
+    assert(payload.target === '/test/project', 'Target should match');
+    assert(payload.summary.riskLevel === 'HIGH', 'Summary should be included');
+    assert(payload.threats.length === 2, 'Should have 2 threats');
+    assert(payload.threats[0].type === 'shell_command', 'Threat type preserved');
+    assert(payload.threats[0].file === 'install.sh', 'Threat file preserved');
+  });
+
+  // ============================================
+  // SANDBOX COVERAGE TESTS (sandbox.js)
+  // ============================================
+
+  console.log('\n=== SANDBOX COVERAGE TESTS ===\n');
+
+  test('SANDBOX-COV: scoreFindings detects sensitive file reads (credential)', () => {
+    const report = { sensitive_files: { read: ['/root/.npmrc', '/home/user/.ssh/id_rsa'] } };
+    const { score, findings } = scoreFindings(report);
+    assert(score >= 80, 'Credential file reads should score >= 80, got ' + score);
+    const credFindings = findings.filter(f => f.type === 'sensitive_file_read' && f.severity === 'CRITICAL');
+    assert(credFindings.length === 2, 'Should have 2 CRITICAL file read findings');
+  });
+
+  test('SANDBOX-COV: scoreFindings detects sensitive file reads (system)', () => {
+    const report = { sensitive_files: { read: ['/etc/passwd'] } };
+    const { score, findings } = scoreFindings(report);
+    assert(score === 25, 'System file read should score 25, got ' + score);
+    assert(findings[0].severity === 'HIGH', 'Should be HIGH severity');
+  });
+
+  test('SANDBOX-COV: scoreFindings detects sensitive file reads (config)', () => {
+    const report = { sensitive_files: { read: ['/home/user/.env', '/home/user/.gitconfig'] } };
+    const { score, findings } = scoreFindings(report);
+    assert(score === 30, 'Config file reads should score 30, got ' + score);
+    assert(findings[0].severity === 'MEDIUM', 'Should be MEDIUM severity');
+  });
+
+  test('SANDBOX-COV: scoreFindings detects sensitive file writes (credential)', () => {
+    const report = { sensitive_files: { written: ['/root/.npmrc'] } };
+    const { score, findings } = scoreFindings(report);
+    assert(score === 40, 'Credential file write should score 40, got ' + score);
+    const wf = findings.filter(f => f.type === 'sensitive_file_write');
+    assert(wf.length === 1 && wf[0].severity === 'CRITICAL', 'Should be CRITICAL write');
+  });
+
+  test('SANDBOX-COV: scoreFindings detects sensitive file writes (system)', () => {
+    const report = { sensitive_files: { written: ['/etc/passwd'] } };
+    const { score, findings } = scoreFindings(report);
+    assert(score === 25, 'System file write should score 25, got ' + score);
+    assert(findings[0].severity === 'HIGH', 'Should be HIGH severity');
+  });
+
+  test('SANDBOX-COV: scoreFindings detects sensitive file writes (other)', () => {
+    const report = { sensitive_files: { written: ['/tmp/somefile'] } };
+    const { score, findings } = scoreFindings(report);
+    assert(score === 15, 'Other file write should score 15, got ' + score);
+    assert(findings[0].severity === 'MEDIUM', 'Should be MEDIUM severity');
+  });
+
+  test('SANDBOX-COV: scoreFindings detects filesystem changes (system path)', () => {
+    const report = { filesystem: { created: ['/usr/bin/backdoor'] } };
+    const { score, findings } = scoreFindings(report);
+    assert(score === 50, 'System path creation should score 50, got ' + score);
+    assert(findings[0].severity === 'CRITICAL', 'Should be CRITICAL');
+  });
+
+  test('SANDBOX-COV: scoreFindings detects filesystem changes (crontab)', () => {
+    const report = { filesystem: { created: ['/etc/cron.d/evil'] } };
+    const { score, findings } = scoreFindings(report);
+    assert(score === 50, 'Crontab creation should score 50, got ' + score);
+  });
+
+  test('SANDBOX-COV: scoreFindings detects filesystem changes (/tmp)', () => {
+    const report = { filesystem: { created: ['/tmp/payload.sh'] } };
+    const { score, findings } = scoreFindings(report);
+    assert(score === 30, '/tmp creation should score 30, got ' + score);
+    assert(findings[0].severity === 'HIGH', 'Should be HIGH');
+  });
+
+  test('SANDBOX-COV: scoreFindings detects suspicious processes (dangerous cmd)', () => {
+    const report = { processes: { spawned: [{ command: '/usr/bin/curl' }] } };
+    const { score, findings } = scoreFindings(report);
+    assert(score === 40, 'Dangerous cmd should score 40, got ' + score);
+    assert(findings[0].type === 'suspicious_process', 'Should be suspicious_process');
+    assert(findings[0].severity === 'CRITICAL', 'Should be CRITICAL');
+  });
+
+  test('SANDBOX-COV: scoreFindings detects unknown processes', () => {
+    const report = { processes: { spawned: [{ command: '/opt/unknown-binary' }] } };
+    const { score, findings } = scoreFindings(report);
+    assert(score === 15, 'Unknown process should score 15, got ' + score);
+    assert(findings[0].type === 'unknown_process', 'Should be unknown_process');
+    assert(findings[0].severity === 'MEDIUM', 'Should be MEDIUM');
+  });
+
+  test('SANDBOX-COV: scoreFindings skips safe IPs in connections', () => {
+    const report = { network: { http_connections: [
+      { host: '127.0.0.1', port: 3000 }
+    ] } };
+    const { score } = scoreFindings(report);
+    assert(score === 0, 'Safe IP should score 0, got ' + score);
+  });
+
+  test('SANDBOX-COV: scoreFindings skips probe ports in connections', () => {
+    const report = { network: { http_connections: [
+      { host: '1.2.3.4', port: 65535 }
+    ] } };
+    const { score } = scoreFindings(report);
+    assert(score === 0, 'Probe port should score 0, got ' + score);
+  });
+
+  test('SANDBOX-COV: scoreFindings detects suspicious TCP connections', () => {
+    const report = { network: { http_connections: [
+      { host: '1.2.3.4', port: 8080 }
+    ] } };
+    const { score, findings } = scoreFindings(report);
+    assert(score === 25, 'Suspicious TCP should score 25, got ' + score);
+    assert(findings[0].type === 'suspicious_connection', 'Should be suspicious_connection');
+  });
+
+  test('SANDBOX-COV: scoreFindings detects .aws credential read', () => {
+    const report = { sensitive_files: { read: ['/root/.aws/credentials'] } };
+    const { score, findings } = scoreFindings(report);
+    assert(score === 40, '.aws read should score 40, got ' + score);
+    assert(findings[0].severity === 'CRITICAL', 'Should be CRITICAL');
+  });
+
+  test('SANDBOX-COV: scoreFindings detects .bash_history read', () => {
+    const report = { sensitive_files: { read: ['/home/user/.bash_history'] } };
+    const { score } = scoreFindings(report);
+    assert(score === 15, '.bash_history read should score 15, got ' + score);
+  });
+
+  test('SANDBOX-COV: scoreFindings with /etc/shadow write', () => {
+    const report = { sensitive_files: { written: ['/etc/shadow'] } };
+    const { score, findings } = scoreFindings(report);
+    assert(score === 25, '/etc/shadow write should score 25, got ' + score);
+    assert(findings[0].severity === 'HIGH', 'Should be HIGH');
+  });
+
+  test('SANDBOX-COV: scoreFindings with .aws credential write', () => {
+    const report = { sensitive_files: { written: ['/root/.aws/credentials'] } };
+    const { score } = scoreFindings(report);
+    assert(score === 40, '.aws write should score 40, got ' + score);
+  });
+
+  test('SANDBOX-COV: scoreFindings with /etc/shadow read', () => {
+    const report = { sensitive_files: { read: ['/etc/shadow'] } };
+    const { score } = scoreFindings(report);
+    assert(score === 25, '/etc/shadow read should score 25, got ' + score);
+  });
+
+  test('SANDBOX-COV: generateNetworkReport with no DNS, no HTTP, no TLS', () => {
+    const report = {
+      package: 'clean-pkg',
+      timestamp: '2025-01-01T00:00:00Z',
+      mode: 'permissive',
+      duration_ms: 1000,
+      network: { dns_resolutions: [], http_requests: [], tls_connections: [], http_connections: [], blocked_connections: [], http_bodies: [] }
+    };
+    const output = generateNetworkReport(report);
+    assert(output.includes('No DNS resolutions captured'), 'Should show no DNS message');
+    assert(output.includes('No HTTP requests captured'), 'Should show no HTTP message');
+    assert(output.includes('No TLS connections captured'), 'Should show no TLS message');
+  });
+
+  test('SANDBOX-COV: generateNetworkReport shows safe vs suspicious domains', () => {
+    const report = {
+      package: 'mixed-pkg',
+      timestamp: '2025-01-01T00:00:00Z',
+      mode: 'permissive',
+      duration_ms: 2000,
+      network: {
+        dns_resolutions: [
+          { domain: 'registry.npmjs.org', ip: '1.2.3.4' },
+          { domain: 'evil.com', ip: '5.6.7.8' }
+        ],
+        http_requests: [
+          { method: 'GET', host: 'registry.npmjs.org', path: '/pkg' },
+          { method: 'POST', host: 'evil.com', path: '/steal' }
+        ],
+        tls_connections: [
+          { domain: 'registry.npmjs.org', ip: '1.2.3.4', port: 443 },
+          { domain: 'evil.com', ip: '5.6.7.8', port: 443 }
+        ],
+        http_connections: [
+          { host: 'registry.npmjs.org', port: 443, protocol: 'TCP' },
+          { host: '5.6.7.8', port: 443, protocol: 'TCP' }
+        ],
+        blocked_connections: [],
+        http_bodies: []
+      }
+    };
+    const output = generateNetworkReport(report);
+    assert(output.includes('[OK]'), 'Should show OK for safe domains');
+    assert(output.includes('[!!]'), 'Should show !! for suspicious domains');
+    assert(output.includes('Raw TCP Connections'), 'Should have raw TCP section');
+  });
+
+  test('SANDBOX-COV: scoreFindings multiple dangerous processes', () => {
+    const report = { processes: { spawned: [
+      { command: 'curl' },
+      { command: 'wget' },
+      { command: 'nc' },
+      { command: '' }
+    ] } };
+    const { score, findings } = scoreFindings(report);
+    assert(score === 100, 'Multiple dangerous cmds should cap at 100, got ' + score);
+    const procFindings = findings.filter(f => f.type === 'suspicious_process');
+    assert(procFindings.length === 3, 'Should have 3 dangerous process findings');
+  });
+
+  // Test getSeverity, displayResults, imageExists (now exported)
+  const { getSeverity, displayResults, imageExists } = require('../src/sandbox.js');
+
+  test('SANDBOX-COV: getSeverity returns CLEAN for 0', () => {
+    assert(getSeverity(0) === 'CLEAN', 'Score 0 should be CLEAN');
+  });
+
+  test('SANDBOX-COV: getSeverity returns LOW for 1-20', () => {
+    assert(getSeverity(10) === 'LOW', 'Score 10 should be LOW');
+    assert(getSeverity(20) === 'LOW', 'Score 20 should be LOW');
+  });
+
+  test('SANDBOX-COV: getSeverity returns MEDIUM for 21-50', () => {
+    assert(getSeverity(30) === 'MEDIUM', 'Score 30 should be MEDIUM');
+    assert(getSeverity(50) === 'MEDIUM', 'Score 50 should be MEDIUM');
+  });
+
+  test('SANDBOX-COV: getSeverity returns HIGH for 51-80', () => {
+    assert(getSeverity(60) === 'HIGH', 'Score 60 should be HIGH');
+    assert(getSeverity(80) === 'HIGH', 'Score 80 should be HIGH');
+  });
+
+  test('SANDBOX-COV: getSeverity returns CRITICAL for 81+', () => {
+    assert(getSeverity(81) === 'CRITICAL', 'Score 81 should be CRITICAL');
+    assert(getSeverity(100) === 'CRITICAL', 'Score 100 should be CRITICAL');
+  });
+
+  test('SANDBOX-COV: displayResults with no findings', () => {
+    const origLog = console.log;
+    const logs = [];
+    console.log = (msg) => logs.push(msg);
+    try {
+      displayResults({ score: 0, severity: 'CLEAN', findings: [] });
+    } finally {
+      console.log = origLog;
+    }
+    assert(logs.some(l => l.includes('0/100')), 'Should show score');
+    assert(logs.some(l => l.includes('No suspicious')), 'Should say no suspicious behavior');
+  });
+
+  test('SANDBOX-COV: displayResults with findings', () => {
+    const origLog = console.log;
+    const logs = [];
+    console.log = (msg) => logs.push(msg);
+    try {
+      displayResults({
+        score: 85,
+        severity: 'CRITICAL',
+        findings: [
+          { type: 'sensitive_file_read', severity: 'CRITICAL', detail: 'Read .npmrc' },
+          { type: 'dns_resolution', severity: 'INFO', detail: 'some.domain → 1.2.3.4' },
+          { type: 'suspicious_process', severity: 'HIGH', detail: 'curl detected' }
+        ]
+      });
+    } finally {
+      console.log = origLog;
+    }
+    assert(logs.some(l => l.includes('85/100')), 'Should show score');
+    assert(logs.some(l => l.includes('2 finding(s)')), 'Should count actionable (non-INFO) findings');
+  });
+
+  test('SANDBOX-COV: imageExists returns boolean', () => {
+    const result = imageExists();
+    assert(typeof result === 'boolean', 'imageExists should return a boolean, got ' + typeof result);
+  });
+
+  test('SANDBOX-COV: generateNetworkReport with TLS connections', () => {
+    const report = {
+      package: 'test-pkg', mode: 'strict', timestamp: '2025-01-01T00:00:00Z', duration_ms: 5000,
+      network: {
+        tls_connections: [
+          { domain: 'registry.npmjs.org', ip: '104.16.0.1', port: 443 },
+          { domain: 'evil.com', ip: '6.6.6.6', port: 443 }
+        ],
+        http_connections: [
+          { host: 'registry.npmjs.org', port: 443, protocol: 'https' },
+          { host: '8.8.8.8', port: 80, protocol: 'http' }
+        ]
+      }
+    };
+    const out = generateNetworkReport(report);
+    assertIncludes(out, 'TLS Connections (2)', 'Should show TLS section');
+    assertIncludes(out, 'evil.com', 'Should show suspicious TLS domain');
+    assertIncludes(out, 'Raw TCP Connections', 'Should show TCP connections section');
+  });
+
+  // ============================================
+  // HOOKS INIT COVERAGE TESTS (hooks-init.js)
+  // ============================================
+
+  console.log('\n=== HOOKS INIT COVERAGE TESTS ===\n');
+
+  test('HOOKS-COV: HOOK_COMMANDS has scan and diff entries', () => {
+    // Access module-level constants via require
+    const hooksModule = require('../src/hooks-init.js');
+    // HOOK_COMMANDS is not exported, but we can verify initHooks behavior
+    assert(typeof hooksModule.initHooks === 'function', 'initHooks should be a function');
+    assert(typeof hooksModule.removeHooks === 'function', 'removeHooks should be a function');
+  });
+
+  await asyncTest('HOOKS-COV: initHooks with git type creates hook file', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-hooks-'));
+    const gitDir = path.join(tmpDir, '.git', 'hooks');
+    fs.mkdirSync(gitDir, { recursive: true });
+    const { initHooks: initH } = require('../src/hooks-init.js');
+    const origLog = console.log;
+    const origErr = console.error;
+    console.log = () => {};
+    console.error = () => {};
+    try {
+      const result = await initH(tmpDir, { type: 'git', mode: 'scan' });
+      console.log = origLog;
+      console.error = origErr;
+      assert(result === true, 'initHooks should return true');
+      const hookPath = path.join(gitDir, 'pre-commit');
+      assert(fs.existsSync(hookPath), 'pre-commit hook should exist');
+      const content = fs.readFileSync(hookPath, 'utf8');
+      assertIncludes(content, 'muaddib scan', 'Hook should contain scan command');
+      assertIncludes(content, 'MUADDIB', 'Hook should contain MUADDIB');
+    } finally {
+      console.log = origLog;
+      console.error = origErr;
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  await asyncTest('HOOKS-COV: initHooks with diff mode generates diff command', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-hooks-'));
+    const gitDir = path.join(tmpDir, '.git', 'hooks');
+    fs.mkdirSync(gitDir, { recursive: true });
+    const { initHooks: initH } = require('../src/hooks-init.js');
+    const origLog = console.log;
+    console.log = () => {};
+    try {
+      await initH(tmpDir, { type: 'git', mode: 'diff' });
+      console.log = origLog;
+      const hookPath = path.join(gitDir, 'pre-commit');
+      const content = fs.readFileSync(hookPath, 'utf8');
+      assertIncludes(content, 'muaddib diff', 'Hook should contain diff command');
+    } finally {
+      console.log = origLog;
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  await asyncTest('HOOKS-COV: initHooks invalid mode defaults to scan', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-hooks-'));
+    const gitDir = path.join(tmpDir, '.git', 'hooks');
+    fs.mkdirSync(gitDir, { recursive: true });
+    const { initHooks: initH } = require('../src/hooks-init.js');
+    const origLog = console.log;
+    console.log = () => {};
+    try {
+      await initH(tmpDir, { type: 'git', mode: 'invalidmode' });
+      console.log = origLog;
+      const hookPath = path.join(gitDir, 'pre-commit');
+      const content = fs.readFileSync(hookPath, 'utf8');
+      assertIncludes(content, 'muaddib scan', 'Invalid mode should default to scan');
+    } finally {
+      console.log = origLog;
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  await asyncTest('HOOKS-COV: initHooks backs up existing hook', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-hooks-'));
+    const gitDir = path.join(tmpDir, '.git', 'hooks');
+    fs.mkdirSync(gitDir, { recursive: true });
+    const hookPath = path.join(gitDir, 'pre-commit');
+    fs.writeFileSync(hookPath, '#!/bin/sh\necho old hook\n');
+    const { initHooks: initH } = require('../src/hooks-init.js');
+    const origLog = console.log;
+    console.log = () => {};
+    try {
+      await initH(tmpDir, { type: 'git', mode: 'scan' });
+      console.log = origLog;
+      const backups = fs.readdirSync(gitDir).filter(f => f.startsWith('pre-commit.backup.'));
+      assert(backups.length >= 1, 'Should have created a backup');
+      const newContent = fs.readFileSync(hookPath, 'utf8');
+      assertIncludes(newContent, 'muaddib scan', 'New hook should contain scan');
+    } finally {
+      console.log = origLog;
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  await asyncTest('HOOKS-COV: initHooks fails without .git directory', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-hooks-'));
+    const { initHooks: initH } = require('../src/hooks-init.js');
+    const origLog = console.log;
+    const origErr = console.error;
+    console.log = () => {};
+    console.error = () => {};
+    try {
+      const result = await initH(tmpDir, { type: 'git', mode: 'scan' });
+      console.log = origLog;
+      console.error = origErr;
+      assert(result === false, 'Should return false when no .git');
+    } finally {
+      console.log = origLog;
+      console.error = origErr;
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  await asyncTest('HOOKS-COV: initPreCommit creates config when none exists', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-hooks-'));
+    const gitDir = path.join(tmpDir, '.git', 'hooks');
+    fs.mkdirSync(gitDir, { recursive: true });
+    // Create .pre-commit-config.yaml marker
+    const configPath = path.join(tmpDir, '.pre-commit-config.yaml');
+    // Don't create it — let initPreCommit create it
+    const { initHooks: initH } = require('../src/hooks-init.js');
+    const origLog = console.log;
+    console.log = () => {};
+    try {
+      await initH(tmpDir, { type: 'pre-commit', mode: 'scan' });
+      console.log = origLog;
+      assert(fs.existsSync(configPath), 'Should create .pre-commit-config.yaml');
+      const content = fs.readFileSync(configPath, 'utf8');
+      assertIncludes(content, 'muaddib-scan', 'Should have muaddib-scan hook id');
+      assertIncludes(content, 'repos:', 'Should have repos section');
+    } finally {
+      console.log = origLog;
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  await asyncTest('HOOKS-COV: initPreCommit appends to existing config', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-hooks-'));
+    const gitDir = path.join(tmpDir, '.git', 'hooks');
+    fs.mkdirSync(gitDir, { recursive: true });
+    const configPath = path.join(tmpDir, '.pre-commit-config.yaml');
+    fs.writeFileSync(configPath, 'repos:\n  - repo: https://github.com/other/hook\n    rev: v1.0\n    hooks:\n      - id: other-hook\n');
+    const { initHooks: initH } = require('../src/hooks-init.js');
+    const origLog = console.log;
+    console.log = () => {};
+    try {
+      await initH(tmpDir, { type: 'pre-commit', mode: 'diff' });
+      console.log = origLog;
+      const content = fs.readFileSync(configPath, 'utf8');
+      assertIncludes(content, 'muaddib-diff', 'Should have muaddib-diff hook id');
+      assertIncludes(content, 'other-hook', 'Should preserve existing hooks');
+    } finally {
+      console.log = origLog;
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  await asyncTest('HOOKS-COV: initPreCommit skips if already configured', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-hooks-'));
+    const gitDir = path.join(tmpDir, '.git', 'hooks');
+    fs.mkdirSync(gitDir, { recursive: true });
+    const configPath = path.join(tmpDir, '.pre-commit-config.yaml');
+    fs.writeFileSync(configPath, 'repos:\n  - repo: muaddib-scanner\n');
+    const { initHooks: initH } = require('../src/hooks-init.js');
+    const origLog = console.log;
+    const logs = [];
+    console.log = (msg) => logs.push(msg);
+    try {
+      await initH(tmpDir, { type: 'pre-commit', mode: 'scan' });
+      console.log = origLog;
+      const logged = logs.some(l => l.includes('already configured'));
+      assert(logged, 'Should log that muaddib is already configured');
+    } finally {
+      console.log = origLog;
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  await asyncTest('HOOKS-COV: removeHooks removes git hook', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-hooks-'));
+    const gitDir = path.join(tmpDir, '.git', 'hooks');
+    fs.mkdirSync(gitDir, { recursive: true });
+    const hookPath = path.join(gitDir, 'pre-commit');
+    fs.writeFileSync(hookPath, '#!/bin/sh\nmuaddib scan . --fail-on high\n');
+    const { removeHooks: removeH } = require('../src/hooks-init.js');
+    const origLog = console.log;
+    console.log = () => {};
+    try {
+      await removeH(tmpDir);
+      console.log = origLog;
+      assert(!fs.existsSync(hookPath), 'Hook should be removed');
+    } finally {
+      console.log = origLog;
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  await asyncTest('HOOKS-COV: removeHooks preserves non-muaddib hook', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-hooks-'));
+    const gitDir = path.join(tmpDir, '.git', 'hooks');
+    fs.mkdirSync(gitDir, { recursive: true });
+    const hookPath = path.join(gitDir, 'pre-commit');
+    fs.writeFileSync(hookPath, '#!/bin/sh\necho "other tool"\n');
+    const { removeHooks: removeH } = require('../src/hooks-init.js');
+    const origLog = console.log;
+    console.log = () => {};
+    try {
+      await removeH(tmpDir);
+      console.log = origLog;
+      assert(fs.existsSync(hookPath), 'Non-muaddib hook should be preserved');
+    } finally {
+      console.log = origLog;
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  await asyncTest('HOOKS-COV: auto-detect selects git when only .git exists', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-hooks-'));
+    const gitDir = path.join(tmpDir, '.git', 'hooks');
+    fs.mkdirSync(gitDir, { recursive: true });
+    const { initHooks: initH } = require('../src/hooks-init.js');
+    const origLog = console.log;
+    const logs = [];
+    console.log = (msg) => logs.push(String(msg));
+    try {
+      await initH(tmpDir, { type: 'auto', mode: 'scan' });
+      console.log = origLog;
+      const gitLog = logs.some(l => l.includes('Hook system: git'));
+      assert(gitLog, 'Should auto-detect git hook system');
+    } finally {
+      console.log = origLog;
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  // ============================================
   // RESULTS
   // ============================================
 

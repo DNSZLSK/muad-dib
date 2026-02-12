@@ -39,12 +39,13 @@ function parseRequirementsTxt(filePath, visited, projectRoot) {
       const includePath = path.resolve(path.dirname(filePath), includeMatch[1].trim());
       // Path traversal guard: ensure included file stays within the project root
       // Use case-insensitive comparison on Windows (PY-01)
+      // PY-001: Derive rootDir once at top-level, pass it down for all recursive calls
       const rootDir = projectRoot || path.resolve(path.dirname(filePath));
       const isWithin = process.platform === 'win32'
         ? includePath.toLowerCase().startsWith(rootDir.toLowerCase())
         : includePath.startsWith(rootDir);
       if (!isWithin) continue;
-      const included = parseRequirementsTxt(includePath, visited, projectRoot);
+      const included = parseRequirementsTxt(includePath, visited, rootDir);
       deps.push(...included);
       continue;
     }

@@ -56,48 +56,38 @@ function scanDirRecursive(dirPath, targetPath, threats, depth = 0) {
 
       const relFile = `${relDir}/${file}`;
 
+      // GHA-001: Line-by-line YAML-aware parsing (skip comments)
+      const yamlLines = content.split('\n');
+      const activeLines = yamlLines.filter(l => !l.trim().startsWith('#'));
+      const activeContent = activeLines.join('\n');
+
       // Détection du backdoor Shai-Hulud discussion.yaml
       if (file === 'discussion.yaml' || file === 'discussion.yml') {
-        if (content.includes('runs-on: self-hosted') && content.includes('github.event.discussion.body')) {
+        if (activeContent.includes('github.event.discussion.body')) {
           threats.push({
             type: 'shai_hulud_backdoor',
             severity: 'CRITICAL',
-            message: 'Backdoor Shai-Hulud détecté: workflow discussion.yaml avec injection via self-hosted runner',
+            message: 'Backdoor Shai-Hulud détecté: workflow discussion.yaml avec injection via discussion body',
             file: relFile
           });
         }
       }
 
-      // Détection générique de workflows suspects
-      if (content.includes('runs-on: self-hosted')) {
-        if (content.includes('${{ github.event.') && (content.includes('.body') || content.includes('.title'))) {
+      // GHA-002: Detect attacker-controlled context injection on ALL runners (not just self-hosted)
+      const injectionPatterns = [
+        { regex: /\$\{\{\s*github\.event\.(comment\.body|issue\.body|issue\.title|pull_request\.body|pull_request\.title|discussion\.body|discussion\.title)/, msg: 'Attacker-controlled GitHub event context used in workflow' },
+        { regex: /\$\{\{\s*github\.head_ref/, msg: 'github.head_ref is attacker-controlled in pull_request workflows' }
+      ];
+
+      for (const { regex, msg } of injectionPatterns) {
+        if (regex.test(activeContent)) {
           threats.push({
             type: 'workflow_injection',
             severity: 'HIGH',
-            message: 'Injection potentielle dans GitHub Actions: input non sanitisé sur self-hosted runner',
+            message: 'Potential injection: ' + msg,
             file: relFile
           });
         }
-      }
-
-      // Detect github.head_ref injection vector (can be attacker-controlled)
-      if (content.includes('${{ github.head_ref')) {
-        threats.push({
-          type: 'workflow_injection',
-          severity: 'HIGH',
-          message: 'Potential injection: github.head_ref is attacker-controlled in pull_request workflows',
-          file: relFile
-        });
-      }
-
-      // Detect comment.body injection vector
-      if (content.includes('${{ github.event.comment.body')) {
-        threats.push({
-          type: 'workflow_injection',
-          severity: 'HIGH',
-          message: 'Potential injection: github.event.comment.body is attacker-controlled',
-          file: relFile
-        });
       }
     }
 }

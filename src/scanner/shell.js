@@ -13,8 +13,8 @@ const MALICIOUS_PATTERNS = [
   { pattern: /rm\s+-rf\s+(~\/|\$HOME|\/home)/m, name: 'home_deletion', severity: 'CRITICAL' },
   { pattern: /shred.*\$HOME/m, name: 'shred_home', severity: 'CRITICAL' },
   { pattern: /curl.*-X\s*POST.*-d/m, name: 'curl_exfiltration', severity: 'HIGH' },
-  { pattern: /\.npmrc/m, name: 'npmrc_access', severity: 'HIGH' },
-  { pattern: /\.ssh/m, name: 'ssh_access', severity: 'HIGH' },
+  { pattern: /(?:cat|readFile|cp|mv|curl\s+file:\/\/|tar\s+.*|scp\s+).*\.npmrc/m, name: 'npmrc_access', severity: 'HIGH' },
+  { pattern: /(?:cat|readFile|cp|mv|curl\s+file:\/\/|tar\s+.*|scp\s+).*\.ssh/m, name: 'ssh_access', severity: 'HIGH' },
   { pattern: /python\s+-c.*import\s+socket/m, name: 'python_reverse_shell', severity: 'CRITICAL' },
   { pattern: /perl\s+-e.*socket/m, name: 'perl_reverse_shell', severity: 'CRITICAL' },
   { pattern: /mkfifo.*\/dev\/tcp/m, name: 'fifo_reverse_shell', severity: 'CRITICAL' }

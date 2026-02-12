@@ -65,18 +65,25 @@ async function sendWebhook(url, results) {
     throw new Error(`Webhook blocked: ${validation.error}`);
   }
 
-  // DNS resolution check: verify ALL resolved IPs are not private (SSRF via DNS rebinding)
-  // Pin the first resolved IP and use it for the actual connection (WHK-001)
+  // DNS resolution check: verify ALL resolved IPs (IPv4 + IPv6) are not private (SSRF via DNS rebinding)
+  // Pin the first resolved IPv4 and use it for the actual connection (WHK-001)
   const urlObj = new URL(url);
   let resolvedAddress;
   try {
-    const addresses = await dns.promises.resolve4(urlObj.hostname);
-    for (const address of addresses) {
+    const [ipv4Addresses, ipv6Addresses] = await Promise.all([
+      dns.promises.resolve4(urlObj.hostname).catch(() => []),
+      dns.promises.resolve6(urlObj.hostname).catch(() => [])
+    ]);
+    const allAddresses = [...ipv4Addresses, ...ipv6Addresses];
+    if (allAddresses.length === 0) {
+      throw new Error(`Webhook blocked: no DNS records found for ${urlObj.hostname}`);
+    }
+    for (const address of allAddresses) {
       if (PRIVATE_IP_PATTERNS.some(pattern => pattern.test(address))) {
         throw new Error(`Webhook blocked: hostname ${urlObj.hostname} resolves to private IP ${address}`);
       }
     }
-    resolvedAddress = addresses[0];
+    resolvedAddress = ipv4Addresses[0] || null;
   } catch (e) {
     if (e.message.startsWith('Webhook blocked')) throw e;
     throw new Error(`Webhook blocked: DNS resolution failed for ${urlObj.hostname}`);
@@ -294,4 +301,4 @@ function send(url, payload, resolvedAddress) {
   });
 }
 
-module.exports = { sendWebhook, validateWebhookUrl };
+module.exports = { sendWebhook, validateWebhookUrl, formatDiscord, formatSlack, formatGeneric };

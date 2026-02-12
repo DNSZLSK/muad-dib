@@ -24,6 +24,21 @@ const DANGEROUS_PATTERNS = [
 
 const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype', 'toString', 'valueOf']);
 
+/**
+ * Clean a version specifier to extract the primary version number.
+ * Handles: ^1.0.0, ~1.0.0, >=1.0.0, >=1.0.0,<2.0.0, git URLs, etc.
+ * @param {string} versionSpec - Raw version from package.json
+ * @returns {string} Cleaned version or original string
+ */
+function cleanVersionSpec(versionSpec) {
+  if (!versionSpec || typeof versionSpec !== 'string') return '';
+  // Skip git URLs, file paths, URLs entirely (not matchable to IOC versions)
+  if (/^(git[+:]|github:|https?:|file:|\/)/.test(versionSpec)) return '';
+  // Handle range specifiers like ">=1.0.0,<2.0.0" — extract the first version
+  const rangeMatch = versionSpec.match(/[\^~>=<!\s]*(\d+\.\d+[.\d-a-zA-Z]*)/);
+  return rangeMatch ? rangeMatch[1] : versionSpec.replace(/^[\^~>=<! ]+/, '');
+}
+
 async function scanPackageJson(targetPath) {
   const threats = [];
   const pkgPath = path.join(targetPath, 'package.json');
@@ -100,7 +115,7 @@ async function scanPackageJson(targetPath) {
         malicious = pkgList ? pkgList.find(p => p.version === '*') : null;
       } else if (iocs.packagesMap.has(depName)) {
         const pkgList = iocs.packagesMap.get(depName);
-        const cleanVersion = depVersion.replace(/^[\^~>=<! ]+/, '');
+        const cleanVersion = cleanVersionSpec(depVersion);
         malicious = pkgList.find(p => p.version === cleanVersion || p.version === depVersion);
       }
     } else if (iocs.packages) {
@@ -108,7 +123,7 @@ async function scanPackageJson(targetPath) {
       malicious = iocs.packages.find(p => {
         if (p.name !== depName) return false;
         if (p.version === '*') return true;
-        const cleanVersion = depVersion.replace(/^[\^~>=<! ]+/, '');
+        const cleanVersion = cleanVersionSpec(depVersion);
         if (p.version === cleanVersion || p.version === depVersion) return true;
         return false;
       });

@@ -294,7 +294,7 @@ function createOptimizedIOCs(iocs) {
  */
 function generateCompactIOCs(fullIOCs) {
   const wildcards = [];
-  const versioned = {};
+  const versioned = Object.create(null);
   const severityOverrides = Object.create(null);
   const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
@@ -315,7 +315,7 @@ function generateCompactIOCs(fullIOCs) {
 
   // PyPI compact (same structure, separate keys)
   const pypiWildcards = [];
-  const pypiVersioned = {};
+  const pypiVersioned = Object.create(null);
 
   for (const p of fullIOCs.pypi_packages || []) {
     if (p.version === '*') {
