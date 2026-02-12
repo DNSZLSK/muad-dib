@@ -29,8 +29,12 @@ async function fetchWithRetry(url) {
       response = await fetch(url, { signal });
     } catch (err) {
       cleanup();
-      if (err.name === 'TimeoutError' || err.name === 'AbortError') return null;
+      // REG-001: Retry on timeout/abort instead of returning null immediately
       lastError = err;
+      if (attempt < MAX_RETRIES - 1) {
+        const backoff = Math.min(1000 * Math.pow(2, attempt), 8000);
+        await new Promise(r => setTimeout(r, backoff));
+      }
       continue;
     }
 

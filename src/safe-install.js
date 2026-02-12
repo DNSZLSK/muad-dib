@@ -1,3 +1,5 @@
+const fs = require('fs');
+const path = require('path');
 const { spawnSync } = require('child_process');
 const { loadCachedIOCs } = require('./ioc/updater.js');
 const { REHABILITATED_PACKAGES } = require('./shared/constants.js');
@@ -90,7 +92,12 @@ function checkIOCs(pkg, pkgName, pkgVersion) {
       malicious = pkgList ? pkgList.find(p => p.version === '*') : null;
     } else if (iocs.packagesMap.has(pkgName)) {
       const pkgList = iocs.packagesMap.get(pkgName);
-      malicious = pkgList.find(p => p.version === pkgVersion || p.version === '*');
+      if (pkgVersion) {
+        malicious = pkgList.find(p => p.version === pkgVersion || p.version === '*');
+      } else {
+        // SFI-003: No version specified — still check for wildcard IOCs
+        malicious = pkgList.find(p => p.version === '*');
+      }
     }
   } else {
     // Fallback: linear search
@@ -242,6 +249,17 @@ async function safeInstall(packages, options = {}) {
         console.log('║   Known malicious package detected!       ║');
         console.log('║   Installing despite security threats.    ║');
         console.log('╚══════════════════════════════════════════╝');
+        console.log('[AUDIT] Force-install override for malicious package: ' + result.package);
+
+        // SFI-004: Write audit log for force-install overrides
+        try {
+          const auditDir = path.join(process.cwd(), '.muaddib-cache');
+          if (!fs.existsSync(auditDir)) fs.mkdirSync(auditDir, { recursive: true });
+          const auditFile = path.join(auditDir, 'force-install-audit.log');
+          const entry = new Date().toISOString() + ' FORCE_INSTALL pkg=' + result.package
+            + ' source=' + result.source + ' reason=' + result.description + '\n';
+          fs.appendFileSync(auditFile, entry);
+        } catch { /* audit log write failure is non-fatal */ }
       }
     }
   }

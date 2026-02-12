@@ -1,0 +1,369 @@
+
+=== AST TESTS ===
+
+[PASS] AST: Detects .npmrc access
+[PASS] AST: Detects .ssh access
+[PASS] AST: Detects GITHUB_TOKEN
+[PASS] AST: Detects NPM_TOKEN
+[PASS] AST: Detects AWS_SECRET
+[PASS] AST: Detects eval()
+[PASS] AST: Detects exec()
+[PASS] AST: Detects new Function()
+[PASS] AST: Dynamic env access flagged as MEDIUM
+
+=== SHELL TESTS ===
+
+[PASS] SHELL: Detects curl | sh
+[PASS] SHELL: Detects wget && chmod +x
+[PASS] SHELL: Detects reverse shell
+[PASS] SHELL: Detects rm -rf $HOME
+
+=== OBFUSCATION TESTS ===
+
+[PASS] OBFUSCATION: Detects massive hex escapes
+[PASS] OBFUSCATION: Detects _0x variables
+
+=== DATAFLOW TESTS ===
+
+[PASS] DATAFLOW: Detects credential read + network send
+[PASS] DATAFLOW: Detects env read + fetch
+
+=== PACKAGE.JSON TESTS ===
+
+[PASS] PACKAGE: Detects suspicious preinstall
+[PASS] PACKAGE: Detects suspicious postinstall
+
+=== MARKER TESTS ===
+
+[PASS] MARKERS: Detects Shai-Hulud
+[PASS] MARKERS: Detects The Second Coming
+
+=== TYPOSQUATTING TESTS ===
+
+[PASS] TYPOSQUAT: Detects lodahs (lodash)
+[PASS] TYPOSQUAT: Detects axois (axios)
+[PASS] TYPOSQUAT: Detects expres (express)
+[PASS] TYPOSQUAT: Severity HIGH
+
+=== CLI TESTS ===
+
+[PASS] CLI: --help displays usage
+[PASS] CLI: --json returns valid JSON
+[PASS] CLI: --sarif generates SARIF file
+[PASS] CLI: --html generates HTML file
+[PASS] CLI: --explain displays details
+[PASS] CLI: --fail-on critical exit code correct
+[PASS] CLI: --fail-on high exit code correct
+
+=== UPDATE TESTS ===
+
+[PASS] UPDATE: Module loads and loadCachedIOCs works
+[PASS] UPDATE: updateIOCs is a function
+
+=== FALSE POSITIVES TESTS ===
+
+[PASS] FALSE POSITIVES: Clean project = no threats
+[PASS] FALSE POSITIVES: Comments ignored
+[PASS] FALSE POSITIVES: Safe env vars (NODE_ENV, PORT, CI, etc.) not flagged
+
+=== EDGE CASES TESTS ===
+
+[PASS] EDGE: Empty file does not crash
+[PASS] EDGE: Non-JS file ignored
+[PASS] EDGE: Invalid JS syntax does not crash
+[PASS] EDGE: Very large file does not timeout
+
+=== MITRE TESTS ===
+
+[PASS] MITRE: T1552.001 - Credentials in Files
+[PASS] MITRE: T1059 - Command Execution
+[PASS] MITRE: T1041 - Exfiltration
+
+=== WHITELIST TESTS ===
+
+[PASS] WHITELIST: chalk is in REHABILITATED_PACKAGES
+[PASS] WHITELIST: debug is in REHABILITATED_PACKAGES
+[PASS] WHITELIST: ua-parser-js has specific compromised versions
+[PASS] WHITELIST: checkRehabilitated returns safe for chalk
+[PASS] WHITELIST: checkRehabilitated returns unsafe for ua-parser-js@0.7.29
+[PASS] WHITELIST: checkRehabilitated returns safe for ua-parser-js@0.7.35
+[PASS] WHITELIST: checkRehabilitated returns null for unknown package
+
+=== IOC LOADING TESTS ===
+
+[PASS] IOC: loadCachedIOCs returns packages
+[PASS] IOC: loadCachedIOCs returns hashes
+[PASS] IOC: loadCachedIOCs returns markers
+[PASS] IOC: Typosquats have wildcard version
+[PASS] IOC: Historical packages have specific versions
+
+=== IOC MATCHING TESTS ===
+
+[PASS] IOC MATCH: Wildcard version matches all versions
+[PASS] IOC MATCH: Specific version matches only that version
+
+=== SCRAPER / DATA TESTS ===
+
+[PASS] SCRAPER: Module loads without error
+[PASS] SCRAPER: data/iocs.json exists and is valid
+[PASS] SCRAPER: IOCs have required fields
+[PASS] SCRAPER: At least 900 IOCs
+
+=== COMPACT IOC TESTS ===
+
+[PASS] COMPACT: iocs-compact.json exists
+[PASS] COMPACT: has expected compact format fields
+[PASS] COMPACT: does NOT have enriched package objects
+[PASS] COMPACT: is significantly smaller than full IOCs
+[PASS] COMPACT: generateCompactIOCs strips enriched data
+[PASS] COMPACT: expandCompactIOCs round-trips correctly
+[PASS] COMPACT: loadCachedIOCs works with compact fallback
+
+=== YAML LOADER TESTS ===
+
+[PASS] YAML: builtin.yaml exists
+[PASS] YAML: loadYAMLIOCs returns packages
+[PASS] YAML: Contains Shai-Hulud packages
+[PASS] YAML: Contains Shai-Hulud markers
+
+=== NON-REGRESSION TESTS ===
+
+[PASS] REGRESSION: chalk should not block (rehabilitated)
+[PASS] REGRESSION: debug should not block (rehabilitated)
+[PASS] REGRESSION: lodash is not in IOCs
+[PASS] REGRESSION: loadash (typosquat) IS in IOCs
+[PASS] REGRESSION: express is not in IOCs
+[PASS] REGRESSION: axios is not in IOCs
+
+=== PACKAGE SECURITY TESTS ===
+
+[PASS] SECURITY: isValidPackageName accepts lodash
+[PASS] SECURITY: isValidPackageName accepts @scope/package
+[PASS] SECURITY: isValidPackageName rejects shell injection
+[PASS] SECURITY: isValidPackageName rejects backticks
+[PASS] SECURITY: isValidPackageName rejects $(...)
+[PASS] SECURITY: isValidPackageName rejects pipes
+
+=== WEBHOOK SECURITY TESTS ===
+
+[PASS] SECURITY: validateWebhookUrl accepts Discord
+[PASS] SECURITY: validateWebhookUrl accepts Slack
+[PASS] SECURITY: validateWebhookUrl rejects HTTP (non-HTTPS)
+[PASS] SECURITY: validateWebhookUrl rejects unauthorized domains
+[PASS] SECURITY: validateWebhookUrl rejects private IPs (127.x)
+[PASS] SECURITY: validateWebhookUrl rejects private IPs (192.168.x)
+[PASS] SECURITY: validateWebhookUrl rejects private IPs (10.x)
+
+=== DIFF MODULE TESTS ===
+
+[PASS] DIFF: Module loads without error
+[PASS] DIFF: isGitRepo returns true for this repo
+[PASS] DIFF: isGitRepo returns false for non-repo
+[PASS] DIFF: getRecentRefs returns tags and commits
+
+=== HOOKS INIT MODULE TESTS ===
+
+[PASS] HOOKS: Module loads without error
+[PASS] HOOKS: detectHookSystem returns object with expected properties
+[PASS] HOOKS: detectHookSystem detects git hooks directory
+
+=== CLI NEW COMMANDS TESTS ===
+
+[PASS] CLI: diff command shows refs when no arg
+[PASS] CLI: init-hooks --help shows in help
+
+=== CLI EXTENDED TESTS ===
+
+[PASS] CLI-EXT: version command shows version
+[PASS] CLI-EXT: --version flag shows version
+[PASS] CLI-EXT: help command shows usage
+[PASS] CLI-EXT: unknown command shows error
+[PASS] CLI-EXT: deduplication reduces duplicate alerts
+[PASS] CLI-EXT: scan with --paranoid and --webhook
+[PASS] CLI-EXT: interactive mode errors without TTY
+[PASS] CLI-EXT: diff with ref HEAD~1
+[PASS] CLI-EXT: init-hooks with --type and --mode
+[PASS] CLI-EXT: install without packages shows usage
+[PASS] CLI-EXT: install blocks malicious package
+[PASS] CLI-EXT: install alias i blocks malicious
+[PASS] CLI-EXT: sandbox without package shows usage
+[PASS] CLI-EXT: sandbox with package errors without Docker
+[PASS] CLI-EXT: scrape command runs
+
+=== DEPENDENCIES TESTS ===
+
+[PASS] DEPS: checkRehabilitatedPackage null for unknown
+[PASS] DEPS: checkRehabilitatedPackage true for safe=true
+[PASS] DEPS: checkRehabilitatedPackage false for compromised version
+[PASS] DEPS: checkRehabilitatedPackage true for safe version of partial
+
+=== HASH TESTS ===
+
+[PASS] HASH: computeHash returns valid SHA256
+[PASS] HASH: computeHashCached computes and caches
+[PASS] HASH: computeHashCached invalidates on mtime change
+[PASS] HASH: computeHashCached returns null for non-existent file
+[PASS] HASH: clearHashCache and getHashCacheSize
+[PASS] DEPS: scanDependencies empty without node_modules
+[PASS] DEPS: scanDependencies skips rehabilitated safe pkg
+[PASS] DEPS: scanDependencies detects rehabilitated compromised version
+[PASS] DEPS: scanDependencies detects wildcard malicious pkg
+[PASS] DEPS: scanDependencies detects specific version malicious pkg
+[PASS] DEPS: scanDependencies skips trusted pkg for file checks
+[PASS] DEPS: scanDependencies detects suspicious file
+[PASS] DEPS: scanDependencies detects Shai-Hulud marker
+[PASS] DEPS: listPackages handles scoped packages
+[PASS] DEPS: listPackages skips hidden directories
+[PASS] DEPS: listPackages skips non-directory items
+[PASS] DEPS: getPackageVersion returns * without package.json
+[PASS] DEPS: getPackageVersion returns * for missing version field
+[PASS] HASH: scanHashes empty without node_modules
+[PASS] HASH: scanHashes traverses node_modules JS files
+[PASS] HASH: scanHashes handles nested directories
+[PASS] HASH: scanHashes respects MAX_DEPTH limit
+[PASS] HASH: scanHashes skips non-JS files
+
+=== SAFE INSTALL TESTS ===
+
+[PASS] SAFE-INSTALL: blocks known malicious wildcard package
+[PASS] SAFE-INSTALL: blocks rehabilitated compromised version
+[PASS] SAFE-INSTALL: cache prevents rescan, IOC catches malicious
+[PASS] SAFE-INSTALL: scoped package version parsing + invalid name
+[PASS] SAFE-INSTALL: force mode continues then name validation blocks
+[PASS] SAFE-INSTALL: rehabilitated safe package passes checkIOCs
+[PASS] SAFE-INSTALL: non-scoped package with version parsing
+[PASS] SAFE-INSTALL: depth=0 unknown pkg blocked by npm view fail
+
+=== WEBHOOK EXTENDED TESTS ===
+
+[PASS] WEBHOOK-EXT: validateWebhookUrl catch for invalid URL
+[PASS] WEBHOOK-EXT: validateWebhookUrl rejects 172.x
+[PASS] WEBHOOK-EXT: sendWebhook rejects HTTP localhost (no exemption)
+[PASS] WEBHOOK-EXT: sendWebhook rejects blocked URL
+[PASS] WEBHOOK-EXT: sendWebhook rejects non-allowed domain
+
+=== PYTHON PARSER TESTS ===
+
+[PASS] PYTHON: normalizePythonName lowercases and normalizes separators
+[PASS] PYTHON: parseRequirementsTxt parses pinned versions
+[PASS] PYTHON: parseRequirementsTxt handles various version specs
+[PASS] PYTHON: parseRequirementsTxt ignores comments and blanks
+[PASS] PYTHON: parseRequirementsTxt handles extras
+[PASS] PYTHON: parseRequirementsTxt handles recursive includes
+[PASS] PYTHON: parseRequirementsTxt handles circular includes
+[PASS] PYTHON: parseRequirementsTxt skips option lines
+[PASS] PYTHON: parseRequirementsTxt handles env markers
+[PASS] PYTHON: parseSetupPy extracts install_requires
+[PASS] PYTHON: parseSetupPy handles single-line install_requires
+[PASS] PYTHON: parseSetupPy also extracts setup_requires
+[PASS] PYTHON: parsePyprojectToml extracts PEP 621 dependencies
+[PASS] PYTHON: parsePyprojectToml extracts Poetry dependencies
+[PASS] PYTHON: parsePyprojectToml handles both PEP 621 and Poetry
+[PASS] PYTHON: detectPythonProject finds all dependency files
+[PASS] PYTHON: detectPythonProject deduplicates by name
+[PASS] PYTHON: detectPythonProject scans requirements/ directory
+[PASS] PYTHON: detectPythonProject returns empty for non-Python project
+[PASS] PYTHON: PEP 503 name normalization in dedup
+
+=== PYTHON SCAN INTEGRATION TESTS ===
+
+[PASS] PYTHON-SCAN: Rule pypi_malicious_package exists
+[PASS] PYTHON-SCAN: Playbook pypi_malicious_package exists
+[PASS] PYTHON-SCAN: CLI shows [PYTHON] section for Python project
+[PASS] PYTHON-SCAN: JSON output includes python field
+[PASS] PYTHON-SCAN: No [PYTHON] section for non-Python project
+[PASS] PYTHON-SCAN: JSON python field is null for non-Python project
+[PASS] PYTHON-SCAN: Explain mode shows [PYTHON] section
+[PASS] PYTHON-SCAN: Detects all Python file types
+
+=== PYPI TYPOSQUATTING TESTS ===
+
+[PASS] PYPI-TYPOSQUAT: Detects reqeusts (requests)
+[PASS] PYPI-TYPOSQUAT: Detects numpie (numpy)
+[PASS] PYPI-TYPOSQUAT: Detects flaks (flask)
+[PASS] PYPI-TYPOSQUAT: Detects djnago (django)
+[PASS] PYPI-TYPOSQUAT: Detects pandsa (pandas)
+[PASS] PYPI-TYPOSQUAT: Does not flag exact package names
+[PASS] PYPI-TYPOSQUAT: PEP 503 normalization — case insensitive
+[PASS] PYPI-TYPOSQUAT: PEP 503 normalization — underscores/dots/hyphens equivalent
+[PASS] PYPI-TYPOSQUAT: Skips short names (< 4 chars)
+[PASS] PYPI-TYPOSQUAT: Skips whitelisted packages
+[PASS] PYPI-TYPOSQUAT: Severity is HIGH
+[PASS] PYPI-TYPOSQUAT: CLI detects PyPI typosquat in requirements.txt
+[PASS] PYPI-TYPOSQUAT: No false positive for legit Python deps
+[PASS] PYPI-TYPOSQUAT: Playbook exists
+
+=== SANDBOX NETWORK TESTS ===
+
+[PASS] SANDBOX-NET: scoreFindings handles empty report
+[PASS] SANDBOX-NET: scoreFindings detects suspicious DNS
+[PASS] SANDBOX-NET: scoreFindings skips safe domains in DNS
+[PASS] SANDBOX-NET: scoreFindings detects DNS resolutions (INFO)
+[PASS] SANDBOX-NET: scoreFindings detects suspicious TLS
+[PASS] SANDBOX-NET: scoreFindings detects data exfiltration
+[PASS] SANDBOX-NET: scoreFindings detects multiple exfiltration patterns
+[PASS] SANDBOX-NET: scoreFindings detects HTTP requests to non-safe hosts
+[PASS] SANDBOX-NET: scoreFindings detects blocked connections
+[PASS] SANDBOX-NET: scoreFindings caps at 100
+[PASS] SANDBOX-NET: generateNetworkReport returns string with sections
+[PASS] SANDBOX-NET: generateNetworkReport shows blocked in strict mode
+[PASS] SANDBOX-NET: generateNetworkReport shows exfiltration alerts
+[PASS] SANDBOX-NET: EXFIL_PATTERNS is an array with entries
+[PASS] SANDBOX-NET: SAFE_DOMAINS includes essential domains
+[PASS] SANDBOX-NET: CLI --strict flag is accepted
+[PASS] SANDBOX-NET: CLI sandbox-report without package shows usage
+[PASS] SANDBOX-NET: CLI sandbox-report with package runs
+
+=== CLI COVERAGE TESTS ===
+
+[PASS] CLI-COV: --exclude flag is parsed correctly
+[PASS] CLI-COV: --fail-on with invalid value defaults gracefully
+[PASS] CLI-COV: --fail-on low works
+[PASS] CLI-COV: --fail-on medium works
+[PASS] CLI-COV: --html with path traversal is blocked
+[PASS] CLI-COV: --sarif with path traversal is blocked
+[PASS] CLI-COV: --webhook with HTTP URL is blocked
+[PASS] CLI-COV: --webhook with private IP is blocked
+[PASS] CLI-COV: --webhook with invalid URL is blocked
+[PASS] CLI-COV: scan with multiple --exclude flags
+[PASS] CLI-COV: remove-hooks command runs
+
+=== WEBHOOK COVERAGE TESTS ===
+
+[PASS] WEBHOOK-COV: validateWebhookUrl rejects IPv6 loopback
+[PASS] WEBHOOK-COV: validateWebhookUrl rejects fc00 (IPv6 private)
+[PASS] WEBHOOK-COV: validateWebhookUrl rejects fe80 (IPv6 link-local)
+[PASS] WEBHOOK-COV: validateWebhookUrl rejects 169.254.x (link-local)
+[PASS] WEBHOOK-COV: validateWebhookUrl rejects 0.x addresses
+[PASS] WEBHOOK-COV: formatDiscord generates correct embed structure
+[PASS] WEBHOOK-COV: validateWebhookUrl accepts subdomain of allowed domain
+[PASS] WEBHOOK-COV: validateWebhookUrl rejects discordapp.evil.com
+
+=== SANDBOX COVERAGE TESTS ===
+
+[PASS] SANDBOX-COV: scoreFindings detects sensitive file reads (credential)
+[PASS] SANDBOX-COV: scoreFindings detects sensitive file reads (system)
+[PASS] SANDBOX-COV: scoreFindings detects sensitive file reads (config)
+[PASS] SANDBOX-COV: scoreFindings detects sensitive file writes (credential)
+[PASS] SANDBOX-COV: scoreFindings detects sensitive file writes (system)
+[PASS] SANDBOX-COV: scoreFindings detects sensitive file writes (other)
+[PASS] SANDBOX-COV: scoreFindings detects filesystem changes (system path)
+[PASS] SANDBOX-COV: scoreFindings detects filesystem changes (crontab)
+[PASS] SANDBOX-COV: scoreFindings detects filesystem changes (/tmp)
+[PASS] SANDBOX-COV: scoreFindings detects suspicious processes (dangerous cmd)
+[PASS] SANDBOX-COV: scoreFindings detects unknown processes
+[PASS] SANDBOX-COV: scoreFindings skips safe IPs in connections
+[PASS] SANDBOX-COV: scoreFindings skips probe ports in connections
+[PASS] SANDBOX-COV: scoreFindings detects suspicious TCP connections
+[PASS] SANDBOX-COV: scoreFindings detects .aws credential read
+[PASS] SANDBOX-COV: scoreFindings detects .bash_history read
+[PASS] SANDBOX-COV: scoreFindings with /etc/shadow write
+[PASS] SANDBOX-COV: scoreFindings with .aws credential write
+[PASS] SANDBOX-COV: scoreFindings with /etc/shadow read
+[PASS] SANDBOX-COV: generateNetworkReport with no DNS, no HTTP, no TLS
+[PASS] SANDBOX-COV: generateNetworkReport shows safe vs suspicious domains
+[PASS] SANDBOX-COV: scoreFindings multiple dangerous processes
+
+=== HOOKS INIT COVERAGE TESTS ===
+
+[PASS] HOOKS-COV: HOOK_COMMANDS has scan and diff entries

@@ -1,4 +1,4 @@
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
@@ -98,9 +98,10 @@ async function initHusky(targetPath, mode) {
   if (!fs.existsSync(huskyDir)) {
     console.log('[INFO] Husky not detected. Installing...');
     try {
-      execSync('npx husky install', {
+      execFileSync('npx', ['husky', 'install'], {
         cwd: targetPath,
-        stdio: 'inherit'
+        stdio: 'inherit',
+        shell: false
       });
     } catch {
       throw new Error('Failed to install husky. Run: npm install -D husky && npx husky install');

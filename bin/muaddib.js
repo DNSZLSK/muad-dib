@@ -29,10 +29,22 @@ for (let i = 0; i < options.length; i++) {
   if (options[i] === '--json') {
     jsonOutput = true;
   } else if (options[i] === '--html') {
-    htmlOutput = options[i + 1] || 'muaddib-report.html';
+    const htmlPath = options[i + 1] || 'muaddib-report.html';
+    // CLI-001: Block path traversal
+    if (htmlPath.includes('..')) {
+      console.error('[ERROR] --html path must not contain path traversal (..)');
+      process.exit(1);
+    }
+    htmlOutput = htmlPath;
     i++;
   } else if (options[i] === '--sarif') {
-    sarifOutput = options[i + 1] || 'muaddib-results.sarif';
+    const sarifPath = options[i + 1] || 'muaddib-results.sarif';
+    // CLI-001: Block path traversal
+    if (sarifPath.includes('..')) {
+      console.error('[ERROR] --sarif path must not contain path traversal (..)');
+      process.exit(1);
+    }
+    sarifOutput = sarifPath;
     i++;
   } else if (options[i] === '--explain') {
     explainMode = true;
@@ -40,7 +52,26 @@ for (let i = 0; i < options.length; i++) {
     failLevel = options[i + 1] || 'high';
     i++;
   } else if (options[i] === '--webhook') {
-    webhookUrl = options[i + 1];
+    const rawUrl = options[i + 1];
+    // CLI-002: Validate webhook URL (HTTPS only, no private IPs)
+    if (rawUrl) {
+      try {
+        const parsed = new URL(rawUrl);
+        if (parsed.protocol !== 'https:') {
+          console.error('[ERROR] --webhook URL must use HTTPS');
+          process.exit(1);
+        }
+        const host = parsed.hostname.toLowerCase();
+        if (/^(127\.|10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|0\.|169\.254\.|localhost$|::1$)/.test(host)) {
+          console.error('[ERROR] --webhook URL must not point to a private/local address');
+          process.exit(1);
+        }
+      } catch {
+        console.error('[ERROR] --webhook URL is invalid');
+        process.exit(1);
+      }
+    }
+    webhookUrl = rawUrl;
     i++;
   } else if (options[i] === '--exclude') {
     if (options[i + 1] && !options[i + 1].startsWith('-')) {
