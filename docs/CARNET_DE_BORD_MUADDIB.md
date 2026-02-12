@@ -127,7 +127,7 @@ Le constat était sans appel :
 
 ### Les optimisations techniques
 
-**Parallélisation des scanners** : Avant, les 9 scanners s'exécutaient séquentiellement. Maintenant ils tournent en parallèle avec `Promise.all()`. Gain de performance significatif sur les gros projets.
+**Parallélisation des scanners** : Avant, les 11 scanners s'exécutaient séquentiellement. Maintenant ils tournent en parallèle avec `Promise.all()`. Gain de performance significatif sur les gros projets.
 
 **Structures de données optimisées** : Remplacement des tableaux par des `Map` et `Set` pour les lookups IOC. Passage de O(n) à O(1) pour la recherche de packages malveillants.
 
@@ -294,7 +294,7 @@ Apres le support npm, j'ai etendu MUAD'DIB pour scanner les projets Python :
 | **Pre-commit hooks** | Support pre-commit, husky, git natif |
 | **GitHub Action Marketplace** | Avec inputs/outputs et SARIF auto |
 | Version check | Notification automatique des nouvelles versions au demarrage |
-| Tests | **218 tests unitaires** + 56 fuzz + 15 adversariaux, **80% coverage** (Codecov) |
+| Tests | **296 tests unitaires** + 56 fuzz + 15 adversariaux, **80% coverage** (Codecov) |
 | Audit securite | 2 audits complets, **58 issues corrigees**, [rapport PDF](MUADDIB_Security_Audit_Report_v1.4.1.pdf) |
 
 ### Ce qui manque (honnêtement)

@@ -117,7 +117,7 @@ Les parsers ont ete testes avec des inputs malformes :
 
 Resultat : **56/56 pass**. Aucun crash, aucune exception non rattrapee.
 
-### 218 tests unitaires
+### 296 tests unitaires
 
 Couverture complete des scanners, parsers, IOC matching, typosquatting, et integrations CLI.
 

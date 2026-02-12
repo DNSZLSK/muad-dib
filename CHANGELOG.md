@@ -26,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - README.fr.md synchronized with English version
 
 ### Performance
-- Parallelize all 9 scanners with `Promise.all()`
+- Parallelize all 11 scanners with `Promise.all()`
 - Optimize IOC lookups with Map/Set (O(1) instead of O(n))
 - Add SHA256 hash cache to avoid redundant calculations
 - Handle symlinks safely with `lstatSync`
