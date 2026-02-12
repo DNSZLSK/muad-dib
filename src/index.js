@@ -17,7 +17,7 @@ const { scanGitHubActions } = require('./scanner/github-actions.js');
 const { detectPythonProject, normalizePythonName } = require('./scanner/python.js');
 const { loadCachedIOCs } = require('./ioc/updater.js');
 const { scanEntropy } = require('./scanner/entropy.js');
-const { setExtraExcludes, getExtraExcludes } = require('./utils.js');
+const { setExtraExcludes, getExtraExcludes, Spinner } = require('./utils.js');
 
 // ============================================
 // SCORING CONSTANTS
@@ -202,6 +202,14 @@ async function run(targetPath, options = {}) {
   // Detect Python project (synchronous, fast file reads)
   const pythonDeps = detectPythonProject(targetPath);
 
+  // Show spinner during scan (TTY only; piped/CI output keeps static message)
+  const useTTYSpinner = !options._capture && process.stdout.isTTY;
+  let spinner = null;
+  if (useTTYSpinner) {
+    spinner = new Spinner();
+    spinner.start(`[MUADDIB] Scanning ${targetPath}...`);
+  }
+
   // Parallel execution of all independent scanners
   const [
     packageThreats,
@@ -230,6 +238,11 @@ async function run(targetPath, options = {}) {
     Promise.resolve(checkPyPITyposquatting(pythonDeps, targetPath)),
     Promise.resolve(scanEntropy(targetPath, { entropyThreshold: options.entropyThreshold || undefined }))
   ]);
+
+  // Stop spinner now that scanning is complete
+  if (spinner) {
+    spinner.succeed(`[MUADDIB] Scanned ${targetPath}`);
+  }
 
   const threats = [
     ...packageThreats,
@@ -368,7 +381,8 @@ async function run(targetPath, options = {}) {
   }
   // Explain output
   else if (options.explain) {
-    console.log(`\n[MUADDIB] Scanning ${targetPath}\n`);
+    if (!spinner) console.log(`\n[MUADDIB] Scanning ${targetPath}\n`);
+    else console.log('');
 
     if (pythonInfo) {
       console.log(`[PYTHON] ${pythonInfo.dependencies} dependencies detected (${pythonInfo.files.join(', ')})`);
@@ -420,7 +434,8 @@ async function run(targetPath, options = {}) {
   }
   // Normal output
   else {
-    console.log(`\n[MUADDIB] Scanning ${targetPath}\n`);
+    if (!spinner) console.log(`\n[MUADDIB] Scanning ${targetPath}\n`);
+    else console.log('');
 
     const scoreBar = '█'.repeat(Math.floor(result.summary.riskScore / 5)) + '░'.repeat(20 - Math.floor(result.summary.riskScore / 5));
     console.log(`[SCORE] ${result.summary.riskScore}/100 [${scoreBar}] ${result.summary.riskLevel}\n`);
