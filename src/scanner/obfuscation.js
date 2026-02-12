@@ -29,26 +29,31 @@ function detectObfuscation(targetPath) {
 
     const signals = [];
     let score = 0;
+    const isMinified = path.basename(file).endsWith('.min.js');
 
-    // 1. Ratio code sur une seule ligne
-    const lines = content.split('\n').filter(l => l.trim());
-    const longLines = lines.filter(l => l.length > 500);
-    if (lines.length > 0 && longLines.length / lines.length > 0.3) {
-      score += 25;
-      signals.push('long_single_lines');
+    // 1. Ratio code sur une seule ligne (skip .min.js — minification, not obfuscation)
+    if (!isMinified) {
+      const lines = content.split('\n').filter(l => l.trim());
+      const longLines = lines.filter(l => l.length > 500);
+      if (lines.length > 0 && longLines.length / lines.length > 0.3) {
+        score += 25;
+        signals.push('long_single_lines');
+      }
     }
 
-    // 2. Hex escapes massifs (iterative counting to avoid large match arrays)
+    // 2. Hex escapes massifs (tracked but only scored with corroborating signals)
+    let hexScore = 0;
     const hexCount = countMatches(content, /\\x[0-9a-fA-F]{2}/g);
     if (hexCount > 20) {
-      score += 25;
+      hexScore = 25;
       signals.push('hex_escapes');
     }
 
-    // 3. Unicode escapes massifs
+    // 3. Unicode escapes massifs (tracked but only scored with corroborating signals)
+    let unicodeScore = 0;
     const unicodeCount = countMatches(content, /\\u[0-9a-fA-F]{4}/g);
     if (unicodeCount > 20) {
-      score += 20;
+      unicodeScore = 20;
       signals.push('unicode_escapes');
     }
 
@@ -69,6 +74,13 @@ function detectObfuscation(targetPath) {
     if (/atob\s*\(/.test(content) && /(eval|Function)\s*\(/.test(content)) {
       score += 30;
       signals.push('base64_eval');
+    }
+
+    // Hex/unicode escapes alone are not obfuscation (e.g. lodash Unicode char tables).
+    // Only count them when combined with strong obfuscation signals.
+    const hasStrongSignals = signals.some(s => s !== 'hex_escapes' && s !== 'unicode_escapes');
+    if (hasStrongSignals) {
+      score += hexScore + unicodeScore;
     }
 
     if (score >= 40) {

@@ -79,6 +79,16 @@ async function analyzeAST(targetPath) {
 }
 
 
+/**
+ * Returns true if all arguments of a call/new expression are string literals.
+ * Used to distinguish safe patterns like eval('1+2') or Function('return this')
+ * from dangerous dynamic patterns like eval(userInput).
+ */
+function hasOnlyStringLiteralArgs(node) {
+  if (!node.arguments || node.arguments.length === 0) return false;
+  return node.arguments.every(arg => arg.type === 'Literal' && typeof arg.value === 'string');
+}
+
 function analyzeFile(content, filePath, basePath) {
   const threats = [];
   let ast;
@@ -104,12 +114,27 @@ function analyzeFile(content, filePath, basePath) {
   walk.simple(ast, {
     CallExpression(node) {
       const callName = getCallName(node);
-      
-      if (DANGEROUS_CALLS.includes(callName)) {
+
+      if (callName === 'eval') {
+        const isConstant = hasOnlyStringLiteralArgs(node);
         threats.push({
-          type: 'dangerous_call_' + callName.toLowerCase(),
-          severity: 'HIGH',
-          message: `Dangerous call "${callName}" detected.`,
+          type: 'dangerous_call_eval',
+          severity: isConstant ? 'LOW' : 'HIGH',
+          message: isConstant
+            ? 'eval() with constant string literal (low risk, globalThis polyfill pattern).'
+            : 'Dangerous call "eval" with dynamic expression detected.',
+          file: path.relative(basePath, filePath)
+        });
+      } else if (callName === 'Function') {
+        const isConstant = hasOnlyStringLiteralArgs(node);
+        // Function() creates a new scope (unlike eval), so dynamic usage is MEDIUM not HIGH.
+        // Common in template engines (lodash, handlebars) and globalThis polyfills.
+        threats.push({
+          type: 'dangerous_call_function',
+          severity: isConstant ? 'LOW' : 'MEDIUM',
+          message: isConstant
+            ? 'Function() with constant string literal (low risk, globalThis polyfill pattern).'
+            : 'Function() with dynamic expression (template/factory pattern).',
           file: path.relative(basePath, filePath)
         });
       }
@@ -117,10 +142,13 @@ function analyzeFile(content, filePath, basePath) {
 
     NewExpression(node) {
       if (node.callee.type === 'Identifier' && node.callee.name === 'Function') {
+        const isConstant = hasOnlyStringLiteralArgs(node);
         threats.push({
           type: 'dangerous_call_function',
-          severity: 'HIGH',
-          message: 'Dangerous call "new Function()" detected.',
+          severity: isConstant ? 'LOW' : 'MEDIUM',
+          message: isConstant
+            ? 'new Function() with constant string literal (low risk, globalThis polyfill pattern).'
+            : 'new Function() with dynamic expression (template/factory pattern).',
           file: path.relative(basePath, filePath)
         });
       }
