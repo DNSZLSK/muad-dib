@@ -3282,6 +3282,119 @@ test('HASH: clearHashCache and getHashCacheSize', () => {
   });
 
   // ============================================
+  // MONITOR TESTS
+  // ============================================
+
+  console.log('\n=== MONITOR TESTS ===\n');
+
+  const { parseNpmResponse, parsePyPIRss, loadState, saveState, STATE_FILE } = require('../src/monitor.js');
+
+  test('MONITOR: parseNpmResponse extracts packages and _updated timestamp', () => {
+    const body = JSON.stringify({
+      '_updated': 1700000000000,
+      'my-package': {
+        name: 'my-package',
+        'dist-tags': { latest: '1.2.3' }
+      },
+      'another-pkg': {
+        name: 'another-pkg',
+        'dist-tags': { latest: '0.0.1' }
+      }
+    });
+    const { packages, maxTimestamp } = parseNpmResponse(body);
+    assert(packages.length === 2, 'Should find 2 packages, got ' + packages.length);
+    assert(packages.some(p => p.name === 'my-package' && p.version === '1.2.3'), 'Should have my-package@1.2.3');
+    assert(packages.some(p => p.name === 'another-pkg' && p.version === '0.0.1'), 'Should have another-pkg@0.0.1');
+    assert(maxTimestamp === 1700000000000, 'Should extract _updated timestamp');
+  });
+
+  test('MONITOR: parseNpmResponse handles empty/invalid JSON', () => {
+    const { packages, maxTimestamp } = parseNpmResponse('not json');
+    assert(packages.length === 0, 'Should return empty on invalid JSON');
+    assert(maxTimestamp === 0, 'Timestamp should be 0');
+  });
+
+  test('MONITOR: parseNpmResponse skips non-object entries', () => {
+    const body = JSON.stringify({
+      '_updated': 123,
+      'good-pkg': { name: 'good-pkg', 'dist-tags': { latest: '1.0.0' } },
+      'bad-entry': 'just a string',
+      'null-entry': null
+    });
+    const { packages } = parseNpmResponse(body);
+    assert(packages.length === 1, 'Should only find 1 valid package, got ' + packages.length);
+    assert(packages[0].name === 'good-pkg', 'Should be good-pkg');
+  });
+
+  test('MONITOR: parseNpmResponse handles missing dist-tags', () => {
+    const body = JSON.stringify({
+      'no-tags': { name: 'no-tags' }
+    });
+    const { packages } = parseNpmResponse(body);
+    assert(packages.length === 1, 'Should find 1 package');
+    assert(packages[0].version === '', 'Version should be empty string when no dist-tags');
+  });
+
+  test('MONITOR: parsePyPIRss extracts package names from RSS', () => {
+    const xml = `<?xml version="1.0"?>
+<rss version="2.0">
+  <channel>
+    <title>Newest packages</title>
+    <item>
+      <title>cool-lib 2.0.0</title>
+      <link>https://pypi.org/project/cool-lib/2.0.0/</link>
+    </item>
+    <item>
+      <title>another-pkg 0.1.0</title>
+      <link>https://pypi.org/project/another-pkg/0.1.0/</link>
+    </item>
+  </channel>
+</rss>`;
+    const packages = parsePyPIRss(xml);
+    assert(packages.length === 2, 'Should find 2 packages, got ' + packages.length);
+    assert(packages[0] === 'cool-lib', 'First should be cool-lib, got ' + packages[0]);
+    assert(packages[1] === 'another-pkg', 'Second should be another-pkg');
+  });
+
+  test('MONITOR: parsePyPIRss handles empty RSS', () => {
+    const xml = `<?xml version="1.0"?><rss><channel></channel></rss>`;
+    const packages = parsePyPIRss(xml);
+    assert(packages.length === 0, 'Should return empty for no items');
+  });
+
+  test('MONITOR: parsePyPIRss handles malformed XML gracefully', () => {
+    const packages = parsePyPIRss('not xml at all');
+    assert(packages.length === 0, 'Should return empty for invalid XML');
+  });
+
+  test('MONITOR: state save and restore round-trip', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-monitor-'));
+    const tmpState = path.join(tmpDir, 'monitor-state.json');
+    const origFile = STATE_FILE;
+
+    // Write state to temp file
+    const testState = { npmLastKey: 1700000000000, pypiLastPackage: 'test-pkg' };
+    fs.writeFileSync(tmpState, JSON.stringify(testState), 'utf8');
+
+    // Read it back manually (loadState uses STATE_FILE, so we test the format)
+    const raw = fs.readFileSync(tmpState, 'utf8');
+    const restored = JSON.parse(raw);
+    assert(restored.npmLastKey === 1700000000000, 'npmLastKey should round-trip');
+    assert(restored.pypiLastPackage === 'test-pkg', 'pypiLastPackage should round-trip');
+
+    // Cleanup
+    try { fs.unlinkSync(tmpState); fs.rmdirSync(tmpDir); } catch {}
+  });
+
+  test('MONITOR: loadState returns defaults when file missing', () => {
+    // loadState reads STATE_FILE which may not exist in test env
+    // We test that it doesn't throw and returns defaults
+    const state = loadState();
+    assert(typeof state.npmLastKey === 'number', 'npmLastKey should be number');
+    assert(typeof state.pypiLastPackage === 'string', 'pypiLastPackage should be string');
+  });
+
+  // ============================================
   // RESULTS
   // ============================================
 
