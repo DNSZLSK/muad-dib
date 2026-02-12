@@ -150,8 +150,8 @@ const PLAYBOOKS = {
 
   high_entropy_string:
     'Chaine a haute entropie detectee. Verifier si c\'est du base64, hex, ou un payload chiffre. Analyser le contexte d\'utilisation.',
-  high_entropy_file:
-    'Fichier avec entropie elevee. Peut etre du code obfusque ou des donnees encodees. Analyser manuellement dans un environnement isole.',
+  js_obfuscation_pattern:
+    'Pattern d\'obfuscation JS detecte (variables _0x*, string arrays encodes, eval+payload, long base64). Analyser dans un sandbox. Comparer avec les signatures Shai-Hulud/chalk/debug.',
 };
 
 function getPlaybook(threatType) {

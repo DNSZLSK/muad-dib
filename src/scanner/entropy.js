@@ -2,21 +2,58 @@ const fs = require('fs');
 const path = require('path');
 const { findFiles } = require('../utils.js');
 
-const ENTROPY_EXCLUDED_DIRS = ['.git', '.muaddib-cache'];
+const ENTROPY_EXCLUDED_DIRS = ['.git', '.muaddib-cache', '__compiled__', '__tests__', '__test__', 'dist', 'build'];
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+
+// File patterns to skip (compiled/minified/bundled)
+const SKIP_FILE_PATTERNS = ['.min.js', '.bundle.js', '.prod.js'];
 
 // Minimum string length to analyze (short strings naturally have low entropy)
 const MIN_STRING_LENGTH = 50;
 
-// Thresholds
-const FILE_ENTROPY_THRESHOLD = 5.5;
+// Thresholds (string-level only — file-level entropy removed, see design notes)
 const STRING_ENTROPY_MEDIUM = 5.5;
 const STRING_ENTROPY_HIGH = 6.5;
 
+// Long base64 threshold (chars) — base64 payloads >200 chars outside source maps are suspicious
+const LONG_BASE64_THRESHOLD = 200;
+
+// Whitelist patterns for non-malicious high-entropy strings
+const SOURCE_MAP_REGEX = /^data:application\/json;base64,/;
+const SHA256_HEX_REGEX = /^[0-9a-fA-F]{64}$/;
+const MD5_HEX_REGEX = /^[0-9a-fA-F]{32}$/;
+const UUID_REGEX = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+const JWT_REGEX = /^eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
+
+// Obfuscation pattern detection
+const HEX_VAR_REGEX = /_0x[a-f0-9]{4,6}/g;
+const BASE64_CHARS_REGEX = /^[A-Za-z0-9+/=]+$/;
+
+/**
+ * Check if a string matches a known non-malicious pattern.
+ * @param {string} str - The string to check
+ * @param {string} filePath - The file path (for context-dependent checks)
+ * @returns {boolean} true if the string is whitelisted
+ */
+function isWhitelistedString(str, filePath) {
+  if (SOURCE_MAP_REGEX.test(str)) return true;
+  if (SHA256_HEX_REGEX.test(str)) return true;
+  if (MD5_HEX_REGEX.test(str)) return true;
+  if (UUID_REGEX.test(str)) return true;
+
+  // JWT tokens in test files
+  if (JWT_REGEX.test(str)) {
+    const lowerPath = filePath.toLowerCase();
+    if (lowerPath.includes('test') || lowerPath.includes('spec') || lowerPath.includes('mock') || lowerPath.includes('fixture')) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 /**
  * Calculate Shannon entropy of a string.
- * Returns a value between 0 (completely uniform) and log2(alphabet_size).
- * For byte data, max is 8 bits.
  * @param {string} str - Input string
  * @returns {number} Entropy in bits (0-8)
  */
@@ -43,13 +80,11 @@ function calculateShannonEntropy(str) {
 
 /**
  * Extract string literals from JS source code via regex.
- * Matches single-quoted, double-quoted, and backtick strings.
  * @param {string} content - JS source code
  * @returns {string[]} Array of string contents (without quotes)
  */
 function extractStringLiterals(content) {
   const strings = [];
-  // Match "...", '...', `...` — non-greedy, no newlines for single/double
   const regex = /(?:"([^"\\]*(?:\\.[^"\\]*)*)"|'([^'\\]*(?:\\.[^'\\]*)*)'|`([^`\\]*(?:\\.[^`\\]*)*)`)/g;
   let match;
   while ((match = regex.exec(content)) !== null) {
@@ -60,16 +95,120 @@ function extractStringLiterals(content) {
 }
 
 /**
- * Scan JavaScript files for high-entropy content (base64, hex, encrypted payloads).
- * Follows the same pattern as detectObfuscation().
- * @param {string} targetPath - Directory to scan
+ * Check if a file should be skipped based on path patterns.
+ * @param {string} filePath - Absolute file path
+ * @returns {boolean} true if the file should be skipped
+ */
+function shouldSkipFile(filePath) {
+  const basename = path.basename(filePath);
+  for (const pattern of SKIP_FILE_PATTERNS) {
+    if (basename.endsWith(pattern)) return true;
+  }
+  return false;
+}
+
+/**
+ * Check if file content contains a source map reference.
+ * @param {string} content - File content
+ * @returns {boolean}
+ */
+function hasSourceMap(content) {
+  return content.includes('//# sourceMappingURL=') || content.includes('//@ sourceMappingURL=');
+}
+
+/**
+ * Detect JS obfuscation patterns that are signatures of real malware.
+ * Returns an array of threats for patterns found in the file content.
+ * @param {string} content - File content
+ * @param {string} relativePath - Relative file path for threat reporting
  * @returns {Array} threats
  */
-function scanEntropy(targetPath) {
+function detectObfuscationPatterns(content, relativePath) {
   const threats = [];
+
+  // 1. Hex variable names: _0x[a-f0-9]{4,6} — classic JS obfuscator signature
+  const hexVarMatches = content.match(HEX_VAR_REGEX);
+  if (hexVarMatches && hexVarMatches.length >= 3) {
+    const uniqueVars = new Set(hexVarMatches);
+    if (uniqueVars.size >= 3) {
+      threats.push({
+        type: 'js_obfuscation_pattern',
+        severity: 'HIGH',
+        message: `JS obfuscator hex variables detected (${uniqueVars.size} unique _0x* vars) — signature of javascript-obfuscator/obfuscator.io`,
+        file: relativePath
+      });
+    }
+  }
+
+  // 2. Encoded string arrays: arrays of 20+ string literals that look like base64/hex
+  const strings = extractStringLiterals(content);
+  const encodedStrings = strings.filter(s => {
+    if (s.length < 8) return false;
+    return BASE64_CHARS_REGEX.test(s) && calculateShannonEntropy(s) > 4.5;
+  });
+  if (encodedStrings.length >= 20) {
+    threats.push({
+      type: 'js_obfuscation_pattern',
+      severity: 'HIGH',
+      message: `Encoded string array detected (${encodedStrings.length} base64/hex strings) — typical of string array rotation obfuscation`,
+      file: relativePath
+    });
+  }
+
+  // 3. eval() or Function() called with high-entropy content
+  //    Match: eval("...high entropy...") or Function("...high entropy...")
+  const evalFuncRegex = /(?:eval|Function)\s*\(\s*(?:"([^"]{50,})"|'([^']{50,})'|`([^`]{50,})`)/g;
+  let evalMatch;
+  while ((evalMatch = evalFuncRegex.exec(content)) !== null) {
+    const arg = evalMatch[1] || evalMatch[2] || evalMatch[3];
+    if (arg) {
+      const argEntropy = calculateShannonEntropy(arg);
+      if (argEntropy > STRING_ENTROPY_MEDIUM) {
+        threats.push({
+          type: 'js_obfuscation_pattern',
+          severity: 'HIGH',
+          message: `eval/Function called with high-entropy argument (${argEntropy.toFixed(2)} bits, ${arg.length} chars) — likely executing obfuscated payload`,
+          file: relativePath
+        });
+        break; // One finding per file is enough
+      }
+    }
+  }
+
+  // 4. Long base64 strings (>200 chars) outside source maps
+  for (const str of strings) {
+    if (str.length > LONG_BASE64_THRESHOLD && BASE64_CHARS_REGEX.test(str)) {
+      // Skip source map data URLs
+      if (SOURCE_MAP_REGEX.test(str)) continue;
+      threats.push({
+        type: 'js_obfuscation_pattern',
+        severity: 'HIGH',
+        message: `Long base64 payload detected (${str.length} chars) — possible encoded malicious code`,
+        file: relativePath
+      });
+      break; // One finding per file is enough
+    }
+  }
+
+  return threats;
+}
+
+/**
+ * Scan JavaScript files for high-entropy strings and JS obfuscation patterns.
+ * @param {string} targetPath - Directory to scan
+ * @param {object} [options] - Options
+ * @param {number} [options.entropyThreshold] - Custom string-level entropy threshold (default: 5.5)
+ * @returns {Array} threats
+ */
+function scanEntropy(targetPath, options = {}) {
+  const threats = [];
+  const stringThreshold = options.entropyThreshold || STRING_ENTROPY_MEDIUM;
   const files = findFiles(targetPath, { extensions: ['.js'], excludedDirs: ENTROPY_EXCLUDED_DIRS });
 
   for (const file of files) {
+    // Skip files matching compiled/minified patterns
+    if (shouldSkipFile(file)) continue;
+
     // Size guard
     try {
       const stat = fs.statSync(file);
@@ -85,25 +224,25 @@ function scanEntropy(targetPath) {
       continue;
     }
 
+    // Skip files containing source maps (legitimate compiled output)
+    if (hasSourceMap(content)) continue;
+
     const relativePath = path.relative(targetPath, file);
 
-    // File-level entropy check
-    const fileEntropy = calculateShannonEntropy(content);
-    if (fileEntropy > FILE_ENTROPY_THRESHOLD) {
-      threats.push({
-        type: 'high_entropy_file',
-        severity: 'MEDIUM',
-        message: `High entropy file (${fileEntropy.toFixed(2)} bits) — possibly obfuscated or encoded content`,
-        file: relativePath
-      });
-    }
+    // Obfuscation pattern detection (MUADDIB-ENTROPY-003)
+    const obfuscationThreats = detectObfuscationPatterns(content, relativePath);
+    threats.push(...obfuscationThreats);
 
-    // String-level entropy check
+    // String-level entropy check (MUADDIB-ENTROPY-001)
     const strings = extractStringLiterals(content);
     for (const str of strings) {
       if (str.length < MIN_STRING_LENGTH) continue;
+
+      // Skip whitelisted patterns
+      if (isWhitelistedString(str, relativePath)) continue;
+
       const strEntropy = calculateShannonEntropy(str);
-      if (strEntropy > STRING_ENTROPY_MEDIUM) {
+      if (strEntropy > stringThreshold) {
         const severity = strEntropy > STRING_ENTROPY_HIGH ? 'HIGH' : 'MEDIUM';
         threats.push({
           type: 'high_entropy_string',
