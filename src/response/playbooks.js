@@ -147,6 +147,11 @@ const PLAYBOOKS = {
     'Package lance des processus inconnus lors de l\'installation. Verifier les commandes executees.',
   sandbox_timeout:
     'CRITIQUE: Le container sandbox a depasse le timeout. Possible boucle infinie ou consommation de ressources.',
+
+  high_entropy_string:
+    'Chaine a haute entropie detectee. Verifier si c\'est du base64, hex, ou un payload chiffre. Analyser le contexte d\'utilisation.',
+  high_entropy_file:
+    'Fichier avec entropie elevee. Peut etre du code obfusque ou des donnees encodees. Analyser manuellement dans un environnement isole.',
 };
 
 function getPlaybook(threatType) {

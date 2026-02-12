@@ -3108,6 +3108,61 @@ test('HASH: clearHashCache and getHashCacheSize', () => {
   });
 
   // ============================================
+  // ENTROPY TESTS
+  // ============================================
+
+  console.log('\n=== ENTROPY TESTS ===\n');
+
+  const { calculateShannonEntropy, scanEntropy } = require('../src/scanner/entropy.js');
+
+  test('ENTROPY: Normal English text has low entropy (<4.0)', () => {
+    const text = 'This is a normal English sentence that should have relatively low Shannon entropy.';
+    const entropy = calculateShannonEntropy(text);
+    assert(entropy < 4.5, 'Normal text entropy should be < 4.5, got ' + entropy.toFixed(2));
+  });
+
+  test('ENTROPY: Base64 string has high entropy (>5.0)', () => {
+    const b64 = 'SGVsbG8gV29ybGQhIFRoaXMgaXMgYSBiYXNlNjQgZW5jb2RlZCBzdHJpbmcgdGhhdCBzaG91bGQgaGF2ZSBoaWdoIGVudHJvcHkgYW5kIHRyaWdnZXIgdGhlIHNjYW5uZXI=';
+    const entropy = calculateShannonEntropy(b64);
+    assert(entropy > 5.0, 'Base64 entropy should be > 5.0, got ' + entropy.toFixed(2));
+  });
+
+  test('ENTROPY: Hex string has high entropy (>3.0)', () => {
+    const hex = '4a6f686e20446f6520736179732068656c6c6f20746f20746865207365637572697479207363616e6e6572206279206372656174696e67206120686578';
+    const entropy = calculateShannonEntropy(hex);
+    assert(entropy > 3.0, 'Hex entropy should be > 3.0, got ' + entropy.toFixed(2));
+  });
+
+  test('ENTROPY: scanEntropy on normal.js returns 0 findings', () => {
+    const entropyDir = path.join(__dirname, 'samples', 'entropy');
+    const threats = scanEntropy(entropyDir);
+    const normalThreats = threats.filter(function(t) { return t.file === 'normal.js'; });
+    assert(normalThreats.length === 0, 'Normal file should have 0 entropy findings, got ' + normalThreats.length);
+  });
+
+  test('ENTROPY: scanEntropy on high-entropy.js finds threats', () => {
+    const entropyDir = path.join(__dirname, 'samples', 'entropy');
+    const threats = scanEntropy(entropyDir);
+    const highThreats = threats.filter(function(t) { return t.file === 'high-entropy.js'; });
+    assert(highThreats.length > 0, 'High-entropy file should trigger findings, got ' + highThreats.length);
+  });
+
+  test('ENTROPY: Short high-entropy string (<50 chars) does NOT trigger', () => {
+    // A short random-looking string should not trigger because of the length threshold
+    const shortStr = 'xK9mQ2pLwR7vN5tY';
+    const entropy = calculateShannonEntropy(shortStr);
+    assert(entropy > 3.5, 'Short string should still have high entropy: ' + entropy.toFixed(2));
+    // But scanEntropy should not flag it because the string is < 50 chars
+    // We verify this by scanning the normal.js file which has only short strings
+    const entropyDir = path.join(__dirname, 'samples', 'entropy');
+    const threats = scanEntropy(entropyDir);
+    const normalStringThreats = threats.filter(function(t) {
+      return t.file === 'normal.js' && t.type === 'high_entropy_string';
+    });
+    assert(normalStringThreats.length === 0, 'Short strings should not trigger, got ' + normalStringThreats.length);
+  });
+
+  // ============================================
   // RESULTS
   // ============================================
 

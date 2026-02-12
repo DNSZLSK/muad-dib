@@ -24,6 +24,7 @@
 | Reverse shell | Pattern matching | HIGH |
 | Dead man's switch (rm -rf $HOME) | Pattern matching | HIGH |
 | Code obfusque | Heuristiques | MEDIUM |
+| Chaines haute entropie (base64, hex, chiffre) | Analyse entropie Shannon | MEDIUM |
 
 ### Flux de donnees suspects
 
@@ -173,6 +174,7 @@ Couverture complete des scanners, parsers, IOC matching, typosquatting, et integ
 | PyPI Supply Chain Compromise | T1195.002 | IOC matching |
 | PyPI Typosquatting | T1195.002 | Levenshtein + PEP 503 |
 | Obfuscated Files | T1027 | Heuristics |
+| Shannon Entropy (strings/files) | T1027 | Entropy analysis |
 | Exfiltration Over C2 Channel | T1041 | Dataflow analysis |
 | Data Destruction | T1485 | Pattern matching |
 | Ingress Tool Transfer | T1105 | Pattern matching |
