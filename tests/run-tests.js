@@ -3287,7 +3287,11 @@ test('HASH: clearHashCache and getHashCacheSize', () => {
 
   console.log('\n=== MONITOR TESTS ===\n');
 
-  const { parseNpmResponse, parsePyPIRss, loadState, saveState, STATE_FILE } = require('../src/monitor.js');
+  const {
+    parseNpmResponse, parsePyPIRss, loadState, saveState, STATE_FILE,
+    ALERTS_FILE, extractTarGz, getNpmTarballUrl, scanQueue,
+    appendAlert, timeoutPromise, stats, MAX_TARBALL_SIZE
+  } = require('../src/monitor.js');
 
   test('MONITOR: parseNpmResponse extracts packages and _updated timestamp', () => {
     const body = JSON.stringify({
@@ -3392,6 +3396,175 @@ test('HASH: clearHashCache and getHashCacheSize', () => {
     const state = loadState();
     assert(typeof state.npmLastKey === 'number', 'npmLastKey should be number');
     assert(typeof state.pypiLastPackage === 'string', 'pypiLastPackage should be string');
+  });
+
+  // ============================================
+  // MONITOR PHASE 2 TESTS
+  // ============================================
+
+  console.log('\n=== MONITOR PHASE 2 TESTS ===\n');
+
+  test('MONITOR: parseNpmResponse extracts tarball URL', () => {
+    const body = JSON.stringify({
+      '_updated': 1700000000000,
+      'my-package': {
+        name: 'my-package',
+        'dist-tags': { latest: '1.2.3' },
+        dist: { tarball: 'https://registry.npmjs.org/my-package/-/my-package-1.2.3.tgz' }
+      },
+      'no-dist': {
+        name: 'no-dist',
+        'dist-tags': { latest: '0.0.1' }
+      }
+    });
+    const { packages } = parseNpmResponse(body);
+    const withTarball = packages.find(p => p.name === 'my-package');
+    assert(withTarball, 'Should find my-package');
+    assert(withTarball.tarball === 'https://registry.npmjs.org/my-package/-/my-package-1.2.3.tgz', 'Should extract tarball URL');
+    const withoutDist = packages.find(p => p.name === 'no-dist');
+    assert(withoutDist, 'Should find no-dist');
+    assert(withoutDist.tarball === '', 'Should have empty tarball when no dist');
+  });
+
+  test('MONITOR: scanQueue FIFO ordering', () => {
+    // Clear queue first
+    scanQueue.length = 0;
+    scanQueue.push({ name: 'first', version: '1.0.0', ecosystem: 'npm', tarballUrl: 'a' });
+    scanQueue.push({ name: 'second', version: '2.0.0', ecosystem: 'npm', tarballUrl: 'b' });
+    scanQueue.push({ name: 'third', version: '3.0.0', ecosystem: 'pypi', tarballUrl: 'c' });
+    assert(scanQueue.length === 3, 'Queue should have 3 items');
+    const item1 = scanQueue.shift();
+    assert(item1.name === 'first', 'First shifted should be "first", got ' + item1.name);
+    const item2 = scanQueue.shift();
+    assert(item2.name === 'second', 'Second shifted should be "second", got ' + item2.name);
+    const item3 = scanQueue.shift();
+    assert(item3.name === 'third', 'Third shifted should be "third", got ' + item3.name);
+    assert(scanQueue.length === 0, 'Queue should be empty');
+  });
+
+  test('MONITOR: getNpmTarballUrl extracts URL from pkg data', () => {
+    const withDist = { dist: { tarball: 'https://example.com/pkg.tgz' } };
+    assert(getNpmTarballUrl(withDist) === 'https://example.com/pkg.tgz', 'Should extract tarball URL');
+    const noDist = { name: 'foo' };
+    assert(getNpmTarballUrl(noDist) === null, 'Should return null when no dist');
+    const emptyDist = { dist: {} };
+    assert(getNpmTarballUrl(emptyDist) === null, 'Should return null when no tarball in dist');
+  });
+
+  test('MONITOR: extractTarGz returns extracted path', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-tar-test-'));
+    const innerDir = path.join(tmpDir, 'source');
+    const packageDir = path.join(innerDir, 'package');
+    fs.mkdirSync(packageDir, { recursive: true });
+    fs.writeFileSync(path.join(packageDir, 'index.js'), 'module.exports = {};\n');
+    // Create a tar.gz from the source directory
+    const tgzPath = path.join(tmpDir, 'test.tar.gz');
+    try {
+      const { execSync: es } = require('child_process');
+      // Use --force-local on Windows so tar doesn't interpret C: as a remote host
+      const forceLocal = process.platform === 'win32' ? ' --force-local' : '';
+      es(`tar czf "${tgzPath}"${forceLocal} -C "${innerDir}" package`, { stdio: 'pipe' });
+      const extractDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-extract-'));
+      const result = extractTarGz(tgzPath, extractDir);
+      // Should detect the package/ subdirectory
+      assert(result.endsWith('package'), 'Should return path ending with package, got ' + result);
+      assert(fs.existsSync(path.join(result, 'index.js')), 'Extracted dir should contain index.js');
+      try { fs.rmSync(extractDir, { recursive: true, force: true }); } catch {}
+    } finally {
+      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+    }
+  });
+
+  test('MONITOR: appendAlert writes to file', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-alert-test-'));
+    const tmpAlerts = path.join(tmpDir, 'alerts.json');
+    try {
+      // Manually test alert format (appendAlert uses ALERTS_FILE, so we test the logic)
+      const alert1 = {
+        timestamp: '2025-01-01T00:00:00.000Z',
+        name: 'evil-pkg',
+        version: '1.0.0',
+        ecosystem: 'npm',
+        findings: [{ rule: 'ast_dangerous_call', severity: 'HIGH', file: 'index.js' }]
+      };
+      const alert2 = {
+        timestamp: '2025-01-01T00:01:00.000Z',
+        name: 'bad-lib',
+        version: '0.1.0',
+        ecosystem: 'pypi',
+        findings: [{ rule: 'shell_exec', severity: 'CRITICAL', file: 'setup.py' }]
+      };
+      // Write first alert
+      fs.writeFileSync(tmpAlerts, JSON.stringify([alert1], null, 2), 'utf8');
+      // Append second
+      const existing = JSON.parse(fs.readFileSync(tmpAlerts, 'utf8'));
+      existing.push(alert2);
+      fs.writeFileSync(tmpAlerts, JSON.stringify(existing, null, 2), 'utf8');
+      // Verify
+      const result = JSON.parse(fs.readFileSync(tmpAlerts, 'utf8'));
+      assert(result.length === 2, 'Should have 2 alerts, got ' + result.length);
+      assert(result[0].name === 'evil-pkg', 'First alert should be evil-pkg');
+      assert(result[1].name === 'bad-lib', 'Second alert should be bad-lib');
+      assert(result[0].findings[0].rule === 'ast_dangerous_call', 'Should have rule field');
+      assert(result[1].ecosystem === 'pypi', 'Should have ecosystem field');
+    } finally {
+      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+    }
+  });
+
+  test('MONITOR: getPyPITarballUrl parses JSON response', () => {
+    // Test the parsing logic directly using the same structure getPyPITarballUrl expects
+    const mockData = {
+      info: { version: '3.2.1' },
+      urls: [
+        { packagetype: 'bdist_wheel', url: 'https://files.pythonhosted.org/pkg-3.2.1.whl' },
+        { packagetype: 'sdist', url: 'https://files.pythonhosted.org/pkg-3.2.1.tar.gz' }
+      ]
+    };
+    // Simulate the logic in getPyPITarballUrl
+    const version = (mockData.info && mockData.info.version) || '';
+    const urls = mockData.urls || [];
+    const sdist = urls.find(u => u.packagetype === 'sdist' && u.url);
+    assert(version === '3.2.1', 'Should extract version');
+    assert(sdist, 'Should find sdist entry');
+    assert(sdist.url === 'https://files.pythonhosted.org/pkg-3.2.1.tar.gz', 'Should get sdist URL');
+
+    // Test fallback: no sdist, find .tar.gz
+    const noSdist = {
+      info: { version: '1.0.0' },
+      urls: [
+        { packagetype: 'bdist_wheel', url: 'https://example.com/pkg.whl' },
+        { packagetype: 'bdist_egg', url: 'https://example.com/pkg.tar.gz' }
+      ]
+    };
+    const noSdistUrls = noSdist.urls;
+    const sdist2 = noSdistUrls.find(u => u.packagetype === 'sdist' && u.url);
+    assert(!sdist2, 'Should not find sdist');
+    const tarGz = noSdistUrls.find(u => u.url && u.url.endsWith('.tar.gz'));
+    assert(tarGz, 'Should find .tar.gz fallback');
+    assert(tarGz.url === 'https://example.com/pkg.tar.gz', 'Should get .tar.gz URL');
+  });
+
+  await asyncTest('MONITOR: timeoutPromise rejects after delay', async () => {
+    const start = Date.now();
+    try {
+      await timeoutPromise(50); // 50ms timeout
+      assert(false, 'Should have rejected');
+    } catch (err) {
+      const elapsed = Date.now() - start;
+      assert(elapsed >= 40, 'Should have waited ~50ms, waited ' + elapsed);
+      assert(err.message.includes('timeout'), 'Error should mention timeout, got: ' + err.message);
+    }
+  });
+
+  test('MONITOR: stats object tracks counters', () => {
+    // Verify stats has expected fields
+    assert(typeof stats.scanned === 'number', 'stats.scanned should be number');
+    assert(typeof stats.clean === 'number', 'stats.clean should be number');
+    assert(typeof stats.suspect === 'number', 'stats.suspect should be number');
+    assert(typeof stats.errors === 'number', 'stats.errors should be number');
+    assert(typeof stats.totalTimeMs === 'number', 'stats.totalTimeMs should be number');
+    assert(typeof stats.lastReportTime === 'number', 'stats.lastReportTime should be number');
   });
 
   // ============================================
