@@ -1,0 +1,2 @@
+// Compiled output — this is legitimate transpiled code with high entropy
+var a=function(t){return t.split("").reverse().join("")};var b="SGVsbG8gV29ybGQhIFRoaXMgaXMgYSBiYXNlNjQgZW5jb2RlZCBzdHJpbmcgdGhhdCBzaG91bGQgaGF2ZSBoaWdoIGVudHJvcHkgYW5kIHRyaWdnZXIgdGhlIHNjYW5uZXI=";var c="xK9mQ2pLwR7vN5tYjF3hZcA8bU6dEoI4sGnX0lWiHfCrPqS1kTuMyBaJeDgOvRx9mQ2pLwR7vN5tYjF3hZcA8bU6dEoI4sGnX0lWiHfCrPqS1kTuMyBa";module.exports={a:a,b:b,c:c};

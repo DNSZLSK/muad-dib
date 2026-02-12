@@ -228,7 +228,7 @@ async function run(targetPath, options = {}) {
     Promise.resolve(scanGitHubActions(targetPath)),
     Promise.resolve(matchPythonIOCs(pythonDeps, targetPath)),
     Promise.resolve(checkPyPITyposquatting(pythonDeps, targetPath)),
-    Promise.resolve(scanEntropy(targetPath))
+    Promise.resolve(scanEntropy(targetPath, { entropyThreshold: options.entropyThreshold || undefined }))
   ]);
 
   const threats = [

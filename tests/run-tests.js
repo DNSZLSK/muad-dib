@@ -3115,7 +3115,9 @@ test('HASH: clearHashCache and getHashCacheSize', () => {
 
   const { calculateShannonEntropy, scanEntropy } = require('../src/scanner/entropy.js');
 
-  test('ENTROPY: Normal English text has low entropy (<4.0)', () => {
+  // --- Shannon entropy unit tests ---
+
+  test('ENTROPY: Normal English text has low entropy (<4.5)', () => {
     const text = 'This is a normal English sentence that should have relatively low Shannon entropy.';
     const entropy = calculateShannonEntropy(text);
     assert(entropy < 4.5, 'Normal text entropy should be < 4.5, got ' + entropy.toFixed(2));
@@ -3133,6 +3135,8 @@ test('HASH: clearHashCache and getHashCacheSize', () => {
     assert(entropy > 3.0, 'Hex entropy should be > 3.0, got ' + entropy.toFixed(2));
   });
 
+  // --- String-level entropy tests ---
+
   test('ENTROPY: scanEntropy on normal.js returns 0 findings', () => {
     const entropyDir = path.join(__dirname, 'samples', 'entropy');
     const threats = scanEntropy(entropyDir);
@@ -3140,26 +3144,89 @@ test('HASH: clearHashCache and getHashCacheSize', () => {
     assert(normalThreats.length === 0, 'Normal file should have 0 entropy findings, got ' + normalThreats.length);
   });
 
-  test('ENTROPY: scanEntropy on high-entropy.js finds threats', () => {
+  test('ENTROPY: scanEntropy on high-entropy.js finds string-level threats', () => {
     const entropyDir = path.join(__dirname, 'samples', 'entropy');
     const threats = scanEntropy(entropyDir);
-    const highThreats = threats.filter(function(t) { return t.file === 'high-entropy.js'; });
-    assert(highThreats.length > 0, 'High-entropy file should trigger findings, got ' + highThreats.length);
+    const highThreats = threats.filter(function(t) {
+      return t.file === 'high-entropy.js' && t.type === 'high_entropy_string';
+    });
+    assert(highThreats.length > 0, 'High-entropy strings should trigger findings, got ' + highThreats.length);
   });
 
   test('ENTROPY: Short high-entropy string (<50 chars) does NOT trigger', () => {
-    // A short random-looking string should not trigger because of the length threshold
     const shortStr = 'xK9mQ2pLwR7vN5tY';
     const entropy = calculateShannonEntropy(shortStr);
     assert(entropy > 3.5, 'Short string should still have high entropy: ' + entropy.toFixed(2));
-    // But scanEntropy should not flag it because the string is < 50 chars
-    // We verify this by scanning the normal.js file which has only short strings
     const entropyDir = path.join(__dirname, 'samples', 'entropy');
     const threats = scanEntropy(entropyDir);
     const normalStringThreats = threats.filter(function(t) {
       return t.file === 'normal.js' && t.type === 'high_entropy_string';
     });
     assert(normalStringThreats.length === 0, 'Short strings should not trigger, got ' + normalStringThreats.length);
+  });
+
+  test('ENTROPY: No file-level entropy scanning (removed)', () => {
+    const entropyDir = path.join(__dirname, 'samples', 'entropy');
+    const threats = scanEntropy(entropyDir);
+    const fileThreats = threats.filter(function(t) { return t.type === 'high_entropy_file'; });
+    assert(fileThreats.length === 0, 'File-level entropy scanning should be removed, got ' + fileThreats.length + ' findings');
+  });
+
+  // --- Exclusion tests ---
+
+  test('ENTROPY: .min.js file does NOT trigger', () => {
+    const entropyDir = path.join(__dirname, 'samples', 'entropy');
+    const threats = scanEntropy(entropyDir);
+    const minThreats = threats.filter(function(t) { return t.file.endsWith('.min.js'); });
+    assert(minThreats.length === 0, '.min.js file should be skipped, got ' + minThreats.length + ' findings');
+  });
+
+  test('ENTROPY: __compiled__/ files do NOT trigger', () => {
+    const entropyDir = path.join(__dirname, 'samples', 'entropy');
+    const threats = scanEntropy(entropyDir);
+    const compiledThreats = threats.filter(function(t) { return t.file.includes('__compiled__'); });
+    assert(compiledThreats.length === 0, '__compiled__/ files should be skipped, got ' + compiledThreats.length + ' findings');
+  });
+
+  test('ENTROPY: Legit minified code does NOT trigger', () => {
+    const entropyDir = path.join(__dirname, 'samples', 'entropy');
+    const threats = scanEntropy(entropyDir);
+    const legitThreats = threats.filter(function(t) { return t.file === 'legit-minified.js'; });
+    assert(legitThreats.length === 0, 'Legitimate minified code should not trigger, got ' + legitThreats.length + ' findings');
+  });
+
+  // --- Obfuscation pattern tests (MUADDIB-ENTROPY-003) ---
+
+  test('ENTROPY: _0x hex variable pattern triggers js_obfuscation_pattern', () => {
+    const entropyDir = path.join(__dirname, 'samples', 'entropy');
+    const threats = scanEntropy(entropyDir);
+    const obfThreats = threats.filter(function(t) {
+      return t.file === 'obfuscated.js' && t.type === 'js_obfuscation_pattern';
+    });
+    assert(obfThreats.length > 0, 'Obfuscated _0x code should trigger js_obfuscation_pattern, got ' + obfThreats.length);
+    assert(obfThreats[0].severity === 'HIGH', 'js_obfuscation_pattern should be HIGH severity');
+  });
+
+  test('ENTROPY: Long base64 payload triggers js_obfuscation_pattern', () => {
+    const entropyDir = path.join(__dirname, 'samples', 'entropy');
+    const threats = scanEntropy(entropyDir);
+    const b64Threats = threats.filter(function(t) {
+      return t.file === 'long-base64-payload.js' && t.type === 'js_obfuscation_pattern';
+    });
+    assert(b64Threats.length > 0, 'Long base64 payload should trigger js_obfuscation_pattern, got ' + b64Threats.length);
+  });
+
+  test('ENTROPY: Rule MUADDIB-ENTROPY-003 exists', () => {
+    const { getRule } = require('../src/rules/index.js');
+    const rule = getRule('js_obfuscation_pattern');
+    assert(rule.id === 'MUADDIB-ENTROPY-003', 'Rule ID should be MUADDIB-ENTROPY-003, got ' + rule.id);
+    assert(rule.mitre === 'T1027.002', 'MITRE should be T1027.002, got ' + rule.mitre);
+  });
+
+  test('ENTROPY: Playbook for js_obfuscation_pattern exists', () => {
+    const { getPlaybook } = require('../src/response/playbooks.js');
+    const pb = getPlaybook('js_obfuscation_pattern');
+    assert(pb && pb.length > 10, 'Playbook should exist for js_obfuscation_pattern');
   });
 
   // ============================================

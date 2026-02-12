@@ -472,14 +472,18 @@ const RULES = {
     references: ['https://attack.mitre.org/techniques/T1027/'],
     mitre: 'T1027'
   },
-  high_entropy_file: {
-    id: 'MUADDIB-ENTROPY-002',
-    name: 'High Entropy File',
-    severity: 'MEDIUM',
-    confidence: 'low',
-    description: 'Fichier JS avec entropie globale elevee. Peut contenir du code obfusque, des payloads encodes ou des donnees compressees.',
-    references: ['https://attack.mitre.org/techniques/T1027/'],
-    mitre: 'T1027'
+  js_obfuscation_pattern: {
+    id: 'MUADDIB-ENTROPY-003',
+    name: 'JS Obfuscation Pattern',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'Pattern d\'obfuscation JS detecte: variables _0x*, tableaux de strings encodes, eval/Function avec contenu haute entropie, ou long payload base64. Signature de javascript-obfuscator et malwares npm connus.',
+    references: [
+      'https://attack.mitre.org/techniques/T1027/002/',
+      'https://attack.mitre.org/techniques/T1027/010/',
+      'https://blog.phylum.io/shai-hulud-npm-worm'
+    ],
+    mitre: 'T1027.002'
   },
 };
 

@@ -1,0 +1,3 @@
+// File with a long base64 payload — should trigger js_obfuscation_pattern
+const payload = "SGVsbG8gV29ybGQhIFRoaXMgaXMgYSB2ZXJ5IGxvbmcgYmFzZTY0IGVuY29kZWQgc3RyaW5nIHRoYXQgaXMgZGVzaWduZWQgdG8gc2ltdWxhdGUgYSBtYWxpY2lvdXMgcGF5bG9hZCBlbWJlZGRlZCBpbiBhIEphdmFTY3JpcHQgZmlsZS4gSXQgc2hvdWxkIGJlIGxvbmcgZW5vdWdoIHRvIHRyaWdnZXIgdGhlIGxvbmcgYmFzZTY0IGRldGVjdGlvbg==";
+module.exports = { payload };

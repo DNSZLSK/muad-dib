@@ -24,6 +24,7 @@ let failLevel = 'high';
 let webhookUrl = null;
 let paranoidMode = false;
 let excludeDirs = [];
+let entropyThreshold = null;
 
 for (let i = 0; i < options.length; i++) {
   if (options[i] === '--json') {
@@ -78,6 +79,15 @@ for (let i = 0; i < options.length; i++) {
       excludeDirs.push(options[i + 1]);
       i++;
     }
+  } else if (options[i] === '--entropy-threshold') {
+    const val = parseFloat(options[i + 1]);
+    if (!isNaN(val) && val > 0 && val <= 8) {
+      entropyThreshold = val;
+    } else {
+      console.error('[ERROR] --entropy-threshold must be a number between 0 and 8');
+      process.exit(1);
+    }
+    i++;
   } else if (options[i] === '--paranoid') {
     paranoidMode = true;
   } else if (options[i] === '--strict') {
@@ -314,6 +324,7 @@ const helpText = `
     --webhook [url]     Discord/Slack webhook
     --paranoid          Ultra-strict mode
     --exclude [dir]     Exclude directory from scan (repeatable)
+    --entropy-threshold [n]  Custom string-level entropy threshold (default: 5.5)
     --save-dev, -D      Install as dev dependency
     -g, --global        Install globally
     --force             Force install despite threats
@@ -342,7 +353,8 @@ if (command === 'version' || command === '--version' || command === '-v') {
     failLevel: failLevel,
     webhook: webhookUrl,
     paranoid: paranoidMode,
-    exclude: excludeDirs
+    exclude: excludeDirs,
+    entropyThreshold: entropyThreshold
   }).then(exitCode => {
     process.exit(exitCode);
   }).catch(err => {
