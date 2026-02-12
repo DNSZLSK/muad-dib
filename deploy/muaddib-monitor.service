@@ -1,0 +1,30 @@
+[Unit]
+Description=MUAD'DIB Registry Monitor
+Documentation=https://github.com/DNSZLSK/muad-dib
+After=network.target docker.service
+Wants=docker.service
+
+[Service]
+Type=simple
+User=muaddib
+Group=muaddib
+WorkingDirectory=/opt/muaddib
+ExecStart=/usr/bin/node src/monitor.js
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=muaddib-monitor
+
+Environment=NODE_ENV=production
+EnvironmentFile=-/opt/muaddib/.env
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/opt/muaddib/data
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
