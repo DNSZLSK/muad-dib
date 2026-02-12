@@ -274,6 +274,99 @@ Apres le support npm, j'ai etendu MUAD'DIB pour scanner les projets Python :
 
 **Distinction update/scrape** : `muaddib update` est rapide (~5 secondes, charge les IOCs compacts du package + YAML + GitHub). `muaddib scrape` est complet (~5 minutes, telecharge les dumps OSV npm + PyPI + toutes les sources).
 
+### Format IOC compact
+
+**Probleme** : Le fichier `iocs.json` complet faisait 112MB apres le scraping de toutes les sources (OSV npm + PyPI + DataDog + OSSF + GitHub Advisory). Impossible a distribuer via npm (la limite est de 10MB).
+
+**Solution** : Creation de `iocs-compact.json` avec un format optimise :
+- **Wildcard patterns** : 87% des packages malveillants sont dangereux a toute version. Stockes dans un tableau `wildcards[]` au lieu de dupliquer les entrees par version.
+- **Versioned entries** : Les 13% restants (packages compromis sur certaines versions seulement) sont stockes dans un objet `versioned{}` avec les plages de versions affectees.
+- **Lookup O(1)** : Au chargement, `loadCachedIOCs()` convertit le format compact en `Map` et `Set` pour des lookups instantanes.
+
+**Resultat** : 112MB → ~5MB. Le fichier `iocs-compact.json` est inclus dans le package npm et charge en memoire au demarrage.
+
+---
+
+## Audit securite v3/v4 (10-12 Fevrier 2026)
+
+### Audit complementaire massif
+
+Apres les 58 issues corrigees en v1.4.0/v1.4.1, un audit plus approfondi a revele **114 issues supplementaires** reparties sur 29 fichiers :
+
+| Severite | Nombre |
+|----------|--------|
+| CRITICAL | 3 |
+| HIGH | 18 |
+| MEDIUM | 48 |
+| LOW | 45 |
+
+### Corrections en 5 waves
+
+Les corrections ont ete appliquees en 5 waves successives pour limiter les regressions :
+
+**Wave 1** : Issues CRITICAL et quick wins
+- **Exit code overflow** : `process.exit(threats.length)` pouvait depasser 125 (limite POSIX). Corrige avec `Math.min(threats.length, 125)`.
+- **`src/` exclu des scans** : Le scanner ne scannait pas son propre code source car `src/` etait dans les repertoires exclus. Corrige : `EXCLUDED_DIRS` ne contient plus `src`.
+- Fuites de spinner (spinner non arrete en cas d'erreur).
+
+**Waves 2-3** : Securite HIGH et scanners
+- ReDoS dans `obfuscation.js` (regex catastrophique remplacee par approche programmatique)
+- Protection prototype pollution dans `package.js` et `typosquat.js`
+- Validation de noms npm dans `npm-registry.js` (prevention injection URL)
+- Protection path traversal dans `python.js` (includes recursifs)
+- `execFileSync` au lieu de `execSync` dans `diff.js` (prevention injection commande)
+
+**Waves 4-5** : Infrastructure et peripheriques
+- Ecriture atomique des fichiers IOC (`.tmp` puis `rename`)
+- Memory bounds sur les reponses HTTP du scraper (200MB max)
+- Validation des chemins de sortie dans `report.js` et `sarif.js`
+- Nettoyage des watchers dans `watch.js` et `daemon.js`
+
+### Audits complementaires
+
+| Audit | Resultat |
+|-------|----------|
+| `npm audit` | 0 vulnerabilites connues |
+| Scan de secrets | Clean (aucun token, cle, ou credential dans le code) |
+| ESLint SAST | 0 erreurs (105 findings = faux positifs attendus, acces fichiers = coeur du metier) |
+| Fuzzing | 56/56 pass, 0 crashes |
+| Adversarial testing | 15/15 detection rate |
+
+### CI pipeline
+
+**GitHub Actions workflow** (`scan.yml`) :
+- Checkout → Node 20 → `npm ci` → tests avec c8 coverage → upload Codecov → self-scan SARIF → upload GitHub Security
+- Self-scan : `node bin/muaddib.js scan . --sarif results.sarif --exclude tests --exclude docker --exclude node_modules --fail-on critical`
+- Les PR ne mergent plus sans CI vert. Plus de bypass admin.
+
+**OpenSSF Scorecard** (`scorecard.yml`) :
+- Analyse hebdomadaire des bonnes pratiques de securite
+- Badge affiche dans les README
+
+---
+
+## Audit documentation et corrections (12 Fevrier 2026)
+
+### Audit complet de la documentation
+
+Un audit systematique de tous les fichiers de documentation (README.md, README.fr.md, CHANGELOG.md, SECURITY.md, docs/threat-model.md, CONTRIBUTING.md, docs/CARNET_DE_BORD_MUADDIB.md) a revele **23 issues** :
+
+| Severite | Nombre | Exemples |
+|----------|--------|----------|
+| CRITICAL | 3 | SECURITY.md: domaines webhook faux, CHANGELOG arrete a v1.2.7 |
+| HIGH | 7 | "npm only" alors que PyPI est supporte, compteurs tests/scanners obsoletes |
+| MEDIUM | 5 | Table des versions, heading FR non traduit, MITRE incomplet |
+| LOW | 8 | Pre-commit rev v1.4.1, noms de fichiers traduits, cosmétique |
+
+### 4 commits de corrections
+
+1. **SECURITY.md** : Domaines webhook corriges (discord.com, discordapp.com, hooks.slack.com — suppression de webhook.site et localhost), "npm and PyPI only", table des versions (1.6.x/1.5.x supported), "7 production dependencies"
+2. **Compteurs** : "296 tests" et "11 scanners" mis a jour dans les 5 fichiers (README, README.fr, CHANGELOG, CARNET, threat-model)
+3. **CHANGELOG** : 16 versions reconstituees (v1.3.0 → v1.6.11) a partir de l'historique git reel
+4. **Corrections mineures** : `## Fonctionnalites` (FR), `rev: v1.6.11` (pre-commit), 7 techniques MITRE ajoutees au threat-model, section Python/PyPI dans CONTRIBUTING.md
+
+Toutes les docs sont maintenant synchronisees avec le code v1.6.11.
+
 ---
 
 ## Etat actuel
