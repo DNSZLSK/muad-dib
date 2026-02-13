@@ -57,9 +57,15 @@ function getWebhookUrl() {
 
 function shouldSendWebhook(result, sandboxResult) {
   if (!getWebhookUrl()) return false;
+
+  // If sandbox ran, it is the final arbiter
+  if (sandboxResult && sandboxResult.score !== undefined) {
+    return sandboxResult.score > 0;
+  }
+
+  // No sandbox — fall back to static analysis thresholds
   if (result.summary.critical > 0) return true;
   if (result.summary.high > 0 && computeRiskScore(result.summary) >= 25) return true;
-  if (sandboxResult && sandboxResult.score > 50) return true;
   return false;
 }
 
@@ -101,7 +107,12 @@ function computeRiskScore(summary) {
 }
 
 async function trySendWebhook(name, version, ecosystem, result, sandboxResult) {
-  if (!shouldSendWebhook(result, sandboxResult)) return;
+  if (!shouldSendWebhook(result, sandboxResult)) {
+    if (sandboxResult && sandboxResult.score === 0) {
+      console.log(`[MONITOR] FALSE POSITIVE (sandbox clean): ${name}@${version}`);
+    }
+    return;
+  }
   const url = getWebhookUrl();
   const payload = buildMonitorWebhookPayload(name, version, ecosystem, result, sandboxResult);
   const webhookData = {
@@ -530,7 +541,7 @@ function parseNpmRss(xml) {
   let match;
   while ((match = itemRegex.exec(xml)) !== null) {
     const itemContent = match[1];
-    const titleMatch = itemContent.match(/<title>([^<]+)<\/title>/);
+    const titleMatch = itemContent.match(/<title>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/title>/);
     if (titleMatch) {
       const title = titleMatch[1].trim();
       const name = title.split(/\s+/)[0];
@@ -611,8 +622,8 @@ function parsePyPIRss(xml) {
   let match;
   while ((match = itemRegex.exec(xml)) !== null) {
     const itemContent = match[1];
-    // Extract <title>...</title> inside item
-    const titleMatch = itemContent.match(/<title>([^<]+)<\/title>/);
+    // Extract <title>...</title> inside item (handles CDATA)
+    const titleMatch = itemContent.match(/<title>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/title>/);
     if (titleMatch) {
       // Title format is usually "package-name 1.0.0"
       const title = titleMatch[1].trim();
