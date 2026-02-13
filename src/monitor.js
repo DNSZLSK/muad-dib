@@ -28,6 +28,9 @@ const stats = {
 // Track daily suspects for the daily report (name, version, ecosystem, findingsCount)
 const dailyAlerts = [];
 
+// Deduplication: track recently scanned packages (cleared every 24h with daily report)
+const recentlyScanned = new Set();
+
 // --- Scan queue (FIFO, sequential) ---
 
 const scanQueue = [];
@@ -54,7 +57,8 @@ function getWebhookUrl() {
 
 function shouldSendWebhook(result, sandboxResult) {
   if (!getWebhookUrl()) return false;
-  if (hasHighOrCritical(result)) return true;
+  if (result.summary.critical > 0) return true;
+  if (result.summary.high > 0 && computeRiskScore(result.summary) >= 25) return true;
   if (sandboxResult && sandboxResult.score > 50) return true;
   return false;
 }
@@ -507,6 +511,7 @@ async function sendDailyReport() {
   stats.errors = 0;
   stats.totalTimeMs = 0;
   dailyAlerts.length = 0;
+  recentlyScanned.clear();
   stats.lastDailyReportTime = Date.now();
 }
 
@@ -775,6 +780,14 @@ async function resolveTarballAndScan(item) {
       return;
     }
   }
+  // Deduplication: skip if already scanned in the last 24h
+  const dedupeKey = `${item.ecosystem}/${item.name}@${item.version}`;
+  if (recentlyScanned.has(dedupeKey)) {
+    console.log(`[MONITOR] SKIP (already scanned): ${item.name}@${item.version}`);
+    return;
+  }
+  recentlyScanned.add(dedupeKey);
+
   await scanPackage(item.name, item.version, item.ecosystem, item.tarballUrl);
 }
 
@@ -803,6 +816,7 @@ module.exports = {
   reportStats,
   stats,
   dailyAlerts,
+  recentlyScanned,
   resolveTarballAndScan,
   MAX_TARBALL_SIZE,
   KNOWN_BUNDLED_FILES,
