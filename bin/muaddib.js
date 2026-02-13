@@ -383,6 +383,62 @@ if (command === 'version' || command === '--version' || command === '-v') {
     console.error('[ERROR]', err.message);
     process.exit(1);
   });
+} else if (command === 'monitor') {
+  const testPkg = options.filter(o => !o.startsWith('-'));
+  const isTemporal = options.includes('--temporal');
+  const isTest = options.includes('--test');
+
+  if (isTemporal && isTest && testPkg.length > 0) {
+    const { detectSuddenLifecycleChange } = require('../src/temporal-analysis.js');
+    const pkgName = testPkg[testPkg.indexOf('--test') !== -1 ? testPkg.length - 1 : 0] || testPkg[0];
+    // Find the package name: it's the non-flag argument
+    const actualPkg = options.filter(o => !o.startsWith('-')).pop();
+    if (!actualPkg) {
+      console.log('Usage: muaddib monitor --temporal --test <package-name>');
+      process.exit(1);
+    }
+    console.log(`[TEMPORAL] Analyzing ${actualPkg}...\n`);
+    detectSuddenLifecycleChange(actualPkg).then(result => {
+      console.log(`Package:          ${result.packageName}`);
+      console.log(`Latest version:   ${result.latestVersion || 'N/A'}`);
+      console.log(`Previous version: ${result.previousVersion || 'N/A'}`);
+      console.log(`Suspicious:       ${result.suspicious ? 'YES' : 'NO'}`);
+      if (result.metadata.note) {
+        console.log(`Note:             ${result.metadata.note}`);
+      }
+      if (result.metadata.latestPublishedAt) {
+        console.log(`Published:        ${result.metadata.latestPublishedAt}`);
+      }
+      if (result.metadata.maintainers && result.metadata.maintainers.length > 0) {
+        const names = result.metadata.maintainers.map(m => m.name || m.email).join(', ');
+        console.log(`Maintainers:      ${names}`);
+      }
+      if (result.findings.length > 0) {
+        console.log(`\nFindings:`);
+        for (const f of result.findings) {
+          const action = f.type === 'lifecycle_added' ? 'ADDED' : f.type === 'lifecycle_modified' ? 'MODIFIED' : 'REMOVED';
+          const value = f.type === 'lifecycle_modified' ? f.newValue : f.value;
+          console.log(`  [${f.severity}] ${f.script} script ${action}: "${value}"`);
+        }
+      } else {
+        console.log(`\nNo lifecycle script changes detected between the last two versions.`);
+      }
+      process.exit(result.suspicious ? 1 : 0);
+    }).catch(err => {
+      console.error(`[ERROR] ${err.message}`);
+      process.exit(1);
+    });
+  } else if (isTemporal && isTest) {
+    console.log('Usage: muaddib monitor --temporal --test <package-name>');
+    process.exit(1);
+  } else {
+    // Start full monitor
+    const { startMonitor } = require('../src/monitor.js');
+    startMonitor().catch(err => {
+      console.error('[ERROR]', err.message);
+      process.exit(1);
+    });
+  }
 } else if (command === 'daemon') {
   startDaemon({ webhook: webhookUrl });
 } else if (command === 'install' || command === 'i') {
