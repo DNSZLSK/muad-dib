@@ -193,6 +193,20 @@ const PLAYBOOKS = {
   dangerous_api_added_medium:
     'Une API potentiellement suspecte (dns.lookup, fs.readFile sur chemin sensible) est apparue. ' +
     'Verifier le contexte d\'utilisation. Comparer: npm diff package@old package@new.',
+
+  publish_burst:
+    'Multiple versions published rapidly. Possible account compromise. ' +
+    'Verify maintainer activity on npm/GitHub. Check changelogs for each version.',
+
+  dormant_spike:
+    'Package dormant for 6+ months suddenly updated. ' +
+    'Check if maintainer changed or account was compromised. ' +
+    'Compare: npm diff package@old package@new.',
+
+  rapid_succession:
+    'Versions published in rapid succession. ' +
+    'Could indicate automated attack or compromised CI/CD. ' +
+    'Verify each version for malicious changes.',
 };
 
 function getPlaybook(threatType) {

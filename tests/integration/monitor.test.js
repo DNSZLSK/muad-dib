@@ -23,7 +23,8 @@ async function runMonitorTests() {
     getWebhookUrl, shouldSendWebhook, buildMonitorWebhookPayload,
     computeRiskLevel, computeRiskScore, buildDailyReportEmbed, DAILY_REPORT_INTERVAL,
     isTemporalEnabled, buildTemporalWebhookEmbed,
-    isTemporalAstEnabled, buildTemporalAstWebhookEmbed
+    isTemporalAstEnabled, buildTemporalAstWebhookEmbed,
+    isTemporalPublishEnabled, buildPublishAnomalyWebhookEmbed
   } = require('../../src/monitor.js');
 
   test('MONITOR: parseNpmRss extracts package names from RSS', () => {
@@ -915,6 +916,124 @@ async function runMonitorTests() {
     assertIncludes(apisField.value, 'child_process', 'Should contain child_process');
     assertIncludes(apisField.value, 'eval', 'Should contain eval');
     assertIncludes(apisField.value, 'process.env', 'Should contain process.env');
+  });
+
+  // ============================================
+  // MONITOR TEMPORAL PUBLISH ANALYSIS TESTS
+  // ============================================
+
+  console.log('\n=== MONITOR TEMPORAL PUBLISH ANALYSIS TESTS ===\n');
+
+  test('MONITOR: isTemporalPublishEnabled defaults to true', () => {
+    const orig = process.env.MUADDIB_MONITOR_TEMPORAL_PUBLISH;
+    delete process.env.MUADDIB_MONITOR_TEMPORAL_PUBLISH;
+    try {
+      assert(isTemporalPublishEnabled() === true, 'Should default to true when env not set');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_MONITOR_TEMPORAL_PUBLISH = orig;
+    }
+  });
+
+  test('MONITOR: isTemporalPublishEnabled returns false when env=false', () => {
+    const orig = process.env.MUADDIB_MONITOR_TEMPORAL_PUBLISH;
+    process.env.MUADDIB_MONITOR_TEMPORAL_PUBLISH = 'false';
+    try {
+      assert(isTemporalPublishEnabled() === false, 'Should return false when env is "false"');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_MONITOR_TEMPORAL_PUBLISH = orig;
+      else delete process.env.MUADDIB_MONITOR_TEMPORAL_PUBLISH;
+    }
+  });
+
+  test('MONITOR: isTemporalPublishEnabled returns false when env=FALSE (case insensitive)', () => {
+    const orig = process.env.MUADDIB_MONITOR_TEMPORAL_PUBLISH;
+    process.env.MUADDIB_MONITOR_TEMPORAL_PUBLISH = 'FALSE';
+    try {
+      assert(isTemporalPublishEnabled() === false, 'Should return false when env is "FALSE"');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_MONITOR_TEMPORAL_PUBLISH = orig;
+      else delete process.env.MUADDIB_MONITOR_TEMPORAL_PUBLISH;
+    }
+  });
+
+  test('MONITOR: buildPublishAnomalyWebhookEmbed has correct Discord embed structure', () => {
+    const mockResult = {
+      packageName: 'spammy-pkg',
+      suspicious: true,
+      versionCount: 15,
+      anomalies: [
+        { type: 'publish_burst', severity: 'HIGH', description: '5 versions in 24h window (2026-01-10 to 2026-01-11)' }
+      ]
+    };
+    const embed = buildPublishAnomalyWebhookEmbed(mockResult);
+    assert(embed.embeds, 'Should have embeds array');
+    assert(embed.embeds.length === 1, 'Should have exactly 1 embed');
+
+    const e = embed.embeds[0];
+    assertIncludes(e.title, 'PUBLISH ANOMALY', 'Title should contain PUBLISH ANOMALY');
+    assertIncludes(e.title, 'HIGH', 'Title should contain severity');
+    assert(e.color === 0xe67e22, 'Color should be orange for HIGH, got ' + e.color);
+
+    const pkgField = e.fields.find(f => f.name === 'Package');
+    assert(pkgField, 'Should have Package field');
+    assertIncludes(pkgField.value, 'spammy-pkg', 'Package field should contain package name');
+
+    const versionsField = e.fields.find(f => f.name === 'Versions Analyzed');
+    assert(versionsField, 'Should have Versions Analyzed field');
+    assertIncludes(versionsField.value, '15', 'Should show version count');
+
+    const anomaliesField = e.fields.find(f => f.name === 'Anomalies Detected');
+    assert(anomaliesField, 'Should have Anomalies Detected field');
+    assertIncludes(anomaliesField.value, 'publish_burst', 'Should contain anomaly type');
+
+    assert(e.footer && e.footer.text, 'Should have footer');
+    assertIncludes(e.footer.text, 'Publish Frequency Analysis', 'Footer should mention Publish Frequency Analysis');
+  });
+
+  test('MONITOR: buildPublishAnomalyWebhookEmbed uses red color for CRITICAL dormant_spike', () => {
+    const mockResult = {
+      packageName: 'dormant-pkg',
+      suspicious: true,
+      versionCount: 20,
+      anomalies: [
+        { type: 'dormant_spike', severity: 'HIGH', description: 'Package dormant for 200 days, then suddenly updated' }
+      ]
+    };
+    const embed = buildPublishAnomalyWebhookEmbed(mockResult);
+    const e = embed.embeds[0];
+    assert(e.color === 0xe67e22, 'Color should be orange for HIGH, got ' + e.color);
+    assertIncludes(e.title, 'HIGH', 'Title should contain HIGH');
+  });
+
+  test('MONITOR: buildPublishAnomalyWebhookEmbed handles multiple anomalies', () => {
+    const mockResult = {
+      packageName: 'multi-anomaly-pkg',
+      suspicious: true,
+      versionCount: 30,
+      anomalies: [
+        { type: 'publish_burst', severity: 'HIGH', description: '4 versions in 24h' },
+        { type: 'rapid_succession', severity: 'MEDIUM', description: '2 versions in 30 minutes' }
+      ]
+    };
+    const embed = buildPublishAnomalyWebhookEmbed(mockResult);
+    const anomaliesField = embed.embeds[0].fields.find(f => f.name === 'Anomalies Detected');
+    assertIncludes(anomaliesField.value, 'publish_burst', 'Should contain publish_burst');
+    assertIncludes(anomaliesField.value, 'rapid_succession', 'Should contain rapid_succession');
+  });
+
+  test('MONITOR: buildPublishAnomalyWebhookEmbed uses yellow color for MEDIUM severity', () => {
+    const mockResult = {
+      packageName: 'rapid-pkg',
+      suspicious: true,
+      versionCount: 10,
+      anomalies: [
+        { type: 'rapid_succession', severity: 'MEDIUM', description: '2 versions in 45 minutes' }
+      ]
+    };
+    const embed = buildPublishAnomalyWebhookEmbed(mockResult);
+    const e = embed.embeds[0];
+    assert(e.color === 0xf1c40f, 'Color should be yellow for MEDIUM, got ' + e.color);
+    assertIncludes(e.title, 'MEDIUM', 'Title should contain MEDIUM');
   });
 
   test('MONITOR: buildTemporalWebhookEmbed handles modified lifecycle scripts', () => {

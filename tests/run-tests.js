@@ -28,6 +28,7 @@ const { runMonitorTests } = require('./integration/monitor.test');
 // Temporal analysis tests
 const { runTemporalAnalysisTests } = require('./temporal/temporal-analysis.test');
 const { runTemporalAstDiffTests } = require('./temporal/temporal-ast-diff.test');
+const { runPublishAnomalyTests } = require('./temporal/publish-anomaly.test');
 
 (async () => {
   // Run all test suites sequentially to preserve output ordering
@@ -48,6 +49,7 @@ const { runTemporalAstDiffTests } = require('./temporal/temporal-ast-diff.test')
   await runMonitorTests();
   await runTemporalAnalysisTests();
   await runTemporalAstDiffTests();
+  await runPublishAnomalyTests();
 
   // Results
   const { passed, failed, skipped, failures } = getCounters();
