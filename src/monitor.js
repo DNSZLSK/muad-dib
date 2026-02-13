@@ -21,8 +21,12 @@ const stats = {
   suspect: 0,
   errors: 0,
   totalTimeMs: 0,
-  lastReportTime: Date.now()
+  lastReportTime: Date.now(),
+  lastDailyReportTime: Date.now()
 };
+
+// Track daily suspects for the daily report (name, version, ecosystem, findingsCount)
+const dailyAlerts = [];
 
 // --- Scan queue (FIFO, sequential) ---
 
@@ -76,17 +80,43 @@ function buildMonitorWebhookPayload(name, version, ecosystem, result, sandboxRes
   return payload;
 }
 
+function computeRiskLevel(summary) {
+  if (summary.critical > 0) return 'CRITICAL';
+  if (summary.high > 0) return 'HIGH';
+  if (summary.medium > 0) return 'MEDIUM';
+  if (summary.low > 0) return 'LOW';
+  return 'CLEAN';
+}
+
+function computeRiskScore(summary) {
+  const raw = (summary.critical || 0) * 25
+            + (summary.high || 0) * 15
+            + (summary.medium || 0) * 5
+            + (summary.low || 0) * 1;
+  return Math.min(raw, 100);
+}
+
 async function trySendWebhook(name, version, ecosystem, result, sandboxResult) {
   if (!shouldSendWebhook(result, sandboxResult)) return;
   const url = getWebhookUrl();
   const payload = buildMonitorWebhookPayload(name, version, ecosystem, result, sandboxResult);
-  // sendWebhook expects a results-like object; wrap payload for formatGeneric
   const webhookData = {
     target: `${ecosystem}/${name}@${version}`,
     timestamp: payload.timestamp,
-    summary: result.summary,
+    ecosystem,
+    summary: {
+      ...result.summary,
+      riskLevel: computeRiskLevel(result.summary),
+      riskScore: computeRiskScore(result.summary)
+    },
     threats: result.threats
   };
+  if (sandboxResult && sandboxResult.score > 0) {
+    webhookData.sandbox = {
+      score: sandboxResult.score,
+      severity: sandboxResult.severity
+    };
+  }
   try {
     await sendWebhook(url, webhookData);
     console.log(`[MONITOR] Webhook sent for ${name}@${version}`);
@@ -264,6 +294,19 @@ function appendAlert(alert) {
   }
 }
 
+// --- Bundled tooling false-positive filter ---
+
+const KNOWN_BUNDLED_FILES = ['yarn.js', 'webpack.js', 'terser.js', 'esbuild.js', 'polyfills.js'];
+
+function isBundledToolingOnly(threats) {
+  if (threats.length === 0) return false;
+  return threats.every(t => {
+    if (!t.file) return false;
+    const basename = path.basename(t.file);
+    return KNOWN_BUNDLED_FILES.includes(basename);
+  });
+}
+
 // --- Package scanning ---
 
 async function scanPackage(name, version, ecosystem, tarballUrl) {
@@ -294,53 +337,78 @@ async function scanPackage(name, version, ecosystem, tarballUrl) {
       stats.clean++;
       console.log(`[MONITOR] CLEAN: ${name}@${version} (0 findings, ${(elapsed / 1000).toFixed(1)}s)`);
     } else {
-      stats.suspect++;
       const counts = [];
       if (result.summary.critical > 0) counts.push(`${result.summary.critical} CRITICAL`);
       if (result.summary.high > 0) counts.push(`${result.summary.high} HIGH`);
       if (result.summary.medium > 0) counts.push(`${result.summary.medium} MEDIUM`);
       if (result.summary.low > 0) counts.push(`${result.summary.low} LOW`);
-      console.log(`[MONITOR] SUSPECT: ${name}@${version} (${counts.join(', ')})`);
 
-      // Sandbox: run dynamic analysis on HIGH/CRITICAL findings
-      let sandboxResult = null;
-      if (hasHighOrCritical(result) && isSandboxEnabled() && sandboxAvailable) {
-        try {
-          console.log(`[MONITOR] SANDBOX: launching for ${name}@${version}...`);
-          sandboxResult = await runSandbox(name);
-          console.log(`[MONITOR] SANDBOX: ${name}@${version} → score: ${sandboxResult.score}, severity: ${sandboxResult.severity}`);
-        } catch (err) {
-          console.error(`[MONITOR] SANDBOX error for ${name}@${version}: ${err.message}`);
-        }
-      }
+      // Check if all findings come from bundled tooling files
+      if (isBundledToolingOnly(result.threats)) {
+        stats.scanned++;
+        const elapsed = Date.now() - startTime;
+        stats.totalTimeMs += elapsed;
+        stats.clean++;
+        console.log(`[MONITOR] SKIPPED (bundled tooling): ${name}@${version} (${counts.join(', ')})`);
 
-      stats.scanned++;
-      const elapsed = Date.now() - startTime;
-      stats.totalTimeMs += elapsed;
-      console.log(`[MONITOR] ${name}@${version} total time: ${(elapsed / 1000).toFixed(1)}s`);
-
-      const alert = {
-        timestamp: new Date().toISOString(),
-        name,
-        version,
-        ecosystem,
-        findings: result.threats.map(t => ({
-          rule: t.rule_id || t.type,
-          severity: t.severity,
-          file: t.file
-        }))
-      };
-
-      if (sandboxResult && sandboxResult.score > 0) {
-        alert.sandbox = {
-          score: sandboxResult.score,
-          severity: sandboxResult.severity,
-          findings: sandboxResult.findings
+        const alert = {
+          timestamp: new Date().toISOString(),
+          name,
+          version,
+          ecosystem,
+          skipped: true,
+          findings: result.threats.map(t => ({
+            rule: t.rule_id || t.type,
+            severity: t.severity,
+            file: t.file
+          }))
         };
-      }
+        appendAlert(alert);
+      } else {
+        stats.suspect++;
+        console.log(`[MONITOR] SUSPECT: ${name}@${version} (${counts.join(', ')})`);
 
-      appendAlert(alert);
-      await trySendWebhook(name, version, ecosystem, result, sandboxResult);
+        // Sandbox: run dynamic analysis on HIGH/CRITICAL findings
+        let sandboxResult = null;
+        if (hasHighOrCritical(result) && isSandboxEnabled() && sandboxAvailable) {
+          try {
+            console.log(`[MONITOR] SANDBOX: launching for ${name}@${version}...`);
+            sandboxResult = await runSandbox(name);
+            console.log(`[MONITOR] SANDBOX: ${name}@${version} → score: ${sandboxResult.score}, severity: ${sandboxResult.severity}`);
+          } catch (err) {
+            console.error(`[MONITOR] SANDBOX error for ${name}@${version}: ${err.message}`);
+          }
+        }
+
+        stats.scanned++;
+        const elapsed = Date.now() - startTime;
+        stats.totalTimeMs += elapsed;
+        console.log(`[MONITOR] ${name}@${version} total time: ${(elapsed / 1000).toFixed(1)}s`);
+
+        const alert = {
+          timestamp: new Date().toISOString(),
+          name,
+          version,
+          ecosystem,
+          findings: result.threats.map(t => ({
+            rule: t.rule_id || t.type,
+            severity: t.severity,
+            file: t.file
+          }))
+        };
+
+        if (sandboxResult && sandboxResult.score > 0) {
+          alert.sandbox = {
+            score: sandboxResult.score,
+            severity: sandboxResult.severity,
+            findings: sandboxResult.findings
+          };
+        }
+
+        appendAlert(alert);
+        dailyAlerts.push({ name, version, ecosystem, findingsCount: result.summary.total });
+        await trySendWebhook(name, version, ecosystem, result, sandboxResult);
+      }
     }
   } catch (err) {
     stats.errors++;
@@ -380,6 +448,66 @@ function reportStats() {
   const avg = stats.scanned > 0 ? (stats.totalTimeMs / stats.scanned / 1000).toFixed(1) : '0.0';
   console.log(`[MONITOR] Stats: ${stats.scanned} scanned, ${stats.clean} clean, ${stats.suspect} suspect, ${stats.errors} error${stats.errors !== 1 ? 's' : ''}, avg ${avg}s/pkg`);
   stats.lastReportTime = Date.now();
+}
+
+const DAILY_REPORT_INTERVAL = 24 * 3600_000; // 24 hours
+
+function buildDailyReportEmbed() {
+  const avg = stats.scanned > 0 ? (stats.totalTimeMs / stats.scanned / 1000).toFixed(1) : '0.0';
+
+  // Top 3 suspects sorted by findings count descending
+  const top3 = dailyAlerts
+    .slice()
+    .sort((a, b) => b.findingsCount - a.findingsCount)
+    .slice(0, 3);
+
+  const top3Text = top3.length > 0
+    ? top3.map((a, i) => `${i + 1}. **${a.ecosystem}/${a.name}@${a.version}** — ${a.findingsCount} finding(s)`).join('\n')
+    : 'None';
+
+  const now = new Date();
+  const readableTime = now.toISOString().replace('T', ' ').replace(/\.\d+Z$/, ' UTC');
+
+  return {
+    embeds: [{
+      title: '\uD83D\uDCCA MUAD\'DIB Daily Report',
+      color: 0x3498db,
+      fields: [
+        { name: 'Packages Scanned', value: `${stats.scanned}`, inline: true },
+        { name: 'Clean', value: `${stats.clean}`, inline: true },
+        { name: 'Suspects', value: `${stats.suspect}`, inline: true },
+        { name: 'Errors', value: `${stats.errors}`, inline: true },
+        { name: 'Avg Scan Time', value: `${avg}s/pkg`, inline: true },
+        { name: 'Top Suspects', value: top3Text, inline: false }
+      ],
+      footer: {
+        text: `MUAD'DIB - Daily summary | ${readableTime}`
+      },
+      timestamp: now.toISOString()
+    }]
+  };
+}
+
+async function sendDailyReport() {
+  const url = getWebhookUrl();
+  if (!url) return;
+
+  const payload = buildDailyReportEmbed();
+  try {
+    await sendWebhook(url, payload, { rawPayload: true });
+    console.log('[MONITOR] Daily report sent');
+  } catch (err) {
+    console.error(`[MONITOR] Daily report webhook failed: ${err.message}`);
+  }
+
+  // Reset daily counters
+  stats.scanned = 0;
+  stats.clean = 0;
+  stats.suspect = 0;
+  stats.errors = 0;
+  stats.totalTimeMs = 0;
+  dailyAlerts.length = 0;
+  stats.lastDailyReportTime = Date.now();
 }
 
 // --- npm polling ---
@@ -591,6 +719,11 @@ async function startMonitor() {
     if (Date.now() - stats.lastReportTime >= 3600_000) {
       reportStats();
     }
+
+    // Daily webhook report
+    if (Date.now() - stats.lastDailyReportTime >= DAILY_REPORT_INTERVAL) {
+      await sendDailyReport();
+    }
   }
 }
 
@@ -669,8 +802,11 @@ module.exports = {
   timeoutPromise,
   reportStats,
   stats,
+  dailyAlerts,
   resolveTarballAndScan,
   MAX_TARBALL_SIZE,
+  KNOWN_BUNDLED_FILES,
+  isBundledToolingOnly,
   isSandboxEnabled,
   hasHighOrCritical,
   get sandboxAvailable() { return sandboxAvailable; },
@@ -678,7 +814,12 @@ module.exports = {
   getWebhookUrl,
   shouldSendWebhook,
   buildMonitorWebhookPayload,
-  trySendWebhook
+  trySendWebhook,
+  computeRiskLevel,
+  computeRiskScore,
+  buildDailyReportEmbed,
+  sendDailyReport,
+  DAILY_REPORT_INTERVAL
 };
 
 // Standalone entry point: node src/monitor.js
