@@ -27,6 +27,7 @@ const { runMonitorTests } = require('./integration/monitor.test');
 
 // Temporal analysis tests
 const { runTemporalAnalysisTests } = require('./temporal/temporal-analysis.test');
+const { runTemporalAstDiffTests } = require('./temporal/temporal-ast-diff.test');
 
 (async () => {
   // Run all test suites sequentially to preserve output ordering
@@ -46,6 +47,7 @@ const { runTemporalAnalysisTests } = require('./temporal/temporal-analysis.test'
   await runEntropyTests();
   await runMonitorTests();
   await runTemporalAnalysisTests();
+  await runTemporalAstDiffTests();
 
   // Results
   const { passed, failed, skipped, failures } = getCounters();

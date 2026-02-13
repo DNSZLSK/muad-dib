@@ -176,6 +176,23 @@ const PLAYBOOKS = {
   lifecycle_modified:
     'Un script lifecycle a ete modifie entre les deux dernieres versions. ' +
     'Verifier le contenu du nouveau script. Comparer: npm diff package@old package@new.',
+
+  dangerous_api_added_critical:
+    'CRITIQUE: Une API dangereuse (child_process, eval, Function, net.connect) est apparue dans la derniere version. ' +
+    'Cette API etait absente de la version precedente. ' +
+    'Actions: 1. NE PAS mettre a jour. ' +
+    '2. Comparer les sources: npm diff package@old package@new. ' +
+    '3. Verifier le changelog et les commits recents. ' +
+    '4. Si pas de justification, signaler sur GitHub/npm.',
+
+  dangerous_api_added_high:
+    'Une API suspecte (process.env, fetch, http/https) est apparue dans la derniere version. ' +
+    'Verifier si le changement est justifie dans le changelog. ' +
+    'Comparer: npm diff package@old package@new.',
+
+  dangerous_api_added_medium:
+    'Une API potentiellement suspecte (dns.lookup, fs.readFile sur chemin sensible) est apparue. ' +
+    'Verifier le contexte d\'utilisation. Comparer: npm diff package@old package@new.',
 };
 
 function getPlaybook(threatType) {

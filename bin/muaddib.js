@@ -26,6 +26,8 @@ let paranoidMode = false;
 let excludeDirs = [];
 let entropyThreshold = null;
 let temporalMode = false;
+let temporalAstMode = false;
+let temporalFullMode = false;
 
 for (let i = 0; i < options.length; i++) {
   if (options[i] === '--json') {
@@ -91,6 +93,10 @@ for (let i = 0; i < options.length; i++) {
     i++;
   } else if (options[i] === '--paranoid') {
     paranoidMode = true;
+  } else if (options[i] === '--temporal-full') {
+    temporalFullMode = true;
+  } else if (options[i] === '--temporal-ast') {
+    temporalAstMode = true;
   } else if (options[i] === '--temporal') {
     temporalMode = true;
   } else if (options[i] === '--strict') {
@@ -327,6 +333,8 @@ const helpText = `
     --webhook [url]     Discord/Slack webhook
     --paranoid          Ultra-strict mode
     --temporal          Detect sudden lifecycle script changes (network requests per package)
+    --temporal-ast      Detect sudden dangerous API additions via AST diff (downloads tarballs)
+    --temporal-full     Both lifecycle + AST temporal analysis
     --exclude [dir]     Exclude directory from scan (repeatable)
     --entropy-threshold [n]  Custom string-level entropy threshold (default: 5.5)
     --save-dev, -D      Install as dev dependency
@@ -357,7 +365,8 @@ if (command === 'version' || command === '--version' || command === '-v') {
     failLevel: failLevel,
     webhook: webhookUrl,
     paranoid: paranoidMode,
-    temporal: temporalMode,
+    temporal: temporalMode || temporalFullMode,
+    temporalAst: temporalAstMode || temporalFullMode,
     exclude: excludeDirs,
     entropyThreshold: entropyThreshold
   }).then(exitCode => {
@@ -386,9 +395,39 @@ if (command === 'version' || command === '--version' || command === '-v') {
 } else if (command === 'monitor') {
   const testPkg = options.filter(o => !o.startsWith('-'));
   const isTemporal = options.includes('--temporal');
+  const isTemporalAst = options.includes('--temporal-ast');
   const isTest = options.includes('--test');
 
-  if (isTemporal && isTest && testPkg.length > 0) {
+  if (isTemporalAst && isTest) {
+    const actualPkg = options.filter(o => !o.startsWith('-')).pop();
+    if (!actualPkg) {
+      console.log('Usage: muaddib monitor --temporal-ast --test <package-name>');
+      process.exit(1);
+    }
+    const { detectSuddenAstChanges } = require('../src/temporal-ast-diff.js');
+    console.log(`[TEMPORAL-AST] Analyzing ${actualPkg}...\n`);
+    detectSuddenAstChanges(actualPkg).then(result => {
+      console.log(`Package:          ${result.packageName}`);
+      console.log(`Latest version:   ${result.latestVersion || 'N/A'}`);
+      console.log(`Previous version: ${result.previousVersion || 'N/A'}`);
+      console.log(`Suspicious:       ${result.suspicious ? 'YES' : 'NO'}`);
+      if (result.metadata.latestPublishedAt) {
+        console.log(`Published:        ${result.metadata.latestPublishedAt}`);
+      }
+      if (result.findings.length > 0) {
+        console.log(`\nFindings:`);
+        for (const f of result.findings) {
+          console.log(`  [${f.severity}] ${f.pattern}: ${f.description}`);
+        }
+      } else {
+        console.log(`\nNo dangerous API changes detected between the last two versions.`);
+      }
+      process.exit(result.suspicious ? 1 : 0);
+    }).catch(err => {
+      console.error(`[ERROR] ${err.message}`);
+      process.exit(1);
+    });
+  } else if (isTemporal && isTest && testPkg.length > 0) {
     const { detectSuddenLifecycleChange } = require('../src/temporal-analysis.js');
     const pkgName = testPkg[testPkg.indexOf('--test') !== -1 ? testPkg.length - 1 : 0] || testPkg[0];
     // Find the package name: it's the non-flag argument

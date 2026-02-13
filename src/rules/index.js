@@ -550,6 +550,43 @@ const RULES = {
     ],
     mitre: 'T1195.002'
   },
+
+  // Temporal AST diff detections
+  dangerous_api_added_critical: {
+    id: 'MUADDIB-TEMPORAL-AST-001',
+    name: 'Dangerous API Added (Critical)',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'API dangereuse (child_process, eval, Function, net.connect) apparue dans la derniere version. Absente de la version precedente.',
+    references: [
+      'https://blog.phylum.io/shai-hulud-npm-worm',
+      'https://blog.npmjs.org/post/180565383195/details-about-the-event-stream-incident'
+    ],
+    mitre: 'T1195.002'
+  },
+  dangerous_api_added_high: {
+    id: 'MUADDIB-TEMPORAL-AST-002',
+    name: 'Dangerous API Added (High)',
+    severity: 'HIGH',
+    confidence: 'medium',
+    description: 'API suspecte (process.env, fetch, http/https) apparue dans la derniere version. Absente de la version precedente.',
+    references: [
+      'https://blog.phylum.io/shai-hulud-npm-worm',
+      'https://docs.npmjs.com/cli/v9/using-npm/scripts#life-cycle-scripts'
+    ],
+    mitre: 'T1195.002'
+  },
+  dangerous_api_added_medium: {
+    id: 'MUADDIB-TEMPORAL-AST-003',
+    name: 'Dangerous API Added (Medium)',
+    severity: 'MEDIUM',
+    confidence: 'medium',
+    description: 'API potentiellement suspecte (dns.lookup, fs.readFile sur chemin sensible) apparue dans la derniere version.',
+    references: [
+      'https://docs.npmjs.com/cli/v9/using-npm/scripts#life-cycle-scripts'
+    ],
+    mitre: 'T1195.002'
+  },
 };
 
 function getRule(type) {
