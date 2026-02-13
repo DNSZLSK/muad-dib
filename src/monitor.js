@@ -6,6 +6,7 @@ const { execSync } = require('child_process');
 const { run } = require('./index.js');
 const { runSandbox, isDockerAvailable } = require('./sandbox.js');
 const { sendWebhook } = require('./webhook.js');
+const { detectSuddenLifecycleChange } = require('./temporal-analysis.js');
 
 const STATE_FILE = path.join(__dirname, '..', 'data', 'monitor-state.json');
 const ALERTS_FILE = path.join(__dirname, '..', 'data', 'monitor-alerts.json');
@@ -41,6 +42,12 @@ let sandboxAvailable = false;
 
 function isSandboxEnabled() {
   const env = process.env.MUADDIB_MONITOR_SANDBOX;
+  if (env !== undefined && env.toLowerCase() === 'false') return false;
+  return true;
+}
+
+function isTemporalEnabled() {
+  const env = process.env.MUADDIB_MONITOR_TEMPORAL;
   if (env !== undefined && env.toLowerCase() === 'false') return false;
   return true;
 }
@@ -137,6 +144,98 @@ async function trySendWebhook(name, version, ecosystem, result, sandboxResult) {
     console.log(`[MONITOR] Webhook sent for ${name}@${version}`);
   } catch (err) {
     console.error(`[MONITOR] Webhook failed for ${name}@${version}: ${err.message}`);
+  }
+}
+
+// --- Temporal analysis integration ---
+
+function buildTemporalWebhookEmbed(temporalResult) {
+  const findings = temporalResult.findings || [];
+  const topFinding = findings[0] || {};
+  const severity = topFinding.severity || 'HIGH';
+  const color = severity === 'CRITICAL' ? 0xe74c3c : 0xe67e22;
+  const emoji = severity === 'CRITICAL' ? '\uD83D\uDD34' : '\uD83D\uDFE0';
+
+  const changeLines = findings.map(f => {
+    const action = f.type === 'lifecycle_added' ? 'ADDED' : 'MODIFIED';
+    const value = f.type === 'lifecycle_modified' ? f.newValue : f.value;
+    return `**${f.script}** script ${action}: \`${value}\``;
+  }).join('\n');
+
+  const pkgName = temporalResult.packageName;
+  const npmLink = `https://www.npmjs.com/package/${pkgName}`;
+
+  return {
+    embeds: [{
+      title: `${emoji} TEMPORAL ANOMALY \u2014 ${severity}`,
+      color: color,
+      fields: [
+        { name: 'Package', value: `[${pkgName}](${npmLink})`, inline: true },
+        { name: 'Version Change', value: `${temporalResult.previousVersion} \u2192 ${temporalResult.latestVersion}`, inline: true },
+        { name: 'Severity', value: severity, inline: true },
+        { name: 'Changes Detected', value: changeLines || 'None', inline: false },
+        { name: 'Published', value: temporalResult.metadata.latestPublishedAt || 'unknown', inline: true },
+        { name: 'Action', value: 'DO NOT INSTALL \u2014 Verify changelog before upgrading', inline: false }
+      ],
+      footer: {
+        text: `MUAD'DIB Temporal Analysis | ${new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, ' UTC')}`
+      },
+      timestamp: new Date().toISOString()
+    }]
+  };
+}
+
+async function tryTemporalAlert(temporalResult) {
+  const url = getWebhookUrl();
+  if (!url) return;
+
+  const payload = buildTemporalWebhookEmbed(temporalResult);
+  try {
+    await sendWebhook(url, payload, { rawPayload: true });
+    console.log(`[MONITOR] Temporal webhook sent for ${temporalResult.packageName}`);
+  } catch (err) {
+    console.error(`[MONITOR] Temporal webhook failed for ${temporalResult.packageName}: ${err.message}`);
+  }
+}
+
+async function runTemporalCheck(packageName) {
+  if (!isTemporalEnabled()) return null;
+  try {
+    const result = await detectSuddenLifecycleChange(packageName);
+    if (result.suspicious) {
+      const findingsStr = result.findings.map(f => {
+        const action = f.type === 'lifecycle_added' ? 'added' : 'modified';
+        return `${f.script} ${action} (${f.severity})`;
+      }).join(', ');
+      console.log(`[MONITOR] TEMPORAL ANOMALY: ${packageName} v${result.previousVersion} → v${result.latestVersion}: ${findingsStr}`);
+
+      appendAlert({
+        timestamp: new Date().toISOString(),
+        name: packageName,
+        version: result.latestVersion,
+        ecosystem: 'npm',
+        temporal: true,
+        findings: result.findings.map(f => ({
+          rule: f.type === 'lifecycle_added' ? 'MUADDIB-TEMPORAL-001' : 'MUADDIB-TEMPORAL-003',
+          severity: f.severity,
+          script: f.script
+        }))
+      });
+
+      dailyAlerts.push({
+        name: packageName,
+        version: result.latestVersion,
+        ecosystem: 'npm',
+        findingsCount: result.findings.length,
+        temporal: true
+      });
+
+      await tryTemporalAlert(result);
+    }
+    return result;
+  } catch (err) {
+    console.error(`[MONITOR] Temporal analysis error for ${packageName}: ${err.message}`);
+    return null;
   }
 }
 
@@ -705,6 +804,13 @@ async function startMonitor() {
     console.log('[MONITOR] Sandbox disabled (MUADDIB_MONITOR_SANDBOX=false)');
   }
 
+  // Temporal analysis status
+  if (isTemporalEnabled()) {
+    console.log('[MONITOR] Temporal analysis enabled — detecting sudden lifecycle script changes');
+  } else {
+    console.log('[MONITOR] Temporal analysis disabled (MUADDIB_MONITOR_TEMPORAL=false)');
+  }
+
   const state = loadState();
   console.log(`[MONITOR] State loaded — npm last: ${state.npmLastPackage || 'none'}, pypi last: ${state.pypiLastPackage || 'none'}`);
   console.log(`[MONITOR] Polling every ${POLL_INTERVAL / 1000}s. Ctrl+C to stop.\n`);
@@ -802,6 +908,11 @@ async function resolveTarballAndScan(item) {
   }
   recentlyScanned.add(dedupeKey);
 
+  // Temporal analysis: check for sudden lifecycle script changes (npm only)
+  if (item.ecosystem === 'npm') {
+    await runTemporalCheck(item.name);
+  }
+
   await scanPackage(item.name, item.version, item.ecosystem, item.tarballUrl);
 }
 
@@ -848,7 +959,10 @@ module.exports = {
   computeRiskScore,
   buildDailyReportEmbed,
   sendDailyReport,
-  DAILY_REPORT_INTERVAL
+  DAILY_REPORT_INTERVAL,
+  isTemporalEnabled,
+  buildTemporalWebhookEmbed,
+  runTemporalCheck
 };
 
 // Standalone entry point: node src/monitor.js

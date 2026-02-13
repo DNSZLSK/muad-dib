@@ -21,7 +21,8 @@ async function runMonitorTests() {
     KNOWN_BUNDLED_FILES, isBundledToolingOnly,
     isSandboxEnabled, hasHighOrCritical,
     getWebhookUrl, shouldSendWebhook, buildMonitorWebhookPayload,
-    computeRiskLevel, computeRiskScore, buildDailyReportEmbed, DAILY_REPORT_INTERVAL
+    computeRiskLevel, computeRiskScore, buildDailyReportEmbed, DAILY_REPORT_INTERVAL,
+    isTemporalEnabled, buildTemporalWebhookEmbed
   } = require('../../src/monitor.js');
 
   test('MONITOR: parseNpmRss extracts package names from RSS', () => {
@@ -669,6 +670,129 @@ async function runMonitorTests() {
 
   test('MONITOR: DAILY_REPORT_INTERVAL is 24 hours', () => {
     assert(DAILY_REPORT_INTERVAL === 24 * 3600000, 'Should be 24h in ms');
+  });
+
+  // ============================================
+  // MONITOR TEMPORAL ANALYSIS TESTS
+  // ============================================
+
+  console.log('\n=== MONITOR TEMPORAL ANALYSIS TESTS ===\n');
+
+  test('MONITOR: isTemporalEnabled defaults to true', () => {
+    const orig = process.env.MUADDIB_MONITOR_TEMPORAL;
+    delete process.env.MUADDIB_MONITOR_TEMPORAL;
+    try {
+      assert(isTemporalEnabled() === true, 'Should default to true when env not set');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_MONITOR_TEMPORAL = orig;
+    }
+  });
+
+  test('MONITOR: isTemporalEnabled returns false when env=false', () => {
+    const orig = process.env.MUADDIB_MONITOR_TEMPORAL;
+    process.env.MUADDIB_MONITOR_TEMPORAL = 'false';
+    try {
+      assert(isTemporalEnabled() === false, 'Should return false when env is "false"');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_MONITOR_TEMPORAL = orig;
+      else delete process.env.MUADDIB_MONITOR_TEMPORAL;
+    }
+  });
+
+  test('MONITOR: isTemporalEnabled returns false when env=FALSE (case insensitive)', () => {
+    const orig = process.env.MUADDIB_MONITOR_TEMPORAL;
+    process.env.MUADDIB_MONITOR_TEMPORAL = 'FALSE';
+    try {
+      assert(isTemporalEnabled() === false, 'Should return false when env is "FALSE"');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_MONITOR_TEMPORAL = orig;
+      else delete process.env.MUADDIB_MONITOR_TEMPORAL;
+    }
+  });
+
+  test('MONITOR: buildTemporalWebhookEmbed has correct Discord embed structure', () => {
+    const mockResult = {
+      packageName: 'evil-pkg',
+      latestVersion: '2.0.0',
+      previousVersion: '1.9.0',
+      suspicious: true,
+      findings: [
+        { type: 'lifecycle_added', script: 'postinstall', value: 'node steal.js', severity: 'CRITICAL' }
+      ],
+      metadata: {
+        latestPublishedAt: '2026-01-15T12:00:00.000Z',
+        previousPublishedAt: '2025-06-01T00:00:00.000Z',
+        maintainers: [{ name: 'attacker' }]
+      }
+    };
+    const embed = buildTemporalWebhookEmbed(mockResult);
+    assert(embed.embeds, 'Should have embeds array');
+    assert(embed.embeds.length === 1, 'Should have exactly 1 embed');
+
+    const e = embed.embeds[0];
+    assertIncludes(e.title, 'TEMPORAL ANOMALY', 'Title should contain TEMPORAL ANOMALY');
+    assertIncludes(e.title, 'CRITICAL', 'Title should contain CRITICAL for critical finding');
+    assert(e.color === 0xe74c3c, 'Color should be red for CRITICAL, got ' + e.color);
+
+    const pkgField = e.fields.find(f => f.name === 'Package');
+    assert(pkgField, 'Should have Package field');
+    assertIncludes(pkgField.value, 'evil-pkg', 'Package field should contain package name');
+
+    const versionField = e.fields.find(f => f.name === 'Version Change');
+    assert(versionField, 'Should have Version Change field');
+    assertIncludes(versionField.value, '1.9.0', 'Should contain previous version');
+    assertIncludes(versionField.value, '2.0.0', 'Should contain latest version');
+
+    const changesField = e.fields.find(f => f.name === 'Changes Detected');
+    assert(changesField, 'Should have Changes Detected field');
+    assertIncludes(changesField.value, 'postinstall', 'Should mention postinstall');
+    assertIncludes(changesField.value, 'ADDED', 'Should say ADDED for lifecycle_added');
+    assertIncludes(changesField.value, 'steal.js', 'Should contain the script value');
+
+    assert(e.footer && e.footer.text, 'Should have footer');
+    assertIncludes(e.footer.text, 'Temporal Analysis', 'Footer should mention Temporal Analysis');
+  });
+
+  test('MONITOR: buildTemporalWebhookEmbed uses orange color for HIGH severity', () => {
+    const mockResult = {
+      packageName: 'sus-pkg',
+      latestVersion: '3.0.0',
+      previousVersion: '2.5.0',
+      suspicious: true,
+      findings: [
+        { type: 'lifecycle_added', script: 'prepare', value: 'npm run build', severity: 'HIGH' }
+      ],
+      metadata: {
+        latestPublishedAt: '2026-01-20T00:00:00.000Z',
+        previousPublishedAt: '2025-12-01T00:00:00.000Z',
+        maintainers: []
+      }
+    };
+    const embed = buildTemporalWebhookEmbed(mockResult);
+    const e = embed.embeds[0];
+    assert(e.color === 0xe67e22, 'Color should be orange for HIGH, got ' + e.color);
+    assertIncludes(e.title, 'HIGH', 'Title should contain HIGH');
+  });
+
+  test('MONITOR: buildTemporalWebhookEmbed handles modified lifecycle scripts', () => {
+    const mockResult = {
+      packageName: 'mod-pkg',
+      latestVersion: '1.1.0',
+      previousVersion: '1.0.0',
+      suspicious: true,
+      findings: [
+        { type: 'lifecycle_modified', script: 'postinstall', oldValue: 'node setup.js', newValue: 'node evil.js', severity: 'CRITICAL' }
+      ],
+      metadata: {
+        latestPublishedAt: '2026-02-01T00:00:00.000Z',
+        previousPublishedAt: '2025-11-01T00:00:00.000Z',
+        maintainers: []
+      }
+    };
+    const embed = buildTemporalWebhookEmbed(mockResult);
+    const changesField = embed.embeds[0].fields.find(f => f.name === 'Changes Detected');
+    assertIncludes(changesField.value, 'MODIFIED', 'Should say MODIFIED for lifecycle_modified');
+    assertIncludes(changesField.value, 'evil.js', 'Should contain the new value');
   });
 }
 
