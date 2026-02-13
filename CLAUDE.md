@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-npm test          # Run all tests (custom framework, ~316 tests)
+npm test          # Run all tests (custom framework, ~405 tests across 4 files)
 npm run lint      # ESLint with security plugin
 npm run scan      # Self-scan: node bin/muaddib.js scan .
 npm run update    # Download latest IOCs
@@ -62,7 +62,7 @@ Tests use a custom framework in `tests/run-tests.js` (no Jest). Test helpers:
 
 ## Key Constraints
 
-- **No external runtime deps** beyond what's in package.json (acorn, chalk, yargs, js-yaml, adm-zip, @inquirer/prompts)
+- **No external runtime deps** beyond what's in package.json (acorn, acorn-walk, chalk, yargs, js-yaml, adm-zip, @inquirer/prompts)
 - **Windows paths:** Always use `path.relative()` for file references in threats; never shell `!` in scripts
 - **Symlink protection:** `findFiles` uses `lstatSync` + inode tracking (maxDepth fallback on Windows where ino=0)
 - **Python typosquat false positives:** Typosquat check must skip packages that ARE in the popular list to avoid false positives (flask↔black)

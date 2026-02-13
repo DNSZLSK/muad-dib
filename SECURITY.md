@@ -4,8 +4,8 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
+| 1.8.x   | :white_check_mark: |
 | 1.6.x   | :white_check_mark: |
-| 1.5.x   | :white_check_mark: |
 | 1.4.x   | :x:                |
 | 1.3.x   | :x:                |
 | 1.2.x   | :x:                |
@@ -57,7 +57,7 @@ Please include the following information in your report:
 - We aim to release fixes before public disclosure
 - We request a 90-day disclosure window for complex issues
 
-## Detection Rules (v1.6.18)
+## Detection Rules (v1.8.0)
 
 MUAD'DIB uses 12 parallel scanners producing the following rule IDs:
 
@@ -84,6 +84,9 @@ MUAD'DIB uses 12 parallel scanners producing the following rule IDs:
 | MUADDIB-SHELL-007 | Home Directory Destruction | CRITICAL |
 | MUADDIB-SHELL-008 | Data Exfiltration via Curl | HIGH |
 | MUADDIB-SHELL-009 | SSH Key Access | HIGH |
+| MUADDIB-SHELL-010 | Python Reverse Shell | CRITICAL |
+| MUADDIB-SHELL-011 | Perl Reverse Shell | CRITICAL |
+| MUADDIB-SHELL-012 | FIFO Reverse Shell | CRITICAL |
 
 ### Package Scanner
 

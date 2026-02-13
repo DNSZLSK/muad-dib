@@ -15,5 +15,13 @@ action/
 deploy/
 coverage/
 .claude/
-ults.sarif
 src/ioc/data/iocs.json
+data/
+hooks/
+test-output.txt
+eslint.config.mjs
+action.yml
+.pre-commit-hooks.yaml
+README.fr.md
+logo2removebg.png
+assets/logo.png

@@ -5,7 +5,7 @@ const AdmZip = require('adm-zip');
 
 const IOC_FILE = path.join(__dirname, 'data/iocs.json');
 const COMPACT_IOC_FILE = path.join(__dirname, 'data/iocs-compact.json');
-const STATIC_IOCS_FILE = path.join(__dirname, 'data/static-iocs.json');
+const STATIC_IOCS_FILE = path.join(__dirname, '../../data/static-iocs.json');
 const { generateCompactIOCs } = require('./updater.js');
 const { Spinner } = require('../utils.js');
 
