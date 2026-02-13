@@ -122,6 +122,7 @@ async function runSandbox(packageName, options = {}) {
 
   return new Promise((resolve) => {
     let stdout = '';
+    let stderr = '';
     let timedOut = false;
     const containerName = `muaddib-sandbox-${Date.now()}`;
 
@@ -150,6 +151,7 @@ async function runSandbox(packageName, options = {}) {
     dockerArgs.push(packageName);
     dockerArgs.push(mode);
 
+    console.log('[SANDBOX] Docker args:', JSON.stringify(dockerArgs));
     const proc = spawn('docker', dockerArgs);
 
     // Timeout: kill container after 120s
@@ -168,6 +170,7 @@ async function runSandbox(packageName, options = {}) {
     });
 
     proc.stderr.on('data', (data) => {
+      stderr += data.toString();
       // Forward sandbox progress logs (sanitize ANSI escape sequences)
       const text = data.toString().replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
       for (const line of text.split('\n')) {
@@ -197,6 +200,10 @@ async function runSandbox(packageName, options = {}) {
         resolve(result);
         return;
       }
+
+      // Debug: log raw output for troubleshooting
+      console.log('[SANDBOX] Raw stdout length:', stdout.length, 'first 200 chars:', stdout.substring(0, 200));
+      console.log('[SANDBOX] Stderr:', stderr.substring(0, 500));
 
       // Parse JSON from container stdout
       let report;
