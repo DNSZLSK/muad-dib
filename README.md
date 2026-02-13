@@ -30,7 +30,7 @@
 
 npm and PyPI supply-chain attacks are exploding. Shai-Hulud compromised 25K+ repos in 2025. Existing tools detect threats but don't help you respond.
 
-MUAD'DIB combines static analysis + dynamic analysis (Docker sandbox) to detect threats AND guide your response.
+MUAD'DIB combines static analysis + dynamic analysis (Docker sandbox) + **behavioral anomaly detection** (v2.0) to detect threats AND guide your response — even before they appear in any IOC database.
 
 ---
 
@@ -393,6 +393,119 @@ Detects malicious patterns in `.github/workflows/` YAML files, including Shai-Hu
 | Supply chain compromise | T1195.002 | IOC matching |
 | PyPI malicious package | T1195.002 | IOC matching |
 | Sandbox dynamic analysis | Multiple | Docker + strace + tcpdump |
+| Sudden lifecycle script addition | T1195.002 | Temporal analysis |
+| Dangerous API injection between versions | T1195.002 | Temporal AST diff |
+| Publish frequency anomaly | T1195.002 | Registry metadata |
+| Maintainer/publisher change | T1195.002 | Registry metadata |
+| Canary token exfiltration | T1552.001 | Sandbox honey tokens |
+
+---
+
+## Supply Chain Anomaly Detection (v2.0)
+
+MUAD'DIB 2.0 introduces a paradigm shift: from **IOC-based detection** (reactive, requires known threats) to **behavioral anomaly detection** (proactive, detects unknown threats by spotting suspicious changes).
+
+Traditional supply-chain scanners rely on blocklists of known malicious packages. The problem: they can only detect threats AFTER they've been identified and reported. Attacks like **ua-parser-js** (2021), **event-stream** (2018), and **Shai-Hulud** (2025) went undetected for hours or days because no IOC existed yet.
+
+MUAD'DIB 2.0 adds 5 behavioral detection features that can catch these attacks **before** they appear in any IOC database, by analyzing what changed between package versions.
+
+### New features
+
+#### 1. Sudden Lifecycle Script Detection (`--temporal`)
+
+Detects when `preinstall`, `install`, or `postinstall` scripts suddenly appear in a new version of a package that never had them before. This is the #1 attack vector for supply-chain attacks.
+
+```bash
+muaddib scan . --temporal
+```
+
+#### 2. Temporal AST Diff (`--temporal-ast`)
+
+Downloads the two latest versions of each dependency and compares their AST (Abstract Syntax Tree) to detect newly added dangerous APIs: `child_process`, `eval`, `Function`, `net.connect`, `process.env`, `fetch`, etc.
+
+```bash
+muaddib scan . --temporal-ast
+```
+
+#### 3. Publish Frequency Anomaly (`--temporal-publish`)
+
+Detects abnormal publishing patterns: burst of versions in 24h, dormant package suddenly updated after 6+ months, rapid version succession (multiple releases in under 1h).
+
+```bash
+muaddib scan . --temporal-publish
+```
+
+#### 4. Maintainer Change Detection (`--temporal-maintainer`)
+
+Detects changes in package maintainers between versions: new maintainer added, sole maintainer replaced (event-stream pattern), suspicious maintainer names, new publisher.
+
+```bash
+muaddib scan . --temporal-maintainer
+```
+
+#### 5. Canary Tokens / Honey Tokens (sandbox)
+
+Injects fake credentials (GITHUB_TOKEN, NPM_TOKEN, AWS keys) into the sandbox environment before installing a package. If the package attempts to exfiltrate these honey tokens via HTTP, DNS, or stdout, it's flagged as confirmed malicious.
+
+```bash
+muaddib sandbox suspicious-package
+```
+
+### Full temporal scan
+
+Enable all temporal analysis features at once:
+
+```bash
+muaddib scan . --temporal-full
+```
+
+### Usage examples
+
+```bash
+# Full behavioral scan (all 5 features)
+muaddib scan . --temporal-full
+
+# Only lifecycle script detection
+muaddib scan . --temporal
+
+# AST diff + maintainer change
+muaddib scan . --temporal-ast --temporal-maintainer
+
+# Sandbox with canary tokens (enabled by default)
+muaddib sandbox suspicious-package
+
+# Sandbox without canary tokens
+muaddib sandbox suspicious-package --no-canary
+```
+
+### New detection rules (v2.0)
+
+| Rule ID | Name | Severity | Feature |
+|---------|------|----------|---------|
+| MUADDIB-TEMPORAL-001 | Sudden Lifecycle Script Added (Critical) | CRITICAL | `--temporal` |
+| MUADDIB-TEMPORAL-002 | Sudden Lifecycle Script Added | HIGH | `--temporal` |
+| MUADDIB-TEMPORAL-003 | Lifecycle Script Modified | MEDIUM | `--temporal` |
+| MUADDIB-TEMPORAL-AST-001 | Dangerous API Added (Critical) | CRITICAL | `--temporal-ast` |
+| MUADDIB-TEMPORAL-AST-002 | Dangerous API Added (High) | HIGH | `--temporal-ast` |
+| MUADDIB-TEMPORAL-AST-003 | Dangerous API Added (Medium) | MEDIUM | `--temporal-ast` |
+| MUADDIB-PUBLISH-001 | Publish Burst Detected | HIGH | `--temporal-publish` |
+| MUADDIB-PUBLISH-002 | Dormant Package Spike | HIGH | `--temporal-publish` |
+| MUADDIB-PUBLISH-003 | Rapid Version Succession | MEDIUM | `--temporal-publish` |
+| MUADDIB-MAINTAINER-001 | New Maintainer Added | HIGH | `--temporal-maintainer` |
+| MUADDIB-MAINTAINER-002 | Suspicious Maintainer Detected | CRITICAL | `--temporal-maintainer` |
+| MUADDIB-MAINTAINER-003 | Sole Maintainer Changed | HIGH | `--temporal-maintainer` |
+| MUADDIB-MAINTAINER-004 | New Publisher Detected | MEDIUM | `--temporal-maintainer` |
+| MUADDIB-CANARY-001 | Canary Token Exfiltration | CRITICAL | sandbox |
+
+### Why it matters
+
+These features detect attacks like:
+- **Shai-Hulud** (2025): Would be caught by temporal lifecycle + AST diff (sudden `postinstall` + `child_process` added)
+- **ua-parser-js** (2021): Would be caught by maintainer change + lifecycle script detection
+- **event-stream** (2018): Would be caught by sole maintainer change + AST diff (new `flatmap-stream` dependency with `eval`)
+- **coa/rc** (2021): Would be caught by publish burst + lifecycle script detection
+
+All without needing a single IOC entry.
 
 ---
 
@@ -489,7 +602,7 @@ Alerts appear in Security > Code scanning alerts.
 ## Architecture
 
 ```
-MUAD'DIB Scanner
+MUAD'DIB 2.0 Scanner
 |
 +-- IOC Match (225,000+ packages, JSON DB)
 |   +-- OSV.dev npm dump (200K+ MAL-* entries)
@@ -512,8 +625,15 @@ MUAD'DIB Scanner
 |   +-- GitHub Actions Scanner
 |   +-- Package, Dependencies, Hash, npm-registry, Dataflow scanners
 |
++-- Supply Chain Anomaly Detection (v2.0)
+|   +-- Temporal Lifecycle Script Detection (--temporal)
+|   +-- Temporal AST Diff (--temporal-ast)
+|   +-- Publish Frequency Anomaly (--temporal-publish)
+|   +-- Maintainer Change Detection (--temporal-maintainer)
+|   +-- Canary Tokens / Honey Tokens (sandbox)
+|
 +-- Paranoid Mode (ultra-strict)
-+-- Docker Sandbox (behavioral analysis, network capture)
++-- Docker Sandbox (behavioral analysis, network capture, canary tokens)
 +-- Zero-Day Monitor (npm + PyPI RSS polling, Discord alerts, daily report)
 |
 v
@@ -558,7 +678,7 @@ npm test
 
 ### Testing
 
-- **326 unit/integration tests** - 80% code coverage via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
+- **541 unit/integration tests** - 80% code coverage via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
 - **56 fuzz tests** - Malformed YAML, invalid JSON, binary files, ReDoS, unicode, 10MB inputs
 - **15 adversarial tests** - Simulated malicious packages, 15/15 detection rate
 - **8 multi-factor typosquat tests** - Edge cases and cache behavior

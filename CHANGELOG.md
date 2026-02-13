@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-02-13
+
+### Added
+- **Sudden Lifecycle Script Detection** (`--temporal`): detects when `preinstall`/`install`/`postinstall` scripts suddenly appear in a new version of a dependency (MUADDIB-TEMPORAL-001, 002, 003)
+- **Temporal AST Diff** (`--temporal-ast`): downloads the two latest versions of each dependency and compares ASTs to detect newly added dangerous APIs — `child_process`, `eval`, `Function`, `net.connect`, `process.env`, `fetch` (MUADDIB-TEMPORAL-AST-001, 002, 003)
+- **Publish Frequency Anomaly** (`--temporal-publish`): detects abnormal publishing patterns — burst of versions in 24h, dormant package spike (6+ months inactivity), rapid version succession (MUADDIB-PUBLISH-001, 002, 003)
+- **Maintainer Change Detection** (`--temporal-maintainer`): detects maintainer changes between versions — new maintainer added, sole maintainer replaced (event-stream pattern), suspicious maintainer names, new publisher (MUADDIB-MAINTAINER-001, 002, 003, 004)
+- **Canary Tokens / Honey Tokens** (sandbox): injects fake credentials (GITHUB_TOKEN, NPM_TOKEN, AWS keys) into sandbox environment and detects exfiltration attempts via HTTP, DNS, or stdout (MUADDIB-CANARY-001)
+- `--temporal-full` flag to enable all 4 temporal analysis features at once
+- `--no-canary` flag to disable canary token injection in sandbox
+- 14 new detection rules (MUADDIB-TEMPORAL-*, MUADDIB-PUBLISH-*, MUADDIB-MAINTAINER-*, MUADDIB-CANARY-*)
+- Test refactoring: 4000 lines → 16 modular test files
+- 541 tests (was 370 in v1.8.0)
+
+### Changed
+- Paradigm shift: from IOC-based detection (reactive) to behavioral anomaly detection (proactive)
+- Sandbox now injects canary tokens by default (disable with `--no-canary`)
+
+### Breaking Changes
+- None. All new features are opt-in via flags (`--temporal`, `--temporal-ast`, `--temporal-publish`, `--temporal-maintainer`, `--temporal-full`). Canary tokens in sandbox are enabled by default but can be disabled with `--no-canary`.
+
 ## [1.8.0] - 2026-02-13
 
 ### Added
@@ -341,7 +362,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Obfuscation detection
 - Package.json lifecycle script analysis
 
-[Unreleased]: https://github.com/DNSZLSK/muad-dib/compare/v1.8.0...HEAD
+[Unreleased]: https://github.com/DNSZLSK/muad-dib/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/DNSZLSK/muad-dib/compare/v1.8.0...v2.0.0
 [1.8.0]: https://github.com/DNSZLSK/muad-dib/compare/v1.6.18...v1.8.0
 [1.6.18]: https://github.com/DNSZLSK/muad-dib/compare/v1.6.17...v1.6.18
 [1.6.17]: https://github.com/DNSZLSK/muad-dib/compare/v1.6.16...v1.6.17

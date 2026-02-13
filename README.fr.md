@@ -30,7 +30,7 @@
 
 Les attaques supply-chain npm et PyPI explosent. Shai-Hulud a compromis 25K+ repos en 2025. Les outils existants détectent, mais n'aident pas à répondre.
 
-MUAD'DIB combine analyse statique + analyse dynamique (sandbox Docker) pour détecter les menaces ET guider votre réponse.
+MUAD'DIB combine analyse statique + analyse dynamique (sandbox Docker) + **détection comportementale d'anomalies** (v2.0) pour détecter les menaces ET guider votre réponse — même avant leur apparition dans une base d'IOC.
 
 ---
 
@@ -392,6 +392,119 @@ Détecte les patterns malveillants dans les fichiers YAML `.github/workflows/`, 
 | Supply chain compromise | T1195.002 | IOC matching |
 | Package PyPI malveillant | T1195.002 | IOC matching |
 | Sandbox analyse dynamique | Multiple | Docker + strace + tcpdump |
+| Ajout soudain de script lifecycle | T1195.002 | Analyse temporelle |
+| Injection d'API dangereuse entre versions | T1195.002 | Diff AST temporel |
+| Anomalie de fréquence de publication | T1195.002 | Métadonnées registre |
+| Changement de maintainer/publisher | T1195.002 | Métadonnées registre |
+| Exfiltration de canary tokens | T1552.001 | Honey tokens sandbox |
+
+---
+
+## Détection d'anomalies supply chain (v2.0)
+
+MUAD'DIB 2.0 introduit un changement de paradigme : de la **détection par IOC** (réactive, nécessite des menaces connues) à la **détection comportementale d'anomalies** (proactive, détecte les menaces inconnues en repérant les changements suspects).
+
+Les scanners supply-chain traditionnels reposent sur des listes de packages malveillants connus. Le problème : ils ne détectent les menaces qu'APRÈS leur identification et signalement. Des attaques comme **ua-parser-js** (2021), **event-stream** (2018) et **Shai-Hulud** (2025) sont passées inaperçues pendant des heures ou des jours car aucun IOC n'existait encore.
+
+MUAD'DIB 2.0 ajoute 5 features de détection comportementale capables d'attraper ces attaques **avant** leur apparition dans une base d'IOC, en analysant ce qui a changé entre les versions d'un package.
+
+### Nouvelles features
+
+#### 1. Détection soudaine de scripts lifecycle (`--temporal`)
+
+Détecte quand des scripts `preinstall`, `install` ou `postinstall` apparaissent soudainement dans une nouvelle version d'un package qui n'en avait jamais. C'est le vecteur d'attaque #1 des attaques supply-chain.
+
+```bash
+muaddib scan . --temporal
+```
+
+#### 2. Diff AST temporel (`--temporal-ast`)
+
+Télécharge les deux dernières versions de chaque dépendance et compare leur AST (Abstract Syntax Tree) pour détecter les APIs dangereuses nouvellement ajoutées : `child_process`, `eval`, `Function`, `net.connect`, `process.env`, `fetch`, etc.
+
+```bash
+muaddib scan . --temporal-ast
+```
+
+#### 3. Anomalie de fréquence de publication (`--temporal-publish`)
+
+Détecte les patterns de publication anormaux : rafale de versions en 24h, package dormant soudainement mis à jour après 6+ mois, succession rapide de versions (plusieurs releases en moins d'1h).
+
+```bash
+muaddib scan . --temporal-publish
+```
+
+#### 4. Détection de changement de maintainer (`--temporal-maintainer`)
+
+Détecte les changements de maintainers entre versions : nouveau maintainer ajouté, seul maintainer remplacé (pattern event-stream), noms de maintainers suspects, nouveau publisher.
+
+```bash
+muaddib scan . --temporal-maintainer
+```
+
+#### 5. Canary Tokens / Honey Tokens (sandbox)
+
+Injecte de faux credentials (GITHUB_TOKEN, NPM_TOKEN, clés AWS) dans l'environnement sandbox avant d'installer un package. Si le package tente d'exfiltrer ces honey tokens via HTTP, DNS ou stdout, il est signalé comme malveillant confirmé.
+
+```bash
+muaddib sandbox suspicious-package
+```
+
+### Scan temporel complet
+
+Activer toutes les features d'analyse temporelle en une commande :
+
+```bash
+muaddib scan . --temporal-full
+```
+
+### Exemples d'utilisation
+
+```bash
+# Scan comportemental complet (5 features)
+muaddib scan . --temporal-full
+
+# Détection lifecycle scripts uniquement
+muaddib scan . --temporal
+
+# Diff AST + changement maintainer
+muaddib scan . --temporal-ast --temporal-maintainer
+
+# Sandbox avec canary tokens (activé par défaut)
+muaddib sandbox suspicious-package
+
+# Sandbox sans canary tokens
+muaddib sandbox suspicious-package --no-canary
+```
+
+### Nouvelles règles de détection (v2.0)
+
+| Rule ID | Nom | Sévérité | Feature |
+|---------|-----|----------|---------|
+| MUADDIB-TEMPORAL-001 | Ajout soudain de script lifecycle (Critique) | CRITICAL | `--temporal` |
+| MUADDIB-TEMPORAL-002 | Ajout soudain de script lifecycle | HIGH | `--temporal` |
+| MUADDIB-TEMPORAL-003 | Script lifecycle modifié | MEDIUM | `--temporal` |
+| MUADDIB-TEMPORAL-AST-001 | API dangereuse ajoutée (Critique) | CRITICAL | `--temporal-ast` |
+| MUADDIB-TEMPORAL-AST-002 | API dangereuse ajoutée (High) | HIGH | `--temporal-ast` |
+| MUADDIB-TEMPORAL-AST-003 | API dangereuse ajoutée (Medium) | MEDIUM | `--temporal-ast` |
+| MUADDIB-PUBLISH-001 | Rafale de publications détectée | HIGH | `--temporal-publish` |
+| MUADDIB-PUBLISH-002 | Pic de package dormant | HIGH | `--temporal-publish` |
+| MUADDIB-PUBLISH-003 | Succession rapide de versions | MEDIUM | `--temporal-publish` |
+| MUADDIB-MAINTAINER-001 | Nouveau maintainer ajouté | HIGH | `--temporal-maintainer` |
+| MUADDIB-MAINTAINER-002 | Maintainer suspect détecté | CRITICAL | `--temporal-maintainer` |
+| MUADDIB-MAINTAINER-003 | Seul maintainer changé | HIGH | `--temporal-maintainer` |
+| MUADDIB-MAINTAINER-004 | Nouveau publisher détecté | MEDIUM | `--temporal-maintainer` |
+| MUADDIB-CANARY-001 | Exfiltration de canary token | CRITICAL | sandbox |
+
+### Pourquoi c'est important
+
+Ces features détectent des attaques comme :
+- **Shai-Hulud** (2025) : Détecté par temporal lifecycle + AST diff (ajout soudain de `postinstall` + `child_process`)
+- **ua-parser-js** (2021) : Détecté par changement maintainer + détection lifecycle
+- **event-stream** (2018) : Détecté par changement de seul maintainer + AST diff (nouvelle dépendance `flatmap-stream` avec `eval`)
+- **coa/rc** (2021) : Détecté par rafale de publications + détection lifecycle
+
+Le tout sans avoir besoin d'un seul IOC.
 
 ---
 
@@ -488,7 +601,7 @@ Les alertes apparaissent dans Security > Code scanning alerts.
 ## Architecture
 
 ```
-MUAD'DIB Scanner
+MUAD'DIB 2.0 Scanner
 |
 +-- IOC Match (225 000+ packages, JSON DB)
 |   +-- OSV.dev npm dump (200K+ entrées MAL-*)
@@ -500,14 +613,24 @@ MUAD'DIB Scanner
 |   +-- Snyk Known Malware
 |   +-- Static IOCs (Socket, Phylum)
 |
-+-- AST Parse (acorn)
-+-- Pattern Matching (shell, scripts)
-+-- Typosquat Detection (npm + PyPI, Levenshtein)
-+-- Python Scanner (requirements.txt, setup.py, pyproject.toml)
-+-- Analyse Entropie Shannon
-+-- GitHub Actions Scanner
++-- 12 Scanners Parallèles
+|   +-- AST Parse (acorn)
+|   +-- Pattern Matching (shell, scripts)
+|   +-- Typosquat Detection (npm + PyPI, Levenshtein)
+|   +-- Python Scanner (requirements.txt, setup.py, pyproject.toml)
+|   +-- Analyse Entropie Shannon
+|   +-- GitHub Actions Scanner
+|   +-- Package, Dependencies, Hash, npm-registry, Dataflow scanners
+|
++-- Détection d'Anomalies Supply Chain (v2.0)
+|   +-- Détection Lifecycle Script Temporelle (--temporal)
+|   +-- Diff AST Temporel (--temporal-ast)
+|   +-- Anomalie Fréquence de Publication (--temporal-publish)
+|   +-- Détection Changement Maintainer (--temporal-maintainer)
+|   +-- Canary Tokens / Honey Tokens (sandbox)
+|
 +-- Paranoid Mode (ultra-strict)
-+-- Docker Sandbox (behavioral analysis, network capture)
++-- Docker Sandbox (analyse comportementale, capture réseau, canary tokens)
 +-- Moniteur Zero-Day (polling RSS npm + PyPI, alertes Discord, rapport quotidien)
 |
 v
@@ -552,7 +675,7 @@ npm test
 
 ### Tests
 
-- **326 tests unitaires/intégration** - 80% coverage via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
+- **541 tests unitaires/intégration** - 80% coverage via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
 - **56 tests de fuzzing** - YAML malformé, JSON invalide, fichiers binaires, ReDoS, unicode, inputs 10MB
 - **15 tests adversariaux** - Packages malveillants simulés, taux de détection 15/15
 - **8 tests multi-facteur typosquat** - Cas limites et comportement cache
