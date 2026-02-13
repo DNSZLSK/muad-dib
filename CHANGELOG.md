@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-02-13
+
+### Added
+- **Zero-day monitor** (`muaddib monitor`): continuous polling of npm and PyPI registries via RSS (60s interval), automatic download/extract/scan of every new package
+- **Discord webhook alerts**: rich embeds with severity color, emoji indicators, package link, ecosystem, sandbox score, readable timestamps
+- **Automated daily report**: 24h summary sent to Discord — packages scanned, clean, suspects, errors, top 3 suspects of the day
+- **Bundled tooling false-positive filter**: findings from known bundled files (yarn.js, webpack.js, terser.js, esbuild.js, polyfills.js) are skipped instead of flagged as suspect
+- **Webhook `rawPayload` option**: allows sending pre-built embeds (used by daily report)
+- 370 tests (was 316 in v1.6.18)
+
+### Fixed
+- **npm polling**: migrated from deprecated `/-/all/since` endpoint (404) to `/-/rss` RSS feed
+- **Tarball URL resolution**: PyPI and npm packages now resolve tarball URLs lazily via `resolveTarballAndScan()` before download, fixing ECONNREFUSED crashes on PyPI packages
+- **processQueue**: now calls `resolveTarballAndScan()` instead of `scanPackage()` directly
+- **Webhook 400 errors**: `trySendWebhook()` now computes `riskScore` and `riskLevel` for `webhookData.summary`, fixing Discord embed failures
+- **extractTarGz test**: skipped on Windows where `tar --force-local` is not supported
+- **Test framework**: added `skipped` counter to test results
+
+### Changed
+- `loadState()` uses `npmLastPackage` (string) instead of `npmLastKey` (timestamp)
+- `parseNpmResponse()` removed, replaced by `parseNpmRss()` (same regex approach as PyPI)
+- `formatDiscord()` enhanced with emoji title, Ecosystem field, Package Link field, Sandbox field, footer with UTC timestamp
+- Monitor stats include `lastDailyReportTime` and `dailyAlerts` tracking
+
 ## [1.6.18] - 2026-02-12
 
 ### Changed
@@ -317,7 +341,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Obfuscation detection
 - Package.json lifecycle script analysis
 
-[Unreleased]: https://github.com/DNSZLSK/muad-dib/compare/v1.6.18...HEAD
+[Unreleased]: https://github.com/DNSZLSK/muad-dib/compare/v1.8.0...HEAD
+[1.8.0]: https://github.com/DNSZLSK/muad-dib/compare/v1.6.18...v1.8.0
 [1.6.18]: https://github.com/DNSZLSK/muad-dib/compare/v1.6.17...v1.6.18
 [1.6.17]: https://github.com/DNSZLSK/muad-dib/compare/v1.6.16...v1.6.17
 [1.6.16]: https://github.com/DNSZLSK/muad-dib/compare/v1.6.15...v1.6.16

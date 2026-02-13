@@ -369,25 +369,56 @@ Toutes les docs sont maintenant synchronisees avec le code v1.6.11.
 
 ---
 
+## Moniteur Zero-Day et alertes Discord (13 Fevrier 2026)
+
+### Le probleme
+
+MUAD'DIB savait scanner des projets existants, mais ne pouvait pas surveiller les nouveaux packages en temps reel. Les attaques supply-chain comme Shai-Hulud se propagent en quelques heures. Le temps de faire un `muaddib scan` manuellement, c'est deja trop tard.
+
+### La solution : `muaddib monitor`
+
+Un moniteur continu qui :
+1. **Interroge les registres** npm et PyPI toutes les 60 secondes via RSS
+2. **Telecharge et scanne** chaque nouveau package automatiquement
+3. **Envoie des alertes Discord** en temps reel avec des embeds riches (couleur par severite, emoji, lien vers le package, score sandbox)
+4. **Genere un rapport quotidien** (resume 24h : packages scannes, clean, suspects, erreurs, top 3 suspects)
+
+### Les galeres techniques
+
+**L'endpoint npm deprecie** : Au debut, le moniteur utilisait `/-/all/since?startkey=<timestamp>` pour recuperer les nouveaux packages npm. Cet endpoint a ete supprime (404). Migration vers le flux RSS `/-/rss?descending=true&limit=50`, avec le meme parsing regex que PyPI.
+
+**Crash PyPI ECONNREFUSED** : Le flux RSS PyPI ne fournit pas l'URL du tarball. Le code appelait `scanPackage()` directement avec `tarballUrl: null`, ce qui tentait un download sur `null` et crashait. Corrige avec `resolveTarballAndScan()` qui resout l'URL via l'API JSON PyPI/npm avant le scan.
+
+**Webhook Discord 400** : `formatDiscord()` attendait `summary.riskScore` et `summary.riskLevel`, mais `trySendWebhook()` passait le `result.summary` brut du scanner (qui n'a pas ces champs). Ajout de `computeRiskScore()` et `computeRiskLevel()` dans le moniteur pour calculer ces valeurs avant l'envoi.
+
+**Faux positifs bundled tooling** : Beaucoup de packages npm incluent des fichiers bundles (yarn.js, webpack.js, terser.js, polyfills.js) qui declenchent des alertes d'obfuscation ou d'eval. Ajout d'un filtre `KNOWN_BUNDLED_FILES` : si TOUTES les findings viennent de ces fichiers, le package est marque comme "skipped (bundled tooling)" au lieu de "suspect".
+
+### Bilan
+
+Le moniteur scanne en moyenne un package toutes les 2-3 secondes. Sur une journee, ca represente ~2000-3000 packages. Les alertes Discord arrivent en temps reel avec suffisamment de contexte (lien package, severite, score sandbox) pour prendre une decision rapide.
+
+---
+
 ## Etat actuel
 
 ### Ce qui fonctionne
 
 | Feature | Détails |
 |---------|---------|
-| CLI complète | scan, watch, update, scrape, install, safe-install, daemon, sandbox, **diff**, **init-hooks**, **remove-hooks** |
+| CLI complète | scan, watch, update, scrape, install, safe-install, daemon, sandbox, **diff**, **init-hooks**, **remove-hooks**, **monitor** |
 | Base IOCs | 225 000+ npm + 14 000+ PyPI packages malveillants |
 | Détection Shai-Hulud | v1, v2, v3 couverts |
 | Exports | JSON, HTML, SARIF |
 | Extension VS Code | Publiée sur Marketplace |
 | Webhooks | Discord / Slack (envoi uniquement si menaces détectées) |
 | Docker Sandbox (analyse dynamique) | Analyse comportementale isolée (strace, tcpdump, filesystem diff, DNS/HTTP/TLS capture, 16 patterns exfiltration, mode strict iptables) |
+| **Moniteur Zero-Day** | Polling RSS npm + PyPI (60s), scan automatique, alertes Discord temps réel, rapport quotidien, filtre bundled tooling |
 | GitHub Actions Backdoor | Détection discussion.yaml (Shai-Hulud 2.0) |
 | **Diff entre versions** | Compare et montre uniquement les NOUVELLES menaces |
 | **Pre-commit hooks** | Support pre-commit, husky, git natif |
 | **GitHub Action Marketplace** | Avec inputs/outputs et SARIF auto |
 | Version check | Notification automatique des nouvelles versions au demarrage |
-| Tests | **296 tests unitaires** + 56 fuzz + 15 adversariaux, **80% coverage** (Codecov) |
+| Tests | **370 tests unitaires** + 56 fuzz + 15 adversariaux, **80% coverage** (Codecov) |
 | Audit securite | 2 audits complets, **58 issues corrigees**, [rapport PDF](MUADDIB_Security_Audit_Report_v1.4.1.pdf) |
 
 ### Ce qui manque (honnêtement)
