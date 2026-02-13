@@ -102,11 +102,11 @@ function loadState() {
     const raw = fs.readFileSync(STATE_FILE, 'utf8');
     const state = JSON.parse(raw);
     return {
-      npmLastKey: typeof state.npmLastKey === 'number' ? state.npmLastKey : 0,
+      npmLastPackage: typeof state.npmLastPackage === 'string' ? state.npmLastPackage : '',
       pypiLastPackage: typeof state.pypiLastPackage === 'string' ? state.pypiLastPackage : ''
     };
   } catch {
-    return { npmLastKey: 0, pypiLastPackage: '' };
+    return { npmLastPackage: '', pypiLastPackage: '' };
   }
 }
 
@@ -364,7 +364,7 @@ async function processQueue() {
     const item = scanQueue.shift();
     try {
       await Promise.race([
-        scanPackage(item.name, item.version, item.ecosystem, item.tarballUrl),
+        resolveTarballAndScan(item),
         timeoutPromise(SCAN_TIMEOUT_MS)
       ]);
     } catch (err) {
@@ -385,68 +385,77 @@ function reportStats() {
 // --- npm polling ---
 
 /**
- * Parse the npm /-/all/since response.
- * Returns array of { name, version, tarball } and the max timestamp seen.
+ * Parse npm RSS XML (same regex approach as parsePyPIRss).
+ * Returns array of package names from <title> tags inside <item>.
  */
-function parseNpmResponse(body) {
-  let data;
-  try {
-    data = JSON.parse(body);
-  } catch {
-    return { packages: [], maxTimestamp: 0 };
-  }
-
+function parseNpmRss(xml) {
   const packages = [];
-  let maxTimestamp = 0;
-
-  // The response is an object keyed by package name.
-  // Each value has name, "dist-tags", time, etc.
-  // There is a special "_updated" key with the latest timestamp.
-  for (const key of Object.keys(data)) {
-    if (key === '_updated') {
-      const ts = Number(data[key]);
-      if (ts > maxTimestamp) maxTimestamp = ts;
-      continue;
+  const itemRegex = /<item>([\s\S]*?)<\/item>/g;
+  let match;
+  while ((match = itemRegex.exec(xml)) !== null) {
+    const itemContent = match[1];
+    const titleMatch = itemContent.match(/<title>([^<]+)<\/title>/);
+    if (titleMatch) {
+      const title = titleMatch[1].trim();
+      const name = title.split(/\s+/)[0];
+      if (name) {
+        packages.push(name);
+      }
     }
-    const pkg = data[key];
-    if (!pkg || typeof pkg !== 'object' || !pkg.name) continue;
-    const version = (pkg['dist-tags'] && pkg['dist-tags'].latest) || '';
-    const tarball = (pkg.dist && pkg.dist.tarball) || '';
-    packages.push({ name: pkg.name, version, tarball });
   }
+  return packages;
+}
 
-  return { packages, maxTimestamp };
+/**
+ * Fetch latest version metadata for an npm package.
+ * Returns { version, tarball } or null on failure.
+ */
+async function getNpmLatestTarball(packageName) {
+  const url = `https://registry.npmjs.org/${encodeURIComponent(packageName)}/latest`;
+  const body = await httpsGet(url);
+  const data = JSON.parse(body);
+  const version = data.version || '';
+  const tarball = (data.dist && data.dist.tarball) || null;
+  return { version, tarball };
 }
 
 async function pollNpm(state) {
-  // First run: use "now - 120s" so we don't get the entire registry
-  const startKey = state.npmLastKey || (Date.now() - 120_000);
-  const url = `https://registry.npmjs.org/-/all/since?stale=update_after&startkey=${startKey}`;
+  const url = 'https://registry.npmjs.org/-/rss?descending=true&limit=50';
 
   try {
     const body = await httpsGet(url);
-    const { packages, maxTimestamp } = parseNpmResponse(body);
+    const packages = parseNpmRss(body);
 
-    for (const pkg of packages) {
-      console.log(`[MONITOR] New npm: ${pkg.name}@${pkg.version}`);
-      if (pkg.tarball) {
-        scanQueue.push({
-          name: pkg.name,
-          version: pkg.version,
-          ecosystem: 'npm',
-          tarballUrl: pkg.tarball
-        });
+    // Find new packages (those after the last seen one)
+    let newPackages;
+    if (!state.npmLastPackage) {
+      newPackages = packages;
+    } else {
+      const lastIdx = packages.indexOf(state.npmLastPackage);
+      if (lastIdx === -1) {
+        newPackages = packages;
+      } else {
+        newPackages = packages.slice(0, lastIdx);
       }
     }
 
-    if (maxTimestamp > 0) {
-      state.npmLastKey = maxTimestamp;
-    } else if (packages.length > 0) {
-      // Fallback: advance timestamp to now
-      state.npmLastKey = Date.now();
+    for (const name of newPackages) {
+      console.log(`[MONITOR] New npm: ${name}`);
+      // Queue npm packages — tarball URL resolved during scan
+      scanQueue.push({
+        name,
+        version: '',
+        ecosystem: 'npm',
+        tarballUrl: null // resolved lazily via resolveTarballAndScan
+      });
     }
 
-    return packages.length;
+    // Remember the most recent package (first in RSS)
+    if (packages.length > 0) {
+      state.npmLastPackage = packages[0];
+    }
+
+    return newPackages.length;
   } catch (err) {
     console.error(`[MONITOR] npm poll error: ${err.message}`);
     return 0;
@@ -550,7 +559,7 @@ async function startMonitor() {
   }
 
   const state = loadState();
-  console.log(`[MONITOR] State loaded — npm startKey: ${state.npmLastKey || 'none'}, pypi last: ${state.pypiLastPackage || 'none'}`);
+  console.log(`[MONITOR] State loaded — npm last: ${state.npmLastPackage || 'none'}, pypi last: ${state.pypiLastPackage || 'none'}`);
   console.log(`[MONITOR] Polling every ${POLL_INTERVAL / 1000}s. Ctrl+C to stop.\n`);
 
   let running = true;
@@ -603,6 +612,21 @@ async function poll(state) {
  * For PyPI packages, we need to fetch the JSON API to get the tarball URL.
  */
 async function resolveTarballAndScan(item) {
+  if (item.ecosystem === 'npm' && !item.tarballUrl) {
+    try {
+      const npmInfo = await getNpmLatestTarball(item.name);
+      if (!npmInfo.tarball) {
+        console.log(`[MONITOR] SKIP: ${item.name} — no tarball URL found on npm`);
+        return;
+      }
+      item.tarballUrl = npmInfo.tarball;
+      if (npmInfo.version) item.version = npmInfo.version;
+    } catch (err) {
+      console.error(`[MONITOR] ERROR resolving npm tarball for ${item.name}: ${err.message}`);
+      stats.errors++;
+      return;
+    }
+  }
   if (item.ecosystem === 'pypi' && !item.tarballUrl) {
     try {
       const pypiInfo = await getPyPITarballUrl(item.name);
@@ -627,7 +651,7 @@ function sleep(ms) {
 
 module.exports = {
   startMonitor,
-  parseNpmResponse,
+  parseNpmRss,
   parsePyPIRss,
   loadState,
   saveState,
@@ -636,6 +660,7 @@ module.exports = {
   downloadToFile,
   extractTarGz,
   getNpmTarballUrl,
+  getNpmLatestTarball,
   getPyPITarballUrl,
   scanPackage,
   scanQueue,
