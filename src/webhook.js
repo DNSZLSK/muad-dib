@@ -58,7 +58,7 @@ function validateWebhookUrl(url) {
   }
 }
 
-async function sendWebhook(url, results) {
+async function sendWebhook(url, results, options = {}) {
   // Validate URL before sending
   const validation = validateWebhookUrl(url);
   if (!validation.valid) {
@@ -89,6 +89,11 @@ async function sendWebhook(url, results) {
     throw new Error(`Webhook blocked: DNS resolution failed for ${urlObj.hostname}`);
   }
 
+  // rawPayload: send the results object directly as the payload (for pre-built embeds)
+  if (options.rawPayload) {
+    return send(url, results, resolvedAddress);
+  }
+
   const isDiscord = url.includes('discord.com');
   const isSlack = url.includes('hooks.slack.com');
 
@@ -107,12 +112,17 @@ async function sendWebhook(url, results) {
 
 function formatDiscord(results) {
   const { summary, threats, target } = results;
-  
+
   const color = summary.riskLevel === 'CRITICAL' ? 0xe74c3c
               : summary.riskLevel === 'HIGH' ? 0xe67e22
               : summary.riskLevel === 'MEDIUM' ? 0xf1c40f
               : summary.riskLevel === 'LOW' ? 0x3498db
               : 0x2ecc71;
+
+  const emoji = summary.riskLevel === 'CRITICAL' ? '\uD83D\uDD34'
+              : summary.riskLevel === 'HIGH' ? '\uD83D\uDFE0'
+              : summary.riskLevel === 'MEDIUM' ? '\uD83D\uDFE1'
+              : '';
 
   const criticalThreats = threats
     .filter(t => t.severity === 'CRITICAL')
@@ -138,6 +148,32 @@ function formatDiscord(results) {
     }
   ];
 
+  // Add ecosystem field if available
+  if (results.ecosystem) {
+    fields.push({
+      name: 'Ecosystem',
+      value: results.ecosystem.toUpperCase(),
+      inline: true
+    });
+  }
+
+  // Add package link if ecosystem info is available
+  if (results.ecosystem && target) {
+    // Extract package name from target (format: "ecosystem/name@version")
+    const nameMatch = target.match(/^(?:npm|pypi)\/(.+?)(?:@.*)?$/);
+    if (nameMatch) {
+      const pkgName = nameMatch[1];
+      const link = results.ecosystem === 'npm'
+        ? `https://www.npmjs.com/package/${pkgName}`
+        : `https://pypi.org/project/${pkgName}/`;
+      fields.push({
+        name: 'Package Link',
+        value: `[${pkgName}](${link})`,
+        inline: true
+      });
+    }
+  }
+
   // Add critical threats if present
   if (criticalThreats) {
     fields.push({
@@ -147,14 +183,27 @@ function formatDiscord(results) {
     });
   }
 
+  // Add sandbox field if sandbox results are present
+  if (results.sandbox) {
+    fields.push({
+      name: 'Sandbox',
+      value: `Score: **${results.sandbox.score}/100** (${results.sandbox.severity})`,
+      inline: false
+    });
+  }
+
+  const titlePrefix = emoji ? `${emoji} ` : '';
+  const ts = results.timestamp ? new Date(results.timestamp) : new Date();
+  const readableTime = ts.toISOString().replace('T', ' ').replace(/\.\d+Z$/, ' UTC');
+
   return {
     embeds: [{
-      title: 'MUAD\'DIB Security Scan',
+      title: `${titlePrefix}MUAD'DIB Security Scan`,
       description: `Scan of **${target}**`,
       color: color,
       fields: fields,
       footer: {
-        text: 'MUAD\'DIB - Supply-chain threat detection'
+        text: `MUAD'DIB - Supply-chain threat detection | ${readableTime}`
       },
       timestamp: results.timestamp
     }]

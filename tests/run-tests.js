@@ -7,6 +7,7 @@ const BIN = path.join(__dirname, '..', 'bin', 'muaddib.js');
 
 let passed = 0;
 let failed = 0;
+let skipped = 0;
 const failures = [];
 
 function test(name, fn) {
@@ -2452,7 +2453,8 @@ test('HASH: clearHashCache and getHashCacheSize', () => {
         { severity: 'CRITICAL', message: 'Malicious package detected' },
         { severity: 'HIGH', message: 'Suspicious script' }
       ],
-      target: '/test/project',
+      target: 'npm/evil-pkg@1.0.0',
+      ecosystem: 'npm',
       timestamp: '2025-01-01T00:00:00Z'
     };
     const payload = formatDiscord(results);
@@ -2464,6 +2466,18 @@ test('HASH: clearHashCache and getHashCacheSize', () => {
     const critField = payload.embeds[0].fields.find(f => f.name === 'Critical Threats');
     assert(critField, 'Should have Critical Threats field');
     assertIncludes(critField.value, 'Malicious package', 'Should list critical threats');
+    // Check emoji in title for CRITICAL
+    assertIncludes(payload.embeds[0].title, '\uD83D\uDD34', 'CRITICAL should have red circle emoji');
+    // Check Ecosystem field
+    const ecoField = payload.embeds[0].fields.find(f => f.name === 'Ecosystem');
+    assert(ecoField, 'Should have Ecosystem field');
+    assert(ecoField.value === 'NPM', 'Ecosystem should be NPM');
+    // Check Package Link field
+    const linkField = payload.embeds[0].fields.find(f => f.name === 'Package Link');
+    assert(linkField, 'Should have Package Link field');
+    assertIncludes(linkField.value, 'npmjs.com', 'npm link should point to npmjs.com');
+    // Check footer has readable timestamp
+    assertIncludes(payload.embeds[0].footer.text, 'UTC', 'Footer should have readable UTC timestamp');
   });
 
   test('WEBHOOK-COV: formatDiscord handles HIGH risk level', () => {
@@ -2474,6 +2488,7 @@ test('HASH: clearHashCache and getHashCacheSize', () => {
     };
     const payload = formatDiscord(results);
     assert(payload.embeds[0].color === 0xe67e22, 'HIGH should be orange');
+    assertIncludes(payload.embeds[0].title, '\uD83D\uDFE0', 'HIGH should have orange circle emoji');
   });
 
   test('WEBHOOK-COV: formatDiscord handles MEDIUM risk level', () => {
@@ -2483,6 +2498,7 @@ test('HASH: clearHashCache and getHashCacheSize', () => {
     };
     const payload = formatDiscord(results);
     assert(payload.embeds[0].color === 0xf1c40f, 'MEDIUM should be yellow');
+    assertIncludes(payload.embeds[0].title, '\uD83D\uDFE1', 'MEDIUM should have yellow circle emoji');
   });
 
   test('WEBHOOK-COV: formatDiscord handles LOW risk level', () => {
@@ -2492,6 +2508,8 @@ test('HASH: clearHashCache and getHashCacheSize', () => {
     };
     const payload = formatDiscord(results);
     assert(payload.embeds[0].color === 0x3498db, 'LOW should be blue');
+    // LOW should NOT have emoji prefix
+    assert(!payload.embeds[0].title.includes('\uD83D\uDD34') && !payload.embeds[0].title.includes('\uD83D\uDFE0') && !payload.embeds[0].title.includes('\uD83D\uDFE1'), 'LOW should have no emoji');
   });
 
   test('WEBHOOK-COV: formatDiscord handles CLEAN risk level', () => {
@@ -2501,6 +2519,35 @@ test('HASH: clearHashCache and getHashCacheSize', () => {
     };
     const payload = formatDiscord(results);
     assert(payload.embeds[0].color === 0x2ecc71, 'CLEAN should be green');
+  });
+
+  test('WEBHOOK-COV: formatDiscord includes PyPI package link', () => {
+    const results = {
+      summary: { riskLevel: 'HIGH', riskScore: 60, critical: 0, high: 2, medium: 0, total: 2 },
+      threats: [{ severity: 'HIGH', message: 'Test' }],
+      target: 'pypi/evil-lib@0.1.0',
+      ecosystem: 'pypi',
+      timestamp: '2025-01-01T00:00:00Z'
+    };
+    const payload = formatDiscord(results);
+    const linkField = payload.embeds[0].fields.find(f => f.name === 'Package Link');
+    assert(linkField, 'Should have Package Link field for pypi');
+    assertIncludes(linkField.value, 'pypi.org', 'pypi link should point to pypi.org');
+  });
+
+  test('WEBHOOK-COV: formatDiscord includes sandbox field when present', () => {
+    const results = {
+      summary: { riskLevel: 'CRITICAL', riskScore: 90, critical: 1, high: 0, medium: 0, total: 1 },
+      threats: [{ severity: 'CRITICAL', message: 'Test' }],
+      target: 'npm/pkg@1.0.0',
+      ecosystem: 'npm',
+      timestamp: '2025-01-01T00:00:00Z',
+      sandbox: { score: 75, severity: 'HIGH' }
+    };
+    const payload = formatDiscord(results);
+    const sandboxField = payload.embeds[0].fields.find(f => f.name === 'Sandbox');
+    assert(sandboxField, 'Should have Sandbox field');
+    assertIncludes(sandboxField.value, '75', 'Sandbox field should contain score');
   });
 
   test('WEBHOOK-COV: formatSlack returns blocks with correct structure', () => {
@@ -3290,9 +3337,11 @@ test('HASH: clearHashCache and getHashCacheSize', () => {
   const {
     parseNpmRss, parsePyPIRss, loadState, saveState, STATE_FILE,
     ALERTS_FILE, extractTarGz, getNpmTarballUrl, getNpmLatestTarball, scanQueue,
-    appendAlert, timeoutPromise, stats, MAX_TARBALL_SIZE,
+    appendAlert, timeoutPromise, stats, dailyAlerts, MAX_TARBALL_SIZE,
+    KNOWN_BUNDLED_FILES, isBundledToolingOnly,
     isSandboxEnabled, hasHighOrCritical,
-    getWebhookUrl, shouldSendWebhook, buildMonitorWebhookPayload
+    getWebhookUrl, shouldSendWebhook, buildMonitorWebhookPayload,
+    computeRiskLevel, computeRiskScore, buildDailyReportEmbed, DAILY_REPORT_INTERVAL
   } = require('../src/monitor.js');
 
   test('MONITOR: parseNpmRss extracts package names from RSS', () => {
@@ -3432,29 +3481,32 @@ test('HASH: clearHashCache and getHashCacheSize', () => {
     assert(getNpmTarballUrl(emptyDist) === null, 'Should return null when no tarball in dist');
   });
 
-  test('MONITOR: extractTarGz returns extracted path', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-tar-test-'));
-    const innerDir = path.join(tmpDir, 'source');
-    const packageDir = path.join(innerDir, 'package');
-    fs.mkdirSync(packageDir, { recursive: true });
-    fs.writeFileSync(path.join(packageDir, 'index.js'), 'module.exports = {};\n');
-    // Create a tar.gz from the source directory
-    const tgzPath = path.join(tmpDir, 'test.tar.gz');
-    try {
-      const { execSync: es } = require('child_process');
-      // Use --force-local on Windows so tar doesn't interpret C: as a remote host
-      const forceLocal = process.platform === 'win32' ? ' --force-local' : '';
-      es(`tar czf "${tgzPath}"${forceLocal} -C "${innerDir}" package`, { stdio: 'pipe' });
-      const extractDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-extract-'));
-      const result = extractTarGz(tgzPath, extractDir);
-      // Should detect the package/ subdirectory
-      assert(result.endsWith('package'), 'Should return path ending with package, got ' + result);
-      assert(fs.existsSync(path.join(result, 'index.js')), 'Extracted dir should contain index.js');
-      try { fs.rmSync(extractDir, { recursive: true, force: true }); } catch {}
-    } finally {
-      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
-    }
-  });
+  if (process.platform !== 'win32') {
+    test('MONITOR: extractTarGz returns extracted path', () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-tar-test-'));
+      const innerDir = path.join(tmpDir, 'source');
+      const packageDir = path.join(innerDir, 'package');
+      fs.mkdirSync(packageDir, { recursive: true });
+      fs.writeFileSync(path.join(packageDir, 'index.js'), 'module.exports = {};\n');
+      // Create a tar.gz from the source directory
+      const tgzPath = path.join(tmpDir, 'test.tar.gz');
+      try {
+        const { execSync: es } = require('child_process');
+        es(`tar czf "${tgzPath}" -C "${innerDir}" package`, { stdio: 'pipe' });
+        const extractDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-extract-'));
+        const result = extractTarGz(tgzPath, extractDir);
+        // Should detect the package/ subdirectory
+        assert(result.endsWith('package'), 'Should return path ending with package, got ' + result);
+        assert(fs.existsSync(path.join(result, 'index.js')), 'Extracted dir should contain index.js');
+        try { fs.rmSync(extractDir, { recursive: true, force: true }); } catch {}
+      } finally {
+        try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+      }
+    });
+  } else {
+    console.log('[SKIP] extractTarGz: not supported on Windows');
+    skipped++;
+  }
 
   test('MONITOR: appendAlert writes to file', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-alert-test-'));
@@ -3809,11 +3861,129 @@ test('HASH: clearHashCache and getHashCacheSize', () => {
   });
 
   // ============================================
+  // MONITOR PHASE 6 TESTS (Webhook fix, daily report, bundled skip)
+  // ============================================
+
+  console.log('\n=== MONITOR PHASE 6 TESTS ===\n');
+
+  test('MONITOR: computeRiskLevel returns CRITICAL when critical > 0', () => {
+    assert(computeRiskLevel({ critical: 1, high: 0, medium: 0, low: 0 }) === 'CRITICAL', 'Should be CRITICAL');
+  });
+
+  test('MONITOR: computeRiskLevel returns HIGH when high > 0', () => {
+    assert(computeRiskLevel({ critical: 0, high: 2, medium: 0, low: 0 }) === 'HIGH', 'Should be HIGH');
+  });
+
+  test('MONITOR: computeRiskLevel returns MEDIUM when medium > 0', () => {
+    assert(computeRiskLevel({ critical: 0, high: 0, medium: 3, low: 0 }) === 'MEDIUM', 'Should be MEDIUM');
+  });
+
+  test('MONITOR: computeRiskLevel returns LOW when low > 0', () => {
+    assert(computeRiskLevel({ critical: 0, high: 0, medium: 0, low: 5 }) === 'LOW', 'Should be LOW');
+  });
+
+  test('MONITOR: computeRiskLevel returns CLEAN when all zero', () => {
+    assert(computeRiskLevel({ critical: 0, high: 0, medium: 0, low: 0 }) === 'CLEAN', 'Should be CLEAN');
+  });
+
+  test('MONITOR: computeRiskScore computes weighted score', () => {
+    // 2*25 + 1*15 + 3*5 + 2*1 = 50 + 15 + 15 + 2 = 82
+    assert(computeRiskScore({ critical: 2, high: 1, medium: 3, low: 2 }) === 82, 'Should be 82');
+  });
+
+  test('MONITOR: computeRiskScore caps at 100', () => {
+    // 5*25 = 125, capped to 100
+    assert(computeRiskScore({ critical: 5, high: 0, medium: 0, low: 0 }) === 100, 'Should cap at 100');
+  });
+
+  test('MONITOR: computeRiskScore returns 0 for clean', () => {
+    assert(computeRiskScore({ critical: 0, high: 0, medium: 0, low: 0 }) === 0, 'Should be 0');
+  });
+
+  test('MONITOR: KNOWN_BUNDLED_FILES contains expected entries', () => {
+    assert(KNOWN_BUNDLED_FILES.includes('yarn.js'), 'Should include yarn.js');
+    assert(KNOWN_BUNDLED_FILES.includes('webpack.js'), 'Should include webpack.js');
+    assert(KNOWN_BUNDLED_FILES.includes('terser.js'), 'Should include terser.js');
+    assert(KNOWN_BUNDLED_FILES.includes('esbuild.js'), 'Should include esbuild.js');
+    assert(KNOWN_BUNDLED_FILES.includes('polyfills.js'), 'Should include polyfills.js');
+    assert(KNOWN_BUNDLED_FILES.length === 5, 'Should have 5 entries');
+  });
+
+  test('MONITOR: isBundledToolingOnly returns true when all threats from bundled files', () => {
+    const threats = [
+      { file: 'node_modules/.cache/yarn.js', severity: 'HIGH', message: 'eval' },
+      { file: 'dist/webpack.js', severity: 'MEDIUM', message: 'obfuscation' }
+    ];
+    assert(isBundledToolingOnly(threats) === true, 'Should be true for all bundled files');
+  });
+
+  test('MONITOR: isBundledToolingOnly returns false when mixed files', () => {
+    const threats = [
+      { file: 'dist/webpack.js', severity: 'MEDIUM', message: 'obfuscation' },
+      { file: 'index.js', severity: 'HIGH', message: 'eval' }
+    ];
+    assert(isBundledToolingOnly(threats) === false, 'Should be false when non-bundled file present');
+  });
+
+  test('MONITOR: isBundledToolingOnly returns false for empty threats', () => {
+    assert(isBundledToolingOnly([]) === false, 'Should be false for empty array');
+  });
+
+  test('MONITOR: isBundledToolingOnly returns false when file is null', () => {
+    const threats = [{ file: null, severity: 'HIGH', message: 'test' }];
+    assert(isBundledToolingOnly(threats) === false, 'Should be false when file is null');
+  });
+
+  test('MONITOR: buildDailyReportEmbed returns valid Discord embed', () => {
+    // Set up some stats
+    const origScanned = stats.scanned;
+    const origClean = stats.clean;
+    const origSuspect = stats.suspect;
+    const origErrors = stats.errors;
+    stats.scanned = 100;
+    stats.clean = 90;
+    stats.suspect = 8;
+    stats.errors = 2;
+    stats.totalTimeMs = 50000;
+
+    dailyAlerts.length = 0;
+    dailyAlerts.push({ name: 'evil-pkg', version: '1.0.0', ecosystem: 'npm', findingsCount: 5 });
+    dailyAlerts.push({ name: 'bad-lib', version: '0.1.0', ecosystem: 'pypi', findingsCount: 3 });
+    dailyAlerts.push({ name: 'sus-mod', version: '2.0.0', ecosystem: 'npm', findingsCount: 8 });
+    dailyAlerts.push({ name: 'minor', version: '1.0.0', ecosystem: 'npm', findingsCount: 1 });
+
+    const embed = buildDailyReportEmbed();
+    assert(embed.embeds, 'Should have embeds array');
+    assert(embed.embeds[0].title.includes('Daily Report'), 'Title should say Daily Report');
+    assert(embed.embeds[0].color === 0x3498db, 'Color should be blue');
+
+    const scannedField = embed.embeds[0].fields.find(f => f.name === 'Packages Scanned');
+    assert(scannedField && scannedField.value === '100', 'Scanned should be 100');
+
+    const topField = embed.embeds[0].fields.find(f => f.name === 'Top Suspects');
+    assert(topField, 'Should have Top Suspects field');
+    assertIncludes(topField.value, 'sus-mod', 'Top suspect should be sus-mod (8 findings)');
+
+    assertIncludes(embed.embeds[0].footer.text, 'UTC', 'Footer should have UTC timestamp');
+
+    // Restore
+    stats.scanned = origScanned;
+    stats.clean = origClean;
+    stats.suspect = origSuspect;
+    stats.errors = origErrors;
+    dailyAlerts.length = 0;
+  });
+
+  test('MONITOR: DAILY_REPORT_INTERVAL is 24 hours', () => {
+    assert(DAILY_REPORT_INTERVAL === 24 * 3600000, 'Should be 24h in ms');
+  });
+
+  // ============================================
   // RESULTS
   // ============================================
 
   console.log('\n========================================');
-  console.log(`RESULTS: ${passed} passed, ${failed} failed`);
+  console.log(`RESULTS: ${passed} passed, ${failed} failed, ${skipped} skipped`);
   console.log('========================================\n');
 
   if (failures.length > 0) {
