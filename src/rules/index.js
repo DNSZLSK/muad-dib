@@ -512,6 +512,44 @@ const RULES = {
     ],
     mitre: 'T1027.002'
   },
+
+  // Temporal analysis detections
+  lifecycle_added_critical: {
+    id: 'MUADDIB-TEMPORAL-001',
+    name: 'Sudden Lifecycle Script Added (Critical)',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Script preinstall/install/postinstall ajoute dans la derniere version. Vecteur d\'attaque #1 des supply chain attacks (Shai-Hulud, ua-parser-js, coa).',
+    references: [
+      'https://blog.phylum.io/shai-hulud-npm-worm',
+      'https://blog.npmjs.org/post/180565383195/details-about-the-event-stream-incident',
+      'https://github.com/nicedayfor/yargs-parser/security/advisories'
+    ],
+    mitre: 'T1195.002'
+  },
+  lifecycle_added_high: {
+    id: 'MUADDIB-TEMPORAL-002',
+    name: 'Sudden Lifecycle Script Added',
+    severity: 'HIGH',
+    confidence: 'medium',
+    description: 'Script lifecycle (prepare, prepack, etc.) ajoute dans la derniere version. Potentiellement suspect si non justifie.',
+    references: [
+      'https://docs.npmjs.com/cli/v9/using-npm/scripts#life-cycle-scripts',
+      'https://blog.phylum.io/shai-hulud-npm-worm'
+    ],
+    mitre: 'T1195.002'
+  },
+  lifecycle_modified: {
+    id: 'MUADDIB-TEMPORAL-003',
+    name: 'Lifecycle Script Modified',
+    severity: 'MEDIUM',
+    confidence: 'medium',
+    description: 'Script lifecycle modifie entre les deux dernieres versions. Verifier si le changement est legitime.',
+    references: [
+      'https://docs.npmjs.com/cli/v9/using-npm/scripts#life-cycle-scripts'
+    ],
+    mitre: 'T1195.002'
+  },
 };
 
 function getRule(type) {

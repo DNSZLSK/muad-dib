@@ -25,6 +25,7 @@ let webhookUrl = null;
 let paranoidMode = false;
 let excludeDirs = [];
 let entropyThreshold = null;
+let temporalMode = false;
 
 for (let i = 0; i < options.length; i++) {
   if (options[i] === '--json') {
@@ -90,6 +91,8 @@ for (let i = 0; i < options.length; i++) {
     i++;
   } else if (options[i] === '--paranoid') {
     paranoidMode = true;
+  } else if (options[i] === '--temporal') {
+    temporalMode = true;
   } else if (options[i] === '--strict') {
     // Sandbox strict mode flag (parsed here, used by sandbox commands)
   } else if (!options[i].startsWith('-')) {
@@ -323,6 +326,7 @@ const helpText = `
     --fail-on [level]   Fail level (critical|high|medium|low)
     --webhook [url]     Discord/Slack webhook
     --paranoid          Ultra-strict mode
+    --temporal          Detect sudden lifecycle script changes (network requests per package)
     --exclude [dir]     Exclude directory from scan (repeatable)
     --entropy-threshold [n]  Custom string-level entropy threshold (default: 5.5)
     --save-dev, -D      Install as dev dependency
@@ -353,6 +357,7 @@ if (command === 'version' || command === '--version' || command === '-v') {
     failLevel: failLevel,
     webhook: webhookUrl,
     paranoid: paranoidMode,
+    temporal: temporalMode,
     exclude: excludeDirs,
     entropyThreshold: entropyThreshold
   }).then(exitCode => {
