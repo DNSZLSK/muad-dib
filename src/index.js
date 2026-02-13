@@ -17,6 +17,7 @@ const { scanGitHubActions } = require('./scanner/github-actions.js');
 const { detectPythonProject, normalizePythonName } = require('./scanner/python.js');
 const { loadCachedIOCs } = require('./ioc/updater.js');
 const { scanEntropy } = require('./scanner/entropy.js');
+const { detectSuddenLifecycleChange } = require('./temporal-analysis.js');
 const { setExtraExcludes, getExtraExcludes, Spinner } = require('./utils.js');
 
 // ============================================
@@ -264,6 +265,64 @@ async function run(targetPath, options = {}) {
     console.log('[PARANOID] Ultra-strict mode enabled\n');
     const paranoidThreats = scanParanoid(targetPath);
     threats.push(...paranoidThreats);
+  }
+
+  // Temporal analysis (--temporal flag, off by default)
+  if (options.temporal) {
+    if (!options._capture && !options.json) {
+      console.log('[TEMPORAL] Analyzing lifecycle script changes (this makes network requests)...\n');
+    }
+    const nodeModulesPath = path.join(targetPath, 'node_modules');
+    if (fs.existsSync(nodeModulesPath)) {
+      const pkgNames = [];
+      try {
+        const items = fs.readdirSync(nodeModulesPath);
+        for (const item of items) {
+          if (item.startsWith('.')) continue;
+          const itemPath = path.join(nodeModulesPath, item);
+          try {
+            const stat = fs.lstatSync(itemPath);
+            if (stat.isSymbolicLink() || !stat.isDirectory()) continue;
+            if (item.startsWith('@')) {
+              const scopedItems = fs.readdirSync(itemPath);
+              for (const si of scopedItems) {
+                const sp = path.join(itemPath, si);
+                const ss = fs.lstatSync(sp);
+                if (!ss.isSymbolicLink() && ss.isDirectory()) {
+                  pkgNames.push(`${item}/${si}`);
+                }
+              }
+            } else {
+              pkgNames.push(item);
+            }
+          } catch { /* skip unreadable */ }
+        }
+      } catch { /* no node_modules readable */ }
+
+      const TEMPORAL_CONCURRENCY = 5;
+      for (let i = 0; i < pkgNames.length; i += TEMPORAL_CONCURRENCY) {
+        const batch = pkgNames.slice(i, i + TEMPORAL_CONCURRENCY);
+        const results = await Promise.allSettled(
+          batch.map(name => detectSuddenLifecycleChange(name))
+        );
+        for (const r of results) {
+          if (r.status !== 'fulfilled' || !r.value.suspicious) continue;
+          const det = r.value;
+          for (const f of det.findings) {
+            const isCriticalScript = ['preinstall', 'install', 'postinstall'].includes(f.script);
+            const threatType = f.type === 'lifecycle_added'
+              ? (isCriticalScript ? 'lifecycle_added_critical' : 'lifecycle_added_high')
+              : 'lifecycle_modified';
+            threats.push({
+              type: threatType,
+              severity: f.severity,
+              message: `Package "${det.packageName}" v${det.latestVersion} ${f.type === 'lifecycle_added' ? 'added' : 'modified'} ${f.script} script (not in v${det.previousVersion}). Script: "${f.type === 'lifecycle_modified' ? f.newValue : f.value}"`,
+              file: `node_modules/${det.packageName}/package.json`
+            });
+          }
+        }
+      }
+    }
   }
 
   // Sandbox integration

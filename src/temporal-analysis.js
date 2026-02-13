@@ -167,9 +167,11 @@ function getLatestVersions(metadata, count = 2) {
   const time = metadata && metadata.time;
   if (!time || typeof time !== 'object') return [];
 
+  const versions = metadata.versions || {};
   const entries = [];
   for (const [version, publishedAt] of Object.entries(time)) {
     if (version === 'created' || version === 'modified') continue;
+    if (!versions[version]) continue; // skip unpublished/yanked versions
     entries.push({ version, publishedAt });
   }
 

@@ -159,6 +159,23 @@ const PLAYBOOKS = {
     'Chaine a haute entropie detectee. Verifier si c\'est du base64, hex, ou un payload chiffre. Analyser le contexte d\'utilisation.',
   js_obfuscation_pattern:
     'Pattern d\'obfuscation JS detecte (variables _0x*, string arrays encodes, eval+payload, long base64). Analyser dans un sandbox. Comparer avec les signatures Shai-Hulud/chalk/debug.',
+
+  lifecycle_added_critical:
+    'CRITIQUE: Un script d\'installation (preinstall/install/postinstall) a ete ajoute dans la derniere version. ' +
+    'C\'est le vecteur d\'attaque #1 des supply chain attacks (Shai-Hulud, ua-parser-js, coa). ' +
+    'Actions: 1. NE PAS installer cette version. ' +
+    '2. Verifier le changelog officiel du package. ' +
+    '3. Comparer avec la version precedente: npm diff package@old package@new. ' +
+    '4. Si pas de justification legitime, signaler sur GitHub/npm.',
+
+  lifecycle_added_high:
+    'Un script lifecycle (prepare, prepack, etc.) a ete ajoute dans la derniere version. ' +
+    'Verifier le changelog officiel. Comparer: npm diff package@old package@new. ' +
+    'Si pas de justification, investiguer le mainteneur.',
+
+  lifecycle_modified:
+    'Un script lifecycle a ete modifie entre les deux dernieres versions. ' +
+    'Verifier le contenu du nouveau script. Comparer: npm diff package@old package@new.',
 };
 
 function getPlaybook(threatType) {

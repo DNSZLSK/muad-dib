@@ -232,6 +232,37 @@ async function runTemporalAnalysisTests() {
     assert(latest.length === 1, 'Should have only 1 version');
   });
 
+  // --- Integration: rules, playbooks, CLI flag ---
+
+  test('TEMPORAL: Rules MUADDIB-TEMPORAL-001/002/003 exist', () => {
+    const { getRule } = require('../../src/rules/index.js');
+    const r1 = getRule('lifecycle_added_critical');
+    assert(r1.id === 'MUADDIB-TEMPORAL-001', 'Rule 001 ID, got ' + r1.id);
+    assert(r1.severity === 'CRITICAL', 'Rule 001 severity');
+    const r2 = getRule('lifecycle_added_high');
+    assert(r2.id === 'MUADDIB-TEMPORAL-002', 'Rule 002 ID, got ' + r2.id);
+    assert(r2.severity === 'HIGH', 'Rule 002 severity');
+    const r3 = getRule('lifecycle_modified');
+    assert(r3.id === 'MUADDIB-TEMPORAL-003', 'Rule 003 ID, got ' + r3.id);
+    assert(r3.severity === 'MEDIUM', 'Rule 003 severity');
+  });
+
+  test('TEMPORAL: Playbooks exist for temporal threat types', () => {
+    const { getPlaybook } = require('../../src/response/playbooks.js');
+    const p1 = getPlaybook('lifecycle_added_critical');
+    assert(p1 && p1.includes('preinstall'), 'Playbook for lifecycle_added_critical');
+    const p2 = getPlaybook('lifecycle_added_high');
+    assert(p2 && p2.length > 10, 'Playbook for lifecycle_added_high');
+    const p3 = getPlaybook('lifecycle_modified');
+    assert(p3 && p3.length > 10, 'Playbook for lifecycle_modified');
+  });
+
+  test('TEMPORAL: --temporal flag is accepted by CLI', () => {
+    const output = runScan(path.join(TESTS_DIR, 'clean'), '--temporal --json');
+    const result = JSON.parse(output);
+    assert(result.summary !== undefined, 'Should produce valid scan result with --temporal');
+  });
+
   // --- fetchPackageMetadata / detectSuddenLifecycleChange (integration, may be skipped in CI) ---
 
   const skipNetwork = process.env.CI === 'true' || process.env.SKIP_NETWORK === 'true';
@@ -255,9 +286,31 @@ async function runTemporalAnalysisTests() {
       }
       assert(threw, 'Should have thrown for non-existent package');
     });
+
+    await asyncTest('TEMPORAL: detectSuddenLifecycleChange on lodash → not suspicious', async () => {
+      const result = await detectSuddenLifecycleChange('lodash');
+      assert(result.packageName === 'lodash', 'packageName should be lodash');
+      assert(result.suspicious === false, 'lodash should not be suspicious');
+      assert(Array.isArray(result.findings), 'findings should be array');
+      assert(result.latestVersion !== null, 'latestVersion should exist');
+      assert(result.previousVersion !== null, 'previousVersion should exist');
+      assert(result.metadata.maintainers !== undefined, 'Should have maintainers');
+    });
+
+    await asyncTest('TEMPORAL: detectSuddenLifecycleChange returns correct structure', async () => {
+      const result = await detectSuddenLifecycleChange('chalk');
+      assert(typeof result.packageName === 'string', 'packageName should be string');
+      assert(typeof result.suspicious === 'boolean', 'suspicious should be boolean');
+      assert(Array.isArray(result.findings), 'findings should be array');
+      assert(typeof result.latestVersion === 'string', 'latestVersion should be string');
+      assert(typeof result.previousVersion === 'string', 'previousVersion should be string');
+      assert(typeof result.metadata === 'object', 'metadata should be object');
+      assert(typeof result.metadata.latestPublishedAt === 'string', 'latestPublishedAt should be string');
+      assert(typeof result.metadata.previousPublishedAt === 'string', 'previousPublishedAt should be string');
+    });
   } else {
-    console.log('[SKIP] TEMPORAL: fetchPackageMetadata network tests (CI/SKIP_NETWORK)');
-    addSkipped(2);
+    console.log('[SKIP] TEMPORAL: fetchPackageMetadata + detectSuddenLifecycleChange network tests (CI/SKIP_NETWORK)');
+    addSkipped(4);
   }
 }
 
