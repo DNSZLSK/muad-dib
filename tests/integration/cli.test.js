@@ -359,6 +359,24 @@ async function runCliTests() {
     assert(json.summary, 'Should produce valid JSON with summary');
   });
 
+  test('CLI-COV: --temporal-publish flag appears in help', () => {
+    const output = runCommand('--help');
+    assertIncludes(output, '--temporal-publish', 'Help should show --temporal-publish flag');
+  });
+
+  test('CLI-COV: --temporal-publish flag is parsed without error', () => {
+    const output = runScan(path.join(TESTS_DIR, 'clean'), '--temporal-publish --json');
+    const json = JSON.parse(output);
+    assert(json.summary, 'Should produce valid JSON with summary');
+  });
+
+  test('CLI-COV: --temporal-full includes publish analysis', () => {
+    // --temporal-full should activate all three temporal modes without error
+    const output = runScan(path.join(TESTS_DIR, 'clean'), '--temporal-full --json');
+    const json = JSON.parse(output);
+    assert(json.summary.total === 0, 'Clean project should have 0 threats with --temporal-full');
+  });
+
   // ============================================
   // DIFF MODULE TESTS
   // ============================================

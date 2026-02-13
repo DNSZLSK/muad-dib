@@ -27,6 +27,7 @@ let excludeDirs = [];
 let entropyThreshold = null;
 let temporalMode = false;
 let temporalAstMode = false;
+let temporalPublishMode = false;
 let temporalFullMode = false;
 
 for (let i = 0; i < options.length; i++) {
@@ -97,6 +98,8 @@ for (let i = 0; i < options.length; i++) {
     temporalFullMode = true;
   } else if (options[i] === '--temporal-ast') {
     temporalAstMode = true;
+  } else if (options[i] === '--temporal-publish') {
+    temporalPublishMode = true;
   } else if (options[i] === '--temporal') {
     temporalMode = true;
   } else if (options[i] === '--strict') {
@@ -334,7 +337,8 @@ const helpText = `
     --paranoid          Ultra-strict mode
     --temporal          Detect sudden lifecycle script changes (network requests per package)
     --temporal-ast      Detect sudden dangerous API additions via AST diff (downloads tarballs)
-    --temporal-full     Both lifecycle + AST temporal analysis
+    --temporal-publish  Detect publish frequency anomalies (bursts, dormant spikes)
+    --temporal-full     All temporal analyses (lifecycle + AST + publish)
     --exclude [dir]     Exclude directory from scan (repeatable)
     --entropy-threshold [n]  Custom string-level entropy threshold (default: 5.5)
     --save-dev, -D      Install as dev dependency
@@ -367,6 +371,7 @@ if (command === 'version' || command === '--version' || command === '-v') {
     paranoid: paranoidMode,
     temporal: temporalMode || temporalFullMode,
     temporalAst: temporalAstMode || temporalFullMode,
+    temporalPublish: temporalPublishMode || temporalFullMode,
     exclude: excludeDirs,
     entropyThreshold: entropyThreshold
   }).then(exitCode => {

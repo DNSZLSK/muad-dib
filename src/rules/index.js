@@ -587,6 +587,43 @@ const RULES = {
     ],
     mitre: 'T1195.002'
   },
+
+  // Publish frequency anomaly detections
+  publish_burst: {
+    id: 'MUADDIB-PUBLISH-001',
+    name: 'Publish Burst Detected',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'Multiple versions publiees en moins de 24h. Possible compromission de compte ou attaque automatisee.',
+    references: [
+      'https://blog.phylum.io/shai-hulud-npm-worm',
+      'https://blog.npmjs.org/post/180565383195/details-about-the-event-stream-incident'
+    ],
+    mitre: 'T1195.002'
+  },
+  dormant_spike: {
+    id: 'MUADDIB-PUBLISH-002',
+    name: 'Dormant Package Spike',
+    severity: 'HIGH',
+    confidence: 'medium',
+    description: 'Package inactif depuis 6+ mois avec une nouvelle version soudaine. Possible changement de mainteneur ou compromission.',
+    references: [
+      'https://blog.npmjs.org/post/180565383195/details-about-the-event-stream-incident',
+      'https://snyk.io/blog/a]]malicious-npm-packages-targeting-developers/'
+    ],
+    mitre: 'T1195.002'
+  },
+  rapid_succession: {
+    id: 'MUADDIB-PUBLISH-003',
+    name: 'Rapid Version Succession',
+    severity: 'MEDIUM',
+    confidence: 'medium',
+    description: 'Versions publiees en succession rapide (moins d\'1h). Possible attaque automatisee ou CI/CD compromis.',
+    references: [
+      'https://docs.npmjs.com/cli/v9/using-npm/scripts#life-cycle-scripts'
+    ],
+    mitre: 'T1195.002'
+  },
 };
 
 function getRule(type) {

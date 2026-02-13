@@ -8,6 +8,7 @@ const { runSandbox, isDockerAvailable } = require('./sandbox.js');
 const { sendWebhook } = require('./webhook.js');
 const { detectSuddenLifecycleChange } = require('./temporal-analysis.js');
 const { detectSuddenAstChanges } = require('./temporal-ast-diff.js');
+const { detectPublishAnomaly } = require('./publish-anomaly.js');
 
 const STATE_FILE = path.join(__dirname, '..', 'data', 'monitor-state.json');
 const ALERTS_FILE = path.join(__dirname, '..', 'data', 'monitor-alerts.json');
@@ -290,6 +291,100 @@ async function runTemporalAstCheck(packageName) {
     return result;
   } catch (err) {
     console.error(`[MONITOR] Temporal AST analysis error for ${packageName}: ${err.message}`);
+    return null;
+  }
+}
+
+function isTemporalPublishEnabled() {
+  const env = process.env.MUADDIB_MONITOR_TEMPORAL_PUBLISH;
+  if (env !== undefined && env.toLowerCase() === 'false') return false;
+  return true;
+}
+
+function buildPublishAnomalyWebhookEmbed(publishResult) {
+  const anomalies = publishResult.anomalies || [];
+  const topAnomaly = anomalies[0] || {};
+  const severity = topAnomaly.severity || 'HIGH';
+  const color = severity === 'CRITICAL' ? 0xe74c3c : severity === 'HIGH' ? 0xe67e22 : 0xf1c40f;
+  const emoji = severity === 'CRITICAL' ? '\uD83D\uDD34' : severity === 'HIGH' ? '\uD83D\uDFE0' : '\uD83D\uDFE1';
+
+  const anomalyLines = anomalies.map(a => {
+    return `**${a.type}** — ${a.severity}: ${a.description}`;
+  }).join('\n');
+
+  const pkgName = publishResult.packageName;
+  const npmLink = `https://www.npmjs.com/package/${pkgName}`;
+
+  return {
+    embeds: [{
+      title: `${emoji} PUBLISH ANOMALY \u2014 ${severity}`,
+      color: color,
+      fields: [
+        { name: 'Package', value: `[${pkgName}](${npmLink})`, inline: true },
+        { name: 'Versions Analyzed', value: `${publishResult.versionCount || 'N/A'}`, inline: true },
+        { name: 'Severity', value: severity, inline: true },
+        { name: 'Anomalies Detected', value: anomalyLines || 'None', inline: false },
+        { name: 'Action', value: 'Verify maintainer activity on npm/GitHub. Check changelogs for each version.', inline: false }
+      ],
+      footer: {
+        text: `MUAD'DIB Publish Frequency Analysis | ${new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, ' UTC')}`
+      },
+      timestamp: new Date().toISOString()
+    }]
+  };
+}
+
+async function tryTemporalPublishAlert(publishResult) {
+  const url = getWebhookUrl();
+  if (!url) return;
+
+  const payload = buildPublishAnomalyWebhookEmbed(publishResult);
+  try {
+    await sendWebhook(url, payload, { rawPayload: true });
+    console.log(`[MONITOR] Publish anomaly webhook sent for ${publishResult.packageName}`);
+  } catch (err) {
+    console.error(`[MONITOR] Publish anomaly webhook failed for ${publishResult.packageName}: ${err.message}`);
+  }
+}
+
+async function runTemporalPublishCheck(packageName) {
+  if (!isTemporalPublishEnabled()) return null;
+  try {
+    const result = await detectPublishAnomaly(packageName);
+    if (result.suspicious) {
+      const anomalyStr = result.anomalies.map(a => {
+        return `${a.type} (${a.severity})`;
+      }).join(', ');
+      console.log(`[MONITOR] PUBLISH ANOMALY: ${packageName}: ${anomalyStr}`);
+
+      appendAlert({
+        timestamp: new Date().toISOString(),
+        name: packageName,
+        version: 'N/A',
+        ecosystem: 'npm',
+        temporalPublish: true,
+        findings: result.anomalies.map(a => ({
+          rule: a.type === 'publish_burst' ? 'MUADDIB-PUBLISH-001'
+            : a.type === 'dormant_spike' ? 'MUADDIB-PUBLISH-002'
+            : 'MUADDIB-PUBLISH-003',
+          severity: a.severity,
+          type: a.type
+        }))
+      });
+
+      dailyAlerts.push({
+        name: packageName,
+        version: 'N/A',
+        ecosystem: 'npm',
+        findingsCount: result.anomalies.length,
+        temporalPublish: true
+      });
+
+      await tryTemporalPublishAlert(result);
+    }
+    return result;
+  } catch (err) {
+    console.error(`[MONITOR] Publish frequency analysis error for ${packageName}: ${err.message}`);
     return null;
   }
 }
@@ -913,6 +1008,12 @@ async function startMonitor() {
     console.log('[MONITOR] Temporal AST analysis disabled (MUADDIB_MONITOR_TEMPORAL_AST=false)');
   }
 
+  if (isTemporalPublishEnabled()) {
+    console.log('[MONITOR] Publish frequency analysis enabled — detecting publish bursts, dormant spikes');
+  } else {
+    console.log('[MONITOR] Publish frequency analysis disabled (MUADDIB_MONITOR_TEMPORAL_PUBLISH=false)');
+  }
+
   const state = loadState();
   console.log(`[MONITOR] State loaded — npm last: ${state.npmLastPackage || 'none'}, pypi last: ${state.pypiLastPackage || 'none'}`);
   console.log(`[MONITOR] Polling every ${POLL_INTERVAL / 1000}s. Ctrl+C to stop.\n`);
@@ -1014,6 +1115,7 @@ async function resolveTarballAndScan(item) {
   if (item.ecosystem === 'npm') {
     await runTemporalCheck(item.name);
     await runTemporalAstCheck(item.name);
+    await runTemporalPublishCheck(item.name);
   }
 
   await scanPackage(item.name, item.version, item.ecosystem, item.tarballUrl);
@@ -1068,7 +1170,10 @@ module.exports = {
   runTemporalCheck,
   isTemporalAstEnabled,
   buildTemporalAstWebhookEmbed,
-  runTemporalAstCheck
+  runTemporalAstCheck,
+  isTemporalPublishEnabled,
+  buildPublishAnomalyWebhookEmbed,
+  runTemporalPublishCheck
 };
 
 // Standalone entry point: node src/monitor.js
