@@ -283,7 +283,7 @@ Add to `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/DNSZLSK/muad-dib
-    rev: v1.6.18
+    rev: v1.8.0
     hooks:
       - id: muaddib-scan        # Scan all threats
       # - id: muaddib-diff      # Or: only new threats
@@ -312,6 +312,10 @@ Removes all MUAD'DIB hooks (husky and git native).
 muaddib init-hooks --type git
 # Creates .git/hooks/pre-commit
 ```
+
+### Zero-Day Monitor
+
+MUAD'DIB includes a continuous zero-day monitor capable of scanning every new npm and PyPI package in real-time with Docker sandbox analysis and webhook alerting.
 
 ### Version check
 
@@ -510,6 +514,7 @@ MUAD'DIB Scanner
 |
 +-- Paranoid Mode (ultra-strict)
 +-- Docker Sandbox (behavioral analysis, network capture)
++-- Zero-Day Monitor (npm + PyPI RSS polling, Discord alerts, daily report)
 |
 v
 Dataflow Analysis (credential read -> network send)
@@ -553,7 +558,7 @@ npm test
 
 ### Testing
 
-- **316 unit/integration tests** - 80% code coverage via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
+- **370 unit/integration tests** - 80% code coverage via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
 - **56 fuzz tests** - Malformed YAML, invalid JSON, binary files, ReDoS, unicode, 10MB inputs
 - **15 adversarial tests** - Simulated malicious packages, 15/15 detection rate
 - **False positive validation** - 0 false positives on express, lodash, axios, react
