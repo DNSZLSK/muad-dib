@@ -3288,57 +3288,54 @@ test('HASH: clearHashCache and getHashCacheSize', () => {
   console.log('\n=== MONITOR TESTS ===\n');
 
   const {
-    parseNpmResponse, parsePyPIRss, loadState, saveState, STATE_FILE,
-    ALERTS_FILE, extractTarGz, getNpmTarballUrl, scanQueue,
+    parseNpmRss, parsePyPIRss, loadState, saveState, STATE_FILE,
+    ALERTS_FILE, extractTarGz, getNpmTarballUrl, getNpmLatestTarball, scanQueue,
     appendAlert, timeoutPromise, stats, MAX_TARBALL_SIZE,
     isSandboxEnabled, hasHighOrCritical,
     getWebhookUrl, shouldSendWebhook, buildMonitorWebhookPayload
   } = require('../src/monitor.js');
 
-  test('MONITOR: parseNpmResponse extracts packages and _updated timestamp', () => {
-    const body = JSON.stringify({
-      '_updated': 1700000000000,
-      'my-package': {
-        name: 'my-package',
-        'dist-tags': { latest: '1.2.3' }
-      },
-      'another-pkg': {
-        name: 'another-pkg',
-        'dist-tags': { latest: '0.0.1' }
-      }
-    });
-    const { packages, maxTimestamp } = parseNpmResponse(body);
+  test('MONITOR: parseNpmRss extracts package names from RSS', () => {
+    const xml = `<?xml version="1.0"?>
+<rss version="2.0">
+  <channel>
+    <title>npm new packages</title>
+    <item>
+      <title>my-package 1.2.3</title>
+      <link>https://www.npmjs.com/package/my-package</link>
+    </item>
+    <item>
+      <title>another-pkg 0.0.1</title>
+      <link>https://www.npmjs.com/package/another-pkg</link>
+    </item>
+  </channel>
+</rss>`;
+    const packages = parseNpmRss(xml);
     assert(packages.length === 2, 'Should find 2 packages, got ' + packages.length);
-    assert(packages.some(p => p.name === 'my-package' && p.version === '1.2.3'), 'Should have my-package@1.2.3');
-    assert(packages.some(p => p.name === 'another-pkg' && p.version === '0.0.1'), 'Should have another-pkg@0.0.1');
-    assert(maxTimestamp === 1700000000000, 'Should extract _updated timestamp');
+    assert(packages[0] === 'my-package', 'First should be my-package, got ' + packages[0]);
+    assert(packages[1] === 'another-pkg', 'Second should be another-pkg');
   });
 
-  test('MONITOR: parseNpmResponse handles empty/invalid JSON', () => {
-    const { packages, maxTimestamp } = parseNpmResponse('not json');
-    assert(packages.length === 0, 'Should return empty on invalid JSON');
-    assert(maxTimestamp === 0, 'Timestamp should be 0');
+  test('MONITOR: parseNpmRss handles empty RSS', () => {
+    const xml = `<?xml version="1.0"?><rss><channel></channel></rss>`;
+    const packages = parseNpmRss(xml);
+    assert(packages.length === 0, 'Should return empty for no items');
   });
 
-  test('MONITOR: parseNpmResponse skips non-object entries', () => {
-    const body = JSON.stringify({
-      '_updated': 123,
-      'good-pkg': { name: 'good-pkg', 'dist-tags': { latest: '1.0.0' } },
-      'bad-entry': 'just a string',
-      'null-entry': null
-    });
-    const { packages } = parseNpmResponse(body);
-    assert(packages.length === 1, 'Should only find 1 valid package, got ' + packages.length);
-    assert(packages[0].name === 'good-pkg', 'Should be good-pkg');
+  test('MONITOR: parseNpmRss handles malformed XML gracefully', () => {
+    const packages = parseNpmRss('not xml at all');
+    assert(packages.length === 0, 'Should return empty for invalid XML');
   });
 
-  test('MONITOR: parseNpmResponse handles missing dist-tags', () => {
-    const body = JSON.stringify({
-      'no-tags': { name: 'no-tags' }
-    });
-    const { packages } = parseNpmResponse(body);
-    assert(packages.length === 1, 'Should find 1 package');
-    assert(packages[0].version === '', 'Version should be empty string when no dist-tags');
+  test('MONITOR: parseNpmRss extracts name only (strips version)', () => {
+    const xml = `<rss><channel>
+    <item><title>scoped-pkg 2.0.0-beta.1</title></item>
+    <item><title>simple</title></item>
+  </channel></rss>`;
+    const packages = parseNpmRss(xml);
+    assert(packages.length === 2, 'Should find 2 packages');
+    assert(packages[0] === 'scoped-pkg', 'Should extract name before version');
+    assert(packages[1] === 'simple', 'Should handle title with no version');
   });
 
   test('MONITOR: parsePyPIRss extracts package names from RSS', () => {
@@ -3379,13 +3376,13 @@ test('HASH: clearHashCache and getHashCacheSize', () => {
     const origFile = STATE_FILE;
 
     // Write state to temp file
-    const testState = { npmLastKey: 1700000000000, pypiLastPackage: 'test-pkg' };
+    const testState = { npmLastPackage: 'test-npm-pkg', pypiLastPackage: 'test-pkg' };
     fs.writeFileSync(tmpState, JSON.stringify(testState), 'utf8');
 
     // Read it back manually (loadState uses STATE_FILE, so we test the format)
     const raw = fs.readFileSync(tmpState, 'utf8');
     const restored = JSON.parse(raw);
-    assert(restored.npmLastKey === 1700000000000, 'npmLastKey should round-trip');
+    assert(restored.npmLastPackage === 'test-npm-pkg', 'npmLastPackage should round-trip');
     assert(restored.pypiLastPackage === 'test-pkg', 'pypiLastPackage should round-trip');
 
     // Cleanup
@@ -3396,7 +3393,7 @@ test('HASH: clearHashCache and getHashCacheSize', () => {
     // loadState reads STATE_FILE which may not exist in test env
     // We test that it doesn't throw and returns defaults
     const state = loadState();
-    assert(typeof state.npmLastKey === 'number', 'npmLastKey should be number');
+    assert(typeof state.npmLastPackage === 'string', 'npmLastPackage should be string');
     assert(typeof state.pypiLastPackage === 'string', 'pypiLastPackage should be string');
   });
 
@@ -3406,26 +3403,8 @@ test('HASH: clearHashCache and getHashCacheSize', () => {
 
   console.log('\n=== MONITOR PHASE 2 TESTS ===\n');
 
-  test('MONITOR: parseNpmResponse extracts tarball URL', () => {
-    const body = JSON.stringify({
-      '_updated': 1700000000000,
-      'my-package': {
-        name: 'my-package',
-        'dist-tags': { latest: '1.2.3' },
-        dist: { tarball: 'https://registry.npmjs.org/my-package/-/my-package-1.2.3.tgz' }
-      },
-      'no-dist': {
-        name: 'no-dist',
-        'dist-tags': { latest: '0.0.1' }
-      }
-    });
-    const { packages } = parseNpmResponse(body);
-    const withTarball = packages.find(p => p.name === 'my-package');
-    assert(withTarball, 'Should find my-package');
-    assert(withTarball.tarball === 'https://registry.npmjs.org/my-package/-/my-package-1.2.3.tgz', 'Should extract tarball URL');
-    const withoutDist = packages.find(p => p.name === 'no-dist');
-    assert(withoutDist, 'Should find no-dist');
-    assert(withoutDist.tarball === '', 'Should have empty tarball when no dist');
+  test('MONITOR: getNpmLatestTarball is exported and is a function', () => {
+    assert(typeof getNpmLatestTarball === 'function', 'getNpmLatestTarball should be a function');
   });
 
   test('MONITOR: scanQueue FIFO ordering', () => {
