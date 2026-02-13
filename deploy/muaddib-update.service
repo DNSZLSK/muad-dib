@@ -1,0 +1,10 @@
+[Unit]
+Description=MUAD'DIB Auto-Update
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/muaddib/deploy/auto-update.sh
+User=root
+WorkingDirectory=/opt/muaddib

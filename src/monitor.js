@@ -301,13 +301,16 @@ function appendAlert(alert) {
 // --- Bundled tooling false-positive filter ---
 
 const KNOWN_BUNDLED_FILES = ['yarn.js', 'webpack.js', 'terser.js', 'esbuild.js', 'polyfills.js'];
+const KNOWN_BUNDLED_PATHS = ['_next/static/chunks/', '.next/static/chunks/'];
 
 function isBundledToolingOnly(threats) {
   if (threats.length === 0) return false;
   return threats.every(t => {
     if (!t.file) return false;
     const basename = path.basename(t.file);
-    return KNOWN_BUNDLED_FILES.includes(basename);
+    if (KNOWN_BUNDLED_FILES.includes(basename)) return true;
+    const normalized = t.file.replace(/\\/g, '/');
+    return KNOWN_BUNDLED_PATHS.some(p => normalized.includes(p));
   });
 }
 
@@ -820,6 +823,7 @@ module.exports = {
   resolveTarballAndScan,
   MAX_TARBALL_SIZE,
   KNOWN_BUNDLED_FILES,
+  KNOWN_BUNDLED_PATHS,
   isBundledToolingOnly,
   isSandboxEnabled,
   hasHighOrCritical,

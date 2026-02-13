@@ -201,9 +201,15 @@ async function runSandbox(packageName, options = {}) {
       // Parse JSON from container stdout
       let report;
       try {
-        report = JSON.parse(stdout);
-      } catch {
-        console.log('[SANDBOX] Failed to parse container output.');
+        // Extract JSON from stdout (may contain log lines before the JSON)
+        const jsonStart = stdout.indexOf('{');
+        const jsonEnd = stdout.lastIndexOf('}');
+        if (jsonStart === -1 || jsonEnd === -1) {
+          throw new Error('No JSON found in output');
+        }
+        report = JSON.parse(stdout.substring(jsonStart, jsonEnd + 1));
+      } catch (e) {
+        console.log('[SANDBOX] Failed to parse container output:', e.message);
         resolve(cleanResult);
         return;
       }
