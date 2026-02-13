@@ -144,8 +144,9 @@ async function runSandbox(packageName, options = {}) {
       dockerArgs.push('--cap-add=NET_ADMIN');
     }
 
-    dockerArgs.push('--tmpfs', '/tmp:rw,noexec,nosuid,size=64m');
-    dockerArgs.push('--tmpfs', '/sandbox:rw,noexec,nosuid,size=256m');
+    dockerArgs.push('--tmpfs', '/tmp:rw,nosuid,size=64m');
+    dockerArgs.push('--tmpfs', '/sandbox/install:rw,nosuid,size=256m');
+    dockerArgs.push('--tmpfs', '/home/sandboxuser:rw,noexec,nosuid,size=16m');
     dockerArgs.push('--read-only');
 
     dockerArgs.push('--security-opt', 'no-new-privileges');
