@@ -7,6 +7,7 @@ const { run } = require('./index.js');
 const { runSandbox, isDockerAvailable } = require('./sandbox.js');
 const { sendWebhook } = require('./webhook.js');
 const { detectSuddenLifecycleChange } = require('./temporal-analysis.js');
+const { detectSuddenAstChanges } = require('./temporal-ast-diff.js');
 
 const STATE_FILE = path.join(__dirname, '..', 'data', 'monitor-state.json');
 const ALERTS_FILE = path.join(__dirname, '..', 'data', 'monitor-alerts.json');
@@ -195,6 +196,101 @@ async function tryTemporalAlert(temporalResult) {
     console.log(`[MONITOR] Temporal webhook sent for ${temporalResult.packageName}`);
   } catch (err) {
     console.error(`[MONITOR] Temporal webhook failed for ${temporalResult.packageName}: ${err.message}`);
+  }
+}
+
+function isTemporalAstEnabled() {
+  const env = process.env.MUADDIB_MONITOR_TEMPORAL_AST;
+  if (env !== undefined && env.toLowerCase() === 'false') return false;
+  return true;
+}
+
+function buildTemporalAstWebhookEmbed(astResult) {
+  const findings = astResult.findings || [];
+  const topFinding = findings[0] || {};
+  const severity = topFinding.severity || 'HIGH';
+  const color = severity === 'CRITICAL' ? 0xe74c3c : severity === 'HIGH' ? 0xe67e22 : 0xf1c40f;
+  const emoji = severity === 'CRITICAL' ? '\uD83D\uDD34' : severity === 'HIGH' ? '\uD83D\uDFE0' : '\uD83D\uDFE1';
+
+  const changeLines = findings.map(f => {
+    return `**${f.pattern}** — ${f.severity}: ${f.description}`;
+  }).join('\n');
+
+  const pkgName = astResult.packageName;
+  const npmLink = `https://www.npmjs.com/package/${pkgName}`;
+
+  return {
+    embeds: [{
+      title: `${emoji} AST ANOMALY \u2014 ${severity}`,
+      color: color,
+      fields: [
+        { name: 'Package', value: `[${pkgName}](${npmLink})`, inline: true },
+        { name: 'Version Change', value: `${astResult.previousVersion} \u2192 ${astResult.latestVersion}`, inline: true },
+        { name: 'Severity', value: severity, inline: true },
+        { name: 'New Dangerous APIs', value: changeLines || 'None', inline: false },
+        { name: 'Published', value: astResult.metadata.latestPublishedAt || 'unknown', inline: true },
+        { name: 'Action', value: 'DO NOT UPDATE \u2014 Compare sources: npm diff pkg@old pkg@new', inline: false }
+      ],
+      footer: {
+        text: `MUAD'DIB Temporal AST Analysis | ${new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, ' UTC')}`
+      },
+      timestamp: new Date().toISOString()
+    }]
+  };
+}
+
+async function tryTemporalAstAlert(astResult) {
+  const url = getWebhookUrl();
+  if (!url) return;
+
+  const payload = buildTemporalAstWebhookEmbed(astResult);
+  try {
+    await sendWebhook(url, payload, { rawPayload: true });
+    console.log(`[MONITOR] Temporal AST webhook sent for ${astResult.packageName}`);
+  } catch (err) {
+    console.error(`[MONITOR] Temporal AST webhook failed for ${astResult.packageName}: ${err.message}`);
+  }
+}
+
+async function runTemporalAstCheck(packageName) {
+  if (!isTemporalAstEnabled()) return null;
+  try {
+    const result = await detectSuddenAstChanges(packageName);
+    if (result.suspicious) {
+      const findingsStr = result.findings.map(f => {
+        return `${f.pattern} (${f.severity})`;
+      }).join(', ');
+      console.log(`[MONITOR] AST ANOMALY: ${packageName} v${result.previousVersion} → v${result.latestVersion}: ${findingsStr}`);
+
+      appendAlert({
+        timestamp: new Date().toISOString(),
+        name: packageName,
+        version: result.latestVersion,
+        ecosystem: 'npm',
+        temporalAst: true,
+        findings: result.findings.map(f => ({
+          rule: f.severity === 'CRITICAL' ? 'MUADDIB-TEMPORAL-AST-001'
+            : f.severity === 'HIGH' ? 'MUADDIB-TEMPORAL-AST-002'
+            : 'MUADDIB-TEMPORAL-AST-003',
+          severity: f.severity,
+          pattern: f.pattern
+        }))
+      });
+
+      dailyAlerts.push({
+        name: packageName,
+        version: result.latestVersion,
+        ecosystem: 'npm',
+        findingsCount: result.findings.length,
+        temporalAst: true
+      });
+
+      await tryTemporalAstAlert(result);
+    }
+    return result;
+  } catch (err) {
+    console.error(`[MONITOR] Temporal AST analysis error for ${packageName}: ${err.message}`);
+    return null;
   }
 }
 
@@ -806,9 +902,15 @@ async function startMonitor() {
 
   // Temporal analysis status
   if (isTemporalEnabled()) {
-    console.log('[MONITOR] Temporal analysis enabled — detecting sudden lifecycle script changes');
+    console.log('[MONITOR] Temporal lifecycle analysis enabled — detecting sudden lifecycle script changes');
   } else {
-    console.log('[MONITOR] Temporal analysis disabled (MUADDIB_MONITOR_TEMPORAL=false)');
+    console.log('[MONITOR] Temporal lifecycle analysis disabled (MUADDIB_MONITOR_TEMPORAL=false)');
+  }
+
+  if (isTemporalAstEnabled()) {
+    console.log('[MONITOR] Temporal AST analysis enabled — detecting sudden dangerous API additions');
+  } else {
+    console.log('[MONITOR] Temporal AST analysis disabled (MUADDIB_MONITOR_TEMPORAL_AST=false)');
   }
 
   const state = loadState();
@@ -911,6 +1013,7 @@ async function resolveTarballAndScan(item) {
   // Temporal analysis: check for sudden lifecycle script changes (npm only)
   if (item.ecosystem === 'npm') {
     await runTemporalCheck(item.name);
+    await runTemporalAstCheck(item.name);
   }
 
   await scanPackage(item.name, item.version, item.ecosystem, item.tarballUrl);
@@ -962,7 +1065,10 @@ module.exports = {
   DAILY_REPORT_INTERVAL,
   isTemporalEnabled,
   buildTemporalWebhookEmbed,
-  runTemporalCheck
+  runTemporalCheck,
+  isTemporalAstEnabled,
+  buildTemporalAstWebhookEmbed,
+  runTemporalAstCheck
 };
 
 // Standalone entry point: node src/monitor.js

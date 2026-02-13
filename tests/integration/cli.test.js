@@ -341,6 +341,24 @@ async function runCliTests() {
     assertIncludes(output, 'Usage', 'Should show usage with -h');
   });
 
+  test('CLI-COV: --temporal-ast flag appears in help', () => {
+    const output = runCommand('--help');
+    assertIncludes(output, '--temporal-ast', 'Help should show --temporal-ast flag');
+    assertIncludes(output, '--temporal-full', 'Help should show --temporal-full flag');
+  });
+
+  test('CLI-COV: --temporal-ast flag is parsed without error', () => {
+    const output = runScan(path.join(TESTS_DIR, 'clean'), '--temporal-ast --json');
+    const json = JSON.parse(output);
+    assert(json.summary, 'Should produce valid JSON with summary');
+  });
+
+  test('CLI-COV: --temporal-full flag is parsed without error', () => {
+    const output = runScan(path.join(TESTS_DIR, 'clean'), '--temporal-full --json');
+    const json = JSON.parse(output);
+    assert(json.summary, 'Should produce valid JSON with summary');
+  });
+
   // ============================================
   // DIFF MODULE TESTS
   // ============================================

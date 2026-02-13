@@ -22,7 +22,8 @@ async function runMonitorTests() {
     isSandboxEnabled, hasHighOrCritical,
     getWebhookUrl, shouldSendWebhook, buildMonitorWebhookPayload,
     computeRiskLevel, computeRiskScore, buildDailyReportEmbed, DAILY_REPORT_INTERVAL,
-    isTemporalEnabled, buildTemporalWebhookEmbed
+    isTemporalEnabled, buildTemporalWebhookEmbed,
+    isTemporalAstEnabled, buildTemporalAstWebhookEmbed
   } = require('../../src/monitor.js');
 
   test('MONITOR: parseNpmRss extracts package names from RSS', () => {
@@ -772,6 +773,148 @@ async function runMonitorTests() {
     const e = embed.embeds[0];
     assert(e.color === 0xe67e22, 'Color should be orange for HIGH, got ' + e.color);
     assertIncludes(e.title, 'HIGH', 'Title should contain HIGH');
+  });
+
+  // ============================================
+  // MONITOR TEMPORAL AST ANALYSIS TESTS
+  // ============================================
+
+  console.log('\n=== MONITOR TEMPORAL AST ANALYSIS TESTS ===\n');
+
+  test('MONITOR: isTemporalAstEnabled defaults to true', () => {
+    const orig = process.env.MUADDIB_MONITOR_TEMPORAL_AST;
+    delete process.env.MUADDIB_MONITOR_TEMPORAL_AST;
+    try {
+      assert(isTemporalAstEnabled() === true, 'Should default to true when env not set');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_MONITOR_TEMPORAL_AST = orig;
+    }
+  });
+
+  test('MONITOR: isTemporalAstEnabled returns false when env=false', () => {
+    const orig = process.env.MUADDIB_MONITOR_TEMPORAL_AST;
+    process.env.MUADDIB_MONITOR_TEMPORAL_AST = 'false';
+    try {
+      assert(isTemporalAstEnabled() === false, 'Should return false when env is "false"');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_MONITOR_TEMPORAL_AST = orig;
+      else delete process.env.MUADDIB_MONITOR_TEMPORAL_AST;
+    }
+  });
+
+  test('MONITOR: isTemporalAstEnabled returns false when env=FALSE (case insensitive)', () => {
+    const orig = process.env.MUADDIB_MONITOR_TEMPORAL_AST;
+    process.env.MUADDIB_MONITOR_TEMPORAL_AST = 'FALSE';
+    try {
+      assert(isTemporalAstEnabled() === false, 'Should return false when env is "FALSE"');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_MONITOR_TEMPORAL_AST = orig;
+      else delete process.env.MUADDIB_MONITOR_TEMPORAL_AST;
+    }
+  });
+
+  test('MONITOR: buildTemporalAstWebhookEmbed has correct Discord embed structure', () => {
+    const mockResult = {
+      packageName: 'evil-pkg',
+      latestVersion: '2.0.0',
+      previousVersion: '1.9.0',
+      suspicious: true,
+      findings: [
+        { type: 'dangerous_api_added', pattern: 'child_process', severity: 'CRITICAL', description: 'Package now uses child_process (not present in previous version)' }
+      ],
+      metadata: {
+        latestPublishedAt: '2026-01-15T12:00:00.000Z',
+        previousPublishedAt: '2025-06-01T00:00:00.000Z'
+      }
+    };
+    const embed = buildTemporalAstWebhookEmbed(mockResult);
+    assert(embed.embeds, 'Should have embeds array');
+    assert(embed.embeds.length === 1, 'Should have exactly 1 embed');
+
+    const e = embed.embeds[0];
+    assertIncludes(e.title, 'AST ANOMALY', 'Title should contain AST ANOMALY');
+    assertIncludes(e.title, 'CRITICAL', 'Title should contain CRITICAL for critical finding');
+    assert(e.color === 0xe74c3c, 'Color should be red for CRITICAL, got ' + e.color);
+
+    const pkgField = e.fields.find(f => f.name === 'Package');
+    assert(pkgField, 'Should have Package field');
+    assertIncludes(pkgField.value, 'evil-pkg', 'Package field should contain package name');
+
+    const versionField = e.fields.find(f => f.name === 'Version Change');
+    assert(versionField, 'Should have Version Change field');
+    assertIncludes(versionField.value, '1.9.0', 'Should contain previous version');
+    assertIncludes(versionField.value, '2.0.0', 'Should contain latest version');
+
+    const apisField = e.fields.find(f => f.name === 'New Dangerous APIs');
+    assert(apisField, 'Should have New Dangerous APIs field');
+    assertIncludes(apisField.value, 'child_process', 'Should mention child_process');
+    assertIncludes(apisField.value, 'CRITICAL', 'Should contain severity');
+
+    assert(e.footer && e.footer.text, 'Should have footer');
+    assertIncludes(e.footer.text, 'Temporal AST Analysis', 'Footer should mention Temporal AST Analysis');
+  });
+
+  test('MONITOR: buildTemporalAstWebhookEmbed uses orange color for HIGH severity', () => {
+    const mockResult = {
+      packageName: 'sus-pkg',
+      latestVersion: '3.0.0',
+      previousVersion: '2.5.0',
+      suspicious: true,
+      findings: [
+        { type: 'dangerous_api_added', pattern: 'process.env', severity: 'HIGH', description: 'Package now uses process.env (not present in previous version)' }
+      ],
+      metadata: {
+        latestPublishedAt: '2026-01-20T00:00:00.000Z',
+        previousPublishedAt: '2025-12-01T00:00:00.000Z'
+      }
+    };
+    const embed = buildTemporalAstWebhookEmbed(mockResult);
+    const e = embed.embeds[0];
+    assert(e.color === 0xe67e22, 'Color should be orange for HIGH, got ' + e.color);
+    assertIncludes(e.title, 'HIGH', 'Title should contain HIGH');
+  });
+
+  test('MONITOR: buildTemporalAstWebhookEmbed uses yellow color for MEDIUM severity', () => {
+    const mockResult = {
+      packageName: 'mid-pkg',
+      latestVersion: '1.1.0',
+      previousVersion: '1.0.0',
+      suspicious: true,
+      findings: [
+        { type: 'dangerous_api_added', pattern: 'dns.lookup', severity: 'MEDIUM', description: 'Package now uses dns.lookup (not present in previous version)' }
+      ],
+      metadata: {
+        latestPublishedAt: '2026-02-01T00:00:00.000Z',
+        previousPublishedAt: '2025-11-01T00:00:00.000Z'
+      }
+    };
+    const embed = buildTemporalAstWebhookEmbed(mockResult);
+    const e = embed.embeds[0];
+    assert(e.color === 0xf1c40f, 'Color should be yellow for MEDIUM, got ' + e.color);
+    assertIncludes(e.title, 'MEDIUM', 'Title should contain MEDIUM');
+  });
+
+  test('MONITOR: buildTemporalAstWebhookEmbed handles multiple findings', () => {
+    const mockResult = {
+      packageName: 'multi-pkg',
+      latestVersion: '5.0.0',
+      previousVersion: '4.9.0',
+      suspicious: true,
+      findings: [
+        { type: 'dangerous_api_added', pattern: 'child_process', severity: 'CRITICAL', description: 'Package now uses child_process' },
+        { type: 'dangerous_api_added', pattern: 'eval', severity: 'CRITICAL', description: 'Package now uses eval' },
+        { type: 'dangerous_api_added', pattern: 'process.env', severity: 'HIGH', description: 'Package now uses process.env' }
+      ],
+      metadata: {
+        latestPublishedAt: '2026-02-10T00:00:00.000Z',
+        previousPublishedAt: '2026-01-01T00:00:00.000Z'
+      }
+    };
+    const embed = buildTemporalAstWebhookEmbed(mockResult);
+    const apisField = embed.embeds[0].fields.find(f => f.name === 'New Dangerous APIs');
+    assertIncludes(apisField.value, 'child_process', 'Should contain child_process');
+    assertIncludes(apisField.value, 'eval', 'Should contain eval');
+    assertIncludes(apisField.value, 'process.env', 'Should contain process.env');
   });
 
   test('MONITOR: buildTemporalWebhookEmbed handles modified lifecycle scripts', () => {
