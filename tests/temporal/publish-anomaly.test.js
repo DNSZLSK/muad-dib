@@ -87,6 +87,22 @@ async function runPublishAnomalyTests() {
     assert(stats.publishHistory.length === 0, 'History should be empty');
   });
 
+  test('PUBLISH: analyzePublishFrequency with null/undefined metadata → no crash', () => {
+    const stats1 = analyzePublishFrequency(null);
+    assert(stats1.totalVersions === 0, 'null metadata should return 0 versions');
+    assert(stats1.lastPublishedAt === null, 'null metadata should return null lastPublishedAt');
+    assert(stats1.publishHistory.length === 0, 'null metadata should return empty history');
+
+    const stats2 = analyzePublishFrequency(undefined);
+    assert(stats2.totalVersions === 0, 'undefined metadata should return 0 versions');
+
+    const stats3 = analyzePublishFrequency({ time: undefined, versions: undefined });
+    assert(stats3.totalVersions === 0, 'undefined time/versions should return 0 versions');
+
+    const stats4 = analyzePublishFrequency({ time: { '1.0.0': '2023-01-01T00:00:00Z' }, versions: undefined });
+    assert(stats4.totalVersions === 0, 'undefined versions should return 0 versions');
+  });
+
   test('PUBLISH: analyzePublishFrequency skips unpublished versions', () => {
     const metadata = {
       time: {
@@ -326,7 +342,7 @@ async function runPublishAnomalyTests() {
       const result = await detectPublishAnomaly('lodash');
       assert(result.packageName === 'lodash', 'packageName should be lodash');
       assert(typeof result.suspicious === 'boolean', 'suspicious should be boolean');
-      assert(Array.isArray(result.findings), 'findings should be array');
+      assert(Array.isArray(result.anomalies), 'anomalies should be array');
       assert(result.stats, 'stats should exist');
       assert(result.stats.totalVersions > 10, 'lodash should have many versions, got ' + result.stats.totalVersions);
       assert(result.stats.avgIntervalDays > 0, 'avgIntervalDays should be > 0');

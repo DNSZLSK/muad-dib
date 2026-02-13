@@ -79,14 +79,34 @@ function analyzePublishFrequency(metadata) {
  * @returns {Promise<object>} Detection result with suspicious flag, findings, and stats
  */
 async function detectPublishAnomaly(packageName) {
-  const metadata = await fetchPackageMetadata(packageName);
+  let metadata;
+  try {
+    metadata = await fetchPackageMetadata(packageName);
+  } catch {
+    return {
+      packageName,
+      suspicious: false,
+      anomalies: [],
+      stats: { totalVersions: 0, avgIntervalDays: 0, stdDevDays: 0, lastPublishedAt: null, publishHistory: [] }
+    };
+  }
+
+  if (!metadata || !metadata.time || !metadata.versions) {
+    return {
+      packageName,
+      suspicious: false,
+      anomalies: [],
+      stats: { totalVersions: 0, avgIntervalDays: 0, stdDevDays: 0, lastPublishedAt: null, publishHistory: [] }
+    };
+  }
+
   const stats = analyzePublishFrequency(metadata);
 
   if (stats.totalVersions < MIN_VERSIONS_FOR_ANALYSIS) {
     return {
       packageName,
       suspicious: false,
-      findings: [],
+      anomalies: [],
       stats
     };
   }
@@ -166,7 +186,7 @@ async function detectPublishAnomaly(packageName) {
   return {
     packageName,
     suspicious: findings.length > 0,
-    findings,
+    anomalies: findings,
     stats
   };
 }
