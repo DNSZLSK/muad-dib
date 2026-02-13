@@ -46,6 +46,7 @@ sleep 1
 
 # ── 3. npm install with strace ──
 echo "[SANDBOX] Installing $PACKAGE..." >&2
+cd /sandbox/install
 strace -f -e trace=network,process,open,openat,connect,execve,sendto,recvfrom \
   -o /tmp/strace.log \
   npm install "$PACKAGE" --ignore-scripts=false > /tmp/install.log 2>&1
@@ -65,8 +66,8 @@ DURATION_MS=$((END_MS - START_MS))
 
 # ── 5. Filesystem diff ──
 echo "[SANDBOX] Analyzing filesystem changes..." >&2
-comm -13 /tmp/fs-before.txt /tmp/fs-after.txt | grep -v '^/sandbox/node_modules/' | grep -v '^/tmp/' > /tmp/fs-created.txt
-comm -23 /tmp/fs-before.txt /tmp/fs-after.txt | grep -v '^/sandbox/node_modules/' > /tmp/fs-deleted.txt
+comm -13 /tmp/fs-before.txt /tmp/fs-after.txt | grep -v '^/sandbox/install/' | grep -v '^/tmp/' > /tmp/fs-created.txt
+comm -23 /tmp/fs-before.txt /tmp/fs-after.txt | grep -v '^/sandbox/install/' > /tmp/fs-deleted.txt
 
 # ── 6. Parse strace ──
 echo "[SANDBOX] Parsing strace..." >&2
