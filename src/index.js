@@ -20,6 +20,7 @@ const { scanEntropy } = require('./scanner/entropy.js');
 const { detectSuddenLifecycleChange } = require('./temporal-analysis.js');
 const { detectSuddenAstChanges } = require('./temporal-ast-diff.js');
 const { detectPublishAnomaly } = require('./publish-anomaly.js');
+const { detectMaintainerChange } = require('./maintainer-change.js');
 const { setExtraExcludes, getExtraExcludes, Spinner } = require('./utils.js');
 
 // ============================================
@@ -430,6 +431,60 @@ async function run(targetPath, options = {}) {
               type: a.type,
               severity: a.severity,
               message: a.description,
+              file: `node_modules/${det.packageName}/package.json`
+            });
+          }
+        }
+      }
+    }
+  }
+
+  // Temporal maintainer change analysis (--temporal-maintainer or --temporal-full flag, off by default)
+  if (options.temporalMaintainer) {
+    if (!options._capture && !options.json) {
+      console.log('[TEMPORAL-MAINTAINER] Analyzing maintainer changes (this makes network requests)...\n');
+    }
+    const nodeModulesPath = path.join(targetPath, 'node_modules');
+    if (fs.existsSync(nodeModulesPath)) {
+      const pkgNames = [];
+      try {
+        const items = fs.readdirSync(nodeModulesPath);
+        for (const item of items) {
+          if (item.startsWith('.')) continue;
+          const itemPath = path.join(nodeModulesPath, item);
+          try {
+            const stat = fs.lstatSync(itemPath);
+            if (stat.isSymbolicLink() || !stat.isDirectory()) continue;
+            if (item.startsWith('@')) {
+              const scopedItems = fs.readdirSync(itemPath);
+              for (const si of scopedItems) {
+                const sp = path.join(itemPath, si);
+                const ss = fs.lstatSync(sp);
+                if (!ss.isSymbolicLink() && ss.isDirectory()) {
+                  pkgNames.push(`${item}/${si}`);
+                }
+              }
+            } else {
+              pkgNames.push(item);
+            }
+          } catch { /* skip unreadable */ }
+        }
+      } catch { /* no node_modules readable */ }
+
+      const MAINTAINER_CONCURRENCY = 5;
+      for (let i = 0; i < pkgNames.length; i += MAINTAINER_CONCURRENCY) {
+        const batch = pkgNames.slice(i, i + MAINTAINER_CONCURRENCY);
+        const results = await Promise.allSettled(
+          batch.map(name => detectMaintainerChange(name))
+        );
+        for (const r of results) {
+          if (r.status !== 'fulfilled' || !r.value.suspicious) continue;
+          const det = r.value;
+          for (const f of det.findings) {
+            threats.push({
+              type: f.type,
+              severity: f.severity,
+              message: f.description,
               file: `node_modules/${det.packageName}/package.json`
             });
           }

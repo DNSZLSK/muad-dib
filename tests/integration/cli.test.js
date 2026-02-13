@@ -371,7 +371,25 @@ async function runCliTests() {
   });
 
   test('CLI-COV: --temporal-full includes publish analysis', () => {
-    // --temporal-full should activate all three temporal modes without error
+    // --temporal-full should activate all four temporal modes without error
+    const output = runScan(path.join(TESTS_DIR, 'clean'), '--temporal-full --json');
+    const json = JSON.parse(output);
+    assert(json.summary.total === 0, 'Clean project should have 0 threats with --temporal-full');
+  });
+
+  test('CLI-COV: --temporal-maintainer flag appears in help', () => {
+    const output = runCommand('--help');
+    assertIncludes(output, '--temporal-maintainer', 'Help should show --temporal-maintainer flag');
+  });
+
+  test('CLI-COV: --temporal-maintainer flag is parsed without error', () => {
+    const output = runScan(path.join(TESTS_DIR, 'clean'), '--temporal-maintainer --json');
+    const json = JSON.parse(output);
+    assert(json.summary, 'Should produce valid JSON with summary');
+  });
+
+  test('CLI-COV: --temporal-full includes maintainer analysis', () => {
+    // --temporal-full should activate all four temporal modes without error
     const output = runScan(path.join(TESTS_DIR, 'clean'), '--temporal-full --json');
     const json = JSON.parse(output);
     assert(json.summary.total === 0, 'Clean project should have 0 threats with --temporal-full');

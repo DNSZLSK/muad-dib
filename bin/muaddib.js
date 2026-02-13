@@ -28,6 +28,7 @@ let entropyThreshold = null;
 let temporalMode = false;
 let temporalAstMode = false;
 let temporalPublishMode = false;
+let temporalMaintainerMode = false;
 let temporalFullMode = false;
 
 for (let i = 0; i < options.length; i++) {
@@ -100,6 +101,8 @@ for (let i = 0; i < options.length; i++) {
     temporalAstMode = true;
   } else if (options[i] === '--temporal-publish') {
     temporalPublishMode = true;
+  } else if (options[i] === '--temporal-maintainer') {
+    temporalMaintainerMode = true;
   } else if (options[i] === '--temporal') {
     temporalMode = true;
   } else if (options[i] === '--strict') {
@@ -338,7 +341,8 @@ const helpText = `
     --temporal          Detect sudden lifecycle script changes (network requests per package)
     --temporal-ast      Detect sudden dangerous API additions via AST diff (downloads tarballs)
     --temporal-publish  Detect publish frequency anomalies (bursts, dormant spikes)
-    --temporal-full     All temporal analyses (lifecycle + AST + publish)
+    --temporal-maintainer  Detect maintainer changes (new maintainer, account takeover)
+    --temporal-full     All temporal analyses (lifecycle + AST + publish + maintainer)
     --exclude [dir]     Exclude directory from scan (repeatable)
     --entropy-threshold [n]  Custom string-level entropy threshold (default: 5.5)
     --save-dev, -D      Install as dev dependency
@@ -372,6 +376,7 @@ if (command === 'version' || command === '--version' || command === '-v') {
     temporal: temporalMode || temporalFullMode,
     temporalAst: temporalAstMode || temporalFullMode,
     temporalPublish: temporalPublishMode || temporalFullMode,
+    temporalMaintainer: temporalMaintainerMode || temporalFullMode,
     exclude: excludeDirs,
     entropyThreshold: entropyThreshold
   }).then(exitCode => {

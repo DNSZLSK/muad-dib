@@ -624,6 +624,55 @@ const RULES = {
     ],
     mitre: 'T1195.002'
   },
+
+  // Maintainer change detections
+  new_maintainer: {
+    id: 'MUADDIB-MAINTAINER-001',
+    name: 'New Maintainer Added',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'Un nouveau maintainer a ete ajoute au package entre les deux dernieres versions. Verifier si le changement est legitime.',
+    references: [
+      'https://blog.npmjs.org/post/180565383195/details-about-the-event-stream-incident',
+      'https://snyk.io/blog/malicious-npm-packages-targeting-developers/'
+    ],
+    mitre: 'T1195.002'
+  },
+  suspicious_maintainer: {
+    id: 'MUADDIB-MAINTAINER-002',
+    name: 'Suspicious Maintainer Detected',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Maintainer avec un nom suspect (generique, auto-genere, tres court). Risque eleve de compromission de compte.',
+    references: [
+      'https://blog.npmjs.org/post/180565383195/details-about-the-event-stream-incident',
+      'https://blog.phylum.io/shai-hulud-npm-worm'
+    ],
+    mitre: 'T1195.002'
+  },
+  sole_maintainer_change: {
+    id: 'MUADDIB-MAINTAINER-003',
+    name: 'Sole Maintainer Changed',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'Le seul maintainer du package a change. Indicateur fort de compromission de compte (event-stream attack pattern).',
+    references: [
+      'https://blog.npmjs.org/post/180565383195/details-about-the-event-stream-incident',
+      'https://snyk.io/blog/malicious-npm-packages-targeting-developers/'
+    ],
+    mitre: 'T1195.002'
+  },
+  new_publisher: {
+    id: 'MUADDIB-MAINTAINER-004',
+    name: 'New Publisher Detected',
+    severity: 'MEDIUM',
+    confidence: 'medium',
+    description: 'La derniere version a ete publiee par un utilisateur different de la version precedente. Verifier la legitimite.',
+    references: [
+      'https://blog.npmjs.org/post/180565383195/details-about-the-event-stream-incident'
+    ],
+    mitre: 'T1195.002'
+  },
 };
 
 function getRule(type) {

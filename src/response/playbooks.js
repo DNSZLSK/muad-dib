@@ -207,6 +207,21 @@ const PLAYBOOKS = {
     'Versions published in rapid succession. ' +
     'Could indicate automated attack or compromised CI/CD. ' +
     'Verify each version for malicious changes.',
+
+  new_maintainer:
+    'A new maintainer was added. Verify this is legitimate by checking the package\'s GitHub/npm page. ' +
+    'Compare: npm diff package@old package@new.',
+
+  suspicious_maintainer:
+    'Maintainer has suspicious name pattern (generic/auto-generated). High risk of account takeover. ' +
+    'Verify maintainer identity on npm and GitHub. Do NOT install until verified.',
+
+  sole_maintainer_change:
+    'The sole maintainer has changed. This is a strong indicator of account compromise (event-stream pattern). ' +
+    'Verify on npm and GitHub. Compare: npm diff package@old package@new.',
+
+  new_publisher:
+    'New publisher detected. Package published by a different user than before. Verify legitimacy by checking the package\'s npm page and changelog.',
 };
 
 function getPlaybook(threatType) {
