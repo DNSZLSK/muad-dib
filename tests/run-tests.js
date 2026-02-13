@@ -7,6 +7,7 @@ const BIN = path.join(__dirname, '..', 'bin', 'muaddib.js');
 
 let passed = 0;
 let failed = 0;
+let skipped = 0;
 const failures = [];
 
 function test(name, fn) {
@@ -3480,29 +3481,32 @@ test('HASH: clearHashCache and getHashCacheSize', () => {
     assert(getNpmTarballUrl(emptyDist) === null, 'Should return null when no tarball in dist');
   });
 
-  test('MONITOR: extractTarGz returns extracted path', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-tar-test-'));
-    const innerDir = path.join(tmpDir, 'source');
-    const packageDir = path.join(innerDir, 'package');
-    fs.mkdirSync(packageDir, { recursive: true });
-    fs.writeFileSync(path.join(packageDir, 'index.js'), 'module.exports = {};\n');
-    // Create a tar.gz from the source directory
-    const tgzPath = path.join(tmpDir, 'test.tar.gz');
-    try {
-      const { execSync: es } = require('child_process');
-      // Use --force-local on Windows so tar doesn't interpret C: as a remote host
-      const forceLocal = process.platform === 'win32' ? ' --force-local' : '';
-      es(`tar czf "${tgzPath}"${forceLocal} -C "${innerDir}" package`, { stdio: 'pipe' });
-      const extractDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-extract-'));
-      const result = extractTarGz(tgzPath, extractDir);
-      // Should detect the package/ subdirectory
-      assert(result.endsWith('package'), 'Should return path ending with package, got ' + result);
-      assert(fs.existsSync(path.join(result, 'index.js')), 'Extracted dir should contain index.js');
-      try { fs.rmSync(extractDir, { recursive: true, force: true }); } catch {}
-    } finally {
-      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
-    }
-  });
+  if (process.platform !== 'win32') {
+    test('MONITOR: extractTarGz returns extracted path', () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-tar-test-'));
+      const innerDir = path.join(tmpDir, 'source');
+      const packageDir = path.join(innerDir, 'package');
+      fs.mkdirSync(packageDir, { recursive: true });
+      fs.writeFileSync(path.join(packageDir, 'index.js'), 'module.exports = {};\n');
+      // Create a tar.gz from the source directory
+      const tgzPath = path.join(tmpDir, 'test.tar.gz');
+      try {
+        const { execSync: es } = require('child_process');
+        es(`tar czf "${tgzPath}" -C "${innerDir}" package`, { stdio: 'pipe' });
+        const extractDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-extract-'));
+        const result = extractTarGz(tgzPath, extractDir);
+        // Should detect the package/ subdirectory
+        assert(result.endsWith('package'), 'Should return path ending with package, got ' + result);
+        assert(fs.existsSync(path.join(result, 'index.js')), 'Extracted dir should contain index.js');
+        try { fs.rmSync(extractDir, { recursive: true, force: true }); } catch {}
+      } finally {
+        try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+      }
+    });
+  } else {
+    console.log('[SKIP] extractTarGz: not supported on Windows');
+    skipped++;
+  }
 
   test('MONITOR: appendAlert writes to file', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-alert-test-'));
@@ -3979,7 +3983,7 @@ test('HASH: clearHashCache and getHashCacheSize', () => {
   // ============================================
 
   console.log('\n========================================');
-  console.log(`RESULTS: ${passed} passed, ${failed} failed`);
+  console.log(`RESULTS: ${passed} passed, ${failed} failed, ${skipped} skipped`);
   console.log('========================================\n');
 
   if (failures.length > 0) {
