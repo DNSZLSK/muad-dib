@@ -3805,13 +3805,26 @@ test('HASH: clearHashCache and getHashCacheSize', () => {
     }
   });
 
-  test('MONITOR: shouldSendWebhook returns false for LOW only and sandbox score <= 50', () => {
+  test('MONITOR: shouldSendWebhook returns false when sandbox score is 0 (false positive)', () => {
+    const orig = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.slack.com/test';
+    try {
+      const result = { summary: { total: 2, critical: 1, high: 1, medium: 0, low: 0 } };
+      const sandbox = { score: 0, severity: 'NONE', findings: [] };
+      assert(shouldSendWebhook(result, sandbox) === false, 'Should return false when sandbox clean (score 0)');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  test('MONITOR: shouldSendWebhook returns true when sandbox score > 0', () => {
     const orig = process.env.MUADDIB_WEBHOOK_URL;
     process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.slack.com/test';
     try {
       const result = { summary: { total: 2, critical: 0, high: 0, medium: 1, low: 1 } };
       const sandbox = { score: 30, severity: 'MEDIUM', findings: [] };
-      assert(shouldSendWebhook(result, sandbox) === false, 'Should return false for LOW/MEDIUM + low sandbox');
+      assert(shouldSendWebhook(result, sandbox) === true, 'Should return true when sandbox score > 0');
     } finally {
       if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
       else delete process.env.MUADDIB_WEBHOOK_URL;
