@@ -1195,6 +1195,33 @@ async function runMonitorTests() {
     assertIncludes(actionField.value, 'CONFIRMED MALICIOUS', 'Action should say CONFIRMED MALICIOUS');
   });
 
+  // --- Temporal webhook suppression when sandbox is CLEAN ---
+
+  test('MONITOR: shouldSendWebhook returns false when sandbox score is 0 (temporal false positive)', () => {
+    const origEnv = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://discord.com/api/webhooks/test/test';
+    try {
+      const mockResult = { summary: { critical: 1, high: 0, medium: 0, low: 0 }, threats: [] };
+      const mockSandboxClean = { score: 0, severity: 'CLEAN', findings: [] };
+      const mockSandboxSuspect = { score: 60, severity: 'HIGH', findings: [{ type: 'suspicious_dns' }] };
+
+      // Sandbox CLEAN → no webhook
+      assert(shouldSendWebhook(mockResult, mockSandboxClean) === false,
+        'Should NOT send webhook when sandbox score is 0 (CLEAN)');
+
+      // Sandbox SUSPECT → send webhook
+      assert(shouldSendWebhook(mockResult, mockSandboxSuspect) === true,
+        'Should send webhook when sandbox score > 0');
+
+      // No sandbox → fall back to static analysis
+      assert(shouldSendWebhook(mockResult, null) === true,
+        'Should send webhook when no sandbox ran (CRITICAL findings)');
+    } finally {
+      if (origEnv === undefined) delete process.env.MUADDIB_WEBHOOK_URL;
+      else process.env.MUADDIB_WEBHOOK_URL = origEnv;
+    }
+  });
+
   test('MONITOR: buildTemporalWebhookEmbed handles modified lifecycle scripts', () => {
     const mockResult = {
       packageName: 'mod-pkg',

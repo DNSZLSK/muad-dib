@@ -319,7 +319,7 @@ async function runTemporalAstCheck(packageName) {
         temporalAst: true
       });
 
-      await tryTemporalAstAlert(result);
+      // Webhook deferred — sent after sandbox confirms (see resolveTarballAndScan)
     }
     return result;
   } catch (err) {
@@ -413,7 +413,7 @@ async function runTemporalPublishCheck(packageName) {
         temporalPublish: true
       });
 
-      await tryTemporalPublishAlert(result);
+      // Webhook deferred — sent after sandbox confirms (see resolveTarballAndScan)
     }
     return result;
   } catch (err) {
@@ -511,7 +511,7 @@ async function runTemporalMaintainerCheck(packageName) {
         temporalMaintainer: true
       });
 
-      await tryTemporalMaintainerAlert(result);
+      // Webhook deferred — sent after sandbox confirms (see resolveTarballAndScan)
     }
     return result;
   } catch (err) {
@@ -552,7 +552,7 @@ async function runTemporalCheck(packageName) {
         temporal: true
       });
 
-      await tryTemporalAlert(result);
+      // Webhook deferred — sent after sandbox confirms (see resolveTarballAndScan)
     }
     return result;
   } catch (err) {
@@ -775,6 +775,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl) {
       stats.totalTimeMs += elapsed;
       stats.clean++;
       console.log(`[MONITOR] CLEAN: ${name}@${version} (0 findings, ${(elapsed / 1000).toFixed(1)}s)`);
+      return { sandboxResult: null };
     } else {
       const counts = [];
       if (result.summary.critical > 0) counts.push(`${result.summary.critical} CRITICAL`);
@@ -803,6 +804,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl) {
           }))
         };
         appendAlert(alert);
+        return { sandboxResult: null };
       } else {
         stats.suspect++;
         console.log(`[MONITOR] SUSPECT: ${name}@${version} (${counts.join(', ')})`);
@@ -868,6 +870,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl) {
         appendAlert(alert);
         dailyAlerts.push({ name, version, ecosystem, findingsCount: result.summary.total });
         await trySendWebhook(name, version, ecosystem, result, sandboxResult);
+        return { sandboxResult };
       }
     }
   } catch (err) {
@@ -875,6 +878,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl) {
     stats.scanned++;
     stats.totalTimeMs += Date.now() - startTime;
     console.error(`[MONITOR] ERROR scanning ${name}@${version}: ${err.message}`);
+    return { sandboxResult: null };
   } finally {
     // Cleanup temp dir
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
@@ -1277,14 +1281,40 @@ async function resolveTarballAndScan(item) {
   recentlyScanned.add(dedupeKey);
 
   // Temporal analysis: check for sudden lifecycle script changes (npm only)
+  // Webhooks are deferred until after sandbox confirms the threat
+  let temporalResult = null;
+  let astResult = null;
+  let publishResult = null;
+  let maintainerResult = null;
+
   if (item.ecosystem === 'npm') {
-    await runTemporalCheck(item.name);
-    await runTemporalAstCheck(item.name);
-    await runTemporalPublishCheck(item.name);
-    await runTemporalMaintainerCheck(item.name);
+    temporalResult = await runTemporalCheck(item.name);
+    astResult = await runTemporalAstCheck(item.name);
+    publishResult = await runTemporalPublishCheck(item.name);
+    maintainerResult = await runTemporalMaintainerCheck(item.name);
   }
 
-  await scanPackage(item.name, item.version, item.ecosystem, item.tarballUrl);
+  const scanResult = await scanPackage(item.name, item.version, item.ecosystem, item.tarballUrl);
+  const sandboxResult = scanResult && scanResult.sandboxResult;
+
+  // Send temporal webhooks only if sandbox did NOT mark the package as CLEAN
+  const hasSuspiciousTemporal = (temporalResult && temporalResult.suspicious)
+    || (astResult && astResult.suspicious)
+    || (publishResult && publishResult.suspicious)
+    || (maintainerResult && maintainerResult.suspicious);
+
+  if (hasSuspiciousTemporal) {
+    // Sandbox ran and package is CLEAN → suppress temporal webhooks
+    if (sandboxResult && sandboxResult.score === 0) {
+      console.log(`[MONITOR] FALSE POSITIVE (sandbox clean, no alert): ${item.name}@${item.version}`);
+    } else {
+      // Sandbox confirmed threat (score > 0) OR sandbox not available → send webhooks
+      if (temporalResult && temporalResult.suspicious) await tryTemporalAlert(temporalResult);
+      if (astResult && astResult.suspicious) await tryTemporalAstAlert(astResult);
+      if (publishResult && publishResult.suspicious) await tryTemporalPublishAlert(publishResult);
+      if (maintainerResult && maintainerResult.suspicious) await tryTemporalMaintainerAlert(maintainerResult);
+    }
+  }
 }
 
 function sleep(ms) {
