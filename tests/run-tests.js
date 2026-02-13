@@ -30,6 +30,7 @@ const { runTemporalAnalysisTests } = require('./temporal/temporal-analysis.test'
 const { runTemporalAstDiffTests } = require('./temporal/temporal-ast-diff.test');
 const { runPublishAnomalyTests } = require('./temporal/publish-anomaly.test');
 const { runMaintainerChangeTests } = require('./temporal/maintainer-change.test');
+const { runCanaryTokensTests } = require('./temporal/canary-tokens.test');
 
 (async () => {
   // Run all test suites sequentially to preserve output ordering
@@ -52,6 +53,7 @@ const { runMaintainerChangeTests } = require('./temporal/maintainer-change.test'
   await runTemporalAstDiffTests();
   await runPublishAnomalyTests();
   await runMaintainerChangeTests();
+  await runCanaryTokensTests();
 
   // Results
   const { passed, failed, skipped, failures } = getCounters();

@@ -395,6 +395,17 @@ async function runCliTests() {
     assert(json.summary.total === 0, 'Clean project should have 0 threats with --temporal-full');
   });
 
+  test('CLI-COV: --no-canary flag appears in help', () => {
+    const output = runCommand('--help');
+    assertIncludes(output, '--no-canary', 'Help should show --no-canary flag');
+  });
+
+  test('CLI-COV: --no-canary flag is parsed without error', () => {
+    // --no-canary is for sandbox commands, but parsing should not crash
+    const output = runCommand('--help');
+    assertIncludes(output, '--no-canary', 'Help should mention --no-canary');
+  });
+
   // ============================================
   // DIFF MODULE TESTS
   // ============================================

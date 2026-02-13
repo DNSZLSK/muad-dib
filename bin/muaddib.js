@@ -107,6 +107,8 @@ for (let i = 0; i < options.length; i++) {
     temporalMode = true;
   } else if (options[i] === '--strict') {
     // Sandbox strict mode flag (parsed here, used by sandbox commands)
+  } else if (options[i] === '--no-canary') {
+    // Sandbox canary disable flag (parsed here, used by sandbox commands)
   } else if (!options[i].startsWith('-')) {
     target = options[i];
   }
@@ -316,7 +318,7 @@ const helpText = `
     muaddib remove-hooks [path]      Remove MUAD'DIB git hooks
     muaddib update                   Update IOCs
     muaddib scrape                   Scrape new IOCs
-    muaddib sandbox <pkg> [--strict]  Analyze in isolated Docker container
+    muaddib sandbox <pkg> [--strict] [--no-canary]  Analyze in isolated Docker container
     muaddib sandbox-report <pkg>     Sandbox + detailed network report
     muaddib version                  Show version
 
@@ -343,6 +345,7 @@ const helpText = `
     --temporal-publish  Detect publish frequency anomalies (bursts, dormant spikes)
     --temporal-maintainer  Detect maintainer changes (new maintainer, account takeover)
     --temporal-full     All temporal analyses (lifecycle + AST + publish + maintainer)
+    --no-canary         Disable honey token injection in sandbox
     --exclude [dir]     Exclude directory from scan (repeatable)
     --entropy-threshold [n]  Custom string-level entropy threshold (default: 5.5)
     --save-dev, -D      Install as dev dependency
@@ -514,13 +517,14 @@ if (command === 'version' || command === '--version' || command === '-v') {
   const sandboxOpts = options.filter(o => !o.startsWith('-'));
   const packageName = sandboxOpts[0];
   const strict = options.includes('--strict');
+  const canary = !options.includes('--no-canary');
   if (!packageName) {
-    console.log('Usage: muaddib sandbox <package-name> [--strict]');
+    console.log('Usage: muaddib sandbox <package-name> [--strict] [--no-canary]');
     process.exit(1);
   }
 
   buildSandboxImage()
-    .then(() => runSandbox(packageName, { strict }))
+    .then(() => runSandbox(packageName, { strict, canary }))
     .then((results) => {
       process.exit(results.suspicious ? 1 : 0);
     })
@@ -532,13 +536,14 @@ if (command === 'version' || command === '--version' || command === '-v') {
   const sandboxOpts = options.filter(o => !o.startsWith('-'));
   const packageName = sandboxOpts[0];
   const strict = options.includes('--strict');
+  const canary = !options.includes('--no-canary');
   if (!packageName) {
-    console.log('Usage: muaddib sandbox-report <package-name> [--strict]');
+    console.log('Usage: muaddib sandbox-report <package-name> [--strict] [--no-canary]');
     process.exit(1);
   }
 
   buildSandboxImage()
-    .then(() => runSandbox(packageName, { strict }))
+    .then(() => runSandbox(packageName, { strict, canary }))
     .then((results) => {
       if (results.raw_report) {
         console.log(generateNetworkReport(results.raw_report));

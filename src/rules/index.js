@@ -673,6 +673,20 @@ const RULES = {
     ],
     mitre: 'T1195.002'
   },
+
+  // Canary token detections
+  canary_exfiltration: {
+    id: 'MUADDIB-CANARY-001',
+    name: 'Canary Token Exfiltration',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Le package a tente d\'exfiltrer des honey tokens (faux secrets) injectes dans le sandbox. Comportement malveillant confirme.',
+    references: [
+      'https://canarytokens.org/generate',
+      'https://blog.phylum.io/shai-hulud-npm-worm'
+    ],
+    mitre: 'T1552.001'
+  },
 };
 
 function getRule(type) {

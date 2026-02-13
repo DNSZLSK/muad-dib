@@ -222,6 +222,11 @@ const PLAYBOOKS = {
 
   new_publisher:
     'New publisher detected. Package published by a different user than before. Verify legitimacy by checking the package\'s npm page and changelog.',
+
+  canary_exfiltration:
+    'CRITIQUE: Le package a tente de voler des credentials (honey tokens). Comportement malveillant confirme. ' +
+    'NE PAS installer. Signaler immediatement sur npm/PyPI. ' +
+    'Si deja installe: considerer la machine compromise, regenerer TOUS les secrets.',
 };
 
 function getPlaybook(threatType) {

@@ -1,5 +1,12 @@
 const { execSync, spawn } = require('child_process');
 const path = require('path');
+const {
+  generateCanaryTokens,
+  createCanaryEnvFile,
+  createCanaryNpmrc,
+  detectCanaryExfiltration,
+  detectCanaryInOutput
+} = require('./canary-tokens.js');
 
 const DOCKER_IMAGE = 'muaddib-sandbox';
 const CONTAINER_TIMEOUT = 120000; // 120 seconds
@@ -110,6 +117,7 @@ async function runSandbox(packageName, options = {}) {
   }
 
   const strict = options.strict || false;
+  const canaryEnabled = options.canary !== false; // enabled by default
   const mode = strict ? 'strict' : 'permissive';
 
   // Validate package name before passing to container
@@ -118,7 +126,14 @@ async function runSandbox(packageName, options = {}) {
     return cleanResult;
   }
 
-  console.log(`[SANDBOX] Analyzing "${packageName}" in isolated container (mode: ${mode})...`);
+  // Generate canary tokens for this sandbox session
+  let canaryTokens = null;
+  if (canaryEnabled) {
+    const canary = generateCanaryTokens();
+    canaryTokens = canary.tokens;
+  }
+
+  console.log(`[SANDBOX] Analyzing "${packageName}" in isolated container (mode: ${mode}${canaryEnabled ? ', canary: on' : ''})...`);
 
   return new Promise((resolve) => {
     let stdout = '';
@@ -136,6 +151,16 @@ async function runSandbox(packageName, options = {}) {
       '--pids-limit=100',
       '--cap-drop=ALL'
     ];
+
+    // Inject canary tokens as environment variables
+    if (canaryTokens) {
+      for (const [key, value] of Object.entries(canaryTokens)) {
+        dockerArgs.push('-e', `${key}=${value}`);
+      }
+      // Also inject canary file contents as env vars for the entrypoint to write
+      dockerArgs.push('-e', `CANARY_ENV_CONTENT=${createCanaryEnvFile(canaryTokens).replace(/\n/g, '\\n')}`);
+      dockerArgs.push('-e', `CANARY_NPMRC_CONTENT=${createCanaryNpmrc(canaryTokens).replace(/\n/g, '\\n')}`);
+    }
 
     // Strict mode needs strace (SYS_PTRACE), packet capture (NET_RAW), and iptables (NET_ADMIN)
     if (strict) {
@@ -220,8 +245,28 @@ async function runSandbox(packageName, options = {}) {
       }
 
       const { score, findings } = scoreFindings(report);
-      const severity = getSeverity(score);
-      const result = { score, severity, findings, raw_report: report, suspicious: score > 0 };
+
+      // Canary token exfiltration detection
+      if (canaryTokens) {
+        const networkExfil = detectCanaryExfiltration(report.network || {}, canaryTokens);
+        const outputExfil = detectCanaryInOutput(stdout, stderr, canaryTokens);
+
+        for (const exfil of [...networkExfil.exfiltrations, ...outputExfil.exfiltrations]) {
+          findings.push({
+            type: 'canary_exfiltration',
+            severity: 'CRITICAL',
+            detail: `Package attempted to exfiltrate ${exfil.token} (${exfil.foundIn})`,
+            evidence: exfil.value
+          });
+        }
+      }
+
+      const finalScore = Math.min(100, findings.reduce((s, f) => {
+        if (f.type === 'canary_exfiltration') return s + 50;
+        return s;
+      }, score));
+      const severity = getSeverity(finalScore);
+      const result = { score: finalScore, severity, findings, raw_report: report, suspicious: finalScore > 0 };
 
       displayResults(result);
       resolve(result);
