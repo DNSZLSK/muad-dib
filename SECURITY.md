@@ -4,8 +4,9 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
+| 2.0.x   | :white_check_mark: |
 | 1.8.x   | :white_check_mark: |
-| 1.6.x   | :white_check_mark: |
+| 1.6.x   | :x:                |
 | 1.4.x   | :x:                |
 | 1.3.x   | :x:                |
 | 1.2.x   | :x:                |
@@ -57,9 +58,9 @@ Please include the following information in your report:
 - We aim to release fixes before public disclosure
 - We request a 90-day disclosure window for complex issues
 
-## Detection Rules (v1.8.0)
+## Detection Rules (v2.0.0)
 
-MUAD'DIB uses 12 parallel scanners producing the following rule IDs:
+MUAD'DIB uses 12 parallel scanners + 5 behavioral anomaly detection features, producing the following rule IDs:
 
 ### AST Scanner
 
@@ -153,6 +154,59 @@ Runtime behavioral analysis: packages are installed in an isolated Docker contai
 | MUADDIB-SANDBOX-007 | Unknown Process Spawned | MEDIUM |
 | MUADDIB-SANDBOX-008 | Container Timeout | CRITICAL |
 
+### Temporal Analysis Rules (v2.0) — Behavioral Anomaly Detection
+
+Behavioral detection analyzes changes between package versions to detect supply-chain attacks before they appear in IOC databases. These features query the npm registry at scan time and compare metadata/code across versions.
+
+#### Sudden Lifecycle Script Detection (`--temporal`)
+
+| Rule ID | Name | Severity | Description |
+|---------|------|----------|-------------|
+| MUADDIB-TEMPORAL-001 | Sudden Lifecycle Script Added (Critical) | CRITICAL | `preinstall`/`install`/`postinstall` script added in latest version. Attack vector #1 (Shai-Hulud, ua-parser-js, coa). |
+| MUADDIB-TEMPORAL-002 | Sudden Lifecycle Script Added | HIGH | Other lifecycle script (`prepare`, `prepack`, etc.) added in latest version. |
+| MUADDIB-TEMPORAL-003 | Lifecycle Script Modified | MEDIUM | Existing lifecycle script content changed between versions. |
+
+MITRE: T1195.002 (Supply Chain Compromise: Software Supply Chain)
+
+#### Temporal AST Diff (`--temporal-ast`)
+
+| Rule ID | Name | Severity | Description |
+|---------|------|----------|-------------|
+| MUADDIB-TEMPORAL-AST-001 | Dangerous API Added (Critical) | CRITICAL | `child_process`, `eval`, `Function`, `net.connect` appeared in latest version (absent from previous). |
+| MUADDIB-TEMPORAL-AST-002 | Dangerous API Added (High) | HIGH | `process.env`, `fetch`, `http`/`https` request appeared in latest version. |
+| MUADDIB-TEMPORAL-AST-003 | Dangerous API Added (Medium) | MEDIUM | `dns.lookup`, `fs.readFile` on sensitive path appeared in latest version. |
+
+MITRE: T1195.002 (Supply Chain Compromise: Software Supply Chain)
+
+#### Publish Frequency Anomaly (`--temporal-publish`)
+
+| Rule ID | Name | Severity | Description |
+|---------|------|----------|-------------|
+| MUADDIB-PUBLISH-001 | Publish Burst Detected | HIGH | Multiple versions published within 24h. Possible account compromise or automated attack. |
+| MUADDIB-PUBLISH-002 | Dormant Package Spike | HIGH | Package inactive for 6+ months with a sudden new version. Possible maintainer change or compromise. |
+| MUADDIB-PUBLISH-003 | Rapid Version Succession | MEDIUM | Versions published in rapid succession (< 1h). Possible automated attack or compromised CI/CD. |
+
+MITRE: T1195.002 (Supply Chain Compromise: Software Supply Chain)
+
+#### Maintainer Change Detection (`--temporal-maintainer`)
+
+| Rule ID | Name | Severity | Description |
+|---------|------|----------|-------------|
+| MUADDIB-MAINTAINER-001 | New Maintainer Added | HIGH | A new maintainer was added between the two latest versions. |
+| MUADDIB-MAINTAINER-002 | Suspicious Maintainer Detected | CRITICAL | Maintainer with suspicious name (generic, auto-generated, very short). High risk of account takeover. |
+| MUADDIB-MAINTAINER-003 | Sole Maintainer Changed | HIGH | The sole maintainer has changed. Strong indicator of account compromise (event-stream pattern). |
+| MUADDIB-MAINTAINER-004 | New Publisher Detected | MEDIUM | Latest version published by a different user than the previous version. |
+
+MITRE: T1195.002 (Supply Chain Compromise: Software Supply Chain)
+
+#### Canary Tokens / Honey Tokens (sandbox)
+
+| Rule ID | Name | Severity | Description |
+|---------|------|----------|-------------|
+| MUADDIB-CANARY-001 | Canary Token Exfiltration | CRITICAL | Package attempted to exfiltrate honey tokens (fake secrets) injected in the sandbox. Confirmed malicious behavior. |
+
+MITRE: T1552.001 (Unsecured Credentials: Credentials in Files)
+
 ### Paranoid Mode Rules
 
 | Rule ID | Name | Severity |
@@ -206,14 +260,29 @@ Runtime behavioral analysis: packages are installed in an isolated Docker contai
 2. **Signed commits**: Use GPG-signed commits when possible
 3. **Review dependencies**: Check new dependencies before adding them
 
+## Threat Model (v2.0)
+
+MUAD'DIB 2.0 uses a **dual detection approach**:
+
+1. **IOC-based detection** (v1.x): Matches packages against 225,000+ known malicious packages from OSV, DataDog, OSSF, GitHub Advisory, and other sources. Fast and reliable for known threats.
+
+2. **Behavioral anomaly detection** (v2.0): Analyzes changes between package versions to detect supply-chain attacks before they appear in IOC databases. Compares lifecycle scripts, AST, publish frequency, and maintainer metadata across versions. This approach can detect 0-day behavioral anomalies without any prior knowledge of the specific attack.
+
+The behavioral detection features are opt-in (`--temporal-full`) and query the npm registry at scan time. They are particularly effective against:
+- Account takeover attacks (event-stream pattern)
+- Compromised CI/CD pipelines (automated malicious publishes)
+- Dormant package hijacking (abandonware takeover)
+- Sudden code injection (Shai-Hulud, ua-parser-js pattern)
+
 ## Known Limitations
 
 MUAD'DIB is an educational tool and first-line defense. It has known limitations:
 
-- **IOC-based detection**: Only detects known threats, not zero-days
+- **Behavioral detection requires network**: Temporal features query the npm registry (requires internet access)
 - **No ML/AI**: Pattern matching is deterministic, sophisticated obfuscation may bypass
 - **npm and PyPI only**: Does not scan other package ecosystems (RubyGems, Maven, Go, etc.)
 - **Sandbox requires Docker**: Behavioral analysis needs Docker Desktop
+- **Temporal analysis is npm-only**: Behavioral anomaly detection (`--temporal-*`) currently only supports npm packages, not PyPI
 
 For enterprise-grade protection, consider complementing with:
 - [Socket.dev](https://socket.dev) - ML behavioral analysis

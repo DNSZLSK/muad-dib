@@ -399,6 +399,60 @@ Le moniteur scanne en moyenne un package toutes les 2-3 secondes. Sur une journe
 
 ---
 
+## MUAD'DIB 2.0 — Supply Chain Anomaly Detector (13 Fevrier 2026)
+
+### Le constat
+
+MUAD'DIB v1.x etait solide pour detecter les menaces **connues** : 225 000+ IOCs, 12 scanners paralleles, sandbox Docker, moniteur zero-day. Mais un probleme fondamental restait : l'outil etait 100% reactif. Si une attaque n'etait pas encore dans la base IOC, elle passait a travers.
+
+Les attaques comme ua-parser-js (2021) ou event-stream (2018) ont ete detectees des heures ou des jours apres la compromission initiale. Pendant ce temps, des milliers de devs avaient deja installe les versions malveillantes.
+
+### Le changement de paradigme
+
+En cherchant comment les outils comme Socket.dev et Phylum detectent les 0-days, j'ai identifie un pattern commun : **l'analyse comportementale entre versions**. Au lieu de chercher si un package est dans une liste noire, on compare ce qui a change entre la version N et la version N-1. Si un package qui n'avait jamais de `postinstall` en ajoute un soudainement, c'est un signal fort.
+
+En etudiant les attaques supply-chain recentes (Shai-Hulud, ua-parser-js, coa, eslint-scope) et les techniques de detection de Socket.dev, Phylum et AWS Security, j'ai identifie 5 features cles pour la detection comportementale :
+
+### Les 5 features
+
+**1. Detection soudaine de scripts lifecycle** (`--temporal`)
+Compare les scripts `preinstall`/`install`/`postinstall` entre les deux dernieres versions d'un package. Si un script d'installation apparait dans une version qui n'en avait pas, c'est le signal #1 des attaques supply-chain.
+
+**2. Diff AST temporel** (`--temporal-ast`)
+Telecharge les deux dernieres versions de chaque dependance, extrait les fichiers JS, parse les ASTs avec acorn, et detecte les APIs dangereuses nouvellement ajoutees : `child_process`, `eval`, `Function`, `net.connect`, `process.env`, `fetch`.
+
+**3. Anomalie de frequence de publication** (`--temporal-publish`)
+Analyse l'historique de publication : rafales de versions en 24h (compromission automatisee), package dormant depuis 6+ mois avec une nouvelle version soudaine (takeover), succession rapide (CI/CD compromis).
+
+**4. Detection de changement de maintainer** (`--temporal-maintainer`)
+Compare les maintainers entre versions : nouveau maintainer ajoute, seul maintainer remplace (pattern event-stream), noms suspects (generiques, auto-generes), nouveau publisher.
+
+**5. Canary tokens / honey tokens** (sandbox)
+Injecte de faux credentials (GITHUB_TOKEN, NPM_TOKEN, cles AWS) dans l'environnement sandbox. Si le package tente de les exfiltrer via HTTP, DNS, ou stdout, c'est la preuve directe de malveillance.
+
+### Refactoring des tests
+
+Avant v2.0, tous les tests etaient dans un seul fichier `tests/run-tests.js` de 4000 lignes. C'etait devenu ingerable. Refactoring en 16 fichiers modulaires :
+- `tests/run-tests.js` (orchestrateur)
+- `tests/integration/cli.test.js`, `monitor.test.js`
+- `tests/sandbox/sandbox.test.js`
+- `tests/temporal/` (temporal, ast-diff, publish, maintainer, canary-tokens)
+- etc.
+
+Passage de 370 a **541 tests**.
+
+### Impact
+
+MUAD'DIB peut maintenant detecter des 0-days comportementaux sans IOC. Les 5 features auraient detecte :
+- **Shai-Hulud** (2025) : temporal lifecycle + AST diff
+- **ua-parser-js** (2021) : changement maintainer + lifecycle
+- **event-stream** (2018) : changement seul maintainer + AST diff
+- **coa/rc** (2021) : rafale de publications + lifecycle
+
+Approche inspiree de Socket.dev et Phylum, adaptee a un outil CLI open source gratuit.
+
+---
+
 ## Etat actuel
 
 ### Ce qui fonctionne
@@ -418,12 +472,13 @@ Le moniteur scanne en moyenne un package toutes les 2-3 secondes. Sur une journe
 | **Pre-commit hooks** | Support pre-commit, husky, git natif |
 | **GitHub Action Marketplace** | Avec inputs/outputs et SARIF auto |
 | Version check | Notification automatique des nouvelles versions au demarrage |
-| Tests | **370 tests unitaires** + 56 fuzz + 15 adversariaux, **80% coverage** (Codecov) |
+| **Detection comportementale (v2.0)** | Temporal lifecycle, AST diff, publish anomaly, maintainer change, canary tokens |
+| Tests | **541 tests unitaires** + 56 fuzz + 15 adversariaux, **80% coverage** (Codecov) |
 | Audit securite | 2 audits complets, **58 issues corrigees**, [rapport PDF](MUADDIB_Security_Audit_Report_v1.4.1.pdf) |
 
 ### Ce qui manque (honnêtement)
 
-**Pas de ML/machine learning** : L'analyse repose sur des patterns statiques et des IOCs connus. Un attaquant qui obfusque différemment peut passer à travers.
+**Pas de ML/machine learning** : L'analyse repose sur des patterns statiques, des IOCs connus, et des heuristiques comportementales (v2.0). La detection comportementale reduit le besoin de ML, mais un attaquant sophistique qui obfusque differemment peut encore passer a travers.
 
 **Pas d'interception TLS type MITM** : Le sandbox capture le SNI (Server Name Indication) et corrèle DNS/TLS, mais ne déchiffre pas le contenu des connexions HTTPS.
 
