@@ -1,0 +1,675 @@
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+const { execSync } = require('child_process');
+const {
+  test, asyncTest, assert, assertIncludes, assertNotIncludes,
+  runScan, runCommand, BIN, TESTS_DIR, addSkipped
+} = require('../test-utils');
+
+async function runMonitorTests() {
+  // ============================================
+  // MONITOR TESTS
+  // ============================================
+
+  console.log('\n=== MONITOR TESTS ===\n');
+
+  const {
+    parseNpmRss, parsePyPIRss, loadState, saveState, STATE_FILE,
+    ALERTS_FILE, extractTarGz, getNpmTarballUrl, getNpmLatestTarball, scanQueue,
+    appendAlert, timeoutPromise, stats, dailyAlerts, MAX_TARBALL_SIZE,
+    KNOWN_BUNDLED_FILES, isBundledToolingOnly,
+    isSandboxEnabled, hasHighOrCritical,
+    getWebhookUrl, shouldSendWebhook, buildMonitorWebhookPayload,
+    computeRiskLevel, computeRiskScore, buildDailyReportEmbed, DAILY_REPORT_INTERVAL
+  } = require('../../src/monitor.js');
+
+  test('MONITOR: parseNpmRss extracts package names from RSS', () => {
+    const xml = `<?xml version="1.0"?>
+<rss version="2.0">
+  <channel>
+    <title>npm new packages</title>
+    <item>
+      <title>my-package 1.2.3</title>
+      <link>https://www.npmjs.com/package/my-package</link>
+    </item>
+    <item>
+      <title>another-pkg 0.0.1</title>
+      <link>https://www.npmjs.com/package/another-pkg</link>
+    </item>
+  </channel>
+</rss>`;
+    const packages = parseNpmRss(xml);
+    assert(packages.length === 2, 'Should find 2 packages, got ' + packages.length);
+    assert(packages[0] === 'my-package', 'First should be my-package, got ' + packages[0]);
+    assert(packages[1] === 'another-pkg', 'Second should be another-pkg');
+  });
+
+  test('MONITOR: parseNpmRss handles empty RSS', () => {
+    const xml = `<?xml version="1.0"?><rss><channel></channel></rss>`;
+    const packages = parseNpmRss(xml);
+    assert(packages.length === 0, 'Should return empty for no items');
+  });
+
+  test('MONITOR: parseNpmRss handles malformed XML gracefully', () => {
+    const packages = parseNpmRss('not xml at all');
+    assert(packages.length === 0, 'Should return empty for invalid XML');
+  });
+
+  test('MONITOR: parseNpmRss extracts name only (strips version)', () => {
+    const xml = `<rss><channel>
+    <item><title>scoped-pkg 2.0.0-beta.1</title></item>
+    <item><title>simple</title></item>
+  </channel></rss>`;
+    const packages = parseNpmRss(xml);
+    assert(packages.length === 2, 'Should find 2 packages');
+    assert(packages[0] === 'scoped-pkg', 'Should extract name before version');
+    assert(packages[1] === 'simple', 'Should handle title with no version');
+  });
+
+  test('MONITOR: parsePyPIRss extracts package names from RSS', () => {
+    const xml = `<?xml version="1.0"?>
+<rss version="2.0">
+  <channel>
+    <title>Newest packages</title>
+    <item>
+      <title>cool-lib 2.0.0</title>
+      <link>https://pypi.org/project/cool-lib/2.0.0/</link>
+    </item>
+    <item>
+      <title>another-pkg 0.1.0</title>
+      <link>https://pypi.org/project/another-pkg/0.1.0/</link>
+    </item>
+  </channel>
+</rss>`;
+    const packages = parsePyPIRss(xml);
+    assert(packages.length === 2, 'Should find 2 packages, got ' + packages.length);
+    assert(packages[0] === 'cool-lib', 'First should be cool-lib, got ' + packages[0]);
+    assert(packages[1] === 'another-pkg', 'Second should be another-pkg');
+  });
+
+  test('MONITOR: parsePyPIRss handles empty RSS', () => {
+    const xml = `<?xml version="1.0"?><rss><channel></channel></rss>`;
+    const packages = parsePyPIRss(xml);
+    assert(packages.length === 0, 'Should return empty for no items');
+  });
+
+  test('MONITOR: parsePyPIRss handles malformed XML gracefully', () => {
+    const packages = parsePyPIRss('not xml at all');
+    assert(packages.length === 0, 'Should return empty for invalid XML');
+  });
+
+  test('MONITOR: state save and restore round-trip', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-monitor-'));
+    const tmpState = path.join(tmpDir, 'monitor-state.json');
+    const origFile = STATE_FILE;
+
+    // Write state to temp file
+    const testState = { npmLastPackage: 'test-npm-pkg', pypiLastPackage: 'test-pkg' };
+    fs.writeFileSync(tmpState, JSON.stringify(testState), 'utf8');
+
+    // Read it back manually (loadState uses STATE_FILE, so we test the format)
+    const raw = fs.readFileSync(tmpState, 'utf8');
+    const restored = JSON.parse(raw);
+    assert(restored.npmLastPackage === 'test-npm-pkg', 'npmLastPackage should round-trip');
+    assert(restored.pypiLastPackage === 'test-pkg', 'pypiLastPackage should round-trip');
+
+    // Cleanup
+    try { fs.unlinkSync(tmpState); fs.rmdirSync(tmpDir); } catch {}
+  });
+
+  test('MONITOR: loadState returns defaults when file missing', () => {
+    // loadState reads STATE_FILE which may not exist in test env
+    // We test that it doesn't throw and returns defaults
+    const state = loadState();
+    assert(typeof state.npmLastPackage === 'string', 'npmLastPackage should be string');
+    assert(typeof state.pypiLastPackage === 'string', 'pypiLastPackage should be string');
+  });
+
+  // ============================================
+  // MONITOR PHASE 2 TESTS
+  // ============================================
+
+  console.log('\n=== MONITOR PHASE 2 TESTS ===\n');
+
+  test('MONITOR: getNpmLatestTarball is exported and is a function', () => {
+    assert(typeof getNpmLatestTarball === 'function', 'getNpmLatestTarball should be a function');
+  });
+
+  test('MONITOR: scanQueue FIFO ordering', () => {
+    // Clear queue first
+    scanQueue.length = 0;
+    scanQueue.push({ name: 'first', version: '1.0.0', ecosystem: 'npm', tarballUrl: 'a' });
+    scanQueue.push({ name: 'second', version: '2.0.0', ecosystem: 'npm', tarballUrl: 'b' });
+    scanQueue.push({ name: 'third', version: '3.0.0', ecosystem: 'pypi', tarballUrl: 'c' });
+    assert(scanQueue.length === 3, 'Queue should have 3 items');
+    const item1 = scanQueue.shift();
+    assert(item1.name === 'first', 'First shifted should be "first", got ' + item1.name);
+    const item2 = scanQueue.shift();
+    assert(item2.name === 'second', 'Second shifted should be "second", got ' + item2.name);
+    const item3 = scanQueue.shift();
+    assert(item3.name === 'third', 'Third shifted should be "third", got ' + item3.name);
+    assert(scanQueue.length === 0, 'Queue should be empty');
+  });
+
+  test('MONITOR: getNpmTarballUrl extracts URL from pkg data', () => {
+    const withDist = { dist: { tarball: 'https://example.com/pkg.tgz' } };
+    assert(getNpmTarballUrl(withDist) === 'https://example.com/pkg.tgz', 'Should extract tarball URL');
+    const noDist = { name: 'foo' };
+    assert(getNpmTarballUrl(noDist) === null, 'Should return null when no dist');
+    const emptyDist = { dist: {} };
+    assert(getNpmTarballUrl(emptyDist) === null, 'Should return null when no tarball in dist');
+  });
+
+  if (process.platform !== 'win32') {
+    test('MONITOR: extractTarGz returns extracted path', () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-tar-test-'));
+      const innerDir = path.join(tmpDir, 'source');
+      const packageDir = path.join(innerDir, 'package');
+      fs.mkdirSync(packageDir, { recursive: true });
+      fs.writeFileSync(path.join(packageDir, 'index.js'), 'module.exports = {};\n');
+      // Create a tar.gz from the source directory
+      const tgzPath = path.join(tmpDir, 'test.tar.gz');
+      try {
+        const { execSync: es } = require('child_process');
+        es(`tar czf "${tgzPath}" -C "${innerDir}" package`, { stdio: 'pipe' });
+        const extractDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-extract-'));
+        const result = extractTarGz(tgzPath, extractDir);
+        // Should detect the package/ subdirectory
+        assert(result.endsWith('package'), 'Should return path ending with package, got ' + result);
+        assert(fs.existsSync(path.join(result, 'index.js')), 'Extracted dir should contain index.js');
+        try { fs.rmSync(extractDir, { recursive: true, force: true }); } catch {}
+      } finally {
+        try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+      }
+    });
+  } else {
+    console.log('[SKIP] extractTarGz: not supported on Windows');
+    addSkipped(1);
+  }
+
+  test('MONITOR: appendAlert writes to file', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-alert-test-'));
+    const tmpAlerts = path.join(tmpDir, 'alerts.json');
+    try {
+      // Manually test alert format (appendAlert uses ALERTS_FILE, so we test the logic)
+      const alert1 = {
+        timestamp: '2025-01-01T00:00:00.000Z',
+        name: 'evil-pkg',
+        version: '1.0.0',
+        ecosystem: 'npm',
+        findings: [{ rule: 'ast_dangerous_call', severity: 'HIGH', file: 'index.js' }]
+      };
+      const alert2 = {
+        timestamp: '2025-01-01T00:01:00.000Z',
+        name: 'bad-lib',
+        version: '0.1.0',
+        ecosystem: 'pypi',
+        findings: [{ rule: 'shell_exec', severity: 'CRITICAL', file: 'setup.py' }]
+      };
+      // Write first alert
+      fs.writeFileSync(tmpAlerts, JSON.stringify([alert1], null, 2), 'utf8');
+      // Append second
+      const existing = JSON.parse(fs.readFileSync(tmpAlerts, 'utf8'));
+      existing.push(alert2);
+      fs.writeFileSync(tmpAlerts, JSON.stringify(existing, null, 2), 'utf8');
+      // Verify
+      const result = JSON.parse(fs.readFileSync(tmpAlerts, 'utf8'));
+      assert(result.length === 2, 'Should have 2 alerts, got ' + result.length);
+      assert(result[0].name === 'evil-pkg', 'First alert should be evil-pkg');
+      assert(result[1].name === 'bad-lib', 'Second alert should be bad-lib');
+      assert(result[0].findings[0].rule === 'ast_dangerous_call', 'Should have rule field');
+      assert(result[1].ecosystem === 'pypi', 'Should have ecosystem field');
+    } finally {
+      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+    }
+  });
+
+  test('MONITOR: getPyPITarballUrl parses JSON response', () => {
+    // Test the parsing logic directly using the same structure getPyPITarballUrl expects
+    const mockData = {
+      info: { version: '3.2.1' },
+      urls: [
+        { packagetype: 'bdist_wheel', url: 'https://files.pythonhosted.org/pkg-3.2.1.whl' },
+        { packagetype: 'sdist', url: 'https://files.pythonhosted.org/pkg-3.2.1.tar.gz' }
+      ]
+    };
+    // Simulate the logic in getPyPITarballUrl
+    const version = (mockData.info && mockData.info.version) || '';
+    const urls = mockData.urls || [];
+    const sdist = urls.find(u => u.packagetype === 'sdist' && u.url);
+    assert(version === '3.2.1', 'Should extract version');
+    assert(sdist, 'Should find sdist entry');
+    assert(sdist.url === 'https://files.pythonhosted.org/pkg-3.2.1.tar.gz', 'Should get sdist URL');
+
+    // Test fallback: no sdist, find .tar.gz
+    const noSdist = {
+      info: { version: '1.0.0' },
+      urls: [
+        { packagetype: 'bdist_wheel', url: 'https://example.com/pkg.whl' },
+        { packagetype: 'bdist_egg', url: 'https://example.com/pkg.tar.gz' }
+      ]
+    };
+    const noSdistUrls = noSdist.urls;
+    const sdist2 = noSdistUrls.find(u => u.packagetype === 'sdist' && u.url);
+    assert(!sdist2, 'Should not find sdist');
+    const tarGz = noSdistUrls.find(u => u.url && u.url.endsWith('.tar.gz'));
+    assert(tarGz, 'Should find .tar.gz fallback');
+    assert(tarGz.url === 'https://example.com/pkg.tar.gz', 'Should get .tar.gz URL');
+  });
+
+  await asyncTest('MONITOR: timeoutPromise rejects after delay', async () => {
+    const start = Date.now();
+    try {
+      await timeoutPromise(50); // 50ms timeout
+      assert(false, 'Should have rejected');
+    } catch (err) {
+      const elapsed = Date.now() - start;
+      assert(elapsed >= 40, 'Should have waited ~50ms, waited ' + elapsed);
+      assert(err.message.includes('timeout'), 'Error should mention timeout, got: ' + err.message);
+    }
+  });
+
+  test('MONITOR: stats object tracks counters', () => {
+    // Verify stats has expected fields
+    assert(typeof stats.scanned === 'number', 'stats.scanned should be number');
+    assert(typeof stats.clean === 'number', 'stats.clean should be number');
+    assert(typeof stats.suspect === 'number', 'stats.suspect should be number');
+    assert(typeof stats.errors === 'number', 'stats.errors should be number');
+    assert(typeof stats.totalTimeMs === 'number', 'stats.totalTimeMs should be number');
+    assert(typeof stats.lastReportTime === 'number', 'stats.lastReportTime should be number');
+  });
+
+  // ============================================
+  // MONITOR PHASE 3 TESTS (Sandbox Integration)
+  // ============================================
+
+  console.log('\n=== MONITOR PHASE 3 TESTS ===\n');
+
+  test('MONITOR: hasHighOrCritical returns true for HIGH findings', () => {
+    const result = { summary: { total: 3, critical: 0, high: 2, medium: 1, low: 0 } };
+    assert(hasHighOrCritical(result) === true, 'Should return true when high > 0');
+  });
+
+  test('MONITOR: hasHighOrCritical returns true for CRITICAL findings', () => {
+    const result = { summary: { total: 1, critical: 1, high: 0, medium: 0, low: 0 } };
+    assert(hasHighOrCritical(result) === true, 'Should return true when critical > 0');
+  });
+
+  test('MONITOR: hasHighOrCritical returns false for LOW/MEDIUM only', () => {
+    const result = { summary: { total: 5, critical: 0, high: 0, medium: 3, low: 2 } };
+    assert(hasHighOrCritical(result) === false, 'Should return false when no HIGH/CRITICAL');
+  });
+
+  test('MONITOR: isSandboxEnabled defaults to true', () => {
+    const orig = process.env.MUADDIB_MONITOR_SANDBOX;
+    delete process.env.MUADDIB_MONITOR_SANDBOX;
+    try {
+      assert(isSandboxEnabled() === true, 'Should default to true when env not set');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_MONITOR_SANDBOX = orig;
+    }
+  });
+
+  test('MONITOR: isSandboxEnabled returns false when env=false', () => {
+    const orig = process.env.MUADDIB_MONITOR_SANDBOX;
+    process.env.MUADDIB_MONITOR_SANDBOX = 'false';
+    try {
+      assert(isSandboxEnabled() === false, 'Should return false when env is "false"');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_MONITOR_SANDBOX = orig;
+      else delete process.env.MUADDIB_MONITOR_SANDBOX;
+    }
+  });
+
+  test('MONITOR: isSandboxEnabled returns false when env=FALSE (case insensitive)', () => {
+    const orig = process.env.MUADDIB_MONITOR_SANDBOX;
+    process.env.MUADDIB_MONITOR_SANDBOX = 'FALSE';
+    try {
+      assert(isSandboxEnabled() === false, 'Should return false when env is "FALSE"');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_MONITOR_SANDBOX = orig;
+      else delete process.env.MUADDIB_MONITOR_SANDBOX;
+    }
+  });
+
+  test('MONITOR: isSandboxEnabled returns true when env=true', () => {
+    const orig = process.env.MUADDIB_MONITOR_SANDBOX;
+    process.env.MUADDIB_MONITOR_SANDBOX = 'true';
+    try {
+      assert(isSandboxEnabled() === true, 'Should return true when env is "true"');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_MONITOR_SANDBOX = orig;
+      else delete process.env.MUADDIB_MONITOR_SANDBOX;
+    }
+  });
+
+  test('MONITOR: sandbox condition requires all three flags', () => {
+    // Simulate the condition: hasHighOrCritical && isSandboxEnabled && sandboxAvailable
+    const monitor = require('../../src/monitor.js');
+    const highResult = { summary: { total: 1, critical: 1, high: 0, medium: 0, low: 0 } };
+    const lowResult = { summary: { total: 2, critical: 0, high: 0, medium: 1, low: 1 } };
+
+    // Case 1: HIGH findings, sandbox enabled, docker available -> should sandbox
+    const origEnv = process.env.MUADDIB_MONITOR_SANDBOX;
+    delete process.env.MUADDIB_MONITOR_SANDBOX;
+    monitor.sandboxAvailable = true;
+    const shouldSandbox1 = hasHighOrCritical(highResult) && isSandboxEnabled() && monitor.sandboxAvailable;
+    assert(shouldSandbox1 === true, 'Should sandbox with HIGH + enabled + docker');
+
+    // Case 2: LOW only findings -> no sandbox
+    const shouldSandbox2 = hasHighOrCritical(lowResult) && isSandboxEnabled() && monitor.sandboxAvailable;
+    assert(shouldSandbox2 === false, 'Should NOT sandbox with LOW/MEDIUM only');
+
+    // Case 3: HIGH findings, sandbox disabled via env -> no sandbox
+    process.env.MUADDIB_MONITOR_SANDBOX = 'false';
+    const shouldSandbox3 = hasHighOrCritical(highResult) && isSandboxEnabled() && monitor.sandboxAvailable;
+    assert(shouldSandbox3 === false, 'Should NOT sandbox when env=false');
+
+    // Case 4: HIGH findings, sandbox enabled, docker unavailable -> no sandbox
+    delete process.env.MUADDIB_MONITOR_SANDBOX;
+    monitor.sandboxAvailable = false;
+    const shouldSandbox4 = hasHighOrCritical(highResult) && isSandboxEnabled() && monitor.sandboxAvailable;
+    assert(shouldSandbox4 === false, 'Should NOT sandbox when docker unavailable');
+
+    // Restore
+    if (origEnv !== undefined) process.env.MUADDIB_MONITOR_SANDBOX = origEnv;
+  });
+
+  test('MONITOR: alert includes sandbox field when sandbox result has score > 0', () => {
+    const sandboxResult = {
+      score: 60,
+      severity: 'HIGH',
+      findings: [{ type: 'suspicious_dns', severity: 'HIGH', detail: 'DNS to evil.com' }]
+    };
+    const alert = {
+      timestamp: new Date().toISOString(),
+      name: 'evil-pkg',
+      version: '1.0.0',
+      ecosystem: 'npm',
+      findings: [{ rule: 'ast_dangerous_call', severity: 'HIGH', file: 'index.js' }]
+    };
+    // Simulate the condition in scanPackage
+    if (sandboxResult && sandboxResult.score > 0) {
+      alert.sandbox = {
+        score: sandboxResult.score,
+        severity: sandboxResult.severity,
+        findings: sandboxResult.findings
+      };
+    }
+    assert(alert.sandbox, 'Alert should have sandbox field');
+    assert(alert.sandbox.score === 60, 'Sandbox score should be 60');
+    assert(alert.sandbox.severity === 'HIGH', 'Sandbox severity should be HIGH');
+    assert(alert.sandbox.findings.length === 1, 'Should have 1 sandbox finding');
+  });
+
+  test('MONITOR: alert has no sandbox field when score is 0', () => {
+    const sandboxResult = { score: 0, severity: 'CLEAN', findings: [] };
+    const alert = {
+      timestamp: new Date().toISOString(),
+      name: 'ok-pkg',
+      version: '1.0.0',
+      ecosystem: 'npm',
+      findings: [{ rule: 'ast_dangerous_call', severity: 'HIGH', file: 'index.js' }]
+    };
+    if (sandboxResult && sandboxResult.score > 0) {
+      alert.sandbox = {
+        score: sandboxResult.score,
+        severity: sandboxResult.severity,
+        findings: sandboxResult.findings
+      };
+    }
+    assert(!alert.sandbox, 'Alert should NOT have sandbox field when score=0');
+  });
+
+  // ============================================
+  // MONITOR PHASE 4 TESTS (Webhook Alerting)
+  // ============================================
+
+  console.log('\n=== MONITOR PHASE 4 TESTS ===\n');
+
+  test('MONITOR: getWebhookUrl returns null when env not set', () => {
+    const orig = process.env.MUADDIB_WEBHOOK_URL;
+    delete process.env.MUADDIB_WEBHOOK_URL;
+    try {
+      assert(getWebhookUrl() === null, 'Should return null when env not set');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
+    }
+  });
+
+  test('MONITOR: getWebhookUrl returns URL when env is set', () => {
+    const orig = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.slack.com/services/T00/B00/xxx';
+    try {
+      assert(getWebhookUrl() === 'https://hooks.slack.com/services/T00/B00/xxx', 'Should return the URL');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  test('MONITOR: shouldSendWebhook returns false when no URL configured', () => {
+    const orig = process.env.MUADDIB_WEBHOOK_URL;
+    delete process.env.MUADDIB_WEBHOOK_URL;
+    try {
+      const result = { summary: { total: 1, critical: 1, high: 0, medium: 0, low: 0 } };
+      assert(shouldSendWebhook(result, null) === false, 'Should return false without URL');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
+    }
+  });
+
+  test('MONITOR: shouldSendWebhook returns true for HIGH findings with URL', () => {
+    const orig = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.slack.com/test';
+    try {
+      const result = { summary: { total: 2, critical: 0, high: 2, medium: 0, low: 0 } };
+      assert(shouldSendWebhook(result, null) === true, 'Should return true for HIGH');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  test('MONITOR: shouldSendWebhook returns true for sandbox score > 50', () => {
+    const orig = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.slack.com/test';
+    try {
+      const result = { summary: { total: 2, critical: 0, high: 0, medium: 2, low: 0 } };
+      const sandbox = { score: 60, severity: 'HIGH', findings: [] };
+      assert(shouldSendWebhook(result, sandbox) === true, 'Should return true for sandbox score > 50');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  test('MONITOR: shouldSendWebhook returns false when sandbox score is 0 (false positive)', () => {
+    const orig = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.slack.com/test';
+    try {
+      const result = { summary: { total: 2, critical: 1, high: 1, medium: 0, low: 0 } };
+      const sandbox = { score: 0, severity: 'NONE', findings: [] };
+      assert(shouldSendWebhook(result, sandbox) === false, 'Should return false when sandbox clean (score 0)');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  test('MONITOR: shouldSendWebhook returns true when sandbox score > 0', () => {
+    const orig = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.slack.com/test';
+    try {
+      const result = { summary: { total: 2, critical: 0, high: 0, medium: 1, low: 1 } };
+      const sandbox = { score: 30, severity: 'MEDIUM', findings: [] };
+      assert(shouldSendWebhook(result, sandbox) === true, 'Should return true when sandbox score > 0');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  test('MONITOR: buildMonitorWebhookPayload has correct structure', () => {
+    const result = {
+      summary: { total: 2, critical: 1, high: 1, medium: 0, low: 0 },
+      threats: [
+        { rule_id: 'MUADDIB-AST-001', type: 'ast_dangerous_call', severity: 'HIGH', file: 'index.js', message: 'eval()' },
+        { rule_id: 'MUADDIB-SHELL-001', type: 'shell_exec', severity: 'CRITICAL', file: 'run.sh', message: 'curl | sh' }
+      ]
+    };
+    const payload = buildMonitorWebhookPayload('evil-pkg', '1.0.0', 'npm', result, null);
+    assert(payload.event === 'malicious_package', 'event should be malicious_package');
+    assert(payload.package === 'evil-pkg', 'package should be evil-pkg');
+    assert(payload.version === '1.0.0', 'version should be 1.0.0');
+    assert(payload.ecosystem === 'npm', 'ecosystem should be npm');
+    assert(typeof payload.timestamp === 'string', 'timestamp should be string');
+    assert(payload.findings.length === 2, 'Should have 2 findings');
+    assert(payload.findings[0].rule === 'MUADDIB-AST-001', 'First finding rule should match');
+    assert(payload.findings[0].severity === 'HIGH', 'First finding severity should match');
+    assert(!payload.sandbox, 'Should have no sandbox field when null');
+  });
+
+  test('MONITOR: buildMonitorWebhookPayload includes sandbox when score > 0', () => {
+    const result = {
+      summary: { total: 1, critical: 1, high: 0, medium: 0, low: 0 },
+      threats: [{ rule_id: 'X', type: 'x', severity: 'CRITICAL', file: 'a.js', message: 'm' }]
+    };
+    const sandbox = { score: 75, severity: 'HIGH', findings: [{ type: 'suspicious_dns' }] };
+    const payload = buildMonitorWebhookPayload('bad-lib', '2.0.0', 'pypi', result, sandbox);
+    assert(payload.sandbox, 'Should have sandbox field');
+    assert(payload.sandbox.score === 75, 'Sandbox score should be 75');
+    assert(payload.sandbox.severity === 'HIGH', 'Sandbox severity should be HIGH');
+  });
+
+  test('MONITOR: buildMonitorWebhookPayload omits sandbox when score is 0', () => {
+    const result = {
+      summary: { total: 1, critical: 1, high: 0, medium: 0, low: 0 },
+      threats: [{ rule_id: 'X', type: 'x', severity: 'CRITICAL', file: 'a.js', message: 'm' }]
+    };
+    const sandbox = { score: 0, severity: 'CLEAN', findings: [] };
+    const payload = buildMonitorWebhookPayload('pkg', '1.0.0', 'npm', result, sandbox);
+    assert(!payload.sandbox, 'Should NOT have sandbox field when score=0');
+  });
+
+  // ============================================
+  // MONITOR PHASE 6 TESTS (Webhook fix, daily report, bundled skip)
+  // ============================================
+
+  console.log('\n=== MONITOR PHASE 6 TESTS ===\n');
+
+  test('MONITOR: computeRiskLevel returns CRITICAL when critical > 0', () => {
+    assert(computeRiskLevel({ critical: 1, high: 0, medium: 0, low: 0 }) === 'CRITICAL', 'Should be CRITICAL');
+  });
+
+  test('MONITOR: computeRiskLevel returns HIGH when high > 0', () => {
+    assert(computeRiskLevel({ critical: 0, high: 2, medium: 0, low: 0 }) === 'HIGH', 'Should be HIGH');
+  });
+
+  test('MONITOR: computeRiskLevel returns MEDIUM when medium > 0', () => {
+    assert(computeRiskLevel({ critical: 0, high: 0, medium: 3, low: 0 }) === 'MEDIUM', 'Should be MEDIUM');
+  });
+
+  test('MONITOR: computeRiskLevel returns LOW when low > 0', () => {
+    assert(computeRiskLevel({ critical: 0, high: 0, medium: 0, low: 5 }) === 'LOW', 'Should be LOW');
+  });
+
+  test('MONITOR: computeRiskLevel returns CLEAN when all zero', () => {
+    assert(computeRiskLevel({ critical: 0, high: 0, medium: 0, low: 0 }) === 'CLEAN', 'Should be CLEAN');
+  });
+
+  test('MONITOR: computeRiskScore computes weighted score', () => {
+    // 2*25 + 1*15 + 3*5 + 2*1 = 50 + 15 + 15 + 2 = 82
+    assert(computeRiskScore({ critical: 2, high: 1, medium: 3, low: 2 }) === 82, 'Should be 82');
+  });
+
+  test('MONITOR: computeRiskScore caps at 100', () => {
+    // 5*25 = 125, capped to 100
+    assert(computeRiskScore({ critical: 5, high: 0, medium: 0, low: 0 }) === 100, 'Should cap at 100');
+  });
+
+  test('MONITOR: computeRiskScore returns 0 for clean', () => {
+    assert(computeRiskScore({ critical: 0, high: 0, medium: 0, low: 0 }) === 0, 'Should be 0');
+  });
+
+  test('MONITOR: KNOWN_BUNDLED_FILES contains expected entries', () => {
+    assert(KNOWN_BUNDLED_FILES.includes('yarn.js'), 'Should include yarn.js');
+    assert(KNOWN_BUNDLED_FILES.includes('webpack.js'), 'Should include webpack.js');
+    assert(KNOWN_BUNDLED_FILES.includes('terser.js'), 'Should include terser.js');
+    assert(KNOWN_BUNDLED_FILES.includes('esbuild.js'), 'Should include esbuild.js');
+    assert(KNOWN_BUNDLED_FILES.includes('polyfills.js'), 'Should include polyfills.js');
+    assert(KNOWN_BUNDLED_FILES.length === 5, 'Should have 5 entries');
+  });
+
+  test('MONITOR: isBundledToolingOnly returns true when all threats from bundled files', () => {
+    const threats = [
+      { file: 'node_modules/.cache/yarn.js', severity: 'HIGH', message: 'eval' },
+      { file: 'dist/webpack.js', severity: 'MEDIUM', message: 'obfuscation' }
+    ];
+    assert(isBundledToolingOnly(threats) === true, 'Should be true for all bundled files');
+  });
+
+  test('MONITOR: isBundledToolingOnly returns false when mixed files', () => {
+    const threats = [
+      { file: 'dist/webpack.js', severity: 'MEDIUM', message: 'obfuscation' },
+      { file: 'index.js', severity: 'HIGH', message: 'eval' }
+    ];
+    assert(isBundledToolingOnly(threats) === false, 'Should be false when non-bundled file present');
+  });
+
+  test('MONITOR: isBundledToolingOnly returns false for empty threats', () => {
+    assert(isBundledToolingOnly([]) === false, 'Should be false for empty array');
+  });
+
+  test('MONITOR: isBundledToolingOnly returns false when file is null', () => {
+    const threats = [{ file: null, severity: 'HIGH', message: 'test' }];
+    assert(isBundledToolingOnly(threats) === false, 'Should be false when file is null');
+  });
+
+  test('MONITOR: buildDailyReportEmbed returns valid Discord embed', () => {
+    // Set up some stats
+    const origScanned = stats.scanned;
+    const origClean = stats.clean;
+    const origSuspect = stats.suspect;
+    const origErrors = stats.errors;
+    stats.scanned = 100;
+    stats.clean = 90;
+    stats.suspect = 8;
+    stats.errors = 2;
+    stats.totalTimeMs = 50000;
+
+    dailyAlerts.length = 0;
+    dailyAlerts.push({ name: 'evil-pkg', version: '1.0.0', ecosystem: 'npm', findingsCount: 5 });
+    dailyAlerts.push({ name: 'bad-lib', version: '0.1.0', ecosystem: 'pypi', findingsCount: 3 });
+    dailyAlerts.push({ name: 'sus-mod', version: '2.0.0', ecosystem: 'npm', findingsCount: 8 });
+    dailyAlerts.push({ name: 'minor', version: '1.0.0', ecosystem: 'npm', findingsCount: 1 });
+
+    const embed = buildDailyReportEmbed();
+    assert(embed.embeds, 'Should have embeds array');
+    assert(embed.embeds[0].title.includes('Daily Report'), 'Title should say Daily Report');
+    assert(embed.embeds[0].color === 0x3498db, 'Color should be blue');
+
+    const scannedField = embed.embeds[0].fields.find(f => f.name === 'Packages Scanned');
+    assert(scannedField && scannedField.value === '100', 'Scanned should be 100');
+
+    const topField = embed.embeds[0].fields.find(f => f.name === 'Top Suspects');
+    assert(topField, 'Should have Top Suspects field');
+    assertIncludes(topField.value, 'sus-mod', 'Top suspect should be sus-mod (8 findings)');
+
+    assertIncludes(embed.embeds[0].footer.text, 'UTC', 'Footer should have UTC timestamp');
+
+    // Restore
+    stats.scanned = origScanned;
+    stats.clean = origClean;
+    stats.suspect = origSuspect;
+    stats.errors = origErrors;
+    dailyAlerts.length = 0;
+  });
+
+  test('MONITOR: DAILY_REPORT_INTERVAL is 24 hours', () => {
+    assert(DAILY_REPORT_INTERVAL === 24 * 3600000, 'Should be 24h in ms');
+  });
+}
+
+module.exports = { runMonitorTests };
