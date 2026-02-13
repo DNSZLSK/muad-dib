@@ -9,6 +9,7 @@ const { sendWebhook } = require('./webhook.js');
 const { detectSuddenLifecycleChange } = require('./temporal-analysis.js');
 const { detectSuddenAstChanges } = require('./temporal-ast-diff.js');
 const { detectPublishAnomaly } = require('./publish-anomaly.js');
+const { detectMaintainerChange } = require('./maintainer-change.js');
 
 const STATE_FILE = path.join(__dirname, '..', 'data', 'monitor-state.json');
 const ALERTS_FILE = path.join(__dirname, '..', 'data', 'monitor-alerts.json');
@@ -385,6 +386,104 @@ async function runTemporalPublishCheck(packageName) {
     return result;
   } catch (err) {
     console.error(`[MONITOR] Publish frequency analysis error for ${packageName}: ${err.message}`);
+    return null;
+  }
+}
+
+function isTemporalMaintainerEnabled() {
+  const env = process.env.MUADDIB_MONITOR_TEMPORAL_MAINTAINER;
+  if (env !== undefined && env.toLowerCase() === 'false') return false;
+  return true;
+}
+
+function buildMaintainerChangeWebhookEmbed(maintainerResult) {
+  const findings = maintainerResult.findings || [];
+  const topFinding = findings[0] || {};
+  const severity = topFinding.severity || 'HIGH';
+  const color = severity === 'CRITICAL' ? 0xe74c3c : severity === 'HIGH' ? 0xe67e22 : 0xf1c40f;
+  const emoji = severity === 'CRITICAL' ? '\uD83D\uDD34' : severity === 'HIGH' ? '\uD83D\uDFE0' : '\uD83D\uDFE1';
+
+  const findingLines = findings.map(f => {
+    let detail = `**${f.type}** — ${f.severity}: ${f.description}`;
+    if (f.riskAssessment && f.riskAssessment.reasons.length > 0) {
+      detail += `\nRisk: ${f.riskAssessment.reasons.join(', ')}`;
+    }
+    return detail;
+  }).join('\n');
+
+  const pkgName = maintainerResult.packageName;
+  const npmLink = `https://www.npmjs.com/package/${pkgName}`;
+
+  return {
+    embeds: [{
+      title: `${emoji} MAINTAINER CHANGE \u2014 ${severity}`,
+      color: color,
+      fields: [
+        { name: 'Package', value: `[${pkgName}](${npmLink})`, inline: true },
+        { name: 'Severity', value: severity, inline: true },
+        { name: 'Findings', value: findingLines || 'None', inline: false },
+        { name: 'Action', value: 'Verify legitimacy before installing', inline: false }
+      ],
+      footer: {
+        text: `MUAD'DIB Maintainer Change Analysis | ${new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, ' UTC')}`
+      },
+      timestamp: new Date().toISOString()
+    }]
+  };
+}
+
+async function tryTemporalMaintainerAlert(maintainerResult) {
+  const url = getWebhookUrl();
+  if (!url) return;
+
+  const payload = buildMaintainerChangeWebhookEmbed(maintainerResult);
+  try {
+    await sendWebhook(url, payload, { rawPayload: true });
+    console.log(`[MONITOR] Maintainer change webhook sent for ${maintainerResult.packageName}`);
+  } catch (err) {
+    console.error(`[MONITOR] Maintainer change webhook failed for ${maintainerResult.packageName}: ${err.message}`);
+  }
+}
+
+async function runTemporalMaintainerCheck(packageName) {
+  if (!isTemporalMaintainerEnabled()) return null;
+  try {
+    const result = await detectMaintainerChange(packageName);
+    if (result.suspicious) {
+      const findingsStr = result.findings.map(f => {
+        return `${f.type} (${f.severity})`;
+      }).join(', ');
+      console.log(`[MONITOR] MAINTAINER CHANGE: ${packageName}: ${findingsStr}`);
+
+      appendAlert({
+        timestamp: new Date().toISOString(),
+        name: packageName,
+        version: 'N/A',
+        ecosystem: 'npm',
+        temporalMaintainer: true,
+        findings: result.findings.map(f => ({
+          rule: f.type === 'new_maintainer' ? 'MUADDIB-MAINTAINER-001'
+            : f.type === 'suspicious_maintainer' ? 'MUADDIB-MAINTAINER-002'
+            : f.type === 'sole_maintainer_change' ? 'MUADDIB-MAINTAINER-003'
+            : 'MUADDIB-MAINTAINER-004',
+          severity: f.severity,
+          type: f.type
+        }))
+      });
+
+      dailyAlerts.push({
+        name: packageName,
+        version: 'N/A',
+        ecosystem: 'npm',
+        findingsCount: result.findings.length,
+        temporalMaintainer: true
+      });
+
+      await tryTemporalMaintainerAlert(result);
+    }
+    return result;
+  } catch (err) {
+    console.error(`[MONITOR] Maintainer change analysis error for ${packageName}: ${err.message}`);
     return null;
   }
 }
@@ -1014,6 +1113,12 @@ async function startMonitor() {
     console.log('[MONITOR] Publish frequency analysis disabled (MUADDIB_MONITOR_TEMPORAL_PUBLISH=false)');
   }
 
+  if (isTemporalMaintainerEnabled()) {
+    console.log('[MONITOR] Maintainer change analysis enabled — detecting maintainer changes, account takeovers');
+  } else {
+    console.log('[MONITOR] Maintainer change analysis disabled (MUADDIB_MONITOR_TEMPORAL_MAINTAINER=false)');
+  }
+
   const state = loadState();
   console.log(`[MONITOR] State loaded — npm last: ${state.npmLastPackage || 'none'}, pypi last: ${state.pypiLastPackage || 'none'}`);
   console.log(`[MONITOR] Polling every ${POLL_INTERVAL / 1000}s. Ctrl+C to stop.\n`);
@@ -1116,6 +1221,7 @@ async function resolveTarballAndScan(item) {
     await runTemporalCheck(item.name);
     await runTemporalAstCheck(item.name);
     await runTemporalPublishCheck(item.name);
+    await runTemporalMaintainerCheck(item.name);
   }
 
   await scanPackage(item.name, item.version, item.ecosystem, item.tarballUrl);
@@ -1173,7 +1279,10 @@ module.exports = {
   runTemporalAstCheck,
   isTemporalPublishEnabled,
   buildPublishAnomalyWebhookEmbed,
-  runTemporalPublishCheck
+  runTemporalPublishCheck,
+  isTemporalMaintainerEnabled,
+  buildMaintainerChangeWebhookEmbed,
+  runTemporalMaintainerCheck
 };
 
 // Standalone entry point: node src/monitor.js

@@ -24,7 +24,8 @@ async function runMonitorTests() {
     computeRiskLevel, computeRiskScore, buildDailyReportEmbed, DAILY_REPORT_INTERVAL,
     isTemporalEnabled, buildTemporalWebhookEmbed,
     isTemporalAstEnabled, buildTemporalAstWebhookEmbed,
-    isTemporalPublishEnabled, buildPublishAnomalyWebhookEmbed
+    isTemporalPublishEnabled, buildPublishAnomalyWebhookEmbed,
+    isTemporalMaintainerEnabled, buildMaintainerChangeWebhookEmbed
   } = require('../../src/monitor.js');
 
   test('MONITOR: parseNpmRss extracts package names from RSS', () => {
@@ -1034,6 +1035,114 @@ async function runMonitorTests() {
     const e = embed.embeds[0];
     assert(e.color === 0xf1c40f, 'Color should be yellow for MEDIUM, got ' + e.color);
     assertIncludes(e.title, 'MEDIUM', 'Title should contain MEDIUM');
+  });
+
+  // ============================================
+  // MONITOR TEMPORAL MAINTAINER ANALYSIS TESTS
+  // ============================================
+
+  console.log('\n=== MONITOR TEMPORAL MAINTAINER ANALYSIS TESTS ===\n');
+
+  test('MONITOR: isTemporalMaintainerEnabled defaults to true', () => {
+    const orig = process.env.MUADDIB_MONITOR_TEMPORAL_MAINTAINER;
+    delete process.env.MUADDIB_MONITOR_TEMPORAL_MAINTAINER;
+    assert(isTemporalMaintainerEnabled() === true, 'Should default to true');
+    if (orig !== undefined) process.env.MUADDIB_MONITOR_TEMPORAL_MAINTAINER = orig;
+  });
+
+  test('MONITOR: isTemporalMaintainerEnabled returns false when env=false', () => {
+    const orig = process.env.MUADDIB_MONITOR_TEMPORAL_MAINTAINER;
+    process.env.MUADDIB_MONITOR_TEMPORAL_MAINTAINER = 'false';
+    assert(isTemporalMaintainerEnabled() === false, 'Should be false when env=false');
+    if (orig !== undefined) process.env.MUADDIB_MONITOR_TEMPORAL_MAINTAINER = orig;
+    else delete process.env.MUADDIB_MONITOR_TEMPORAL_MAINTAINER;
+  });
+
+  test('MONITOR: isTemporalMaintainerEnabled returns false when env=FALSE (case insensitive)', () => {
+    const orig = process.env.MUADDIB_MONITOR_TEMPORAL_MAINTAINER;
+    process.env.MUADDIB_MONITOR_TEMPORAL_MAINTAINER = 'FALSE';
+    assert(isTemporalMaintainerEnabled() === false, 'Should be false when env=FALSE');
+    if (orig !== undefined) process.env.MUADDIB_MONITOR_TEMPORAL_MAINTAINER = orig;
+    else delete process.env.MUADDIB_MONITOR_TEMPORAL_MAINTAINER;
+  });
+
+  test('MONITOR: buildMaintainerChangeWebhookEmbed has correct Discord embed structure', () => {
+    const mockResult = {
+      packageName: 'suspicious-pkg',
+      suspicious: true,
+      findings: [
+        {
+          type: 'sole_maintainer_change',
+          severity: 'CRITICAL',
+          maintainer: { name: 'npm-user-99999', email: '' },
+          previousMaintainer: { name: 'trusteddev', email: '' },
+          riskAssessment: { riskLevel: 'HIGH', reasons: ['Generic name pattern: "npm-user-99999"'] },
+          description: "Sole maintainer changed from 'trusteddev' to 'npm-user-99999'"
+        }
+      ],
+      maintainers: { current: [{ name: 'npm-user-99999', email: '' }], count: 1 }
+    };
+    const embed = buildMaintainerChangeWebhookEmbed(mockResult);
+    assert(embed.embeds && embed.embeds.length === 1, 'Should have one embed');
+    const e = embed.embeds[0];
+    assertIncludes(e.title, 'MAINTAINER CHANGE', 'Title should contain MAINTAINER CHANGE');
+    assertIncludes(e.title, 'CRITICAL', 'Title should contain CRITICAL');
+    assert(e.color === 0xe74c3c, 'Color should be red for CRITICAL');
+    const pkgField = e.fields.find(f => f.name === 'Package');
+    assertIncludes(pkgField.value, 'suspicious-pkg', 'Package field should contain package name');
+    const findingsField = e.fields.find(f => f.name === 'Findings');
+    assertIncludes(findingsField.value, 'sole_maintainer_change', 'Should contain finding type');
+    assertIncludes(findingsField.value, 'Generic name pattern', 'Should contain risk reason');
+  });
+
+  test('MONITOR: buildMaintainerChangeWebhookEmbed uses orange color for HIGH severity', () => {
+    const mockResult = {
+      packageName: 'new-maint-pkg',
+      suspicious: true,
+      findings: [
+        {
+          type: 'new_maintainer',
+          severity: 'HIGH',
+          maintainer: { name: 'newguy', email: '' },
+          riskAssessment: { riskLevel: 'LOW', reasons: [] },
+          description: "New maintainer 'newguy' added between v1.0.0 and v2.0.0"
+        }
+      ],
+      maintainers: { current: [{ name: 'original', email: '' }, { name: 'newguy', email: '' }], count: 2 }
+    };
+    const embed = buildMaintainerChangeWebhookEmbed(mockResult);
+    const e = embed.embeds[0];
+    assert(e.color === 0xe67e22, 'Color should be orange for HIGH, got ' + e.color);
+    assertIncludes(e.title, 'HIGH', 'Title should contain HIGH');
+  });
+
+  test('MONITOR: buildMaintainerChangeWebhookEmbed handles multiple findings', () => {
+    const mockResult = {
+      packageName: 'multi-issue-pkg',
+      suspicious: true,
+      findings: [
+        {
+          type: 'new_maintainer',
+          severity: 'CRITICAL',
+          maintainer: { name: 'npm-user-hacker', email: '' },
+          riskAssessment: { riskLevel: 'HIGH', reasons: ['Generic name pattern: "npm-user-hacker"'] },
+          description: "New maintainer 'npm-user-hacker' added"
+        },
+        {
+          type: 'new_publisher',
+          severity: 'HIGH',
+          maintainer: { name: 'npm-user-hacker', email: '' },
+          previousPublisher: { name: 'original-dev', email: '' },
+          riskAssessment: { riskLevel: 'HIGH', reasons: ['Generic name pattern: "npm-user-hacker"'] },
+          description: "New publisher 'npm-user-hacker' (previously 'original-dev')"
+        }
+      ],
+      maintainers: { current: [{ name: 'npm-user-hacker', email: '' }], count: 1 }
+    };
+    const embed = buildMaintainerChangeWebhookEmbed(mockResult);
+    const findingsField = embed.embeds[0].fields.find(f => f.name === 'Findings');
+    assertIncludes(findingsField.value, 'new_maintainer', 'Should contain new_maintainer');
+    assertIncludes(findingsField.value, 'new_publisher', 'Should contain new_publisher');
   });
 
   test('MONITOR: buildTemporalWebhookEmbed handles modified lifecycle scripts', () => {
