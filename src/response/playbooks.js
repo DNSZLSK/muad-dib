@@ -125,6 +125,13 @@ const PLAYBOOKS = {
   ssh_key_read:
     'Lecture des cles SSH. Regenerer immediatement toutes les cles: ssh-keygen -t ed25519',
 
+  python_reverse_shell:
+    'CRITIQUE: Reverse shell Python detecte. Machine potentiellement compromise. Isoler immediatement.',
+  perl_reverse_shell:
+    'CRITIQUE: Reverse shell Perl detecte. Machine potentiellement compromise. Isoler immediatement.',
+  fifo_reverse_shell:
+    'CRITIQUE: Reverse shell FIFO/named pipe detecte. Machine potentiellement compromise. Isoler immediatement.',
+
   shai_hulud_backdoor:
     'CRITIQUE: Backdoor Shai-Hulud dans GitHub Actions. Supprimer le workflow et auditer les runs precedents.',
 

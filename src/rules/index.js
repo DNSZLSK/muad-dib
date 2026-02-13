@@ -347,6 +347,33 @@ const RULES = {
     references: ['https://attack.mitre.org/techniques/T1552/004/'],
     mitre: 'T1552.004'
   },
+  python_reverse_shell: {
+    id: 'MUADDIB-SHELL-010',
+    name: 'Python Reverse Shell',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Reverse shell via python -c import socket detecte',
+    references: ['https://attack.mitre.org/techniques/T1059/004/'],
+    mitre: 'T1059.006'
+  },
+  perl_reverse_shell: {
+    id: 'MUADDIB-SHELL-011',
+    name: 'Perl Reverse Shell',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Reverse shell via perl -e socket detecte',
+    references: ['https://attack.mitre.org/techniques/T1059/004/'],
+    mitre: 'T1059.006'
+  },
+  fifo_reverse_shell: {
+    id: 'MUADDIB-SHELL-012',
+    name: 'FIFO Reverse Shell',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Reverse shell via mkfifo /dev/tcp detecte',
+    references: ['https://attack.mitre.org/techniques/T1059/004/'],
+    mitre: 'T1059.004'
+  },
 
   // AST additional patterns
   possible_obfuscation: {

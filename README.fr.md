@@ -552,9 +552,10 @@ npm test
 
 ### Tests
 
-- **370 tests unitaires/intégration** - 80% coverage via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
+- **326 tests unitaires/intégration** - 80% coverage via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
 - **56 tests de fuzzing** - YAML malformé, JSON invalide, fichiers binaires, ReDoS, unicode, inputs 10MB
 - **15 tests adversariaux** - Packages malveillants simulés, taux de détection 15/15
+- **8 tests multi-facteur typosquat** - Cas limites et comportement cache
 - **Audit ESLint sécurité** - `eslint-plugin-security` avec 14 règles activées
 
 ---

@@ -8,3 +8,5 @@ results.sarif
 src/ioc/data/iocs.json
 src/ioc/data/iocs-compact.json
 nul
+.env
+.env.*
