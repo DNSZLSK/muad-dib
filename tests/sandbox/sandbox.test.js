@@ -504,6 +504,65 @@ async function runSandboxTests() {
     assertIncludes(out, 'evil.com', 'Should show suspicious TLS domain');
     assertIncludes(out, 'Raw TCP Connections', 'Should show TCP connections section');
   });
+
+  // ============================================
+  // SANDBOX CANARY TOKEN TESTS
+  // ============================================
+
+  console.log('\n=== SANDBOX CANARY TOKEN TESTS ===\n');
+
+  const {
+    generateCanaryTokens: genTokens,
+    detectCanaryExfiltration,
+    detectCanaryInOutput
+  } = require('../../src/canary-tokens.js');
+  const { getRule } = require('../../src/rules/index.js');
+  const { getPlaybook } = require('../../src/response/playbooks.js');
+
+  test('SANDBOX-CANARY: generateCanaryTokens produces injectable tokens', () => {
+    const { tokens, suffix } = genTokens();
+    assert(typeof suffix === 'string' && suffix.length > 0, 'Should have a suffix');
+    assert(Object.keys(tokens).length === 8, 'Should have 8 tokens');
+    for (const value of Object.values(tokens)) {
+      assertIncludes(value, 'MUADDIB_CANARY', 'Each token should contain MUADDIB_CANARY');
+    }
+  });
+
+  test('SANDBOX-CANARY: detectCanaryExfiltration finds token in HTTP body', () => {
+    const { tokens } = genTokens();
+    const networkLogs = {
+      http_bodies: ['POST stolen=' + tokens.GITHUB_TOKEN + '&done=1'],
+      dns_queries: [],
+      http_requests: [],
+      tls_connections: []
+    };
+    const result = detectCanaryExfiltration(networkLogs, tokens);
+    assert(result.detected === true, 'Should detect exfiltration');
+    assert(result.exfiltrations.length >= 1, 'Should have at least 1 exfiltration');
+    assert(result.exfiltrations[0].token === 'GITHUB_TOKEN', 'Should identify GITHUB_TOKEN');
+    assert(result.exfiltrations[0].severity === 'CRITICAL', 'Severity should be CRITICAL');
+  });
+
+  test('SANDBOX-CANARY: detectCanaryInOutput finds token in process output', () => {
+    const { tokens } = genTokens();
+    const result = detectCanaryInOutput('sending ' + tokens.NPM_TOKEN, '', tokens);
+    assert(result.detected === true, 'Should detect in stdout');
+    assert(result.exfiltrations[0].token === 'NPM_TOKEN', 'Should identify NPM_TOKEN');
+  });
+
+  test('SANDBOX-CANARY: Rule MUADDIB-CANARY-001 exists', () => {
+    const rule = getRule('canary_exfiltration');
+    assert(rule.id === 'MUADDIB-CANARY-001', 'Rule ID should be MUADDIB-CANARY-001');
+    assert(rule.severity === 'CRITICAL', 'Severity should be CRITICAL');
+    assertIncludes(rule.description, 'honey tokens', 'Description should mention honey tokens');
+  });
+
+  test('SANDBOX-CANARY: Playbook for canary_exfiltration exists', () => {
+    const playbook = getPlaybook('canary_exfiltration');
+    assertIncludes(playbook, 'CRITIQUE', 'Playbook should contain CRITIQUE');
+    assertIncludes(playbook, 'honey tokens', 'Playbook should mention honey tokens');
+    assertIncludes(playbook, 'malveillant', 'Playbook should mention malveillant');
+  });
 }
 
 module.exports = { runSandboxTests };

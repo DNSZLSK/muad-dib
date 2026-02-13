@@ -25,7 +25,8 @@ async function runMonitorTests() {
     isTemporalEnabled, buildTemporalWebhookEmbed,
     isTemporalAstEnabled, buildTemporalAstWebhookEmbed,
     isTemporalPublishEnabled, buildPublishAnomalyWebhookEmbed,
-    isTemporalMaintainerEnabled, buildMaintainerChangeWebhookEmbed
+    isTemporalMaintainerEnabled, buildMaintainerChangeWebhookEmbed,
+    isCanaryEnabled, buildCanaryExfiltrationWebhookEmbed
   } = require('../../src/monitor.js');
 
   test('MONITOR: parseNpmRss extracts package names from RSS', () => {
@@ -1143,6 +1144,55 @@ async function runMonitorTests() {
     const findingsField = embed.embeds[0].fields.find(f => f.name === 'Findings');
     assertIncludes(findingsField.value, 'new_maintainer', 'Should contain new_maintainer');
     assertIncludes(findingsField.value, 'new_publisher', 'Should contain new_publisher');
+  });
+
+  // ============================================
+  // MONITOR CANARY TOKEN TESTS
+  // ============================================
+
+  console.log('\n=== MONITOR CANARY TOKEN TESTS ===\n');
+
+  test('MONITOR: isCanaryEnabled defaults to true', () => {
+    const orig = process.env.MUADDIB_MONITOR_CANARY;
+    delete process.env.MUADDIB_MONITOR_CANARY;
+    assert(isCanaryEnabled() === true, 'Should default to true');
+    if (orig !== undefined) process.env.MUADDIB_MONITOR_CANARY = orig;
+  });
+
+  test('MONITOR: isCanaryEnabled returns false when env=false', () => {
+    const orig = process.env.MUADDIB_MONITOR_CANARY;
+    process.env.MUADDIB_MONITOR_CANARY = 'false';
+    assert(isCanaryEnabled() === false, 'Should be false when env=false');
+    if (orig !== undefined) process.env.MUADDIB_MONITOR_CANARY = orig;
+    else delete process.env.MUADDIB_MONITOR_CANARY;
+  });
+
+  test('MONITOR: isCanaryEnabled returns false when env=FALSE (case insensitive)', () => {
+    const orig = process.env.MUADDIB_MONITOR_CANARY;
+    process.env.MUADDIB_MONITOR_CANARY = 'FALSE';
+    assert(isCanaryEnabled() === false, 'Should be false when env=FALSE');
+    if (orig !== undefined) process.env.MUADDIB_MONITOR_CANARY = orig;
+    else delete process.env.MUADDIB_MONITOR_CANARY;
+  });
+
+  test('MONITOR: buildCanaryExfiltrationWebhookEmbed has correct Discord embed structure', () => {
+    const exfiltrations = [
+      { token: 'GITHUB_TOKEN', foundIn: 'HTTP POST body to evil.com' },
+      { token: 'NPM_TOKEN', foundIn: 'DNS query: npm_MUADDIB_CANARY_xxx.evil.com' }
+    ];
+    const embed = buildCanaryExfiltrationWebhookEmbed('malicious-pkg', '1.0.0', exfiltrations);
+    assert(embed.embeds && embed.embeds.length === 1, 'Should have one embed');
+    const e = embed.embeds[0];
+    assertIncludes(e.title, 'CANARY EXFILTRATION', 'Title should contain CANARY EXFILTRATION');
+    assertIncludes(e.title, 'CRITICAL', 'Title should contain CRITICAL');
+    assert(e.color === 0xe74c3c, 'Color should be red for CRITICAL');
+    const pkgField = e.fields.find(f => f.name === 'Package');
+    assertIncludes(pkgField.value, 'malicious-pkg', 'Package field should contain package name');
+    const tokensField = e.fields.find(f => f.name === 'Exfiltrated Tokens');
+    assertIncludes(tokensField.value, 'GITHUB_TOKEN', 'Should contain GITHUB_TOKEN');
+    assertIncludes(tokensField.value, 'NPM_TOKEN', 'Should contain NPM_TOKEN');
+    const actionField = e.fields.find(f => f.name === 'Action');
+    assertIncludes(actionField.value, 'CONFIRMED MALICIOUS', 'Action should say CONFIRMED MALICIOUS');
   });
 
   test('MONITOR: buildTemporalWebhookEmbed handles modified lifecycle scripts', () => {

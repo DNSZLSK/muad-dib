@@ -43,6 +43,38 @@ const scanQueue = [];
 
 let sandboxAvailable = false;
 
+function isCanaryEnabled() {
+  const env = process.env.MUADDIB_MONITOR_CANARY;
+  if (env !== undefined && env.toLowerCase() === 'false') return false;
+  return true;
+}
+
+function buildCanaryExfiltrationWebhookEmbed(packageName, version, exfiltrations) {
+  const exfilLines = exfiltrations.map(e => {
+    return `**${e.token}** — ${e.foundIn}`;
+  }).join('\n');
+
+  const npmLink = `https://www.npmjs.com/package/${packageName}`;
+
+  return {
+    embeds: [{
+      title: '\uD83D\uDD34 CANARY EXFILTRATION \u2014 CRITICAL',
+      color: 0xe74c3c,
+      fields: [
+        { name: 'Package', value: `[${packageName}](${npmLink})`, inline: true },
+        { name: 'Version', value: version || 'N/A', inline: true },
+        { name: 'Severity', value: 'CRITICAL', inline: true },
+        { name: 'Exfiltrated Tokens', value: exfilLines || 'None', inline: false },
+        { name: 'Action', value: 'CONFIRMED MALICIOUS \u2014 Do NOT install, report to npm', inline: false }
+      ],
+      footer: {
+        text: `MUAD'DIB Canary Token Analysis | ${new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, ' UTC')}`
+      },
+      timestamp: new Date().toISOString()
+    }]
+  };
+}
+
 function isSandboxEnabled() {
   const env = process.env.MUADDIB_MONITOR_SANDBOX;
   if (env !== undefined && env.toLowerCase() === 'false') return false;
@@ -779,9 +811,30 @@ async function scanPackage(name, version, ecosystem, tarballUrl) {
         let sandboxResult = null;
         if (hasHighOrCritical(result) && isSandboxEnabled() && sandboxAvailable) {
           try {
-            console.log(`[MONITOR] SANDBOX: launching for ${name}@${version}...`);
-            sandboxResult = await runSandbox(name);
+            const canary = isCanaryEnabled();
+            console.log(`[MONITOR] SANDBOX: launching for ${name}@${version}${canary ? ' (canary: on)' : ''}...`);
+            sandboxResult = await runSandbox(name, { canary });
             console.log(`[MONITOR] SANDBOX: ${name}@${version} → score: ${sandboxResult.score}, severity: ${sandboxResult.severity}`);
+
+            // Check for canary exfiltration findings and send dedicated alert
+            const canaryFindings = (sandboxResult.findings || []).filter(f => f.type === 'canary_exfiltration');
+            if (canaryFindings.length > 0) {
+              console.log(`[MONITOR] CANARY EXFILTRATION: ${name}@${version} — ${canaryFindings.length} token(s) stolen!`);
+              const url = getWebhookUrl();
+              if (url) {
+                const exfiltrations = canaryFindings.map(f => ({
+                  token: f.detail.match(/exfiltrate (\S+)/)?.[1] || 'UNKNOWN',
+                  foundIn: f.detail
+                }));
+                const payload = buildCanaryExfiltrationWebhookEmbed(name, version, exfiltrations);
+                try {
+                  await sendWebhook(url, payload, { rawPayload: true });
+                  console.log(`[MONITOR] Canary exfiltration webhook sent for ${name}@${version}`);
+                } catch (webhookErr) {
+                  console.error(`[MONITOR] Canary webhook failed for ${name}@${version}: ${webhookErr.message}`);
+                }
+              }
+            }
           } catch (err) {
             console.error(`[MONITOR] SANDBOX error for ${name}@${version}: ${err.message}`);
           }
@@ -1094,6 +1147,13 @@ async function startMonitor() {
     console.log('[MONITOR] Sandbox disabled (MUADDIB_MONITOR_SANDBOX=false)');
   }
 
+  // Canary tokens status
+  if (isCanaryEnabled()) {
+    console.log('[MONITOR] Canary tokens enabled — honey tokens injected in sandbox for exfiltration detection');
+  } else {
+    console.log('[MONITOR] Canary tokens disabled (MUADDIB_MONITOR_CANARY=false)');
+  }
+
   // Temporal analysis status
   if (isTemporalEnabled()) {
     console.log('[MONITOR] Temporal lifecycle analysis enabled — detecting sudden lifecycle script changes');
@@ -1282,7 +1342,9 @@ module.exports = {
   runTemporalPublishCheck,
   isTemporalMaintainerEnabled,
   buildMaintainerChangeWebhookEmbed,
-  runTemporalMaintainerCheck
+  runTemporalMaintainerCheck,
+  isCanaryEnabled,
+  buildCanaryExfiltrationWebhookEmbed
 };
 
 // Standalone entry point: node src/monitor.js
