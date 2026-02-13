@@ -144,6 +144,8 @@ async function runSandbox(packageName, options = {}) {
       dockerArgs.push('--cap-add=NET_ADMIN');
     }
 
+    dockerArgs.push('--tmpfs', '/tmp:rw,noexec,nosuid,size=64m');
+    dockerArgs.push('--tmpfs', '/sandbox:rw,noexec,nosuid,size=256m');
     dockerArgs.push('--read-only');
 
     dockerArgs.push('--security-opt', 'no-new-privileges');
@@ -151,7 +153,6 @@ async function runSandbox(packageName, options = {}) {
     dockerArgs.push(packageName);
     dockerArgs.push(mode);
 
-    console.log('[SANDBOX] Docker args:', JSON.stringify(dockerArgs));
     const proc = spawn('docker', dockerArgs);
 
     // Timeout: kill container after 120s
@@ -200,10 +201,6 @@ async function runSandbox(packageName, options = {}) {
         resolve(result);
         return;
       }
-
-      // Debug: log raw output for troubleshooting
-      console.log('[SANDBOX] Raw stdout length:', stdout.length, 'first 200 chars:', stdout.substring(0, 200));
-      console.log('[SANDBOX] Stderr:', stderr.substring(0, 500));
 
       // Parse JSON from container stdout
       let report;
