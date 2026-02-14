@@ -780,6 +780,260 @@ async function runCliTests() {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   });
+
+  // ============================================
+  // THREAT FEED MODULE TESTS
+  // ============================================
+
+  console.log('\n=== THREAT FEED MODULE TESTS ===\n');
+
+  test('FEED: Module loads with expected exports', () => {
+    const { getFeed, computeDetectionScore, SEVERITY_WEIGHTS } = require('../../src/threat-feed.js');
+    assert(typeof getFeed === 'function', 'getFeed should be a function');
+    assert(typeof computeDetectionScore === 'function', 'computeDetectionScore should be a function');
+    assert(typeof SEVERITY_WEIGHTS === 'object', 'SEVERITY_WEIGHTS should be an object');
+    assert(SEVERITY_WEIGHTS.CRITICAL === 25, 'CRITICAL weight should be 25');
+    assert(SEVERITY_WEIGHTS.HIGH === 10, 'HIGH weight should be 10');
+    assert(SEVERITY_WEIGHTS.MEDIUM === 3, 'MEDIUM weight should be 3');
+    assert(SEVERITY_WEIGHTS.LOW === 1, 'LOW weight should be 1');
+  });
+
+  test('FEED: getFeed returns expected structure', () => {
+    const { getFeed } = require('../../src/threat-feed.js');
+    const result = getFeed();
+    assert(typeof result.generated_at === 'string', 'Should have generated_at');
+    assert(typeof result.version === 'string', 'Should have version');
+    assert(Array.isArray(result.feed), 'Should have feed array');
+  });
+
+  test('FEED: getFeed version matches package.json', () => {
+    const { getFeed } = require('../../src/threat-feed.js');
+    const pkgJson = require('../../package.json');
+    const result = getFeed();
+    assert(result.version === pkgJson.version, `Version should be ${pkgJson.version}, got ${result.version}`);
+  });
+
+  test('FEED: computeDetectionScore with known types', () => {
+    const { computeDetectionScore } = require('../../src/threat-feed.js');
+    const detection = {
+      findings: ['obfuscation_detected', 'known_malicious_package'],
+      severity: 'CRITICAL'
+    };
+    const result = computeDetectionScore(detection);
+    assert(result.score === 35, `Score should be 35 (HIGH=10 + CRITICAL=25), got ${result.score}`);
+    assert(result.breakdown.length === 2, 'Should have 2 breakdown entries');
+    assert(result.breakdown[0].points >= result.breakdown[1].points, 'Breakdown should be sorted descending');
+  });
+
+  test('FEED: computeDetectionScore caps at 100', () => {
+    const { computeDetectionScore } = require('../../src/threat-feed.js');
+    const detection = {
+      findings: [
+        'known_malicious_package', 'known_malicious_package',
+        'known_malicious_package', 'known_malicious_package',
+        'known_malicious_package'
+      ],
+      severity: 'CRITICAL'
+    };
+    const result = computeDetectionScore(detection);
+    assert(result.score === 100, `Score should be capped at 100, got ${result.score}`);
+  });
+
+  test('FEED: computeDetectionScore falls back to detection severity for unknown types', () => {
+    const { computeDetectionScore } = require('../../src/threat-feed.js');
+    const detection = {
+      findings: ['totally_unknown_type_xyz'],
+      severity: 'HIGH'
+    };
+    const result = computeDetectionScore(detection);
+    assert(result.score === 10, `Unknown type with HIGH severity should score 10, got ${result.score}`);
+    assert(result.breakdown[0].rule === 'MUADDIB-UNK-001', 'Should use unknown rule');
+    assert(result.breakdown[0].severity === 'HIGH', 'Should use detection severity');
+  });
+
+  test('FEED: getFeed respects limit option', () => {
+    const { getFeed } = require('../../src/threat-feed.js');
+    const result = getFeed({ limit: 5 });
+    assert(result.feed.length <= 5, `Feed should have at most 5 entries, got ${result.feed.length}`);
+  });
+
+  test('FEED: getFeed handles empty detections', () => {
+    const { getFeed } = require('../../src/threat-feed.js');
+    const result = getFeed({ since: '2099-01-01T00:00:00Z' });
+    assert(Array.isArray(result.feed), 'Feed should still be an array');
+    assert(result.feed.length === 0, 'Future since date should return empty feed');
+  });
+
+  // ============================================
+  // CLI FEED COMMAND TESTS
+  // ============================================
+
+  console.log('\n=== CLI FEED COMMAND TESTS ===\n');
+
+  test('FEED-CLI: muaddib feed outputs valid JSON', () => {
+    const output = runCommand('feed');
+    let parsed;
+    try {
+      parsed = JSON.parse(output);
+    } catch (e) {
+      throw new Error('feed command should output valid JSON');
+    }
+    assert(typeof parsed.generated_at === 'string', 'Should have generated_at');
+    assert(typeof parsed.version === 'string', 'Should have version');
+    assert(Array.isArray(parsed.feed), 'Should have feed array');
+  });
+
+  test('FEED-CLI: muaddib feed --limit 3 respects limit', () => {
+    const output = runCommand('feed --limit 3');
+    const parsed = JSON.parse(output);
+    assert(parsed.feed.length <= 3, `Feed should have at most 3 entries, got ${parsed.feed.length}`);
+  });
+
+  test('FEED-CLI: muaddib feed --severity CRITICAL filters', () => {
+    const output = runCommand('feed --severity CRITICAL');
+    const parsed = JSON.parse(output);
+    for (const entry of parsed.feed) {
+      assert(entry.severity === 'CRITICAL', `All entries should be CRITICAL, got ${entry.severity}`);
+    }
+  });
+
+  test('FEED-CLI: muaddib feed --since 2099-01-01 returns empty feed', () => {
+    const output = runCommand('feed --since 2099-01-01');
+    const parsed = JSON.parse(output);
+    assert(parsed.feed.length === 0, 'Future since date should return empty feed');
+  });
+
+  test('FEED-CLI: help text includes feed and serve commands', () => {
+    const output = runCommand('--help');
+    assertIncludes(output, 'muaddib feed', 'Help should show feed command');
+    assertIncludes(output, 'muaddib serve', 'Help should show serve command');
+    assertIncludes(output, '--limit', 'Help should show --limit option');
+    assertIncludes(output, '--port', 'Help should show --port option');
+  });
+
+  // ============================================
+  // HTTP SERVER TESTS
+  // ============================================
+
+  console.log('\n=== HTTP SERVER TESTS ===\n');
+
+  test('SERVE: startServer is a function', () => {
+    const { startServer } = require('../../src/serve.js');
+    assert(typeof startServer === 'function', 'startServer should be a function');
+  });
+
+  await asyncTest('SERVE: server responds to GET /feed with 200', async () => {
+    const { startServer } = require('../../src/serve.js');
+    const port = 30000 + Math.floor(Math.random() * 10000);
+    const origLog = console.log;
+    console.log = () => {};
+    const server = startServer({ port });
+    try {
+      await new Promise(resolve => setTimeout(resolve, 200));
+      const data = await new Promise((resolve, reject) => {
+        const req = require('http').get(`http://127.0.0.1:${port}/feed`, (res) => {
+          assert(res.statusCode === 200, `Should return 200, got ${res.statusCode}`);
+          let body = '';
+          res.on('data', chunk => body += chunk);
+          res.on('end', () => {
+            const parsed = JSON.parse(body);
+            assert(typeof parsed.generated_at === 'string', 'Should have generated_at');
+            assert(Array.isArray(parsed.feed), 'Should have feed array');
+            resolve(parsed);
+          });
+        });
+        req.on('error', reject);
+      });
+    } finally {
+      console.log = origLog;
+      server.close();
+    }
+  });
+
+  await asyncTest('SERVE: server responds 404 to unknown routes', async () => {
+    const { startServer } = require('../../src/serve.js');
+    const port = 30000 + Math.floor(Math.random() * 10000);
+    const origLog = console.log;
+    console.log = () => {};
+    const server = startServer({ port });
+    try {
+      await new Promise(resolve => setTimeout(resolve, 200));
+      await new Promise((resolve, reject) => {
+        const req = require('http').get(`http://127.0.0.1:${port}/unknown`, (res) => {
+          assert(res.statusCode === 404, `Should return 404, got ${res.statusCode}`);
+          let body = '';
+          res.on('data', chunk => body += chunk);
+          res.on('end', () => {
+            const parsed = JSON.parse(body);
+            assert(typeof parsed.error === 'string', 'Should have error message');
+            resolve();
+          });
+        });
+        req.on('error', reject);
+      });
+    } finally {
+      console.log = origLog;
+      server.close();
+    }
+  });
+
+  await asyncTest('SERVE: /health returns status ok', async () => {
+    const { startServer } = require('../../src/serve.js');
+    const port = 30000 + Math.floor(Math.random() * 10000);
+    const origLog = console.log;
+    console.log = () => {};
+    const server = startServer({ port });
+    try {
+      await new Promise(resolve => setTimeout(resolve, 200));
+      await new Promise((resolve, reject) => {
+        const req = require('http').get(`http://127.0.0.1:${port}/health`, (res) => {
+          assert(res.statusCode === 200, `Should return 200, got ${res.statusCode}`);
+          let body = '';
+          res.on('data', chunk => body += chunk);
+          res.on('end', () => {
+            const parsed = JSON.parse(body);
+            assert(parsed.status === 'ok', 'Should have status ok');
+            assert(typeof parsed.version === 'string', 'Should have version');
+            resolve();
+          });
+        });
+        req.on('error', reject);
+      });
+    } finally {
+      console.log = origLog;
+      server.close();
+    }
+  });
+
+  await asyncTest('SERVE: /feed passes query params to getFeed', async () => {
+    const { startServer } = require('../../src/serve.js');
+    const port = 30000 + Math.floor(Math.random() * 10000);
+    const origLog = console.log;
+    console.log = () => {};
+    const server = startServer({ port });
+    try {
+      await new Promise(resolve => setTimeout(resolve, 200));
+      await new Promise((resolve, reject) => {
+        const req = require('http').get(`http://127.0.0.1:${port}/feed?limit=2&severity=CRITICAL&since=2099-01-01`, (res) => {
+          assert(res.statusCode === 200, `Should return 200, got ${res.statusCode}`);
+          let body = '';
+          res.on('data', chunk => body += chunk);
+          res.on('end', () => {
+            const parsed = JSON.parse(body);
+            assert(parsed.feed.length <= 2, 'Limit should be respected');
+            for (const entry of parsed.feed) {
+              assert(entry.severity === 'CRITICAL', 'Severity filter should be applied');
+            }
+            resolve();
+          });
+        });
+        req.on('error', reject);
+      });
+    } finally {
+      console.log = origLog;
+      server.close();
+    }
+  });
 }
 
 module.exports = { runCliTests };
