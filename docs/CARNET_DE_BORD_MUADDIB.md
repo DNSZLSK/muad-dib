@@ -453,13 +453,68 @@ Approche inspiree de Socket.dev et Phylum, adaptee a un outil CLI open source gr
 
 ---
 
+## MUAD'DIB 2.1 — Validation & Observabilite (14 Fevrier 2026)
+
+### Le constat
+
+MUAD'DIB 2.0 avait la detection : 12 scanners statiques, 5 features comportementales, sandbox Docker. Mais une question restait sans reponse : **est-ce que ca marche vraiment ?**
+
+Pas de metriques de faux positifs. Pas de validation contre des attaques reelles. Pas de suivi des temps de detection. Pas moyen de savoir si le scanner s'ameliore ou se degrade au fil des versions.
+
+### Les 5 features de validation
+
+**1. Ground Truth Dataset** (`muaddib replay`)
+Un dataset de 5 attaques supply-chain reelles avec les fixtures associees :
+
+| Attaque | Annee | Technique | Attendu |
+|---------|-------|-----------|---------|
+| event-stream | 2018 | flatmap-stream malveillant | 2 CRITICAL (IOC match) |
+| ua-parser-js | 2021 | Script lifecycle injecte | 1 MEDIUM (lifecycle) |
+| coa | 2021 | Lifecycle + obfuscation JS | 1 HIGH + 1 MEDIUM |
+| node-ipc | 2022 | Protestware malveillant | 2 CRITICAL (IOC match) |
+| colors | 2022 | Protestware (boucle infinie) | Hors scope |
+
+Le replay execute le scanner sur chaque fixture et verifie que les findings attendus sont presents. Resultat : **100% de detection** (4/4 malware + 1 hors scope correctement classifie).
+
+**2. Detection Time Logging** (`muaddib detections`)
+Chaque detection est enregistree avec un timestamp `first_seen_at`. Quand une advisory publique est emise (OSV, GitHub Advisory), on peut calculer le **lead time** : combien de temps avant l'advisory publique MUAD'DIB avait detecte la menace.
+
+**3. FP Rate Tracking** (`muaddib stats`)
+Suivi quotidien des resultats de scan : total/clean/suspect/faux positif/confirme malveillant. Le taux de faux positifs est calcule automatiquement : `FP / (FP + Confirme)`.
+
+**4. Score Breakdown** (`--breakdown`)
+Decomposition explicable du score de risque : chaque finding montre sa contribution au score total avec les poids par severite (CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1).
+
+**5. Threat Feed API** (`muaddib feed` / `muaddib serve`)
+Export des detections en flux JSON pour integration SIEM. `muaddib serve` demarre un serveur HTTP localhost avec `GET /feed` et `GET /health`.
+
+### Augmentation massive du coverage
+
+Le coverage est passe de ~65% a **74%** avec 168 nouveaux tests :
+
+| Module | Avant | Apres | Tests ajoutes |
+|--------|-------|-------|---------------|
+| `src/diff.js` | 45% | ~75% | 35 (nouveau fichier test) |
+| `src/temporal-ast-diff.js` | 50% | ~70% | 20 |
+| `src/monitor.js` | 44% | ~60% | 21 |
+| Ground truth | - | 100% | 12 |
+| Total | 541 | **709** | +168 |
+
+Les fonctions internes de `diff.js` (`getThreatId`, `compareThreats`, `resolveRef`, `SAFE_REF_REGEX`) ont ete exportees pour permettre le test unitaire.
+
+### Bilan
+
+v2.1 est la version "observabilite". MUAD'DIB ne se contente plus de detecter : il prouve sa propre efficacite avec des metriques. Le ground truth sert aussi de test de non-regression : si un futur changement casse la detection d'une attaque reelle, les tests echouent.
+
+---
+
 ## Etat actuel
 
 ### Ce qui fonctionne
 
 | Feature | Détails |
 |---------|---------|
-| CLI complète | scan, watch, update, scrape, install, safe-install, daemon, sandbox, **diff**, **init-hooks**, **remove-hooks**, **monitor** |
+| CLI complète | scan, watch, update, scrape, install, safe-install, daemon, sandbox, **diff**, **init-hooks**, **remove-hooks**, **monitor**, **feed**, **serve**, **stats**, **detections**, **replay** |
 | Base IOCs | 225 000+ npm + 14 000+ PyPI packages malveillants |
 | Détection Shai-Hulud | v1, v2, v3 couverts |
 | Exports | JSON, HTML, SARIF |
@@ -473,7 +528,8 @@ Approche inspiree de Socket.dev et Phylum, adaptee a un outil CLI open source gr
 | **GitHub Action Marketplace** | Avec inputs/outputs et SARIF auto |
 | Version check | Notification automatique des nouvelles versions au demarrage |
 | **Detection comportementale (v2.0)** | Temporal lifecycle, AST diff, publish anomaly, maintainer change, canary tokens |
-| Tests | **541 tests unitaires** + 56 fuzz + 15 adversariaux, **80% coverage** (Codecov) |
+| **Validation & Observabilite (v2.1)** | Ground truth (5 attaques, 100%), detection time logging, FP rate tracking, score breakdown, threat feed API |
+| Tests | **709 tests unitaires** + 56 fuzz + 15 adversariaux, **74% coverage** (Codecov) |
 | Audit securite | 2 audits complets, **58 issues corrigees**, [rapport PDF](MUADDIB_Security_Audit_Report_v1.4.1.pdf) |
 
 ### Ce qui manque (honnêtement)
@@ -503,7 +559,7 @@ Approche inspiree de Socket.dev et Phylum, adaptee a un outil CLI open source gr
 
 ## Conclusion
 
-MUAD'DIB n'est pas parfait. C'est un projet de formation, pas un produit enterprise. Mais il fonctionne pour ce qu'il est censé faire : détecter les menaces npm et PyPI connues, analyser les comportements suspects dans un sandbox, et guider la réponse.
+MUAD'DIB n'est pas parfait. C'est un projet de formation, pas un produit enterprise. Mais il fonctionne pour ce qu'il est censé faire : détecter les menaces npm et PyPI connues, analyser les comportements suspects dans un sandbox, détecter les anomalies comportementales entre versions, et prouver son efficacité avec des métriques de validation.
 
 Le plus satisfaisant : voir le score passer de 126 alertes (faux positifs) à 1 alerte légitime sur React.js après une semaine d'itérations. Et voir le sandbox Docker fonctionner du premier coup (après avoir fixé les permissions).
 

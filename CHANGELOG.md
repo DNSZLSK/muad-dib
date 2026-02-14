@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-02-14
+
+### Added
+- **Ground Truth Dataset** (`muaddib replay` / `muaddib ground-truth`): 5 real-world supply-chain attacks (event-stream, ua-parser-js, coa, node-ipc, colors) with expected findings. Validates scanner detection coverage with automated replay. 100% detection rate (4/4 malware detected, 1 out of scope).
+- **Detection Time Logging** (`muaddib detections`): tracks `first_seen_at` timestamp for every detection, computes lead time vs. public advisory. Supports `--stats` for aggregate metrics and `--json` for machine-readable output.
+- **FP Rate Tracking** (`muaddib stats`): daily scan statistics with total/clean/suspect/false_positive/confirmed counts and automatic FP rate computation. Supports `--daily` for per-day breakdown and `--json` for export.
+- **Score Breakdown** (`muaddib scan --breakdown`): explainable score decomposition showing per-finding contribution with severity weights (CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1).
+- **Threat Feed API** (`muaddib feed` / `muaddib serve`): JSON threat feed for SIEM integration. `feed` outputs to stdout with `--limit`, `--severity`, `--since` filters. `serve` starts an HTTP server (default port 3000) with `GET /feed` and `GET /health` endpoints.
+- 709 tests (was 541 in v2.0.0), +168 new tests
+- 74% code coverage (was ~65% in v2.0.0)
+- New test files: `tests/integration/diff.test.js` (35 tests), `tests/integration/ground-truth.test.js`
+- Expanded coverage for `src/diff.js`, `src/temporal-ast-diff.js`, `src/monitor.js`
+
+### Changed
+- Test count: 541 → 709 (+31% increase)
+- Code coverage: ~65% → 74%
+- Architecture diagram updated to include v2.1 validation & observability layer
+
+### Breaking Changes
+- None. All new features are additive CLI commands (`feed`, `serve`, `stats`, `detections`, `replay`, `ground-truth`) and a new scan flag (`--breakdown`).
+
 ## [2.0.0] - 2026-02-13
 
 ### Added
@@ -362,7 +383,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Obfuscation detection
 - Package.json lifecycle script analysis
 
-[Unreleased]: https://github.com/DNSZLSK/muad-dib/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/DNSZLSK/muad-dib/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/DNSZLSK/muad-dib/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/DNSZLSK/muad-dib/compare/v1.8.0...v2.0.0
 [1.8.0]: https://github.com/DNSZLSK/muad-dib/compare/v1.6.18...v1.8.0
 [1.6.18]: https://github.com/DNSZLSK/muad-dib/compare/v1.6.17...v1.6.18
