@@ -143,7 +143,7 @@ for (let i = 0; i < options.length; i++) {
 }
 
 // Version check (truly non-blocking, skip for machine-readable output)
-if (!jsonOutput && !sarifOutput) {
+if (!jsonOutput && !sarifOutput && command !== 'feed' && command !== 'serve') {
   try {
     const currentVersion = require('../package.json').version;
     exec('npm view muaddib-scanner version', { timeout: 5000 }, (err, stdout) => {
@@ -450,6 +450,19 @@ if (command === 'version' || command === '--version' || command === '-v') {
     console.error('[ERROR]', err.message);
     process.exit(1);
   });
+} else if (command === 'feed') {
+  const { getFeed } = require('../src/threat-feed.js');
+  const feedOpts = {};
+  if (feedLimit) feedOpts.limit = feedLimit;
+  if (feedSeverity) feedOpts.severity = feedSeverity;
+  if (feedSince) feedOpts.since = feedSince;
+  const result = getFeed(feedOpts);
+  console.log(JSON.stringify(result, null, 2));
+  process.exit(0);
+} else if (command === 'serve') {
+  const { startServer } = require('../src/serve.js');
+  startServer({ port: servePort || 3000 });
+  // Server runs indefinitely — no process.exit
 } else if (command === 'watch') {
   watch(target);
 } else if (command === 'update') {
