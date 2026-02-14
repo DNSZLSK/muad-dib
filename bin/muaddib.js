@@ -31,6 +31,10 @@ let temporalPublishMode = false;
 let temporalMaintainerMode = false;
 let temporalFullMode = false;
 let breakdownMode = false;
+let feedLimit = null;
+let feedSeverity = null;
+let feedSince = null;
+let servePort = null;
 
 for (let i = 0; i < options.length; i++) {
   if (options[i] === '--json') {
@@ -108,6 +112,27 @@ for (let i = 0; i < options.length; i++) {
     breakdownMode = true;
   } else if (options[i] === '--temporal') {
     temporalMode = true;
+  } else if (options[i] === '--limit') {
+    const val = parseInt(options[i + 1], 10);
+    if (!isNaN(val) && val > 0) {
+      feedLimit = val;
+    }
+    i++;
+  } else if (options[i] === '--severity') {
+    feedSeverity = options[i + 1] || null;
+    i++;
+  } else if (options[i] === '--since') {
+    feedSince = options[i + 1] || null;
+    i++;
+  } else if (options[i] === '--port') {
+    const val = parseInt(options[i + 1], 10);
+    if (!isNaN(val) && val >= 1 && val <= 65535) {
+      servePort = val;
+    } else {
+      console.error('[ERROR] --port must be a number between 1 and 65535');
+      process.exit(1);
+    }
+    i++;
   } else if (options[i] === '--strict') {
     // Sandbox strict mode flag (parsed here, used by sandbox commands)
   } else if (options[i] === '--no-canary') {
@@ -118,7 +143,7 @@ for (let i = 0; i < options.length; i++) {
 }
 
 // Version check (truly non-blocking, skip for machine-readable output)
-if (!jsonOutput && !sarifOutput) {
+if (!jsonOutput && !sarifOutput && command !== 'feed' && command !== 'serve') {
   try {
     const currentVersion = require('../package.json').version;
     exec('npm view muaddib-scanner version', { timeout: 5000 }, (err, stdout) => {
@@ -158,6 +183,8 @@ async function interactiveMenu() {
       { name: 'Update IOCs', value: 'update' },
       { name: 'Scrape new IOCs', value: 'scrape' },
       { name: 'Sandbox analysis', value: 'sandbox' },
+      { name: 'Threat feed (JSON)', value: 'feed' },
+      { name: 'Threat feed server', value: 'serve' },
       { name: 'Quit', value: 'quit' }
     ]
   });
@@ -268,6 +295,19 @@ async function interactiveMenu() {
     process.exit(results.suspicious ? 1 : 0);
   }
 
+  if (action === 'feed') {
+    const { getFeed } = require('../src/threat-feed.js');
+    const result = getFeed();
+    console.log(JSON.stringify(result, null, 2));
+    process.exit(0);
+  }
+
+  if (action === 'serve') {
+    const { startServer } = require('../src/serve.js');
+    startServer({ port: 3000 });
+    // Server runs indefinitely
+  }
+
   if (action === 'diff') {
     const baseRef = await input({
       message: 'Compare with (commit/tag/branch):',
@@ -323,6 +363,8 @@ const helpText = `
     muaddib scrape                   Scrape new IOCs
     muaddib sandbox <pkg> [--strict] [--no-canary]  Analyze in isolated Docker container
     muaddib sandbox-report <pkg>     Sandbox + detailed network report
+    muaddib feed [options]            Threat feed (JSON)
+    muaddib serve [options]           Start threat feed HTTP server
     muaddib detections               List recent detections
     muaddib detections --stats       Show aggregated detection stats
     muaddib detections --json        Raw JSON output
@@ -362,6 +404,10 @@ const helpText = `
     --temporal-full     All temporal analyses (lifecycle + AST + publish + maintainer)
     --no-canary         Disable honey token injection in sandbox
     --exclude [dir]     Exclude directory from scan (repeatable)
+    --limit [n]         Limit feed entries (default: 50)
+    --severity [level]  Filter by severity (CRITICAL|HIGH|MEDIUM|LOW)
+    --since [date]      Filter detections after date (ISO 8601)
+    --port [n]          HTTP server port (default: 3000, serve only)
     --entropy-threshold [n]  Custom string-level entropy threshold (default: 5.5)
     --save-dev, -D      Install as dev dependency
     -g, --global        Install globally
@@ -404,6 +450,19 @@ if (command === 'version' || command === '--version' || command === '-v') {
     console.error('[ERROR]', err.message);
     process.exit(1);
   });
+} else if (command === 'feed') {
+  const { getFeed } = require('../src/threat-feed.js');
+  const feedOpts = {};
+  if (feedLimit) feedOpts.limit = feedLimit;
+  if (feedSeverity) feedOpts.severity = feedSeverity;
+  if (feedSince) feedOpts.since = feedSince;
+  const result = getFeed(feedOpts);
+  console.log(JSON.stringify(result, null, 2));
+  process.exit(0);
+} else if (command === 'serve') {
+  const { startServer } = require('../src/serve.js');
+  startServer({ port: servePort || 3000 });
+  // Server runs indefinitely — no process.exit
 } else if (command === 'watch') {
   watch(target);
 } else if (command === 'update') {
