@@ -93,6 +93,35 @@ function hasHighOrCritical(result) {
   return result.summary.critical > 0 || result.summary.high > 0;
 }
 
+// --- Verbose mode (--verbose sends ALL alerts including temporal/publish/maintainer) ---
+
+let verboseMode = false;
+
+function isVerboseMode() {
+  if (verboseMode) return true;
+  const env = process.env.MUADDIB_MONITOR_VERBOSE;
+  return env !== undefined && env.toLowerCase() === 'true';
+}
+
+function setVerboseMode(value) {
+  verboseMode = !!value;
+}
+
+// --- IOC match types (these are the only static-analysis types that warrant a webhook) ---
+
+const IOC_MATCH_TYPES = new Set([
+  'known_malicious_package',
+  'known_malicious_hash',
+  'pypi_malicious_package',
+  'shai_hulud_marker',
+  'shai_hulud_backdoor'
+]);
+
+function hasIOCMatch(result) {
+  if (!result || !result.threats) return false;
+  return result.threats.some(t => IOC_MATCH_TYPES.has(t.type));
+}
+
 // --- Webhook alerting ---
 
 function getWebhookUrl() {
@@ -107,9 +136,10 @@ function shouldSendWebhook(result, sandboxResult) {
     return sandboxResult.score > 0;
   }
 
-  // No sandbox — fall back to static analysis thresholds
-  if (result.summary.critical > 0) return true;
-  if (result.summary.high > 0 && computeRiskScore(result.summary) >= 25) return true;
+  // No sandbox — only send webhook for confirmed IOC matches
+  // (known_malicious_package, known_malicious_hash, pypi_malicious_package, etc.)
+  if (hasIOCMatch(result)) return true;
+
   return false;
 }
 
@@ -223,13 +253,17 @@ function buildTemporalWebhookEmbed(temporalResult) {
 }
 
 async function tryTemporalAlert(temporalResult) {
+  // Temporal anomalies are logged only — no webhook unless --verbose
+  console.log(`[MONITOR] ANOMALY (logged only): temporal lifecycle change for ${temporalResult.packageName}`);
+  if (!isVerboseMode()) return;
+
   const url = getWebhookUrl();
   if (!url) return;
 
   const payload = buildTemporalWebhookEmbed(temporalResult);
   try {
     await sendWebhook(url, payload, { rawPayload: true });
-    console.log(`[MONITOR] Temporal webhook sent for ${temporalResult.packageName}`);
+    console.log(`[MONITOR] Temporal webhook sent for ${temporalResult.packageName} (verbose mode)`);
   } catch (err) {
     console.error(`[MONITOR] Temporal webhook failed for ${temporalResult.packageName}: ${err.message}`);
   }
@@ -276,13 +310,17 @@ function buildTemporalAstWebhookEmbed(astResult) {
 }
 
 async function tryTemporalAstAlert(astResult) {
+  // AST anomalies are logged only — no webhook unless --verbose
+  console.log(`[MONITOR] ANOMALY (logged only): AST change for ${astResult.packageName}`);
+  if (!isVerboseMode()) return;
+
   const url = getWebhookUrl();
   if (!url) return;
 
   const payload = buildTemporalAstWebhookEmbed(astResult);
   try {
     await sendWebhook(url, payload, { rawPayload: true });
-    console.log(`[MONITOR] Temporal AST webhook sent for ${astResult.packageName}`);
+    console.log(`[MONITOR] Temporal AST webhook sent for ${astResult.packageName} (verbose mode)`);
   } catch (err) {
     console.error(`[MONITOR] Temporal AST webhook failed for ${astResult.packageName}: ${err.message}`);
   }
@@ -370,13 +408,17 @@ function buildPublishAnomalyWebhookEmbed(publishResult) {
 }
 
 async function tryTemporalPublishAlert(publishResult) {
+  // Publish anomalies are logged only — no webhook unless --verbose
+  console.log(`[MONITOR] ANOMALY (logged only): publish frequency for ${publishResult.packageName}`);
+  if (!isVerboseMode()) return;
+
   const url = getWebhookUrl();
   if (!url) return;
 
   const payload = buildPublishAnomalyWebhookEmbed(publishResult);
   try {
     await sendWebhook(url, payload, { rawPayload: true });
-    console.log(`[MONITOR] Publish anomaly webhook sent for ${publishResult.packageName}`);
+    console.log(`[MONITOR] Publish anomaly webhook sent for ${publishResult.packageName} (verbose mode)`);
   } catch (err) {
     console.error(`[MONITOR] Publish anomaly webhook failed for ${publishResult.packageName}: ${err.message}`);
   }
@@ -467,13 +509,17 @@ function buildMaintainerChangeWebhookEmbed(maintainerResult) {
 }
 
 async function tryTemporalMaintainerAlert(maintainerResult) {
+  // Maintainer changes are logged only — no webhook unless --verbose
+  console.log(`[MONITOR] ANOMALY (logged only): maintainer change for ${maintainerResult.packageName}`);
+  if (!isVerboseMode()) return;
+
   const url = getWebhookUrl();
   if (!url) return;
 
   const payload = buildMaintainerChangeWebhookEmbed(maintainerResult);
   try {
     await sendWebhook(url, payload, { rawPayload: true });
-    console.log(`[MONITOR] Maintainer change webhook sent for ${maintainerResult.packageName}`);
+    console.log(`[MONITOR] Maintainer change webhook sent for ${maintainerResult.packageName} (verbose mode)`);
   } catch (err) {
     console.error(`[MONITOR] Maintainer change webhook failed for ${maintainerResult.packageName}: ${err.message}`);
   }
@@ -1259,7 +1305,11 @@ async function pollPyPI(state) {
 
 // --- Main loop ---
 
-async function startMonitor() {
+async function startMonitor(options) {
+  if (options && options.verbose) {
+    setVerboseMode(true);
+  }
+
   console.log(`
 ╔════════════════════════════════════════════╗
 ║     MUAD'DIB - Registry Monitor           ║
@@ -1309,6 +1359,15 @@ async function startMonitor() {
     console.log('[MONITOR] Maintainer change analysis enabled — detecting maintainer changes, account takeovers');
   } else {
     console.log('[MONITOR] Maintainer change analysis disabled (MUADDIB_MONITOR_TEMPORAL_MAINTAINER=false)');
+  }
+
+  // Webhook filtering mode
+  if (isVerboseMode()) {
+    console.log('[MONITOR] Verbose mode ON — ALL anomalies sent as webhooks (temporal, publish, maintainer, AST)');
+  } else {
+    console.log('[MONITOR] Strict webhook mode — only IOC matches, sandbox confirmations, and canary exfiltrations trigger webhooks');
+    console.log('[MONITOR]   Temporal/publish/maintainer anomalies are logged but NOT sent as webhooks');
+    console.log('[MONITOR]   Use --verbose to send all anomalies as webhooks');
   }
 
   const state = loadState();
@@ -1538,6 +1597,10 @@ module.exports = {
   isCanaryEnabled,
   buildCanaryExfiltrationWebhookEmbed,
   isPublishAnomalyOnly,
+  isVerboseMode,
+  setVerboseMode,
+  hasIOCMatch,
+  IOC_MATCH_TYPES,
   DETECTIONS_FILE,
   appendDetection,
   loadDetections,

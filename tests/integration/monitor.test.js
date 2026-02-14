@@ -28,6 +28,7 @@ async function runMonitorTests() {
     isTemporalMaintainerEnabled, buildMaintainerChangeWebhookEmbed,
     isCanaryEnabled, buildCanaryExfiltrationWebhookEmbed,
     isPublishAnomalyOnly,
+    isVerboseMode, setVerboseMode, hasIOCMatch, IOC_MATCH_TYPES,
     DETECTIONS_FILE, appendDetection, loadDetections, getDetectionStats,
     SCAN_STATS_FILE, loadScanStats, updateScanStats
   } = require('../../src/monitor.js');
@@ -468,12 +469,29 @@ async function runMonitorTests() {
     }
   });
 
-  test('MONITOR: shouldSendWebhook returns true for HIGH findings with URL', () => {
+  test('MONITOR: shouldSendWebhook returns false for HIGH findings without IOC match', () => {
     const orig = process.env.MUADDIB_WEBHOOK_URL;
     process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.slack.com/test';
     try {
-      const result = { summary: { total: 2, critical: 0, high: 2, medium: 0, low: 0 } };
-      assert(shouldSendWebhook(result, null) === true, 'Should return true for HIGH');
+      const result = { summary: { total: 2, critical: 0, high: 2, medium: 0, low: 0 }, threats: [
+        { type: 'dangerous_call_eval', severity: 'HIGH' },
+        { type: 'obfuscation_detected', severity: 'HIGH' }
+      ] };
+      assert(shouldSendWebhook(result, null) === false, 'Should return false for HIGH without IOC match');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  test('MONITOR: shouldSendWebhook returns true for IOC match', () => {
+    const orig = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.slack.com/test';
+    try {
+      const result = { summary: { total: 1, critical: 1, high: 0, medium: 0, low: 0 }, threats: [
+        { type: 'known_malicious_package', severity: 'CRITICAL' }
+      ] };
+      assert(shouldSendWebhook(result, null) === true, 'Should return true for IOC match');
     } finally {
       if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
       else delete process.env.MUADDIB_WEBHOOK_URL;
@@ -517,6 +535,52 @@ async function runMonitorTests() {
       if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
       else delete process.env.MUADDIB_WEBHOOK_URL;
     }
+  });
+
+  test('MONITOR: hasIOCMatch detects known_malicious_package', () => {
+    const result = { threats: [{ type: 'known_malicious_package', severity: 'CRITICAL' }] };
+    assert(hasIOCMatch(result) === true, 'Should detect known_malicious_package');
+  });
+
+  test('MONITOR: hasIOCMatch detects known_malicious_hash', () => {
+    const result = { threats: [{ type: 'known_malicious_hash', severity: 'CRITICAL' }] };
+    assert(hasIOCMatch(result) === true, 'Should detect known_malicious_hash');
+  });
+
+  test('MONITOR: hasIOCMatch returns false for non-IOC threats', () => {
+    const result = { threats: [{ type: 'dangerous_call_eval', severity: 'HIGH' }] };
+    assert(hasIOCMatch(result) === false, 'Should return false for non-IOC threat');
+  });
+
+  test('MONITOR: hasIOCMatch returns false for empty threats', () => {
+    assert(hasIOCMatch({ threats: [] }) === false, 'Should return false for empty threats');
+    assert(hasIOCMatch(null) === false, 'Should return false for null');
+  });
+
+  test('MONITOR: IOC_MATCH_TYPES contains expected types', () => {
+    assert(IOC_MATCH_TYPES.has('known_malicious_package'), 'Should include known_malicious_package');
+    assert(IOC_MATCH_TYPES.has('known_malicious_hash'), 'Should include known_malicious_hash');
+    assert(IOC_MATCH_TYPES.has('pypi_malicious_package'), 'Should include pypi_malicious_package');
+    assert(IOC_MATCH_TYPES.has('shai_hulud_marker'), 'Should include shai_hulud_marker');
+    assert(!IOC_MATCH_TYPES.has('dangerous_call_eval'), 'Should NOT include dangerous_call_eval');
+  });
+
+  test('MONITOR: isVerboseMode defaults to false', () => {
+    const origEnv = process.env.MUADDIB_MONITOR_VERBOSE;
+    delete process.env.MUADDIB_MONITOR_VERBOSE;
+    setVerboseMode(false);
+    try {
+      assert(isVerboseMode() === false, 'Should default to false');
+    } finally {
+      if (origEnv !== undefined) process.env.MUADDIB_MONITOR_VERBOSE = origEnv;
+    }
+  });
+
+  test('MONITOR: setVerboseMode enables verbose', () => {
+    setVerboseMode(true);
+    assert(isVerboseMode() === true, 'Should be true after setVerboseMode(true)');
+    setVerboseMode(false);
+    assert(isVerboseMode() === false, 'Should be false after setVerboseMode(false)');
   });
 
   test('MONITOR: buildMonitorWebhookPayload has correct structure', () => {
@@ -1204,21 +1268,30 @@ async function runMonitorTests() {
     const origEnv = process.env.MUADDIB_WEBHOOK_URL;
     process.env.MUADDIB_WEBHOOK_URL = 'https://discord.com/api/webhooks/test/test';
     try {
-      const mockResult = { summary: { critical: 1, high: 0, medium: 0, low: 0 }, threats: [] };
+      const mockResultIOC = { summary: { critical: 1, high: 0, medium: 0, low: 0 }, threats: [
+        { type: 'known_malicious_package', severity: 'CRITICAL' }
+      ] };
+      const mockResultNoIOC = { summary: { critical: 1, high: 0, medium: 0, low: 0 }, threats: [
+        { type: 'shell_exec', severity: 'CRITICAL' }
+      ] };
       const mockSandboxClean = { score: 0, severity: 'CLEAN', findings: [] };
       const mockSandboxSuspect = { score: 60, severity: 'HIGH', findings: [{ type: 'suspicious_dns' }] };
 
       // Sandbox CLEAN → no webhook
-      assert(shouldSendWebhook(mockResult, mockSandboxClean) === false,
+      assert(shouldSendWebhook(mockResultIOC, mockSandboxClean) === false,
         'Should NOT send webhook when sandbox score is 0 (CLEAN)');
 
       // Sandbox SUSPECT → send webhook
-      assert(shouldSendWebhook(mockResult, mockSandboxSuspect) === true,
+      assert(shouldSendWebhook(mockResultIOC, mockSandboxSuspect) === true,
         'Should send webhook when sandbox score > 0');
 
-      // No sandbox → fall back to static analysis
-      assert(shouldSendWebhook(mockResult, null) === true,
-        'Should send webhook when no sandbox ran (CRITICAL findings)');
+      // No sandbox + IOC match → send webhook
+      assert(shouldSendWebhook(mockResultIOC, null) === true,
+        'Should send webhook when no sandbox ran and IOC match found');
+
+      // No sandbox + no IOC match → no webhook
+      assert(shouldSendWebhook(mockResultNoIOC, null) === false,
+        'Should NOT send webhook when no sandbox ran and no IOC match');
     } finally {
       if (origEnv === undefined) delete process.env.MUADDIB_WEBHOOK_URL;
       else process.env.MUADDIB_WEBHOOK_URL = origEnv;
@@ -1773,27 +1846,45 @@ async function runMonitorTests() {
     assert(isBundledToolingOnly(threats) === true, 'Should recognize mix of bundled files and paths');
   });
 
-  test('MONITOR: shouldSendWebhook returns false for HIGH findings with low score', () => {
+  test('MONITOR: shouldSendWebhook returns false for HIGH findings without IOC (strict mode)', () => {
     const orig = process.env.MUADDIB_WEBHOOK_URL;
     process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.slack.com/test';
     try {
-      // 1 HIGH = score 15, which is < 25
-      const result = { summary: { total: 1, critical: 0, high: 1, medium: 0, low: 0 } };
+      const result = { summary: { total: 1, critical: 0, high: 1, medium: 0, low: 0 }, threats: [
+        { type: 'dangerous_call_eval', severity: 'HIGH' }
+      ] };
       assert(shouldSendWebhook(result, null) === false,
-        'Should return false for HIGH with score < 25');
+        'Should return false for HIGH without IOC match');
     } finally {
       if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
       else delete process.env.MUADDIB_WEBHOOK_URL;
     }
   });
 
-  test('MONITOR: shouldSendWebhook returns true for CRITICAL even with low score', () => {
+  test('MONITOR: shouldSendWebhook returns true for CRITICAL with IOC match', () => {
     const orig = process.env.MUADDIB_WEBHOOK_URL;
     process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.slack.com/test';
     try {
-      const result = { summary: { total: 1, critical: 1, high: 0, medium: 0, low: 0 } };
+      const result = { summary: { total: 1, critical: 1, high: 0, medium: 0, low: 0 }, threats: [
+        { type: 'known_malicious_package', severity: 'CRITICAL' }
+      ] };
       assert(shouldSendWebhook(result, null) === true,
-        'Should return true for CRITICAL findings');
+        'Should return true for CRITICAL with IOC match');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  test('MONITOR: shouldSendWebhook returns false for CRITICAL without IOC match', () => {
+    const orig = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.slack.com/test';
+    try {
+      const result = { summary: { total: 1, critical: 1, high: 0, medium: 0, low: 0 }, threats: [
+        { type: 'shell_exec', severity: 'CRITICAL' }
+      ] };
+      assert(shouldSendWebhook(result, null) === false,
+        'Should return false for CRITICAL without IOC match');
     } finally {
       if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
       else delete process.env.MUADDIB_WEBHOOK_URL;
