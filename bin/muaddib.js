@@ -561,7 +561,10 @@ if (command === 'version' || command === '--version' || command === '-v') {
   } else {
     // Start full monitor
     const { startMonitor } = require('../src/monitor.js');
-    startMonitor().catch(err => {
+    const monitorOpts = {
+      verbose: options.includes('--verbose')
+    };
+    startMonitor(monitorOpts).catch(err => {
       console.error('[ERROR]', err.message);
       process.exit(1);
     });
