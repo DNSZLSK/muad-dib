@@ -532,6 +532,7 @@ async function run(targetPath, options = {}) {
   // Enrich each threat with rules
   const enrichedThreats = deduped.map(t => {
     const rule = getRule(t.type);
+    const points = SEVERITY_WEIGHTS[t.severity] || 0;
     return {
       ...t,
       rule_id: rule.id || t.type,
@@ -539,9 +540,15 @@ async function run(targetPath, options = {}) {
       confidence: rule.confidence || 'medium',
       references: rule.references || [],
       mitre: t.mitre || rule.mitre,
-      playbook: getPlaybook(t.type)
+      playbook: getPlaybook(t.type),
+      points
     };
   });
+
+  // Build score breakdown sorted by impact (descending)
+  const breakdown = enrichedThreats
+    .map(t => ({ rule: t.rule_id, type: t.type, points: t.points, reason: t.message }))
+    .sort((a, b) => b.points - a.points);
 
   // Calculate risk score (0-100) using deduplicated threats
   const criticalCount = deduped.filter(t => t.severity === 'CRITICAL').length;
@@ -581,7 +588,8 @@ async function run(targetPath, options = {}) {
       medium: mediumCount,
       low: lowCount,
       riskScore: riskScore,
-      riskLevel: riskLevel
+      riskLevel: riskLevel,
+      breakdown
     },
     sandbox: sandboxData
   };
@@ -610,6 +618,23 @@ async function run(targetPath, options = {}) {
   else if (options.explain) {
     if (!spinner) console.log(`\n[MUADDIB] Scanning ${targetPath}\n`);
     else console.log('');
+
+    const explainScoreBar = '█'.repeat(Math.floor(result.summary.riskScore / 5)) + '░'.repeat(20 - Math.floor(result.summary.riskScore / 5));
+    console.log(`[SCORE] ${result.summary.riskScore}/100 [${explainScoreBar}] ${result.summary.riskLevel}\n`);
+
+    if (options.breakdown && breakdown.length > 0) {
+      console.log('[BREAKDOWN] Score contributors:');
+      for (const entry of breakdown) {
+        const pts = String(entry.points).padStart(2);
+        console.log(`  +${pts}  ${entry.reason} (${entry.rule})`);
+      }
+      const uncapped = breakdown.reduce((sum, e) => sum + e.points, 0);
+      if (uncapped > MAX_RISK_SCORE) {
+        console.log('  ----');
+        console.log(`  Sum: ${uncapped} (capped to ${MAX_RISK_SCORE})`);
+      }
+      console.log('');
+    }
 
     if (pythonInfo) {
       console.log(`[PYTHON] ${pythonInfo.dependencies} dependencies detected (${pythonInfo.files.join(', ')})`);
@@ -666,6 +691,20 @@ async function run(targetPath, options = {}) {
 
     const scoreBar = '█'.repeat(Math.floor(result.summary.riskScore / 5)) + '░'.repeat(20 - Math.floor(result.summary.riskScore / 5));
     console.log(`[SCORE] ${result.summary.riskScore}/100 [${scoreBar}] ${result.summary.riskLevel}\n`);
+
+    if (options.breakdown && breakdown.length > 0) {
+      console.log('[BREAKDOWN] Score contributors:');
+      for (const entry of breakdown) {
+        const pts = String(entry.points).padStart(2);
+        console.log(`  +${pts}  ${entry.reason} (${entry.rule})`);
+      }
+      const uncapped = breakdown.reduce((sum, e) => sum + e.points, 0);
+      if (uncapped > MAX_RISK_SCORE) {
+        console.log('  ----');
+        console.log(`  Sum: ${uncapped} (capped to ${MAX_RISK_SCORE})`);
+      }
+      console.log('');
+    }
 
     if (pythonInfo) {
       console.log(`[PYTHON] ${pythonInfo.dependencies} dependencies detected (${pythonInfo.files.join(', ')})`);

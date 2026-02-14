@@ -687,6 +687,81 @@ async function runCliTests() {
     }
   });
 
+  // ============================================
+  // SCORE BREAKDOWN TESTS
+  // ============================================
+
+  console.log('\n=== SCORE BREAKDOWN TESTS ===\n');
+
+  test('BREAKDOWN: --breakdown appears in help', () => {
+    const output = runCommand('--help');
+    assertIncludes(output, '--breakdown', 'Help should show --breakdown flag');
+  });
+
+  test('BREAKDOWN: --breakdown shows score contributors', () => {
+    const output = runScan(path.join(TESTS_DIR, 'ast'), '--breakdown');
+    assertIncludes(output, '[BREAKDOWN]', 'Should show [BREAKDOWN] header');
+    assertIncludes(output, 'MUADDIB-', 'Should show rule IDs');
+  });
+
+  test('BREAKDOWN: --breakdown --explain shows both breakdown and score', () => {
+    const output = runScan(path.join(TESTS_DIR, 'ast'), '--breakdown --explain');
+    assertIncludes(output, '[BREAKDOWN]', 'Should show [BREAKDOWN] header');
+    assertIncludes(output, '[SCORE]', 'Should show [SCORE] bar');
+  });
+
+  test('BREAKDOWN: JSON includes summary.breakdown array', () => {
+    const output = runScan(path.join(TESTS_DIR, 'ast'), '--json');
+    const result = JSON.parse(output);
+    assert(Array.isArray(result.summary.breakdown), 'summary.breakdown should be an array');
+    assert(result.summary.breakdown.length > 0, 'breakdown should have entries for ast fixtures');
+    const entry = result.summary.breakdown[0];
+    assert(typeof entry.rule === 'string', 'breakdown entry should have rule');
+    assert(typeof entry.type === 'string', 'breakdown entry should have type');
+    assert(typeof entry.points === 'number', 'breakdown entry should have points');
+    assert(typeof entry.reason === 'string', 'breakdown entry should have reason');
+  });
+
+  test('BREAKDOWN: JSON breakdown sorted descending by points', () => {
+    const output = runScan(path.join(TESTS_DIR, 'ast'), '--json');
+    const result = JSON.parse(output);
+    const bd = result.summary.breakdown;
+    for (let i = 1; i < bd.length; i++) {
+      assert(bd[i - 1].points >= bd[i].points, `breakdown[${i - 1}].points (${bd[i - 1].points}) should >= breakdown[${i}].points (${bd[i].points})`);
+    }
+  });
+
+  test('BREAKDOWN: threats have numeric points field', () => {
+    const output = runScan(path.join(TESTS_DIR, 'ast'), '--json');
+    const result = JSON.parse(output);
+    for (const t of result.threats) {
+      assert(typeof t.points === 'number', `threat ${t.rule_id} should have numeric points`);
+      assert(t.points > 0, `threat ${t.rule_id} should have positive points`);
+    }
+  });
+
+  test('BREAKDOWN: clean project has empty breakdown', () => {
+    const output = runScan(path.join(TESTS_DIR, 'clean'), '--json');
+    const result = JSON.parse(output);
+    assert(Array.isArray(result.summary.breakdown), 'summary.breakdown should be an array');
+    assert(result.summary.breakdown.length === 0, 'clean project breakdown should be empty');
+  });
+
+  test('BREAKDOWN: --breakdown on clean project shows no breakdown header', () => {
+    const output = runScan(path.join(TESTS_DIR, 'clean'), '--breakdown');
+    assertNotIncludes(output, '[BREAKDOWN]', 'Clean project should not show [BREAKDOWN] header');
+  });
+
+  test('BREAKDOWN: points match severity weights', () => {
+    const output = runScan(path.join(TESTS_DIR, 'ast'), '--json');
+    const result = JSON.parse(output);
+    const WEIGHTS = { CRITICAL: 25, HIGH: 10, MEDIUM: 3, LOW: 1 };
+    for (const t of result.threats) {
+      const expected = WEIGHTS[t.severity];
+      assert(t.points === expected, `${t.rule_id} (${t.severity}) should have ${expected} points, got ${t.points}`);
+    }
+  });
+
   await asyncTest('HOOKS-COV: auto-detect selects git when only .git exists', async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-hooks-'));
     const gitDir = path.join(tmpDir, '.git', 'hooks');

@@ -30,6 +30,7 @@ let temporalAstMode = false;
 let temporalPublishMode = false;
 let temporalMaintainerMode = false;
 let temporalFullMode = false;
+let breakdownMode = false;
 
 for (let i = 0; i < options.length; i++) {
   if (options[i] === '--json') {
@@ -103,6 +104,8 @@ for (let i = 0; i < options.length; i++) {
     temporalPublishMode = true;
   } else if (options[i] === '--temporal-maintainer') {
     temporalMaintainerMode = true;
+  } else if (options[i] === '--breakdown') {
+    breakdownMode = true;
   } else if (options[i] === '--temporal') {
     temporalMode = true;
   } else if (options[i] === '--strict') {
@@ -343,6 +346,7 @@ const helpText = `
     --html [file]       HTML report
     --sarif [file]      SARIF report (GitHub Security)
     --explain           Detailed explanations
+    --breakdown         Show score breakdown by threat
     --fail-on [level]   Fail level (critical|high|medium|low)
     --webhook [url]     Discord/Slack webhook
     --paranoid          Ultra-strict mode
@@ -387,7 +391,8 @@ if (command === 'version' || command === '--version' || command === '-v') {
     temporalPublish: temporalPublishMode || temporalFullMode,
     temporalMaintainer: temporalMaintainerMode || temporalFullMode,
     exclude: excludeDirs,
-    entropyThreshold: entropyThreshold
+    entropyThreshold: entropyThreshold,
+    breakdown: breakdownMode
   }).then(exitCode => {
     process.exit(exitCode);
   }).catch(err => {
