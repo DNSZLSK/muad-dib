@@ -1,0 +1,118 @@
+{
+  "version": "1.0",
+  "attacks": [
+    {
+      "id": "GT-001",
+      "name": "event-stream",
+      "version": "3.3.6",
+      "ecosystem": "npm",
+      "year": 2018,
+      "vector": ["dependency_injection", "obfuscation", "crypto_theft"],
+      "published_at": "2018-09-09",
+      "disclosed_at": "2018-11-26",
+      "severity": "CRITICAL",
+      "description": "Malicious maintainer added flatmap-stream dependency containing AES-encrypted payload targeting Copay bitcoin wallet. Used hex-encoded strings, require('crypto').createDecipher, and module._compile() to execute decrypted code in memory.",
+      "source": "https://blog.npmjs.org/post/180565383195/details-about-the-event-stream-incident",
+      "mitre": ["T1195.002", "T1027", "T1059.007"],
+      "sample_dir": "samples/event-stream/",
+      "expected_detections": ["known_malicious_package"],
+      "expected": {
+        "min_threats": 1,
+        "rules": ["MUADDIB-DEP-001"],
+        "severities": ["CRITICAL"],
+        "scanners": ["package"]
+      }
+    },
+    {
+      "id": "GT-002",
+      "name": "ua-parser-js",
+      "version": "0.7.29",
+      "ecosystem": "npm",
+      "year": 2021,
+      "vector": ["account_hijack", "preinstall_script", "crypto_miner", "credential_stealer"],
+      "published_at": "2021-10-22",
+      "disclosed_at": "2021-10-22",
+      "severity": "CRITICAL",
+      "description": "Hijacked npm account published version with preinstall script that downloads XMRig crypto miner (Linux) and DanaBot password stealer (Windows). Uses curl/wget/certutil fallback chain. Geofences out CIS countries on Linux.",
+      "source": "https://github.com/advisories/GHSA-pjwm-rvh2-c87w",
+      "mitre": ["T1195.002", "T1059.007", "T1059.004", "T1496"],
+      "sample_dir": "samples/ua-parser-js/",
+      "expected_detections": ["lifecycle_script"],
+      "expected": {
+        "min_threats": 1,
+        "rules": ["MUADDIB-PKG-001"],
+        "severities": ["MEDIUM"],
+        "scanners": ["package"]
+      },
+      "gaps": "Shell scripts (.sh/.bat) and child_process exec/spawn in preinstall.js not flagged by AST scanner. Could improve with shell file scanning and child_process pattern detection."
+    },
+    {
+      "id": "GT-003",
+      "name": "coa",
+      "version": "2.0.3",
+      "ecosystem": "npm",
+      "year": 2021,
+      "vector": ["account_hijack", "preinstall_script", "obfuscation", "credential_stealer"],
+      "published_at": "2021-11-04",
+      "disclosed_at": "2021-11-04",
+      "severity": "CRITICAL",
+      "description": "Hijacked npm account published version with preinstall script and obfuscated compile.js (obfuscator.io _0x pattern). Windows payload downloads DanaBot stealer DLL via curl/wget/certutil, registers with regsvr32.",
+      "source": "https://github.com/advisories/GHSA-73qr-pfmq-6rp8",
+      "mitre": ["T1195.002", "T1059.007", "T1027", "T1218.010"],
+      "sample_dir": "samples/coa/",
+      "expected_detections": ["lifecycle_script", "js_obfuscation_pattern"],
+      "expected": {
+        "min_threats": 2,
+        "rules": ["MUADDIB-PKG-001", "MUADDIB-ENTROPY-003"],
+        "severities": ["MEDIUM", "HIGH"],
+        "scanners": ["package", "entropy"]
+      }
+    },
+    {
+      "id": "GT-004",
+      "name": "node-ipc",
+      "version": "10.1.1",
+      "ecosystem": "npm",
+      "year": 2022,
+      "vector": ["protestware", "geolocation_wiper", "base64_obfuscation"],
+      "published_at": "2022-03-07",
+      "disclosed_at": "2022-03-15",
+      "severity": "CRITICAL",
+      "description": "Maintainer added geolocation-based file wiper (dao/ssl-geospec.js) that checks IP against Russia/Belarus via API, then recursively overwrites all files with heart emoji. Also added peacenotwar dependency that drops text file on Desktop.",
+      "source": "https://github.com/advisories/GHSA-97m3-w2cp-4xx6",
+      "mitre": ["T1195.002", "T1485", "T1614.001", "T1027"],
+      "sample_dir": "samples/node-ipc/",
+      "expected_detections": ["known_malicious_package"],
+      "expected": {
+        "min_threats": 1,
+        "rules": ["MUADDIB-DEP-001"],
+        "severities": ["CRITICAL"],
+        "scanners": ["package"]
+      },
+      "gaps": "ssl-geospec.js base64 obfuscation (Buffer.from + base64), https.get network call, and fs.writeFile destructive pattern not detected by AST/entropy scanners. ESM import syntax may not be parsed. Could improve with base64 string detection and network+fs combined pattern analysis."
+    },
+    {
+      "id": "GT-005",
+      "name": "colors",
+      "version": "1.4.1",
+      "ecosystem": "npm",
+      "year": 2022,
+      "vector": ["maintainer_sabotage", "infinite_loop", "denial_of_service"],
+      "published_at": "2022-01-07",
+      "disclosed_at": "2022-01-08",
+      "severity": "HIGH",
+      "description": "Maintainer self-sabotage: added infinite for-loop (i=666 to Infinity) printing zalgo-encoded text to stdout, causing DoS on any application requiring colors. Also added American flag ASCII art module.",
+      "source": "https://github.com/Marak/colors.js/commit/074a0f8",
+      "mitre": ["T1195.002", "T1499"],
+      "sample_dir": "samples/colors/",
+      "expected_detections": [],
+      "expected": {
+        "min_threats": 0,
+        "rules": [],
+        "severities": [],
+        "scanners": []
+      },
+      "gaps": "Infinite loop DoS is not in scope of current scanners (focused on data exfiltration, obfuscation, credential theft). Could add infinite loop pattern detection (for/while to Infinity) as a LOW severity rule."
+    }
+  ]
+}

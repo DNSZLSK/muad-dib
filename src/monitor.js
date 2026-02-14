@@ -673,9 +673,12 @@ function downloadToFile(url, destPath, timeoutMs = 30_000) {
 }
 
 function extractTarGz(tgzPath, destDir) {
-  // Use --force-local on Windows so tar doesn't interpret C: as a remote host
-  const forceLocal = process.platform === 'win32' ? ' --force-local' : '';
-  execSync(`tar xzf "${tgzPath}"${forceLocal} -C "${destDir}"`, { timeout: 60_000, stdio: 'pipe' });
+  // Use cwd + relative paths so C: never appears in tar arguments
+  // (GNU tar treats C: as remote host, bsdtar doesn't support --force-local)
+  const tgzDir = path.dirname(path.resolve(tgzPath));
+  const tgzName = path.basename(tgzPath);
+  const relDest = path.relative(tgzDir, path.resolve(destDir)) || '.';
+  execSync(`tar xzf "${tgzName}" -C "${relDest}"`, { cwd: tgzDir, timeout: 60_000, stdio: 'pipe' });
   // npm tarballs extract into a package/ subdirectory; detect it
   const packageSubdir = path.join(destDir, 'package');
   if (fs.existsSync(packageSubdir) && fs.statSync(packageSubdir).isDirectory()) {
