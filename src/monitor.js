@@ -1237,6 +1237,20 @@ async function poll(state) {
 }
 
 /**
+ * Returns true if publish_anomaly is the ONLY suspicious temporal result.
+ * publish_anomaly alone is too noisy for webhooks — only alert when combined
+ * with another anomaly (lifecycle, AST, maintainer).
+ */
+function isPublishAnomalyOnly(temporalResult, astResult, publishResult, maintainerResult) {
+  const hasLifecycle = temporalResult && temporalResult.suspicious;
+  const hasAst = astResult && astResult.suspicious;
+  const hasPublish = publishResult && publishResult.suspicious;
+  const hasMaintainer = maintainerResult && maintainerResult.suspicious;
+
+  return !!(hasPublish && !hasLifecycle && !hasAst && !hasMaintainer);
+}
+
+/**
  * Wrapper to resolve PyPI tarball URLs before scanning.
  * For npm packages, tarballUrl is already set from the registry response.
  * For PyPI packages, we need to fetch the JSON API to get the tarball URL.
@@ -1311,6 +1325,9 @@ async function resolveTarballAndScan(item) {
     // Static scan is CLEAN (0 findings) and no sandbox ran → suppress temporal webhooks
     } else if (staticClean && !sandboxResult) {
       console.log(`[MONITOR] FALSE POSITIVE (static clean, no alert): ${item.name}@${item.version}`);
+    // publish_anomaly alone → no webhook (too noisy, not actionable alone)
+    } else if (isPublishAnomalyOnly(temporalResult, astResult, publishResult, maintainerResult)) {
+      console.log(`[MONITOR] PUBLISH ANOMALY (alone, no alert): ${item.name}@${item.version}`);
     } else {
       // Sandbox confirmed threat (score > 0) OR static scan found threats → send webhooks
       if (temporalResult && temporalResult.suspicious) await tryTemporalAlert(temporalResult);
@@ -1378,7 +1395,8 @@ module.exports = {
   buildMaintainerChangeWebhookEmbed,
   runTemporalMaintainerCheck,
   isCanaryEnabled,
-  buildCanaryExfiltrationWebhookEmbed
+  buildCanaryExfiltrationWebhookEmbed,
+  isPublishAnomalyOnly
 };
 
 // Standalone entry point: node src/monitor.js

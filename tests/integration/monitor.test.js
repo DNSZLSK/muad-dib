@@ -26,7 +26,8 @@ async function runMonitorTests() {
     isTemporalAstEnabled, buildTemporalAstWebhookEmbed,
     isTemporalPublishEnabled, buildPublishAnomalyWebhookEmbed,
     isTemporalMaintainerEnabled, buildMaintainerChangeWebhookEmbed,
-    isCanaryEnabled, buildCanaryExfiltrationWebhookEmbed
+    isCanaryEnabled, buildCanaryExfiltrationWebhookEmbed,
+    isPublishAnomalyOnly
   } = require('../../src/monitor.js');
 
   test('MONITOR: parseNpmRss extracts package names from RSS', () => {
@@ -1246,6 +1247,65 @@ async function runMonitorTests() {
       'Static SUSPECT + sandbox CLEAN → no temporal webhook');
     assert(shouldSendTemporalWebhook(true, { score: 60 }) === true,
       'Static CLEAN + sandbox SUSPECT → send temporal webhook');
+  });
+
+  // ============================================
+  // MONITOR PUBLISH ANOMALY ALONE SUPPRESSION TESTS
+  // ============================================
+
+  console.log('\n=== MONITOR PUBLISH ANOMALY ALONE SUPPRESSION TESTS ===\n');
+
+  test('MONITOR: isPublishAnomalyOnly returns true when only publish is suspicious', () => {
+    const publishResult = { suspicious: true, anomalies: [{ type: 'publish_burst', severity: 'HIGH' }] };
+    assert(isPublishAnomalyOnly(null, null, publishResult, null) === true,
+      'Should return true when only publish is suspicious');
+  });
+
+  test('MONITOR: isPublishAnomalyOnly returns false when publish + lifecycle are suspicious', () => {
+    const publishResult = { suspicious: true, anomalies: [{ type: 'publish_burst', severity: 'HIGH' }] };
+    const temporalResult = { suspicious: true, findings: [{ type: 'lifecycle_added', script: 'postinstall', severity: 'CRITICAL' }] };
+    assert(isPublishAnomalyOnly(temporalResult, null, publishResult, null) === false,
+      'Should return false when publish + lifecycle are suspicious');
+  });
+
+  test('MONITOR: isPublishAnomalyOnly returns false when publish + AST are suspicious', () => {
+    const publishResult = { suspicious: true, anomalies: [{ type: 'rapid_succession', severity: 'MEDIUM' }] };
+    const astResult = { suspicious: true, findings: [{ pattern: 'child_process', severity: 'CRITICAL' }] };
+    assert(isPublishAnomalyOnly(null, astResult, publishResult, null) === false,
+      'Should return false when publish + AST are suspicious');
+  });
+
+  test('MONITOR: isPublishAnomalyOnly returns false when publish + maintainer are suspicious', () => {
+    const publishResult = { suspicious: true, anomalies: [{ type: 'publish_burst', severity: 'HIGH' }] };
+    const maintainerResult = { suspicious: true, findings: [{ type: 'sole_maintainer_change', severity: 'CRITICAL' }] };
+    assert(isPublishAnomalyOnly(null, null, publishResult, maintainerResult) === false,
+      'Should return false when publish + maintainer are suspicious');
+  });
+
+  test('MONITOR: isPublishAnomalyOnly returns false when only lifecycle is suspicious (no publish)', () => {
+    const temporalResult = { suspicious: true, findings: [{ type: 'lifecycle_added', script: 'postinstall', severity: 'CRITICAL' }] };
+    assert(isPublishAnomalyOnly(temporalResult, null, null, null) === false,
+      'Should return false when lifecycle is suspicious without publish');
+  });
+
+  test('MONITOR: isPublishAnomalyOnly returns false when nothing is suspicious', () => {
+    assert(isPublishAnomalyOnly(null, null, null, null) === false,
+      'Should return false when nothing is suspicious');
+  });
+
+  test('MONITOR: isPublishAnomalyOnly returns false when publish suspicious=false', () => {
+    const publishResult = { suspicious: false, anomalies: [] };
+    assert(isPublishAnomalyOnly(null, null, publishResult, null) === false,
+      'Should return false when publish.suspicious is false');
+  });
+
+  test('MONITOR: isPublishAnomalyOnly returns false when all four are suspicious', () => {
+    const temporalResult = { suspicious: true, findings: [] };
+    const astResult = { suspicious: true, findings: [] };
+    const publishResult = { suspicious: true, anomalies: [] };
+    const maintainerResult = { suspicious: true, findings: [] };
+    assert(isPublishAnomalyOnly(temporalResult, astResult, publishResult, maintainerResult) === false,
+      'Should return false when all four are suspicious');
   });
 
   test('MONITOR: buildTemporalWebhookEmbed handles modified lifecycle scripts', () => {
