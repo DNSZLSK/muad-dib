@@ -562,11 +562,11 @@ asyncTest('BOOTSTRAP: ensureIOCs skips download when cache file exists and is la
     const result = await ensureIOCs();
     assert(result === true, 'Should return true when cache exists');
   } else {
-    // Create a temp large file to test skip logic
+    // Create a temp large file to test skip logic (need >1MB, each entry is ~30 bytes)
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-bootstrap-test-'));
     const tmpFile = path.join(tmpDir, 'test-iocs.json');
-    // Write a file larger than MIN_IOCS_SIZE
-    const bigData = JSON.stringify({ packages: new Array(10000).fill({ name: 'test', version: '*' }) });
+    // Write a file larger than MIN_IOCS_SIZE (40000 entries ≈ 1.2MB)
+    const bigData = JSON.stringify({ packages: new Array(40000).fill({ name: 'test', version: '*' }) });
     fs.writeFileSync(tmpFile, bigData);
     const stat = fs.statSync(tmpFile);
     assert(stat.size >= MIN_IOCS_SIZE, 'Test file should be >= 1MB, got ' + stat.size);
