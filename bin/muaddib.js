@@ -323,6 +323,9 @@ const helpText = `
     muaddib detections               List recent detections
     muaddib detections --stats       Show aggregated detection stats
     muaddib detections --json        Raw JSON output
+    muaddib stats                    Show scan stats + FP rate
+    muaddib stats --daily            Last 7 days daily breakdown
+    muaddib stats --json             Raw JSON dump
     muaddib version                  Show version
 
   Diff Examples:
@@ -628,6 +631,49 @@ if (command === 'version' || command === '--version' || command === '-v') {
     console.log(`  [${d.severity}] ${d.ecosystem}/${d.package}@${d.version} — ${d.first_seen_at}${lead}`);
     console.log(`         findings: ${d.findings.join(', ')}`);
   }
+  console.log('');
+  process.exit(0);
+} else if (command === 'stats') {
+  const { loadScanStats } = require('../src/monitor.js');
+  const wantDaily = options.includes('--daily');
+  const wantJson = options.includes('--json');
+
+  const data = loadScanStats();
+
+  if (wantJson) {
+    console.log(JSON.stringify(data, null, 2));
+    process.exit(0);
+  }
+
+  if (wantDaily) {
+    const last7 = data.daily.slice(-7);
+    console.log('\n  MUAD\'DIB Scan Stats — Daily Breakdown\n');
+    if (last7.length === 0) {
+      console.log('  No daily data recorded yet.\n');
+      process.exit(0);
+    }
+    console.log('  Date         Scanned  Clean  Suspect  FP  Confirmed  FP Rate');
+    console.log('  ' + '-'.repeat(60));
+    for (const d of last7) {
+      const fpRate = (d.fp_rate * 100).toFixed(1) + '%';
+      console.log(`  ${d.date}   ${String(d.scanned).padStart(5)}  ${String(d.clean).padStart(5)}  ${String(d.suspect).padStart(7)}  ${String(d.false_positive).padStart(2)}  ${String(d.confirmed).padStart(9)}  ${fpRate.padStart(7)}`);
+    }
+    console.log('');
+    process.exit(0);
+  }
+
+  // Default: global stats
+  const s = data.stats;
+  const globalDenom = s.false_positive + s.confirmed_malicious;
+  const globalFpRate = globalDenom > 0 ? ((s.false_positive / globalDenom) * 100).toFixed(1) + '%' : 'N/A';
+
+  console.log('\n  MUAD\'DIB Scan Stats\n');
+  console.log(`  Total scanned:      ${s.total_scanned}`);
+  console.log(`  Clean:              ${s.clean}`);
+  console.log(`  Suspect:            ${s.suspect}`);
+  console.log(`  False positives:    ${s.false_positive}`);
+  console.log(`  Confirmed malicious: ${s.confirmed_malicious}`);
+  console.log(`  FP rate:            ${globalFpRate}`);
   console.log('');
   process.exit(0);
 } else if (command === 'init-hooks') {

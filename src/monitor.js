@@ -14,6 +14,7 @@ const { detectMaintainerChange } = require('./maintainer-change.js');
 const STATE_FILE = path.join(__dirname, '..', 'data', 'monitor-state.json');
 const ALERTS_FILE = path.join(__dirname, '..', 'data', 'monitor-alerts.json');
 const DETECTIONS_FILE = path.join(__dirname, '..', 'data', 'detections.json');
+const SCAN_STATS_FILE = path.join(__dirname, '..', 'data', 'scan-stats.json');
 const POLL_INTERVAL = 60_000;
 const MAX_TARBALL_SIZE = 50 * 1024 * 1024; // 50MB
 const SCAN_TIMEOUT_MS = 180_000; // 3 minutes per package
@@ -798,6 +799,53 @@ function getDetectionStats() {
   return { total, bySeverity, byEcosystem, leadTime };
 }
 
+// --- Scan stats (FP rate tracking) ---
+
+function loadScanStats() {
+  try {
+    const raw = fs.readFileSync(SCAN_STATS_FILE, 'utf8');
+    const data = JSON.parse(raw);
+    if (data && data.stats && Array.isArray(data.daily)) return data;
+    return { stats: { total_scanned: 0, clean: 0, suspect: 0, false_positive: 0, confirmed_malicious: 0 }, daily: [] };
+  } catch {
+    return { stats: { total_scanned: 0, clean: 0, suspect: 0, false_positive: 0, confirmed_malicious: 0 }, daily: [] };
+  }
+}
+
+function updateScanStats(result) {
+  const data = loadScanStats();
+  data.stats.total_scanned++;
+
+  if (result === 'clean') data.stats.clean++;
+  else if (result === 'suspect') data.stats.suspect++;
+  else if (result === 'false_positive') data.stats.false_positive++;
+  else if (result === 'confirmed') data.stats.confirmed_malicious++;
+
+  const today = new Date().toISOString().slice(0, 10);
+  let dayEntry = data.daily.find(d => d.date === today);
+  if (!dayEntry) {
+    dayEntry = { date: today, scanned: 0, clean: 0, suspect: 0, false_positive: 0, confirmed: 0, fp_rate: 0 };
+    data.daily.push(dayEntry);
+  }
+  dayEntry.scanned++;
+
+  if (result === 'clean') dayEntry.clean++;
+  else if (result === 'suspect') dayEntry.suspect++;
+  else if (result === 'false_positive') dayEntry.false_positive++;
+  else if (result === 'confirmed') dayEntry.confirmed++;
+
+  const denom = dayEntry.false_positive + dayEntry.confirmed;
+  dayEntry.fp_rate = denom > 0 ? dayEntry.false_positive / denom : 0;
+
+  try {
+    const dir = path.dirname(SCAN_STATS_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(SCAN_STATS_FILE, JSON.stringify(data, null, 2), 'utf8');
+  } catch (err) {
+    console.error(`[MONITOR] Failed to save scan stats: ${err.message}`);
+  }
+}
+
 // --- Bundled tooling false-positive filter ---
 
 const KNOWN_BUNDLED_FILES = ['yarn.js', 'webpack.js', 'terser.js', 'esbuild.js', 'polyfills.js'];
@@ -843,6 +891,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl) {
       stats.totalTimeMs += elapsed;
       stats.clean++;
       console.log(`[MONITOR] CLEAN: ${name}@${version} (0 findings, ${(elapsed / 1000).toFixed(1)}s)`);
+      updateScanStats('clean');
       return { sandboxResult: null, staticClean: true };
     } else {
       const counts = [];
@@ -872,6 +921,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl) {
           }))
         };
         appendAlert(alert);
+        updateScanStats('clean');
         return { sandboxResult: null, staticClean: true };
       } else {
         stats.suspect++;
@@ -1387,6 +1437,19 @@ async function resolveTarballAndScan(item) {
   const sandboxResult = scanResult && scanResult.sandboxResult;
   const staticClean = scanResult && scanResult.staticClean;
 
+  // FP rate tracking
+  if (scanResult) {
+    if (!staticClean) {
+      if (sandboxResult && sandboxResult.score === 0) {
+        updateScanStats('false_positive');
+      } else if (sandboxResult && sandboxResult.score > 0) {
+        updateScanStats('confirmed');
+      } else {
+        updateScanStats('suspect');
+      }
+    }
+  }
+
   // Send temporal webhooks only if the package is confirmed suspicious
   const hasSuspiciousTemporal = (temporalResult && temporalResult.suspicious)
     || (astResult && astResult.suspicious)
@@ -1475,7 +1538,10 @@ module.exports = {
   DETECTIONS_FILE,
   appendDetection,
   loadDetections,
-  getDetectionStats
+  getDetectionStats,
+  SCAN_STATS_FILE,
+  loadScanStats,
+  updateScanStats
 };
 
 // Standalone entry point: node src/monitor.js

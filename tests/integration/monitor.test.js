@@ -28,7 +28,8 @@ async function runMonitorTests() {
     isTemporalMaintainerEnabled, buildMaintainerChangeWebhookEmbed,
     isCanaryEnabled, buildCanaryExfiltrationWebhookEmbed,
     isPublishAnomalyOnly,
-    DETECTIONS_FILE, appendDetection, loadDetections, getDetectionStats
+    DETECTIONS_FILE, appendDetection, loadDetections, getDetectionStats,
+    SCAN_STATS_FILE, loadScanStats, updateScanStats
   } = require('../../src/monitor.js');
 
   test('MONITOR: parseNpmRss extracts package names from RSS', () => {
@@ -1481,6 +1482,192 @@ async function runMonitorTests() {
         fs.writeFileSync(DETECTIONS_FILE, backup, 'utf8');
       } else {
         try { fs.unlinkSync(DETECTIONS_FILE); } catch {}
+      }
+    }
+  });
+
+  // ============================================
+  // SCAN STATS (FP RATE TRACKING) TESTS
+  // ============================================
+
+  console.log('\n=== SCAN STATS (FP RATE TRACKING) TESTS ===\n');
+
+  test('MONITOR: loadScanStats returns default structure when file missing', () => {
+    const backupExists = fs.existsSync(SCAN_STATS_FILE);
+    let backup = null;
+    if (backupExists) {
+      backup = fs.readFileSync(SCAN_STATS_FILE, 'utf8');
+    }
+    try {
+      try { fs.unlinkSync(SCAN_STATS_FILE); } catch {}
+      const data = loadScanStats();
+      assert(data.stats.total_scanned === 0, 'total_scanned should be 0');
+      assert(data.stats.clean === 0, 'clean should be 0');
+      assert(data.stats.suspect === 0, 'suspect should be 0');
+      assert(data.stats.false_positive === 0, 'false_positive should be 0');
+      assert(data.stats.confirmed_malicious === 0, 'confirmed_malicious should be 0');
+      assert(Array.isArray(data.daily), 'daily should be array');
+      assert(data.daily.length === 0, 'daily should be empty');
+    } finally {
+      if (backup !== null) {
+        fs.writeFileSync(SCAN_STATS_FILE, backup, 'utf8');
+      }
+    }
+  });
+
+  test('MONITOR: updateScanStats clean increments clean + total_scanned', () => {
+    const backupExists = fs.existsSync(SCAN_STATS_FILE);
+    let backup = null;
+    if (backupExists) {
+      backup = fs.readFileSync(SCAN_STATS_FILE, 'utf8');
+    }
+    try {
+      const dir = path.dirname(SCAN_STATS_FILE);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(SCAN_STATS_FILE, JSON.stringify({ stats: { total_scanned: 0, clean: 0, suspect: 0, false_positive: 0, confirmed_malicious: 0 }, daily: [] }), 'utf8');
+
+      updateScanStats('clean');
+      const data = loadScanStats();
+      assert(data.stats.total_scanned === 1, 'total_scanned should be 1, got ' + data.stats.total_scanned);
+      assert(data.stats.clean === 1, 'clean should be 1, got ' + data.stats.clean);
+      assert(data.stats.suspect === 0, 'suspect should still be 0');
+    } finally {
+      if (backup !== null) {
+        fs.writeFileSync(SCAN_STATS_FILE, backup, 'utf8');
+      } else {
+        try { fs.unlinkSync(SCAN_STATS_FILE); } catch {}
+      }
+    }
+  });
+
+  test('MONITOR: updateScanStats false_positive increments false_positive + total_scanned', () => {
+    const backupExists = fs.existsSync(SCAN_STATS_FILE);
+    let backup = null;
+    if (backupExists) {
+      backup = fs.readFileSync(SCAN_STATS_FILE, 'utf8');
+    }
+    try {
+      const dir = path.dirname(SCAN_STATS_FILE);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(SCAN_STATS_FILE, JSON.stringify({ stats: { total_scanned: 0, clean: 0, suspect: 0, false_positive: 0, confirmed_malicious: 0 }, daily: [] }), 'utf8');
+
+      updateScanStats('false_positive');
+      const data = loadScanStats();
+      assert(data.stats.total_scanned === 1, 'total_scanned should be 1');
+      assert(data.stats.false_positive === 1, 'false_positive should be 1');
+    } finally {
+      if (backup !== null) {
+        fs.writeFileSync(SCAN_STATS_FILE, backup, 'utf8');
+      } else {
+        try { fs.unlinkSync(SCAN_STATS_FILE); } catch {}
+      }
+    }
+  });
+
+  test('MONITOR: updateScanStats confirmed increments confirmed_malicious + total_scanned', () => {
+    const backupExists = fs.existsSync(SCAN_STATS_FILE);
+    let backup = null;
+    if (backupExists) {
+      backup = fs.readFileSync(SCAN_STATS_FILE, 'utf8');
+    }
+    try {
+      const dir = path.dirname(SCAN_STATS_FILE);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(SCAN_STATS_FILE, JSON.stringify({ stats: { total_scanned: 0, clean: 0, suspect: 0, false_positive: 0, confirmed_malicious: 0 }, daily: [] }), 'utf8');
+
+      updateScanStats('confirmed');
+      const data = loadScanStats();
+      assert(data.stats.total_scanned === 1, 'total_scanned should be 1');
+      assert(data.stats.confirmed_malicious === 1, 'confirmed_malicious should be 1');
+    } finally {
+      if (backup !== null) {
+        fs.writeFileSync(SCAN_STATS_FILE, backup, 'utf8');
+      } else {
+        try { fs.unlinkSync(SCAN_STATS_FILE); } catch {}
+      }
+    }
+  });
+
+  test('MONITOR: updateScanStats creates daily entry with today date', () => {
+    const backupExists = fs.existsSync(SCAN_STATS_FILE);
+    let backup = null;
+    if (backupExists) {
+      backup = fs.readFileSync(SCAN_STATS_FILE, 'utf8');
+    }
+    try {
+      const dir = path.dirname(SCAN_STATS_FILE);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(SCAN_STATS_FILE, JSON.stringify({ stats: { total_scanned: 0, clean: 0, suspect: 0, false_positive: 0, confirmed_malicious: 0 }, daily: [] }), 'utf8');
+
+      updateScanStats('clean');
+      const data = loadScanStats();
+      const today = new Date().toISOString().slice(0, 10);
+      assert(data.daily.length === 1, 'Should have 1 daily entry');
+      assert(data.daily[0].date === today, 'Daily entry date should be today: ' + today);
+      assert(data.daily[0].scanned === 1, 'Daily scanned should be 1');
+      assert(data.daily[0].clean === 1, 'Daily clean should be 1');
+    } finally {
+      if (backup !== null) {
+        fs.writeFileSync(SCAN_STATS_FILE, backup, 'utf8');
+      } else {
+        try { fs.unlinkSync(SCAN_STATS_FILE); } catch {}
+      }
+    }
+  });
+
+  test('MONITOR: updateScanStats computes fp_rate correctly', () => {
+    const backupExists = fs.existsSync(SCAN_STATS_FILE);
+    let backup = null;
+    if (backupExists) {
+      backup = fs.readFileSync(SCAN_STATS_FILE, 'utf8');
+    }
+    try {
+      const dir = path.dirname(SCAN_STATS_FILE);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(SCAN_STATS_FILE, JSON.stringify({ stats: { total_scanned: 0, clean: 0, suspect: 0, false_positive: 0, confirmed_malicious: 0 }, daily: [] }), 'utf8');
+
+      // 3 false positives, 1 confirmed → fp_rate = 3/(3+1) = 0.75
+      updateScanStats('false_positive');
+      updateScanStats('false_positive');
+      updateScanStats('false_positive');
+      updateScanStats('confirmed');
+
+      const data = loadScanStats();
+      const today = new Date().toISOString().slice(0, 10);
+      const dayEntry = data.daily.find(d => d.date === today);
+      assert(dayEntry, 'Should have daily entry');
+      assert(dayEntry.false_positive === 3, 'false_positive should be 3');
+      assert(dayEntry.confirmed === 1, 'confirmed should be 1');
+      assert(Math.abs(dayEntry.fp_rate - 0.75) < 0.001, 'fp_rate should be 0.75, got ' + dayEntry.fp_rate);
+    } finally {
+      if (backup !== null) {
+        fs.writeFileSync(SCAN_STATS_FILE, backup, 'utf8');
+      } else {
+        try { fs.unlinkSync(SCAN_STATS_FILE); } catch {}
+      }
+    }
+  });
+
+  test('MONITOR: updateScanStats suspect increments suspect + total_scanned', () => {
+    const backupExists = fs.existsSync(SCAN_STATS_FILE);
+    let backup = null;
+    if (backupExists) {
+      backup = fs.readFileSync(SCAN_STATS_FILE, 'utf8');
+    }
+    try {
+      const dir = path.dirname(SCAN_STATS_FILE);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(SCAN_STATS_FILE, JSON.stringify({ stats: { total_scanned: 0, clean: 0, suspect: 0, false_positive: 0, confirmed_malicious: 0 }, daily: [] }), 'utf8');
+
+      updateScanStats('suspect');
+      const data = loadScanStats();
+      assert(data.stats.total_scanned === 1, 'total_scanned should be 1');
+      assert(data.stats.suspect === 1, 'suspect should be 1');
+    } finally {
+      if (backup !== null) {
+        fs.writeFileSync(SCAN_STATS_FILE, backup, 'utf8');
+      } else {
+        try { fs.unlinkSync(SCAN_STATS_FILE); } catch {}
       }
     }
   });
