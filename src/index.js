@@ -16,6 +16,7 @@ const path = require('path');
 const { scanGitHubActions } = require('./scanner/github-actions.js');
 const { detectPythonProject, normalizePythonName } = require('./scanner/python.js');
 const { loadCachedIOCs } = require('./ioc/updater.js');
+const { ensureIOCs } = require('./ioc/bootstrap.js');
 const { scanEntropy } = require('./scanner/entropy.js');
 const { detectSuddenLifecycleChange } = require('./temporal-analysis.js');
 const { detectSuddenAstChanges } = require('./temporal-ast-diff.js');
@@ -198,6 +199,9 @@ function checkPyPITyposquatting(deps, targetPath) {
 }
 
 async function run(targetPath, options = {}) {
+  // Ensure IOCs are downloaded (first run only, graceful failure)
+  await ensureIOCs();
+
   // Apply --exclude dirs for this scan
   if (options.exclude && options.exclude.length > 0) {
     setExtraExcludes(options.exclude);
