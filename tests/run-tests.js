@@ -24,6 +24,7 @@ const { runSandboxTests } = require('./sandbox/sandbox.test');
 // Integration tests
 const { runCliTests } = require('./integration/cli.test');
 const { runMonitorTests } = require('./integration/monitor.test');
+const { runGroundTruthTests } = require('./integration/ground-truth.test');
 
 // Temporal analysis tests
 const { runTemporalAnalysisTests } = require('./temporal/temporal-analysis.test');
@@ -54,6 +55,7 @@ const { runCanaryTokensTests } = require('./temporal/canary-tokens.test');
   await runPublishAnomalyTests();
   await runMaintainerChangeTests();
   await runCanaryTokensTests();
+  await runGroundTruthTests();
 
   // Results
   const { passed, failed, skipped, failures } = getCounters();
