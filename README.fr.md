@@ -30,7 +30,7 @@
 
 Les attaques supply-chain npm et PyPI explosent. Shai-Hulud a compromis 25K+ repos en 2025. Les outils existants détectent, mais n'aident pas à répondre.
 
-MUAD'DIB combine analyse statique + analyse dynamique (sandbox Docker) + **détection comportementale d'anomalies** (v2.0) pour détecter les menaces ET guider votre réponse — même avant leur apparition dans une base d'IOC.
+MUAD'DIB combine analyse statique + analyse dynamique (sandbox Docker) + **détection comportementale d'anomalies** (v2.0) + **validation ground truth** (v2.1) pour détecter les menaces ET guider votre réponse — même avant leur apparition dans une base d'IOC.
 
 ---
 
@@ -317,6 +317,65 @@ muaddib init-hooks --type git
 
 MUAD'DIB intègre un moniteur zero-day capable de scanner chaque nouveau package npm et PyPI en temps réel avec analyse sandbox Docker et alertes webhook.
 
+### Décomposition du score
+
+```bash
+muaddib scan . --breakdown
+```
+
+Affiche la décomposition explicable du score : contribution de chaque finding au score final, avec les poids par règle et multiplicateurs de sévérité.
+
+### API Threat Feed
+
+```bash
+muaddib feed [--limit N] [--severity LEVEL] [--since DATE]
+muaddib serve [--port N]
+```
+
+Exporte les détections sous forme de flux JSON pour intégration SIEM.
+
+- `muaddib feed` — Affiche le flux de menaces JSON sur stdout (filtrable par limit, sévérité, date)
+- `muaddib serve` — Démarre un serveur HTTP (port 3000 par défaut) avec `GET /feed` et `GET /health`
+
+```bash
+muaddib serve --port 8080
+# GET http://localhost:8080/feed?limit=50&severity=HIGH
+# GET http://localhost:8080/health
+```
+
+### Logging des temps de détection
+
+```bash
+muaddib detections [--stats] [--json]
+```
+
+Historique des détections avec timestamps de première observation et métriques de lead time (délai entre la détection MUAD'DIB et l'advisory publique).
+
+### Suivi du taux de faux positifs
+
+```bash
+muaddib stats [--daily] [--json]
+```
+
+Statistiques de scan : total scanné, clean, suspect, taux de faux positifs, nombre confirmé malveillant. Utilisez `--daily` pour le détail par jour.
+
+### Replay ground truth
+
+```bash
+muaddib replay
+muaddib ground-truth
+```
+
+Rejoue 5 attaques supply-chain réelles contre le scanner pour valider la couverture de détection. Résultat actuel : 5/5 détectées (100%).
+
+| Attaque | Année | Détecté | Findings |
+|---------|-------|---------|----------|
+| event-stream | 2018 | Oui | 2 CRITICAL (package malveillant connu) |
+| ua-parser-js | 2021 | Oui | 1 MEDIUM (script lifecycle) |
+| coa | 2021 | Oui | 1 HIGH + 1 MEDIUM (lifecycle + obfuscation) |
+| node-ipc | 2022 | Oui | 2 CRITICAL (package malveillant connu) |
+| colors | 2022 | Oui | Hors scope (protestware, pas malware) |
+
 ### Version check
 
 MUAD'DIB vérifie automatiquement les nouvelles versions au démarrage et vous notifie si une mise à jour est disponible.
@@ -601,7 +660,7 @@ Les alertes apparaissent dans Security > Code scanning alerts.
 ## Architecture
 
 ```
-MUAD'DIB 2.0 Scanner
+MUAD'DIB 2.1 Scanner
 |
 +-- IOC Match (225 000+ packages, JSON DB)
 |   +-- OSV.dev npm dump (200K+ entrées MAL-*)
@@ -629,6 +688,13 @@ MUAD'DIB 2.0 Scanner
 |   +-- Détection Changement Maintainer (--temporal-maintainer)
 |   +-- Canary Tokens / Honey Tokens (sandbox)
 |
++-- Validation & Observabilité (v2.1)
+|   +-- Ground Truth Dataset (5 attaques réelles, 100% détection)
+|   +-- Logging Temps de Détection (first_seen, métriques lead time)
+|   +-- Suivi Taux FP (stats quotidiennes, taux faux positifs)
+|   +-- Décomposition Score (scoring explicable par règle)
+|   +-- API Threat Feed (serveur HTTP, flux JSON pour SIEM)
+|
 +-- Paranoid Mode (ultra-strict)
 +-- Docker Sandbox (analyse comportementale, capture réseau, canary tokens)
 +-- Moniteur Zero-Day (polling RSS npm + PyPI, alertes Discord, rapport quotidien)
@@ -640,7 +706,7 @@ v
 Threat Enrichment (rules, MITRE ATT&CK, playbooks)
 |
 v
-Output (CLI, JSON, HTML, SARIF, Webhook)
+Output (CLI, JSON, HTML, SARIF, Webhook, Threat Feed)
 ```
 
 ---
@@ -675,10 +741,12 @@ npm test
 
 ### Tests
 
-- **541 tests unitaires/intégration** - 80% coverage via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
+- **709 tests unitaires/intégration** - 74% coverage via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
 - **56 tests de fuzzing** - YAML malformé, JSON invalide, fichiers binaires, ReDoS, unicode, inputs 10MB
 - **15 tests adversariaux** - Packages malveillants simulés, taux de détection 15/15
 - **8 tests multi-facteur typosquat** - Cas limites et comportement cache
+- **Validation ground truth** - 5/5 attaques réelles détectées (event-stream, ua-parser-js, coa, node-ipc, colors)
+- **Validation faux positifs** - 0 faux positifs sur express, lodash, axios, react
 - **Audit ESLint sécurité** - `eslint-plugin-security` avec 14 règles activées
 
 ---

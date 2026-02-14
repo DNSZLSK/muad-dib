@@ -4,8 +4,9 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
+| 2.1.x   | :white_check_mark: |
 | 2.0.x   | :white_check_mark: |
-| 1.8.x   | :white_check_mark: |
+| 1.8.x   | :x:                |
 | 1.6.x   | :x:                |
 | 1.4.x   | :x:                |
 | 1.3.x   | :x:                |
@@ -58,9 +59,9 @@ Please include the following information in your report:
 - We aim to release fixes before public disclosure
 - We request a 90-day disclosure window for complex issues
 
-## Detection Rules (v2.0.0)
+## Detection Rules (v2.1.0)
 
-MUAD'DIB uses 12 parallel scanners + 5 behavioral anomaly detection features, producing the following rule IDs:
+MUAD'DIB uses 12 parallel scanners + 5 behavioral anomaly detection features + ground truth validation, producing the following rule IDs:
 
 ### AST Scanner
 
@@ -260,19 +261,43 @@ MITRE: T1552.001 (Unsecured Credentials: Credentials in Files)
 2. **Signed commits**: Use GPG-signed commits when possible
 3. **Review dependencies**: Check new dependencies before adding them
 
-## Threat Model (v2.0)
+## Threat Model (v2.1)
 
-MUAD'DIB 2.0 uses a **dual detection approach**:
+MUAD'DIB 2.1 uses a **triple detection approach**:
 
 1. **IOC-based detection** (v1.x): Matches packages against 225,000+ known malicious packages from OSV, DataDog, OSSF, GitHub Advisory, and other sources. Fast and reliable for known threats.
 
 2. **Behavioral anomaly detection** (v2.0): Analyzes changes between package versions to detect supply-chain attacks before they appear in IOC databases. Compares lifecycle scripts, AST, publish frequency, and maintainer metadata across versions. This approach can detect 0-day behavioral anomalies without any prior knowledge of the specific attack.
+
+3. **Ground truth validation** (v2.1): Validates detection accuracy against 5 real-world attacks, tracks detection lead times vs. public advisories, and monitors false positive rates over time. Provides observability into scanner effectiveness.
 
 The behavioral detection features are opt-in (`--temporal-full`) and query the npm registry at scan time. They are particularly effective against:
 - Account takeover attacks (event-stream pattern)
 - Compromised CI/CD pipelines (automated malicious publishes)
 - Dormant package hijacking (abandonware takeover)
 - Sudden code injection (Shai-Hulud, ua-parser-js pattern)
+
+## Ground Truth Validation (v2.1)
+
+MUAD'DIB v2.1 includes a ground truth dataset of 5 real-world supply-chain attacks to continuously validate detection coverage:
+
+| Attack | Year | Expected | Result |
+|--------|------|----------|--------|
+| event-stream | 2018 | CRITICAL IOC match | Detected (2 CRITICAL) |
+| ua-parser-js | 2021 | Lifecycle script | Detected (1 MEDIUM) |
+| coa | 2021 | Lifecycle + obfuscation | Detected (1 HIGH + 1 MEDIUM) |
+| node-ipc | 2022 | CRITICAL IOC match | Detected (2 CRITICAL) |
+| colors | 2022 | Out of scope (protestware) | Correctly skipped |
+
+Run `muaddib replay` to validate detection at any time.
+
+## Threat Feed API Security
+
+The `muaddib serve` HTTP server binds to `localhost` (127.0.0.1) by default. It serves detection data as JSON for SIEM integration.
+
+- **No authentication**: the server is designed for local use only. Do not expose to the public internet.
+- **No sensitive data**: the feed contains detection metadata (package names, severities, timestamps), not raw file contents or credentials.
+- **Localhost binding**: default port 3000, binds to 127.0.0.1 only.
 
 ## Known Limitations
 

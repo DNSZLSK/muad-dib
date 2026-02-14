@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-npm test          # Run all tests (custom framework, ~541 tests across 16 files)
+npm test          # Run all tests (custom framework, ~709 tests across 17 files)
 npm run lint      # ESLint with security plugin
 npm run scan      # Self-scan: node bin/muaddib.js scan .
 npm run update    # Download latest IOCs
@@ -46,9 +46,15 @@ Tests use a custom framework in `tests/run-tests.js` (no Jest). Test helpers:
 - `src/canary-tokens.js` — Canary tokens (sandbox): injects fake credentials and detects exfiltration attempts
 - `--temporal-full` enables all 4 temporal features at once
 
+**Validation & Observability (v2.1):** 5 features for measuring and validating scanner effectiveness:
+- `src/ground-truth.js` — Ground truth dataset: 5 real-world attacks (event-stream, ua-parser-js, coa, node-ipc, colors) replayed against scanner. 100% detection rate.
+- `src/monitor.js` — Detection time logging (`appendDetection`, `getDetectionStats`): tracks first_seen, lead time vs advisory. FP rate tracking (`loadScanStats`, `updateScanStats`): daily stats with false positive rate.
+- `src/threat-feed.js` — Threat Feed API: `muaddib feed` (JSON stdout) and `muaddib serve` (HTTP server with `/feed` and `/health` endpoints)
+- `--breakdown` flag — Explainable score decomposition showing per-finding contribution
+
 **Other key features (not scanners):**
 - `src/sandbox.js` — Docker-based dynamic analysis: installs a package in an isolated container, captures filesystem changes, network traffic (tcpdump), and process spawns (strace). Injects canary tokens by default.
-- `src/diff.js` — Compares scan results between two git refs to surface only new threats (useful in CI)
+- `src/diff.js` — Compares scan results between two git refs to surface only new threats (useful in CI). Exports `getThreatId`, `compareThreats`, `resolveRef` for testing.
 
 **Rules & playbooks:** Threat types map to rules in `src/rules/index.js` (MITRE ATT&CK mapped) and remediation text in `src/response/playbooks.js`. Both keyed by threat `type` string.
 
@@ -65,7 +71,7 @@ Tests use a custom framework in `tests/run-tests.js` (no Jest). Test helpers:
 2. Import in `src/index.js`, add to the Promise.all destructuring and the threats spread
 3. Add rule entry in `src/rules/index.js` with id, name, severity, confidence, description, mitre
 4. Add playbook entry in `src/response/playbooks.js`
-5. Add tests in the appropriate test file under `tests/` (16 modular test files)
+5. Add tests in the appropriate test file under `tests/` (17 modular test files)
 6. Create test fixtures in `tests/samples/my-scanner/`
 
 ## Key Constraints

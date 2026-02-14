@@ -41,7 +41,7 @@
 |-----------|--------|
 | Malware polymorphe avance | Pas de ML/machine learning, patterns statiques uniquement |
 | Obfuscation avancee | Heuristiques limitees, pas de desobfuscation automatique du JS |
-| Zero-day (packages inconnus) | Base IOC reactive |
+| Zero-day (packages inconnus) | Base IOC reactive (v1.x); atténué par la détection comportementale (v2.0) et validé par le ground truth (v2.1) |
 | Attaques via binaires natifs | Pas d'analyse binaire |
 | Backdoors subtiles | Pas de review de code semantique |
 | Time bombs (declenchement differe) | Pas d'analyse temporelle |
@@ -118,9 +118,39 @@ Les parsers ont ete testes avec des inputs malformes :
 
 Resultat : **56/56 pass**. Aucun crash, aucune exception non rattrapee.
 
-### 296 tests unitaires
+### 709 tests unitaires et d'integration
 
-Couverture complete des scanners, parsers, IOC matching, typosquatting, et integrations CLI.
+Couverture complete des scanners, parsers, IOC matching, typosquatting, integrations CLI, diff, monitor, temporal analysis, et ground truth. 74% code coverage.
+
+### Validation Ground Truth (v2.1)
+
+5 attaques supply-chain reelles sont rejouees automatiquement pour valider la couverture :
+
+| Attaque | Annee | Technique | Resultat |
+|---------|-------|-----------|----------|
+| event-stream | 2018 | Package malveillant connu (flatmap-stream) | 2 CRITICAL detectes |
+| ua-parser-js | 2021 | Script lifecycle malveillant ajoute | 1 MEDIUM detecte |
+| coa | 2021 | Script lifecycle + obfuscation JS | 1 HIGH + 1 MEDIUM detectes |
+| node-ipc | 2022 | Package malveillant connu (protestware) | 2 CRITICAL detectes |
+| colors | 2022 | Protestware (hors scope) | Correctement ignore |
+
+Taux de detection : **100%** (4/4 attaques malware + 1 hors scope correctement classifie).
+
+### Suivi du taux de faux positifs (v2.1)
+
+Le systeme de FP rate tracking (`muaddib stats`) enregistre quotidiennement :
+- Nombre total de packages scannes
+- Clean / Suspect / Faux positif / Confirme malveillant
+- Taux de faux positifs = FP / (FP + Confirme)
+- Ventilation par jour (`--daily`)
+
+### Metriques de temps de detection (v2.1)
+
+Le systeme de detection time logging (`muaddib detections`) suit :
+- `first_seen_at` : timestamp de premiere detection par MUAD'DIB
+- `advisory_at` : timestamp de l'advisory publique (OSV, GitHub Advisory, etc.)
+- `lead_time_hours` : delai entre detection et advisory (en heures)
+- Statistiques agregees : count, avg, min, max du lead time
 
 ## Hypotheses
 
@@ -189,17 +219,22 @@ Couverture complete des scanners, parsers, IOC matching, typosquatting, et integ
 1. Utiliser `muaddib install <pkg>` au lieu de `npm install` pour scanner avant installation
 2. Mettre a jour les IOCs regulierement (`muaddib update`)
 3. Utiliser le mode `--explain` pour comprendre les detections
-4. Integrer dans CI/CD avec sortie SARIF
-5. Configurer les pre-commit hooks (`muaddib init-hooks`) pour scanner a chaque commit
-6. Utiliser `muaddib diff` en CI pour ne bloquer que les nouvelles menaces
+4. Utiliser `--breakdown` pour comprendre la decomposition du score
+5. Integrer dans CI/CD avec sortie SARIF
+6. Configurer les pre-commit hooks (`muaddib init-hooks`) pour scanner a chaque commit
+7. Utiliser `muaddib diff` en CI pour ne bloquer que les nouvelles menaces
+8. Valider la couverture avec `muaddib replay` regulierement
 
 ### Pour les equipes securite
 
 1. Completer avec une analyse dynamique (`muaddib sandbox <pkg>`)
 2. Monitorer les nouveaux packages avant adoption
-3. Utiliser `--sarif` pour integration SIEM et GitHub Security
-4. Contribuer des IOCs via PR sur le repo
-5. Utiliser le mode `--paranoid` pour les projets critiques
+3. Utiliser `--sarif` pour integration GitHub Security
+4. Utiliser `muaddib serve` pour integration SIEM via threat feed JSON
+5. Suivre le taux de faux positifs avec `muaddib stats --daily`
+6. Monitorer les lead times de detection avec `muaddib detections --stats`
+7. Contribuer des IOCs via PR sur le repo
+8. Utiliser le mode `--paranoid` pour les projets critiques
 
 ## Contacts
 
