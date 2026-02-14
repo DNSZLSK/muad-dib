@@ -1,8 +1,9 @@
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
-const CACHE_PATH = path.join(__dirname, '../../.muaddib-cache');
-const CACHE_IOC_FILE = path.join(CACHE_PATH, 'iocs.json');
+const HOME_DATA_PATH = path.join(os.homedir(), '.muaddib', 'data');
+const CACHE_IOC_FILE = path.join(HOME_DATA_PATH, 'iocs.json');
 const LOCAL_IOC_FILE = path.join(__dirname, 'data/iocs.json');
 const LOCAL_COMPACT_FILE = path.join(__dirname, 'data/iocs-compact.json');
 const { loadYAMLIOCs } = require('./yaml-loader.js');
@@ -56,16 +57,16 @@ async function updateIOCs() {
   mergeIOCs(baseIOCs, githubIOCs);
   console.log('     +' + shaiHulud.packages.length + ' GenSecAI, +' + datadog.packages.length + ' DataDog');
 
-  // Step 4: Merge and save to cache
-  if (!fs.existsSync(CACHE_PATH)) {
-    fs.mkdirSync(CACHE_PATH, { recursive: true });
+  // Step 4: Merge and save to cache (~/.muaddib/data/ — persists across npm updates)
+  if (!fs.existsSync(HOME_DATA_PATH)) {
+    fs.mkdirSync(HOME_DATA_PATH, { recursive: true });
   }
 
   // Verify write permission before attempting save (CROSS-001)
   try {
-    fs.accessSync(CACHE_PATH, fs.constants.W_OK);
+    fs.accessSync(HOME_DATA_PATH, fs.constants.W_OK);
   } catch {
-    console.log('[WARN] Cache directory is not writable: ' + CACHE_PATH);
+    console.log('[WARN] Cache directory is not writable: ' + HOME_DATA_PATH);
     console.log('[WARN] IOCs loaded in memory but not persisted to disk.');
     return { total: baseIOCs.packages.length, totalPyPI: (baseIOCs.pypi_packages || []).length };
   }
