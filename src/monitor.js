@@ -671,7 +671,7 @@ function downloadToFile(url, destPath, timeoutMs = 30_000) {
 }
 
 function extractTarGz(tgzPath, destDir) {
-  // Use --force-local on Windows so tar doesn't interpret C: as a remote host
+  // Use --force-local on Windows so GNU tar doesn't interpret C: as a remote host
   const forceLocal = process.platform === 'win32' ? ' --force-local' : '';
   execSync(`tar xzf "${tgzPath}"${forceLocal} -C "${destDir}"`, { timeout: 60_000, stdio: 'pipe' });
   // npm tarballs extract into a package/ subdirectory; detect it
