@@ -775,7 +775,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl) {
       stats.totalTimeMs += elapsed;
       stats.clean++;
       console.log(`[MONITOR] CLEAN: ${name}@${version} (0 findings, ${(elapsed / 1000).toFixed(1)}s)`);
-      return { sandboxResult: null };
+      return { sandboxResult: null, staticClean: true };
     } else {
       const counts = [];
       if (result.summary.critical > 0) counts.push(`${result.summary.critical} CRITICAL`);
@@ -804,7 +804,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl) {
           }))
         };
         appendAlert(alert);
-        return { sandboxResult: null };
+        return { sandboxResult: null, staticClean: true };
       } else {
         stats.suspect++;
         console.log(`[MONITOR] SUSPECT: ${name}@${version} (${counts.join(', ')})`);
@@ -870,7 +870,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl) {
         appendAlert(alert);
         dailyAlerts.push({ name, version, ecosystem, findingsCount: result.summary.total });
         await trySendWebhook(name, version, ecosystem, result, sandboxResult);
-        return { sandboxResult };
+        return { sandboxResult, staticClean: false };
       }
     }
   } catch (err) {
@@ -878,7 +878,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl) {
     stats.scanned++;
     stats.totalTimeMs += Date.now() - startTime;
     console.error(`[MONITOR] ERROR scanning ${name}@${version}: ${err.message}`);
-    return { sandboxResult: null };
+    return { sandboxResult: null, staticClean: false };
   } finally {
     // Cleanup temp dir
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
@@ -1296,8 +1296,9 @@ async function resolveTarballAndScan(item) {
 
   const scanResult = await scanPackage(item.name, item.version, item.ecosystem, item.tarballUrl);
   const sandboxResult = scanResult && scanResult.sandboxResult;
+  const staticClean = scanResult && scanResult.staticClean;
 
-  // Send temporal webhooks only if sandbox did NOT mark the package as CLEAN
+  // Send temporal webhooks only if the package is confirmed suspicious
   const hasSuspiciousTemporal = (temporalResult && temporalResult.suspicious)
     || (astResult && astResult.suspicious)
     || (publishResult && publishResult.suspicious)
@@ -1307,8 +1308,11 @@ async function resolveTarballAndScan(item) {
     // Sandbox ran and package is CLEAN → suppress temporal webhooks
     if (sandboxResult && sandboxResult.score === 0) {
       console.log(`[MONITOR] FALSE POSITIVE (sandbox clean, no alert): ${item.name}@${item.version}`);
+    // Static scan is CLEAN (0 findings) and no sandbox ran → suppress temporal webhooks
+    } else if (staticClean && !sandboxResult) {
+      console.log(`[MONITOR] FALSE POSITIVE (static clean, no alert): ${item.name}@${item.version}`);
     } else {
-      // Sandbox confirmed threat (score > 0) OR sandbox not available → send webhooks
+      // Sandbox confirmed threat (score > 0) OR static scan found threats → send webhooks
       if (temporalResult && temporalResult.suspicious) await tryTemporalAlert(temporalResult);
       if (astResult && astResult.suspicious) await tryTemporalAstAlert(astResult);
       if (publishResult && publishResult.suspicious) await tryTemporalPublishAlert(publishResult);

@@ -1222,6 +1222,32 @@ async function runMonitorTests() {
     }
   });
 
+  test('MONITOR: temporal webhook suppressed when static scan is CLEAN and no sandbox', () => {
+    // Simulate the decision logic from resolveTarballAndScan:
+    // If staticClean=true and sandboxResult=null → no webhook (false positive)
+    // If staticClean=false and sandboxResult=null → send webhook (static found threats)
+    // If staticClean=true and sandboxResult.score=0 → no webhook (sandbox confirms clean)
+
+    function shouldSendTemporalWebhook(staticClean, sandboxResult) {
+      if (sandboxResult && sandboxResult.score === 0) return false;
+      if (staticClean && !sandboxResult) return false;
+      return true;
+    }
+
+    assert(shouldSendTemporalWebhook(true, null) === false,
+      'Static CLEAN + no sandbox → no temporal webhook');
+    assert(shouldSendTemporalWebhook(true, { score: 0 }) === false,
+      'Static CLEAN + sandbox CLEAN → no temporal webhook');
+    assert(shouldSendTemporalWebhook(false, null) === true,
+      'Static SUSPECT + no sandbox → send temporal webhook');
+    assert(shouldSendTemporalWebhook(false, { score: 60 }) === true,
+      'Static SUSPECT + sandbox SUSPECT → send temporal webhook');
+    assert(shouldSendTemporalWebhook(false, { score: 0 }) === false,
+      'Static SUSPECT + sandbox CLEAN → no temporal webhook');
+    assert(shouldSendTemporalWebhook(true, { score: 60 }) === true,
+      'Static CLEAN + sandbox SUSPECT → send temporal webhook');
+  });
+
   test('MONITOR: buildTemporalWebhookEmbed handles modified lifecycle scripts', () => {
     const mockResult = {
       packageName: 'mod-pkg',
