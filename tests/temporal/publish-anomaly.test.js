@@ -304,6 +304,143 @@ async function runPublishAnomalyTests() {
     assert(MIN_VERSIONS_FOR_ANALYSIS === 3, 'MIN_VERSIONS_FOR_ANALYSIS should be 3');
   });
 
+  test('PUBLISH: analyzePublishFrequency stdDevDays nonzero for irregular intervals', () => {
+    const metadata = {
+      time: {
+        '1.0.0': '2023-01-01T00:00:00Z',
+        '1.1.0': '2023-01-10T00:00:00Z',
+        '1.2.0': '2023-07-01T00:00:00Z'
+      },
+      versions: { '1.0.0': {}, '1.1.0': {}, '1.2.0': {} }
+    };
+    const stats = analyzePublishFrequency(metadata);
+    assert(stats.stdDevDays > 0, 'StdDev should be > 0 for irregular intervals, got ' + stats.stdDevDays);
+  });
+
+  // --- detectPublishAnomaly (mocked fetchPackageMetadata) ---
+
+  const temporalPath = require.resolve('../../src/temporal-analysis.js');
+  const publishPath = require.resolve('../../src/publish-anomaly.js');
+
+  async function withMockedFetch(mockFn, testFn) {
+    const origFetch = require.cache[temporalPath].exports.fetchPackageMetadata;
+    require.cache[temporalPath].exports.fetchPackageMetadata = mockFn;
+    delete require.cache[publishPath];
+    try {
+      const mod = require(publishPath);
+      await testFn(mod.detectPublishAnomaly);
+    } finally {
+      require.cache[temporalPath].exports.fetchPackageMetadata = origFetch;
+      delete require.cache[publishPath];
+    }
+  }
+
+  await asyncTest('PUBLISH: detectPublishAnomaly detects burst', async () => {
+    const metadata = {
+      time: {
+        '1.0.0': '2024-01-01T00:00:00Z',
+        '1.0.1': '2024-06-01T08:00:00Z',
+        '1.0.2': '2024-06-01T12:00:00Z',
+        '1.0.3': '2024-06-01T16:00:00Z',
+        '1.0.4': '2024-06-01T20:00:00Z'
+      },
+      versions: { '1.0.0': {}, '1.0.1': {}, '1.0.2': {}, '1.0.3': {}, '1.0.4': {} }
+    };
+    await withMockedFetch(async () => metadata, async (detect) => {
+      const result = await detect('test-pkg');
+      assert(result.suspicious === true, 'Should be suspicious');
+      assert(result.packageName === 'test-pkg', 'Package name should match');
+      const burst = result.anomalies.find(f => f.type === 'publish_burst');
+      assert(burst, 'Should have publish_burst finding');
+      assert(burst.severity === 'HIGH', 'Burst severity should be HIGH');
+    });
+  });
+
+  await asyncTest('PUBLISH: detectPublishAnomaly detects dormant spike', async () => {
+    const metadata = {
+      time: {
+        '1.0.0': '2023-01-01T00:00:00Z',
+        '1.1.0': '2023-03-01T00:00:00Z',
+        '1.2.0': '2023-05-01T00:00:00Z',
+        '2.0.0': '2024-06-01T00:00:00Z'
+      },
+      versions: { '1.0.0': {}, '1.1.0': {}, '1.2.0': {}, '2.0.0': {} }
+    };
+    await withMockedFetch(async () => metadata, async (detect) => {
+      const result = await detect('test-pkg');
+      assert(result.suspicious === true, 'Should be suspicious');
+      const dormant = result.anomalies.find(f => f.type === 'dormant_spike');
+      assert(dormant, 'Should have dormant_spike finding');
+      assert(dormant.severity === 'HIGH', 'Dormant severity should be HIGH');
+    });
+  });
+
+  await asyncTest('PUBLISH: detectPublishAnomaly detects rapid succession', async () => {
+    const metadata = {
+      time: {
+        '1.0.0': '2024-01-01T00:00:00Z',
+        '1.1.0': '2024-06-01T00:00:00Z',
+        '1.1.1': '2024-06-01T00:15:00Z',
+        '1.1.2': '2024-06-01T00:30:00Z'
+      },
+      versions: { '1.0.0': {}, '1.1.0': {}, '1.1.1': {}, '1.1.2': {} }
+    };
+    await withMockedFetch(async () => metadata, async (detect) => {
+      const result = await detect('test-pkg');
+      assert(result.suspicious === true, 'Should be suspicious');
+      const rapid = result.anomalies.find(f => f.type === 'rapid_succession');
+      assert(rapid, 'Should have rapid_succession finding');
+      assert(rapid.severity === 'MEDIUM', 'Rapid severity should be MEDIUM');
+    });
+  });
+
+  await asyncTest('PUBLISH: detectPublishAnomaly normal → not suspicious', async () => {
+    const metadata = {
+      time: {
+        '1.0.0': '2023-01-01T00:00:00Z',
+        '1.1.0': '2023-04-01T00:00:00Z',
+        '1.2.0': '2023-07-01T00:00:00Z',
+        '1.3.0': '2023-10-01T00:00:00Z'
+      },
+      versions: { '1.0.0': {}, '1.1.0': {}, '1.2.0': {}, '1.3.0': {} }
+    };
+    await withMockedFetch(async () => metadata, async (detect) => {
+      const result = await detect('test-pkg');
+      assert(result.suspicious === false, 'Should not be suspicious');
+      assert(result.anomalies.length === 0, 'Should have no anomalies');
+      assert(result.stats.totalVersions === 4, 'Should have 4 versions');
+    });
+  });
+
+  await asyncTest('PUBLISH: detectPublishAnomaly <3 versions → not suspicious', async () => {
+    const metadata = {
+      time: { '1.0.0': '2023-01-01T00:00:00Z', '1.0.1': '2023-02-01T00:00:00Z' },
+      versions: { '1.0.0': {}, '1.0.1': {} }
+    };
+    await withMockedFetch(async () => metadata, async (detect) => {
+      const result = await detect('test-pkg');
+      assert(result.suspicious === false, 'Should not be suspicious');
+      assert(result.stats.totalVersions === 2, 'Should have 2 versions');
+    });
+  });
+
+  await asyncTest('PUBLISH: detectPublishAnomaly fetch failure → graceful fallback', async () => {
+    await withMockedFetch(async () => { throw new Error('Network error'); }, async (detect) => {
+      const result = await detect('test-pkg');
+      assert(result.suspicious === false, 'Should not be suspicious on error');
+      assert(result.anomalies.length === 0, 'Should have no anomalies');
+      assert(result.stats.totalVersions === 0, 'Should have 0 versions');
+    });
+  });
+
+  await asyncTest('PUBLISH: detectPublishAnomaly missing time/versions → fallback', async () => {
+    await withMockedFetch(async () => ({ name: 'test-pkg' }), async (detect) => {
+      const result = await detect('test-pkg');
+      assert(result.suspicious === false, 'Should not be suspicious');
+      assert(result.anomalies.length === 0, 'Should have no anomalies');
+    });
+  });
+
   // --- Rules and playbooks ---
 
   test('PUBLISH: Rules MUADDIB-PUBLISH-001/002/003 exist', () => {

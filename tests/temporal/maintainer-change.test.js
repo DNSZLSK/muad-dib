@@ -84,6 +84,36 @@ async function runMaintainerChangeTests() {
     assert(result.riskLevel === 'HIGH', 'Should be HIGH, got ' + result.riskLevel);
   });
 
+  test('MAINTAINER: analyzeMaintainerRisk default → HIGH', () => {
+    const result = analyzeMaintainerRisk({ name: 'default', email: '' });
+    assert(result.riskLevel === 'HIGH', 'default should be HIGH');
+  });
+
+  test('MAINTAINER: analyzeMaintainerRisk temp → HIGH', () => {
+    const result = analyzeMaintainerRisk({ name: 'temp', email: '' });
+    assert(result.riskLevel === 'HIGH', 'temp should be HIGH');
+  });
+
+  test('MAINTAINER: analyzeMaintainerRisk tmp → HIGH', () => {
+    const result = analyzeMaintainerRisk({ name: 'tmp', email: '' });
+    assert(result.riskLevel === 'HIGH', 'tmp should be HIGH');
+  });
+
+  test('MAINTAINER: analyzeMaintainerRisk owner → HIGH', () => {
+    const result = analyzeMaintainerRisk({ name: 'owner', email: '' });
+    assert(result.riskLevel === 'HIGH', 'owner should be HIGH');
+  });
+
+  test('MAINTAINER: analyzeMaintainerRisk maintainer → HIGH', () => {
+    const result = analyzeMaintainerRisk({ name: 'maintainer', email: '' });
+    assert(result.riskLevel === 'HIGH', 'maintainer should be HIGH');
+  });
+
+  test('MAINTAINER: analyzeMaintainerRisk null input → HIGH', () => {
+    const result = analyzeMaintainerRisk(null);
+    assert(result.riskLevel === 'HIGH', 'null should be HIGH');
+  });
+
   // --- getMaintainersHistory ---
 
   test('MAINTAINER: getMaintainersHistory with 2 maintainers → returns both', () => {
@@ -138,6 +168,33 @@ async function runMaintainerChangeTests() {
     const result = getVersionMaintainers({ maintainers: [{ name: 'x', email: '' }] });
     assert(result.publisher === null, 'Publisher should be null when no _npmUser');
     assert(result.maintainers.length === 1, 'Should have 1 maintainer');
+  });
+
+  test('MAINTAINER: getVersionMaintainers with empty maintainers array', () => {
+    const result = getVersionMaintainers({ _npmUser: { name: 'x', email: 'x@y.com' }, maintainers: [] });
+    assert(result.publisher.name === 'x', 'Publisher should exist');
+    assert(result.maintainers.length === 0, 'Maintainers should be empty');
+  });
+
+  test('MAINTAINER: getMaintainersHistory with missing name/email fields', () => {
+    const metadata = {
+      maintainers: [
+        { name: 'alice' },
+        { email: 'bob@x.com' },
+        {}
+      ]
+    };
+    const result = getMaintainersHistory(metadata);
+    assert(result.count === 3, 'Should have 3 maintainers');
+    assert(result.current[0].email === '', 'Missing email defaults to empty');
+    assert(result.current[1].name === '', 'Missing name defaults to empty');
+    assert(result.current[2].name === '', 'Both missing defaults to empty');
+  });
+
+  test('MAINTAINER: getMaintainersHistory with non-array maintainers', () => {
+    const result = getMaintainersHistory({ maintainers: 'not-array' });
+    assert(result.count === 0, 'Non-array should return count 0');
+    assert(result.current.length === 0, 'Non-array should return empty');
   });
 
   // --- Constants ---
@@ -319,6 +376,170 @@ async function runMaintainerChangeTests() {
 
     const risk = analyzeMaintainerRisk(newestMaint.publisher);
     assert(risk.riskLevel === 'HIGH', 'npm-user-77777 should be HIGH risk');
+  });
+
+  // --- detectMaintainerChange (mocked fetchPackageMetadata) ---
+
+  const temporalPath = require.resolve('../../src/temporal-analysis.js');
+  const maintainerPath = require.resolve('../../src/maintainer-change.js');
+
+  async function withMockedFetchMaint(mockFn, testFn) {
+    const origFetch = require.cache[temporalPath].exports.fetchPackageMetadata;
+    require.cache[temporalPath].exports.fetchPackageMetadata = mockFn;
+    delete require.cache[maintainerPath];
+    try {
+      const mod = require(maintainerPath);
+      await testFn(mod.detectMaintainerChange);
+    } finally {
+      require.cache[temporalPath].exports.fetchPackageMetadata = origFetch;
+      delete require.cache[maintainerPath];
+    }
+  }
+
+  await asyncTest('MAINTAINER: detectMaintainerChange detects sole maintainer change', async () => {
+    const metadata = {
+      maintainers: [{ name: 'npm-user-99999', email: 'x@y.com' }],
+      time: { '1.0.0': '2020-01-01T00:00:00Z', '1.0.1': '2026-01-15T00:00:00Z' },
+      versions: {
+        '1.0.0': {
+          _npmUser: { name: 'trusteddev', email: 'trusted@dev.com' },
+          maintainers: [{ name: 'trusteddev', email: 'trusted@dev.com' }]
+        },
+        '1.0.1': {
+          _npmUser: { name: 'npm-user-99999', email: 'x@y.com' },
+          maintainers: [{ name: 'npm-user-99999', email: 'x@y.com' }]
+        }
+      }
+    };
+    await withMockedFetchMaint(async () => metadata, async (detect) => {
+      const result = await detect('test-pkg');
+      assert(result.suspicious === true, 'Should be suspicious');
+      assert(result.packageName === 'test-pkg', 'Package name should match');
+      const newMaint = result.findings.find(f => f.type === 'new_maintainer');
+      assert(newMaint, 'Should have new_maintainer finding');
+      assert(newMaint.severity === 'CRITICAL', 'Suspicious new maintainer should be CRITICAL');
+    });
+  });
+
+  await asyncTest('MAINTAINER: detectMaintainerChange detects new legitimate maintainer', async () => {
+    const metadata = {
+      maintainers: [
+        { name: 'alice', email: 'a@x.com' },
+        { name: 'bob', email: 'b@x.com' },
+        { name: 'charlie', email: 'c@x.com' }
+      ],
+      time: { '1.0.0': '2024-01-01T00:00:00Z', '1.0.1': '2026-01-15T00:00:00Z' },
+      versions: {
+        '1.0.0': {
+          _npmUser: { name: 'alice', email: 'a@x.com' },
+          maintainers: [{ name: 'alice', email: 'a@x.com' }, { name: 'bob', email: 'b@x.com' }]
+        },
+        '1.0.1': {
+          _npmUser: { name: 'alice', email: 'a@x.com' },
+          maintainers: [
+            { name: 'alice', email: 'a@x.com' },
+            { name: 'bob', email: 'b@x.com' },
+            { name: 'charlie', email: 'c@x.com' }
+          ]
+        }
+      }
+    };
+    await withMockedFetchMaint(async () => metadata, async (detect) => {
+      const result = await detect('test-pkg');
+      assert(result.suspicious === true, 'Should be suspicious');
+      const newMaint = result.findings.find(f => f.type === 'new_maintainer');
+      assert(newMaint, 'Should have new_maintainer finding');
+      assert(newMaint.severity === 'HIGH', 'Legitimate new maintainer should be HIGH');
+      assert(newMaint.maintainer.name === 'charlie', 'Should reference charlie');
+    });
+  });
+
+  await asyncTest('MAINTAINER: detectMaintainerChange detects publisher change', async () => {
+    const metadata = {
+      maintainers: [{ name: 'trusteddev', email: 't@d.com' }, { name: 'newpublisher', email: 'n@p.com' }],
+      time: { '1.0.0': '2024-01-01T00:00:00Z', '1.0.1': '2026-01-15T00:00:00Z' },
+      versions: {
+        '1.0.0': {
+          _npmUser: { name: 'trusteddev', email: 't@d.com' },
+          maintainers: [{ name: 'trusteddev', email: 't@d.com' }]
+        },
+        '1.0.1': {
+          _npmUser: { name: 'newpublisher', email: 'n@p.com' },
+          maintainers: [{ name: 'trusteddev', email: 't@d.com' }, { name: 'newpublisher', email: 'n@p.com' }]
+        }
+      }
+    };
+    await withMockedFetchMaint(async () => metadata, async (detect) => {
+      const result = await detect('test-pkg');
+      assert(result.suspicious === true, 'Should be suspicious');
+      const pubChange = result.findings.find(f => f.type === 'new_publisher');
+      assert(pubChange, 'Should have new_publisher finding');
+    });
+  });
+
+  await asyncTest('MAINTAINER: detectMaintainerChange no changes → not suspicious', async () => {
+    const metadata = {
+      maintainers: [{ name: 'alice', email: 'a@x.com' }],
+      time: { '1.0.0': '2024-01-01T00:00:00Z', '1.0.1': '2024-06-01T00:00:00Z' },
+      versions: {
+        '1.0.0': {
+          _npmUser: { name: 'alice', email: 'a@x.com' },
+          maintainers: [{ name: 'alice', email: 'a@x.com' }]
+        },
+        '1.0.1': {
+          _npmUser: { name: 'alice', email: 'a@x.com' },
+          maintainers: [{ name: 'alice', email: 'a@x.com' }]
+        }
+      }
+    };
+    await withMockedFetchMaint(async () => metadata, async (detect) => {
+      const result = await detect('test-pkg');
+      assert(result.suspicious === false, 'Should not be suspicious');
+      assert(result.findings.length === 0, 'Should have no findings');
+    });
+  });
+
+  await asyncTest('MAINTAINER: detectMaintainerChange single version → not suspicious', async () => {
+    const metadata = {
+      maintainers: [{ name: 'alice', email: 'a@x.com' }],
+      time: { '1.0.0': '2024-01-01T00:00:00Z' },
+      versions: {
+        '1.0.0': {
+          _npmUser: { name: 'alice', email: 'a@x.com' },
+          maintainers: [{ name: 'alice', email: 'a@x.com' }]
+        }
+      }
+    };
+    await withMockedFetchMaint(async () => metadata, async (detect) => {
+      const result = await detect('test-pkg');
+      assert(result.suspicious === false, 'Should not be suspicious');
+      assert(result.findings.length === 0, 'Should have no findings');
+      assert(result.maintainers.count === 1, 'Should have 1 maintainer');
+    });
+  });
+
+  await asyncTest('MAINTAINER: detectMaintainerChange detects suspicious existing maintainer', async () => {
+    const metadata = {
+      maintainers: [{ name: 'npm-user-12345', email: 'x@y.com' }, { name: 'alice', email: 'a@x.com' }],
+      time: { '1.0.0': '2024-01-01T00:00:00Z', '1.0.1': '2024-06-01T00:00:00Z' },
+      versions: {
+        '1.0.0': {
+          _npmUser: { name: 'alice', email: 'a@x.com' },
+          maintainers: [{ name: 'npm-user-12345', email: 'x@y.com' }, { name: 'alice', email: 'a@x.com' }]
+        },
+        '1.0.1': {
+          _npmUser: { name: 'alice', email: 'a@x.com' },
+          maintainers: [{ name: 'npm-user-12345', email: 'x@y.com' }, { name: 'alice', email: 'a@x.com' }]
+        }
+      }
+    };
+    await withMockedFetchMaint(async () => metadata, async (detect) => {
+      const result = await detect('test-pkg');
+      assert(result.suspicious === true, 'Should be suspicious');
+      const susp = result.findings.find(f => f.type === 'suspicious_maintainer');
+      assert(susp, 'Should have suspicious_maintainer finding');
+      assert(susp.severity === 'HIGH', 'Suspicious maintainer severity should be HIGH');
+    });
   });
 
   // --- Rules and playbooks ---

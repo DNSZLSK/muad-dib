@@ -403,4 +403,9 @@ function showRefs(targetPath) {
   console.log('Example: muaddib diff abc1234\n');
 }
 
-module.exports = { diff, showRefs, isGitRepo, getRecentRefs };
+module.exports = {
+  diff, showRefs, isGitRepo, getRecentRefs,
+  // Exported for testing
+  getThreatId, compareThreats, resolveRef, getCurrentCommit,
+  hasUncommittedChanges, runSilentScan, SAFE_REF_REGEX
+};
