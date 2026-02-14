@@ -30,6 +30,7 @@ let temporalAstMode = false;
 let temporalPublishMode = false;
 let temporalMaintainerMode = false;
 let temporalFullMode = false;
+let breakdownMode = false;
 
 for (let i = 0; i < options.length; i++) {
   if (options[i] === '--json') {
@@ -103,6 +104,8 @@ for (let i = 0; i < options.length; i++) {
     temporalPublishMode = true;
   } else if (options[i] === '--temporal-maintainer') {
     temporalMaintainerMode = true;
+  } else if (options[i] === '--breakdown') {
+    breakdownMode = true;
   } else if (options[i] === '--temporal') {
     temporalMode = true;
   } else if (options[i] === '--strict') {
@@ -320,7 +323,12 @@ const helpText = `
     muaddib scrape                   Scrape new IOCs
     muaddib sandbox <pkg> [--strict] [--no-canary]  Analyze in isolated Docker container
     muaddib sandbox-report <pkg>     Sandbox + detailed network report
-    muaddib replay [id] [options]    Replay ground truth attacks
+    muaddib detections               List recent detections
+    muaddib detections --stats       Show aggregated detection stats
+    muaddib detections --json        Raw JSON output
+    muaddib stats                    Show scan stats + FP rate
+    muaddib stats --daily            Last 7 days daily breakdown
+    muaddib stats --json             Raw JSON dump
     muaddib version                  Show version
 
   Replay Options:
@@ -343,6 +351,7 @@ const helpText = `
     --html [file]       HTML report
     --sarif [file]      SARIF report (GitHub Security)
     --explain           Detailed explanations
+    --breakdown         Show score breakdown by threat
     --fail-on [level]   Fail level (critical|high|medium|low)
     --webhook [url]     Discord/Slack webhook
     --paranoid          Ultra-strict mode
@@ -387,7 +396,8 @@ if (command === 'version' || command === '--version' || command === '-v') {
     temporalPublish: temporalPublishMode || temporalFullMode,
     temporalMaintainer: temporalMaintainerMode || temporalFullMode,
     exclude: excludeDirs,
-    entropyThreshold: entropyThreshold
+    entropyThreshold: entropyThreshold,
+    breakdown: breakdownMode
   }).then(exitCode => {
     process.exit(exitCode);
   }).catch(err => {
@@ -582,6 +592,100 @@ if (command === 'version' || command === '--version' || command === '-v') {
     console.error('[ERROR]', err.message);
     process.exit(1);
   });
+} else if (command === 'detections') {
+  const { loadDetections, getDetectionStats } = require('../src/monitor.js');
+  const wantStats = options.includes('--stats');
+  const wantJson = options.includes('--json');
+
+  if (wantJson) {
+    const data = loadDetections();
+    console.log(JSON.stringify(data, null, 2));
+    process.exit(0);
+  }
+
+  if (wantStats) {
+    const s = getDetectionStats();
+    console.log('\n  MUAD\'DIB Detection Stats\n');
+    console.log(`  Total detections: ${s.total}`);
+    if (Object.keys(s.bySeverity).length > 0) {
+      console.log('  By severity:');
+      for (const [sev, count] of Object.entries(s.bySeverity)) {
+        console.log(`    ${sev}: ${count}`);
+      }
+    }
+    if (Object.keys(s.byEcosystem).length > 0) {
+      console.log('  By ecosystem:');
+      for (const [eco, count] of Object.entries(s.byEcosystem)) {
+        console.log(`    ${eco}: ${count}`);
+      }
+    }
+    if (s.leadTime) {
+      console.log(`  Lead time (hours): avg=${s.leadTime.avg.toFixed(1)}, min=${s.leadTime.min.toFixed(1)}, max=${s.leadTime.max.toFixed(1)} (${s.leadTime.count} entries)`);
+    } else {
+      console.log('  Lead time: no advisory data yet');
+    }
+    console.log('');
+    process.exit(0);
+  }
+
+  // Default: list recent detections
+  const data = loadDetections();
+  const recent = data.detections.slice(-20).reverse();
+  if (recent.length === 0) {
+    console.log('\n  No detections recorded yet.\n');
+    process.exit(0);
+  }
+  console.log(`\n  MUAD'DIB Recent Detections (${recent.length} of ${data.detections.length})\n`);
+  for (const d of recent) {
+    const lead = d.lead_time_hours != null ? ` | lead: ${d.lead_time_hours.toFixed(1)}h` : '';
+    console.log(`  [${d.severity}] ${d.ecosystem}/${d.package}@${d.version} — ${d.first_seen_at}${lead}`);
+    console.log(`         findings: ${d.findings.join(', ')}`);
+  }
+  console.log('');
+  process.exit(0);
+} else if (command === 'stats') {
+  const { loadScanStats } = require('../src/monitor.js');
+  const wantDaily = options.includes('--daily');
+  const wantJson = options.includes('--json');
+
+  const data = loadScanStats();
+
+  if (wantJson) {
+    console.log(JSON.stringify(data, null, 2));
+    process.exit(0);
+  }
+
+  if (wantDaily) {
+    const last7 = data.daily.slice(-7);
+    console.log('\n  MUAD\'DIB Scan Stats — Daily Breakdown\n');
+    if (last7.length === 0) {
+      console.log('  No daily data recorded yet.\n');
+      process.exit(0);
+    }
+    console.log('  Date         Scanned  Clean  Suspect  FP  Confirmed  FP Rate');
+    console.log('  ' + '-'.repeat(60));
+    for (const d of last7) {
+      const fpRate = (d.fp_rate * 100).toFixed(1) + '%';
+      console.log(`  ${d.date}   ${String(d.scanned).padStart(5)}  ${String(d.clean).padStart(5)}  ${String(d.suspect).padStart(7)}  ${String(d.false_positive).padStart(2)}  ${String(d.confirmed).padStart(9)}  ${fpRate.padStart(7)}`);
+    }
+    console.log('');
+    process.exit(0);
+  }
+
+  // Default: global stats
+  const s = data.stats;
+  const globalDenom = s.false_positive + s.confirmed_malicious;
+  const globalFpRate = globalDenom > 0 ? ((s.false_positive / globalDenom) * 100).toFixed(1) + '%' : 'N/A';
+
+  console.log('\n  MUAD\'DIB Scan Stats\n');
+  console.log(`  Total scanned:      ${s.total_scanned}`);
+  console.log(`  Clean:              ${s.clean}`);
+  console.log(`  Suspect:            ${s.suspect}`);
+  console.log(`  False positives:    ${s.false_positive}`);
+  console.log(`  Confirmed malicious: ${s.confirmed_malicious}`);
+  console.log(`  FP rate:            ${globalFpRate}`);
+  console.log('');
+  process.exit(0);
 } else if (command === 'init-hooks') {
   // Parse init-hooks arguments
   let hookType = 'auto';
