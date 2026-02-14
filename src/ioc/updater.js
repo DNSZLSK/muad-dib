@@ -57,6 +57,23 @@ async function updateIOCs() {
   mergeIOCs(baseIOCs, githubIOCs);
   console.log('     +' + shaiHulud.packages.length + ' GenSecAI, +' + datadog.packages.length + ' DataDog');
 
+  // Step 3b: Load existing cache IOCs (from bootstrap download or previous update)
+  if (fs.existsSync(CACHE_IOC_FILE)) {
+    try {
+      const existingCache = JSON.parse(fs.readFileSync(CACHE_IOC_FILE, 'utf8'));
+      const before = baseIOCs.packages.length;
+      const beforePyPI = (baseIOCs.pypi_packages || []).length;
+      mergeIOCs(baseIOCs, existingCache);
+      const addedNpm = baseIOCs.packages.length - before;
+      const addedPyPI = (baseIOCs.pypi_packages || []).length - beforePyPI;
+      if (addedNpm > 0 || addedPyPI > 0) {
+        console.log('     +' + addedNpm + ' npm, +' + addedPyPI + ' PyPI from existing cache');
+      }
+    } catch (e) {
+      console.log('[WARN] Failed to load existing cache: ' + e.message);
+    }
+  }
+
   // Step 4: Merge and save to cache (~/.muaddib/data/ — persists across npm updates)
   if (!fs.existsSync(HOME_DATA_PATH)) {
     fs.mkdirSync(HOME_DATA_PATH, { recursive: true });
@@ -72,7 +89,7 @@ async function updateIOCs() {
   }
 
   baseIOCs.updated = new Date().toISOString();
-  baseIOCs.sources = ['compact', 'yaml', 'shai-hulud-detector', 'datadog'];
+  baseIOCs.sources = ['compact', 'yaml', 'shai-hulud-detector', 'datadog', 'cache'];
 
   // Clean internal dedup sets before serialization
   delete baseIOCs._pkgKeys;

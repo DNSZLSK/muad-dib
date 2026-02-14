@@ -24,6 +24,20 @@ test('UPDATE: updateIOCs is a function', () => {
   assert(typeof updateIOCs === 'function', 'updateIOCs should be a function');
 });
 
+asyncTest('UPDATE: updateIOCs does not reduce IOC count', async () => {
+  const { loadCachedIOCs, updateIOCs, invalidateCache } = require('../../src/ioc/updater.js');
+  const before = loadCachedIOCs();
+  const beforeNpm = before.packages.length;
+  const beforePyPI = before.pypi_packages.length;
+  await updateIOCs();
+  invalidateCache();
+  const after = loadCachedIOCs();
+  const afterNpm = after.packages.length;
+  const afterPyPI = after.pypi_packages.length;
+  assert(afterNpm >= beforeNpm, 'npm IOCs should not decrease: before=' + beforeNpm + ' after=' + afterNpm);
+  assert(afterPyPI >= beforePyPI, 'PyPI IOCs should not decrease: before=' + beforePyPI + ' after=' + afterPyPI);
+});
+
 // ============================================
 // FALSE POSITIVES TESTS
 // ============================================
