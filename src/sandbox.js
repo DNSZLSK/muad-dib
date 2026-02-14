@@ -35,6 +35,18 @@ const PROBE_PORTS = [65535]; // Node.js internal connectivity checks
 // Commands that are always suspicious in a sandbox
 const DANGEROUS_CMDS = ['curl', 'wget', 'nc', 'netcat', 'python', 'python3', 'bash', 'sh'];
 
+// Static canary tokens injected by sandbox-runner.sh (fallback honeypots).
+// These are searched in the sandbox report as a complement to the dynamic
+// tokens from canary-tokens.js (which use random suffixes per session).
+const STATIC_CANARY_TOKENS = {
+  GITHUB_TOKEN: 'MUADDIB_CANARY_GITHUB_f8k3t0k3n',
+  NPM_TOKEN: 'MUADDIB_CANARY_NPM_s3cr3tt0k3n',
+  AWS_ACCESS_KEY_ID: 'MUADDIB_CANARY_AKIAIOSFODNN7EXAMPLE',
+  AWS_SECRET_ACCESS_KEY: 'MUADDIB_CANARY_wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+  SLACK_WEBHOOK_URL: 'MUADDIB_CANARY_SLACK',
+  DISCORD_WEBHOOK_URL: 'MUADDIB_CANARY_DISCORD'
+};
+
 // Patterns indicating data exfiltration in HTTP bodies
 const EXFIL_PATTERNS = [
   { pattern: /\bNPM_TOKEN\b/i, label: 'npm token', severity: 'CRITICAL' },
@@ -247,7 +259,7 @@ async function runSandbox(packageName, options = {}) {
 
       const { score, findings } = scoreFindings(report);
 
-      // Canary token exfiltration detection
+      // Canary token exfiltration detection (dynamic tokens)
       if (canaryTokens) {
         const networkExfil = detectCanaryExfiltration(report.network || {}, canaryTokens);
         const outputExfil = detectCanaryInOutput(stdout, stderr, canaryTokens);
@@ -258,6 +270,22 @@ async function runSandbox(packageName, options = {}) {
             severity: 'CRITICAL',
             detail: `Package attempted to exfiltrate ${exfil.token} (${exfil.foundIn})`,
             evidence: exfil.value
+          });
+        }
+      }
+
+      // Static canary token detection (fallback for shell-injected tokens)
+      const staticExfil = detectStaticCanaryExfiltration(report);
+      for (const { token, value } of staticExfil) {
+        const alreadyDetected = findings.some(f =>
+          f.type === 'canary_exfiltration' && f.detail && f.detail.includes(token)
+        );
+        if (!alreadyDetected) {
+          findings.push({
+            type: 'canary_exfiltration',
+            severity: 'CRITICAL',
+            detail: `Canary token exfiltration detected: ${token}`,
+            evidence: value
           });
         }
       }
@@ -283,6 +311,47 @@ async function runSandbox(packageName, options = {}) {
       resolve(cleanResult);
     });
   });
+}
+
+// ── Static canary detection ──
+
+/**
+ * Detect static canary token exfiltration in a sandbox report.
+ * Searches HTTP bodies, DNS queries, HTTP request URLs, TLS domains,
+ * filesystem changes, process commands, and install output.
+ * @param {object} report - Parsed sandbox report JSON
+ * @returns {Array<{token: string, value: string}>} Exfiltrated tokens
+ */
+function detectStaticCanaryExfiltration(report) {
+  const exfiltrated = [];
+  if (!report) return exfiltrated;
+
+  const searchable = [];
+
+  // Network data
+  for (const body of (report.network?.http_bodies || [])) if (body) searchable.push(body);
+  for (const domain of (report.network?.dns_queries || [])) if (domain) searchable.push(domain);
+  for (const req of (report.network?.http_requests || [])) {
+    searchable.push(`${req.method || ''} ${req.host || ''}${req.path || ''}`);
+  }
+  for (const tls of (report.network?.tls_connections || [])) if (tls.domain) searchable.push(tls.domain);
+
+  // Filesystem + processes
+  for (const file of (report.filesystem?.created || [])) if (file) searchable.push(file);
+  for (const proc of (report.processes?.spawned || [])) if (proc.command) searchable.push(proc.command);
+
+  // Install output
+  if (report.install_output) searchable.push(report.install_output);
+
+  const allOutput = searchable.join('\n');
+
+  for (const [tokenName, tokenValue] of Object.entries(STATIC_CANARY_TOKENS)) {
+    if (allOutput.includes(tokenValue)) {
+      exfiltrated.push({ token: tokenName, value: tokenValue });
+    }
+  }
+
+  return exfiltrated;
 }
 
 // ── Scoring engine ──
@@ -548,4 +617,4 @@ function displayResults(result) {
   }
 }
 
-module.exports = { buildSandboxImage, runSandbox, scoreFindings, generateNetworkReport, EXFIL_PATTERNS, SAFE_DOMAINS, getSeverity, displayResults, isDockerAvailable, imageExists };
+module.exports = { buildSandboxImage, runSandbox, scoreFindings, generateNetworkReport, EXFIL_PATTERNS, SAFE_DOMAINS, getSeverity, displayResults, isDockerAvailable, imageExists, STATIC_CANARY_TOKENS, detectStaticCanaryExfiltration };

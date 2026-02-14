@@ -44,6 +44,26 @@ tcpdump -i any -nn 'not port 53 and not port 80 and not port 443' -l > /tmp/othe
 OTHER_PID=$!
 sleep 1
 
+# ── 2b. CI environment simulation ──
+# Simulate CI to trigger CI-aware malware that checks for these env vars
+echo "[SANDBOX] Simulating CI environment..." >&2
+export CI=true
+export GITHUB_ACTIONS=true
+export GITLAB_CI=true
+export TRAVIS=true
+export CIRCLECI=true
+export JENKINS_URL=http://localhost:8080
+
+# ── 2c. Canary tokens (honeypots) ──
+# Use Docker-injected dynamic tokens if available, otherwise static fallbacks.
+# If exfiltrated via network/DNS/files, sandbox.js detects the theft.
+export GITHUB_TOKEN="${GITHUB_TOKEN:-MUADDIB_CANARY_GITHUB_f8k3t0k3n}"
+export NPM_TOKEN="${NPM_TOKEN:-MUADDIB_CANARY_NPM_s3cr3tt0k3n}"
+export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-MUADDIB_CANARY_AKIAIOSFODNN7EXAMPLE}"
+export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-MUADDIB_CANARY_wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY}"
+export SLACK_WEBHOOK_URL="${SLACK_WEBHOOK_URL:-https://hooks.slack.com/MUADDIB_CANARY_SLACK}"
+export DISCORD_WEBHOOK_URL="${DISCORD_WEBHOOK_URL:-https://discord.com/api/webhooks/MUADDIB_CANARY_DISCORD}"
+
 # ── 3. npm install with strace ──
 echo "[SANDBOX] Installing $PACKAGE..." >&2
 cd /sandbox/install

