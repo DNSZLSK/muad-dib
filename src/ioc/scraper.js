@@ -1,10 +1,12 @@
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const AdmZip = require('adm-zip');
 
 const IOC_FILE = path.join(__dirname, 'data/iocs.json');
 const COMPACT_IOC_FILE = path.join(__dirname, 'data/iocs-compact.json');
+const HOME_IOC_FILE = path.join(os.homedir(), '.muaddib', 'data', 'iocs.json');
 const STATIC_IOCS_FILE = path.join(__dirname, '../../data/static-iocs.json');
 const { generateCompactIOCs } = require('./updater.js');
 const { Spinner } = require('../utils.js');
@@ -623,11 +625,11 @@ async function scrapeOSSFMaliciousPackages(knownIds) {
       return packages;
     }
 
-    // Incremental: compare tree SHA
+    // Incremental: compare tree SHA (stored in ~/.muaddib/data/ to persist across npm updates)
     const treeSha = data.sha;
-    const dataDir = path.join(__dirname, 'data');
-    if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
-    const shaFile = path.join(dataDir, '.ossf-tree-sha');
+    const homeDir = path.dirname(HOME_IOC_FILE);
+    if (!fs.existsSync(homeDir)) fs.mkdirSync(homeDir, { recursive: true });
+    const shaFile = path.join(homeDir, '.ossf-tree-sha');
     let lastSha = null;
     try { lastSha = fs.readFileSync(shaFile, 'utf8').trim(); } catch {}
 
@@ -1004,9 +1006,18 @@ async function runScraper() {
     throw new Error(`Data directory is not writable: ${dataDir}`);
   }
 
-  // Load existing IOCs
+  // Load existing IOCs (check ~/.muaddib/data/ first, then local)
   let existingIOCs = { packages: [], pypi_packages: [], hashes: [], markers: [], files: [] };
-  if (fs.existsSync(IOC_FILE)) {
+  if (fs.existsSync(HOME_IOC_FILE)) {
+    try {
+      existingIOCs = JSON.parse(fs.readFileSync(HOME_IOC_FILE, 'utf8'));
+      if (!existingIOCs.pypi_packages) existingIOCs.pypi_packages = [];
+      console.log('[INFO] Loaded existing IOCs from ' + HOME_IOC_FILE);
+    } catch {
+      console.log('[WARN] Home IOCs file corrupted, trying local...');
+    }
+  }
+  if (existingIOCs.packages.length === 0 && fs.existsSync(IOC_FILE)) {
     try {
       existingIOCs = JSON.parse(fs.readFileSync(IOC_FILE, 'utf8'));
       if (!existingIOCs.pypi_packages) existingIOCs.pypi_packages = [];
@@ -1186,7 +1197,21 @@ async function runScraper() {
   const tmpCompactFile = COMPACT_IOC_FILE + '.tmp';
   fs.writeFileSync(tmpCompactFile, JSON.stringify(compactIOCs));
   fs.renameSync(tmpCompactFile, COMPACT_IOC_FILE);
-  saveSpinner.succeed('Saved IOCs + compact format');
+
+  // Persist to ~/.muaddib/data/ (survives npm update)
+  saveSpinner.update('Persisting to home directory...');
+  const homeDir = path.dirname(HOME_IOC_FILE);
+  if (!fs.existsSync(homeDir)) {
+    fs.mkdirSync(homeDir, { recursive: true });
+  }
+  try {
+    const tmpHomeFile = HOME_IOC_FILE + '.tmp';
+    fs.writeFileSync(tmpHomeFile, JSON.stringify(existingIOCs, null, 2));
+    fs.renameSync(tmpHomeFile, HOME_IOC_FILE);
+    saveSpinner.succeed('Saved IOCs + compact format + home directory');
+  } catch (e) {
+    saveSpinner.succeed('Saved IOCs + compact format (home dir write failed: ' + e.message + ')');
+  }
 
   // Display summary
   console.log('\n' + '='.repeat(60));
