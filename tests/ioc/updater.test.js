@@ -540,6 +540,11 @@ test('BOOTSTRAP: isAllowedRedirect accepts objects.githubusercontent.com', () =>
   assert(isAllowedRedirect('https://objects.githubusercontent.com/foo') === true, 'objects.githubusercontent.com should be allowed');
 });
 
+test('BOOTSTRAP: isAllowedRedirect accepts release-assets.githubusercontent.com', () => {
+  const { isAllowedRedirect } = require('../../src/ioc/bootstrap.js');
+  assert(isAllowedRedirect('https://release-assets.githubusercontent.com/foo') === true, 'release-assets.githubusercontent.com should be allowed');
+});
+
 test('BOOTSTRAP: isAllowedRedirect rejects HTTP', () => {
   const { isAllowedRedirect } = require('../../src/ioc/bootstrap.js');
   assert(isAllowedRedirect('http://github.com/foo') === false, 'HTTP should be rejected');
