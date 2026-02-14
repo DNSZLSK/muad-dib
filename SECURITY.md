@@ -59,7 +59,7 @@ Please include the following information in your report:
 - We aim to release fixes before public disclosure
 - We request a 90-day disclosure window for complex issues
 
-## Detection Rules (v2.1.0)
+## Detection Rules (v2.1.2)
 
 MUAD'DIB uses 12 parallel scanners + 5 behavioral anomaly detection features + ground truth validation, producing the following rule IDs:
 
@@ -142,7 +142,7 @@ MUAD'DIB uses 12 parallel scanners + 5 behavioral anomaly detection features + g
 
 ### Sandbox Rules (Docker) — Dynamic Analysis
 
-Runtime behavioral analysis: packages are installed in an isolated Docker container and monitored for suspicious activity (file access, network traffic, process spawns) via strace, tcpdump, and filesystem diffing.
+Runtime behavioral analysis: packages are installed in an isolated Docker container and monitored for suspicious activity (file access, network traffic, process spawns) via strace, tcpdump, and filesystem diffing. The sandbox simulates a CI environment (v2.1.2) to trigger CI-aware malware and injects 6 canary token honeypots for exfiltration detection.
 
 | Rule ID | Name | Severity |
 |---------|------|----------|
@@ -208,6 +208,17 @@ MITRE: T1195.002 (Supply Chain Compromise: Software Supply Chain)
 
 MITRE: T1552.001 (Unsecured Credentials: Credentials in Files)
 
+6 honeypot credentials are injected (v2.1.2):
+- `GITHUB_TOKEN` / `NPM_TOKEN` — Package registry tokens
+- `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` — Cloud credentials
+- `SLACK_WEBHOOK_URL` / `DISCORD_WEBHOOK_URL` — Messaging webhooks
+
+Detection uses both dynamic tokens (random per session) and static fallback tokens. Exfiltration is searched in HTTP bodies, DNS queries, HTTP request URLs, TLS domains, filesystem changes, process commands, and install output.
+
+#### CI-Aware Sandbox (v2.1.2)
+
+The sandbox simulates CI environments by setting: `CI=true`, `GITHUB_ACTIONS=true`, `GITLAB_CI=true`, `TRAVIS=true`, `CIRCLECI=true`, `JENKINS_URL=http://localhost:8080`. This triggers CI-aware malware that checks for these environment variables before activating, which would otherwise stay dormant in local development environments.
+
 ### Paranoid Mode Rules
 
 | Rule ID | Name | Severity |
@@ -232,8 +243,17 @@ MITRE: T1552.001 (Unsecured Credentials: Credentials in Files)
   - discord.com
   - discordapp.com
   - hooks.slack.com
-- Private IP ranges are blocked (127.x, 10.x, 172.16-31.x, 192.168.x)
+- Download module (v2.1.2) only allows redirects to whitelisted registry domains:
+  - registry.npmjs.org, registry.yarnpkg.com
+  - pypi.org, files.pythonhosted.org
+- Private IP ranges are blocked (127.x, 10.x, 172.16-31.x, 192.168.x, 169.254.x, IPv6 loopback/link-local)
 - Redirect validation prevents SSRF via open redirects
+
+### Command Injection Protection (v2.1.2)
+
+- `execFileSync` with array arguments replaces `execSync` with template literals for tar extraction
+- Package names are sanitized via `sanitizePackageName()` to remove `..` path traversal sequences
+- `NPM_PACKAGE_REGEX` is centralized in `src/shared/constants.js` and enforced across all modules
 
 ### XSS Protection
 
@@ -261,7 +281,7 @@ MITRE: T1552.001 (Unsecured Credentials: Credentials in Files)
 2. **Signed commits**: Use GPG-signed commits when possible
 3. **Review dependencies**: Check new dependencies before adding them
 
-## Threat Model (v2.1)
+## Threat Model (v2.1.2)
 
 MUAD'DIB 2.1 uses a **triple detection approach**:
 

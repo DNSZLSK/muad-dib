@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.2] - 2026-02-14
+
+### Added
+- **CI-aware sandbox**: `sandbox-runner.sh` now simulates CI environments (CI, GITHUB_ACTIONS, GITLAB_CI, TRAVIS, CIRCLECI, JENKINS_URL) to trigger CI-aware malware that stays dormant outside CI pipelines.
+- **Enriched canary tokens**: 6 static honeypot credentials (GITHUB_TOKEN, NPM_TOKEN, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, SLACK_WEBHOOK_URL, DISCORD_WEBHOOK_URL) injected by `sandbox-runner.sh` as fallback to the dynamic canary system. `detectStaticCanaryExfiltration()` searches all report fields (HTTP bodies, DNS, TLS, filesystem, processes, install output).
+- **Strict webhook filtering**: Monitor alerts are only sent for IOC matches, sandbox-confirmed threats, or canary token exfiltration — eliminating noise from heuristic-only detections.
+- **IOC persistence**: IOC database now stored in `~/.muaddib/data/` instead of the package directory. Survives `npm update` and global installs.
+- **UX recommendations**: Each threat now displays a remediation recommendation inline below the finding.
+- 742 tests (was 709 in v2.1.0), +33 new tests (14 static canary + 10 SSRF + 9 security)
+
+### Security
+- **SSRF protection in downloadToFile**: Domain allowlist (registry.npmjs.org, pypi.org, etc.) + private IP blocking on redirects. Shared `src/shared/download.js` module replaces duplicated code in `temporal-ast-diff.js` and `monitor.js`.
+- **Command injection fix**: `execSync` with template literals replaced by `execFileSync` with array arguments in tar extraction.
+- **Path traversal fix**: `sanitizePackageName()` removes `..` sequences from package names used in temp directory paths.
+- **Unprotected JSON.parse**: 2 bare `JSON.parse` calls in `monitor.js` (getPyPITarballUrl, getNpmLatestTarball) wrapped in try/catch.
+- **Constant deduplication**: `NPM_PACKAGE_REGEX`, `MAX_TARBALL_SIZE`, `DOWNLOAD_TIMEOUT` centralized in `src/shared/constants.js` (was duplicated in 3-5 files).
+
+### Changed
+- Test count: 709 → 742 (+5% increase)
+- New shared module: `src/shared/download.js` (SSRF-safe downloadToFile, extractTarGz, sanitizePackageName)
+- Architecture diagram updated with CI-aware sandbox
+
+### Breaking Changes
+- None. All changes are additive or internal refactors.
+
 ## [2.1.0] - 2026-02-14
 
 ### Added
@@ -383,7 +408,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Obfuscation detection
 - Package.json lifecycle script analysis
 
-[Unreleased]: https://github.com/DNSZLSK/muad-dib/compare/v2.1.0...HEAD
+[Unreleased]: https://github.com/DNSZLSK/muad-dib/compare/v2.1.2...HEAD
+[2.1.2]: https://github.com/DNSZLSK/muad-dib/compare/v2.1.0...v2.1.2
 [2.1.0]: https://github.com/DNSZLSK/muad-dib/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/DNSZLSK/muad-dib/compare/v1.8.0...v2.0.0
 [1.8.0]: https://github.com/DNSZLSK/muad-dib/compare/v1.6.18...v1.8.0
