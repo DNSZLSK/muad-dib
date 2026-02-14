@@ -1,0 +1,6 @@
+{
+  "name": "colors",
+  "version": "1.4.1",
+  "description": "get colors in your node.js console",
+  "main": "lib/index.js"
+}

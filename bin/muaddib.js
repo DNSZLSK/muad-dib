@@ -373,6 +373,11 @@ const helpText = `
     muaddib stats --json             Raw JSON dump
     muaddib version                  Show version
 
+  Replay Options:
+    --verbose           Show detailed findings per attack
+    --json              Machine-readable JSON output
+    GT-NNN              Replay single attack by ID
+
   Diff Examples:
     muaddib diff HEAD~1              Compare with previous commit
     muaddib diff v1.2.0              Compare with tag
@@ -755,19 +760,23 @@ if (command === 'version' || command === '--version' || command === '-v') {
     console.error('[ERROR]', err.message);
     process.exit(1);
   });
-} else if (command === 'feed') {
-  const { getFeed } = require('../src/threat-feed.js');
-  const feedOpts = {};
-  if (feedLimit) feedOpts.limit = feedLimit;
-  if (feedSeverity) feedOpts.severity = feedSeverity;
-  if (feedSince) feedOpts.since = feedSince;
-  const result = getFeed(feedOpts);
-  console.log(JSON.stringify(result, null, 2));
-  process.exit(0);
-} else if (command === 'serve') {
-  const { startServer } = require('../src/serve.js');
-  startServer({ port: servePort || 3000 });
-  // Server runs indefinitely — no process.exit
+} else if (command === 'replay' || command === 'ground-truth') {
+  const { replay } = require('../tests/ground-truth/replay.js');
+  const replayOpts = {};
+  for (const o of options) {
+    if (o === '--verbose' || o === '-v') replayOpts.verbose = true;
+    else if (o === '--json') replayOpts.json = true;
+    else if (o.startsWith('GT-')) replayOpts.filterId = o;
+  }
+  replay(replayOpts).then(result => {
+    if (!replayOpts.json) {
+      process.exit(result.missed > 0 ? 1 : 0);
+    }
+    process.exit(0);
+  }).catch(err => {
+    console.error('[ERROR]', err.message);
+    process.exit(1);
+  });
 } else if (command === 'help') {
   console.log(helpText);
   process.exit(0);

@@ -189,6 +189,18 @@ packages:
       - https://snyk.io/blog/peacenotwar-malicious-npm-node-ipc-package-vulnerability/
     mitre: T1485
 
+  - id: PROTESTWARE-002b
+    name: "peacenotwar"
+    version: "*"
+    severity: critical
+    confidence: high
+    source: protestware
+    introduced: "2022-03-01"
+    description: "Protestware dependency - deposite fichier texte sur le bureau via node-ipc"
+    references:
+      - https://snyk.io/blog/peacenotwar-malicious-npm-node-ipc-package-vulnerability/
+    mitre: T1485
+
   - id: PROTESTWARE-003
     name: "colors"
     version: "1.4.1"

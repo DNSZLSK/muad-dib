@@ -1,0 +1,8 @@
+{
+  "name": "event-stream",
+  "version": "3.3.6",
+  "description": "construct pipes of streams of events",
+  "dependencies": {
+    "flatmap-stream": "0.1.1"
+  }
+}

