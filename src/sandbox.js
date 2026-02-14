@@ -8,9 +8,10 @@ const {
   detectCanaryInOutput
 } = require('./canary-tokens.js');
 
+const { NPM_PACKAGE_REGEX } = require('./shared/constants.js');
+
 const DOCKER_IMAGE = 'muaddib-sandbox';
 const CONTAINER_TIMEOUT = 120000; // 120 seconds
-const NPM_PACKAGE_REGEX = /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/;
 
 // Domains excluded from network findings (false positives)
 const SAFE_DOMAINS = [

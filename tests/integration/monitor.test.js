@@ -197,6 +197,70 @@ async function runMonitorTests() {
     addSkipped(1);
   }
 
+  // --- SSRF redirect protection tests ---
+
+  const {
+    isAllowedDownloadRedirect,
+    sanitizePackageName
+  } = require('../../src/shared/download.js');
+
+  test('DOWNLOAD: isAllowedDownloadRedirect allows registry.npmjs.org', () => {
+    const result = isAllowedDownloadRedirect('https://registry.npmjs.org/pkg/-/pkg-1.0.0.tgz');
+    assert(result.allowed === true, 'Should allow registry.npmjs.org');
+  });
+
+  test('DOWNLOAD: isAllowedDownloadRedirect allows files.pythonhosted.org', () => {
+    const result = isAllowedDownloadRedirect('https://files.pythonhosted.org/packages/source/p/pkg/pkg-1.0.0.tar.gz');
+    assert(result.allowed === true, 'Should allow files.pythonhosted.org');
+  });
+
+  test('DOWNLOAD: isAllowedDownloadRedirect blocks private IP 127.0.0.1', () => {
+    const result = isAllowedDownloadRedirect('https://127.0.0.1/evil');
+    assert(result.allowed === false, 'Should block 127.0.0.1');
+    assertIncludes(result.error, 'private IP', 'Error should mention private IP');
+  });
+
+  test('DOWNLOAD: isAllowedDownloadRedirect blocks private IP 169.254.x.x', () => {
+    const result = isAllowedDownloadRedirect('https://169.254.169.254/latest/meta-data/');
+    assert(result.allowed === false, 'Should block 169.254.x.x (cloud metadata)');
+  });
+
+  test('DOWNLOAD: isAllowedDownloadRedirect blocks private IP 10.x.x.x', () => {
+    const result = isAllowedDownloadRedirect('https://10.0.0.1/internal');
+    assert(result.allowed === false, 'Should block 10.x.x.x');
+  });
+
+  test('DOWNLOAD: isAllowedDownloadRedirect blocks private IP 192.168.x.x', () => {
+    const result = isAllowedDownloadRedirect('https://192.168.1.1/internal');
+    assert(result.allowed === false, 'Should block 192.168.x.x');
+  });
+
+  test('DOWNLOAD: isAllowedDownloadRedirect blocks non-whitelisted domain', () => {
+    const result = isAllowedDownloadRedirect('https://evil-server.com/malware.tar.gz');
+    assert(result.allowed === false, 'Should block non-whitelisted domain');
+    assertIncludes(result.error, 'not in allowlist', 'Error should mention allowlist');
+  });
+
+  test('DOWNLOAD: isAllowedDownloadRedirect blocks HTTP (non-HTTPS)', () => {
+    const result = isAllowedDownloadRedirect('http://registry.npmjs.org/pkg/-/pkg-1.0.0.tgz');
+    assert(result.allowed === false, 'Should block HTTP');
+    assertIncludes(result.error, 'non-HTTPS', 'Error should mention HTTPS');
+  });
+
+  test('DOWNLOAD: isAllowedDownloadRedirect blocks invalid URL', () => {
+    const result = isAllowedDownloadRedirect('not a url');
+    assert(result.allowed === false, 'Should block invalid URL');
+  });
+
+  test('DOWNLOAD: sanitizePackageName removes path traversal', () => {
+    const r1 = sanitizePackageName('../../etc');
+    assert(!r1.includes('..'), 'Should strip .. sequences, got: ' + r1);
+    assert(sanitizePackageName('@scope/name') === 'scope_name', 'Should strip @ and /');
+    assert(sanitizePackageName('simple-pkg') === 'simple-pkg', 'Should keep simple names');
+    const r2 = sanitizePackageName('../../../tmp/evil');
+    assert(!r2.includes('..'), 'Should strip all .. sequences, got: ' + r2);
+  });
+
   test('MONITOR: appendAlert writes to file', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-alert-test-'));
     const tmpAlerts = path.join(tmpDir, 'alerts.json');

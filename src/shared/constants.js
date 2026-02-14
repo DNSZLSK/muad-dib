@@ -79,4 +79,11 @@ const REHABILITATED_PACKAGES = {
   }
 };
 
-module.exports = { REHABILITATED_PACKAGES };
+// Regex to validate npm package names (prevents command injection)
+const NPM_PACKAGE_REGEX = /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/;
+
+// Download/extraction limits
+const MAX_TARBALL_SIZE = 50 * 1024 * 1024; // 50MB
+const DOWNLOAD_TIMEOUT = 30_000; // 30 seconds
+
+module.exports = { REHABILITATED_PACKAGES, NPM_PACKAGE_REGEX, MAX_TARBALL_SIZE, DOWNLOAD_TIMEOUT };

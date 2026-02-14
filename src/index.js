@@ -723,15 +723,12 @@ async function run(targetPath, options = {}) {
         const countStr = t.count > 1 ? ` (x${t.count})` : '';
         console.log(`  ${i + 1}. [${t.severity}] ${t.type}${countStr}`);
         console.log(`     ${t.message}`);
-        console.log(`     File: ${t.file}\n`);
-      });
-
-      console.log('[RESPONSE] Recommendations:\n');
-      deduped.forEach(t => {
+        console.log(`     File: ${t.file}`);
         const playbook = getPlaybook(t.type);
         if (playbook) {
-          console.log(`  -> ${playbook}\n`);
+          console.log(`     \u2192 ${playbook}`);
         }
+        console.log('');
       });
     }
 
