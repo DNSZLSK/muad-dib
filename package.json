@@ -10,7 +10,8 @@
     "test": "node tests/run-tests.js",
     "scan": "node bin/muaddib.js scan .",
     "update": "node bin/muaddib.js update",
-    "lint": "eslint src bin --ext .js"
+    "lint": "eslint src bin --ext .js",
+    "compress-iocs": "node -e \"const fs=require('fs');const zlib=require('zlib');zlib.gzip(fs.readFileSync('src/ioc/data/iocs.json'),(e,b)=>{if(e)throw e;fs.writeFileSync('iocs.json.gz',b);console.log('Compressed: '+b.length+' bytes')})\""
   },
   "keywords": [
     "security",

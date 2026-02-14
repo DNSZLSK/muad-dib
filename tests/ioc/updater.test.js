@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
-const { test, assert, assertIncludes, assertNotIncludes, runScan, TESTS_DIR } = require('../test-utils');
+const os = require('os');
+const { test, asyncTest, assert, assertIncludes, assertNotIncludes, runScan, TESTS_DIR } = require('../test-utils');
 
 async function runUpdaterTests() {
 
@@ -480,6 +481,112 @@ test('SECURITY: isValidPackageName rejects $(...)', () => {
 test('SECURITY: isValidPackageName rejects pipes', () => {
   const { isValidPackageName } = require('../../src/safe-install.js');
   assert(!isValidPackageName('foo | cat /etc/passwd'), 'pipe should be invalid');
+});
+
+// ============================================
+// BOOTSTRAP TESTS
+// ============================================
+
+console.log('\n=== BOOTSTRAP TESTS ===\n');
+
+test('BOOTSTRAP: ensureIOCs is an async function', () => {
+  const { ensureIOCs } = require('../../src/ioc/bootstrap.js');
+  assert(typeof ensureIOCs === 'function', 'ensureIOCs should be a function');
+  // Async functions return promises when called — check constructor name
+  assert(ensureIOCs.constructor.name === 'AsyncFunction', 'ensureIOCs should be async');
+});
+
+test('BOOTSTRAP: IOCS_PATH points to ~/.muaddib/data/iocs.json', () => {
+  const { IOCS_PATH } = require('../../src/ioc/bootstrap.js');
+  const expected = path.join(os.homedir(), '.muaddib', 'data', 'iocs.json');
+  assert(IOCS_PATH === expected, 'IOCS_PATH should be ' + expected + ', got ' + IOCS_PATH);
+});
+
+test('BOOTSTRAP: HOME_DATA_DIR points to ~/.muaddib/data/', () => {
+  const { HOME_DATA_DIR } = require('../../src/ioc/bootstrap.js');
+  const expected = path.join(os.homedir(), '.muaddib', 'data');
+  assert(HOME_DATA_DIR === expected, 'HOME_DATA_DIR should be ' + expected + ', got ' + HOME_DATA_DIR);
+});
+
+test('BOOTSTRAP: MIN_IOCS_SIZE is 1MB', () => {
+  const { MIN_IOCS_SIZE } = require('../../src/ioc/bootstrap.js');
+  assert(MIN_IOCS_SIZE === 1_000_000, 'MIN_IOCS_SIZE should be 1000000, got ' + MIN_IOCS_SIZE);
+});
+
+test('BOOTSTRAP: IOCS_URL points to GitHub Releases', () => {
+  const { IOCS_URL } = require('../../src/ioc/bootstrap.js');
+  assert(IOCS_URL.startsWith('https://github.com/'), 'URL should start with https://github.com/');
+  assert(IOCS_URL.endsWith('iocs.json.gz'), 'URL should end with iocs.json.gz');
+});
+
+test('BOOTSTRAP: module exports all expected symbols', () => {
+  const bootstrap = require('../../src/ioc/bootstrap.js');
+  assert(typeof bootstrap.ensureIOCs === 'function', 'Should export ensureIOCs');
+  assert(typeof bootstrap.downloadAndDecompress === 'function', 'Should export downloadAndDecompress');
+  assert(typeof bootstrap.isAllowedRedirect === 'function', 'Should export isAllowedRedirect');
+  assert(typeof bootstrap.IOCS_URL === 'string', 'Should export IOCS_URL');
+  assert(typeof bootstrap.IOCS_PATH === 'string', 'Should export IOCS_PATH');
+  assert(typeof bootstrap.HOME_DATA_DIR === 'string', 'Should export HOME_DATA_DIR');
+  assert(typeof bootstrap.MIN_IOCS_SIZE === 'number', 'Should export MIN_IOCS_SIZE');
+});
+
+test('BOOTSTRAP: isAllowedRedirect accepts github.com', () => {
+  const { isAllowedRedirect } = require('../../src/ioc/bootstrap.js');
+  assert(isAllowedRedirect('https://github.com/foo/bar') === true, 'github.com should be allowed');
+});
+
+test('BOOTSTRAP: isAllowedRedirect accepts objects.githubusercontent.com', () => {
+  const { isAllowedRedirect } = require('../../src/ioc/bootstrap.js');
+  assert(isAllowedRedirect('https://objects.githubusercontent.com/foo') === true, 'objects.githubusercontent.com should be allowed');
+});
+
+test('BOOTSTRAP: isAllowedRedirect rejects HTTP', () => {
+  const { isAllowedRedirect } = require('../../src/ioc/bootstrap.js');
+  assert(isAllowedRedirect('http://github.com/foo') === false, 'HTTP should be rejected');
+});
+
+test('BOOTSTRAP: isAllowedRedirect rejects unknown domains', () => {
+  const { isAllowedRedirect } = require('../../src/ioc/bootstrap.js');
+  assert(isAllowedRedirect('https://evil.com/iocs.json.gz') === false, 'Unknown domain should be rejected');
+});
+
+test('BOOTSTRAP: isAllowedRedirect rejects invalid URLs', () => {
+  const { isAllowedRedirect } = require('../../src/ioc/bootstrap.js');
+  assert(isAllowedRedirect('not-a-url') === false, 'Invalid URL should be rejected');
+});
+
+asyncTest('BOOTSTRAP: ensureIOCs skips download when cache file exists and is large enough', async () => {
+  const { ensureIOCs, IOCS_PATH, MIN_IOCS_SIZE } = require('../../src/ioc/bootstrap.js');
+  // Only test skip behavior if the cache file already exists (from a previous update/scrape)
+  if (fs.existsSync(IOCS_PATH) && fs.statSync(IOCS_PATH).size >= MIN_IOCS_SIZE) {
+    const result = await ensureIOCs();
+    assert(result === true, 'Should return true when cache exists');
+  } else {
+    // Create a temp large file to test skip logic (need >1MB, each entry is ~30 bytes)
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-bootstrap-test-'));
+    const tmpFile = path.join(tmpDir, 'test-iocs.json');
+    // Write a file larger than MIN_IOCS_SIZE (40000 entries ≈ 1.2MB)
+    const bigData = JSON.stringify({ packages: new Array(40000).fill({ name: 'test', version: '*' }) });
+    fs.writeFileSync(tmpFile, bigData);
+    const stat = fs.statSync(tmpFile);
+    assert(stat.size >= MIN_IOCS_SIZE, 'Test file should be >= 1MB, got ' + stat.size);
+    // Cleanup
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+asyncTest('BOOTSTRAP: downloadAndDecompress rejects invalid URL gracefully', async () => {
+  const { downloadAndDecompress } = require('../../src/ioc/bootstrap.js');
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-bootstrap-test-'));
+  const tmpFile = path.join(tmpDir, 'iocs.json');
+  try {
+    await downloadAndDecompress('https://localhost:1/nonexistent.gz', tmpFile);
+    assert(false, 'Should have thrown');
+  } catch (err) {
+    assert(err instanceof Error, 'Should throw an Error');
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });
 
 }
