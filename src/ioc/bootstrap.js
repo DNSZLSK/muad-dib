@@ -23,7 +23,8 @@ const MAX_REDIRECTS = 5;
 // Allowed redirect domains (SSRF protection)
 const ALLOWED_REDIRECT_DOMAINS = [
   'github.com',
-  'objects.githubusercontent.com'
+  'objects.githubusercontent.com',
+  'release-assets.githubusercontent.com'
 ];
 
 /**
