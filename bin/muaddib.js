@@ -320,6 +320,9 @@ const helpText = `
     muaddib scrape                   Scrape new IOCs
     muaddib sandbox <pkg> [--strict] [--no-canary]  Analyze in isolated Docker container
     muaddib sandbox-report <pkg>     Sandbox + detailed network report
+    muaddib detections               List recent detections
+    muaddib detections --stats       Show aggregated detection stats
+    muaddib detections --json        Raw JSON output
     muaddib version                  Show version
 
   Diff Examples:
@@ -576,6 +579,57 @@ if (command === 'version' || command === '--version' || command === '-v') {
     console.error('[ERROR]', err.message);
     process.exit(1);
   });
+} else if (command === 'detections') {
+  const { loadDetections, getDetectionStats } = require('../src/monitor.js');
+  const wantStats = options.includes('--stats');
+  const wantJson = options.includes('--json');
+
+  if (wantJson) {
+    const data = loadDetections();
+    console.log(JSON.stringify(data, null, 2));
+    process.exit(0);
+  }
+
+  if (wantStats) {
+    const s = getDetectionStats();
+    console.log('\n  MUAD\'DIB Detection Stats\n');
+    console.log(`  Total detections: ${s.total}`);
+    if (Object.keys(s.bySeverity).length > 0) {
+      console.log('  By severity:');
+      for (const [sev, count] of Object.entries(s.bySeverity)) {
+        console.log(`    ${sev}: ${count}`);
+      }
+    }
+    if (Object.keys(s.byEcosystem).length > 0) {
+      console.log('  By ecosystem:');
+      for (const [eco, count] of Object.entries(s.byEcosystem)) {
+        console.log(`    ${eco}: ${count}`);
+      }
+    }
+    if (s.leadTime) {
+      console.log(`  Lead time (hours): avg=${s.leadTime.avg.toFixed(1)}, min=${s.leadTime.min.toFixed(1)}, max=${s.leadTime.max.toFixed(1)} (${s.leadTime.count} entries)`);
+    } else {
+      console.log('  Lead time: no advisory data yet');
+    }
+    console.log('');
+    process.exit(0);
+  }
+
+  // Default: list recent detections
+  const data = loadDetections();
+  const recent = data.detections.slice(-20).reverse();
+  if (recent.length === 0) {
+    console.log('\n  No detections recorded yet.\n');
+    process.exit(0);
+  }
+  console.log(`\n  MUAD'DIB Recent Detections (${recent.length} of ${data.detections.length})\n`);
+  for (const d of recent) {
+    const lead = d.lead_time_hours != null ? ` | lead: ${d.lead_time_hours.toFixed(1)}h` : '';
+    console.log(`  [${d.severity}] ${d.ecosystem}/${d.package}@${d.version} — ${d.first_seen_at}${lead}`);
+    console.log(`         findings: ${d.findings.join(', ')}`);
+  }
+  console.log('');
+  process.exit(0);
 } else if (command === 'init-hooks') {
   // Parse init-hooks arguments
   let hookType = 'auto';

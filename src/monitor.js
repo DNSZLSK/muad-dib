@@ -13,6 +13,7 @@ const { detectMaintainerChange } = require('./maintainer-change.js');
 
 const STATE_FILE = path.join(__dirname, '..', 'data', 'monitor-state.json');
 const ALERTS_FILE = path.join(__dirname, '..', 'data', 'monitor-alerts.json');
+const DETECTIONS_FILE = path.join(__dirname, '..', 'data', 'detections.json');
 const POLL_INTERVAL = 60_000;
 const MAX_TARBALL_SIZE = 50 * 1024 * 1024; // 50MB
 const SCAN_TIMEOUT_MS = 180_000; // 3 minutes per package
@@ -730,6 +731,73 @@ function appendAlert(alert) {
   }
 }
 
+// --- Detection time logging ---
+
+function loadDetections() {
+  try {
+    const raw = fs.readFileSync(DETECTIONS_FILE, 'utf8');
+    const data = JSON.parse(raw);
+    if (data && Array.isArray(data.detections)) return data;
+    return { detections: [] };
+  } catch {
+    return { detections: [] };
+  }
+}
+
+function appendDetection(name, version, ecosystem, findings, severity) {
+  try {
+    const dir = path.dirname(DETECTIONS_FILE);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    const data = loadDetections();
+    const key = `${name}@${version}`;
+    if (data.detections.some(d => `${d.package}@${d.version}` === key)) {
+      return; // dedup
+    }
+    data.detections.push({
+      package: name,
+      version,
+      ecosystem,
+      first_seen_at: new Date().toISOString(),
+      findings,
+      severity,
+      advisory_at: null,
+      lead_time_hours: null
+    });
+    fs.writeFileSync(DETECTIONS_FILE, JSON.stringify(data, null, 2), 'utf8');
+  } catch (err) {
+    console.error(`[MONITOR] Failed to save detection: ${err.message}`);
+  }
+}
+
+function getDetectionStats() {
+  const data = loadDetections();
+  const detections = data.detections;
+  const total = detections.length;
+
+  const bySeverity = {};
+  const byEcosystem = {};
+  for (const d of detections) {
+    bySeverity[d.severity] = (bySeverity[d.severity] || 0) + 1;
+    byEcosystem[d.ecosystem] = (byEcosystem[d.ecosystem] || 0) + 1;
+  }
+
+  const withLeadTime = detections.filter(d => d.advisory_at && d.lead_time_hours != null);
+  let leadTime = null;
+  if (withLeadTime.length > 0) {
+    const hours = withLeadTime.map(d => d.lead_time_hours);
+    leadTime = {
+      count: withLeadTime.length,
+      avg: hours.reduce((a, b) => a + b, 0) / hours.length,
+      min: Math.min(...hours),
+      max: Math.max(...hours)
+    };
+  }
+
+  return { total, bySeverity, byEcosystem, leadTime };
+}
+
 // --- Bundled tooling false-positive filter ---
 
 const KNOWN_BUNDLED_FILES = ['yarn.js', 'webpack.js', 'terser.js', 'esbuild.js', 'polyfills.js'];
@@ -868,6 +936,13 @@ async function scanPackage(name, version, ecosystem, tarballUrl) {
         }
 
         appendAlert(alert);
+
+        const findingTypes = [...new Set(result.threats.map(t => t.type))];
+        const maxSeverity = result.summary.critical > 0 ? 'CRITICAL'
+          : result.summary.high > 0 ? 'HIGH'
+          : result.summary.medium > 0 ? 'MEDIUM' : 'LOW';
+        appendDetection(name, version, ecosystem, findingTypes, maxSeverity);
+
         dailyAlerts.push({ name, version, ecosystem, findingsCount: result.summary.total });
         await trySendWebhook(name, version, ecosystem, result, sandboxResult);
         return { sandboxResult, staticClean: false };
@@ -1396,7 +1471,11 @@ module.exports = {
   runTemporalMaintainerCheck,
   isCanaryEnabled,
   buildCanaryExfiltrationWebhookEmbed,
-  isPublishAnomalyOnly
+  isPublishAnomalyOnly,
+  DETECTIONS_FILE,
+  appendDetection,
+  loadDetections,
+  getDetectionStats
 };
 
 // Standalone entry point: node src/monitor.js
