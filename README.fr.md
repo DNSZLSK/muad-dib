@@ -146,7 +146,7 @@ Détection ultra-stricte avec moins de tolérance. Utile pour les projets critiq
 muaddib scan . --webhook "https://discord.com/api/webhooks/..."
 ```
 
-Envoie une alerte avec le score et les menaces sur Discord ou Slack.
+Envoie une alerte avec le score et les menaces sur Discord ou Slack. Filtrage strict (v2.1.2) : les alertes ne sont envoyées que pour les correspondances IOC, les menaces confirmées par sandbox, ou l'exfiltration de canary tokens — réduisant le bruit des détections heuristiques seules.
 
 ### Surveillance temps réel
 
@@ -203,6 +203,8 @@ Monitoring multi-couches :
 - **Capture réseau** (tcpdump) : résolutions DNS avec IPs résolues, requêtes HTTP (méthode, host, path, body), détection TLS SNI
 - **Diff filesystem** : snapshot avant/après install, détecte les fichiers créés dans des emplacements suspects
 - **Détection exfiltration de données** : 16 patterns sensibles (tokens, credentials, clés SSH, clés privées, .env)
+- **Environnement CI simulé** (v2.1.2) : simule un environnement CI (GITHUB_ACTIONS, GITLAB_CI, TRAVIS, CIRCLECI, JENKINS) pour déclencher les malwares CI-aware qui resteraient autrement dormants
+- **Canary tokens enrichis** (v2.1.2) : 6 honeypots injectés comme variables d'environnement (GITHUB_TOKEN, NPM_TOKEN, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, SLACK_WEBHOOK_URL, DISCORD_WEBHOOK_URL). Si exfiltrés via réseau, DNS ou filesystem, déclenche une alerte CRITICAL avec score +50
 - **Moteur de scoring** : score de risque 0-100 basé sur la sévérité des comportements
 
 Utilisez `--strict` pour bloquer tout trafic réseau sortant non essentiel via iptables.
@@ -503,7 +505,14 @@ muaddib scan . --temporal-maintainer
 
 #### 5. Canary Tokens / Honey Tokens (sandbox)
 
-Injecte de faux credentials (GITHUB_TOKEN, NPM_TOKEN, clés AWS) dans l'environnement sandbox avant d'installer un package. Si le package tente d'exfiltrer ces honey tokens via HTTP, DNS ou stdout, il est signalé comme malveillant confirmé.
+Injecte de faux credentials dans l'environnement sandbox avant d'installer un package. Si le package tente d'exfiltrer ces honey tokens via HTTP, DNS, filesystem ou stdout, il est signalé comme malveillant confirmé.
+
+6 honeypots sont injectés :
+- `GITHUB_TOKEN` / `NPM_TOKEN` — Tokens de registre
+- `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` — Credentials cloud
+- `SLACK_WEBHOOK_URL` / `DISCORD_WEBHOOK_URL` — Webhooks de messagerie
+
+Les tokens dynamiques (aléatoires par session, depuis `canary-tokens.js`) et les tokens statiques de fallback (dans `sandbox-runner.sh`) sont utilisés pour une défense en profondeur.
 
 ```bash
 muaddib sandbox suspicious-package
@@ -696,7 +705,7 @@ MUAD'DIB 2.1 Scanner
 |   +-- API Threat Feed (serveur HTTP, flux JSON pour SIEM)
 |
 +-- Paranoid Mode (ultra-strict)
-+-- Docker Sandbox (analyse comportementale, capture réseau, canary tokens)
++-- Docker Sandbox (analyse comportementale, capture réseau, canary tokens, CI-aware)
 +-- Moniteur Zero-Day (polling RSS npm + PyPI, alertes Discord, rapport quotidien)
 |
 v
@@ -741,7 +750,7 @@ npm test
 
 ### Tests
 
-- **709 tests unitaires/intégration** - 74% coverage via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
+- **742 tests unitaires/intégration** - 74% coverage via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
 - **56 tests de fuzzing** - YAML malformé, JSON invalide, fichiers binaires, ReDoS, unicode, inputs 10MB
 - **15 tests adversariaux** - Packages malveillants simulés, taux de détection 15/15
 - **8 tests multi-facteur typosquat** - Cas limites et comportement cache

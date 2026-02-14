@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-npm test          # Run all tests (custom framework, ~709 tests across 17 files)
+npm test          # Run all tests (custom framework, ~742 tests across 17 files)
 npm run lint      # ESLint with security plugin
 npm run scan      # Self-scan: node bin/muaddib.js scan .
 npm run update    # Download latest IOCs
@@ -45,6 +45,16 @@ Tests use a custom framework in `tests/run-tests.js` (no Jest). Test helpers:
 - `src/maintainer-change.js` — Maintainer change detection (`--temporal-maintainer`): detects new/suspicious maintainers, sole maintainer change
 - `src/canary-tokens.js` — Canary tokens (sandbox): injects fake credentials and detects exfiltration attempts
 - `--temporal-full` enables all 4 temporal features at once
+
+**Sandbox Enhancements (v2.1.2):**
+- CI-aware environment: `sandbox-runner.sh` sets CI=true, GITHUB_ACTIONS, GITLAB_CI, TRAVIS, CIRCLECI, JENKINS_URL to trigger CI-aware malware
+- Enriched canary tokens: 6 static honeypots (GITHUB_TOKEN, NPM_TOKEN, AWS keys, SLACK/DISCORD webhooks) as fallback to dynamic tokens
+- `detectStaticCanaryExfiltration()` in `src/sandbox.js` searches all report fields for static canary values
+- Strict webhook filtering: monitor alerts only for IOC match, sandbox confirm, or canary exfiltration
+
+**Security Hardening (v2.1.2):**
+- `src/shared/download.js` — SSRF-safe downloadToFile (domain allowlist + private IP blocking), injection-safe extractTarGz (execFileSync), sanitizePackageName (path traversal prevention)
+- `src/shared/constants.js` — Centralized NPM_PACKAGE_REGEX, MAX_TARBALL_SIZE, DOWNLOAD_TIMEOUT
 
 **Validation & Observability (v2.1):** 5 features for measuring and validating scanner effectiveness:
 - `src/ground-truth.js` — Ground truth dataset: 5 real-world attacks (event-stream, ua-parser-js, coa, node-ipc, colors) replayed against scanner. 100% detection rate.

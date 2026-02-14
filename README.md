@@ -146,7 +146,7 @@ Ultra-strict detection with lower tolerance. Useful for critical projects. Detec
 muaddib scan . --webhook "https://discord.com/api/webhooks/..."
 ```
 
-Sends an alert with score and threats to Discord or Slack.
+Sends an alert with score and threats to Discord or Slack. Strict filtering (v2.1.2): alerts are only sent for IOC matches, sandbox-confirmed threats, or canary token exfiltration — reducing noise from heuristic-only detections.
 
 ### Real-time monitoring
 
@@ -203,6 +203,8 @@ Multi-layer monitoring:
 - **Network capture** (tcpdump): DNS resolutions with resolved IPs, HTTP requests (method, host, path, body), TLS SNI detection
 - **Filesystem diff**: snapshot before/after install, detects files created in suspicious locations
 - **Data exfiltration detection**: 16 sensitive patterns (tokens, credentials, SSH keys, private keys, .env)
+- **CI-aware environment** (v2.1.2): simulates CI environments (GITHUB_ACTIONS, GITLAB_CI, TRAVIS, CIRCLECI, JENKINS) to trigger CI-aware malware that would otherwise stay dormant
+- **Enriched canary tokens** (v2.1.2): 6 honeypot credentials injected as env vars (GITHUB_TOKEN, NPM_TOKEN, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, SLACK_WEBHOOK_URL, DISCORD_WEBHOOK_URL). If exfiltrated via network, DNS, or filesystem, triggers CRITICAL alert with +50 score
 - **Scoring engine**: 0-100 risk score based on behavioral severity
 
 Use `--strict` to block all non-essential outbound network traffic via iptables.
@@ -504,7 +506,14 @@ muaddib scan . --temporal-maintainer
 
 #### 5. Canary Tokens / Honey Tokens (sandbox)
 
-Injects fake credentials (GITHUB_TOKEN, NPM_TOKEN, AWS keys) into the sandbox environment before installing a package. If the package attempts to exfiltrate these honey tokens via HTTP, DNS, or stdout, it's flagged as confirmed malicious.
+Injects fake credentials into the sandbox environment before installing a package. If the package attempts to exfiltrate these honey tokens via HTTP, DNS, filesystem, or stdout, it's flagged as confirmed malicious.
+
+6 honeypot credentials are injected:
+- `GITHUB_TOKEN` / `NPM_TOKEN` — Package registry tokens
+- `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` — Cloud credentials
+- `SLACK_WEBHOOK_URL` / `DISCORD_WEBHOOK_URL` — Messaging webhooks
+
+Both dynamic tokens (random per session, from `canary-tokens.js`) and static fallback tokens (in `sandbox-runner.sh`) are used for defense in depth.
 
 ```bash
 muaddib sandbox suspicious-package
@@ -699,7 +708,7 @@ MUAD'DIB 2.1 Scanner
 |   +-- Threat Feed API (HTTP server, JSON feed for SIEM)
 |
 +-- Paranoid Mode (ultra-strict)
-+-- Docker Sandbox (behavioral analysis, network capture, canary tokens)
++-- Docker Sandbox (behavioral analysis, network capture, canary tokens, CI-aware)
 +-- Zero-Day Monitor (npm + PyPI RSS polling, Discord alerts, daily report)
 |
 v
@@ -744,7 +753,7 @@ npm test
 
 ### Testing
 
-- **709 unit/integration tests** - 74% code coverage via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
+- **742 unit/integration tests** - 74% code coverage via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
 - **56 fuzz tests** - Malformed YAML, invalid JSON, binary files, ReDoS, unicode, 10MB inputs
 - **15 adversarial tests** - Simulated malicious packages, 15/15 detection rate
 - **8 multi-factor typosquat tests** - Edge cases and cache behavior

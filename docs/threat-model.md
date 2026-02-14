@@ -33,6 +33,40 @@
 | Lecture credential + envoi reseau | Analyse dataflow | HIGH |
 | Acces process.env + fetch/request | Analyse dataflow | HIGH |
 
+### Detection des malwares CI-aware (v2.1.2)
+
+Certains malwares supply-chain ne s'activent que dans un environnement CI/CD. Ils testent la presence de variables comme `CI`, `GITHUB_ACTIONS`, `GITLAB_CI` avant d'executer leur payload, restant dormants sur les machines locales.
+
+Le sandbox MUAD'DIB simule 6 environnements CI : GitHub Actions, GitLab CI, Travis CI, CircleCI, Jenkins. Les malwares CI-aware declenchent leur payload dans le container isole, permettant leur detection via strace, tcpdump et filesystem diff.
+
+### Canary tokens / Honey tokens (v2.1.2)
+
+Le sandbox injecte 6 faux credentials comme honeypots :
+
+| Token | Type | Objectif |
+|-------|------|----------|
+| GITHUB_TOKEN | Registry token | Detecter vol de tokens GitHub |
+| NPM_TOKEN | Registry token | Detecter vol de tokens npm |
+| AWS_ACCESS_KEY_ID | Cloud credential | Detecter vol de cles AWS |
+| AWS_SECRET_ACCESS_KEY | Cloud credential | Detecter vol de secrets AWS |
+| SLACK_WEBHOOK_URL | Messaging webhook | Detecter exfiltration Slack |
+| DISCORD_WEBHOOK_URL | Messaging webhook | Detecter exfiltration Discord |
+
+**Detection double couche** :
+1. **Tokens dynamiques** : Suffixe aleatoire genere par `canary-tokens.js` a chaque session, injecte via Docker `-e`
+2. **Tokens statiques** : Valeurs fallback dans `sandbox-runner.sh`, detectes par `detectStaticCanaryExfiltration()` dans `sandbox.js`
+
+**7 vecteurs de detection** :
+- Corps HTTP (POST bodies)
+- Requetes DNS (tunneling DNS)
+- URLs de requetes HTTP
+- Connexions TLS (SNI)
+- Modifications filesystem (fichiers crees)
+- Commandes processus (arguments)
+- Sortie d'installation npm (stdout/stderr)
+
+Si un package tente d'exfiltrer un canary token, c'est la preuve directe de comportement malveillant (CRITICAL, +50 au score, regle MUADDIB-CANARY-001).
+
 ## Ce que MUAD'DIB NE detecte PAS
 
 ### Limitations connues
@@ -71,8 +105,9 @@
 
 | Protection | Detail |
 |------------|--------|
-| SSRF protection | Les redirections HTTP du fetcher IOC sont validees via `isAllowedFetchRedirect()` avec whitelist de domaines autorises et resolution des URLs relatives |
+| SSRF protection | Download centralise dans `src/shared/download.js` : whitelist de domaines registres (registry.npmjs.org, pypi.org, etc.), blocage des IP privees (127.x, 10.x, 172.16-31.x, 192.168.x, 169.254.x, IPv6 loopback/link-local), validation des redirections |
 | Webhook timeout | Les envois webhook (Discord/Slack) sont limites en temps pour eviter les blocages sur des endpoints lents ou malveillants |
+| Webhook strict | Alertes uniquement pour IOC match, sandbox confirm, ou canary exfiltration (pas de heuristiques basse confiance) |
 | Fail-closed sur registry | Si le registre npm est injoignable lors d'un `muaddib install`, l'installation echoue par defaut plutot que de continuer sans verification. `safe-install` bloque egalement si la base IOC est indisponible (design fail-closed) |
 
 ### Securite des installations
@@ -82,7 +117,9 @@
 | `--ignore-scripts` | Les `npm install` internes (sandbox, safe-install) utilisent le flag `--ignore-scripts` pour empecher l'execution de preinstall/postinstall malveillants |
 | Symlink protection | `lstatSync` est utilise pour detecter les liens symboliques et eviter les boucles infinies ou l'acces a des fichiers hors scope |
 | XSS dans rapports HTML | Les donnees utilisateur dans les rapports HTML sont echappees via `escapeHtml()` |
-| Docker sandbox (analyse dynamique) | L'analyse sandbox valide le nom du package avant passage au container Docker |
+| Docker sandbox (analyse dynamique) | L'analyse sandbox valide le nom du package via `sanitizePackageName()` avant passage au container Docker |
+| Command injection prevention | `execFileSync` avec arguments en tableau au lieu de `execSync` avec template literals pour l'extraction tar. `NPM_PACKAGE_REGEX` centralise dans `src/shared/constants.js` |
+| Path traversal prevention | `sanitizePackageName()` supprime les sequences `..` dans les noms de packages |
 
 ## Resultats des tests adversariaux
 
@@ -118,9 +155,9 @@ Les parsers ont ete testes avec des inputs malformes :
 
 Resultat : **56/56 pass**. Aucun crash, aucune exception non rattrapee.
 
-### 709 tests unitaires et d'integration
+### 742 tests unitaires et d'integration
 
-Couverture complete des scanners, parsers, IOC matching, typosquatting, integrations CLI, diff, monitor, temporal analysis, et ground truth. 74% code coverage.
+Couverture complete des scanners, parsers, IOC matching, typosquatting, integrations CLI, diff, monitor, temporal analysis, ground truth, canary tokens, et securite (SSRF, injection). 74% code coverage.
 
 ### Validation Ground Truth (v2.1)
 

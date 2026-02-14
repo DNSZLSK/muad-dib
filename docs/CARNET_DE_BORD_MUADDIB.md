@@ -508,6 +508,58 @@ v2.1 est la version "observabilite". MUAD'DIB ne se contente plus de detecter : 
 
 ---
 
+## MUAD'DIB 2.1.2 — Sandbox CI-aware & Hardening securite (14 Fevrier 2026)
+
+### Le probleme des malwares CI-aware
+
+Certains malwares supply-chain sont plus intelligents que prevu : ils detectent s'ils s'executent dans un environnement CI/CD avant d'activer leur payload. Si la variable `CI` ou `GITHUB_ACTIONS` n'est pas definie, ils restent dormants. Notre sandbox Docker ne simulait pas un environnement CI, donc ces malwares passaient a travers.
+
+### Solution : simulation CI dans le sandbox
+
+Le `sandbox-runner.sh` simule maintenant 6 environnements CI differents :
+
+```bash
+export CI=true
+export GITHUB_ACTIONS=true
+export GITLAB_CI=true
+export TRAVIS=true
+export CIRCLECI=true
+export JENKINS_URL=http://localhost:8080
+```
+
+Les malwares qui testent `if (process.env.CI)` ou `if (process.env.GITHUB_ACTIONS)` declenchent maintenant leur payload dans notre sandbox, ce qui permet leur detection.
+
+### Canary tokens enrichis
+
+Le sandbox injecte maintenant 6 canary tokens (faux secrets) comme honeypots :
+- `GITHUB_TOKEN` / `NPM_TOKEN` — Tokens de registre
+- `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` — Credentials cloud
+- `SLACK_WEBHOOK_URL` / `DISCORD_WEBHOOK_URL` — Webhooks messaging
+
+Le systeme de detection est en double couche :
+1. **Tokens dynamiques** : Generes aleatoirement par `canary-tokens.js` a chaque session sandbox, injectes via Docker `-e`
+2. **Tokens statiques** : Valeurs fallback dans `sandbox-runner.sh` avec pattern `${VAR:-default}`, detectes par `detectStaticCanaryExfiltration()` dans `sandbox.js`
+
+L'exfiltration est recherchee dans 7 vecteurs : corps HTTP, requetes DNS, URLs HTTP, connexions TLS, modifications filesystem, commandes processus, et sortie d'installation.
+
+### Hardening securite
+
+**Protection SSRF** : Centralisation du download dans `src/shared/download.js` avec validation stricte des domaines (registres npm/PyPI uniquement), blocage des IP privees (127.x, 10.x, 172.16-31.x, 192.168.x, IPv6 loopback), et verification des redirections.
+
+**Prevention injection de commande** : Remplacement de `execSync` avec template literals par `execFileSync` avec arguments en tableau pour l'extraction tar. Centralisation de `NPM_PACKAGE_REGEX` dans `src/shared/constants.js`.
+
+**Sanitization des paths** : `sanitizePackageName()` supprime les sequences `..` pour prevenir le path traversal.
+
+**JSON.parse protege** : Les 2 appels `JSON.parse` non proteges dans `monitor.js` et `sandbox.js` sont maintenant dans des blocs try/catch.
+
+**Webhook strict** : Les alertes webhook ne se declenchent plus que pour les menaces confirmees (IOC match, sandbox confirm, canary exfiltration), pas pour les heuristiques basse confiance.
+
+### Bilan
+
++33 nouveaux tests (14 canary + 10 SSRF + 9 security), passage de 709 a **742 tests**. La securite interne de l'outil est maintenant aussi rigoureuse que sa capacite de detection.
+
+---
+
 ## Etat actuel
 
 ### Ce qui fonctionne
@@ -520,7 +572,7 @@ v2.1 est la version "observabilite". MUAD'DIB ne se contente plus de detecter : 
 | Exports | JSON, HTML, SARIF |
 | Extension VS Code | Publiée sur Marketplace |
 | Webhooks | Discord / Slack (envoi uniquement si menaces détectées) |
-| Docker Sandbox (analyse dynamique) | Analyse comportementale isolée (strace, tcpdump, filesystem diff, DNS/HTTP/TLS capture, 16 patterns exfiltration, mode strict iptables) |
+| Docker Sandbox (analyse dynamique) | Analyse comportementale isolée, CI-aware (6 env CI simulés), canary tokens enrichis (6 honeypots), strace, tcpdump, filesystem diff, DNS/HTTP/TLS capture, 16 patterns exfiltration, mode strict iptables |
 | **Moniteur Zero-Day** | Polling RSS npm + PyPI (60s), scan automatique, alertes Discord temps réel, rapport quotidien, filtre bundled tooling |
 | GitHub Actions Backdoor | Détection discussion.yaml (Shai-Hulud 2.0) |
 | **Diff entre versions** | Compare et montre uniquement les NOUVELLES menaces |
@@ -529,7 +581,8 @@ v2.1 est la version "observabilite". MUAD'DIB ne se contente plus de detecter : 
 | Version check | Notification automatique des nouvelles versions au demarrage |
 | **Detection comportementale (v2.0)** | Temporal lifecycle, AST diff, publish anomaly, maintainer change, canary tokens |
 | **Validation & Observabilite (v2.1)** | Ground truth (5 attaques, 100%), detection time logging, FP rate tracking, score breakdown, threat feed API |
-| Tests | **709 tests unitaires** + 56 fuzz + 15 adversariaux, **74% coverage** (Codecov) |
+| Tests | **742 tests unitaires** + 56 fuzz + 15 adversariaux, **74% coverage** (Codecov) |
+| **Hardening securite (v2.1.2)** | SSRF protection (shared/download.js), command injection prevention (execFileSync), path traversal (sanitizePackageName), JSON.parse protege, webhook strict |
 | Audit securite | 2 audits complets, **58 issues corrigees**, [rapport PDF](MUADDIB_Security_Audit_Report_v1.4.1.pdf) |
 
 ### Ce qui manque (honnêtement)
