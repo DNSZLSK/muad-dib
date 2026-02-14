@@ -176,9 +176,13 @@ async function runDiffTests() {
     assert(result === null, 'Should return null for non-existent ref');
   });
 
-  test('DIFF: resolveRef resolves HEAD~1', () => {
+  test('DIFF: resolveRef resolves HEAD~1 when history is deep enough', () => {
     const hash = resolveRef(REPO_ROOT, 'HEAD~1');
-    assert(hash !== null, 'HEAD~1 should resolve to a hash');
+    // Shallow clones (e.g. CI with --depth=1) may not have HEAD~1
+    if (hash === null) {
+      console.log('       (skipped: shallow clone, HEAD~1 not available)');
+      return;
+    }
     assert(/^[0-9a-f]+$/.test(hash), 'Should be a hex hash');
   });
 
