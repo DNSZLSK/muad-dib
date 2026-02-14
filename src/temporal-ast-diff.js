@@ -2,16 +2,14 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { execSync } = require('child_process');
 const acorn = require('acorn');
 const walk = require('acorn-walk');
 const { findJsFiles } = require('./utils.js');
 const { fetchPackageMetadata, getLatestVersions } = require('./temporal-analysis.js');
+const { downloadToFile, extractTarGz, sanitizePackageName } = require('./shared/download.js');
 
 const REGISTRY_URL = 'https://registry.npmjs.org';
-const MAX_TARBALL_SIZE = 50 * 1024 * 1024; // 50MB
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
-const DOWNLOAD_TIMEOUT = 30_000;
 const METADATA_TIMEOUT = 10_000;
 
 const SENSITIVE_PATHS = [
@@ -77,84 +75,6 @@ function fetchVersionMetadata(packageName, version) {
   });
 }
 
-/**
- * Download a file from HTTPS URL to disk.
- */
-function downloadToFile(url, destPath) {
-  return new Promise((resolve, reject) => {
-    const doRequest = (requestUrl) => {
-      const req = https.get(requestUrl, { timeout: DOWNLOAD_TIMEOUT }, (res) => {
-        if (res.statusCode === 301 || res.statusCode === 302) {
-          res.resume();
-          const location = res.headers.location;
-          if (!location) return reject(new Error(`Redirect without Location for ${requestUrl}`));
-          return doRequest(location);
-        }
-        if (res.statusCode < 200 || res.statusCode >= 300) {
-          res.resume();
-          return reject(new Error(`HTTP ${res.statusCode} for ${requestUrl}`));
-        }
-        const contentLength = parseInt(res.headers['content-length'], 10);
-        if (contentLength && contentLength > MAX_TARBALL_SIZE) {
-          res.resume();
-          return reject(new Error(`Tarball too large: ${contentLength} bytes`));
-        }
-        const fileStream = fs.createWriteStream(destPath);
-        let downloaded = 0;
-        res.on('data', chunk => {
-          downloaded += chunk.length;
-          if (downloaded > MAX_TARBALL_SIZE) {
-            res.destroy();
-            fileStream.destroy();
-            try { fs.unlinkSync(destPath); } catch {}
-            reject(new Error(`Tarball too large: ${downloaded}+ bytes`));
-          }
-        });
-        res.pipe(fileStream);
-        fileStream.on('finish', () => resolve(downloaded));
-        fileStream.on('error', err => {
-          try { fs.unlinkSync(destPath); } catch {}
-          reject(err);
-        });
-        res.on('error', err => {
-          fileStream.destroy();
-          try { fs.unlinkSync(destPath); } catch {}
-          reject(err);
-        });
-      });
-      req.on('error', reject);
-      req.on('timeout', () => {
-        req.destroy();
-        reject(new Error(`Download timeout for ${requestUrl}`));
-      });
-    };
-    doRequest(url);
-  });
-}
-
-/**
- * Extract a .tar.gz to a directory. Returns the package root.
- */
-function extractTarGz(tgzPath, destDir) {
-  // Use cwd + relative paths so C: never appears in tar arguments
-  // (GNU tar treats C: as remote host, bsdtar doesn't support --force-local)
-  const tgzDir = path.dirname(path.resolve(tgzPath));
-  const tgzName = path.basename(tgzPath);
-  const relDest = path.relative(tgzDir, path.resolve(destDir)) || '.';
-  execSync(`tar xzf "${tgzName}" -C "${relDest}"`, { cwd: tgzDir, timeout: 60_000, stdio: 'pipe' });
-  // npm tarballs extract into a package/ subdirectory
-  const packageSubdir = path.join(destDir, 'package');
-  if (fs.existsSync(packageSubdir) && fs.statSync(packageSubdir).isDirectory()) {
-    return packageSubdir;
-  }
-  const entries = fs.readdirSync(destDir);
-  if (entries.length === 1) {
-    const single = path.join(destDir, entries[0]);
-    if (fs.statSync(single).isDirectory()) return single;
-  }
-  return destDir;
-}
-
 // --- Core functions ---
 
 /**
@@ -170,7 +90,7 @@ async function fetchPackageTarball(packageName, version) {
     throw new Error(`No tarball URL found for ${packageName}@${version}`);
   }
 
-  const safeName = packageName.replace(/\//g, '_').replace(/@/g, '');
+  const safeName = sanitizePackageName(packageName);
   const tmpBase = path.join(os.tmpdir(), 'muaddib-ast-diff');
   if (!fs.existsSync(tmpBase)) fs.mkdirSync(tmpBase, { recursive: true });
   const tmpDir = fs.mkdtempSync(path.join(tmpBase, `${safeName}-${version}-`));

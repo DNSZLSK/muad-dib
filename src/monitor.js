@@ -2,7 +2,6 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { execSync } = require('child_process');
 const { run } = require('./index.js');
 const { runSandbox, isDockerAvailable } = require('./sandbox.js');
 const { sendWebhook } = require('./webhook.js');
@@ -10,13 +9,14 @@ const { detectSuddenLifecycleChange } = require('./temporal-analysis.js');
 const { detectSuddenAstChanges } = require('./temporal-ast-diff.js');
 const { detectPublishAnomaly } = require('./publish-anomaly.js');
 const { detectMaintainerChange } = require('./maintainer-change.js');
+const { downloadToFile, extractTarGz, sanitizePackageName } = require('./shared/download.js');
+const { MAX_TARBALL_SIZE } = require('./shared/constants.js');
 
 const STATE_FILE = path.join(__dirname, '..', 'data', 'monitor-state.json');
 const ALERTS_FILE = path.join(__dirname, '..', 'data', 'monitor-alerts.json');
 const DETECTIONS_FILE = path.join(__dirname, '..', 'data', 'detections.json');
 const SCAN_STATS_FILE = path.join(__dirname, '..', 'data', 'scan-stats.json');
 const POLL_INTERVAL = 60_000;
-const MAX_TARBALL_SIZE = 50 * 1024 * 1024; // 50MB
 const SCAN_TIMEOUT_MS = 180_000; // 3 minutes per package
 
 // --- Stats counters ---
@@ -664,81 +664,6 @@ function httpsGet(url, timeoutMs = 30_000) {
   });
 }
 
-// --- Download & extraction helpers ---
-
-function downloadToFile(url, destPath, timeoutMs = 30_000) {
-  return new Promise((resolve, reject) => {
-    const doRequest = (requestUrl) => {
-      const req = https.get(requestUrl, { timeout: timeoutMs }, (res) => {
-        if (res.statusCode === 301 || res.statusCode === 302) {
-          res.resume();
-          const location = res.headers.location;
-          if (!location) return reject(new Error(`Redirect without Location for ${requestUrl}`));
-          return doRequest(location);
-        }
-        if (res.statusCode < 200 || res.statusCode >= 300) {
-          res.resume();
-          return reject(new Error(`HTTP ${res.statusCode} for ${requestUrl}`));
-        }
-        const contentLength = parseInt(res.headers['content-length'], 10);
-        if (contentLength && contentLength > MAX_TARBALL_SIZE) {
-          res.resume();
-          return reject(new Error(`Package too large: ${contentLength} bytes (max ${MAX_TARBALL_SIZE})`));
-        }
-        const fileStream = fs.createWriteStream(destPath);
-        let downloadedBytes = 0;
-        res.on('data', (chunk) => {
-          downloadedBytes += chunk.length;
-          if (downloadedBytes > MAX_TARBALL_SIZE) {
-            res.destroy();
-            fileStream.destroy();
-            try { fs.unlinkSync(destPath); } catch {}
-            reject(new Error(`Package too large: ${downloadedBytes}+ bytes (max ${MAX_TARBALL_SIZE})`));
-          }
-        });
-        res.pipe(fileStream);
-        fileStream.on('finish', () => resolve(downloadedBytes));
-        fileStream.on('error', (err) => {
-          try { fs.unlinkSync(destPath); } catch {}
-          reject(err);
-        });
-        res.on('error', (err) => {
-          fileStream.destroy();
-          try { fs.unlinkSync(destPath); } catch {}
-          reject(err);
-        });
-      });
-      req.on('error', reject);
-      req.on('timeout', () => {
-        req.destroy();
-        reject(new Error(`Timeout downloading ${requestUrl}`));
-      });
-    };
-    doRequest(url);
-  });
-}
-
-function extractTarGz(tgzPath, destDir) {
-  // Use cwd + relative paths so C: never appears in tar arguments
-  // (GNU tar treats C: as remote host, bsdtar doesn't support --force-local)
-  const tgzDir = path.dirname(path.resolve(tgzPath));
-  const tgzName = path.basename(tgzPath);
-  const relDest = path.relative(tgzDir, path.resolve(destDir)) || '.';
-  execSync(`tar xzf "${tgzName}" -C "${relDest}"`, { cwd: tgzDir, timeout: 60_000, stdio: 'pipe' });
-  // npm tarballs extract into a package/ subdirectory; detect it
-  const packageSubdir = path.join(destDir, 'package');
-  if (fs.existsSync(packageSubdir) && fs.statSync(packageSubdir).isDirectory()) {
-    return packageSubdir;
-  }
-  // Otherwise return destDir itself (PyPI sdists vary)
-  const entries = fs.readdirSync(destDir);
-  if (entries.length === 1) {
-    const single = path.join(destDir, entries[0]);
-    if (fs.statSync(single).isDirectory()) return single;
-  }
-  return destDir;
-}
-
 // --- Tarball URL helpers ---
 
 function getNpmTarballUrl(pkgData) {
@@ -748,7 +673,12 @@ function getNpmTarballUrl(pkgData) {
 async function getPyPITarballUrl(packageName) {
   const url = `https://pypi.org/pypi/${encodeURIComponent(packageName)}/json`;
   const body = await httpsGet(url);
-  const data = JSON.parse(body);
+  let data;
+  try {
+    data = JSON.parse(body);
+  } catch (e) {
+    throw new Error(`Invalid JSON from PyPI for ${packageName}: ${e.message}`);
+  }
   const version = (data.info && data.info.version) || '';
   const urls = data.urls || [];
   // Prefer sdist (.tar.gz)
@@ -917,7 +847,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl) {
   const startTime = Date.now();
   const tmpBase = path.join(os.tmpdir(), 'muaddib-monitor');
   if (!fs.existsSync(tmpBase)) fs.mkdirSync(tmpBase, { recursive: true });
-  const tmpDir = fs.mkdtempSync(path.join(tmpBase, `${name.replace(/\//g, '_')}-`));
+  const tmpDir = fs.mkdtempSync(path.join(tmpBase, `${sanitizePackageName(name)}-`));
 
   try {
     const tgzPath = path.join(tmpDir, 'package.tar.gz');
@@ -1180,7 +1110,12 @@ function parseNpmRss(xml) {
 async function getNpmLatestTarball(packageName) {
   const url = `https://registry.npmjs.org/${encodeURIComponent(packageName)}/latest`;
   const body = await httpsGet(url);
-  const data = JSON.parse(body);
+  let data;
+  try {
+    data = JSON.parse(body);
+  } catch (e) {
+    throw new Error(`Invalid JSON from npm registry for ${packageName}: ${e.message}`);
+  }
   const version = data.version || '';
   const tarball = (data.dist && data.dist.tarball) || null;
   return { version, tarball };

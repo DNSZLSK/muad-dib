@@ -2,10 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const { loadCachedIOCs } = require('./ioc/updater.js');
-const { REHABILITATED_PACKAGES } = require('./shared/constants.js');
-
-// Regex to validate npm package names (prevents command injection)
-const NPM_PACKAGE_REGEX = /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/;
+const { REHABILITATED_PACKAGES, NPM_PACKAGE_REGEX } = require('./shared/constants.js');
 
 /**
  * Validates that a package name is safe (no command injection)

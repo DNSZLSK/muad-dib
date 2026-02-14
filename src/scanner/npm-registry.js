@@ -1,10 +1,11 @@
+const { NPM_PACKAGE_REGEX } = require('../shared/constants.js');
+
 const REGISTRY_URL = 'https://registry.npmjs.org';
 const DOWNLOADS_URL = 'https://api.npmjs.org/downloads/point/last-week';
 const SEARCH_URL = 'https://registry.npmjs.org/-/v1/search';
 
 const REQUEST_TIMEOUT = 10000; // 10 seconds
 const MAX_RETRIES = 3;
-const NPM_NAME_REGEX = /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/;
 
 /**
  * Create a timeout signal, with fallback for older Node versions.
@@ -75,7 +76,7 @@ async function fetchWithRetry(url) {
 
 async function getPackageMetadata(packageName) {
   // Validate package name before building URL
-  if (!NPM_NAME_REGEX.test(packageName)) return null;
+  if (!NPM_PACKAGE_REGEX.test(packageName)) return null;
 
   // 1. Registry metadata
   const registryUrl = REGISTRY_URL + '/' + encodeURIComponent(packageName);
