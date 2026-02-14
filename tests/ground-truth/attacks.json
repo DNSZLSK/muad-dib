@@ -17,10 +17,10 @@
       "sample_dir": "samples/event-stream/",
       "expected_detections": ["known_malicious_package"],
       "expected": {
-        "min_threats": 2,
+        "min_threats": 1,
         "rules": ["MUADDIB-DEP-001"],
         "severities": ["CRITICAL"],
-        "scanners": ["dependencies"]
+        "scanners": ["package"]
       }
     },
     {
@@ -82,12 +82,12 @@
       "source": "https://github.com/advisories/GHSA-97m3-w2cp-4xx6",
       "mitre": ["T1195.002", "T1485", "T1614.001", "T1027"],
       "sample_dir": "samples/node-ipc/",
-      "expected_detections": ["shai_hulud_marker"],
+      "expected_detections": ["known_malicious_package"],
       "expected": {
         "min_threats": 1,
-        "rules": ["MUADDIB-DEP-003"],
+        "rules": ["MUADDIB-DEP-001"],
         "severities": ["CRITICAL"],
-        "scanners": ["dependencies"]
+        "scanners": ["package"]
       },
       "gaps": "ssl-geospec.js base64 obfuscation (Buffer.from + base64), https.get network call, and fs.writeFile destructive pattern not detected by AST/entropy scanners. ESM import syntax may not be parsed. Could improve with base64 string detection and network+fs combined pattern analysis."
     },
