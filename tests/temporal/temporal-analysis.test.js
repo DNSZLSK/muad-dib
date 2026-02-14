@@ -194,6 +194,33 @@ async function runTemporalAnalysisTests() {
     assert(getLatestVersions({ time: null }).length === 0, 'Null time');
   });
 
+  test('TEMPORAL: getLatestVersions with count=1', () => {
+    const result = getLatestVersions(mockMetadataWithTime, 1);
+    assert(result.length === 1, 'Should return 1 version');
+    assert(result[0].version === '1.2.0', 'Should be newest version');
+  });
+
+  test('TEMPORAL: getLatestVersions skips versions not in versions object', () => {
+    const meta = {
+      versions: { '1.0.0': {} },
+      time: { '1.0.0': '2020-01-01T00:00:00Z', '1.1.0': '2021-01-01T00:00:00Z' }
+    };
+    const result = getLatestVersions(meta);
+    assert(result.length === 1, 'Should skip version not in versions object');
+    assert(result[0].version === '1.0.0', 'Only 1.0.0 should be returned');
+  });
+
+  test('TEMPORAL: getLifecycleScripts extracts install script', () => {
+    const result = getLifecycleScripts({ scripts: { install: 'node-gyp rebuild' } });
+    assert(result.install === 'node-gyp rebuild', 'Should extract install');
+    assert(Object.keys(result).length === 1, 'Should have 1 key');
+  });
+
+  test('TEMPORAL: getLifecycleScripts extracts prepublishOnly', () => {
+    const result = getLifecycleScripts({ scripts: { prepublishOnly: 'npm test && npm run build' } });
+    assert(result.prepublishOnly === 'npm test && npm run build', 'prepublishOnly');
+  });
+
   // --- detectSuddenLifecycleChange (mocked) ---
 
   test('TEMPORAL: detectSuddenLifecycleChange detects added postinstall (mock)', () => {
@@ -230,6 +257,172 @@ async function runTemporalAnalysisTests() {
     };
     const latest = getLatestVersions(mockSingle, 2);
     assert(latest.length === 1, 'Should have only 1 version');
+  });
+
+  // --- detectSuddenLifecycleChange (mocked https via Module._load) ---
+
+  const Module = require('module');
+  const EventEmitter = require('events');
+
+  async function withMockedHttps(mockResponseData, testFn) {
+    const temporalPath = require.resolve('../../src/temporal-analysis.js');
+    const savedTemporal = require.cache[temporalPath];
+    delete require.cache[temporalPath];
+
+    const mockHttps = {
+      request: (options, callback) => {
+        const res = new EventEmitter();
+        res.statusCode = 200;
+        res.resume = () => {};
+        const req = new EventEmitter();
+        req.end = () => {
+          process.nextTick(() => {
+            callback(res);
+            process.nextTick(() => {
+              const json = JSON.stringify(mockResponseData);
+              res.emit('data', Buffer.from(json));
+              res.emit('end');
+            });
+          });
+        };
+        req.setTimeout = () => {};
+        req.destroy = () => {};
+        return req;
+      }
+    };
+
+    const originalLoad = Module._load;
+    Module._load = function(request, parent, isMain) {
+      if (request === 'https') return mockHttps;
+      return originalLoad.apply(this, arguments);
+    };
+
+    try {
+      const mod = require(temporalPath);
+      await testFn(mod);
+    } finally {
+      Module._load = originalLoad;
+      delete require.cache[temporalPath];
+      if (savedTemporal) require.cache[temporalPath] = savedTemporal;
+    }
+  }
+
+  await asyncTest('TEMPORAL: detectSuddenLifecycleChange added postinstall → CRITICAL (mocked)', async () => {
+    const mockData = {
+      name: 'test-pkg',
+      maintainers: [{ name: 'evil', email: 'evil@example.com' }],
+      versions: {
+        '1.0.0': { scripts: { test: 'jest' } },
+        '1.1.0': { scripts: { test: 'jest', postinstall: 'node exploit.js' } }
+      },
+      time: { '1.0.0': '2020-01-15T00:00:00.000Z', '1.1.0': '2021-01-01T00:00:00.000Z' }
+    };
+    await withMockedHttps(mockData, async (mod) => {
+      const result = await mod.detectSuddenLifecycleChange('test-pkg');
+      assert(result.packageName === 'test-pkg', 'Package name');
+      assert(result.suspicious === true, 'Should be suspicious');
+      const added = result.findings.find(f => f.type === 'lifecycle_added');
+      assert(added, 'Should have lifecycle_added finding');
+      assert(added.script === 'postinstall', 'Script should be postinstall');
+      assert(added.severity === 'CRITICAL', 'postinstall should be CRITICAL');
+      assert(result.latestVersion === '1.1.0', 'Latest version');
+      assert(result.previousVersion === '1.0.0', 'Previous version');
+    });
+  });
+
+  await asyncTest('TEMPORAL: detectSuddenLifecycleChange added prepare → HIGH (mocked)', async () => {
+    const mockData = {
+      name: 'test-pkg', maintainers: [],
+      versions: {
+        '1.0.0': { scripts: { test: 'jest' } },
+        '1.1.0': { scripts: { test: 'jest', prepare: 'npm run build' } }
+      },
+      time: { '1.0.0': '2020-01-15T00:00:00.000Z', '1.1.0': '2021-01-01T00:00:00.000Z' }
+    };
+    await withMockedHttps(mockData, async (mod) => {
+      const result = await mod.detectSuddenLifecycleChange('test-pkg');
+      assert(result.suspicious === true, 'Should be suspicious');
+      const added = result.findings.find(f => f.type === 'lifecycle_added');
+      assert(added.severity === 'HIGH', 'prepare should be HIGH (non-critical)');
+    });
+  });
+
+  await asyncTest('TEMPORAL: detectSuddenLifecycleChange modified script (mocked)', async () => {
+    const mockData = {
+      name: 'test-pkg', maintainers: [],
+      versions: {
+        '1.0.0': { scripts: { postinstall: 'node setup.js' } },
+        '1.1.0': { scripts: { postinstall: 'node evil.js' } }
+      },
+      time: { '1.0.0': '2020-01-15T00:00:00.000Z', '1.1.0': '2021-01-01T00:00:00.000Z' }
+    };
+    await withMockedHttps(mockData, async (mod) => {
+      const result = await mod.detectSuddenLifecycleChange('test-pkg');
+      assert(result.suspicious === true, 'Should be suspicious');
+      const modified = result.findings.find(f => f.type === 'lifecycle_modified');
+      assert(modified, 'Should have lifecycle_modified finding');
+      assert(modified.oldValue === 'node setup.js', 'Old value');
+      assert(modified.newValue === 'node evil.js', 'New value');
+    });
+  });
+
+  await asyncTest('TEMPORAL: detectSuddenLifecycleChange removed script → LOW (mocked)', async () => {
+    const mockData = {
+      name: 'test-pkg', maintainers: [],
+      versions: {
+        '1.0.0': { scripts: { postinstall: 'node setup.js' } },
+        '1.1.0': { scripts: {} }
+      },
+      time: { '1.0.0': '2020-01-15T00:00:00.000Z', '1.1.0': '2021-01-01T00:00:00.000Z' }
+    };
+    await withMockedHttps(mockData, async (mod) => {
+      const result = await mod.detectSuddenLifecycleChange('test-pkg');
+      assert(result.suspicious === true, 'Should be suspicious');
+      const removed = result.findings.find(f => f.type === 'lifecycle_removed');
+      assert(removed, 'Should have lifecycle_removed finding');
+      assert(removed.severity === 'LOW', 'Removed should be LOW');
+    });
+  });
+
+  await asyncTest('TEMPORAL: detectSuddenLifecycleChange no changes → not suspicious (mocked)', async () => {
+    const mockData = {
+      name: 'test-pkg', maintainers: [{ name: 'alice', email: 'a@x.com' }],
+      versions: {
+        '1.0.0': { scripts: { test: 'jest' } },
+        '1.1.0': { scripts: { test: 'mocha' } }
+      },
+      time: { '1.0.0': '2020-01-15T00:00:00.000Z', '1.1.0': '2021-01-01T00:00:00.000Z' }
+    };
+    await withMockedHttps(mockData, async (mod) => {
+      const result = await mod.detectSuddenLifecycleChange('test-pkg');
+      assert(result.suspicious === false, 'Should not be suspicious');
+      assert(result.findings.length === 0, 'Should have no findings');
+      assert(result.metadata.maintainers.length === 1, 'Should have maintainers');
+    });
+  });
+
+  await asyncTest('TEMPORAL: detectSuddenLifecycleChange single version → correct structure (mocked)', async () => {
+    const mockData = {
+      name: 'test-pkg', maintainers: [],
+      versions: { '1.0.0': { scripts: { test: 'jest' } } },
+      time: { '1.0.0': '2020-01-15T00:00:00.000Z' }
+    };
+    await withMockedHttps(mockData, async (mod) => {
+      const result = await mod.detectSuddenLifecycleChange('test-pkg');
+      assert(result.suspicious === false, 'Should not be suspicious');
+      assert(result.latestVersion === '1.0.0', 'Latest version');
+      assert(result.previousVersion === null, 'Previous version should be null');
+      assert(result.metadata.note.includes('fewer than 2'), 'Should have note');
+    });
+  });
+
+  await asyncTest('TEMPORAL: fetchPackageMetadata parses response (mocked)', async () => {
+    const mockData = { name: 'mock-pkg', versions: { '1.0.0': {} } };
+    await withMockedHttps(mockData, async (mod) => {
+      const result = await mod.fetchPackageMetadata('mock-pkg');
+      assert(result.name === 'mock-pkg', 'Name should match');
+      assert(result.versions['1.0.0'], 'Should have version 1.0.0');
+    });
   });
 
   // --- Integration: rules, playbooks, CLI flag ---

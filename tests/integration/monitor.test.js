@@ -1672,6 +1672,282 @@ async function runMonitorTests() {
     }
   });
 
+  // ============================================
+  // MONITOR ADDITIONAL COVERAGE TESTS
+  // ============================================
+
+  console.log('\n=== MONITOR ADDITIONAL COVERAGE TESTS ===\n');
+
+  test('MONITOR: reportStats logs formatted output without error', () => {
+    const monitor = require('../../src/monitor.js');
+    const origScanned = stats.scanned;
+    const origClean = stats.clean;
+    const origSuspect = stats.suspect;
+    const origErrors = stats.errors;
+    const origTotalTimeMs = stats.totalTimeMs;
+
+    stats.scanned = 50;
+    stats.clean = 40;
+    stats.suspect = 8;
+    stats.errors = 2;
+    stats.totalTimeMs = 25000;
+
+    let threw = false;
+    try {
+      monitor.reportStats();
+    } catch {
+      threw = true;
+    }
+    assert(!threw, 'reportStats should not throw');
+
+    stats.scanned = origScanned;
+    stats.clean = origClean;
+    stats.suspect = origSuspect;
+    stats.errors = origErrors;
+    stats.totalTimeMs = origTotalTimeMs;
+  });
+
+  test('MONITOR: reportStats handles zero scanned (no division error)', () => {
+    const monitor = require('../../src/monitor.js');
+    const origScanned = stats.scanned;
+    const origTotalTimeMs = stats.totalTimeMs;
+
+    stats.scanned = 0;
+    stats.totalTimeMs = 0;
+
+    let threw = false;
+    try {
+      monitor.reportStats();
+    } catch {
+      threw = true;
+    }
+    assert(!threw, 'reportStats should not throw with zero scanned');
+
+    stats.scanned = origScanned;
+    stats.totalTimeMs = origTotalTimeMs;
+  });
+
+  test('MONITOR: buildDailyReportEmbed with zero stats shows 0 values', () => {
+    const origScanned = stats.scanned;
+    const origClean = stats.clean;
+    const origSuspect = stats.suspect;
+    const origErrors = stats.errors;
+    const origTotalTimeMs = stats.totalTimeMs;
+    const origDailyAlerts = [...dailyAlerts];
+
+    stats.scanned = 0;
+    stats.clean = 0;
+    stats.suspect = 0;
+    stats.errors = 0;
+    stats.totalTimeMs = 0;
+    dailyAlerts.length = 0;
+
+    const embed = buildDailyReportEmbed();
+    const scannedField = embed.embeds[0].fields.find(f => f.name === 'Packages Scanned');
+    assert(scannedField && scannedField.value === '0', 'Scanned should be 0');
+
+    const topField = embed.embeds[0].fields.find(f => f.name === 'Top Suspects');
+    assert(topField && topField.value === 'None', 'Top Suspects should be "None" when empty');
+
+    stats.scanned = origScanned;
+    stats.clean = origClean;
+    stats.suspect = origSuspect;
+    stats.errors = origErrors;
+    stats.totalTimeMs = origTotalTimeMs;
+    dailyAlerts.length = 0;
+    dailyAlerts.push(...origDailyAlerts);
+  });
+
+  test('MONITOR: isBundledToolingOnly returns true for _next/static/chunks/ path', () => {
+    const threats = [
+      { file: '.next/static/chunks/main-12345.js', severity: 'HIGH', message: 'eval' }
+    ];
+    assert(isBundledToolingOnly(threats) === true, 'Should recognize _next/static/chunks/ path');
+  });
+
+  test('MONITOR: isBundledToolingOnly returns true for mixed bundled files and paths', () => {
+    const threats = [
+      { file: 'dist/yarn.js', severity: 'HIGH', message: 'eval' },
+      { file: '_next/static/chunks/framework-abc.js', severity: 'MEDIUM', message: 'obfuscation' }
+    ];
+    assert(isBundledToolingOnly(threats) === true, 'Should recognize mix of bundled files and paths');
+  });
+
+  test('MONITOR: shouldSendWebhook returns false for HIGH findings with low score', () => {
+    const orig = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.slack.com/test';
+    try {
+      // 1 HIGH = score 15, which is < 25
+      const result = { summary: { total: 1, critical: 0, high: 1, medium: 0, low: 0 } };
+      assert(shouldSendWebhook(result, null) === false,
+        'Should return false for HIGH with score < 25');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  test('MONITOR: shouldSendWebhook returns true for CRITICAL even with low score', () => {
+    const orig = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.slack.com/test';
+    try {
+      const result = { summary: { total: 1, critical: 1, high: 0, medium: 0, low: 0 } };
+      assert(shouldSendWebhook(result, null) === true,
+        'Should return true for CRITICAL findings');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  test('MONITOR: computeRiskScore with only medium and low', () => {
+    // 2*5 + 3*1 = 13
+    assert(computeRiskScore({ critical: 0, high: 0, medium: 2, low: 3 }) === 13,
+      'Should be 13 for 2 medium + 3 low');
+  });
+
+  test('MONITOR: computeRiskScore with missing fields defaults to 0', () => {
+    assert(computeRiskScore({}) === 0, 'Should be 0 for empty summary');
+  });
+
+  test('MONITOR: recentlyScanned tracks scanned packages', () => {
+    const monitor = require('../../src/monitor.js');
+    const origSet = new Set(monitor.recentlyScanned);
+    monitor.recentlyScanned.clear();
+
+    monitor.recentlyScanned.add('npm/test-pkg@1.0.0');
+    assert(monitor.recentlyScanned.has('npm/test-pkg@1.0.0'), 'Should track scanned package');
+    assert(!monitor.recentlyScanned.has('npm/other-pkg@1.0.0'), 'Should not have unscanned package');
+
+    monitor.recentlyScanned.clear();
+    for (const item of origSet) monitor.recentlyScanned.add(item);
+  });
+
+  test('MONITOR: buildTemporalWebhookEmbed handles empty findings', () => {
+    const mockResult = {
+      packageName: 'empty-findings-pkg',
+      latestVersion: '2.0.0',
+      previousVersion: '1.0.0',
+      suspicious: false,
+      findings: [],
+      metadata: {
+        latestPublishedAt: '2026-01-15T12:00:00.000Z',
+        previousPublishedAt: '2025-06-01T00:00:00.000Z'
+      }
+    };
+    const embed = buildTemporalWebhookEmbed(mockResult);
+    assert(embed.embeds && embed.embeds.length === 1, 'Should have one embed');
+    const changesField = embed.embeds[0].fields.find(f => f.name === 'Changes Detected');
+    assert(changesField.value === 'None', 'Changes should be "None" for empty findings');
+  });
+
+  test('MONITOR: buildTemporalAstWebhookEmbed handles empty findings', () => {
+    const mockResult = {
+      packageName: 'empty-ast-pkg',
+      latestVersion: '2.0.0',
+      previousVersion: '1.0.0',
+      suspicious: false,
+      findings: [],
+      metadata: {
+        latestPublishedAt: '2026-01-15T12:00:00.000Z',
+        previousPublishedAt: '2025-06-01T00:00:00.000Z'
+      }
+    };
+    const embed = buildTemporalAstWebhookEmbed(mockResult);
+    assert(embed.embeds && embed.embeds.length === 1, 'Should have one embed');
+    const apisField = embed.embeds[0].fields.find(f => f.name === 'New Dangerous APIs');
+    assert(apisField.value === 'None', 'APIs should be "None" for empty findings');
+  });
+
+  test('MONITOR: buildPublishAnomalyWebhookEmbed handles empty anomalies', () => {
+    const mockResult = {
+      packageName: 'empty-anomaly-pkg',
+      suspicious: false,
+      versionCount: 5,
+      anomalies: []
+    };
+    const embed = buildPublishAnomalyWebhookEmbed(mockResult);
+    assert(embed.embeds && embed.embeds.length === 1, 'Should have one embed');
+    const anomaliesField = embed.embeds[0].fields.find(f => f.name === 'Anomalies Detected');
+    assert(anomaliesField.value === 'None', 'Anomalies should be "None" for empty array');
+  });
+
+  test('MONITOR: buildMaintainerChangeWebhookEmbed handles no risk reasons', () => {
+    const mockResult = {
+      packageName: 'no-risk-pkg',
+      suspicious: true,
+      findings: [
+        {
+          type: 'new_maintainer',
+          severity: 'HIGH',
+          maintainer: { name: 'newguy', email: '' },
+          riskAssessment: { riskLevel: 'LOW', reasons: [] },
+          description: "New maintainer 'newguy' added"
+        }
+      ]
+    };
+    const embed = buildMaintainerChangeWebhookEmbed(mockResult);
+    const findingsField = embed.embeds[0].fields.find(f => f.name === 'Findings');
+    assert(findingsField, 'Should have Findings field');
+    assertIncludes(findingsField.value, 'new_maintainer', 'Should contain finding type');
+    assertNotIncludes(findingsField.value, 'Risk:', 'Should not have Risk line with empty reasons');
+  });
+
+  test('MONITOR: buildMaintainerChangeWebhookEmbed handles findings with no riskAssessment', () => {
+    const mockResult = {
+      packageName: 'no-assessment-pkg',
+      suspicious: true,
+      findings: [
+        {
+          type: 'new_maintainer',
+          severity: 'MEDIUM',
+          maintainer: { name: 'someone', email: '' },
+          description: "New maintainer 'someone' added"
+        }
+      ]
+    };
+    const embed = buildMaintainerChangeWebhookEmbed(mockResult);
+    assert(embed.embeds && embed.embeds.length === 1, 'Should have one embed');
+    assert(embed.embeds[0].color === 0xf1c40f, 'Color should be yellow for MEDIUM');
+  });
+
+  test('MONITOR: buildCanaryExfiltrationWebhookEmbed with no version shows N/A', () => {
+    const exfiltrations = [{ token: 'SECRET', foundIn: 'DNS query' }];
+    const embed = buildCanaryExfiltrationWebhookEmbed('test-pkg', null, exfiltrations);
+    const versionField = embed.embeds[0].fields.find(f => f.name === 'Version');
+    assert(versionField.value === 'N/A', 'Version should be N/A when null');
+  });
+
+  test('MONITOR: buildCanaryExfiltrationWebhookEmbed with empty exfiltrations shows None', () => {
+    const embed = buildCanaryExfiltrationWebhookEmbed('test-pkg', '1.0.0', []);
+    const tokensField = embed.embeds[0].fields.find(f => f.name === 'Exfiltrated Tokens');
+    assert(tokensField.value === 'None', 'Should show "None" for empty exfiltrations');
+  });
+
+  test('MONITOR: buildPublishAnomalyWebhookEmbed CRITICAL color for critical anomaly', () => {
+    const mockResult = {
+      packageName: 'critical-pub-pkg',
+      suspicious: true,
+      versionCount: 5,
+      anomalies: [
+        { type: 'dormant_spike', severity: 'CRITICAL', description: 'Dormant for 2 years' }
+      ]
+    };
+    const embed = buildPublishAnomalyWebhookEmbed(mockResult);
+    assert(embed.embeds[0].color === 0xe74c3c, 'Color should be red for CRITICAL');
+  });
+
+  test('MONITOR: buildMaintainerChangeWebhookEmbed with empty findings shows None', () => {
+    const mockResult = {
+      packageName: 'empty-maint-pkg',
+      suspicious: false,
+      findings: []
+    };
+    const embed = buildMaintainerChangeWebhookEmbed(mockResult);
+    const findingsField = embed.embeds[0].fields.find(f => f.name === 'Findings');
+    assert(findingsField.value === 'None', 'Should show "None" for empty findings');
+  });
+
   test('MONITOR: buildTemporalWebhookEmbed handles modified lifecycle scripts', () => {
     const mockResult = {
       packageName: 'mod-pkg',
