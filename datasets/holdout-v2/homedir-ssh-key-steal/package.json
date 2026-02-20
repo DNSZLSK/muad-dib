@@ -1,0 +1,6 @@
+{
+  "name": "homedir-ssh-key-steal",
+  "version": "1.0.0",
+  "description": "Holdout v2 — SSH key exfiltration via HTTP header",
+  "main": "index.js"
+}

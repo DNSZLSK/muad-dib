@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.1] - 2026-02-20
+
+### Added
+- **Holdout v2 validation**: 10 new unseen samples evaluated with frozen rules — 40% pre-tuning detection rate (4/10). Measures generalization improvement over holdout v1 (30%).
+- **6 new detection capabilities** closing holdout v2 blind spots:
+  - `env_charcode_reconstruction` (MUADDIB-AST-018): detects `String.fromCharCode` used to reconstruct env var names and evade static analysis of `process.env` access
+  - `lifecycle_shell_pipe` (MUADDIB-PKG-010): detects `curl | sh` or `wget | sh` piped to shell in preinstall/install/postinstall lifecycle scripts
+  - `credential_tampering` (MUADDIB-FLOW-003): detects cache poisoning patterns — sensitive data read + write to npm/yarn/pip cache paths (`_cacache`, `.cache/yarn`, `.cache/pip`)
+  - Extended `env_proxy_intercept` (MUADDIB-AST-009): now detects `Object.defineProperty(process.env, ...)` getter traps
+  - Extended `prototype_hook` (MUADDIB-AST-017): now detects Node.js core module prototype hijacking (`http.IncomingMessage.prototype`, `stream.Readable.prototype`, etc.)
+  - Extended `workflow_write` (MUADDIB-AST-015): variable propagation through `path.join()`, regex fallback for files that fail AST parsing (e.g. GitHub Actions `${{ }}` expressions)
+- **Dataflow scanner enhancements**: `process.env[computed]` (dynamic bracket access) tracked as env_read source, sensitive path variable propagation through `path.join`/`path.resolve`, separate file_tamper sinks from exfiltration sinks
+- Adversarial dataset expanded: 35 → 45 samples (10 promoted from holdout v2)
+- `muaddib-ignore` directive: add `// muaddib-ignore` in the first 5 lines of a file to skip dataflow analysis (like eslint-disable)
+- `--exclude` now supports path-based patterns (e.g. `--exclude src/scanner`) in addition to bare directory names
+
+### Changed
+- Rule count: 86 → 89 (+3 new rules)
+- `workflow_write` severity escalated from HIGH to CRITICAL
+- ADR: 35/35 → 45/45
+
+### Breaking Changes
+- None. All changes are additive.
+
 ## [2.2.0] - 2026-02-20
 
 ### Added
@@ -431,7 +455,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Obfuscation detection
 - Package.json lifecycle script analysis
 
-[Unreleased]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.0...HEAD
+[Unreleased]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.1...HEAD
+[2.2.1]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.0...v2.2.1
 [2.2.0]: https://github.com/DNSZLSK/muad-dib/compare/v2.1.2...v2.2.0
 [2.1.2]: https://github.com/DNSZLSK/muad-dib/compare/v2.1.0...v2.1.2
 [2.1.0]: https://github.com/DNSZLSK/muad-dib/compare/v2.0.0...v2.1.0

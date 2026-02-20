@@ -80,6 +80,19 @@ async function scanPackageJson(targetPath) {
           });
         }
       }
+
+      // Escalate: lifecycle script (preinstall/install/postinstall) + shell pipe → CRITICAL
+      if (['preinstall', 'install', 'postinstall'].includes(scriptName)) {
+        if (/curl\s.*\|\s*(sh|bash)\b/.test(scriptContent) ||
+            /wget\s.*\|\s*(sh|bash)\b/.test(scriptContent)) {
+          threats.push({
+            type: 'lifecycle_shell_pipe',
+            severity: 'CRITICAL',
+            message: `Critical: "${scriptName}" pipes remote code to shell — supply chain RCE.`,
+            file: 'package.json'
+          });
+        }
+      }
     }
   }
 
