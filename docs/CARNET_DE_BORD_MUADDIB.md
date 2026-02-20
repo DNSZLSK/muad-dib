@@ -845,6 +845,105 @@ Troisieme batch de 10 samples crees avec les regles gelees. Le score pre-tuning 
 
 ---
 
+## MUAD'DIB 2.2.5 — Desobfuscation legere (20 Fevrier 2026)
+
+### Le probleme
+
+MUAD'DIB detectait les patterns d'obfuscation (variables `_0x`, hex escapes, base64) mais ne pouvait pas **voir a travers** l'obfuscation. Un `require('child' + '_process')` etait detecte comme concatenation suspecte, mais un `require(String.fromCharCode(99,104,105,108,100,95,112,114,111,99,101,115,115))` passait completement inapercu. Les attaquants le savaient et utilisaient des techniques d'obfuscation de plus en plus sophistiquees.
+
+### La solution : desobfuscation statique par AST
+
+Creation de `src/scanner/deobfuscate.js` — un pre-processeur qui transforme le code obfusque en code lisible **sans executer le code** (pas d'eval, tout est statique via l'AST acorn).
+
+4 transformations + propagation de constantes :
+
+**1. String concat folding** : `'chi' + 'ld_' + 'process'` → `'child_process'`
+
+**2. CharCode reconstruction** : `String.fromCharCode(104,116,116,112)` → `'http'`
+
+**3. Base64 decode** : `Buffer.from('Y2hpbGRfcHJvY2Vzcw==','base64').toString()` → `'child_process'` et `atob('aHR0cA==')` → `'http'`
+
+**4. Hex array resolution** : `[0x63,0x68,0x69,0x6c,0x64].map(c=>String.fromCharCode(c)).join('')` → `'child'`
+
+**5. Const propagation** (Phase 2) : Apres les 4 transformations, les `const x = 'literal'` sont propages dans leurs references, puis les concatenations resultantes sont re-pliees. Cela permet de resoudre des patterns comme :
+```js
+const a = Buffer.from('Y2hpbGRfcHJv','base64').toString();
+const b = Buffer.from('Y2Vzcw==','base64').toString();
+require(a + b).exec('id');
+// → require('child_process').exec('id')
+```
+
+### L'approche additive (lecon apprise)
+
+Le premier reflexe etait de remplacer le code original par le code desobfusque avant de le scanner. **Mauvaise idee.** Le sample `dynamic-require` est passe de score 78 a 28 parce que les signaux d'obfuscation (qui sont eux-memes suspects) etaient perdus.
+
+**Solution adoptee** : approche additive.
+1. Scanner le code **original** d'abord (preserve les alertes d'obfuscation)
+2. Scanner le code **desobfusque** ensuite
+3. Ajouter uniquement les **nouvelles** findings du code desobfusque
+
+Cela permet de detecter a la fois l'obfuscation elle-meme ET les patterns dangereux caches dessous.
+
+### Holdout v4 : test de la desobfuscation
+
+10 samples crees specifiquement pour tester si la desobfuscation ameliore la detection. Regles gelees, scores bruts.
+
+**Score pre-tuning : 8/10 (80%)** — amelioration de +20pp par rapport au holdout v3 (60%).
+
+| Sample | Technique | Score brut | Seuil | Resultat |
+|--------|-----------|-----------|-------|----------|
+| base64-require | `require(Buffer.from('...','base64').toString())` | 25 | 20 | PASS |
+| charcode-fetch | `String.fromCharCode` pour URL + fetch | 35 | 20 | PASS |
+| concat-env-steal | `'NPM'+'_'+'TOK'+'EN'` env var + exfil | 13 | 20 | FAIL |
+| hex-array-exec | `[0x63,...].map(c=>String.fromCharCode(c))` → commande shell | 25 | 20 | PASS |
+| atob-eval | `eval(atob('...'))` | 11 | 20 | FAIL |
+| nested-base64-concat | Base64 split en variables + `require(a+b).exec()` | 10 | 20 | FAIL |
+| charcode-spread-homedir | `String.fromCharCode(...[111,115])` pour module `os` | 45 | 20 | PASS |
+| mixed-obfuscation-stealer | charCode + base64 + concat multi-couches | 45 | 25 | PASS |
+| template-literal-hide | `` `${'child'}${'_process'}` `` | 60 | 15 | PASS |
+| double-decode-exfil | Double base64 + exfiltration | 70 | 20 | PASS |
+
+**Impact mesure de la desobfuscation** :
+- `hex-array-exec` : **0 → 25** (totalement invisible sans desobfuscation)
+- `mixed-obfuscation-stealer` : **10 → 45** (les couches d'obfuscation masquaient les patterns dangereux)
+
+### 2 corrections post-holdout
+
+**1. atob-eval** (11 → 26) : Nouvelle regle `staged_eval_decode` (MUADDIB-AST-021, CRITICAL). Detecte `eval(atob(...))` et `eval(Buffer.from().toString())` — le pattern de staged payload ou le code malveillant est encode puis decode et execute dynamiquement.
+
+**2. nested-base64-concat** (10 → 35) : Deux corrections complementaires :
+- Ajout de la **propagation de constantes** dans le desobfuscateur (Phase 2 + Phase 3 re-fold)
+- Detection du pattern **chaine require** : `require(non-literal).exec()` est maintenant detecte comme `dynamic_require_exec` (avant, seul le pattern en deux lignes `const mod = require(...); mod.exec()` etait couvert)
+
+### Progression des scores pre-tuning
+
+| Batch | Score | Tendance |
+|-------|-------|----------|
+| Vague 1 | ~14% | Baseline |
+| Test robustesse | 33% (1/3) | Amelioration |
+| Vague 2 | 0% (0/5) | Regression (nouvelles techniques) |
+| Intermediate | 60% (3/5) | Les corrections generalisent |
+| Vague 3 | 60% (3/5) | Stabilisation |
+| Holdout v1 | 30% (3/10) | Vrais angles morts |
+| Holdout v2 | 40% (4/10) | Amelioration marginale |
+| Holdout v3 | 60% (6/10) | Amelioration significative |
+| **Holdout v4** | **80% (8/10)** | **Desobfuscation generalise** |
+
+La tendance 30% → 40% → 60% → 80% montre une amelioration constante de +20pp par batch. Chaque cycle de correction ameliore la generalisation au-dela des patterns specifiques corriges.
+
+### Resultats finaux v2.2.5
+
+| Metrique | Valeur | Details |
+|----------|--------|---------|
+| **TPR** (Ground Truth) | **100%** (4/4) | event-stream, ua-parser-js, coa, node-ipc |
+| **FPR** (Benign) | **0%** (0/98) | Aucun faux positif |
+| **ADR** (Adversarial) | **100%** (35/35) | 35 samples evasifs detectes |
+| **Holdout v4** (pre-tuning) | **80%** (8/10) | 10 samples desobfuscation |
+
+**805 tests**, 0 echecs. **92 regles de detection**. **13 scanners paralleles**. Flag `--no-deobfuscate` disponible.
+
+---
+
 ## Etat actuel
 
 ### Ce qui fonctionne
@@ -866,8 +965,9 @@ Troisieme batch de 10 samples crees avec les regles gelees. Le score pre-tuning 
 | Version check | Notification automatique des nouvelles versions au demarrage |
 | **Detection comportementale (v2.0)** | Temporal lifecycle, AST diff, publish anomaly, maintainer change, canary tokens |
 | **Validation & Observabilite (v2.1)** | Ground truth (5 attaques, 100%), detection time logging, FP rate tracking, score breakdown, threat feed API |
-| **Evaluation & Red Team (v2.2)** | `muaddib evaluate`, 35 adversariaux (4 vagues) + holdout v1/v2/v3 (30 samples), TPR 100%, FPR 0%, ADR 100%, Holdout v1 30%, Holdout v2 40%, Holdout v3 60%, 13 scanners, 91 règles, AI config scanner |
-| Tests | **781 tests unitaires** + 56 fuzz + 35 adversariaux, **74% coverage** (Codecov) |
+| **Evaluation & Red Team (v2.2)** | `muaddib evaluate`, 35 adversariaux (4 vagues) + holdout v1/v2/v3/v4 (40 samples), TPR 100%, FPR 0%, ADR 100%, Holdout v1 30%, Holdout v2 40%, Holdout v3 60%, Holdout v4 80%, 13 scanners, 92 regles, AI config scanner |
+| **Desobfuscation (v2.2.5)** | `src/scanner/deobfuscate.js`, 4 transformations AST + const propagation, approche additive (original + desobfusque), `--no-deobfuscate` flag |
+| Tests | **805 tests unitaires** + 56 fuzz + 35 adversariaux, **74% coverage** (Codecov) |
 | **Hardening securite (v2.1.2)** | SSRF protection (shared/download.js), command injection prevention (execFileSync), path traversal (sanitizePackageName), JSON.parse protege, webhook strict |
 | Audit securite | 2 audits complets, **58 issues corrigees**, [rapport PDF](MUADDIB_Security_Audit_Report_v1.4.1.pdf) |
 
@@ -877,7 +977,7 @@ Troisieme batch de 10 samples crees avec les regles gelees. Le score pre-tuning 
 
 **Pas d'interception TLS type MITM** : Le sandbox capture le SNI (Server Name Indication) et corrèle DNS/TLS, mais ne déchiffre pas le contenu des connexions HTTPS.
 
-**Pas de désobfuscation automatique du JS** : Les heuristiques détectent les patterns d'obfuscation connus (_0x, hex escapes), mais pas de désobfuscation active.
+**Desobfuscation limitee aux patterns connus** : La desobfuscation statique (v2.2.5) resout concat, charcode, base64, hex arrays et propage les constantes. Mais les obfuscateurs avances (javascript-obfuscator, JScrambler) utilisent des transformations de flux de controle que l'approche statique ne peut pas resoudre.
 
 **Dépendance aux APIs tierces** : Si DataDog, GitHub, ou OSV changent leurs APIs, le scraper casse.
 

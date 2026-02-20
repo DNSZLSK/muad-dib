@@ -31,6 +31,7 @@ let temporalPublishMode = false;
 let temporalMaintainerMode = false;
 let temporalFullMode = false;
 let breakdownMode = false;
+let noDeobfuscate = false;
 let feedLimit = null;
 let feedSeverity = null;
 let feedSince = null;
@@ -110,6 +111,8 @@ for (let i = 0; i < options.length; i++) {
     temporalMaintainerMode = true;
   } else if (options[i] === '--breakdown') {
     breakdownMode = true;
+  } else if (options[i] === '--no-deobfuscate') {
+    noDeobfuscate = true;
   } else if (options[i] === '--temporal') {
     temporalMode = true;
   } else if (options[i] === '--limit') {
@@ -395,6 +398,7 @@ const helpText = `
     --temporal-maintainer  Detect maintainer changes (new maintainer, account takeover)
     --temporal-full     All temporal analyses (lifecycle + AST + publish + maintainer)
     --no-canary         Disable honey token injection in sandbox
+    --no-deobfuscate    Disable deobfuscation pre-processing
     --exclude [dir]     Exclude directory from scan (repeatable)
     --limit [n]         Limit feed entries (default: 50)
     --severity [level]  Filter by severity (CRITICAL|HIGH|MEDIUM|LOW)
@@ -435,7 +439,8 @@ if (command === 'version' || command === '--version' || command === '-v') {
     temporalMaintainer: temporalMaintainerMode || temporalFullMode,
     exclude: excludeDirs,
     entropyThreshold: entropyThreshold,
-    breakdown: breakdownMode
+    breakdown: breakdownMode,
+    noDeobfuscate: noDeobfuscate
   }).then(exitCode => {
     process.exit(exitCode);
   }).catch(err => {

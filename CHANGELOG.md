@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.5] - 2026-02-20
+
+### Added
+- **Deobfuscation pre-processing** (`src/scanner/deobfuscate.js`): Static AST-based deobfuscation applied before AST and dataflow scanners. 4 transformations + const propagation:
+  - String concatenation folding (`'chi' + 'ld_' + 'process'` → `'child_process'`)
+  - CharCode reconstruction (`String.fromCharCode(104,116,116,112)` → `'http'`)
+  - Base64 decode (`Buffer.from('Y2hpbGRfcHJvY2Vzcw==','base64').toString()` → `'child_process'`, `atob(...)` → decoded string)
+  - Hex array resolution (`[0x63,0x68].map(c=>String.fromCharCode(c)).join('')` → `'ch'`)
+  - Const propagation: resolves `const x = 'literal'` references, then re-folds concatenations
+- **`--no-deobfuscate` flag**: Disable deobfuscation pre-processing
+- **New rule `staged_eval_decode`** (MUADDIB-AST-021): detects `eval()` or `Function()` receiving a decoded argument (`atob(...)` or `Buffer.from().toString('base64')`) — staged payload execution pattern. Severity: CRITICAL, MITRE T1140.
+- **Chained dynamic require detection**: `require(non-literal).exec(...)` now detected as `dynamic_require_exec` (previously only tracked the two-statement pattern `const mod = require(...); mod.exec(...)`)
+- **Holdout v4 validation**: 10 new unseen samples specifically testing deobfuscation effectiveness — 80% pre-tuning detection rate (8/10). Measures generalization improvement over holdout v3 (60%).
+- 805 tests (was 781 in v2.2.2), +24 new tests (25 deobfuscation unit tests)
+
+### Changed
+- Rule count: 91 → 92 (+1 new rule: MUADDIB-AST-021)
+- Deobfuscation uses **additive approach**: original code is scanned first (preserving obfuscation-detection signals), then deobfuscated code is scanned for additional findings hidden by obfuscation
+- Holdout v4 dataset: 10 new samples in `datasets/holdout-v4/`
+- Holdout progression: 30% → 40% → 60% → **80%** (+20pp per batch, consistent improvement)
+
+### Breaking Changes
+- None. All changes are additive. `--no-deobfuscate` disables the new feature if needed.
+
 ## [2.2.2] - 2026-02-20
 
 ### Added
@@ -473,7 +497,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Obfuscation detection
 - Package.json lifecycle script analysis
 
-[Unreleased]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.1...HEAD
+[Unreleased]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.5...HEAD
+[2.2.5]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.2...v2.2.5
+[2.2.2]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.1...v2.2.2
 [2.2.1]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.0...v2.2.1
 [2.2.0]: https://github.com/DNSZLSK/muad-dib/compare/v2.1.2...v2.2.0
 [2.1.2]: https://github.com/DNSZLSK/muad-dib/compare/v2.1.0...v2.1.2

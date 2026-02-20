@@ -19,6 +19,7 @@ const { loadCachedIOCs } = require('./ioc/updater.js');
 const { ensureIOCs } = require('./ioc/bootstrap.js');
 const { scanEntropy } = require('./scanner/entropy.js');
 const { scanAIConfig } = require('./scanner/ai-config.js');
+const { deobfuscate } = require('./scanner/deobfuscate.js');
 const { detectSuddenLifecycleChange } = require('./temporal-analysis.js');
 const { detectSuddenAstChanges } = require('./temporal-ast-diff.js');
 const { detectPublishAnomaly } = require('./publish-anomaly.js');
@@ -222,6 +223,9 @@ async function run(targetPath, options = {}) {
     spinner.start(`[MUADDIB] Scanning ${targetPath}...`);
   }
 
+  // Deobfuscation pre-processor (pass to AST/dataflow scanners unless disabled)
+  const deobfuscateFn = options.noDeobfuscate ? null : deobfuscate;
+
   // Parallel execution of all independent scanners
   const [
     packageThreats,
@@ -240,11 +244,11 @@ async function run(targetPath, options = {}) {
   ] = await Promise.all([
     scanPackageJson(targetPath),
     scanShellScripts(targetPath),
-    analyzeAST(targetPath),
+    analyzeAST(targetPath, { deobfuscate: deobfuscateFn }),
     Promise.resolve(detectObfuscation(targetPath)),
     scanDependencies(targetPath),
     scanHashes(targetPath),
-    analyzeDataFlow(targetPath),
+    analyzeDataFlow(targetPath, { deobfuscate: deobfuscateFn }),
     scanTyposquatting(targetPath),
     Promise.resolve(scanGitHubActions(targetPath)),
     Promise.resolve(matchPythonIOCs(pythonDeps, targetPath)),

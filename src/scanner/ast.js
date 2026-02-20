@@ -92,22 +92,22 @@ const SANDBOX_INDICATORS = [
   '/proc/self/cgroup'
 ];
 
-async function analyzeAST(targetPath) {
+async function analyzeAST(targetPath, options = {}) {
   const threats = [];
   const files = findJsFiles(targetPath);
 
   for (const file of files) {
     const relativePath = path.relative(targetPath, file).replace(/\\/g, '/');
-    
+
     if (EXCLUDED_FILES.includes(relativePath)) {
       continue;
     }
-    
+
     // Ignore files in dev folders
     if (isDevFile(relativePath)) {
       continue;
     }
-    
+
     try {
       const stat = fs.statSync(file);
       if (stat.size > MAX_FILE_SIZE) continue;
@@ -119,8 +119,26 @@ async function analyzeAST(targetPath) {
     } catch {
       continue;
     }
+
+    // Analyze original code first (preserves obfuscation-detection rules)
     const fileThreats = analyzeFile(content, file, targetPath);
     threats.push(...fileThreats);
+
+    // Also analyze deobfuscated code for additional findings hidden by obfuscation
+    if (typeof options.deobfuscate === 'function') {
+      try {
+        const result = options.deobfuscate(content);
+        if (result.transforms.length > 0) {
+          const deobThreats = analyzeFile(result.code, file, targetPath);
+          const existingKeys = new Set(fileThreats.map(t => `${t.type}::${t.message}`));
+          for (const dt of deobThreats) {
+            if (!existingKeys.has(`${dt.type}::${dt.message}`)) {
+              threats.push(dt);
+            }
+          }
+        }
+      } catch { /* deobfuscation failed — skip */ }
+    }
   }
 
   return threats;
@@ -135,6 +153,34 @@ async function analyzeAST(targetPath) {
 function hasOnlyStringLiteralArgs(node) {
   if (!node.arguments || node.arguments.length === 0) return false;
   return node.arguments.every(arg => arg.type === 'Literal' && typeof arg.value === 'string');
+}
+
+/**
+ * Returns true if a node is a decode call: atob(str) or Buffer.from(str,'base64').toString()
+ * Used to detect staged eval/Function decode patterns.
+ */
+function hasDecodeArg(node) {
+  if (!node || typeof node !== 'object') return false;
+  // atob('...')
+  if (node.type === 'CallExpression' &&
+      node.callee?.type === 'Identifier' && node.callee.name === 'atob') {
+    return true;
+  }
+  // Buffer.from('...', 'base64').toString()
+  if (node.type === 'CallExpression' &&
+      node.callee?.type === 'MemberExpression' &&
+      node.callee.property?.name === 'toString') {
+    const inner = node.callee.object;
+    if (inner?.type === 'CallExpression' &&
+        inner.callee?.type === 'MemberExpression' &&
+        inner.callee.object?.name === 'Buffer' &&
+        inner.callee.property?.name === 'from' &&
+        inner.arguments?.length >= 2 &&
+        inner.arguments[1]?.value === 'base64') {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -391,6 +437,23 @@ function analyzeFile(content, filePath, basePath) {
         }
       }
 
+      // Detect chained: require(non-literal).exec(...) — direct dynamic require + exec
+      if ((execName || memberExec) && node.callee.type === 'MemberExpression' &&
+          node.callee.object?.type === 'CallExpression') {
+        const innerCall = node.callee.object;
+        const innerName = getCallName(innerCall);
+        if (innerName === 'require' && innerCall.arguments.length > 0 &&
+            innerCall.arguments[0]?.type !== 'Literal') {
+          const method = execName || memberExec;
+          threats.push({
+            type: 'dynamic_require_exec',
+            severity: 'CRITICAL',
+            message: `${method}() chained on dynamic require() — obfuscated module + command execution.`,
+            file: path.relative(basePath, filePath)
+          });
+        }
+      }
+
       // Detect sandbox/container evasion: fs.accessSync('/.dockerenv'), fs.existsSync('/.dockerenv'), etc.
       if (node.callee.type === 'MemberExpression' && node.callee.property?.type === 'Identifier') {
         const fsMethod = node.callee.property.name;
@@ -608,27 +671,47 @@ function analyzeFile(content, filePath, basePath) {
 
       if (callName === 'eval') {
         hasEvalInFile = true;
-        const isConstant = hasOnlyStringLiteralArgs(node);
-        threats.push({
-          type: 'dangerous_call_eval',
-          severity: isConstant ? 'LOW' : 'HIGH',
-          message: isConstant
-            ? 'eval() with constant string literal (low risk, globalThis polyfill pattern).'
-            : 'Dangerous call "eval" with dynamic expression detected.',
-          file: path.relative(basePath, filePath)
-        });
+        // Detect staged eval decode: eval(atob(...)) or eval(Buffer.from(...).toString())
+        if (node.arguments.length === 1 && hasDecodeArg(node.arguments[0])) {
+          threats.push({
+            type: 'staged_eval_decode',
+            severity: 'CRITICAL',
+            message: 'eval() with decode argument (atob/Buffer.from base64) — staged payload execution.',
+            file: path.relative(basePath, filePath)
+          });
+        } else {
+          const isConstant = hasOnlyStringLiteralArgs(node);
+          threats.push({
+            type: 'dangerous_call_eval',
+            severity: isConstant ? 'LOW' : 'HIGH',
+            message: isConstant
+              ? 'eval() with constant string literal (low risk, globalThis polyfill pattern).'
+              : 'Dangerous call "eval" with dynamic expression detected.',
+            file: path.relative(basePath, filePath)
+          });
+        }
       } else if (callName === 'Function') {
-        const isConstant = hasOnlyStringLiteralArgs(node);
-        // Function() creates a new scope (unlike eval), so dynamic usage is MEDIUM not HIGH.
-        // Common in template engines (lodash, handlebars) and globalThis polyfills.
-        threats.push({
-          type: 'dangerous_call_function',
-          severity: isConstant ? 'LOW' : 'MEDIUM',
-          message: isConstant
-            ? 'Function() with constant string literal (low risk, globalThis polyfill pattern).'
-            : 'Function() with dynamic expression (template/factory pattern).',
-          file: path.relative(basePath, filePath)
-        });
+        // Detect staged Function decode: new Function(atob(...))
+        if (node.arguments.length >= 1 && hasDecodeArg(node.arguments[node.arguments.length - 1])) {
+          threats.push({
+            type: 'staged_eval_decode',
+            severity: 'CRITICAL',
+            message: 'Function() with decode argument (atob/Buffer.from base64) — staged payload execution.',
+            file: path.relative(basePath, filePath)
+          });
+        } else {
+          const isConstant = hasOnlyStringLiteralArgs(node);
+          // Function() creates a new scope (unlike eval), so dynamic usage is MEDIUM not HIGH.
+          // Common in template engines (lodash, handlebars) and globalThis polyfills.
+          threats.push({
+            type: 'dangerous_call_function',
+            severity: isConstant ? 'LOW' : 'MEDIUM',
+            message: isConstant
+              ? 'Function() with constant string literal (low risk, globalThis polyfill pattern).'
+              : 'Function() with dynamic expression (template/factory pattern).',
+            file: path.relative(basePath, filePath)
+          });
+        }
       }
     },
 

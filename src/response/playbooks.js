@@ -318,6 +318,11 @@ const PLAYBOOKS = {
     'Fichier binaire (.png/.jpg/.wasm) reference avec eval() dans le meme fichier. ' +
     'Technique de steganographie: le payload malveillant est cache dans les pixels d\'une image ou les sections d\'un WASM. ' +
     'Analyser le fichier binaire dans un sandbox. Verifier les donnees extraites avant execution.',
+
+  staged_eval_decode:
+    'CRITIQUE: eval() ou Function() recoit un argument decode en base64 (atob/Buffer.from). ' +
+    'Technique de staged payload: le code malveillant est encode puis decode et execute dynamiquement. ' +
+    'Isoler la machine. Decoder le payload manuellement pour analyser le code execute. Supprimer le package.',
 };
 
 function getPlaybook(threatType) {

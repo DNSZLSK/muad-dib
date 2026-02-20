@@ -12,6 +12,7 @@ const { runHashTests } = require('./scanner/hash.test');
 const { runEntropyTests } = require('./scanner/entropy.test');
 const { runPythonTests } = require('./scanner/python.test');
 const { runAIConfigTests } = require('./scanner/ai-config.test');
+const { runDeobfuscateTests } = require('./scanner/deobfuscate.test');
 
 // IOC tests
 const { runUpdaterTests } = require('./ioc/updater.test');
@@ -60,6 +61,7 @@ const { runCanaryTokensTests } = require('./temporal/canary-tokens.test');
   await runMaintainerChangeTests();
   await runCanaryTokensTests();
   await runAIConfigTests();
+  await runDeobfuscateTests();
   await runGroundTruthTests();
   await runEvaluateTests();
 

@@ -585,6 +585,19 @@ const RULES = {
     mitre: 'T1027.003'
   },
 
+  staged_eval_decode: {
+    id: 'MUADDIB-AST-021',
+    name: 'Staged Eval Decode',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'eval() ou Function() recoit un argument decode (atob ou Buffer.from base64). Pattern classique de staged payload: le code malveillant est encode en base64 puis decode et execute dynamiquement.',
+    references: [
+      'https://attack.mitre.org/techniques/T1140/',
+      'https://attack.mitre.org/techniques/T1059/007/'
+    ],
+    mitre: 'T1140'
+  },
+
   env_charcode_reconstruction: {
     id: 'MUADDIB-AST-018',
     name: 'Environment Variable Key Reconstruction',

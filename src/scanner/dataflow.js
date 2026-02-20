@@ -6,7 +6,7 @@ const { isDevFile, findJsFiles, getCallName } = require('../utils.js');
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
-async function analyzeDataFlow(targetPath) {
+async function analyzeDataFlow(targetPath, options = {}) {
   const threats = [];
   const files = findJsFiles(targetPath);
 
@@ -35,8 +35,25 @@ async function analyzeDataFlow(targetPath) {
       continue;
     }
 
+    // Analyze original code first (preserves obfuscation-detection rules)
     const fileThreats = analyzeFile(content, file, targetPath);
     threats.push(...fileThreats);
+
+    // Also analyze deobfuscated code for additional findings hidden by obfuscation
+    if (typeof options.deobfuscate === 'function') {
+      try {
+        const result = options.deobfuscate(content);
+        if (result.transforms.length > 0) {
+          const deobThreats = analyzeFile(result.code, file, targetPath);
+          const existingKeys = new Set(fileThreats.map(t => `${t.type}::${t.message}`));
+          for (const dt of deobThreats) {
+            if (!existingKeys.has(`${dt.type}::${dt.message}`)) {
+              threats.push(dt);
+            }
+          }
+        }
+      } catch { /* deobfuscation failed — skip */ }
+    }
   }
 
   return threats;
