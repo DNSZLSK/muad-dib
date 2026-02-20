@@ -106,7 +106,10 @@ function scanParanoid(targetPath) {
         if (stat.isSymbolicLink()) continue;
 
         if (stat.isDirectory()) {
-          if (!excluded.includes(file)) {
+          const rel = path.relative(targetPath, fullPath).replace(/\\/g, '/');
+          const isExcluded = excluded.includes(file) ||
+            excluded.some(ex => rel === ex || rel.startsWith(ex + '/'));
+          if (!isExcluded) {
             walkDir(fullPath, depth + 1);
           }
         } else if (file.endsWith('.js') || file.endsWith('.json') || file.endsWith('.sh')) {
@@ -205,7 +208,7 @@ async function run(targetPath, options = {}) {
 
   // Apply --exclude dirs for this scan
   if (options.exclude && options.exclude.length > 0) {
-    setExtraExcludes(options.exclude);
+    setExtraExcludes(options.exclude, targetPath);
   }
 
   // Detect Python project (synchronous, fast file reads)

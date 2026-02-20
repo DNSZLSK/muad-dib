@@ -12,9 +12,11 @@ const EXCLUDED_DIRS = ['node_modules', '.git', '.muaddib-cache'];
  * Merged into every findFiles() call on top of the caller's excludedDirs.
  */
 let _extraExcludedDirs = [];
+let _scanRoot = '';
 
-function setExtraExcludes(dirs) {
+function setExtraExcludes(dirs, scanRoot) {
   _extraExcludedDirs = Array.isArray(dirs) ? dirs : [];
+  _scanRoot = scanRoot || '';
 }
 
 function getExtraExcludes() {
@@ -91,9 +93,14 @@ function findFiles(dir, options = {}) {
   }
 
   for (const item of items) {
-    if (allExcludedDirs.includes(item)) continue;
-
     const fullPath = path.join(dir, item);
+
+    // Check both bare name ("tests") and relative path ("src/scanner")
+    if (allExcludedDirs.includes(item)) continue;
+    if (_extraExcludedDirs.length > 0 && _scanRoot) {
+      const rel = path.relative(_scanRoot, fullPath).replace(/\\/g, '/');
+      if (_extraExcludedDirs.some(ex => rel === ex || rel.startsWith(ex + '/'))) continue;
+    }
 
     try {
       const lstat = fs.lstatSync(fullPath);
