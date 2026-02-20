@@ -752,7 +752,16 @@ if (command === 'version' || command === '--version' || command === '-v') {
   process.exit(0);
 } else if (command === 'evaluate') {
   const { evaluate } = require('../src/commands/evaluate.js');
-  evaluate({ json: jsonOutput }).then(() => {
+  const evalOpts = { json: jsonOutput };
+  for (let i = 0; i < options.length; i++) {
+    if (options[i] === '--benign-limit' && options[i + 1]) {
+      evalOpts.benignLimit = parseInt(options[i + 1], 10);
+      i++;
+    } else if (options[i] === '--refresh-benign') {
+      evalOpts.refreshBenign = true;
+    }
+  }
+  evaluate(evalOpts).then(() => {
     process.exit(0);
   }).catch(err => {
     console.error('[ERROR]', err.message);

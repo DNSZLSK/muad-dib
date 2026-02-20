@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.7] - 2026-02-20
+
+### Fixed
+- **Evaluate benign FPR was invalid**: Previous versions (v2.2.0–v2.2.6) reported FPR 0% (0/98) but `evaluateBenign()` only created empty temp dirs with `package.json` metadata — it never scanned actual source code. All 13+ scanners (AST, dataflow, obfuscation, entropy, etc.) had nothing to analyze.
+- **Evaluate now scans real source code**: Rewritten to download real npm tarballs via `npm pack`, extract with native Node.js (`zlib.gunzipSync` + tar parser, no shell `tar` dependency), and scan the actual package source with all 14 scanners.
+
+### Added
+- **Benign dataset expansion**: 98 → 529 npm packages, 50 → 132 PyPI packages across 18+ categories
+- **Ground truth malware database**: `datasets/ground-truth/known-malware.json` — 65 documented real-world malicious packages (45 npm, 18 PyPI, 2 cross-ecosystem) with metadata (name, ecosystem, version, date, source, technique, url, severity)
+- **Tarball caching**: Downloaded packages cached in `.muaddib-cache/benign-tarballs/` to avoid re-downloading
+- **`--benign-limit N` flag**: Only test first N benign packages (useful for quick iteration)
+- **`--refresh-benign` flag**: Force re-download of all cached tarballs
+- **FP debugging output**: False positive entries now include full threat details (type, severity, message, file)
+
+### Changed
+- **Real FPR measured for the first time: 38% (19/50)** on actual source code. Top FP causes: `dynamic_require` (127 hits), `dangerous_call_function` (90), `prototype_hook` (67), `env_access` (61). Worst offenders: next, gatsby, restify, moleculer, keystone, total.js, htmx.org (all score 100).
+- Benign package list: `datasets/benign/packages-npm.txt` expanded from 98 to 529 unique packages
+- PyPI package list: `datasets/benign/packages-pypi.txt` expanded from 50 to 132 unique packages
+- Evaluate reports `scanned` and `skipped` counts for benign packages
+
+### Breaking Changes
+- None. All changes are additive. FPR metric now reflects real scanning results.
+
 ## [2.2.6] - 2026-02-20
 
 ### Added
@@ -521,7 +544,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Obfuscation detection
 - Package.json lifecycle script analysis
 
-[Unreleased]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.6...HEAD
+[Unreleased]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.7...HEAD
+[2.2.7]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.6...v2.2.7
 [2.2.6]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.5...v2.2.6
 [2.2.5]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.2...v2.2.5
 [2.2.2]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.1...v2.2.2
