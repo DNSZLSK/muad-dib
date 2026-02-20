@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-npm test          # Run all tests (custom framework, ~742 tests across 17 files)
+npm test          # Run all tests (custom framework, ~781 tests across 18 files)
 npm run lint      # ESLint with security plugin
 npm run scan      # Self-scan: node bin/muaddib.js scan .
 npm run update    # Download latest IOCs
@@ -28,9 +28,9 @@ Tests use a custom framework in `tests/run-tests.js` (no Jest). Test helpers:
 
 **CLI entry:** `bin/muaddib.js` — yargs-based dispatcher, delegates to `src/index.js`.
 
-**Core orchestration:** `src/index.js` — `run(targetPath, options)` launches 12 scanners in parallel via `Promise.all`, then deduplicates, scores (0-100 weighted: CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1), enriches with rules/playbooks, and outputs (CLI/JSON/HTML/SARIF).
+**Core orchestration:** `src/index.js` — `run(targetPath, options)` launches 13 scanners in parallel via `Promise.all`, then deduplicates, scores (0-100 weighted: CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1), enriches with rules/playbooks (86 rules), and outputs (CLI/JSON/HTML/SARIF).
 
-**Scanner pattern:** Each of the 12 scanners in `src/scanner/` returns `Array<{type, severity, message, file}>`:
+**Scanner pattern:** Each of the 13 scanners in `src/scanner/` returns `Array<{type, severity, message, file}>`:
 - `file` must use `path.relative(targetPath, absolutePath)` for Windows compatibility
 - Sync scanners are wrapped in `Promise.resolve()` in the Promise.all
 - Use `findFiles(dir, { extensions, excludedDirs })` from `src/utils.js` for file walking
@@ -62,9 +62,26 @@ Tests use a custom framework in `tests/run-tests.js` (no Jest). Test helpers:
 - `src/threat-feed.js` — Threat Feed API: `muaddib feed` (JSON stdout) and `muaddib serve` (HTTP server with `/feed` and `/health` endpoints)
 - `--breakdown` flag — Explainable score decomposition showing per-finding contribution
 
+**AI Config Scanner (v2.2):** `src/scanner/ai-config.js` scans AI agent configuration files (`.cursorrules`, `.cursorignore`, `.windsurfrules`, `CLAUDE.md`, `AGENT.md`, `.github/copilot-instructions.md`, `copilot-setup-steps.yml`) for prompt injection patterns. Detects shell commands, exfiltration, credential access, and injection instructions. Compound detection (shell + exfil/credentials) escalates to CRITICAL.
+
+**Evaluation Framework (v2.2):** `src/commands/evaluate.js` — `muaddib evaluate` measures TPR (Ground Truth, 4 real attacks), FPR (Benign, 98 popular packages), and ADR (Adversarial, 35 evasive samples). Results saved to `metrics/v{version}.json`. Adversarial samples in `datasets/adversarial/`, benign package list in `datasets/benign/packages-npm.txt`.
+
+**New AST detection rules (v2.2):**
+- MUADDIB-AST-008 to AST-012: Dynamic require with decode patterns, sandbox evasion, detached process, binary dropper patterns
+- MUADDIB-AST-013: AI agent abuse (s1ngularity/Nx pattern — `--dangerously-skip-permissions`, `--yolo` flags)
+- MUADDIB-AST-014: Credential CLI theft (`gh auth token`, `gcloud auth print-access-token`, `aws sts get-session-token`)
+- MUADDIB-AST-015: Workflow write (fs.writeFileSync to `.github/workflows`)
+- MUADDIB-AST-016: Binary dropper (fs.chmodSync 0o755 + exec of temp file)
+- MUADDIB-AST-017: Prototype hooking (globalThis.fetch, XMLHttpRequest.prototype override)
+- MUADDIB-AICONF-001: AI config prompt injection (HIGH)
+- MUADDIB-AICONF-002: AI config compound injection — shell + exfil/credentials (CRITICAL)
+
 **Other key features (not scanners):**
 - `src/sandbox.js` — Docker-based dynamic analysis: installs a package in an isolated container, captures filesystem changes, network traffic (tcpdump), and process spawns (strace). Injects canary tokens by default.
 - `src/diff.js` — Compares scan results between two git refs to surface only new threats (useful in CI). Exports `getThreatId`, `compareThreats`, `resolveRef` for testing.
+
+**Internal (not user-facing):**
+- `src/monitor.js` — `muaddib monitor` is an internal infrastructure command (runs on VPS via systemd, polls npm/PyPI every 60s). It is intentionally hidden from `--help` and the interactive menu. Do not expose it in user-facing documentation or CLI help. The module also exports `loadDetections`, `getDetectionStats`, `loadScanStats` which are used by the user-facing `detections` and `stats` commands.
 
 **Rules & playbooks:** Threat types map to rules in `src/rules/index.js` (MITRE ATT&CK mapped) and remediation text in `src/response/playbooks.js`. Both keyed by threat `type` string.
 
@@ -81,7 +98,7 @@ Tests use a custom framework in `tests/run-tests.js` (no Jest). Test helpers:
 2. Import in `src/index.js`, add to the Promise.all destructuring and the threats spread
 3. Add rule entry in `src/rules/index.js` with id, name, severity, confidence, description, mitre
 4. Add playbook entry in `src/response/playbooks.js`
-5. Add tests in the appropriate test file under `tests/` (17 modular test files)
+5. Add tests in the appropriate test file under `tests/` (18 modular test files)
 6. Create test fixtures in `tests/samples/my-scanner/`
 
 ## Key Constraints

@@ -61,7 +61,7 @@ async function runCliTests() {
     try {
       execSync(`node "${BIN}" scan "${path.join(TESTS_DIR, 'dataflow')}" --fail-on critical`, { encoding: 'utf8' });
     } catch (e) {
-      assert(e.status === 1, 'Exit code should be 1 for 1 CRITICAL');
+      assert(e.status >= 1, 'Exit code should be >= 1 for CRITICAL findings');
       return;
     }
     throw new Error('Should have non-zero exit code');

@@ -11,6 +11,7 @@ const { runDependencyTests } = require('./scanner/dependency.test');
 const { runHashTests } = require('./scanner/hash.test');
 const { runEntropyTests } = require('./scanner/entropy.test');
 const { runPythonTests } = require('./scanner/python.test');
+const { runAIConfigTests } = require('./scanner/ai-config.test');
 
 // IOC tests
 const { runUpdaterTests } = require('./ioc/updater.test');
@@ -26,6 +27,7 @@ const { runCliTests } = require('./integration/cli.test');
 const { runMonitorTests } = require('./integration/monitor.test');
 const { runDiffTests } = require('./integration/diff.test');
 const { runGroundTruthTests } = require('./integration/ground-truth.test');
+const { runEvaluateTests } = require('./integration/evaluate.test');
 
 // Temporal analysis tests
 const { runTemporalAnalysisTests } = require('./temporal/temporal-analysis.test');
@@ -57,7 +59,9 @@ const { runCanaryTokensTests } = require('./temporal/canary-tokens.test');
   await runPublishAnomalyTests();
   await runMaintainerChangeTests();
   await runCanaryTokensTests();
+  await runAIConfigTests();
   await runGroundTruthTests();
+  await runEvaluateTests();
 
   // Results
   const { passed, failed, skipped, failures } = getCounters();

@@ -371,6 +371,7 @@ const helpText = `
     muaddib stats                    Show scan stats + FP rate
     muaddib stats --daily            Last 7 days daily breakdown
     muaddib stats --json             Raw JSON dump
+    muaddib evaluate                 Evaluate scanner effectiveness (TPR, FPR, ADR)
     muaddib version                  Show version
 
   Replay Options:
@@ -748,6 +749,14 @@ if (command === 'version' || command === '--version' || command === '-v') {
   console.log(`  FP rate:            ${globalFpRate}`);
   console.log('');
   process.exit(0);
+} else if (command === 'evaluate') {
+  const { evaluate } = require('../src/commands/evaluate.js');
+  evaluate({ json: jsonOutput }).then(() => {
+    process.exit(0);
+  }).catch(err => {
+    console.error('[ERROR]', err.message);
+    process.exit(1);
+  });
 } else if (command === 'init-hooks') {
   // Parse init-hooks arguments
   let hookType = 'auto';

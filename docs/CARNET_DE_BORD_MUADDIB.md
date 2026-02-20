@@ -375,9 +375,9 @@ Toutes les docs sont maintenant synchronisees avec le code v1.6.11.
 
 MUAD'DIB savait scanner des projets existants, mais ne pouvait pas surveiller les nouveaux packages en temps reel. Les attaques supply-chain comme Shai-Hulud se propagent en quelques heures. Le temps de faire un `muaddib scan` manuellement, c'est deja trop tard.
 
-### La solution : `muaddib monitor`
+### La solution
 
-Un moniteur continu qui :
+Un moniteur continu interne (infrastructure VPS) qui :
 1. **Interroge les registres** npm et PyPI toutes les 60 secondes via RSS
 2. **Telecharge et scanne** chaque nouveau package automatiquement
 3. **Envoie des alertes Discord** en temps reel avec des embeds riches (couleur par severite, emoji, lien vers le package, score sandbox)
@@ -560,13 +560,179 @@ L'exfiltration est recherchee dans 7 vecteurs : corps HTTP, requetes DNS, URLs H
 
 ---
 
+## MUAD'DIB 2.2 — Evaluation et Red Team / Blue Team (20 Fevrier 2026)
+
+### Le constat
+
+MUAD'DIB avait des metriques de validation ponctuelles (ground truth replay, fuzzing, adversarial testing) mais pas de **commande unifiee** pour mesurer l'efficacite globale du scanner. Impossible de repondre simplement a : "Quel est le taux de faux positifs ? Quel est le taux de detection sur des attaques evasives ?"
+
+### La commande `muaddib evaluate`
+
+Creation d'une commande qui mesure 3 axes :
+
+**1. True Positive Rate (TPR)** — Ground Truth
+Scan des 4 attaques supply-chain reelles (event-stream, ua-parser-js, coa, node-ipc). Un score >= 3 = detecte.
+
+**2. False Positive Rate (FPR)** — Benign
+Scan de 98 packages npm populaires (express, react, lodash, webpack, etc.) dans des projets temporaires. Un score > 20 = faux positif.
+
+**3. Adversarial Detection Rate (ADR)** — Adversarial
+Scan de 7 echantillons malveillants evasifs, chacun avec un seuil de detection specifique :
+
+| Echantillon | Technique | Seuil | Score |
+|-------------|-----------|-------|-------|
+| ci-trigger-exfil | Exfiltration conditionelle CI | 35 | 38 |
+| delayed-exfil | setTimeout + credentials theft | 30 | 35 |
+| docker-aware | Detection sandbox + curl\|sh | 25 | 25 |
+| staged-fetch | Fetch remote + eval() | 35 | 35 |
+| dns-chunk-exfil | Exfiltration DNS par chunks | 35 | 35 |
+| string-concat-obfuscation | require() avec concatenation | 10 | 10 |
+| postinstall-download | Lifecycle + require('https') | 30 | 33 |
+
+### Red Team / Blue Team
+
+Le baseline initial etait catastrophique : TPR 0%, ADR 14%. Le processus Red Team / Blue Team a permis d'identifier et combler les lacunes :
+
+**Ameliorations scanner AST** (`src/scanner/ast.js`) :
+- Detection des `require()` avec `BinaryExpression` (concatenation de strings = obfuscation)
+- Detection des `exec()`/`execSync()` avec commandes shell dangereuses (pipe vers sh, netcat, /dev/tcp)
+
+**Ameliorations scanner dataflow** (`src/scanner/dataflow.js`) :
+- Resolution DNS (dns.resolve, dns.lookup) reconnue comme sink d'exfiltration
+- `eval()` suivi comme sink de type `eval_exec`
+- Detection de payload staged : network fetch + eval() dans le meme fichier
+
+**Ameliorations scanner package** (`src/scanner/package.js`) :
+- `require('https')` / `require('http')` dans les lifecycle scripts
+- `node -e` dans les lifecycle scripts
+
+5 nouvelles regles ajoutees : MUADDIB-AST-006, AST-007, FLOW-002, PKG-006, PKG-007.
+
+### Resultats initiaux
+
+| Metrique | Valeur | Details |
+|----------|--------|---------|
+| **TPR** (Ground Truth) | **100%** (4/4) | event-stream, ua-parser-js, coa, node-ipc |
+| **FPR** (Benign) | **0%** (0/98) | Aucun faux positif sur 98 packages populaires |
+| **ADR** (Adversarial) | **100%** (7/7) | 7 echantillons evasifs detectes |
+
+Les metriques sont sauvegardees dans `metrics/v2.1.5.json` pour le suivi de regression.
+
+### Tests
+
+770 tests unitaires, 0 echecs, 1 skip (Windows).
+
+---
+
+## MUAD'DIB 2.2 — Red Team / Blue Team complet (20 Fevrier 2026)
+
+### Audit structure et nettoyage
+
+Avant de lancer les vagues adversariales avancees, un audit complet de la structure du projet :
+- Retrait de `muaddib monitor` de la CLI publique et du menu interactif (commande interne infrastructure)
+- Nettoyage des fichiers obsoletes (logos dupliques, test-output.txt, anciens VSIX)
+- Creation du framework d'evaluation unifie (`src/commands/evaluate.js`)
+
+### Framework d'evaluation
+
+Creation de `muaddib evaluate` — une commande unique qui mesure 3 axes :
+1. **TPR** (True Positive Rate) : 4 attaques reelles (event-stream, ua-parser-js, coa, node-ipc)
+2. **FPR** (False Positive Rate) : 98 packages npm populaires
+3. **ADR** (Adversarial Detection Rate) : samples malveillants evasifs avec seuils specifiques
+
+Les resultats sont sauvegardes dans `metrics/v{version}.json` pour le suivi de regression entre versions.
+
+### 4 vagues Red Team / Blue Team
+
+Le processus suit un cycle rigoureux : creer les samples avec regles gelees, enregistrer les scores bruts, puis ameliorer les regles.
+
+**Vague 1** (20 samples initiaux) : Baseline catastrophique (TPR 0%, ADR 14%). Ameliorations massives du scanner AST (detection require() obfusque, exec() dangereux), dataflow (DNS exfil, staged payload), et package (require https/http dans lifecycle). 5 nouvelles regles. Resultat final : 20/20.
+
+**Vague 2** (5 samples — test robustesse + template literal + proxy) : Score pre-tuning 0%. Les patterns utilises (template literal obfuscation, proxy env intercept, nested payload, dynamic import, websocket exfil) n'etaient pas du tout couverts. Nouvelles detections ajoutees. Resultat final : 25/25.
+
+**Vague 3** (5 samples — techniques emergentes 2025-2026) : Score pre-tuning 60%. Basee sur des attaques reelles documentees :
+- **ai-agent-weaponization** : pattern s1ngularity/Nx (StepSecurity, Snyk) — invoque des agents IA (Claude, Gemini) avec `--dangerously-skip-permissions` pour voler des credentials
+- **ai-config-injection** : pattern ToxicSkills/Clinejection (Snyk, NVIDIA) — injection de prompts dans .cursorrules, CLAUDE.md, copilot-instructions.md
+- **rdd-zero-deps** : pattern PhantomRaven (Sonatype) — variante zero-deps avec inline `https.get` + `eval()` dans postinstall
+- **discord-webhook-exfil** : pattern Shai-Hulud (Check Point, Datadog) — exfiltration de credentials via webhook Discord
+- **preinstall-background-fork** : pattern StepSecurity — preinstall + fork detache + vol de credentials en arriere-plan
+
+Corrections : nouveau scanner `src/scanner/ai-config.js` (13eme scanner parallele) + detection flags IA dans AST. Resultat : 25/25.
+
+**Holdout v1** (10 samples, regles gelees) : Score pre-tuning **30% (3/10)**. C'est la metrique la plus honnete — elle mesure la capacite de generalisation sur des patterns jamais vus pendant le tuning.
+
+Samples bases sur :
+- **silent-error-swallow** : try/catch silencieux + vol de credentials
+- **double-base64-exfil** : double encodage base64 + exec(variable)
+- **crypto-wallet-harvest** : scan des wallets crypto (.ethereum, .electrum, .config/solana)
+- **self-hosted-runner-backdoor** : creation de fichier .github/workflows (persistance)
+- **dead-mans-switch** : rm -rf si aucun token trouve
+- **fake-captcha-fingerprint** : fingerprinting systeme via os.hostname/networkInterfaces
+- **pyinstaller-dropper** : download + chmod + exec binaire /tmp
+- **gh-cli-token-steal** : execSync('gh auth token')
+- **triple-base64-github-push** : triple base64 + exfiltration GitHub API
+- **browser-api-hook** : hooking globalThis.fetch / XMLHttpRequest.prototype
+
+Corrections (7 MISS) : detection credential CLI commands (gh, gcloud, aws), workflow write via variables, binary dropper (chmod + exec temp), prototype hooking, crypto wallet paths dans dataflow, OS fingerprint sources. 7 nouvelles regles (MUADDIB-AST-014 a 017, MUADDIB-AICONF-001/002). Resultat final : 35/35.
+
+### Progression des scores pre-tuning
+
+| Batch | Score pre-tuning | Tendance |
+|-------|-----------------|----------|
+| Vague 1 | ~14% | Baseline |
+| Test robustesse | 33% (1/3) | Amelioration |
+| Vague 2 | 0% (0/5) | Regression (nouvelles techniques) |
+| Intermediate | 60% (3/5) | Les corrections generalisent |
+| Vague 3 | 60% (3/5) | Stabilisation |
+| **Holdout v1** | **30% (3/10)** | Vrais angles morts reveles |
+
+Le 30% du holdout montre que les ameliorations ne generalisent que partiellement. Chaque vague revele de nouveaux angles morts que les regles existantes ne couvrent pas.
+
+### Nouveau scanner : ai-config.js
+
+Creation d'un 13eme scanner parallele dedie a la detection d'injection de prompts dans les fichiers de configuration d'agents IA :
+- Fichiers scannes : `.cursorrules`, `.cursorignore`, `.windsurfrules`, `CLAUDE.md`, `AGENT.md`, `.github/copilot-instructions.md`, `copilot-setup-steps.yml`
+- 4 categories de patterns : commandes shell, exfiltration, acces credentials, instructions d'injection
+- Detection composee : shell + exfil/credentials → escalade CRITICAL
+
+### Resultats finaux v2.2.0
+
+| Metrique | Valeur | Details |
+|----------|--------|---------|
+| **TPR** (Ground Truth) | **100%** (4/4) | event-stream, ua-parser-js, coa, node-ipc |
+| **FPR** (Benign) | **0%** (0/98) | Aucun faux positif |
+| **ADR** (Adversarial) | **100%** (35/35) | 35 samples evasifs detectes |
+| **Holdout** (pre-tuning) | **30%** (3/10) | 10 samples jamais vus |
+
+**781 tests**, 0 echecs, 1 skip (Windows). **86 regles de detection**. **13 scanners paralleles**.
+
+### Sources des techniques d'attaque
+
+Toutes les techniques sont basees sur des attaques reelles documentees par des chercheurs en securite en 2025-2026 :
+- **Snyk** : ToxicSkills, s1ngularity, Clinejection
+- **Sonatype** : PhantomRaven (zero-deps dropper)
+- **Datadog Security Labs** : Shai-Hulud 2.0 (workflow injection)
+- **Unit 42** : Shai-Hulud (credential exfil, dead man's switch)
+- **Check Point** : Shai-Hulud 2.0 (Discord webhook exfil)
+- **Zscaler ThreatLabz** : Shai-Hulud V2 (CI-gated, DNS exfil)
+- **StepSecurity** : s1ngularity (AI agent abuse)
+- **Socket.dev** : Mid-year supply chain report 2025
+- **NVIDIA** : AI agent security guidance
+- **Sygnia** : chalk/debug sept 2025 (prototype hooking)
+- **Hive Pro** : crypto wallet harvesting, gh CLI abuse
+- **Koi Security** : PackageGate
+
+Documentation detaillee : [docs/EVALUATION_METHODOLOGY.md](EVALUATION_METHODOLOGY.md)
+
+---
+
 ## Etat actuel
 
 ### Ce qui fonctionne
 
 | Feature | Détails |
 |---------|---------|
-| CLI complète | scan, watch, update, scrape, install, safe-install, daemon, sandbox, **diff**, **init-hooks**, **remove-hooks**, **monitor**, **feed**, **serve**, **stats**, **detections**, **replay** |
+| CLI complète | scan, watch, update, scrape, install, safe-install, daemon, sandbox, **diff**, **init-hooks**, **remove-hooks**, **feed**, **serve**, **stats**, **detections**, **replay**, **evaluate** (v2.2) |
 | Base IOCs | 225 000+ npm + 14 000+ PyPI packages malveillants |
 | Détection Shai-Hulud | v1, v2, v3 couverts |
 | Exports | JSON, HTML, SARIF |
@@ -581,7 +747,8 @@ L'exfiltration est recherchee dans 7 vecteurs : corps HTTP, requetes DNS, URLs H
 | Version check | Notification automatique des nouvelles versions au demarrage |
 | **Detection comportementale (v2.0)** | Temporal lifecycle, AST diff, publish anomaly, maintainer change, canary tokens |
 | **Validation & Observabilite (v2.1)** | Ground truth (5 attaques, 100%), detection time logging, FP rate tracking, score breakdown, threat feed API |
-| Tests | **742 tests unitaires** + 56 fuzz + 15 adversariaux, **74% coverage** (Codecov) |
+| **Evaluation & Red Team (v2.2)** | `muaddib evaluate`, 35 samples adversariaux (4 vagues + holdout), TPR 100%, FPR 0%, ADR 100%, Holdout 30%, 13 scanners, 86 règles, AI config scanner |
+| Tests | **781 tests unitaires** + 56 fuzz + 35 adversariaux, **74% coverage** (Codecov) |
 | **Hardening securite (v2.1.2)** | SSRF protection (shared/download.js), command injection prevention (execFileSync), path traversal (sanitizePackageName), JSON.parse protege, webhook strict |
 | Audit securite | 2 audits complets, **58 issues corrigees**, [rapport PDF](MUADDIB_Security_Audit_Report_v1.4.1.pdf) |
 

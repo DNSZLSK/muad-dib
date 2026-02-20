@@ -19,7 +19,9 @@ const DANGEROUS_PATTERNS = [
   { pattern: /\.npmrc/, name: 'npmrc_access' },
   { pattern: /GITHUB_TOKEN/, name: 'github_token_access' },
   { pattern: /AWS_/, name: 'aws_credential_access' },
-  { pattern: /base64/, name: 'base64_encoding' }
+  { pattern: /base64/, name: 'base64_encoding' },
+  { pattern: /require\s*\(\s*['"]https?['"]\)/, name: 'network_require' },
+  { pattern: /node\s+-e\s/, name: 'node_inline_exec' }
 ];
 
 const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype', 'toString', 'valueOf']);

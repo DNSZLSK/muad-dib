@@ -18,6 +18,7 @@ const { detectPythonProject, normalizePythonName } = require('./scanner/python.j
 const { loadCachedIOCs } = require('./ioc/updater.js');
 const { ensureIOCs } = require('./ioc/bootstrap.js');
 const { scanEntropy } = require('./scanner/entropy.js');
+const { scanAIConfig } = require('./scanner/ai-config.js');
 const { detectSuddenLifecycleChange } = require('./temporal-analysis.js');
 const { detectSuddenAstChanges } = require('./temporal-ast-diff.js');
 const { detectPublishAnomaly } = require('./publish-anomaly.js');
@@ -231,7 +232,8 @@ async function run(targetPath, options = {}) {
     ghActionsThreats,
     pythonThreats,
     pypiTyposquatThreats,
-    entropyThreats
+    entropyThreats,
+    aiConfigThreats
   ] = await Promise.all([
     scanPackageJson(targetPath),
     scanShellScripts(targetPath),
@@ -244,7 +246,8 @@ async function run(targetPath, options = {}) {
     Promise.resolve(scanGitHubActions(targetPath)),
     Promise.resolve(matchPythonIOCs(pythonDeps, targetPath)),
     Promise.resolve(checkPyPITyposquatting(pythonDeps, targetPath)),
-    Promise.resolve(scanEntropy(targetPath, { entropyThreshold: options.entropyThreshold || undefined }))
+    Promise.resolve(scanEntropy(targetPath, { entropyThreshold: options.entropyThreshold || undefined })),
+    Promise.resolve(scanAIConfig(targetPath))
   ]);
 
   // Stop spinner now that scanning is complete
@@ -264,7 +267,8 @@ async function run(targetPath, options = {}) {
     ...ghActionsThreats,
     ...pythonThreats,
     ...pypiTyposquatThreats,
-    ...entropyThreats
+    ...entropyThreats,
+    ...aiConfigThreats
   ];
 
   // Paranoid mode

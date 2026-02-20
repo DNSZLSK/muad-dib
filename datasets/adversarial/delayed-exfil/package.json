@@ -1,0 +1,6 @@
+{
+  "name": "delayed-exfil",
+  "version": "1.0.0",
+  "description": "Adversarial sample: delayed credential exfiltration",
+  "main": "index.js"
+}

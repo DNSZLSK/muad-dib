@@ -385,6 +385,96 @@ const RULES = {
     references: ['https://attack.mitre.org/techniques/T1027/'],
     mitre: 'T1027'
   },
+  dynamic_require: {
+    id: 'MUADDIB-AST-006',
+    name: 'Dynamic Require with Concatenation',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'require() avec concatenation de chaines — technique d\'obfuscation pour masquer le nom du module',
+    references: ['https://attack.mitre.org/techniques/T1027/'],
+    mitre: 'T1027'
+  },
+  dangerous_exec: {
+    id: 'MUADDIB-AST-007',
+    name: 'Dangerous Shell Command Execution',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'exec() avec commande shell dangereuse (pipe to shell, reverse shell, netcat)',
+    references: ['https://owasp.org/www-community/attacks/Command_Injection'],
+    mitre: 'T1059.004'
+  },
+  staged_payload: {
+    id: 'MUADDIB-FLOW-002',
+    name: 'Staged Payload Execution',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Telechargement reseau + eval() dans le meme fichier — execution de payload distant',
+    references: ['https://attack.mitre.org/techniques/T1105/'],
+    mitre: 'T1105'
+  },
+  network_require: {
+    id: 'MUADDIB-PKG-006',
+    name: 'Network Module in Lifecycle Script',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'require(https/http) dans un script lifecycle — telechargement au moment de l\'installation',
+    references: ['https://blog.phylum.io/shai-hulud-npm-worm'],
+    mitre: 'T1105'
+  },
+  node_inline_exec: {
+    id: 'MUADDIB-PKG-007',
+    name: 'Node Inline Execution in Lifecycle Script',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'node -e dans un script lifecycle — execution de code inline au moment de l\'installation',
+    references: ['https://owasp.org/www-community/attacks/Command_Injection'],
+    mitre: 'T1059.007'
+  },
+  dynamic_import: {
+    id: 'MUADDIB-AST-008',
+    name: 'Dynamic import() of Dangerous Module',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'import() dynamique pour charger un module dangereux ou avec argument calcule — technique d\'evasion pour eviter la detection de require()',
+    references: ['https://attack.mitre.org/techniques/T1027/'],
+    mitre: 'T1027'
+  },
+  env_proxy_intercept: {
+    id: 'MUADDIB-AST-009',
+    name: 'Environment Variable Proxy Interception',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'new Proxy(process.env) detecte — intercepte silencieusement tous les acces aux variables d\'environnement pour exfiltration',
+    references: ['https://attack.mitre.org/techniques/T1552/001/'],
+    mitre: 'T1552.001'
+  },
+  dynamic_require_exec: {
+    id: 'MUADDIB-AST-010',
+    name: 'Command Execution via Dynamic Require',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'exec/execSync appele sur un module charge dynamiquement (require obfusque) — execution de commandes dissimulees',
+    references: ['https://attack.mitre.org/techniques/T1059/007/'],
+    mitre: 'T1059.007'
+  },
+  sandbox_evasion: {
+    id: 'MUADDIB-AST-011',
+    name: 'Sandbox/Container Evasion',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'Detection de sandbox/container (/.dockerenv, /proc/cgroup) — technique anti-analyse pour eviter la detection en environnement controle',
+    references: ['https://attack.mitre.org/techniques/T1497/001/'],
+    mitre: 'T1497.001'
+  },
+  detached_process: {
+    id: 'MUADDIB-AST-012',
+    name: 'Detached Background Process',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'spawn/fork avec {detached: true} — le processus survit a la fin de npm install et execute le payload en arriere-plan',
+    references: ['https://attack.mitre.org/techniques/T1036/009/'],
+    mitre: 'T1036.009'
+  },
   dangerous_call_function: {
     id: 'MUADDIB-AST-005',
     name: 'new Function() Constructor',
@@ -393,6 +483,97 @@ const RULES = {
     description: 'Appel new Function() detecte - equivalent a eval()',
     references: ['https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function/Function'],
     mitre: 'T1059.007'
+  },
+
+  credential_command_exec: {
+    id: 'MUADDIB-AST-014',
+    name: 'Credential Theft via CLI Tool',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'exec/execSync appelle un outil CLI legitime pour voler des tokens d\'authentification (gh auth token, gcloud auth, aws sts). Technique s1ngularity/Nx.',
+    references: [
+      'https://snyk.io/blog/malicious-npm-packages-abuse-ai-agents/',
+      'https://attack.mitre.org/techniques/T1059/'
+    ],
+    mitre: 'T1059'
+  },
+  workflow_write: {
+    id: 'MUADDIB-AST-015',
+    name: 'GitHub Actions Workflow Write',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'fs.writeFileSync cree un fichier dans .github/workflows — injection de workflow GitHub Actions pour persistence. Technique Shai-Hulud 2.0.',
+    references: [
+      'https://www.wiz.io/blog/shai-hulud-npm-supply-chain-attack',
+      'https://attack.mitre.org/techniques/T1195/002/'
+    ],
+    mitre: 'T1195.002'
+  },
+  binary_dropper: {
+    id: 'MUADDIB-AST-016',
+    name: 'Binary Dropper Pattern',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'fs.chmodSync avec permissions executables (0o755/0o777) — pattern de dropper binaire: telecharge, ecrit, chmod, execute.',
+    references: [
+      'https://www.sonatype.com/blog/phantomraven-supply-chain-attack',
+      'https://attack.mitre.org/techniques/T1105/'
+    ],
+    mitre: 'T1105'
+  },
+  prototype_hook: {
+    id: 'MUADDIB-AST-017',
+    name: 'Native API Prototype Hooking',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'Modification du prototype ou remplacement de fonctions natives du navigateur/Node.js (fetch, XMLHttpRequest, http.request). Technique chalk/debug (Sygnia, sept 2025) pour intercepter du trafic.',
+    references: [
+      'https://www.sygnia.co/blog/malicious-chalk-debug-npm-packages/',
+      'https://attack.mitre.org/techniques/T1557/'
+    ],
+    mitre: 'T1557'
+  },
+
+  ai_config_injection: {
+    id: 'MUADDIB-AICONF-001',
+    name: 'AI Config Prompt Injection',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'Fichier de configuration d\'agent IA (.cursorrules, CLAUDE.md, copilot-instructions.md) contient des instructions d\'execution de commandes shell ou d\'acces a des credentials. Technique ToxicSkills/Clinejection.',
+    references: [
+      'https://snyk.io/blog/toxicskills-prompt-injection-ai-agents/',
+      'https://snyk.io/blog/clinejection-ai-config-prompt-injection/',
+      'https://arxiv.org/abs/2601.17548'
+    ],
+    mitre: 'T1059'
+  },
+  ai_config_injection_critical: {
+    id: 'MUADDIB-AICONF-002',
+    name: 'AI Config Prompt Injection (Critical)',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Fichier de configuration d\'agent IA contient des commandes d\'exfiltration (curl POST vers un domaine externe, pipe vers shell) ou une combinaison commande shell + acces credentials. Attaque confirmee.',
+    references: [
+      'https://snyk.io/blog/toxicskills-prompt-injection-ai-agents/',
+      'https://snyk.io/blog/clinejection-ai-config-prompt-injection/',
+      'https://arxiv.org/abs/2601.17548',
+      'https://developer.nvidia.com/blog/ai-agent-security-guidance/'
+    ],
+    mitre: 'T1059'
+  },
+
+  ai_agent_abuse: {
+    id: 'MUADDIB-AST-013',
+    name: 'AI Agent Weaponization',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Invocation d\'un agent IA (Claude, Gemini, Q, Aider) avec des flags qui desactivent les controles de securite (--dangerously-skip-permissions, --yolo, --trust-all-tools). Technique s1ngularity/Nx (aout 2025).',
+    references: [
+      'https://snyk.io/blog/malicious-npm-packages-abuse-ai-agents/',
+      'https://stepsecurity.io/blog/ai-agent-weaponization-supply-chain',
+      'https://attack.mitre.org/techniques/T1059/'
+    ],
+    mitre: 'T1059'
   },
 
   // GitHub Actions patterns
