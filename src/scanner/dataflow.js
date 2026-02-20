@@ -60,6 +60,9 @@ function analyzeFile(content, filePath, basePath) {
   const sources = [];
   const sinks = [];
 
+  // Pre-scan: detect raw socket module import (net/tls) for instance .connect() detection
+  const hasRawSocketModule = /require\s*\(\s*['"](?:net|tls)['"]\s*\)/.test(content);
+
   // Track variables assigned from sensitive path expressions
   const sensitivePathVars = new Set();
 
@@ -155,7 +158,7 @@ function analyzeFile(content, filePath, basePath) {
         const prop = node.callee.property;
         if (obj.type === 'Identifier' && prop.type === 'Identifier') {
           // DNS resolution as exfiltration sink
-          if (obj.name === 'dns' && ['resolve', 'lookup', 'resolve4', 'resolve6'].includes(prop.name)) {
+          if (obj.name === 'dns' && ['resolve', 'lookup', 'resolve4', 'resolve6', 'resolveTxt'].includes(prop.name)) {
             sinks.push({ type: 'network_send', name: `dns.${prop.name}`, line: node.loc?.start?.line });
           }
           // HTTP/HTTPS request/get as network sink
@@ -165,6 +168,10 @@ function analyzeFile(content, filePath, basePath) {
           // net.connect / net.createConnection / tls.connect as network sink
           if ((obj.name === 'net' || obj.name === 'tls') && ['connect', 'createConnection'].includes(prop.name)) {
             sinks.push({ type: 'network_send', name: `${obj.name}.${prop.name}`, line: node.loc?.start?.line });
+          }
+          // Instance socket.connect(port, host) when file imports net/tls
+          if (hasRawSocketModule && prop.name === 'connect' && node.arguments.length >= 2) {
+            sinks.push({ type: 'network_send', name: 'socket.connect', line: node.loc?.start?.line });
           }
         }
       }

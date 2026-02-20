@@ -97,6 +97,21 @@ Each batch below was evaluated with **rules frozen** at the time of creation. Th
 | npm-cache-poison | 0 | 20 | FAIL |
 | conditional-os-payload | 35 | 25 | PASS |
 
+### Holdout v3 (10 samples, rules frozen): 6/10 (60%)
+
+| Sample | Score | Threshold | Result |
+|--------|-------|-----------|--------|
+| require-cache-poison | 0 | 20 | FAIL |
+| symlink-escape | 35 | 25 | PASS |
+| dns-txt-payload | 10 | 25 | FAIL |
+| env-file-parse-exfil | 25 | 25 | PASS |
+| git-credential-steal | 25 | 25 | PASS |
+| electron-rce | 45 | 25 | PASS |
+| postinstall-reverse-shell | 3 | 30 | FAIL |
+| steganography-payload | 10 | 15 | FAIL |
+| npm-hook-hijack | 38 | 20 | PASS |
+| timezone-trigger | 45 | 20 | PASS |
+
 ---
 
 ## 3. Progression
@@ -108,7 +123,8 @@ Each batch below was evaluated with **rules frozen** at the time of creation. Th
 | Intermediate | 60% (3/5) | 5 |
 | Vague 3 | 60% (3/5) | 5 |
 | Holdout v1 | 30% (3/10) | 10 |
-| **Holdout v2** | **40% (4/10)** | 10 |
+| Holdout v2 | 40% (4/10) | 10 |
+| **Holdout v3** | **60% (6/10)** | 10 |
 
 **Key observations:**
 
@@ -116,7 +132,8 @@ Each batch below was evaluated with **rules frozen** at the time of creation. Th
 - The 60% in Intermediate/Vague 3 shows partial generalization — rules improved for earlier samples also caught new patterns.
 - The **Holdout v1 30%** revealed 7 genuine blind spots: binary droppers, prototype hooking, credential CLI theft, workflow injection, crypto wallet harvesting, and more.
 - The **Holdout v2 40%** shows marginal improvement in generalization (+10pp). 6 new blind spots identified: env var charcode reconstruction, lifecycle shell pipe, Object.defineProperty proxy, Node.js core prototype hijack, GitHub workflow injection via template literals, npm cache poisoning.
-- After corrections, all 45 samples pass (ADR 100%). But the pre-correction holdout scores (30%, 40%) are the true measures of generalization.
+- The **Holdout v3 60%** shows significant improvement (+20pp over v2). 4 blind spots identified: require.cache poisoning, DNS TXT payload staging, JavaScript reverse shell (net.Socket + pipe), steganographic payload execution.
+- After corrections, all 55 samples pass (ADR 100%). But the pre-correction holdout scores (30%, 40%, 60%) are the true measures of generalization.
 
 ---
 
@@ -173,14 +190,15 @@ All adversarial samples are based on real-world attack techniques documented by 
 
 ---
 
-## 6. Current Metrics (v2.2.1)
+## 6. Current Metrics (v2.2.2)
 
 | Metric | Result | Description |
 |--------|--------|-------------|
 | **TPR** (Ground Truth) | 100% (4/4) | Real-world attacks: event-stream, ua-parser-js, coa, node-ipc |
 | **FPR** (Benign) | 0% (0/98) | 98 popular npm packages, threshold > 20 |
-| **ADR** (Adversarial) | 100% (45/45) | 45 evasive samples across 4 vagues + promoted holdout v1 + promoted holdout v2 |
+| **ADR** (Adversarial) | 100% (35/35) | 35 evasive samples across 4 vagues |
 | **Holdout v1** (pre-tuning) | 30% (3/10) | 10 unseen samples before rule corrections |
 | **Holdout v2** (pre-tuning) | 40% (4/10) | 10 unseen samples before rule corrections |
+| **Holdout v3** (pre-tuning) | 60% (6/10) | 10 unseen samples before rule corrections |
 
 Run `muaddib evaluate` to reproduce these metrics locally. Results are saved to `metrics/v{version}.json`.

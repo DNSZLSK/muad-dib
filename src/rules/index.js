@@ -562,6 +562,29 @@ const RULES = {
     mitre: 'T1059'
   },
 
+  require_cache_poison: {
+    id: 'MUADDIB-AST-019',
+    name: 'Require Cache Poisoning',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Acces a require.cache pour remplacer ou hijacker des modules Node.js charges. Technique de cache poisoning pour intercepter du trafic ou injecter du code.',
+    references: [
+      'https://attack.mitre.org/techniques/T1574/006/'
+    ],
+    mitre: 'T1574.006'
+  },
+  staged_binary_payload: {
+    id: 'MUADDIB-AST-020',
+    name: 'Staged Binary Payload Execution',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'Reference a un fichier binaire (.png/.jpg/.wasm) combinee avec eval() dans le meme fichier. Possible execution de payload steganographique cache dans une image.',
+    references: [
+      'https://attack.mitre.org/techniques/T1027/003/'
+    ],
+    mitre: 'T1027.003'
+  },
+
   env_charcode_reconstruction: {
     id: 'MUADDIB-AST-018',
     name: 'Environment Variable Key Reconstruction',

@@ -308,6 +308,16 @@ const PLAYBOOKS = {
     'CRITIQUE: Ecriture detectee dans un cache sensible (npm _cacache, yarn, pip). ' +
     'Possible cache poisoning: injection de code malveillant dans des packages caches. ' +
     'Nettoyer le cache: npm cache clean --force. Reinstaller les dependances depuis zero.',
+
+  require_cache_poison:
+    'CRITIQUE: require.cache modifie pour hijacker des modules Node.js. ' +
+    'Le code remplace les exports de modules charges (https, http, fs) pour intercepter toutes les requetes. ' +
+    'Supprimer le package. Redemarrer le processus Node.js. Auditer le trafic reseau recent.',
+
+  staged_binary_payload:
+    'Fichier binaire (.png/.jpg/.wasm) reference avec eval() dans le meme fichier. ' +
+    'Technique de steganographie: le payload malveillant est cache dans les pixels d\'une image ou les sections d\'un WASM. ' +
+    'Analyser le fichier binaire dans un sandbox. Verifier les donnees extraites avant execution.',
 };
 
 function getPlaybook(threatType) {

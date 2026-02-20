@@ -1,0 +1,6 @@
+{
+  "name": "electron-rce",
+  "version": "1.0.0",
+  "description": "Cross-platform desktop helper",
+  "main": "index.js"
+}

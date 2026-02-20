@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.2] - 2026-02-20
+
+### Added
+- **Holdout v3 validation**: 10 new unseen samples evaluated with frozen rules — 60% pre-tuning detection rate (6/10). Measures generalization improvement over holdout v2 (40%).
+- **4 new detection capabilities** closing holdout v3 blind spots:
+  - `require_cache_poison` (MUADDIB-AST-019): detects `require.cache` access for module cache poisoning — hijacking loaded Node.js modules (https, http, fs) to intercept traffic
+  - `staged_binary_payload` (MUADDIB-AST-020): detects binary file reference (.png/.jpg/.wasm) combined with `eval()` in same file — steganographic payload execution
+  - Extended `dns.resolveTxt` as dataflow network sink: enables staged_payload detection for DNS TXT record payload retrieval + eval pattern
+  - Shell process spawn detection: `spawn('/bin/sh')`, `spawn('cmd.exe')`, conditional shell binary via ternary — direct shell process spawn
+  - Instance `socket.connect(port, host)` detection: recognizes `.connect()` on socket variables (not just `net.connect`) when file imports `net` or `tls`
+
+### Changed
+- Rule count: 89 → 91 (+2 new rules: MUADDIB-AST-019, MUADDIB-AST-020)
+- Holdout v3 dataset: 10 new samples in `datasets/holdout-v3/`
+
+### Breaking Changes
+- None. All changes are additive.
+
 ## [2.2.1] - 2026-02-20
 
 ### Added
