@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.6] - 2026-02-20
+
+### Added
+- **Inter-module dataflow analysis** (`src/scanner/module-graph.js`): New 14th scanner that tracks tainted data across file boundaries. Builds a module dependency graph, annotates tainted exports (fs.readFileSync, process.env, os.homedir, child_process), and detects when credentials read in one module reach a network/exec sink in another module.
+  - 3-hop taint propagation through re-export chains (A → B → C)
+  - Class method analysis: tracks tainted sources through class declarations and method bodies
+  - Inline require re-export: `module.exports = require('./source')` propagation
+  - Function-wrapped taint propagation: `module.exports = fn(taintedVar)` tracking
+  - Named export destructuring: `const { getCredentials } = require('./utils')` resolution
+  - Instance propagation: `new Collector()` inherits taint from imported class
+- **New rule `cross_file_dataflow`** (MUADDIB-FLOW-004): detects credential read in one module exported and sent to network in another module — inter-file exfiltration. Severity: CRITICAL, MITRE T1041.
+- **`--no-module-graph` flag**: Disable inter-module dataflow analysis
+- **Holdout v5 validation**: 10 new unseen samples specifically testing inter-module dataflow — 50% pre-tuning detection rate (5/10). First holdout for a new scanner. 2 accepted limitations (EventEmitter pub/sub, callback-based taint). Post-correction: 8/10.
+- 822 tests (was 805 in v2.2.5), +17 new tests
+
+### Changed
+- Rule count: 92 → 93 (+1 new rule: MUADDIB-FLOW-004)
+- Scanner count: 13 → 14 (module-graph runs before individual scanners)
+- Holdout v5 dataset: 10 new samples in `datasets/holdout-v5/`
+- Holdout progression: 30% → 40% → 60% → 80% → **50%** (new scanner baseline)
+
+### Breaking Changes
+- None. All changes are additive. `--no-module-graph` disables the new feature if needed.
+
 ## [2.2.5] - 2026-02-20
 
 ### Added
@@ -497,7 +521,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Obfuscation detection
 - Package.json lifecycle script analysis
 
-[Unreleased]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.5...HEAD
+[Unreleased]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.6...HEAD
+[2.2.6]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.5...v2.2.6
 [2.2.5]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.2...v2.2.5
 [2.2.2]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.1...v2.2.2
 [2.2.1]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.0...v2.2.1

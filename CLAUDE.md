@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-npm test          # Run all tests (custom framework, ~805 tests across 19 files)
+npm test          # Run all tests (custom framework, ~822 tests across 20 files)
 npm run lint      # ESLint with security plugin
 npm run scan      # Self-scan: node bin/muaddib.js scan .
 npm run update    # Download latest IOCs
@@ -28,9 +28,9 @@ Tests use a custom framework in `tests/run-tests.js` (no Jest). Test helpers:
 
 **CLI entry:** `bin/muaddib.js` — yargs-based dispatcher, delegates to `src/index.js`.
 
-**Core orchestration:** `src/index.js` — `run(targetPath, options)` launches 13 scanners in parallel via `Promise.all`, then deduplicates, scores (0-100 weighted: CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1), enriches with rules/playbooks (92 rules), and outputs (CLI/JSON/HTML/SARIF).
+**Core orchestration:** `src/index.js` — `run(targetPath, options)` runs cross-file module graph analysis first, then launches 13 individual scanners in parallel via `Promise.all`, then deduplicates, scores (0-100 weighted: CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1), enriches with rules/playbooks (93 rules), and outputs (CLI/JSON/HTML/SARIF).
 
-**Scanner pattern:** Each of the 13 scanners in `src/scanner/` returns `Array<{type, severity, message, file}>`:
+**Scanner pattern:** Each of the 13 individual scanners in `src/scanner/` returns `Array<{type, severity, message, file}>`:
 - `file` must use `path.relative(targetPath, absolutePath)` for Windows compatibility
 - Sync scanners are wrapped in `Promise.resolve()` in the Promise.all
 - Use `findFiles(dir, { extensions, excludedDirs })` from `src/utils.js` for file walking
@@ -64,7 +64,9 @@ Tests use a custom framework in `tests/run-tests.js` (no Jest). Test helpers:
 
 **Deobfuscation Pre-processing (v2.2.5):** `src/scanner/deobfuscate.js` applies static AST-based deobfuscation before AST and dataflow scanners. 4 transformations: string concat folding, charcode reconstruction, base64 decode, hex array resolution. Phase 2 const propagation resolves `const x = 'literal'` references. Additive approach: original code scanned first (preserves obfuscation signals), then deobfuscated code adds new findings. Disable with `--no-deobfuscate`.
 
-**Evaluation Framework (v2.2):** `src/commands/evaluate.js` measures TPR (Ground Truth, 4 real attacks), FPR (Benign, 98 popular packages), and ADR (Adversarial, 35 evasive samples across 4 vagues). Results saved to `metrics/v{version}.json`. Adversarial samples in `datasets/adversarial/`, holdout samples in `datasets/holdout-v2/`, `datasets/holdout-v3/`, and `datasets/holdout-v4/`, benign package list in `datasets/benign/packages-npm.txt`.
+**Inter-module Dataflow (v2.2.6):** `src/scanner/module-graph.js` builds a dependency graph of local modules, annotates tainted exports (fs.readFileSync, process.env, os.homedir, child_process, dns), and detects when credentials read in one module reach a network/exec sink in another module. Features: 3-hop re-export chain propagation, class method analysis, named export destructuring, inline require re-export, function-wrapped taint propagation. Runs before individual scanners. Disable with `--no-module-graph`.
+
+**Evaluation Framework (v2.2):** `src/commands/evaluate.js` measures TPR (Ground Truth, 4 real attacks), FPR (Benign, 98 popular packages), and ADR (Adversarial, 35 evasive samples across 4 vagues). Results saved to `metrics/v{version}.json`. Adversarial samples in `datasets/adversarial/`, holdout samples in `datasets/holdout-v2/`, `datasets/holdout-v3/`, `datasets/holdout-v4/`, and `datasets/holdout-v5/`, benign package list in `datasets/benign/packages-npm.txt`.
 
 **New AST detection rules (v2.2):**
 - MUADDIB-AST-008 to AST-012: Dynamic require with decode patterns, sandbox evasion, detached process, binary dropper patterns
@@ -81,6 +83,7 @@ Tests use a custom framework in `tests/run-tests.js` (no Jest). Test helpers:
 - MUADDIB-AST-019: Require cache poisoning (require.cache access to hijack loaded modules)
 - MUADDIB-AST-020: Staged binary payload (binary file .png/.jpg/.wasm + eval in same file — steganographic execution)
 - MUADDIB-AST-021: Staged eval decode (eval/Function with atob or Buffer.from base64 argument — CRITICAL)
+- MUADDIB-FLOW-004: Cross-file dataflow (credential read in one module, network exfil in another — CRITICAL)
 
 **Other key features (not scanners):**
 - `src/sandbox.js` — Docker-based dynamic analysis: installs a package in an isolated container, captures filesystem changes, network traffic (tcpdump), and process spawns (strace). Injects canary tokens by default.
@@ -109,7 +112,7 @@ The following commands are internal infrastructure/dev tools. They work when cal
 2. Import in `src/index.js`, add to the Promise.all destructuring and the threats spread
 3. Add rule entry in `src/rules/index.js` with id, name, severity, confidence, description, mitre
 4. Add playbook entry in `src/response/playbooks.js`
-5. Add tests in the appropriate test file under `tests/` (18 modular test files)
+5. Add tests in the appropriate test file under `tests/` (20 modular test files)
 6. Create test fixtures in `tests/samples/my-scanner/`
 
 ## Key Constraints

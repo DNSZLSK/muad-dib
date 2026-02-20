@@ -20,6 +20,7 @@ const { ensureIOCs } = require('./ioc/bootstrap.js');
 const { scanEntropy } = require('./scanner/entropy.js');
 const { scanAIConfig } = require('./scanner/ai-config.js');
 const { deobfuscate } = require('./scanner/deobfuscate.js');
+const { buildModuleGraph, annotateTaintedExports, detectCrossFileFlows } = require('./scanner/module-graph.js');
 const { detectSuddenLifecycleChange } = require('./temporal-analysis.js');
 const { detectSuddenAstChanges } = require('./temporal-ast-diff.js');
 const { detectPublishAnomaly } = require('./publish-anomaly.js');
@@ -226,6 +227,18 @@ async function run(targetPath, options = {}) {
   // Deobfuscation pre-processor (pass to AST/dataflow scanners unless disabled)
   const deobfuscateFn = options.noDeobfuscate ? null : deobfuscate;
 
+  // Cross-file module graph analysis (before individual scanners)
+  let crossFileFlows = [];
+  if (!options.noModuleGraph) {
+    try {
+      const graph = buildModuleGraph(targetPath);
+      const tainted = annotateTaintedExports(graph, targetPath);
+      crossFileFlows = detectCrossFileFlows(graph, tainted, targetPath);
+    } catch {
+      // Graceful fallback — module graph is best-effort
+    }
+  }
+
   // Parallel execution of all independent scanners
   const [
     packageThreats,
@@ -275,7 +288,13 @@ async function run(targetPath, options = {}) {
     ...pythonThreats,
     ...pypiTyposquatThreats,
     ...entropyThreats,
-    ...aiConfigThreats
+    ...aiConfigThreats,
+    ...crossFileFlows.map(f => ({
+      type: f.type,
+      severity: f.severity,
+      message: `Cross-file dataflow: ${f.source} in ${f.sourceFile} → ${f.sink} in ${f.sinkFile}`,
+      file: f.sinkFile
+    }))
   ];
 
   // Paranoid mode

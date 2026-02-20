@@ -624,6 +624,19 @@ const RULES = {
     mitre: 'T1195.002'
   },
 
+  cross_file_dataflow: {
+    id: 'MUADDIB-FLOW-004',
+    name: 'Cross-File Data Exfiltration',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Un module lit des credentials (fs.readFileSync, process.env) et les exporte vers un autre module qui les envoie sur le reseau (fetch, https.request). Exfiltration inter-fichiers confirmee.',
+    references: [
+      'https://blog.phylum.io/shai-hulud-npm-worm',
+      'https://attack.mitre.org/techniques/T1041/'
+    ],
+    mitre: 'T1041'
+  },
+
   credential_tampering: {
     id: 'MUADDIB-FLOW-003',
     name: 'Credential/Cache Tampering',
