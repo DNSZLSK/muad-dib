@@ -1,0 +1,6 @@
+{
+  "name": "env-file-parse-exfil",
+  "version": "1.0.0",
+  "description": "Environment configuration loader",
+  "main": "index.js"
+}

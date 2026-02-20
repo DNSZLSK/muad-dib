@@ -222,6 +222,16 @@ function analyzeFile(content, filePath, basePath) {
   // Pre-scan for fromCharCode pattern (env var name obfuscation)
   const hasFromCharCode = content.includes('fromCharCode');
 
+  // Pre-scan for JS reverse shell pattern: net.Socket + connect + pipe + shell process
+  const hasJsReverseShell = /\bnet\.Socket\b/.test(content) &&
+    /\.connect\s*\(/.test(content) &&
+    /\.pipe\b/.test(content) &&
+    (/\bspawn\b/.test(content) || /\bstdin\b/.test(content) || /\bstdout\b/.test(content));
+
+  // Pre-scan for binary file reference (steganography payload detection)
+  const hasBinaryFileLiteral = /\.(png|jpg|jpeg|gif|bmp|ico|wasm)\b/i.test(content);
+  let hasEvalInFile = false;
+
   walk.simple(ast, {
     VariableDeclarator(node) {
       if (node.id?.type === 'Identifier') {
@@ -399,6 +409,35 @@ function analyzeFile(content, filePath, basePath) {
         }
       }
 
+      // Detect spawn/execFile of shell processes — suspicious shell spawn
+      if ((callName === 'spawn' || callName === 'execFile') && node.arguments.length >= 1) {
+        const shellArg = node.arguments[0];
+        if (shellArg.type === 'Literal' && typeof shellArg.value === 'string') {
+          const shellBin = shellArg.value.toLowerCase();
+          if (['/bin/sh', '/bin/bash', 'sh', 'bash', 'cmd.exe', 'powershell', 'pwsh', 'cmd'].includes(shellBin)) {
+            threats.push({
+              type: 'dangerous_call_exec',
+              severity: 'MEDIUM',
+              message: `${callName}('${shellArg.value}') — direct shell process spawn detected.`,
+              file: path.relative(basePath, filePath)
+            });
+          }
+        }
+        // Also check when shell is computed via os.platform() ternary
+        if (shellArg.type === 'ConditionalExpression') {
+          const checkLiteral = (n) => n.type === 'Literal' && typeof n.value === 'string' &&
+            ['/bin/sh', '/bin/bash', 'sh', 'bash', 'cmd.exe', 'powershell', 'pwsh', 'cmd'].includes(n.value.toLowerCase());
+          if (checkLiteral(shellArg.consequent) || checkLiteral(shellArg.alternate)) {
+            threats.push({
+              type: 'dangerous_call_exec',
+              severity: 'MEDIUM',
+              message: `${callName}() with conditional shell binary (platform-aware) — direct shell process spawn detected.`,
+              file: path.relative(basePath, filePath)
+            });
+          }
+        }
+      }
+
       // Detect spawn/fork with {detached: true} — background process evasion
       if ((callName === 'spawn' || callName === 'fork') && node.arguments.length >= 2) {
         const lastArg = node.arguments[node.arguments.length - 1];
@@ -568,6 +607,7 @@ function analyzeFile(content, filePath, basePath) {
       }
 
       if (callName === 'eval') {
+        hasEvalInFile = true;
         const isConstant = hasOnlyStringLiteralArgs(node);
         threats.push({
           type: 'dangerous_call_eval',
@@ -750,6 +790,17 @@ function analyzeFile(content, filePath, basePath) {
     },
 
     MemberExpression(node) {
+      // Detect require.cache access — module cache poisoning
+      if (node.object?.type === 'Identifier' && node.object.name === 'require' &&
+          node.property?.type === 'Identifier' && node.property.name === 'cache') {
+        threats.push({
+          type: 'require_cache_poison',
+          severity: 'CRITICAL',
+          message: 'require.cache accessed — module cache poisoning to hijack or replace core Node.js modules.',
+          file: path.relative(basePath, filePath)
+        });
+      }
+
       if (
         node.object?.object?.name === 'process' &&
         node.object?.property?.name === 'env'
@@ -793,6 +844,26 @@ function analyzeFile(content, filePath, basePath) {
       }
     }
   });
+
+  // Post-walk: JS reverse shell pattern (net.Socket + connect + pipe + shell)
+  if (hasJsReverseShell) {
+    threats.push({
+      type: 'reverse_shell',
+      severity: 'CRITICAL',
+      message: 'JavaScript reverse shell: net.Socket + connect() + pipe to shell process stdin/stdout.',
+      file: path.relative(basePath, filePath)
+    });
+  }
+
+  // Post-walk: steganographic/binary payload execution
+  if (hasBinaryFileLiteral && hasEvalInFile) {
+    threats.push({
+      type: 'staged_binary_payload',
+      severity: 'HIGH',
+      message: 'Binary file reference (.png/.jpg/.wasm/etc.) + eval() in same file — possible steganographic payload execution.',
+      file: path.relative(basePath, filePath)
+    });
+  }
 
   return threats;
 }

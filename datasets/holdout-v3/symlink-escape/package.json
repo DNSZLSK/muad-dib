@@ -1,0 +1,6 @@
+{
+  "name": "symlink-escape",
+  "version": "1.0.0",
+  "description": "File system utilities for linking",
+  "main": "index.js"
+}

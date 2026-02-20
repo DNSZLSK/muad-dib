@@ -28,7 +28,7 @@ Tests use a custom framework in `tests/run-tests.js` (no Jest). Test helpers:
 
 **CLI entry:** `bin/muaddib.js` — yargs-based dispatcher, delegates to `src/index.js`.
 
-**Core orchestration:** `src/index.js` — `run(targetPath, options)` launches 13 scanners in parallel via `Promise.all`, then deduplicates, scores (0-100 weighted: CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1), enriches with rules/playbooks (89 rules), and outputs (CLI/JSON/HTML/SARIF).
+**Core orchestration:** `src/index.js` — `run(targetPath, options)` launches 13 scanners in parallel via `Promise.all`, then deduplicates, scores (0-100 weighted: CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1), enriches with rules/playbooks (91 rules), and outputs (CLI/JSON/HTML/SARIF).
 
 **Scanner pattern:** Each of the 13 scanners in `src/scanner/` returns `Array<{type, severity, message, file}>`:
 - `file` must use `path.relative(targetPath, absolutePath)` for Windows compatibility
@@ -64,7 +64,7 @@ Tests use a custom framework in `tests/run-tests.js` (no Jest). Test helpers:
 
 **AI Config Scanner (v2.2):** `src/scanner/ai-config.js` scans AI agent configuration files (`.cursorrules`, `.cursorignore`, `.windsurfrules`, `CLAUDE.md`, `AGENT.md`, `.github/copilot-instructions.md`, `copilot-setup-steps.yml`) for prompt injection patterns. Detects shell commands, exfiltration, credential access, and injection instructions. Compound detection (shell + exfil/credentials) escalates to CRITICAL.
 
-**Evaluation Framework (v2.2):** `src/commands/evaluate.js` — `muaddib evaluate` measures TPR (Ground Truth, 4 real attacks), FPR (Benign, 98 popular packages), and ADR (Adversarial, 45 evasive samples across 4 vagues + promoted holdout v1 + promoted holdout v2). Results saved to `metrics/v{version}.json`. Adversarial samples in `datasets/adversarial/`, holdout samples in `datasets/holdout-v2/`, benign package list in `datasets/benign/packages-npm.txt`.
+**Evaluation Framework (v2.2):** `src/commands/evaluate.js` — `muaddib evaluate` measures TPR (Ground Truth, 4 real attacks), FPR (Benign, 98 popular packages), and ADR (Adversarial, 35 evasive samples across 4 vagues). Results saved to `metrics/v{version}.json`. Adversarial samples in `datasets/adversarial/`, holdout samples in `datasets/holdout-v2/` and `datasets/holdout-v3/`, benign package list in `datasets/benign/packages-npm.txt`.
 
 **New AST detection rules (v2.2):**
 - MUADDIB-AST-008 to AST-012: Dynamic require with decode patterns, sandbox evasion, detached process, binary dropper patterns
@@ -78,6 +78,8 @@ Tests use a custom framework in `tests/run-tests.js` (no Jest). Test helpers:
 - MUADDIB-AICONF-002: AI config compound injection — shell + exfil/credentials (CRITICAL)
 - MUADDIB-PKG-010: Lifecycle shell pipe (curl|sh or wget|sh in preinstall/install/postinstall)
 - MUADDIB-FLOW-003: Credential tampering / cache poisoning (sensitive read + write to cache paths)
+- MUADDIB-AST-019: Require cache poisoning (require.cache access to hijack loaded modules)
+- MUADDIB-AST-020: Staged binary payload (binary file .png/.jpg/.wasm + eval in same file — steganographic execution)
 
 **Other key features (not scanners):**
 - `src/sandbox.js` — Docker-based dynamic analysis: installs a package in an isolated container, captures filesystem changes, network traffic (tcpdump), and process spawns (strace). Injects canary tokens by default.

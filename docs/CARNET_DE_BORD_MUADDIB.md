@@ -786,6 +786,65 @@ Apres la correction des 7 blind spots du holdout v1, un deuxieme batch de 10 sam
 
 ---
 
+## MUAD'DIB 2.2.2 — Holdout v3 & corrections (20 Fevrier 2026)
+
+### Holdout v3 : generalisation en nette amelioration
+
+Troisieme batch de 10 samples crees avec les regles gelees. Le score pre-tuning de 60% montre une amelioration significative par rapport au holdout v2 (40%) et v1 (30%).
+
+**Score pre-tuning : 6/10 (60%)** — amelioration de +20pp par rapport au holdout v2.
+
+| Sample | Technique | Score brut | Seuil | Resultat |
+|--------|-----------|-----------|-------|----------|
+| require-cache-poison | `require.cache[require.resolve('https')]` — hijack module exports pour intercepter les requetes HTTP | 0 | 20 | FAIL |
+| symlink-escape | Lecture via lien symbolique vers `~/.ssh/id_rsa` + exfiltration | 35 | 25 | PASS |
+| dns-txt-payload | `dns.resolveTxt()` pour recuperer un payload encode en base64 + `eval()` | 10 | 25 | FAIL |
+| env-file-parse-exfil | Parse fichier `.env` + exfiltration des secrets via POST | 25 | 25 | PASS |
+| git-credential-steal | Lecture `.git-credentials` + exfiltration HTTP | 25 | 25 | PASS |
+| electron-rce | Faux plugin Electron avec `shell.openExternal()` + exec de commande | 45 | 25 | PASS |
+| postinstall-reverse-shell | `net.Socket` + `connect()` + `pipe` vers stdin/stdout de `/bin/sh` (reverse shell JS pur) | 3 | 30 | FAIL |
+| steganography-payload | Lecture PNG + extraction LSB pixels + `eval()` du payload cache | 10 | 15 | FAIL |
+| npm-hook-hijack | Injection `oninstall` hook dans `~/.npmrc` pour persistance | 38 | 20 | PASS |
+| timezone-trigger | `Intl.DateTimeFormat().resolvedOptions().timeZone` — ciblage geographique + vol credentials | 45 | 20 | PASS |
+
+### 4 corrections
+
+**1. require-cache-poison** (0 → 25) : Nouveau type `require_cache_poison` (MUADDIB-AST-019). Le scanner AST detecte maintenant l'acces a `require.cache` pour modifier les exports de modules charges — technique de cache poisoning pour intercepter silencieusement le trafic HTTP/HTTPS.
+
+**2. dns-txt-payload** (10 → 35) : Extension du scanner dataflow pour reconnaitre `dns.resolveTxt` comme sink reseau. Active la detection `staged_payload` (MUADDIB-FLOW-002) quand combine avec `eval()` — pattern de payload via DNS TXT records sans connexion HTTP visible.
+
+**3. postinstall-reverse-shell** (3 → 53) : Deux ameliorations complementaires :
+- Scanner AST : detection du pattern reverse shell JS pur (`net.Socket` + `connect()` + `pipe` + shell process spawn)
+- Scanner dataflow : detection de `socket.connect(port, host)` sur des variables d'instance quand le fichier importe `net` ou `tls` (pas seulement `net.connect` direct). Permet la correlation avec `os.platform()` pour produire un `suspicious_dataflow` CRITICAL.
+
+**4. steganography-payload** (10 → 20) : Nouveau type `staged_binary_payload` (MUADDIB-AST-020). Le scanner AST detecte maintenant la reference a des fichiers binaires (.png/.jpg/.wasm) combinee avec `eval()` dans le meme fichier — technique de steganographie ou le payload malveillant est cache dans les pixels d'une image.
+
+### Progression des scores pre-tuning
+
+| Batch | Score | Tendance |
+|-------|-------|----------|
+| Vague 1 | ~14% | Baseline |
+| Test robustesse | 33% (1/3) | Amelioration |
+| Vague 2 | 0% (0/5) | Regression (nouvelles techniques) |
+| Intermediate | 60% (3/5) | Les corrections generalisent |
+| Vague 3 | 60% (3/5) | Stabilisation |
+| Holdout v1 | 30% (3/10) | Vrais angles morts |
+| Holdout v2 | 40% (4/10) | Amelioration marginale |
+| **Holdout v3** | **60% (6/10)** | Amelioration significative |
+
+### Resultats finaux v2.2.2
+
+| Metrique | Valeur | Details |
+|----------|--------|---------|
+| **TPR** (Ground Truth) | **100%** (4/4) | event-stream, ua-parser-js, coa, node-ipc |
+| **FPR** (Benign) | **0%** (0/98) | Aucun faux positif |
+| **ADR** (Adversarial) | **100%** (35/35) | 35 samples evasifs detectes |
+| **Holdout v3** (pre-tuning) | **60%** (6/10) | 10 samples jamais vus |
+
+**781 tests**, 0 echecs. **91 regles de detection**. **13 scanners paralleles**.
+
+---
+
 ## Etat actuel
 
 ### Ce qui fonctionne
@@ -807,8 +866,8 @@ Apres la correction des 7 blind spots du holdout v1, un deuxieme batch de 10 sam
 | Version check | Notification automatique des nouvelles versions au demarrage |
 | **Detection comportementale (v2.0)** | Temporal lifecycle, AST diff, publish anomaly, maintainer change, canary tokens |
 | **Validation & Observabilite (v2.1)** | Ground truth (5 attaques, 100%), detection time logging, FP rate tracking, score breakdown, threat feed API |
-| **Evaluation & Red Team (v2.2)** | `muaddib evaluate`, 45 samples adversariaux (4 vagues + holdout v1 + holdout v2), TPR 100%, FPR 0%, ADR 100%, Holdout v1 30%, Holdout v2 40%, 13 scanners, 89 règles, AI config scanner |
-| Tests | **781 tests unitaires** + 56 fuzz + 45 adversariaux, **74% coverage** (Codecov) |
+| **Evaluation & Red Team (v2.2)** | `muaddib evaluate`, 35 adversariaux (4 vagues) + holdout v1/v2/v3 (30 samples), TPR 100%, FPR 0%, ADR 100%, Holdout v1 30%, Holdout v2 40%, Holdout v3 60%, 13 scanners, 91 règles, AI config scanner |
+| Tests | **781 tests unitaires** + 56 fuzz + 35 adversariaux, **74% coverage** (Codecov) |
 | **Hardening securite (v2.1.2)** | SSRF protection (shared/download.js), command injection prevention (execFileSync), path traversal (sanitizePackageName), JSON.parse protege, webhook strict |
 | Audit securite | 2 audits complets, **58 issues corrigees**, [rapport PDF](MUADDIB_Security_Audit_Report_v1.4.1.pdf) |
 
