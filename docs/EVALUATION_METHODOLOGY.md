@@ -237,12 +237,65 @@ All adversarial samples are based on real-world attack techniques documented by 
 
 ---
 
-## 6. Current Metrics (v2.2.6)
+## 6. FPR Methodology Correction (v2.2.7)
+
+### Previous FPR was invalid (v2.2.0–v2.2.6)
+
+The FPR metric reported in versions v2.2.0 through v2.2.6 (0% on 98 packages) was **invalid**. The `evaluateBenign()` function created empty temporary directories containing only a `package.json` with the package name, then ran the scanner against these empty directories. This only tested IOC name matching and typosquat detection — it did **not** scan the actual source code of the packages. The 13+ scanners (AST, dataflow, obfuscation, entropy, etc.) had nothing to analyze.
+
+This was discovered when comparing the evaluation approach for benign packages vs. ground truth/adversarial: the latter scanned real JavaScript files, while benign packages never downloaded or examined any code.
+
+### Fix: real source code scanning
+
+In v2.2.7, `evaluateBenign()` was rewritten to:
+1. Download real tarballs via `npm pack <pkg>` (executed with `cwd` to avoid Windows path issues)
+2. Extract tarballs using native Node.js (`zlib.gunzipSync` + tar header parsing — no shell `tar` dependency)
+3. Scan the extracted source code with all 14 scanners
+4. Cache tarballs in `.muaddib-cache/benign-tarballs/` to avoid re-downloading
+5. Support `--benign-limit N` to test a subset and `--refresh-benign` to force re-download
+
+### Real FPR: 38% (19/50) — first honest measurement
+
+Measured on 50 real npm packages (first 50 from the 529-package benign list). Threshold: score > 20.
+
+**Top FP-causing threat types** (frequency across all 19 false positives):
+
+| Threat Type | Count | Primary Offenders |
+|-------------|-------|-------------------|
+| `dynamic_require` | 127 | next (76), gatsby (20), strapi (7), sails (6) |
+| `dangerous_call_function` | 90 | keystone (29), next (20), htmx.org (10), vue (7) |
+| `prototype_hook` | 67 | restify (52), next (15) |
+| `env_access` | 61 | next (33), keystone (17), moleculer (3) |
+| `dynamic_import` | 56 | next (45), gatsby (7), nuxt (3) |
+| `obfuscation_detected` | 44 | next (41), keystone (1), total.js (1) |
+| `typosquat_detected` | 25 | chai↔chalk, pino↔sinon, ioredis↔redis, etc. |
+| `suspicious_dataflow` | 26 | next (13), keystone (4), moleculer (4) |
+| `dangerous_call_eval` | 21 | next (11), htmx.org (6), total.js (4) |
+| `require_cache_poison` | 18 | gatsby (8), next (4), moleculer (2) |
+| `staged_payload` | 10 | htmx.org (5), next (4), total.js (1) |
+
+**Worst offenders** (score 100):
+
+| Package | Score | Primary FP Causes |
+|---------|-------|-------------------|
+| next | 100 | Massive bundled output with dynamic requires/imports, obfuscated dist files, prototype extensions |
+| gatsby | 100 | Plugin system with dynamic requires, require.cache for HMR |
+| restify | 100 | `Request.prototype.*` / `Response.prototype.*` assignments (52 hits) |
+| moleculer | 100 | Datadog metrics (os.hostname + fetch), require.cache for hot-reload |
+| keystone | 100 | Bundled admin UI (minified JS), env access for config keys |
+| total.js | 100 | eval-based template engine, dynamic env access, staged payload pattern |
+| htmx.org | 100 | eval for dynamic CSS expressions + fetch in same file |
+
+**Note:** This FPR is measured on 50 packages, not yet the full 529-package dataset. The 38% represents a real, honest baseline measured for the first time. Reducing FPR while maintaining TPR/ADR is the next priority.
+
+---
+
+## 7. Current Metrics (v2.2.7)
 
 | Metric | Result | Description |
 |--------|--------|-------------|
 | **TPR** (Ground Truth) | 100% (4/4) | Real-world attacks: event-stream, ua-parser-js, coa, node-ipc |
-| **FPR** (Benign) | 0% (0/98) | 98 popular npm packages, threshold > 20 |
+| **FPR** (Benign) | **38% (19/50)** | 50 popular npm packages, real source code, threshold > 20 |
 | **ADR** (Adversarial) | 100% (35/35) | 35 evasive samples across 4 vagues |
 | **Holdout v1** (pre-tuning) | 30% (3/10) | 10 unseen samples before rule corrections |
 | **Holdout v2** (pre-tuning) | 40% (4/10) | 10 unseen samples before rule corrections |

@@ -1028,6 +1028,99 @@ Ces deux limitations sont documentees et n'affectent pas la detection des patter
 
 ---
 
+## MUAD'DIB 2.2.7 — Le vrai FPR (20 Fevrier 2026)
+
+### La decouverte embarrassante
+
+En examinant le code de `evaluateBenign()`, une realite genante est apparue : **le FPR de 0% etait completement faux**. Depuis v2.2.0, la fonction creait des repertoires temporaires vides contenant uniquement un `package.json` avec le nom du package, puis lancait le scanner sur ces repertoires vides. Les 13+ scanners (AST, dataflow, obfuscation, entropy, etc.) n'avaient litteralement rien a analyser. Le 0% ne mesurait que le matching IOC et la detection de typosquatting sur les noms — pas du tout la capacite du scanner a eviter les faux positifs sur du vrai code source.
+
+Pendant ce temps, le ground truth (4 attaques reelles) et les adversariaux (35 samples) scannaient de vrais fichiers JavaScript. L'asymetrie etait flagrante : TPR et ADR testaient du vrai code, FPR testait du vide.
+
+### La correction : scanner du vrai code source
+
+Reecriture complete de `evaluateBenign()` pour telecharger et scanner les vrais tarballs npm :
+
+1. **Download** : `npm pack <pkg>` execute avec `cwd` (evite les problemes de chemins Windows avec `--pack-destination`)
+2. **Extraction** : Node.js natif (`zlib.gunzipSync` + parsing tar header 512 octets) — aucune dependance shell `tar` (qui causait des problemes avec `C:` interprete comme remote host sur Windows)
+3. **Scan** : Le repertoire extrait `package/` est scanne avec les 14 scanners
+4. **Cache** : Les tarballs extraits sont caches dans `.muaddib-cache/benign-tarballs/` pour eviter de retelecharger a chaque run
+
+Nouveaux flags :
+- `--benign-limit N` : ne tester que les N premiers packages (iteration rapide)
+- `--refresh-benign` : forcer le re-telechargement de tous les tarballs
+
+### Les galeres Windows
+
+La route vers le scan reel a ete semee d'embuches techniques :
+
+**1. `execFileSync('npm', ...)` echoue sur Windows** : npm est un wrapper `.cmd`, pas un binaire. Solution : `shell: true` ou `execSync('npm pack ...')`.
+
+**2. `tar` interprete `C:` comme un remote host** : La commande `tar xzf "C:\path\file.tgz"` interprete `C:` comme un nom de machine SSH. `--force-local` ne fonctionnait pas non plus. Solution finale : abandonner completement le `tar` shell et ecrire un extracteur tar natif en Node.js (zlib.gunzipSync + parsing des headers tar de 512 octets).
+
+**3. npm pack avec paths Windows** : `--pack-destination "C:\Users\..."` causait des erreurs d'echappement. Solution : utiliser `cwd: pkgCacheDir` au lieu de `--pack-destination`.
+
+### Le vrai FPR : 38% (19/50)
+
+Premier test sur 50 packages reels. Resultat brutal :
+
+| Metrique | Valeur |
+|----------|--------|
+| **TPR** | 100% (4/4) |
+| **FPR** | **38% (19/50)** |
+| **ADR** | 100% (35/35) |
+
+19 packages populaires et legitimes declenchent plus de 20 points de risque. Les pires :
+
+| Package | Score | Cause principale |
+|---------|-------|------------------|
+| next | 100 | 76 dynamic_require, 45 dynamic_import, 41 obfuscation (dist bundles) |
+| gatsby | 100 | 20 dynamic_require, 8 require.cache (HMR), plugin system |
+| restify | 100 | 52 prototype_hook (Request/Response.prototype assignments) |
+| moleculer | 100 | dataflow FP (os.hostname + fetch pour metriques Datadog) |
+| keystone | 100 | admin UI bundle minifie, 17 env_access pour config |
+| total.js | 100 | eval-based template engine, staged_payload (fetch + eval meme fichier) |
+| htmx.org | 100 | eval pour expressions dynamiques + fetch (5 staged_payload) |
+
+### Analyse des causes de faux positifs
+
+Les types de menaces les plus bruyants sur du vrai code :
+
+| Type | Hits | Pourquoi c'est un FP |
+|------|------|----------------------|
+| `dynamic_require` | 127 | Plugin systems, loaders, middleware chains |
+| `dangerous_call_function` | 90 | Template engines, runtime codegen, globalThis polyfills |
+| `prototype_hook` | 67 | Frameworks HTTP qui etendent Request/Response prototypes |
+| `env_access` | 61 | Config management (`KEYSTONE_DEV`, `DATADOG_API_KEY`, etc.) |
+| `dynamic_import` | 56 | Code splitting, lazy loading (next.js, gatsby) |
+| `obfuscation_detected` | 44 | Minified/bundled dist files |
+| `typosquat_detected` | 25 | Packages populaires qui se ressemblent (chai↔chalk, pino↔sinon) |
+| `staged_payload` | 10 | fetch + eval dans le meme fichier (htmx, total.js template engines) |
+
+### Dataset massif
+
+En parallele de la correction evaluate, expansion massive des datasets :
+
+- **Benign npm** : 98 → **529 packages** (18+ categories : frameworks web, UI, build tools, CLI, testing, database, linters, monorepo, devops, crypto, HTTP, logging, etc.)
+- **Benign PyPI** : 50 → **132 packages** (15 categories)
+- **Ground truth malware** : Creation de `datasets/ground-truth/known-malware.json` — **65 packages malveillants documentes** (45 npm, 18 PyPI, 2 cross-ecosystem), couvrant 2018-2026, avec metadata complete (nom, ecosysteme, version, date, source, technique, URL, severite)
+
+### Lecon apprise
+
+**Ne jamais faire confiance a un FPR de 0%.** Un scanner de securite qui ne genere aucun faux positif ne scanne probablement rien. Le 38% est embarrassant mais honnete — c'est la premiere mesure reelle. La priorite est maintenant de reduire ce FPR tout en maintenant TPR 100% et ADR 100%.
+
+### Resultats finaux v2.2.7
+
+| Metrique | Valeur | Details |
+|----------|--------|---------|
+| **TPR** (Ground Truth) | **100%** (4/4) | event-stream, ua-parser-js, coa, node-ipc |
+| **FPR** (Benign) | **38%** (19/50) | Premier FPR reel sur code source |
+| **ADR** (Adversarial) | **100%** (35/35) | 35 samples evasifs detectes |
+| **Holdout v5** (pre-tuning) | **50%** (5/10) | 10 samples inter-modules |
+
+**822 tests**, 0 echecs. **93 regles de detection**. **14 scanners**. **529 packages benins npm + 132 PyPI**. **65 malwares documentes**.
+
+---
+
 ## Etat actuel
 
 ### Ce qui fonctionne
@@ -1049,7 +1142,7 @@ Ces deux limitations sont documentees et n'affectent pas la detection des patter
 | Version check | Notification automatique des nouvelles versions au demarrage |
 | **Detection comportementale (v2.0)** | Temporal lifecycle, AST diff, publish anomaly, maintainer change, canary tokens |
 | **Validation & Observabilite (v2.1)** | Ground truth (5 attaques, 100%), detection time logging, FP rate tracking, score breakdown, threat feed API |
-| **Evaluation & Red Team (v2.2)** | `muaddib evaluate`, 35 adversariaux (4 vagues) + holdout v1/v2/v3/v4/v5 (50 samples), TPR 100%, FPR 0%, ADR 100%, Holdout v1 30%, Holdout v2 40%, Holdout v3 60%, Holdout v4 80%, Holdout v5 50%, 14 scanners, 93 regles, AI config scanner |
+| **Evaluation & Red Team (v2.2)** | `muaddib evaluate`, 35 adversariaux (4 vagues) + holdout v1/v2/v3/v4/v5 (50 samples), TPR 100%, **FPR 38% (19/50) reel sur code source** (corrige v2.2.7, etait 0% invalide), ADR 100%, Holdout v1 30%, Holdout v2 40%, Holdout v3 60%, Holdout v4 80%, Holdout v5 50%, 14 scanners, 93 regles, AI config scanner, 529 packages benins npm, 132 PyPI, 65 malwares documentes |
 | **Desobfuscation (v2.2.5)** | `src/scanner/deobfuscate.js`, 4 transformations AST + const propagation, approche additive (original + desobfusque), `--no-deobfuscate` flag |
 | **Dataflow inter-module (v2.2.6)** | `src/scanner/module-graph.js`, graphe de dependances, propagation de teinte inter-fichiers, 3-hop re-export, class methods, named exports, `--no-module-graph` flag |
 | Tests | **822 tests unitaires** + 56 fuzz + 35 adversariaux, **74% coverage** (Codecov) |

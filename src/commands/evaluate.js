@@ -3,11 +3,17 @@
  *
  * Measures TPR (Ground Truth), FPR (Benign), and ADR (Adversarial).
  * Saves versioned metrics to metrics/v{version}.json.
+ *
+ * Benign FPR: downloads real npm tarballs and scans actual source code
+ * with all 13+ scanners (AST, dataflow, obfuscation, entropy, etc.).
+ * Tarballs are cached in .muaddib-cache/benign-tarballs/ to avoid
+ * re-downloading on every run.
  */
 
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
+const zlib = require('zlib');
+const { execSync } = require('child_process');
 const { run } = require('../index.js');
 
 const ROOT = path.join(__dirname, '..', '..');
@@ -15,9 +21,11 @@ const GT_DIR = path.join(ROOT, 'tests', 'ground-truth');
 const BENIGN_DIR = path.join(ROOT, 'datasets', 'benign');
 const ADVERSARIAL_DIR = path.join(ROOT, 'datasets', 'adversarial');
 const METRICS_DIR = path.join(ROOT, 'metrics');
+const CACHE_DIR = path.join(ROOT, '.muaddib-cache', 'benign-tarballs');
 
 const GT_THRESHOLD = 3;
 const BENIGN_THRESHOLD = 20;
+const PACK_TIMEOUT_MS = 30000;
 
 const ADVERSARIAL_THRESHOLDS = {
   // Vague 1 (20 samples)
@@ -102,45 +110,187 @@ async function evaluateGroundTruth() {
   return { detected, total, tpr, details };
 }
 
+// =========================================================================
+// 2. Benign — download real tarballs and scan actual source code
+// =========================================================================
+
 /**
- * 2. Benign — scan popular npm packages for false positives
+ * Convert a package name to a safe cache directory name.
+ * @scoped/pkg → _scoped_pkg
  */
-async function evaluateBenign() {
+function pkgToCacheName(pkg) {
+  return pkg.replace(/\//g, '_').replace(/@/g, '_');
+}
+
+/**
+ * Extract a .tgz file using Node.js built-in zlib + minimal tar parser.
+ * Only extracts regular files (type '0' or NUL).
+ */
+function extractTgz(tgzPath, destDir) {
+  const compressed = fs.readFileSync(tgzPath);
+  const tarData = zlib.gunzipSync(compressed);
+
+  let offset = 0;
+  while (offset + 512 <= tarData.length) {
+    const header = tarData.subarray(offset, offset + 512);
+
+    // Check for end-of-archive (two zero blocks)
+    if (header.every(b => b === 0)) break;
+
+    // Parse tar header
+    const name = header.subarray(0, 100).toString('utf8').replace(/\0+$/, '');
+    const sizeOctal = header.subarray(124, 136).toString('utf8').replace(/\0+$/, '').trim();
+    const size = parseInt(sizeOctal, 8) || 0;
+    const typeFlag = String.fromCharCode(header[156]);
+
+    offset += 512; // move past header
+
+    if (name && (typeFlag === '0' || typeFlag === '\0') && size > 0) {
+      // Regular file — extract it
+      const filePath = path.join(destDir, name);
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      const fileData = tarData.subarray(offset, offset + size);
+      fs.writeFileSync(filePath, fileData);
+    }
+
+    // Advance past data blocks (512-byte aligned)
+    offset += Math.ceil(size / 512) * 512;
+  }
+}
+
+/**
+ * Download a package tarball via `npm pack` and extract with native Node.js.
+ * Returns the path to the extracted package directory, or null on failure.
+ * Uses a persistent cache to avoid re-downloading.
+ */
+function downloadAndExtract(pkg, options = {}) {
+  const cacheName = pkgToCacheName(pkg);
+  const pkgCacheDir = path.join(CACHE_DIR, cacheName);
+
+  // Check cache first (unless refreshing)
+  if (!options.refreshBenign && fs.existsSync(pkgCacheDir)) {
+    const extractedDir = path.join(pkgCacheDir, 'package');
+    if (fs.existsSync(extractedDir)) {
+      return extractedDir;
+    }
+  }
+
+  // Download via npm pack (cwd approach avoids Windows path issues)
+  fs.mkdirSync(pkgCacheDir, { recursive: true });
+
+  let tgzFilename;
+  try {
+    const output = execSync(`npm pack ${pkg}`, {
+      cwd: pkgCacheDir,
+      encoding: 'utf8',
+      timeout: PACK_TIMEOUT_MS,
+      stdio: ['pipe', 'pipe', 'pipe']
+    });
+    tgzFilename = output.trim().split('\n').pop().trim();
+  } catch (err) {
+    if (process.env.MUADDIB_DEBUG) {
+      console.error(`\n  [DEBUG] npm pack ${pkg} failed: ${(err.stderr || err.message || '').slice(0, 200)}`);
+    }
+    fs.rmSync(pkgCacheDir, { recursive: true, force: true });
+    return null;
+  }
+
+  const tgzPath = path.join(pkgCacheDir, tgzFilename);
+  if (!fs.existsSync(tgzPath)) {
+    fs.rmSync(pkgCacheDir, { recursive: true, force: true });
+    return null;
+  }
+
+  // Extract tarball using native Node.js (no shell tar dependency)
+  try {
+    extractTgz(tgzPath, pkgCacheDir);
+  } catch (err) {
+    if (process.env.MUADDIB_DEBUG) {
+      console.error(`\n  [DEBUG] extract ${pkg} failed: ${(err.message || '').slice(0, 200)}`);
+    }
+    fs.rmSync(pkgCacheDir, { recursive: true, force: true });
+    return null;
+  }
+
+  // Clean up tarball to save space
+  try { fs.unlinkSync(tgzPath); } catch { /* ignore */ }
+
+  const extractedDir = path.join(pkgCacheDir, 'package');
+  if (!fs.existsSync(extractedDir)) {
+    fs.rmSync(pkgCacheDir, { recursive: true, force: true });
+    return null;
+  }
+
+  return extractedDir;
+}
+
+/**
+ * Evaluate benign packages by downloading real source code and scanning it.
+ */
+async function evaluateBenign(options = {}) {
   const listFile = path.join(BENIGN_DIR, 'packages-npm.txt');
-  const packages = fs.readFileSync(listFile, 'utf8')
+  let packages = fs.readFileSync(listFile, 'utf8')
     .split('\n')
     .map(l => l.trim())
     .filter(l => l && !l.startsWith('#'));
 
-  const details = [];
-  let flagged = 0;
-
-  for (const pkg of packages) {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-eval-'));
-    try {
-      // Create minimal project with this package as dependency
-      const pkgJson = { name: 'eval-project', version: '1.0.0', dependencies: { [pkg]: '*' } };
-      fs.writeFileSync(path.join(tmpDir, 'package.json'), JSON.stringify(pkgJson));
-
-      // Create fake node_modules entry so dependency scanner picks it up
-      const parts = pkg.split('/');
-      const nmDir = path.join(tmpDir, 'node_modules', ...parts);
-      fs.mkdirSync(nmDir, { recursive: true });
-      fs.writeFileSync(path.join(nmDir, 'package.json'), JSON.stringify({ name: pkg, version: '999.0.0' }));
-
-      const result = await silentScan(tmpDir);
-      const score = result.summary.riskScore;
-      const isFlagged = score > BENIGN_THRESHOLD;
-      if (isFlagged) flagged++;
-      details.push({ name: pkg, score, flagged: isFlagged });
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
+  // Apply limit if specified
+  const limit = options.benignLimit || 0;
+  if (limit > 0) {
+    packages = packages.slice(0, limit);
   }
 
+  fs.mkdirSync(CACHE_DIR, { recursive: true });
+
+  const details = [];
+  let flagged = 0;
+  let skipped = 0;
   const total = packages.length;
-  const fpr = total > 0 ? flagged / total : 0;
-  return { flagged, total, fpr, details };
+
+  for (let i = 0; i < packages.length; i++) {
+    const pkg = packages[i];
+    const progress = `[${i + 1}/${total}]`;
+
+    // Progress indicator (overwrite line)
+    if (!options.json && process.stdout.isTTY) {
+      process.stdout.write(`\r  [2/3] Benign ${progress} ${pkg}${''.padEnd(40)}`);
+    }
+
+    const extractedDir = downloadAndExtract(pkg, options);
+    if (!extractedDir) {
+      details.push({ name: pkg, score: 0, flagged: false, skipped: true, error: 'download failed' });
+      skipped++;
+      continue;
+    }
+
+    const result = await silentScan(extractedDir);
+    const score = result.summary.riskScore;
+    const isFlagged = score > BENIGN_THRESHOLD;
+    if (isFlagged) flagged++;
+
+    const entry = { name: pkg, score, flagged: isFlagged };
+
+    // Include threat details for flagged packages (for debugging FPs)
+    if (isFlagged && result.threats) {
+      entry.threats = result.threats.map(t => ({
+        type: t.type,
+        severity: t.severity,
+        message: t.message,
+        file: t.file
+      }));
+    }
+
+    details.push(entry);
+  }
+
+  // Clear progress line
+  if (!options.json && process.stdout.isTTY) {
+    process.stdout.write('\r' + ''.padEnd(80) + '\r');
+  }
+
+  const scanned = total - skipped;
+  const fpr = scanned > 0 ? flagged / scanned : 0;
+  return { flagged, total, scanned, skipped, fpr, details };
 }
 
 /**
@@ -186,6 +336,11 @@ function saveMetrics(report) {
 
 /**
  * Main evaluate function
+ *
+ * Options:
+ *   json             — JSON output mode
+ *   benignLimit      — Only test first N benign packages
+ *   refreshBenign    — Force re-download of all tarballs
  */
 async function evaluate(options = {}) {
   const version = require('../../package.json').version;
@@ -198,9 +353,9 @@ async function evaluate(options = {}) {
   const groundTruth = await evaluateGroundTruth();
 
   if (!jsonMode) {
-    console.log(`  [2/3] Benign packages...`);
+    console.log(`  [2/3] Benign packages (real source code)...`);
   }
-  const benign = await evaluateBenign();
+  const benign = await evaluateBenign(options);
 
   if (!jsonMode) {
     console.log(`  [3/3] Adversarial samples...`);
@@ -226,7 +381,7 @@ async function evaluate(options = {}) {
 
     console.log('');
     console.log(`  Ground Truth (TPR):  ${groundTruth.detected}/${groundTruth.total}  ${tprPct}%`);
-    console.log(`  Benign (FPR):        ${benign.flagged}/${benign.total}  ${fprPct}%`);
+    console.log(`  Benign (FPR):        ${benign.flagged}/${benign.scanned}  ${fprPct}%  (${benign.skipped} skipped)`);
     console.log(`  Adversarial (ADR):   ${adversarial.detected}/${adversarial.total}  ${adrPct}%`);
     console.log('');
 
@@ -240,12 +395,17 @@ async function evaluate(options = {}) {
       console.log('');
     }
 
-    // Show false positives
+    // Show false positives with threat details
     const fps = benign.details.filter(d => d.flagged);
     if (fps.length > 0) {
       console.log('  False positives:');
       for (const fp of fps) {
         console.log(`    ${fp.name}: score ${fp.score}`);
+        if (fp.threats) {
+          for (const t of fp.threats) {
+            console.log(`      [${t.severity}] ${t.type}: ${t.message}${t.file ? ' (' + t.file + ')' : ''}`);
+          }
+        }
       }
       console.log('');
     }
