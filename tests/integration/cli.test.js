@@ -903,12 +903,10 @@ async function runCliTests() {
     assert(parsed.feed.length === 0, 'Future since date should return empty feed');
   });
 
-  test('FEED-CLI: help text includes feed and serve commands', () => {
+  test('FEED-CLI: feed and serve are hidden from --help (internal commands)', () => {
     const output = runCommand('--help');
-    assertIncludes(output, 'muaddib feed', 'Help should show feed command');
-    assertIncludes(output, 'muaddib serve', 'Help should show serve command');
-    assertIncludes(output, '--limit', 'Help should show --limit option');
-    assertIncludes(output, '--port', 'Help should show --port option');
+    assert(!output.includes('muaddib feed'), 'feed should NOT appear in help');
+    assert(!output.includes('muaddib serve'), 'serve should NOT appear in help');
   });
 
   // ============================================

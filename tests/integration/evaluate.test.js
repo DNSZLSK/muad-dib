@@ -123,15 +123,10 @@ async function runEvaluateTests() {
     fs.rmSync(tmpMetrics, { recursive: true, force: true });
   });
 
-  // CLI tests
-  test('EVALUATE: evaluate appears in --help', () => {
+  // CLI tests — evaluate is hidden from --help (internal command, like monitor)
+  test('EVALUATE: evaluate is hidden from --help', () => {
     const output = runCommand('--help');
-    assert(output.includes('evaluate'), 'evaluate should appear in help');
-  });
-
-  test('EVALUATE: evaluate appears in help command', () => {
-    const output = runCommand('help');
-    assert(output.includes('evaluate'), 'evaluate should appear in help');
+    assert(!output.includes('muaddib evaluate'), 'evaluate should NOT appear in help');
   });
 }
 

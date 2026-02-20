@@ -327,40 +327,6 @@ muaddib scan . --breakdown
 
 Shows explainable score breakdown: how each finding contributes to the final risk score, with per-rule weights and severity multipliers.
 
-### Threat Feed API
-
-```bash
-muaddib feed [--limit N] [--severity LEVEL] [--since DATE]
-muaddib serve [--port N]
-```
-
-Export detections as a JSON threat feed for SIEM integration.
-
-- `muaddib feed` — Output threat feed JSON to stdout (filterable by limit, severity, date)
-- `muaddib serve` — Start an HTTP server (default port 3000) with `GET /feed` and `GET /health` endpoints
-
-```bash
-muaddib serve --port 8080
-# GET http://localhost:8080/feed?limit=50&severity=HIGH
-# GET http://localhost:8080/health
-```
-
-### Detection time logging
-
-```bash
-muaddib detections [--stats] [--json]
-```
-
-View detection history with first-seen timestamps and lead time metrics (time between MUAD'DIB detection and public advisory).
-
-### FP rate tracking
-
-```bash
-muaddib stats [--daily] [--json]
-```
-
-View scan statistics: total scanned, clean, suspect, false positive rate, confirmed malicious count. Use `--daily` for per-day breakdown.
-
 ### Ground truth replay
 
 ```bash
@@ -742,7 +708,7 @@ Output (CLI, JSON, HTML, SARIF, Webhook, Threat Feed)
 - **ADR** (Adversarial Detection Rate): detection rate on 35 evasive malicious samples across 4 red-team waves + promoted holdout
 - **Holdout** (pre-tuning): detection rate on 10 unseen samples before any rule correction (measures generalization)
 
-Run `muaddib evaluate` to reproduce these metrics locally. See [Evaluation Methodology](docs/EVALUATION_METHODOLOGY.md) for the full experimental protocol.
+See [Evaluation Methodology](docs/EVALUATION_METHODOLOGY.md) for the full experimental protocol.
 
 ---
 

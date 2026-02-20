@@ -476,17 +476,17 @@ Un dataset de 5 attaques supply-chain reelles avec les fixtures associees :
 
 Le replay execute le scanner sur chaque fixture et verifie que les findings attendus sont presents. Resultat : **100% de detection** (4/4 malware + 1 hors scope correctement classifie).
 
-**2. Detection Time Logging** (`muaddib detections`)
-Chaque detection est enregistree avec un timestamp `first_seen_at`. Quand une advisory publique est emise (OSV, GitHub Advisory), on peut calculer le **lead time** : combien de temps avant l'advisory publique MUAD'DIB avait detecte la menace.
+**2. Detection Time Logging** (commande interne `detections`)
+Chaque detection est enregistree avec un timestamp `first_seen_at`. Quand une advisory publique est emise (OSV, GitHub Advisory), on peut calculer le **lead time** : combien de temps avant l'advisory publique MUAD'DIB avait detecte la menace. Commande d'infrastructure VPS, cachee du `--help`.
 
-**3. FP Rate Tracking** (`muaddib stats`)
-Suivi quotidien des resultats de scan : total/clean/suspect/faux positif/confirme malveillant. Le taux de faux positifs est calcule automatiquement : `FP / (FP + Confirme)`.
+**3. FP Rate Tracking** (commande interne `stats`)
+Suivi quotidien des resultats de scan : total/clean/suspect/faux positif/confirme malveillant. Le taux de faux positifs est calcule automatiquement : `FP / (FP + Confirme)`. Commande d'infrastructure VPS, cachee du `--help`.
 
 **4. Score Breakdown** (`--breakdown`)
 Decomposition explicable du score de risque : chaque finding montre sa contribution au score total avec les poids par severite (CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1).
 
-**5. Threat Feed API** (`muaddib feed` / `muaddib serve`)
-Export des detections en flux JSON pour integration SIEM. `muaddib serve` demarre un serveur HTTP localhost avec `GET /feed` et `GET /health`.
+**5. Threat Feed API** (commandes internes `feed` / `serve`)
+Export des detections en flux JSON pour integration SIEM. Serveur HTTP localhost avec `GET /feed` et `GET /health`. Commandes d'infrastructure VPS, cachees du `--help`.
 
 ### Augmentation massive du coverage
 
@@ -566,9 +566,9 @@ L'exfiltration est recherchee dans 7 vecteurs : corps HTTP, requetes DNS, URLs H
 
 MUAD'DIB avait des metriques de validation ponctuelles (ground truth replay, fuzzing, adversarial testing) mais pas de **commande unifiee** pour mesurer l'efficacite globale du scanner. Impossible de repondre simplement a : "Quel est le taux de faux positifs ? Quel est le taux de detection sur des attaques evasives ?"
 
-### La commande `muaddib evaluate`
+### Le framework d'evaluation (commande interne `evaluate`)
 
-Creation d'une commande qui mesure 3 axes :
+Creation d'une commande interne (cachee du `--help`) qui mesure 3 axes :
 
 **1. True Positive Rate (TPR)** — Ground Truth
 Scan des 4 attaques supply-chain reelles (event-stream, ua-parser-js, coa, node-ipc). Un score >= 3 = detecte.
@@ -616,7 +616,7 @@ Le baseline initial etait catastrophique : TPR 0%, ADR 14%. Le processus Red Tea
 | **FPR** (Benign) | **0%** (0/98) | Aucun faux positif sur 98 packages populaires |
 | **ADR** (Adversarial) | **100%** (7/7) | 7 echantillons evasifs detectes |
 
-Les metriques sont sauvegardees dans `metrics/v2.1.5.json` pour le suivi de regression.
+Les metriques sont sauvegardees dans `metrics/v{version}.json` pour le suivi de regression (fichiers regeneres par `muaddib evaluate`, non commites).
 
 ### Tests
 
@@ -631,11 +631,11 @@ Les metriques sont sauvegardees dans `metrics/v2.1.5.json` pour le suivi de regr
 Avant de lancer les vagues adversariales avancees, un audit complet de la structure du projet :
 - Retrait de `muaddib monitor` de la CLI publique et du menu interactif (commande interne infrastructure)
 - Nettoyage des fichiers obsoletes (logos dupliques, test-output.txt, anciens VSIX)
-- Creation du framework d'evaluation unifie (`src/commands/evaluate.js`)
+- Creation du framework d'evaluation interne (`src/commands/evaluate.js`, commande dev cachee du `--help`)
 
 ### Framework d'evaluation
 
-Creation de `muaddib evaluate` — une commande unique qui mesure 3 axes :
+Creation de la commande interne `evaluate` — mesure 3 axes :
 1. **TPR** (True Positive Rate) : 4 attaques reelles (event-stream, ua-parser-js, coa, node-ipc)
 2. **FPR** (False Positive Rate) : 98 packages npm populaires
 3. **ADR** (Adversarial Detection Rate) : samples malveillants evasifs avec seuils specifiques

@@ -52,7 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.2.0] - 2026-02-20
 
 ### Added
-- **Evaluation Framework** (`muaddib evaluate`): unified command measuring TPR (Ground Truth, 4 real-world attacks), FPR (Benign, 98 popular npm packages), and ADR (Adversarial, 35 evasive samples). Results saved to `metrics/v{version}.json` for regression tracking.
+- **Evaluation Framework** (internal `evaluate` command): unified measurement of TPR (Ground Truth, 4 real-world attacks), FPR (Benign, 98 popular npm packages), and ADR (Adversarial, 35 evasive samples). Results saved to `metrics/v{version}.json` for regression tracking.
 - **Adversarial dataset** (`datasets/adversarial/`): 35 evasive malicious samples across 4 red-team waves + promoted holdout, based on real 2025-2026 attack techniques (Shai-Hulud, PhantomRaven, s1ngularity/Nx, ToxicSkills, chalk/debug compromise).
 - **Benign dataset** (`datasets/benign/packages-npm.txt`): 98 popular npm packages for false positive measurement.
 - **Holdout validation**: 10 unseen samples evaluated with frozen rules to measure generalization (30% pre-tuning detection rate). Published alongside tuned ADR for experimental honesty.
@@ -70,7 +70,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Architecture diagram updated with 13 scanners and v2.2 evaluation framework
 
 ### Breaking Changes
-- None. All changes are additive. The `evaluate` command is a new CLI command. Existing scans benefit from improved detection without changes.
+- None. All changes are additive. Existing scans benefit from improved detection without changes.
 
 ## [2.1.2] - 2026-02-14
 
@@ -101,10 +101,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Ground Truth Dataset** (`muaddib replay` / `muaddib ground-truth`): 5 real-world supply-chain attacks (event-stream, ua-parser-js, coa, node-ipc, colors) with expected findings. Validates scanner detection coverage with automated replay. 100% detection rate (4/4 malware detected, 1 out of scope).
-- **Detection Time Logging** (`muaddib detections`): tracks `first_seen_at` timestamp for every detection, computes lead time vs. public advisory. Supports `--stats` for aggregate metrics and `--json` for machine-readable output.
-- **FP Rate Tracking** (`muaddib stats`): daily scan statistics with total/clean/suspect/false_positive/confirmed counts and automatic FP rate computation. Supports `--daily` for per-day breakdown and `--json` for export.
+- **Detection Time Logging** (internal `detections` command): tracks `first_seen_at` timestamp for every detection, computes lead time vs. public advisory.
+- **FP Rate Tracking** (internal `stats` command): daily scan statistics with total/clean/suspect/false_positive/confirmed counts and automatic FP rate computation.
 - **Score Breakdown** (`muaddib scan --breakdown`): explainable score decomposition showing per-finding contribution with severity weights (CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1).
-- **Threat Feed API** (`muaddib feed` / `muaddib serve`): JSON threat feed for SIEM integration. `feed` outputs to stdout with `--limit`, `--severity`, `--since` filters. `serve` starts an HTTP server (default port 3000) with `GET /feed` and `GET /health` endpoints.
+- **Threat Feed API** (internal `feed`/`serve` commands): JSON threat feed for SIEM integration on VPS infrastructure.
 - 709 tests (was 541 in v2.0.0), +168 new tests
 - 74% code coverage (was ~65% in v2.0.0)
 - New test files: `tests/integration/diff.test.js` (35 tests), `tests/integration/ground-truth.test.js`
@@ -116,7 +116,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Architecture diagram updated to include v2.1 validation & observability layer
 
 ### Breaking Changes
-- None. All new features are additive CLI commands (`feed`, `serve`, `stats`, `detections`, `replay`, `ground-truth`) and a new scan flag (`--breakdown`).
+- None. All new features are additive. New user-facing commands: `replay`, `ground-truth`, and scan flag `--breakdown`. Internal infrastructure commands: `feed`, `serve`, `stats`, `detections`.
 
 ## [2.0.0] - 2026-02-13
 
