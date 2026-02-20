@@ -327,40 +327,6 @@ muaddib scan . --breakdown
 
 Affiche la décomposition explicable du score : contribution de chaque finding au score final, avec les poids par règle et multiplicateurs de sévérité.
 
-### API Threat Feed
-
-```bash
-muaddib feed [--limit N] [--severity LEVEL] [--since DATE]
-muaddib serve [--port N]
-```
-
-Exporte les détections sous forme de flux JSON pour intégration SIEM.
-
-- `muaddib feed` — Affiche le flux de menaces JSON sur stdout (filtrable par limit, sévérité, date)
-- `muaddib serve` — Démarre un serveur HTTP (port 3000 par défaut) avec `GET /feed` et `GET /health`
-
-```bash
-muaddib serve --port 8080
-# GET http://localhost:8080/feed?limit=50&severity=HIGH
-# GET http://localhost:8080/health
-```
-
-### Logging des temps de détection
-
-```bash
-muaddib detections [--stats] [--json]
-```
-
-Historique des détections avec timestamps de première observation et métriques de lead time (délai entre la détection MUAD'DIB et l'advisory publique).
-
-### Suivi du taux de faux positifs
-
-```bash
-muaddib stats [--daily] [--json]
-```
-
-Statistiques de scan : total scanné, clean, suspect, taux de faux positifs, nombre confirmé malveillant. Utilisez `--daily` pour le détail par jour.
-
 ### Replay ground truth
 
 ```bash
@@ -739,7 +705,7 @@ Output (CLI, JSON, HTML, SARIF, Webhook, Threat Feed)
 - **ADR** (Adversarial Detection Rate) : taux de detection sur 35 samples malveillants evasifs (4 vagues red team + holdout promu)
 - **Holdout** (pre-tuning) : taux de detection sur 10 samples jamais vus avant correction des regles (mesure de generalisation)
 
-Lancez `muaddib evaluate` pour reproduire ces metriques localement. Voir [Evaluation Methodology](docs/EVALUATION_METHODOLOGY.md) pour le protocole experimental complet.
+Voir [Evaluation Methodology](docs/EVALUATION_METHODOLOGY.md) pour le protocole experimental complet.
 
 ---
 

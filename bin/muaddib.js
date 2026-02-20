@@ -363,15 +363,6 @@ const helpText = `
     muaddib scrape                   Scrape new IOCs
     muaddib sandbox <pkg> [--strict] [--no-canary]  Analyze in isolated Docker container
     muaddib sandbox-report <pkg>     Sandbox + detailed network report
-    muaddib feed [options]            Threat feed (JSON)
-    muaddib serve [options]           Start threat feed HTTP server
-    muaddib detections               List recent detections
-    muaddib detections --stats       Show aggregated detection stats
-    muaddib detections --json        Raw JSON output
-    muaddib stats                    Show scan stats + FP rate
-    muaddib stats --daily            Last 7 days daily breakdown
-    muaddib stats --json             Raw JSON dump
-    muaddib evaluate                 Evaluate scanner effectiveness (TPR, FPR, ADR)
     muaddib version                  Show version
 
   Replay Options:

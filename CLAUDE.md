@@ -56,15 +56,13 @@ Tests use a custom framework in `tests/run-tests.js` (no Jest). Test helpers:
 - `src/shared/download.js` — SSRF-safe downloadToFile (domain allowlist + private IP blocking), injection-safe extractTarGz (execFileSync), sanitizePackageName (path traversal prevention)
 - `src/shared/constants.js` — Centralized NPM_PACKAGE_REGEX, MAX_TARBALL_SIZE, DOWNLOAD_TIMEOUT
 
-**Validation & Observability (v2.1):** 5 features for measuring and validating scanner effectiveness:
+**Validation & Observability (v2.1):** Features for measuring and validating scanner effectiveness:
 - `src/ground-truth.js` — Ground truth dataset: 5 real-world attacks (event-stream, ua-parser-js, coa, node-ipc, colors) replayed against scanner. 100% detection rate.
-- `src/monitor.js` — Detection time logging (`appendDetection`, `getDetectionStats`): tracks first_seen, lead time vs advisory. FP rate tracking (`loadScanStats`, `updateScanStats`): daily stats with false positive rate.
-- `src/threat-feed.js` — Threat Feed API: `muaddib feed` (JSON stdout) and `muaddib serve` (HTTP server with `/feed` and `/health` endpoints)
 - `--breakdown` flag — Explainable score decomposition showing per-finding contribution
 
 **AI Config Scanner (v2.2):** `src/scanner/ai-config.js` scans AI agent configuration files (`.cursorrules`, `.cursorignore`, `.windsurfrules`, `CLAUDE.md`, `AGENT.md`, `.github/copilot-instructions.md`, `copilot-setup-steps.yml`) for prompt injection patterns. Detects shell commands, exfiltration, credential access, and injection instructions. Compound detection (shell + exfil/credentials) escalates to CRITICAL.
 
-**Evaluation Framework (v2.2):** `src/commands/evaluate.js` — `muaddib evaluate` measures TPR (Ground Truth, 4 real attacks), FPR (Benign, 98 popular packages), and ADR (Adversarial, 35 evasive samples across 4 vagues). Results saved to `metrics/v{version}.json`. Adversarial samples in `datasets/adversarial/`, holdout samples in `datasets/holdout-v2/` and `datasets/holdout-v3/`, benign package list in `datasets/benign/packages-npm.txt`.
+**Evaluation Framework (v2.2):** `src/commands/evaluate.js` measures TPR (Ground Truth, 4 real attacks), FPR (Benign, 98 popular packages), and ADR (Adversarial, 35 evasive samples across 4 vagues). Results saved to `metrics/v{version}.json`. Adversarial samples in `datasets/adversarial/`, holdout samples in `datasets/holdout-v2/` and `datasets/holdout-v3/`, benign package list in `datasets/benign/packages-npm.txt`.
 
 **New AST detection rules (v2.2):**
 - MUADDIB-AST-008 to AST-012: Dynamic require with decode patterns, sandbox evasion, detached process, binary dropper patterns
@@ -86,7 +84,12 @@ Tests use a custom framework in `tests/run-tests.js` (no Jest). Test helpers:
 - `src/diff.js` — Compares scan results between two git refs to surface only new threats (useful in CI). Exports `getThreatId`, `compareThreats`, `resolveRef` for testing.
 
 **Internal (not user-facing):**
-- `src/monitor.js` — `muaddib monitor` is an internal infrastructure command (runs on VPS via systemd, polls npm/PyPI every 60s). It is intentionally hidden from `--help` and the interactive menu. Do not expose it in user-facing documentation or CLI help. The module also exports `loadDetections`, `getDetectionStats`, `loadScanStats` which are used by the user-facing `detections` and `stats` commands.
+The following commands are internal infrastructure/dev tools. They work when called directly but are intentionally hidden from `--help` and the interactive menu. Do not expose them in user-facing documentation or CLI help.
+- `src/monitor.js` — `muaddib monitor` runs on VPS via systemd, polls npm/PyPI every 60s. Exports `loadDetections`, `getDetectionStats`, `loadScanStats`.
+- `src/threat-feed.js` — `muaddib feed` (JSON stdout) and `muaddib serve` (HTTP server with `/feed` and `/health`). SIEM integration for VPS infrastructure.
+- `muaddib detections` — Detection history with lead time metrics. Uses monitor exports.
+- `muaddib stats` — Daily scan statistics and FP rate. Uses monitor exports.
+- `src/commands/evaluate.js` — `muaddib evaluate` measures TPR/FPR/ADR. Dev-only evaluation command.
 
 **Rules & playbooks:** Threat types map to rules in `src/rules/index.js` (MITRE ATT&CK mapped) and remediation text in `src/response/playbooks.js`. Both keyed by threat `type` string.
 
