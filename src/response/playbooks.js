@@ -56,6 +56,36 @@ const PLAYBOOKS = {
   exec_wget:
     'Execution de wget via child_process. Verifier l\'URL et les donnees.',
   
+  dynamic_require:
+    'require() avec concatenation detecte. Technique d\'obfuscation pour masquer le module charge. Analyser les variables concatenees.',
+
+  dangerous_exec:
+    'CRITIQUE: Execution de commande shell dangereuse detectee. Isoler la machine. Verifier si la commande a ete executee.',
+
+  staged_payload:
+    'CRITIQUE: Code telecharge depuis le reseau et execute via eval(). Payload distant probable. Isoler et analyser le trafic reseau.',
+
+  network_require:
+    'require(https/http) dans un script lifecycle. Le package telecharge du code lors de l\'installation. Verifier l\'URL de destination.',
+
+  node_inline_exec:
+    'node -e dans un script lifecycle. Code inline execute a l\'installation. Analyser le code inline.',
+
+  dynamic_import:
+    'import() dynamique detecte. Technique d\'evasion pour eviter la detection de require(). Verifier quel module est charge et son usage.',
+
+  env_proxy_intercept:
+    'CRITIQUE: new Proxy(process.env) intercepte tous les acces aux variables d\'environnement. Technique d\'exfiltration silencieuse. Isoler la machine, regenerer tous les secrets.',
+
+  dynamic_require_exec:
+    'CRITIQUE: exec/execSync appele sur un module charge via require() obfusque. Le module child_process est dissimule par concatenation/encodage. Isoler la machine, auditer les commandes executees.',
+
+  sandbox_evasion:
+    'Code detecte la presence d\'un sandbox/container (/.dockerenv, /proc/cgroup). Technique anti-analyse: le malware adapte son comportement selon l\'environnement. Analyser les deux branches (sandbox vs production).',
+
+  detached_process:
+    'spawn/fork avec {detached: true} detecte. Le processus enfant survit a la fin de npm install et execute le payload en arriere-plan. Verifier les processus en cours: ps aux | grep node. Tuer le processus suspect.',
+
   known_malicious_package:
     'CRITIQUE: Supprimer immediatement. rm -rf node_modules && npm cache clean --force && npm install',
 
@@ -222,6 +252,42 @@ const PLAYBOOKS = {
 
   new_publisher:
     'New publisher detected. Package published by a different user than before. Verify legitimacy by checking the package\'s npm page and changelog.',
+
+  credential_command_exec:
+    'CRITIQUE: Le code utilise un outil CLI legitime (gh, gcloud, aws, az) pour voler des tokens. ' +
+    'Verifier: gh auth status, gcloud auth list, aws sts get-caller-identity. ' +
+    'Regenerer tous les tokens des outils concernes. Revoquer les sessions actives.',
+
+  workflow_write:
+    'Le code cree un fichier dans .github/workflows/ — injection de workflow GitHub Actions. ' +
+    'Supprimer le fichier cree. Auditer les workflows existants. ' +
+    'Verifier les GitHub Actions runs recents pour des executions non autorisees.',
+
+  binary_dropper:
+    'CRITIQUE: Pattern dropper detecte — fichier telecharge, rendu executable (chmod), et execute. ' +
+    'Verifier /tmp pour des binaires suspects. Tuer les processus inconnus. ' +
+    'Considerer la machine compromise si le binaire a ete execute.',
+
+  prototype_hook:
+    'Prototype de fonction native modifie (fetch, XMLHttpRequest, http.request). ' +
+    'Technique d\'interception de trafic pour voler des donnees en transit. ' +
+    'Supprimer le package. Auditer le trafic reseau recent.',
+
+  ai_config_injection:
+    'Fichier de config d\'agent IA contient des instructions malveillantes. ' +
+    'NE PAS ouvrir le projet avec un agent IA sans verifier les fichiers .cursorrules, CLAUDE.md, copilot-instructions.md. ' +
+    'Supprimer ou nettoyer ces fichiers avant toute utilisation. Technique ToxicSkills/Clinejection.',
+
+  ai_config_injection_critical:
+    'CRITIQUE: Fichier de config d\'agent IA contient des commandes d\'exfiltration ou un combo shell + credential access. ' +
+    'NE PAS ouvrir ce projet avec un agent IA. Supprimer les fichiers de config compromis. ' +
+    'Si deja ouvert avec un agent IA, considerer la machine compromise. Regenerer tous les secrets.',
+
+  ai_agent_abuse:
+    'CRITIQUE: Un agent IA (Claude, Gemini, Q) est invoque avec des flags de bypass de securite ' +
+    '(--dangerously-skip-permissions, --yolo, --trust-all-tools). Technique s1ngularity/Nx. ' +
+    'NE PAS installer. Verifier si l\'agent a ete execute. Si oui, considerer la machine compromise. ' +
+    'Auditer les fichiers sensibles (.ssh, .aws, .env) pour des acces non autorises.',
 
   canary_exfiltration:
     'CRITIQUE: Le package a tente de voler des credentials (honey tokens). Comportement malveillant confirme. ' +

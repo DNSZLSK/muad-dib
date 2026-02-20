@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-02-20
+
+### Added
+- **Evaluation Framework** (`muaddib evaluate`): unified command measuring TPR (Ground Truth, 4 real-world attacks), FPR (Benign, 98 popular npm packages), and ADR (Adversarial, 35 evasive samples). Results saved to `metrics/v{version}.json` for regression tracking.
+- **Adversarial dataset** (`datasets/adversarial/`): 35 evasive malicious samples across 4 red-team waves + promoted holdout, based on real 2025-2026 attack techniques (Shai-Hulud, PhantomRaven, s1ngularity/Nx, ToxicSkills, chalk/debug compromise).
+- **Benign dataset** (`datasets/benign/packages-npm.txt`): 98 popular npm packages for false positive measurement.
+- **Holdout validation**: 10 unseen samples evaluated with frozen rules to measure generalization (30% pre-tuning detection rate). Published alongside tuned ADR for experimental honesty.
+- **13th scanner: AI Config Scanner** (`src/scanner/ai-config.js`): detects prompt injection in AI agent configuration files (`.cursorrules`, `.cursorignore`, `.windsurfrules`, `CLAUDE.md`, `AGENT.md`, `.github/copilot-instructions.md`, `copilot-setup-steps.yml`). 4 pattern categories: shell commands, exfiltration, credential access, injection instructions. Compound detection escalates to CRITICAL.
+- **AST scanner enhancements**: credential CLI theft detection (`gh auth token`, `gcloud auth print-access-token`, `aws sts get-session-token`), workflow injection detection (fs.writeFileSync to `.github/workflows`), binary dropper detection (fs.chmodSync + exec temp file), prototype hooking detection (globalThis.fetch, XMLHttpRequest.prototype override), AI agent abuse detection (s1ngularity/Nx `--dangerously-skip-permissions`, `--yolo` flags), variable tracking for dangerous commands/workflow paths/temp paths.
+- **Dataflow scanner enhancements**: crypto wallet paths (.ethereum, .electrum, .config/solana, .exodus, .bitcoin, .monero, .gnupg), OS fingerprint sources (os.hostname, os.networkInterfaces, os.userInfo), fs.readdirSync as credential source.
+- **New detection rules**: MUADDIB-AST-008 through AST-017, MUADDIB-AICONF-001, MUADDIB-AICONF-002 (~30 new rules total, 86 rules cumulative).
+- **Evaluation methodology documentation** (`docs/EVALUATION_METHODOLOGY.md`): experimental protocol, raw holdout scores, improvement cycle, attack technique sources.
+- 781 tests (was 742 in v2.1.2), +39 new tests (11 AI config scanner + 13 evaluate + 15 AST enhancements)
+
+### Changed
+- Scanner count: 12 → 13 (added AI config scanner)
+- Rule count: ~56 → 86 (~30 new rules)
+- Test count: 742 → 781 (+5% increase)
+- Architecture diagram updated with 13 scanners and v2.2 evaluation framework
+
+### Breaking Changes
+- None. All changes are additive. The `evaluate` command is a new CLI command. Existing scans benefit from improved detection without changes.
+
 ## [2.1.2] - 2026-02-14
 
 ### Added
@@ -77,7 +100,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.8.0] - 2026-02-13
 
 ### Added
-- **Zero-day monitor** (`muaddib monitor`): continuous polling of npm and PyPI registries via RSS (60s interval), automatic download/extract/scan of every new package
+- **Zero-day monitor** (internal infrastructure): continuous polling of npm and PyPI registries via RSS (60s interval), automatic download/extract/scan of every new package
 - **Discord webhook alerts**: rich embeds with severity color, emoji indicators, package link, ecosystem, sandbox score, readable timestamps
 - **Automated daily report**: 24h summary sent to Discord — packages scanned, clean, suspects, errors, top 3 suspects of the day
 - **Bundled tooling false-positive filter**: findings from known bundled files (yarn.js, webpack.js, terser.js, esbuild.js, polyfills.js) are skipped instead of flagged as suspect
@@ -408,7 +431,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Obfuscation detection
 - Package.json lifecycle script analysis
 
-[Unreleased]: https://github.com/DNSZLSK/muad-dib/compare/v2.1.2...HEAD
+[Unreleased]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.0...HEAD
+[2.2.0]: https://github.com/DNSZLSK/muad-dib/compare/v2.1.2...v2.2.0
 [2.1.2]: https://github.com/DNSZLSK/muad-dib/compare/v2.1.0...v2.1.2
 [2.1.0]: https://github.com/DNSZLSK/muad-dib/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/DNSZLSK/muad-dib/compare/v1.8.0...v2.0.0

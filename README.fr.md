@@ -317,7 +317,7 @@ muaddib init-hooks --type git
 
 ### Moniteur Zero-Day
 
-MUAD'DIB intègre un moniteur zero-day capable de scanner chaque nouveau package npm et PyPI en temps réel avec analyse sandbox Docker et alertes webhook.
+MUAD'DIB surveille en continu les registres npm et PyPI pour détecter les nouveaux packages en temps réel, en les scannant automatiquement avec analyse sandbox Docker et alertes webhook. Ce monitoring tourne en interne sur notre infrastructure — les menaces détectées alimentent la base IOC et l'API threat feed.
 
 ### Décomposition du score
 
@@ -458,6 +458,13 @@ Détecte les patterns malveillants dans les fichiers YAML `.github/workflows/`, 
 | Anomalie de fréquence de publication | T1195.002 | Métadonnées registre |
 | Changement de maintainer/publisher | T1195.002 | Métadonnées registre |
 | Exfiltration de canary tokens | T1552.001 | Honey tokens sandbox |
+| Weaponisation agent IA | T1059.004 | AST (flags s1ngularity/Nx) |
+| Injection prompt config IA | T1059.004 | Scan fichiers (.cursorrules, CLAUDE.md) |
+| Vol credentials CLI (gh, gcloud, aws) | T1552.001 | AST |
+| Dropper binaire (chmod + exec /tmp) | T1105 | AST |
+| Hooking prototype (fetch, XMLHttpRequest) | T1557 | AST |
+| Injection workflow (.github/workflows) | T1195.002 | AST |
+| Harvest crypto wallets | T1005 | Dataflow |
 
 ---
 
@@ -669,7 +676,7 @@ Les alertes apparaissent dans Security > Code scanning alerts.
 ## Architecture
 
 ```
-MUAD'DIB 2.1 Scanner
+MUAD'DIB 2.2 Scanner
 |
 +-- IOC Match (225 000+ packages, JSON DB)
 |   +-- OSV.dev npm dump (200K+ entrées MAL-*)
@@ -681,13 +688,14 @@ MUAD'DIB 2.1 Scanner
 |   +-- Snyk Known Malware
 |   +-- Static IOCs (Socket, Phylum)
 |
-+-- 12 Scanners Parallèles
-|   +-- AST Parse (acorn)
++-- 13 Scanners Parallèles (86 règles)
+|   +-- AST Parse (acorn) — eval/Function, credential CLI theft, binary droppers, prototype hooks
 |   +-- Pattern Matching (shell, scripts)
 |   +-- Typosquat Detection (npm + PyPI, Levenshtein)
 |   +-- Python Scanner (requirements.txt, setup.py, pyproject.toml)
 |   +-- Analyse Entropie Shannon
 |   +-- GitHub Actions Scanner
+|   +-- AI Config Scanner (.cursorrules, CLAUDE.md, copilot-instructions.md)
 |   +-- Package, Dependencies, Hash, npm-registry, Dataflow scanners
 |
 +-- Détection d'Anomalies Supply Chain (v2.0)
@@ -706,7 +714,7 @@ MUAD'DIB 2.1 Scanner
 |
 +-- Paranoid Mode (ultra-strict)
 +-- Docker Sandbox (analyse comportementale, capture réseau, canary tokens, CI-aware)
-+-- Moniteur Zero-Day (polling RSS npm + PyPI, alertes Discord, rapport quotidien)
++-- Moniteur Zero-Day (interne : polling RSS npm + PyPI, alertes Discord, rapport quotidien)
 |
 v
 Dataflow Analysis (credential read -> network send)
@@ -717,6 +725,21 @@ Threat Enrichment (rules, MITRE ATT&CK, playbooks)
 v
 Output (CLI, JSON, HTML, SARIF, Webhook, Threat Feed)
 ```
+
+---
+
+## Metriques d'evaluation
+
+| Version | TPR (Ground Truth) | FPR (Benign) | ADR (Adversarial) | Holdout (pre-tuning) | Date |
+|---------|-------------------|-------------|-------------------|---------------------|------|
+| 2.2.0   | 100.0% (4/4)      | 0.0% (0/98) | 100.0% (35/35)    | 30.0% (3/10)        | 2026-02-20 |
+
+- **TPR** (True Positive Rate) : taux de detection sur 5 attaques supply-chain reelles (event-stream, ua-parser-js, coa, node-ipc, colors)
+- **FPR** (False Positive Rate) : packages avec score > 20 sur 98 packages npm populaires
+- **ADR** (Adversarial Detection Rate) : taux de detection sur 35 samples malveillants evasifs (4 vagues red team + holdout promu)
+- **Holdout** (pre-tuning) : taux de detection sur 10 samples jamais vus avant correction des regles (mesure de generalisation)
+
+Lancez `muaddib evaluate` pour reproduire ces metriques localement. Voir [Evaluation Methodology](docs/EVALUATION_METHODOLOGY.md) pour le protocole experimental complet.
 
 ---
 
@@ -750,12 +773,13 @@ npm test
 
 ### Tests
 
-- **742 tests unitaires/intégration** - 74% coverage via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
+- **781 tests unitaires/intégration** sur 18 fichiers modulaires - 74% coverage via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
 - **56 tests de fuzzing** - YAML malformé, JSON invalide, fichiers binaires, ReDoS, unicode, inputs 10MB
-- **15 tests adversariaux** - Packages malveillants simulés, taux de détection 15/15
+- **35 samples adversariaux** - Packages malveillants évasifs, taux de détection 35/35 (100% ADR)
 - **8 tests multi-facteur typosquat** - Cas limites et comportement cache
 - **Validation ground truth** - 5/5 attaques réelles détectées (event-stream, ua-parser-js, coa, node-ipc, colors)
-- **Validation faux positifs** - 0 faux positifs sur express, lodash, axios, react
+- **Validation faux positifs** - 0/98 faux positifs sur packages npm populaires (0% FPR)
+- **Validation holdout** - 3/10 détection sur samples jamais vus avant correction (30% pre-tuning)
 - **Audit ESLint sécurité** - `eslint-plugin-security` avec 14 règles activées
 
 ---
@@ -768,6 +792,7 @@ npm test
 
 ## Documentation
 
+- [Evaluation Methodology](docs/EVALUATION_METHODOLOGY.md) - Protocole expérimental, scores holdout bruts, sources d'attaques
 - [Threat Model](docs/threat-model.md) - Ce que MUAD'DIB détecte et ne détecte pas
 - [Rapport d'audit sécurité v1.4.1](docs/MUADDIB_Security_Audit_Report_v1.4.1.pdf) - Audit complet (58 issues corrigées)
 - [IOCs YAML](iocs/) - Base de données des menaces
