@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo2removebg.png" alt="MUAD'DIB Logo" width="700">
+  <img src="assets/muaddibLogo.png" alt="MUAD'DIB Logo" width="700">
 </p>
 
 <p align="center">
