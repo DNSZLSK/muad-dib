@@ -944,6 +944,90 @@ La tendance 30% → 40% → 60% → 80% montre une amelioration constante de +20
 
 ---
 
+## MUAD'DIB 2.2.6 — Dataflow inter-module (20 Fevrier 2026)
+
+### Le probleme
+
+MUAD'DIB detectait les flux de donnees dangereux (lecture de credentials + envoi reseau) mais uniquement **dans un seul fichier**. Le scanner dataflow (`src/scanner/dataflow.js`) suivait les variables de la source au sink a l'interieur d'un meme fichier. Mais les attaquants le savent : il suffit de separer la lecture des credentials dans `reader.js` et l'exfiltration dans `sender.js` pour echapper completement a la detection.
+
+C'est exactement ce que font les malwares supply-chain sophistiques : un module "utilitaire" lit discretement les tokens npm ou les cles SSH, un autre module "reseau" envoie les donnees vers un serveur externe. Aucun fichier seul ne contient le pattern complet source→sink.
+
+### La solution : analyse dataflow inter-module
+
+Creation de `src/scanner/module-graph.js` — un nouveau scanner qui construit un **graphe de dependances** entre les modules locaux d'un package et propage les teintes (taint) a travers les frontieres de fichiers.
+
+L'analyse se fait en 3 etapes :
+
+**1. Construction du graphe de dependances** : Parcourt tous les fichiers `.js` du package, extrait les `require('./...')` et `import` locaux (ignore `node_modules`), et construit un graphe oriente des dependances inter-modules.
+
+**2. Annotation des exports teintes** : Pour chaque fichier, analyse les exports (`module.exports`, `exports.foo`) et determine si la valeur exportee depend d'une source sensible :
+- `fs.readFileSync()` — lecture de fichiers (`.npmrc`, `.ssh/id_rsa`, `.env`)
+- `process.env.GITHUB_TOKEN` — variables d'environnement sensibles
+- `os.homedir()` — chemin du repertoire utilisateur
+- `child_process.exec()` — execution de commandes
+- `dns.resolveTxt()` — resolution DNS
+
+L'analyse supporte les patterns avances :
+- **Methodes de classe** : `class Collector { read() { return fs.readFileSync(...) } }` → export teinte
+- **Corps de fonctions** : `module.exports = function() { return process.env.TOKEN }` → export teinte
+- **Propagation de variables** : `const data = fs.readFileSync(...); module.exports = data` → export teinte
+
+**3. Detection des flux inter-fichiers** : Pour chaque fichier qui importe un module teinte, cherche si les variables importees atteignent un sink reseau :
+- `fetch()`, `https.request()`, `https.get()`
+- `WebSocket`, `XMLHttpRequest`
+- `child_process.exec()`, `.connect()`, `.write()`, `.send()`
+
+La propagation de teinte supporte :
+- **Chaines de re-export** (3 hops max) : `a.js` → `b.js` (re-export) → `c.js` (sink)
+- **Inline require re-export** : `module.exports = require('./source')`
+- **Function-wrapped taint** : `module.exports = encode(taintedVar)`
+- **Named export destructuring** : `const { getToken } = require('./utils')`
+- **Propagation d'instances** : `new Collector()` herite la teinte du module importe
+
+### Holdout v5 : premier holdout inter-module
+
+10 samples crees avec les regles gelees, specifiquement pour tester le nouveau scanner.
+
+**Score pre-tuning : 5/10 (50%)** — chute attendue par rapport au holdout v4 (80%), car c'est un scanner entierement nouveau.
+
+| Sample | Technique | Resultat |
+|--------|-----------|----------|
+| split-env-exfil | Cross-file `process.env.GITHUB_TOKEN` → `fetch()` | PASS |
+| split-npmrc-steal | Cross-file `fs.readFileSync(.npmrc)` → `https.request` | PASS |
+| reexport-chain | Double re-export (a → b → c) | PASS |
+| three-hop-chain | Source → transform (base64) → sink, 3 hops | PASS |
+| named-export-steal | Named export destructuring `{ getCredentials }` | PASS |
+| class-method-exfil | Instanciation de classe + appel methode | FAIL → PASS (post-correction) |
+| mixed-inline-split | Dual : eval inline + flux inter-fichiers | PASS |
+| conditional-split | Exfiltration conditionnelle CI | PASS |
+| event-emitter-flow | EventEmitter pub/sub entre modules | FAIL (limitation acceptee) |
+| callback-exfil | Passage de teinte via callback | FAIL (limitation acceptee) |
+
+### Corrections post-holdout
+
+**class-method-exfil** : Ajout de l'analyse des corps de methodes dans les declarations de classe. Le scanner annote maintenant correctement les exports de classes dont les methodes contiennent des sources sensibles (`fs.readFileSync`, `process.env`, etc.).
+
+### 2 limitations acceptees
+
+**EventEmitter** : Le flux de donnees via `bus.emit('data', credentials)` → `bus.on('data', callback)` necessite une analyse dynamique ou un suivi symbolique des evenements. L'approche statique par AST ne peut pas resoudre la correspondance nom d'evenement → listener sans executer le code.
+
+**Callbacks** : La propagation de teinte a travers les parametres de callback (`reader(function(data) { fetch(url, data) })`) necessite une analyse inter-procedurale complete. C'est un probleme connu des analyses statiques — le tracking des valeurs a travers les frontieres de fonctions anonymes depasse le scope de l'analyse actuelle.
+
+Ces deux limitations sont documentees et n'affectent pas la detection des patterns inter-modules les plus courants dans les malwares supply-chain (re-export, named export, classe, inline require).
+
+### Resultats finaux v2.2.6
+
+| Metrique | Valeur | Details |
+|----------|--------|---------|
+| **TPR** (Ground Truth) | **100%** (4/4) | event-stream, ua-parser-js, coa, node-ipc |
+| **FPR** (Benign) | **0%** (0/98) | Aucun faux positif |
+| **ADR** (Adversarial) | **100%** (35/35) | 35 samples evasifs detectes |
+| **Holdout v5** (pre-tuning) | **50%** (5/10) | 10 samples inter-modules |
+
+**822 tests**, 0 echecs. **93 regles de detection**. **14 scanners** (13 paralleles + module-graph). Flags `--no-deobfuscate` et `--no-module-graph` disponibles.
+
+---
+
 ## Etat actuel
 
 ### Ce qui fonctionne
@@ -965,9 +1049,10 @@ La tendance 30% → 40% → 60% → 80% montre une amelioration constante de +20
 | Version check | Notification automatique des nouvelles versions au demarrage |
 | **Detection comportementale (v2.0)** | Temporal lifecycle, AST diff, publish anomaly, maintainer change, canary tokens |
 | **Validation & Observabilite (v2.1)** | Ground truth (5 attaques, 100%), detection time logging, FP rate tracking, score breakdown, threat feed API |
-| **Evaluation & Red Team (v2.2)** | `muaddib evaluate`, 35 adversariaux (4 vagues) + holdout v1/v2/v3/v4 (40 samples), TPR 100%, FPR 0%, ADR 100%, Holdout v1 30%, Holdout v2 40%, Holdout v3 60%, Holdout v4 80%, 13 scanners, 92 regles, AI config scanner |
+| **Evaluation & Red Team (v2.2)** | `muaddib evaluate`, 35 adversariaux (4 vagues) + holdout v1/v2/v3/v4/v5 (50 samples), TPR 100%, FPR 0%, ADR 100%, Holdout v1 30%, Holdout v2 40%, Holdout v3 60%, Holdout v4 80%, Holdout v5 50%, 14 scanners, 93 regles, AI config scanner |
 | **Desobfuscation (v2.2.5)** | `src/scanner/deobfuscate.js`, 4 transformations AST + const propagation, approche additive (original + desobfusque), `--no-deobfuscate` flag |
-| Tests | **805 tests unitaires** + 56 fuzz + 35 adversariaux, **74% coverage** (Codecov) |
+| **Dataflow inter-module (v2.2.6)** | `src/scanner/module-graph.js`, graphe de dependances, propagation de teinte inter-fichiers, 3-hop re-export, class methods, named exports, `--no-module-graph` flag |
+| Tests | **822 tests unitaires** + 56 fuzz + 35 adversariaux, **74% coverage** (Codecov) |
 | **Hardening securite (v2.1.2)** | SSRF protection (shared/download.js), command injection prevention (execFileSync), path traversal (sanitizePackageName), JSON.parse protege, webhook strict |
 | Audit securite | 2 audits complets, **58 issues corrigees**, [rapport PDF](MUADDIB_Security_Audit_Report_v1.4.1.pdf) |
 

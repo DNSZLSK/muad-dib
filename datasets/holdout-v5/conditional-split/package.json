@@ -1,0 +1,5 @@
+{
+  "name": "conditional-split",
+  "version": "1.0.0",
+  "description": "Holdout v5 — conditional CI-gated exfiltration"
+}

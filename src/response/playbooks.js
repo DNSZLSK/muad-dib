@@ -304,6 +304,11 @@ const PLAYBOOKS = {
     'NE PAS installer. Ceci execute du code arbitraire a l\'installation. ' +
     'Si deja installe: considerer la machine compromise. Auditer les modifications systeme.',
 
+  cross_file_dataflow:
+    'CRITIQUE: Un module lit des credentials et les exporte vers un autre module qui les envoie sur le reseau. ' +
+    'Exfiltration inter-fichiers confirmee. Isoler la machine, supprimer le package, regenerer TOUS les secrets. ' +
+    'Auditer les connexions reseau recentes pour identifier les donnees exfiltrees.',
+
   credential_tampering:
     'CRITIQUE: Ecriture detectee dans un cache sensible (npm _cacache, yarn, pip). ' +
     'Possible cache poisoning: injection de code malveillant dans des packages caches. ' +
