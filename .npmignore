@@ -20,4 +20,7 @@ eslint.config.mjs
 action.yml
 .pre-commit-hooks.yaml
 README.fr.md
-assets/logo.png
+metrics/
+nul
+datasets/holdout-v2/
+datasets/holdout-v3/

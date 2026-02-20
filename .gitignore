@@ -1,5 +1,6 @@
 node_modules/
 coverage/
+metrics/
 .muaddib-cache/
 *.log
 rapport.html
@@ -10,5 +11,7 @@ src/ioc/data/iocs-compact.json
 nul
 iocs.json.gz
 *.vsix
+*.tgz
+.nyc_output/
 .env
 .env.*
