@@ -500,7 +500,7 @@ const RULES = {
   workflow_write: {
     id: 'MUADDIB-AST-015',
     name: 'GitHub Actions Workflow Write',
-    severity: 'HIGH',
+    severity: 'CRITICAL',
     confidence: 'high',
     description: 'fs.writeFileSync cree un fichier dans .github/workflows — injection de workflow GitHub Actions pour persistence. Technique Shai-Hulud 2.0.',
     references: [
@@ -560,6 +560,44 @@ const RULES = {
       'https://developer.nvidia.com/blog/ai-agent-security-guidance/'
     ],
     mitre: 'T1059'
+  },
+
+  env_charcode_reconstruction: {
+    id: 'MUADDIB-AST-018',
+    name: 'Environment Variable Key Reconstruction',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'process.env accede avec une cle reconstruite dynamiquement via String.fromCharCode. Technique d\'obfuscation pour eviter la detection statique des noms de variables sensibles (GITHUB_TOKEN, etc.).',
+    references: [
+      'https://attack.mitre.org/techniques/T1027/',
+      'https://attack.mitre.org/techniques/T1552/001/'
+    ],
+    mitre: 'T1027'
+  },
+
+  lifecycle_shell_pipe: {
+    id: 'MUADDIB-PKG-010',
+    name: 'Lifecycle Script Pipes to Shell',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Script lifecycle (preinstall/install/postinstall) execute curl | sh ou wget | bash — telecharge et execute du code distant au moment de npm install.',
+    references: [
+      'https://blog.phylum.io/shai-hulud-npm-worm',
+      'https://socket.dev/blog/2025-supply-chain-report'
+    ],
+    mitre: 'T1195.002'
+  },
+
+  credential_tampering: {
+    id: 'MUADDIB-FLOW-003',
+    name: 'Credential/Cache Tampering',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Ecriture dans un chemin sensible (cache npm _cacache, cache yarn, credentials). Possible cache poisoning: injection de code malveillant dans des packages caches.',
+    references: [
+      'https://attack.mitre.org/techniques/T1565/001/'
+    ],
+    mitre: 'T1565.001'
   },
 
   ai_agent_abuse: {

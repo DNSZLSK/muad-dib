@@ -293,6 +293,21 @@ const PLAYBOOKS = {
     'CRITIQUE: Le package a tente de voler des credentials (honey tokens). Comportement malveillant confirme. ' +
     'NE PAS installer. Signaler immediatement sur npm/PyPI. ' +
     'Si deja installe: considerer la machine compromise, regenerer TOUS les secrets.',
+
+  env_charcode_reconstruction:
+    'Obfuscation detectee: le nom de la variable d\'environnement est reconstruit dynamiquement via fromCharCode ' +
+    'pour eviter la detection statique. Technique de vol de GITHUB_TOKEN, NPM_TOKEN, etc. ' +
+    'Verifier quelles variables sont accedees et si elles sont exfiltrees.',
+
+  lifecycle_shell_pipe:
+    'CRITIQUE: Le script lifecycle (preinstall/postinstall) pipe du code distant vers un shell (curl | sh). ' +
+    'NE PAS installer. Ceci execute du code arbitraire a l\'installation. ' +
+    'Si deja installe: considerer la machine compromise. Auditer les modifications systeme.',
+
+  credential_tampering:
+    'CRITIQUE: Ecriture detectee dans un cache sensible (npm _cacache, yarn, pip). ' +
+    'Possible cache poisoning: injection de code malveillant dans des packages caches. ' +
+    'Nettoyer le cache: npm cache clean --force. Reinstaller les dependances depuis zero.',
 };
 
 function getPlaybook(threatType) {

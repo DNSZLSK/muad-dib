@@ -1,0 +1,6 @@
+{
+  "name": "setTimeout-chain",
+  "version": "1.0.0",
+  "description": "Holdout v2 — nested setTimeout chain with random delays",
+  "main": "index.js"
+}

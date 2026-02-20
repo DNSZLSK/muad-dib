@@ -78,6 +78,13 @@ const HOOKABLE_NATIVES = [
   'WebSocket', 'EventSource'
 ];
 
+// Node.js core module classes targeted for prototype hooking
+const NODE_HOOKABLE_MODULES = ['http', 'https', 'net', 'tls', 'stream'];
+const NODE_HOOKABLE_CLASSES = [
+  'IncomingMessage', 'ServerResponse', 'ClientRequest',
+  'OutgoingMessage', 'Socket', 'Server', 'Agent'
+];
+
 // Paths indicating sandbox/container environment detection (anti-analysis)
 const SANDBOX_INDICATORS = [
   '/.dockerenv',
@@ -162,6 +169,20 @@ function analyzeFile(content, filePath, basePath) {
       allowHashBang: true
     });
   } catch {
+    // AST parse failed — apply regex fallback for known dangerous patterns
+
+    // Workflow manipulation: reads + writes to .github/workflows
+    if (/\.github/.test(content) && /workflows/.test(content) &&
+        /writeFileSync|writeFile/.test(content) &&
+        /readdirSync|readFileSync/.test(content)) {
+      threats.push({
+        type: 'workflow_write',
+        severity: 'CRITICAL',
+        message: 'File reads and modifies .github/workflows — GitHub Actions injection (regex fallback).',
+        file: path.relative(basePath, filePath)
+      });
+    }
+
     if (content.length > 1000 && content.split('\n').length < 10) {
       threats.push({
         type: 'possible_obfuscation',
@@ -198,6 +219,9 @@ function analyzeFile(content, filePath, basePath) {
     return null;
   }
 
+  // Pre-scan for fromCharCode pattern (env var name obfuscation)
+  const hasFromCharCode = content.includes('fromCharCode');
+
   walk.simple(ast, {
     VariableDeclarator(node) {
       if (node.id?.type === 'Identifier') {
@@ -230,6 +254,10 @@ function analyzeFile(content, filePath, basePath) {
               prop?.type === 'Identifier' && (prop.name === 'join' || prop.name === 'resolve')) {
             const joinArgs = node.init.arguments.map(a => extractStringValue(a) || '').join('/');
             if (/\.github[\\/\/]workflows/i.test(joinArgs) || /\.github[\\/\/]actions/i.test(joinArgs)) {
+              workflowPathVars.add(node.id.name);
+            }
+            // Propagate: path.join(workflowPathVar, ...) inherits tracking
+            else if (node.init.arguments.some(a => a.type === 'Identifier' && workflowPathVars.has(a.name))) {
               workflowPathVars.add(node.id.name);
             }
           }
@@ -416,8 +444,8 @@ function analyzeFile(content, filePath, basePath) {
           if (hasWorkflowVar || /\.github[\\/]workflows/i.test(checkPath) || /\.github[\\/]actions/i.test(checkPath)) {
             threats.push({
               type: 'workflow_write',
-              severity: 'HIGH',
-              message: `${writeMethod}() creates file in .github/workflows — GitHub Actions persistence technique.`,
+              severity: 'CRITICAL',
+              message: `${writeMethod}() writes to .github/workflows — GitHub Actions injection/persistence technique.`,
               file: path.relative(basePath, filePath)
             });
           }
@@ -433,8 +461,24 @@ function analyzeFile(content, filePath, basePath) {
           if (pathArg?.type === 'Identifier' && workflowPathVars.has(pathArg.name)) {
             threats.push({
               type: 'workflow_write',
-              severity: 'HIGH',
+              severity: 'CRITICAL',
               message: `${mkdirMethod}() creates .github/workflows directory — GitHub Actions persistence technique.`,
+              file: path.relative(basePath, filePath)
+            });
+          }
+        }
+      }
+
+      // Detect fs.readdirSync on .github/workflows — workflow enumeration for injection
+      if (node.callee.type === 'MemberExpression' && node.callee.property?.type === 'Identifier') {
+        const readDirMethod = node.callee.property.name;
+        if ((readDirMethod === 'readdirSync' || readDirMethod === 'readdir') && node.arguments.length > 0) {
+          const pathArg = node.arguments[0];
+          if (pathArg?.type === 'Identifier' && workflowPathVars.has(pathArg.name)) {
+            threats.push({
+              type: 'workflow_write',
+              severity: 'CRITICAL',
+              message: `${readDirMethod}() enumerates .github/workflows — workflow modification/injection technique.`,
               file: path.relative(basePath, filePath)
             });
           }
@@ -500,6 +544,24 @@ function analyzeFile(content, filePath, basePath) {
             type: 'ai_agent_abuse',
             severity: 'HIGH',
             message: `AI coding agent "${cmdName}" invoked from package — potential AI agent weaponization.`,
+            file: path.relative(basePath, filePath)
+          });
+        }
+      }
+
+      // Detect Object.defineProperty(process.env, ...) — env interception via property descriptors
+      if (node.callee.type === 'MemberExpression' &&
+          node.callee.object?.type === 'Identifier' && node.callee.object.name === 'Object' &&
+          node.callee.property?.type === 'Identifier' && node.callee.property.name === 'defineProperty' &&
+          node.arguments.length >= 2) {
+        const target = node.arguments[0];
+        if (target.type === 'MemberExpression' &&
+            target.object?.name === 'process' &&
+            target.property?.name === 'env') {
+          threats.push({
+            type: 'env_proxy_intercept',
+            severity: 'CRITICAL',
+            message: 'Object.defineProperty(process.env) detected — intercepts environment variable access for credential theft.',
             file: path.relative(basePath, filePath)
           });
         }
@@ -665,6 +727,25 @@ function analyzeFile(content, filePath, basePath) {
             file: path.relative(basePath, filePath)
           });
         }
+
+        // <module>.<Class>.prototype.<method> = ... (Node.js core module prototype hooking)
+        // e.g. http.IncomingMessage.prototype.emit = function(...)
+        if (left.object?.type === 'MemberExpression' &&
+            left.object.property?.type === 'Identifier' && left.object.property.name === 'prototype' &&
+            left.object.object?.type === 'MemberExpression' &&
+            left.object.object.object?.type === 'Identifier' &&
+            left.object.object.property?.type === 'Identifier') {
+          const moduleName = left.object.object.object.name;
+          const className = left.object.object.property.name;
+          if (NODE_HOOKABLE_MODULES.includes(moduleName) && NODE_HOOKABLE_CLASSES.includes(className)) {
+            threats.push({
+              type: 'prototype_hook',
+              severity: 'CRITICAL',
+              message: `${moduleName}.${className}.prototype.${left.property?.name || '?'} overridden — Node.js core module prototype hooking for traffic interception.`,
+              file: path.relative(basePath, filePath)
+            });
+          }
+        }
       }
     },
 
@@ -675,6 +756,15 @@ function analyzeFile(content, filePath, basePath) {
       ) {
         // Dynamic access: process.env[variable] — always flag as MEDIUM
         if (node.computed) {
+          // Escalate if env key was built via String.fromCharCode (obfuscation)
+          if (hasFromCharCode) {
+            threats.push({
+              type: 'env_charcode_reconstruction',
+              severity: 'HIGH',
+              message: 'process.env accessed with dynamically reconstructed key (String.fromCharCode obfuscation).',
+              file: path.relative(basePath, filePath)
+            });
+          }
           threats.push({
             type: 'env_access',
             severity: 'MEDIUM',

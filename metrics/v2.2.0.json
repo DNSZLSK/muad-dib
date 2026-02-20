@@ -1,6 +1,6 @@
 {
   "version": "2.2.0",
-  "date": "2026-02-20T13:40:59.769Z",
+  "date": "2026-02-20T15:41:24.060Z",
   "groundTruth": {
     "detected": 4,
     "total": 4,
@@ -708,7 +708,7 @@
       },
       {
         "name": "self-hosted-runner-backdoor",
-        "score": 23,
+        "score": 53,
         "threshold": 20,
         "detected": true
       },

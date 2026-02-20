@@ -69,6 +69,17 @@ function analyzeFile(content, filePath, basePath) {
         if (containsSensitiveLiteral(node.init)) {
           sensitivePathVars.add(node.id.name);
         }
+        // Propagate sensitive vars through path.join/resolve
+        if (node.init?.type === 'CallExpression' && node.init.callee?.type === 'MemberExpression') {
+          const obj = node.init.callee.object;
+          const prop = node.init.callee.property;
+          if (obj?.type === 'Identifier' && obj.name === 'path' &&
+              prop?.type === 'Identifier' && (prop.name === 'join' || prop.name === 'resolve')) {
+            if (node.init.arguments.some(a => a.type === 'Identifier' && sensitivePathVars.has(a.name))) {
+              sensitivePathVars.add(node.id.name);
+            }
+          }
+        }
       }
     },
 
@@ -158,6 +169,21 @@ function analyzeFile(content, filePath, basePath) {
         }
       }
 
+      // Detect writeFileSync/writeFile on sensitive paths → cache poisoning / credential tampering
+      if (node.callee.type === 'MemberExpression') {
+        const prop = node.callee.property;
+        if (prop?.type === 'Identifier' && (prop.name === 'writeFileSync' || prop.name === 'writeFile')) {
+          const arg = node.arguments[0];
+          if (arg && isCredentialPath(arg, sensitivePathVars)) {
+            sinks.push({
+              type: 'file_tamper',
+              name: prop.name,
+              line: node.loc?.start?.line
+            });
+          }
+        }
+      }
+
       // Track eval calls for staged payload detection
       if (callName === 'eval') {
         sinks.push({
@@ -173,6 +199,15 @@ function analyzeFile(content, filePath, basePath) {
         node.object?.object?.name === 'process' &&
         node.object?.property?.name === 'env'
       ) {
+        // Dynamic bracket access: process.env[variable]
+        if (node.computed) {
+          sources.push({
+            type: 'env_read',
+            name: 'process.env[dynamic]',
+            line: node.loc?.start?.line
+          });
+          return;
+        }
         const envVar = node.property?.name || '';
         if (isSensitiveEnv(envVar)) {
           sources.push({
@@ -197,11 +232,15 @@ function analyzeFile(content, filePath, basePath) {
     });
   }
 
-  if (sources.length > 0 && sinks.length > 0) {
+  // Separate exfiltration sinks from file tampering sinks
+  const exfilSinks = sinks.filter(s => s.type !== 'file_tamper');
+  const fileTamperSinks = sinks.filter(s => s.type === 'file_tamper');
+
+  if (sources.length > 0 && exfilSinks.length > 0) {
     // Determine severity by scope proximity: if source and sink are < 50 lines apart -> CRITICAL, else HIGH
     let severity = 'HIGH';
     for (const src of sources) {
-      for (const sink of sinks) {
+      for (const sink of exfilSinks) {
         if (src.line && sink.line && Math.abs(src.line - sink.line) < 50) {
           severity = 'CRITICAL';
           break;
@@ -213,7 +252,17 @@ function analyzeFile(content, filePath, basePath) {
     threats.push({
       type: 'suspicious_dataflow',
       severity: severity,
-      message: `Suspicious flow: credentials read (${sources.map(s => s.name).join(', ')}) + network send (${sinks.map(s => s.name).join(', ')})`,
+      message: `Suspicious flow: credentials read (${sources.map(s => s.name).join(', ')}) + network send (${exfilSinks.map(s => s.name).join(', ')})`,
+      file: path.relative(basePath, filePath)
+    });
+  }
+
+  // Detect cache poisoning: credential source + write to sensitive path
+  if (sources.length > 0 && fileTamperSinks.length > 0) {
+    threats.push({
+      type: 'credential_tampering',
+      severity: 'CRITICAL',
+      message: `Cache poisoning: sensitive data access (${sources.map(s => s.name).join(', ')}) + write to sensitive path (${fileTamperSinks.map(s => s.name).join(', ')})`,
       file: path.relative(basePath, filePath)
     });
   }
@@ -226,7 +275,8 @@ const SENSITIVE_PATH_PATTERNS = [
   '/etc/passwd', '/etc/shadow', '/etc/hosts',
   '.ethereum', '.electrum', '.config/solana', '.exodus',
   '.atomic', '.metamask', '.ledger-live', '.trezor',
-  '.bitcoin', '.monero', '.gnupg'
+  '.bitcoin', '.monero', '.gnupg',
+  '_cacache', '.cache/yarn', '.cache/pip'
 ];
 
 function isSensitivePath(val) {
