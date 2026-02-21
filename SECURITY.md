@@ -4,6 +4,7 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
+| 2.2.x   | :white_check_mark: |
 | 2.1.x   | :white_check_mark: |
 | 2.0.x   | :white_check_mark: |
 | 1.8.x   | :x:                |
@@ -59,9 +60,9 @@ Please include the following information in your report:
 - We aim to release fixes before public disclosure
 - We request a 90-day disclosure window for complex issues
 
-## Detection Rules (v2.1.2)
+## Detection Rules (v2.2.13)
 
-MUAD'DIB uses 12 parallel scanners + 5 behavioral anomaly detection features + ground truth validation, producing the following rule IDs:
+MUAD'DIB uses 14 parallel scanners + 5 behavioral anomaly detection features + ground truth validation, producing the following rule IDs:
 
 ### AST Scanner
 
@@ -103,6 +104,42 @@ MUAD'DIB uses 12 parallel scanners + 5 behavioral anomaly detection features + g
 | MUADDIB-PKG-007 | GitHub Token Access | HIGH |
 | MUADDIB-PKG-008 | AWS Credential Access | HIGH |
 | MUADDIB-PKG-009 | Base64 Encoding in Script | MEDIUM |
+| MUADDIB-PKG-010 | Lifecycle Shell Pipe | CRITICAL |
+
+### AST Scanner (v2.2+)
+
+| Rule ID | Name | Severity | MITRE |
+|---------|------|----------|-------|
+| MUADDIB-AST-008 | Dynamic Require with Decode | HIGH | T1059 |
+| MUADDIB-AST-009 | Sandbox Evasion | HIGH | T1497 |
+| MUADDIB-AST-010 | Detached Process | HIGH | T1059 |
+| MUADDIB-AST-011 | Binary Dropper Pattern | CRITICAL | T1105 |
+| MUADDIB-AST-012 | Dynamic Require Decode | HIGH | T1059 |
+| MUADDIB-AST-013 | AI Agent Abuse | CRITICAL | T1059 |
+| MUADDIB-AST-014 | Credential CLI Theft | CRITICAL | T1552 |
+| MUADDIB-AST-015 | Workflow Write | HIGH | T1195.002 |
+| MUADDIB-AST-016 | Binary Dropper | CRITICAL | T1105 |
+| MUADDIB-AST-017 | Prototype Hooking | HIGH | T1574 |
+| MUADDIB-AST-018 | Env Charcode Reconstruction | HIGH | T1027 |
+| MUADDIB-AST-019 | Require Cache Poisoning | CRITICAL | T1574 |
+| MUADDIB-AST-020 | Staged Binary Payload | CRITICAL | T1027 |
+| MUADDIB-AST-021 | Staged Eval Decode | CRITICAL | T1140 |
+| MUADDIB-AST-022 | Encrypted Payload Decryption | HIGH | T1140 |
+| MUADDIB-AST-023 | Module Compile Execution | CRITICAL | T1059 |
+
+### AI Config Scanner (v2.2)
+
+| Rule ID | Name | Severity |
+|---------|------|----------|
+| MUADDIB-AICONF-001 | AI Config Prompt Injection | HIGH |
+| MUADDIB-AICONF-002 | AI Config Compound Injection | CRITICAL |
+
+### Dataflow Scanner (v2.2+)
+
+| Rule ID | Name | Severity |
+|---------|------|----------|
+| MUADDIB-FLOW-003 | Credential Tampering / Cache Poisoning | CRITICAL |
+| MUADDIB-FLOW-004 | Cross-File Dataflow | CRITICAL |
 
 ### Obfuscation Scanner
 
@@ -281,15 +318,15 @@ The sandbox simulates CI environments by setting: `CI=true`, `GITHUB_ACTIONS=tru
 2. **Signed commits**: Use GPG-signed commits when possible
 3. **Review dependencies**: Check new dependencies before adding them
 
-## Threat Model (v2.1.2)
+## Threat Model (v2.2.13)
 
-MUAD'DIB 2.1 uses a **triple detection approach**:
+MUAD'DIB 2.2 uses a **triple detection approach**:
 
 1. **IOC-based detection** (v1.x): Matches packages against 225,000+ known malicious packages from OSV, DataDog, OSSF, GitHub Advisory, and other sources. Fast and reliable for known threats.
 
 2. **Behavioral anomaly detection** (v2.0): Analyzes changes between package versions to detect supply-chain attacks before they appear in IOC databases. Compares lifecycle scripts, AST, publish frequency, and maintainer metadata across versions. This approach can detect 0-day behavioral anomalies without any prior knowledge of the specific attack.
 
-3. **Ground truth validation** (v2.1): Validates detection accuracy against 5 real-world attacks, tracks detection lead times vs. public advisories, and monitors false positive rates over time. Provides observability into scanner effectiveness.
+3. **Ground truth validation** (v2.1–v2.2.12): Validates detection accuracy against 51 real-world attacks (49 active samples), tracks detection lead times vs. public advisories, and monitors false positive rates over time. Provides observability into scanner effectiveness.
 
 The behavioral detection features are opt-in (`--temporal-full`) and query the npm registry at scan time. They are particularly effective against:
 - Account takeover attacks (event-stream pattern)
@@ -297,19 +334,17 @@ The behavioral detection features are opt-in (`--temporal-full`) and query the n
 - Dormant package hijacking (abandonware takeover)
 - Sudden code injection (Shai-Hulud, ua-parser-js pattern)
 
-## Ground Truth Validation (v2.1)
+## Ground Truth Validation (v2.2.12)
 
-MUAD'DIB v2.1 includes a ground truth dataset of 5 real-world supply-chain attacks to continuously validate detection coverage:
+MUAD'DIB includes a ground truth dataset of 51 real-world supply-chain attacks (49 active samples) to continuously validate detection coverage.
 
-| Attack | Year | Expected | Result |
-|--------|------|----------|--------|
-| event-stream | 2018 | CRITICAL IOC match | Detected (2 CRITICAL) |
-| ua-parser-js | 2021 | Lifecycle script | Detected (1 MEDIUM) |
-| coa | 2021 | Lifecycle + obfuscation | Detected (1 HIGH + 1 MEDIUM) |
-| node-ipc | 2022 | CRITICAL IOC match | Detected (2 CRITICAL) |
-| colors | 2022 | Out of scope (protestware) | Correctly skipped |
+**TPR: 91.8% (45/49 detected)**
 
-Run `muaddib replay` to validate detection at any time.
+4 out-of-scope misses (browser-only or FP-risky):
+- lottie-player, polyfill-io, trojanized-jquery (browser-only DOM attacks)
+- websocket-rat (FP-risky pattern)
+
+Run `muaddib evaluate --ground-truth` to validate detection at any time.
 
 ## Threat Feed API Security
 

@@ -312,6 +312,14 @@ function checkPyPITyposquatting(deps, targetPath) {
 }
 
 async function run(targetPath, options = {}) {
+  // Validate targetPath exists and is a directory
+  if (!targetPath || !fs.existsSync(targetPath)) {
+    throw new Error(`Target path does not exist: ${targetPath}`);
+  }
+  if (!fs.statSync(targetPath).isDirectory()) {
+    throw new Error(`Target path is not a directory: ${targetPath}`);
+  }
+
   // Ensure IOCs are downloaded (first run only, graceful failure)
   await ensureIOCs();
 
@@ -396,7 +404,7 @@ async function run(targetPath, options = {}) {
     ...pypiTyposquatThreats,
     ...entropyThreats,
     ...aiConfigThreats,
-    ...crossFileFlows.map(f => ({
+    ...crossFileFlows.filter(f => f && f.sourceFile && f.sinkFile).map(f => ({
       type: f.type,
       severity: f.severity,
       message: `Cross-file dataflow: ${f.source} in ${f.sourceFile} → ${f.sink} in ${f.sinkFile}`,
