@@ -2,13 +2,13 @@ const fs = require('fs');
 const path = require('path');
 const acorn = require('acorn');
 const { findFiles } = require('../utils');
+const { ACORN_OPTIONS: BASE_ACORN_OPTIONS } = require('../shared/constants.js');
 
 // --- Sensitive source patterns ---
 const SENSITIVE_MODULES = new Set(['fs', 'child_process', 'dns', 'os']);
 
 const ACORN_OPTIONS = {
-  ecmaVersion: 'latest',
-  sourceType: 'module',
+  ...BASE_ACORN_OPTIONS,
   allowReturnOutsideFunction: true,
   allowImportExportEverywhere: true,
 };

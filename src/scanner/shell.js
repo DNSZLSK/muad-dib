@@ -1,9 +1,8 @@
 const fs = require('fs');
 const path = require('path');
-const { findFiles } = require('../utils.js');
+const { findFiles, forEachSafeFile } = require('../utils.js');
 
 const SHELL_EXCLUDED_DIRS = ['node_modules', '.git', '.muaddib-cache'];
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
 const MALICIOUS_PATTERNS = [
   { pattern: /curl.*\|.*sh/m, name: 'curl_pipe_shell', severity: 'HIGH' },
@@ -26,16 +25,7 @@ async function scanShellScripts(targetPath) {
   // Cherche les fichiers shell
   const files = findFiles(targetPath, { extensions: ['.sh', '.bash', '.zsh', '.command'], excludedDirs: SHELL_EXCLUDED_DIRS });
 
-  for (const file of files) {
-    let content;
-    try {
-      const stat = fs.statSync(file);
-      if (stat.size > MAX_FILE_SIZE) continue;
-      content = fs.readFileSync(file, 'utf8');
-    } catch {
-      continue; // Skip unreadable files
-    }
-    
+  forEachSafeFile(files, (file, content) => {
     // Strip comment lines to avoid false positives on documentation
     const activeContent = content.split('\n')
       .filter(line => !line.trimStart().startsWith('#'))
@@ -51,7 +41,7 @@ async function scanShellScripts(targetPath) {
         });
       }
     }
-  }
+  });
 
   return threats;
 }

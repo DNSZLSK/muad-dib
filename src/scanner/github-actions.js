@@ -1,8 +1,9 @@
 const fs = require('fs');
 const path = require('path');
 
+const { MAX_FILE_SIZE } = require('../shared/constants.js');
+
 const YAML_EXTENSIONS = ['.yml', '.yaml'];
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const MAX_DEPTH = 10;
 
 function scanGitHubActions(targetPath) {

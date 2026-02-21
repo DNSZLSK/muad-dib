@@ -25,7 +25,7 @@ const { detectSuddenLifecycleChange } = require('./temporal-analysis.js');
 const { detectSuddenAstChanges } = require('./temporal-ast-diff.js');
 const { detectPublishAnomaly } = require('./publish-anomaly.js');
 const { detectMaintainerChange } = require('./maintainer-change.js');
-const { setExtraExcludes, getExtraExcludes, Spinner } = require('./utils.js');
+const { setExtraExcludes, getExtraExcludes, Spinner, listInstalledPackages } = require('./utils.js');
 
 // ============================================
 // SCORING CONSTANTS
@@ -62,7 +62,7 @@ const RISK_THRESHOLDS = {
 // Maximum score (capped)
 const MAX_RISK_SCORE = 100;
 
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+const { MAX_FILE_SIZE } = require('./shared/constants.js');
 
 // Cap MEDIUM prototype_hook contribution (frameworks like Restify have 50+ extensions)
 const PROTO_HOOK_MEDIUM_CAP = 15;
@@ -424,33 +424,8 @@ async function run(targetPath, options = {}) {
     if (!options._capture && !options.json) {
       console.log('[TEMPORAL] Analyzing lifecycle script changes (this makes network requests)...\n');
     }
-    const nodeModulesPath = path.join(targetPath, 'node_modules');
-    if (fs.existsSync(nodeModulesPath)) {
-      const pkgNames = [];
-      try {
-        const items = fs.readdirSync(nodeModulesPath);
-        for (const item of items) {
-          if (item.startsWith('.')) continue;
-          const itemPath = path.join(nodeModulesPath, item);
-          try {
-            const stat = fs.lstatSync(itemPath);
-            if (stat.isSymbolicLink() || !stat.isDirectory()) continue;
-            if (item.startsWith('@')) {
-              const scopedItems = fs.readdirSync(itemPath);
-              for (const si of scopedItems) {
-                const sp = path.join(itemPath, si);
-                const ss = fs.lstatSync(sp);
-                if (!ss.isSymbolicLink() && ss.isDirectory()) {
-                  pkgNames.push(`${item}/${si}`);
-                }
-              }
-            } else {
-              pkgNames.push(item);
-            }
-          } catch { /* skip unreadable */ }
-        }
-      } catch { /* no node_modules readable */ }
-
+    const pkgNames = listInstalledPackages(targetPath);
+    {
       const TEMPORAL_CONCURRENCY = 5;
       for (let i = 0; i < pkgNames.length; i += TEMPORAL_CONCURRENCY) {
         const batch = pkgNames.slice(i, i + TEMPORAL_CONCURRENCY);
@@ -482,33 +457,8 @@ async function run(targetPath, options = {}) {
     if (!options._capture && !options.json) {
       console.log('[TEMPORAL-AST] Analyzing dangerous API changes (this downloads tarballs)...\n');
     }
-    const nodeModulesPath = path.join(targetPath, 'node_modules');
-    if (fs.existsSync(nodeModulesPath)) {
-      const pkgNames = [];
-      try {
-        const items = fs.readdirSync(nodeModulesPath);
-        for (const item of items) {
-          if (item.startsWith('.')) continue;
-          const itemPath = path.join(nodeModulesPath, item);
-          try {
-            const stat = fs.lstatSync(itemPath);
-            if (stat.isSymbolicLink() || !stat.isDirectory()) continue;
-            if (item.startsWith('@')) {
-              const scopedItems = fs.readdirSync(itemPath);
-              for (const si of scopedItems) {
-                const sp = path.join(itemPath, si);
-                const ss = fs.lstatSync(sp);
-                if (!ss.isSymbolicLink() && ss.isDirectory()) {
-                  pkgNames.push(`${item}/${si}`);
-                }
-              }
-            } else {
-              pkgNames.push(item);
-            }
-          } catch { /* skip unreadable */ }
-        }
-      } catch { /* no node_modules readable */ }
-
+    const pkgNames = listInstalledPackages(targetPath);
+    {
       const AST_CONCURRENCY = 3;
       for (let i = 0; i < pkgNames.length; i += AST_CONCURRENCY) {
         const batch = pkgNames.slice(i, i + AST_CONCURRENCY);
@@ -539,33 +489,8 @@ async function run(targetPath, options = {}) {
     if (!options._capture && !options.json) {
       console.log('[TEMPORAL-PUBLISH] Analyzing publish frequency anomalies (this makes network requests)...\n');
     }
-    const nodeModulesPath = path.join(targetPath, 'node_modules');
-    if (fs.existsSync(nodeModulesPath)) {
-      const pkgNames = [];
-      try {
-        const items = fs.readdirSync(nodeModulesPath);
-        for (const item of items) {
-          if (item.startsWith('.')) continue;
-          const itemPath = path.join(nodeModulesPath, item);
-          try {
-            const stat = fs.lstatSync(itemPath);
-            if (stat.isSymbolicLink() || !stat.isDirectory()) continue;
-            if (item.startsWith('@')) {
-              const scopedItems = fs.readdirSync(itemPath);
-              for (const si of scopedItems) {
-                const sp = path.join(itemPath, si);
-                const ss = fs.lstatSync(sp);
-                if (!ss.isSymbolicLink() && ss.isDirectory()) {
-                  pkgNames.push(`${item}/${si}`);
-                }
-              }
-            } else {
-              pkgNames.push(item);
-            }
-          } catch { /* skip unreadable */ }
-        }
-      } catch { /* no node_modules readable */ }
-
+    const pkgNames = listInstalledPackages(targetPath);
+    {
       const PUBLISH_CONCURRENCY = 5;
       for (let i = 0; i < pkgNames.length; i += PUBLISH_CONCURRENCY) {
         const batch = pkgNames.slice(i, i + PUBLISH_CONCURRENCY);
@@ -593,33 +518,8 @@ async function run(targetPath, options = {}) {
     if (!options._capture && !options.json) {
       console.log('[TEMPORAL-MAINTAINER] Analyzing maintainer changes (this makes network requests)...\n');
     }
-    const nodeModulesPath = path.join(targetPath, 'node_modules');
-    if (fs.existsSync(nodeModulesPath)) {
-      const pkgNames = [];
-      try {
-        const items = fs.readdirSync(nodeModulesPath);
-        for (const item of items) {
-          if (item.startsWith('.')) continue;
-          const itemPath = path.join(nodeModulesPath, item);
-          try {
-            const stat = fs.lstatSync(itemPath);
-            if (stat.isSymbolicLink() || !stat.isDirectory()) continue;
-            if (item.startsWith('@')) {
-              const scopedItems = fs.readdirSync(itemPath);
-              for (const si of scopedItems) {
-                const sp = path.join(itemPath, si);
-                const ss = fs.lstatSync(sp);
-                if (!ss.isSymbolicLink() && ss.isDirectory()) {
-                  pkgNames.push(`${item}/${si}`);
-                }
-              }
-            } else {
-              pkgNames.push(item);
-            }
-          } catch { /* skip unreadable */ }
-        }
-      } catch { /* no node_modules readable */ }
-
+    const pkgNames = listInstalledPackages(targetPath);
+    {
       const MAINTAINER_CONCURRENCY = 5;
       for (let i = 0; i < pkgNames.length; i += MAINTAINER_CONCURRENCY) {
         const batch = pkgNames.slice(i, i + MAINTAINER_CONCURRENCY);

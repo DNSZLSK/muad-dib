@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { MAX_FILE_SIZE } = require('./shared/constants.js');
 
 /**
  * Directories excluded from scanning.
@@ -228,6 +229,61 @@ class Spinner {
   }
 }
 
+/**
+ * Iterates files with size guard and error handling.
+ * Calls callback(file, content) for each readable file under MAX_FILE_SIZE.
+ */
+function forEachSafeFile(files, callback) {
+  for (const file of files) {
+    try {
+      const stat = fs.statSync(file);
+      if (stat.size > MAX_FILE_SIZE) continue;
+    } catch { continue; }
+    let content;
+    try {
+      content = fs.readFileSync(file, 'utf8');
+    } catch { continue; }
+    callback(file, content);
+  }
+}
+
+/**
+ * Lists installed packages in node_modules (handles scoped packages).
+ * @param {string} targetPath - Root of the project
+ * @returns {string[]} Package names (e.g. ['express', '@babel/core'])
+ */
+function listInstalledPackages(targetPath) {
+  const nm = path.join(targetPath, 'node_modules');
+  if (!fs.existsSync(nm)) return [];
+  const names = [];
+  try {
+    for (const item of fs.readdirSync(nm)) {
+      if (item.startsWith('.')) continue;
+      const itemPath = path.join(nm, item);
+      try {
+        const stat = fs.lstatSync(itemPath);
+        if (stat.isSymbolicLink() || !stat.isDirectory()) continue;
+        if (item.startsWith('@')) {
+          for (const si of fs.readdirSync(itemPath)) {
+            const ss = fs.lstatSync(path.join(itemPath, si));
+            if (!ss.isSymbolicLink() && ss.isDirectory()) names.push(`${item}/${si}`);
+          }
+        } else {
+          names.push(item);
+        }
+      } catch { /* skip unreadable */ }
+    }
+  } catch { /* no node_modules readable */ }
+  return names;
+}
+
+/**
+ * Logs to stderr when MUADDIB_DEBUG is set. No-op otherwise.
+ */
+function debugLog(...args) {
+  if (process.env.MUADDIB_DEBUG) console.error('[DEBUG]', ...args);
+}
+
 module.exports = {
   EXCLUDED_DIRS,
   DEV_PATTERNS,
@@ -238,5 +294,8 @@ module.exports = {
   getCallName,
   Spinner,
   setExtraExcludes,
-  getExtraExcludes
+  getExtraExcludes,
+  forEachSafeFile,
+  listInstalledPackages,
+  debugLog
 };

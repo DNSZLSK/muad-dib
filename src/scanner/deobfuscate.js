@@ -2,6 +2,7 @@
 
 const acorn = require('acorn');
 const walk = require('acorn-walk');
+const { ACORN_OPTIONS } = require('../shared/constants.js');
 
 /**
  * Lightweight static deobfuscation pre-processor.
@@ -16,12 +17,7 @@ function deobfuscate(sourceCode) {
   // Parse AST — if parsing fails, return source unchanged (fail-safe)
   let ast;
   try {
-    ast = acorn.parse(sourceCode, {
-      ecmaVersion: 2024,
-      sourceType: 'module',
-      allowHashBang: true,
-      ranges: true
-    });
+    ast = acorn.parse(sourceCode, { ...ACORN_OPTIONS, ranges: true });
   } catch {
     return { code: sourceCode, transforms };
   }
@@ -197,12 +193,7 @@ function propagateConsts(sourceCode) {
   const transforms = [];
   let ast;
   try {
-    ast = acorn.parse(sourceCode, {
-      ecmaVersion: 2024,
-      sourceType: 'module',
-      allowHashBang: true,
-      ranges: true
-    });
+    ast = acorn.parse(sourceCode, { ...ACORN_OPTIONS, ranges: true });
   } catch {
     return { code: sourceCode, transforms };
   }
@@ -316,12 +307,7 @@ function foldConcatsOnly(sourceCode) {
   const transforms = [];
   let ast;
   try {
-    ast = acorn.parse(sourceCode, {
-      ecmaVersion: 2024,
-      sourceType: 'module',
-      allowHashBang: true,
-      ranges: true
-    });
+    ast = acorn.parse(sourceCode, { ...ACORN_OPTIONS, ranges: true });
   } catch {
     return { code: sourceCode, transforms };
   }
