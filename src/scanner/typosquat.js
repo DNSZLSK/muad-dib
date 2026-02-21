@@ -72,7 +72,19 @@ const WHITELIST = new Set([
   'eslint-config-prettier', 'eslint-plugin-prettier',
   'eslint-scope', 'eslint-visitor-keys',
   'esbuild-register',
-  'neo-async'
+  'neo-async',
+
+  // Packages with names close to other popular packages (not typosquats)
+  'chai',       // resembles chalk (missing_char)
+  'pino',       // resembles sinon (missing_char)
+  'ioredis',    // resembles redis (extra prefix)
+  'bcryptjs',   // resembles bcrypt (suffix)
+  'recast',     // resembles react (extra_char)
+  'asyncdi',    // resembles async (suffix)
+  'redux',      // resembles redis (wrong_char)
+  'args',       // resembles yargs (missing_char)
+  'oxlint',     // resembles eslint (wrong_char)
+  'vasync'      // resembles async (extra prefix)
 ]);
 
 

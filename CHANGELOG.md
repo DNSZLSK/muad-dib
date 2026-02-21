@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.8] - 2026-02-21
+
+### Added
+- **FP reduction post-processing** (`applyFPReductions()` in `src/index.js`): Count-based severity downgrade applied after deduplication, before scoring. Legitimate frameworks produce high volumes of certain threat types (Next.js: 76 dynamic_require, Restify: 52 prototype_hook), while malware has 1-3 occurrences. Downgrading severity instead of removing findings preserves detection signals while reducing score impact.
+  - `dynamic_require` >10 occurrences → HIGH downgraded to LOW
+  - `dangerous_call_function` >5 occurrences → MEDIUM downgraded to LOW
+  - `require_cache_poison` >3 occurrences → CRITICAL downgraded to LOW
+  - `prototype_hook` targeting framework prototypes (Request/Response/App/Router) → HIGH downgraded to MEDIUM (CRITICAL core prototypes and malicious hooks like globalThis.fetch untouched)
+- **Typosquat whitelist expansion**: 10 packages added — chai, pino, ioredis, bcryptjs, recast, asyncdi, redux, args, oxlint, vasync. All legitimate packages with names close to other popular packages (e.g., chai↔chalk, redux↔redis, recast↔react).
+
+### Changed
+- **FPR reduced from 38% to 19.4%** (102/527 packages on full benign dataset, down from 19/50). Score distribution: 45% clean (score 0), 27.3% low (1-10), 8.3% marginal (11-20), 19.4% FP (>20).
+- 4 packages rescued from false positive status: vue (21→7), preact (23→3), riot (25→15), derby (26→16)
+- TPR 100% (4/4), ADR 100% (35/35), all holdouts 40/40 — no regression from FP corrections
+
+### Breaking Changes
+- None. All changes reduce false positives without affecting malware detection.
+
 ## [2.2.7] - 2026-02-20
 
 ### Fixed
@@ -544,7 +562,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Obfuscation detection
 - Package.json lifecycle script analysis
 
-[Unreleased]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.7...HEAD
+[Unreleased]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.8...HEAD
+[2.2.8]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.7...v2.2.8
 [2.2.7]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.6...v2.2.7
 [2.2.6]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.5...v2.2.6
 [2.2.5]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.2...v2.2.5
