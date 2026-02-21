@@ -1,0 +1,6 @@
+{
+  "name": "tencent-cloud-python-sdk",
+  "version": "3.0.0",
+  "description": "Tencent Cloud SDK",
+  "main": "index.js"
+}

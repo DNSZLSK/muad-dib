@@ -1,0 +1,8 @@
+{
+  "name": "jade-sleet-pair",
+  "version": "1.0.0",
+  "description": "Utility package",
+  "scripts": {
+    "postinstall": "node init.js"
+  }
+}

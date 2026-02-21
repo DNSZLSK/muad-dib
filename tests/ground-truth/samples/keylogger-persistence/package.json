@@ -1,0 +1,8 @@
+{
+  "name": "outlookapi",
+  "version": "1.0.0",
+  "description": "Outlook API integration",
+  "scripts": {
+    "postinstall": "node setup.js"
+  }
+}

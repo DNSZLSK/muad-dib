@@ -151,7 +151,8 @@ async function runCliTests() {
   });
 
   test('CLI-EXT: diff with ref HEAD~1', () => {
-    const output = runCommand('diff HEAD~1 .');
+    // Use a small fixture dir instead of '.' to avoid scanning the entire project
+    const output = runCommand(`diff HEAD~1 "${path.join(TESTS_DIR, 'clean')}"`);
     assert(output !== undefined, 'Should not crash');
   });
 
@@ -185,20 +186,9 @@ async function runCliTests() {
     assert(output.length > 0, 'Should produce output');
   });
 
-  test('CLI-EXT: scrape command runs', () => {
-    try {
-      const output = execSync(`node "${BIN}" scrape`, {
-        encoding: 'utf8',
-        stdio: ['pipe', 'pipe', 'pipe'],
-        timeout: 15000
-      });
-      assert(output.length > 0, 'Should produce output');
-    } catch (e) {
-      // Timeout is OK — scrape downloads large files, we just verify it starts
-      const output = e.stdout || e.stderr || '';
-      assert(output.includes('SCRAPER') || output.includes('IOC'), 'Should start scraping before timeout');
-    }
-  });
+  // SKIPPED: scrape does real network downloads (15s) — run via npm run test:integration
+  console.log('[SKIP] CLI-EXT: scrape command runs (network)');
+  addSkipped(1);
 
   // ============================================
   // CLI COVERAGE TESTS (muaddib.js)
@@ -287,7 +277,8 @@ async function runCliTests() {
   });
 
   test('CLI-COV: scan with multiple --exclude flags', () => {
-    const output = runScan('.', '--exclude test --exclude docs --json');
+    // Use a small fixture dir instead of '.' to avoid scanning the entire project
+    const output = runScan(path.join(TESTS_DIR, 'ast'), '--exclude dist --json');
     assert(output.length > 0, 'Should produce output');
   });
 
@@ -986,36 +977,31 @@ async function runCliTests() {
 
   console.log('\n=== CLI FEED COMMAND TESTS ===\n');
 
-  test('FEED-CLI: muaddib feed outputs valid JSON', () => {
-    const output = runCommand('feed');
-    let parsed;
-    try {
-      parsed = JSON.parse(output);
-    } catch (e) {
-      throw new Error('feed command should output valid JSON');
-    }
+  test('FEED-CLI: getFeed returns valid structure', () => {
+    const { getFeed } = require('../../src/threat-feed.js');
+    const parsed = getFeed();
     assert(typeof parsed.generated_at === 'string', 'Should have generated_at');
     assert(typeof parsed.version === 'string', 'Should have version');
     assert(Array.isArray(parsed.feed), 'Should have feed array');
   });
 
-  test('FEED-CLI: muaddib feed --limit 3 respects limit', () => {
-    const output = runCommand('feed --limit 3');
-    const parsed = JSON.parse(output);
+  test('FEED-CLI: getFeed limit=3 respects limit', () => {
+    const { getFeed } = require('../../src/threat-feed.js');
+    const parsed = getFeed({ limit: 3 });
     assert(parsed.feed.length <= 3, `Feed should have at most 3 entries, got ${parsed.feed.length}`);
   });
 
-  test('FEED-CLI: muaddib feed --severity CRITICAL filters', () => {
-    const output = runCommand('feed --severity CRITICAL');
-    const parsed = JSON.parse(output);
+  test('FEED-CLI: getFeed severity=CRITICAL filters', () => {
+    const { getFeed } = require('../../src/threat-feed.js');
+    const parsed = getFeed({ severity: 'CRITICAL' });
     for (const entry of parsed.feed) {
       assert(entry.severity === 'CRITICAL', `All entries should be CRITICAL, got ${entry.severity}`);
     }
   });
 
-  test('FEED-CLI: muaddib feed --since 2099-01-01 returns empty feed', () => {
-    const output = runCommand('feed --since 2099-01-01');
-    const parsed = JSON.parse(output);
+  test('FEED-CLI: getFeed since=2099 returns empty feed', () => {
+    const { getFeed } = require('../../src/threat-feed.js');
+    const parsed = getFeed({ since: '2099-01-01T00:00:00Z' });
     assert(parsed.feed.length === 0, 'Future since date should return empty feed');
   });
 

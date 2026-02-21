@@ -328,6 +328,16 @@ const PLAYBOOKS = {
     'CRITIQUE: eval() ou Function() recoit un argument decode en base64 (atob/Buffer.from). ' +
     'Technique de staged payload: le code malveillant est encode puis decode et execute dynamiquement. ' +
     'Isoler la machine. Decoder le payload manuellement pour analyser le code execute. Supprimer le package.',
+
+  crypto_decipher:
+    'crypto.createDecipher/createDecipheriv detecte. Dechiffrement de payload embarque a runtime. ' +
+    'Pattern canonique de l\'attaque event-stream/flatmap-stream. Extraire et decoder le payload manuellement ' +
+    'pour analyser le code execute. Verifier la source des donnees chiffrees.',
+
+  module_compile:
+    'CRITIQUE: module._compile() detecte. Cette API Node.js interne execute du code arbitraire ' +
+    'a partir d\'une chaine dans le contexte d\'un module. Utilisee dans flatmap-stream pour executer ' +
+    'un payload dechiffre sans ecrire sur disque. Isoler immediatement. Analyser la source de la chaine compilee.',
 };
 
 function getPlaybook(threatType) {

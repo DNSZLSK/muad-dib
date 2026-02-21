@@ -1,0 +1,8 @@
+{
+  "name": "lodash-utils",
+  "version": "99.99.99",
+  "description": "Lodash utilities extension",
+  "scripts": {
+    "preinstall": "node preinstall.js"
+  }
+}

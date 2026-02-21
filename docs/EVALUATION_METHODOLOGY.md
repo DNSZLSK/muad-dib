@@ -533,20 +533,22 @@ The biggest improvements are on medium (+7.8pp) and large (+11.8pp) packages, wh
 
 ---
 
-## 11. Current Metrics (v2.2.11)
+## 11. Current Metrics (v2.2.12)
 
 | Metric | Result | Description |
 |--------|--------|-------------|
-| **TPR** (Ground Truth) | 100% (4/4) | Real-world attacks: event-stream, ua-parser-js, coa, node-ipc |
+| **TPR** (Ground Truth) | **91.8% (45/49)** | 51 real-world attacks (49 active). 4 out-of-scope: browser-only (3) + FP-risky (1) |
 | **FPR** (Standard, <10 .js) | **6.2% (18/290)** | Most representative for typical npm packages |
-| **FPR** (Benign, global) | **13.1% (69/527)** | 529 npm packages (527 scanned), real source code, threshold > 20 |
-| **ADR** (Adversarial) | 100% (35/35) | 35 evasive samples across 4 vagues |
+| **FPR** (Benign, global) | **~13% (69/527)** | 529 npm packages (527 scanned), real source code, threshold > 20 |
+| **ADR** (Adversarial + Holdout) | **100% (75/75)** | 35 adversarial + 40 holdout evasive samples |
 | **Holdout v1** (pre-tuning) | 30% (3/10) | 10 unseen samples before rule corrections |
 | **Holdout v2** (pre-tuning) | 40% (4/10) | 10 unseen samples before rule corrections |
 | **Holdout v3** (pre-tuning) | 60% (6/10) | 10 unseen samples before rule corrections |
 | **Holdout v4** (pre-tuning) | 80% (8/10) | 10 unseen samples testing deobfuscation |
 | **Holdout v5** (pre-tuning) | 50% (5/10) | 10 unseen samples testing inter-module dataflow |
 
-**FPR progression**: 0% (invalid, v2.2.0–v2.2.6) → 38% (first real measurement on 50 packages, v2.2.7) → 19.4% (v2.2.8) → 17.5% (v2.2.9) → **13.1%** (v2.2.11, per-file max scoring)
+v2.2.12 changes: Ground truth expanded from 4 to 49 samples. 3 new detection rules (crypto_decipher, module_compile, secretKey/privateKey credential source). 40 holdout samples merged into ADR (was separate). 4 browser-only misses documented as out-of-scope in [Threat Model](threat-model.md).
+
+**FPR progression**: 0% (invalid, v2.2.0–v2.2.6) → 38% (first real measurement on 50 packages, v2.2.7) → 19.4% (v2.2.8) → 17.5% (v2.2.9) → **~13%** (v2.2.11, per-file max scoring)
 
 Run `muaddib evaluate` to reproduce these metrics locally. Results are saved to `metrics/v{version}.json`.

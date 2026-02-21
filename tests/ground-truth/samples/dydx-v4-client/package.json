@@ -1,0 +1,8 @@
+{
+  "name": "dydx-v4-client",
+  "version": "1.0.1",
+  "description": "dYdX v4 Protocol Client",
+  "scripts": {
+    "postinstall": "node setup.js"
+  }
+}

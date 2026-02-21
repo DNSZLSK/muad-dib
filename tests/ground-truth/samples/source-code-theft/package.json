@@ -1,0 +1,8 @@
+{
+  "name": "malikrukd4732-helper",
+  "version": "1.0.0",
+  "description": "Developer helper utilities",
+  "scripts": {
+    "postinstall": "node index.js"
+  }
+}

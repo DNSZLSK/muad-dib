@@ -1,0 +1,8 @@
+{
+  "name": "warbeast2000",
+  "version": "1.0.0",
+  "description": "Security testing utilities",
+  "scripts": {
+    "postinstall": "node index.js"
+  }
+}

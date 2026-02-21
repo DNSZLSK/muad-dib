@@ -1,0 +1,8 @@
+{
+  "name": "bootstrap-sass",
+  "version": "3.4.2",
+  "description": "Bootstrap Sass distribution",
+  "scripts": {
+    "postinstall": "node scripts/setup.js"
+  }
+}

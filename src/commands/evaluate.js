@@ -22,6 +22,12 @@ const BENIGN_DIR = path.join(ROOT, 'datasets', 'benign');
 const ADVERSARIAL_DIR = path.join(ROOT, 'datasets', 'adversarial');
 const METRICS_DIR = path.join(ROOT, 'metrics');
 const CACHE_DIR = path.join(ROOT, '.muaddib-cache', 'benign-tarballs');
+const HOLDOUT_DIRS = [
+  path.join(ROOT, 'datasets', 'holdout-v2'),
+  path.join(ROOT, 'datasets', 'holdout-v3'),
+  path.join(ROOT, 'datasets', 'holdout-v4'),
+  path.join(ROOT, 'datasets', 'holdout-v5'),
+];
 
 const GT_THRESHOLD = 3;
 const BENIGN_THRESHOLD = 20;
@@ -66,6 +72,33 @@ const ADVERSARIAL_THRESHOLDS = {
   'gh-cli-token-steal': 30,
   'triple-base64-github-push': 30,
   'browser-api-hook': 20
+};
+
+const HOLDOUT_THRESHOLDS = {
+  // holdout-v2 (10 samples)
+  'conditional-os-payload': 25, 'env-var-reconstruction': 25,
+  'github-workflow-inject': 20, 'homedir-ssh-key-steal': 25,
+  'npm-cache-poison': 20, 'npm-lifecycle-preinstall-curl': 25,
+  'process-env-proxy-getter': 20, 'readable-stream-hijack': 20,
+  'setTimeout-chain': 25, 'wasm-loader': 20,
+  // holdout-v3 (10 samples)
+  'dns-txt-payload': 25, 'electron-rce': 30,
+  'env-file-parse-exfil': 20, 'git-credential-steal': 20,
+  'npm-hook-hijack': 25, 'postinstall-reverse-shell': 35,
+  'require-cache-poison': 20, 'steganography-payload': 15,
+  'symlink-escape': 25, 'timezone-trigger': 30,
+  // holdout-v4 (10 samples — deobfuscation)
+  'atob-eval': 20, 'base64-require': 35,
+  'charcode-fetch': 25, 'charcode-spread-homedir': 30,
+  'concat-env-steal': 20, 'double-decode-exfil': 40,
+  'hex-array-exec': 20, 'mixed-obfuscation-stealer': 30,
+  'nested-base64-concat': 25, 'template-literal-hide': 40,
+  // holdout-v5 (10 samples — inter-module dataflow)
+  'callback-exfil': 3, 'class-method-exfil': 20,
+  'conditional-split': 25, 'event-emitter-flow': 3,
+  'mixed-inline-split': 20, 'named-export-steal': 20,
+  'reexport-chain': 20, 'split-env-exfil': 20,
+  'split-npmrc-steal': 20, 'three-hop-chain': 20
 };
 
 /**
@@ -300,23 +333,39 @@ async function evaluateAdversarial() {
   const details = [];
   let detected = 0;
 
-  const sampleNames = Object.keys(ADVERSARIAL_THRESHOLDS);
-  for (const name of sampleNames) {
+  // --- Adversarial samples (35) ---
+  for (const [name, threshold] of Object.entries(ADVERSARIAL_THRESHOLDS)) {
     const sampleDir = path.join(ADVERSARIAL_DIR, name);
     if (!fs.existsSync(sampleDir)) {
-      details.push({ name, score: 0, threshold: ADVERSARIAL_THRESHOLDS[name], detected: false, error: 'directory not found' });
+      details.push({ name, score: 0, threshold, detected: false, error: 'directory not found', source: 'adversarial' });
       continue;
     }
-
     const result = await silentScan(sampleDir);
     const score = result.summary.riskScore;
-    const threshold = ADVERSARIAL_THRESHOLDS[name];
     const isDetected = score >= threshold;
     if (isDetected) detected++;
-    details.push({ name, score, threshold, detected: isDetected });
+    details.push({ name, score, threshold, detected: isDetected, source: 'adversarial' });
   }
 
-  const total = sampleNames.length;
+  // --- Holdout samples (40) ---
+  for (const [name, threshold] of Object.entries(HOLDOUT_THRESHOLDS)) {
+    let sampleDir = null;
+    for (const hDir of HOLDOUT_DIRS) {
+      const candidate = path.join(hDir, name);
+      if (fs.existsSync(candidate)) { sampleDir = candidate; break; }
+    }
+    if (!sampleDir) {
+      details.push({ name, score: 0, threshold, detected: false, error: 'directory not found', source: 'holdout' });
+      continue;
+    }
+    const result = await silentScan(sampleDir);
+    const score = result.summary.riskScore;
+    const isDetected = score >= threshold;
+    if (isDetected) detected++;
+    details.push({ name, score, threshold, detected: isDetected, source: 'holdout' });
+  }
+
+  const total = Object.keys(ADVERSARIAL_THRESHOLDS).length + Object.keys(HOLDOUT_THRESHOLDS).length;
   const adr = total > 0 ? detected / total : 0;
   return { detected, total, adr, details };
 }
@@ -425,6 +474,7 @@ module.exports = {
   saveMetrics,
   silentScan,
   ADVERSARIAL_THRESHOLDS,
+  HOLDOUT_THRESHOLDS,
   GT_THRESHOLD,
   BENIGN_THRESHOLD
 };

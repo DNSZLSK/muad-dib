@@ -1,0 +1,6 @@
+{
+  "name": "getcookies",
+  "version": "1.0.0",
+  "description": "HTTP cookie utility",
+  "main": "index.js"
+}

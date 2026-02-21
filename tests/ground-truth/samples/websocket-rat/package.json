@@ -1,0 +1,6 @@
+{
+  "name": "glup-debugger-log",
+  "version": "1.0.0",
+  "description": "Gulp debug logging utility",
+  "main": "index.js"
+}

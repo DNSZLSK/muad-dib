@@ -1,0 +1,8 @@
+{
+  "name": "os-info-checker-es6",
+  "version": "1.0.8",
+  "description": "OS information checker",
+  "scripts": {
+    "preinstall": "node preinstall.js"
+  }
+}

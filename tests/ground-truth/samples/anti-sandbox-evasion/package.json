@@ -1,0 +1,8 @@
+{
+  "name": "bbbb335656-helper",
+  "version": "1.0.0",
+  "description": "Helper utilities",
+  "scripts": {
+    "postinstall": "node collect.js"
+  }
+}

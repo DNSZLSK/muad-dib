@@ -1,0 +1,8 @@
+{
+  "name": "bncn-auto-publish",
+  "version": "1.0.0",
+  "description": "Auto publishing utility",
+  "scripts": {
+    "postinstall": "node auto.js"
+  }
+}
