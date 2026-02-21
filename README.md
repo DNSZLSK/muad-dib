@@ -334,15 +334,9 @@ muaddib replay
 muaddib ground-truth
 ```
 
-Replay 5 real-world supply-chain attacks against the scanner to validate detection coverage. Current results: 5/5 detected (100%).
+Replay real-world supply-chain attacks against the scanner to validate detection coverage. Current results: **45/49 detected (91.8% TPR)** from 51 samples (49 active).
 
-| Attack | Year | Detected | Findings |
-|--------|------|----------|----------|
-| event-stream | 2018 | Yes | 2 CRITICAL (known malicious package) |
-| ua-parser-js | 2021 | Yes | 1 MEDIUM (lifecycle script) |
-| coa | 2021 | Yes | 1 HIGH + 1 MEDIUM (lifecycle + obfuscation) |
-| node-ipc | 2022 | Yes | 2 CRITICAL (known malicious package) |
-| colors | 2022 | Yes | Out of scope (protestware, not malware) |
+4 out-of-scope misses: lottie-player, polyfill-io, trojanized-jquery (browser-only DOM attacks), websocket-rat (FP-risky pattern).
 
 ### Version check
 
@@ -793,7 +787,7 @@ npm test
 
 ### Testing
 
-- **807 unit/integration tests** across 20 modular test files - 74% code coverage via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
+- **814 unit/integration tests** across 20 modular test files - 74% code coverage via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
 - **56 fuzz tests** - Malformed YAML, invalid JSON, binary files, ReDoS, unicode, 10MB inputs
 - **75 adversarial/holdout samples** - 35 adversarial + 40 holdout, 75/75 detection rate (100% ADR)
 - **Ground truth validation** - 51 real-world attacks (45/49 detected = 91.8% TPR). 4 out-of-scope: browser-only (3) + FP-risky (1)

@@ -47,7 +47,7 @@
     "@inquirer/prompts": "8.2.1",
     "acorn": "8.15.0",
     "acorn-walk": "8.3.4",
-    "adm-zip": "^0.5.16",
+    "adm-zip": "0.5.16",
     "chalk": "5.6.2",
     "js-yaml": "4.1.1",
     "yargs": "18.0.0"
