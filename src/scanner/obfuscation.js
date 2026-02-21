@@ -8,7 +8,7 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
 function detectObfuscation(targetPath) {
   const threats = [];
-  const files = findFiles(targetPath, { extensions: ['.js'], excludedDirs: OBF_EXCLUDED_DIRS });
+  const files = findFiles(targetPath, { extensions: ['.js', '.mjs', '.cjs'], excludedDirs: OBF_EXCLUDED_DIRS });
 
   for (const file of files) {
     // Skip files exceeding MAX_FILE_SIZE to avoid memory issues

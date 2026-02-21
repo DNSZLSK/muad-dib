@@ -203,7 +203,7 @@ function detectObfuscationPatterns(content, relativePath) {
 function scanEntropy(targetPath, options = {}) {
   const threats = [];
   const stringThreshold = options.entropyThreshold || STRING_ENTROPY_MEDIUM;
-  const files = findFiles(targetPath, { extensions: ['.js'], excludedDirs: ENTROPY_EXCLUDED_DIRS });
+  const files = findFiles(targetPath, { extensions: ['.js', '.mjs', '.cjs'], excludedDirs: ENTROPY_EXCLUDED_DIRS });
 
   for (const file of files) {
     // Skip files matching compiled/minified patterns

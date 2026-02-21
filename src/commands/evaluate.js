@@ -71,7 +71,11 @@ const ADVERSARIAL_THRESHOLDS = {
   'pyinstaller-dropper': 35,
   'gh-cli-token-steal': 30,
   'triple-base64-github-push': 30,
-  'browser-api-hook': 20
+  'browser-api-hook': 20,
+  // Audit bypass samples (v2.2.13)
+  'indirect-eval-bypass': 10,
+  'muaddib-ignore-bypass': 25,
+  'mjs-extension-bypass': 100
 };
 
 const HOLDOUT_THRESHOLDS = {

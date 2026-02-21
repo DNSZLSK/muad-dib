@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.13] - 2026-02-21
+
+### Fixed
+- **P0-1: Indirect eval detection** (MUADDIB-AST-004): Detect computed property access (`obj["eval"]()`, `obj["Function"]()`), sequence expressions (`(0, eval)()`), and dynamic global dispatch via globalThis/global alias with variable property (`g[k]()` where `g = globalThis`). Closes bypass-01.
+- **P0-2: Remove `muaddib-ignore` directive**: Deleted attacker-accessible `// muaddib-ignore` skip in dataflow scanner (`src/scanner/dataflow.js`). Closes bypass-02.
+- **P0-3: Scan .mjs/.cjs files**: All scanners (AST, dataflow, obfuscation, entropy, module-graph) now process `.mjs` and `.cjs` files in addition to `.js`. ESM packages with `"type": "module"` are no longer invisible. Closes bypass-03.
+
+### Added
+- 3 adversarial regression samples in `datasets/adversarial/`: `indirect-eval-bypass`, `muaddib-ignore-bypass`, `mjs-extension-bypass`
+- 7 unit tests for indirect eval detection patterns (computed property, sequence expression, globalThis alias, .mjs file scanning, false positive guard)
+
+### Changed
+- ADR: 75/75 → **78/78 = 100%** (3 new adversarial samples)
+- Scanner file extension coverage: `.js` → `.js`, `.mjs`, `.cjs` across all 5 file-scanning scanners
+- Test count: 807 → 814+
+
 ## [2.2.12] - 2026-02-21
 
 ### Added

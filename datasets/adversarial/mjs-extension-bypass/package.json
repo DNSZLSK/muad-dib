@@ -1,0 +1,6 @@
+{
+  "name": "audit-bypass-03-mjs-extension",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Audit bypass: .mjs files are not scanned by any scanner"
+}
