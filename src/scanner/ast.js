@@ -719,6 +719,30 @@ function analyzeFile(content, filePath, basePath) {
           });
         }
       }
+
+      // Detect crypto.createDecipher/createDecipheriv — encrypted payload pattern (flatmap-stream)
+      // Also detect module._compile — in-memory code execution
+      if (node.callee.type === 'MemberExpression') {
+        const prop = node.callee.property;
+        const propName = prop.type === 'Identifier' ? prop.name :
+                         (prop.type === 'Literal' ? prop.value : null);
+        if (propName === 'createDecipher' || propName === 'createDecipheriv') {
+          threats.push({
+            type: 'crypto_decipher',
+            severity: 'HIGH',
+            message: `${propName}() detected — runtime decryption of embedded payload (event-stream/flatmap-stream pattern).`,
+            file: path.relative(basePath, filePath)
+          });
+        }
+        if (propName === '_compile') {
+          threats.push({
+            type: 'module_compile',
+            severity: 'CRITICAL',
+            message: 'module._compile() detected — executes arbitrary code from string in module context (flatmap-stream pattern).',
+            file: path.relative(basePath, filePath)
+          });
+        }
+      }
     },
 
     ImportExpression(node) {

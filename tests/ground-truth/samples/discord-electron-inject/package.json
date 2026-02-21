@@ -1,0 +1,8 @@
+{
+  "name": "duer-js",
+  "version": "1.0.0",
+  "description": "JavaScript utilities",
+  "scripts": {
+    "postinstall": "node inject.js"
+  }
+}

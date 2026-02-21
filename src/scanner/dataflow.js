@@ -95,7 +95,10 @@ function analyzeFile(content, filePath, basePath) {
           const prop = node.init.callee.property;
           if (obj?.type === 'Identifier' && obj.name === 'path' &&
               prop?.type === 'Identifier' && (prop.name === 'join' || prop.name === 'resolve')) {
-            if (node.init.arguments.some(a => a.type === 'Identifier' && sensitivePathVars.has(a.name))) {
+            if (node.init.arguments.some(a =>
+              (a.type === 'Identifier' && sensitivePathVars.has(a.name)) ||
+              (a.type === 'MemberExpression' && a.object?.type === 'Identifier' && sensitivePathVars.has(a.object.name))
+            )) {
               sensitivePathVars.add(node.id.name);
             }
           }
@@ -241,6 +244,17 @@ function analyzeFile(content, filePath, basePath) {
           });
         }
       }
+
+      // Detect property access to secret key material
+      const propName = node.property?.type === 'Identifier' ? node.property.name :
+                       (node.property?.type === 'Literal' ? node.property.value : null);
+      if (propName && ['secretKey', '_secretKey', 'privateKey', '_privateKey', 'mnemonic', 'seedPhrase'].includes(propName)) {
+        sources.push({
+          type: 'credential_read',
+          name: propName,
+          line: node.loc?.start?.line
+        });
+      }
     }
   });
 
@@ -300,7 +314,8 @@ const SENSITIVE_PATH_PATTERNS = [
   '.ethereum', '.electrum', '.config/solana', '.exodus',
   '.atomic', '.metamask', '.ledger-live', '.trezor',
   '.bitcoin', '.monero', '.gnupg',
-  '_cacache', '.cache/yarn', '.cache/pip'
+  '_cacache', '.cache/yarn', '.cache/pip',
+  'discord', 'leveldb'
 ];
 
 function isSensitivePath(val) {
@@ -327,6 +342,9 @@ function containsSensitiveLiteral(node) {
   if (node.type === 'CallExpression' && node.arguments) {
     return node.arguments.some(a => containsSensitiveLiteral(a));
   }
+  if (node.type === 'ObjectExpression' && node.properties) {
+    return node.properties.some(p => p.value && containsSensitiveLiteral(p.value));
+  }
   return false;
 }
 
@@ -344,6 +362,11 @@ function isCredentialPath(arg, sensitivePathVars) {
   }
   // Handle variable references: fs.readFileSync(npmrcPath) where npmrcPath was assigned a sensitive path
   if (arg.type === 'Identifier' && sensitivePathVars && sensitivePathVars.has(arg.name)) {
+    return true;
+  }
+  // Handle property access on tracked objects: _0x.a where _0x is tracked as sensitive
+  if (arg.type === 'MemberExpression' && arg.object?.type === 'Identifier' &&
+      sensitivePathVars && sensitivePathVars.has(arg.object.name)) {
     return true;
   }
   // Handle path.join(dir, '.npmrc') or path.join(sshDir, 'id_rsa') where sshDir is tracked

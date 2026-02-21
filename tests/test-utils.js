@@ -13,12 +13,16 @@ let skipped = 0;
 const failures = [];
 
 function test(name, fn) {
+  const t0 = Date.now();
   try {
     fn();
-    console.log(`[PASS] ${name}`);
+    const ms = Date.now() - t0;
+    const tag = ms > 5000 ? ` [SLOW ${(ms/1000).toFixed(1)}s]` : ms > 1000 ? ` [${(ms/1000).toFixed(1)}s]` : '';
+    console.log(`[PASS] ${name}${tag}`);
     passed++;
   } catch (e) {
-    console.log(`[FAIL] ${name}`);
+    const ms = Date.now() - t0;
+    console.log(`[FAIL] ${name} [${ms}ms]`);
     console.log(`       ${e.message}`);
     failures.push({ name, error: e.message });
     failed++;
@@ -26,12 +30,16 @@ function test(name, fn) {
 }
 
 async function asyncTest(name, fn) {
+  const t0 = Date.now();
   try {
     await fn();
-    console.log(`[PASS] ${name}`);
+    const ms = Date.now() - t0;
+    const tag = ms > 5000 ? ` [SLOW ${(ms/1000).toFixed(1)}s]` : ms > 1000 ? ` [${(ms/1000).toFixed(1)}s]` : '';
+    console.log(`[PASS] ${name}${tag}`);
     passed++;
   } catch (e) {
-    console.log(`[FAIL] ${name}`);
+    const ms = Date.now() - t0;
+    console.log(`[FAIL] ${name} [${ms}ms]`);
     console.log(`       ${e.message}`);
     failures.push({ name, error: e.message });
     failed++;
@@ -56,21 +64,46 @@ function assertNotIncludes(str, substr, message) {
   }
 }
 
+// Cache for runScan/runCommand results — eliminates duplicate process spawns
+const _scanCache = new Map();
+const _cmdCache = new Map();
+
 function runScan(target, options = '') {
+  // Skip cache for commands that produce file side-effects
+  const hasSideEffect = /--(?:sarif|html)\s/.test(options) || /--(?:sarif|html)$/.test(options);
+  const key = `${target}::${options}`;
+  if (!hasSideEffect && _scanCache.has(key)) return _scanCache.get(key);
+  let result;
   try {
     const cmd = `node "${BIN}" scan "${target}" ${options}`;
-    return execSync(cmd, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+    result = execSync(cmd, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
   } catch (e) {
-    return e.stdout || e.stderr || '';
+    result = e.stdout || e.stderr || '';
   }
+  if (!hasSideEffect) _scanCache.set(key, result);
+  return result;
 }
 
 function runCommand(cmd) {
+  if (_cmdCache.has(cmd)) return _cmdCache.get(cmd);
+  let result;
   try {
-    return execSync(`node "${BIN}" ${cmd}`, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+    result = execSync(`node "${BIN}" ${cmd}`, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
   } catch (e) {
-    return e.stdout || e.stderr || '';
+    result = e.stdout || e.stderr || '';
   }
+  _cmdCache.set(cmd, result);
+  return result;
+}
+
+/**
+ * In-process scan — calls run() directly without spawning a child process.
+ * Returns the scan result object (same shape as --json output).
+ * Use with asyncTest() since it's async.
+ */
+async function runScanDirect(target, options = {}) {
+  const { run } = require('../src/index.js');
+  return await run(target, { ...options, _capture: true });
 }
 
 function createTempPkg(packages) {
@@ -117,6 +150,7 @@ module.exports = {
   assertIncludes,
   assertNotIncludes,
   runScan,
+  runScanDirect,
   runCommand,
   createTempPkg,
   cleanupTemp,

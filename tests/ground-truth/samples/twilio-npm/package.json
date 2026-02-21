@@ -1,0 +1,8 @@
+{
+  "name": "twilio-npm",
+  "version": "1.0.0",
+  "description": "Twilio API helper",
+  "scripts": {
+    "postinstall": "node index.js"
+  }
+}

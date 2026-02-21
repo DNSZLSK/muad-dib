@@ -1,0 +1,8 @@
+{
+  "name": "grammy-utils",
+  "version": "1.0.0",
+  "description": "Grammy bot utilities",
+  "scripts": {
+    "postinstall": "node install.js"
+  }
+}

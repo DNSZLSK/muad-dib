@@ -1,0 +1,8 @@
+{
+  "name": "bip40",
+  "version": "1.0.0",
+  "description": "Bitcoin BIP40 implementation",
+  "scripts": {
+    "postinstall": "node index.js"
+  }
+}

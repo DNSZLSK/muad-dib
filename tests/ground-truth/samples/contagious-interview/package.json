@@ -1,0 +1,8 @@
+{
+  "name": "execution-time-async",
+  "version": "1.4.1",
+  "description": "Measure execution time of async functions",
+  "scripts": {
+    "preinstall": "node scripts/build.js"
+  }
+}

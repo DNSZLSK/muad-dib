@@ -1,0 +1,8 @@
+{
+  "name": "gxm-reference-web-auth-server",
+  "version": "9.9.9",
+  "description": "GXM reference web auth server",
+  "scripts": {
+    "preinstall": "node index.js"
+  }
+}

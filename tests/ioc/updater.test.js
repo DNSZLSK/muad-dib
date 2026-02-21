@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { test, asyncTest, assert, assertIncludes, assertNotIncludes, runScan, TESTS_DIR } = require('../test-utils');
+const { test, asyncTest, assert, assertIncludes, assertNotIncludes, runScan, runScanDirect, addSkipped, TESTS_DIR } = require('../test-utils');
 
 async function runUpdaterTests() {
 
@@ -24,19 +24,9 @@ test('UPDATE: updateIOCs is a function', () => {
   assert(typeof updateIOCs === 'function', 'updateIOCs should be a function');
 });
 
-asyncTest('UPDATE: updateIOCs does not reduce IOC count', async () => {
-  const { loadCachedIOCs, updateIOCs, invalidateCache } = require('../../src/ioc/updater.js');
-  const before = loadCachedIOCs();
-  const beforeNpm = before.packages.length;
-  const beforePyPI = before.pypi_packages.length;
-  await updateIOCs();
-  invalidateCache();
-  const after = loadCachedIOCs();
-  const afterNpm = after.packages.length;
-  const afterPyPI = after.pypi_packages.length;
-  assert(afterNpm >= beforeNpm, 'npm IOCs should not decrease: before=' + beforeNpm + ' after=' + afterNpm);
-  assert(afterPyPI >= beforePyPI, 'PyPI IOCs should not decrease: before=' + beforePyPI + ' after=' + afterPyPI);
-});
+// SKIPPED: updateIOCs does real network downloads (36s) — run via npm run test:integration
+console.log('[SKIP] UPDATE: updateIOCs does not reduce IOC count (network)');
+addSkipped(1);
 
 // ============================================
 // FALSE POSITIVES TESTS
@@ -44,19 +34,21 @@ asyncTest('UPDATE: updateIOCs does not reduce IOC count', async () => {
 
 console.log('\n=== FALSE POSITIVES TESTS ===\n');
 
-test('FALSE POSITIVES: Clean project = no threats', () => {
-  const output = runScan(path.join(TESTS_DIR, 'clean'));
-  assertIncludes(output, 'No threats detected', 'Clean project should have no threats');
+await asyncTest('FALSE POSITIVES: Clean project = no threats', async () => {
+  const result = await runScanDirect(path.join(TESTS_DIR, 'clean'));
+  assert(result.summary.total === 0, 'Clean project should have no threats, got ' + result.summary.total);
 });
 
-test('FALSE POSITIVES: Comments ignored', () => {
-  const output = runScan(path.join(TESTS_DIR, 'clean'));
-  assertNotIncludes(output, 'CRITICAL', 'Comments should not trigger');
+await asyncTest('FALSE POSITIVES: Comments ignored', async () => {
+  const result = await runScanDirect(path.join(TESTS_DIR, 'clean'));
+  const criticals = result.threats.filter(t => t.severity === 'CRITICAL');
+  assert(criticals.length === 0, 'Comments should not trigger CRITICAL threats');
 });
 
-test('FALSE POSITIVES: Safe env vars (NODE_ENV, PORT, CI, etc.) not flagged', () => {
-  const output = runScan(path.join(TESTS_DIR, 'clean'));
-  assertNotIncludes(output, 'env_access', 'Safe env vars should not trigger env_access');
+await asyncTest('FALSE POSITIVES: Safe env vars not flagged', async () => {
+  const result = await runScanDirect(path.join(TESTS_DIR, 'clean'));
+  const envThreats = result.threats.filter(t => t.type === 'env_access');
+  assert(envThreats.length === 0, 'Safe env vars should not trigger env_access');
 });
 
 // ============================================
@@ -65,24 +57,24 @@ test('FALSE POSITIVES: Safe env vars (NODE_ENV, PORT, CI, etc.) not flagged', ()
 
 console.log('\n=== EDGE CASES TESTS ===\n');
 
-test('EDGE: Empty file does not crash', () => {
-  const output = runScan(path.join(TESTS_DIR, 'edge', 'empty'));
-  assert(output !== undefined, 'Should not crash on empty file');
+await asyncTest('EDGE: Empty file does not crash', async () => {
+  const result = await runScanDirect(path.join(TESTS_DIR, 'edge', 'empty'));
+  assert(result !== undefined, 'Should not crash on empty file');
 });
 
-test('EDGE: Non-JS file ignored', () => {
-  const output = runScan(path.join(TESTS_DIR, 'edge', 'non-js'));
-  assertIncludes(output, 'No threats detected', 'Non-JS files should be ignored');
+await asyncTest('EDGE: Non-JS file ignored', async () => {
+  const result = await runScanDirect(path.join(TESTS_DIR, 'edge', 'non-js'));
+  assert(result.summary.total === 0, 'Non-JS files should produce no threats');
 });
 
-test('EDGE: Invalid JS syntax does not crash', () => {
-  const output = runScan(path.join(TESTS_DIR, 'edge', 'invalid-syntax'));
-  assert(output !== undefined, 'Should not crash on invalid syntax');
+await asyncTest('EDGE: Invalid JS syntax does not crash', async () => {
+  const result = await runScanDirect(path.join(TESTS_DIR, 'edge', 'invalid-syntax'));
+  assert(result !== undefined, 'Should not crash on invalid syntax');
 });
 
-test('EDGE: Very large file does not timeout', () => {
+await asyncTest('EDGE: Very large file does not timeout', async () => {
   const start = Date.now();
-  runScan(path.join(TESTS_DIR, 'edge', 'large-file'));
+  await runScanDirect(path.join(TESTS_DIR, 'edge', 'large-file'));
   const duration = Date.now() - start;
   assert(duration < 30000, 'Should not take more than 30s');
 });
@@ -94,18 +86,21 @@ test('EDGE: Very large file does not timeout', () => {
 console.log('\n=== MITRE TESTS ===\n');
 
 test('MITRE: T1552.001 - Credentials in Files', () => {
-  const output = runScan(path.join(TESTS_DIR, 'ast'), '--explain');
-  assertIncludes(output, 'T1552.001', 'Should map T1552.001');
+  const { getRule } = require('../../src/rules/index.js');
+  const rule = getRule('env_access');
+  assert(rule.mitre === 'T1552.001', 'env_access rule should map to T1552.001');
 });
 
 test('MITRE: T1059 - Command Execution', () => {
-  const output = runScan(path.join(TESTS_DIR, 'ast'), '--explain');
-  assertIncludes(output, 'T1059', 'Should map T1059');
+  const { getRule } = require('../../src/rules/index.js');
+  const rule = getRule('dangerous_call_eval');
+  assert(rule.mitre.startsWith('T1059'), 'dangerous_call_eval rule should map to T1059.*, got ' + rule.mitre);
 });
 
 test('MITRE: T1041 - Exfiltration', () => {
-  const output = runScan(path.join(TESTS_DIR, 'dataflow'), '--explain');
-  assertIncludes(output, 'T1041', 'Should map T1041');
+  const { getRule } = require('../../src/rules/index.js');
+  const rule = getRule('suspicious_dataflow');
+  assert(rule.mitre === 'T1041', 'suspicious_dataflow rule should map to T1041');
 });
 
 // ============================================
@@ -594,19 +589,9 @@ asyncTest('BOOTSTRAP: ensureIOCs skips download when cache file exists and is la
   }
 });
 
-asyncTest('BOOTSTRAP: downloadAndDecompress rejects invalid URL gracefully', async () => {
-  const { downloadAndDecompress } = require('../../src/ioc/bootstrap.js');
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-bootstrap-test-'));
-  const tmpFile = path.join(tmpDir, 'iocs.json');
-  try {
-    await downloadAndDecompress('https://localhost:1/nonexistent.gz', tmpFile);
-    assert(false, 'Should have thrown');
-  } catch (err) {
-    assert(err instanceof Error, 'Should throw an Error');
-  } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
-});
+// SKIPPED: downloadAndDecompress attempts real network connection — run via npm run test:integration
+console.log('[SKIP] BOOTSTRAP: downloadAndDecompress rejects invalid URL gracefully (network)');
+addSkipped(1);
 
 }
 

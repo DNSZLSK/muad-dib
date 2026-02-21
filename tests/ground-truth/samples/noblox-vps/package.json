@@ -1,0 +1,8 @@
+{
+  "name": "noblox.js-vps",
+  "version": "4.21.0",
+  "description": "Roblox API wrapper",
+  "scripts": {
+    "postinstall": "node postinstall.js"
+  }
+}

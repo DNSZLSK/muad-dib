@@ -649,6 +649,32 @@ const RULES = {
     mitre: 'T1565.001'
   },
 
+  crypto_decipher: {
+    id: 'MUADDIB-AST-022',
+    name: 'Encrypted Payload Decryption',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'crypto.createDecipher/createDecipheriv detecte. Dechiffrement runtime de payload embarque. Pattern canonique de flatmap-stream/event-stream.',
+    references: [
+      'https://snyk.io/blog/malicious-code-found-in-npm-package-event-stream/',
+      'https://attack.mitre.org/techniques/T1140/'
+    ],
+    mitre: 'T1140'
+  },
+
+  module_compile: {
+    id: 'MUADDIB-AST-023',
+    name: 'Module Compile Execution',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'module._compile() detecte. Execution de code arbitraire a partir d\'une chaine dans le contexte module. Technique cle de flatmap-stream.',
+    references: [
+      'https://blog.npmjs.org/post/180565383195/details-about-the-event-stream-incident',
+      'https://attack.mitre.org/techniques/T1059/007/'
+    ],
+    mitre: 'T1059'
+  },
+
   ai_agent_abuse: {
     id: 'MUADDIB-AST-013',
     name: 'AI Agent Weaponization',

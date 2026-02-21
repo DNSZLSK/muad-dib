@@ -689,7 +689,7 @@ MUAD'DIB 2.2.11 Scanner
 |   +-- Canary Tokens / Honey Tokens (sandbox)
 |
 +-- Validation & Observability (v2.1)
-|   +-- Ground Truth Dataset (5 real-world attacks, 100% detection)
+|   +-- Ground Truth Dataset (51 real-world attacks, 91.8% TPR)
 |   +-- Detection Time Logging (first_seen tracking, lead time metrics)
 |   +-- FP Rate Tracking (daily stats, false positive rate)
 |   +-- Score Breakdown (explainable per-rule scoring)
@@ -726,11 +726,10 @@ Output (CLI, JSON, HTML, SARIF, Webhook, Threat Feed)
 
 | Metric | Result | Details |
 |--------|--------|---------|
-| **TPR** (Ground Truth) | **100%** (4/4) | Real-world attacks: event-stream, ua-parser-js, coa, node-ipc |
+| **TPR** (Ground Truth) | **91.8%** (45/49) | 51 real-world attacks (49 active). 4 out-of-scope: browser-only (3) + FP-risky (1) |
 | **FPR** (Standard packages) | **6.2%** (18/290) | Packages with <10 JS files — typical libraries and tools |
-| **FPR** (Benign, global) | **13.1%** (69/527) | 529 npm packages, real source code via `npm pack`, threshold > 20 |
-| **ADR** (Adversarial) | **100%** (35/35) | 35 evasive samples across 4 red-team waves |
-| **Holdouts** (pre-tuning) | 40/40 pass | All holdout samples pass after corrections |
+| **FPR** (Benign, global) | **~13%** (69/527) | 529 npm packages, real source code via `npm pack`, threshold > 20 |
+| **ADR** (Adversarial + Holdout) | **100%** (75/75) | 35 adversarial + 40 holdout evasive samples across 5 red-team waves |
 
 **FPR by package size** — FPR correlates linearly with package size. Per-file max scoring (v2.2.11) significantly reduces FP on medium/large packages:
 
@@ -741,7 +740,7 @@ Output (CLI, JSON, HTML, SARIF, Webhook, Threat Feed)
 | Large (50-100 JS files) | 40 | 10 | 25.0% |
 | Very large (100+ JS files) | 62 | 25 | 40.3% |
 
-**FPR progression**: 0% (invalid, empty dirs, v2.2.0-v2.2.6) → 38% (first real measurement, v2.2.7) → 19.4% (v2.2.8) → 17.5% (v2.2.9) → **13.1%** (v2.2.11, per-file max scoring)
+**FPR progression**: 0% (invalid, empty dirs, v2.2.0-v2.2.6) → 38% (first real measurement, v2.2.7) → 19.4% (v2.2.8) → 17.5% (v2.2.9) → **~13%** (v2.2.11, per-file max scoring)
 
 **Holdout progression** (pre-tuning scores, rules frozen):
 
@@ -753,12 +752,12 @@ Output (CLI, JSON, HTML, SARIF, Webhook, Threat Feed)
 | v4 | **80%** (8/10) | Deobfuscation effectiveness |
 | v5 | 50% (5/10) | Inter-module dataflow (new scanner) |
 
-- **TPR** (True Positive Rate): detection rate on 4 real-world supply-chain attacks (event-stream, ua-parser-js, coa, node-ipc)
+- **TPR** (True Positive Rate): detection rate on 49 real-world supply-chain attacks (event-stream, ua-parser-js, coa, flatmap-stream, eslint-scope, solana-web3js, and 43 more). 4 misses are browser-only (lottie-player, polyfill-io, trojanized-jquery) or risky to fix (websocket-rat) — see [Threat Model](docs/threat-model.md).
 - **FPR** (False Positive Rate): packages scoring > 20 out of 529 real npm packages (source code scanned, not empty dirs). The 6.2% on standard packages (<10 JS files, 290 packages) is the most representative metric for typical use — most npm packages are small.
-- **ADR** (Adversarial Detection Rate): detection rate on 35 evasive malicious samples across 4 red-team waves
+- **ADR** (Adversarial Detection Rate): detection rate on 75 evasive malicious samples — 35 adversarial (4 red-team waves) + 40 holdout (5 batches of 10, testing obfuscation, inter-module dataflow, etc.)
 - **Holdout** (pre-tuning): detection rate on 10 unseen samples with rules frozen (measures generalization)
 
-Datasets: 529 npm + 132 PyPI benign packages, 35 adversarial samples, 50 holdout samples (5 batches), 65 documented malware packages.
+Datasets: 529 npm + 132 PyPI benign packages, 75 adversarial/holdout samples, 51 ground-truth attacks (65 documented malware packages).
 
 See [Evaluation Methodology](docs/EVALUATION_METHODOLOGY.md) for the full experimental protocol.
 
@@ -794,13 +793,11 @@ npm test
 
 ### Testing
 
-- **836 unit/integration tests** across 20 modular test files - 74% code coverage via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
+- **807 unit/integration tests** across 20 modular test files - 74% code coverage via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
 - **56 fuzz tests** - Malformed YAML, invalid JSON, binary files, ReDoS, unicode, 10MB inputs
-- **35 adversarial samples** - Evasive malicious packages, 35/35 detection rate (100% ADR)
-- **50 holdout samples** - 5 batches of 10, pre-tuning scores: 30% → 40% → 60% → 80% → 50%
-- **8 multi-factor typosquat tests** - Edge cases and cache behavior
-- **Ground truth validation** - 5/5 real-world attacks detected (event-stream, ua-parser-js, coa, node-ipc, colors)
-- **False positive validation** - 6.2% FPR on standard packages (18/290), 13.1% global (69/527) on real npm source code via `npm pack`
+- **75 adversarial/holdout samples** - 35 adversarial + 40 holdout, 75/75 detection rate (100% ADR)
+- **Ground truth validation** - 51 real-world attacks (45/49 detected = 91.8% TPR). 4 out-of-scope: browser-only (3) + FP-risky (1)
+- **False positive validation** - 6.2% FPR on standard packages (18/290), ~13% global (69/527) on real npm source code via `npm pack`
 - **ESLint security audit** - `eslint-plugin-security` with 14 rules enabled
 
 ---

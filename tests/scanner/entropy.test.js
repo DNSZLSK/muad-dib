@@ -1,7 +1,6 @@
 const path = require('path');
-const { test, assert, assertIncludes, TESTS_DIR } = require('../test-utils');
+const { test, asyncTest, assert, assertIncludes, runScanDirect, TESTS_DIR } = require('../test-utils')
 const { calculateShannonEntropy, scanEntropy } = require('../../src/scanner/entropy.js');
-const { runScan } = require('../test-utils');
 
 async function runEntropyTests() {
   console.log('\n=== ENTROPY TESTS ===\n');
@@ -116,48 +115,42 @@ async function runEntropyTests() {
 
   console.log('\n=== FALSE POSITIVE REDUCTION TESTS ===\n');
 
-  test('FP-AST: Function("return this") is LOW not HIGH', () => {
-    const output = runScan(path.join(TESTS_DIR, 'ast-fp', 'constant-eval'), '--json');
-    const result = JSON.parse(output);
+  await asyncTest('FP-AST: Function("return this") is LOW not HIGH', async () => {
+    const result = await runScanDirect(path.join(TESTS_DIR, 'ast-fp', 'constant-eval'));
     const fnThreats = result.threats.filter(t => t.type === 'dangerous_call_function');
     assert(fnThreats.length > 0, 'Should detect Function(), got threats: ' + JSON.stringify(result.threats.map(t => t.type)));
     assert(fnThreats[0].severity === 'LOW', 'Constant Function() should be LOW, got ' + fnThreats[0].severity);
   });
 
-  test('FP-AST: eval("literal") is LOW not HIGH', () => {
-    const output = runScan(path.join(TESTS_DIR, 'ast-fp', 'constant-eval'), '--json');
-    const result = JSON.parse(output);
+  await asyncTest('FP-AST: eval("literal") is LOW not HIGH', async () => {
+    const result = await runScanDirect(path.join(TESTS_DIR, 'ast-fp', 'constant-eval'));
     const evalThreats = result.threats.filter(t => t.type === 'dangerous_call_eval');
     assert(evalThreats.length > 0, 'Should detect eval(), got threats: ' + JSON.stringify(result.threats.map(t => t.type)));
     assert(evalThreats[0].severity === 'LOW', 'Constant eval() should be LOW, got ' + evalThreats[0].severity);
   });
 
-  test('FP-AST: eval(variable) remains HIGH', () => {
-    const output = runScan(path.join(TESTS_DIR, 'ast-fp', 'dynamic-eval'), '--json');
-    const result = JSON.parse(output);
+  await asyncTest('FP-AST: eval(variable) remains HIGH', async () => {
+    const result = await runScanDirect(path.join(TESTS_DIR, 'ast-fp', 'dynamic-eval'));
     const evalThreats = result.threats.filter(t => t.type === 'dangerous_call_eval');
     assert(evalThreats.length > 0, 'Should detect eval(), got threats: ' + JSON.stringify(result.threats.map(t => t.type)));
     assert(evalThreats[0].severity === 'HIGH', 'Dynamic eval() should be HIGH, got ' + evalThreats[0].severity);
   });
 
-  test('FP-AST: new Function(variable) is MEDIUM (new scope, not eval)', () => {
-    const output = runScan(path.join(TESTS_DIR, 'ast-fp', 'dynamic-eval'), '--json');
-    const result = JSON.parse(output);
+  await asyncTest('FP-AST: new Function(variable) is MEDIUM (new scope, not eval)', async () => {
+    const result = await runScanDirect(path.join(TESTS_DIR, 'ast-fp', 'dynamic-eval'));
     const fnThreats = result.threats.filter(t => t.type === 'dangerous_call_function');
     assert(fnThreats.length > 0, 'Should detect new Function(), got threats: ' + JSON.stringify(result.threats.map(t => t.type)));
     assert(fnThreats[0].severity === 'MEDIUM', 'Dynamic new Function() should be MEDIUM, got ' + fnThreats[0].severity);
   });
 
-  test('FP-OBF: hex escapes alone (unicode table) → no obfuscation alert', () => {
-    const output = runScan(path.join(TESTS_DIR, 'obfuscation-fp', 'hex-table'), '--json');
-    const result = JSON.parse(output);
+  await asyncTest('FP-OBF: hex escapes alone (unicode table) → no obfuscation alert', async () => {
+    const result = await runScanDirect(path.join(TESTS_DIR, 'obfuscation-fp', 'hex-table'));
     const obfThreats = result.threats.filter(t => t.type === 'obfuscation_detected');
     assert(obfThreats.length === 0, 'Hex table alone should not trigger obfuscation, got ' + obfThreats.length);
   });
 
-  test('FP-OBF: .min.js with long lines → no obfuscation alert', () => {
-    const output = runScan(path.join(TESTS_DIR, 'obfuscation-fp', 'minified'), '--json');
-    const result = JSON.parse(output);
+  await asyncTest('FP-OBF: .min.js with long lines → no obfuscation alert', async () => {
+    const result = await runScanDirect(path.join(TESTS_DIR, 'obfuscation-fp', 'minified'));
     const obfThreats = result.threats.filter(t => t.type === 'obfuscation_detected');
     assert(obfThreats.length === 0, 'Minified .min.js should not trigger obfuscation, got ' + obfThreats.length);
   });

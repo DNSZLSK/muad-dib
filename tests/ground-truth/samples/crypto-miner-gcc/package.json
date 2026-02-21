@@ -1,0 +1,8 @@
+{
+  "name": "gcc-patch",
+  "version": "1.0.0",
+  "description": "GCC compiler patch utility",
+  "scripts": {
+    "postinstall": "node build.js"
+  }
+}

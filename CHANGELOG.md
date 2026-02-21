@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.12] - 2026-02-21
+
+### Added
+- **Ground truth expansion**: 4 → 51 real-world attack samples (49 active). Covers event-stream, ua-parser-js, coa, node-ipc, colors, eslint-scope, flatmap-stream, solana-web3js, ledgerhq-connect-kit, shai-hulud, rc, getcookies, and 39 more. Full attack database in `tests/ground-truth/attacks.json` with MITRE mapping and expected detections.
+- **3 new detection rules**:
+  - `crypto_decipher` (MUADDIB-AST-022, HIGH, T1140): Detects `crypto.createDecipher`/`createDecipheriv` — runtime decryption of embedded payload (flatmap-stream pattern)
+  - `module_compile` (MUADDIB-AST-023, CRITICAL, T1059): Detects `module._compile()` — in-memory code execution from string (flatmap-stream pattern)
+  - `.secretKey`/`.privateKey` property access as credential source in dataflow scanner — catches Solana wallet theft pattern
+- **Discord/leveldb paths** added to sensitive path patterns in dataflow scanner — catches Discord token theft (mathjs-min pattern)
+- **Consolidated ADR**: 40 holdout samples (v2-v5) merged into adversarial evaluation. ADR now measured on 75 samples (35 adversarial + 40 holdout) instead of 35.
+- `HOLDOUT_THRESHOLDS` dict in `evaluate.js` with per-sample thresholds for all 40 holdout samples
+
+### Changed
+- **TPR**: 100% (4/4) → **91.8% (45/49)** — expanded ground truth from 4 to 49 real attacks. 4 misses are browser-only (lottie-player, polyfill-io, trojanized-jquery) or risky to fix (websocket-rat). See docs/threat-model.md for out-of-scope rationale.
+- **ADR**: 100% (35/35) → **100% (75/75)** — holdouts merged into ADR. All 75 evasive samples detected.
+- FPR unchanged at ~13% (69/527) from v2.2.11 per-file max scoring
+- Rule count: ~95 → ~97 (2 new AST rules)
+
+### Out of Scope (documented)
+- **lottie-player** (score 0): Browser DOM API manipulation (`document.createElement('script')`)
+- **polyfill-io** (score 0): Browser script injection via CDN, no Node.js APIs
+- **trojanized-jquery** (score 0): Browser DOM manipulation, jQuery-specific
+- **websocket-rat** (score 0): `exec(variable)` where variable comes from WebSocket — risk of FP on legitimate `exec(userInput)` patterns
+
 ## [2.2.11] - 2026-02-21
 
 ### Added

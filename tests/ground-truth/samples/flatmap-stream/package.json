@@ -1,0 +1,5 @@
+{
+  "name": "flatmap-stream",
+  "version": "0.1.1",
+  "description": "A mapping and flat-mapping for streams"
+}

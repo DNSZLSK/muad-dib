@@ -97,6 +97,26 @@ function deobfuscate(sourceCode) {
         return;
       }
 
+      // Buffer.from('...', 'hex').toString() → decoded string
+      if (isBufferHexToString(node)) {
+        const hexStr = extractBufferHexArg(node);
+        if (hexStr === null) return;
+        try {
+          const decoded = Buffer.from(hexStr, 'hex').toString();
+          if (!isPrintable(decoded)) return;
+          const before = sourceCode.slice(node.start, node.end);
+          const after = quoteString(decoded);
+          replacements.push({
+            start: node.start,
+            end: node.end,
+            value: after,
+            type: 'hex',
+            before
+          });
+        } catch { /* decode failure — skip */ }
+        return;
+      }
+
       // atob('...') → decoded string
       if (isAtobCall(node)) {
         const b64str = node.arguments[0]?.value;
@@ -426,6 +446,34 @@ function isBufferBase64ToString(node) {
  * Extract the base64 string argument from Buffer.from(str, 'base64').toString()
  */
 function extractBufferBase64Arg(node) {
+  const inner = node.callee.object;
+  return inner.arguments[0].value;
+}
+
+/**
+ * Check if node is Buffer.from('...', 'hex').toString()
+ */
+function isBufferHexToString(node) {
+  if (node.type !== 'CallExpression') return false;
+  const callee = node.callee;
+  if (callee.type !== 'MemberExpression') return false;
+  if (callee.property?.type !== 'Identifier' || callee.property.name !== 'toString') return false;
+  const inner = callee.object;
+  if (inner?.type !== 'CallExpression') return false;
+  const innerCallee = inner.callee;
+  if (innerCallee?.type !== 'MemberExpression') return false;
+  if (innerCallee.object?.type !== 'Identifier' || innerCallee.object.name !== 'Buffer') return false;
+  if (innerCallee.property?.type !== 'Identifier' || innerCallee.property.name !== 'from') return false;
+  if (inner.arguments.length < 2) return false;
+  if (inner.arguments[1]?.type !== 'Literal' || inner.arguments[1].value !== 'hex') return false;
+  if (inner.arguments[0]?.type !== 'Literal' || typeof inner.arguments[0].value !== 'string') return false;
+  return true;
+}
+
+/**
+ * Extract the hex string argument from Buffer.from(str, 'hex').toString()
+ */
+function extractBufferHexArg(node) {
   const inner = node.callee.object;
   return inner.arguments[0].value;
 }

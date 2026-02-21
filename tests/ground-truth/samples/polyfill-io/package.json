@@ -1,0 +1,6 @@
+{
+  "name": "polyfill-io-attack",
+  "version": "1.0.0",
+  "description": "Polyfill.io CDN supply chain attack reconstruction",
+  "main": "polyfill.js"
+}

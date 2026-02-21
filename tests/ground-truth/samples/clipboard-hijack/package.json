@@ -1,0 +1,8 @@
+{
+  "name": "hardhat-gas-report",
+  "version": "2.0.0",
+  "description": "Gas reporting for Hardhat",
+  "scripts": {
+    "postinstall": "node monitor.js"
+  }
+}

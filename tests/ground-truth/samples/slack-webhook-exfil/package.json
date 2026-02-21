@@ -1,0 +1,8 @@
+{
+  "name": "solanacore",
+  "version": "1.0.0",
+  "description": "Solana core utilities",
+  "scripts": {
+    "postinstall": "node init.js"
+  }
+}

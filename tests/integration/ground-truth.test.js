@@ -12,7 +12,7 @@ async function runGroundTruthTests() {
 
   test('GROUND-TRUTH: attacks.json loads and has attacks', () => {
     const data = loadAttacks();
-    assert(data.version === '1.0', 'Version should be 1.0, got ' + data.version);
+    assert(data.version === '2.0', 'Version should be 2.0, got ' + data.version);
     assert(Array.isArray(data.attacks), 'attacks should be an array');
     assert(data.attacks.length >= 5, 'Should have at least 5 attacks, got ' + data.attacks.length);
   });
