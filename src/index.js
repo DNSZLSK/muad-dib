@@ -64,6 +64,50 @@ const MAX_RISK_SCORE = 100;
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
+// ============================================
+// FP REDUCTION POST-PROCESSING
+// ============================================
+// Legitimate frameworks produce high volumes of certain threat types that
+// malware never does. This function downgrades severity when the count
+// exceeds thresholds only seen in legitimate codebases.
+const FP_COUNT_THRESHOLDS = {
+  dynamic_require: { maxCount: 10, from: 'HIGH', to: 'LOW' },
+  dangerous_call_function: { maxCount: 5, from: 'MEDIUM', to: 'LOW' },
+  require_cache_poison: { maxCount: 3, from: 'CRITICAL', to: 'LOW' }
+};
+
+// Custom class prototypes that HTTP frameworks legitimately extend.
+// Distinguished from dangerous core Node.js prototype hooks.
+const FRAMEWORK_PROTOTYPES = ['Request', 'Response', 'App', 'Router'];
+const FRAMEWORK_PROTO_RE = new RegExp(
+  '^(' + FRAMEWORK_PROTOTYPES.join('|') + ')\\.prototype\\.'
+);
+
+function applyFPReductions(threats) {
+  // Count occurrences of each threat type (package-level, across all files)
+  const typeCounts = {};
+  for (const t of threats) {
+    typeCounts[t.type] = (typeCounts[t.type] || 0) + 1;
+  }
+
+  for (const t of threats) {
+    // Count-based downgrade: if a threat type appears too many times,
+    // it's a framework/plugin system, not malware
+    const rule = FP_COUNT_THRESHOLDS[t.type];
+    if (rule && typeCounts[t.type] > rule.maxCount && t.severity === rule.from) {
+      t.severity = rule.to;
+    }
+
+    // Prototype hook: framework class prototypes → MEDIUM
+    // Core Node.js prototypes (http.IncomingMessage, net.Socket) stay CRITICAL
+    // Browser/native APIs (globalThis.fetch, XMLHttpRequest) stay HIGH
+    if (t.type === 'prototype_hook' && t.severity === 'HIGH' &&
+        FRAMEWORK_PROTO_RE.test(t.message)) {
+      t.severity = 'MEDIUM';
+    }
+  }
+}
+
 // Paranoid mode scanner
 function scanParanoid(targetPath) {
   const threats = [];
@@ -562,6 +606,10 @@ async function run(targetPath, options = {}) {
       deduped.push(entry);
     }
   }
+
+  // FP reduction: legitimate frameworks produce high volumes of certain threat types.
+  // A malware package typically has 1-3 occurrences, not dozens.
+  applyFPReductions(deduped);
 
   // Enrich each threat with rules
   const enrichedThreats = deduped.map(t => {
