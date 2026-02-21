@@ -426,12 +426,76 @@ All corrections verified against adversarial and holdout datasets:
 
 ---
 
-## 9. Current Metrics (v2.2.9)
+## 9. FPR by Package Size (v2.2.10)
+
+### Methodology
+
+For each of the 527 scanned benign packages, the number of `.js` files in the extracted tarball (`.muaddib-cache/benign-tarballs/`) was counted recursively (excluding `node_modules`). Packages were grouped into 4 size categories and FPR computed per category.
+
+488 out of 527 packages were matched (41 scoped `@scope/pkg` packages not resolved in the cache due to directory naming, 2 skipped due to download failure). The 41 unmatched scoped packages contain 7 additional FPs (`@prisma/client` 100, `@changesets/cli` 96, `@vue/compiler-sfc` 65, `@napi-rs/cli` 56, `@swc/core` 42, `@storybook/react` 26, `@nestjs/core` 23).
+
+### Results
+
+| Category | Packages | FP (>20) | FPR | Avg Score | Avg .js Files |
+|----------|----------|----------|-----|-----------|---------------|
+| **Small** (<10 .js) | 251 | 15 | **6.0%** | 5.4 | 3 |
+| **Medium** (10-50 .js) | 137 | 27 | **19.7%** | 15.0 | 25 |
+| **Large** (50-100 .js) | 38 | 14 | **36.8%** | 29.8 | 66 |
+| **Very large** (100+ .js) | 62 | 29 | **46.8%** | 38.2 | 400 |
+
+### Top 3 worst FPs per category
+
+**Small (<10 .js):**
+- `yarn` (score 100, 4 .js) — bundled monolithic CLI
+- `typescript` (score 100, 9 .js) — minified compiler
+- `esbuild` (score 83, 2 .js) — native bundler wrappers
+
+**Medium (10-50 .js):**
+- `total.js` (score 100, 19 .js) — template engine with eval
+- `htmx.org` (score 100, 28 .js) — eval for dynamic CSS expressions
+- `vite` (score 100, 19 .js) — bundler with dynamic require/import
+
+**Large (50-100 .js):**
+- `mocha` (score 100, 62 .js) — test runner with dynamic require
+- `vitest` (score 100, 61 .js) — test runner
+- `lerna` (score 100, 56 .js) — monorepo tool
+
+**Very large (100+ .js):**
+- `next` (score 100, 3162 .js) — 76 dynamic_require, 45 dynamic_import, 41 obfuscation
+- `gatsby` (score 100, 544 .js) — plugin system, HMR
+- `moleculer` (score 100, 143 .js) — microservice framework
+
+### Fine-grained correlation
+
+| JS Files | Packages | FP | FPR | Avg Score |
+|----------|----------|-----|-----|-----------|
+| 0 | 21 | 1 | 4.8% | 3.2 |
+| 1-5 | 176 | 6 | **3.4%** | 4.1 |
+| 6-10 | 58 | 8 | 13.8% | 10.2 |
+| 11-25 | 73 | 14 | 19.2% | 15.1 |
+| 26-50 | 60 | 13 | 21.7% | 15.7 |
+| 51-100 | 38 | 14 | 36.8% | 29.8 |
+| 101-200 | 27 | 10 | 37.0% | 28.6 |
+| 201-500 | 21 | 10 | 47.6% | 35.7 |
+| **500+** | **14** | **9** | **64.3%** | **60.5** |
+
+### Key observations
+
+1. **Linear correlation**: FPR goes from 3.4% (1-5 .js files) to 64.3% (500+ .js files). More code = more findings = higher score.
+2. **Critical threshold at ~50 .js files**: below 50, FPR stays under 22%. Above 50, FPR exceeds 36%.
+3. **Small packages (51% of dataset) have excellent FPR of 6%** — heuristics work well for typical libraries. Most npm packages are small, so the 6% is the most representative metric for real-world usage.
+4. **Score-100 packages in "small" category** (yarn, typescript) are special cases: monolithic bundlers that compress everything into 1-2 enormous minified files that trigger obfuscation + eval heuristics.
+5. **Very large packages (100+ .js) are inherently noisy**: they are full frameworks (Next.js, Gatsby, Webpack) that legitimately use dynamic require/import, eval, prototype extensions, env access, and other patterns that overlap with malware techniques. This is a fundamental challenge for static heuristic-based scanners — not a bug.
+
+---
+
+## 10. Current Metrics (v2.2.10)
 
 | Metric | Result | Description |
 |--------|--------|-------------|
 | **TPR** (Ground Truth) | 100% (4/4) | Real-world attacks: event-stream, ua-parser-js, coa, node-ipc |
-| **FPR** (Benign) | **17.5% (92/527)** | 529 npm packages (527 scanned), real source code, threshold > 20 |
+| **FPR** (Benign, global) | **17.5% (92/527)** | 529 npm packages (527 scanned), real source code, threshold > 20 |
+| **FPR** (Standard, <10 .js) | **6.0% (15/251)** | Most representative for typical npm packages |
 | **ADR** (Adversarial) | 100% (35/35) | 35 evasive samples across 4 vagues |
 | **Holdout v1** (pre-tuning) | 30% (3/10) | 10 unseen samples before rule corrections |
 | **Holdout v2** (pre-tuning) | 40% (4/10) | 10 unseen samples before rule corrections |
