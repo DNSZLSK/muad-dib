@@ -1,0 +1,5 @@
+{
+  "name": "audit-bypass-02-muaddib-ignore",
+  "version": "1.0.0",
+  "description": "Audit bypass: muaddib-ignore directive + source map injection"
+}

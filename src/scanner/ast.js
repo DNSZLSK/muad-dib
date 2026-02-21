@@ -254,6 +254,8 @@ function analyzeFile(content, filePath, basePath) {
   const workflowPathVars = new Set();
   // Track variables assigned temp/executable file paths
   const execPathVars = new Map();
+  // Track variables that alias globalThis/global (e.g. const g = globalThis)
+  const globalThisAliases = new Set();
 
   /**
    * Extract string value from a node if it's a Literal or TemplateLiteral with no expressions.
@@ -306,6 +308,13 @@ function analyzeFile(content, filePath, basePath) {
         // Track variables assigned temp/executable file paths
         if (strVal && /^\/tmp\/|^\/var\/tmp\/|\\temp\\/i.test(strVal)) {
           execPathVars.set(node.id.name, strVal);
+        }
+
+        // Track variables that alias globalThis or global (e.g. const g = globalThis)
+        if (node.init?.type === 'Identifier' &&
+            (node.init.name === 'globalThis' || node.init.name === 'global' ||
+             node.init.name === 'window' || node.init.name === 'self')) {
+          globalThisAliases.add(node.id.name);
         }
 
         // Track variables assigned from path.join containing .github/workflows
@@ -717,6 +726,68 @@ function analyzeFile(content, filePath, basePath) {
               : 'Function() with dynamic expression (template/factory pattern).',
             file: path.relative(basePath, filePath)
           });
+        }
+      }
+
+      // Detect indirect eval/Function via computed property: obj['eval'](code), g['Function'](code)
+      // Bypasses getCallName() which only reads .property.name (Identifier), not Literal values
+      if (node.callee.type === 'MemberExpression' && node.callee.computed) {
+        const prop = node.callee.property;
+        if (prop.type === 'Literal' && typeof prop.value === 'string') {
+          if (prop.value === 'eval') {
+            hasEvalInFile = true;
+            threats.push({
+              type: 'dangerous_call_eval',
+              severity: 'HIGH',
+              message: 'Indirect eval via computed property access (obj["eval"]) — evasion technique.',
+              file: path.relative(basePath, filePath)
+            });
+          } else if (prop.value === 'Function') {
+            threats.push({
+              type: 'dangerous_call_function',
+              severity: 'MEDIUM',
+              message: 'Indirect Function via computed property access (obj["Function"]) — evasion technique.',
+              file: path.relative(basePath, filePath)
+            });
+          }
+        }
+        // Detect computed call on globalThis/global alias with variable property: g[k]()
+        // where g = globalThis and k is a variable (not a literal) — dynamic global dispatch
+        const obj = node.callee.object;
+        if (prop.type === 'Identifier' && obj?.type === 'Identifier' &&
+            (globalThisAliases.has(obj.name) || obj.name === 'globalThis' || obj.name === 'global')) {
+          hasEvalInFile = true;
+          threats.push({
+            type: 'dangerous_call_eval',
+            severity: 'HIGH',
+            message: `Dynamic global dispatch via computed property (${obj.name}[${prop.name}]) — likely indirect eval evasion.`,
+            file: path.relative(basePath, filePath)
+          });
+        }
+      }
+
+      // Detect indirect eval/Function via sequence expression: (0, eval)(code), (0, Function)(code)
+      // Comma operator returns last expression, so (0, eval) === eval but avoids Identifier callee
+      if (node.callee.type === 'SequenceExpression') {
+        const exprs = node.callee.expressions;
+        const last = exprs[exprs.length - 1];
+        if (last && last.type === 'Identifier') {
+          if (last.name === 'eval') {
+            hasEvalInFile = true;
+            threats.push({
+              type: 'dangerous_call_eval',
+              severity: 'HIGH',
+              message: 'Indirect eval via sequence expression ((0, eval)) — evasion technique.',
+              file: path.relative(basePath, filePath)
+            });
+          } else if (last.name === 'Function') {
+            threats.push({
+              type: 'dangerous_call_function',
+              severity: 'MEDIUM',
+              message: 'Indirect Function via sequence expression ((0, Function)) — evasion technique.',
+              file: path.relative(basePath, filePath)
+            });
+          }
         }
       }
 

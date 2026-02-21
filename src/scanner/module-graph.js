@@ -32,7 +32,7 @@ const SINK_INSTANCE_METHODS = new Set(['connect', 'write', 'send']);
 function buildModuleGraph(packagePath) {
   const graph = {};
   const files = findFiles(packagePath, {
-    extensions: ['.js'],
+    extensions: ['.js', '.mjs', '.cjs'],
     excludedDirs: ['node_modules', '.git'],
   });
   for (const absFile of files) {

@@ -29,12 +29,6 @@ async function analyzeDataFlow(targetPath, options = {}) {
       continue;
     }
 
-    // Respect // muaddib-ignore directive in first 5 lines (like eslint-disable)
-    const headerLines = content.slice(0, 1024).split('\n').slice(0, 5);
-    if (headerLines.some(line => line.includes('muaddib-ignore'))) {
-      continue;
-    }
-
     // Analyze original code first (preserves obfuscation-detection rules)
     const fileThreats = analyzeFile(content, file, targetPath);
     threats.push(...fileThreats);

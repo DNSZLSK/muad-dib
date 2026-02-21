@@ -145,7 +145,7 @@ function findFiles(dir, options = {}) {
  * @returns {string[]} List of .js file paths
  */
 function findJsFiles(dir, results = []) {
-  return findFiles(dir, { extensions: ['.js'], results });
+  return findFiles(dir, { extensions: ['.js', '.mjs', '.cjs'], results });
 }
 
 /**
