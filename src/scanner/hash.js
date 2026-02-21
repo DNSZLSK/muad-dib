@@ -3,11 +3,11 @@ const path = require('path');
 const nodeCrypto = require('crypto');
 const { loadCachedIOCs } = require('../ioc/updater.js');
 const { findFiles } = require('../utils.js');
+const { MAX_FILE_SIZE } = require('../shared/constants.js');
 
 // Hash cache: filePath -> { hash, mtime }
 const hashCache = new Map();
 const MAX_CACHE_SIZE = 10000;
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
 async function scanHashes(targetPath) {
   const threats = [];

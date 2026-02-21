@@ -1,9 +1,8 @@
 const fs = require('fs');
 const path = require('path');
-const { findFiles } = require('../utils.js');
+const { findFiles, forEachSafeFile } = require('../utils.js');
 
 const ENTROPY_EXCLUDED_DIRS = ['.git', '.muaddib-cache', '__compiled__', '__tests__', '__test__', 'dist', 'build'];
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
 // File patterns to skip (compiled/minified/bundled)
 const SKIP_FILE_PATTERNS = ['.min.js', '.bundle.js', '.prod.js'];
@@ -205,27 +204,10 @@ function scanEntropy(targetPath, options = {}) {
   const stringThreshold = options.entropyThreshold || STRING_ENTROPY_MEDIUM;
   const files = findFiles(targetPath, { extensions: ['.js', '.mjs', '.cjs'], excludedDirs: ENTROPY_EXCLUDED_DIRS });
 
-  for (const file of files) {
-    // Skip files matching compiled/minified patterns
-    if (shouldSkipFile(file)) continue;
-
-    // Size guard
-    try {
-      const stat = fs.statSync(file);
-      if (stat.size > MAX_FILE_SIZE) continue;
-    } catch {
-      continue;
-    }
-
-    let content;
-    try {
-      content = fs.readFileSync(file, 'utf8');
-    } catch {
-      continue;
-    }
-
+  const safeFiles = files.filter(f => !shouldSkipFile(f));
+  forEachSafeFile(safeFiles, (file, content) => {
     // Skip files containing source maps (legitimate compiled output)
-    if (hasSourceMap(content)) continue;
+    if (hasSourceMap(content)) return;
 
     const relativePath = path.relative(targetPath, file);
 
@@ -252,7 +234,7 @@ function scanEntropy(targetPath, options = {}) {
         });
       }
     }
-  }
+  });
 
   return threats;
 }

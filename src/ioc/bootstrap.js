@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const zlib = require('zlib');
+const { debugLog } = require('../utils.js');
 
 // GitHub Releases URL for pre-compressed IOC database
 const IOCS_URL = 'https://github.com/DNSZLSK/muad-dib/releases/latest/download/iocs.json.gz';
@@ -87,12 +88,12 @@ function downloadAndDecompress(url, destPath) {
 
         gunzip.on('error', (err) => {
           fileStream.destroy();
-          try { fs.unlinkSync(tmpPath); } catch {}
+          try { fs.unlinkSync(tmpPath); } catch (e) { debugLog('cleanup failed:', e.message); }
           reject(new Error('Decompression failed: ' + err.message));
         });
 
         fileStream.on('error', (err) => {
-          try { fs.unlinkSync(tmpPath); } catch {}
+          try { fs.unlinkSync(tmpPath); } catch (e) { debugLog('cleanup failed:', e.message); }
           reject(err);
         });
 
@@ -102,7 +103,7 @@ function downloadAndDecompress(url, destPath) {
             fs.renameSync(tmpPath, destPath);
             resolve();
           } catch (err) {
-            try { fs.unlinkSync(tmpPath); } catch {}
+            try { fs.unlinkSync(tmpPath); } catch (e) { debugLog('cleanup failed:', e.message); }
             reject(err);
           }
         });
@@ -110,7 +111,7 @@ function downloadAndDecompress(url, destPath) {
         res.on('error', (err) => {
           gunzip.destroy();
           fileStream.destroy();
-          try { fs.unlinkSync(tmpPath); } catch {}
+          try { fs.unlinkSync(tmpPath); } catch (e) { debugLog('cleanup failed:', e.message); }
           reject(err);
         });
 

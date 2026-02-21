@@ -86,4 +86,8 @@ const NPM_PACKAGE_REGEX = /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*
 const MAX_TARBALL_SIZE = 50 * 1024 * 1024; // 50MB
 const DOWNLOAD_TIMEOUT = 30_000; // 30 seconds
 
-module.exports = { REHABILITATED_PACKAGES, NPM_PACKAGE_REGEX, MAX_TARBALL_SIZE, DOWNLOAD_TIMEOUT };
+// Shared scanner constants
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB — skip files larger than this to avoid memory issues
+const ACORN_OPTIONS = { ecmaVersion: 2024, sourceType: 'module', allowHashBang: true };
+
+module.exports = { REHABILITATED_PACKAGES, NPM_PACKAGE_REGEX, MAX_TARBALL_SIZE, DOWNLOAD_TIMEOUT, MAX_FILE_SIZE, ACORN_OPTIONS };

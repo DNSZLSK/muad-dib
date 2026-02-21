@@ -2,55 +2,14 @@ const fs = require('fs');
 const path = require('path');
 const acorn = require('acorn');
 const walk = require('acorn-walk');
-const { isDevFile, findJsFiles, getCallName } = require('../utils.js');
-
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+const { getCallName } = require('../utils.js');
+const { ACORN_OPTIONS } = require('../shared/constants.js');
+const { analyzeWithDeobfuscation } = require('../shared/analyze-helper.js');
 
 async function analyzeDataFlow(targetPath, options = {}) {
-  const threats = [];
-  const files = findJsFiles(targetPath);
-
-  for (const file of files) {
-    const relativePath = path.relative(targetPath, file).replace(/\\/g, '/');
-
-    if (isDevFile(relativePath)) {
-      continue;
-    }
-
-    try {
-      const stat = fs.statSync(file);
-      if (stat.size > MAX_FILE_SIZE) continue;
-    } catch { continue; }
-
-    let content;
-    try {
-      content = fs.readFileSync(file, 'utf8');
-    } catch {
-      continue;
-    }
-
-    // Analyze original code first (preserves obfuscation-detection rules)
-    const fileThreats = analyzeFile(content, file, targetPath);
-    threats.push(...fileThreats);
-
-    // Also analyze deobfuscated code for additional findings hidden by obfuscation
-    if (typeof options.deobfuscate === 'function') {
-      try {
-        const result = options.deobfuscate(content);
-        if (result.transforms.length > 0) {
-          const deobThreats = analyzeFile(result.code, file, targetPath);
-          const existingKeys = new Set(fileThreats.map(t => `${t.type}::${t.message}`));
-          for (const dt of deobThreats) {
-            if (!existingKeys.has(`${dt.type}::${dt.message}`)) {
-              threats.push(dt);
-            }
-          }
-        }
-      } catch { /* deobfuscation failed — skip */ }
-    }
-  }
-
-  return threats;
+  return analyzeWithDeobfuscation(targetPath, analyzeFile, {
+    deobfuscate: options.deobfuscate
+  });
 }
 
 function analyzeFile(content, filePath, basePath) {
@@ -58,12 +17,7 @@ function analyzeFile(content, filePath, basePath) {
   let ast;
 
   try {
-    ast = acorn.parse(content, {
-      ecmaVersion: 2024,
-      sourceType: 'module',
-      allowHashBang: true,
-      locations: true
-    });
+    ast = acorn.parse(content, { ...ACORN_OPTIONS, locations: true });
   } catch {
     return threats;
   }

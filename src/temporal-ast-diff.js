@@ -4,12 +4,13 @@ const path = require('path');
 const os = require('os');
 const acorn = require('acorn');
 const walk = require('acorn-walk');
-const { findJsFiles } = require('./utils.js');
+const { findJsFiles, forEachSafeFile, debugLog } = require('./utils.js');
 const { fetchPackageMetadata, getLatestVersions } = require('./temporal-analysis.js');
 const { downloadToFile, extractTarGz, sanitizePackageName } = require('./shared/download.js');
 
+const { MAX_FILE_SIZE, ACORN_OPTIONS } = require('./shared/constants.js');
+
 const REGISTRY_URL = 'https://registry.npmjs.org';
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const METADATA_TIMEOUT = 10_000;
 
 const SENSITIVE_PATHS = [
@@ -101,12 +102,12 @@ async function fetchPackageTarball(packageName, version) {
     await downloadToFile(tarballUrl, tgzPath);
     extractedDir = extractTarGz(tgzPath, tmpDir);
   } catch (err) {
-    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (e) { debugLog('tmpDir cleanup failed:', e.message); }
     throw err;
   }
 
   const cleanup = () => {
-    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (e) { debugLog('tmpDir cleanup failed:', e.message); }
   };
 
   return { dir: extractedDir, cleanup };
@@ -120,20 +121,9 @@ async function fetchPackageTarball(packageName, version) {
 function extractDangerousPatterns(directory) {
   const patterns = new Set();
   const files = findJsFiles(directory);
-
-  for (const file of files) {
-    try {
-      const stat = fs.statSync(file);
-      if (stat.size > MAX_FILE_SIZE) continue;
-    } catch { continue; }
-
-    let content;
-    try { content = fs.readFileSync(file, 'utf8'); }
-    catch { continue; }
-
+  forEachSafeFile(files, (file, content) => {
     extractPatternsFromSource(content, patterns);
-  }
-
+  });
   return patterns;
 }
 
@@ -145,7 +135,7 @@ function extractDangerousPatterns(directory) {
 function extractPatternsFromSource(source, patterns) {
   let ast;
   try {
-    ast = acorn.parse(source, { ecmaVersion: 2024, sourceType: 'module', allowHashBang: true });
+    ast = acorn.parse(source, ACORN_OPTIONS);
   } catch { return; }
 
   walk.simple(ast, {

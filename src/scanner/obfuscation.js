@@ -1,30 +1,15 @@
 const fs = require('fs');
 const path = require('path');
-const { findFiles } = require('../utils.js');
+const { findFiles, forEachSafeFile } = require('../utils.js');
 
 // node_modules NOT excluded: detect obfuscated code in dependencies
 const OBF_EXCLUDED_DIRS = ['.git', '.muaddib-cache'];
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
 function detectObfuscation(targetPath) {
   const threats = [];
   const files = findFiles(targetPath, { extensions: ['.js', '.mjs', '.cjs'], excludedDirs: OBF_EXCLUDED_DIRS });
 
-  for (const file of files) {
-    // Skip files exceeding MAX_FILE_SIZE to avoid memory issues
-    try {
-      const stat = fs.statSync(file);
-      if (stat.size > MAX_FILE_SIZE) continue;
-    } catch {
-      continue;
-    }
-
-    let content;
-    try {
-      content = fs.readFileSync(file, 'utf8');
-    } catch {
-      continue; // Skip unreadable files
-    }
+  forEachSafeFile(files, (file, content) => {
     const relativePath = path.relative(targetPath, file);
 
     const signals = [];
@@ -96,7 +81,7 @@ function detectObfuscation(targetPath) {
         file: relativePath
       });
     }
-  }
+  });
 
   return threats;
 }

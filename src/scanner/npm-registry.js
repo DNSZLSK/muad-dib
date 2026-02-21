@@ -1,4 +1,5 @@
 const { NPM_PACKAGE_REGEX } = require('../shared/constants.js');
+const { debugLog } = require('../utils.js');
 
 const REGISTRY_URL = 'https://registry.npmjs.org';
 const DOWNLOADS_URL = 'https://api.npmjs.org/downloads/point/last-week';
@@ -44,13 +45,13 @@ async function fetchWithRetry(url) {
     // 404 = package doesn't exist
     if (response.status === 404) {
       // Drain response body to free resources
-      try { await response.text(); } catch {}
+      try { await response.text(); } catch (e) { debugLog('response drain failed:', e.message); }
       return null;
     }
 
     // 429 = rate limit, respect Retry-After header (capped at 30s)
     if (response.status === 429) {
-      try { await response.text(); } catch {}
+      try { await response.text(); } catch (e) { debugLog('response drain failed:', e.message); }
       const retryAfter = parseInt(response.headers.get('retry-after'), 10);
       const delay = Math.min(retryAfter && retryAfter > 0 ? retryAfter * 1000 : 2000, 30000);
       await new Promise(r => setTimeout(r, delay));
@@ -59,7 +60,7 @@ async function fetchWithRetry(url) {
 
     if (!response.ok) {
       // Drain response body on errors
-      try { await response.text(); } catch {}
+      try { await response.text(); } catch (e) { debugLog('response drain failed:', e.message); }
       return null;
     }
 
