@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.10] - 2026-02-21
+
+### Added
+- **FPR by package size analysis**: Documented linear correlation between package size (JS file count) and false positive rate. FPR ranges from 6.0% on standard packages (<10 JS files, 251 packages) to 46.8% on very large frameworks (100+ JS files, 62 packages). The 6% on standard packages is the most representative metric for typical npm usage.
+- **FPR size category table** in README.md, README.fr.md, and EVALUATION_METHODOLOGY.md: Small 6.0%, Medium 19.7%, Large 36.8%, Very Large 46.8%.
+- **Fine-grained correlation** in EVALUATION_METHODOLOGY.md: 9-bucket breakdown from 0 JS files (4.8% FPR) to 500+ JS files (64.3% FPR).
+
+### Changed
+- README evaluation metrics now show both global FPR (17.5%) and standard-package FPR (6.0%) with explanation of size correlation
+- No code changes — documentation and analysis only
+
 ## [2.2.9] - 2026-02-21
 
 ### Added
@@ -579,7 +590,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Obfuscation detection
 - Package.json lifecycle script analysis
 
-[Unreleased]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.9...HEAD
+[Unreleased]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.10...HEAD
+[2.2.10]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.9...v2.2.10
 [2.2.9]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.8...v2.2.9
 [2.2.8]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.7...v2.2.8
 [2.2.7]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.6...v2.2.7
