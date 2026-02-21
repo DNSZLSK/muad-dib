@@ -30,7 +30,7 @@
 
 npm and PyPI supply-chain attacks are exploding. Shai-Hulud compromised 25K+ repos in 2025. Existing tools detect threats but don't help you respond.
 
-MUAD'DIB combines static analysis + **deobfuscation engine** (v2.2.5) + **inter-module dataflow** (v2.2.6) + dynamic analysis (Docker sandbox) + **behavioral anomaly detection** (v2.0) + **ground truth validation** (v2.1) to detect threats AND guide your response — even before they appear in any IOC database.
+MUAD'DIB combines static analysis + **deobfuscation engine** (v2.2.5) + **inter-module dataflow** (v2.2.6) + **per-file max scoring** (v2.2.11) + dynamic analysis (Docker sandbox) + **behavioral anomaly detection** (v2.0) + **ground truth validation** (v2.1) to detect threats AND guide your response — even before they appear in any IOC database.
 
 ---
 
@@ -647,7 +647,7 @@ Alerts appear in Security > Code scanning alerts.
 ## Architecture
 
 ```
-MUAD'DIB 2.2.9 Scanner
+MUAD'DIB 2.2.11 Scanner
 |
 +-- IOC Match (225,000+ packages, JSON DB)
 |   +-- OSV.dev npm dump (200K+ MAL-* entries)
@@ -701,6 +701,11 @@ MUAD'DIB 2.2.9 Scanner
 |   +-- Obfuscation in dist/build → LOW
 |   +-- Safe env var + prefix filtering
 |
++-- Per-File Max Scoring (v2.2.11)
+|   +-- Score = max(file_scores) + package_level_score
+|   +-- Eliminates score accumulation across many files
+|   +-- Package-level threats (lifecycle, typosquat, IOC) scored separately
+|
 +-- Paranoid Mode (ultra-strict)
 +-- Docker Sandbox (behavioral analysis, network capture, canary tokens, CI-aware)
 +-- Zero-Day Monitor (internal: npm + PyPI RSS polling, Discord alerts, daily report)
@@ -722,21 +727,21 @@ Output (CLI, JSON, HTML, SARIF, Webhook, Threat Feed)
 | Metric | Result | Details |
 |--------|--------|---------|
 | **TPR** (Ground Truth) | **100%** (4/4) | Real-world attacks: event-stream, ua-parser-js, coa, node-ipc |
-| **FPR** (Benign) | **17.5%** (92/527) | 529 npm packages, real source code via `npm pack`, threshold > 20 |
-| **FPR** (Standard packages) | **6.0%** (15/251) | Packages with <10 JS files — typical libraries and tools |
+| **FPR** (Standard packages) | **6.2%** (18/290) | Packages with <10 JS files — typical libraries and tools |
+| **FPR** (Benign, global) | **13.1%** (69/527) | 529 npm packages, real source code via `npm pack`, threshold > 20 |
 | **ADR** (Adversarial) | **100%** (35/35) | 35 evasive samples across 4 red-team waves |
 | **Holdouts** (pre-tuning) | 40/40 pass | All holdout samples pass after corrections |
 
-**FPR by package size** — FPR correlates linearly with package size. Large frameworks (Next.js, Gatsby, Webpack) accumulate legitimate findings that trigger heuristics:
+**FPR by package size** — FPR correlates linearly with package size. Per-file max scoring (v2.2.11) significantly reduces FP on medium/large packages:
 
 | Category | Packages | FP | FPR |
 |----------|----------|-----|-----|
-| Small (<10 JS files) | 251 | 15 | **6.0%** |
-| Medium (10-50 JS files) | 137 | 27 | 19.7% |
-| Large (50-100 JS files) | 38 | 14 | 36.8% |
-| Very large (100+ JS files) | 62 | 29 | 46.8% |
+| Small (<10 JS files) | 290 | 18 | **6.2%** |
+| Medium (10-50 JS files) | 135 | 16 | 11.9% |
+| Large (50-100 JS files) | 40 | 10 | 25.0% |
+| Very large (100+ JS files) | 62 | 25 | 40.3% |
 
-**FPR progression**: 0% (invalid, empty dirs, v2.2.0-v2.2.6) → 38% (first real measurement, v2.2.7) → 19.4% (v2.2.8) → **17.5%** (v2.2.9)
+**FPR progression**: 0% (invalid, empty dirs, v2.2.0-v2.2.6) → 38% (first real measurement, v2.2.7) → 19.4% (v2.2.8) → 17.5% (v2.2.9) → **13.1%** (v2.2.11, per-file max scoring)
 
 **Holdout progression** (pre-tuning scores, rules frozen):
 
@@ -749,7 +754,7 @@ Output (CLI, JSON, HTML, SARIF, Webhook, Threat Feed)
 | v5 | 50% (5/10) | Inter-module dataflow (new scanner) |
 
 - **TPR** (True Positive Rate): detection rate on 4 real-world supply-chain attacks (event-stream, ua-parser-js, coa, node-ipc)
-- **FPR** (False Positive Rate): packages scoring > 20 out of 529 real npm packages (source code scanned, not empty dirs). The 6% on standard packages (<10 JS files, 251 packages) is the most representative metric for typical use — most npm packages are small.
+- **FPR** (False Positive Rate): packages scoring > 20 out of 529 real npm packages (source code scanned, not empty dirs). The 6.2% on standard packages (<10 JS files, 290 packages) is the most representative metric for typical use — most npm packages are small.
 - **ADR** (Adversarial Detection Rate): detection rate on 35 evasive malicious samples across 4 red-team waves
 - **Holdout** (pre-tuning): detection rate on 10 unseen samples with rules frozen (measures generalization)
 
@@ -789,13 +794,13 @@ npm test
 
 ### Testing
 
-- **822 unit/integration tests** across 20 modular test files - 74% code coverage via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
+- **836 unit/integration tests** across 20 modular test files - 74% code coverage via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
 - **56 fuzz tests** - Malformed YAML, invalid JSON, binary files, ReDoS, unicode, 10MB inputs
 - **35 adversarial samples** - Evasive malicious packages, 35/35 detection rate (100% ADR)
 - **50 holdout samples** - 5 batches of 10, pre-tuning scores: 30% → 40% → 60% → 80% → 50%
 - **8 multi-factor typosquat tests** - Edge cases and cache behavior
 - **Ground truth validation** - 5/5 real-world attacks detected (event-stream, ua-parser-js, coa, node-ipc, colors)
-- **False positive validation** - 17.5% FPR (92/527) on real npm source code via `npm pack` (honest measurement)
+- **False positive validation** - 6.2% FPR on standard packages (18/290), 13.1% global (69/527) on real npm source code via `npm pack`
 - **ESLint security audit** - `eslint-plugin-security` with 14 rules enabled
 
 ---

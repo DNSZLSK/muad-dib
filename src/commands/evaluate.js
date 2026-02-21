@@ -44,7 +44,7 @@ const ADVERSARIAL_THRESHOLDS = {
   'nested-payload': 30,
   'dynamic-import': 30,
   'websocket-exfil': 30,
-  'bun-runtime-evasion': 30,
+  'bun-runtime-evasion': 25,
   'preinstall-exec': 35,
   'remote-dynamic-dependency': 35,
   'github-exfil': 30,

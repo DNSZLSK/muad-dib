@@ -762,6 +762,122 @@ async function runCliTests() {
     }
   });
 
+  // ============================================
+  // PER-FILE SCORING TESTS (v2.2.11)
+  // ============================================
+
+  console.log('\n=== PER-FILE SCORING TESTS ===\n');
+
+  test('PER-FILE: JSON includes summary.maxFileScore', () => {
+    const output = runScan(path.join(TESTS_DIR, 'ast'), '--json');
+    const result = JSON.parse(output);
+    assert(typeof result.summary.maxFileScore === 'number', 'summary.maxFileScore should be number');
+  });
+
+  test('PER-FILE: JSON includes summary.globalRiskScore', () => {
+    const output = runScan(path.join(TESTS_DIR, 'ast'), '--json');
+    const result = JSON.parse(output);
+    assert(typeof result.summary.globalRiskScore === 'number', 'summary.globalRiskScore should be number');
+  });
+
+  test('PER-FILE: JSON includes summary.mostSuspiciousFile', () => {
+    const output = runScan(path.join(TESTS_DIR, 'ast'), '--json');
+    const result = JSON.parse(output);
+    assert(result.summary.mostSuspiciousFile !== null, 'mostSuspiciousFile should be set for ast fixtures');
+  });
+
+  test('PER-FILE: JSON includes summary.packageScore', () => {
+    const output = runScan(path.join(TESTS_DIR, 'ast'), '--json');
+    const result = JSON.parse(output);
+    assert(typeof result.summary.packageScore === 'number', 'summary.packageScore should be number');
+  });
+
+  test('PER-FILE: JSON includes summary.fileScores object', () => {
+    const output = runScan(path.join(TESTS_DIR, 'ast'), '--json');
+    const result = JSON.parse(output);
+    assert(typeof result.summary.fileScores === 'object' && result.summary.fileScores !== null, 'fileScores should be an object');
+  });
+
+  test('PER-FILE: riskScore <= globalRiskScore', () => {
+    const output = runScan(path.join(TESTS_DIR, 'ast'), '--json');
+    const result = JSON.parse(output);
+    assert(result.summary.riskScore <= result.summary.globalRiskScore,
+      `Per-file score (${result.summary.riskScore}) should be <= global score (${result.summary.globalRiskScore})`);
+  });
+
+  test('PER-FILE: riskScore = maxFileScore + packageScore (capped)', () => {
+    const output = runScan(path.join(TESTS_DIR, 'ast'), '--json');
+    const result = JSON.parse(output);
+    const expected = Math.min(100, result.summary.maxFileScore + result.summary.packageScore);
+    assert(result.summary.riskScore === expected,
+      `riskScore (${result.summary.riskScore}) should equal min(100, maxFileScore + packageScore) = ${expected}`);
+  });
+
+  test('PER-FILE: clean project has maxFileScore 0', () => {
+    const output = runScan(path.join(TESTS_DIR, 'clean'), '--json');
+    const result = JSON.parse(output);
+    assert(result.summary.maxFileScore === 0, 'Clean project maxFileScore should be 0');
+    assert(result.summary.mostSuspiciousFile === null, 'Clean project mostSuspiciousFile should be null');
+    assert(result.summary.riskScore === 0, 'Clean project riskScore should be 0');
+  });
+
+  test('PER-FILE: mostSuspiciousFile appears in fileScores', () => {
+    const output = runScan(path.join(TESTS_DIR, 'ast'), '--json');
+    const result = JSON.parse(output);
+    if (result.summary.mostSuspiciousFile) {
+      assert(result.summary.fileScores[result.summary.mostSuspiciousFile] !== undefined,
+        'mostSuspiciousFile should have an entry in fileScores');
+      assert(result.summary.fileScores[result.summary.mostSuspiciousFile] === result.summary.maxFileScore,
+        'mostSuspiciousFile score should equal maxFileScore');
+    }
+  });
+
+  test('PER-FILE: isPackageLevelThreat classifies correctly', () => {
+    const { isPackageLevelThreat } = require('../../src/index.js');
+    assert(isPackageLevelThreat({ type: 'lifecycle_script', file: 'package.json' }) === true, 'lifecycle_script should be package-level');
+    assert(isPackageLevelThreat({ type: 'typosquat_detected', file: 'package.json' }) === true, 'typosquat should be package-level');
+    assert(isPackageLevelThreat({ type: 'known_malicious_package', file: 'node_modules/evil' }) === true, 'known_malicious should be package-level');
+    assert(isPackageLevelThreat({ type: 'eval_usage', file: 'src/index.js' }) === false, 'eval_usage should be file-level');
+    assert(isPackageLevelThreat({ type: 'dynamic_require', file: 'lib/utils.js' }) === false, 'dynamic_require should be file-level');
+    assert(isPackageLevelThreat({ type: 'obfuscation_detected', file: 'dist/bundle.js' }) === false, 'obfuscation should be file-level');
+  });
+
+  test('PER-FILE: computeGroupScore with mixed severities', () => {
+    const { computeGroupScore } = require('../../src/index.js');
+    const threats = [
+      { severity: 'CRITICAL', type: 'test' },
+      { severity: 'HIGH', type: 'test' },
+      { severity: 'LOW', type: 'test' }
+    ];
+    const score = computeGroupScore(threats);
+    assert(score === 36, `Expected 25+10+1=36, got ${score}`);
+  });
+
+  test('PER-FILE: computeGroupScore caps prototype_hook MEDIUM', () => {
+    const { computeGroupScore } = require('../../src/index.js');
+    const threats = [];
+    for (let i = 0; i < 20; i++) {
+      threats.push({ severity: 'MEDIUM', type: 'prototype_hook' });
+    }
+    const score = computeGroupScore(threats);
+    assert(score === 15, `Expected 15 (capped), got ${score}`);
+  });
+
+  test('PER-FILE: computeGroupScore caps at 100', () => {
+    const { computeGroupScore } = require('../../src/index.js');
+    const threats = [];
+    for (let i = 0; i < 5; i++) {
+      threats.push({ severity: 'CRITICAL', type: 'test' });
+    }
+    const score = computeGroupScore(threats);
+    assert(score === 100, `Expected 100 (capped), got ${score}`);
+  });
+
+  test('PER-FILE: output shows Max file info when threats exist', () => {
+    const output = runScan(path.join(TESTS_DIR, 'ast'), '');
+    assertIncludes(output, 'Max file:', 'Should show max file in score output');
+  });
+
   await asyncTest('HOOKS-COV: auto-detect selects git when only .git exists', async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-hooks-'));
     const gitDir = path.join(tmpDir, '.git', 'hooks');

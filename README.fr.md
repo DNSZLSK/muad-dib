@@ -30,7 +30,7 @@
 
 Les attaques supply-chain npm et PyPI explosent. Shai-Hulud a compromis 25K+ repos en 2025. Les outils existants détectent, mais n'aident pas à répondre.
 
-MUAD'DIB combine analyse statique + **moteur de désobfuscation** (v2.2.5) + **dataflow inter-module** (v2.2.6) + analyse dynamique (sandbox Docker) + **détection comportementale d'anomalies** (v2.0) + **validation ground truth** (v2.1) pour détecter les menaces ET guider votre réponse — même avant leur apparition dans une base d'IOC.
+MUAD'DIB combine analyse statique + **moteur de désobfuscation** (v2.2.5) + **dataflow inter-module** (v2.2.6) + **scoring per-file max** (v2.2.11) + analyse dynamique (sandbox Docker) + **détection comportementale d'anomalies** (v2.0) + **validation ground truth** (v2.1) pour détecter les menaces ET guider votre réponse — même avant leur apparition dans une base d'IOC.
 
 ---
 
@@ -646,7 +646,7 @@ Les alertes apparaissent dans Security > Code scanning alerts.
 ## Architecture
 
 ```
-MUAD'DIB 2.2.9 Scanner
+MUAD'DIB 2.2.11 Scanner
 |
 +-- IOC Match (225 000+ packages, JSON DB)
 |   +-- OSV.dev npm dump (200K+ entrées MAL-*)
@@ -698,6 +698,11 @@ MUAD'DIB 2.2.9 Scanner
 |   +-- Obfuscation dans dist/build → LOW
 |   +-- Filtrage env vars safe + préfixes
 |
++-- Scoring Per-File Max (v2.2.11)
+|   +-- Score = max(scores_par_fichier) + score_package_level
+|   +-- Élimine l'accumulation de score sur de nombreux fichiers
+|   +-- Menaces package-level (lifecycle, typosquat, IOC) scorées séparément
+|
 +-- Paranoid Mode (ultra-strict)
 +-- Docker Sandbox (analyse comportementale, capture réseau, canary tokens, CI-aware)
 +-- Moniteur Zero-Day (interne : polling RSS npm + PyPI, alertes Discord, rapport quotidien)
@@ -719,21 +724,21 @@ Output (CLI, JSON, HTML, SARIF, Webhook, Threat Feed)
 | Metrique | Resultat | Details |
 |----------|----------|---------|
 | **TPR** (Ground Truth) | **100%** (4/4) | Attaques reelles : event-stream, ua-parser-js, coa, node-ipc |
-| **FPR** (Benign) | **17.5%** (92/527) | 529 packages npm, vrai code source via `npm pack`, seuil > 20 |
-| **FPR** (Packages standard) | **6.0%** (15/251) | Packages avec <10 fichiers JS — librairies et outils typiques |
+| **FPR** (Packages standard) | **6.2%** (18/290) | Packages avec <10 fichiers JS — librairies et outils typiques |
+| **FPR** (Benign, global) | **13.1%** (69/527) | 529 packages npm, vrai code source via `npm pack`, seuil > 20 |
 | **ADR** (Adversarial) | **100%** (35/35) | 35 samples evasifs sur 4 vagues red team |
 | **Holdouts** (pre-tuning) | 40/40 pass | Tous les holdouts passent apres corrections |
 
-**FPR par taille de package** — Le FPR correle lineairement avec la taille du package. Les gros frameworks (Next.js, Gatsby, Webpack) accumulent des findings legitimes qui declenchent les heuristiques :
+**FPR par taille de package** — Le FPR correle lineairement avec la taille du package. Le scoring per-file max (v2.2.11) reduit significativement les FP sur les packages moyens/gros :
 
 | Categorie | Packages | FP | FPR |
 |-----------|----------|-----|-----|
-| Petits (<10 fichiers JS) | 251 | 15 | **6.0%** |
-| Moyens (10-50 fichiers JS) | 137 | 27 | 19.7% |
-| Gros (50-100 fichiers JS) | 38 | 14 | 36.8% |
-| Tres gros (100+ fichiers JS) | 62 | 29 | 46.8% |
+| Petits (<10 fichiers JS) | 290 | 18 | **6.2%** |
+| Moyens (10-50 fichiers JS) | 135 | 16 | 11.9% |
+| Gros (50-100 fichiers JS) | 40 | 10 | 25.0% |
+| Tres gros (100+ fichiers JS) | 62 | 25 | 40.3% |
 
-**Progression FPR** : 0% (invalide, dirs vides, v2.2.0-v2.2.6) → 38% (premiere vraie mesure, v2.2.7) → 19.4% (v2.2.8) → **17.5%** (v2.2.9)
+**Progression FPR** : 0% (invalide, dirs vides, v2.2.0-v2.2.6) → 38% (premiere vraie mesure, v2.2.7) → 19.4% (v2.2.8) → 17.5% (v2.2.9) → **13.1%** (v2.2.11, scoring per-file max)
 
 **Progression holdout** (scores pre-tuning, regles gelees) :
 
@@ -746,7 +751,7 @@ Output (CLI, JSON, HTML, SARIF, Webhook, Threat Feed)
 | v5 | 50% (5/10) | Dataflow inter-module (nouveau scanner) |
 
 - **TPR** (True Positive Rate) : taux de detection sur 4 attaques supply-chain reelles (event-stream, ua-parser-js, coa, node-ipc)
-- **FPR** (False Positive Rate) : packages avec score > 20 sur 529 packages npm reels (code source scanne, pas des dirs vides). Le 6% sur les packages standard (<10 fichiers JS, 251 packages) est la metrique la plus representative pour un usage typique — la plupart des packages npm sont petits.
+- **FPR** (False Positive Rate) : packages avec score > 20 sur 529 packages npm reels (code source scanne, pas des dirs vides). Le 6.2% sur les packages standard (<10 fichiers JS, 290 packages) est la metrique la plus representative pour un usage typique — la plupart des packages npm sont petits.
 - **ADR** (Adversarial Detection Rate) : taux de detection sur 35 samples malveillants evasifs sur 4 vagues red team
 - **Holdout** (pre-tuning) : taux de detection sur 10 samples jamais vus avec regles gelees (mesure de generalisation)
 
@@ -786,13 +791,13 @@ npm test
 
 ### Tests
 
-- **822 tests unitaires/intégration** sur 20 fichiers modulaires - 74% coverage via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
+- **836 tests unitaires/intégration** sur 20 fichiers modulaires - 74% coverage via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
 - **56 tests de fuzzing** - YAML malformé, JSON invalide, fichiers binaires, ReDoS, unicode, inputs 10MB
 - **35 samples adversariaux** - Packages malveillants évasifs, taux de détection 35/35 (100% ADR)
 - **50 samples holdout** - 5 batches de 10, scores pre-tuning : 30% → 40% → 60% → 80% → 50%
 - **8 tests multi-facteur typosquat** - Cas limites et comportement cache
 - **Validation ground truth** - 5/5 attaques réelles détectées (event-stream, ua-parser-js, coa, node-ipc, colors)
-- **Validation faux positifs** - 17.5% FPR (92/527) sur vrai code source npm via `npm pack` (mesure honnête)
+- **Validation faux positifs** - 6.2% FPR sur packages standard (18/290), 13.1% global (69/527) sur vrai code source npm via `npm pack`
 - **Audit ESLint sécurité** - `eslint-plugin-security` avec 14 règles activées
 
 ---

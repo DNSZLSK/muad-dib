@@ -489,13 +489,57 @@ For each of the 527 scanned benign packages, the number of `.js` files in the ex
 
 ---
 
-## 10. Current Metrics (v2.2.10)
+## 10. Per-File Max Scoring (v2.2.11)
+
+### Problem
+
+The global scoring approach sums findings across ALL files in a package. A framework with 500 JS files accumulates LOW/MEDIUM findings and easily exceeds the FP threshold (>20), even though no single file is suspicious. Meanwhile, malware concentrates everything in 1-2 files.
+
+### Solution
+
+Replace global score accumulation with per-file max scoring:
+
+```
+riskScore = min(100, max(file_scores) + package_level_score)
+```
+
+- **File-level threats** (AST, dataflow, obfuscation, entropy findings tied to specific source files) are grouped by file. Each file group is scored independently using the same severity weights (CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1). The highest-scoring file determines `maxFileScore`.
+- **Package-level threats** (lifecycle scripts, typosquat, IOC matches, sandbox findings, cross-file dataflow) are scored separately as `packageScore`.
+- The old global sum is preserved as `globalRiskScore` for comparison.
+
+### Why it works
+
+Malware typically has 1-2 files with high concentration of dangerous patterns (credential read + network send + obfuscation in a single file). Per-file scoring preserves this signal. Large frameworks have low scores per file but many files — per-file max eliminates the accumulation effect.
+
+### Results: FPR 17.5% → 13.1%
+
+| Metric | v2.2.10 | v2.2.11 |
+|--------|---------|---------|
+| **TPR** | 100% (4/4) | 100% (4/4) |
+| **FPR** (global) | 17.5% (92/527) | **13.1% (69/527)** |
+| **FPR** (standard, <10 .js) | 6.0% (15/251) | **6.2% (18/290)** |
+| **FPR** (medium, 10-50 .js) | 19.7% (27/137) | **11.9% (16/135)** |
+| **FPR** (large, 50-100 .js) | 36.8% (14/38) | **25.0% (10/40)** |
+| **FPR** (very large, 100+ .js) | 46.8% (29/62) | **40.3% (25/62)** |
+| **ADR** | 100% (35/35) | 100% (35/35) |
+| **Holdouts** | 40/40 | 40/40 |
+
+The biggest improvements are on medium (+7.8pp) and large (+11.8pp) packages, where score accumulation was the primary FP driver. Small packages see a slight increase (6.0%→6.2%) due to category boundary shifts, not regression.
+
+### Safety verification
+
+- **ADR**: 100% (35/35). One sample (`bun-runtime-evasion`) scored 28 with per-file scoring (was 30 threshold). Threshold adjusted from 30 to 25 — per user constraint: "adjust the sample threshold, not the scoring."
+- **Holdouts**: 40/40 across all 5 batches. No regression.
+
+---
+
+## 11. Current Metrics (v2.2.11)
 
 | Metric | Result | Description |
 |--------|--------|-------------|
 | **TPR** (Ground Truth) | 100% (4/4) | Real-world attacks: event-stream, ua-parser-js, coa, node-ipc |
-| **FPR** (Benign, global) | **17.5% (92/527)** | 529 npm packages (527 scanned), real source code, threshold > 20 |
-| **FPR** (Standard, <10 .js) | **6.0% (15/251)** | Most representative for typical npm packages |
+| **FPR** (Standard, <10 .js) | **6.2% (18/290)** | Most representative for typical npm packages |
+| **FPR** (Benign, global) | **13.1% (69/527)** | 529 npm packages (527 scanned), real source code, threshold > 20 |
 | **ADR** (Adversarial) | 100% (35/35) | 35 evasive samples across 4 vagues |
 | **Holdout v1** (pre-tuning) | 30% (3/10) | 10 unseen samples before rule corrections |
 | **Holdout v2** (pre-tuning) | 40% (4/10) | 10 unseen samples before rule corrections |
@@ -503,6 +547,6 @@ For each of the 527 scanned benign packages, the number of `.js` files in the ex
 | **Holdout v4** (pre-tuning) | 80% (8/10) | 10 unseen samples testing deobfuscation |
 | **Holdout v5** (pre-tuning) | 50% (5/10) | 10 unseen samples testing inter-module dataflow |
 
-**FPR progression**: 0% (invalid, v2.2.0–v2.2.6) → 38% (first real measurement on 50 packages, v2.2.7) → 19.4% (v2.2.8) → **17.5%** (v2.2.9)
+**FPR progression**: 0% (invalid, v2.2.0–v2.2.6) → 38% (first real measurement on 50 packages, v2.2.7) → 19.4% (v2.2.8) → 17.5% (v2.2.9) → **13.1%** (v2.2.11, per-file max scoring)
 
 Run `muaddib evaluate` to reproduce these metrics locally. Results are saved to `metrics/v{version}.json`.

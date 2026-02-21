@@ -64,6 +64,67 @@ const MAX_RISK_SCORE = 100;
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
+// Cap MEDIUM prototype_hook contribution (frameworks like Restify have 50+ extensions)
+const PROTO_HOOK_MEDIUM_CAP = 15;
+
+// ============================================
+// PER-FILE MAX SCORING (v2.2.11)
+// ============================================
+// Threat types classified as package-level (not tied to a specific source file).
+// These are added to the package score, not grouped by file.
+const PACKAGE_LEVEL_TYPES = new Set([
+  'lifecycle_script', 'lifecycle_shell_pipe',
+  'lifecycle_added_critical', 'lifecycle_added_high', 'lifecycle_modified',
+  'known_malicious_package', 'typosquat_detected',
+  'shai_hulud_marker', 'suspicious_file',
+  'pypi_malicious_package', 'pypi_typosquat_detected',
+  'dangerous_api_added_critical', 'dangerous_api_added_high', 'dangerous_api_added_medium',
+  'publish_burst', 'publish_dormant_spike', 'publish_rapid_succession',
+  'maintainer_new_suspicious', 'maintainer_sole_change',
+  'sandbox_network_activity', 'sandbox_file_changes', 'sandbox_process_spawns',
+  'sandbox_canary_exfiltration'
+]);
+
+/**
+ * Classify a threat as package-level or file-level.
+ * Package-level: metadata findings (package.json, node_modules, sandbox)
+ * File-level: code-level findings in specific source files
+ */
+function isPackageLevelThreat(threat) {
+  if (PACKAGE_LEVEL_TYPES.has(threat.type)) return true;
+  if (threat.file === 'package.json') return true;
+  if (threat.file && (threat.file.startsWith('node_modules/') || threat.file.startsWith('node_modules\\'))) return true;
+  if (threat.file && threat.file.startsWith('[SANDBOX]')) return true;
+  return false;
+}
+
+/**
+ * Compute a risk score for a group of threats using standard weights.
+ * Handles prototype_hook MEDIUM cap per group.
+ * @param {Array} threats - array of threat objects (after FP reductions)
+ * @returns {number} score 0-100
+ */
+function computeGroupScore(threats) {
+  const criticalCount = threats.filter(t => t.severity === 'CRITICAL').length;
+  const highCount = threats.filter(t => t.severity === 'HIGH').length;
+  const mediumCount = threats.filter(t => t.severity === 'MEDIUM').length;
+  const lowCount = threats.filter(t => t.severity === 'LOW').length;
+
+  const mediumProtoHookCount = threats.filter(
+    t => t.type === 'prototype_hook' && t.severity === 'MEDIUM'
+  ).length;
+  const protoHookPoints = Math.min(mediumProtoHookCount * SEVERITY_WEIGHTS.MEDIUM, PROTO_HOOK_MEDIUM_CAP);
+  const otherMediumCount = mediumCount - mediumProtoHookCount;
+
+  let score = 0;
+  score += criticalCount * SEVERITY_WEIGHTS.CRITICAL;
+  score += highCount * SEVERITY_WEIGHTS.HIGH;
+  score += otherMediumCount * SEVERITY_WEIGHTS.MEDIUM;
+  score += protoHookPoints;
+  score += lowCount * SEVERITY_WEIGHTS.LOW;
+  return Math.min(MAX_RISK_SCORE, score);
+}
+
 // ============================================
 // FP REDUCTION POST-PROCESSING
 // ============================================
@@ -634,26 +695,56 @@ async function run(targetPath, options = {}) {
     .map(t => ({ rule: t.rule_id, type: t.type, points: t.points, reason: t.message }))
     .sort((a, b) => b.points - a.points);
 
-  // Calculate risk score (0-100) using deduplicated threats
+  // ============================================
+  // PER-FILE MAX SCORING (v2.2.11)
+  // ============================================
+
+  // 1. Separate deduped threats into package-level and file-level
+  const packageLevelThreats = [];
+  const fileLevelThreats = [];
+  for (const t of deduped) {
+    if (isPackageLevelThreat(t)) {
+      packageLevelThreats.push(t);
+    } else {
+      fileLevelThreats.push(t);
+    }
+  }
+
+  // 2. Group file-level threats by file
+  const fileGroups = new Map();
+  for (const t of fileLevelThreats) {
+    const key = t.file || '(unknown)';
+    if (!fileGroups.has(key)) fileGroups.set(key, []);
+    fileGroups.get(key).push(t);
+  }
+
+  // 3. Compute per-file scores and find the most suspicious file
+  let maxFileScore = 0;
+  let mostSuspiciousFile = null;
+  const fileScores = {};
+  for (const [file, fileThreats] of fileGroups) {
+    const score = computeGroupScore(fileThreats);
+    fileScores[file] = score;
+    if (score > maxFileScore) {
+      maxFileScore = score;
+      mostSuspiciousFile = file;
+    }
+  }
+
+  // 4. Compute package-level score (typosquat, lifecycle, dependency IOC, etc.)
+  const packageScore = computeGroupScore(packageLevelThreats);
+
+  // 5. Final score = max file score + package-level score, capped at 100
+  const riskScore = Math.min(MAX_RISK_SCORE, maxFileScore + packageScore);
+
+  // 6. Old global score for comparison (sum of ALL findings)
+  const globalRiskScore = computeGroupScore(deduped);
+
+  // 7. Severity counts (global, for summary display)
   const criticalCount = deduped.filter(t => t.severity === 'CRITICAL').length;
   const highCount = deduped.filter(t => t.severity === 'HIGH').length;
   const mediumCount = deduped.filter(t => t.severity === 'MEDIUM').length;
   const lowCount = deduped.filter(t => t.severity === 'LOW').length;
-
-  // Cap MEDIUM prototype_hook contribution to 15 points max (5 × MEDIUM=3)
-  // Frameworks like Restify have 50+ prototype extensions that are not malicious
-  const mediumProtoHookCount = deduped.filter(t => t.type === 'prototype_hook' && t.severity === 'MEDIUM').length;
-  const PROTO_HOOK_MEDIUM_CAP = 15;
-  const protoHookPoints = Math.min(mediumProtoHookCount * SEVERITY_WEIGHTS.MEDIUM, PROTO_HOOK_MEDIUM_CAP);
-  const otherMediumCount = mediumCount - mediumProtoHookCount;
-
-  let riskScore = 0;
-  riskScore += criticalCount * SEVERITY_WEIGHTS.CRITICAL;
-  riskScore += highCount * SEVERITY_WEIGHTS.HIGH;
-  riskScore += otherMediumCount * SEVERITY_WEIGHTS.MEDIUM;
-  riskScore += protoHookPoints;
-  riskScore += lowCount * SEVERITY_WEIGHTS.LOW;
-  riskScore = Math.min(MAX_RISK_SCORE, riskScore);
 
   const riskLevel = riskScore >= RISK_THRESHOLDS.CRITICAL ? 'CRITICAL'
                   : riskScore >= RISK_THRESHOLDS.HIGH ? 'HIGH'
@@ -679,8 +770,13 @@ async function run(targetPath, options = {}) {
       high: highCount,
       medium: mediumCount,
       low: lowCount,
-      riskScore: riskScore,
-      riskLevel: riskLevel,
+      riskScore,
+      riskLevel,
+      globalRiskScore,
+      maxFileScore,
+      packageScore,
+      mostSuspiciousFile,
+      fileScores,
       breakdown
     },
     sandbox: sandboxData
@@ -712,7 +808,14 @@ async function run(targetPath, options = {}) {
     else console.log('');
 
     const explainScoreBar = '█'.repeat(Math.floor(result.summary.riskScore / 5)) + '░'.repeat(20 - Math.floor(result.summary.riskScore / 5));
-    console.log(`[SCORE] ${result.summary.riskScore}/100 [${explainScoreBar}] ${result.summary.riskLevel}\n`);
+    console.log(`[SCORE] ${result.summary.riskScore}/100 [${explainScoreBar}] ${result.summary.riskLevel}`);
+    if (mostSuspiciousFile) {
+      console.log(`        Max file: ${mostSuspiciousFile} (${maxFileScore} pts)`);
+      if (packageScore > 0) {
+        console.log(`        Package-level: +${packageScore} pts`);
+      }
+    }
+    console.log('');
 
     if (options.breakdown && breakdown.length > 0) {
       console.log('[BREAKDOWN] Score contributors:');
@@ -720,10 +823,9 @@ async function run(targetPath, options = {}) {
         const pts = String(entry.points).padStart(2);
         console.log(`  +${pts}  ${entry.reason} (${entry.rule})`);
       }
-      const uncapped = breakdown.reduce((sum, e) => sum + e.points, 0);
-      if (uncapped > MAX_RISK_SCORE) {
+      if (globalRiskScore !== riskScore) {
         console.log('  ----');
-        console.log(`  Sum: ${uncapped} (capped to ${MAX_RISK_SCORE})`);
+        console.log(`  Global sum: ${globalRiskScore}, Per-file max: ${riskScore}`);
       }
       console.log('');
     }
@@ -782,7 +884,14 @@ async function run(targetPath, options = {}) {
     else console.log('');
 
     const scoreBar = '█'.repeat(Math.floor(result.summary.riskScore / 5)) + '░'.repeat(20 - Math.floor(result.summary.riskScore / 5));
-    console.log(`[SCORE] ${result.summary.riskScore}/100 [${scoreBar}] ${result.summary.riskLevel}\n`);
+    console.log(`[SCORE] ${result.summary.riskScore}/100 [${scoreBar}] ${result.summary.riskLevel}`);
+    if (mostSuspiciousFile) {
+      console.log(`        Max file: ${mostSuspiciousFile} (${maxFileScore} pts)`);
+      if (packageScore > 0) {
+        console.log(`        Package-level: +${packageScore} pts`);
+      }
+    }
+    console.log('');
 
     if (options.breakdown && breakdown.length > 0) {
       console.log('[BREAKDOWN] Score contributors:');
@@ -790,10 +899,9 @@ async function run(targetPath, options = {}) {
         const pts = String(entry.points).padStart(2);
         console.log(`  +${pts}  ${entry.reason} (${entry.rule})`);
       }
-      const uncapped = breakdown.reduce((sum, e) => sum + e.points, 0);
-      if (uncapped > MAX_RISK_SCORE) {
+      if (globalRiskScore !== riskScore) {
         console.log('  ----');
-        console.log(`  Sum: ${uncapped} (capped to ${MAX_RISK_SCORE})`);
+        console.log(`  Global sum: ${globalRiskScore}, Per-file max: ${riskScore}`);
       }
       console.log('');
     }
@@ -869,4 +977,4 @@ async function run(targetPath, options = {}) {
   return Math.min(failingThreats.length, 125);
 }
 
-module.exports = { run };
+module.exports = { run, isPackageLevelThreat, computeGroupScore };

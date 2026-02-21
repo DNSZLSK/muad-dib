@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.11] - 2026-02-21
+
+### Added
+- **Per-file max scoring**: Replaced global score accumulation with per-file max scoring. New formula: `riskScore = min(100, max(file_scores) + package_level_score)`. Malware concentrates threats in 1-2 files, while large frameworks accumulate low-severity findings across hundreds of files. Per-file scoring eliminates this false positive pattern.
+  - `isPackageLevelThreat()`: classifies threats as package-level (lifecycle scripts, typosquat, IOC matches, sandbox findings) vs file-level
+  - `computeGroupScore()`: extracted scoring logic for reuse per file group
+  - Package-level threats (lifecycle_script, typosquat_detected, known_malicious_package, etc.) scored separately and added to the max file score
+- **New JSON output fields**: `summary.globalRiskScore` (old global sum for comparison), `summary.maxFileScore`, `summary.packageScore`, `summary.mostSuspiciousFile`, `summary.fileScores` (per-file score map)
+- **CLI output**: shows "Max file: path (X pts)" and "Package-level: +Y pts" after score bar, "Global sum: X, Per-file max: Y" in breakdown when they differ
+- 14 new tests for per-file scoring (836 total, was 822)
+
+### Changed
+- **FPR reduced from 17.5% to 13.1%** (69/527 packages on full benign dataset, down from 92/527)
+- **FPR by size improvements**: Medium 19.7%→11.9%, Large 36.8%→25.0%, Very Large 46.8%→40.3%, Small 6.0%→6.2%
+- FPR on standard packages (<10 JS files): **6.2%** (18/290) — the most representative metric for typical npm usage
+- Adjusted `bun-runtime-evasion` adversarial threshold from 30 to 25 (score 28 with per-file scoring)
+- TPR 100% (4/4), ADR 100% (35/35), all holdouts 40/40 — no regression
+
+### Breaking Changes
+- `summary.riskScore` now uses per-file max scoring instead of global sum. The old global sum is available as `summary.globalRiskScore`. For most packages, `riskScore <= globalRiskScore`.
+
 ## [2.2.10] - 2026-02-21
 
 ### Added
