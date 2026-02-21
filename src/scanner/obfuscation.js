@@ -29,7 +29,12 @@ function detectObfuscation(targetPath) {
 
     const signals = [];
     let score = 0;
-    const isMinified = path.basename(file).endsWith('.min.js');
+    const basename = path.basename(file);
+    const isMinified = basename.endsWith('.min.js');
+    const isBundled = basename.endsWith('.bundle.js');
+    const pathParts = relativePath.split(path.sep);
+    const isInDistOrBuild = pathParts.some(p => p === 'dist' || p === 'build');
+    const isPackageOutput = isMinified || isBundled || isInDistOrBuild;
 
     // 1. Ratio code sur une seule ligne (skip .min.js — minification, not obfuscation)
     if (!isMinified) {
@@ -86,7 +91,7 @@ function detectObfuscation(targetPath) {
     if (score >= 40) {
       threats.push({
         type: 'obfuscation_detected',
-        severity: score >= 70 ? 'CRITICAL' : 'HIGH',
+        severity: isPackageOutput ? 'LOW' : (score >= 70 ? 'CRITICAL' : 'HIGH'),
         message: `Code obfusque (score: ${score}). Signaux: ${signals.join(', ')}`,
         file: relativePath
       });
