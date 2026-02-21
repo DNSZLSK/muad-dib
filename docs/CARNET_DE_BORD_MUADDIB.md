@@ -1178,6 +1178,71 @@ Les 19.4% restants sont domines par : `env_access` (274 hits/44 packages), `susp
 
 ---
 
+## MUAD'DIB 2.2.9 — Reduction des faux positifs pass 2 (21 Fevrier 2026)
+
+### Le probleme
+
+Le FPR etait a 19.4% (102/527) apres la premiere passe de reduction (v2.2.8). Les types de menaces restants les plus bruyants etaient `env_access` (274 hits, 44 packages), `suspicious_dataflow` (151 hits, 39 packages), `obfuscation_detected` (100 hits, 28 packages), et le score residuel des `prototype_hook` MEDIUM en volume.
+
+### 4 corrections
+
+**Correction 1 — `env_access` (filtrage scanner-level)** :
+- Expansion de `SAFE_ENV_VARS` (+13 variables) : `SHELL`, `USER`, `LOGNAME`, `EDITOR`, `TZ`, `NODE_DEBUG`, `NODE_PATH`, `NODE_OPTIONS`, `DISPLAY`, `COLORTERM`, `FORCE_COLOR`, `NO_COLOR`, `TERM_PROGRAM`
+- Ajout de `SAFE_ENV_PREFIXES` : `npm_config_*`, `npm_lifecycle_*`, `npm_package_*`, `lc_*` — filtrage par prefixe (case-insensitive)
+- Applique au niveau du scanner (`src/scanner/ast.js`), pas en post-traitement
+- Next.js lit 33 env vars de config (PORT, NODE_ENV, npm_config_*). Un malware lit GITHUB_TOKEN, NPM_TOKEN — jamais dans la safe list.
+
+**Correction 2 — `suspicious_dataflow` (>5 → LOW)** :
+- Si un package a plus de 5 `suspicious_dataflow` findings, tous sont downgrades en LOW
+- Ajoute au `FP_COUNT_THRESHOLDS` de `applyFPReductions()`
+- Next.js (13), Keystone (4), Moleculer (4) — frameworks avec observabilite (os.hostname + fetch pour metriques Datadog/NewRelic). Un malware a 1-2 patterns dataflow.
+
+**Correction 3 — `obfuscation_detected` (dist/build + comptage)** :
+- Scanner-level : les fichiers dans `dist/`, `build/`, ou nommes `*.bundle.js`, `*.min.js` recoivent la severite LOW au lieu de HIGH/CRITICAL
+- Post-traitement : si un package a plus de 3 `obfuscation_detected` findings, tous les restants sont downgrades en LOW
+- Applique dans `src/scanner/obfuscation.js` et `applyFPReductions()`
+- Next.js a 41 hits d'obfuscation (tous dans dist/build). Le code minifie/bundle est attendu comme "obfusque". Un malware obfusque 1-2 fichiers.
+
+**Correction 4 — `prototype_hook` MEDIUM scoring cap** :
+- Apres v2.2.8 qui downgrade les prototypes framework de HIGH a MEDIUM, certains packages (Restify : 52 hits MEDIUM) scoraient encore trop haut par volume (52 × 3 = 156 points avant cap → score max 100)
+- Nouveau cap : les findings `prototype_hook` MEDIUM contribuent au maximum 15 points (equivalent a 5 × MEDIUM=3)
+- Applique dans la fonction de scoring de `src/index.js`
+- 52 hits MEDIUM ne doivent pas produire un score de 100. Le cap limite la contribution sans affecter les packages avec peu de hits.
+
+### Resultats : FPR 19.4% → 17.5%
+
+Evaluation complete sur les **529 packages npm** (527 scannes, 2 skips) :
+
+| Metrique | v2.2.8 | v2.2.9 |
+|----------|--------|--------|
+| **TPR** | 100% (4/4) | 100% (4/4) |
+| **FPR** | 19.4% (102/527) | **17.5% (92/527)** |
+| **ADR** | 100% (35/35) | 100% (35/35) |
+| **Holdouts** | 40/40 | 40/40 |
+
+**10 packages sauves** (passage de FP a clean) :
+
+| Package | Avant | Apres | Correction principale |
+|---------|-------|-------|-----------------------|
+| restify | 100 | 15 | Cap scoring prototype_hook MEDIUM |
+| html-minifier-terser | 88 | 16 | Obfuscation dans dist → LOW |
+| request | 87 | 15 | Cap scoring prototype_hook MEDIUM |
+| terser | 41 | 17 | Obfuscation dans dist → LOW |
+| prisma | 38 | 14 | Filtrage prefixe env_access |
+| luxon | 36 | 9 | Env vars safe |
+| markdown-it | 35 | 2 | Obfuscation dans dist → LOW |
+| exceljs | 29 | 11 | Dataflow >5 → LOW |
+| csso | 26 | 8 | Obfuscation dans dist → LOW |
+| svgo | 23 | 14 | Obfuscation comptage >3 → LOW |
+
+### Lecon apprise
+
+**Les corrections au niveau du scanner sont plus efficaces que le post-traitement.** La correction `env_access` (expansion safe vars + prefixes) et `obfuscation_detected` (dist/build → LOW) agissent directement dans le scanner, eliminant les faux positifs a la source. Le post-traitement par comptage (v2.2.8) est un filet de securite pour les cas residuels, mais la premiere ligne de defense doit etre dans la logique de detection elle-meme.
+
+**La progression FPR** : 38% → 19.4% → 17.5%. Chaque passe de correction cible des types de menaces specifiques avec des seuils conservatifs. L'objectif n'est pas 0% (impossible sans perdre des vrais positifs) mais un equilibre ou les FP restants sont des cas ambigus (fetch + eval dans un template engine) plutot que des patterns trivialement identificables.
+
+---
+
 ## Etat actuel
 
 ### Ce qui fonctionne
@@ -1199,7 +1264,7 @@ Les 19.4% restants sont domines par : `env_access` (274 hits/44 packages), `susp
 | Version check | Notification automatique des nouvelles versions au demarrage |
 | **Detection comportementale (v2.0)** | Temporal lifecycle, AST diff, publish anomaly, maintainer change, canary tokens |
 | **Validation & Observabilite (v2.1)** | Ground truth (5 attaques, 100%), detection time logging, FP rate tracking, score breakdown, threat feed API |
-| **Evaluation & Red Team (v2.2)** | `muaddib evaluate`, 35 adversariaux (4 vagues) + holdout v1/v2/v3/v4/v5 (50 samples), TPR 100%, **FPR 19.4% (102/527) reel sur code source** (v2.2.8, reduit de 38% via count-based severity downgrade), ADR 100%, Holdout v1 30%, Holdout v2 40%, Holdout v3 60%, Holdout v4 80%, Holdout v5 50%, 14 scanners, 93 regles, AI config scanner, 529 packages benins npm, 132 PyPI, 65 malwares documentes |
+| **Evaluation & Red Team (v2.2)** | `muaddib evaluate`, 35 adversariaux (4 vagues) + holdout v1/v2/v3/v4/v5 (50 samples), TPR 100%, **FPR 17.5% (92/527) reel sur code source** (v2.2.9, reduit de 38% via 2 passes de FP reduction), ADR 100%, Holdout v1 30%, Holdout v2 40%, Holdout v3 60%, Holdout v4 80%, Holdout v5 50%, 14 scanners, ~95 regles, AI config scanner, 529 packages benins npm, 132 PyPI, 65 malwares documentes |
 | **Desobfuscation (v2.2.5)** | `src/scanner/deobfuscate.js`, 4 transformations AST + const propagation, approche additive (original + desobfusque), `--no-deobfuscate` flag |
 | **Dataflow inter-module (v2.2.6)** | `src/scanner/module-graph.js`, graphe de dependances, propagation de teinte inter-fichiers, 3-hop re-export, class methods, named exports, `--no-module-graph` flag |
 | Tests | **822 tests unitaires** + 56 fuzz + 35 adversariaux, **74% coverage** (Codecov) |

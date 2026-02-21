@@ -31,8 +31,14 @@ const SENSITIVE_STRINGS = [
 // Env vars that are safe and should NOT be flagged (common config/runtime vars)
 const SAFE_ENV_VARS = [
   'NODE_ENV', 'PORT', 'HOST', 'HOSTNAME', 'PWD', 'HOME', 'PATH',
-  'LANG', 'TERM', 'CI', 'DEBUG', 'VERBOSE', 'LOG_LEVEL'
+  'LANG', 'TERM', 'CI', 'DEBUG', 'VERBOSE', 'LOG_LEVEL',
+  'SHELL', 'USER', 'LOGNAME', 'EDITOR', 'TZ',
+  'NODE_DEBUG', 'NODE_PATH', 'NODE_OPTIONS',
+  'DISPLAY', 'COLORTERM', 'FORCE_COLOR', 'NO_COLOR', 'TERM_PROGRAM'
 ];
+
+// Env var prefixes that are safe (npm metadata, locale settings)
+const SAFE_ENV_PREFIXES = ['npm_config_', 'npm_lifecycle_', 'npm_package_', 'lc_'];
 
 // Env var keywords to detect sensitive environment access (separate from SENSITIVE_STRINGS)
 const ENV_SENSITIVE_KEYWORDS = [
@@ -912,6 +918,11 @@ function analyzeFile(content, filePath, basePath) {
         if (envVar) {
           // Skip safe/common env vars
           if (SAFE_ENV_VARS.includes(envVar)) {
+            return;
+          }
+          // Skip safe prefixes (npm_config_*, npm_lifecycle_*, npm_package_*, LC_*)
+          const envLower = envVar.toLowerCase();
+          if (SAFE_ENV_PREFIXES.some(p => envLower.startsWith(p))) {
             return;
           }
           // Flag only vars containing sensitive keywords

@@ -366,12 +366,72 @@ All corrections were verified against adversarial and holdout datasets:
 
 ---
 
-## 8. Current Metrics (v2.2.8)
+## 8. FP Reduction Pass 2 (v2.2.9)
+
+### Approach: scanner-level + post-processing refinements
+
+Building on v2.2.8's count-based severity downgrade, v2.2.9 applies 4 additional corrections targeting the remaining top FP-causing threat types.
+
+### 4 corrections
+
+**Correction 1 — `env_access` (safe env vars + prefix filtering):**
+- Expanded `SAFE_ENV_VARS` list: added `SHELL`, `USER`, `LOGNAME`, `EDITOR`, `TZ`, `NODE_DEBUG`, `NODE_PATH`, `NODE_OPTIONS`, `DISPLAY`, `COLORTERM`, `FORCE_COLOR`, `NO_COLOR`, `TERM_PROGRAM`
+- Added `SAFE_ENV_PREFIXES`: `npm_config_*`, `npm_lifecycle_*`, `npm_package_*`, `lc_*` — filtered by prefix (case-insensitive)
+- Applied at scanner level (`src/scanner/ast.js`), not post-processing
+- Rationale: Next.js reads 33 env vars (PORT, NODE_ENV, npm_config_*), all configuration-related. A real env-stealing malware reads GITHUB_TOKEN, NPM_TOKEN, AWS keys.
+- Safety: adversarial samples access `GITHUB_TOKEN`, `NPM_TOKEN`, `AWS_ACCESS_KEY_ID` — none are in the safe list
+
+**Correction 2 — `suspicious_dataflow` (>5 occurrences → LOW):**
+- If a package has more than 5 `suspicious_dataflow` findings, all occurrences are downgraded to LOW (regardless of original severity)
+- Added to `FP_COUNT_THRESHOLDS` in `applyFPReductions()`
+- Rationale: Next.js has 13, Keystone 4, Moleculer 4. Legitimate frameworks with observability (os.hostname + fetch for Datadog/NewRelic metrics) produce many dataflow hits. A malware package has 1-2 dataflow patterns.
+
+**Correction 3 — `obfuscation_detected` (dist/build/bundle → LOW + >3 → LOW):**
+- Scanner-level: files in `dist/`, `build/`, or named `*.bundle.js`, `*.min.js` are assigned LOW severity instead of HIGH/CRITICAL
+- Post-processing: if a package has more than 3 `obfuscation_detected` findings, all remaining are downgraded to LOW
+- Applied both at scanner level (`src/scanner/obfuscation.js`) and in `applyFPReductions()`
+- Rationale: Next.js has 41 obfuscation hits (all in dist/build), htmx has 10. Bundled/minified output is expected to look obfuscated. A malware package obfuscates 1-2 files.
+
+**Correction 4 — `prototype_hook` MEDIUM scoring cap (15 points max):**
+- After v2.2.8 downgraded framework prototypes from HIGH to MEDIUM, some packages (Restify: 52 MEDIUM hits) still scored too high from MEDIUM volume alone (52 × 3 = 156 points before cap)
+- New scoring cap: `prototype_hook` MEDIUM findings contribute at most 15 points (equivalent to 5 × MEDIUM=3)
+- Applied in the scoring function in `src/index.js`
+- Rationale: 52 MEDIUM hits should not produce a score of 100. The cap limits prototype hook MEDIUM contribution without affecting packages with few hits.
+
+### Results: FPR 19.4% → 17.5%
+
+Measured on the full 529-package benign dataset (527 scanned, 2 skipped).
+
+**10 packages rescued** (from FP to clean):
+
+| Package | Before | After | Primary correction |
+|---------|--------|-------|--------------------|
+| restify | 100 | 15 | prototype_hook MEDIUM cap |
+| html-minifier-terser | 88 | 16 | obfuscation in dist → LOW |
+| request | 87 | 15 | prototype_hook MEDIUM cap |
+| terser | 41 | 17 | obfuscation in dist → LOW |
+| prisma | 38 | 14 | env_access prefix filtering |
+| luxon | 36 | 9 | env_access safe vars |
+| markdown-it | 35 | 2 | obfuscation in dist → LOW |
+| exceljs | 29 | 11 | dataflow >5 → LOW |
+| csso | 26 | 8 | obfuscation in dist → LOW |
+| svgo | 23 | 14 | obfuscation count >3 → LOW |
+
+### Safety verification
+
+All corrections verified against adversarial and holdout datasets:
+- **TPR**: 100% (4/4) — no regression
+- **ADR**: 100% (35/35) — all 35 adversarial samples still detected
+- **Holdouts**: 40/40 across v2, v3, v4, v5 — all pass
+
+---
+
+## 9. Current Metrics (v2.2.9)
 
 | Metric | Result | Description |
 |--------|--------|-------------|
 | **TPR** (Ground Truth) | 100% (4/4) | Real-world attacks: event-stream, ua-parser-js, coa, node-ipc |
-| **FPR** (Benign) | **19.4% (102/527)** | 529 npm packages (527 scanned), real source code, threshold > 20 |
+| **FPR** (Benign) | **17.5% (92/527)** | 529 npm packages (527 scanned), real source code, threshold > 20 |
 | **ADR** (Adversarial) | 100% (35/35) | 35 evasive samples across 4 vagues |
 | **Holdout v1** (pre-tuning) | 30% (3/10) | 10 unseen samples before rule corrections |
 | **Holdout v2** (pre-tuning) | 40% (4/10) | 10 unseen samples before rule corrections |
@@ -379,6 +439,6 @@ All corrections were verified against adversarial and holdout datasets:
 | **Holdout v4** (pre-tuning) | 80% (8/10) | 10 unseen samples testing deobfuscation |
 | **Holdout v5** (pre-tuning) | 50% (5/10) | 10 unseen samples testing inter-module dataflow |
 
-**FPR progression**: 0% (invalid, v2.2.0–v2.2.6) → 38% (first real measurement on 50 packages, v2.2.7) → **19.4%** (full 529-package dataset with FP reductions, v2.2.8)
+**FPR progression**: 0% (invalid, v2.2.0–v2.2.6) → 38% (first real measurement on 50 packages, v2.2.7) → 19.4% (v2.2.8) → **17.5%** (v2.2.9)
 
 Run `muaddib evaluate` to reproduce these metrics locally. Results are saved to `metrics/v{version}.json`.

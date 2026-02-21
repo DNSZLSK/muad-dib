@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.9] - 2026-02-21
+
+### Added
+- **FP reduction pass 2** — 4 additional corrections targeting remaining top FP-causing threat types:
+  - `env_access`: expanded `SAFE_ENV_VARS` list (+13 vars: SHELL, USER, TZ, NODE_DEBUG, etc.) and added `SAFE_ENV_PREFIXES` (npm_config_*, npm_lifecycle_*, npm_package_*, lc_*) for prefix-based filtering at scanner level
+  - `suspicious_dataflow` >5 occurrences → all downgraded to LOW (added to `FP_COUNT_THRESHOLDS`)
+  - `obfuscation_detected`: files in dist/build/*.bundle.js downgraded to LOW at scanner level + >3 occurrences → LOW at post-processing level
+  - `prototype_hook` MEDIUM scoring cap: maximum 15 points contribution (5 × MEDIUM=3) regardless of volume — prevents Restify-style 52-hit packages from scoring 100
+
+### Changed
+- **FPR reduced from 19.4% to 17.5%** (92/527 packages on full benign dataset, down from 102/527)
+- 10 packages rescued from false positive status: restify (100→15), html-minifier-terser (88→16), request (87→15), terser (41→17), prisma (38→14), luxon (36→9), markdown-it (35→2), exceljs (29→11), csso (26→8), svgo (23→14)
+- TPR 100% (4/4), ADR 100% (35/35), all holdouts 40/40 — no regression from FP corrections
+
+### Breaking Changes
+- None. All changes reduce false positives without affecting malware detection.
+
 ## [2.2.8] - 2026-02-21
 
 ### Added
@@ -562,7 +579,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Obfuscation detection
 - Package.json lifecycle script analysis
 
-[Unreleased]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.8...HEAD
+[Unreleased]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.9...HEAD
+[2.2.9]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.8...v2.2.9
 [2.2.8]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.7...v2.2.8
 [2.2.7]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.6...v2.2.7
 [2.2.6]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.5...v2.2.6

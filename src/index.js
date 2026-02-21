@@ -73,7 +73,9 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const FP_COUNT_THRESHOLDS = {
   dynamic_require: { maxCount: 10, from: 'HIGH', to: 'LOW' },
   dangerous_call_function: { maxCount: 5, from: 'MEDIUM', to: 'LOW' },
-  require_cache_poison: { maxCount: 3, from: 'CRITICAL', to: 'LOW' }
+  require_cache_poison: { maxCount: 3, from: 'CRITICAL', to: 'LOW' },
+  suspicious_dataflow: { maxCount: 5, to: 'LOW' },
+  obfuscation_detected: { maxCount: 3, to: 'LOW' }
 };
 
 // Custom class prototypes that HTTP frameworks legitimately extend.
@@ -94,7 +96,7 @@ function applyFPReductions(threats) {
     // Count-based downgrade: if a threat type appears too many times,
     // it's a framework/plugin system, not malware
     const rule = FP_COUNT_THRESHOLDS[t.type];
-    if (rule && typeCounts[t.type] > rule.maxCount && t.severity === rule.from) {
+    if (rule && typeCounts[t.type] > rule.maxCount && (!rule.from || t.severity === rule.from)) {
       t.severity = rule.to;
     }
 
@@ -638,10 +640,18 @@ async function run(targetPath, options = {}) {
   const mediumCount = deduped.filter(t => t.severity === 'MEDIUM').length;
   const lowCount = deduped.filter(t => t.severity === 'LOW').length;
 
+  // Cap MEDIUM prototype_hook contribution to 15 points max (5 × MEDIUM=3)
+  // Frameworks like Restify have 50+ prototype extensions that are not malicious
+  const mediumProtoHookCount = deduped.filter(t => t.type === 'prototype_hook' && t.severity === 'MEDIUM').length;
+  const PROTO_HOOK_MEDIUM_CAP = 15;
+  const protoHookPoints = Math.min(mediumProtoHookCount * SEVERITY_WEIGHTS.MEDIUM, PROTO_HOOK_MEDIUM_CAP);
+  const otherMediumCount = mediumCount - mediumProtoHookCount;
+
   let riskScore = 0;
   riskScore += criticalCount * SEVERITY_WEIGHTS.CRITICAL;
   riskScore += highCount * SEVERITY_WEIGHTS.HIGH;
-  riskScore += mediumCount * SEVERITY_WEIGHTS.MEDIUM;
+  riskScore += otherMediumCount * SEVERITY_WEIGHTS.MEDIUM;
+  riskScore += protoHookPoints;
   riskScore += lowCount * SEVERITY_WEIGHTS.LOW;
   riskScore = Math.min(MAX_RISK_SCORE, riskScore);
 

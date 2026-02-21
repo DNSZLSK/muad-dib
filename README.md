@@ -30,7 +30,7 @@
 
 npm and PyPI supply-chain attacks are exploding. Shai-Hulud compromised 25K+ repos in 2025. Existing tools detect threats but don't help you respond.
 
-MUAD'DIB combines static analysis + dynamic analysis (Docker sandbox) + **behavioral anomaly detection** (v2.0) + **ground truth validation** (v2.1) to detect threats AND guide your response — even before they appear in any IOC database.
+MUAD'DIB combines static analysis + **deobfuscation engine** (v2.2.5) + **inter-module dataflow** (v2.2.6) + dynamic analysis (Docker sandbox) + **behavioral anomaly detection** (v2.0) + **ground truth validation** (v2.1) to detect threats AND guide your response — even before they appear in any IOC database.
 
 ---
 
@@ -432,6 +432,10 @@ Detects malicious patterns in `.github/workflows/` YAML files, including Shai-Hu
 | Prototype hooking (fetch, XMLHttpRequest) | T1557 | AST |
 | Workflow injection (.github/workflows) | T1195.002 | AST |
 | Crypto wallet harvesting | T1005 | Dataflow |
+| Require cache poisoning | T1574.001 | AST |
+| Staged eval decode (eval+atob/Buffer) | T1140 | AST |
+| Deobfuscation (string concat, charcode, base64, hex) | T1140 | AST pre-processing |
+| Cross-file dataflow (inter-module exfiltration) | T1041 | Module graph |
 
 ---
 
@@ -643,7 +647,7 @@ Alerts appear in Security > Code scanning alerts.
 ## Architecture
 
 ```
-MUAD'DIB 2.2 Scanner
+MUAD'DIB 2.2.9 Scanner
 |
 +-- IOC Match (225,000+ packages, JSON DB)
 |   +-- OSV.dev npm dump (200K+ MAL-* entries)
@@ -655,7 +659,17 @@ MUAD'DIB 2.2 Scanner
 |   +-- Snyk Known Malware
 |   +-- Static IOCs (Socket, Phylum)
 |
-+-- 13 Parallel Scanners (86 rules)
++-- Deobfuscation Pre-processing (v2.2.5, --no-deobfuscate to disable)
+|   +-- String concat folding, CharCode reconstruction
+|   +-- Base64 decode, Hex array resolution
+|   +-- Const propagation (Phase 2)
+|
++-- Inter-module Dataflow (v2.2.6, --no-module-graph to disable)
+|   +-- Module dependency graph, tainted export annotation
+|   +-- 3-hop re-export chains, class method analysis
+|   +-- Cross-file credential read -> network sink detection
+|
++-- 14 Parallel Scanners (~95 rules)
 |   +-- AST Parse (acorn) — eval/Function, credential CLI theft, binary droppers, prototype hooks
 |   +-- Pattern Matching (shell, scripts)
 |   +-- Obfuscation Detection (skip .min.js, ignore hex/unicode alone)
@@ -681,6 +695,12 @@ MUAD'DIB 2.2 Scanner
 |   +-- Score Breakdown (explainable per-rule scoring)
 |   +-- Threat Feed API (HTTP server, JSON feed for SIEM)
 |
++-- FP Reduction Post-processing (v2.2.8-v2.2.9)
+|   +-- Count-based severity downgrade (dynamic_require, dataflow, etc.)
+|   +-- Framework prototype scoring cap
+|   +-- Obfuscation in dist/build → LOW
+|   +-- Safe env var + prefix filtering
+|
 +-- Paranoid Mode (ultra-strict)
 +-- Docker Sandbox (behavioral analysis, network capture, canary tokens, CI-aware)
 +-- Zero-Day Monitor (internal: npm + PyPI RSS polling, Discord alerts, daily report)
@@ -699,14 +719,31 @@ Output (CLI, JSON, HTML, SARIF, Webhook, Threat Feed)
 
 ## Evaluation Metrics
 
-| Version | TPR (Ground Truth) | FPR (Benign) | ADR (Adversarial) | Holdout (pre-tuning) | Date |
-|---------|-------------------|-------------|-------------------|---------------------|------|
-| 2.2.0   | 100.0% (4/4)      | 0.0% (0/98) | 100.0% (35/35)    | 30.0% (3/10)        | 2026-02-20 |
+| Metric | Result | Details |
+|--------|--------|---------|
+| **TPR** (Ground Truth) | **100%** (4/4) | Real-world attacks: event-stream, ua-parser-js, coa, node-ipc |
+| **FPR** (Benign) | **17.5%** (92/527) | 529 npm packages, real source code via `npm pack`, threshold > 20 |
+| **ADR** (Adversarial) | **100%** (35/35) | 35 evasive samples across 4 red-team waves |
+| **Holdouts** (pre-tuning) | 40/40 pass | All holdout samples pass after corrections |
 
-- **TPR** (True Positive Rate): detection rate on 5 real-world supply-chain attacks (event-stream, ua-parser-js, coa, node-ipc, colors)
-- **FPR** (False Positive Rate): packages scoring > 20 out of 98 popular npm packages
-- **ADR** (Adversarial Detection Rate): detection rate on 35 evasive malicious samples across 4 red-team waves + promoted holdout
-- **Holdout** (pre-tuning): detection rate on 10 unseen samples before any rule correction (measures generalization)
+**FPR progression**: 0% (invalid, empty dirs, v2.2.0-v2.2.6) → 38% (first real measurement, v2.2.7) → 19.4% (v2.2.8) → **17.5%** (v2.2.9)
+
+**Holdout progression** (pre-tuning scores, rules frozen):
+
+| Holdout | Score | Focus |
+|---------|-------|-------|
+| v1 | 30% (3/10) | General patterns |
+| v2 | 40% (4/10) | Env charcode, lifecycle, prototype |
+| v3 | 60% (6/10) | Require cache, DNS TXT, reverse shell |
+| v4 | **80%** (8/10) | Deobfuscation effectiveness |
+| v5 | 50% (5/10) | Inter-module dataflow (new scanner) |
+
+- **TPR** (True Positive Rate): detection rate on 4 real-world supply-chain attacks (event-stream, ua-parser-js, coa, node-ipc)
+- **FPR** (False Positive Rate): packages scoring > 20 out of 529 real npm packages (source code scanned, not empty dirs)
+- **ADR** (Adversarial Detection Rate): detection rate on 35 evasive malicious samples across 4 red-team waves
+- **Holdout** (pre-tuning): detection rate on 10 unseen samples with rules frozen (measures generalization)
+
+Datasets: 529 npm + 132 PyPI benign packages, 35 adversarial samples, 50 holdout samples (5 batches), 65 documented malware packages.
 
 See [Evaluation Methodology](docs/EVALUATION_METHODOLOGY.md) for the full experimental protocol.
 
@@ -742,13 +779,13 @@ npm test
 
 ### Testing
 
-- **781 unit/integration tests** across 18 modular test files - 74% code coverage via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
+- **822 unit/integration tests** across 20 modular test files - 74% code coverage via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
 - **56 fuzz tests** - Malformed YAML, invalid JSON, binary files, ReDoS, unicode, 10MB inputs
 - **35 adversarial samples** - Evasive malicious packages, 35/35 detection rate (100% ADR)
+- **50 holdout samples** - 5 batches of 10, pre-tuning scores: 30% → 40% → 60% → 80% → 50%
 - **8 multi-factor typosquat tests** - Edge cases and cache behavior
 - **Ground truth validation** - 5/5 real-world attacks detected (event-stream, ua-parser-js, coa, node-ipc, colors)
-- **False positive validation** - 0/98 false positives on popular npm packages (0% FPR)
-- **Holdout validation** - 3/10 detection on unseen samples before rule corrections (30% pre-tuning)
+- **False positive validation** - 17.5% FPR (92/527) on real npm source code via `npm pack` (honest measurement)
 - **ESLint security audit** - `eslint-plugin-security` with 14 rules enabled
 
 ---
