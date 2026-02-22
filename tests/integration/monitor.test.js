@@ -21,7 +21,8 @@ async function runMonitorTests() {
     KNOWN_BUNDLED_FILES, isBundledToolingOnly,
     isSandboxEnabled, hasHighOrCritical,
     getWebhookUrl, shouldSendWebhook, buildMonitorWebhookPayload,
-    computeRiskLevel, computeRiskScore, buildDailyReportEmbed, DAILY_REPORT_INTERVAL,
+    computeRiskLevel, computeRiskScore, buildDailyReportEmbed,
+    DAILY_REPORT_HOUR, isDailyReportDue, getParisHour, getParisDateString,
     isTemporalEnabled, buildTemporalWebhookEmbed,
     isTemporalAstEnabled, buildTemporalAstWebhookEmbed,
     isTemporalPublishEnabled, buildPublishAnomalyWebhookEmbed,
@@ -803,8 +804,26 @@ async function runMonitorTests() {
     dailyAlerts.length = 0;
   });
 
-  test('MONITOR: DAILY_REPORT_INTERVAL is 24 hours', () => {
-    assert(DAILY_REPORT_INTERVAL === 24 * 3600000, 'Should be 24h in ms');
+  test('MONITOR: DAILY_REPORT_HOUR is 8 (08:00 Paris)', () => {
+    assert(DAILY_REPORT_HOUR === 8, 'Should be 8 (08:00)');
+  });
+
+  test('MONITOR: getParisHour returns a valid hour 0-23', () => {
+    const hour = getParisHour();
+    assert(hour >= 0 && hour <= 23, 'Hour should be 0-23, got ' + hour);
+  });
+
+  test('MONITOR: getParisDateString returns YYYY-MM-DD format', () => {
+    const dateStr = getParisDateString();
+    assert(/^\d{4}-\d{2}-\d{2}$/.test(dateStr), 'Should be YYYY-MM-DD, got ' + dateStr);
+  });
+
+  test('MONITOR: isDailyReportDue returns false after report sent today', () => {
+    const origDate = stats.lastDailyReportDate;
+    stats.lastDailyReportDate = getParisDateString(); // pretend we sent today
+    const due = isDailyReportDue();
+    stats.lastDailyReportDate = origDate;
+    assert(due === false, 'Should not be due if already sent today');
   });
 
   // ============================================

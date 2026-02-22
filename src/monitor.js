@@ -28,7 +28,7 @@ const stats = {
   errors: 0,
   totalTimeMs: 0,
   lastReportTime: Date.now(),
-  lastDailyReportTime: Date.now()
+  lastDailyReportDate: null // YYYY-MM-DD (Paris) of last daily report sent
 };
 
 // Track daily suspects for the daily report (name, version, ecosystem, findingsCount)
@@ -615,6 +615,10 @@ function loadState() {
   try {
     const raw = fs.readFileSync(STATE_FILE, 'utf8');
     const state = JSON.parse(raw);
+    // Restore daily report date so it survives restarts (auto-update, crashes)
+    if (typeof state.lastDailyReportDate === 'string') {
+      stats.lastDailyReportDate = state.lastDailyReportDate;
+    }
     return {
       npmLastPackage: typeof state.npmLastPackage === 'string' ? state.npmLastPackage : '',
       pypiLastPackage: typeof state.pypiLastPackage === 'string' ? state.pypiLastPackage : ''
@@ -630,7 +634,12 @@ function saveState(state) {
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
-    fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2), 'utf8');
+    // Persist daily report date so it survives restarts
+    const persistedState = {
+      ...state,
+      lastDailyReportDate: stats.lastDailyReportDate
+    };
+    fs.writeFileSync(STATE_FILE, JSON.stringify(persistedState, null, 2), 'utf8');
   } catch (err) {
     console.error(`[MONITOR] Failed to save state: ${err.message}`);
   }
@@ -1018,7 +1027,38 @@ function reportStats() {
   stats.lastReportTime = Date.now();
 }
 
-const DAILY_REPORT_INTERVAL = 24 * 3600_000; // 24 hours
+const DAILY_REPORT_HOUR = 8; // 08:00 Paris time (Europe/Paris)
+
+/**
+ * Returns the current hour in Europe/Paris timezone (0-23).
+ */
+function getParisHour() {
+  const formatter = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/Paris',
+    hour: 'numeric',
+    hour12: false
+  });
+  return parseInt(formatter.format(new Date()), 10);
+}
+
+/**
+ * Returns today's date string in Europe/Paris timezone (YYYY-MM-DD).
+ */
+function getParisDateString() {
+  const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris' });
+  return formatter.format(new Date());
+}
+
+/**
+ * Check if the daily report is due: Paris hour matches DAILY_REPORT_HOUR
+ * and we haven't already sent one today.
+ */
+function isDailyReportDue() {
+  const parisHour = getParisHour();
+  if (parisHour !== DAILY_REPORT_HOUR) return false;
+  const today = getParisDateString();
+  return stats.lastDailyReportDate !== today;
+}
 
 function buildDailyReportEmbed() {
   const avg = stats.scanned > 0 ? (stats.totalTimeMs / stats.scanned / 1000).toFixed(1) : '0.0';
@@ -1076,7 +1116,7 @@ async function sendDailyReport() {
   stats.totalTimeMs = 0;
   dailyAlerts.length = 0;
   recentlyScanned.clear();
-  stats.lastDailyReportTime = Date.now();
+  stats.lastDailyReportDate = getParisDateString();
 }
 
 // --- npm polling ---
@@ -1311,9 +1351,12 @@ async function startMonitor(options) {
 
   let running = true;
 
-  // SIGINT: save state and exit
-  process.on('SIGINT', () => {
-    console.log('\n[MONITOR] Stopping — saving state...');
+  // SIGINT: send pending daily report, save state and exit
+  process.on('SIGINT', async () => {
+    console.log('\n[MONITOR] Stopping — sending pending daily report...');
+    if (stats.scanned > 0) {
+      await sendDailyReport();
+    }
     saveState(state);
     reportStats();
     console.log('[MONITOR] State saved. Bye!');
@@ -1339,8 +1382,8 @@ async function startMonitor(options) {
       reportStats();
     }
 
-    // Daily webhook report
-    if (Date.now() - stats.lastDailyReportTime >= DAILY_REPORT_INTERVAL) {
+    // Daily webhook report at 08:00 Paris time
+    if (isDailyReportDue()) {
       await sendDailyReport();
     }
   }
@@ -1516,7 +1559,10 @@ module.exports = {
   computeRiskScore,
   buildDailyReportEmbed,
   sendDailyReport,
-  DAILY_REPORT_INTERVAL,
+  DAILY_REPORT_HOUR,
+  isDailyReportDue,
+  getParisHour,
+  getParisDateString,
   isTemporalEnabled,
   buildTemporalWebhookEmbed,
   runTemporalCheck,

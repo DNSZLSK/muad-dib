@@ -197,19 +197,46 @@ async function run(targetPath, options = {}) {
   // Deobfuscation pre-processor (pass to AST/dataflow scanners unless disabled)
   const deobfuscateFn = options.noDeobfuscate ? null : deobfuscate;
 
+  // Helper: yield to event loop so spinner can animate between sync operations
+  const yieldThen = (fn) => new Promise(resolve => setImmediate(() => resolve(fn())));
+
   // Cross-file module graph analysis (before individual scanners)
+  // Wrapped in yieldThen to unblock spinner animation
   let crossFileFlows = [];
   if (!options.noModuleGraph) {
     try {
-      const graph = buildModuleGraph(targetPath);
-      const tainted = annotateTaintedExports(graph, targetPath);
-      crossFileFlows = detectCrossFileFlows(graph, tainted, targetPath);
+      const graph = await yieldThen(() => buildModuleGraph(targetPath));
+      const tainted = await yieldThen(() => annotateTaintedExports(graph, targetPath));
+      crossFileFlows = await yieldThen(() => detectCrossFileFlows(graph, tainted, targetPath));
     } catch {
       // Graceful fallback — module graph is best-effort
     }
   }
 
   // Parallel execution of all independent scanners
+  // Sync scanners use yieldThen() to yield to event loop (keeps spinner animating)
+  let scanResult;
+  try {
+    scanResult = await Promise.all([
+      scanPackageJson(targetPath),
+      scanShellScripts(targetPath),
+      analyzeAST(targetPath, { deobfuscate: deobfuscateFn }),
+      yieldThen(() => detectObfuscation(targetPath)),
+      scanDependencies(targetPath),
+      scanHashes(targetPath),
+      analyzeDataFlow(targetPath, { deobfuscate: deobfuscateFn }),
+      scanTyposquatting(targetPath),
+      yieldThen(() => scanGitHubActions(targetPath)),
+      yieldThen(() => matchPythonIOCs(pythonDeps, targetPath)),
+      yieldThen(() => checkPyPITyposquatting(pythonDeps, targetPath)),
+      yieldThen(() => scanEntropy(targetPath, { entropyThreshold: options.entropyThreshold || undefined })),
+      yieldThen(() => scanAIConfig(targetPath))
+    ]);
+  } catch (err) {
+    if (spinner) spinner.fail(`[MUADDIB] Scan failed: ${err.message}`);
+    throw err;
+  }
+
   const [
     packageThreats,
     shellThreats,
@@ -224,21 +251,7 @@ async function run(targetPath, options = {}) {
     pypiTyposquatThreats,
     entropyThreats,
     aiConfigThreats
-  ] = await Promise.all([
-    scanPackageJson(targetPath),
-    scanShellScripts(targetPath),
-    analyzeAST(targetPath, { deobfuscate: deobfuscateFn }),
-    Promise.resolve(detectObfuscation(targetPath)),
-    scanDependencies(targetPath),
-    scanHashes(targetPath),
-    analyzeDataFlow(targetPath, { deobfuscate: deobfuscateFn }),
-    scanTyposquatting(targetPath),
-    Promise.resolve(scanGitHubActions(targetPath)),
-    Promise.resolve(matchPythonIOCs(pythonDeps, targetPath)),
-    Promise.resolve(checkPyPITyposquatting(pythonDeps, targetPath)),
-    Promise.resolve(scanEntropy(targetPath, { entropyThreshold: options.entropyThreshold || undefined })),
-    Promise.resolve(scanAIConfig(targetPath))
-  ]);
+  ] = scanResult;
 
   // Stop spinner now that scanning is complete
   if (spinner) {
