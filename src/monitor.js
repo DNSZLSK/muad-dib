@@ -1061,17 +1061,25 @@ function isDailyReportDue() {
 }
 
 function buildDailyReportEmbed() {
-  const avg = stats.scanned > 0 ? (stats.totalTimeMs / stats.scanned / 1000).toFixed(1) : '0.0';
+  // Use disk-based daily entries filtered by lastDailyReportDate for accurate delta
+  const { agg, top3: diskTop3 } = buildReportFromDisk();
 
-  // Top 3 suspects sorted by findings count descending
-  const top3 = dailyAlerts
-    .slice()
-    .sort((a, b) => b.findingsCount - a.findingsCount)
-    .slice(0, 3);
+  // Prefer in-memory dailyAlerts for top suspects (richer data), fallback to disk
+  const top3 = dailyAlerts.length > 0
+    ? dailyAlerts.slice().sort((a, b) => b.findingsCount - a.findingsCount).slice(0, 3)
+    : diskTop3;
 
   const top3Text = top3.length > 0
-    ? top3.map((a, i) => `${i + 1}. **${a.ecosystem}/${a.name}@${a.version}** — ${a.findingsCount} finding(s)`).join('\n')
+    ? top3.map((a, i) => {
+        const name = a.ecosystem ? `${a.ecosystem}/${a.name || a.package}` : (a.name || a.package);
+        const version = a.version || 'N/A';
+        const count = a.findingsCount || (a.findings ? a.findings.length : 0);
+        return `${i + 1}. **${name}@${version}** — ${count} finding(s)`;
+      }).join('\n')
     : 'None';
+
+  // Avg scan time from in-memory stats (not available on disk)
+  const avg = stats.scanned > 0 ? (stats.totalTimeMs / stats.scanned / 1000).toFixed(1) : '0.0';
 
   const now = new Date();
   const readableTime = now.toISOString().replace('T', ' ').replace(/\.\d+Z$/, ' UTC');
@@ -1081,9 +1089,9 @@ function buildDailyReportEmbed() {
       title: '\uD83D\uDCCA MUAD\'DIB Daily Report',
       color: 0x3498db,
       fields: [
-        { name: 'Packages Scanned', value: `${stats.scanned}`, inline: true },
-        { name: 'Clean', value: `${stats.clean}`, inline: true },
-        { name: 'Suspects', value: `${stats.suspect}`, inline: true },
+        { name: 'Packages Scanned', value: `${agg.scanned}`, inline: true },
+        { name: 'Clean', value: `${agg.clean}`, inline: true },
+        { name: 'Suspects', value: `${agg.suspect}`, inline: true },
         { name: 'Errors', value: `${stats.errors}`, inline: true },
         { name: 'Avg Scan Time', value: `${avg}s/pkg`, inline: true },
         { name: 'Top Suspects', value: top3Text, inline: false }
@@ -1140,12 +1148,11 @@ function loadStateRaw() {
 function buildReportFromDisk() {
   const scanData = loadScanStats();
   const stateRaw = loadStateRaw();
-  const lastDate = stateRaw.lastDailyReportDate || null;
+  // Default to today if no report ever sent (avoids summing entire history)
+  const lastDate = stateRaw.lastDailyReportDate || getParisDateString();
 
-  // Filter daily entries since last report
-  const sinceDays = lastDate
-    ? scanData.daily.filter(d => d.date > lastDate)
-    : scanData.daily;
+  // Filter daily entries strictly AFTER last report date
+  const sinceDays = scanData.daily.filter(d => d.date > lastDate);
 
   // Aggregate counters
   const agg = { scanned: 0, clean: 0, suspect: 0 };
@@ -1157,9 +1164,9 @@ function buildReportFromDisk() {
 
   // Load detections since last report for top suspects
   const detections = loadDetections();
-  const recentDetections = lastDate
-    ? detections.detections.filter(d => d.first_seen_at && d.first_seen_at.slice(0, 10) > lastDate)
-    : detections.detections;
+  const recentDetections = detections.detections.filter(
+    d => d.first_seen_at && d.first_seen_at.slice(0, 10) > lastDate
+  );
 
   const top3 = recentDetections
     .slice()
@@ -1241,11 +1248,10 @@ function getReportStatus() {
   const stateRaw = loadStateRaw();
   const lastDate = stateRaw.lastDailyReportDate || null;
 
-  // Count packages scanned since last report
+  // Count packages scanned since last report (default to today if never sent)
   const scanData = loadScanStats();
-  const sinceDays = lastDate
-    ? scanData.daily.filter(d => d.date > lastDate)
-    : scanData.daily;
+  const sinceDate = lastDate || getParisDateString();
+  const sinceDays = scanData.daily.filter(d => d.date > sinceDate);
 
   let scannedSince = 0;
   for (const d of sinceDays) {
