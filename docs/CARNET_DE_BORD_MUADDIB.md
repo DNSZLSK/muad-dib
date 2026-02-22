@@ -1024,7 +1024,7 @@ Ces deux limitations sont documentees et n'affectent pas la detection des patter
 | **ADR** (Adversarial) | **100%** (35/35) | 35 samples evasifs detectes |
 | **Holdout v5** (pre-tuning) | **50%** (5/10) | 10 samples inter-modules |
 
-**822 tests**, 0 echecs. **93 regles de detection**. **14 scanners** (13 paralleles + module-graph). Flags `--no-deobfuscate` et `--no-module-graph` disponibles.
+**862 tests**, 0 echecs. **94 regles de detection**. **14 scanners** (13 paralleles + module-graph). Flags `--no-deobfuscate` et `--no-module-graph` disponibles.
 
 ---
 
@@ -1117,7 +1117,7 @@ En parallele de la correction evaluate, expansion massive des datasets :
 | **ADR** (Adversarial) | **100%** (35/35) | 35 samples evasifs detectes |
 | **Holdout v5** (pre-tuning) | **50%** (5/10) | 10 samples inter-modules |
 
-**822 tests**, 0 echecs. **93 regles de detection**. **14 scanners**. **529 packages benins npm + 132 PyPI**. **65 malwares documentes**.
+**862 tests**, 0 echecs. **94 regles de detection**. **14 scanners**. **529 packages benins npm + 132 PyPI**. **65 malwares documentes**.
 
 ---
 
@@ -1406,13 +1406,13 @@ Les 40 holdouts (v2-v5, 10 chacun) sont fusionnes dans l'evaluation ADR. Ils tes
 
 ### Metriques finales
 
-| Metrique | v2.2.11 | v2.2.12 |
-|----------|---------|---------|
-| **TPR** | 100% (4/4) | **91.8% (45/49)** |
-| **FPR** (global) | 13.1% (69/527) | ~13% (inchange) |
-| **ADR** | 100% (35/35) | **100% (75/75)** |
-| Tests | 836 | 807 |
-| Regles | ~95 | ~97 |
+| Metrique | v2.2.11 | v2.2.12 | v2.2.20 |
+|----------|---------|---------|---------|
+| **TPR** | 100% (4/4) | **91.8% (45/49)** | 91.8% (45/49) |
+| **FPR** (global) | 13.1% (69/527) | ~13% (inchange) | ~13% (69/527) |
+| **ADR** | 100% (35/35) | 100% (75/75) | **100% (78/78)** |
+| Tests | 836 | 807 | **862** |
+| Regles | ~95 | ~97 | **94** |
 
 **Note sur le TPR** : Le TPR passe de 100% a 91.8% non pas par regression mais par expansion du ground truth. Avec 4 samples, 100% etait facile a atteindre. Avec 49 samples, 91.8% est un chiffre beaucoup plus representatif. Les 4 misses sont tous hors scope (browser-only) ou acceptes (risque FP).
 
@@ -1439,10 +1439,10 @@ Les 40 holdouts (v2-v5, 10 chacun) sont fusionnes dans l'evaluation ADR. Ils tes
 | Version check | Notification automatique des nouvelles versions au demarrage |
 | **Detection comportementale (v2.0)** | Temporal lifecycle, AST diff, publish anomaly, maintainer change, canary tokens |
 | **Validation & Observabilite (v2.1)** | Ground truth (51 attaques, 91.8% TPR), detection time logging, FP rate tracking, score breakdown, threat feed API |
-| **Evaluation & Red Team (v2.2)** | `muaddib evaluate`, 75 samples evasifs (35 adversariaux + 40 holdouts), TPR 91.8% (45/49), **FPR 6.2% sur packages standard (<10 .js, 18/290), ~13% global (69/527)** (v2.2.11, per-file max scoring), ADR 100% (75/75), 14 scanners, ~97 regles, AI config scanner, 529 packages benins npm, 132 PyPI, 65 malwares documentes |
+| **Evaluation & Red Team (v2.2)** | `muaddib evaluate`, 78 samples evasifs (38 adversariaux + 40 holdouts), TPR 91.8% (45/49), **FPR 6.2% sur packages standard (<10 .js, 18/290), ~13% global (69/527)** (v2.2.11, per-file max scoring), ADR 100% (78/78), 14 scanners, 94 regles, AI config scanner, 529 packages benins npm, 132 PyPI, 65 malwares documentes |
 | **Desobfuscation (v2.2.5)** | `src/scanner/deobfuscate.js`, 4 transformations AST + const propagation, approche additive (original + desobfusque), `--no-deobfuscate` flag |
 | **Dataflow inter-module (v2.2.6)** | `src/scanner/module-graph.js`, graphe de dependances, propagation de teinte inter-fichiers, 3-hop re-export, class methods, named exports, `--no-module-graph` flag |
-| Tests | **807 tests unitaires** + 56 fuzz + 75 adversariaux/holdout, **74% coverage** (Codecov) |
+| Tests | **862 tests unitaires** + 56 fuzz + 78 adversariaux/holdout, **74% coverage** (Codecov) |
 | **Hardening securite (v2.1.2)** | SSRF protection (shared/download.js), command injection prevention (execFileSync), path traversal (sanitizePackageName), JSON.parse protege, webhook strict |
 | Audit securite | 2 audits complets, **58 issues corrigees**, [rapport PDF](MUADDIB_Security_Audit_Report_v1.4.1.pdf) |
 

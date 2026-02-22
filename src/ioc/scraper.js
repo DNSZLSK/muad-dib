@@ -95,7 +95,7 @@ function parseCSVLine(line) {
  * @returns {string[][]} Array of parsed lines
  */
 function parseCSV(csvContent, hasHeader = true) {
-  const lines = csvContent.split('\n').filter(l => l.trim());
+  const lines = csvContent.split(/\r?\n/).filter(l => l.trim());
   const startIndex = hasHeader ? 1 : 0;
   const results = [];
 

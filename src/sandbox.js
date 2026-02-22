@@ -1,4 +1,5 @@
-const { execSync, spawn } = require('child_process');
+const { execSync, execFileSync, spawn } = require('child_process');
+const crypto = require('crypto');
 const path = require('path');
 const {
   generateCanaryTokens,
@@ -74,7 +75,7 @@ function isDockerAvailable() {
 
 function imageExists() {
   try {
-    execSync(`docker image inspect ${DOCKER_IMAGE}`, { stdio: 'pipe', timeout: 10000 });
+    execFileSync('docker', ['image', 'inspect', DOCKER_IMAGE], { stdio: 'pipe', timeout: 10000 });
     return true;
   } catch {
     return false;
@@ -97,7 +98,7 @@ async function buildSandboxImage() {
   console.log('[SANDBOX] Building Docker image...');
 
   return new Promise((resolve) => {
-    const dockerfilePath = path.join(__dirname, '..', 'docker');
+    const dockerfilePath = path.join(__dirname, '..', 'docker').replace(/\\/g, '/');
     const proc = spawn('docker', ['build', '-t', DOCKER_IMAGE, dockerfilePath], {
       stdio: 'inherit'
     });
@@ -152,7 +153,7 @@ async function runSandbox(packageName, options = {}) {
     let stdout = '';
     let stderr = '';
     let timedOut = false;
-    const containerName = `muaddib-sandbox-${Date.now()}`;
+    const containerName = `muaddib-sandbox-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
 
     const dockerArgs = [
       'run',
@@ -171,14 +172,15 @@ async function runSandbox(packageName, options = {}) {
         dockerArgs.push('-e', `${key}=${value}`);
       }
       // Also inject canary file contents as env vars for the entrypoint to write
-      dockerArgs.push('-e', `CANARY_ENV_CONTENT=${createCanaryEnvFile(canaryTokens).replace(/\n/g, '\\n')}`);
-      dockerArgs.push('-e', `CANARY_NPMRC_CONTENT=${createCanaryNpmrc(canaryTokens).replace(/\n/g, '\\n')}`);
+      dockerArgs.push('-e', `CANARY_ENV_CONTENT=${createCanaryEnvFile(canaryTokens).replace(/\r?\n/g, '\\n')}`);
+      dockerArgs.push('-e', `CANARY_NPMRC_CONTENT=${createCanaryNpmrc(canaryTokens).replace(/\r?\n/g, '\\n')}`);
     }
 
-    // Strict mode needs strace (SYS_PTRACE), packet capture (NET_RAW), and iptables (NET_ADMIN)
+    // Both modes need NET_RAW for tcpdump (runs as root in entrypoint).
+    // Strict mode also needs NET_ADMIN for iptables network blocking.
+    // SYS_PTRACE is not needed: strace traces its own child (npm install via su).
+    dockerArgs.push('--cap-add=NET_RAW');
     if (strict) {
-      dockerArgs.push('--cap-add=SYS_PTRACE');
-      dockerArgs.push('--cap-add=NET_RAW');
       dockerArgs.push('--cap-add=NET_ADMIN');
     }
 
@@ -199,7 +201,7 @@ async function runSandbox(packageName, options = {}) {
       timedOut = true;
       console.log('[SANDBOX] Timeout (120s). Killing container...');
       try {
-        execSync(`docker kill ${containerName}`, { stdio: 'pipe', timeout: 5000 });
+        execFileSync('docker', ['kill', containerName], { stdio: 'pipe', timeout: 5000 });
       } catch {
         proc.kill('SIGKILL');
       }
@@ -213,7 +215,7 @@ async function runSandbox(packageName, options = {}) {
       stderr += data.toString();
       // Forward sandbox progress logs (sanitize ANSI escape sequences)
       const text = data.toString().replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
-      for (const line of text.split('\n')) {
+      for (const line of text.split(/\r?\n/)) {
         if (line.includes('[SANDBOX]')) {
           console.log(line.trim());
         }
@@ -241,16 +243,25 @@ async function runSandbox(packageName, options = {}) {
         return;
       }
 
-      // Parse JSON from container stdout
+      // Parse JSON from container stdout using delimiter
       let report;
       try {
-        // Extract JSON from stdout (may contain log lines before the JSON)
-        const jsonStart = stdout.indexOf('{');
-        const jsonEnd = stdout.lastIndexOf('}');
-        if (jsonStart === -1 || jsonEnd === -1) {
-          throw new Error('No JSON found in output');
+        const REPORT_DELIMITER = '---MUADDIB-REPORT-START---';
+        const delimIdx = stdout.indexOf(REPORT_DELIMITER);
+        let jsonStr;
+        if (delimIdx !== -1) {
+          // Reliable: use delimiter to skip any package output before the report
+          jsonStr = stdout.substring(delimIdx + REPORT_DELIMITER.length).trim();
+        } else {
+          // Fallback: find first '{' (backward compat with older images)
+          const jsonStart = stdout.indexOf('{');
+          const jsonEnd = stdout.lastIndexOf('}');
+          if (jsonStart === -1 || jsonEnd === -1) {
+            throw new Error('No JSON found in output');
+          }
+          jsonStr = stdout.substring(jsonStart, jsonEnd + 1);
         }
-        report = JSON.parse(stdout.substring(jsonStart, jsonEnd + 1));
+        report = JSON.parse(jsonStr);
       } catch (e) {
         console.log('[SANDBOX] Failed to parse container output:', e.message);
         resolve(cleanResult);
@@ -461,7 +472,7 @@ function scoreFindings(report) {
   // 6. Suspicious processes
   for (const p of (report.processes?.spawned || [])) {
     const cmd = p.command || '';
-    const basename = cmd.split('/').pop();
+    const basename = path.basename(cmd);
     if (DANGEROUS_CMDS.some(d => basename === d)) {
       score += 40;
       findings.push({ type: 'suspicious_process', severity: 'CRITICAL', detail: `Dangerous command spawned: ${cmd}`, evidence: cmd });

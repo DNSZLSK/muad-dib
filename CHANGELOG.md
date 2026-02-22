@@ -7,6 +7,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.21] - 2026-02-22
+
+### Fixed
+- **P0: `--json --paranoid` invalid JSON** (`src/index.js`): `[PARANOID]` message was printed to stdout before JSON output, breaking `JSON.parse()` in CI/CD pipelines. Now suppressed in JSON mode.
+- **P1: `scan --help` launched a full scan** (`bin/muaddib.js`): `--help`/`-h` was not recognized as a scan subcommand flag, causing it to scan `.` (potentially >2 min). Now shows help text immediately.
+- **P1: Version check suggested downgrade** (`bin/muaddib.js`): Used string inequality (`!==`) instead of semver comparison, so `2.2.20 -> 2.2.19` was displayed as an "update". Now uses proper major.minor.patch comparison.
+- **P2: `--fail-on` accepted invalid levels** (`bin/muaddib.js`): Invalid values like `--fail-on foo` silently fell back to `high`. Now validates against `critical|high|medium|low` and exits with error. Case-insensitive (`HIGH` works).
+- **P3: Raw ANSI escape codes in `report --now`** (`bin/muaddib.js`): `\x1b[33m` codes leaked into non-TTY output. Now uses `process.stdout.isTTY` guard.
+- **CI self-scan false positive** (`src/scanner/ast-detectors.js`): `binary_dropper` rule (MUADDIB-AST-016) fired on bare `chmodSync(0o755)` without exec/spawn co-occurrence, flagging legitimate git hook creation in `hooks-init.js` as CRITICAL. Now requires chmod + exec/spawn in the same file (compound detection), matching the documented rule intent.
+
+### Changed
+- **VS Code Extension** (21 fixes):
+  - **Security (2 critical)**: Fixed command injection in package name passed to `child_process.exec` (now uses `execFile` with arg array). Fixed XSS in HTML report via unsanitized threat messages (now escapes all user-controlled content).
+  - **Reliability**: Fixed race condition in concurrent scans, scan-on-save debounce, stale diagnostics on file close, progress bar stuck at 99%, sidebar count sync, status bar state after errors.
+  - **UX**: Fixed scan results not showing when panel hidden, empty state handling in sidebar, tooltip truncation, severity icon mapping, auto-scan toggle persistence, manual scan on unsaved files.
+  - **Performance**: Disposable cleanup on deactivation, output channel memory leak, reduced redundant badge refreshes.
+- **Sandbox hardening**: Root/sandboxuser privilege separation (install as root, run as sandboxuser). JSON delimiter (`---JSON-REPORT---`) for reliable stdout parsing. Container name collision prevention via random suffix.
+- **Monitor resilience**: SIGTERM handler for graceful shutdown. `unhandledRejection` handler prevents silent crashes. Webhook retry with exponential backoff (3 attempts, 1s/2s/4s). Rate limiting (1 request/2s). Atomic file writes via `writeFileSync` with temp+rename.
+- **Cross-platform**: `.gitattributes` LF enforcement for shell scripts. CRLF fixes in sandbox scripts. `path.basename()` fix for Windows paths in monitor.
+- **Performance**: `benchmark.js` created for scaling analysis (O(n^0.80) scaling confirmed, bottlenecks identified: IOC loading 40%, AST parsing 25%).
+
+## [2.2.20] - 2026-02-22
+
+### Fixed
+- **Daily report delta logic**: First report (null `lastDailyReportDate`) now correctly shows only today's scans (`d.date >= today`) instead of entire history. Subsequent reports use strict delta (`d.date > lastDate`).
+
+## [2.2.19] - 2026-02-22
+
+### Fixed
+- **First report includes all history**: When `lastDailyReportDate` is null, `buildReportFromDisk()` and `getReportStatus()` now include all daily entries instead of filtering to an empty set.
+- **SyntaxError fix**: Removed duplicate `const today` declaration in `getReportStatus()`.
+
+## [2.2.18] - 2026-02-22
+
+### Fixed
+- **Report delta**: `buildDailyReportEmbed()` now uses disk-based daily entries via `buildReportFromDisk()` instead of in-memory cumulative `stats`. Shows packages scanned since last report, not total since VPS launch.
+- **Spinner animation for all scanners**: All 13 scanners in `Promise.all` wrapped in `yieldThen()` (not just 5). "Async" scanners (`analyzeAST`, `analyzeDataFlow`, etc.) are actually synchronous due to `readFileSync`/`readdirSync` internals.
+- **False positive on local dependencies**: Skip `link:`, `file:`, and `workspace:` protocol dependencies in package.json IOC matching (local code references, not npm packages).
+
+## [2.2.17] - 2026-02-22
+
+### Added
+- **`muaddib report --now`**: Force send daily report from persisted disk data. Hidden command (not in `--help`).
+- **`muaddib report --status`**: Display last report date, packages scanned since, and next scheduled report time. Hidden command.
+- `buildReportFromDisk()`, `buildReportEmbedFromDisk()`, `sendReportNow()`, `getReportStatus()` exports in `src/monitor.js`.
+
+## [2.2.16] - 2026-02-22
+
+### Fixed
+- **Daily reports not sending**: `lastDailyReportTime` reset on every daemon restart (17 commits in 48h triggered auto-updates every 6h, resetting the 24h timer). Now persisted as `lastDailyReportDate` in `monitor-state.json`.
+- **Spinner animation blocked**: `setInterval(100ms)` animation never fired because event loop was blocked by synchronous scanners. Added `yieldThen()` helper wrapping sync operations in `setImmediate`.
+- **Scraper spinner leaks**: Fixed spinner not stopped on network error/timeout and parse errors in IOC scraper.
+
+### Changed
+- **Daily report time**: Changed from rolling 24h window to fixed **08:00 Paris time** (`Europe/Paris` timezone via `Intl.DateTimeFormat`). Report sent once per calendar day, survives daemon restarts.
+- SIGINT handler now sends daily report before exit if data has accumulated.
+
+## [2.2.15] - 2026-02-22
+
+### Changed
+- **Sprint 4-5 refactoring**: -1382 LOC across codebase. DRY extraction, dead code removal, performance optimizations.
+- Shared `analyzeWithDeobfuscation()` helper extracted to `src/shared/analyze-helper.js` (used by AST, dataflow, obfuscation, entropy, module-graph scanners).
+- `findFiles()` centralized file walking with extension filtering and exclusion.
+
+## [2.2.14] - 2026-02-21
+
+### Changed
+- **Sprint 1-3 audit fixes**: Documentation corrections, +40 tests, -186 LOC DRY refactoring.
+- Test count: 814 -> 862 (+48 tests across monitor, report, scoring, and scanner modules).
+
 ## [2.2.13] - 2026-02-21
 
 ### Fixed
@@ -651,7 +721,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Obfuscation detection
 - Package.json lifecycle script analysis
 
-[Unreleased]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.10...HEAD
+[Unreleased]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.20...HEAD
+[2.2.20]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.19...v2.2.20
+[2.2.19]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.18...v2.2.19
+[2.2.18]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.17...v2.2.18
+[2.2.17]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.16...v2.2.17
+[2.2.16]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.15...v2.2.16
+[2.2.15]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.14...v2.2.15
+[2.2.14]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.13...v2.2.14
+[2.2.13]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.12...v2.2.13
+[2.2.12]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.11...v2.2.12
+[2.2.11]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.10...v2.2.11
 [2.2.10]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.9...v2.2.10
 [2.2.9]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.8...v2.2.9
 [2.2.8]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.7...v2.2.8

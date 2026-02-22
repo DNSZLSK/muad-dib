@@ -58,7 +58,7 @@ function scanDirRecursive(dirPath, targetPath, threats, depth = 0) {
       const relFile = `${relDir}/${file}`;
 
       // GHA-001: Line-by-line YAML-aware parsing (skip comments)
-      const yamlLines = content.split('\n');
+      const yamlLines = content.split(/\r?\n/);
       const activeLines = yamlLines.filter(l => !l.trim().startsWith('#'));
       const activeContent = activeLines.join('\n');
 

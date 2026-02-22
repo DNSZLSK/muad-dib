@@ -12,11 +12,17 @@ const { detectMaintainerChange } = require('./maintainer-change.js');
 const { downloadToFile, extractTarGz, sanitizePackageName } = require('./shared/download.js');
 const { MAX_TARBALL_SIZE } = require('./shared/constants.js');
 
+// Prevent unhandled promise rejections from crashing the monitor process
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[MONITOR] Unhandled rejection:', reason);
+});
+
 const STATE_FILE = path.join(__dirname, '..', 'data', 'monitor-state.json');
 const ALERTS_FILE = path.join(__dirname, '..', 'data', 'monitor-alerts.json');
 const DETECTIONS_FILE = path.join(__dirname, '..', 'data', 'detections.json');
 const SCAN_STATS_FILE = path.join(__dirname, '..', 'data', 'scan-stats.json');
 const POLL_INTERVAL = 60_000;
+const POLL_MAX_BACKOFF = 960_000; // 16 minutes max backoff
 const SCAN_TIMEOUT_MS = 180_000; // 3 minutes per package
 
 // --- Stats counters ---
@@ -36,6 +42,9 @@ const dailyAlerts = [];
 
 // Deduplication: track recently scanned packages (cleared every 24h with daily report)
 const recentlyScanned = new Set();
+
+// Consecutive poll error tracking for exponential backoff
+let consecutivePollErrors = 0;
 
 // --- Scan queue (FIFO, sequential) ---
 
@@ -639,7 +648,10 @@ function saveState(state) {
       ...state,
       lastDailyReportDate: stats.lastDailyReportDate
     };
-    fs.writeFileSync(STATE_FILE, JSON.stringify(persistedState, null, 2), 'utf8');
+    // Atomic write: write to .tmp then rename (crash-safe)
+    const tmpFile = STATE_FILE + '.tmp';
+    fs.writeFileSync(tmpFile, JSON.stringify(persistedState, null, 2), 'utf8');
+    fs.renameSync(tmpFile, STATE_FILE);
   } catch (err) {
     console.error(`[MONITOR] Failed to save state: ${err.message}`);
   }
@@ -1361,7 +1373,7 @@ async function pollNpm(state) {
     return newPackages.length;
   } catch (err) {
     console.error(`[MONITOR] npm poll error: ${err.message}`);
-    return 0;
+    return -1;
   }
 }
 
@@ -1435,16 +1447,36 @@ async function pollPyPI(state) {
     return newPackages.length;
   } catch (err) {
     console.error(`[MONITOR] PyPI poll error: ${err.message}`);
-    return 0;
+    return -1;
   }
 }
 
 // --- Main loop ---
 
+function cleanupOrphanTmpDirs() {
+  const tmpBase = path.join(os.tmpdir(), 'muaddib-monitor');
+  try {
+    if (!fs.existsSync(tmpBase)) return;
+    const entries = fs.readdirSync(tmpBase);
+    for (const entry of entries) {
+      const fullPath = path.join(tmpBase, entry);
+      try {
+        fs.rmSync(fullPath, { recursive: true, force: true });
+      } catch {}
+    }
+    if (entries.length > 0) {
+      console.log(`[MONITOR] Cleaned up ${entries.length} orphan temp dir(s)`);
+    }
+  } catch {}
+}
+
 async function startMonitor(options) {
   if (options && options.verbose) {
     setVerboseMode(true);
   }
+
+  // Cleanup temp dirs from previous runs (SIGTERM/crash may leave orphans)
+  cleanupOrphanTmpDirs();
 
   console.log(`
 ╔════════════════════════════════════════════╗
@@ -1512,9 +1544,9 @@ async function startMonitor(options) {
 
   let running = true;
 
-  // SIGINT: send pending daily report, save state and exit
-  process.on('SIGINT', async () => {
-    console.log('\n[MONITOR] Stopping — sending pending daily report...');
+  // Graceful shutdown handler (shared by SIGINT and SIGTERM)
+  async function gracefulShutdown(signal) {
+    console.log(`\n[MONITOR] Received ${signal} — sending pending daily report...`);
     if (stats.scanned > 0) {
       await sendDailyReport();
     }
@@ -1523,7 +1555,10 @@ async function startMonitor(options) {
     console.log('[MONITOR] State saved. Bye!');
     running = false;
     process.exit(0);
-  });
+  }
+
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 
   // Initial poll + scan
   await poll(state);
@@ -1559,7 +1594,21 @@ async function poll(state) {
     pollPyPI(state)
   ]);
 
-  console.log(`[MONITOR] Found ${npmCount} npm + ${pypiCount} PyPI new packages`);
+  // Track consecutive poll failures for backoff
+  if (npmCount === -1 && pypiCount === -1) {
+    consecutivePollErrors++;
+    if (consecutivePollErrors > 1) {
+      const backoff = Math.min(POLL_INTERVAL * Math.pow(2, consecutivePollErrors - 1), POLL_MAX_BACKOFF);
+      console.log(`[MONITOR] Both registries failed (${consecutivePollErrors}x) — backing off ${(backoff / 1000).toFixed(0)}s`);
+      await sleep(backoff);
+    }
+  } else {
+    consecutivePollErrors = 0;
+  }
+
+  const npmDisplay = npmCount === -1 ? 'error' : npmCount;
+  const pypiDisplay = pypiCount === -1 ? 'error' : pypiCount;
+  console.log(`[MONITOR] Found ${npmDisplay} npm + ${pypiDisplay} PyPI new packages`);
 }
 
 /**
@@ -1753,7 +1802,10 @@ module.exports = {
   buildReportFromDisk,
   buildReportEmbedFromDisk,
   sendReportNow,
-  getReportStatus
+  getReportStatus,
+  cleanupOrphanTmpDirs,
+  consecutivePollErrors: { get() { return consecutivePollErrors; }, set(v) { consecutivePollErrors = v; } },
+  POLL_MAX_BACKOFF
 };
 
 // Standalone entry point: node src/monitor.js

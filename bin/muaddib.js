@@ -62,7 +62,13 @@ for (let i = 0; i < options.length; i++) {
   } else if (options[i] === '--explain') {
     explainMode = true;
   } else if (options[i] === '--fail-on') {
-    failLevel = options[i + 1] || 'high';
+    const val = (options[i + 1] || 'high').toLowerCase();
+    const validLevels = ['critical', 'high', 'medium', 'low'];
+    if (!validLevels.includes(val)) {
+      console.error(`[ERROR] --fail-on must be one of: ${validLevels.join(', ')} (got: "${val}")`);
+      process.exit(1);
+    }
+    failLevel = val;
     i++;
   } else if (options[i] === '--webhook') {
     const rawUrl = options[i + 1];
@@ -155,7 +161,13 @@ if (!jsonOutput && !sarifOutput && command !== 'feed' && command !== 'serve') {
     exec('npm view muaddib-scanner version', { timeout: 5000 }, (err, stdout) => {
       if (err) return; // No network or npm unavailable
       const latest = (stdout || '').toString().trim();
-      if (latest && latest !== currentVersion) {
+      if (!latest || latest === currentVersion) return;
+      // Semver comparison: only notify if remote is strictly newer
+      const parse = v => v.split('.').map(Number);
+      const [cM, cm, cp] = parse(currentVersion);
+      const [lM, lm, lp] = parse(latest);
+      const isNewer = lM > cM || (lM === cM && (lm > cm || (lm === cm && lp > cp)));
+      if (isNewer) {
         console.log(`\n[UPDATE] New version available: ${currentVersion} -> ${latest}`);
         console.log(`  Run: npm install -g muaddib-scanner@latest\n`);
       }
@@ -429,6 +441,10 @@ if (command === 'version' || command === '--version' || command === '-v') {
     process.exit(1);
   });
 } else if (command === 'scan') {
+  if (options.includes('--help') || options.includes('-h')) {
+    console.log(helpText);
+    process.exit(0);
+  }
   run(target, {
     json: jsonOutput,
     html: htmlOutput,
@@ -817,10 +833,13 @@ if (command === 'version' || command === '--version' || command === '-v') {
   if (options.includes('--now')) {
     const { sendReportNow } = require('../src/monitor.js');
     sendReportNow().then(result => {
+      const color = process.stdout.isTTY;
       if (result.sent) {
-        console.log(`\n  \x1b[32m\u2713\x1b[0m ${result.message}\n`);
+        const check = color ? '\x1b[32m\u2713\x1b[0m' : '\u2713';
+        console.log(`\n  ${check} ${result.message}\n`);
       } else {
-        console.log(`\n  \x1b[33m!\x1b[0m ${result.message}\n`);
+        const warn = color ? '\x1b[33m!\x1b[0m' : '!';
+        console.log(`\n  ${warn} ${result.message}\n`);
       }
       process.exit(result.sent ? 0 : 1);
     }).catch(err => {

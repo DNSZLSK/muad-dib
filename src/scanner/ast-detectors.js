@@ -487,7 +487,7 @@ function handleCallExpression(node, ctx) {
     }
   }
 
-  // Detect fs.chmodSync with executable permissions
+  // Detect fs.chmodSync with executable permissions (deferred to postWalk for compound check)
   if (node.callee.type === 'MemberExpression' && node.callee.property?.type === 'Identifier') {
     const chmodMethod = node.callee.property.name;
     if ((chmodMethod === 'chmodSync' || chmodMethod === 'chmod') && node.arguments.length >= 2) {
@@ -495,12 +495,8 @@ function handleCallExpression(node, ctx) {
       if (modeArg?.type === 'Literal' && typeof modeArg.value === 'number') {
         // 0o755=493, 0o777=511, 0o700=448, 0o775=509
         if (modeArg.value === 493 || modeArg.value === 511 || modeArg.value === 448 || modeArg.value === 509) {
-          ctx.threats.push({
-            type: 'binary_dropper',
-            severity: 'CRITICAL',
-            message: `${chmodMethod}() with executable permissions (0o${modeArg.value.toString(8)}) — binary dropper pattern.`,
-            file: ctx.relFile
-          });
+          ctx.hasChmodExecutable = true;
+          ctx.chmodMessage = `${chmodMethod}() with executable permissions (0o${modeArg.value.toString(8)})`;
         }
       }
     }
@@ -528,7 +524,8 @@ function handleCallExpression(node, ctx) {
     const firstArg = node.arguments[0];
     const cmdName = firstArg?.type === 'Literal' && typeof firstArg.value === 'string'
       ? firstArg.value.toLowerCase() : '';
-    const isAIAgent = AI_AGENT_BINARIES.some(bin => cmdName === bin || cmdName.endsWith('/' + bin));
+    const cmdBasename = cmdName ? path.basename(cmdName) : '';
+    const isAIAgent = AI_AGENT_BINARIES.some(bin => cmdBasename === bin);
 
     if (hasDangerousFlag) {
       const matchedFlag = AI_AGENT_DANGEROUS_FLAGS.find(flag => allArgText.includes(flag));
@@ -908,6 +905,22 @@ function handlePostWalk(ctx) {
       message: 'JavaScript reverse shell: net.Socket + connect() + pipe to shell process stdin/stdout.',
       file: ctx.relFile
     });
+  }
+
+  // Binary dropper: chmod executable + exec/spawn in same file = CRITICAL
+  if (ctx.hasChmodExecutable) {
+    const execTypes = ['dangerous_exec', 'dangerous_call_exec', 'detached_process'];
+    const hasExecInFile = ctx.threats.some(t =>
+      t.file === ctx.relFile && execTypes.includes(t.type)
+    );
+    if (hasExecInFile) {
+      ctx.threats.push({
+        type: 'binary_dropper',
+        severity: 'CRITICAL',
+        message: `${ctx.chmodMessage} + exec/spawn in same file — binary dropper pattern.`,
+        file: ctx.relFile
+      });
+    }
   }
 
   // Steganographic/binary payload execution

@@ -120,6 +120,9 @@ ${command}
 `;
 
   fs.writeFileSync(preCommitPath, hookContent, { mode: 0o755 });
+  if (process.platform !== 'win32') {
+    fs.chmodSync(preCommitPath, 0o755);
+  }
   console.log(`[OK] Created ${preCommitPath}`);
 }
 
@@ -216,6 +219,9 @@ exit 0
   }
 
   fs.writeFileSync(preCommitPath, hookContent, { mode: 0o755 });
+  if (process.platform !== 'win32') {
+    fs.chmodSync(preCommitPath, 0o755);
+  }
   console.log(`[OK] Created ${preCommitPath}`);
 }
 

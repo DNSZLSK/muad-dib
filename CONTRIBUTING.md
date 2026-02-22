@@ -73,6 +73,24 @@ MUAD'DIB scans Python projects via `src/scanner/python.js` (requirements.txt, se
 - Improve Python dependency parsing in `src/scanner/python.js`
 - Add popular PyPI packages to the typosquatting whitelist in `src/scanner/typosquat.js`
 
+### 7. Add adversarial test samples
+
+MUAD'DIB maintains evasive samples to validate scanner robustness (78 samples, 100% ADR):
+- `datasets/adversarial/` -- 38 samples with evasion techniques (encoding, splitting, indirection)
+- `datasets/holdout-v2/` through `datasets/holdout-v5/` -- 40 holdout samples (4 rounds of 10)
+
+To add a new adversarial sample:
+1. Create a directory in `datasets/adversarial/` with a malicious pattern that evades detection
+2. Add a threshold entry in `src/commands/evaluate.js` (`ADVERSARIAL_THRESHOLDS`)
+3. Run `node bin/muaddib.js evaluate --adversarial` to verify detection
+
+### 8. Expand ground truth
+
+The ground truth dataset (`tests/ground-truth/`) contains 51 real-world attack samples (49 active). To add a new sample:
+1. Add the malicious package source to `tests/ground-truth/`
+2. Add an entry in `tests/ground-truth/attacks.json` with `name`, `min_threats`, `expected_types`
+3. Run `node bin/muaddib.js evaluate --ground-truth` to verify TPR
+
 ## Development
 ```bash
 git clone https://github.com/DNSZLSK/muad-dib.git
@@ -83,7 +101,13 @@ npm test
 
 ## Testing your changes
 ```bash
+# Scan test fixtures
 node bin/muaddib.js scan tests/samples --explain
+
+# Run evaluation (TPR, FPR, ADR)
+node bin/muaddib.js evaluate --ground-truth    # TPR on 49 real attacks
+node bin/muaddib.js evaluate --adversarial     # ADR on 78 evasive samples
+node bin/muaddib.js evaluate --benign          # FPR on 529 npm packages
 ```
 
 ## Pull request process
@@ -92,9 +116,10 @@ node bin/muaddib.js scan tests/samples --explain
 2. Create a branch (`git checkout -b feature/my-feature`)
 3. Make your changes
 4. Run tests (`npm test`)
-5. Commit (`git commit -m "Add my feature"`)
-6. Push (`git push origin feature/my-feature`)
-7. Open a Pull Request
+5. Run `node bin/muaddib.js evaluate --ground-truth --adversarial` to check for regressions
+6. Commit (`git commit -m "Add my feature"`)
+7. Push (`git push origin feature/my-feature`)
+8. Open a Pull Request
 
 ## Code of conduct
 

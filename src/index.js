@@ -283,7 +283,9 @@ async function run(targetPath, options = {}) {
 
   // Paranoid mode
   if (options.paranoid) {
-    console.log('[PARANOID] Ultra-strict mode enabled\n');
+    if (!options.json) {
+      console.log('[PARANOID] Ultra-strict mode enabled\n');
+    }
     const paranoidThreats = scanParanoid(targetPath);
     threats.push(...paranoidThreats);
   }
