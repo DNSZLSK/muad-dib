@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const acorn = require('acorn');
-const { findFiles } = require('../utils');
+const { findFiles, EXCLUDED_DIRS } = require('../utils');
 const { ACORN_OPTIONS: BASE_ACORN_OPTIONS } = require('../shared/constants.js');
 
 // --- Sensitive source patterns ---
@@ -33,7 +33,7 @@ function buildModuleGraph(packagePath) {
   const graph = {};
   const files = findFiles(packagePath, {
     extensions: ['.js', '.mjs', '.cjs'],
-    excludedDirs: ['node_modules', '.git'],
+    excludedDirs: EXCLUDED_DIRS,
   });
   for (const absFile of files) {
     const relFile = toRel(absFile, packagePath);
