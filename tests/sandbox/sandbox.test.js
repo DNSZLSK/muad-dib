@@ -420,7 +420,7 @@ async function runSandboxTests() {
   });
 
   // Test getSeverity, displayResults, imageExists (now exported)
-  const { getSeverity, displayResults, imageExists } = require('../../src/sandbox.js');
+  const { getSeverity, displayResults, imageExists, isDockerAvailable, buildSandboxImage } = require('../../src/sandbox.js');
 
   test('SANDBOX-COV: getSeverity returns CLEAN for 0', () => {
     assert(getSeverity(0) === 'CLEAN', 'Score 0 should be CLEAN');
@@ -483,6 +483,35 @@ async function runSandboxTests() {
   test('SANDBOX-COV: imageExists returns boolean', () => {
     const result = imageExists();
     assert(typeof result === 'boolean', 'imageExists should return a boolean, got ' + typeof result);
+  });
+
+  test('SANDBOX-COV: isDockerAvailable returns boolean', () => {
+    const result = isDockerAvailable();
+    assert(typeof result === 'boolean', 'isDockerAvailable should return a boolean, got ' + typeof result);
+  });
+
+  await asyncTest('SANDBOX-COV: buildSandboxImage returns boolean', async () => {
+    const origLog = console.log;
+    console.log = () => {};
+    try {
+      const result = await buildSandboxImage();
+      assert(typeof result === 'boolean', 'buildSandboxImage should return a boolean');
+    } finally {
+      console.log = origLog;
+    }
+  });
+
+  await asyncTest('SANDBOX-COV: runSandbox with invalid package name returns clean', async () => {
+    const origLog = console.log;
+    console.log = () => {};
+    try {
+      const { runSandbox } = require('../../src/sandbox.js');
+      const result = await runSandbox('$(evil-injection)', {});
+      assert(result.score === 0, 'Invalid name should return score 0');
+      assert(result.severity === 'CLEAN', 'Should be CLEAN');
+    } finally {
+      console.log = origLog;
+    }
   });
 
   test('SANDBOX-COV: generateNetworkReport with TLS connections', () => {
@@ -694,6 +723,157 @@ async function runSandboxTests() {
       return s;
     }, baseScore));
     assert(finalScore === 70, 'Final score should be base(20) + canary(50) = 70, got ' + finalScore);
+  });
+
+  // ============================================
+  // SANDBOX ADDITIONAL COVERAGE TESTS
+  // ============================================
+
+  console.log('\n=== SANDBOX ADDITIONAL COVERAGE TESTS ===\n');
+
+  test('SANDBOX-COV: scoreFindings with combined network and filesystem threats', () => {
+    const report = {
+      network: {
+        dns_queries: ['evil.com'],
+        http_connections: [{ host: '1.2.3.4', port: 8080 }]
+      },
+      filesystem: { created: ['/tmp/payload.bin'] },
+      processes: { spawned: [{ command: '/opt/unknown-binary' }] }
+    };
+    const { score, findings } = scoreFindings(report);
+    assert(score > 0, 'Combined report should have non-zero score');
+    assert(findings.length >= 3, 'Should have findings from DNS, filesystem, and process');
+    const types = findings.map(f => f.type);
+    assert(types.includes('suspicious_dns'), 'Should have DNS finding');
+    assert(types.includes('suspicious_filesystem'), 'Should have filesystem finding');
+    assert(types.includes('unknown_process'), 'Should have process finding');
+  });
+
+  test('SANDBOX-COV: scoreFindings with SSH key exfiltration pattern', () => {
+    const report = { network: { http_bodies: ['ssh-rsa AAAAB3... user@host'] } };
+    const { findings } = scoreFindings(report);
+    const exfilFindings = findings.filter(f => f.type === 'data_exfiltration');
+    assert(exfilFindings.length >= 1, 'Should detect SSH key exfiltration');
+    assert(exfilFindings[0].detail.includes('SSH key'), 'Should identify as SSH key');
+  });
+
+  test('SANDBOX-COV: scoreFindings with private key exfiltration pattern', () => {
+    const report = { network: { http_bodies: ['BEGIN RSA PRIVATE KEY-----\nMIIE...'] } };
+    const { findings } = scoreFindings(report);
+    const exfilFindings = findings.filter(f => f.type === 'data_exfiltration');
+    assert(exfilFindings.length >= 1, 'Should detect private key exfiltration');
+    assert(exfilFindings[0].detail.includes('private key'), 'Should identify as private key');
+  });
+
+  test('SANDBOX-COV: scoreFindings with /etc/passwd exfiltration pattern', () => {
+    const report = { network: { http_bodies: ['root:x:0:0:root:/root:/bin/bash from /etc/passwd'] } };
+    const { findings } = scoreFindings(report);
+    const exfilFindings = findings.filter(f => f.type === 'data_exfiltration');
+    assert(exfilFindings.length >= 1, 'Should detect passwd file exfiltration');
+    assert(exfilFindings[0].severity === 'HIGH', 'Passwd exfil should be HIGH');
+  });
+
+  test('SANDBOX-COV: scoreFindings with .env exfiltration pattern', () => {
+    const report = { network: { http_bodies: ['DB_HOST=localhost from .env file'] } };
+    const { findings } = scoreFindings(report);
+    const exfilFindings = findings.filter(f => f.type === 'data_exfiltration');
+    assert(exfilFindings.length >= 1, 'Should detect .env exfiltration');
+    assert(exfilFindings[0].severity === 'HIGH', '.env exfil should be HIGH');
+  });
+
+  test('SANDBOX-COV: scoreFindings with password exfiltration pattern', () => {
+    const report = { network: { http_bodies: ['stolen password: abc123'] } };
+    const { findings } = scoreFindings(report);
+    const exfilFindings = findings.filter(f => f.type === 'data_exfiltration');
+    assert(exfilFindings.length >= 1, 'Should detect password exfiltration');
+  });
+
+  test('SANDBOX-COV: scoreFindings with safe domain in HTTP connections', () => {
+    const report = { network: { http_connections: [
+      { host: 'registry.npmjs.org', port: 443 }
+    ] } };
+    const { score } = scoreFindings(report);
+    assert(score === 0, 'Safe domain HTTP connection should score 0');
+  });
+
+  test('SANDBOX-COV: scoreFindings with subdomain of safe domain', () => {
+    const report = { network: { dns_queries: ['sub.registry.npmjs.org'] } };
+    const { score } = scoreFindings(report);
+    assert(score === 0, 'Subdomain of safe domain should score 0');
+  });
+
+  test('SANDBOX-COV: scoreFindings with empty process command', () => {
+    const report = { processes: { spawned: [{ command: '' }] } };
+    const { score, findings } = scoreFindings(report);
+    assert(score === 0, 'Empty command should score 0, got ' + score);
+    assert(findings.length === 0, 'Empty command should produce no findings');
+  });
+
+  test('SANDBOX-COV: detectStaticCanaryExfiltration with partial report fields', () => {
+    // Report with some network fields missing
+    const report = {
+      network: {
+        http_bodies: [],
+        // dns_queries, http_requests, tls_connections intentionally omitted
+      },
+      // filesystem, processes intentionally omitted
+    };
+    const result = detectStaticCanaryExfiltration(report);
+    assert(result.length === 0, 'Should handle missing network sub-fields gracefully');
+  });
+
+  test('SANDBOX-COV: detectStaticCanaryExfiltration with all search fields populated but clean', () => {
+    const report = {
+      network: {
+        http_bodies: ['safe data only'],
+        dns_queries: ['google.com', 'npmjs.org'],
+        http_requests: [{ method: 'GET', host: 'npmjs.org', path: '/package' }],
+        tls_connections: [{ domain: 'google.com', ip: '8.8.8.8', port: 443 }]
+      },
+      filesystem: { created: ['/tmp/safe-file.txt'] },
+      processes: { spawned: [{ command: 'node index.js' }] },
+      install_output: 'npm install completed successfully'
+    };
+    const result = detectStaticCanaryExfiltration(report);
+    assert(result.length === 0, 'Clean report with all fields should return empty');
+  });
+
+  await asyncTest('SANDBOX-COV: runSandbox returns clean result when Docker unavailable', async () => {
+    const { runSandbox } = require('../../src/sandbox.js');
+    const { execSync: origExecSync } = require('child_process');
+    const origLog = console.log;
+    console.log = () => {};
+    try {
+      // runSandbox checks isDockerAvailable internally via execSync('docker info')
+      // On machines without Docker, this naturally returns clean result
+      const result = await runSandbox('lodash', {});
+      assert(typeof result === 'object', 'Should return an object');
+      assert(typeof result.score === 'number', 'Should have a numeric score');
+      assert(typeof result.severity === 'string', 'Should have a severity string');
+      assert(Array.isArray(result.findings), 'Should have findings array');
+    } finally {
+      console.log = origLog;
+    }
+  });
+
+  test('SANDBOX-COV: generateNetworkReport with ssh-ed25519 exfil pattern', () => {
+    const report = {
+      package: 'test-pkg',
+      timestamp: '2025-01-01T00:00:00Z',
+      mode: 'permissive',
+      duration_ms: 3000,
+      network: {
+        dns_resolutions: [],
+        http_requests: [],
+        tls_connections: [],
+        http_connections: [],
+        blocked_connections: [],
+        http_bodies: ['ssh-ed25519 AAAAC3Nz... user@host']
+      }
+    };
+    const output = generateNetworkReport(report);
+    assert(output.includes('Data Exfiltration'), 'Should have exfil section');
+    assert(output.includes('SSH key'), 'Should identify SSH key in report');
   });
 }
 

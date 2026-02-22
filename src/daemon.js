@@ -175,4 +175,4 @@ function triggerScan(dir) {
   }, 3000);
 }
 
-module.exports = { startDaemon };
+module.exports = { startDaemon, watchDirectory, watchFile, watchNodeModules, triggerScan, getScanState };

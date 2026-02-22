@@ -203,6 +203,90 @@ async function runDeobfuscateTests() {
     assertIncludes(t.before, "'he' + 'llo'", 'before should show original');
     assert(t.after === "'hello'", `after should be 'hello', got ${t.after}`);
   });
+
+  // =====================================================
+  // 7. CONST PROPAGATION (Phase 2)
+  // =====================================================
+
+  test('DEOBFUSCATE: Const propagation — resolves const ref in require', () => {
+    // Phase 1 needs a trigger (string concat of literals) to activate phase 2 const propagation
+    const src = `const trigger = 'hel' + 'lo';\nconst a = 'child_';\nconst b = 'process';\nrequire(a + b);`;
+    const { code, transforms } = deobfuscate(src);
+    assertIncludes(code, "'child_process'", 'Should propagate const and fold to child_process');
+    assert(transforms.length > 0, 'Should have transforms for const propagation');
+  });
+
+  test('DEOBFUSCATE: Const propagation — reassigned var NOT propagated', () => {
+    const src = `const a = 'safe';\nlet b = 'initial';\nb = 'changed';\nrequire(b);`;
+    const { code } = deobfuscate(src);
+    // b is reassigned, so it should NOT be propagated
+    assertIncludes(code, 'require(b)', 'Reassigned variable should NOT be propagated');
+  });
+
+  test('DEOBFUSCATE: Const propagation — does not propagate property access', () => {
+    const src = `const name = 'test';\nobj.name = 'other';`;
+    const { code } = deobfuscate(src);
+    assertIncludes(code, 'obj.name', 'Property access should not be propagated');
+  });
+
+  // =====================================================
+  // 8. HEX BUFFER DECODE
+  // =====================================================
+
+  test('DEOBFUSCATE: Hex Buffer — Buffer.from(hex).toString()', () => {
+    const { code, transforms } = deobfuscate(`const x = Buffer.from('6576616c', 'hex').toString();`);
+    assertIncludes(code, "'eval'", 'Should decode hex Buffer.from to eval');
+    assert(transforms.length === 1, `Expected 1 transform, got ${transforms.length}`);
+    assert(transforms[0].type === 'hex', `Expected type hex, got ${transforms[0].type}`);
+  });
+
+  test('DEOBFUSCATE: Hex Buffer — non-printable result NOT folded', () => {
+    // 0x01 0x02 0x03 are control chars
+    const { code, transforms } = deobfuscate(`const x = Buffer.from('010203', 'hex').toString();`);
+    assertIncludes(code, "Buffer.from", 'Should NOT fold hex with non-printable result');
+    assert(transforms.length === 0, `Expected 0 transforms for non-printable, got ${transforms.length}`);
+  });
+
+  // =====================================================
+  // 9. isPrintable edge cases
+  // =====================================================
+
+  test('DEOBFUSCATE: atob with non-printable result NOT folded', () => {
+    // Base64 of binary data with control characters
+    const { transforms } = deobfuscate(`const x = atob('AQIDBA==');`);
+    assert(transforms.length === 0, 'atob with non-printable result should NOT fold');
+  });
+
+  test('DEOBFUSCATE: Base64 with valid printable result IS folded', () => {
+    const { code, transforms } = deobfuscate(`const x = atob('cmVxdWlyZQ==');`);
+    assertIncludes(code, "'require'", 'Should decode atob to require');
+    assert(transforms.length === 1, 'Should have 1 transform');
+  });
+
+  // =====================================================
+  // 10. EMPTY / EDGE CASES
+  // =====================================================
+
+  test('DEOBFUSCATE: Empty hex array returns null (no transform)', () => {
+    const { transforms } = deobfuscate(`const x = [].map(c => String.fromCharCode(c)).join('');`);
+    assert(transforms.length === 0, 'Empty array should produce no transforms');
+  });
+
+  test('DEOBFUSCATE: Hex array map without join does NOT fold', () => {
+    const { transforms } = deobfuscate(`const x = [0x68, 0x65].map(c => String.fromCharCode(c));`);
+    assert(transforms.length === 0, 'Array map without .join should not fold');
+  });
+
+  test('DEOBFUSCATE: atob with multiple args does NOT fold', () => {
+    // atob only takes one arg; if somehow parsed with more, it shouldn't fold
+    const { transforms } = deobfuscate(`const x = atob('aGVsbG8=', 'extra');`);
+    assert(transforms.length === 0, 'atob with multiple args should not fold');
+  });
+
+  test('DEOBFUSCATE: String with special chars is properly escaped', () => {
+    const { code } = deobfuscate(`const x = 'line1\\n' + 'line2';`);
+    assertIncludes(code, "'line1\\nline2'", 'Should preserve newline escape in folded string');
+  });
 }
 
 module.exports = { runDeobfuscateTests };

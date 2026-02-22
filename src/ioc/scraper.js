@@ -1278,7 +1278,13 @@ async function runScraper() {
   };
 }
 
-module.exports = { runScraper, scrapeShaiHuludDetector, scrapeDatadogIOCs };
+module.exports = {
+  runScraper, scrapeShaiHuludDetector, scrapeDatadogIOCs,
+  // Pure utility functions (exported for testing)
+  parseCSVLine, parseCSV, extractVersions, parseOSVEntry,
+  createFreshness, isAllowedRedirect, loadStaticIOCs,
+  CONFIDENCE_ORDER, ALLOWED_REDIRECT_DOMAINS
+};
 
 // Direct execution if called as CLI
 if (require.main === module) {

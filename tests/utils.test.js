@@ -166,6 +166,185 @@ async function runUtilsTests() {
     assert(EXCLUDED_DIRS.includes('.git'), 'Should include .git');
     assert(EXCLUDED_DIRS.includes('.muaddib-cache'), 'Should include .muaddib-cache');
   });
+
+  // --- isDevFile: compiler/scripts patterns ---
+
+  test('UTILS: isDevFile identifies compiler directory', () => {
+    assert(isDevFile('compiler/transform.js') === true, 'compiler/ should be dev');
+  });
+
+  test('UTILS: isDevFile identifies tools directory', () => {
+    assert(isDevFile('tools/generate.js') === true, 'tools/ should be dev');
+  });
+
+  test('UTILS: isDevFile identifies packages/*/scripts pattern', () => {
+    assert(isDevFile('packages/core/scripts/build.js') === true, 'packages/*/scripts/ should be dev');
+  });
+
+  // --- Spinner ---
+
+  test('UTILS: Spinner start/succeed lifecycle', () => {
+    const { Spinner } = require('../src/utils.js');
+    const spinner = new Spinner();
+    const origWrite = process.stdout.write;
+    const writes = [];
+    process.stdout.write = (data) => { writes.push(data); return true; };
+    try {
+      spinner.start('Loading...');
+      // Let interval tick once
+      assert(writes.length >= 1, 'Should have written at least once');
+      spinner.succeed('Done!');
+      const lastWrite = writes[writes.length - 1];
+      assert(lastWrite.includes('Done!'), 'succeed should output the text');
+    } finally {
+      process.stdout.write = origWrite;
+    }
+  });
+
+  test('UTILS: Spinner fail lifecycle', () => {
+    const { Spinner } = require('../src/utils.js');
+    const spinner = new Spinner();
+    const origWrite = process.stdout.write;
+    const writes = [];
+    process.stdout.write = (data) => { writes.push(data); return true; };
+    try {
+      spinner.start('Working...');
+      spinner.fail('Error!');
+      const lastWrite = writes[writes.length - 1];
+      assert(lastWrite.includes('Error!'), 'fail should output the text');
+    } finally {
+      process.stdout.write = origWrite;
+    }
+  });
+
+  test('UTILS: Spinner update changes text', () => {
+    const { Spinner } = require('../src/utils.js');
+    const spinner = new Spinner();
+    const origWrite = process.stdout.write;
+    process.stdout.write = () => true;
+    try {
+      spinner.start('Initial');
+      spinner.update('Updated');
+      assert(spinner._text === 'Updated', 'update should change text');
+      spinner.succeed('Done');
+    } finally {
+      process.stdout.write = origWrite;
+    }
+  });
+
+  // --- listInstalledPackages ---
+
+  test('UTILS: listInstalledPackages finds packages', () => {
+    const { listInstalledPackages } = require('../src/utils.js');
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-utils-'));
+    const nm = path.join(tmp, 'node_modules');
+    fs.mkdirSync(path.join(nm, 'express'), { recursive: true });
+    fs.mkdirSync(path.join(nm, 'lodash'), { recursive: true });
+    try {
+      const pkgs = listInstalledPackages(tmp);
+      assert(pkgs.includes('express'), 'Should find express');
+      assert(pkgs.includes('lodash'), 'Should find lodash');
+      assert(pkgs.length === 2, 'Should find 2 packages, got ' + pkgs.length);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  test('UTILS: listInstalledPackages handles scoped packages', () => {
+    const { listInstalledPackages } = require('../src/utils.js');
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-utils-'));
+    const nm = path.join(tmp, 'node_modules');
+    fs.mkdirSync(path.join(nm, '@babel', 'core'), { recursive: true });
+    fs.mkdirSync(path.join(nm, '@types', 'node'), { recursive: true });
+    fs.mkdirSync(path.join(nm, 'express'), { recursive: true });
+    try {
+      const pkgs = listInstalledPackages(tmp);
+      assert(pkgs.includes('@babel/core'), 'Should find @babel/core');
+      assert(pkgs.includes('@types/node'), 'Should find @types/node');
+      assert(pkgs.includes('express'), 'Should find express');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  test('UTILS: listInstalledPackages returns empty for no node_modules', () => {
+    const { listInstalledPackages } = require('../src/utils.js');
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-utils-'));
+    try {
+      const pkgs = listInstalledPackages(tmp);
+      assert(pkgs.length === 0, 'Should return empty array');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  test('UTILS: listInstalledPackages skips dot-files', () => {
+    const { listInstalledPackages } = require('../src/utils.js');
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-utils-'));
+    const nm = path.join(tmp, 'node_modules');
+    fs.mkdirSync(path.join(nm, '.cache'), { recursive: true });
+    fs.mkdirSync(path.join(nm, 'express'), { recursive: true });
+    try {
+      const pkgs = listInstalledPackages(tmp);
+      assert(!pkgs.includes('.cache'), '.cache should be skipped');
+      assert(pkgs.length === 1, 'Should find 1 package, got ' + pkgs.length);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- debugLog ---
+
+  test('UTILS: debugLog is silent without MUADDIB_DEBUG', () => {
+    const { debugLog } = require('../src/utils.js');
+    const origEnv = process.env.MUADDIB_DEBUG;
+    delete process.env.MUADDIB_DEBUG;
+    const origErr = console.error;
+    let called = false;
+    console.error = () => { called = true; };
+    try {
+      debugLog('test message');
+      assert(!called, 'debugLog should not output without MUADDIB_DEBUG');
+    } finally {
+      console.error = origErr;
+      if (origEnv !== undefined) process.env.MUADDIB_DEBUG = origEnv;
+    }
+  });
+
+  test('UTILS: debugLog outputs with MUADDIB_DEBUG set', () => {
+    const { debugLog } = require('../src/utils.js');
+    const origEnv = process.env.MUADDIB_DEBUG;
+    process.env.MUADDIB_DEBUG = '1';
+    const origErr = console.error;
+    const msgs = [];
+    console.error = (...args) => { msgs.push(args.join(' ')); };
+    try {
+      debugLog('test message');
+      assert(msgs.length > 0, 'debugLog should output with MUADDIB_DEBUG');
+      assert(msgs[0].includes('[DEBUG]'), 'Should include [DEBUG] prefix');
+      assert(msgs[0].includes('test message'), 'Should include the message');
+    } finally {
+      console.error = origErr;
+      if (origEnv !== undefined) process.env.MUADDIB_DEBUG = origEnv;
+      else delete process.env.MUADDIB_DEBUG;
+    }
+  });
+
+  // --- forEachSafeFile ---
+
+  test('UTILS: forEachSafeFile processes small files', () => {
+    const { forEachSafeFile } = require('../src/utils.js');
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-utils-'));
+    const f1 = path.join(tmp, 'a.js');
+    const f2 = path.join(tmp, 'b.js');
+    fs.writeFileSync(f1, 'const x = 1;');
+    fs.writeFileSync(f2, 'const y = 2;');
+    try {
+      const results = [];
+      forEachSafeFile([f1, f2], (file, content) => results.push({ file, content }));
+      assert(results.length === 2, 'Should process 2 files, got ' + results.length);
+      assert(results[0].content.includes('const x'), 'Should read content of first file');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  test('UTILS: forEachSafeFile skips non-existent files', () => {
+    const { forEachSafeFile } = require('../src/utils.js');
+    const results = [];
+    forEachSafeFile(['/nonexistent/file.js'], (file, content) => results.push(file));
+    assert(results.length === 0, 'Should skip non-existent files');
+  });
 }
 
 module.exports = { runUtilsTests };

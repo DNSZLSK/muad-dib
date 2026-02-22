@@ -22,6 +22,7 @@ const { runUtilsTests } = require('./utils.test');
 
 // IOC tests
 const { runUpdaterTests } = require('./ioc/updater.test');
+const { runScraperTests } = require('./ioc/scraper.test');
 
 // Report tests
 const { runWebhookTests } = require('./report/webhook.test');
@@ -33,6 +34,13 @@ const { runSandboxTests } = require('./sandbox/sandbox.test');
 const { runCliTests } = require('./integration/cli.test');
 const { runMonitorTests } = require('./integration/monitor.test');
 const { runDiffTests } = require('./integration/diff.test');
+const { runOutputFormatterTests } = require('./integration/output-formatter.test');
+const { runSafeInstallTests } = require('./integration/safe-install.test');
+const { runDownloadTests } = require('./integration/download.test');
+const { runDaemonWatchTests } = require('./integration/daemon-watch.test');
+const { runReportTests } = require('./integration/report.test');
+const { runHooksInitTests } = require('./integration/hooks-init.test');
+const { runSarifTests } = require('./integration/sarif.test');
 
 // Temporal analysis tests
 const { runTemporalAnalysisTests } = require('./temporal/temporal-analysis.test');
@@ -40,6 +48,7 @@ const { runTemporalAstDiffTests } = require('./temporal/temporal-ast-diff.test')
 const { runPublishAnomalyTests } = require('./temporal/publish-anomaly.test');
 const { runMaintainerChangeTests } = require('./temporal/maintainer-change.test');
 const { runCanaryTokensTests } = require('./temporal/canary-tokens.test');
+const { runTemporalRunnerTests } = require('./temporal/temporal-runner.test');
 
 // NOTE: ground-truth.test.js and evaluate.test.js are EXCLUDED from npm test
 // because they scan 51+ real samples (takes 20+ minutes).
@@ -92,6 +101,19 @@ async function timed(name, fn) {
   await timed('module-graph', runModuleGraphTests);
   await timed('github-actions', runGitHubActionsTests);
   await timed('npm-registry', runNpmRegistryTests);
+
+  // IOC scraper tests (Phase 3)
+  await timed('scraper', runScraperTests);
+
+  // New integration tests (Phase 2+3)
+  await timed('output-formatter', runOutputFormatterTests);
+  await timed('safe-install', runSafeInstallTests);
+  await timed('download', runDownloadTests);
+  await timed('temporal-runner', runTemporalRunnerTests);
+  await timed('daemon-watch', runDaemonWatchTests);
+  await timed('report', runReportTests);
+  await timed('hooks-init', runHooksInitTests);
+  await timed('sarif', runSarifTests);
 
   // Utility tests
   await timed('utils', runUtilsTests);

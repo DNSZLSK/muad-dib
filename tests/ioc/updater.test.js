@@ -593,6 +593,439 @@ asyncTest('BOOTSTRAP: ensureIOCs skips download when cache file exists and is la
 console.log('[SKIP] BOOTSTRAP: downloadAndDecompress rejects invalid URL gracefully (network)');
 addSkipped(1);
 
+// ============================================
+// MERGE IOCs TESTS
+// ============================================
+
+console.log('\n=== MERGE IOCs TESTS ===\n');
+
+test('MERGE: mergeIOCs deduplicates packages by name@version', () => {
+  const { mergeIOCs } = require('../../src/ioc/updater.js');
+  const target = { packages: [{ name: 'pkg-a', version: '1.0' }], pypi_packages: [], hashes: [], markers: [], files: [] };
+  const source = {
+    packages: [{ name: 'pkg-a', version: '1.0' }, { name: 'pkg-b', version: '2.0' }],
+    pypi_packages: [], hashes: [], markers: [], files: []
+  };
+  const added = mergeIOCs(target, source);
+  assert(added === 1, 'Should add 1 new package, got ' + added);
+  assert(target.packages.length === 2, 'Target should have 2 packages');
+});
+
+test('MERGE: mergeIOCs merges PyPI packages', () => {
+  const { mergeIOCs } = require('../../src/ioc/updater.js');
+  const target = { packages: [], pypi_packages: [], hashes: [], markers: [], files: [] };
+  const source = {
+    packages: [],
+    pypi_packages: [{ name: 'evil-py', version: '1.0' }, { name: 'bad-py', version: '*' }],
+    hashes: [], markers: [], files: []
+  };
+  mergeIOCs(target, source);
+  assert(target.pypi_packages.length === 2, 'Should have 2 PyPI packages');
+});
+
+test('MERGE: mergeIOCs merges hashes, markers, and files', () => {
+  const { mergeIOCs } = require('../../src/ioc/updater.js');
+  const target = { packages: [], pypi_packages: [], hashes: ['hash1'], markers: ['marker1'], files: ['file1'] };
+  const source = {
+    packages: [], pypi_packages: [],
+    hashes: ['hash1', 'hash2'], markers: ['marker2'], files: ['file1', 'file2']
+  };
+  mergeIOCs(target, source);
+  assert(target.hashes.length === 2, 'Should have 2 hashes (deduped), got ' + target.hashes.length);
+  assert(target.markers.length === 2, 'Should have 2 markers');
+  assert(target.files.length === 2, 'Should have 2 files (deduped)');
+});
+
+test('MERGE: mergeIOCs handles missing pypi_packages in target', () => {
+  const { mergeIOCs } = require('../../src/ioc/updater.js');
+  const target = { packages: [], hashes: [], markers: [], files: [] };
+  const source = { packages: [], pypi_packages: [{ name: 'test', version: '*' }], hashes: [], markers: [], files: [] };
+  mergeIOCs(target, source);
+  assert(target.pypi_packages.length === 1, 'Should create pypi_packages and add 1');
+});
+
+// ============================================
+// CREATE OPTIMIZED IOCs TESTS
+// ============================================
+
+console.log('\n=== CREATE OPTIMIZED IOCs TESTS ===\n');
+
+test('OPTIMIZED: createOptimizedIOCs produces Map/Set structures', () => {
+  const { createOptimizedIOCs } = require('../../src/ioc/updater.js');
+  const iocs = {
+    packages: [
+      { name: 'evil-pkg', version: '*' },
+      { name: 'evil-pkg', version: '1.0.0' },
+      { name: 'bad-lib', version: '2.0.0' }
+    ],
+    pypi_packages: [
+      { name: 'py-evil', version: '*' },
+      { name: 'py-bad', version: '1.0' }
+    ],
+    hashes: ['abc123', 'def456'],
+    markers: ['setup_bun.js'],
+    files: ['inject.js']
+  };
+  const opt = createOptimizedIOCs(iocs);
+  assert(opt.packagesMap instanceof Map, 'Should have packagesMap');
+  assert(opt.wildcardPackages instanceof Set, 'Should have wildcardPackages');
+  assert(opt.pypiPackagesMap instanceof Map, 'Should have pypiPackagesMap');
+  assert(opt.pypiWildcardPackages instanceof Set, 'Should have pypiWildcardPackages');
+  assert(opt.hashesSet instanceof Set, 'Should have hashesSet');
+  assert(opt.markersSet instanceof Set, 'Should have markersSet');
+  assert(opt.filesSet instanceof Set, 'Should have filesSet');
+  assert(opt.wildcardPackages.has('evil-pkg'), 'evil-pkg should be in wildcards');
+  assert(!opt.wildcardPackages.has('bad-lib'), 'bad-lib should NOT be in wildcards');
+  assert(opt.pypiWildcardPackages.has('py-evil'), 'py-evil should be in pypi wildcards');
+  assert(opt.packagesMap.get('evil-pkg').length === 2, 'evil-pkg should have 2 entries');
+  assert(opt.hashesSet.has('abc123'), 'Should have hash abc123');
+  assert(opt.markersSet.has('setup_bun.js'), 'Should have marker');
+  assert(opt.filesSet.has('inject.js'), 'Should have file');
+  assert(opt.packages.length === 3, 'Should preserve original packages array');
+});
+
+// ============================================
+// INVALIDATE CACHE TESTS
+// ============================================
+
+console.log('\n=== INVALIDATE CACHE TESTS ===\n');
+
+test('INVALIDATE: invalidateCache clears cached result', () => {
+  const { loadCachedIOCs, invalidateCache } = require('../../src/ioc/updater.js');
+  // First call populates cache
+  const first = loadCachedIOCs();
+  assert(first.packagesMap, 'First call should return optimized IOCs');
+  // Invalidate
+  invalidateCache();
+  // Second call should reload (we can't easily verify it reloaded, but it shouldn't crash)
+  const second = loadCachedIOCs();
+  assert(second.packagesMap, 'Should still return valid IOCs after invalidate');
+});
+
+// ============================================
+// EXPAND COMPACT IOCs EDGE CASES
+// ============================================
+
+console.log('\n=== EXPAND COMPACT EDGE CASES ===\n');
+
+test('EXPAND: expandCompactIOCs handles severity overrides', () => {
+  const { expandCompactIOCs } = require('../../src/ioc/updater.js');
+  const compact = {
+    defaultSeverity: 'critical',
+    wildcards: ['pkg-a'],
+    versioned: { 'pkg-b': ['1.0.0'] },
+    pypi_wildcards: [],
+    pypi_versioned: {},
+    hashes: [],
+    markers: [],
+    files: [],
+    severityOverrides: { 'pkg-b': { '1.0.0': 'high' } }
+  };
+  const expanded = expandCompactIOCs(compact);
+  const pkgA = expanded.packages.find(p => p.name === 'pkg-a');
+  const pkgB = expanded.packages.find(p => p.name === 'pkg-b');
+  assert(pkgA.severity === 'critical', 'pkg-a should use default severity');
+  assert(pkgB.severity === 'high', 'pkg-b should use override severity "high"');
+});
+
+test('EXPAND: expandCompactIOCs handles empty compact', () => {
+  const { expandCompactIOCs } = require('../../src/ioc/updater.js');
+  const compact = {};
+  const expanded = expandCompactIOCs(compact);
+  assert(expanded.packages.length === 0, 'Should have 0 packages');
+  assert(expanded.pypi_packages.length === 0, 'Should have 0 PyPI packages');
+  assert(expanded.hashes.length === 0, 'Should have 0 hashes');
+});
+
+test('EXPAND: expandCompactIOCs deduplicates wildcards', () => {
+  const { expandCompactIOCs } = require('../../src/ioc/updater.js');
+  const compact = {
+    defaultSeverity: 'critical',
+    wildcards: ['dup-pkg', 'dup-pkg', 'unique-pkg'],
+    versioned: {},
+    pypi_wildcards: [],
+    pypi_versioned: {},
+    hashes: [], markers: [], files: []
+  };
+  const expanded = expandCompactIOCs(compact);
+  const dupCount = expanded.packages.filter(p => p.name === 'dup-pkg').length;
+  assert(dupCount === 1, 'Duplicate wildcards should be deduped, got ' + dupCount);
+});
+
+test('COMPACT: generateCompactIOCs skips __proto__ keys', () => {
+  const { generateCompactIOCs } = require('../../src/ioc/updater.js');
+  const input = {
+    packages: [
+      { name: '__proto__', version: '1.0', severity: 'high' },
+      { name: 'normal-pkg', version: '*', severity: 'critical' }
+    ],
+    pypi_packages: [], hashes: [], markers: [], files: []
+  };
+  const compact = generateCompactIOCs(input);
+  assert(!compact.versioned['__proto__'], '__proto__ should be skipped in versioned');
+  assert(compact.wildcards.includes('normal-pkg'), 'normal-pkg should be in wildcards');
+});
+
+// ============================================
+// BOOTSTRAP COVERAGE TESTS
+// ============================================
+
+console.log('\n=== BOOTSTRAP COVERAGE TESTS ===\n');
+
+const { isAllowedRedirect: bootstrapIsAllowedRedirect, ensureIOCs: bootstrapEnsureIOCs, downloadAndDecompress, IOCS_PATH: BOOTSTRAP_IOCS_PATH, HOME_DATA_DIR: BOOTSTRAP_HOME_DATA_DIR, MIN_IOCS_SIZE: BOOTSTRAP_MIN_IOCS_SIZE } = require('../../src/ioc/bootstrap.js');
+
+test('BOOTSTRAP-COV: isAllowedRedirect allows github.com', () => {
+  assert(bootstrapIsAllowedRedirect('https://github.com/some/path') === true, 'github.com should be allowed');
+});
+
+test('BOOTSTRAP-COV: isAllowedRedirect allows objects.githubusercontent.com', () => {
+  assert(bootstrapIsAllowedRedirect('https://objects.githubusercontent.com/some/path') === true, 'objects.githubusercontent.com should be allowed');
+});
+
+test('BOOTSTRAP-COV: isAllowedRedirect allows release-assets.githubusercontent.com', () => {
+  assert(bootstrapIsAllowedRedirect('https://release-assets.githubusercontent.com/some/path') === true, 'release-assets.githubusercontent.com should be allowed');
+});
+
+test('BOOTSTRAP-COV: isAllowedRedirect blocks HTTP protocol', () => {
+  assert(bootstrapIsAllowedRedirect('http://github.com/path') === false, 'HTTP should be blocked');
+});
+
+test('BOOTSTRAP-COV: isAllowedRedirect blocks unknown domain', () => {
+  assert(bootstrapIsAllowedRedirect('https://evil.com/path') === false, 'Unknown domain should be blocked');
+});
+
+test('BOOTSTRAP-COV: isAllowedRedirect blocks invalid URL', () => {
+  assert(bootstrapIsAllowedRedirect('not-a-url') === false, 'Invalid URL should be blocked');
+});
+
+test('BOOTSTRAP-COV: isAllowedRedirect blocks empty string', () => {
+  assert(bootstrapIsAllowedRedirect('') === false, 'Empty string should be blocked');
+});
+
+await asyncTest('BOOTSTRAP-COV: ensureIOCs returns true when IOC file exists and is large enough', async () => {
+  const origExists = fs.existsSync;
+  const origStat = fs.statSync;
+  fs.existsSync = (p) => {
+    if (p === BOOTSTRAP_HOME_DATA_DIR) return true;
+    if (p === BOOTSTRAP_IOCS_PATH) return true;
+    return origExists(p);
+  };
+  fs.statSync = (p) => {
+    if (p === BOOTSTRAP_IOCS_PATH) return { size: 10_000_000 }; // 10MB > MIN_IOCS_SIZE
+    return origStat(p);
+  };
+  try {
+    const result = await bootstrapEnsureIOCs();
+    assert(result === true, 'Should return true when IOCs exist');
+  } finally {
+    fs.existsSync = origExists;
+    fs.statSync = origStat;
+  }
+});
+
+await asyncTest('BOOTSTRAP-COV: ensureIOCs handles download failure gracefully', async () => {
+  const origExists = fs.existsSync;
+  const origMkdir = fs.mkdirSync;
+  const origStderr = process.stderr.write;
+  const stderrOutput = [];
+  fs.existsSync = (p) => {
+    if (p === BOOTSTRAP_HOME_DATA_DIR) return true;
+    if (p === BOOTSTRAP_IOCS_PATH) return false; // IOCs don't exist
+    return origExists(p);
+  };
+  process.stderr.write = (msg) => { stderrOutput.push(msg); };
+  try {
+    const result = await bootstrapEnsureIOCs();
+    // Should return false since download fails (no network mock)
+    assert(result === false, 'Should return false when download fails');
+  } finally {
+    fs.existsSync = origExists;
+    process.stderr.write = origStderr;
+  }
+});
+
+await asyncTest('BOOTSTRAP-COV: downloadAndDecompress rejects on invalid URL', async () => {
+  try {
+    await downloadAndDecompress('https://localhost:1/nonexistent', path.join(os.tmpdir(), 'test-iocs-' + Date.now() + '.json'));
+    assert(false, 'Should have thrown');
+  } catch (err) {
+    assert(err instanceof Error, 'Should throw an Error');
+  }
+});
+
+// ============================================
+// UPDATER COVERAGE TESTS
+// ============================================
+
+console.log('\n=== UPDATER COVERAGE TESTS ===\n');
+
+test('UPDATER-COV: generateCompactIOCs handles severity overrides', () => {
+  const { generateCompactIOCs } = require('../../src/ioc/updater.js');
+  const fullIOCs = {
+    packages: [
+      { name: 'pkg1', version: '*', severity: 'critical' },
+      { name: 'pkg2', version: '1.0', severity: 'high' },
+      { name: 'pkg3', version: '2.0', severity: 'medium' }
+    ],
+    pypi_packages: []
+  };
+  const compact = generateCompactIOCs(fullIOCs);
+  assert(compact.wildcards.includes('pkg1'), 'pkg1 should be in wildcards');
+  assert(compact.versioned['pkg2'] !== undefined, 'pkg2 should be in versioned');
+  assert(compact.severityOverrides['pkg2'] !== undefined, 'pkg2 should have severity override');
+  assert(compact.severityOverrides['pkg2']['1.0'] === 'high', 'pkg2 1.0 should be high');
+  assert(compact.severityOverrides['pkg3'] !== undefined, 'pkg3 should have severity override');
+  assert(compact.severityOverrides['pkg3']['2.0'] === 'medium', 'pkg3 2.0 should be medium');
+  // critical severity should NOT appear in overrides (it's the default)
+  assert(!compact.severityOverrides['pkg1'], 'pkg1 (critical) should not have severity override');
+});
+
+test('UPDATER-COV: generateCompactIOCs handles PyPI packages', () => {
+  const { generateCompactIOCs } = require('../../src/ioc/updater.js');
+  const fullIOCs = {
+    packages: [],
+    pypi_packages: [
+      { name: 'py-evil', version: '*' },
+      { name: 'py-bad', version: '1.0' }
+    ]
+  };
+  const compact = generateCompactIOCs(fullIOCs);
+  assert(compact.pypi_wildcards.includes('py-evil'), 'Should have pypi wildcard');
+  assert(compact.pypi_versioned['py-bad'] !== undefined, 'Should have pypi versioned');
+  assert(compact.pypi_versioned['py-bad'][0] === '1.0', 'Should have pypi version 1.0');
+});
+
+test('UPDATER-COV: generateCompactIOCs skips dangerous keys in severity overrides', () => {
+  const { generateCompactIOCs } = require('../../src/ioc/updater.js');
+  const fullIOCs = {
+    packages: [
+      { name: '__proto__', version: '1.0', severity: 'high' },
+      { name: 'constructor', version: '2.0', severity: 'medium' },
+      { name: 'prototype', version: '3.0', severity: 'high' },
+      { name: 'safe-pkg', version: '1.0', severity: 'high' }
+    ],
+    pypi_packages: []
+  };
+  const compact = generateCompactIOCs(fullIOCs);
+  // __proto__, constructor, prototype should be skipped from severity_overrides
+  assert(!compact.severityOverrides || !compact.severityOverrides['__proto__'], 'Should skip __proto__ in severity overrides');
+  assert(!compact.severityOverrides || !compact.severityOverrides['constructor'], 'Should skip constructor in severity overrides');
+  assert(!compact.severityOverrides || !compact.severityOverrides['prototype'], 'Should skip prototype in severity overrides');
+  // safe-pkg should still have its override
+  assert(compact.severityOverrides['safe-pkg'] !== undefined, 'safe-pkg should have severity override');
+  assert(compact.severityOverrides['safe-pkg']['1.0'] === 'high', 'safe-pkg 1.0 should be high');
+});
+
+test('UPDATER-COV: generateCompactIOCs skips dangerous version keys too', () => {
+  const { generateCompactIOCs } = require('../../src/ioc/updater.js');
+  const fullIOCs = {
+    packages: [
+      { name: 'some-pkg', version: '__proto__', severity: 'high' },
+      { name: 'other-pkg', version: 'constructor', severity: 'medium' }
+    ],
+    pypi_packages: []
+  };
+  const compact = generateCompactIOCs(fullIOCs);
+  // Packages with dangerous version keys should be skipped from severity_overrides
+  assert(!compact.severityOverrides || !compact.severityOverrides['some-pkg'], 'Should skip pkg with __proto__ version from severity overrides');
+  assert(!compact.severityOverrides || !compact.severityOverrides['other-pkg'], 'Should skip pkg with constructor version from severity overrides');
+});
+
+test('UPDATER-COV: loadCachedIOCs compact file fallback path', () => {
+  const { invalidateCache, loadCachedIOCs } = require('../../src/ioc/updater.js');
+  // Invalidate cache to force reload
+  invalidateCache();
+
+  const origExistsSync = fs.existsSync;
+  const origReadFileSync = fs.readFileSync;
+
+  // Mock fs.existsSync to simulate: LOCAL_IOC_FILE does not exist, LOCAL_COMPACT_FILE exists
+  const LOCAL_IOC_FILE = path.join(__dirname, '..', '..', 'src', 'ioc', 'data', 'iocs.json');
+  const LOCAL_COMPACT_FILE = path.join(__dirname, '..', '..', 'src', 'ioc', 'data', 'iocs-compact.json');
+
+  fs.existsSync = (p) => {
+    if (p === LOCAL_IOC_FILE) return false; // Force compact fallback
+    return origExistsSync(p);
+  };
+
+  try {
+    const iocs = loadCachedIOCs();
+    assert(iocs.packagesMap instanceof Map, 'Should return packagesMap from compact fallback');
+    assert(iocs.wildcardPackages instanceof Set, 'Should return wildcardPackages from compact fallback');
+  } finally {
+    fs.existsSync = origExistsSync;
+    // Invalidate cache so mocked results don't affect other tests
+    invalidateCache();
+  }
+});
+
+test('UPDATER-COV: loadCachedIOCs handles compact file load error', () => {
+  const { invalidateCache, loadCachedIOCs } = require('../../src/ioc/updater.js');
+  invalidateCache();
+
+  const origExistsSync = fs.existsSync;
+  const origReadFileSync = fs.readFileSync;
+  const origLog = console.log;
+  const logs = [];
+
+  const LOCAL_IOC_FILE = path.join(__dirname, '..', '..', 'src', 'ioc', 'data', 'iocs.json');
+  const LOCAL_COMPACT_FILE = path.join(__dirname, '..', '..', 'src', 'ioc', 'data', 'iocs-compact.json');
+
+  fs.existsSync = (p) => {
+    if (p === LOCAL_IOC_FILE) return false; // Force compact fallback
+    return origExistsSync(p);
+  };
+  fs.readFileSync = (p, enc) => {
+    if (p === LOCAL_COMPACT_FILE) throw new Error('test compact read error');
+    return origReadFileSync(p, enc);
+  };
+  console.log = (msg) => logs.push(msg);
+
+  try {
+    const iocs = loadCachedIOCs();
+    assert(iocs.packagesMap instanceof Map, 'Should still return valid IOCs on compact error');
+    assert(logs.some(l => l.includes('Failed to load compact IOC database')), 'Should log compact load error');
+  } finally {
+    fs.existsSync = origExistsSync;
+    fs.readFileSync = origReadFileSync;
+    console.log = origLog;
+    invalidateCache();
+  }
+});
+
+test('UPDATER-COV: loadCachedIOCs handles cached IOC file load error', () => {
+  const { invalidateCache, loadCachedIOCs } = require('../../src/ioc/updater.js');
+  invalidateCache();
+
+  const origExistsSync = fs.existsSync;
+  const origReadFileSync = fs.readFileSync;
+  const origLog = console.log;
+  const logs = [];
+
+  const CACHE_IOC_FILE = path.join(os.homedir(), '.muaddib', 'data', 'iocs.json');
+
+  fs.existsSync = (p) => {
+    if (p === CACHE_IOC_FILE) return true; // Simulate cache file exists
+    return origExistsSync(p);
+  };
+  fs.readFileSync = (p, enc) => {
+    if (p === CACHE_IOC_FILE) throw new Error('test cache read error');
+    return origReadFileSync(p, enc);
+  };
+  console.log = (msg) => logs.push(msg);
+
+  try {
+    const iocs = loadCachedIOCs();
+    assert(iocs.packagesMap instanceof Map, 'Should still return valid IOCs on cache error');
+    assert(logs.some(l => l.includes('Failed to load cached IOCs')), 'Should log cached IOC load error');
+  } finally {
+    fs.existsSync = origExistsSync;
+    fs.readFileSync = origReadFileSync;
+    console.log = origLog;
+    invalidateCache();
+  }
+});
+
 }
 
 module.exports = { runUpdaterTests };
