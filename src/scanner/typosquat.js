@@ -311,6 +311,9 @@ function findTyposquatMatch(name) {
     // Ignore si le package populaire est trop court
     if (popular.length < MIN_PACKAGE_LENGTH) continue;
 
+    // Length pre-filter: Levenshtein distance >= |len(a) - len(b)|
+    if (Math.abs(nameLower.length - popularLower.length) > 2) continue;
+
     const distance = levenshteinDistance(nameLower, popularLower);
 
     // Distance de 1 = tres suspect (une seule lettre de difference)
@@ -478,6 +481,9 @@ function findPyPITyposquatMatch(name) {
 
     // Skip short popular packages
     if (popularNorm.length < MIN_PYPI_LENGTH) continue;
+
+    // Length pre-filter: Levenshtein distance >= |len(a) - len(b)|
+    if (Math.abs(normalized.length - popularNorm.length) > 2) continue;
 
     const distance = levenshteinDistance(normalized, popularNorm);
 
