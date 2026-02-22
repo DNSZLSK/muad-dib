@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **P1: Version check suggested downgrade** (`bin/muaddib.js`): Used string inequality (`!==`) instead of semver comparison, so `2.2.20 -> 2.2.19` was displayed as an "update". Now uses proper major.minor.patch comparison.
 - **P2: `--fail-on` accepted invalid levels** (`bin/muaddib.js`): Invalid values like `--fail-on foo` silently fell back to `high`. Now validates against `critical|high|medium|low` and exits with error. Case-insensitive (`HIGH` works).
 - **P3: Raw ANSI escape codes in `report --now`** (`bin/muaddib.js`): `\x1b[33m` codes leaked into non-TTY output. Now uses `process.stdout.isTTY` guard.
+- **CI self-scan false positive** (`src/scanner/ast-detectors.js`): `binary_dropper` rule (MUADDIB-AST-016) fired on bare `chmodSync(0o755)` without exec/spawn co-occurrence, flagging legitimate git hook creation in `hooks-init.js` as CRITICAL. Now requires chmod + exec/spawn in the same file (compound detection), matching the documented rule intent.
 
 ### Changed
 - **VS Code Extension** (21 fixes):
