@@ -1119,6 +1119,157 @@ async function sendDailyReport() {
   stats.lastDailyReportDate = getParisDateString();
 }
 
+// --- CLI report helpers (muaddib report --now / --status) ---
+
+/**
+ * Read raw state file (without restoring into stats).
+ */
+function loadStateRaw() {
+  try {
+    const raw = fs.readFileSync(STATE_FILE, 'utf8');
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Reconstruct daily report data from persisted files (no in-memory stats needed).
+ * Used by `muaddib report --now` to send a report from a separate CLI process.
+ */
+function buildReportFromDisk() {
+  const scanData = loadScanStats();
+  const stateRaw = loadStateRaw();
+  const lastDate = stateRaw.lastDailyReportDate || null;
+
+  // Filter daily entries since last report
+  const sinceDays = lastDate
+    ? scanData.daily.filter(d => d.date > lastDate)
+    : scanData.daily;
+
+  // Aggregate counters
+  const agg = { scanned: 0, clean: 0, suspect: 0 };
+  for (const d of sinceDays) {
+    agg.scanned += d.scanned || 0;
+    agg.clean += d.clean || 0;
+    agg.suspect += d.suspect || 0;
+  }
+
+  // Load detections since last report for top suspects
+  const detections = loadDetections();
+  const recentDetections = lastDate
+    ? detections.detections.filter(d => d.first_seen_at && d.first_seen_at.slice(0, 10) > lastDate)
+    : detections.detections;
+
+  const top3 = recentDetections
+    .slice()
+    .sort((a, b) => (b.findings ? b.findings.length : 0) - (a.findings ? a.findings.length : 0))
+    .slice(0, 3);
+
+  return { agg, top3, hasData: agg.scanned > 0 };
+}
+
+/**
+ * Build a Discord embed from disk data (same format as buildDailyReportEmbed).
+ */
+function buildReportEmbedFromDisk() {
+  const { agg, top3, hasData } = buildReportFromDisk();
+  if (!hasData) return null;
+
+  const top3Text = top3.length > 0
+    ? top3.map((a, i) => `${i + 1}. **${a.ecosystem}/${a.package}@${a.version}** — ${a.findings ? a.findings.length : 0} finding(s)`).join('\n')
+    : 'None';
+
+  const now = new Date();
+  const readableTime = now.toISOString().replace('T', ' ').replace(/\.\d+Z$/, ' UTC');
+
+  return {
+    embeds: [{
+      title: '\uD83D\uDCCA MUAD\'DIB Daily Report (manual)',
+      color: 0x3498db,
+      fields: [
+        { name: 'Packages Scanned', value: `${agg.scanned}`, inline: true },
+        { name: 'Clean', value: `${agg.clean}`, inline: true },
+        { name: 'Suspects', value: `${agg.suspect}`, inline: true },
+        { name: 'Top Suspects', value: top3Text, inline: false }
+      ],
+      footer: {
+        text: `MUAD'DIB - Manual report | ${readableTime}`
+      },
+      timestamp: now.toISOString()
+    }]
+  };
+}
+
+/**
+ * Force send a daily report from persisted data.
+ * Returns { sent: boolean, message: string }.
+ */
+async function sendReportNow() {
+  const url = getWebhookUrl();
+  if (!url) {
+    return { sent: false, message: 'MUADDIB_WEBHOOK_URL not configured' };
+  }
+
+  const payload = buildReportEmbedFromDisk();
+  if (!payload) {
+    return { sent: false, message: 'No data to report' };
+  }
+
+  try {
+    await sendWebhook(url, payload, { rawPayload: true });
+  } catch (err) {
+    return { sent: false, message: `Webhook failed: ${err.message}` };
+  }
+
+  // Update lastDailyReportDate on disk
+  const stateRaw = loadStateRaw();
+  const state = {
+    npmLastPackage: stateRaw.npmLastPackage || '',
+    pypiLastPackage: stateRaw.pypiLastPackage || ''
+  };
+  stats.lastDailyReportDate = getParisDateString();
+  saveState(state);
+
+  return { sent: true, message: 'Daily report sent' };
+}
+
+/**
+ * Get report status for `muaddib report --status`.
+ */
+function getReportStatus() {
+  const stateRaw = loadStateRaw();
+  const lastDate = stateRaw.lastDailyReportDate || null;
+
+  // Count packages scanned since last report
+  const scanData = loadScanStats();
+  const sinceDays = lastDate
+    ? scanData.daily.filter(d => d.date > lastDate)
+    : scanData.daily;
+
+  let scannedSince = 0;
+  for (const d of sinceDays) {
+    scannedSince += d.scanned || 0;
+  }
+
+  // Compute next report time
+  const today = getParisDateString();
+  const parisHour = getParisHour();
+  let nextReport;
+  if (lastDate === today || (lastDate !== today && parisHour >= DAILY_REPORT_HOUR)) {
+    // Already sent today OR past 08:00 but not sent (will fire soon if monitor runs)
+    if (lastDate === today) {
+      nextReport = 'Tomorrow 08:00 (Europe/Paris)';
+    } else {
+      nextReport = 'Today 08:00 (Europe/Paris) — pending, monitor must be running';
+    }
+  } else {
+    nextReport = 'Today 08:00 (Europe/Paris)';
+  }
+
+  return { lastDailyReportDate: lastDate, scannedSince, nextReport };
+}
+
 // --- npm polling ---
 
 /**
@@ -1588,7 +1739,11 @@ module.exports = {
   getDetectionStats,
   SCAN_STATS_FILE,
   loadScanStats,
-  updateScanStats
+  updateScanStats,
+  buildReportFromDisk,
+  buildReportEmbedFromDisk,
+  sendReportNow,
+  getReportStatus
 };
 
 // Standalone entry point: node src/monitor.js

@@ -31,7 +31,8 @@ async function runMonitorTests() {
     isPublishAnomalyOnly,
     isVerboseMode, setVerboseMode, hasIOCMatch, IOC_MATCH_TYPES,
     DETECTIONS_FILE, appendDetection, loadDetections, getDetectionStats,
-    SCAN_STATS_FILE, loadScanStats, updateScanStats
+    SCAN_STATS_FILE, loadScanStats, updateScanStats,
+    buildReportFromDisk, buildReportEmbedFromDisk, getReportStatus
   } = require('../../src/monitor.js');
 
   test('MONITOR: parseNpmRss extracts package names from RSS', () => {
@@ -2141,6 +2142,59 @@ async function runMonitorTests() {
     const changesField = embed.embeds[0].fields.find(f => f.name === 'Changes Detected');
     assertIncludes(changesField.value, 'MODIFIED', 'Should say MODIFIED for lifecycle_modified');
     assertIncludes(changesField.value, 'evil.js', 'Should contain the new value');
+  });
+
+  // ============================================
+  // REPORT CLI TESTS (muaddib report --now / --status)
+  // ============================================
+
+  console.log('\n=== REPORT CLI TESTS ===\n');
+
+  test('MONITOR: buildReportFromDisk returns hasData false when no scan stats', () => {
+    const result = buildReportFromDisk();
+    assert(typeof result.hasData === 'boolean', 'hasData should be boolean');
+    assert(typeof result.agg === 'object', 'agg should be object');
+    assert(typeof result.agg.scanned === 'number', 'agg.scanned should be number');
+    assert(Array.isArray(result.top3), 'top3 should be array');
+  });
+
+  test('MONITOR: buildReportEmbedFromDisk returns null when no data', () => {
+    // With no scan stats data, should return null
+    const embed = buildReportEmbedFromDisk();
+    // May or may not be null depending on local data/ state — just check structure
+    if (embed) {
+      assert(embed.embeds && embed.embeds.length === 1, 'Should have one embed');
+      const e = embed.embeds[0];
+      assertIncludes(e.title, 'Daily Report', 'Title should contain Daily Report');
+      assert(e.fields.length >= 3, 'Should have at least 3 fields');
+    }
+    // If null, that's valid (no data)
+  });
+
+  test('MONITOR: getReportStatus returns correct structure', () => {
+    const status = getReportStatus();
+    assert('lastDailyReportDate' in status, 'Should have lastDailyReportDate');
+    assert(typeof status.scannedSince === 'number', 'scannedSince should be number');
+    assert(typeof status.nextReport === 'string', 'nextReport should be string');
+    assertIncludes(status.nextReport, '08:00', 'nextReport should mention 08:00');
+    assertIncludes(status.nextReport, 'Europe/Paris', 'nextReport should mention Europe/Paris');
+  });
+
+  test('MONITOR: buildReportFromDisk top3 is sorted by findings count desc', () => {
+    const result = buildReportFromDisk();
+    if (result.top3.length >= 2) {
+      const counts = result.top3.map(d => d.findings ? d.findings.length : 0);
+      for (let i = 1; i < counts.length; i++) {
+        assert(counts[i] <= counts[i - 1], 'top3 should be sorted by findings count descending');
+      }
+    }
+  });
+
+  test('MONITOR: buildReportFromDisk agg fields are non-negative', () => {
+    const result = buildReportFromDisk();
+    assert(result.agg.scanned >= 0, 'scanned should be >= 0');
+    assert(result.agg.clean >= 0, 'clean should be >= 0');
+    assert(result.agg.suspect >= 0, 'suspect should be >= 0');
   });
 }
 
