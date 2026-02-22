@@ -375,9 +375,13 @@ function fetchBufferWithProgress(url, label, redirectCount = 0) {
       });
     });
 
-    req.on('error', reject);
+    req.on('error', (err) => {
+      spinner.fail('Download failed: ' + err.message);
+      reject(err);
+    });
     req.setTimeout(300000, () => {
       req.destroy();
+      spinner.fail('Download timed out');
       reject(new Error('Timeout downloading ' + label));
     });
 
@@ -722,36 +726,41 @@ async function scrapeOSVDataDump() {
     let skippedCount = 0;
 
     const spinner = new Spinner();
-    spinner.start('Parsing npm entries... 0/' + total);
+    try {
+      spinner.start('Parsing npm entries... 0/' + total);
 
-    for (let i = 0; i < entries.length; i++) {
-      const entry = entries[i];
-      const name = entry.entryName;
+      for (let i = 0; i < entries.length; i++) {
+        const entry = entries[i];
+        const name = entry.entryName;
 
-      // Only process MAL-*.json files (malware), skip GHSA-*, CVE-*, PYSEC-* etc.
-      if (!name.startsWith('MAL-') || !name.endsWith('.json')) {
-        skippedCount++;
-      } else {
-        try {
-          const content = entry.getData().toString('utf8');
-          const vuln = JSON.parse(content);
-          const parsed = parseOSVEntry(vuln, 'osv-malicious');
-          for (const p of parsed) packages.push(p);
+        // Only process MAL-*.json files (malware), skip GHSA-*, CVE-*, PYSEC-* etc.
+        if (!name.startsWith('MAL-') || !name.endsWith('.json')) {
+          skippedCount++;
+        } else {
+          try {
+            const content = entry.getData().toString('utf8');
+            const vuln = JSON.parse(content);
+            const parsed = parseOSVEntry(vuln, 'osv-malicious');
+            for (const p of parsed) packages.push(p);
 
-          // Track known IDs so OSSF can skip them
-          knownIds.add(vuln.id || path.basename(name, '.json'));
-          malCount++;
-        } catch {
-          // Skip unparseable entries
+            // Track known IDs so OSSF can skip them
+            knownIds.add(vuln.id || path.basename(name, '.json'));
+            malCount++;
+          } catch {
+            // Skip unparseable entries
+          }
+        }
+
+        if ((i + 1) % 1000 === 0 || i === entries.length - 1) {
+          spinner.update('Parsing npm entries... ' + (i + 1) + '/' + total);
         }
       }
 
-      if ((i + 1) % 1000 === 0 || i === entries.length - 1) {
-        spinner.update('Parsing npm entries... ' + (i + 1) + '/' + total);
-      }
+      spinner.succeed('Parsed npm entries: ' + malCount + ' MAL-* (' + skippedCount + ' skipped) \u2192 ' + packages.length + ' packages');
+    } catch (innerErr) {
+      spinner.fail('Parsing npm entries failed');
+      throw innerErr;
     }
-
-    spinner.succeed('Parsed npm entries: ' + malCount + ' MAL-* (' + skippedCount + ' skipped) \u2192 ' + packages.length + ' packages');
   } catch (e) {
     console.log('[SCRAPER]   Error: ' + e.message);
   }
@@ -778,33 +787,38 @@ async function scrapeOSVPyPIDataDump() {
     let skippedCount = 0;
 
     const spinner = new Spinner();
-    spinner.start('Parsing PyPI entries... 0/' + total);
+    try {
+      spinner.start('Parsing PyPI entries... 0/' + total);
 
-    for (let i = 0; i < entries.length; i++) {
-      const entry = entries[i];
-      const name = entry.entryName;
+      for (let i = 0; i < entries.length; i++) {
+        const entry = entries[i];
+        const name = entry.entryName;
 
-      // Only process MAL-*.json files (malware)
-      if (!name.startsWith('MAL-') || !name.endsWith('.json')) {
-        skippedCount++;
-      } else {
-        try {
-          const content = entry.getData().toString('utf8');
-          const vuln = JSON.parse(content);
-          const parsed = parseOSVEntry(vuln, 'osv-malicious-pypi', 'PyPI');
-          for (const p of parsed) packages.push(p);
-          malCount++;
-        } catch {
-          // Skip unparseable entries
+        // Only process MAL-*.json files (malware)
+        if (!name.startsWith('MAL-') || !name.endsWith('.json')) {
+          skippedCount++;
+        } else {
+          try {
+            const content = entry.getData().toString('utf8');
+            const vuln = JSON.parse(content);
+            const parsed = parseOSVEntry(vuln, 'osv-malicious-pypi', 'PyPI');
+            for (const p of parsed) packages.push(p);
+            malCount++;
+          } catch {
+            // Skip unparseable entries
+          }
+        }
+
+        if ((i + 1) % 1000 === 0 || i === entries.length - 1) {
+          spinner.update('Parsing PyPI entries... ' + (i + 1) + '/' + total);
         }
       }
 
-      if ((i + 1) % 1000 === 0 || i === entries.length - 1) {
-        spinner.update('Parsing PyPI entries... ' + (i + 1) + '/' + total);
-      }
+      spinner.succeed('Parsed PyPI entries: ' + malCount + ' MAL-* (' + skippedCount + ' skipped) \u2192 ' + packages.length + ' packages');
+    } catch (innerErr) {
+      spinner.fail('Parsing PyPI entries failed');
+      throw innerErr;
     }
-
-    spinner.succeed('Parsed PyPI entries: ' + malCount + ' MAL-* (' + skippedCount + ' skipped) \u2192 ' + packages.length + ' packages');
   } catch (e) {
     console.log('[SCRAPER]   Error: ' + e.message);
   }
