@@ -1,26 +1,40 @@
+# Test & evaluation data (CRITICAL: contains malware samples)
 tests/
 test/
-vscode-extension/
-docs/
+datasets/
+
+# Build & cache
+.muaddib-cache/
+coverage/
+metrics/
+data/
+
+# Infrastructure
+docker/
+deploy/
+hooks/
 .github/
 .git/
-.muaddib-cache/
+.claude/
+vscode-extension/
+
+# Docs (keep README.md only)
+docs/
 *.md
 !README.md
-rapport.html
-results.sarif
-index.html
-deploy/
-coverage/
-.claude/
-src/ioc/data/iocs.json
-data/
-hooks/
+
+# Config & artifacts
 eslint.config.mjs
 action.yml
 .pre-commit-hooks.yaml
+rapport.html
+results.sarif
+index.html
+src/ioc/data/iocs.json
 README.fr.md
-metrics/
+
+# Windows / temp artifacts
 nul
-datasets/holdout-v2/
-datasets/holdout-v3/
+tmp-test-pack.js
+testssampleslink-deppackage.json
+.gitattributes
