@@ -1150,11 +1150,12 @@ function buildReportFromDisk() {
   const stateRaw = loadStateRaw();
   const lastDate = stateRaw.lastDailyReportDate || null;
 
-  // If no report ever sent (null), include ALL daily entries (first report = full history).
-  // After first send, lastDailyReportDate is set and subsequent reports show delta only.
+  // First report (null): show today only (>= today).
+  // Subsequent reports: show days after last report (> lastDate).
+  const today = getParisDateString();
   const sinceDays = lastDate
     ? scanData.daily.filter(d => d.date > lastDate)
-    : scanData.daily;
+    : scanData.daily.filter(d => d.date >= today);
 
   // Aggregate counters
   const agg = { scanned: 0, clean: 0, suspect: 0 };
@@ -1168,7 +1169,7 @@ function buildReportFromDisk() {
   const detections = loadDetections();
   const recentDetections = lastDate
     ? detections.detections.filter(d => d.first_seen_at && d.first_seen_at.slice(0, 10) > lastDate)
-    : detections.detections;
+    : detections.detections.filter(d => d.first_seen_at && d.first_seen_at.slice(0, 10) >= today);
 
   const top3 = recentDetections
     .slice()
@@ -1250,11 +1251,12 @@ function getReportStatus() {
   const stateRaw = loadStateRaw();
   const lastDate = stateRaw.lastDailyReportDate || null;
 
-  // Count packages scanned since last report (all history if never sent)
+  // Count packages scanned since last report (today only if never sent)
   const scanData = loadScanStats();
+  const today = getParisDateString();
   const sinceDays = lastDate
     ? scanData.daily.filter(d => d.date > lastDate)
-    : scanData.daily;
+    : scanData.daily.filter(d => d.date >= today);
 
   let scannedSince = 0;
   for (const d of sinceDays) {
@@ -1262,7 +1264,6 @@ function getReportStatus() {
   }
 
   // Compute next report time
-  const today = getParisDateString();
   const parisHour = getParisHour();
   let nextReport;
   if (lastDate === today || (lastDate !== today && parisHour >= DAILY_REPORT_HOUR)) {
