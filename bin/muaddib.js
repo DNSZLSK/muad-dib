@@ -812,6 +812,34 @@ if (command === 'version' || command === '--version' || command === '-v') {
     console.error('[ERROR]', err.message);
     process.exit(1);
   });
+} else if (command === 'report') {
+  // Hidden/internal — not in --help
+  if (options.includes('--now')) {
+    const { sendReportNow } = require('../src/monitor.js');
+    sendReportNow().then(result => {
+      if (result.sent) {
+        console.log(`\n  \x1b[32m\u2713\x1b[0m ${result.message}\n`);
+      } else {
+        console.log(`\n  \x1b[33m!\x1b[0m ${result.message}\n`);
+      }
+      process.exit(result.sent ? 0 : 1);
+    }).catch(err => {
+      console.error('[ERROR]', err.message);
+      process.exit(1);
+    });
+  } else if (options.includes('--status')) {
+    const { getReportStatus } = require('../src/monitor.js');
+    const status = getReportStatus();
+    console.log('\n  MUAD\'DIB Report Status\n');
+    console.log(`  Last report sent:     ${status.lastDailyReportDate || 'Never'}`);
+    console.log(`  Packages scanned since: ${status.scannedSince}`);
+    console.log(`  Next scheduled report:  ${status.nextReport}`);
+    console.log('');
+    process.exit(0);
+  } else {
+    console.log('Usage: muaddib report --now | --status');
+    process.exit(1);
+  }
 } else if (command === 'help') {
   console.log(helpText);
   process.exit(0);
