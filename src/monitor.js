@@ -1148,11 +1148,13 @@ function loadStateRaw() {
 function buildReportFromDisk() {
   const scanData = loadScanStats();
   const stateRaw = loadStateRaw();
-  // Default to today if no report ever sent (avoids summing entire history)
-  const lastDate = stateRaw.lastDailyReportDate || getParisDateString();
+  const lastDate = stateRaw.lastDailyReportDate || null;
 
-  // Filter daily entries strictly AFTER last report date
-  const sinceDays = scanData.daily.filter(d => d.date > lastDate);
+  // If no report ever sent (null), include ALL daily entries (first report = full history).
+  // After first send, lastDailyReportDate is set and subsequent reports show delta only.
+  const sinceDays = lastDate
+    ? scanData.daily.filter(d => d.date > lastDate)
+    : scanData.daily;
 
   // Aggregate counters
   const agg = { scanned: 0, clean: 0, suspect: 0 };
@@ -1164,9 +1166,9 @@ function buildReportFromDisk() {
 
   // Load detections since last report for top suspects
   const detections = loadDetections();
-  const recentDetections = detections.detections.filter(
-    d => d.first_seen_at && d.first_seen_at.slice(0, 10) > lastDate
-  );
+  const recentDetections = lastDate
+    ? detections.detections.filter(d => d.first_seen_at && d.first_seen_at.slice(0, 10) > lastDate)
+    : detections.detections;
 
   const top3 = recentDetections
     .slice()
@@ -1248,10 +1250,11 @@ function getReportStatus() {
   const stateRaw = loadStateRaw();
   const lastDate = stateRaw.lastDailyReportDate || null;
 
-  // Count packages scanned since last report (default to today if never sent)
+  // Count packages scanned since last report (all history if never sent)
   const scanData = loadScanStats();
-  const sinceDate = lastDate || getParisDateString();
-  const sinceDays = scanData.daily.filter(d => d.date > sinceDate);
+  const sinceDays = lastDate
+    ? scanData.daily.filter(d => d.date > lastDate)
+    : scanData.daily;
 
   let scannedSince = 0;
   for (const d of sinceDays) {
