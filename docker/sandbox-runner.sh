@@ -10,21 +10,26 @@ fi
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 START_MS=$(date +%s%3N 2>/dev/null || echo 0)
 
-# ── 0. Strict mode: iptables rules ──
+# ══════════════════════════════════════════════════════════════
+# PHASE 1: Root-privileged setup (iptables, tcpdump, filesystem snapshot)
+# Runs as root to access raw sockets and kernel netfilter.
+# ══════════════════════════════════════════════════════════════
+
+# ── 0. Strict mode: iptables rules (requires root + NET_ADMIN) ──
 if [ "$MODE" = "strict" ]; then
   echo "[SANDBOX] STRICT MODE — blocking non-essential network..." >&2
   # Allow loopback
-  iptables -A OUTPUT -o lo -j ACCEPT 2>/dev/null
+  iptables -A OUTPUT -o lo -j ACCEPT
   # Allow DNS (UDP 53)
-  iptables -A OUTPUT -p udp --dport 53 -j ACCEPT 2>/dev/null
+  iptables -A OUTPUT -p udp --dport 53 -j ACCEPT
   # Allow registry.npmjs.org (resolve + allow)
   REGISTRY_IPS=$(nslookup registry.npmjs.org 2>/dev/null | grep -E '^Address:' | tail -n+2 | awk '{print $2}')
   for ip in $REGISTRY_IPS; do
-    iptables -A OUTPUT -d "$ip" -p tcp --dport 443 -j ACCEPT 2>/dev/null
+    iptables -A OUTPUT -d "$ip" -p tcp --dport 443 -j ACCEPT
   done
   # Log + reject everything else
-  iptables -A OUTPUT -j LOG --log-prefix "BLOCKED: " 2>/dev/null
-  iptables -A OUTPUT -j REJECT 2>/dev/null
+  iptables -A OUTPUT -j LOG --log-prefix "BLOCKED: "
+  iptables -A OUTPUT -j REJECT
   echo "[SANDBOX] iptables rules applied." >&2
 fi
 
@@ -32,7 +37,7 @@ fi
 echo "[SANDBOX] Snapshot filesystem before install..." >&2
 find / -type f 2>/dev/null | sort > /tmp/fs-before.txt
 
-# ── 2. tcpdump: separate captures for DNS, HTTP, TLS ──
+# ── 2. tcpdump: separate captures for DNS, HTTP, TLS (requires root + NET_RAW) ──
 echo "[SANDBOX] Starting network capture..." >&2
 tcpdump -i any -nn 'port 53' -l > /tmp/dns.log 2>/dev/null &
 DNS_PID=$!
@@ -43,6 +48,12 @@ TLS_PID=$!
 tcpdump -i any -nn 'not port 53 and not port 80 and not port 443' -l > /tmp/other.log 2>/dev/null &
 OTHER_PID=$!
 sleep 1
+
+# ══════════════════════════════════════════════════════════════
+# PHASE 2: Unprivileged install (su sandboxuser)
+# npm install runs as sandboxuser with strace for syscall tracing.
+# strace can trace child processes without SYS_PTRACE (parent→child).
+# ══════════════════════════════════════════════════════════════
 
 # ── 2b. CI environment simulation ──
 # Simulate CI to trigger CI-aware malware that checks for these env vars
@@ -64,13 +75,22 @@ export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-MUADDIB_CANARY_wJalrXUtnF
 export SLACK_WEBHOOK_URL="${SLACK_WEBHOOK_URL:-https://hooks.slack.com/MUADDIB_CANARY_SLACK}"
 export DISCORD_WEBHOOK_URL="${DISCORD_WEBHOOK_URL:-https://discord.com/api/webhooks/MUADDIB_CANARY_DISCORD}"
 
-# ── 3. npm install with strace ──
-echo "[SANDBOX] Installing $PACKAGE..." >&2
+# ── 3. npm install with strace — as sandboxuser ──
+echo "[SANDBOX] Installing $PACKAGE as sandboxuser..." >&2
 cd /sandbox/install
-strace -f -e trace=network,process,open,openat,connect,execve,sendto,recvfrom \
-  -o /tmp/strace.log \
-  npm install "$PACKAGE" --ignore-scripts=false > /tmp/install.log 2>&1
+# Ensure sandboxuser owns the install directory
+chown sandboxuser:sandboxuser /sandbox/install
+# Run npm install as sandboxuser via su, wrapped in strace for syscall tracing
+su sandboxuser -s /bin/sh -c "
+  strace -f -e trace=network,process,open,openat,connect,execve,sendto,recvfrom \
+    -o /tmp/strace.log \
+    npm install \"$PACKAGE\" --ignore-scripts=false > /tmp/install.log 2>&1
+"
 EXIT_CODE=$?
+
+# ══════════════════════════════════════════════════════════════
+# PHASE 3: Post-install analysis (back as root for full access)
+# ══════════════════════════════════════════════════════════════
 
 # ── 4. Filesystem snapshot AFTER install ──
 echo "[SANDBOX] Snapshot filesystem after install..." >&2
@@ -188,7 +208,7 @@ NR==FNR { ip_domain[$2]=$1; next }
 ' /tmp/dns-resolutions.txt /tmp/connections.txt 2>/dev/null | \
   grep '	443$' | sort -u > /tmp/tls-connections.txt
 
-# ── 10. Blocked connections (strict mode) ──
+# ── 10. Blocked connections (strict mode — requires root for dmesg) ──
 if [ "$MODE" = "strict" ]; then
   dmesg 2>/dev/null | grep 'BLOCKED:' | \
     sed -n 's/.*DST=\([^ ]*\).*DPT=\([^ ]*\).*/\1\t\2/p' | \
@@ -241,7 +261,8 @@ BLOCKED=$(jq -R -s 'split("\n") | map(select(length > 0)) | map(
   split("\t") | {ip: .[0], port: (.[1] | tonumber)}
 )' < /tmp/blocked.txt)
 
-# ── Final JSON ──
+# ── Final JSON (prefixed with delimiter for reliable parsing) ──
+echo "---MUADDIB-REPORT-START---"
 jq -n \
   --arg package "$PACKAGE" \
   --arg timestamp "$TIMESTAMP" \

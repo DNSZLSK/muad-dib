@@ -23,7 +23,7 @@ function detectObfuscation(targetPath) {
 
     // 1. Ratio code sur une seule ligne (skip .min.js — minification, not obfuscation)
     if (!isMinified) {
-      const lines = content.split('\n').filter(l => l.trim());
+      const lines = content.split(/\r?\n/).filter(l => l.trim());
       const longLines = lines.filter(l => l.length > 500);
       if (lines.length > 0 && longLines.length / lines.length > 0.3) {
         score += 25;
@@ -100,7 +100,7 @@ function countMatches(str, regex) {
  * Detects patterns like: var x = ["a", "b", "c", ...] with 10+ quoted items.
  */
 function hasLargeStringArray(content) {
-  const lines = content.split('\n');
+  const lines = content.split(/\r?\n/);
   for (const line of lines) {
     const varIdx = line.indexOf('var ');
     if (varIdx === -1) continue;

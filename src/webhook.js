@@ -299,8 +299,28 @@ function formatGeneric(results) {
 }
 
 const MAX_RESPONSE_SIZE = 1024 * 1024; // 1MB
+const MAX_RETRIES = 3;
+const BACKOFF_BASE_MS = 1000; // 1s, 2s, 4s exponential backoff
+const RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
 
-function send(url, payload, resolvedAddress) {
+// Rate limiting: max 1 webhook per second (Discord limit is 30/min)
+const RATE_LIMIT_MS = 1000;
+let lastWebhookTime = 0;
+
+function rateLimitDelay() {
+  const now = Date.now();
+  const elapsed = now - lastWebhookTime;
+  if (elapsed < RATE_LIMIT_MS) {
+    return RATE_LIMIT_MS - elapsed;
+  }
+  return 0;
+}
+
+function sleepMs(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function sendOnce(url, payload, resolvedAddress) {
   return new Promise((resolve, reject) => {
     const urlObj = new URL(url);
     const protocol = urlObj.protocol === 'https:' ? https : http;
@@ -335,7 +355,10 @@ function send(url, payload, resolvedAddress) {
         if (res.statusCode >= 200 && res.statusCode < 300) {
           resolve({ success: true, status: res.statusCode });
         } else {
-          reject(new Error(`Webhook failed: HTTP ${res.statusCode}`));
+          const err = new Error(`Webhook failed: HTTP ${res.statusCode}`);
+          err.statusCode = res.statusCode;
+          err.retryAfter = res.headers['retry-after'] || null;
+          reject(err);
         }
       });
     });
@@ -350,4 +373,41 @@ function send(url, payload, resolvedAddress) {
   });
 }
 
-module.exports = { sendWebhook, validateWebhookUrl, formatDiscord, formatSlack, formatGeneric };
+async function send(url, payload, resolvedAddress) {
+  // Rate limiting: wait if sending too fast
+  const delay = rateLimitDelay();
+  if (delay > 0) {
+    await sleepMs(delay);
+  }
+
+  let lastError;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      lastWebhookTime = Date.now();
+      const result = await sendOnce(url, payload, resolvedAddress);
+      return result;
+    } catch (err) {
+      lastError = err;
+      const isRetryable = err.statusCode && RETRYABLE_STATUS_CODES.has(err.statusCode);
+      if (!isRetryable || attempt >= MAX_RETRIES) {
+        throw err;
+      }
+      // Compute backoff: respect Retry-After header if present, else exponential
+      let backoffMs;
+      if (err.retryAfter) {
+        const parsed = parseInt(err.retryAfter, 10);
+        backoffMs = !isNaN(parsed) ? parsed * 1000 : BACKOFF_BASE_MS * Math.pow(2, attempt);
+      } else {
+        backoffMs = BACKOFF_BASE_MS * Math.pow(2, attempt);
+      }
+      console.error(`[WEBHOOK] HTTP ${err.statusCode}, retrying in ${backoffMs}ms (attempt ${attempt + 1}/${MAX_RETRIES})...`);
+      await sleepMs(backoffMs);
+    }
+  }
+  throw lastError;
+}
+
+module.exports = {
+  sendWebhook, validateWebhookUrl, formatDiscord, formatSlack, formatGeneric,
+  MAX_RETRIES, BACKOFF_BASE_MS, RETRYABLE_STATUS_CODES, RATE_LIMIT_MS
+};

@@ -16,13 +16,13 @@ function getRecentRefs(targetPath, limit = 10) {
       cwd: targetPath,
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe']
-    }).trim().split('\n').filter(Boolean).slice(0, 5);
+    }).trim().split(/\r?\n/).filter(Boolean).slice(0, 5);
 
     const commits = execFileSync('git', ['log', '--oneline', `-${Number(limit) || 10}`], {
       cwd: targetPath,
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe']
-    }).trim().split('\n').filter(Boolean);
+    }).trim().split(/\r?\n/).filter(Boolean);
 
     return { tags, commits };
   } catch {

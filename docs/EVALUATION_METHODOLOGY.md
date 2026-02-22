@@ -180,7 +180,7 @@ This holdout is the first to specifically test **cross-file dataflow detection**
 - The **Holdout v4 80%** shows the strongest generalization yet (+20pp over v3). This batch specifically tested deobfuscation — 2 samples only detectable thanks to the new deobfuscation pre-processing (`hex-array-exec` 0→25, `mixed-obfuscation-stealer` 10→45). 2 blind spots identified: eval+decode compound pattern, const propagation needed for split base64 variables.
 - The **Holdout v5 50%** is the first holdout testing an entirely new scanner (`module-graph.js`) rather than improvements to existing ones. The drop from 80% to 50% reflects the challenge of a new detection domain (inter-module dataflow). 5 samples detected out of the box — re-export chains, 3-hop propagation, named exports, inline require, conditional splits. 3 samples failed: EventEmitter flows, callback-based taint, and class method calls (2 accepted as fundamental limitations of static analysis, 1 fixed post-holdout).
 - **Progression trend: 30% → 40% → 60% → 80% → 50%** — the first four holdouts show consistent improvement on the same scanner. Holdout v5 tests a new scanner, resetting the baseline. The 50% on first contact with inter-module patterns is a strong starting point.
-- After corrections, all 73 samples pass (ADR 100%, with 2 accepted limitations). But the pre-correction holdout scores (30%, 40%, 60%, 80%, 50%) are the true measures of generalization.
+- After corrections, all 78 samples pass (ADR 100%, with 2 accepted limitations). But the pre-correction holdout scores (30%, 40%, 60%, 80%, 50%) are the true measures of generalization.
 
 ---
 
@@ -533,21 +533,21 @@ The biggest improvements are on medium (+7.8pp) and large (+11.8pp) packages, wh
 
 ---
 
-## 11. Current Metrics (v2.2.12)
+## 11. Current Metrics (v2.2.21)
 
 | Metric | Result | Description |
 |--------|--------|-------------|
 | **TPR** (Ground Truth) | **91.8% (45/49)** | 51 real-world attacks (49 active). 4 out-of-scope: browser-only (3) + FP-risky (1) |
 | **FPR** (Standard, <10 .js) | **6.2% (18/290)** | Most representative for typical npm packages |
 | **FPR** (Benign, global) | **~13% (69/527)** | 529 npm packages (527 scanned), real source code, threshold > 20 |
-| **ADR** (Adversarial + Holdout) | **100% (75/75)** | 35 adversarial + 40 holdout evasive samples |
+| **ADR** (Adversarial + Holdout) | **100% (78/78)** | 38 adversarial + 40 holdout evasive samples |
 | **Holdout v1** (pre-tuning) | 30% (3/10) | 10 unseen samples before rule corrections |
 | **Holdout v2** (pre-tuning) | 40% (4/10) | 10 unseen samples before rule corrections |
 | **Holdout v3** (pre-tuning) | 60% (6/10) | 10 unseen samples before rule corrections |
 | **Holdout v4** (pre-tuning) | 80% (8/10) | 10 unseen samples testing deobfuscation |
 | **Holdout v5** (pre-tuning) | 50% (5/10) | 10 unseen samples testing inter-module dataflow |
 
-v2.2.12 changes: Ground truth expanded from 4 to 49 samples. 3 new detection rules (crypto_decipher, module_compile, secretKey/privateKey credential source). 40 holdout samples merged into ADR (was separate). 4 browser-only misses documented as out-of-scope in [Threat Model](threat-model.md).
+v2.2.12 changes: Ground truth expanded from 4 to 49 samples. 3 new detection rules (crypto_decipher, module_compile, secretKey/privateKey credential source). 40 holdout samples merged into ADR (was separate). 4 browser-only misses documented as out-of-scope in [Threat Model](threat-model.md). v2.2.13: 3 adversarial bypass samples added (indirect-eval, muaddib-ignore, mjs-extension), ADR 75/75 -> 78/78.
 
 **FPR progression**: 0% (invalid, v2.2.0–v2.2.6) → 38% (first real measurement on 50 packages, v2.2.7) → 19.4% (v2.2.8) → 17.5% (v2.2.9) → **~13%** (v2.2.11, per-file max scoring)
 

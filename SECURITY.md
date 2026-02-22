@@ -60,7 +60,7 @@ Please include the following information in your report:
 - We aim to release fixes before public disclosure
 - We request a 90-day disclosure window for complex issues
 
-## Detection Rules (v2.2.13)
+## Detection Rules (v2.2.21)
 
 MUAD'DIB uses 14 parallel scanners + 5 behavioral anomaly detection features + ground truth validation, producing the following rule IDs:
 
@@ -117,7 +117,7 @@ MUAD'DIB uses 14 parallel scanners + 5 behavioral anomaly detection features + g
 | MUADDIB-AST-012 | Dynamic Require Decode | HIGH | T1059 |
 | MUADDIB-AST-013 | AI Agent Abuse | CRITICAL | T1059 |
 | MUADDIB-AST-014 | Credential CLI Theft | CRITICAL | T1552 |
-| MUADDIB-AST-015 | Workflow Write | HIGH | T1195.002 |
+| MUADDIB-AST-015 | Workflow Write | CRITICAL | T1195.002 |
 | MUADDIB-AST-016 | Binary Dropper | CRITICAL | T1105 |
 | MUADDIB-AST-017 | Prototype Hooking | HIGH | T1574 |
 | MUADDIB-AST-018 | Env Charcode Reconstruction | HIGH | T1027 |
@@ -318,7 +318,7 @@ The sandbox simulates CI environments by setting: `CI=true`, `GITHUB_ACTIONS=tru
 2. **Signed commits**: Use GPG-signed commits when possible
 3. **Review dependencies**: Check new dependencies before adding them
 
-## Threat Model (v2.2.13)
+## Threat Model (v2.2.21)
 
 MUAD'DIB 2.2 uses a **triple detection approach**:
 
@@ -334,7 +334,7 @@ The behavioral detection features are opt-in (`--temporal-full`) and query the n
 - Dormant package hijacking (abandonware takeover)
 - Sudden code injection (Shai-Hulud, ua-parser-js pattern)
 
-## Ground Truth Validation (v2.2.12)
+## Ground Truth Validation (v2.2.21)
 
 MUAD'DIB includes a ground truth dataset of 51 real-world supply-chain attacks (49 active samples) to continuously validate detection coverage.
 

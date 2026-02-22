@@ -27,7 +27,7 @@ async function scanShellScripts(targetPath) {
 
   forEachSafeFile(files, (file, content) => {
     // Strip comment lines to avoid false positives on documentation
-    const activeContent = content.split('\n')
+    const activeContent = content.split(/\r?\n/)
       .filter(line => !line.trimStart().startsWith('#'))
       .join('\n');
 

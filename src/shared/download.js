@@ -136,14 +136,24 @@ function extractTarGz(tgzPath, destDir) {
   execFileSync('tar', ['xzf', tgzName, '-C', relDest], { cwd: tgzDir, timeout: 60_000, stdio: 'pipe' });
   // npm tarballs extract into a package/ subdirectory; detect it
   const packageSubdir = path.join(destDir, 'package');
-  if (fs.existsSync(packageSubdir) && fs.statSync(packageSubdir).isDirectory()) {
-    return packageSubdir;
+  try {
+    const stat = fs.lstatSync(packageSubdir);
+    if (!stat.isSymbolicLink() && stat.isDirectory()) {
+      return packageSubdir;
+    }
+  } catch {
+    // packageSubdir doesn't exist or is a broken symlink — continue
   }
   // Otherwise return destDir itself (PyPI sdists vary)
   const entries = fs.readdirSync(destDir);
   if (entries.length === 1) {
     const single = path.join(destDir, entries[0]);
-    if (fs.statSync(single).isDirectory()) return single;
+    try {
+      const stat = fs.lstatSync(single);
+      if (!stat.isSymbolicLink() && stat.isDirectory()) return single;
+    } catch {
+      // broken symlink or permission denied — skip
+    }
   }
   return destDir;
 }

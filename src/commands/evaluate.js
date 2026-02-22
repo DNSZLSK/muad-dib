@@ -223,7 +223,7 @@ function downloadAndExtract(pkg, options = {}) {
       timeout: PACK_TIMEOUT_MS,
       stdio: ['pipe', 'pipe', 'pipe']
     });
-    tgzFilename = output.trim().split('\n').pop().trim();
+    tgzFilename = output.trim().split(/\r?\n/).pop().trim();
   } catch (err) {
     if (process.env.MUADDIB_DEBUG) {
       console.error(`\n  [DEBUG] npm pack ${pkg} failed: ${(err.stderr || err.message || '').slice(0, 200)}`);
@@ -267,7 +267,7 @@ function downloadAndExtract(pkg, options = {}) {
 async function evaluateBenign(options = {}) {
   const listFile = path.join(BENIGN_DIR, 'packages-npm.txt');
   let packages = fs.readFileSync(listFile, 'utf8')
-    .split('\n')
+    .split(/\r?\n/)
     .map(l => l.trim())
     .filter(l => l && !l.startsWith('#'));
 

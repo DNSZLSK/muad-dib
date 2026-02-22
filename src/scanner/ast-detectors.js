@@ -528,7 +528,8 @@ function handleCallExpression(node, ctx) {
     const firstArg = node.arguments[0];
     const cmdName = firstArg?.type === 'Literal' && typeof firstArg.value === 'string'
       ? firstArg.value.toLowerCase() : '';
-    const isAIAgent = AI_AGENT_BINARIES.some(bin => cmdName === bin || cmdName.endsWith('/' + bin));
+    const cmdBasename = cmdName ? path.basename(cmdName) : '';
+    const isAIAgent = AI_AGENT_BINARIES.some(bin => cmdBasename === bin);
 
     if (hasDangerousFlag) {
       const matchedFlag = AI_AGENT_DANGEROUS_FLAGS.find(flag => allArgText.includes(flag));

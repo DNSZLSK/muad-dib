@@ -49,7 +49,7 @@ function analyzeFile(content, filePath, basePath) {
       });
     }
 
-    if (content.length > 1000 && content.split('\n').length < 10) {
+    if (content.length > 1000 && content.split(/\r?\n/).length < 10) {
       threats.push({
         type: 'possible_obfuscation',
         severity: 'MEDIUM',

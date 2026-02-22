@@ -87,7 +87,7 @@ Impact sur TPR : 45/49 = 91.8% (4 misses documentes et acceptes).
 | Technique | Raison |
 |-----------|--------|
 | Malware polymorphe avance | Pas de ML/machine learning, patterns statiques uniquement |
-| Obfuscation avancee | Heuristiques limitees, pas de desobfuscation automatique du JS |
+| Obfuscation avancee | Desobfuscation statique (v2.2.5) couvre concat, charcode, base64, hex arrays + const propagation. Les obfuscateurs avances (JScrambler, control flow flattening) ne sont pas couverts |
 | Zero-day (packages inconnus) | Base IOC reactive (v1.x); atténué par la détection comportementale (v2.0) et validé par le ground truth (v2.1) |
 | Attaques via binaires natifs | Pas d'analyse binaire |
 | Backdoors subtiles | Pas de review de code semantique |
@@ -136,27 +136,11 @@ Impact sur TPR : 45/49 = 91.8% (4 misses documentes et acceptes).
 
 ## Resultats des tests adversariaux
 
-### Taux de detection : 15/15 (100%)
+### Taux de detection : 78/78 (100% ADR)
 
-15 scenarios de packages malveillants realistes ont ete crees et testes :
+78 samples adversariaux/holdout evasifs (38 adversariaux + 40 holdouts sur 5 vagues red team) testes avec des techniques d'evasion reelles (obfuscation, dataflow inter-module, charcode reconstruction, prototype hooking, AI agent weaponization, etc.).
 
-| # | Scenario | Technique | Detecte |
-|---|----------|-----------|---------|
-| 1 | `postinstall curl \| sh` | T1059.004 | Oui |
-| 2 | `preinstall` reverse shell | T1059.004 | Oui |
-| 3 | `child_process.exec` + base64 + eval | T1059 | Oui |
-| 4 | `readFileSync` credentials + fetch | T1552.001 | Oui |
-| 5 | `process.env.NPM_TOKEN` exfiltration | T1552.001 | Oui |
-| 6 | `eval()` avec concatenation dynamique | T1059 | Oui |
-| 7 | `Buffer.from` base64 + eval | T1027 | Oui |
-| 8 | `dns.lookup` exfiltration via env | T1041 | Oui |
-| 9 | Typosquatting lodahs/axois/expres | T1195.002 | Oui |
-| 10 | `.npmrc` read + HTTP POST | T1552.001 | Oui |
-| 11 | `~/.ssh/id_rsa` vol de cle SSH | T1552.001 | Oui |
-| 12 | Code obfusque `_0x` + hex escapes | T1027 | Oui |
-| 13 | Webhook suspect dans postinstall | T1105 | Oui |
-| 14 | Tampering package.json + vol credentials | T1195.002 | Oui |
-| 15 | Prototype pollution + eval | T1059 | Oui |
+Voir [Evaluation Methodology](EVALUATION_METHODOLOGY.md) pour le detail des scores pre-tuning et post-tuning.
 
 ### Robustesse (56 fuzz tests)
 
@@ -168,7 +152,7 @@ Les parsers ont ete testes avec des inputs malformes :
 
 Resultat : **56/56 pass**. Aucun crash, aucune exception non rattrapee.
 
-### 807 tests unitaires et d'integration
+### 862 tests unitaires et d'integration
 
 Couverture complete des scanners, parsers, IOC matching, typosquatting, integrations CLI, diff, monitor, temporal analysis, ground truth, canary tokens, et securite (SSRF, injection). 74% code coverage.
 

@@ -3,7 +3,7 @@ FROM node:20-alpine
 # Outils de monitoring
 RUN apk add --no-cache strace curl tcpdump coreutils findutils jq iptables
 
-# User non-root
+# Non-root user for npm install (privilege drop via su in sandbox-runner.sh)
 RUN adduser -D sandboxuser
 
 # Dossier de travail avec bonnes permissions
@@ -14,6 +14,7 @@ RUN chown sandboxuser:sandboxuser /sandbox
 COPY sandbox-runner.sh /sandbox/
 RUN sed -i 's/\r$//' /sandbox/sandbox-runner.sh && chmod +x /sandbox/sandbox-runner.sh
 
-USER sandboxuser
-
+# Entrypoint runs as root for iptables/tcpdump/dmesg access.
+# npm install is dropped to sandboxuser via su in sandbox-runner.sh.
+# --security-opt no-new-privileges is set by the Docker run args in sandbox.js.
 ENTRYPOINT ["/sandbox/sandbox-runner.sh"]

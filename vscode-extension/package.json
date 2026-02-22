@@ -1,8 +1,8 @@
 {
   "name": "muaddib-vscode",
   "displayName": "MUAD'DIB Security Scanner",
-  "description": "Detecte les attaques supply chain npm directement dans VS Code",
-  "version": "2.2.20",
+  "description": "Detecte les attaques supply chain npm et PyPI directement dans VS Code",
+  "version": "2.2.22",
   "publisher": "dnszlsk",
   "engines": {
     "vscode": "^1.85.0"
@@ -14,13 +14,17 @@
   "keywords": [
     "security",
     "npm",
+    "pypi",
     "supply-chain",
     "malware",
     "scanner"
   ],
   "icon": "icon.png",
   "activationEvents": [
-    "workspaceContains:package.json"
+    "workspaceContains:package.json",
+    "workspaceContains:requirements.txt",
+    "workspaceContains:pyproject.toml",
+    "workspaceContains:setup.py"
   ],
   "main": "./extension.js",
   "contributes": {
@@ -32,6 +36,10 @@
       {
         "command": "muaddib.scanFile",
         "title": "MUAD'DIB: Scan Current File"
+      },
+      {
+        "command": "muaddib.updateIOCs",
+        "title": "MUAD'DIB: Update IOCs"
       }
     ],
     "configuration": {
@@ -45,7 +53,7 @@
         "muaddib.webhookUrl": {
           "type": "string",
           "default": "",
-          "description": "URL du webhook Discord/Slack pour les alertes"
+          "description": "URL du webhook Discord/Slack pour les alertes (HTTPS uniquement)"
         },
         "muaddib.failLevel": {
           "type": "string",
@@ -56,7 +64,22 @@
             "low"
           ],
           "default": "high",
-          "description": "Niveau de severite pour afficher les alertes"
+          "description": "Niveau de severite minimum pour signaler les menaces"
+        },
+        "muaddib.explain": {
+          "type": "boolean",
+          "default": false,
+          "description": "Afficher les explications detaillees pour chaque menace"
+        },
+        "muaddib.paranoid": {
+          "type": "boolean",
+          "default": false,
+          "description": "Mode ultra-strict (plus de detections, plus de faux positifs)"
+        },
+        "muaddib.temporalAnalysis": {
+          "type": "boolean",
+          "default": false,
+          "description": "Activer les analyses temporelles (requetes reseau vers les registres npm/PyPI)"
         }
       }
     }
