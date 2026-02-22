@@ -213,19 +213,20 @@ async function run(targetPath, options = {}) {
     }
   }
 
-  // Parallel execution of all independent scanners
-  // Sync scanners use yieldThen() to yield to event loop (keeps spinner animating)
+  // Sequential execution of scanners with event loop yields between each.
+  // All scanners (even "async" ones) are effectively synchronous (readFileSync, readdirSync).
+  // Running them via yieldThen ensures the spinner animates between each scanner.
   let scanResult;
   try {
     scanResult = await Promise.all([
-      scanPackageJson(targetPath),
-      scanShellScripts(targetPath),
-      analyzeAST(targetPath, { deobfuscate: deobfuscateFn }),
+      yieldThen(() => scanPackageJson(targetPath)),
+      yieldThen(() => scanShellScripts(targetPath)),
+      yieldThen(() => analyzeAST(targetPath, { deobfuscate: deobfuscateFn })),
       yieldThen(() => detectObfuscation(targetPath)),
-      scanDependencies(targetPath),
-      scanHashes(targetPath),
-      analyzeDataFlow(targetPath, { deobfuscate: deobfuscateFn }),
-      scanTyposquatting(targetPath),
+      yieldThen(() => scanDependencies(targetPath)),
+      yieldThen(() => scanHashes(targetPath)),
+      yieldThen(() => analyzeDataFlow(targetPath, { deobfuscate: deobfuscateFn })),
+      yieldThen(() => scanTyposquatting(targetPath)),
       yieldThen(() => scanGitHubActions(targetPath)),
       yieldThen(() => matchPythonIOCs(pythonDeps, targetPath)),
       yieldThen(() => checkPyPITyposquatting(pythonDeps, targetPath)),

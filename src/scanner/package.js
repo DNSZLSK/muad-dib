@@ -121,6 +121,8 @@ async function scanPackageJson(targetPath) {
 
   for (const [depName, depVersion] of Object.entries(allDeps)) {
     if (DANGEROUS_KEYS.has(depName)) continue;
+    // Skip local dependencies (link:, file:, workspace:) — they're local code, not npm packages
+    if (typeof depVersion === 'string' && /^(link:|file:|workspace:)/.test(depVersion)) continue;
     let malicious = null;
 
     // Use optimized Map for O(1) lookup if available
