@@ -1089,6 +1089,8 @@ async function runScraper() {
 
   // Smart deduplication: build map of best entry per key
   // For duplicates, keep the one with highest confidence, then most recent date
+  const dedupSpinner = new Spinner();
+  dedupSpinner.start('Deduplicating ' + allPackages.length + ' npm + ' + pypiPackages.length + ' PyPI entries...');
   const dedupMap = new Map();
 
   // Seed with existing IOCs
@@ -1181,6 +1183,8 @@ async function runScraper() {
       'pigS3cr3ts.json'
     ];
   }
+
+  dedupSpinner.succeed('Deduplicated: ' + existingIOCs.packages.length + ' npm + ' + existingIOCs.pypi_packages.length + ' PyPI packages (' + addedPackages + ' new, ' + upgradedPackages + ' upgraded)');
 
   // Update metadata
   existingIOCs.updated = new Date().toISOString();

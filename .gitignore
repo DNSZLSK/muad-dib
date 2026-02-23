@@ -15,3 +15,7 @@ iocs.json.gz
 .nyc_output/
 .env
 .env.*
+data/detections.json
+data/monitor-alerts.json
+data/monitor-state.json
+data/scan-stats.json

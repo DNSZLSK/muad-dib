@@ -533,7 +533,7 @@ The biggest improvements are on medium (+7.8pp) and large (+11.8pp) packages, wh
 
 ---
 
-## 11. Current Metrics (v2.2.21)
+## 11. Current Metrics (v2.2.24)
 
 | Metric | Result | Description |
 |--------|--------|-------------|
@@ -547,7 +547,7 @@ The biggest improvements are on medium (+7.8pp) and large (+11.8pp) packages, wh
 | **Holdout v4** (pre-tuning) | 80% (8/10) | 10 unseen samples testing deobfuscation |
 | **Holdout v5** (pre-tuning) | 50% (5/10) | 10 unseen samples testing inter-module dataflow |
 
-v2.2.12 changes: Ground truth expanded from 4 to 49 samples. 3 new detection rules (crypto_decipher, module_compile, secretKey/privateKey credential source). 40 holdout samples merged into ADR (was separate). 4 browser-only misses documented as out-of-scope in [Threat Model](threat-model.md). v2.2.13: 3 adversarial bypass samples added (indirect-eval, muaddib-ignore, mjs-extension), ADR 75/75 -> 78/78.
+v2.2.12 changes: Ground truth expanded from 4 to 49 samples. 3 new detection rules (crypto_decipher, module_compile, secretKey/privateKey credential source). 40 holdout samples merged into ADR (was separate). 4 browser-only misses documented as out-of-scope in [Threat Model](threat-model.md). v2.2.13: 3 adversarial bypass samples added (indirect-eval, muaddib-ignore, mjs-extension), ADR 75/75 -> 78/78. v2.2.22: scan freeze fix (module-graph EXCLUDED_DIRS). v2.2.23: .npmignore excludes malware samples. v2.2.24: tests 862 → 1317, coverage 72% → 86%.
 
 **FPR progression**: 0% (invalid, v2.2.0–v2.2.6) → 38% (first real measurement on 50 packages, v2.2.7) → 19.4% (v2.2.8) → 17.5% (v2.2.9) → **~13%** (v2.2.11, per-file max scoring)
 

@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-npm test          # Run all tests (custom framework, 862 tests across 20 files)
+npm test          # Run all tests (custom framework, 1317 tests across 20 files)
 npm run lint      # ESLint with security plugin
 npm run scan      # Self-scan: node bin/muaddib.js scan .
 npm run update    # Download latest IOCs
@@ -73,6 +73,12 @@ Tests use a custom framework in `tests/run-tests.js` (no Jest). Test helpers:
 **Per-File Max Scoring (v2.2.11):** Replaces global score accumulation with per-file max scoring. Formula: `riskScore = min(100, max(file_scores) + package_level_score)`. Threats are split into package-level (lifecycle scripts, typosquat, IOC matches, sandbox findings — classified by `PACKAGE_LEVEL_TYPES` Set + file heuristics) and file-level (AST, dataflow, obfuscation). File-level threats grouped by `threat.file`, each group scored independently via `computeGroupScore()`. Package-level threats scored separately. Result includes `globalRiskScore` (old sum), `maxFileScore`, `packageScore`, `mostSuspiciousFile`, `fileScores` map. FPR: 17.5% → **~13%** (69/527). FPR on standard packages: **6.2%** (18/290).
 
 **Ground Truth Expansion (v2.2.12):** 51 real-world attack samples in `tests/ground-truth/` (49 active, 2 with min_threats=0). TPR: **91.8% (45/49)**. 4 out-of-scope misses: lottie-player, polyfill-io, trojanized-jquery (browser-only), websocket-rat (FP-risky). 3 new detection rules: `crypto_decipher` (MUADDIB-AST-022, T1140), `module_compile` (MUADDIB-AST-023, T1059), `.secretKey`/`.privateKey` credential source in dataflow. ADR consolidated: 78 samples (38 adversarial + 40 holdout) = **100% (78/78)** (3 bypass samples added in v2.2.13).
+
+**Scan Freeze Fix (v2.2.22):** Module graph scanner's `EXCLUDED_DIRS` aligned with main scanner to prevent infinite loops on `dist/`, `build/`, `.next/` directories.
+
+**npm Package Fix (v2.2.23):** `.npmignore` updated to exclude ground-truth malware samples and adversarial datasets from the published npm package.
+
+**Coverage Expansion (v2.2.24):** Tests expanded from 862 to 1317 (+455). Coverage 72% → 86% (c8 line coverage). All scanner, infrastructure, and utility modules covered.
 
 **New AST detection rules (v2.2):**
 - MUADDIB-AST-008 to AST-012: Dynamic require with decode patterns, sandbox evasion, detached process, binary dropper patterns
