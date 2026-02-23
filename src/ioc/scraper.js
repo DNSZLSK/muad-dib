@@ -753,6 +753,7 @@ async function scrapeOSVDataDump() {
 
         if ((i + 1) % 1000 === 0 || i === entries.length - 1) {
           spinner.update('Parsing npm entries... ' + (i + 1) + '/' + total);
+          await new Promise(resolve => setImmediate(resolve));
         }
       }
 
@@ -811,6 +812,7 @@ async function scrapeOSVPyPIDataDump() {
 
         if ((i + 1) % 1000 === 0 || i === entries.length - 1) {
           spinner.update('Parsing PyPI entries... ' + (i + 1) + '/' + total);
+          await new Promise(resolve => setImmediate(resolve));
         }
       }
 
