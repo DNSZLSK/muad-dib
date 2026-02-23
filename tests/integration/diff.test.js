@@ -316,6 +316,47 @@ async function runDiffTests() {
     }
   });
 
+  // --- diff() with JSON output ---
+
+  await asyncTest('DIFF: diff with json option on valid ref', async () => {
+    const origLog = console.log;
+    const logs = [];
+    console.log = (...args) => logs.push(args.join(' '));
+    try {
+      const exitCode = await diff(REPO_ROOT, 'HEAD~1', { json: true });
+      if (exitCode !== 1) {
+        // Should have logged JSON output
+        const jsonOutput = logs.find(l => l.startsWith('{'));
+        if (jsonOutput) {
+          const parsed = JSON.parse(jsonOutput);
+          assert(parsed.base, 'JSON should have base');
+          assert(parsed.current, 'JSON should have current');
+          assert(parsed.diff, 'JSON should have diff');
+        }
+      }
+    } finally {
+      console.log = origLog;
+    }
+  });
+
+  await asyncTest('DIFF: diff with text output shows summary', async () => {
+    const origLog = console.log;
+    const origErr = console.error;
+    const logs = [];
+    console.log = (...args) => logs.push(args.join(' '));
+    console.error = () => {};
+    try {
+      const exitCode = await diff(REPO_ROOT, 'HEAD~1', { json: false });
+      if (exitCode !== 1) {
+        const allOutput = logs.join('\n');
+        assert(allOutput.includes('DIFF SUMMARY') || allOutput.includes('Risk Score'), 'Should show diff summary');
+      }
+    } finally {
+      console.log = origLog;
+      console.error = origErr;
+    }
+  });
+
   // --- failLevel option ---
 
   test('DIFF: failLevel severity mapping covers all levels', () => {

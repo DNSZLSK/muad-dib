@@ -1,0 +1,88 @@
+{
+  "detections": [
+    {
+      "package": "test-dedup-detection-1771800819956",
+      "version": "1.0.0",
+      "ecosystem": "npm",
+      "first_seen_at": "2026-02-22T22:53:39.956Z",
+      "findings": [
+        "test_type"
+      ],
+      "severity": "HIGH",
+      "advisory_at": null,
+      "lead_time_hours": null
+    },
+    {
+      "package": "test-dedup-detection-1771801104746",
+      "version": "1.0.0",
+      "ecosystem": "npm",
+      "first_seen_at": "2026-02-22T22:58:24.747Z",
+      "findings": [
+        "test_type"
+      ],
+      "severity": "HIGH",
+      "advisory_at": null,
+      "lead_time_hours": null
+    },
+    {
+      "package": "test-dedup-detection-1771801368249",
+      "version": "1.0.0",
+      "ecosystem": "npm",
+      "first_seen_at": "2026-02-22T23:02:48.249Z",
+      "findings": [
+        "test_type"
+      ],
+      "severity": "HIGH",
+      "advisory_at": null,
+      "lead_time_hours": null
+    },
+    {
+      "package": "test-dedup-detection-1771802160696",
+      "version": "1.0.0",
+      "ecosystem": "npm",
+      "first_seen_at": "2026-02-22T23:16:00.696Z",
+      "findings": [
+        "test_type"
+      ],
+      "severity": "HIGH",
+      "advisory_at": null,
+      "lead_time_hours": null
+    },
+    {
+      "package": "test-dedup-detection-1771802946595",
+      "version": "1.0.0",
+      "ecosystem": "npm",
+      "first_seen_at": "2026-02-22T23:29:06.595Z",
+      "findings": [
+        "test_type"
+      ],
+      "severity": "HIGH",
+      "advisory_at": null,
+      "lead_time_hours": null
+    },
+    {
+      "package": "test-dedup-detection-1771803306819",
+      "version": "1.0.0",
+      "ecosystem": "npm",
+      "first_seen_at": "2026-02-22T23:35:06.819Z",
+      "findings": [
+        "test_type"
+      ],
+      "severity": "HIGH",
+      "advisory_at": null,
+      "lead_time_hours": null
+    },
+    {
+      "package": "test-dedup-detection-1771803618627",
+      "version": "1.0.0",
+      "ecosystem": "npm",
+      "first_seen_at": "2026-02-22T23:40:18.627Z",
+      "findings": [
+        "test_type"
+      ],
+      "severity": "HIGH",
+      "advisory_at": null,
+      "lead_time_hours": null
+    }
+  ]
+}

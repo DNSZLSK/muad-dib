@@ -291,4 +291,4 @@ async function safeInstall(packages, options = {}) {
   return { blocked: false };
 }
 
-module.exports = { safeInstall, REHABILITATED_PACKAGES, checkRehabilitated, isValidPackageName };
+module.exports = { safeInstall, scanPackageRecursive, REHABILITATED_PACKAGES, checkRehabilitated, isValidPackageName, checkIOCs };

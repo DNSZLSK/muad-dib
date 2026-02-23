@@ -421,4 +421,4 @@ function invalidateCache() {
   cachedIOCsTime = 0;
 }
 
-module.exports = { updateIOCs, loadCachedIOCs, invalidateCache, generateCompactIOCs, expandCompactIOCs };
+module.exports = { updateIOCs, loadCachedIOCs, invalidateCache, generateCompactIOCs, expandCompactIOCs, mergeIOCs, createOptimizedIOCs };
