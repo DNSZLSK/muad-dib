@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.24] - 2026-02-23
+
+### Changed
+- **Coverage 72% → 86%**: Massive test expansion across all scanner and infrastructure modules. c8 line coverage measured at 86.15%.
+- **Test count: 862 → 1317** (+455 tests across 20 modular test files). New coverage for monitor, report, scoring, sandbox, webhook, safe-install, hooks-init, and all scanner modules.
+- 0 failures, 4 skipped (Windows-specific).
+
+## [2.2.23] - 2026-02-23
+
+### Fixed
+- **`.npmignore` excludes malware samples**: Ground truth samples (`tests/ground-truth/`), adversarial datasets (`datasets/adversarial/`, `datasets/holdout-*/`), and test fixtures containing malicious code are now excluded from the published npm package. Prevents false positives when scanning projects that depend on `muaddib-scanner`.
+
+## [2.2.22] - 2026-02-23
+
+### Fixed
+- **Scan freeze on large projects** (`src/scanner/module-graph.js`): Module graph scanner used its own hardcoded `EXCLUDED_DIRS` list that was missing directories excluded by the main scanner (`findFiles` in `src/utils.js`). This caused infinite loops or very long scans when the module graph traversed into `dist/`, `build/`, `coverage/`, or `.next/` directories. Now uses the same `EXCLUDED_DIRS` from `src/utils.js`.
+
 ## [2.2.21] - 2026-02-22
 
 ### Fixed
@@ -721,7 +738,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Obfuscation detection
 - Package.json lifecycle script analysis
 
-[Unreleased]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.20...HEAD
+[Unreleased]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.24...HEAD
+[2.2.24]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.23...v2.2.24
+[2.2.23]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.22...v2.2.23
+[2.2.22]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.21...v2.2.22
+[2.2.21]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.20...v2.2.21
 [2.2.20]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.19...v2.2.20
 [2.2.19]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.18...v2.2.19
 [2.2.18]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.17...v2.2.18

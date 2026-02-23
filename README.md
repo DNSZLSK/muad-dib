@@ -285,7 +285,7 @@ Add to `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/DNSZLSK/muad-dib
-    rev: v2.2.21
+    rev: v2.2.24
     hooks:
       - id: muaddib-scan        # Scan all threats
       # - id: muaddib-diff      # Or: only new threats
@@ -641,7 +641,7 @@ Alerts appear in Security > Code scanning alerts.
 ## Architecture
 
 ```
-MUAD'DIB 2.2.21 Scanner
+MUAD'DIB 2.2.24 Scanner
 |
 +-- IOC Match (225,000+ packages, JSON DB)
 |   +-- OSV.dev npm dump (200K+ MAL-* entries)
@@ -751,7 +751,7 @@ Output (CLI, JSON, HTML, SARIF, Webhook, Threat Feed)
 - **ADR** (Adversarial Detection Rate): detection rate on 75 evasive malicious samples — 35 adversarial (4 red-team waves) + 40 holdout (5 batches of 10, testing obfuscation, inter-module dataflow, etc.)
 - **Holdout** (pre-tuning): detection rate on 10 unseen samples with rules frozen (measures generalization)
 
-Datasets: 529 npm + 132 PyPI benign packages, 78 adversarial/holdout samples, 51 ground-truth attacks (65 documented malware packages).
+Datasets: 529 npm + 132 PyPI benign packages, 78 adversarial/holdout samples, 51 ground-truth attacks (65 documented malware packages). **1317 tests**, 86% code coverage.
 
 See [Evaluation Methodology](docs/EVALUATION_METHODOLOGY.md) for the full experimental protocol.
 
@@ -787,7 +787,7 @@ npm test
 
 ### Testing
 
-- **862 unit/integration tests** across 20 modular test files - 74% code coverage via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
+- **1317 unit/integration tests** across 20 modular test files - 86% code coverage via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
 - **56 fuzz tests** - Malformed YAML, invalid JSON, binary files, ReDoS, unicode, 10MB inputs
 - **78 adversarial/holdout samples** - 38 adversarial + 40 holdout, 78/78 detection rate (100% ADR)
 - **Ground truth validation** - 51 real-world attacks (45/49 detected = 91.8% TPR). 4 out-of-scope: browser-only (3) + FP-risky (1)

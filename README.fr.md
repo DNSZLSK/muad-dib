@@ -285,7 +285,7 @@ Ajoutez à `.pre-commit-config.yaml` :
 ```yaml
 repos:
   - repo: https://github.com/DNSZLSK/muad-dib
-    rev: v2.2.21
+    rev: v2.2.24
     hooks:
       - id: muaddib-scan        # Scanner toutes les menaces
       # - id: muaddib-diff      # Ou: seulement les nouvelles
@@ -640,7 +640,7 @@ Les alertes apparaissent dans Security > Code scanning alerts.
 ## Architecture
 
 ```
-MUAD'DIB 2.2.21 Scanner
+MUAD'DIB 2.2.24 Scanner
 |
 +-- IOC Match (225 000+ packages, JSON DB)
 |   +-- OSV.dev npm dump (200K+ entrées MAL-*)
@@ -748,7 +748,7 @@ Output (CLI, JSON, HTML, SARIF, Webhook, Threat Feed)
 - **ADR** (Adversarial Detection Rate) : taux de detection sur 78 samples malveillants evasifs — 38 adversariaux (4 vagues red team + 3 bypasses) + 40 holdouts (5 batches de 10, testant obfuscation, dataflow inter-module, etc.)
 - **Holdout** (pre-tuning) : taux de detection sur 10 samples jamais vus avec regles gelees (mesure de generalisation)
 
-Datasets : 529 npm + 132 PyPI packages benins, 78 samples adversariaux/holdout, 51 attaques ground-truth (65 packages malveillants documentes).
+Datasets : 529 npm + 132 PyPI packages benins, 78 samples adversariaux/holdout, 51 attaques ground-truth (65 packages malveillants documentes). **1317 tests**, 86% coverage.
 
 Voir [Evaluation Methodology](docs/EVALUATION_METHODOLOGY.md) pour le protocole experimental complet.
 
@@ -784,7 +784,7 @@ npm test
 
 ### Tests
 
-- **862 tests unitaires/integration** sur 20 fichiers modulaires - 74% coverage via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
+- **1317 tests unitaires/integration** sur 20 fichiers modulaires - 86% coverage via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
 - **56 tests de fuzzing** - YAML malforme, JSON invalide, fichiers binaires, ReDoS, unicode, inputs 10MB
 - **78 samples adversariaux/holdout** - 38 adversariaux + 40 holdouts, 78/78 taux de detection (100% ADR)
 - **Validation ground truth** - 51 attaques reelles (45/49 detectees = 91.8% TPR). 4 hors scope : browser-only (3) + risque FP (1)

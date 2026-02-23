@@ -152,9 +152,9 @@ Les parsers ont ete testes avec des inputs malformes :
 
 Resultat : **56/56 pass**. Aucun crash, aucune exception non rattrapee.
 
-### 862 tests unitaires et d'integration
+### 1317 tests unitaires et d'integration
 
-Couverture complete des scanners, parsers, IOC matching, typosquatting, integrations CLI, diff, monitor, temporal analysis, ground truth, canary tokens, et securite (SSRF, injection). 74% code coverage.
+Couverture complete des scanners, parsers, IOC matching, typosquatting, integrations CLI, diff, monitor, temporal analysis, ground truth, canary tokens, et securite (SSRF, injection). 86% code coverage (c8).
 
 ### Validation Ground Truth (v2.2.12)
 

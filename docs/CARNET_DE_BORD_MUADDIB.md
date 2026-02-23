@@ -1406,15 +1406,73 @@ Les 40 holdouts (v2-v5, 10 chacun) sont fusionnes dans l'evaluation ADR. Ils tes
 
 ### Metriques finales
 
-| Metrique | v2.2.11 | v2.2.12 | v2.2.20 |
-|----------|---------|---------|---------|
-| **TPR** | 100% (4/4) | **91.8% (45/49)** | 91.8% (45/49) |
-| **FPR** (global) | 13.1% (69/527) | ~13% (inchange) | ~13% (69/527) |
-| **ADR** | 100% (35/35) | 100% (75/75) | **100% (78/78)** |
-| Tests | 836 | 807 | **862** |
-| Regles | ~95 | ~97 | **94** |
+| Metrique | v2.2.11 | v2.2.12 | v2.2.20 | v2.2.24 |
+|----------|---------|---------|---------|---------|
+| **TPR** | 100% (4/4) | **91.8% (45/49)** | 91.8% (45/49) | 91.8% (45/49) |
+| **FPR** (global) | 13.1% (69/527) | ~13% (inchange) | ~13% (69/527) | ~13% (69/527) |
+| **ADR** | 100% (35/35) | 100% (75/75) | **100% (78/78)** | 100% (78/78) |
+| Tests | 836 | 807 | 862 | **1317** |
+| Coverage | — | — | 74% | **86%** |
+| Regles | ~95 | ~97 | 94 | **94** |
 
 **Note sur le TPR** : Le TPR passe de 100% a 91.8% non pas par regression mais par expansion du ground truth. Avec 4 samples, 100% etait facile a atteindre. Avec 49 samples, 91.8% est un chiffre beaucoup plus representatif. Les 4 misses sont tous hors scope (browser-only) ou acceptes (risque FP).
+
+---
+
+## v2.2.21 — Audit complet (22 Fevrier 2026)
+
+Sprint d'audit massif couvrant CLI, VS Code, sandbox, monitor, cross-platform, UX et performances.
+
+**Corrections critiques :**
+- **P0 : `--json --paranoid` JSON invalide** : le message `[PARANOID]` etait imprime sur stdout avant le JSON, cassant `JSON.parse()` en CI/CD.
+- **P1 : `scan --help` lancait un scan complet** au lieu d'afficher l'aide.
+- **P1 : Version check suggerait un downgrade** a cause d'une comparaison string au lieu de semver.
+- **CI self-scan false positive** : `binary_dropper` (MUADDIB-AST-016) se declenchait sur `chmodSync(0o755)` sans co-occurrence exec/spawn. Corrige pour exiger chmod + exec dans le meme fichier.
+
+**VS Code Extension (21 fixes)** : 2 vulnérabilités critiques (command injection dans le nom de package passé à `exec`, XSS dans le rapport HTML), race condition, debounce scan-on-save, progress bar bloquée à 99%, fuite mémoire output channel.
+
+**Sandbox hardening** : Séparation de privilèges root/sandboxuser. Délimiteur JSON `---JSON-REPORT---` pour parsing stdout fiable. Prévention collision nom container via suffixe aléatoire.
+
+**Monitor resilience** : Handler SIGTERM pour shutdown gracieux. Retry webhook avec backoff exponentiel (3 tentatives). Rate limiting (1 req/2s). Ecritures fichiers atomiques.
+
+**Performance** : `benchmark.js` créé pour analyse de scaling. Scaling confirmé O(n^0.80), goulots identifiés : chargement IOC 40%, parsing AST 25%.
+
+862 tests, 94 regles, 14 scanners.
+
+---
+
+## v2.2.22 — Fix scan freeze (23 Fevrier 2026)
+
+Bug critique : le module-graph scanner avait sa propre liste `EXCLUDED_DIRS` hardcodee, non synchronisee avec celle du scanner principal (`findFiles` dans `src/utils.js`). Sur les gros projets, il traversait `dist/`, `build/`, `.next/`, `coverage/` et pouvait boucler infiniment ou prendre >10 minutes.
+
+**Fix** : Utilisation de la meme liste `EXCLUDED_DIRS` depuis `src/utils.js`.
+
+---
+
+## v2.2.23 — Fix .npmignore (23 Fevrier 2026)
+
+Les samples de malware du ground truth (`tests/ground-truth/`), les datasets adversariaux (`datasets/adversarial/`, `datasets/holdout-*/`), et les fixtures de test contenant du code malveillant n'etaient pas exclus du package npm publie. Un utilisateur installant `muaddib-scanner` pouvait se retrouver avec ces fichiers dans son `node_modules/`, potentiellement declenchant des faux positifs chez d'autres scanners.
+
+**Fix** : `.npmignore` mis a jour pour exclure tous ces repertoires.
+
+---
+
+## v2.2.24 — Coverage 72% → 86%, 1317 tests (23 Fevrier 2026)
+
+Expansion massive de la suite de tests : +455 tests couvrant tous les modules scanner et infrastructure.
+
+| Module | Nouveaux tests | Coverage |
+|--------|---------------|----------|
+| Scanner (AST, dataflow, obfuscation, entropy, module-graph) | ~200 | 95.8% |
+| Monitor, report, webhook | ~100 | 60-99% |
+| Scoring, safe-install, hooks-init | ~80 | 85-99% |
+| Utils, shared, IOC | ~75 | 85-93% |
+
+**Metriques finales v2.2.24** :
+- **1317 tests** (862 → 1317, +53%)
+- **86% coverage** (72% → 86%, +14pp)
+- TPR 91.8% (45/49), FPR ~13% (69/527), ADR 100% (78/78) — inchanges
+- 94 regles, 14 scanners — inchanges
 
 ---
 
@@ -1442,7 +1500,7 @@ Les 40 holdouts (v2-v5, 10 chacun) sont fusionnes dans l'evaluation ADR. Ils tes
 | **Evaluation & Red Team (v2.2)** | `muaddib evaluate`, 78 samples evasifs (38 adversariaux + 40 holdouts), TPR 91.8% (45/49), **FPR 6.2% sur packages standard (<10 .js, 18/290), ~13% global (69/527)** (v2.2.11, per-file max scoring), ADR 100% (78/78), 14 scanners, 94 regles, AI config scanner, 529 packages benins npm, 132 PyPI, 65 malwares documentes |
 | **Desobfuscation (v2.2.5)** | `src/scanner/deobfuscate.js`, 4 transformations AST + const propagation, approche additive (original + desobfusque), `--no-deobfuscate` flag |
 | **Dataflow inter-module (v2.2.6)** | `src/scanner/module-graph.js`, graphe de dependances, propagation de teinte inter-fichiers, 3-hop re-export, class methods, named exports, `--no-module-graph` flag |
-| Tests | **862 tests unitaires** + 56 fuzz + 78 adversariaux/holdout, **74% coverage** (Codecov) |
+| Tests | **1317 tests unitaires** + 56 fuzz + 78 adversariaux/holdout, **86% coverage** (c8/Codecov) |
 | **Hardening securite (v2.1.2)** | SSRF protection (shared/download.js), command injection prevention (execFileSync), path traversal (sanitizePackageName), JSON.parse protege, webhook strict |
 | Audit securite | 2 audits complets, **58 issues corrigees**, [rapport PDF](MUADDIB_Security_Audit_Report_v1.4.1.pdf) |
 
