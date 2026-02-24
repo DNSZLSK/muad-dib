@@ -84,7 +84,16 @@ function analyzeFile(content, filePath, basePath) {
     hasTempFileWrite: false,
     hasTempFileExec: false,
     hasFileDelete: false,
-    hasTmpdirInContent: /\btmpdir\b|\/dev\/shm\b|\/tmp\b/i.test(content)
+    hasTmpdirInContent: /\btmpdir\b|\/dev\/shm\b|\/tmp\b/i.test(content),
+    // SANDWORM_MODE P2: env harvesting co-occurrence
+    hasEnvEnumeration: false,  // Object.entries/keys/values(process.env)
+    hasEnvHarvestPattern: /\b(KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL|NPM|AWS|SSH|WEBHOOK)\b/.test(content),
+    // SANDWORM_MODE P2: DNS exfiltration co-occurrence
+    hasDnsRequire: /\brequire\s*\(\s*['"]dns['"]\s*\)/.test(content) || /\bdns\s*\.\s*resolve/.test(content),
+    hasBase64Encode: /\.toString\s*\(\s*['"]base64(url)?['"]\s*\)/.test(content),
+    hasDnsLoop: false,  // set when dns call inside loop context detected
+    // SANDWORM_MODE P2: LLM API key harvesting
+    llmApiKeyCount: 0
   };
 
   walk.simple(ast, {

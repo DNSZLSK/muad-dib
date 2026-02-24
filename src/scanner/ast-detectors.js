@@ -83,6 +83,38 @@ const NODE_HOOKABLE_CLASSES = [
   'OutgoingMessage', 'Socket', 'Server', 'Agent'
 ];
 
+// AI/MCP config paths targeted for config injection (SANDWORM_MODE)
+const MCP_CONFIG_PATHS = [
+  '.claude/', 'claude_desktop_config',
+  '.cursor/', 'mcp.json',
+  '.continue/',
+  '.vscode/',
+  '.windsurf/', '.codeium/'
+];
+
+// MCP content indicators in written data
+const MCP_CONTENT_PATTERNS = ['mcpServers', '"mcp"', '"server"', '"command"', '"args"'];
+
+// Git hooks names
+const GIT_HOOKS = [
+  'pre-commit', 'pre-push', 'post-checkout', 'post-merge',
+  'pre-receive', 'post-receive', 'prepare-commit-msg', 'commit-msg',
+  'pre-rebase', 'post-rewrite', 'pre-auto-gc'
+];
+
+// LLM API key environment variable names (3+ = harvesting)
+const LLM_API_KEY_VARS = [
+  'OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'GOOGLE_API_KEY',
+  'GROQ_API_KEY', 'TOGETHER_API_KEY', 'FIREWORKS_API_KEY',
+  'REPLICATE_API_KEY', 'MISTRAL_API_KEY', 'COHERE_API_KEY'
+];
+
+// Env harvesting sensitive patterns (for Object.entries/keys/values filtering)
+const ENV_HARVEST_PATTERNS = [
+  'KEY', 'SECRET', 'TOKEN', 'PASSWORD', 'CREDENTIAL',
+  'NPM', 'AWS', 'SSH', 'WEBHOOK'
+];
+
 // Paths indicating sandbox/container environment detection (anti-analysis)
 const SANDBOX_INDICATORS = [
   '/.dockerenv',
@@ -487,6 +519,84 @@ function handleCallExpression(node, ctx) {
     }
   }
 
+  // SANDWORM_MODE R5: MCP config injection — writeFileSync to AI config paths
+  if (node.callee.type === 'MemberExpression' && node.callee.property?.type === 'Identifier') {
+    const mcpWriteMethod = node.callee.property.name;
+    if (['writeFileSync', 'writeFile'].includes(mcpWriteMethod) && node.arguments.length >= 2) {
+      const mcpPathArg = node.arguments[0];
+      const mcpPathStr = extractStringValue(mcpPathArg);
+      // Also check path.join() calls
+      let mcpJoinedPath = '';
+      if (mcpPathArg?.type === 'CallExpression' && mcpPathArg.arguments) {
+        mcpJoinedPath = mcpPathArg.arguments.map(a => extractStringValue(a) || '').join('/');
+      }
+      const mcpCheckPath = (mcpPathStr || mcpJoinedPath).toLowerCase();
+      const isMcpPath = MCP_CONFIG_PATHS.some(p => mcpCheckPath.includes(p.toLowerCase()));
+      if (isMcpPath) {
+        // Check content argument for MCP-related patterns
+        const contentArg = node.arguments[1];
+        const contentStr = extractStringValue(contentArg);
+        const hasContentPattern = contentStr
+          ? MCP_CONTENT_PATTERNS.some(p => contentStr.includes(p.replace(/"/g, '')))
+          : true; // dynamic content = suspicious by default for AI config paths
+        if (hasContentPattern) {
+          ctx.threats.push({
+            type: 'mcp_config_injection',
+            severity: 'CRITICAL',
+            message: `MCP config injection: ${mcpWriteMethod}() writes to AI assistant configuration (${mcpCheckPath}). SANDWORM_MODE technique for AI toolchain poisoning.`,
+            file: ctx.relFile
+          });
+        }
+      }
+    }
+  }
+
+  // SANDWORM_MODE R6: Git hooks injection — writeFileSync to .git/hooks/
+  if (node.callee.type === 'MemberExpression' && node.callee.property?.type === 'Identifier') {
+    const gitWriteMethod = node.callee.property.name;
+    if (['writeFileSync', 'writeFile'].includes(gitWriteMethod) && node.arguments.length >= 1) {
+      const gitPathArg = node.arguments[0];
+      const gitPathStr = extractStringValue(gitPathArg);
+      let gitJoinedPath = '';
+      if (gitPathArg?.type === 'CallExpression' && gitPathArg.arguments) {
+        gitJoinedPath = gitPathArg.arguments.map(a => extractStringValue(a) || '').join('/');
+      }
+      const gitCheckPath = gitPathStr || gitJoinedPath;
+      if (/\.git[\\/]hooks[\\/]/i.test(gitCheckPath) ||
+          GIT_HOOKS.some(h => gitCheckPath.includes(h) && gitCheckPath.includes('.git'))) {
+        ctx.threats.push({
+          type: 'git_hooks_injection',
+          severity: 'HIGH',
+          message: `Git hook injection: ${gitWriteMethod}() writes to .git/hooks/. Persistence technique.`,
+          file: ctx.relFile
+        });
+      }
+    }
+  }
+
+  // SANDWORM_MODE R6: Git hooks injection via exec — git config --global init.templateDir or git config hooks
+  if ((execName || memberExec) && node.arguments.length > 0) {
+    const gitExecArg = node.arguments[0];
+    const gitExecStr = extractStringValue(gitExecArg);
+    if (gitExecStr) {
+      if (/git\s+config\s+.*init\.templateDir/i.test(gitExecStr)) {
+        ctx.threats.push({
+          type: 'git_hooks_injection',
+          severity: 'HIGH',
+          message: 'Git hook injection: modifying global git template directory via "git config init.templateDir". Persistence technique.',
+          file: ctx.relFile
+        });
+      } else if (/git\s+config\b/.test(gitExecStr) && /hooks/i.test(gitExecStr)) {
+        ctx.threats.push({
+          type: 'git_hooks_injection',
+          severity: 'HIGH',
+          message: 'Git hook injection: modifying git hooks configuration. Persistence technique.',
+          file: ctx.relFile
+        });
+      }
+    }
+  }
+
   // Detect fs.chmodSync with executable permissions (deferred to postWalk for compound check)
   if (node.callee.type === 'MemberExpression' && node.callee.property?.type === 'Identifier') {
     const chmodMethod = node.callee.property.name;
@@ -734,6 +844,32 @@ function handleCallExpression(node, ctx) {
       ctx.hasTempFileExec = true;
     }
   }
+
+  // SANDWORM_MODE R7: Detect Object.entries/keys/values(process.env)
+  if (node.callee.type === 'MemberExpression' &&
+      node.callee.object?.type === 'Identifier' && node.callee.object.name === 'Object' &&
+      node.callee.property?.type === 'Identifier' &&
+      ['entries', 'keys', 'values'].includes(node.callee.property.name) &&
+      node.arguments.length >= 1) {
+    const enumArg = node.arguments[0];
+    // Check if argument is process.env
+    if (enumArg.type === 'MemberExpression' &&
+        enumArg.object?.type === 'Identifier' && enumArg.object.name === 'process' &&
+        enumArg.property?.type === 'Identifier' && enumArg.property.name === 'env') {
+      ctx.hasEnvEnumeration = true;
+    }
+  }
+
+  // SANDWORM_MODE R8: Detect dns.resolve/resolve4/resolveTxt calls (flag for co-occurrence)
+  if (node.callee.type === 'MemberExpression' && node.callee.property?.type === 'Identifier') {
+    const dnsPropName = node.callee.property.name;
+    if (['resolve', 'resolve4', 'resolveTxt', 'resolveCname'].includes(dnsPropName)) {
+      // Set hasDnsLoop if file has dns require + base64 encoding (co-occurrence checked in postWalk)
+      if (ctx.hasDnsRequire && ctx.hasBase64Encode) {
+        ctx.hasDnsLoop = true;
+      }
+    }
+  }
 }
 
 function handleImportExpression(node, ctx) {
@@ -939,6 +1075,10 @@ function handleMemberExpression(node, ctx) {
           file: ctx.relFile
         });
       }
+      // SANDWORM_MODE R9: Count LLM API key accesses
+      if (LLM_API_KEY_VARS.includes(envVar)) {
+        ctx.llmApiKeyCount++;
+      }
     }
   }
 }
@@ -960,6 +1100,36 @@ function handlePostWalk(ctx) {
       type: 'write_execute_delete',
       severity: 'HIGH',
       message: 'Anti-forensics: write, execute, then delete. Typical malware staging pattern.',
+      file: ctx.relFile
+    });
+  }
+
+  // SANDWORM_MODE R7: env harvesting = Object.entries/keys/values(process.env) + sensitive pattern in file
+  if (ctx.hasEnvEnumeration && ctx.hasEnvHarvestPattern) {
+    ctx.threats.push({
+      type: 'env_harvesting_dynamic',
+      severity: 'HIGH',
+      message: 'Dynamic environment variable harvesting with sensitive pattern matching. Credential theft technique.',
+      file: ctx.relFile
+    });
+  }
+
+  // SANDWORM_MODE R8: DNS exfiltration = dns require + base64 encode + dns call (loop implied by co-occurrence)
+  if (ctx.hasDnsLoop) {
+    ctx.threats.push({
+      type: 'dns_chunk_exfiltration',
+      severity: 'HIGH',
+      message: 'DNS exfiltration: data encoded in DNS queries. Covert channel for firewall bypass.',
+      file: ctx.relFile
+    });
+  }
+
+  // SANDWORM_MODE R9: LLM API key harvesting (3+ different providers = harvesting)
+  if (ctx.llmApiKeyCount >= 3) {
+    ctx.threats.push({
+      type: 'llm_api_key_harvesting',
+      severity: 'MEDIUM',
+      message: `LLM API key harvesting: accessing ${ctx.llmApiKeyCount} AI provider keys. Monetization vector.`,
       file: ctx.relFile
     });
   }

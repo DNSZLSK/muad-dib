@@ -713,6 +713,66 @@ const RULES = {
     mitre: 'T1070.004'
   },
 
+  mcp_config_injection: {
+    id: 'MUADDIB-AST-027',
+    name: 'MCP Config Injection',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Injection de configuration MCP: ecriture dans les fichiers de configuration d\'assistants IA (.claude/, .cursor/, .continue/, .vscode/, .windsurf/). Technique SANDWORM_MODE pour empoisonner la chaine d\'outils IA.',
+    references: [
+      'https://attack.mitre.org/techniques/T1546/016/'
+    ],
+    mitre: 'T1546.016'
+  },
+
+  git_hooks_injection: {
+    id: 'MUADDIB-AST-028',
+    name: 'Git Hooks Injection',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'Injection de hooks Git: ecriture dans .git/hooks/ ou modification de git config init.templateDir. Technique de persistence via hooks pre-commit, pre-push, post-checkout.',
+    references: [
+      'https://attack.mitre.org/techniques/T1546/004/'
+    ],
+    mitre: 'T1546.004'
+  },
+
+  env_harvesting_dynamic: {
+    id: 'MUADDIB-AST-029',
+    name: 'Dynamic Environment Variable Harvesting',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'Collecte dynamique de variables d\'environnement via Object.entries/keys/values(process.env) avec filtrage par patterns sensibles (TOKEN, SECRET, KEY, PASSWORD, AWS, SSH). Technique de vol de credentials.',
+    references: [
+      'https://attack.mitre.org/techniques/T1552/001/'
+    ],
+    mitre: 'T1552.001'
+  },
+
+  dns_chunk_exfiltration: {
+    id: 'MUADDIB-AST-030',
+    name: 'DNS Chunk Exfiltration',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'Exfiltration DNS: donnees encodees en base64 dans les requetes DNS. Canal covert pour contourner les firewalls. Pattern: dns.resolve + Buffer.from().toString("base64").',
+    references: [
+      'https://attack.mitre.org/techniques/T1048/003/'
+    ],
+    mitre: 'T1048.003'
+  },
+
+  llm_api_key_harvesting: {
+    id: 'MUADDIB-AST-031',
+    name: 'LLM API Key Harvesting',
+    severity: 'MEDIUM',
+    confidence: 'medium',
+    description: 'Collecte de cles API LLM: acces a 3+ variables d\'environnement de providers IA (OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLE_API_KEY, etc.). Vecteur de monetisation.',
+    references: [
+      'https://attack.mitre.org/techniques/T1552/001/'
+    ],
+    mitre: 'T1552.001'
+  },
+
   ai_agent_abuse: {
     id: 'MUADDIB-AST-013',
     name: 'AI Agent Weaponization',

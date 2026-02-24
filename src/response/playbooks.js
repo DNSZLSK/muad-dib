@@ -354,6 +354,31 @@ const PLAYBOOKS = {
     'execution via require() ou Module._compile(), puis suppression via unlinkSync/rmSync. ' +
     'Ce pattern de staging est typique des malwares cherchant a eviter la detection post-mortem. ' +
     'Isoler la machine et inspecter les artefacts temporaires avant nettoyage.',
+
+  mcp_config_injection:
+    'CRITIQUE: Ecriture dans les fichiers de configuration MCP d\'assistants IA (.claude/, .cursor/, .continue/, .vscode/). ' +
+    'Technique SANDWORM_MODE: le malware empoisonne la configuration MCP pour ajouter des serveurs malveillants. ' +
+    'Verifier immediatement les fichiers de config IA. Supprimer les entrees MCP non reconnues. Supprimer le package.',
+
+  git_hooks_injection:
+    'Injection de hooks Git detectee. Le package ecrit dans .git/hooks/ (pre-commit, pre-push, etc.) ' +
+    'ou modifie git config init.templateDir pour la persistence globale. ' +
+    'Verifier .git/hooks/ et git config --global --list. Supprimer les hooks non reconnus.',
+
+  env_harvesting_dynamic:
+    'Collecte dynamique de variables d\'environnement via Object.entries/keys/values(process.env) ' +
+    'avec filtrage par patterns sensibles. Technique de vol de credentials a grande echelle. ' +
+    'Verifier les tokens/secrets exposes. Revoquer immediatement les credentials compromis.',
+
+  dns_chunk_exfiltration:
+    'Exfiltration via requetes DNS detectee. Les donnees sont encodees en base64 et envoyees comme sous-domaines DNS. ' +
+    'Cette technique contourne les firewalls et proxies car le DNS est rarement filtre. ' +
+    'Bloquer les requetes DNS sortantes du package. Verifier les donnees exfiltrees.',
+
+  llm_api_key_harvesting:
+    'Acces a 3+ cles API de providers LLM (OpenAI, Anthropic, Google, etc.). Usage unique = legitime, ' +
+    'acces multiples = collecte pour revente ou abus. Verifier si le package a une raison ' +
+    'legitime d\'acceder a plusieurs providers. Revoquer les cles exposees si necessaire.',
 };
 
 function getPlaybook(threatType) {
