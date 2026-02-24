@@ -675,6 +675,44 @@ const RULES = {
     mitre: 'T1059'
   },
 
+  zlib_inflate_eval: {
+    id: 'MUADDIB-AST-024',
+    name: 'Obfuscated Payload via Zlib Inflate',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Payload obfusque: zlib inflate + decodage base64 + execution dynamique (eval/Function/Module._compile) dans le meme fichier. Aucun package legitime n\'utilise ce pattern. Technique SANDWORM_MODE (fev. 2026).',
+    references: [
+      'https://socket.dev/blog/sandworm-mode-campaign',
+      'https://attack.mitre.org/techniques/T1027/002/'
+    ],
+    mitre: 'T1027.002'
+  },
+
+  module_compile_dynamic: {
+    id: 'MUADDIB-AST-025',
+    name: 'Dynamic Module Compile Execution',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Module._compile() avec argument dynamique (non-literal). Execution de code en memoire sans ecriture sur disque. Technique d\'evasion malware courante.',
+    references: [
+      'https://blog.npmjs.org/post/180565383195/details-about-the-event-stream-incident',
+      'https://attack.mitre.org/techniques/T1059/007/'
+    ],
+    mitre: 'T1059'
+  },
+
+  write_execute_delete: {
+    id: 'MUADDIB-AST-026',
+    name: 'Anti-Forensics Write-Execute-Delete',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'Anti-forensique: ecriture dans un repertoire temporaire, execution, puis suppression. Pattern typique de staging malware pour eviter la detection post-mortem.',
+    references: [
+      'https://attack.mitre.org/techniques/T1070/004/'
+    ],
+    mitre: 'T1070.004'
+  },
+
   ai_agent_abuse: {
     id: 'MUADDIB-AST-013',
     name: 'AI Agent Weaponization',

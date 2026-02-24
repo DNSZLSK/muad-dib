@@ -261,10 +261,13 @@ function buildTemporalWebhookEmbed(temporalResult) {
   };
 }
 
-async function tryTemporalAlert(temporalResult) {
-  // Temporal anomalies are logged only — no webhook unless --verbose
-  console.log(`[MONITOR] ANOMALY (logged only): temporal lifecycle change for ${temporalResult.packageName}`);
-  if (!isVerboseMode()) return;
+async function tryTemporalAlert(temporalResult, options) {
+  const force = options && options.force;
+  // Temporal anomalies are logged only — no webhook unless --verbose or forced
+  if (!force) {
+    console.log(`[MONITOR] ANOMALY (logged only): temporal lifecycle change for ${temporalResult.packageName}`);
+  }
+  if (!force && !isVerboseMode()) return;
 
   const url = getWebhookUrl();
   if (!url) return;
@@ -318,10 +321,13 @@ function buildTemporalAstWebhookEmbed(astResult) {
   };
 }
 
-async function tryTemporalAstAlert(astResult) {
-  // AST anomalies are logged only — no webhook unless --verbose
-  console.log(`[MONITOR] ANOMALY (logged only): AST change for ${astResult.packageName}`);
-  if (!isVerboseMode()) return;
+async function tryTemporalAstAlert(astResult, options) {
+  const force = options && options.force;
+  // AST anomalies are logged only — no webhook unless --verbose or forced
+  if (!force) {
+    console.log(`[MONITOR] ANOMALY (logged only): AST change for ${astResult.packageName}`);
+  }
+  if (!force && !isVerboseMode()) return;
 
   const url = getWebhookUrl();
   if (!url) return;
@@ -416,10 +422,13 @@ function buildPublishAnomalyWebhookEmbed(publishResult) {
   };
 }
 
-async function tryTemporalPublishAlert(publishResult) {
-  // Publish anomalies are logged only — no webhook unless --verbose
-  console.log(`[MONITOR] ANOMALY (logged only): publish frequency for ${publishResult.packageName}`);
-  if (!isVerboseMode()) return;
+async function tryTemporalPublishAlert(publishResult, options) {
+  const force = options && options.force;
+  // Publish anomalies are logged only — no webhook unless --verbose or forced
+  if (!force) {
+    console.log(`[MONITOR] ANOMALY (logged only): publish frequency for ${publishResult.packageName}`);
+  }
+  if (!force && !isVerboseMode()) return;
 
   const url = getWebhookUrl();
   if (!url) return;
@@ -517,10 +526,13 @@ function buildMaintainerChangeWebhookEmbed(maintainerResult) {
   };
 }
 
-async function tryTemporalMaintainerAlert(maintainerResult) {
-  // Maintainer changes are logged only — no webhook unless --verbose
-  console.log(`[MONITOR] ANOMALY (logged only): maintainer change for ${maintainerResult.packageName}`);
-  if (!isVerboseMode()) return;
+async function tryTemporalMaintainerAlert(maintainerResult, options) {
+  const force = options && options.force;
+  // Maintainer changes are logged only — no webhook unless --verbose or forced
+  if (!force) {
+    console.log(`[MONITOR] ANOMALY (logged only): maintainer change for ${maintainerResult.packageName}`);
+  }
+  if (!force && !isVerboseMode()) return;
 
   const url = getWebhookUrl();
   if (!url) return;
@@ -1612,6 +1624,41 @@ async function poll(state) {
 }
 
 /**
+ * Returns the highest severity level from all suspicious temporal results.
+ * Used to decide whether a temporal alert can be downgraded to FALSE POSITIVE.
+ * Returns 'CRITICAL', 'HIGH', 'MEDIUM', 'LOW', or null if no findings.
+ */
+function getTemporalMaxSeverity(temporalResult, astResult, publishResult, maintainerResult) {
+  const SEVERITY_ORDER = { CRITICAL: 4, HIGH: 3, MEDIUM: 2, LOW: 1 };
+  let maxLevel = 0;
+  let maxSeverity = null;
+
+  const allFindings = [];
+  if (temporalResult && temporalResult.suspicious && temporalResult.findings) {
+    allFindings.push(...temporalResult.findings);
+  }
+  if (astResult && astResult.suspicious && astResult.findings) {
+    allFindings.push(...astResult.findings);
+  }
+  if (publishResult && publishResult.suspicious && publishResult.anomalies) {
+    allFindings.push(...publishResult.anomalies);
+  }
+  if (maintainerResult && maintainerResult.suspicious && maintainerResult.findings) {
+    allFindings.push(...maintainerResult.findings);
+  }
+
+  for (const f of allFindings) {
+    const level = SEVERITY_ORDER[f.severity] || 0;
+    if (level > maxLevel) {
+      maxLevel = level;
+      maxSeverity = f.severity;
+    }
+  }
+
+  return maxSeverity;
+}
+
+/**
  * Returns true if publish_anomaly is the ONLY suspicious temporal result.
  * publish_anomaly alone is too noisy for webhooks — only alert when combined
  * with another anomaly (lifecycle, AST, maintainer).
@@ -1710,9 +1757,24 @@ async function resolveTarballAndScan(item) {
     // Sandbox ran and package is CLEAN → suppress temporal webhooks
     if (sandboxResult && sandboxResult.score === 0) {
       console.log(`[MONITOR] FALSE POSITIVE (sandbox clean, no alert): ${item.name}@${item.version}`);
-    // Static scan is CLEAN (0 findings) and no sandbox ran → suppress temporal webhooks
+    // Static scan is CLEAN (0 findings) and no sandbox ran
     } else if (staticClean && !sandboxResult) {
-      console.log(`[MONITOR] FALSE POSITIVE (static clean, no alert): ${item.name}@${item.version}`);
+      // Temporal CRITICAL/HIGH cannot be downgraded — "static clean" may mean obfuscated payload
+      const temporalMaxSev = getTemporalMaxSeverity(temporalResult, astResult, publishResult, maintainerResult);
+      if (temporalMaxSev === 'CRITICAL' || temporalMaxSev === 'HIGH') {
+        console.log(`[MONITOR] Temporal ${temporalMaxSev} preserved despite static clean scan: ${item.name}@${item.version}`);
+        console.log(`[MONITOR] SUSPECT (temporal anomaly, possible obfuscated payload): ${item.name}@${item.version}`);
+        stats.suspect++;
+        stats.clean--;
+        updateScanStats('suspect');
+        // Force-send temporal webhooks (bypass verbose mode check)
+        if (temporalResult && temporalResult.suspicious) await tryTemporalAlert(temporalResult, { force: true });
+        if (astResult && astResult.suspicious) await tryTemporalAstAlert(astResult, { force: true });
+        if (publishResult && publishResult.suspicious) await tryTemporalPublishAlert(publishResult, { force: true });
+        if (maintainerResult && maintainerResult.suspicious) await tryTemporalMaintainerAlert(maintainerResult, { force: true });
+      } else {
+        console.log(`[MONITOR] FALSE POSITIVE (static clean, no alert): ${item.name}@${item.version}`);
+      }
     // publish_anomaly alone → no webhook (too noisy, not actionable alone)
     } else if (isPublishAnomalyOnly(temporalResult, astResult, publishResult, maintainerResult)) {
       console.log(`[MONITOR] PUBLISH ANOMALY (alone, no alert): ${item.name}@${item.version}`);
@@ -1787,6 +1849,7 @@ module.exports = {
   runTemporalMaintainerCheck,
   isCanaryEnabled,
   buildCanaryExfiltrationWebhookEmbed,
+  getTemporalMaxSeverity,
   isPublishAnomalyOnly,
   isVerboseMode,
   setVerboseMode,

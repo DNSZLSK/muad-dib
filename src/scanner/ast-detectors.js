@@ -565,6 +565,7 @@ function handleCallExpression(node, ctx) {
 
   if (callName === 'eval') {
     ctx.hasEvalInFile = true;
+    ctx.hasDynamicExec = true;
     // Detect staged eval decode
     if (node.arguments.length === 1 && hasDecodeArg(node.arguments[0])) {
       ctx.threats.push({
@@ -585,6 +586,7 @@ function handleCallExpression(node, ctx) {
       });
     }
   } else if (callName === 'Function') {
+    ctx.hasDynamicExec = true;
     // Detect staged Function decode
     if (node.arguments.length >= 1 && hasDecodeArg(node.arguments[node.arguments.length - 1])) {
       ctx.threats.push({
@@ -679,12 +681,57 @@ function handleCallExpression(node, ctx) {
       });
     }
     if (propName === '_compile') {
+      ctx.hasDynamicExec = true;
       ctx.threats.push({
         type: 'module_compile',
         severity: 'CRITICAL',
         message: 'module._compile() detected — executes arbitrary code from string in module context (flatmap-stream pattern).',
         file: ctx.relFile
       });
+      // SANDWORM_MODE: Module._compile with non-literal argument = dynamic code execution
+      if (node.arguments.length >= 1 && !hasOnlyStringLiteralArgs(node)) {
+        ctx.threats.push({
+          type: 'module_compile_dynamic',
+          severity: 'CRITICAL',
+          message: 'In-memory code execution via Module._compile(). Common malware evasion technique.',
+          file: ctx.relFile
+        });
+      }
+      // Module._compile counts as temp file exec for write-execute-delete pattern
+      ctx.hasTempFileExec = ctx.hasTempFileExec || ctx.hasTmpdirInContent;
+    }
+
+    // SANDWORM_MODE: Track writeFileSync/writeFile to temp paths
+    if (propName === 'writeFileSync' || propName === 'writeFile') {
+      const arg = node.arguments && node.arguments[0];
+      if (arg) {
+        const strVal = extractStringValue(arg);
+        if (strVal && (/\/dev\/shm\b/.test(strVal) || /\btmp\b/i.test(strVal) || /\btemp\b/i.test(strVal))) {
+          ctx.hasTempFileWrite = true;
+        }
+        // Variable reference to tmpdir/temp path
+        if (!strVal && (arg.type === 'Identifier' || arg.type === 'CallExpression' || arg.type === 'MemberExpression')) {
+          // Dynamic path — check if file content involves tmpdir patterns
+          ctx.hasTempFileWrite = ctx.hasTempFileWrite || ctx.hasTmpdirInContent;
+        }
+      }
+    }
+
+    // SANDWORM_MODE: Track unlinkSync/rmSync (file deletion)
+    if (propName === 'unlinkSync' || propName === 'unlink' || propName === 'rmSync') {
+      ctx.hasFileDelete = true;
+    }
+  }
+
+  // SANDWORM_MODE: Track require() of temp path (execution of temp file)
+  if (callName === 'require' && node.arguments.length > 0) {
+    const arg = node.arguments[0];
+    const strVal = extractStringValue(arg);
+    if (strVal && (/\/dev\/shm\b/.test(strVal) || /\btmp\b/i.test(strVal) || /\btemp\b/i.test(strVal))) {
+      ctx.hasTempFileExec = true;
+    } else if (!strVal && ctx.hasTmpdirInContent) {
+      // Variable argument in a file that references tmpdir paths
+      ctx.hasTempFileExec = true;
     }
   }
 }
@@ -897,6 +944,26 @@ function handleMemberExpression(node, ctx) {
 }
 
 function handlePostWalk(ctx) {
+  // SANDWORM_MODE: zlib inflate + base64 decode + eval/Function/Module._compile = obfuscated payload
+  if (ctx.hasZlibInflate && ctx.hasBase64Decode && ctx.hasDynamicExec) {
+    ctx.threats.push({
+      type: 'zlib_inflate_eval',
+      severity: 'CRITICAL',
+      message: 'Obfuscated payload: zlib inflate + base64 decode + dynamic execution. No legitimate package uses this pattern.',
+      file: ctx.relFile
+    });
+  }
+
+  // SANDWORM_MODE: write + execute + delete = anti-forensics staging
+  if (ctx.hasTempFileWrite && ctx.hasTempFileExec && ctx.hasFileDelete) {
+    ctx.threats.push({
+      type: 'write_execute_delete',
+      severity: 'HIGH',
+      message: 'Anti-forensics: write, execute, then delete. Typical malware staging pattern.',
+      file: ctx.relFile
+    });
+  }
+
   // JS reverse shell pattern
   if (ctx.hasJsReverseShell) {
     ctx.threats.push({

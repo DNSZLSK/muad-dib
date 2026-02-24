@@ -75,7 +75,16 @@ function analyzeFile(content, filePath, basePath) {
       /\.pipe\b/.test(content) &&
       (/\bspawn\b/.test(content) || /\bstdin\b/.test(content) || /\bstdout\b/.test(content)),
     hasBinaryFileLiteral: /\.(png|jpg|jpeg|gif|bmp|ico|wasm)\b/i.test(content),
-    hasEvalInFile: false
+    hasEvalInFile: false,
+    // SANDWORM_MODE: zlib inflate + base64 + eval co-occurrence
+    hasZlibInflate: /\brequire\s*\(\s*['"]zlib['"]\s*\)/.test(content) || /\bzlib\s*\.\s*inflate/.test(content),
+    hasBase64Decode: /Buffer\.from\s*\([^)]*,\s*['"]base64['"]/.test(content),
+    hasDynamicExec: false,  // set in handleCallExpression for eval/Function/Module._compile
+    // SANDWORM_MODE: write + execute + delete anti-forensics
+    hasTempFileWrite: false,
+    hasTempFileExec: false,
+    hasFileDelete: false,
+    hasTmpdirInContent: /\btmpdir\b|\/dev\/shm\b|\/tmp\b/i.test(content)
   };
 
   walk.simple(ast, {
