@@ -593,6 +593,131 @@ async function runAstTests() {
       assert(t, 'Should detect readdirSync on .github/workflows');
     } finally { cleanupTemp(tmp); }
   });
+
+  // ============================================
+  // SANDWORM_MODE: zlib_inflate_eval (AST-024)
+  // ============================================
+
+  await asyncTest('AST: Detects zlib + base64 + eval (SANDWORM_MODE pattern)', async () => {
+    const code = `
+const zlib = require('zlib');
+const payload = Buffer.from('eJzLSM3JyQcABJgB8Q==', 'base64');
+const decoded = zlib.inflateSync(payload).toString();
+eval(decoded);
+`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'zlib_inflate_eval');
+      assert(t, 'Should detect zlib + base64 + eval as zlib_inflate_eval');
+      assert(t.severity === 'CRITICAL', 'Should be CRITICAL severity');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: zlib + base64 without eval → no zlib_inflate_eval detection', async () => {
+    const code = `
+const zlib = require('zlib');
+const payload = Buffer.from('eJzLSM3JyQcABJgB8Q==', 'base64');
+const decoded = zlib.inflateSync(payload).toString();
+console.log(decoded);
+`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'zlib_inflate_eval');
+      assert(!t, 'Should NOT detect zlib_inflate_eval without eval/Function');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: eval + base64 without zlib → detected by existing rule, not AST-024', async () => {
+    const code = `
+const payload = Buffer.from('Y29uc29sZS5sb2coMSk=', 'base64').toString();
+eval(payload);
+`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const zlibRule = result.threats.find(t => t.type === 'zlib_inflate_eval');
+      assert(!zlibRule, 'Should NOT trigger zlib_inflate_eval without zlib');
+      // Should still be detected by existing eval rule
+      const evalRule = result.threats.find(t => t.type === 'dangerous_call_eval');
+      assert(evalRule, 'Should still detect eval by existing rule');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // ============================================
+  // SANDWORM_MODE: module_compile_dynamic (AST-025)
+  // ============================================
+
+  await asyncTest('AST: Detects Module._compile(dynamicVar) as CRITICAL', async () => {
+    const code = `
+const m = require('module');
+const mod = new m();
+const code = getPayload();
+mod._compile(code, '/tmp/payload.js');
+`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'module_compile_dynamic');
+      assert(t, 'Should detect Module._compile with dynamic argument');
+      assert(t.severity === 'CRITICAL', 'Should be CRITICAL severity');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: Module._compile with string literal → no module_compile_dynamic', async () => {
+    const code = `
+const m = new module.constructor();
+m._compile('console.log("hello")', 'test.js');
+`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'module_compile_dynamic');
+      assert(!t, 'Should NOT trigger module_compile_dynamic for string literal args');
+      // Should still detect the base module_compile rule
+      const base = result.threats.find(t => t.type === 'module_compile');
+      assert(base, 'Should still detect module_compile base rule');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // ============================================
+  // SANDWORM_MODE: write_execute_delete (AST-026)
+  // ============================================
+
+  await asyncTest('AST: Detects write + require + unlink anti-forensics pattern', async () => {
+    const code = `
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const tmpFile = path.join(os.tmpdir(), 'payload.js');
+fs.writeFileSync(tmpFile, maliciousCode);
+require(tmpFile);
+fs.unlinkSync(tmpFile);
+`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'write_execute_delete');
+      assert(t, 'Should detect write + require + unlink anti-forensics');
+      assert(t.severity === 'HIGH', 'Should be HIGH severity');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: write without delete → no write_execute_delete detection', async () => {
+    const code = `
+const fs = require('fs');
+const tmpFile = '/tmp/data.js';
+fs.writeFileSync(tmpFile, someCode);
+require(tmpFile);
+`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'write_execute_delete');
+      assert(!t, 'Should NOT trigger write_execute_delete without file deletion');
+    } finally { cleanupTemp(tmp); }
+  });
 }
 
 module.exports = { runAstTests };

@@ -28,7 +28,7 @@ async function runMonitorTests() {
     isTemporalPublishEnabled, buildPublishAnomalyWebhookEmbed,
     isTemporalMaintainerEnabled, buildMaintainerChangeWebhookEmbed,
     isCanaryEnabled, buildCanaryExfiltrationWebhookEmbed,
-    isPublishAnomalyOnly,
+    getTemporalMaxSeverity, isPublishAnomalyOnly,
     isVerboseMode, setVerboseMode, hasIOCMatch, IOC_MATCH_TYPES,
     DETECTIONS_FILE, appendDetection, loadDetections, getDetectionStats,
     SCAN_STATS_FILE, loadScanStats, updateScanStats,
@@ -1379,30 +1379,98 @@ async function runMonitorTests() {
     }
   });
 
-  test('MONITOR: temporal webhook suppressed when static scan is CLEAN and no sandbox', () => {
+  test('MONITOR: temporal webhook suppressed when static scan is CLEAN and no sandbox (MEDIUM/LOW)', () => {
     // Simulate the decision logic from resolveTarballAndScan:
-    // If staticClean=true and sandboxResult=null → no webhook (false positive)
+    // If staticClean=true and sandboxResult=null AND temporal is MEDIUM/LOW → no webhook (false positive)
     // If staticClean=false and sandboxResult=null → send webhook (static found threats)
     // If staticClean=true and sandboxResult.score=0 → no webhook (sandbox confirms clean)
+    // If staticClean=true and temporal is CRITICAL/HIGH → SUSPECT (send webhook)
 
-    function shouldSendTemporalWebhook(staticClean, sandboxResult) {
+    function shouldSendTemporalWebhook(staticClean, sandboxResult, temporalMaxSev) {
       if (sandboxResult && sandboxResult.score === 0) return false;
-      if (staticClean && !sandboxResult) return false;
+      if (staticClean && !sandboxResult) {
+        // CRITICAL/HIGH temporal cannot be downgraded
+        if (temporalMaxSev === 'CRITICAL' || temporalMaxSev === 'HIGH') return true;
+        return false;
+      }
       return true;
     }
 
-    assert(shouldSendTemporalWebhook(true, null) === false,
-      'Static CLEAN + no sandbox → no temporal webhook');
-    assert(shouldSendTemporalWebhook(true, { score: 0 }) === false,
-      'Static CLEAN + sandbox CLEAN → no temporal webhook');
-    assert(shouldSendTemporalWebhook(false, null) === true,
+    assert(shouldSendTemporalWebhook(true, null, 'MEDIUM') === false,
+      'Static CLEAN + no sandbox + temporal MEDIUM → no temporal webhook');
+    assert(shouldSendTemporalWebhook(true, null, 'LOW') === false,
+      'Static CLEAN + no sandbox + temporal LOW → no temporal webhook');
+    assert(shouldSendTemporalWebhook(true, null, 'CRITICAL') === true,
+      'Static CLEAN + no sandbox + temporal CRITICAL → SUSPECT, send webhook');
+    assert(shouldSendTemporalWebhook(true, null, 'HIGH') === true,
+      'Static CLEAN + no sandbox + temporal HIGH → SUSPECT, send webhook');
+    assert(shouldSendTemporalWebhook(true, { score: 0 }, 'CRITICAL') === false,
+      'Static CLEAN + sandbox CLEAN → no temporal webhook (even if CRITICAL)');
+    assert(shouldSendTemporalWebhook(false, null, 'MEDIUM') === true,
       'Static SUSPECT + no sandbox → send temporal webhook');
-    assert(shouldSendTemporalWebhook(false, { score: 60 }) === true,
+    assert(shouldSendTemporalWebhook(false, { score: 60 }, 'HIGH') === true,
       'Static SUSPECT + sandbox SUSPECT → send temporal webhook');
-    assert(shouldSendTemporalWebhook(false, { score: 0 }) === false,
+    assert(shouldSendTemporalWebhook(false, { score: 0 }, 'CRITICAL') === false,
       'Static SUSPECT + sandbox CLEAN → no temporal webhook');
-    assert(shouldSendTemporalWebhook(true, { score: 60 }) === true,
+    assert(shouldSendTemporalWebhook(true, { score: 60 }, 'HIGH') === true,
       'Static CLEAN + sandbox SUSPECT → send temporal webhook');
+  });
+
+  // ============================================
+  // TEMPORAL MAX SEVERITY HELPER TESTS
+  // ============================================
+
+  console.log('\n=== TEMPORAL MAX SEVERITY TESTS ===\n');
+
+  test('MONITOR: getTemporalMaxSeverity returns CRITICAL when lifecycle has CRITICAL', () => {
+    const temporal = { suspicious: true, findings: [{ severity: 'CRITICAL', type: 'lifecycle_added', script: 'postinstall' }] };
+    assert(getTemporalMaxSeverity(temporal, null, null, null) === 'CRITICAL',
+      'Should return CRITICAL');
+  });
+
+  test('MONITOR: getTemporalMaxSeverity returns HIGH from AST result', () => {
+    const ast = { suspicious: true, findings: [{ severity: 'HIGH', pattern: 'child_process' }] };
+    assert(getTemporalMaxSeverity(null, ast, null, null) === 'HIGH',
+      'Should return HIGH from AST');
+  });
+
+  test('MONITOR: getTemporalMaxSeverity returns highest across multiple sources', () => {
+    const temporal = { suspicious: true, findings: [{ severity: 'MEDIUM' }] };
+    const ast = { suspicious: true, findings: [{ severity: 'HIGH' }] };
+    const publish = { suspicious: true, anomalies: [{ severity: 'LOW' }] };
+    const maintainer = { suspicious: true, findings: [{ severity: 'CRITICAL' }] };
+    assert(getTemporalMaxSeverity(temporal, ast, publish, maintainer) === 'CRITICAL',
+      'Should return CRITICAL as highest across all sources');
+  });
+
+  test('MONITOR: getTemporalMaxSeverity returns null when no findings', () => {
+    assert(getTemporalMaxSeverity(null, null, null, null) === null,
+      'Should return null when all null');
+  });
+
+  test('MONITOR: getTemporalMaxSeverity ignores non-suspicious results', () => {
+    const temporal = { suspicious: false, findings: [{ severity: 'CRITICAL' }] };
+    assert(getTemporalMaxSeverity(temporal, null, null, null) === null,
+      'Should return null when suspicious=false even with CRITICAL findings');
+  });
+
+  test('MONITOR: getTemporalMaxSeverity returns MEDIUM when only MEDIUM findings', () => {
+    const publish = { suspicious: true, anomalies: [{ severity: 'MEDIUM' }] };
+    assert(getTemporalMaxSeverity(null, null, publish, null) === 'MEDIUM',
+      'Should return MEDIUM from publish anomaly');
+  });
+
+  test('MONITOR: getTemporalMaxSeverity handles empty findings arrays', () => {
+    const temporal = { suspicious: true, findings: [] };
+    assert(getTemporalMaxSeverity(temporal, null, null, null) === null,
+      'Should return null for empty findings');
+  });
+
+  test('MONITOR: getTemporalMaxSeverity picks HIGH over MEDIUM from mixed sources', () => {
+    const temporal = { suspicious: true, findings: [{ severity: 'MEDIUM' }] };
+    const ast = { suspicious: true, findings: [{ severity: 'HIGH' }] };
+    assert(getTemporalMaxSeverity(temporal, ast, null, null) === 'HIGH',
+      'Should return HIGH as max of MEDIUM and HIGH');
   });
 
   // ============================================
@@ -3948,6 +4016,60 @@ async function runMonitorTests() {
     } finally {
       if (origEnv !== undefined) process.env.MUADDIB_WEBHOOK_URL = origEnv;
     }
+  });
+
+  // ============================================
+  // SANDWORM_MODE FIX: TEMPORAL CRITICAL/HIGH PRESERVED DESPITE STATIC CLEAN
+  // ============================================
+
+  console.log('\n=== SANDWORM_MODE FIX TESTS ===\n');
+
+  test('MONITOR: temporal CRITICAL + static clean → verdict is SUSPECT not FALSE POSITIVE', () => {
+    // Simulate the decision logic from resolveTarballAndScan
+    const temporalResult = { suspicious: true, findings: [{ severity: 'CRITICAL', type: 'lifecycle_added', script: 'postinstall' }] };
+    const staticClean = true;
+    const sandboxResult = null;
+
+    const temporalMaxSev = getTemporalMaxSeverity(temporalResult, null, null, null);
+    const isSuspect = (temporalMaxSev === 'CRITICAL' || temporalMaxSev === 'HIGH');
+
+    assert(isSuspect === true, 'Temporal CRITICAL + static clean should be SUSPECT');
+    assert(temporalMaxSev === 'CRITICAL', 'Max severity should be CRITICAL');
+  });
+
+  test('MONITOR: temporal HIGH + static clean → verdict is SUSPECT not FALSE POSITIVE', () => {
+    const astResult = { suspicious: true, findings: [{ severity: 'HIGH', pattern: 'child_process' }] };
+    const temporalMaxSev = getTemporalMaxSeverity(null, astResult, null, null);
+    const isSuspect = (temporalMaxSev === 'CRITICAL' || temporalMaxSev === 'HIGH');
+
+    assert(isSuspect === true, 'Temporal HIGH + static clean should be SUSPECT');
+    assert(temporalMaxSev === 'HIGH', 'Max severity should be HIGH');
+  });
+
+  test('MONITOR: temporal MEDIUM + static clean → verdict remains FALSE POSITIVE', () => {
+    const publishResult = { suspicious: true, anomalies: [{ severity: 'MEDIUM', type: 'rapid_succession' }] };
+    const temporalMaxSev = getTemporalMaxSeverity(null, null, publishResult, null);
+    const isSuspect = (temporalMaxSev === 'CRITICAL' || temporalMaxSev === 'HIGH');
+
+    assert(isSuspect === false, 'Temporal MEDIUM + static clean should remain FALSE POSITIVE');
+  });
+
+  test('MONITOR: temporal LOW + static clean → verdict remains FALSE POSITIVE', () => {
+    const maintainerResult = { suspicious: true, findings: [{ severity: 'LOW' }] };
+    const temporalMaxSev = getTemporalMaxSeverity(null, null, null, maintainerResult);
+    const isSuspect = (temporalMaxSev === 'CRITICAL' || temporalMaxSev === 'HIGH');
+
+    assert(isSuspect === false, 'Temporal LOW + static clean should remain FALSE POSITIVE');
+  });
+
+  test('MONITOR: mixed temporal (MEDIUM lifecycle + CRITICAL AST) + static clean → SUSPECT', () => {
+    const temporal = { suspicious: true, findings: [{ severity: 'MEDIUM' }] };
+    const ast = { suspicious: true, findings: [{ severity: 'CRITICAL', pattern: 'eval' }] };
+    const temporalMaxSev = getTemporalMaxSeverity(temporal, ast, null, null);
+    const isSuspect = (temporalMaxSev === 'CRITICAL' || temporalMaxSev === 'HIGH');
+
+    assert(isSuspect === true, 'Mixed temporal with any CRITICAL should be SUSPECT');
+    assert(temporalMaxSev === 'CRITICAL', 'Should pick CRITICAL as max');
   });
 }
 

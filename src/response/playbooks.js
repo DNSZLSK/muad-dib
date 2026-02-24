@@ -338,6 +338,22 @@ const PLAYBOOKS = {
     'CRITIQUE: module._compile() detecte. Cette API Node.js interne execute du code arbitraire ' +
     'a partir d\'une chaine dans le contexte d\'un module. Utilisee dans flatmap-stream pour executer ' +
     'un payload dechiffre sans ecrire sur disque. Isoler immediatement. Analyser la source de la chaine compilee.',
+
+  zlib_inflate_eval:
+    'CRITIQUE: Payload obfusque detecte — zlib inflate + decodage base64 + execution dynamique dans le meme fichier. ' +
+    'Ce pattern est la signature de la campagne SANDWORM_MODE (fev. 2026). Aucun package legitime ne combine ces 3 elements. ' +
+    'Isoler immediatement la machine. Decoder manuellement: zlib.inflateSync(Buffer.from(data, "base64")).toString(). Supprimer le package.',
+
+  module_compile_dynamic:
+    'CRITIQUE: Module._compile() avec argument dynamique (variable, expression). Execution de code en memoire ' +
+    'sans ecriture sur disque. Technique d\'evasion utilisee dans flatmap-stream et SANDWORM_MODE. ' +
+    'Isoler immediatement. Tracer la source de la chaine compilee pour extraire le payload.',
+
+  write_execute_delete:
+    'Pattern anti-forensique detecte: ecriture dans un repertoire temporaire (/tmp, /dev/shm, os.tmpdir()), ' +
+    'execution via require() ou Module._compile(), puis suppression via unlinkSync/rmSync. ' +
+    'Ce pattern de staging est typique des malwares cherchant a eviter la detection post-mortem. ' +
+    'Isoler la machine et inspecter les artefacts temporaires avant nettoyage.',
 };
 
 function getPlaybook(threatType) {
