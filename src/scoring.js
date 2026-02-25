@@ -107,6 +107,7 @@ const FP_COUNT_THRESHOLDS = {
   suspicious_dataflow: { maxCount: 5, to: 'LOW' },
   obfuscation_detected: { maxCount: 3, to: 'LOW' },
   module_compile_dynamic: { maxCount: 3, from: 'CRITICAL', to: 'LOW' },
+  module_compile: { maxCount: 3, from: 'CRITICAL', to: 'LOW' },
   zlib_inflate_eval: { maxCount: 2, from: 'CRITICAL', to: 'LOW' }
 };
 
@@ -151,12 +152,29 @@ function applyFPReductions(threats, reachableFiles) {
       t.severity = rule.to;
     }
 
+    // require_cache_poison: single hit → HIGH (plugin dedup/hot-reload, not malware)
+    // Malware poisons cache repeatedly; a single access is framework behavior
+    if (t.type === 'require_cache_poison' && t.severity === 'CRITICAL' &&
+        typeCounts.require_cache_poison === 1) {
+      t.severity = 'HIGH';
+    }
+
     // Prototype hook: framework class prototypes → MEDIUM
     // Core Node.js prototypes (http.IncomingMessage, net.Socket) stay CRITICAL
     // Browser/native APIs (globalThis.fetch, XMLHttpRequest) stay HIGH
     if (t.type === 'prototype_hook' && t.severity === 'HIGH' &&
         FRAMEWORK_PROTO_RE.test(t.message)) {
       t.severity = 'MEDIUM';
+    }
+
+    // HTTP client prototype whitelist: packages with >20 prototype_hook hits
+    // targeting HTTP objects (Request, Response, fetch, etc.) are legitimate HTTP clients
+    if (t.type === 'prototype_hook' && (t.severity === 'HIGH' || t.severity === 'CRITICAL') &&
+        typeCounts.prototype_hook > 20) {
+      const HTTP_PROTO_RE = /\b(Request|Response|fetch|get|post|put|delete|patch|head|options|query|command)\b/i;
+      if (HTTP_PROTO_RE.test(t.message)) {
+        t.severity = 'MEDIUM';
+      }
     }
 
     // Dist/build/minified files: bundler artifacts get severity downgraded one notch.

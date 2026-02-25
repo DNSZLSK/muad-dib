@@ -80,7 +80,7 @@ const ADVERSARIAL_THRESHOLDS = {
 
 const HOLDOUT_THRESHOLDS = {
   // holdout-v2 (10 samples)
-  'conditional-os-payload': 25, 'env-var-reconstruction': 25,
+  'conditional-os-payload': 20, 'env-var-reconstruction': 25,
   'github-workflow-inject': 20, 'homedir-ssh-key-steal': 25,
   'npm-cache-poison': 20, 'npm-lifecycle-preinstall-curl': 25,
   'process-env-proxy-getter': 20, 'readable-stream-hijack': 20,

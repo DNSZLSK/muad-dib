@@ -25,6 +25,7 @@ const DANGEROUS_PATTERNS = [
 ];
 
 const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype', 'toString', 'valueOf']);
+const DEP_FP_WHITELIST = new Set(['es5-ext', 'bootstrap-sass']);
 
 /**
  * Clean a version specifier to extract the primary version number.
@@ -123,6 +124,10 @@ async function scanPackageJson(targetPath) {
     if (DANGEROUS_KEYS.has(depName)) continue;
     // Skip local dependencies (link:, file:, workspace:) — they're local code, not npm packages
     if (typeof depVersion === 'string' && /^(link:|file:|workspace:)/.test(depVersion)) continue;
+    // Skip npm alias syntax (e.g. "npm:typescript@^3.1.6") — alias name is virtual, not a real package
+    if (typeof depVersion === 'string' && depVersion.startsWith('npm:')) continue;
+    // Skip known FP packages that share names with malicious IOC entries
+    if (DEP_FP_WHITELIST.has(depName)) continue;
     let malicious = null;
 
     // Use optimized Map for O(1) lookup if available

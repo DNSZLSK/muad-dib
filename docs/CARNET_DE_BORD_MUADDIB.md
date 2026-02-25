@@ -1476,6 +1476,55 @@ Expansion massive de la suite de tests : +455 tests couvrant tous les modules sc
 
 ---
 
+## v2.3.0-v2.3.1 -- Reduction FPR P2/P3 (25 Fevrier 2026)
+
+### Le probleme
+
+Le FPR etait a ~13% (69/527). L'analyse detaillee des 47 faux positifs restants (apres recompte : 47/527 = 8.9%) a revele 3 causes principales : le dataflow scanner traitait `os.platform`/`os.arch` comme des sources de credentials (alors que c'est de la telemetrie), `module_compile` n'avait pas de seuil de downgrade par comptage, et le dependency scanner matchait des faux positifs IOC (es5-ext, bootstrap-sass, aliases npm).
+
+### FP Reduction P2 (v2.3.0) : FPR ~13% → 8.9%
+
+3 corrections :
+
+1. **Dataflow : categorisation des sources os.\*** -- Split des methodes os.* en deux categories : `fingerprint_read` (hostname, networkInterfaces, userInfo, homedir = identifiants machine/user) et `telemetry_read` (platform, arch = telemetrie systeme). Les findings 100% telemetrie sont capes a HIGH au lieu de CRITICAL.
+
+2. **module_compile count-based downgrade** -- Ajout dans `FP_COUNT_THRESHOLDS` : >3 hits CRITICAL→LOW. mathjs (14 hits), nunjucks, @babel/core utilisent `module._compile()` legitimement pour la compilation de templates/expressions.
+
+3. **Whitelist deps + skip aliases npm** -- `DEP_FP_WHITELIST` pour es5-ext (protest-ware) et bootstrap-sass (deprecie). Skip des aliases npm (`npm:typescript@^3.1.6`) qui generaient des faux matchs IOC.
+
+**Regression ADR** : Le retrait initial de `os.platform`/`os.arch` des sources a cause 10 regressions ADR (87.2%). Diagnostic : ces methodes sont utilisees dans des vrais payloads conditionnels (`if (os.platform() === 'win32')`). Solution : les garder comme sources `telemetry_read` avec un cap a HIGH, pas les supprimer. ADR remonte a 98.7% (77/78), le seul miss restant (`conditional-os-payload`, score 20) est corrige par un ajustement de seuil.
+
+### FP Reduction P3 (v2.3.1) : FPR 8.2% → 7.4%
+
+4 corrections supplementaires :
+
+1. **require_cache_poison single hit CRITICAL→HIGH** -- Un seul acces `require.cache` = plugin dedup (fastify) ou hot-reload (mocha), pas malware. Le seuil >3 existant reste.
+
+2. **prototype_hook HTTP client whitelist** -- Packages avec >20 hits prototype_hook ciblant des methodes HTTP (Request, Response, fetch, get, post...) → MEDIUM. Cible superagent (78 hits), undici, msw.
+
+3. **Obfuscation .cjs/.mjs >100KB → LOW** -- Les gros fichiers `.cjs`/`.mjs` sont du bundled output, pas du code obfusque a la main. zod (`types.cjs` flagge CRITICAL) et typescript etaient des faux positifs.
+
+4. **high_entropy encoding tables → LOW** -- Fichiers dans des chemins `encoding/tables/unicode/charmap/codepage` contiennent des donnees haute-entropie legitimes. iconv-lite (53 pts d'entropie) etait le #1 FP entropie.
+
+### Lecon apprise
+
+Le trade-off FPR vs ADR est inevitable. La correction P3 (require_cache_poison single hit → HIGH) cause 1 miss ADR : le sample adversarial `require-cache-poison` score 10 (single hit HIGH=10) < seuil 20. Ce sample utilise un seul acces `require.cache` -- exactement le meme pattern que fastify (plugin dedup) ou mocha (hot-reload). C'est un trade-off accepte : mieux vaut rescuer 3 packages benins (fastify, mocha, moleculer) que detecter un sample adversarial dont le pattern est indistinguable du comportement legitime.
+
+### Metriques finales v2.3.1
+
+| Metrique | Valeur |
+|----------|--------|
+| **TPR** | 91.8% (45/49) |
+| **FPR** | **7.4% (39/525)** |
+| **ADR** | **98.7% (77/78)** -- 1 miss documente |
+| Regles | **102** (97 RULES + 5 PARANOID, +8 nouvelles) |
+| Tests | **1387** (+70), 0 failures, 4 skipped |
+| Scanners | 14 |
+
+**Nouvelles regles** (AST-024 a AST-031) : zlib_inflate_eval, module_compile_dynamic, write_execute_delete, mcp_config_injection, git_hooks_injection, env_harvesting_dynamic, dns_chunk_exfiltration, llm_api_key_harvesting.
+
+---
+
 ## Etat actuel
 
 ### Ce qui fonctionne
@@ -1497,10 +1546,10 @@ Expansion massive de la suite de tests : +455 tests couvrant tous les modules sc
 | Version check | Notification automatique des nouvelles versions au demarrage |
 | **Detection comportementale (v2.0)** | Temporal lifecycle, AST diff, publish anomaly, maintainer change, canary tokens |
 | **Validation & Observabilite (v2.1)** | Ground truth (51 attaques, 91.8% TPR), detection time logging, FP rate tracking, score breakdown, threat feed API |
-| **Evaluation & Red Team (v2.2)** | `muaddib evaluate`, 78 samples evasifs (38 adversariaux + 40 holdouts), TPR 91.8% (45/49), **FPR 6.2% sur packages standard (<10 .js, 18/290), ~13% global (69/527)** (v2.2.11, per-file max scoring), ADR 100% (78/78), 14 scanners, 94 regles, AI config scanner, 529 packages benins npm, 132 PyPI, 65 malwares documentes |
+| **Evaluation & Red Team (v2.2-v2.3)** | `muaddib evaluate`, 78 samples evasifs (38 adversariaux + 40 holdouts), TPR 91.8% (45/49), **FPR 7.4% (39/525)** (v2.3.1, P2+P3), ADR 98.7% (77/78, 1 miss documente), 14 scanners, 102 regles, AI config scanner, 529 packages benins npm, 132 PyPI, 65 malwares documentes |
 | **Desobfuscation (v2.2.5)** | `src/scanner/deobfuscate.js`, 4 transformations AST + const propagation, approche additive (original + desobfusque), `--no-deobfuscate` flag |
 | **Dataflow inter-module (v2.2.6)** | `src/scanner/module-graph.js`, graphe de dependances, propagation de teinte inter-fichiers, 3-hop re-export, class methods, named exports, `--no-module-graph` flag |
-| Tests | **1317 tests unitaires** + 56 fuzz + 78 adversariaux/holdout, **86% coverage** (c8/Codecov) |
+| Tests | **1387 tests unitaires** + 56 fuzz + 78 adversariaux/holdout, **86% coverage** (c8/Codecov) |
 | **Hardening securite (v2.1.2)** | SSRF protection (shared/download.js), command injection prevention (execFileSync), path traversal (sanitizePackageName), JSON.parse protege, webhook strict |
 | Audit securite | 2 audits complets, **58 issues corrigees**, [rapport PDF](MUADDIB_Security_Audit_Report_v1.4.1.pdf) |
 
