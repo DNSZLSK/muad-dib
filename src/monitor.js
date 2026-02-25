@@ -1640,9 +1640,9 @@ function getTemporalMaxSeverity(temporalResult, astResult, publishResult, mainta
   if (astResult && astResult.suspicious && astResult.findings) {
     allFindings.push(...astResult.findings);
   }
-  if (publishResult && publishResult.suspicious && publishResult.anomalies) {
-    allFindings.push(...publishResult.anomalies);
-  }
+  // publishResult deliberately excluded — publish anomalies alone (nightly builds,
+  // burst releases) should not trigger temporal preservation. They are handled
+  // separately by isPublishAnomalyOnly().
   if (maintainerResult && maintainerResult.suspicious && maintainerResult.findings) {
     allFindings.push(...maintainerResult.findings);
   }

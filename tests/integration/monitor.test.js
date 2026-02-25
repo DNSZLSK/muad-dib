@@ -1454,10 +1454,10 @@ async function runMonitorTests() {
       'Should return null when suspicious=false even with CRITICAL findings');
   });
 
-  test('MONITOR: getTemporalMaxSeverity returns MEDIUM when only MEDIUM findings', () => {
+  test('MONITOR: getTemporalMaxSeverity ignores publish anomalies (excluded from severity calc)', () => {
     const publish = { suspicious: true, anomalies: [{ severity: 'MEDIUM' }] };
-    assert(getTemporalMaxSeverity(null, null, publish, null) === 'MEDIUM',
-      'Should return MEDIUM from publish anomaly');
+    assert(getTemporalMaxSeverity(null, null, publish, null) === null,
+      'Should return null — publish anomalies excluded from severity calculation');
   });
 
   test('MONITOR: getTemporalMaxSeverity handles empty findings arrays', () => {
@@ -4046,12 +4046,18 @@ async function runMonitorTests() {
     assert(temporalMaxSev === 'HIGH', 'Max severity should be HIGH');
   });
 
-  test('MONITOR: temporal MEDIUM + static clean → verdict remains FALSE POSITIVE', () => {
-    const publishResult = { suspicious: true, anomalies: [{ severity: 'MEDIUM', type: 'rapid_succession' }] };
+  test('MONITOR: publish_burst HIGH alone + static clean → FALSE POSITIVE (not SUSPECT)', () => {
+    // This is the core fix: nightly builds (nuxt, opencode, pine-ds, adguard) with
+    // publish_burst HIGH but clean static scan should NOT be marked SUSPECT.
+    // publishResult is excluded from getTemporalMaxSeverity() — handled by isPublishAnomalyOnly().
+    const publishResult = { suspicious: true, anomalies: [{ severity: 'HIGH', type: 'publish_burst' }] };
     const temporalMaxSev = getTemporalMaxSeverity(null, null, publishResult, null);
     const isSuspect = (temporalMaxSev === 'CRITICAL' || temporalMaxSev === 'HIGH');
 
-    assert(isSuspect === false, 'Temporal MEDIUM + static clean should remain FALSE POSITIVE');
+    assert(temporalMaxSev === null, 'publish_burst HIGH should be excluded from severity calc');
+    assert(isSuspect === false, 'publish_burst HIGH alone + static clean must be FALSE POSITIVE, not SUSPECT');
+    assert(isPublishAnomalyOnly(null, null, publishResult, null) === true,
+      'publish_burst alone should be caught by isPublishAnomalyOnly');
   });
 
   test('MONITOR: temporal LOW + static clean → verdict remains FALSE POSITIVE', () => {
