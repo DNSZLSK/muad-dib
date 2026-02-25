@@ -299,7 +299,7 @@ async function runAstTests() {
       const result = await runScanDirect(tmp);
       const t = result.threats.find(t => t.type === 'require_cache_poison');
       assert(t, 'Should detect require.cache access');
-      assert(t.severity === 'CRITICAL', 'Should be CRITICAL severity');
+      assert(t.severity === 'HIGH', 'Single require_cache_poison should be HIGH (downgraded from CRITICAL)');
     } finally { cleanupTemp(tmp); }
   });
 

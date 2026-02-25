@@ -90,14 +90,21 @@ function analyzeFile(content, filePath, basePath) {
         }
       }
 
-      // os.hostname(), os.networkInterfaces(), os.userInfo() as fingerprint sources
+      // os.hostname(), os.networkInterfaces(), os.userInfo(), os.homedir() as fingerprint sources
+      // os.platform(), os.arch() as telemetry sources (lower severity)
       if (node.callee.type === 'MemberExpression') {
         const obj = node.callee.object;
         const prop = node.callee.property;
         if (obj?.type === 'Identifier' && obj.name === 'os' && prop?.type === 'Identifier') {
-          if (['hostname', 'networkInterfaces', 'userInfo', 'cpus', 'totalmem', 'platform', 'arch', 'homedir'].includes(prop.name)) {
+          if (['hostname', 'networkInterfaces', 'userInfo', 'homedir'].includes(prop.name)) {
             sources.push({
               type: 'fingerprint_read',
+              name: `os.${prop.name}`,
+              line: node.loc?.start?.line
+            });
+          } else if (['platform', 'arch'].includes(prop.name)) {
+            sources.push({
+              type: 'telemetry_read',
               name: `os.${prop.name}`,
               line: node.loc?.start?.line
             });
@@ -234,6 +241,10 @@ function analyzeFile(content, filePath, basePath) {
       }
       if (severity === 'CRITICAL') break;
     }
+
+    // Downgrade: if ALL sources are pure telemetry (os.platform, os.arch), cap at HIGH
+    const allTelemetryOnly = sources.every(s => s.type === 'telemetry_read');
+    if (allTelemetryOnly && severity === 'CRITICAL') severity = 'HIGH';
 
     threats.push({
       type: 'suspicious_dataflow',

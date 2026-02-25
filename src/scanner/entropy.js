@@ -7,6 +7,9 @@ const ENTROPY_EXCLUDED_DIRS = ['.git', '.muaddib-cache', '__compiled__', '__test
 // File patterns to skip (compiled/minified/bundled)
 const SKIP_FILE_PATTERNS = ['.min.js', '.bundle.js', '.prod.js'];
 
+// Files containing encoding/character tables have legitimately high entropy
+const ENCODING_TABLE_RE = /(?:encoding|tables|unicode|charmap|codepage)/i;
+
 // Minimum string length to analyze (short strings naturally have low entropy)
 const MIN_STRING_LENGTH = 50;
 
@@ -225,7 +228,8 @@ function scanEntropy(targetPath, options = {}) {
 
       const strEntropy = calculateShannonEntropy(str);
       if (strEntropy > stringThreshold) {
-        const severity = strEntropy > STRING_ENTROPY_HIGH ? 'HIGH' : 'MEDIUM';
+        const isEncodingTable = ENCODING_TABLE_RE.test(relativePath);
+        const severity = isEncodingTable ? 'LOW' : (strEntropy > STRING_ENTROPY_HIGH ? 'HIGH' : 'MEDIUM');
         threats.push({
           type: 'high_entropy_string',
           severity,
