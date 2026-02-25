@@ -84,10 +84,11 @@ function analyzeFile(content, filePath, basePath) {
     hasTempFileWrite: false,
     hasTempFileExec: false,
     hasFileDelete: false,
-    hasTmpdirInContent: /\btmpdir\b|\/dev\/shm\b|\/tmp\b/i.test(content),
+    hasDevShmInContent: /\/dev\/shm\b/.test(content),
     // SANDWORM_MODE P2: env harvesting co-occurrence
     hasEnvEnumeration: false,  // Object.entries/keys/values(process.env)
     hasEnvHarvestPattern: /\b(KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL|NPM|AWS|SSH|WEBHOOK)\b/.test(content),
+    hasNetworkCallInFile: /\b(fetch|https?\.request|https?\.get|dns\.resolve)\b/.test(content),
     // SANDWORM_MODE P2: DNS exfiltration co-occurrence
     hasDnsRequire: /\brequire\s*\(\s*['"]dns['"]\s*\)/.test(content) || /\bdns\s*\.\s*resolve/.test(content),
     hasBase64Encode: /\.toString\s*\(\s*['"]base64(url)?['"]\s*\)/.test(content),
@@ -105,6 +106,35 @@ function analyzeFile(content, filePath, basePath) {
     AssignmentExpression(node) { handleAssignmentExpression(node, ctx); },
     MemberExpression(node) { handleMemberExpression(node, ctx); }
   });
+
+  // FIX 5: DNS chunk exfiltration — verify dns.resolve* is inside a loop body
+  if (ctx.hasDnsRequire && ctx.hasBase64Encode && !ctx.hasDnsLoop) {
+    walk.ancestor(ast, {
+      CallExpression(node, _state, ancestors) {
+        if (ctx.hasDnsLoop) return;
+        if (node.callee.type === 'MemberExpression' && node.callee.property?.type === 'Identifier') {
+          const name = node.callee.property.name;
+          if (['resolve', 'resolve4', 'resolveTxt', 'resolveCname'].includes(name)) {
+            for (const anc of ancestors) {
+              if (['ForStatement', 'WhileStatement', 'ForOfStatement',
+                   'ForInStatement', 'DoWhileStatement'].includes(anc.type)) {
+                ctx.hasDnsLoop = true;
+                return;
+              }
+              // forEach/map callback = implicit loop
+              if (anc.type === 'CallExpression' && anc.callee?.type === 'MemberExpression') {
+                const m = anc.callee.property?.name;
+                if (['forEach', 'map', 'reduce', 'filter'].includes(m)) {
+                  ctx.hasDnsLoop = true;
+                  return;
+                }
+              }
+            }
+          }
+        }
+      }
+    });
+  }
 
   handlePostWalk(ctx);
 

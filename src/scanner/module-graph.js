@@ -880,4 +880,7 @@ function toRel(abs, packagePath) {
   return path.relative(packagePath, abs).replace(/\\/g, '/');
 }
 
-module.exports = { buildModuleGraph, annotateTaintedExports, detectCrossFileFlows };
+module.exports = {
+  buildModuleGraph, annotateTaintedExports, detectCrossFileFlows,
+  resolveLocal, extractLocalImports, parseFile, isLocalImport, toRel, isFileExists
+};

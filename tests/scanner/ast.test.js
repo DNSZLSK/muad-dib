@@ -688,12 +688,10 @@ m._compile('console.log("hello")', 'test.js');
   await asyncTest('AST: Detects write + require + unlink anti-forensics pattern', async () => {
     const code = `
 const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const tmpFile = path.join(os.tmpdir(), 'payload.js');
-fs.writeFileSync(tmpFile, maliciousCode);
-require(tmpFile);
-fs.unlinkSync(tmpFile);
+const shmFile = '/dev/shm/payload.js';
+fs.writeFileSync(shmFile, maliciousCode);
+require(shmFile);
+fs.unlinkSync(shmFile);
 `;
     const tmp = makeTempPkg(code);
     try {

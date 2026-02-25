@@ -14,6 +14,7 @@ const { runPythonTests } = require('./scanner/python.test');
 const { runAIConfigTests } = require('./scanner/ai-config.test');
 const { runDeobfuscateTests } = require('./scanner/deobfuscate.test');
 const { runModuleGraphTests } = require('./scanner/module-graph.test');
+const { runReachabilityTests } = require('./scanner/reachability.test');
 const { runGitHubActionsTests } = require('./scanner/github-actions.test');
 const { runNpmRegistryTests } = require('./scanner/npm-registry.test');
 
@@ -99,6 +100,7 @@ async function timed(name, fn) {
   await timed('ai-config', runAIConfigTests);
   await timed('deobfuscate', runDeobfuscateTests);
   await timed('module-graph', runModuleGraphTests);
+  await timed('reachability', runReachabilityTests);
   await timed('github-actions', runGitHubActionsTests);
   await timed('npm-registry', runNpmRegistryTests);
 

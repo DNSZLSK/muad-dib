@@ -33,6 +33,7 @@ let temporalFullMode = false;
 let breakdownMode = false;
 let noDeobfuscate = false;
 let noModuleGraph = false;
+let noReachability = false;
 let feedLimit = null;
 let feedSeverity = null;
 let feedSince = null;
@@ -122,6 +123,8 @@ for (let i = 0; i < options.length; i++) {
     noDeobfuscate = true;
   } else if (options[i] === '--no-module-graph') {
     noModuleGraph = true;
+  } else if (options[i] === '--no-reachability') {
+    noReachability = true;
   } else if (options[i] === '--temporal') {
     temporalMode = true;
   } else if (options[i] === '--limit') {
@@ -415,6 +418,7 @@ const helpText = `
     --no-canary         Disable honey token injection in sandbox
     --no-deobfuscate    Disable deobfuscation pre-processing
     --no-module-graph   Disable cross-file dataflow analysis
+    --no-reachability   Disable entry-point reachability analysis
     --exclude [dir]     Exclude directory from scan (repeatable)
     --limit [n]         Limit feed entries (default: 50)
     --severity [level]  Filter by severity (CRITICAL|HIGH|MEDIUM|LOW)
@@ -461,7 +465,8 @@ if (command === 'version' || command === '--version' || command === '-v') {
     entropyThreshold: entropyThreshold,
     breakdown: breakdownMode,
     noDeobfuscate: noDeobfuscate,
-    noModuleGraph: noModuleGraph
+    noModuleGraph: noModuleGraph,
+    noReachability: noReachability
   }).then(exitCode => {
     process.exit(exitCode);
   }).catch(err => {
