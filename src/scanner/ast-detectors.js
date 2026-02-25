@@ -808,7 +808,7 @@ function handleCallExpression(node, ctx) {
         });
       }
       // Module._compile counts as temp file exec for write-execute-delete pattern
-      ctx.hasTempFileExec = ctx.hasTempFileExec || ctx.hasTmpdirInContent;
+      ctx.hasTempFileExec = ctx.hasTempFileExec || ctx.hasDevShmInContent;
     }
 
     // SANDWORM_MODE: Track writeFileSync/writeFile to temp paths
@@ -816,13 +816,13 @@ function handleCallExpression(node, ctx) {
       const arg = node.arguments && node.arguments[0];
       if (arg) {
         const strVal = extractStringValue(arg);
-        if (strVal && (/\/dev\/shm\b/.test(strVal) || /\btmp\b/i.test(strVal) || /\btemp\b/i.test(strVal))) {
+        if (strVal && /\/dev\/shm\b/.test(strVal)) {
           ctx.hasTempFileWrite = true;
         }
-        // Variable reference to tmpdir/temp path
+        // Variable reference to /dev/shm path
         if (!strVal && (arg.type === 'Identifier' || arg.type === 'CallExpression' || arg.type === 'MemberExpression')) {
-          // Dynamic path — check if file content involves tmpdir patterns
-          ctx.hasTempFileWrite = ctx.hasTempFileWrite || ctx.hasTmpdirInContent;
+          // Dynamic path — check if file content involves /dev/shm
+          ctx.hasTempFileWrite = ctx.hasTempFileWrite || ctx.hasDevShmInContent;
         }
       }
     }
@@ -837,10 +837,10 @@ function handleCallExpression(node, ctx) {
   if (callName === 'require' && node.arguments.length > 0) {
     const arg = node.arguments[0];
     const strVal = extractStringValue(arg);
-    if (strVal && (/\/dev\/shm\b/.test(strVal) || /\btmp\b/i.test(strVal) || /\btemp\b/i.test(strVal))) {
+    if (strVal && /\/dev\/shm\b/.test(strVal)) {
       ctx.hasTempFileExec = true;
-    } else if (!strVal && ctx.hasTmpdirInContent) {
-      // Variable argument in a file that references tmpdir paths
+    } else if (!strVal && ctx.hasDevShmInContent) {
+      // Variable argument in a file that references /dev/shm
       ctx.hasTempFileExec = true;
     }
   }
@@ -860,16 +860,7 @@ function handleCallExpression(node, ctx) {
     }
   }
 
-  // SANDWORM_MODE R8: Detect dns.resolve/resolve4/resolveTxt calls (flag for co-occurrence)
-  if (node.callee.type === 'MemberExpression' && node.callee.property?.type === 'Identifier') {
-    const dnsPropName = node.callee.property.name;
-    if (['resolve', 'resolve4', 'resolveTxt', 'resolveCname'].includes(dnsPropName)) {
-      // Set hasDnsLoop if file has dns require + base64 encoding (co-occurrence checked in postWalk)
-      if (ctx.hasDnsRequire && ctx.hasBase64Encode) {
-        ctx.hasDnsLoop = true;
-      }
-    }
-  }
+  // SANDWORM_MODE R8: dns.resolve detection moved to walk.ancestor() in ast.js (FIX 5)
 }
 
 function handleImportExpression(node, ctx) {
@@ -1086,9 +1077,11 @@ function handleMemberExpression(node, ctx) {
 function handlePostWalk(ctx) {
   // SANDWORM_MODE: zlib inflate + base64 decode + eval/Function/Module._compile = obfuscated payload
   if (ctx.hasZlibInflate && ctx.hasBase64Decode && ctx.hasDynamicExec) {
+    // FIX 4: dist/build files get LOW severity (bundlers legitimately use zlib+base64+eval)
+    const isDistFile = /^(dist|build)[/\\]/i.test(ctx.relFile) || /\.bundle\.js$/i.test(ctx.relFile);
     ctx.threats.push({
       type: 'zlib_inflate_eval',
-      severity: 'CRITICAL',
+      severity: isDistFile ? 'LOW' : 'CRITICAL',
       message: 'Obfuscated payload: zlib inflate + base64 decode + dynamic execution. No legitimate package uses this pattern.',
       file: ctx.relFile
     });
@@ -1105,7 +1098,7 @@ function handlePostWalk(ctx) {
   }
 
   // SANDWORM_MODE R7: env harvesting = Object.entries/keys/values(process.env) + sensitive pattern in file
-  if (ctx.hasEnvEnumeration && ctx.hasEnvHarvestPattern) {
+  if (ctx.hasEnvEnumeration && ctx.hasEnvHarvestPattern && ctx.hasNetworkCallInFile) {
     ctx.threats.push({
       type: 'env_harvesting_dynamic',
       severity: 'HIGH',

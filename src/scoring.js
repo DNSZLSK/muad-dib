@@ -105,8 +105,29 @@ const FP_COUNT_THRESHOLDS = {
   dangerous_call_function: { maxCount: 5, from: 'MEDIUM', to: 'LOW' },
   require_cache_poison: { maxCount: 3, from: 'CRITICAL', to: 'LOW' },
   suspicious_dataflow: { maxCount: 5, to: 'LOW' },
-  obfuscation_detected: { maxCount: 3, to: 'LOW' }
+  obfuscation_detected: { maxCount: 3, to: 'LOW' },
+  module_compile_dynamic: { maxCount: 3, from: 'CRITICAL', to: 'LOW' },
+  zlib_inflate_eval: { maxCount: 2, from: 'CRITICAL', to: 'LOW' }
 };
+
+// Types exempt from dist/ downgrade — IOC matches and lifecycle scripts are always real
+const DIST_EXEMPT_TYPES = new Set([
+  'ioc_match', 'known_malicious_package', 'pypi_malicious_package', 'shai_hulud_marker',
+  'lifecycle_script', 'lifecycle_shell_pipe',
+  'lifecycle_added_critical', 'lifecycle_added_high', 'lifecycle_modified'
+]);
+
+// Regex matching dist/build/minified/bundled file paths
+const DIST_FILE_RE = /(?:^|[/\\])(?:dist|build)[/\\]|\.min\.js$|\.bundle\.js$/i;
+
+// Types exempt from reachability downgrade — IOC matches, lifecycle, and package-level types
+const REACHABILITY_EXEMPT_TYPES = new Set([
+  ...DIST_EXEMPT_TYPES,
+  'cross_file_dataflow',
+  'typosquat_detected', 'pypi_typosquat_detected',
+  'pypi_malicious_package',
+  'ai_config_injection', 'ai_config_injection_compound'
+]);
 
 // Custom class prototypes that HTTP frameworks legitimately extend.
 // Distinguished from dangerous core Node.js prototype hooks.
@@ -115,7 +136,7 @@ const FRAMEWORK_PROTO_RE = new RegExp(
   '^(' + FRAMEWORK_PROTOTYPES.join('|') + ')\\.prototype\\.'
 );
 
-function applyFPReductions(threats) {
+function applyFPReductions(threats, reachableFiles) {
   // Count occurrences of each threat type (package-level, across all files)
   const typeCounts = {};
   for (const t of threats) {
@@ -136,6 +157,25 @@ function applyFPReductions(threats) {
     if (t.type === 'prototype_hook' && t.severity === 'HIGH' &&
         FRAMEWORK_PROTO_RE.test(t.message)) {
       t.severity = 'MEDIUM';
+    }
+
+    // Dist/build/minified files: bundler artifacts get severity downgraded one notch.
+    // Real malware injects payloads in source files, not in dist/ output.
+    if (t.file && !DIST_EXEMPT_TYPES.has(t.type) && DIST_FILE_RE.test(t.file)) {
+      if (t.severity === 'CRITICAL') t.severity = 'HIGH';
+      else if (t.severity === 'HIGH') t.severity = 'MEDIUM';
+      else if (t.severity === 'MEDIUM') t.severity = 'LOW';
+    }
+
+    // Reachability: findings in files not reachable from entry points → LOW
+    if (reachableFiles && reachableFiles.size > 0 && t.file &&
+        !REACHABILITY_EXEMPT_TYPES.has(t.type) &&
+        !isPackageLevelThreat(t)) {
+      const normalizedFile = t.file.replace(/\\/g, '/');
+      if (!reachableFiles.has(normalizedFile)) {
+        t.severity = 'LOW';
+        t.unreachable = true;
+      }
     }
   }
 }

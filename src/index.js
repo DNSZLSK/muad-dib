@@ -19,6 +19,7 @@ const { scanEntropy } = require('./scanner/entropy.js');
 const { scanAIConfig } = require('./scanner/ai-config.js');
 const { deobfuscate } = require('./scanner/deobfuscate.js');
 const { buildModuleGraph, annotateTaintedExports, detectCrossFileFlows } = require('./scanner/module-graph.js');
+const { computeReachableFiles } = require('./scanner/reachability.js');
 const { runTemporalAnalyses } = require('./temporal-runner.js');
 const { formatOutput } = require('./output-formatter.js');
 const { setExtraExcludes, getExtraExcludes, Spinner, listInstalledPackages, clearFileListCache } = require('./utils.js');
@@ -333,9 +334,22 @@ async function run(targetPath, options = {}) {
     }
   }
 
+  // Reachability analysis: determine which files are reachable from entry points
+  let reachableFiles = null;
+  if (!options.noReachability) {
+    try {
+      const reachability = computeReachableFiles(targetPath);
+      if (!reachability.skipped) {
+        reachableFiles = reachability.reachableFiles;
+      }
+    } catch {
+      // Graceful fallback — treat all files as reachable
+    }
+  }
+
   // FP reduction: legitimate frameworks produce high volumes of certain threat types.
   // A malware package typically has 1-3 occurrences, not dozens.
-  applyFPReductions(deduped);
+  applyFPReductions(deduped, reachableFiles);
 
   // Enrich each threat with rules
   const enrichedThreats = deduped.map(t => {

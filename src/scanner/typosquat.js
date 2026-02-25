@@ -84,7 +84,31 @@ const WHITELIST = new Set([
   'redux',      // resembles redis (wrong_char)
   'args',       // resembles yargs (missing_char)
   'oxlint',     // resembles eslint (wrong_char)
-  'vasync'      // resembles async (extra prefix)
+  'vasync',     // resembles async (extra prefix)
+
+  // FPR P1: Benign packages falsely flagged as typosquat in evaluation
+  'conf',       // resembles config
+  'defu',       // resembles debug
+  'ohash',      // resembles lodash
+  'cors',       // resembles colors
+  'meant',      // resembles react
+  'whelk',      // resembles chalk
+  'tslog',      // resembles tslib
+  'mkdist',     // resembles mkdirp
+  'jshint',     // resembles eslint
+  'dtslint',    // resembles eslint
+  'redis',      // resembles redux
+  'cypress',    // resembles express
+  'colord',     // resembles colors
+  'read',       // resembles react
+  'ulid',       // resembles uuid
+  'tslint',     // resembles eslint
+  'jison',      // resembles sinon
+  'reds',       // resembles redis
+  'docdash',    // resembles lodash
+  'yarpm',      // resembles yargs
+  'canvg',      // resembles canvas
+  'obug'        // internal sub-dependency
 ]);
 
 
