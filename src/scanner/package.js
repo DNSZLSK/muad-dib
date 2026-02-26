@@ -4,6 +4,7 @@ const { loadCachedIOCs } = require('../ioc/updater.js');
 
 const SUSPICIOUS_SCRIPTS = [
   'preinstall',
+  'install',
   'postinstall',
   'preuninstall',
   'postuninstall',
@@ -97,6 +98,21 @@ async function scanPackageJson(targetPath) {
     }
   }
 
+  // Check non-lifecycle scripts (test, start, etc.) for network exfil commands
+  const NETWORK_SCRIPT_PATTERN = /\bcurl\b|\bwget\b|\bnc\s+-|\bncat\b|\bpowershell\b|\bnslookup\b/;
+  for (const [scriptName, scriptContent] of Object.entries(scripts)) {
+    if (SUSPICIOUS_SCRIPTS.includes(scriptName)) continue; // already checked above
+    if (typeof scriptContent !== 'string') continue;
+    if (NETWORK_SCRIPT_PATTERN.test(scriptContent)) {
+      threats.push({
+        type: 'lifecycle_script',
+        severity: 'MEDIUM',
+        message: `Script "${scriptName}" contains network command (curl/wget/nc/nslookup). Unusual for "${scriptName}".`,
+        file: 'package.json'
+      });
+    }
+  }
+
   // Scan declared dependencies against IOCs
   let iocs;
   try {
@@ -126,6 +142,26 @@ async function scanPackageJson(targetPath) {
     if (typeof depVersion === 'string' && /^(link:|file:|workspace:)/.test(depVersion)) continue;
     // Skip npm alias syntax (e.g. "npm:typescript@^3.1.6") — alias name is virtual, not a real package
     if (typeof depVersion === 'string' && depVersion.startsWith('npm:')) continue;
+    // Detect suspicious dependency URLs (HTTP/HTTPS instead of version)
+    if (typeof depVersion === 'string' && /^https?:\/\//.test(depVersion)) {
+      const urlLower = depVersion.toLowerCase();
+      const isSuspicious = [
+        /ngrok\.io/, /ngrok-free\.app/, /ngrok\.app/,
+        /localtunnel\.me/, /loca\.lt/, /serveo\.net/, /bore\.digital/,
+        /trycloudflare\.com/, /localhost\.run/,
+        /\/\/localhost[:/]/, /\/\/127\.0\.0\.1[:/]/, /\/\/0\.0\.0\.0[:/]/,
+        /\/\/10\.\d{1,3}\.\d{1,3}\.\d{1,3}[:/]/,
+        /\/\/192\.168\.\d{1,3}\.\d{1,3}[:/]/,
+        /\/\/172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}[:/]/
+      ].some(p => p.test(urlLower));
+      threats.push({
+        type: 'dependency_url_suspicious',
+        severity: isSuspicious ? 'HIGH' : 'MEDIUM',
+        message: `Dependency "${depName}" uses HTTP URL: ${depVersion}` +
+          (isSuspicious ? ' (tunnel/private/localhost)' : ' (unusual, verify source)'),
+        file: 'package.json'
+      });
+    }
     // Skip known FP packages that share names with malicious IOC entries
     if (DEP_FP_WHITELIST.has(depName)) continue;
     let malicious = null;

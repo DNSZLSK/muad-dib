@@ -1,7 +1,7 @@
 const path = require('path');
 const acorn = require('acorn');
 const walk = require('acorn-walk');
-const { ACORN_OPTIONS } = require('../shared/constants.js');
+const { ACORN_OPTIONS, safeParse } = require('../shared/constants.js');
 const { analyzeWithDeobfuscation } = require('../shared/analyze-helper.js');
 const {
   handleVariableDeclarator,
@@ -32,9 +32,8 @@ function analyzeFile(content, filePath, basePath) {
   const threats = [];
   let ast;
 
-  try {
-    ast = acorn.parse(content, ACORN_OPTIONS);
-  } catch {
+  ast = safeParse(content);
+  if (!ast) {
     // AST parse failed — apply regex fallback for known dangerous patterns
 
     // Workflow manipulation: reads + writes to .github/workflows

@@ -178,6 +178,17 @@ const RULES = {
     ],
     mitre: 'T1195.002'
   },
+  dependency_url_suspicious: {
+    id: 'MUADDIB-DEP-005',
+    name: 'Suspicious Dependency URL',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'Dependance declaree avec une URL HTTP/HTTPS au lieu d\'une version npm. Les URLs ngrok/localhost/IP privee sont fortement suspectes.',
+    references: [
+      'https://docs.npmjs.com/cli/v9/configuring-npm/package-json#urls-as-dependencies'
+    ],
+    mitre: 'T1195.002'
+  },
 
   // Hash detections
   known_malicious_hash: {

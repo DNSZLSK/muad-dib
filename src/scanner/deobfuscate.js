@@ -2,7 +2,7 @@
 
 const acorn = require('acorn');
 const walk = require('acorn-walk');
-const { ACORN_OPTIONS } = require('../shared/constants.js');
+const { ACORN_OPTIONS, safeParse } = require('../shared/constants.js');
 
 /**
  * Lightweight static deobfuscation pre-processor.
@@ -15,12 +15,8 @@ function deobfuscate(sourceCode) {
   const transforms = [];
 
   // Parse AST — if parsing fails, return source unchanged (fail-safe)
-  let ast;
-  try {
-    ast = acorn.parse(sourceCode, { ...ACORN_OPTIONS, ranges: true });
-  } catch {
-    return { code: sourceCode, transforms };
-  }
+  let ast = safeParse(sourceCode, { ranges: true });
+  if (!ast) return { code: sourceCode, transforms };
 
   // Collect replacements as { start, end, value, type, before }
   const replacements = [];
@@ -191,12 +187,8 @@ function deobfuscate(sourceCode) {
  */
 function propagateConsts(sourceCode) {
   const transforms = [];
-  let ast;
-  try {
-    ast = acorn.parse(sourceCode, { ...ACORN_OPTIONS, ranges: true });
-  } catch {
-    return { code: sourceCode, transforms };
-  }
+  let ast = safeParse(sourceCode, { ranges: true });
+  if (!ast) return { code: sourceCode, transforms };
 
   // Collect const declarations: name → { value, initStart, initEnd }
   const constMap = new Map();
@@ -305,12 +297,8 @@ function propagateConsts(sourceCode) {
  */
 function foldConcatsOnly(sourceCode) {
   const transforms = [];
-  let ast;
-  try {
-    ast = acorn.parse(sourceCode, { ...ACORN_OPTIONS, ranges: true });
-  } catch {
-    return { code: sourceCode, transforms };
-  }
+  let ast = safeParse(sourceCode, { ranges: true });
+  if (!ast) return { code: sourceCode, transforms };
 
   const replacements = [];
   walk.simple(ast, {

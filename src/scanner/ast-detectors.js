@@ -68,7 +68,7 @@ const CREDENTIAL_CLI_COMMANDS = [
 ];
 
 // Dangerous shell command patterns for variable tracking
-const DANGEROUS_CMD_PATTERNS = [/\bcurl\b/, /\bwget\b/, /\bnc\s+-/, /\/dev\/tcp\//, /\bbash\s+-i/];
+const DANGEROUS_CMD_PATTERNS = [/\bcurl\b/, /\bwget\b/, /\bnc\s+-/, /\/dev\/tcp\//, /\bbash\s+-i/, /\bpowershell\b/, /\bpwsh\b/, /\bnslookup\b/, /\bdig\s+/];
 
 // Native APIs targeted for prototype hooking (chalk Sept 2025, Sygnia)
 const HOOKABLE_NATIVES = [
@@ -325,7 +325,7 @@ function handleCallExpression(node, ctx) {
 
     if (cmdStr) {
       // Check for dangerous shell patterns
-      if (/\|\s*(sh|bash)\b/.test(cmdStr) || /nc\s+-[elp]/.test(cmdStr) || /\/dev\/tcp\//.test(cmdStr) || /bash\s+-i/.test(cmdStr) || /\bcurl\b/.test(cmdStr) || /\bwget\b/.test(cmdStr)) {
+      if (/\|\s*(sh|bash)\b/.test(cmdStr) || /nc\s+-[elp]/.test(cmdStr) || /\/dev\/tcp\//.test(cmdStr) || /bash\s+-i/.test(cmdStr) || /\bcurl\b/.test(cmdStr) || /\bwget\b/.test(cmdStr) || /\bpowershell\b/.test(cmdStr) || /\bpwsh\b/.test(cmdStr) || /\bnslookup\b/.test(cmdStr) || /\bdig\s+/.test(cmdStr) || /\bhost\s+\S+\.\S+/.test(cmdStr)) {
         ctx.threats.push({
           type: 'dangerous_exec',
           severity: 'CRITICAL',

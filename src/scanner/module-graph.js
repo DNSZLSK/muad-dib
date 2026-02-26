@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const acorn = require('acorn');
 const { findFiles, EXCLUDED_DIRS } = require('../utils');
-const { ACORN_OPTIONS: BASE_ACORN_OPTIONS } = require('../shared/constants.js');
+const { ACORN_OPTIONS: BASE_ACORN_OPTIONS, safeParse } = require('../shared/constants.js');
 
 // --- Sensitive source patterns ---
 const SENSITIVE_MODULES = new Set(['fs', 'child_process', 'dns', 'os']);
@@ -765,11 +765,7 @@ function parseFile(filePath) {
   } catch {
     return null;
   }
-  try {
-    return acorn.parse(content, ACORN_OPTIONS);
-  } catch {
-    return null;
-  }
+  return safeParse(content, { allowReturnOutsideFunction: true, allowImportExportEverywhere: true });
 }
 
 function walkAST(node, visitor) {

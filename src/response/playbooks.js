@@ -98,6 +98,9 @@ const PLAYBOOKS = {
   lifecycle_script_dependency:
     'Verifier le contenu du script dans le package. Reinstaller avec --ignore-scripts si suspect.',
 
+  dependency_url_suspicious:
+    'Dependance avec URL suspecte. Verifier l\'URL. Les URLs ngrok/localhost/IP privee sont malveillantes. Ne pas installer.',
+
   suspicious_file:
     'Fichier typique de Shai-Hulud. Ne pas executer. Verifier le hash contre les IOCs connus.',
 

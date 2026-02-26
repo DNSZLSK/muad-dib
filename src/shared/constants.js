@@ -90,4 +90,24 @@ const DOWNLOAD_TIMEOUT = 30_000; // 30 seconds
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB — skip files larger than this to avoid memory issues
 const ACORN_OPTIONS = { ecmaVersion: 2024, sourceType: 'module', allowHashBang: true };
 
-module.exports = { REHABILITATED_PACKAGES, NPM_PACKAGE_REGEX, MAX_TARBALL_SIZE, DOWNLOAD_TIMEOUT, MAX_FILE_SIZE, ACORN_OPTIONS };
+const acorn = require('acorn');
+
+/**
+ * Parse JS source with module-mode fallback to script-mode.
+ * `const package = ...` is valid in script mode but reserved in module mode.
+ * Returns AST or null if both modes fail.
+ */
+function safeParse(code, extraOptions = {}) {
+  const opts = { ...ACORN_OPTIONS, ...extraOptions };
+  try {
+    return acorn.parse(code, opts);
+  } catch {
+    try {
+      return acorn.parse(code, { ...opts, sourceType: 'script' });
+    } catch {
+      return null;
+    }
+  }
+}
+
+module.exports = { REHABILITATED_PACKAGES, NPM_PACKAGE_REGEX, MAX_TARBALL_SIZE, DOWNLOAD_TIMEOUT, MAX_FILE_SIZE, ACORN_OPTIONS, safeParse };
