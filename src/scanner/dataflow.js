@@ -3,7 +3,7 @@ const path = require('path');
 const acorn = require('acorn');
 const walk = require('acorn-walk');
 const { getCallName } = require('../utils.js');
-const { ACORN_OPTIONS } = require('../shared/constants.js');
+const { ACORN_OPTIONS, safeParse } = require('../shared/constants.js');
 const { analyzeWithDeobfuscation } = require('../shared/analyze-helper.js');
 
 async function analyzeDataFlow(targetPath, options = {}) {
@@ -16,11 +16,8 @@ function analyzeFile(content, filePath, basePath) {
   const threats = [];
   let ast;
 
-  try {
-    ast = acorn.parse(content, { ...ACORN_OPTIONS, locations: true });
-  } catch {
-    return threats;
-  }
+  ast = safeParse(content, { locations: true });
+  if (!ast) return threats;
 
   const sources = [];
   const sinks = [];
@@ -340,9 +337,17 @@ function isCredentialPath(arg, sensitivePathVars) {
   return false;
 }
 
+// System identity env vars used for fingerprinting/exfiltration
+const SYSTEM_IDENTITY_ENVS = new Set([
+  'USER', 'USERNAME', 'LOGNAME', 'HOME', 'HOSTNAME',
+  'USERPROFILE', 'COMPUTERNAME', 'WHOAMI'
+]);
+
 function isSensitiveEnv(name) {
+  const upper = name.toUpperCase();
+  if (SYSTEM_IDENTITY_ENVS.has(upper)) return true;
   const sensitive = ['TOKEN', 'SECRET', 'KEY', 'PASSWORD', 'CREDENTIAL', 'AUTH', 'NPM', 'AWS', 'AZURE', 'GCP'];
-  return sensitive.some(s => name.toUpperCase().includes(s));
+  return sensitive.some(s => upper.includes(s));
 }
 
 module.exports = { analyzeDataFlow };

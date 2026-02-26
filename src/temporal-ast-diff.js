@@ -8,7 +8,7 @@ const { findJsFiles, forEachSafeFile, debugLog } = require('./utils.js');
 const { fetchPackageMetadata, getLatestVersions } = require('./temporal-analysis.js');
 const { downloadToFile, extractTarGz, sanitizePackageName } = require('./shared/download.js');
 
-const { MAX_FILE_SIZE, ACORN_OPTIONS } = require('./shared/constants.js');
+const { MAX_FILE_SIZE, ACORN_OPTIONS, safeParse } = require('./shared/constants.js');
 
 const REGISTRY_URL = 'https://registry.npmjs.org';
 const METADATA_TIMEOUT = 10_000;
@@ -133,10 +133,8 @@ function extractDangerousPatterns(directory) {
  * @param {Set<string>} patterns - Accumulator set
  */
 function extractPatternsFromSource(source, patterns) {
-  let ast;
-  try {
-    ast = acorn.parse(source, ACORN_OPTIONS);
-  } catch { return; }
+  let ast = safeParse(source);
+  if (!ast) return;
 
   walk.simple(ast, {
     CallExpression(node) {

