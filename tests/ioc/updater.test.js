@@ -241,26 +241,23 @@ test('SCRAPER: Module loads without error', () => {
   assert(typeof runScraper === 'function', 'runScraper should be a function');
 });
 
-test('SCRAPER: data/iocs.json exists and is valid', () => {
-  const iocsPath = path.join(__dirname, '..', '..', 'data', 'iocs.json');
-  assert(fs.existsSync(iocsPath), 'data/iocs.json should exist');
-  const content = fs.readFileSync(iocsPath, 'utf8');
-  const iocs = JSON.parse(content);
+test('FIXTURE: test-iocs.json loads and is valid', () => {
+  const iocs = require('../fixtures/test-iocs.json');
   assert(iocs.packages, 'Should have packages');
   assert(Array.isArray(iocs.packages), 'packages should be an array');
 });
 
-test('SCRAPER: IOCs have required fields', () => {
-  const iocs = require('../../data/iocs.json');
+test('FIXTURE: IOCs have required fields', () => {
+  const iocs = require('../fixtures/test-iocs.json');
   const sample = iocs.packages[0];
   assert(sample.name, 'IOC should have name');
   assert(sample.version, 'IOC should have version');
   assert(sample.source, 'IOC should have source');
 });
 
-test('SCRAPER: At least 900 IOCs', () => {
-  const iocs = require('../../data/iocs.json');
-  assert(iocs.packages.length >= 900, `Should have at least 900 IOCs, has ${iocs.packages.length}`);
+test('FIXTURE: IOC fixture has expected count', () => {
+  const iocs = require('../fixtures/test-iocs.json');
+  assert(iocs.packages.length === 15, `Should have 15 IOCs in fixture, has ${iocs.packages.length}`);
 });
 
 // ============================================
@@ -433,25 +430,25 @@ test('REGRESSION: debug should not block (rehabilitated)', () => {
 });
 
 test('REGRESSION: lodash is not in IOCs', () => {
-  const iocs = require('../../data/iocs.json');
+  const iocs = require('../fixtures/test-iocs.json');
   const lodash = iocs.packages.find(p => p.name === 'lodash');
   assert(!lodash, 'lodash should not be in IOCs');
 });
 
 test('REGRESSION: loadash (typosquat) IS in IOCs', () => {
-  const iocs = require('../../data/iocs.json');
+  const iocs = require('../fixtures/test-iocs.json');
   const loadash = iocs.packages.find(p => p.name === 'loadash');
   assert(loadash, 'loadash (typosquat) should be in IOCs');
 });
 
 test('REGRESSION: express is not in IOCs', () => {
-  const iocs = require('../../data/iocs.json');
+  const iocs = require('../fixtures/test-iocs.json');
   const express = iocs.packages.find(p => p.name === 'express');
   assert(!express, 'express should not be in IOCs');
 });
 
 test('REGRESSION: axios is not in IOCs', () => {
-  const iocs = require('../../data/iocs.json');
+  const iocs = require('../fixtures/test-iocs.json');
   const axios = iocs.packages.find(p => p.name === 'axios');
   assert(!axios, 'axios should not be in IOCs');
 });

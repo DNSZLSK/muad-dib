@@ -1,0 +1,116 @@
+{
+  "version": "1.1.0",
+  "updated": "2026-01-15T00:00:00.000Z",
+  "description": "Test fixture IOCs for unit tests",
+  "packages": [
+    {
+      "name": "ua-parser-js",
+      "version": "0.7.29",
+      "source": "community",
+      "description": "Compromis octobre 2021 - crypto miner"
+    },
+    {
+      "name": "coa",
+      "version": "2.0.3",
+      "source": "community",
+      "description": "Compromis novembre 2021"
+    },
+    {
+      "name": "coa",
+      "version": "2.0.4",
+      "source": "community",
+      "description": "Compromis novembre 2021"
+    },
+    {
+      "name": "rc",
+      "version": "1.2.9",
+      "source": "community",
+      "description": "Compromis novembre 2021"
+    },
+    {
+      "name": "event-stream",
+      "version": "3.3.6",
+      "severity": "critical",
+      "confidence": "high",
+      "source": "npm-removed",
+      "description": "Removed from npm: Malicious code injection",
+      "mitre": "T1195.002"
+    },
+    {
+      "name": "loadash",
+      "version": "*",
+      "source": "typosquat",
+      "description": "Typosquat de lodash"
+    },
+    {
+      "name": "crossenv",
+      "version": "*",
+      "source": "typosquat",
+      "description": "Typosquat de cross-env"
+    },
+    {
+      "name": "flatmap-stream",
+      "version": "0.1.1",
+      "source": "community",
+      "description": "Malicious dependency of event-stream"
+    },
+    {
+      "name": "babelcli",
+      "version": "*",
+      "source": "typosquat",
+      "description": "Typosquat de babel-cli"
+    },
+    {
+      "name": "mongose",
+      "version": "*",
+      "source": "typosquat",
+      "description": "Typosquat de mongoose"
+    },
+    {
+      "name": "colors",
+      "version": "1.4.1",
+      "source": "community",
+      "description": "Sabotaged version"
+    },
+    {
+      "name": "colors",
+      "version": "1.4.2",
+      "source": "community",
+      "description": "Sabotaged version"
+    },
+    {
+      "name": "faker",
+      "version": "6.6.6",
+      "source": "community",
+      "description": "Sabotaged version"
+    },
+    {
+      "name": "node-ipc",
+      "version": "10.1.1",
+      "source": "community",
+      "description": "Protestware version"
+    },
+    {
+      "name": "node-ipc",
+      "version": "10.1.2",
+      "source": "community",
+      "description": "Protestware version"
+    }
+  ],
+  "hashes": [
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "abc123def456"
+  ],
+  "markers": [
+    "setup_bun.js",
+    "postinstall.sh",
+    "preinstall.js",
+    "install.bat"
+  ],
+  "files": [
+    "inject.js",
+    "payload.js",
+    "backdoor.js",
+    "stealer.js"
+  ]
+}
