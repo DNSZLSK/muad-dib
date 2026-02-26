@@ -3,7 +3,6 @@ const { exec } = require('child_process');
 const { run } = require('../src/index.js');
 const { updateIOCs } = require('../src/ioc/updater.js');
 const { watch } = require('../src/watch.js');
-const { startDaemon } = require('../src/daemon.js');
 const { runScraper } = require('../src/ioc/scraper.js');
 const { safeInstall } = require('../src/safe-install.js');
 const { buildSandboxImage, runSandbox, generateNetworkReport } = require('../src/sandbox.js');
@@ -279,6 +278,7 @@ async function interactiveMenu() {
         message: 'Webhook URL:'
       });
     }
+    const { startDaemon } = require('../src/daemon.js');
     startDaemon({ webhook });
   }
 
@@ -593,6 +593,7 @@ if (command === 'version' || command === '--version' || command === '-v') {
     });
   }
 } else if (command === 'daemon') {
+  const { startDaemon } = require('../src/daemon.js');
   startDaemon({ webhook: webhookUrl });
 } else if (command === 'install' || command === 'i') {
   const packages = options.filter(o => !o.startsWith('-'));

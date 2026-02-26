@@ -21,7 +21,7 @@
 </p>
 
 <p align="center">
-  <a href="README.fr.md">Version francaise</a>
+  <a href="docs/README.fr.md">Version francaise</a>
 </p>
 
 ---
