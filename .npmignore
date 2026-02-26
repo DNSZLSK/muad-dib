@@ -9,7 +9,7 @@ coverage/
 metrics/
 data/
 
-# Infrastructure
+# Infrastructure (internal/VPS-only modules)
 docker/
 deploy/
 hooks/
@@ -17,6 +17,15 @@ hooks/
 .git/
 .claude/
 vscode-extension/
+src/monitor.js
+src/daemon.js
+src/threat-feed.js
+src/serve.js
+src/webhook.js
+src/commands/evaluate.js
+
+# Assets (logo only used in rendered markdown)
+assets/
 
 # Docs (keep README.md only)
 docs/
@@ -31,10 +40,8 @@ rapport.html
 results.sarif
 index.html
 src/ioc/data/iocs.json
-README.fr.md
 
 # Windows / temp artifacts
 nul
-tmp-test-pack.js
-testssampleslink-deppackage.json
+tmp-*
 .gitattributes
