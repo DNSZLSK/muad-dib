@@ -1582,6 +1582,4 @@ Le trade-off FPR vs ADR est inevitable. La correction P3 (require_cache_poison s
 
 MUAD'DIB n'est pas parfait. C'est un projet de formation, pas un produit enterprise. Mais il fonctionne pour ce qu'il est censé faire : détecter les menaces npm et PyPI connues, analyser les comportements suspects dans un sandbox, détecter les anomalies comportementales entre versions, et prouver son efficacité avec des métriques de validation.
 
-Le plus satisfaisant : voir le score passer de 126 alertes (faux positifs) à 1 alerte légitime sur React.js après une semaine d'itérations. Et voir le sandbox Docker fonctionner du premier coup (après avoir fixé les permissions).
-
 *"Fear is the mind-killer. I will face my fear."* - Dune, Frank Herbert
