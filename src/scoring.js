@@ -137,7 +137,38 @@ const FRAMEWORK_PROTO_RE = new RegExp(
   '^(' + FRAMEWORK_PROTOTYPES.join('|') + ')\\.prototype\\.'
 );
 
-function applyFPReductions(threats, reachableFiles) {
+// ============================================
+// BENIGN PACKAGE WHITELIST (v2.3.5)
+// ============================================
+// Well-known npm packages whose legitimate code patterns trigger false positives.
+// For whitelisted packages, non-IOC threats are downgraded to LOW.
+// IOC matches, lifecycle_shell_pipe, and cross_file_dataflow are NEVER downgraded
+// — a compromised version of these packages would still be detected.
+const BENIGN_PACKAGE_WHITELIST = new Set([
+  'meteor',               // powershell PATH setup in install.js (dangerous_exec FP)
+  'blessed',              // module._compile for terminal capabilities (module_compile FP)
+  'sharp',                // native bindings with dynamic require + postinstall (lifecycle FP)
+  'forever',              // process manager: detached spawn + HOME config access (dataflow FP)
+  'start-server-and-test' // curl/wget in test scripts, not install hooks (lifecycle FP)
+]);
+
+// Threat types never affected by benign package whitelist (real compromise indicators)
+const WHITELIST_EXEMPT_TYPES = new Set([
+  'ioc_match', 'known_malicious_package', 'pypi_malicious_package', 'shai_hulud_marker',
+  'lifecycle_shell_pipe',
+  'cross_file_dataflow'
+]);
+
+function applyFPReductions(threats, reachableFiles, packageName) {
+  // Benign package whitelist: downgrade all non-IOC threats to LOW
+  if (packageName && BENIGN_PACKAGE_WHITELIST.has(packageName)) {
+    for (const t of threats) {
+      if (!WHITELIST_EXEMPT_TYPES.has(t.type) && t.severity !== 'LOW') {
+        t.severity = 'LOW';
+      }
+    }
+  }
+
   // Count occurrences of each threat type (package-level, across all files)
   const typeCounts = {};
   for (const t of threats) {
@@ -267,5 +298,6 @@ function calculateRiskScore(deduped) {
 
 module.exports = {
   SEVERITY_WEIGHTS, RISK_THRESHOLDS, MAX_RISK_SCORE,
+  BENIGN_PACKAGE_WHITELIST, WHITELIST_EXEMPT_TYPES,
   isPackageLevelThreat, computeGroupScore, applyFPReductions, calculateRiskScore
 };
