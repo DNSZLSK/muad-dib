@@ -6,6 +6,101 @@ const { getCallName } = require('../utils.js');
 const { ACORN_OPTIONS, safeParse } = require('../shared/constants.js');
 const { analyzeWithDeobfuscation } = require('../shared/analyze-helper.js');
 
+// Module classification maps for intra-file taint tracking
+const MODULE_SOURCE_METHODS = {
+  os: {
+    homedir: 'fingerprint_read', hostname: 'fingerprint_read',
+    networkInterfaces: 'fingerprint_read', userInfo: 'fingerprint_read',
+    platform: 'telemetry_read', arch: 'telemetry_read'
+  },
+  fs: {
+    readFileSync: 'credential_read', readFile: 'credential_read',
+    readdirSync: 'credential_read', readdir: 'credential_read'
+  }
+};
+
+const MODULE_SINK_METHODS = {
+  child_process: { exec: 'exec_sink', execSync: 'exec_sink', spawn: 'exec_sink' },
+  http: { request: 'network_send', get: 'network_send' },
+  https: { request: 'network_send', get: 'network_send' },
+  net: { connect: 'network_send', createConnection: 'network_send' },
+  tls: { connect: 'network_send', createConnection: 'network_send' },
+  dns: { resolve: 'network_send', lookup: 'network_send', resolve4: 'network_send', resolve6: 'network_send', resolveTxt: 'network_send' },
+  fs: { writeFileSync: 'file_tamper', writeFile: 'file_tamper' }
+};
+
+// All tracked module names (for filtering in buildTaintMap)
+const TRACKED_MODULES = new Set([
+  ...Object.keys(MODULE_SOURCE_METHODS),
+  ...Object.keys(MODULE_SINK_METHODS)
+]);
+
+/**
+ * Pre-pass: builds a taint map from require() assignments.
+ * Maps variable names to { source: moduleName, detail: 'module.method' }
+ * Only tracks modules in MODULE_SOURCE_METHODS or MODULE_SINK_METHODS.
+ */
+function buildTaintMap(ast) {
+  const taintMap = new Map();
+
+  walk.simple(ast, {
+    VariableDeclarator(node) {
+      if (!node.init) return;
+
+      // Pattern: const x = require("os")
+      if (node.id.type === 'Identifier' && node.init.type === 'CallExpression') {
+        const callee = node.init.callee;
+        if (callee.type === 'Identifier' && callee.name === 'require' && node.init.arguments.length > 0) {
+          const arg = node.init.arguments[0];
+          if (arg.type === 'Literal' && typeof arg.value === 'string' && TRACKED_MODULES.has(arg.value)) {
+            taintMap.set(node.id.name, { source: arg.value, detail: arg.value });
+          }
+        }
+      }
+
+      // Pattern: const { exec, spawn } = require("child_process")
+      if (node.id.type === 'ObjectPattern' && node.init.type === 'CallExpression') {
+        const callee = node.init.callee;
+        if (callee.type === 'Identifier' && callee.name === 'require' && node.init.arguments.length > 0) {
+          const arg = node.init.arguments[0];
+          if (arg.type === 'Literal' && typeof arg.value === 'string' && TRACKED_MODULES.has(arg.value)) {
+            for (const prop of node.id.properties) {
+              if (prop.type === 'Property' && prop.value?.type === 'Identifier') {
+                const methodName = prop.key?.type === 'Identifier' ? prop.key.name : (prop.key?.value || '');
+                taintMap.set(prop.value.name, { source: arg.value, detail: `${arg.value}.${methodName}` });
+              }
+            }
+          }
+        }
+      }
+
+      // Pattern: const e = process.env
+      if (node.id.type === 'Identifier' && node.init.type === 'MemberExpression') {
+        const obj = node.init.object;
+        const prop = node.init.property;
+        if (obj?.type === 'Identifier' && obj.name === 'process' &&
+            prop?.type === 'Identifier' && prop.name === 'env') {
+          taintMap.set(node.id.name, { source: 'process.env', detail: 'process.env' });
+        }
+      }
+
+      // Pattern: const h = x.homedir where x is tainted as "os"
+      if (node.id.type === 'Identifier' && node.init.type === 'MemberExpression') {
+        const obj = node.init.object;
+        const prop = node.init.property;
+        if (obj?.type === 'Identifier' && prop?.type === 'Identifier') {
+          const parentTaint = taintMap.get(obj.name);
+          if (parentTaint && TRACKED_MODULES.has(parentTaint.source)) {
+            taintMap.set(node.id.name, { source: parentTaint.source, detail: `${parentTaint.source}.${prop.name}` });
+          }
+        }
+      }
+    }
+  });
+
+  return taintMap;
+}
+
 async function analyzeDataFlow(targetPath, options = {}) {
   return analyzeWithDeobfuscation(targetPath, analyzeFile, {
     deobfuscate: options.deobfuscate
@@ -27,6 +122,9 @@ function analyzeFile(content, filePath, basePath) {
 
   // Track variables assigned from sensitive path expressions
   const sensitivePathVars = new Set();
+
+  // Build taint map for aliased require tracking
+  const taintMap = buildTaintMap(ast);
 
   walk.simple(ast, {
     VariableDeclarator(node) {
@@ -163,6 +261,68 @@ function analyzeFile(content, filePath, basePath) {
         }
       }
 
+      // Taint resolution: aliased module calls (e.g., const myOs = require("os"); myOs.homedir())
+      if (node.callee.type === 'MemberExpression') {
+        const obj = node.callee.object;
+        const prop = node.callee.property;
+        if (obj?.type === 'Identifier' && prop?.type === 'Identifier') {
+          const taint = taintMap.get(obj.name);
+          // Dedup guard: skip when varName === moduleName (already handled by hard-coded checks above)
+          if (taint && obj.name !== taint.source) {
+            const moduleName = taint.source;
+            const methodName = prop.name;
+            // Check source methods
+            const sourceMethods = MODULE_SOURCE_METHODS[moduleName];
+            if (sourceMethods && sourceMethods[methodName]) {
+              sources.push({
+                type: sourceMethods[methodName],
+                name: `${moduleName}.${methodName}`,
+                line: node.loc?.start?.line,
+                taint_tracked: true
+              });
+            }
+            // Check sink methods
+            const sinkMethods = MODULE_SINK_METHODS[moduleName];
+            if (sinkMethods && sinkMethods[methodName]) {
+              sinks.push({
+                type: sinkMethods[methodName],
+                name: `${moduleName}.${methodName}`,
+                line: node.loc?.start?.line,
+                taint_tracked: true
+              });
+            }
+          }
+        }
+      }
+
+      // Taint resolution: bare destructured calls (e.g., const { exec } = require("child_process"); exec("cmd"))
+      if (node.callee.type === 'Identifier') {
+        const taint = taintMap.get(node.callee.name);
+        if (taint && taint.detail.includes('.')) {
+          const [moduleName, methodName] = taint.detail.split('.');
+          // Check sink methods for destructured calls
+          const sinkMethods = MODULE_SINK_METHODS[moduleName];
+          if (sinkMethods && sinkMethods[methodName]) {
+            sinks.push({
+              type: sinkMethods[methodName],
+              name: `${moduleName}.${methodName}`,
+              line: node.loc?.start?.line,
+              taint_tracked: true
+            });
+          }
+          // Check source methods for destructured calls
+          const sourceMethods = MODULE_SOURCE_METHODS[moduleName];
+          if (sourceMethods && sourceMethods[methodName]) {
+            sources.push({
+              type: sourceMethods[methodName],
+              name: `${moduleName}.${methodName}`,
+              line: node.loc?.start?.line,
+              taint_tracked: true
+            });
+          }
+        }
+      }
+
       // Track eval calls for staged payload detection
       if (callName === 'eval') {
         sinks.push({
@@ -174,6 +334,31 @@ function analyzeFile(content, filePath, basePath) {
     },
 
     MemberExpression(node) {
+      // Taint resolution: aliased process.env (e.g., const env = process.env; env.NPM_TOKEN)
+      if (node.object?.type === 'Identifier' && node.property) {
+        const taint = taintMap.get(node.object.name);
+        if (taint && taint.source === 'process.env') {
+          if (node.computed) {
+            sources.push({
+              type: 'env_read',
+              name: 'process.env[dynamic]',
+              line: node.loc?.start?.line,
+              taint_tracked: true
+            });
+          } else {
+            const envVar = node.property?.name || '';
+            if (isSensitiveEnv(envVar)) {
+              sources.push({
+                type: 'env_read',
+                name: envVar,
+                line: node.loc?.start?.line,
+                taint_tracked: true
+              });
+            }
+          }
+        }
+      }
+
       if (
         node.object?.object?.name === 'process' &&
         node.object?.property?.name === 'env'
@@ -210,6 +395,9 @@ function analyzeFile(content, filePath, basePath) {
     }
   });
 
+  // Check if any source or sink was resolved via taint tracking
+  const hasTaintTracked = sources.some(s => s.taint_tracked) || sinks.some(s => s.taint_tracked);
+
   // Detect staged payload: network fetch + eval in same file (no credential source needed)
   const hasNetworkSink = sinks.some(s => s.type === 'network_send' || s.type === 'exec_network');
   const hasEvalSink = sinks.some(s => s.type === 'eval_exec');
@@ -218,7 +406,8 @@ function analyzeFile(content, filePath, basePath) {
       type: 'staged_payload',
       severity: 'CRITICAL',
       message: 'Network fetch + eval() in same file (staged payload execution).',
-      file: path.relative(basePath, filePath)
+      file: path.relative(basePath, filePath),
+      ...(hasTaintTracked && { taint_tracked: true })
     });
   }
 
@@ -247,7 +436,8 @@ function analyzeFile(content, filePath, basePath) {
       type: 'suspicious_dataflow',
       severity: severity,
       message: `Suspicious flow: credentials read (${sources.map(s => s.name).join(', ')}) + network send (${exfilSinks.map(s => s.name).join(', ')})`,
-      file: path.relative(basePath, filePath)
+      file: path.relative(basePath, filePath),
+      ...(hasTaintTracked && { taint_tracked: true })
     });
   }
 
@@ -257,7 +447,8 @@ function analyzeFile(content, filePath, basePath) {
       type: 'credential_tampering',
       severity: 'CRITICAL',
       message: `Cache poisoning: sensitive data access (${sources.map(s => s.name).join(', ')}) + write to sensitive path (${fileTamperSinks.map(s => s.name).join(', ')})`,
-      file: path.relative(basePath, filePath)
+      file: path.relative(basePath, filePath),
+      ...(hasTaintTracked && { taint_tracked: true })
     });
   }
 
