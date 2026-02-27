@@ -347,9 +347,18 @@ async function run(targetPath, options = {}) {
     }
   }
 
+  // Read package name for benign package whitelist
+  let packageName = null;
+  try {
+    const pkgPath = path.join(targetPath, 'package.json');
+    if (fs.existsSync(pkgPath)) {
+      packageName = JSON.parse(fs.readFileSync(pkgPath, 'utf8')).name || null;
+    }
+  } catch { /* graceful fallback */ }
+
   // FP reduction: legitimate frameworks produce high volumes of certain threat types.
   // A malware package typically has 1-3 occurrences, not dozens.
-  applyFPReductions(deduped, reachableFiles);
+  applyFPReductions(deduped, reachableFiles, packageName);
 
   // Enrich each threat with rules
   const enrichedThreats = deduped.map(t => {
