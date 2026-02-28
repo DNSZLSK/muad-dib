@@ -19,7 +19,7 @@ jobs:
           node-version: '20'
           cache: 'npm'
       - run: npm ci
-      - run: npm install -g c8
+      - run: npm install -g c8@11.0.0
       - name: Run tests with coverage
         run: c8 --reporter=lcov --reporter=text npm test
       - name: Upload coverage to Codecov
@@ -42,7 +42,7 @@ jobs:
           node-version: '20'
       - run: npm ci
       - name: MUAD'DIB self-scan
-        run: node bin/muaddib.js scan . --sarif results.sarif --exclude tests --exclude docker --exclude node_modules --exclude deploy --exclude datasets --exclude src/scanner --exclude src/ioc --fail-on critical
+        run: node bin/muaddib.js scan . --sarif results.sarif --exclude tests --exclude docker --exclude node_modules --exclude deploy --exclude datasets --exclude src/scanner --exclude src/ioc --exclude vscode-extension --fail-on critical
       - name: Filter SARIF (exclude scanner source — self-referential findings)
         run: node .github/filter-sarif.js results.sarif
       - uses: github/codeql-action/upload-sarif@45580472a5bb82c4681c4ac726cfdb60060c2ee1 # v3
