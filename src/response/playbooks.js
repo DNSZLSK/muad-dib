@@ -382,6 +382,11 @@ const PLAYBOOKS = {
     'Acces a 3+ cles API de providers LLM (OpenAI, Anthropic, Google, etc.). Usage unique = legitime, ' +
     'acces multiples = collecte pour revente ou abus. Verifier si le package a une raison ' +
     'legitime d\'acceder a plusieurs providers. Revoquer les cles exposees si necessaire.',
+
+  suspicious_domain:
+    'Domaine C2 ou d\'exfiltration detecte dans le code source. Ces domaines (oastify.com, webhook.site, ngrok.io, etc.) ' +
+    'sont utilises pour recevoir des donnees volees ou relayer des commandes. Verifier si le package a une raison ' +
+    'legitime d\'utiliser ce domaine. Bloquer les connexions sortantes vers ce domaine.',
 };
 
 function getPlaybook(threatType) {

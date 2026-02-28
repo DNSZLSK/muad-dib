@@ -1090,6 +1090,19 @@ const RULES = {
     ],
     mitre: 'T1552.001'
   },
+
+  suspicious_domain: {
+    id: 'MUADDIB-AST-032',
+    name: 'Suspicious C2/Exfiltration Domain',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'Domaine C2 ou d\'exfiltration detecte dans le code (oastify.com, burpcollaborator.net, webhook.site, ngrok.io, etc.). Ces domaines sont utilises pour recevoir des donnees volees ou comme relais de commande.',
+    references: [
+      'https://attack.mitre.org/techniques/T1071/001/',
+      'https://portswigger.net/burp/documentation/collaborator'
+    ],
+    mitre: 'T1071.001'
+  },
 };
 
 function getRule(type) {

