@@ -620,13 +620,14 @@ if (command === 'version' || command === '--version' || command === '-v') {
   const packageName = sandboxOpts[0];
   const strict = options.includes('--strict');
   const canary = !options.includes('--no-canary');
+  const local = options.includes('--local');
   if (!packageName) {
-    console.log('Usage: muaddib sandbox <package-name> [--strict] [--no-canary]');
+    console.log('Usage: muaddib sandbox <package-name|path> [--local] [--strict] [--no-canary]');
     process.exit(1);
   }
 
   buildSandboxImage()
-    .then(() => runSandbox(packageName, { strict, canary }))
+    .then(() => runSandbox(packageName, { strict, canary, local }))
     .then((results) => {
       process.exit(results.suspicious ? 1 : 0);
     })
@@ -639,13 +640,14 @@ if (command === 'version' || command === '--version' || command === '-v') {
   const packageName = sandboxOpts[0];
   const strict = options.includes('--strict');
   const canary = !options.includes('--no-canary');
+  const local = options.includes('--local');
   if (!packageName) {
-    console.log('Usage: muaddib sandbox-report <package-name> [--strict] [--no-canary]');
+    console.log('Usage: muaddib sandbox-report <package-name|path> [--local] [--strict] [--no-canary]');
     process.exit(1);
   }
 
   buildSandboxImage()
-    .then(() => runSandbox(packageName, { strict, canary }))
+    .then(() => runSandbox(packageName, { strict, canary, local }))
     .then((results) => {
       if (results.raw_report) {
         console.log(generateNetworkReport(results.raw_report));

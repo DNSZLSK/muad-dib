@@ -726,6 +726,65 @@ async function runSandboxTests() {
   });
 
   // ============================================
+  // SANDBOX LOCAL MODE TESTS
+  // ============================================
+
+  console.log('\n=== SANDBOX LOCAL MODE TESTS ===\n');
+
+  await asyncTest('SANDBOX-LOCAL: runSandbox rejects non-existent local path', async () => {
+    const { runSandbox } = require('../../src/sandbox.js');
+    const origLog = console.log;
+    const logs = [];
+    console.log = (msg) => logs.push(msg);
+    try {
+      const result = await runSandbox('/nonexistent/path/that/does/not/exist', { local: true });
+      assert(result.score === 0, 'Non-existent local path should return score 0, got ' + result.score);
+      assert(result.severity === 'CLEAN', 'Should be CLEAN, got ' + result.severity);
+      assert(logs.some(l => l.includes('Local path does not exist')), 'Should log path not found message');
+    } finally {
+      console.log = origLog;
+    }
+  });
+
+  await asyncTest('SANDBOX-LOCAL: runSandbox rejects path-like input without --local flag', async () => {
+    const { runSandbox } = require('../../src/sandbox.js');
+    const origLog = console.log;
+    const logs = [];
+    console.log = (msg) => logs.push(msg);
+    try {
+      const result = await runSandbox('/tmp/some-local-dir', {});
+      assert(result.score === 0, 'Path without --local should return score 0, got ' + result.score);
+      assert(result.severity === 'CLEAN', 'Should be CLEAN');
+      assert(logs.some(l => l.includes('Invalid package name')), 'Should log invalid package name');
+    } finally {
+      console.log = origLog;
+    }
+  });
+
+  test('SANDBOX-LOCAL: displayName extraction from package.json', () => {
+    const os = require('os');
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-local-test-'));
+    try {
+      fs.writeFileSync(path.join(tmpDir, 'package.json'), JSON.stringify({ name: 'my-local-pkg', version: '1.0.0' }));
+      // Verify the path exists and package.json is readable
+      const pkgJsonPath = path.join(tmpDir, 'package.json');
+      assert(fs.existsSync(pkgJsonPath), 'package.json should exist');
+      const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'));
+      assert(pkg.name === 'my-local-pkg', 'Should read package name from package.json');
+
+      // Verify fallback to basename when no package.json name
+      const tmpDir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-local-test2-'));
+      fs.writeFileSync(path.join(tmpDir2, 'package.json'), JSON.stringify({ version: '1.0.0' }));
+      const pkg2 = JSON.parse(fs.readFileSync(path.join(tmpDir2, 'package.json'), 'utf8'));
+      const fallbackName = pkg2.name || path.basename(tmpDir2);
+      assert(fallbackName === path.basename(tmpDir2), 'Should fall back to directory basename when name is missing');
+      fs.rmSync(tmpDir2, { recursive: true, force: true });
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  // ============================================
   // SANDBOX ADDITIONAL COVERAGE TESTS
   // ============================================
 

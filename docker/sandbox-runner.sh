@@ -106,8 +106,8 @@ DURATION_MS=$((END_MS - START_MS))
 
 # ── 5. Filesystem diff ──
 echo "[SANDBOX] Analyzing filesystem changes..." >&2
-comm -13 /tmp/fs-before.txt /tmp/fs-after.txt | grep -v '^/sandbox/install/' | grep -v '^/tmp/' > /tmp/fs-created.txt
-comm -23 /tmp/fs-before.txt /tmp/fs-after.txt | grep -v '^/sandbox/install/' > /tmp/fs-deleted.txt
+comm -13 /tmp/fs-before.txt /tmp/fs-after.txt | grep -v '^/sandbox/install/' | grep -v '^/sandbox/local-pkg/' | grep -v '^/tmp/' > /tmp/fs-created.txt
+comm -23 /tmp/fs-before.txt /tmp/fs-after.txt | grep -v '^/sandbox/install/' | grep -v '^/sandbox/local-pkg/' > /tmp/fs-deleted.txt
 
 # ── 6. Parse strace ──
 echo "[SANDBOX] Parsing strace..." >&2

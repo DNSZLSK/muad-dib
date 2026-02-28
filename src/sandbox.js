@@ -1,5 +1,6 @@
 const { execSync, execFileSync, spawn } = require('child_process');
 const crypto = require('crypto');
+const fs = require('fs');
 const path = require('path');
 const {
   generateCanaryTokens,
@@ -125,18 +126,40 @@ async function buildSandboxImage() {
 async function runSandbox(packageName, options = {}) {
   const cleanResult = { score: 0, severity: 'CLEAN', findings: [], raw_report: null, suspicious: false };
 
-  if (!isDockerAvailable()) {
-    console.log('[SANDBOX] Docker is not installed or not running. Skipping.');
-    return cleanResult;
-  }
-
   const strict = options.strict || false;
   const canaryEnabled = options.canary !== false; // enabled by default
+  const local = options.local || false;
   const mode = strict ? 'strict' : 'permissive';
 
-  // Validate package name before passing to container
-  if (!NPM_PACKAGE_REGEX.test(packageName)) {
-    console.log('[SANDBOX] Invalid package name: ' + packageName);
+  // Validate inputs before checking Docker availability
+  let localAbsPath = null;
+  let displayName = packageName;
+
+  if (local) {
+    localAbsPath = path.resolve(packageName);
+    if (!fs.existsSync(localAbsPath)) {
+      console.log('[SANDBOX] Local path does not exist: ' + localAbsPath);
+      return cleanResult;
+    }
+    // Read package name for display
+    const pkgJsonPath = path.join(localAbsPath, 'package.json');
+    if (fs.existsSync(pkgJsonPath)) {
+      try {
+        const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'));
+        displayName = pkg.name || path.basename(localAbsPath);
+      } catch { displayName = path.basename(localAbsPath); }
+    } else {
+      displayName = path.basename(localAbsPath);
+    }
+  } else {
+    if (!NPM_PACKAGE_REGEX.test(packageName)) {
+      console.log('[SANDBOX] Invalid package name: ' + packageName);
+      return cleanResult;
+    }
+  }
+
+  if (!isDockerAvailable()) {
+    console.log('[SANDBOX] Docker is not installed or not running. Skipping.');
     return cleanResult;
   }
 
@@ -147,7 +170,7 @@ async function runSandbox(packageName, options = {}) {
     canaryTokens = canary.tokens;
   }
 
-  console.log(`[SANDBOX] Analyzing "${packageName}" in isolated container (mode: ${mode}${canaryEnabled ? ', canary: on' : ''})...`);
+  console.log(`[SANDBOX] Analyzing "${displayName}" in isolated container (mode: ${mode}${canaryEnabled ? ', canary: on' : ''}${local ? ', local' : ''})...`);
 
   return new Promise((resolve) => {
     let stdout = '';
@@ -190,8 +213,13 @@ async function runSandbox(packageName, options = {}) {
     dockerArgs.push('--read-only');
 
     dockerArgs.push('--security-opt', 'no-new-privileges');
+
+    if (local) {
+      dockerArgs.push('-v', `${localAbsPath}:/sandbox/local-pkg:ro`);
+    }
+
     dockerArgs.push(DOCKER_IMAGE);
-    dockerArgs.push(packageName);
+    dockerArgs.push(local ? '/sandbox/local-pkg' : packageName);
     dockerArgs.push(mode);
 
     const proc = spawn('docker', dockerArgs);
@@ -262,6 +290,9 @@ async function runSandbox(packageName, options = {}) {
           jsonStr = stdout.substring(jsonStart, jsonEnd + 1);
         }
         report = JSON.parse(jsonStr);
+        if (local && report) {
+          report.package = displayName;
+        }
       } catch (e) {
         console.log('[SANDBOX] Failed to parse container output:', e.message);
         resolve(cleanResult);

