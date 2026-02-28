@@ -88,6 +88,29 @@ su sandboxuser -s /bin/sh -c "
 "
 EXIT_CODE=$?
 
+# ── 3b. Entry point execution — trigger runtime malware ──
+# Malware that puts code in index.js without lifecycle scripts is only
+# caught when the entry point is actually required. strace + tcpdump
+# are already running, so any network/filesystem activity is captured.
+echo "[SANDBOX] Executing package entry point..." >&2
+
+if echo "$PACKAGE" | grep -q '^/'; then
+  # Local mode: $PACKAGE is already a path (e.g. /sandbox/local-pkg)
+  REQUIRE_PATH="$PACKAGE"
+else
+  # Remote mode: package installed in node_modules
+  REQUIRE_PATH="/sandbox/install/node_modules/$PACKAGE"
+fi
+
+su sandboxuser -s /bin/sh -c "
+  strace -f -e trace=network,process,open,openat,connect,execve,sendto,recvfrom \
+    -o /tmp/strace-entrypoint.log \
+    timeout 10 node -e \"try { require('$REQUIRE_PATH') } catch(e) {}\" > /tmp/entrypoint.log 2>&1
+" || true
+
+# Merge entrypoint strace into main strace log for unified analysis
+cat /tmp/strace-entrypoint.log >> /tmp/strace.log 2>/dev/null
+
 # ══════════════════════════════════════════════════════════════
 # PHASE 3: Post-install analysis (back as root for full access)
 # ══════════════════════════════════════════════════════════════
@@ -225,9 +248,10 @@ touch /tmp/fs-created.txt /tmp/fs-deleted.txt /tmp/dns-queries.txt \
   /tmp/sensitive-read.txt /tmp/sensitive-written.txt \
   /tmp/connections.txt /tmp/suspicious-cmds.txt /tmp/install.log \
   /tmp/dns-resolutions.txt /tmp/http-requests.txt /tmp/http-bodies.txt \
-  /tmp/tls-connections.txt /tmp/blocked.txt
+  /tmp/tls-connections.txt /tmp/blocked.txt /tmp/entrypoint.log
 
 INSTALL_OUTPUT=$(head -c 5000 /tmp/install.log)
+ENTRYPOINT_OUTPUT=$(head -c 5000 /tmp/entrypoint.log 2>/dev/null || echo "")
 
 FS_CREATED=$(jq -R -s 'split("\n") | map(select(length > 0))' < /tmp/fs-created.txt)
 FS_DELETED=$(jq -R -s 'split("\n") | map(select(length > 0))' < /tmp/fs-deleted.txt)
@@ -281,6 +305,7 @@ jq -n \
   --argjson tls_connections "$TLS_CONNS" \
   --argjson blocked_connections "$BLOCKED" \
   --arg install_output "$INSTALL_OUTPUT" \
+  --arg entrypoint_output "$ENTRYPOINT_OUTPUT" \
   --argjson exit_code "${EXIT_CODE:-1}" \
   '{
     package: $package,
@@ -309,5 +334,6 @@ jq -n \
       written: $sensitive_written
     },
     install_output: $install_output,
+    entrypoint_output: $entrypoint_output,
     exit_code: $exit_code
   }'

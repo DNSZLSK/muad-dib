@@ -785,6 +785,50 @@ async function runSandboxTests() {
   });
 
   // ============================================
+  // SANDBOX ENTRY POINT EXECUTION TESTS
+  // ============================================
+
+  console.log('\n=== SANDBOX ENTRY POINT EXECUTION TESTS ===\n');
+
+  test('SANDBOX-ENTRYPOINT: detectStaticCanaryExfiltration finds token in entrypoint_output', () => {
+    const report = { entrypoint_output: 'sending ' + STATIC_CANARY_TOKENS.GITHUB_TOKEN };
+    const result = detectStaticCanaryExfiltration(report);
+    assert(result.length >= 1, 'Should detect entrypoint output exfiltration');
+    assert(result[0].token === 'GITHUB_TOKEN', 'Should identify GITHUB_TOKEN');
+  });
+
+  test('SANDBOX-ENTRYPOINT: detectStaticCanaryExfiltration clean entrypoint_output', () => {
+    const report = {
+      entrypoint_output: 'Module loaded successfully',
+      install_output: 'npm install completed'
+    };
+    const result = detectStaticCanaryExfiltration(report);
+    assert(result.length === 0, 'Clean entrypoint should return empty');
+  });
+
+  test('SANDBOX-ENTRYPOINT: scoreFindings works with report including entrypoint_output', () => {
+    const report = {
+      entrypoint_output: 'some runtime output',
+      network: { dns_queries: ['evil.com'] }
+    };
+    const { score, findings } = scoreFindings(report);
+    assert(score > 0, 'Should still score network findings');
+    const dnsFindings = findings.filter(f => f.type === 'suspicious_dns');
+    assert(dnsFindings.length === 1, 'Should detect DNS finding');
+  });
+
+  test('SANDBOX-ENTRYPOINT: detectStaticCanaryExfiltration finds multiple tokens in entrypoint_output', () => {
+    const report = {
+      entrypoint_output: 'leaked: ' + STATIC_CANARY_TOKENS.NPM_TOKEN + ' and ' + STATIC_CANARY_TOKENS.AWS_ACCESS_KEY_ID
+    };
+    const result = detectStaticCanaryExfiltration(report);
+    assert(result.length >= 2, 'Should detect 2+ tokens, got ' + result.length);
+    const tokenNames = result.map(r => r.token);
+    assert(tokenNames.includes('NPM_TOKEN'), 'Should include NPM_TOKEN');
+    assert(tokenNames.includes('AWS_ACCESS_KEY_ID'), 'Should include AWS_ACCESS_KEY_ID');
+  });
+
+  // ============================================
   // SANDBOX ADDITIONAL COVERAGE TESTS
   // ============================================
 
