@@ -136,9 +136,9 @@ Impact sur TPR : 45/49 = 91.8% (4 misses documentes et acceptes).
 
 ## Resultats des tests adversariaux
 
-### Taux de detection : 78/78 (100% ADR)
+### Taux de detection : 77/78 (98.7% ADR)
 
-78 samples adversariaux/holdout evasifs (38 adversariaux + 40 holdouts sur 5 vagues red team) testes avec des techniques d'evasion reelles (obfuscation, dataflow inter-module, charcode reconstruction, prototype hooking, AI agent weaponization, etc.).
+78 samples adversariaux/holdout evasifs (38 adversariaux + 40 holdouts sur 5 vagues red team) testes avec des techniques d'evasion reelles (obfuscation, dataflow inter-module, charcode reconstruction, prototype hooking, AI agent weaponization, etc.). 1 miss documente : `require-cache-poison` (compromis accepte avec la reduction FP P3).
 
 Voir [Evaluation Methodology](EVALUATION_METHODOLOGY.md) pour le detail des scores pre-tuning et post-tuning.
 
@@ -161,6 +161,20 @@ Couverture complete des scanners, parsers, IOC matching, typosquatting, integrat
 51 attaques supply-chain reelles sont rejouees automatiquement pour valider la couverture. La base inclut event-stream, ua-parser-js, coa, node-ipc, colors, eslint-scope, flatmap-stream, solana-web3js, rc, getcookies, ledgerhq-connect-kit, shai-hulud, et 39 autres attaques de 2018 a 2025.
 
 Taux de detection : **91.8%** (45/49 attaques actives). 4 misses documentes comme hors scope (voir section "Attaques browser-only" ci-dessus).
+
+### Benchmark Datadog 17K (v2.3.1)
+
+Validation a grande echelle contre le [DataDog Malicious Software Packages Dataset](https://github.com/DataDog/malicious-software-packages-dataset) : 17 922 packages malveillants npm reels.
+
+- **TPR brut : 88.2%** (15 810 / 17 922)
+- **TPR ajuste (malware JS/Node.js) : ~100%** (15 810 / ~15 845)
+
+Les 2 077 misses (score=0) ont ete categorises manuellement :
+- **1 233 pages de phishing** : HTML/CSS/JS frontend (faux login, redirects, captchas). Aucune API Node.js (`require`, `child_process`, `fs`, `process.env`).
+- **824 binaires natifs** : Pas de fichiers JS. 201 packages @42ailab (binaires multi-plateforme darwin-arm64, linux-x64, etc.) + 623 autres.
+- **20 bibliotheques corrigees** : Code malveillant retire avant le scan (compromission temporaire).
+
+Limitation connue et documentee : MUAD'DIB fait de l'analyse AST statique Node.js. La detection de phishing HTML et l'analyse de binaires natifs sont hors scope.
 
 ### Suivi du taux de faux positifs (v2.1)
 
