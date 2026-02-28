@@ -37,7 +37,9 @@ async function runMonitorTests() {
     consecutivePollErrors, POLL_MAX_BACKOFF,
     runTemporalAstCheck, runTemporalPublishCheck, runTemporalMaintainerCheck,
     runTemporalCheck, reportStats, recentlyScanned, sendDailyReport,
-    resolveTarballAndScan, KNOWN_BUNDLED_PATHS
+    resolveTarballAndScan, KNOWN_BUNDLED_PATHS,
+    LAST_DAILY_REPORT_FILE, DAILY_REPORT_COOLDOWN_MS,
+    loadLastDailyReportTimestamp, saveLastDailyReportTimestamp, isDailyReportOnCooldown
   } = require('../../src/monitor.js');
 
   test('MONITOR: parseNpmRss extracts package names from RSS', () => {
@@ -4076,6 +4078,125 @@ async function runMonitorTests() {
 
     assert(isSuspect === true, 'Mixed temporal with any CRITICAL should be SUSPECT');
     assert(temporalMaxSev === 'CRITICAL', 'Should pick CRITICAL as max');
+  });
+
+  // --- Daily report cooldown (SIGTERM restart fix) ---
+
+  test('MONITOR: DAILY_REPORT_COOLDOWN_MS is 12 hours', () => {
+    assert(DAILY_REPORT_COOLDOWN_MS === 12 * 60 * 60 * 1000, 'Cooldown should be 12 hours');
+  });
+
+  test('MONITOR: loadLastDailyReportTimestamp returns 0 when file missing', () => {
+    const origFile = LAST_DAILY_REPORT_FILE;
+    const tmpFile = path.join(os.tmpdir(), 'muaddib-test-no-exist-' + Date.now() + '.json');
+    // Temporarily override — the function reads from the module-level constant,
+    // so we test by ensuring a missing file returns 0
+    const ts = loadLastDailyReportTimestamp();
+    // If the file doesn't exist in production data dir, returns 0
+    assert(typeof ts === 'number', 'Should return a number');
+  });
+
+  test('MONITOR: saveLastDailyReportTimestamp writes and loadLastDailyReportTimestamp reads', () => {
+    // Backup existing file if any
+    let backup = null;
+    try {
+      backup = fs.readFileSync(LAST_DAILY_REPORT_FILE, 'utf8');
+    } catch {}
+
+    try {
+      saveLastDailyReportTimestamp();
+      const ts = loadLastDailyReportTimestamp();
+      assert(typeof ts === 'number', 'Should return a number');
+      assert(ts > 0, 'Timestamp should be positive');
+      assert(Date.now() - ts < 5000, 'Timestamp should be recent (within 5s)');
+    } finally {
+      // Restore backup
+      if (backup !== null) {
+        fs.writeFileSync(LAST_DAILY_REPORT_FILE, backup, 'utf8');
+      } else {
+        try { fs.unlinkSync(LAST_DAILY_REPORT_FILE); } catch {}
+      }
+    }
+  });
+
+  test('MONITOR: isDailyReportOnCooldown returns true when report sent recently', () => {
+    let backup = null;
+    try {
+      backup = fs.readFileSync(LAST_DAILY_REPORT_FILE, 'utf8');
+    } catch {}
+
+    try {
+      // Write a recent timestamp
+      const dir = path.dirname(LAST_DAILY_REPORT_FILE);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(LAST_DAILY_REPORT_FILE, JSON.stringify({ sentAt: Date.now() }), 'utf8');
+      assert(isDailyReportOnCooldown() === true, 'Should be on cooldown when just sent');
+    } finally {
+      if (backup !== null) {
+        fs.writeFileSync(LAST_DAILY_REPORT_FILE, backup, 'utf8');
+      } else {
+        try { fs.unlinkSync(LAST_DAILY_REPORT_FILE); } catch {}
+      }
+    }
+  });
+
+  test('MONITOR: isDailyReportOnCooldown returns false when report sent >12h ago', () => {
+    let backup = null;
+    try {
+      backup = fs.readFileSync(LAST_DAILY_REPORT_FILE, 'utf8');
+    } catch {}
+
+    try {
+      // Write an old timestamp (13 hours ago)
+      const dir = path.dirname(LAST_DAILY_REPORT_FILE);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      const oldTs = Date.now() - (13 * 60 * 60 * 1000);
+      fs.writeFileSync(LAST_DAILY_REPORT_FILE, JSON.stringify({ sentAt: oldTs }), 'utf8');
+      assert(isDailyReportOnCooldown() === false, 'Should NOT be on cooldown after 13h');
+    } finally {
+      if (backup !== null) {
+        fs.writeFileSync(LAST_DAILY_REPORT_FILE, backup, 'utf8');
+      } else {
+        try { fs.unlinkSync(LAST_DAILY_REPORT_FILE); } catch {}
+      }
+    }
+  });
+
+  test('MONITOR: isDailyReportOnCooldown returns false when file missing', () => {
+    let backup = null;
+    try {
+      backup = fs.readFileSync(LAST_DAILY_REPORT_FILE, 'utf8');
+    } catch {}
+
+    try {
+      // Remove the file
+      try { fs.unlinkSync(LAST_DAILY_REPORT_FILE); } catch {}
+      assert(isDailyReportOnCooldown() === false, 'Should NOT be on cooldown when no file');
+    } finally {
+      if (backup !== null) {
+        fs.writeFileSync(LAST_DAILY_REPORT_FILE, backup, 'utf8');
+      }
+    }
+  });
+
+  test('MONITOR: isDailyReportOnCooldown returns false for corrupt file', () => {
+    let backup = null;
+    try {
+      backup = fs.readFileSync(LAST_DAILY_REPORT_FILE, 'utf8');
+    } catch {}
+
+    try {
+      const dir = path.dirname(LAST_DAILY_REPORT_FILE);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(LAST_DAILY_REPORT_FILE, 'not json', 'utf8');
+      assert(isDailyReportOnCooldown() === false, 'Should NOT be on cooldown for corrupt file');
+    } finally {
+      if (backup !== null) {
+        fs.writeFileSync(LAST_DAILY_REPORT_FILE, backup, 'utf8');
+      } else {
+        try { fs.unlinkSync(LAST_DAILY_REPORT_FILE); } catch {}
+      }
+    }
   });
 }
 

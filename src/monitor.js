@@ -21,6 +21,8 @@ const STATE_FILE = path.join(__dirname, '..', 'data', 'monitor-state.json');
 const ALERTS_FILE = path.join(__dirname, '..', 'data', 'monitor-alerts.json');
 const DETECTIONS_FILE = path.join(__dirname, '..', 'data', 'detections.json');
 const SCAN_STATS_FILE = path.join(__dirname, '..', 'data', 'scan-stats.json');
+const LAST_DAILY_REPORT_FILE = path.join(__dirname, '..', 'data', 'last-daily-report.json');
+const DAILY_REPORT_COOLDOWN_MS = 12 * 60 * 60 * 1000; // 12 hours
 const POLL_INTERVAL = 60_000;
 const POLL_MAX_BACKOFF = 960_000; // 16 minutes max backoff
 const SCAN_TIMEOUT_MS = 180_000; // 3 minutes per package
@@ -1115,6 +1117,41 @@ function reportStats() {
 const DAILY_REPORT_HOUR = 8; // 08:00 Paris time (Europe/Paris)
 
 /**
+ * Load the timestamp (ms since epoch) of the last daily report sent.
+ * Returns 0 if no file exists or file is invalid.
+ */
+function loadLastDailyReportTimestamp() {
+  try {
+    const raw = fs.readFileSync(LAST_DAILY_REPORT_FILE, 'utf8');
+    const data = JSON.parse(raw);
+    return typeof data.sentAt === 'number' ? data.sentAt : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Persist the timestamp of the last daily report sent.
+ */
+function saveLastDailyReportTimestamp() {
+  try {
+    const dir = path.dirname(LAST_DAILY_REPORT_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(LAST_DAILY_REPORT_FILE, JSON.stringify({ sentAt: Date.now() }, null, 2), 'utf8');
+  } catch (err) {
+    console.error(`[MONITOR] Failed to save last daily report timestamp: ${err.message}`);
+  }
+}
+
+/**
+ * Returns true if a daily report was sent less than DAILY_REPORT_COOLDOWN_MS ago.
+ */
+function isDailyReportOnCooldown() {
+  const lastSent = loadLastDailyReportTimestamp();
+  return (Date.now() - lastSent) < DAILY_REPORT_COOLDOWN_MS;
+}
+
+/**
  * Returns the current hour in Europe/Paris timezone (0-23).
  */
 function getParisHour() {
@@ -1197,6 +1234,7 @@ async function sendDailyReport() {
   try {
     await sendWebhook(url, payload, { rawPayload: true });
     console.log('[MONITOR] Daily report sent');
+    saveLastDailyReportTimestamp();
   } catch (err) {
     console.error(`[MONITOR] Daily report webhook failed: ${err.message}`);
   }
@@ -1325,6 +1363,7 @@ async function sendReportNow() {
   };
   stats.lastDailyReportDate = getParisDateString();
   saveState(state);
+  saveLastDailyReportTimestamp();
 
   return { sent: true, message: 'Daily report sent' };
 }
@@ -1619,9 +1658,12 @@ async function startMonitor(options) {
 
   // Graceful shutdown handler (shared by SIGINT and SIGTERM)
   async function gracefulShutdown(signal) {
-    console.log(`\n[MONITOR] Received ${signal} — sending pending daily report...`);
-    if (stats.scanned > 0) {
+    console.log(`\n[MONITOR] Received ${signal} — shutting down...`);
+    if (stats.scanned > 0 && !isDailyReportOnCooldown()) {
+      console.log('[MONITOR] Sending pending daily report...');
       await sendDailyReport();
+    } else if (stats.scanned > 0) {
+      console.log('[MONITOR] Daily report skipped (sent less than 12h ago)');
     }
     saveState(state);
     reportStats();
@@ -1931,7 +1973,12 @@ module.exports = {
   getReportStatus,
   cleanupOrphanTmpDirs,
   consecutivePollErrors: { get() { return consecutivePollErrors; }, set(v) { consecutivePollErrors = v; } },
-  POLL_MAX_BACKOFF
+  POLL_MAX_BACKOFF,
+  LAST_DAILY_REPORT_FILE,
+  DAILY_REPORT_COOLDOWN_MS,
+  loadLastDailyReportTimestamp,
+  saveLastDailyReportTimestamp,
+  isDailyReportOnCooldown
 };
 
 // Standalone entry point: node src/monitor.js
