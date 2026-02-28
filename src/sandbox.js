@@ -382,8 +382,9 @@ function detectStaticCanaryExfiltration(report) {
   for (const file of (report.filesystem?.created || [])) if (file) searchable.push(file);
   for (const proc of (report.processes?.spawned || [])) if (proc.command) searchable.push(proc.command);
 
-  // Install output
+  // Install + entrypoint output
   if (report.install_output) searchable.push(report.install_output);
+  if (report.entrypoint_output) searchable.push(report.entrypoint_output);
 
   const allOutput = searchable.join('\n');
 
