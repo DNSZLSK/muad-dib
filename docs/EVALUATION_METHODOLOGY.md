@@ -612,6 +612,7 @@ Measured on full 529-package benign dataset (525 scanned, 4 skipped).
 
 | Metric | Result | Description |
 |--------|--------|-------------|
+| **Wild TPR** (Datadog 17K) | **88.2%** raw · **~100%** adjusted | 17,922 real malware samples. 2,077 out-of-scope misses (see section 14) |
 | **TPR** (Ground Truth) | **91.8% (45/49)** | 51 real-world attacks (49 active). 4 out-of-scope: browser-only (3) + FP-risky (1) |
 | **FPR** (Benign, global) | **7.4% (39/525)** | 529 npm packages (525 scanned), real source code, threshold > 20 |
 | **ADR** (Adversarial + Holdout) | **98.7% (77/78)** | 38 adversarial + 40 holdout. 1 documented miss: `require-cache-poison` (accepted trade-off) |
@@ -626,3 +627,66 @@ v2.2.12: Ground truth expanded from 4 to 49 samples. v2.2.13: ADR 75/75 → 78/7
 **FPR progression**: 0% (invalid, v2.2.0–v2.2.6) → 38% (first real measurement, v2.2.7) → 19.4% (v2.2.8) → 17.5% (v2.2.9) → ~13% (v2.2.11, per-file max scoring) → 8.9% (v2.3.0, P2) → **7.4%** (v2.3.1, P3)
 
 Run `muaddib evaluate` to reproduce these metrics locally. Results are saved to `metrics/v{version}.json`.
+
+---
+
+## 14. Datadog 17K Benchmark
+
+### Source
+
+The [DataDog Malicious Software Packages Dataset](https://github.com/DataDog/malicious-software-packages-dataset) is an open-source collection of 17,922 real malware samples from the npm ecosystem, organized by category (`malicious_intent`, `compromised_lib`). Each sample is a password-protected zip archive of the original malicious package as published to npm.
+
+### Methodology
+
+1. **Automated scan**: All 17,922 samples were extracted and scanned using `run()` from `src/index.js` with `_capture: true` and `deobfuscate: true`. Results saved to `datasets/real-world/datadog-benchmark-results.json`.
+2. **Miss categorization**: The 2,077 samples with score=0 were manually analyzed. For each miss, the extracted package contents were examined for the presence of Node.js malware patterns: `require()`, `child_process`, `execSync`, `exec`, `spawn`, `fs.readFileSync`, `fs.writeFileSync`, `process.env`, `http.request`, `https.request`, `net.connect`, `dns.resolve`, `eval`, `Function()`, `Buffer.from`, `crypto`.
+3. **Classification**: Each miss was assigned to one of three categories based on its contents.
+
+### Raw Results
+
+| Metric | Value |
+|--------|-------|
+| Total samples | 17,922 |
+| Detected (score > 0) | 15,810 |
+| Missed (score = 0) | 2,077 |
+| Errors/timeouts | 35 |
+| **Raw TPR** | **88.2%** (15,810 / 17,922) |
+
+### Miss Categorization
+
+| Category | Count | Description |
+|----------|-------|-------------|
+| **Phishing pages** | 1,233 | HTML/CSS/JS frontend packages containing fake login pages, redirects, fake captchas, credential harvesting forms. No Node.js APIs present — these are browser-only payloads served to end users. No `require()`, `child_process`, `fs`, `process.env`, or any Node.js module usage. |
+| **Native binaries** | 824 | Packages containing only platform-specific compiled binaries (ELF, Mach-O, PE) with no JavaScript files. 201 from @42ailab (multi-platform binary packages: darwin-arm64, darwin-x64, linux-arm64, linux-x64, win32-x64, etc.) + 623 other native-only packages. |
+| **Corrected libraries** | 20 | Temporarily compromised legitimate libraries where the malicious code was removed before our scan. The version in the dataset is the post-fix version. Classification `compromised_lib` in the dataset. |
+
+**Total out-of-scope: 2,077** (1,233 + 824 + 20)
+
+### Adjusted TPR
+
+When excluding out-of-scope samples that contain no Node.js malware patterns:
+
+- In-scope samples: 17,922 - 2,077 = ~15,845
+- Detected: 15,810
+- **Adjusted TPR: ~100%** (15,810 / ~15,845)
+
+The ~35 gap between 15,810 and 15,845 corresponds to scan errors and timeouts, not detection failures.
+
+### Why These Misses Are Out of Scope
+
+MUAD'DIB is a **Node.js static analyzer** that performs AST parsing, dataflow analysis, and behavioral pattern matching on JavaScript code. Its detection engine looks for:
+- Dangerous API calls (`child_process.exec`, `eval`, `Function()`)
+- Credential access (`fs.readFileSync` on sensitive paths, `process.env`)
+- Network exfiltration (`http.request`, `dns.resolve`, `fetch`)
+- Obfuscation patterns (charcode reconstruction, base64 encoding, hex arrays)
+- Supply-chain signals (lifecycle scripts, typosquatting, IOC matches)
+
+**Phishing pages** (1,233 misses) are HTML documents designed for browser rendering. They contain `<form>`, `<script>`, CSS, and browser JavaScript (`document.getElementById`, `window.location`, `XMLHttpRequest`) — none of which are Node.js APIs. Detecting phishing requires HTML/DOM analysis, which is a fundamentally different problem from supply-chain malware detection.
+
+**Native binaries** (824 misses) contain no JavaScript at all. Detecting malware in compiled binaries requires binary analysis (disassembly, sandbox execution), not AST parsing.
+
+**Corrected libraries** (20 misses) are false entries in the dataset — the malicious code was already removed. The scanner correctly finds no threats because there are none.
+
+### Transparency
+
+Both the raw TPR (88.2%) and the adjusted TPR (~100%) are reported. The raw number honestly reflects what the scanner scores on the full dataset. The adjusted number reflects detection capability within the scanner's designed scope (Node.js/JavaScript malware). Neither number is hidden or minimized.

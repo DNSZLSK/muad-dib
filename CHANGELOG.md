@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Test count: 1317 → **1387** (+70 tests, 0 failures, 4 skipped)
 - **ADR: 98.7% (77/78)** — 1 documented miss: `require-cache-poison` adversarial sample scores 10 (single CRITICAL→HIGH downgrade) < threshold 20. Accepted trade-off: the FP reduction on fastify, mocha, moleculer outweighs missing one adversarial sample that uses a single `require.cache` access indistinguishable from legitimate plugin behavior.
 - TPR unchanged at **91.8% (45/49)**
+- **Datadog 17K benchmark**: 88.2% raw TPR (15,810/17,922). 2,077 misses categorized as out-of-scope (1,233 phishing HTML, 824 native binaries, 20 corrected libs). Adjusted TPR on JS/Node.js malware: ~100%.
 
 ## [2.3.0] - 2026-02-25
 

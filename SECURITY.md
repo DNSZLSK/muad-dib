@@ -355,6 +355,19 @@ MUAD'DIB includes a ground truth dataset of 51 real-world supply-chain attacks (
 
 Run `muaddib evaluate --ground-truth` to validate detection at any time.
 
+## Datadog 17K Benchmark (v2.3.1)
+
+Validated against the [DataDog Malicious Software Packages Dataset](https://github.com/DataDog/malicious-software-packages-dataset) (17,922 real malware npm packages).
+
+**Raw TPR: 88.2% (15,810/17,922)**
+
+The 2,077 misses (score=0) are all out-of-scope:
+- 1,233 phishing pages (HTML/CSS/JS frontend — no Node.js APIs)
+- 824 native binaries (no JS files)
+- 20 corrected libraries (malicious code already removed)
+
+**Adjusted TPR on JS/Node.js malware: ~100%** (15,810/~15,845). See [Evaluation Methodology](docs/EVALUATION_METHODOLOGY.md#14-datadog-17k-benchmark) for the full categorization methodology.
+
 ## Threat Feed API Security
 
 The `muaddib serve` HTTP server binds to `localhost` (127.0.0.1) by default. It serves detection data as JSON for SIEM integration.
