@@ -19,7 +19,9 @@ for (const run of sarif.runs || []) {
     const uri = decodeURIComponent(
       r.locations?.[0]?.physicalLocation?.artifactLocation?.uri || ''
     ).replace(/\\/g, '/');
-    return !uri.startsWith('src/');
+    // Exclude scanner source (definitional sensitive references) and
+    // VS Code extension (self-referential: uses child_process to invoke CLI)
+    return !uri.startsWith('src/') && !uri.startsWith('vscode-extension/');
   });
   removed += before - run.results.length;
 }
