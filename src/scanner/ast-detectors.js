@@ -102,6 +102,18 @@ const GIT_HOOKS = [
   'pre-rebase', 'post-rewrite', 'pre-auto-gc'
 ];
 
+// Suspicious C2/exfiltration domains (HIGH severity)
+const SUSPICIOUS_DOMAINS_HIGH = [
+  'oastify.com', 'oast.fun', 'oast.me', 'oast.live',
+  'burpcollaborator.net', 'webhook.site', 'pipedream.net',
+  'requestbin.com', 'hookbin.com', 'canarytokens.com'
+];
+
+// Suspicious tunnel/proxy domains (MEDIUM severity)
+const SUSPICIOUS_DOMAINS_MEDIUM = [
+  'ngrok.io', 'ngrok-free.app', 'serveo.net', 'localhost.run', 'loca.lt'
+];
+
 // LLM API key environment variable names (3+ = harvesting)
 const LLM_API_KEY_VARS = [
   'OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'GOOGLE_API_KEY',
@@ -943,6 +955,31 @@ function handleLiteral(node, ctx) {
           message: `AI agent security bypass flag "${flag}" found — weaponized AI coding assistant (s1ngularity/Nx pattern).`,
           file: ctx.relFile
         });
+      }
+    }
+
+    // Detect suspicious C2/exfiltration domains in string literals
+    const lowerVal = node.value.toLowerCase();
+    for (const domain of SUSPICIOUS_DOMAINS_HIGH) {
+      if (lowerVal.includes(domain)) {
+        ctx.threats.push({
+          type: 'suspicious_domain',
+          severity: 'HIGH',
+          message: `Suspicious C2/exfiltration domain "${domain}" found in string literal.`,
+          file: ctx.relFile
+        });
+        break;
+      }
+    }
+    for (const domain of SUSPICIOUS_DOMAINS_MEDIUM) {
+      if (lowerVal.includes(domain)) {
+        ctx.threats.push({
+          type: 'suspicious_domain',
+          severity: 'MEDIUM',
+          message: `Suspicious tunnel/proxy domain "${domain}" found in string literal.`,
+          file: ctx.relFile
+        });
+        break;
       }
     }
   }

@@ -622,7 +622,7 @@ async function runReachabilityTests() {
   // =========================================================================
 
   test('benign whitelist: contains expected packages', () => {
-    for (const pkg of ['meteor', 'blessed', 'sharp', 'forever', 'start-server-and-test']) {
+    for (const pkg of ['meteor', 'blessed', 'sharp', 'forever', 'start-server-and-test', 'ultra-runner', 'node-gyp', 'graceful-fs']) {
       assert(BENIGN_PACKAGE_WHITELIST.has(pkg), `${pkg} should be in BENIGN_PACKAGE_WHITELIST`);
     }
   });
@@ -670,8 +670,8 @@ async function runReachabilityTests() {
     assert(threats[0].severity === 'CRITICAL', `Should stay CRITICAL when no packageName, got ${threats[0].severity}`);
   });
 
-  test('benign whitelist: all 5 packages downgrade correctly', () => {
-    for (const pkg of ['meteor', 'blessed', 'sharp', 'forever', 'start-server-and-test']) {
+  test('benign whitelist: all 8 packages downgrade correctly', () => {
+    for (const pkg of ['meteor', 'blessed', 'sharp', 'forever', 'start-server-and-test', 'ultra-runner', 'node-gyp', 'graceful-fs']) {
       const threats = [
         { type: 'module_compile', severity: 'CRITICAL', file: 'lib/main.js', message: '_compile' },
         { type: 'suspicious_dataflow', severity: 'HIGH', file: 'lib/index.js', message: 'flow' }

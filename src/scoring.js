@@ -149,7 +149,10 @@ const BENIGN_PACKAGE_WHITELIST = new Set([
   'blessed',              // module._compile for terminal capabilities (module_compile FP)
   'sharp',                // native bindings with dynamic require + postinstall (lifecycle FP)
   'forever',              // process manager: detached spawn + HOME config access (dataflow FP)
-  'start-server-and-test' // curl/wget in test scripts, not install hooks (lifecycle FP)
+  'start-server-and-test', // curl/wget in test scripts, not install hooks (lifecycle FP)
+  'ultra-runner',         // aliased fs.readFileSync in pnp.js + dynamic require (taint-tracked dataflow FP)
+  'node-gyp',             // aliased child_process.spawn in node-gyp.js + env access (taint-tracked dataflow FP)
+  'graceful-fs'           // aliased fs.readFile/readdir/writeFile monkey-patching (taint-tracked credential_tampering FP)
 ]);
 
 // Threat types never affected by benign package whitelist (real compromise indicators)

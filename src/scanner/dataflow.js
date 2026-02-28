@@ -16,6 +16,10 @@ const MODULE_SOURCE_METHODS = {
   fs: {
     readFileSync: 'credential_read', readFile: 'credential_read',
     readdirSync: 'credential_read', readdir: 'credential_read'
+  },
+  child_process: {
+    exec: 'command_output', execSync: 'command_output',
+    spawn: 'command_output', spawnSync: 'command_output'
   }
 };
 
@@ -34,6 +38,9 @@ const TRACKED_MODULES = new Set([
   ...Object.keys(MODULE_SOURCE_METHODS),
   ...Object.keys(MODULE_SINK_METHODS)
 ]);
+
+// Methods that execute commands — used for exec result capture detection
+const EXEC_METHODS = new Set(['exec', 'execSync', 'spawn', 'spawnSync']);
 
 /**
  * Pre-pass: builds a taint map from require() assignments.
@@ -126,6 +133,9 @@ function analyzeFile(content, filePath, basePath) {
   // Build taint map for aliased require tracking
   const taintMap = buildTaintMap(ast);
 
+  // Track exec calls whose result is captured (for command_output source detection)
+  const execResultNodes = new Set();
+
   walk.simple(ast, {
     VariableDeclarator(node) {
       if (node.id?.type === 'Identifier' && node.init) {
@@ -144,6 +154,34 @@ function analyzeFile(content, filePath, basePath) {
             )) {
               sensitivePathVars.add(node.id.name);
             }
+          }
+        }
+        // Track exec result capture: const output = execSync('cmd')
+        if (node.init.type === 'CallExpression') {
+          let execName = null;
+          const initCallee = node.init.callee;
+          if (initCallee?.type === 'Identifier' && EXEC_METHODS.has(initCallee.name)) {
+            const taint = taintMap.get(initCallee.name);
+            if (taint && taint.source === 'child_process') {
+              execName = taint.detail;
+            }
+          } else if (initCallee?.type === 'MemberExpression' &&
+                     initCallee.object?.type === 'Identifier' &&
+                     initCallee.property?.type === 'Identifier' &&
+                     EXEC_METHODS.has(initCallee.property.name)) {
+            const taint = taintMap.get(initCallee.object.name);
+            if (taint && taint.source === 'child_process') {
+              execName = `child_process.${initCallee.property.name}`;
+            }
+          }
+          if (execName) {
+            execResultNodes.add(node.init);
+            sources.push({
+              type: 'command_output',
+              name: execName,
+              line: node.loc?.start?.line,
+              taint_tracked: true
+            });
           }
         }
       }
@@ -271,9 +309,9 @@ function analyzeFile(content, filePath, basePath) {
           if (taint && obj.name !== taint.source) {
             const moduleName = taint.source;
             const methodName = prop.name;
-            // Check source methods
+            // Check source methods (skip command_output — handled by VariableDeclarator capture)
             const sourceMethods = MODULE_SOURCE_METHODS[moduleName];
-            if (sourceMethods && sourceMethods[methodName]) {
+            if (sourceMethods && sourceMethods[methodName] && sourceMethods[methodName] !== 'command_output') {
               sources.push({
                 type: sourceMethods[methodName],
                 name: `${moduleName}.${methodName}`,
@@ -310,12 +348,38 @@ function analyzeFile(content, filePath, basePath) {
               taint_tracked: true
             });
           }
-          // Check source methods for destructured calls
+          // Check source methods for destructured calls (skip command_output — handled by VariableDeclarator capture)
           const sourceMethods = MODULE_SOURCE_METHODS[moduleName];
-          if (sourceMethods && sourceMethods[methodName]) {
+          if (sourceMethods && sourceMethods[methodName] && sourceMethods[methodName] !== 'command_output') {
             sources.push({
               type: sourceMethods[methodName],
               name: `${moduleName}.${methodName}`,
+              line: node.loc?.start?.line,
+              taint_tracked: true
+            });
+          }
+        }
+      }
+
+      // Exec callback: exec('cmd', (err, stdout) => {...}) — output will be used
+      if (!execResultNodes.has(node) && node.arguments.length >= 2) {
+        const lastArg = node.arguments[node.arguments.length - 1];
+        if (lastArg.type === 'FunctionExpression' || lastArg.type === 'ArrowFunctionExpression') {
+          let isExecCb = false;
+          if (node.callee?.type === 'Identifier' && EXEC_METHODS.has(node.callee.name)) {
+            const taint = taintMap.get(node.callee.name);
+            isExecCb = !!(taint && taint.source === 'child_process');
+          } else if (node.callee?.type === 'MemberExpression' &&
+                     node.callee.object?.type === 'Identifier' &&
+                     node.callee.property?.type === 'Identifier' &&
+                     EXEC_METHODS.has(node.callee.property.name)) {
+            const taint = taintMap.get(node.callee.object.name);
+            isExecCb = !!(taint && taint.source === 'child_process');
+          }
+          if (isExecCb) {
+            sources.push({
+              type: 'command_output',
+              name: 'child_process.exec',
               line: node.loc?.start?.line,
               taint_tracked: true
             });
@@ -412,7 +476,9 @@ function analyzeFile(content, filePath, basePath) {
   }
 
   // Separate exfiltration sinks from file tampering sinks
-  const exfilSinks = sinks.filter(s => s.type !== 'file_tamper');
+  // When command output is captured, exclude exec_sink (the exec itself is the source, not an exfil sink)
+  const hasCommandOutput = sources.some(s => s.type === 'command_output');
+  const exfilSinks = sinks.filter(s => s.type !== 'file_tamper' && !(hasCommandOutput && s.type === 'exec_sink'));
   const fileTamperSinks = sinks.filter(s => s.type === 'file_tamper');
 
   if (sources.length > 0 && exfilSinks.length > 0) {
@@ -432,10 +498,11 @@ function analyzeFile(content, filePath, basePath) {
     const allTelemetryOnly = sources.every(s => s.type === 'telemetry_read');
     if (allTelemetryOnly && severity === 'CRITICAL') severity = 'HIGH';
 
+    const sourceDesc = hasCommandOutput ? 'command output' : 'credentials read';
     threats.push({
       type: 'suspicious_dataflow',
       severity: severity,
-      message: `Suspicious flow: credentials read (${sources.map(s => s.name).join(', ')}) + network send (${exfilSinks.map(s => s.name).join(', ')})`,
+      message: `Suspicious flow: ${sourceDesc} (${sources.map(s => s.name).join(', ')}) + network send (${exfilSinks.map(s => s.name).join(', ')})`,
       file: path.relative(basePath, filePath),
       ...(hasTaintTracked && { taint_tracked: true })
     });
