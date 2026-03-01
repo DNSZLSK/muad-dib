@@ -22,7 +22,8 @@ const ALERTS_FILE = path.join(__dirname, '..', 'data', 'monitor-alerts.json');
 const DETECTIONS_FILE = path.join(__dirname, '..', 'data', 'detections.json');
 const SCAN_STATS_FILE = path.join(__dirname, '..', 'data', 'scan-stats.json');
 const LAST_DAILY_REPORT_FILE = path.join(__dirname, '..', 'data', 'last-daily-report.json');
-const DAILY_REPORT_COOLDOWN_MS = 12 * 60 * 60 * 1000; // 12 hours
+const DAILY_STATS_FILE = path.join(__dirname, '..', 'data', 'daily-stats.json');
+const DAILY_STATS_PERSIST_INTERVAL = 10; // Persist to disk every N scans
 const POLL_INTERVAL = 60_000;
 const POLL_MAX_BACKOFF = 960_000; // 16 minutes max backoff
 const SCAN_TIMEOUT_MS = 180_000; // 3 minutes per package
@@ -52,6 +53,9 @@ const recentlyScanned = new Set();
 
 // Consecutive poll error tracking for exponential backoff
 let consecutivePollErrors = 0;
+
+// Counter for throttled disk persistence
+let scansSinceLastPersist = 0;
 
 // --- Scan queue (FIFO, sequential) ---
 
@@ -701,6 +705,11 @@ function loadState() {
     if (typeof state.lastDailyReportDate === 'string') {
       stats.lastDailyReportDate = state.lastDailyReportDate;
     }
+    // Also check the dedicated daily report file (crash-safe source of truth)
+    const diskDate = loadLastDailyReportDate();
+    if (diskDate && (!stats.lastDailyReportDate || diskDate > stats.lastDailyReportDate)) {
+      stats.lastDailyReportDate = diskDate;
+    }
     return {
       npmLastPackage: typeof state.npmLastPackage === 'string' ? state.npmLastPackage : '',
       pypiLastPackage: typeof state.pypiLastPackage === 'string' ? state.pypiLastPackage : ''
@@ -936,6 +945,63 @@ function updateScanStats(result) {
   }
 }
 
+// --- Daily stats persistence (survives restarts) ---
+
+function loadDailyStats() {
+  try {
+    const raw = fs.readFileSync(DAILY_STATS_FILE, 'utf8');
+    const data = JSON.parse(raw);
+    if (data && typeof data.scanned === 'number') {
+      stats.scanned = data.scanned;
+      stats.clean = data.clean || 0;
+      stats.suspect = data.suspect || 0;
+      stats.errors = data.errors || 0;
+      stats.totalTimeMs = data.totalTimeMs || 0;
+      if (Array.isArray(data.dailyAlerts)) {
+        dailyAlerts.length = 0;
+        dailyAlerts.push(...data.dailyAlerts);
+      }
+      console.log(`[MONITOR] Restored daily stats: ${stats.scanned} scanned, ${stats.clean} clean, ${stats.suspect} suspect`);
+    }
+  } catch {
+    // No file or corrupt — start from zero
+  }
+}
+
+function saveDailyStats() {
+  try {
+    const dir = path.dirname(DAILY_STATS_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const data = {
+      scanned: stats.scanned,
+      clean: stats.clean,
+      suspect: stats.suspect,
+      errors: stats.errors,
+      totalTimeMs: stats.totalTimeMs,
+      dailyAlerts: dailyAlerts.slice()
+    };
+    fs.writeFileSync(DAILY_STATS_FILE, JSON.stringify(data, null, 2), 'utf8');
+  } catch (err) {
+    console.error(`[MONITOR] Failed to save daily stats: ${err.message}`);
+  }
+}
+
+function resetDailyStats() {
+  try { fs.unlinkSync(DAILY_STATS_FILE); } catch {}
+}
+
+/**
+ * Persist daily stats to disk every DAILY_STATS_PERSIST_INTERVAL scans.
+ * Called after each scan completes in processQueue.
+ */
+function maybePersistDailyStats() {
+  scansSinceLastPersist++;
+  if (scansSinceLastPersist >= DAILY_STATS_PERSIST_INTERVAL) {
+    saveDailyStats();
+    scansSinceLastPersist = 0;
+  }
+}
+
 // --- Bundled tooling false-positive filter ---
 
 const KNOWN_BUNDLED_FILES = ['yarn.js', 'webpack.js', 'terser.js', 'esbuild.js', 'polyfills.js'];
@@ -1133,6 +1199,7 @@ async function processQueue() {
       stats.errors++;
       console.error(`[MONITOR] Queue error for ${item.name}: ${err.message}`);
     }
+    maybePersistDailyStats();
   }
 }
 
@@ -1147,38 +1214,42 @@ function reportStats() {
 const DAILY_REPORT_HOUR = 8; // 08:00 Paris time (Europe/Paris)
 
 /**
- * Load the timestamp (ms since epoch) of the last daily report sent.
- * Returns 0 if no file exists or file is invalid.
+ * Load the date (YYYY-MM-DD) of the last daily report sent from disk.
+ * Returns null if no file exists or file is invalid.
  */
-function loadLastDailyReportTimestamp() {
+function loadLastDailyReportDate() {
   try {
     const raw = fs.readFileSync(LAST_DAILY_REPORT_FILE, 'utf8');
     const data = JSON.parse(raw);
-    return typeof data.sentAt === 'number' ? data.sentAt : 0;
+    return typeof data.lastReportDate === 'string' ? data.lastReportDate : null;
   } catch {
-    return 0;
+    return null;
   }
 }
 
 /**
- * Persist the timestamp of the last daily report sent.
+ * Persist the date of the last daily report sent (YYYY-MM-DD).
  */
-function saveLastDailyReportTimestamp() {
+function saveLastDailyReportDate(dateStr) {
   try {
     const dir = path.dirname(LAST_DAILY_REPORT_FILE);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(LAST_DAILY_REPORT_FILE, JSON.stringify({ sentAt: Date.now() }, null, 2), 'utf8');
+    fs.writeFileSync(LAST_DAILY_REPORT_FILE, JSON.stringify({ lastReportDate: dateStr }, null, 2), 'utf8');
   } catch (err) {
-    console.error(`[MONITOR] Failed to save last daily report timestamp: ${err.message}`);
+    console.error(`[MONITOR] Failed to save last daily report date: ${err.message}`);
   }
 }
 
 /**
- * Returns true if a daily report was sent less than DAILY_REPORT_COOLDOWN_MS ago.
+ * Returns true if today's daily report has already been sent.
+ * Checks both in-memory state AND disk file for crash resilience.
  */
-function isDailyReportOnCooldown() {
-  const lastSent = loadLastDailyReportTimestamp();
-  return (Date.now() - lastSent) < DAILY_REPORT_COOLDOWN_MS;
+function hasReportBeenSentToday() {
+  const today = getParisDateString();
+  if (stats.lastDailyReportDate === today) return true;
+  const diskDate = loadLastDailyReportDate();
+  if (diskDate === today) return true;
+  return false;
 }
 
 /**
@@ -1202,14 +1273,14 @@ function getParisDateString() {
 }
 
 /**
- * Check if the daily report is due: Paris hour matches DAILY_REPORT_HOUR
- * and we haven't already sent one today.
+ * Check if the daily report is due:
+ * 1. It is >= 08:00 Paris time (07:00 UTC)
+ * 2. Today's report has NOT been sent yet (in-memory + disk check)
  */
 function isDailyReportDue() {
   const parisHour = getParisHour();
-  if (parisHour !== DAILY_REPORT_HOUR) return false;
-  const today = getParisDateString();
-  return stats.lastDailyReportDate !== today;
+  if (parisHour < DAILY_REPORT_HOUR) return false;
+  return !hasReportBeenSentToday();
 }
 
 function buildDailyReportEmbed() {
@@ -1260,11 +1331,23 @@ async function sendDailyReport() {
   const url = getWebhookUrl();
   if (!url) return;
 
+  // Never send an empty report (0 scanned — restart with no work done)
+  if (stats.scanned === 0) {
+    console.log('[MONITOR] Daily report skipped (0 packages scanned)');
+    return;
+  }
+
+  // Write-ahead: mark today's report as sent BEFORE the webhook HTTP request.
+  // If the process is killed (SIGKILL) during sendWebhook, the date is already
+  // recorded on disk and prevents duplicate reports on next startup.
+  const today = getParisDateString();
+  stats.lastDailyReportDate = today;
+  saveLastDailyReportDate(today);
+
   const payload = buildDailyReportEmbed();
   try {
     await sendWebhook(url, payload, { rawPayload: true });
     console.log('[MONITOR] Daily report sent');
-    saveLastDailyReportTimestamp();
   } catch (err) {
     console.error(`[MONITOR] Daily report webhook failed: ${err.message}`);
   }
@@ -1278,7 +1361,7 @@ async function sendDailyReport() {
   dailyAlerts.length = 0;
   recentlyScanned.clear();
   downloadsCache.clear();
-  stats.lastDailyReportDate = getParisDateString();
+  resetDailyStats();
 }
 
 // --- CLI report helpers (muaddib report --now / --status) ---
@@ -1387,14 +1470,15 @@ async function sendReportNow() {
   }
 
   // Update lastDailyReportDate on disk
+  const today = getParisDateString();
   const stateRaw = loadStateRaw();
   const state = {
     npmLastPackage: stateRaw.npmLastPackage || '',
     pypiLastPackage: stateRaw.pypiLastPackage || ''
   };
-  stats.lastDailyReportDate = getParisDateString();
+  stats.lastDailyReportDate = today;
   saveState(state);
-  saveLastDailyReportTimestamp();
+  saveLastDailyReportDate(today);
 
   return { sent: true, message: 'Daily report sent' };
 }
@@ -1681,20 +1765,18 @@ async function startMonitor(options) {
   console.log('[MONITOR]   NEVER sent: temporal anomaly, AST anomaly, publish anomaly, maintainer change, MEDIUM-only packages');
 
   const state = loadState();
+  loadDailyStats(); // Restore counters from previous run (survives restarts)
   console.log(`[MONITOR] State loaded — npm last: ${state.npmLastPackage || 'none'}, pypi last: ${state.pypiLastPackage || 'none'}`);
   console.log(`[MONITOR] Polling every ${POLL_INTERVAL / 1000}s. Ctrl+C to stop.\n`);
 
   let running = true;
 
   // Graceful shutdown handler (shared by SIGINT and SIGTERM)
+  // Daily report is NEVER sent on shutdown — it only fires at 08:00 Paris time.
+  // Counters are persisted to disk so they survive the restart.
   async function gracefulShutdown(signal) {
     console.log(`\n[MONITOR] Received ${signal} — shutting down...`);
-    if (stats.scanned > 0 && !isDailyReportOnCooldown()) {
-      console.log('[MONITOR] Sending pending daily report...');
-      await sendDailyReport();
-    } else if (stats.scanned > 0) {
-      console.log('[MONITOR] Daily report skipped (sent less than 12h ago)');
-    }
+    saveDailyStats();
     saveState(state);
     reportStats();
     console.log('[MONITOR] State saved. Bye!');
@@ -1999,10 +2081,17 @@ module.exports = {
   consecutivePollErrors: { get() { return consecutivePollErrors; }, set(v) { consecutivePollErrors = v; } },
   POLL_MAX_BACKOFF,
   LAST_DAILY_REPORT_FILE,
-  DAILY_REPORT_COOLDOWN_MS,
-  loadLastDailyReportTimestamp,
-  saveLastDailyReportTimestamp,
-  isDailyReportOnCooldown
+  loadLastDailyReportDate,
+  saveLastDailyReportDate,
+  hasReportBeenSentToday,
+  DAILY_STATS_FILE,
+  DAILY_STATS_PERSIST_INTERVAL,
+  loadDailyStats,
+  saveDailyStats,
+  resetDailyStats,
+  maybePersistDailyStats,
+  get scansSinceLastPersist() { return scansSinceLastPersist; },
+  set scansSinceLastPersist(v) { scansSinceLastPersist = v; }
 };
 
 // Standalone entry point: node src/monitor.js
