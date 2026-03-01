@@ -851,7 +851,7 @@ async function runCliTests() {
       threats.push({ severity: 'MEDIUM', type: 'prototype_hook' });
     }
     const score = computeGroupScore(threats);
-    assert(score === 15, `Expected 15 (capped), got ${score}`);
+    assert(score === 15, `Expected 15 (MEDIUM proto_hook capped), got ${score}`);
   });
 
   test('PER-FILE: computeGroupScore caps at 100', () => {

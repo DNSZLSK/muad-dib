@@ -145,7 +145,15 @@ function isSafeLifecycleScript(scriptValue) {
   const commands = scriptValue.trim().split(/\s*&&\s*/);
   return commands.every(cmd => {
     const trimmed = cmd.trim();
-    return /^npm\s+(run\s+)?(build|test|lint|typecheck|prepare|compile|format|clean|tsc)\s*$/i.test(trimmed);
+    // npm/yarn/pnpm/bun run <task> or direct tool calls
+    if (/^(npm|yarn|pnpm|bun)\s+(run\s+)?(build|test|lint|typecheck|prepare|compile|format|clean|tsc|check|prebuild|postbuild)\s*$/i.test(trimmed)) return true;
+    // Standalone tool commands
+    if (/^(tsc|eslint|prettier|jest|vitest|mocha|rollup|webpack|esbuild|vite|tsup|unbuild|turbo)\b/i.test(trimmed)) return true;
+    // echo (informational, no side effects)
+    if (/^echo\s+/i.test(trimmed)) return true;
+    // exit 0 / true / : (no-ops)
+    if (/^(exit\s+0|true|:)\s*$/i.test(trimmed)) return true;
+    return false;
   });
 }
 
@@ -218,8 +226,10 @@ function shouldSendWebhook(result, sandboxResult) {
   // IOC match (package in 225K+ database)
   if (hasIOCMatch(result)) return true;
 
-  // Static score >= 50 (combination of signals, not a single isolated signal)
-  if (result && result.summary && result.summary.riskScore >= 50) return true;
+  // Static score >= 50 BUT only if there are CRITICAL or HIGH findings.
+  // MEDIUM-only packages (e.g. webpeel: 28 MEDIUM, score 100) are logged as SUSPECT
+  // but not webhooks — the volume of MEDIUM signals is noise, not a real threat.
+  if (result && result.summary && result.summary.riskScore >= 50 && hasHighOrCritical(result)) return true;
 
   return false;
 }
@@ -333,31 +343,13 @@ function buildTemporalWebhookEmbed(temporalResult) {
   };
 }
 
-async function tryTemporalAlert(temporalResult, options) {
-  const force = options && options.force;
-
-  // STRICT FILTER: never send webhook if all lifecycle scripts are safe
-  // (npm run/build/test/lint/typecheck only)
+async function tryTemporalAlert(temporalResult, _options) {
+  // STRICT FILTER: temporal anomalies are NEVER sent as webhooks — too noisy.
+  // Logged to journalctl only. IOC match, sandbox, and canary exfil are the only webhook triggers.
   if (hasOnlySafeTemporalFindings(temporalResult)) {
     console.log(`[MONITOR] ANOMALY (safe scripts, no webhook): temporal lifecycle change for ${temporalResult.packageName}`);
-    return;
-  }
-
-  // Temporal anomalies are logged only — no webhook unless forced
-  if (!force) {
-    console.log(`[MONITOR] ANOMALY (logged only): temporal lifecycle change for ${temporalResult.packageName}`);
-  }
-  if (!force && !isVerboseMode()) return;
-
-  const url = getWebhookUrl();
-  if (!url) return;
-
-  const payload = buildTemporalWebhookEmbed(temporalResult);
-  try {
-    await sendWebhook(url, payload, { rawPayload: true });
-    console.log(`[MONITOR] Temporal webhook sent for ${temporalResult.packageName}`);
-  } catch (err) {
-    console.error(`[MONITOR] Temporal webhook failed for ${temporalResult.packageName}: ${err.message}`);
+  } else {
+    console.log(`[MONITOR] ANOMALY (logged only, never webhook): temporal lifecycle change for ${temporalResult.packageName}`);
   }
 }
 
@@ -401,32 +393,14 @@ function buildTemporalAstWebhookEmbed(astResult) {
   };
 }
 
-async function tryTemporalAstAlert(astResult, options) {
-  const force = options && options.force;
-
-  // STRICT FILTER: never send webhook for isolated AST patterns
-  // (fetch alone, child_process alone — no combination with obfuscation/exfil/credentials)
+async function tryTemporalAstAlert(astResult, _options) {
+  // STRICT FILTER: AST anomalies are NEVER sent as webhooks — too noisy.
+  // Logged to journalctl only. IOC match, sandbox, and canary exfil are the only webhook triggers.
   if (!isAstAnomalyCombined(astResult)) {
     const patterns = (astResult.findings || []).map(f => f.pattern).join(', ');
     console.log(`[MONITOR] ANOMALY (isolated AST, no webhook): ${astResult.packageName} — ${patterns}`);
-    return;
-  }
-
-  // Combined AST anomaly — log and send
-  if (!force) {
-    console.log(`[MONITOR] ANOMALY (combined AST): ${astResult.packageName}`);
-  }
-  if (!force && !isVerboseMode()) return;
-
-  const url = getWebhookUrl();
-  if (!url) return;
-
-  const payload = buildTemporalAstWebhookEmbed(astResult);
-  try {
-    await sendWebhook(url, payload, { rawPayload: true });
-    console.log(`[MONITOR] Temporal AST webhook sent for ${astResult.packageName}`);
-  } catch (err) {
-    console.error(`[MONITOR] Temporal AST webhook failed for ${astResult.packageName}: ${err.message}`);
+  } else {
+    console.log(`[MONITOR] ANOMALY (combined AST, logged only): ${astResult.packageName}`);
   }
 }
 
@@ -1644,11 +1618,10 @@ async function startMonitor(options) {
   // Webhook filtering mode
   console.log('[MONITOR] Strict webhook mode — webhooks sent ONLY for:');
   console.log('[MONITOR]   - IOC match (225K+ package database)');
-  console.log('[MONITOR]   - Static score >= 50 (combination of signals)');
+  console.log('[MONITOR]   - Static score >= 50 with CRITICAL or HIGH findings');
   console.log('[MONITOR]   - Sandbox score > 0');
   console.log('[MONITOR]   - Canary token exfiltration');
-  console.log('[MONITOR]   - Combined AST anomaly (child_process+creds, child_process+network, eval)');
-  console.log('[MONITOR]   Publish anomaly + maintainer change: NEVER sent (journalctl only)');
+  console.log('[MONITOR]   NEVER sent: temporal anomaly, AST anomaly, publish anomaly, maintainer change, MEDIUM-only packages');
 
   const state = loadState();
   console.log(`[MONITOR] State loaded — npm last: ${state.npmLastPackage || 'none'}, pypi last: ${state.pypiLastPackage || 'none'}`);
@@ -1850,43 +1823,31 @@ async function resolveTarballAndScan(item) {
     }
   }
 
-  // Send temporal webhooks only if the package is confirmed suspicious
+  // Log temporal anomalies (NEVER send webhooks — logged to journalctl only)
   const hasSuspiciousTemporal = (temporalResult && temporalResult.suspicious)
     || (astResult && astResult.suspicious)
     || (publishResult && publishResult.suspicious)
     || (maintainerResult && maintainerResult.suspicious);
 
   if (hasSuspiciousTemporal) {
-    // Sandbox ran and package is CLEAN → suppress temporal webhooks
     if (sandboxResult && sandboxResult.score === 0) {
       console.log(`[MONITOR] FALSE POSITIVE (sandbox clean, no alert): ${item.name}@${item.version}`);
-    // Static scan is CLEAN (0 findings) and no sandbox ran
     } else if (staticClean && !sandboxResult) {
-      // Temporal CRITICAL/HIGH cannot be downgraded — "static clean" may mean obfuscated payload
+      // Temporal CRITICAL/HIGH with static clean → reclassify as SUSPECT for stats
       const temporalMaxSev = getTemporalMaxSeverity(temporalResult, astResult, publishResult, maintainerResult);
       if (temporalMaxSev === 'CRITICAL' || temporalMaxSev === 'HIGH') {
         console.log(`[MONITOR] Temporal ${temporalMaxSev} preserved despite static clean scan: ${item.name}@${item.version}`);
-        console.log(`[MONITOR] SUSPECT (temporal anomaly, possible obfuscated payload): ${item.name}@${item.version}`);
+        console.log(`[MONITOR] SUSPECT (temporal anomaly, logged only): ${item.name}@${item.version}`);
         stats.suspect++;
         stats.clean--;
         updateScanStats('suspect');
-        // Force-send ONLY temporal lifecycle and combined AST webhooks
-        // Publish anomaly and maintainer change are NEVER sent as webhooks
-        if (temporalResult && temporalResult.suspicious) await tryTemporalAlert(temporalResult, { force: true });
-        if (astResult && astResult.suspicious) await tryTemporalAstAlert(astResult, { force: true });
       } else {
         console.log(`[MONITOR] FALSE POSITIVE (static clean, no alert): ${item.name}@${item.version}`);
       }
-    // publish_anomaly alone → no webhook (too noisy, not actionable alone)
-    } else if (isPublishAnomalyOnly(temporalResult, astResult, publishResult, maintainerResult)) {
-      console.log(`[MONITOR] PUBLISH ANOMALY (alone, no alert): ${item.name}@${item.version}`);
-    } else {
-      // Sandbox confirmed threat (score > 0) OR static scan found threats
-      // Send ONLY temporal lifecycle (if suspicious scripts) and combined AST webhooks
-      // Publish anomaly and maintainer change are NEVER sent as webhooks
-      if (temporalResult && temporalResult.suspicious) await tryTemporalAlert(temporalResult);
-      if (astResult && astResult.suspicious) await tryTemporalAstAlert(astResult);
     }
+    // Log all temporal findings (no webhook)
+    if (temporalResult && temporalResult.suspicious) await tryTemporalAlert(temporalResult);
+    if (astResult && astResult.suspicious) await tryTemporalAstAlert(astResult);
   }
 }
 

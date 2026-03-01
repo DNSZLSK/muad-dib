@@ -221,8 +221,27 @@ function containsDecodePattern(node) {
 //   workflowPathVars, execPathVars, globalThisAliases,
 //   hasFromCharCode, hasEvalInFile (mutable)
 
+function isStaticValue(node) {
+  if (!node) return false;
+  if (node.type === 'Literal' && typeof node.value === 'string') return true;
+  if (node.type === 'ArrayExpression') {
+    return node.elements.every(el => el && el.type === 'Literal' && typeof el.value === 'string');
+  }
+  if (node.type === 'ObjectExpression') {
+    return node.properties.every(p =>
+      p.value && p.value.type === 'Literal' && typeof p.value.value === 'string'
+    );
+  }
+  return false;
+}
+
 function handleVariableDeclarator(node, ctx) {
   if (node.id?.type === 'Identifier') {
+    // Track statically-assigned variables for dynamic_require qualification
+    if (node.init && isStaticValue(node.init)) {
+      ctx.staticAssignments.add(node.id.name);
+    }
+
     // Track dynamic require vars
     if (node.init?.type === 'CallExpression') {
       const initCallName = getCallName(node.init);
@@ -305,10 +324,15 @@ function handleCallExpression(node, ctx) {
         });
       }
     } else if (arg.type === 'Identifier') {
+      // If the variable was assigned from a static value (string literal,
+      // array of strings, object with string values), it's a plugin loader pattern
+      const severity = ctx.staticAssignments.has(arg.name) ? 'LOW' : 'HIGH';
       ctx.threats.push({
         type: 'dynamic_require',
-        severity: 'HIGH',
-        message: 'Dynamic require() with variable argument (module name obfuscation).',
+        severity,
+        message: severity === 'LOW'
+          ? `Dynamic require() with statically-assigned variable "${arg.name}" (plugin loader pattern).`
+          : 'Dynamic require() with variable argument (module name obfuscation).',
         file: ctx.relFile
       });
     }
@@ -717,14 +741,13 @@ function handleCallExpression(node, ctx) {
         message: 'Function() with decode argument (atob/Buffer.from base64) — staged payload execution.',
         file: ctx.relFile
       });
-    } else {
-      const isConstant = hasOnlyStringLiteralArgs(node);
+    } else if (!hasOnlyStringLiteralArgs(node)) {
+      // Only flag dynamic Function() calls — string literal args (e.g. Function('return this'))
+      // are zero-risk globalThis polyfills used by every bundler
       ctx.threats.push({
         type: 'dangerous_call_function',
-        severity: isConstant ? 'LOW' : 'MEDIUM',
-        message: isConstant
-          ? 'Function() with constant string literal (low risk, globalThis polyfill pattern).'
-          : 'Function() with dynamic expression (template/factory pattern).',
+        severity: 'MEDIUM',
+        message: 'Function() with dynamic expression (template/factory pattern).',
         file: ctx.relFile
       });
     }
@@ -901,15 +924,15 @@ function handleImportExpression(node, ctx) {
 
 function handleNewExpression(node, ctx) {
   if (node.callee.type === 'Identifier' && node.callee.name === 'Function') {
-    const isConstant = hasOnlyStringLiteralArgs(node);
-    ctx.threats.push({
-      type: 'dangerous_call_function',
-      severity: isConstant ? 'LOW' : 'MEDIUM',
-      message: isConstant
-        ? 'new Function() with constant string literal (low risk, globalThis polyfill pattern).'
-        : 'new Function() with dynamic expression (template/factory pattern).',
-      file: ctx.relFile
-    });
+    // Skip string literal args — zero-risk globalThis polyfills used by every bundler
+    if (!hasOnlyStringLiteralArgs(node)) {
+      ctx.threats.push({
+        type: 'dangerous_call_function',
+        severity: 'MEDIUM',
+        message: 'new Function() with dynamic expression (template/factory pattern).',
+        file: ctx.relFile
+      });
+    }
   }
 
   // Detect new Proxy(process.env, handler)

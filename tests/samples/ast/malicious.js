@@ -12,7 +12,7 @@ const awsSecret = process.env.AWS_SECRET;
 
 // Test dangerous calls
 eval('console.log("evil")');
-new Function('return this')();
+new Function(someVariable)();
 exec('ls -la');
 spawn('node', ['script.js']);
 
