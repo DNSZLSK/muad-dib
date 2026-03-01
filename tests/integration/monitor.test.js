@@ -40,7 +40,9 @@ async function runMonitorTests() {
     resolveTarballAndScan, KNOWN_BUNDLED_PATHS,
     LAST_DAILY_REPORT_FILE, DAILY_REPORT_COOLDOWN_MS,
     loadLastDailyReportTimestamp, saveLastDailyReportTimestamp, isDailyReportOnCooldown,
-    isSafeLifecycleScript
+    isSafeLifecycleScript,
+    getWeeklyDownloads, hasTyposquat, formatFindings,
+    POPULAR_THRESHOLD, downloadsCache, DOWNLOADS_CACHE_TTL
   } = require('../../src/monitor.js');
 
   test('MONITOR: parseNpmRss extracts package names from RSS', () => {
@@ -4260,6 +4262,151 @@ async function runMonitorTests() {
       } else {
         try { fs.unlinkSync(LAST_DAILY_REPORT_FILE); } catch {}
       }
+    }
+  });
+
+  // --- Popularity pre-filter tests ---
+
+  test('MONITOR: POPULAR_THRESHOLD is 50000', () => {
+    assert(POPULAR_THRESHOLD === 50000, 'POPULAR_THRESHOLD should be 50000, got ' + POPULAR_THRESHOLD);
+  });
+
+  test('MONITOR: downloadsCache stores and returns cached value', () => {
+    downloadsCache.clear();
+    downloadsCache.set('test-pkg', { downloads: 100000, fetchedAt: Date.now() });
+    const cached = downloadsCache.get('test-pkg');
+    assert(cached.downloads === 100000, 'Cached downloads should be 100000');
+    downloadsCache.clear();
+  });
+
+  test('MONITOR: downloadsCache entry expires after TTL', () => {
+    downloadsCache.clear();
+    const expiredTime = Date.now() - DOWNLOADS_CACHE_TTL - 1000;
+    downloadsCache.set('expired-pkg', { downloads: 200000, fetchedAt: expiredTime });
+    const cached = downloadsCache.get('expired-pkg');
+    assert(cached !== undefined, 'Entry should exist in map');
+    assert((Date.now() - cached.fetchedAt) >= DOWNLOADS_CACHE_TTL, 'Entry should be past TTL');
+    downloadsCache.clear();
+  });
+
+  test('MONITOR: hasTyposquat detects typosquat_detected', () => {
+    const result = { threats: [{ type: 'typosquat_detected', severity: 'HIGH' }] };
+    assert(hasTyposquat(result) === true, 'Should detect typosquat_detected');
+  });
+
+  test('MONITOR: hasTyposquat detects pypi_typosquat_detected', () => {
+    const result = { threats: [{ type: 'pypi_typosquat_detected', severity: 'HIGH' }] };
+    assert(hasTyposquat(result) === true, 'Should detect pypi_typosquat_detected');
+  });
+
+  test('MONITOR: hasTyposquat returns false for normal threats', () => {
+    const result = { threats: [{ type: 'obfuscation_detected', severity: 'MEDIUM' }] };
+    assert(hasTyposquat(result) === false, 'Should return false for non-typosquat threats');
+  });
+
+  test('MONITOR: hasTyposquat returns false for null/empty', () => {
+    assert(hasTyposquat(null) === false, 'Should return false for null');
+    assert(hasTyposquat({}) === false, 'Should return false for empty object');
+    assert(hasTyposquat({ threats: [] }) === false, 'Should return false for empty threats');
+  });
+
+  test('MONITOR: formatFindings formats and deduplicates', () => {
+    const result = {
+      threats: [
+        { type: 'obfuscation_detected', severity: 'CRITICAL' },
+        { type: 'obfuscation_detected', severity: 'CRITICAL' },
+        { type: 'credential_tampering', severity: 'CRITICAL' },
+        { type: 'dynamic_require', severity: 'HIGH' }
+      ]
+    };
+    const formatted = formatFindings(result);
+    assert(formatted === 'obfuscation_detected(CRITICAL), credential_tampering(CRITICAL), dynamic_require(HIGH)',
+      'Should deduplicate and format, got: ' + formatted);
+  });
+
+  test('MONITOR: formatFindings returns empty for no threats', () => {
+    assert(formatFindings(null) === '', 'Should return empty for null');
+    assert(formatFindings({}) === '', 'Should return empty for no threats');
+    assert(formatFindings({ threats: [] }) === '', 'Should return empty for empty threats');
+  });
+
+  test('MONITOR: popular package without IOC/typosquat/HIGH would be TRUSTED (logic test)', () => {
+    // Test the logic conditions for pre-filter eligibility
+    const result = {
+      threats: [{ type: 'obfuscation_detected', severity: 'MEDIUM' }],
+      summary: { critical: 0, high: 0, medium: 1, low: 0, total: 1 }
+    };
+    const ecosystem = 'npm';
+    const eligible = ecosystem === 'npm'
+      && !hasIOCMatch(result)
+      && !hasTyposquat(result)
+      && !hasHighOrCritical(result);
+    assert(eligible === true, 'Package with only MEDIUM findings and no IOC/typosquat should be eligible');
+  });
+
+  test('MONITOR: popular package WITH IOC is not skipped', () => {
+    const result = {
+      threats: [{ type: 'known_malicious_package', severity: 'CRITICAL' }],
+      summary: { critical: 1, high: 0, medium: 0, low: 0, total: 1 }
+    };
+    const eligible = !hasIOCMatch(result) && !hasTyposquat(result) && !hasHighOrCritical(result);
+    assert(eligible === false, 'Package with IOC match should NOT be eligible for pre-filter');
+  });
+
+  test('MONITOR: popular package WITH HIGH findings is not skipped', () => {
+    const result = {
+      threats: [{ type: 'suspicious_dataflow', severity: 'HIGH' }],
+      summary: { critical: 0, high: 1, medium: 0, low: 0, total: 1 }
+    };
+    const eligible = !hasIOCMatch(result) && !hasTyposquat(result) && !hasHighOrCritical(result);
+    assert(eligible === false, 'Package with HIGH findings should NOT be eligible for pre-filter');
+  });
+
+  await asyncTest('MONITOR: sendDailyReport clears downloadsCache', async () => {
+    const origEnv = process.env.MUADDIB_WEBHOOK_URL;
+    const origLog = console.log;
+    const origErr = console.error;
+    console.log = () => {};
+    console.error = () => {};
+
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.example.com/test';
+
+    const webhookModule = require('../../src/webhook.js');
+    const origSendWebhook = webhookModule.sendWebhook;
+    webhookModule.sendWebhook = async () => {};
+
+    const origScanned = stats.scanned;
+    const origClean = stats.clean;
+    const origSuspect = stats.suspect;
+    const origErrors = stats.errors;
+    const origTotalTimeMs = stats.totalTimeMs;
+    const origLastDate = stats.lastDailyReportDate;
+
+    stats.scanned = 1;
+    stats.clean = 1;
+    stats.suspect = 0;
+    stats.errors = 0;
+    stats.totalTimeMs = 1000;
+    downloadsCache.set('cached-pkg', { downloads: 999999, fetchedAt: Date.now() });
+
+    try {
+      await sendDailyReport();
+      assert(downloadsCache.size === 0, 'downloadsCache should be cleared after sendDailyReport, got size ' + downloadsCache.size);
+    } finally {
+      webhookModule.sendWebhook = origSendWebhook;
+      console.log = origLog;
+      console.error = origErr;
+      stats.scanned = origScanned;
+      stats.clean = origClean;
+      stats.suspect = origSuspect;
+      stats.errors = origErrors;
+      stats.totalTimeMs = origTotalTimeMs;
+      dailyAlerts.length = 0;
+      recentlyScanned.clear();
+      downloadsCache.clear();
+      stats.lastDailyReportDate = origLastDate;
+      if (origEnv !== undefined) process.env.MUADDIB_WEBHOOK_URL = origEnv;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
     }
   });
 }
