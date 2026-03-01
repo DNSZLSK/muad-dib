@@ -1525,6 +1525,63 @@ Le trade-off FPR vs ADR est inevitable. La correction P3 (require_cache_poison s
 
 ---
 
+## v2.4.7 -- Vague 4 Blue Team : 5 bypass, 5 corrections (1er Mars 2026)
+
+### Le probleme
+
+5 nouveaux samples adversariaux exploitant des techniques d'evasion avancees ont ete crees avec les regles gelees. **Score pre-fix : 0/5 (0%)** -- le pire resultat depuis la Vague 2. Toutes les techniques d'evasion ont contourne les regles existantes :
+
+| Sample | Score pre-fix | Technique d'evasion | Source |
+|--------|---------------|---------------------|--------|
+| git-hook-persistence | 3 | Concatenation de strings (`.gi` + `t` → `.git`) contourne le matching de chemins | SANDWORM_MODE / Socket.dev |
+| native-addon-camouflage | 3 | `execSync` avec commandes legitimistes (node-gyp) ne matche pas `DANGEROUS_CMD_PATTERNS` | NeoShadow / Aikido |
+| stego-png-payload | 16 | `new Function()` ne setait pas `ctx.hasDynamicExec`, le compose fetch+decrypt+exec ne declenchait pas | buildrunner-dev / Veracode |
+| stegabin-vscode-persistence | 28 | Chemin tasks.json construit via retour de fonction (pas une variable trackee) | StegaBin / FAMOUS CHOLLIMA |
+| mcp-server-injection | 3 | Chemins dynamiques (`os.homedir()`) contournent le matching AST | SANDWORM_MODE |
+
+### Les 5 corrections
+
+**Correction 1 — `resolveStringConcat()`** : Nouvelle fonction recursive qui resout les `BinaryExpression` avec operateur `+` : `.gi` + `t` → `.git`. Gere aussi les `TemplateLiteral` sans expressions. Combinee avec `extractStringValue()` dans un wrapper `extractStringValueDeep()` pour une resolution complete des strings dans tous les detecteurs de chemins (AST-027, AST-028).
+
+**Correction 2 — Compose `download_exec_binary` (AST-034)** : Nouvelle detection par co-occurrence au niveau contenu : `hasRemoteFetch` + `hasChmodExecutable` + `hasExecSyncCall`. Tracking de `ctx.hasExecSyncCall` pour tout appel exec/execSync (pas seulement les patterns dangereux). Score native-addon-camouflage : 3 → 28.
+
+**Correction 3 — Fix `new Function()` + compose `fetch_decrypt_exec` (AST-033)** : `handleNewExpression` ne settait pas `ctx.hasDynamicExec = true` pour `new Function()` avec arguments non-literals. Fix + nouveau compose : `hasRemoteFetch` + `hasCryptoDecipher` + `hasDynamicExec`. Score stego-png-payload : 16 → 41.
+
+**Correction 4 — Compose `ide_persistence` (AST-035)** : Detection par co-occurrence au niveau contenu : `hasTasksJsonInContent` + `hasRunOnInContent` + `hasWriteFileSyncInContent`. Pas besoin de resoudre les chemins -- si le fichier mentionne tasks.json, runOn/folderOpen, et writeFileSync, c'est un signal de persistence IDE. Score stegabin-vscode-persistence : 28 → 38.
+
+**Correction 5 — MCP content keywords** : Quand les chemins sont entierement dynamiques, la detection se rabat sur des mots-cles au niveau contenu : `mcpServers` ou `mcp.json` ou `claude_desktop_config` combines avec `writeFileSync`. Variable tracking aussi ajoute via `ideConfigPathVars` Map. Score mcp-server-injection : 3 → 28.
+
+### Resultats
+
+| Sample | Pre-fix | Post-fix | Seuil | Resultat |
+|--------|---------|----------|-------|----------|
+| git-hook-persistence | 3 | 13 | 10 | PASS |
+| native-addon-camouflage | 3 | 28 | 25 | PASS |
+| stego-png-payload | 16 | 41 | 35 | PASS |
+| stegabin-vscode-persistence | 28 | 38 | 30 | PASS |
+| mcp-server-injection | 3 | 28 | 25 | PASS |
+
+### Metriques finales v2.4.7
+
+| Metrique | Valeur |
+|----------|--------|
+| **TPR** | 91.8% (45/49) |
+| **FPR** | **7.4% (39/525)** — inchange |
+| **ADR** | **98.8% (82/83)** — 43 adversariaux + 40 holdouts, 1 miss documente |
+| Regles | **107** (102 RULES + 5 PARANOID, +3 nouvelles) |
+| Tests | **1471**, 0 failures |
+| Scanners | 14 |
+
+**Nouvelles regles** : `fetch_decrypt_exec` (AST-033, CRITICAL, T1027.003), `download_exec_binary` (AST-034, CRITICAL, T1105), `ide_persistence` (AST-035, HIGH, T1546).
+
+### Lecon apprise
+
+La concatenation de strings est une technique d'evasion redoutablement simple. `.gi` + `t` contourne tout pattern matching statique sur `.git`. La solution (`resolveStringConcat()`) est recursive et generalisable -- elle resout n'importe quelle chaine de `BinaryExpression` avec `+`. Cette technique a ete documentee dans des campagnes reelles (SANDWORM_MODE) et devrait etre consideree comme un pattern d'evasion de base.
+
+La detection par co-occurrence au niveau contenu (pas au niveau AST) est un filet de securite efficace quand la resolution de chemins echoue. Si un fichier mentionne `tasks.json` ET `runOn` ET `writeFileSync`, c'est suspect independamment de comment les chemins sont construits.
+
+---
+
 ## Etat actuel
 
 ### Ce qui fonctionne
@@ -1546,10 +1603,10 @@ Le trade-off FPR vs ADR est inevitable. La correction P3 (require_cache_poison s
 | Version check | Notification automatique des nouvelles versions au demarrage |
 | **Detection comportementale (v2.0)** | Temporal lifecycle, AST diff, publish anomaly, maintainer change, canary tokens |
 | **Validation & Observabilite (v2.1)** | Ground truth (51 attaques, 91.8% TPR), detection time logging, FP rate tracking, score breakdown, threat feed API |
-| **Evaluation & Red Team (v2.2-v2.3)** | `muaddib evaluate`, 78 samples evasifs (38 adversariaux + 40 holdouts), TPR 91.8% (45/49), **FPR 7.4% (39/525)** (v2.3.1, P2+P3), ADR 98.7% (77/78, 1 miss documente), 14 scanners, 102 regles, AI config scanner, 529 packages benins npm, 132 PyPI, 65 malwares documentes |
+| **Evaluation & Red Team (v2.2-v2.4)** | `muaddib evaluate`, 83 samples evasifs (43 adversariaux + 40 holdouts), TPR 91.8% (45/49), **FPR 7.4% (39/525)**, ADR **98.8% (82/83)** (1 miss documente), 14 scanners, 107 regles, AI config scanner, 529 packages benins npm, 132 PyPI, 65 malwares documentes |
 | **Desobfuscation (v2.2.5)** | `src/scanner/deobfuscate.js`, 4 transformations AST + const propagation, approche additive (original + desobfusque), `--no-deobfuscate` flag |
 | **Dataflow inter-module (v2.2.6)** | `src/scanner/module-graph.js`, graphe de dependances, propagation de teinte inter-fichiers, 3-hop re-export, class methods, named exports, `--no-module-graph` flag |
-| Tests | **1387 tests unitaires** + 56 fuzz + 78 adversariaux/holdout, **86% coverage** (c8/Codecov) |
+| Tests | **1471 tests unitaires** + 56 fuzz + 83 adversariaux/holdout, **86% coverage** (c8/Codecov) |
 | **Hardening securite (v2.1.2)** | SSRF protection (shared/download.js), command injection prevention (execFileSync), path traversal (sanitizePackageName), JSON.parse protege, webhook strict |
 | Audit securite | 2 audits complets, **58 issues corrigees**, [rapport PDF](MUADDIB_Security_Audit_Report_v1.4.1.pdf) |
 

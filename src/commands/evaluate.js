@@ -75,7 +75,13 @@ const ADVERSARIAL_THRESHOLDS = {
   // Audit bypass samples (v2.2.13)
   'indirect-eval-bypass': 10,
   'muaddib-ignore-bypass': 25,
-  'mjs-extension-bypass': 100
+  'mjs-extension-bypass': 100,
+  // Vague 4 (5 samples)
+  'git-hook-persistence': 10,
+  'native-addon-camouflage': 25,
+  'stego-png-payload': 35,
+  'stegabin-vscode-persistence': 30,
+  'mcp-server-injection': 25
 };
 
 const HOLDOUT_THRESHOLDS = {

@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-npm test          # Run all tests (custom framework, 1387 tests across 20 files)
+npm test          # Run all tests (custom framework, 1471 tests across 20 files)
 npm run lint      # ESLint with security plugin
 npm run scan      # Self-scan: node bin/muaddib.js scan .
 npm run update    # Download latest IOCs
@@ -28,7 +28,7 @@ Tests use a custom framework in `tests/run-tests.js` (no Jest). Test helpers:
 
 **CLI entry:** `bin/muaddib.js` — yargs-based dispatcher, delegates to `src/index.js`.
 
-**Core orchestration:** `src/index.js` — `run(targetPath, options)` runs cross-file module graph analysis first, then launches 13 individual scanners in parallel via `Promise.all`, then deduplicates, applies FP reductions, scores using per-file max (v2.2.11: `riskScore = min(100, max(file_scores) + package_level_score)`, severity weights: CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1), enriches with rules/playbooks (102 rules), and outputs (CLI/JSON/HTML/SARIF). Exports `isPackageLevelThreat` and `computeGroupScore` for testing.
+**Core orchestration:** `src/index.js` — `run(targetPath, options)` runs cross-file module graph analysis first, then launches 13 individual scanners in parallel via `Promise.all`, then deduplicates, applies FP reductions, scores using per-file max (v2.2.11: `riskScore = min(100, max(file_scores) + package_level_score)`, severity weights: CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1), enriches with rules/playbooks (107 rules), and outputs (CLI/JSON/HTML/SARIF). Exports `isPackageLevelThreat` and `computeGroupScore` for testing.
 
 **Scanner pattern:** Each of the 13 individual scanners in `src/scanner/` returns `Array<{type, severity, message, file}>`:
 - `file` must use `path.relative(targetPath, absolutePath)` for Windows compatibility
@@ -66,13 +66,13 @@ Tests use a custom framework in `tests/run-tests.js` (no Jest). Test helpers:
 
 **Inter-module Dataflow (v2.2.6):** `src/scanner/module-graph.js` builds a dependency graph of local modules, annotates tainted exports (fs.readFileSync, process.env, os.homedir, child_process, dns), and detects when credentials read in one module reach a network/exec sink in another module. Features: 3-hop re-export chain propagation, class method analysis, named export destructuring, inline require re-export, function-wrapped taint propagation. Runs before individual scanners. Disable with `--no-module-graph`.
 
-**Evaluation Framework (v2.2, corrected v2.2.7, FP reduction v2.2.8–v2.2.9, size analysis v2.2.10, per-file scoring v2.2.11, GT expansion v2.2.12, FP reduction P2 v2.3.0, P3 v2.3.1):** `src/commands/evaluate.js` measures TPR (Ground Truth, 49 real attacks from 51 samples), FPR (Benign, 529 npm packages — real source code via `npm pack` + native tar extraction), and ADR (Adversarial + Holdout, 78 evasive samples — 38 adversarial + 40 holdout). Benign tarballs cached in `.muaddib-cache/benign-tarballs/`. Flags: `--benign-limit N`, `--refresh-benign`. Results saved to `metrics/v{version}.json`. FPR progression: 0% (invalid, v2.2.0–v2.2.6) → 38% (v2.2.7) → 19.4% (v2.2.8) → 17.5% (v2.2.9) → ~13% (69/527, v2.2.11) → 8.9% (47/527, v2.3.0) → **7.4% (39/525, v2.3.1)**. Adversarial samples in `datasets/adversarial/`, holdout samples in `datasets/holdout-v2/` through `datasets/holdout-v5/`, benign package lists in `datasets/benign/packages-npm.txt` (529 packages) and `datasets/benign/packages-pypi.txt` (132 packages), ground truth attacks in `tests/ground-truth/attacks.json` (51 entries), ground truth malware database in `datasets/ground-truth/known-malware.json` (65 entries).
+**Evaluation Framework (v2.2, corrected v2.2.7, FP reduction v2.2.8–v2.2.9, size analysis v2.2.10, per-file scoring v2.2.11, GT expansion v2.2.12, FP reduction P2 v2.3.0, P3 v2.3.1, Vague 4 v2.4.7):** `src/commands/evaluate.js` measures TPR (Ground Truth, 49 real attacks from 51 samples), FPR (Benign, 529 npm packages — real source code via `npm pack` + native tar extraction), and ADR (Adversarial + Holdout, 83 evasive samples — 43 adversarial + 40 holdout). Benign tarballs cached in `.muaddib-cache/benign-tarballs/`. Flags: `--benign-limit N`, `--refresh-benign`. Results saved to `metrics/v{version}.json`. FPR progression: 0% (invalid, v2.2.0–v2.2.6) → 38% (v2.2.7) → 19.4% (v2.2.8) → 17.5% (v2.2.9) → ~13% (69/527, v2.2.11) → 8.9% (47/527, v2.3.0) → **7.4% (39/525, v2.3.1)**. Adversarial samples in `datasets/adversarial/` (43 samples), holdout samples in `datasets/holdout-v2/` through `datasets/holdout-v5/` (40 samples), benign package lists in `datasets/benign/packages-npm.txt` (529 packages) and `datasets/benign/packages-pypi.txt` (132 packages), ground truth attacks in `tests/ground-truth/attacks.json` (51 entries), ground truth malware database in `datasets/ground-truth/known-malware.json` (65 entries).
 
 **FP Reduction Post-processing (v2.2.8–v2.2.9, v2.3.0–v2.3.1):** `applyFPReductions()` in `src/scoring.js` applies count-based severity downgrades between deduplication and scoring. Thresholds: `dynamic_require` >10 HIGH→LOW, `dangerous_call_function` >5 MEDIUM→LOW, `require_cache_poison` >3 CRITICAL→LOW (single hit CRITICAL→HIGH), `suspicious_dataflow` >5 any→LOW, `obfuscation_detected` >3 any→LOW, `module_compile` >3 CRITICAL→LOW, `module_compile_dynamic` >3 CRITICAL→LOW, `zlib_inflate_eval` >2 CRITICAL→LOW. Framework prototype hooks (Request/Response/App/Router.prototype) downgraded HIGH→MEDIUM (CRITICAL core prototypes untouched). HTTP client prototype whitelist: packages with >20 prototype_hook hits targeting HTTP methods → MEDIUM. Prototype hook MEDIUM scoring capped at 15 points max. Dist/build/minified file downgrade (one severity notch). Reachability-based downgrade (unreachable files → LOW). Typosquat whitelist expanded with 10 packages (chai, pino, ioredis, bcryptjs, recast, asyncdi, redux, args, oxlint, vasync). Scanner-level: expanded `SAFE_ENV_VARS` (+13 vars) and added `SAFE_ENV_PREFIXES` (npm_config_*, npm_lifecycle_*, npm_package_*, lc_*) in `src/scanner/ast.js`. Obfuscation in dist/build/*.bundle.js and .cjs/.mjs >100KB → LOW. Entropy: encoding table paths → LOW. Dataflow: os.platform/arch categorized as `telemetry_read` (capped at HIGH, not CRITICAL). Package scanner: `DEP_FP_WHITELIST` (es5-ext, bootstrap-sass), npm alias skip (`npm:` prefix).
 
 **Per-File Max Scoring (v2.2.11):** Replaces global score accumulation with per-file max scoring. Formula: `riskScore = min(100, max(file_scores) + package_level_score)`. Threats are split into package-level (lifecycle scripts, typosquat, IOC matches, sandbox findings — classified by `PACKAGE_LEVEL_TYPES` Set + file heuristics) and file-level (AST, dataflow, obfuscation). File-level threats grouped by `threat.file`, each group scored independently via `computeGroupScore()`. Package-level threats scored separately. Result includes `globalRiskScore` (old sum), `maxFileScore`, `packageScore`, `mostSuspiciousFile`, `fileScores` map.
 
-**Ground Truth Expansion (v2.2.12):** 51 real-world attack samples in `tests/ground-truth/` (49 active, 2 with min_threats=0). TPR: **91.8% (45/49)**. 4 out-of-scope misses: lottie-player, polyfill-io, trojanized-jquery (browser-only), websocket-rat (FP-risky). 3 new detection rules: `crypto_decipher` (MUADDIB-AST-022, T1140), `module_compile` (MUADDIB-AST-023, T1059), `.secretKey`/`.privateKey` credential source in dataflow. ADR consolidated: 78 samples (38 adversarial + 40 holdout). ADR was 100% (78/78) in v2.2.13–v2.2.24, now **98.7% (77/78)** in v2.3.1 (1 documented miss: `require-cache-poison`, accepted trade-off from FP reduction P3).
+**Ground Truth Expansion (v2.2.12):** 51 real-world attack samples in `tests/ground-truth/` (49 active, 2 with min_threats=0). TPR: **91.8% (45/49)**. 4 out-of-scope misses: lottie-player, polyfill-io, trojanized-jquery (browser-only), websocket-rat (FP-risky). 3 new detection rules: `crypto_decipher` (MUADDIB-AST-022, T1140), `module_compile` (MUADDIB-AST-023, T1059), `.secretKey`/`.privateKey` credential source in dataflow. ADR consolidated: 83 samples (43 adversarial + 40 holdout). ADR: **98.8% (82/83)** in v2.4.7 (1 documented miss: `require-cache-poison`, accepted trade-off from FP reduction P3).
 
 **Scan Freeze Fix (v2.2.22):** Module graph scanner's `EXCLUDED_DIRS` aligned with main scanner to prevent infinite loops on `dist/`, `build/`, `.next/` directories.
 
@@ -83,6 +83,8 @@ Tests use a custom framework in `tests/run-tests.js` (no Jest). Test helpers:
 **FP Reduction P2 (v2.3.0):** FPR ~13% → 8.9% (47/527). Dataflow scanner: os.* methods split into `fingerprint_read` (hostname, networkInterfaces, userInfo, homedir) and `telemetry_read` (platform, arch); telemetry-only findings capped at HIGH. Scoring: `module_compile` added to FP_COUNT_THRESHOLDS (>3 CRITICAL→LOW). Package scanner: `DEP_FP_WHITELIST` (es5-ext, bootstrap-sass), npm alias skip.
 
 **FP Reduction P3 (v2.3.1):** FPR 8.2% → 7.4% (39/525). Scoring: `require_cache_poison` single hit CRITICAL→HIGH; HTTP client prototype whitelist (>20 hits → MEDIUM); obfuscation: .cjs/.mjs >100KB → LOW; entropy: encoding table paths → LOW. ADR: 100% → 98.7% (77/78, 1 documented miss: require-cache-poison). 8 new rules (AST-024 to AST-031), rule count 94 → 102. Tests 1317 → 1387.
+
+**Vague 4 Blue Team (v2.4.7):** 5 new adversarial samples (43 total). Pre-fix score 0/5 (0%). 5 bypass corrections: `resolveStringConcat()` for BinaryExpression string concat resolution, enhanced AST-027/AST-028 with deep string resolution + variable path tracking, fixed `new Function()` not setting `ctx.hasDynamicExec`, content-level compound detection for MCP/IDE/binary patterns. 3 new rules: `fetch_decrypt_exec` (AST-033, CRITICAL), `download_exec_binary` (AST-034, CRITICAL), `ide_persistence` (AST-035, HIGH). Post-fix: 5/5 (100%). ADR: 98.8% (82/83). Rule count: 107 (102 RULES + 5 PARANOID).
 
 **New AST detection rules (v2.2):**
 - MUADDIB-AST-008 to AST-012: Dynamic require with decode patterns, sandbox evasion, detached process, binary dropper patterns
@@ -110,6 +112,9 @@ Tests use a custom framework in `tests/run-tests.js` (no Jest). Test helpers:
 - MUADDIB-AST-029: Dynamic env var harvesting (Object.keys(process.env) — HIGH, T1552)
 - MUADDIB-AST-030: DNS chunk exfiltration (dns.resolve with data in subdomain — HIGH, T1048)
 - MUADDIB-AST-031: LLM API key harvesting (OPENAI_API_KEY, ANTHROPIC_API_KEY — MEDIUM, T1552)
+- MUADDIB-AST-033: Steganographic payload chain (fetch + crypto decrypt + eval/Function — CRITICAL, T1027.003)
+- MUADDIB-AST-034: Download-execute binary (download + chmod + execSync — CRITICAL, T1105)
+- MUADDIB-AST-035: IDE task persistence (tasks.json + runOn:folderOpen + writeFileSync — HIGH, T1546)
 
 **Other key features (not scanners):**
 - `src/sandbox.js` — Docker-based dynamic analysis: installs a package in an isolated container, captures filesystem changes, network traffic (tcpdump), and process spawns (strace). Injects canary tokens by default.
@@ -123,7 +128,7 @@ The following commands are internal infrastructure/dev tools. They work when cal
 - `muaddib stats` — Daily scan statistics and FP rate. Uses monitor exports.
 - `src/commands/evaluate.js` — `muaddib evaluate` measures TPR/FPR/ADR. Dev-only evaluation command.
 
-**Rules & playbooks:** Threat types map to rules in `src/rules/index.js` (102 rules: 97 RULES + 5 PARANOID, MITRE ATT&CK mapped) and remediation text in `src/response/playbooks.js`. Both keyed by threat `type` string.
+**Rules & playbooks:** Threat types map to rules in `src/rules/index.js` (107 rules: 102 RULES + 5 PARANOID, MITRE ATT&CK mapped) and remediation text in `src/response/playbooks.js`. Both keyed by threat `type` string.
 
 **IOC system (3-tier):**
 1. `src/ioc/data/iocs-compact.json` (~5MB, ships with npm) — wildcards[] + versioned{} Maps for O(1) lookup

@@ -154,6 +154,40 @@ This holdout is the first to specifically test **cross-file dataflow detection**
 
 **Key inter-module capabilities validated:** re-export chains (a → b → c), 3-hop propagation with intermediate transforms, named export + destructuring, inline require re-export, function-wrapped taint propagation, and class method analysis (post-correction).
 
+### Vague 4 (5 samples, rules frozen): 0/5 (0%)
+
+Vague 4 tests **5 advanced evasion techniques** documented in 2025-2026 threat intelligence: string concatenation to evade path matching, native addon camouflage, steganographic payload chains, IDE persistence via VS Code tasks.json, and MCP config injection. All 5 samples were designed to bypass existing rules through dynamic path construction, content-level obfuscation, and compound patterns split across multiple steps.
+
+| Sample | Pre-fix Score | Threshold | Result | Technique | Source |
+|--------|---------------|-----------|--------|-----------|--------|
+| git-hook-persistence | 3 | 10 | FAIL | String concat evasion (`.gi` + `t` → `.git`), writeFileSync to .git/hooks/ | SANDWORM_MODE / Socket.dev |
+| native-addon-camouflage | 3 | 25 | FAIL | Binary download + chmod 0o755 + execSync, disguised as native addon compilation | NeoShadow / Aikido |
+| stego-png-payload | 16 | 35 | FAIL | Fetch PNG + pixel extraction + createDecipheriv + gunzipSync + `new Function()` | buildrunner-dev / Veracode |
+| stegabin-vscode-persistence | 28 | 30 | FAIL | Pastebin steganography for C2, write tasks.json with runOn:folderOpen auto-exec | StegaBin / FAMOUS CHOLLIMA |
+| mcp-server-injection | 3 | 25 | FAIL | MCP server creation + injection into .claude/settings.json, .cursor/mcp.json | SANDWORM_MODE |
+
+**Pre-fix score: 0/5 (0%).** All 5 samples evaded detection with rules frozen. Key evasion techniques:
+
+- **String concatenation** (`.gi` + `t` + `ho` + `oks`) defeated static path matching for `.git/hooks/`
+- **Native addon camouflage**: `execSync` with legitimate-looking commands (node-gyp rebuild) didn't match `DANGEROUS_CMD_PATTERNS`, so no exec threat fired
+- **Steganographic chain**: `new Function()` in `handleNewExpression` did NOT set `ctx.hasDynamicExec`, so the compound `fetch + decrypt + exec` never triggered
+- **IDE persistence**: `tasks.json` path was built via function return value (not a tracked variable), so path resolution failed
+- **MCP injection**: fully dynamic paths (computed from `os.homedir()`) defeated AST-level path matching
+
+**Post-fix score: 5/5 (100%).** After 5 corrections:
+
+| Sample | Pre-fix | Post-fix | Key Fix |
+|--------|---------|----------|---------|
+| git-hook-persistence | 3 | 13 | `resolveStringConcat()` resolves `BinaryExpression` with `+` operator |
+| native-addon-camouflage | 3 | 28 | New compound `download_exec_binary` (AST-034): content-level fetch + chmod + execSync |
+| stego-png-payload | 16 | 41 | Fixed `new Function()` setting `ctx.hasDynamicExec` + new compound `fetch_decrypt_exec` (AST-033) |
+| stegabin-vscode-persistence | 28 | 38 | New compound `ide_persistence` (AST-035): content co-occurrence tasks.json + runOn + writeFileSync |
+| mcp-server-injection | 3 | 28 | Content-level `hasMcpContentKeywords` detection (mcpServers + writeFileSync co-occurrence) |
+
+**3 new rules added:** `fetch_decrypt_exec` (MUADDIB-AST-033, CRITICAL, T1027.003), `download_exec_binary` (MUADDIB-AST-034, CRITICAL, T1105), `ide_persistence` (MUADDIB-AST-035, HIGH, T1546).
+
+**Key technique: `resolveStringConcat()`** — Recursive function that resolves `BinaryExpression` nodes with `+` operator: `.gi` + `t` → `.git`. Also handles `TemplateLiteral` without expressions. Combined with `extractStringValue()` in `extractStringValueDeep()` wrapper for comprehensive string resolution across all path-matching detectors (AST-027, AST-028).
+
 ---
 
 ## 3. Progression
@@ -169,6 +203,7 @@ This holdout is the first to specifically test **cross-file dataflow detection**
 | Holdout v3 | 60% (6/10) | 10 |
 | **Holdout v4** | **80% (8/10)** | 10 |
 | **Holdout v5** | **50% (5/10)** | 10 |
+| **Vague 4** | **0% (0/5)** | 5 |
 
 **Key observations:**
 
@@ -179,8 +214,9 @@ This holdout is the first to specifically test **cross-file dataflow detection**
 - The **Holdout v3 60%** shows significant improvement (+20pp over v2). 4 blind spots identified: require.cache poisoning, DNS TXT payload staging, JavaScript reverse shell (net.Socket + pipe), steganographic payload execution.
 - The **Holdout v4 80%** shows the strongest generalization yet (+20pp over v3). This batch specifically tested deobfuscation — 2 samples only detectable thanks to the new deobfuscation pre-processing (`hex-array-exec` 0→25, `mixed-obfuscation-stealer` 10→45). 2 blind spots identified: eval+decode compound pattern, const propagation needed for split base64 variables.
 - The **Holdout v5 50%** is the first holdout testing an entirely new scanner (`module-graph.js`) rather than improvements to existing ones. The drop from 80% to 50% reflects the challenge of a new detection domain (inter-module dataflow). 5 samples detected out of the box — re-export chains, 3-hop propagation, named exports, inline require, conditional splits. 3 samples failed: EventEmitter flows, callback-based taint, and class method calls (2 accepted as fundamental limitations of static analysis, 1 fixed post-holdout).
-- **Progression trend: 30% → 40% → 60% → 80% → 50%** — the first four holdouts show consistent improvement on the same scanner. Holdout v5 tests a new scanner, resetting the baseline. The 50% on first contact with inter-module patterns is a strong starting point.
-- After corrections, all 78 samples pass (ADR 100%, with 2 accepted limitations). But the pre-correction holdout scores (30%, 40%, 60%, 80%, 50%) are the true measures of generalization.
+- The **Vague 4 0%** is the worst pre-fix result since Vague 2 (also 0%). All 5 samples used advanced evasion: string concatenation to break path matching, native addon camouflage, steganographic pipelines, IDE persistence, and MCP config injection. The 0% exposed critical gaps in dynamic path resolution and compound pattern detection. 5 corrections (including `resolveStringConcat()` and 3 new compound rules) brought all 5 to detection. Post-fix: 5/5.
+- **Progression trend: 30% → 40% → 60% → 80% → 50% → 0%** — the 0% in Vague 4 shows that sophisticated evasion techniques (string concatenation, content-level patterns) can still defeat the scanner. But each 0% batch drives significant improvements: Vague 2 led to template literal handling, Vague 4 led to `resolveStringConcat()` and 3 new compound detection rules.
+- After corrections, 82 of 83 samples pass (ADR 98.8%, with 1 documented miss: `require-cache-poison`). The pre-correction scores are the true measures of generalization.
 
 ---
 
@@ -234,6 +270,9 @@ All adversarial samples are based on real-world attack techniques documented by 
 | **Sygnia** | chalk/debug September 2025 compromise, prototype hooking (globalThis.fetch, XMLHttpRequest.prototype), native API interception | Sygnia Threat Intelligence 2025 |
 | **Hive Pro** | Typosquatting credential theft, crypto wallet harvesting (.ethereum, .electrum, .config/solana), gh auth token CLI abuse | Hive Pro Research 2025 |
 | **Koi Security** | PackageGate vulnerability, npm registry metadata manipulation, publish frequency anomalies | Koi Security 2025 |
+| **Aikido** | NeoShadow campaign: native addon camouflage (fake node-gyp rebuild), binary download + chmod + execSync dropper pattern | Aikido Security Blog 2025 |
+| **Veracode** | buildrunner-dev steganographic payloads: PNG pixel extraction + crypto.createDecipheriv + zlib.gunzipSync + new Function() execution chain | Veracode Research 2025 |
+| **Reversing Labs** | FAMOUS CHOLLIMA / StegaBin: Pastebin character-interval steganography for C2, VS Code tasks.json persistence with runOn:folderOpen auto-execution | Reversing Labs 2025 |
 
 ---
 
@@ -608,21 +647,22 @@ Measured on full 529-package benign dataset (525 scanned, 4 skipped).
 
 ---
 
-## 13. Current Metrics (v2.3.1)
+## 13. Current Metrics (v2.4.7)
 
 | Metric | Result | Description |
 |--------|--------|-------------|
 | **Wild TPR** (Datadog 17K) | **88.2%** raw · **~100%** adjusted | 17,922 real malware samples. 2,077 out-of-scope misses (see section 14) |
 | **TPR** (Ground Truth) | **91.8% (45/49)** | 51 real-world attacks (49 active). 4 out-of-scope: browser-only (3) + FP-risky (1) |
 | **FPR** (Benign, global) | **7.4% (39/525)** | 529 npm packages (525 scanned), real source code, threshold > 20 |
-| **ADR** (Adversarial + Holdout) | **98.7% (77/78)** | 38 adversarial + 40 holdout. 1 documented miss: `require-cache-poison` (accepted trade-off) |
+| **ADR** (Adversarial + Holdout) | **98.8% (82/83)** | 43 adversarial + 40 holdout. 1 documented miss: `require-cache-poison` (accepted trade-off) |
 | **Holdout v1** (pre-tuning) | 30% (3/10) | 10 unseen samples before rule corrections |
 | **Holdout v2** (pre-tuning) | 40% (4/10) | 10 unseen samples before rule corrections |
 | **Holdout v3** (pre-tuning) | 60% (6/10) | 10 unseen samples before rule corrections |
 | **Holdout v4** (pre-tuning) | 80% (8/10) | 10 unseen samples testing deobfuscation |
 | **Holdout v5** (pre-tuning) | 50% (5/10) | 10 unseen samples testing inter-module dataflow |
+| **Vague 4** (pre-fix) | 0% (0/5) | 5 adversarial samples testing string concat evasion, compound patterns |
 
-v2.2.12: Ground truth expanded from 4 to 49 samples. v2.2.13: ADR 75/75 → 78/78. v2.2.22: scan freeze fix. v2.2.23: .npmignore excludes malware. v2.2.24: tests 862 → 1317, coverage 72% → 86%. v2.3.0: FPR ~13% → 8.9% (P2). v2.3.1: FPR 8.2% → 7.4% (P3), 8 new rules (102 total), tests 1317 → 1387, ADR 100% → 98.7% (1 documented miss).
+v2.2.12: Ground truth expanded from 4 to 49 samples. v2.2.13: ADR 75/75 → 78/78. v2.2.22: scan freeze fix. v2.2.23: .npmignore excludes malware. v2.2.24: tests 862 → 1317, coverage 72% → 86%. v2.3.0: FPR ~13% → 8.9% (P2). v2.3.1: FPR 8.2% → 7.4% (P3), 8 new rules (102 total), tests 1317 → 1387, ADR 100% → 98.7% (1 documented miss). **v2.4.7**: Vague 4 (5 adversarial samples, 5 bypass corrections, 3 new rules), ADR 98.7% → 98.8% (82/83), 107 total rules (102 RULES + 5 PARANOID).
 
 **FPR progression**: 0% (invalid, v2.2.0–v2.2.6) → 38% (first real measurement, v2.2.7) → 19.4% (v2.2.8) → 17.5% (v2.2.9) → ~13% (v2.2.11, per-file max scoring) → 8.9% (v2.3.0, P2) → **7.4%** (v2.3.1, P3)
 
