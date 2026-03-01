@@ -1103,6 +1103,44 @@ const RULES = {
     ],
     mitre: 'T1071.001'
   },
+
+  fetch_decrypt_exec: {
+    id: 'MUADDIB-AST-033',
+    name: 'Steganographic Payload Chain',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Chaine steganographique: fetch distant + dechiffrement crypto + execution dynamique (eval/Function). Pattern buildrunner-dev: payload cache dans une image, dechiffre a runtime, puis execute.',
+    references: [
+      'https://attack.mitre.org/techniques/T1027/003/',
+      'https://attack.mitre.org/techniques/T1140/'
+    ],
+    mitre: 'T1027.003'
+  },
+
+  download_exec_binary: {
+    id: 'MUADDIB-AST-034',
+    name: 'Download-Execute Binary Pattern',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Pattern download-execute: telechargement distant + chmod executable + execSync dans le meme fichier. Dropper binaire deguise en compilation native addon (NeoShadow pattern).',
+    references: [
+      'https://attack.mitre.org/techniques/T1105/',
+      'https://attack.mitre.org/techniques/T1059/'
+    ],
+    mitre: 'T1105'
+  },
+
+  ide_persistence: {
+    id: 'MUADDIB-AST-035',
+    name: 'IDE Task Persistence',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'Persistence IDE: ecriture dans tasks.json ou Code/User/ avec execution automatique a l\'ouverture du dossier (runOn: folderOpen). Pattern FAMOUS CHOLLIMA / StegaBin pour persistance VS Code.',
+    references: [
+      'https://attack.mitre.org/techniques/T1546/'
+    ],
+    mitre: 'T1546'
+  },
 };
 
 function getRule(type) {

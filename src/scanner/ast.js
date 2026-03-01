@@ -94,7 +94,24 @@ function analyzeFile(content, filePath, basePath) {
     hasBase64Encode: /\.toString\s*\(\s*['"]base64(url)?['"]\s*\)/.test(content),
     hasDnsLoop: false,  // set when dns call inside loop context detected
     // SANDWORM_MODE P2: LLM API key harvesting
-    llmApiKeyCount: 0
+    llmApiKeyCount: 0,
+    // Wave 4: path variable tracking for git hooks and IDE config injection
+    gitHooksPathVars: new Map(),
+    ideConfigPathVars: new Map(),
+    // Wave 4: compound detection — fetch + decrypt + eval chain
+    hasRemoteFetch: /\bhttps?\.(get|request)\b/.test(content) || /\bfetch\s*\(/.test(content),
+    hasCryptoDecipher: /\bcreateDecipher(iv)?\s*\(/.test(content),
+    // Wave 4: native addon camouflage signals
+    hasRequireNodeFile: false,
+    hasExecSyncCall: false,
+    // Wave 4: IDE persistence (VS Code tasks.json, Code/User/ paths)
+    hasIdePersistenceWrite: false,
+    hasTasksJsonInContent: /\btasks\.json\b/.test(content),
+    hasRunOnInContent: /\brunOn\b|\bfolderOpen\b/.test(content),
+    hasWriteFileSyncInContent: /\bwriteFileSync\b|\bwriteFile\s*\(/.test(content),
+    // Wave 4: MCP content keyword detection (must also have writeFileSync in same file)
+    hasMcpContentKeywords: (/\bmcpServers\b/.test(content) || /\bmcp\.json\b/.test(content) || /\bclaude_desktop_config\b/.test(content)) &&
+      /\bwriteFileSync\b|\bwriteFile\s*\(/.test(content)
   };
 
   walk.simple(ast, {

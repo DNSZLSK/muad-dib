@@ -387,6 +387,21 @@ const PLAYBOOKS = {
     'Domaine C2 ou d\'exfiltration detecte dans le code source. Ces domaines (oastify.com, webhook.site, ngrok.io, etc.) ' +
     'sont utilises pour recevoir des donnees volees ou relayer des commandes. Verifier si le package a une raison ' +
     'legitime d\'utiliser ce domaine. Bloquer les connexions sortantes vers ce domaine.',
+
+  fetch_decrypt_exec:
+    'CRITIQUE: Chaine steganographique detectee. Le code telecharge un fichier distant, le dechiffre via crypto, ' +
+    'puis execute le resultat via eval/Function. Pattern buildrunner-dev: payload malveillant cache dans une image PNG. ' +
+    'Isoler immediatement. Analyser le payload dechiffre. Supprimer le package.',
+
+  download_exec_binary:
+    'CRITIQUE: Pattern download-execute detecte. Le code telecharge un binaire, le rend executable (chmod 755), ' +
+    'puis l\'execute via execSync. Dropper deguise en compilation native addon (NeoShadow pattern). ' +
+    'Bloquer les telechargements. Verifier les binaires ecrits sur disque. Supprimer le package.',
+
+  ide_persistence:
+    'Persistence IDE detectee. Le code ecrit dans tasks.json ou la configuration VS Code avec execution automatique ' +
+    'a l\'ouverture du dossier (runOn: folderOpen, reveal: silent). Pattern FAMOUS CHOLLIMA / StegaBin. ' +
+    'Verifier ~/.config/Code/User/tasks.json et supprimer les taches inconnues.',
 };
 
 function getPlaybook(threatType) {

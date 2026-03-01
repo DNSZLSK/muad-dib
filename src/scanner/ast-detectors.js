@@ -155,6 +155,35 @@ function extractStringValue(node) {
 }
 
 /**
+ * Recursively resolve BinaryExpression with '+' operator to reconstruct
+ * concatenated strings like '.gi' + 't' → '.git' or 'ho' + 'oks' → 'hooks'.
+ * Returns null if any part is non-literal.
+ */
+function resolveStringConcat(node) {
+  if (!node) return null;
+  if (node.type === 'Literal' && typeof node.value === 'string') return node.value;
+  if (node.type === 'TemplateLiteral' && node.expressions.length === 0) {
+    return node.quasis.map(q => q.value.raw).join('');
+  }
+  if (node.type === 'BinaryExpression' && node.operator === '+') {
+    const left = resolveStringConcat(node.left);
+    const right = resolveStringConcat(node.right);
+    if (left !== null && right !== null) return left + right;
+  }
+  return null;
+}
+
+/**
+ * Extract string value from a node, including BinaryExpression resolution.
+ * Falls back to extractStringValue if concat resolution fails.
+ */
+function extractStringValueDeep(node) {
+  const concat = resolveStringConcat(node);
+  if (concat !== null) return concat;
+  return extractStringValue(node);
+}
+
+/**
  * Returns true if all arguments of a call/new expression are string literals.
  * Used to distinguish safe patterns like eval('1+2') or Function('return this')
  * from dangerous dynamic patterns like eval(userInput).
@@ -276,13 +305,39 @@ function handleVariableDeclarator(node, ctx) {
       const prop = node.init.callee.property;
       if (obj?.type === 'Identifier' && obj.name === 'path' &&
           prop?.type === 'Identifier' && (prop.name === 'join' || prop.name === 'resolve')) {
-        const joinArgs = node.init.arguments.map(a => extractStringValue(a) || '').join('/');
+        const joinArgs = node.init.arguments.map(a => extractStringValueDeep(a) || '').join('/');
         if (/\.github[\\/\/]workflows/i.test(joinArgs) || /\.github[\\/\/]actions/i.test(joinArgs)) {
           ctx.workflowPathVars.add(node.id.name);
         }
         // Propagate: path.join(workflowPathVar, ...) inherits tracking
         else if (node.init.arguments.some(a => a.type === 'Identifier' && ctx.workflowPathVars.has(a.name))) {
           ctx.workflowPathVars.add(node.id.name);
+        }
+        // Track path.join that resolves to .git/hooks (concat fragments included)
+        if (/\.git[\\/\/]hooks/i.test(joinArgs) ||
+            (GIT_HOOKS.some(h => joinArgs.includes(h)) && joinArgs.includes('.git'))) {
+          ctx.gitHooksPathVars.set(node.id.name, joinArgs);
+        }
+        // Propagate: path.join(gitHooksPathVar, ...) inherits tracking
+        else if (node.init.arguments.some(a => a.type === 'Identifier' && ctx.gitHooksPathVars.has(a.name))) {
+          const parentPath = node.init.arguments.map(a => {
+            if (a.type === 'Identifier' && ctx.gitHooksPathVars.has(a.name)) return ctx.gitHooksPathVars.get(a.name);
+            return extractStringValueDeep(a) || '';
+          }).join('/');
+          ctx.gitHooksPathVars.set(node.id.name, parentPath);
+        }
+        // Track path.join that resolves to IDE config paths (.claude/, .cursor/, etc.)
+        const joinLower = joinArgs.toLowerCase();
+        if (MCP_CONFIG_PATHS.some(p => joinLower.includes(p.toLowerCase()))) {
+          ctx.ideConfigPathVars.set(node.id.name, joinArgs);
+        }
+        // Propagate: path.join(ideConfigPathVar, ...) inherits tracking
+        else if (node.init.arguments.some(a => a.type === 'Identifier' && ctx.ideConfigPathVars.has(a.name))) {
+          const parentPath = node.init.arguments.map(a => {
+            if (a.type === 'Identifier' && ctx.ideConfigPathVars.has(a.name)) return ctx.ideConfigPathVars.get(a.name);
+            return extractStringValueDeep(a) || '';
+          }).join('/');
+          ctx.ideConfigPathVars.set(node.id.name, parentPath);
         }
       }
     }
@@ -336,6 +391,11 @@ function handleCallExpression(node, ctx) {
         file: ctx.relFile
       });
     }
+    // Wave 4: detect require() of .node binary files (native addon camouflage)
+    const reqStr = extractStringValueDeep(arg);
+    if (reqStr && /\.node\s*$/.test(reqStr)) {
+      ctx.hasRequireNodeFile = true;
+    }
   }
 
   // Detect exec/execSync with dangerous shell commands (direct or via MemberExpression)
@@ -345,6 +405,8 @@ function handleCallExpression(node, ctx) {
     (node.callee.property.name === 'exec' || node.callee.property.name === 'execSync')
     ? node.callee.property.name : null;
   if ((execName || memberExec) && node.arguments.length > 0) {
+    // Wave 4: track any execSync/exec call for compound detection
+    ctx.hasExecSyncCall = true;
     const arg = node.arguments[0];
     let cmdStr = null;
     if (arg.type === 'Literal' && typeof arg.value === 'string') {
@@ -560,13 +622,18 @@ function handleCallExpression(node, ctx) {
     const mcpWriteMethod = node.callee.property.name;
     if (['writeFileSync', 'writeFile'].includes(mcpWriteMethod) && node.arguments.length >= 2) {
       const mcpPathArg = node.arguments[0];
-      const mcpPathStr = extractStringValue(mcpPathArg);
-      // Also check path.join() calls
+      const mcpPathStr = extractStringValueDeep(mcpPathArg);
+      // Also check path.join() calls — resolve concat fragments in each argument
       let mcpJoinedPath = '';
       if (mcpPathArg?.type === 'CallExpression' && mcpPathArg.arguments) {
-        mcpJoinedPath = mcpPathArg.arguments.map(a => extractStringValue(a) || '').join('/');
+        mcpJoinedPath = mcpPathArg.arguments.map(a => extractStringValueDeep(a) || '').join('/');
       }
-      const mcpCheckPath = (mcpPathStr || mcpJoinedPath).toLowerCase();
+      // Also check if path arg is a variable tracked as MCP/IDE config path
+      let mcpVarPath = '';
+      if (mcpPathArg?.type === 'Identifier' && ctx.ideConfigPathVars.has(mcpPathArg.name)) {
+        mcpVarPath = ctx.ideConfigPathVars.get(mcpPathArg.name);
+      }
+      const mcpCheckPath = (mcpPathStr || mcpJoinedPath || mcpVarPath).toLowerCase();
       const isMcpPath = MCP_CONFIG_PATHS.some(p => mcpCheckPath.includes(p.toLowerCase()));
       if (isMcpPath) {
         // Check content argument for MCP-related patterns
@@ -592,14 +659,19 @@ function handleCallExpression(node, ctx) {
     const gitWriteMethod = node.callee.property.name;
     if (['writeFileSync', 'writeFile'].includes(gitWriteMethod) && node.arguments.length >= 1) {
       const gitPathArg = node.arguments[0];
-      const gitPathStr = extractStringValue(gitPathArg);
+      const gitPathStr = extractStringValueDeep(gitPathArg);
       let gitJoinedPath = '';
       if (gitPathArg?.type === 'CallExpression' && gitPathArg.arguments) {
-        gitJoinedPath = gitPathArg.arguments.map(a => extractStringValue(a) || '').join('/');
+        gitJoinedPath = gitPathArg.arguments.map(a => extractStringValueDeep(a) || '').join('/');
       }
-      const gitCheckPath = gitPathStr || gitJoinedPath;
+      // Also check if path arg is a variable tracked as git hooks path
+      let gitVarPath = '';
+      if (gitPathArg?.type === 'Identifier' && ctx.gitHooksPathVars.has(gitPathArg.name)) {
+        gitVarPath = ctx.gitHooksPathVars.get(gitPathArg.name);
+      }
+      const gitCheckPath = gitPathStr || gitJoinedPath || gitVarPath;
       if (/\.git[\\/]hooks[\\/]/i.test(gitCheckPath) ||
-          GIT_HOOKS.some(h => gitCheckPath.includes(h) && gitCheckPath.includes('.git'))) {
+          GIT_HOOKS.some(h => gitCheckPath.includes(h) && (gitCheckPath.includes('.git') || gitCheckPath.includes('hooks')))) {
         ctx.threats.push({
           type: 'git_hooks_injection',
           severity: 'HIGH',
@@ -632,6 +704,43 @@ function handleCallExpression(node, ctx) {
       }
     }
   }
+
+  // Wave 4: IDE persistence — writeFileSync to VS Code tasks.json or Code/User/ paths
+  if (node.callee.type === 'MemberExpression' && node.callee.property?.type === 'Identifier') {
+    const ideWriteMethod = node.callee.property.name;
+    if (['writeFileSync', 'writeFile'].includes(ideWriteMethod) && node.arguments.length >= 1) {
+      const idePathArg = node.arguments[0];
+      const idePathStr = extractStringValueDeep(idePathArg);
+      let ideJoinedPath = '';
+      if (idePathArg?.type === 'CallExpression' && idePathArg.arguments) {
+        ideJoinedPath = idePathArg.arguments.map(a => extractStringValueDeep(a) || '').join('/');
+      }
+      let ideVarPath = '';
+      if (idePathArg?.type === 'Identifier' && ctx.ideConfigPathVars.has(idePathArg.name)) {
+        ideVarPath = ctx.ideConfigPathVars.get(idePathArg.name);
+      }
+      const ideCheckPath = (idePathStr || ideJoinedPath || ideVarPath).toLowerCase();
+      if ((ideCheckPath.includes('tasks.json') || ideCheckPath.includes('code/user/') || ideCheckPath.includes('.vscode/')) &&
+          !ctx.hasIdePersistenceWrite) {
+        // Check content for task runner persistence patterns (runOn, folderOpen)
+        const ideContentArg = node.arguments[1];
+        const ideContentStr = extractStringValue(ideContentArg);
+        const hasPersistencePattern = ideContentStr
+          ? /runOn|folderOpen|reveal.*silent/.test(ideContentStr)
+          : true; // dynamic content targeting IDE task paths = suspicious
+        if (hasPersistencePattern) {
+          ctx.hasIdePersistenceWrite = true;
+          ctx.threats.push({
+            type: 'ide_persistence',
+            severity: 'HIGH',
+            message: `IDE persistence: ${ideWriteMethod}() writes to IDE task configuration (${ideCheckPath}). Auto-execution on folder open.`,
+            file: ctx.relFile
+          });
+        }
+      }
+    }
+  }
+
 
   // Detect fs.chmodSync with executable permissions (deferred to postWalk for compound check)
   if (node.callee.type === 'MemberExpression' && node.callee.property?.type === 'Identifier') {
@@ -926,6 +1035,7 @@ function handleNewExpression(node, ctx) {
   if (node.callee.type === 'Identifier' && node.callee.name === 'Function') {
     // Skip string literal args — zero-risk globalThis polyfills used by every bundler
     if (!hasOnlyStringLiteralArgs(node)) {
+      ctx.hasDynamicExec = true;
       ctx.threats.push({
         type: 'dangerous_call_function',
         severity: 'MEDIUM',
@@ -1219,6 +1329,47 @@ function handlePostWalk(ctx) {
       type: 'staged_binary_payload',
       severity: 'HIGH',
       message: 'Binary file reference (.png/.jpg/.wasm/etc.) + eval() in same file — possible steganographic payload execution.',
+      file: ctx.relFile
+    });
+  }
+
+  // Wave 4: Remote fetch + crypto decrypt + dynamic eval = steganographic payload chain
+  if (ctx.hasRemoteFetch && ctx.hasCryptoDecipher && ctx.hasDynamicExec) {
+    ctx.threats.push({
+      type: 'fetch_decrypt_exec',
+      severity: 'CRITICAL',
+      message: 'Steganographic payload chain: remote fetch + crypto decryption + dynamic execution. No legitimate package uses this pattern.',
+      file: ctx.relFile
+    });
+  }
+
+  // Wave 4: Download-execute-cleanup — https download + chmod executable + execSync + unlink
+  if (ctx.hasRemoteFetch && ctx.hasChmodExecutable && ctx.hasExecSyncCall) {
+    ctx.threats.push({
+      type: 'download_exec_binary',
+      severity: 'CRITICAL',
+      message: 'Download-execute pattern: remote fetch + chmod executable + execSync in same file. Binary dropper camouflaged as native addon build.',
+      file: ctx.relFile
+    });
+  }
+
+  // Wave 4: IDE persistence via content co-occurrence — tasks.json + runOn + writeFileSync
+  if (!ctx.hasIdePersistenceWrite && ctx.hasTasksJsonInContent && ctx.hasRunOnInContent && ctx.hasWriteFileSyncInContent) {
+    ctx.hasIdePersistenceWrite = true;
+    ctx.threats.push({
+      type: 'ide_persistence',
+      severity: 'HIGH',
+      message: 'IDE persistence: writes tasks.json with auto-execution trigger (runOn/folderOpen). VS Code task persistence technique.',
+      file: ctx.relFile
+    });
+  }
+
+  // Wave 4: MCP content keywords in file with writeFileSync = MCP injection signal
+  if (ctx.hasMcpContentKeywords && !ctx.threats.some(t => t.type === 'mcp_config_injection')) {
+    ctx.threats.push({
+      type: 'mcp_config_injection',
+      severity: 'CRITICAL',
+      message: 'MCP config injection: code contains MCP server configuration keywords (mcpServers/mcp.json/claude_desktop_config) with filesystem writes. AI toolchain poisoning.',
       file: ctx.relFile
     });
   }

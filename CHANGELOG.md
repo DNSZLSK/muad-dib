@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.4.7] - 2026-03-01
+
+### Added
+- **Vague 4 — 5 new adversarial samples** (43 total adversarial, 83 total ADR). Advanced evasion techniques:
+  - `git-hook-persistence`: String concatenation evasion (`.gi` + `t` → `.git`), writeFileSync to .git/hooks/ (SANDWORM_MODE / Socket.dev)
+  - `native-addon-camouflage`: Binary download + chmod 0o755 + execSync, disguised as native addon compilation (NeoShadow / Aikido)
+  - `stego-png-payload`: PNG pixel extraction + createDecipheriv + gunzipSync + `new Function()` steganographic chain (buildrunner-dev / Veracode)
+  - `stegabin-vscode-persistence`: Pastebin steganography for C2, VS Code tasks.json persistence with runOn:folderOpen (StegaBin / FAMOUS CHOLLIMA)
+  - `mcp-server-injection`: MCP server creation + injection into .claude/settings.json, .cursor/mcp.json (SANDWORM_MODE)
+- **`resolveStringConcat()`**: Recursive BinaryExpression resolver for string concatenation evasion — `.gi` + `t` → `.git`. Combined with `extractStringValue()` in `extractStringValueDeep()` wrapper. Enhances AST-027 (MCP config injection) and AST-028 (git hooks injection).
+- **3 new detection rules** (107 total: 102 RULES + 5 PARANOID):
+  - `fetch_decrypt_exec` (MUADDIB-AST-033, CRITICAL, T1027.003): Steganographic payload chain — remote fetch + crypto decrypt + dynamic eval
+  - `download_exec_binary` (MUADDIB-AST-034, CRITICAL, T1105): Download-execute binary pattern — download + chmod + execSync
+  - `ide_persistence` (MUADDIB-AST-035, HIGH, T1546): IDE task persistence — tasks.json + runOn:folderOpen + writeFileSync
+- **Content-level compound detection**: `hasMcpContentKeywords` (mcpServers + writeFileSync co-occurrence), `ide_persistence` (tasks.json + runOn + writeFileSync content co-occurrence), `download_exec_binary` (fetch + chmod + execSync content co-occurrence)
+- **Variable path tracking**: `gitHooksPathVars` Map and `ideConfigPathVars` Map propagate path.join resolutions through variable assignments for AST-027 and AST-028
+
+### Fixed
+- **`new Function()` not setting `ctx.hasDynamicExec`**: In `handleNewExpression`, `new Function()` with non-literal arguments now correctly sets `ctx.hasDynamicExec = true`, enabling the `fetch_decrypt_exec` compound detection
+- **MCP config injection (AST-027)**: Enhanced with deep string resolution (`extractStringValueDeep()`), variable tracking via `ideConfigPathVars`, and content-level fallback via `hasMcpContentKeywords`
+- **Git hooks injection (AST-028)**: Enhanced with deep string resolution, variable tracking via `gitHooksPathVars`, and relaxed matching to fire when path contains hook name + "hooks"
+
+### Changed
+- **ADR: 98.7% → 98.8% (82/83)** — 43 adversarial + 40 holdout. 1 documented miss: `require-cache-poison` (unchanged)
+- TPR unchanged at **91.8% (45/49)**
+- FPR unchanged at **7.4% (39/525)**
+- Vague 4 pre-fix score: **0/5 (0%)** — all 5 evasion techniques bypassed existing rules. Post-fix: **5/5 (100%)**
+
 ## [2.3.1] - 2026-02-25
 
 ### Changed
@@ -771,7 +799,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Obfuscation detection
 - Package.json lifecycle script analysis
 
-[Unreleased]: https://github.com/DNSZLSK/muad-dib/compare/v2.3.1...HEAD
+[Unreleased]: https://github.com/DNSZLSK/muad-dib/compare/v2.4.7...HEAD
+[2.4.7]: https://github.com/DNSZLSK/muad-dib/compare/v2.3.1...v2.4.7
 [2.3.1]: https://github.com/DNSZLSK/muad-dib/compare/v2.3.0...v2.3.1
 [2.3.0]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.24...v2.3.0
 [2.2.24]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.23...v2.2.24
