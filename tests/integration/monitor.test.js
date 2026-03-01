@@ -38,8 +38,10 @@ async function runMonitorTests() {
     runTemporalAstCheck, runTemporalPublishCheck, runTemporalMaintainerCheck,
     runTemporalCheck, reportStats, recentlyScanned, sendDailyReport,
     resolveTarballAndScan, KNOWN_BUNDLED_PATHS,
-    LAST_DAILY_REPORT_FILE, DAILY_REPORT_COOLDOWN_MS,
-    loadLastDailyReportTimestamp, saveLastDailyReportTimestamp, isDailyReportOnCooldown,
+    LAST_DAILY_REPORT_FILE,
+    loadLastDailyReportDate, saveLastDailyReportDate, hasReportBeenSentToday,
+    DAILY_STATS_FILE, DAILY_STATS_PERSIST_INTERVAL,
+    loadDailyStats, saveDailyStats, resetDailyStats, maybePersistDailyStats,
     isSafeLifecycleScript,
     getWeeklyDownloads, hasTyposquat, formatFindings,
     POPULAR_THRESHOLD, downloadsCache, DOWNLOADS_CACHE_TTL
@@ -3295,15 +3297,24 @@ async function runMonitorTests() {
 
   test('MONITOR: loadState restores lastDailyReportDate into stats', () => {
     const origDate = stats.lastDailyReportDate;
+    // Backup the disk report file so it doesn't override our test value
+    let backupReport = null;
+    try { backupReport = fs.readFileSync(LAST_DAILY_REPORT_FILE, 'utf8'); } catch {}
+
     stats.lastDailyReportDate = '2024-06-15';
     saveState({ npmLastPackage: 'restore-test', pypiLastPackage: '' });
     stats.lastDailyReportDate = null; // clear
+    // Also clear the disk report file so loadState uses state file value
+    try { fs.unlinkSync(LAST_DAILY_REPORT_FILE); } catch {}
     try {
       const state = loadState();
-      assert(stats.lastDailyReportDate === '2024-06-15', 'Should restore lastDailyReportDate from file');
+      assert(stats.lastDailyReportDate === '2024-06-15', 'Should restore lastDailyReportDate from file, got ' + stats.lastDailyReportDate);
       assert(state.npmLastPackage === 'restore-test', 'Should restore npmLastPackage');
     } finally {
       stats.lastDailyReportDate = origDate;
+      if (backupReport !== null) {
+        fs.writeFileSync(LAST_DAILY_REPORT_FILE, backupReport, 'utf8');
+      }
     }
   });
 
@@ -4146,122 +4157,121 @@ async function runMonitorTests() {
     assert(temporalMaxSev === 'CRITICAL', 'Should pick CRITICAL as max');
   });
 
-  // --- Daily report cooldown (SIGTERM restart fix) ---
+  // --- Daily report date-based dedup (fixed-time 08:00 Paris) ---
 
-  test('MONITOR: DAILY_REPORT_COOLDOWN_MS is 12 hours', () => {
-    assert(DAILY_REPORT_COOLDOWN_MS === 12 * 60 * 60 * 1000, 'Cooldown should be 12 hours');
-  });
-
-  test('MONITOR: loadLastDailyReportTimestamp returns 0 when file missing', () => {
-    const origFile = LAST_DAILY_REPORT_FILE;
-    const tmpFile = path.join(os.tmpdir(), 'muaddib-test-no-exist-' + Date.now() + '.json');
-    // Temporarily override — the function reads from the module-level constant,
-    // so we test by ensuring a missing file returns 0
-    const ts = loadLastDailyReportTimestamp();
-    // If the file doesn't exist in production data dir, returns 0
-    assert(typeof ts === 'number', 'Should return a number');
-  });
-
-  test('MONITOR: saveLastDailyReportTimestamp writes and loadLastDailyReportTimestamp reads', () => {
-    // Backup existing file if any
+  test('MONITOR: loadLastDailyReportDate returns null when file missing', () => {
     let backup = null;
+    try { backup = fs.readFileSync(LAST_DAILY_REPORT_FILE, 'utf8'); } catch {}
     try {
-      backup = fs.readFileSync(LAST_DAILY_REPORT_FILE, 'utf8');
-    } catch {}
-
-    try {
-      saveLastDailyReportTimestamp();
-      const ts = loadLastDailyReportTimestamp();
-      assert(typeof ts === 'number', 'Should return a number');
-      assert(ts > 0, 'Timestamp should be positive');
-      assert(Date.now() - ts < 5000, 'Timestamp should be recent (within 5s)');
-    } finally {
-      // Restore backup
-      if (backup !== null) {
-        fs.writeFileSync(LAST_DAILY_REPORT_FILE, backup, 'utf8');
-      } else {
-        try { fs.unlinkSync(LAST_DAILY_REPORT_FILE); } catch {}
-      }
-    }
-  });
-
-  test('MONITOR: isDailyReportOnCooldown returns true when report sent recently', () => {
-    let backup = null;
-    try {
-      backup = fs.readFileSync(LAST_DAILY_REPORT_FILE, 'utf8');
-    } catch {}
-
-    try {
-      // Write a recent timestamp
-      const dir = path.dirname(LAST_DAILY_REPORT_FILE);
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(LAST_DAILY_REPORT_FILE, JSON.stringify({ sentAt: Date.now() }), 'utf8');
-      assert(isDailyReportOnCooldown() === true, 'Should be on cooldown when just sent');
-    } finally {
-      if (backup !== null) {
-        fs.writeFileSync(LAST_DAILY_REPORT_FILE, backup, 'utf8');
-      } else {
-        try { fs.unlinkSync(LAST_DAILY_REPORT_FILE); } catch {}
-      }
-    }
-  });
-
-  test('MONITOR: isDailyReportOnCooldown returns false when report sent >12h ago', () => {
-    let backup = null;
-    try {
-      backup = fs.readFileSync(LAST_DAILY_REPORT_FILE, 'utf8');
-    } catch {}
-
-    try {
-      // Write an old timestamp (13 hours ago)
-      const dir = path.dirname(LAST_DAILY_REPORT_FILE);
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      const oldTs = Date.now() - (13 * 60 * 60 * 1000);
-      fs.writeFileSync(LAST_DAILY_REPORT_FILE, JSON.stringify({ sentAt: oldTs }), 'utf8');
-      assert(isDailyReportOnCooldown() === false, 'Should NOT be on cooldown after 13h');
-    } finally {
-      if (backup !== null) {
-        fs.writeFileSync(LAST_DAILY_REPORT_FILE, backup, 'utf8');
-      } else {
-        try { fs.unlinkSync(LAST_DAILY_REPORT_FILE); } catch {}
-      }
-    }
-  });
-
-  test('MONITOR: isDailyReportOnCooldown returns false when file missing', () => {
-    let backup = null;
-    try {
-      backup = fs.readFileSync(LAST_DAILY_REPORT_FILE, 'utf8');
-    } catch {}
-
-    try {
-      // Remove the file
       try { fs.unlinkSync(LAST_DAILY_REPORT_FILE); } catch {}
-      assert(isDailyReportOnCooldown() === false, 'Should NOT be on cooldown when no file');
+      assert(loadLastDailyReportDate() === null, 'Should return null when file missing');
     } finally {
-      if (backup !== null) {
-        fs.writeFileSync(LAST_DAILY_REPORT_FILE, backup, 'utf8');
-      }
+      if (backup !== null) fs.writeFileSync(LAST_DAILY_REPORT_FILE, backup, 'utf8');
     }
   });
 
-  test('MONITOR: isDailyReportOnCooldown returns false for corrupt file', () => {
+  test('MONITOR: loadLastDailyReportDate returns null for corrupt file', () => {
     let backup = null;
-    try {
-      backup = fs.readFileSync(LAST_DAILY_REPORT_FILE, 'utf8');
-    } catch {}
-
+    try { backup = fs.readFileSync(LAST_DAILY_REPORT_FILE, 'utf8'); } catch {}
     try {
       const dir = path.dirname(LAST_DAILY_REPORT_FILE);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(LAST_DAILY_REPORT_FILE, 'not json', 'utf8');
-      assert(isDailyReportOnCooldown() === false, 'Should NOT be on cooldown for corrupt file');
+      assert(loadLastDailyReportDate() === null, 'Should return null for corrupt file');
     } finally {
       if (backup !== null) {
         fs.writeFileSync(LAST_DAILY_REPORT_FILE, backup, 'utf8');
       } else {
         try { fs.unlinkSync(LAST_DAILY_REPORT_FILE); } catch {}
       }
+    }
+  });
+
+  test('MONITOR: saveLastDailyReportDate writes and loadLastDailyReportDate reads', () => {
+    let backup = null;
+    try { backup = fs.readFileSync(LAST_DAILY_REPORT_FILE, 'utf8'); } catch {}
+    try {
+      saveLastDailyReportDate('2026-03-01');
+      const date = loadLastDailyReportDate();
+      assert(date === '2026-03-01', 'Should read back the saved date, got ' + date);
+    } finally {
+      if (backup !== null) {
+        fs.writeFileSync(LAST_DAILY_REPORT_FILE, backup, 'utf8');
+      } else {
+        try { fs.unlinkSync(LAST_DAILY_REPORT_FILE); } catch {}
+      }
+    }
+  });
+
+  test('MONITOR: hasReportBeenSentToday returns true when disk date is today', () => {
+    const origLastDate = stats.lastDailyReportDate;
+    let backup = null;
+    try { backup = fs.readFileSync(LAST_DAILY_REPORT_FILE, 'utf8'); } catch {}
+    try {
+      stats.lastDailyReportDate = null; // stale in-memory
+      const today = getParisDateString();
+      saveLastDailyReportDate(today);
+      assert(hasReportBeenSentToday() === true, 'Should return true when disk has today');
+    } finally {
+      stats.lastDailyReportDate = origLastDate;
+      if (backup !== null) {
+        fs.writeFileSync(LAST_DAILY_REPORT_FILE, backup, 'utf8');
+      } else {
+        try { fs.unlinkSync(LAST_DAILY_REPORT_FILE); } catch {}
+      }
+    }
+  });
+
+  test('MONITOR: hasReportBeenSentToday returns true when in-memory date is today', () => {
+    const origLastDate = stats.lastDailyReportDate;
+    try {
+      stats.lastDailyReportDate = getParisDateString();
+      assert(hasReportBeenSentToday() === true, 'Should return true when in-memory has today');
+    } finally {
+      stats.lastDailyReportDate = origLastDate;
+    }
+  });
+
+  test('MONITOR: hasReportBeenSentToday returns false when date is yesterday', () => {
+    const origLastDate = stats.lastDailyReportDate;
+    let backup = null;
+    try { backup = fs.readFileSync(LAST_DAILY_REPORT_FILE, 'utf8'); } catch {}
+    try {
+      stats.lastDailyReportDate = '1970-01-01';
+      saveLastDailyReportDate('1970-01-01');
+      assert(hasReportBeenSentToday() === false, 'Should return false for old date');
+    } finally {
+      stats.lastDailyReportDate = origLastDate;
+      if (backup !== null) {
+        fs.writeFileSync(LAST_DAILY_REPORT_FILE, backup, 'utf8');
+      } else {
+        try { fs.unlinkSync(LAST_DAILY_REPORT_FILE); } catch {}
+      }
+    }
+  });
+
+  test('MONITOR: hasReportBeenSentToday returns false when no file and no in-memory date', () => {
+    const origLastDate = stats.lastDailyReportDate;
+    let backup = null;
+    try { backup = fs.readFileSync(LAST_DAILY_REPORT_FILE, 'utf8'); } catch {}
+    try {
+      stats.lastDailyReportDate = null;
+      try { fs.unlinkSync(LAST_DAILY_REPORT_FILE); } catch {}
+      assert(hasReportBeenSentToday() === false, 'Should return false when nothing stored');
+    } finally {
+      stats.lastDailyReportDate = origLastDate;
+      if (backup !== null) fs.writeFileSync(LAST_DAILY_REPORT_FILE, backup, 'utf8');
+    }
+  });
+
+  test('MONITOR: isDailyReportDue returns false when report already sent today', () => {
+    const origLastDate = stats.lastDailyReportDate;
+    try {
+      stats.lastDailyReportDate = getParisDateString();
+      // Regardless of hour, already sent today → false
+      assert(isDailyReportDue() === false, 'Should not be due if already sent today');
+    } finally {
+      stats.lastDailyReportDate = origLastDate;
     }
   });
 
@@ -4405,6 +4415,326 @@ async function runMonitorTests() {
       recentlyScanned.clear();
       downloadsCache.clear();
       stats.lastDailyReportDate = origLastDate;
+      if (origEnv !== undefined) process.env.MUADDIB_WEBHOOK_URL = origEnv;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  // --- Daily report cooldown bug fixes ---
+
+  await asyncTest('MONITOR: sendDailyReport skips when 0 packages scanned', async () => {
+    const origEnv = process.env.MUADDIB_WEBHOOK_URL;
+    const origLog = console.log;
+    const origErr = console.error;
+    const logs = [];
+    console.log = (...args) => logs.push(args.join(' '));
+    console.error = () => {};
+
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.example.com/test';
+
+    const webhookModule = require('../../src/webhook.js');
+    const origSendWebhook = webhookModule.sendWebhook;
+    let webhookCalled = false;
+    webhookModule.sendWebhook = async () => { webhookCalled = true; };
+
+    const origScanned = stats.scanned;
+    const origClean = stats.clean;
+    const origSuspect = stats.suspect;
+    const origErrors = stats.errors;
+
+    stats.scanned = 0;
+    stats.clean = 0;
+    stats.suspect = 0;
+    stats.errors = 0;
+
+    try {
+      await sendDailyReport();
+      assert(webhookCalled === false, 'Webhook should NOT be called when 0 packages scanned');
+      const skipLog = logs.find(l => l.includes('skipped (0 packages scanned)'));
+      assert(skipLog !== undefined, 'Should log that report was skipped due to 0 scanned');
+    } finally {
+      webhookModule.sendWebhook = origSendWebhook;
+      console.log = origLog;
+      console.error = origErr;
+      stats.scanned = origScanned;
+      stats.clean = origClean;
+      stats.suspect = origSuspect;
+      stats.errors = origErrors;
+      if (origEnv !== undefined) process.env.MUADDIB_WEBHOOK_URL = origEnv;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  await asyncTest('MONITOR: sendDailyReport saves date to disk even when webhook fails', async () => {
+    const origEnv = process.env.MUADDIB_WEBHOOK_URL;
+    const origLog = console.log;
+    const origErr = console.error;
+    console.log = () => {};
+    console.error = () => {};
+
+    // Point to a URL that will fail (no real webhook)
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.example.com/test';
+
+    const origScanned = stats.scanned;
+    const origLastDate = stats.lastDailyReportDate;
+    stats.scanned = 1;
+
+    let backupFile = null;
+    try {
+      backupFile = fs.readFileSync(LAST_DAILY_REPORT_FILE, 'utf8');
+    } catch {}
+
+    try {
+      try { fs.unlinkSync(LAST_DAILY_REPORT_FILE); } catch {}
+      await sendDailyReport();
+      // Even though webhook failed, date should be saved (write-ahead)
+      const savedDate = loadLastDailyReportDate();
+      const today = getParisDateString();
+      assert(savedDate === today, 'Date should be saved to disk even on webhook failure, got ' + savedDate);
+      assert(hasReportBeenSentToday() === true, 'Should mark today as sent');
+    } finally {
+      console.log = origLog;
+      console.error = origErr;
+      stats.scanned = origScanned;
+      stats.lastDailyReportDate = origLastDate;
+      dailyAlerts.length = 0;
+      recentlyScanned.clear();
+      downloadsCache.clear();
+      if (backupFile !== null) {
+        fs.writeFileSync(LAST_DAILY_REPORT_FILE, backupFile, 'utf8');
+      }
+      if (origEnv !== undefined) process.env.MUADDIB_WEBHOOK_URL = origEnv;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  test('MONITOR: isDailyReportDue returns false when disk has today even if in-memory stale', () => {
+    const origLastDate = stats.lastDailyReportDate;
+    let backupFile = null;
+    try { backupFile = fs.readFileSync(LAST_DAILY_REPORT_FILE, 'utf8'); } catch {}
+
+    try {
+      stats.lastDailyReportDate = '1970-01-01'; // Stale in-memory
+      saveLastDailyReportDate(getParisDateString()); // Fresh on disk
+      // isDailyReportDue checks hasReportBeenSentToday which reads disk
+      // Regardless of hour, today's report is already sent → false
+      assert(hasReportBeenSentToday() === true, 'hasReportBeenSentToday should check disk');
+    } finally {
+      stats.lastDailyReportDate = origLastDate;
+      if (backupFile !== null) {
+        fs.writeFileSync(LAST_DAILY_REPORT_FILE, backupFile, 'utf8');
+      } else {
+        try { fs.unlinkSync(LAST_DAILY_REPORT_FILE); } catch {}
+      }
+    }
+  });
+
+  // --- Daily stats persistence tests ---
+
+  test('MONITOR: DAILY_STATS_PERSIST_INTERVAL is 10', () => {
+    assert(DAILY_STATS_PERSIST_INTERVAL === 10, 'Should persist every 10 scans, got ' + DAILY_STATS_PERSIST_INTERVAL);
+  });
+
+  test('MONITOR: saveDailyStats and loadDailyStats roundtrip', () => {
+    const origScanned = stats.scanned;
+    const origClean = stats.clean;
+    const origSuspect = stats.suspect;
+    const origErrors = stats.errors;
+    const origTotalTimeMs = stats.totalTimeMs;
+    const origDailyAlerts = dailyAlerts.slice();
+
+    let backup = null;
+    try { backup = fs.readFileSync(DAILY_STATS_FILE, 'utf8'); } catch {}
+
+    try {
+      stats.scanned = 42;
+      stats.clean = 30;
+      stats.suspect = 10;
+      stats.errors = 2;
+      stats.totalTimeMs = 99000;
+      dailyAlerts.length = 0;
+      dailyAlerts.push({ name: 'test-pkg', version: '1.0.0', ecosystem: 'npm', findingsCount: 3 });
+
+      saveDailyStats();
+
+      // Reset to zero
+      stats.scanned = 0;
+      stats.clean = 0;
+      stats.suspect = 0;
+      stats.errors = 0;
+      stats.totalTimeMs = 0;
+      dailyAlerts.length = 0;
+
+      loadDailyStats();
+
+      assert(stats.scanned === 42, 'scanned should be restored to 42, got ' + stats.scanned);
+      assert(stats.clean === 30, 'clean should be restored to 30, got ' + stats.clean);
+      assert(stats.suspect === 10, 'suspect should be restored to 10, got ' + stats.suspect);
+      assert(stats.errors === 2, 'errors should be restored to 2, got ' + stats.errors);
+      assert(stats.totalTimeMs === 99000, 'totalTimeMs should be restored');
+      assert(dailyAlerts.length === 1, 'dailyAlerts should be restored, got ' + dailyAlerts.length);
+      assert(dailyAlerts[0].name === 'test-pkg', 'dailyAlert name should match');
+    } finally {
+      stats.scanned = origScanned;
+      stats.clean = origClean;
+      stats.suspect = origSuspect;
+      stats.errors = origErrors;
+      stats.totalTimeMs = origTotalTimeMs;
+      dailyAlerts.length = 0;
+      dailyAlerts.push(...origDailyAlerts);
+      if (backup !== null) {
+        fs.writeFileSync(DAILY_STATS_FILE, backup, 'utf8');
+      } else {
+        try { fs.unlinkSync(DAILY_STATS_FILE); } catch {}
+      }
+    }
+  });
+
+  test('MONITOR: loadDailyStats starts from zero when file missing', () => {
+    const origScanned = stats.scanned;
+    let backup = null;
+    try { backup = fs.readFileSync(DAILY_STATS_FILE, 'utf8'); } catch {}
+
+    try {
+      try { fs.unlinkSync(DAILY_STATS_FILE); } catch {}
+      stats.scanned = 99;
+      loadDailyStats();
+      // File missing → no restoration, stats stay as-is
+      assert(stats.scanned === 99, 'Should not change stats when file missing');
+    } finally {
+      stats.scanned = origScanned;
+      if (backup !== null) fs.writeFileSync(DAILY_STATS_FILE, backup, 'utf8');
+    }
+  });
+
+  test('MONITOR: loadDailyStats handles corrupt file', () => {
+    const origScanned = stats.scanned;
+    let backup = null;
+    try { backup = fs.readFileSync(DAILY_STATS_FILE, 'utf8'); } catch {}
+
+    try {
+      const dir = path.dirname(DAILY_STATS_FILE);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(DAILY_STATS_FILE, 'not json', 'utf8');
+      stats.scanned = 99;
+      loadDailyStats();
+      assert(stats.scanned === 99, 'Should not change stats for corrupt file');
+    } finally {
+      stats.scanned = origScanned;
+      if (backup !== null) {
+        fs.writeFileSync(DAILY_STATS_FILE, backup, 'utf8');
+      } else {
+        try { fs.unlinkSync(DAILY_STATS_FILE); } catch {}
+      }
+    }
+  });
+
+  test('MONITOR: resetDailyStats removes the file', () => {
+    let backup = null;
+    try { backup = fs.readFileSync(DAILY_STATS_FILE, 'utf8'); } catch {}
+
+    try {
+      const dir = path.dirname(DAILY_STATS_FILE);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(DAILY_STATS_FILE, '{}', 'utf8');
+      assert(fs.existsSync(DAILY_STATS_FILE) === true, 'File should exist before reset');
+      resetDailyStats();
+      assert(fs.existsSync(DAILY_STATS_FILE) === false, 'File should be deleted after reset');
+    } finally {
+      if (backup !== null) fs.writeFileSync(DAILY_STATS_FILE, backup, 'utf8');
+    }
+  });
+
+  test('MONITOR: maybePersistDailyStats throttles at DAILY_STATS_PERSIST_INTERVAL', () => {
+    const origScanned = stats.scanned;
+    const origSinceLastPersist = require('../../src/monitor.js').scansSinceLastPersist;
+    let backup = null;
+    try { backup = fs.readFileSync(DAILY_STATS_FILE, 'utf8'); } catch {}
+
+    const monitor = require('../../src/monitor.js');
+
+    try {
+      try { fs.unlinkSync(DAILY_STATS_FILE); } catch {}
+      monitor.scansSinceLastPersist = 0;
+      stats.scanned = 7;
+
+      // Call 9 times — should NOT persist yet
+      for (let i = 0; i < DAILY_STATS_PERSIST_INTERVAL - 1; i++) {
+        maybePersistDailyStats();
+      }
+      assert(!fs.existsSync(DAILY_STATS_FILE), 'Should NOT persist before interval reached');
+
+      // 10th call — should persist
+      maybePersistDailyStats();
+      assert(fs.existsSync(DAILY_STATS_FILE), 'Should persist at interval');
+
+      const data = JSON.parse(fs.readFileSync(DAILY_STATS_FILE, 'utf8'));
+      assert(data.scanned === 7, 'Persisted scanned should be 7, got ' + data.scanned);
+    } finally {
+      stats.scanned = origScanned;
+      monitor.scansSinceLastPersist = 0;
+      if (backup !== null) {
+        fs.writeFileSync(DAILY_STATS_FILE, backup, 'utf8');
+      } else {
+        try { fs.unlinkSync(DAILY_STATS_FILE); } catch {}
+      }
+    }
+  });
+
+  await asyncTest('MONITOR: sendDailyReport resets daily stats file', async () => {
+    const origEnv = process.env.MUADDIB_WEBHOOK_URL;
+    const origLog = console.log;
+    const origErr = console.error;
+    console.log = () => {};
+    console.error = () => {};
+
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.example.com/test';
+
+    const origScanned = stats.scanned;
+    const origClean = stats.clean;
+    const origSuspect = stats.suspect;
+    const origErrors = stats.errors;
+    const origTotalTimeMs = stats.totalTimeMs;
+    const origLastDate = stats.lastDailyReportDate;
+
+    let backupStats = null;
+    try { backupStats = fs.readFileSync(DAILY_STATS_FILE, 'utf8'); } catch {}
+    let backupReport = null;
+    try { backupReport = fs.readFileSync(LAST_DAILY_REPORT_FILE, 'utf8'); } catch {}
+
+    stats.scanned = 5;
+    stats.clean = 3;
+    stats.suspect = 2;
+    stats.errors = 0;
+    stats.totalTimeMs = 10000;
+
+    // Write daily stats file
+    saveDailyStats();
+    assert(fs.existsSync(DAILY_STATS_FILE), 'daily-stats.json should exist before sendDailyReport');
+
+    try {
+      await sendDailyReport();
+      assert(!fs.existsSync(DAILY_STATS_FILE), 'daily-stats.json should be deleted after sendDailyReport');
+    } finally {
+      console.log = origLog;
+      console.error = origErr;
+      stats.scanned = origScanned;
+      stats.clean = origClean;
+      stats.suspect = origSuspect;
+      stats.errors = origErrors;
+      stats.totalTimeMs = origTotalTimeMs;
+      stats.lastDailyReportDate = origLastDate;
+      dailyAlerts.length = 0;
+      recentlyScanned.clear();
+      downloadsCache.clear();
+      if (backupStats !== null) {
+        fs.writeFileSync(DAILY_STATS_FILE, backupStats, 'utf8');
+      } else {
+        try { fs.unlinkSync(DAILY_STATS_FILE); } catch {}
+      }
+      if (backupReport !== null) {
+        fs.writeFileSync(LAST_DAILY_REPORT_FILE, backupReport, 'utf8');
+      }
       if (origEnv !== undefined) process.env.MUADDIB_WEBHOOK_URL = origEnv;
       else delete process.env.MUADDIB_WEBHOOK_URL;
     }
