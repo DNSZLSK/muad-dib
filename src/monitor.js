@@ -27,6 +27,11 @@ const POLL_INTERVAL = 60_000;
 const POLL_MAX_BACKOFF = 960_000; // 16 minutes max backoff
 const SCAN_TIMEOUT_MS = 180_000; // 3 minutes per package
 
+// --- Popularity pre-filter ---
+const POPULAR_THRESHOLD = 50_000; // Weekly downloads to classify as "popular"
+const DOWNLOADS_CACHE_TTL = 24 * 60 * 60 * 1000; // 24h
+const downloadsCache = new Map(); // key: packageName → { downloads, fetchedAt }
+
 // --- Stats counters ---
 
 const stats = {
@@ -131,6 +136,25 @@ const IOC_MATCH_TYPES = new Set([
 function hasIOCMatch(result) {
   if (!result || !result.threats) return false;
   return result.threats.some(t => IOC_MATCH_TYPES.has(t.type));
+}
+
+function hasTyposquat(result) {
+  if (!result || !result.threats) return false;
+  return result.threats.some(t => t.type === 'typosquat_detected' || t.type === 'pypi_typosquat_detected');
+}
+
+function formatFindings(result) {
+  if (!result || !result.threats || result.threats.length === 0) return '';
+  const seen = new Set();
+  const parts = [];
+  for (const t of result.threats) {
+    const key = `${t.type}(${t.severity})`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      parts.push(key);
+    }
+  }
+  return parts.join(', ');
 }
 
 // --- Strict webhook filtering helpers ---
@@ -734,6 +758,23 @@ function httpsGet(url, timeoutMs = 30_000) {
   });
 }
 
+async function getWeeklyDownloads(packageName) {
+  const cached = downloadsCache.get(packageName);
+  if (cached && (Date.now() - cached.fetchedAt) < DOWNLOADS_CACHE_TTL) {
+    return cached.downloads;
+  }
+  try {
+    const url = `https://api.npmjs.org/downloads/point/last-week/${encodeURIComponent(packageName)}`;
+    const body = await httpsGet(url, 3000);
+    const data = JSON.parse(body);
+    const downloads = typeof data.downloads === 'number' ? data.downloads : -1;
+    downloadsCache.set(packageName, { downloads, fetchedAt: Date.now() });
+    return downloads;
+  } catch {
+    return -1;
+  }
+}
+
 // --- Tarball URL helpers ---
 
 function getNpmTarballUrl(pkgData) {
@@ -973,8 +1014,23 @@ async function scanPackage(name, version, ecosystem, tarballUrl) {
         updateScanStats('clean');
         return { sandboxResult: null, staticClean: true };
       } else {
+        // Popularity pre-filter: skip sandbox for popular npm packages with only MEDIUM/LOW
+        if (ecosystem === 'npm' && !hasIOCMatch(result) && !hasTyposquat(result) && !hasHighOrCritical(result)) {
+          const downloads = await getWeeklyDownloads(name);
+          if (downloads >= POPULAR_THRESHOLD) {
+            stats.scanned++;
+            const elapsed = Date.now() - startTime;
+            stats.totalTimeMs += elapsed;
+            stats.clean++;
+            console.log(`[MONITOR] TRUSTED (popular): ${name}@${version} (${Math.round(downloads / 1000)}k downloads/week, ${counts.join(', ')})`);
+            updateScanStats('clean');
+            return { sandboxResult: null, staticClean: true };
+          }
+        }
+
         stats.suspect++;
         console.log(`[MONITOR] SUSPECT: ${name}@${version} (${counts.join(', ')})`);
+        console.log(`[MONITOR] FINDINGS: ${name}@${version} → ${formatFindings(result)}`);
 
         // Sandbox: run dynamic analysis on HIGH/CRITICAL findings
         let sandboxResult = null;
@@ -1221,6 +1277,7 @@ async function sendDailyReport() {
   stats.totalTimeMs = 0;
   dailyAlerts.length = 0;
   recentlyScanned.clear();
+  downloadsCache.clear();
   stats.lastDailyReportDate = getParisDateString();
 }
 
@@ -1920,7 +1977,13 @@ module.exports = {
   isVerboseMode,
   setVerboseMode,
   hasIOCMatch,
+  hasTyposquat,
+  formatFindings,
   IOC_MATCH_TYPES,
+  getWeeklyDownloads,
+  POPULAR_THRESHOLD,
+  downloadsCache,
+  DOWNLOADS_CACHE_TTL,
   DETECTIONS_FILE,
   appendDetection,
   loadDetections,
