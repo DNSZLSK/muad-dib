@@ -13,6 +13,12 @@ const ENCODING_TABLE_RE = /(?:encoding|tables|unicode|charmap|codepage)/i;
 // Minimum string length to analyze (short strings naturally have low entropy)
 const MIN_STRING_LENGTH = 50;
 
+// Maximum string length to analyze — strings >1000 chars are data blobs
+// (certificates, unicode tables, embedded binary), not malware payloads.
+// Real malware uses 50-500 char encoded payloads; making payloads longer
+// defeats the purpose of obfuscation.
+const MAX_STRING_LENGTH = 1000;
+
 // Thresholds (string-level only — file-level entropy removed, see design notes)
 const STRING_ENTROPY_MEDIUM = 5.5;
 const STRING_ENTROPY_HIGH = 6.5;
@@ -222,6 +228,7 @@ function scanEntropy(targetPath, options = {}) {
     const strings = extractStringLiterals(content);
     for (const str of strings) {
       if (str.length < MIN_STRING_LENGTH) continue;
+      if (str.length > MAX_STRING_LENGTH) continue;
 
       // Skip whitelisted patterns
       if (isWhitelistedString(str, relativePath)) continue;

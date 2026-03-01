@@ -115,11 +115,10 @@ async function runEntropyTests() {
 
   console.log('\n=== FALSE POSITIVE REDUCTION TESTS ===\n');
 
-  await asyncTest('FP-AST: Function("return this") is LOW not HIGH', async () => {
+  await asyncTest('FP-AST: Function("return this") is not flagged', async () => {
     const result = await runScanDirect(path.join(TESTS_DIR, 'ast-fp', 'constant-eval'));
     const fnThreats = result.threats.filter(t => t.type === 'dangerous_call_function');
-    assert(fnThreats.length > 0, 'Should detect Function(), got threats: ' + JSON.stringify(result.threats.map(t => t.type)));
-    assert(fnThreats[0].severity === 'LOW', 'Constant Function() should be LOW, got ' + fnThreats[0].severity);
+    assert(fnThreats.length === 0, 'Constant Function("return this") should NOT be flagged, got: ' + JSON.stringify(fnThreats));
   });
 
   await asyncTest('FP-AST: eval("literal") is LOW not HIGH', async () => {
@@ -141,6 +140,41 @@ async function runEntropyTests() {
     const fnThreats = result.threats.filter(t => t.type === 'dangerous_call_function');
     assert(fnThreats.length > 0, 'Should detect new Function(), got threats: ' + JSON.stringify(result.threats.map(t => t.type)));
     assert(fnThreats[0].severity === 'MEDIUM', 'Dynamic new Function() should be MEDIUM, got ' + fnThreats[0].severity);
+  });
+
+  // --- Long string exclusion (FPR P4) ---
+
+  test('FP-ENTROPY: Strings > 1000 chars are excluded (data blobs, not payloads)', () => {
+    const entropyDir = path.join(__dirname, '..', 'samples', 'entropy');
+    // Create a string > 1000 chars with high entropy
+    const longString = 'A'.repeat(500) + 'B'.repeat(300) + 'C'.repeat(201) + 'DEFGH';
+    // The scanner should skip strings > 1000 chars entirely
+    const { scanEntropy: scan } = require('../../src/scanner/entropy.js');
+    const fs = require('fs');
+    const os = require('os');
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-entropy-'));
+    fs.writeFileSync(path.join(tmpDir, 'package.json'), JSON.stringify({ name: 'test-pkg', version: '1.0.0' }));
+    const longB64 = Buffer.from(require('crypto').randomBytes(800)).toString('base64');
+    fs.writeFileSync(path.join(tmpDir, 'index.js'), `const blob = "${longB64}";`);
+    const threats = scan(tmpDir);
+    const longThreats = threats.filter(t => t.type === 'high_entropy_string');
+    assert(longThreats.length === 0, 'Strings > 1000 chars should be excluded, got ' + longThreats.length);
+    fs.rmSync(tmpDir, { recursive: true });
+  });
+
+  test('FP-ENTROPY: Strings 50-1000 chars still detected', () => {
+    const { scanEntropy: scan } = require('../../src/scanner/entropy.js');
+    const fs = require('fs');
+    const os = require('os');
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-entropy-'));
+    fs.writeFileSync(path.join(tmpDir, 'package.json'), JSON.stringify({ name: 'test-pkg', version: '1.0.0' }));
+    // 300 random bytes → ~400 chars of base64, well above MIN_STRING_LENGTH (50) and below MAX_STRING_LENGTH (1000)
+    const medB64 = Buffer.from(require('crypto').randomBytes(300)).toString('base64');
+    fs.writeFileSync(path.join(tmpDir, 'index.js'), `const payload = "${medB64}";`);
+    const threats = scan(tmpDir);
+    const entropyThreats = threats.filter(t => t.type === 'high_entropy_string');
+    assert(entropyThreats.length > 0, 'Strings 50-1000 chars with high entropy should still be detected, got ' + entropyThreats.length + ' (str len=' + medB64.length + ')');
+    fs.rmSync(tmpDir, { recursive: true });
   });
 
   await asyncTest('FP-OBF: hex escapes alone (unicode table) → no obfuscation alert', async () => {

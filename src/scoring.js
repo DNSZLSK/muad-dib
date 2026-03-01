@@ -33,7 +33,9 @@ const RISK_THRESHOLDS = {
 // Maximum score (capped)
 const MAX_RISK_SCORE = 100;
 
-// Cap MEDIUM prototype_hook contribution (frameworks like Restify have 50+ extensions)
+// Cap MEDIUM prototype_hook contribution — MEDIUM hooks are framework class extensions
+// (Request/Response/App/Router) which are not security risks. Capped at 15 points (5 × MEDIUM weight)
+// to limit noise while preserving some signal. CRITICAL and HIGH prototype_hook findings still score normally.
 const PROTO_HOOK_MEDIUM_CAP = 15;
 
 // ============================================

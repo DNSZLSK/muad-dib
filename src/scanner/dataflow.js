@@ -114,6 +114,10 @@ async function analyzeDataFlow(targetPath, options = {}) {
   });
 }
 
+/**
+ * Check if a VariableDeclarator init expression is a source-generating expression.
+ * Used to track which variables hold data from sensitive sources.
+ */
 function analyzeFile(content, filePath, basePath) {
   const threats = [];
   let ast;
@@ -208,6 +212,7 @@ function analyzeFile(content, filePath, basePath) {
           name: callName,
           line: node.loc?.start?.line
         });
+
       }
 
       if (callName === 'exec' || callName === 'execSync') {
@@ -219,6 +224,7 @@ function analyzeFile(content, filePath, basePath) {
               name: callName,
               line: node.loc?.start?.line
             });
+    
           }
         }
       }
@@ -268,18 +274,22 @@ function analyzeFile(content, filePath, basePath) {
           // DNS resolution as exfiltration sink
           if (obj.name === 'dns' && ['resolve', 'lookup', 'resolve4', 'resolve6', 'resolveTxt'].includes(prop.name)) {
             sinks.push({ type: 'network_send', name: `dns.${prop.name}`, line: node.loc?.start?.line });
+    
           }
           // HTTP/HTTPS request/get as network sink
           if ((obj.name === 'http' || obj.name === 'https') && ['request', 'get'].includes(prop.name)) {
             sinks.push({ type: 'network_send', name: `${obj.name}.${prop.name}`, line: node.loc?.start?.line });
+    
           }
           // net.connect / net.createConnection / tls.connect as network sink
           if ((obj.name === 'net' || obj.name === 'tls') && ['connect', 'createConnection'].includes(prop.name)) {
             sinks.push({ type: 'network_send', name: `${obj.name}.${prop.name}`, line: node.loc?.start?.line });
+    
           }
           // Instance socket.connect(port, host) when file imports net/tls
           if (hasRawSocketModule && prop.name === 'connect' && node.arguments.length >= 2) {
             sinks.push({ type: 'network_send', name: 'socket.connect', line: node.loc?.start?.line });
+    
           }
         }
       }
@@ -322,8 +332,9 @@ function analyzeFile(content, filePath, basePath) {
             // Check sink methods
             const sinkMethods = MODULE_SINK_METHODS[moduleName];
             if (sinkMethods && sinkMethods[methodName]) {
+              const sinkType = sinkMethods[methodName];
               sinks.push({
-                type: sinkMethods[methodName],
+                type: sinkType,
                 name: `${moduleName}.${methodName}`,
                 line: node.loc?.start?.line,
                 taint_tracked: true
@@ -341,8 +352,9 @@ function analyzeFile(content, filePath, basePath) {
           // Check sink methods for destructured calls
           const sinkMethods = MODULE_SINK_METHODS[moduleName];
           if (sinkMethods && sinkMethods[methodName]) {
+            const sinkType = sinkMethods[methodName];
             sinks.push({
-              type: sinkMethods[methodName],
+              type: sinkType,
               name: `${moduleName}.${methodName}`,
               line: node.loc?.start?.line,
               taint_tracked: true

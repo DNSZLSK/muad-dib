@@ -967,6 +967,67 @@ const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
       assert(t.severity === 'HIGH', 'webhook.site should be HIGH severity');
     } finally { cleanupTemp(tmp); }
   });
+  // --- FPR P4: Function() string literal skip ---
+
+  await asyncTest('FUNC-SKIP: Function("return this") produces no finding', async () => {
+    const tmp = makeTempPkg(`var root = Function('return this')();`);
+    try {
+      const result = await runScanDirect(tmp);
+      const fn = result.threats.filter(t => t.type === 'dangerous_call_function');
+      assert(fn.length === 0, 'Function("return this") should produce no finding');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('FUNC-SKIP: new Function("return 1") produces no finding', async () => {
+    const tmp = makeTempPkg(`var x = new Function('return 1')();`);
+    try {
+      const result = await runScanDirect(tmp);
+      const fn = result.threats.filter(t => t.type === 'dangerous_call_function');
+      assert(fn.length === 0, 'new Function("return 1") should produce no finding');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('FUNC-SKIP: Function(variable) still flagged MEDIUM', async () => {
+    const tmp = makeTempPkg(`var x = Function(code)();`);
+    try {
+      const result = await runScanDirect(tmp);
+      const fn = result.threats.find(t => t.type === 'dangerous_call_function');
+      assert(fn, 'Function(variable) should be flagged');
+      assert(fn.severity === 'MEDIUM', 'Function(variable) should be MEDIUM, got ' + fn.severity);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- FPR P4: dynamic_require source qualification ---
+
+  await asyncTest('DREQ-QUAL: require(staticVar) → LOW', async () => {
+    const tmp = makeTempPkg(`const mod = './utils';\nrequire(mod);`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'dynamic_require');
+      assert(t, 'Should detect require(variable)');
+      assert(t.severity === 'LOW', 'require(staticVar) should be LOW, got ' + t.severity);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('DREQ-QUAL: require(dynamicVar) → HIGH', async () => {
+    const tmp = makeTempPkg(`const mod = getModule();\nrequire(mod);`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'dynamic_require');
+      assert(t, 'Should detect require(variable)');
+      assert(t.severity === 'HIGH', 'require(dynamicVar) should be HIGH, got ' + t.severity);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('DREQ-QUAL: require(staticArrayVar) → LOW', async () => {
+    const tmp = makeTempPkg(`const plugins = ['./a', './b', './c'];\nrequire(plugins);`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'dynamic_require');
+      assert(t, 'Should detect require(variable)');
+      assert(t.severity === 'LOW', 'require(static array var) should be LOW, got ' + t.severity);
+    } finally { cleanupTemp(tmp); }
+  });
 }
 
 module.exports = { runAstTests };

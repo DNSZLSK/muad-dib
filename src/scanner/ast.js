@@ -64,6 +64,7 @@ function analyzeFile(content, filePath, basePath) {
     threats,
     relFile: path.relative(basePath, filePath),
     dynamicRequireVars: new Set(),
+    staticAssignments: new Set(),
     dangerousCmdVars: new Map(),
     workflowPathVars: new Set(),
     execPathVars: new Map(),
