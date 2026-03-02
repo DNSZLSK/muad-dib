@@ -892,6 +892,62 @@ const RULES = {
     mitre: 'T1499'
   },
 
+  // Sandbox preload detections (time-bomb and behavioral analysis)
+  sandbox_timer_delay_suspicious: {
+    id: 'MUADDIB-SANDBOX-009',
+    name: 'Sandbox: Suspicious Timer Delay',
+    severity: 'MEDIUM',
+    confidence: 'medium',
+    description: 'Package uses setTimeout/setInterval with delay > 1 hour. Possible time-bomb to evade sandbox analysis.',
+    references: ['https://attack.mitre.org/techniques/T1497/003/'],
+    mitre: 'T1497.003'
+  },
+  sandbox_timer_delay_critical: {
+    id: 'MUADDIB-SANDBOX-010',
+    name: 'Sandbox: Critical Timer Delay (Time-Bomb)',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Package uses setTimeout/setInterval with delay > 24 hours. Strong indicator of time-bomb malware designed to evade sandbox analysis.',
+    references: ['https://attack.mitre.org/techniques/T1497/003/'],
+    mitre: 'T1497.003'
+  },
+  sandbox_preload_sensitive_read: {
+    id: 'MUADDIB-SANDBOX-011',
+    name: 'Sandbox: Preload Sensitive File Read',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'Package reads sensitive credential files (.npmrc, .ssh, .aws, .env) detected via runtime monkey-patching.',
+    references: ['https://attack.mitre.org/techniques/T1552/001/'],
+    mitre: 'T1552.001'
+  },
+  sandbox_network_after_sensitive_read: {
+    id: 'MUADDIB-SANDBOX-012',
+    name: 'Sandbox: Network After Sensitive Read',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Package makes network requests after reading sensitive files. Strong indicator of credential exfiltration.',
+    references: ['https://attack.mitre.org/techniques/T1041/'],
+    mitre: 'T1041'
+  },
+  sandbox_exec_suspicious: {
+    id: 'MUADDIB-SANDBOX-013',
+    name: 'Sandbox: Suspicious Command Execution',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'Package executes dangerous commands (curl, wget, bash, sh, powershell) detected via runtime monkey-patching.',
+    references: ['https://attack.mitre.org/techniques/T1059/'],
+    mitre: 'T1059'
+  },
+  sandbox_env_token_access: {
+    id: 'MUADDIB-SANDBOX-014',
+    name: 'Sandbox: Sensitive Env Var Access',
+    severity: 'MEDIUM',
+    confidence: 'medium',
+    description: 'Package accesses sensitive environment variables (TOKEN, SECRET, KEY, PASSWORD) detected via runtime monkey-patching.',
+    references: ['https://attack.mitre.org/techniques/T1552/001/'],
+    mitre: 'T1552.001'
+  },
+
   // Entropy detections
   high_entropy_string: {
     id: 'MUADDIB-ENTROPY-001',

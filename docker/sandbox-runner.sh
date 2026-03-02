@@ -75,6 +75,11 @@ export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-MUADDIB_CANARY_wJalrXUtnF
 export SLACK_WEBHOOK_URL="${SLACK_WEBHOOK_URL:-https://hooks.slack.com/MUADDIB_CANARY_SLACK}"
 export DISCORD_WEBHOOK_URL="${DISCORD_WEBHOOK_URL:-https://discord.com/api/webhooks/MUADDIB_CANARY_DISCORD}"
 
+# ── 2d. Preload injection — monkey-patches time, timers, network, fs, process APIs ──
+# NODE_OPTIONS is injected by sandbox.js via Docker -e flag.
+# If not set externally, default to loading preload.js for behavioral logging.
+export NODE_OPTIONS="${NODE_OPTIONS:---require /opt/preload.js}"
+
 # ── 3. npm install with strace — as sandboxuser ──
 echo "[SANDBOX] Installing $PACKAGE as sandboxuser..." >&2
 cd /sandbox/install
@@ -248,10 +253,12 @@ touch /tmp/fs-created.txt /tmp/fs-deleted.txt /tmp/dns-queries.txt \
   /tmp/sensitive-read.txt /tmp/sensitive-written.txt \
   /tmp/connections.txt /tmp/suspicious-cmds.txt /tmp/install.log \
   /tmp/dns-resolutions.txt /tmp/http-requests.txt /tmp/http-bodies.txt \
-  /tmp/tls-connections.txt /tmp/blocked.txt /tmp/entrypoint.log
+  /tmp/tls-connections.txt /tmp/blocked.txt /tmp/entrypoint.log \
+  /tmp/preload.log
 
 INSTALL_OUTPUT=$(head -c 5000 /tmp/install.log)
 ENTRYPOINT_OUTPUT=$(head -c 5000 /tmp/entrypoint.log 2>/dev/null || echo "")
+PRELOAD_LOG=$(head -c 50000 /tmp/preload.log 2>/dev/null || echo "")
 
 FS_CREATED=$(jq -R -s 'split("\n") | map(select(length > 0))' < /tmp/fs-created.txt)
 FS_DELETED=$(jq -R -s 'split("\n") | map(select(length > 0))' < /tmp/fs-deleted.txt)
@@ -306,6 +313,7 @@ jq -n \
   --argjson blocked_connections "$BLOCKED" \
   --arg install_output "$INSTALL_OUTPUT" \
   --arg entrypoint_output "$ENTRYPOINT_OUTPUT" \
+  --arg preload_log "$PRELOAD_LOG" \
   --argjson exit_code "${EXIT_CODE:-1}" \
   '{
     package: $package,
@@ -335,5 +343,6 @@ jq -n \
     },
     install_output: $install_output,
     entrypoint_output: $entrypoint_output,
+    preload_log: $preload_log,
     exit_code: $exit_code
   }'

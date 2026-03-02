@@ -5,7 +5,7 @@ const { updateIOCs } = require('../src/ioc/updater.js');
 const { watch } = require('../src/watch.js');
 const { runScraper } = require('../src/ioc/scraper.js');
 const { safeInstall } = require('../src/safe-install.js');
-const { buildSandboxImage, runSandbox, generateNetworkReport } = require('../src/sandbox.js');
+const { buildSandboxImage, runSandbox, generateNetworkReport } = require('../src/sandbox/index.js');
 const { diff, showRefs } = require('../src/diff.js');
 const { initHooks, removeHooks } = require('../src/hooks-init.js');
 

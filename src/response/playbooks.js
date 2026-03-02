@@ -188,6 +188,32 @@ const PLAYBOOKS = {
   sandbox_timeout:
     'CRITIQUE: Le container sandbox a depasse le timeout. Possible boucle infinie ou consommation de ressources.',
 
+  sandbox_timer_delay_suspicious:
+    'Timer avec delai > 1h detecte. Possible time-bomb: le malware attend avant de s\'activer pour eviter les sandbox. ' +
+    'Verifier le code pour des setTimeout/setInterval avec des delais inhabituels.',
+
+  sandbox_timer_delay_critical:
+    'CRITIQUE: Timer avec delai > 24h detecte. Fort indicateur de time-bomb malware. ' +
+    'Le package retarde volontairement l\'execution du payload pour echapper a l\'analyse sandbox. ' +
+    'NE PAS installer. Analyser le code pour identifier le payload retarde.',
+
+  sandbox_preload_sensitive_read:
+    'Lecture de fichiers sensibles detectee via monkey-patching runtime (.npmrc, .ssh, .aws, .env). ' +
+    'Le package accede a des credentials pendant l\'installation. Regenerer les secrets exposes.',
+
+  sandbox_network_after_sensitive_read:
+    'CRITIQUE: Activite reseau detectee apres lecture de fichiers sensibles. ' +
+    'Fort indicateur d\'exfiltration de credentials. Isoler la machine, supprimer le package, ' +
+    'regenerer TOUS les secrets. Auditer les connexions reseau recentes.',
+
+  sandbox_exec_suspicious:
+    'Execution de commandes dangereuses detectee via monkey-patching runtime (curl, wget, bash, sh, powershell). ' +
+    'Verifier les commandes executees. Si le package n\'a pas de raison legitime d\'executer ces commandes, supprimer.',
+
+  sandbox_env_token_access:
+    'Acces a des variables d\'environnement sensibles detecte via monkey-patching runtime (TOKEN, SECRET, KEY, PASSWORD). ' +
+    'Verifier si le package a une raison legitime d\'acceder a ces variables. Revoquer les credentials si necessaire.',
+
   high_entropy_string:
     'Chaine a haute entropie detectee. Verifier si c\'est du base64, hex, ou un payload chiffre. Analyser le contexte d\'utilisation.',
   js_obfuscation_pattern:
