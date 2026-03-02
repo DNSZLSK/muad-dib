@@ -30,6 +30,8 @@ const { runWebhookTests } = require('./report/webhook.test');
 
 // Sandbox tests
 const { runSandboxTests } = require('./sandbox/sandbox.test');
+const { runPreloadTests } = require('./unit/preload.test');
+const { runSandboxPreloadTests } = require('./integration/sandbox-preload.test');
 
 // Integration tests (fast subset — CLI, monitor, diff)
 const { runCliTests } = require('./integration/cli.test');
@@ -83,6 +85,8 @@ async function timed(name, fn) {
   await timed('webhook', runWebhookTests);
   await timed('python', runPythonTests);
   await timed('sandbox', runSandboxTests);
+  await timed('preload', runPreloadTests);
+  await timed('sandbox-preload', runSandboxPreloadTests);
   await timed('entropy', runEntropyTests);
 
   // Monitor + diff

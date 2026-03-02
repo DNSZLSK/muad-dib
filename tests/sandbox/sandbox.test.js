@@ -18,7 +18,7 @@ async function runSandboxTests() {
     generateNetworkReport,
     EXFIL_PATTERNS,
     SAFE_DOMAINS
-  } = require('../../src/sandbox.js');
+  } = require('../../src/sandbox/index.js');
 
   test('SANDBOX-NET: scoreFindings handles empty report', () => {
     const { score, findings } = scoreFindings({});
@@ -420,7 +420,7 @@ async function runSandboxTests() {
   });
 
   // Test getSeverity, displayResults, imageExists (now exported)
-  const { getSeverity, displayResults, imageExists, isDockerAvailable, buildSandboxImage } = require('../../src/sandbox.js');
+  const { getSeverity, displayResults, imageExists, isDockerAvailable, buildSandboxImage } = require('../../src/sandbox/index.js');
 
   test('SANDBOX-COV: getSeverity returns CLEAN for 0', () => {
     assert(getSeverity(0) === 'CLEAN', 'Score 0 should be CLEAN');
@@ -505,7 +505,7 @@ async function runSandboxTests() {
     const origLog = console.log;
     console.log = () => {};
     try {
-      const { runSandbox } = require('../../src/sandbox.js');
+      const { runSandbox } = require('../../src/sandbox/index.js');
       const result = await runSandbox('$(evil-injection)', {});
       assert(result.score === 0, 'Invalid name should return score 0');
       assert(result.severity === 'CLEAN', 'Should be CLEAN');
@@ -602,7 +602,7 @@ async function runSandboxTests() {
   const {
     STATIC_CANARY_TOKENS,
     detectStaticCanaryExfiltration
-  } = require('../../src/sandbox.js');
+  } = require('../../src/sandbox/index.js');
 
   test('STATIC-CANARY: STATIC_CANARY_TOKENS has 6 entries with MUADDIB_CANARY values', () => {
     const keys = Object.keys(STATIC_CANARY_TOKENS);
@@ -732,7 +732,7 @@ async function runSandboxTests() {
   console.log('\n=== SANDBOX LOCAL MODE TESTS ===\n');
 
   await asyncTest('SANDBOX-LOCAL: runSandbox rejects non-existent local path', async () => {
-    const { runSandbox } = require('../../src/sandbox.js');
+    const { runSandbox } = require('../../src/sandbox/index.js');
     const origLog = console.log;
     const logs = [];
     console.log = (msg) => logs.push(msg);
@@ -747,7 +747,7 @@ async function runSandboxTests() {
   });
 
   await asyncTest('SANDBOX-LOCAL: runSandbox rejects path-like input without --local flag', async () => {
-    const { runSandbox } = require('../../src/sandbox.js');
+    const { runSandbox } = require('../../src/sandbox/index.js');
     const origLog = console.log;
     const logs = [];
     console.log = (msg) => logs.push(msg);
@@ -942,7 +942,7 @@ async function runSandboxTests() {
   });
 
   await asyncTest('SANDBOX-COV: runSandbox returns clean result when Docker unavailable', async () => {
-    const { runSandbox } = require('../../src/sandbox.js');
+    const { runSandbox } = require('../../src/sandbox/index.js');
     const { execSync: origExecSync } = require('child_process');
     const origLog = console.log;
     console.log = () => {};
