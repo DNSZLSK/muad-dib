@@ -147,6 +147,13 @@ function hasTyposquat(result) {
   return result.threats.some(t => t.type === 'typosquat_detected' || t.type === 'pypi_typosquat_detected');
 }
 
+function isSuspectClassification(result) {
+  if (!result || !result.threats || result.threats.length === 0) return false;
+  if (result.summary.critical > 0 || result.summary.high > 0) return true;
+  const distinctTypes = new Set(result.threats.map(t => t.type));
+  return distinctTypes.size >= 2;
+}
+
 function formatFindings(result) {
   if (!result || !result.threats || result.threats.length === 0) return '';
   const seen = new Set();
@@ -1092,6 +1099,16 @@ async function scanPackage(name, version, ecosystem, tarballUrl) {
             updateScanStats('clean');
             return { sandboxResult: null, staticClean: true };
           }
+        }
+
+        if (!isSuspectClassification(result)) {
+          stats.scanned++;
+          const elapsed = Date.now() - startTime;
+          stats.totalTimeMs += elapsed;
+          stats.clean++;
+          console.log(`[MONITOR] CLEAN (low-signal): ${name}@${version} (${counts.join(', ')})`);
+          updateScanStats('clean');
+          return { sandboxResult: null, staticClean: true };
         }
 
         stats.suspect++;
@@ -2060,6 +2077,7 @@ module.exports = {
   setVerboseMode,
   hasIOCMatch,
   hasTyposquat,
+  isSuspectClassification,
   formatFindings,
   IOC_MATCH_TYPES,
   getWeeklyDownloads,

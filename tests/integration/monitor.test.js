@@ -43,7 +43,7 @@ async function runMonitorTests() {
     DAILY_STATS_FILE, DAILY_STATS_PERSIST_INTERVAL,
     loadDailyStats, saveDailyStats, resetDailyStats, maybePersistDailyStats,
     isSafeLifecycleScript,
-    getWeeklyDownloads, hasTyposquat, formatFindings,
+    getWeeklyDownloads, hasTyposquat, isSuspectClassification, formatFindings,
     POPULAR_THRESHOLD, downloadsCache, DOWNLOADS_CACHE_TTL
   } = require('../../src/monitor.js');
 
@@ -4738,6 +4738,71 @@ async function runMonitorTests() {
       if (origEnv !== undefined) process.env.MUADDIB_WEBHOOK_URL = origEnv;
       else delete process.env.MUADDIB_WEBHOOK_URL;
     }
+  });
+  // ============================================
+  // isSuspectClassification TESTS
+  // ============================================
+
+  console.log('\n=== isSuspectClassification TESTS ===\n');
+
+  test('isSuspectClassification: 1 LOW finding → false (CLEAN)', () => {
+    const result = { threats: [{ type: 'dynamic_require', severity: 'LOW' }], summary: { critical: 0, high: 0, medium: 0, low: 1 } };
+    assert(isSuspectClassification(result) === false, 'Single LOW should be CLEAN');
+  });
+
+  test('isSuspectClassification: 1 MEDIUM finding → false (CLEAN)', () => {
+    const result = { threats: [{ type: 'obfuscation_detected', severity: 'MEDIUM' }], summary: { critical: 0, high: 0, medium: 1, low: 0 } };
+    assert(isSuspectClassification(result) === false, 'Single MEDIUM should be CLEAN');
+  });
+
+  test('isSuspectClassification: 1 HIGH finding → true (SUSPECT)', () => {
+    const result = { threats: [{ type: 'suspicious_dataflow', severity: 'HIGH' }], summary: { critical: 0, high: 1, medium: 0, low: 0 } };
+    assert(isSuspectClassification(result) === true, 'Single HIGH should be SUSPECT');
+  });
+
+  test('isSuspectClassification: 1 CRITICAL finding → true (SUSPECT)', () => {
+    const result = { threats: [{ type: 'known_malicious_package', severity: 'CRITICAL' }], summary: { critical: 1, high: 0, medium: 0, low: 0 } };
+    assert(isSuspectClassification(result) === true, 'Single CRITICAL should be SUSPECT');
+  });
+
+  test('isSuspectClassification: 2 findings same type MEDIUM → false (CLEAN)', () => {
+    const result = {
+      threats: [
+        { type: 'obfuscation_detected', severity: 'MEDIUM' },
+        { type: 'obfuscation_detected', severity: 'MEDIUM' }
+      ],
+      summary: { critical: 0, high: 0, medium: 2, low: 0 }
+    };
+    assert(isSuspectClassification(result) === false, '2 same-type MEDIUM should be CLEAN');
+  });
+
+  test('isSuspectClassification: 2 findings different types LOW → true (SUSPECT)', () => {
+    const result = {
+      threats: [
+        { type: 'dynamic_require', severity: 'LOW' },
+        { type: 'suspicious_dataflow', severity: 'LOW' }
+      ],
+      summary: { critical: 0, high: 0, medium: 0, low: 2 }
+    };
+    assert(isSuspectClassification(result) === true, '2 distinct LOW types should be SUSPECT');
+  });
+
+  test('isSuspectClassification: 3 findings, 2 distinct types → true (SUSPECT)', () => {
+    const result = {
+      threats: [
+        { type: 'obfuscation_detected', severity: 'MEDIUM' },
+        { type: 'obfuscation_detected', severity: 'MEDIUM' },
+        { type: 'dynamic_require', severity: 'LOW' }
+      ],
+      summary: { critical: 0, high: 0, medium: 2, low: 1 }
+    };
+    assert(isSuspectClassification(result) === true, '3 findings with 2 distinct types should be SUSPECT');
+  });
+
+  test('isSuspectClassification: null/empty → false', () => {
+    assert(isSuspectClassification(null) === false, 'null should be false');
+    assert(isSuspectClassification({}) === false, 'empty object should be false');
+    assert(isSuspectClassification({ threats: [] }) === false, 'empty threats should be false');
   });
 }
 
