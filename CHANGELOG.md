@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.4.9] - 2026-03-02
+
+### Added
+- **Sandbox monkey-patching preload system** — Runtime instrumentation injected via `NODE_OPTIONS=--require /opt/preload.js` in the Docker sandbox. Detects time-bomb malware (MITRE T1497.003) that uses `setTimeout(fn, 72*3600000)` to delay exfiltration past sandbox timeout.
+  - **Time manipulation**: `Date.now()`, `Date` constructor, `performance.now()`, `process.hrtime()`, `process.hrtime.bigint()`, `process.uptime()` all synchronized with configurable `MUADDIB_TIME_OFFSET_MS`
+  - **Timer acceleration**: `setTimeout` delay forced to 0, `setInterval` first execution immediate — delayed payloads execute instantly
+  - **Network interception**: `http.request`, `https.request`, `fetch`, `dns.resolve`, `dns.lookup`, `net.connect` logged with host/method/path
+  - **Filesystem interception**: `readFileSync`, `readFile`, `writeFileSync`, `writeFile` logged, sensitive paths (`.npmrc`, `.ssh`, `.aws`, `.env`) flagged
+  - **Process interception**: `child_process.exec/execSync/spawn/spawnSync/execFile/execFileSync` logged, dangerous commands (curl, wget, bash, sh, powershell) flagged
+  - **Environment interception**: `process.env` Proxy for sensitive key access logging (TOKEN, SECRET, KEY, PASSWORD patterns)
+  - All patches in IIFE with closure-scoped originals, try/catch guarded — never breaks target package
+- **Multi-run sandbox execution** — 3 sequential Docker runs at time offsets [0h, 72h, 7d] via `MUADDIB_TIME_OFFSET_MS`. Early exit on score >= 80 (CRITICAL found). Returns best (highest score) result with `all_runs` metadata array.
+- **Preload log analyzer** (`src/sandbox/analyzer.js`) — Parses `[PRELOAD]` log lines with 6 scoring rules
+- **6 new sandbox preload rules** (MUADDIB-SANDBOX-009 to 014, 113 total: 108 RULES + 5 PARANOID):
+  - `sandbox_timer_delay_suspicious` (MUADDIB-SANDBOX-009, MEDIUM, T1497.003): Timer delay > 1h
+  - `sandbox_timer_delay_critical` (MUADDIB-SANDBOX-010, CRITICAL, T1497.003): Timer delay > 24h (supersedes suspicious)
+  - `sandbox_preload_sensitive_read` (MUADDIB-SANDBOX-011, HIGH, T1552.001): Sensitive file read via preload
+  - `sandbox_network_after_sensitive_read` (MUADDIB-SANDBOX-012, CRITICAL, T1041): Network after sensitive read (compound)
+  - `sandbox_exec_suspicious` (MUADDIB-SANDBOX-013, HIGH, T1059): Dangerous command execution via preload
+  - `sandbox_env_token_access` (MUADDIB-SANDBOX-014, MEDIUM, T1552.001): Sensitive env var access via preload
+- **`.dockerignore`** — Limits Docker build context size
+
+### Changed
+- **Sandbox module migrated**: `src/sandbox.js` → `src/sandbox/index.js` (module directory structure)
+- **Sandbox refactored**: `runSandbox()` → `runSingleSandbox()` + multi-run orchestrator
+- **Docker infrastructure**: Dockerfile copies `preload.js` to `/opt/preload.js`, `sandbox-runner.sh` captures `/tmp/preload.log` and includes `preload_log` field in JSON report
+- Rule count: 107 → **113** (108 RULES + 5 PARANOID)
+- Test count: 1471 → **1522** (+51 tests, 0 failures)
+
 ## [2.4.7] - 2026-03-01
 
 ### Added
