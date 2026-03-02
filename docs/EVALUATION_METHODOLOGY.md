@@ -647,7 +647,66 @@ Measured on full 529-package benign dataset (525 scanned, 4 skipped).
 
 ---
 
-## 13. Current Metrics (v2.4.7)
+## 13. Dynamic Analysis: Multi-Run Sandbox with Preload Monkey-Patching (v2.4.9)
+
+### Problem
+
+Time-bomb malware uses `setTimeout(fn, 72*3600000)` or `Date.now()` checks to delay payload execution past sandbox timeouts. MITRE ATT&CK T1497.003 (Time Based Evasion Checks) has become a top-10 evasion technique in 2026 supply-chain attacks. The existing sandbox (strace + tcpdump, 120s timeout) cannot detect payloads that never execute during analysis.
+
+### Approach: Runtime Monkey-Patching + Multi-Run
+
+**Preload script** (`docker/preload.js`): A self-contained IIFE injected via `NODE_OPTIONS=--require /opt/preload.js` that patches all time-related and sensitive APIs at runtime:
+
+- **Time APIs**: `Date.now()`, `Date` constructor (no-arg), `performance.now()`, `process.hrtime()`, `process.hrtime.bigint()`, `process.uptime()` — all shifted by `MUADDIB_TIME_OFFSET_MS` environment variable
+- **Timer APIs**: `setTimeout` delay forced to 0 (immediate execution), `setInterval` first callback executed immediately
+- **Network APIs**: `http.request`, `https.request`, `fetch`, `dns.resolve`, `dns.lookup`, `net.connect` — logged with host/method/path
+- **Filesystem APIs**: `fs.readFileSync`, `fs.readFile`, `fs.writeFileSync`, `fs.writeFile` — logged, with sensitive path detection (`.npmrc`, `.ssh`, `.aws`, `.env`, `id_rsa`, `credentials`)
+- **Process APIs**: `child_process.exec/execSync/spawn/spawnSync/execFile/execFileSync` — logged, with dangerous command detection (curl, wget, bash, sh, powershell)
+- **Environment**: `process.env` wrapped in Proxy for sensitive key access logging (TOKEN, SECRET, KEY, PASSWORD patterns)
+
+All originals are saved in a closure scope inaccessible to the target package. Every patch is try/catch guarded to never break the analyzed package.
+
+**Multi-run orchestration** (`src/sandbox/index.js`): The `runSandbox()` function executes 3 sequential Docker runs with different time offsets:
+
+| Run | Time Offset | Purpose |
+|-----|-------------|---------|
+| 1/3 | 0ms (immediate) | Baseline — detect immediate threats |
+| 2/3 | 259200000ms (72h) | Trigger 3-day time-bombs |
+| 3/3 | 604800000ms (7d) | Trigger 1-week time-bombs |
+
+Each run uses `runSingleSandbox()` with a 60s timeout. Early exit on score >= 80 (CRITICAL found). The highest-scoring run result is returned with an `all_runs` metadata array.
+
+**Preload log analyzer** (`src/sandbox/analyzer.js`): Parses `[PRELOAD]`-prefixed log lines from `/tmp/preload.log` and produces scored findings:
+
+| Rule | Condition | Severity | Score |
+|------|-----------|----------|-------|
+| Timer delay suspicious | delay > 1h | MEDIUM | +15 |
+| Timer delay critical | delay > 24h (supersedes suspicious) | CRITICAL | +30 |
+| Sensitive file read | .npmrc/.ssh/.aws/.env path detected | HIGH | +20 |
+| Network after sensitive read | Network call after sensitive file read (compound) | CRITICAL | +40 |
+| Exec suspicious | curl/wget/bash/sh/powershell command | HIGH | +25 |
+| Env token access | TOKEN/SECRET/KEY/PASSWORD pattern | MEDIUM | +10 |
+
+### Safety Considerations
+
+- **Benign package impact**: Preload logging should not trigger on benign packages because scoring requires suspicious patterns (>1h timers, sensitive file reads, dangerous commands). Standard `npm install` does not produce these patterns.
+- **Timer acceleration risk**: Forcing all `setTimeout` delays to 0 could cause test suites or build scripts to behave differently. This is acceptable in the sandbox context where the goal is threat detection, not functional testing.
+- **Score combination**: Preload findings are combined with strace/tcpdump findings. The total is capped at 100.
+
+### 6 New Rules
+
+| ID | Type | Severity | MITRE |
+|----|------|----------|-------|
+| MUADDIB-SANDBOX-009 | `sandbox_timer_delay_suspicious` | MEDIUM | T1497.003 |
+| MUADDIB-SANDBOX-010 | `sandbox_timer_delay_critical` | CRITICAL | T1497.003 |
+| MUADDIB-SANDBOX-011 | `sandbox_preload_sensitive_read` | HIGH | T1552.001 |
+| MUADDIB-SANDBOX-012 | `sandbox_network_after_sensitive_read` | CRITICAL | T1041 |
+| MUADDIB-SANDBOX-013 | `sandbox_exec_suspicious` | HIGH | T1059 |
+| MUADDIB-SANDBOX-014 | `sandbox_env_token_access` | MEDIUM | T1552.001 |
+
+---
+
+## 14. Current Metrics (v2.4.9)
 
 | Metric | Result | Description |
 |--------|--------|-------------|
@@ -662,7 +721,7 @@ Measured on full 529-package benign dataset (525 scanned, 4 skipped).
 | **Holdout v5** (pre-tuning) | 50% (5/10) | 10 unseen samples testing inter-module dataflow |
 | **Vague 4** (pre-fix) | 0% (0/5) | 5 adversarial samples testing string concat evasion, compound patterns |
 
-v2.2.12: Ground truth expanded from 4 to 49 samples. v2.2.13: ADR 75/75 → 78/78. v2.2.22: scan freeze fix. v2.2.23: .npmignore excludes malware. v2.2.24: tests 862 → 1317, coverage 72% → 86%. v2.3.0: FPR ~13% → 8.9% (P2). v2.3.1: FPR 8.2% → 7.4% (P3), 8 new rules (102 total), tests 1317 → 1387, ADR 100% → 98.7% (1 documented miss). **v2.4.7**: Vague 4 (5 adversarial samples, 5 bypass corrections, 3 new rules), ADR 98.7% → 98.8% (82/83), 107 total rules (102 RULES + 5 PARANOID).
+v2.2.12: Ground truth expanded from 4 to 49 samples. v2.2.13: ADR 75/75 → 78/78. v2.2.22: scan freeze fix. v2.2.23: .npmignore excludes malware. v2.2.24: tests 862 → 1317, coverage 72% → 86%. v2.3.0: FPR ~13% → 8.9% (P2). v2.3.1: FPR 8.2% → 7.4% (P3), 8 new rules (102 total), tests 1317 → 1387, ADR 100% → 98.7% (1 documented miss). **v2.4.7**: Vague 4 (5 adversarial samples, 5 bypass corrections, 3 new rules), ADR 98.7% → 98.8% (82/83), 107 total rules (102 RULES + 5 PARANOID). **v2.4.9**: Sandbox preload monkey-patching (multi-run [0h, 72h, 7d], time-bomb detection), 6 new sandbox preload rules (SANDBOX-009 to 014), 113 total rules (108 RULES + 5 PARANOID), tests 1471 → 1522.
 
 **FPR progression**: 0% (invalid, v2.2.0–v2.2.6) → 38% (first real measurement, v2.2.7) → 19.4% (v2.2.8) → 17.5% (v2.2.9) → ~13% (v2.2.11, per-file max scoring) → 8.9% (v2.3.0, P2) → **7.4%** (v2.3.1, P3)
 
@@ -670,7 +729,7 @@ Run `muaddib evaluate` to reproduce these metrics locally. Results are saved to 
 
 ---
 
-## 14. Datadog 17K Benchmark
+## 15. Datadog 17K Benchmark
 
 ### Source
 

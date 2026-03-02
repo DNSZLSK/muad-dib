@@ -1582,6 +1582,77 @@ La detection par co-occurrence au niveau contenu (pas au niveau AST) est un file
 
 ---
 
+## v2.4.8–v2.4.9 — Filtre multi-signal & sandbox monkey-patching (2 Mars 2026)
+
+### Contexte
+
+Deux problemes distincts mais complementaires :
+
+1. **Bruit du moniteur** : le moniteur zero-day (v2.1) generait trop de suspects. 65% des alertes etaient des faux suspects — des packages qui declenchaient un seul signal faible (metadata suspecte OU lifecycle script OU score heuristique) sans convergence de signaux. Le tri manuel etait devenu intenable.
+
+2. **Time-bombs** : MITRE ATT&CK T1497.003 (Time Based Evasion Checks) est remonte dans le top 10 des techniques d'evasion en 2026. Les malwares supply-chain utilisent des `setTimeout(fn, 72*3600000)` pour retarder l'exfiltration de 72h apres l'installation — bien au-dela du timeout du sandbox Docker (120s). Le sandbox existant (strace + tcpdump) ne peut pas detecter un payload qui ne s'execute jamais pendant l'analyse.
+
+### v2.4.8 — Filtre multi-signal (65% suspects elimines)
+
+Classification multi-signal pour le moniteur : un package n'est considere comme suspect que si **au moins 2 signaux** convergent parmi metadata suspecte, lifecycle script suspect, score heuristique eleve, nom typosquat, et IOC partiel. Un seul signal = mise en observation, pas alerte.
+
+Resultat : reduction de 65% des faux suspects, permettant de se concentrer sur les vrais positifs.
+
+### v2.4.9 — Sandbox monkey-patching preload
+
+Le coeur de la mise a jour : un systeme de **monkey-patching runtime** injecte dans le container Docker via `NODE_OPTIONS=--require /opt/preload.js`.
+
+**L'idee** : si le malware attend 72h avant de voler les credentials, on lui fait croire que 72h se sont ecoulees. Toutes les APIs de temps sont patchees de maniere coherente :
+
+- `Date.now()` retourne le temps reel + offset
+- `new Date()` sans argument retourne la date decalee
+- `performance.now()`, `process.hrtime()`, `process.uptime()` — tous synchronises
+- `setTimeout(fn, 72h)` → `setTimeout(fn, 0)` — execution immediate
+- `setInterval(fn, delay)` → premiere execution immediate
+
+En parallele, toutes les APIs sensibles sont interceptees pour logging comportemental :
+- **Reseau** : http/https.request, fetch, dns.resolve, net.connect
+- **Fichiers** : readFileSync/writeFileSync avec detection de chemins sensibles (.npmrc, .ssh, .aws)
+- **Processus** : exec/spawn avec detection de commandes dangereuses (curl, wget, bash)
+- **Environnement** : Proxy sur process.env pour logger l'acces aux variables TOKEN/SECRET/KEY
+
+**Multi-run** : 3 executions sequentielles a des offsets de temps differents :
+1. Run 1 : temps reel (0h) — baseline
+2. Run 2 : +72h — declenche les time-bombs 3 jours
+3. Run 3 : +7 jours — declenche les time-bombs 1 semaine
+
+Sortie anticipee si le score depasse 80 (CRITICAL detecte). Le meilleur score des 3 runs est retenu.
+
+**Securite du preload** : tout est encapsule dans une IIFE. Les references aux fonctions originales sont sauvegardees dans une closure inaccessible au package cible. Chaque patch est protege par try/catch — le preload ne peut jamais casser le package analyse.
+
+**6 nouvelles regles de detection** (MUADDIB-SANDBOX-009 a 014) :
+
+| Regle | Severite | Score | Pattern |
+|-------|----------|-------|---------|
+| Timer delay > 1h | MEDIUM | +15 | `setTimeout` avec delai suspicieux |
+| Timer delay > 24h | CRITICAL | +30 | Time-bomb probable (supersede le > 1h) |
+| Lecture fichier sensible | HIGH | +20 | .npmrc, .ssh, .aws, .env via preload |
+| Reseau apres lecture sensible | CRITICAL | +40 | Compose : file read + network = exfiltration |
+| Execution commande dangereuse | HIGH | +25 | curl, wget, bash, powershell via preload |
+| Acces env sensible | MEDIUM | +10 | TOKEN, SECRET, KEY, PASSWORD |
+
+### Migration technique
+
+Le module sandbox a ete restructure : `src/sandbox.js` → `src/sandbox/index.js` (module directory). L'analyseur de logs preload est dans `src/sandbox/analyzer.js`. Le Dockerfile copie `preload.js` dans `/opt/preload.js`, et le `sandbox-runner.sh` capture `/tmp/preload.log` dans le rapport JSON.
+
+### Metriques finales v2.4.9
+
+| Metrique | Valeur |
+|----------|--------|
+| **TPR** | 91.8% (45/49) |
+| **FPR** | **7.4% (39/525)** — inchange |
+| **ADR** | **98.8% (82/83)** — inchange |
+| Regles | **113** (108 RULES + 5 PARANOID, +6 nouvelles) |
+| Tests | **1522** (+51), 0 failures |
+| Scanners | 14 |
+
+---
+
 ## Etat actuel
 
 ### Ce qui fonctionne
@@ -1594,7 +1665,7 @@ La detection par co-occurrence au niveau contenu (pas au niveau AST) est un file
 | Exports | JSON, HTML, SARIF |
 | Extension VS Code | Publiée sur Marketplace |
 | Webhooks | Discord / Slack (envoi uniquement si menaces détectées) |
-| Docker Sandbox (analyse dynamique) | Analyse comportementale isolée, CI-aware (6 env CI simulés), canary tokens enrichis (6 honeypots), strace, tcpdump, filesystem diff, DNS/HTTP/TLS capture, 16 patterns exfiltration, mode strict iptables |
+| Docker Sandbox (analyse dynamique) | Analyse comportementale isolée, CI-aware (6 env CI simulés), canary tokens enrichis (6 honeypots), strace, tcpdump, filesystem diff, DNS/HTTP/TLS capture, 16 patterns exfiltration, mode strict iptables, **monkey-patching preload** (time warp, timer acceleration, API interception), **multi-run** [0h, 72h, 7j] |
 | **Moniteur Zero-Day** | Polling RSS npm + PyPI (60s), scan automatique, alertes Discord temps réel, rapport quotidien, filtre bundled tooling |
 | GitHub Actions Backdoor | Détection discussion.yaml (Shai-Hulud 2.0) |
 | **Diff entre versions** | Compare et montre uniquement les NOUVELLES menaces |
@@ -1603,10 +1674,10 @@ La detection par co-occurrence au niveau contenu (pas au niveau AST) est un file
 | Version check | Notification automatique des nouvelles versions au demarrage |
 | **Detection comportementale (v2.0)** | Temporal lifecycle, AST diff, publish anomaly, maintainer change, canary tokens |
 | **Validation & Observabilite (v2.1)** | Ground truth (51 attaques, 91.8% TPR), detection time logging, FP rate tracking, score breakdown, threat feed API |
-| **Evaluation & Red Team (v2.2-v2.4)** | `muaddib evaluate`, 83 samples evasifs (43 adversariaux + 40 holdouts), TPR 91.8% (45/49), **FPR 7.4% (39/525)**, ADR **98.8% (82/83)** (1 miss documente), 14 scanners, 107 regles, AI config scanner, 529 packages benins npm, 132 PyPI, 65 malwares documentes |
+| **Evaluation & Red Team (v2.2-v2.4)** | `muaddib evaluate`, 83 samples evasifs (43 adversariaux + 40 holdouts), TPR 91.8% (45/49), **FPR 7.4% (39/525)**, ADR **98.8% (82/83)** (1 miss documente), 14 scanners, 113 regles, AI config scanner, 529 packages benins npm, 132 PyPI, 65 malwares documentes |
 | **Desobfuscation (v2.2.5)** | `src/scanner/deobfuscate.js`, 4 transformations AST + const propagation, approche additive (original + desobfusque), `--no-deobfuscate` flag |
 | **Dataflow inter-module (v2.2.6)** | `src/scanner/module-graph.js`, graphe de dependances, propagation de teinte inter-fichiers, 3-hop re-export, class methods, named exports, `--no-module-graph` flag |
-| Tests | **1471 tests unitaires** + 56 fuzz + 83 adversariaux/holdout, **86% coverage** (c8/Codecov) |
+| Tests | **1522 tests unitaires** + 56 fuzz + 83 adversariaux/holdout, **86% coverage** (c8/Codecov) |
 | **Hardening securite (v2.1.2)** | SSRF protection (shared/download.js), command injection prevention (execFileSync), path traversal (sanitizePackageName), JSON.parse protege, webhook strict |
 | Audit securite | 2 audits complets, **58 issues corrigees**, [rapport PDF](MUADDIB_Security_Audit_Report_v1.4.1.pdf) |
 
