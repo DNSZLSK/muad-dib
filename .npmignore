@@ -7,7 +7,7 @@ datasets/
 .muaddib-cache/
 coverage/
 metrics/
-data/
+/data/
 
 # Infrastructure (internal/VPS-only modules)
 docker/
@@ -21,7 +21,6 @@ src/monitor.js
 src/daemon.js
 src/threat-feed.js
 src/serve.js
-src/webhook.js
 src/commands/evaluate.js
 
 # Assets (logo only used in rendered markdown)
