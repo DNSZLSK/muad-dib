@@ -147,9 +147,16 @@ function hasTyposquat(result) {
   return result.threats.some(t => t.type === 'typosquat_detected' || t.type === 'pypi_typosquat_detected');
 }
 
+function hasLifecycleScript(result) {
+  if (!result || !result.threats) return false;
+  return result.threats.some(t => t.type === 'lifecycle_script');
+}
+
 function isSuspectClassification(result) {
   if (!result || !result.threats || result.threats.length === 0) return false;
   if (result.summary.critical > 0 || result.summary.high > 0) return true;
+  // lifecycle_script is the #1 npm attack vector — always suspect
+  if (hasLifecycleScript(result)) return true;
   const distinctTypes = new Set(result.threats.map(t => t.type));
   return distinctTypes.size >= 2;
 }
@@ -1115,12 +1122,13 @@ async function scanPackage(name, version, ecosystem, tarballUrl) {
         console.log(`[MONITOR] SUSPECT: ${name}@${version} (${counts.join(', ')})`);
         console.log(`[MONITOR] FINDINGS: ${name}@${version} → ${formatFindings(result)}`);
 
-        // Sandbox: run dynamic analysis on HIGH/CRITICAL findings
+        // Sandbox: run dynamic analysis on HIGH/CRITICAL findings or lifecycle_script
         let sandboxResult = null;
-        if (hasHighOrCritical(result) && isSandboxEnabled() && sandboxAvailable) {
+        if ((hasHighOrCritical(result) || hasLifecycleScript(result)) && isSandboxEnabled() && sandboxAvailable) {
           try {
             const canary = isCanaryEnabled();
-            console.log(`[MONITOR] SANDBOX: launching for ${name}@${version}${canary ? ' (canary: on)' : ''}...`);
+            const reason = hasLifecycleScript(result) && !hasHighOrCritical(result) ? ' (lifecycle_script detected)' : '';
+            console.log(`[MONITOR] SANDBOX${reason}: launching for ${name}@${version}${canary ? ' (canary: on)' : ''}...`);
             sandboxResult = await runSandbox(name, { canary });
             console.log(`[MONITOR] SANDBOX: ${name}@${version} → score: ${sandboxResult.score}, severity: ${sandboxResult.severity}`);
 
@@ -1579,7 +1587,7 @@ async function getNpmLatestTarball(packageName) {
 }
 
 async function pollNpm(state) {
-  const url = 'https://registry.npmjs.org/-/rss?descending=true&limit=50';
+  const url = 'https://registry.npmjs.org/-/rss?descending=true&limit=200';
 
   try {
     const body = await httpsGet(url);
