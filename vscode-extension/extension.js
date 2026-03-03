@@ -93,7 +93,21 @@ function runCLI(args, token, cwd) {
 // Immune to npx output contamination (download messages, warnings)
 // ---------------------------------------------------------------------------
 function extractJSON(text) {
-  const trimmed = (text || '').trimEnd();
+  // Strip BOM and invisible chars
+  let trimmed = (text || '').replace(/^\uFEFF/, '').trim();
+  if (!trimmed) return null;
+
+  // Strip trailing non-JSON content (e.g. npm warnings after the closing brace)
+  if (!trimmed.endsWith('}')) {
+    const lastBrace = trimmed.lastIndexOf('}');
+    if (lastBrace === -1) return null;
+    trimmed = trimmed.substring(0, lastBrace + 1);
+  }
+
+  // Fast path: stdout is pure JSON — parse directly
+  try { return JSON.parse(trimmed); } catch(e) { /* fall through to brace-counting */ }
+
+  // Fallback: brace-counting from the end
   if (!trimmed.endsWith('}')) return null;
   let depth = 0;
   for (let i = trimmed.length - 1; i >= 0; i--) {
