@@ -1,10 +1,12 @@
 const vscode = require('vscode');
 const { spawn } = require('child_process');
 const path = require('path');
+const crypto = require('crypto');
 
 let diagnosticCollection;
 let isScanning = false;   // P19: prevent concurrent scans
 let activeProcess = null; // P5: allow cancellation via kill
+let outputChannel;        // Debug output channel
 
 // ---------------------------------------------------------------------------
 // P16: Escape HTML to prevent XSS in webview
@@ -20,53 +22,90 @@ function escapeHtml(str) {
 }
 
 // ---------------------------------------------------------------------------
-// P10: Safe CLI execution with spawn + args array (no shell injection)
-// P5:  Cancellable via VS Code CancellationToken
+// P7: Generate cryptographic nonce for webview CSP
 // ---------------------------------------------------------------------------
-function runCLI(args, token) {
+function getNonce() {
+  return crypto.randomBytes(16).toString('hex');
+}
+
+// ---------------------------------------------------------------------------
+// P10: Safe CLI execution — shell: true with cwd-based target (".")
+// Avoids path-with-spaces issue on Windows (DEP0190). The scan target is
+// always "." and cwd is set to the actual project directory.
+// ---------------------------------------------------------------------------
+function runCLI(args, token, cwd) {
   return new Promise((resolve, reject) => {
-    const child = spawn('npx', ['muaddib-scanner', ...args], {
-      shell: true,       // needed on Windows for npx.cmd
-      windowsHide: true
+    const spawnArgs = ['--yes', 'muaddib-scanner', ...args];
+    const spawnCwd = cwd || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || undefined;
+
+    outputChannel.appendLine(`[CMD] npx ${spawnArgs.join(' ')}`);
+    outputChannel.appendLine(`[CWD] ${spawnCwd || '(default)'}`);
+
+    const child = spawn('npx', spawnArgs, {
+      shell: true,
+      windowsHide: true,
+      cwd: spawnCwd
     });
 
     activeProcess = child;
     let stdout = '';
     let stderr = '';
 
+    // P2: Kill after 120s to prevent infinite hang
+    const TIMEOUT_MS = 120_000;
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error('timeout'));
+    }, TIMEOUT_MS);
+
     child.stdout.on('data', (data) => { stdout += data.toString(); });
     child.stderr.on('data', (data) => { stderr += data.toString(); });
 
     if (token) {
       token.onCancellationRequested(() => {
+        clearTimeout(timer);
         child.kill();
         reject(new Error('cancelled'));
       });
     }
 
     child.on('close', (code) => {
+      clearTimeout(timer);
       activeProcess = null;
+      outputChannel.appendLine(`[EXIT] code=${code} stdout=${stdout.length}B stderr=${stderr.length}B`);
+      if (stderr) {
+        outputChannel.appendLine(`[STDERR] ${stderr.substring(0, 500)}`);
+      }
       resolve({ stdout, stderr, code });
     });
 
     child.on('error', (err) => {
+      clearTimeout(timer);
       activeProcess = null;
+      outputChannel.appendLine(`[ERROR] ${err.message}`);
       reject(err);
     });
   });
 }
 
 // ---------------------------------------------------------------------------
-// P7: Extract JSON from CLI output (may contain log lines before JSON)
+// P3: Extract JSON from CLI output — brace-counting from end
+// Immune to npx output contamination (download messages, warnings)
 // ---------------------------------------------------------------------------
-function extractJSON(stdout) {
-  const jsonMatch = stdout.match(/\{[\s\S]*\}$/);
-  if (!jsonMatch) return null;
-  try {
-    return JSON.parse(jsonMatch[0]);
-  } catch {
-    return null;
+function extractJSON(text) {
+  const trimmed = (text || '').trimEnd();
+  if (!trimmed.endsWith('}')) return null;
+  let depth = 0;
+  for (let i = trimmed.length - 1; i >= 0; i--) {
+    if (trimmed[i] === '}') depth++;
+    else if (trimmed[i] === '{') depth--;
+    if (depth === 0) {
+      try {
+        return JSON.parse(trimmed.substring(i));
+      } catch { return null; }
+    }
   }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -85,7 +124,9 @@ function isValidWebhookUrl(str) {
 // Activation
 // ---------------------------------------------------------------------------
 function activate(context) {
-  console.log('MUAD\'DIB Security Scanner active');
+  outputChannel = vscode.window.createOutputChannel('MUAD\'DIB');
+  context.subscriptions.push(outputChannel);
+  outputChannel.appendLine('MUAD\'DIB Security Scanner active');
 
   diagnosticCollection = vscode.languages.createDiagnosticCollection('muaddib');
   context.subscriptions.push(diagnosticCollection);
@@ -138,10 +179,11 @@ function activate(context) {
 
 // ---------------------------------------------------------------------------
 // P11 + P20: Build CLI args from user configuration
+// Target is always "." — actual path is passed via cwd to runCLI.
 // ---------------------------------------------------------------------------
-function buildScanArgs(targetPath) {
+function buildScanArgs() {
   const config = vscode.workspace.getConfiguration('muaddib');
-  const args = ['scan', targetPath, '--json'];
+  const args = ['scan', '.', '--json'];
 
   // P10: Validate webhook URL before passing
   const webhookUrl = config.get('webhookUrl');
@@ -194,12 +236,13 @@ async function scanProject() {
       title: 'MUAD\'DIB: Scan en cours...',
       cancellable: true // P5: allow cancellation
     }, async (_progress, token) => {
-      const args = buildScanArgs(projectPath);
-      const { stdout, stderr } = await runCLI(args, token);
+      const args = buildScanArgs();
+      const { stdout, stderr, code } = await runCLI(args, token, projectPath);
 
-      const result = extractJSON(stdout);
+      // P5: Try stdout first, fall back to stderr
+      const result = extractJSON(stdout) || extractJSON(stderr);
       if (!result) {
-        if (stdout.includes('Aucune menace') || stdout.includes('No threat')) {
+        if ((stdout + stderr).includes('Aucune menace') || (stdout + stderr).includes('No threat')) {
           vscode.window.showInformationMessage('MUAD\'DIB: Aucune menace detectee');
           diagnosticCollection.clear();
         } else if (stderr && stderr.includes('not found')) {
@@ -208,8 +251,9 @@ async function scanProject() {
             'MUAD\'DIB: CLI non trouve. Installez avec: npm install -g muaddib-scanner'
           );
         } else {
+          outputChannel.appendLine(`[DEBUG] extractJSON failed. stdout=${stdout.substring(0, 300)}`);
           vscode.window.showErrorMessage(
-            'MUAD\'DIB: Le scan n\'a retourne aucun resultat exploitable'
+            'MUAD\'DIB: Le scan n\'a retourne aucun resultat exploitable (voir Output > MUAD\'DIB)'
           );
         }
         return;
@@ -220,6 +264,8 @@ async function scanProject() {
   } catch (e) {
     if (e.message === 'cancelled') {
       vscode.window.showInformationMessage('MUAD\'DIB: Scan annule');
+    } else if (e.message === 'timeout') {
+      vscode.window.showErrorMessage('MUAD\'DIB: Scan interrompu (timeout 120s).');
     } else if (e.code === 'ENOENT') {
       // P12: npx not found
       vscode.window.showErrorMessage(
@@ -282,11 +328,11 @@ async function scanCurrentFile() {
       title: 'MUAD\'DIB: Scan du fichier...',
       cancellable: true
     }, async (_progress, token) => {
-      const args = buildScanArgs(dirPath);
-      const { stdout } = await runCLI(args, token);
+      const args = buildScanArgs();
+      const { stdout, stderr } = await runCLI(args, token, dirPath);
 
-      // P7: Use regex JSON extraction (same as scanProject)
-      const result = extractJSON(stdout);
+      // P5: Try stdout first, fall back to stderr
+      const result = extractJSON(stdout) || extractJSON(stderr);
       if (!result) {
         vscode.window.showInformationMessage('MUAD\'DIB: Aucune menace detectee');
         return;
@@ -311,6 +357,8 @@ async function scanCurrentFile() {
   } catch (e) {
     if (e.message === 'cancelled') {
       vscode.window.showInformationMessage('MUAD\'DIB: Scan annule');
+    } else if (e.message === 'timeout') {
+      vscode.window.showErrorMessage('MUAD\'DIB: Scan interrompu (timeout 120s).');
     } else if (e.code === 'ENOENT') {
       vscode.window.showErrorMessage(
         'MUAD\'DIB: npx introuvable. Verifiez que Node.js est installe et dans le PATH'
@@ -345,13 +393,19 @@ async function updateIOCs() {
       if (code === 0) {
         vscode.window.showInformationMessage('MUAD\'DIB: IOCs mis a jour avec succes');
       } else {
-        const detail = (stderr || stdout || '').trim().split('\n').pop() || 'Erreur inconnue';
-        vscode.window.showErrorMessage(`MUAD\'DIB: Echec de la mise a jour - ${detail}`);
+        // P4: Skip npm ERR!/warn boilerplate, find the actual error line
+        const lines = (stderr || stdout || '').trim().split('\n');
+        const errorLine = lines.reverse().find(l =>
+          l.includes('[ERROR]') || (l.trim() && !l.startsWith('npm ERR!') && !l.startsWith('npm warn') && !l.includes('Node.js v'))
+        ) || 'Erreur inconnue';
+        vscode.window.showErrorMessage(`MUAD\'DIB: Echec de la mise a jour - ${errorLine.trim()}`);
       }
     });
   } catch (e) {
     if (e.message === 'cancelled') {
       vscode.window.showInformationMessage('MUAD\'DIB: Mise a jour annulee');
+    } else if (e.message === 'timeout') {
+      vscode.window.showErrorMessage('MUAD\'DIB: Mise a jour interrompue (timeout 120s).');
     } else if (e.code === 'ENOENT') {
       vscode.window.showErrorMessage(
         'MUAD\'DIB: npx introuvable. Verifiez que Node.js est installe et dans le PATH'
@@ -434,6 +488,8 @@ function displayResults(result, projectPath) {
 // P14: Include LOW count in summary
 // ---------------------------------------------------------------------------
 function showDetailPanel(result, projectPath) {
+  const nonce = getNonce();
+
   const panel = vscode.window.createWebviewPanel(
     'muaddibResults',
     'MUAD\'DIB - Resultats',
@@ -458,6 +514,7 @@ function showDetailPanel(result, projectPath) {
     <!DOCTYPE html>
     <html>
     <head>
+      <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
       <style>
         body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; padding: 20px; background: #1e1e1e; color: #fff; }
         h1 { color: #e94560; }
@@ -497,7 +554,7 @@ function showDetailPanel(result, projectPath) {
           ${threatRows}
         </tbody>
       </table>
-      <script>
+      <script nonce="${nonce}">
         const vscode = acquireVsCodeApi();
         document.querySelectorAll('.file-link').forEach(link => {
           link.addEventListener('click', (e) => {
