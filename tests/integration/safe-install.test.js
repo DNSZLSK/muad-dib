@@ -251,17 +251,21 @@ async function runSafeInstallTests() {
   await asyncTest('SAFE-INSTALL: safeInstall with force flag on malicious package', async () => {
     const origLog = console.log;
     const origAppend = require('fs').appendFileSync;
+    const cp = require('child_process');
+    const origSpawnSync = cp.spawnSync;
     // Mock appendFileSync to avoid writing audit log
     require('fs').appendFileSync = () => {};
+    // Mock spawnSync to prevent real npm install (loadash exists on npm and would contaminate package.json)
+    cp.spawnSync = () => ({ status: 1, stdout: '', stderr: 'mocked' });
     console.log = () => {};
     try {
       const result = await safeInstall(['loadash'], { force: true });
       // Force flag allows installation to proceed past IOC check
-      // It will still fail at npm install (package doesn't exist or npm not found)
-      // but it exercises the force code path
+      // spawnSync is mocked so no real npm install runs
     } finally {
       console.log = origLog;
       require('fs').appendFileSync = origAppend;
+      cp.spawnSync = origSpawnSync;
     }
   });
 }
