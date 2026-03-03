@@ -8,7 +8,12 @@ const { analyzeDataFlow } = require('./scanner/dataflow.js');
 const { getPlaybook } = require('./response/playbooks.js');
 const { getRule, PARANOID_RULES } = require('./rules/index.js');
 const { scanTyposquatting, findPyPITyposquatMatch } = require('./scanner/typosquat.js');
-const { sendWebhook } = require('./webhook.js');
+let sendWebhook;
+try {
+  sendWebhook = require('./webhook.js').sendWebhook;
+} catch {
+  sendWebhook = async () => {}; // no-op quand webhook.js absent (npm package)
+}
 const fs = require('fs');
 const path = require('path');
 const { scanGitHubActions } = require('./scanner/github-actions.js');
