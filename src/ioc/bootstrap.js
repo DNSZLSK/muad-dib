@@ -165,7 +165,7 @@ async function ensureIOCs() {
     return true;
   } catch (err) {
     process.stderr.write('[WARN] Could not download IOC database: ' + err.message + '\n');
-    process.stderr.write('[WARN] Continuing with compact IOCs (limited PyPI coverage)\n');
+    process.stderr.write('[WARN] Continuing with YAML IOCs only (run "muaddib update" for full coverage)\n');
     return false;
   }
 }

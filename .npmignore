@@ -39,6 +39,7 @@ rapport.html
 results.sarif
 index.html
 src/ioc/data/iocs.json
+src/ioc/data/iocs-compact.json
 
 # Windows / temp artifacts
 nul
