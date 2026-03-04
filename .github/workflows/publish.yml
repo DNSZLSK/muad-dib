@@ -21,6 +21,10 @@ jobs:
         with:
           node-version: '20'
           registry-url: https://registry.npmjs.org
+      - name: Check files after checkout
+        run: |
+          grep -i loadash package.json || echo "clean after checkout"
+          grep -i loadash package-lock.json || echo "lockfile clean after checkout"
       - run: npm install -g npm@11.11.0
       - run: npm ci
       - run: npm test
