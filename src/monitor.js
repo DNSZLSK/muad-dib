@@ -39,6 +39,7 @@ const stats = {
   scanned: 0,
   clean: 0,
   suspect: 0,
+  suspectByTier: { t1: 0, t2: 0, t3: 0 },
   errors: 0,
   totalTimeMs: 0,
   lastReportTime: Date.now(),
@@ -152,13 +153,70 @@ function hasLifecycleScript(result) {
   return result.threats.some(t => t.type === 'lifecycle_script');
 }
 
+// --- Suspect tier constants ---
+
+// Tier 1: high-intent threat types that always warrant sandbox analysis
+const TIER1_TYPES = new Set([
+  'sandbox_evasion', 'env_charcode_reconstruction',
+  'staged_payload', 'staged_binary_payload'
+]);
+
+// Tier 2: active threat types that warrant sandbox when queue pressure is low
+const TIER2_ACTIVE_TYPES = new Set([
+  'suspicious_dataflow', 'dangerous_call_eval', 'dangerous_call_function',
+  'mcp_config_injection', 'ai_agent_abuse', 'crypto_miner'
+]);
+
+// Tier 3: passive/informational types — no sandbox, no stats.suspect increment
+const TIER3_PASSIVE_TYPES = new Set([
+  'sensitive_string', 'suspicious_domain', 'obfuscation_detected',
+  'prototype_hook', 'env_access', 'dynamic_import',
+  'dynamic_require', 'high_entropy_string'
+]);
+
+/**
+ * Classify a scan result into suspect tiers.
+ * @param {Object} result - scan result with threats and summary
+ * @returns {{ suspect: boolean, tier: 1|2|3|null }}
+ *   - tier 1: sandbox obligatoire (HIGH/CRITICAL, lifecycle, high-intent types)
+ *   - tier 2: sandbox si queue < 50 (2+ distinct types with active signal)
+ *   - tier 3: logged only, no sandbox, no stats.suspect (passive-only signals)
+ *   - { suspect: false, tier: null } for CLEAN packages
+ */
 function isSuspectClassification(result) {
-  if (!result || !result.threats || result.threats.length === 0) return false;
-  if (result.summary.critical > 0 || result.summary.high > 0) return true;
-  // lifecycle_script is the #1 npm attack vector — always suspect
-  if (hasLifecycleScript(result)) return true;
+  if (!result || !result.threats || result.threats.length === 0) {
+    return { suspect: false, tier: null };
+  }
+
+  // Tier 1: HIGH/CRITICAL severity, lifecycle scripts, or high-intent types
+  if (result.summary.critical > 0 || result.summary.high > 0) {
+    return { suspect: true, tier: 1 };
+  }
+  if (hasLifecycleScript(result)) {
+    return { suspect: true, tier: 1 };
+  }
+  if (result.threats.some(t => TIER1_TYPES.has(t.type))) {
+    return { suspect: true, tier: 1 };
+  }
+
   const distinctTypes = new Set(result.threats.map(t => t.type));
-  return distinctTypes.size >= 2;
+  if (distinctTypes.size < 2) {
+    return { suspect: false, tier: null };
+  }
+
+  // Tier 2: 2+ distinct types with at least one active type
+  if (result.threats.some(t => TIER2_ACTIVE_TYPES.has(t.type))) {
+    return { suspect: true, tier: 2 };
+  }
+
+  // Tier 3: 2+ distinct types but all passive
+  const allPassive = result.threats.every(t => TIER3_PASSIVE_TYPES.has(t.type));
+  if (allPassive) {
+    return { suspect: true, tier: 3 };
+  }
+
+  // 2+ distinct types with non-passive types not in tier 2 active list — tier 2
+  return { suspect: true, tier: 2 };
 }
 
 function formatFindings(result) {
@@ -969,6 +1027,11 @@ function loadDailyStats() {
       stats.scanned = data.scanned;
       stats.clean = data.clean || 0;
       stats.suspect = data.suspect || 0;
+      if (data.suspectByTier) {
+        stats.suspectByTier.t1 = data.suspectByTier.t1 || 0;
+        stats.suspectByTier.t2 = data.suspectByTier.t2 || 0;
+        stats.suspectByTier.t3 = data.suspectByTier.t3 || 0;
+      }
       stats.errors = data.errors || 0;
       stats.totalTimeMs = data.totalTimeMs || 0;
       if (Array.isArray(data.dailyAlerts)) {
@@ -990,6 +1053,7 @@ function saveDailyStats() {
       scanned: stats.scanned,
       clean: stats.clean,
       suspect: stats.suspect,
+      suspectByTier: { ...stats.suspectByTier },
       errors: stats.errors,
       totalTimeMs: stats.totalTimeMs,
       dailyAlerts: dailyAlerts.slice()
@@ -1108,7 +1172,8 @@ async function scanPackage(name, version, ecosystem, tarballUrl) {
           }
         }
 
-        if (!isSuspectClassification(result)) {
+        const classification = isSuspectClassification(result);
+        if (!classification.suspect) {
           stats.scanned++;
           const elapsed = Date.now() - startTime;
           stats.totalTimeMs += elapsed;
@@ -1118,16 +1183,38 @@ async function scanPackage(name, version, ecosystem, tarballUrl) {
           return { sandboxResult: null, staticClean: true };
         }
 
+        const tier = classification.tier;
+
+        // Tier 3: logged only, no stats.suspect increment, no sandbox
+        if (tier === 3) {
+          stats.scanned++;
+          const elapsed = Date.now() - startTime;
+          stats.totalTimeMs += elapsed;
+          stats.suspectByTier.t3++;
+          console.log(`[MONITOR] SUSPECT T3 (low-intent): ${name}@${version} (${counts.join(', ')})`);
+          console.log(`[MONITOR] FINDINGS: ${name}@${version} → ${formatFindings(result)}`);
+          updateScanStats('clean'); // T3 does not inflate suspect stats
+          return { sandboxResult: null, staticClean: true, tier: 3 };
+        }
+
+        // Tier 1 and Tier 2: count as suspect
         stats.suspect++;
-        console.log(`[MONITOR] SUSPECT: ${name}@${version} (${counts.join(', ')})`);
+        stats.suspectByTier[tier === 1 ? 't1' : 't2']++;
+        const tierLabel = tier === 1 ? 'T1' : 'T2';
+        console.log(`[MONITOR] SUSPECT ${tierLabel}: ${name}@${version} (${counts.join(', ')})`);
         console.log(`[MONITOR] FINDINGS: ${name}@${version} → ${formatFindings(result)}`);
 
-        // Sandbox: run dynamic analysis on HIGH/CRITICAL findings or lifecycle_script
+        // Sandbox decision based on tier
         let sandboxResult = null;
-        if ((hasHighOrCritical(result) || hasLifecycleScript(result)) && isSandboxEnabled() && sandboxAvailable) {
+        const shouldSandbox = isSandboxEnabled() && sandboxAvailable && (
+          tier === 1 ||
+          (tier === 2 && scanQueue.length < 50)
+        );
+
+        if (shouldSandbox) {
           try {
             const canary = isCanaryEnabled();
-            const reason = hasLifecycleScript(result) && !hasHighOrCritical(result) ? ' (lifecycle_script detected)' : '';
+            const reason = tier === 2 ? ' (T2, queue low)' : '';
             console.log(`[MONITOR] SANDBOX${reason}: launching for ${name}@${version}${canary ? ' (canary: on)' : ''}...`);
             sandboxResult = await runSandbox(name, { canary });
             console.log(`[MONITOR] SANDBOX: ${name}@${version} → score: ${sandboxResult.score}, severity: ${sandboxResult.severity}`);
@@ -1154,6 +1241,8 @@ async function scanPackage(name, version, ecosystem, tarballUrl) {
           } catch (err) {
             console.error(`[MONITOR] SANDBOX error for ${name}@${version}: ${err.message}`);
           }
+        } else if (tier === 2) {
+          console.log(`[MONITOR] SANDBOX SKIPPED (T2, queue ${scanQueue.length} >= 50): ${name}@${version}`);
         }
 
         stats.scanned++;
@@ -1166,6 +1255,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl) {
           name,
           version,
           ecosystem,
+          tier,
           findings: result.threats.map(t => ({
             rule: t.rule_id || t.type,
             severity: t.severity,
@@ -1189,9 +1279,9 @@ async function scanPackage(name, version, ecosystem, tarballUrl) {
           : result.summary.medium > 0 ? 'MEDIUM' : 'LOW';
         appendDetection(name, version, ecosystem, findingTypes, maxSeverity);
 
-        dailyAlerts.push({ name, version, ecosystem, findingsCount: result.summary.total });
+        dailyAlerts.push({ name, version, ecosystem, findingsCount: result.summary.total, tier });
         await trySendWebhook(name, version, ecosystem, result, sandboxResult);
-        return { sandboxResult, staticClean: false };
+        return { sandboxResult, staticClean: false, tier };
       }
     }
   } catch (err) {
@@ -1232,7 +1322,8 @@ async function processQueue() {
 
 function reportStats() {
   const avg = stats.scanned > 0 ? (stats.totalTimeMs / stats.scanned / 1000).toFixed(1) : '0.0';
-  console.log(`[MONITOR] Stats: ${stats.scanned} scanned, ${stats.clean} clean, ${stats.suspect} suspect, ${stats.errors} error${stats.errors !== 1 ? 's' : ''}, avg ${avg}s/pkg`);
+  const { t1, t2, t3 } = stats.suspectByTier;
+  console.log(`[MONITOR] Stats: ${stats.scanned} scanned, ${stats.clean} clean, ${stats.suspect} suspect (T1:${t1} T2:${t2} T3:${t3}), ${stats.errors} error${stats.errors !== 1 ? 's' : ''}, avg ${avg}s/pkg`);
   stats.lastReportTime = Date.now();
 }
 
@@ -1381,6 +1472,9 @@ async function sendDailyReport() {
   stats.scanned = 0;
   stats.clean = 0;
   stats.suspect = 0;
+  stats.suspectByTier.t1 = 0;
+  stats.suspectByTier.t2 = 0;
+  stats.suspectByTier.t3 = 0;
   stats.errors = 0;
   stats.totalTimeMs = 0;
   dailyAlerts.length = 0;
@@ -2086,6 +2180,9 @@ module.exports = {
   hasIOCMatch,
   hasTyposquat,
   isSuspectClassification,
+  TIER1_TYPES,
+  TIER2_ACTIVE_TYPES,
+  TIER3_PASSIVE_TYPES,
   formatFindings,
   IOC_MATCH_TYPES,
   getWeeklyDownloads,
