@@ -4,7 +4,6 @@ on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -21,27 +20,6 @@ jobs:
         with:
           node-version: '20'
           registry-url: https://registry.npmjs.org
-      - name: Check files after checkout
-        run: |
-          grep -i loadash package.json || echo "clean after checkout"
-          grep -i loadash package-lock.json || echo "lockfile clean after checkout"
-      - run: npm install -g npm@11.11.0
       - run: npm ci
       - run: npm test
-      - name: Debug loadash ghost
-        run: |
-          echo "=== npm why ==="
-          npm why loadash || echo "not found"
-          echo "=== npm ls ==="
-          npm ls loadash || echo "not found"
-          echo "=== package-lock.json ==="
-          grep -i loadash package-lock.json || echo "not in lockfile"
-          echo "=== tarball contents ==="
-          npm pack --dry-run 2>&1 | grep -i loadash || echo "not in tarball"
-          echo "=== node_modules ==="
-          ls node_modules | grep -i loa || echo "not in node_modules"
-          echo "=== all json files ==="
-          find . -path ./node_modules -prune -o -name "*.json" -print | xargs grep -l "loadash" 2>/dev/null || echo "not in any json"
-          echo "=== npm cache ==="
-          npm cache ls 2>/dev/null | grep -i loadash || echo "not in cache"
       - run: npm publish --provenance --access public
