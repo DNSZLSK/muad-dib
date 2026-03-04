@@ -27,8 +27,34 @@ const PRIVATE_IP_PATTERNS = [
 ];
 
 /**
+ * Normalize a hostname by unwrapping IPv6-mapped IPv4 addresses
+ * and converting decimal IP notation to dotted notation.
+ * @param {string} hostname - Raw hostname from URL
+ * @returns {string} Normalized hostname for SSRF validation
+ */
+function normalizeHostname(hostname) {
+  hostname = hostname.toLowerCase();
+  // Unwrap IPv6-mapped IPv4: ::ffff:192.168.1.1 → 192.168.1.1
+  if (hostname.startsWith('::ffff:')) {
+    const ipv4Part = hostname.slice(7);
+    if (/^(\d{1,3}\.){3}\d{1,3}$/.test(ipv4Part)) {
+      return ipv4Part;
+    }
+  }
+  // Convert decimal IP notation: 2130706433 → 127.0.0.1
+  if (/^\d+$/.test(hostname)) {
+    const num = parseInt(hostname, 10);
+    if (num > 0 && num < 4294967296) {
+      return [(num >>> 24) & 255, (num >>> 16) & 255, (num >>> 8) & 255, num & 255].join('.');
+    }
+  }
+  return hostname;
+}
+
+/**
  * Validates that a redirect URL is allowed (SSRF protection).
  * Only HTTPS to whitelisted domains is permitted.
+ * Normalizes IPv6-mapped IPv4 and decimal IP notation before validation.
  * @param {string} redirectUrl - The redirect target URL
  * @returns {{allowed: boolean, error?: string}}
  */
@@ -38,10 +64,11 @@ function isAllowedDownloadRedirect(redirectUrl) {
     if (urlObj.protocol !== 'https:') {
       return { allowed: false, error: `Redirect blocked: non-HTTPS protocol ${urlObj.protocol}` };
     }
-    const hostname = urlObj.hostname.toLowerCase();
-    // Block private IP addresses
-    if (PRIVATE_IP_PATTERNS.some(p => p.test(hostname))) {
-      return { allowed: false, error: `Redirect blocked: private IP ${hostname}` };
+    const rawHostname = urlObj.hostname.toLowerCase();
+    const hostname = normalizeHostname(rawHostname);
+    // Block private IP addresses (check both raw and normalized)
+    if (PRIVATE_IP_PATTERNS.some(p => p.test(hostname) || p.test(rawHostname))) {
+      return { allowed: false, error: `Redirect blocked: private IP ${rawHostname}` };
     }
     const domainAllowed = ALLOWED_DOWNLOAD_DOMAINS.some(domain =>
       hostname === domain || hostname.endsWith('.' + domain)
@@ -176,6 +203,7 @@ module.exports = {
   extractTarGz,
   sanitizePackageName,
   isAllowedDownloadRedirect,
+  normalizeHostname,
   ALLOWED_DOWNLOAD_DOMAINS,
   PRIVATE_IP_PATTERNS
 };

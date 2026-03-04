@@ -339,15 +339,20 @@ function foldConcatsOnly(sourceCode) {
 /**
  * Recursively fold string concat BinaryExpression.
  * Returns the concatenated string, or null if any part is not a string literal.
+ * Depth limit prevents stack overflow DoS on deeply nested expressions.
  */
-function tryFoldConcat(node) {
+const MAX_FOLD_DEPTH = 100;
+
+function tryFoldConcat(node, depth) {
+  if (depth === undefined) depth = 0;
+  if (depth > MAX_FOLD_DEPTH) return null;
   if (node.type === 'Literal' && typeof node.value === 'string') {
     return node.value;
   }
   if (node.type === 'BinaryExpression' && node.operator === '+') {
-    const left = tryFoldConcat(node.left);
+    const left = tryFoldConcat(node.left, depth + 1);
     if (left === null) return null;
-    const right = tryFoldConcat(node.right);
+    const right = tryFoldConcat(node.right, depth + 1);
     if (right === null) return null;
     return left + right;
   }

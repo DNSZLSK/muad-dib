@@ -32,6 +32,10 @@ const { SEVERITY_WEIGHTS, RISK_THRESHOLDS, MAX_RISK_SCORE, isPackageLevelThreat,
 
 const { MAX_FILE_SIZE } = require('./shared/constants.js');
 
+// Timeout constants for scan safety
+const SCANNER_TIMEOUT = 15000;  // 15s per individual scanner
+const SCAN_TIMEOUT = 60000;     // 60s global scan timeout
+
 // Paranoid mode scanner
 function scanParanoid(targetPath) {
   const threats = [];
@@ -222,27 +226,38 @@ async function run(targetPath, options = {}) {
   // Sequential execution of scanners with event loop yields between each.
   // All scanners (even "async" ones) are effectively synchronous (readFileSync, readdirSync).
   // Running them via yieldThen ensures the spinner animates between each scanner.
-  let scanResult;
-  try {
-    scanResult = await Promise.all([
-      yieldThen(() => scanPackageJson(targetPath)),
-      yieldThen(() => scanShellScripts(targetPath)),
-      yieldThen(() => analyzeAST(targetPath, { deobfuscate: deobfuscateFn })),
-      yieldThen(() => detectObfuscation(targetPath)),
-      yieldThen(() => scanDependencies(targetPath)),
-      yieldThen(() => scanHashes(targetPath)),
-      yieldThen(() => analyzeDataFlow(targetPath, { deobfuscate: deobfuscateFn })),
-      yieldThen(() => scanTyposquatting(targetPath)),
-      yieldThen(() => scanGitHubActions(targetPath)),
-      yieldThen(() => matchPythonIOCs(pythonDeps, targetPath)),
-      yieldThen(() => checkPyPITyposquatting(pythonDeps, targetPath)),
-      yieldThen(() => scanEntropy(targetPath, { entropyThreshold: options.entropyThreshold || undefined })),
-      yieldThen(() => scanAIConfig(targetPath))
-    ]);
-  } catch (err) {
-    if (spinner) spinner.fail(`[MUADDIB] Scan failed: ${err.message}`);
-    throw err;
-  }
+  // Uses Promise.allSettled so one scanner crash doesn't kill the entire scan.
+  const SCANNER_NAMES = [
+    'scanPackageJson', 'scanShellScripts', 'analyzeAST', 'detectObfuscation',
+    'scanDependencies', 'scanHashes', 'analyzeDataFlow', 'scanTyposquatting',
+    'scanGitHubActions', 'matchPythonIOCs', 'checkPyPITyposquatting',
+    'scanEntropy', 'scanAIConfig'
+  ];
+
+  const settledResults = await Promise.allSettled([
+    yieldThen(() => scanPackageJson(targetPath)),
+    yieldThen(() => scanShellScripts(targetPath)),
+    yieldThen(() => analyzeAST(targetPath, { deobfuscate: deobfuscateFn })),
+    yieldThen(() => detectObfuscation(targetPath)),
+    yieldThen(() => scanDependencies(targetPath)),
+    yieldThen(() => scanHashes(targetPath)),
+    yieldThen(() => analyzeDataFlow(targetPath, { deobfuscate: deobfuscateFn })),
+    yieldThen(() => scanTyposquatting(targetPath)),
+    yieldThen(() => scanGitHubActions(targetPath)),
+    yieldThen(() => matchPythonIOCs(pythonDeps, targetPath)),
+    yieldThen(() => checkPyPITyposquatting(pythonDeps, targetPath)),
+    yieldThen(() => scanEntropy(targetPath, { entropyThreshold: options.entropyThreshold || undefined })),
+    yieldThen(() => scanAIConfig(targetPath))
+  ]);
+
+  // Extract results: use empty array for rejected scanners, log errors
+  const scannerErrors = [];
+  const scanResult = settledResults.map((r, i) => {
+    if (r.status === 'fulfilled') return r.value;
+    scannerErrors.push({ scanner: SCANNER_NAMES[i], error: r.reason });
+    console.error(`[WARN] Scanner ${SCANNER_NAMES[i]} failed: ${r.reason?.message || r.reason}`);
+    return [];
+  });
 
   const [
     packageThreats,
@@ -420,7 +435,8 @@ async function run(targetPath, options = {}) {
       fileScores,
       breakdown
     },
-    sandbox: sandboxData
+    sandbox: sandboxData,
+    scannerErrors: scannerErrors.length > 0 ? scannerErrors : undefined
   };
 
   // _capture mode: return result directly without printing (used by diff.js)

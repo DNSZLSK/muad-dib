@@ -44,6 +44,7 @@ const { runDaemonWatchTests } = require('./integration/daemon-watch.test');
 const { runReportTests } = require('./integration/report.test');
 const { runHooksInitTests } = require('./integration/hooks-init.test');
 const { runSarifTests } = require('./integration/sarif.test');
+const { runAuditFixTests } = require('./integration/audit-fixes.test');
 
 // Temporal analysis tests
 const { runTemporalAnalysisTests } = require('./temporal/temporal-analysis.test');
@@ -120,6 +121,9 @@ async function timed(name, fn) {
   await timed('report', runReportTests);
   await timed('hooks-init', runHooksInitTests);
   await timed('sarif', runSarifTests);
+
+  // Audit fix tests
+  await timed('audit-fixes', runAuditFixTests);
 
   // Utility tests
   await timed('utils', runUtilsTests);
