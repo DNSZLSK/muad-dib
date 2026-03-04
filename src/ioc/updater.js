@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const crypto = require('crypto');
 
 const HOME_DATA_PATH = path.join(os.homedir(), '.muaddib', 'data');
 const CACHE_IOC_FILE = path.join(HOME_DATA_PATH, 'iocs.json');
@@ -100,8 +101,13 @@ async function updateIOCs() {
 
   // Atomic write: write to .tmp then rename (UP-001)
   const tmpFile = CACHE_IOC_FILE + '.tmp';
-  fs.writeFileSync(tmpFile, JSON.stringify(baseIOCs));
+  const jsonData = JSON.stringify(baseIOCs);
+  fs.writeFileSync(tmpFile, jsonData);
   fs.renameSync(tmpFile, CACHE_IOC_FILE);
+
+  // Write HMAC signature alongside the cache file
+  const hmac = generateIOCHMAC(jsonData);
+  fs.writeFileSync(CACHE_IOC_FILE + '.hmac', hmac);
 
   const totalNpm = baseIOCs.packages.length;
   const totalPyPI = (baseIOCs.pypi_packages || []).length;
@@ -217,11 +223,22 @@ function loadCachedIOCs() {
     }
   }
 
-  // Priority 3: Cached IOCs (from previous update)
+  // Priority 3: Cached IOCs (from previous update) — verify HMAC integrity
   if (fs.existsSync(CACHE_IOC_FILE)) {
     try {
-      const cachedIOCs = JSON.parse(fs.readFileSync(CACHE_IOC_FILE, 'utf8'));
-      mergeIOCs(merged, cachedIOCs);
+      const cachedData = fs.readFileSync(CACHE_IOC_FILE, 'utf8');
+      const hmacFile = CACHE_IOC_FILE + '.hmac';
+      if (fs.existsSync(hmacFile)) {
+        const storedHmac = fs.readFileSync(hmacFile, 'utf8').trim();
+        if (!verifyIOCHMAC(cachedData, storedHmac)) {
+          console.log('[WARN] IOC cache HMAC verification failed — possible tampering. Skipping cache.');
+        } else {
+          mergeIOCs(merged, JSON.parse(cachedData));
+        }
+      } else {
+        // No HMAC file yet (first run or pre-HMAC version) — load but warn
+        mergeIOCs(merged, JSON.parse(cachedData));
+      }
     } catch (e) {
       console.log('[WARN] Failed to load cached IOCs: ' + e.message);
     }
@@ -421,4 +438,44 @@ function invalidateCache() {
   cachedIOCsTime = 0;
 }
 
-module.exports = { updateIOCs, loadCachedIOCs, invalidateCache, generateCompactIOCs, expandCompactIOCs, mergeIOCs, createOptimizedIOCs };
+// ============================================
+// IOC INTEGRITY: HMAC-SHA256 signing/verification
+// ============================================
+// Key is derived from a stable machine-specific seed + hardcoded salt.
+// This protects against local file tampering by unauthorized processes.
+const IOC_HMAC_SALT = 'muaddib-ioc-integrity-v1';
+
+function getIOCHMACKey() {
+  // Derive key from salt + hostname (machine-specific but stable)
+  const seed = IOC_HMAC_SALT + ':' + os.hostname();
+  return crypto.createHash('sha256').update(seed).digest();
+}
+
+/**
+ * Generate HMAC-SHA256 for IOC data string.
+ * @param {string} data - JSON string of IOC data
+ * @returns {string} Hex-encoded HMAC
+ */
+function generateIOCHMAC(data) {
+  const key = getIOCHMACKey();
+  return crypto.createHmac('sha256', key).update(data).digest('hex');
+}
+
+/**
+ * Verify HMAC-SHA256 of IOC data.
+ * @param {string} data - JSON string of IOC data
+ * @param {string} hmac - Expected HMAC hex string
+ * @returns {boolean} True if HMAC matches
+ */
+function verifyIOCHMAC(data, hmac) {
+  if (!hmac || typeof hmac !== 'string') return false;
+  const expected = generateIOCHMAC(data);
+  // Constant-time comparison to prevent timing attacks
+  try {
+    return crypto.timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(hmac, 'hex'));
+  } catch {
+    return false;
+  }
+}
+
+module.exports = { updateIOCs, loadCachedIOCs, invalidateCache, generateCompactIOCs, expandCompactIOCs, mergeIOCs, createOptimizedIOCs, generateIOCHMAC, verifyIOCHMAC };

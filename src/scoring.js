@@ -180,12 +180,19 @@ function applyFPReductions(threats, reachableFiles, packageName) {
     typeCounts[t.type] = (typeCounts[t.type] || 0) + 1;
   }
 
+  const totalThreats = threats.length;
+
   for (const t of threats) {
     // Count-based downgrade: if a threat type appears too many times,
-    // it's a framework/plugin system, not malware
+    // it's a framework/plugin system, not malware.
+    // Percentage guard: only downgrade if the type is < 50% of total threats.
+    // When a type dominates findings (> 50%), it may be real malware, not framework noise.
     const rule = FP_COUNT_THRESHOLDS[t.type];
     if (rule && typeCounts[t.type] > rule.maxCount && (!rule.from || t.severity === rule.from)) {
-      t.severity = rule.to;
+      const typeRatio = typeCounts[t.type] / totalThreats;
+      if (typeRatio < 0.5) {
+        t.severity = rule.to;
+      }
     }
 
     // require_cache_poison: single hit → HIGH (plugin dedup/hot-reload, not malware)

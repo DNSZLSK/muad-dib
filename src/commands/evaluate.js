@@ -476,6 +476,22 @@ async function evaluate(options = {}) {
   return report;
 }
 
+/**
+ * Classify whether a detection was made via IOC lookup or heuristic analysis.
+ * IOC-based: known malicious packages, PyPI IOCs, Shai-Hulud markers
+ * Heuristic-based: AST patterns, dataflow, obfuscation, typosquat, etc.
+ * @param {Object} threat - Threat object with type field
+ * @returns {'ioc'|'heuristic'} Detection source classification
+ */
+const IOC_TYPES = new Set([
+  'known_malicious_package', 'pypi_malicious_package', 'shai_hulud_marker', 'ioc_match'
+]);
+
+function classifyDetectionSource(threat) {
+  if (!threat || !threat.type) return 'heuristic';
+  return IOC_TYPES.has(threat.type) ? 'ioc' : 'heuristic';
+}
+
 module.exports = {
   evaluate,
   evaluateGroundTruth,
@@ -483,6 +499,7 @@ module.exports = {
   evaluateAdversarial,
   saveMetrics,
   silentScan,
+  classifyDetectionSource,
   ADVERSARIAL_THRESHOLDS,
   HOLDOUT_THRESHOLDS,
   GT_THRESHOLD,
