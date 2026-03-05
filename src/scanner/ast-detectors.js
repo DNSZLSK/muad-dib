@@ -30,7 +30,7 @@ const SAFE_ENV_VARS = [
 ];
 
 // Env var prefixes that are safe (npm metadata, locale settings)
-const SAFE_ENV_PREFIXES = ['npm_config_', 'npm_lifecycle_', 'npm_package_', 'lc_'];
+const SAFE_ENV_PREFIXES = ['npm_config_', 'npm_lifecycle_', 'npm_package_', 'lc_', 'muaddib_'];
 
 // Env var keywords to detect sensitive environment access (separate from SENSITIVE_STRINGS)
 const ENV_SENSITIVE_KEYWORDS = [

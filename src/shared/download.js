@@ -83,6 +83,38 @@ function isAllowedDownloadRedirect(redirectUrl) {
 }
 
 /**
+ * Check if an IP address is private/internal.
+ */
+function isPrivateIP(ip) {
+  const normalized = normalizeHostname(ip);
+  return PRIVATE_IP_PATTERNS.some(p => p.test(normalized));
+}
+
+/**
+ * Resolve hostname to IP and validate it's not a private address.
+ * Prevents DNS rebinding attacks where a domain initially resolves to
+ * a public IP but later rebinds to a private IP.
+ */
+async function safeDnsResolve(hostname) {
+  // Skip for IP addresses (already validated in isAllowedDownloadRedirect)
+  if (/^(\d{1,3}\.){3}\d{1,3}$/.test(hostname)) {
+    if (isPrivateIP(hostname)) throw new Error(`DNS rebinding blocked: ${hostname} is private`);
+    return hostname;
+  }
+  const dns = require('dns');
+  const addresses = await dns.promises.resolve4(hostname);
+  if (!addresses || addresses.length === 0) {
+    throw new Error(`DNS resolution failed for ${hostname}`);
+  }
+  for (const addr of addresses) {
+    if (isPrivateIP(addr)) {
+      throw new Error(`DNS rebinding blocked: ${hostname} resolved to private IP ${addr}`);
+    }
+  }
+  return addresses[0];
+}
+
+/**
  * Download a file from HTTPS URL to disk, with SSRF-safe redirect handling.
  * @param {string} url - Source URL (must be HTTPS)
  * @param {string} destPath - Local file path to write to
@@ -90,60 +122,64 @@ function isAllowedDownloadRedirect(redirectUrl) {
  * @returns {Promise<number>} Number of bytes downloaded
  */
 function downloadToFile(url, destPath, timeoutMs = DOWNLOAD_TIMEOUT) {
-  return new Promise((resolve, reject) => {
-    const doRequest = (requestUrl) => {
-      const req = https.get(requestUrl, { timeout: timeoutMs }, (res) => {
-        if (res.statusCode === 301 || res.statusCode === 302) {
-          res.resume();
-          const location = res.headers.location;
-          if (!location) return reject(new Error(`Redirect without Location for ${requestUrl}`));
-          // Resolve relative redirects against the request URL
-          const absoluteLocation = new URL(location, requestUrl).href;
-          const check = isAllowedDownloadRedirect(absoluteLocation);
-          if (!check.allowed) {
-            return reject(new Error(check.error));
+  // DNS rebinding protection: validate hostname before connecting
+  const parsedUrl = new URL(url);
+  return safeDnsResolve(parsedUrl.hostname).then(() => {
+    return new Promise((resolve, reject) => {
+      const doRequest = (requestUrl) => {
+        const req = https.get(requestUrl, { timeout: timeoutMs }, (res) => {
+          if (res.statusCode === 301 || res.statusCode === 302) {
+            res.resume();
+            const location = res.headers.location;
+            if (!location) return reject(new Error(`Redirect without Location for ${requestUrl}`));
+            // Resolve relative redirects against the request URL
+            const absoluteLocation = new URL(location, requestUrl).href;
+            const check = isAllowedDownloadRedirect(absoluteLocation);
+            if (!check.allowed) {
+              return reject(new Error(check.error));
+            }
+            return doRequest(absoluteLocation);
           }
-          return doRequest(absoluteLocation);
-        }
-        if (res.statusCode < 200 || res.statusCode >= 300) {
-          res.resume();
-          return reject(new Error(`HTTP ${res.statusCode} for ${requestUrl}`));
-        }
-        const contentLength = parseInt(res.headers['content-length'], 10);
-        if (contentLength && contentLength > MAX_TARBALL_SIZE) {
-          res.resume();
-          return reject(new Error(`Package too large: ${contentLength} bytes (max ${MAX_TARBALL_SIZE})`));
-        }
-        const fileStream = fs.createWriteStream(destPath);
-        let downloadedBytes = 0;
-        res.on('data', (chunk) => {
-          downloadedBytes += chunk.length;
-          if (downloadedBytes > MAX_TARBALL_SIZE) {
-            res.destroy();
+          if (res.statusCode < 200 || res.statusCode >= 300) {
+            res.resume();
+            return reject(new Error(`HTTP ${res.statusCode} for ${requestUrl}`));
+          }
+          const contentLength = parseInt(res.headers['content-length'], 10);
+          if (contentLength && contentLength > MAX_TARBALL_SIZE) {
+            res.resume();
+            return reject(new Error(`Package too large: ${contentLength} bytes (max ${MAX_TARBALL_SIZE})`));
+          }
+          const fileStream = fs.createWriteStream(destPath);
+          let downloadedBytes = 0;
+          res.on('data', (chunk) => {
+            downloadedBytes += chunk.length;
+            if (downloadedBytes > MAX_TARBALL_SIZE) {
+              res.destroy();
+              fileStream.destroy();
+              try { fs.unlinkSync(destPath); } catch {}
+              reject(new Error(`Package too large: ${downloadedBytes}+ bytes (max ${MAX_TARBALL_SIZE})`));
+            }
+          });
+          res.pipe(fileStream);
+          fileStream.on('finish', () => resolve(downloadedBytes));
+          fileStream.on('error', (err) => {
+            try { fs.unlinkSync(destPath); } catch {}
+            reject(err);
+          });
+          res.on('error', (err) => {
             fileStream.destroy();
             try { fs.unlinkSync(destPath); } catch {}
-            reject(new Error(`Package too large: ${downloadedBytes}+ bytes (max ${MAX_TARBALL_SIZE})`));
-          }
+            reject(err);
+          });
         });
-        res.pipe(fileStream);
-        fileStream.on('finish', () => resolve(downloadedBytes));
-        fileStream.on('error', (err) => {
-          try { fs.unlinkSync(destPath); } catch {}
-          reject(err);
+        req.on('error', reject);
+        req.on('timeout', () => {
+          req.destroy();
+          reject(new Error(`Timeout downloading ${requestUrl}`));
         });
-        res.on('error', (err) => {
-          fileStream.destroy();
-          try { fs.unlinkSync(destPath); } catch {}
-          reject(err);
-        });
-      });
-      req.on('error', reject);
-      req.on('timeout', () => {
-        req.destroy();
-        reject(new Error(`Timeout downloading ${requestUrl}`));
-      });
-    };
-    doRequest(url);
+      };
+      doRequest(url);
+    });
   });
 }
 
@@ -204,6 +240,8 @@ module.exports = {
   sanitizePackageName,
   isAllowedDownloadRedirect,
   normalizeHostname,
+  isPrivateIP,
+  safeDnsResolve,
   ALLOWED_DOWNLOAD_DOMAINS,
   PRIVATE_IP_PATTERNS
 };

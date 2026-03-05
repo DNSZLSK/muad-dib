@@ -22,6 +22,24 @@ const TWENTY_FOUR_HOURS_MS = 24 * ONE_HOUR_MS;
  * @param {string} logContent - Raw preload log content
  * @returns {{ score: number, findings: Array<{type: string, severity: string, detail: string, evidence: string}> }}
  */
+/**
+ * Validate that a log line has the expected [PRELOAD] CATEGORY: format.
+ * Rejects lines that don't match the expected structure to prevent
+ * log injection attacks where malware injects fake preload log lines.
+ */
+const VALID_CATEGORIES = new Set([
+  'INIT', 'TIME', 'TIMER', 'NETWORK', 'FS_READ', 'FS_WRITE',
+  'EXEC', 'ENV_ACCESS', 'NATIVE_ADDON', 'WORKER'
+]);
+
+function isValidPreloadLine(line) {
+  if (!line || !line.includes('[PRELOAD]')) return false;
+  // Must match format: [PRELOAD] CATEGORY: ... (t+NNNms)
+  const match = line.match(/^\[PRELOAD\]\s+(\w+):/);
+  if (!match) return false;
+  return VALID_CATEGORIES.has(match[1]);
+}
+
 function analyzePreloadLog(logContent) {
   const findings = [];
   let score = 0;
@@ -30,7 +48,7 @@ function analyzePreloadLog(logContent) {
     return { score: 0, findings: [] };
   }
 
-  const lines = logContent.split('\n').filter(l => l.includes('[PRELOAD]'));
+  const lines = logContent.split('\n').filter(l => isValidPreloadLine(l));
 
   // Categorize lines
   const timerLines = [];
@@ -201,4 +219,4 @@ function analyzePreloadLog(logContent) {
   };
 }
 
-module.exports = { analyzePreloadLog };
+module.exports = { analyzePreloadLog, isValidPreloadLine };

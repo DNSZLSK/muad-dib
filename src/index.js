@@ -27,7 +27,7 @@ const { buildModuleGraph, annotateTaintedExports, detectCrossFileFlows } = requi
 const { computeReachableFiles } = require('./scanner/reachability.js');
 const { runTemporalAnalyses } = require('./temporal-runner.js');
 const { formatOutput } = require('./output-formatter.js');
-const { setExtraExcludes, getExtraExcludes, Spinner, listInstalledPackages, clearFileListCache } = require('./utils.js');
+const { setExtraExcludes, getExtraExcludes, Spinner, listInstalledPackages, clearFileListCache, debugLog } = require('./utils.js');
 const { SEVERITY_WEIGHTS, RISK_THRESHOLDS, MAX_RISK_SCORE, isPackageLevelThreat, computeGroupScore, applyFPReductions, calculateRiskScore } = require('./scoring.js');
 
 const { MAX_FILE_SIZE } = require('./shared/constants.js');
@@ -218,8 +218,9 @@ async function run(targetPath, options = {}) {
       const graph = await yieldThen(() => buildModuleGraph(targetPath));
       const tainted = await yieldThen(() => annotateTaintedExports(graph, targetPath));
       crossFileFlows = await yieldThen(() => detectCrossFileFlows(graph, tainted, targetPath));
-    } catch {
+    } catch (e) {
       // Graceful fallback — module graph is best-effort
+      debugLog('[MODULE-GRAPH] Error:', e && e.message);
     }
   }
 

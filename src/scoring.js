@@ -283,13 +283,25 @@ function calculateRiskScore(deduped) {
   // 4. Compute package-level score (typosquat, lifecycle, dependency IOC, etc.)
   const packageScore = computeGroupScore(packageLevelThreats);
 
-  // 5. Final score = max file score + package-level score, capped at 100
-  const riskScore = Math.min(MAX_RISK_SCORE, maxFileScore + packageScore);
+  // 5. Cross-file bonus: aggregate signal from non-max files
+  // A package with 3 files each scoring 20 is more suspicious than 1 file scoring 20.
+  // Add 25% of each non-max file's score as a bonus, capped at 25.
+  const sortedScores = Object.values(fileScores).sort((a, b) => b - a);
+  let crossFileBonus = 0;
+  if (sortedScores.length > 1) {
+    for (let i = 1; i < sortedScores.length; i++) {
+      crossFileBonus += Math.ceil(sortedScores[i] * 0.25);
+    }
+    crossFileBonus = Math.min(crossFileBonus, 25);
+  }
 
-  // 6. Old global score for comparison (sum of ALL findings)
+  // 6. Final score = max file score + cross-file bonus + package-level score, capped at 100
+  const riskScore = Math.min(MAX_RISK_SCORE, maxFileScore + crossFileBonus + packageScore);
+
+  // 7. Old global score for comparison (sum of ALL findings)
   const globalRiskScore = computeGroupScore(deduped);
 
-  // 7. Severity counts (global, for summary display)
+  // 8. Severity counts (global, for summary display)
   const criticalCount = deduped.filter(t => t.severity === 'CRITICAL').length;
   const highCount = deduped.filter(t => t.severity === 'HIGH').length;
   const mediumCount = deduped.filter(t => t.severity === 'MEDIUM').length;
@@ -303,7 +315,7 @@ function calculateRiskScore(deduped) {
 
   return {
     riskScore, riskLevel, globalRiskScore,
-    maxFileScore, packageScore, mostSuspiciousFile, fileScores,
+    maxFileScore, crossFileBonus, packageScore, mostSuspiciousFile, fileScores,
     criticalCount, highCount, mediumCount, lowCount
   };
 }

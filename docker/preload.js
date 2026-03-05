@@ -76,7 +76,10 @@
   function log(category, msg) {
     try {
       const ts = _DateNow.call(Date) - realStart;
-      _appendFileSync.call(_fs, LOG_FILE, `[PRELOAD] ${category}: ${msg} (t+${ts}ms)\n`);
+      // Sanitize msg to prevent log injection (attacker injecting \n[PRELOAD] EXEC: DANGEROUS)
+      const safeMsg = String(msg).replace(/\r/g, '\\r').replace(/\n/g, '\\n').substring(0, 1000);
+      const safeCat = String(category).replace(/[\r\n]/g, '');
+      _appendFileSync.call(_fs, LOG_FILE, `[PRELOAD] ${safeCat}: ${safeMsg} (t+${ts}ms)\n`);
     } catch (e) {
       // Silent — never break the target
     }
@@ -503,7 +506,34 @@
   } catch (e) { /* ignore */ }
 
   // ═══════════════════════════════════════════════════════
-  // 12. STARTUP LOG
+  // 12. WORKER THREADS INTERCEPTION
+  // ═══════════════════════════════════════════════════════
+
+  // Workers spawned via new Worker() don't inherit NODE_OPTIONS preload.
+  // Intercept the Worker constructor to inject preload and time offset.
+  try {
+    const wt = require('worker_threads');
+    if (wt && wt.Worker) {
+      const _OrigWorker = wt.Worker;
+      wt.Worker = function (filename, options) {
+        options = options || {};
+        // Propagate time offset to worker
+        options.env = Object.assign({}, process.env, options.env || {}, {
+          MUADDIB_TIME_OFFSET_MS: String(TIME_OFFSET)
+        });
+        // Inject preload script into worker
+        if (!options.execArgv) options.execArgv = [];
+        options.execArgv = options.execArgv.concat(['--require', '/opt/preload.js']);
+        log('WORKER', `Worker spawned: ${String(filename).substring(0, 200)}`);
+        return new _OrigWorker(filename, options);
+      };
+      // Preserve prototype chain
+      wt.Worker.prototype = _OrigWorker.prototype;
+    }
+  } catch (e) { /* worker_threads not available or not writable */ }
+
+  // ═══════════════════════════════════════════════════════
+  // 13. STARTUP LOG
   // ═══════════════════════════════════════════════════════
 
   log('INIT', `Preload active. TIME_OFFSET=${TIME_OFFSET}ms (${(TIME_OFFSET / 3600000).toFixed(1)}h). PID=${process.pid}`);

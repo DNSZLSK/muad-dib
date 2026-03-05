@@ -23,6 +23,7 @@ const DETECTIONS_FILE = path.join(__dirname, '..', 'data', 'detections.json');
 const SCAN_STATS_FILE = path.join(__dirname, '..', 'data', 'scan-stats.json');
 const LAST_DAILY_REPORT_FILE = path.join(__dirname, '..', 'data', 'last-daily-report.json');
 const DAILY_STATS_FILE = path.join(__dirname, '..', 'data', 'daily-stats.json');
+const TEMPORAL_DETECTIONS_FILE = path.join(__dirname, '..', 'data', 'temporal-detections.json');
 
 /**
  * Atomic file write: write to .tmp then rename (crash-safe).
@@ -37,6 +38,46 @@ function atomicWriteFileSync(filePath, data) {
   fs.writeFileSync(tmpFile, data, 'utf8');
   fs.renameSync(tmpFile, filePath);
 }
+
+/**
+ * Append a temporal detection to the temporal detections file.
+ * @param {string} name - Package name
+ * @param {string} version - Package version
+ * @param {Array} findings - Temporal findings array
+ */
+function appendTemporalDetection(name, version, findings) {
+  let detections = [];
+  try {
+    if (fs.existsSync(TEMPORAL_DETECTIONS_FILE)) {
+      detections = JSON.parse(fs.readFileSync(TEMPORAL_DETECTIONS_FILE, 'utf8'));
+    }
+  } catch { /* corrupted file — start fresh */ }
+  detections.push({
+    name,
+    version,
+    findings,
+    timestamp: new Date().toISOString()
+  });
+  // Keep last 1000 entries
+  if (detections.length > 1000) {
+    detections = detections.slice(-1000);
+  }
+  atomicWriteFileSync(TEMPORAL_DETECTIONS_FILE, JSON.stringify(detections, null, 2));
+}
+
+/**
+ * Load temporal detections from file.
+ * @returns {Array} Array of temporal detection entries
+ */
+function loadTemporalDetections() {
+  try {
+    if (fs.existsSync(TEMPORAL_DETECTIONS_FILE)) {
+      return JSON.parse(fs.readFileSync(TEMPORAL_DETECTIONS_FILE, 'utf8'));
+    }
+  } catch { /* ignore */ }
+  return [];
+}
+
 const DAILY_STATS_PERSIST_INTERVAL = 10; // Persist to disk every N scans
 const POLL_INTERVAL = 60_000;
 const POLL_MAX_BACKOFF = 960_000; // 16 minutes max backoff
@@ -2091,13 +2132,23 @@ async function resolveTarballAndScan(item) {
     }
   }
 
-  // Log temporal anomalies (NEVER send webhooks — logged to journalctl only)
+  // Temporal anomaly handling: persist findings and send webhooks for CRITICAL/HIGH
   const hasSuspiciousTemporal = (temporalResult && temporalResult.suspicious)
     || (astResult && astResult.suspicious)
     || (publishResult && publishResult.suspicious)
     || (maintainerResult && maintainerResult.suspicious);
 
   if (hasSuspiciousTemporal) {
+    // Collect all temporal findings for persistence
+    const temporalFindings = [];
+    if (temporalResult && temporalResult.suspicious) temporalFindings.push({ type: 'lifecycle', data: temporalResult });
+    if (astResult && astResult.suspicious) temporalFindings.push({ type: 'ast_diff', data: astResult });
+    if (publishResult && publishResult.suspicious) temporalFindings.push({ type: 'publish', data: publishResult });
+    if (maintainerResult && maintainerResult.suspicious) temporalFindings.push({ type: 'maintainer', data: maintainerResult });
+
+    // Always persist temporal detections
+    appendTemporalDetection(item.name, item.version, temporalFindings);
+
     if (sandboxResult && sandboxResult.score === 0) {
       console.log(`[MONITOR] FALSE POSITIVE (sandbox clean, no alert): ${item.name}@${item.version}`);
     } else if (staticClean && !sandboxResult) {
@@ -2109,13 +2160,17 @@ async function resolveTarballAndScan(item) {
         stats.suspect++;
         stats.clean--;
         updateScanStats('suspect');
+        // Send webhook for CRITICAL/HIGH temporal findings that aren't sandbox-clean
+        if (temporalResult && temporalResult.suspicious) await tryTemporalAlert(temporalResult);
+        if (astResult && astResult.suspicious) await tryTemporalAstAlert(astResult);
       } else {
         console.log(`[MONITOR] FALSE POSITIVE (static clean, no alert): ${item.name}@${item.version}`);
       }
+    } else {
+      // Not static-clean and no sandbox / sandbox positive — send webhooks
+      if (temporalResult && temporalResult.suspicious) await tryTemporalAlert(temporalResult);
+      if (astResult && astResult.suspicious) await tryTemporalAstAlert(astResult);
     }
-    // Log all temporal findings (no webhook)
-    if (temporalResult && temporalResult.suspicious) await tryTemporalAlert(temporalResult);
-    if (astResult && astResult.suspicious) await tryTemporalAstAlert(astResult);
   }
 }
 
@@ -2225,7 +2280,10 @@ module.exports = {
   maybePersistDailyStats,
   get scansSinceLastPersist() { return scansSinceLastPersist; },
   set scansSinceLastPersist(v) { scansSinceLastPersist = v; },
-  atomicWriteFileSync
+  atomicWriteFileSync,
+  appendTemporalDetection,
+  loadTemporalDetections,
+  TEMPORAL_DETECTIONS_FILE
 };
 
 // Standalone entry point: node src/monitor.js

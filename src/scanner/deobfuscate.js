@@ -581,4 +581,71 @@ function isPrintable(str) {
   return (controlCount / str.length) < 0.2;
 }
 
-module.exports = { deobfuscate };
+/**
+ * Detect control flow flattening obfuscation pattern.
+ * Pattern: while(true/1) { switch(var) { case N: ...; var = M; break; ... } }
+ * Returns true if the pattern is detected.
+ * @param {string} sourceCode — raw JS source
+ * @returns {boolean}
+ */
+function detectControlFlowFlattening(sourceCode) {
+  const ast = safeParse(sourceCode, { ranges: true });
+  if (!ast) return false;
+
+  let found = false;
+  walk.simple(ast, {
+    WhileStatement(node) {
+      if (found) return;
+      // Check for while(true) or while(1)
+      const test = node.test;
+      const isInfinite = (test.type === 'Literal' && (test.value === true || test.value === 1))
+        || (test.type === 'Identifier' && test.name === 'true');
+      if (!isInfinite) return;
+
+      // Body should contain a SwitchStatement
+      const body = node.body;
+      let switchNode = null;
+      if (body.type === 'SwitchStatement') {
+        switchNode = body;
+      } else if (body.type === 'BlockStatement' && body.body) {
+        switchNode = body.body.find(s => s.type === 'SwitchStatement');
+      }
+      if (!switchNode || !switchNode.cases) return;
+
+      // Need at least 3 cases for CFF pattern
+      if (switchNode.cases.length < 3) return;
+
+      // Check for state variable reassignment in at least 2 cases
+      const discriminant = switchNode.discriminant;
+      if (!discriminant) return;
+      let stateVarName = null;
+      if (discriminant.type === 'Identifier') {
+        stateVarName = discriminant.name;
+      } else if (discriminant.type === 'MemberExpression' && discriminant.property?.type === 'Identifier') {
+        stateVarName = discriminant.property.name;
+      }
+      if (!stateVarName) return;
+
+      // Count cases that reassign the state variable
+      let reassignCount = 0;
+      for (const c of switchNode.cases) {
+        if (!c.consequent) continue;
+        const caseSource = sourceCode.slice(c.start, c.end);
+        // Look for stateVar = <number> pattern
+        const reassignRe = new RegExp('\\b' + stateVarName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*=\\s*\\d+');
+        if (reassignRe.test(caseSource)) {
+          reassignCount++;
+        }
+      }
+
+      // CFF pattern: at least 2 cases reassign the state variable
+      if (reassignCount >= 2) {
+        found = true;
+      }
+    }
+  });
+
+  return found;
+}
+
+module.exports = { deobfuscate, detectControlFlowFlattening };
