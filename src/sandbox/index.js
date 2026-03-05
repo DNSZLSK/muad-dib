@@ -171,14 +171,18 @@ async function runSingleSandbox(packageName, options = {}) {
       dockerArgs.push('-e', `CANARY_NPMRC_CONTENT=${createCanaryNpmrc(canaryTokens).replace(/\r?\n/g, '\\n')}`);
     }
 
-    // Inject time offset and preload for monkey-patching
+    // Inject time offset (preload.js deferred to entry point in sandbox-runner.sh)
     dockerArgs.push('-e', `MUADDIB_TIME_OFFSET_MS=${timeOffset}`);
-    dockerArgs.push('-e', 'NODE_OPTIONS=--require /opt/preload.js');
 
     // Both modes need NET_RAW for tcpdump (runs as root in entrypoint).
     // Strict mode also needs NET_ADMIN for iptables network blocking.
     // SYS_PTRACE is not needed: strace traces its own child (npm install via su).
+    // SETUID + SETGID required for su (privilege drop to sandboxuser).
+    // CHOWN required for chown in sandbox-runner.sh.
     dockerArgs.push('--cap-add=NET_RAW');
+    dockerArgs.push('--cap-add=SETUID');
+    dockerArgs.push('--cap-add=SETGID');
+    dockerArgs.push('--cap-add=CHOWN');
     if (strict) {
       dockerArgs.push('--cap-add=NET_ADMIN');
     }
@@ -230,8 +234,20 @@ async function runSingleSandbox(packageName, options = {}) {
       }
     });
 
-    proc.on('close', () => {
+    proc.on('close', (code) => {
       clearTimeout(timer);
+
+      // Docker-level failure: log error and return clean result
+      if (code !== 0 && !stdout.includes('---MUADDIB-REPORT-START---')) {
+        const errLines = stderr.split(/\r?\n/).filter(l => l && !l.includes('[SANDBOX]'));
+        if (errLines.length > 0) {
+          console.log(`[SANDBOX] Docker error (exit ${code}): ${errLines[0]}`);
+        } else {
+          console.log(`[SANDBOX] Container exited with code ${code} (no output)`);
+        }
+        resolve(cleanResult);
+        return;
+      }
 
       if (timedOut) {
         const result = {
