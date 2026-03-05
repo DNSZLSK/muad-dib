@@ -2,7 +2,7 @@
  * MUAD'DIB Sandbox Preload Log Analyzer
  *
  * Parses [PRELOAD] log lines produced by docker/preload.js and generates
- * scored findings for behavioral analysis. Six detection rules:
+ * scored findings for behavioral analysis. Seven detection rules:
  *
  *   1. sandbox_timer_delay_suspicious — timer delay > 1h (MEDIUM, +15)
  *   2. sandbox_timer_delay_critical   — timer delay > 24h (CRITICAL, +30, supersedes #1)
@@ -10,6 +10,7 @@
  *   4. sandbox_network_after_sensitive_read — network call after sensitive read (CRITICAL, +40)
  *   5. sandbox_exec_suspicious        — dangerous command execution (HIGH, +25)
  *   6. sandbox_env_token_access       — sensitive env var access (MEDIUM, +10)
+ *   7. sandbox_native_addon_load      — native .node addon loaded (MEDIUM, +15)
  */
 
 const ONE_HOUR_MS = 3600000;
@@ -38,6 +39,7 @@ function analyzePreloadLog(logContent) {
   const networkLines = [];
   const execLines = [];
   const envLines = [];
+  const nativeAddonLines = [];
 
   for (const line of lines) {
     if (line.includes('TIMER:')) {
@@ -52,6 +54,8 @@ function analyzePreloadLog(logContent) {
       execLines.push(line);
     } else if (line.includes('ENV_ACCESS:')) {
       envLines.push(line);
+    } else if (line.includes('NATIVE_ADDON:')) {
+      nativeAddonLines.push(line);
     }
   }
 
@@ -170,6 +174,24 @@ function analyzePreloadLog(logContent) {
       severity: 'MEDIUM',
       detail: `Sensitive env var access detected: ${unique.join(', ')}`,
       evidence: unique.join(', ')
+    });
+  }
+
+  // ── Rule 7: Native addon loading ──
+  // Native addons (.node files) can bypass all JS monkey-patches via syscalls.
+  // Flag their loading so analysts know time-based evasion may be undetected.
+  if (nativeAddonLines.length > 0) {
+    const addons = nativeAddonLines.map(l => {
+      const m = l.match(/process\.dlopen:\s*(.+?)(?:\s+\(t\+|$)/);
+      return m ? m[1].trim() : 'unknown';
+    });
+
+    score += 15;
+    findings.push({
+      type: 'sandbox_native_addon_load',
+      severity: 'MEDIUM',
+      detail: `Native addon loaded (${addons.length}): time-based evasion via syscalls possible`,
+      evidence: addons.join(', ')
     });
   }
 

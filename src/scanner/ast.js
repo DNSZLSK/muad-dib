@@ -11,6 +11,7 @@ const {
   handleLiteral,
   handleAssignmentExpression,
   handleMemberExpression,
+  handleWithStatement,
   handlePostWalk
 } = require('./ast-detectors.js');
 
@@ -121,7 +122,8 @@ function analyzeFile(content, filePath, basePath) {
     NewExpression(node) { handleNewExpression(node, ctx); },
     Literal(node) { handleLiteral(node, ctx); },
     AssignmentExpression(node) { handleAssignmentExpression(node, ctx); },
-    MemberExpression(node) { handleMemberExpression(node, ctx); }
+    MemberExpression(node) { handleMemberExpression(node, ctx); },
+    WithStatement(node) { handleWithStatement(node, ctx); }
   });
 
   // FIX 5: DNS chunk exfiltration — verify dns.resolve* is inside a loop body

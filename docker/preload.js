@@ -460,7 +460,50 @@
   } catch (e) { /* Proxy not supported or env not writable */ }
 
   // ═══════════════════════════════════════════════════════
-  // 10. STARTUP LOG
+  // 10. NATIVE ADDON DETECTION (process.dlopen)
+  // ═══════════════════════════════════════════════════════
+
+  // Native addons (.node files) can call syscalls like clock_gettime() directly,
+  // bypassing all JavaScript monkey-patches. We can't prevent this, but we CAN
+  // detect the loading of native addons and flag it for the analyzer.
+  try {
+    const _origDlopen = process.dlopen;
+    process.dlopen = function (module, filename) {
+      try {
+        const f = String(filename || '');
+        log('NATIVE_ADDON', `process.dlopen: ${f}`);
+      } catch (e) { /* ignore */ }
+      return _origDlopen.apply(process, arguments);
+    };
+  } catch (e) { /* ignore — process.dlopen may not be writable */ }
+
+  // ═══════════════════════════════════════════════════════
+  // 11. /proc/uptime SPOOFING
+  // ═══════════════════════════════════════════════════════
+
+  // Malware reads /proc/uptime to detect sandboxes (low uptime = fresh sandbox).
+  // We intercept readFileSync('/proc/uptime') to return a realistic high uptime.
+  // This complements the time API patches in section 4.
+  try {
+    const _origReadFileSyncForUptime = _fs.readFileSync;
+    const _currentReadFileSync = _fs.readFileSync; // may already be patched by section 7
+    _fs.readFileSync = function (filePath) {
+      try {
+        const p = String(filePath);
+        if (p === '/proc/uptime') {
+          // Return fake uptime: ~30 days + idle time (realistic for a production server)
+          const fakeUptime = 2592000 + Math.floor(TIME_OFFSET / 1000) + Math.random() * 100;
+          const fakeIdle = fakeUptime * 0.95;
+          log('FS_READ', `SPOOFED /proc/uptime (real read intercepted)`);
+          return `${fakeUptime.toFixed(2)} ${fakeIdle.toFixed(2)}\n`;
+        }
+      } catch (e) { /* ignore */ }
+      return _currentReadFileSync.apply(_fs, arguments);
+    };
+  } catch (e) { /* ignore */ }
+
+  // ═══════════════════════════════════════════════════════
+  // 12. STARTUP LOG
   // ═══════════════════════════════════════════════════════
 
   log('INIT', `Preload active. TIME_OFFSET=${TIME_OFFSET}ms (${(TIME_OFFSET / 3600000).toFixed(1)}h). PID=${process.pid}`);
