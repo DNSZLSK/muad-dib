@@ -162,7 +162,12 @@ function analyzePreloadLog(logContent) {
   }
 
   // ── Rule 5: Suspicious exec ──
-  const dangerousExecLines = execLines.filter(l => l.includes('DANGEROUS'));
+  const dangerousExecLines = execLines.filter(l => {
+    if (!l.includes('DANGEROUS')) return false;
+    // Skip sandbox infrastructure commands (e.g. /usr/bin/timeout wrapping node)
+    if (/\btimeout\b/.test(l)) return false;
+    return true;
+  });
   if (dangerousExecLines.length > 0) {
     const cmds = dangerousExecLines.map(l => {
       const m = l.match(/(?:exec|execSync|spawn|spawnSync|execFile|execFileSync):\s*(.+?)(?:\s+\(t\+|$)/);

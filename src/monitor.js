@@ -373,18 +373,26 @@ function getWebhookUrl() {
 function shouldSendWebhook(result, sandboxResult) {
   if (!getWebhookUrl()) return false;
 
-  // If sandbox ran, it is the final arbiter
-  if (sandboxResult && sandboxResult.score !== undefined) {
-    return sandboxResult.score > 0;
+  const staticScore = (result && result.summary) ? (result.summary.riskScore || 0) : 0;
+  const sandboxScore = (sandboxResult && sandboxResult.score !== undefined) ? sandboxResult.score : -1;
+
+  // CRITICAL static score — always send regardless of sandbox
+  if (staticScore >= 80 && hasHighOrCritical(result)) return true;
+
+  // Real sandbox detection (above timeout noise threshold)
+  if (sandboxScore > 30) return true;
+
+  // Sandbox ran but score is just timeout noise (<=15, e.g. /usr/bin/timeout FP) — suppress
+  if (sandboxScore >= 0 && sandboxScore <= 15) return false;
+
+  // Sandbox ran with moderate score (16-30): send if static also suspicious
+  if (sandboxScore > 15 && sandboxScore <= 30) {
+    return staticScore >= 50 && hasHighOrCritical(result);
   }
 
-  // IOC match (package in 225K+ database)
+  // No sandbox: IOC match or high static score
   if (hasIOCMatch(result)) return true;
-
-  // Static score >= 50 BUT only if there are CRITICAL or HIGH findings.
-  // MEDIUM-only packages (e.g. webpeel: 28 MEDIUM, score 100) are logged as SUSPECT
-  // but not webhooks — the volume of MEDIUM signals is noise, not a real threat.
-  if (result && result.summary && result.summary.riskScore >= 50 && hasHighOrCritical(result)) return true;
+  if (staticScore >= 50 && hasHighOrCritical(result)) return true;
 
   return false;
 }
