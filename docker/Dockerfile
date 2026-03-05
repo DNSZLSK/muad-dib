@@ -17,6 +17,9 @@ RUN sed -i 's/\r$//' /sandbox/sandbox-runner.sh && chmod +x /sandbox/sandbox-run
 # Preload script for runtime monkey-patching (time acceleration, API logging)
 COPY preload.js /opt/preload.js
 
+# Pre-create install directory with correct ownership
+RUN mkdir -p /sandbox/install && chown sandboxuser:sandboxuser /sandbox/install
+
 # Pre-bake filesystem baseline for diff (avoids find / at runtime)
 RUN find / -type f 2>/dev/null | sort > /opt/fs-baseline.txt
 
