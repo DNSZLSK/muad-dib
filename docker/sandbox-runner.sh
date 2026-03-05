@@ -75,10 +75,10 @@ export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-MUADDIB_CANARY_wJalrXUtnF
 export SLACK_WEBHOOK_URL="${SLACK_WEBHOOK_URL:-https://hooks.slack.com/MUADDIB_CANARY_SLACK}"
 export DISCORD_WEBHOOK_URL="${DISCORD_WEBHOOK_URL:-https://discord.com/api/webhooks/MUADDIB_CANARY_DISCORD}"
 
-# ── 2d. Preload injection — monkey-patches time, timers, network, fs, process APIs ──
-# NODE_OPTIONS is injected by sandbox.js via Docker -e flag.
-# If not set externally, default to loading preload.js for behavioral logging.
-export NODE_OPTIONS="${NODE_OPTIONS:---require /opt/preload.js}"
+# ── 2d. Preload injection — deferred to entry point (phase 3b) ──
+# NODE_OPTIONS='--require /opt/preload.js' monkey-patches http/https/net/dns.
+# Enabling it during npm install causes timeouts (hundreds of wrapped network calls).
+# tcpdump already captures install-phase network; preload targets runtime behavior.
 
 # ── 3. npm install with strace — as sandboxuser ──
 echo "[SANDBOX] Installing $PACKAGE as sandboxuser..." >&2
@@ -104,6 +104,8 @@ EXIT_CODE=$?
 # Malware that puts code in index.js without lifecycle scripts is only
 # caught when the entry point is actually required. strace + tcpdump
 # are already running, so any network/filesystem activity is captured.
+# Preload enabled here (not during install) to avoid npm timeout.
+export NODE_OPTIONS="${NODE_OPTIONS:---require /opt/preload.js}"
 echo "[SANDBOX] Executing package entry point..." >&2
 
 if echo "$PACKAGE" | grep -q '^/'; then
