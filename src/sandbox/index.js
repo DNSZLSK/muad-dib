@@ -46,6 +46,9 @@ const PROBE_PORTS = [65535]; // Node.js internal connectivity checks
 // Commands that are always suspicious in a sandbox
 const DANGEROUS_CMDS = ['curl', 'wget', 'nc', 'netcat', 'python', 'python3', 'bash', 'sh'];
 
+// Commands that are sandbox infrastructure — not spawned by the package
+const SAFE_SANDBOX_CMDS = new Set(['timeout', 'node', 'npm', 'npx', 'su', 'env']);
+
 // Static canary tokens injected by sandbox-runner.sh (fallback honeypots).
 // These are searched in the sandbox report as a complement to the dynamic
 // tokens from canary-tokens.js (which use random suffixes per session).
@@ -607,6 +610,7 @@ function scoreFindings(report) {
   for (const p of (report.processes?.spawned || [])) {
     const cmd = p.command || '';
     const basename = path.basename(cmd);
+    if (SAFE_SANDBOX_CMDS.has(basename)) continue; // Skip sandbox infrastructure
     if (DANGEROUS_CMDS.some(d => basename === d)) {
       score += 40;
       findings.push({ type: 'suspicious_process', severity: 'CRITICAL', detail: `Dangerous command spawned: ${cmd}`, evidence: cmd });
@@ -762,4 +766,4 @@ function displayResults(result) {
   }
 }
 
-module.exports = { buildSandboxImage, runSandbox, runSingleSandbox, scoreFindings, generateNetworkReport, EXFIL_PATTERNS, SAFE_DOMAINS, getSeverity, displayResults, isDockerAvailable, imageExists, STATIC_CANARY_TOKENS, detectStaticCanaryExfiltration, analyzePreloadLog, TIME_OFFSETS };
+module.exports = { buildSandboxImage, runSandbox, runSingleSandbox, scoreFindings, generateNetworkReport, EXFIL_PATTERNS, SAFE_DOMAINS, getSeverity, displayResults, isDockerAvailable, imageExists, STATIC_CANARY_TOKENS, detectStaticCanaryExfiltration, analyzePreloadLog, TIME_OFFSETS, SAFE_SANDBOX_CMDS };

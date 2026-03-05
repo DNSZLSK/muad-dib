@@ -302,6 +302,20 @@ async function runSandboxTests() {
     assert(findings[0].severity === 'MEDIUM', 'Should be MEDIUM');
   });
 
+  test('SANDBOX-COV: scoreFindings skips safe sandbox commands (timeout, node, npm)', () => {
+    const report = { processes: { spawned: [
+      { command: '/usr/bin/timeout' },
+      { command: '/usr/local/bin/node' },
+      { command: '/usr/local/bin/npm' },
+      { command: '/usr/bin/npx' },
+      { command: '/usr/bin/su' },
+      { command: '/usr/bin/env' }
+    ] } };
+    const { score, findings } = scoreFindings(report);
+    assert(score === 0, 'Safe sandbox cmds should score 0, got ' + score);
+    assert(findings.length === 0, 'Should have no findings for safe sandbox cmds');
+  });
+
   test('SANDBOX-COV: scoreFindings skips safe IPs in connections', () => {
     const report = { network: { http_connections: [
       { host: '127.0.0.1', port: 3000 }

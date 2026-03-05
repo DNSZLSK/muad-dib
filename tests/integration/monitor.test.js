@@ -603,13 +603,13 @@ async function runMonitorTests() {
     }
   });
 
-  test('MONITOR: shouldSendWebhook returns true when sandbox score > 0', () => {
+  test('MONITOR: shouldSendWebhook returns true when sandbox score > 30', () => {
     const orig = process.env.MUADDIB_WEBHOOK_URL;
     process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.slack.com/test';
     try {
       const result = { summary: { total: 2, critical: 0, high: 0, medium: 1, low: 1 } };
-      const sandbox = { score: 30, severity: 'MEDIUM', findings: [] };
-      assert(shouldSendWebhook(result, sandbox) === true, 'Should return true when sandbox score > 0');
+      const sandbox = { score: 35, severity: 'MEDIUM', findings: [] };
+      assert(shouldSendWebhook(result, sandbox) === true, 'Should return true when sandbox score > 30');
     } finally {
       if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
       else delete process.env.MUADDIB_WEBHOOK_URL;
@@ -1372,7 +1372,7 @@ async function runMonitorTests() {
 
       // Sandbox SUSPECT → send webhook
       assert(shouldSendWebhook(mockResultIOC, mockSandboxSuspect) === true,
-        'Should send webhook when sandbox score > 0');
+        'Should send webhook when sandbox score > 30');
 
       // No sandbox + IOC match → send webhook
       assert(shouldSendWebhook(mockResultIOC, null) === true,
@@ -2862,13 +2862,13 @@ async function runMonitorTests() {
 
   // --- shouldSendWebhook extended ---
 
-  test('MONITOR: shouldSendWebhook returns true for sandbox score > 0 with webhook URL', () => {
+  test('MONITOR: shouldSendWebhook returns true for sandbox score > 30 with webhook URL', () => {
     const origEnv = process.env.MUADDIB_WEBHOOK_URL;
     process.env.MUADDIB_WEBHOOK_URL = 'https://example.com/webhook';
     try {
       const result = { summary: { critical: 0, high: 0, medium: 0, low: 0, total: 0 }, threats: [] };
-      const sandboxResult = { score: 5, severity: 'HIGH' };
-      assert(shouldSendWebhook(result, sandboxResult) === true, 'Should return true for sandbox score > 0');
+      const sandboxResult = { score: 35, severity: 'HIGH' };
+      assert(shouldSendWebhook(result, sandboxResult) === true, 'Should return true for sandbox score > 30');
     } finally {
       if (origEnv !== undefined) {
         process.env.MUADDIB_WEBHOOK_URL = origEnv;
@@ -2942,6 +2942,71 @@ async function runMonitorTests() {
       };
       assert(shouldSendWebhook(result, null) === true,
         'Should send webhook for package with HIGH findings and score >= 50');
+    } finally {
+      if (origEnv !== undefined) process.env.MUADDIB_WEBHOOK_URL = origEnv;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  // --- shouldSendWebhook: tiered sandbox thresholds ---
+
+  test('MONITOR: shouldSendWebhook returns false for sandbox score 15 (timeout FP)', () => {
+    const origEnv = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://example.com/webhook';
+    try {
+      const result = { summary: { critical: 0, high: 1, medium: 2, low: 0, total: 3, riskScore: 40 }, threats: [
+        { type: 'suspicious_dataflow', severity: 'HIGH' }
+      ] };
+      const sandboxResult = { score: 15, severity: 'LOW' };
+      assert(shouldSendWebhook(result, sandboxResult) === false,
+        'Should NOT send webhook for sandbox score 15 (timeout noise)');
+    } finally {
+      if (origEnv !== undefined) process.env.MUADDIB_WEBHOOK_URL = origEnv;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  test('MONITOR: shouldSendWebhook returns true for static >= 80 even with sandbox score 15', () => {
+    const origEnv = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://example.com/webhook';
+    try {
+      const result = { summary: { critical: 1, high: 2, medium: 0, low: 0, total: 3, riskScore: 85 }, threats: [
+        { type: 'shell_exec', severity: 'CRITICAL' },
+        { type: 'suspicious_dataflow', severity: 'HIGH' }
+      ] };
+      const sandboxResult = { score: 15, severity: 'LOW' };
+      assert(shouldSendWebhook(result, sandboxResult) === true,
+        'Should send webhook for static >= 80 even with sandbox noise');
+    } finally {
+      if (origEnv !== undefined) process.env.MUADDIB_WEBHOOK_URL = origEnv;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  test('MONITOR: shouldSendWebhook returns true for sandbox score > 30', () => {
+    const origEnv = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://example.com/webhook';
+    try {
+      const result = { summary: { critical: 0, high: 0, medium: 0, low: 0, total: 0 }, threats: [] };
+      const sandboxResult = { score: 40, severity: 'MEDIUM' };
+      assert(shouldSendWebhook(result, sandboxResult) === true,
+        'Should send webhook for sandbox score > 30');
+    } finally {
+      if (origEnv !== undefined) process.env.MUADDIB_WEBHOOK_URL = origEnv;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  test('MONITOR: shouldSendWebhook returns false for low static + sandbox score 15', () => {
+    const origEnv = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://example.com/webhook';
+    try {
+      const result = { summary: { critical: 0, high: 0, medium: 1, low: 0, total: 1, riskScore: 30 }, threats: [
+        { type: 'prototype_hook', severity: 'MEDIUM' }
+      ] };
+      const sandboxResult = { score: 15, severity: 'LOW' };
+      assert(shouldSendWebhook(result, sandboxResult) === false,
+        'Should NOT send webhook for low static score + sandbox noise');
     } finally {
       if (origEnv !== undefined) process.env.MUADDIB_WEBHOOK_URL = origEnv;
       else delete process.env.MUADDIB_WEBHOOK_URL;
