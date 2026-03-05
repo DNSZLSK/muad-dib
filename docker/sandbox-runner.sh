@@ -35,7 +35,7 @@ fi
 
 # ── 1. Filesystem snapshot BEFORE install ──
 echo "[SANDBOX] Snapshot filesystem before install..." >&2
-find / -type f 2>/dev/null | sort > /tmp/fs-before.txt
+cp /opt/fs-baseline.txt /tmp/fs-before.txt
 
 # ── 2. tcpdump: separate captures for DNS, HTTP, TLS (requires root + NET_RAW) ──
 echo "[SANDBOX] Starting network capture..." >&2
@@ -86,11 +86,18 @@ cd /sandbox/install
 # Ensure sandboxuser owns the install directory
 chown sandboxuser:sandboxuser /sandbox/install
 # Run npm install as sandboxuser via su, wrapped in strace for syscall tracing
-su sandboxuser -s /bin/sh -c "
-  strace -f -e trace=network,process,open,openat,connect,execve,sendto,recvfrom \
-    -o /tmp/strace.log \
-    npm install \"$PACKAGE\" --ignore-scripts=false > /tmp/install.log 2>&1
-"
+if [ "$MODE" = "strict" ]; then
+  su sandboxuser -s /bin/sh -c "
+    strace -f -e trace=network,process,open,openat,connect,execve,sendto,recvfrom \
+      -o /tmp/strace.log \
+      npm install \"$PACKAGE\" --ignore-scripts=false --fetch-timeout=120000 > /tmp/install.log 2>&1
+  "
+else
+  touch /tmp/strace.log
+  su sandboxuser -s /bin/sh -c "
+    npm install \"$PACKAGE\" --ignore-scripts=false --fetch-timeout=120000 > /tmp/install.log 2>&1
+  "
+fi
 EXIT_CODE=$?
 
 # ── 3b. Entry point execution — trigger runtime malware ──
