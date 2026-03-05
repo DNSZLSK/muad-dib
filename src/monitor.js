@@ -158,13 +158,13 @@ function hasLifecycleScript(result) {
 // Tier 1: high-intent threat types that always warrant sandbox analysis
 const TIER1_TYPES = new Set([
   'sandbox_evasion', 'env_charcode_reconstruction',
-  'staged_payload', 'staged_binary_payload'
+  'staged_payload', 'staged_binary_payload',
+  'mcp_config_injection', 'ai_agent_abuse', 'crypto_miner'
 ]);
 
 // Tier 2: active threat types that warrant sandbox when queue pressure is low
 const TIER2_ACTIVE_TYPES = new Set([
-  'suspicious_dataflow', 'dangerous_call_eval', 'dangerous_call_function',
-  'mcp_config_injection', 'ai_agent_abuse', 'crypto_miner'
+  'suspicious_dataflow', 'dangerous_call_eval', 'dangerous_call_function'
 ]);
 
 // Tier 3: passive/informational types — no sandbox, no stats.suspect increment
