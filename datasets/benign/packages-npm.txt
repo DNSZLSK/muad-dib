@@ -214,7 +214,7 @@ npm
 oao
 ultra-runner
 
-# === Wasm/native (12) ===
+# === Wasm/native (15) ===
 sharp
 canvas
 node-gyp
@@ -227,6 +227,9 @@ nan
 ref-napi
 ffi-napi
 farmhash
+leveldown
+sodium-native
+cpu-features
 
 # === DevOps/CI (18) ===
 husky

@@ -11,9 +11,62 @@ const SECURITY_HEADERS = {
   'Cache-Control': 'no-store'
 };
 
+// Rate limiting: 60 requests per minute per IP (sliding window)
+const RATE_LIMIT_MAX = 60;
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const rateLimitMap = new Map();
+
 function sendJson(res, statusCode, data) {
   res.writeHead(statusCode, SECURITY_HEADERS);
   res.end(JSON.stringify(data));
+}
+
+/**
+ * Check bearer token authentication.
+ * If MUADDIB_FEED_TOKEN is set, require Authorization: Bearer <token> header.
+ * @param {http.IncomingMessage} req
+ * @returns {{ ok: boolean, error?: string }}
+ */
+function checkAuth(req) {
+  const token = process.env.MUADDIB_FEED_TOKEN;
+  if (!token) return { ok: true }; // No token configured = no auth required
+
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    return { ok: false, error: 'Missing Authorization header' };
+  }
+  const parts = authHeader.split(' ');
+  if (parts.length !== 2 || parts[0] !== 'Bearer') {
+    return { ok: false, error: 'Invalid Authorization format. Use: Bearer <token>' };
+  }
+  if (parts[1] !== token) {
+    return { ok: false, error: 'Invalid token' };
+  }
+  return { ok: true };
+}
+
+/**
+ * Rate limiter: sliding window, max RATE_LIMIT_MAX requests per RATE_LIMIT_WINDOW_MS per IP.
+ * @param {string} ip - Client IP address
+ * @returns {{ ok: boolean, remaining: number }}
+ */
+function checkRateLimit(ip) {
+  const now = Date.now();
+  if (!rateLimitMap.has(ip)) {
+    rateLimitMap.set(ip, [now]);
+    return { ok: true, remaining: RATE_LIMIT_MAX - 1 };
+  }
+  const timestamps = rateLimitMap.get(ip);
+  // Remove timestamps outside the window
+  const windowStart = now - RATE_LIMIT_WINDOW_MS;
+  while (timestamps.length > 0 && timestamps[0] < windowStart) {
+    timestamps.shift();
+  }
+  if (timestamps.length >= RATE_LIMIT_MAX) {
+    return { ok: false, remaining: 0 };
+  }
+  timestamps.push(now);
+  return { ok: true, remaining: RATE_LIMIT_MAX - timestamps.length };
 }
 
 function startServer(options = {}) {
@@ -22,6 +75,21 @@ function startServer(options = {}) {
   const server = http.createServer((req, res) => {
     if (req.method !== 'GET') {
       sendJson(res, 405, { error: 'Method not allowed. Use GET.' });
+      return;
+    }
+
+    // Authentication check (if MUADDIB_FEED_TOKEN is set)
+    const auth = checkAuth(req);
+    if (!auth.ok) {
+      sendJson(res, 401, { error: auth.error });
+      return;
+    }
+
+    // Rate limiting
+    const ip = req.socket.remoteAddress || '127.0.0.1';
+    const rateCheck = checkRateLimit(ip);
+    if (!rateCheck.ok) {
+      sendJson(res, 429, { error: 'Rate limit exceeded. Max 60 requests per minute.' });
       return;
     }
 
@@ -55,4 +123,4 @@ function startServer(options = {}) {
   return server;
 }
 
-module.exports = { startServer };
+module.exports = { startServer, checkAuth, checkRateLimit, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS, rateLimitMap };

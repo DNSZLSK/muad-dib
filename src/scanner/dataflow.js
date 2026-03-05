@@ -140,7 +140,26 @@ function analyzeFile(content, filePath, basePath) {
   // Track exec calls whose result is captured (for command_output source detection)
   const execResultNodes = new Set();
 
+  // Fix #22: EventEmitter tracking — detect tainted emit → on patterns
+  const eventHandlers = new Map(); // eventName → { hasNetworkSink: boolean }
+  const emitTaintedEvents = new Set(); // event names emitted with tainted data
+
+  // Fix #23: Function param tainting — track function declarations
+  const functionDefs = new Map(); // functionName → { params: [paramNames] }
+
   walk.simple(ast, {
+    FunctionDeclaration(node) {
+      // Fix #23: Track function declarations for param tainting
+      if (node.id && node.id.name && node.params) {
+        const paramNames = node.params
+          .filter(p => p.type === 'Identifier')
+          .map(p => p.name);
+        if (paramNames.length > 0) {
+          functionDefs.set(node.id.name, { params: paramNames });
+        }
+      }
+    },
+
     VariableDeclarator(node) {
       if (node.id?.type === 'Identifier' && node.init) {
         if (containsSensitiveLiteral(node.init)) {
@@ -373,6 +392,62 @@ function analyzeFile(content, filePath, basePath) {
         }
       }
 
+      // Fix #22: EventEmitter tracking
+      if (node.callee.type === 'MemberExpression' && node.callee.property?.type === 'Identifier') {
+        const methodName = node.callee.property.name;
+
+        // Track .on('eventName', handler) — check if handler has network sink
+        if (methodName === 'on' && node.arguments.length >= 2) {
+          const eventArg = node.arguments[0];
+          if (eventArg.type === 'Literal' && typeof eventArg.value === 'string') {
+            const handler = node.arguments[1];
+            // Check if the handler body contains network sinks
+            let handlerHasSink = false;
+            if (handler.type === 'FunctionExpression' || handler.type === 'ArrowFunctionExpression') {
+              const bodyStr = content.slice(handler.start, handler.end);
+              handlerHasSink = /\b(request|fetch|https?\.get|https?\.request|dns\.resolve)\b/.test(bodyStr);
+            }
+            eventHandlers.set(eventArg.value, { hasNetworkSink: handlerHasSink });
+          }
+        }
+
+        // Track .emit('eventName', taintedData) — check if emitted data is tainted
+        if (methodName === 'emit' && node.arguments.length >= 2) {
+          const eventArg = node.arguments[0];
+          if (eventArg.type === 'Literal' && typeof eventArg.value === 'string') {
+            const dataArg = node.arguments[1];
+            if (dataArg.type === 'Identifier' && sensitivePathVars.has(dataArg.name)) {
+              emitTaintedEvents.add(eventArg.value);
+            }
+            // Also check taintMap
+            if (dataArg.type === 'Identifier') {
+              const taint = taintMap.get(dataArg.name);
+              if (taint && (taint.source === 'process.env' || MODULE_SOURCE_METHODS[taint.source])) {
+                emitTaintedEvents.add(eventArg.value);
+              }
+            }
+          }
+        }
+      }
+
+      // Fix #23: Function param tainting — propagate taint through function calls
+      if (node.callee.type === 'Identifier' && functionDefs.has(node.callee.name)) {
+        const funcDef = functionDefs.get(node.callee.name);
+        for (let i = 0; i < node.arguments.length && i < funcDef.params.length; i++) {
+          const arg = node.arguments[i];
+          if (arg.type === 'Identifier') {
+            // Check if argument is tainted
+            const argTaint = taintMap.get(arg.name);
+            if (argTaint && (argTaint.source === 'process.env' || MODULE_SOURCE_METHODS[argTaint.source])) {
+              sensitivePathVars.add(funcDef.params[i]);
+            }
+            if (sensitivePathVars.has(arg.name)) {
+              sensitivePathVars.add(funcDef.params[i]);
+            }
+          }
+        }
+      }
+
       // Exec callback: exec('cmd', (err, stdout) => {...}) — output will be used
       if (!execResultNodes.has(node) && node.arguments.length >= 2) {
         const lastArg = node.arguments[node.arguments.length - 1];
@@ -470,6 +545,25 @@ function analyzeFile(content, filePath, basePath) {
       }
     }
   });
+
+  // Fix #22: EventEmitter compound detection
+  for (const eventName of emitTaintedEvents) {
+    const handler = eventHandlers.get(eventName);
+    if (handler && handler.hasNetworkSink) {
+      sources.push({
+        type: 'credential_read',
+        name: `EventEmitter.emit('${eventName}')`,
+        line: 0,
+        taint_tracked: true
+      });
+      sinks.push({
+        type: 'network_send',
+        name: `EventEmitter.on('${eventName}') handler`,
+        line: 0,
+        taint_tracked: true
+      });
+    }
+  }
 
   // Check if any source or sink was resolved via taint tracking
   const hasTaintTracked = sources.some(s => s.taint_tracked) || sinks.some(s => s.taint_tracked);

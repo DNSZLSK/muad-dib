@@ -22,6 +22,7 @@ const BENIGN_DIR = path.join(ROOT, 'datasets', 'benign');
 const ADVERSARIAL_DIR = path.join(ROOT, 'datasets', 'adversarial');
 const METRICS_DIR = path.join(ROOT, 'metrics');
 const CACHE_DIR = path.join(ROOT, '.muaddib-cache', 'benign-tarballs');
+const PYPI_CACHE_DIR = path.join(ROOT, '.muaddib-cache', 'benign-pypi');
 const HOLDOUT_DIRS = [
   path.join(ROOT, 'datasets', 'holdout-v2'),
   path.join(ROOT, 'datasets', 'holdout-v3'),
@@ -336,6 +337,143 @@ async function evaluateBenign(options = {}) {
   return { flagged, total, scanned, skipped, fpr, details };
 }
 
+// =========================================================================
+// 2b. PyPI Benign — download real PyPI sdists and scan
+// =========================================================================
+
+/**
+ * Download a PyPI package via pip download and extract.
+ * Returns the path to the extracted package directory, or null on failure.
+ */
+function downloadAndExtractPyPI(pkg, options = {}) {
+  const cacheName = pkgToCacheName(pkg);
+  const pkgCacheDir = path.join(PYPI_CACHE_DIR, cacheName);
+
+  // Check cache first
+  if (!options.refreshBenign && fs.existsSync(pkgCacheDir)) {
+    const entries = fs.readdirSync(pkgCacheDir).filter(e => {
+      try { return fs.statSync(path.join(pkgCacheDir, e)).isDirectory(); } catch { return false; }
+    });
+    if (entries.length > 0) return path.join(pkgCacheDir, entries[0]);
+  }
+
+  fs.mkdirSync(pkgCacheDir, { recursive: true });
+
+  // Download sdist via pip
+  try {
+    execSync(`pip download --no-deps --no-binary :all: -d "${pkgCacheDir}" "${pkg}"`, {
+      encoding: 'utf8',
+      timeout: PACK_TIMEOUT_MS,
+      stdio: ['pipe', 'pipe', 'pipe']
+    });
+  } catch (err) {
+    if (process.env.MUADDIB_DEBUG) {
+      console.error(`\n  [DEBUG] pip download ${pkg} failed: ${(err.stderr || err.message || '').slice(0, 200)}`);
+    }
+    fs.rmSync(pkgCacheDir, { recursive: true, force: true });
+    return null;
+  }
+
+  // Find and extract the downloaded archive
+  const archives = fs.readdirSync(pkgCacheDir).filter(f => f.endsWith('.tar.gz') || f.endsWith('.tgz'));
+  if (archives.length === 0) {
+    // Try .zip files
+    const zips = fs.readdirSync(pkgCacheDir).filter(f => f.endsWith('.zip'));
+    if (zips.length === 0) {
+      fs.rmSync(pkgCacheDir, { recursive: true, force: true });
+      return null;
+    }
+    // Skip zip extraction (not common for sdists) — mark as skipped
+    fs.rmSync(pkgCacheDir, { recursive: true, force: true });
+    return null;
+  }
+
+  try {
+    extractTgz(path.join(pkgCacheDir, archives[0]), pkgCacheDir);
+  } catch (err) {
+    if (process.env.MUADDIB_DEBUG) {
+      console.error(`\n  [DEBUG] extract PyPI ${pkg} failed: ${(err.message || '').slice(0, 200)}`);
+    }
+    fs.rmSync(pkgCacheDir, { recursive: true, force: true });
+    return null;
+  }
+
+  // Clean up archive
+  try { fs.unlinkSync(path.join(pkgCacheDir, archives[0])); } catch { /* ignore */ }
+
+  // Find extracted directory
+  const entries = fs.readdirSync(pkgCacheDir).filter(e => {
+    try { return fs.statSync(path.join(pkgCacheDir, e)).isDirectory(); } catch { return false; }
+  });
+  if (entries.length === 0) {
+    fs.rmSync(pkgCacheDir, { recursive: true, force: true });
+    return null;
+  }
+  return path.join(pkgCacheDir, entries[0]);
+}
+
+/**
+ * Evaluate benign PyPI packages (separate from npm FPR).
+ */
+async function evaluateBenignPyPI(options = {}) {
+  const listFile = path.join(BENIGN_DIR, 'packages-pypi.txt');
+  if (!fs.existsSync(listFile)) return null;
+
+  let packages = fs.readFileSync(listFile, 'utf8')
+    .split(/\r?\n/)
+    .map(l => l.trim())
+    .filter(l => l && !l.startsWith('#'));
+
+  if (packages.length === 0) return null;
+
+  const limit = options.benignLimit || 0;
+  if (limit > 0) packages = packages.slice(0, limit);
+
+  fs.mkdirSync(PYPI_CACHE_DIR, { recursive: true });
+
+  const details = [];
+  let flagged = 0;
+  let skipped = 0;
+  const total = packages.length;
+
+  for (let i = 0; i < packages.length; i++) {
+    const pkg = packages[i];
+    const progress = `[${i + 1}/${total}]`;
+
+    if (!options.json && process.stdout.isTTY) {
+      process.stdout.write(`\r  [2b/4] PyPI Benign ${progress} ${pkg}${''.padEnd(40)}`);
+    }
+
+    const extractedDir = downloadAndExtractPyPI(pkg, options);
+    if (!extractedDir) {
+      details.push({ name: pkg, score: 0, flagged: false, skipped: true, error: 'download failed' });
+      skipped++;
+      continue;
+    }
+
+    const result = await silentScan(extractedDir);
+    const score = result.summary.riskScore;
+    const isFlagged = score > BENIGN_THRESHOLD;
+    if (isFlagged) flagged++;
+
+    const entry = { name: pkg, score, flagged: isFlagged };
+    if (isFlagged && result.threats) {
+      entry.threats = result.threats.map(t => ({
+        type: t.type, severity: t.severity, message: t.message, file: t.file
+      }));
+    }
+    details.push(entry);
+  }
+
+  if (!options.json && process.stdout.isTTY) {
+    process.stdout.write('\r' + ''.padEnd(80) + '\r');
+  }
+
+  const scanned = total - skipped;
+  const fpr = scanned > 0 ? flagged / scanned : 0;
+  return { flagged, total, scanned, skipped, fpr, details };
+}
+
 /**
  * 3. Adversarial — scan evasive malicious samples
  */
@@ -407,17 +545,22 @@ async function evaluate(options = {}) {
 
   if (!jsonMode) {
     console.log(`\n  MUAD'DIB Evaluation (v${version})\n`);
-    console.log(`  [1/3] Ground Truth...`);
+    console.log(`  [1/4] Ground Truth...`);
   }
   const groundTruth = await evaluateGroundTruth();
 
   if (!jsonMode) {
-    console.log(`  [2/3] Benign packages (real source code)...`);
+    console.log(`  [2/4] Benign npm packages (real source code)...`);
   }
   const benign = await evaluateBenign(options);
 
   if (!jsonMode) {
-    console.log(`  [3/3] Adversarial samples...`);
+    console.log(`  [2b/4] Benign PyPI packages...`);
+  }
+  const benignPyPI = await evaluateBenignPyPI(options);
+
+  if (!jsonMode) {
+    console.log(`  [3/4] Adversarial samples...`);
   }
   const adversarial = await evaluateAdversarial();
 
@@ -426,6 +569,7 @@ async function evaluate(options = {}) {
     date: new Date().toISOString(),
     groundTruth,
     benign,
+    benignPyPI,
     adversarial
   };
 
@@ -440,7 +584,11 @@ async function evaluate(options = {}) {
 
     console.log('');
     console.log(`  Ground Truth (TPR):  ${groundTruth.detected}/${groundTruth.total}  ${tprPct}%`);
-    console.log(`  Benign (FPR):        ${benign.flagged}/${benign.scanned}  ${fprPct}%  (${benign.skipped} skipped)`);
+    console.log(`  Benign npm (FPR):    ${benign.flagged}/${benign.scanned}  ${fprPct}%  (${benign.skipped} skipped)`);
+    if (benignPyPI) {
+      const pypiPct = (benignPyPI.fpr * 100).toFixed(1);
+      console.log(`  Benign PyPI (FPR):   ${benignPyPI.flagged}/${benignPyPI.scanned}  ${pypiPct}%  (${benignPyPI.skipped} skipped)`);
+    }
     console.log(`  Adversarial (ADR):   ${adversarial.detected}/${adversarial.total}  ${adrPct}%`);
     console.log('');
 
@@ -496,6 +644,7 @@ module.exports = {
   evaluate,
   evaluateGroundTruth,
   evaluateBenign,
+  evaluateBenignPyPI,
   evaluateAdversarial,
   saveMetrics,
   silentScan,
