@@ -192,9 +192,8 @@ async function runSingleSandbox(packageName, options = {}) {
     dockerArgs.push('--tmpfs', '/home/sandboxuser:rw,noexec,nosuid,size=16m');
     dockerArgs.push('--read-only');
 
-    // Mount fake /proc/uptime to prevent time-based sandbox evasion (T1497.003)
-    // Malware reads /proc/uptime to detect sandboxes (low uptime = sandbox)
-    dockerArgs.push('--tmpfs', '/proc/uptime:ro,size=4k');
+    // /proc/uptime evasion (T1497.003) handled by preload.js monkey-patching
+    // (process.uptime, Date.now, performance.now, process.hrtime)
 
     dockerArgs.push('--security-opt', 'no-new-privileges');
 
