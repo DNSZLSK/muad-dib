@@ -165,10 +165,29 @@ function resolveStringConcat(node) {
   if (node.type === 'TemplateLiteral' && node.expressions.length === 0) {
     return node.quasis.map(q => q.value.raw).join('');
   }
+  // TemplateLiteral with resolvable expressions
+  if (node.type === 'TemplateLiteral' && node.expressions.length > 0) {
+    const parts = [];
+    for (let i = 0; i < node.quasis.length; i++) {
+      parts.push(node.quasis[i].value.raw);
+      if (i < node.expressions.length) {
+        const resolved = resolveStringConcat(node.expressions[i]);
+        if (resolved === null) return null;
+        parts.push(resolved);
+      }
+    }
+    return parts.join('');
+  }
   if (node.type === 'BinaryExpression' && node.operator === '+') {
     const left = resolveStringConcat(node.left);
     const right = resolveStringConcat(node.right);
     if (left !== null && right !== null) return left + right;
+  }
+  // ConditionalExpression — either branch is enough for detection
+  if (node.type === 'ConditionalExpression') {
+    const consequent = resolveStringConcat(node.consequent);
+    const alternate = resolveStringConcat(node.alternate);
+    return consequent !== null ? consequent : alternate;
   }
   return null;
 }

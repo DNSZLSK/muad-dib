@@ -229,9 +229,12 @@ function extractTarGz(tgzPath, destDir) {
  */
 function sanitizePackageName(packageName) {
   return packageName
+    .normalize('NFC')
+    .replace(/[^\x20-\x7E]/g, '')   // Strip non-ASCII (Unicode confusables)
     .replace(/\.\./g, '')
-    .replace(/\//g, '_')
-    .replace(/@/g, '');
+    .replace(/[/\\]/g, '_')          // Both slash types → _
+    .replace(/[@:]/g, '')            // @ and : (Windows drive letter)
+    .replace(/[\x00-\x1F]/g, '');   // Control chars (safety net)
 }
 
 module.exports = {
