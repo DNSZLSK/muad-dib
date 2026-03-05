@@ -4870,7 +4870,7 @@ async function runMonitorTests() {
     assert(r.suspect === true && r.tier === 2, 'eval + sensitive_string should be T2, got tier=' + r.tier);
   });
 
-  test('isSuspectClassification T2: mcp_config_injection + dynamic_require → tier 2', () => {
+  test('isSuspectClassification T1: mcp_config_injection + dynamic_require → tier 1', () => {
     const result = {
       threats: [
         { type: 'mcp_config_injection', severity: 'MEDIUM' },
@@ -4879,7 +4879,7 @@ async function runMonitorTests() {
       summary: { critical: 0, high: 0, medium: 1, low: 1 }
     };
     const r = isSuspectClassification(result);
-    assert(r.suspect === true && r.tier === 2, 'mcp_config_injection + dynamic_require should be T2, got tier=' + r.tier);
+    assert(r.suspect === true && r.tier === 1, 'mcp_config_injection should be T1, got tier=' + r.tier);
   });
 
   test('isSuspectClassification T2: non-passive non-active types → tier 2 (fallback)', () => {
@@ -4952,17 +4952,17 @@ async function runMonitorTests() {
     assert(TIER1_TYPES.has('env_charcode_reconstruction'), 'env_charcode_reconstruction in TIER1');
     assert(TIER1_TYPES.has('staged_payload'), 'staged_payload in TIER1');
     assert(TIER1_TYPES.has('staged_binary_payload'), 'staged_binary_payload in TIER1');
-    assert(TIER1_TYPES.size === 4, 'TIER1 should have 4 types, got ' + TIER1_TYPES.size);
+    assert(TIER1_TYPES.has('mcp_config_injection'), 'mcp_config_injection in TIER1');
+    assert(TIER1_TYPES.has('ai_agent_abuse'), 'ai_agent_abuse in TIER1');
+    assert(TIER1_TYPES.has('crypto_miner'), 'crypto_miner in TIER1');
+    assert(TIER1_TYPES.size === 7, 'TIER1 should have 7 types, got ' + TIER1_TYPES.size);
   });
 
   test('isSuspectClassification: TIER2_ACTIVE_TYPES contains expected types', () => {
     assert(TIER2_ACTIVE_TYPES.has('suspicious_dataflow'), 'suspicious_dataflow in TIER2');
     assert(TIER2_ACTIVE_TYPES.has('dangerous_call_eval'), 'dangerous_call_eval in TIER2');
     assert(TIER2_ACTIVE_TYPES.has('dangerous_call_function'), 'dangerous_call_function in TIER2');
-    assert(TIER2_ACTIVE_TYPES.has('mcp_config_injection'), 'mcp_config_injection in TIER2');
-    assert(TIER2_ACTIVE_TYPES.has('ai_agent_abuse'), 'ai_agent_abuse in TIER2');
-    assert(TIER2_ACTIVE_TYPES.has('crypto_miner'), 'crypto_miner in TIER2');
-    assert(TIER2_ACTIVE_TYPES.size === 6, 'TIER2 should have 6 types, got ' + TIER2_ACTIVE_TYPES.size);
+    assert(TIER2_ACTIVE_TYPES.size === 3, 'TIER2 should have 3 types, got ' + TIER2_ACTIVE_TYPES.size);
   });
 
   test('isSuspectClassification: TIER3_PASSIVE_TYPES contains expected types', () => {
@@ -5006,7 +5006,7 @@ async function runMonitorTests() {
 
   // --- Edge: T2 mixed passive + one active ---
 
-  test('isSuspectClassification: 1 active + 2 passive types → T2 not T3', () => {
+  test('isSuspectClassification: crypto_miner + 2 passive types → T1', () => {
     const result = {
       threats: [
         { type: 'crypto_miner', severity: 'MEDIUM' },
@@ -5016,7 +5016,45 @@ async function runMonitorTests() {
       summary: { critical: 0, high: 0, medium: 1, low: 2 }
     };
     const r = isSuspectClassification(result);
-    assert(r.suspect === true && r.tier === 2, 'One active type should elevate to T2, got tier=' + r.tier);
+    assert(r.suspect === true && r.tier === 1, 'crypto_miner is now T1, got tier=' + r.tier);
+  });
+
+  // --- Promoted T1 types: always sandbox ---
+
+  test('isSuspectClassification T1: ai_agent_abuse alone → tier 1', () => {
+    const result = {
+      threats: [
+        { type: 'ai_agent_abuse', severity: 'MEDIUM' },
+        { type: 'sensitive_string', severity: 'LOW' }
+      ],
+      summary: { critical: 0, high: 0, medium: 1, low: 1 }
+    };
+    const r = isSuspectClassification(result);
+    assert(r.suspect === true && r.tier === 1, 'ai_agent_abuse should be T1, got tier=' + r.tier);
+  });
+
+  test('isSuspectClassification T1: crypto_miner alone → tier 1', () => {
+    const result = {
+      threats: [
+        { type: 'crypto_miner', severity: 'MEDIUM' },
+        { type: 'dynamic_require', severity: 'LOW' }
+      ],
+      summary: { critical: 0, high: 0, medium: 1, low: 1 }
+    };
+    const r = isSuspectClassification(result);
+    assert(r.suspect === true && r.tier === 1, 'crypto_miner should be T1, got tier=' + r.tier);
+  });
+
+  test('isSuspectClassification T1: mcp_config_injection alone → tier 1', () => {
+    const result = {
+      threats: [
+        { type: 'mcp_config_injection', severity: 'MEDIUM' },
+        { type: 'prototype_hook', severity: 'LOW' }
+      ],
+      summary: { critical: 0, high: 0, medium: 1, low: 1 }
+    };
+    const r = isSuspectClassification(result);
+    assert(r.suspect === true && r.tier === 1, 'mcp_config_injection should be T1, got tier=' + r.tier);
   });
 }
 
