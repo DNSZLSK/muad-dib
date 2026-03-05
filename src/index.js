@@ -30,7 +30,8 @@ const { formatOutput } = require('./output-formatter.js');
 const { setExtraExcludes, getExtraExcludes, Spinner, listInstalledPackages, clearFileListCache, debugLog } = require('./utils.js');
 const { SEVERITY_WEIGHTS, RISK_THRESHOLDS, MAX_RISK_SCORE, isPackageLevelThreat, computeGroupScore, applyFPReductions, calculateRiskScore } = require('./scoring.js');
 
-const { MAX_FILE_SIZE } = require('./shared/constants.js');
+const { MAX_FILE_SIZE, safeParse } = require('./shared/constants.js');
+const walk = require('acorn-walk');
 
 // Timeout constants for scan safety
 const SCANNER_TIMEOUT = 15000;  // 15s per individual scanner
@@ -40,27 +41,169 @@ const SCAN_TIMEOUT = 60000;     // 60s global scan timeout
 function scanParanoid(targetPath) {
   const threats = [];
 
-  function scanFile(filePath) {
+  // AST-based paranoid detection patterns
+  const PARANOID_AST_DETECTORS = {
+    network_access: {
+      callNames: new Set(['fetch', 'axios']),
+      memberPatterns: [
+        { obj: 'http', prop: 'request' }, { obj: 'http', prop: 'get' },
+        { obj: 'https', prop: 'request' }, { obj: 'https', prop: 'get' },
+        { obj: 'net', prop: 'connect' }
+      ],
+      newNames: new Set(['XMLHttpRequest'])
+    },
+    sensitive_file_access: {
+      sensitiveStrings: ['.env', '.npmrc', '.ssh', '.git', 'id_rsa', 'credentials', 'secrets']
+    },
+    dynamic_execution: {
+      callNames: new Set(['eval']),
+      newNames: new Set(['Function']),
+      memberPatterns: [
+        { obj: 'vm', prop: 'runInContext' }, { obj: 'vm', prop: 'runInNewContext' },
+        { obj: 'vm', prop: 'runInThisContext' }
+      ]
+    },
+    subprocess: {
+      callNames: new Set(['exec', 'execSync', 'spawn', 'spawnSync', 'fork', 'execFile', 'execFileSync']),
+      memberPatterns: [
+        { obj: 'child_process', prop: 'exec' }, { obj: 'child_process', prop: 'execSync' },
+        { obj: 'child_process', prop: 'spawn' }, { obj: 'child_process', prop: 'fork' }
+      ]
+    },
+    env_access: {
+      memberPatterns: [{ obj: 'process', prop: 'env' }]
+    }
+  };
+
+  function scanFileAST(filePath) {
     try {
       const stat = fs.statSync(filePath);
       if (stat.size > MAX_FILE_SIZE) return;
       const content = fs.readFileSync(filePath, 'utf8');
+      const relFile = path.relative(targetPath, filePath);
 
-      // Ignore URLs (they often contain patterns like .git)
-      const contentWithoutUrls = content.replace(/https?:\/\/[^\s"']+/g, '');
+      const ast = safeParse(content);
+      if (!ast) {
+        // Parse failed — fall back to content matching for this file
+        scanFileContent(filePath, content, relFile);
+        return;
+      }
 
-      for (const [, rule] of Object.entries(PARANOID_RULES)) {
-        for (const pattern of rule.patterns) {
-          if (contentWithoutUrls.includes(pattern)) {
+      const found = new Set(); // deduplicate: one finding per rule per file
+
+      walk.simple(ast, {
+        CallExpression(node) {
+          // Direct calls: eval(), exec(), fetch(), etc.
+          if (node.callee.type === 'Identifier') {
+            const name = node.callee.name;
+            for (const [ruleKey, detector] of Object.entries(PARANOID_AST_DETECTORS)) {
+              if (detector.callNames && detector.callNames.has(name) && !found.has(ruleKey)) {
+                found.add(ruleKey);
+                const rule = PARANOID_RULES[ruleKey];
+                threats.push({
+                  type: rule.id, severity: rule.severity.toUpperCase(),
+                  message: `${rule.message}: "${name}"`, file: relFile, mitre: rule.mitre
+                });
+              }
+            }
+          }
+          // Member calls: http.request(), child_process.exec(), etc.
+          if (node.callee.type === 'MemberExpression' &&
+              node.callee.object?.type === 'Identifier' &&
+              node.callee.property?.type === 'Identifier') {
+            const obj = node.callee.object.name;
+            const prop = node.callee.property.name;
+            for (const [ruleKey, detector] of Object.entries(PARANOID_AST_DETECTORS)) {
+              if (detector.memberPatterns &&
+                  detector.memberPatterns.some(m => m.obj === obj && m.prop === prop) &&
+                  !found.has(ruleKey)) {
+                found.add(ruleKey);
+                const rule = PARANOID_RULES[ruleKey];
+                threats.push({
+                  type: rule.id, severity: rule.severity.toUpperCase(),
+                  message: `${rule.message}: "${obj}.${prop}"`, file: relFile, mitre: rule.mitre
+                });
+              }
+            }
+          }
+        },
+        NewExpression(node) {
+          if (node.callee.type === 'Identifier') {
+            const name = node.callee.name;
+            for (const [ruleKey, detector] of Object.entries(PARANOID_AST_DETECTORS)) {
+              if (detector.newNames && detector.newNames.has(name) && !found.has(ruleKey)) {
+                found.add(ruleKey);
+                const rule = PARANOID_RULES[ruleKey];
+                threats.push({
+                  type: rule.id, severity: rule.severity.toUpperCase(),
+                  message: `${rule.message}: "new ${name}"`, file: relFile, mitre: rule.mitre
+                });
+              }
+            }
+          }
+        },
+        MemberExpression(node) {
+          // process.env access
+          if (node.object?.type === 'Identifier' && node.object.name === 'process' &&
+              node.property?.type === 'Identifier' && node.property.name === 'env' &&
+              !found.has('env_access')) {
+            found.add('env_access');
+            const rule = PARANOID_RULES.env_access;
             threats.push({
-              type: rule.id,
-              severity: rule.severity.toUpperCase(),
-              message: `${rule.message}: "${pattern}"`,
-              file: path.relative(targetPath, filePath),
-              mitre: rule.mitre
+              type: rule.id, severity: rule.severity.toUpperCase(),
+              message: `${rule.message}: "process.env"`, file: relFile, mitre: rule.mitre
             });
           }
+        },
+        Literal(node) {
+          // Sensitive file string literals
+          if (typeof node.value === 'string' && !found.has('sensitive_file_access')) {
+            const detector = PARANOID_AST_DETECTORS.sensitive_file_access;
+            for (const s of detector.sensitiveStrings) {
+              if (node.value.includes(s)) {
+                found.add('sensitive_file_access');
+                const rule = PARANOID_RULES.sensitive_file_access;
+                threats.push({
+                  type: rule.id, severity: rule.severity.toUpperCase(),
+                  message: `${rule.message}: "${s}"`, file: relFile, mitre: rule.mitre
+                });
+                break;
+              }
+            }
+          }
         }
+      });
+    } catch {
+      // Ignore read/parse errors
+    }
+  }
+
+  // Content-based fallback for non-JS files or parse failures
+  function scanFileContent(filePath, content, relFile) {
+    const contentWithoutUrls = content.replace(/https?:\/\/[^\s"']+/g, '');
+    for (const [, rule] of Object.entries(PARANOID_RULES)) {
+      for (const pattern of rule.patterns) {
+        if (contentWithoutUrls.includes(pattern)) {
+          threats.push({
+            type: rule.id, severity: rule.severity.toUpperCase(),
+            message: `${rule.message}: "${pattern}"`, file: relFile, mitre: rule.mitre
+          });
+        }
+      }
+    }
+  }
+
+  function scanFile(filePath) {
+    try {
+      const stat = fs.statSync(filePath);
+      if (stat.size > MAX_FILE_SIZE) return;
+      const ext = path.extname(filePath);
+      if (ext === '.js' || ext === '.mjs' || ext === '.cjs') {
+        scanFileAST(filePath);
+      } else {
+        const content = fs.readFileSync(filePath, 'utf8');
+        const relFile = path.relative(targetPath, filePath);
+        scanFileContent(filePath, content, relFile);
       }
     } catch {
       // Ignore read errors
@@ -86,7 +229,8 @@ function scanParanoid(targetPath) {
           if (!isExcluded) {
             walkDir(fullPath, depth + 1);
           }
-        } else if (file.endsWith('.js') || file.endsWith('.json') || file.endsWith('.sh')) {
+        } else if (file.endsWith('.js') || file.endsWith('.mjs') || file.endsWith('.cjs') ||
+                   file.endsWith('.json') || file.endsWith('.sh')) {
           scanFile(fullPath);
         }
       }

@@ -81,6 +81,7 @@ function findFiles(dir, options = {}) {
     maxDepth = 100,
     results = [],
     visitedInodes = new Set(),
+    visitedPaths = new Set(),
     depth = 0
   } = options;
 
@@ -90,15 +91,15 @@ function findFiles(dir, options = {}) {
       [...excludedDirs, ..._extraExcludedDirs].sort().join(',');
     const cached = _fileListCache.get(cacheKey);
     if (cached) return [...cached]; // return copy to prevent mutation
-    const result = _findFilesImpl(dir, { extensions, excludedDirs, maxDepth, results, visitedInodes, depth });
+    const result = _findFilesImpl(dir, { extensions, excludedDirs, maxDepth, results, visitedInodes, visitedPaths, depth });
     _fileListCache.set(cacheKey, [...result]);
     return result;
   }
 
-  return _findFilesImpl(dir, { extensions, excludedDirs, maxDepth, results, visitedInodes, depth });
+  return _findFilesImpl(dir, { extensions, excludedDirs, maxDepth, results, visitedInodes, visitedPaths, depth });
 }
 
-function _findFilesImpl(dir, { extensions, excludedDirs, maxDepth, results, visitedInodes, depth }) {
+function _findFilesImpl(dir, { extensions, excludedDirs, maxDepth, results, visitedInodes, visitedPaths, depth }) {
   if (depth > maxDepth) return results;
   if (!fs.existsSync(dir)) return results;
 
@@ -132,10 +133,16 @@ function _findFilesImpl(dir, { extensions, excludedDirs, maxDepth, results, visi
         try {
           const realPath = fs.realpathSync(fullPath);
           const realStat = fs.statSync(realPath);
-          if (realStat.ino !== 0 && visitedInodes.has(realStat.ino)) continue;
-          if (realStat.ino !== 0) visitedInodes.add(realStat.ino);
+          if (realStat.ino !== 0) {
+            if (visitedInodes.has(realStat.ino)) continue;
+            visitedInodes.add(realStat.ino);
+          } else {
+            // Windows ino=0 fallback: use resolved path for cycle detection
+            if (visitedPaths.has(realPath)) continue;
+            visitedPaths.add(realPath);
+          }
           if (realStat.isDirectory()) {
-            _findFilesImpl(realPath, { extensions, excludedDirs, maxDepth, results, visitedInodes, depth: depth + 1 });
+            _findFilesImpl(realPath, { extensions, excludedDirs, maxDepth, results, visitedInodes, visitedPaths, depth: depth + 1 });
           } else if (extensions.some(ext => item.endsWith(ext))) {
             results.push(realPath);
           }
@@ -145,10 +152,19 @@ function _findFilesImpl(dir, { extensions, excludedDirs, maxDepth, results, visi
         continue;
       }
 
-      if (lstat.ino !== 0) visitedInodes.add(lstat.ino);
+      if (lstat.ino !== 0) {
+        visitedInodes.add(lstat.ino);
+      } else {
+        // Windows ino=0 fallback: use resolved path for cycle detection
+        const resolvedPath = path.resolve(fullPath);
+        if (lstat.isDirectory()) {
+          if (visitedPaths.has(resolvedPath)) continue;
+          visitedPaths.add(resolvedPath);
+        }
+      }
 
       if (lstat.isDirectory()) {
-        _findFilesImpl(fullPath, { extensions, excludedDirs, maxDepth, results, visitedInodes, depth: depth + 1 });
+        _findFilesImpl(fullPath, { extensions, excludedDirs, maxDepth, results, visitedInodes, visitedPaths, depth: depth + 1 });
       } else if (extensions.some(ext => item.endsWith(ext))) {
         results.push(fullPath);
       }

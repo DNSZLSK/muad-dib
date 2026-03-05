@@ -424,7 +424,7 @@ const RULES = {
     mitre: 'T1105'
   },
   network_require: {
-    id: 'MUADDIB-PKG-006',
+    id: 'MUADDIB-PKG-011',
     name: 'Network Module in Lifecycle Script',
     severity: 'HIGH',
     confidence: 'high',
@@ -433,7 +433,7 @@ const RULES = {
     mitre: 'T1105'
   },
   node_inline_exec: {
-    id: 'MUADDIB-PKG-007',
+    id: 'MUADDIB-PKG-012',
     name: 'Node Inline Execution in Lifecycle Script',
     severity: 'HIGH',
     confidence: 'high',
