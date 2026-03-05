@@ -707,9 +707,13 @@ const SYSTEM_IDENTITY_ENVS = new Set([
   'USERPROFILE', 'COMPUTERNAME', 'WHOAMI'
 ]);
 
+// Env var prefixes for tool-internal configuration (not external credentials)
+const SAFE_ENV_PREFIXES = ['MUADDIB_', 'npm_config_', 'npm_lifecycle_', 'npm_package_'];
+
 function isSensitiveEnv(name) {
   const upper = name.toUpperCase();
   if (SYSTEM_IDENTITY_ENVS.has(upper)) return true;
+  if (SAFE_ENV_PREFIXES.some(p => upper.startsWith(p))) return false;
   const sensitive = ['TOKEN', 'SECRET', 'KEY', 'PASSWORD', 'CREDENTIAL', 'AUTH', 'NPM', 'AWS', 'AZURE', 'GCP'];
   return sensitive.some(s => upper.includes(s));
 }
