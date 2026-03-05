@@ -23,6 +23,20 @@ const DETECTIONS_FILE = path.join(__dirname, '..', 'data', 'detections.json');
 const SCAN_STATS_FILE = path.join(__dirname, '..', 'data', 'scan-stats.json');
 const LAST_DAILY_REPORT_FILE = path.join(__dirname, '..', 'data', 'last-daily-report.json');
 const DAILY_STATS_FILE = path.join(__dirname, '..', 'data', 'daily-stats.json');
+
+/**
+ * Atomic file write: write to .tmp then rename (crash-safe).
+ * Prevents race conditions and partial writes from corrupting data files.
+ * @param {string} filePath - Target file path
+ * @param {string} data - Content to write
+ */
+function atomicWriteFileSync(filePath, data) {
+  const dir = path.dirname(filePath);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  const tmpFile = filePath + '.tmp';
+  fs.writeFileSync(tmpFile, data, 'utf8');
+  fs.renameSync(tmpFile, filePath);
+}
 const DAILY_STATS_PERSIST_INTERVAL = 10; // Persist to disk every N scans
 const POLL_INTERVAL = 60_000;
 const POLL_MAX_BACKOFF = 960_000; // 16 minutes max backoff
@@ -897,7 +911,7 @@ function appendAlert(alert) {
       alerts = JSON.parse(fs.readFileSync(ALERTS_FILE, 'utf8'));
     } catch {}
     alerts.push(alert);
-    fs.writeFileSync(ALERTS_FILE, JSON.stringify(alerts, null, 2), 'utf8');
+    atomicWriteFileSync(ALERTS_FILE, JSON.stringify(alerts, null, 2));
   } catch (err) {
     console.error(`[MONITOR] Failed to save alert: ${err.message}`);
   }
@@ -937,7 +951,7 @@ function appendDetection(name, version, ecosystem, findings, severity) {
       advisory_at: null,
       lead_time_hours: null
     });
-    fs.writeFileSync(DETECTIONS_FILE, JSON.stringify(data, null, 2), 'utf8');
+    atomicWriteFileSync(DETECTIONS_FILE, JSON.stringify(data, null, 2));
   } catch (err) {
     console.error(`[MONITOR] Failed to save detection: ${err.message}`);
   }
@@ -1009,9 +1023,7 @@ function updateScanStats(result) {
   dayEntry.fp_rate = denom > 0 ? dayEntry.false_positive / denom : 0;
 
   try {
-    const dir = path.dirname(SCAN_STATS_FILE);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(SCAN_STATS_FILE, JSON.stringify(data, null, 2), 'utf8');
+    atomicWriteFileSync(SCAN_STATS_FILE, JSON.stringify(data, null, 2));
   } catch (err) {
     console.error(`[MONITOR] Failed to save scan stats: ${err.message}`);
   }
@@ -1058,7 +1070,7 @@ function saveDailyStats() {
       totalTimeMs: stats.totalTimeMs,
       dailyAlerts: dailyAlerts.slice()
     };
-    fs.writeFileSync(DAILY_STATS_FILE, JSON.stringify(data, null, 2), 'utf8');
+    atomicWriteFileSync(DAILY_STATS_FILE, JSON.stringify(data, null, 2));
   } catch (err) {
     console.error(`[MONITOR] Failed to save daily stats: ${err.message}`);
   }
@@ -1348,9 +1360,7 @@ function loadLastDailyReportDate() {
  */
 function saveLastDailyReportDate(dateStr) {
   try {
-    const dir = path.dirname(LAST_DAILY_REPORT_FILE);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(LAST_DAILY_REPORT_FILE, JSON.stringify({ lastReportDate: dateStr }, null, 2), 'utf8');
+    atomicWriteFileSync(LAST_DAILY_REPORT_FILE, JSON.stringify({ lastReportDate: dateStr }, null, 2));
   } catch (err) {
     console.error(`[MONITOR] Failed to save last daily report date: ${err.message}`);
   }
@@ -2214,7 +2224,8 @@ module.exports = {
   resetDailyStats,
   maybePersistDailyStats,
   get scansSinceLastPersist() { return scansSinceLastPersist; },
-  set scansSinceLastPersist(v) { scansSinceLastPersist = v; }
+  set scansSinceLastPersist(v) { scansSinceLastPersist = v; },
+  atomicWriteFileSync
 };
 
 // Standalone entry point: node src/monitor.js

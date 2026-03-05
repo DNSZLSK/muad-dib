@@ -862,6 +862,81 @@ function handleCallExpression(node, ctx) {
     }
   }
 
+  // Detect eval.call(null, code) / eval.apply(null, [code]) / Function.call/apply
+  if (node.callee.type === 'MemberExpression' && !node.callee.computed &&
+      node.callee.property?.type === 'Identifier' &&
+      (node.callee.property.name === 'call' || node.callee.property.name === 'apply')) {
+    const obj = node.callee.object;
+    if (obj?.type === 'Identifier' && (obj.name === 'eval' || obj.name === 'Function')) {
+      ctx.hasEvalInFile = true;
+      ctx.hasDynamicExec = true;
+      ctx.threats.push({
+        type: obj.name === 'eval' ? 'dangerous_call_eval' : 'dangerous_call_function',
+        severity: 'HIGH',
+        message: `${obj.name}.${node.callee.property.name}() — indirect execution via call/apply evasion technique.`,
+        file: ctx.relFile
+      });
+    }
+  }
+
+  // Detect array access pattern: [require][0]('child_process') or [eval][0](code)
+  if (node.callee.type === 'MemberExpression' && node.callee.computed &&
+      node.callee.object?.type === 'ArrayExpression' &&
+      node.callee.property?.type === 'Literal' && typeof node.callee.property.value === 'number') {
+    const elements = node.callee.object.elements;
+    for (const el of elements) {
+      if (el?.type === 'Identifier') {
+        if (el.name === 'eval') {
+          ctx.hasEvalInFile = true;
+          ctx.hasDynamicExec = true;
+          ctx.threats.push({
+            type: 'dangerous_call_eval',
+            severity: 'HIGH',
+            message: '[eval][0]() — array access evasion technique for indirect eval execution.',
+            file: ctx.relFile
+          });
+        } else if (el.name === 'require') {
+          ctx.threats.push({
+            type: 'dynamic_require',
+            severity: 'HIGH',
+            message: '[require][0]() — array access evasion technique for indirect require.',
+            file: ctx.relFile
+          });
+        } else if (el.name === 'Function') {
+          ctx.hasDynamicExec = true;
+          ctx.threats.push({
+            type: 'dangerous_call_function',
+            severity: 'MEDIUM',
+            message: '[Function][0]() — array access evasion technique for indirect Function construction.',
+            file: ctx.relFile
+          });
+        }
+      }
+    }
+  }
+
+  // Detect new Proxy(require, handler) — proxy wrapping require to intercept module loading
+  if (node.callee.type === 'Identifier' && node.callee.name !== 'Proxy') {
+    // handled below in handleNewExpression
+  }
+
+  // Detect template literals in exec/execSync: execSync(`${cmd}`)
+  if ((execName || memberExec) && node.arguments.length > 0) {
+    const arg = node.arguments[0];
+    if (arg.type === 'TemplateLiteral' && arg.expressions.length > 0) {
+      // Template literal with dynamic expressions in exec — bypass for string matching
+      const staticParts = arg.quasis.map(q => q.value.raw).join('');
+      if (DANGEROUS_CMD_PATTERNS.some(p => p.test(staticParts))) {
+        ctx.threats.push({
+          type: 'dangerous_exec',
+          severity: 'CRITICAL',
+          message: `Dangerous command in template literal exec(): "${staticParts.substring(0, 80)}" — template literal evasion.`,
+          file: ctx.relFile
+        });
+      }
+    }
+  }
+
   // Detect indirect eval/Function via computed property
   if (node.callee.type === 'MemberExpression' && node.callee.computed) {
     const prop = node.callee.property;
@@ -1058,6 +1133,15 @@ function handleNewExpression(node, ctx) {
         file: ctx.relFile
       });
     }
+    // Detect new Proxy(require, handler) — intercept module loading
+    if (target.type === 'Identifier' && target.name === 'require') {
+      ctx.threats.push({
+        type: 'dynamic_require',
+        severity: 'HIGH',
+        message: 'new Proxy(require) — proxy wrapping require to intercept/redirect module loading.',
+        file: ctx.relFile
+      });
+    }
   }
 }
 
@@ -1119,6 +1203,54 @@ function handleLiteral(node, ctx) {
 }
 
 function handleAssignmentExpression(node, ctx) {
+  // Detect object property indirection: obj.exec = require('child_process').exec
+  // or obj.fn = eval — stashing dangerous functions in object properties
+  if (node.left?.type === 'MemberExpression' && node.right) {
+    const propName = node.left.property?.type === 'Identifier' ? node.left.property.name :
+                     (node.left.property?.type === 'Literal' ? String(node.left.property.value) : null);
+
+    if (propName) {
+      // Assigning require('child_process') or its methods to an object property
+      if (node.right.type === 'CallExpression' && getCallName(node.right) === 'require' &&
+          node.right.arguments.length > 0 && node.right.arguments[0]?.type === 'Literal') {
+        const mod = node.right.arguments[0].value;
+        if (mod === 'child_process' || mod === 'fs' || mod === 'net' || mod === 'dns') {
+          ctx.threats.push({
+            type: 'dynamic_require',
+            severity: 'HIGH',
+            message: `Object property indirection: ${propName} = require('${mod}') — hiding dangerous module in object property.`,
+            file: ctx.relFile
+          });
+        }
+      }
+      // Assigning require('child_process').exec to an object property
+      if (node.right.type === 'MemberExpression' && node.right.object?.type === 'CallExpression' &&
+          getCallName(node.right.object) === 'require' &&
+          node.right.object.arguments.length > 0 && node.right.object.arguments[0]?.type === 'Literal' &&
+          node.right.object.arguments[0].value === 'child_process') {
+        const method = node.right.property?.type === 'Identifier' ? node.right.property.name : null;
+        if (method && ['exec', 'execSync', 'spawn', 'execFile'].includes(method)) {
+          ctx.threats.push({
+            type: 'dangerous_exec',
+            severity: 'HIGH',
+            message: `Object property indirection: ${propName} = require('child_process').${method} — hiding exec in object property.`,
+            file: ctx.relFile
+          });
+        }
+      }
+      // Assigning eval or Function to an object property
+      if (node.right.type === 'Identifier' && (node.right.name === 'eval' || node.right.name === 'Function')) {
+        ctx.hasDynamicExec = true;
+        ctx.threats.push({
+          type: node.right.name === 'eval' ? 'dangerous_call_eval' : 'dangerous_call_function',
+          severity: 'HIGH',
+          message: `Object property indirection: ${propName} = ${node.right.name} — stashing dangerous function in object property.`,
+          file: ctx.relFile
+        });
+      }
+    }
+  }
+
   if (node.left?.type === 'MemberExpression') {
     const left = node.left;
 
@@ -1375,6 +1507,33 @@ function handlePostWalk(ctx) {
   }
 }
 
+function handleWithStatement(node, ctx) {
+  // with(require('child_process')) exec(cmd) — scope injection evasion
+  // The with() statement makes all properties of the object available as local variables.
+  // When used with require(), it allows calling exec(), spawn() etc. without explicit reference.
+  if (node.object?.type === 'CallExpression' && getCallName(node.object) === 'require') {
+    const arg = node.object.arguments[0];
+    const modName = arg?.type === 'Literal' ? arg.value : null;
+    const dangerousModules = ['child_process', 'fs', 'http', 'https', 'net', 'dns'];
+    if (modName && dangerousModules.includes(modName)) {
+      ctx.hasDynamicExec = true;
+      ctx.threats.push({
+        type: 'dangerous_exec',
+        severity: 'CRITICAL',
+        message: `with(require('${modName}')) — scope injection evasion: all module methods available as local variables.`,
+        file: ctx.relFile
+      });
+    } else if (!modName) {
+      ctx.threats.push({
+        type: 'dynamic_require',
+        severity: 'HIGH',
+        message: 'with(require(...)) — scope injection with dynamic module. Evasion technique.',
+        file: ctx.relFile
+      });
+    }
+  }
+}
+
 module.exports = {
   handleVariableDeclarator,
   handleCallExpression,
@@ -1383,5 +1542,6 @@ module.exports = {
   handleLiteral,
   handleAssignmentExpression,
   handleMemberExpression,
+  handleWithStatement,
   handlePostWalk
 };
