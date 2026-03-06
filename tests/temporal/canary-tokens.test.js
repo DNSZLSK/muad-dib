@@ -1,7 +1,7 @@
 const { test, assert, assertIncludes } = require('../test-utils');
 
 const {
-  CANARY_PREFIXES,
+  CANARY_GENERATORS,
   generateCanaryTokens,
   createCanaryEnvFile,
   createCanaryNpmrc,
@@ -35,23 +35,68 @@ async function runCanaryTokensTests() {
     assert(Object.keys(tokens).length === 8, 'Should have exactly 8 tokens, got ' + Object.keys(tokens).length);
   });
 
-  test('CANARY: every token contains MUADDIB_CANARY', () => {
+  test('CANARY: no token contains MUADDIB or CANARY marker', () => {
     const { tokens } = generateCanaryTokens();
     for (const [key, value] of Object.entries(tokens)) {
-      assertIncludes(value, 'MUADDIB_CANARY', `Token ${key} should contain MUADDIB_CANARY`);
+      assert(!value.includes('MUADDIB'), `Token ${key} should NOT contain MUADDIB: ${value}`);
+      assert(!value.includes('CANARY'), `Token ${key} should NOT contain CANARY: ${value}`);
     }
   });
 
-  test('CANARY: two calls produce different suffixes', () => {
-    const r1 = generateCanaryTokens();
-    const r2 = generateCanaryTokens();
-    assert(r1.suffix !== r2.suffix, 'Suffixes should differ between calls');
+  test('CANARY: GITHUB_TOKEN starts with ghp_ and has length 40', () => {
+    const { tokens } = generateCanaryTokens();
+    assert(tokens.GITHUB_TOKEN.startsWith('ghp_'), `GITHUB_TOKEN should start with ghp_, got ${tokens.GITHUB_TOKEN.substring(0, 10)}`);
+    assert(tokens.GITHUB_TOKEN.length === 40, `GITHUB_TOKEN should have length 40, got ${tokens.GITHUB_TOKEN.length}`);
   });
 
-  test('CANARY: tokens use correct prefixes from CANARY_PREFIXES', () => {
+  test('CANARY: GH_TOKEN starts with ghp_ and has length 40', () => {
     const { tokens } = generateCanaryTokens();
-    for (const [key, prefix] of Object.entries(CANARY_PREFIXES)) {
-      assert(tokens[key].startsWith(prefix), `Token ${key} should start with "${prefix}", got "${tokens[key]}"`);
+    assert(tokens.GH_TOKEN.startsWith('ghp_'), `GH_TOKEN should start with ghp_, got ${tokens.GH_TOKEN.substring(0, 10)}`);
+    assert(tokens.GH_TOKEN.length === 40, `GH_TOKEN should have length 40, got ${tokens.GH_TOKEN.length}`);
+  });
+
+  test('CANARY: AWS_ACCESS_KEY_ID starts with AKIA and has length 20', () => {
+    const { tokens } = generateCanaryTokens();
+    assert(tokens.AWS_ACCESS_KEY_ID.startsWith('AKIA'), `AWS_ACCESS_KEY_ID should start with AKIA, got ${tokens.AWS_ACCESS_KEY_ID.substring(0, 10)}`);
+    assert(tokens.AWS_ACCESS_KEY_ID.length === 20, `AWS_ACCESS_KEY_ID should have length 20, got ${tokens.AWS_ACCESS_KEY_ID.length}`);
+  });
+
+  test('CANARY: NPM_TOKEN starts with npm_ and has length 40', () => {
+    const { tokens } = generateCanaryTokens();
+    assert(tokens.NPM_TOKEN.startsWith('npm_'), `NPM_TOKEN should start with npm_, got ${tokens.NPM_TOKEN.substring(0, 10)}`);
+    assert(tokens.NPM_TOKEN.length === 40, `NPM_TOKEN should have length 40, got ${tokens.NPM_TOKEN.length}`);
+  });
+
+  test('CANARY: NPM_AUTH_TOKEN starts with npm_', () => {
+    const { tokens } = generateCanaryTokens();
+    assert(tokens.NPM_AUTH_TOKEN.startsWith('npm_'), `NPM_AUTH_TOKEN should start with npm_, got ${tokens.NPM_AUTH_TOKEN.substring(0, 10)}`);
+  });
+
+  test('CANARY: GITLAB_TOKEN starts with glpat-', () => {
+    const { tokens } = generateCanaryTokens();
+    assert(tokens.GITLAB_TOKEN.startsWith('glpat-'), `GITLAB_TOKEN should start with glpat-, got ${tokens.GITLAB_TOKEN.substring(0, 10)}`);
+  });
+
+  test('CANARY: DOCKER_PASSWORD starts with dckr_pat_', () => {
+    const { tokens } = generateCanaryTokens();
+    assert(tokens.DOCKER_PASSWORD.startsWith('dckr_pat_'), `DOCKER_PASSWORD should start with dckr_pat_, got ${tokens.DOCKER_PASSWORD.substring(0, 15)}`);
+  });
+
+  test('CANARY: AWS_SECRET_ACCESS_KEY has length 40', () => {
+    const { tokens } = generateCanaryTokens();
+    assert(tokens.AWS_SECRET_ACCESS_KEY.length === 40, `AWS_SECRET_ACCESS_KEY should have length 40, got ${tokens.AWS_SECRET_ACCESS_KEY.length}`);
+  });
+
+  test('CANARY: two calls produce different tokens', () => {
+    const r1 = generateCanaryTokens();
+    const r2 = generateCanaryTokens();
+    assert(r1.tokens.GITHUB_TOKEN !== r2.tokens.GITHUB_TOKEN, 'GITHUB_TOKEN should differ between calls');
+    assert(r1.tokens.NPM_TOKEN !== r2.tokens.NPM_TOKEN, 'NPM_TOKEN should differ between calls');
+  });
+
+  test('CANARY: CANARY_GENERATORS has all 8 keys', () => {
+    for (const key of EXPECTED_KEYS) {
+      assert(typeof CANARY_GENERATORS[key] === 'function', `CANARY_GENERATORS should have function for ${key}`);
     }
   });
 

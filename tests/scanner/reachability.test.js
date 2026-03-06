@@ -3,7 +3,7 @@ const path = require('path');
 const os = require('os');
 const { test, asyncTest, assert, assertIncludes, runScanDirect } = require('../test-utils');
 const { computeReachableFiles, getEntryPoints, extractExportsPaths, extractScriptJsFiles } = require('../../src/scanner/reachability');
-const { applyFPReductions, isPackageLevelThreat, BENIGN_PACKAGE_WHITELIST, WHITELIST_EXEMPT_TYPES } = require('../../src/scoring');
+const { applyFPReductions, isPackageLevelThreat } = require('../../src/scoring');
 
 function makeTmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-reach-'));
@@ -613,88 +613,6 @@ async function runReachabilityTests() {
         const hasHighSev = noReachFindings.some(t => t.severity !== 'LOW');
         assert(hasHighSev, 'Without reachability: should have findings above LOW');
       }
-    } finally {
-      cleanup(tmp);
-    }
-  });
-  // =========================================================================
-  // Benign Package Whitelist (v2.3.5)
-  // =========================================================================
-
-  test('benign whitelist: contains expected packages', () => {
-    for (const pkg of ['meteor', 'blessed', 'sharp', 'forever', 'start-server-and-test', 'ultra-runner', 'node-gyp', 'graceful-fs']) {
-      assert(BENIGN_PACKAGE_WHITELIST.has(pkg), `${pkg} should be in BENIGN_PACKAGE_WHITELIST`);
-    }
-  });
-
-  test('benign whitelist: downgrades non-IOC threats to LOW', () => {
-    const threats = [
-      { type: 'dangerous_exec', severity: 'CRITICAL', file: 'install.js', message: 'powershell' },
-      { type: 'lifecycle_script', severity: 'MEDIUM', file: 'package.json', message: 'install' },
-      { type: 'dynamic_require', severity: 'HIGH', file: 'lib/main.js', message: 'dynamic' }
-    ];
-    applyFPReductions(threats, null, 'meteor');
-    assert(threats[0].severity === 'LOW', `dangerous_exec should be LOW for meteor, got ${threats[0].severity}`);
-    assert(threats[1].severity === 'LOW', `lifecycle_script should be LOW for meteor, got ${threats[1].severity}`);
-    assert(threats[2].severity === 'LOW', `dynamic_require should be LOW for meteor, got ${threats[2].severity}`);
-  });
-
-  test('benign whitelist: preserves IOC match severity', () => {
-    const threats = [
-      { type: 'known_malicious_package', severity: 'CRITICAL', file: 'package.json', message: 'malicious' },
-      { type: 'ioc_match', severity: 'CRITICAL', file: 'index.js', message: 'IOC' },
-      { type: 'lifecycle_shell_pipe', severity: 'CRITICAL', file: 'package.json', message: 'curl|sh' },
-      { type: 'cross_file_dataflow', severity: 'CRITICAL', file: 'lib/a.js', message: 'flow' }
-    ];
-    applyFPReductions(threats, null, 'blessed');
-    for (const t of threats) {
-      assert(t.severity === 'CRITICAL', `${t.type} should stay CRITICAL for whitelisted package, got ${t.severity}`);
-    }
-  });
-
-  test('benign whitelist: no effect on non-whitelisted packages', () => {
-    const threats = [
-      { type: 'dangerous_exec', severity: 'CRITICAL', file: 'install.js', message: 'powershell' },
-      { type: 'module_compile', severity: 'CRITICAL', file: 'lib/main.js', message: '_compile' }
-    ];
-    applyFPReductions(threats, null, 'unknown-package');
-    assert(threats[0].severity === 'CRITICAL', `Should stay CRITICAL for non-whitelisted, got ${threats[0].severity}`);
-    assert(threats[1].severity === 'CRITICAL', `Should stay CRITICAL for non-whitelisted, got ${threats[1].severity}`);
-  });
-
-  test('benign whitelist: no effect when packageName is null', () => {
-    const threats = [
-      { type: 'dangerous_exec', severity: 'CRITICAL', file: 'install.js', message: 'test' }
-    ];
-    applyFPReductions(threats, null, null);
-    assert(threats[0].severity === 'CRITICAL', `Should stay CRITICAL when no packageName, got ${threats[0].severity}`);
-  });
-
-  test('benign whitelist: all 8 packages downgrade correctly', () => {
-    for (const pkg of ['meteor', 'blessed', 'sharp', 'forever', 'start-server-and-test', 'ultra-runner', 'node-gyp', 'graceful-fs']) {
-      const threats = [
-        { type: 'module_compile', severity: 'CRITICAL', file: 'lib/main.js', message: '_compile' },
-        { type: 'suspicious_dataflow', severity: 'HIGH', file: 'lib/index.js', message: 'flow' }
-      ];
-      applyFPReductions(threats, null, pkg);
-      assert(threats[0].severity === 'LOW', `${pkg}: module_compile should be LOW, got ${threats[0].severity}`);
-      assert(threats[1].severity === 'LOW', `${pkg}: suspicious_dataflow should be LOW, got ${threats[1].severity}`);
-    }
-  });
-
-  await asyncTest('integration: benign package whitelist applied in scan', async () => {
-    const tmp = makeTmpDir();
-    try {
-      writeFile(tmp, 'package.json', JSON.stringify({ name: 'sharp', main: './index.js' }));
-      writeFile(tmp, 'index.js', `
-        const path = require('path');
-        const mod = require(path.join(__dirname, 'lib', 'sharp.js'));
-      `);
-
-      const result = await runScanDirect(tmp, { _capture: true });
-      // sharp is whitelisted, so score should be very low
-      assert(result.summary.riskScore < 20,
-        `Whitelisted package 'sharp' should have score < 20, got ${result.summary.riskScore}`);
     } finally {
       cleanup(tmp);
     }

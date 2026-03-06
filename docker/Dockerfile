@@ -15,7 +15,8 @@ COPY sandbox-runner.sh /sandbox/
 RUN sed -i 's/\r$//' /sandbox/sandbox-runner.sh && chmod +x /sandbox/sandbox-runner.sh
 
 # Preload script for runtime monkey-patching (time acceleration, API logging)
-COPY preload.js /opt/preload.js
+# Copied as node_setup.js to avoid revealing tool identity in /proc/self/cmdline
+COPY preload.js /opt/node_setup.js
 
 # Pre-create install directory with correct ownership
 RUN mkdir -p /sandbox/install && chown sandboxuser:sandboxuser /sandbox/install
