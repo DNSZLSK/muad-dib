@@ -31,8 +31,16 @@ function test(name, fn) {
 
 async function asyncTest(name, fn) {
   const t0 = Date.now();
+  let unhandled = null;
+  const handler = (reason) => { unhandled = reason; };
+  process.on('unhandledRejection', handler);
   try {
     await fn();
+    // Let microtask queue drain so unhandled rejections surface
+    await new Promise(resolve => setImmediate(resolve));
+    if (unhandled) {
+      throw unhandled instanceof Error ? unhandled : new Error(String(unhandled));
+    }
     const ms = Date.now() - t0;
     const tag = ms > 5000 ? ` [SLOW ${(ms/1000).toFixed(1)}s]` : ms > 1000 ? ` [${(ms/1000).toFixed(1)}s]` : '';
     console.log(`[PASS] ${name}${tag}`);
@@ -43,6 +51,8 @@ async function asyncTest(name, fn) {
     console.log(`       ${e.message}`);
     failures.push({ name, error: e.message });
     failed++;
+  } finally {
+    process.removeListener('unhandledRejection', handler);
   }
 }
 
@@ -141,6 +151,29 @@ function addSkipped(n) {
   skipped += n;
 }
 
+function assertThrows(fn, message) {
+  try {
+    fn();
+  } catch (e) {
+    return e;
+  }
+  throw new Error(message || 'Expected function to throw');
+}
+
+async function assertRejects(fn, message) {
+  try {
+    await fn();
+  } catch (e) {
+    return e;
+  }
+  throw new Error(message || 'Expected promise to reject');
+}
+
+function clearScanCache() {
+  _scanCache.clear();
+  _cmdCache.clear();
+}
+
 module.exports = {
   TESTS_DIR,
   BIN,
@@ -149,11 +182,14 @@ module.exports = {
   assert,
   assertIncludes,
   assertNotIncludes,
+  assertThrows,
+  assertRejects,
   runScan,
   runScanDirect,
   runCommand,
   createTempPkg,
   cleanupTemp,
+  clearScanCache,
   getCounters,
   addSkipped
 };

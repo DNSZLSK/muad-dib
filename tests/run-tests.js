@@ -17,6 +17,8 @@ const { runModuleGraphTests } = require('./scanner/module-graph.test');
 const { runReachabilityTests } = require('./scanner/reachability.test');
 const { runGitHubActionsTests } = require('./scanner/github-actions.test');
 const { runNpmRegistryTests } = require('./scanner/npm-registry.test');
+const { runAstNegativeTests } = require('./scanner/ast-negative.test');
+const { runAstBypassRegressionTests } = require('./scanner/ast-bypass-regression.test');
 
 // Utility tests
 const { runUtilsTests } = require('./utils.test');
@@ -108,6 +110,8 @@ async function timed(name, fn) {
   await timed('reachability', runReachabilityTests);
   await timed('github-actions', runGitHubActionsTests);
   await timed('npm-registry', runNpmRegistryTests);
+  await timed('ast-negative', runAstNegativeTests);
+  await timed('ast-bypass-regression', runAstBypassRegressionTests);
 
   // IOC scraper tests (Phase 3)
   await timed('scraper', runScraperTests);
