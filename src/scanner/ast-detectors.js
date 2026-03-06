@@ -56,6 +56,14 @@ const SAFE_STRINGS = [
   'npmjs.com'
 ];
 
+// Domains where fetch is legitimate (not C2) — used to suppress download_exec_binary compound
+const SAFE_FETCH_DOMAINS = [
+  'registry.npmjs.org', 'npmjs.com',
+  'github.com', 'objects.githubusercontent.com', 'raw.githubusercontent.com',
+  'nodejs.org', 'yarnpkg.com',
+  'pypi.org', 'files.pythonhosted.org'
+];
+
 // Credential-stealing CLI commands (s1ngularity/Nx, Shai-Hulud)
 const CREDENTIAL_CLI_COMMANDS = [
   'gh auth token',
@@ -1182,15 +1190,22 @@ function handleLiteral(node, ctx) {
       }
     }
 
-    // Detect AI agent dangerous flags as string literals
+    // Detect AI agent dangerous flags as string literals (MEDIUM signal only —
+    // CRITICAL reserved for CallExpression context where flag is actually used in exec/spawn)
     for (const flag of AI_AGENT_DANGEROUS_FLAGS) {
       if (node.value === flag) {
-        ctx.threats.push({
-          type: 'ai_agent_abuse',
-          severity: 'CRITICAL',
-          message: `AI agent security bypass flag "${flag}" found — weaponized AI coding assistant (s1ngularity/Nx pattern).`,
-          file: ctx.relFile
-        });
+        // Skip if already detected in a CallExpression context (avoid double-counting)
+        const alreadyDetected = ctx.threats.some(t =>
+          t.type === 'ai_agent_abuse' && t.severity === 'CRITICAL' && t.file === ctx.relFile
+        );
+        if (!alreadyDetected) {
+          ctx.threats.push({
+            type: 'ai_agent_abuse',
+            severity: 'MEDIUM',
+            message: `AI agent security bypass flag "${flag}" referenced in code — verify it is not used in exec/spawn invocations.`,
+            file: ctx.relFile
+          });
+        }
       }
     }
 
@@ -1495,7 +1510,8 @@ function handlePostWalk(ctx) {
   }
 
   // Wave 4: Download-execute-cleanup — https download + chmod executable + execSync + unlink
-  if (ctx.hasRemoteFetch && ctx.hasChmodExecutable && ctx.hasExecSyncCall) {
+  // Exclude when all URLs in the file point to safe registries (npm, GitHub, nodejs.org)
+  if (ctx.hasRemoteFetch && ctx.hasChmodExecutable && ctx.hasExecSyncCall && !ctx.fetchOnlySafeDomains) {
     ctx.threats.push({
       type: 'download_exec_binary',
       severity: 'CRITICAL',

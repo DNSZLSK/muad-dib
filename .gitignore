@@ -16,4 +16,5 @@ iocs.json.gz
 .env
 .env.*
 data/*.json
+logs/
 tmp-*

@@ -106,11 +106,17 @@ const FP_COUNT_THRESHOLDS = {
   dynamic_require: { maxCount: 10, from: 'HIGH', to: 'LOW' },
   dangerous_call_function: { maxCount: 5, from: 'MEDIUM', to: 'LOW' },
   require_cache_poison: { maxCount: 3, from: 'CRITICAL', to: 'LOW' },
-  suspicious_dataflow: { maxCount: 5, to: 'LOW' },
+  suspicious_dataflow: { maxCount: 3, to: 'LOW' },
   obfuscation_detected: { maxCount: 3, to: 'LOW' },
   module_compile_dynamic: { maxCount: 3, from: 'CRITICAL', to: 'LOW' },
   module_compile: { maxCount: 3, from: 'CRITICAL', to: 'LOW' },
-  zlib_inflate_eval: { maxCount: 2, from: 'CRITICAL', to: 'LOW' }
+  zlib_inflate_eval: { maxCount: 2, from: 'CRITICAL', to: 'LOW' },
+  // P4: plugin loaders legitimately use many dynamic imports (webpack, eslint, knex, gatsby)
+  dynamic_import: { maxCount: 5, from: 'HIGH', to: 'LOW' },
+  // P4: hash algorithms contain bit manipulation that triggers obfuscation heuristics
+  js_obfuscation_pattern: { maxCount: 1, from: 'HIGH', to: 'LOW' },
+  // P4: bundled credential_tampering from minified alias resolution (jspdf, lerna)
+  credential_tampering: { maxCount: 5, to: 'LOW' }
 };
 
 // Types exempt from dist/ downgrade — IOC matches and lifecycle scripts are always real
@@ -182,6 +188,18 @@ function applyFPReductions(threats, reachableFiles, packageName) {
 
   const totalThreats = threats.length;
 
+  // P4: Plugin loader pattern — packages with 2+ dynamic_require + dynamic_import combined
+  // are legitimate plugin systems (webpack, eslint, karma, knex, jasmine, gatsby).
+  // Malware uses one pattern, not both. Bypass the per-type percentage guard.
+  const pluginLoaderCount = (typeCounts.dynamic_require || 0) + (typeCounts.dynamic_import || 0);
+  if (pluginLoaderCount > 1) {
+    for (const t of threats) {
+      if ((t.type === 'dynamic_require' || t.type === 'dynamic_import') && t.severity === 'HIGH') {
+        t.severity = 'LOW';
+      }
+    }
+  }
+
   for (const t of threats) {
     // Count-based downgrade: if a threat type appears too many times,
     // it's a framework/plugin system, not malware.
@@ -190,7 +208,10 @@ function applyFPReductions(threats, reachableFiles, packageName) {
     const rule = FP_COUNT_THRESHOLDS[t.type];
     if (rule && typeCounts[t.type] > rule.maxCount && (!rule.from || t.severity === rule.from)) {
       const typeRatio = typeCounts[t.type] / totalThreats;
-      if (typeRatio < 0.5) {
+      // P4: suspicious_dataflow bypasses the percentage guard — multiple data flow paths
+      // indicate a complex application (SMTP client, monitoring agent), not malware.
+      // Malware has 1-2 targeted exfiltration flows, not 4+.
+      if (typeRatio < 0.5 || t.type === 'suspicious_dataflow') {
         t.severity = rule.to;
       }
     }
@@ -220,11 +241,13 @@ function applyFPReductions(threats, reachableFiles, packageName) {
       }
     }
 
-    // Dist/build/minified files: bundler artifacts get severity downgraded one notch.
+    // Dist/build/minified files: bundler artifacts get severity downgraded two notches.
     // Real malware injects payloads in source files, not in dist/ output.
+    // Two-notch downgrade (P4): cross-file bonus amplifies dist/ noise in large packages.
+    // IOC matches and lifecycle scripts are exempt (DIST_EXEMPT_TYPES).
     if (t.file && !DIST_EXEMPT_TYPES.has(t.type) && DIST_FILE_RE.test(t.file)) {
-      if (t.severity === 'CRITICAL') t.severity = 'HIGH';
-      else if (t.severity === 'HIGH') t.severity = 'MEDIUM';
+      if (t.severity === 'CRITICAL') t.severity = 'MEDIUM';
+      else if (t.severity === 'HIGH') t.severity = 'LOW';
       else if (t.severity === 'MEDIUM') t.severity = 'LOW';
     }
 
@@ -271,9 +294,11 @@ function calculateRiskScore(deduped) {
   let maxFileScore = 0;
   let mostSuspiciousFile = null;
   const fileScores = {};
+  const fileHasMediumPlus = {}; // P4: track files with MEDIUM+ threats for cross-file bonus
   for (const [file, fileThreats] of fileGroups) {
     const score = computeGroupScore(fileThreats);
     fileScores[file] = score;
+    fileHasMediumPlus[file] = fileThreats.some(t => t.severity !== 'LOW');
     if (score > maxFileScore) {
       maxFileScore = score;
       mostSuspiciousFile = file;
@@ -286,11 +311,16 @@ function calculateRiskScore(deduped) {
   // 5. Cross-file bonus: aggregate signal from non-max files
   // A package with 3 files each scoring 20 is more suspicious than 1 file scoring 20.
   // Add 25% of each non-max file's score as a bonus, capped at 25.
-  const sortedScores = Object.values(fileScores).sort((a, b) => b - a);
+  // P4: Only count files that have at least one MEDIUM+ threat.
+  // Files with only LOW findings are noise in large packages and shouldn't amplify the score.
+  const bonusEligibleScores = Object.entries(fileScores)
+    .filter(([file]) => fileHasMediumPlus[file])
+    .map(([, score]) => score)
+    .sort((a, b) => b - a);
   let crossFileBonus = 0;
-  if (sortedScores.length > 1) {
-    for (let i = 1; i < sortedScores.length; i++) {
-      crossFileBonus += Math.ceil(sortedScores[i] * 0.25);
+  if (bonusEligibleScores.length > 1) {
+    for (let i = 1; i < bonusEligibleScores.length; i++) {
+      crossFileBonus += Math.ceil(bonusEligibleScores[i] * 0.25);
     }
     crossFileBonus = Math.min(crossFileBonus, 25);
   }
