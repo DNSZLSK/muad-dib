@@ -1653,6 +1653,80 @@ Le module sandbox a ete restructure : `src/sandbox.js` → `src/sandbox/index.js
 
 ---
 
+## v2.4.10–v2.4.20 — Packaging, StegaBin, suspect tiers (2-3 Mars 2026)
+
+Serie de releases orientees packaging, detection et stabilisation du moniteur :
+
+- **v2.4.10** : Fix import conditionnel du module webhook pour compatibilite npm
+- **v2.4.11–v2.4.13** : Nettoyage lockfile, sandbox lifecycle_script obligatoire
+- **v2.4.14** : **Detection StegaBin** — nouvelles regles `vendor_path_payload`, `install_script_indirection`, hash IOC pour la variante malware StegaBin
+- **v2.4.16–v2.4.17** : Fix extension VS Code (spawn path-with-spaces, strip trailing output + BOM avant JSON.parse), packaging npm (include/exclude webhook.js et iocs-compact.json)
+- **v2.4.18** : **Systeme de tiers suspects** (T1/T2/T3) pour reduction FPR du moniteur
+- **v2.4.19** : Fix dependance fantome `loadash` causee par `npm@11.11.0`, ajout NODE_AUTH_TOKEN pour publish CI
+- **v2.4.20** : Blocage du typosquat `loadash` via overrides dans package.json
+
+---
+
+## v2.5.0–v2.5.6 — Audit securite complet (4-6 Mars 2026)
+
+### Le probleme
+
+Un audit securite complet du projet a identifie **41 issues** a remedier (14 CRITICAL, 18 HIGH, 9 MEDIUM). Les issues couvraient l'ensemble de la codebase : scanners, sandbox, infrastructure, et outils CI.
+
+### Les remediations
+
+**v2.5.0 — 10 remediations initiales (14 CRITICAL, 18 HIGH)** : Premier bloc de corrections couvrant les vulnerabilites les plus critiques identifiees par l'audit.
+
+**v2.5.1 — Sandbox npm install timeout** : `strace` en mode permissif uniquement (causait des timeouts d'installation), baseline filesystem pre-bake, fetch-timeout 120s. Promotion de `mcp_config_injection`, `ai_agent_abuse`, `crypto_miner` au tier T1 (suspects prioritaires).
+
+**v2.5.2 — Preload timing** : L'injection du preload via `NODE_OPTIONS` se faisait pendant `npm install`, causant des timeouts car le monkey-patching interceptait les appels reseau de npm lui-meme. Fix : deferrer l'injection au point d'entree du package, pas pendant l'installation.
+
+**v2.5.3 — Sandbox Docker fixes** :
+- Pre-creation du repertoire `/sandbox/install` dans le Dockerfile
+- Fix Docker caps + injection `NODE_OPTIONS` (corrige le parsing moniteur)
+- Suppression de `--tmpfs /proc/uptime` (tmpfs ne peut pas monter sur des fichiers individuels)
+
+**v2.5.4 — 3 remediations CRITICAL** : #10 native addon path traversal, #15 ecritures atomiques, #18 contournements AST.
+
+**v2.5.5 — 14 remediations HIGH** : Poursuite de l'audit securite.
+
+**v2.5.6 — 5 remediations MEDIUM** : **Audit 41/41 complet**. Toutes les issues identifiees ont ete remediees.
+
+---
+
+## v2.5.7–v2.5.8 — FP Reduction P4 + IOC wildcard audit (6 Mars 2026)
+
+### Le probleme
+
+Le FPR etait a 7.4% (39/525) depuis v2.3.1. L'analyse des faux positifs restants a revele deux causes :
+1. **Bruit webhook** : le moniteur envoyait trop d'alertes pour des packages a score modere
+2. **IOC wildcards invalides** : certains packages dans `iocs-compact.json` avaient des entrees wildcard (= toutes versions malveillantes) alors qu'ils n'auraient du avoir que des entrees versionnees. Ces fausses entrees IOC causaient des matchs sur des packages benins.
+
+### v2.5.7 — Webhook noise reduction
+
+Augmentation du seuil webhook et ajout de `/usr/bin/timeout` a la whitelist des commandes. Reduit le bruit d'alertes du moniteur sans affecter la detection reelle.
+
+### v2.5.8 — IOC wildcard audit + FPR 6.0%
+
+Audit complet des entrees IOC wildcards : identification et correction des packages mal categorises (wildcard au lieu de versionne). Suppression des scripts de test temporaires.
+
+**FPR : 7.4% → 6.0% (32/529)** — 7 packages sauves du statut faux positif.
+
+### Metriques finales v2.5.8
+
+| Metrique | Valeur |
+|----------|--------|
+| **TPR** | 91.8% (45/49) |
+| **FPR** | **6.0% (32/529)** |
+| **ADR** | **98.8% (82/83)** — 1 miss documente |
+| Regles | **113** (108 RULES + 5 PARANOID) |
+| Tests | **1656**, 0 failures, 42 fichiers de test |
+| Scanners | 14 |
+
+**Progression FPR** : 38% → 19.4% → 17.5% → ~13% → 8.9% → 7.4% → **6.0%**
+
+---
+
 ## Etat actuel
 
 ### Ce qui fonctionne
@@ -1674,12 +1748,12 @@ Le module sandbox a ete restructure : `src/sandbox.js` → `src/sandbox/index.js
 | Version check | Notification automatique des nouvelles versions au demarrage |
 | **Detection comportementale (v2.0)** | Temporal lifecycle, AST diff, publish anomaly, maintainer change, canary tokens |
 | **Validation & Observabilite (v2.1)** | Ground truth (51 attaques, 91.8% TPR), detection time logging, FP rate tracking, score breakdown, threat feed API |
-| **Evaluation & Red Team (v2.2-v2.4)** | `muaddib evaluate`, 83 samples evasifs (43 adversariaux + 40 holdouts), TPR 91.8% (45/49), **FPR 7.4% (39/525)**, ADR **98.8% (82/83)** (1 miss documente), 14 scanners, 113 regles, AI config scanner, 529 packages benins npm, 132 PyPI, 65 malwares documentes |
+| **Evaluation & Red Team (v2.2-v2.5)** | `muaddib evaluate`, 83 samples evasifs (43 adversariaux + 40 holdouts), TPR 91.8% (45/49), **FPR 6.0% (32/529)**, ADR **98.8% (82/83)** (1 miss documente), 14 scanners, 113 regles, AI config scanner, 529 packages benins npm, 132 PyPI, 65 malwares documentes |
 | **Desobfuscation (v2.2.5)** | `src/scanner/deobfuscate.js`, 4 transformations AST + const propagation, approche additive (original + desobfusque), `--no-deobfuscate` flag |
 | **Dataflow inter-module (v2.2.6)** | `src/scanner/module-graph.js`, graphe de dependances, propagation de teinte inter-fichiers, 3-hop re-export, class methods, named exports, `--no-module-graph` flag |
-| Tests | **1522 tests unitaires** + 56 fuzz + 83 adversariaux/holdout, **86% coverage** (c8/Codecov) |
+| Tests | **1656 tests unitaires** (42 fichiers) + 56 fuzz + 83 adversariaux/holdout, **86% coverage** (c8/Codecov) |
 | **Hardening securite (v2.1.2)** | SSRF protection (shared/download.js), command injection prevention (execFileSync), path traversal (sanitizePackageName), JSON.parse protege, webhook strict |
-| Audit securite | 2 audits complets, **58 issues corrigees**, [rapport PDF](MUADDIB_Security_Audit_Report_v1.4.1.pdf) |
+| Audit securite | 3 audits complets, **99 issues corrigees** (58 v1.4 + 41 v2.5), [rapport PDF](MUADDIB_Security_Audit_Report_v1.4.1.pdf) |
 
 ### Ce qui manque (honnêtement)
 

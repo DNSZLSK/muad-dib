@@ -7,6 +7,81 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.5.8] - 2026-03-06
+
+### Changed
+- Chore: remove temporary test scripts
+
+## [2.5.7] - 2026-03-06
+
+### Fixed
+- **Webhook noise reduction**: Raised webhook threshold and added `/usr/bin/timeout` to whitelist to reduce false alerts from sandbox monitoring
+
+## [2.5.6] - 2026-03-06
+
+### Fixed
+- **5 MEDIUM audit remediations**: Completes full security audit — 41/41 issues remediated across v2.5.0–v2.5.6
+
+## [2.5.5] - 2026-03-06
+
+### Fixed
+- **14 HIGH audit remediations**: Continued security audit remediation
+- Fix #16
+
+## [2.5.4] - 2026-03-05
+
+### Fixed
+- **3 CRITICAL audit remediations**: #10 native addon path traversal, #15 atomic file writes, #18 AST parser bypasses
+
+## [2.5.3] - 2026-03-05
+
+### Fixed
+- **Sandbox Docker fixes**: Pre-create `/sandbox/install` directory in Dockerfile, fix Docker caps + `NODE_OPTIONS` injection (fixes monitor parsing), remove `--tmpfs /proc/uptime` (tmpfs cannot mount on files)
+
+## [2.5.2] - 2026-03-04
+
+### Fixed
+- **Sandbox preload timing**: Defer `preload.js` injection to entry point (fixes npm install timeout caused by `NODE_OPTIONS` loading preload during `npm install`)
+
+### Changed
+- Bump VS Code extension version
+
+## [2.5.1] - 2026-03-04
+
+### Fixed
+- **Sandbox npm install timeout**: strace permissive-only mode, pre-baked filesystem baseline, fetch-timeout 120s
+
+### Changed
+- Promote `mcp_config_injection`, `ai_agent_abuse`, `crypto_miner` to T1 suspect tier
+
+## [2.5.0] - 2026-03-04
+
+### Security
+- **Security audit remediation**: 10 remediations covering 14 CRITICAL and 18 HIGH issues. Comprehensive audit of all scanner, sandbox, and infrastructure modules.
+
+## [2.4.20] - 2026-03-03
+
+### Fixed
+- **Block loadash typosquat**: Added `loadash` to package.json overrides to prevent typosquat dependency injection via npm ghost dependency
+
+## [2.4.10–2.4.19] - 2026-03-02 to 2026-03-03
+
+### Added
+- **StegaBin detection rules** (v2.4.14): `vendor_path_payload`, `install_script_indirection`, hash IOC for StegaBin malware variant
+- **Suspect tier system** (v2.4.18): T1/T2/T3 classification for monitor FPR reduction
+
+### Fixed
+- **Conditional webhook require** (v2.4.10): Fix for npm package compatibility when webhook module not present
+- **Lockfile cleanup** (v2.4.11): Clean package-lock.json for CI publish
+- **Lifecycle script sandbox** (v2.4.12): Always sandbox packages with `lifecycle_script` findings
+- **VS Code extension** (v2.4.16–2.4.17): Fix spawn path-with-spaces, strip trailing CLI output + BOM before JSON.parse
+- **npm packaging** (v2.4.14–2.4.16): Include webhook.js and iocs-compact.json in tarball, then exclude iocs-compact.json
+- **loadash ghost dependency** (v2.4.19): Remove `npm@11.11.0` upgrade causing loadash ghost dependency, add NODE_AUTH_TOKEN for npm publish
+
+### Changed
+- Test count: 1522 → **1656** (+134 tests across 42 test files)
+- FPR: 7.4% → **6.0%** (32/529) via FP reduction P4 + IOC wildcard audit
+
 ## [2.4.9] - 2026-03-02
 
 ### Added
@@ -828,7 +903,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Obfuscation detection
 - Package.json lifecycle script analysis
 
-[Unreleased]: https://github.com/DNSZLSK/muad-dib/compare/v2.4.7...HEAD
+[Unreleased]: https://github.com/DNSZLSK/muad-dib/compare/v2.5.8...HEAD
+[2.5.8]: https://github.com/DNSZLSK/muad-dib/compare/v2.5.7...v2.5.8
+[2.5.7]: https://github.com/DNSZLSK/muad-dib/compare/v2.5.6...v2.5.7
+[2.5.6]: https://github.com/DNSZLSK/muad-dib/compare/v2.5.5...v2.5.6
+[2.5.5]: https://github.com/DNSZLSK/muad-dib/compare/v2.5.4...v2.5.5
+[2.5.4]: https://github.com/DNSZLSK/muad-dib/compare/v2.5.3...v2.5.4
+[2.5.3]: https://github.com/DNSZLSK/muad-dib/compare/v2.5.2...v2.5.3
+[2.5.2]: https://github.com/DNSZLSK/muad-dib/compare/v2.5.1...v2.5.2
+[2.5.1]: https://github.com/DNSZLSK/muad-dib/compare/v2.5.0...v2.5.1
+[2.5.0]: https://github.com/DNSZLSK/muad-dib/compare/v2.4.20...v2.5.0
+[2.4.20]: https://github.com/DNSZLSK/muad-dib/compare/v2.4.9...v2.4.20
+[2.4.9]: https://github.com/DNSZLSK/muad-dib/compare/v2.4.7...v2.4.9
 [2.4.7]: https://github.com/DNSZLSK/muad-dib/compare/v2.3.1...v2.4.7
 [2.3.1]: https://github.com/DNSZLSK/muad-dib/compare/v2.3.0...v2.3.1
 [2.3.0]: https://github.com/DNSZLSK/muad-dib/compare/v2.2.24...v2.3.0

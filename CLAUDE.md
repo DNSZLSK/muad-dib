@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-npm test          # Run all tests (custom framework, 1522 tests across 22 files)
+npm test          # Run all tests (custom framework, 1656 tests across 42 files)
 npm run lint      # ESLint with security plugin
 npm run scan      # Self-scan: node bin/muaddib.js scan .
 npm run update    # Download latest IOCs
@@ -72,7 +72,7 @@ Tests use a custom framework in `tests/run-tests.js` (no Jest). Test helpers:
 
 **Inter-module Dataflow (v2.2.6):** `src/scanner/module-graph.js` builds a dependency graph of local modules, annotates tainted exports (fs.readFileSync, process.env, os.homedir, child_process, dns), and detects when credentials read in one module reach a network/exec sink in another module. Features: 3-hop re-export chain propagation, class method analysis, named export destructuring, inline require re-export, function-wrapped taint propagation. Runs before individual scanners. Disable with `--no-module-graph`.
 
-**Evaluation Framework (v2.2, corrected v2.2.7, FP reduction v2.2.8–v2.2.9, size analysis v2.2.10, per-file scoring v2.2.11, GT expansion v2.2.12, FP reduction P2 v2.3.0, P3 v2.3.1, Vague 4 v2.4.7, sandbox preload v2.4.9):** `src/commands/evaluate.js` measures TPR (Ground Truth, 49 real attacks from 51 samples), FPR (Benign, 529 npm packages — real source code via `npm pack` + native tar extraction), and ADR (Adversarial + Holdout, 83 evasive samples — 43 adversarial + 40 holdout). Benign tarballs cached in `.muaddib-cache/benign-tarballs/`. Flags: `--benign-limit N`, `--refresh-benign`. Results saved to `metrics/v{version}.json`. FPR progression: 0% (invalid, v2.2.0–v2.2.6) → 38% (v2.2.7) → 19.4% (v2.2.8) → 17.5% (v2.2.9) → ~13% (69/527, v2.2.11) → 8.9% (47/527, v2.3.0) → **7.4% (39/525, v2.3.1)**. Adversarial samples in `datasets/adversarial/` (43 samples), holdout samples in `datasets/holdout-v2/` through `datasets/holdout-v5/` (40 samples), benign package lists in `datasets/benign/packages-npm.txt` (529 packages) and `datasets/benign/packages-pypi.txt` (132 packages), ground truth attacks in `tests/ground-truth/attacks.json` (51 entries), ground truth malware database in `datasets/ground-truth/known-malware.json` (65 entries).
+**Evaluation Framework (v2.2, corrected v2.2.7, FP reduction v2.2.8–v2.2.9, size analysis v2.2.10, per-file scoring v2.2.11, GT expansion v2.2.12, FP reduction P2 v2.3.0, P3 v2.3.1, Vague 4 v2.4.7, sandbox preload v2.4.9, FP reduction P4 v2.5.7–v2.5.8):** `src/commands/evaluate.js` measures TPR (Ground Truth, 49 real attacks from 51 samples), FPR (Benign, 529 npm packages — real source code via `npm pack` + native tar extraction), and ADR (Adversarial + Holdout, 83 evasive samples — 43 adversarial + 40 holdout). Benign tarballs cached in `.muaddib-cache/benign-tarballs/`. Flags: `--benign-limit N`, `--refresh-benign`. Results saved to `metrics/v{version}.json`. FPR progression: 0% (invalid, v2.2.0–v2.2.6) → 38% (v2.2.7) → 19.4% (v2.2.8) → 17.5% (v2.2.9) → ~13% (69/527, v2.2.11) → 8.9% (47/527, v2.3.0) → 7.4% (39/525, v2.3.1) → **6.0% (32/529, v2.5.8)**. Adversarial samples in `datasets/adversarial/` (43 samples), holdout samples in `datasets/holdout-v2/` through `datasets/holdout-v5/` (40 samples), benign package lists in `datasets/benign/packages-npm.txt` (529 packages) and `datasets/benign/packages-pypi.txt` (132 packages), ground truth attacks in `tests/ground-truth/attacks.json` (51 entries), ground truth malware database in `datasets/ground-truth/known-malware.json` (65 entries).
 
 **FP Reduction Post-processing (v2.2.8–v2.2.9, v2.3.0–v2.3.1):** `applyFPReductions()` in `src/scoring.js` applies count-based severity downgrades between deduplication and scoring. Thresholds: `dynamic_require` >10 HIGH→LOW, `dangerous_call_function` >5 MEDIUM→LOW, `require_cache_poison` >3 CRITICAL→LOW (single hit CRITICAL→HIGH), `suspicious_dataflow` >5 any→LOW, `obfuscation_detected` >3 any→LOW, `module_compile` >3 CRITICAL→LOW, `module_compile_dynamic` >3 CRITICAL→LOW, `zlib_inflate_eval` >2 CRITICAL→LOW. Framework prototype hooks (Request/Response/App/Router.prototype) downgraded HIGH→MEDIUM (CRITICAL core prototypes untouched). HTTP client prototype whitelist: packages with >20 prototype_hook hits targeting HTTP methods → MEDIUM. Prototype hook MEDIUM scoring capped at 15 points max. Dist/build/minified file downgrade (one severity notch). Reachability-based downgrade (unreachable files → LOW). Typosquat whitelist expanded with 10 packages (chai, pino, ioredis, bcryptjs, recast, asyncdi, redux, args, oxlint, vasync). Scanner-level: expanded `SAFE_ENV_VARS` (+13 vars) and added `SAFE_ENV_PREFIXES` (npm_config_*, npm_lifecycle_*, npm_package_*, lc_*) in `src/scanner/ast.js`. Obfuscation in dist/build/*.bundle.js and .cjs/.mjs >100KB → LOW. Entropy: encoding table paths → LOW. Dataflow: os.platform/arch categorized as `telemetry_read` (capped at HIGH, not CRITICAL). Package scanner: `DEP_FP_WHITELIST` (es5-ext, bootstrap-sass), npm alias skip (`npm:` prefix).
 
@@ -90,9 +90,13 @@ Tests use a custom framework in `tests/run-tests.js` (no Jest). Test helpers:
 
 **FP Reduction P3 (v2.3.1):** FPR 8.2% → 7.4% (39/525). Scoring: `require_cache_poison` single hit CRITICAL→HIGH; HTTP client prototype whitelist (>20 hits → MEDIUM); obfuscation: .cjs/.mjs >100KB → LOW; entropy: encoding table paths → LOW. ADR: 100% → 98.7% (77/78, 1 documented miss: require-cache-poison). 8 new rules (AST-024 to AST-031), rule count 94 → 102. Tests 1317 → 1387. Current rule count: **113** (108 RULES + 5 PARANOID) as of v2.4.9.
 
+**Security Audit (v2.5.0–v2.5.6):** Comprehensive security audit with 41 issues remediated across 5 versions: 10 initial remediations (14 CRITICAL, 18 HIGH) in v2.5.0, sandbox fixes (npm install timeout, preload timing, Docker caps, /proc/uptime) in v2.5.1–v2.5.3, 3 CRITICAL remediations (#10 native addon, #15 atomic writes, #18 AST bypasses) in v2.5.4, 14 HIGH remediations in v2.5.5, 5 MEDIUM remediations completing 41/41 in v2.5.6.
+
+**FP Reduction P4 (v2.5.7–v2.5.8):** FPR 7.4% → **6.0% (32/529)**. Webhook noise reduction + `/usr/bin/timeout` whitelist. IOC wildcard audit: removed false IOC entries causing spurious matches. Tests: 1522 → **1656** (+134). Test files: 22 → **42**.
+
 **Vague 4 Blue Team (v2.4.7):** 5 new adversarial samples (43 total). Pre-fix score 0/5 (0%). 5 bypass corrections: `resolveStringConcat()` for BinaryExpression string concat resolution, enhanced AST-027/AST-028 with deep string resolution + variable path tracking, fixed `new Function()` not setting `ctx.hasDynamicExec`, content-level compound detection for MCP/IDE/binary patterns. 3 new rules: `fetch_decrypt_exec` (AST-033, CRITICAL), `download_exec_binary` (AST-034, CRITICAL), `ide_persistence` (AST-035, HIGH). Post-fix: 5/5 (100%). ADR: 98.8% (82/83). Rule count: 107 (102 RULES + 5 PARANOID).
 
-**Sandbox Preload (v2.4.9):** Multi-run sandbox with monkey-patching preload for time-bomb detection. 3 runs at [0h, 72h, 7d] offsets. 6 new sandbox preload rules (SANDBOX-009 to 014). Rule count: 113 (108 RULES + 5 PARANOID). Tests: 1522.
+**Sandbox Preload (v2.4.9):** Multi-run sandbox with monkey-patching preload for time-bomb detection. 3 runs at [0h, 72h, 7d] offsets. 6 new sandbox preload rules (SANDBOX-009 to 014). Rule count: 113 (108 RULES + 5 PARANOID).
 
 **New AST detection rules (v2.2):**
 - MUADDIB-AST-008 to AST-012: Dynamic require with decode patterns, sandbox evasion, detached process, binary dropper patterns
@@ -157,7 +161,7 @@ The following commands are internal infrastructure/dev tools. They work when cal
 2. Import in `src/index.js`, add to the Promise.all destructuring and the threats spread
 3. Add rule entry in `src/rules/index.js` with id, name, severity, confidence, description, mitre
 4. Add playbook entry in `src/response/playbooks.js`
-5. Add tests in the appropriate test file under `tests/` (20 modular test files)
+5. Add tests in the appropriate test file under `tests/` (42 modular test files)
 6. Create test fixtures in `tests/samples/my-scanner/`
 
 ## Key Constraints
