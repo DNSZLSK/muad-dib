@@ -958,7 +958,7 @@ async function scrapeSnykMalware() {
     { name: 'event-stream', version: '3.3.6', description: 'Flatmap-stream backdoor (2018)' },
     { name: 'flatmap-stream', version: '*', description: 'Malicious dependency of event-stream' },
     { name: 'eslint-scope', version: '3.7.2', description: 'Credential theft (2018)' },
-    { name: 'eslint-config-eslint', version: '*', description: 'Credential theft (2018)' },
+    { name: 'eslint-config-eslint', version: '5.0.2', description: 'Credential theft (2018)' },
     { name: 'getcookies', version: '*', description: 'Backdoor malware' },
     { name: 'mailparser', version: '2.3.0', description: 'Compromised version' },
     { name: 'node-ipc', version: '10.1.1', description: 'Protestware - file deletion' },

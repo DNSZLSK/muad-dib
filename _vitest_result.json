@@ -1,0 +1,395 @@
+{
+  "target": "C:/Users/kposz/PyCharmMiscProject/CDA 2025 - 2026/muad-dib/.muaddib-cache/benign-tarballs/vitest/package",
+  "timestamp": "2026-03-06T10:35:36.370Z",
+  "threats": [
+    {
+      "type": "prototype_hook",
+      "severity": "MEDIUM",
+      "message": "WebSocket.prototype.addEventListener overridden — native API hooking for traffic interception.",
+      "file": "dist\\chunks\\cli-api.B7PN_QUv.js",
+      "count": 1,
+      "rule_id": "MUADDIB-AST-017",
+      "rule_name": "Native API Prototype Hooking",
+      "confidence": "high",
+      "references": [
+        "https://www.sygnia.co/blog/malicious-chalk-debug-npm-packages/",
+        "https://attack.mitre.org/techniques/T1557/"
+      ],
+      "mitre": "T1557",
+      "playbook": "Prototype de fonction native modifie (fetch, XMLHttpRequest, http.request). Technique d'interception de trafic pour voler des donnees en transit. Supprimer le package. Auditer le trafic reseau recent.",
+      "points": 3
+    },
+    {
+      "type": "prototype_hook",
+      "severity": "MEDIUM",
+      "message": "WebSocket.prototype.removeEventListener overridden — native API hooking for traffic interception.",
+      "file": "dist\\chunks\\cli-api.B7PN_QUv.js",
+      "count": 1,
+      "rule_id": "MUADDIB-AST-017",
+      "rule_name": "Native API Prototype Hooking",
+      "confidence": "high",
+      "references": [
+        "https://www.sygnia.co/blog/malicious-chalk-debug-npm-packages/",
+        "https://attack.mitre.org/techniques/T1557/"
+      ],
+      "mitre": "T1557",
+      "playbook": "Prototype de fonction native modifie (fetch, XMLHttpRequest, http.request). Technique d'interception de trafic pour voler des donnees en transit. Supprimer le package. Auditer le trafic reseau recent.",
+      "points": 3
+    },
+    {
+      "type": "env_access",
+      "severity": "LOW",
+      "message": "Dynamic access to process.env (variable key).",
+      "file": "dist\\chunks\\cli-api.B7PN_QUv.js",
+      "count": 3,
+      "rule_id": "MUADDIB-AST-002",
+      "rule_name": "Sensitive Environment Variable Access",
+      "confidence": "high",
+      "references": [
+        "https://blog.phylum.io/shai-hulud-npm-worm",
+        "https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions"
+      ],
+      "mitre": "T1552.001",
+      "playbook": "Acces a une variable d'environnement sensible. Verifier si les donnees sont exfiltrees.",
+      "points": 1
+    },
+    {
+      "type": "reverse_shell",
+      "severity": "HIGH",
+      "message": "JavaScript reverse shell: net.Socket + connect() + pipe to shell process stdin/stdout.",
+      "file": "dist\\chunks\\cli-api.B7PN_QUv.js",
+      "count": 1,
+      "rule_id": "MUADDIB-SHELL-002",
+      "rule_name": "Reverse Shell",
+      "confidence": "high",
+      "references": [
+        "https://attack.mitre.org/techniques/T1059/004/"
+      ],
+      "mitre": "T1059.004",
+      "playbook": "CRITIQUE: Reverse shell detecte. Machine potentiellement compromise. Isoler immediatement.",
+      "points": 10
+    },
+    {
+      "type": "env_access",
+      "severity": "LOW",
+      "message": "Dynamic access to process.env (variable key).",
+      "file": "dist\\chunks\\init.B6MLFIaN.js",
+      "count": 4,
+      "unreachable": true,
+      "rule_id": "MUADDIB-AST-002",
+      "rule_name": "Sensitive Environment Variable Access",
+      "confidence": "high",
+      "references": [
+        "https://blog.phylum.io/shai-hulud-npm-worm",
+        "https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions"
+      ],
+      "mitre": "T1552.001",
+      "playbook": "Acces a une variable d'environnement sensible. Verifier si les donnees sont exfiltrees.",
+      "points": 1
+    },
+    {
+      "type": "dynamic_import",
+      "severity": "MEDIUM",
+      "message": "Dynamic import() with computed argument (possible obfuscation).",
+      "file": "dist\\chunks\\traces.CCmnQaNT.js",
+      "count": 1,
+      "rule_id": "MUADDIB-AST-008",
+      "rule_name": "Dynamic import() of Dangerous Module",
+      "confidence": "high",
+      "references": [
+        "https://attack.mitre.org/techniques/T1027/"
+      ],
+      "mitre": "T1027",
+      "playbook": "import() dynamique detecte. Technique d'evasion pour eviter la detection de require(). Verifier quel module est charge et son usage.",
+      "points": 3
+    },
+    {
+      "type": "module_compile",
+      "severity": "LOW",
+      "message": "module._compile() detected — executes arbitrary code from string in module context (flatmap-stream pattern).",
+      "file": "dist\\chunks\\vm.D3epNOPZ.js",
+      "count": 1,
+      "unreachable": true,
+      "rule_id": "MUADDIB-AST-023",
+      "rule_name": "Module Compile Execution",
+      "confidence": "high",
+      "references": [
+        "https://blog.npmjs.org/post/180565383195/details-about-the-event-stream-incident",
+        "https://attack.mitre.org/techniques/T1059/007/"
+      ],
+      "mitre": "T1059",
+      "playbook": "CRITIQUE: module._compile() detecte. Cette API Node.js interne execute du code arbitraire a partir d'une chaine dans le contexte d'un module. Utilisee dans flatmap-stream pour executer un payload dechiffre sans ecrire sur disque. Isoler immediatement. Analyser la source de la chaine compilee.",
+      "points": 1
+    },
+    {
+      "type": "module_compile_dynamic",
+      "severity": "LOW",
+      "message": "In-memory code execution via Module._compile(). Common malware evasion technique.",
+      "file": "dist\\chunks\\vm.D3epNOPZ.js",
+      "count": 1,
+      "unreachable": true,
+      "rule_id": "MUADDIB-AST-025",
+      "rule_name": "Dynamic Module Compile Execution",
+      "confidence": "high",
+      "references": [
+        "https://blog.npmjs.org/post/180565383195/details-about-the-event-stream-incident",
+        "https://attack.mitre.org/techniques/T1059/007/"
+      ],
+      "mitre": "T1059",
+      "playbook": "CRITIQUE: Module._compile() avec argument dynamique (variable, expression). Execution de code en memoire sans ecriture sur disque. Technique d'evasion utilisee dans flatmap-stream et SANDWORM_MODE. Isoler immediatement. Tracer la source de la chaine compilee pour extraire le payload.",
+      "points": 1
+    },
+    {
+      "type": "require_cache_poison",
+      "severity": "LOW",
+      "message": "require.cache accessed — module cache poisoning to hijack or replace core Node.js modules.",
+      "file": "dist\\chunks\\vm.D3epNOPZ.js",
+      "count": 1,
+      "unreachable": true,
+      "rule_id": "MUADDIB-AST-019",
+      "rule_name": "Require Cache Poisoning",
+      "confidence": "high",
+      "references": [
+        "https://attack.mitre.org/techniques/T1574/006/"
+      ],
+      "mitre": "T1574.006",
+      "playbook": "CRITIQUE: require.cache modifie pour hijacker des modules Node.js. Le code remplace les exports de modules charges (https, http, fs) pour intercepter toutes les requetes. Supprimer le package. Redemarrer le processus Node.js. Auditer le trafic reseau recent.",
+      "points": 1
+    },
+    {
+      "type": "dynamic_require",
+      "severity": "LOW",
+      "message": "Dynamic require() with variable argument (module name obfuscation).",
+      "file": "dist\\chunks\\vm.D3epNOPZ.js",
+      "count": 3,
+      "unreachable": true,
+      "rule_id": "MUADDIB-AST-006",
+      "rule_name": "Dynamic Require with Concatenation",
+      "confidence": "high",
+      "references": [
+        "https://attack.mitre.org/techniques/T1027/"
+      ],
+      "mitre": "T1027",
+      "playbook": "require() avec concatenation detecte. Technique d'obfuscation pour masquer le module charge. Analyser les variables concatenees.",
+      "points": 1
+    },
+    {
+      "type": "dynamic_import",
+      "severity": "MEDIUM",
+      "message": "Dynamic import() with computed argument (possible obfuscation).",
+      "file": "dist\\module-evaluator.js",
+      "count": 1,
+      "rule_id": "MUADDIB-AST-008",
+      "rule_name": "Dynamic import() of Dangerous Module",
+      "confidence": "high",
+      "references": [
+        "https://attack.mitre.org/techniques/T1027/"
+      ],
+      "mitre": "T1027",
+      "playbook": "import() dynamique detecte. Technique d'evasion pour eviter la detection de require(). Verifier quel module est charge et son usage.",
+      "points": 3
+    },
+    {
+      "type": "env_access",
+      "severity": "LOW",
+      "message": "Dynamic access to process.env (variable key).",
+      "file": "dist\\module-evaluator.js",
+      "count": 4,
+      "rule_id": "MUADDIB-AST-002",
+      "rule_name": "Sensitive Environment Variable Access",
+      "confidence": "high",
+      "references": [
+        "https://blog.phylum.io/shai-hulud-npm-worm",
+        "https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions"
+      ],
+      "mitre": "T1552.001",
+      "playbook": "Acces a une variable d'environnement sensible. Verifier si les donnees sont exfiltrees.",
+      "points": 1
+    },
+    {
+      "type": "env_proxy_intercept",
+      "severity": "HIGH",
+      "message": "new Proxy(process.env) detected — intercepts all environment variable access.",
+      "file": "dist\\module-evaluator.js",
+      "count": 1,
+      "rule_id": "MUADDIB-AST-009",
+      "rule_name": "Environment Variable Proxy Interception",
+      "confidence": "high",
+      "references": [
+        "https://attack.mitre.org/techniques/T1552/001/"
+      ],
+      "mitre": "T1552.001",
+      "playbook": "CRITIQUE: new Proxy(process.env) intercepte tous les acces aux variables d'environnement. Technique d'exfiltration silencieuse. Isoler la machine, regenerer tous les secrets.",
+      "points": 10
+    },
+    {
+      "type": "suspicious_dataflow",
+      "severity": "MEDIUM",
+      "message": "Suspicious flow: credentials read (npm_config_user_agent, process.env[dynamic], process.env[dynamic], npm_config_VITEST_MODULE_DIRECTORIES, process.env[dynamic]) + network send (request, request, net.connect, tls.connect, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, fetch, get, get, get, get, get, get, get, get, get, get, get, get, get, get, request, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get)",
+      "file": "dist\\chunks\\cli-api.B7PN_QUv.js",
+      "count": 1,
+      "rule_id": "MUADDIB-FLOW-001",
+      "rule_name": "Suspicious Data Flow",
+      "confidence": "high",
+      "references": [
+        "https://blog.phylum.io/shai-hulud-npm-worm"
+      ],
+      "mitre": "T1041",
+      "playbook": "CRITIQUE: Code lit des credentials et les envoie sur le reseau. Exfiltration probable. Isoler la machine, regenerer tous les secrets.",
+      "points": 3
+    },
+    {
+      "type": "suspicious_dataflow",
+      "severity": "LOW",
+      "message": "Suspicious flow: credentials read (process.env[dynamic], process.env[dynamic], process.env[dynamic], process.env[dynamic]) + network send (get, fetch, get, post)",
+      "file": "dist\\chunks\\init.B6MLFIaN.js",
+      "count": 1,
+      "unreachable": true,
+      "rule_id": "MUADDIB-FLOW-001",
+      "rule_name": "Suspicious Data Flow",
+      "confidence": "high",
+      "references": [
+        "https://blog.phylum.io/shai-hulud-npm-worm"
+      ],
+      "mitre": "T1041",
+      "playbook": "CRITIQUE: Code lit des credentials et les envoie sur le reseau. Exfiltration probable. Isoler la machine, regenerer tous les secrets.",
+      "points": 1
+    },
+    {
+      "type": "suspicious_dataflow",
+      "severity": "MEDIUM",
+      "message": "Suspicious flow: credentials read (process.env[dynamic], process.env[dynamic], process.env[dynamic], process.env[dynamic]) + network send (get, get)",
+      "file": "dist\\module-evaluator.js",
+      "count": 1,
+      "rule_id": "MUADDIB-FLOW-001",
+      "rule_name": "Suspicious Data Flow",
+      "confidence": "high",
+      "references": [
+        "https://blog.phylum.io/shai-hulud-npm-worm"
+      ],
+      "mitre": "T1041",
+      "playbook": "CRITIQUE: Code lit des credentials et les envoie sur le reseau. Exfiltration probable. Isoler la machine, regenerer tous les secrets.",
+      "points": 3
+    }
+  ],
+  "python": null,
+  "summary": {
+    "total": 16,
+    "critical": 0,
+    "high": 2,
+    "medium": 6,
+    "low": 8,
+    "riskScore": 28,
+    "riskLevel": "MEDIUM",
+    "globalRiskScore": 46,
+    "maxFileScore": 20,
+    "packageScore": 0,
+    "mostSuspiciousFile": "dist\\chunks\\cli-api.B7PN_QUv.js",
+    "fileScores": {
+      "dist\\chunks\\cli-api.B7PN_QUv.js": 20,
+      "dist\\chunks\\init.B6MLFIaN.js": 2,
+      "dist\\chunks\\traces.CCmnQaNT.js": 3,
+      "dist\\chunks\\vm.D3epNOPZ.js": 4,
+      "dist\\module-evaluator.js": 17
+    },
+    "breakdown": [
+      {
+        "rule": "MUADDIB-SHELL-002",
+        "type": "reverse_shell",
+        "points": 10,
+        "reason": "JavaScript reverse shell: net.Socket + connect() + pipe to shell process stdin/stdout."
+      },
+      {
+        "rule": "MUADDIB-AST-009",
+        "type": "env_proxy_intercept",
+        "points": 10,
+        "reason": "new Proxy(process.env) detected — intercepts all environment variable access."
+      },
+      {
+        "rule": "MUADDIB-AST-017",
+        "type": "prototype_hook",
+        "points": 3,
+        "reason": "WebSocket.prototype.addEventListener overridden — native API hooking for traffic interception."
+      },
+      {
+        "rule": "MUADDIB-AST-017",
+        "type": "prototype_hook",
+        "points": 3,
+        "reason": "WebSocket.prototype.removeEventListener overridden — native API hooking for traffic interception."
+      },
+      {
+        "rule": "MUADDIB-AST-008",
+        "type": "dynamic_import",
+        "points": 3,
+        "reason": "Dynamic import() with computed argument (possible obfuscation)."
+      },
+      {
+        "rule": "MUADDIB-AST-008",
+        "type": "dynamic_import",
+        "points": 3,
+        "reason": "Dynamic import() with computed argument (possible obfuscation)."
+      },
+      {
+        "rule": "MUADDIB-FLOW-001",
+        "type": "suspicious_dataflow",
+        "points": 3,
+        "reason": "Suspicious flow: credentials read (npm_config_user_agent, process.env[dynamic], process.env[dynamic], npm_config_VITEST_MODULE_DIRECTORIES, process.env[dynamic]) + network send (request, request, net.connect, tls.connect, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, fetch, get, get, get, get, get, get, get, get, get, get, get, get, get, get, request, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get, get)"
+      },
+      {
+        "rule": "MUADDIB-FLOW-001",
+        "type": "suspicious_dataflow",
+        "points": 3,
+        "reason": "Suspicious flow: credentials read (process.env[dynamic], process.env[dynamic], process.env[dynamic], process.env[dynamic]) + network send (get, get)"
+      },
+      {
+        "rule": "MUADDIB-AST-002",
+        "type": "env_access",
+        "points": 1,
+        "reason": "Dynamic access to process.env (variable key)."
+      },
+      {
+        "rule": "MUADDIB-AST-002",
+        "type": "env_access",
+        "points": 1,
+        "reason": "Dynamic access to process.env (variable key)."
+      },
+      {
+        "rule": "MUADDIB-AST-023",
+        "type": "module_compile",
+        "points": 1,
+        "reason": "module._compile() detected — executes arbitrary code from string in module context (flatmap-stream pattern)."
+      },
+      {
+        "rule": "MUADDIB-AST-025",
+        "type": "module_compile_dynamic",
+        "points": 1,
+        "reason": "In-memory code execution via Module._compile(). Common malware evasion technique."
+      },
+      {
+        "rule": "MUADDIB-AST-019",
+        "type": "require_cache_poison",
+        "points": 1,
+        "reason": "require.cache accessed — module cache poisoning to hijack or replace core Node.js modules."
+      },
+      {
+        "rule": "MUADDIB-AST-006",
+        "type": "dynamic_require",
+        "points": 1,
+        "reason": "Dynamic require() with variable argument (module name obfuscation)."
+      },
+      {
+        "rule": "MUADDIB-AST-002",
+        "type": "env_access",
+        "points": 1,
+        "reason": "Dynamic access to process.env (variable key)."
+      },
+      {
+        "rule": "MUADDIB-FLOW-001",
+        "type": "suspicious_dataflow",
+        "points": 1,
+        "reason": "Suspicious flow: credentials read (process.env[dynamic], process.env[dynamic], process.env[dynamic], process.env[dynamic]) + network send (get, fetch, get, post)"
+      }
+    ]
+  },
+  "sandbox": null
+}

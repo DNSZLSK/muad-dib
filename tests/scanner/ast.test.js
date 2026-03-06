@@ -395,9 +395,19 @@ async function runAstTests() {
     const tmp = makeTempPkg(`const { spawn } = require('child_process');\nspawn('claude', ['--dangerously-skip-permissions', 'task']);`);
     try {
       const result = await runScanDirect(tmp);
+      // CallExpression detection → CRITICAL (flag used in spawn)
+      const tCrit = result.threats.find(t => t.type === 'ai_agent_abuse' && t.severity === 'CRITICAL');
+      assert(tCrit, 'Should detect --dangerously-skip-permissions as CRITICAL when used in spawn');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: AI agent flag as string literal (not in exec) is MEDIUM', async () => {
+    const tmp = makeTempPkg(`const DEFAULT_FLAG = '--dangerously-skip-permissions';\nconsole.log(DEFAULT_FLAG);`);
+    try {
+      const result = await runScanDirect(tmp);
       const t = result.threats.find(t => t.type === 'ai_agent_abuse');
-      assert(t, 'Should detect --dangerously-skip-permissions');
-      assert(t.severity === 'CRITICAL', 'Should be CRITICAL severity');
+      assert(t, 'Should detect flag as string literal');
+      assert(t.severity === 'MEDIUM', 'Literal-only detection should be MEDIUM, not CRITICAL');
     } finally { cleanupTemp(tmp); }
   });
 

@@ -101,6 +101,8 @@ function analyzeFile(content, filePath, basePath) {
     ideConfigPathVars: new Map(),
     // Wave 4: compound detection — fetch + decrypt + eval chain
     hasRemoteFetch: /\bhttps?\.(get|request)\b/.test(content) || /\bfetch\s*\(/.test(content),
+    // Safe domain exclusion: if ALL URLs in file are from known registries, suppress download_exec_binary
+    fetchOnlySafeDomains: false, // computed below after URL extraction
     hasCryptoDecipher: /\bcreateDecipher(iv)?\s*\(/.test(content),
     // Wave 4: native addon camouflage signals
     hasRequireNodeFile: false,
@@ -111,9 +113,27 @@ function analyzeFile(content, filePath, basePath) {
     hasRunOnInContent: /\brunOn\b|\bfolderOpen\b/.test(content),
     hasWriteFileSyncInContent: /\bwriteFileSync\b|\bwriteFile\s*\(/.test(content),
     // Wave 4: MCP content keyword detection (must also have writeFileSync in same file)
+    // Content-level MCP detection: MCP keyword + writeFileSync + MCP config path in same file
+    // Path co-occurrence prevents FPs where a file reads MCP config but writes elsewhere.
+    // Read-only pattern (readFileSync without writeFileSync to MCP) is not injection.
     hasMcpContentKeywords: (/\bmcpServers\b/.test(content) || /\bmcp\.json\b/.test(content) || /\bclaude_desktop_config\b/.test(content)) &&
-      /\bwriteFileSync\b|\bwriteFile\s*\(/.test(content)
+      /\bwriteFileSync\b|\bwriteFile\s*\(/.test(content) &&
+      (/\.claude[/\\]/.test(content) || /\.cursor[/\\]/.test(content) || /\.vscode[/\\]/.test(content) || /\.windsurf[/\\]/.test(content) || /\.codeium[/\\]/.test(content) || /\.continue[/\\]/.test(content) || /claude_desktop_config/.test(content) || /\bmcp\.json\b/.test(content))
   };
+
+  // Compute fetchOnlySafeDomains: check if ALL URLs in file point to known registries
+  if (ctx.hasRemoteFetch) {
+    const urlMatches = content.match(/https?:\/\/[^\s'"`)]+/g) || [];
+    const SAFE_FETCH_DOMAINS = [
+      'registry.npmjs.org', 'npmjs.com',
+      'github.com', 'objects.githubusercontent.com', 'raw.githubusercontent.com',
+      'nodejs.org', 'yarnpkg.com',
+      'pypi.org', 'files.pythonhosted.org'
+    ];
+    if (urlMatches.length > 0 && urlMatches.every(u => SAFE_FETCH_DOMAINS.some(d => u.includes(d)))) {
+      ctx.fetchOnlySafeDomains = true;
+    }
+  }
 
   walk.simple(ast, {
     VariableDeclarator(node) { handleVariableDeclarator(node, ctx); },

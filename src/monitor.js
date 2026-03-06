@@ -25,6 +25,14 @@ const LAST_DAILY_REPORT_FILE = path.join(__dirname, '..', 'data', 'last-daily-re
 const DAILY_STATS_FILE = path.join(__dirname, '..', 'data', 'daily-stats.json');
 const TEMPORAL_DETECTIONS_FILE = path.join(__dirname, '..', 'data', 'temporal-detections.json');
 
+// Local log persistence directories (parallel to Discord webhooks for offline analysis)
+const DAILY_REPORTS_LOG_DIR = path.join(__dirname, '..', 'logs', 'daily-reports');
+const ALERTS_LOG_DIR = path.join(__dirname, '..', 'logs', 'alerts');
+
+// Ensure log directories exist at startup
+fs.mkdirSync(DAILY_REPORTS_LOG_DIR, { recursive: true });
+fs.mkdirSync(ALERTS_LOG_DIR, { recursive: true });
+
 /**
  * Atomic file write: write to .tmp then rename (crash-safe).
  * Prevents race conditions and partial writes from corrupting data files.
@@ -434,6 +442,44 @@ function computeRiskScore(summary) {
   return Math.min(raw, 100);
 }
 
+/**
+ * Persist a CRITICAL/HIGH alert to logs/alerts/YYYY-MM-DD-HH-mm-ss-<package>.json
+ * Same payload as webhook — enables offline FPR/TPR trend analysis.
+ */
+function persistAlert(name, version, ecosystem, webhookData) {
+  try {
+    const now = new Date();
+    const ts = now.toISOString().replace(/[:.]/g, '-').replace('Z', '');
+    const safeName = (name || 'unknown').replace(/[/\\@]/g, '_');
+    const filename = `${ts}-${safeName}.json`;
+    const filePath = path.join(ALERTS_LOG_DIR, filename);
+    atomicWriteFileSync(filePath, JSON.stringify(webhookData, null, 2));
+  } catch (err) {
+    console.error(`[MONITOR] Failed to persist alert for ${name}@${version}: ${err.message}`);
+  }
+}
+
+/**
+ * Persist a daily report to logs/daily-reports/YYYY-MM-DD.json
+ * Same payload as Discord embed + raw metrics for trend analysis.
+ */
+function persistDailyReport(reportPayload, rawMetrics) {
+  try {
+    const today = getParisDateString();
+    const filePath = path.join(DAILY_REPORTS_LOG_DIR, `${today}.json`);
+    const data = {
+      date: today,
+      timestamp: new Date().toISOString(),
+      embed: reportPayload,
+      metrics: rawMetrics
+    };
+    atomicWriteFileSync(filePath, JSON.stringify(data, null, 2));
+    console.log(`[MONITOR] Daily report persisted to ${filePath}`);
+  } catch (err) {
+    console.error(`[MONITOR] Failed to persist daily report: ${err.message}`);
+  }
+}
+
 async function trySendWebhook(name, version, ecosystem, result, sandboxResult) {
   if (!shouldSendWebhook(result, sandboxResult)) {
     if (sandboxResult && sandboxResult.score === 0) {
@@ -460,6 +506,8 @@ async function trySendWebhook(name, version, ecosystem, result, sandboxResult) {
       severity: sandboxResult.severity
     };
   }
+  // Persist alert locally before sending webhook (survives Discord outages)
+  persistAlert(name, version, ecosystem, webhookData);
   try {
     await sendWebhook(url, webhookData);
     console.log(`[MONITOR] Webhook sent for ${name}@${version}`);
@@ -1520,6 +1568,19 @@ async function sendDailyReport() {
   saveLastDailyReportDate(today);
 
   const payload = buildDailyReportEmbed();
+
+  // Persist locally with full raw metrics (survives Discord outages, enables trend analysis)
+  const { agg } = buildReportFromDisk();
+  persistDailyReport(payload, {
+    scanned: agg.scanned,
+    clean: agg.clean,
+    suspect: agg.suspect,
+    errors: stats.errors,
+    avgScanTimeMs: stats.scanned > 0 ? Math.round(stats.totalTimeMs / stats.scanned) : 0,
+    suspectByTier: { ...stats.suspectByTier },
+    topSuspects: dailyAlerts.slice().sort((a, b) => b.findingsCount - a.findingsCount).slice(0, 10)
+  });
+
   try {
     await sendWebhook(url, payload, { rawPayload: true });
     console.log('[MONITOR] Daily report sent');
