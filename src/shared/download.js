@@ -196,7 +196,7 @@ function extractTarGz(tgzPath, destDir) {
   const tgzDir = path.dirname(path.resolve(tgzPath));
   const tgzName = path.basename(tgzPath);
   const relDest = path.relative(tgzDir, path.resolve(destDir)) || '.';
-  execFileSync('tar', ['xzf', tgzName, '-C', relDest], { cwd: tgzDir, timeout: 60_000, stdio: 'pipe' });
+  execFileSync('tar', ['xzf', tgzName, '-C', relDest, '--no-same-owner'], { cwd: tgzDir, timeout: 60_000, stdio: 'pipe' });
   // npm tarballs extract into a package/ subdirectory; detect it
   const packageSubdir = path.join(destDir, 'package');
   try {

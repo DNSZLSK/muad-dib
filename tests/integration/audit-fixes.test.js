@@ -1709,6 +1709,152 @@ https.get('https://registry.npmjs.org/express/-/express-4.18.2.tgz', (res) => {
 }
 
 // ===================================================================
+// BATCH 5: Infrastructure Security Hardening
+// ===================================================================
+
+async function runBatch5InfraTests() {
+  console.log('\n=== BATCH 5: Infra Security Hardening ===\n');
+
+  const zlib = require('zlib');
+
+  // --- extractTgz path traversal guard ---
+
+  test('BATCH5: extractTgz skips path traversal entries', () => {
+    const { extractTgz } = require('../../src/commands/evaluate.js');
+
+    // Verify the guard code is present in the loaded function
+    const fnSrc = extractTgz.toString();
+    assert(fnSrc.includes('path.relative') || fnSrc.includes('startsWith'),
+      'extractTgz should contain path traversal guard');
+
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-tgz-traversal-'));
+    try {
+      // Use a self-contained traversal: destDir is tmpDir/nest/extracted,
+      // traversal entry is ../escape.txt which would land in tmpDir/nest/
+      // This keeps everything inside tmpDir for reliable cleanup & assertion.
+      const nestDir = path.join(tmpDir, 'nest');
+      const destDir = path.join(nestDir, 'extracted');
+      fs.mkdirSync(destDir, { recursive: true });
+
+      const traversalName = '../escape.txt';
+      const safeName = 'package/index.js';
+      const safeContent = Buffer.from('console.log("safe");\n');
+      const traversalContent = Buffer.from('ESCAPED\n');
+
+      function makeTarEntry(name, content) {
+        const header = Buffer.alloc(512, 0);
+        header.write(name, 0, Math.min(name.length, 100), 'utf8');
+        header.write('0000644\0', 100, 8, 'utf8');
+        header.write('0000000\0', 108, 8, 'utf8');
+        header.write('0000000\0', 116, 8, 'utf8');
+        const sizeStr = content.length.toString(8).padStart(11, '0') + '\0';
+        header.write(sizeStr, 124, 12, 'utf8');
+        header.write('00000000000\0', 136, 12, 'utf8');
+        header[156] = 0x30; // '0'
+        header.write('        ', 148, 8, 'utf8');
+        let chksum = 0;
+        for (let i = 0; i < 512; i++) chksum += header[i];
+        const chkStr = chksum.toString(8).padStart(6, '0') + '\0 ';
+        header.write(chkStr, 148, 8, 'utf8');
+        const dataBlocks = Buffer.alloc(Math.ceil(content.length / 512) * 512, 0);
+        content.copy(dataBlocks);
+        return Buffer.concat([header, dataBlocks]);
+      }
+
+      const tarData = Buffer.concat([
+        makeTarEntry(traversalName, traversalContent),
+        makeTarEntry(safeName, safeContent),
+        Buffer.alloc(1024, 0) // end of archive
+      ]);
+      const tgzData = zlib.gzipSync(tarData);
+
+      const tgzPath = path.join(tmpDir, 'test.tgz');
+      fs.writeFileSync(tgzPath, tgzData);
+
+      extractTgz(tgzPath, destDir);
+
+      // Safe file should exist
+      const safeFile = path.join(destDir, 'package', 'index.js');
+      assert(fs.existsSync(safeFile), 'Safe file should be extracted');
+
+      // Only 'package' directory should exist inside destDir — no traversal artifacts
+      const entries = fs.readdirSync(destDir);
+      assert(entries.length === 1 && entries[0] === 'package',
+        `destDir should only contain "package", got: [${entries.join(', ')}]`);
+
+      // The escaped file should NOT exist in the parent (nestDir)
+      const escapedFile = path.join(nestDir, 'escape.txt');
+      assert(!fs.existsSync(escapedFile),
+        'Traversal file should NOT escape to parent directory');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  // --- YAML HMAC verification ---
+
+  test('BATCH5: YAML HMAC verification passes on valid signed file', () => {
+    const { generateIOCHMAC } = require('../../src/ioc/updater.js');
+    const { readVerifiedYAML } = require('../../src/ioc/yaml-loader.js');
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-hmac-'));
+    try {
+      const yamlContent = 'packages:\n  - name: test-pkg\n    version: "1.0.0"\n';
+      const yamlPath = path.join(tmpDir, 'test.yaml');
+      fs.writeFileSync(yamlPath, yamlContent);
+      const hmac = generateIOCHMAC(yamlContent);
+      fs.writeFileSync(yamlPath + '.hmac', hmac);
+
+      // Should load without warning — capture stderr
+      const origError = console.error;
+      let warned = false;
+      console.error = (...args) => {
+        if (args[0] && args[0].includes('HMAC verification failed')) warned = true;
+      };
+      try {
+        const result = readVerifiedYAML(yamlPath);
+        assert(result === yamlContent, 'Should return original YAML content');
+        assert(!warned, 'Should NOT warn on valid HMAC');
+      } finally {
+        console.error = origError;
+      }
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  test('BATCH5: YAML HMAC verification warns on tampered file', () => {
+    const { generateIOCHMAC } = require('../../src/ioc/updater.js');
+    const { readVerifiedYAML } = require('../../src/ioc/yaml-loader.js');
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-hmac-tamper-'));
+    try {
+      const yamlContent = 'packages:\n  - name: test-pkg\n    version: "1.0.0"\n';
+      const yamlPath = path.join(tmpDir, 'test.yaml');
+      fs.writeFileSync(yamlPath, yamlContent);
+      // Sign original content
+      const hmac = generateIOCHMAC(yamlContent);
+      fs.writeFileSync(yamlPath + '.hmac', hmac);
+      // Tamper with the file
+      fs.writeFileSync(yamlPath, yamlContent + '  - name: evil-pkg\n    version: "6.6.6"\n');
+
+      const origError = console.error;
+      let warned = false;
+      console.error = (...args) => {
+        if (args[0] && args[0].includes('HMAC verification failed')) warned = true;
+      };
+      try {
+        const result = readVerifiedYAML(yamlPath);
+        assert(result.includes('evil-pkg'), 'Should still load tampered content (backward-compat)');
+        assert(warned, 'Should warn about HMAC mismatch');
+      } finally {
+        console.error = origError;
+      }
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+}
+
+// ===================================================================
 // EXPORT
 // ===================================================================
 async function runAuditFixTests() {
@@ -1748,6 +1894,8 @@ async function runAuditFixTests() {
   await runMediumFix34Tests();
   // Audit scoring hardening
   await runAuditScoringTests();
+  // Batch 5 infra hardening
+  await runBatch5InfraTests();
 }
 
 module.exports = { runAuditFixTests };

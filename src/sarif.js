@@ -10,6 +10,11 @@ const pkgVersion = (() => {
   }
 })();
 
+function sarifUri(filePath) {
+  if (!filePath) return '';
+  return filePath.split(/[/\\]/).map(encodeURIComponent).join('/');
+}
+
 function generateSARIF(results) {
   const sarif = {
     $schema: 'https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json',
@@ -50,7 +55,7 @@ function generateSARIF(results) {
             {
               physicalLocation: {
                 artifactLocation: {
-                  uri: encodeURI(threat.file || ''),
+                  uri: sarifUri(threat.file),
                   uriBaseId: '%SRCROOT%'
                 },
                 region: {

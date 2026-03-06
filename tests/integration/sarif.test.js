@@ -126,6 +126,37 @@ async function runSarifTests() {
       assertIncludes(e.message, 'Invalid output path', 'Should mention invalid path');
     }
   });
+
+  // --- URI encoding (Batch 5 hardening) ---
+
+  test('SARIF: URI encodes special characters per segment', () => {
+    const results = {
+      threats: [{ rule_id: 'R1', severity: 'HIGH', message: 'test', file: 'src/file with spaces.js', line: 1 }]
+    };
+    const sarif = generateSARIF(results);
+    const uri = sarif.runs[0].results[0].locations[0].physicalLocation.artifactLocation.uri;
+    assert(uri === 'src/file%20with%20spaces.js', `URI should encode spaces per segment, got: ${uri}`);
+    assert(!uri.includes(' '), 'URI should not contain raw spaces');
+  });
+
+  test('SARIF: URI normalizes backslashes to forward slashes', () => {
+    const results = {
+      threats: [{ rule_id: 'R1', severity: 'HIGH', message: 'test', file: 'src\\lib\\index.js', line: 1 }]
+    };
+    const sarif = generateSARIF(results);
+    const uri = sarif.runs[0].results[0].locations[0].physicalLocation.artifactLocation.uri;
+    assert(uri === 'src/lib/index.js', `URI should use forward slashes, got: ${uri}`);
+    assert(!uri.includes('\\'), 'URI should not contain backslashes');
+  });
+
+  test('SARIF: URI handles empty/null file gracefully', () => {
+    const results = {
+      threats: [{ rule_id: 'R1', severity: 'HIGH', message: 'test', file: '', line: 1 }]
+    };
+    const sarif = generateSARIF(results);
+    const uri = sarif.runs[0].results[0].locations[0].physicalLocation.artifactLocation.uri;
+    assert(uri === '', `URI should be empty string for empty file, got: ${uri}`);
+  });
 }
 
 module.exports = { runSarifTests };

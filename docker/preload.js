@@ -57,6 +57,7 @@
   // ═══════════════════════════════════════════════════════
 
   const TIME_OFFSET = parseInt(process.env.NODE_TIMING_OFFSET || '0', 10);
+  delete process.env.NODE_TIMING_OFFSET;
   const LOG_FILE = '/tmp/preload.log';
   const realStart = _DateNow.call(Date);
 

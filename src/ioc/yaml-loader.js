@@ -4,6 +4,31 @@ const yaml = require('js-yaml');
 
 const IOCS_DIR = path.join(__dirname, '../../iocs');
 
+/**
+ * Read a YAML file with optional HMAC verification.
+ * If a sibling .hmac file exists, verify integrity. Warn on mismatch but still load
+ * (backward-compatible for pre-HMAC installs).
+ * Uses lazy require to avoid circular dependency with updater.js.
+ * @param {string} filePath - Path to the YAML file
+ * @returns {string} Raw YAML content
+ */
+function readVerifiedYAML(filePath) {
+  const content = fs.readFileSync(filePath, 'utf8');
+  const hmacPath = filePath + '.hmac';
+  if (fs.existsSync(hmacPath)) {
+    try {
+      const { verifyIOCHMAC } = require('./updater.js');
+      const storedHmac = fs.readFileSync(hmacPath, 'utf8').trim();
+      if (!verifyIOCHMAC(content, storedHmac)) {
+        console.error(`[WARN] HMAC verification failed for ${path.basename(filePath)} — possible tampering`);
+      }
+    } catch (e) {
+      console.error(`[WARN] Could not read HMAC file for ${path.basename(filePath)}: ${e.message}`);
+    }
+  }
+  return content;
+}
+
 function loadYAMLIOCs() {
   const iocs = {
     packages: [],
@@ -34,7 +59,7 @@ function loadPackagesYAML(filePath, iocs, seenPkgs) {
   if (!fs.existsSync(filePath)) return;
 
   try {
-    const data = yaml.load(fs.readFileSync(filePath, 'utf8'), { schema: yaml.JSON_SCHEMA });
+    const data = yaml.load(readVerifiedYAML(filePath), { schema: yaml.JSON_SCHEMA });
     if (data && data.packages) {
       for (const p of data.packages) {
         if (!p.name || typeof p.name !== 'string') continue;
@@ -64,7 +89,7 @@ function loadBuiltinYAML(filePath, iocs, seenPkgs, seenHashes, seenMarkers, seen
   if (!fs.existsSync(filePath)) return;
 
   try {
-    const data = yaml.load(fs.readFileSync(filePath, 'utf8'), { schema: yaml.JSON_SCHEMA });
+    const data = yaml.load(readVerifiedYAML(filePath), { schema: yaml.JSON_SCHEMA });
 
     // Packages
     if (data && data.packages) {
@@ -150,7 +175,7 @@ function loadHashesYAML(filePath, iocs, seenHashes, seenMarkers, seenFiles) {
   if (!fs.existsSync(filePath)) return;
 
   try {
-    const data = yaml.load(fs.readFileSync(filePath, 'utf8'), { schema: yaml.JSON_SCHEMA });
+    const data = yaml.load(readVerifiedYAML(filePath), { schema: yaml.JSON_SCHEMA });
 
     if (data && data.hashes) {
       for (const h of data.hashes) {
@@ -220,4 +245,20 @@ function getIOCStats() {
   return _cachedIOCStats;
 }
 
-module.exports = { loadYAMLIOCs, getIOCStats };
+/**
+ * Generate .hmac signature files for the 3 YAML IOC files.
+ * Call after updating YAML IOCs to sign them for integrity verification.
+ */
+function signYAMLIOCs() {
+  const { generateIOCHMAC } = require('./updater.js');
+  const yamlFiles = ['packages.yaml', 'builtin.yaml', 'hashes.yaml'];
+  for (const file of yamlFiles) {
+    const filePath = path.join(IOCS_DIR, file);
+    if (!fs.existsSync(filePath)) continue;
+    const content = fs.readFileSync(filePath, 'utf8');
+    const hmac = generateIOCHMAC(content);
+    fs.writeFileSync(filePath + '.hmac', hmac);
+  }
+}
+
+module.exports = { loadYAMLIOCs, getIOCStats, readVerifiedYAML, signYAMLIOCs };
