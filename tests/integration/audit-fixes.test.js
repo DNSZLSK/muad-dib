@@ -1775,7 +1775,12 @@ async function runBatch5InfraTests() {
       const safeFile = path.join(destDir, 'package', 'index.js');
       assert(fs.existsSync(safeFile), 'Safe file should be extracted');
 
-      // Traversal file should NOT exist anywhere above destDir
+      // Only 'package' directory should exist inside destDir — no traversal artifacts
+      const entries = fs.readdirSync(destDir);
+      assert(entries.length === 1 && entries[0] === 'package',
+        `destDir should only contain "package", got: [${entries.join(', ')}]`);
+
+      // Traversal file should NOT exist at resolved path
       const traversalTarget = path.resolve(destDir, traversalName);
       assert(!fs.existsSync(traversalTarget), 'Path traversal file should NOT be extracted');
     } finally {

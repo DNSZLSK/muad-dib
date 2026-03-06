@@ -192,7 +192,8 @@ function extractTgz(tgzPath, destDir) {
     if (name && (typeFlag === '0' || typeFlag === '\0') && size > 0) {
       // Regular file — extract it (with path traversal guard)
       const resolved = path.resolve(destDir, name);
-      if (!resolved.startsWith(path.resolve(destDir) + path.sep) && resolved !== path.resolve(destDir)) {
+      const rel = path.relative(path.resolve(destDir), resolved);
+      if (rel.startsWith('..') || path.isAbsolute(rel)) {
         offset += Math.ceil(size / 512) * 512;
         continue; // skip path traversal attempt
       }
