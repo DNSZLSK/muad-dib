@@ -26,25 +26,73 @@ const DAILY_STATS_FILE = path.join(__dirname, '..', 'data', 'daily-stats.json');
 const TEMPORAL_DETECTIONS_FILE = path.join(__dirname, '..', 'data', 'temporal-detections.json');
 
 // Local log persistence directories (parallel to Discord webhooks for offline analysis)
-const DAILY_REPORTS_LOG_DIR = path.join(__dirname, '..', 'logs', 'daily-reports');
-const ALERTS_LOG_DIR = path.join(__dirname, '..', 'logs', 'alerts');
+// Primary: logs/ relative to project root. Fallback: /tmp/ if primary is read-only (EROFS/EACCES).
+const PRIMARY_DAILY_REPORTS_DIR = path.join(__dirname, '..', 'logs', 'daily-reports');
+const PRIMARY_ALERTS_DIR = path.join(__dirname, '..', 'logs', 'alerts');
+const FALLBACK_DAILY_REPORTS_DIR = path.join(require('os').tmpdir(), 'muaddib-daily-reports');
+const FALLBACK_ALERTS_DIR = path.join(require('os').tmpdir(), 'muaddib-alerts');
 
-// Ensure log directories exist at startup
-fs.mkdirSync(DAILY_REPORTS_LOG_DIR, { recursive: true });
-fs.mkdirSync(ALERTS_LOG_DIR, { recursive: true });
+/**
+ * Try to ensure a directory exists and is writable. Returns the usable path
+ * or a fallback path if the primary is read-only / permission-denied.
+ */
+function resolveWritableDir(primary, fallback) {
+  try {
+    fs.mkdirSync(primary, { recursive: true });
+    // Verify writability with a probe file
+    const probe = path.join(primary, '.write-test');
+    fs.writeFileSync(probe, '', 'utf8');
+    fs.unlinkSync(probe);
+    return primary;
+  } catch (err) {
+    if (err.code === 'EROFS' || err.code === 'EACCES' || err.code === 'EPERM') {
+      console.warn(`[MONITOR] WARNING: ${primary} is not writable (${err.code}). Falling back to ${fallback}`);
+      try {
+        fs.mkdirSync(fallback, { recursive: true });
+        return fallback;
+      } catch (fallbackErr) {
+        console.error(`[MONITOR] ERROR: Fallback ${fallback} also not writable: ${fallbackErr.message}`);
+        return fallback; // Return anyway — individual writes will catch errors
+      }
+    }
+    throw err; // Unexpected error — let it propagate
+  }
+}
+
+const DAILY_REPORTS_LOG_DIR = resolveWritableDir(PRIMARY_DAILY_REPORTS_DIR, FALLBACK_DAILY_REPORTS_DIR);
+const ALERTS_LOG_DIR = resolveWritableDir(PRIMARY_ALERTS_DIR, FALLBACK_ALERTS_DIR);
 
 /**
  * Atomic file write: write to .tmp then rename (crash-safe).
  * Prevents race conditions and partial writes from corrupting data files.
+ * On EROFS/EACCES, logs a warning and skips (non-fatal for monitor uptime).
  * @param {string} filePath - Target file path
  * @param {string} data - Content to write
  */
 function atomicWriteFileSync(filePath, data) {
   const dir = path.dirname(filePath);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  try {
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  } catch (err) {
+    if (err.code === 'EROFS' || err.code === 'EACCES' || err.code === 'EPERM') {
+      console.warn(`[MONITOR] Cannot create directory ${dir} (${err.code}) — skipping write to ${path.basename(filePath)}`);
+      return;
+    }
+    throw err;
+  }
   const tmpFile = filePath + '.tmp';
-  fs.writeFileSync(tmpFile, data, 'utf8');
-  fs.renameSync(tmpFile, filePath);
+  try {
+    fs.writeFileSync(tmpFile, data, 'utf8');
+    fs.renameSync(tmpFile, filePath);
+  } catch (err) {
+    if (err.code === 'EROFS' || err.code === 'EACCES' || err.code === 'EPERM') {
+      console.warn(`[MONITOR] Cannot write ${path.basename(filePath)} (${err.code}) — skipping`);
+      // Clean up .tmp if it was partially written
+      try { fs.unlinkSync(tmpFile); } catch (_) { /* ignore */ }
+      return;
+    }
+    throw err;
+  }
 }
 
 /**
@@ -383,22 +431,28 @@ function shouldSendWebhook(result, sandboxResult) {
 
   const staticScore = (result && result.summary) ? (result.summary.riskScore || 0) : 0;
   const sandboxScore = (sandboxResult && sandboxResult.score !== undefined) ? sandboxResult.score : -1;
+  const sandboxRan = sandboxScore >= 0;
 
-  // CRITICAL static score — always send regardless of sandbox
-  if (staticScore >= 80 && hasHighOrCritical(result)) return true;
-
-  // Real sandbox detection (above timeout noise threshold)
-  if (sandboxScore > 30) return true;
+  // Sandbox ran and came back clean — suppress webhook regardless of static score.
+  // A clean sandbox verdict overrides static analysis (FP confirmed dynamically).
+  if (sandboxRan && sandboxScore === 0) return false;
 
   // Sandbox ran but score is just timeout noise (<=15, e.g. /usr/bin/timeout FP) — suppress
-  if (sandboxScore >= 0 && sandboxScore <= 15) return false;
+  if (sandboxRan && sandboxScore <= 15) return false;
+
+  // Real sandbox detection (above timeout noise threshold) — always send
+  if (sandboxScore > 30) return true;
 
   // Sandbox ran with moderate score (16-30): send if static also suspicious
-  if (sandboxScore > 15 && sandboxScore <= 30) {
+  if (sandboxRan && sandboxScore > 15 && sandboxScore <= 30) {
     return staticScore >= 50 && hasHighOrCritical(result);
   }
 
-  // No sandbox: IOC match or high static score
+  // No sandbox ran (sandboxScore === -1): fall back to static analysis
+  // CRITICAL static score — send
+  if (staticScore >= 80 && hasHighOrCritical(result)) return true;
+
+  // IOC match or high static score
   if (hasIOCMatch(result)) return true;
   if (staticScore >= 50 && hasHighOrCritical(result)) return true;
 
@@ -2352,7 +2406,10 @@ module.exports = {
   atomicWriteFileSync,
   appendTemporalDetection,
   loadTemporalDetections,
-  TEMPORAL_DETECTIONS_FILE
+  TEMPORAL_DETECTIONS_FILE,
+  ALERTS_LOG_DIR,
+  DAILY_REPORTS_LOG_DIR,
+  resolveWritableDir
 };
 
 // Standalone entry point: node src/monitor.js
