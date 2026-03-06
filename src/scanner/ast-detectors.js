@@ -858,12 +858,24 @@ function handleCallExpression(node, ctx) {
       });
     } else {
       const isConstant = hasOnlyStringLiteralArgs(node);
+      let severity = isConstant ? 'LOW' : 'HIGH';
+      let message = isConstant
+        ? 'eval() with constant string literal (low risk, globalThis polyfill pattern).'
+        : 'Dangerous call "eval" with dynamic expression detected.';
+
+      // Audit fix: even string-literal eval is dangerous if content contains dangerous APIs
+      if (isConstant && node.arguments[0]?.value) {
+        const val = node.arguments[0].value;
+        if (/\b(require|import|exec|execSync|spawn|child_process|\.readFile|\.writeFile|process\.env|\.homedir)\b/.test(val)) {
+          severity = 'HIGH';
+          message = `eval() with dangerous API in string literal: "${val.substring(0, 100)}"`;
+        }
+      }
+
       ctx.threats.push({
         type: 'dangerous_call_eval',
-        severity: isConstant ? 'LOW' : 'HIGH',
-        message: isConstant
-          ? 'eval() with constant string literal (low risk, globalThis polyfill pattern).'
-          : 'Dangerous call "eval" with dynamic expression detected.',
+        severity,
+        message,
         file: ctx.relFile
       });
     }

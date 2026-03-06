@@ -130,7 +130,12 @@ function analyzeFile(content, filePath, basePath) {
       'nodejs.org', 'yarnpkg.com',
       'pypi.org', 'files.pythonhosted.org'
     ];
-    if (urlMatches.length > 0 && urlMatches.every(u => SAFE_FETCH_DOMAINS.some(d => u.includes(d)))) {
+    if (urlMatches.length > 0 && urlMatches.every(u => {
+      try {
+        const hostname = new URL(u).hostname;
+        return SAFE_FETCH_DOMAINS.some(d => hostname === d || hostname.endsWith('.' + d));
+      } catch { return false; }
+    })) {
       ctx.fetchOnlySafeDomains = true;
     }
   }

