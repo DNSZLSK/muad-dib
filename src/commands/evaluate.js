@@ -13,7 +13,7 @@
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
-const { execSync } = require('child_process');
+const { execSync, execFileSync } = require('child_process');
 const { run } = require('../index.js');
 
 const ROOT = path.join(__dirname, '..', '..');
@@ -224,7 +224,7 @@ function downloadAndExtract(pkg, options = {}) {
 
   let tgzFilename;
   try {
-    const output = execSync(`npm pack ${pkg}`, {
+    const output = execFileSync('npm', ['pack', pkg], {
       cwd: pkgCacheDir,
       encoding: 'utf8',
       timeout: PACK_TIMEOUT_MS,
@@ -361,7 +361,7 @@ function downloadAndExtractPyPI(pkg, options = {}) {
 
   // Download sdist via pip
   try {
-    execSync(`pip download --no-deps --no-binary :all: -d "${pkgCacheDir}" "${pkg}"`, {
+    execFileSync('pip', ['download', '--no-deps', '--no-binary', ':all:', '-d', pkgCacheDir, pkg], {
       encoding: 'utf8',
       timeout: PACK_TIMEOUT_MS,
       stdio: ['pipe', 'pipe', 'pipe']

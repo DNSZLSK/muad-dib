@@ -119,19 +119,35 @@ const FP_COUNT_THRESHOLDS = {
   credential_tampering: { maxCount: 5, to: 'LOW' }
 };
 
-// Types exempt from dist/ downgrade — IOC matches and lifecycle scripts are always real
+// Types exempt from dist/ downgrade — IOC matches, lifecycle scripts, and
+// high-confidence compound detections are always real even in dist/ files
 const DIST_EXEMPT_TYPES = new Set([
   'ioc_match', 'known_malicious_package', 'pypi_malicious_package', 'shai_hulud_marker',
   'lifecycle_script', 'lifecycle_shell_pipe',
-  'lifecycle_added_critical', 'lifecycle_added_high', 'lifecycle_modified'
+  'lifecycle_added_critical', 'lifecycle_added_high', 'lifecycle_modified',
+  // Compound detections — require multiple correlated signals, not single-pattern FPs
+  'zlib_inflate_eval',        // zlib + base64 + eval (event-stream pattern)
+  'fetch_decrypt_exec',       // fetch + decrypt + eval (steganographic chain)
+  'download_exec_binary',     // download + chmod + exec (binary dropper)
+  'cross_file_dataflow',      // credential read → network exfil across files
+  'staged_eval_decode',       // eval(atob(...)) (explicit payload staging)
+  'reverse_shell'             // net.Socket + connect + pipe (always malicious)
 ]);
 
 // Regex matching dist/build/minified/bundled file paths
 const DIST_FILE_RE = /(?:^|[/\\])(?:dist|build)[/\\]|\.min\.js$|\.bundle\.js$/i;
 
-// Types exempt from reachability downgrade — IOC matches, lifecycle, and package-level types
+// Types exempt from reachability downgrade — IOC matches, lifecycle, and package-level types.
+// NOTE: Uses the base IOC/lifecycle exempt set, NOT full DIST_EXEMPT_TYPES.
+// Compound detections (zlib_inflate_eval, staged_eval_decode, etc.) should still be
+// downgraded if the file is truly unreachable, since unreachable code cannot execute.
+const REACHABILITY_BASE_EXEMPT = new Set([
+  'ioc_match', 'known_malicious_package', 'pypi_malicious_package', 'shai_hulud_marker',
+  'lifecycle_script', 'lifecycle_shell_pipe',
+  'lifecycle_added_critical', 'lifecycle_added_high', 'lifecycle_modified'
+]);
 const REACHABILITY_EXEMPT_TYPES = new Set([
-  ...DIST_EXEMPT_TYPES,
+  ...REACHABILITY_BASE_EXEMPT,
   'cross_file_dataflow',
   'typosquat_detected', 'pypi_typosquat_detected',
   'pypi_malicious_package',
@@ -188,11 +204,11 @@ function applyFPReductions(threats, reachableFiles, packageName) {
 
   const totalThreats = threats.length;
 
-  // P4: Plugin loader pattern — packages with 2+ dynamic_require + dynamic_import combined
+  // P4: Plugin loader pattern — packages with 5+ dynamic_require + dynamic_import combined
   // are legitimate plugin systems (webpack, eslint, karma, knex, jasmine, gatsby).
-  // Malware uses one pattern, not both. Bypass the per-type percentage guard.
+  // Threshold raised from >1 to >4 (audit fix: >1 was trivially exploitable).
   const pluginLoaderCount = (typeCounts.dynamic_require || 0) + (typeCounts.dynamic_import || 0);
-  if (pluginLoaderCount > 1) {
+  if (pluginLoaderCount > 4) {
     for (const t of threats) {
       if ((t.type === 'dynamic_require' || t.type === 'dynamic_import') && t.severity === 'HIGH') {
         t.severity = 'LOW';
@@ -208,10 +224,11 @@ function applyFPReductions(threats, reachableFiles, packageName) {
     const rule = FP_COUNT_THRESHOLDS[t.type];
     if (rule && typeCounts[t.type] > rule.maxCount && (!rule.from || t.severity === rule.from)) {
       const typeRatio = typeCounts[t.type] / totalThreats;
-      // P4: suspicious_dataflow bypasses the percentage guard — multiple data flow paths
-      // indicate a complex application (SMTP client, monitoring agent), not malware.
-      // Malware has 1-2 targeted exfiltration flows, not 4+.
-      if (typeRatio < 0.5 || t.type === 'suspicious_dataflow') {
+      // suspicious_dataflow: partial bypass of percentage guard up to 80%.
+      // Complex apps (SMTP, monitoring) have 50-80% dataflow findings — still downgrade.
+      // But if dataflow is >80% of ALL findings, it may be real targeted exfiltration.
+      // (Audit fix: full bypass was exploitable — 4+ dataflow patterns = all LOW.)
+      if (typeRatio < 0.5 || (t.type === 'suspicious_dataflow' && typeRatio < 0.8)) {
         t.severity = rule.to;
       }
     }
@@ -232,22 +249,22 @@ function applyFPReductions(threats, reachableFiles, packageName) {
     }
 
     // HTTP client prototype whitelist: packages with >20 prototype_hook hits
-    // targeting HTTP objects (Request, Response, fetch, etc.) are legitimate HTTP clients
+    // targeting HTTP class names are legitimate HTTP clients/frameworks.
+    // Audit fix: narrowed regex — 'get','delete','command' matched getCredentials, deleteAccount.
     if (t.type === 'prototype_hook' && (t.severity === 'HIGH' || t.severity === 'CRITICAL') &&
         typeCounts.prototype_hook > 20) {
-      const HTTP_PROTO_RE = /\b(Request|Response|fetch|get|post|put|delete|patch|head|options|query|command)\b/i;
+      const HTTP_PROTO_RE = /\b(Request|Response|IncomingMessage|ClientRequest|ServerResponse|fetch)\b/i;
       if (HTTP_PROTO_RE.test(t.message)) {
         t.severity = 'MEDIUM';
       }
     }
 
-    // Dist/build/minified files: bundler artifacts get severity downgraded two notches.
-    // Real malware injects payloads in source files, not in dist/ output.
-    // Two-notch downgrade (P4): cross-file bonus amplifies dist/ noise in large packages.
-    // IOC matches and lifecycle scripts are exempt (DIST_EXEMPT_TYPES).
+    // Dist/build/minified files: bundler artifacts get severity downgraded one notch.
+    // Reduced from two-notch (audit fix): 2-notch made dist/ attacks invisible (CRITICAL→MEDIUM=3pts).
+    // Compound detections are exempt (DIST_EXEMPT_TYPES).
     if (t.file && !DIST_EXEMPT_TYPES.has(t.type) && DIST_FILE_RE.test(t.file)) {
-      if (t.severity === 'CRITICAL') t.severity = 'MEDIUM';
-      else if (t.severity === 'HIGH') t.severity = 'LOW';
+      if (t.severity === 'CRITICAL') t.severity = 'HIGH';
+      else if (t.severity === 'HIGH') t.severity = 'MEDIUM';
       else if (t.severity === 'MEDIUM') t.severity = 'LOW';
     }
 
