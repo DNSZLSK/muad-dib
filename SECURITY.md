@@ -4,10 +4,12 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
+| 2.5.x   | :white_check_mark: |
+| 2.4.x   | :white_check_mark: |
 | 2.3.x   | :white_check_mark: |
-| 2.2.x   | :white_check_mark: |
-| 2.1.x   | :white_check_mark: |
-| 2.0.x   | :white_check_mark: |
+| 2.2.x   | :x:                |
+| 2.1.x   | :x:                |
+| 2.0.x   | :x:                |
 | 1.8.x   | :x:                |
 | 1.6.x   | :x:                |
 | 1.4.x   | :x:                |
@@ -61,9 +63,9 @@ Please include the following information in your report:
 - We aim to release fixes before public disclosure
 - We request a 90-day disclosure window for complex issues
 
-## Detection Rules (v2.3.1)
+## Detection Rules (v2.5.8)
 
-MUAD'DIB uses 14 parallel scanners + 5 behavioral anomaly detection features + ground truth validation, producing 102 rule IDs (97 RULES + 5 PARANOID):
+MUAD'DIB uses 14 parallel scanners + 5 behavioral anomaly detection features + ground truth validation, producing 113 rule IDs (108 RULES + 5 PARANOID):
 
 ### AST Scanner
 
@@ -135,6 +137,9 @@ MUAD'DIB uses 14 parallel scanners + 5 behavioral anomaly detection features + g
 | MUADDIB-AST-029 | Dynamic Environment Variable Harvesting | HIGH | T1552 |
 | MUADDIB-AST-030 | DNS Chunk Exfiltration | HIGH | T1048 |
 | MUADDIB-AST-031 | LLM API Key Harvesting | MEDIUM | T1552 |
+| MUADDIB-AST-033 | Steganographic Payload Chain (fetch + decrypt + eval) | CRITICAL | T1027.003 |
+| MUADDIB-AST-034 | Download-Execute Binary (download + chmod + execSync) | CRITICAL | T1105 |
+| MUADDIB-AST-035 | IDE Task Persistence (tasks.json + runOn + writeFileSync) | HIGH | T1546 |
 
 ### AI Config Scanner (v2.2)
 
@@ -200,6 +205,19 @@ Runtime behavioral analysis: packages are installed in an isolated Docker contai
 | MUADDIB-SANDBOX-006 | Dangerous Process Spawned | CRITICAL |
 | MUADDIB-SANDBOX-007 | Unknown Process Spawned | MEDIUM |
 | MUADDIB-SANDBOX-008 | Container Timeout | CRITICAL |
+
+### Sandbox Preload Rules (v2.4.9) — Runtime Monkey-Patching
+
+Runtime behavioral analysis via monkey-patching preload (`NODE_OPTIONS=--require /opt/preload.js`). Patches time APIs, intercepts network/filesystem/process/env calls. Multi-run mode at [0h, 72h, 7d] offsets to detect time-bomb malware (MITRE T1497.003).
+
+| Rule ID | Name | Severity | MITRE |
+|---------|------|----------|-------|
+| MUADDIB-SANDBOX-009 | Suspicious Timer Delay (> 1h) | MEDIUM | T1497.003 |
+| MUADDIB-SANDBOX-010 | Critical Timer Delay / Time-Bomb (> 24h) | CRITICAL | T1497.003 |
+| MUADDIB-SANDBOX-011 | Preload Sensitive File Read (.npmrc, .ssh, .aws, .env) | HIGH | T1552.001 |
+| MUADDIB-SANDBOX-012 | Network After Sensitive Read (compound: file + network) | CRITICAL | T1041 |
+| MUADDIB-SANDBOX-013 | Suspicious Command Execution (curl, wget, bash, powershell) | HIGH | T1059 |
+| MUADDIB-SANDBOX-014 | Sensitive Environment Variable Access (TOKEN, SECRET, KEY) | MEDIUM | T1552.001 |
 
 ### Temporal Analysis Rules (v2.0) — Behavioral Anomaly Detection
 
@@ -327,15 +345,15 @@ The sandbox simulates CI environments by setting: `CI=true`, `GITHUB_ACTIONS=tru
 2. **Signed commits**: Use GPG-signed commits when possible
 3. **Review dependencies**: Check new dependencies before adding them
 
-## Threat Model (v2.3.1)
+## Threat Model (v2.5.8)
 
-MUAD'DIB 2.3 uses a **triple detection approach**:
+MUAD'DIB 2.5 uses a **triple detection approach**:
 
 1. **IOC-based detection** (v1.x): Matches packages against 225,000+ known malicious packages from OSV, DataDog, OSSF, GitHub Advisory, and other sources. Fast and reliable for known threats.
 
 2. **Behavioral anomaly detection** (v2.0): Analyzes changes between package versions to detect supply-chain attacks before they appear in IOC databases. Compares lifecycle scripts, AST, publish frequency, and maintainer metadata across versions. This approach can detect 0-day behavioral anomalies without any prior knowledge of the specific attack.
 
-3. **Ground truth validation** (v2.1–v2.3.1): Validates detection accuracy against 51 real-world attacks (49 active samples), tracks detection lead times vs. public advisories, and monitors false positive rates over time. 1387 tests with 86% code coverage. Provides observability into scanner effectiveness.
+3. **Ground truth validation** (v2.1–v2.5.8): Validates detection accuracy against 51 real-world attacks (49 active samples), tracks detection lead times vs. public advisories, and monitors false positive rates over time. 1656 tests with 86% code coverage. Provides observability into scanner effectiveness.
 
 The behavioral detection features are opt-in (`--temporal-full`) and query the npm registry at scan time. They are particularly effective against:
 - Account takeover attacks (event-stream pattern)
@@ -343,7 +361,7 @@ The behavioral detection features are opt-in (`--temporal-full`) and query the n
 - Dormant package hijacking (abandonware takeover)
 - Sudden code injection (Shai-Hulud, ua-parser-js pattern)
 
-## Ground Truth Validation (v2.3.1)
+## Ground Truth Validation (v2.5.8)
 
 MUAD'DIB includes a ground truth dataset of 51 real-world supply-chain attacks (49 active samples) to continuously validate detection coverage.
 
@@ -355,7 +373,7 @@ MUAD'DIB includes a ground truth dataset of 51 real-world supply-chain attacks (
 
 Run `muaddib evaluate --ground-truth` to validate detection at any time.
 
-## Datadog 17K Benchmark (v2.3.1)
+## Datadog 17K Benchmark (v2.5.8)
 
 Validated against the [DataDog Malicious Software Packages Dataset](https://github.com/DataDog/malicious-software-packages-dataset) (17,922 real malware npm packages).
 
