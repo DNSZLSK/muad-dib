@@ -1709,6 +1709,144 @@ https.get('https://registry.npmjs.org/express/-/express-4.18.2.tgz', (res) => {
 }
 
 // ===================================================================
+// BATCH 5: Infrastructure Security Hardening
+// ===================================================================
+
+async function runBatch5InfraTests() {
+  console.log('\n=== BATCH 5: Infra Security Hardening ===\n');
+
+  const zlib = require('zlib');
+
+  // --- extractTgz path traversal guard ---
+
+  test('BATCH5: extractTgz skips path traversal entries', () => {
+    const { extractTgz } = require('../../src/commands/evaluate.js');
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-tgz-traversal-'));
+    try {
+      // Build a minimal tar archive with a path traversal entry
+      const traversalName = '../../../etc/passwd';
+      const safeName = 'package/index.js';
+      const safeContent = Buffer.from('console.log("safe");\n');
+      const traversalContent = Buffer.from('root:x:0:0\n');
+
+      function makeTarEntry(name, content) {
+        const header = Buffer.alloc(512, 0);
+        // name field (0-100)
+        header.write(name, 0, Math.min(name.length, 100), 'utf8');
+        // mode (100-108)
+        header.write('0000644\0', 100, 8, 'utf8');
+        // uid (108-116)
+        header.write('0000000\0', 108, 8, 'utf8');
+        // gid (116-124)
+        header.write('0000000\0', 116, 8, 'utf8');
+        // size (124-136) in octal
+        const sizeStr = content.length.toString(8).padStart(11, '0') + '\0';
+        header.write(sizeStr, 124, 12, 'utf8');
+        // mtime (136-148)
+        header.write('00000000000\0', 136, 12, 'utf8');
+        // typeflag (156) = '0' for regular file
+        header[156] = 0x30; // '0'
+        // checksum (148-156) — compute
+        header.write('        ', 148, 8, 'utf8'); // 8 spaces for checksum calc
+        let chksum = 0;
+        for (let i = 0; i < 512; i++) chksum += header[i];
+        const chkStr = chksum.toString(8).padStart(6, '0') + '\0 ';
+        header.write(chkStr, 148, 8, 'utf8');
+        // data blocks (512-byte aligned)
+        const dataBlocks = Buffer.alloc(Math.ceil(content.length / 512) * 512, 0);
+        content.copy(dataBlocks);
+        return Buffer.concat([header, dataBlocks]);
+      }
+
+      const traversalEntry = makeTarEntry(traversalName, traversalContent);
+      const safeEntry = makeTarEntry(safeName, safeContent);
+      const endOfArchive = Buffer.alloc(1024, 0);
+      const tarData = Buffer.concat([traversalEntry, safeEntry, endOfArchive]);
+      const tgzData = zlib.gzipSync(tarData);
+
+      const tgzPath = path.join(tmpDir, 'test.tgz');
+      fs.writeFileSync(tgzPath, tgzData);
+
+      const destDir = path.join(tmpDir, 'extracted');
+      fs.mkdirSync(destDir, { recursive: true });
+      extractTgz(tgzPath, destDir);
+
+      // Safe file should exist
+      const safeFile = path.join(destDir, 'package', 'index.js');
+      assert(fs.existsSync(safeFile), 'Safe file should be extracted');
+
+      // Traversal file should NOT exist anywhere above destDir
+      const traversalTarget = path.resolve(destDir, traversalName);
+      assert(!fs.existsSync(traversalTarget), 'Path traversal file should NOT be extracted');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  // --- YAML HMAC verification ---
+
+  test('BATCH5: YAML HMAC verification passes on valid signed file', () => {
+    const { generateIOCHMAC } = require('../../src/ioc/updater.js');
+    const { readVerifiedYAML } = require('../../src/ioc/yaml-loader.js');
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-hmac-'));
+    try {
+      const yamlContent = 'packages:\n  - name: test-pkg\n    version: "1.0.0"\n';
+      const yamlPath = path.join(tmpDir, 'test.yaml');
+      fs.writeFileSync(yamlPath, yamlContent);
+      const hmac = generateIOCHMAC(yamlContent);
+      fs.writeFileSync(yamlPath + '.hmac', hmac);
+
+      // Should load without warning — capture stderr
+      const origError = console.error;
+      let warned = false;
+      console.error = (...args) => {
+        if (args[0] && args[0].includes('HMAC verification failed')) warned = true;
+      };
+      try {
+        const result = readVerifiedYAML(yamlPath);
+        assert(result === yamlContent, 'Should return original YAML content');
+        assert(!warned, 'Should NOT warn on valid HMAC');
+      } finally {
+        console.error = origError;
+      }
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  test('BATCH5: YAML HMAC verification warns on tampered file', () => {
+    const { generateIOCHMAC } = require('../../src/ioc/updater.js');
+    const { readVerifiedYAML } = require('../../src/ioc/yaml-loader.js');
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-hmac-tamper-'));
+    try {
+      const yamlContent = 'packages:\n  - name: test-pkg\n    version: "1.0.0"\n';
+      const yamlPath = path.join(tmpDir, 'test.yaml');
+      fs.writeFileSync(yamlPath, yamlContent);
+      // Sign original content
+      const hmac = generateIOCHMAC(yamlContent);
+      fs.writeFileSync(yamlPath + '.hmac', hmac);
+      // Tamper with the file
+      fs.writeFileSync(yamlPath, yamlContent + '  - name: evil-pkg\n    version: "6.6.6"\n');
+
+      const origError = console.error;
+      let warned = false;
+      console.error = (...args) => {
+        if (args[0] && args[0].includes('HMAC verification failed')) warned = true;
+      };
+      try {
+        const result = readVerifiedYAML(yamlPath);
+        assert(result.includes('evil-pkg'), 'Should still load tampered content (backward-compat)');
+        assert(warned, 'Should warn about HMAC mismatch');
+      } finally {
+        console.error = origError;
+      }
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+}
+
+// ===================================================================
 // EXPORT
 // ===================================================================
 async function runAuditFixTests() {
@@ -1748,6 +1886,8 @@ async function runAuditFixTests() {
   await runMediumFix34Tests();
   // Audit scoring hardening
   await runAuditScoringTests();
+  // Batch 5 infra hardening
+  await runBatch5InfraTests();
 }
 
 module.exports = { runAuditFixTests };

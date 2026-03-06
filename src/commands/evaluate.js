@@ -190,8 +190,13 @@ function extractTgz(tgzPath, destDir) {
     offset += 512; // move past header
 
     if (name && (typeFlag === '0' || typeFlag === '\0') && size > 0) {
-      // Regular file — extract it
-      const filePath = path.join(destDir, name);
+      // Regular file — extract it (with path traversal guard)
+      const resolved = path.resolve(destDir, name);
+      if (!resolved.startsWith(path.resolve(destDir) + path.sep) && resolved !== path.resolve(destDir)) {
+        offset += Math.ceil(size / 512) * 512;
+        continue; // skip path traversal attempt
+      }
+      const filePath = resolved;
       fs.mkdirSync(path.dirname(filePath), { recursive: true });
       const fileData = tarData.subarray(offset, offset + size);
       fs.writeFileSync(filePath, fileData);
@@ -652,5 +657,6 @@ module.exports = {
   ADVERSARIAL_THRESHOLDS,
   HOLDOUT_THRESHOLDS,
   GT_THRESHOLD,
-  BENIGN_THRESHOLD
+  BENIGN_THRESHOLD,
+  extractTgz
 };
