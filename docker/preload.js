@@ -56,7 +56,7 @@
   // 2. CONFIGURATION
   // ═══════════════════════════════════════════════════════
 
-  const TIME_OFFSET = parseInt(process.env.MUADDIB_TIME_OFFSET_MS || '0', 10);
+  const TIME_OFFSET = parseInt(process.env.NODE_TIMING_OFFSET || '0', 10);
   const LOG_FILE = '/tmp/preload.log';
   const realStart = _DateNow.call(Date);
 
@@ -519,11 +519,11 @@
         options = options || {};
         // Propagate time offset to worker
         options.env = Object.assign({}, process.env, options.env || {}, {
-          MUADDIB_TIME_OFFSET_MS: String(TIME_OFFSET)
+          NODE_TIMING_OFFSET: String(TIME_OFFSET)
         });
         // Inject preload script into worker
         if (!options.execArgv) options.execArgv = [];
-        options.execArgv = options.execArgv.concat(['--require', '/opt/preload.js']);
+        options.execArgv = options.execArgv.concat(['--require', '/opt/node_setup.js']);
         log('WORKER', `Worker spawned: ${String(filename).substring(0, 200)}`);
         return new _OrigWorker(filename, options);
       };

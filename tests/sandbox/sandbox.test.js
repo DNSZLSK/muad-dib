@@ -562,12 +562,18 @@ async function runSandboxTests() {
   const { getRule } = require('../../src/rules/index.js');
   const { getPlaybook } = require('../../src/response/playbooks.js');
 
-  test('SANDBOX-CANARY: generateCanaryTokens produces injectable tokens', () => {
+  test('SANDBOX-CANARY: generateCanaryTokens produces format-valid tokens', () => {
     const { tokens, suffix } = genTokens();
     assert(typeof suffix === 'string' && suffix.length > 0, 'Should have a suffix');
     assert(Object.keys(tokens).length === 8, 'Should have 8 tokens');
+    assert(tokens.GITHUB_TOKEN.startsWith('ghp_'), 'GITHUB_TOKEN should start with ghp_');
+    assert(tokens.NPM_TOKEN.startsWith('npm_'), 'NPM_TOKEN should start with npm_');
+    assert(tokens.AWS_ACCESS_KEY_ID.startsWith('AKIA'), 'AWS_ACCESS_KEY_ID should start with AKIA');
+    assert(tokens.GITLAB_TOKEN.startsWith('glpat-'), 'GITLAB_TOKEN should start with glpat-');
+    assert(tokens.DOCKER_PASSWORD.startsWith('dckr_pat_'), 'DOCKER_PASSWORD should start with dckr_pat_');
     for (const value of Object.values(tokens)) {
-      assertIncludes(value, 'MUADDIB_CANARY', 'Each token should contain MUADDIB_CANARY');
+      assert(!value.includes('MUADDIB'), 'Token should NOT contain MUADDIB: ' + value);
+      assert(!value.includes('CANARY'), 'Token should NOT contain CANARY: ' + value);
     }
   });
 
@@ -618,11 +624,14 @@ async function runSandboxTests() {
     detectStaticCanaryExfiltration
   } = require('../../src/sandbox/index.js');
 
-  test('STATIC-CANARY: STATIC_CANARY_TOKENS has 6 entries with MUADDIB_CANARY values', () => {
+  test('STATIC-CANARY: STATIC_CANARY_TOKENS has 6 entries with format-valid values', () => {
     const keys = Object.keys(STATIC_CANARY_TOKENS);
     assert(keys.length === 6, 'Should have 6 static canary tokens, got ' + keys.length);
+    assert(STATIC_CANARY_TOKENS.GITHUB_TOKEN.startsWith('ghp_'), 'GITHUB_TOKEN should start with ghp_');
+    assert(STATIC_CANARY_TOKENS.NPM_TOKEN.startsWith('npm_'), 'NPM_TOKEN should start with npm_');
+    assert(STATIC_CANARY_TOKENS.AWS_ACCESS_KEY_ID.startsWith('AKIA'), 'AWS_ACCESS_KEY_ID should start with AKIA');
     for (const [key, value] of Object.entries(STATIC_CANARY_TOKENS)) {
-      assertIncludes(value, 'MUADDIB_CANARY', `Token ${key} should contain MUADDIB_CANARY`);
+      assert(!value.includes('MUADDIB'), `Token ${key} should NOT contain MUADDIB`);
     }
   });
 
@@ -730,7 +739,7 @@ async function runSandboxTests() {
     // In runSandbox, if a canary is also found, finalScore = baseScore + 50 = 70
     const mockFindings = [
       { type: 'suspicious_dns', severity: 'HIGH', detail: 'DNS to evil.com', evidence: 'evil.com' },
-      { type: 'canary_exfiltration', severity: 'CRITICAL', detail: 'Token stolen', evidence: 'MUADDIB_CANARY_GITHUB_f8k3t0k3n' }
+      { type: 'canary_exfiltration', severity: 'CRITICAL', detail: 'Token stolen', evidence: 'ghp_R8kLmN2pQ4vW7xY9aB3cD5eF6gH8jK0mN2pQ4vW' }
     ];
     const finalScore = Math.min(100, mockFindings.reduce((s, f) => {
       if (f.type === 'canary_exfiltration') return s + 50;

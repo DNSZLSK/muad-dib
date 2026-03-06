@@ -1,31 +1,51 @@
 const crypto = require('crypto');
 
 /**
- * Canary token definitions.
- * Each key is an env var name, value is a prefix.
- * A random suffix is appended at generation time.
+ * Generate a base32-encoded string of the given length.
+ * Uses characters A-Z and 2-7 (RFC 4648 base32 alphabet).
  */
-const CANARY_PREFIXES = {
-  GITHUB_TOKEN: 'ghp_MUADDIB_CANARY_',
-  NPM_TOKEN: 'npm_MUADDIB_CANARY_',
-  AWS_ACCESS_KEY_ID: 'AKIA_MUADDIB_CANARY_',
-  AWS_SECRET_ACCESS_KEY: 'MUADDIB_CANARY_SECRET_',
-  GITLAB_TOKEN: 'glpat-MUADDIB_CANARY_',
-  DOCKER_PASSWORD: 'dckr_MUADDIB_CANARY_',
-  NPM_AUTH_TOKEN: 'npm_MUADDIB_CANARY_AUTH_',
-  GH_TOKEN: 'ghp_MUADDIB_CANARY_GH_'
+function generateBase32(length) {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  const bytes = crypto.randomBytes(length);
+  return Array.from(bytes).map(b => chars[b % 32]).join('');
+}
+
+/**
+ * Canary token generators.
+ * Each generator produces a format-valid token that matches the real service format.
+ * No common marker (like "MUADDIB_CANARY") — detection relies on exact value matching.
+ */
+const CANARY_GENERATORS = {
+  // GitHub PAT: ghp_ + 36 alphanumeric chars
+  GITHUB_TOKEN: () => 'ghp_' + crypto.randomBytes(27).toString('base64url').substring(0, 36),
+  // npm token: npm_ + 36 hex chars
+  NPM_TOKEN: () => 'npm_' + crypto.randomBytes(18).toString('hex'),
+  // AWS Access Key: AKIA + 16 chars [A-Z2-7]
+  AWS_ACCESS_KEY_ID: () => 'AKIA' + generateBase32(16),
+  // AWS Secret: 40 chars base64
+  AWS_SECRET_ACCESS_KEY: () => crypto.randomBytes(30).toString('base64').substring(0, 40),
+  // GitLab PAT: glpat- + 20 alphanumeric
+  GITLAB_TOKEN: () => 'glpat-' + crypto.randomBytes(15).toString('base64url').substring(0, 20),
+  // Docker: dckr_pat_ + 56 alphanumeric
+  DOCKER_PASSWORD: () => 'dckr_pat_' + crypto.randomBytes(42).toString('base64url').substring(0, 56),
+  // npm auth token: same as NPM_TOKEN format
+  NPM_AUTH_TOKEN: () => 'npm_' + crypto.randomBytes(18).toString('hex'),
+  // GH_TOKEN: same as GITHUB_TOKEN format
+  GH_TOKEN: () => 'ghp_' + crypto.randomBytes(27).toString('base64url').substring(0, 36)
 };
 
 /**
- * Generate a unique set of canary tokens with random suffixes.
+ * Generate a unique set of canary tokens with format-valid values.
+ * Each token matches its real service format (ghp_, AKIA, npm_, etc.).
  * @returns {{ tokens: Record<string, string>, suffix: string }}
  */
 function generateCanaryTokens() {
-  const suffix = crypto.randomBytes(8).toString('hex');
   const tokens = {};
-  for (const [key, prefix] of Object.entries(CANARY_PREFIXES)) {
-    tokens[key] = prefix + suffix;
+  for (const [key, generator] of Object.entries(CANARY_GENERATORS)) {
+    tokens[key] = generator();
   }
+  // Suffix retained for backward compatibility (used in some callers)
+  const suffix = crypto.randomBytes(8).toString('hex');
   return { tokens, suffix };
 }
 
@@ -175,7 +195,7 @@ function detectCanaryInOutput(stdout, stderr, tokens) {
 }
 
 module.exports = {
-  CANARY_PREFIXES,
+  CANARY_GENERATORS,
   generateCanaryTokens,
   createCanaryEnvFile,
   createCanaryNpmrc,

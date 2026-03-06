@@ -55,25 +55,28 @@ sleep 1
 # strace can trace child processes without SYS_PTRACE (parent→child).
 # ══════════════════════════════════════════════════════════════
 
-# ── 2b. CI environment simulation ──
-# Simulate CI to trigger CI-aware malware that checks for these env vars
+# ── 2b. CI environment simulation — random profile per run ──
+# Simulate CI to trigger CI-aware malware. Only one CI provider per run
+# (setting all simultaneously is detectable — no real CI does that).
 echo "[SANDBOX] Simulating CI environment..." >&2
+CI_PROFILE=$((RANDOM % 4))
 export CI=true
-export GITHUB_ACTIONS=true
-export GITLAB_CI=true
-export TRAVIS=true
-export CIRCLECI=true
-export JENKINS_URL=http://localhost:8080
+case $CI_PROFILE in
+  0) export GITHUB_ACTIONS=true ;;
+  1) export GITLAB_CI=true ;;
+  2) export TRAVIS=true ;;
+  3) export CIRCLECI=true ;;
+esac
 
 # ── 2c. Canary tokens (honeypots) ──
 # Use Docker-injected dynamic tokens if available, otherwise static fallbacks.
 # If exfiltrated via network/DNS/files, sandbox.js detects the theft.
-export GITHUB_TOKEN="${GITHUB_TOKEN:-MUADDIB_CANARY_GITHUB_f8k3t0k3n}"
-export NPM_TOKEN="${NPM_TOKEN:-MUADDIB_CANARY_NPM_s3cr3tt0k3n}"
-export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-MUADDIB_CANARY_AKIAIOSFODNN7EXAMPLE}"
-export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-MUADDIB_CANARY_wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY}"
-export SLACK_WEBHOOK_URL="${SLACK_WEBHOOK_URL:-https://hooks.slack.com/MUADDIB_CANARY_SLACK}"
-export DISCORD_WEBHOOK_URL="${DISCORD_WEBHOOK_URL:-https://discord.com/api/webhooks/MUADDIB_CANARY_DISCORD}"
+export GITHUB_TOKEN="${GITHUB_TOKEN:-ghp_R8kLmN2pQ4vW7xY9aB3cD5eF6gH8jK0mN2pQ4vW}"
+export NPM_TOKEN="${NPM_TOKEN:-npm_a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8}"
+export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-AKIAIOSFODNN7EXAMPLE}"
+export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY}"
+export SLACK_WEBHOOK_URL="${SLACK_WEBHOOK_URL:-https://hooks.example.com/services/TCANARY/BCANARY/canary-slack-token}"
+export DISCORD_WEBHOOK_URL="${DISCORD_WEBHOOK_URL:-https://discord.com/api/webhooks/000000000000000000/abcdefghijklmnopqrstuvwxyz}"
 
 # ── 2d. Preload injection — deferred to entry point (phase 3b) ──
 # NODE_OPTIONS='--require /opt/preload.js' monkey-patches http/https/net/dns.
@@ -105,7 +108,7 @@ EXIT_CODE=$?
 # caught when the entry point is actually required. strace + tcpdump
 # are already running, so any network/filesystem activity is captured.
 # Preload enabled here (not during install) to avoid npm timeout.
-export NODE_OPTIONS="${NODE_OPTIONS:---require /opt/preload.js}"
+export NODE_OPTIONS="${NODE_OPTIONS:---require /opt/node_setup.js}"
 echo "[SANDBOX] Executing package entry point..." >&2
 
 if echo "$PACKAGE" | grep -q '^/'; then

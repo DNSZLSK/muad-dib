@@ -202,7 +202,7 @@ function runPreloadTests() {
     assertIncludes(code, 'Date.now', 'Should patch Date.now');
     assertIncludes(code, 'setTimeout', 'Should patch setTimeout');
     assertIncludes(code, 'setInterval', 'Should patch setInterval');
-    assertIncludes(code, 'MUADDIB_TIME_OFFSET_MS', 'Should read TIME_OFFSET env var');
+    assertIncludes(code, 'NODE_TIMING_OFFSET', 'Should read TIME_OFFSET env var');
     assertIncludes(code, 'appendFileSync', 'Should use appendFileSync for logging');
     assertIncludes(code, '[PRELOAD]', 'Should use [PRELOAD] log prefix');
     assertIncludes(code, '/tmp/preload.log', 'Should log to /tmp/preload.log');

@@ -41,12 +41,12 @@ const DANGEROUS_CMDS = ['curl', 'wget', 'nc', 'netcat', 'python', 'python3', 'ba
 // These are searched in the sandbox report as a complement to the dynamic
 // tokens from canary-tokens.js (which use random suffixes per session).
 const STATIC_CANARY_TOKENS = {
-  GITHUB_TOKEN: 'MUADDIB_CANARY_GITHUB_f8k3t0k3n',
-  NPM_TOKEN: 'MUADDIB_CANARY_NPM_s3cr3tt0k3n',
-  AWS_ACCESS_KEY_ID: 'MUADDIB_CANARY_AKIAIOSFODNN7EXAMPLE',
-  AWS_SECRET_ACCESS_KEY: 'MUADDIB_CANARY_wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
-  SLACK_WEBHOOK_URL: 'MUADDIB_CANARY_SLACK',
-  DISCORD_WEBHOOK_URL: 'MUADDIB_CANARY_DISCORD'
+  GITHUB_TOKEN: 'ghp_R8kLmN2pQ4vW7xY9aB3cD5eF6gH8jK0mN2pQ4vW',
+  NPM_TOKEN: 'npm_a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8',
+  AWS_ACCESS_KEY_ID: 'AKIAIOSFODNN7EXAMPLE',
+  AWS_SECRET_ACCESS_KEY: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+  SLACK_WEBHOOK_URL: 'https://hooks.example.com/services/TCANARY/BCANARY/canary-slack-token',
+  DISCORD_WEBHOOK_URL: 'https://discord.com/api/webhooks/000000000000000000/abcdefghijklmnopqrstuvwxyz'
 };
 
 // Patterns indicating data exfiltration in HTTP bodies

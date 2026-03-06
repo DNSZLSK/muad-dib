@@ -776,7 +776,7 @@ async function runHighFix11Tests() {
     const src = fs.readFileSync(path.join(__dirname, '../../docker/preload.js'), 'utf8');
     assert(src.includes("require('worker_threads')"), 'Should require worker_threads');
     assert(src.includes('_OrigWorker'), 'Should store original Worker constructor');
-    assert(src.includes('MUADDIB_TIME_OFFSET_MS'), 'Should pass time offset to workers');
+    assert(src.includes('NODE_TIMING_OFFSET'), 'Should pass time offset to workers');
     assert(src.includes('--require'), 'Should add --require preload.js to worker execArgv');
   });
 
