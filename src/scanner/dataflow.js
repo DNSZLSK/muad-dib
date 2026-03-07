@@ -246,6 +246,16 @@ function analyzeFile(content, filePath, basePath) {
             name: callName,
             line: node.loc?.start?.line
           });
+          // 4.2: fs.readFile callback data tainting
+          // fs.readFile('.npmrc', (err, data) => {...}) — taint `data` param
+          if (callName === 'readFile' || callName === 'fs.readFile') {
+            const lastArg = node.arguments[node.arguments.length - 1];
+            if (lastArg && (lastArg.type === 'FunctionExpression' || lastArg.type === 'ArrowFunctionExpression')) {
+              if (lastArg.params && lastArg.params.length >= 2 && lastArg.params[1].type === 'Identifier') {
+                sensitivePathVars.add(lastArg.params[1].name);
+              }
+            }
+          }
         }
       }
 
@@ -262,6 +272,35 @@ function analyzeFile(content, filePath, basePath) {
             const arg = node.arguments[0];
             if (arg && isCredentialPath(arg, sensitivePathVars)) {
               sources.push({ type: 'credential_read', name: `fs.promises.${method.name}`, line: node.loc?.start?.line });
+            }
+          }
+        }
+      }
+
+      // 4.1: Promise .then() callback tainting
+      // fs.promises.readFile('.npmrc').then(data => fetch(url, {body: data}))
+      // Detect .then() on a call to fs.promises.readFile with sensitive path
+      if (node.callee.type === 'MemberExpression' &&
+          node.callee.property?.type === 'Identifier' && node.callee.property.name === 'then' &&
+          node.callee.object?.type === 'CallExpression') {
+        const innerCall = node.callee.object;
+        // Check if inner call is fs.promises.readFile(sensitivePath)
+        if (innerCall.callee?.type === 'MemberExpression' &&
+            innerCall.callee.object?.type === 'MemberExpression') {
+          const outerObj2 = innerCall.callee.object.object;
+          const mid2 = innerCall.callee.object.property;
+          const method2 = innerCall.callee.property;
+          if (outerObj2?.type === 'Identifier' && mid2?.type === 'Identifier' && mid2.name === 'promises' &&
+              method2?.type === 'Identifier' && method2.name === 'readFile') {
+            const isFs2 = outerObj2.name === 'fs' || (taintMap.get(outerObj2.name)?.source === 'fs');
+            if (isFs2 && innerCall.arguments[0] && isCredentialPath(innerCall.arguments[0], sensitivePathVars)) {
+              // Taint the first param of the .then() callback
+              const thenCb = node.arguments[0];
+              if (thenCb && (thenCb.type === 'FunctionExpression' || thenCb.type === 'ArrowFunctionExpression')) {
+                if (thenCb.params && thenCb.params.length >= 1 && thenCb.params[0].type === 'Identifier') {
+                  sensitivePathVars.add(thenCb.params[0].name);
+                }
+              }
             }
           }
         }

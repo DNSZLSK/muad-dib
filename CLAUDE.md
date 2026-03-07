@@ -19,7 +19,7 @@ Priorités :
 ## Commands
 
 ```bash
-npm test          # Run all tests (custom framework, 1656 tests across 42 files)
+npm test          # Run all tests (custom framework, 1790 tests across 43 files)
 npm run lint      # ESLint with security plugin
 npm run scan      # Self-scan: node bin/muaddib.js scan .
 npm run update    # Download latest IOCs
@@ -42,7 +42,7 @@ Tests use a custom framework in `tests/run-tests.js` (no Jest). Test helpers:
 
 **CLI entry:** `bin/muaddib.js` — yargs-based dispatcher, delegates to `src/index.js`.
 
-**Core orchestration:** `src/index.js` — `run(targetPath, options)` runs cross-file module graph analysis first, then launches 13 individual scanners in parallel via `Promise.all`, then deduplicates, applies FP reductions, scores using per-file max (v2.2.11: `riskScore = min(100, max(file_scores) + package_level_score)`, severity weights: CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1), enriches with rules/playbooks (113 rules), and outputs (CLI/JSON/HTML/SARIF). Exports `isPackageLevelThreat` and `computeGroupScore` for testing.
+**Core orchestration:** `src/index.js` — `run(targetPath, options)` runs cross-file module graph analysis first, then launches 13 individual scanners in parallel via `Promise.all`, then deduplicates, applies FP reductions, scores using per-file max (v2.2.11: `riskScore = min(100, max(file_scores) + package_level_score)`, severity weights: CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1), enriches with rules/playbooks (117 rules), and outputs (CLI/JSON/HTML/SARIF). Exports `isPackageLevelThreat` and `computeGroupScore` for testing.
 
 **Scanner pattern:** Each of the 13 individual scanners in `src/scanner/` returns `Array<{type, severity, message, file}>`:
 - `file` must use `path.relative(targetPath, absolutePath)` for Windows compatibility
@@ -102,7 +102,7 @@ Tests use a custom framework in `tests/run-tests.js` (no Jest). Test helpers:
 
 **FP Reduction P2 (v2.3.0):** FPR ~13% → 8.9% (47/527). Dataflow scanner: os.* methods split into `fingerprint_read` (hostname, networkInterfaces, userInfo, homedir) and `telemetry_read` (platform, arch); telemetry-only findings capped at HIGH. Scoring: `module_compile` added to FP_COUNT_THRESHOLDS (>3 CRITICAL→LOW). Package scanner: `DEP_FP_WHITELIST` (es5-ext, bootstrap-sass), npm alias skip.
 
-**FP Reduction P3 (v2.3.1):** FPR 8.2% → 7.4% (39/525). Scoring: `require_cache_poison` single hit CRITICAL→HIGH; HTTP client prototype whitelist (>20 hits → MEDIUM); obfuscation: .cjs/.mjs >100KB → LOW; entropy: encoding table paths → LOW. ADR: 100% → 98.7% (77/78, 1 documented miss: require-cache-poison). 8 new rules (AST-024 to AST-031), rule count 94 → 102. Tests 1317 → 1387. Current rule count: **113** (108 RULES + 5 PARANOID) as of v2.4.9.
+**FP Reduction P3 (v2.3.1):** FPR 8.2% → 7.4% (39/525). Scoring: `require_cache_poison` single hit CRITICAL→HIGH; HTTP client prototype whitelist (>20 hits → MEDIUM); obfuscation: .cjs/.mjs >100KB → LOW; entropy: encoding table paths → LOW. ADR: 100% → 98.7% (77/78, 1 documented miss: require-cache-poison). 8 new rules (AST-024 to AST-031), rule count 94 → 102. Tests 1317 → 1387. Current rule count: **117** (112 RULES + 5 PARANOID) as of v2.5.13.
 
 **Security Audit (v2.5.0–v2.5.6):** Comprehensive security audit with 41 issues remediated across 5 versions: 10 initial remediations (14 CRITICAL, 18 HIGH) in v2.5.0, sandbox fixes (npm install timeout, preload timing, Docker caps, /proc/uptime) in v2.5.1–v2.5.3, 3 CRITICAL remediations (#10 native addon, #15 atomic writes, #18 AST bypasses) in v2.5.4, 14 HIGH remediations in v2.5.5, 5 MEDIUM remediations completing 41/41 in v2.5.6.
 
@@ -110,7 +110,9 @@ Tests use a custom framework in `tests/run-tests.js` (no Jest). Test helpers:
 
 **Vague 4 Blue Team (v2.4.7):** 5 new adversarial samples (43 total). Pre-fix score 0/5 (0%). 5 bypass corrections: `resolveStringConcat()` for BinaryExpression string concat resolution, enhanced AST-027/AST-028 with deep string resolution + variable path tracking, fixed `new Function()` not setting `ctx.hasDynamicExec`, content-level compound detection for MCP/IDE/binary patterns. 3 new rules: `fetch_decrypt_exec` (AST-033, CRITICAL), `download_exec_binary` (AST-034, CRITICAL), `ide_persistence` (AST-035, HIGH). Post-fix: 5/5 (100%). ADR: 98.8% (82/83). Rule count: 107 (102 RULES + 5 PARANOID).
 
-**Sandbox Preload (v2.4.9):** Multi-run sandbox with monkey-patching preload for time-bomb detection. 3 runs at [0h, 72h, 7d] offsets. 6 new sandbox preload rules (SANDBOX-009 to 014). Rule count: 113 (108 RULES + 5 PARANOID).
+**Sandbox Preload (v2.4.9):** Multi-run sandbox with monkey-patching preload for time-bomb detection. 3 runs at [0h, 72h, 7d] offsets. 6 new sandbox preload rules (SANDBOX-009 to 014). Rule count: 117 (112 RULES + 5 PARANOID).
+
+**Audit Hardening (v2.5.13):** 5 batches of hardening fixes: (1) Scoring: per-file plugin loader threshold (prevents cross-file dilution), lifecycle CRITICAL floor (packageScore >= 50 when CRITICAL present), percentage guard tightened 50%→40%. (2) IOC integrity: HMAC race condition fix (write before rename), `.hmac-initialized` marker enforcement, scraper HMAC consistency. (3) Sandbox: NODE_OPTIONS locked via Object.defineProperty to prevent preload bypass in child processes. (4) Dataflow: Promise `.then()` callback tainting for `fs.promises.readFile`, `fs.readFile` callback second-param tainting. (5) Deobfuscation: TemplateLiteral support in `tryFoldConcat`, ArrayPattern destructuring in Phase 2 const propagation. Tests: 1656 → **1790** (+134). Test files: 42 → **43**.
 
 **New AST detection rules (v2.2):**
 - MUADDIB-AST-008 to AST-012: Dynamic require with decode patterns, sandbox evasion, detached process, binary dropper patterns
@@ -160,7 +162,7 @@ The following commands are internal infrastructure/dev tools. They work when cal
 - `muaddib stats` — Daily scan statistics and FP rate. Uses monitor exports.
 - `src/commands/evaluate.js` — `muaddib evaluate` measures TPR/FPR/ADR. Dev-only evaluation command.
 
-**Rules & playbooks:** Threat types map to rules in `src/rules/index.js` (113 rules: 108 RULES + 5 PARANOID, MITRE ATT&CK mapped) and remediation text in `src/response/playbooks.js`. Both keyed by threat `type` string.
+**Rules & playbooks:** Threat types map to rules in `src/rules/index.js` (117 rules: 112 RULES + 5 PARANOID, MITRE ATT&CK mapped) and remediation text in `src/response/playbooks.js`. Both keyed by threat `type` string.
 
 **IOC system (3-tier):**
 1. `src/ioc/data/iocs-compact.json` (~5MB, ships with npm) — wildcards[] + versioned{} Maps for O(1) lookup

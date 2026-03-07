@@ -47,6 +47,24 @@ function deobfuscate(sourceCode) {
       });
     },
 
+    // ---- 1b. TEMPLATE LITERAL FOLDING ----
+    // `child_process` → 'child_process' (no expression templates)
+    // `child_${'process'}` → 'child_process' (with resolvable expressions)
+    TemplateLiteral(node) {
+      const folded = tryFoldConcat(node);
+      if (folded === null) return;
+      const before = sourceCode.slice(node.start, node.end);
+      const after = quoteString(folded);
+      if (before === after) return; // no change
+      replacements.push({
+        start: node.start,
+        end: node.end,
+        value: after,
+        type: 'template_literal',
+        before
+      });
+    },
+
     // ---- 2. CHARCODE REBUILD + 3. BASE64 DECODE ----
     CallExpression(node) {
       // String.fromCharCode(99, 104, 105, 108, 100) → "child"
@@ -199,14 +217,30 @@ function propagateConsts(sourceCode) {
     VariableDeclaration(node) {
       if (node.kind !== 'const') return;
       for (const decl of node.declarations) {
-        if (decl.id?.type !== 'Identifier') continue;
         if (!decl.init) continue;
-        if (decl.init.type === 'Literal' && typeof decl.init.value === 'string') {
-          constMap.set(decl.id.name, {
-            value: decl.init.value,
-            declStart: decl.init.start,
-            declEnd: decl.init.end
-          });
+        // Standard: const x = 'literal'
+        if (decl.id?.type === 'Identifier') {
+          if (decl.init.type === 'Literal' && typeof decl.init.value === 'string') {
+            constMap.set(decl.id.name, {
+              value: decl.init.value,
+              declStart: decl.init.start,
+              declEnd: decl.init.end
+            });
+          }
+        }
+        // Array destructuring: const [a, b] = ['child_', 'process']
+        if (decl.id?.type === 'ArrayPattern' && decl.init?.type === 'ArrayExpression') {
+          for (let i = 0; i < decl.id.elements.length && i < decl.init.elements.length; i++) {
+            if (decl.id.elements[i]?.type === 'Identifier' &&
+                decl.init.elements[i]?.type === 'Literal' &&
+                typeof decl.init.elements[i].value === 'string') {
+              constMap.set(decl.id.elements[i].name, {
+                value: decl.init.elements[i].value,
+                declStart: decl.init.elements[i].start,
+                declEnd: decl.init.elements[i].end
+              });
+            }
+          }
         }
       }
     },
@@ -348,6 +382,23 @@ function tryFoldConcat(node, depth) {
   if (depth > MAX_FOLD_DEPTH) return null;
   if (node.type === 'Literal' && typeof node.value === 'string') {
     return node.value;
+  }
+  // TemplateLiteral without expressions → direct string
+  if (node.type === 'TemplateLiteral' && node.expressions.length === 0) {
+    return node.quasis.map(q => q.value.cooked).join('');
+  }
+  // TemplateLiteral with resolvable expressions
+  if (node.type === 'TemplateLiteral' && node.expressions.length > 0) {
+    const parts = [];
+    for (let i = 0; i < node.quasis.length; i++) {
+      parts.push(node.quasis[i].value.cooked);
+      if (i < node.expressions.length) {
+        const v = tryFoldConcat(node.expressions[i], depth + 1);
+        if (v === null) return null;
+        parts.push(v);
+      }
+    }
+    return parts.join('');
   }
   if (node.type === 'BinaryExpression' && node.operator === '+') {
     const left = tryFoldConcat(node.left, depth + 1);

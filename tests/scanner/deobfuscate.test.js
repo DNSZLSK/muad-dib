@@ -287,6 +287,65 @@ async function runDeobfuscateTests() {
     const { code } = deobfuscate(`const x = 'line1\\n' + 'line2';`);
     assertIncludes(code, "'line1\\nline2'", 'Should preserve newline escape in folded string');
   });
+
+  // =====================================================
+  // 11. TEMPLATE LITERAL FOLDING (v2.5.13)
+  // =====================================================
+
+  test('DEOBFUSCATE: Template literal — no expressions → string', () => {
+    const { code, transforms } = deobfuscate('const x = `child_process`;');
+    assertIncludes(code, "'child_process'", 'Should fold template literal without expressions');
+    assert(transforms.length === 1, `Expected 1 transform, got ${transforms.length}`);
+    assert(transforms[0].type === 'template_literal', `Expected type template_literal, got ${transforms[0].type}`);
+  });
+
+  test('DEOBFUSCATE: Template literal — with resolvable expression', () => {
+    const { code, transforms } = deobfuscate("const x = `child_${'process'}`;");
+    assertIncludes(code, "'child_process'", 'Should fold template with literal expression');
+    assert(transforms.length >= 1, `Expected at least 1 transform, got ${transforms.length}`);
+  });
+
+  test('DEOBFUSCATE: Template literal — nested concat in expression', () => {
+    const { code } = deobfuscate("const x = `${'child' + '_process'}`;");
+    assertIncludes(code, "'child_process'", 'Should fold nested concat in template expression');
+  });
+
+  test('DEOBFUSCATE: Template literal — unresolvable expression NOT folded', () => {
+    const { code, transforms } = deobfuscate('const x = `prefix_${someVar}`;');
+    assertIncludes(code, 'someVar', 'Template with variable should NOT be folded');
+    const templateTransform = transforms.find(t => t.type === 'template_literal');
+    assert(!templateTransform, 'Should NOT have template_literal transform for unresolvable');
+  });
+
+  test('DEOBFUSCATE: Template literal — in BinaryExpression concat', () => {
+    const { code } = deobfuscate("const x = `child` + '_process';");
+    assertIncludes(code, "'child_process'", 'Should fold template + string concat');
+  });
+
+  // =====================================================
+  // 12. ARRAY DESTRUCTURING CONST PROPAGATION (v2.5.13)
+  // =====================================================
+
+  test('DEOBFUSCATE: Array destructuring — const [a,b] = ["child_","process"]', () => {
+    // Need a phase 1 trigger to activate phase 2
+    const src = `const trigger = 'he' + 'llo';\nconst [a, b] = ['child_', 'process'];\nrequire(a + b);`;
+    const { code } = deobfuscate(src);
+    assertIncludes(code, "'child_process'", 'Should propagate array destructured consts and fold');
+  });
+
+  test('DEOBFUSCATE: Array destructuring — partial elements', () => {
+    const src = `const trigger = 'he' + 'llo';\nconst [x, , z] = ['eval', 42, 'safe'];\nconsole.log(x);`;
+    const { code, transforms } = deobfuscate(src);
+    // x should be propagated, the hole (,) skipped, z propagated
+    assert(transforms.length > 0, 'Should have transforms');
+  });
+
+  test('DEOBFUSCATE: Array destructuring — non-string elements skipped', () => {
+    const src = `const trigger = 'he' + 'llo';\nconst [a, b] = [42, true];\nconsole.log(a);`;
+    const { code } = deobfuscate(src);
+    // 42 and true are not strings, should not be propagated
+    assertIncludes(code, 'console.log(a)', 'Non-string elements should not be propagated');
+  });
 }
 
 module.exports = { runDeobfuscateTests };

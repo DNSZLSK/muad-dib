@@ -1602,17 +1602,18 @@ https.get('https://registry.npmjs.org/express/-/express-4.18.2.tgz', (res) => {
       `staged_eval_decode in dist/ should stay CRITICAL (exempt), got ${threats[0].severity}`);
   });
 
-  test('AUDIT-S3: Plugin loader with 5+ patterns triggers downgrade', () => {
+  test('AUDIT-S3: Plugin loader with 5+ patterns in SAME file triggers downgrade', () => {
+    // v2.5.13: per-file threshold — only downgrade files that individually exceed 4
     const threats = [
-      { type: 'dynamic_require', severity: 'HIGH', file: 'a.js', message: 'dr1' },
-      { type: 'dynamic_require', severity: 'HIGH', file: 'b.js', message: 'dr2' },
-      { type: 'dynamic_require', severity: 'HIGH', file: 'c.js', message: 'dr3' },
-      { type: 'dynamic_import', severity: 'HIGH', file: 'd.js', message: 'di1' },
-      { type: 'dynamic_import', severity: 'HIGH', file: 'e.js', message: 'di2' }
+      { type: 'dynamic_require', severity: 'HIGH', file: 'loader.js', message: 'dr1' },
+      { type: 'dynamic_require', severity: 'HIGH', file: 'loader.js', message: 'dr2' },
+      { type: 'dynamic_require', severity: 'HIGH', file: 'loader.js', message: 'dr3' },
+      { type: 'dynamic_import', severity: 'HIGH', file: 'loader.js', message: 'di1' },
+      { type: 'dynamic_import', severity: 'HIGH', file: 'loader.js', message: 'di2' }
     ];
     applyFPReductions(threats, null, null);
-    assert(threats[0].severity === 'LOW', 'dynamic_require should be LOW with 5 combined patterns');
-    assert(threats[3].severity === 'LOW', 'dynamic_import should be LOW with 5 combined patterns');
+    assert(threats[0].severity === 'LOW', 'dynamic_require should be LOW with 5 combined patterns in same file');
+    assert(threats[3].severity === 'LOW', 'dynamic_import should be LOW with 5 combined patterns in same file');
   });
 
   // --- Fix 2.2: suspicious_dataflow percentage guard ---

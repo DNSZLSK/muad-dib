@@ -61,6 +61,14 @@
   const LOG_FILE = '/tmp/preload.log';
   const realStart = _DateNow.call(Date);
 
+  // Lock NODE_OPTIONS to prevent target package from disabling preload in child processes
+  try {
+    const _nodeOpts = process.env.NODE_OPTIONS;
+    Object.defineProperty(process.env, 'NODE_OPTIONS', {
+      value: _nodeOpts, writable: false, configurable: false, enumerable: true
+    });
+  } catch (e) { /* env may not support defineProperty */ }
+
   // Sensitive file patterns for FS interception
   const SENSITIVE_RE = /\.(npmrc|env|ssh|aws|gitconfig|bash_history)|id_rsa|credentials|\.gnupg|known_hosts|\.netrc/i;
 
@@ -456,7 +464,7 @@
         return target[prop];
       },
       set: function (target, prop, value) {
-        target[prop] = value;
+        try { target[prop] = value; } catch (e) { /* NODE_OPTIONS is locked */ }
         return true;
       }
     });
