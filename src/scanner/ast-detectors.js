@@ -1118,6 +1118,79 @@ function handleCallExpression(node, ctx) {
     }
   }
 
+  // Batch 1: vm.* code execution — vm.runInThisContext, vm.runInNewContext, vm.compileFunction, vm.Script
+  if (node.callee.type === 'MemberExpression' && node.callee.property?.type === 'Identifier') {
+    const vmMethod = node.callee.property.name;
+    if (['runInThisContext', 'runInNewContext', 'compileFunction'].includes(vmMethod)) {
+      // NOTE: Do NOT set ctx.hasDynamicExec — vm.* is legitimately used by bundlers
+      // (webpack, jest, etc.) and must not trigger compound detections (zlib_inflate_eval,
+      // fetch_decrypt_exec) which were designed for eval/Function patterns.
+      ctx.threats.push({
+        type: 'vm_code_execution',
+        severity: 'HIGH',
+        message: `vm.${vmMethod}() — dynamic code execution via Node.js vm module bypasses eval detection.`,
+        file: ctx.relFile
+      });
+    }
+  }
+
+  // Batch 1: Reflect.construct(Function, [...]) / Reflect.apply(eval, null, [...])
+  if (node.callee.type === 'MemberExpression' &&
+      node.callee.object?.type === 'Identifier' && node.callee.object.name === 'Reflect' &&
+      node.callee.property?.type === 'Identifier') {
+    const reflectMethod = node.callee.property.name;
+    if (reflectMethod === 'construct' && node.arguments.length >= 2) {
+      const target = node.arguments[0];
+      if (target.type === 'Identifier' && target.name === 'Function') {
+        ctx.hasDynamicExec = true;
+        ctx.threats.push({
+          type: 'reflect_code_execution',
+          severity: 'CRITICAL',
+          message: 'Reflect.construct(Function, [...]) — indirect Function construction bypasses new Function() detection.',
+          file: ctx.relFile
+        });
+      }
+    } else if (reflectMethod === 'apply' && node.arguments.length >= 3) {
+      const target = node.arguments[0];
+      if (target.type === 'Identifier' && (target.name === 'eval' || target.name === 'Function')) {
+        ctx.hasDynamicExec = true;
+        ctx.threats.push({
+          type: 'reflect_code_execution',
+          severity: 'CRITICAL',
+          message: `Reflect.apply(${target.name}, ...) — indirect ${target.name} invocation bypasses direct call detection.`,
+          file: ctx.relFile
+        });
+      }
+    }
+  }
+
+  // Batch 1: process.binding('spawn_sync'/'fs') / process._linkedBinding(...)
+  if (node.callee.type === 'MemberExpression' &&
+      node.callee.object?.type === 'Identifier' && node.callee.object.name === 'process' &&
+      node.callee.property?.type === 'Identifier' &&
+      (node.callee.property.name === 'binding' || node.callee.property.name === '_linkedBinding') &&
+      node.arguments.length >= 1) {
+    const bindArg = node.arguments[0];
+    const bindStr = bindArg?.type === 'Literal' && typeof bindArg.value === 'string' ? bindArg.value : null;
+    const dangerousBindings = ['spawn_sync', 'fs', 'pipe_wrap', 'tcp_wrap', 'tls_wrap', 'udp_wrap', 'process_wrap'];
+    if (bindStr && dangerousBindings.includes(bindStr)) {
+      ctx.threats.push({
+        type: 'process_binding_abuse',
+        severity: 'CRITICAL',
+        message: `process.${node.callee.property.name}('${bindStr}') — direct V8 binding access bypasses child_process/fs module detection.`,
+        file: ctx.relFile
+      });
+    } else if (!bindStr) {
+      // Dynamic binding argument — suspicious
+      ctx.threats.push({
+        type: 'process_binding_abuse',
+        severity: 'HIGH',
+        message: `process.${node.callee.property.name}() with dynamic argument — potential V8 binding abuse.`,
+        file: ctx.relFile
+      });
+    }
+  }
+
   // SANDWORM_MODE R8: dns.resolve detection moved to walk.ancestor() in ast.js (FIX 5)
 }
 
@@ -1157,6 +1230,19 @@ function handleNewExpression(node, ctx) {
         file: ctx.relFile
       });
     }
+  }
+
+  // Batch 1: new vm.Script(code) — dynamic code compilation via vm module
+  if (node.callee.type === 'MemberExpression' &&
+      node.callee.property?.type === 'Identifier' && node.callee.property.name === 'Script' &&
+      node.arguments.length >= 1 && !hasOnlyStringLiteralArgs(node)) {
+    // NOTE: Do NOT set ctx.hasDynamicExec — same rationale as vm.runInThisContext above.
+    ctx.threats.push({
+      type: 'vm_code_execution',
+      severity: 'HIGH',
+      message: 'new vm.Script() with dynamic code — vm module code compilation bypasses eval detection.',
+      file: ctx.relFile
+    });
   }
 
   // Detect new Proxy(process.env, handler)

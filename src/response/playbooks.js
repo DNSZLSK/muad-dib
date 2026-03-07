@@ -428,6 +428,21 @@ const PLAYBOOKS = {
     'Persistence IDE detectee. Le code ecrit dans tasks.json ou la configuration VS Code avec execution automatique ' +
     'a l\'ouverture du dossier (runOn: folderOpen, reveal: silent). Pattern FAMOUS CHOLLIMA / StegaBin. ' +
     'Verifier ~/.config/Code/User/tasks.json et supprimer les taches inconnues.',
+
+  vm_code_execution:
+    'CRITIQUE: Execution de code via le module vm de Node.js. Les methodes vm.runInThisContext(), vm.runInNewContext(), ' +
+    'vm.compileFunction() et new vm.Script() permettent d\'executer du code dynamique en contournant la detection eval/Function. ' +
+    'Analyser le code source execute. Verifier s\'il s\'agit d\'un moteur de templates ou d\'un payload malveillant.',
+
+  reflect_code_execution:
+    'CRITIQUE: Execution de code via l\'API Reflect. Reflect.construct(Function, [...]) et Reflect.apply(eval, ...) ' +
+    'contournent la detection directe de eval/new Function(). Technique d\'evasion avancee. ' +
+    'Analyser les arguments passes a Reflect. Supprimer le package si non justifie.',
+
+  process_binding_abuse:
+    'CRITIQUE: Acces direct aux bindings V8 internes via process.binding() ou process._linkedBinding(). ' +
+    'Permet l\'execution de commandes (spawn_sync) ou l\'acces au systeme de fichiers (fs) sans passer par les modules Node.js standards. ' +
+    'Technique d\'evasion avancee contournant toute la couche d\'abstraction. Supprimer immediatement.',
 };
 
 function getPlaybook(threatType) {

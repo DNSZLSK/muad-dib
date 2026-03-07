@@ -111,6 +111,8 @@ const FP_COUNT_THRESHOLDS = {
   module_compile_dynamic: { maxCount: 3, from: 'CRITICAL', to: 'LOW' },
   module_compile: { maxCount: 3, from: 'CRITICAL', to: 'LOW' },
   zlib_inflate_eval: { maxCount: 2, from: 'CRITICAL', to: 'LOW' },
+  // Build tools (webpack, jest) legitimately use vm.runInThisContext for module evaluation
+  vm_code_execution: { maxCount: 3, from: 'HIGH', to: 'LOW' },
   // P4: plugin loaders legitimately use many dynamic imports (webpack, eslint, knex, gatsby)
   dynamic_import: { maxCount: 5, from: 'HIGH', to: 'LOW' },
   // P4: hash algorithms contain bit manipulation that triggers obfuscation heuristics
