@@ -188,6 +188,97 @@ async function runEntropyTests() {
     const obfThreats = result.threats.filter(t => t.type === 'obfuscation_detected');
     assert(obfThreats.length === 0, 'Minified .min.js should not trigger obfuscation, got ' + obfThreats.length);
   });
+
+  // =============================================
+  // v2.5.14: B11 — Fragment cluster detection
+  // =============================================
+
+  await asyncTest('ENTROPY B11: 6 short high-entropy strings → fragmented_high_entropy_cluster', async () => {
+    const fs = require('fs');
+    const os = require('os');
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-frag-'));
+    fs.writeFileSync(path.join(tmpDir, 'package.json'), JSON.stringify({ name: 'test-frag', version: '1.0.0' }));
+    // 6 fragments of 30 chars each with high entropy (random-looking base64)
+    fs.writeFileSync(path.join(tmpDir, 'index.js'), `
+const a = 'xK9mQ2pLwR7vN5tY3hBfZsJcGdAe';
+const b = 'R7vN5tY3hBfZsJcGdAexK9mQ2pLwR';
+const c = 'Q2pLwR7vN5tY3hBfZsJcGdAexK9mX';
+const d = 'N5tY3hBfZsJcGdAexK9mQ2pLwR7vZ';
+const e = 'hBfZsJcGdAexK9mQ2pLwR7vN5tY3W';
+const f = 'JcGdAexK9mQ2pLwR7vN5tY3hBfZsV';
+console.log(a + b + c + d + e + f);
+`);
+    try {
+      const threats = scanEntropy(tmpDir);
+      const t = threats.find(t => t.type === 'fragmented_high_entropy_cluster');
+      assert(t, 'Should detect fragmented high entropy cluster');
+    } finally { fs.rmSync(tmpDir, { recursive: true }); }
+  });
+
+  await asyncTest('ENTROPY B11 negative: 3 short high-entropy strings → NOT enough for cluster', async () => {
+    const fs = require('fs');
+    const os = require('os');
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-frag-'));
+    fs.writeFileSync(path.join(tmpDir, 'package.json'), JSON.stringify({ name: 'test-frag', version: '1.0.0' }));
+    fs.writeFileSync(path.join(tmpDir, 'index.js'), `
+const a = 'xK9mQ2pLwR7vN5tY3hBfZsJcGdAe';
+const b = 'R7vN5tY3hBfZsJcGdAexK9mQ2pLwR';
+const c = 'Q2pLwR7vN5tY3hBfZsJcGdAexK9mX';
+console.log(a + b + c);
+`);
+    try {
+      const threats = scanEntropy(tmpDir);
+      const t = threats.find(t => t.type === 'fragmented_high_entropy_cluster');
+      assert(!t, 'Should NOT detect cluster with only 3 fragments');
+    } finally { fs.rmSync(tmpDir, { recursive: true }); }
+  });
+
+  // =============================================
+  // v2.5.14: B12 — Windowed analysis for long strings
+  // =============================================
+
+  await asyncTest('ENTROPY B12: 1500-char string with high-entropy window → detected', async () => {
+    const fs = require('fs');
+    const os = require('os');
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-long-'));
+    fs.writeFileSync(path.join(tmpDir, 'package.json'), JSON.stringify({ name: 'test-long', version: '1.0.0' }));
+    // Generate payload with high entropy (>6.0) using many distinct printable ASCII chars
+    let payload = '';
+    for (let i = 0; i < 600; i++) {
+      const code = 33 + (i * 7 + 13) % 93;
+      let ch = String.fromCharCode(code);
+      if (ch === '"' || ch === '\\' || ch === "'" || ch === '`') ch = 'X';
+      payload += ch;
+    }
+    // Pad with 500 chars of A so that window at offset 500 is entirely payload
+    const padding = 'A'.repeat(500);
+    const combined = padding + payload + padding;
+    // Verify combined > MAX_STRING_LENGTH (1000)
+    assert(combined.length > 1000, 'Combined should be > 1000 chars');
+    // Verify payload entropy > 6.0
+    const payloadEntropy = calculateShannonEntropy(payload.slice(0, 500));
+    assert(payloadEntropy > 6.0, 'Payload entropy should be > 6.0, got ' + payloadEntropy.toFixed(2));
+    fs.writeFileSync(path.join(tmpDir, 'index.js'), 'const data = ' + JSON.stringify(combined) + ';');
+    try {
+      const threats = scanEntropy(tmpDir);
+      const t = threats.find(t => t.type === 'high_entropy_string' && t.message.includes('long string'));
+      assert(t, 'Should detect high entropy window in long padded string');
+    } finally { fs.rmSync(tmpDir, { recursive: true }); }
+  });
+
+  await asyncTest('ENTROPY B12: 1500-char low-entropy string → NOT detected', async () => {
+    const fs = require('fs');
+    const os = require('os');
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-long-'));
+    fs.writeFileSync(path.join(tmpDir, 'package.json'), JSON.stringify({ name: 'test-long', version: '1.0.0' }));
+    const longLowEntropy = 'AAAA'.repeat(400); // 1600 chars of very low entropy
+    fs.writeFileSync(path.join(tmpDir, 'index.js'), `const data = '${longLowEntropy}';\nconsole.log(data);`);
+    try {
+      const threats = scanEntropy(tmpDir);
+      const t = threats.find(t => t.type === 'high_entropy_string' && t.message.includes('long string'));
+      assert(!t, 'Long low-entropy string should NOT trigger windowed analysis');
+    } finally { fs.rmSync(tmpDir, { recursive: true }); }
+  });
 }
 
 module.exports = { runEntropyTests };

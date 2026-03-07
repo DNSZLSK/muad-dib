@@ -203,6 +203,33 @@ function analyzeFile(content, filePath, basePath) {
             }
           }
         }
+        // B7: Taint propagation through data-preserving wrappers
+        if (initNode.type === 'CallExpression') {
+          const callee = initNode.callee;
+          let isTaintWrapper = false;
+          // JSON.stringify(x) / JSON.parse(x)
+          if (callee?.type === 'MemberExpression' &&
+              callee.object?.type === 'Identifier' && callee.object.name === 'JSON' &&
+              callee.property?.type === 'Identifier' &&
+              (callee.property.name === 'stringify' || callee.property.name === 'parse')) {
+            isTaintWrapper = true;
+          }
+          // x.toString() / String(x) / Buffer.from(x)
+          if (callee?.type === 'MemberExpression' &&
+              callee.property?.type === 'Identifier' && callee.property.name === 'toString') {
+            isTaintWrapper = true;
+          }
+          if (callee?.type === 'Identifier' && callee.name === 'String') {
+            isTaintWrapper = true;
+          }
+          if (isTaintWrapper && initNode.arguments.length >= 1) {
+            const wrappedArg = initNode.arguments[0];
+            if (wrappedArg.type === 'Identifier' && sensitivePathVars.has(wrappedArg.name)) {
+              sensitivePathVars.add(node.id.name);
+            }
+          }
+        }
+
         // Track exec result capture: const output = execSync('cmd')
         if (initNode.type === 'CallExpression') {
           let execName = null;

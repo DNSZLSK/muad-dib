@@ -455,6 +455,13 @@ function invalidateCache() {
 // ============================================
 // Key is derived from a stable machine-specific seed + hardcoded salt.
 // This protects against local file tampering by unauthorized processes.
+//
+// RISK ACCEPTED (v2.5.14): Full cryptographic signing of IOC updates (e.g., Ed25519
+// signatures verified against a pinned public key) was evaluated but not implemented.
+// Current mitigations: HTTPS-only downloads + domain allowlist in src/shared/download.js
+// + HMAC-SHA256 integrity for cached data. The HMAC key is machine-local, so it does
+// not protect against a compromised upstream source — that risk is accepted given the
+// cost/benefit trade-off and the existing HTTPS + domain pinning controls.
 const IOC_HMAC_SALT = 'muaddib-ioc-integrity-v1';
 
 function getIOCHMACKey() {

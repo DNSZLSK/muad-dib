@@ -385,6 +385,33 @@ const RULES = {
     references: ['https://attack.mitre.org/techniques/T1059/004/'],
     mitre: 'T1059.004'
   },
+  fifo_nc_reverse_shell: {
+    id: 'MUADDIB-SHELL-013',
+    name: 'FIFO + Netcat Reverse Shell',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Reverse shell via mkfifo + netcat (sans /dev/tcp). Technique alternative de reverse shell utilisant un named pipe.',
+    references: ['https://attack.mitre.org/techniques/T1059/004/'],
+    mitre: 'T1059.004'
+  },
+  base64_decode_exec: {
+    id: 'MUADDIB-SHELL-014',
+    name: 'Base64 Decode Pipe to Shell',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Payload encode en base64 decode et pipe vers bash/sh. Technique d\'obfuscation courante pour cacher des commandes malveillantes.',
+    references: ['https://attack.mitre.org/techniques/T1140/'],
+    mitre: 'T1140'
+  },
+  wget_base64_decode: {
+    id: 'MUADDIB-SHELL-015',
+    name: 'Wget + Base64 Decode',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'Telechargement via wget suivi de decodage base64. Pattern de staging en deux etapes pour dropper un payload.',
+    references: ['https://attack.mitre.org/techniques/T1105/'],
+    mitre: 'T1105'
+  },
 
   // AST additional patterns
   possible_obfuscation: {
@@ -955,6 +982,15 @@ const RULES = {
     severity: 'MEDIUM',
     confidence: 'medium',
     description: 'Chaine a haute entropie detectee (base64, hex, payload chiffre). Souvent signe d\'obfuscation ou de donnees encodees.',
+    references: ['https://attack.mitre.org/techniques/T1027/'],
+    mitre: 'T1027'
+  },
+  fragmented_high_entropy_cluster: {
+    id: 'MUADDIB-ENTROPY-004',
+    name: 'Fragmented High Entropy Cluster',
+    severity: 'MEDIUM',
+    confidence: 'medium',
+    description: 'Cluster de chaines courtes a haute entropie (8-49 chars) detecte. Technique de fragmentation de payload pour contourner le seuil de longueur minimum d\'analyse entropique.',
     references: ['https://attack.mitre.org/techniques/T1027/'],
     mitre: 'T1027'
   },

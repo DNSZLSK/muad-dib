@@ -178,6 +178,151 @@ new Worker('require("child_process").execSync("id")', { eval: true });
       cleanupTemp(tmp);
     }
   });
+
+  // =============================================
+  // v2.5.14: B1 — eval alias bypass detection
+  // =============================================
+
+  await asyncTest('BYPASS-REG B1: const E = eval; E(code) — detected', async () => {
+    const tmp = makeTempPkg(`
+const E = eval;
+E('require("child_process").execSync("id")');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const detected = hasType(result, 'dangerous_call_eval');
+      assert(detected, 'const E = eval; E() should be detected as dangerous_call_eval');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('BYPASS-REG B1: const E = (x) => eval(x); E(code) — detected', async () => {
+    const tmp = makeTempPkg(`
+const E = (x) => eval(x);
+E('require("child_process").execSync("id")');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const detected = hasType(result, 'dangerous_call_eval');
+      assert(detected, 'Arrow function eval wrapper should be detected');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('BYPASS-REG B1: const F = function(x) { return eval(x); }; F(code) — detected', async () => {
+    const tmp = makeTempPkg(`
+const F = function(x) { return eval(x); };
+F('process.env.SECRET');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const detected = hasType(result, 'dangerous_call_eval');
+      assert(detected, 'Function expression eval wrapper should be detected');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('BYPASS-REG B1: const F = Function; F(code) — detected', async () => {
+    const tmp = makeTempPkg(`
+const F = Function;
+const fn = F('return process.env.TOKEN');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const detected = hasType(result, 'dangerous_call_function');
+      assert(detected, 'const F = Function; F() should be detected as dangerous_call_function');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('BYPASS-REG B1 negative: const L = console.log; L() — NOT eval alias', async () => {
+    const tmp = makeTempPkg(`
+const L = console.log;
+L('hello world');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const evalThreats = (result.threats || []).filter(t => t.type === 'dangerous_call_eval' && t.message.includes('alias'));
+      assert(evalThreats.length === 0, 'console.log alias should NOT be detected as eval alias');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // =============================================
+  // v2.5.14: B2 — globalThis indirect assignment
+  // =============================================
+
+  await asyncTest('BYPASS-REG B2: const g = globalThis; g.fetch = fn — detected', async () => {
+    const tmp = makeTempPkg(`
+const g = globalThis;
+g.fetch = function(url) { return originalFetch(url); };
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const detected = hasType(result, 'prototype_hook');
+      assert(detected, 'globalThis alias g.fetch override should be detected as prototype_hook');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('BYPASS-REG B2 negative: const g = globalThis; g.myCustomProp = fn — NOT detected', async () => {
+    const tmp = makeTempPkg(`
+const g = globalThis;
+g.myCustomProp = function() { return 42; };
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const hookThreats = (result.threats || []).filter(t =>
+        t.type === 'prototype_hook' && t.message.includes('myCustomProp'));
+      assert(hookThreats.length === 0, 'Custom property on globalThis alias should NOT be detected as prototype_hook');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // =============================================
+  // v2.5.14: B5 — require(obj.prop) resolution
+  // =============================================
+
+  await asyncTest('BYPASS-REG B5: const o = {m:"child_process"}; require(o.m) — CRITICAL', async () => {
+    const tmp = makeTempPkg(`
+const o = { m: 'child_process' };
+const cp = require(o.m);
+cp.execSync('id');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = (result.threats || []).find(t =>
+        t.type === 'dynamic_require' && t.severity === 'CRITICAL' && t.message.includes('child_process'));
+      assert(t, 'require(o.m) resolving to child_process should be CRITICAL dynamic_require');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('BYPASS-REG B5: const o = {m:"lodash"}; require(o.m) — HIGH (non-dangerous)', async () => {
+    const tmp = makeTempPkg(`
+const o = { m: 'lodash' };
+const _ = require(o.m);
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = (result.threats || []).find(t =>
+        t.type === 'dynamic_require' && t.severity === 'CRITICAL');
+      assert(!t, 'require(o.m) with lodash should NOT be CRITICAL');
+      const h = (result.threats || []).find(t => t.type === 'dynamic_require');
+      assert(h, 'require(o.m) with any member expression should still be HIGH dynamic_require');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // =============================================
+  // v2.5.14: Variable reassignment tracking
+  // =============================================
+
+  await asyncTest('BYPASS-REG: let x = "child_"; x += "process"; require(x) — CRITICAL', async () => {
+    const tmp = makeTempPkg(`
+let x = 'child_';
+x += 'process';
+const cp = require(x);
+cp.execSync('id');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = (result.threats || []).find(t =>
+        t.type === 'dynamic_require' && t.severity === 'CRITICAL' && t.message.includes('child_process'));
+      assert(t, 'Variable reassignment to child_process should be CRITICAL dynamic_require');
+    } finally { cleanupTemp(tmp); }
+  });
 }
 
 module.exports = { runAstBypassRegressionTests };

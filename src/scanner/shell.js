@@ -16,7 +16,10 @@ const MALICIOUS_PATTERNS = [
   { pattern: /(?:cat|readFile|cp|mv|curl\s+file:\/\/|tar\s+.*|scp\s+).*\.ssh/m, name: 'ssh_access', severity: 'HIGH' },
   { pattern: /python\s+-c.*import\s+socket/m, name: 'python_reverse_shell', severity: 'CRITICAL' },
   { pattern: /perl\s+-e.*socket/m, name: 'perl_reverse_shell', severity: 'CRITICAL' },
-  { pattern: /mkfifo.*\/dev\/tcp/m, name: 'fifo_reverse_shell', severity: 'CRITICAL' }
+  { pattern: /mkfifo.*\/dev\/tcp/m, name: 'fifo_reverse_shell', severity: 'CRITICAL' },
+  { pattern: /mkfifo\s+\S+.*(?:\|\s*nc\s|nc\s+\S+.*>\s*\/tmp\/)/m, name: 'fifo_nc_reverse_shell', severity: 'CRITICAL' },
+  { pattern: /base64\s+-d\b.*\|\s*(ba)?sh/m, name: 'base64_decode_exec', severity: 'CRITICAL' },
+  { pattern: /wget\s+\S+.*&&.*base64\s+-d/m, name: 'wget_base64_decode', severity: 'HIGH' }
 ];
 
 async function scanShellScripts(targetPath) {
