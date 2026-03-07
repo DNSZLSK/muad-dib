@@ -70,6 +70,9 @@ function analyzeFile(content, filePath, basePath) {
     workflowPathVars: new Set(),
     execPathVars: new Map(),
     globalThisAliases: new Set(),
+    evalAliases: new Map(),           // B1: variable name → 'eval'|'Function'
+    objectPropertyMap: new Map(),     // B5: objName → Map<propName, stringValue>
+    stringVarValues: new Map(),       // Variable reassignment tracking: varName → string value
     hasFromCharCode: content.includes('fromCharCode'),
     hasJsReverseShell: /\bnet\.Socket\b/.test(content) &&
       /\.connect\s*\(/.test(content) &&

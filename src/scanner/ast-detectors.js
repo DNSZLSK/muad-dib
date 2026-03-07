@@ -330,6 +330,44 @@ function handleVariableDeclarator(node, ctx) {
       ctx.globalThisAliases.add(node.id.name);
     }
 
+    // B1: const E = eval; const F = Function;
+    if (node.init?.type === 'Identifier' &&
+        (node.init.name === 'eval' || node.init.name === 'Function')) {
+      ctx.evalAliases.set(node.id.name, node.init.name);
+    }
+    // B1: const E = (x) => eval(x); const E = function(x) { return eval(x); }
+    if ((node.init?.type === 'ArrowFunctionExpression' || node.init?.type === 'FunctionExpression') &&
+        node.init.params?.length >= 1) {
+      const body = node.init.body;
+      if (body?.type === 'CallExpression') {
+        const cn = getCallName(body);
+        if (cn === 'eval' || cn === 'Function') ctx.evalAliases.set(node.id.name, cn);
+      }
+      if (body?.type === 'BlockStatement' && body.body?.length === 1 &&
+          body.body[0].type === 'ReturnStatement' && body.body[0].argument?.type === 'CallExpression') {
+        const cn = getCallName(body.body[0].argument);
+        if (cn === 'eval' || cn === 'Function') ctx.evalAliases.set(node.id.name, cn);
+      }
+    }
+
+    // B5: Track object literal string properties
+    if (node.init?.type === 'ObjectExpression') {
+      const propMap = new Map();
+      for (const prop of node.init.properties) {
+        if (prop.type !== 'Property') continue;
+        const key = prop.key?.type === 'Identifier' ? prop.key.name :
+                    (prop.key?.type === 'Literal' ? String(prop.key.value) : null);
+        const val = extractStringValueDeep(prop.value);
+        if (key && val) propMap.set(key, val);
+      }
+      if (propMap.size > 0) ctx.objectPropertyMap.set(node.id.name, propMap);
+    }
+
+    // Track initial string values for reassignment tracking
+    if (strVal !== null && strVal !== undefined) {
+      ctx.stringVarValues.set(node.id.name, strVal);
+    }
+
     // Track variables assigned from path.join containing .github/workflows
     if (node.init?.type === 'CallExpression' && node.init.callee?.type === 'MemberExpression') {
       const obj = node.init.callee.object;
@@ -442,17 +480,68 @@ function handleCallExpression(node, ctx) {
         });
       }
     } else if (arg.type === 'Identifier') {
-      // If the variable was assigned from a static value (string literal,
-      // array of strings, object with string values), it's a plugin loader pattern
-      const severity = ctx.staticAssignments.has(arg.name) ? 'LOW' : 'HIGH';
-      ctx.threats.push({
-        type: 'dynamic_require',
-        severity,
-        message: severity === 'LOW'
-          ? `Dynamic require() with statically-assigned variable "${arg.name}" (plugin loader pattern).`
-          : 'Dynamic require() with variable argument (module name obfuscation).',
-        file: ctx.relFile
-      });
+      // Check if variable was reassignment-tracked to a dangerous module
+      const DANGEROUS_MODS_REQ = ['child_process', 'fs', 'net', 'dns', 'http', 'https', 'tls'];
+      const resolvedVal = ctx.stringVarValues?.get(arg.name);
+      if (resolvedVal) {
+        const norm = resolvedVal.startsWith('node:') ? resolvedVal.slice(5) : resolvedVal;
+        if (DANGEROUS_MODS_REQ.includes(norm)) {
+          ctx.threats.push({
+            type: 'dynamic_require', severity: 'CRITICAL',
+            message: `require(${arg.name}) resolves to "${norm}" via variable reassignment — module name obfuscation.`,
+            file: ctx.relFile
+          });
+        } else {
+          // If the variable was assigned from a static value (string literal,
+          // array of strings, object with string values), it's a plugin loader pattern
+          const severity = ctx.staticAssignments.has(arg.name) ? 'LOW' : 'HIGH';
+          ctx.threats.push({
+            type: 'dynamic_require',
+            severity,
+            message: severity === 'LOW'
+              ? `Dynamic require() with statically-assigned variable "${arg.name}" (plugin loader pattern).`
+              : 'Dynamic require() with variable argument (module name obfuscation).',
+            file: ctx.relFile
+          });
+        }
+      } else {
+        // If the variable was assigned from a static value (string literal,
+        // array of strings, object with string values), it's a plugin loader pattern
+        const severity = ctx.staticAssignments.has(arg.name) ? 'LOW' : 'HIGH';
+        ctx.threats.push({
+          type: 'dynamic_require',
+          severity,
+          message: severity === 'LOW'
+            ? `Dynamic require() with statically-assigned variable "${arg.name}" (plugin loader pattern).`
+            : 'Dynamic require() with variable argument (module name obfuscation).',
+          file: ctx.relFile
+        });
+      }
+    }
+    // B5: require(obj.prop) — MemberExpression argument
+    else if (arg.type === 'MemberExpression') {
+      const objName = arg.object?.type === 'Identifier' ? arg.object.name : null;
+      const propName = arg.property?.type === 'Identifier' ? arg.property.name :
+                       (arg.property?.type === 'Literal' ? String(arg.property.value) : null);
+      const DANGEROUS_MODS = ['child_process', 'fs', 'net', 'dns', 'http', 'https', 'tls'];
+      let resolved = false;
+      if (objName && propName && ctx.objectPropertyMap?.has(objName)) {
+        const val = ctx.objectPropertyMap.get(objName).get(propName);
+        if (val) {
+          const norm = val.startsWith('node:') ? val.slice(5) : val;
+          if (DANGEROUS_MODS.includes(norm)) {
+            ctx.threats.push({ type: 'dynamic_require', severity: 'CRITICAL',
+              message: `require(${objName}.${propName}) resolves to "${norm}" — object property indirection.`,
+              file: ctx.relFile });
+            resolved = true;
+          }
+        }
+      }
+      if (!resolved) {
+        ctx.threats.push({ type: 'dynamic_require', severity: 'HIGH',
+          message: 'Dynamic require() with member expression argument (object property obfuscation).',
+          file: ctx.relFile });
+      }
     }
     // Wave 4: detect require() of .node binary files (native addon camouflage)
     const reqStr = extractStringValueDeep(arg);
@@ -879,6 +968,19 @@ function handleCallExpression(node, ctx) {
         file: ctx.relFile
       });
     }
+  }
+
+  // B1: Alias call — E('code') where E = eval or F = Function
+  if (node.callee.type === 'Identifier' && ctx.evalAliases?.has(node.callee.name)) {
+    const aliased = ctx.evalAliases.get(node.callee.name);
+    ctx.hasEvalInFile = true;
+    ctx.hasDynamicExec = true;
+    ctx.threats.push({
+      type: aliased === 'eval' ? 'dangerous_call_eval' : 'dangerous_call_function',
+      severity: 'HIGH',
+      message: `Indirect ${aliased} via alias "${node.callee.name}" — eval wrapper evasion.`,
+      file: ctx.relFile
+    });
   }
 
   if (callName === 'eval') {
@@ -1432,6 +1534,29 @@ function handleLiteral(node, ctx) {
 }
 
 function handleAssignmentExpression(node, ctx) {
+  // Variable reassignment: x += 'process' or x = x + 'process'
+  if (node.left?.type === 'Identifier') {
+    if (node.operator === '+=' && ctx.stringVarValues.has(node.left.name)) {
+      const rightVal = extractStringValueDeep(node.right);
+      if (rightVal !== null) {
+        const combined = ctx.stringVarValues.get(node.left.name) + rightVal;
+        ctx.stringVarValues.set(node.left.name, combined);
+        if (DANGEROUS_CMD_PATTERNS.some(p => p.test(combined))) {
+          ctx.dangerousCmdVars.set(node.left.name, combined);
+        }
+      }
+    }
+    if (node.operator === '=' && node.right?.type === 'BinaryExpression') {
+      const resolved = resolveStringConcat(node.right);
+      if (resolved) {
+        ctx.stringVarValues.set(node.left.name, resolved);
+        if (DANGEROUS_CMD_PATTERNS.some(p => p.test(resolved))) {
+          ctx.dangerousCmdVars.set(node.left.name, resolved);
+        }
+      }
+    }
+  }
+
   // Detect object property indirection: obj.exec = require('child_process').exec
   // or obj.fn = eval — stashing dangerous functions in object properties
   if (node.left?.type === 'MemberExpression' && node.right) {
@@ -1489,14 +1614,17 @@ function handleAssignmentExpression(node, ctx) {
   if (node.left?.type === 'MemberExpression') {
     const left = node.left;
 
-    // globalThis.fetch = ... or globalThis.XMLHttpRequest = ...
-    if (left.object?.type === 'Identifier' && left.object.name === 'globalThis' &&
+    // globalThis.fetch = ... or globalThis.XMLHttpRequest = ... (B2: include aliases)
+    if (left.object?.type === 'Identifier' &&
+        (left.object.name === 'globalThis' || left.object.name === 'global' ||
+         left.object.name === 'window' || left.object.name === 'self' ||
+         ctx.globalThisAliases.has(left.object.name)) &&
         left.property?.type === 'Identifier') {
       if (HOOKABLE_NATIVES.includes(left.property.name)) {
         ctx.threats.push({
           type: 'prototype_hook',
           severity: 'HIGH',
-          message: `globalThis.${left.property.name} overridden — native API hooking for traffic interception.`,
+          message: `${left.object.name}.${left.property.name} overridden — native API hooking for traffic interception.`,
           file: ctx.relFile
         });
       }
@@ -1712,7 +1840,8 @@ function handlePostWalk(ctx) {
 
   // Wave 4: Download-execute-cleanup — https download + chmod executable + execSync + unlink
   // Exclude when all URLs in the file point to safe registries (npm, GitHub, nodejs.org)
-  if (ctx.hasRemoteFetch && ctx.hasChmodExecutable && ctx.hasExecSyncCall && !ctx.fetchOnlySafeDomains) {
+  // B4: removed fetchOnlySafeDomains guard — compound requires fetch+chmod+exec, which is never legitimate
+  if (ctx.hasRemoteFetch && ctx.hasChmodExecutable && ctx.hasExecSyncCall) {
     ctx.threats.push({
       type: 'download_exec_binary',
       severity: 'CRITICAL',

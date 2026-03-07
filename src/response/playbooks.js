@@ -165,6 +165,15 @@ const PLAYBOOKS = {
   fifo_reverse_shell:
     'CRITIQUE: Reverse shell FIFO/named pipe detecte. Machine potentiellement compromise. Isoler immediatement.',
 
+  fifo_nc_reverse_shell:
+    'CRITIQUE: Reverse shell via mkfifo + netcat detecte. Machine potentiellement compromise. Isoler immediatement. Verifier les connexions sortantes actives.',
+
+  base64_decode_exec:
+    'CRITIQUE: Payload encode en base64 pipe vers un shell. Decoder le payload pour analyse: echo "<payload>" | base64 -d. Isoler la machine si deja execute.',
+
+  wget_base64_decode:
+    'Telechargement + decodage base64 detecte. Verifier l\'URL de telechargement et decoder le contenu. Pattern de staging malveillant en deux etapes.',
+
   shai_hulud_backdoor:
     'CRITIQUE: Backdoor Shai-Hulud dans GitHub Actions. Supprimer le workflow et auditer les runs precedents.',
 
@@ -448,6 +457,10 @@ const PLAYBOOKS = {
     'new Worker() avec eval:true detecte. Le code s\'execute dans un thread worker separe, contournant la detection AST du thread principal. ' +
     'Verifier le contenu du code passe au Worker. Si dynamique ou obfusque, supprimer le package. ' +
     'Analyser les communications inter-threads (parentPort, workerData) pour identifier le payload.',
+
+  fragmented_high_entropy_cluster:
+    'Cluster de chaines courtes a haute entropie detecte. Possible fragmentation de payload pour eviter la detection. ' +
+    'Reconstituer les fragments et analyser le contenu combine. Verifier si les chaines sont concatenees ou reassemblees a l\'execution.',
 };
 
 function getPlaybook(threatType) {

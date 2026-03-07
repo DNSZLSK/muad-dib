@@ -228,7 +228,26 @@ function scanEntropy(targetPath, options = {}) {
     const strings = extractStringLiterals(content);
     for (const str of strings) {
       if (str.length < MIN_STRING_LENGTH) continue;
-      if (str.length > MAX_STRING_LENGTH) continue;
+
+      // B12: Windowed analysis for strings > MAX_STRING_LENGTH
+      if (str.length > MAX_STRING_LENGTH) {
+        if (SOURCE_MAP_REGEX.test(str) || SHA256_HEX_REGEX.test(str)) continue;
+        const WINDOW = 500, WIN_THRESHOLD = 6.0;
+        for (let i = 0; i < str.length; i += WINDOW) {
+          const w = str.slice(i, i + WINDOW);
+          if (w.length < 20) continue;
+          if (calculateShannonEntropy(w) > WIN_THRESHOLD) {
+            threats.push({
+              type: 'high_entropy_string',
+              severity: ENCODING_TABLE_RE.test(relativePath) ? 'LOW' : 'MEDIUM',
+              message: `High entropy window in long string (${str.length} chars, offset ${i}) — possible padded payload`,
+              file: relativePath
+            });
+            break;
+          }
+        }
+        continue;
+      }
 
       // Skip whitelisted patterns
       if (isWhitelistedString(str, relativePath)) continue;
@@ -244,6 +263,23 @@ function scanEntropy(targetPath, options = {}) {
           file: relativePath
         });
       }
+    }
+
+    // B11: Fragment cluster — many short high-entropy strings = payload fragmentation
+    const FRAG_MIN = 8, FRAG_MAX = 49, FRAG_COUNT = 5, FRAG_ENTROPY = 4.5;
+    const frags = strings.filter(s =>
+      s.length >= FRAG_MIN && s.length <= FRAG_MAX &&
+      !SOURCE_MAP_REGEX.test(s) && !SHA256_HEX_REGEX.test(s) && !MD5_HEX_REGEX.test(s) &&
+      !UUID_REGEX.test(s) && !JWT_REGEX.test(s) &&
+      calculateShannonEntropy(s) > FRAG_ENTROPY
+    );
+    if (frags.length >= FRAG_COUNT) {
+      threats.push({
+        type: 'fragmented_high_entropy_cluster',
+        severity: ENCODING_TABLE_RE.test(relativePath) ? 'LOW' : 'MEDIUM',
+        message: `Fragment cluster: ${frags.length} short high-entropy strings (8-49 chars) — possible payload fragmentation.`,
+        file: relativePath
+      });
     }
   });
 

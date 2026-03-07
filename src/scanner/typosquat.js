@@ -116,6 +116,20 @@ const WHITELIST = new Set([
 ]);
 
 
+// B13: Pair-aware whitelist — only skip comparison with the specific popular package
+const WHITELIST_PAIRS = new Map([
+  ['chai', 'chalk'], ['pino', 'sinon'], ['ioredis', 'redis'],
+  ['bcryptjs', 'bcrypt'], ['recast', 'react'], ['asyncdi', 'async'],
+  ['redux', 'redis'], ['args', 'yargs'], ['oxlint', 'eslint'], ['vasync', 'async'],
+  ['conf', 'config'], ['defu', 'debug'], ['ohash', 'lodash'], ['cors', 'colors'],
+  ['meant', 'react'], ['whelk', 'chalk'], ['tslog', 'tslib'], ['mkdist', 'mkdirp'],
+  ['jshint', 'eslint'], ['dtslint', 'eslint'], ['redis', 'redux'],
+  ['cypress', 'express'], ['colord', 'colors'], ['read', 'react'],
+  ['ulid', 'uuid'], ['tslint', 'eslint'], ['jison', 'sinon'],
+  ['reds', 'redis'], ['docdash', 'lodash'], ['yarpm', 'yargs'],
+  ['canvg', 'canvas'], ['mocks', 'mocha'], ['reactor', 'react']
+]);
+
 // Pre-computed lowercase versions for performance
 const POPULAR_PACKAGES_LOWER = POPULAR_PACKAGES.map(p => p.toLowerCase());
 
@@ -317,9 +331,9 @@ async function scanTyposquatting(targetPath) {
 function findTyposquatMatch(name) {
   const nameLower = name.toLowerCase();
   
-  // Ignore les packages whitelistes
-  if (WHITELIST.has(nameLower)) return null;
-  
+  // Ignore les packages whitelistes (B13: only skip entirely if not in pair-aware map)
+  if (WHITELIST.has(nameLower) && !WHITELIST_PAIRS.has(nameLower)) return null;
+
   // Ignore les packages scoped (@org/package)
   if (name.startsWith('@')) return null;
 
@@ -329,12 +343,18 @@ function findTyposquatMatch(name) {
   // Ignore les packages avec suffixes legitimes courants
   if (isLegitimateVariant(nameLower)) return null;
 
+  // B13: Get the specific popular package this whitelisted name is paired with
+  const pairedTarget = WHITELIST_PAIRS.get(nameLower);
+
   for (let i = 0; i < POPULAR_PACKAGES.length; i++) {
     const popularLower = POPULAR_PACKAGES_LOWER[i];
     const popular = POPULAR_PACKAGES[i];
 
     // Ignore si c'est exactement le meme
     if (nameLower === popularLower) continue;
+
+    // B13: Skip only the intended pair for whitelisted packages
+    if (pairedTarget && pairedTarget === popularLower) continue;
 
     // Ignore si le package populaire est trop court
     if (popular.length < MIN_PACKAGE_LENGTH) continue;

