@@ -17,6 +17,9 @@ const MODULE_SOURCE_METHODS = {
     readFileSync: 'credential_read', readFile: 'credential_read',
     readdirSync: 'credential_read', readdir: 'credential_read'
   },
+  'fs/promises': {
+    readFile: 'credential_read', readdir: 'credential_read'
+  },
   child_process: {
     exec: 'command_output', execSync: 'command_output',
     spawn: 'command_output', spawnSync: 'command_output'
@@ -53,12 +56,14 @@ function buildTaintMap(ast) {
   walk.simple(ast, {
     VariableDeclarator(node) {
       if (!node.init) return;
+      let init = node.init;
+      if (init.type === 'AwaitExpression') init = init.argument;
 
       // Pattern: const x = require("os")
-      if (node.id.type === 'Identifier' && node.init.type === 'CallExpression') {
-        const callee = node.init.callee;
-        if (callee.type === 'Identifier' && callee.name === 'require' && node.init.arguments.length > 0) {
-          const arg = node.init.arguments[0];
+      if (node.id.type === 'Identifier' && init.type === 'CallExpression') {
+        const callee = init.callee;
+        if (callee.type === 'Identifier' && callee.name === 'require' && init.arguments.length > 0) {
+          const arg = init.arguments[0];
           if (arg.type === 'Literal' && typeof arg.value === 'string' && TRACKED_MODULES.has(arg.value)) {
             taintMap.set(node.id.name, { source: arg.value, detail: arg.value });
           }
@@ -66,10 +71,10 @@ function buildTaintMap(ast) {
       }
 
       // Pattern: const { exec, spawn } = require("child_process")
-      if (node.id.type === 'ObjectPattern' && node.init.type === 'CallExpression') {
-        const callee = node.init.callee;
-        if (callee.type === 'Identifier' && callee.name === 'require' && node.init.arguments.length > 0) {
-          const arg = node.init.arguments[0];
+      if (node.id.type === 'ObjectPattern' && init.type === 'CallExpression') {
+        const callee = init.callee;
+        if (callee.type === 'Identifier' && callee.name === 'require' && init.arguments.length > 0) {
+          const arg = init.arguments[0];
           if (arg.type === 'Literal' && typeof arg.value === 'string' && TRACKED_MODULES.has(arg.value)) {
             for (const prop of node.id.properties) {
               if (prop.type === 'Property' && prop.value?.type === 'Identifier') {
@@ -82,9 +87,9 @@ function buildTaintMap(ast) {
       }
 
       // Pattern: const e = process.env
-      if (node.id.type === 'Identifier' && node.init.type === 'MemberExpression') {
-        const obj = node.init.object;
-        const prop = node.init.property;
+      if (node.id.type === 'Identifier' && init.type === 'MemberExpression') {
+        const obj = init.object;
+        const prop = init.property;
         if (obj?.type === 'Identifier' && obj.name === 'process' &&
             prop?.type === 'Identifier' && prop.name === 'env') {
           taintMap.set(node.id.name, { source: 'process.env', detail: 'process.env' });
@@ -92,9 +97,9 @@ function buildTaintMap(ast) {
       }
 
       // Pattern: const h = x.homedir where x is tainted as "os"
-      if (node.id.type === 'Identifier' && node.init.type === 'MemberExpression') {
-        const obj = node.init.object;
-        const prop = node.init.property;
+      if (node.id.type === 'Identifier' && init.type === 'MemberExpression') {
+        const obj = init.object;
+        const prop = init.property;
         if (obj?.type === 'Identifier' && prop?.type === 'Identifier') {
           const parentTaint = taintMap.get(obj.name);
           if (parentTaint && TRACKED_MODULES.has(parentTaint.source)) {
@@ -162,16 +167,19 @@ function analyzeFile(content, filePath, basePath) {
 
     VariableDeclarator(node) {
       if (node.id?.type === 'Identifier' && node.init) {
-        if (containsSensitiveLiteral(node.init)) {
+        let initNode = node.init;
+        if (initNode.type === 'AwaitExpression') initNode = initNode.argument;
+
+        if (containsSensitiveLiteral(initNode)) {
           sensitivePathVars.add(node.id.name);
         }
         // Propagate sensitive vars through path.join/resolve
-        if (node.init?.type === 'CallExpression' && node.init.callee?.type === 'MemberExpression') {
-          const obj = node.init.callee.object;
-          const prop = node.init.callee.property;
+        if (initNode.type === 'CallExpression' && initNode.callee?.type === 'MemberExpression') {
+          const obj = initNode.callee.object;
+          const prop = initNode.callee.property;
           if (obj?.type === 'Identifier' && obj.name === 'path' &&
               prop?.type === 'Identifier' && (prop.name === 'join' || prop.name === 'resolve')) {
-            if (node.init.arguments.some(a =>
+            if (initNode.arguments.some(a =>
               (a.type === 'Identifier' && sensitivePathVars.has(a.name)) ||
               (a.type === 'MemberExpression' && a.object?.type === 'Identifier' && sensitivePathVars.has(a.object.name))
             )) {
@@ -179,10 +187,26 @@ function analyzeFile(content, filePath, basePath) {
             }
           }
         }
+        // Propagate taint through spread: const payload = { ...creds }
+        if (initNode.type === 'ObjectExpression') {
+          for (const prop of initNode.properties) {
+            if (prop.type === 'SpreadElement' && prop.argument?.type === 'Identifier') {
+              if (sensitivePathVars.has(prop.argument.name)) {
+                sensitivePathVars.add(node.id.name);
+                break;
+              }
+              const taint = taintMap.get(prop.argument.name);
+              if (taint && (taint.source === 'process.env' || MODULE_SOURCE_METHODS[taint.source])) {
+                sensitivePathVars.add(node.id.name);
+                break;
+              }
+            }
+          }
+        }
         // Track exec result capture: const output = execSync('cmd')
-        if (node.init.type === 'CallExpression') {
+        if (initNode.type === 'CallExpression') {
           let execName = null;
-          const initCallee = node.init.callee;
+          const initCallee = initNode.callee;
           if (initCallee?.type === 'Identifier' && EXEC_METHODS.has(initCallee.name)) {
             const taint = taintMap.get(initCallee.name);
             if (taint && taint.source === 'child_process') {
@@ -198,7 +222,7 @@ function analyzeFile(content, filePath, basePath) {
             }
           }
           if (execName) {
-            execResultNodes.add(node.init);
+            execResultNodes.add(initNode);
             sources.push({
               type: 'command_output',
               name: execName,
@@ -222,6 +246,24 @@ function analyzeFile(content, filePath, basePath) {
             name: callName,
             line: node.loc?.start?.line
           });
+        }
+      }
+
+      // fs.promises.readFile(path) — 3-level member chain
+      if (node.callee.type === 'MemberExpression' &&
+          node.callee.object?.type === 'MemberExpression') {
+        const outerObj = node.callee.object.object;
+        const mid = node.callee.object.property;
+        const method = node.callee.property;
+        if (outerObj?.type === 'Identifier' && mid?.type === 'Identifier' && mid.name === 'promises' &&
+            method?.type === 'Identifier' && (method.name === 'readFile' || method.name === 'readdir')) {
+          const isFs = outerObj.name === 'fs' || (taintMap.get(outerObj.name)?.source === 'fs');
+          if (isFs) {
+            const arg = node.arguments[0];
+            if (arg && isCredentialPath(arg, sensitivePathVars)) {
+              sources.push({ type: 'credential_read', name: `fs.promises.${method.name}`, line: node.loc?.start?.line });
+            }
+          }
         }
       }
 

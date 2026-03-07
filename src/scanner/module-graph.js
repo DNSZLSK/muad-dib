@@ -157,8 +157,22 @@ function analyzeExports(filePath) {
     }
   });
 
-  // First pass: collect require assignments and tainted variable assignments
+  // First pass: collect require assignments, ES imports, and tainted variable assignments
   walkAST(ast, (node) => {
+    // import fs from 'fs' / import { readFileSync } from 'fs'
+    if (node.type === 'ImportDeclaration' && node.source && typeof node.source.value === 'string') {
+      const modName = node.source.value;
+      if (SENSITIVE_MODULES.has(modName)) {
+        for (const spec of node.specifiers) {
+          if (spec.type === 'ImportDefaultSpecifier' || spec.type === 'ImportNamespaceSpecifier') {
+            moduleVars[spec.local.name] = modName;
+          } else if (spec.type === 'ImportSpecifier') {
+            moduleVars[spec.local.name] = modName;
+          }
+        }
+      }
+    }
+
     // const fs = require('fs')
     if (node.type === 'VariableDeclaration') {
       for (const decl of node.declarations) {
@@ -197,6 +211,64 @@ function analyzeExports(filePath) {
   // Second pass: find exports and check if they are tainted
   const exports = {};
   walkAST(ast, (node) => {
+    // export function foo() {...} / export const foo = expr
+    if (node.type === 'ExportNamedDeclaration' && node.declaration) {
+      const decl = node.declaration;
+      if (decl.type === 'FunctionDeclaration' && decl.id) {
+        const funcBody = decl.body && decl.body.type === 'BlockStatement' ? decl.body.body : null;
+        if (funcBody) {
+          const bodyTaint = scanBodyForTaint(funcBody, moduleVars, taintedVars);
+          if (bodyTaint) {
+            exports[decl.id.name] = { tainted: true, source: bodyTaint.source, detail: bodyTaint.detail };
+          }
+        }
+      }
+      if (decl.type === 'VariableDeclaration') {
+        for (const vDecl of decl.declarations) {
+          if (!vDecl.id || vDecl.id.type !== 'Identifier') continue;
+          if (vDecl.init) {
+            const taint = checkNodeTaint(vDecl.init, moduleVars);
+            if (taint) {
+              exports[vDecl.id.name] = { tainted: true, source: taint.source, detail: taint.detail };
+            } else if (vDecl.init.type === 'Identifier' && taintedVars[vDecl.init.name]) {
+              const t = taintedVars[vDecl.init.name];
+              exports[vDecl.id.name] = { tainted: true, source: t.source, detail: t.detail };
+            } else {
+              const funcBody = getFunctionBody(vDecl.init);
+              if (funcBody) {
+                const bodyTaint = scanBodyForTaint(funcBody, moduleVars, taintedVars);
+                if (bodyTaint) {
+                  exports[vDecl.id.name] = { tainted: true, source: bodyTaint.source, detail: bodyTaint.detail };
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // export default function() {...} / export default expr
+    if (node.type === 'ExportDefaultDeclaration' && node.declaration) {
+      const decl = node.declaration;
+      const taint = checkNodeTaint(decl, moduleVars);
+      if (taint) {
+        exports['default'] = { tainted: true, source: taint.source, detail: taint.detail };
+      } else if (decl.type === 'Identifier' && taintedVars[decl.name]) {
+        const t = taintedVars[decl.name];
+        exports['default'] = { tainted: true, source: t.source, detail: t.detail };
+      } else {
+        const funcBody = (decl.type === 'FunctionDeclaration' || decl.type === 'FunctionExpression' || decl.type === 'ArrowFunctionExpression')
+          ? (decl.body && decl.body.type === 'BlockStatement' ? decl.body.body : (decl.body ? [{ type: 'ReturnStatement', argument: decl.body }] : null))
+          : getFunctionBody(decl);
+        if (funcBody) {
+          const bodyTaint = scanBodyForTaint(funcBody, moduleVars, taintedVars);
+          if (bodyTaint) {
+            exports['default'] = { tainted: true, source: bodyTaint.source, detail: bodyTaint.detail };
+          }
+        }
+      }
+    }
+
     // module.exports = value  OR  module.exports = { ... }
     if (isModuleExportsAssign(node)) {
       const value = node.expression.right;
@@ -416,6 +488,9 @@ function detectCrossFileFlows(graph, taintedExports, packagePath) {
     const localTaint = collectImportTaint(ast, relFile, graph, expandedTaint, packagePath);
     if (Object.keys(localTaint).length === 0) continue;
 
+    // Propagate taint through local variable assignments (e.g., const data = read())
+    propagateLocalTaint(ast, localTaint);
+
     // Find sinks that use tainted variables
     const sinks = findSinksUsingTainted(ast, localTaint);
     for (const sink of sinks) {
@@ -464,6 +539,69 @@ function expandTaintThroughReexports(graph, taintedExports, packagePath) {
       if (!expanded[relFile]) expanded[relFile] = {};
       const fileDir = path.dirname(absFile);
       walkAST(ast, (node) => {
+        // ES re-export: export { foo } from './reader'
+        if (node.type === 'ExportNamedDeclaration' && node.source && typeof node.source.value === 'string') {
+          const spec = node.source.value;
+          if (isLocalImport(spec)) {
+            const resolved = resolveLocal(fileDir, spec, packagePath);
+            if (resolved && expanded[resolved]) {
+              for (const specifier of node.specifiers) {
+                const importedName = specifier.exported.name || specifier.exported.value;
+                const sourceName = specifier.local.name || specifier.local.value;
+                const srcTaint = expanded[resolved][sourceName];
+                if (srcTaint && srcTaint.tainted && !expanded[relFile][importedName]) {
+                  expanded[relFile][importedName] = {
+                    tainted: true,
+                    source: srcTaint.source,
+                    detail: srcTaint.detail,
+                    sourceFile: srcTaint.sourceFile || resolved,
+                  };
+                  changed = true;
+                }
+              }
+            }
+          }
+          return;
+        }
+
+        // ES export of tainted variable: export const x = taintedVar
+        if (node.type === 'ExportNamedDeclaration' && node.declaration) {
+          const decl = node.declaration;
+          if (decl.type === 'VariableDeclaration') {
+            for (const vDecl of decl.declarations) {
+              if (vDecl.id?.type === 'Identifier' && vDecl.init?.type === 'Identifier' && localTaint[vDecl.init.name]) {
+                if (!expanded[relFile][vDecl.id.name]) {
+                  expanded[relFile][vDecl.id.name] = {
+                    tainted: true,
+                    source: localTaint[vDecl.init.name].source,
+                    detail: localTaint[vDecl.init.name].detail,
+                    sourceFile: localTaint[vDecl.init.name].sourceFile,
+                  };
+                  changed = true;
+                }
+              }
+            }
+          }
+          return;
+        }
+
+        // ES export default of tainted variable
+        if (node.type === 'ExportDefaultDeclaration' && node.declaration) {
+          const decl = node.declaration;
+          if (decl.type === 'Identifier' && localTaint[decl.name]) {
+            if (!expanded[relFile]['default']) {
+              expanded[relFile]['default'] = {
+                tainted: true,
+                source: localTaint[decl.name].source,
+                detail: localTaint[decl.name].detail,
+                sourceFile: localTaint[decl.name].sourceFile,
+              };
+              changed = true;
+            }
+          }
+          return;
+        }
+
         if (!isModuleExportsAssign(node)) return;
         const value = node.expression.right;
         const exportName = getExportName(node.expression.left);
@@ -582,6 +720,42 @@ function collectImportTaint(ast, currentFile, graph, taintedExports, packagePath
   const localTaint = {};
   const fileDir = path.dirname(path.resolve(packagePath, currentFile));
 
+  // Handle ES import declarations
+  walkAST(ast, (node) => {
+    if (node.type !== 'ImportDeclaration' || !node.source || typeof node.source.value !== 'string') return;
+    const spec = node.source.value;
+    if (!isLocalImport(spec)) return;
+    const resolved = resolveLocal(fileDir, spec, packagePath);
+    if (!resolved || !taintedExports[resolved]) return;
+    const modTaint = taintedExports[resolved];
+
+    for (const specifier of node.specifiers) {
+      if (specifier.type === 'ImportDefaultSpecifier') {
+        const defTaint = modTaint['default'];
+        if (defTaint && defTaint.tainted) {
+          localTaint[specifier.local.name] = {
+            source: defTaint.source,
+            detail: defTaint.detail || '',
+            sourceFile: defTaint.sourceFile || resolved,
+          };
+        }
+        localTaint['__module__' + specifier.local.name] = { resolved, modTaint };
+      } else if (specifier.type === 'ImportNamespaceSpecifier') {
+        localTaint['__module__' + specifier.local.name] = { resolved, modTaint };
+      } else if (specifier.type === 'ImportSpecifier') {
+        const importedName = specifier.imported.name || specifier.imported.value;
+        if (modTaint[importedName] && modTaint[importedName].tainted) {
+          localTaint[specifier.local.name] = {
+            source: modTaint[importedName].source,
+            detail: modTaint[importedName].detail || '',
+            sourceFile: modTaint[importedName].sourceFile || resolved,
+          };
+        }
+      }
+    }
+  });
+
+  // Handle CommonJS require() imports
   walkAST(ast, (node) => {
     if (node.type !== 'VariableDeclaration') return;
     for (const decl of node.declarations) {
@@ -765,6 +939,10 @@ function findTaintedArgument(args, taintedNames) {
         if (prop.value && prop.value.type === 'Identifier' && taintedNames.has(prop.value.name)) {
           return prop.value.name;
         }
+        // Spread: { ...data }
+        if (prop.type === 'SpreadElement' && prop.argument?.type === 'Identifier' && taintedNames.has(prop.argument.name)) {
+          return prop.argument.name;
+        }
       }
     }
   }
@@ -889,6 +1067,8 @@ function resolveLocal(fileDir, spec, packagePath) {
   const abs = path.resolve(fileDir, spec);
   if (isFileExists(abs)) return toRel(abs, packagePath);
   if (isFileExists(abs + '.js')) return toRel(abs + '.js', packagePath);
+  if (isFileExists(abs + '.mjs')) return toRel(abs + '.mjs', packagePath);
+  if (isFileExists(abs + '.cjs')) return toRel(abs + '.cjs', packagePath);
   if (isFileExists(path.join(abs, 'index.js'))) return toRel(path.join(abs, 'index.js'), packagePath);
   return null;
 }
