@@ -1236,6 +1236,19 @@ const RULES = {
     ],
     mitre: 'T1059'
   },
+
+  worker_thread_exec: {
+    id: 'MUADDIB-AST-039',
+    name: 'Worker Thread Code Execution',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'new Worker() avec eval:true execute du code arbitraire dans un thread worker, contournant la detection du thread principal. Technique d\'evasion pour executer du code dynamique hors du scope AST principal.',
+    references: [
+      'https://nodejs.org/api/worker_threads.html',
+      'https://attack.mitre.org/techniques/T1059/'
+    ],
+    mitre: 'T1059'
+  },
 };
 
 function getRule(type) {

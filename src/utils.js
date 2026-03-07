@@ -215,7 +215,12 @@ function getCallName(node) {
     return node.callee.name;
   }
   if (node.callee.type === 'MemberExpression' && node.callee.property) {
-    return node.callee.property.name;
+    // Batch 2: handle bracket notation cp['exec']('cmd') — computed property with string literal
+    if (node.callee.computed && node.callee.property.type === 'Literal'
+        && typeof node.callee.property.value === 'string') {
+      return node.callee.property.value;
+    }
+    return node.callee.property.name || '';
   }
   return '';
 }
