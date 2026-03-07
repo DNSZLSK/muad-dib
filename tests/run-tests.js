@@ -47,6 +47,7 @@ const { runReportTests } = require('./integration/report.test');
 const { runHooksInitTests } = require('./integration/hooks-init.test');
 const { runSarifTests } = require('./integration/sarif.test');
 const { runAuditFixTests } = require('./integration/audit-fixes.test');
+const { runScoringHardeningTests } = require('./integration/scoring-hardening.test');
 
 // Temporal analysis tests
 const { runTemporalAnalysisTests } = require('./temporal/temporal-analysis.test');
@@ -128,6 +129,9 @@ async function timed(name, fn) {
 
   // Audit fix tests
   await timed('audit-fixes', runAuditFixTests);
+
+  // Scoring hardening tests (v2.5.13)
+  await timed('scoring-hardening', runScoringHardeningTests);
 
   // Utility tests
   await timed('utils', runUtilsTests);

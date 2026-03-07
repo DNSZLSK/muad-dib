@@ -100,14 +100,19 @@ async function updateIOCs() {
   delete baseIOCs._fileSet;
 
   // Atomic write: write to .tmp then rename (UP-001)
+  // HMAC written BEFORE rename to prevent race condition (crash between rename and HMAC write)
   const tmpFile = CACHE_IOC_FILE + '.tmp';
   const jsonData = JSON.stringify(baseIOCs);
   fs.writeFileSync(tmpFile, jsonData);
-  fs.renameSync(tmpFile, CACHE_IOC_FILE);
-
-  // Write HMAC signature alongside the cache file
   const hmac = generateIOCHMAC(jsonData);
   fs.writeFileSync(CACHE_IOC_FILE + '.hmac', hmac);
+  fs.renameSync(tmpFile, CACHE_IOC_FILE);
+
+  // Mark HMAC as initialized — future loads require HMAC presence
+  const hmacMarker = path.join(HOME_DATA_PATH, '.hmac-initialized');
+  if (!fs.existsSync(hmacMarker)) {
+    try { fs.writeFileSync(hmacMarker, new Date().toISOString()); } catch {}
+  }
 
   const totalNpm = baseIOCs.packages.length;
   const totalPyPI = (baseIOCs.pypi_packages || []).length;
@@ -236,8 +241,15 @@ function loadCachedIOCs() {
           mergeIOCs(merged, JSON.parse(cachedData));
         }
       } else {
-        // No HMAC file yet (first run or pre-HMAC version) — load but warn
-        mergeIOCs(merged, JSON.parse(cachedData));
+        // No HMAC file — check if HMAC was previously initialized
+        const hmacMarker = path.join(HOME_DATA_PATH, '.hmac-initialized');
+        if (fs.existsSync(hmacMarker)) {
+          // HMAC was initialized before but .hmac file is missing → possible tampering
+          console.log('[WARN] IOC cache HMAC file missing but was previously initialized — skipping cache.');
+        } else {
+          // First run or pre-HMAC version — load but warn
+          mergeIOCs(merged, JSON.parse(cachedData));
+        }
       }
     } catch (e) {
       console.log('[WARN] Failed to load cached IOCs: ' + e.message);

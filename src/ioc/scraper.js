@@ -1226,8 +1226,18 @@ async function runScraper() {
   }
   try {
     const tmpHomeFile = HOME_IOC_FILE + '.tmp';
-    fs.writeFileSync(tmpHomeFile, JSON.stringify(existingIOCs, null, 2));
+    const homeJsonData = JSON.stringify(existingIOCs, null, 2);
+    fs.writeFileSync(tmpHomeFile, homeJsonData);
+    // Write HMAC before rename for consistency with updater.js
+    const { generateIOCHMAC } = require('./updater.js');
+    const homeHmac = generateIOCHMAC(homeJsonData);
+    fs.writeFileSync(HOME_IOC_FILE + '.hmac', homeHmac);
     fs.renameSync(tmpHomeFile, HOME_IOC_FILE);
+    // Mark HMAC as initialized
+    const hmacMarker = path.join(homeDir, '.hmac-initialized');
+    if (!fs.existsSync(hmacMarker)) {
+      try { fs.writeFileSync(hmacMarker, new Date().toISOString()); } catch {}
+    }
     saveSpinner.succeed('Saved IOCs + compact format + home directory');
   } catch (e) {
     saveSpinner.succeed('Saved IOCs + compact format (home dir write failed: ' + e.message + ')');
