@@ -1197,6 +1197,45 @@ const RULES = {
     ],
     mitre: 'T1546'
   },
+
+  vm_code_execution: {
+    id: 'MUADDIB-AST-036',
+    name: 'VM Module Code Execution',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'Execution de code dynamique via le module vm de Node.js (vm.runInThisContext, vm.runInNewContext, vm.compileFunction, new vm.Script). Contourne la detection eval/Function.',
+    references: [
+      'https://nodejs.org/api/vm.html',
+      'https://attack.mitre.org/techniques/T1059/'
+    ],
+    mitre: 'T1059'
+  },
+
+  reflect_code_execution: {
+    id: 'MUADDIB-AST-037',
+    name: 'Reflect API Code Execution',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Execution de code dynamique via Reflect.construct(Function, [...]) ou Reflect.apply(eval, ...). Contourne la detection directe de eval/Function/new Function.',
+    references: [
+      'https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Reflect',
+      'https://attack.mitre.org/techniques/T1059/'
+    ],
+    mitre: 'T1059'
+  },
+
+  process_binding_abuse: {
+    id: 'MUADDIB-AST-038',
+    name: 'Process Binding Abuse',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Acces direct aux bindings V8 internes via process.binding() ou process._linkedBinding(). Contourne les modules child_process/fs pour execution de commandes ou acces fichiers sans detection.',
+    references: [
+      'https://nodejs.org/api/process.html#processbindingname',
+      'https://attack.mitre.org/techniques/T1059/'
+    ],
+    mitre: 'T1059'
+  },
 };
 
 function getRule(type) {

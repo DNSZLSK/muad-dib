@@ -1038,6 +1038,141 @@ const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
       assert(t.severity === 'LOW', 'require(static array var) should be LOW, got ' + t.severity);
     } finally { cleanupTemp(tmp); }
   });
+
+  // ============================
+  // Batch 1: vm module detection
+  // ============================
+
+  await asyncTest('AST: Detects vm.runInThisContext()', async () => {
+    const tmp = makeTempPkg(`const vm = require('vm');\nvm.runInThisContext('1+1');`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'vm_code_execution');
+      assert(t, 'Should detect vm.runInThisContext');
+      assert(t.severity === 'HIGH', 'vm.runInThisContext should be HIGH');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: Detects vm.runInNewContext()', async () => {
+    const tmp = makeTempPkg(`const vm = require('vm');\nvm.runInNewContext('x+1', {x:2});`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'vm_code_execution');
+      assert(t, 'Should detect vm.runInNewContext');
+      assert(t.severity === 'HIGH', 'vm.runInNewContext should be HIGH');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: Detects vm.compileFunction()', async () => {
+    const tmp = makeTempPkg(`const vm = require('vm');\nvm.compileFunction('return 1');`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'vm_code_execution');
+      assert(t, 'Should detect vm.compileFunction');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: Detects new vm.Script() with dynamic code', async () => {
+    const tmp = makeTempPkg(`const vm = require('vm');\nconst s = new vm.Script(getCode());\ns.runInThisContext();`);
+    try {
+      const result = await runScanDirect(tmp);
+      const vmThreats = result.threats.filter(t => t.type === 'vm_code_execution');
+      assert(vmThreats.length >= 1, 'Should detect new vm.Script or vm.runInThisContext');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // ====================================
+  // Batch 1: Reflect API code execution
+  // ====================================
+
+  await asyncTest('AST: Detects Reflect.construct(Function, [...])', async () => {
+    const tmp = makeTempPkg(`const fn = Reflect.construct(Function, ['return 1']);\nfn();`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'reflect_code_execution');
+      assert(t, 'Should detect Reflect.construct(Function)');
+      assert(t.severity === 'CRITICAL', 'Reflect.construct(Function) should be CRITICAL');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: Detects Reflect.apply(eval, null, [...])', async () => {
+    const tmp = makeTempPkg(`Reflect.apply(eval, null, ['1+1']);`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'reflect_code_execution');
+      assert(t, 'Should detect Reflect.apply(eval)');
+      assert(t.severity === 'CRITICAL', 'Reflect.apply(eval) should be CRITICAL');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: Reflect.apply(Function, null, [...]) detected', async () => {
+    const tmp = makeTempPkg(`Reflect.apply(Function, null, ['return 1']);`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'reflect_code_execution');
+      assert(t, 'Should detect Reflect.apply(Function)');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: Reflect.construct with non-Function target — no reflect_code_execution', async () => {
+    const tmp = makeTempPkg(`const obj = Reflect.construct(Array, [[1,2,3]]);`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'reflect_code_execution');
+      assert(!t, 'Reflect.construct(Array) should NOT be detected as reflect_code_execution');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // ====================================
+  // Batch 1: process.binding abuse
+  // ====================================
+
+  await asyncTest('AST: Detects process.binding("spawn_sync")', async () => {
+    const tmp = makeTempPkg(`const b = process.binding('spawn_sync');\nb.spawn({file:'/bin/sh'});`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'process_binding_abuse');
+      assert(t, 'Should detect process.binding("spawn_sync")');
+      assert(t.severity === 'CRITICAL', 'process.binding("spawn_sync") should be CRITICAL');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: Detects process._linkedBinding("spawn_sync")', async () => {
+    const tmp = makeTempPkg(`const b = process._linkedBinding('spawn_sync');\nb.spawn({file:'/bin/sh'});`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'process_binding_abuse');
+      assert(t, 'Should detect process._linkedBinding("spawn_sync")');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: Detects process.binding("fs")', async () => {
+    const tmp = makeTempPkg(`const fsBinding = process.binding('fs');\nfsBinding.open('/etc/passwd', 0, 0o644);`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'process_binding_abuse');
+      assert(t, 'Should detect process.binding("fs")');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: process.binding with dynamic argument — HIGH', async () => {
+    const tmp = makeTempPkg(`const mod = getTarget();\nprocess.binding(mod);`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'process_binding_abuse');
+      assert(t, 'Should detect process.binding(dynamicArg)');
+      assert(t.severity === 'HIGH', 'Dynamic binding should be HIGH, got ' + t.severity);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: process.binding("constants") — no detection (safe binding)', async () => {
+    const tmp = makeTempPkg(`const c = process.binding('constants');`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'process_binding_abuse');
+      assert(!t, 'process.binding("constants") should NOT trigger process_binding_abuse');
+    } finally { cleanupTemp(tmp); }
+  });
 }
 
 module.exports = { runAstTests };
