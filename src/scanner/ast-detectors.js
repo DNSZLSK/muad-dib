@@ -206,8 +206,12 @@ function resolveStringConcat(node) {
  */
 function extractStringValueDeep(node) {
   const concat = resolveStringConcat(node);
-  if (concat !== null) return concat;
-  return extractStringValue(node);
+  let result = concat !== null ? concat : extractStringValue(node);
+  // Batch 2: strip node: prefix so require('node:child_process') normalizes to 'child_process'
+  if (typeof result === 'string' && result.startsWith('node:')) {
+    result = result.slice(5);
+  }
+  return result;
 }
 
 /**
@@ -366,6 +370,38 @@ function handleVariableDeclarator(node, ctx) {
           }).join('/');
           ctx.ideConfigPathVars.set(node.id.name, parentPath);
         }
+      }
+    }
+  }
+
+  // Batch 2: Detect destructuring of process.env: const { TOKEN, SECRET } = process.env
+  if (node.id?.type === 'ObjectPattern' &&
+      node.init?.type === 'MemberExpression' &&
+      node.init.object?.type === 'Identifier' && node.init.object.name === 'process' &&
+      node.init.property?.type === 'Identifier' && node.init.property.name === 'env') {
+    for (const prop of node.id.properties) {
+      if (prop.type === 'Property' && prop.key?.type === 'Identifier') {
+        const envVar = prop.key.name;
+        if (SAFE_ENV_VARS.includes(envVar)) continue;
+        const envLower = envVar.toLowerCase();
+        if (SAFE_ENV_PREFIXES.some(p => envLower.startsWith(p))) continue;
+        if (ENV_SENSITIVE_KEYWORDS.some(s => envVar.toUpperCase().includes(s))) {
+          ctx.threats.push({
+            type: 'env_access',
+            severity: 'HIGH',
+            message: `Destructured access to sensitive env var: const { ${envVar} } = process.env.`,
+            file: ctx.relFile
+          });
+        }
+      }
+      // RestElement: const { ...all } = process.env → env harvesting
+      if (prop.type === 'RestElement') {
+        ctx.threats.push({
+          type: 'env_harvesting_dynamic',
+          severity: 'HIGH',
+          message: 'Environment variable harvesting via rest destructuring: const { ...rest } = process.env.',
+          file: ctx.relFile
+        });
       }
     }
   }
@@ -1035,6 +1071,29 @@ function handleCallExpression(node, ctx) {
     }
   }
 
+  // Batch 2: Detect indirect eval/Function via logical expression: (false || eval)(code), (0 || Function)(code)
+  if (node.callee.type === 'LogicalExpression' && node.callee.operator === '||') {
+    const right = node.callee.right;
+    if (right?.type === 'Identifier') {
+      if (right.name === 'eval') {
+        ctx.hasEvalInFile = true;
+        ctx.threats.push({
+          type: 'dangerous_call_eval',
+          severity: 'HIGH',
+          message: 'Indirect eval via logical expression ((false || eval)) — evasion technique.',
+          file: ctx.relFile
+        });
+      } else if (right.name === 'Function') {
+        ctx.threats.push({
+          type: 'dangerous_call_function',
+          severity: 'MEDIUM',
+          message: 'Indirect Function via logical expression ((false || Function)) — evasion technique.',
+          file: ctx.relFile
+        });
+      }
+    }
+  }
+
   // Detect crypto.createDecipher/createDecipheriv and module._compile
   if (node.callee.type === 'MemberExpression') {
     const prop = node.callee.property;
@@ -1198,8 +1257,10 @@ function handleImportExpression(node, ctx) {
   if (node.source) {
     const src = node.source;
     if (src.type === 'Literal' && typeof src.value === 'string') {
-      const dangerousModules = ['child_process', 'fs', 'http', 'https', 'net', 'dns', 'tls'];
-      if (dangerousModules.includes(src.value)) {
+      const dangerousModules = ['child_process', 'fs', 'http', 'https', 'net', 'dns', 'tls', 'worker_threads'];
+      // Batch 2: strip node: prefix so import('node:child_process') normalizes
+      const modName = src.value.startsWith('node:') ? src.value.slice(5) : src.value;
+      if (dangerousModules.includes(modName)) {
         ctx.threats.push({
           type: 'dynamic_import',
           severity: 'HIGH',
@@ -1266,6 +1327,25 @@ function handleNewExpression(node, ctx) {
         message: 'new Proxy(require) — proxy wrapping require to intercept/redirect module loading.',
         file: ctx.relFile
       });
+    }
+  }
+
+  // Batch 2: new Worker(code, { eval: true }) — worker_threads code execution
+  if (node.callee.type === 'Identifier' && node.callee.name === 'Worker' &&
+      node.arguments.length >= 2) {
+    const opts = node.arguments[1];
+    if (opts?.type === 'ObjectExpression') {
+      const evalProp = opts.properties?.find(p =>
+        p.key?.name === 'eval' && p.value?.value === true);
+      if (evalProp) {
+        ctx.hasDynamicExec = true;
+        ctx.threats.push({
+          type: 'worker_thread_exec',
+          severity: 'HIGH',
+          message: 'new Worker() with eval:true — executes arbitrary code in worker thread, bypasses main thread detection.',
+          file: ctx.relFile
+        });
+      }
     }
   }
 }
@@ -1345,7 +1425,9 @@ function handleAssignmentExpression(node, ctx) {
       // Assigning require('child_process') or its methods to an object property
       if (node.right.type === 'CallExpression' && getCallName(node.right) === 'require' &&
           node.right.arguments.length > 0 && node.right.arguments[0]?.type === 'Literal') {
-        const mod = node.right.arguments[0].value;
+        const rawMod = node.right.arguments[0].value;
+        // Batch 2: strip node: prefix
+        const mod = typeof rawMod === 'string' && rawMod.startsWith('node:') ? rawMod.slice(5) : rawMod;
         if (mod === 'child_process' || mod === 'fs' || mod === 'net' || mod === 'dns') {
           ctx.threats.push({
             type: 'dynamic_require',
@@ -1358,16 +1440,20 @@ function handleAssignmentExpression(node, ctx) {
       // Assigning require('child_process').exec to an object property
       if (node.right.type === 'MemberExpression' && node.right.object?.type === 'CallExpression' &&
           getCallName(node.right.object) === 'require' &&
-          node.right.object.arguments.length > 0 && node.right.object.arguments[0]?.type === 'Literal' &&
-          node.right.object.arguments[0].value === 'child_process') {
-        const method = node.right.property?.type === 'Identifier' ? node.right.property.name : null;
-        if (method && ['exec', 'execSync', 'spawn', 'execFile'].includes(method)) {
-          ctx.threats.push({
-            type: 'dangerous_exec',
-            severity: 'HIGH',
-            message: `Object property indirection: ${propName} = require('child_process').${method} — hiding exec in object property.`,
-            file: ctx.relFile
-          });
+          node.right.object.arguments.length > 0 && node.right.object.arguments[0]?.type === 'Literal') {
+        const reqModRaw = node.right.object.arguments[0].value;
+        // Batch 2: strip node: prefix
+        const reqMod = typeof reqModRaw === 'string' && reqModRaw.startsWith('node:') ? reqModRaw.slice(5) : reqModRaw;
+        if (reqMod === 'child_process') {
+          const method = node.right.property?.type === 'Identifier' ? node.right.property.name : null;
+          if (method && ['exec', 'execSync', 'spawn', 'execFile'].includes(method)) {
+            ctx.threats.push({
+              type: 'dangerous_exec',
+              severity: 'HIGH',
+              message: `Object property indirection: ${propName} = require('child_process').${method} — hiding exec in object property.`,
+              file: ctx.relFile
+            });
+          }
         }
       }
       // Assigning eval or Function to an object property
@@ -1646,8 +1732,10 @@ function handleWithStatement(node, ctx) {
   // When used with require(), it allows calling exec(), spawn() etc. without explicit reference.
   if (node.object?.type === 'CallExpression' && getCallName(node.object) === 'require') {
     const arg = node.object.arguments[0];
-    const modName = arg?.type === 'Literal' ? arg.value : null;
-    const dangerousModules = ['child_process', 'fs', 'http', 'https', 'net', 'dns'];
+    const rawModName = arg?.type === 'Literal' ? arg.value : null;
+    // Batch 2: strip node: prefix
+    const modName = typeof rawModName === 'string' && rawModName.startsWith('node:') ? rawModName.slice(5) : rawModName;
+    const dangerousModules = ['child_process', 'fs', 'http', 'https', 'net', 'dns', 'worker_threads'];
     if (modName && dangerousModules.includes(modName)) {
       ctx.hasDynamicExec = true;
       ctx.threats.push({

