@@ -196,7 +196,12 @@ function applyFPReductions(threats, reachableFiles, packageName) {
       // Complex apps (SMTP, monitoring) have 50-80% dataflow findings — still downgrade.
       // But if dataflow is >80% of ALL findings, it may be real targeted exfiltration.
       // (Audit fix: full bypass was exploitable — 4+ dataflow patterns = all LOW.)
-      if (typeRatio < 0.5 || (t.type === 'suspicious_dataflow' && typeRatio < 0.8)) {
+      // vm_code_execution: full bypass — packages with only vm.Script calls (cassandra-driver,
+      // webpack, jest) are legitimate. Real malware using vm always has other signals
+      // (network, fs, obfuscation). The >3 count threshold is sufficient protection.
+      if (typeRatio < 0.5 ||
+          (t.type === 'suspicious_dataflow' && typeRatio < 0.8) ||
+          t.type === 'vm_code_execution') {
         t.severity = rule.to;
       }
     }

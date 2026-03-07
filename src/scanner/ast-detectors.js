@@ -1108,24 +1108,41 @@ function handleCallExpression(node, ctx) {
       });
     }
     if (propName === '_compile') {
-      ctx.hasDynamicExec = true;
-      ctx.threats.push({
-        type: 'module_compile',
-        severity: 'CRITICAL',
-        message: 'module._compile() detected — executes arbitrary code from string in module context (flatmap-stream pattern).',
-        file: ctx.relFile
-      });
-      // SANDWORM_MODE: Module._compile with non-literal argument = dynamic code execution
-      if (node.arguments.length >= 1 && !hasOnlyStringLiteralArgs(node)) {
+      // Context-aware gating: only flag _compile when the Module API is plausibly in scope.
+      // Custom class methods (e.g. blessed's Tput.prototype._compile) are not malware.
+      const calleeObj = node.callee.object;
+      const isThisCall = calleeObj.type === 'ThisExpression';
+      const isModuleIdentifier = calleeObj.type === 'Identifier' &&
+        (calleeObj.name === 'module' || calleeObj.name === 'Module' || calleeObj.name === 'm');
+      const isConstructed = calleeObj.type === 'NewExpression' || calleeObj.type === 'CallExpression';
+      const isMemberChain = calleeObj.type === 'MemberExpression';
+      // Skip: this._compile() is always a custom instance method, not Node Module API
+      // Detect: module/Module/m identifier, new X()._compile(), X()._compile(), X.Y._compile()
+      // Other identifiers: only if require('module') or module.constructor is in file
+      const shouldDetect = !isThisCall && (
+        isModuleIdentifier || isConstructed || isMemberChain ||
+        (calleeObj.type === 'Identifier' && ctx.hasModuleImport)
+      );
+      if (shouldDetect) {
+        ctx.hasDynamicExec = true;
         ctx.threats.push({
-          type: 'module_compile_dynamic',
+          type: 'module_compile',
           severity: 'CRITICAL',
-          message: 'In-memory code execution via Module._compile(). Common malware evasion technique.',
+          message: 'module._compile() detected — executes arbitrary code from string in module context (flatmap-stream pattern).',
           file: ctx.relFile
         });
+        // SANDWORM_MODE: Module._compile with non-literal argument = dynamic code execution
+        if (node.arguments.length >= 1 && !hasOnlyStringLiteralArgs(node)) {
+          ctx.threats.push({
+            type: 'module_compile_dynamic',
+            severity: 'CRITICAL',
+            message: 'In-memory code execution via Module._compile(). Common malware evasion technique.',
+            file: ctx.relFile
+          });
+        }
+        // Module._compile counts as temp file exec for write-execute-delete pattern
+        ctx.hasTempFileExec = ctx.hasTempFileExec || ctx.hasDevShmInContent;
       }
-      // Module._compile counts as temp file exec for write-execute-delete pattern
-      ctx.hasTempFileExec = ctx.hasTempFileExec || ctx.hasDevShmInContent;
     }
 
     // SANDWORM_MODE: Track writeFileSync/writeFile to temp paths

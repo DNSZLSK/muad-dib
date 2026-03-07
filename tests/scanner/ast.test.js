@@ -227,6 +227,52 @@ async function runAstTests() {
     } finally { cleanupTemp(tmp); }
   });
 
+  // --- _compile negative: custom class method should NOT trigger ---
+  await asyncTest('AST: Custom class _compile() method NOT flagged as module_compile', async () => {
+    const tmp = makeTempPkg(`
+// blessed-style terminal capability compiler — not Node Module API
+function Tput(options) { this.terminal = options.terminal; }
+Tput.prototype._compile = function(key, str) {
+  return str.replace(/\\\\e/g, '\\x1b');
+};
+const tput = new Tput({ terminal: 'xterm' });
+tput._compile('smcup', '\\\\e[?1049h');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'module_compile');
+      assert(!t, 'Custom class _compile() should NOT trigger module_compile');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: this._compile() NOT flagged as module_compile', async () => {
+    const tmp = makeTempPkg(`
+class Compiler {
+  _compile(source) { return source.toUpperCase(); }
+  run() { return this._compile('hello'); }
+}
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'module_compile');
+      assert(!t, 'this._compile() should NOT trigger module_compile');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: module._compile() still detected with require("module")', async () => {
+    const tmp = makeTempPkg(`
+const Module = require('module');
+const m = new Module();
+m._compile(payload, '/tmp/test.js');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'module_compile');
+      assert(t, 'module._compile() with require("module") should still be detected');
+      assert(t.severity === 'CRITICAL', 'Should be CRITICAL severity');
+    } finally { cleanupTemp(tmp); }
+  });
+
   // --- new Proxy(process.env) ---
 
   await asyncTest('AST: Detects new Proxy(process.env, handler)', async () => {

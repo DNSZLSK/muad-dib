@@ -116,6 +116,8 @@ function analyzeFile(content, filePath, basePath) {
     // Content-level MCP detection: MCP keyword + writeFileSync + MCP config path in same file
     // Path co-occurrence prevents FPs where a file reads MCP config but writes elsewhere.
     // Read-only pattern (readFileSync without writeFileSync to MCP) is not injection.
+    // Module API context: require('module') or module.constructor usage
+    hasModuleImport: /require\s*\(\s*['"]module['"]\s*\)/.test(content) || /module\.constructor/.test(content),
     hasMcpContentKeywords: (/\bmcpServers\b/.test(content) || /\bmcp\.json\b/.test(content) || /\bclaude_desktop_config\b/.test(content)) &&
       /\bwriteFileSync\b|\bwriteFile\s*\(/.test(content) &&
       (/\.claude[/\\]/.test(content) || /\.cursor[/\\]/.test(content) || /\.vscode[/\\]/.test(content) || /\.windsurf[/\\]/.test(content) || /\.codeium[/\\]/.test(content) || /\.continue[/\\]/.test(content) || /claude_desktop_config/.test(content) || /\bmcp\.json\b/.test(content))

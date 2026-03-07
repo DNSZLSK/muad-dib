@@ -1855,6 +1855,86 @@ async function runBatch5InfraTests() {
 }
 
 // ===================================================================
+// BATCH 3: Scoring hardening — FP reduction
+// ===================================================================
+async function runBatch3ScoringTests() {
+  console.log('\n=== BATCH 3: Scoring Hardening ===\n');
+
+  // Fix 1: _compile detection refinement — custom class _compile not flagged
+  await asyncTest('B3-Fix1: Custom class _compile() does NOT trigger module_compile', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-b3f1-'));
+    try {
+      fs.writeFileSync(path.join(tmpDir, 'package.json'), JSON.stringify({
+        name: 'test-b3-compile', version: '1.0.0'
+      }));
+      // blessed-style: Tput.prototype._compile is a terminal compiler, not Module API
+      fs.writeFileSync(path.join(tmpDir, 'tput.js'), `
+function Tput(opts) { this.terminal = opts.terminal; }
+Tput.prototype._compile = function(key, str) {
+  return str.replace(/\\\\e/g, '\\x1b');
+};
+const t = new Tput({ terminal: 'xterm' });
+t._compile('smcup', '\\\\e[?1049h');
+`);
+      const result = await runScanDirect(tmpDir);
+      const mc = (result.threats || []).filter(t => t.type === 'module_compile');
+      assert(mc.length === 0, 'Custom _compile should NOT trigger module_compile (blessed FP)');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  // Fix 1: _compile with Module API still detected
+  await asyncTest('B3-Fix1: module._compile() with module.constructor still detected', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-b3f1b-'));
+    try {
+      fs.writeFileSync(path.join(tmpDir, 'package.json'), JSON.stringify({
+        name: 'test-b3-compile-pos', version: '1.0.0'
+      }));
+      fs.writeFileSync(path.join(tmpDir, 'index.js'), `
+const m = new module.constructor();
+m._compile(payload, 'fake.js');
+`);
+      const result = await runScanDirect(tmpDir);
+      const mc = (result.threats || []).filter(t => t.type === 'module_compile');
+      assert(mc.length > 0, 'module._compile with module.constructor must still be detected');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  // Fix 2: vm_code_execution percentage guard relaxation
+  await asyncTest('B3-Fix2: Multiple vm_code_execution findings get downgraded to LOW', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-b3f2-'));
+    try {
+      fs.writeFileSync(path.join(tmpDir, 'package.json'), JSON.stringify({
+        name: 'test-b3-vm', version: '1.0.0'
+      }));
+      // 4 vm.Script usages (like cassandra-driver query compilation)
+      fs.writeFileSync(path.join(tmpDir, 'query.js'), `
+const vm = require('vm');
+const s1 = new vm.Script('SELECT * FROM t1');
+const s2 = new vm.Script('SELECT * FROM t2');
+const s3 = new vm.Script('SELECT * FROM t3');
+const s4 = new vm.Script('SELECT * FROM t4');
+`);
+      const result = await runScanDirect(tmpDir);
+      const vmThreats = (result.threats || []).filter(t => t.type === 'vm_code_execution');
+      // All should be downgraded to LOW (>3 count threshold + relaxed % guard)
+      const nonLow = vmThreats.filter(t => t.severity !== 'LOW');
+      assert(nonLow.length === 0, `vm_code_execution should all be LOW when ratio < 80%, got: ${vmThreats.map(t => t.severity).join(',')}`);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  // Fix 3: credential_tampering single-hit downgrade REVERTED
+  // ADR regression: npm-cache-poison and npm-hook-hijack rely on single
+  // credential_tampering CRITICAL as key signal. Downgrading breaks detection.
+  // graceful-fs FP (score 25) accepted as trade-off vs 2 ADR misses.
+}
+
+// ===================================================================
 // EXPORT
 // ===================================================================
 async function runAuditFixTests() {
@@ -1896,6 +1976,8 @@ async function runAuditFixTests() {
   await runAuditScoringTests();
   // Batch 5 infra hardening
   await runBatch5InfraTests();
+  // Batch 3 scoring hardening
+  await runBatch3ScoringTests();
 }
 
 module.exports = { runAuditFixTests };
