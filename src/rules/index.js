@@ -703,7 +703,7 @@ const RULES = {
   module_compile: {
     id: 'MUADDIB-AST-023',
     name: 'Module Compile Execution',
-    severity: 'CRITICAL',
+    severity: 'HIGH',
     confidence: 'high',
     description: 'module._compile() detecte. Execution de code arbitraire a partir d\'une chaine dans le contexte module. Technique cle de flatmap-stream.',
     references: [
@@ -729,7 +729,7 @@ const RULES = {
   module_compile_dynamic: {
     id: 'MUADDIB-AST-025',
     name: 'Dynamic Module Compile Execution',
-    severity: 'CRITICAL',
+    severity: 'HIGH',
     confidence: 'high',
     description: 'Module._compile() avec argument dynamique (non-literal). Execution de code en memoire sans ecriture sur disque. Technique d\'evasion malware courante.',
     references: [

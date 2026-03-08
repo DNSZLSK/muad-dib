@@ -740,8 +740,9 @@ const SENSITIVE_PATH_PATTERNS = [
   '.ethereum', '.electrum', '.config/solana', '.exodus',
   '.atomic', '.metamask', '.ledger-live', '.trezor',
   '.bitcoin', '.monero', '.gnupg',
-  '_cacache', '.cache/yarn', '.cache/pip',
-  'discord', 'leveldb'
+  '_cacache', '.cache/yarn', '.cache/pip'
+  // P6: Removed discord, leveldb — data directories, not credential paths.
+  // _cacache/.cache kept — real cache poisoning vectors (T1195.002).
 ];
 
 function isSensitivePath(val) {
@@ -816,8 +817,20 @@ const SYSTEM_IDENTITY_ENVS = new Set([
 // Env var prefixes for tool-internal configuration (not external credentials)
 const SAFE_ENV_PREFIXES = ['MUADDIB_', 'npm_config_', 'npm_lifecycle_', 'npm_package_'];
 
+// P6: Node.js runtime config env vars that are not credentials.
+// NODE_TLS_REJECT_UNAUTHORIZED matches "AUTH" in "UNAUTHORIZED" → false positive.
+// Real credential exfiltration targets API_KEY, TOKEN, SECRET, PASSWORD.
+const DATAFLOW_SAFE_ENV_VARS = new Set([
+  'NODE_TLS_REJECT_UNAUTHORIZED', 'NODE_OPTIONS', 'NODE_EXTRA_CA_CERTS',
+  'NODE_ENV', 'NODE_PATH', 'NODE_DEBUG',
+  'DEBUG', 'CI', 'HTTPS_PROXY', 'HTTP_PROXY', 'NO_PROXY',
+  'LANG', 'TZ', 'PORT', 'HOST'
+  // Note: HOME, USER, HOSTNAME stay sensitive — fingerprint exfiltration detection.
+]);
+
 function isSensitiveEnv(name) {
   const upper = name.toUpperCase();
+  if (DATAFLOW_SAFE_ENV_VARS.has(upper)) return false;
   if (SYSTEM_IDENTITY_ENVS.has(upper)) return true;
   if (SAFE_ENV_PREFIXES.some(p => upper.startsWith(p))) return false;
   const sensitive = ['TOKEN', 'SECRET', 'KEY', 'PASSWORD', 'CREDENTIAL', 'AUTH', 'NPM', 'AWS', 'AZURE', 'GCP'];

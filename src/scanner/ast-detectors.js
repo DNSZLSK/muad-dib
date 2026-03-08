@@ -1294,7 +1294,9 @@ function handleCallExpression(node, ctx) {
         ctx.hasDynamicExec = true;
         ctx.threats.push({
           type: 'module_compile',
-          severity: 'CRITICAL',
+          // P6: Baseline HIGH — single module._compile() in build tools (@babel/core, art-template)
+          // is framework behavior. Compound detections (zlib_inflate_eval, fetch_decrypt_exec) stay CRITICAL.
+          severity: 'HIGH',
           message: 'module._compile() detected — executes arbitrary code from string in module context (flatmap-stream pattern).',
           file: ctx.relFile
         });
@@ -1302,7 +1304,7 @@ function handleCallExpression(node, ctx) {
         if (node.arguments.length >= 1 && !hasOnlyStringLiteralArgs(node)) {
           ctx.threats.push({
             type: 'module_compile_dynamic',
-            severity: 'CRITICAL',
+            severity: 'HIGH',
             message: 'In-memory code execution via Module._compile(). Common malware evasion technique.',
             file: ctx.relFile
           });

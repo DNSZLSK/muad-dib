@@ -223,7 +223,7 @@ async function runAstTests() {
       const result = await runScanDirect(tmp);
       const t = result.threats.find(t => t.type === 'module_compile');
       assert(t, 'Should detect module._compile()');
-      assert(t.severity === 'CRITICAL', 'Should be CRITICAL severity');
+      assert(t.severity === 'HIGH', 'Should be HIGH severity (P6: baseline downgrade)');
     } finally { cleanupTemp(tmp); }
   });
 
@@ -269,7 +269,7 @@ m._compile(payload, '/tmp/test.js');
       const result = await runScanDirect(tmp);
       const t = result.threats.find(t => t.type === 'module_compile');
       assert(t, 'module._compile() with require("module") should still be detected');
-      assert(t.severity === 'CRITICAL', 'Should be CRITICAL severity');
+      assert(t.severity === 'HIGH', 'Should be HIGH severity (P6: baseline downgrade)');
     } finally { cleanupTemp(tmp); }
   });
 
@@ -705,7 +705,7 @@ eval(payload);
   // SANDWORM_MODE: module_compile_dynamic (AST-025)
   // ============================================
 
-  await asyncTest('AST: Detects Module._compile(dynamicVar) as CRITICAL', async () => {
+  await asyncTest('AST: Detects Module._compile(dynamicVar) as HIGH', async () => {
     const code = `
 const m = require('module');
 const mod = new m();
@@ -717,7 +717,7 @@ mod._compile(code, '/tmp/payload.js');
       const result = await runScanDirect(tmp);
       const t = result.threats.find(t => t.type === 'module_compile_dynamic');
       assert(t, 'Should detect Module._compile with dynamic argument');
-      assert(t.severity === 'CRITICAL', 'Should be CRITICAL severity');
+      assert(t.severity === 'HIGH', 'Should be HIGH severity (P6: baseline downgrade)');
     } finally { cleanupTemp(tmp); }
   });
 

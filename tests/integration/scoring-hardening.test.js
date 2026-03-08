@@ -243,6 +243,73 @@ async function runScoringHardeningTests() {
     applyFPReductions(threats, null, null);
     assert(threats[0].severity === 'MEDIUM', `eval CRITICAL in dist/ should be MEDIUM (two-notch), got ${threats[0].severity}`);
   });
+
+  // ==========================================================================
+  // FP-P6 Fix 1: credential_regex_harvest count-based downgrade
+  // ==========================================================================
+  test('FP-P6 Fix1: credential_regex_harvest >4 hits → LOW', () => {
+    const threats = [];
+    for (let i = 0; i < 6; i++) {
+      threats.push({ type: 'credential_regex_harvest', severity: 'HIGH', file: 'lib/http.js', message: `regex${i}` });
+    }
+    // Add other threats to keep ratio below 40%
+    for (let i = 0; i < 10; i++) {
+      threats.push({ type: 'env_access', severity: 'MEDIUM', file: `f${i}.js`, message: `env${i}` });
+    }
+    applyFPReductions(threats, null, null);
+    assert(threats[0].severity === 'LOW',
+      `credential_regex_harvest with 6 hits should be LOW, got ${threats[0].severity}`);
+  });
+
+  test('FP-P6 Fix1: credential_regex_harvest <=4 hits stays HIGH', () => {
+    const threats = [
+      { type: 'credential_regex_harvest', severity: 'HIGH', file: 'steal.js', message: 'regex1' },
+      { type: 'credential_regex_harvest', severity: 'HIGH', file: 'steal.js', message: 'regex2' },
+      { type: 'env_access', severity: 'MEDIUM', file: 'a.js', message: 'env' }
+    ];
+    applyFPReductions(threats, null, null);
+    assert(threats[0].severity === 'HIGH',
+      `credential_regex_harvest with 2 hits should stay HIGH, got ${threats[0].severity}`);
+  });
+
+  // ==========================================================================
+  // FP-P6 Fix 2: remote_code_load + proxy_data_intercept NOT exempt from dist/
+  // ==========================================================================
+  test('FP-P6 Fix2: remote_code_load in dist/ gets downgrade (no longer exempt)', () => {
+    const threats = [
+      { type: 'remote_code_load', severity: 'CRITICAL', file: 'dist/bundle.js', message: 'fetch+eval' }
+    ];
+    applyFPReductions(threats, null, null);
+    assert(threats[0].severity === 'HIGH',
+      `remote_code_load in dist/ should be HIGH (1-notch), got ${threats[0].severity}`);
+  });
+
+  test('FP-P6 Fix2: proxy_data_intercept in dist/ gets downgrade (no longer exempt)', () => {
+    const threats = [
+      { type: 'proxy_data_intercept', severity: 'CRITICAL', file: 'dist/vendor.js', message: 'proxy+net' }
+    ];
+    applyFPReductions(threats, null, null);
+    assert(threats[0].severity === 'HIGH',
+      `proxy_data_intercept in dist/ should be HIGH (1-notch), got ${threats[0].severity}`);
+  });
+
+  test('FP-P6 Fix2: remote_code_load in source file stays CRITICAL', () => {
+    const threats = [
+      { type: 'remote_code_load', severity: 'CRITICAL', file: 'src/loader.js', message: 'fetch+eval' }
+    ];
+    applyFPReductions(threats, null, null);
+    assert(threats[0].severity === 'CRITICAL',
+      `remote_code_load in src/ should stay CRITICAL, got ${threats[0].severity}`);
+  });
+
+  test('FP-P6 Fix2: fetch_decrypt_exec still exempt from dist/ downgrade', () => {
+    const threats = [
+      { type: 'fetch_decrypt_exec', severity: 'CRITICAL', file: 'dist/payload.js', message: 'fetch+decrypt+eval' }
+    ];
+    applyFPReductions(threats, null, null);
+    assert(threats[0].severity === 'CRITICAL',
+      `fetch_decrypt_exec should stay CRITICAL in dist/ (still exempt), got ${threats[0].severity}`);
+  });
 }
 
 module.exports = { runScoringHardeningTests };
