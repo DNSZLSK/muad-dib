@@ -1,9 +1,0 @@
-{
-  "name": "ci-trigger-exfil",
-  "version": "1.0.0",
-  "description": "Adversarial sample: CI-triggered credential exfiltration",
-  "main": "index.js",
-  "scripts": {
-    "postinstall": "node index.js"
-  }
-}

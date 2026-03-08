@@ -1,9 +1,0 @@
-{
-  "name": "iife-exfil",
-  "version": "1.0.0",
-  "description": "Adversarial sample: IIFE with obfuscated variable names, env read + http.request exfil",
-  "main": "index.js",
-  "scripts": {
-    "postinstall": "node index.js"
-  }
-}

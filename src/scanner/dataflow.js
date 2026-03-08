@@ -9,9 +9,11 @@ const { analyzeWithDeobfuscation } = require('../shared/analyze-helper.js');
 // Module classification maps for intra-file taint tracking
 const MODULE_SOURCE_METHODS = {
   os: {
-    homedir: 'fingerprint_read', hostname: 'fingerprint_read',
+    homedir: 'fingerprint_read',
     networkInterfaces: 'fingerprint_read', userInfo: 'fingerprint_read',
-    platform: 'telemetry_read', arch: 'telemetry_read'
+    hostname: 'telemetry_read', platform: 'telemetry_read', arch: 'telemetry_read',
+    type: 'telemetry_read', release: 'telemetry_read',
+    cpus: 'telemetry_read', totalmem: 'telemetry_read', freemem: 'telemetry_read'
   },
   fs: {
     readFileSync: 'credential_read', readFile: 'credential_read',
@@ -356,21 +358,17 @@ function analyzeFile(content, filePath, basePath) {
         }
       }
 
-      // os.hostname(), os.networkInterfaces(), os.userInfo(), os.homedir() as fingerprint sources
-      // os.platform(), os.arch() as telemetry sources (lower severity)
+      // os.* methods classified via MODULE_SOURCE_METHODS for consistent categorization
+      // fingerprint_read: homedir, networkInterfaces, userInfo (real exfil targets)
+      // telemetry_read: hostname, platform, arch, type, release, cpus, totalmem, freemem
       if (node.callee.type === 'MemberExpression') {
         const obj = node.callee.object;
         const prop = node.callee.property;
         if (obj?.type === 'Identifier' && obj.name === 'os' && prop?.type === 'Identifier') {
-          if (['hostname', 'networkInterfaces', 'userInfo', 'homedir'].includes(prop.name)) {
+          const osClassification = MODULE_SOURCE_METHODS.os?.[prop.name];
+          if (osClassification) {
             sources.push({
-              type: 'fingerprint_read',
-              name: `os.${prop.name}`,
-              line: node.loc?.start?.line
-            });
-          } else if (['platform', 'arch'].includes(prop.name)) {
-            sources.push({
-              type: 'telemetry_read',
+              type: osClassification,
               name: `os.${prop.name}`,
               line: node.loc?.start?.line
             });

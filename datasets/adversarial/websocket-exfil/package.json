@@ -1,9 +1,0 @@
-{
-  "name": "websocket-exfil",
-  "version": "1.0.0",
-  "description": "Adversarial sample: WebSocket exfiltration bypassing HTTP detection",
-  "main": "index.js",
-  "scripts": {
-    "postinstall": "node index.js"
-  }
-}

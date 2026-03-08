@@ -5,7 +5,7 @@ const { findFiles, EXCLUDED_DIRS } = require('../utils');
 const { ACORN_OPTIONS: BASE_ACORN_OPTIONS, safeParse } = require('../shared/constants.js');
 
 // --- Sensitive source patterns ---
-const SENSITIVE_MODULES = new Set(['fs', 'child_process', 'dns', 'os']);
+const SENSITIVE_MODULES = new Set(['fs', 'child_process', 'dns', 'os', 'dgram']);
 
 const ACORN_OPTIONS = {
   ...BASE_ACORN_OPTIONS,
@@ -151,9 +151,14 @@ function analyzeExports(filePath) {
 
   // Track class declarations: class Foo { ... }
   const classDefs = {};
+  // Track function declarations: function foo() { ... }
+  const funcDefs = {};
   walkAST(ast, (node) => {
     if (node.type === 'ClassDeclaration' && node.id && node.id.name) {
       classDefs[node.id.name] = node;
+    }
+    if (node.type === 'FunctionDeclaration' && node.id && node.id.name) {
+      funcDefs[node.id.name] = node;
     }
   });
 
@@ -309,6 +314,16 @@ function analyzeExports(filePath) {
             } else if (prop.value.type === 'Identifier' && taintedVars[prop.value.name]) {
               const t = taintedVars[prop.value.name];
               exports[propName] = { tainted: true, source: t.source, detail: t.detail };
+            } else if (prop.value.type === 'Identifier' && funcDefs[prop.value.name]) {
+              // Shorthand property referencing a FunctionDeclaration: { readConfig }
+              const fnNode = funcDefs[prop.value.name];
+              const fnBody = fnNode.body && fnNode.body.type === 'BlockStatement' ? fnNode.body.body : null;
+              if (fnBody) {
+                const bodyTaint = scanBodyForTaint(fnBody, moduleVars, taintedVars);
+                if (bodyTaint) {
+                  exports[propName] = { tainted: true, source: bodyTaint.source, detail: bodyTaint.detail };
+                }
+              }
             }
           }
         }
@@ -1081,8 +1096,283 @@ function toRel(abs, packagePath) {
   return path.relative(packagePath, abs).replace(/\\/g, '/');
 }
 
+// =============================================================================
+// STEP 4 — Sink export annotation (for callback-based cross-file detection)
+// =============================================================================
+
+/**
+ * Annotate exports that contain network/exec sinks in their function body.
+ * This is the inverse of annotateTaintedExports — finds "where data goes out".
+ * Used to detect callback-based cross-file exfiltration:
+ *   reader.js exports readConfig() (tainted source)
+ *   sender.js exports sendData() (sink export)
+ *   index.js connects them via callback: readConfig((data) => sendData(data))
+ */
+function annotateSinkExports(graph, packagePath) {
+  const result = {};
+  for (const relFile of Object.keys(graph)) {
+    const absFile = path.resolve(packagePath, relFile);
+    result[relFile] = analyzeSinkExports(absFile);
+  }
+  return result;
+}
+
+function analyzeSinkExports(filePath) {
+  const ast = parseFile(filePath);
+  if (!ast) return {};
+
+  const sinkExports = {};
+
+  // Track function declarations for shorthand property resolution
+  const localFuncDefs = {};
+  walkAST(ast, (node) => {
+    if (node.type === 'FunctionDeclaration' && node.id && node.id.name) {
+      localFuncDefs[node.id.name] = node;
+    }
+  });
+
+  // Collect require assignments for sink module detection
+  const sinkModuleVars = {};
+  walkAST(ast, (node) => {
+    if (node.type === 'VariableDeclaration') {
+      for (const decl of node.declarations) {
+        if (!decl.init || !decl.id || decl.id.type !== 'Identifier') continue;
+        if (isRequireCall(decl.init)) {
+          const mod = decl.init.arguments[0].value;
+          if (mod === 'http' || mod === 'https' || mod === 'net' || mod === 'dgram') {
+            sinkModuleVars[decl.id.name] = mod;
+          }
+        }
+      }
+    }
+    if (node.type === 'ImportDeclaration' && node.source && typeof node.source.value === 'string') {
+      const mod = node.source.value;
+      if (mod === 'http' || mod === 'https' || mod === 'net' || mod === 'dgram') {
+        for (const spec of node.specifiers) {
+          sinkModuleVars[spec.local.name] = mod;
+        }
+      }
+    }
+  });
+
+  function bodyHasSink(body) {
+    let found = null;
+    walkAST({ type: 'Program', body }, (node) => {
+      if (found) return;
+      if (node.type === 'CallExpression') {
+        // fetch(), eval()
+        if (node.callee.type === 'Identifier' && SINK_CALLEE_NAMES.has(node.callee.name)) {
+          found = node.callee.name + '()';
+          return;
+        }
+        // https.request(), http.get()
+        if (node.callee.type === 'MemberExpression') {
+          const chain = getMemberChain(node.callee);
+          if (SINK_MEMBER_METHODS.has(chain)) {
+            found = chain + '()';
+            return;
+          }
+          // Variable-based: const h = require('https'); h.request()
+          if (node.callee.object.type === 'Identifier' && sinkModuleVars[node.callee.object.name]) {
+            const method = node.callee.property.name || node.callee.property.value;
+            if (method === 'request' || method === 'get') {
+              found = sinkModuleVars[node.callee.object.name] + '.' + method + '()';
+              return;
+            }
+          }
+          // .write(), .send(), .connect()
+          const method = node.callee.property.name || node.callee.property.value;
+          if (SINK_INSTANCE_METHODS.has(method)) {
+            found = method + '()';
+            return;
+          }
+        }
+      }
+    });
+    return found;
+  }
+
+  // Check module.exports = { fn: function() { ... sink ... } }
+  walkAST(ast, (node) => {
+    if (isModuleExportsAssign(node)) {
+      const value = node.expression.right;
+      const exportName = getExportName(node.expression.left);
+
+      if (value.type === 'ObjectExpression' && exportName === 'default') {
+        for (const prop of value.properties) {
+          if (!prop.key) continue;
+          const propName = prop.key.name || prop.key.value || 'unknown';
+          let funcBody = getFunctionBody(prop.value);
+          // Shorthand property referencing a FunctionDeclaration: { reportData }
+          if (!funcBody && prop.value.type === 'Identifier' && localFuncDefs[prop.value.name]) {
+            const fnNode = localFuncDefs[prop.value.name];
+            funcBody = fnNode.body && fnNode.body.type === 'BlockStatement' ? fnNode.body.body : null;
+          }
+          if (funcBody) {
+            const sink = bodyHasSink(funcBody);
+            if (sink) {
+              sinkExports[propName] = { hasSink: true, sink };
+            }
+          }
+        }
+      } else {
+        const funcBody = getFunctionBody(value);
+        if (funcBody) {
+          const sink = bodyHasSink(funcBody);
+          if (sink) {
+            sinkExports[exportName] = { hasSink: true, sink };
+          }
+        }
+      }
+    }
+
+    // export function foo() { ... sink ... }
+    if (node.type === 'ExportNamedDeclaration' && node.declaration) {
+      const decl = node.declaration;
+      if (decl.type === 'FunctionDeclaration' && decl.id) {
+        const funcBody = decl.body && decl.body.type === 'BlockStatement' ? decl.body.body : null;
+        if (funcBody) {
+          const sink = bodyHasSink(funcBody);
+          if (sink) {
+            sinkExports[decl.id.name] = { hasSink: true, sink };
+          }
+        }
+      }
+    }
+  });
+
+  return sinkExports;
+}
+
+/**
+ * Detect callback-based cross-file flows.
+ * Pattern: file imports tainted source fn + sink fn, connects them via callback.
+ * Example: readConfig((err, data) => { sendData(data); })
+ * Also: const data = readConfig(); sendData(data);
+ */
+function detectCallbackCrossFileFlows(graph, taintedExports, sinkExports, packagePath) {
+  const expandedTaint = expandTaintThroughReexports(graph, taintedExports, packagePath);
+  const flows = [];
+
+  for (const relFile of Object.keys(graph)) {
+    const absFile = path.resolve(packagePath, relFile);
+    const ast = parseFile(absFile);
+    if (!ast) continue;
+
+    const fileDir = path.dirname(absFile);
+
+    // Collect imported tainted source functions and imported sink functions
+    const importedSources = {}; // varName → { sourceFile, source, detail }
+    const importedSinks = {};   // varName → { sinkFile, sink }
+
+    walkAST(ast, (node) => {
+      if (node.type !== 'VariableDeclaration') return;
+      for (const decl of node.declarations) {
+        if (!decl.init || !decl.id) continue;
+
+        // const { readConfig } = require('./reader')
+        if (isRequireCall(decl.init) && isLocalImport(decl.init.arguments[0].value)) {
+          const spec = decl.init.arguments[0].value;
+          const resolved = resolveLocal(fileDir, spec, packagePath);
+          if (!resolved) continue;
+
+          if (decl.id.type === 'ObjectPattern') {
+            for (const prop of decl.id.properties) {
+              const key = prop.key && (prop.key.name || prop.key.value);
+              const localName = prop.value && prop.value.name;
+              if (!key || !localName) continue;
+
+              // Check if this is a tainted source export
+              if (expandedTaint[resolved] && expandedTaint[resolved][key] && expandedTaint[resolved][key].tainted) {
+                const t = expandedTaint[resolved][key];
+                importedSources[localName] = {
+                  sourceFile: t.sourceFile || resolved,
+                  source: t.source,
+                  detail: t.detail || ''
+                };
+              }
+
+              // Check if this is a sink export
+              if (sinkExports[resolved] && sinkExports[resolved][key] && sinkExports[resolved][key].hasSink) {
+                importedSinks[localName] = {
+                  sinkFile: resolved,
+                  sink: sinkExports[resolved][key].sink
+                };
+              }
+            }
+          }
+
+          if (decl.id.type === 'Identifier') {
+            // Whole module import: const reader = require('./reader')
+            // Check default taint
+            if (expandedTaint[resolved] && expandedTaint[resolved]['default'] && expandedTaint[resolved]['default'].tainted) {
+              const t = expandedTaint[resolved]['default'];
+              importedSources[decl.id.name] = {
+                sourceFile: t.sourceFile || resolved,
+                source: t.source,
+                detail: t.detail || ''
+              };
+            }
+            // Check default sink
+            if (sinkExports[resolved] && sinkExports[resolved]['default'] && sinkExports[resolved]['default'].hasSink) {
+              importedSinks[decl.id.name] = {
+                sinkFile: resolved,
+                sink: sinkExports[resolved]['default'].sink
+              };
+            }
+          }
+        }
+      }
+    });
+
+    // If we have both imported sources and sinks, check for callback connections
+    if (Object.keys(importedSources).length === 0 || Object.keys(importedSinks).length === 0) continue;
+
+    // Pattern 1: sourceFn(function(err, data) { sinkFn(data); })
+    // Pattern 2: const result = sourceFn(); sinkFn(result);
+    walkAST(ast, (node) => {
+      if (node.type !== 'CallExpression') return;
+
+      // Check if the call is to an imported source
+      const calleeName = node.callee.type === 'Identifier' ? node.callee.name : null;
+      if (!calleeName || !importedSources[calleeName]) return;
+
+      // Check if any argument is a callback that calls an imported sink
+      for (const arg of node.arguments) {
+        if (arg.type === 'FunctionExpression' || arg.type === 'ArrowFunctionExpression') {
+          const body = arg.body.type === 'BlockStatement' ? arg.body.body : [arg.body];
+          walkAST({ type: 'Program', body }, (inner) => {
+            if (inner.type !== 'CallExpression') return;
+            const innerCallee = inner.callee.type === 'Identifier' ? inner.callee.name : null;
+            if (innerCallee && importedSinks[innerCallee]) {
+              const src = importedSources[calleeName];
+              const snk = importedSinks[innerCallee];
+              // Avoid duplicates
+              const key = `${src.sourceFile}→${relFile}→${snk.sinkFile}`;
+              if (!flows.some(f => `${f.sourceFile}→${f.sinkFile}→${snk.sinkFile}` === key)) {
+                flows.push({
+                  severity: 'CRITICAL',
+                  type: 'cross_file_dataflow',
+                  sourceFile: src.sourceFile,
+                  source: `${src.source}${src.detail ? '(' + src.detail + ')' : ''}`,
+                  sinkFile: relFile,
+                  sink: snk.sink,
+                  description: `Credential read in ${src.sourceFile} passed via callback to network sink (${snk.sink}) imported from ${snk.sinkFile} in ${relFile}`,
+                });
+              }
+            }
+          });
+        }
+      }
+    });
+  }
+
+  return flows;
+}
+
 module.exports = {
   buildModuleGraph, annotateTaintedExports, detectCrossFileFlows,
+  annotateSinkExports, detectCallbackCrossFileFlows,
   resolveLocal, extractLocalImports, parseFile, isLocalImport, toRel, isFileExists,
   tryResolveConcatRequire
 };

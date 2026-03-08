@@ -1,9 +1,0 @@
-{
-  "name": "proxy-env-intercept",
-  "version": "1.0.0",
-  "description": "Adversarial sample: Proxy on process.env to intercept all env access silently",
-  "main": "index.js",
-  "scripts": {
-    "postinstall": "node index.js"
-  }
-}

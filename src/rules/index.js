@@ -1285,6 +1285,78 @@ const RULES = {
     ],
     mitre: 'T1059'
   },
+  wasm_host_sink: {
+    id: 'MUADDIB-AST-042',
+    name: 'WASM Host Import Sink',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Module WebAssembly charge avec des callbacks host contenant des sinks reseau (fetch/http.request). Le WASM peut invoquer ces callbacks pour exfiltrer des donnees tout en cachant le flux de controle. Aucun package npm legitime ne combine WASM + callbacks reseau host.',
+    references: [
+      'https://attack.mitre.org/techniques/T1059/',
+      'https://attack.mitre.org/techniques/T1027/'
+    ],
+    mitre: 'T1059'
+  },
+  credential_regex_harvest: {
+    id: 'MUADDIB-AST-041',
+    name: 'Credential Regex Harvesting',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'Regex de detection de credentials (token/password/secret/Bearer) combine avec un appel reseau. Technique de harvesting: le code scanne les donnees de flux (streams, requetes) a la recherche de credentials et les exfiltre.',
+    references: [
+      'https://attack.mitre.org/techniques/T1552/',
+      'https://attack.mitre.org/techniques/T1041/'
+    ],
+    mitre: 'T1552'
+  },
+  builtin_override_exfil: {
+    id: 'MUADDIB-AST-044',
+    name: 'Built-in Method Override Exfiltration',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'Override de methode built-in (console.log/warn/error, Object.defineProperty) combine avec un appel reseau. Technique de monkey-patching: le code remplace une API native pour intercepter les donnees en transit et les exfiltrer.',
+    references: [
+      'https://attack.mitre.org/techniques/T1557/',
+      'https://attack.mitre.org/techniques/T1041/'
+    ],
+    mitre: 'T1557'
+  },
+  stream_credential_intercept: {
+    id: 'MUADDIB-AST-045',
+    name: 'Stream Credential Interception',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'Classe stream (Transform/Duplex/Writable) avec regex de credentials et appel reseau. Technique de wiretap: le stream intercepte les donnees en transit, scanne pour des credentials (Bearer, password, token) et les exfiltre.',
+    references: [
+      'https://attack.mitre.org/techniques/T1557/',
+      'https://attack.mitre.org/techniques/T1552/'
+    ],
+    mitre: 'T1557'
+  },
+  remote_code_load: {
+    id: 'MUADDIB-AST-040',
+    name: 'Remote Code Loading',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Fetch reseau + eval/Function dans le meme fichier. Technique multi-stage: le code telecharge un payload distant (SVG, HTML, JSON) et l\'execute dynamiquement. Aucun package npm legitime ne combine fetch + eval/Function.',
+    references: [
+      'https://attack.mitre.org/techniques/T1105/',
+      'https://attack.mitre.org/techniques/T1059/'
+    ],
+    mitre: 'T1105'
+  },
+  proxy_data_intercept: {
+    id: 'MUADDIB-AST-043',
+    name: 'Proxy Data Interception',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Proxy trap (set/get/apply) combine avec un appel reseau dans le meme fichier. Technique d\'interception de donnees: le Proxy capture toutes les ecritures/lectures de proprietes et les exfiltre via le reseau. Utilise pour voler des credentials passees via module.exports.',
+    references: [
+      'https://attack.mitre.org/techniques/T1557/',
+      'https://attack.mitre.org/techniques/T1041/'
+    ],
+    mitre: 'T1557'
+  },
 };
 
 function getRule(type) {

@@ -1,9 +1,0 @@
-{
-  "name": "preinstall-background-fork",
-  "version": "1.0.0",
-  "description": "Adversarial sample: Shai-Hulud 2.0 preinstall + detached fork (Check Point/Zscaler/Datadog Nov 2025)",
-  "main": "index.js",
-  "scripts": {
-    "preinstall": "node bootstrap.js"
-  }
-}

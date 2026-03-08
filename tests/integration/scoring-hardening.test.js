@@ -200,6 +200,49 @@ async function runScoringHardeningTests() {
     assert(result.riskScore >= 60,
       `Should be at least 60 (floor 50 + file 10), got ${result.riskScore}`);
   });
+
+  // ==========================================================================
+  // FP-P5 Fix 5: Dist two-notch downgrade for bundler artifact types
+  // ==========================================================================
+  test('FP-P5 Fix5: bundler artifact eval in dist/ gets two-notch downgrade', () => {
+    const threats = [
+      { type: 'dangerous_call_eval', severity: 'HIGH', file: 'dist/bundle.js', message: 'eval()' },
+      { type: 'dynamic_require', severity: 'HIGH', file: 'dist/bundle.js', message: 'require(x)' },
+      { type: 'obfuscation_detected', severity: 'MEDIUM', file: 'dist/bundle.js', message: 'obfusc' }
+    ];
+    applyFPReductions(threats, null, null);
+    assert(threats[0].severity === 'LOW', `eval HIGH in dist/ should be LOW (two-notch), got ${threats[0].severity}`);
+    assert(threats[1].severity === 'LOW', `dynamic_require HIGH in dist/ should be LOW (two-notch), got ${threats[1].severity}`);
+    assert(threats[2].severity === 'LOW', `obfuscation MEDIUM in dist/ should be LOW (two-notch), got ${threats[2].severity}`);
+  });
+
+  test('FP-P5 Fix5: non-bundler-artifact type in dist/ gets one-notch downgrade', () => {
+    const threats = [
+      { type: 'env_access', severity: 'HIGH', file: 'dist/index.js', message: 'env' },
+      { type: 'suspicious_dataflow', severity: 'HIGH', file: 'build/main.js', message: 'flow' }
+    ];
+    applyFPReductions(threats, null, null);
+    assert(threats[0].severity === 'MEDIUM', `env_access HIGH in dist/ should be MEDIUM (one-notch), got ${threats[0].severity}`);
+    assert(threats[1].severity === 'MEDIUM', `suspicious_dataflow HIGH in build/ should be MEDIUM (one-notch), got ${threats[1].severity}`);
+  });
+
+  test('FP-P5 Fix5: compound detection exempt from dist/ downgrade', () => {
+    const threats = [
+      { type: 'fetch_decrypt_exec', severity: 'CRITICAL', file: 'dist/payload.js', message: 'fetch+decrypt+eval' },
+      { type: 'download_exec_binary', severity: 'CRITICAL', file: 'build/dropper.js', message: 'download+chmod+exec' }
+    ];
+    applyFPReductions(threats, null, null);
+    assert(threats[0].severity === 'CRITICAL', `fetch_decrypt_exec should stay CRITICAL in dist/, got ${threats[0].severity}`);
+    assert(threats[1].severity === 'CRITICAL', `download_exec_binary should stay CRITICAL in build/, got ${threats[1].severity}`);
+  });
+
+  test('FP-P5 Fix5: CRITICAL bundler artifact in dist/ → MEDIUM (two-notch)', () => {
+    const threats = [
+      { type: 'dangerous_call_eval', severity: 'CRITICAL', file: 'dist/vendor.min.js', message: 'eval' }
+    ];
+    applyFPReductions(threats, null, null);
+    assert(threats[0].severity === 'MEDIUM', `eval CRITICAL in dist/ should be MEDIUM (two-notch), got ${threats[0].severity}`);
+  });
 }
 
 module.exports = { runScoringHardeningTests };

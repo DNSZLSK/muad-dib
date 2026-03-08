@@ -1,9 +1,0 @@
-{
-  "name": "dead-mans-switch",
-  "version": "1.0.0",
-  "description": "Holdout sample: Shai-Hulud 2.0 dead man's switch (Unit 42)",
-  "main": "index.js",
-  "scripts": {
-    "postinstall": "node index.js"
-  }
-}

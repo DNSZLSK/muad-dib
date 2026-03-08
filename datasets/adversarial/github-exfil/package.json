@@ -1,9 +1,0 @@
-{
-  "name": "github-exfil",
-  "version": "1.0.0",
-  "description": "Adversarial sample: Shai-Hulud v1/v2 GitHub API exfiltration",
-  "main": "index.js",
-  "scripts": {
-    "postinstall": "node index.js"
-  }
-}

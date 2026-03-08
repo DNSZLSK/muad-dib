@@ -2,6 +2,7 @@ node_modules/
 coverage/
 metrics/
 .muaddib-cache/
+datasets/adversarial/
 *.log
 rapport.html
 results.sarif

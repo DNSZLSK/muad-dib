@@ -1,9 +1,0 @@
-{
-  "name": "fake-captcha-fingerprint",
-  "version": "1.0.0",
-  "description": "Holdout sample: typosquatting fake CAPTCHA fingerprinting (Hive Pro July 2025)",
-  "main": "index.js",
-  "scripts": {
-    "postinstall": "node index.js"
-  }
-}

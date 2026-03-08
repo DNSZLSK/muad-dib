@@ -82,7 +82,35 @@ const ADVERSARIAL_THRESHOLDS = {
   'native-addon-camouflage': 25,
   'stego-png-payload': 35,
   'stegabin-vscode-persistence': 30,
-  'mcp-server-injection': 25
+  'mcp-server-injection': 25,
+  // Vague 5 (27 samples — advanced evasion techniques)
+  'async-iterator-exfil': 20,
+  'console-override-exfil': 20,
+  'cross-file-callback-exfil': 20,
+  'error-reporting-exfil': 20,
+  'error-stack-exfil': 20,
+  'event-emitter-exfil': 20,
+  'fn-return-exfil': 20,
+  'getter-defineProperty-exfil': 20,
+  'http-header-exfil': 20,
+  'import-map-poison': 20,
+  'intl-polyfill-backdoor': 20,
+  'net-time-exfil': 20,
+  'postmessage-exfil': 20,
+  'process-title-exfil': 20,
+  'promise-chain-exfil': 20,
+  'proxy-getter-dns-exfil': 20,
+  'readable-stream-exfil': 20,
+  'response-intercept-exfil': 20,
+  'setTimeout-eval-chain': 20,
+  'setter-trap-exfil': 20,
+  'sourcemap-payload': 20,
+  'stream-pipe-exfil': 20,
+  'svg-payload-fetch': 20,
+  'symbol-iterator-exfil': 20,
+  'toJSON-hijack': 20,
+  'url-constructor-exfil': 20,
+  'wasm-c2-payload': 20
 };
 
 const HOLDOUT_THRESHOLDS = {
@@ -482,16 +510,18 @@ async function evaluateBenignPyPI(options = {}) {
 
 /**
  * 3. Adversarial — scan evasive malicious samples
+ * Skips gracefully if datasets/adversarial/ directory is missing (local-only data).
  */
 async function evaluateAdversarial() {
   const details = [];
   let detected = 0;
+  const adversarialDirExists = fs.existsSync(ADVERSARIAL_DIR);
 
-  // --- Adversarial samples (35) ---
+  // --- Adversarial samples ---
   for (const [name, threshold] of Object.entries(ADVERSARIAL_THRESHOLDS)) {
     const sampleDir = path.join(ADVERSARIAL_DIR, name);
-    if (!fs.existsSync(sampleDir)) {
-      details.push({ name, score: 0, threshold, detected: false, error: 'directory not found', source: 'adversarial' });
+    if (!adversarialDirExists || !fs.existsSync(sampleDir)) {
+      details.push({ name, score: 0, threshold, detected: false, error: 'directory not found (local-only)', source: 'adversarial' });
       continue;
     }
     const result = await silentScan(sampleDir);

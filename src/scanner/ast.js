@@ -15,6 +15,24 @@ const {
   handlePostWalk
 } = require('./ast-detectors.js');
 
+// Check if credential keywords appear INSIDE regex literals or new RegExp() patterns.
+// Only true when the keyword is part of the regex pattern itself, not just a string elsewhere in the file.
+const CREDENTIAL_REGEX_KEYWORDS = /bearer|password|secret|token|credential|api.?key/i;
+function hasCredentialInsideRegex(content) {
+  // Check regex literals: /...pattern.../flags
+  const regexLiteralRe = /\/(?!\*)(?:[^/\\]|\\.)+\/[gimsuy]*/g;
+  let m;
+  while ((m = regexLiteralRe.exec(content)) !== null) {
+    if (CREDENTIAL_REGEX_KEYWORDS.test(m[0])) return true;
+  }
+  // Check new RegExp('pattern') — keyword must be in the string argument
+  const newRegExpRe = /new\s+RegExp\s*\(\s*(['"`])((?:[^\\]|\\.)*?)\1/g;
+  while ((m = newRegExpRe.exec(content)) !== null) {
+    if (CREDENTIAL_REGEX_KEYWORDS.test(m[2])) return true;
+  }
+  return false;
+}
+
 const EXCLUDED_FILES = [
   'src/scanner/ast.js',
   'src/scanner/shell.js',
@@ -93,6 +111,15 @@ function analyzeFile(content, filePath, basePath) {
     hasEnvEnumeration: false,  // Object.entries/keys/values(process.env)
     hasEnvHarvestPattern: /\b(KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL|NPM|AWS|SSH|WEBHOOK)\b/.test(content),
     hasNetworkCallInFile: /\b(fetch|https?\.request|https?\.get|dns\.resolve)\b/.test(content),
+    // Credential regex harvesting: regex literals or new RegExp() whose PATTERN contains credential keywords
+    // Must check that the keyword is inside the regex, not just anywhere in the file
+    hasCredentialRegex: hasCredentialInsideRegex(content),
+    // Built-in method override: console.X = function or Object.defineProperty = function
+    hasBuiltinOverride: /\bconsole\s*\.\s*\w+\s*=\s*function/.test(content) ||
+                        /\bconsole\s*\[\s*\w+\s*\]\s*=\s*function/.test(content) ||
+                        /\bObject\s*\.\s*defineProperty\s*=\s*function/.test(content),
+    // Stream interceptor: class extending Transform/Duplex/Writable (data wiretap pattern)
+    hasStreamInterceptor: /\bextends\s+(Transform|Duplex|Writable)\b/.test(content),
     // SANDWORM_MODE P2: DNS exfiltration co-occurrence
     hasDnsRequire: /\brequire\s*\(\s*['"]dns['"]\s*\)/.test(content) || /\bdns\s*\.\s*resolve/.test(content),
     hasBase64Encode: /\.toString\s*\(\s*['"]base64(url)?['"]\s*\)/.test(content),
@@ -123,7 +150,11 @@ function analyzeFile(content, filePath, basePath) {
     hasModuleImport: /require\s*\(\s*['"]module['"]\s*\)/.test(content) || /module\.constructor/.test(content),
     hasMcpContentKeywords: (/\bmcpServers\b/.test(content) || /\bmcp\.json\b/.test(content) || /\bclaude_desktop_config\b/.test(content)) &&
       /\bwriteFileSync\b|\bwriteFile\s*\(/.test(content) &&
-      (/\.claude[/\\]/.test(content) || /\.cursor[/\\]/.test(content) || /\.vscode[/\\]/.test(content) || /\.windsurf[/\\]/.test(content) || /\.codeium[/\\]/.test(content) || /\.continue[/\\]/.test(content) || /claude_desktop_config/.test(content) || /\bmcp\.json\b/.test(content))
+      (/\.claude[/\\]/.test(content) || /\.cursor[/\\]/.test(content) || /\.vscode[/\\]/.test(content) || /\.windsurf[/\\]/.test(content) || /\.codeium[/\\]/.test(content) || /\.continue[/\\]/.test(content) || /claude_desktop_config/.test(content) || /\bmcp\.json\b/.test(content)),
+    // WASM payload detection: WebAssembly.compile/instantiate with host import sinks
+    hasWasmLoad: /\bWebAssembly\s*\.\s*(compile|instantiate|compileStreaming|instantiateStreaming)\b/.test(content),
+    hasWasmHostSink: false,  // set in handleCallExpression when WASM import object contains network/fs sinks
+    hasProxyTrap: false  // set in handleNewExpression when Proxy has set/get/apply trap
   };
 
   // Compute fetchOnlySafeDomains: check if ALL URLs in file point to known registries

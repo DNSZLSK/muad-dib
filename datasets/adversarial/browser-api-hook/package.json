@@ -1,6 +1,0 @@
-{
-  "name": "browser-api-hook",
-  "version": "1.0.0",
-  "description": "Holdout sample: chalk Sept 2025 prototype hooking for crypto wallet interception (Sygnia)",
-  "main": "index.js"
-}

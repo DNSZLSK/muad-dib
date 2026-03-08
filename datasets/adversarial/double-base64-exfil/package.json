@@ -1,9 +1,0 @@
-{
-  "name": "double-base64-exfil",
-  "version": "1.0.0",
-  "description": "Holdout sample: Shai-Hulud double base64 encoding + exec exfiltration",
-  "main": "index.js",
-  "scripts": {
-    "postinstall": "node index.js"
-  }
-}

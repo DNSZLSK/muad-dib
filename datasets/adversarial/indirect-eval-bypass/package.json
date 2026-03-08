@@ -1,5 +1,0 @@
-{
-  "name": "audit-bypass-01-indirect-eval",
-  "version": "1.0.0",
-  "description": "Audit bypass: indirect eval via computed property + SAFE_STRINGS poisoning"
-}

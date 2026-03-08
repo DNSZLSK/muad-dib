@@ -1,6 +1,0 @@
-{
-  "name": "crypto-wallet-harvest",
-  "version": "1.0.0",
-  "description": "Holdout sample: chalk/debug crypto wallet harvesting (Sygnia Sept 2025)",
-  "main": "index.js"
-}

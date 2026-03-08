@@ -29,13 +29,14 @@ async function runEvaluateTests() {
     assert(typeof evaluateAdversarial === 'function', 'evaluateAdversarial should be a function');
   });
 
-  test('EVALUATE: ADVERSARIAL_THRESHOLDS has 35 entries', () => {
+  test('EVALUATE: ADVERSARIAL_THRESHOLDS has 62 entries', () => {
     const keys = Object.keys(ADVERSARIAL_THRESHOLDS);
-    assert(keys.length === 35, `Expected 35 adversarial thresholds, got ${keys.length}`);
+    assert(keys.length === 62, `Expected 62 adversarial thresholds, got ${keys.length}`);
   });
 
   test('EVALUATE: ADVERSARIAL_THRESHOLDS has correct sample names', () => {
     const expected = [
+      // Vague 1-4 (35 samples)
       'ci-trigger-exfil', 'delayed-exfil', 'docker-aware',
       'staged-fetch', 'dns-chunk-exfil', 'string-concat-obfuscation',
       'postinstall-download', 'dynamic-require', 'iife-exfil',
@@ -48,7 +49,17 @@ async function runEvaluateTests() {
       'silent-error-swallow', 'double-base64-exfil', 'crypto-wallet-harvest',
       'self-hosted-runner-backdoor', 'dead-mans-switch', 'fake-captcha-fingerprint',
       'pyinstaller-dropper', 'gh-cli-token-steal', 'triple-base64-github-push',
-      'browser-api-hook'
+      'browser-api-hook',
+      // Vague 5 (27 samples)
+      'async-iterator-exfil', 'console-override-exfil', 'cross-file-callback-exfil',
+      'error-reporting-exfil', 'error-stack-exfil', 'event-emitter-exfil',
+      'fn-return-exfil', 'getter-defineProperty-exfil', 'http-header-exfil',
+      'import-map-poison', 'intl-polyfill-backdoor', 'net-time-exfil',
+      'postmessage-exfil', 'process-title-exfil', 'promise-chain-exfil',
+      'proxy-getter-dns-exfil', 'readable-stream-exfil', 'response-intercept-exfil',
+      'setTimeout-eval-chain', 'setter-trap-exfil', 'sourcemap-payload',
+      'stream-pipe-exfil', 'svg-payload-fetch', 'symbol-iterator-exfil',
+      'toJSON-hijack', 'url-constructor-exfil', 'wasm-c2-payload'
     ];
     for (const name of expected) {
       assert(ADVERSARIAL_THRESHOLDS[name] !== undefined, `Missing threshold for ${name}`);
@@ -99,7 +110,8 @@ async function runEvaluateTests() {
     assert(typeof adv.total === 'number', 'total should be number');
     assert(typeof adv.adr === 'number', 'adr should be number');
     assert(Array.isArray(adv.details), 'details should be array');
-    assert(adv.total === 35, `Expected 35 adversarial samples, got ${adv.total}`);
+    // total = ADVERSARIAL_THRESHOLDS (62) + HOLDOUT_THRESHOLDS (40) = 102
+    assert(adv.total === 102, `Expected 102 adversarial+holdout samples, got ${adv.total}`);
     for (const d of adv.details) {
       assert(typeof d.name === 'string', 'detail name should be string');
       assert(typeof d.score === 'number', 'detail score should be number');

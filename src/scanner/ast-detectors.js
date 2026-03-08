@@ -26,16 +26,55 @@ const SAFE_ENV_VARS = [
   'LANG', 'TERM', 'CI', 'DEBUG', 'VERBOSE', 'LOG_LEVEL',
   'SHELL', 'USER', 'LOGNAME', 'EDITOR', 'TZ',
   'NODE_DEBUG', 'NODE_PATH', 'NODE_OPTIONS',
-  'DISPLAY', 'COLORTERM', 'FORCE_COLOR', 'NO_COLOR', 'TERM_PROGRAM'
+  'DISPLAY', 'COLORTERM', 'FORCE_COLOR', 'NO_COLOR', 'TERM_PROGRAM',
+  // CI environment metadata (non-sensitive)
+  'GITHUB_REPOSITORY', 'GITHUB_SHA', 'GITHUB_REF', 'GITHUB_WORKSPACE',
+  'GITHUB_RUN_ID', 'GITHUB_RUN_NUMBER', 'GITHUB_ACTOR', 'GITHUB_EVENT_NAME',
+  'GITHUB_WORKFLOW', 'GITHUB_ACTION', 'GITHUB_JOB', 'GITHUB_SERVER_URL',
+  'GITLAB_CI', 'TRAVIS', 'CIRCLECI', 'JENKINS_URL',
+  // Build tool config
+  'NODE_TLS_REJECT_UNAUTHORIZED', 'BABEL_ENV', 'WEBPACK_MODE'
 ];
 
-// Env var prefixes that are safe (npm metadata, locale settings)
-const SAFE_ENV_PREFIXES = ['npm_config_', 'npm_lifecycle_', 'npm_package_', 'lc_', 'muaddib_'];
+// Env var prefixes that are safe (npm metadata, locale settings, framework public vars)
+const SAFE_ENV_PREFIXES = [
+  'npm_config_', 'npm_lifecycle_', 'npm_package_', 'lc_', 'muaddib_',
+  'next_public_', 'vite_', 'react_app_'
+];
 
 // Env var keywords to detect sensitive environment access (separate from SENSITIVE_STRINGS)
 const ENV_SENSITIVE_KEYWORDS = [
   'TOKEN', 'SECRET', 'KEY', 'PASSWORD', 'CREDENTIAL', 'AUTH'
 ];
+
+// Non-sensitive qualifiers: when a keyword is preceded by one of these in the env var name,
+// it is config metadata, not a real secret (e.g., PUBLIC_KEY, CACHE_KEY, SORT_KEY)
+const ENV_NON_SENSITIVE_QUALIFIERS = new Set([
+  'PUBLIC', 'CACHE', 'PRIMARY', 'FOREIGN', 'SORT', 'PARTITION', 'INDEX', 'ENCRYPTION'
+]);
+
+/**
+ * Check if an env var name contains a sensitive keyword as a full _-delimited segment,
+ * not preceded by a non-sensitive qualifier.
+ * e.g., NPM_TOKEN → TOKEN is full segment → true
+ *       PUBLIC_KEY → KEY preceded by PUBLIC → false
+ *       CACHE_KEY → KEY preceded by CACHE → false
+ *       GITHUB_TOKEN → TOKEN is full segment, preceded by GITHUB (not a qualifier) → true
+ */
+function isEnvSensitive(envVar) {
+  const upper = envVar.toUpperCase();
+  const segments = upper.split('_');
+  for (let i = 0; i < segments.length; i++) {
+    if (ENV_SENSITIVE_KEYWORDS.includes(segments[i])) {
+      // Check if preceded by a non-sensitive qualifier
+      if (i > 0 && ENV_NON_SENSITIVE_QUALIFIERS.has(segments[i - 1])) {
+        continue;
+      }
+      return true;
+    }
+  }
+  return false;
+}
 
 // AI agent dangerous flags — disable security controls (s1ngularity/Nx, Aug 2025)
 const AI_AGENT_DANGEROUS_FLAGS = [
@@ -85,10 +124,11 @@ const HOOKABLE_NATIVES = [
 ];
 
 // Node.js core module classes targeted for prototype hooking
-const NODE_HOOKABLE_MODULES = ['http', 'https', 'net', 'tls', 'stream'];
+const NODE_HOOKABLE_MODULES = ['http', 'https', 'net', 'tls', 'stream', 'events', 'dgram'];
 const NODE_HOOKABLE_CLASSES = [
   'IncomingMessage', 'ServerResponse', 'ClientRequest',
-  'OutgoingMessage', 'Socket', 'Server', 'Agent'
+  'OutgoingMessage', 'Socket', 'Server', 'Agent',
+  'EventEmitter'
 ];
 
 // AI/MCP config paths targeted for config injection (SANDWORM_MODE)
@@ -423,7 +463,7 @@ function handleVariableDeclarator(node, ctx) {
         if (SAFE_ENV_VARS.includes(envVar)) continue;
         const envLower = envVar.toLowerCase();
         if (SAFE_ENV_PREFIXES.some(p => envLower.startsWith(p))) continue;
-        if (ENV_SENSITIVE_KEYWORDS.some(s => envVar.toUpperCase().includes(s))) {
+        if (isEnvSensitive(envVar)) {
           ctx.threats.push({
             type: 'env_access',
             severity: 'HIGH',
@@ -538,7 +578,7 @@ function handleCallExpression(node, ctx) {
         }
       }
       if (!resolved) {
-        ctx.threats.push({ type: 'dynamic_require', severity: 'HIGH',
+        ctx.threats.push({ type: 'dynamic_require', severity: 'MEDIUM',
           message: 'Dynamic require() with member expression argument (object property obfuscation).',
           file: ctx.relFile });
       }
@@ -985,9 +1025,9 @@ function handleCallExpression(node, ctx) {
 
   if (callName === 'eval') {
     ctx.hasEvalInFile = true;
-    ctx.hasDynamicExec = true;
     // Detect staged eval decode
     if (node.arguments.length === 1 && hasDecodeArg(node.arguments[0])) {
+      ctx.hasDynamicExec = true;
       ctx.threats.push({
         type: 'staged_eval_decode',
         severity: 'CRITICAL',
@@ -1007,7 +1047,13 @@ function handleCallExpression(node, ctx) {
         if (/\b(require|import|exec|execSync|spawn|child_process|\.readFile|\.writeFile|process\.env|\.homedir)\b/.test(val)) {
           severity = 'HIGH';
           message = `eval() with dangerous API in string literal: "${val.substring(0, 100)}"`;
+          ctx.hasDynamicExec = true;
         }
+      }
+
+      // Only set hasDynamicExec for non-constant (dynamic) eval
+      if (!isConstant) {
+        ctx.hasDynamicExec = true;
       }
 
       ctx.threats.push({
@@ -1034,6 +1080,25 @@ function handleCallExpression(node, ctx) {
         type: 'dangerous_call_function',
         severity: 'MEDIUM',
         message: 'Function() with dynamic expression (template/factory pattern).',
+        file: ctx.relFile
+      });
+    }
+  }
+
+  // setTimeout/setInterval with string argument = eval equivalent
+  // setTimeout("require('child_process').exec('whoami')", 100) executes the string as code
+  // Only string Literal and TemplateLiteral are eval-equivalent; Identifier/MemberExpression
+  // are function references (callbacks), not code strings.
+  if ((callName === 'setTimeout' || callName === 'setInterval') && node.arguments.length >= 1) {
+    const firstArg = node.arguments[0];
+    if ((firstArg.type === 'Literal' && typeof firstArg.value === 'string') ||
+        firstArg.type === 'TemplateLiteral') {
+      ctx.hasEvalInFile = true;
+      ctx.hasDynamicExec = true;
+      ctx.threats.push({
+        type: 'dangerous_call_eval',
+        severity: 'HIGH',
+        message: `${callName}() with string argument — eval equivalent, executes the string as code.`,
         file: ctx.relFile
       });
     }
@@ -1447,6 +1512,20 @@ function handleNewExpression(node, ctx) {
         file: ctx.relFile
       });
     }
+    // Detect new Proxy(obj, handler) where handler has set/get traps — data interception
+    // Real-world technique: export a Proxy that intercepts all property sets/gets to exfiltrate
+    // data flowing through the module. Combined with network (hasNetworkInFile) → credential theft.
+    if (!target.type?.includes('MemberExpression') || target.property?.name !== 'env') {
+      const handler = node.arguments[1];
+      if (handler?.type === 'ObjectExpression') {
+        const hasTrap = handler.properties?.some(p =>
+          p.key?.type === 'Identifier' && ['set', 'get', 'apply', 'construct'].includes(p.key.name)
+        );
+        if (hasTrap) {
+          ctx.hasProxyTrap = true;
+        }
+      }
+    }
   }
 
   // Batch 2: new Worker(code, { eval: true }) — worker_threads code execution
@@ -1630,6 +1709,19 @@ function handleAssignmentExpression(node, ctx) {
       }
     }
 
+    // JSON.stringify = ... or JSON.parse = ... — global API hooking
+    // Real-world technique: override JSON.stringify to intercept all serialization and exfiltrate data
+    if (left.object?.type === 'Identifier' && left.object.name === 'JSON' &&
+        left.property?.type === 'Identifier' &&
+        ['stringify', 'parse'].includes(left.property.name)) {
+      ctx.threats.push({
+        type: 'prototype_hook',
+        severity: 'HIGH',
+        message: `JSON.${left.property.name} overridden — global API hooking to intercept all JSON serialization/deserialization.`,
+        file: ctx.relFile
+      });
+    }
+
     // XMLHttpRequest.prototype.send = ... or Response.prototype.json = ...
     if (left.object?.type === 'MemberExpression' &&
         left.object.property?.type === 'Identifier' &&
@@ -1723,7 +1815,7 @@ function handleMemberExpression(node, ctx) {
       if (SAFE_ENV_PREFIXES.some(p => envLower.startsWith(p))) {
         return;
       }
-      if (ENV_SENSITIVE_KEYWORDS.some(s => envVar.toUpperCase().includes(s))) {
+      if (isEnvSensitive(envVar)) {
         ctx.threats.push({
           type: 'env_access',
           severity: 'HIGH',
@@ -1828,6 +1920,17 @@ function handlePostWalk(ctx) {
     });
   }
 
+  // Remote code loading: fetch + eval/Function in same file = multi-stage payload
+  // Distinct from fetch_decrypt_exec which also requires crypto. This catches SVG/HTML payload extraction.
+  if (ctx.hasRemoteFetch && ctx.hasDynamicExec && !ctx.hasCryptoDecipher) {
+    ctx.threats.push({
+      type: 'remote_code_load',
+      severity: 'CRITICAL',
+      message: 'Remote code loading: network fetch + dynamic eval/Function in same file — multi-stage payload execution.',
+      file: ctx.relFile
+    });
+  }
+
   // Wave 4: Remote fetch + crypto decrypt + dynamic eval = steganographic payload chain
   if (ctx.hasRemoteFetch && ctx.hasCryptoDecipher && ctx.hasDynamicExec) {
     ctx.threats.push({
@@ -1857,6 +1960,67 @@ function handlePostWalk(ctx) {
       type: 'ide_persistence',
       severity: 'HIGH',
       message: 'IDE persistence: writes tasks.json with auto-execution trigger (runOn/folderOpen). VS Code task persistence technique.',
+      file: ctx.relFile
+    });
+  }
+
+  // WASM payload detection: WebAssembly.compile/instantiate + readFileSync/https in same file
+  // WASM host import objects can contain callback functions that read credentials and exfiltrate.
+  // This pattern is never legitimate in npm packages — WASM should use pure computation, not host I/O.
+  if (ctx.hasWasmLoad && ctx.hasNetworkCallInFile) {
+    ctx.threats.push({
+      type: 'wasm_host_sink',
+      severity: 'CRITICAL',
+      message: 'WebAssembly module with network-capable host imports. WASM can invoke host callbacks to exfiltrate data while hiding control flow.',
+      file: ctx.relFile
+    });
+  }
+
+  // Credential regex harvesting: credential-matching regex + network call in same file
+  // Real-world pattern: Transform/stream that scans data for tokens/passwords and exfiltrates
+  if (ctx.hasCredentialRegex && ctx.hasNetworkCallInFile) {
+    ctx.threats.push({
+      type: 'credential_regex_harvest',
+      severity: 'HIGH',
+      message: 'Credential regex patterns (token/password/secret/Bearer) + network call in same file — stream data credential harvesting.',
+      file: ctx.relFile
+    });
+  }
+
+  // Built-in method override + network: console.X = function or Object.defineProperty = function
+  // combined with network calls. Monkey-patching built-in APIs for data interception.
+  if (ctx.hasBuiltinOverride && ctx.hasNetworkCallInFile) {
+    ctx.threats.push({
+      type: 'builtin_override_exfil',
+      severity: 'HIGH',
+      message: 'Built-in method override (console/Object.defineProperty) + network call — runtime API hijacking for data interception and exfiltration.',
+      file: ctx.relFile
+    });
+  }
+
+  // Stream credential interception: Transform/Duplex/Writable stream + credential regex + network
+  // Wiretap pattern: intercepts data in transit, scans for credentials, exfiltrates matches.
+  if (ctx.hasStreamInterceptor && ctx.hasCredentialRegex && ctx.hasNetworkCallInFile) {
+    ctx.threats.push({
+      type: 'stream_credential_intercept',
+      severity: 'HIGH',
+      message: 'Stream class (Transform/Duplex/Writable) with credential regex scanning + network call — data-in-transit credential wiretap.',
+      file: ctx.relFile
+    });
+  }
+
+  // Proxy data interception: new Proxy(obj, { set/get }) + network in same file
+  // Real-world pattern: export a Proxy that exfiltrates all property assignments via network
+  // CRITICAL only when credential signals co-occur (env_access, suspicious_dataflow),
+  // otherwise HIGH — bare Proxy + fetch is insufficient evidence.
+  if (ctx.hasProxyTrap && ctx.hasNetworkCallInFile) {
+    const hasCredentialSignal = ctx.threats.some(t =>
+      t.type === 'env_access' || t.type === 'suspicious_dataflow'
+    );
+    ctx.threats.push({
+      type: 'proxy_data_intercept',
+      severity: hasCredentialSignal ? 'CRITICAL' : 'HIGH',
+      message: 'Proxy trap (set/get/apply) with network call in same file — data interception and exfiltration via Proxy handler.',
       file: ctx.relFile
     });
   }
