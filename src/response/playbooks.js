@@ -461,6 +461,31 @@ const PLAYBOOKS = {
   fragmented_high_entropy_cluster:
     'Cluster de chaines courtes a haute entropie detecte. Possible fragmentation de payload pour eviter la detection. ' +
     'Reconstituer les fragments et analyser le contenu combine. Verifier si les chaines sont concatenees ou reassemblees a l\'execution.',
+
+  wasm_host_sink:
+    'CRITIQUE: Module WebAssembly charge avec des imports host contenant des sinks reseau. Le flux de controle est cache dans le binaire WASM, ' +
+    'rendant l\'analyse statique impossible. Le WASM peut lire des fichiers sensibles et exfiltrer via les callbacks host. ' +
+    'Supprimer le package immediatement. Analyser le fichier WASM avec wasm2wat pour comprendre le flux. Regenerer tous les secrets.',
+  credential_regex_harvest:
+    'Code contient des regex de detection de credentials (Bearer, password, token, API key) combine avec un appel reseau. ' +
+    'Technique de harvesting: scanne les donnees en transit (streams HTTP, fichiers) pour extraire des secrets et les exfiltrer. ' +
+    'Supprimer le package. Auditer le trafic reseau sortant.',
+  builtin_override_exfil:
+    'Code remplace une methode built-in (console.log/warn/error, Object.defineProperty) et contient un appel reseau. ' +
+    'Technique de monkey-patching: intercepte les donnees passant par les APIs natives pour les exfiltrer. ' +
+    'Supprimer le package. Verifier si d\'autres methodes natives ont ete modifiees.',
+  stream_credential_intercept:
+    'Classe stream (Transform/Duplex/Writable) avec regex de credentials et appel reseau. ' +
+    'Technique de wiretap: le stream intercepte les donnees en transit, scanne pour des secrets (Bearer, password, token) ' +
+    'et les exfiltre via un appel reseau. Supprimer le package.',
+  remote_code_load:
+    'CRITIQUE: Fetch reseau + eval/new Function() dans le meme fichier. ' +
+    'Technique multi-stage: le package telecharge un payload depuis un serveur distant (SVG, HTML, JSON) puis l\'execute. ' +
+    'Supprimer le package. Bloquer le domaine C2 au niveau firewall.',
+  proxy_data_intercept:
+    'CRITIQUE: Un Proxy JavaScript avec trap set/get/apply est combine avec un appel reseau. ' +
+    'Technique d\'interception: le Proxy capture toutes les ecritures de proprietes (credentials, tokens, config) ' +
+    'et les exfiltre via HTTPS/fetch/dgram. Supprimer le package. Auditer tous les modules qui importent ce package.',
 };
 
 function getPlaybook(threatType) {

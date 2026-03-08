@@ -1,9 +1,0 @@
-{
-  "name": "detached-background",
-  "version": "1.0.0",
-  "description": "Adversarial sample: Shai-Hulud 2.0 detached background process",
-  "main": "index.js",
-  "scripts": {
-    "postinstall": "node launcher.js"
-  }
-}

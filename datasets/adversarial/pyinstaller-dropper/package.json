@@ -1,9 +1,0 @@
-{
-  "name": "pyinstaller-dropper",
-  "version": "1.0.0",
-  "description": "Holdout sample: PhantomRaven binary dropper (Sonatype)",
-  "main": "index.js",
-  "scripts": {
-    "postinstall": "node index.js"
-  }
-}

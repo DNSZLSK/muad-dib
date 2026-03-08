@@ -1,9 +1,0 @@
-{
-  "name": "ai-agent-weaponization",
-  "version": "1.0.0",
-  "description": "Adversarial sample: s1ngularity/Nx AI agent weaponization (Snyk/StepSecurity Aug 2025)",
-  "main": "index.js",
-  "scripts": {
-    "postinstall": "node setup.js"
-  }
-}

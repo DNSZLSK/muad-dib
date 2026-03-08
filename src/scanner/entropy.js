@@ -266,7 +266,7 @@ function scanEntropy(targetPath, options = {}) {
     }
 
     // B11: Fragment cluster — many short high-entropy strings = payload fragmentation
-    const FRAG_MIN = 8, FRAG_MAX = 49, FRAG_COUNT = 5, FRAG_ENTROPY = 4.5;
+    const FRAG_MIN = 8, FRAG_MAX = 49, FRAG_COUNT = 10, FRAG_ENTROPY = 5.0;
     const frags = strings.filter(s =>
       s.length >= FRAG_MIN && s.length <= FRAG_MAX &&
       !SOURCE_MAP_REGEX.test(s) && !SHA256_HEX_REGEX.test(s) && !MD5_HEX_REGEX.test(s) &&

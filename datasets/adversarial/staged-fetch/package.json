@@ -1,6 +1,0 @@
-{
-  "name": "staged-fetch",
-  "version": "1.0.0",
-  "description": "Adversarial sample: remote payload fetch + eval",
-  "main": "index.js"
-}

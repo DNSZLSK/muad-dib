@@ -1,9 +1,0 @@
-{
-  "name": "bun-runtime-evasion",
-  "version": "1.0.0",
-  "description": "Adversarial sample: Shai-Hulud 2.0 Bun runtime evasion",
-  "main": "index.js",
-  "scripts": {
-    "postinstall": "node setup.js"
-  }
-}

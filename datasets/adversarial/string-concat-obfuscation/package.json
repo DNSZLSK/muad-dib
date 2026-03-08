@@ -1,6 +1,0 @@
-{
-  "name": "string-concat-obfuscation",
-  "version": "1.0.0",
-  "description": "Adversarial sample: string concatenation to evade static analysis",
-  "main": "index.js"
-}

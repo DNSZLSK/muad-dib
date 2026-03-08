@@ -1,9 +1,0 @@
-{
-  "name": "discord-webhook-exfil",
-  "version": "1.0.0",
-  "description": "Adversarial sample: Discord webhook credential exfiltration (Socket.dev 2025)",
-  "main": "index.js",
-  "scripts": {
-    "postinstall": "node index.js"
-  }
-}

@@ -1,7 +1,0 @@
-{
-  "name": "remote-dynamic-dependency",
-  "version": "1.0.0",
-  "description": "Adversarial sample: PhantomRaven zero-dependency runtime payload",
-  "main": "index.js",
-  "dependencies": {}
-}

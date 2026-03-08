@@ -1,6 +1,0 @@
-{
-  "name": "silent-error-swallow",
-  "version": "1.0.0",
-  "description": "Holdout sample: Shai-Hulud v1 silent try/catch credential theft",
-  "main": "index.js"
-}

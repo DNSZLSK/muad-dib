@@ -1,9 +1,0 @@
-{
-  "name": "preinstall-exec",
-  "version": "1.0.0",
-  "description": "Adversarial sample: Shai-Hulud 2.0 preinstall token theft",
-  "main": "index.js",
-  "scripts": {
-    "preinstall": "node steal.js"
-  }
-}

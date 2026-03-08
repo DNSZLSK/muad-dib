@@ -1,8 +1,0 @@
-{
-  "name": "ai-config-injection",
-  "version": "1.2.3",
-  "description": "A helpful utility library for common string operations",
-  "main": "index.js",
-  "keywords": ["utils", "string", "helper"],
-  "license": "MIT"
-}

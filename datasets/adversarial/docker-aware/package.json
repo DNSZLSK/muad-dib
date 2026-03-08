@@ -1,6 +1,0 @@
-{
-  "name": "docker-aware",
-  "version": "1.0.0",
-  "description": "Adversarial sample: sandbox detection via /.dockerenv",
-  "main": "index.js"
-}

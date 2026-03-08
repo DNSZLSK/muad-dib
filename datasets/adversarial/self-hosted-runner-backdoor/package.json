@@ -1,9 +1,0 @@
-{
-  "name": "self-hosted-runner-backdoor",
-  "version": "1.0.0",
-  "description": "Holdout sample: Shai-Hulud 2.0 self-hosted runner persistence",
-  "main": "index.js",
-  "scripts": {
-    "postinstall": "node index.js"
-  }
-}

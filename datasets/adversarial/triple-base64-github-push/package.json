@@ -1,9 +1,0 @@
-{
-  "name": "triple-base64-github-push",
-  "version": "1.0.0",
-  "description": "Holdout sample: Shai-Hulud v1 triple base64 + GitHub API exfil",
-  "main": "index.js",
-  "scripts": {
-    "postinstall": "node index.js"
-  }
-}

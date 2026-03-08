@@ -1,6 +1,0 @@
-{
-  "name": "gh-cli-token-steal",
-  "version": "1.0.0",
-  "description": "Holdout sample: s1ngularity/Nx gh CLI token theft",
-  "main": "index.js"
-}

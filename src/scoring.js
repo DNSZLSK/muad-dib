@@ -118,7 +118,9 @@ const FP_COUNT_THRESHOLDS = {
   // P4: hash algorithms contain bit manipulation that triggers obfuscation heuristics
   js_obfuscation_pattern: { maxCount: 1, from: 'HIGH', to: 'LOW' },
   // P4: bundled credential_tampering from minified alias resolution (jspdf, lerna)
-  credential_tampering: { maxCount: 5, to: 'LOW' }
+  credential_tampering: { maxCount: 5, to: 'LOW' },
+  // B1 FP reduction: bundled code aliases eval/Function (sinon, storybook, vitest)
+  dangerous_call_eval: { maxCount: 3, from: 'MEDIUM', to: 'LOW' }
 };
 
 // Types exempt from dist/ downgrade — IOC matches, lifecycle scripts, and
@@ -133,11 +135,24 @@ const DIST_EXEMPT_TYPES = new Set([
   'download_exec_binary',     // download + chmod + exec (binary dropper)
   'cross_file_dataflow',      // credential read → network exfil across files
   'staged_eval_decode',       // eval(atob(...)) (explicit payload staging)
-  'reverse_shell'             // net.Socket + connect + pipe (always malicious)
+  'reverse_shell',            // net.Socket + connect + pipe (always malicious)
+  'remote_code_load',          // fetch + eval/Function (multi-stage payload)
+  'proxy_data_intercept'       // Proxy trap + network (data interception)
 ]);
 
 // Regex matching dist/build/minified/bundled file paths
 const DIST_FILE_RE = /(?:^|[/\\])(?:dist|build)[/\\]|\.min\.js$|\.bundle\.js$/i;
+
+// Bundler artifact types: get two-notch downgrade in dist/ files (CRITICAL→MEDIUM, HIGH→LOW).
+// These are individual pattern signals that bundlers routinely produce (eval for globalThis,
+// dynamic require for code-splitting, minification obfuscation, etc.)
+const DIST_BUNDLER_ARTIFACT_TYPES = new Set([
+  'dangerous_call_eval', 'dangerous_call_function',
+  'dynamic_require', 'dynamic_import',
+  'obfuscation_detected', 'high_entropy_string', 'possible_obfuscation',
+  'js_obfuscation_pattern', 'vm_code_execution',
+  'module_compile', 'module_compile_dynamic'
+]);
 
 // Types exempt from reachability downgrade — IOC matches, lifecycle, and package-level types.
 // NOTE: Uses the base IOC/lifecycle exempt set, NOT full DIST_EXEMPT_TYPES.
@@ -244,13 +259,23 @@ function applyFPReductions(threats, reachableFiles, packageName) {
       }
     }
 
-    // Dist/build/minified files: bundler artifacts get severity downgraded one notch.
-    // Reduced from two-notch (audit fix): 2-notch made dist/ attacks invisible (CRITICAL→MEDIUM=3pts).
+    // Dist/build/minified files: severity downgrade for bundler output.
     // Compound detections are exempt (DIST_EXEMPT_TYPES).
+    // Bundler artifact types (eval, dynamic_require, obfuscation) get two-notch downgrade
+    // (CRITICAL→MEDIUM, HIGH→LOW) since bundlers routinely produce these patterns.
+    // Other non-exempt types keep one-notch downgrade.
     if (t.file && !DIST_EXEMPT_TYPES.has(t.type) && DIST_FILE_RE.test(t.file)) {
-      if (t.severity === 'CRITICAL') t.severity = 'HIGH';
-      else if (t.severity === 'HIGH') t.severity = 'MEDIUM';
-      else if (t.severity === 'MEDIUM') t.severity = 'LOW';
+      if (DIST_BUNDLER_ARTIFACT_TYPES.has(t.type)) {
+        // Two-notch downgrade for bundler artifacts
+        if (t.severity === 'CRITICAL') t.severity = 'MEDIUM';
+        else if (t.severity === 'HIGH') t.severity = 'LOW';
+        else if (t.severity === 'MEDIUM') t.severity = 'LOW';
+      } else {
+        // One-notch downgrade for other non-exempt types
+        if (t.severity === 'CRITICAL') t.severity = 'HIGH';
+        else if (t.severity === 'HIGH') t.severity = 'MEDIUM';
+        else if (t.severity === 'MEDIUM') t.severity = 'LOW';
+      }
     }
 
     // Reachability: findings in files not reachable from entry points → LOW

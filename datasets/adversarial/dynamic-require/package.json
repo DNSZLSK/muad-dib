@@ -1,9 +1,0 @@
-{
-  "name": "dynamic-require",
-  "version": "1.0.0",
-  "description": "Adversarial sample: base64-encoded require to load child_process, then reverse shell",
-  "main": "index.js",
-  "scripts": {
-    "postinstall": "node index.js"
-  }
-}

@@ -1,9 +1,0 @@
-{
-  "name": "template-literal-obfuscation",
-  "version": "1.0.0",
-  "description": "Adversarial sample: template literals to reconstruct dangerous module names",
-  "main": "index.js",
-  "scripts": {
-    "postinstall": "node index.js"
-  }
-}

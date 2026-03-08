@@ -1,9 +1,0 @@
-{
-  "name": "conditional-chain",
-  "version": "1.0.0",
-  "description": "Adversarial sample: fs.readFileSync + dns.resolve exfiltration, no eval/child_process",
-  "main": "index.js",
-  "scripts": {
-    "postinstall": "node index.js"
-  }
-}

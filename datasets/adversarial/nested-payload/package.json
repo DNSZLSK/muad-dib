@@ -1,9 +1,0 @@
-{
-  "name": "nested-payload",
-  "version": "1.0.0",
-  "description": "Adversarial sample: malware buried 3 levels deep in require chain",
-  "main": "index.js",
-  "scripts": {
-    "postinstall": "node index.js"
-  }
-}

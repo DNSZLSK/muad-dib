@@ -23,7 +23,7 @@ const { ensureIOCs } = require('./ioc/bootstrap.js');
 const { scanEntropy } = require('./scanner/entropy.js');
 const { scanAIConfig } = require('./scanner/ai-config.js');
 const { deobfuscate } = require('./scanner/deobfuscate.js');
-const { buildModuleGraph, annotateTaintedExports, detectCrossFileFlows } = require('./scanner/module-graph.js');
+const { buildModuleGraph, annotateTaintedExports, detectCrossFileFlows, annotateSinkExports, detectCallbackCrossFileFlows } = require('./scanner/module-graph.js');
 const { computeReachableFiles } = require('./scanner/reachability.js');
 const { runTemporalAnalyses } = require('./temporal-runner.js');
 const { formatOutput } = require('./output-formatter.js');
@@ -362,6 +362,10 @@ async function run(targetPath, options = {}) {
       const graph = await yieldThen(() => buildModuleGraph(targetPath));
       const tainted = await yieldThen(() => annotateTaintedExports(graph, targetPath));
       crossFileFlows = await yieldThen(() => detectCrossFileFlows(graph, tainted, targetPath));
+      // Callback-based cross-file flow detection
+      const sinkAnnotations = await yieldThen(() => annotateSinkExports(graph, targetPath));
+      const callbackFlows = await yieldThen(() => detectCallbackCrossFileFlows(graph, tainted, sinkAnnotations, targetPath));
+      crossFileFlows = crossFileFlows.concat(callbackFlows);
     } catch (e) {
       // Graceful fallback — module graph is best-effort
       debugLog('[MODULE-GRAPH] Error:', e && e.message);

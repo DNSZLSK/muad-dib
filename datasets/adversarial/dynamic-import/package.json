@@ -1,9 +1,0 @@
-{
-  "name": "dynamic-import",
-  "version": "1.0.0",
-  "description": "Adversarial sample: ESM dynamic import() instead of require()",
-  "main": "index.js",
-  "scripts": {
-    "postinstall": "node index.js"
-  }
-}

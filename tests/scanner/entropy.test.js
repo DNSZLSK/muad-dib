@@ -193,20 +193,26 @@ async function runEntropyTests() {
   // v2.5.14: B11 — Fragment cluster detection
   // =============================================
 
-  await asyncTest('ENTROPY B11: 6 short high-entropy strings → fragmented_high_entropy_cluster', async () => {
+  await asyncTest('ENTROPY B11: 12 short high-entropy strings → fragmented_high_entropy_cluster', async () => {
     const fs = require('fs');
     const os = require('os');
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-frag-'));
     fs.writeFileSync(path.join(tmpDir, 'package.json'), JSON.stringify({ name: 'test-frag', version: '1.0.0' }));
-    // 6 fragments of 30 chars each with high entropy (random-looking base64)
+    // 12 fragments of 40 chars each with entropy > 5.0 (high-diversity charset)
     fs.writeFileSync(path.join(tmpDir, 'index.js'), `
-const a = 'xK9mQ2pLwR7vN5tY3hBfZsJcGdAe';
-const b = 'R7vN5tY3hBfZsJcGdAexK9mQ2pLwR';
-const c = 'Q2pLwR7vN5tY3hBfZsJcGdAexK9mX';
-const d = 'N5tY3hBfZsJcGdAexK9mQ2pLwR7vZ';
-const e = 'hBfZsJcGdAexK9mQ2pLwR7vN5tY3W';
-const f = 'JcGdAexK9mQ2pLwR7vN5tY3hBfZsV';
-console.log(a + b + c + d + e + f);
+const a = '2Tv;]"Df+Mo4Vx=_$Fh-Oq6Xz?a&Hj/Qs8Z|Ac';
+const b = 'Ch0UzBg/TyAf.Sx@e-Rw?d,Qv>c+Pu=b*Ot<a)N';
+const c = 'T|Go:b-U}Hp;c.V!Iq<d/W"Jr=e0X#Ks>f1Y$Lt?';
+const d = 'e3^,W%P{ItBm;f4_-X&Q|JuCn<g5z.YxR}KvDo=h';
+const e = 'vGuFtEsDrCqBpAo@n?m>l=k<j;i:h9g8f7e6d5c4';
+const f = '*[/z4e9j>oCtHyM!R&W+y0a5f:k?pDuIzN"SxX,]';
+const g = ';oFzQ(y3g>rI}T+_6jAuL#W.b9mDxO&Z1e<pG{R)';
+const h = 'L&]7nH"Y3jD{U/f@wQ+b<sMx^8oI#Z4kE|V0gAxR';
+const i = ']:tQ.hE"y9sP-gD![8rO,fC}Z7qN+eB|Y6pM*dA{';
+const j = 'nN.kK+hH(eE%bB"_?|y<yY9vV6sS3pP0mM-jJ*gG';
+const k = '"bE(hK.nQ4tW:z]@#cF)iL/oR5uX;{^A$dG*jM0p';
+const l = '3vyB(kQ7zzF,oU;!dJ0sY?%hN4w]C)lR8{aG-pV<';
+console.log(a+b+c+d+e+f+g+h+i+j+k+l);
 `);
     try {
       const threats = scanEntropy(tmpDir);
@@ -215,21 +221,23 @@ console.log(a + b + c + d + e + f);
     } finally { fs.rmSync(tmpDir, { recursive: true }); }
   });
 
-  await asyncTest('ENTROPY B11 negative: 3 short high-entropy strings → NOT enough for cluster', async () => {
+  await asyncTest('ENTROPY B11 negative: 5 short high-entropy strings → NOT enough for cluster', async () => {
     const fs = require('fs');
     const os = require('os');
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-frag-'));
     fs.writeFileSync(path.join(tmpDir, 'package.json'), JSON.stringify({ name: 'test-frag', version: '1.0.0' }));
     fs.writeFileSync(path.join(tmpDir, 'index.js'), `
-const a = 'xK9mQ2pLwR7vN5tY3hBfZsJcGdAe';
-const b = 'R7vN5tY3hBfZsJcGdAexK9mQ2pLwR';
-const c = 'Q2pLwR7vN5tY3hBfZsJcGdAexK9mX';
-console.log(a + b + c);
+const a = '2Tv;]"Df+Mo4Vx=_$Fh-Oq6Xz?a&Hj/Qs8Z|Ac';
+const b = 'Ch0UzBg/TyAf.Sx@e-Rw?d,Qv>c+Pu=b*Ot<a)N';
+const c = 'T|Go:b-U}Hp;c.V!Iq<d/W"Jr=e0X#Ks>f1Y$Lt?';
+const d = 'e3^,W%P{ItBm;f4_-X&Q|JuCn<g5z.YxR}KvDo=h';
+const e = 'vGuFtEsDrCqBpAo@n?m>l=k<j;i:h9g8f7e6d5c4';
+console.log(a+b+c+d+e);
 `);
     try {
       const threats = scanEntropy(tmpDir);
       const t = threats.find(t => t.type === 'fragmented_high_entropy_cluster');
-      assert(!t, 'Should NOT detect cluster with only 3 fragments');
+      assert(!t, 'Should NOT detect cluster with only 5 fragments (threshold is 10)');
     } finally { fs.rmSync(tmpDir, { recursive: true }); }
   });
 

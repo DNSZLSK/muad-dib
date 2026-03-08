@@ -1557,22 +1557,31 @@ https.get('https://registry.npmjs.org/express/-/express-4.18.2.tgz', (res) => {
 
   // --- Fix 2.1: Dist downgrade 1-notch + DIST_EXEMPT_TYPES ---
 
-  test('AUDIT-S4: Dist file CRITICAL downgraded to HIGH (1-notch, not MEDIUM)', () => {
+  test('AUDIT-S4: Dist file bundler artifact CRITICAL → MEDIUM (2-notch)', () => {
     const threats = [
       { type: 'dangerous_call_eval', severity: 'CRITICAL', file: 'dist/index.js', message: 'eval' }
     ];
     applyFPReductions(threats, null, null);
-    assert(threats[0].severity === 'HIGH',
-      `CRITICAL in dist/ should become HIGH (1-notch), got ${threats[0].severity}`);
+    assert(threats[0].severity === 'MEDIUM',
+      `CRITICAL bundler artifact in dist/ should become MEDIUM (2-notch), got ${threats[0].severity}`);
   });
 
-  test('AUDIT-S4: Dist file HIGH downgraded to MEDIUM (1-notch)', () => {
+  test('AUDIT-S4: Dist file bundler artifact HIGH → LOW (2-notch)', () => {
     const threats = [
       { type: 'dynamic_require', severity: 'HIGH', file: 'build/loader.js', message: 'dr' }
     ];
     applyFPReductions(threats, null, null);
+    assert(threats[0].severity === 'LOW',
+      `HIGH bundler artifact in build/ should become LOW (2-notch), got ${threats[0].severity}`);
+  });
+
+  test('AUDIT-S4: Dist file non-bundler type HIGH → MEDIUM (1-notch)', () => {
+    const threats = [
+      { type: 'env_access', severity: 'HIGH', file: 'dist/config.js', message: 'env' }
+    ];
+    applyFPReductions(threats, null, null);
     assert(threats[0].severity === 'MEDIUM',
-      `HIGH in build/ should become MEDIUM (1-notch), got ${threats[0].severity}`);
+      `HIGH non-bundler type in dist/ should become MEDIUM (1-notch), got ${threats[0].severity}`);
   });
 
   test('AUDIT-S4: zlib_inflate_eval exempt from dist downgrade', () => {
