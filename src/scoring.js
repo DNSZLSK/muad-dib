@@ -108,8 +108,8 @@ const FP_COUNT_THRESHOLDS = {
   require_cache_poison: { maxCount: 3, from: 'CRITICAL', to: 'LOW' },
   suspicious_dataflow: { maxCount: 3, to: 'LOW' },
   obfuscation_detected: { maxCount: 3, to: 'LOW' },
-  module_compile_dynamic: { maxCount: 3, from: 'CRITICAL', to: 'LOW' },
-  module_compile: { maxCount: 3, from: 'CRITICAL', to: 'LOW' },
+  module_compile_dynamic: { maxCount: 3, from: 'HIGH', to: 'LOW' },
+  module_compile: { maxCount: 3, from: 'HIGH', to: 'LOW' },
   zlib_inflate_eval: { maxCount: 2, from: 'CRITICAL', to: 'LOW' },
   // Build tools (webpack, jest) legitimately use vm.runInThisContext for module evaluation
   vm_code_execution: { maxCount: 3, from: 'HIGH', to: 'LOW' },
@@ -120,7 +120,10 @@ const FP_COUNT_THRESHOLDS = {
   // P4: bundled credential_tampering from minified alias resolution (jspdf, lerna)
   credential_tampering: { maxCount: 5, to: 'LOW' },
   // B1 FP reduction: bundled code aliases eval/Function (sinon, storybook, vitest)
-  dangerous_call_eval: { maxCount: 3, from: 'MEDIUM', to: 'LOW' }
+  dangerous_call_eval: { maxCount: 3, from: 'MEDIUM', to: 'LOW' },
+  // P6: HTTP client libraries (undici, aws-sdk, nodemailer, jsdom) parse Authorization/Bearer headers
+  // with 5+ credential regexes. Real harvesters use 1-2 targeted regexes.
+  credential_regex_harvest: { maxCount: 4, from: 'HIGH', to: 'LOW' }
 };
 
 // Types exempt from dist/ downgrade — IOC matches, lifecycle scripts, and
@@ -135,9 +138,10 @@ const DIST_EXEMPT_TYPES = new Set([
   'download_exec_binary',     // download + chmod + exec (binary dropper)
   'cross_file_dataflow',      // credential read → network exfil across files
   'staged_eval_decode',       // eval(atob(...)) (explicit payload staging)
-  'reverse_shell',            // net.Socket + connect + pipe (always malicious)
-  'remote_code_load',          // fetch + eval/Function (multi-stage payload)
-  'proxy_data_intercept'       // Proxy trap + network (data interception)
+  'reverse_shell'             // net.Socket + connect + pipe (always malicious)
+  // P6: remote_code_load and proxy_data_intercept removed — in bundled dist/ files,
+  // fetch + eval co-occurrence is coincidental (bundler combines HTTP client + template compilation).
+  // fetch_decrypt_exec (fetch+decrypt+eval triple) remains exempt — never coincidental.
 ]);
 
 // Regex matching dist/build/minified/bundled file paths

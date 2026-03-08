@@ -20,7 +20,10 @@ function detectObfuscation(targetPath) {
     const pathParts = relativePath.split(path.sep);
     const isInDistOrBuild = pathParts.some(p => p === 'dist' || p === 'build');
     const isLargeCjsMjs = (basename.endsWith('.cjs') || basename.endsWith('.mjs')) && content.length > 100 * 1024;
-    const isPackageOutput = isMinified || isBundled || isInDistOrBuild || isLargeCjsMjs;
+    // P6: Any JS file > 100KB is overwhelmingly bundled output regardless of directory name.
+    // Real obfuscated malware is typically small (<50KB). Catches prettier plugins/, svelte compiler/, etc.
+    const isLargeJs = basename.endsWith('.js') && content.length > 100 * 1024;
+    const isPackageOutput = isMinified || isBundled || isInDistOrBuild || isLargeCjsMjs || isLargeJs;
 
     // 1. Ratio code sur une seule ligne (skip .min.js — minification, not obfuscation)
     if (!isMinified) {
