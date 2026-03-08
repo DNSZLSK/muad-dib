@@ -63,9 +63,9 @@ Please include the following information in your report:
 - We aim to release fixes before public disclosure
 - We request a 90-day disclosure window for complex issues
 
-## Detection Rules (v2.5.8)
+## Detection Rules (v2.5.17)
 
-MUAD'DIB uses 14 parallel scanners + 5 behavioral anomaly detection features + ground truth validation, producing 113 rule IDs (108 RULES + 5 PARANOID):
+MUAD'DIB uses 14 parallel scanners + 5 behavioral anomaly detection features + ground truth validation, producing 121 rule IDs (116 RULES + 5 PARANOID):
 
 ### AST Scanner
 
@@ -93,6 +93,9 @@ MUAD'DIB uses 14 parallel scanners + 5 behavioral anomaly detection features + g
 | MUADDIB-SHELL-010 | Python Reverse Shell | CRITICAL |
 | MUADDIB-SHELL-011 | Perl Reverse Shell | CRITICAL |
 | MUADDIB-SHELL-012 | FIFO Reverse Shell | CRITICAL |
+| MUADDIB-SHELL-013 | FIFO + Netcat Reverse Shell (mkfifo + nc) | CRITICAL |
+| MUADDIB-SHELL-014 | Base64 Decode Pipe to Shell (base64 -d \| bash) | CRITICAL |
+| MUADDIB-SHELL-015 | Wget + Base64 Decode Two-Stage | HIGH |
 
 ### Package Scanner
 
@@ -128,9 +131,9 @@ MUAD'DIB uses 14 parallel scanners + 5 behavioral anomaly detection features + g
 | MUADDIB-AST-020 | Staged Binary Payload | CRITICAL | T1027 |
 | MUADDIB-AST-021 | Staged Eval Decode | CRITICAL | T1140 |
 | MUADDIB-AST-022 | Encrypted Payload Decryption | HIGH | T1140 |
-| MUADDIB-AST-023 | Module Compile Execution | CRITICAL | T1059 |
+| MUADDIB-AST-023 | Module Compile Execution | HIGH | T1059 |
 | MUADDIB-AST-024 | Obfuscated Payload via Zlib Inflate | CRITICAL | T1140 |
-| MUADDIB-AST-025 | Dynamic Module Compile Execution | CRITICAL | T1059 |
+| MUADDIB-AST-025 | Dynamic Module Compile Execution | HIGH | T1059 |
 | MUADDIB-AST-026 | Anti-Forensics Write-Execute-Delete | HIGH | T1070 |
 | MUADDIB-AST-027 | MCP Config Injection | CRITICAL | T1059 |
 | MUADDIB-AST-028 | Git Hooks Injection | HIGH | T1195.002 |
@@ -178,6 +181,7 @@ MUAD'DIB uses 14 parallel scanners + 5 behavioral anomaly detection features + g
 | MUADDIB-ENTROPY-001 | High Entropy String | MEDIUM | Threshold: 5.5 bits + 50 chars min |
 | ~~MUADDIB-ENTROPY-002~~ | ~~High Entropy File~~ | ~~removed~~ | Removed in v1.6.16 — replaced by ENTROPY-003 |
 | MUADDIB-ENTROPY-003 | JS Obfuscation Pattern | HIGH | _0x* vars, encoded string arrays, eval+entropy, long base64 |
+| MUADDIB-ENTROPY-004 | Fragmented High Entropy Cluster | MEDIUM | Many short high-entropy strings bypassing MIN_STRING_LENGTH |
 
 ### Other Scanners
 
@@ -345,7 +349,7 @@ The sandbox simulates CI environments by setting: `CI=true`, `GITHUB_ACTIONS=tru
 2. **Signed commits**: Use GPG-signed commits when possible
 3. **Review dependencies**: Check new dependencies before adding them
 
-## Threat Model (v2.5.8)
+## Threat Model (v2.5.17)
 
 MUAD'DIB 2.5 uses a **triple detection approach**:
 
@@ -353,7 +357,7 @@ MUAD'DIB 2.5 uses a **triple detection approach**:
 
 2. **Behavioral anomaly detection** (v2.0): Analyzes changes between package versions to detect supply-chain attacks before they appear in IOC databases. Compares lifecycle scripts, AST, publish frequency, and maintainer metadata across versions. This approach can detect 0-day behavioral anomalies without any prior knowledge of the specific attack.
 
-3. **Ground truth validation** (v2.1–v2.5.8): Validates detection accuracy against 51 real-world attacks (49 active samples), tracks detection lead times vs. public advisories, and monitors false positive rates over time. 1656 tests with 86% code coverage. Provides observability into scanner effectiveness.
+3. **Ground truth validation** (v2.1–v2.5.17): Validates detection accuracy against 51 real-world attacks (49 active samples), tracks detection lead times vs. public advisories, and monitors false positive rates over time. 1869 tests with 86% code coverage. Provides observability into scanner effectiveness.
 
 The behavioral detection features are opt-in (`--temporal-full`) and query the npm registry at scan time. They are particularly effective against:
 - Account takeover attacks (event-stream pattern)
@@ -361,19 +365,18 @@ The behavioral detection features are opt-in (`--temporal-full`) and query the n
 - Dormant package hijacking (abandonware takeover)
 - Sudden code injection (Shai-Hulud, ua-parser-js pattern)
 
-## Ground Truth Validation (v2.5.8)
+## Ground Truth Validation (v2.5.17)
 
 MUAD'DIB includes a ground truth dataset of 51 real-world supply-chain attacks (49 active samples) to continuously validate detection coverage.
 
-**TPR: 91.8% (45/49 detected)**
+**TPR: 93.9% (46/49 detected)**
 
-4 out-of-scope misses (browser-only or FP-risky):
+3 out-of-scope misses (browser-only):
 - lottie-player, polyfill-io, trojanized-jquery (browser-only DOM attacks)
-- websocket-rat (FP-risky pattern)
 
 Run `muaddib evaluate --ground-truth` to validate detection at any time.
 
-## Datadog 17K Benchmark (v2.5.8)
+## Datadog 17K Benchmark (v2.5.17)
 
 Validated against the [DataDog Malicious Software Packages Dataset](https://github.com/DataDog/malicious-software-packages-dataset) (17,922 real malware npm packages).
 

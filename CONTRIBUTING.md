@@ -75,8 +75,8 @@ MUAD'DIB scans Python projects via `src/scanner/python.js` (requirements.txt, se
 
 ### 7. Add adversarial test samples
 
-MUAD'DIB maintains evasive samples to validate scanner robustness (83 samples, 98.8% ADR):
-- `datasets/adversarial/` -- 43 samples with evasion techniques (encoding, splitting, indirection)
+MUAD'DIB maintains evasive samples to validate scanner robustness (102 samples, 94.0% ADR on available samples):
+- `datasets/adversarial/` -- 62 samples with evasion techniques (encoding, splitting, indirection)
 - `datasets/holdout-v2/` through `datasets/holdout-v5/` -- 40 holdout samples (4 rounds of 10)
 
 To add a new adversarial sample:

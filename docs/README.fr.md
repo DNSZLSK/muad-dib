@@ -286,7 +286,7 @@ Ajoutez à `.pre-commit-config.yaml` :
 ```yaml
 repos:
   - repo: https://github.com/DNSZLSK/muad-dib
-    rev: v2.5.8
+    rev: v2.5.17
     hooks:
       - id: muaddib-scan        # Scanner toutes les menaces
       # - id: muaddib-diff      # Ou: seulement les nouvelles
@@ -335,7 +335,7 @@ muaddib replay
 muaddib ground-truth
 ```
 
-Rejoue des attaques supply-chain réelles contre le scanner pour valider la couverture de détection. Résultat actuel : **45/49 détectées (91.8% TPR)** sur 51 samples (49 actifs).
+Rejoue des attaques supply-chain réelles contre le scanner pour valider la couverture de détection. Résultat actuel : **46/49 détectées (93.9% TPR)** sur 51 samples (49 actifs).
 
 4 misses hors scope : lottie-player, polyfill-io, trojanized-jquery (attaques browser-only DOM), websocket-rat (pattern risque FP).
 
@@ -663,7 +663,7 @@ MUAD'DIB 2.5.8 Scanner
 |   +-- Chaînes re-export 3 hops, analyse méthodes de classe
 |   +-- Détection credential read → network sink cross-fichiers
 |
-+-- 14 Scanners Parallèles (113 règles)
++-- 14 Scanners Parallèles (121 règles)
 |   +-- AST Parse (acorn) — eval/Function, credential CLI theft, binary droppers, prototype hooks
 |   +-- Pattern Matching (shell, scripts)
 |   +-- Typosquat Detection (npm + PyPI, Levenshtein)
@@ -681,13 +681,13 @@ MUAD'DIB 2.5.8 Scanner
 |   +-- Canary Tokens / Honey Tokens (sandbox)
 |
 +-- Validation & Observabilité (v2.1)
-|   +-- Ground Truth Dataset (51 attaques réelles, 91.8% TPR)
+|   +-- Ground Truth Dataset (51 attaques réelles, 93.9% TPR)
 |   +-- Logging Temps de Détection (first_seen, métriques lead time)
 |   +-- Suivi Taux FP (stats quotidiennes, taux faux positifs)
 |   +-- Décomposition Score (scoring explicable par règle)
 |   +-- API Threat Feed (serveur HTTP, flux JSON pour SIEM)
 |
-+-- Réduction FP Post-traitement (v2.2.8-v2.2.9, v2.3.0-v2.3.1, v2.5.7-v2.5.8)
++-- Réduction FP Post-traitement (v2.2.8-v2.3.1, v2.5.7-v2.5.8, v2.5.15-v2.5.16)
 |   +-- Downgrade sévérité par comptage (dynamic_require, dataflow, module_compile, etc.)
 |   +-- Cap scoring prototype_hook MEDIUM + whitelist HTTP client
 |   +-- Obfuscation dans dist/build/.cjs/.mjs → LOW
@@ -695,6 +695,8 @@ MUAD'DIB 2.5.8 Scanner
 |   +-- Catégorisation source télémétrie dataflow (os.platform/arch → telemetry_read)
 |   +-- Whitelist DEP (es5-ext, bootstrap-sass) + skip alias npm
 |   +-- Audit IOC wildcards (v2.5.8) : FPR 10.8% → 6.0%
+|   +-- P5 precision heuristique (v2.5.15) : 7 corrections
+|   +-- P6 precision composes (v2.5.16) : 6 corrections
 |
 +-- Scoring Per-File Max (v2.2.11)
 |   +-- Score = max(scores_par_fichier) + score_package_level
@@ -730,9 +732,9 @@ Output (CLI, JSON, HTML, SARIF, Webhook, Threat Feed)
 | Metrique | Resultat | Details |
 |----------|----------|---------|
 | **Wild TPR** (Datadog 17K) | **88.2%** brut · **~100%** ajuste | 17 922 packages malveillants reels. 2 077 misses hors scope (voir ci-dessous) |
-| **TPR** (Ground Truth) | **91.8%** (45/49) | 51 attaques reelles (49 actives). 4 hors scope : browser-only (3) + risque FP (1) |
-| **FPR** (Benign, global) | **6.0%** (32/529) | 529 packages npm, vrai code source via `npm pack`, seuil > 20 |
-| **ADR** (Adversarial + Holdout) | **98.8%** (82/83) | 43 adversariaux + 40 holdouts. 1 miss documente : `require-cache-poison` (compromis accepte) |
+| **TPR** (Ground Truth) | **93.9%** (46/49) | 51 attaques reelles (49 actives). 3 hors scope : browser-only (3) |
+| **FPR** (Benign, global) | **12.3%** (65/529) | 529 packages npm, vrai code source via `npm pack`, seuil > 20 |
+| **ADR** (Adversarial + Holdout) | **94.0%** (63/67) | 62 adversariaux + 40 holdouts. 4 misses documentes |
 
 **Benchmark Datadog 17K** — [DataDog Malicious Software Packages Dataset](https://github.com/DataDog/malicious-software-packages-dataset), 17 922 packages malveillants npm. TPR brut : 88.2% (15 810/17 922). Les 2 077 misses (score=0) ont ete categorises :
 
@@ -753,7 +755,9 @@ TPR ajuste sur malware JS/Node.js : **~100%** (15 810/~15 845). Voir [Evaluation
 | Gros (50-100 fichiers JS) | 40 | 10 | 25.0% |
 | Tres gros (100+ fichiers JS) | 62 | 25 | 40.3% |
 
-**Progression FPR** : 0% (invalide, dirs vides, v2.2.0-v2.2.6) → 38% (premiere vraie mesure, v2.2.7) → 19.4% (v2.2.8) → 17.5% (v2.2.9) → ~13% (v2.2.11, scoring per-file max) → 8.9% (v2.3.0, P2) → 7.4% (v2.3.1, P3) → **6.0%** (v2.5.8, P4 + audit IOC wildcards)
+**Progression FPR** : 0% (invalide, dirs vides, v2.2.0-v2.2.6) → 38% (premiere vraie mesure, v2.2.7) → 19.4% (v2.2.8) → 17.5% (v2.2.9) → ~13% (v2.2.11, scoring per-file max) → 8.9% (v2.3.0, P2) → 7.4% (v2.3.1, P3) → 6.0% (v2.5.8, P4 + audit IOC wildcards) → ~13.6% (v2.5.14, hardening audit) → **12.3%** (v2.5.16, P5+P6)
+
+> **Note sur l'evolution du FPR :** Le FPR historique de 6.0% (v2.5.8) reposait sur un `BENIGN_PACKAGE_WHITELIST` qui excluait certains packages connus du scoring — un biais de data leakage supprime en v2.5.10. Le FPR actuel de 12.3% est une mesure honnete sans whitelisting, contre 529 packages benins reels. Les reductions P5/P6 (precision setTimeout, dist/ two-notch downgrade, credential_regex count-based, env segment matching, etc.) sont des ameliorations de precision des detecteurs, pas du whitelisting.
 
 **Progression holdout** (scores pre-tuning, regles gelees) :
 
@@ -771,7 +775,7 @@ TPR ajuste sur malware JS/Node.js : **~100%** (15 810/~15 845). Voir [Evaluation
 - **ADR** (Adversarial Detection Rate) : taux de detection sur 83 samples malveillants evasifs — 43 adversariaux (4 vagues red team + 3 bypasses + Vague 4) + 40 holdouts (5 batches de 10, testant obfuscation, dataflow inter-module, etc.). 1 miss documente : `require-cache-poison` (compromis accepte).
 - **Holdout** (pre-tuning) : taux de detection sur 10 samples jamais vus avec regles gelees (mesure de generalisation)
 
-Datasets : 17 922 samples Datadog, 529 npm + 132 PyPI packages benins, 83 samples adversariaux/holdout, 51 attaques ground-truth (65 packages malveillants documentes). **1656 tests**, 86% coverage.
+Datasets : 17 922 samples Datadog, 529 npm + 132 PyPI packages benins, 102 samples adversariaux/holdout, 51 attaques ground-truth (65 packages malveillants documentes). **1869 tests**, 86% coverage.
 
 Voir [Evaluation Methodology](docs/EVALUATION_METHODOLOGY.md) pour le protocole experimental complet.
 
@@ -807,12 +811,12 @@ npm test
 
 ### Tests
 
-- **1656 tests unitaires/integration** sur 42 fichiers modulaires - 86% coverage via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
+- **1869 tests unitaires/integration** sur 43 fichiers modulaires - 86% coverage via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
 - **56 tests de fuzzing** - YAML malforme, JSON invalide, fichiers binaires, ReDoS, unicode, inputs 10MB
 - **Benchmark Datadog 17K** - 17 922 packages malveillants reels, 88.2% TPR brut, ~100% sur malware JS/Node.js (2 077 misses hors scope : phishing, binaires, libs corrigees)
-- **83 samples adversariaux/holdout** - 43 adversariaux + 40 holdouts, 82/83 taux de detection (98.8% ADR). 1 miss documente : `require-cache-poison` (compromis accepte)
-- **Validation ground truth** - 51 attaques reelles (45/49 detectees = 91.8% TPR). 4 hors scope : browser-only (3) + risque FP (1)
-- **Validation faux positifs** - 6.0% FPR global (32/529) sur vrai code source npm via `npm pack`
+- **102 samples adversariaux/holdout** - 62 adversariaux + 40 holdouts, 63/67 taux de detection sur samples disponibles (94.0% ADR). 4 misses documentes
+- **Validation ground truth** - 51 attaques reelles (46/49 detectees = 93.9% TPR). 3 hors scope : browser-only (lottie-player, polyfill-io, trojanized-jquery)
+- **Validation faux positifs** - 12.3% FPR global (65/529) sur vrai code source npm via `npm pack`
 - **Audit ESLint securite** - `eslint-plugin-security` avec 14 regles activees
 
 ---
