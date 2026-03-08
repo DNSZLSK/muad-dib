@@ -534,18 +534,10 @@ function persistDailyReport(reportPayload, rawMetrics) {
   }
 }
 
-async function trySendWebhook(name, version, ecosystem, result, sandboxResult) {
-  if (!shouldSendWebhook(result, sandboxResult)) {
-    if (sandboxResult && sandboxResult.score === 0) {
-      console.log(`[MONITOR] FALSE POSITIVE (sandbox clean): ${name}@${version}`);
-    }
-    return;
-  }
-  const url = getWebhookUrl();
-  const payload = buildMonitorWebhookPayload(name, version, ecosystem, result, sandboxResult);
+function buildAlertData(name, version, ecosystem, result, sandboxResult) {
   const webhookData = {
     target: `${ecosystem}/${name}@${version}`,
-    timestamp: payload.timestamp,
+    timestamp: new Date().toISOString(),
     ecosystem,
     summary: {
       ...result.summary,
@@ -560,8 +552,18 @@ async function trySendWebhook(name, version, ecosystem, result, sandboxResult) {
       severity: sandboxResult.severity
     };
   }
-  // Persist alert locally before sending webhook (survives Discord outages)
-  persistAlert(name, version, ecosystem, webhookData);
+  return webhookData;
+}
+
+async function trySendWebhook(name, version, ecosystem, result, sandboxResult) {
+  if (!shouldSendWebhook(result, sandboxResult)) {
+    if (sandboxResult && sandboxResult.score === 0) {
+      console.log(`[MONITOR] FALSE POSITIVE (sandbox clean): ${name}@${version}`);
+    }
+    return;
+  }
+  const url = getWebhookUrl();
+  const webhookData = buildAlertData(name, version, ecosystem, result, sandboxResult);
   try {
     await sendWebhook(url, webhookData);
     console.log(`[MONITOR] Webhook sent for ${name}@${version}`);
@@ -1443,6 +1445,9 @@ async function scanPackage(name, version, ecosystem, tarballUrl) {
         appendDetection(name, version, ecosystem, findingTypes, maxSeverity);
 
         dailyAlerts.push({ name, version, ecosystem, findingsCount: result.summary.total, tier });
+        // Persist alert locally for ALL suspects (independent of webhook filtering)
+        const alertData = buildAlertData(name, version, ecosystem, result, sandboxResult);
+        persistAlert(name, version, ecosystem, alertData);
         await trySendWebhook(name, version, ecosystem, result, sandboxResult);
         return { sandboxResult, staticClean: false, tier };
       }
@@ -1605,9 +1610,6 @@ function buildDailyReportEmbed() {
 }
 
 async function sendDailyReport() {
-  const url = getWebhookUrl();
-  if (!url) return;
-
   // Never send an empty report (0 scanned — restart with no work done)
   if (stats.scanned === 0) {
     console.log('[MONITOR] Daily report skipped (0 packages scanned)');
@@ -1623,7 +1625,7 @@ async function sendDailyReport() {
 
   const payload = buildDailyReportEmbed();
 
-  // Persist locally with full raw metrics (survives Discord outages, enables trend analysis)
+  // Persist locally with full raw metrics (independent of webhook — enables trend analysis)
   const { agg } = buildReportFromDisk();
   persistDailyReport(payload, {
     scanned: agg.scanned,
@@ -1635,11 +1637,17 @@ async function sendDailyReport() {
     topSuspects: dailyAlerts.slice().sort((a, b) => b.findingsCount - a.findingsCount).slice(0, 10)
   });
 
-  try {
-    await sendWebhook(url, payload, { rawPayload: true });
-    console.log('[MONITOR] Daily report sent');
-  } catch (err) {
-    console.error(`[MONITOR] Daily report webhook failed: ${err.message}`);
+  // Send webhook only if configured
+  const url = getWebhookUrl();
+  if (url) {
+    try {
+      await sendWebhook(url, payload, { rawPayload: true });
+      console.log('[MONITOR] Daily report sent');
+    } catch (err) {
+      console.error(`[MONITOR] Daily report webhook failed: ${err.message}`);
+    }
+  } else {
+    console.log('[MONITOR] Daily report persisted locally (no webhook URL configured)');
   }
 
   // Reset daily counters
@@ -2335,6 +2343,8 @@ module.exports = {
   getWebhookUrl,
   shouldSendWebhook,
   buildMonitorWebhookPayload,
+  buildAlertData,
+  persistAlert,
   trySendWebhook,
   computeRiskLevel,
   computeRiskScore,
