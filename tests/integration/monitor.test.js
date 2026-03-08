@@ -4093,23 +4093,28 @@ async function runMonitorTests() {
 
   // --- sendDailyReport with no webhook (early return) ---
 
-  await asyncTest('MONITOR-COV: sendDailyReport returns early when no webhook URL', async () => {
+  await asyncTest('MONITOR-COV: sendDailyReport persists locally and resets stats even without webhook URL', async () => {
     const origEnv = process.env.MUADDIB_WEBHOOK_URL;
     delete process.env.MUADDIB_WEBHOOK_URL;
+    const logs = [];
     const origLog = console.log;
-    console.log = () => {};
+    const origErr = console.error;
+    console.log = (msg) => logs.push(msg);
+    console.error = () => {};
 
-    // Set stats to non-zero to verify they are NOT reset (early return)
+    // Set stats to non-zero to verify they ARE reset (persist + reset even without webhook)
     const origScanned = stats.scanned;
     stats.scanned = 42;
 
     try {
       await sendDailyReport();
-      // sendDailyReport checks url first; if not set, returns immediately
-      // Stats should NOT be reset because the function returned early
-      assert(stats.scanned === 42, 'Stats should NOT be reset when no webhook URL (early return)');
+      // sendDailyReport now persists locally and resets counters even without webhook
+      assert(stats.scanned === 0, 'Stats should be reset after daily report (no webhook still persists)');
+      const noWebhookLog = logs.some(l => typeof l === 'string' && l.includes('no webhook URL configured'));
+      assert(noWebhookLog, 'Should log that no webhook URL is configured');
     } finally {
       console.log = origLog;
+      console.error = origErr;
       stats.scanned = origScanned;
       if (origEnv !== undefined) process.env.MUADDIB_WEBHOOK_URL = origEnv;
     }
