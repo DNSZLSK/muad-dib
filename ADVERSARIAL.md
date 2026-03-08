@@ -6,10 +6,14 @@ This document describes the adversarial malware samples used to evaluate MUAD'DI
 
 - **62 adversarial samples** across 5 red-team waves
 - **40 holdout samples** across 4 holdout sets (holdout-v2 through holdout-v5)
-- **ADR (Adversarial Detection Rate): 98.8% (82/83)** on waves 1-4 + holdout
-- **Wave 5: 27/27 detected (100%)**
-- All samples scored >= 20/100 (detection threshold)
-- 1 documented miss: `require-cache-poison` (accepted trade-off from FP reduction P3)
+- **ADR (Adversarial Detection Rate): 94.0% (63/67 available)** on waves 1-5 + holdout (v2.5.17)
+- **Wave 5: 24/27 detected on available samples** (3 misses: `getter-defineProperty-exfil`, `setTimeout-eval-chain`, `setter-trap-exfil`)
+- 43 adversarial sample directories are local-only and not evaluated on all machines
+- 4 documented misses on available samples:
+  - `require-cache-poison` (accepted trade-off from FP reduction P3)
+  - `getter-defineProperty-exfil` (Object.defineProperty interception — no AST pattern)
+  - `setTimeout-eval-chain` (deferred eval chain — no direct dangerous call)
+  - `setter-trap-exfil` (property setter trap — no AST pattern)
 
 ## Wave 1 — Core Evasion Techniques (20 samples)
 
@@ -92,7 +96,7 @@ Inspired by real-world campaigns (DPRK/Lazarus, FAMOUS CHOLLIMA) and 2025-2026 s
 | error-stack-exfil | Error stack trace manipulation for data exfiltration | T1041 | 35 | PASS |
 | event-emitter-exfil | EventEmitter-based credential relay | T1041 | 25 | PASS |
 | fn-return-exfil | Function return value interception and exfiltration | T1557 | 70 | PASS |
-| getter-defineProperty-exfil | Object.defineProperty override to intercept sensitive property definitions | T1574 | 25 | PASS |
+| getter-defineProperty-exfil | Object.defineProperty override to intercept sensitive property definitions | T1574 | 10 | **MISS** |
 | http-header-exfil | HTTP header injection (cookies, user-agent) for data exfiltration | T1048 | 45 | PASS |
 | import-map-poison | Import map poisoning to redirect module resolution | T1574 | 25 | PASS |
 | intl-polyfill-backdoor | Intl polyfill with backdoor for locale-triggered exfiltration | T1027 | 35 | PASS |
@@ -103,8 +107,8 @@ Inspired by real-world campaigns (DPRK/Lazarus, FAMOUS CHOLLIMA) and 2025-2026 s
 | proxy-getter-dns-exfil | Proxy getter trap + DNS-based exfiltration | T1048 | 35 | PASS |
 | readable-stream-exfil | Transform stream credential scanning and exfiltration | T1557 | 25 | PASS |
 | response-intercept-exfil | HTTP response interception via monkey-patching | T1557 | 75 | PASS |
-| setTimeout-eval-chain | setTimeout + eval chain for deferred code execution | T1059 | 20 | PASS |
-| setter-trap-exfil | Property setter trap for credential interception | T1557 | 25 | PASS |
+| setTimeout-eval-chain | setTimeout + eval chain for deferred code execution | T1059 | 0 | **MISS** |
+| setter-trap-exfil | Property setter trap for credential interception | T1557 | 0 | **MISS** |
 | sourcemap-payload | Source map file with embedded executable payload | T1027 | 63 | PASS |
 | stream-pipe-exfil | Stream pipe interception for data-in-transit theft | T1557 | 45 | PASS |
 | svg-payload-fetch | SVG file with embedded payload fetched and executed | T1027.003 | 28 | PASS |

@@ -706,14 +706,14 @@ Each run uses `runSingleSandbox()` with a 60s timeout. Early exit on score >= 80
 
 ---
 
-## 14. Current Metrics (v2.4.9)
+## 14. Current Metrics (v2.5.17)
 
 | Metric | Result | Description |
 |--------|--------|-------------|
 | **Wild TPR** (Datadog 17K) | **88.2%** raw · **~100%** adjusted | 17,922 real malware samples. 2,077 out-of-scope misses (see section 14) |
-| **TPR** (Ground Truth) | **91.8% (45/49)** | 51 real-world attacks (49 active). 4 out-of-scope: browser-only (3) + FP-risky (1) |
-| **FPR** (Benign, global) | **7.4% (39/525)** | 529 npm packages (525 scanned), real source code, threshold > 20 |
-| **ADR** (Adversarial + Holdout) | **98.8% (82/83)** | 43 adversarial + 40 holdout. 1 documented miss: `require-cache-poison` (accepted trade-off) |
+| **TPR** (Ground Truth) | **93.9% (46/49)** | 51 real-world attacks (49 active). 3 out-of-scope: browser-only (3) |
+| **FPR** (Benign, global) | **12.3% (65/529)** | 529 npm packages, real source code, threshold > 20. Honest measurement without whitelisting |
+| **ADR** (Adversarial + Holdout) | **94.0% (63/67)** | 62 adversarial + 40 holdout. 4 misses on available samples |
 | **Holdout v1** (pre-tuning) | 30% (3/10) | 10 unseen samples before rule corrections |
 | **Holdout v2** (pre-tuning) | 40% (4/10) | 10 unseen samples before rule corrections |
 | **Holdout v3** (pre-tuning) | 60% (6/10) | 10 unseen samples before rule corrections |
@@ -721,9 +721,11 @@ Each run uses `runSingleSandbox()` with a 60s timeout. Early exit on score >= 80
 | **Holdout v5** (pre-tuning) | 50% (5/10) | 10 unseen samples testing inter-module dataflow |
 | **Vague 4** (pre-fix) | 0% (0/5) | 5 adversarial samples testing string concat evasion, compound patterns |
 
-v2.2.12: Ground truth expanded from 4 to 49 samples. v2.2.13: ADR 75/75 → 78/78. v2.2.22: scan freeze fix. v2.2.23: .npmignore excludes malware. v2.2.24: tests 862 → 1317, coverage 72% → 86%. v2.3.0: FPR ~13% → 8.9% (P2). v2.3.1: FPR 8.2% → 7.4% (P3), 8 new rules (102 total), tests 1317 → 1387, ADR 100% → 98.7% (1 documented miss). **v2.4.7**: Vague 4 (5 adversarial samples, 5 bypass corrections, 3 new rules), ADR 98.7% → 98.8% (82/83), 107 total rules (102 RULES + 5 PARANOID). **v2.4.9**: Sandbox preload monkey-patching (multi-run [0h, 72h, 7d], time-bomb detection), 6 new sandbox preload rules (SANDBOX-009 to 014), 113 total rules (108 RULES + 5 PARANOID), tests 1471 → 1522.
+v2.2.12: Ground truth expanded from 4 to 49 samples. v2.2.13: ADR 75/75 → 78/78. v2.2.22: scan freeze fix. v2.2.23: .npmignore excludes malware. v2.2.24: tests 862 → 1317, coverage 72% → 86%. v2.3.0: FPR ~13% → 8.9% (P2). v2.3.1: FPR 8.2% → 7.4% (P3), 8 new rules (102 total), tests 1317 → 1387, ADR 100% → 98.7% (1 documented miss). **v2.4.7**: Vague 4 (5 adversarial samples, 5 bypass corrections, 3 new rules), ADR 98.7% → 98.8% (82/83), 107 total rules (102 RULES + 5 PARANOID). **v2.4.9**: Sandbox preload monkey-patching (multi-run [0h, 72h, 7d], time-bomb detection), 6 new sandbox preload rules (SANDBOX-009 to 014), 113 total rules (108 RULES + 5 PARANOID), tests 1471 → 1522. **v2.5.0-v2.5.6**: Security audit (41 issues remediated). **v2.5.7-v2.5.8**: FP Reduction P4, FPR 7.4% → 6.0% (included BENIGN_PACKAGE_WHITELIST bias). **v2.5.13-v2.5.14**: Audit hardening (scoring, IOC, sandbox, dataflow, deobfuscation, AST bypasses, shell patterns, entropy, typosquat), 121 rules (116 RULES + 5 PARANOID), tests 1656 → 1815. **v2.5.15-v2.5.16**: FP Reduction P5/P6, FPR ~13.6% → 12.3% (honest measurement without whitelisting), TPR 91.8% → 93.9%.
 
-**FPR progression**: 0% (invalid, v2.2.0–v2.2.6) → 38% (first real measurement, v2.2.7) → 19.4% (v2.2.8) → 17.5% (v2.2.9) → ~13% (v2.2.11, per-file max scoring) → 8.9% (v2.3.0, P2) → **7.4%** (v2.3.1, P3)
+**FPR progression**: 0% (invalid, v2.2.0–v2.2.6) → 38% (first real measurement, v2.2.7) → 19.4% (v2.2.8) → 17.5% (v2.2.9) → ~13% (v2.2.11, per-file max scoring) → 8.9% (v2.3.0, P2) → 7.4% (v2.3.1, P3) → 6.0% (v2.5.8, P4 + whitelist bias) → ~13.6% (v2.5.14, audit hardening + whitelist removed) → **12.3%** (v2.5.16, P5+P6, honest measurement)
+
+> **Note on FPR evolution:** The historic 6.0% FPR (v2.5.8) relied on a `BENIGN_PACKAGE_WHITELIST` that excluded certain known packages from scoring — a data leakage bias removed in v2.5.10. The current 12.3% FPR is an honest measurement without whitelisting, against 529 real benign packages.
 
 Run `muaddib evaluate` to reproduce these metrics locally. Results are saved to `metrics/v{version}.json`.
 

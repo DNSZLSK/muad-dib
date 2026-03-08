@@ -1727,6 +1727,82 @@ Audit complet des entrees IOC wildcards : identification et correction des packa
 
 ---
 
+## v2.5.13–v2.5.14 — Audit Hardening (8 Mars 2026)
+
+### Contexte
+
+Suite a l'audit securite (v2.5.0-v2.5.6), 14 findings supplementaires ont ete identifies necessitant un renforcement des heuristiques.
+
+### v2.5.13 — Hardening batch 1
+
+5 lots de corrections :
+1. **Scoring** : seuil plugin loader per-file (empeche la dilution cross-file), plancher CRITICAL lifecycle (packageScore >= 50), garde pourcentage 50%→40%
+2. **Integrite IOC** : correction race condition HMAC (ecriture avant rename), marqueur `.hmac-initialized`, coherence HMAC scraper
+3. **Sandbox** : NODE_OPTIONS verrouille via `Object.defineProperty` (empeche le bypass preload dans les processus enfants)
+4. **Dataflow** : propagation de teinte pour Promise `.then()` callback, `fs.readFile` callback second parametre
+5. **Desobfuscation** : support TemplateLiteral dans `tryFoldConcat`, destructuration ArrayPattern dans la propagation de constantes Phase 2
+
+Tests : 1656 → **1790** (+134). Fichiers de test : 42 → **43**. Regles : 113 → **117** (112 RULES + 5 PARANOID).
+
+### v2.5.14 — Hardening batch 2
+
+5 lots ciblant 14 findings restants :
+1. **AST** : detection bypass eval alias (`const E = eval; E(code)`), assignation indirecte globalThis, resolution require(obj.prop), suivi de reassignation variable (`let x = 'child_'; x += 'process'; require(x)`)
+2. **Dataflow** : propagation de teinte JSON.stringify/parse/toString/String(), suppression du guard fetchOnlySafeDomains pour download_exec_binary
+3. **Shell** : 3 nouveaux patterns — reverse shell mkfifo+nc (SHELL-013), base64 decode pipe to bash (SHELL-014), wget+base64 two-stage (SHELL-015)
+4. **Entropie** : detection clusters fragmentes (ENTROPY-004), analyse fenetree pour strings > MAX_STRING_LENGTH
+5. **Typosquat** : whitelist pair-aware (packages whitelistes ne skipent que le package populaire specifique qu'ils imitent)
+
+4 nouvelles regles. Tests : 1790 → **1815** (+25). Regles : 117 → **121** (116 RULES + 5 PARANOID).
+
+**Impact** : La detection plus stricte a augmente le FPR de 6.0% a ~13.6% (72/529). C'est un compromis accepte : les heuristiques plus agressives detectent des patterns reels que l'ancienne version laissait passer.
+
+**Note sur le FPR historique** : Le FPR de 6.0% (v2.5.8) reposait sur un `BENIGN_PACKAGE_WHITELIST` qui excluait certains packages connus du scoring — un biais de data leakage supprime en v2.5.10. Le FPR actuel de 12.3% est une mesure honnete sans whitelisting. Les reductions P5/P6 sont des ameliorations de precision des detecteurs, pas du whitelisting.
+
+---
+
+## v2.5.15 — FP Reduction P5 (8 Mars 2026)
+
+7 corrections de precision heuristique. Amelioration de la precision de detection sans reduire la couverture.
+
+---
+
+## v2.5.16 — FP Reduction P6 — Compound Detection Precision (8 Mars 2026)
+
+### Le probleme
+
+Apres P5, le FPR etait a ~13.6% (72/529). Les FP restants sont domines par des detections composes (co-occurrence de signaux dans le meme fichier) qui se declenchent sur des packages legitimes.
+
+### Les 6 corrections
+
+1. **credential_regex_harvest** : downgrade count-based (>4 hits HIGH→LOW). Les bibliotheques HTTP (undici, aws-sdk, nodemailer) parsent legitimement des headers `Authorization: Bearer` avec des regex.
+2. **remote_code_load / proxy_data_intercept** : retires de DIST_EXEMPT_TYPES. Dans les fichiers bundles dist/, fetch + eval est une coincidence du bundler, pas une attaque.
+3. **Obfuscation large-file** : tout fichier `.js` >100KB traite comme output bundle (severite → LOW). Les vrais malwares obfusques sont <50KB.
+4. **Chemins sensibles** : `discord` et `leveldb` retires de SENSITIVE_PATH_PATTERNS — ce sont des repertoires de donnees, pas des chemins de credentials.
+5. **module_compile** : severite par defaut CRITICAL→HIGH. Un seul appel `module._compile()` est un comportement framework (@babel/core, art-template). Les compounds (zlib_inflate_eval) restent CRITICAL.
+6. **DATAFLOW_SAFE_ENV_VARS** : exclusion des variables de configuration Node.js (NODE_TLS_REJECT_UNAUTHORIZED, NODE_ENV, CI, etc.) des sources de credentials.
+
+### Metriques
+
+| Metrique | Avant P6 | Apres P6 | Delta |
+|----------|----------|----------|-------|
+| **TPR** | 91.8% (45/49) | **93.9% (46/49)** | +1 detection |
+| **FPR** | 13.6% (72/529) | **12.3% (65/529)** | -7 FPs |
+| **ADR** | 94.0% (63/67) | **94.0% (63/67)** | stable |
+
+Tests : 1815 → **1869** (+54).
+
+---
+
+## v2.5.17 — Audit documentation (8 Mars 2026)
+
+Audit complet de toute la documentation pour aligner les chiffres avec le code :
+- README.md, SECURITY.md, ADVERSARIAL.md, CHANGELOG.md, CLAUDE.md, MEMORY.md, README.fr.md, carnet de bord
+- Version v2.5.8 → v2.5.17 partout
+- Tests 1656 → 1869, regles 113 → 121, TPR 91.8% → 93.9%, FPR 6.0% → 12.3%, ADR 98.8% → 94.0%
+
+---
+
 ## Etat actuel
 
 ### Ce qui fonctionne
@@ -1747,11 +1823,11 @@ Audit complet des entrees IOC wildcards : identification et correction des packa
 | **GitHub Action Marketplace** | Avec inputs/outputs et SARIF auto |
 | Version check | Notification automatique des nouvelles versions au demarrage |
 | **Detection comportementale (v2.0)** | Temporal lifecycle, AST diff, publish anomaly, maintainer change, canary tokens |
-| **Validation & Observabilite (v2.1)** | Ground truth (51 attaques, 91.8% TPR), detection time logging, FP rate tracking, score breakdown, threat feed API |
-| **Evaluation & Red Team (v2.2-v2.5)** | `muaddib evaluate`, 83 samples evasifs (43 adversariaux + 40 holdouts), TPR 91.8% (45/49), **FPR 6.0% (32/529)**, ADR **98.8% (82/83)** (1 miss documente), 14 scanners, 113 regles, AI config scanner, 529 packages benins npm, 132 PyPI, 65 malwares documentes |
+| **Validation & Observabilite (v2.1)** | Ground truth (51 attaques, 93.9% TPR), detection time logging, FP rate tracking, score breakdown, threat feed API |
+| **Evaluation & Red Team (v2.2-v2.5)** | `muaddib evaluate`, 102 samples evasifs (62 adversariaux + 40 holdouts), TPR **93.9% (46/49)**, **FPR 12.3% (65/529)**, ADR **94.0% (63/67)** (4 misses documentes), 14 scanners, 121 regles, AI config scanner, 529 packages benins npm, 132 PyPI, 65 malwares documentes |
 | **Desobfuscation (v2.2.5)** | `src/scanner/deobfuscate.js`, 4 transformations AST + const propagation, approche additive (original + desobfusque), `--no-deobfuscate` flag |
 | **Dataflow inter-module (v2.2.6)** | `src/scanner/module-graph.js`, graphe de dependances, propagation de teinte inter-fichiers, 3-hop re-export, class methods, named exports, `--no-module-graph` flag |
-| Tests | **1656 tests unitaires** (42 fichiers) + 56 fuzz + 83 adversariaux/holdout, **86% coverage** (c8/Codecov) |
+| Tests | **1869 tests unitaires** (43 fichiers) + 56 fuzz + 102 adversariaux/holdout, **86% coverage** (c8/Codecov) |
 | **Hardening securite (v2.1.2)** | SSRF protection (shared/download.js), command injection prevention (execFileSync), path traversal (sanitizePackageName), JSON.parse protege, webhook strict |
 | Audit securite | 3 audits complets, **99 issues corrigees** (58 v1.4 + 41 v2.5), [rapport PDF](MUADDIB_Security_Audit_Report_v1.4.1.pdf) |
 

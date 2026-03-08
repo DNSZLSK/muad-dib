@@ -7,6 +7,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.5.17] - 2026-03-08
+
+### Changed
+- **Documentation audit**: All docs updated to match code reality — version, test count (1869), rule count (121), metrics (TPR 93.9%, FPR 12.3%, ADR 94.0%)
+- Updated README.md, SECURITY.md, ADVERSARIAL.md, CLAUDE.md, MEMORY.md, carnet de bord, French README
+- Corrected all stale version references (v2.5.8 → v2.5.17)
+
+## [2.5.16] - 2026-03-08
+
+### Changed
+- **FP Reduction P6 — Compound Detection Precision**: 6 fixes targeting compound detection false positives
+  - Fix 1: `credential_regex_harvest` count-based downgrade (>4 hits HIGH→LOW) — HTTP client libraries legitimately parse Bearer headers
+  - Fix 2: Remove `remote_code_load` and `proxy_data_intercept` from DIST_EXEMPT_TYPES — bundled dist/ files get standard downgrade
+  - Fix 3: Obfuscation large-file heuristic — any `.js` file >100KB treated as bundled output (severity → LOW)
+  - Fix 4: Remove `discord` and `leveldb` from SENSITIVE_PATH_PATTERNS — data directories, not credential paths
+  - Fix 5: `module_compile` and `module_compile_dynamic` default severity CRITICAL → HIGH — single call is framework behavior
+  - Fix 6: DATAFLOW_SAFE_ENV_VARS — exclude Node.js runtime config (NODE_TLS_REJECT_UNAUTHORIZED, NODE_ENV, CI, etc.) from credential sources
+- Test count: 1815 → **1869** (+54 tests)
+- TPR: 91.8% → **93.9%** (46/49) — +1 detection from module_compile severity change
+- FPR: 13.6% → **12.3%** (65/529) — 7 fewer false positives
+- ADR: **94.0%** (63/67 on available samples) — stable, no regression
+
+## [2.5.15] - 2026-03-08
+
+### Fixed
+- **FP Reduction P5 — Heuristic Precision**: 7 fixes improving detection precision without reducing coverage
+
+## [2.5.14] - 2026-03-08
+
+### Added
+- **Audit Hardening (batch 2)**: 5 batches targeting 14 remaining audit findings
+  - AST: eval alias bypass detection (`const E = eval; E(code)`), globalThis indirect assignment via aliases, require(obj.prop) object property resolution, variable reassignment tracking (`let x = 'child_'; x += 'process'; require(x)`)
+  - Dataflow: JSON.stringify/parse/toString/String() taint propagation, removed fetchOnlySafeDomains guard from download_exec_binary compound
+  - Shell: 3 new patterns — mkfifo+nc reverse shell (SHELL-013), base64 decode pipe to bash (SHELL-014), wget+base64 two-stage (SHELL-015)
+  - Entropy: fragment cluster detection (ENTROPY-004), windowed analysis for strings > MAX_STRING_LENGTH
+  - Typosquat: pair-aware whitelist (whitelisted packages only skip the specific popular package they resemble)
+- 4 new rules: MUADDIB-SHELL-013, MUADDIB-SHELL-014, MUADDIB-SHELL-015, MUADDIB-ENTROPY-004
+- Rule count: 117 → **121** (116 RULES + 5 PARANOID)
+- Test count: 1790 → **1815** (+25 tests)
+
+## [2.5.13] - 2026-03-08
+
+### Added
+- **Audit Hardening (batch 1)**: 5 batches of hardening fixes
+  - Scoring: per-file plugin loader threshold (prevents cross-file dilution), lifecycle CRITICAL floor (packageScore >= 50 when CRITICAL present), percentage guard tightened 50%→40%
+  - IOC integrity: HMAC race condition fix (write before rename), `.hmac-initialized` marker enforcement, scraper HMAC consistency
+  - Sandbox: NODE_OPTIONS locked via Object.defineProperty to prevent preload bypass in child processes
+  - Dataflow: Promise `.then()` callback tainting for `fs.promises.readFile`, `fs.readFile` callback second-param tainting
+  - Deobfuscation: TemplateLiteral support in `tryFoldConcat`, ArrayPattern destructuring in Phase 2 const propagation
+- Rule count: 113 → **117** (112 RULES + 5 PARANOID)
+- Test count: 1656 → **1790** (+134 tests), test files: 42 → **43**
+
+## [2.5.9–2.5.12] - 2026-03-07
+
+### Fixed
+- Minor bug fixes and stability improvements
+
 ## [2.5.8] - 2026-03-06
 
 ### Changed

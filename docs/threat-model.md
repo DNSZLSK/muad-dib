@@ -80,7 +80,7 @@ MUAD'DIB est un analyseur statique Node.js. Les attaques qui utilisent exclusive
 | **trojanized-jquery** | Manipulation DOM jQuery | API jQuery/DOM browser, aucune API Node.js |
 | **websocket-rat** | `exec(variable)` via WebSocket | API Node.js presente mais `exec(variable)` est trop generique — detecter ce pattern causerait des faux positifs sur du code legitime |
 
-Impact sur TPR : 45/49 = 91.8% (4 misses documentes et acceptes).
+Impact sur TPR : 46/49 = 93.9% (3 misses documentes et acceptes). Note : websocket-rat est desormais detecte depuis v2.5.16.
 
 ### Limitations connues
 
@@ -160,7 +160,7 @@ Couverture complete des scanners, parsers, IOC matching, typosquatting, integrat
 
 51 attaques supply-chain reelles sont rejouees automatiquement pour valider la couverture. La base inclut event-stream, ua-parser-js, coa, node-ipc, colors, eslint-scope, flatmap-stream, solana-web3js, rc, getcookies, ledgerhq-connect-kit, shai-hulud, et 39 autres attaques de 2018 a 2025.
 
-Taux de detection : **91.8%** (45/49 attaques actives). 4 misses documentes comme hors scope (voir section "Attaques browser-only" ci-dessus).
+Taux de detection : **93.9%** (46/49 attaques actives). 3 misses documentes comme hors scope (voir section "Attaques browser-only" ci-dessus).
 
 ### Benchmark Datadog 17K (v2.3.1)
 
