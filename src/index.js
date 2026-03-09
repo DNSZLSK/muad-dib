@@ -29,6 +29,7 @@ const { runTemporalAnalyses } = require('./temporal-runner.js');
 const { formatOutput } = require('./output-formatter.js');
 const { setExtraExcludes, getExtraExcludes, Spinner, listInstalledPackages, clearFileListCache, debugLog } = require('./utils.js');
 const { SEVERITY_WEIGHTS, RISK_THRESHOLDS, MAX_RISK_SCORE, isPackageLevelThreat, computeGroupScore, applyFPReductions, calculateRiskScore } = require('./scoring.js');
+const { buildIntentPairs } = require('./intent-graph.js');
 
 const { MAX_FILE_SIZE, safeParse } = require('./shared/constants.js');
 const walk = require('acorn-walk');
@@ -529,6 +530,23 @@ async function run(targetPath, options = {}) {
   // A malware package typically has 1-3 occurrences, not dozens.
   applyFPReductions(deduped, reachableFiles, packageName);
 
+  // Intent coherence analysis: detect source→sink pairs across files
+  const intentResult = buildIntentPairs(deduped);
+  // Add intent threats to deduped before enrichment so they get rules/playbooks
+  if (intentResult.intentThreats) {
+    for (const it of intentResult.intentThreats) {
+      // Respect reachability: downgrade intent threats in unreachable files
+      if (reachableFiles && reachableFiles.size > 0 && it.file) {
+        const normalizedFile = it.file.replace(/\\/g, '/');
+        if (!reachableFiles.has(normalizedFile)) {
+          it.severity = 'LOW';
+          it.unreachable = true;
+        }
+      }
+      deduped.push(it);
+    }
+  }
+
   // Enrich each threat with rules
   const enrichedThreats = deduped.map(t => {
     const rule = getRule(t.type);
@@ -550,12 +568,12 @@ async function run(targetPath, options = {}) {
     .map(t => ({ rule: t.rule_id, type: t.type, points: t.points, reason: t.message }))
     .sort((a, b) => b.points - a.points);
 
-  // Per-file max scoring (v2.2.11)
+  // Per-file max scoring (v2.2.11) with intent graph bonus
   const {
     riskScore, riskLevel, globalRiskScore,
-    maxFileScore, packageScore, mostSuspiciousFile, fileScores,
+    maxFileScore, packageScore, intentBonus, mostSuspiciousFile, fileScores,
     criticalCount, highCount, mediumCount, lowCount
-  } = calculateRiskScore(deduped);
+  } = calculateRiskScore(deduped, intentResult);
 
   // Python scan metadata
   const pythonInfo = pythonDeps.length > 0 ? {

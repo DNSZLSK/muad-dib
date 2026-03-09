@@ -65,7 +65,7 @@ Please include the following information in your report:
 
 ## Detection Rules (v2.5.17)
 
-MUAD'DIB uses 14 parallel scanners + 5 behavioral anomaly detection features + ground truth validation, producing 121 rule IDs (116 RULES + 5 PARANOID):
+MUAD'DIB uses 14 parallel scanners + 5 behavioral anomaly detection features + ground truth validation, producing 129 rule IDs (124 RULES + 5 PARANOID):
 
 ### AST Scanner
 
@@ -223,6 +223,15 @@ Runtime behavioral analysis via monkey-patching preload (`NODE_OPTIONS=--require
 | MUADDIB-SANDBOX-013 | Suspicious Command Execution (curl, wget, bash, powershell) | HIGH | T1059 |
 | MUADDIB-SANDBOX-014 | Sensitive Environment Variable Access (TOKEN, SECRET, KEY) | MEDIUM | T1552.001 |
 
+### Intent Coherence Rules (v2.6.0) — Intra-File Source-Sink Analysis
+
+Intra-file coherence analysis detects when a single file contains both a credential source and a dangerous sink. Cross-file detection is handled by module-graph (FLOW-004). LOW-severity threats are excluded to respect FP reductions.
+
+| Rule ID | Name | Severity | MITRE |
+|---------|------|----------|-------|
+| MUADDIB-INTENT-001 | Intent Credential Exfiltration (credential_read + exec/network sink) | CRITICAL | T1041 |
+| MUADDIB-INTENT-002 | Intent Command Output Exfiltration (command_output + network sink) | HIGH | T1041 |
+
 ### Temporal Analysis Rules (v2.0) — Behavioral Anomaly Detection
 
 Behavioral detection analyzes changes between package versions to detect supply-chain attacks before they appear in IOC databases. These features query the npm registry at scan time and compare metadata/code across versions.
@@ -357,7 +366,7 @@ MUAD'DIB 2.5 uses a **triple detection approach**:
 
 2. **Behavioral anomaly detection** (v2.0): Analyzes changes between package versions to detect supply-chain attacks before they appear in IOC databases. Compares lifecycle scripts, AST, publish frequency, and maintainer metadata across versions. This approach can detect 0-day behavioral anomalies without any prior knowledge of the specific attack.
 
-3. **Ground truth validation** (v2.1–v2.5.17): Validates detection accuracy against 51 real-world attacks (49 active samples), tracks detection lead times vs. public advisories, and monitors false positive rates over time. 1869 tests with 86% code coverage. Provides observability into scanner effectiveness.
+3. **Ground truth validation** (v2.1–v2.6.0): Validates detection accuracy against 51 real-world attacks (49 active samples), tracks detection lead times vs. public advisories, and monitors false positive rates over time. 1905 tests with 86% code coverage. Provides observability into scanner effectiveness.
 
 The behavioral detection features are opt-in (`--temporal-full`) and query the npm registry at scan time. They are particularly effective against:
 - Account takeover attacks (event-stream pattern)

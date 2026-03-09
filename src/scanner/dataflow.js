@@ -109,6 +109,31 @@ function buildTaintMap(ast) {
           }
         }
       }
+
+      // B5 fix: const tools = { read: fs.readFileSync, home: os.homedir }
+      // Track object properties that reference tainted module methods as tainted aliases
+      if (node.id.type === 'Identifier' && init.type === 'ObjectExpression') {
+        for (const prop of init.properties) {
+          if (prop.type !== 'Property') continue;
+          const key = prop.key?.type === 'Identifier' ? prop.key.name :
+                      (prop.key?.type === 'Literal' ? String(prop.key.value) : null);
+          if (!key) continue;
+          // Property value is a MemberExpression on a tainted module: fs.readFileSync, os.homedir
+          if (prop.value?.type === 'MemberExpression' &&
+              prop.value.object?.type === 'Identifier' &&
+              prop.value.property?.type === 'Identifier') {
+            const parentTaint = taintMap.get(prop.value.object.name);
+            if (parentTaint && TRACKED_MODULES.has(parentTaint.source)) {
+              const methodName = prop.value.property.name;
+              // Store as "objName.key" so tools.read calls are resolved
+              taintMap.set(`${node.id.name}.${key}`, {
+                source: parentTaint.source,
+                detail: `${parentTaint.source}.${methodName}`
+              });
+            }
+          }
+        }
+      }
     }
   });
 
@@ -461,6 +486,42 @@ function analyzeFile(content, filePath, basePath) {
               sinks.push({
                 type: sinkType,
                 name: `${moduleName}.${methodName}`,
+                line: node.loc?.start?.line,
+                taint_tracked: true
+              });
+            }
+          }
+
+          // B5 fix: object method alias — tools.read(...) where tools.read = fs.readFileSync
+          const aliasKey = `${obj.name}.${prop.name}`;
+          const aliasTaint = taintMap.get(aliasKey);
+          if (aliasTaint && aliasTaint.detail.includes('.')) {
+            const [aliasModule, aliasMethod] = aliasTaint.detail.split('.');
+            const aliasSourceMethods = MODULE_SOURCE_METHODS[aliasModule];
+            if (aliasSourceMethods && aliasSourceMethods[aliasMethod]) {
+              // For credential_read: also check if the argument is a sensitive path
+              const isCredArg = node.arguments[0] && isCredentialPath(node.arguments[0], sensitivePathVars);
+              if (aliasSourceMethods[aliasMethod] === 'credential_read' && isCredArg) {
+                sources.push({
+                  type: 'credential_read',
+                  name: `${aliasModule}.${aliasMethod}`,
+                  line: node.loc?.start?.line,
+                  taint_tracked: true
+                });
+              } else if (aliasSourceMethods[aliasMethod] !== 'credential_read') {
+                sources.push({
+                  type: aliasSourceMethods[aliasMethod],
+                  name: `${aliasModule}.${aliasMethod}`,
+                  line: node.loc?.start?.line,
+                  taint_tracked: true
+                });
+              }
+            }
+            const aliasSinkMethods = MODULE_SINK_METHODS[aliasModule];
+            if (aliasSinkMethods && aliasSinkMethods[aliasMethod]) {
+              sinks.push({
+                type: aliasSinkMethods[aliasMethod],
+                name: `${aliasModule}.${aliasMethod}`,
                 line: node.loc?.start?.line,
                 taint_tracked: true
               });

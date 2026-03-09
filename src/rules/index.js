@@ -1357,6 +1357,31 @@ const RULES = {
     ],
     mitre: 'T1557'
   },
+  // Intent Graph rules (v2.6.0)
+  intent_credential_exfil: {
+    id: 'MUADDIB-INTENT-001',
+    name: 'Intent Credential Exfiltration',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Coherence d\'intention: lecture de credentials (fichiers sensibles, env vars) combinee avec un sink reseau ou exec dans le meme package. Pattern typique DPRK/Lazarus: code malveillant fragmente sur plusieurs fichiers avec uniquement des APIs legitimes.',
+    references: [
+      'https://attack.mitre.org/techniques/T1041/',
+      'https://www.cisa.gov/news-events/cybersecurity-advisories/aa22-108a'
+    ],
+    mitre: 'T1041'
+  },
+  intent_command_exfil: {
+    id: 'MUADDIB-INTENT-002',
+    name: 'Intent Command Output Exfiltration',
+    severity: 'HIGH',
+    confidence: 'medium',
+    description: 'Coherence d\'intention: sortie de commande systeme combinee avec un sink reseau. Le code execute des commandes et transmet les resultats sur le reseau — reconnaissance ou exfiltration.',
+    references: [
+      'https://attack.mitre.org/techniques/T1059/',
+      'https://attack.mitre.org/techniques/T1041/'
+    ],
+    mitre: 'T1059'
+  },
 };
 
 function getRule(type) {

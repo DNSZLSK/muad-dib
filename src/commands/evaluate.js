@@ -110,7 +110,20 @@ const ADVERSARIAL_THRESHOLDS = {
   'symbol-iterator-exfil': 20,
   'toJSON-hijack': 20,
   'url-constructor-exfil': 20,
-  'wasm-c2-payload': 20
+  'wasm-c2-payload': 20,
+  // Vague 6 — DPRK + Intent Graph (10 samples)
+  // Group A: pure API, multi-file, cross-file taint
+  'locale-config-sync': 10,        // partially detected — cross-file class taint gap
+  'metrics-aggregator-lite': 3,    // partially detected — EventEmitter gap
+  'env-config-validator': 10,      // partially detected — rest destructuring without compound
+  'stream-transform-kit': 10,      // partially detected — stream pipe gap
+  'cache-warmup-utils': 25,
+  // Group B: eval evasion techniques
+  'fn-return-eval': 25,
+  'call-chain-eval': 20,
+  'regex-source-require': 25,
+  'charcode-arithmetic': 25,
+  'object-method-alias': 25
 };
 
 const HOLDOUT_THRESHOLDS = {

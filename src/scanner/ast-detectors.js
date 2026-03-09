@@ -389,6 +389,32 @@ function handleVariableDeclarator(node, ctx) {
         if (cn === 'eval' || cn === 'Function') ctx.evalAliases.set(node.id.name, cn);
       }
     }
+    // B1 fix: const getEval = () => eval; — 0-param arrow/function returning eval/Function as value (not call)
+    if ((node.init?.type === 'ArrowFunctionExpression' || node.init?.type === 'FunctionExpression')) {
+      const body = node.init.body;
+      // () => eval
+      if (body?.type === 'Identifier' && (body.name === 'eval' || body.name === 'Function')) {
+        ctx.evalAliases.set(node.id.name, body.name + '_factory');
+      }
+      // () => { return eval; }
+      if (body?.type === 'BlockStatement' && body.body?.length === 1 &&
+          body.body[0].type === 'ReturnStatement' &&
+          body.body[0].argument?.type === 'Identifier' &&
+          (body.body[0].argument.name === 'eval' || body.body[0].argument.name === 'Function')) {
+        ctx.evalAliases.set(node.id.name, body.body[0].argument.name + '_factory');
+      }
+    }
+
+    // B1 fix: const compiler = getCompiler() where getCompiler is eval_factory
+    if (node.init?.type === 'CallExpression' &&
+        node.init.callee?.type === 'Identifier' &&
+        ctx.evalAliases?.has(node.init.callee.name)) {
+      const aliased = ctx.evalAliases.get(node.init.callee.name);
+      if (aliased.endsWith('_factory')) {
+        const baseName = aliased.replace('_factory', '');
+        ctx.evalAliases.set(node.id.name, baseName);
+      }
+    }
 
     // B5: Track object literal string properties
     if (node.init?.type === 'ObjectExpression') {
@@ -556,6 +582,23 @@ function handleCallExpression(node, ctx) {
             : 'Dynamic require() with variable argument (module name obfuscation).',
           file: ctx.relFile
         });
+      }
+    }
+    // B3 fix: require(/child_process/.source) — RegExpLiteral.source resolution
+    else if (arg.type === 'MemberExpression' &&
+             arg.object?.type === 'Literal' && arg.object.regex &&
+             arg.property?.type === 'Identifier' && arg.property.name === 'source') {
+      const regexSource = arg.object.regex.pattern;
+      const DANGEROUS_MODS = ['child_process', 'fs', 'net', 'dns', 'http', 'https', 'tls'];
+      const norm = regexSource.startsWith('node:') ? regexSource.slice(5) : regexSource;
+      if (DANGEROUS_MODS.includes(norm)) {
+        ctx.threats.push({ type: 'dynamic_require', severity: 'CRITICAL',
+          message: `require(/${regexSource}/.source) resolves to "${norm}" — regex .source evasion.`,
+          file: ctx.relFile });
+      } else {
+        ctx.threats.push({ type: 'dynamic_require', severity: 'HIGH',
+          message: `require() with regex .source argument (/${regexSource}/.source) — obfuscation technique.`,
+          file: ctx.relFile });
       }
     }
     // B5: require(obj.prop) — MemberExpression argument
@@ -1013,14 +1056,37 @@ function handleCallExpression(node, ctx) {
   // B1: Alias call — E('code') where E = eval or F = Function
   if (node.callee.type === 'Identifier' && ctx.evalAliases?.has(node.callee.name)) {
     const aliased = ctx.evalAliases.get(node.callee.name);
-    ctx.hasEvalInFile = true;
-    ctx.hasDynamicExec = true;
-    ctx.threats.push({
-      type: aliased === 'eval' ? 'dangerous_call_eval' : 'dangerous_call_function',
-      severity: 'HIGH',
-      message: `Indirect ${aliased} via alias "${node.callee.name}" — eval wrapper evasion.`,
-      file: ctx.relFile
-    });
+    if (aliased.endsWith('_factory')) {
+      // Factory pattern: getEval()('code') — the callee is detected at outer CallExpression level
+      // Mark the identifier so we can detect the outer call
+    } else {
+      ctx.hasEvalInFile = true;
+      ctx.hasDynamicExec = true;
+      ctx.threats.push({
+        type: aliased === 'eval' ? 'dangerous_call_eval' : 'dangerous_call_function',
+        severity: 'HIGH',
+        message: `Indirect ${aliased} via alias "${node.callee.name}" — eval wrapper evasion.`,
+        file: ctx.relFile
+      });
+    }
+  }
+
+  // B1 fix: Factory call — getEval()('code') where getEval = () => eval
+  if (node.callee.type === 'CallExpression' &&
+      node.callee.callee?.type === 'Identifier' &&
+      ctx.evalAliases?.has(node.callee.callee.name)) {
+    const aliased = ctx.evalAliases.get(node.callee.callee.name);
+    if (aliased.endsWith('_factory')) {
+      const baseName = aliased.replace('_factory', '');
+      ctx.hasEvalInFile = true;
+      ctx.hasDynamicExec = true;
+      ctx.threats.push({
+        type: baseName === 'eval' ? 'dangerous_call_eval' : 'dangerous_call_function',
+        severity: 'HIGH',
+        message: `Indirect ${baseName} via factory function "${node.callee.callee.name}()" — eval factory evasion.`,
+        file: ctx.relFile
+      });
+    }
   }
 
   if (callName === 'eval') {
@@ -1118,6 +1184,24 @@ function handleCallExpression(node, ctx) {
         message: `${obj.name}.${node.callee.property.name}() — indirect execution via call/apply evasion technique.`,
         file: ctx.relFile
       });
+    }
+    // B2 fix: Function.prototype.call.call(eval, null, code) / X.call.call(eval, ...)
+    // Deep MemberExpression: obj is itself a MemberExpression ending in .call/.apply
+    if (obj?.type === 'MemberExpression' &&
+        obj.property?.type === 'Identifier' &&
+        (obj.property.name === 'call' || obj.property.name === 'apply') &&
+        node.arguments.length >= 2) {
+      const firstArg = node.arguments[0];
+      if (firstArg?.type === 'Identifier' && (firstArg.name === 'eval' || firstArg.name === 'Function')) {
+        ctx.hasEvalInFile = true;
+        ctx.hasDynamicExec = true;
+        ctx.threats.push({
+          type: firstArg.name === 'eval' ? 'dangerous_call_eval' : 'dangerous_call_function',
+          severity: 'HIGH',
+          message: `${firstArg.name} passed to .call.call() — nested call/apply evasion technique.`,
+          file: ctx.relFile
+        });
+      }
     }
   }
 
