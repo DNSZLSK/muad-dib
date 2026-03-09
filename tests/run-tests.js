@@ -19,6 +19,7 @@ const { runGitHubActionsTests } = require('./scanner/github-actions.test');
 const { runNpmRegistryTests } = require('./scanner/npm-registry.test');
 const { runAstNegativeTests } = require('./scanner/ast-negative.test');
 const { runAstBypassRegressionTests } = require('./scanner/ast-bypass-regression.test');
+const { runIntentGraphTests } = require('./scanner/intent-graph.test');
 
 // Utility tests
 const { runUtilsTests } = require('./utils.test');
@@ -132,6 +133,9 @@ async function timed(name, fn) {
 
   // Scoring hardening tests (v2.5.13)
   await timed('scoring-hardening', runScoringHardeningTests);
+
+  // Intent graph tests (v2.6.0)
+  await timed('intent-graph', runIntentGraphTests);
 
   // Utility tests
   await timed('utils', runUtilsTests);

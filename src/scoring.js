@@ -297,11 +297,12 @@ function applyFPReductions(threats, reachableFiles, packageName) {
 
 /**
  * Calculate per-file max risk score from deduplicated threats.
- * Formula: riskScore = min(100, max(file_scores) + package_level_score)
+ * Formula: riskScore = min(100, max(file_scores + intent_bonus) + package_level_score)
  * @param {Array} deduped - deduplicated threat array
+ * @param {Object} [intentResult] - optional result from buildIntentPairs()
  * @returns {Object} { riskScore, riskLevel, globalRiskScore, maxFileScore, packageScore, mostSuspiciousFile, fileScores, criticalCount, highCount, mediumCount, lowCount }
  */
-function calculateRiskScore(deduped) {
+function calculateRiskScore(deduped, intentResult) {
   // 1. Separate deduped threats into package-level and file-level
   const packageLevelThreats = [];
   const fileLevelThreats = [];
@@ -361,13 +362,20 @@ function calculateRiskScore(deduped) {
     crossFileBonus = Math.min(crossFileBonus, 25);
   }
 
-  // 6. Final score = max file score + cross-file bonus + package-level score, capped at 100
-  const riskScore = Math.min(MAX_RISK_SCORE, maxFileScore + crossFileBonus + packageScore);
+  // 6. Intent coherence bonus: additive score from source→sink pairs
+  let intentBonus = 0;
+  if (intentResult && intentResult.intentScore > 0) {
+    // Cap intent bonus at 30 to prevent over-inflation
+    intentBonus = Math.min(intentResult.intentScore, 30);
+  }
 
-  // 7. Old global score for comparison (sum of ALL findings)
+  // 7. Final score = max file score + cross-file bonus + intent bonus + package-level score, capped at 100
+  const riskScore = Math.min(MAX_RISK_SCORE, maxFileScore + crossFileBonus + intentBonus + packageScore);
+
+  // 8. Old global score for comparison (sum of ALL findings)
   const globalRiskScore = computeGroupScore(deduped);
 
-  // 8. Severity counts (global, for summary display)
+  // 9. Severity counts (global, for summary display)
   const criticalCount = deduped.filter(t => t.severity === 'CRITICAL').length;
   const highCount = deduped.filter(t => t.severity === 'HIGH').length;
   const mediumCount = deduped.filter(t => t.severity === 'MEDIUM').length;
@@ -381,7 +389,7 @@ function calculateRiskScore(deduped) {
 
   return {
     riskScore, riskLevel, globalRiskScore,
-    maxFileScore, crossFileBonus, packageScore, mostSuspiciousFile, fileScores,
+    maxFileScore, crossFileBonus, intentBonus, packageScore, mostSuspiciousFile, fileScores,
     criticalCount, highCount, mediumCount, lowCount
   };
 }

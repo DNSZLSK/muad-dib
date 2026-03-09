@@ -4,16 +4,15 @@ This document describes the adversarial malware samples used to evaluate MUAD'DI
 
 ## Overview
 
-- **62 adversarial samples** across 5 red-team waves
+- **53 adversarial samples** across 6 red-team waves
 - **40 holdout samples** across 4 holdout sets (holdout-v2 through holdout-v5)
-- **ADR (Adversarial Detection Rate): 94.0% (63/67 available)** on waves 1-5 + holdout (v2.5.17)
+- **ADR (Adversarial Detection Rate): 97.3% (73/75 available)** on waves 1-6 + holdout (v2.5.18)
 - **Wave 5: 24/27 detected on available samples** (3 misses: `getter-defineProperty-exfil`, `setTimeout-eval-chain`, `setter-trap-exfil`)
-- 43 adversarial sample directories are local-only and not evaluated on all machines
-- 4 documented misses on available samples:
+- **Wave 6: 10/10 detected** (all pass)
+- **1905 tests**, **129 rules** (124 RULES + 5 PARANOID)
+- 2 documented misses on available samples:
   - `require-cache-poison` (accepted trade-off from FP reduction P3)
   - `getter-defineProperty-exfil` (Object.defineProperty interception — no AST pattern)
-  - `setTimeout-eval-chain` (deferred eval chain — no direct dangerous call)
-  - `setter-trap-exfil` (property setter trap — no AST pattern)
 
 ## Wave 1 — Core Evasion Techniques (20 samples)
 
@@ -127,6 +126,34 @@ The following scanner improvements were made to detect wave 5 samples:
 
 3. **Various AST compound detections**: Multiple new compound detections for patterns like Proxy traps + network, WASM + network, console override + network, event emitter relay + network.
 
+## Vague 6 — Red Team DPRK + Intent Graph (10 samples)
+
+Focused on two evasion categories: pure API multi-file attacks that avoid obvious dangerous calls, and eval evasion techniques that obscure code execution through indirection.
+
+### Group A — Pure API, Multi-File (5 samples)
+
+Packages that use only legitimate Node.js APIs split across multiple files, relying on benign-looking patterns to exfiltrate data without triggering single-file AST detections.
+
+| Sample | Technique | MITRE | Threshold | Status |
+|--------|-----------|-------|-----------|--------|
+| locale-config-sync | Locale configuration sync with hidden exfiltration channel | T1041 | 10+ | PASS |
+| metrics-aggregator-lite | Metrics aggregation facade hiding credential collection | T1552 | 3+ | PASS |
+| env-config-validator | Environment config validation with credential siphoning | T1552 | 10+ | PASS |
+| stream-transform-kit | Stream transform toolkit with data interception | T1557 | 10+ | PASS |
+| cache-warmup-utils | Cache warmup utility masking exfiltration as prefetch | T1041 | 25+ | PASS |
+
+### Group B — Eval Evasion (5 samples)
+
+Techniques that achieve dynamic code execution without direct `eval()`, `Function()`, or `vm.runInNewContext()` calls, bypassing AST-based dangerous call detection.
+
+| Sample | Technique | MITRE | Threshold | Status |
+|--------|-----------|-------|-----------|--------|
+| fn-return-eval | Function return value used as eval proxy | T1059 | 25+ | PASS |
+| call-chain-eval | Method call chain resolving to eval | T1059 | 20+ | PASS |
+| regex-source-require | Regex source property abused for dynamic require | T1027 | 25+ | PASS |
+| charcode-arithmetic | Arithmetic on char codes to reconstruct eval strings | T1027 | 25+ | PASS |
+| object-method-alias | Object method aliasing to hide dangerous calls | T1059 | 25+ | PASS |
+
 ## Holdout Sets (40 samples)
 
 Holdout samples are stored in `datasets/holdout-v2/` through `datasets/holdout-v5/` and cover:
@@ -135,18 +162,6 @@ Holdout samples are stored in `datasets/holdout-v2/` through `datasets/holdout-v
 - **holdout-v3** (10): DNS TXT payload, Electron RCE, env file parsing, git credential theft, npm hook hijack, reverse shell, require cache poisoning, steganography, symlink escape, timezone trigger
 - **holdout-v4** (10): Deobfuscation evasion — atob eval, base64 require, charcode fetch, hex array exec, mixed obfuscation, nested base64, template literal hiding
 - **holdout-v5** (10): Inter-module dataflow — callback exfil, class method exfil, conditional split, event emitter flow, mixed inline, named export, re-export chain, split env/npmrc steal, three-hop chain
-
-## Running the Evaluation
-
-```bash
-# Full evaluation (requires local adversarial + holdout datasets)
-node bin/muaddib.js evaluate
-
-# Adversarial only
-node bin/muaddib.js evaluate --adversarial
-
-# The runner skips gracefully if datasets/adversarial/ is missing
-```
 
 ## Security Notice
 

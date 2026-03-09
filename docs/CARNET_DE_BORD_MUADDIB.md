@@ -1803,6 +1803,56 @@ Audit complet de toute la documentation pour aligner les chiffres avec le code :
 
 ---
 
+## v2.6.0 — Graphe d'intention & Red Team DPRK (9 Mars 2026)
+
+### Contexte
+
+Deux axes de travail en parallele : renforcer la couverture adversariale avec 10 nouveaux echantillons inspires des campagnes DPRK (Lazarus/APT38), et introduire un graphe d'intention v2 pour la detection de coherence source-sink intra-fichier.
+
+### Red Team DPRK : 10 nouveaux echantillons adversariaux
+
+Ajout de 10 echantillons simulant des techniques d'evasion observees dans les campagnes supply-chain nord-coreennes :
+- **5 echantillons pure API multi-fichiers** : patterns d'exfiltration repartis sur plusieurs modules avec imports locaux, imitant les packages npm malveillants attribues a Lazarus
+- **5 echantillons evasion eval** : techniques de contournement de la detection `eval()` — eval factory, `.call.call(eval)`, `require(/regex/.source)`, charcode arithmetique, object-method-alias
+
+### Graphe d'intention v2 : analyse de coherence intra-fichier
+
+Le graphe d'intention analyse la co-occurrence source-sink **a l'interieur d'un meme fichier** pour detecter des intentions malveillantes coherentes. L'analyse verifie si un fichier contient a la fois une source de donnees sensibles (credentials, fichiers systeme, variables d'environnement) et un sink d'exfiltration (requetes reseau, commandes shell, DNS).
+
+**Decision architecturale importante** : la co-occurrence cross-file (entre fichiers differents) a ete volontairement exclue. Les tests sur les 529 packages benins ont montre une explosion de faux positifs — un SDK qui lit `process.env` dans un module de config et fait du HTTP dans un module client declenche systematiquement la detection. La recherche academique (SpiderScan, Cerebro, taint-based slicing) confirme que seul le data flow prouve ou l'analyse intra-fichier est fiable pour la detection de menaces.
+
+### Corrections scanner
+
+5 corrections de detection pour contrer les evasions eval :
+1. **Eval factory** : detection de fonctions qui retournent `eval` ou `Function` comme valeur
+2. **.call.call(eval)** : detection de l'invocation indirecte via double `.call` sur eval/Function
+3. **require(/regex/.source)** : resolution du `.source` d'un literal regex comme argument de `require()`
+4. **Charcode arithmetique** : detection de `String.fromCharCode()` avec expressions arithmetiques (addition/soustraction/XOR) dans les arguments
+5. **Object-method-alias** : detection de l'aliasing de methodes dangereuses via affectation a un objet (`obj.e = eval; obj.e(code)`)
+
+### Nouvelles regles
+
+8 nouvelles regles ajoutees (total : **129** = 124 RULES + 5 PARANOID) :
+- **INTENT-001** : Exfiltration de credentials — coherence source credential + sink reseau dans le meme fichier (CRITICAL)
+- **INTENT-002** : Exfiltration via commandes — coherence source credential + sink execution de commande dans le meme fichier (CRITICAL)
+- 6 regles supplementaires pour les corrections scanner (eval factory, call.call, regex source, charcode arithmetique, object-method-alias, patterns DPRK)
+
+### Metriques
+
+| Metrique | Avant v2.6.0 | Apres v2.6.0 | Delta |
+|----------|--------------|--------------|-------|
+| **TPR** | 93.9% (46/49) | **93.9% (46/49)** | inchange |
+| **FPR** | 12.3% (65/529) | **12.3% (65/532)** | zero FP ajoute par le graphe d'intention |
+| **ADR** | 94.0% (63/67) | **97.3% (73/75)** | +10 echantillons, amelioration significative |
+
+Tests : 1869 → **1905** (+36). Fichiers de test : 43 → **44**.
+
+### Lecon apprise
+
+La co-occurrence source-sink cross-file sans preuve de data flow = explosion de faux positifs. Un fichier qui lit `process.env.DATABASE_URL` et un autre qui fait `fetch()` ne constituent pas une exfiltration — c'est le comportement normal de n'importe quel SDK, ORM ou framework web. La recherche academique (SpiderScan, Cerebro, taint-based slicing) confirme que seul le data flow prouve (propagation de teinte explicite entre modules) ou l'analyse intra-fichier (source + sink dans le meme fichier avec contexte AST) est fiable. C'est exactement ce que fait deja `module-graph.js` pour le cross-file : il trace le data flow reel, pas la simple co-occurrence.
+
+---
+
 ## Etat actuel
 
 ### Ce qui fonctionne

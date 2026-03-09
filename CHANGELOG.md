@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.0] - 2026-03-09
+
+### Added
+- **Intent Graph v2 — Intra-File Coherence Analysis**: `src/intent-graph.js` detects when a single file contains both a high-confidence credential source AND a dangerous sink (eval, exec, network). Intra-file pairing only — cross-file co-occurrence removed (causes FP explosion on SDKs). LOW-severity threats excluded from pairing (respects FP reductions). Cross-file detection delegated to module-graph.js (proven taint paths).
+- **Red Team DPRK — 10 Adversarial Samples**: 5 pure-API multi-file packages (Group A: locale-config-sync, metrics-aggregator-lite, env-config-validator, stream-transform-kit, cache-warmup-utils) + 5 eval evasion packages (Group B: fn-return-eval, call-chain-eval, regex-source-require, charcode-arithmetic, object-method-alias)
+- **Scanner Fixes**: eval factory detection (`() => eval`), `.call.call(eval)` deep MemberExpression, `require(/regex/.source)` regex literal resolution, charcode arithmetic evaluation (`String.fromCharCode(99+3)`), object-method-alias taint tracking in dataflow
+- 2 new intent rules: MUADDIB-INTENT-001 (credential exfil, CRITICAL), MUADDIB-INTENT-002 (command exfil, HIGH)
+- 6 new eval evasion rules in ast-detectors.js
+- Rule count: 121 → **129** (124 RULES + 5 PARANOID)
+- Test count: 1869 → **1905** (+36 tests)
+- Test files: 43 → **44** (new: intent-graph.test.js)
+- TPR: **93.9%** (46/49) — unchanged
+- FPR: **12.3%** (65/532) — zero FP added by intent graph
+- ADR: 94.0% → **97.3%** (73/75 on existing dirs) — +10 new adversarial samples detected
+
 ## [2.5.17] - 2026-03-08
 
 ### Changed

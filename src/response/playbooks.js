@@ -486,6 +486,15 @@ const PLAYBOOKS = {
     'CRITIQUE: Un Proxy JavaScript avec trap set/get/apply est combine avec un appel reseau. ' +
     'Technique d\'interception: le Proxy capture toutes les ecritures de proprietes (credentials, tokens, config) ' +
     'et les exfiltre via HTTPS/fetch/dgram. Supprimer le package. Auditer tous les modules qui importent ce package.',
+  intent_credential_exfil:
+    'CRITIQUE: Coherence d\'intention detectee — lecture de credentials combinee avec exfiltration reseau. ' +
+    'Pattern multi-fichier DPRK/Lazarus: chaque fichier semble legitime individuellement mais le package ' +
+    'dans son ensemble collecte des secrets et les envoie sur le reseau. Supprimer le package immediatement. ' +
+    'Regenerer tous les tokens/credentials exposes. Auditer le package.json pour les scripts lifecycle.',
+  intent_command_exfil:
+    'Coherence d\'intention detectee — sortie de commande systeme combinee avec exfiltration reseau. ' +
+    'Le package execute des commandes et transmet les resultats. Verifier les commandes executees. ' +
+    'Supprimer le package si non attendu. Auditer les logs reseau pour identifier les donnees exfiltrees.',
 };
 
 function getPlaybook(threatType) {

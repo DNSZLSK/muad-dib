@@ -426,7 +426,43 @@ function isStringFromCharCode(node) {
 }
 
 /**
- * Extract numeric arguments from a call (handles direct numbers and spread of array).
+ * Evaluate a constant numeric expression (BinaryExpression with literal operands).
+ * Supports +, -, *, ^, |, &, ~, <<, >> on numeric literals (recursive).
+ * Returns a number or null if the expression contains non-constant parts.
+ */
+function evaluateConstantExpr(node) {
+  if (node.type === 'Literal' && typeof node.value === 'number') {
+    return node.value;
+  }
+  if (node.type === 'UnaryExpression' && node.operator === '-') {
+    const val = evaluateConstantExpr(node.argument);
+    return val !== null ? -val : null;
+  }
+  if (node.type === 'UnaryExpression' && node.operator === '~') {
+    const val = evaluateConstantExpr(node.argument);
+    return val !== null ? ~val : null;
+  }
+  if (node.type === 'BinaryExpression') {
+    const left = evaluateConstantExpr(node.left);
+    const right = evaluateConstantExpr(node.right);
+    if (left === null || right === null) return null;
+    switch (node.operator) {
+      case '+': return left + right;
+      case '-': return left - right;
+      case '*': return left * right;
+      case '^': return left ^ right;
+      case '|': return left | right;
+      case '&': return left & right;
+      case '<<': return left << right;
+      case '>>': return left >> right;
+      default: return null;
+    }
+  }
+  return null;
+}
+
+/**
+ * Extract numeric arguments from a call (handles direct numbers, arithmetic expressions, and spread of array).
  * Returns array of numbers, or null if any argument is non-numeric.
  */
 function extractNumericArgs(node) {
@@ -434,16 +470,20 @@ function extractNumericArgs(node) {
   for (const arg of node.arguments) {
     if (arg.type === 'SpreadElement' && arg.argument?.type === 'ArrayExpression') {
       for (const el of arg.argument.elements) {
-        if (el?.type === 'Literal' && typeof el.value === 'number') {
-          nums.push(el.value);
+        const val = evaluateConstantExpr(el);
+        if (val !== null) {
+          nums.push(val);
         } else {
           return null; // non-numeric — abort
         }
       }
-    } else if (arg.type === 'Literal' && typeof arg.value === 'number') {
-      nums.push(arg.value);
     } else {
-      return null; // non-numeric argument (variable, expression) — abort
+      const val = evaluateConstantExpr(arg);
+      if (val !== null) {
+        nums.push(val);
+      } else {
+        return null; // non-numeric argument (variable, expression) — abort
+      }
     }
   }
   return nums.length > 0 ? nums : null;
