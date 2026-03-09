@@ -3,7 +3,7 @@
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
-const { test, asyncTest, assert, assertIncludes, runScanDirect } = require('../test-utils');
+const { test, asyncTest, assert, assertIncludes, runScanDirect, addSkipped } = require('../test-utils');
 const { classifySource, classifySink, buildIntentPairs, COHERENCE_MATRIX, CROSS_FILE_MULTIPLIER } = require('../../src/intent-graph.js');
 
 const ADVERSARIAL_DIR = path.join(__dirname, '..', '..', 'datasets', 'adversarial');
@@ -180,85 +180,96 @@ async function runIntentGraphTests() {
   // cannot boost them (cross-file pairing removed to prevent FP explosion).
   // Full detection requires module-graph improvements for class/EventEmitter/stream taint.
 
-  await asyncTest('INTENT: A1 locale-config-sync partially detected (cross-file class taint)', async () => {
-    const dir = path.join(ADVERSARIAL_DIR, 'locale-config-sync');
-    if (!fs.existsSync(dir)) { assert(false, 'Sample not found'); return; }
-    const result = await runScanDirect(dir, { _capture: true });
-    assert(result.summary.riskScore >= 10,
-      `locale-config-sync should score >= 10, got ${result.summary.riskScore}`);
-  });
+  const sampleNames = [
+    'locale-config-sync', 'metrics-aggregator-lite', 'env-config-validator',
+    'stream-transform-kit', 'cache-warmup-utils', 'fn-return-eval',
+    'call-chain-eval', 'regex-source-require', 'charcode-arithmetic', 'object-method-alias'
+  ];
+  const samplesExist = sampleNames.some(n => fs.existsSync(path.join(ADVERSARIAL_DIR, n)));
 
-  await asyncTest('INTENT: A2 metrics-aggregator-lite partially detected (EventEmitter gap)', async () => {
-    const dir = path.join(ADVERSARIAL_DIR, 'metrics-aggregator-lite');
-    if (!fs.existsSync(dir)) { assert(false, 'Sample not found'); return; }
-    const result = await runScanDirect(dir, { _capture: true });
-    assert(result.summary.riskScore >= 3,
-      `metrics-aggregator-lite should score >= 3, got ${result.summary.riskScore}`);
-  });
+  if (!samplesExist) {
+    addSkipped(10);
+  } else {
+    await asyncTest('INTENT: A1 locale-config-sync partially detected (cross-file class taint)', async () => {
+      const dir = path.join(ADVERSARIAL_DIR, 'locale-config-sync');
+      if (!fs.existsSync(dir)) { addSkipped(1); return; }
+      const result = await runScanDirect(dir, { _capture: true });
+      assert(result.summary.riskScore >= 10,
+        `locale-config-sync should score >= 10, got ${result.summary.riskScore}`);
+    });
 
-  await asyncTest('INTENT: A3 env-config-validator partially detected (rest destructuring)', async () => {
-    const dir = path.join(ADVERSARIAL_DIR, 'env-config-validator');
-    if (!fs.existsSync(dir)) { assert(false, 'Sample not found'); return; }
-    const result = await runScanDirect(dir, { _capture: true });
-    assert(result.summary.riskScore >= 10,
-      `env-config-validator should score >= 10, got ${result.summary.riskScore}`);
-  });
+    await asyncTest('INTENT: A2 metrics-aggregator-lite partially detected (EventEmitter gap)', async () => {
+      const dir = path.join(ADVERSARIAL_DIR, 'metrics-aggregator-lite');
+      if (!fs.existsSync(dir)) { addSkipped(1); return; }
+      const result = await runScanDirect(dir, { _capture: true });
+      assert(result.summary.riskScore >= 3,
+        `metrics-aggregator-lite should score >= 3, got ${result.summary.riskScore}`);
+    });
 
-  await asyncTest('INTENT: A4 stream-transform-kit partially detected (stream pipe gap)', async () => {
-    const dir = path.join(ADVERSARIAL_DIR, 'stream-transform-kit');
-    if (!fs.existsSync(dir)) { assert(false, 'Sample not found'); return; }
-    const result = await runScanDirect(dir, { _capture: true });
-    assert(result.summary.riskScore >= 10,
-      `stream-transform-kit should score >= 10, got ${result.summary.riskScore}`);
-  });
+    await asyncTest('INTENT: A3 env-config-validator partially detected (rest destructuring)', async () => {
+      const dir = path.join(ADVERSARIAL_DIR, 'env-config-validator');
+      if (!fs.existsSync(dir)) { addSkipped(1); return; }
+      const result = await runScanDirect(dir, { _capture: true });
+      assert(result.summary.riskScore >= 10,
+        `env-config-validator should score >= 10, got ${result.summary.riskScore}`);
+    });
 
-  await asyncTest('INTENT: A5 cache-warmup-utils detected', async () => {
-    const dir = path.join(ADVERSARIAL_DIR, 'cache-warmup-utils');
-    if (!fs.existsSync(dir)) { assert(false, 'Sample not found'); return; }
-    const result = await runScanDirect(dir, { _capture: true });
-    assert(result.summary.riskScore >= 25,
-      `cache-warmup-utils should score >= 25, got ${result.summary.riskScore}`);
-  });
+    await asyncTest('INTENT: A4 stream-transform-kit partially detected (stream pipe gap)', async () => {
+      const dir = path.join(ADVERSARIAL_DIR, 'stream-transform-kit');
+      if (!fs.existsSync(dir)) { addSkipped(1); return; }
+      const result = await runScanDirect(dir, { _capture: true });
+      assert(result.summary.riskScore >= 10,
+        `stream-transform-kit should score >= 10, got ${result.summary.riskScore}`);
+    });
 
-  await asyncTest('INTENT: B1 fn-return-eval detected (eval factory)', async () => {
-    const dir = path.join(ADVERSARIAL_DIR, 'fn-return-eval');
-    if (!fs.existsSync(dir)) { assert(false, 'Sample not found'); return; }
-    const result = await runScanDirect(dir, { _capture: true });
-    assert(result.summary.riskScore >= 25,
-      `fn-return-eval should score >= 25, got ${result.summary.riskScore}`);
-  });
+    await asyncTest('INTENT: A5 cache-warmup-utils detected', async () => {
+      const dir = path.join(ADVERSARIAL_DIR, 'cache-warmup-utils');
+      if (!fs.existsSync(dir)) { addSkipped(1); return; }
+      const result = await runScanDirect(dir, { _capture: true });
+      assert(result.summary.riskScore >= 25,
+        `cache-warmup-utils should score >= 25, got ${result.summary.riskScore}`);
+    });
 
-  await asyncTest('INTENT: B2 call-chain-eval detected (.call.call evasion)', async () => {
-    const dir = path.join(ADVERSARIAL_DIR, 'call-chain-eval');
-    if (!fs.existsSync(dir)) { assert(false, 'Sample not found'); return; }
-    const result = await runScanDirect(dir, { _capture: true });
-    assert(result.summary.riskScore >= 20,
-      `call-chain-eval should score >= 20, got ${result.summary.riskScore}`);
-  });
+    await asyncTest('INTENT: B1 fn-return-eval detected (eval factory)', async () => {
+      const dir = path.join(ADVERSARIAL_DIR, 'fn-return-eval');
+      if (!fs.existsSync(dir)) { addSkipped(1); return; }
+      const result = await runScanDirect(dir, { _capture: true });
+      assert(result.summary.riskScore >= 25,
+        `fn-return-eval should score >= 25, got ${result.summary.riskScore}`);
+    });
 
-  await asyncTest('INTENT: B3 regex-source-require detected (regex .source)', async () => {
-    const dir = path.join(ADVERSARIAL_DIR, 'regex-source-require');
-    if (!fs.existsSync(dir)) { assert(false, 'Sample not found'); return; }
-    const result = await runScanDirect(dir, { _capture: true });
-    assert(result.summary.riskScore >= 25,
-      `regex-source-require should score >= 25, got ${result.summary.riskScore}`);
-  });
+    await asyncTest('INTENT: B2 call-chain-eval detected (.call.call evasion)', async () => {
+      const dir = path.join(ADVERSARIAL_DIR, 'call-chain-eval');
+      if (!fs.existsSync(dir)) { addSkipped(1); return; }
+      const result = await runScanDirect(dir, { _capture: true });
+      assert(result.summary.riskScore >= 20,
+        `call-chain-eval should score >= 20, got ${result.summary.riskScore}`);
+    });
 
-  await asyncTest('INTENT: B4 charcode-arithmetic detected', async () => {
-    const dir = path.join(ADVERSARIAL_DIR, 'charcode-arithmetic');
-    if (!fs.existsSync(dir)) { assert(false, 'Sample not found'); return; }
-    const result = await runScanDirect(dir, { _capture: true });
-    assert(result.summary.riskScore >= 25,
-      `charcode-arithmetic should score >= 25, got ${result.summary.riskScore}`);
-  });
+    await asyncTest('INTENT: B3 regex-source-require detected (regex .source)', async () => {
+      const dir = path.join(ADVERSARIAL_DIR, 'regex-source-require');
+      if (!fs.existsSync(dir)) { addSkipped(1); return; }
+      const result = await runScanDirect(dir, { _capture: true });
+      assert(result.summary.riskScore >= 25,
+        `regex-source-require should score >= 25, got ${result.summary.riskScore}`);
+    });
 
-  await asyncTest('INTENT: B5 object-method-alias detected', async () => {
-    const dir = path.join(ADVERSARIAL_DIR, 'object-method-alias');
-    if (!fs.existsSync(dir)) { assert(false, 'Sample not found'); return; }
-    const result = await runScanDirect(dir, { _capture: true });
-    assert(result.summary.riskScore >= 25,
-      `object-method-alias should score >= 25, got ${result.summary.riskScore}`);
-  });
+    await asyncTest('INTENT: B4 charcode-arithmetic detected', async () => {
+      const dir = path.join(ADVERSARIAL_DIR, 'charcode-arithmetic');
+      if (!fs.existsSync(dir)) { addSkipped(1); return; }
+      const result = await runScanDirect(dir, { _capture: true });
+      assert(result.summary.riskScore >= 25,
+        `charcode-arithmetic should score >= 25, got ${result.summary.riskScore}`);
+    });
+
+    await asyncTest('INTENT: B5 object-method-alias detected', async () => {
+      const dir = path.join(ADVERSARIAL_DIR, 'object-method-alias');
+      if (!fs.existsSync(dir)) { addSkipped(1); return; }
+      const result = await runScanDirect(dir, { _capture: true });
+      assert(result.summary.riskScore >= 25,
+        `object-method-alias should score >= 25, got ${result.summary.riskScore}`);
+    });
+  }
 
   // =========================================================================
   // Negative tests: scanner fixes should not FP on benign patterns
