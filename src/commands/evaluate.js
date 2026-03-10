@@ -113,10 +113,10 @@ const ADVERSARIAL_THRESHOLDS = {
   'wasm-c2-payload': 20,
   // Vague 6 — DPRK + Intent Graph (10 samples)
   // Group A: pure API, multi-file, cross-file taint
-  'locale-config-sync': 10,        // partially detected — cross-file class taint gap
-  'metrics-aggregator-lite': 3,    // partially detected — EventEmitter gap
-  'env-config-validator': 10,      // partially detected — rest destructuring without compound
-  'stream-transform-kit': 10,      // partially detected — stream pipe gap
+  'locale-config-sync': 25,        // v2.6.1: class this.X + imported sink method
+  'metrics-aggregator-lite': 25,   // v2.6.1: EventEmitter + ObjectExpression taint + this.method() sink
+  'env-config-validator': 25,      // v2.6.1: imported sink method detection
+  'stream-transform-kit': 25,     // v2.6.1: pipe chain cross-file flows
   'cache-warmup-utils': 25,
   // Group B: eval evasion techniques
   'fn-return-eval': 25,

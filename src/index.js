@@ -23,7 +23,7 @@ const { ensureIOCs } = require('./ioc/bootstrap.js');
 const { scanEntropy } = require('./scanner/entropy.js');
 const { scanAIConfig } = require('./scanner/ai-config.js');
 const { deobfuscate } = require('./scanner/deobfuscate.js');
-const { buildModuleGraph, annotateTaintedExports, detectCrossFileFlows, annotateSinkExports, detectCallbackCrossFileFlows } = require('./scanner/module-graph.js');
+const { buildModuleGraph, annotateTaintedExports, detectCrossFileFlows, annotateSinkExports, detectCallbackCrossFileFlows, detectEventEmitterFlows } = require('./scanner/module-graph.js');
 const { computeReachableFiles } = require('./scanner/reachability.js');
 const { runTemporalAnalyses } = require('./temporal-runner.js');
 const { formatOutput } = require('./output-formatter.js');
@@ -357,16 +357,27 @@ async function run(targetPath, options = {}) {
 
   // Cross-file module graph analysis (before individual scanners)
   // Wrapped in yieldThen to unblock spinner animation
+  // Bounded: 5s timeout to prevent DoS on large/adversarial packages
+  const MODULE_GRAPH_TIMEOUT_MS = 5000;
   let crossFileFlows = [];
   if (!options.noModuleGraph) {
-    try {
+    const moduleGraphWork = async () => {
       const graph = await yieldThen(() => buildModuleGraph(targetPath));
       const tainted = await yieldThen(() => annotateTaintedExports(graph, targetPath));
-      crossFileFlows = await yieldThen(() => detectCrossFileFlows(graph, tainted, targetPath));
-      // Callback-based cross-file flow detection
       const sinkAnnotations = await yieldThen(() => annotateSinkExports(graph, targetPath));
+      crossFileFlows = await yieldThen(() => detectCrossFileFlows(graph, tainted, sinkAnnotations, targetPath));
+      // Callback-based cross-file flow detection
       const callbackFlows = await yieldThen(() => detectCallbackCrossFileFlows(graph, tainted, sinkAnnotations, targetPath));
       crossFileFlows = crossFileFlows.concat(callbackFlows);
+      // EventEmitter cross-module flow detection
+      const emitterFlows = await yieldThen(() => detectEventEmitterFlows(graph, tainted, sinkAnnotations, targetPath));
+      crossFileFlows = crossFileFlows.concat(emitterFlows);
+    };
+    const timeout = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Module graph timeout')), MODULE_GRAPH_TIMEOUT_MS)
+    );
+    try {
+      await Promise.race([moduleGraphWork(), timeout]);
     } catch (e) {
       // Graceful fallback — module graph is best-effort
       debugLog('[MODULE-GRAPH] Error:', e && e.message);
