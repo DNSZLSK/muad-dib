@@ -641,7 +641,7 @@ Les alertes apparaissent dans Security > Code scanning alerts.
 ## Architecture
 
 ```
-MUAD'DIB 2.5.17 Scanner
+MUAD'DIB 2.6.1 Scanner
 |
 +-- IOC Match (225 000+ packages, JSON DB)
 |   +-- OSV.dev npm dump (200K+ entrées MAL-*)
@@ -760,7 +760,7 @@ TPR ajuste sur malware JS/Node.js : **~100%** (15 810/~15 845). Voir [Evaluation
 | Gros (50-100 fichiers JS) | 40 | 10 | 25.0% |
 | Tres gros (100+ fichiers JS) | 62 | 25 | 40.3% |
 
-**Progression FPR** : 0% (invalide, dirs vides, v2.2.0-v2.2.6) → 38% (premiere vraie mesure, v2.2.7) → 19.4% (v2.2.8) → 17.5% (v2.2.9) → ~13% (v2.2.11, scoring per-file max) → 8.9% (v2.3.0, P2) → 7.4% (v2.3.1, P3) → 6.0% (v2.5.8, P4 + audit IOC wildcards) → ~13.6% (v2.5.14, hardening audit) → **12.3%** (v2.5.16, P5+P6, 65/532)
+**Progression FPR** : 0% (invalide, dirs vides, v2.2.0-v2.2.6) → 38% (premiere vraie mesure, v2.2.7) → 19.4% (v2.2.8) → 17.5% (v2.2.9) → ~13% (v2.2.11, scoring per-file max) → 8.9% (v2.3.0, P2) → 7.4% (v2.3.1, P3) → 6.0% (v2.5.8, P4 + audit IOC wildcards) → ~13.6% (v2.5.14, hardening audit) → **12.3%** (v2.5.16, P5+P6, 65/532) → **12.3%** (v2.6.1, module-graph bounded path — zero FP)
 
 > **Note sur l'evolution du FPR :** Le FPR historique de 6.0% (v2.5.8) reposait sur un `BENIGN_PACKAGE_WHITELIST` qui excluait certains packages connus du scoring — un biais de data leakage supprime en v2.5.10. Le FPR actuel de 12.3% est une mesure honnete sans whitelisting, contre 532 packages benins reels. Les reductions P5/P6 (precision setTimeout, dist/ two-notch downgrade, credential_regex count-based, env segment matching, etc.) sont des ameliorations de precision des detecteurs, pas du whitelisting.
 
@@ -780,7 +780,7 @@ TPR ajuste sur malware JS/Node.js : **~100%** (15 810/~15 845). Voir [Evaluation
 - **ADR** (Adversarial Detection Rate) : taux de detection sur 102 samples malveillants evasifs — 62 adversariaux (4 vagues red team + 3 bypasses + Vague 4) + 40 holdouts (5 batches de 10, testant obfuscation, dataflow inter-module, etc.). 2 misses documentes.
 - **Holdout** (pre-tuning) : taux de detection sur 10 samples jamais vus avec regles gelees (mesure de generalisation)
 
-Datasets : 17 922 samples Datadog, 532 npm + 132 PyPI packages benins, 102 samples adversariaux/holdout, 51 attaques ground-truth (65 packages malveillants documentes). **1905 tests**, 86% coverage.
+Datasets : 17 922 samples Datadog, 532 npm + 132 PyPI packages benins, 102 samples adversariaux/holdout, 51 attaques ground-truth (65 packages malveillants documentes). **1932 tests**, 86% coverage.
 
 Voir [Evaluation Methodology](docs/EVALUATION_METHODOLOGY.md) pour le protocole experimental complet.
 
@@ -816,7 +816,7 @@ npm test
 
 ### Tests
 
-- **1905 tests unitaires/integration** sur 44 fichiers modulaires - 86% coverage via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
+- **1932 tests unitaires/integration** sur 44 fichiers modulaires - 86% coverage via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
 - **56 tests de fuzzing** - YAML malforme, JSON invalide, fichiers binaires, ReDoS, unicode, inputs 10MB
 - **Benchmark Datadog 17K** - 17 922 packages malveillants reels, 88.2% TPR brut, ~100% sur malware JS/Node.js (2 077 misses hors scope : phishing, binaires, libs corrigees)
 - **102 samples adversariaux/holdout** - 62 adversariaux + 40 holdouts, 73/75 taux de detection sur samples disponibles (97.3% ADR). 2 misses documentes

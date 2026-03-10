@@ -1853,6 +1853,62 @@ La co-occurrence source-sink cross-file sans preuve de data flow = explosion de 
 
 ---
 
+## v2.6.1 — Module-Graph Bounded Path (10 Mars 2026)
+
+### Contexte
+
+Les 5 echantillons adversariaux Group A (DPRK pure API multi-fichiers) de la v2.6.0 n'etaient que partiellement detectes. Le module-graph existant ne couvrait pas 4 patterns de propagation de teinte inter-modules : instances de classe importees, EventEmitter pub/sub, pipelines stream, et methodes de sink importees. L'objectif est de detecter ces 5 echantillons (score >= 25) sans augmenter le FPR.
+
+### Bounded path infrastructure (Step 0)
+
+Ajout de bornes pour prevenir les DoS sur les gros packages :
+- `MAX_GRAPH_NODES = 50` : packages avec plus de 50 fichiers JS → graphe vide (retour immediat)
+- `MAX_GRAPH_EDGES = 200` : troncature des aretes au-dela de 200
+- `MAX_FLOWS = 20` : cap sur les flux detectes
+- Timeout 5s via `Promise.race` dans `src/index.js`
+
+### 5 nouveaux patterns de detection (Steps 1-4)
+
+1. **Imported sink method detection** : `obj.method(taintedArg)` ou `method()` contient un sink reseau interne. Construit `moduleRefs` via `require()` et `new Instance()`, puis verifie `sinkExports` pour chaque appel de methode recevant un argument teinte.
+
+2. **Class `this.X` instance taint** : `this.reader = new Reader()` dans les constructeurs propage la reference module. `this.reader.readAll()` dans les methodes verifie les exports teintes du module associe.
+
+3. **Stream pipeline detection** : `fs.createReadStream` ajoute comme source de teinte. `resolvePipeChainSource()` suit les chaines `.pipe()` (MAX_PIPE_DEPTH=5). `findPipeChainCrossFileFlows()` detecte les chaines pipe inter-modules (source teintee → sink module).
+
+4. **EventEmitter cross-module** : `.emit('event', taintedData)` matche avec `.on('event', handler)` entre fichiers. BENIGN_EVENT_NAMES filtre les evenements standard Node.js. MAX_EMITTER_FLOWS=2 par package. Resolution `this.method()` dans les handlers via `classMethodBodies`. ObjectExpression property taint pour les objets contenant des valeurs teintees.
+
+### Corrections supplementaires
+
+- `describeSensitiveCall` etendu : `os.hostname`, `os.userInfo`, `os.networkInterfaces` comme sources de fingerprinting
+- `Object.create(null)` pour `classMethodBodies` (crash par collision prototype sur packages benins)
+- Fix pipe chain: restructuration du while loop pour que `.pipe()` recursion fonctionne independamment du type du sous-objet
+
+### Scores Group A (tous >= 25)
+
+| Echantillon | Avant | Apres | Pattern detecte |
+|-------------|-------|-------|-----------------|
+| locale-config-sync | ~10 | **30** | class this.X + imported sink method |
+| metrics-aggregator-lite | ~3 | **26** | EventEmitter + ObjectExpression taint |
+| env-config-validator | ~10 | **28** | imported sink method |
+| stream-transform-kit | ~10 | **28** | pipe chain cross-file flows |
+| cache-warmup-utils | ~25 | **28** | cross-file dataflow (existant) |
+
+### Metriques
+
+| Metrique | Avant v2.6.1 | Apres v2.6.1 | Delta |
+|----------|--------------|--------------|-------|
+| **TPR** | 93.9% (46/49) | **93.9% (46/49)** | inchange |
+| **FPR** | 12.3% (65/532) | **12.3% (65/529)** | zero FP ajoute |
+| **ADR** | 97.3% (73/75) | **97.3% (73/75)** | inchange (thresholds releves de 3-10 a 25) |
+
+Tests : 1905 → **1932** (+27). Fichiers de test : 44 (inchange).
+
+### Lecon apprise
+
+La detection de teinte inter-modules necessite de gerer non seulement les imports directs mais aussi les instances de classe, les EventEmitters, et les pipelines stream. Chaque pattern a ses subtilites : les constructeurs qui stockent des references dans `this.X`, les handlers `.on()` qui appellent `this.method()` au lieu de contenir le sink directement, les chaines `.pipe()` ou la source et le sink sont des methodes de modules differents. La borne MAX_GRAPH_NODES=50 est essentielle — sans elle, les gros packages (react, aws-sdk) causent des timeouts.
+
+---
+
 ## Etat actuel
 
 ### Ce qui fonctionne

@@ -1,8 +1,13 @@
 const fs = require('fs');
 const path = require('path');
 const acorn = require('acorn');
-const { findFiles, EXCLUDED_DIRS } = require('../utils');
+const { findFiles, EXCLUDED_DIRS, debugLog } = require('../utils');
 const { ACORN_OPTIONS: BASE_ACORN_OPTIONS, safeParse } = require('../shared/constants.js');
+
+// --- Bounded path limits ---
+const MAX_GRAPH_NODES = 50;   // Max files in dependency graph
+const MAX_GRAPH_EDGES = 200;  // Max total import edges
+const MAX_FLOWS = 20;         // Max cross-file flow findings per package
 
 // --- Sensitive source patterns ---
 const SENSITIVE_MODULES = new Set(['fs', 'child_process', 'dns', 'os', 'dgram']);
@@ -18,6 +23,7 @@ const SINK_CALLEE_NAMES = new Set(['fetch', 'eval', 'Function', 'WebSocket', 'XM
 const SINK_MEMBER_METHODS = new Set([
   'https.request', 'https.get', 'http.request', 'http.get',
   'child_process.exec', 'child_process.execSync', 'child_process.spawn',
+  'dns.resolveTxt', 'dns.resolve', 'dns.resolve4', 'dns.resolve6',
 ]);
 const SINK_INSTANCE_METHODS = new Set(['connect', 'write', 'send']);
 
@@ -35,9 +41,23 @@ function buildModuleGraph(packagePath) {
     extensions: ['.js', '.mjs', '.cjs'],
     excludedDirs: EXCLUDED_DIRS,
   });
+
+  // Bounded path: skip module graph for very large packages
+  if (files.length > MAX_GRAPH_NODES) {
+    debugLog(`[MODULE-GRAPH] Skipping: ${files.length} files exceeds MAX_GRAPH_NODES (${MAX_GRAPH_NODES})`);
+    return graph;
+  }
+
+  let totalEdges = 0;
   for (const absFile of files) {
     const relFile = toRel(absFile, packagePath);
     const imports = extractLocalImports(absFile, packagePath);
+    totalEdges += imports.length;
+    if (totalEdges > MAX_GRAPH_EDGES) {
+      debugLog(`[MODULE-GRAPH] Edge limit reached (${totalEdges} > ${MAX_GRAPH_EDGES}), returning partial graph`);
+      graph[relFile] = imports;
+      break;
+    }
     graph[relFile] = imports;
   }
   return graph;
@@ -424,11 +444,11 @@ function checkNodeTaint(node, moduleVars) {
 
 function describeSensitiveCall(mod, method, args) {
   const detail = extractLiteralArg(args);
-  if (mod === 'fs' && (method === 'readFileSync' || method === 'readFile')) {
+  if (mod === 'fs' && (method === 'readFileSync' || method === 'readFile' || method === 'createReadStream')) {
     return { source: `fs.${method}`, detail };
   }
-  if (mod === 'os' && method === 'homedir') {
-    return { source: 'os.homedir', detail: '' };
+  if (mod === 'os' && (method === 'homedir' || method === 'hostname' || method === 'userInfo' || method === 'networkInterfaces')) {
+    return { source: `os.${method}`, detail: '' };
   }
   if (mod === 'child_process' && (method === 'exec' || method === 'execSync' || method === 'spawn')) {
     return { source: `child_process.${method}`, detail };
@@ -488,7 +508,13 @@ function scanBodyForTaint(body, moduleVars, taintedVars) {
  * network/exec sink in another module.
  * Max 2 levels of re-export (A → B → C).
  */
-function detectCrossFileFlows(graph, taintedExports, packagePath) {
+function detectCrossFileFlows(graph, taintedExports, sinkExportsOrPath, packagePath) {
+  // Backward compat: old callers pass (graph, tainted, path) — 3 args
+  let sinkExports = sinkExportsOrPath;
+  if (typeof sinkExportsOrPath === 'string') {
+    packagePath = sinkExportsOrPath;
+    sinkExports = null;
+  }
   // Expand taint through re-exports (max 2 levels)
   const expandedTaint = expandTaintThroughReexports(graph, taintedExports, packagePath);
 
@@ -499,6 +525,18 @@ function detectCrossFileFlows(graph, taintedExports, packagePath) {
     const ast = parseFile(absFile);
     if (!ast) continue;
 
+    // Pipe chain cross-file flows (runs before localTaint check — doesn't need localTaint)
+    if (sinkExports && flows.length < MAX_FLOWS) {
+      const pipeFlows = findPipeChainCrossFileFlows(ast, relFile, graph, expandedTaint, sinkExports, packagePath);
+      for (const flow of pipeFlows) {
+        if (flows.length >= MAX_FLOWS) break;
+        const key = `${flow.sourceFile}→${flow.sinkFile}`;
+        if (!flows.some(f => `${f.sourceFile}→${f.sinkFile}` === key)) {
+          flows.push(flow);
+        }
+      }
+    }
+
     // Find which local variables are tainted via imports
     const localTaint = collectImportTaint(ast, relFile, graph, expandedTaint, packagePath);
     if (Object.keys(localTaint).length === 0) continue;
@@ -506,9 +544,10 @@ function detectCrossFileFlows(graph, taintedExports, packagePath) {
     // Propagate taint through local variable assignments (e.g., const data = read())
     propagateLocalTaint(ast, localTaint);
 
-    // Find sinks that use tainted variables
+    // Find sinks that use tainted variables (direct sink calls at call site)
     const sinks = findSinksUsingTainted(ast, localTaint);
     for (const sink of sinks) {
+      if (flows.length >= MAX_FLOWS) break;
       const taintInfo = localTaint[sink.taintedVar];
       flows.push({
         severity: 'CRITICAL',
@@ -519,6 +558,24 @@ function detectCrossFileFlows(graph, taintedExports, packagePath) {
         sink: sink.sink,
         description: `Credential read in ${taintInfo.sourceFile} exported and sent to network in ${relFile}`,
       });
+    }
+
+    // Find imported methods that internally contain sinks and receive tainted args
+    if (sinkExports && flows.length < MAX_FLOWS) {
+      const importedSinkFlows = findImportedSinkMethodCalls(ast, localTaint, relFile, graph, sinkExports, packagePath);
+      for (const flow of importedSinkFlows) {
+        if (flows.length >= MAX_FLOWS) break;
+        // Deduplicate: skip if same sourceFile→sinkFile already found
+        const key = `${flow.sourceFile}→${flow.sinkFile}`;
+        if (!flows.some(f => `${f.sourceFile}→${f.sinkFile}` === key)) {
+          flows.push(flow);
+        }
+      }
+    }
+
+    if (flows.length >= MAX_FLOWS) {
+      debugLog(`[MODULE-GRAPH] Flow limit reached (${MAX_FLOWS}), returning partial results`);
+      break;
     }
   }
 
@@ -865,6 +922,67 @@ function collectImportTaint(ast, currentFile, graph, taintedExports, packagePath
     }
   });
 
+  // Resolve this.X = new Y() in class constructors, then this.X.method() in methods
+  walkAST(ast, (node) => {
+    if (node.type !== 'ClassDeclaration' && node.type !== 'ClassExpression') return;
+    if (!node.body || node.body.type !== 'ClassBody') return;
+
+    // Phase 1: scan constructor for this.X = new Y() assignments
+    const thisRefs = {}; // propName → __module__ ref
+    for (const method of node.body.body) {
+      if (method.type !== 'MethodDefinition' || method.kind !== 'constructor') continue;
+      const ctorBody = method.value && method.value.body;
+      if (!ctorBody) continue;
+      walkAST(ctorBody, (n) => {
+        // this.reader = new Reader(...)
+        if (n.type === 'ExpressionStatement' && n.expression.type === 'AssignmentExpression' &&
+            n.expression.left.type === 'MemberExpression' &&
+            n.expression.left.object.type === 'ThisExpression' &&
+            n.expression.right.type === 'NewExpression' &&
+            n.expression.right.callee.type === 'Identifier') {
+          const prop = n.expression.left.property.name || n.expression.left.property.value;
+          const className = n.expression.right.callee.name;
+          const modRef = localTaint['__module__' + className];
+          if (prop && modRef) {
+            thisRefs[prop] = modRef;
+          }
+        }
+      });
+    }
+
+    if (Object.keys(thisRefs).length === 0) return;
+
+    // Phase 2: scan all methods for this.X.method() calls that return tainted data
+    for (const method of node.body.body) {
+      if (method.type !== 'MethodDefinition' || method.kind === 'constructor') continue;
+      const methodBody = method.value && method.value.body;
+      if (!methodBody) continue;
+      walkAST(methodBody, (n) => {
+        if (n.type !== 'VariableDeclaration') return;
+        for (const decl of n.declarations) {
+          if (!decl.init || !decl.id || decl.id.type !== 'Identifier') continue;
+          // const data = this.reader.readAll()
+          if (decl.init.type === 'CallExpression' &&
+              decl.init.callee.type === 'MemberExpression' &&
+              decl.init.callee.object.type === 'MemberExpression' &&
+              decl.init.callee.object.object.type === 'ThisExpression') {
+            const thisProp = decl.init.callee.object.property.name || decl.init.callee.object.property.value;
+            const methodName = decl.init.callee.property.name || decl.init.callee.property.value;
+            const modRef = thisRefs[thisProp];
+            if (modRef && methodName && modRef.modTaint[methodName] && modRef.modTaint[methodName].tainted) {
+              const t = modRef.modTaint[methodName];
+              localTaint[decl.id.name] = {
+                source: t.source,
+                detail: t.detail || '',
+                sourceFile: t.sourceFile || modRef.resolved,
+              };
+            }
+          }
+        }
+      });
+    }
+  });
+
   // Clean up internal markers
   for (const key of Object.keys(localTaint)) {
     if (key.startsWith('__module__')) delete localTaint[key];
@@ -884,16 +1002,76 @@ function findSinksUsingTainted(ast, localTaint) {
     if (node.type !== 'CallExpression') return;
 
     const sinkName = getSinkName(node);
-    if (!sinkName) return;
+    if (sinkName) {
+      // Check if any argument references a tainted variable
+      const taintedArg = findTaintedArgument(node.arguments, taintedNames);
+      if (taintedArg) {
+        sinks.push({ sink: sinkName, taintedVar: taintedArg });
+      }
+    }
 
-    // Check if any argument references a tainted variable
-    const taintedArg = findTaintedArgument(node.arguments, taintedNames);
-    if (taintedArg) {
-      sinks.push({ sink: sinkName, taintedVar: taintedArg });
+    // Pipe chain detection: tainted.pipe(transform).pipe(networkSink)
+    // .pipe() returns the destination, so chains propagate taint.
+    // Walk up to MAX_PIPE_DEPTH steps.
+    if (node.callee && node.callee.type === 'MemberExpression') {
+      const method = node.callee.property.name || node.callee.property.value;
+      if (method === 'pipe') {
+        const pipeSource = resolvePipeChainSource(node, taintedNames, 0);
+        if (pipeSource) {
+          // The final .pipe() destination — check if it's a known sink
+          const destArg = node.arguments && node.arguments[0];
+          if (destArg) {
+            const destSink = getArgSinkName(destArg);
+            if (destSink) {
+              sinks.push({ sink: destSink, taintedVar: pipeSource });
+            }
+          }
+        }
+      }
     }
   });
 
   return sinks;
+}
+
+const MAX_PIPE_DEPTH = 5;
+
+/**
+ * Walk a .pipe() chain leftward to find the tainted source variable.
+ * tainted.pipe(a).pipe(b) → check tainted, recurse through .pipe(a)
+ */
+function resolvePipeChainSource(pipeCallNode, taintedNames, depth) {
+  if (depth > MAX_PIPE_DEPTH) return null;
+  const obj = pipeCallNode.callee && pipeCallNode.callee.object;
+  if (!obj) return null;
+
+  // Base case: taintedVar.pipe(...)
+  if (obj.type === 'Identifier' && taintedNames.has(obj.name)) {
+    return obj.name;
+  }
+
+  // Recursive case: something.pipe(...).pipe(...)
+  if (obj.type === 'CallExpression' && obj.callee && obj.callee.type === 'MemberExpression') {
+    const method = obj.callee.property.name || obj.callee.property.value;
+    if (method === 'pipe') {
+      return resolvePipeChainSource(obj, taintedNames, depth + 1);
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Check if a .pipe() destination argument is a network sink.
+ * E.g., net.connect(...), http.request(...)
+ */
+function getArgSinkName(argNode) {
+  // net.connect(...) as pipe destination
+  if (argNode.type === 'CallExpression') {
+    return getSinkName(argNode);
+  }
+  // Direct identifier that is a known sink instance (less common)
+  return null;
 }
 
 function getSinkName(callNode) {
@@ -970,6 +1148,304 @@ function findTaintedInExpr(node, taintedNames) {
     return findTaintedInExpr(node.left, taintedNames) || findTaintedInExpr(node.right, taintedNames);
   }
   return null;
+}
+
+/**
+ * Find calls to imported methods whose bodies contain sinks, receiving tainted args.
+ * Pattern: reporter.report(taintedData) where report() internally calls https.request().
+ */
+function findImportedSinkMethodCalls(ast, localTaint, relFile, graph, sinkExports, packagePath) {
+  const flows = [];
+  const taintedNames = new Set(Object.keys(localTaint));
+  const fileDir = path.dirname(path.resolve(packagePath, relFile));
+
+  // Build map: varName → resolved module path (for require-based imports)
+  const moduleRefs = {};
+  walkAST(ast, (node) => {
+    if (node.type !== 'VariableDeclaration') return;
+    for (const decl of node.declarations) {
+      if (!decl.init || !decl.id) continue;
+      // const reporter = require('./reporter')
+      if (decl.id.type === 'Identifier' && isRequireCall(decl.init) && isLocalImport(decl.init.arguments[0].value)) {
+        const resolved = resolveLocal(fileDir, decl.init.arguments[0].value, packagePath);
+        if (resolved) moduleRefs[decl.id.name] = resolved;
+      }
+      // const r = new Reporter() where Reporter was required above
+      if (decl.id.type === 'Identifier' && decl.init.type === 'NewExpression' && decl.init.callee.type === 'Identifier') {
+        const ctorRef = moduleRefs[decl.init.callee.name];
+        if (ctorRef) moduleRefs[decl.id.name] = ctorRef;
+      }
+    }
+  });
+
+  // Also handle ESM: import reporter from './reporter'
+  for (const node of ast.body) {
+    if (node.type === 'ImportDeclaration' && node.source && typeof node.source.value === 'string') {
+      if (isLocalImport(node.source.value)) {
+        const resolved = resolveLocal(fileDir, node.source.value, packagePath);
+        if (!resolved) continue;
+        for (const spec of node.specifiers) {
+          moduleRefs[spec.local.name] = resolved;
+        }
+      }
+    }
+  }
+
+  // Resolve this.X = new Y() in class constructors → thisRefs map
+  const thisRefs = {}; // propName → resolved module path
+  walkAST(ast, (node) => {
+    if (node.type !== 'ClassDeclaration' && node.type !== 'ClassExpression') return;
+    if (!node.body || node.body.type !== 'ClassBody') return;
+    for (const method of node.body.body) {
+      if (method.type !== 'MethodDefinition' || method.kind !== 'constructor') continue;
+      const ctorBody = method.value && method.value.body;
+      if (!ctorBody) continue;
+      walkAST(ctorBody, (n) => {
+        if (n.type === 'ExpressionStatement' && n.expression.type === 'AssignmentExpression' &&
+            n.expression.left.type === 'MemberExpression' &&
+            n.expression.left.object.type === 'ThisExpression' &&
+            n.expression.right.type === 'NewExpression' &&
+            n.expression.right.callee.type === 'Identifier') {
+          const prop = n.expression.left.property.name || n.expression.left.property.value;
+          const className = n.expression.right.callee.name;
+          const resolved = moduleRefs[className];
+          if (prop && resolved) {
+            thisRefs[prop] = resolved;
+          }
+        }
+      });
+    }
+  });
+
+  // Find obj.method(taintedArg) where obj's module has sink exports
+  walkAST(ast, (node) => {
+    if (node.type !== 'CallExpression') return;
+    const callee = node.callee;
+
+    // Pattern: obj.method(taintedArg)
+    if (callee.type === 'MemberExpression' && callee.object.type === 'Identifier') {
+      const objName = callee.object.name;
+      const methodName = callee.property.name || callee.property.value;
+      const resolved = moduleRefs[objName];
+      if (!resolved || !methodName) return;
+
+      // Check if this method is a known sink export
+      const moduleSinks = sinkExports[resolved];
+      if (!moduleSinks) return;
+      const sinkInfo = moduleSinks[methodName] || moduleSinks['default'];
+      if (!sinkInfo || !sinkInfo.hasSink) return;
+
+      // Check if any argument is tainted
+      const taintedArg = findTaintedArgument(node.arguments, taintedNames);
+      if (!taintedArg) return;
+
+      const taintInfo = localTaint[taintedArg];
+      if (!taintInfo) return;
+
+      flows.push({
+        severity: 'CRITICAL',
+        type: 'cross_file_dataflow',
+        sourceFile: taintInfo.sourceFile,
+        source: `${taintInfo.source}${taintInfo.detail ? '(' + taintInfo.detail + ')' : ''}`,
+        sinkFile: relFile,
+        sink: sinkInfo.sink,
+        description: `Credential read in ${taintInfo.sourceFile} flows to imported sink method ${objName}.${methodName}() (${sinkInfo.sink}) in ${relFile}`,
+      });
+    }
+
+    // Pattern: this.transport.report(taintedArg) where transport's module has sink exports
+    if (callee.type === 'MemberExpression' &&
+        callee.object.type === 'MemberExpression' &&
+        callee.object.object.type === 'ThisExpression') {
+      const thisProp = callee.object.property.name || callee.object.property.value;
+      const methodName = callee.property.name || callee.property.value;
+      const resolved = thisRefs[thisProp];
+      if (resolved && methodName) {
+        const moduleSinks = sinkExports[resolved];
+        if (moduleSinks) {
+          const sinkInfo = moduleSinks[methodName] || moduleSinks['default'];
+          if (sinkInfo && sinkInfo.hasSink) {
+            const taintedArg = findTaintedArgument(node.arguments, taintedNames);
+            if (taintedArg) {
+              const taintInfo = localTaint[taintedArg];
+              if (taintInfo) {
+                flows.push({
+                  severity: 'CRITICAL',
+                  type: 'cross_file_dataflow',
+                  sourceFile: taintInfo.sourceFile,
+                  source: `${taintInfo.source}${taintInfo.detail ? '(' + taintInfo.detail + ')' : ''}`,
+                  sinkFile: relFile,
+                  sink: sinkInfo.sink,
+                  description: `Credential read in ${taintInfo.sourceFile} flows via this.${thisProp}.${methodName}() (${sinkInfo.sink}) in ${relFile}`,
+                });
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Pattern: sinkFn(taintedArg) where sinkFn is a direct import of a sink function
+    if (callee.type === 'Identifier') {
+      const resolved = moduleRefs[callee.name];
+      if (!resolved) return;
+      const moduleSinks = sinkExports[resolved];
+      if (!moduleSinks) return;
+      const sinkInfo = moduleSinks['default'] || moduleSinks[callee.name];
+      if (!sinkInfo || !sinkInfo.hasSink) return;
+
+      const taintedArg = findTaintedArgument(node.arguments, taintedNames);
+      if (!taintedArg) return;
+
+      const taintInfo = localTaint[taintedArg];
+      if (!taintInfo) return;
+
+      flows.push({
+        severity: 'CRITICAL',
+        type: 'cross_file_dataflow',
+        sourceFile: taintInfo.sourceFile,
+        source: `${taintInfo.source}${taintInfo.detail ? '(' + taintInfo.detail + ')' : ''}`,
+        sinkFile: relFile,
+        sink: sinkInfo.sink,
+        description: `Credential read in ${taintInfo.sourceFile} flows to imported sink function ${callee.name}() (${sinkInfo.sink}) in ${relFile}`,
+      });
+    }
+  });
+
+  return flows;
+}
+
+/**
+ * Detect cross-file flows through .pipe() chains involving imported module instances.
+ * Pattern: reader.stream().pipe(transform).pipe(sink.createWritable())
+ * where reader and sink are instances of imported module classes.
+ */
+function findPipeChainCrossFileFlows(ast, relFile, graph, taintedExports, sinkExports, packagePath) {
+  const flows = [];
+  const fileDir = path.dirname(path.resolve(packagePath, relFile));
+
+  // Build moduleRefs: varName → resolved module path
+  const moduleRefs = {};
+  walkAST(ast, (node) => {
+    if (node.type !== 'VariableDeclaration') return;
+    for (const decl of node.declarations) {
+      if (!decl.init || !decl.id || decl.id.type !== 'Identifier') continue;
+      if (isRequireCall(decl.init) && isLocalImport(decl.init.arguments[0].value)) {
+        const resolved = resolveLocal(fileDir, decl.init.arguments[0].value, packagePath);
+        if (resolved) moduleRefs[decl.id.name] = resolved;
+      }
+      if (decl.init.type === 'NewExpression' && decl.init.callee.type === 'Identifier') {
+        const ctorRef = moduleRefs[decl.init.callee.name];
+        if (ctorRef) moduleRefs[decl.id.name] = ctorRef;
+      }
+    }
+  });
+
+  // Walk AST for .pipe() chains
+  walkAST(ast, (node) => {
+    if (node.type !== 'CallExpression') return;
+    if (!node.callee || node.callee.type !== 'MemberExpression') return;
+    const method = node.callee.property.name || node.callee.property.value;
+    if (method !== 'pipe') return;
+
+    // Walk leftward to find the source of the pipe chain
+    let sourceInfo = null;
+    let current = node;
+    let depth = 0;
+    while (current && depth < MAX_PIPE_DEPTH) {
+      const obj = current.callee && current.callee.object;
+      if (!obj) break;
+
+      if (obj.type === 'CallExpression' && obj.callee && obj.callee.type === 'MemberExpression') {
+        const innerMethod = obj.callee.property.name || obj.callee.property.value;
+        // Another .pipe() (intermediate step) — keep walking regardless of sub-object type
+        if (innerMethod === 'pipe') {
+          current = obj;
+          depth++;
+          continue;
+        }
+        // Non-pipe method call on an Identifier: instance.method() from a tainted module
+        if (obj.callee.object.type === 'Identifier') {
+          const objName = obj.callee.object.name;
+          const resolved = moduleRefs[objName];
+          if (resolved && taintedExports[resolved]) {
+            const modTaint = taintedExports[resolved];
+            if (modTaint[innerMethod] && modTaint[innerMethod].tainted) {
+              const t = modTaint[innerMethod];
+              sourceInfo = {
+                source: `${t.source}${t.detail ? '(' + t.detail + ')' : ''}`,
+                sourceFile: t.sourceFile || resolved,
+              };
+            }
+          }
+        }
+      }
+      break;
+    }
+
+    if (!sourceInfo) return;
+
+    // Check ALL pipe destinations in the chain (walk outward)
+    // For the current (outermost) .pipe(), check its argument
+    const checkPipeDest = (pipeNode) => {
+      const destArg = pipeNode.arguments && pipeNode.arguments[0];
+      if (!destArg) return null;
+
+      // Direct sink: net.connect(), https.request()
+      const directSink = getSinkName(destArg);
+      if (directSink) return { sink: directSink, sinkFile: relFile };
+
+      // Module method sink: sink.createWritable() where sink module has sink exports
+      if (destArg.type === 'CallExpression' && destArg.callee && destArg.callee.type === 'MemberExpression' &&
+          destArg.callee.object.type === 'Identifier') {
+        const destObj = destArg.callee.object.name;
+        const destMethod = destArg.callee.property.name || destArg.callee.property.value;
+        const destResolved = moduleRefs[destObj];
+        if (destResolved && sinkExports[destResolved]) {
+          const sInfo = sinkExports[destResolved][destMethod] || sinkExports[destResolved]['default'];
+          if (sInfo && sInfo.hasSink) {
+            return { sink: sInfo.sink, sinkFile: destResolved };
+          }
+        }
+      }
+      return null;
+    };
+
+    // Check the outermost .pipe() destination
+    let sinkResult = checkPipeDest(node);
+
+    // Also walk inward through intermediate .pipe() steps to check their destinations
+    if (!sinkResult) {
+      let inner = node.callee && node.callee.object;
+      let d = 0;
+      while (inner && d < MAX_PIPE_DEPTH && !sinkResult) {
+        if (inner.type === 'CallExpression' && inner.callee && inner.callee.type === 'MemberExpression') {
+          const m = inner.callee.property.name || inner.callee.property.value;
+          if (m === 'pipe') {
+            sinkResult = checkPipeDest(inner);
+            inner = inner.callee.object;
+            d++;
+            continue;
+          }
+        }
+        break;
+      }
+    }
+
+    if (sinkResult) {
+      flows.push({
+        severity: 'CRITICAL',
+        type: 'cross_file_dataflow',
+        sourceFile: sourceInfo.sourceFile,
+        source: sourceInfo.source,
+        sinkFile: relFile,
+        sink: sinkResult.sink,
+        description: `${sourceInfo.source} in ${sourceInfo.sourceFile} piped to ${sinkResult.sink} in ${relFile}`,
+      });
+    }
+  });
+
+  return flows;
 }
 
 // =============================================================================
@@ -1139,7 +1615,7 @@ function analyzeSinkExports(filePath) {
         if (!decl.init || !decl.id || decl.id.type !== 'Identifier') continue;
         if (isRequireCall(decl.init)) {
           const mod = decl.init.arguments[0].value;
-          if (mod === 'http' || mod === 'https' || mod === 'net' || mod === 'dgram') {
+          if (mod === 'http' || mod === 'https' || mod === 'net' || mod === 'dgram' || mod === 'dns') {
             sinkModuleVars[decl.id.name] = mod;
           }
         }
@@ -1147,7 +1623,7 @@ function analyzeSinkExports(filePath) {
     }
     if (node.type === 'ImportDeclaration' && node.source && typeof node.source.value === 'string') {
       const mod = node.source.value;
-      if (mod === 'http' || mod === 'https' || mod === 'net' || mod === 'dgram') {
+      if (mod === 'http' || mod === 'https' || mod === 'net' || mod === 'dgram' || mod === 'dns') {
         for (const spec of node.specifiers) {
           sinkModuleVars[spec.local.name] = mod;
         }
@@ -1175,7 +1651,7 @@ function analyzeSinkExports(filePath) {
           // Variable-based: const h = require('https'); h.request()
           if (node.callee.object.type === 'Identifier' && sinkModuleVars[node.callee.object.name]) {
             const method = node.callee.property.name || node.callee.property.value;
-            if (method === 'request' || method === 'get') {
+            if (method === 'request' || method === 'get' || method === 'resolveTxt' || method === 'resolve' || method === 'resolve4' || method === 'resolve6') {
               found = sinkModuleVars[node.callee.object.name] + '.' + method + '()';
               return;
             }
@@ -1212,6 +1688,32 @@ function analyzeSinkExports(filePath) {
             const sink = bodyHasSink(funcBody);
             if (sink) {
               sinkExports[propName] = { hasSink: true, sink };
+            }
+          }
+        }
+      } else if ((value.type === 'ClassExpression' || value.type === 'Identifier') && exportName === 'default') {
+        // module.exports = ClassName — resolve class from local declarations
+        let classNode = value;
+        if (value.type === 'Identifier') {
+          // Find class declaration in AST
+          walkAST(ast, (n) => {
+            if (n.type === 'ClassDeclaration' && n.id && n.id.name === value.name) {
+              classNode = n;
+            }
+          });
+        }
+        if (classNode.body && classNode.body.type === 'ClassBody') {
+          for (const method of classNode.body.body) {
+            if (method.type !== 'MethodDefinition' || method.kind === 'constructor') continue;
+            const methodName = method.key && (method.key.name || method.key.value);
+            const funcBody = method.value && method.value.body;
+            if (!methodName || !funcBody) continue;
+            const body = funcBody.type === 'BlockStatement' ? funcBody.body : null;
+            if (body) {
+              const sink = bodyHasSink(body);
+              if (sink) {
+                sinkExports[methodName] = { hasSink: true, sink };
+              }
             }
           }
         }
@@ -1370,9 +1872,217 @@ function detectCallbackCrossFileFlows(graph, taintedExports, sinkExports, packag
   return flows;
 }
 
+// =============================================================================
+// STEP 5 — EventEmitter cross-module detection
+// =============================================================================
+
+// Standard Node.js event names that are NOT indicative of malicious intent
+const BENIGN_EVENT_NAMES = new Set([
+  'error', 'end', 'close', 'data', 'finish', 'readable', 'drain',
+  'connect', 'listening', 'message', 'timeout', 'response', 'request',
+  'open', 'pause', 'resume', 'pipe', 'unpipe', 'exit', 'disconnect',
+]);
+
+const MAX_EMITTER_FLOWS = 2; // Cap per package to prevent explosion on event-heavy libs
+
+/**
+ * Detect cross-file EventEmitter flows.
+ * Pattern: file A does emitter.emit('event', taintedData),
+ *          file B does emitter.on('event', (data) => networkSink(data))
+ * where the emitter is shared via a common imported module.
+ */
+function detectEventEmitterFlows(graph, taintedExports, sinkExports, packagePath) {
+  const expandedTaint = expandTaintThroughReexports(graph, taintedExports, packagePath);
+  const flows = [];
+
+  // Phase 1: collect all emit() and on() calls across files
+  const emitCalls = []; // { file, eventName, taintedSource, emitterVar }
+  const onCalls = [];   // { file, eventName, hasSink, sinkName, emitterVar }
+
+  for (const relFile of Object.keys(graph)) {
+    const absFile = path.resolve(packagePath, relFile);
+    const ast = parseFile(absFile);
+    if (!ast) continue;
+
+    // Build taint map for this file (imports + local sources)
+    const localTaint = collectImportTaint(ast, relFile, graph, expandedTaint, packagePath);
+
+    // Also detect local taint sources (process.env, fs.readFileSync, os.homedir)
+    // collectImportTaint only handles cross-file imports; we need intra-file sources too
+    const moduleVars = {};
+    walkAST(ast, (n) => {
+      if (n.type === 'VariableDeclaration') {
+        for (const decl of n.declarations) {
+          if (!decl.init || !decl.id || decl.id.type !== 'Identifier') continue;
+          if (isRequireCall(decl.init) && SENSITIVE_MODULES.has(decl.init.arguments[0].value)) {
+            moduleVars[decl.id.name] = decl.init.arguments[0].value;
+          }
+          const t = checkNodeTaint(decl.init, moduleVars);
+          if (t && !localTaint[decl.id.name]) {
+            localTaint[decl.id.name] = { source: t.source, detail: t.detail || '', sourceFile: relFile };
+          }
+          // ObjectExpression: const metrics = { hostname: os.hostname(), ... }
+          // If any property value is tainted, the whole object is tainted
+          if (!t && !localTaint[decl.id.name] && decl.init.type === 'ObjectExpression') {
+            for (const prop of decl.init.properties) {
+              if (!prop.value) continue;
+              const pt = checkNodeTaint(prop.value, moduleVars);
+              if (pt) {
+                localTaint[decl.id.name] = { source: pt.source, detail: pt.detail || '', sourceFile: relFile };
+                break;
+              }
+            }
+          }
+        }
+      }
+    });
+
+    propagateLocalTaint(ast, localTaint);
+    const taintedNames = new Set(Object.keys(localTaint));
+
+    // Collect class method bodies for resolving this.method() calls in handlers
+    const classMethodBodies = Object.create(null);
+    walkAST(ast, (n) => {
+      if (n.type !== 'ClassDeclaration' && n.type !== 'ClassExpression') return;
+      if (!n.body || n.body.type !== 'ClassBody') return;
+      for (const member of n.body.body) {
+        if (member.type !== 'MethodDefinition') continue;
+        const name = member.key && (member.key.name || member.key.value);
+        if (!name || name === 'constructor') continue;
+        const body = member.value && member.value.body;
+        if (body && body.type === 'BlockStatement') {
+          if (!classMethodBodies[name]) classMethodBodies[name] = [];
+          classMethodBodies[name].push(body.body);
+        }
+      }
+    });
+
+    walkAST(ast, (node) => {
+      if (node.type !== 'CallExpression' || !node.callee || node.callee.type !== 'MemberExpression') return;
+      const method = node.callee.property.name || node.callee.property.value;
+      if (!method) return;
+
+      const emitterVar = getEmitterVarName(node.callee.object);
+
+      // emitter.emit('eventName', data)
+      if (method === 'emit' && node.arguments.length >= 2) {
+        const eventNameNode = node.arguments[0];
+        const eventName = (eventNameNode.type === 'Literal' && typeof eventNameNode.value === 'string') ? eventNameNode.value : null;
+        if (!eventName || BENIGN_EVENT_NAMES.has(eventName)) return;
+
+        // Check if any data argument (2nd+) is tainted
+        const dataArgs = node.arguments.slice(1);
+        const taintedArg = findTaintedArgument(dataArgs, taintedNames);
+        if (!taintedArg) return;
+
+        emitCalls.push({
+          file: relFile,
+          eventName,
+          taintedSource: localTaint[taintedArg],
+          emitterVar,
+        });
+      }
+
+      // emitter.on('eventName', handler) — check if handler has a network sink
+      if ((method === 'on' || method === 'addListener' || method === 'once') && node.arguments.length >= 2) {
+        const eventNameNode = node.arguments[0];
+        const eventName = (eventNameNode.type === 'Literal' && typeof eventNameNode.value === 'string') ? eventNameNode.value : null;
+        if (!eventName || BENIGN_EVENT_NAMES.has(eventName)) return;
+
+        const handler = node.arguments[1];
+        if (handler.type !== 'FunctionExpression' && handler.type !== 'ArrowFunctionExpression') return;
+
+        // Check if handler body contains a network sink
+        const handlerBody = handler.body.type === 'BlockStatement' ? handler.body.body : [handler.body];
+        let sinkFound = null;
+        walkAST({ type: 'Program', body: handlerBody }, (inner) => {
+          if (sinkFound) return;
+          if (inner.type === 'CallExpression') {
+            const sName = getSinkName(inner);
+            if (sName) sinkFound = sName;
+          }
+        });
+
+        // If no direct sink, check this.method() calls → resolve to class method bodies
+        if (!sinkFound && Object.keys(classMethodBodies).length > 0) {
+          walkAST({ type: 'Program', body: handlerBody }, (inner) => {
+            if (sinkFound) return;
+            if (inner.type === 'CallExpression' &&
+                inner.callee.type === 'MemberExpression' &&
+                inner.callee.object.type === 'ThisExpression') {
+              const methodName = inner.callee.property.name || inner.callee.property.value;
+              if (methodName && classMethodBodies[methodName]) {
+                for (const methodBody of classMethodBodies[methodName]) {
+                  walkAST({ type: 'Program', body: methodBody }, (n2) => {
+                    if (sinkFound) return;
+                    if (n2.type === 'CallExpression') {
+                      const sName = getSinkName(n2);
+                      if (sName) sinkFound = sName;
+                    }
+                  });
+                  if (sinkFound) return;
+                }
+              }
+            }
+          });
+        }
+
+        if (sinkFound) {
+          onCalls.push({
+            file: relFile,
+            eventName,
+            hasSink: true,
+            sinkName: sinkFound,
+            emitterVar,
+          });
+        }
+      }
+    });
+  }
+
+  // Phase 2: match emit + on by event name (cross-file only)
+  for (const emit of emitCalls) {
+    if (flows.length >= MAX_EMITTER_FLOWS) break;
+    for (const on of onCalls) {
+      if (flows.length >= MAX_EMITTER_FLOWS) break;
+      if (emit.eventName !== on.eventName) continue;
+      if (emit.file === on.file) continue; // intra-file handled by dataflow scanner
+
+      // Dedup by event name
+      if (flows.some(f => f.description.includes(emit.eventName))) continue;
+
+      const taintInfo = emit.taintedSource;
+      flows.push({
+        severity: 'CRITICAL',
+        type: 'cross_file_dataflow',
+        sourceFile: taintInfo.sourceFile || emit.file,
+        source: `${taintInfo.source}${taintInfo.detail ? '(' + taintInfo.detail + ')' : ''}`,
+        sinkFile: on.file,
+        sink: on.sinkName,
+        description: `Credential emitted via EventEmitter '${emit.eventName}' in ${emit.file} → handler with ${on.sinkName} in ${on.file}`,
+      });
+    }
+  }
+
+  return flows;
+}
+
+/**
+ * Extract the variable name from an emitter expression.
+ * Handles: emitter.emit(), this.emitter.emit(), bus.emit()
+ */
+function getEmitterVarName(node) {
+  if (node.type === 'Identifier') return node.name;
+  if (node.type === 'MemberExpression' && node.object.type === 'ThisExpression') {
+    return 'this.' + (node.property.name || node.property.value);
+  }
+  return null;
+}
+
 module.exports = {
   buildModuleGraph, annotateTaintedExports, detectCrossFileFlows,
-  annotateSinkExports, detectCallbackCrossFileFlows,
+  annotateSinkExports, detectCallbackCrossFileFlows, detectEventEmitterFlows,
   resolveLocal, extractLocalImports, parseFile, isLocalImport, toRel, isFileExists,
-  tryResolveConcatRequire
+  tryResolveConcatRequire,
+  MAX_GRAPH_NODES, MAX_GRAPH_EDGES, MAX_FLOWS
 };

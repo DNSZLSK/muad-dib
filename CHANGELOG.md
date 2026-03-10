@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.1] - 2026-03-10
+
+### Added
+- **Module-Graph Bounded Path**: 5 new cross-file taint propagation patterns in `src/scanner/module-graph.js`:
+  - **Bounded path infrastructure**: MAX_GRAPH_NODES=50, MAX_GRAPH_EDGES=200, MAX_FLOWS=20, 5s timeout via Promise.race — prevents DoS on large packages
+  - **Imported sink method detection**: `obj.method(taintedArg)` where method internally contains a network sink (via sinkExports annotation)
+  - **Class `this.X` instance taint**: `this.reader = new Reader()` in constructors, `this.reader.readAll()` taint resolution in methods
+  - **Stream pipeline detection**: `fs.createReadStream` as taint source + `.pipe()` chain following (MAX_PIPE_DEPTH=5) with cross-file module method resolution
+  - **EventEmitter cross-module detection**: `.emit('event', taintedData)` matched with `.on('event', handler)` across files, with `this.method()` handler resolution and ObjectExpression property taint
+  - **Pipe chain cross-file flows**: `reader.stream().pipe(transform).pipe(sink.createWritable())` detection across imported module instances
+- Extended `describeSensitiveCall` with `os.hostname`, `os.userInfo`, `os.networkInterfaces` as fingerprint sources
+- `Object.create(null)` for classMethodBodies to prevent prototype collision crashes on benign packages
+- Test count: 1905 → **1932** (+27 tests)
+- TPR: **93.9%** (46/49) — unchanged
+- FPR: **12.3%** (65/529) — zero FP added
+- ADR: **97.3%** (73/75) — unchanged, all 5 Group A adversarial samples now score >= 25
+
 ## [2.6.0] - 2026-03-09
 
 ### Added

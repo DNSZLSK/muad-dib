@@ -642,7 +642,7 @@ Alerts appear in Security > Code scanning alerts.
 ## Architecture
 
 ```
-MUAD'DIB 2.5.17 Scanner
+MUAD'DIB 2.6.1 Scanner
 |
 +-- IOC Match (225,000+ packages, JSON DB)
 |   +-- OSV.dev npm dump (200K+ MAL-* entries)
@@ -773,7 +773,7 @@ All 2,077 misses lack Node.js malware patterns. MUAD'DIB performs AST-based Node
 | Large (50-100 JS files) | 40 | 10 | 25.0% |
 | Very large (100+ JS files) | 62 | 25 | 40.3% |
 
-**FPR progression**: 0% (invalid, empty dirs, v2.2.0-v2.2.6) → 38% (first real measurement, v2.2.7) → 19.4% (v2.2.8) → 17.5% (v2.2.9) → ~13% (v2.2.11, per-file max scoring) → 8.9% (v2.3.0, P2) → 7.4% (v2.3.1, P3) → 6.0% (v2.5.8, P4 + IOC wildcard audit) → ~13.6% (v2.5.14, audit hardening added stricter detection) → **12.3%** (v2.5.16, P5 + P6) → **12.3%** (v2.6.0, intent graph v2 — zero FP added)
+**FPR progression**: 0% (invalid, empty dirs, v2.2.0-v2.2.6) → 38% (first real measurement, v2.2.7) → 19.4% (v2.2.8) → 17.5% (v2.2.9) → ~13% (v2.2.11, per-file max scoring) → 8.9% (v2.3.0, P2) → 7.4% (v2.3.1, P3) → 6.0% (v2.5.8, P4 + IOC wildcard audit) → ~13.6% (v2.5.14, audit hardening added stricter detection) → **12.3%** (v2.5.16, P5 + P6) → **12.3%** (v2.6.0, intent graph v2 — zero FP added) → **12.3%** (v2.6.1, module-graph bounded path — zero FP added)
 
 > **Note on FPR evolution:** The historic 6.0% FPR (v2.5.8) relied on a `BENIGN_PACKAGE_WHITELIST` that excluded certain known packages from scoring — a data leakage bias removed in v2.5.10. The current 12.3% FPR is an honest measurement without whitelisting, against 532 real benign packages. The intent graph (v2.6.0) adds zero false positives by using intra-file pairing only and excluding LOW-severity threats.
 
@@ -793,7 +793,7 @@ All 2,077 misses lack Node.js malware patterns. MUAD'DIB performs AST-based Node
 - **ADR** (Adversarial Detection Rate): detection rate on 120 evasive malicious samples — 53 adversarial + 40 holdout (6 adversarial waves + 4 holdout batches). 75 available on disk. 2 misses on available samples: `require-cache-poison` (P3 trade-off), `getter-defineProperty-exfil`.
 - **Holdout** (pre-tuning): detection rate on 10 unseen samples with rules frozen (measures generalization)
 
-Datasets: 17,922 Datadog malware samples, 532 npm + 132 PyPI benign packages, 120 adversarial/holdout samples (75 available on disk), 51 ground-truth attacks (65 documented malware packages). **1905 tests**, 86% code coverage.
+Datasets: 17,922 Datadog malware samples, 532 npm + 132 PyPI benign packages, 120 adversarial/holdout samples (75 available on disk), 51 ground-truth attacks (65 documented malware packages). **1932 tests**, 86% code coverage.
 
 See [Evaluation Methodology](docs/EVALUATION_METHODOLOGY.md) for the full experimental protocol.
 
@@ -829,7 +829,7 @@ npm test
 
 ### Testing
 
-- **1905 unit/integration tests** across 44 modular test files - 86% code coverage via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
+- **1932 unit/integration tests** across 44 modular test files - 86% code coverage via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
 - **56 fuzz tests** - Malformed YAML, invalid JSON, binary files, ReDoS, unicode, 10MB inputs
 - **Datadog 17K benchmark** - 17,922 real malware samples, 88.2% raw TPR, ~100% on JS/Node.js malware (2,077 out-of-scope misses: phishing, binaries, corrected libs)
 - **120 adversarial/holdout samples** - 53 adversarial + 40 holdout (75 available on disk), 73/75 detection rate (97.3% ADR). 2 misses: `require-cache-poison` (P3 trade-off), `getter-defineProperty-exfil`
