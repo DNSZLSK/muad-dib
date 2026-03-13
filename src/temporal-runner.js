@@ -84,6 +84,7 @@ async function runTemporalAnalyses(targetPath, options, pkgNames) {
     }
     {
       const PUBLISH_CONCURRENCY = 5;
+      const publishThreats = [];
       for (let i = 0; i < pkgNames.length; i += PUBLISH_CONCURRENCY) {
         const batch = pkgNames.slice(i, i + PUBLISH_CONCURRENCY);
         const results = await Promise.allSettled(
@@ -93,14 +94,37 @@ async function runTemporalAnalyses(targetPath, options, pkgNames) {
           if (r.status !== 'fulfilled' || !r.value.suspicious) continue;
           const det = r.value;
           for (const a of det.anomalies) {
-            threats.push({
+            publishThreats.push({
               type: a.type,
               severity: a.severity,
               message: a.description,
-              file: `node_modules/${det.packageName}/package.json`
+              file: `node_modules/${det.packageName}/package.json`,
+              _scope: det.packageName.startsWith('@') ? det.packageName.split('/')[0] : null
             });
           }
         }
+      }
+
+      // P7: Scope-aware deduplication for monorepo releases.
+      // When 3+ packages from the same @scope trigger publish_burst or rapid_succession,
+      // it's a coordinated monorepo release (lerna, nx, turbo), not an attack.
+      // Downgrade all findings for that scope to LOW severity.
+      const MONOREPO_SCOPE_THRESHOLD = 3;
+      const scopeTypeCounts = new Map(); // key: `${scope}:${type}` → count
+      for (const t of publishThreats) {
+        if (!t._scope) continue;
+        const key = `${t._scope}:${t.type}`;
+        scopeTypeCounts.set(key, (scopeTypeCounts.get(key) || 0) + 1);
+      }
+      for (const t of publishThreats) {
+        if (t._scope) {
+          const key = `${t._scope}:${t.type}`;
+          if ((scopeTypeCounts.get(key) || 0) >= MONOREPO_SCOPE_THRESHOLD) {
+            t.severity = 'LOW';
+          }
+        }
+        delete t._scope; // clean up internal field
+        threats.push(t);
       }
     }
   }

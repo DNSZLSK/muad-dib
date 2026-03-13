@@ -1313,11 +1313,15 @@ async function scanPackage(name, version, ecosystem, tarballUrl) {
           version,
           ecosystem,
           skipped: true,
-          findings: result.threats.map(t => ({
-            rule: t.rule_id || t.type,
-            severity: t.severity,
-            file: t.file
-          }))
+          // P7: Exclude LOW-severity findings from alert persistence
+          findings: result.threats
+            .filter(t => t.severity !== 'LOW')
+            .map(t => ({
+              rule: t.rule_id || t.type,
+              severity: t.severity,
+              file: t.file
+            })),
+          lowCount: result.threats.filter(t => t.severity === 'LOW').length
         };
         appendAlert(alert);
         updateScanStats('clean');
@@ -1421,11 +1425,17 @@ async function scanPackage(name, version, ecosystem, tarballUrl) {
           version,
           ecosystem,
           tier,
-          findings: result.threats.map(t => ({
-            rule: t.rule_id || t.type,
-            severity: t.severity,
-            file: t.file
-          }))
+          // P7: Exclude LOW-severity findings from alert persistence.
+          // LOW findings are FP-reduced noise (bundler artifacts, config loaders, SDK patterns).
+          // Storing them inflates monitor-alerts.json and obscures real threats.
+          findings: result.threats
+            .filter(t => t.severity !== 'LOW')
+            .map(t => ({
+              rule: t.rule_id || t.type,
+              severity: t.severity,
+              file: t.file
+            })),
+          lowCount: result.threats.filter(t => t.severity === 'LOW').length
         };
 
         if (sandboxResult && sandboxResult.score > 0) {
