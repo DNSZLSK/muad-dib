@@ -10,6 +10,7 @@
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
   <img src="https://img.shields.io/badge/node-%3E%3D18-brightgreen" alt="Node">
   <img src="https://img.shields.io/badge/IOCs-225%2C000%2B-red" alt="IOCs">
+    [![Socket Badge](https://badge.socket.dev/npm/package/muaddib-scanner/2.6.7)](https://badge.socket.dev/npm/package/muaddib-scanner/2.6.7)
 </p>
 
 <p align="center">
