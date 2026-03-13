@@ -4,9 +4,10 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
+| 2.6.x   | :white_check_mark: |
 | 2.5.x   | :white_check_mark: |
-| 2.4.x   | :white_check_mark: |
-| 2.3.x   | :white_check_mark: |
+| 2.4.x   | :x:                |
+| 2.3.x   | :x:                |
 | 2.2.x   | :x:                |
 | 2.1.x   | :x:                |
 | 2.0.x   | :x:                |
@@ -63,7 +64,7 @@ Please include the following information in your report:
 - We aim to release fixes before public disclosure
 - We request a 90-day disclosure window for complex issues
 
-## Detection Rules (v2.6.1)
+## Detection Rules (v2.6.2)
 
 MUAD'DIB uses 14 parallel scanners + 5 behavioral anomaly detection features + ground truth validation, producing 129 rule IDs (124 RULES + 5 PARANOID):
 
@@ -358,15 +359,15 @@ The sandbox simulates CI environments by setting: `CI=true`, `GITHUB_ACTIONS=tru
 2. **Signed commits**: Use GPG-signed commits when possible
 3. **Review dependencies**: Check new dependencies before adding them
 
-## Threat Model (v2.5.17)
+## Threat Model (v2.6.2)
 
-MUAD'DIB 2.5 uses a **triple detection approach**:
+MUAD'DIB 2.6 uses a **triple detection approach**:
 
 1. **IOC-based detection** (v1.x): Matches packages against 225,000+ known malicious packages from OSV, DataDog, OSSF, GitHub Advisory, and other sources. Fast and reliable for known threats.
 
 2. **Behavioral anomaly detection** (v2.0): Analyzes changes between package versions to detect supply-chain attacks before they appear in IOC databases. Compares lifecycle scripts, AST, publish frequency, and maintainer metadata across versions. This approach can detect 0-day behavioral anomalies without any prior knowledge of the specific attack.
 
-3. **Ground truth validation** (v2.1–v2.6.1): Validates detection accuracy against 51 real-world attacks (49 active samples), tracks detection lead times vs. public advisories, and monitors false positive rates over time. 1932 tests with 86% code coverage. Provides observability into scanner effectiveness.
+3. **Ground truth validation** (v2.1–v2.6.2): Validates detection accuracy against 51 real-world attacks (49 active samples), tracks detection lead times vs. public advisories, and monitors false positive rates over time. 1940 tests with 86% code coverage. Provides observability into scanner effectiveness.
 
 The behavioral detection features are opt-in (`--temporal-full`) and query the npm registry at scan time. They are particularly effective against:
 - Account takeover attacks (event-stream pattern)
@@ -374,7 +375,7 @@ The behavioral detection features are opt-in (`--temporal-full`) and query the n
 - Dormant package hijacking (abandonware takeover)
 - Sudden code injection (Shai-Hulud, ua-parser-js pattern)
 
-## Ground Truth Validation (v2.6.1)
+## Ground Truth Validation (v2.6.2)
 
 MUAD'DIB includes a ground truth dataset of 51 real-world supply-chain attacks (49 active samples) to continuously validate detection coverage.
 
@@ -385,7 +386,7 @@ MUAD'DIB includes a ground truth dataset of 51 real-world supply-chain attacks (
 
 Run `muaddib evaluate --ground-truth` to validate detection at any time.
 
-## Datadog 17K Benchmark (v2.5.17)
+## Datadog 17K Benchmark (v2.6.2)
 
 Validated against the [DataDog Malicious Software Packages Dataset](https://github.com/DataDog/malicious-software-packages-dataset) (17,922 real malware npm packages).
 

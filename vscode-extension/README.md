@@ -4,100 +4,95 @@ Supply-chain threat detection for npm and PyPI projects, directly in VS Code.
 
 ## Features
 
-- **Scan Project** -- Analyse toutes les dependances npm/PyPI du workspace ouvert
-- **Scan Current File** -- Analyse le fichier actif uniquement (.js, .json, .py, .toml, .yaml, .md)
-- **Update IOCs** -- Telecharge les derniers indicateurs de compromission
-- **Auto-scan** -- Scan automatique a l'ouverture du projet et a chaque modification de `package.json` ou `requirements.txt`
-- **Diagnostics inline** -- Les menaces detectees apparaissent dans l'onglet "Problems" de VS Code
-- **Rapport detaille** -- Panneau avec tableau colore par severite et liens cliquables vers les fichiers
-- **Webhook alerts** -- Envoi optionnel des alertes vers Discord ou Slack
-- **Scan annulable** -- Possibilite d'annuler un scan en cours depuis la notification
-- **14 scanners specialises** -- AST, dataflow, obfuscation, typosquatting, IOC, AI config, etc.
-- **113 regles de detection** -- Mappees sur le framework MITRE ATT&CK
+- **Scan Project** -- Analyzes all npm/PyPI dependencies in the open workspace
+- **Scan Current File** -- Analyzes only the active file (.js, .json, .py, .toml, .yaml, .md)
+- **Update IOCs** -- Downloads the latest indicators of compromise
+- **Auto-scan** -- Automatic scan on project open and on each `package.json` or `requirements.txt` change
+- **Inline diagnostics** -- Detected threats appear in VS Code's "Problems" tab
+- **Detailed report** -- Panel with color-coded severity table and clickable file links
+- **Webhook alerts** -- Optional alert forwarding to Discord or Slack
+- **Cancellable scan** -- Ability to cancel a running scan from the notification
+- **14 specialized scanners** -- AST, dataflow, obfuscation, typosquatting, IOC, AI config, etc.
+- **129 detection rules** -- Mapped to the MITRE ATT&CK framework
 
-## Prerequis
+## Prerequisites
 
-Le CLI `muaddib-scanner` doit etre installe globalement :
+The `muaddib-scanner` CLI must be installed globally:
 
 ```bash
 npm install -g muaddib-scanner
 ```
 
-Requiert Node.js >= 18.0.0.
+Requires Node.js >= 18.0.0.
 
 ## Installation
 
-### Depuis le Marketplace
+### From the Marketplace
 
-1. Ouvrir VS Code
+1. Open VS Code
 2. Extensions (Ctrl+Shift+X)
-3. Chercher "MUAD'DIB Security Scanner"
-4. Installer
+3. Search for "MUAD'DIB Security Scanner"
+4. Install
 
-Ou directement : [MUAD'DIB Security Scanner](https://marketplace.visualstudio.com/items?itemName=dnszlsk.muaddib-vscode)
+Or directly: [MUAD'DIB Security Scanner](https://marketplace.visualstudio.com/items?itemName=dnszlsk.muaddib-vscode)
 
-### Depuis un VSIX
+### From a VSIX
 
-1. Build l'extension :
+1. Build the extension:
    ```bash
    cd vscode-extension
    npx @vscode/vsce package
    ```
-2. Dans VS Code : Extensions > `...` > Install from VSIX > selectionner le `.vsix`
+2. In VS Code: Extensions > `...` > Install from VSIX > select the `.vsix` file
 
-## Commandes
+## Commands
 
-Raccourci : ouvrir la palette de commandes (Ctrl+Shift+P) et taper "MUAD'DIB".
+Shortcut: open the command palette (Ctrl+Shift+P) and type "MUAD'DIB".
 
-| Commande | Description |
-|----------|-------------|
-| `MUAD'DIB: Scan Project` | Lance un scan complet du workspace |
-| `MUAD'DIB: Scan Current File` | Scanne le fichier actuellement ouvert |
-| `MUAD'DIB: Update IOCs` | Met a jour les indicateurs de compromission |
+| Command | Description |
+|---------|-------------|
+| `MUAD'DIB: Scan Project` | Run a full workspace scan |
+| `MUAD'DIB: Scan Current File` | Scan the currently open file |
+| `MUAD'DIB: Update IOCs` | Update indicators of compromise |
 
 ## Configuration
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `muaddib.autoScan` | boolean | `true` | Scanner automatiquement a l'ouverture du projet |
-| `muaddib.webhookUrl` | string | `""` | URL du webhook Discord/Slack pour les alertes (HTTPS uniquement) |
-| `muaddib.failLevel` | string | `"high"` | Niveau minimum de severite (`critical`, `high`, `medium`, `low`) |
-| `muaddib.explain` | boolean | `false` | Afficher les explications detaillees pour chaque menace |
-| `muaddib.paranoid` | boolean | `false` | Mode ultra-strict (plus de detections, plus de faux positifs) |
-| `muaddib.temporalAnalysis` | boolean | `false` | Analyses temporelles (requetes reseau vers npm/PyPI) |
+| `muaddib.autoScan` | boolean | `true` | Automatically scan on project open |
+| `muaddib.webhookUrl` | string | `""` | Discord/Slack webhook URL for alerts (HTTPS only) |
+| `muaddib.failLevel` | string | `"high"` | Minimum severity level (`critical`, `high`, `medium`, `low`) |
+| `muaddib.explain` | boolean | `false` | Show detailed explanations for each threat |
+| `muaddib.paranoid` | boolean | `false` | Ultra-strict mode (more detections, more false positives) |
+| `muaddib.temporalAnalysis` | boolean | `false` | Temporal analysis (network queries to npm/PyPI) |
 
-## Fonctionnement
+## How It Works
 
-L'extension s'active automatiquement lorsqu'un `package.json`, `requirements.txt`, `pyproject.toml` ou `setup.py` est detecte dans le workspace.
+The extension activates automatically when a `package.json`, `requirements.txt`, `pyproject.toml`, or `setup.py` is detected in the workspace.
 
-Elle execute `muaddib-scanner scan --json` sur le workspace ou le fichier courant, puis convertit les resultats en diagnostics VS Code (warnings/errors dans l'onglet Problems).
+It runs `muaddib-scanner scan --json` on the workspace or current file, then converts results into VS Code diagnostics (warnings/errors in the Problems tab).
 
-Le scan detecte :
-- Packages npm/PyPI malveillants connus (225 000+ IOCs)
-- Patterns d'attaque supply-chain (lifecycle scripts, obfuscation, exfiltration)
-- Typosquatting sur les noms de packages
-- Flux de donnees inter-modules (credentials -> exfiltration)
-- Injection dans les fichiers de configuration AI (.cursorrules, CLAUDE.md, etc.)
+The scan detects:
+- Known malicious npm/PyPI packages (225,000+ IOCs)
+- Supply-chain attack patterns (lifecycle scripts, obfuscation, exfiltration)
+- Package name typosquatting
+- Inter-module dataflow (credentials -> exfiltration)
+- AI configuration file injection (.cursorrules, CLAUDE.md, etc.)
 
-## Niveaux de severite
+## Severity Levels
 
-| Niveau | VS Code | Signification |
-|--------|---------|---------------|
-| CRITICAL | Error (rouge) | Package quasi certainement malveillant |
-| HIGH | Error (rouge) | Indicateurs forts d'intention malveillante |
-| MEDIUM | Warning (jaune) | Patterns suspects a investiguer |
-| LOW | Information (bleu) | Preoccupations mineures ou informationnelles |
+| Level | VS Code | Meaning |
+|-------|---------|---------|
+| CRITICAL | Error (red) | Package almost certainly malicious |
+| HIGH | Error (red) | Strong indicators of malicious intent |
+| MEDIUM | Warning (yellow) | Suspicious patterns to investigate |
+| LOW | Information (blue) | Minor or informational concerns |
 
-## Screenshots
+## License
 
-<!-- TODO: Add screenshots -->
-*Screenshots a venir*
+MIT - See [LICENSE](LICENSE) for details.
 
-## Licence
-
-MIT - Voir [LICENSE](LICENSE) pour les details.
-
-## Liens
+## Links
 
 - [MUAD'DIB CLI](https://github.com/DNSZLSK/muad-dib)
-- [Signaler un bug](https://github.com/DNSZLSK/muad-dib/issues)
+- [Report a bug](https://github.com/DNSZLSK/muad-dib/issues)
