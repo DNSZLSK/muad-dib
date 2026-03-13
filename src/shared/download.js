@@ -41,11 +41,25 @@ function normalizeHostname(hostname) {
       return ipv4Part;
     }
   }
-  // Convert decimal IP notation: 2130706433 → 127.0.0.1
-  if (/^\d+$/.test(hostname)) {
-    const num = parseInt(hostname, 10);
+  // Convert integer IP notation (decimal or hex): 2130706433 or 0x7f000001 → 127.0.0.1
+  if (/^(0x[\da-f]+|\d+)$/i.test(hostname)) {
+    const num = hostname.startsWith('0x') ? parseInt(hostname, 16) : parseInt(hostname, 10);
     if (num > 0 && num < 4294967296) {
       return [(num >>> 24) & 255, (num >>> 16) & 255, (num >>> 8) & 255, num & 255].join('.');
+    }
+  }
+  // Convert dotted IP with octal/hex octets: 0177.0.0.01 or 0x7f.0.0.1 → 127.0.0.1
+  if (/^[\da-fox.]+$/i.test(hostname)) {
+    const parts = hostname.split('.');
+    if (parts.length === 4) {
+      const octets = parts.map(p => {
+        if (/^0x[\da-f]+$/i.test(p)) return parseInt(p, 16);
+        if (/^0\d+$/.test(p)) return parseInt(p, 8);
+        return parseInt(p, 10);
+      });
+      if (octets.every(o => !isNaN(o) && o >= 0 && o <= 255)) {
+        return octets.join('.');
+      }
     }
   }
   return hostname;
@@ -121,12 +135,18 @@ async function safeDnsResolve(hostname) {
  * @param {number} [timeoutMs] - Download timeout in ms (default: DOWNLOAD_TIMEOUT)
  * @returns {Promise<number>} Number of bytes downloaded
  */
+const MAX_REDIRECTS = 5;
+
 function downloadToFile(url, destPath, timeoutMs = DOWNLOAD_TIMEOUT) {
   // DNS rebinding protection: validate hostname before connecting
   const parsedUrl = new URL(url);
   return safeDnsResolve(parsedUrl.hostname).then(() => {
     return new Promise((resolve, reject) => {
-      const doRequest = (requestUrl) => {
+      const doRequest = (requestUrl, redirectCount) => {
+        if (redirectCount === undefined) redirectCount = 0;
+        if (redirectCount >= MAX_REDIRECTS) {
+          return reject(new Error(`Too many redirects (${MAX_REDIRECTS}) for ${url}`));
+        }
         const req = https.get(requestUrl, { timeout: timeoutMs }, (res) => {
           if (res.statusCode === 301 || res.statusCode === 302) {
             res.resume();
@@ -138,7 +158,7 @@ function downloadToFile(url, destPath, timeoutMs = DOWNLOAD_TIMEOUT) {
             if (!check.allowed) {
               return reject(new Error(check.error));
             }
-            return doRequest(absoluteLocation);
+            return doRequest(absoluteLocation, redirectCount + 1);
           }
           if (res.statusCode < 200 || res.statusCode >= 300) {
             res.resume();
@@ -246,5 +266,6 @@ module.exports = {
   isPrivateIP,
   safeDnsResolve,
   ALLOWED_DOWNLOAD_DOMAINS,
-  PRIVATE_IP_PATTERNS
+  PRIVATE_IP_PATTERNS,
+  MAX_REDIRECTS
 };

@@ -5,9 +5,10 @@ const { findFiles, EXCLUDED_DIRS, debugLog } = require('../utils');
 const { ACORN_OPTIONS: BASE_ACORN_OPTIONS, safeParse } = require('../shared/constants.js');
 
 // --- Bounded path limits ---
-const MAX_GRAPH_NODES = 50;   // Max files in dependency graph
-const MAX_GRAPH_EDGES = 200;  // Max total import edges
+const MAX_GRAPH_NODES = 100;  // Max files in dependency graph (covers ~86% of npm packages)
+const MAX_GRAPH_EDGES = 400;  // Max total import edges
 const MAX_FLOWS = 20;         // Max cross-file flow findings per package
+const MAX_TAINT_DEPTH = 50;   // Max AST recursion depth (DoS guard)
 
 // --- Sensitive source patterns ---
 const SENSITIVE_MODULES = new Set(['fs', 'child_process', 'dns', 'os', 'dgram']);
@@ -103,7 +104,9 @@ function tryResolveConcatRequire(node, depth) {
   return null;
 }
 
-function walkForRequires(node, fileDir, packagePath, imports) {
+function walkForRequires(node, fileDir, packagePath, imports, depth) {
+  if (depth === undefined) depth = 0;
+  if (depth > MAX_TAINT_DEPTH) return;
   if (!node || typeof node !== 'object') return;
   if (
     node.type === 'CallExpression' &&
@@ -130,11 +133,11 @@ function walkForRequires(node, fileDir, packagePath, imports) {
     if (Array.isArray(child)) {
       for (const item of child) {
         if (item && typeof item === 'object' && item.type) {
-          walkForRequires(item, fileDir, packagePath, imports);
+          walkForRequires(item, fileDir, packagePath, imports, depth + 1);
         }
       }
     } else if (child && typeof child === 'object' && child.type) {
-      walkForRequires(child, fileDir, packagePath, imports);
+      walkForRequires(child, fileDir, packagePath, imports, depth + 1);
     }
   }
 }
@@ -1462,7 +1465,9 @@ function parseFile(filePath) {
   return safeParse(content, { allowReturnOutsideFunction: true, allowImportExportEverywhere: true });
 }
 
-function walkAST(node, visitor) {
+function walkAST(node, visitor, depth) {
+  if (depth === undefined) depth = 0;
+  if (depth > MAX_TAINT_DEPTH) return;
   if (!node || typeof node !== 'object') return;
   if (node.type) visitor(node);
   for (const key of Object.keys(node)) {
@@ -1470,10 +1475,10 @@ function walkAST(node, visitor) {
     const child = node[key];
     if (Array.isArray(child)) {
       for (const item of child) {
-        if (item && typeof item === 'object' && item.type) walkAST(item, visitor);
+        if (item && typeof item === 'object' && item.type) walkAST(item, visitor, depth + 1);
       }
     } else if (child && typeof child === 'object' && child.type) {
-      walkAST(child, visitor);
+      walkAST(child, visitor, depth + 1);
     }
   }
 }
@@ -1536,10 +1541,12 @@ function getFunctionBody(node) {
   return null;
 }
 
-function getMemberChain(node) {
+function getMemberChain(node, depth) {
+  if (depth === undefined) depth = 0;
+  if (depth > MAX_TAINT_DEPTH) return '';
   if (node.type === 'Identifier') return node.name;
   if (node.type === 'MemberExpression') {
-    const obj = getMemberChain(node.object);
+    const obj = getMemberChain(node.object, depth + 1);
     const prop = node.property.name || node.property.value || '';
     return `${obj}.${prop}`;
   }
@@ -2084,5 +2091,5 @@ module.exports = {
   annotateSinkExports, detectCallbackCrossFileFlows, detectEventEmitterFlows,
   resolveLocal, extractLocalImports, parseFile, isLocalImport, toRel, isFileExists,
   tryResolveConcatRequire,
-  MAX_GRAPH_NODES, MAX_GRAPH_EDGES, MAX_FLOWS
+  MAX_GRAPH_NODES, MAX_GRAPH_EDGES, MAX_FLOWS, MAX_TAINT_DEPTH
 };

@@ -140,6 +140,53 @@ async function runEvaluateTests() {
     const output = runCommand('--help');
     assert(!output.includes('muaddib evaluate'), 'evaluate should NOT appear in help');
   });
+
+  // --- Wilson CI tests ---
+  const { wilsonCI, isBenignHoldout } = require('../../src/commands/evaluate.js');
+
+  test('EVALUATE: wilsonCI returns valid interval for 46/49', () => {
+    const ci = wilsonCI(46, 49);
+    assert(ci.lower > 0.8, `CI lower should be > 0.8, got ${ci.lower.toFixed(3)}`);
+    assert(ci.upper <= 1.0, `CI upper should be <= 1.0, got ${ci.upper.toFixed(3)}`);
+    assert(ci.lower < ci.upper, 'lower should be < upper');
+    assert(ci.center > ci.lower && ci.center < ci.upper, 'center should be between lower and upper');
+  });
+
+  test('EVALUATE: wilsonCI handles 0/0', () => {
+    const ci = wilsonCI(0, 0);
+    assert(ci.lower === 0, 'lower should be 0');
+    assert(ci.upper === 0, 'upper should be 0');
+  });
+
+  test('EVALUATE: wilsonCI handles 0/100 (no successes)', () => {
+    const ci = wilsonCI(0, 100);
+    assert(ci.lower === 0, 'lower should be 0 for no successes');
+    assert(ci.upper > 0, 'upper should be > 0 (CI has width)');
+    assert(ci.upper < 0.05, `upper should be small, got ${ci.upper.toFixed(3)}`);
+  });
+
+  test('EVALUATE: wilsonCI handles 100/100 (all successes)', () => {
+    const ci = wilsonCI(100, 100);
+    assert(ci.lower > 0.95, `lower should be > 0.95, got ${ci.lower.toFixed(3)}`);
+    assert(ci.upper > 0.99, `upper should be > 0.99, got ${ci.upper.toFixed(6)}`);
+  });
+
+  // --- Benign holdout split tests ---
+  test('EVALUATE: isBenignHoldout is deterministic', () => {
+    const r1 = isBenignHoldout('express');
+    const r2 = isBenignHoldout('express');
+    assert(r1 === r2, 'Same package should always get same split');
+  });
+
+  test('EVALUATE: isBenignHoldout produces ~30% holdout rate', () => {
+    // Test with a set of package names
+    const names = ['express', 'lodash', 'react', 'chalk', 'yargs', 'debug', 'minimist',
+      'commander', 'axios', 'glob', 'rimraf', 'mkdirp', 'semver', 'ws', 'uuid',
+      'dotenv', 'cors', 'helmet', 'passport', 'moment'];
+    const holdout = names.filter(n => isBenignHoldout(n)).length;
+    const ratio = holdout / names.length;
+    assert(ratio >= 0.1 && ratio <= 0.6, `Holdout ratio should be ~30%, got ${(ratio * 100).toFixed(0)}%`);
+  });
 }
 
 module.exports = { runEvaluateTests };

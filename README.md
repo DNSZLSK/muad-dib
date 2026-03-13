@@ -284,9 +284,14 @@ repos:
 | **Wild TPR** (Datadog 17K) | **88.2%** raw / **~100%** adjusted | 17,922 real malware. 2,077 out-of-scope (phishing, binaries, corrected) |
 | **TPR** (Ground Truth) | **93.9%** (46/49) | 51 real attacks. 3 out-of-scope: browser-only |
 | **FPR** (Benign) | **12.1%** (64/529) | 529 npm packages, real source via `npm pack` |
-| **ADR** (Adversarial + Holdout) | **94.8%** (73/77) | 53 adversarial + 40 holdout (77 available on disk) |
+| **ADR** (Adversarial + Holdout) | **92.2%** (71/77) | 53 adversarial + 40 holdout (77 available on disk), global threshold=20 |
 
-**1940 tests** across 44 files, 86% code coverage. **129 rules** (124 RULES + 5 PARANOID).
+**1974 tests** across 44 files, 86% code coverage. **129 rules** (124 RULES + 5 PARANOID).
+
+> **Methodology caveats:**
+> - TPR measured on 49 Node.js attack samples (3 browser-only excluded from 51 total)
+> - FPR measured on 529 curated popular npm packages (not a random sample)
+> - ADR measured with global threshold (score >= 20) as of v2.6.5
 
 See [Evaluation Methodology](docs/EVALUATION_METHODOLOGY.md) for the full experimental protocol, holdout history, and Datadog benchmark details.
 
@@ -322,7 +327,7 @@ npm test
 
 ### Testing
 
-- **1940 tests** across 44 modular test files - 86% code coverage
+- **1974 tests** across 44 modular test files - 86% code coverage
 - **56 fuzz tests** - Malformed inputs, ReDoS, unicode, binary
 - **Datadog 17K benchmark** - 17,922 real malware samples
 - **Ground truth validation** - 51 real-world attacks (93.9% TPR)

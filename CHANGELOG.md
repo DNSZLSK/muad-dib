@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.4] - 2026-03-13
+
+### Fixed
+- **Dependency security**: Bump `flatted` to >=3.4.0 (GHSA-25h7-pfq9-p65f, ReDoS/DoS vulnerability)
+
+## [2.6.3] - 2026-03-13
+
+### Fixed
+- **IOC pipeline reliability**: 3 fixes in `src/ioc/scraper.js` and `src/ioc/updater.js`:
+  - Split DataDog multi-version CSV entries (e.g., `"1.0.0,1.0.1"`) into individual version records instead of treating as single invalid version
+  - Extract GHSA advisory versions from `affected[].ranges[].events[].introduced/fixed` instead of relying on missing `versions` field
+  - `NEVER_WILDCARD` guard: prevent packages with known versioned entries from being promoted to wildcard (all-versions-malicious) status
+- Test count: +183 IOC pipeline tests
+
+## [2.6.2] - 2026-03-13
+
+### Changed
+- **FP Reduction P7 — Scoring Downgrades**: 7 heuristic fixes:
+  - LOW-severity alert filtering in monitor (noise reduction)
+  - Monorepo scope grouping for publish anomaly detection (prevents false bursts on scoped packages)
+  - `env_access` count threshold (>10 hits → LOW) — config-heavy packages
+  - `suspicious_dataflow` full bypass (removed 80% ratio guard that failed on packages with many flows)
+  - `high_entropy_string` count threshold (>5 hits → LOW) — encoding-heavy packages
+  - Extended DIST_FILE_RE with `out|output` directories + `env_access` added to DIST_BUNDLER_ARTIFACT_TYPES
+  - `credential_regex_harvest` threshold lowered (>2 hits → LOW) — HTTP client libraries
+- Test count: 1869 → **1940** (+71 tests)
+- FPR: 12.3% → **12.1%** (64/529) — 1 fewer false positive
+- ADR denominator corrected: counts only available samples on disk
+- ADR: **94.8%** (73/77 available)
+
+### Added
+- Documentation restructure (v2.6.2 docs update)
+
 ## [2.6.1] - 2026-03-10
 
 ### Added

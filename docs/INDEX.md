@@ -34,7 +34,7 @@
 | Scanners | 14 parallel |
 | TPR (Ground Truth) | 93.9% (46/49) |
 | FPR (Benign) | 12.1% (64/529) |
-| ADR (Adversarial + Holdout) | 94.8% (73/77) |
+| ADR (Adversarial + Holdout) | 92.2% (71/77) |
 | Wild TPR (Datadog 17K) | 88.2% raw / ~100% adjusted |
 
 ## Architecture Overview

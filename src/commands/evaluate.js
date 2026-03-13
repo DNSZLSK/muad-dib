@@ -32,7 +32,40 @@ const HOLDOUT_DIRS = [
 
 const GT_THRESHOLD = 3;
 const BENIGN_THRESHOLD = 20;
+const ADR_THRESHOLD = 20;  // v2.6.5: global threshold (aligned with BENIGN_THRESHOLD, no per-sample overfitting)
 const PACK_TIMEOUT_MS = 30000;
+
+// --- Holdout benign split ---
+// Deterministic 70/30 split based on package name hash for overfitting detection.
+// Training set: used for tuning FP reductions. Holdout: untouched validation set.
+const BENIGN_HOLDOUT_RATIO = 0.3;
+
+function hashString(s) {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) {
+    h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+  }
+  return Math.abs(h);
+}
+
+function isBenignHoldout(pkgName) {
+  return (hashString(pkgName) % 100) < (BENIGN_HOLDOUT_RATIO * 100);
+}
+
+// --- Wilson score confidence interval ---
+// For binomial proportions with small samples. z=1.96 for 95% CI.
+function wilsonCI(successes, total, z = 1.96) {
+  if (total === 0) return { lower: 0, upper: 0, center: 0 };
+  const p = successes / total;
+  const denom = 1 + z * z / total;
+  const center = (p + z * z / (2 * total)) / denom;
+  const margin = z * Math.sqrt((p * (1 - p) + z * z / (4 * total)) / total) / denom;
+  return {
+    lower: Math.max(0, center - margin),
+    upper: Math.min(1, center + margin),
+    center
+  };
+}
 
 const ADVERSARIAL_THRESHOLDS = {
   // Vague 1 (20 samples)
@@ -170,7 +203,9 @@ async function silentScan(dir) {
 async function evaluateGroundTruth() {
   const attacksFile = path.join(GT_DIR, 'attacks.json');
   const data = JSON.parse(fs.readFileSync(attacksFile, 'utf8'));
-  const attacks = data.attacks.filter(a => a.expected.min_threats > 0);
+  const allAttacks = data.attacks;
+  const attacks = allAttacks.filter(a => a.expected.min_threats > 0);
+  const totalAll = allAttacks.length; // includes browser-only out-of-scope
 
   const details = [];
   let detected = 0;
@@ -192,7 +227,9 @@ async function evaluateGroundTruth() {
 
   const total = attacks.length;
   const tpr = total > 0 ? detected / total : 0;
-  return { detected, total, tpr, details };
+  const tprAll = totalAll > 0 ? detected / totalAll : 0;
+  const tprCI = wilsonCI(detected, total);
+  return { detected, total, totalAll, tpr, tprAll, tprCI, details };
 }
 
 // =========================================================================
@@ -359,7 +396,26 @@ async function evaluateBenign(options = {}) {
     const isFlagged = score > BENIGN_THRESHOLD;
     if (isFlagged) flagged++;
 
-    const entry = { name: pkg, score, flagged: isFlagged };
+    // Count JS files for size classification
+    let jsFileCount = 0;
+    try {
+      const countJs = (dir, depth) => {
+        if (depth > 10) return;
+        for (const f of fs.readdirSync(dir)) {
+          if (f === 'node_modules' || f === '.git') continue;
+          const fp = path.join(dir, f);
+          try {
+            const st = fs.lstatSync(fp);
+            if (st.isSymbolicLink()) continue;
+            if (st.isDirectory()) countJs(fp, depth + 1);
+            else if (f.endsWith('.js') || f.endsWith('.mjs') || f.endsWith('.cjs')) jsFileCount++;
+          } catch { /* skip */ }
+        }
+      };
+      countJs(extractedDir, 0);
+    } catch { /* skip */ }
+
+    const entry = { name: pkg, score, flagged: isFlagged, jsFiles: jsFileCount };
 
     // Include threat details for flagged packages (for debugging FPs)
     if (isFlagged && result.threats) {
@@ -381,7 +437,31 @@ async function evaluateBenign(options = {}) {
 
   const scanned = total - skipped;
   const fpr = scanned > 0 ? flagged / scanned : 0;
-  return { flagged, total, scanned, skipped, fpr, details };
+
+  // Stratified FPR by package size (JS file count)
+  const sizeCategories = { small: { max: 10 }, medium: { max: 50 }, large: { max: 100 }, veryLarge: { max: Infinity } };
+  const stratified = {};
+  for (const [cat, { max }] of Object.entries(sizeCategories)) {
+    const prev = cat === 'small' ? 0 : cat === 'medium' ? 10 : cat === 'large' ? 50 : 100;
+    const catDetails = details.filter(d => !d.skipped && d.jsFiles > prev && d.jsFiles <= max);
+    const catFlagged = catDetails.filter(d => d.flagged).length;
+    stratified[cat] = { flagged: catFlagged, total: catDetails.length, fpr: catDetails.length > 0 ? catFlagged / catDetails.length : 0 };
+  }
+
+  // Holdout benign split: deterministic 70/30 for overfitting detection
+  const holdoutDetails = details.filter(d => !d.skipped && isBenignHoldout(d.name));
+  const trainingDetails = details.filter(d => !d.skipped && !isBenignHoldout(d.name));
+  const holdoutFlagged = holdoutDetails.filter(d => d.flagged).length;
+  const trainingFlagged = trainingDetails.filter(d => d.flagged).length;
+  const holdoutSplit = {
+    training: { flagged: trainingFlagged, total: trainingDetails.length, fpr: trainingDetails.length > 0 ? trainingFlagged / trainingDetails.length : 0 },
+    holdout: { flagged: holdoutFlagged, total: holdoutDetails.length, fpr: holdoutDetails.length > 0 ? holdoutFlagged / holdoutDetails.length : 0 }
+  };
+
+  // Wilson 95% CI for FPR
+  const fprCI = wilsonCI(flagged, scanned);
+
+  return { flagged, total, scanned, skipped, fpr, fprCI, stratified, holdoutSplit, details };
 }
 
 // =========================================================================
@@ -530,43 +610,69 @@ async function evaluateAdversarial() {
   let detected = 0;
   const adversarialDirExists = fs.existsSync(ADVERSARIAL_DIR);
 
+  // v2.6.5: Use global ADR_THRESHOLD for honest measurement (no per-sample overfitting)
+  // Legacy per-sample thresholds preserved in ADVERSARIAL_THRESHOLDS/HOLDOUT_THRESHOLDS for reference
+
   // --- Adversarial samples ---
-  for (const [name, threshold] of Object.entries(ADVERSARIAL_THRESHOLDS)) {
+  for (const name of Object.keys(ADVERSARIAL_THRESHOLDS)) {
     const sampleDir = path.join(ADVERSARIAL_DIR, name);
     if (!adversarialDirExists || !fs.existsSync(sampleDir)) {
-      details.push({ name, score: 0, threshold, detected: false, error: 'directory not found (local-only)', source: 'adversarial' });
+      details.push({ name, score: 0, threshold: ADR_THRESHOLD, detected: false, error: 'directory not found (local-only)', source: 'adversarial' });
       continue;
     }
     const result = await silentScan(sampleDir);
     const score = result.summary.riskScore;
-    const isDetected = score >= threshold;
+    const isDetected = score >= ADR_THRESHOLD;
     if (isDetected) detected++;
-    details.push({ name, score, threshold, detected: isDetected, source: 'adversarial' });
+    details.push({ name, score, threshold: ADR_THRESHOLD, detected: isDetected, source: 'adversarial' });
   }
 
   // --- Holdout samples (40) ---
-  for (const [name, threshold] of Object.entries(HOLDOUT_THRESHOLDS)) {
+  for (const name of Object.keys(HOLDOUT_THRESHOLDS)) {
     let sampleDir = null;
     for (const hDir of HOLDOUT_DIRS) {
       const candidate = path.join(hDir, name);
       if (fs.existsSync(candidate)) { sampleDir = candidate; break; }
     }
     if (!sampleDir) {
-      details.push({ name, score: 0, threshold, detected: false, error: 'directory not found', source: 'holdout' });
+      details.push({ name, score: 0, threshold: ADR_THRESHOLD, detected: false, error: 'directory not found', source: 'holdout' });
       continue;
     }
     const result = await silentScan(sampleDir);
     const score = result.summary.riskScore;
-    const isDetected = score >= threshold;
+    const isDetected = score >= ADR_THRESHOLD;
     if (isDetected) detected++;
-    details.push({ name, score, threshold, detected: isDetected, source: 'holdout' });
+    details.push({ name, score, threshold: ADR_THRESHOLD, detected: isDetected, source: 'holdout' });
   }
 
   // Count only samples that exist on disk (exclude "directory not found")
   const available = details.filter(d => !d.error).length;
   const total = Object.keys(ADVERSARIAL_THRESHOLDS).length + Object.keys(HOLDOUT_THRESHOLDS).length;
   const adr = available > 0 ? detected / available : 0;
-  return { detected, total, available, adr, details };
+
+  // Cohort separation: adversarial vs holdout
+  const advDetails = details.filter(d => d.source === 'adversarial');
+  const holdDetails = details.filter(d => d.source === 'holdout');
+  const advAvailable = advDetails.filter(d => !d.error).length;
+  const holdAvailable = holdDetails.filter(d => !d.error).length;
+  const advDetected = advDetails.filter(d => d.detected).length;
+  const holdDetected = holdDetails.filter(d => d.detected).length;
+  const cohorts = {
+    adversarial: { detected: advDetected, available: advAvailable, adr: advAvailable > 0 ? advDetected / advAvailable : 0 },
+    holdout: { detected: holdDetected, available: holdAvailable, adr: holdAvailable > 0 ? holdDetected / holdAvailable : 0 }
+  };
+
+  // Wilson 95% CI for ADR
+  const adrCI = wilsonCI(detected, available);
+
+  // Sensitivity curve: ADR at multiple thresholds
+  const sensitivityThresholds = [5, 10, 15, 20, 25, 30, 40, 50, 60, 80];
+  const sensitivity = sensitivityThresholds.map(t => {
+    const det = details.filter(d => !d.error && d.score >= t).length;
+    return { threshold: t, detected: det, available, adr: available > 0 ? det / available : 0 };
+  });
+
+  return { detected, total, available, adr, adrCI, cohorts, sensitivity, details };
 }
 
 /**
@@ -630,17 +736,43 @@ async function evaluate(options = {}) {
     console.log(JSON.stringify(report, null, 2));
   } else {
     const tprPct = (groundTruth.tpr * 100).toFixed(1);
+    const tprAllPct = (groundTruth.tprAll * 100).toFixed(1);
     const fprPct = (benign.fpr * 100).toFixed(1);
     const adrPct = (adversarial.adr * 100).toFixed(1);
 
     console.log('');
-    console.log(`  Ground Truth (TPR):  ${groundTruth.detected}/${groundTruth.total}  ${tprPct}%`);
-    console.log(`  Benign npm (FPR):    ${benign.flagged}/${benign.scanned}  ${fprPct}%  (${benign.skipped} skipped)`);
+    const tprCIStr = groundTruth.tprCI ? ` [95% CI: ${(groundTruth.tprCI.lower * 100).toFixed(1)}-${(groundTruth.tprCI.upper * 100).toFixed(1)}%]` : '';
+    console.log(`  TPR (Node.js attacks): ${groundTruth.detected}/${groundTruth.total}  ${tprPct}%${tprCIStr}`);
+    console.log(`  TPR (all samples):     ${groundTruth.detected}/${groundTruth.totalAll}  ${tprAllPct}%  [includes ${groundTruth.totalAll - groundTruth.total} browser-only out-of-scope]`);
+    const fprCIStr = benign.fprCI ? ` [95% CI: ${(benign.fprCI.lower * 100).toFixed(1)}-${(benign.fprCI.upper * 100).toFixed(1)}%]` : '';
+    console.log(`  FPR (global):          ${benign.flagged}/${benign.scanned}  ${fprPct}%${fprCIStr}`);
+    if (benign.holdoutSplit) {
+      const hs = benign.holdoutSplit;
+      console.log(`  FPR (training):        ${hs.training.flagged}/${hs.training.total}  ${(hs.training.fpr * 100).toFixed(1)}%  [70% tuning set]`);
+      console.log(`  FPR (holdout):         ${hs.holdout.flagged}/${hs.holdout.total}  ${(hs.holdout.fpr * 100).toFixed(1)}%  [30% validation set]`);
+    }
+    if (benign.stratified) {
+      for (const [cat, data] of Object.entries(benign.stratified)) {
+        if (data.total > 0) {
+          const label = cat === 'veryLarge' ? 'very large' : cat;
+          const pct = (data.fpr * 100).toFixed(1);
+          const sizeDesc = cat === 'small' ? '<10 JS files' : cat === 'medium' ? '10-50 files' : cat === 'large' ? '50-100 files' : '100+ files';
+          console.log(`  FPR (${label.padEnd(10)}):  ${data.flagged}/${data.total}   ${pct}%   [${sizeDesc}]`);
+        }
+      }
+    }
     if (benignPyPI) {
       const pypiPct = (benignPyPI.fpr * 100).toFixed(1);
-      console.log(`  Benign PyPI (FPR):   ${benignPyPI.flagged}/${benignPyPI.scanned}  ${pypiPct}%  (${benignPyPI.skipped} skipped)`);
+      console.log(`  Benign PyPI (FPR):     ${benignPyPI.flagged}/${benignPyPI.scanned}  ${pypiPct}%  (${benignPyPI.skipped} skipped)`);
     }
-    console.log(`  Adversarial (ADR):   ${adversarial.detected}/${adversarial.available}  ${adrPct}%  (${adversarial.total - adversarial.available} missing)`);
+    const adrCIStr = adversarial.adrCI ? ` [95% CI: ${(adversarial.adrCI.lower * 100).toFixed(1)}-${(adversarial.adrCI.upper * 100).toFixed(1)}%]` : '';
+    console.log(`  ADR (threshold=${ADR_THRESHOLD}):   ${adversarial.detected}/${adversarial.available}  ${adrPct}%${adrCIStr}  (${adversarial.total - adversarial.available} missing)`);
+    if (adversarial.cohorts) {
+      const adv = adversarial.cohorts.adversarial;
+      const hold = adversarial.cohorts.holdout;
+      console.log(`  ADR (adversarial):     ${adv.detected}/${adv.available}  ${(adv.adr * 100).toFixed(1)}%`);
+      console.log(`  ADR (holdout):         ${hold.detected}/${hold.available}  ${(hold.adr * 100).toFixed(1)}%`);
+    }
     console.log('');
 
     // Show failed adversarial samples
@@ -704,5 +836,8 @@ module.exports = {
   HOLDOUT_THRESHOLDS,
   GT_THRESHOLD,
   BENIGN_THRESHOLD,
-  extractTgz
+  ADR_THRESHOLD,
+  extractTgz,
+  wilsonCI,
+  isBenignHoldout
 };

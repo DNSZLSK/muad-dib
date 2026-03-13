@@ -463,6 +463,34 @@ function invalidateCache() {
   cachedIOCsTime = 0;
 }
 
+/**
+ * Check IOC freshness based on cached file mtime.
+ * Returns a warning string if IOCs are older than maxAgeDays, null otherwise.
+ * @param {number} maxAgeDays - Maximum acceptable age in days (default: 30)
+ * @returns {string|null} Warning message or null
+ */
+function checkIOCStaleness(maxAgeDays = 30) {
+  const filesToCheck = [CACHE_IOC_FILE, LOCAL_IOC_FILE, LOCAL_COMPACT_FILE];
+  let newestMtime = 0;
+
+  for (const f of filesToCheck) {
+    try {
+      const stat = fs.statSync(f);
+      if (stat.mtimeMs > newestMtime) newestMtime = stat.mtimeMs;
+    } catch {
+      // File doesn't exist — skip
+    }
+  }
+
+  if (newestMtime === 0) return null; // No IOC files found — bootstrap will handle
+
+  const ageDays = (Date.now() - newestMtime) / (1000 * 60 * 60 * 24);
+  if (ageDays > maxAgeDays) {
+    return `IOC database is ${Math.floor(ageDays)} days old (threshold: ${maxAgeDays}d). Run "muaddib update" for latest threat data.`;
+  }
+  return null;
+}
+
 // ============================================
 // IOC INTEGRITY: HMAC-SHA256 signing/verification
 // ============================================
@@ -510,4 +538,4 @@ function verifyIOCHMAC(data, hmac) {
   }
 }
 
-module.exports = { updateIOCs, loadCachedIOCs, invalidateCache, generateCompactIOCs, expandCompactIOCs, mergeIOCs, createOptimizedIOCs, generateIOCHMAC, verifyIOCHMAC, NEVER_WILDCARD };
+module.exports = { updateIOCs, loadCachedIOCs, invalidateCache, generateCompactIOCs, expandCompactIOCs, mergeIOCs, createOptimizedIOCs, generateIOCHMAC, verifyIOCHMAC, checkIOCStaleness, NEVER_WILDCARD };

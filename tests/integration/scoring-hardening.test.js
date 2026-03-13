@@ -1,6 +1,7 @@
 'use strict';
 
-const { test, assert } = require('../test-utils');
+const path = require('path');
+const { test, asyncTest, assert, runScanDirect } = require('../test-utils');
 const { applyFPReductions, calculateRiskScore, computeGroupScore } = require('../../src/scoring.js');
 
 async function runScoringHardeningTests() {
@@ -418,6 +419,95 @@ async function runScoringHardeningTests() {
     applyFPReductions(threats, null, null);
     assert(threats[0].severity === 'CRITICAL',
       `suspicious_dataflow with 2 hits should stay CRITICAL, got ${threats[0].severity}`);
+  });
+
+  // ==========================================================================
+  // v2.6.5: Percentage guard bypass fix
+  // ==========================================================================
+  test('v2.6.5: single suspicious_dataflow at high ratio stays HIGH (no bypass)', () => {
+    // 1 suspicious_dataflow + 1 other = 50% ratio. Should NOT be downgraded
+    // because count (1) <= maxCount (3)
+    const threats = [
+      { type: 'suspicious_dataflow', severity: 'CRITICAL', file: 'a.js', message: 'flow1' },
+      { type: 'obfuscation_detected', severity: 'HIGH', file: 'b.js', message: 'obf1' }
+    ];
+    applyFPReductions(threats, null, null);
+    assert(threats[0].severity === 'CRITICAL',
+      `Single suspicious_dataflow at 50% ratio should stay CRITICAL, got ${threats[0].severity}`);
+  });
+
+  test('v2.6.5: 4 suspicious_dataflow in SDK package → downgrade (count > 3)', () => {
+    const threats = [
+      { type: 'suspicious_dataflow', severity: 'CRITICAL', file: 'a.js', message: 'flow1' },
+      { type: 'suspicious_dataflow', severity: 'CRITICAL', file: 'b.js', message: 'flow2' },
+      { type: 'suspicious_dataflow', severity: 'CRITICAL', file: 'c.js', message: 'flow3' },
+      { type: 'suspicious_dataflow', severity: 'CRITICAL', file: 'd.js', message: 'flow4' },
+      { type: 'obfuscation_detected', severity: 'HIGH', file: 'e.js', message: 'obf1' }
+    ];
+    applyFPReductions(threats, null, null);
+    assert(threats[0].severity === 'LOW',
+      `4 suspicious_dataflow (count > 3) should be LOW, got ${threats[0].severity}`);
+  });
+
+  test('v2.6.5: 2 suspicious_dataflow at 60% ratio stays CRITICAL (count <= 3)', () => {
+    // 2 suspicious_dataflow + 1 other = 66% ratio but count <= 3
+    const threats = [
+      { type: 'suspicious_dataflow', severity: 'CRITICAL', file: 'a.js', message: 'flow1' },
+      { type: 'suspicious_dataflow', severity: 'CRITICAL', file: 'b.js', message: 'flow2' },
+      { type: 'obfuscation_detected', severity: 'HIGH', file: 'c.js', message: 'obf1' }
+    ];
+    applyFPReductions(threats, null, null);
+    assert(threats[0].severity === 'CRITICAL',
+      `2 suspicious_dataflow at 66% ratio should stay CRITICAL (count <= 3), got ${threats[0].severity}`);
+  });
+
+  // ==========================================================================
+  // v2.6.5: CI smoke test — regression guard for scoring
+  // ==========================================================================
+  const GT_DIR = path.join(__dirname, '..', 'ground-truth', 'samples');
+
+  await asyncTest('CI smoke: event-stream scores >= 20', async () => {
+    const dir = path.join(GT_DIR, 'event-stream');
+    const result = await runScanDirect(dir);
+    assert(result.summary.riskScore >= 20,
+      `event-stream should score >= 20, got ${result.summary.riskScore}`);
+  });
+
+  await asyncTest('CI smoke: flatmap-stream scores >= 20', async () => {
+    const dir = path.join(GT_DIR, 'flatmap-stream');
+    const result = await runScanDirect(dir);
+    assert(result.summary.riskScore >= 20,
+      `flatmap-stream should score >= 20, got ${result.summary.riskScore}`);
+  });
+
+  await asyncTest('CI smoke: coa scores >= 20', async () => {
+    const dir = path.join(GT_DIR, 'coa');
+    const result = await runScanDirect(dir);
+    assert(result.summary.riskScore >= 20,
+      `coa should score >= 20, got ${result.summary.riskScore}`);
+  });
+
+  // ==========================================================================
+  // v2.6.5: Paranoid mode alias detection
+  // ==========================================================================
+  const PARANOID_DIR = path.join(__dirname, '..', 'samples', 'paranoid');
+
+  await asyncTest('PARANOID: detects eval alias (const e = eval; e(code))', async () => {
+    const result = await runScanDirect(PARANOID_DIR, { paranoid: true });
+    const evalThreats = result.threats.filter(t =>
+      t.type === 'MUADDIB-PARANOID-003' && t.message && t.message.includes('alias')
+    );
+    assert(evalThreats.length > 0,
+      `Should detect eval alias in paranoid mode, got ${evalThreats.length} threats`);
+  });
+
+  await asyncTest('PARANOID: detects Function alias (const F = Function; new F(code))', async () => {
+    const result = await runScanDirect(PARANOID_DIR, { paranoid: true });
+    const fnThreats = result.threats.filter(t =>
+      t.type === 'MUADDIB-PARANOID-003'
+    );
+    assert(fnThreats.length > 0,
+      `Should detect Function alias in paranoid mode, got ${fnThreats.length} threats`);
   });
 }
 
