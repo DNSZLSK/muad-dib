@@ -64,9 +64,9 @@ Please include the following information in your report:
 - We aim to release fixes before public disclosure
 - We request a 90-day disclosure window for complex issues
 
-## Detection Rules (v2.6.2)
+## Detection Rules (v2.6.5)
 
-MUAD'DIB uses 14 parallel scanners + 5 behavioral anomaly detection features + ground truth validation, producing 129 rule IDs (124 RULES + 5 PARANOID):
+MUAD'DIB uses 14 scanner modules (module-graph pre-analysis + 13 parallel scanners) + 5 behavioral anomaly detection features + ground truth validation, producing 129 rule IDs (124 RULES + 5 PARANOID):
 
 ### AST Scanner
 
@@ -144,6 +144,7 @@ MUAD'DIB uses 14 parallel scanners + 5 behavioral anomaly detection features + g
 | MUADDIB-AST-033 | Steganographic Payload Chain (fetch + decrypt + eval) | CRITICAL | T1027.003 |
 | MUADDIB-AST-034 | Download-Execute Binary (download + chmod + execSync) | CRITICAL | T1105 |
 | MUADDIB-AST-035 | IDE Task Persistence (tasks.json + runOn + writeFileSync) | HIGH | T1546 |
+| MUADDIB-AST-036 | VM Module Code Execution (vm.runInThisContext, vm.Script) | HIGH | T1059 |
 
 ### AI Config Scanner (v2.2)
 
@@ -359,7 +360,7 @@ The sandbox simulates CI environments by setting: `CI=true`, `GITHUB_ACTIONS=tru
 2. **Signed commits**: Use GPG-signed commits when possible
 3. **Review dependencies**: Check new dependencies before adding them
 
-## Threat Model (v2.6.2)
+## Threat Model (v2.6.5)
 
 MUAD'DIB 2.6 uses a **triple detection approach**:
 
@@ -367,7 +368,7 @@ MUAD'DIB 2.6 uses a **triple detection approach**:
 
 2. **Behavioral anomaly detection** (v2.0): Analyzes changes between package versions to detect supply-chain attacks before they appear in IOC databases. Compares lifecycle scripts, AST, publish frequency, and maintainer metadata across versions. This approach can detect 0-day behavioral anomalies without any prior knowledge of the specific attack.
 
-3. **Ground truth validation** (v2.1–v2.6.2): Validates detection accuracy against 51 real-world attacks (49 active samples), tracks detection lead times vs. public advisories, and monitors false positive rates over time. 1940 tests with 86% code coverage. Provides observability into scanner effectiveness.
+3. **Ground truth validation** (v2.1–v2.6.5): Validates detection accuracy against 51 real-world attacks (49 active samples), tracks detection lead times vs. public advisories, and monitors false positive rates over time. 1974 tests with 86% code coverage. Provides observability into scanner effectiveness.
 
 The behavioral detection features are opt-in (`--temporal-full`) and query the npm registry at scan time. They are particularly effective against:
 - Account takeover attacks (event-stream pattern)
@@ -375,7 +376,7 @@ The behavioral detection features are opt-in (`--temporal-full`) and query the n
 - Dormant package hijacking (abandonware takeover)
 - Sudden code injection (Shai-Hulud, ua-parser-js pattern)
 
-## Ground Truth Validation (v2.6.2)
+## Ground Truth Validation (v2.6.5)
 
 MUAD'DIB includes a ground truth dataset of 51 real-world supply-chain attacks (49 active samples) to continuously validate detection coverage.
 
@@ -386,7 +387,17 @@ MUAD'DIB includes a ground truth dataset of 51 real-world supply-chain attacks (
 
 Run `muaddib evaluate --ground-truth` to validate detection at any time.
 
-## Datadog 17K Benchmark (v2.6.2)
+## Evaluation Methodology Caveats (v2.6.5)
+
+The metrics reported above should be interpreted with the following caveats:
+
+- **TPR scope:** Measured on 49 Node.js attack samples from 51 total. 3 browser-only attacks (lottie-player, polyfill-io, trojanized-jquery) are excluded because MUAD'DIB is a Node.js static analyzer and cannot detect DOM/browser-only patterns.
+- **FPR dataset:** Measured on 529 curated popular npm packages, not a random sample. FPR varies significantly by package size: small packages (<10 JS files) have lower FPR than very large packages (100+ files) due to accumulation of benign patterns that resemble threats.
+- **ADR methodology:** As of v2.6.5, ADR uses a global threshold (score >= 20) aligned with the benign threshold. Earlier versions used per-sample tuned thresholds which inflated the ADR metric.
+- **Node.js scope:** MUAD'DIB is designed for Node.js/npm supply-chain attacks. Browser-only attacks, native binary payloads, and phishing pages are out of scope.
+- **Static analysis limitations:** Dynamic obfuscation, encrypted payloads that require runtime keys, and multi-stage attacks fetching payloads from external servers may evade static detection.
+
+## Datadog 17K Benchmark (v2.6.5)
 
 Validated against the [DataDog Malicious Software Packages Dataset](https://github.com/DataDog/malicious-software-packages-dataset) (17,922 real malware npm packages).
 
@@ -406,6 +417,62 @@ The `muaddib serve` HTTP server binds to `localhost` (127.0.0.1) by default. It 
 - **No authentication**: the server is designed for local use only. Do not expose to the public internet.
 - **No sensitive data**: the feed contains detection metadata (package names, severities, timestamps), not raw file contents or credentials.
 - **Localhost binding**: default port 3000, binds to 127.0.0.1 only.
+
+## Scoring & FP Reduction (v2.6.5)
+
+### Risk Score Formula
+
+```
+riskScore = min(100, maxFileScore + crossFileBonus + intentBonus + packageScore)
+```
+
+- **Severity weights**: CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1
+- **Per-file max**: Threats grouped by file, each group scored independently. Only the maximum file score counts.
+- **Cross-file bonus**: 25% of non-max file scores (MEDIUM+ only), capped at 25.
+- **Intent bonus**: Intra-file source-sink coherence, capped at 30.
+- **Package score**: Lifecycle scripts, typosquat, IOC matches. CRITICAL floor at 50 when present.
+
+### Risk Levels
+
+| Level | Threshold |
+|-------|-----------|
+| CRITICAL | >= 80 |
+| HIGH | >= 50 |
+| MEDIUM | >= 20 |
+| LOW | > 0 |
+| SAFE | 0 |
+
+### FP Count Thresholds
+
+Legitimate frameworks produce high volumes of certain threat types that malware never does. When the count exceeds these thresholds, severity is downgraded to LOW:
+
+| Threat Type | Max Count | From | Rationale |
+|-------------|-----------|------|-----------|
+| dynamic_require | 10 | HIGH | Plugin loaders (webpack, eslint) |
+| dangerous_call_function | 5 | MEDIUM | Template engines, bundlers |
+| require_cache_poison | 3 | CRITICAL | Hot-reload systems (1 hit → HIGH) |
+| suspicious_dataflow | 3 | any | SDKs with many flows |
+| obfuscation_detected | 3 | any | Minified bundles |
+| module_compile | 3 | HIGH | Framework module systems |
+| module_compile_dynamic | 3 | HIGH | Dynamic module loaders |
+| zlib_inflate_eval | 2 | CRITICAL | Compression libraries |
+| vm_code_execution | 3 | HIGH | Build tools (webpack, jest) |
+| dynamic_import | 5 | HIGH | Plugin loaders |
+| js_obfuscation_pattern | 1 | HIGH | Hash algorithm bit manipulation |
+| credential_tampering | 5 | any | Minified alias resolution |
+| dangerous_call_eval | 3 | MEDIUM | Bundled globalThis eval |
+| credential_regex_harvest | 2 | HIGH | HTTP client Authorization parsing |
+| env_access | 10 | HIGH | Config frameworks (dotenv, aws-sdk) |
+| high_entropy_string | 5 | any | Bundled data/assets |
+
+A percentage guard (< 40% of total threats) prevents downgrading when a type dominates findings.
+
+### Other Reduction Heuristics
+
+- **Dist/build files**: One-notch severity downgrade; bundler artifacts get two-notch (CRITICAL→MEDIUM).
+- **Reachability**: Findings in files not reachable from entry points → LOW.
+- **Framework prototypes**: Request/Response/App/Router.prototype → MEDIUM.
+- **HTTP client whitelist**: >20 prototype_hook hits targeting HTTP class names → MEDIUM.
 
 ## Known Limitations
 

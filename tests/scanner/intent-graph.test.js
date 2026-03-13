@@ -18,9 +18,24 @@ async function runIntentGraphTests() {
     assert(result === 'credential_read', `Expected credential_read, got ${result}`);
   });
 
-  test('INTENT: classifySource — env_access excluded (config, not credential theft)', () => {
-    const result = classifySource({ type: 'env_access', message: 'process.env.TOKEN' });
-    assert(result === null, `Expected null (env_access excluded), got ${result}`);
+  test('INTENT: classifySource — env_access with sensitive var → credential_read', () => {
+    const result = classifySource({ type: 'env_access', message: 'process.env.GITHUB_TOKEN' });
+    assert(result === 'credential_read', `Expected credential_read for GITHUB_TOKEN, got ${result}`);
+  });
+
+  test('INTENT: classifySource — env_access with NODE_ENV → null (config)', () => {
+    const result = classifySource({ type: 'env_access', message: 'process.env.NODE_ENV' });
+    assert(result === null, `Expected null for NODE_ENV (config), got ${result}`);
+  });
+
+  test('INTENT: classifySource — env_access with PORT → null (config)', () => {
+    const result = classifySource({ type: 'env_access', message: 'process.env.PORT' });
+    assert(result === null, `Expected null for PORT (config), got ${result}`);
+  });
+
+  test('INTENT: classifySource — env_access with API_KEY → credential_read', () => {
+    const result = classifySource({ type: 'env_access', message: 'process.env.API_KEY' });
+    assert(result === 'credential_read', `Expected credential_read for API_KEY, got ${result}`);
   });
 
   test('INTENT: classifySource — env_harvesting_dynamic → credential_read', () => {
@@ -312,6 +327,26 @@ async function runIntentGraphTests() {
     const result = buildIntentPairs(threats);
     assert(result.intentScore === 0, `Cross-file only pattern should score 0, got ${result.intentScore}`);
     assert(result.intentThreats.length === 0, 'Should not generate intent threats for cross-file co-occurrence');
+  });
+
+  // --- v2.6.5: env_access conditional pairing ---
+
+  test('INTENT: env_access(TOKEN) + network in same file → intent pair', () => {
+    const threats = [
+      { type: 'env_access', severity: 'HIGH', message: 'process.env.GITHUB_TOKEN', file: 'steal.js' },
+      { type: 'dangerous_call_eval', severity: 'CRITICAL', message: 'eval()', file: 'steal.js' }
+    ];
+    const result = buildIntentPairs(threats);
+    assert(result.intentScore > 0, `env_access(TOKEN) + eval in same file should produce intent score, got ${result.intentScore}`);
+  });
+
+  test('INTENT: env_access(NODE_ENV) + network in same file → no intent pair', () => {
+    const threats = [
+      { type: 'env_access', severity: 'HIGH', message: 'process.env.NODE_ENV', file: 'config.js' },
+      { type: 'dangerous_call_eval', severity: 'CRITICAL', message: 'eval()', file: 'config.js' }
+    ];
+    const result = buildIntentPairs(threats);
+    assert(result.intentScore === 0, `env_access(NODE_ENV) should not produce intent pair, got ${result.intentScore}`);
   });
 }
 

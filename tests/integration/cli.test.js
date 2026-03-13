@@ -1134,6 +1134,27 @@ async function runCliTests() {
       server.close();
     }
   });
+
+  // --- Scan warnings field (v2.6.5) ---
+
+  asyncTest('CLI: JSON output contains warnings field as array or undefined', async () => {
+    const { run } = require('../../src/index.js');
+    const result = await run(path.join(TESTS_DIR, 'ast'), { _capture: true });
+    // warnings should either be undefined (no warnings) or an array
+    assert(
+      result.warnings === undefined || Array.isArray(result.warnings),
+      `warnings should be undefined or array, got ${typeof result.warnings}`
+    );
+  });
+
+  asyncTest('CLI: JSON output has standard result fields', async () => {
+    const { run } = require('../../src/index.js');
+    const result = await run(path.join(TESTS_DIR, 'ast'), { _capture: true });
+    assert(result.target !== undefined, 'result should have target');
+    assert(result.timestamp !== undefined, 'result should have timestamp');
+    assert(result.threats !== undefined, 'result should have threats');
+    assert(result.summary !== undefined, 'result should have summary');
+  });
 }
 
 module.exports = { runCliTests };

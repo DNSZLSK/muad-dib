@@ -19,7 +19,7 @@ Priorités :
 ## Commands
 
 ```bash
-npm test          # Run all tests (custom framework, 1940 tests across 44 files)
+npm test          # Run all tests (custom framework, 1974 tests across 44 files)
 npm run lint      # ESLint with security plugin
 npm run scan      # Self-scan: node bin/muaddib.js scan .
 npm run update    # Download latest IOCs
@@ -42,7 +42,7 @@ Tests use a custom framework in `tests/run-tests.js` (no Jest). Test helpers:
 
 **CLI entry:** `bin/muaddib.js` — yargs-based dispatcher, delegates to `src/index.js`.
 
-**Core orchestration:** `src/index.js` — `run(targetPath, options)` runs cross-file module graph analysis first, then launches 13 individual scanners in parallel via `Promise.all`, then deduplicates, applies FP reductions, scores using per-file max (v2.2.11: `riskScore = min(100, max(file_scores) + package_level_score)`, severity weights: CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1), applies intent coherence analysis (intra-file source-sink pairing), enriches with rules/playbooks (129 rules), and outputs (CLI/JSON/HTML/SARIF). Exports `isPackageLevelThreat` and `computeGroupScore` for testing.
+**Core orchestration:** `src/index.js` — `run(targetPath, options)` runs cross-file module graph analysis first, then launches 13 individual scanners in parallel via `Promise.all` (14 scanner modules total), then deduplicates, applies FP reductions, scores using per-file max (v2.2.11: `riskScore = min(100, max(file_scores) + package_level_score)`, severity weights: CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1), applies intent coherence analysis (intra-file source-sink pairing), enriches with rules/playbooks (129 rules), and outputs (CLI/JSON/HTML/SARIF). Result includes `warnings: []` array (v2.6.5) for incomplete scan notifications (module graph timeout/skip, deobfuscation failures). Exports `isPackageLevelThreat` and `computeGroupScore` for testing.
 
 **Scanner pattern:** Each of the 13 individual scanners in `src/scanner/` returns `Array<{type, severity, message, file}>`:
 - `file` must use `path.relative(targetPath, absolutePath)` for Windows compatibility
@@ -121,6 +121,8 @@ Tests use a custom framework in `tests/run-tests.js` (no Jest). Test helpers:
 **FP Reduction P6 (v2.5.16):** Compound detection precision — 6 fixes: (1) `credential_regex_harvest` count-based downgrade (>4 hits HIGH→LOW — HTTP client libraries). (2) Remove `remote_code_load` and `proxy_data_intercept` from DIST_EXEMPT_TYPES — bundled dist/ files get standard downgrade. (3) Obfuscation large-file heuristic — `.js` >100KB → LOW. (4) Remove `discord`/`leveldb` from SENSITIVE_PATH_PATTERNS — data dirs, not creds. (5) `module_compile`/`module_compile_dynamic` baseline CRITICAL→HIGH — single call is framework behavior. (6) `DATAFLOW_SAFE_ENV_VARS` — exclude Node.js runtime config from credential sources. Tests: 1815 → **1869** (+54). TPR: 91.8% → **93.9%** (46/49). FPR: 13.6% → **12.3%** (65/529). ADR: **94.0%** (63/67 available).
 
 **FP Reduction P7 (v2.6.2):** 7 heuristic fixes: (1) LOW-severity alert filtering in monitor. (2) Monorepo scope grouping for publish anomaly. (3) `env_access` count threshold (>10 → LOW). (4) `suspicious_dataflow` full bypass (removed 80% ratio guard). (5) `high_entropy_string` count threshold (>5 → LOW). (6) Extended DIST_FILE_RE (`out|output`) + `env_access` added to DIST_BUNDLER_ARTIFACT_TYPES. (7) `credential_regex_harvest` threshold lowered (>2 → LOW). Tests: 1869 → **1940** (+71). FPR: 12.3% → **12.1%** (64/529). ADR denominator fixed: counts only available samples. ADR: **94.8%** (73/77 available).
+
+**Audit Remediation (v2.6.5):** Post-audit ANSSI hardening — 6 categories of fixes: (1) Critical safety: removed self-dependency in package.json, recursion depth guard (MAX_TAINT_DEPTH=50) in module-graph.js, redirect limit (MAX_REDIRECTS=5) in download.js, `warnings[]` array in scan results for incomplete scan notifications. (2) Detection bypasses: `env_access` conditional classification in intent-graph.js (sensitive env vars only), percentage guard count-based fix in scoring.js, array destructuring + object alias taint propagation in dataflow.js. (3) Evaluation methodology: global ADR_THRESHOLD=20 (replaces per-sample thresholds), scoped TPR reporting (Node.js vs all), stratified FPR by package size, CI smoke tests. (4) IOC input validation: package name + version format validation in scraper.js. (5) Paranoid mode: eval/Function/require alias tracking in scanParanoid. (6) Documentation: methodology caveats, honest metrics. Tests: 1940 → **1974** (+34).
 
 **New AST detection rules (v2.2):**
 - MUADDIB-AST-008 to AST-012: Dynamic require with decode patterns, sandbox evasion, detached process, binary dropper patterns

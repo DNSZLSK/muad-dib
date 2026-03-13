@@ -10,6 +10,38 @@ const HOME_IOC_FILE = path.join(os.homedir(), '.muaddib', 'data', 'iocs.json');
 const STATIC_IOCS_FILE = path.join(__dirname, '../../data/static-iocs.json');
 const { generateCompactIOCs } = require('./updater.js');
 const { Spinner } = require('../utils.js');
+const { NPM_PACKAGE_REGEX } = require('../shared/constants.js');
+
+// Version format validation (semver-like + wildcard)
+const VERSION_RE = /^(\*|0|[1-9]\d*(\.\d+){0,2}(-[\w.]+)?(\+[\w.]+)?)$/;
+
+/**
+ * Validate an IOC package entry before insertion.
+ * Returns true if valid, false if should be skipped.
+ */
+function validateIOCEntry(pkgName, version, ecosystem) {
+  if (!pkgName || typeof pkgName !== 'string') return false;
+  // npm: validate with NPM_PACKAGE_REGEX
+  if (ecosystem === 'npm' || !ecosystem) {
+    if (!NPM_PACKAGE_REGEX.test(pkgName)) {
+      console.warn(`[WARN] Invalid ${ecosystem || 'npm'} package name skipped: ${pkgName}`);
+      return false;
+    }
+  }
+  // PyPI: basic check — no path traversal, no slashes
+  if (ecosystem === 'pypi') {
+    if (/[/\\]|\.\./.test(pkgName)) {
+      console.warn(`[WARN] Invalid PyPI package name skipped: ${pkgName}`);
+      return false;
+    }
+  }
+  // Version validation
+  if (version && !VERSION_RE.test(version)) {
+    console.warn(`[WARN] Invalid version skipped: ${version} for ${pkgName}`);
+    return false;
+  }
+  return true;
+}
 
 // Allowed domains for redirections (SSRF security)
 const ALLOWED_REDIRECT_DOMAINS = [
@@ -1110,10 +1142,15 @@ async function runScraper() {
     dedupMap.set(key, pkg);
   }
 
-  // Merge new IOCs with smart replacement
+  // Merge new IOCs with smart replacement (with input validation)
   let addedPackages = 0;
   let upgradedPackages = 0;
+  let skippedInvalid = 0;
   for (const pkg of allPackages) {
+    if (!validateIOCEntry(pkg.name, pkg.version, 'npm')) {
+      skippedInvalid++;
+      continue;
+    }
     const key = pkg.name + '@' + pkg.version;
     if (!dedupMap.has(key)) {
       dedupMap.set(key, pkg);
@@ -1148,6 +1185,10 @@ async function runScraper() {
   }
   let addedPyPIPackages = 0;
   for (const pkg of pypiPackages) {
+    if (!validateIOCEntry(pkg.name, pkg.version, 'pypi')) {
+      skippedInvalid++;
+      continue;
+    }
     const key = pkg.name + '@' + pkg.version;
     if (!pypiDedupMap.has(key)) {
       pypiDedupMap.set(key, pkg);
@@ -1308,6 +1349,7 @@ module.exports = {
   // Pure utility functions (exported for testing)
   parseCSVLine, parseCSV, extractVersions, parseOSVEntry,
   createFreshness, isAllowedRedirect, loadStaticIOCs,
+  validateIOCEntry,
   CONFIDENCE_ORDER, ALLOWED_REDIRECT_DOMAINS
 };
 

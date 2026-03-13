@@ -18,7 +18,7 @@ const fs = require('fs');
 const path = require('path');
 const { scanGitHubActions } = require('./scanner/github-actions.js');
 const { detectPythonProject, normalizePythonName } = require('./scanner/python.js');
-const { loadCachedIOCs } = require('./ioc/updater.js');
+const { loadCachedIOCs, checkIOCStaleness } = require('./ioc/updater.js');
 const { ensureIOCs } = require('./ioc/bootstrap.js');
 const { scanEntropy } = require('./scanner/entropy.js');
 const { scanAIConfig } = require('./scanner/ai-config.js');
@@ -92,18 +92,32 @@ function scanParanoid(targetPath) {
 
       const found = new Set(); // deduplicate: one finding per rule per file
 
+      // v2.6.5: Track aliases of eval, Function, require for bypass detection
+      // e.g., const e = eval; e(code) — or — const F = Function; new F(code)
+      const ALIAS_TARGETS = new Set(['eval', 'Function', 'require']);
+      const aliases = new Map(); // aliasName → originalName
+
       walk.simple(ast, {
+        VariableDeclarator(node) {
+          // const e = eval / const F = Function / const r = require
+          if (node.id?.type === 'Identifier' && node.init?.type === 'Identifier' &&
+              ALIAS_TARGETS.has(node.init.name)) {
+            aliases.set(node.id.name, node.init.name);
+          }
+        },
         CallExpression(node) {
           // Direct calls: eval(), exec(), fetch(), etc.
           if (node.callee.type === 'Identifier') {
-            const name = node.callee.name;
+            // Resolve alias to original name if applicable
+            const name = aliases.get(node.callee.name) || node.callee.name;
             for (const [ruleKey, detector] of Object.entries(PARANOID_AST_DETECTORS)) {
               if (detector.callNames && detector.callNames.has(name) && !found.has(ruleKey)) {
                 found.add(ruleKey);
                 const rule = PARANOID_RULES[ruleKey];
                 threats.push({
                   type: rule.id, severity: rule.severity.toUpperCase(),
-                  message: `${rule.message}: "${name}"`, file: relFile, mitre: rule.mitre
+                  message: `${rule.message}: "${node.callee.name}"${aliases.has(node.callee.name) ? ` (alias of ${name})` : ''}`,
+                  file: relFile, mitre: rule.mitre
                 });
               }
             }
@@ -130,14 +144,16 @@ function scanParanoid(targetPath) {
         },
         NewExpression(node) {
           if (node.callee.type === 'Identifier') {
-            const name = node.callee.name;
+            // Resolve alias: const F = Function; new F(code)
+            const name = aliases.get(node.callee.name) || node.callee.name;
             for (const [ruleKey, detector] of Object.entries(PARANOID_AST_DETECTORS)) {
               if (detector.newNames && detector.newNames.has(name) && !found.has(ruleKey)) {
                 found.add(ruleKey);
                 const rule = PARANOID_RULES[ruleKey];
                 threats.push({
                   type: rule.id, severity: rule.severity.toUpperCase(),
-                  message: `${rule.message}: "new ${name}"`, file: relFile, mitre: rule.mitre
+                  message: `${rule.message}: "new ${node.callee.name}"${aliases.has(node.callee.name) ? ` (alias of ${name})` : ''}`,
+                  file: relFile, mitre: rule.mitre
                 });
               }
             }
@@ -333,6 +349,9 @@ async function run(targetPath, options = {}) {
   // Ensure IOCs are downloaded (first run only, graceful failure)
   await ensureIOCs();
 
+  // Check IOC freshness — warn if database is older than 30 days
+  const iocStalenessWarning = checkIOCStaleness(30);
+
   // Apply --exclude dirs for this scan
   if (options.exclude && options.exclude.length > 0) {
     setExtraExcludes(options.exclude, targetPath);
@@ -359,10 +378,16 @@ async function run(targetPath, options = {}) {
   // Wrapped in yieldThen to unblock spinner animation
   // Bounded: 5s timeout to prevent DoS on large/adversarial packages
   const MODULE_GRAPH_TIMEOUT_MS = 5000;
+  const warnings = [];
+  if (iocStalenessWarning) warnings.push(iocStalenessWarning);
   let crossFileFlows = [];
   if (!options.noModuleGraph) {
     const moduleGraphWork = async () => {
       const graph = await yieldThen(() => buildModuleGraph(targetPath));
+      if (Object.keys(graph).length === 0) {
+        // buildModuleGraph returns empty when MAX_GRAPH_NODES exceeded
+        warnings.push('Module graph skipped: package exceeds 100 files limit');
+      }
       const tainted = await yieldThen(() => annotateTaintedExports(graph, targetPath));
       const sinkAnnotations = await yieldThen(() => annotateSinkExports(graph, targetPath));
       crossFileFlows = await yieldThen(() => detectCrossFileFlows(graph, tainted, sinkAnnotations, targetPath));
@@ -381,6 +406,9 @@ async function run(targetPath, options = {}) {
     } catch (e) {
       // Graceful fallback — module graph is best-effort
       debugLog('[MODULE-GRAPH] Error:', e && e.message);
+      if (e && e.message === 'Module graph timeout') {
+        warnings.push(`Module graph analysis timed out (${MODULE_GRAPH_TIMEOUT_MS / 1000}s) — cross-file flows may be incomplete`);
+      }
     }
   }
 
@@ -593,6 +621,10 @@ async function run(targetPath, options = {}) {
     threats: pythonThreats.length + pypiTyposquatThreats.length
   } : null;
 
+  // Track deobfuscation failures
+  // (deobfuscate returns {deobfuscatedThreats, failures} but failures aren't surfaced)
+  // We detect this via scannerErrors for now
+
   const result = {
     target: targetPath,
     timestamp: new Date().toISOString(),
@@ -614,6 +646,7 @@ async function run(targetPath, options = {}) {
       breakdown
     },
     sandbox: sandboxData,
+    warnings: warnings.length > 0 ? warnings : undefined,
     scannerErrors: scannerErrors.length > 0 ? scannerErrors : undefined
   };
 

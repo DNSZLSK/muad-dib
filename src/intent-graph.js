@@ -24,10 +24,13 @@ const SOURCE_TYPES = {
   credential_regex_harvest: 'credential_read', // regex patterns for tokens/passwords
   llm_api_key_harvest: 'credential_read',     // OPENAI_API_KEY, ANTHROPIC_API_KEY
   credential_cli_steal: 'credential_read',    // gh auth token, gcloud auth
-  // env_access EXCLUDED — standard config (process.env.PORT, AWS_REGION, NODE_ENV)
+  // env_access: conditionally classified — see classifySource()
   // suspicious_dataflow EXCLUDED — already compound detection
   // cross_file_dataflow EXCLUDED — already scored CRITICAL by module-graph
 };
+
+// Sensitive env var patterns — env_access referencing these is credential theft, not config
+const SENSITIVE_ENV_PATTERNS = /TOKEN|KEY|SECRET|PASSWORD|CREDENTIAL|API_KEY|AUTH/i;
 
 // ============================================
 // SINK CLASSIFICATION (from existing threats only)
@@ -105,9 +108,17 @@ const CROSS_FILE_MULTIPLIER = 0.5;
 function classifySource(threat) {
   if (SOURCE_TYPES[threat.type]) return SOURCE_TYPES[threat.type];
 
+  // env_access: only classify as credential_read if accessing sensitive vars
+  // Standard config (NODE_ENV, PORT, DEBUG) → null (no pairing)
+  if (threat.type === 'env_access') {
+    if (threat.message && SENSITIVE_ENV_PATTERNS.test(threat.message)) {
+      return 'credential_read';
+    }
+    return null;
+  }
+
   // Explicitly excluded types
   if (threat.type === 'suspicious_dataflow') return null;
-  if (threat.type === 'env_access') return null;
   if (threat.type === 'cross_file_dataflow') return null;
 
   // Message-based: only for threats referencing sensitive file paths

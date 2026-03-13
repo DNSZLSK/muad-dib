@@ -9,6 +9,7 @@ async function runScraperTests() {
     runScraper, scrapeShaiHuludDetector, scrapeDatadogIOCs,
     parseCSVLine, parseCSV, extractVersions, parseOSVEntry,
     createFreshness, isAllowedRedirect, loadStaticIOCs,
+    validateIOCEntry,
     CONFIDENCE_ORDER, ALLOWED_REDIRECT_DOMAINS
   } = require('../../src/ioc/scraper.js');
 
@@ -2970,6 +2971,66 @@ async function runScraperTests() {
       console.log = origLog;
       process.stdout.write = origWrite;
       Object.assign(fs, origFs);
+    }
+  });
+
+  // ==========================================================================
+  // v2.6.5: IOC Input Validation
+  // ==========================================================================
+
+  test('IOC-VALIDATE: valid npm package name accepted', () => {
+    assert(validateIOCEntry('lodash', '4.17.21', 'npm') === true, 'lodash should be valid');
+    assert(validateIOCEntry('@scope/pkg', '1.0.0', 'npm') === true, 'scoped package should be valid');
+  });
+
+  test('IOC-VALIDATE: package name with path traversal rejected', () => {
+    const origWarn = console.warn;
+    const warnings = [];
+    console.warn = (...args) => warnings.push(args.join(' '));
+    try {
+      assert(validateIOCEntry('../etc/passwd', '1.0.0', 'npm') === false, '../ in name should be rejected');
+      assert(warnings.length > 0, 'Should emit a warning');
+    } finally {
+      console.warn = origWarn;
+    }
+  });
+
+  test('IOC-VALIDATE: package name with special characters rejected', () => {
+    const origWarn = console.warn;
+    console.warn = () => {};
+    try {
+      assert(validateIOCEntry('pkg with spaces', '1.0.0', 'npm') === false, 'Spaces in name should be rejected');
+      assert(validateIOCEntry('PKG_UPPER', '1.0.0', 'npm') === false, 'Uppercase npm names are invalid');
+    } finally {
+      console.warn = origWarn;
+    }
+  });
+
+  test('IOC-VALIDATE: malformed version rejected', () => {
+    const origWarn = console.warn;
+    console.warn = () => {};
+    try {
+      assert(validateIOCEntry('lodash', 'not-a-version!@#', 'npm') === false, 'Malformed version should be rejected');
+    } finally {
+      console.warn = origWarn;
+    }
+  });
+
+  test('IOC-VALIDATE: wildcard version accepted', () => {
+    assert(validateIOCEntry('lodash', '*', 'npm') === true, 'Wildcard version should be valid');
+  });
+
+  test('IOC-VALIDATE: valid PyPI package accepted', () => {
+    assert(validateIOCEntry('requests', '2.28.0', 'pypi') === true, 'requests should be valid');
+  });
+
+  test('IOC-VALIDATE: PyPI name with slashes rejected', () => {
+    const origWarn = console.warn;
+    console.warn = () => {};
+    try {
+      assert(validateIOCEntry('pkg/evil', '1.0.0', 'pypi') === false, 'Slash in PyPI name should be rejected');
+    } finally {
+      console.warn = origWarn;
     }
   });
 }

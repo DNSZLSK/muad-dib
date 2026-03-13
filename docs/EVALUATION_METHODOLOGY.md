@@ -713,7 +713,7 @@ Each run uses `runSingleSandbox()` with a 60s timeout. Early exit on score >= 80
 | **Wild TPR** (Datadog 17K) | **88.2%** raw · **~100%** adjusted | 17,922 real malware samples. 2,077 out-of-scope misses (see section 15) |
 | **TPR** (Ground Truth) | **93.9% (46/49)** | 51 real-world attacks (49 active). 3 out-of-scope: browser-only (3) |
 | **FPR** (Benign, global) | **12.1% (64/529)** | 529 npm packages, real source code, threshold > 20. Honest measurement without whitelisting |
-| **ADR** (Adversarial + Holdout) | **94.8% (73/77)** | 53 adversarial + 40 holdout. 77 available on disk. 2 misses on available samples |
+| **ADR** (Adversarial + Holdout) | **92.2% (71/77)** | 53 adversarial + 40 holdout. 77 available on disk. Global threshold=20. 6 misses on available samples |
 | **Holdout v1** (pre-tuning) | 30% (3/10) | 10 unseen samples before rule corrections |
 | **Holdout v2** (pre-tuning) | 40% (4/10) | 10 unseen samples before rule corrections |
 | **Holdout v3** (pre-tuning) | 60% (6/10) | 10 unseen samples before rule corrections |

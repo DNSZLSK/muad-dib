@@ -110,6 +110,32 @@ function buildTaintMap(ast) {
         }
       }
 
+      // B8 fix: const fn = tools.read — resolve object property alias to tainted method
+      if (node.id.type === 'Identifier' && init.type === 'MemberExpression' &&
+          init.object?.type === 'Identifier' && init.property?.type === 'Identifier') {
+        const aliasKey = `${init.object.name}.${init.property.name}`;
+        const aliasTaint = taintMap.get(aliasKey);
+        if (aliasTaint && TRACKED_MODULES.has(aliasTaint.source)) {
+          taintMap.set(node.id.name, aliasTaint);
+        }
+      }
+
+      // B9 fix: const [x] = [fs.readFileSync(...)] — array destructuring taint
+      if (node.id.type === 'ArrayPattern' && init.type === 'ArrayExpression') {
+        for (let i = 0; i < node.id.elements.length && i < init.elements.length; i++) {
+          const elem = node.id.elements[i];
+          const val = init.elements[i];
+          if (!elem || elem.type !== 'Identifier' || !val) continue;
+          if (val.type === 'CallExpression' && val.callee?.type === 'MemberExpression' &&
+              val.callee.object?.type === 'Identifier' && val.callee.property?.type === 'Identifier') {
+            const parentTaint = taintMap.get(val.callee.object.name);
+            if (parentTaint && TRACKED_MODULES.has(parentTaint.source)) {
+              taintMap.set(elem.name, { source: parentTaint.source, detail: `${parentTaint.source}.${val.callee.property.name}` });
+            }
+          }
+        }
+      }
+
       // B5 fix: const tools = { read: fs.readFileSync, home: os.homedir }
       // Track object properties that reference tainted module methods as tainted aliases
       if (node.id.type === 'Identifier' && init.type === 'ObjectExpression') {
@@ -193,6 +219,18 @@ function analyzeFile(content, filePath, basePath) {
     },
 
     VariableDeclarator(node) {
+      // B9: Array destructuring taint propagation: const [data] = [fs.readFileSync('.npmrc')]
+      if (node.id?.type === 'ArrayPattern' && node.init?.type === 'ArrayExpression') {
+        for (let i = 0; i < node.id.elements.length && i < node.init.elements.length; i++) {
+          const elem = node.id.elements[i];
+          const val = node.init.elements[i];
+          if (!elem || elem.type !== 'Identifier' || !val) continue;
+          if (containsSensitiveLiteral(val)) {
+            sensitivePathVars.add(elem.name);
+          }
+        }
+      }
+
       if (node.id?.type === 'Identifier' && node.init) {
         let initNode = node.init;
         if (initNode.type === 'AwaitExpression') initNode = initNode.argument;

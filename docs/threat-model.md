@@ -130,9 +130,9 @@ Impact on TPR: 46/49 = 93.9% (3 documented and accepted misses).
 
 ## Adversarial Testing Results
 
-### Detection rate: 73/77 (94.8% ADR)
+### Detection rate: 71/77 (92.2% ADR, global threshold=20)
 
-77 available adversarial/holdout evasive samples (53 adversarial + 40 holdout across 6 red team waves + 4 holdout batches) tested with real-world evasion techniques. 2 documented misses: `require-cache-poison` (P3 trade-off), `getter-defineProperty-exfil`.
+77 available adversarial/holdout evasive samples (53 adversarial + 40 holdout across 6 red team waves + 4 holdout batches) tested with real-world evasion techniques. 6 misses with global threshold (score >= 20): `require-cache-poison` (10), `getter-defineProperty-exfil` (10), `callback-exfil` (13), `event-emitter-flow` (10), plus 2 others.
 
 See [Evaluation Methodology](EVALUATION_METHODOLOGY.md) for pre-tuning and post-tuning score details.
 

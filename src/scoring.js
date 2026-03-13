@@ -232,17 +232,13 @@ function applyFPReductions(threats, reachableFiles, packageName) {
     const rule = FP_COUNT_THRESHOLDS[t.type];
     if (rule && typeCounts[t.type] > rule.maxCount && (!rule.from || t.severity === rule.from)) {
       const typeRatio = typeCounts[t.type] / totalThreats;
-      // suspicious_dataflow: full bypass of percentage guard. Packages with >3 suspicious_dataflow
-      // findings are always legitimate SDKs (SMTP, monitoring, analytics). Real malware has 1-2
-      // targeted source→sink pairs. The count >3 threshold is sufficient protection.
-      // P7: removed 80% ratio cap — it caused ~30k FP hits in production on SDK packages
-      // where dataflow was the dominant finding type (e.g. @darajs/core, addio-admin-sdk).
-      // vm_code_execution: full bypass — packages with only vm.Script calls (cassandra-driver,
-      // webpack, jest) are legitimate. Real malware using vm always has other signals
-      // (network, fs, obfuscation). The >3 count threshold is sufficient protection.
+      // suspicious_dataflow: bypass percentage guard when count exceeds threshold.
+      // Packages with >3 suspicious_dataflow findings are always legitimate SDKs.
+      // But a single suspicious_dataflow at 50% ratio should NOT be downgraded.
+      // vm_code_execution: same logic — bypass only when count exceeds threshold.
       if (typeRatio < 0.4 ||
-          t.type === 'suspicious_dataflow' ||
-          t.type === 'vm_code_execution') {
+          (t.type === 'suspicious_dataflow' && typeCounts[t.type] > rule.maxCount) ||
+          (t.type === 'vm_code_execution' && typeCounts[t.type] > rule.maxCount)) {
         t.severity = rule.to;
       }
     }

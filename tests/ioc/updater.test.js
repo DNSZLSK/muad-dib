@@ -1023,6 +1023,58 @@ test('UPDATER-COV: loadCachedIOCs handles cached IOC file load error', () => {
   }
 });
 
+// ============================================
+// IOC STALENESS TESTS
+// ============================================
+
+console.log('\n=== IOC STALENESS TESTS ===\n');
+
+test('STALENESS: checkIOCStaleness returns null for fresh files', () => {
+  const { checkIOCStaleness } = require('../../src/ioc/updater.js');
+  // Compact file should exist and be recent (we just ran tests)
+  const result = checkIOCStaleness(30);
+  // If the file is less than 30 days old, should return null
+  const compactPath = path.join(__dirname, '..', '..', 'src', 'ioc', 'data', 'iocs-compact.json');
+  if (fs.existsSync(compactPath)) {
+    const ageDays = (Date.now() - fs.statSync(compactPath).mtimeMs) / (1000 * 60 * 60 * 24);
+    if (ageDays <= 30) {
+      assert(result === null, 'Fresh files should return null, got: ' + result);
+    } else {
+      assert(typeof result === 'string', 'Old files should return a warning string');
+      assert(result.includes('muaddib update'), 'Warning should suggest running muaddib update');
+    }
+  }
+});
+
+test('STALENESS: checkIOCStaleness returns warning for old files', () => {
+  const { checkIOCStaleness } = require('../../src/ioc/updater.js');
+  // With maxAge=0, any existing file should trigger a warning
+  const compactPath = path.join(__dirname, '..', '..', 'src', 'ioc', 'data', 'iocs-compact.json');
+  if (fs.existsSync(compactPath)) {
+    const result = checkIOCStaleness(0);
+    assert(typeof result === 'string', 'Should return a warning when maxAge=0');
+    assert(result.includes('muaddib update'), 'Warning should suggest muaddib update');
+    assert(result.includes('days old'), 'Warning should mention age in days');
+  }
+});
+
+test('STALENESS: checkIOCStaleness returns null when no IOC files exist', () => {
+  const { checkIOCStaleness } = require('../../src/ioc/updater.js');
+  const origStatSync = fs.statSync;
+  fs.statSync = (p) => { throw new Error('ENOENT'); };
+  try {
+    const result = checkIOCStaleness(30);
+    assert(result === null, 'Should return null when no IOC files exist');
+  } finally {
+    fs.statSync = origStatSync;
+  }
+});
+
+test('STALENESS: checkIOCStaleness is exported from updater', () => {
+  const updater = require('../../src/ioc/updater.js');
+  assert(typeof updater.checkIOCStaleness === 'function', 'checkIOCStaleness should be exported');
+});
+
 // --- NEVER_WILDCARD guard tests ---
 
 test('UPDATER: generateCompactIOCs blocks NEVER_WILDCARD packages from wildcards', () => {
