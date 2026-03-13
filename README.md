@@ -270,7 +270,7 @@ With pre-commit framework:
 ```yaml
 repos:
   - repo: https://github.com/DNSZLSK/muad-dib
-    rev: v2.6.2
+    rev: v2.6.6
     hooks:
       - id: muaddib-scan
 ```
@@ -286,7 +286,7 @@ repos:
 | **FPR** (Benign) | **12.1%** (64/529) | 529 npm packages, real source via `npm pack` |
 | **ADR** (Adversarial + Holdout) | **92.2%** (71/77) | 53 adversarial + 40 holdout (77 available on disk), global threshold=20 |
 
-**1974 tests** across 44 files, 86% code coverage. **129 rules** (124 RULES + 5 PARANOID).
+**2009 tests** across 46 files, 86% code coverage. **130 rules** (125 RULES + 5 PARANOID).
 
 > **Methodology caveats:**
 > - TPR measured on 49 Node.js attack samples (3 browser-only excluded from 51 total)
@@ -327,7 +327,7 @@ npm test
 
 ### Testing
 
-- **1974 tests** across 44 modular test files - 86% code coverage
+- **2009 tests** across 46 modular test files - 86% code coverage
 - **56 fuzz tests** - Malformed inputs, ReDoS, unicode, binary
 - **Datadog 17K benchmark** - 17,922 real malware samples
 - **Ground truth validation** - 51 real-world attacks (93.9% TPR)

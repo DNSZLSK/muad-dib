@@ -34,10 +34,6 @@ const { buildIntentPairs } = require('./intent-graph.js');
 const { MAX_FILE_SIZE, safeParse } = require('./shared/constants.js');
 const walk = require('acorn-walk');
 
-// Timeout constants for scan safety
-const SCANNER_TIMEOUT = 15000;  // 15s per individual scanner
-const SCAN_TIMEOUT = 60000;     // 60s global scan timeout
-
 // Paranoid mode scanner
 function scanParanoid(targetPath) {
   const threats = [];
@@ -398,9 +394,10 @@ async function run(targetPath, options = {}) {
       const emitterFlows = await yieldThen(() => detectEventEmitterFlows(graph, tainted, sinkAnnotations, targetPath));
       crossFileFlows = crossFileFlows.concat(emitterFlows);
     };
-    const timeout = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Module graph timeout')), MODULE_GRAPH_TIMEOUT_MS)
-    );
+    let graphTimerId;
+    const timeout = new Promise((_, reject) => {
+      graphTimerId = setTimeout(() => reject(new Error('Module graph timeout')), MODULE_GRAPH_TIMEOUT_MS);
+    });
     try {
       await Promise.race([moduleGraphWork(), timeout]);
     } catch (e) {
@@ -409,6 +406,8 @@ async function run(targetPath, options = {}) {
       if (e && e.message === 'Module graph timeout') {
         warnings.push(`Module graph analysis timed out (${MODULE_GRAPH_TIMEOUT_MS / 1000}s) — cross-file flows may be incomplete`);
       }
+    } finally {
+      clearTimeout(graphTimerId);
     }
   }
 

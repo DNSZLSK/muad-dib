@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { findFiles, forEachSafeFile } = require('../utils.js');
+const { MAX_FILE_SIZE } = require('../shared/constants.js');
 
 const SHELL_EXCLUDED_DIRS = ['node_modules', '.git', '.muaddib-cache'];
 
@@ -22,29 +23,73 @@ const MALICIOUS_PATTERNS = [
   { pattern: /wget\s+\S+.*&&.*base64\s+-d/m, name: 'wget_base64_decode', severity: 'HIGH' }
 ];
 
+const SHEBANG_RE = /^#!.*\b(?:ba)?sh\b/;
+
+function scanFileContent(file, content, targetPath, threats) {
+  // Strip comment lines to avoid false positives on documentation
+  const activeContent = content.split(/\r?\n/)
+    .filter(line => !line.trimStart().startsWith('#'))
+    .join('\n');
+
+  for (const { pattern, name, severity } of MALICIOUS_PATTERNS) {
+    if (pattern.test(activeContent)) {
+      threats.push({
+        type: name,
+        severity: severity,
+        message: `Pattern malveillant "${name}" detecte.`,
+        file: path.relative(targetPath, file)
+      });
+    }
+  }
+}
+
+/**
+ * Find extensionless files in a directory (non-recursive into excluded dirs).
+ * Used for shebang-based shell script detection.
+ */
+function findExtensionlessFiles(dir, excludedDirs, results = [], depth = 0) {
+  if (depth > 20) return results;
+  let items;
+  try { items = fs.readdirSync(dir); } catch { return results; }
+
+  for (const item of items) {
+    if (excludedDirs.includes(item)) continue;
+    const fullPath = path.join(dir, item);
+    try {
+      const lstat = fs.lstatSync(fullPath);
+      if (lstat.isSymbolicLink()) continue;
+      if (lstat.isDirectory()) {
+        findExtensionlessFiles(fullPath, excludedDirs, results, depth + 1);
+      } else if (lstat.isFile() && !path.extname(item) && lstat.size <= MAX_FILE_SIZE) {
+        results.push(fullPath);
+      }
+    } catch { /* permission error */ }
+  }
+  return results;
+}
+
 async function scanShellScripts(targetPath) {
   const threats = [];
-  
-  // Cherche les fichiers shell
+
+  // Pass 1: files with shell extensions
   const files = findFiles(targetPath, { extensions: ['.sh', '.bash', '.zsh', '.command'], excludedDirs: SHELL_EXCLUDED_DIRS });
 
   forEachSafeFile(files, (file, content) => {
-    // Strip comment lines to avoid false positives on documentation
-    const activeContent = content.split(/\r?\n/)
-      .filter(line => !line.trimStart().startsWith('#'))
-      .join('\n');
-
-    for (const { pattern, name, severity } of MALICIOUS_PATTERNS) {
-      if (pattern.test(activeContent)) {
-        threats.push({
-          type: name,
-          severity: severity,
-          message: `Pattern malveillant "${name}" detecte.`,
-          file: path.relative(targetPath, file)
-        });
-      }
-    }
+    scanFileContent(file, content, targetPath, threats);
   });
+
+  // Pass 2: extensionless files with sh/bash shebang
+  const extensionless = findExtensionlessFiles(targetPath, SHELL_EXCLUDED_DIRS);
+
+  for (const file of extensionless) {
+    try {
+      const content = fs.readFileSync(file, 'utf8');
+      const firstLine = content.split(/\r?\n/, 1)[0];
+      if (SHEBANG_RE.test(firstLine)) {
+        scanFileContent(file, content, targetPath, threats);
+      }
+    } catch { /* ignore unreadable files */ }
+  }
 
   return threats;
 }

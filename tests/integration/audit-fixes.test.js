@@ -376,12 +376,12 @@ async function runAuditFix8Tests() {
 async function runAuditFix9Tests() {
   console.log('\n=== AUDIT FIX 9: Scan timeouts ===\n');
 
-  test('FIX9: SCANNER_TIMEOUT and SCAN_TIMEOUT constants exist', () => {
+  test('FIX9: Module graph timeout exists (SCANNER_TIMEOUT/SCAN_TIMEOUT removed as dead code)', () => {
     const indexSrc = fs.readFileSync(path.join(__dirname, '../../src/index.js'), 'utf8');
-    assert(indexSrc.includes('SCANNER_TIMEOUT') || indexSrc.includes('scannerTimeout'),
-      'Should define per-scanner timeout');
-    assert(indexSrc.includes('SCAN_TIMEOUT') || indexSrc.includes('scanTimeout'),
-      'Should define global scan timeout');
+    // SCANNER_TIMEOUT and SCAN_TIMEOUT were unused dead code, removed in v2.6.6
+    // Module graph has its own timeout via MODULE_GRAPH_TIMEOUT_MS
+    assert(indexSrc.includes('MODULE_GRAPH_TIMEOUT_MS'),
+      'Should define module graph timeout');
   });
 
   await asyncTest('FIX9: Normal scan completes within timeout', async () => {

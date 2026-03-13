@@ -25,12 +25,12 @@
 |----------|-------------|
 | [Carnet de Bord](CARNET_DE_BORD_MUADDIB.md) | Development journal (French) — project history and decisions |
 
-## Current Metrics (v2.6.2)
+## Current Metrics (v2.6.6)
 
 | Metric | Value |
 |--------|-------|
-| Tests | 1940 across 44 files |
-| Rules | 129 (124 RULES + 5 PARANOID) |
+| Tests | 2009 across 46 files |
+| Rules | 130 (125 RULES + 5 PARANOID) |
 | Scanners | 14 parallel |
 | TPR (Ground Truth) | 93.9% (46/49) |
 | FPR (Benign) | 12.1% (64/529) |
