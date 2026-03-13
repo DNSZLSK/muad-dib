@@ -1023,6 +1023,59 @@ test('UPDATER-COV: loadCachedIOCs handles cached IOC file load error', () => {
   }
 });
 
+// --- NEVER_WILDCARD guard tests ---
+
+test('UPDATER: generateCompactIOCs blocks NEVER_WILDCARD packages from wildcards', () => {
+  const { generateCompactIOCs, NEVER_WILDCARD } = require('../../src/ioc/updater.js');
+  assert(NEVER_WILDCARD instanceof Set, 'NEVER_WILDCARD should be exported as a Set');
+  assert(NEVER_WILDCARD.has('event-stream'), 'NEVER_WILDCARD should contain event-stream');
+
+  const fullIOCs = {
+    packages: [
+      { name: 'event-stream', version: '*', severity: 'critical' },
+      { name: 'evil-typosquat', version: '*', severity: 'critical' }
+    ],
+    pypi_packages: []
+  };
+  const compact = generateCompactIOCs(fullIOCs);
+  assert(!compact.wildcards.includes('event-stream'), 'event-stream should be blocked from wildcards');
+  assert(compact.wildcards.includes('evil-typosquat'), 'evil-typosquat should be in wildcards');
+});
+
+test('UPDATER: generateCompactIOCs allows NEVER_WILDCARD versioned entries', () => {
+  const { generateCompactIOCs } = require('../../src/ioc/updater.js');
+  const fullIOCs = {
+    packages: [
+      { name: 'event-stream', version: '3.3.6', severity: 'critical' },
+      { name: 'event-stream', version: '*', severity: 'critical' },
+      { name: 'ua-parser-js', version: '0.7.29', severity: 'critical' }
+    ],
+    pypi_packages: []
+  };
+  const compact = generateCompactIOCs(fullIOCs);
+  // event-stream wildcard blocked, but versioned entry should be present
+  assert(!compact.wildcards.includes('event-stream'), 'event-stream wildcard should be blocked');
+  assert(compact.versioned['event-stream'] !== undefined, 'event-stream should have versioned entries');
+  assert(compact.versioned['event-stream'].includes('3.3.6'), 'event-stream 3.3.6 should be in versioned');
+  // ua-parser-js versioned entry should also work
+  assert(compact.versioned['ua-parser-js'] !== undefined, 'ua-parser-js should have versioned entries');
+  assert(compact.versioned['ua-parser-js'].includes('0.7.29'), 'ua-parser-js 0.7.29 should be in versioned');
+});
+
+test('UPDATER: generateCompactIOCs allows non-NEVER_WILDCARD wildcards', () => {
+  const { generateCompactIOCs } = require('../../src/ioc/updater.js');
+  const fullIOCs = {
+    packages: [
+      { name: 'totally-evil-pkg', version: '*', severity: 'critical' },
+      { name: 'another-malware', version: '*', severity: 'critical' }
+    ],
+    pypi_packages: []
+  };
+  const compact = generateCompactIOCs(fullIOCs);
+  assert(compact.wildcards.includes('totally-evil-pkg'), 'Non-protected pkg should be in wildcards');
+  assert(compact.wildcards.includes('another-malware'), 'Non-protected pkg should be in wildcards');
+});
+
 }
 
 module.exports = { runUpdaterTests };

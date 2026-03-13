@@ -339,6 +339,15 @@ function createOptimizedIOCs(iocs) {
  * @param {Object} fullIOCs - Full IOCs object with packages array
  * @returns {Object} Compact IOCs
  */
+// Legitimate packages with version-specific compromises only.
+// These must never become wildcards (all-version flags) because only
+// specific versions were malicious — flagging all versions is a false positive.
+const NEVER_WILDCARD = new Set([
+  'event-stream', 'ua-parser-js', 'coa', 'rc',
+  'colors', 'faker', 'node-ipc',
+  'posthog-node', 'ngx-bootstrap', '@asyncapi/specs'
+]);
+
 function generateCompactIOCs(fullIOCs) {
   const wildcards = [];
   const versioned = Object.create(null);
@@ -353,6 +362,10 @@ function generateCompactIOCs(fullIOCs) {
     }
 
     if (p.version === '*') {
+      if (NEVER_WILDCARD.has(p.name)) {
+        // Legitimate package — skip wildcard, treat as version-unknown
+        continue;
+      }
       wildcards.push(p.name);
     } else {
       if (!versioned[p.name]) versioned[p.name] = [];
@@ -497,4 +510,4 @@ function verifyIOCHMAC(data, hmac) {
   }
 }
 
-module.exports = { updateIOCs, loadCachedIOCs, invalidateCache, generateCompactIOCs, expandCompactIOCs, mergeIOCs, createOptimizedIOCs, generateIOCHMAC, verifyIOCHMAC };
+module.exports = { updateIOCs, loadCachedIOCs, invalidateCache, generateCompactIOCs, expandCompactIOCs, mergeIOCs, createOptimizedIOCs, generateIOCHMAC, verifyIOCHMAC, NEVER_WILDCARD };
