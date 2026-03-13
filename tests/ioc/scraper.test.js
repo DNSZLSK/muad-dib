@@ -719,6 +719,121 @@ async function runScraperTests() {
     }
   });
 
+  await asyncTest('SCRAPER: scrapeDatadogIOCs splits multi-version consolidated CSV', async () => {
+    const origRequest = https.request;
+    const origLog = console.log;
+    console.log = () => {};
+
+    let callCount = 0;
+    // Multi-version string: "1.0.0, 2.0.0, 3.0.0" should produce 3 entries
+    const consolidatedCSV = 'package_name,versions,vendors\nmulti-ver-pkg,"1.0.0, 2.0.0, 3.0.0",datadog\n';
+    const directCSV = 'package_name,version\n';
+
+    https.request = (options, callback) => {
+      callCount++;
+      const req = createMockRequest();
+      req.end = () => {
+        process.nextTick(() => {
+          const res = createMockResponse(200, null, {});
+          callback(res);
+          process.nextTick(() => {
+            const body = callCount === 1 ? consolidatedCSV : directCSV;
+            res.emit('data', Buffer.from(body));
+            res.emit('end');
+          });
+        });
+      };
+      return req;
+    };
+
+    try {
+      const result = await scrapeDatadogIOCs();
+      const multiPkgs = result.packages.filter(p => p.name === 'multi-ver-pkg');
+      assert(multiPkgs.length === 3, 'Should split into 3 entries, got ' + multiPkgs.length);
+      const versions = multiPkgs.map(p => p.version).sort();
+      assert(versions[0] === '1.0.0', 'First version should be 1.0.0, got ' + versions[0]);
+      assert(versions[1] === '2.0.0', 'Second version should be 2.0.0, got ' + versions[1]);
+      assert(versions[2] === '3.0.0', 'Third version should be 3.0.0, got ' + versions[2]);
+    } finally {
+      https.request = origRequest;
+      console.log = origLog;
+    }
+  });
+
+  await asyncTest('SCRAPER: scrapeDatadogIOCs handles single version in consolidated (no split)', async () => {
+    const origRequest = https.request;
+    const origLog = console.log;
+    console.log = () => {};
+
+    let callCount = 0;
+    const consolidatedCSV = 'package_name,versions,vendors\nsingle-ver-pkg,1.0.0,datadog\n';
+    const directCSV = 'package_name,version\n';
+
+    https.request = (options, callback) => {
+      callCount++;
+      const req = createMockRequest();
+      req.end = () => {
+        process.nextTick(() => {
+          const res = createMockResponse(200, null, {});
+          callback(res);
+          process.nextTick(() => {
+            const body = callCount === 1 ? consolidatedCSV : directCSV;
+            res.emit('data', Buffer.from(body));
+            res.emit('end');
+          });
+        });
+      };
+      return req;
+    };
+
+    try {
+      const result = await scrapeDatadogIOCs();
+      const pkgs = result.packages.filter(p => p.name === 'single-ver-pkg');
+      assert(pkgs.length === 1, 'Single version should produce 1 entry, got ' + pkgs.length);
+      assert(pkgs[0].version === '1.0.0', 'Version should be 1.0.0, got ' + pkgs[0].version);
+    } finally {
+      https.request = origRequest;
+      console.log = origLog;
+    }
+  });
+
+  await asyncTest('SCRAPER: scrapeDatadogIOCs handles wildcard in consolidated', async () => {
+    const origRequest = https.request;
+    const origLog = console.log;
+    console.log = () => {};
+
+    let callCount = 0;
+    const consolidatedCSV = 'package_name,versions,vendors\nwildcard-pkg,*,datadog\n';
+    const directCSV = 'package_name,version\n';
+
+    https.request = (options, callback) => {
+      callCount++;
+      const req = createMockRequest();
+      req.end = () => {
+        process.nextTick(() => {
+          const res = createMockResponse(200, null, {});
+          callback(res);
+          process.nextTick(() => {
+            const body = callCount === 1 ? consolidatedCSV : directCSV;
+            res.emit('data', Buffer.from(body));
+            res.emit('end');
+          });
+        });
+      };
+      return req;
+    };
+
+    try {
+      const result = await scrapeDatadogIOCs();
+      const pkgs = result.packages.filter(p => p.name === 'wildcard-pkg');
+      assert(pkgs.length === 1, 'Wildcard should produce 1 entry, got ' + pkgs.length);
+      assert(pkgs[0].version === '*', 'Version should be *, got ' + pkgs[0].version);
+    } finally {
+      https.request = origRequest;
+      console.log = origLog;
+    }
+  });
+
   // --- fetchJSON redirect handling ---
 
   await asyncTest('SCRAPER: scrapeShaiHuludDetector follows allowed redirect', async () => {
@@ -2092,7 +2207,8 @@ async function runScraperTests() {
                 {
                   id: 'GHSA-backdoor-003',
                   summary: 'Package contains backdoor code',
-                  affected: [{ package: { ecosystem: 'npm', name: 'ghsa-backdoor-pkg' } }]
+                  affected: [{ package: { ecosystem: 'npm', name: 'ghsa-backdoor-pkg' },
+                    versions: ['1.2.3', '1.2.4'] }]
                 },
                 {
                   id: 'CVE-2024-9999',
@@ -2175,6 +2291,18 @@ async function runScraperTests() {
 
         // CVE- prefixed entries should be filtered out (only GHSA- accepted)
         assert(!ghsaNames.includes('cve-not-ghsa'), 'Should filter out non-GHSA entries');
+
+        // GHSA-backdoor-003 has versions: ['1.2.3', '1.2.4'] — should produce versioned entries, not wildcard
+        const backdoorEntries = ghsaPkgs.filter(p => p.name === 'ghsa-backdoor-pkg');
+        assert(backdoorEntries.length === 2, 'Backdoor pkg with 2 versions should produce 2 entries, got ' + backdoorEntries.length);
+        const bdVersions = backdoorEntries.map(p => p.version).sort();
+        assert(bdVersions[0] === '1.2.3', 'First backdoor version should be 1.2.3, got ' + bdVersions[0]);
+        assert(bdVersions[1] === '1.2.4', 'Second backdoor version should be 1.2.4, got ' + bdVersions[1]);
+
+        // GHSA entries without versions should fall back to wildcard
+        const malwarePkg = ghsaPkgs.filter(p => p.name === 'ghsa-malware-pkg');
+        assert(malwarePkg.length === 1, 'Malware pkg without versions should produce 1 entry');
+        assert(malwarePkg[0].version === '*', 'Malware pkg without versions should be wildcard, got ' + malwarePkg[0].version);
       }
     } finally {
       https.request = origRequest;

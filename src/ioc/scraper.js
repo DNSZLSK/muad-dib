@@ -545,25 +545,31 @@ async function scrapeDatadogIOCs() {
 
       for (const parts of rows) {
         const name = parts[0] || '';
-        const versions = parts[1] || '*';
+        const versionsStr = parts[1] || '*';
         const vendors = parts[2] || 'datadog';
 
         if (name && name !== 'package_name' && name !== 'name') {
-          packages.push({
-            id: `DATADOG-${name}`,
-            name: name,
-            version: versions || '*',
-            severity: 'critical',
-            confidence: 'high',
-            source: 'datadog-consolidated',
-            description: `Compromised package (sources: ${vendors})`,
-            references: ['https://securitylabs.datadoghq.com/articles/shai-hulud-2.0-npm-worm/'],
-            mitre: 'T1195.002',
-            freshness: createFreshness('datadog', 'high')
-          });
+          // Split comma-separated multi-version strings (e.g. "4.18.1, 5.11.3")
+          const versionList = versionsStr.includes(',')
+            ? versionsStr.split(',').map(v => v.trim()).filter(Boolean)
+            : [versionsStr];
+          for (const ver of versionList) {
+            packages.push({
+              id: `DATADOG-${name}`,
+              name: name,
+              version: ver || '*',
+              severity: 'critical',
+              confidence: 'high',
+              source: 'datadog-consolidated',
+              description: `Compromised package (sources: ${vendors})`,
+              references: ['https://securitylabs.datadoghq.com/articles/shai-hulud-2.0-npm-worm/'],
+              mitre: 'T1195.002',
+              freshness: createFreshness('datadog', 'high')
+            });
+          }
         }
       }
-      console.log(`[SCRAPER]   ${packages.length} packages (consolidated)`);
+      console.log(`[SCRAPER]   ${packages.length} IOC entries (consolidated)`);
     }
     
     // DataDog specific file
@@ -858,18 +864,21 @@ async function scrapeGitHubAdvisory() {
           if (isMalware) {
             for (const affected of vuln.affected || []) {
               if (affected.package && affected.package.ecosystem === 'npm') {
-                packages.push({
-                  id: vuln.id,
-                  name: affected.package.name,
-                  version: '*',
-                  severity: 'critical',
-                  confidence: 'high',
-                  source: 'github-advisory',
-                  description: (vuln.summary || 'Malicious package').slice(0, 200),
-                  references: ['https://github.com/advisories/' + vuln.id],
-                  mitre: 'T1195.002',
-                  freshness: createFreshness('github-advisory', 'high')
-                });
+                const versions = extractVersions(affected);
+                for (const ver of versions) {
+                  packages.push({
+                    id: vuln.id,
+                    name: affected.package.name,
+                    version: ver,
+                    severity: 'critical',
+                    confidence: 'high',
+                    source: 'github-advisory',
+                    description: (vuln.summary || 'Malicious package').slice(0, 200),
+                    references: ['https://github.com/advisories/' + vuln.id],
+                    mitre: 'T1195.002',
+                    freshness: createFreshness('github-advisory', 'high')
+                  });
+                }
               }
             }
           }
