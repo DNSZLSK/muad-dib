@@ -273,7 +273,7 @@ async function runSingleSandbox(packageName, options = {}) {
       let report;
       try {
         const REPORT_DELIMITER = '---MUADDIB-REPORT-START---';
-        const delimIdx = stdout.indexOf(REPORT_DELIMITER);
+        const delimIdx = stdout.lastIndexOf(REPORT_DELIMITER);
         let jsonStr;
         if (delimIdx !== -1) {
           // Reliable: use delimiter to skip any package output before the report

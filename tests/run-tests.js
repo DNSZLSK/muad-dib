@@ -49,6 +49,8 @@ const { runHooksInitTests } = require('./integration/hooks-init.test');
 const { runSarifTests } = require('./integration/sarif.test');
 const { runAuditFixTests } = require('./integration/audit-fixes.test');
 const { runScoringHardeningTests } = require('./integration/scoring-hardening.test');
+const { runGroundTruthSmokeTests } = require('./integration/ground-truth-smoke.test');
+const { runV266FixesTests } = require('./integration/v266-fixes.test');
 
 // Temporal analysis tests
 const { runTemporalAnalysisTests } = require('./temporal/temporal-analysis.test');
@@ -136,6 +138,12 @@ async function timed(name, fn) {
 
   // Intent graph tests (v2.6.0)
   await timed('intent-graph', runIntentGraphTests);
+
+  // v2.6.6 bug fix verification + scanner hardening tests
+  await timed('v266-fixes', runV266FixesTests);
+
+  // Ground truth smoke tests (5 representative samples, fast)
+  await timed('ground-truth-smoke', runGroundTruthSmokeTests);
 
   // Utility tests
   await timed('utils', runUtilsTests);

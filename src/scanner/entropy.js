@@ -232,7 +232,7 @@ function scanEntropy(targetPath, options = {}) {
       // B12: Windowed analysis for strings > MAX_STRING_LENGTH
       if (str.length > MAX_STRING_LENGTH) {
         if (SOURCE_MAP_REGEX.test(str) || SHA256_HEX_REGEX.test(str)) continue;
-        const WINDOW = 500, WIN_THRESHOLD = 6.0;
+        const WINDOW = 500, WIN_THRESHOLD = 5.5;
         for (let i = 0; i < str.length; i += WINDOW) {
           const w = str.slice(i, i + WINDOW);
           if (w.length < 20) continue;

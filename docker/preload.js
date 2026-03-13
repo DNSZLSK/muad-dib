@@ -375,6 +375,33 @@
     };
   } catch (e) { /* ignore */ }
 
+  // fs.promises patches (malware may use async API to avoid sync patches)
+  try {
+    const fsp = _fs.promises;
+    if (fsp) {
+      const origFspReadFile = fsp.readFile;
+      fsp.readFile = function (filePath) {
+        try {
+          const p = String(filePath);
+          if (SENSITIVE_RE.test(p)) {
+            log('FS_READ', `SENSITIVE ${p}`);
+          }
+        } catch (e) { /* ignore */ }
+        return origFspReadFile.apply(fsp, arguments);
+      };
+
+      const origFspWriteFile = fsp.writeFile;
+      fsp.writeFile = function (filePath) {
+        try {
+          const p = String(filePath);
+          const isSensitive = SENSITIVE_RE.test(p);
+          log('FS_WRITE', `${isSensitive ? 'SENSITIVE ' : ''}${p}`);
+        } catch (e) { /* ignore */ }
+        return origFspWriteFile.apply(fsp, arguments);
+      };
+    }
+  } catch (e) { /* ignore */ }
+
   // ═══════════════════════════════════════════════════════
   // 8. PROCESS PATCHES — command execution logging
   // ═══════════════════════════════════════════════════════

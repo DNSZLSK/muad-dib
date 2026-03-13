@@ -209,13 +209,25 @@ async function evaluateGroundTruth() {
 
   const details = [];
   let detected = 0;
+  let detectedAt20 = 0;
+  let iocBased = 0;
+  let heuristicOnly = 0;
 
   for (const attack of attacks) {
     const sampleDir = path.join(GT_DIR, attack.sample_dir);
     const result = await silentScan(sampleDir);
     const score = result.summary.riskScore;
     const isDetected = score >= GT_THRESHOLD;
+    const isDetectedAt20 = score >= ADR_THRESHOLD;
     if (isDetected) detected++;
+    if (isDetectedAt20) detectedAt20++;
+    // Classify detection source: IOC-based vs heuristic-only
+    const threats = result.threats || [];
+    const hasIOC = threats.some(t => classifyDetectionSource(t) === 'ioc');
+    if (isDetected) {
+      if (hasIOC) iocBased++;
+      else heuristicOnly++;
+    }
     details.push({
       name: attack.name,
       id: attack.id,
@@ -229,7 +241,8 @@ async function evaluateGroundTruth() {
   const tpr = total > 0 ? detected / total : 0;
   const tprAll = totalAll > 0 ? detected / totalAll : 0;
   const tprCI = wilsonCI(detected, total);
-  return { detected, total, totalAll, tpr, tprAll, tprCI, details };
+  const tprAt20 = total > 0 ? detectedAt20 / total : 0;
+  return { detected, detectedAt20, total, totalAll, tpr, tprAt20, tprAll, tprCI, iocBased, heuristicOnly, details };
 }
 
 // =========================================================================
@@ -742,8 +755,12 @@ async function evaluate(options = {}) {
 
     console.log('');
     const tprCIStr = groundTruth.tprCI ? ` [95% CI: ${(groundTruth.tprCI.lower * 100).toFixed(1)}-${(groundTruth.tprCI.upper * 100).toFixed(1)}%]` : '';
+    const tprAt20Pct = (groundTruth.tprAt20 * 100).toFixed(1);
     console.log(`  TPR (Node.js attacks): ${groundTruth.detected}/${groundTruth.total}  ${tprPct}%${tprCIStr}`);
+    console.log(`  TPR (threshold=20):    ${groundTruth.detectedAt20}/${groundTruth.total}  ${tprAt20Pct}%`);
     console.log(`  TPR (all samples):     ${groundTruth.detected}/${groundTruth.totalAll}  ${tprAllPct}%  [includes ${groundTruth.totalAll - groundTruth.total} browser-only out-of-scope]`);
+    console.log(`  TPR IOC-based:         ${groundTruth.iocBased}/${groundTruth.total}`);
+    console.log(`  TPR heuristic-only:    ${groundTruth.heuristicOnly}/${groundTruth.total}`);
     const fprCIStr = benign.fprCI ? ` [95% CI: ${(benign.fprCI.lower * 100).toFixed(1)}-${(benign.fprCI.upper * 100).toFixed(1)}%]` : '';
     console.log(`  FPR (global):          ${benign.flagged}/${benign.scanned}  ${fprPct}%${fprCIStr}`);
     if (benign.holdoutSplit) {

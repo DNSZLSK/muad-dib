@@ -76,7 +76,7 @@ function scanDirRecursive(dirPath, targetPath, threats, depth = 0) {
 
       // GHA-002: Detect attacker-controlled context injection on ALL runners (not just self-hosted)
       const injectionPatterns = [
-        { regex: /\$\{\{\s*github\.event\.(comment\.body|issue\.body|issue\.title|pull_request\.body|pull_request\.title|discussion\.body|discussion\.title)/, msg: 'Attacker-controlled GitHub event context used in workflow' },
+        { regex: /\$\{\{\s*github\.event\.(comment\.body|issue\.body|issue\.title|pull_request\.body|pull_request\.title|discussion\.body|discussion\.title|pages\[\]\.html_url)/, msg: 'Attacker-controlled GitHub event context used in workflow' },
         { regex: /\$\{\{\s*github\.head_ref/, msg: 'github.head_ref is attacker-controlled in pull_request workflows' }
       ];
 
@@ -89,6 +89,18 @@ function scanDirRecursive(dirPath, targetPath, threats, depth = 0) {
             file: relFile
           });
         }
+      }
+
+      // GHA-003: Compound — pull_request_target + checkout of PR head (pwn request)
+      const hasPRTarget = /pull_request_target/m.test(activeContent);
+      const hasCheckoutPRHead = /actions\/checkout[\s\S]*?ref:\s*\$\{\{\s*github\.event\.pull_request\.head\.(ref|sha)\s*\}\}/m.test(activeContent);
+      if (hasPRTarget && hasCheckoutPRHead) {
+        threats.push({
+          type: 'workflow_pwn_request',
+          severity: 'CRITICAL',
+          message: 'Pwn request: pull_request_target with checkout of PR head ref/sha allows arbitrary code execution',
+          file: relFile
+        });
       }
     }
 }

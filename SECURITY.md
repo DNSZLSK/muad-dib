@@ -414,7 +414,7 @@ The 2,077 misses (score=0) are all out-of-scope:
 
 The `muaddib serve` HTTP server binds to `localhost` (127.0.0.1) by default. It serves detection data as JSON for SIEM integration.
 
-- **No authentication**: the server is designed for local use only. Do not expose to the public internet.
+- **No authentication**: the server is designed for local use only. Do not expose to the public internet. For production deployment, use a reverse proxy (nginx, Caddy) with authentication and TLS termination.
 - **No sensitive data**: the feed contains detection metadata (package names, severities, timestamps), not raw file contents or credentials.
 - **Localhost binding**: default port 3000, binds to 127.0.0.1 only.
 

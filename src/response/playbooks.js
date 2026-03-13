@@ -180,6 +180,9 @@ const PLAYBOOKS = {
   workflow_injection:
     'Injection potentielle dans GitHub Actions via input non sanitise sur self-hosted runner. Supprimer ou corriger le workflow.',
 
+  workflow_pwn_request:
+    'CRITIQUE: Pwn request detecte — pull_request_target avec checkout du head de la PR permet l\'execution de code arbitraire. Remplacer par pull_request ou utiliser une strategie de checkout securisee (base ref uniquement).',
+
   sandbox_sensitive_file_read:
     'CRITIQUE: Package lit des fichiers sensibles (credentials) lors de l\'installation. Ne pas installer. Supprimer immediatement.',
   sandbox_sensitive_file_write:

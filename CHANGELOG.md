@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.6] - 2026-03-13
+
+### Fixed
+- **PARANOID_RULES lookup**: `getRule()` now resolves paranoid threat types by rule ID (e.g., `MUADDIB-PARANOID-003`), fixing fallback to UNK-001
+- **Sandbox delimiter injection**: Changed `indexOf` to `lastIndexOf` for report delimiter parsing — prevents malicious packages from injecting fake report delimiters
+- **Module graph timer leak**: `setTimeout` for module graph timeout is now properly cleared via `finally { clearTimeout() }`
+- **Broken URL**: Fixed malformed Snyk URL in `dormant_spike` rule references
+- **Dead code removal**: Removed unused `SCANNER_TIMEOUT`/`SCAN_TIMEOUT` constants from `src/index.js` and `CROSS_FILE_MULTIPLIER` from `src/intent-graph.js`
+
+### Added
+- **Shell shebang detection**: Shell scanner now scans extensionless files with `#!/bin/sh` or `#!/bin/bash` shebang lines
+- **GitHub Actions pwn request detection** (GHA-003): Compound detection for `pull_request_target` + `actions/checkout` with PR head ref/sha — CRITICAL
+- **GitHub Actions injection patterns**: Added `github.event.pages[].html_url` to attacker-controlled context patterns
+- **Preload fs.promises patches**: Sandbox preload now patches `fs.promises.readFile` and `fs.promises.writeFile` for async API interception
+- **TPR dual-threshold reporting**: `evaluate` command now reports TPR at both threshold=3 and threshold=20, with IOC-based vs heuristic-only breakdown
+- 1 new rule: `workflow_pwn_request` (MUADDIB-GHA-003, CRITICAL, T1195.002)
+
+### Changed
+- **Entropy WIN_THRESHOLD**: Aligned windowed analysis threshold from 6.0 to 5.5 (= STRING_ENTROPY_MEDIUM) — closes detection gap around MAX_STRING_LENGTH
+- Test count: 1974 → **2009** tests (+35)
+- Rule count: 129 → **130** (125 RULES + 5 PARANOID)
+
+## [2.6.5] - 2026-03-13
+
+### Fixed
+- **Audit remediation (post-ANSSI)** — 6 categories of hardening:
+  1. **Critical safety**: Removed self-dependency in package.json, recursion depth guard (MAX_TAINT_DEPTH=50) in module-graph.js, redirect limit (MAX_REDIRECTS=5) in download.js, `warnings[]` array in scan results
+  2. **Detection bypasses**: `env_access` conditional classification in intent-graph.js (sensitive env vars only), percentage guard count-based fix in scoring.js, array destructuring + object alias taint propagation in dataflow.js
+  3. **Evaluation methodology**: Global ADR_THRESHOLD=20 (replaces per-sample thresholds), scoped TPR reporting, stratified FPR by package size, CI smoke tests
+  4. **IOC input validation**: Package name + version format validation in scraper.js
+  5. **Paranoid mode**: eval/Function/require alias tracking in scanParanoid
+  6. **Documentation**: Methodology caveats, honest metrics
+- Test count: 1940 → **1974** (+34)
+- ADR: uses global threshold=20 (honest measurement)
+
 ## [2.6.4] - 2026-03-13
 
 ### Fixed

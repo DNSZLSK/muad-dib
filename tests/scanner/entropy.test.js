@@ -144,11 +144,10 @@ async function runEntropyTests() {
 
   // --- Long string exclusion (FPR P4) ---
 
-  test('FP-ENTROPY: Strings > 1000 chars are excluded (data blobs, not payloads)', () => {
-    const entropyDir = path.join(__dirname, '..', 'samples', 'entropy');
-    // Create a string > 1000 chars with high entropy
-    const longString = 'A'.repeat(500) + 'B'.repeat(300) + 'C'.repeat(201) + 'DEFGH';
-    // The scanner should skip strings > 1000 chars entirely
+  test('FP-ENTROPY: Strings > 1000 chars analyzed via windowed scan (v2.6.6)', () => {
+    // v2.6.6: WIN_THRESHOLD aligned to 5.5 (= STRING_ENTROPY_MEDIUM)
+    // Strings > MAX_STRING_LENGTH are now scanned via 500-char windows
+    // High entropy base64 data IS detected but at appropriate severity
     const { scanEntropy: scan } = require('../../src/scanner/entropy.js');
     const fs = require('fs');
     const os = require('os');
@@ -158,7 +157,8 @@ async function runEntropyTests() {
     fs.writeFileSync(path.join(tmpDir, 'index.js'), `const blob = "${longB64}";`);
     const threats = scan(tmpDir);
     const longThreats = threats.filter(t => t.type === 'high_entropy_string');
-    assert(longThreats.length === 0, 'Strings > 1000 chars should be excluded, got ' + longThreats.length);
+    // Windowed analysis detects high entropy in 500-char windows
+    assert(longThreats.length >= 1, 'Windowed analysis should detect high entropy string > 1000 chars');
     fs.rmSync(tmpDir, { recursive: true });
   });
 

@@ -97,10 +97,6 @@ const COHERENCE_MATRIX = {
   },
 };
 
-// Kept for backward compatibility but no longer used in pairing
-// Cross-file detection is handled by module-graph.js (cross_file_dataflow)
-const CROSS_FILE_MULTIPLIER = 0.5;
-
 /**
  * Classify a threat as a source type.
  * Only high-confidence credential access patterns.
@@ -239,6 +235,5 @@ module.exports = {
   classifySource,
   classifySink,
   buildIntentPairs,
-  COHERENCE_MATRIX,
-  CROSS_FILE_MULTIPLIER
+  COHERENCE_MATRIX
 };

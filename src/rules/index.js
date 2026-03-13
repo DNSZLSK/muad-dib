@@ -844,6 +844,18 @@ const RULES = {
     references: ['https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions'],
     mitre: 'T1195.002'
   },
+  workflow_pwn_request: {
+    id: 'MUADDIB-GHA-003',
+    name: 'GitHub Actions Pwn Request',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Workflow pull_request_target avec checkout du head ref/sha de la PR — permet execution de code arbitraire (pwn request)',
+    references: [
+      'https://securitylab.github.com/research/github-actions-preventing-pwn-requests/',
+      'https://attack.mitre.org/techniques/T1195/002/'
+    ],
+    mitre: 'T1195.002'
+  },
 
   // Sandbox detections
   sandbox_sensitive_file_read: {
@@ -1104,7 +1116,7 @@ const RULES = {
     description: 'Package inactif depuis 6+ mois avec une nouvelle version soudaine. Possible changement de mainteneur ou compromission.',
     references: [
       'https://blog.npmjs.org/post/180565383195/details-about-the-event-stream-incident',
-      'https://snyk.io/blog/a]]malicious-npm-packages-targeting-developers/'
+      'https://snyk.io/blog/malicious-npm-packages-targeting-developers/'
     ],
     mitre: 'T1195.002'
   },
@@ -1387,6 +1399,7 @@ const RULES = {
 function getRule(type) {
   if (RULES[type]) return RULES[type];
   if (PARANOID_RULES[type]) return PARANOID_RULES[type];
+  if (PARANOID_RULES_BY_ID[type]) return PARANOID_RULES_BY_ID[type];
   return {
     id: 'MUADDIB-UNK-001',
     name: 'Unknown Threat',
@@ -1436,5 +1449,11 @@ const PARANOID_RULES = {
     mitre: 'T1552.001'
   }
 };
+
+// Reverse-map: PARANOID rule ID → rule object (for scanParanoid threats)
+const PARANOID_RULES_BY_ID = {};
+for (const [, rule] of Object.entries(PARANOID_RULES)) {
+  PARANOID_RULES_BY_ID[rule.id] = rule;
+}
 
 module.exports = { RULES, getRule, PARANOID_RULES };

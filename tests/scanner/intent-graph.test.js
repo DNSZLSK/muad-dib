@@ -4,7 +4,7 @@ const path = require('path');
 const os = require('os');
 const fs = require('fs');
 const { test, asyncTest, assert, assertIncludes, runScanDirect, addSkipped } = require('../test-utils');
-const { classifySource, classifySink, buildIntentPairs, COHERENCE_MATRIX, CROSS_FILE_MULTIPLIER } = require('../../src/intent-graph.js');
+const { classifySource, classifySink, buildIntentPairs, COHERENCE_MATRIX } = require('../../src/intent-graph.js');
 
 const ADVERSARIAL_DIR = path.join(__dirname, '..', '..', 'datasets', 'adversarial');
 
@@ -113,8 +113,9 @@ async function runIntentGraphTests() {
     assert(entry.severity === 'HIGH', `Expected HIGH, got ${entry.severity}`);
   });
 
-  test('INTENT: cross-file multiplier = 0.5', () => {
-    assert(CROSS_FILE_MULTIPLIER === 0.5, `Expected 0.5, got ${CROSS_FILE_MULTIPLIER}`);
+  test('INTENT: CROSS_FILE_MULTIPLIER removed (dead code)', () => {
+    const exports = require('../../src/intent-graph.js');
+    assert(!('CROSS_FILE_MULTIPLIER' in exports), 'CROSS_FILE_MULTIPLIER should be removed from exports');
   });
 
   // =========================================================================
