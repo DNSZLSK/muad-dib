@@ -155,7 +155,9 @@ async function runScoringHardeningTests() {
       `suspicious_dataflow at 75% should be LOW, got ${threats[0].severity}`);
   });
 
-  test('H7: suspicious_dataflow at 90% NOT downgraded (above 80% guard)', () => {
+  // P7: suspicious_dataflow now has full bypass (like vm_code_execution).
+  // The 80% ratio guard was removed — packages with >3 suspicious_dataflow are always SDKs.
+  test('H7-P7: suspicious_dataflow at 90% IS downgraded (full bypass, no 80% guard)', () => {
     const threats = [];
     // 9 dataflow + 1 other = 90%
     for (let i = 0; i < 9; i++) {
@@ -163,9 +165,9 @@ async function runScoringHardeningTests() {
     }
     threats.push({ type: 'obfuscation_detected', severity: 'HIGH', file: 'a.js', message: 'obf' });
     applyFPReductions(threats, null, null);
-    // 9/10 = 90% > 80% → should NOT be downgraded
-    assert(threats[0].severity === 'CRITICAL',
-      `suspicious_dataflow at 90% should stay CRITICAL, got ${threats[0].severity}`);
+    // P7: full bypass → downgraded regardless of ratio
+    assert(threats[0].severity === 'LOW',
+      `suspicious_dataflow at 90% should be LOW (P7 full bypass), got ${threats[0].severity}`);
   });
 
   // ===================================================================
@@ -216,13 +218,14 @@ async function runScoringHardeningTests() {
     assert(threats[2].severity === 'LOW', `obfuscation MEDIUM in dist/ should be LOW (two-notch), got ${threats[2].severity}`);
   });
 
-  test('FP-P5 Fix5: non-bundler-artifact type in dist/ gets one-notch downgrade', () => {
+  // P7: env_access is now a DIST_BUNDLER_ARTIFACT_TYPE → two-notch downgrade in dist/
+  test('FP-P5/P7: env_access in dist/ gets two-notch downgrade (now bundler artifact)', () => {
     const threats = [
       { type: 'env_access', severity: 'HIGH', file: 'dist/index.js', message: 'env' },
       { type: 'suspicious_dataflow', severity: 'HIGH', file: 'build/main.js', message: 'flow' }
     ];
     applyFPReductions(threats, null, null);
-    assert(threats[0].severity === 'MEDIUM', `env_access HIGH in dist/ should be MEDIUM (one-notch), got ${threats[0].severity}`);
+    assert(threats[0].severity === 'LOW', `env_access HIGH in dist/ should be LOW (P7 two-notch), got ${threats[0].severity}`);
     assert(threats[1].severity === 'MEDIUM', `suspicious_dataflow HIGH in build/ should be MEDIUM (one-notch), got ${threats[1].severity}`);
   });
 
@@ -247,9 +250,10 @@ async function runScoringHardeningTests() {
   // ==========================================================================
   // FP-P6 Fix 1: credential_regex_harvest count-based downgrade
   // ==========================================================================
-  test('FP-P6 Fix1: credential_regex_harvest >4 hits → LOW', () => {
+  // P7: credential_regex_harvest threshold lowered from >4 to >2
+  test('FP-P7: credential_regex_harvest >2 hits → LOW', () => {
     const threats = [];
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 4; i++) {
       threats.push({ type: 'credential_regex_harvest', severity: 'HIGH', file: 'lib/http.js', message: `regex${i}` });
     }
     // Add other threats to keep ratio below 40%
@@ -258,10 +262,10 @@ async function runScoringHardeningTests() {
     }
     applyFPReductions(threats, null, null);
     assert(threats[0].severity === 'LOW',
-      `credential_regex_harvest with 6 hits should be LOW, got ${threats[0].severity}`);
+      `credential_regex_harvest with 4 hits should be LOW (P7 threshold >2), got ${threats[0].severity}`);
   });
 
-  test('FP-P6 Fix1: credential_regex_harvest <=4 hits stays HIGH', () => {
+  test('FP-P7: credential_regex_harvest <=2 hits stays HIGH', () => {
     const threats = [
       { type: 'credential_regex_harvest', severity: 'HIGH', file: 'steal.js', message: 'regex1' },
       { type: 'credential_regex_harvest', severity: 'HIGH', file: 'steal.js', message: 'regex2' },
@@ -309,6 +313,111 @@ async function runScoringHardeningTests() {
     applyFPReductions(threats, null, null);
     assert(threats[0].severity === 'CRITICAL',
       `fetch_decrypt_exec should stay CRITICAL in dist/ (still exempt), got ${threats[0].severity}`);
+  });
+
+  // ==========================================================================
+  // FP-P7: env_access count-based downgrade (>10 → LOW)
+  // ==========================================================================
+  test('FP-P7: env_access >10 hits → LOW (config loader pattern)', () => {
+    const threats = [];
+    for (let i = 0; i < 12; i++) {
+      threats.push({ type: 'env_access', severity: 'HIGH', file: `config${i}.js`, message: `env${i}` });
+    }
+    // Add other threats to keep ratio below 40%
+    for (let i = 0; i < 20; i++) {
+      threats.push({ type: 'obfuscation_detected', severity: 'HIGH', file: `f${i}.js`, message: `o${i}` });
+    }
+    applyFPReductions(threats, null, null);
+    assert(threats[0].severity === 'LOW',
+      `env_access with 12 hits should be LOW, got ${threats[0].severity}`);
+  });
+
+  test('FP-P7: env_access <=10 hits stays HIGH', () => {
+    const threats = [];
+    for (let i = 0; i < 5; i++) {
+      threats.push({ type: 'env_access', severity: 'HIGH', file: `config${i}.js`, message: `env${i}` });
+    }
+    for (let i = 0; i < 10; i++) {
+      threats.push({ type: 'obfuscation_detected', severity: 'HIGH', file: `f${i}.js`, message: `o${i}` });
+    }
+    applyFPReductions(threats, null, null);
+    assert(threats[0].severity === 'HIGH',
+      `env_access with 5 hits should stay HIGH, got ${threats[0].severity}`);
+  });
+
+  // ==========================================================================
+  // FP-P7: high_entropy_string count-based downgrade (>5 → LOW)
+  // ==========================================================================
+  test('FP-P7: high_entropy_string >5 hits → LOW (bundled data pattern)', () => {
+    const threats = [];
+    for (let i = 0; i < 8; i++) {
+      threats.push({ type: 'high_entropy_string', severity: 'MEDIUM', file: `data${i}.js`, message: `entropy${i}` });
+    }
+    // Add other threats to keep ratio below 40%
+    for (let i = 0; i < 15; i++) {
+      threats.push({ type: 'env_access', severity: 'HIGH', file: `f${i}.js`, message: `env${i}` });
+    }
+    applyFPReductions(threats, null, null);
+    assert(threats[0].severity === 'LOW',
+      `high_entropy_string with 8 hits should be LOW, got ${threats[0].severity}`);
+  });
+
+  test('FP-P7: high_entropy_string <=5 hits stays MEDIUM', () => {
+    const threats = [];
+    for (let i = 0; i < 3; i++) {
+      threats.push({ type: 'high_entropy_string', severity: 'MEDIUM', file: `data${i}.js`, message: `entropy${i}` });
+    }
+    for (let i = 0; i < 10; i++) {
+      threats.push({ type: 'env_access', severity: 'HIGH', file: `f${i}.js`, message: `env${i}` });
+    }
+    applyFPReductions(threats, null, null);
+    assert(threats[0].severity === 'MEDIUM',
+      `high_entropy_string with 3 hits should stay MEDIUM, got ${threats[0].severity}`);
+  });
+
+  // ==========================================================================
+  // FP-P7: Extended DIST_FILE_RE — out/ and output/ directories
+  // ==========================================================================
+  test('FP-P7: bundler artifacts in out/ get two-notch downgrade', () => {
+    const threats = [
+      { type: 'dynamic_require', severity: 'HIGH', file: 'out/index.js', message: 'require(x)' },
+      { type: 'obfuscation_detected', severity: 'HIGH', file: 'output/bundle.js', message: 'obfusc' }
+    ];
+    applyFPReductions(threats, null, null);
+    assert(threats[0].severity === 'LOW', `dynamic_require in out/ should be LOW (two-notch), got ${threats[0].severity}`);
+    assert(threats[1].severity === 'LOW', `obfuscation in output/ should be LOW (two-notch), got ${threats[1].severity}`);
+  });
+
+  test('FP-P7: credential_regex_harvest in dist/ gets one-notch downgrade (not bundler artifact)', () => {
+    const threats = [
+      { type: 'credential_regex_harvest', severity: 'HIGH', file: 'dist/http-client.js', message: 'Bearer regex' }
+    ];
+    applyFPReductions(threats, null, null);
+    assert(threats[0].severity === 'MEDIUM',
+      `credential_regex_harvest in dist/ should be MEDIUM (1-notch, not bundler artifact), got ${threats[0].severity}`);
+  });
+
+  // ==========================================================================
+  // FP-P7: suspicious_dataflow full bypass — 100% ratio still downgrades
+  // ==========================================================================
+  test('FP-P7: suspicious_dataflow at 100% IS downgraded (full bypass)', () => {
+    const threats = [];
+    for (let i = 0; i < 5; i++) {
+      threats.push({ type: 'suspicious_dataflow', severity: 'CRITICAL', file: `f${i}.js`, message: `flow${i}` });
+    }
+    applyFPReductions(threats, null, null);
+    assert(threats[0].severity === 'LOW',
+      `suspicious_dataflow at 100% should be LOW (full bypass), got ${threats[0].severity}`);
+  });
+
+  test('FP-P7: suspicious_dataflow <=3 stays CRITICAL (below count threshold)', () => {
+    const threats = [
+      { type: 'suspicious_dataflow', severity: 'CRITICAL', file: 'a.js', message: 'flow1' },
+      { type: 'suspicious_dataflow', severity: 'CRITICAL', file: 'b.js', message: 'flow2' }
+    ];
+    applyFPReductions(threats, null, null);
+    assert(threats[0].severity === 'CRITICAL',
+      `suspicious_dataflow with 2 hits should stay CRITICAL, got ${threats[0].severity}`);
   });
 }
 

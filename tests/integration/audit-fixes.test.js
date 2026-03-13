@@ -1575,9 +1575,10 @@ https.get('https://registry.npmjs.org/express/-/express-4.18.2.tgz', (res) => {
       `HIGH bundler artifact in build/ should become LOW (2-notch), got ${threats[0].severity}`);
   });
 
+  // P7: env_access moved to DIST_BUNDLER_ARTIFACT_TYPES, use prototype_hook for 1-notch test
   test('AUDIT-S4: Dist file non-bundler type HIGH → MEDIUM (1-notch)', () => {
     const threats = [
-      { type: 'env_access', severity: 'HIGH', file: 'dist/config.js', message: 'env' }
+      { type: 'prototype_hook', severity: 'HIGH', file: 'dist/config.js', message: 'proto' }
     ];
     applyFPReductions(threats, null, null);
     assert(threats[0].severity === 'MEDIUM',
@@ -1627,7 +1628,9 @@ https.get('https://registry.npmjs.org/express/-/express-4.18.2.tgz', (res) => {
 
   // --- Fix 2.2: suspicious_dataflow percentage guard ---
 
-  test('AUDIT-S5: suspicious_dataflow at 100% ratio NOT downgraded (>80% guard)', () => {
+  // P7: suspicious_dataflow now has full bypass (80% guard removed).
+  // Packages with >3 suspicious_dataflow findings are always legitimate SDKs.
+  test('AUDIT-S5-P7: suspicious_dataflow at 100% ratio IS downgraded (full bypass)', () => {
     const threats = [
       { type: 'suspicious_dataflow', severity: 'CRITICAL', file: 'a.js', message: 'cred→net' },
       { type: 'suspicious_dataflow', severity: 'CRITICAL', file: 'b.js', message: 'cred→net' },
@@ -1635,9 +1638,9 @@ https.get('https://registry.npmjs.org/express/-/express-4.18.2.tgz', (res) => {
       { type: 'suspicious_dataflow', severity: 'CRITICAL', file: 'd.js', message: 'cred→net' }
     ];
     applyFPReductions(threats, null, null);
-    // 4/4 = 100% ratio, above 80% — should NOT be downgraded
-    const hasCritical = threats.some(t => t.severity === 'CRITICAL');
-    assert(hasCritical, 'suspicious_dataflow at 100% ratio should keep CRITICAL (>80% guard)');
+    // P7: full bypass — downgraded regardless of ratio
+    const allLow = threats.every(t => t.severity === 'LOW');
+    assert(allLow, 'suspicious_dataflow at 100% should be LOW (P7 full bypass)');
   });
 
   test('AUDIT-S5: suspicious_dataflow at 33% ratio IS downgraded', () => {

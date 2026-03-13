@@ -122,8 +122,14 @@ const FP_COUNT_THRESHOLDS = {
   // B1 FP reduction: bundled code aliases eval/Function (sinon, storybook, vitest)
   dangerous_call_eval: { maxCount: 3, from: 'MEDIUM', to: 'LOW' },
   // P6: HTTP client libraries (undici, aws-sdk, nodemailer, jsdom) parse Authorization/Bearer headers
-  // with 5+ credential regexes. Real harvesters use 1-2 targeted regexes.
-  credential_regex_harvest: { maxCount: 4, from: 'HIGH', to: 'LOW' }
+  // with 3+ credential regexes. Real harvesters use 1-2 targeted regexes.
+  credential_regex_harvest: { maxCount: 2, from: 'HIGH', to: 'LOW' },
+  // P7: Config frameworks (pm2, nx, dotenv, aws-sdk) read 10+ env vars — not credential theft.
+  // Real stealers access 1-5 targeted env vars. Count >10 = config loader pattern.
+  env_access: { maxCount: 10, from: 'HIGH', to: 'LOW' },
+  // P7: Bundled files with 5+ high-entropy strings are data files, not malware payloads.
+  // Real payloads use 1-2 targeted encoded strings. Count >5 = bundled assets/data.
+  high_entropy_string: { maxCount: 5, to: 'LOW' }
 };
 
 // Types exempt from dist/ downgrade — IOC matches, lifecycle scripts, and
@@ -144,8 +150,9 @@ const DIST_EXEMPT_TYPES = new Set([
   // fetch_decrypt_exec (fetch+decrypt+eval triple) remains exempt — never coincidental.
 ]);
 
-// Regex matching dist/build/minified/bundled file paths
-const DIST_FILE_RE = /(?:^|[/\\])(?:dist|build)[/\\]|\.min\.js$|\.bundle\.js$/i;
+// Regex matching dist/build/out/output/minified/bundled file paths
+// P7: added out/ and output/ — common build output directories (esbuild, custom build scripts)
+const DIST_FILE_RE = /(?:^|[/\\])(?:dist|build|out|output)[/\\]|\.min\.js$|\.bundle\.js$/i;
 
 // Bundler artifact types: get two-notch downgrade in dist/ files (CRITICAL→MEDIUM, HIGH→LOW).
 // These are individual pattern signals that bundlers routinely produce (eval for globalThis,
@@ -155,7 +162,9 @@ const DIST_BUNDLER_ARTIFACT_TYPES = new Set([
   'dynamic_require', 'dynamic_import',
   'obfuscation_detected', 'high_entropy_string', 'possible_obfuscation',
   'js_obfuscation_pattern', 'vm_code_execution',
-  'module_compile', 'module_compile_dynamic'
+  'module_compile', 'module_compile_dynamic',
+  // P7: env_access in dist/ is bundled SDK config reading, not credential theft
+  'env_access'
 ]);
 
 // Types exempt from reachability downgrade — IOC matches, lifecycle, and package-level types.
@@ -223,15 +232,16 @@ function applyFPReductions(threats, reachableFiles, packageName) {
     const rule = FP_COUNT_THRESHOLDS[t.type];
     if (rule && typeCounts[t.type] > rule.maxCount && (!rule.from || t.severity === rule.from)) {
       const typeRatio = typeCounts[t.type] / totalThreats;
-      // suspicious_dataflow: partial bypass of percentage guard up to 80%.
-      // Complex apps (SMTP, monitoring) have 50-80% dataflow findings — still downgrade.
-      // But if dataflow is >80% of ALL findings, it may be real targeted exfiltration.
-      // (Audit fix: full bypass was exploitable — 4+ dataflow patterns = all LOW.)
+      // suspicious_dataflow: full bypass of percentage guard. Packages with >3 suspicious_dataflow
+      // findings are always legitimate SDKs (SMTP, monitoring, analytics). Real malware has 1-2
+      // targeted source→sink pairs. The count >3 threshold is sufficient protection.
+      // P7: removed 80% ratio cap — it caused ~30k FP hits in production on SDK packages
+      // where dataflow was the dominant finding type (e.g. @darajs/core, addio-admin-sdk).
       // vm_code_execution: full bypass — packages with only vm.Script calls (cassandra-driver,
       // webpack, jest) are legitimate. Real malware using vm always has other signals
       // (network, fs, obfuscation). The >3 count threshold is sufficient protection.
       if (typeRatio < 0.4 ||
-          (t.type === 'suspicious_dataflow' && typeRatio < 0.8) ||
+          t.type === 'suspicious_dataflow' ||
           t.type === 'vm_code_execution') {
         t.severity = rule.to;
       }

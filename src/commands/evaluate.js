@@ -562,9 +562,11 @@ async function evaluateAdversarial() {
     details.push({ name, score, threshold, detected: isDetected, source: 'holdout' });
   }
 
+  // Count only samples that exist on disk (exclude "directory not found")
+  const available = details.filter(d => !d.error).length;
   const total = Object.keys(ADVERSARIAL_THRESHOLDS).length + Object.keys(HOLDOUT_THRESHOLDS).length;
-  const adr = total > 0 ? detected / total : 0;
-  return { detected, total, adr, details };
+  const adr = available > 0 ? detected / available : 0;
+  return { detected, total, available, adr, details };
 }
 
 /**
@@ -638,7 +640,7 @@ async function evaluate(options = {}) {
       const pypiPct = (benignPyPI.fpr * 100).toFixed(1);
       console.log(`  Benign PyPI (FPR):   ${benignPyPI.flagged}/${benignPyPI.scanned}  ${pypiPct}%  (${benignPyPI.skipped} skipped)`);
     }
-    console.log(`  Adversarial (ADR):   ${adversarial.detected}/${adversarial.total}  ${adrPct}%`);
+    console.log(`  Adversarial (ADR):   ${adversarial.detected}/${adversarial.available}  ${adrPct}%  (${adversarial.total - adversarial.available} missing)`);
     console.log('');
 
     // Show failed adversarial samples
