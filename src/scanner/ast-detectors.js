@@ -2094,6 +2094,19 @@ function handlePostWalk(ctx) {
     });
   }
 
+  // WASM standalone: WebAssembly.compile/instantiate WITHOUT network sinks.
+  // Legitimate: crypto, image processing, codecs. Still warrants investigation
+  // because WASM hides control flow from static analysis.
+  // Compound WASM + network → wasm_host_sink (CRITICAL) takes priority (mutually exclusive).
+  if (ctx.hasWasmLoad && !ctx.hasNetworkCallInFile) {
+    ctx.threats.push({
+      type: 'wasm_standalone',
+      severity: 'MEDIUM',
+      message: 'WebAssembly module loaded without detectable network sinks. WASM hides control flow — verify .wasm file purpose.',
+      file: ctx.relFile
+    });
+  }
+
   // Credential regex harvesting: credential-matching regex + network call in same file
   // Real-world pattern: Transform/stream that scans data for tokens/passwords and exfiltrates
   if (ctx.hasCredentialRegex && ctx.hasNetworkCallInFile) {

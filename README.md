@@ -286,7 +286,7 @@ repos:
 | **FPR** (Benign) | **12.1%** (64/529) | 529 npm packages, real source via `npm pack` |
 | **ADR** (Adversarial + Holdout) | **92.2%** (71/77) | 53 adversarial + 40 holdout (77 available on disk), global threshold=20 |
 
-**2042 tests** across 49 files. **133 rules** (128 RULES + 5 PARANOID).
+**2093 tests** across 49 files. **134 rules** (129 RULES + 5 PARANOID).
 
 > **Methodology caveats:**
 > - TPR measured on 49 Node.js attack samples (3 browser-only excluded from 51 total)
@@ -327,7 +327,7 @@ npm test
 
 ### Testing
 
-- **2042 tests** across 49 modular test files
+- **2093 tests** across 49 modular test files
 - **56 fuzz tests** - Malformed inputs, ReDoS, unicode, binary
 - **Datadog 17K benchmark** - 17,922 real malware samples
 - **Ground truth validation** - 51 real-world attacks (93.9% TPR)
@@ -347,7 +347,7 @@ npm test
 - [Evaluation Methodology](docs/EVALUATION_METHODOLOGY.md) - Experimental protocol, holdout scores
 - [Threat Model](docs/threat-model.md) - What MUAD'DIB detects and doesn't detect
 - [Adversarial Evaluation](ADVERSARIAL.md) - Red team samples and ADR results
-- [Security Policy](SECURITY.md) - Detection rules reference (133 rules)
+- [Security Policy](SECURITY.md) - Detection rules reference (134 rules)
 - [Security Audit](docs/SECURITY_AUDIT.md) - Bypass validation report
 - [FP Analysis](docs/EVALUATION.md) - Historical false positive analysis
 

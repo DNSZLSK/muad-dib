@@ -12,6 +12,9 @@ const { detectMaintainerChange } = require('./maintainer-change.js');
 const { downloadToFile, extractTarGz, sanitizePackageName } = require('./shared/download.js');
 const { MAX_TARBALL_SIZE } = require('./shared/constants.js');
 
+// Self-exclude: never scan our own package through the monitor
+const SELF_PACKAGE_NAME = require('../package.json').name; // 'muaddib-scanner'
+
 // Prevent unhandled promise rejections from crashing the monitor process
 process.on('unhandledRejection', (reason, promise) => {
   console.error('[MONITOR] Unhandled rejection:', reason);
@@ -191,6 +194,11 @@ const recentlyScanned = new Set();
 // Webhook dedup: track alerted packages by name → Set<rule_ids> (cleared with daily report).
 // If a new version triggers the same rules, skip the webhook. If new rules appear, let it through.
 const alertedPackageRules = new Map();
+
+// Scope grouping: buffer scoped npm packages for grouped webhooks (monorepo noise reduction).
+// @scope → { packages[], timer, maxScore, ecosystem }
+const SCOPE_GROUP_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
+const pendingGrouped = new Map();
 
 // Consecutive poll error tracking for exponential backoff
 let consecutivePollErrors = 0;
@@ -558,6 +566,48 @@ function computeRiskScore(summary) {
 }
 
 /**
+ * Compute a reputation factor for a package based on registry metadata.
+ * Monitor-only: adjusts the score used for webhook decisions without
+ * mutating the persisted alert score.
+ *
+ * Established packages (old, many versions, high downloads) get a factor < 1.0
+ * that attenuates the webhook score.  New/suspicious packages get > 1.0.
+ * Clamped to [0.3, 1.5].
+ *
+ * @param {Object|null} metadata - Registry metadata from getPackageMetadata()
+ * @returns {number} factor in [0.3, 1.5]
+ */
+function computeReputationFactor(metadata) {
+  if (!metadata) return 1.0;
+  let factor = 1.0;
+
+  // Age signal (mutually exclusive branches)
+  const ageDays = metadata.age_days;
+  if (ageDays !== null && ageDays !== undefined) {
+    if (ageDays > 730) factor -= 0.3;
+    else if (ageDays > 365) factor -= 0.15;
+    else if (ageDays < 7) factor += 0.3;
+    else if (ageDays < 30) factor += 0.2;
+  }
+
+  // Version count signal (mutually exclusive)
+  const versionCount = metadata.version_count || 0;
+  if (versionCount > 50) factor -= 0.2;
+  else if (versionCount > 20) factor -= 0.1;
+  else if (versionCount === 1) factor += 0.2;
+  else if (versionCount <= 2) factor += 0.15;
+
+  // Downloads signal
+  const downloads = metadata.weekly_downloads || 0;
+  if (downloads > 100000) factor -= 0.2;
+  else if (downloads > 50000) factor -= 0.1;
+  else if (downloads < 10) factor += 0.15;
+  else if (downloads < 100) factor += 0.1;
+
+  return Math.max(0.3, Math.min(1.5, factor));
+}
+
+/**
  * Persist a CRITICAL/HIGH alert to logs/alerts/YYYY-MM-DD-HH-mm-ss-<package>.json
  * Same payload as webhook — enables offline FPR/TPR trend analysis.
  */
@@ -647,6 +697,14 @@ async function trySendWebhook(name, version, ecosystem, result, sandboxResult) {
     alertedPackageRules.set(name, new Set(currentRules));
   }
 
+  // Scope grouping: buffer scoped npm packages for grouped webhook
+  const scope = extractScope(name);
+  if (scope && ecosystem === 'npm') {
+    bufferScopedWebhook(scope, name, version, ecosystem, result, sandboxResult);
+    return;
+  }
+
+  // Non-scoped: send immediately (existing behavior)
   const url = getWebhookUrl();
   const webhookData = buildAlertData(name, version, ecosystem, result, sandboxResult);
   try {
@@ -654,6 +712,118 @@ async function trySendWebhook(name, version, ecosystem, result, sandboxResult) {
     console.log(`[MONITOR] Webhook sent for ${name}@${version}`);
   } catch (err) {
     console.error(`[MONITOR] Webhook failed for ${name}@${version}: ${err.message}`);
+  }
+}
+
+/**
+ * Extract the npm scope from a package name, e.g. '@scope/pkg' → '@scope'.
+ * Returns null for unscoped packages.
+ */
+function extractScope(name) {
+  if (typeof name !== 'string') return null;
+  const match = name.match(/^(@[^/]+)\//);
+  return match ? match[1] : null;
+}
+
+/**
+ * Buffer a scoped package webhook for grouped delivery.
+ * Multiple packages from the same scope published within SCOPE_GROUP_WINDOW_MS
+ * are grouped into a single webhook (monorepo noise reduction).
+ */
+function bufferScopedWebhook(scope, name, version, ecosystem, result, sandboxResult) {
+  const entry = {
+    name, version,
+    score: (result && result.summary) ? (result.summary.riskScore || 0) : 0,
+    threats: result.threats || [],
+    sandboxResult
+  };
+
+  const existing = pendingGrouped.get(scope);
+  if (existing) {
+    existing.packages.push(entry);
+    if (entry.score > existing.maxScore) existing.maxScore = entry.score;
+    console.log(`[MONITOR] GROUPED: ${name}@${version} \u2192 scope ${scope} (${existing.packages.length} packages, max=${existing.maxScore})`);
+  } else {
+    const group = {
+      packages: [entry],
+      maxScore: entry.score,
+      ecosystem,
+      timer: setTimeout(() => flushScopeGroup(scope), SCOPE_GROUP_WINDOW_MS)
+    };
+    if (group.timer.unref) group.timer.unref();
+    pendingGrouped.set(scope, group);
+    console.log(`[MONITOR] GROUPED: ${name}@${version} started scope group ${scope} (5 min window)`);
+  }
+}
+
+/**
+ * Flush a scope group: send grouped webhook or individual webhook if only 1 package.
+ */
+async function flushScopeGroup(scope) {
+  const group = pendingGrouped.get(scope);
+  if (!group) return;
+  pendingGrouped.delete(scope);
+
+  const url = getWebhookUrl();
+  if (!url) return;
+
+  // Single package in group: send as normal webhook (no grouping noise)
+  if (group.packages.length === 1) {
+    const pkg = group.packages[0];
+    const result = {
+      threats: pkg.threats,
+      summary: { riskScore: pkg.score }
+    };
+    const webhookData = buildAlertData(pkg.name, pkg.version, group.ecosystem, result, pkg.sandboxResult);
+    try {
+      await sendWebhook(url, webhookData);
+      console.log(`[MONITOR] Webhook sent for ${pkg.name}@${pkg.version} (scope group flush, single)`);
+    } catch (err) {
+      console.error(`[MONITOR] Webhook failed for ${pkg.name}@${pkg.version}: ${err.message}`);
+    }
+    return;
+  }
+
+  // Multiple packages: build grouped Discord embed
+  const pkgLines = group.packages.map(p =>
+    `\u2022 \`${p.name}@${p.version}\` \u2014 score: ${p.score}`
+  ).join('\n');
+
+  // Deduplicate threat types across all packages, top 5
+  const allTypes = new Set();
+  for (const p of group.packages) {
+    for (const t of p.threats) allTypes.add(t.type);
+  }
+  const topThreats = [...allTypes].slice(0, 5).join(', ') || 'none';
+
+  const color = group.maxScore >= 75 ? 0xe74c3c
+    : group.maxScore >= 50 ? 0xe67e22
+    : group.maxScore >= 25 ? 0xf1c40f
+    : 0x95a5a6;
+
+  const payload = {
+    embeds: [{
+      title: `\uD83D\uDCE6 SCOPE GROUP \u2014 ${scope} (${group.packages.length} packages)`,
+      color,
+      fields: [
+        { name: 'Max Score', value: String(group.maxScore), inline: true },
+        { name: 'Packages', value: String(group.packages.length), inline: true },
+        { name: 'Ecosystem', value: group.ecosystem, inline: true },
+        { name: 'Package List', value: pkgLines.slice(0, 1024), inline: false },
+        { name: 'Top Threat Types', value: topThreats, inline: false }
+      ],
+      footer: {
+        text: `MUAD'DIB Monitor | ${new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, ' UTC')}`
+      },
+      timestamp: new Date().toISOString()
+    }]
+  };
+
+  try {
+    await sendWebhook(url, payload, { rawPayload: true });
+    console.log(`[MONITOR] Grouped webhook sent for ${scope} (${group.packages.length} packages, max=${group.maxScore})`);
+  } catch (err) {
+    console.error(`[MONITOR] Grouped webhook failed for ${scope}: ${err.message}`);
   }
 }
 
@@ -1573,7 +1743,29 @@ async function scanPackage(name, version, ecosystem, tarballUrl) {
         // Persist alert locally for ALL suspects (independent of webhook filtering)
         const alertData = buildAlertData(name, version, ecosystem, result, sandboxResult);
         persistAlert(name, version, ecosystem, alertData);
-        await trySendWebhook(name, version, ecosystem, result, sandboxResult);
+
+        // Reputation scoring (monitor-only, npm only)
+        // Adjusts score for webhook decision without mutating persisted alert data.
+        let adjustedResult = result;
+        if (ecosystem === 'npm') {
+          try {
+            const { getPackageMetadata } = require('./scanner/npm-registry.js');
+            const metadata = await getPackageMetadata(name);
+            const reputationFactor = computeReputationFactor(metadata);
+            if (reputationFactor !== 1.0) {
+              const originalScore = result.summary.riskScore || 0;
+              const adjustedScore = Math.round(originalScore * reputationFactor);
+              adjustedResult = {
+                ...result,
+                summary: { ...result.summary, riskScore: adjustedScore, reputationFactor }
+              };
+              console.log(`[MONITOR] REPUTATION: ${name} factor=${reputationFactor.toFixed(2)} (${originalScore} → ${adjustedScore})`);
+            }
+          } catch (err) {
+            console.error(`[MONITOR] Reputation error for ${name}: ${err.message}`);
+          }
+        }
+        await trySendWebhook(name, version, ecosystem, adjustedResult, sandboxResult);
         const staticScore = result.summary.riskScore || 0;
         return { sandboxResult, staticClean: false, tier, staticScore };
       }
@@ -1800,6 +1992,11 @@ async function sendDailyReport() {
   dailyAlerts.length = 0;
   recentlyScanned.clear();
   alertedPackageRules.clear();
+  // Flush and clear pending scope groups on daily reset
+  for (const [, group] of pendingGrouped) {
+    clearTimeout(group.timer);
+  }
+  pendingGrouped.clear();
   downloadsCache.clear();
   resetDailyStats();
 }
@@ -2022,6 +2219,10 @@ async function pollNpm(state) {
     }
 
     for (const name of newPackages) {
+      if (name === SELF_PACKAGE_NAME) {
+        console.log(`[MONITOR] SKIPPED (self): ${name}`);
+        continue;
+      }
       console.log(`[MONITOR] New npm: ${name}`);
       // Queue npm packages — tarball URL resolved during scan
       scanQueue.push({
@@ -2216,6 +2417,12 @@ async function startMonitor(options) {
   // Counters are persisted to disk so they survive the restart.
   async function gracefulShutdown(signal) {
     console.log(`\n[MONITOR] Received ${signal} — shutting down...`);
+    // Flush all pending scope groups before exit
+    for (const [scope, group] of pendingGrouped) {
+      clearTimeout(group.timer);
+      await flushScopeGroup(scope);
+    }
+    pendingGrouped.clear();
     saveDailyStats();
     saveState(state);
     reportStats();
@@ -2496,6 +2703,12 @@ module.exports = {
   formatErrorBreakdown,
   computeRiskLevel,
   computeRiskScore,
+  computeReputationFactor,
+  extractScope,
+  pendingGrouped,
+  bufferScopedWebhook,
+  flushScopeGroup,
+  SCOPE_GROUP_WINDOW_MS,
   buildDailyReportEmbed,
   sendDailyReport,
   DAILY_REPORT_HOUR,
@@ -2567,7 +2780,8 @@ module.exports = {
   TEMPORAL_DETECTIONS_FILE,
   ALERTS_LOG_DIR,
   DAILY_REPORTS_LOG_DIR,
-  resolveWritableDir
+  resolveWritableDir,
+  SELF_PACKAGE_NAME
 };
 
 // Standalone entry point: node src/monitor.js

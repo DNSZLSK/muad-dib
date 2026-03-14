@@ -478,6 +478,9 @@ const PLAYBOOKS = {
     'CRITIQUE: Module WebAssembly charge avec des imports host contenant des sinks reseau. Le flux de controle est cache dans le binaire WASM, ' +
     'rendant l\'analyse statique impossible. Le WASM peut lire des fichiers sensibles et exfiltrer via les callbacks host. ' +
     'Supprimer le package immediatement. Analyser le fichier WASM avec wasm2wat pour comprendre le flux. Regenerer tous les secrets.',
+  wasm_standalone:
+    'Module WebAssembly charge sans sink reseau apparent. Usage potentiellement legitime (crypto, image, codecs video). ' +
+    'Verifier le fichier .wasm avec wasm2wat. Si le package n\'a aucune raison d\'utiliser du WASM, considerer comme suspect.',
   credential_regex_harvest:
     'Code contient des regex de detection de credentials (Bearer, password, token, API key) combine avec un appel reseau. ' +
     'Technique de harvesting: scanne les donnees en transit (streams HTTP, fichiers) pour extraire des secrets et les exfiltrer. ' +

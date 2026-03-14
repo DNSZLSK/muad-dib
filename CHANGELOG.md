@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.7.5] - 2026-03-14
+
+### Added
+- **WASM standalone detection**: New rule `wasm_standalone` (MUADDIB-AST-046, MEDIUM) detects WebAssembly.compile/instantiate without network sinks. Mutually exclusive with `wasm_host_sink` (CRITICAL) — no double-counting
+- **Monitor self-exclude**: Monitor skips scanning `muaddib-scanner` itself from the npm RSS feed (prevents self-triggered webhooks)
+- **Reputation scoring** (monitor-only): `computeReputationFactor()` adjusts webhook score based on package age, version count, and weekly downloads. Established packages (>2y, >50 versions, >100K downloads) get factor ~0.3, reducing webhook noise. Floor at 0.3 ensures compromised established packages (event-stream, ua-parser-js) still trigger at score >= 30. IOC matches bypass reputation scoring entirely
+- **Scope dedup buffer** (monitor-only): Scoped npm packages (`@scope/...`) published within 5 minutes are grouped into a single Discord webhook instead of N individual alerts. Reduces monorepo noise (e.g., `@jdeploy-installer/x` x6 architectures). Each package still scanned individually and persisted in `persistAlert()`
+
+### Changed
+- Rule count: 133 → **134** (129 RULES + 5 PARANOID)
+- Test count: 2042 → **2093** (+51) across 49 files
+- `npm-registry.js`: `getPackageMetadata()` now returns `version_count` field
+
 ## [2.6.9] - 2026-03-14
 
 ### Fixed

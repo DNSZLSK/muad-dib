@@ -114,6 +114,7 @@ async function getPackageMetadata(packageName) {
 
   const weeklyDownloads = downloadsData?.downloads ?? 0;
   const authorPackageCount = authorData?.total ?? 0;
+  const versionCount = meta.versions ? Object.keys(meta.versions).length : 0;
 
   return {
     created_at: createdAt,
@@ -121,7 +122,8 @@ async function getPackageMetadata(packageName) {
     weekly_downloads: weeklyDownloads,
     author_package_count: authorPackageCount,
     has_readme: hasReadme,
-    has_repository: hasRepository
+    has_repository: hasRepository,
+    version_count: versionCount
   };
 }
 
