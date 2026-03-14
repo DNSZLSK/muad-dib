@@ -535,8 +535,8 @@ function computeRiskLevel(summary) {
 
 function computeRiskScore(summary) {
   const raw = (summary.critical || 0) * 25
-            + (summary.high || 0) * 15
-            + (summary.medium || 0) * 5
+            + (summary.high || 0) * 10
+            + (summary.medium || 0) * 3
             + (summary.low || 0) * 1;
   return Math.min(raw, 100);
 }

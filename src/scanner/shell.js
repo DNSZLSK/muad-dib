@@ -20,7 +20,11 @@ const MALICIOUS_PATTERNS = [
   { pattern: /mkfifo.*\/dev\/tcp/m, name: 'fifo_reverse_shell', severity: 'CRITICAL' },
   { pattern: /mkfifo\s+\S+.*(?:\|\s*nc\s|nc\s+\S+.*>\s*\/tmp\/)/m, name: 'fifo_nc_reverse_shell', severity: 'CRITICAL' },
   { pattern: /base64\s+-d\b.*\|\s*(ba)?sh/m, name: 'base64_decode_exec', severity: 'CRITICAL' },
-  { pattern: /wget\s+\S+.*&&.*base64\s+-d/m, name: 'wget_base64_decode', severity: 'HIGH' }
+  { pattern: /wget\s+\S+.*&&.*base64\s+-d/m, name: 'wget_base64_decode', severity: 'HIGH' },
+  // IFS evasion patterns (v2.6.9)
+  { pattern: /curl\$\{?IFS\}?.*\|.*sh/m, name: 'curl_ifs_evasion', severity: 'CRITICAL' },
+  { pattern: /eval\s+.*\$\(curl/m, name: 'eval_curl_subshell', severity: 'CRITICAL' },
+  { pattern: /sh\s+-c\s+['"].*curl/m, name: 'sh_c_curl_exec', severity: 'HIGH' }
 ];
 
 const SHEBANG_RE = /^#!.*\b(?:ba)?sh\b/;

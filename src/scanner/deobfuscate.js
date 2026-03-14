@@ -71,6 +71,8 @@ function deobfuscate(sourceCode) {
       if (isStringFromCharCode(node)) {
         const nums = extractNumericArgs(node);
         if (nums === null) return;
+        // Validate charcode range [0, 0x10FFFF] to prevent invalid codepoints
+        if (nums.some(n => n < 0 || n > 0x10FFFF || !Number.isFinite(n))) return;
         try {
           const decoded = String.fromCharCode(...nums);
           const before = sourceCode.slice(node.start, node.end);

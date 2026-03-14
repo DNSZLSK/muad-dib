@@ -174,6 +174,15 @@ const PLAYBOOKS = {
   wget_base64_decode:
     'Telechargement + decodage base64 detecte. Verifier l\'URL de telechargement et decoder le contenu. Pattern de staging malveillant en deux etapes.',
 
+  curl_ifs_evasion:
+    'CRITIQUE: Evasion IFS detectee — curl$IFS ou curl${IFS} pipe vers shell. Technique d\'evasion pour contourner la detection de "curl|sh". Ne pas installer.',
+
+  eval_curl_subshell:
+    'CRITIQUE: eval $(curl ...) detecte. Telecharge et execute du code distant via command substitution. Ne pas installer.',
+
+  sh_c_curl_exec:
+    'sh -c wrapping autour de curl detecte. Technique d\'evasion pour masquer l\'execution de commandes distantes. Analyser le contenu telecharge.',
+
   shai_hulud_backdoor:
     'CRITIQUE: Backdoor Shai-Hulud dans GitHub Actions. Supprimer le workflow et auditer les runs precedents.',
 

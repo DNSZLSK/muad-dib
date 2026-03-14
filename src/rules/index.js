@@ -1369,6 +1369,35 @@ const RULES = {
     ],
     mitre: 'T1557'
   },
+  // Shell IFS evasion rules (v2.6.9)
+  curl_ifs_evasion: {
+    id: 'MUADDIB-SHELL-016',
+    name: 'Curl IFS Variable Evasion',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Evasion IFS: curl$IFS ou curl${IFS} pipe vers shell. Technique d\'evasion pour contourner la detection de curl|sh en utilisant $IFS comme separateur.',
+    references: ['https://attack.mitre.org/techniques/T1059/004/'],
+    mitre: 'T1059.004'
+  },
+  eval_curl_subshell: {
+    id: 'MUADDIB-SHELL-017',
+    name: 'Eval Curl Command Substitution',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'eval $(curl ...) detecte. Telecharge et execute du code distant via command substitution.',
+    references: ['https://attack.mitre.org/techniques/T1059/004/'],
+    mitre: 'T1059.004'
+  },
+  sh_c_curl_exec: {
+    id: 'MUADDIB-SHELL-018',
+    name: 'Shell -c Curl Execution',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'sh -c wrapping autour de curl. Technique d\'evasion pour masquer l\'execution de commandes distantes.',
+    references: ['https://attack.mitre.org/techniques/T1059/004/'],
+    mitre: 'T1059.004'
+  },
+
   // Intent Graph rules (v2.6.0)
   intent_credential_exfil: {
     id: 'MUADDIB-INTENT-001',

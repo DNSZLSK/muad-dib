@@ -116,8 +116,15 @@ async function safeDnsResolve(hostname) {
     return hostname;
   }
   const dns = require('dns');
-  const addresses = await dns.promises.resolve4(hostname);
-  if (!addresses || addresses.length === 0) {
+  const [v4, v6] = await Promise.allSettled([
+    dns.promises.resolve4(hostname),
+    dns.promises.resolve6(hostname),
+  ]);
+  const addresses = [
+    ...(v4.status === 'fulfilled' ? v4.value : []),
+    ...(v6.status === 'fulfilled' ? v6.value : []),
+  ];
+  if (addresses.length === 0) {
     throw new Error(`DNS resolution failed for ${hostname}`);
   }
   for (const addr of addresses) {

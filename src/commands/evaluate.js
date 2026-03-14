@@ -67,124 +67,71 @@ function wilsonCI(successes, total, z = 1.96) {
   };
 }
 
-const ADVERSARIAL_THRESHOLDS = {
+// v2.6.9: Replaced per-sample thresholds with flat sample list.
+// All samples use global ADR_THRESHOLD (no per-sample overfitting).
+const ADVERSARIAL_SAMPLES = [
   // Vague 1 (20 samples)
-  'ci-trigger-exfil': 35,
-  'delayed-exfil': 30,
-  'docker-aware': 35,
-  'staged-fetch': 35,
-  'dns-chunk-exfil': 35,
-  'string-concat-obfuscation': 30,
-  'postinstall-download': 30,
-  'dynamic-require': 40,
-  'iife-exfil': 40,
-  'conditional-chain': 30,
-  'template-literal-obfuscation': 30,
-  'proxy-env-intercept': 40,
-  'nested-payload': 30,
-  'dynamic-import': 30,
-  'websocket-exfil': 30,
-  'bun-runtime-evasion': 25,
-  'preinstall-exec': 35,
-  'remote-dynamic-dependency': 35,
-  'github-exfil': 30,
-  'detached-background': 35,
+  'ci-trigger-exfil', 'delayed-exfil', 'docker-aware', 'staged-fetch',
+  'dns-chunk-exfil', 'string-concat-obfuscation', 'postinstall-download',
+  'dynamic-require', 'iife-exfil', 'conditional-chain',
+  'template-literal-obfuscation', 'proxy-env-intercept', 'nested-payload',
+  'dynamic-import', 'websocket-exfil', 'bun-runtime-evasion',
+  'preinstall-exec', 'remote-dynamic-dependency', 'github-exfil', 'detached-background',
   // Vague 3 (5 samples)
-  'ai-agent-weaponization': 35,
-  'ai-config-injection': 30,
-  'rdd-zero-deps': 35,
-  'discord-webhook-exfil': 30,
-  'preinstall-background-fork': 35,
-  // Holdout → promoted (10 samples)
-  'silent-error-swallow': 25,
-  'double-base64-exfil': 30,
-  'crypto-wallet-harvest': 25,
-  'self-hosted-runner-backdoor': 20,
-  'dead-mans-switch': 30,
-  'fake-captcha-fingerprint': 20,
-  'pyinstaller-dropper': 35,
-  'gh-cli-token-steal': 30,
-  'triple-base64-github-push': 30,
-  'browser-api-hook': 20,
+  'ai-agent-weaponization', 'ai-config-injection', 'rdd-zero-deps',
+  'discord-webhook-exfil', 'preinstall-background-fork',
+  // Holdout promoted (10 samples)
+  'silent-error-swallow', 'double-base64-exfil', 'crypto-wallet-harvest',
+  'self-hosted-runner-backdoor', 'dead-mans-switch', 'fake-captcha-fingerprint',
+  'pyinstaller-dropper', 'gh-cli-token-steal', 'triple-base64-github-push', 'browser-api-hook',
   // Audit bypass samples (v2.2.13)
-  'indirect-eval-bypass': 10,
-  'muaddib-ignore-bypass': 25,
-  'mjs-extension-bypass': 100,
+  'indirect-eval-bypass', 'muaddib-ignore-bypass', 'mjs-extension-bypass',
   // Vague 4 (5 samples)
-  'git-hook-persistence': 10,
-  'native-addon-camouflage': 25,
-  'stego-png-payload': 35,
-  'stegabin-vscode-persistence': 30,
-  'mcp-server-injection': 25,
-  // Vague 5 (27 samples — advanced evasion techniques)
-  'async-iterator-exfil': 20,
-  'console-override-exfil': 20,
-  'cross-file-callback-exfil': 20,
-  'error-reporting-exfil': 20,
-  'error-stack-exfil': 20,
-  'event-emitter-exfil': 20,
-  'fn-return-exfil': 20,
-  'getter-defineProperty-exfil': 20,
-  'http-header-exfil': 20,
-  'import-map-poison': 20,
-  'intl-polyfill-backdoor': 20,
-  'net-time-exfil': 20,
-  'postmessage-exfil': 20,
-  'process-title-exfil': 20,
-  'promise-chain-exfil': 20,
-  'proxy-getter-dns-exfil': 20,
-  'readable-stream-exfil': 20,
-  'response-intercept-exfil': 20,
-  'setTimeout-eval-chain': 20,
-  'setter-trap-exfil': 20,
-  'sourcemap-payload': 20,
-  'stream-pipe-exfil': 20,
-  'svg-payload-fetch': 20,
-  'symbol-iterator-exfil': 20,
-  'toJSON-hijack': 20,
-  'url-constructor-exfil': 20,
-  'wasm-c2-payload': 20,
+  'git-hook-persistence', 'native-addon-camouflage', 'stego-png-payload',
+  'stegabin-vscode-persistence', 'mcp-server-injection',
+  // Vague 5 (27 samples)
+  'async-iterator-exfil', 'console-override-exfil', 'cross-file-callback-exfil',
+  'error-reporting-exfil', 'error-stack-exfil', 'event-emitter-exfil',
+  'fn-return-exfil', 'getter-defineProperty-exfil', 'http-header-exfil',
+  'import-map-poison', 'intl-polyfill-backdoor', 'net-time-exfil',
+  'postmessage-exfil', 'process-title-exfil', 'promise-chain-exfil',
+  'proxy-getter-dns-exfil', 'readable-stream-exfil', 'response-intercept-exfil',
+  'setTimeout-eval-chain', 'setter-trap-exfil', 'sourcemap-payload',
+  'stream-pipe-exfil', 'svg-payload-fetch', 'symbol-iterator-exfil',
+  'toJSON-hijack', 'url-constructor-exfil', 'wasm-c2-payload',
   // Vague 6 — DPRK + Intent Graph (10 samples)
-  // Group A: pure API, multi-file, cross-file taint
-  'locale-config-sync': 25,        // v2.6.1: class this.X + imported sink method
-  'metrics-aggregator-lite': 25,   // v2.6.1: EventEmitter + ObjectExpression taint + this.method() sink
-  'env-config-validator': 25,      // v2.6.1: imported sink method detection
-  'stream-transform-kit': 25,     // v2.6.1: pipe chain cross-file flows
-  'cache-warmup-utils': 25,
-  // Group B: eval evasion techniques
-  'fn-return-eval': 25,
-  'call-chain-eval': 20,
-  'regex-source-require': 25,
-  'charcode-arithmetic': 25,
-  'object-method-alias': 25
-};
+  'locale-config-sync', 'metrics-aggregator-lite', 'env-config-validator',
+  'stream-transform-kit', 'cache-warmup-utils',
+  'fn-return-eval', 'call-chain-eval', 'regex-source-require',
+  'charcode-arithmetic', 'object-method-alias',
+];
 
-const HOLDOUT_THRESHOLDS = {
+const HOLDOUT_SAMPLES = [
   // holdout-v2 (10 samples)
-  'conditional-os-payload': 20, 'env-var-reconstruction': 25,
-  'github-workflow-inject': 20, 'homedir-ssh-key-steal': 25,
-  'npm-cache-poison': 20, 'npm-lifecycle-preinstall-curl': 25,
-  'process-env-proxy-getter': 20, 'readable-stream-hijack': 20,
-  'setTimeout-chain': 25, 'wasm-loader': 20,
+  'conditional-os-payload', 'env-var-reconstruction',
+  'github-workflow-inject', 'homedir-ssh-key-steal',
+  'npm-cache-poison', 'npm-lifecycle-preinstall-curl',
+  'process-env-proxy-getter', 'readable-stream-hijack',
+  'setTimeout-chain', 'wasm-loader',
   // holdout-v3 (10 samples)
-  'dns-txt-payload': 25, 'electron-rce': 30,
-  'env-file-parse-exfil': 20, 'git-credential-steal': 20,
-  'npm-hook-hijack': 25, 'postinstall-reverse-shell': 35,
-  'require-cache-poison': 20, 'steganography-payload': 15,
-  'symlink-escape': 25, 'timezone-trigger': 30,
+  'dns-txt-payload', 'electron-rce',
+  'env-file-parse-exfil', 'git-credential-steal',
+  'npm-hook-hijack', 'postinstall-reverse-shell',
+  'require-cache-poison', 'steganography-payload',
+  'symlink-escape', 'timezone-trigger',
   // holdout-v4 (10 samples — deobfuscation)
-  'atob-eval': 20, 'base64-require': 35,
-  'charcode-fetch': 25, 'charcode-spread-homedir': 30,
-  'concat-env-steal': 20, 'double-decode-exfil': 40,
-  'hex-array-exec': 20, 'mixed-obfuscation-stealer': 30,
-  'nested-base64-concat': 25, 'template-literal-hide': 40,
+  'atob-eval', 'base64-require',
+  'charcode-fetch', 'charcode-spread-homedir',
+  'concat-env-steal', 'double-decode-exfil',
+  'hex-array-exec', 'mixed-obfuscation-stealer',
+  'nested-base64-concat', 'template-literal-hide',
   // holdout-v5 (10 samples — inter-module dataflow)
-  'callback-exfil': 3, 'class-method-exfil': 20,
-  'conditional-split': 25, 'event-emitter-flow': 3,
-  'mixed-inline-split': 20, 'named-export-steal': 20,
-  'reexport-chain': 20, 'split-env-exfil': 20,
-  'split-npmrc-steal': 20, 'three-hop-chain': 20
-};
+  'callback-exfil', 'class-method-exfil',
+  'conditional-split', 'event-emitter-flow',
+  'mixed-inline-split', 'named-export-steal',
+  'reexport-chain', 'split-env-exfil',
+  'split-npmrc-steal', 'three-hop-chain',
+];
 
 /**
  * Scan a directory silently and return the result
@@ -406,7 +353,7 @@ async function evaluateBenign(options = {}) {
 
     const result = await silentScan(extractedDir);
     const score = result.summary.riskScore;
-    const isFlagged = score > BENIGN_THRESHOLD;
+    const isFlagged = score >= BENIGN_THRESHOLD;
     if (isFlagged) flagged++;
 
     // Count JS files for size classification
@@ -593,7 +540,7 @@ async function evaluateBenignPyPI(options = {}) {
 
     const result = await silentScan(extractedDir);
     const score = result.summary.riskScore;
-    const isFlagged = score > BENIGN_THRESHOLD;
+    const isFlagged = score >= BENIGN_THRESHOLD;
     if (isFlagged) flagged++;
 
     const entry = { name: pkg, score, flagged: isFlagged };
@@ -624,10 +571,9 @@ async function evaluateAdversarial() {
   const adversarialDirExists = fs.existsSync(ADVERSARIAL_DIR);
 
   // v2.6.5: Use global ADR_THRESHOLD for honest measurement (no per-sample overfitting)
-  // Legacy per-sample thresholds preserved in ADVERSARIAL_THRESHOLDS/HOLDOUT_THRESHOLDS for reference
 
   // --- Adversarial samples ---
-  for (const name of Object.keys(ADVERSARIAL_THRESHOLDS)) {
+  for (const name of ADVERSARIAL_SAMPLES) {
     const sampleDir = path.join(ADVERSARIAL_DIR, name);
     if (!adversarialDirExists || !fs.existsSync(sampleDir)) {
       details.push({ name, score: 0, threshold: ADR_THRESHOLD, detected: false, error: 'directory not found (local-only)', source: 'adversarial' });
@@ -641,7 +587,7 @@ async function evaluateAdversarial() {
   }
 
   // --- Holdout samples (40) ---
-  for (const name of Object.keys(HOLDOUT_THRESHOLDS)) {
+  for (const name of HOLDOUT_SAMPLES) {
     let sampleDir = null;
     for (const hDir of HOLDOUT_DIRS) {
       const candidate = path.join(hDir, name);
@@ -660,7 +606,7 @@ async function evaluateAdversarial() {
 
   // Count only samples that exist on disk (exclude "directory not found")
   const available = details.filter(d => !d.error).length;
-  const total = Object.keys(ADVERSARIAL_THRESHOLDS).length + Object.keys(HOLDOUT_THRESHOLDS).length;
+  const total = ADVERSARIAL_SAMPLES.length + HOLDOUT_SAMPLES.length;
   const adr = available > 0 ? detected / available : 0;
 
   // Cohort separation: adversarial vs holdout
@@ -849,8 +795,8 @@ module.exports = {
   saveMetrics,
   silentScan,
   classifyDetectionSource,
-  ADVERSARIAL_THRESHOLDS,
-  HOLDOUT_THRESHOLDS,
+  ADVERSARIAL_SAMPLES,
+  HOLDOUT_SAMPLES,
   GT_THRESHOLD,
   BENIGN_THRESHOLD,
   ADR_THRESHOLD,

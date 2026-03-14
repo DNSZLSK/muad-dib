@@ -64,9 +64,9 @@ Please include the following information in your report:
 - We aim to release fixes before public disclosure
 - We request a 90-day disclosure window for complex issues
 
-## Detection Rules (v2.6.5)
+## Detection Rules (v2.6.9)
 
-MUAD'DIB uses 14 scanner modules (module-graph pre-analysis + 13 parallel scanners) + 5 behavioral anomaly detection features + ground truth validation, producing 129 rule IDs (124 RULES + 5 PARANOID):
+MUAD'DIB uses 14 scanner modules (module-graph pre-analysis + 13 parallel scanners) + 5 behavioral anomaly detection features + ground truth validation, producing 133 rule IDs (128 RULES + 5 PARANOID):
 
 ### AST Scanner
 
@@ -97,6 +97,9 @@ MUAD'DIB uses 14 scanner modules (module-graph pre-analysis + 13 parallel scanne
 | MUADDIB-SHELL-013 | FIFO + Netcat Reverse Shell (mkfifo + nc) | CRITICAL |
 | MUADDIB-SHELL-014 | Base64 Decode Pipe to Shell (base64 -d \| bash) | CRITICAL |
 | MUADDIB-SHELL-015 | Wget + Base64 Decode Two-Stage | HIGH |
+| MUADDIB-SHELL-016 | Curl IFS Variable Evasion (curl$IFS \| sh) | CRITICAL |
+| MUADDIB-SHELL-017 | Eval Curl Command Substitution (eval $(curl)) | CRITICAL |
+| MUADDIB-SHELL-018 | Shell -c Curl Execution (sh -c curl) | HIGH |
 
 ### Package Scanner
 
@@ -145,6 +148,15 @@ MUAD'DIB uses 14 scanner modules (module-graph pre-analysis + 13 parallel scanne
 | MUADDIB-AST-034 | Download-Execute Binary (download + chmod + execSync) | CRITICAL | T1105 |
 | MUADDIB-AST-035 | IDE Task Persistence (tasks.json + runOn + writeFileSync) | HIGH | T1546 |
 | MUADDIB-AST-036 | VM Module Code Execution (vm.runInThisContext, vm.Script) | HIGH | T1059 |
+| MUADDIB-AST-037 | Reflect API Code Execution (Reflect.construct/apply) | CRITICAL | T1059 |
+| MUADDIB-AST-038 | Process Binding Abuse (process.binding/_linkedBinding) | CRITICAL | T1059 |
+| MUADDIB-AST-039 | Worker Thread Code Execution (new Worker eval:true) | HIGH | T1059 |
+| MUADDIB-AST-040 | Remote Code Loading (fetch + eval/Function) | CRITICAL | T1105 |
+| MUADDIB-AST-041 | Credential Regex Harvesting (regex + network) | HIGH | T1552 |
+| MUADDIB-AST-042 | WASM Host Import Sink (WASM + network callbacks) | CRITICAL | T1059 |
+| MUADDIB-AST-043 | Proxy Data Interception (Proxy trap + network) | CRITICAL | T1557 |
+| MUADDIB-AST-044 | Built-in Method Override Exfiltration | HIGH | T1557 |
+| MUADDIB-AST-045 | Stream Credential Interception (Transform/Duplex + regex) | HIGH | T1557 |
 
 ### AI Config Scanner (v2.2)
 
@@ -196,6 +208,7 @@ MUAD'DIB uses 14 scanner modules (module-graph pre-analysis + 13 parallel scanne
 | MUADDIB-PYPI-002 | PyPI Typosquatting | HIGH |
 | MUADDIB-GHA-001 | Shai-Hulud GH Actions Backdoor | CRITICAL |
 | MUADDIB-GHA-002 | Workflow Injection | HIGH |
+| MUADDIB-GHA-003 | GitHub Actions Pwn Request | CRITICAL |
 
 ### Sandbox Rules (Docker) — Dynamic Analysis
 
@@ -360,7 +373,7 @@ The sandbox simulates CI environments by setting: `CI=true`, `GITHUB_ACTIONS=tru
 2. **Signed commits**: Use GPG-signed commits when possible
 3. **Review dependencies**: Check new dependencies before adding them
 
-## Threat Model (v2.6.5)
+## Threat Model (v2.6.9)
 
 MUAD'DIB 2.6 uses a **triple detection approach**:
 
