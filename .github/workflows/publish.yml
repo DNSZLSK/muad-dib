@@ -20,7 +20,29 @@ jobs:
         with:
           node-version: '20'
           registry-url: https://registry.npmjs.org
+      - name: Pre-install check
+        run: |
+          echo "=== package.json BEFORE npm ci ==="
+          cat package.json | grep -A 20 '"dependencies"'
+          echo "=== loadash anywhere? ==="
+          grep -r "loadash" . --include="*.json" -l || echo "NOT FOUND"
       - run: npm ci
+      - name: Post-install check
+        run: |
+          echo "=== package.json AFTER npm ci ==="
+          cat package.json | grep -A 20 '"dependencies"'
+          echo "=== loadash in node_modules? ==="
+          ls node_modules/loadash/package.json 2>/dev/null && cat node_modules/loadash/package.json | head -5 || echo "NOT FOUND"
+          echo "=== npm pack dry run ==="
+          npm pack --dry-run 2>&1 | head -5
+          echo "=== diff package.json ==="
+          git diff package.json || echo "NO DIFF"
+      - name: Verify no typosquat contamination
+        run: |
+          if grep -q '"loadash"' package.json; then
+            echo "::error::loadash typosquat detected in package.json — aborting publish"
+            exit 1
+          fi
       - run: npm test
       - name: Validate tag matches package.json version
         run: |
