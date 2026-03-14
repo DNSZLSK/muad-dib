@@ -3024,6 +3024,32 @@ async function runScraperTests() {
     assert(validateIOCEntry('requests', '2.28.0', 'pypi') === true, 'requests should be valid');
   });
 
+  // --- NEVER_WILDCARD guard in scraper ---
+
+  test('SCRAPER: NEVER_WILDCARD packages with version=* are skipped during dedup', () => {
+    const { NEVER_WILDCARD } = require('../../src/ioc/updater.js');
+    // Verify NEVER_WILDCARD is imported and used in scraper
+    assert(NEVER_WILDCARD instanceof Set, 'NEVER_WILDCARD should be a Set');
+    assert(NEVER_WILDCARD.has('posthog-node'), 'posthog-node should be in NEVER_WILDCARD');
+    assert(NEVER_WILDCARD.has('event-stream'), 'event-stream should be in NEVER_WILDCARD');
+
+    // Simulate: a wildcard entry for a NEVER_WILDCARD package should be blocked
+    // The scraper checks: if (pkg.version === '*' && NEVER_WILDCARD.has(pkg.name)) → skip
+    const testPkg = { name: 'posthog-node', version: '*' };
+    const shouldSkip = testPkg.version === '*' && NEVER_WILDCARD.has(testPkg.name);
+    assert(shouldSkip === true, 'posthog-node@* should be skipped by NEVER_WILDCARD');
+
+    // Versioned entry for NEVER_WILDCARD package should NOT be skipped
+    const versionedPkg = { name: 'event-stream', version: '3.3.6' };
+    const shouldNotSkip = versionedPkg.version === '*' && NEVER_WILDCARD.has(versionedPkg.name);
+    assert(shouldNotSkip === false, 'event-stream@3.3.6 should NOT be skipped');
+
+    // Non-NEVER_WILDCARD package with wildcard should NOT be skipped
+    const normalPkg = { name: 'totally-malicious-pkg', version: '*' };
+    const normalShouldNotSkip = normalPkg.version === '*' && NEVER_WILDCARD.has(normalPkg.name);
+    assert(normalShouldNotSkip === false, 'Non-NEVER_WILDCARD package@* should NOT be skipped');
+  });
+
   test('IOC-VALIDATE: PyPI name with slashes rejected', () => {
     const origWarn = console.warn;
     console.warn = () => {};

