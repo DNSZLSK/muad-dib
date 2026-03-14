@@ -20,29 +20,21 @@ jobs:
         with:
           node-version: '20'
           registry-url: https://registry.npmjs.org
-      - name: Pre-install check
+      - name: Verify no tarball contamination
         run: |
-          echo "=== package.json BEFORE npm ci ==="
-          cat package.json | grep -A 20 '"dependencies"'
-          echo "=== loadash anywhere? ==="
-          grep -r "loadash" . --include="*.json" -l || echo "NOT FOUND"
-      - run: npm ci
-      - name: Post-install check
-        run: |
-          echo "=== package.json AFTER npm ci ==="
-          cat package.json | grep -A 20 '"dependencies"'
-          echo "=== loadash in node_modules? ==="
-          ls node_modules/loadash/package.json 2>/dev/null && cat node_modules/loadash/package.json | head -5 || echo "NOT FOUND"
-          echo "=== npm pack dry run ==="
-          npm pack --dry-run 2>&1 | head -5
-          echo "=== diff package.json ==="
-          git diff package.json || echo "NO DIFF"
-      - name: Verify no typosquat contamination
-        run: |
-          if grep -q '"loadash"' package.json; then
-            echo "::error::loadash typosquat detected in package.json — aborting publish"
+          # Guard 1: package/ directory must not exist (npm pack residue overwrites package.json in tarball)
+          if [ -d "package" ]; then
+            echo "::error::package/ directory found — this overwrites package.json in the published tarball. Remove it."
             exit 1
           fi
+          # Guard 2: loadash typosquat must not be in dependencies (overrides is OK)
+          if node -e "const d=require('./package.json').dependencies||{}; if(d.loadash){process.exit(1)}"; then
+            echo "package.json dependencies: clean"
+          else
+            echo "::error::loadash typosquat found in package.json dependencies — aborting publish"
+            exit 1
+          fi
+      - run: npm ci
       - run: npm test
       - name: Validate tag matches package.json version
         run: |

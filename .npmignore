@@ -41,6 +41,9 @@ index.html
 src/ioc/data/iocs.json
 src/ioc/data/iocs-compact.json
 
+# npm pack extraction residue (CRITICAL: overwrites package.json in tarball)
+package/
+
 # Windows / temp artifacts
 nul
 tmp-*
