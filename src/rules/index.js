@@ -1309,6 +1309,15 @@ const RULES = {
     ],
     mitre: 'T1059'
   },
+  wasm_standalone: {
+    id: 'MUADDIB-AST-046',
+    name: 'WASM Module Load (Standalone)',
+    severity: 'MEDIUM',
+    confidence: 'medium',
+    description: 'Module WebAssembly charge sans sink reseau detectable. Usage legitime frequent (cryptographie, traitement d\'image, codecs). Le WASM cache le flux de controle — verifier le fichier .wasm manuellement.',
+    references: ['https://attack.mitre.org/techniques/T1027/'],
+    mitre: 'T1027'
+  },
   credential_regex_harvest: {
     id: 'MUADDIB-AST-041',
     name: 'Credential Regex Harvesting',

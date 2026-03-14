@@ -64,9 +64,9 @@ Please include the following information in your report:
 - We aim to release fixes before public disclosure
 - We request a 90-day disclosure window for complex issues
 
-## Detection Rules (v2.6.9)
+## Detection Rules (v2.7.5)
 
-MUAD'DIB uses 14 scanner modules (module-graph pre-analysis + 13 parallel scanners) + 5 behavioral anomaly detection features + ground truth validation, producing 133 rule IDs (128 RULES + 5 PARANOID):
+MUAD'DIB uses 14 scanner modules (module-graph pre-analysis + 13 parallel scanners) + 5 behavioral anomaly detection features + ground truth validation, producing 134 rule IDs (129 RULES + 5 PARANOID):
 
 ### AST Scanner
 
@@ -157,6 +157,7 @@ MUAD'DIB uses 14 scanner modules (module-graph pre-analysis + 13 parallel scanne
 | MUADDIB-AST-043 | Proxy Data Interception (Proxy trap + network) | CRITICAL | T1557 |
 | MUADDIB-AST-044 | Built-in Method Override Exfiltration | HIGH | T1557 |
 | MUADDIB-AST-045 | Stream Credential Interception (Transform/Duplex + regex) | HIGH | T1557 |
+| MUADDIB-AST-046 | WASM Module Load Standalone (no network sinks) | MEDIUM | T1027 |
 
 ### AI Config Scanner (v2.2)
 
@@ -373,7 +374,7 @@ The sandbox simulates CI environments by setting: `CI=true`, `GITHUB_ACTIONS=tru
 2. **Signed commits**: Use GPG-signed commits when possible
 3. **Review dependencies**: Check new dependencies before adding them
 
-## Threat Model (v2.6.9)
+## Threat Model (v2.7.5)
 
 MUAD'DIB 2.6 uses a **triple detection approach**:
 

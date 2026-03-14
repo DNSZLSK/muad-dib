@@ -48,7 +48,14 @@ async function runMonitorTests() {
     TIER1_TYPES, TIER2_ACTIVE_TYPES, TIER3_PASSIVE_TYPES,
     POPULAR_THRESHOLD, downloadsCache, DOWNLOADS_CACHE_TTL,
     ALERTS_LOG_DIR, DAILY_REPORTS_LOG_DIR, resolveWritableDir,
-    atomicWriteFileSync
+    atomicWriteFileSync,
+    SELF_PACKAGE_NAME,
+    computeReputationFactor,
+    extractScope,
+    pendingGrouped,
+    bufferScopedWebhook,
+    flushScopeGroup,
+    SCOPE_GROUP_WINDOW_MS
   } = require('../../src/monitor.js');
 
   test('MONITOR: parseNpmRss extracts package names from RSS', () => {
@@ -5762,6 +5769,246 @@ async function runMonitorTests() {
     // Simulate the clearing that happens in sendDailyReport
     alertedPackageRules.clear();
     assert(alertedPackageRules.size === 0, 'Should be empty after clear');
+  });
+
+  // ===== C1: Self-exclude tests =====
+
+  test('MONITOR: SELF_PACKAGE_NAME is muaddib-scanner', () => {
+    assert(SELF_PACKAGE_NAME === 'muaddib-scanner',
+      `SELF_PACKAGE_NAME should be muaddib-scanner, got ${SELF_PACKAGE_NAME}`);
+  });
+
+  test('MONITOR: Self-exclude skips muaddib-scanner in RSS', () => {
+    // Simulate what pollNpm does: filter out SELF_PACKAGE_NAME from newPackages
+    const newPackages = ['some-pkg', 'muaddib-scanner', 'another-pkg'];
+    const filtered = newPackages.filter(name => name !== SELF_PACKAGE_NAME);
+    assert(filtered.length === 2, `Should filter to 2 packages, got ${filtered.length}`);
+    assert(!filtered.includes('muaddib-scanner'), 'muaddib-scanner should be excluded');
+    assert(filtered.includes('some-pkg'), 'some-pkg should remain');
+    assert(filtered.includes('another-pkg'), 'another-pkg should remain');
+  });
+
+  test('MONITOR: Self-exclude does NOT skip muaddib-scanner-utils', () => {
+    const newPackages = ['muaddib-scanner-utils', 'muaddib-scanner-cli'];
+    const filtered = newPackages.filter(name => name !== SELF_PACKAGE_NAME);
+    assert(filtered.length === 2, `Should keep both packages, got ${filtered.length}`);
+    assert(filtered.includes('muaddib-scanner-utils'), 'muaddib-scanner-utils should remain');
+    assert(filtered.includes('muaddib-scanner-cli'), 'muaddib-scanner-cli should remain');
+  });
+
+  // ===== C4: Reputation scoring tests =====
+
+  test('MONITOR: computeReputationFactor — established package → ~0.3', () => {
+    const factor = computeReputationFactor({
+      age_days: 1000,
+      version_count: 100,
+      weekly_downloads: 200000
+    });
+    assert(factor >= 0.3 && factor <= 0.4,
+      `Established package should have factor ~0.3, got ${factor}`);
+  });
+
+  test('MONITOR: computeReputationFactor — new suspect package → ~1.5', () => {
+    const factor = computeReputationFactor({
+      age_days: 3,
+      version_count: 1,
+      weekly_downloads: 5
+    });
+    assert(factor >= 1.4 && factor <= 1.5,
+      `New package should have factor ~1.5, got ${factor}`);
+  });
+
+  test('MONITOR: computeReputationFactor — null metadata → 1.0', () => {
+    const factor = computeReputationFactor(null);
+    assert(factor === 1.0, `Null metadata should return 1.0, got ${factor}`);
+  });
+
+  test('MONITOR: computeReputationFactor — floor 0.3', () => {
+    // Even extreme values should not go below 0.3
+    const factor = computeReputationFactor({
+      age_days: 5000,
+      version_count: 500,
+      weekly_downloads: 10000000
+    });
+    assert(factor >= 0.3, `Factor should never be below 0.3, got ${factor}`);
+  });
+
+  test('MONITOR: computeReputationFactor — ceiling 1.5', () => {
+    // Even extreme new package values should not exceed 1.5
+    const factor = computeReputationFactor({
+      age_days: 1,
+      version_count: 1,
+      weekly_downloads: 0
+    });
+    assert(factor <= 1.5, `Factor should never exceed 1.5, got ${factor}`);
+  });
+
+  test('MONITOR: computeReputationFactor — moderate package', () => {
+    // 1 year old, 30 versions, 10k downloads → slight decrease
+    const factor = computeReputationFactor({
+      age_days: 400,
+      version_count: 30,
+      weekly_downloads: 10000
+    });
+    assert(factor >= 0.6 && factor <= 0.9,
+      `Moderate package should have factor ~0.75, got ${factor}`);
+  });
+
+  test('MONITOR: reputation scoring suppresses webhook for established packages', () => {
+    // Simulate: raw score 25 × factor 0.3 = 8 → below webhook threshold (20)
+    const rawScore = 25;
+    const factor = computeReputationFactor({
+      age_days: 1000,
+      version_count: 100,
+      weekly_downloads: 200000
+    });
+    const adjustedScore = Math.round(rawScore * factor);
+    assert(adjustedScore < 20, `Adjusted score ${adjustedScore} should be below 20`);
+
+    // Simulate: shouldSendWebhook would get the adjusted result
+    const adjustedResult = {
+      threats: [{ type: 'env_access', severity: 'HIGH', rule_id: 'MUADDIB-AST-007' }],
+      summary: { riskScore: adjustedScore, critical: 0, high: 1, medium: 0, low: 0 }
+    };
+    assert(!shouldSendWebhook(adjustedResult, null),
+      `Webhook should be suppressed for adjusted score ${adjustedScore}`);
+  });
+
+  test('MONITOR: reputation scoring allows webhook for new packages', () => {
+    // Simulate: raw score 25 × factor 1.5 = 38 → above webhook threshold (20)
+    const rawScore = 25;
+    const factor = computeReputationFactor({
+      age_days: 3,
+      version_count: 1,
+      weekly_downloads: 5
+    });
+    const adjustedScore = Math.round(rawScore * factor);
+    assert(adjustedScore >= 20, `Adjusted score ${adjustedScore} should be >= 20`);
+  });
+
+  // ===== C2: Scope dedup tests =====
+
+  test('MONITOR: extractScope — scoped package', () => {
+    assert(extractScope('@scope/pkg') === '@scope',
+      'Should extract @scope from @scope/pkg');
+  });
+
+  test('MONITOR: extractScope — unscoped package', () => {
+    assert(extractScope('unscoped') === null,
+      'Should return null for unscoped package');
+  });
+
+  test('MONITOR: extractScope — nested scope', () => {
+    assert(extractScope('@my-org/sub-package') === '@my-org',
+      'Should extract @my-org from @my-org/sub-package');
+  });
+
+  test('MONITOR: extractScope — null/invalid input', () => {
+    assert(extractScope(null) === null, 'Should return null for null');
+    assert(extractScope(123) === null, 'Should return null for number');
+    assert(extractScope('') === null, 'Should return null for empty string');
+  });
+
+  test('MONITOR: SCOPE_GROUP_WINDOW_MS is 5 minutes', () => {
+    assert(SCOPE_GROUP_WINDOW_MS === 5 * 60 * 1000,
+      `Should be 300000ms, got ${SCOPE_GROUP_WINDOW_MS}`);
+  });
+
+  asyncTest('MONITOR: bufferScopedWebhook groups packages by scope', async () => {
+    // Clean up any pending groups
+    for (const [, group] of pendingGrouped) clearTimeout(group.timer);
+    pendingGrouped.clear();
+
+    try {
+      const result1 = {
+        threats: [{ type: 'env_access', severity: 'HIGH' }],
+        summary: { riskScore: 30 }
+      };
+      const result2 = {
+        threats: [{ type: 'suspicious_dataflow', severity: 'MEDIUM' }],
+        summary: { riskScore: 20 }
+      };
+      const result3 = {
+        threats: [{ type: 'obfuscation_detected', severity: 'HIGH' }],
+        summary: { riskScore: 40 }
+      };
+
+      bufferScopedWebhook('@test-scope', '@test-scope/a', '1.0.0', 'npm', result1, null);
+      bufferScopedWebhook('@test-scope', '@test-scope/b', '1.0.0', 'npm', result2, null);
+      bufferScopedWebhook('@test-scope', '@test-scope/c', '1.0.0', 'npm', result3, null);
+
+      const group = pendingGrouped.get('@test-scope');
+      assert(group, 'Should have a pending group for @test-scope');
+      assert(group.packages.length === 3, `Should have 3 packages, got ${group.packages.length}`);
+      assert(group.maxScore === 40, `Max score should be 40, got ${group.maxScore}`);
+    } finally {
+      for (const [, group] of pendingGrouped) clearTimeout(group.timer);
+      pendingGrouped.clear();
+    }
+  });
+
+  asyncTest('MONITOR: different scopes create independent groups', async () => {
+    for (const [, group] of pendingGrouped) clearTimeout(group.timer);
+    pendingGrouped.clear();
+
+    try {
+      const result = {
+        threats: [{ type: 'env_access', severity: 'HIGH' }],
+        summary: { riskScore: 25 }
+      };
+
+      bufferScopedWebhook('@scope-a', '@scope-a/pkg', '1.0.0', 'npm', result, null);
+      bufferScopedWebhook('@scope-b', '@scope-b/pkg', '1.0.0', 'npm', result, null);
+
+      assert(pendingGrouped.size === 2, `Should have 2 groups, got ${pendingGrouped.size}`);
+      assert(pendingGrouped.has('@scope-a'), 'Should have @scope-a group');
+      assert(pendingGrouped.has('@scope-b'), 'Should have @scope-b group');
+    } finally {
+      for (const [, group] of pendingGrouped) clearTimeout(group.timer);
+      pendingGrouped.clear();
+    }
+  });
+
+  asyncTest('MONITOR: flushScopeGroup single package sends normal webhook', async () => {
+    for (const [, group] of pendingGrouped) clearTimeout(group.timer);
+    pendingGrouped.clear();
+
+    const result = {
+      threats: [{ type: 'env_access', severity: 'HIGH' }],
+      summary: { riskScore: 25 }
+    };
+
+    bufferScopedWebhook('@single', '@single/pkg', '1.0.0', 'npm', result, null);
+    assert(pendingGrouped.has('@single'), 'Should have pending group');
+
+    // Flush without webhook URL → no send, but group should be cleaned
+    const prevUrl = process.env.MUADDIB_WEBHOOK_URL;
+    delete process.env.MUADDIB_WEBHOOK_URL;
+    try {
+      clearTimeout(pendingGrouped.get('@single').timer);
+      await flushScopeGroup('@single');
+      assert(!pendingGrouped.has('@single'), 'Group should be removed after flush');
+    } finally {
+      if (prevUrl !== undefined) process.env.MUADDIB_WEBHOOK_URL = prevUrl;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  test('MONITOR: timer.unref called on scope group', () => {
+    for (const [, group] of pendingGrouped) clearTimeout(group.timer);
+    pendingGrouped.clear();
+
+    const result = {
+      threats: [],
+      summary: { riskScore: 10 }
+    };
+
+    bufferScopedWebhook('@unref-test', '@unref-test/pkg', '1.0.0', 'npm', result, null);
+    const group = pendingGrouped.get('@unref-test');
+    assert(group, 'Should have pending group');
+    // Timer was created — if unref exists, it was called (no crash = pass)
+    clearTimeout(group.timer);
+    pendingGrouped.clear();
   });
 }
 

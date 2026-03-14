@@ -19,7 +19,7 @@ Priorités :
 ## Commands
 
 ```bash
-npm test          # Run all tests (custom framework, 2042 tests across 49 files)
+npm test          # Run all tests (custom framework, 2093 tests across 49 files)
 npm run lint      # ESLint with security plugin
 npm run scan      # Self-scan: node bin/muaddib.js scan .
 npm run update    # Download latest IOCs
@@ -42,7 +42,7 @@ Tests use a custom framework in `tests/run-tests.js` (no Jest). Test helpers:
 
 **CLI entry:** `bin/muaddib.js` — yargs-based dispatcher, delegates to `src/index.js`.
 
-**Core orchestration:** `src/index.js` — `run(targetPath, options)` runs cross-file module graph analysis first, then launches 13 individual scanners in parallel via `Promise.all` (14 scanner modules total), then deduplicates, applies FP reductions, scores using per-file max (v2.2.11: `riskScore = min(100, max(file_scores) + package_level_score)`, severity weights: CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1), applies intent coherence analysis (intra-file source-sink pairing), enriches with rules/playbooks (133 rules), and outputs (CLI/JSON/HTML/SARIF). Result includes `warnings: []` array (v2.6.5) for incomplete scan notifications (module graph timeout/skip, deobfuscation failures). Exports `isPackageLevelThreat` and `computeGroupScore` for testing.
+**Core orchestration:** `src/index.js` — `run(targetPath, options)` runs cross-file module graph analysis first, then launches 13 individual scanners in parallel via `Promise.all` (14 scanner modules total), then deduplicates, applies FP reductions, scores using per-file max (v2.2.11: `riskScore = min(100, max(file_scores) + package_level_score)`, severity weights: CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1), applies intent coherence analysis (intra-file source-sink pairing), enriches with rules/playbooks (134 rules), and outputs (CLI/JSON/HTML/SARIF). Result includes `warnings: []` array (v2.6.5) for incomplete scan notifications (module graph timeout/skip, deobfuscation failures). Exports `isPackageLevelThreat` and `computeGroupScore` for testing.
 
 **Scanner pattern:** Each of the 13 individual scanners in `src/scanner/` returns `Array<{type, severity, message, file}>`:
 - `file` must use `path.relative(targetPath, absolutePath)` for Windows compatibility
@@ -102,7 +102,7 @@ Tests use a custom framework in `tests/run-tests.js` (no Jest). Test helpers:
 
 **FP Reduction P2 (v2.3.0):** FPR ~13% → 8.9% (47/527). Dataflow scanner: os.* methods split into `fingerprint_read` (hostname, networkInterfaces, userInfo, homedir) and `telemetry_read` (platform, arch); telemetry-only findings capped at HIGH. Scoring: `module_compile` added to FP_COUNT_THRESHOLDS (>3 CRITICAL→LOW). Package scanner: `DEP_FP_WHITELIST` (es5-ext, bootstrap-sass), npm alias skip.
 
-**FP Reduction P3 (v2.3.1):** FPR 8.2% → 7.4% (39/525). Scoring: `require_cache_poison` single hit CRITICAL→HIGH; HTTP client prototype whitelist (>20 hits → MEDIUM); obfuscation: .cjs/.mjs >100KB → LOW; entropy: encoding table paths → LOW. ADR: 100% → 98.7% (77/78, 1 documented miss: require-cache-poison). 8 new rules (AST-024 to AST-031), rule count 94 → 102. Tests 1317 → 1387. Current rule count: **133** (128 RULES + 5 PARANOID) as of v2.6.9.
+**FP Reduction P3 (v2.3.1):** FPR 8.2% → 7.4% (39/525). Scoring: `require_cache_poison` single hit CRITICAL→HIGH; HTTP client prototype whitelist (>20 hits → MEDIUM); obfuscation: .cjs/.mjs >100KB → LOW; entropy: encoding table paths → LOW. ADR: 100% → 98.7% (77/78, 1 documented miss: require-cache-poison). 8 new rules (AST-024 to AST-031), rule count 94 → 102. Tests 1317 → 1387. Current rule count: **134** (129 RULES + 5 PARANOID) as of v2.7.5.
 
 **Security Audit (v2.5.0–v2.5.6):** Comprehensive security audit with 41 issues remediated across 5 versions: 10 initial remediations (14 CRITICAL, 18 HIGH) in v2.5.0, sandbox fixes (npm install timeout, preload timing, Docker caps, /proc/uptime) in v2.5.1–v2.5.3, 3 CRITICAL remediations (#10 native addon, #15 atomic writes, #18 AST bypasses) in v2.5.4, 14 HIGH remediations in v2.5.5, 5 MEDIUM remediations completing 41/41 in v2.5.6.
 
@@ -125,6 +125,8 @@ Tests use a custom framework in `tests/run-tests.js` (no Jest). Test helpers:
 **Audit Remediation (v2.6.5):** Post-audit ANSSI hardening — 6 categories of fixes: (1) Critical safety: removed self-dependency in package.json, recursion depth guard (MAX_TAINT_DEPTH=50) in module-graph.js, redirect limit (MAX_REDIRECTS=5) in download.js, `warnings[]` array in scan results for incomplete scan notifications. (2) Detection bypasses: `env_access` conditional classification in intent-graph.js (sensitive env vars only), percentage guard count-based fix in scoring.js, array destructuring + object alias taint propagation in dataflow.js. (3) Evaluation methodology: global ADR_THRESHOLD=20 (replaces per-sample thresholds), scoped TPR reporting (Node.js vs all), stratified FPR by package size, CI smoke tests. (4) IOC input validation: package name + version format validation in scraper.js. (5) Paranoid mode: eval/Function/require alias tracking in scanParanoid. (6) Documentation: methodology caveats, honest metrics. Tests: 1940 → **1974** (+34).
 
 **Audit Remediation (v2.6.9):** Post-audit technical fixes — 4 phases: (1) Critical: SSRF IPv6 bypass fix (safeDnsResolve resolves IPv4+IPv6), monitor scoring weight alignment (HIGH=10, MEDIUM=3), package.json overrides typo fix, CI version validation. (2) Documentation: rule count, test count, version alignment across README/SECURITY/CHANGELOG/CLAUDE.md. (3) Evaluation methodology: per-sample thresholds replaced with flat sample arrays, FPR operator consistency (>= not >), evaluation smoke tests. (4) Code hardening: Object.create(null) for prototype pollution prevention in module-graph.js, 3 new shell IFS evasion patterns (SHELL-016 to SHELL-018), charcode range validation in deobfuscator. Tests: 2009 → **2042** (+33). Rules: 130 → **133** (128 RULES + 5 PARANOID). Test files: 46 → **49**.
+
+**Webhook Noise Reduction (v2.7.5):** Monitor webhook volume reduction — 4 chantiers: (1) Self-exclude: `SELF_PACKAGE_NAME` constant skips `muaddib-scanner` in pollNpm(). (2) WASM standalone: new rule `wasm_standalone` (AST-046, MEDIUM) for WebAssembly without network sinks, mutually exclusive with `wasm_host_sink` (CRITICAL). (3) Reputation scoring: `computeReputationFactor()` adjusts webhook score based on age/versions/downloads (floor 0.3, ceiling 1.5), IOC matches bypass. (4) Scope dedup: `bufferScopedWebhook()` groups scoped npm packages within 5min window into single grouped Discord webhook. Tests: 2042 → **2093** (+51). Rules: 133 → **134** (129 RULES + 5 PARANOID).
 
 **New AST detection rules (v2.2):**
 - MUADDIB-AST-008 to AST-012: Dynamic require with decode patterns, sandbox evasion, detached process, binary dropper patterns
@@ -167,6 +169,7 @@ Tests use a custom framework in `tests/run-tests.js` (no Jest). Test helpers:
 - MUADDIB-ENTROPY-004: Fragmented high entropy cluster (many short high-entropy strings — MEDIUM, T1027)
 - MUADDIB-INTENT-001: Intent credential exfiltration (intra-file credential_read + exec/network sink — CRITICAL, T1041)
 - MUADDIB-INTENT-002: Intent command output exfiltration (intra-file command_output + network sink — HIGH, T1041)
+- MUADDIB-AST-046: WASM standalone module load (WebAssembly without network sinks — MEDIUM, T1027)
 
 **Intent Graph Analysis (v2.6.0):** `src/intent-graph.js` performs intra-file source-sink coherence analysis. When a single file contains both a high-confidence credential source (sensitive_string, env_harvesting_dynamic, credential_regex_harvest) AND a dangerous sink (eval, exec, network), the intent graph boosts the score via a coherence matrix. Design principles: (1) INTRA-FILE pairing only — cross-file co-occurrence without proven data flow causes FP explosion on SDKs. (2) Cross-file detection delegated to module-graph.js (proven taint paths). (3) LOW severity threats excluded from pairing (respects FP reductions). (4) env_access and suspicious_dataflow excluded (standard config / double-counting). Intent bonus capped at 30 in scoring.js. Pipeline: deduplication → applyFPReductions → buildIntentPairs → enrichWithRules → calculateRiskScore.
 
@@ -184,7 +187,7 @@ The following commands are internal infrastructure/dev tools. They work when cal
 - `muaddib stats` — Daily scan statistics and FP rate. Uses monitor exports.
 - `src/commands/evaluate.js` — `muaddib evaluate` measures TPR/FPR/ADR. Dev-only evaluation command.
 
-**Rules & playbooks:** Threat types map to rules in `src/rules/index.js` (133 rules: 128 RULES + 5 PARANOID, MITRE ATT&CK mapped) and remediation text in `src/response/playbooks.js`. Both keyed by threat `type` string.
+**Rules & playbooks:** Threat types map to rules in `src/rules/index.js` (134 rules: 129 RULES + 5 PARANOID, MITRE ATT&CK mapped) and remediation text in `src/response/playbooks.js`. Both keyed by threat `type` string.
 
 **IOC system (3-tier):**
 1. `src/ioc/data/iocs-compact.json` (~5MB, ships with npm) — wildcards[] + versioned{} Maps for O(1) lookup
@@ -199,7 +202,7 @@ The following commands are internal infrastructure/dev tools. They work when cal
 2. Import in `src/index.js`, add to the Promise.all destructuring and the threats spread
 3. Add rule entry in `src/rules/index.js` with id, name, severity, confidence, description, mitre
 4. Add playbook entry in `src/response/playbooks.js`
-5. Add tests in the appropriate test file under `tests/` (43 modular test files)
+5. Add tests in the appropriate test file under `tests/` (49 modular test files)
 6. Create test fixtures in `tests/samples/my-scanner/`
 
 ## Key Constraints
