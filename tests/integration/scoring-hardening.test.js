@@ -289,13 +289,31 @@ async function runScoringHardeningTests() {
       `remote_code_load in dist/ should be HIGH (1-notch), got ${threats[0].severity}`);
   });
 
-  test('FP-P6 Fix2: proxy_data_intercept in dist/ gets downgrade (no longer exempt)', () => {
+  test('P8: proxy_data_intercept in dist/ gets 2-notch downgrade (bundler artifact)', () => {
     const threats = [
       { type: 'proxy_data_intercept', severity: 'CRITICAL', file: 'dist/vendor.js', message: 'proxy+net' }
     ];
     applyFPReductions(threats, null, null);
-    assert(threats[0].severity === 'HIGH',
-      `proxy_data_intercept in dist/ should be HIGH (1-notch), got ${threats[0].severity}`);
+    assert(threats[0].severity === 'MEDIUM',
+      `proxy_data_intercept in dist/ should be MEDIUM (2-notch bundler artifact), got ${threats[0].severity}`);
+  });
+
+  test('P8: proxy_data_intercept HIGH in dist/ gets downgraded to LOW', () => {
+    const threats = [
+      { type: 'proxy_data_intercept', severity: 'HIGH', file: 'dist/chunk-abc.js', message: 'proxy trap' }
+    ];
+    applyFPReductions(threats, null, null);
+    assert(threats[0].severity === 'LOW',
+      `proxy_data_intercept HIGH in dist/ should be LOW (2-notch), got ${threats[0].severity}`);
+  });
+
+  test('P8: proxy_data_intercept in source file stays CRITICAL', () => {
+    const threats = [
+      { type: 'proxy_data_intercept', severity: 'CRITICAL', file: 'src/handler.js', message: 'proxy+net' }
+    ];
+    applyFPReductions(threats, null, null);
+    assert(threats[0].severity === 'CRITICAL',
+      `proxy_data_intercept in src/ should stay CRITICAL, got ${threats[0].severity}`);
   });
 
   test('FP-P6 Fix2: remote_code_load in source file stays CRITICAL', () => {

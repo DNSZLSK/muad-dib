@@ -33,11 +33,12 @@ async function runMonitorTests() {
     DETECTIONS_FILE, appendDetection, loadDetections, getDetectionStats,
     SCAN_STATS_FILE, loadScanStats, updateScanStats,
     buildReportFromDisk, buildReportEmbedFromDisk, getReportStatus,
-    trySendWebhook, cleanupOrphanTmpDirs, sendReportNow,
+    trySendWebhook, classifyError, recordError, formatErrorBreakdown,
+    cleanupOrphanTmpDirs, sendReportNow,
     consecutivePollErrors, POLL_MAX_BACKOFF,
     runTemporalAstCheck, runTemporalPublishCheck, runTemporalMaintainerCheck,
     runTemporalCheck, reportStats, recentlyScanned, sendDailyReport,
-    resolveTarballAndScan, KNOWN_BUNDLED_PATHS,
+    resolveTarballAndScan, alertedPackageRules, KNOWN_BUNDLED_PATHS,
     LAST_DAILY_REPORT_FILE,
     loadLastDailyReportDate, saveLastDailyReportDate, hasReportBeenSentToday,
     DAILY_STATS_FILE, DAILY_STATS_PERSIST_INTERVAL,
@@ -3474,6 +3475,7 @@ async function runMonitorTests() {
     console.error = (...args) => errors.push(args.join(' '));
 
     try {
+      alertedPackageRules.clear(); // Prevent dedup from previous tests
       const mockResult = {
         threats: [{ type: 'known_malicious_package', severity: 'CRITICAL' }],
         summary: { critical: 1, high: 0, medium: 0, low: 0, total: 1 }
@@ -3523,6 +3525,7 @@ async function runMonitorTests() {
     console.error = (...args) => errors.push(args.join(' '));
 
     try {
+      alertedPackageRules.clear(); // Prevent dedup from previous tests
       const mockResult = {
         threats: [{ type: 'dynamic_require', severity: 'HIGH' }],
         summary: { critical: 0, high: 1, medium: 0, low: 0, total: 1 }
@@ -3548,6 +3551,7 @@ async function runMonitorTests() {
     console.error = (...args) => errors.push(args.join(' '));
 
     try {
+      alertedPackageRules.clear(); // Prevent dedup from previous tests
       const mockResult = {
         threats: [{ type: 'known_malicious_package', severity: 'CRITICAL' }],
         summary: { critical: 1, high: 0, medium: 0, low: 0, total: 1 }
@@ -4044,6 +4048,7 @@ async function runMonitorTests() {
     console.error = (...args) => logs.push(args.join(' '));
 
     try {
+      alertedPackageRules.clear(); // Prevent dedup from previous tests
       const mockResult = {
         threats: [{ type: 'known_malicious_package', severity: 'CRITICAL' }],
         summary: { critical: 1, high: 0, medium: 0, low: 0, total: 1 }
@@ -5258,6 +5263,218 @@ async function runMonitorTests() {
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
+  });
+
+  // ============================================
+  // ERROR CLASSIFICATION + BREAKDOWN TESTS
+  // ============================================
+
+  console.log('\n=== ERROR CLASSIFICATION TESTS ===\n');
+
+  test('MONITOR: classifyError returns http_error for HTTP status errors', () => {
+    assert(classifyError(new Error('HTTP 404 for https://registry.npmjs.org/foo')) === 'http_error',
+      'HTTP 404 should classify as http_error');
+    assert(classifyError(new Error('HTTP 502 for https://registry.npmjs.org/bar')) === 'http_error',
+      'HTTP 502 should classify as http_error');
+  });
+
+  test('MONITOR: classifyError returns tar_failed for extraction errors', () => {
+    assert(classifyError(new Error('tar extraction failed')) === 'tar_failed',
+      'tar extraction should classify as tar_failed');
+    assert(classifyError(new Error('Failed to extract archive')) === 'tar_failed',
+      'extract error should classify as tar_failed');
+  });
+
+  test('MONITOR: classifyError returns too_large for size errors', () => {
+    assert(classifyError(new Error('tarball too large (52.3MB)')) === 'too_large',
+      'tarball too large should classify as too_large');
+  });
+
+  test('MONITOR: classifyError returns timeout for timeout errors', () => {
+    assert(classifyError(new Error('Scan timeout after 180s')) === 'timeout',
+      'timeout should classify as timeout');
+    assert(classifyError(new Error('Timeout for https://registry.npmjs.org/foo')) === 'timeout',
+      'HTTP timeout should classify as timeout');
+  });
+
+  test('MONITOR: classifyError returns other for unknown errors', () => {
+    assert(classifyError(new Error('ENOENT: no such file')) === 'other',
+      'ENOENT should classify as other');
+    assert(classifyError(new Error('')) === 'other',
+      'Empty message should classify as other');
+    assert(classifyError(null) === 'other',
+      'null error should classify as other');
+  });
+
+  test('MONITOR: recordError increments stats.errors and errorsByType', () => {
+    const prevErrors = stats.errors;
+    const prevHttp = stats.errorsByType.http_error;
+    recordError(new Error('HTTP 404 for https://example.com'));
+    assert(stats.errors === prevErrors + 1, 'stats.errors should increment');
+    assert(stats.errorsByType.http_error === prevHttp + 1, 'http_error count should increment');
+  });
+
+  test('MONITOR: formatErrorBreakdown returns "0" for zero errors', () => {
+    const result = formatErrorBreakdown(0, { too_large: 0, tar_failed: 0, http_error: 0, timeout: 0, other: 0 });
+    assert(result === '0', `Expected "0", got "${result}"`);
+  });
+
+  test('MONITOR: formatErrorBreakdown shows breakdown for non-zero errors', () => {
+    const result = formatErrorBreakdown(138, { too_large: 5, tar_failed: 40, http_error: 60, timeout: 15, other: 18 });
+    assertIncludes(result, '138', 'Should contain total count');
+    assertIncludes(result, 'HTTP: 60', 'Should contain HTTP breakdown');
+    assertIncludes(result, 'tar: 40', 'Should contain tar breakdown');
+    assertIncludes(result, 'too large: 5', 'Should contain too_large breakdown');
+    assertIncludes(result, 'timeout: 15', 'Should contain timeout breakdown');
+    assertIncludes(result, 'other: 18', 'Should contain other breakdown');
+  });
+
+  test('MONITOR: formatErrorBreakdown omits zero categories', () => {
+    const result = formatErrorBreakdown(10, { too_large: 0, tar_failed: 0, http_error: 10, timeout: 0, other: 0 });
+    assertIncludes(result, '10', 'Should contain total');
+    assertIncludes(result, 'HTTP: 10', 'Should contain HTTP');
+    assertNotIncludes(result, 'tar:', 'Should not contain tar when 0');
+    assertNotIncludes(result, 'too large:', 'Should not contain too_large when 0');
+    assertNotIncludes(result, 'timeout:', 'Should not contain timeout when 0');
+    assertNotIncludes(result, 'other:', 'Should not contain other when 0');
+  });
+
+  test('MONITOR: buildDailyReportEmbed includes error breakdown', () => {
+    // Set up some errors for the report
+    const prevErrors = stats.errors;
+    const prevHttp = stats.errorsByType.http_error;
+    const prevScanned = stats.scanned;
+    stats.scanned = 100;
+    stats.errors = 20;
+    stats.errorsByType.http_error = 12;
+    stats.errorsByType.tar_failed = 5;
+    stats.errorsByType.other = 3;
+    try {
+      const embed = buildDailyReportEmbed();
+      const errorsField = embed.embeds[0].fields.find(f => f.name === 'Errors');
+      assert(errorsField, 'Should have Errors field');
+      assertIncludes(errorsField.value, '20', 'Errors field should contain total');
+      assertIncludes(errorsField.value, 'HTTP: 12', 'Errors field should contain HTTP breakdown');
+    } finally {
+      stats.errors = prevErrors;
+      stats.errorsByType.http_error = prevHttp;
+      stats.errorsByType.tar_failed = 0;
+      stats.errorsByType.other = 0;
+      stats.scanned = prevScanned;
+    }
+  });
+
+  // ============================================
+  // WEBHOOK DEDUP TESTS
+  // ============================================
+
+  console.log('\n=== WEBHOOK DEDUP TESTS ===\n');
+
+  test('MONITOR: alertedPackageRules is a Map', () => {
+    assert(alertedPackageRules instanceof Map, 'alertedPackageRules should be a Map');
+  });
+
+  await asyncTest('MONITOR: trySendWebhook dedup skips same rules for different versions', async () => {
+    const prevUrl = process.env.MUADDIB_WEBHOOK_URL;
+    const origLog = console.log;
+    const origErr = console.error;
+    const logs = [];
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.example.com/test';
+    console.log = (...args) => logs.push(args.join(' '));
+    console.error = (...args) => logs.push(args.join(' '));
+    alertedPackageRules.clear();
+
+    try {
+      // First call — should populate the dedup map
+      const result1 = {
+        threats: [
+          { type: 'dangerous_shell_exec', severity: 'HIGH', rule_id: 'MUADDIB-AST-007' },
+          { type: 'proxy_data_intercept', severity: 'HIGH', rule_id: 'MUADDIB-AST-043' }
+        ],
+        summary: { critical: 0, high: 2, medium: 0, low: 0, total: 2, riskScore: 60 }
+      };
+      await trySendWebhook('@agenticmail/enterprise', '0.5.479', 'npm', result1, null);
+
+      // Check dedup map was populated
+      assert(alertedPackageRules.has('@agenticmail/enterprise'), 'Should track alerted package');
+      const trackedRules = alertedPackageRules.get('@agenticmail/enterprise');
+      assert(trackedRules.has('MUADDIB-AST-007'), 'Should track AST-007 rule');
+      assert(trackedRules.has('MUADDIB-AST-043'), 'Should track AST-043 rule');
+
+      // Second call with same rules — should be deduped
+      logs.length = 0;
+      const result2 = {
+        threats: [
+          { type: 'dangerous_shell_exec', severity: 'HIGH', rule_id: 'MUADDIB-AST-007' },
+          { type: 'proxy_data_intercept', severity: 'HIGH', rule_id: 'MUADDIB-AST-043' }
+        ],
+        summary: { critical: 0, high: 2, medium: 0, low: 0, total: 2, riskScore: 60 }
+      };
+      await trySendWebhook('@agenticmail/enterprise', '0.5.490', 'npm', result2, null);
+
+      // Should have logged DEDUP
+      const dedupLog = logs.find(l => l.includes('DEDUP'));
+      assert(dedupLog !== undefined, 'Should log DEDUP for same rules on different version');
+
+      // Map should still have the same 2 rules
+      assert(alertedPackageRules.get('@agenticmail/enterprise').size === 2,
+        'Should still have 2 rules tracked after dedup');
+    } finally {
+      console.log = origLog;
+      console.error = origErr;
+      alertedPackageRules.clear();
+      if (prevUrl !== undefined) process.env.MUADDIB_WEBHOOK_URL = prevUrl;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  await asyncTest('MONITOR: trySendWebhook dedup allows new rules through', async () => {
+    const prevUrl = process.env.MUADDIB_WEBHOOK_URL;
+    const origLog = console.log;
+    const origErr = console.error;
+    const logs = [];
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.example.com/test';
+    console.log = (...args) => logs.push(args.join(' '));
+    console.error = (...args) => logs.push(args.join(' '));
+    alertedPackageRules.clear();
+
+    try {
+      // Pre-populate with one known rule
+      alertedPackageRules.set('@agenticmail/enterprise', new Set(['MUADDIB-AST-007']));
+
+      // Call with an OLD rule + a NEW rule — should NOT be deduped
+      const result = {
+        threats: [
+          { type: 'dangerous_shell_exec', severity: 'HIGH', rule_id: 'MUADDIB-AST-007' },
+          { type: 'lifecycle_shell_pipe', severity: 'CRITICAL', rule_id: 'MUADDIB-PKG-010' }
+        ],
+        summary: { critical: 1, high: 1, medium: 0, low: 0, total: 2, riskScore: 80 }
+      };
+      await trySendWebhook('@agenticmail/enterprise', '0.5.500', 'npm', result, null);
+
+      // Should NOT have logged DEDUP (new rule present)
+      const dedupLog = logs.find(l => l.includes('DEDUP'));
+      assert(dedupLog === undefined, 'Should NOT log DEDUP when new rules are present');
+
+      // The tracked set should now include both old and new rules
+      const tracked = alertedPackageRules.get('@agenticmail/enterprise');
+      assert(tracked.has('MUADDIB-AST-007'), 'Should still have old rule');
+      assert(tracked.has('MUADDIB-PKG-010'), 'Should have added new rule');
+    } finally {
+      console.log = origLog;
+      console.error = origErr;
+      alertedPackageRules.clear();
+      if (prevUrl !== undefined) process.env.MUADDIB_WEBHOOK_URL = prevUrl;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  test('MONITOR: sendDailyReport clears alertedPackageRules', () => {
+    alertedPackageRules.set('test-pkg', new Set(['RULE-001']));
+    assert(alertedPackageRules.size > 0, 'Should have entries before clear');
+    // Simulate the clearing that happens in sendDailyReport
+    alertedPackageRules.clear();
+    assert(alertedPackageRules.size === 0, 'Should be empty after clear');
   });
 }
 

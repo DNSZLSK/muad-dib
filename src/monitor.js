@@ -152,16 +152,45 @@ const stats = {
   suspect: 0,
   suspectByTier: { t1: 0, t2: 0, t3: 0 },
   errors: 0,
+  errorsByType: { too_large: 0, tar_failed: 0, http_error: 0, timeout: 0, other: 0 },
   totalTimeMs: 0,
   lastReportTime: Date.now(),
   lastDailyReportDate: null // YYYY-MM-DD (Paris) of last daily report sent
 };
+
+/**
+ * Classify an error into a category for the daily report breakdown.
+ * @param {Error} err
+ * @returns {'too_large'|'tar_failed'|'http_error'|'timeout'|'other'}
+ */
+function classifyError(err) {
+  const msg = (err && err.message) || '';
+  if (/too large|tarball too large/i.test(msg)) return 'too_large';
+  if (/tar\b|extract/i.test(msg)) return 'tar_failed';
+  if (/HTTP [45]\d\d|HTTP \d{3}/i.test(msg)) return 'http_error';
+  if (/timeout/i.test(msg)) return 'timeout';
+  return 'other';
+}
+
+/**
+ * Increment error counter with category tracking.
+ * @param {Error} [err] - optional error for classification
+ */
+function recordError(err) {
+  stats.errors++;
+  const category = err ? classifyError(err) : 'other';
+  stats.errorsByType[category]++;
+}
 
 // Track daily suspects for the daily report (name, version, ecosystem, findingsCount)
 const dailyAlerts = [];
 
 // Deduplication: track recently scanned packages (cleared every 24h with daily report)
 const recentlyScanned = new Set();
+
+// Webhook dedup: track alerted packages by name → Set<rule_ids> (cleared with daily report).
+// If a new version triggers the same rules, skip the webhook. If new rules appear, let it through.
+const alertedPackageRules = new Map();
 
 // Consecutive poll error tracking for exponential backoff
 let consecutivePollErrors = 0;
@@ -328,6 +357,22 @@ function isSuspectClassification(result) {
 
   // 2+ distinct types with non-passive types not in tier 2 active list — tier 2
   return { suspect: true, tier: 2 };
+}
+
+/**
+ * Format error count with breakdown by type for the daily report.
+ * Returns "0" if no errors, or "138 (HTTP: 60, tar: 40, timeout: 20, other: 18)" style.
+ */
+function formatErrorBreakdown(total, byType) {
+  if (total === 0) return '0';
+  const parts = [];
+  if (byType.http_error > 0) parts.push(`HTTP: ${byType.http_error}`);
+  if (byType.tar_failed > 0) parts.push(`tar: ${byType.tar_failed}`);
+  if (byType.too_large > 0) parts.push(`too large: ${byType.too_large}`);
+  if (byType.timeout > 0) parts.push(`timeout: ${byType.timeout}`);
+  if (byType.other > 0) parts.push(`other: ${byType.other}`);
+  if (parts.length === 0) return `${total}`;
+  return `${total} (${parts.join(', ')})`;
 }
 
 function formatFindings(result) {
@@ -562,6 +607,25 @@ async function trySendWebhook(name, version, ecosystem, result, sandboxResult) {
     }
     return;
   }
+
+  // Webhook dedup: if the same package was already alerted today with the exact same rules,
+  // skip the webhook. Different versions of the same package triggering identical findings
+  // (e.g. @agenticmail/enterprise 0.5.479, 0.5.490, 0.5.494) generate redundant noise.
+  // If a new version introduces NEW rules, the alert passes through normally.
+  const currentRules = new Set(result.threats.map(t => t.rule_id || t.type));
+  const previousRules = alertedPackageRules.get(name);
+  if (previousRules) {
+    const newRules = [...currentRules].filter(r => !previousRules.has(r));
+    if (newRules.length === 0) {
+      console.log(`[MONITOR] DEDUP: ${name} (already alerted today with same rules)`);
+      return;
+    }
+    // New rules found — let alert through and update the tracked set
+    for (const r of currentRules) previousRules.add(r);
+  } else {
+    alertedPackageRules.set(name, new Set(currentRules));
+  }
+
   const url = getWebhookUrl();
   const webhookData = buildAlertData(name, version, ecosystem, result, sandboxResult);
   try {
@@ -1198,6 +1262,13 @@ function loadDailyStats() {
         stats.suspectByTier.t3 = data.suspectByTier.t3 || 0;
       }
       stats.errors = data.errors || 0;
+      if (data.errorsByType) {
+        stats.errorsByType.too_large = data.errorsByType.too_large || 0;
+        stats.errorsByType.tar_failed = data.errorsByType.tar_failed || 0;
+        stats.errorsByType.http_error = data.errorsByType.http_error || 0;
+        stats.errorsByType.timeout = data.errorsByType.timeout || 0;
+        stats.errorsByType.other = data.errorsByType.other || 0;
+      }
       stats.totalTimeMs = data.totalTimeMs || 0;
       if (Array.isArray(data.dailyAlerts)) {
         dailyAlerts.length = 0;
@@ -1220,6 +1291,7 @@ function saveDailyStats() {
       suspect: stats.suspect,
       suspectByTier: { ...stats.suspectByTier },
       errors: stats.errors,
+      errorsByType: { ...stats.errorsByType },
       totalTimeMs: stats.totalTimeMs,
       dailyAlerts: dailyAlerts.slice()
     };
@@ -1463,7 +1535,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl) {
       }
     }
   } catch (err) {
-    stats.errors++;
+    recordError(err);
     stats.scanned++;
     stats.totalTimeMs += Date.now() - startTime;
     console.error(`[MONITOR] ERROR scanning ${name}@${version}: ${err.message}`);
@@ -1489,10 +1561,16 @@ async function processQueue() {
         timeoutPromise(SCAN_TIMEOUT_MS)
       ]);
     } catch (err) {
-      stats.errors++;
+      recordError(err);
       console.error(`[MONITOR] Queue error for ${item.name}: ${err.message}`);
     }
     maybePersistDailyStats();
+
+    // Check daily report between each package scan (not just between poll cycles).
+    // Without this, a queue of 50 packages × 3min/each = 150min delay on the report.
+    if (isDailyReportDue()) {
+      await sendDailyReport();
+    }
   }
 }
 
@@ -1607,7 +1685,7 @@ function buildDailyReportEmbed() {
         { name: 'Packages Scanned', value: `${agg.scanned}`, inline: true },
         { name: 'Clean', value: `${agg.clean}`, inline: true },
         { name: 'Suspects', value: `${agg.suspect}`, inline: true },
-        { name: 'Errors', value: `${stats.errors}`, inline: true },
+        { name: 'Errors', value: formatErrorBreakdown(stats.errors, stats.errorsByType), inline: true },
         { name: 'Avg Scan Time', value: `${avg}s/pkg`, inline: true },
         { name: 'Top Suspects', value: top3Text, inline: false }
       ],
@@ -1642,6 +1720,7 @@ async function sendDailyReport() {
     clean: agg.clean,
     suspect: agg.suspect,
     errors: stats.errors,
+    errorsByType: { ...stats.errorsByType },
     avgScanTimeMs: stats.scanned > 0 ? Math.round(stats.totalTimeMs / stats.scanned) : 0,
     suspectByTier: { ...stats.suspectByTier },
     topSuspects: dailyAlerts.slice().sort((a, b) => b.findingsCount - a.findingsCount).slice(0, 10)
@@ -1668,9 +1747,15 @@ async function sendDailyReport() {
   stats.suspectByTier.t2 = 0;
   stats.suspectByTier.t3 = 0;
   stats.errors = 0;
+  stats.errorsByType.too_large = 0;
+  stats.errorsByType.tar_failed = 0;
+  stats.errorsByType.http_error = 0;
+  stats.errorsByType.timeout = 0;
+  stats.errorsByType.other = 0;
   stats.totalTimeMs = 0;
   dailyAlerts.length = 0;
   recentlyScanned.clear();
+  alertedPackageRules.clear();
   downloadsCache.clear();
   resetDailyStats();
 }
@@ -2215,7 +2300,7 @@ async function resolveTarballAndScan(item) {
       if (npmInfo.version) item.version = npmInfo.version;
     } catch (err) {
       console.error(`[MONITOR] ERROR resolving npm tarball for ${item.name}: ${err.message}`);
-      stats.errors++;
+      recordError(err);
       return;
     }
   }
@@ -2230,7 +2315,7 @@ async function resolveTarballAndScan(item) {
       if (pypiInfo.version) item.version = pypiInfo.version;
     } catch (err) {
       console.error(`[MONITOR] ERROR resolving PyPI tarball for ${item.name}: ${err.message}`);
-      stats.errors++;
+      recordError(err);
       return;
     }
   }
@@ -2341,6 +2426,7 @@ module.exports = {
   stats,
   dailyAlerts,
   recentlyScanned,
+  alertedPackageRules,
   resolveTarballAndScan,
   MAX_TARBALL_SIZE,
   KNOWN_BUNDLED_FILES,
@@ -2356,6 +2442,9 @@ module.exports = {
   buildAlertData,
   persistAlert,
   trySendWebhook,
+  classifyError,
+  recordError,
+  formatErrorBreakdown,
   computeRiskLevel,
   computeRiskScore,
   buildDailyReportEmbed,
