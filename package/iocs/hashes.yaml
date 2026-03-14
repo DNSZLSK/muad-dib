@@ -1,0 +1,214 @@
+# MUAD'DIB IOCs - Hashes SHA256 malveillants
+# Contribuez via PR: https://github.com/DNSZLSK/muad-dib
+
+version: "1.0.0"
+updated: "2026-01-01"
+
+hashes:
+  # ============================================
+  # SHAI-HULUD v2 - bun_environment.js
+  # ============================================
+  - id: HASH-SHAI-V2-001
+    sha256: "62ee164b9b306250c1172583f138c9614139264f889fa99614903c12755468d0"
+    file: "bun_environment.js"
+    source: shai-hulud-v2
+    severity: critical
+    confidence: high
+    description: "Payload Shai-Hulud v2 - exfiltration credentials"
+    references:
+      - https://www.wiz.io/blog/shai-hulud-npm-supply-chain-attack
+
+  - id: HASH-SHAI-V2-002
+    sha256: "cbb9bc5a8496243e02f3cc080efbe3e4a1430ba0671f2e43a202bf45b05479cd"
+    file: "bun_environment.js"
+    source: shai-hulud-v2
+    severity: critical
+    confidence: high
+    description: "Variante Shai-Hulud v2"
+    references:
+      - https://www.wiz.io/blog/shai-hulud-npm-supply-chain-attack
+
+  - id: HASH-SHAI-V2-003
+    sha256: "f099c5d9ec417d4445a0328ac0ada9cde79fc37410914103ae9c609cbc0ee068"
+    file: "bun_environment.js"
+    source: shai-hulud-v2
+    severity: critical
+    confidence: high
+    description: "Variante Shai-Hulud v2"
+    references:
+      - https://www.wiz.io/blog/shai-hulud-npm-supply-chain-attack
+
+  # ============================================
+  # SHAI-HULUD v2 - setup_bun.js
+  # ============================================
+  - id: HASH-SHAI-V2-004
+    sha256: "a3894003ad1d293ba96d77881ccd2071446dc3f65f434669b49b3da92421901a"
+    file: "setup_bun.js"
+    source: shai-hulud-v2
+    severity: critical
+    confidence: high
+    description: "Loader Shai-Hulud v2"
+    references:
+      - https://www.wiz.io/blog/shai-hulud-npm-supply-chain-attack
+
+  - id: HASH-SHAI-V2-005
+    sha256: "f1df4896244500671eb4aa63ebb48ea11cee196fafaa0e9874e17b24ac053c02"
+    file: "setup_bun.js"
+    source: shai-hulud-v2
+    severity: critical
+    confidence: high
+    description: "Variante Shai-Hulud v2"
+    references:
+      - https://blog.phylum.io/shai-hulud-npm-worm
+
+  - id: HASH-SHAI-V2-006
+    sha256: "9d59fd0bcc14b671079824c704575f201b74276238dc07a9c12a93a84195648a"
+    file: "setup_bun.js"
+    source: shai-hulud-v2
+    severity: critical
+    confidence: high
+    description: "Variante Shai-Hulud v2"
+    references:
+      - https://blog.phylum.io/shai-hulud-npm-worm
+
+  - id: HASH-SHAI-V2-007
+    sha256: "e0250076c1d2ac38777ea8f542431daf61fcbaab0ca9c196614b28065ef5b918"
+    file: "setup_bun.js"
+    source: shai-hulud-v2
+    severity: critical
+    confidence: high
+    description: "Variante Shai-Hulud v2"
+    references:
+      - https://blog.phylum.io/shai-hulud-npm-worm
+
+  # ============================================
+  # NODE-IPC PROTESTWARE
+  # ============================================
+  - id: HASH-PROTEST-001
+    sha256: "4b2399646573bb737c4969563303d8ee2e9ddbd1b271f1ca9e35ea78062538db"
+    file: "peacenotwar.js"
+    source: protestware
+    severity: critical
+    confidence: high
+    description: "Payload node-ipc peacenotwar"
+    references:
+      - https://snyk.io/blog/peacenotwar-malicious-npm-node-ipc-package-vulnerability/
+
+  - id: HASH-PROTEST-002
+    sha256: "46faab8ab153fae6e80e7cca38eab363075bb524edd79e42269217a083628f09"
+    file: "peacenotwar.js"
+    source: protestware
+    severity: critical
+    confidence: high
+    description: "Variante node-ipc peacenotwar"
+    references:
+      - https://snyk.io/blog/peacenotwar-malicious-npm-node-ipc-package-vulnerability/
+
+markers:
+  # ============================================
+  # SHAI-HULUD MARKERS
+  # ============================================
+  - id: MARKER-SHAI-001
+    pattern: "Sha1-Hulud"
+    source: shai-hulud-v1
+    severity: critical
+    confidence: high
+    description: "Signature Shai-Hulud v1"
+
+  - id: MARKER-SHAI-002
+    pattern: "Shai-Hulud"
+    source: shai-hulud-v1
+    severity: critical
+    confidence: high
+    description: "Signature Shai-Hulud"
+
+  - id: MARKER-SHAI-003
+    pattern: "The Second Coming"
+    source: shai-hulud-v2
+    severity: critical
+    confidence: high
+    description: "Signature Shai-Hulud v2"
+
+  - id: MARKER-SHAI-004
+    pattern: "Goldox-T3chs"
+    source: shai-hulud-v3
+    severity: critical
+    confidence: high
+    description: "Signature Shai-Hulud v3 Golden Path"
+
+  - id: MARKER-SHAI-005
+    pattern: "Only Happy Girl"
+    source: shai-hulud-v2
+    severity: critical
+    confidence: high
+    description: "Signature Shai-Hulud v2 variante"
+
+  # ============================================
+  # PROTESTWARE MARKERS
+  # ============================================
+  - id: MARKER-PROTEST-001
+    pattern: "peacenotwar"
+    source: protestware
+    severity: critical
+    confidence: high
+    description: "Signature node-ipc protestware"
+
+  # ============================================
+  # GENERIC MALWARE MARKERS
+  # ============================================
+  - id: MARKER-GENERIC-001
+    pattern: "/dev/tcp"
+    source: generic
+    severity: critical
+    confidence: high
+    description: "Reverse shell bash"
+
+  - id: MARKER-GENERIC-002
+    pattern: "discord.com/api/webhooks"
+    source: generic
+    severity: high
+    confidence: medium
+    description: "Exfiltration via Discord webhook"
+
+files:
+  # ============================================
+  # FICHIERS SUSPECTS SHAI-HULUD
+  # ============================================
+  - id: FILE-SHAI-001
+    name: "setup_bun.js"
+    source: shai-hulud-v2
+    severity: critical
+    confidence: high
+    description: "Loader Shai-Hulud"
+
+  - id: FILE-SHAI-002
+    name: "bun_environment.js"
+    source: shai-hulud-v2
+    severity: critical
+    confidence: high
+    description: "Payload Shai-Hulud"
+
+  - id: FILE-SHAI-003
+    name: "bundle.js"
+    source: shai-hulud-v2
+    severity: high
+    confidence: medium
+    description: "Payload obfusque potentiel"
+
+  # ============================================
+  # FICHIERS SUSPECTS GENERIQUES
+  # ============================================
+  - id: FILE-GENERIC-001
+    name: "stealer.js"
+    source: generic
+    severity: critical
+    confidence: high
+    description: "Token stealer potentiel"
+
+  - id: FILE-GENERIC-002
+    name: "token-grabber.js"
+    source: generic
+    severity: critical
+    confidence: high
+    description: "Token stealer potentiel"
+

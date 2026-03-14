@@ -1,0 +1,230 @@
+const fs = require('fs');
+const { escapeHtml } = require('./utils.js');
+
+function generateHTML(results) {
+  const { target, timestamp, threats, summary } = results;
+
+  const threatRows = threats.map(t => `
+    <tr class="${escapeHtml(t.severity).toLowerCase()}">
+      <td>${escapeHtml(t.severity)}</td>
+      <td>${escapeHtml(t.type)}</td>
+      <td>${escapeHtml(t.message)}</td>
+      <td>${escapeHtml(t.file)}</td>
+      <td>${escapeHtml(t.playbook)}</td>
+    </tr>
+  `).join('');
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MUAD'DIB - Scan Report</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #1a1a2e;
+      color: #eee;
+      margin: 0;
+      padding: 20px;
+    }
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    h1 {
+      color: #e94560;
+      border-bottom: 2px solid #e94560;
+      padding-bottom: 10px;
+    }
+    .summary {
+      display: flex;
+      gap: 20px;
+      margin: 20px 0;
+    }
+    .summary-card {
+      background: #16213e;
+      padding: 20px;
+      border-radius: 8px;
+      flex: 1;
+    }
+    .summary-card h3 {
+      margin: 0 0 10px 0;
+      color: #888;
+      font-size: 14px;
+    }
+    .summary-card .value {
+      font-size: 32px;
+      font-weight: bold;
+    }
+    .critical .value { color: #e94560; }
+    .high .value { color: #ff6b35; }
+    .medium .value { color: #f9c74f; }
+    .total .value { color: #4ecdc4; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+    }
+    th, td {
+      padding: 12px;
+      text-align: left;
+      border-bottom: 1px solid #333;
+    }
+    th {
+      background: #16213e;
+      color: #e94560;
+    }
+    tr.critical { background: rgba(233, 69, 96, 0.2); }
+    tr.high { background: rgba(255, 107, 53, 0.2); }
+    tr.medium { background: rgba(249, 199, 79, 0.1); }
+    .meta {
+      color: #666;
+      font-size: 12px;
+      margin-top: 40px;
+    }
+    .ok {
+      background: #16213e;
+      padding: 40px;
+      border-radius: 8px;
+      text-align: center;
+      color: #4ecdc4;
+      font-size: 24px;
+    }
+    .sandbox-section {
+      background: #16213e;
+      padding: 20px;
+      border-radius: 8px;
+      margin-top: 30px;
+      border-left: 4px solid #9b59b6;
+    }
+    .sandbox-section h2 {
+      color: #9b59b6;
+      margin-top: 0;
+    }
+    .sandbox-meta {
+      display: flex;
+      gap: 30px;
+      margin-bottom: 15px;
+    }
+    .sandbox-meta span {
+      color: #aaa;
+    }
+    .sandbox-finding {
+      padding: 8px 12px;
+      margin: 4px 0;
+      border-radius: 4px;
+      background: rgba(155, 89, 182, 0.1);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>MUAD'DIB - Scan Report</h1>
+
+    <div class="summary">
+      <div class="summary-card total">
+        <h3>TOTAL</h3>
+        <div class="value">${escapeHtml(summary.total)}</div>
+      </div>
+      <div class="summary-card critical">
+        <h3>CRITICAL</h3>
+        <div class="value">${escapeHtml(summary.critical)}</div>
+      </div>
+      <div class="summary-card high">
+        <h3>HIGH</h3>
+        <div class="value">${escapeHtml(summary.high)}</div>
+      </div>
+      <div class="summary-card medium">
+        <h3>MEDIUM</h3>
+        <div class="value">${escapeHtml(summary.medium)}</div>
+      </div>
+    </div>
+
+    ${threats.length > 0 ? `
+    <table>
+      <thead>
+        <tr>
+          <th>Severity</th>
+          <th>Type</th>
+          <th>Message</th>
+          <th>File</th>
+          <th>Recommendation</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${threatRows}
+      </tbody>
+    </table>
+    ` : '<div class="ok">No threats detected</div>'}
+
+    ${results.sandbox ? `
+    <div class="sandbox-section">
+      <h2>[SANDBOX] Dynamic Analysis</h2>
+      <div class="sandbox-meta">
+        <span>Package: <strong>${escapeHtml(results.sandbox.package)}</strong></span>
+        <span>Score: <strong>${escapeHtml(String(results.sandbox.score))}/100</strong></span>
+        <span>Severity: <strong>${escapeHtml(results.sandbox.severity)}</strong></span>
+      </div>
+      ${results.sandbox.findings.length === 0
+        ? '<p style="color: #4ecdc4;">No suspicious behavior detected.</p>'
+        : results.sandbox.findings.map(f => `
+          <div class="sandbox-finding">
+            <strong>[${escapeHtml(f.severity)}]</strong> ${escapeHtml(f.type)}: ${escapeHtml(f.detail)}
+          </div>
+        `).join('')}
+
+      ${results.sandbox.network ? `
+      <h3 style="color: #9b59b6; margin-top: 20px;">Network Activity</h3>
+      ${(results.sandbox.network.dns_resolutions || []).length > 0 ? `
+        <h4 style="color: #aaa;">DNS Resolutions</h4>
+        ${results.sandbox.network.dns_resolutions.map(r => `
+          <div class="sandbox-finding">${escapeHtml(r.domain)} &rarr; ${escapeHtml(r.ip)}</div>
+        `).join('')}
+      ` : ''}
+      ${(results.sandbox.network.http_requests || []).length > 0 ? `
+        <h4 style="color: #aaa;">HTTP Requests</h4>
+        ${results.sandbox.network.http_requests.map(r => `
+          <div class="sandbox-finding">${escapeHtml(r.method)} ${escapeHtml(r.host)}${escapeHtml(r.path)}</div>
+        `).join('')}
+      ` : ''}
+      ${(results.sandbox.network.tls_connections || []).length > 0 ? `
+        <h4 style="color: #aaa;">TLS Connections</h4>
+        ${results.sandbox.network.tls_connections.map(t => `
+          <div class="sandbox-finding">${escapeHtml(t.domain)} (${escapeHtml(t.ip)}:${escapeHtml(String(t.port))})</div>
+        `).join('')}
+      ` : ''}
+      ${(results.sandbox.network.blocked_connections || []).length > 0 ? `
+        <h4 style="color: #e94560;">Blocked Connections</h4>
+        ${results.sandbox.network.blocked_connections.map(b => `
+          <div class="sandbox-finding" style="background: rgba(233,69,96,0.2);">[BLOCKED] ${escapeHtml(b.ip)}:${escapeHtml(String(b.port))}</div>
+        `).join('')}
+      ` : ''}
+      ` : ''}
+    </div>
+    ` : ''}
+
+    <div class="meta">
+      <p>Target: ${escapeHtml(target)}</p>
+      <p>Date: ${escapeHtml(timestamp)}</p>
+      <p>Generated by MUAD'DIB</p>
+    </div>
+  </div>
+</body>
+</html>`;
+}
+
+function saveReport(results, outputPath) {
+  if (!outputPath || typeof outputPath !== 'string') {
+    throw new Error('Invalid output path for HTML report');
+  }
+  const html = generateHTML(results);
+  try {
+    fs.writeFileSync(outputPath, html);
+  } catch (e) {
+    throw new Error(`Failed to write HTML report to ${outputPath}: ${e.message}`);
+  }
+  return outputPath;
+}
+
+module.exports = { generateHTML, saveReport };
