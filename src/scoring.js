@@ -167,7 +167,10 @@ const DIST_BUNDLER_ARTIFACT_TYPES = new Set([
   'env_access',
   // P8: Proxy traps in dist/ are state management frameworks (MobX, Vue reactivity, Immer),
   // not malicious data interception. Two-notch downgrade (CRITICAL→MEDIUM, HIGH→LOW).
-  'proxy_data_intercept'
+  'proxy_data_intercept',
+  // P9: fetch+eval in dist/ is Vite/Webpack code splitting (lazy chunk loading),
+  // not remote code execution. Two-notch downgrade (CRITICAL→MEDIUM, HIGH→LOW).
+  'remote_code_load'
 ]);
 
 // Types exempt from reachability downgrade — IOC matches, lifecycle, and package-level types.
