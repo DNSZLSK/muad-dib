@@ -143,6 +143,22 @@ const MCP_CONFIG_PATHS = [
 // MCP content indicators in written data
 const MCP_CONTENT_PATTERNS = ['mcpServers', '"mcp"', '"server"', '"command"', '"args"'];
 
+// Sensitive AI config files — writes to these are always suspicious regardless of content.
+// Split into two tiers:
+// - UNIQUE: filenames no legitimate plugin would use (always sensitive)
+// - ROOT_ONLY: generic names (settings.json) that are sensitive ONLY when directly
+//   at config dir root (e.g. ~/.claude/settings.json), not in subdirectories
+//   (e.g. ~/.claude/my-plugin/settings.json which is legitimate plugin config)
+const SENSITIVE_AI_CONFIG_FILES_UNIQUE = [
+  'claude.md', 'claude_desktop_config.json',
+  'mcp.json',
+  '.cursorrules', '.windsurfrules',
+  'copilot-instructions.md'
+];
+const SENSITIVE_AI_CONFIG_FILES_ROOT_ONLY = [
+  'settings.json', 'settings.local.json'
+];
+
 // Git hooks names
 const GIT_HOOKS = [
   'pre-commit', 'pre-push', 'post-checkout', 'post-merge',
@@ -874,9 +890,25 @@ function handleCallExpression(node, ctx) {
         // Check content argument for MCP-related patterns
         const contentArg = node.arguments[1];
         const contentStr = extractStringValue(contentArg);
+        // Extract filename from path to distinguish sensitive config files from plugin state
+        const mcpFileName = mcpCheckPath.split(/[/\\]/).filter(Boolean).pop() || '';
+        const isUniqueSensitive = SENSITIVE_AI_CONFIG_FILES_UNIQUE.some(f => mcpFileName === f);
+        // For generic names (settings.json), only sensitive at config dir root (1 level deep)
+        // e.g. .claude/settings.json → sensitive, .claude/plugin/settings.json → not sensitive
+        let isRootOnlySensitive = false;
+        if (SENSITIVE_AI_CONFIG_FILES_ROOT_ONLY.some(f => mcpFileName === f)) {
+          const matchedDir = MCP_CONFIG_PATHS.find(p => mcpCheckPath.includes(p.toLowerCase()));
+          if (matchedDir) {
+            const idx = mcpCheckPath.indexOf(matchedDir.toLowerCase());
+            const afterDir = mcpCheckPath.slice(idx + matchedDir.length);
+            // Direct child: no further path separators (e.g. "settings.json", not "sub/settings.json")
+            isRootOnlySensitive = !afterDir.includes('/') && !afterDir.includes('\\');
+          }
+        }
+        const isSensitiveConfigFile = isUniqueSensitive || isRootOnlySensitive;
         const hasContentPattern = contentStr
           ? MCP_CONTENT_PATTERNS.some(p => contentStr.includes(p.replace(/"/g, '')))
-          : true; // dynamic content = suspicious by default for AI config paths
+          : isSensitiveConfigFile; // dynamic content only suspicious for known config files
         if (hasContentPattern) {
           ctx.threats.push({
             type: 'mcp_config_injection',
