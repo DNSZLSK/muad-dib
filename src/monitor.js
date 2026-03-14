@@ -255,15 +255,20 @@ function hasHighOrCritical(result) {
 }
 
 // --- Verbose mode (--verbose sends ALL alerts including temporal/publish/maintainer) ---
+// @deprecated verboseMode is unused in production — temporal/publish/maintainer
+// alerts are controlled by their own feature flags (isTemporalEnabled, etc.).
+// Retained for backward compatibility with existing tests and CLI flag parsing.
 
 let verboseMode = false;
 
+/** @deprecated See comment above. */
 function isVerboseMode() {
   if (verboseMode) return true;
   const env = process.env.MUADDIB_MONITOR_VERBOSE;
   return env !== undefined && env.toLowerCase() === 'true';
 }
 
+/** @deprecated See comment above. */
 function setVerboseMode(value) {
   verboseMode = !!value;
 }
@@ -478,28 +483,30 @@ function shouldSendWebhook(result, sandboxResult) {
   const sandboxScore = (sandboxResult && sandboxResult.score !== undefined) ? sandboxResult.score : -1;
   const sandboxRan = sandboxScore >= 0;
 
-  // Sandbox ran and came back clean — suppress webhook regardless of static score.
-  // A clean sandbox verdict overrides static analysis (FP confirmed dynamically).
-  if (sandboxRan && sandboxScore === 0) return false;
+  // 1. IOC match — ALWAYS send, regardless of sandbox result.
+  // IOC matches are highest-confidence (225K+ known malicious packages).
+  // Sandbox can miss time-bombs, env-specific, browser-only payloads.
+  if (hasIOCMatch(result)) return true;
 
-  // Sandbox ran but score is just timeout noise (<=15, e.g. /usr/bin/timeout FP) — suppress
-  if (sandboxRan && sandboxScore <= 15) return false;
-
-  // Real sandbox detection (above timeout noise threshold) — always send
+  // 2. Real sandbox detection (> 30) — always send
   if (sandboxScore > 30) return true;
 
-  // Sandbox ran with moderate score (16-30): send if static also suspicious
-  if (sandboxRan && sandboxScore > 15 && sandboxScore <= 30) {
-    return staticScore >= 50 && hasHighOrCritical(result);
+  // 3. Sandbox clean (0) or timeout noise (1-15): suppress unless static is strong.
+  // Dormant malware can be statically suspicious but dynamically clean.
+  // Threshold >= 20 aligned with BENIGN_THRESHOLD — packages exceeding benign
+  // baseline with HIGH/CRITICAL findings deserve an alert. hasHighOrCritical()
+  // guards against FP (benign score 25 with only MEDIUM/LOW won't pass).
+  if (sandboxRan && sandboxScore <= 15) {
+    return staticScore >= 20 && hasHighOrCritical(result);
   }
 
-  // No sandbox ran (sandboxScore === -1): fall back to static analysis
-  // CRITICAL static score — send
-  if (staticScore >= 80 && hasHighOrCritical(result)) return true;
+  // 4. Sandbox moderate (16-30): send if static corroborates
+  if (sandboxRan && sandboxScore > 15 && sandboxScore <= 30) {
+    return staticScore >= 20 && hasHighOrCritical(result);
+  }
 
-  // IOC match or high static score
-  if (hasIOCMatch(result)) return true;
-  if (staticScore >= 50 && hasHighOrCritical(result)) return true;
+  // 5. No sandbox: static-only thresholds
+  if (staticScore >= 20 && hasHighOrCritical(result)) return true;
 
   return false;
 }
@@ -526,6 +533,15 @@ function buildMonitorWebhookPayload(name, version, ecosystem, result, sandboxRes
 }
 
 function computeRiskLevel(summary) {
+  // Score-based thresholds aligned with src/scoring.js RISK_THRESHOLDS (75/50/25)
+  if (summary.riskScore !== undefined) {
+    if (summary.riskScore >= 75) return 'CRITICAL';
+    if (summary.riskScore >= 50) return 'HIGH';
+    if (summary.riskScore >= 25) return 'MEDIUM';
+    if (summary.riskScore > 0) return 'LOW';
+    return 'CLEAN';
+  }
+  // Fallback when riskScore not available (e.g. legacy callers)
   if (summary.critical > 0) return 'CRITICAL';
   if (summary.high > 0) return 'HIGH';
   if (summary.medium > 0) return 'MEDIUM';
@@ -586,8 +602,8 @@ function buildAlertData(name, version, ecosystem, result, sandboxResult) {
     ecosystem,
     summary: {
       ...result.summary,
-      riskLevel: computeRiskLevel(result.summary),
-      riskScore: computeRiskScore(result.summary)
+      riskLevel: result.summary.riskLevel || computeRiskLevel(result.summary),
+      riskScore: result.summary.riskScore || computeRiskScore(result.summary)
     },
     threats: result.threats
   };
@@ -603,9 +619,14 @@ function buildAlertData(name, version, ecosystem, result, sandboxResult) {
 async function trySendWebhook(name, version, ecosystem, result, sandboxResult) {
   if (!shouldSendWebhook(result, sandboxResult)) {
     if (sandboxResult && sandboxResult.score === 0) {
-      console.log(`[MONITOR] FALSE POSITIVE (sandbox clean): ${name}@${version}`);
+      console.log(`[MONITOR] SUPPRESSED (sandbox clean, low static): ${name}@${version}`);
     }
     return;
+  }
+
+  if (sandboxResult && sandboxResult.score === 0) {
+    const staticScore = (result && result.summary) ? (result.summary.riskScore || 0) : 0;
+    console.log(`[MONITOR] DORMANT SUSPECT: ${name}@${version} (static score: ${staticScore}, sandbox clean — possible evasive malware)`);
   }
 
   // Webhook dedup: if the same package was already alerted today with the exact same rules,
@@ -637,6 +658,10 @@ async function trySendWebhook(name, version, ecosystem, result, sandboxResult) {
 }
 
 // --- Temporal analysis integration ---
+// Note: buildTemporalWebhookEmbed, buildTemporalAstWebhookEmbed,
+// buildPublishAnomalyWebhookEmbed, buildMaintainerChangeWebhookEmbed
+// are currently unused in production (temporal alerts go through trySendWebhook
+// via the main alerting path). Retained for potential future Discord rich embed use.
 
 function buildTemporalWebhookEmbed(temporalResult) {
   const findings = temporalResult.findings || [];
@@ -1464,18 +1489,32 @@ async function scanPackage(name, version, ecosystem, tarballUrl) {
             const canaryFindings = (sandboxResult.findings || []).filter(f => f.type === 'canary_exfiltration');
             if (canaryFindings.length > 0) {
               console.log(`[MONITOR] CANARY EXFILTRATION: ${name}@${version} — ${canaryFindings.length} token(s) stolen!`);
-              const url = getWebhookUrl();
-              if (url) {
-                const exfiltrations = canaryFindings.map(f => ({
-                  token: f.detail.match(/exfiltrate (\S+)/)?.[1] || 'UNKNOWN',
-                  foundIn: f.detail
-                }));
-                const payload = buildCanaryExfiltrationWebhookEmbed(name, version, exfiltrations);
-                try {
-                  await sendWebhook(url, payload, { rawPayload: true });
-                  console.log(`[MONITOR] Canary exfiltration webhook sent for ${name}@${version}`);
-                } catch (webhookErr) {
-                  console.error(`[MONITOR] Canary webhook failed for ${name}@${version}: ${webhookErr.message}`);
+              // Dedup: skip if this package was already alerted with canary_exfiltration
+              const canaryRuleId = 'canary_exfiltration';
+              const previousRules = alertedPackageRules.get(name);
+              const alreadyAlerted = previousRules && previousRules.has(canaryRuleId);
+              if (alreadyAlerted) {
+                console.log(`[MONITOR] DEDUP: ${name} canary exfiltration (already alerted today)`);
+              } else {
+                const url = getWebhookUrl();
+                if (url) {
+                  const exfiltrations = canaryFindings.map(f => ({
+                    token: f.detail.match(/exfiltrate (\S+)/)?.[1] || 'UNKNOWN',
+                    foundIn: f.detail
+                  }));
+                  const payload = buildCanaryExfiltrationWebhookEmbed(name, version, exfiltrations);
+                  try {
+                    await sendWebhook(url, payload, { rawPayload: true });
+                    console.log(`[MONITOR] Canary exfiltration webhook sent for ${name}@${version}`);
+                    // Track in dedup map
+                    if (previousRules) {
+                      previousRules.add(canaryRuleId);
+                    } else {
+                      alertedPackageRules.set(name, new Set([canaryRuleId]));
+                    }
+                  } catch (webhookErr) {
+                    console.error(`[MONITOR] Canary webhook failed for ${name}@${version}: ${webhookErr.message}`);
+                  }
                 }
               }
             }
@@ -1518,6 +1557,10 @@ async function scanPackage(name, version, ecosystem, tarballUrl) {
           };
         }
 
+        if (sandboxResult && sandboxResult.score === 0 && (result.summary.riskScore || 0) >= 20) {
+          alert.dormant_suspect = true;
+        }
+
         appendAlert(alert);
 
         const findingTypes = [...new Set(result.threats.map(t => t.type))];
@@ -1531,7 +1574,8 @@ async function scanPackage(name, version, ecosystem, tarballUrl) {
         const alertData = buildAlertData(name, version, ecosystem, result, sandboxResult);
         persistAlert(name, version, ecosystem, alertData);
         await trySendWebhook(name, version, ecosystem, result, sandboxResult);
-        return { sandboxResult, staticClean: false, tier };
+        const staticScore = result.summary.riskScore || 0;
+        return { sandboxResult, staticClean: false, tier, staticScore };
       }
     }
   } catch (err) {
@@ -2376,7 +2420,12 @@ async function resolveTarballAndScan(item) {
     appendTemporalDetection(item.name, item.version, temporalFindings);
 
     if (sandboxResult && sandboxResult.score === 0) {
-      console.log(`[MONITOR] FALSE POSITIVE (sandbox clean, no alert): ${item.name}@${item.version}`);
+      const riskScore = (scanResult && scanResult.staticScore) || 0;
+      if (riskScore >= 20) {
+        console.log(`[MONITOR] DORMANT SUSPECT: ${item.name}@${item.version} (static score: ${riskScore}, sandbox clean — possible evasive malware)`);
+      } else {
+        console.log(`[MONITOR] FALSE POSITIVE (sandbox clean, no alert): ${item.name}@${item.version}`);
+      }
     } else if (staticClean && !sandboxResult) {
       // Temporal CRITICAL/HIGH with static clean → reclassify as SUSPECT for stats
       const temporalMaxSev = getTemporalMaxSeverity(temporalResult, astResult, publishResult, maintainerResult);

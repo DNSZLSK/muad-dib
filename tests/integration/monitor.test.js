@@ -33,7 +33,7 @@ async function runMonitorTests() {
     DETECTIONS_FILE, appendDetection, loadDetections, getDetectionStats,
     SCAN_STATS_FILE, loadScanStats, updateScanStats,
     buildReportFromDisk, buildReportEmbedFromDisk, getReportStatus,
-    trySendWebhook, classifyError, recordError, formatErrorBreakdown,
+    buildAlertData, trySendWebhook, classifyError, recordError, formatErrorBreakdown,
     cleanupOrphanTmpDirs, sendReportNow,
     consecutivePollErrors, POLL_MAX_BACKOFF,
     runTemporalAstCheck, runTemporalPublishCheck, runTemporalMaintainerCheck,
@@ -619,11 +619,11 @@ async function runMonitorTests() {
     }
   });
 
-  test('MONITOR: shouldSendWebhook returns false when static CRITICAL 100 but sandbox clean', () => {
+  test('MONITOR: shouldSendWebhook returns true when static CRITICAL 100 but sandbox clean (dormant suspect)', () => {
     const orig = process.env.MUADDIB_WEBHOOK_URL;
     process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.example.com/test';
     try {
-      // Static score 100 CRITICAL — but sandbox says CLEAN
+      // Static score 100 CRITICAL — sandbox says CLEAN but high static = dormant suspect
       const result = { summary: { total: 5, critical: 4, high: 1, medium: 0, low: 0, riskScore: 100 }, threats: [
         { type: 'dangerous_call_eval', severity: 'CRITICAL' },
         { type: 'obfuscation_detected', severity: 'CRITICAL' },
@@ -632,8 +632,8 @@ async function runMonitorTests() {
         { type: 'prototype_hook', severity: 'HIGH' }
       ] };
       const sandbox = { score: 0, severity: 'CLEAN', findings: [] };
-      assert(shouldSendWebhook(result, sandbox) === false,
-        'Sandbox clean should suppress webhook even with static score 100 CRITICAL');
+      assert(shouldSendWebhook(result, sandbox) === true,
+        'High static score with sandbox clean should send webhook (dormant suspect)');
     } finally {
       if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
       else delete process.env.MUADDIB_WEBHOOK_URL;
@@ -658,7 +658,7 @@ async function runMonitorTests() {
     }
   });
 
-  test('MONITOR: shouldSendWebhook returns false for sandbox score 10 (timeout noise)', () => {
+  test('MONITOR: shouldSendWebhook returns true for sandbox score 10 with high static (dormant suspect)', () => {
     const orig = process.env.MUADDIB_WEBHOOK_URL;
     process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.example.com/test';
     try {
@@ -668,12 +668,232 @@ async function runMonitorTests() {
         { type: 'suspicious_dataflow', severity: 'CRITICAL' }
       ] };
       const sandbox = { score: 10, severity: 'LOW', findings: [] };
-      assert(shouldSendWebhook(result, sandbox) === false,
-        'Sandbox score <= 15 (timeout noise) should suppress webhook');
+      assert(shouldSendWebhook(result, sandbox) === true,
+        'High static score with low sandbox should send webhook (dormant suspect)');
     } finally {
       if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
       else delete process.env.MUADDIB_WEBHOOK_URL;
     }
+  });
+
+  // --- shouldSendWebhook: IOC + sandbox combinations (BUGs 1-3) ---
+
+  test('MONITOR: shouldSendWebhook sends for IOC match + sandbox CLEAN (score 0)', () => {
+    const orig = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.example.com/test';
+    try {
+      const result = { summary: { total: 1, critical: 1, high: 0, medium: 0, low: 0, riskScore: 25 }, threats: [
+        { type: 'known_malicious_package', severity: 'CRITICAL' }
+      ] };
+      const sandbox = { score: 0, severity: 'CLEAN', findings: [] };
+      assert(shouldSendWebhook(result, sandbox) === true,
+        'IOC match must ALWAYS send, even when sandbox is clean');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  test('MONITOR: shouldSendWebhook sends for IOC match + sandbox timeout noise (score 10)', () => {
+    const orig = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.example.com/test';
+    try {
+      const result = { summary: { total: 1, critical: 1, high: 0, medium: 0, low: 0, riskScore: 25 }, threats: [
+        { type: 'known_malicious_package', severity: 'CRITICAL' }
+      ] };
+      const sandbox = { score: 10, severity: 'LOW', findings: [] };
+      assert(shouldSendWebhook(result, sandbox) === true,
+        'IOC match must send even with timeout noise sandbox score');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  test('MONITOR: shouldSendWebhook sends for IOC match + sandbox moderate (score 20)', () => {
+    const orig = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.example.com/test';
+    try {
+      const result = { summary: { total: 1, critical: 1, high: 0, medium: 0, low: 0, riskScore: 25 }, threats: [
+        { type: 'known_malicious_package', severity: 'CRITICAL' }
+      ] };
+      const sandbox = { score: 20, severity: 'MEDIUM', findings: [] };
+      assert(shouldSendWebhook(result, sandbox) === true,
+        'IOC match must send even with moderate sandbox score');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  test('MONITOR: shouldSendWebhook sends for shai_hulud_marker + sandbox CLEAN', () => {
+    const orig = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.example.com/test';
+    try {
+      const result = { summary: { total: 1, critical: 1, high: 0, medium: 0, low: 0, riskScore: 25 }, threats: [
+        { type: 'shai_hulud_marker', severity: 'CRITICAL' }
+      ] };
+      const sandbox = { score: 0, severity: 'CLEAN', findings: [] };
+      assert(shouldSendWebhook(result, sandbox) === true,
+        'Shai-Hulud marker must always send (IOC match)');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  test('MONITOR: shouldSendWebhook sends for shai_hulud_backdoor + sandbox CLEAN', () => {
+    const orig = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.example.com/test';
+    try {
+      const result = { summary: { total: 1, critical: 1, high: 0, medium: 0, low: 0, riskScore: 25 }, threats: [
+        { type: 'shai_hulud_backdoor', severity: 'CRITICAL' }
+      ] };
+      const sandbox = { score: 0, severity: 'CLEAN', findings: [] };
+      assert(shouldSendWebhook(result, sandbox) === true,
+        'Shai-Hulud backdoor must always send (IOC match)');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  // --- shouldSendWebhook: static threshold with sandbox clean (BUG 4, threshold >= 20) ---
+
+  test('MONITOR: shouldSendWebhook sends for moderate static (38) + CRITICAL + sandbox CLEAN (dormant DPRK)', () => {
+    const orig = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.example.com/test';
+    try {
+      // Simulates @chatclub1/claude-code — DPRK malware with obfuscation CRITICAL, lifecycle, dynamic require
+      const result = { summary: { total: 3, critical: 1, high: 1, medium: 1, low: 0, riskScore: 38 }, threats: [
+        { type: 'obfuscation_detected', severity: 'CRITICAL' },
+        { type: 'lifecycle_script', severity: 'HIGH' },
+        { type: 'dynamic_require', severity: 'MEDIUM' }
+      ] };
+      const sandbox = { score: 0, severity: 'CLEAN', findings: [] };
+      assert(shouldSendWebhook(result, sandbox) === true,
+        'Score 38 with CRITICAL findings + sandbox clean should send (dormant malware)');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  test('MONITOR: shouldSendWebhook suppresses low static (15) + MEDIUM-only + sandbox CLEAN', () => {
+    const orig = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.example.com/test';
+    try {
+      const result = { summary: { total: 2, critical: 0, high: 0, medium: 2, low: 0, riskScore: 15 }, threats: [
+        { type: 'obfuscation_detected', severity: 'MEDIUM' },
+        { type: 'dynamic_require', severity: 'MEDIUM' }
+      ] };
+      const sandbox = { score: 0, severity: 'CLEAN', findings: [] };
+      assert(shouldSendWebhook(result, sandbox) === false,
+        'Score 15 with only MEDIUM findings should be suppressed (confirmed benign)');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  test('MONITOR: shouldSendWebhook suppresses low static (10) + HIGH + sandbox CLEAN', () => {
+    const orig = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.example.com/test';
+    try {
+      const result = { summary: { total: 1, critical: 0, high: 1, medium: 0, low: 0, riskScore: 10 }, threats: [
+        { type: 'dangerous_call_eval', severity: 'HIGH' }
+      ] };
+      const sandbox = { score: 0, severity: 'CLEAN', findings: [] };
+      assert(shouldSendWebhook(result, sandbox) === false,
+        'Score 10 below threshold should be suppressed even with HIGH finding');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  test('MONITOR: shouldSendWebhook sends for sandbox moderate (20) + static >= 20 + HIGH', () => {
+    const orig = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.example.com/test';
+    try {
+      const result = { summary: { total: 2, critical: 1, high: 1, medium: 0, low: 0, riskScore: 35 }, threats: [
+        { type: 'dangerous_call_eval', severity: 'CRITICAL' },
+        { type: 'obfuscation_detected', severity: 'HIGH' }
+      ] };
+      const sandbox = { score: 20, severity: 'MEDIUM', findings: [] };
+      assert(shouldSendWebhook(result, sandbox) === true,
+        'Sandbox 16-30 + static >= 20 + HIGH/CRITICAL should send');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  test('MONITOR: shouldSendWebhook suppresses sandbox moderate (20) + low static (10)', () => {
+    const orig = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.example.com/test';
+    try {
+      const result = { summary: { total: 1, critical: 0, high: 0, medium: 1, low: 0, riskScore: 10 }, threats: [
+        { type: 'obfuscation_detected', severity: 'MEDIUM' }
+      ] };
+      const sandbox = { score: 20, severity: 'MEDIUM', findings: [] };
+      assert(shouldSendWebhook(result, sandbox) === false,
+        'Sandbox 16-30 + low static should be suppressed');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  // --- computeRiskLevel: score-based thresholds (BUG 6) ---
+
+  test('MONITOR: computeRiskLevel uses riskScore when available (CRITICAL >= 75)', () => {
+    assert(computeRiskLevel({ riskScore: 80, critical: 0, high: 0, medium: 0, low: 0 }) === 'CRITICAL',
+      'riskScore 80 should be CRITICAL');
+  });
+
+  test('MONITOR: computeRiskLevel uses riskScore (HIGH >= 50)', () => {
+    assert(computeRiskLevel({ riskScore: 55, critical: 0, high: 0, medium: 0, low: 0 }) === 'HIGH',
+      'riskScore 55 should be HIGH');
+  });
+
+  test('MONITOR: computeRiskLevel uses riskScore (MEDIUM >= 25)', () => {
+    assert(computeRiskLevel({ riskScore: 30, critical: 0, high: 0, medium: 0, low: 0 }) === 'MEDIUM',
+      'riskScore 30 should be MEDIUM');
+  });
+
+  test('MONITOR: computeRiskLevel uses riskScore (LOW > 0)', () => {
+    assert(computeRiskLevel({ riskScore: 5, critical: 0, high: 0, medium: 0, low: 0 }) === 'LOW',
+      'riskScore 5 should be LOW');
+  });
+
+  test('MONITOR: computeRiskLevel uses riskScore (CLEAN = 0)', () => {
+    assert(computeRiskLevel({ riskScore: 0, critical: 0, high: 0, medium: 0, low: 0 }) === 'CLEAN',
+      'riskScore 0 should be CLEAN');
+  });
+
+  test('MONITOR: computeRiskLevel falls back to severity counts when no riskScore', () => {
+    // No riskScore field — uses existing severity-count fallback
+    assert(computeRiskLevel({ critical: 0, high: 1, medium: 0, low: 0 }) === 'HIGH',
+      'Should fall back to severity count when riskScore missing');
+  });
+
+  // --- buildAlertData: score passthrough (BUG 5) ---
+
+  test('MONITOR: buildAlertData preserves main scorer riskScore instead of recomputing', () => {
+    const result = {
+      summary: { total: 3, critical: 1, high: 1, medium: 1, low: 0, riskScore: 42, riskLevel: 'HIGH' },
+      threats: [
+        { type: 'obfuscation_detected', severity: 'CRITICAL' },
+        { type: 'dangerous_call_eval', severity: 'HIGH' },
+        { type: 'dynamic_require', severity: 'MEDIUM' }
+      ]
+    };
+    const alertData = buildAlertData('test-pkg', '1.0.0', 'npm', result, null);
+    assert(alertData.summary.riskScore === 42,
+      'Should preserve main scanner riskScore (42), not recompute to ' + alertData.summary.riskScore);
+    assert(alertData.summary.riskLevel === 'HIGH',
+      'Should preserve main scanner riskLevel (HIGH), not recompute to ' + alertData.summary.riskLevel);
   });
 
   test('MONITOR: hasIOCMatch detects known_malicious_package', () => {
@@ -1426,9 +1646,9 @@ async function runMonitorTests() {
       const mockSandboxClean = { score: 0, severity: 'CLEAN', findings: [] };
       const mockSandboxSuspect = { score: 60, severity: 'HIGH', findings: [{ type: 'suspicious_dns' }] };
 
-      // Sandbox CLEAN → no webhook
-      assert(shouldSendWebhook(mockResultIOC, mockSandboxClean) === false,
-        'Should NOT send webhook when sandbox score is 0 (CLEAN)');
+      // IOC match → always send, even with sandbox CLEAN
+      assert(shouldSendWebhook(mockResultIOC, mockSandboxClean) === true,
+        'IOC match must ALWAYS send, even when sandbox is CLEAN');
 
       // Sandbox SUSPECT → send webhook
       assert(shouldSendWebhook(mockResultIOC, mockSandboxSuspect) === true,
@@ -2602,20 +2822,22 @@ async function runMonitorTests() {
     }
   });
 
-  await asyncTest('MONITOR: trySendWebhook logs false positive when sandbox score is 0', async () => {
+  await asyncTest('MONITOR: trySendWebhook logs suppressed when sandbox score is 0 and low static', async () => {
     const origEnv = process.env.MUADDIB_WEBHOOK_URL;
-    delete process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.example.com/test';
     const origLog = console.log;
     let logOutput = '';
     console.log = (...args) => { logOutput += args.join(' '); };
     try {
-      const result = { summary: { critical: 1, high: 0, medium: 0, low: 0, total: 1 }, threats: [{ type: 'test', severity: 'CRITICAL' }] };
+      // Low static score (no riskScore), sandbox clean → suppressed
+      const result = { summary: { critical: 0, high: 0, medium: 1, low: 0, total: 1 }, threats: [{ type: 'test', severity: 'MEDIUM' }] };
       const sandboxResult = { score: 0, severity: 'CLEAN' };
       await trySendWebhook('test-pkg', '1.0.0', 'npm', result, sandboxResult);
-      assertIncludes(logOutput, 'FALSE POSITIVE', 'Should log false positive');
+      assertIncludes(logOutput, 'SUPPRESSED', 'Should log SUPPRESSED (not FALSE POSITIVE)');
     } finally {
       console.log = origLog;
       if (origEnv !== undefined) process.env.MUADDIB_WEBHOOK_URL = origEnv;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
     }
   });
 
@@ -2938,13 +3160,14 @@ async function runMonitorTests() {
     }
   });
 
-  test('MONITOR: shouldSendWebhook returns false for sandbox score = 0', () => {
+  test('MONITOR: shouldSendWebhook returns true for IOC match even with sandbox score = 0', () => {
     const origEnv = process.env.MUADDIB_WEBHOOK_URL;
     process.env.MUADDIB_WEBHOOK_URL = 'https://example.com/webhook';
     try {
+      // IOC match is highest-confidence — sandbox CLEAN must NOT suppress it
       const result = { summary: { critical: 1, high: 0, medium: 0, low: 0, total: 1 }, threats: [{ type: 'known_malicious_package', severity: 'CRITICAL' }] };
       const sandboxResult = { score: 0, severity: 'CLEAN' };
-      assert(shouldSendWebhook(result, sandboxResult) === false, 'Sandbox score 0 should override IOC match');
+      assert(shouldSendWebhook(result, sandboxResult) === true, 'IOC match must always send, sandbox clean must not override');
     } finally {
       if (origEnv !== undefined) {
         process.env.MUADDIB_WEBHOOK_URL = origEnv;
@@ -3010,23 +3233,24 @@ async function runMonitorTests() {
 
   // --- shouldSendWebhook: tiered sandbox thresholds ---
 
-  test('MONITOR: shouldSendWebhook returns false for sandbox score 15 (timeout FP)', () => {
+  test('MONITOR: shouldSendWebhook sends for sandbox score 15 with high static + HIGH finding', () => {
     const origEnv = process.env.MUADDIB_WEBHOOK_URL;
     process.env.MUADDIB_WEBHOOK_URL = 'https://example.com/webhook';
     try {
+      // riskScore 40 >= 20 threshold AND has HIGH finding → sends even with timeout noise
       const result = { summary: { critical: 0, high: 1, medium: 2, low: 0, total: 3, riskScore: 40 }, threats: [
         { type: 'suspicious_dataflow', severity: 'HIGH' }
       ] };
       const sandboxResult = { score: 15, severity: 'LOW' };
-      assert(shouldSendWebhook(result, sandboxResult) === false,
-        'Should NOT send webhook for sandbox score 15 (timeout noise)');
+      assert(shouldSendWebhook(result, sandboxResult) === true,
+        'Score 40 with HIGH finding should send even with sandbox timeout noise');
     } finally {
       if (origEnv !== undefined) process.env.MUADDIB_WEBHOOK_URL = origEnv;
       else delete process.env.MUADDIB_WEBHOOK_URL;
     }
   });
 
-  test('MONITOR: shouldSendWebhook returns false for static >= 80 when sandbox score <= 15 (sandbox overrides)', () => {
+  test('MONITOR: shouldSendWebhook returns true for static >= 80 when sandbox score <= 15 (dormant suspect)', () => {
     const origEnv = process.env.MUADDIB_WEBHOOK_URL;
     process.env.MUADDIB_WEBHOOK_URL = 'https://example.com/webhook';
     try {
@@ -3035,8 +3259,8 @@ async function runMonitorTests() {
         { type: 'suspicious_dataflow', severity: 'HIGH' }
       ] };
       const sandboxResult = { score: 15, severity: 'LOW' };
-      assert(shouldSendWebhook(result, sandboxResult) === false,
-        'Sandbox score <= 15 should suppress webhook even with static >= 80');
+      assert(shouldSendWebhook(result, sandboxResult) === true,
+        'High static score with low sandbox should send webhook (dormant suspect)');
     } finally {
       if (origEnv !== undefined) process.env.MUADDIB_WEBHOOK_URL = origEnv;
       else delete process.env.MUADDIB_WEBHOOK_URL;
@@ -3067,6 +3291,68 @@ async function runMonitorTests() {
       const sandboxResult = { score: 15, severity: 'LOW' };
       assert(shouldSendWebhook(result, sandboxResult) === false,
         'Should NOT send webhook for low static score + sandbox noise');
+    } finally {
+      if (origEnv !== undefined) process.env.MUADDIB_WEBHOOK_URL = origEnv;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  // --- Dormant suspect: sandbox clean + high static ---
+
+  test('MONITOR: shouldSendWebhook returns true for sandbox=0 with staticScore=38 + HIGH/CRITICAL (dormant suspect)', () => {
+    const origEnv = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://example.com/webhook';
+    try {
+      const result = { summary: { critical: 2, high: 3, medium: 1, low: 0, total: 6, riskScore: 38 }, threats: [
+        { type: 'shell_exec', severity: 'CRITICAL' },
+        { type: 'obfuscation_detected', severity: 'CRITICAL' },
+        { type: 'suspicious_dataflow', severity: 'HIGH' },
+        { type: 'env_access', severity: 'HIGH' },
+        { type: 'dynamic_require', severity: 'HIGH' },
+        { type: 'prototype_hook', severity: 'MEDIUM' }
+      ] };
+      const sandboxResult = { score: 0, severity: 'CLEAN', findings: [] };
+      assert(shouldSendWebhook(result, sandboxResult) === true,
+        'Dormant suspect: sandbox=0 + staticScore=38 + HIGH/CRITICAL should send webhook');
+    } finally {
+      if (origEnv !== undefined) process.env.MUADDIB_WEBHOOK_URL = origEnv;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  test('MONITOR: shouldSendWebhook returns false for sandbox=0 with staticScore=5 (true FP)', () => {
+    const origEnv = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://example.com/webhook';
+    try {
+      const result = { summary: { critical: 0, high: 0, medium: 1, low: 1, total: 2, riskScore: 5 }, threats: [
+        { type: 'prototype_hook', severity: 'MEDIUM' },
+        { type: 'env_access', severity: 'LOW' }
+      ] };
+      const sandboxResult = { score: 0, severity: 'CLEAN', findings: [] };
+      assert(shouldSendWebhook(result, sandboxResult) === false,
+        'Low static score + sandbox clean should suppress webhook (true FP)');
+    } finally {
+      if (origEnv !== undefined) process.env.MUADDIB_WEBHOOK_URL = origEnv;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  test('MONITOR: shouldSendWebhook returns false for sandbox=0 + staticScore=60 but MEDIUM-only (no HIGH/CRITICAL)', () => {
+    const origEnv = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://example.com/webhook';
+    try {
+      const result = { summary: { critical: 0, high: 0, medium: 5, low: 2, total: 7, riskScore: 60 }, threats: [
+        { type: 'prototype_hook', severity: 'MEDIUM' },
+        { type: 'env_access', severity: 'MEDIUM' },
+        { type: 'dynamic_require', severity: 'MEDIUM' },
+        { type: 'obfuscation_detected', severity: 'MEDIUM' },
+        { type: 'suspicious_dataflow', severity: 'MEDIUM' },
+        { type: 'high_entropy_string', severity: 'LOW' },
+        { type: 'credential_regex_harvest', severity: 'LOW' }
+      ] };
+      const sandboxResult = { score: 0, severity: 'CLEAN', findings: [] };
+      assert(shouldSendWebhook(result, sandboxResult) === false,
+        'Static 60 + sandbox clean + MEDIUM-only should not send webhook (hasHighOrCritical guard)');
     } finally {
       if (origEnv !== undefined) process.env.MUADDIB_WEBHOOK_URL = origEnv;
       else delete process.env.MUADDIB_WEBHOOK_URL;
@@ -3492,7 +3778,7 @@ async function runMonitorTests() {
     }
   });
 
-  await asyncTest('MONITOR-COV: trySendWebhook does not send for false positive', async () => {
+  await asyncTest('MONITOR-COV: trySendWebhook logs suppressed for low-static sandbox clean', async () => {
     const origEnv = process.env.MUADDIB_WEBHOOK_URL;
     const origLog = console.log;
     const logs = [];
@@ -3500,13 +3786,14 @@ async function runMonitorTests() {
     console.log = (...args) => logs.push(args.join(' '));
 
     try {
+      // No riskScore → staticScore=0 < 20, sandbox clean → suppressed
       const mockResult = {
         threats: [{ type: 'suspicious_dataflow', severity: 'HIGH' }],
         summary: { critical: 0, high: 1, medium: 0, low: 0, total: 1 }
       };
       await trySendWebhook('safe-pkg', '1.0.0', 'npm', mockResult, { score: 0 });
-      const fpLog = logs.find(l => l.includes('FALSE POSITIVE'));
-      assert(fpLog !== undefined, 'Should log FALSE POSITIVE message');
+      const suppressedLog = logs.find(l => l.includes('SUPPRESSED'));
+      assert(suppressedLog !== undefined, 'Should log SUPPRESSED message');
     } finally {
       console.log = origLog;
       if (origEnv !== undefined) process.env.MUADDIB_WEBHOOK_URL = origEnv;
