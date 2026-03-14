@@ -278,15 +278,24 @@ async function runScoringHardeningTests() {
   });
 
   // ==========================================================================
-  // FP-P6 Fix 2: remote_code_load + proxy_data_intercept NOT exempt from dist/
+  // FP-P6/P9: remote_code_load + proxy_data_intercept are bundler artifacts in dist/
   // ==========================================================================
-  test('FP-P6 Fix2: remote_code_load in dist/ gets downgrade (no longer exempt)', () => {
+  test('FP-P9: remote_code_load CRITICAL in dist/ gets 2-notch downgrade (bundler artifact)', () => {
     const threats = [
       { type: 'remote_code_load', severity: 'CRITICAL', file: 'dist/bundle.js', message: 'fetch+eval' }
     ];
     applyFPReductions(threats, null, null);
-    assert(threats[0].severity === 'HIGH',
-      `remote_code_load in dist/ should be HIGH (1-notch), got ${threats[0].severity}`);
+    assert(threats[0].severity === 'MEDIUM',
+      `remote_code_load in dist/ should be MEDIUM (2-notch bundler artifact), got ${threats[0].severity}`);
+  });
+
+  test('FP-P9: remote_code_load HIGH in dist/ gets downgraded to LOW', () => {
+    const threats = [
+      { type: 'remote_code_load', severity: 'HIGH', file: 'dist/index-Co9R73to.js', message: 'fetch+eval chunk' }
+    ];
+    applyFPReductions(threats, null, null);
+    assert(threats[0].severity === 'LOW',
+      `remote_code_load HIGH in dist/ should be LOW (2-notch), got ${threats[0].severity}`);
   });
 
   test('P8: proxy_data_intercept in dist/ gets 2-notch downgrade (bundler artifact)', () => {
