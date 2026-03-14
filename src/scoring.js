@@ -164,7 +164,10 @@ const DIST_BUNDLER_ARTIFACT_TYPES = new Set([
   'js_obfuscation_pattern', 'vm_code_execution',
   'module_compile', 'module_compile_dynamic',
   // P7: env_access in dist/ is bundled SDK config reading, not credential theft
-  'env_access'
+  'env_access',
+  // P8: Proxy traps in dist/ are state management frameworks (MobX, Vue reactivity, Immer),
+  // not malicious data interception. Two-notch downgrade (CRITICAL→MEDIUM, HIGH→LOW).
+  'proxy_data_intercept'
 ]);
 
 // Types exempt from reachability downgrade — IOC matches, lifecycle, and package-level types.
