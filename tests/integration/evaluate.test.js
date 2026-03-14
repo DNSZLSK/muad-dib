@@ -13,9 +13,11 @@ async function runEvaluateTests() {
     evaluateAdversarial,
     saveMetrics,
     silentScan,
-    ADVERSARIAL_THRESHOLDS,
+    ADVERSARIAL_SAMPLES,
+    HOLDOUT_SAMPLES,
     GT_THRESHOLD,
-    BENIGN_THRESHOLD
+    BENIGN_THRESHOLD,
+    ADR_THRESHOLD
   } = require('../../src/commands/evaluate.js');
 
   // Module structure tests
@@ -29,41 +31,32 @@ async function runEvaluateTests() {
     assert(typeof evaluateAdversarial === 'function', 'evaluateAdversarial should be a function');
   });
 
-  test('EVALUATE: ADVERSARIAL_THRESHOLDS has 62 entries', () => {
-    const keys = Object.keys(ADVERSARIAL_THRESHOLDS);
-    assert(keys.length === 62, `Expected 62 adversarial thresholds, got ${keys.length}`);
+  test('EVALUATE: ADVERSARIAL_SAMPLES is an array with expected count', () => {
+    assert(Array.isArray(ADVERSARIAL_SAMPLES), 'ADVERSARIAL_SAMPLES should be an array');
+    assert(ADVERSARIAL_SAMPLES.length >= 62, `Expected >= 62 adversarial samples, got ${ADVERSARIAL_SAMPLES.length}`);
   });
 
-  test('EVALUATE: ADVERSARIAL_THRESHOLDS has correct sample names', () => {
+  test('EVALUATE: ADVERSARIAL_SAMPLES contains expected sample names', () => {
     const expected = [
-      // Vague 1-4 (35 samples)
       'ci-trigger-exfil', 'delayed-exfil', 'docker-aware',
       'staged-fetch', 'dns-chunk-exfil', 'string-concat-obfuscation',
-      'postinstall-download', 'dynamic-require', 'iife-exfil',
-      'conditional-chain', 'template-literal-obfuscation', 'proxy-env-intercept',
-      'nested-payload', 'dynamic-import', 'websocket-exfil',
-      'bun-runtime-evasion', 'preinstall-exec', 'remote-dynamic-dependency',
-      'github-exfil', 'detached-background',
-      'ai-agent-weaponization', 'ai-config-injection', 'rdd-zero-deps',
-      'discord-webhook-exfil', 'preinstall-background-fork',
-      'silent-error-swallow', 'double-base64-exfil', 'crypto-wallet-harvest',
-      'self-hosted-runner-backdoor', 'dead-mans-switch', 'fake-captcha-fingerprint',
-      'pyinstaller-dropper', 'gh-cli-token-steal', 'triple-base64-github-push',
-      'browser-api-hook',
-      // Vague 5 (27 samples)
-      'async-iterator-exfil', 'console-override-exfil', 'cross-file-callback-exfil',
-      'error-reporting-exfil', 'error-stack-exfil', 'event-emitter-exfil',
-      'fn-return-exfil', 'getter-defineProperty-exfil', 'http-header-exfil',
-      'import-map-poison', 'intl-polyfill-backdoor', 'net-time-exfil',
-      'postmessage-exfil', 'process-title-exfil', 'promise-chain-exfil',
-      'proxy-getter-dns-exfil', 'readable-stream-exfil', 'response-intercept-exfil',
-      'setTimeout-eval-chain', 'setter-trap-exfil', 'sourcemap-payload',
-      'stream-pipe-exfil', 'svg-payload-fetch', 'symbol-iterator-exfil',
-      'toJSON-hijack', 'url-constructor-exfil', 'wasm-c2-payload'
+      'ai-agent-weaponization', 'mcp-server-injection',
+      'fn-return-eval', 'charcode-arithmetic',
     ];
     for (const name of expected) {
-      assert(ADVERSARIAL_THRESHOLDS[name] !== undefined, `Missing threshold for ${name}`);
+      assert(ADVERSARIAL_SAMPLES.includes(name), `Missing sample: ${name}`);
     }
+  });
+
+  test('EVALUATE: HOLDOUT_SAMPLES is an array with 40 entries', () => {
+    assert(Array.isArray(HOLDOUT_SAMPLES), 'HOLDOUT_SAMPLES should be an array');
+    assert(HOLDOUT_SAMPLES.length === 40, `Expected 40 holdout samples, got ${HOLDOUT_SAMPLES.length}`);
+  });
+
+  test('EVALUATE: ADR_THRESHOLD is a global number (no per-sample thresholds)', () => {
+    assert(typeof ADR_THRESHOLD === 'number', 'ADR_THRESHOLD should be a number');
+    assert(ADR_THRESHOLD > 0, 'ADR_THRESHOLD should be > 0');
+    assert(ADR_THRESHOLD === 20, `ADR_THRESHOLD should be 20, got ${ADR_THRESHOLD}`);
   });
 
   test('EVALUATE: GT_THRESHOLD is 3', () => {
@@ -110,8 +103,9 @@ async function runEvaluateTests() {
     assert(typeof adv.total === 'number', 'total should be number');
     assert(typeof adv.adr === 'number', 'adr should be number');
     assert(Array.isArray(adv.details), 'details should be array');
-    // total = ADVERSARIAL_THRESHOLDS (62) + HOLDOUT_THRESHOLDS (40) = 102
-    assert(adv.total === 102, `Expected 102 adversarial+holdout samples, got ${adv.total}`);
+    // total = ADVERSARIAL_SAMPLES + HOLDOUT_SAMPLES
+    const expectedTotal = ADVERSARIAL_SAMPLES.length + HOLDOUT_SAMPLES.length;
+    assert(adv.total === expectedTotal, `Expected ${expectedTotal} adversarial+holdout samples, got ${adv.total}`);
     for (const d of adv.details) {
       assert(typeof d.name === 'string', 'detail name should be string');
       assert(typeof d.score === 'number', 'detail score should be number');

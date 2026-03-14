@@ -167,15 +167,16 @@ function analyzeExports(filePath) {
 
   // Track which local variables hold sensitive module references
   // e.g. const fs = require('fs') → moduleVars['fs'] = 'fs'
-  const moduleVars = {};
+  // Object.create(null) prevents prototype pollution via __proto__/constructor keys
+  const moduleVars = Object.create(null);
   // Track which local variables hold tainted values
   // e.g. const data = fs.readFileSync(...) → taintedVars['data'] = { source, detail }
-  const taintedVars = {};
+  const taintedVars = Object.create(null);
 
   // Track class declarations: class Foo { ... }
-  const classDefs = {};
+  const classDefs = Object.create(null);
   // Track function declarations: function foo() { ... }
-  const funcDefs = {};
+  const funcDefs = Object.create(null);
   walkAST(ast, (node) => {
     if (node.type === 'ClassDeclaration' && node.id && node.id.name) {
       classDefs[node.id.name] = node;
@@ -468,7 +469,7 @@ function describeSensitiveCall(mod, method, args) {
  */
 function scanBodyForTaint(body, moduleVars, taintedVars) {
   // Collect local tainted vars within this function scope too
-  const localTainted = { ...taintedVars };
+  const localTainted = Object.assign(Object.create(null), taintedVars);
 
   let found = null;
   walkAST({ type: 'Program', body }, (node) => {

@@ -791,8 +791,8 @@ async function runMonitorTests() {
   });
 
   test('MONITOR: computeRiskScore computes weighted score', () => {
-    // 2*25 + 1*15 + 3*5 + 2*1 = 50 + 15 + 15 + 2 = 82
-    assert(computeRiskScore({ critical: 2, high: 1, medium: 3, low: 2 }) === 82, 'Should be 82');
+    // 2*25 + 1*10 + 3*3 + 2*1 = 50 + 10 + 9 + 2 = 71
+    assert(computeRiskScore({ critical: 2, high: 1, medium: 3, low: 2 }) === 71, 'Should be 71');
   });
 
   test('MONITOR: computeRiskScore caps at 100', () => {
@@ -2101,9 +2101,9 @@ async function runMonitorTests() {
   });
 
   test('MONITOR: computeRiskScore with only medium and low', () => {
-    // 2*5 + 3*1 = 13
-    assert(computeRiskScore({ critical: 0, high: 0, medium: 2, low: 3 }) === 13,
-      'Should be 13 for 2 medium + 3 low');
+    // 2*3 + 3*1 = 9
+    assert(computeRiskScore({ critical: 0, high: 0, medium: 2, low: 3 }) === 9,
+      'Should be 9 for 2 medium + 3 low');
   });
 
   test('MONITOR: computeRiskScore with missing fields defaults to 0', () => {
@@ -2395,8 +2395,8 @@ async function runMonitorTests() {
 
   test('MONITOR: computeRiskScore calculates correctly', () => {
     const score = computeRiskScore({ critical: 1, high: 1, medium: 1, low: 1 });
-    // 25 + 15 + 5 + 1 = 46
-    assert(score === 46, 'Score should be 46, got ' + score);
+    // 25 + 10 + 3 + 1 = 39
+    assert(score === 39, 'Score should be 39, got ' + score);
   });
 
   test('MONITOR: isPublishAnomalyOnly returns true when only publish is suspicious', () => {
@@ -2899,8 +2899,8 @@ async function runMonitorTests() {
 
   test('MONITOR: computeRiskScore computes correct value for mixed findings', () => {
     const score = computeRiskScore({ critical: 0, high: 1, medium: 2, low: 3 });
-    // 0*25 + 1*15 + 2*5 + 3*1 = 28
-    assert(score === 28, 'Should be 28, got ' + score);
+    // 0*25 + 1*10 + 2*3 + 3*1 = 19
+    assert(score === 19, 'Should be 19, got ' + score);
   });
 
   // --- computeRiskLevel extended ---

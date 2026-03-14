@@ -1,4 +1,4 @@
-const { test, assert } = require('../test-utils');
+const { test, asyncTest, assert } = require('../test-utils');
 
 async function runDownloadTests() {
   console.log('\n=== DOWNLOAD TESTS ===\n');
@@ -135,6 +135,50 @@ async function runDownloadTests() {
   test('DOWNLOAD: isAllowedDownloadRedirect blocks octal loopback', () => {
     const result = isAllowedDownloadRedirect('https://0177.0.0.01/payload');
     assert(result.allowed === false, 'Should block octal loopback');
+  });
+
+  // --- IPv6 SSRF protection (v2.6.9) ---
+
+  test('DOWNLOAD: isPrivateIP blocks IPv6 loopback ::1', () => {
+    assert(isPrivateIP('::1') === true, '::1 should be private');
+  });
+
+  test('DOWNLOAD: isPrivateIP blocks IPv6 ULA fc00::', () => {
+    assert(isPrivateIP('fc00::1') === true, 'fc00::1 should be private');
+  });
+
+  test('DOWNLOAD: isPrivateIP blocks IPv6 link-local fe80::', () => {
+    assert(isPrivateIP('fe80::1') === true, 'fe80::1 should be private');
+  });
+
+  test('DOWNLOAD: isPrivateIP blocks ::ffff:127.0.0.1 mapped address', () => {
+    assert(isPrivateIP('::ffff:127.0.0.1') === true, '::ffff:127.0.0.1 should be private');
+  });
+
+  await asyncTest('DOWNLOAD: safeDnsResolve resolves both IPv4 and IPv6', async () => {
+    const { safeDnsResolve } = require('../../src/shared/download.js');
+    // Direct IP addresses bypass DNS resolution
+    const result = await safeDnsResolve('8.8.8.8');
+    assert(result === '8.8.8.8', 'Direct IP should pass through');
+  });
+
+  // --- Monitor scoring weight alignment (v2.6.9) ---
+
+  test('DOWNLOAD: Monitor scoring weights match scoring.js SEVERITY_WEIGHTS', () => {
+    const { computeRiskScore } = require('../../src/monitor.js');
+    const { SEVERITY_WEIGHTS } = require('../../src/scoring.js');
+
+    // 1 CRITICAL should give SEVERITY_WEIGHTS.CRITICAL
+    const critScore = computeRiskScore({ critical: 1, high: 0, medium: 0, low: 0 });
+    assert(critScore === SEVERITY_WEIGHTS.CRITICAL, `1 CRITICAL should give ${SEVERITY_WEIGHTS.CRITICAL}, got ${critScore}`);
+
+    // 1 HIGH should give SEVERITY_WEIGHTS.HIGH
+    const highScore = computeRiskScore({ critical: 0, high: 1, medium: 0, low: 0 });
+    assert(highScore === SEVERITY_WEIGHTS.HIGH, `1 HIGH should give ${SEVERITY_WEIGHTS.HIGH}, got ${highScore}`);
+
+    // 1 MEDIUM should give SEVERITY_WEIGHTS.MEDIUM
+    const medScore = computeRiskScore({ critical: 0, high: 0, medium: 1, low: 0 });
+    assert(medScore === SEVERITY_WEIGHTS.MEDIUM, `1 MEDIUM should give ${SEVERITY_WEIGHTS.MEDIUM}, got ${medScore}`);
   });
 }
 

@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.9] - 2026-03-14
+
+### Fixed
+- **SSRF IPv6 bypass**: `safeDnsResolve()` now resolves both IPv4 and IPv6 addresses via `Promise.allSettled` — prevents SSRF via IPv6 loopback (::1) or ULA (fc00::)
+- **Monitor scoring weights**: Aligned `computeRiskScore()` in monitor.js with `SEVERITY_WEIGHTS` from scoring.js (HIGH: 15→10, MEDIUM: 5→3)
+- **Package.json overrides typo**: Removed `"loadash"` override (lodash is not a dependency)
+- **FPR operator consistency**: `evaluateBenign()` now uses `>=` instead of `>` for BENIGN_THRESHOLD (aligned with GT/ADR which use `>=`)
+
+### Added
+- 3 new shell evasion rules: `curl_ifs_evasion` (SHELL-016, CRITICAL), `eval_curl_subshell` (SHELL-017, CRITICAL), `sh_c_curl_exec` (SHELL-018, HIGH)
+- **CI version validation**: `publish.yml` now validates that git tag matches `package.json` version before npm publish
+- **Evaluation smoke tests**: New test file `evaluation-smoke.test.js` verifying threshold consistency, no per-sample overfitting, and monitor/scoring weight alignment
+- **Charcode validation**: `extractNumericArgs()` in deobfuscator now validates values are in [0, 0x10FFFF] before `String.fromCharCode()`
+
+### Changed
+- **Per-sample thresholds removed**: `ADVERSARIAL_THRESHOLDS`/`HOLDOUT_THRESHOLDS` objects replaced with flat `ADVERSARIAL_SAMPLES`/`HOLDOUT_SAMPLES` arrays — all samples use global `ADR_THRESHOLD=20`
+- **Prototype pollution prevention**: `taintedVars`/`moduleVars`/`classDefs`/`funcDefs` in module-graph.js now use `Object.create(null)` instead of `{}`
+- VS Code extension version: 2.5.8 → **2.6.9**
+- Test count: 2009 → **2042** tests (+33) across 49 files
+- Rule count: 130 → **133** (128 RULES + 5 PARANOID)
+
 ## [2.6.6] - 2026-03-13
 
 ### Fixed
