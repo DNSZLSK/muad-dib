@@ -162,6 +162,28 @@ async function runDownloadTests() {
     assert(result === '8.8.8.8', 'Direct IP should pass through');
   });
 
+  // --- IPv6 special ranges (v2.7.9) ---
+
+  test('DOWNLOAD: isPrivateIP blocks IPv6 multicast ff02::1', () => {
+    assert(isPrivateIP('ff02::1') === true, 'ff02::1 multicast should be blocked');
+  });
+
+  test('DOWNLOAD: isPrivateIP blocks IPv6 documentation 2001:db8::1', () => {
+    assert(isPrivateIP('2001:db8::1') === true, '2001:db8::1 should be blocked');
+  });
+
+  test('DOWNLOAD: isPrivateIP blocks IPv6 discard 100::1', () => {
+    assert(isPrivateIP('100::1') === true, '100::1 discard should be blocked');
+  });
+
+  test('DOWNLOAD: isPrivateIP blocks IPv6 NAT64 64:ff9b::1', () => {
+    assert(isPrivateIP('64:ff9b::1') === true, '64:ff9b::1 NAT64 should be blocked');
+  });
+
+  test('DOWNLOAD: isPrivateIP allows public IPv6 2607:f8b0::1', () => {
+    assert(isPrivateIP('2607:f8b0::1') === false, 'Google public IPv6 should be allowed');
+  });
+
   // --- Monitor scoring weight alignment (v2.6.9) ---
 
   test('DOWNLOAD: Monitor scoring weights match scoring.js SEVERITY_WEIGHTS', () => {

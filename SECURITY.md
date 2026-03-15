@@ -4,6 +4,7 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
+| 2.7.x   | :white_check_mark: |
 | 2.6.x   | :white_check_mark: |
 | 2.5.x   | :white_check_mark: |
 | 2.4.x   | :x:                |
@@ -64,7 +65,7 @@ Please include the following information in your report:
 - We aim to release fixes before public disclosure
 - We request a 90-day disclosure window for complex issues
 
-## Detection Rules (v2.7.5)
+## Detection Rules (v2.7.8)
 
 MUAD'DIB uses 14 scanner modules (module-graph pre-analysis + 13 parallel scanners) + 5 behavioral anomaly detection features + ground truth validation, producing 134 rule IDs (129 RULES + 5 PARANOID):
 
@@ -374,7 +375,7 @@ The sandbox simulates CI environments by setting: `CI=true`, `GITHUB_ACTIONS=tru
 2. **Signed commits**: Use GPG-signed commits when possible
 3. **Review dependencies**: Check new dependencies before adding them
 
-## Threat Model (v2.7.5)
+## Threat Model (v2.7.8)
 
 MUAD'DIB 2.6 uses a **triple detection approach**:
 

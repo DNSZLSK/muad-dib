@@ -30,7 +30,7 @@
 
 npm and PyPI supply-chain attacks are exploding. Shai-Hulud compromised 25K+ repos in 2025. Existing tools detect threats but don't help you respond.
 
-MUAD'DIB combines **14 parallel scanners** (133 detection rules), a **deobfuscation engine**, **inter-module dataflow analysis**, **per-file max scoring**, Docker sandbox with **monkey-patching preload** for time-bomb detection, **behavioral anomaly detection**, and **ground truth validation** to detect threats AND guide your response — even before they appear in any IOC database.
+MUAD'DIB combines **14 parallel scanners** (134 detection rules), a **deobfuscation engine**, **inter-module dataflow analysis**, **per-file max scoring**, Docker sandbox with **monkey-patching preload** for time-bomb detection, **behavioral anomaly detection**, and **ground truth validation** to detect threats AND guide your response — even before they appear in any IOC database.
 
 ---
 
@@ -195,7 +195,7 @@ muaddib replay                     # Ground truth validation (46/49 TPR)
 | GitHub Actions | Shai-Hulud backdoor detection |
 | Hash Scanner | Known malicious file hashes |
 
-### 133 detection rules
+### 134 detection rules
 
 All rules are mapped to MITRE ATT&CK techniques. See [SECURITY.md](SECURITY.md#detection-rules-v262) for the complete rules reference.
 
@@ -286,7 +286,7 @@ repos:
 | **FPR** (Benign) | **12.1%** (64/529) | 529 npm packages, real source via `npm pack` |
 | **ADR** (Adversarial + Holdout) | **92.2%** (71/77) | 53 adversarial + 40 holdout (77 available on disk), global threshold=20 |
 
-**2093 tests** across 49 files. **134 rules** (129 RULES + 5 PARANOID).
+**2166 tests** across 49 files. **134 rules** (129 RULES + 5 PARANOID).
 
 > **Methodology caveats:**
 > - TPR measured on 49 Node.js attack samples (3 browser-only excluded from 51 total)
@@ -327,7 +327,7 @@ npm test
 
 ### Testing
 
-- **2093 tests** across 49 modular test files
+- **2166 tests** across 49 modular test files
 - **56 fuzz tests** - Malformed inputs, ReDoS, unicode, binary
 - **Datadog 17K benchmark** - 17,922 real malware samples
 - **Ground truth validation** - 51 real-world attacks (93.9% TPR)

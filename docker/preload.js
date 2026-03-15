@@ -87,7 +87,7 @@
       const ts = _DateNow.call(Date) - realStart;
       // Sanitize msg to prevent log injection (attacker injecting \n[PRELOAD] EXEC: DANGEROUS)
       const safeMsg = String(msg).replace(/\r/g, '\\r').replace(/\n/g, '\\n').substring(0, 1000);
-      const safeCat = String(category).replace(/[\r\n]/g, '');
+      const safeCat = String(category).replace(/[\r\n\[\]]/g, '');
       _appendFileSync.call(_fs, LOG_FILE, `[PRELOAD] ${safeCat}: ${safeMsg} (t+${ts}ms)\n`);
     } catch (e) {
       // Silent — never break the target
@@ -185,7 +185,7 @@
   // ═══════════════════════════════════════════════════════
 
   try {
-    global.setTimeout = function (fn, delay, ...args) {
+    const _patchedSetTimeout = function (fn, delay, ...args) {
       if (typeof fn !== 'function' && typeof fn !== 'string') {
         return _setTimeout(fn, delay, ...args);
       }
@@ -195,12 +195,17 @@
       }
       return _setTimeout(fn, 0, ...args);
     };
-    // Preserve toString for detection evasion
-    global.setTimeout.toString = function () { return 'function setTimeout() { [native code] }'; };
+    _patchedSetTimeout.toString = function () { return 'function setTimeout() { [native code] }'; };
+    Object.defineProperty(global, 'setTimeout', {
+      value: _patchedSetTimeout,
+      writable: false,
+      configurable: false,
+      enumerable: true
+    });
   } catch (e) { /* ignore */ }
 
   try {
-    global.setInterval = function (fn, delay, ...args) {
+    const _patchedSetInterval = function (fn, delay, ...args) {
       if (typeof fn !== 'function' && typeof fn !== 'string') {
         return _setInterval(fn, delay, ...args);
       }
@@ -212,7 +217,13 @@
       }
       return _setInterval(fn, delay, ...args);
     };
-    global.setInterval.toString = function () { return 'function setInterval() { [native code] }'; };
+    _patchedSetInterval.toString = function () { return 'function setInterval() { [native code] }'; };
+    Object.defineProperty(global, 'setInterval', {
+      value: _patchedSetInterval,
+      writable: false,
+      configurable: false,
+      enumerable: true
+    });
   } catch (e) { /* ignore */ }
 
   // Preserve clearTimeout/clearInterval (not patched, but ensure they exist)

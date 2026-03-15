@@ -231,6 +231,41 @@ function runPreloadTests() {
   });
 
   // ============================================
+  // PRELOAD HARDENING TESTS (v2.7.9)
+  // ============================================
+
+  console.log('\n=== PRELOAD HARDENING (v2.7.9) ===\n');
+
+  test('PRELOAD: setTimeout is non-writable (Object.defineProperty)', () => {
+    const preloadPath = path.join(__dirname, '..', '..', 'docker', 'preload.js');
+    const content = fs.readFileSync(preloadPath, 'utf-8');
+    assert(
+      content.includes("Object.defineProperty(global, 'setTimeout'") ||
+      content.includes('Object.defineProperty(global, "setTimeout"'),
+      'setTimeout should be locked via Object.defineProperty'
+    );
+  });
+
+  test('PRELOAD: setInterval is non-writable (Object.defineProperty)', () => {
+    const preloadPath = path.join(__dirname, '..', '..', 'docker', 'preload.js');
+    const content = fs.readFileSync(preloadPath, 'utf-8');
+    assert(
+      content.includes("Object.defineProperty(global, 'setInterval'") ||
+      content.includes('Object.defineProperty(global, "setInterval"'),
+      'setInterval should be locked via Object.defineProperty'
+    );
+  });
+
+  test('PRELOAD: safeCat strips brackets from category', () => {
+    const preloadPath = path.join(__dirname, '..', '..', 'docker', 'preload.js');
+    const content = fs.readFileSync(preloadPath, 'utf-8');
+    assert(
+      content.includes('\\[\\]') || content.includes('[\\]'),
+      'safeCat should strip brackets to prevent log injection'
+    );
+  });
+
+  // ============================================
   // SANDBOX MODULE INTEGRATION TESTS
   // ============================================
 

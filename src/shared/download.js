@@ -23,7 +23,11 @@ const PRIVATE_IP_PATTERNS = [
   /^::1$/,
   /^::ffff:127\./,
   /^fc00:/,
-  /^fe80:/
+  /^fe80:/,
+  /^ff/i,                      // IPv6 multicast (RFC 4291 ff00::/8)
+  /^2001:0?db8:/i,             // IPv6 documentation (RFC 3849 2001:db8::/32)
+  /^100:/,                     // IPv6 discard (RFC 6666 100::/64)
+  /^64:ff9b:/i                 // IPv6 NAT64 well-known (RFC 6052 64:ff9b::/96)
 ];
 
 /**
