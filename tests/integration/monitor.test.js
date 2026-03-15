@@ -51,6 +51,9 @@ async function runMonitorTests() {
     atomicWriteFileSync,
     SELF_PACKAGE_NAME,
     computeReputationFactor,
+    HIGH_CONFIDENCE_MALICE_TYPES,
+    hasHighConfidenceThreat,
+    getWebhookThreshold,
     extractScope,
     pendingGrouped,
     bufferScopedWebhook,
@@ -5799,12 +5802,13 @@ async function runMonitorTests() {
   // ===== C4: Reputation scoring tests =====
 
   test('MONITOR: computeReputationFactor — established package → ~0.3', () => {
+    // 1000d = >730 (-0.3), 100 versions = >50 (-0.2), 200k = >100k (-0.2) → 1.0-0.7 ≈ 0.3
     const factor = computeReputationFactor({
       age_days: 1000,
       version_count: 100,
       weekly_downloads: 200000
     });
-    assert(factor >= 0.3 && factor <= 0.4,
+    assert(factor >= 0.29 && factor <= 0.4,
       `Established package should have factor ~0.3, got ${factor}`);
   });
 
@@ -5823,14 +5827,15 @@ async function runMonitorTests() {
     assert(factor === 1.0, `Null metadata should return 1.0, got ${factor}`);
   });
 
-  test('MONITOR: computeReputationFactor — floor 0.3', () => {
-    // Even extreme values should not go below 0.3
+  test('MONITOR: computeReputationFactor — floor 0.10', () => {
+    // Even extreme values should not go below 0.10
     const factor = computeReputationFactor({
       age_days: 5000,
       version_count: 500,
       weekly_downloads: 10000000
     });
-    assert(factor >= 0.3, `Factor should never be below 0.3, got ${factor}`);
+    assert(factor >= 0.10, `Factor should never be below 0.10, got ${factor}`);
+    assert(factor <= 0.10 + 0.001, `Extreme package should hit floor 0.10, got ${factor}`);
   });
 
   test('MONITOR: computeReputationFactor — ceiling 1.5', () => {
@@ -5991,6 +5996,271 @@ async function runMonitorTests() {
     } finally {
       if (prevUrl !== undefined) process.env.MUADDIB_WEBHOOK_URL = prevUrl;
       else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  // ===== v2.7.6 C2: Aggressive reputation tiers =====
+
+  test('MONITOR: computeReputationFactor — Playwright-like (5+ years, 200+ versions, 1M+ dl) → 0.10', () => {
+    // ~12 years, ~1700 versions, ~10M weekly: -0.5 -0.3 -0.4 = 0.10 (floor)
+    const factor = computeReputationFactor({
+      age_days: 4380,
+      version_count: 1700,
+      weekly_downloads: 10000000
+    });
+    assert(factor >= 0.10 && factor <= 0.11,
+      `Playwright-like package should hit floor 0.10, got ${factor}`);
+  });
+
+  test('MONITOR: computeReputationFactor — 5+ year age tier', () => {
+    const factor = computeReputationFactor({
+      age_days: 2000,
+      version_count: 10,
+      weekly_downloads: 1000
+    });
+    // age >1825 → -0.5, versions 10 → 0, downloads 1000 → 0 → 0.5
+    assert(factor >= 0.45 && factor <= 0.55,
+      `5+ year package should get -0.5 age reduction, got ${factor}`);
+  });
+
+  test('MONITOR: computeReputationFactor — 200+ versions tier', () => {
+    const factor = computeReputationFactor({
+      age_days: 500,
+      version_count: 300,
+      weekly_downloads: 1000
+    });
+    // age >365 → -0.15, versions >200 → -0.3, downloads 1000 → 0 → 0.55
+    assert(factor >= 0.50 && factor <= 0.60,
+      `200+ version package should get -0.3 version reduction, got ${factor}`);
+  });
+
+  test('MONITOR: computeReputationFactor — 1M+ downloads tier', () => {
+    const factor = computeReputationFactor({
+      age_days: 500,
+      version_count: 10,
+      weekly_downloads: 5000000
+    });
+    // age >365 → -0.15, versions 10 → 0, downloads >1M → -0.4 → 0.45
+    assert(factor >= 0.40 && factor <= 0.50,
+      `1M+ dl package should get -0.4 download reduction, got ${factor}`);
+  });
+
+  // ===== v2.7.6 C1: High-confidence malice bypass =====
+
+  test('MONITOR: HIGH_CONFIDENCE_MALICE_TYPES contains 8 threat types', () => {
+    assert(HIGH_CONFIDENCE_MALICE_TYPES.size === 8,
+      `Should have 8 types, got ${HIGH_CONFIDENCE_MALICE_TYPES.size}`);
+    assert(HIGH_CONFIDENCE_MALICE_TYPES.has('lifecycle_shell_pipe'), 'Missing lifecycle_shell_pipe');
+    assert(HIGH_CONFIDENCE_MALICE_TYPES.has('fetch_decrypt_exec'), 'Missing fetch_decrypt_exec');
+    assert(HIGH_CONFIDENCE_MALICE_TYPES.has('download_exec_binary'), 'Missing download_exec_binary');
+    assert(HIGH_CONFIDENCE_MALICE_TYPES.has('intent_credential_exfil'), 'Missing intent_credential_exfil');
+    assert(HIGH_CONFIDENCE_MALICE_TYPES.has('intent_command_exfil'), 'Missing intent_command_exfil');
+    assert(HIGH_CONFIDENCE_MALICE_TYPES.has('cross_file_dataflow'), 'Missing cross_file_dataflow');
+    assert(HIGH_CONFIDENCE_MALICE_TYPES.has('canary_exfiltration'), 'Missing canary_exfiltration');
+    assert(HIGH_CONFIDENCE_MALICE_TYPES.has('sandbox_network_after_sensitive_read'), 'Missing sandbox_network_after_sensitive_read');
+  });
+
+  test('MONITOR: HIGH_CONFIDENCE_MALICE_TYPES does NOT contain FP-prone types', () => {
+    assert(!HIGH_CONFIDENCE_MALICE_TYPES.has('dynamic_require'), 'Should not contain dynamic_require');
+    assert(!HIGH_CONFIDENCE_MALICE_TYPES.has('prototype_hook'), 'Should not contain prototype_hook');
+    assert(!HIGH_CONFIDENCE_MALICE_TYPES.has('env_access'), 'Should not contain env_access');
+    assert(!HIGH_CONFIDENCE_MALICE_TYPES.has('credential_regex_harvest'), 'Should not contain credential_regex_harvest');
+    assert(!HIGH_CONFIDENCE_MALICE_TYPES.has('suspicious_dataflow'), 'Should not contain suspicious_dataflow');
+    assert(!HIGH_CONFIDENCE_MALICE_TYPES.has('obfuscation_detected'), 'Should not contain obfuscation_detected');
+    assert(!HIGH_CONFIDENCE_MALICE_TYPES.has('credential_exfil'), 'Should not contain credential_exfil');
+  });
+
+  test('MONITOR: hasHighConfidenceThreat returns true for lifecycle_shell_pipe', () => {
+    const result = {
+      threats: [
+        { type: 'env_access', severity: 'HIGH' },
+        { type: 'lifecycle_shell_pipe', severity: 'CRITICAL' }
+      ]
+    };
+    assert(hasHighConfidenceThreat(result) === true, 'Should detect lifecycle_shell_pipe');
+  });
+
+  test('MONITOR: hasHighConfidenceThreat returns false for dynamic_require', () => {
+    const result = {
+      threats: [
+        { type: 'dynamic_require', severity: 'HIGH' },
+        { type: 'env_access', severity: 'MEDIUM' }
+      ]
+    };
+    assert(hasHighConfidenceThreat(result) === false, 'Should NOT flag dynamic_require');
+  });
+
+  test('MONITOR: hasHighConfidenceThreat returns false for null/empty', () => {
+    assert(hasHighConfidenceThreat(null) === false, 'null should return false');
+    assert(hasHighConfidenceThreat({}) === false, 'no threats should return false');
+    assert(hasHighConfidenceThreat({ threats: [] }) === false, 'empty threats should return false');
+  });
+
+  // ===== v2.7.6 C3: Graduated webhook threshold =====
+
+  test('MONITOR: getWebhookThreshold — very established (factor ≤ 0.5) → 35', () => {
+    assert(getWebhookThreshold(0.10) === 35, 'factor 0.10 should return 35');
+    assert(getWebhookThreshold(0.30) === 35, 'factor 0.30 should return 35');
+    assert(getWebhookThreshold(0.50) === 35, 'factor 0.50 should return 35');
+  });
+
+  test('MONITOR: getWebhookThreshold — established (0.5 < factor ≤ 0.8) → 25', () => {
+    assert(getWebhookThreshold(0.51) === 25, 'factor 0.51 should return 25');
+    assert(getWebhookThreshold(0.70) === 25, 'factor 0.70 should return 25');
+    assert(getWebhookThreshold(0.80) === 25, 'factor 0.80 should return 25');
+  });
+
+  test('MONITOR: getWebhookThreshold — new/unknown (factor > 0.8) → 20', () => {
+    assert(getWebhookThreshold(0.81) === 20, 'factor 0.81 should return 20');
+    assert(getWebhookThreshold(1.0) === 20, 'factor 1.0 should return 20');
+    assert(getWebhookThreshold(1.5) === 20, 'factor 1.5 should return 20');
+  });
+
+  test('MONITOR: shouldSendWebhook suppresses established package with adjusted score 30 (factor 0.30, threshold 35)', () => {
+    // Established package: score 30, factor 0.30 → threshold 35 → 30 < 35 → SUPPRESSED
+    process.env.MUADDIB_WEBHOOK_URL = 'https://test.webhook.url';
+    try {
+      const result = {
+        threats: [{ type: 'env_access', severity: 'HIGH' }],
+        summary: { riskScore: 30, critical: 0, high: 1, medium: 0, low: 0, reputationFactor: 0.30 }
+      };
+      assert(!shouldSendWebhook(result, null),
+        'Score 30 with factor 0.30 (threshold 35) should be suppressed');
+    } finally {
+      delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  test('MONITOR: shouldSendWebhook sends for established package with high adjusted score (factor 0.30, score 40)', () => {
+    process.env.MUADDIB_WEBHOOK_URL = 'https://test.webhook.url';
+    try {
+      const result = {
+        threats: [{ type: 'env_access', severity: 'HIGH' }],
+        summary: { riskScore: 40, critical: 0, high: 1, medium: 0, low: 0, reputationFactor: 0.30 }
+      };
+      assert(shouldSendWebhook(result, null),
+        'Score 40 with factor 0.30 (threshold 35) should send');
+    } finally {
+      delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  test('MONITOR: shouldSendWebhook sends for new package with score 20 (default threshold)', () => {
+    process.env.MUADDIB_WEBHOOK_URL = 'https://test.webhook.url';
+    try {
+      const result = {
+        threats: [{ type: 'suspicious_dataflow', severity: 'HIGH' }],
+        summary: { riskScore: 25, critical: 0, high: 1, medium: 0, low: 0 }
+      };
+      assert(shouldSendWebhook(result, null),
+        'Score 25 without reputationFactor (default threshold 20) should send');
+    } finally {
+      delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  test('MONITOR: shouldSendWebhook always sends for IOC match even with low score and high reputation', () => {
+    process.env.MUADDIB_WEBHOOK_URL = 'https://test.webhook.url';
+    try {
+      const result = {
+        threats: [{ type: 'known_malicious_package', severity: 'CRITICAL' }],
+        summary: { riskScore: 5, critical: 1, high: 0, medium: 0, low: 0, reputationFactor: 0.10 }
+      };
+      assert(shouldSendWebhook(result, null),
+        'IOC match must ALWAYS send regardless of reputation');
+    } finally {
+      delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  // ===== v2.7.6 Integration: established + FP → suppressed, established + HC → sent =====
+
+  test('MONITOR: integration — Playwright-like FP suppressed (factor 0.10, raw 100 → adj 10, threshold 35)', () => {
+    process.env.MUADDIB_WEBHOOK_URL = 'https://test.webhook.url';
+    try {
+      const rawScore = 100;
+      const factor = computeReputationFactor({
+        age_days: 4380,       // ~12 years
+        version_count: 1700,
+        weekly_downloads: 10000000
+      });
+      const adjustedScore = Math.round(rawScore * factor);
+      assert(adjustedScore <= 10, `Adjusted score should be ≤10, got ${adjustedScore}`);
+
+      const adjustedResult = {
+        threats: [{ type: 'env_access', severity: 'HIGH' }],
+        summary: { riskScore: adjustedScore, critical: 0, high: 1, medium: 0, low: 0, reputationFactor: factor }
+      };
+      const threshold = getWebhookThreshold(factor);
+      assert(threshold === 35, `Threshold should be 35 for factor ${factor}`);
+      assert(!shouldSendWebhook(adjustedResult, null),
+        `Playwright-like FP should be suppressed: adj=${adjustedScore} < threshold=${threshold}`);
+    } finally {
+      delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  test('MONITOR: integration — established + lifecycle_shell_pipe bypasses reputation', () => {
+    // Simulates supply-chain compromise of established package
+    const result = {
+      threats: [
+        { type: 'lifecycle_shell_pipe', severity: 'CRITICAL' },
+        { type: 'suspicious_dataflow', severity: 'HIGH' }
+      ],
+      summary: { riskScore: 80, critical: 1, high: 1, medium: 0, low: 0 }
+    };
+    // hasHighConfidenceThreat should return true → reputation BYPASSED → raw score used
+    assert(hasHighConfidenceThreat(result) === true,
+      'lifecycle_shell_pipe should trigger HC bypass');
+
+    process.env.MUADDIB_WEBHOOK_URL = 'https://test.webhook.url';
+    try {
+      // Even if we had applied reputation (factor 0.10 → adj 8), the raw score
+      // should be used because of HC bypass. Verify with raw score.
+      assert(shouldSendWebhook(result, null),
+        'Established package with lifecycle_shell_pipe should ALWAYS send (raw score used)');
+    } finally {
+      delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  test('MONITOR: integration — new suspicious package still sends (factor 1.0, threshold 20)', () => {
+    process.env.MUADDIB_WEBHOOK_URL = 'https://test.webhook.url';
+    try {
+      const factor = computeReputationFactor({
+        age_days: 3,
+        version_count: 1,
+        weekly_downloads: 5
+      });
+      const rawScore = 25;
+      const adjustedScore = Math.round(rawScore * factor);
+      assert(adjustedScore >= 20, `New package adjusted score should be ≥ 20, got ${adjustedScore}`);
+
+      const result = {
+        threats: [{ type: 'suspicious_dataflow', severity: 'HIGH' }],
+        summary: { riskScore: adjustedScore, critical: 0, high: 1, medium: 0, low: 0, reputationFactor: factor }
+      };
+      assert(shouldSendWebhook(result, null),
+        'New suspicious package should send (score amplified, threshold 20)');
+    } finally {
+      delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  test('MONITOR: shouldSendWebhook with sandbox clean + established + graduated threshold', () => {
+    process.env.MUADDIB_WEBHOOK_URL = 'https://test.webhook.url';
+    try {
+      // Established package (factor 0.50) → threshold 35
+      // Score 30 + HIGH → 30 < 35 → SUPPRESSED even though sandbox clean dormant
+      const result = {
+        threats: [{ type: 'env_access', severity: 'HIGH' }],
+        summary: { riskScore: 30, critical: 0, high: 1, medium: 0, low: 0, reputationFactor: 0.50 }
+      };
+      const sandbox = { score: 0, severity: 'NONE' };
+      assert(!shouldSendWebhook(result, sandbox),
+        'Established package (factor 0.50, threshold 35) with score 30 + sandbox clean should be suppressed');
+    } finally {
+      delete process.env.MUADDIB_WEBHOOK_URL;
     }
   });
 
