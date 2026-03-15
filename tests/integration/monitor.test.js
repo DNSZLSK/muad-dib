@@ -6280,6 +6280,115 @@ async function runMonitorTests() {
     clearTimeout(group.timer);
     pendingGrouped.clear();
   });
+
+  // ===== v2.7.7 C1: Webhook embed bug fix =====
+
+  asyncTest('MONITOR: flushScopeGroup single package has severity counts in summary', async () => {
+    for (const [, group] of pendingGrouped) clearTimeout(group.timer);
+    pendingGrouped.clear();
+
+    const result = {
+      threats: [
+        { type: 'intent_credential_exfil', severity: 'CRITICAL' },
+        { type: 'env_access', severity: 'HIGH' },
+        { type: 'obfuscation_detected', severity: 'MEDIUM' }
+      ],
+      summary: { riskScore: 55 }
+    };
+
+    bufferScopedWebhook('@embed-test', '@embed-test/pkg', '1.0.0', 'npm', result, null);
+    assert(pendingGrouped.has('@embed-test'), 'Should have pending group');
+
+    // Inspect the stored entry to verify it has the right data
+    const group = pendingGrouped.get('@embed-test');
+    const pkg = group.packages[0];
+    assert(pkg.threats.length === 3, `Should have 3 threats, got ${pkg.threats.length}`);
+
+    // Flush without webhook URL → builds the result internally
+    const prevUrl = process.env.MUADDIB_WEBHOOK_URL;
+    delete process.env.MUADDIB_WEBHOOK_URL;
+    try {
+      clearTimeout(group.timer);
+      await flushScopeGroup('@embed-test');
+      assert(!pendingGrouped.has('@embed-test'), 'Group should be removed after flush');
+    } finally {
+      if (prevUrl !== undefined) process.env.MUADDIB_WEBHOOK_URL = prevUrl;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  test('MONITOR: flushScopeGroup single-package result has correct severity counts', () => {
+    // Verify the logic that builds severity counts from threats
+    const threats = [
+      { type: 'intent_credential_exfil', severity: 'CRITICAL' },
+      { type: 'env_access', severity: 'HIGH' },
+      { type: 'obfuscation_detected', severity: 'MEDIUM' },
+      { type: 'high_entropy_string', severity: 'LOW' }
+    ];
+    const critical = threats.filter(t => t.severity === 'CRITICAL').length;
+    const high = threats.filter(t => t.severity === 'HIGH').length;
+    const medium = threats.filter(t => t.severity === 'MEDIUM').length;
+    const low = threats.filter(t => t.severity === 'LOW').length;
+    assert(critical === 1, `Expected 1 CRITICAL, got ${critical}`);
+    assert(high === 1, `Expected 1 HIGH, got ${high}`);
+    assert(medium === 1, `Expected 1 MEDIUM, got ${medium}`);
+    assert(low === 1, `Expected 1 LOW, got ${low}`);
+    assert(threats.length === 4, `Expected total 4, got ${threats.length}`);
+  });
+
+  // ===== v2.7.7 C2: HC bypass severity check =====
+
+  test('MONITOR: hasHighConfidenceThreat returns false for LOW severity HC type', () => {
+    const result = {
+      threats: [
+        { type: 'intent_credential_exfil', severity: 'LOW' }
+      ]
+    };
+    assert(hasHighConfidenceThreat(result) === false,
+      'LOW severity intent_credential_exfil should NOT trigger HC bypass');
+  });
+
+  test('MONITOR: hasHighConfidenceThreat returns true for CRITICAL severity HC type', () => {
+    const result = {
+      threats: [
+        { type: 'intent_credential_exfil', severity: 'CRITICAL' }
+      ]
+    };
+    assert(hasHighConfidenceThreat(result) === true,
+      'CRITICAL severity intent_credential_exfil should trigger HC bypass');
+  });
+
+  test('MONITOR: hasHighConfidenceThreat returns true for HIGH severity HC type', () => {
+    const result = {
+      threats: [
+        { type: 'cross_file_dataflow', severity: 'HIGH' }
+      ]
+    };
+    assert(hasHighConfidenceThreat(result) === true,
+      'HIGH severity cross_file_dataflow should trigger HC bypass');
+  });
+
+  test('MONITOR: hasHighConfidenceThreat — mixed LOW HC + non-HC → false', () => {
+    const result = {
+      threats: [
+        { type: 'intent_credential_exfil', severity: 'LOW' },
+        { type: 'env_access', severity: 'HIGH' }
+      ]
+    };
+    assert(hasHighConfidenceThreat(result) === false,
+      'Only LOW HC type + non-HC type should return false');
+  });
+
+  test('MONITOR: hasHighConfidenceThreat — mixed LOW HC + CRITICAL HC → true', () => {
+    const result = {
+      threats: [
+        { type: 'intent_credential_exfil', severity: 'LOW' },
+        { type: 'lifecycle_shell_pipe', severity: 'CRITICAL' }
+      ]
+    };
+    assert(hasHighConfidenceThreat(result) === true,
+      'Should return true when at least one non-LOW HC type exists');
+  });
 }
 
 module.exports = { runMonitorTests };

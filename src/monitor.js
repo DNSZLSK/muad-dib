@@ -307,7 +307,7 @@ const HIGH_CONFIDENCE_MALICE_TYPES = new Set([
 
 function hasHighConfidenceThreat(result) {
   if (!result || !result.threats) return false;
-  return result.threats.some(t => HIGH_CONFIDENCE_MALICE_TYPES.has(t.type));
+  return result.threats.some(t => HIGH_CONFIDENCE_MALICE_TYPES.has(t.type) && t.severity !== 'LOW');
 }
 
 function hasIOCMatch(result) {
@@ -810,9 +810,13 @@ async function flushScopeGroup(scope) {
   // Single package in group: send as normal webhook (no grouping noise)
   if (group.packages.length === 1) {
     const pkg = group.packages[0];
+    const critical = pkg.threats.filter(t => t.severity === 'CRITICAL').length;
+    const high = pkg.threats.filter(t => t.severity === 'HIGH').length;
+    const medium = pkg.threats.filter(t => t.severity === 'MEDIUM').length;
+    const low = pkg.threats.filter(t => t.severity === 'LOW').length;
     const result = {
       threats: pkg.threats,
-      summary: { riskScore: pkg.score }
+      summary: { riskScore: pkg.score, critical, high, medium, low, total: pkg.threats.length }
     };
     const webhookData = buildAlertData(pkg.name, pkg.version, group.ecosystem, result, pkg.sandboxResult);
     try {
