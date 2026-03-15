@@ -291,6 +291,25 @@ const IOC_MATCH_TYPES = new Set([
   'shai_hulud_backdoor'
 ]);
 
+// High-confidence malice types: quasi-never legitimate in benign packages.
+// When present, reputation attenuation is BYPASSED — raw score used for webhook.
+// This prevents supply-chain compromises of established packages from being suppressed.
+const HIGH_CONFIDENCE_MALICE_TYPES = new Set([
+  'lifecycle_shell_pipe',                  // curl|sh in preinstall
+  'fetch_decrypt_exec',                    // steganographic payload chain
+  'download_exec_binary',                  // download+chmod+exec
+  'intent_credential_exfil',               // intra-file credential→network
+  'intent_command_exfil',                  // intra-file command→network
+  'cross_file_dataflow',                   // proven taint cross-modules
+  'canary_exfiltration',                   // canary sandbox exfiltrated
+  'sandbox_network_after_sensitive_read'   // compound sandbox detection
+]);
+
+function hasHighConfidenceThreat(result) {
+  if (!result || !result.threats) return false;
+  return result.threats.some(t => HIGH_CONFIDENCE_MALICE_TYPES.has(t.type));
+}
+
 function hasIOCMatch(result) {
   if (!result || !result.threats) return false;
   return result.threats.some(t => IOC_MATCH_TYPES.has(t.type));
@@ -484,12 +503,31 @@ function getWebhookUrl() {
   return process.env.MUADDIB_WEBHOOK_URL || null;
 }
 
+/**
+ * Get the webhook score threshold based on reputation factor.
+ * Established packages (low factor) require higher scores to trigger alerts,
+ * reducing noise from well-known packages with benign FP patterns.
+ *
+ * @param {number} reputationFactor - Package reputation factor from computeReputationFactor()
+ * @returns {number} Threshold: 35 (very established), 25 (established), 20 (new/unknown)
+ */
+function getWebhookThreshold(reputationFactor) {
+  if (reputationFactor <= 0.5) return 35;   // very established — high bar
+  if (reputationFactor <= 0.8) return 25;   // established — moderate bar
+  return 20;                                 // new/unknown — default bar
+}
+
 function shouldSendWebhook(result, sandboxResult) {
   if (!getWebhookUrl()) return false;
 
   const staticScore = (result && result.summary) ? (result.summary.riskScore || 0) : 0;
   const sandboxScore = (sandboxResult && sandboxResult.score !== undefined) ? sandboxResult.score : -1;
   const sandboxRan = sandboxScore >= 0;
+
+  // Graduated threshold: use reputationFactor if available, else default (20)
+  const reputationFactor = (result && result.summary && result.summary.reputationFactor !== undefined)
+    ? result.summary.reputationFactor : 1.0;
+  const threshold = getWebhookThreshold(reputationFactor);
 
   // 1. IOC match — ALWAYS send, regardless of sandbox result.
   // IOC matches are highest-confidence (225K+ known malicious packages).
@@ -501,20 +539,19 @@ function shouldSendWebhook(result, sandboxResult) {
 
   // 3. Sandbox clean (0) or timeout noise (1-15): suppress unless static is strong.
   // Dormant malware can be statically suspicious but dynamically clean.
-  // Threshold >= 20 aligned with BENIGN_THRESHOLD — packages exceeding benign
-  // baseline with HIGH/CRITICAL findings deserve an alert. hasHighOrCritical()
-  // guards against FP (benign score 25 with only MEDIUM/LOW won't pass).
+  // Threshold graduated by reputation — established packages need higher static score.
+  // hasHighOrCritical() guards against FP (benign score with only MEDIUM/LOW won't pass).
   if (sandboxRan && sandboxScore <= 15) {
-    return staticScore >= 20 && hasHighOrCritical(result);
+    return staticScore >= threshold && hasHighOrCritical(result);
   }
 
   // 4. Sandbox moderate (16-30): send if static corroborates
   if (sandboxRan && sandboxScore > 15 && sandboxScore <= 30) {
-    return staticScore >= 20 && hasHighOrCritical(result);
+    return staticScore >= threshold && hasHighOrCritical(result);
   }
 
   // 5. No sandbox: static-only thresholds
-  if (staticScore >= 20 && hasHighOrCritical(result)) return true;
+  if (staticScore >= threshold && hasHighOrCritical(result)) return true;
 
   return false;
 }
@@ -572,10 +609,10 @@ function computeRiskScore(summary) {
  *
  * Established packages (old, many versions, high downloads) get a factor < 1.0
  * that attenuates the webhook score.  New/suspicious packages get > 1.0.
- * Clamped to [0.3, 1.5].
+ * Clamped to [0.10, 1.5].
  *
  * @param {Object|null} metadata - Registry metadata from getPackageMetadata()
- * @returns {number} factor in [0.3, 1.5]
+ * @returns {number} factor in [0.10, 1.5]
  */
 function computeReputationFactor(metadata) {
   if (!metadata) return 1.0;
@@ -584,7 +621,8 @@ function computeReputationFactor(metadata) {
   // Age signal (mutually exclusive branches)
   const ageDays = metadata.age_days;
   if (ageDays !== null && ageDays !== undefined) {
-    if (ageDays > 730) factor -= 0.3;
+    if (ageDays > 1825) factor -= 0.5;       // 5+ years — highly established
+    else if (ageDays > 730) factor -= 0.3;
     else if (ageDays > 365) factor -= 0.15;
     else if (ageDays < 7) factor += 0.3;
     else if (ageDays < 30) factor += 0.2;
@@ -592,19 +630,21 @@ function computeReputationFactor(metadata) {
 
   // Version count signal (mutually exclusive)
   const versionCount = metadata.version_count || 0;
-  if (versionCount > 50) factor -= 0.2;
+  if (versionCount > 200) factor -= 0.3;     // 200+ versions — mature project
+  else if (versionCount > 50) factor -= 0.2;
   else if (versionCount > 20) factor -= 0.1;
   else if (versionCount === 1) factor += 0.2;
   else if (versionCount <= 2) factor += 0.15;
 
   // Downloads signal
   const downloads = metadata.weekly_downloads || 0;
-  if (downloads > 100000) factor -= 0.2;
+  if (downloads > 1000000) factor -= 0.4;    // 1M+ weekly — top-tier package
+  else if (downloads > 100000) factor -= 0.2;
   else if (downloads > 50000) factor -= 0.1;
   else if (downloads < 10) factor += 0.15;
   else if (downloads < 100) factor += 0.1;
 
-  return Math.max(0.3, Math.min(1.5, factor));
+  return Math.max(0.10, Math.min(1.5, factor));
 }
 
 /**
@@ -1746,8 +1786,9 @@ async function scanPackage(name, version, ecosystem, tarballUrl) {
 
         // Reputation scoring (monitor-only, npm only)
         // Adjusts score for webhook decision without mutating persisted alert data.
+        // High-confidence malice types BYPASS reputation — supply-chain compromise protection.
         let adjustedResult = result;
-        if (ecosystem === 'npm') {
+        if (ecosystem === 'npm' && !hasHighConfidenceThreat(result)) {
           try {
             const { getPackageMetadata } = require('./scanner/npm-registry.js');
             const metadata = await getPackageMetadata(name);
@@ -1764,6 +1805,8 @@ async function scanPackage(name, version, ecosystem, tarballUrl) {
           } catch (err) {
             console.error(`[MONITOR] Reputation error for ${name}: ${err.message}`);
           }
+        } else if (ecosystem === 'npm' && hasHighConfidenceThreat(result)) {
+          console.log(`[MONITOR] REPUTATION BYPASS: ${name} has high-confidence threat — using raw score`);
         }
         await trySendWebhook(name, version, ecosystem, adjustedResult, sandboxResult);
         const staticScore = result.summary.riskScore || 0;
@@ -2627,10 +2670,10 @@ async function resolveTarballAndScan(item) {
     appendTemporalDetection(item.name, item.version, temporalFindings);
 
     if (sandboxResult && sandboxResult.score === 0) {
+      // DORMANT SUSPECT log is handled by trySendWebhook() (authoritative, uses adjusted score).
+      // Only log FALSE POSITIVE here for packages that didn't reach the webhook threshold.
       const riskScore = (scanResult && scanResult.staticScore) || 0;
-      if (riskScore >= 20) {
-        console.log(`[MONITOR] DORMANT SUSPECT: ${item.name}@${item.version} (static score: ${riskScore}, sandbox clean — possible evasive malware)`);
-      } else {
+      if (riskScore < 20) {
         console.log(`[MONITOR] FALSE POSITIVE (sandbox clean, no alert): ${item.name}@${item.version}`);
       }
     } else if (staticClean && !sandboxResult) {
@@ -2704,6 +2747,9 @@ module.exports = {
   computeRiskLevel,
   computeRiskScore,
   computeReputationFactor,
+  HIGH_CONFIDENCE_MALICE_TYPES,
+  hasHighConfidenceThreat,
+  getWebhookThreshold,
   extractScope,
   pendingGrouped,
   bufferScopedWebhook,
