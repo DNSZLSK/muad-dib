@@ -11,9 +11,15 @@ const { detectPublishAnomaly } = require('./publish-anomaly.js');
 const { detectMaintainerChange } = require('./maintainer-change.js');
 const { downloadToFile, extractTarGz, sanitizePackageName } = require('./shared/download.js');
 const { MAX_TARBALL_SIZE } = require('./shared/constants.js');
+const { loadCachedIOCs } = require('./ioc/updater.js');
 
 // Self-exclude: never scan our own package through the monitor
 const SELF_PACKAGE_NAME = require('../package.json').name; // 'muaddib-scanner'
+
+// C1: Size cap — skip full scan for large packages (>20MB unpacked).
+// Malware payloads are tiny (<1MB typically); 20MB has 20x safety margin.
+// Exceptions: IOC match (always scan), suspicious lifecycle scripts (always scan).
+const LARGE_PACKAGE_SIZE = 20 * 1024 * 1024; // 20MB
 
 // Prevent unhandled promise rejections from crashing the monitor process
 process.on('unhandledRejection', (reason, promise) => {
@@ -65,6 +71,14 @@ function resolveWritableDir(primary, fallback) {
 const DAILY_REPORTS_LOG_DIR = resolveWritableDir(PRIMARY_DAILY_REPORTS_DIR, FALLBACK_DAILY_REPORTS_DIR);
 const ALERTS_LOG_DIR = resolveWritableDir(PRIMARY_ALERTS_DIR, FALLBACK_ALERTS_DIR);
 
+// C3: Scan history memory — persistent cross-session webhook dedup.
+// Stores scan fingerprints (score, threat types, HC types) per package.
+// Suppresses webhook if a previous scan produced equivalent results.
+const SCAN_MEMORY_FILE = path.join(__dirname, '..', 'data', 'scan-memory.json');
+const SCAN_MEMORY_EXPIRY_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+const MAX_MEMORY_ENTRIES = 50000;
+const MEMORY_SCORE_TOLERANCE = 0.15; // ±15% score tolerance
+
 /**
  * Atomic file write: write to .tmp then rename (crash-safe).
  * Prevents race conditions and partial writes from corrupting data files.
@@ -96,6 +110,139 @@ function atomicWriteFileSync(filePath, data) {
     }
     throw err;
   }
+}
+
+// --- C3: Scan Memory Management ---
+
+// In-memory cache of scan memory (loaded lazily on first use)
+let scanMemoryCache = null;
+
+/**
+ * Load scan memory from disk (with expiration purge).
+ * @returns {Object} Map-like object: packageName → { version, score, types, hcTypes, timestamp }
+ */
+function loadScanMemory() {
+  if (scanMemoryCache) return scanMemoryCache;
+  const store = Object.create(null);
+  try {
+    if (fs.existsSync(SCAN_MEMORY_FILE)) {
+      const raw = JSON.parse(fs.readFileSync(SCAN_MEMORY_FILE, 'utf8'));
+      const now = Date.now();
+      let purged = 0;
+      for (const [key, entry] of Object.entries(raw)) {
+        if (now - entry.timestamp > SCAN_MEMORY_EXPIRY_MS) {
+          purged++;
+          continue; // expired
+        }
+        store[key] = entry;
+      }
+      if (purged > 0) {
+        console.log(`[MONITOR] MEMORY: purged ${purged} expired entries`);
+      }
+    }
+  } catch (err) {
+    console.warn(`[MONITOR] MEMORY: failed to load scan memory: ${err.message}`);
+  }
+  scanMemoryCache = store;
+  return store;
+}
+
+/**
+ * Save scan memory to disk (atomic write, max entries enforced).
+ */
+function saveScanMemory() {
+  if (!scanMemoryCache) return;
+  const entries = Object.entries(scanMemoryCache);
+  // Enforce max entries: evict oldest if over limit
+  if (entries.length > MAX_MEMORY_ENTRIES) {
+    entries.sort((a, b) => a[1].timestamp - b[1].timestamp);
+    const toRemove = entries.length - MAX_MEMORY_ENTRIES;
+    for (let i = 0; i < toRemove; i++) {
+      delete scanMemoryCache[entries[i][0]];
+    }
+  }
+  try {
+    atomicWriteFileSync(SCAN_MEMORY_FILE, JSON.stringify(scanMemoryCache, null, 2));
+  } catch (err) {
+    console.warn(`[MONITOR] MEMORY: failed to save scan memory: ${err.message}`);
+  }
+}
+
+/**
+ * Record a scan result in memory.
+ * @param {string} name - Package name
+ * @param {number} score - Risk score
+ * @param {string[]} types - Unique threat types
+ * @param {string[]} hcTypes - High-confidence threat types present
+ */
+function recordScanMemory(name, score, types, hcTypes) {
+  const store = loadScanMemory();
+  store[name] = {
+    score,
+    types: types.sort(),
+    hcTypes: hcTypes.sort(),
+    timestamp: Date.now()
+  };
+}
+
+/**
+ * Check if a webhook should be suppressed based on scan memory.
+ * Returns { suppress: boolean, reason?: string }.
+ *
+ * Suppression conditions (ALL must be true):
+ * 1. Previous scan exists and not expired
+ * 2. Score within ±15% of previous
+ * 3. No NEW threat types (subset or equal)
+ * 4. No NEW high-confidence types
+ *
+ * Bypass conditions (any = don't suppress):
+ * - IOC match in current result
+ * - New HC types not in previous scan
+ */
+function shouldSuppressByMemory(name, result) {
+  const store = loadScanMemory();
+  const prev = store[name];
+  if (!prev) return { suppress: false };
+
+  const currentScore = (result && result.summary) ? (result.summary.riskScore || 0) : 0;
+  const currentTypes = [...new Set((result.threats || []).map(t => t.type))].sort();
+  const currentHCTypes = (result.threats || [])
+    .filter(t => HIGH_CONFIDENCE_MALICE_TYPES.has(t.type) && t.severity !== 'LOW')
+    .map(t => t.type);
+  const currentHCSet = [...new Set(currentHCTypes)].sort();
+
+  // Bypass: IOC match always sends
+  if (hasIOCMatch(result)) return { suppress: false, reason: 'IOC match' };
+
+  // Condition 1: Score within ±15%
+  const prevScore = prev.score || 0;
+  if (prevScore === 0 && currentScore === 0) {
+    // Both zero — suppress (nothing changed)
+  } else if (prevScore === 0 || currentScore === 0) {
+    // One is zero, other is not — significant change
+    return { suppress: false, reason: `score changed (${prevScore} → ${currentScore})` };
+  } else {
+    const ratio = currentScore / prevScore;
+    if (ratio < (1 - MEMORY_SCORE_TOLERANCE) || ratio > (1 + MEMORY_SCORE_TOLERANCE)) {
+      return { suppress: false, reason: `score changed (${prevScore} → ${currentScore}, ratio=${ratio.toFixed(2)})` };
+    }
+  }
+
+  // Condition 2: No new threat types
+  const prevTypesSet = new Set(prev.types || []);
+  const newTypes = currentTypes.filter(t => !prevTypesSet.has(t));
+  if (newTypes.length > 0) {
+    return { suppress: false, reason: `new threat types: ${newTypes.join(', ')}` };
+  }
+
+  // Condition 3: No new HC types
+  const prevHCSet = new Set(prev.hcTypes || []);
+  const newHC = currentHCSet.filter(t => !prevHCSet.has(t));
+  if (newHC.length > 0) {
+    return { suppress: false, reason: `new HC types: ${newHC.join(', ')}` };
+  }
+
+  return { suppress: true, reason: `memory match (prev score=${prevScore}, current=${currentScore})` };
 }
 
 /**
@@ -205,6 +352,9 @@ let consecutivePollErrors = 0;
 
 // Counter for throttled disk persistence
 let scansSinceLastPersist = 0;
+
+// Counter for throttled scan memory persistence (C3)
+let scansSinceLastMemoryPersist = 0;
 
 // --- Scan queue (FIFO, sequential) ---
 
@@ -717,6 +867,32 @@ async function trySendWebhook(name, version, ecosystem, result, sandboxResult) {
   if (sandboxResult && sandboxResult.score === 0) {
     const staticScore = (result && result.summary) ? (result.summary.riskScore || 0) : 0;
     console.log(`[MONITOR] DORMANT SUSPECT: ${name}@${version} (static score: ${staticScore}, sandbox clean — possible evasive malware)`);
+  }
+
+  // C3: Scan memory — cross-session webhook dedup (before daily dedup).
+  // Suppresses webhook if previous scan produced equivalent results (same types, similar score).
+  // Always records the current scan for future comparisons.
+  const currentScore = (result && result.summary) ? (result.summary.riskScore || 0) : 0;
+  const currentTypes = [...new Set((result.threats || []).map(t => t.type))];
+  const currentHCTypes = [...new Set(
+    (result.threats || [])
+      .filter(t => HIGH_CONFIDENCE_MALICE_TYPES.has(t.type) && t.severity !== 'LOW')
+      .map(t => t.type)
+  )];
+
+  const memoryCheck = shouldSuppressByMemory(name, result);
+  // Always record current scan (updates timestamp + fingerprint for future checks)
+  recordScanMemory(name, currentScore, currentTypes, currentHCTypes);
+  // Persist periodically (throttled to every 10 scans to avoid disk I/O overhead)
+  scansSinceLastMemoryPersist++;
+  if (scansSinceLastMemoryPersist >= 10) {
+    saveScanMemory();
+    scansSinceLastMemoryPersist = 0;
+  }
+
+  if (memoryCheck.suppress) {
+    console.log(`[MONITOR] MEMORY SUPPRESSED: ${name}@${version} (${memoryCheck.reason})`);
+    return;
   }
 
   // Webhook dedup: if the same package was already alerted today with the exact same rules,
@@ -1574,11 +1750,12 @@ function isBundledToolingOnly(threats) {
 
 // --- Package scanning ---
 
-async function scanPackage(name, version, ecosystem, tarballUrl) {
+async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta) {
   const startTime = Date.now();
   const tmpBase = path.join(os.tmpdir(), 'muaddib-monitor');
   if (!fs.existsSync(tmpBase)) fs.mkdirSync(tmpBase, { recursive: true });
   const tmpDir = fs.mkdtempSync(path.join(tmpBase, `${sanitizePackageName(name)}-`));
+  const meta = registryMeta || {};
 
   try {
     const tgzPath = path.join(tmpDir, 'package.tar.gz');
@@ -1590,6 +1767,43 @@ async function scanPackage(name, version, ecosystem, tarballUrl) {
       console.log(`[MONITOR] SKIP: ${name}@${version} — tarball too large (${(fileSize / 1024 / 1024).toFixed(1)}MB)`);
       stats.scanned++;
       return;
+    }
+
+    // C1: Size cap — skip full scan for large packages (>20MB unpacked).
+    // Malware payloads are tiny (<1MB); >20MB = real frameworks/apps.
+    // Exceptions: IOC match (always scan), lifecycle scripts (scan if suspicious).
+    const unpackedSize = meta.unpackedSize || 0;
+    if (unpackedSize > LARGE_PACKAGE_SIZE) {
+      // Exception 1: IOC match — always scan known malicious packages
+      let isKnownIOC = false;
+      try {
+        const iocs = loadCachedIOCs();
+        isKnownIOC = (iocs.wildcardPackages && iocs.wildcardPackages.has(name)) ||
+                     (iocs.packagesMap && iocs.packagesMap.has(name));
+      } catch { /* IOC load failure — proceed with skip */ }
+
+      if (isKnownIOC) {
+        console.log(`[MONITOR] SIZE CAP BYPASS (IOC): ${name}@${version} (${(unpackedSize / 1024 / 1024).toFixed(1)}MB — known IOC)`);
+      } else {
+        // Exception 2: Lifecycle scripts — check registry scripts before skipping.
+        // A compromised large package could have malicious preinstall/install/postinstall.
+        const scripts = meta.registryScripts || {};
+        const DANGEROUS_LIFECYCLE = ['preinstall', 'install', 'postinstall'];
+        const hasSuspiciousLifecycle = DANGEROUS_LIFECYCLE.some(hook => {
+          const val = scripts[hook];
+          return val && !isSafeLifecycleScript(val);
+        });
+
+        if (hasSuspiciousLifecycle) {
+          console.log(`[MONITOR] SIZE CAP BYPASS (lifecycle): ${name}@${version} (${(unpackedSize / 1024 / 1024).toFixed(1)}MB — suspicious lifecycle scripts)`);
+        } else {
+          console.log(`[MONITOR] SIZE_SKIP: ${name}@${version} — large package (${(unpackedSize / 1024 / 1024).toFixed(1)}MB unpacked)`);
+          stats.scanned++;
+          stats.clean++;
+          updateScanStats('clean');
+          return;
+        }
+      }
     }
 
     const extractedDir = extractTarGz(tgzPath, tmpDir);
@@ -2046,6 +2260,8 @@ async function sendDailyReport() {
   pendingGrouped.clear();
   downloadsCache.clear();
   resetDailyStats();
+  // C3: Flush scan memory to disk on daily reset (ensures no data loss)
+  saveScanMemory();
 }
 
 // --- CLI report helpers (muaddib report --now / --status) ---
@@ -2242,7 +2458,9 @@ async function getNpmLatestTarball(packageName) {
   }
   const version = data.version || '';
   const tarball = (data.dist && data.dist.tarball) || null;
-  return { version, tarball };
+  const unpackedSize = (data.dist && data.dist.unpackedSize) || 0;
+  const scripts = (data.scripts) || {};
+  return { version, tarball, unpackedSize, scripts };
 }
 
 async function pollNpm(state) {
@@ -2596,6 +2814,8 @@ async function resolveTarballAndScan(item) {
       }
       item.tarballUrl = npmInfo.tarball;
       if (npmInfo.version) item.version = npmInfo.version;
+      if (npmInfo.unpackedSize) item.unpackedSize = npmInfo.unpackedSize;
+      if (npmInfo.scripts) item.registryScripts = npmInfo.scripts;
     } catch (err) {
       console.error(`[MONITOR] ERROR resolving npm tarball for ${item.name}: ${err.message}`);
       recordError(err);
@@ -2639,7 +2859,10 @@ async function resolveTarballAndScan(item) {
     maintainerResult = await runTemporalMaintainerCheck(item.name);
   }
 
-  const scanResult = await scanPackage(item.name, item.version, item.ecosystem, item.tarballUrl);
+  const scanResult = await scanPackage(item.name, item.version, item.ecosystem, item.tarballUrl, {
+    unpackedSize: item.unpackedSize || 0,
+    registryScripts: item.registryScripts || null
+  });
   const sandboxResult = scanResult && scanResult.sandboxResult;
   const staticClean = scanResult && scanResult.staticClean;
 
@@ -2732,6 +2955,7 @@ module.exports = {
   alertedPackageRules,
   resolveTarballAndScan,
   MAX_TARBALL_SIZE,
+  LARGE_PACKAGE_SIZE,
   KNOWN_BUNDLED_FILES,
   KNOWN_BUNDLED_PATHS,
   isBundledToolingOnly,
@@ -2831,7 +3055,20 @@ module.exports = {
   ALERTS_LOG_DIR,
   DAILY_REPORTS_LOG_DIR,
   resolveWritableDir,
-  SELF_PACKAGE_NAME
+  SELF_PACKAGE_NAME,
+  // C3: Scan memory exports
+  SCAN_MEMORY_FILE,
+  SCAN_MEMORY_EXPIRY_MS,
+  MAX_MEMORY_ENTRIES,
+  MEMORY_SCORE_TOLERANCE,
+  loadScanMemory,
+  saveScanMemory,
+  recordScanMemory,
+  shouldSuppressByMemory,
+  get scanMemoryCache() { return scanMemoryCache; },
+  set scanMemoryCache(v) { scanMemoryCache = v; },
+  get scansSinceLastMemoryPersist() { return scansSinceLastMemoryPersist; },
+  set scansSinceLastMemoryPersist(v) { scansSinceLastMemoryPersist = v; }
 };
 
 // Standalone entry point: node src/monitor.js

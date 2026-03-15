@@ -197,7 +197,7 @@ const FRAMEWORK_PROTO_RE = new RegExp(
   '^(' + FRAMEWORK_PROTOTYPES.join('|') + ')\\.prototype\\.'
 );
 
-function applyFPReductions(threats, reachableFiles, packageName) {
+function applyFPReductions(threats, reachableFiles, packageName, packageDeps) {
   // Count occurrences of each threat type (package-level, across all files)
   const typeCounts = {};
   for (const t of threats) {
@@ -303,6 +303,17 @@ function applyFPReductions(threats, reachableFiles, packageName) {
         t.severity = 'LOW';
         t.unreachable = true;
       }
+    }
+
+    // C2: MCP server awareness — legitimate MCP servers write to MCP config files.
+    // Downgrade mcp_config_injection to MEDIUM when @modelcontextprotocol/sdk is in dependencies.
+    // Only dependencies (not devDependencies) — a real MCP server must ship the SDK.
+    // High-confidence compound types stay untouched (lifecycle_shell_pipe, fetch_decrypt_exec, etc.)
+    if (t.type === 'mcp_config_injection' && t.severity === 'CRITICAL' &&
+        packageDeps && typeof packageDeps === 'object' &&
+        packageDeps['@modelcontextprotocol/sdk']) {
+      t.severity = 'MEDIUM';
+      t.mcpSdkDowngrade = true;
     }
   }
 }
