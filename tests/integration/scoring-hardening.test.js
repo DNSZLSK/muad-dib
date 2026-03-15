@@ -536,6 +536,69 @@ async function runScoringHardeningTests() {
     assert(fnThreats.length > 0,
       `Should detect Function alias in paranoid mode, got ${fnThreats.length} threats`);
   });
+
+  // ===================================================================
+  // C2: MCP Server Awareness — downgrade mcp_config_injection to MEDIUM
+  //     when @modelcontextprotocol/sdk is in dependencies
+  // ===================================================================
+
+  console.log('\n=== C2: MCP SERVER AWARENESS TESTS ===\n');
+
+  test('C2: mcp_config_injection CRITICAL → MEDIUM when MCP SDK in dependencies', () => {
+    const threats = [
+      { type: 'mcp_config_injection', severity: 'CRITICAL', file: 'index.js', message: 'MCP config write' }
+    ];
+    const deps = { '@modelcontextprotocol/sdk': '^1.0.0' };
+    applyFPReductions(threats, null, null, deps);
+    assert(threats[0].severity === 'MEDIUM',
+      `MCP SDK dep should downgrade to MEDIUM, got ${threats[0].severity}`);
+    assert(threats[0].mcpSdkDowngrade === true,
+      'Should set mcpSdkDowngrade flag');
+  });
+
+  test('C2: mcp_config_injection stays CRITICAL without MCP SDK', () => {
+    const threats = [
+      { type: 'mcp_config_injection', severity: 'CRITICAL', file: 'index.js', message: 'MCP config write' }
+    ];
+    applyFPReductions(threats, null, null, null);
+    assert(threats[0].severity === 'CRITICAL',
+      `Without MCP SDK dep, should stay CRITICAL, got ${threats[0].severity}`);
+  });
+
+  test('C2: mcp_config_injection stays CRITICAL with MCP SDK in devDependencies only', () => {
+    // devDependencies are NOT passed as packageDeps — only production deps
+    const threats = [
+      { type: 'mcp_config_injection', severity: 'CRITICAL', file: 'index.js', message: 'MCP config write' }
+    ];
+    // Empty deps (SDK would be in devDependencies, not here)
+    const deps = { 'express': '^4.0.0' };
+    applyFPReductions(threats, null, null, deps);
+    assert(threats[0].severity === 'CRITICAL',
+      `Without MCP SDK in deps, should stay CRITICAL, got ${threats[0].severity}`);
+  });
+
+  test('C2: HC types NOT downgraded even with MCP SDK dep', () => {
+    const threats = [
+      { type: 'lifecycle_shell_pipe', severity: 'CRITICAL', file: 'package.json', message: 'curl|sh' },
+      { type: 'mcp_config_injection', severity: 'CRITICAL', file: 'index.js', message: 'MCP config write' }
+    ];
+    const deps = { '@modelcontextprotocol/sdk': '^1.0.0' };
+    applyFPReductions(threats, null, null, deps);
+    assert(threats[0].severity === 'CRITICAL',
+      `lifecycle_shell_pipe should stay CRITICAL, got ${threats[0].severity}`);
+    assert(threats[1].severity === 'MEDIUM',
+      `mcp_config_injection should downgrade to MEDIUM, got ${threats[1].severity}`);
+  });
+
+  test('C2: mcp_config_injection already non-CRITICAL — no change', () => {
+    const threats = [
+      { type: 'mcp_config_injection', severity: 'HIGH', file: 'index.js', message: 'MCP config write' }
+    ];
+    const deps = { '@modelcontextprotocol/sdk': '^1.0.0' };
+    applyFPReductions(threats, null, null, deps);
+    assert(threats[0].severity === 'HIGH',
+      `Already HIGH should stay HIGH (not double-downgrade), got ${threats[0].severity}`);
+  });
 }
 
 module.exports = { runScoringHardeningTests };

@@ -555,18 +555,21 @@ async function run(targetPath, options = {}) {
     }
   }
 
-  // Read package name for benign package whitelist
+  // Read package name and dependencies for FP reduction heuristics
   let packageName = null;
+  let packageDeps = null;
   try {
     const pkgPath = path.join(targetPath, 'package.json');
     if (fs.existsSync(pkgPath)) {
-      packageName = JSON.parse(fs.readFileSync(pkgPath, 'utf8')).name || null;
+      const pkgData = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+      packageName = pkgData.name || null;
+      packageDeps = pkgData.dependencies || null;
     }
   } catch { /* graceful fallback */ }
 
   // FP reduction: legitimate frameworks produce high volumes of certain threat types.
   // A malware package typically has 1-3 occurrences, not dozens.
-  applyFPReductions(deduped, reachableFiles, packageName);
+  applyFPReductions(deduped, reachableFiles, packageName, packageDeps);
 
   // Intent coherence analysis: detect source→sink pairs within files
   // Pass targetPath for destination-aware SDK pattern detection
