@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.7.8] - 2026-03-15
+
+### Added
+- **Size cap 20MB** (monitor-only): Skip full scan for packages >20MB unpacked. Malware payloads are tiny (<1MB); 20MB provides 20x safety margin. Exceptions: IOC match (always scan), suspicious lifecycle scripts (always scan)
+- **MCP server awareness**: Downgrade `mcp_config_injection` from CRITICAL to MEDIUM when `@modelcontextprotocol/sdk` is in package dependencies — legitimate MCP servers write config files
+- **Scan history memory** (monitor-only): Cross-session webhook dedup via `scan-memory.json`. Suppresses duplicate webhooks when score within ±15% and no new threat types. 30-day expiry, 50K max entries. IOC match and HC types bypass memory suppression
+
+### Changed
+- Test count: 2143 → **2166** (+23) across 49 files
+- VS Code extension version: 2.7.7 → **2.7.8**
+
+## [2.7.7] - 2026-03-15
+
+### Added
+- **Destination-aware intent**: `isSDKPattern()` with 22 curated SDK env-domain mappings (AWS, Azure, Google, Firebase, Stripe, Twilio, SendGrid, Datadog, Sentry, Slack, GitHub, GitLab, Cloudflare, OpenAI, Anthropic, MongoDB, Auth0, HubSpot, Contentful, Salesforce, Supabase, Mailgun). Heuristic brand-matching fallback for unknown SDKs
+- `SUSPICIOUS_DOMAIN_PATTERNS` blocks tunneling services (ngrok, serveo, localtunnel, etc.) and raw IP addresses from SDK exemption
+- `extractEnvVarFromMessage()`, `extractBrandFromEnvVar()`, `domainMatchesSuffix()` helpers exported for testing
+- **HC bypass severity check**: Monitor validates severity !== LOW before counting HC types
+
+### Fixed
+- **Webhook embed fix**: Discord embed formatting correction in monitor
+
+### Changed
+- `buildIntentPairs()` now accepts `targetPath` parameter for file reading (SDK pattern detection)
+- Test count: 2093 → **2143** (+50) across 49 files
+
+## [2.7.6] - 2026-03-15
+
+### Added
+- **High-confidence malice bypass**: 8 threat types (`lifecycle_shell_pipe`, `fetch_decrypt_exec`, `download_exec_binary`, `intent_credential_exfil`, `intent_command_exfil`, `cross_file_dataflow`, `canary_exfiltration`, `sandbox_network_after_sensitive_read`) bypass reputation attenuation — supply-chain compromise of established packages cannot be suppressed
+- **Graduated webhook threshold**: `getWebhookThreshold()` returns 35 (very established, factor ≤0.5), 25 (established, factor ≤0.8), 20 (new/unknown) — established packages require higher static score to trigger webhook
+- **Aggressive reputation tiers**: `computeReputationFactor()` floor lowered from 0.30 to 0.10. New tiers: 5+ years age (-0.5), 200+ versions (-0.3), 1M+ weekly downloads (-0.4)
+
+### Fixed
+- **Double DORMANT log**: `DORMANT SUSPECT` log moved to `trySendWebhook()` (authoritative, uses adjusted score). `resolveTarballAndScan()` now only logs `FALSE POSITIVE` for packages below threshold
+- Exported `HIGH_CONFIDENCE_MALICE_TYPES`, `hasHighConfidenceThreat`, `getWebhookThreshold` for testing
+
+### Changed
+- VS Code extension version: 2.7.5 → **2.7.6**
+
 ## [2.7.5] - 2026-03-14
 
 ### Added

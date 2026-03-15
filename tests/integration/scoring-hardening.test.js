@@ -599,6 +599,82 @@ async function runScoringHardeningTests() {
     assert(threats[0].severity === 'HIGH',
       `Already HIGH should stay HIGH (not double-downgrade), got ${threats[0].severity}`);
   });
+
+  // ==========================================================================
+  // v2.7.9: FP Audit Trail — reductions[] tracking
+  // ==========================================================================
+
+  console.log('\n=== FP AUDIT TRAIL TESTS (v2.7.9) ===\n');
+
+  test('SCORING: applyFPReductions adds reductions[] to downgraded threats', () => {
+    const threats = [];
+    for (let i = 0; i < 12; i++) {
+      threats.push({ type: 'dynamic_require', severity: 'HIGH', file: 'loader.js', message: `dr${i}` });
+    }
+    applyFPReductions(threats, null, null);
+    const downgraded = threats.filter(t => t.severity === 'LOW');
+    assert(downgraded.length > 0, 'some threats should be downgraded');
+    downgraded.forEach(t => {
+      assert(Array.isArray(t.reductions), 'reductions should be an array');
+      assert(t.reductions.length > 0, 'reductions should not be empty for downgraded threats');
+      const hasExpectedRule = t.reductions.some(r => r.rule === 'count_threshold' || r.rule === 'plugin_loader_per_file');
+      assert(hasExpectedRule, 'rule should be count_threshold or plugin_loader_per_file');
+    });
+  });
+
+  test('SCORING: reductions[] is empty for non-downgraded threats', () => {
+    const threats = [
+      { type: 'lifecycle_shell_pipe', severity: 'CRITICAL', file: 'package.json', message: 'lsp' }
+    ];
+    applyFPReductions(threats, null, null);
+    assert(Array.isArray(threats[0].reductions), 'reductions should be initialized');
+    assert(threats[0].reductions.length === 0, 'no reductions for non-downgraded threat');
+  });
+
+  test('SCORING: reductions[] tracks dist file downgrade with correct rule', () => {
+    const threats = [
+      { type: 'dangerous_call_eval', severity: 'MEDIUM', file: 'dist/bundle.js', message: 'eval in dist' }
+    ];
+    applyFPReductions(threats, null, null);
+    assert(threats[0].reductions.length > 0, 'dist file should be downgraded');
+    const r = threats[0].reductions.find(r => r.rule === 'dist_file');
+    assert(r, 'should have dist_file reduction');
+    assert(r.from === 'MEDIUM', 'from should be MEDIUM');
+    assert(r.to === 'LOW', 'to should be LOW');
+  });
+
+  test('SCORING: reductions[] tracks multiple reductions on same threat', () => {
+    const threats = [];
+    for (let i = 0; i < 12; i++) {
+      threats.push({ type: 'dynamic_require', severity: 'HIGH', file: 'dist/loader.js', message: `dr${i}` });
+    }
+    applyFPReductions(threats, null, null);
+    const multi = threats.filter(t => t.reductions.length >= 1);
+    assert(multi.length > 0, 'threats should have at least one reduction');
+  });
+
+  test('SCORING: reductions[] tracks MCP SDK downgrade', () => {
+    const threats = [
+      { type: 'mcp_config_injection', severity: 'CRITICAL', file: 'index.js', message: 'MCP config' }
+    ];
+    applyFPReductions(threats, null, null, { '@modelcontextprotocol/sdk': '^1.0.0' });
+    assert(threats[0].reductions.length > 0, 'MCP SDK should add a reduction');
+    const r = threats[0].reductions.find(r => r.rule === 'mcp_sdk');
+    assert(r, 'should have mcp_sdk reduction');
+    assert(r.from === 'CRITICAL', 'from CRITICAL');
+    assert(r.to === 'MEDIUM', 'to MEDIUM');
+  });
+
+  test('SCORING: reductions[] tracks unreachable downgrade', () => {
+    const reachable = new Set(['main.js']);
+    const threats = [
+      { type: 'dangerous_call_eval', severity: 'HIGH', file: 'orphan.js', message: 'eval' }
+    ];
+    applyFPReductions(threats, reachable, null);
+    const r = threats[0].reductions.find(r => r.rule === 'unreachable');
+    assert(r, 'should have unreachable reduction');
+    assert(r.to === 'LOW', 'unreachable should downgrade to LOW');
+  });
 }
 
 module.exports = { runScoringHardeningTests };

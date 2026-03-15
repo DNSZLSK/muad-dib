@@ -198,6 +198,11 @@ const FRAMEWORK_PROTO_RE = new RegExp(
 );
 
 function applyFPReductions(threats, reachableFiles, packageName, packageDeps) {
+  // Initialize reductions audit trail on each threat
+  for (const t of threats) {
+    t.reductions = [];
+  }
+
   // Count occurrences of each threat type (package-level, across all files)
   const typeCounts = {};
   for (const t of threats) {
@@ -224,6 +229,7 @@ function applyFPReductions(threats, reachableFiles, packageName, packageDeps) {
       if ((t.type === 'dynamic_require' || t.type === 'dynamic_import') && t.severity === 'HIGH') {
         const f = t.file || '(unknown)';
         if (perFilePluginCount[f] > 4) {
+          t.reductions.push({ rule: 'plugin_loader_per_file', from: 'HIGH', to: 'LOW' });
           t.severity = 'LOW';
         }
       }
@@ -245,6 +251,7 @@ function applyFPReductions(threats, reachableFiles, packageName, packageDeps) {
       if (typeRatio < 0.4 ||
           (t.type === 'suspicious_dataflow' && typeCounts[t.type] > rule.maxCount) ||
           (t.type === 'vm_code_execution' && typeCounts[t.type] > rule.maxCount)) {
+        t.reductions.push({ rule: 'count_threshold', from: t.severity, to: rule.to });
         t.severity = rule.to;
       }
     }
@@ -253,6 +260,7 @@ function applyFPReductions(threats, reachableFiles, packageName, packageDeps) {
     // Malware poisons cache repeatedly; a single access is framework behavior
     if (t.type === 'require_cache_poison' && t.severity === 'CRITICAL' &&
         typeCounts.require_cache_poison === 1) {
+      t.reductions.push({ rule: 'cache_poison_single', from: 'CRITICAL', to: 'HIGH' });
       t.severity = 'HIGH';
     }
 
@@ -261,6 +269,7 @@ function applyFPReductions(threats, reachableFiles, packageName, packageDeps) {
     // Browser/native APIs (globalThis.fetch, XMLHttpRequest) stay HIGH
     if (t.type === 'prototype_hook' && t.severity === 'HIGH' &&
         FRAMEWORK_PROTO_RE.test(t.message)) {
+      t.reductions.push({ rule: 'framework_prototype', from: 'HIGH', to: 'MEDIUM' });
       t.severity = 'MEDIUM';
     }
 
@@ -271,6 +280,7 @@ function applyFPReductions(threats, reachableFiles, packageName, packageDeps) {
         typeCounts.prototype_hook > 20) {
       const HTTP_PROTO_RE = /\b(Request|Response|IncomingMessage|ClientRequest|ServerResponse|fetch)\b/i;
       if (HTTP_PROTO_RE.test(t.message)) {
+        t.reductions.push({ rule: 'http_client_whitelist', from: t.severity, to: 'MEDIUM' });
         t.severity = 'MEDIUM';
       }
     }
@@ -283,14 +293,18 @@ function applyFPReductions(threats, reachableFiles, packageName, packageDeps) {
     if (t.file && !DIST_EXEMPT_TYPES.has(t.type) && DIST_FILE_RE.test(t.file)) {
       if (DIST_BUNDLER_ARTIFACT_TYPES.has(t.type)) {
         // Two-notch downgrade for bundler artifacts
+        const fromSev = t.severity;
         if (t.severity === 'CRITICAL') t.severity = 'MEDIUM';
         else if (t.severity === 'HIGH') t.severity = 'LOW';
         else if (t.severity === 'MEDIUM') t.severity = 'LOW';
+        if (t.severity !== fromSev) t.reductions.push({ rule: 'dist_file', from: fromSev, to: t.severity });
       } else {
         // One-notch downgrade for other non-exempt types
+        const fromSev = t.severity;
         if (t.severity === 'CRITICAL') t.severity = 'HIGH';
         else if (t.severity === 'HIGH') t.severity = 'MEDIUM';
         else if (t.severity === 'MEDIUM') t.severity = 'LOW';
+        if (t.severity !== fromSev) t.reductions.push({ rule: 'dist_file', from: fromSev, to: t.severity });
       }
     }
 
@@ -300,6 +314,7 @@ function applyFPReductions(threats, reachableFiles, packageName, packageDeps) {
         !isPackageLevelThreat(t)) {
       const normalizedFile = t.file.replace(/\\/g, '/');
       if (!reachableFiles.has(normalizedFile)) {
+        t.reductions.push({ rule: 'unreachable', from: t.severity, to: 'LOW' });
         t.severity = 'LOW';
         t.unreachable = true;
       }
@@ -312,6 +327,7 @@ function applyFPReductions(threats, reachableFiles, packageName, packageDeps) {
     if (t.type === 'mcp_config_injection' && t.severity === 'CRITICAL' &&
         packageDeps && typeof packageDeps === 'object' &&
         packageDeps['@modelcontextprotocol/sdk']) {
+      t.reductions.push({ rule: 'mcp_sdk', from: 'CRITICAL', to: 'MEDIUM' });
       t.severity = 'MEDIUM';
       t.mcpSdkDowngrade = true;
     }
