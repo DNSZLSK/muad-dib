@@ -568,8 +568,9 @@ async function run(targetPath, options = {}) {
   // A malware package typically has 1-3 occurrences, not dozens.
   applyFPReductions(deduped, reachableFiles, packageName);
 
-  // Intent coherence analysis: detect source→sink pairs across files
-  const intentResult = buildIntentPairs(deduped);
+  // Intent coherence analysis: detect source→sink pairs within files
+  // Pass targetPath for destination-aware SDK pattern detection
+  const intentResult = buildIntentPairs(deduped, targetPath);
   // Add intent threats to deduped before enrichment so they get rules/playbooks
   if (intentResult.intentThreats) {
     for (const it of intentResult.intentThreats) {

