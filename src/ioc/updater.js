@@ -345,7 +345,7 @@ function createOptimizedIOCs(iocs) {
 const NEVER_WILDCARD = new Set([
   'event-stream', 'ua-parser-js', 'coa', 'rc',
   'colors', 'faker', 'node-ipc',
-  'posthog-node', 'ngx-bootstrap', '@asyncapi/specs'
+  'posthog-node', 'posthog-js', 'ngx-bootstrap', '@asyncapi/specs'
 ]);
 
 function generateCompactIOCs(fullIOCs) {

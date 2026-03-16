@@ -592,7 +592,8 @@ async function run(targetPath, options = {}) {
   // Enrich each threat with rules
   const enrichedThreats = deduped.map(t => {
     const rule = getRule(t.type);
-    const points = SEVERITY_WEIGHTS[t.severity] || 0;
+    const confFactor = { high: 1.0, medium: 0.85, low: 0.6 }[rule.confidence] || 1.0;
+    const points = Math.round((SEVERITY_WEIGHTS[t.severity] || 0) * confFactor);
     return {
       ...t,
       rule_id: rule.id || t.type,

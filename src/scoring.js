@@ -1,3 +1,5 @@
+const { getRule } = require('./rules/index.js');
+
 // ============================================
 // SCORING CONSTANTS
 // ============================================
@@ -38,6 +40,13 @@ const MAX_RISK_SCORE = 100;
 // to limit noise while preserving some signal. CRITICAL and HIGH prototype_hook findings still score normally.
 const PROTO_HOOK_MEDIUM_CAP = 15;
 
+// Confidence-weighted scoring factors (v2.7.10)
+// High-confidence detections (eval, IOC, shell injection) score at full weight.
+// Medium-confidence heuristics (lifecycle_script, obfuscation, high_entropy) are discounted.
+// Low-confidence informational findings (possible_obfuscation, base64_in_script) are heavily discounted.
+// Unknown/paranoid rules default to 1.0 (no penalty).
+const CONFIDENCE_FACTORS = { high: 1.0, medium: 0.85, low: 0.6 };
+
 // ============================================
 // PER-FILE MAX SCORING (v2.2.11)
 // ============================================
@@ -76,24 +85,24 @@ function isPackageLevelThreat(threat) {
  * @returns {number} score 0-100
  */
 function computeGroupScore(threats) {
-  const criticalCount = threats.filter(t => t.severity === 'CRITICAL').length;
-  const highCount = threats.filter(t => t.severity === 'HIGH').length;
-  const mediumCount = threats.filter(t => t.severity === 'MEDIUM').length;
-  const lowCount = threats.filter(t => t.severity === 'LOW').length;
-
-  const mediumProtoHookCount = threats.filter(
-    t => t.type === 'prototype_hook' && t.severity === 'MEDIUM'
-  ).length;
-  const protoHookPoints = Math.min(mediumProtoHookCount * SEVERITY_WEIGHTS.MEDIUM, PROTO_HOOK_MEDIUM_CAP);
-  const otherMediumCount = mediumCount - mediumProtoHookCount;
-
   let score = 0;
-  score += criticalCount * SEVERITY_WEIGHTS.CRITICAL;
-  score += highCount * SEVERITY_WEIGHTS.HIGH;
-  score += otherMediumCount * SEVERITY_WEIGHTS.MEDIUM;
-  score += protoHookPoints;
-  score += lowCount * SEVERITY_WEIGHTS.LOW;
-  return Math.min(MAX_RISK_SCORE, score);
+  let protoHookMediumPoints = 0;
+
+  for (const t of threats) {
+    const weight = SEVERITY_WEIGHTS[t.severity] || 0;
+    const rule = getRule(t.type);
+    const factor = CONFIDENCE_FACTORS[rule.confidence] || 1.0;
+
+    if (t.type === 'prototype_hook' && t.severity === 'MEDIUM') {
+      protoHookMediumPoints += weight * factor;
+      continue;
+    }
+
+    score += weight * factor;
+  }
+
+  score += Math.min(protoHookMediumPoints, PROTO_HOOK_MEDIUM_CAP);
+  return Math.min(MAX_RISK_SCORE, Math.round(score));
 }
 
 // ============================================
@@ -434,6 +443,6 @@ function calculateRiskScore(deduped, intentResult) {
 }
 
 module.exports = {
-  SEVERITY_WEIGHTS, RISK_THRESHOLDS, MAX_RISK_SCORE,
+  SEVERITY_WEIGHTS, RISK_THRESHOLDS, MAX_RISK_SCORE, CONFIDENCE_FACTORS,
   isPackageLevelThreat, computeGroupScore, applyFPReductions, calculateRiskScore
 };
