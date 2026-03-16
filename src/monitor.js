@@ -74,6 +74,13 @@ const ALERTS_LOG_DIR = resolveWritableDir(PRIMARY_ALERTS_DIR, FALLBACK_ALERTS_DI
 // C3: Scan history memory — persistent cross-session webhook dedup.
 // Stores scan fingerprints (score, threat types, HC types) per package.
 // Suppresses webhook if a previous scan produced equivalent results.
+// CouchDB changes stream: reliable chronological feed of all npm registry mutations.
+// Primary source for new-package detection; RSS is kept as fallback.
+const NPM_SEQ_FILE = path.join(__dirname, '..', 'data', 'npm-seq.json');
+const CHANGES_STREAM_URL = 'https://replicate.npmjs.com/_changes';
+const CHANGES_LIMIT = 200;
+const CHANGES_CATCHUP_MAX = 500000; // If behind by more than 500k seqs, skip to "now"
+
 const SCAN_MEMORY_FILE = path.join(__dirname, '..', 'data', 'scan-memory.json');
 const SCAN_MEMORY_EXPIRY_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const MAX_MEMORY_ENTRIES = 50000;
@@ -110,6 +117,34 @@ function atomicWriteFileSync(filePath, data) {
     }
     throw err;
   }
+}
+
+// --- npm seq persistence (CouchDB _changes stream) ---
+
+/**
+ * Load the last processed CouchDB sequence number from the dedicated file.
+ * Returns null if no file exists or file is invalid (triggers "now" initialization).
+ */
+function loadNpmSeq() {
+  try {
+    if (fs.existsSync(NPM_SEQ_FILE)) {
+      const data = JSON.parse(fs.readFileSync(NPM_SEQ_FILE, 'utf8'));
+      if (typeof data.lastSeq === 'number' || typeof data.lastSeq === 'string') {
+        return data.lastSeq;
+      }
+    }
+  } catch (err) {
+    console.warn(`[MONITOR] Failed to load npm seq: ${err.message}`);
+  }
+  return null;
+}
+
+/**
+ * Persist the last processed CouchDB sequence number to a dedicated file.
+ * Uses atomic write (crash-safe). Also stored in monitor-state.json via saveState().
+ */
+function saveNpmSeq(seq) {
+  atomicWriteFileSync(NPM_SEQ_FILE, JSON.stringify({ lastSeq: seq, updatedAt: new Date().toISOString() }, null, 2));
 }
 
 // --- C3: Scan Memory Management ---
@@ -1430,10 +1465,11 @@ function loadState() {
     }
     return {
       npmLastPackage: typeof state.npmLastPackage === 'string' ? state.npmLastPackage : '',
-      pypiLastPackage: typeof state.pypiLastPackage === 'string' ? state.pypiLastPackage : ''
+      pypiLastPackage: typeof state.pypiLastPackage === 'string' ? state.pypiLastPackage : '',
+      npmLastSeq: state.npmLastSeq != null ? state.npmLastSeq : loadNpmSeq()
     };
   } catch {
-    return { npmLastPackage: '', pypiLastPackage: '' };
+    return { npmLastPackage: '', pypiLastPackage: '', npmLastSeq: loadNpmSeq() };
   }
 }
 
@@ -2077,6 +2113,12 @@ function reportStats() {
   const avg = stats.scanned > 0 ? (stats.totalTimeMs / stats.scanned / 1000).toFixed(1) : '0.0';
   const { t1, t2, t3 } = stats.suspectByTier;
   console.log(`[MONITOR] Stats: ${stats.scanned} scanned, ${stats.clean} clean, ${stats.suspect} suspect (T1:${t1} T2:${t2} T3:${t3}), ${stats.errors} error${stats.errors !== 1 ? 's' : ''}, avg ${avg}s/pkg`);
+  if (stats.changesStreamPackages) {
+    console.log(`[MONITOR]   Changes stream packages: ${stats.changesStreamPackages}`);
+  }
+  if (stats.rssFallbackCount) {
+    console.log(`[MONITOR]   RSS fallback activations: ${stats.rssFallbackCount}`);
+  }
   stats.lastReportTime = Date.now();
 }
 
@@ -2463,7 +2505,96 @@ async function getNpmLatestTarball(packageName) {
   return { version, tarball, unpackedSize, scripts };
 }
 
-async function pollNpm(state) {
+/**
+ * Poll npm changes stream (replicate.npmjs.com/_changes).
+ * Returns count of new packages queued, or -1 on error.
+ * Filters out deleted packages and metadata-only updates (no new version).
+ */
+async function pollNpmChanges(state) {
+  try {
+    let lastSeq = state.npmLastSeq;
+
+    // First run: initialize to current seq ("now")
+    if (lastSeq == null) {
+      const infoBody = await httpsGet(`${CHANGES_STREAM_URL}?limit=0&since=0&descending=true`, 10000);
+      const info = JSON.parse(infoBody);
+      state.npmLastSeq = info.last_seq;
+      saveNpmSeq(info.last_seq);
+      console.log(`[MONITOR] Changes stream initialized at seq ${info.last_seq}`);
+      return 0;
+    }
+
+    const url = `${CHANGES_STREAM_URL}?since=${lastSeq}&limit=${CHANGES_LIMIT}`;
+    const body = await httpsGet(url, 30000);
+    const data = JSON.parse(body);
+
+    if (!data.results || !Array.isArray(data.results)) {
+      console.warn('[MONITOR] Changes stream returned unexpected format');
+      return -1;
+    }
+
+    // Catch-up protection: if too far behind, skip to current
+    if (data.results.length === CHANGES_LIMIT) {
+      const currentSeqBody = await httpsGet(`${CHANGES_STREAM_URL}?limit=0&since=0&descending=true`, 10000);
+      const currentSeqData = JSON.parse(currentSeqBody);
+      const currentSeq = currentSeqData.last_seq;
+      if (typeof currentSeq === 'number' && typeof data.last_seq === 'number' &&
+          (currentSeq - data.last_seq) > CHANGES_CATCHUP_MAX) {
+        console.warn(`[MONITOR] Changes stream too far behind (${currentSeq - lastSeq} changes) — skipping to current`);
+        state.npmLastSeq = currentSeq;
+        saveNpmSeq(currentSeq);
+        return 0;
+      }
+    }
+
+    let queued = 0;
+    for (const change of data.results) {
+      // Skip deleted packages
+      if (change.deleted) continue;
+
+      const name = change.id;
+
+      // Skip design docs and internal CouchDB docs
+      if (!name || name.startsWith('_design/')) continue;
+
+      // Skip self
+      if (name === SELF_PACKAGE_NAME) continue;
+
+      // Push to queue — version resolution happens in resolveTarballAndScan()
+      scanQueue.push({
+        name,
+        version: '',
+        ecosystem: 'npm',
+        tarballUrl: null
+      });
+      queued++;
+    }
+
+    // Persist new seq
+    if (data.last_seq != null) {
+      state.npmLastSeq = data.last_seq;
+      saveNpmSeq(data.last_seq);
+    }
+
+    if (queued > 0) {
+      console.log(`[MONITOR] Changes stream: ${queued} packages queued (seq ${lastSeq} → ${data.last_seq})`);
+    }
+
+    // Track metric
+    stats.changesStreamPackages = (stats.changesStreamPackages || 0) + queued;
+
+    return queued;
+  } catch (err) {
+    console.error(`[MONITOR] Changes stream error: ${err.message} — falling back to RSS`);
+    return -1;
+  }
+}
+
+/**
+ * Poll npm via RSS feed (legacy).
+ * Kept as fallback when the CouchDB changes stream is unavailable.
+ */
+async function pollNpmRss(state) {
   const url = 'https://registry.npmjs.org/-/rss?descending=true&limit=200';
 
   try {
@@ -2508,6 +2639,22 @@ async function pollNpm(state) {
     console.error(`[MONITOR] npm poll error: ${err.message}`);
     return -1;
   }
+}
+
+/**
+ * Poll npm registry for new packages.
+ * Primary: CouchDB changes stream (replicate.npmjs.com).
+ * Fallback: RSS feed (registry.npmjs.org) when changes stream fails.
+ */
+async function pollNpm(state) {
+  const count = await pollNpmChanges(state);
+  if (count >= 0) {
+    return count;
+  }
+  // Fallback to RSS on changes stream failure
+  console.log('[MONITOR] Using RSS fallback for npm');
+  stats.rssFallbackCount = (stats.rssFallbackCount || 0) + 1;
+  return pollNpmRss(state);
 }
 
 // --- PyPI polling ---
@@ -2672,7 +2819,8 @@ async function startMonitor(options) {
 
   const state = loadState();
   loadDailyStats(); // Restore counters from previous run (survives restarts)
-  console.log(`[MONITOR] State loaded — npm last: ${state.npmLastPackage || 'none'}, pypi last: ${state.pypiLastPackage || 'none'}`);
+  console.log(`[MONITOR] State loaded — npm last: ${state.npmLastPackage || 'none'}, pypi last: ${state.pypiLastPackage || 'none'}, npm seq: ${state.npmLastSeq || 'none'}`);
+  console.log('[MONITOR] npm changes stream enabled (replicate.npmjs.com) with RSS fallback');
   console.log(`[MONITOR] Polling every ${POLL_INTERVAL / 1000}s. Ctrl+C to stop.\n`);
 
   let running = true;
@@ -2934,10 +3082,18 @@ module.exports = {
   startMonitor,
   parseNpmRss,
   parsePyPIRss,
+  pollNpmChanges,
+  pollNpmRss,
   loadState,
   saveState,
   STATE_FILE,
   ALERTS_FILE,
+  NPM_SEQ_FILE,
+  loadNpmSeq,
+  saveNpmSeq,
+  CHANGES_STREAM_URL,
+  CHANGES_LIMIT,
+  CHANGES_CATCHUP_MAX,
   downloadToFile,
   extractTarGz,
   getNpmTarballUrl,
