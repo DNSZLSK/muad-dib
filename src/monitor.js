@@ -2514,13 +2514,18 @@ async function pollNpmChanges(state) {
   try {
     let lastSeq = state.npmLastSeq;
 
-    // First run: initialize to current seq ("now")
+    // First run: initialize to current seq ("now") via root endpoint
     if (lastSeq == null) {
-      const infoBody = await httpsGet(`${CHANGES_STREAM_URL}?limit=0&since=0&descending=true`, 10000);
+      const infoBody = await httpsGet('https://replicate.npmjs.com/', 10000);
       const info = JSON.parse(infoBody);
-      state.npmLastSeq = info.last_seq;
-      saveNpmSeq(info.last_seq);
-      console.log(`[MONITOR] Changes stream initialized at seq ${info.last_seq}`);
+      const currentSeq = info.update_seq;
+      if (currentSeq == null) {
+        console.warn('[MONITOR] Changes stream init: no update_seq in root response');
+        return -1;
+      }
+      state.npmLastSeq = currentSeq;
+      saveNpmSeq(currentSeq);
+      console.log(`[MONITOR] Changes stream initialized at seq ${currentSeq}`);
       return 0;
     }
 
@@ -2535,9 +2540,9 @@ async function pollNpmChanges(state) {
 
     // Catch-up protection: if too far behind, skip to current
     if (data.results.length === CHANGES_LIMIT) {
-      const currentSeqBody = await httpsGet(`${CHANGES_STREAM_URL}?limit=0&since=0&descending=true`, 10000);
+      const currentSeqBody = await httpsGet('https://replicate.npmjs.com/', 10000);
       const currentSeqData = JSON.parse(currentSeqBody);
-      const currentSeq = currentSeqData.last_seq;
+      const currentSeq = currentSeqData.update_seq;
       if (typeof currentSeq === 'number' && typeof data.last_seq === 'number' &&
           (currentSeq - data.last_seq) > CHANGES_CATCHUP_MAX) {
         console.warn(`[MONITOR] Changes stream too far behind (${currentSeq - lastSeq} changes) — skipping to current`);
