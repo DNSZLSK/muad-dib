@@ -10,7 +10,8 @@ async function runScraperTests() {
     parseCSVLine, parseCSV, extractVersions, parseOSVEntry,
     createFreshness, isAllowedRedirect, loadStaticIOCs,
     validateIOCEntry,
-    CONFIDENCE_ORDER, ALLOWED_REDIRECT_DOMAINS
+    CONFIDENCE_ORDER, ALLOWED_REDIRECT_DOMAINS,
+    MAX_ENTRY_UNCOMPRESSED, MAX_TOTAL_UNCOMPRESSED
   } = require('../../src/ioc/scraper.js');
 
   // --- parseCSVLine ---
@@ -3058,6 +3059,179 @@ async function runScraperTests() {
     } finally {
       console.warn = origWarn;
     }
+  });
+
+  // --- Zip bomb protection ---
+
+  await asyncTest('SCRAPER: zip bomb protection skips oversized entries and preserves valid ones', async () => {
+    const origRequest = https.request;
+    const origLog = console.log;
+    const origWarn = console.warn;
+    const origWrite = process.stdout.write;
+    const origFs = {
+      existsSync: fs.existsSync,
+      readFileSync: fs.readFileSync,
+      writeFileSync: fs.writeFileSync,
+      mkdirSync: fs.mkdirSync,
+      statSync: fs.statSync,
+      renameSync: fs.renameSync,
+      accessSync: fs.accessSync
+    };
+
+    const warnings = [];
+    console.log = () => {};
+    console.warn = (...args) => { if (typeof args[0] === 'string') warnings.push(args[0]); };
+    process.stdout.write = () => true;
+
+    const AdmZip = require('adm-zip');
+
+    // Build npm zip with one valid entry and one entry whose header will be binary-patched
+    const npmZip = new AdmZip();
+    npmZip.addFile('MAL-VALID-SMALL.json', Buffer.from(JSON.stringify({
+      id: 'MAL-VALID-SMALL',
+      affected: [{ package: { ecosystem: 'npm', name: 'valid-small-pkg' }, versions: ['1.0.0'] }],
+      summary: 'Small valid entry'
+    })));
+    npmZip.addFile('MAL-BOMB.json', Buffer.from('{"id":"MAL-BOMB"}'));
+    const npmZipBuf = npmZip.toBuffer();
+
+    // Binary-patch: find MAL-BOMB.json in the central directory and set uncompressed size to huge value
+    const bombFilename = Buffer.from('MAL-BOMB.json');
+    const centralDirSig = Buffer.from([0x50, 0x4b, 0x01, 0x02]); // PK\x01\x02
+    const localHeaderSig = Buffer.from([0x50, 0x4b, 0x03, 0x04]); // PK\x03\x04
+    const hugeSize = MAX_ENTRY_UNCOMPRESSED + 1;
+
+    // Patch central directory entry for MAL-BOMB.json (uncompressed size at offset 24)
+    for (let i = 0; i < npmZipBuf.length - 4; i++) {
+      if (npmZipBuf[i] === 0x50 && npmZipBuf[i+1] === 0x4b && npmZipBuf[i+2] === 0x01 && npmZipBuf[i+3] === 0x02) {
+        const fnLen = npmZipBuf.readUInt16LE(i + 28);
+        const fn = npmZipBuf.slice(i + 46, i + 46 + fnLen);
+        if (fn.equals(bombFilename)) {
+          npmZipBuf.writeUInt32LE(hugeSize, i + 24); // uncompressed size in central dir
+          break;
+        }
+      }
+    }
+    // Also patch local file header for MAL-BOMB.json (uncompressed size at offset 22)
+    for (let i = 0; i < npmZipBuf.length - 4; i++) {
+      if (npmZipBuf[i] === 0x50 && npmZipBuf[i+1] === 0x4b && npmZipBuf[i+2] === 0x03 && npmZipBuf[i+3] === 0x04) {
+        const fnLen = npmZipBuf.readUInt16LE(i + 26);
+        const fn = npmZipBuf.slice(i + 30, i + 30 + fnLen);
+        if (fn.equals(bombFilename)) {
+          npmZipBuf.writeUInt32LE(hugeSize, i + 22); // uncompressed size in local header
+          break;
+        }
+      }
+    }
+
+    https.request = (options, callback) => {
+      const url = 'https://' + options.hostname + options.path;
+      const req = new EventEmitter();
+      req.write = () => {};
+      req.setTimeout = () => {};
+      req.destroy = () => {};
+      req.end = () => {
+        process.nextTick(() => {
+          const res = new EventEmitter();
+          res.headers = { 'content-length': '100' };
+          res.resume = () => {};
+
+          if (url.includes('npm/all.zip')) {
+            res.statusCode = 200;
+            callback(res);
+            res.emit('data', npmZipBuf);
+            res.emit('end');
+          }
+          else if (url.includes('PyPI/all.zip')) {
+            res.statusCode = 200;
+            callback(res);
+            const zip = new AdmZip();
+            zip.addFile('SKIP.json', Buffer.from('{}'));
+            res.emit('data', zip.toBuffer());
+            res.emit('end');
+          }
+          else if (url.includes('gensecaihq')) {
+            res.statusCode = 200;
+            callback(res);
+            res.emit('data', Buffer.from(JSON.stringify({ packages: [] })));
+            res.emit('end');
+          }
+          else if (url.includes('api.osv.dev')) {
+            res.statusCode = 200;
+            callback(res);
+            res.emit('data', Buffer.from(JSON.stringify({ vulns: [] })));
+            res.emit('end');
+          }
+          else if (url.includes('api.github.com')) {
+            res.statusCode = 200;
+            callback(res);
+            res.emit('data', Buffer.from(JSON.stringify({ sha: 'sha-zipbomb-test', tree: [] })));
+            res.emit('end');
+          }
+          else {
+            res.statusCode = 200;
+            callback(res);
+            res.emit('data', Buffer.from('h,v\n'));
+            res.emit('end');
+          }
+        });
+      };
+      return req;
+    };
+
+    const mockFiles = {};
+    let savedIocs = null;
+    fs.existsSync = (p) => {
+      if (typeof p === 'string' && p.includes('static-iocs')) return origFs.existsSync(p);
+      return true;
+    };
+    fs.readFileSync = (p, enc) => {
+      if (typeof p === 'string' && p.includes('static-iocs')) return origFs.readFileSync(p, enc);
+      if (typeof p === 'string' && p.includes('.ossf-tree-sha')) return 'sha-zipbomb-test';
+      return JSON.stringify({ packages: [], pypi_packages: [], hashes: [], markers: [], files: [] });
+    };
+    fs.writeFileSync = (p, data) => { mockFiles[path.resolve(p)] = data; };
+    fs.mkdirSync = () => {};
+    fs.accessSync = () => {};
+    fs.statSync = (p) => {
+      const resolved = path.resolve(p);
+      if (mockFiles[resolved]) return { size: Buffer.byteLength(mockFiles[resolved]) };
+      return origFs.statSync(p);
+    };
+    fs.renameSync = (from, to) => {
+      const rf = path.resolve(from); const rt = path.resolve(to);
+      if (mockFiles[rf]) { mockFiles[rt] = mockFiles[rf]; delete mockFiles[rf]; }
+      if (typeof to === 'string' && to.includes('iocs.json') && !to.includes('compact') && mockFiles[rt]) {
+        try { savedIocs = JSON.parse(mockFiles[rt]); } catch {}
+      }
+    };
+
+    try {
+      const result = await runScraper();
+      assert(typeof result === 'object', 'Should complete despite oversized entry in zip');
+
+      // Check that zip bomb warning was logged for MAL-BOMB entry
+      const bombWarning = warnings.find(w => w.includes('Zip bomb protection') && w.includes('MAL-BOMB'));
+      assert(bombWarning, 'Should have logged zip bomb warning for oversized MAL-BOMB entry');
+
+      // The valid small entry should be present in IOCs
+      if (savedIocs) {
+        const validPkg = savedIocs.packages.find(p => p.name === 'valid-small-pkg');
+        assert(validPkg, 'Valid small entry should be present in IOCs despite oversized sibling');
+      }
+    } finally {
+      https.request = origRequest;
+      console.log = origLog;
+      console.warn = origWarn;
+      process.stdout.write = origWrite;
+      Object.assign(fs, origFs);
+    }
+  });
+
+  test('SCRAPER: zip bomb constants are reasonable', () => {
+    assert(MAX_ENTRY_UNCOMPRESSED === 50 * 1024 * 1024, 'MAX_ENTRY_UNCOMPRESSED should be 50MB');
+    assert(MAX_TOTAL_UNCOMPRESSED === 500 * 1024 * 1024, 'MAX_TOTAL_UNCOMPRESSED should be 500MB');
+    assert(MAX_ENTRY_UNCOMPRESSED < MAX_TOTAL_UNCOMPRESSED, 'Per-entry limit should be less than total budget');
   });
 }
 

@@ -154,6 +154,8 @@ function loadStaticIOCs() {
 
 const MAX_REDIRECTS = 5;
 const MAX_RESPONSE_SIZE = 200 * 1024 * 1024; // 200MB
+const MAX_ENTRY_UNCOMPRESSED = 50 * 1024 * 1024;   // 50MB per zip entry
+const MAX_TOTAL_UNCOMPRESSED = 500 * 1024 * 1024;   // 500MB total budget per zip
 
 function fetchJSON(url, options = {}, redirectCount = 0) {
   return new Promise((resolve, reject) => {
@@ -762,6 +764,7 @@ async function scrapeOSVDataDump() {
 
     let malCount = 0;
     let skippedCount = 0;
+    let totalUncompressed = 0;
 
     const spinner = new Spinner();
     try {
@@ -775,6 +778,19 @@ async function scrapeOSVDataDump() {
         if (!name.startsWith('MAL-') || !name.endsWith('.json')) {
           skippedCount++;
         } else {
+          // Zip bomb protection: check declared uncompressed size
+          const entrySize = entry.header ? entry.header.size : 0;
+          if (entrySize > MAX_ENTRY_UNCOMPRESSED) {
+            console.warn(`[WARN] Zip bomb protection: skipping oversized entry ${name} (${entrySize} bytes)`);
+            skippedCount++;
+            continue;
+          }
+          totalUncompressed += entrySize;
+          if (totalUncompressed > MAX_TOTAL_UNCOMPRESSED) {
+            console.warn(`[WARN] Zip bomb protection: total uncompressed budget exceeded at entry ${name}, stopping`);
+            break;
+          }
+
           try {
             const content = entry.getData().toString('utf8');
             const vuln = JSON.parse(content);
@@ -784,8 +800,8 @@ async function scrapeOSVDataDump() {
             // Track known IDs so OSSF can skip them
             knownIds.add(vuln.id || path.basename(name, '.json'));
             malCount++;
-          } catch {
-            // Skip unparseable entries
+          } catch (parseErr) {
+            console.warn(`[WARN] Skipping unparseable entry: ${name}`);
           }
         }
 
@@ -824,6 +840,7 @@ async function scrapeOSVPyPIDataDump() {
 
     let malCount = 0;
     let skippedCount = 0;
+    let totalUncompressed = 0;
 
     const spinner = new Spinner();
     try {
@@ -837,14 +854,27 @@ async function scrapeOSVPyPIDataDump() {
         if (!name.startsWith('MAL-') || !name.endsWith('.json')) {
           skippedCount++;
         } else {
+          // Zip bomb protection: check declared uncompressed size
+          const entrySize = entry.header ? entry.header.size : 0;
+          if (entrySize > MAX_ENTRY_UNCOMPRESSED) {
+            console.warn(`[WARN] Zip bomb protection: skipping oversized entry ${name} (${entrySize} bytes)`);
+            skippedCount++;
+            continue;
+          }
+          totalUncompressed += entrySize;
+          if (totalUncompressed > MAX_TOTAL_UNCOMPRESSED) {
+            console.warn(`[WARN] Zip bomb protection: total uncompressed budget exceeded at entry ${name}, stopping`);
+            break;
+          }
+
           try {
             const content = entry.getData().toString('utf8');
             const vuln = JSON.parse(content);
             const parsed = parseOSVEntry(vuln, 'osv-malicious-pypi', 'PyPI');
             for (const p of parsed) packages.push(p);
             malCount++;
-          } catch {
-            // Skip unparseable entries
+          } catch (parseErr) {
+            console.warn(`[WARN] Skipping unparseable entry: ${name}`);
           }
         }
 
@@ -1356,7 +1386,8 @@ module.exports = {
   parseCSVLine, parseCSV, extractVersions, parseOSVEntry,
   createFreshness, isAllowedRedirect, loadStaticIOCs,
   validateIOCEntry,
-  CONFIDENCE_ORDER, ALLOWED_REDIRECT_DOMAINS
+  CONFIDENCE_ORDER, ALLOWED_REDIRECT_DOMAINS,
+  MAX_ENTRY_UNCOMPRESSED, MAX_TOTAL_UNCOMPRESSED
 };
 
 // Direct execution if called as CLI

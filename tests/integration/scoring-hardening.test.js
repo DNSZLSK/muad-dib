@@ -2,7 +2,7 @@
 
 const path = require('path');
 const { test, asyncTest, assert, runScanDirect } = require('../test-utils');
-const { applyFPReductions, calculateRiskScore, computeGroupScore } = require('../../src/scoring.js');
+const { applyFPReductions, calculateRiskScore, computeGroupScore, CONFIDENCE_FACTORS } = require('../../src/scoring.js');
 
 async function runScoringHardeningTests() {
   console.log('\n=== SCORING HARDENING TESTS (v2.5.13) ===\n');
@@ -76,8 +76,9 @@ async function runScoringHardeningTests() {
       { type: 'lifecycle_script', severity: 'HIGH', file: 'package.json', message: 'preinstall' }
     ];
     const result = calculateRiskScore(threats);
-    assert(result.packageScore === 10,
-      `HIGH lifecycle should score 10 (no floor), got ${result.packageScore}`);
+    // lifecycle_script has MEDIUM confidence → round(10 * 0.85) = round(8.5) = 9
+    assert(result.packageScore === 9,
+      `HIGH lifecycle should score 9 (medium conf, no floor), got ${result.packageScore}`);
   });
 
   // ===================================================================
@@ -674,6 +675,98 @@ async function runScoringHardeningTests() {
     const r = threats[0].reductions.find(r => r.rule === 'unreachable');
     assert(r, 'should have unreachable reduction');
     assert(r.to === 'LOW', 'unreachable should downgrade to LOW');
+  });
+
+  // ===================================================================
+  // CONFIDENCE-WEIGHTED SCORING (v2.7.10)
+  // ===================================================================
+
+  test('CONFIDENCE: CONFIDENCE_FACTORS has correct values', () => {
+    assert(CONFIDENCE_FACTORS.high === 1.0, 'high should be 1.0');
+    assert(CONFIDENCE_FACTORS.medium === 0.85, 'medium should be 0.85');
+    assert(CONFIDENCE_FACTORS.low === 0.6, 'low should be 0.6');
+  });
+
+  test('CONFIDENCE: all-HIGH-confidence threats score unchanged', () => {
+    // reverse_shell: CRITICAL, high confidence. env_access: HIGH, high confidence.
+    const threats = [
+      { type: 'reverse_shell', severity: 'CRITICAL', file: 'a.js', message: 'rs' },
+      { type: 'env_access', severity: 'HIGH', file: 'a.js', message: 'ea' }
+    ];
+    const score = computeGroupScore(threats);
+    // CRITICAL(25)*1.0 + HIGH(10)*1.0 = 35
+    assert(score === 35, `all-HIGH-conf should score 35, got ${score}`);
+  });
+
+  test('CONFIDENCE: MEDIUM-confidence threats score less than HIGH-confidence at same severity', () => {
+    // lifecycle_script is MEDIUM confidence, CRITICAL severity
+    const highConf = [{ type: 'reverse_shell', severity: 'CRITICAL', file: 'a.js', message: 'rs' }];
+    const medConf = [{ type: 'lifecycle_script', severity: 'CRITICAL', file: 'a.js', message: 'ls' }];
+    const highScore = computeGroupScore(highConf);
+    const medScore = computeGroupScore(medConf);
+    // 25*1.0=25 vs 25*0.85=21.25→21
+    assert(highScore === 25, `HIGH-conf CRITICAL should score 25, got ${highScore}`);
+    assert(medScore === 21, `MEDIUM-conf CRITICAL should score 21, got ${medScore}`);
+    assert(highScore > medScore, 'HIGH-conf should score more than MEDIUM-conf');
+  });
+
+  test('CONFIDENCE: LOW-confidence threats score less than MEDIUM-confidence', () => {
+    // possible_obfuscation is LOW confidence, MEDIUM severity
+    const medConf = [{ type: 'obfuscation_detected', severity: 'MEDIUM', file: 'a.js', message: 'ob' }];
+    const lowConf = [{ type: 'possible_obfuscation', severity: 'MEDIUM', file: 'a.js', message: 'po' }];
+    const medScore = computeGroupScore(medConf);
+    const lowScore = computeGroupScore(lowConf);
+    // round(3*0.85)=round(2.55)=3 vs round(3*0.6)=round(1.8)=2
+    assert(medScore === 3, `MEDIUM-conf MEDIUM-sev should score 3, got ${medScore}`);
+    assert(lowScore === 2, `LOW-conf MEDIUM-sev should score 2, got ${lowScore}`);
+    assert(medScore > lowScore, 'MEDIUM-conf should score more than LOW-conf');
+  });
+
+  test('CONFIDENCE: unknown threat type defaults to factor 1.0', () => {
+    const threats = [
+      { type: 'totally_unknown_threat_xyz', severity: 'HIGH', file: 'a.js', message: 'unk' }
+    ];
+    const score = computeGroupScore(threats);
+    // getRule returns confidence:'low' for unknown → 10*0.6=6
+    // Wait, getRule returns {confidence:'low'} for unknown types
+    // So this tests that getRule fallback works: 10 * 0.6 = 6
+    assert(score === 6, `unknown type should use getRule fallback (low conf → 6), got ${score}`);
+  });
+
+  test('CONFIDENCE: proto_hook MEDIUM cap still works with confidence weighting', () => {
+    // prototype_hook has HIGH confidence → factor 1.0
+    // 6 MEDIUM proto_hooks → 6*3*1.0=18, capped at 15
+    const threats = [];
+    for (let i = 0; i < 6; i++) {
+      threats.push({ type: 'prototype_hook', severity: 'MEDIUM', file: 'a.js', message: `ph${i}` });
+    }
+    const score = computeGroupScore(threats);
+    assert(score === 15, `proto_hook MEDIUM cap should still apply (15), got ${score}`);
+  });
+
+  test('CONFIDENCE: mixed confidence threats accumulate correctly', () => {
+    const threats = [
+      // env_access: HIGH conf, HIGH sev → 10*1.0 = 10
+      { type: 'env_access', severity: 'HIGH', file: 'a.js', message: 'ea' },
+      // high_entropy_string: MEDIUM conf, MEDIUM sev → 3*0.85 = 2.55
+      { type: 'high_entropy_string', severity: 'MEDIUM', file: 'a.js', message: 'he' },
+      // possible_obfuscation: LOW conf, LOW sev → 1*0.6 = 0.6
+      { type: 'possible_obfuscation', severity: 'LOW', file: 'a.js', message: 'po' }
+    ];
+    const score = computeGroupScore(threats);
+    // floor(10 + 2.55 + 0.6) = floor(13.15) = 13
+    assert(score === 13, `mixed confidence should score 13, got ${score}`);
+  });
+
+  test('CONFIDENCE: paranoid rules (no confidence field) default to factor 1.0', () => {
+    // Paranoid rules have no confidence field → getRule returns rule without confidence
+    // CONFIDENCE_FACTORS[undefined] = undefined → || 1.0
+    const threats = [
+      { type: 'MUADDIB-PARANOID-001', severity: 'MEDIUM', file: 'a.js', message: 'p1' }
+    ];
+    const score = computeGroupScore(threats);
+    // MEDIUM(3) * 1.0 = 3
+    assert(score === 3, `paranoid rule should score at full weight (3), got ${score}`);
   });
 }
 

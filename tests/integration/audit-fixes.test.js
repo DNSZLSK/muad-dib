@@ -1269,7 +1269,7 @@ async function runHighFix31Tests() {
       { type: 'lifecycle_script', severity: 'MEDIUM', file: 'package.json', message: 'lifecycle' }
     ];
     const result = calculateRiskScore(threats);
-    // File score: 10 (1 HIGH). Package score: 3 (1 MEDIUM). No cross-file bonus (1 file only).
+    // dangerous_exec: HIGH(10)*high(1.0)=10. lifecycle_script: MEDIUM(3)*medium(0.85)=round(2.55)=3.
     assert(result.maxFileScore === 10, `Expected maxFileScore=10, got ${result.maxFileScore}`);
     assert(result.packageScore === 3, `Expected packageScore=3, got ${result.packageScore}`);
     assert(result.riskScore === 13, `Expected riskScore=13, got ${result.riskScore}`);

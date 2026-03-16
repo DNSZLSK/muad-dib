@@ -743,13 +743,14 @@ async function runCliTests() {
     assertNotIncludes(output, '[BREAKDOWN]', 'Clean project should not show [BREAKDOWN] header');
   });
 
-  test('BREAKDOWN: points match severity weights', () => {
+  test('BREAKDOWN: points match severity weights × confidence', () => {
     const output = runScan(path.join(TESTS_DIR, 'ast'), '--json');
     const result = JSON.parse(output);
     const WEIGHTS = { CRITICAL: 25, HIGH: 10, MEDIUM: 3, LOW: 1 };
+    const CONF = { high: 1.0, medium: 0.85, low: 0.6 };
     for (const t of result.threats) {
-      const expected = WEIGHTS[t.severity];
-      assert(t.points === expected, `${t.rule_id} (${t.severity}) should have ${expected} points, got ${t.points}`);
+      const expected = Math.round((WEIGHTS[t.severity] || 0) * (CONF[t.confidence] || 1.0));
+      assert(t.points === expected, `${t.rule_id} (${t.severity}/${t.confidence}) should have ${expected} points, got ${t.points}`);
     }
   });
 
@@ -835,12 +836,14 @@ async function runCliTests() {
 
   test('PER-FILE: computeGroupScore with mixed severities', () => {
     const { computeGroupScore } = require('../../src/index.js');
+    // Use real types with HIGH confidence so weights are unmodified
     const threats = [
-      { severity: 'CRITICAL', type: 'test' },
-      { severity: 'HIGH', type: 'test' },
-      { severity: 'LOW', type: 'test' }
+      { severity: 'CRITICAL', type: 'reverse_shell' },
+      { severity: 'HIGH', type: 'env_access' },
+      { severity: 'LOW', type: 'env_access' }
     ];
     const score = computeGroupScore(threats);
+    // 25*1.0 + 10*1.0 + 1*1.0 = 36
     assert(score === 36, `Expected 25+10+1=36, got ${score}`);
   });
 
@@ -856,9 +859,10 @@ async function runCliTests() {
 
   test('PER-FILE: computeGroupScore caps at 100', () => {
     const { computeGroupScore } = require('../../src/index.js');
+    // Use real type with HIGH confidence so 5*25*1.0=125 → capped at 100
     const threats = [];
     for (let i = 0; i < 5; i++) {
-      threats.push({ severity: 'CRITICAL', type: 'test' });
+      threats.push({ severity: 'CRITICAL', type: 'reverse_shell' });
     }
     const score = computeGroupScore(threats);
     assert(score === 100, `Expected 100 (capped), got ${score}`);
