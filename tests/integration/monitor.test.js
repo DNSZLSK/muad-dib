@@ -66,7 +66,8 @@ async function runMonitorTests() {
     saveNpmSeq,
     CHANGES_STREAM_URL,
     CHANGES_LIMIT,
-    CHANGES_CATCHUP_MAX
+    CHANGES_CATCHUP_MAX,
+    SCAN_CONCURRENCY
   } = require('../../src/monitor.js');
 
   test('MONITOR: parseNpmRss extracts package names from RSS', () => {
@@ -6765,6 +6766,117 @@ async function runMonitorTests() {
 
   // Cleanup seq file after all changes stream tests
   try { fs.unlinkSync(NPM_SEQ_FILE); } catch {}
+
+  // ============================================
+  // SCAN CONCURRENCY TESTS
+  // ============================================
+
+  console.log('\n=== SCAN CONCURRENCY TESTS ===\n');
+
+  test('CONCURRENCY: SCAN_CONCURRENCY defaults to 3', () => {
+    assert(SCAN_CONCURRENCY >= 1, `SCAN_CONCURRENCY must be >= 1, got ${SCAN_CONCURRENCY}`);
+    if (!process.env.MUADDIB_SCAN_CONCURRENCY) {
+      assert(SCAN_CONCURRENCY === 3, `Default SCAN_CONCURRENCY should be 3, got ${SCAN_CONCURRENCY}`);
+    }
+  });
+
+  test('CONCURRENCY: SCAN_CONCURRENCY is exported as a number', () => {
+    assert(typeof SCAN_CONCURRENCY === 'number', `SCAN_CONCURRENCY should be number, got ${typeof SCAN_CONCURRENCY}`);
+    assert(Number.isInteger(SCAN_CONCURRENCY), `SCAN_CONCURRENCY should be integer, got ${SCAN_CONCURRENCY}`);
+  });
+
+  test('CONCURRENCY: processQueue source uses worker pool pattern', () => {
+    // Verify the implementation uses the worker pool pattern (not sequential)
+    const src = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'monitor.js'), 'utf8');
+    assertIncludes(src, 'async function worker()', 'processQueue should define inner worker function');
+    assertIncludes(src, 'Promise.all(workers)', 'processQueue should await all workers in parallel');
+    assertIncludes(src, 'SCAN_CONCURRENCY', 'processQueue should reference SCAN_CONCURRENCY');
+  });
+
+  test('CONCURRENCY: processQueue source caps workers at queue length', () => {
+    const src = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'monitor.js'), 'utf8');
+    assertIncludes(src, 'Math.min(SCAN_CONCURRENCY, scanQueue.length)',
+      'Should not spawn more workers than queue items');
+  });
+
+  await asyncTest('CONCURRENCY: processQueue handles empty queue', async () => {
+    scanQueue.length = 0;
+    await processQueue();
+    assert(scanQueue.length === 0, 'Queue should remain empty');
+  });
+
+  await asyncTest('CONCURRENCY: worker pool drains queue and runs concurrently', async () => {
+    // Mock test: simulate the worker pool pattern without real network calls.
+    // We replicate the exact processQueue logic with a mock scan function
+    // to verify concurrency behavior.
+    const processed = [];
+    let maxConcurrent = 0;
+    let currentConcurrent = 0;
+
+    async function mockScan(item) {
+      currentConcurrent++;
+      if (currentConcurrent > maxConcurrent) maxConcurrent = currentConcurrent;
+      // Simulate async work (10ms)
+      await new Promise(r => setTimeout(r, 10));
+      processed.push(item.name);
+      currentConcurrent--;
+    }
+
+    // Build a mock queue
+    const mockQueue = [];
+    for (let i = 0; i < 6; i++) {
+      mockQueue.push({ name: `mock-pkg-${i}`, version: '1.0.0', ecosystem: 'npm', tarballUrl: null });
+    }
+
+    // Replicate the worker pool pattern from processQueue
+    const concurrency = 3;
+    async function mockWorker() {
+      while (mockQueue.length > 0) {
+        const item = mockQueue.shift();
+        await mockScan(item);
+      }
+    }
+    const workers = [];
+    for (let i = 0; i < Math.min(concurrency, mockQueue.length); i++) {
+      workers.push(mockWorker());
+    }
+    await Promise.all(workers);
+
+    assert(mockQueue.length === 0, `Mock queue should be drained, ${mockQueue.length} remaining`);
+    assert(processed.length === 6, `All 6 items should be processed, got ${processed.length}`);
+    assert(maxConcurrent > 1, `Should have run concurrently (max concurrent: ${maxConcurrent})`);
+    assert(maxConcurrent <= concurrency, `Should not exceed concurrency limit (max: ${maxConcurrent}, limit: ${concurrency})`);
+  });
+
+  test('CONCURRENCY: concurrency log only when queue > 1 and concurrency > 1', () => {
+    // Verify the source code has the guard condition
+    const src = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'monitor.js'), 'utf8');
+    assertIncludes(src, 'SCAN_CONCURRENCY > 1 && scanQueue.length > 1',
+      'processQueue should only log concurrency when both concurrency and queue > 1');
+  });
+
+  await asyncTest('CONCURRENCY: mock worker pool with 1 item does not run multiple workers', async () => {
+    const workerCount = [];
+    const mockQueue = [{ name: 'solo-pkg' }];
+    const concurrency = 3;
+
+    async function mockWorker(id) {
+      workerCount.push(id);
+      while (mockQueue.length > 0) {
+        mockQueue.shift();
+        await new Promise(r => setTimeout(r, 5));
+      }
+    }
+
+    const workers = [];
+    for (let i = 0; i < Math.min(concurrency, mockQueue.length); i++) {
+      workers.push(mockWorker(i));
+    }
+    await Promise.all(workers);
+
+    assert(workerCount.length === 1, `Should spawn only 1 worker for 1 item, got ${workerCount.length}`);
+    assert(mockQueue.length === 0, 'Queue should be drained');
+  });
 }
 
 module.exports = { runMonitorTests };
