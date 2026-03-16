@@ -323,6 +323,7 @@ const DAILY_STATS_PERSIST_INTERVAL = 10; // Persist to disk every N scans
 const POLL_INTERVAL = 60_000;
 const POLL_MAX_BACKOFF = 960_000; // 16 minutes max backoff
 const SCAN_TIMEOUT_MS = 180_000; // 3 minutes per package
+const SCAN_CONCURRENCY = Math.max(1, parseInt(process.env.MUADDIB_SCAN_CONCURRENCY, 10) || 3);
 
 // --- Popularity pre-filter ---
 const POPULAR_THRESHOLD = 50_000; // Weekly downloads to classify as "popular"
@@ -2085,26 +2086,54 @@ function timeoutPromise(ms) {
   });
 }
 
-async function processQueue() {
-  while (scanQueue.length > 0) {
-    const item = scanQueue.shift();
-    try {
-      await Promise.race([
-        resolveTarballAndScan(item),
-        timeoutPromise(SCAN_TIMEOUT_MS)
-      ]);
-    } catch (err) {
-      recordError(err);
-      console.error(`[MONITOR] Queue error for ${item.name}: ${err.message}`);
-    }
-    maybePersistDailyStats();
+/**
+ * Process a single item from the scan queue.
+ * Encapsulates the full per-package flow: scan → sandbox → reputation → webhook.
+ */
+async function processQueueItem(item) {
+  try {
+    await Promise.race([
+      resolveTarballAndScan(item),
+      timeoutPromise(SCAN_TIMEOUT_MS)
+    ]);
+  } catch (err) {
+    recordError(err);
+    console.error(`[MONITOR] Queue error for ${item.name}: ${err.message}`);
+  }
+  maybePersistDailyStats();
 
-    // Check daily report between each package scan (not just between poll cycles).
-    // Without this, a queue of 50 packages × 3min/each = 150min delay on the report.
-    if (isDailyReportDue()) {
-      await sendDailyReport();
+  // Check daily report between each package scan (not just between poll cycles).
+  // Without this, a queue of 50 packages × 3min/each = 150min delay on the report.
+  if (isDailyReportDue()) {
+    await sendDailyReport();
+  }
+}
+
+/**
+ * Worker-pool consumer for the scan queue.
+ * Runs up to SCAN_CONCURRENCY scans in parallel. Each worker pulls from the
+ * shared scanQueue until it's empty. Node.js is single-threaded so
+ * scanQueue.shift() is atomic — no race conditions between workers.
+ */
+async function processQueue() {
+  if (scanQueue.length === 0) return;
+
+  if (SCAN_CONCURRENCY > 1 && scanQueue.length > 1) {
+    console.log(`[MONITOR] Processing ${scanQueue.length} queued packages (concurrency: ${SCAN_CONCURRENCY})`);
+  }
+
+  async function worker() {
+    while (scanQueue.length > 0) {
+      const item = scanQueue.shift();
+      await processQueueItem(item);
     }
   }
+
+  const workers = [];
+  for (let i = 0; i < Math.min(SCAN_CONCURRENCY, scanQueue.length); i++) {
+    workers.push(worker());
+  }
+  await Promise.all(workers);
 }
 
 // --- Stats reporting ---
@@ -2826,6 +2855,7 @@ async function startMonitor(options) {
   loadDailyStats(); // Restore counters from previous run (survives restarts)
   console.log(`[MONITOR] State loaded — npm last: ${state.npmLastPackage || 'none'}, pypi last: ${state.pypiLastPackage || 'none'}, npm seq: ${state.npmLastSeq || 'none'}`);
   console.log('[MONITOR] npm changes stream enabled (replicate.npmjs.com) with RSS fallback');
+  console.log(`[MONITOR] Scan concurrency: ${SCAN_CONCURRENCY} (MUADDIB_SCAN_CONCURRENCY to override)`);
   console.log(`[MONITOR] Polling every ${POLL_INTERVAL / 1000}s. Ctrl+C to stop.\n`);
 
   let running = true;
@@ -3097,6 +3127,7 @@ module.exports = {
   loadNpmSeq,
   saveNpmSeq,
   CHANGES_STREAM_URL,
+  SCAN_CONCURRENCY,
   CHANGES_LIMIT,
   CHANGES_CATCHUP_MAX,
   downloadToFile,
