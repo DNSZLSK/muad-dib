@@ -9,7 +9,7 @@ async function runScraperTests() {
     runScraper, scrapeShaiHuludDetector, scrapeDatadogIOCs,
     parseCSVLine, parseCSV, extractVersions, parseOSVEntry,
     createFreshness, isAllowedRedirect, loadStaticIOCs,
-    validateIOCEntry,
+    validateIOCEntry, getNoVersionSkipCount, resetNoVersionSkipCount,
     CONFIDENCE_ORDER, ALLOWED_REDIRECT_DOMAINS,
     MAX_ENTRY_UNCOMPRESSED, MAX_TOTAL_UNCOMPRESSED
   } = require('../../src/ioc/scraper.js');
@@ -126,6 +126,32 @@ async function runScraperTests() {
     const result = extractVersions(affected);
     const uniqueCount = new Set(result).size;
     assert(uniqueCount === result.length, 'Should not have duplicates');
+  });
+
+  // --- noVersionSkipCount aggregated warning ---
+
+  test('SCRAPER: extractVersions increments noVersionSkipCount on empty affected', () => {
+    resetNoVersionSkipCount();
+    extractVersions({});
+    extractVersions({ ranges: [{ events: [{ introduced: '0' }] }] });
+    extractVersions({});
+    assert(getNoVersionSkipCount() === 3, 'Should have counted 3 skips, got ' + getNoVersionSkipCount());
+  });
+
+  test('SCRAPER: resetNoVersionSkipCount resets counter to 0', () => {
+    resetNoVersionSkipCount();
+    assert(getNoVersionSkipCount() === 0, 'Counter should be 0 after reset');
+    extractVersions({});
+    assert(getNoVersionSkipCount() === 1, 'Counter should be 1 after one skip');
+    resetNoVersionSkipCount();
+    assert(getNoVersionSkipCount() === 0, 'Counter should be 0 after second reset');
+  });
+
+  test('SCRAPER: extractVersions does NOT increment counter when versions found', () => {
+    resetNoVersionSkipCount();
+    extractVersions({ versions: ['1.0.0'] });
+    extractVersions({ versions: ['2.0.0', '3.0.0'] });
+    assert(getNoVersionSkipCount() === 0, 'Counter should stay 0 when versions are found');
   });
 
   // --- parseOSVEntry ---

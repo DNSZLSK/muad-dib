@@ -4972,8 +4972,8 @@ async function runMonitorTests() {
 
   // --- Daily stats persistence tests ---
 
-  test('MONITOR: DAILY_STATS_PERSIST_INTERVAL is 10', () => {
-    assert(DAILY_STATS_PERSIST_INTERVAL === 10, 'Should persist every 10 scans, got ' + DAILY_STATS_PERSIST_INTERVAL);
+  test('MONITOR: DAILY_STATS_PERSIST_INTERVAL is 1 (crash-safe)', () => {
+    assert(DAILY_STATS_PERSIST_INTERVAL === 1, 'Should persist every scan, got ' + DAILY_STATS_PERSIST_INTERVAL);
   });
 
   test('MONITOR: saveDailyStats and loadDailyStats roundtrip', () => {
@@ -5086,31 +5086,29 @@ async function runMonitorTests() {
     }
   });
 
-  test('MONITOR: maybePersistDailyStats throttles at DAILY_STATS_PERSIST_INTERVAL', () => {
+  test('MONITOR: maybePersistDailyStats persists every scan (interval=1)', () => {
     const origScanned = stats.scanned;
-    const origSinceLastPersist = require('../../src/monitor.js').scansSinceLastPersist;
+    const monitor = require('../../src/monitor.js');
     let backup = null;
     try { backup = fs.readFileSync(DAILY_STATS_FILE, 'utf8'); } catch {}
-
-    const monitor = require('../../src/monitor.js');
 
     try {
       try { fs.unlinkSync(DAILY_STATS_FILE); } catch {}
       monitor.scansSinceLastPersist = 0;
       stats.scanned = 7;
 
-      // Call 9 times — should NOT persist yet
-      for (let i = 0; i < DAILY_STATS_PERSIST_INTERVAL - 1; i++) {
-        maybePersistDailyStats();
-      }
-      assert(!fs.existsSync(DAILY_STATS_FILE), 'Should NOT persist before interval reached');
-
-      // 10th call — should persist
+      // First call should persist immediately (interval=1)
       maybePersistDailyStats();
-      assert(fs.existsSync(DAILY_STATS_FILE), 'Should persist at interval');
+      assert(fs.existsSync(DAILY_STATS_FILE), 'Should persist on first call (crash-safe)');
 
       const data = JSON.parse(fs.readFileSync(DAILY_STATS_FILE, 'utf8'));
       assert(data.scanned === 7, 'Persisted scanned should be 7, got ' + data.scanned);
+
+      // Second call should also persist (updated value)
+      stats.scanned = 12;
+      maybePersistDailyStats();
+      const data2 = JSON.parse(fs.readFileSync(DAILY_STATS_FILE, 'utf8'));
+      assert(data2.scanned === 12, 'Persisted scanned should be 12, got ' + data2.scanned);
     } finally {
       stats.scanned = origScanned;
       monitor.scansSinceLastPersist = 0;
@@ -6689,7 +6687,7 @@ async function runMonitorTests() {
   test('CHANGES: constants have correct values', () => {
     assert(CHANGES_STREAM_URL === 'https://replicate.npmjs.com/_changes',
       `CHANGES_STREAM_URL should be replicate.npmjs.com, got ${CHANGES_STREAM_URL}`);
-    assert(CHANGES_LIMIT === 200, `CHANGES_LIMIT should be 200, got ${CHANGES_LIMIT}`);
+    assert(CHANGES_LIMIT === 1000, `CHANGES_LIMIT should be 1000, got ${CHANGES_LIMIT}`);
     assert(CHANGES_CATCHUP_MAX === 500000, `CHANGES_CATCHUP_MAX should be 500000, got ${CHANGES_CATCHUP_MAX}`);
   });
 
@@ -6773,10 +6771,10 @@ async function runMonitorTests() {
 
   console.log('\n=== SCAN CONCURRENCY TESTS ===\n');
 
-  test('CONCURRENCY: SCAN_CONCURRENCY defaults to 3', () => {
+  test('CONCURRENCY: SCAN_CONCURRENCY defaults to 5', () => {
     assert(SCAN_CONCURRENCY >= 1, `SCAN_CONCURRENCY must be >= 1, got ${SCAN_CONCURRENCY}`);
     if (!process.env.MUADDIB_SCAN_CONCURRENCY) {
-      assert(SCAN_CONCURRENCY === 3, `Default SCAN_CONCURRENCY should be 3, got ${SCAN_CONCURRENCY}`);
+      assert(SCAN_CONCURRENCY === 5, `Default SCAN_CONCURRENCY should be 5, got ${SCAN_CONCURRENCY}`);
     }
   });
 
