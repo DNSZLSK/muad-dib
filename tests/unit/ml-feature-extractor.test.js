@@ -1,0 +1,336 @@
+'use strict';
+
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+const { test, assert } = require('../test-utils');
+
+function runMLFeatureExtractorTests() {
+  console.log('\n=== ML FEATURE EXTRACTOR TESTS ===\n');
+
+  const { extractFeatures, buildTrainingRecord, TOP_THREAT_TYPES } = require('../../src/ml/feature-extractor');
+  const { appendRecord, readRecords, getStats, relabelRecords, setTrainingFile, resetTrainingFile } = require('../../src/ml/jsonl-writer');
+
+  // --- extractFeatures tests ---
+
+  test('extractFeatures: returns all expected feature keys', () => {
+    const result = {
+      threats: [
+        { type: 'suspicious_dataflow', severity: 'HIGH', file: 'index.js', rule_id: 'AST-001' },
+        { type: 'env_access', severity: 'MEDIUM', file: 'index.js', rule_id: 'AST-002' },
+        { type: 'obfuscation_detected', severity: 'LOW', file: 'utils.js', rule_id: 'AST-003' }
+      ],
+      summary: {
+        total: 3,
+        critical: 0,
+        high: 1,
+        medium: 1,
+        low: 1,
+        riskScore: 25,
+        maxFileScore: 20,
+        packageScore: 5,
+        globalRiskScore: 30,
+        fileScores: { 'index.js': 20, 'utils.js': 3 },
+        breakdown: [
+          { rule: 'AST-001', type: 'suspicious_dataflow', points: 10, reason: 'test' },
+          { rule: 'AST-002', type: 'env_access', points: 3, reason: 'test' },
+          { rule: 'AST-003', type: 'obfuscation_detected', points: 1, reason: 'test' }
+        ]
+      }
+    };
+
+    const features = extractFeatures(result, { name: 'test-pkg', version: '1.0.0' });
+
+    // Core scoring features
+    assert(features.score === 25, `score should be 25, got ${features.score}`);
+    assert(features.max_file_score === 20, `max_file_score should be 20, got ${features.max_file_score}`);
+    assert(features.package_score === 5, `package_score should be 5, got ${features.package_score}`);
+
+    // Severity counts
+    assert(features.count_total === 3, `count_total should be 3, got ${features.count_total}`);
+    assert(features.count_critical === 0, `count_critical should be 0, got ${features.count_critical}`);
+    assert(features.count_high === 1, `count_high should be 1, got ${features.count_high}`);
+    assert(features.count_medium === 1, `count_medium should be 1, got ${features.count_medium}`);
+    assert(features.count_low === 1, `count_low should be 1, got ${features.count_low}`);
+
+    // Distinct types
+    assert(features.distinct_threat_types === 3, `distinct_threat_types should be 3, got ${features.distinct_threat_types}`);
+
+    // Per-type counts
+    assert(features.type_suspicious_dataflow === 1, `type_suspicious_dataflow should be 1`);
+    assert(features.type_env_access === 1, `type_env_access should be 1`);
+    assert(features.type_obfuscation_detected === 1, `type_obfuscation_detected should be 1`);
+    assert(features.type_staged_payload === 0, `type_staged_payload should be 0`);
+    assert(features.type_other === 0, `type_other should be 0 (all types are in TOP list)`);
+
+    // Boolean signals
+    assert(features.has_network_access === 1, `has_network_access should be 1 (suspicious_dataflow)`);
+    assert(features.has_obfuscation === 1, `has_obfuscation should be 1`);
+    assert(features.has_env_access === 1, `has_env_access should be 1`);
+    assert(features.has_eval === 0, `has_eval should be 0`);
+    assert(features.has_lifecycle_script === 0, `has_lifecycle_script should be 0`);
+    assert(features.has_ioc_match === 0, `has_ioc_match should be 0`);
+
+    // File distribution
+    assert(features.file_count_with_threats === 2, `file_count_with_threats should be 2`);
+    assert(features.file_score_max === 20, `file_score_max should be 20`);
+
+    // Severity ratio
+    assert(features.severity_ratio_high > 0.3 && features.severity_ratio_high < 0.4,
+      `severity_ratio_high should be ~0.33, got ${features.severity_ratio_high}`);
+
+    // Points concentration
+    assert(features.max_single_points === 10, `max_single_points should be 10`);
+  });
+
+  test('extractFeatures: handles empty result', () => {
+    const result = { threats: [], summary: { total: 0, critical: 0, high: 0, medium: 0, low: 0 } };
+    const features = extractFeatures(result, {});
+
+    assert(features.score === 0, 'score should be 0');
+    assert(features.count_total === 0, 'count_total should be 0');
+    assert(features.distinct_threat_types === 0, 'distinct_threat_types should be 0');
+    assert(features.has_network_access === 0, 'has_network_access should be 0');
+    assert(features.file_count_with_threats === 0, 'file_count_with_threats should be 0');
+    assert(features.severity_ratio_high === 0, 'severity_ratio_high should be 0');
+  });
+
+  test('extractFeatures: handles null/undefined result gracefully', () => {
+    const features = extractFeatures(null, {});
+    assert(features.score === 0, 'score should be 0 for null result');
+    assert(features.count_total === 0, 'count_total should be 0 for null result');
+  });
+
+  test('extractFeatures: counts non-top types in type_other', () => {
+    const result = {
+      threats: [
+        { type: 'some_unknown_type_xyz', severity: 'MEDIUM', file: 'x.js' },
+        { type: 'some_unknown_type_xyz', severity: 'MEDIUM', file: 'y.js' },
+        { type: 'another_unknown_type', severity: 'LOW', file: 'z.js' }
+      ],
+      summary: { total: 3, critical: 0, high: 0, medium: 2, low: 1 }
+    };
+    const features = extractFeatures(result, {});
+    assert(features.type_other === 3, `type_other should be 3, got ${features.type_other}`);
+    assert(features.type_suspicious_dataflow === 0, 'known type should be 0');
+  });
+
+  test('extractFeatures: detects IOC match boolean', () => {
+    const result = {
+      threats: [
+        { type: 'known_malicious_package', severity: 'CRITICAL', file: 'package.json' }
+      ],
+      summary: { total: 1, critical: 1, high: 0, medium: 0, low: 0, riskScore: 100 }
+    };
+    const features = extractFeatures(result, {});
+    assert(features.has_ioc_match === 1, 'has_ioc_match should be 1');
+  });
+
+  test('extractFeatures: detects sandbox findings', () => {
+    const result = {
+      threats: [
+        { type: 'sandbox_suspicious_connection', severity: 'HIGH', file: 'index.js' }
+      ],
+      summary: { total: 1, critical: 0, high: 1, medium: 0, low: 0 }
+    };
+    const features = extractFeatures(result, {});
+    assert(features.has_sandbox_finding === 1, 'has_sandbox_finding should be 1');
+  });
+
+  test('extractFeatures: handles registry metadata', () => {
+    const result = { threats: [], summary: { total: 0, critical: 0, high: 0, medium: 0, low: 0 } };
+    const meta = {
+      unpackedSize: 50000,
+      registryMeta: {
+        dependencies: { lodash: '^4.0.0', express: '^4.18.0' },
+        devDependencies: { jest: '^29.0.0' }
+      }
+    };
+    const features = extractFeatures(result, meta);
+    assert(features.unpacked_size_bytes === 50000, `unpacked_size_bytes should be 50000, got ${features.unpacked_size_bytes}`);
+    assert(features.dep_count === 2, `dep_count should be 2, got ${features.dep_count}`);
+    assert(features.dev_dep_count === 1, `dev_dep_count should be 1, got ${features.dev_dep_count}`);
+  });
+
+  test('extractFeatures: reputation factor from summary', () => {
+    const result = {
+      threats: [],
+      summary: { total: 0, critical: 0, high: 0, medium: 0, low: 0, reputationFactor: 0.5 }
+    };
+    const features = extractFeatures(result, {});
+    assert(features.reputation_factor === 0.5, `reputation_factor should be 0.5, got ${features.reputation_factor}`);
+  });
+
+  // --- buildTrainingRecord tests ---
+
+  test('buildTrainingRecord: includes identity + label + features', () => {
+    const result = {
+      threats: [{ type: 'env_access', severity: 'HIGH', file: 'index.js' }],
+      summary: { total: 1, critical: 0, high: 1, medium: 0, low: 0, riskScore: 10, maxFileScore: 10, packageScore: 0 }
+    };
+    const record = buildTrainingRecord(result, {
+      name: 'evil-pkg',
+      version: '1.2.3',
+      ecosystem: 'npm',
+      label: 'suspect',
+      tier: 1,
+      sandboxResult: { score: 50, findings: [{ type: 'sandbox_exec_suspicious' }] }
+    });
+
+    // Identity
+    assert(record.name === 'evil-pkg', 'name should match');
+    assert(record.version === '1.2.3', 'version should match');
+    assert(record.ecosystem === 'npm', 'ecosystem should match');
+    assert(typeof record.timestamp === 'string', 'timestamp should be a string');
+
+    // Label
+    assert(record.label === 'suspect', 'label should be suspect');
+    assert(record.tier === 1, 'tier should be 1');
+
+    // Features (spot check)
+    assert(record.score === 10, `score should be 10, got ${record.score}`);
+    assert(record.count_high === 1, 'count_high should be 1');
+    assert(record.type_env_access === 1, 'type_env_access should be 1');
+
+    // Sandbox
+    assert(record.sandbox_score === 50, `sandbox_score should be 50, got ${record.sandbox_score}`);
+    assert(record.sandbox_finding_count === 1, `sandbox_finding_count should be 1, got ${record.sandbox_finding_count}`);
+  });
+
+  test('buildTrainingRecord: defaults for missing params', () => {
+    const result = {
+      threats: [],
+      summary: { total: 0, critical: 0, high: 0, medium: 0, low: 0, riskScore: 0 }
+    };
+    const record = buildTrainingRecord(result, { name: 'test' });
+
+    assert(record.name === 'test', 'name should be test');
+    assert(record.version === '', 'version should default to empty');
+    assert(record.ecosystem === 'npm', 'ecosystem should default to npm');
+    assert(record.label === 'suspect', 'label should default to suspect');
+    assert(record.tier === null, 'tier should default to null');
+    assert(record.sandbox_score === 0, 'sandbox_score should default to 0');
+    assert(record.sandbox_finding_count === 0, 'sandbox_finding_count should default to 0');
+  });
+
+  // --- JSONL writer tests ---
+
+  // Use a temp dir for JSONL tests to avoid polluting data/
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-ml-test-'));
+  const tmpFile = path.join(tmpDir, 'test-training.jsonl');
+
+  // Redirect writer to temp file
+  setTrainingFile(tmpFile);
+
+  test('JSONL writer: appendRecord writes valid JSONL', () => {
+    const record = { name: 'test-pkg', version: '1.0.0', score: 42, label: 'clean' };
+    appendRecord(record);
+
+    const content = fs.readFileSync(tmpFile, 'utf8');
+    const lines = content.trim().split('\n');
+    assert(lines.length === 1, `Should have 1 line, got ${lines.length}`);
+
+    const parsed = JSON.parse(lines[0]);
+    assert(parsed.name === 'test-pkg', 'name should match');
+    assert(parsed.score === 42, 'score should match');
+    assert(parsed.label === 'clean', 'label should match');
+  });
+
+  test('JSONL writer: appendRecord appends multiple records', () => {
+    appendRecord({ name: 'pkg2', version: '2.0.0', score: 80, label: 'suspect' });
+    appendRecord({ name: 'pkg3', version: '3.0.0', score: 5, label: 'fp' });
+
+    const content = fs.readFileSync(tmpFile, 'utf8');
+    const lines = content.trim().split('\n');
+    assert(lines.length === 3, `Should have 3 lines, got ${lines.length}`);
+
+    const last = JSON.parse(lines[2]);
+    assert(last.name === 'pkg3', 'last record name should be pkg3');
+    assert(last.label === 'fp', 'last record label should be fp');
+  });
+
+  test('JSONL writer: readRecords returns all records', () => {
+    const records = readRecords();
+    assert(records.length === 3, `Should have 3 records, got ${records.length}`);
+    assert(records[0].name === 'test-pkg', 'first record name should be test-pkg');
+    assert(records[2].name === 'pkg3', 'third record name should be pkg3');
+  });
+
+  test('JSONL writer: getStats returns correct count and size', () => {
+    const s = getStats();
+    assert(s.recordCount === 3, `recordCount should be 3, got ${s.recordCount}`);
+    assert(s.fileSizeBytes > 0, 'fileSizeBytes should be > 0');
+  });
+
+  test('JSONL writer: relabelRecords updates matching records', () => {
+    const updated = relabelRecords('test-pkg', 'confirmed');
+    assert(updated === 1, `Should have updated 1 record, got ${updated}`);
+
+    const records = readRecords();
+    const relabeled = records.find(r => r.name === 'test-pkg');
+    assert(relabeled.label === 'confirmed', `label should be confirmed, got ${relabeled.label}`);
+
+    // Other records should be unchanged
+    const other = records.find(r => r.name === 'pkg2');
+    assert(other.label === 'suspect', `pkg2 label should still be suspect, got ${other.label}`);
+  });
+
+  test('JSONL writer: relabelRecords returns 0 for non-existent package', () => {
+    const updated = relabelRecords('non-existent-pkg', 'fp');
+    assert(updated === 0, `Should have updated 0 records, got ${updated}`);
+  });
+
+  test('JSONL writer: readRecords handles empty file', () => {
+    const emptyFile = path.join(tmpDir, 'empty.jsonl');
+    fs.writeFileSync(emptyFile, '', 'utf8');
+    setTrainingFile(emptyFile);
+    const records = readRecords();
+    assert(records.length === 0, `Should have 0 records from empty file, got ${records.length}`);
+  });
+
+  test('JSONL writer: readRecords handles malformed lines gracefully', () => {
+    const badFile = path.join(tmpDir, 'bad.jsonl');
+    fs.writeFileSync(badFile, '{"valid": true}\n{not json\n{"also": "valid"}\n', 'utf8');
+    setTrainingFile(badFile);
+    const records = readRecords();
+    assert(records.length === 2, `Should skip malformed line, got ${records.length}`);
+  });
+
+  test('JSONL writer: getStats returns 0 for non-existent file', () => {
+    setTrainingFile(path.join(tmpDir, 'nope.jsonl'));
+    const s = getStats();
+    assert(s.recordCount === 0, 'recordCount should be 0');
+    assert(s.fileSizeBytes === 0, 'fileSizeBytes should be 0');
+  });
+
+  // --- TOP_THREAT_TYPES coverage ---
+
+  test('TOP_THREAT_TYPES contains at least 20 types', () => {
+    assert(TOP_THREAT_TYPES.length >= 20, `TOP_THREAT_TYPES should have 20+ types, got ${TOP_THREAT_TYPES.length}`);
+  });
+
+  test('TOP_THREAT_TYPES has no duplicates', () => {
+    const unique = new Set(TOP_THREAT_TYPES);
+    assert(unique.size === TOP_THREAT_TYPES.length, 'TOP_THREAT_TYPES should have no duplicates');
+  });
+
+  // --- Feature vector stability ---
+
+  test('Feature vector has consistent key count', () => {
+    const result = {
+      threats: [{ type: 'env_access', severity: 'HIGH', file: 'x.js' }],
+      summary: { total: 1, critical: 0, high: 1, medium: 0, low: 0, riskScore: 10 }
+    };
+    const features = extractFeatures(result, {});
+    const keys = Object.keys(features);
+    // Core: 4 + Severity: 5 + Distinct: 1 + Per-type: 32 + Booleans: 10
+    // + File dist: 3 + Ratios: 3 + Meta: 3 + Reputation: 1 = 62
+    assert(keys.length >= 55, `Feature vector should have 55+ keys, got ${keys.length}`);
+  });
+
+  // Cleanup
+  resetTrainingFile();
+  try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+}
+
+module.exports = { runMLFeatureExtractorTests };

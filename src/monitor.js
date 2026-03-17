@@ -12,6 +12,8 @@ const { detectMaintainerChange } = require('./maintainer-change.js');
 const { downloadToFile, extractTarGz, sanitizePackageName } = require('./shared/download.js');
 const { MAX_TARBALL_SIZE } = require('./shared/constants.js');
 const { loadCachedIOCs } = require('./ioc/updater.js');
+const { buildTrainingRecord } = require('./ml/feature-extractor.js');
+const { appendRecord: appendTrainingRecord, relabelRecords, getStats: getTrainingStats } = require('./ml/jsonl-writer.js');
 
 // Self-exclude: never scan our own package through the monitor
 const SELF_PACKAGE_NAME = require('../package.json').name; // 'muaddib-scanner'
@@ -1785,6 +1787,36 @@ function isBundledToolingOnly(threats) {
   });
 }
 
+// --- ML training data export ---
+
+/**
+ * Record a JSONL training sample for every scanned package.
+ * Called at each decision point in scanPackage() with the appropriate label.
+ * Non-fatal: failures are logged but never crash the monitor.
+ *
+ * @param {Object} result - scan result from run() (can be null for skipped packages)
+ * @param {Object} params - { name, version, ecosystem, label, tier, registryMeta, unpackedSize, sandboxResult }
+ */
+function recordTrainingSample(result, params) {
+  try {
+    if (!result) return; // No scan result (size skip, tarball error) — nothing to record
+    const record = buildTrainingRecord(result, {
+      name: params.name,
+      version: params.version,
+      ecosystem: params.ecosystem,
+      unpackedSize: params.unpackedSize || 0,
+      registryMeta: params.registryMeta || {},
+      label: params.label || 'clean',
+      tier: params.tier || null,
+      sandboxResult: params.sandboxResult || null
+    });
+    appendTrainingRecord(record);
+  } catch (err) {
+    // Non-fatal: ML export must never crash the monitor
+    console.error(`[ML] Failed to record training sample for ${params.name}: ${err.message}`);
+  }
+}
+
 // --- Package scanning ---
 
 async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta) {
@@ -1853,6 +1885,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta) {
       stats.clean++;
       console.log(`[MONITOR] CLEAN: ${name}@${version} (0 findings, ${(elapsed / 1000).toFixed(1)}s)`);
       updateScanStats('clean');
+      recordTrainingSample(result, { name, version, ecosystem, label: 'clean', registryMeta: meta, unpackedSize: meta.unpackedSize });
       return { sandboxResult: null, staticClean: true };
     } else {
       const counts = [];
@@ -1887,6 +1920,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta) {
         };
         appendAlert(alert);
         updateScanStats('clean');
+        recordTrainingSample(result, { name, version, ecosystem, label: 'clean', registryMeta: meta, unpackedSize: meta.unpackedSize });
         return { sandboxResult: null, staticClean: true };
       } else {
         // Popularity pre-filter: skip sandbox for popular npm packages with only MEDIUM/LOW
@@ -1899,6 +1933,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta) {
             stats.clean++;
             console.log(`[MONITOR] TRUSTED (popular): ${name}@${version} (${Math.round(downloads / 1000)}k downloads/week, ${counts.join(', ')})`);
             updateScanStats('clean');
+            recordTrainingSample(result, { name, version, ecosystem, label: 'clean', registryMeta: meta, unpackedSize: meta.unpackedSize });
             return { sandboxResult: null, staticClean: true };
           }
         }
@@ -1911,6 +1946,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta) {
           stats.clean++;
           console.log(`[MONITOR] CLEAN (low-signal): ${name}@${version} (${counts.join(', ')})`);
           updateScanStats('clean');
+          recordTrainingSample(result, { name, version, ecosystem, label: 'clean', registryMeta: meta, unpackedSize: meta.unpackedSize });
           return { sandboxResult: null, staticClean: true };
         }
 
@@ -1925,6 +1961,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta) {
           console.log(`[MONITOR] SUSPECT T3 (low-intent): ${name}@${version} (${counts.join(', ')})`);
           console.log(`[MONITOR] FINDINGS: ${name}@${version} → ${formatFindings(result)}`);
           updateScanStats('clean'); // T3 does not inflate suspect stats
+          recordTrainingSample(result, { name, version, ecosystem, label: 'clean', tier: 3, registryMeta: meta, unpackedSize: meta.unpackedSize });
           return { sandboxResult: null, staticClean: true, tier: 3 };
         }
 
@@ -2033,6 +2070,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta) {
           : result.summary.high > 0 ? 'HIGH'
           : result.summary.medium > 0 ? 'MEDIUM' : 'LOW';
         appendDetection(name, version, ecosystem, findingTypes, maxSeverity);
+        recordTrainingSample(result, { name, version, ecosystem, label: 'suspect', tier, sandboxResult, registryMeta: meta, unpackedSize: meta.unpackedSize });
 
         dailyAlerts.push({ name, version, ecosystem, findingsCount: result.summary.total, tier });
         // Persist alert locally for ALL suspects (independent of webhook filtering)
@@ -3049,13 +3087,15 @@ async function resolveTarballAndScan(item) {
   const sandboxResult = scanResult && scanResult.sandboxResult;
   const staticClean = scanResult && scanResult.staticClean;
 
-  // FP rate tracking
+  // FP rate tracking + ML label refinement
   if (scanResult) {
     if (!staticClean) {
       if (sandboxResult && sandboxResult.score === 0) {
         updateScanStats('false_positive');
+        relabelRecords(item.name, 'fp');
       } else if (sandboxResult && sandboxResult.score > 0) {
         updateScanStats('confirmed');
+        relabelRecords(item.name, 'confirmed');
       } else {
         updateScanStats('suspect');
       }
@@ -3260,7 +3300,11 @@ module.exports = {
   get scanMemoryCache() { return scanMemoryCache; },
   set scanMemoryCache(v) { scanMemoryCache = v; },
   get scansSinceLastMemoryPersist() { return scansSinceLastMemoryPersist; },
-  set scansSinceLastMemoryPersist(v) { scansSinceLastMemoryPersist = v; }
+  set scansSinceLastMemoryPersist(v) { scansSinceLastMemoryPersist = v; },
+  // ML training data exports
+  recordTrainingSample,
+  relabelRecords,
+  getTrainingStats
 };
 
 // Standalone entry point: node src/monitor.js
