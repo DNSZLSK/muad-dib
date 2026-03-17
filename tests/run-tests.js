@@ -34,6 +34,7 @@ const { runWebhookTests } = require('./report/webhook.test');
 // Sandbox tests
 const { runSandboxTests } = require('./sandbox/sandbox.test');
 const { runPreloadTests } = require('./unit/preload.test');
+const { runMLFeatureExtractorTests } = require('./unit/ml-feature-extractor.test');
 const { runSandboxPreloadTests } = require('./integration/sandbox-preload.test');
 
 // Integration tests (fast subset — CLI, monitor, diff)
@@ -148,6 +149,9 @@ async function timed(name, fn) {
 
   // Evaluation methodology smoke tests (v2.6.9)
   await timed('evaluation-smoke', runEvaluationSmokeTests);
+
+  // ML feature extraction tests (v2.8.7)
+  await timed('ml-feature-extractor', runMLFeatureExtractorTests);
 
   // Utility tests
   await timed('utils', runUtilsTests);
