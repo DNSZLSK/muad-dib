@@ -340,6 +340,21 @@ function applyFPReductions(threats, reachableFiles, packageName, packageDeps) {
       t.severity = 'MEDIUM';
       t.mcpSdkDowngrade = true;
     }
+
+    // C12: AI SDK awareness — env_access on AI API keys is expected in SDK packages.
+    // Downgrade env_access HIGH → MEDIUM when @modelcontextprotocol/sdk, @anthropic/sdk,
+    // or openai is in dependencies AND the env var is an AI provider key.
+    // Does NOT affect compound detections (intent_credential_exfil stays CRITICAL).
+    if (t.type === 'env_access' && t.severity === 'HIGH' &&
+        packageDeps && typeof packageDeps === 'object') {
+      const hasAiSdk = packageDeps['@modelcontextprotocol/sdk'] ||
+                       packageDeps['@anthropic/sdk'] ||
+                       packageDeps['openai'];
+      if (hasAiSdk && /\b(ANTHROPIC_API_KEY|OPENAI_API_KEY|CLAUDE_API_KEY)\b/.test(t.message)) {
+        t.reductions.push({ rule: 'ai_sdk_env', from: 'HIGH', to: 'MEDIUM' });
+        t.severity = 'MEDIUM';
+      }
+    }
   }
 }
 

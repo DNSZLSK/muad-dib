@@ -809,6 +809,26 @@ function analyzeFile(content, filePath, basePath) {
     const allTelemetryOnly = sources.every(s => s.type === 'telemetry_read');
     if (allTelemetryOnly && severity === 'CRITICAL') severity = 'HIGH';
 
+    // C7: SDK pattern downgrade — if ALL env_read sources match SDK env→domain mappings,
+    // this is legitimate SDK usage (e.g., STRIPE_API_KEY → api.stripe.com). Cap at HIGH.
+    if (severity === 'CRITICAL') {
+      const envSources = sources.filter(s => s.type === 'env_read');
+      if (envSources.length > 0 && sources.every(s => s.type === 'env_read' || s.type === 'telemetry_read')) {
+        try {
+          const { isSDKPattern } = require('../intent-graph.js');
+          const fileContent = fs.readFileSync(filePath, 'utf8');
+          const allSDK = envSources.every(s => {
+            // Extract env var name from source name (e.g., "STRIPE_API_KEY" from "process.env.STRIPE_API_KEY")
+            const envVar = s.name.replace(/^process\.env\./, '').replace(/^process\.env\[['"]/, '').replace(/['"]\]$/, '');
+            return isSDKPattern(envVar, fileContent);
+          });
+          if (allSDK) severity = 'HIGH';
+        } catch {
+          // Intent graph not available — keep CRITICAL
+        }
+      }
+    }
+
     const sourceDesc = hasCommandOutput ? 'command output' : 'credentials read';
     threats.push({
       type: 'suspicious_dataflow',

