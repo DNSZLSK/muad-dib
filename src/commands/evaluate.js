@@ -23,6 +23,7 @@ const ADVERSARIAL_DIR = path.join(ROOT, 'datasets', 'adversarial');
 const METRICS_DIR = path.join(ROOT, 'metrics');
 const CACHE_DIR = path.join(ROOT, '.muaddib-cache', 'benign-tarballs');
 const PYPI_CACHE_DIR = path.join(ROOT, '.muaddib-cache', 'benign-pypi');
+const SCAN_CACHE_FILE = path.join(ROOT, '.muaddib-cache', 'evaluate-scan-cache.json');
 const HOLDOUT_DIRS = [
   path.join(ROOT, 'datasets', 'holdout-v2'),
   path.join(ROOT, 'datasets', 'holdout-v3'),
@@ -34,6 +35,75 @@ const GT_THRESHOLD = 3;
 const BENIGN_THRESHOLD = 20;
 const ADR_THRESHOLD = 20;  // v2.6.5: global threshold (aligned with BENIGN_THRESHOLD, no per-sample overfitting)
 const PACK_TIMEOUT_MS = 30000;
+
+// =========================================================================
+// Scan result cache — avoids re-scanning when src/ hasn't changed
+// =========================================================================
+
+/**
+ * Compute a fingerprint of all src/*.js files based on size + mtime.
+ * Changes when any scanner source file is modified.
+ */
+function computeSrcFingerprint() {
+  const srcDir = path.join(ROOT, 'src');
+  const entries = [];
+  const walk = (dir) => {
+    let items;
+    try { items = fs.readdirSync(dir); } catch { return; }
+    for (const f of items) {
+      const fp = path.join(dir, f);
+      try {
+        const st = fs.statSync(fp);
+        if (st.isDirectory()) walk(fp);
+        else if (f.endsWith('.js')) entries.push(`${path.relative(ROOT, fp)}:${st.size}:${Math.floor(st.mtimeMs)}`);
+      } catch { /* skip */ }
+    }
+  };
+  walk(srcDir);
+  entries.sort();
+  return hashString(entries.join('|')).toString(36);
+}
+
+// In-memory scan result cache: { fingerprint, results: { relPath -> scanResult } }
+let _scanCache = { fingerprint: null, results: Object.create(null) };
+
+function loadScanCache() {
+  try {
+    if (!fs.existsSync(SCAN_CACHE_FILE)) return;
+    const data = JSON.parse(fs.readFileSync(SCAN_CACHE_FILE, 'utf8'));
+    const currentFP = computeSrcFingerprint();
+    if (data.fingerprint === currentFP && data.results) {
+      _scanCache = { fingerprint: currentFP, results: data.results };
+      return Object.keys(data.results).length;
+    }
+    // Fingerprint mismatch → cache invalidated
+    return 0;
+  } catch { return 0; }
+}
+
+function saveScanCache() {
+  try {
+    _scanCache.fingerprint = computeSrcFingerprint();
+    fs.mkdirSync(path.dirname(SCAN_CACHE_FILE), { recursive: true });
+    fs.writeFileSync(SCAN_CACHE_FILE, JSON.stringify(_scanCache));
+  } catch { /* best effort */ }
+}
+
+function getCachedResult(dir) {
+  const key = path.relative(ROOT, dir);
+  return _scanCache.results[key] || null;
+}
+
+function setCachedResult(dir, result) {
+  const key = path.relative(ROOT, dir);
+  // Store minimal result: only what evaluate needs (score, total, threats summary)
+  _scanCache.results[key] = {
+    summary: { riskScore: result.summary.riskScore, total: result.summary.total },
+    threats: (result.threats || []).map(t => ({
+      type: t.type, severity: t.severity, message: t.message, file: t.file
+    }))
+  };
+}
 
 // --- Holdout benign split ---
 // Deterministic 70/30 split based on package name hash for overfitting detection.
@@ -134,11 +204,18 @@ const HOLDOUT_SAMPLES = [
 ];
 
 /**
- * Scan a directory silently and return the result
+ * Scan a directory silently and return the result.
+ * Uses scan result cache when available (cache populated by loadScanCache).
  */
 async function silentScan(dir) {
+  // Check cache first
+  const cached = getCachedResult(dir);
+  if (cached) return cached;
+
   try {
-    return await run(dir, { _capture: true });
+    const result = await run(dir, { _capture: true });
+    setCachedResult(dir, result);
+    return result;
   } catch (err) {
     return { summary: { riskScore: 0, total: 0 }, threats: [], error: err.message };
   }
@@ -659,6 +736,12 @@ async function evaluate(options = {}) {
   const version = require('../../package.json').version;
   const jsonMode = options.json || false;
 
+  // Load scan result cache (auto-invalidates when src/ changes)
+  const cachedCount = options.refreshBenign ? 0 : loadScanCache();
+  if (!jsonMode && cachedCount > 0) {
+    console.log(`\n  [CACHE] ${cachedCount} cached scan results loaded (src/ unchanged)`);
+  }
+
   if (!jsonMode) {
     console.log(`\n  MUAD'DIB Evaluation (v${version})\n`);
     console.log(`  [1/4] Ground Truth...`);
@@ -767,6 +850,9 @@ async function evaluate(options = {}) {
     console.log('');
   }
 
+  // Persist scan result cache for next run
+  saveScanCache();
+
   return report;
 }
 
@@ -802,5 +888,8 @@ module.exports = {
   ADR_THRESHOLD,
   extractTgz,
   wilsonCI,
-  isBenignHoldout
+  isBenignHoldout,
+  computeSrcFingerprint,
+  loadScanCache,
+  saveScanCache
 };

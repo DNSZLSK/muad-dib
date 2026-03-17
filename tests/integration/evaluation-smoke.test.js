@@ -54,6 +54,23 @@ async function runEvaluationSmokeTests() {
     assert(oneOfEach === expected,
       `Monitor score (${oneOfEach}) should match scoring.js weights sum (${expected})`);
   });
+
+  // --- Scan result cache tests (P3) ---
+  const { computeSrcFingerprint } = require('../../src/commands/evaluate.js');
+
+  test('EVAL-SMOKE: computeSrcFingerprint returns stable string', () => {
+    const fp1 = computeSrcFingerprint();
+    const fp2 = computeSrcFingerprint();
+    assert(typeof fp1 === 'string', 'fingerprint should be a string');
+    assert(fp1.length > 0, 'fingerprint should not be empty');
+    assert(fp1 === fp2, 'fingerprint should be deterministic');
+  });
+
+  test('EVAL-SMOKE: scan result cache exports exist', () => {
+    const { loadScanCache, saveScanCache } = require('../../src/commands/evaluate.js');
+    assert(typeof loadScanCache === 'function', 'loadScanCache should be a function');
+    assert(typeof saveScanCache === 'function', 'saveScanCache should be a function');
+  });
 }
 
 module.exports = { runEvaluationSmokeTests };

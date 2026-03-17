@@ -450,9 +450,9 @@ async function runTemporalAnalysisTests() {
     assert(p3 && p3.length > 10, 'Playbook for lifecycle_modified');
   });
 
-  test('TEMPORAL: --temporal flag is accepted by CLI', () => {
-    const output = runScan(path.join(TESTS_DIR, 'clean'), '--temporal --json');
-    const result = JSON.parse(output);
+  await asyncTest('TEMPORAL: --temporal flag is accepted (direct)', async () => {
+    const { runScanCached } = require('../test-utils');
+    const result = await runScanCached(path.join(TESTS_DIR, 'clean'), { temporal: true });
     assert(result.summary !== undefined, 'Should produce valid scan result with --temporal');
   });
 

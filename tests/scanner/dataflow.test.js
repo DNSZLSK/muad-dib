@@ -1,7 +1,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { test, asyncTest, assert, assertIncludes, runScan, runScanDirect, cleanupTemp, TESTS_DIR } = require('../test-utils');
+const { test, asyncTest, assert, assertIncludes, runScan, runScanDirect, runScanFast, cleanupTemp, TESTS_DIR } = require('../test-utils');
 
 function makeTempPkg(jsContent, fileName = 'index.js') {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-df-'));
@@ -13,13 +13,13 @@ function makeTempPkg(jsContent, fileName = 'index.js') {
 async function runDataflowTests() {
   console.log('\n=== DATAFLOW TESTS ===\n');
 
-  test('DATAFLOW: Detects credential read + network send', () => {
-    const output = runScan(path.join(TESTS_DIR, 'dataflow'));
+  await asyncTest('DATAFLOW: Detects credential read + network send (fast)', async () => {
+    const output = await runScanFast(path.join(TESTS_DIR, 'dataflow'));
     assertIncludes(output, 'Suspicious flow', 'Should detect suspicious flow');
   });
 
-  test('DATAFLOW: Detects env read + fetch', () => {
-    const output = runScan(path.join(TESTS_DIR, 'dataflow'));
+  await asyncTest('DATAFLOW: Detects env read + fetch (fast)', async () => {
+    const output = await runScanFast(path.join(TESTS_DIR, 'dataflow'));
     assertIncludes(output, 'CRITICAL', 'Should be CRITICAL');
   });
 

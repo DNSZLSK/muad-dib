@@ -116,6 +116,47 @@ async function runScanDirect(target, options = {}) {
   return await run(target, { ...options, _capture: true });
 }
 
+// Cache for runScanDirect results — eliminates duplicate in-process scans
+const _directCache = new Map();
+
+/**
+ * Cached in-process scan — wraps runScanDirect with a Map cache.
+ * Returns the scan result object. Use with asyncTest().
+ * Options object is serialized as cache key.
+ */
+async function runScanCached(target, options = {}) {
+  const key = `${target}::${JSON.stringify(options)}`;
+  if (_directCache.has(key)) return _directCache.get(key);
+  const result = await runScanDirect(target, options);
+  _directCache.set(key, result);
+  return result;
+}
+
+/**
+ * Flatten a scan result object into a searchable text string.
+ * Includes threat types, messages, severities, files, rule IDs — for assertIncludes checks.
+ */
+function resultToText(result) {
+  const parts = [];
+  for (const t of (result.threats || [])) {
+    parts.push(`${t.severity || ''} ${t.type || ''} ${t.message || ''} ${t.file || ''} ${t.rule_id || ''}`);
+  }
+  if (result.summary) {
+    parts.push(`riskScore=${result.summary.riskScore}`);
+    if (result.summary.mostSuspiciousFile) parts.push(`Max file: ${result.summary.mostSuspiciousFile}`);
+  }
+  return parts.join('\n');
+}
+
+/**
+ * runScanFast: async, cached, returns text string compatible with assertIncludes.
+ * Drop-in replacement for runScan() in tests that check text output keywords.
+ */
+async function runScanFast(target, options = {}) {
+  const result = await runScanCached(target, options);
+  return resultToText(result);
+}
+
 function createTempPkg(packages) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-test-'));
   const nmDir = path.join(tmpDir, 'node_modules');
@@ -186,6 +227,9 @@ module.exports = {
   assertRejects,
   runScan,
   runScanDirect,
+  runScanCached,
+  runScanFast,
+  resultToText,
   runCommand,
   createTempPkg,
   cleanupTemp,
