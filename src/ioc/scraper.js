@@ -15,6 +15,9 @@ const { NPM_PACKAGE_REGEX } = require('../shared/constants.js');
 // Version format validation (semver-like + wildcard)
 const VERSION_RE = /^(\*|0|[1-9]\d*(\.\d+){0,2}(-[\w.]+)?(\+[\w.]+)?)$/;
 
+// Aggregated warning counter for noisy logs (reset per scraper run)
+let _noVersionSkipCount = 0;
+
 /**
  * Validate an IOC package entry before insertion.
  * Returns true if valid, false if should be skipped.
@@ -463,7 +466,7 @@ function extractVersions(affected) {
   }
 
   if (versions.size === 0) {
-    console.log('[SCRAPER]   WARN: No version info found, skipping wildcard fallback');
+    _noVersionSkipCount++;
     return [];
   }
   return [...versions];
@@ -1089,6 +1092,9 @@ async function runScraper() {
   console.log('  OSV + OSSF + GenSecAI + DataDog + Snyk');
   console.log('='.repeat(60) + '\n');
 
+  // Reset aggregated warning counters
+  _noVersionSkipCount = 0;
+
   // Create data directory if needed
   const dataDir = path.dirname(IOC_FILE);
   if (!fs.existsSync(dataDir)) {
@@ -1151,6 +1157,11 @@ async function runScraper() {
   const staticPackages = results[4];
   const snykPackages = results[5];
   const pypiPackages = results[6];
+
+  // Log aggregated warnings
+  if (_noVersionSkipCount > 0) {
+    console.log('[SCRAPER] WARN: ' + _noVersionSkipCount + ' packages skipped (no version info, wildcard fallback avoided)');
+  }
 
   // Merge all scraped packages
   const allPackages = [
@@ -1389,12 +1400,17 @@ async function runScraper() {
   };
 }
 
+// Test helpers for aggregated warning counters
+function getNoVersionSkipCount() { return _noVersionSkipCount; }
+function resetNoVersionSkipCount() { _noVersionSkipCount = 0; }
+
 module.exports = {
   runScraper, scrapeShaiHuludDetector, scrapeDatadogIOCs,
   // Pure utility functions (exported for testing)
   parseCSVLine, parseCSV, extractVersions, parseOSVEntry,
   createFreshness, isAllowedRedirect, loadStaticIOCs,
   validateIOCEntry,
+  getNoVersionSkipCount, resetNoVersionSkipCount,
   CONFIDENCE_ORDER, ALLOWED_REDIRECT_DOMAINS,
   MAX_ENTRY_UNCOMPRESSED, MAX_TOTAL_UNCOMPRESSED
 };

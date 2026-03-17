@@ -78,7 +78,7 @@ const ALERTS_LOG_DIR = resolveWritableDir(PRIMARY_ALERTS_DIR, FALLBACK_ALERTS_DI
 // Primary source for new-package detection; RSS is kept as fallback.
 const NPM_SEQ_FILE = path.join(__dirname, '..', 'data', 'npm-seq.json');
 const CHANGES_STREAM_URL = 'https://replicate.npmjs.com/_changes';
-const CHANGES_LIMIT = 200;
+const CHANGES_LIMIT = 1000;
 const CHANGES_CATCHUP_MAX = 500000; // If behind by more than 500k seqs, skip to "now"
 
 const SCAN_MEMORY_FILE = path.join(__dirname, '..', 'data', 'scan-memory.json');
@@ -319,11 +319,11 @@ function loadTemporalDetections() {
   return [];
 }
 
-const DAILY_STATS_PERSIST_INTERVAL = 10; // Persist to disk every N scans
+const DAILY_STATS_PERSIST_INTERVAL = 1; // Persist to disk every scan (crash-safe)
 const POLL_INTERVAL = 60_000;
 const POLL_MAX_BACKOFF = 960_000; // 16 minutes max backoff
 const SCAN_TIMEOUT_MS = 180_000; // 3 minutes per package
-const SCAN_CONCURRENCY = Math.max(1, parseInt(process.env.MUADDIB_SCAN_CONCURRENCY, 10) || 3);
+const SCAN_CONCURRENCY = Math.max(1, parseInt(process.env.MUADDIB_SCAN_CONCURRENCY, 10) || 5);
 
 // --- Popularity pre-filter ---
 const POPULAR_THRESHOLD = 50_000; // Weekly downloads to classify as "popular"
@@ -1675,7 +1675,7 @@ function updateScanStats(result) {
   else if (result === 'false_positive') data.stats.false_positive++;
   else if (result === 'confirmed') data.stats.confirmed_malicious++;
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getParisDateString();
   let dayEntry = data.daily.find(d => d.date === today);
   if (!dayEntry) {
     dayEntry = { date: today, scanned: 0, clean: 0, suspect: 0, false_positive: 0, confirmed: 0, fp_rate: 0 };
@@ -2222,8 +2222,9 @@ function isDailyReportDue() {
 }
 
 function buildDailyReportEmbed() {
-  // Use disk-based daily entries filtered by lastDailyReportDate for accurate delta
-  const { agg, top3: diskTop3 } = buildReportFromDisk();
+  // Use in-memory stats (accumulated since last reset, restored from disk on restart)
+  // instead of disk-based daily entries which can undercount due to UTC/Paris date mismatch
+  const { top3: diskTop3 } = buildReportFromDisk();
 
   // Prefer in-memory dailyAlerts for top suspects (richer data), fallback to disk
   const top3 = dailyAlerts.length > 0
@@ -2239,7 +2240,7 @@ function buildDailyReportEmbed() {
       }).join('\n')
     : 'None';
 
-  // Avg scan time from in-memory stats (not available on disk)
+  // Avg scan time from in-memory stats
   const avg = stats.scanned > 0 ? (stats.totalTimeMs / stats.scanned / 1000).toFixed(1) : '0.0';
 
   const now = new Date();
@@ -2250,9 +2251,9 @@ function buildDailyReportEmbed() {
       title: '\uD83D\uDCCA MUAD\'DIB Daily Report',
       color: 0x3498db,
       fields: [
-        { name: 'Packages Scanned', value: `${agg.scanned}`, inline: true },
-        { name: 'Clean', value: `${agg.clean}`, inline: true },
-        { name: 'Suspects', value: `${agg.suspect}`, inline: true },
+        { name: 'Packages Scanned', value: `${stats.scanned}`, inline: true },
+        { name: 'Clean', value: `${stats.clean}`, inline: true },
+        { name: 'Suspects', value: `${stats.suspect}`, inline: true },
         { name: 'Errors', value: formatErrorBreakdown(stats.errors, stats.errorsByType), inline: true },
         { name: 'Avg Scan Time', value: `${avg}s/pkg`, inline: true },
         { name: 'Top Suspects', value: top3Text, inline: false }
@@ -2282,11 +2283,10 @@ async function sendDailyReport() {
   const payload = buildDailyReportEmbed();
 
   // Persist locally with full raw metrics (independent of webhook — enables trend analysis)
-  const { agg } = buildReportFromDisk();
   persistDailyReport(payload, {
-    scanned: agg.scanned,
-    clean: agg.clean,
-    suspect: agg.suspect,
+    scanned: stats.scanned,
+    clean: stats.clean,
+    suspect: stats.suspect,
     errors: stats.errors,
     errorsByType: { ...stats.errorsByType },
     avgScanTimeMs: stats.scanned > 0 ? Math.round(stats.totalTimeMs / stats.scanned) : 0,
