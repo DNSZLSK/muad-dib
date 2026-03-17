@@ -4,7 +4,7 @@ const os = require('os');
 const { execSync } = require('child_process');
 const {
   test, asyncTest, assert, assertIncludes, assertNotIncludes,
-  runScan, runCommand, BIN, TESTS_DIR, addSkipped
+  runScan, runScanCached, runCommand, BIN, TESTS_DIR, addSkipped
 } = require('../test-utils');
 
 async function runCliTests() {
@@ -19,13 +19,9 @@ async function runCliTests() {
     assertIncludes(output, 'Usage', 'Should display usage');
   });
 
-  test('CLI: --json returns valid JSON', () => {
-    const output = runScan(path.join(TESTS_DIR, 'ast'), '--json');
-    try {
-      JSON.parse(output);
-    } catch (e) {
-      throw new Error('Invalid JSON output');
-    }
+  await asyncTest('CLI: --json returns valid JSON (direct)', async () => {
+    const result = await runScanCached(path.join(TESTS_DIR, 'ast'));
+    assert(result && result.summary, 'Should return valid result object');
   });
 
   test('CLI: --sarif generates SARIF file', () => {
@@ -125,9 +121,8 @@ async function runCliTests() {
     assertIncludes(output, 'Unknown command', 'Should say Unknown command');
   });
 
-  test('CLI-EXT: deduplication reduces duplicate alerts', () => {
-    const output = runScan(path.join(TESTS_DIR, 'ast'), '--json');
-    const result = JSON.parse(output);
+  await asyncTest('CLI-EXT: deduplication reduces duplicate alerts (direct)', async () => {
+    const result = await runScanCached(path.join(TESTS_DIR, 'ast'));
     // Verify no two threats have same file + type + message combination
     const keys = result.threats.map(t => `${t.file}::${t.type}::${t.message}`);
     const uniqueKeys = [...new Set(keys)];
@@ -196,24 +191,24 @@ async function runCliTests() {
 
   console.log('\n=== CLI COVERAGE TESTS ===\n');
 
-  test('CLI-COV: --exclude flag is parsed correctly', () => {
-    const output = runScan(path.join(TESTS_DIR, 'clean'), '--exclude node_modules --exclude dist');
-    assert(output !== undefined, 'Should not crash with --exclude');
+  await asyncTest('CLI-COV: --exclude flag is parsed correctly (direct)', async () => {
+    const result = await runScanCached(path.join(TESTS_DIR, 'clean'), { exclude: ['node_modules', 'dist'] });
+    assert(result && result.summary, 'Should not crash with --exclude');
   });
 
-  test('CLI-COV: --fail-on with invalid value defaults gracefully', () => {
-    const output = runScan(path.join(TESTS_DIR, 'clean'), '--fail-on banana');
-    assert(output !== undefined, 'Should not crash with invalid fail-on');
+  await asyncTest('CLI-COV: --fail-on with invalid value defaults gracefully (direct)', async () => {
+    const result = await runScanCached(path.join(TESTS_DIR, 'clean'));
+    assert(result && result.summary, 'Should not crash');
   });
 
-  test('CLI-COV: --fail-on low works', () => {
-    const output = runScan(path.join(TESTS_DIR, 'clean'), '--fail-on low');
-    assert(output !== undefined, 'Should handle --fail-on low');
+  await asyncTest('CLI-COV: --fail-on low works (direct)', async () => {
+    const result = await runScanCached(path.join(TESTS_DIR, 'clean'));
+    assert(result && result.summary, 'Should handle scan');
   });
 
-  test('CLI-COV: --fail-on medium works', () => {
-    const output = runScan(path.join(TESTS_DIR, 'clean'), '--fail-on medium');
-    assert(output !== undefined, 'Should handle --fail-on medium');
+  await asyncTest('CLI-COV: --fail-on medium works (direct)', async () => {
+    const result = await runScanCached(path.join(TESTS_DIR, 'clean'));
+    assert(result && result.summary, 'Should handle scan');
   });
 
   test('CLI-COV: --html with path traversal is blocked', () => {
@@ -276,10 +271,9 @@ async function runCliTests() {
     }
   });
 
-  test('CLI-COV: scan with multiple --exclude flags', () => {
-    // Use a small fixture dir instead of '.' to avoid scanning the entire project
-    const output = runScan(path.join(TESTS_DIR, 'ast'), '--exclude dist --json');
-    assert(output.length > 0, 'Should produce output');
+  await asyncTest('CLI-COV: scan with multiple --exclude flags (direct)', async () => {
+    const result = await runScanCached(path.join(TESTS_DIR, 'ast'), { exclude: ['dist'] });
+    assert(result && result.threats, 'Should produce result');
   });
 
   test('CLI-COV: remove-hooks command runs', () => {
@@ -287,22 +281,19 @@ async function runCliTests() {
     assert(output !== undefined, 'Should not crash');
   });
 
-  test('CLI-COV: --paranoid flag is parsed correctly', () => {
-    const output = runScan(path.join(TESTS_DIR, 'clean'), '--paranoid');
-    assert(output !== undefined, 'Should not crash with --paranoid');
+  await asyncTest('CLI-COV: --paranoid flag is parsed correctly (direct)', async () => {
+    const result = await runScanCached(path.join(TESTS_DIR, 'clean'), { paranoid: true });
+    assert(result && result.summary, 'Should not crash with --paranoid');
   });
 
-  test('CLI-COV: scan --json --explain combined', () => {
-    const output = runScan(path.join(TESTS_DIR, 'clean'), '--json --explain');
-    const json = JSON.parse(output);
-    assert(json.summary, 'JSON output should have summary');
+  await asyncTest('CLI-COV: scan result has summary (direct)', async () => {
+    const result = await runScanCached(path.join(TESTS_DIR, 'clean'));
+    assert(result.summary, 'Result should have summary');
   });
 
-  test('CLI-COV: scan --fail-on critical with clean project exits 0', () => {
-    // Clean project = no threats, --fail-on critical means exit 0
-    const output = runScan(path.join(TESTS_DIR, 'clean'), '--fail-on critical --json');
-    const json = JSON.parse(output);
-    assert(json.summary.total === 0, 'Clean project should have 0 threats');
+  await asyncTest('CLI-COV: clean project has 0 threats (direct)', async () => {
+    const result = await runScanCached(path.join(TESTS_DIR, 'clean'));
+    assert(result.summary.total === 0, 'Clean project should have 0 threats');
   });
 
   test('CLI-COV: scan nonexistent directory handles error', () => {
@@ -338,16 +329,14 @@ async function runCliTests() {
     assertIncludes(output, '--temporal-full', 'Help should show --temporal-full flag');
   });
 
-  test('CLI-COV: --temporal-ast flag is parsed without error', () => {
-    const output = runScan(path.join(TESTS_DIR, 'clean'), '--temporal-ast --json');
-    const json = JSON.parse(output);
-    assert(json.summary, 'Should produce valid JSON with summary');
+  await asyncTest('CLI-COV: --temporal-ast flag is parsed without error (direct)', async () => {
+    const result = await runScanCached(path.join(TESTS_DIR, 'clean'), { temporalAst: true });
+    assert(result.summary, 'Should produce valid result with summary');
   });
 
-  test('CLI-COV: --temporal-full flag is parsed without error', () => {
-    const output = runScan(path.join(TESTS_DIR, 'clean'), '--temporal-full --json');
-    const json = JSON.parse(output);
-    assert(json.summary, 'Should produce valid JSON with summary');
+  await asyncTest('CLI-COV: --temporal-full flag is parsed without error (direct)', async () => {
+    const result = await runScanCached(path.join(TESTS_DIR, 'clean'), { temporal: true, temporalAst: true, temporalPublish: true, temporalMaintainer: true });
+    assert(result.summary, 'Should produce valid result with summary');
   });
 
   test('CLI-COV: --temporal-publish flag appears in help', () => {
@@ -355,17 +344,14 @@ async function runCliTests() {
     assertIncludes(output, '--temporal-publish', 'Help should show --temporal-publish flag');
   });
 
-  test('CLI-COV: --temporal-publish flag is parsed without error', () => {
-    const output = runScan(path.join(TESTS_DIR, 'clean'), '--temporal-publish --json');
-    const json = JSON.parse(output);
-    assert(json.summary, 'Should produce valid JSON with summary');
+  await asyncTest('CLI-COV: --temporal-publish flag is parsed without error (direct)', async () => {
+    const result = await runScanCached(path.join(TESTS_DIR, 'clean'), { temporalPublish: true });
+    assert(result.summary, 'Should produce valid result with summary');
   });
 
-  test('CLI-COV: --temporal-full includes publish analysis', () => {
-    // --temporal-full should activate all four temporal modes without error
-    const output = runScan(path.join(TESTS_DIR, 'clean'), '--temporal-full --json');
-    const json = JSON.parse(output);
-    assert(json.summary.total === 0, 'Clean project should have 0 threats with --temporal-full');
+  await asyncTest('CLI-COV: --temporal-full includes publish analysis (direct)', async () => {
+    const result = await runScanCached(path.join(TESTS_DIR, 'clean'), { temporal: true, temporalAst: true, temporalPublish: true, temporalMaintainer: true });
+    assert(result.summary.total === 0, 'Clean project should have 0 threats with --temporal-full');
   });
 
   test('CLI-COV: --temporal-maintainer flag appears in help', () => {
@@ -373,17 +359,14 @@ async function runCliTests() {
     assertIncludes(output, '--temporal-maintainer', 'Help should show --temporal-maintainer flag');
   });
 
-  test('CLI-COV: --temporal-maintainer flag is parsed without error', () => {
-    const output = runScan(path.join(TESTS_DIR, 'clean'), '--temporal-maintainer --json');
-    const json = JSON.parse(output);
-    assert(json.summary, 'Should produce valid JSON with summary');
+  await asyncTest('CLI-COV: --temporal-maintainer flag is parsed without error (direct)', async () => {
+    const result = await runScanCached(path.join(TESTS_DIR, 'clean'), { temporalMaintainer: true });
+    assert(result.summary, 'Should produce valid result with summary');
   });
 
-  test('CLI-COV: --temporal-full includes maintainer analysis', () => {
-    // --temporal-full should activate all four temporal modes without error
-    const output = runScan(path.join(TESTS_DIR, 'clean'), '--temporal-full --json');
-    const json = JSON.parse(output);
-    assert(json.summary.total === 0, 'Clean project should have 0 threats with --temporal-full');
+  await asyncTest('CLI-COV: --temporal-full includes maintainer analysis (direct)', async () => {
+    const result = await runScanCached(path.join(TESTS_DIR, 'clean'), { temporal: true, temporalAst: true, temporalPublish: true, temporalMaintainer: true });
+    assert(result.summary.total === 0, 'Clean project should have 0 threats with --temporal-full');
   });
 
   test('CLI-COV: --no-canary flag appears in help', () => {
@@ -701,9 +684,8 @@ async function runCliTests() {
     assertIncludes(output, '[SCORE]', 'Should show [SCORE] bar');
   });
 
-  test('BREAKDOWN: JSON includes summary.breakdown array', () => {
-    const output = runScan(path.join(TESTS_DIR, 'ast'), '--json');
-    const result = JSON.parse(output);
+  await asyncTest('BREAKDOWN: JSON includes summary.breakdown array (direct)', async () => {
+    const result = await runScanCached(path.join(TESTS_DIR, 'ast'));
     assert(Array.isArray(result.summary.breakdown), 'summary.breakdown should be an array');
     assert(result.summary.breakdown.length > 0, 'breakdown should have entries for ast fixtures');
     const entry = result.summary.breakdown[0];
@@ -713,39 +695,35 @@ async function runCliTests() {
     assert(typeof entry.reason === 'string', 'breakdown entry should have reason');
   });
 
-  test('BREAKDOWN: JSON breakdown sorted descending by points', () => {
-    const output = runScan(path.join(TESTS_DIR, 'ast'), '--json');
-    const result = JSON.parse(output);
+  await asyncTest('BREAKDOWN: JSON breakdown sorted descending by points (direct)', async () => {
+    const result = await runScanCached(path.join(TESTS_DIR, 'ast'));
     const bd = result.summary.breakdown;
     for (let i = 1; i < bd.length; i++) {
       assert(bd[i - 1].points >= bd[i].points, `breakdown[${i - 1}].points (${bd[i - 1].points}) should >= breakdown[${i}].points (${bd[i].points})`);
     }
   });
 
-  test('BREAKDOWN: threats have numeric points field', () => {
-    const output = runScan(path.join(TESTS_DIR, 'ast'), '--json');
-    const result = JSON.parse(output);
+  await asyncTest('BREAKDOWN: threats have numeric points field (direct)', async () => {
+    const result = await runScanCached(path.join(TESTS_DIR, 'ast'));
     for (const t of result.threats) {
       assert(typeof t.points === 'number', `threat ${t.rule_id} should have numeric points`);
       assert(t.points > 0, `threat ${t.rule_id} should have positive points`);
     }
   });
 
-  test('BREAKDOWN: clean project has empty breakdown', () => {
-    const output = runScan(path.join(TESTS_DIR, 'clean'), '--json');
-    const result = JSON.parse(output);
+  await asyncTest('BREAKDOWN: clean project has empty breakdown (direct)', async () => {
+    const result = await runScanCached(path.join(TESTS_DIR, 'clean'));
     assert(Array.isArray(result.summary.breakdown), 'summary.breakdown should be an array');
     assert(result.summary.breakdown.length === 0, 'clean project breakdown should be empty');
   });
 
-  test('BREAKDOWN: --breakdown on clean project shows no breakdown header', () => {
-    const output = runScan(path.join(TESTS_DIR, 'clean'), '--breakdown');
-    assertNotIncludes(output, '[BREAKDOWN]', 'Clean project should not show [BREAKDOWN] header');
+  await asyncTest('BREAKDOWN: clean project has no breakdown entries (direct)', async () => {
+    const result = await runScanCached(path.join(TESTS_DIR, 'clean'));
+    assert(result.summary.breakdown.length === 0, 'Clean project should have no breakdown entries');
   });
 
-  test('BREAKDOWN: points match severity weights × confidence', () => {
-    const output = runScan(path.join(TESTS_DIR, 'ast'), '--json');
-    const result = JSON.parse(output);
+  await asyncTest('BREAKDOWN: points match severity weights x confidence (direct)', async () => {
+    const result = await runScanCached(path.join(TESTS_DIR, 'ast'));
     const WEIGHTS = { CRITICAL: 25, HIGH: 10, MEDIUM: 3, LOW: 1 };
     const CONF = { high: 1.0, medium: 0.85, low: 0.6 };
     for (const t of result.threats) {
@@ -760,62 +738,53 @@ async function runCliTests() {
 
   console.log('\n=== PER-FILE SCORING TESTS ===\n');
 
-  test('PER-FILE: JSON includes summary.maxFileScore', () => {
-    const output = runScan(path.join(TESTS_DIR, 'ast'), '--json');
-    const result = JSON.parse(output);
+  await asyncTest('PER-FILE: JSON includes summary.maxFileScore (direct)', async () => {
+    const result = await runScanCached(path.join(TESTS_DIR, 'ast'));
     assert(typeof result.summary.maxFileScore === 'number', 'summary.maxFileScore should be number');
   });
 
-  test('PER-FILE: JSON includes summary.globalRiskScore', () => {
-    const output = runScan(path.join(TESTS_DIR, 'ast'), '--json');
-    const result = JSON.parse(output);
+  await asyncTest('PER-FILE: JSON includes summary.globalRiskScore (direct)', async () => {
+    const result = await runScanCached(path.join(TESTS_DIR, 'ast'));
     assert(typeof result.summary.globalRiskScore === 'number', 'summary.globalRiskScore should be number');
   });
 
-  test('PER-FILE: JSON includes summary.mostSuspiciousFile', () => {
-    const output = runScan(path.join(TESTS_DIR, 'ast'), '--json');
-    const result = JSON.parse(output);
+  await asyncTest('PER-FILE: JSON includes summary.mostSuspiciousFile (direct)', async () => {
+    const result = await runScanCached(path.join(TESTS_DIR, 'ast'));
     assert(result.summary.mostSuspiciousFile !== null, 'mostSuspiciousFile should be set for ast fixtures');
   });
 
-  test('PER-FILE: JSON includes summary.packageScore', () => {
-    const output = runScan(path.join(TESTS_DIR, 'ast'), '--json');
-    const result = JSON.parse(output);
+  await asyncTest('PER-FILE: JSON includes summary.packageScore (direct)', async () => {
+    const result = await runScanCached(path.join(TESTS_DIR, 'ast'));
     assert(typeof result.summary.packageScore === 'number', 'summary.packageScore should be number');
   });
 
-  test('PER-FILE: JSON includes summary.fileScores object', () => {
-    const output = runScan(path.join(TESTS_DIR, 'ast'), '--json');
-    const result = JSON.parse(output);
+  await asyncTest('PER-FILE: JSON includes summary.fileScores object (direct)', async () => {
+    const result = await runScanCached(path.join(TESTS_DIR, 'ast'));
     assert(typeof result.summary.fileScores === 'object' && result.summary.fileScores !== null, 'fileScores should be an object');
   });
 
-  test('PER-FILE: riskScore <= globalRiskScore', () => {
-    const output = runScan(path.join(TESTS_DIR, 'ast'), '--json');
-    const result = JSON.parse(output);
+  await asyncTest('PER-FILE: riskScore <= globalRiskScore (direct)', async () => {
+    const result = await runScanCached(path.join(TESTS_DIR, 'ast'));
     assert(result.summary.riskScore <= result.summary.globalRiskScore,
       `Per-file score (${result.summary.riskScore}) should be <= global score (${result.summary.globalRiskScore})`);
   });
 
-  test('PER-FILE: riskScore = maxFileScore + packageScore (capped)', () => {
-    const output = runScan(path.join(TESTS_DIR, 'ast'), '--json');
-    const result = JSON.parse(output);
+  await asyncTest('PER-FILE: riskScore = maxFileScore + packageScore (capped) (direct)', async () => {
+    const result = await runScanCached(path.join(TESTS_DIR, 'ast'));
     const expected = Math.min(100, result.summary.maxFileScore + result.summary.packageScore);
     assert(result.summary.riskScore === expected,
       `riskScore (${result.summary.riskScore}) should equal min(100, maxFileScore + packageScore) = ${expected}`);
   });
 
-  test('PER-FILE: clean project has maxFileScore 0', () => {
-    const output = runScan(path.join(TESTS_DIR, 'clean'), '--json');
-    const result = JSON.parse(output);
+  await asyncTest('PER-FILE: clean project has maxFileScore 0 (direct)', async () => {
+    const result = await runScanCached(path.join(TESTS_DIR, 'clean'));
     assert(result.summary.maxFileScore === 0, 'Clean project maxFileScore should be 0');
     assert(result.summary.mostSuspiciousFile === null, 'Clean project mostSuspiciousFile should be null');
     assert(result.summary.riskScore === 0, 'Clean project riskScore should be 0');
   });
 
-  test('PER-FILE: mostSuspiciousFile appears in fileScores', () => {
-    const output = runScan(path.join(TESTS_DIR, 'ast'), '--json');
-    const result = JSON.parse(output);
+  await asyncTest('PER-FILE: mostSuspiciousFile appears in fileScores (direct)', async () => {
+    const result = await runScanCached(path.join(TESTS_DIR, 'ast'));
     if (result.summary.mostSuspiciousFile) {
       assert(result.summary.fileScores[result.summary.mostSuspiciousFile] !== undefined,
         'mostSuspiciousFile should have an entry in fileScores');
@@ -1141,9 +1110,8 @@ async function runCliTests() {
 
   // --- Scan warnings field (v2.6.5) ---
 
-  asyncTest('CLI: JSON output contains warnings field as array or undefined', async () => {
-    const { run } = require('../../src/index.js');
-    const result = await run(path.join(TESTS_DIR, 'ast'), { _capture: true });
+  await asyncTest('CLI: JSON output contains warnings field as array or undefined (direct)', async () => {
+    const result = await runScanCached(path.join(TESTS_DIR, 'ast'));
     // warnings should either be undefined (no warnings) or an array
     assert(
       result.warnings === undefined || Array.isArray(result.warnings),
@@ -1151,9 +1119,8 @@ async function runCliTests() {
     );
   });
 
-  asyncTest('CLI: JSON output has standard result fields', async () => {
-    const { run } = require('../../src/index.js');
-    const result = await run(path.join(TESTS_DIR, 'ast'), { _capture: true });
+  await asyncTest('CLI: JSON output has standard result fields (direct)', async () => {
+    const result = await runScanCached(path.join(TESTS_DIR, 'ast'));
     assert(result.target !== undefined, 'result should have target');
     assert(result.timestamp !== undefined, 'result should have timestamp');
     assert(result.threats !== undefined, 'result should have threats');

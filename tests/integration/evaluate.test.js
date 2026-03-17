@@ -165,6 +165,36 @@ async function runEvaluateTests() {
     assert(ci.upper > 0.99, `upper should be > 0.99, got ${ci.upper.toFixed(6)}`);
   });
 
+  // --- Scan result cache tests ---
+  const { computeSrcFingerprint, loadScanCache, saveScanCache } = require('../../src/commands/evaluate.js');
+
+  test('EVALUATE: computeSrcFingerprint returns stable string', () => {
+    const fp1 = computeSrcFingerprint();
+    const fp2 = computeSrcFingerprint();
+    assert(typeof fp1 === 'string', 'fingerprint should be a string');
+    assert(fp1.length > 0, 'fingerprint should not be empty');
+    assert(fp1 === fp2, 'fingerprint should be deterministic');
+  });
+
+  test('EVALUATE: loadScanCache returns 0 when no cache file', () => {
+    const count = loadScanCache();
+    // Either 0 (no cache) or a number (cached results exist) — both valid
+    assert(typeof count === 'number' || count === undefined, 'loadScanCache should return number or undefined');
+  });
+
+  await asyncTest('EVALUATE: silentScan uses cache on second call', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-eval-cache-'));
+    try {
+      fs.writeFileSync(path.join(tmpDir, 'package.json'), JSON.stringify({ name: 'cache-test', version: '1.0.0' }));
+      fs.writeFileSync(path.join(tmpDir, 'index.js'), 'module.exports = {};');
+      const result1 = await silentScan(tmpDir);
+      const result2 = await silentScan(tmpDir);
+      assert(result1.summary.riskScore === result2.summary.riskScore, 'Cached result should have same score');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
   // --- Benign holdout split tests ---
   test('EVALUATE: isBenignHoldout is deterministic', () => {
     const r1 = isBenignHoldout('express');

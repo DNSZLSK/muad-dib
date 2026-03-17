@@ -1,18 +1,18 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { test, asyncTest, assert, assertIncludes, assertNotIncludes, runScan, runScanDirect, cleanupTemp, TESTS_DIR } = require('../test-utils');
+const { test, asyncTest, assert, assertIncludes, assertNotIncludes, runScan, runScanDirect, runScanFast, cleanupTemp, TESTS_DIR } = require('../test-utils');
 
 async function runPackageTests() {
   console.log('\n=== PACKAGE.JSON TESTS ===\n');
 
-  test('PACKAGE: Detects suspicious preinstall', () => {
-    const output = runScan(path.join(TESTS_DIR, 'package'));
+  await asyncTest('PACKAGE: Detects suspicious preinstall (fast)', async () => {
+    const output = await runScanFast(path.join(TESTS_DIR, 'package'));
     assertIncludes(output, 'preinstall', 'Should detect preinstall');
   });
 
-  test('PACKAGE: Detects suspicious postinstall', () => {
-    const output = runScan(path.join(TESTS_DIR, 'package'));
+  await asyncTest('PACKAGE: Detects suspicious postinstall (fast)', async () => {
+    const output = await runScanFast(path.join(TESTS_DIR, 'package'));
     assertIncludes(output, 'postinstall', 'Should detect postinstall');
   });
 
@@ -223,13 +223,13 @@ async function runPackageTests() {
   // Marker tests (grouped under package scanner)
   console.log('\n=== MARKER TESTS ===\n');
 
-  test('MARKERS: Detects Shai-Hulud', () => {
-    const output = runScan(path.join(TESTS_DIR, 'markers'));
+  await asyncTest('MARKERS: Detects Shai-Hulud (fast)', async () => {
+    const output = await runScanFast(path.join(TESTS_DIR, 'markers'));
     assertIncludes(output, 'Shai-Hulud', 'Should detect Shai-Hulud marker');
   });
 
-  test('MARKERS: Detects The Second Coming', () => {
-    const output = runScan(path.join(TESTS_DIR, 'markers'));
+  await asyncTest('MARKERS: Detects The Second Coming (fast)', async () => {
+    const output = await runScanFast(path.join(TESTS_DIR, 'markers'));
     assertIncludes(output, 'Second Coming', 'Should detect The Second Coming marker');
   });
 }

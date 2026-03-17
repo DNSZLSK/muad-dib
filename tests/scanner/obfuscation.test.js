@@ -1,7 +1,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { test, asyncTest, assert, assertIncludes, runScan, runScanDirect, cleanupTemp, TESTS_DIR } = require('../test-utils');
+const { test, asyncTest, assert, assertIncludes, runScan, runScanDirect, runScanFast, cleanupTemp, TESTS_DIR } = require('../test-utils');
 
 function makeTempPkg(jsContent) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-obf-'));
@@ -13,13 +13,13 @@ function makeTempPkg(jsContent) {
 async function runObfuscationTests() {
   console.log('\n=== OBFUSCATION TESTS ===\n');
 
-  test('OBFUSCATION: Detects massive hex escapes', () => {
-    const output = runScan(path.join(TESTS_DIR, 'obfuscation'));
+  await asyncTest('OBFUSCATION: Detects massive hex escapes (fast)', async () => {
+    const output = await runScanFast(path.join(TESTS_DIR, 'obfuscation'));
     assertIncludes(output, 'obfusc', 'Should detect obfuscation');
   });
 
-  test('OBFUSCATION: Detects _0x variables', () => {
-    const output = runScan(path.join(TESTS_DIR, 'obfuscation'));
+  await asyncTest('OBFUSCATION: Detects _0x variables (fast)', async () => {
+    const output = await runScanFast(path.join(TESTS_DIR, 'obfuscation'));
     assertIncludes(output, 'obfusc', 'Should detect _0x variables');
   });
 
