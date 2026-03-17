@@ -2,7 +2,7 @@
   "name": "muaddib-vscode",
   "displayName": "MUAD'DIB Security Scanner",
   "description": "Detecte les attaques supply chain npm et PyPI directement dans VS Code",
-  "version": "2.8.0",
+  "version": "2.8.1",
   "publisher": "dnszlsk",
   "engines": {
     "vscode": "^1.85.0"

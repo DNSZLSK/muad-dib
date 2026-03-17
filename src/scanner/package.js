@@ -188,11 +188,15 @@ async function scanPackageJson(targetPath) {
     }
 
     if (malicious) {
+      // C1: Include triggering dependency metadata for diagnostic
       threats.push({
         type: 'known_malicious_package',
         severity: 'CRITICAL',
         message: `Malicious dependency declared: ${depName}@${depVersion} (source: ${malicious.source || 'IOC'})`,
-        file: 'package.json'
+        file: 'package.json',
+        matchedDep: depName,
+        matchedVersion: malicious.version,
+        iocSource: malicious.source || 'IOC'
       });
     }
   }

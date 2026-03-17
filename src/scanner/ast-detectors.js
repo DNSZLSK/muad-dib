@@ -2062,11 +2062,14 @@ function handlePostWalk(ctx) {
   // Wave 4: Download-execute-cleanup — https download + chmod executable + execSync + unlink
   // Exclude when all URLs in the file point to safe registries (npm, GitHub, nodejs.org)
   // B4: removed fetchOnlySafeDomains guard — compound requires fetch+chmod+exec, which is never legitimate
+  // C10: If file also contains hash/checksum verification, downgrade to HIGH — real droppers
+  // don't verify payload integrity; legitimate installers (esbuild, sharp) do.
   if (ctx.hasRemoteFetch && ctx.hasChmodExecutable && ctx.hasExecSyncCall) {
     ctx.threats.push({
       type: 'download_exec_binary',
-      severity: 'CRITICAL',
-      message: 'Download-execute pattern: remote fetch + chmod executable + execSync in same file. Binary dropper camouflaged as native addon build.',
+      severity: ctx.hasHashVerification ? 'HIGH' : 'CRITICAL',
+      message: 'Download-execute pattern: remote fetch + chmod executable + execSync in same file.' +
+        (ctx.hasHashVerification ? ' Hash verification detected — likely legitimate binary installer.' : ' Binary dropper camouflaged as native addon build.'),
       file: ctx.relFile
     });
   }
@@ -2082,22 +2085,41 @@ function handlePostWalk(ctx) {
     });
   }
 
-  // WASM payload detection: WebAssembly.compile/instantiate + readFileSync/https in same file
-  // WASM host import objects can contain callback functions that read credentials and exfiltrate.
-  // This pattern is never legitimate in npm packages — WASM should use pure computation, not host I/O.
+  // WASM payload detection: WebAssembly.compile/instantiate + network in same file
+  // C5+C6: Only emit CRITICAL wasm_host_sink if corroborating exfil signals exist
+  // (env_access, sensitive_string, credential reads). WASM + fetch alone is likely
+  // just WASM module loading via fetch() (standard pattern: fetch('mod.wasm').then(WebAssembly.instantiateStreaming))
   if (ctx.hasWasmLoad && ctx.hasNetworkCallInFile) {
-    ctx.threats.push({
-      type: 'wasm_host_sink',
-      severity: 'CRITICAL',
-      message: 'WebAssembly module with network-capable host imports. WASM can invoke host callbacks to exfiltrate data while hiding control flow.',
-      file: ctx.relFile
-    });
+    // C5/C6: Distinguish fetch-for-WASM-loading from independent network channels
+    // https.request, http.get, dns.resolve are NEVER used for WASM loading — they indicate
+    // an independent network channel (e.g., WASM host callbacks for C2 exfiltration)
+    const hasExfilSignal = ctx.threats.some(t =>
+      t.file === ctx.relFile && (
+        t.type === 'env_access' || t.type === 'sensitive_string' ||
+        t.type === 'suspicious_dataflow' || t.type === 'credential_regex_harvest'
+      )
+    );
+    if (ctx.hasNonFetchNetworkCall || hasExfilSignal) {
+      ctx.threats.push({
+        type: 'wasm_host_sink',
+        severity: 'CRITICAL',
+        message: 'WebAssembly module with network-capable host imports and credential/env access. WASM can invoke host callbacks to exfiltrate data while hiding control flow.',
+        file: ctx.relFile
+      });
+    } else {
+      // WASM + network but no credential/env signals → standalone MEDIUM (likely fetch for WASM loading)
+      ctx.threats.push({
+        type: 'wasm_standalone',
+        severity: 'MEDIUM',
+        message: 'WebAssembly module with network calls but no credential/env access signals. Likely WASM loading via fetch(). Verify .wasm file purpose.',
+        file: ctx.relFile
+      });
+    }
   }
 
   // WASM standalone: WebAssembly.compile/instantiate WITHOUT network sinks.
   // Legitimate: crypto, image processing, codecs. Still warrants investigation
   // because WASM hides control flow from static analysis.
-  // Compound WASM + network → wasm_host_sink (CRITICAL) takes priority (mutually exclusive).
   if (ctx.hasWasmLoad && !ctx.hasNetworkCallInFile) {
     ctx.threats.push({
       type: 'wasm_standalone',

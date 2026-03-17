@@ -111,6 +111,8 @@ function analyzeFile(content, filePath, basePath) {
     hasEnvEnumeration: false,  // Object.entries/keys/values(process.env)
     hasEnvHarvestPattern: /\b(KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL|NPM|AWS|SSH|WEBHOOK)\b/.test(content),
     hasNetworkCallInFile: /\b(fetch|https?\.request|https?\.get|dns\.resolve)\b/.test(content),
+    // C5: Non-fetch network calls indicate independent network channel (NOT WASM loading)
+    hasNonFetchNetworkCall: /\bhttps?\.request\b|\bhttps?\.get\b|\bdns\.resolve\b/.test(content),
     // Credential regex harvesting: regex literals or new RegExp() whose PATTERN contains credential keywords
     // Must check that the keyword is inside the regex, not just anywhere in the file
     hasCredentialRegex: hasCredentialInsideRegex(content),
@@ -154,7 +156,11 @@ function analyzeFile(content, filePath, basePath) {
     // WASM payload detection: WebAssembly.compile/instantiate with host import sinks
     hasWasmLoad: /\bWebAssembly\s*\.\s*(compile|instantiate|compileStreaming|instantiateStreaming)\b/.test(content),
     hasWasmHostSink: false,  // set in handleCallExpression when WASM import object contains network/fs sinks
-    hasProxyTrap: false  // set in handleNewExpression when Proxy has set/get/apply trap
+    hasProxyTrap: false,  // set in handleNewExpression when Proxy has set/get/apply trap
+    // C10: Hash verification — legitimate binary installers verify checksums
+    // Requires BOTH createHash() call AND .digest() call — false positives from
+    // standalone mentions of 'sha256' or 'integrity' in comments/descriptions
+    hasHashVerification: /\bcreateHash\s*\(/.test(content) && /\.digest\s*\(/.test(content)
   };
 
   // Compute fetchOnlySafeDomains: check if ALL URLs in file point to known registries

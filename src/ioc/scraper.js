@@ -462,7 +462,11 @@ function extractVersions(affected) {
     }
   }
 
-  return versions.size > 0 ? [...versions] : ['*'];
+  if (versions.size === 0) {
+    console.log('[SCRAPER]   WARN: No version info found, skipping wildcard fallback');
+    return [];
+  }
+  return [...versions];
 }
 
 /**
@@ -519,7 +523,8 @@ async function scrapeShaiHuludDetector() {
       // Extract packages — one IOC per version for correct matching
       const pkgList = data.packages || [];
       for (const pkg of pkgList) {
-        const versions = pkg.affectedVersions || ['*'];
+        const versions = pkg.affectedVersions || [];
+        if (versions.length === 0) continue; // Skip packages with no version info — avoids false wildcard
         for (const ver of versions) {
           packages.push({
             id: `SHAI-HULUD-${pkg.name}-${ver}`,
@@ -588,10 +593,11 @@ async function scrapeDatadogIOCs() {
             ? versionsStr.split(',').map(v => v.trim()).filter(Boolean)
             : [versionsStr];
           for (const ver of versionList) {
+            if (!ver || ver === '*') continue; // Skip wildcard fallbacks — avoids false positive cascade
             packages.push({
               id: `DATADOG-${name}`,
               name: name,
-              version: ver || '*',
+              version: ver,
               severity: 'critical',
               confidence: 'high',
               source: 'datadog-consolidated',
@@ -967,10 +973,11 @@ async function scrapeStaticIOCs() {
   
   // Socket.dev reports
   for (const pkg of staticIOCs.socket || []) {
+    if (!pkg.version) continue; // Skip entries without version — avoids wildcard cascade
     packages.push({
       id: `SOCKET-${pkg.name}`,
       name: pkg.name,
-      version: pkg.version || '*',
+      version: pkg.version,
       severity: pkg.severity || 'critical',
       confidence: 'high',
       source: 'socket-dev',
@@ -983,10 +990,11 @@ async function scrapeStaticIOCs() {
   
   // Phylum Research
   for (const pkg of staticIOCs.phylum || []) {
+    if (!pkg.version) continue; // Skip entries without version — avoids wildcard cascade
     packages.push({
       id: `PHYLUM-${pkg.name}`,
       name: pkg.name,
-      version: pkg.version || '*',
+      version: pkg.version,
       severity: pkg.severity || 'critical',
       confidence: 'high',
       source: 'phylum',
@@ -999,10 +1007,11 @@ async function scrapeStaticIOCs() {
   
   // npm removed packages
   for (const pkg of staticIOCs.npmRemoved || []) {
+    if (!pkg.version) continue; // Skip entries without version — avoids wildcard cascade
     packages.push({
       id: `NPM-REMOVED-${pkg.name}`,
       name: pkg.name,
-      version: pkg.version || '*',
+      version: pkg.version,
       severity: 'critical',
       confidence: 'high',
       source: 'npm-removed',

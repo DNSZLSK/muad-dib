@@ -89,11 +89,10 @@ async function runScraperTests() {
     assert(result.includes('2.0.0'), 'Should include 2.0.0');
   });
 
-  test('SCRAPER: extractVersions returns * for empty affected', () => {
+  test('SCRAPER: extractVersions returns empty for empty affected (C2: no wildcard fallback)', () => {
     const affected = {};
     const result = extractVersions(affected);
-    assert(result.length === 1, 'Should have 1 entry');
-    assert(result[0] === '*', 'Should be wildcard');
+    assert(result.length === 0, 'Should return empty array — C2 prevents wildcard cascade');
   });
 
   test('SCRAPER: extractVersions extracts from ranges events', () => {
@@ -109,14 +108,14 @@ async function runScraperTests() {
     assert(result.includes('1.0.0'), 'Should include introduced version 1.0.0');
   });
 
-  test('SCRAPER: extractVersions skips introduced=0', () => {
+  test('SCRAPER: extractVersions skips introduced=0 (C2: returns empty, no wildcard)', () => {
     const affected = {
       ranges: [{
         events: [{ introduced: '0' }]
       }]
     };
     const result = extractVersions(affected);
-    assert(result.length === 1 && result[0] === '*', 'Should return wildcard for introduced=0');
+    assert(result.length === 0, 'Should return empty — C2 prevents wildcard fallback for introduced=0');
   });
 
   test('SCRAPER: extractVersions deduplicates versions', () => {
@@ -384,7 +383,7 @@ async function runScraperTests() {
     }
   });
 
-  await asyncTest('SCRAPER: scrapeShaiHuludDetector handles packages without affectedVersions', async () => {
+  await asyncTest('SCRAPER: scrapeShaiHuludDetector skips packages without affectedVersions (C2)', async () => {
     const origRequest = https.request;
     const origLog = console.log;
     console.log = () => {};
@@ -412,8 +411,7 @@ async function runScraperTests() {
 
     try {
       const result = await scrapeShaiHuludDetector();
-      assert(result.packages.length === 1, 'Should have 1 wildcard entry');
-      assert(result.packages[0].version === '*', 'Should default to wildcard version');
+      assert(result.packages.length === 0, 'Should have 0 entries — C2 skips packages without version info');
     } finally {
       https.request = origRequest;
       console.log = origLog;
@@ -547,7 +545,8 @@ async function runScraperTests() {
     console.log = () => {};
 
     let callCount = 0;
-    const consolidatedCSV = 'package_name,versions,vendors\nevil-dd-pkg,1.0.0,datadog\nevil-dd-pkg2,*,"datadog,socket"\n';
+    // C2: wildcard versions ('*') are now skipped — use specific versions only
+    const consolidatedCSV = 'package_name,versions,vendors\nevil-dd-pkg,1.0.0,datadog\nevil-dd-pkg2,2.3.4,"datadog,socket"\n';
     const directCSV = 'package_name,version\nevil-dd-pkg,1.0.0\nevil-dd-new,2.0.0\n';
 
     https.request = (options, callback) => {
@@ -799,7 +798,7 @@ async function runScraperTests() {
     }
   });
 
-  await asyncTest('SCRAPER: scrapeDatadogIOCs handles wildcard in consolidated', async () => {
+  await asyncTest('SCRAPER: scrapeDatadogIOCs skips wildcard in consolidated (C2)', async () => {
     const origRequest = https.request;
     const origLog = console.log;
     console.log = () => {};
@@ -828,8 +827,7 @@ async function runScraperTests() {
     try {
       const result = await scrapeDatadogIOCs();
       const pkgs = result.packages.filter(p => p.name === 'wildcard-pkg');
-      assert(pkgs.length === 1, 'Wildcard should produce 1 entry, got ' + pkgs.length);
-      assert(pkgs[0].version === '*', 'Version should be *, got ' + pkgs[0].version);
+      assert(pkgs.length === 0, 'C2: wildcard entries should be skipped, got ' + pkgs.length);
     } finally {
       https.request = origRequest;
       console.log = origLog;
@@ -2199,7 +2197,8 @@ async function runScraperTests() {
                 {
                   id: 'GHSA-malware-test-001',
                   summary: 'Malicious package - credential stealer',
-                  affected: [{ package: { ecosystem: 'npm', name: 'ghsa-malware-pkg' } }]
+                  affected: [{ package: { ecosystem: 'npm', name: 'ghsa-malware-pkg' },
+                    versions: ['1.0.0'] }]
                 },
                 {
                   id: 'GHSA-normal-vuln-002',
@@ -2220,7 +2219,8 @@ async function runScraperTests() {
                 {
                   id: 'GHSA-trojan-004',
                   summary: 'This is a trojan package',
-                  affected: [{ package: { ecosystem: 'npm', name: 'ghsa-trojan-pkg' } }]
+                  affected: [{ package: { ecosystem: 'npm', name: 'ghsa-trojan-pkg' },
+                    versions: ['3.0.0'] }]
                 }
               ]
             })));
@@ -2301,10 +2301,10 @@ async function runScraperTests() {
         assert(bdVersions[0] === '1.2.3', 'First backdoor version should be 1.2.3, got ' + bdVersions[0]);
         assert(bdVersions[1] === '1.2.4', 'Second backdoor version should be 1.2.4, got ' + bdVersions[1]);
 
-        // GHSA entries without versions should fall back to wildcard
+        // GHSA entries with explicit versions should produce versioned entries (C2: no wildcard fallback)
         const malwarePkg = ghsaPkgs.filter(p => p.name === 'ghsa-malware-pkg');
-        assert(malwarePkg.length === 1, 'Malware pkg without versions should produce 1 entry');
-        assert(malwarePkg[0].version === '*', 'Malware pkg without versions should be wildcard, got ' + malwarePkg[0].version);
+        assert(malwarePkg.length === 1, 'Malware pkg with 1 version should produce 1 entry');
+        assert(malwarePkg[0].version === '1.0.0', 'Malware pkg version should be 1.0.0, got ' + malwarePkg[0].version);
       }
     } finally {
       https.request = origRequest;
@@ -2773,14 +2773,14 @@ async function runScraperTests() {
     // Mock static-iocs.json with known entries for all three categories
     const staticIocData = {
       socket: [
-        { name: 'socket-test-pkg', severity: 'critical', description: 'Socket test' },
+        { name: 'socket-test-pkg', version: '1.0.0', severity: 'critical', description: 'Socket test' },
         { name: 'socket-test-pkg2', version: '2.0.0', severity: 'high' }
       ],
       phylum: [
-        { name: 'phylum-test-pkg', description: 'Phylum test' }
+        { name: 'phylum-test-pkg', version: '1.0.0', description: 'Phylum test' }
       ],
       npmRemoved: [
-        { name: 'npm-removed-test', reason: 'malware detected' }
+        { name: 'npm-removed-test', version: '1.0.0', reason: 'malware detected' }
       ]
     };
 
@@ -2820,7 +2820,7 @@ async function runScraperTests() {
         assert(socketPkgs.length >= 2, 'Should have at least 2 socket entries, got ' + socketPkgs.length);
         const socketTest = socketPkgs.find(p => p.name === 'socket-test-pkg');
         assert(socketTest, 'Should have socket-test-pkg');
-        assert(socketTest.version === '*', 'Socket pkg without version should default to *');
+        assert(socketTest.version === '1.0.0', 'Socket pkg version should be 1.0.0');
         assert(socketTest.id === 'SOCKET-socket-test-pkg', 'Socket ID format');
         assert(socketTest.references[0].includes('socket.dev'), 'Socket reference URL');
 
