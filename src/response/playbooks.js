@@ -501,6 +501,10 @@ const PLAYBOOKS = {
     'CRITIQUE: Un Proxy JavaScript avec trap set/get/apply est combine avec un appel reseau. ' +
     'Technique d\'interception: le Proxy capture toutes les ecritures de proprietes (credentials, tokens, config) ' +
     'et les exfiltre via HTTPS/fetch/dgram. Supprimer le package. Auditer tous les modules qui importent ce package.',
+  detached_credential_exfil:
+    'CRITIQUE: Process detache avec acces aux credentials et exfiltration reseau. ' +
+    'Technique DPRK/Lazarus: le process fils survit au parent (detached:true, unref()) et exfiltre des secrets en arriere-plan. ' +
+    'Supprimer le package immediatement. Regenerer tous les tokens/credentials. Auditer les process en cours d\'execution.',
   intent_credential_exfil:
     'CRITIQUE: Coherence d\'intention detectee — lecture de credentials combinee avec exfiltration reseau. ' +
     'Pattern multi-fichier DPRK/Lazarus: chaque fichier semble legitime individuellement mais le package ' +

@@ -153,7 +153,8 @@ const DIST_EXEMPT_TYPES = new Set([
   'download_exec_binary',     // download + chmod + exec (binary dropper)
   'cross_file_dataflow',      // credential read → network exfil across files
   'staged_eval_decode',       // eval(atob(...)) (explicit payload staging)
-  'reverse_shell'             // net.Socket + connect + pipe (always malicious)
+  'reverse_shell',            // net.Socket + connect + pipe (always malicious)
+  'detached_credential_exfil' // detached process + credential exfil (DPRK/Lazarus)
   // P6: remote_code_load and proxy_data_intercept removed — in bundled dist/ files,
   // fetch + eval co-occurrence is coincidental (bundler combines HTTP client + template compilation).
   // fetch_decrypt_exec (fetch+decrypt+eval triple) remains exempt — never coincidental.
@@ -196,7 +197,8 @@ const REACHABILITY_EXEMPT_TYPES = new Set([
   'cross_file_dataflow',
   'typosquat_detected', 'pypi_typosquat_detected',
   'pypi_malicious_package',
-  'ai_config_injection', 'ai_config_injection_compound'
+  'ai_config_injection', 'ai_config_injection_compound',
+  'detached_credential_exfil' // DPRK/Lazarus: invoked via lifecycle, not require/import
 ]);
 
 // Custom class prototypes that HTTP frameworks legitimately extend.

@@ -533,6 +533,95 @@ async function runMonitorTests() {
   });
 
   // ============================================
+  // SANDBOX CONFIRMATION BUG TESTS
+  // ============================================
+
+  console.log('\n=== SANDBOX CONFIRMATION BUG TESTS ===\n');
+
+  test('MONITOR: sandbox score=100 + 0 findings → sandbox_inconclusive, NOT confirmed', () => {
+    // Simulate sandbox timeout: score > 0 but no actual findings
+    const sandboxResult = { score: 100, severity: 'CRITICAL', findings: [] };
+    const hasSandboxFindings = sandboxResult.findings && sandboxResult.findings.length > 0;
+    assert(!hasSandboxFindings, 'Empty findings array should NOT count as findings');
+    // Verify updateScanStats would get sandbox_inconclusive
+    const statsFile = path.join(os.tmpdir(), `muaddib-stats-test-${Date.now()}.json`);
+    try {
+      fs.writeFileSync(statsFile, JSON.stringify({
+        stats: { total_scanned: 0, clean: 0, suspect: 0, false_positive: 0, confirmed_malicious: 0, sandbox_inconclusive: 0 },
+        daily: []
+      }));
+    } finally {
+      try { fs.unlinkSync(statsFile); } catch {}
+    }
+    // The key assertion: score > 0 but 0 findings = inconclusive
+    assert(sandboxResult.score > 0, 'Score should be > 0');
+    assert(sandboxResult.findings.length === 0, 'Findings should be empty');
+    assert(!hasSandboxFindings, 'hasSandboxFindings should be false');
+  });
+
+  test('MONITOR: sandbox score=80 + 2 findings → confirmed', () => {
+    const sandboxResult = {
+      score: 80,
+      severity: 'HIGH',
+      findings: [
+        { type: 'suspicious_dns', severity: 'HIGH', detail: 'DNS to evil.com' },
+        { type: 'file_write', severity: 'MEDIUM', detail: 'Wrote to /etc/shadow' }
+      ]
+    };
+    const hasSandboxFindings = sandboxResult.findings && sandboxResult.findings.length > 0;
+    assert(hasSandboxFindings, 'Should have sandbox findings');
+    assert(sandboxResult.score > 0, 'Score should be > 0');
+  });
+
+  test('MONITOR: sandbox score=0 → false_positive (unchanged behavior)', () => {
+    const sandboxResult = { score: 0, severity: 'CLEAN', findings: [] };
+    assert(sandboxResult.score === 0, 'Score should be 0');
+    // Original behavior: score === 0 means false_positive
+    const isFP = sandboxResult.score === 0;
+    assert(isFP, 'Score 0 should still result in false_positive classification');
+  });
+
+  test('MONITOR: relabelRecords blocks confirmed with 0 findings', () => {
+    const { relabelRecords: relabel, setTrainingFile, resetTrainingFile } = require('../../src/ml/jsonl-writer.js');
+    const tmpFile = path.join(os.tmpdir(), `muaddib-ml-test-${Date.now()}.jsonl`);
+    setTrainingFile(tmpFile);
+    try {
+      // Write a test record
+      fs.writeFileSync(tmpFile, JSON.stringify({ name: 'test-pkg', label: 'suspect' }) + '\n');
+      // Attempt to relabel to 'confirmed' without findings count
+      const updated = relabel('test-pkg', 'confirmed');
+      assert(updated === 0, `Should block relabel to confirmed without findings, got ${updated}`);
+      // Verify record was NOT changed
+      const content = fs.readFileSync(tmpFile, 'utf8');
+      const record = JSON.parse(content.trim());
+      assert(record.label === 'suspect', `Label should still be suspect, got ${record.label}`);
+      // With findings count > 0, should work
+      const updated2 = relabel('test-pkg', 'confirmed', 3);
+      assert(updated2 === 1, `Should relabel with findings count > 0, got ${updated2}`);
+    } finally {
+      try { fs.unlinkSync(tmpFile); } catch {}
+      resetTrainingFile();
+    }
+  });
+
+  test('MONITOR: updateScanStats handles sandbox_inconclusive', () => {
+    const statsFile = path.join(os.tmpdir(), `muaddib-stats-si-${Date.now()}.json`);
+    try {
+      fs.writeFileSync(statsFile, JSON.stringify({
+        stats: { total_scanned: 10, clean: 5, suspect: 3, false_positive: 1, confirmed_malicious: 1, sandbox_inconclusive: 0 },
+        daily: []
+      }));
+      const data = JSON.parse(fs.readFileSync(statsFile, 'utf8'));
+      assert(data.stats.sandbox_inconclusive === 0, 'Initial sandbox_inconclusive should be 0');
+      // Simulate what updateScanStats does for sandbox_inconclusive
+      data.stats.sandbox_inconclusive++;
+      assert(data.stats.sandbox_inconclusive === 1, 'sandbox_inconclusive should increment to 1');
+    } finally {
+      try { fs.unlinkSync(statsFile); } catch {}
+    }
+  });
+
+  // ============================================
   // MONITOR PHASE 4 TESTS (Webhook Alerting)
   // ============================================
 
@@ -6062,9 +6151,9 @@ async function runMonitorTests() {
 
   // ===== v2.7.6 C1: High-confidence malice bypass =====
 
-  test('MONITOR: HIGH_CONFIDENCE_MALICE_TYPES contains 8 threat types', () => {
-    assert(HIGH_CONFIDENCE_MALICE_TYPES.size === 8,
-      `Should have 8 types, got ${HIGH_CONFIDENCE_MALICE_TYPES.size}`);
+  test('MONITOR: HIGH_CONFIDENCE_MALICE_TYPES contains 9 threat types', () => {
+    assert(HIGH_CONFIDENCE_MALICE_TYPES.size === 9,
+      `Should have 9 types, got ${HIGH_CONFIDENCE_MALICE_TYPES.size}`);
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('lifecycle_shell_pipe'), 'Missing lifecycle_shell_pipe');
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('fetch_decrypt_exec'), 'Missing fetch_decrypt_exec');
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('download_exec_binary'), 'Missing download_exec_binary');

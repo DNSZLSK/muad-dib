@@ -263,7 +263,7 @@ function runMLFeatureExtractorTests() {
   });
 
   test('JSONL writer: relabelRecords updates matching records', () => {
-    const updated = relabelRecords('test-pkg', 'confirmed');
+    const updated = relabelRecords('test-pkg', 'confirmed', 2);
     assert(updated === 1, `Should have updated 1 record, got ${updated}`);
 
     const records = readRecords();

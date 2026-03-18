@@ -567,6 +567,33 @@ async function run(targetPath, options = {}) {
     }
   } catch { /* graceful fallback */ }
 
+  // Cross-scanner compound: detached_process + suspicious_dataflow in same file
+  // Catches cases where credential flow is detected by dataflow scanner, not AST scanner
+  {
+    const fileMap = Object.create(null);
+    for (const t of deduped) {
+      if (t.file) {
+        if (!fileMap[t.file]) fileMap[t.file] = [];
+        fileMap[t.file].push(t);
+      }
+    }
+    for (const file of Object.keys(fileMap)) {
+      const fileThreats = fileMap[file];
+      const hasDetached = fileThreats.some(t => t.type === 'detached_process');
+      const hasCredFlow = fileThreats.some(t => t.type === 'suspicious_dataflow');
+      const alreadyCompound = fileThreats.some(t => t.type === 'detached_credential_exfil');
+      if (hasDetached && hasCredFlow && !alreadyCompound) {
+        deduped.push({
+          type: 'detached_credential_exfil',
+          severity: 'CRITICAL',
+          message: 'Detached process + credential dataflow — background exfiltration (cross-scanner compound).',
+          file,
+          count: 1
+        });
+      }
+    }
+  }
+
   // FP reduction: legitimate frameworks produce high volumes of certain threat types.
   // A malware package typically has 1-3 occurrences, not dozens.
   applyFPReductions(deduped, reachableFiles, packageName, packageDeps);

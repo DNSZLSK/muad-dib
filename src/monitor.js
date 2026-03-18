@@ -490,7 +490,8 @@ const HIGH_CONFIDENCE_MALICE_TYPES = new Set([
   'intent_command_exfil',                  // intra-file command→network
   'cross_file_dataflow',                   // proven taint cross-modules
   'canary_exfiltration',                   // canary sandbox exfiltrated
-  'sandbox_network_after_sensitive_read'   // compound sandbox detection
+  'sandbox_network_after_sensitive_read',  // compound sandbox detection
+  'detached_credential_exfil'             // detached process + credential exfil (DPRK/Lazarus)
 ]);
 
 function hasHighConfidenceThreat(result) {
@@ -1662,25 +1663,28 @@ function loadScanStats() {
     const raw = fs.readFileSync(SCAN_STATS_FILE, 'utf8');
     const data = JSON.parse(raw);
     if (data && data.stats && Array.isArray(data.daily)) return data;
-    return { stats: { total_scanned: 0, clean: 0, suspect: 0, false_positive: 0, confirmed_malicious: 0 }, daily: [] };
+    return { stats: { total_scanned: 0, clean: 0, suspect: 0, false_positive: 0, confirmed_malicious: 0, sandbox_inconclusive: 0 }, daily: [] };
   } catch {
-    return { stats: { total_scanned: 0, clean: 0, suspect: 0, false_positive: 0, confirmed_malicious: 0 }, daily: [] };
+    return { stats: { total_scanned: 0, clean: 0, suspect: 0, false_positive: 0, confirmed_malicious: 0, sandbox_inconclusive: 0 }, daily: [] };
   }
 }
 
 function updateScanStats(result) {
   const data = loadScanStats();
   data.stats.total_scanned++;
+  // Ensure sandbox_inconclusive field exists (backward compat with old stats files)
+  if (data.stats.sandbox_inconclusive === undefined) data.stats.sandbox_inconclusive = 0;
 
   if (result === 'clean') data.stats.clean++;
   else if (result === 'suspect') data.stats.suspect++;
   else if (result === 'false_positive') data.stats.false_positive++;
   else if (result === 'confirmed') data.stats.confirmed_malicious++;
+  else if (result === 'sandbox_inconclusive') data.stats.sandbox_inconclusive++;
 
   const today = getParisDateString();
   let dayEntry = data.daily.find(d => d.date === today);
   if (!dayEntry) {
-    dayEntry = { date: today, scanned: 0, clean: 0, suspect: 0, false_positive: 0, confirmed: 0, fp_rate: 0 };
+    dayEntry = { date: today, scanned: 0, clean: 0, suspect: 0, false_positive: 0, confirmed: 0, sandbox_inconclusive: 0, fp_rate: 0 };
     data.daily.push(dayEntry);
   }
   dayEntry.scanned++;
@@ -1689,6 +1693,7 @@ function updateScanStats(result) {
   else if (result === 'suspect') dayEntry.suspect++;
   else if (result === 'false_positive') dayEntry.false_positive++;
   else if (result === 'confirmed') dayEntry.confirmed++;
+  else if (result === 'sandbox_inconclusive') { dayEntry.sandbox_inconclusive = (dayEntry.sandbox_inconclusive || 0) + 1; }
 
   const denom = dayEntry.false_positive + dayEntry.confirmed;
   dayEntry.fp_rate = denom > 0 ? dayEntry.false_positive / denom : 0;
@@ -3094,8 +3099,15 @@ async function resolveTarballAndScan(item) {
         updateScanStats('false_positive');
         relabelRecords(item.name, 'fp');
       } else if (sandboxResult && sandboxResult.score > 0) {
-        updateScanStats('confirmed');
-        relabelRecords(item.name, 'confirmed');
+        const hasSandboxFindings = sandboxResult.findings && sandboxResult.findings.length > 0;
+        if (hasSandboxFindings) {
+          updateScanStats('confirmed');
+          relabelRecords(item.name, 'confirmed', sandboxResult.findings.length);
+        } else {
+          // Sandbox score > 0 but no detailed findings = timeout/install error
+          updateScanStats('sandbox_inconclusive');
+          console.log(`[MONITOR] SANDBOX INCONCLUSIVE: ${item.name} score=${sandboxResult.score} but 0 findings — probable timeout or install error`);
+        }
       } else {
         updateScanStats('suspect');
       }
