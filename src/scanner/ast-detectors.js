@@ -2187,6 +2187,24 @@ function handlePostWalk(ctx) {
       file: ctx.relFile
     });
   }
+
+  // DPRK/Lazarus compound: detached background process + credential env access + network
+  // Pattern: spawn({detached:true}) reads secrets then exfils via network.
+  // This combination is never legitimate — daemons don't read API keys and send them out.
+  const hasDetachedInFile = ctx.threats.some(t =>
+    t.file === ctx.relFile && t.type === 'detached_process'
+  );
+  const hasSensitiveEnvInFile = ctx.threats.some(t =>
+    t.file === ctx.relFile && t.type === 'env_access'
+  );
+  if (hasDetachedInFile && hasSensitiveEnvInFile && ctx.hasNetworkCallInFile) {
+    ctx.threats.push({
+      type: 'detached_credential_exfil',
+      severity: 'CRITICAL',
+      message: 'Detached process + sensitive env access + network call — credential exfiltration via background process (DPRK/Lazarus evasion pattern).',
+      file: ctx.relFile
+    });
+  }
 }
 
 function handleWithStatement(node, ctx) {

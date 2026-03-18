@@ -134,9 +134,15 @@ function getStats() {
  *
  * @param {string} packageName - package name to relabel
  * @param {string} newLabel - 'fp' or 'confirmed'
+ * @param {number} [sandboxFindingCount] - number of sandbox findings (defense-in-depth for 'confirmed')
  * @returns {number} number of records updated
  */
-function relabelRecords(packageName, newLabel) {
+function relabelRecords(packageName, newLabel, sandboxFindingCount) {
+  // Defense-in-depth: never write 'confirmed' without real sandbox findings
+  if (newLabel === 'confirmed' && (!sandboxFindingCount || sandboxFindingCount === 0)) {
+    console.warn(`[ML] BLOCKED relabel to 'confirmed' for ${packageName}: sandbox_finding_count=${sandboxFindingCount || 0}`);
+    return 0;
+  }
   try {
     if (!fs.existsSync(TRAINING_FILE)) return 0;
     const content = fs.readFileSync(TRAINING_FILE, 'utf8');
