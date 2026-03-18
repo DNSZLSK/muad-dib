@@ -1378,6 +1378,106 @@ const RULES = {
     ],
     mitre: 'T1557'
   },
+  // Package manifest detections (v2.8.9)
+  bin_field_hijack: {
+    id: 'MUADDIB-PKG-013',
+    name: 'Bin Field PATH Hijack',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Le champ "bin" de package.json shadow une commande systeme (node, npm, git, bash, etc.). A l\'install, npm cree un symlink dans node_modules/.bin/ qui intercepte la commande reelle pour tous les npm scripts.',
+    references: [
+      'https://socket.dev/blog/2025-supply-chain-report',
+      'https://www.wiz.io/blog/shai-hulud-npm-supply-chain-attack'
+    ],
+    mitre: 'T1574.007'
+  },
+  git_dependency_rce: {
+    id: 'MUADDIB-PKG-014',
+    name: 'Git Dependency RCE (PackageGate)',
+    severity: 'HIGH',
+    confidence: 'medium',
+    description: 'Dependance utilisant une URL git+ ou git://. Vecteur PackageGate: un .npmrc malveillant peut overrider le binaire git, permettant l\'execution de code meme avec --ignore-scripts.',
+    references: [
+      'https://socket.dev/blog/packagegate-npm-rce',
+      'https://attack.mitre.org/techniques/T1195/002/'
+    ],
+    mitre: 'T1195.002'
+  },
+  npmrc_git_override: {
+    id: 'MUADDIB-PKG-015',
+    name: '.npmrc Git Binary Override',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Fichier .npmrc contient git= override — technique PackageGate: remplace le binaire git par un script controle par l\'attaquant.',
+    references: [
+      'https://socket.dev/blog/packagegate-npm-rce'
+    ],
+    mitre: 'T1195.002'
+  },
+
+  // AST detections (v2.8.9 — supply-chain gaps)
+  node_modules_write: {
+    id: 'MUADDIB-AST-048',
+    name: 'Write to node_modules/ (Worm Propagation)',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'writeFileSync/writeFile/appendFileSync ciblant node_modules/ — technique de propagation worm Shai-Hulud 2.0: modifie d\'autres packages installes pour injecter un backdoor persistent.',
+    references: [
+      'https://www.wiz.io/blog/shai-hulud-npm-supply-chain-attack',
+      'https://attack.mitre.org/techniques/T1195/002/'
+    ],
+    mitre: 'T1195.002'
+  },
+  bun_runtime_evasion: {
+    id: 'MUADDIB-AST-049',
+    name: 'Bun Runtime Evasion',
+    severity: 'HIGH',
+    confidence: 'medium',
+    description: 'Invocation du runtime Bun (bun run/exec/install) via exec/spawn — technique Shai-Hulud 2.0: utilise un runtime alternatif pour echapper aux sandboxes et monitoring Node.js.',
+    references: [
+      'https://www.wiz.io/blog/shai-hulud-npm-supply-chain-attack',
+      'https://attack.mitre.org/techniques/T1059/'
+    ],
+    mitre: 'T1059'
+  },
+  static_timer_bomb: {
+    id: 'MUADDIB-AST-050',
+    name: 'Static Timer Bomb',
+    severity: 'MEDIUM',
+    confidence: 'medium',
+    description: 'setTimeout/setInterval avec delai > 1h detecte statiquement. PhantomRaven active le 2nd stage 48h+ apres install. Evasion temporelle: le payload s\'active bien apres l\'installation pour echapper aux sandboxes.',
+    references: [
+      'https://www.sonatype.com/blog/phantomraven-supply-chain-attack',
+      'https://attack.mitre.org/techniques/T1497/003/'
+    ],
+    mitre: 'T1497.003'
+  },
+  npm_publish_worm: {
+    id: 'MUADDIB-AST-051',
+    name: 'npm publish Worm Propagation',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'exec("npm publish") detecte — technique de propagation worm Shai-Hulud: utilise les tokens npm voles pour publier des versions infectees des packages de la victime.',
+    references: [
+      'https://blog.phylum.io/shai-hulud-npm-worm',
+      'https://www.wiz.io/blog/shai-hulud-npm-supply-chain-attack',
+      'https://attack.mitre.org/techniques/T1195/002/'
+    ],
+    mitre: 'T1195.002'
+  },
+  ollama_local_llm: {
+    id: 'MUADDIB-AST-052',
+    name: 'Ollama Local LLM (Polymorphic Engine)',
+    severity: 'HIGH',
+    confidence: 'medium',
+    description: 'Reference au port 11434 (Ollama) detectee. PhantomRaven Wave 4 utilise un LLM local pour reecrire le malware et eviter la detection signature. Moteur polymorphe.',
+    references: [
+      'https://www.sonatype.com/blog/phantomraven-supply-chain-attack',
+      'https://attack.mitre.org/techniques/T1027/005/'
+    ],
+    mitre: 'T1027.005'
+  },
+
   // Shell IFS evasion rules (v2.6.9)
   curl_ifs_evasion: {
     id: 'MUADDIB-SHELL-016',

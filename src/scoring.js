@@ -154,7 +154,9 @@ const DIST_EXEMPT_TYPES = new Set([
   'cross_file_dataflow',      // credential read → network exfil across files
   'staged_eval_decode',       // eval(atob(...)) (explicit payload staging)
   'reverse_shell',            // net.Socket + connect + pipe (always malicious)
-  'detached_credential_exfil' // detached process + credential exfil (DPRK/Lazarus)
+  'detached_credential_exfil', // detached process + credential exfil (DPRK/Lazarus)
+  'node_modules_write',       // writeFile to node_modules/ (worm propagation)
+  'npm_publish_worm'          // exec("npm publish") (worm propagation)
   // P6: remote_code_load and proxy_data_intercept removed — in bundled dist/ files,
   // fetch + eval co-occurrence is coincidental (bundler combines HTTP client + template compilation).
   // fetch_decrypt_exec (fetch+decrypt+eval triple) remains exempt — never coincidental.

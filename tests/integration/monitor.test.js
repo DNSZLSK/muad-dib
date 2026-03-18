@@ -6151,9 +6151,9 @@ async function runMonitorTests() {
 
   // ===== v2.7.6 C1: High-confidence malice bypass =====
 
-  test('MONITOR: HIGH_CONFIDENCE_MALICE_TYPES contains 9 threat types', () => {
-    assert(HIGH_CONFIDENCE_MALICE_TYPES.size === 9,
-      `Should have 9 types, got ${HIGH_CONFIDENCE_MALICE_TYPES.size}`);
+  test('MONITOR: HIGH_CONFIDENCE_MALICE_TYPES contains 11 threat types', () => {
+    assert(HIGH_CONFIDENCE_MALICE_TYPES.size === 11,
+      `Should have 11 types, got ${HIGH_CONFIDENCE_MALICE_TYPES.size}`);
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('lifecycle_shell_pipe'), 'Missing lifecycle_shell_pipe');
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('fetch_decrypt_exec'), 'Missing fetch_decrypt_exec');
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('download_exec_binary'), 'Missing download_exec_binary');
@@ -6162,6 +6162,8 @@ async function runMonitorTests() {
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('cross_file_dataflow'), 'Missing cross_file_dataflow');
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('canary_exfiltration'), 'Missing canary_exfiltration');
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('sandbox_network_after_sensitive_read'), 'Missing sandbox_network_after_sensitive_read');
+    assert(HIGH_CONFIDENCE_MALICE_TYPES.has('node_modules_write'), 'Missing node_modules_write');
+    assert(HIGH_CONFIDENCE_MALICE_TYPES.has('npm_publish_worm'), 'Missing npm_publish_worm');
   });
 
   test('MONITOR: HIGH_CONFIDENCE_MALICE_TYPES does NOT contain FP-prone types', () => {

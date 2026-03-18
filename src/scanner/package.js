@@ -28,6 +28,13 @@ const DANGEROUS_PATTERNS = [
 const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype', 'toString', 'valueOf']);
 const DEP_FP_WHITELIST = new Set(['es5-ext', 'bootstrap-sass']);
 
+// System commands that should never be shadowed via the "bin" field (PATH hijack)
+const SHADOWED_COMMANDS = new Set([
+  'node', 'npm', 'npx', 'git', 'sh', 'bash', 'zsh', 'python', 'python3',
+  'curl', 'wget', 'ssh', 'scp', 'tar', 'make', 'gcc', 'go', 'ruby',
+  'perl', 'php', 'java', 'javac', 'pip', 'pip3', 'yarn', 'pnpm', 'bun'
+]);
+
 /**
  * Clean a version specifier to extract the primary version number.
  * Handles: ^1.0.0, ~1.0.0, >=1.0.0, >=1.0.0,<2.0.0, git URLs, etc.
@@ -95,6 +102,16 @@ async function scanPackageJson(targetPath) {
           });
         }
       }
+
+      // Detect Bun runtime evasion in lifecycle scripts (Shai-Hulud 2.0)
+      if (/\bbun\s+(run|exec|install|x)\b/.test(scriptContent) || /\bbunx\s+/.test(scriptContent)) {
+        threats.push({
+          type: 'bun_runtime_evasion',
+          severity: 'HIGH',
+          message: `Bun runtime invocation in lifecycle script "${scriptName}" — alternative runtime to evade Node.js monitoring/sandboxing.`,
+          file: 'package.json'
+        });
+      }
     }
   }
 
@@ -111,6 +128,39 @@ async function scanPackageJson(targetPath) {
         file: 'package.json'
       });
     }
+  }
+
+  // Detect bin field hijacking: shadowing system commands (node, npm, git, bash, etc.)
+  if (pkg.bin) {
+    const binEntries = typeof pkg.bin === 'string'
+      ? { [pkg.name]: pkg.bin }
+      : pkg.bin;
+    for (const [cmdName, cmdPath] of Object.entries(binEntries || {})) {
+      if (SHADOWED_COMMANDS.has(cmdName)) {
+        threats.push({
+          type: 'bin_field_hijack',
+          severity: 'CRITICAL',
+          message: `package.json "bin" field shadows system command "${cmdName}" → ${cmdPath}. PATH hijack: all npm scripts will execute this instead of the real ${cmdName}.`,
+          file: 'package.json'
+        });
+      }
+    }
+  }
+
+  // Detect .npmrc with git= override (PackageGate technique)
+  const npmrcPath = path.join(targetPath, '.npmrc');
+  if (fs.existsSync(npmrcPath)) {
+    try {
+      const npmrcContent = fs.readFileSync(npmrcPath, 'utf8');
+      if (/^git\s*=/m.test(npmrcContent)) {
+        threats.push({
+          type: 'npmrc_git_override',
+          severity: 'CRITICAL',
+          message: '.npmrc contains git= override — PackageGate technique: replaces git binary with attacker-controlled script.',
+          file: '.npmrc'
+        });
+      }
+    } catch { /* permission error */ }
   }
 
   // Scan declared dependencies against IOCs
@@ -156,9 +206,18 @@ async function scanPackageJson(targetPath) {
       ].some(p => p.test(urlLower));
       threats.push({
         type: 'dependency_url_suspicious',
-        severity: isSuspicious ? 'HIGH' : 'MEDIUM',
+        severity: isSuspicious ? 'CRITICAL' : 'HIGH',
         message: `Dependency "${depName}" uses HTTP URL: ${depVersion}` +
           (isSuspicious ? ' (tunnel/private/localhost)' : ' (unusual, verify source)'),
+        file: 'package.json'
+      });
+    }
+    // Detect git-based dependencies — potential PackageGate RCE vector
+    if (typeof depVersion === 'string' && /^git[+:]/.test(depVersion)) {
+      threats.push({
+        type: 'git_dependency_rce',
+        severity: 'HIGH',
+        message: `Dependency "${depName}" uses git URL: ${depVersion} — potential PackageGate RCE vector (malicious .npmrc can override git binary).`,
         file: 'package.json'
       });
     }

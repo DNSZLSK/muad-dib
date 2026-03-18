@@ -705,6 +705,26 @@ function handleCallExpression(node, ctx) {
           break;
         }
       }
+
+      // Bun runtime evasion: exec/spawn using bun instead of node (Shai-Hulud 2.0)
+      if (/\bbun\s+(run|exec|install|x)\b/.test(cmdStr)) {
+        ctx.threats.push({
+          type: 'bun_runtime_evasion',
+          severity: 'HIGH',
+          message: `Bun runtime invocation detected: "${cmdStr.slice(0, 80)}" — alternative runtime to evade Node.js monitoring/sandboxing.`,
+          file: ctx.relFile
+        });
+      }
+
+      // Worm propagation: npm publish / npm adduser / npm token create (Shai-Hulud)
+      if (/\bnpm\s+(publish|adduser|token\s+create|login)\b/.test(cmdStr)) {
+        ctx.threats.push({
+          type: 'npm_publish_worm',
+          severity: 'CRITICAL',
+          message: `exec("${cmdStr.slice(0, 80)}") — worm propagation: publishing packages with stolen credentials.`,
+          file: ctx.relFile
+        });
+      }
     }
   }
 
@@ -785,6 +805,30 @@ function handleCallExpression(node, ctx) {
     }
   }
 
+  // Detect spawn('bun', ['run', ...]) — Bun runtime evasion via spawn
+  if ((callName === 'spawn' || callName === 'execFile') && node.arguments.length >= 1) {
+    const bunArg = node.arguments[0];
+    if (bunArg.type === 'Literal' && typeof bunArg.value === 'string' && bunArg.value === 'bun') {
+      // Check the args array for run/exec/install/x
+      const argsArr = node.arguments[1];
+      let bunCmd = 'bun';
+      if (argsArr?.type === 'ArrayExpression' && argsArr.elements.length > 0) {
+        const firstEl = argsArr.elements[0];
+        if (firstEl?.type === 'Literal' && typeof firstEl.value === 'string') {
+          bunCmd = `bun ${firstEl.value}`;
+        }
+      }
+      if (/\bbun\s*(run|exec|install|x)?$/.test(bunCmd) || bunCmd === 'bun') {
+        ctx.threats.push({
+          type: 'bun_runtime_evasion',
+          severity: 'HIGH',
+          message: `spawn("bun", [...]) — Bun runtime invocation to evade Node.js monitoring/sandboxing.`,
+          file: ctx.relFile
+        });
+      }
+    }
+  }
+
   // Detect spawn/fork with {detached: true}
   if ((callName === 'spawn' || callName === 'fork') && node.arguments.length >= 2) {
     const lastArg = node.arguments[node.arguments.length - 1];
@@ -830,6 +874,27 @@ function handleCallExpression(node, ctx) {
           type: 'workflow_write',
           severity: 'CRITICAL',
           message: `${writeMethod}() writes to .github/workflows — GitHub Actions injection/persistence technique.`,
+          file: ctx.relFile
+        });
+      }
+    }
+  }
+
+  // Detect writes to node_modules/ — worm propagation / package patching (Shai-Hulud 2.0)
+  if (node.callee.type === 'MemberExpression' && node.callee.property?.type === 'Identifier') {
+    const nmWriteMethod = node.callee.property.name;
+    if (['writeFileSync', 'writeFile', 'appendFileSync'].includes(nmWriteMethod) && node.arguments.length >= 2) {
+      const nmPathArg = node.arguments[0];
+      let nmPathStr = extractStringValueDeep(nmPathArg);
+      // Also resolve variable indirection
+      if (!nmPathStr && nmPathArg?.type === 'Identifier' && ctx.stringVarValues?.has(nmPathArg.name)) {
+        nmPathStr = ctx.stringVarValues.get(nmPathArg.name);
+      }
+      if (nmPathStr && /node_modules[/\\]/.test(nmPathStr)) {
+        ctx.threats.push({
+          type: 'node_modules_write',
+          severity: 'CRITICAL',
+          message: `${nmWriteMethod}() targeting node_modules/ path: "${nmPathStr.substring(0, 80)}" — package patching / worm propagation technique.`,
           file: ctx.relFile
         });
       }
@@ -1199,6 +1264,24 @@ function handleCallExpression(node, ctx) {
         message: `${callName}() with string argument — eval equivalent, executes the string as code.`,
         file: ctx.relFile
       });
+    }
+
+    // Static timer bomb: setTimeout/setInterval with delay > 1 hour (PhantomRaven 48h delay)
+    if (node.arguments.length >= 2) {
+      const delayArg = node.arguments[1];
+      let delayMs = null;
+      if (delayArg.type === 'Literal' && typeof delayArg.value === 'number') {
+        delayMs = delayArg.value;
+      }
+      if (delayMs !== null && delayMs > 3600000) { // > 1 hour
+        const hours = (delayMs / 3600000).toFixed(1);
+        ctx.threats.push({
+          type: 'static_timer_bomb',
+          severity: delayMs > 86400000 ? 'HIGH' : 'MEDIUM', // > 24h = HIGH
+          message: `${callName}() with ${hours}h delay (${delayMs}ms) — time-bomb evasion: payload activates long after install.`,
+          file: ctx.relFile
+        });
+      }
     }
   }
 
@@ -1726,6 +1809,17 @@ function handleLiteral(node, ctx) {
         });
         break;
       }
+    }
+
+    // Ollama LLM local: polymorphic engine indicator (PhantomRaven Wave 4)
+    // Port 11434 is Ollama's default port. Legitimate packages don't call local LLMs.
+    if (/(?:localhost|127\.0\.0\.1):11434/.test(node.value)) {
+      ctx.threats.push({
+        type: 'ollama_local_llm',
+        severity: 'HIGH',
+        message: `Reference to Ollama LLM API (${node.value.slice(0, 60)}) — polymorphic malware engine: uses local LLM to rewrite code and evade detection.`,
+        file: ctx.relFile
+      });
     }
   }
 }
