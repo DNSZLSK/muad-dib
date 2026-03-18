@@ -170,7 +170,11 @@ const GIT_HOOKS = [
 const SUSPICIOUS_DOMAINS_HIGH = [
   'oastify.com', 'oast.fun', 'oast.me', 'oast.live',
   'burpcollaborator.net', 'webhook.site', 'pipedream.net',
-  'requestbin.com', 'hookbin.com', 'canarytokens.com'
+  'requestbin.com', 'hookbin.com', 'canarytokens.com',
+  // GlassWorm C2 IPs (mars 2026)
+  '217.69.3.218', '217.69.3.152',
+  '199.247.10.166', '199.247.13.106',
+  '140.82.52.31', '45.32.150.251'
 ];
 
 // Suspicious tunnel/proxy domains (MEDIUM severity)
@@ -197,6 +201,27 @@ const SANDBOX_INDICATORS = [
   '/proc/1/cgroup',
   '/proc/self/cgroup'
 ];
+
+// Blockchain RPC endpoints — potential C2 channel via blockchain (GlassWorm)
+const BLOCKCHAIN_RPC_ENDPOINTS = [
+  'api.mainnet-beta.solana.com',
+  'api.devnet.solana.com',
+  'api.testnet.solana.com',
+  'mainnet.infura.io',
+  'rpc.ankr.com'
+];
+
+// Solana/Web3 C2 methods — used for dead drop resolver (GlassWorm)
+const SOLANA_C2_METHODS = [
+  'getSignaturesForAddress', 'getAccountInfo', 'getTransaction',
+  'getConfirmedSignaturesForAddress2', 'getParsedTransaction'
+];
+
+// Solana/Web3 package names
+const SOLANA_PACKAGES = ['@solana/web3.js', 'solana-web3.js', '@solana/web3'];
+
+// Variation selector constants (GlassWorm decoder signature)
+const VARIATION_SELECTOR_CONSTS = [0xFE00, 0xFE0F, 0xE0100, 0xE01EF];
 
 // ============================================
 // HELPER FUNCTIONS
@@ -646,6 +671,10 @@ function handleCallExpression(node, ctx) {
     const reqStr = extractStringValueDeep(arg);
     if (reqStr && /\.node\s*$/.test(reqStr)) {
       ctx.hasRequireNodeFile = true;
+    }
+    // GlassWorm: track Solana/Web3 require imports for compound blockchain C2 detection
+    if (reqStr && SOLANA_PACKAGES.some(pkg => reqStr === pkg)) {
+      ctx.hasSolanaImport = true;
     }
   }
 
@@ -1653,6 +1682,10 @@ function handleImportExpression(node, ctx) {
           file: ctx.relFile
         });
       }
+      // GlassWorm: track Solana/Web3 dynamic import for compound blockchain C2 detection
+      if (SOLANA_PACKAGES.some(pkg => src.value === pkg)) {
+        ctx.hasSolanaImport = true;
+      }
     } else {
       ctx.threats.push({
         type: 'dynamic_import',
@@ -1820,6 +1853,34 @@ function handleLiteral(node, ctx) {
         message: `Reference to Ollama LLM API (${node.value.slice(0, 60)}) — polymorphic malware engine: uses local LLM to rewrite code and evade detection.`,
         file: ctx.relFile
       });
+    }
+
+    // Blockchain RPC endpoints — potential C2 channel (GlassWorm)
+    for (const endpoint of BLOCKCHAIN_RPC_ENDPOINTS) {
+      if (lowerVal.includes(endpoint)) {
+        ctx.threats.push({
+          type: 'blockchain_rpc_endpoint',
+          severity: 'MEDIUM',
+          message: `Hardcoded blockchain RPC endpoint "${endpoint}" — potential blockchain C2 channel.`,
+          file: ctx.relFile
+        });
+        break;
+      }
+    }
+
+    // Track Solana C2 method names in string literals (for compound detection)
+    for (const method of SOLANA_C2_METHODS) {
+      if (node.value === method || node.value.includes(method)) {
+        ctx.hasSolanaC2Method = true;
+        break;
+      }
+    }
+  }
+
+  // Track variation selector constants in numeric literals (GlassWorm decoder)
+  if (typeof node.value === 'number') {
+    if (VARIATION_SELECTOR_CONSTS.includes(node.value)) {
+      ctx.hasVariationSelectorConst = true;
     }
   }
 }
@@ -1993,6 +2054,16 @@ function handleMemberExpression(node, ctx) {
       message: 'require.cache accessed — module cache poisoning to hijack or replace core Node.js modules.',
       file: ctx.relFile
     });
+  }
+
+  // GlassWorm: track .codePointAt() calls (variation selector decoder pattern)
+  if (node.property?.type === 'Identifier' && node.property.name === 'codePointAt') {
+    ctx.hasCodePointAt = true;
+  }
+
+  // GlassWorm: track Solana C2 method calls (e.g., connection.getSignaturesForAddress)
+  if (node.property?.type === 'Identifier' && SOLANA_C2_METHODS.includes(node.property.name)) {
+    ctx.hasSolanaC2Method = true;
   }
 
   if (
@@ -2296,6 +2367,30 @@ function handlePostWalk(ctx) {
       type: 'detached_credential_exfil',
       severity: 'CRITICAL',
       message: 'Detached process + sensitive env access + network call — credential exfiltration via background process (DPRK/Lazarus evasion pattern).',
+      file: ctx.relFile
+    });
+  }
+
+  // GlassWorm: Unicode variation selector decoder = .codePointAt + variation selector constants
+  if (ctx.hasCodePointAt && ctx.hasVariationSelectorConst) {
+    ctx.threats.push({
+      type: 'unicode_variation_decoder',
+      severity: 'CRITICAL',
+      message: 'Unicode variation selector decoder: .codePointAt() + 0xFE00/0xE0100 constants — GlassWorm payload reconstruction from invisible characters.',
+      file: ctx.relFile
+    });
+  }
+
+  // GlassWorm: Blockchain C2 resolution = Solana import + C2 method
+  // CRITICAL if combined with eval/exec, HIGH otherwise
+  if (ctx.hasSolanaImport && ctx.hasSolanaC2Method) {
+    ctx.threats.push({
+      type: 'blockchain_c2_resolution',
+      severity: ctx.hasDynamicExec ? 'CRITICAL' : 'HIGH',
+      message: 'Solana/Web3 import + blockchain C2 method (getSignaturesForAddress/getTransaction) — ' +
+        (ctx.hasDynamicExec
+          ? 'dead drop resolver with dynamic execution. GlassWorm blockchain C2 pattern confirmed.'
+          : 'potential dead drop resolver. GlassWorm technique: C2 address rotated via Solana memo field.'),
       file: ctx.relFile
     });
   }

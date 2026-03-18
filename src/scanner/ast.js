@@ -160,7 +160,13 @@ function analyzeFile(content, filePath, basePath) {
     // C10: Hash verification — legitimate binary installers verify checksums
     // Requires BOTH createHash() call AND .digest() call — false positives from
     // standalone mentions of 'sha256' or 'integrity' in comments/descriptions
-    hasHashVerification: /\bcreateHash\s*\(/.test(content) && /\.digest\s*\(/.test(content)
+    hasHashVerification: /\bcreateHash\s*\(/.test(content) && /\.digest\s*\(/.test(content),
+    // GlassWorm: variation selector decoder pattern (.codePointAt + 0xFE00/0xE0100)
+    hasCodePointAt: false,
+    hasVariationSelectorConst: false,
+    // GlassWorm: blockchain C2 resolution (Solana import + C2 method + dynamic exec)
+    hasSolanaImport: false,
+    hasSolanaC2Method: false
   };
 
   // Compute fetchOnlySafeDomains: check if ALL URLs in file point to known registries
