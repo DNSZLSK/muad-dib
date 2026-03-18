@@ -217,6 +217,42 @@ async function runShellTests() {
       assert(!shT, 'Benign sh -c should NOT trigger sh_c_curl_exec');
     } finally { cleanupTemp(tmp); }
   });
+  // ===== Bun runtime evasion in shell scripts =====
+  console.log('\n=== BUN RUNTIME EVASION (SHELL) TESTS ===\n');
+
+  await asyncTest('SHELL: bun run in .sh file → bun_runtime_evasion', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-shell-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'test-shell', version: '1.0.0' }));
+    fs.writeFileSync(path.join(tmp, 'setup.sh'), '#!/bin/bash\nbun run payload.js');
+    try {
+      const result = await runScanDirect(tmp);
+      const t = (result.threats || []).find(t => t.type === 'bun_runtime_evasion');
+      assert(t, 'bun run in .sh should be detected');
+      assert(t.severity === 'HIGH', `Expected HIGH, got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('SHELL: benign shell script without bun → NO bun_runtime_evasion', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-shell-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'test-shell', version: '1.0.0' }));
+    fs.writeFileSync(path.join(tmp, 'build.sh'), '#!/bin/bash\nnpm run build\necho "done"');
+    try {
+      const result = await runScanDirect(tmp);
+      const t = (result.threats || []).find(t => t.type === 'bun_runtime_evasion');
+      assert(!t, 'Normal shell script should NOT trigger bun_runtime_evasion');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('SHELL: bun run in shebang file (no extension) → bun_runtime_evasion', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-shell-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'test-shell', version: '1.0.0' }));
+    fs.writeFileSync(path.join(tmp, 'bootstrap'), '#!/bin/bash\nbun run install_payload.js');
+    try {
+      const result = await runScanDirect(tmp);
+      const t = (result.threats || []).find(t => t.type === 'bun_runtime_evasion');
+      assert(t, 'bun run in shebang file should be detected');
+    } finally { cleanupTemp(tmp); }
+  });
 }
 
 module.exports = { runShellTests };

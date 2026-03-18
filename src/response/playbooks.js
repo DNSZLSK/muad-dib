@@ -514,6 +514,52 @@ const PLAYBOOKS = {
     'Coherence d\'intention detectee — sortie de commande systeme combinee avec exfiltration reseau. ' +
     'Le package execute des commandes et transmet les resultats. Verifier les commandes executees. ' +
     'Supprimer le package si non attendu. Auditer les logs reseau pour identifier les donnees exfiltrees.',
+
+  bin_field_hijack:
+    'CRITIQUE: Le champ "bin" de package.json shadow une commande systeme (node, npm, git, bash, etc.). ' +
+    'A l\'installation, npm cree un symlink dans node_modules/.bin/ qui intercepte la commande reelle. ' +
+    'Tous les npm scripts executeront le code malveillant au lieu de la vraie commande. ' +
+    'NE PAS installer. Si deja installe: rm -rf node_modules && npm cache clean --force && npm install.',
+
+  git_dependency_rce:
+    'Dependance utilisant une URL git+ ou git://. Vecteur d\'attaque PackageGate: si le package contient ' +
+    'un .npmrc avec git=./malicious.sh, npm executera le script au lieu de git, meme avec --ignore-scripts. ' +
+    'Verifier le contenu du .npmrc. Ne pas installer de packages avec des dependances git non vérifiées.',
+
+  npmrc_git_override:
+    'CRITIQUE: Fichier .npmrc contient git= override — technique PackageGate. Le binaire git est remplace ' +
+    'par un script controle par l\'attaquant. TOUTE operation git (clone, fetch, pull) executera le script malveillant. ' +
+    'NE PAS installer. Si deja installe: supprimer le package, verifier .npmrc, reinstaller git.',
+
+  node_modules_write:
+    'CRITIQUE: Le code ecrit dans node_modules/ — technique de propagation worm Shai-Hulud 2.0. ' +
+    'Le malware modifie d\'autres packages installes (ethers, webpack, etc.) pour injecter un backdoor persistent. ' +
+    'Verifier l\'integrite de tous les packages: rm -rf node_modules && npm install. ' +
+    'Auditer les fichiers modifies. Regenerer tous les secrets si le code a ete execute.',
+
+  bun_runtime_evasion:
+    'Invocation du runtime Bun detectee — technique Shai-Hulud 2.0. Le payload est execute via bun run ' +
+    'au lieu de node, echappant a toutes les sandboxes Node.js et au monitoring (--experimental-permission). ' +
+    'Verifier si bun est installe: which bun. Supprimer le package. ' +
+    'Auditer les processus: ps aux | grep bun.',
+
+  static_timer_bomb:
+    'Timer avec delai > 1h detecte dans l\'analyse statique (setTimeout/setInterval). ' +
+    'Technique PhantomRaven: le payload s\'active 48h+ apres l\'installation pour echapper aux sandboxes. ' +
+    'Analyser le callback du timer pour identifier le payload retarde. ' +
+    'Si delai > 24h: fort indicateur de time-bomb malware. NE PAS installer.',
+
+  npm_publish_worm:
+    'CRITIQUE: exec("npm publish") detecte — propagation worm. Le code utilise des tokens npm voles ' +
+    'pour publier des versions infectees des packages de la victime. Technique Shai-Hulud 1.0 et 2.0. ' +
+    'Isoler immediatement la machine. Revoquer les tokens npm: npm token revoke. ' +
+    'Verifier les packages publies: npm profile ls. Signaler sur npm.',
+
+  ollama_local_llm:
+    'Reference au port Ollama (11434) detectee. PhantomRaven Wave 4 utilise un LLM local (DeepSeek Coder) ' +
+    'pour reecrire le malware a chaque execution, evitant la detection par signature. Moteur polymorphe. ' +
+    'Verifier si Ollama est installe: curl http://localhost:11434/api/tags. ' +
+    'Aucun package npm legitime n\'appelle un LLM local. Supprimer le package.',
 };
 
 function getPlaybook(threatType) {

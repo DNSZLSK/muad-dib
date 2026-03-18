@@ -149,7 +149,7 @@ async function runPackageTests() {
 
   // --- Dependency URL detection (P3) ---
 
-  await asyncTest('PACKAGE: Detects ngrok dependency URL as HIGH', async () => {
+  await asyncTest('PACKAGE: Detects ngrok dependency URL as CRITICAL', async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pkg-'));
     fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
       name: 'test-pkg', version: '1.0.0',
@@ -159,12 +159,12 @@ async function runPackageTests() {
       const result = await runScanDirect(tmp);
       const t = result.threats.find(t => t.type === 'dependency_url_suspicious');
       assert(t, 'Should detect ngrok URL dependency');
-      assert(t.severity === 'HIGH', 'ngrok URL should be HIGH severity');
+      assert(t.severity === 'CRITICAL', 'ngrok URL should be CRITICAL severity');
       assertIncludes(t.message, 'tunnel', 'Should mention tunnel');
     } finally { cleanupTemp(tmp); }
   });
 
-  await asyncTest('PACKAGE: Detects localhost dependency URL as HIGH', async () => {
+  await asyncTest('PACKAGE: Detects localhost dependency URL as CRITICAL', async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pkg-'));
     fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
       name: 'test-pkg', version: '1.0.0',
@@ -174,11 +174,11 @@ async function runPackageTests() {
       const result = await runScanDirect(tmp);
       const t = result.threats.find(t => t.type === 'dependency_url_suspicious');
       assert(t, 'Should detect localhost URL dependency');
-      assert(t.severity === 'HIGH', 'localhost URL should be HIGH severity');
+      assert(t.severity === 'CRITICAL', 'localhost URL should be CRITICAL severity');
     } finally { cleanupTemp(tmp); }
   });
 
-  await asyncTest('PACKAGE: Detects generic HTTPS dependency URL as MEDIUM', async () => {
+  await asyncTest('PACKAGE: Detects generic HTTPS dependency URL as HIGH', async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pkg-'));
     fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
       name: 'test-pkg', version: '1.0.0',
@@ -188,7 +188,7 @@ async function runPackageTests() {
       const result = await runScanDirect(tmp);
       const t = result.threats.find(t => t.type === 'dependency_url_suspicious');
       assert(t, 'Should detect generic HTTPS URL dependency');
-      assert(t.severity === 'MEDIUM', 'Generic HTTPS URL should be MEDIUM severity');
+      assert(t.severity === 'HIGH', 'Generic HTTPS URL should be HIGH severity');
     } finally { cleanupTemp(tmp); }
   });
 
@@ -217,6 +217,182 @@ async function runPackageTests() {
       const result = await runScanDirect(tmp);
       const t = result.threats.find(t => t.type === 'lifecycle_script');
       assert(!t, 'Normal test/start scripts should not trigger');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- bin field hijack (PKG-013) ---
+  console.log('\n=== BIN FIELD HIJACK TESTS ===\n');
+
+  await asyncTest('PACKAGE: bin field hijack — shadows "node" → CRITICAL', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pkg-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
+      name: 'evil-pkg', version: '1.0.0',
+      bin: { node: './evil.js' }
+    }));
+    fs.writeFileSync(path.join(tmp, 'evil.js'), '#!/usr/bin/env node\nconsole.log("hijacked");');
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'bin_field_hijack');
+      assert(t, 'Should detect bin_field_hijack when shadowing node');
+      assert(t.severity === 'CRITICAL', `Expected CRITICAL, got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('PACKAGE: bin field hijack — shadows "npm" → CRITICAL', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pkg-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
+      name: 'evil-pkg', version: '1.0.0',
+      bin: { npm: './shim.js' }
+    }));
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'bin_field_hijack');
+      assert(t, 'Should detect bin_field_hijack when shadowing npm');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('PACKAGE: bin field — legitimate command name → NO detection', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pkg-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
+      name: 'my-tool', version: '1.0.0',
+      bin: { 'my-tool': './cli.js' }
+    }));
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'bin_field_hijack');
+      assert(!t, 'Legitimate bin name should NOT trigger bin_field_hijack');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('PACKAGE: bin field string shorthand → NO detection', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pkg-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
+      name: 'my-tool', version: '1.0.0',
+      bin: './index.js'
+    }));
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'bin_field_hijack');
+      assert(!t, 'String shorthand bin with non-system package name should NOT trigger');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- git dependency RCE (PKG-014) ---
+  console.log('\n=== GIT DEPENDENCY RCE TESTS ===\n');
+
+  await asyncTest('PACKAGE: git+ dependency → git_dependency_rce HIGH', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pkg-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
+      name: 'test-pkg', version: '1.0.0',
+      dependencies: { 'evil-dep': 'git+https://evil.com/repo.git' }
+    }));
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'git_dependency_rce');
+      assert(t, 'Should detect git_dependency_rce');
+      assert(t.severity === 'HIGH', `Expected HIGH, got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('PACKAGE: normal semver dependency → NO git_dependency_rce', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pkg-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
+      name: 'test-pkg', version: '1.0.0',
+      dependencies: { lodash: '^4.17.21' }
+    }));
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'git_dependency_rce');
+      assert(!t, 'Normal semver dependency should NOT trigger git_dependency_rce');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- .npmrc git= override (PKG-015) ---
+  console.log('\n=== NPMRC GIT OVERRIDE TESTS ===\n');
+
+  await asyncTest('PACKAGE: .npmrc with git= override → CRITICAL', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pkg-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
+      name: 'test-pkg', version: '1.0.0'
+    }));
+    fs.writeFileSync(path.join(tmp, '.npmrc'), 'git=./malicious.sh\nregistry=https://registry.npmjs.org/');
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'npmrc_git_override');
+      assert(t, 'Should detect npmrc_git_override');
+      assert(t.severity === 'CRITICAL', `Expected CRITICAL, got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('PACKAGE: .npmrc without git= → NO detection', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pkg-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
+      name: 'test-pkg', version: '1.0.0'
+    }));
+    fs.writeFileSync(path.join(tmp, '.npmrc'), 'registry=https://registry.npmjs.org/\nsave-exact=true');
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'npmrc_git_override');
+      assert(!t, 'Normal .npmrc should NOT trigger npmrc_git_override');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- URL dependency severity fix ---
+
+  await asyncTest('PACKAGE: HTTP URL dependency (non-tunnel) → HIGH', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pkg-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
+      name: 'test-pkg', version: '1.0.0',
+      dependencies: { 'remote-dep': 'https://packages.storeartifact.com/dep-1.0.0.tgz' }
+    }));
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'dependency_url_suspicious');
+      assert(t, 'Should detect dependency_url_suspicious');
+      assert(t.severity === 'HIGH', `Non-tunnel URL should be HIGH, got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('PACKAGE: HTTP URL dependency (ngrok tunnel) → CRITICAL', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pkg-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
+      name: 'test-pkg', version: '1.0.0',
+      dependencies: { 'remote-dep': 'https://abc123.ngrok-free.app/pkg.tgz' }
+    }));
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'dependency_url_suspicious');
+      assert(t, 'Should detect dependency_url_suspicious');
+      assert(t.severity === 'CRITICAL', `Tunnel URL should be CRITICAL, got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- Bun runtime evasion in lifecycle scripts ---
+
+  await asyncTest('PACKAGE: bun run in postinstall → bun_runtime_evasion', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pkg-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
+      name: 'test-pkg', version: '1.0.0',
+      scripts: { postinstall: 'bun run setup.js' }
+    }));
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'bun_runtime_evasion');
+      assert(t, 'Should detect bun_runtime_evasion in lifecycle script');
+      assert(t.severity === 'HIGH', `Expected HIGH, got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('PACKAGE: bunx in preinstall → bun_runtime_evasion', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pkg-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
+      name: 'test-pkg', version: '1.0.0',
+      scripts: { preinstall: 'bunx some-tool' }
+    }));
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'bun_runtime_evasion');
+      assert(t, 'Should detect bun_runtime_evasion with bunx');
     } finally { cleanupTemp(tmp); }
   });
 
