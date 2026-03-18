@@ -1544,6 +1544,56 @@ const RULES = {
     ],
     mitre: 'T1059'
   },
+
+  // GlassWorm detections (mars 2026)
+  unicode_invisible_injection: {
+    id: 'MUADDIB-OBF-003',
+    name: 'Unicode Invisible Character Injection',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Caracteres Unicode invisibles detectes (zero-width, variation selectors). Technique GlassWorm: encodage de payload malveillant via variation selectors (U+FE00-FE0F, U+E0100-E01EF) invisible dans les editeurs.',
+    references: [
+      'https://www.aikido.dev/blog/glassworm-returns-unicode-attack-github-npm-vscode',
+      'https://attack.mitre.org/techniques/T1027/'
+    ],
+    mitre: 'T1027'
+  },
+  unicode_variation_decoder: {
+    id: 'MUADDIB-AST-053',
+    name: 'Unicode Variation Selector Decoder',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Decodeur de payload Unicode via variation selectors (.codePointAt + 0xFE00/0xE0100). Signature GlassWorm: le code reconstruit un payload octet par octet a partir de caracteres invisibles.',
+    references: [
+      'https://www.koi.security/blog/glassworm-first-self-propagating-worm-using-invisible-code-hits-openvsx-marketplace',
+      'https://attack.mitre.org/techniques/T1140/'
+    ],
+    mitre: 'T1140'
+  },
+  blockchain_c2_resolution: {
+    id: 'MUADDIB-AST-054',
+    name: 'Blockchain C2 Resolution (Dead Drop)',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'Import Solana/Web3 + appel API C2 (getSignaturesForAddress, getTransaction). Technique GlassWorm: la blockchain sert de dead drop resolver pour obtenir l\'adresse C2 via le champ memo des transactions.',
+    references: [
+      'https://www.sonatype.com/blog/hijacked-npm-packages-deliver-malware-via-solana-linked-to-glassworm',
+      'https://attack.mitre.org/techniques/T1102/'
+    ],
+    mitre: 'T1102'
+  },
+  blockchain_rpc_endpoint: {
+    id: 'MUADDIB-AST-055',
+    name: 'Hardcoded Blockchain RPC Endpoint',
+    severity: 'MEDIUM',
+    confidence: 'medium',
+    description: 'Endpoint RPC blockchain hardcode (Solana mainnet, Infura Ethereum). Dans un package non-crypto, indique un potentiel canal C2 via blockchain.',
+    references: [
+      'https://www.koi.security/blog/glassworm-first-self-propagating-worm-using-invisible-code-hits-openvsx-marketplace',
+      'https://attack.mitre.org/techniques/T1102/'
+    ],
+    mitre: 'T1102'
+  },
 };
 
 function getRule(type) {

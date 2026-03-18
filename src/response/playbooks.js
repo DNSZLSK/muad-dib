@@ -515,6 +515,28 @@ const PLAYBOOKS = {
     'Le package execute des commandes et transmet les resultats. Verifier les commandes executees. ' +
     'Supprimer le package si non attendu. Auditer les logs reseau pour identifier les donnees exfiltrees.',
 
+  unicode_invisible_injection:
+    'CRITIQUE: Caracteres Unicode invisibles detectes (zero-width, variation selectors). ' +
+    'Technique GlassWorm: du code malveillant est encode via des variation selectors invisibles dans les editeurs. ' +
+    'Analyser le fichier avec un editeur hexa. Supprimer le package immediatement. ' +
+    'Verifier les autres fichiers du projet pour des injections similaires.',
+
+  unicode_variation_decoder:
+    'CRITIQUE: Decodeur de payload Unicode via variation selectors detecte (.codePointAt + 0xFE00/0xE0100). ' +
+    'Signature GlassWorm: le code reconstruit un payload octet par octet a partir de caracteres invisibles. ' +
+    'Isoler immediatement. Decoder manuellement les variation selectors pour extraire le payload. Supprimer le package.',
+
+  blockchain_c2_resolution:
+    'Import Solana/Web3 + appel API blockchain C2 (getSignaturesForAddress, getTransaction) detecte. ' +
+    'Technique GlassWorm: la blockchain sert de dead drop resolver pour obtenir l\'adresse C2 via le champ memo. ' +
+    'Cout de rotation: 0.000005 SOL par changement d\'adresse C2 — censorship-resistant. ' +
+    'Bloquer les connexions vers les RPC Solana. Supprimer le package.',
+
+  blockchain_rpc_endpoint:
+    'Endpoint RPC blockchain hardcode detecte (Solana mainnet, Infura Ethereum). ' +
+    'Dans un package non-crypto, cela indique un potentiel canal C2 via blockchain. ' +
+    'Verifier le contexte: si le package n\'a rien a voir avec la blockchain, supprimer immediatement.',
+
   bin_field_hijack:
     'CRITIQUE: Le champ "bin" de package.json shadow une commande systeme (node, npm, git, bash, etc.). ' +
     'A l\'installation, npm cree un symlink dans node_modules/.bin/ qui intercepte la commande reelle. ' +
