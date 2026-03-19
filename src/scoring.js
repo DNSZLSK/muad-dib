@@ -62,7 +62,9 @@ const PACKAGE_LEVEL_TYPES = new Set([
   'publish_burst', 'publish_dormant_spike', 'publish_rapid_succession',
   'maintainer_new_suspicious', 'maintainer_sole_change',
   'sandbox_network_activity', 'sandbox_file_changes', 'sandbox_process_spawns',
-  'sandbox_canary_exfiltration'
+  'sandbox_canary_exfiltration',
+  // Compound scoring rules — package-level co-occurrences
+  'lifecycle_typosquat', 'lifecycle_inline_exec', 'lifecycle_remote_require'
 ]);
 
 /**
@@ -156,7 +158,12 @@ const DIST_EXEMPT_TYPES = new Set([
   'reverse_shell',            // net.Socket + connect + pipe (always malicious)
   'detached_credential_exfil', // detached process + credential exfil (DPRK/Lazarus)
   'node_modules_write',       // writeFile to node_modules/ (worm propagation)
-  'npm_publish_worm'          // exec("npm publish") (worm propagation)
+  'npm_publish_worm',         // exec("npm publish") (worm propagation)
+  // Dangerous shell commands in dist/ are real threats, never bundler output
+  'dangerous_exec',
+  // Compound scoring rules — co-occurrence signals, never FP
+  'crypto_staged_payload', 'lifecycle_typosquat', 'credential_env_exfil',
+  'lifecycle_inline_exec', 'lifecycle_remote_require', 'obfuscated_credential_tampering'
   // P6: remote_code_load and proxy_data_intercept removed — in bundled dist/ files,
   // fetch + eval co-occurrence is coincidental (bundler combines HTTP client + template compilation).
   // fetch_decrypt_exec (fetch+decrypt+eval triple) remains exempt — never coincidental.
@@ -202,6 +209,93 @@ const REACHABILITY_EXEMPT_TYPES = new Set([
   'ai_config_injection', 'ai_config_injection_compound',
   'detached_credential_exfil' // DPRK/Lazarus: invoked via lifecycle, not require/import
 ]);
+
+// ============================================
+// COMPOUND SCORING RULES (v2.9.2)
+// ============================================
+// Co-occurrences of threat types that NEVER appear in benign packages.
+// Applied AFTER FP reductions to recover signals that were individually downgraded.
+// Each compound injects a new CRITICAL threat when all required types are present.
+const SCORING_COMPOUNDS = [
+  {
+    type: 'crypto_staged_payload',
+    requires: ['staged_binary_payload', 'crypto_decipher'],
+    severity: 'CRITICAL',
+    message: 'Binary file reference + crypto decryption — steganographic payload chain (scoring compound).',
+    fileFrom: 'staged_binary_payload'
+  },
+  {
+    type: 'lifecycle_typosquat',
+    requires: ['lifecycle_script', 'typosquat_detected'],
+    severity: 'CRITICAL',
+    message: 'Lifecycle hook on typosquat package — dependency confusion attack vector (scoring compound).',
+    fileFrom: 'typosquat_detected'
+  },
+  {
+    type: 'credential_env_exfil',
+    requires: ['credential_tampering', 'env_access'],
+    severity: 'CRITICAL',
+    message: 'Credential path tampering + environment variable access — credential exfiltration chain (scoring compound).',
+    fileFrom: 'credential_tampering'
+  },
+  {
+    type: 'lifecycle_inline_exec',
+    requires: ['lifecycle_script', 'node_inline_exec'],
+    severity: 'CRITICAL',
+    message: 'Lifecycle hook with inline Node execution (node -e) — install-time code execution (scoring compound).',
+    fileFrom: 'node_inline_exec'
+  },
+  {
+    type: 'lifecycle_remote_require',
+    requires: ['lifecycle_script', 'network_require'],
+    severity: 'CRITICAL',
+    message: 'Lifecycle hook loading remote code (require http/https) — supply chain payload delivery (scoring compound).',
+    fileFrom: 'network_require'
+  },
+  {
+    type: 'obfuscated_credential_tampering',
+    requires: ['credential_tampering', 'obfuscation_detected'],
+    severity: 'CRITICAL',
+    message: 'Obfuscated code + credential path tampering — concealed credential theft (scoring compound).',
+    fileFrom: 'credential_tampering'
+  }
+];
+
+/**
+ * Apply compound boost rules: inject synthetic CRITICAL threats when
+ * co-occurring threat types indicate unambiguous malice.
+ * Called AFTER applyFPReductions to recover individually-downgraded signals.
+ * @param {Array} threats - deduplicated threat array (mutated in place)
+ */
+function applyCompoundBoosts(threats) {
+  const typeSet = new Set(threats.map(t => t.type));
+
+  // Build map of type → first file encountered (for file assignment)
+  const typeFileMap = Object.create(null);
+  for (const t of threats) {
+    if (!typeFileMap[t.type]) {
+      typeFileMap[t.type] = t.file || '(unknown)';
+    }
+  }
+
+  for (const compound of SCORING_COMPOUNDS) {
+    // Skip if compound already present (e.g. from a scanner)
+    if (typeSet.has(compound.type)) continue;
+
+    // Check all required types are present
+    if (compound.requires.every(req => typeSet.has(req))) {
+      threats.push({
+        type: compound.type,
+        severity: compound.severity,
+        message: compound.message,
+        file: typeFileMap[compound.fileFrom] || '(unknown)',
+        count: 1,
+        compound: true
+      });
+      typeSet.add(compound.type);
+    }
+  }
+}
 
 // Custom class prototypes that HTTP frameworks legitimately extend.
 // Distinguished from dangerous core Node.js prototype hooks.
@@ -463,5 +557,5 @@ function calculateRiskScore(deduped, intentResult) {
 
 module.exports = {
   SEVERITY_WEIGHTS, RISK_THRESHOLDS, MAX_RISK_SCORE, CONFIDENCE_FACTORS,
-  isPackageLevelThreat, computeGroupScore, applyFPReductions, calculateRiskScore
+  isPackageLevelThreat, computeGroupScore, applyFPReductions, applyCompoundBoosts, calculateRiskScore
 };

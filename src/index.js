@@ -28,7 +28,7 @@ const { computeReachableFiles } = require('./scanner/reachability.js');
 const { runTemporalAnalyses } = require('./temporal-runner.js');
 const { formatOutput } = require('./output-formatter.js');
 const { setExtraExcludes, getExtraExcludes, Spinner, listInstalledPackages, clearFileListCache, debugLog } = require('./utils.js');
-const { SEVERITY_WEIGHTS, RISK_THRESHOLDS, MAX_RISK_SCORE, isPackageLevelThreat, computeGroupScore, applyFPReductions, calculateRiskScore } = require('./scoring.js');
+const { SEVERITY_WEIGHTS, RISK_THRESHOLDS, MAX_RISK_SCORE, isPackageLevelThreat, computeGroupScore, applyFPReductions, applyCompoundBoosts, calculateRiskScore } = require('./scoring.js');
 const { buildIntentPairs } = require('./intent-graph.js');
 
 const { MAX_FILE_SIZE, safeParse } = require('./shared/constants.js');
@@ -597,6 +597,11 @@ async function run(targetPath, options = {}) {
   // FP reduction: legitimate frameworks produce high volumes of certain threat types.
   // A malware package typically has 1-3 occurrences, not dozens.
   applyFPReductions(deduped, reachableFiles, packageName, packageDeps);
+
+  // Compound scoring: inject synthetic CRITICAL threats when co-occurring types
+  // indicate unambiguous malice. Applied AFTER FP reductions to recover signals
+  // that were individually downgraded (count-based, dist, reachability).
+  applyCompoundBoosts(deduped);
 
   // Intent coherence analysis: detect source→sink pairs within files
   // Pass targetPath for destination-aware SDK pattern detection
