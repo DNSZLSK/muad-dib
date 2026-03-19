@@ -1594,6 +1594,81 @@ const RULES = {
     ],
     mitre: 'T1102'
   },
+
+  // Compound scoring rules (v2.9.2)
+  // Injected by applyCompoundBoosts() when co-occurring threat types indicate unambiguous malice.
+  crypto_staged_payload: {
+    id: 'MUADDIB-COMPOUND-001',
+    name: 'Steganographic Payload + Crypto Decryption',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Reference a un fichier binaire (.png/.jpg/.wasm) avec eval() combinee avec dechiffrement crypto (createDecipher). Chaine steganographique complete: payload cache dans un fichier binaire, dechiffre a runtime.',
+    references: [
+      'https://attack.mitre.org/techniques/T1140/',
+      'https://attack.mitre.org/techniques/T1027/003/'
+    ],
+    mitre: 'T1140'
+  },
+  lifecycle_typosquat: {
+    id: 'MUADDIB-COMPOUND-002',
+    name: 'Lifecycle Hook on Typosquat Package',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Script lifecycle (preinstall/postinstall) sur un package avec nom similaire a un package populaire. Vecteur classique de dependency confusion: le code s\'execute automatiquement a l\'installation.',
+    references: [
+      'https://attack.mitre.org/techniques/T1195/002/',
+      'https://snyk.io/blog/typosquatting-attacks/'
+    ],
+    mitre: 'T1195.002'
+  },
+  credential_env_exfil: {
+    id: 'MUADDIB-COMPOUND-003',
+    name: 'Credential Tampering + Env Access',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Ecriture dans un chemin sensible (cache npm/yarn, credentials) combinee avec acces aux variables d\'environnement. Chaine d\'exfiltration de credentials par double vecteur.',
+    references: [
+      'https://attack.mitre.org/techniques/T1552/001/',
+      'https://attack.mitre.org/techniques/T1565/001/'
+    ],
+    mitre: 'T1552.001'
+  },
+  lifecycle_inline_exec: {
+    id: 'MUADDIB-COMPOUND-004',
+    name: 'Lifecycle Hook + Inline Node Execution',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Script lifecycle avec execution inline Node.js (node -e). Le code s\'execute automatiquement a npm install avec un payload inline.',
+    references: [
+      'https://attack.mitre.org/techniques/T1059/007/',
+      'https://attack.mitre.org/techniques/T1195/002/'
+    ],
+    mitre: 'T1059.007'
+  },
+  lifecycle_remote_require: {
+    id: 'MUADDIB-COMPOUND-005',
+    name: 'Lifecycle Hook + Remote Code Loading',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Script lifecycle avec require(http/https) pour charger du code distant. Le payload est telecharge et execute automatiquement a l\'installation.',
+    references: [
+      'https://attack.mitre.org/techniques/T1105/',
+      'https://attack.mitre.org/techniques/T1195/002/'
+    ],
+    mitre: 'T1105'
+  },
+  obfuscated_credential_tampering: {
+    id: 'MUADDIB-COMPOUND-006',
+    name: 'Obfuscated Code + Credential Tampering',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Code obfusque combine avec ecriture dans des chemins sensibles (cache npm/yarn, credentials). Dissimulation de vol de credentials.',
+    references: [
+      'https://attack.mitre.org/techniques/T1027/',
+      'https://attack.mitre.org/techniques/T1565/001/'
+    ],
+    mitre: 'T1027'
+  },
 };
 
 function getRule(type) {

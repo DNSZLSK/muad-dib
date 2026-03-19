@@ -537,6 +537,35 @@ const PLAYBOOKS = {
     'Dans un package non-crypto, cela indique un potentiel canal C2 via blockchain. ' +
     'Verifier le contexte: si le package n\'a rien a voir avec la blockchain, supprimer immediatement.',
 
+  crypto_staged_payload:
+    'CRITIQUE: Chaine steganographique complete detectee — fichier binaire (.png/.jpg/.wasm) avec eval() + dechiffrement crypto. ' +
+    'Le payload malveillant est cache dans un fichier binaire et dechiffre a runtime. Supprimer le package immediatement. ' +
+    'Analyser le fichier binaire dans un sandbox pour extraire le payload.',
+
+  lifecycle_typosquat:
+    'CRITIQUE: Package avec nom similaire a un package populaire ET scripts lifecycle. ' +
+    'Vecteur classique de dependency confusion: le code s\'execute a l\'installation. ' +
+    'NE PAS installer. Verifier le nom exact du package. Signaler sur npm.',
+
+  credential_env_exfil:
+    'CRITIQUE: Ecriture dans des chemins sensibles (cache npm/yarn, credentials) + acces aux variables d\'environnement. ' +
+    'Double vecteur d\'exfiltration de credentials. Supprimer le package. Regenerer tous les secrets. ' +
+    'Nettoyer le cache: npm cache clean --force.',
+
+  lifecycle_inline_exec:
+    'CRITIQUE: Script lifecycle avec node -e (execution inline). Le code s\'execute automatiquement a npm install. ' +
+    'NE PAS installer. Si deja installe: considerer la machine compromise. ' +
+    'Auditer les modifications systeme recentes.',
+
+  lifecycle_remote_require:
+    'CRITIQUE: Script lifecycle avec require(http/https) pour charger du code distant. ' +
+    'Le payload est telecharge et execute automatiquement a l\'installation. ' +
+    'NE PAS installer. Bloquer les connexions sortantes. Supprimer le package.',
+
+  obfuscated_credential_tampering:
+    'CRITIQUE: Code obfusque + ecriture dans des chemins sensibles. Dissimulation de vol de credentials. ' +
+    'Supprimer le package immediatement. Nettoyer le cache npm/yarn. Regenerer tous les secrets.',
+
   bin_field_hijack:
     'CRITIQUE: Le champ "bin" de package.json shadow une commande systeme (node, npm, git, bash, etc.). ' +
     'A l\'installation, npm cree un symlink dans node_modules/.bin/ qui intercepte la commande reelle. ' +

@@ -53,6 +53,7 @@ const { runScoringHardeningTests } = require('./integration/scoring-hardening.te
 const { runGroundTruthSmokeTests } = require('./integration/ground-truth-smoke.test');
 const { runV266FixesTests } = require('./integration/v266-fixes.test');
 const { runEvaluationSmokeTests } = require('./integration/evaluation-smoke.test');
+const { runCompoundScoringTests } = require('./integration/compound-scoring.test');
 
 // Temporal analysis tests
 const { runTemporalAnalysisTests } = require('./temporal/temporal-analysis.test');
@@ -149,6 +150,9 @@ async function timed(name, fn) {
 
   // Evaluation methodology smoke tests (v2.6.9)
   await timed('evaluation-smoke', runEvaluationSmokeTests);
+
+  // Compound scoring tests (v2.9.2)
+  await timed('compound-scoring', runCompoundScoringTests);
 
   // ML feature extraction tests (v2.8.7)
   await timed('ml-feature-extractor', runMLFeatureExtractorTests);
