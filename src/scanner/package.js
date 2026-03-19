@@ -137,6 +137,11 @@ async function scanPackageJson(targetPath) {
       : pkg.bin;
     for (const [cmdName, cmdPath] of Object.entries(binEntries || {})) {
       if (SHADOWED_COMMANDS.has(cmdName)) {
+        // Skip when the package IS the legitimate provider of the command:
+        // 1. Self-name: npm→bin.npm, yarn→bin.yarn
+        // 2. Sibling commands: npm also provides npx → pkg.name in SHADOWED_COMMANDS
+        // Typosquats still caught: 'nmp' declaring bin.npm → 'nmp' not in SHADOWED_COMMANDS → fires
+        if (cmdName === pkg.name || SHADOWED_COMMANDS.has(pkg.name)) continue;
         threats.push({
           type: 'bin_field_hijack',
           severity: 'CRITICAL',

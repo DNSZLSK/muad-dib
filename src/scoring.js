@@ -156,14 +156,16 @@ const DIST_EXEMPT_TYPES = new Set([
   'cross_file_dataflow',      // credential read → network exfil across files
   'staged_eval_decode',       // eval(atob(...)) (explicit payload staging)
   'reverse_shell',            // net.Socket + connect + pipe (always malicious)
-  'detached_credential_exfil', // detached process + credential exfil (DPRK/Lazarus)
+  // detached_credential_exfil removed from DIST_EXEMPT: in dist/ files, co-occurrence of
+  // detached_process + env_access + network is coincidental bundler aggregation.
+  // Kept in REACHABILITY_EXEMPT_TYPES (lifecycle invocation is valid).
   'node_modules_write',       // writeFile to node_modules/ (worm propagation)
   'npm_publish_worm',         // exec("npm publish") (worm propagation)
   // Dangerous shell commands in dist/ are real threats, never bundler output
   'dangerous_exec',
   // Compound scoring rules — co-occurrence signals, never FP
-  'crypto_staged_payload', 'lifecycle_typosquat', 'credential_env_exfil',
-  'lifecycle_inline_exec', 'lifecycle_remote_require', 'obfuscated_credential_tampering'
+  'crypto_staged_payload', 'lifecycle_typosquat',
+  'lifecycle_inline_exec', 'lifecycle_remote_require'
   // P6: remote_code_load and proxy_data_intercept removed — in bundled dist/ files,
   // fetch + eval co-occurrence is coincidental (bundler combines HTTP client + template compilation).
   // fetch_decrypt_exec (fetch+decrypt+eval triple) remains exempt — never coincidental.
@@ -181,7 +183,7 @@ const DIST_BUNDLER_ARTIFACT_TYPES = new Set([
   'dynamic_require', 'dynamic_import',
   'obfuscation_detected', 'high_entropy_string', 'possible_obfuscation',
   'js_obfuscation_pattern', 'vm_code_execution',
-  'module_compile', 'module_compile_dynamic',
+  'module_compile', 'module_compile_dynamic', 'unicode_variation_decoder',
   // P7: env_access in dist/ is bundled SDK config reading, not credential theft
   'env_access',
   // P8: Proxy traps in dist/ are state management frameworks (MobX, Vue reactivity, Immer),
@@ -189,7 +191,12 @@ const DIST_BUNDLER_ARTIFACT_TYPES = new Set([
   'proxy_data_intercept',
   // P9: fetch+eval in dist/ is Vite/Webpack code splitting (lazy chunk loading),
   // not remote code execution. Two-notch downgrade (CRITICAL→MEDIUM, HIGH→LOW).
-  'remote_code_load'
+  'remote_code_load',
+  // P10: In dist/ bundles, binary file refs + crypto are coincidental bundler aggregation
+  // (webpack bundles crypto utils alongside image processing). Real steganographic attacks
+  // (flatmap-stream) have these at package root, not dist/. Compound (crypto_staged_payload)
+  // is in DIST_EXEMPT_TYPES so the overall signal is preserved when truly malicious.
+  'staged_binary_payload', 'crypto_decipher'
 ]);
 
 // Types exempt from reachability downgrade — IOC matches, lifecycle, and package-level types.
@@ -222,7 +229,8 @@ const SCORING_COMPOUNDS = [
     requires: ['staged_binary_payload', 'crypto_decipher'],
     severity: 'CRITICAL',
     message: 'Binary file reference + crypto decryption — steganographic payload chain (scoring compound).',
-    fileFrom: 'staged_binary_payload'
+    fileFrom: 'staged_binary_payload',
+    sameFile: true // Real steganographic attacks (flatmap-stream) have crypto+binary in the SAME file
   },
   {
     type: 'lifecycle_typosquat',
@@ -230,13 +238,6 @@ const SCORING_COMPOUNDS = [
     severity: 'CRITICAL',
     message: 'Lifecycle hook on typosquat package — dependency confusion attack vector (scoring compound).',
     fileFrom: 'typosquat_detected'
-  },
-  {
-    type: 'credential_env_exfil',
-    requires: ['credential_tampering', 'env_access'],
-    severity: 'CRITICAL',
-    message: 'Credential path tampering + environment variable access — credential exfiltration chain (scoring compound).',
-    fileFrom: 'credential_tampering'
   },
   {
     type: 'lifecycle_inline_exec',
@@ -252,13 +253,6 @@ const SCORING_COMPOUNDS = [
     message: 'Lifecycle hook loading remote code (require http/https) — supply chain payload delivery (scoring compound).',
     fileFrom: 'network_require'
   },
-  {
-    type: 'obfuscated_credential_tampering',
-    requires: ['credential_tampering', 'obfuscation_detected'],
-    severity: 'CRITICAL',
-    message: 'Obfuscated code + credential path tampering — concealed credential theft (scoring compound).',
-    fileFrom: 'credential_tampering'
-  }
 ];
 
 /**
@@ -284,6 +278,28 @@ function applyCompoundBoosts(threats) {
 
     // Check all required types are present
     if (compound.requires.every(req => typeSet.has(req))) {
+      // Severity gate: at least one component must have severity >= MEDIUM
+      // after FP reductions. If all components were downgraded to LOW,
+      // the compound signal is not strong enough to justify a CRITICAL boost.
+      const hasSignificantComponent = compound.requires.some(req =>
+        threats.some(t => t.type === req && t.severity !== 'LOW')
+      );
+      if (!hasSignificantComponent) continue;
+
+      // Same-file constraint: all required types must appear in at least one common file.
+      // Prevents cross-file coincidental matches (e.g. next.js: staged_binary_payload in
+      // dist/compiled/@vercel/nft/index.js + crypto_decipher in a different file).
+      if (compound.sameFile) {
+        const filesByType = compound.requires.map(req =>
+          new Set(threats.filter(t => t.type === req).map(t => t.file))
+        );
+        // Find intersection of all file sets
+        const commonFiles = [...filesByType[0]].filter(f =>
+          filesByType.every(s => s.has(f))
+        );
+        if (commonFiles.length === 0) continue;
+      }
+
       threats.push({
         type: compound.type,
         severity: compound.severity,

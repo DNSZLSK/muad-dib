@@ -277,6 +277,48 @@ async function runPackageTests() {
     } finally { cleanupTemp(tmp); }
   });
 
+  // --- v2.9.3: bin_field_hijack self-name exemption ---
+
+  await asyncTest('PACKAGE: bin field self-name exemption — npm declaring bin.npm → NO detection', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pkg-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
+      name: 'npm', version: '10.0.0',
+      bin: { npm: './bin/npm-cli.js' }
+    }));
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'bin_field_hijack');
+      assert(!t, 'npm declaring bin.npm is NOT hijacking — it IS npm');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('PACKAGE: bin field typosquat — nmp declaring bin.npm → CRITICAL', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pkg-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
+      name: 'nmp', version: '1.0.0',
+      bin: { npm: './evil.js' }
+    }));
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'bin_field_hijack');
+      assert(t, 'Typosquat nmp declaring bin.npm should trigger bin_field_hijack');
+      assert(t.severity === 'CRITICAL', `Expected CRITICAL, got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('PACKAGE: bin field self-name exemption — yarn declaring bin.yarn → NO detection', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pkg-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
+      name: 'yarn', version: '1.22.0',
+      bin: { yarn: './bin/yarn.js' }
+    }));
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'bin_field_hijack');
+      assert(!t, 'yarn declaring bin.yarn is NOT hijacking — it IS yarn');
+    } finally { cleanupTemp(tmp); }
+  });
+
   // --- git dependency RCE (PKG-014) ---
   console.log('\n=== GIT DEPENDENCY RCE TESTS ===\n');
 

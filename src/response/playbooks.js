@@ -547,11 +547,6 @@ const PLAYBOOKS = {
     'Vecteur classique de dependency confusion: le code s\'execute a l\'installation. ' +
     'NE PAS installer. Verifier le nom exact du package. Signaler sur npm.',
 
-  credential_env_exfil:
-    'CRITIQUE: Ecriture dans des chemins sensibles (cache npm/yarn, credentials) + acces aux variables d\'environnement. ' +
-    'Double vecteur d\'exfiltration de credentials. Supprimer le package. Regenerer tous les secrets. ' +
-    'Nettoyer le cache: npm cache clean --force.',
-
   lifecycle_inline_exec:
     'CRITIQUE: Script lifecycle avec node -e (execution inline). Le code s\'execute automatiquement a npm install. ' +
     'NE PAS installer. Si deja installe: considerer la machine compromise. ' +
@@ -561,10 +556,6 @@ const PLAYBOOKS = {
     'CRITIQUE: Script lifecycle avec require(http/https) pour charger du code distant. ' +
     'Le payload est telecharge et execute automatiquement a l\'installation. ' +
     'NE PAS installer. Bloquer les connexions sortantes. Supprimer le package.',
-
-  obfuscated_credential_tampering:
-    'CRITIQUE: Code obfusque + ecriture dans des chemins sensibles. Dissimulation de vol de credentials. ' +
-    'Supprimer le package immediatement. Nettoyer le cache npm/yarn. Regenerer tous les secrets.',
 
   bin_field_hijack:
     'CRITIQUE: Le champ "bin" de package.json shadow une commande systeme (node, npm, git, bash, etc.). ' +
