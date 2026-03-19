@@ -95,22 +95,22 @@ async function runObfuscationTests() {
 
   // --- v2.9.1: GlassWorm Unicode invisible detection ---
 
-  await asyncTest('OBFUSCATION: Detects zero-width chars injection (>=3)', async () => {
-    // Inject 5 zero-width space chars (U+200B) into a JS file
-    const invisible = '\u200B'.repeat(5);
+  await asyncTest('OBFUSCATION: Detects zero-width chars injection (>=10)', async () => {
+    // Inject 12 zero-width space chars (U+200B) into a JS file
+    const invisible = '\u200B'.repeat(12);
     const code = `var x = "${invisible}"; console.log(x);`;
     const tmp = makeTempPkg(code);
     try {
       const result = await runScanDirect(tmp);
       const t = (result.threats || []).find(t => t.type === 'unicode_invisible_injection');
-      assert(t, 'Should detect unicode_invisible_injection for 5 zero-width chars');
+      assert(t, 'Should detect unicode_invisible_injection for 12 zero-width chars');
       assert(t.severity === 'CRITICAL', `Expected CRITICAL, got ${t.severity}`);
     } finally { cleanupTemp(tmp); }
   });
 
-  await asyncTest('OBFUSCATION: Detects variation selectors (U+FE00-FE0F)', async () => {
-    // Inject 4 variation selectors (U+FE01, U+FE02, U+FE03, U+FE04)
-    const code = `var payload = "a\uFE01b\uFE02c\uFE03d\uFE04"; eval(decode(payload));`;
+  await asyncTest('OBFUSCATION: Detects variation selectors (U+FE00-FE0E)', async () => {
+    // Inject 12 variation selectors (U+FE01-FE0C) — excludes U+FE0F (emoji)
+    const code = `var payload = "a\uFE01b\uFE02c\uFE03d\uFE04e\uFE05f\uFE06g\uFE07h\uFE08i\uFE09j\uFE0Ak\uFE0Bl\uFE0C"; eval(decode(payload));`;
     const tmp = makeTempPkg(code);
     try {
       const result = await runScanDirect(tmp);
@@ -120,8 +120,8 @@ async function runObfuscationTests() {
   });
 
   await asyncTest('OBFUSCATION: Detects mixed invisible chars (zero-width + FEFF)', async () => {
-    // U+200B + U+200C + U+FEFF (at pos > 0) = 3 invisible chars
-    const code = `var a = 1;\u200B\u200Cvar b = 2;\uFEFFvar c = 3;`;
+    // 12 mixed invisible chars — above threshold of 10
+    const code = `var a = 1;\u200B\u200C\u200D\u200B\u200C\u200D\u200B\u200C\u200D\u200Bvar b = 2;\uFEFF\u2060var c = 3;`;
     const tmp = makeTempPkg(code);
     try {
       const result = await runScanDirect(tmp);
@@ -141,27 +141,55 @@ async function runObfuscationTests() {
     } finally { cleanupTemp(tmp); }
   });
 
-  await asyncTest('OBFUSCATION: NO detection for <3 invisible chars', async () => {
-    // Only 2 invisible chars — below threshold
-    const code = `var x = "\u200B\u200C"; console.log(x);`;
+  await asyncTest('OBFUSCATION: NO detection for <10 invisible chars', async () => {
+    // Only 5 invisible chars — below threshold of 10
+    const code = `var x = "\u200B\u200C\u200D\u200B\u200C"; console.log(x);`;
     const tmp = makeTempPkg(code);
     try {
       const result = await runScanDirect(tmp);
       const t = (result.threats || []).find(t => t.type === 'unicode_invisible_injection');
-      assert(!t, 'Only 2 invisible chars should NOT trigger (threshold is 3)');
+      assert(!t, 'Only 5 invisible chars should NOT trigger (threshold is 10)');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('OBFUSCATION: NO detection for emojis with U+FE0F variation selector', async () => {
+    // Emojis use U+FE0F (VS16) for presentation — must NOT trigger
+    const code = `var msg = "Delete \uD83D\uDDD1\uFE0F info \u2139\uFE0F warning \u26A0\uFE0F check \u2705\uFE0F star \u2B50\uFE0F fire \uD83D\uDD25\uFE0F heart \u2764\uFE0F ok \uD83D\uDC4D\uFE0F no \uD83D\uDC4E\uFE0F sun \u2600\uFE0F"; console.log(msg);`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = (result.threats || []).find(t => t.type === 'unicode_invisible_injection');
+      assert(!t, 'Emojis with U+FE0F should NOT trigger unicode_invisible_injection');
     } finally { cleanupTemp(tmp); }
   });
 
   await asyncTest('OBFUSCATION: Unicode invisible downgraded to LOW for large files', async () => {
-    // File > 100KB with invisible chars → isPackageOutput → LOW
+    // File > 100KB with 12 invisible chars → isPackageOutput → LOW
     const padding = '// ' + 'x'.repeat(120 * 1024) + '\n';
-    const code = padding + `var a = "\u200B\u200C\u200D\uFE01\uFE02";`;
+    const code = padding + `var a = "\u200B\u200C\u200D\uFE01\uFE02\u200B\u200C\u200D\uFE03\uFE04\uFE05\uFE06";`;
     const tmp = makeTempPkg(code);
     try {
       const result = await runScanDirect(tmp);
       const t = (result.threats || []).find(t => t.type === 'unicode_invisible_injection');
       assert(t, 'Should still detect unicode_invisible_injection in large file');
       assert(t.severity === 'LOW', `Expected LOW for large file, got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('OBFUSCATION: Unicode invisible in locale/ file → LOW (not CRITICAL)', async () => {
+    // Persian/Arabic text uses ZWNJ (U+200C) for proper character rendering
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-obf-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'test-locale', version: '1.0.0' }));
+    const localeDir = path.join(tmp, 'locale', 'fa-IR', '_lib');
+    fs.mkdirSync(localeDir, { recursive: true });
+    // 15 ZWNJ chars — legitimate Persian text formatting
+    const zwnj = '\u200C'.repeat(15);
+    fs.writeFileSync(path.join(localeDir, 'formatDistance.js'), `module.exports = function(token) { return "${zwnj}"; };`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = (result.threats || []).find(t => t.type === 'unicode_invisible_injection' && t.file && t.file.includes('locale'));
+      assert(t, 'Should detect unicode_invisible_injection in locale file');
+      assert(t.severity === 'LOW', `Expected LOW for locale file, got ${t.severity}`);
     } finally { cleanupTemp(tmp); }
   });
 

@@ -2360,7 +2360,7 @@ function handlePostWalk(ctx) {
     t.file === ctx.relFile && t.type === 'detached_process'
   );
   const hasSensitiveEnvInFile = ctx.threats.some(t =>
-    t.file === ctx.relFile && t.type === 'env_access'
+    t.file === ctx.relFile && t.type === 'env_access' && t.severity === 'HIGH'
   );
   if (hasDetachedInFile && hasSensitiveEnvInFile && ctx.hasNetworkCallInFile) {
     ctx.threats.push({
@@ -2372,11 +2372,15 @@ function handlePostWalk(ctx) {
   }
 
   // GlassWorm: Unicode variation selector decoder = .codePointAt + variation selector constants
+  // CRITICAL if combined with eval/exec (GlassWorm always uses dynamic execution),
+  // MEDIUM otherwise (.codePointAt + 0xFE00 is legitimate Unicode processing in fonts/text libs)
   if (ctx.hasCodePointAt && ctx.hasVariationSelectorConst) {
     ctx.threats.push({
       type: 'unicode_variation_decoder',
-      severity: 'CRITICAL',
-      message: 'Unicode variation selector decoder: .codePointAt() + 0xFE00/0xE0100 constants — GlassWorm payload reconstruction from invisible characters.',
+      severity: ctx.hasDynamicExec ? 'CRITICAL' : 'MEDIUM',
+      message: ctx.hasDynamicExec
+        ? 'Unicode variation selector decoder: .codePointAt() + 0xFE00/0xE0100 constants + dynamic execution — GlassWorm payload reconstruction from invisible characters.'
+        : 'Unicode variation selector decoder: .codePointAt() + 0xFE00/0xE0100 constants — likely legitimate Unicode processing (text formatting, font rendering).',
       file: ctx.relFile
     });
   }

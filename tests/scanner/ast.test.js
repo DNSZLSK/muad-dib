@@ -2127,6 +2127,34 @@ child.unref();
     } finally { cleanupTemp(tmp); }
   });
 
+  await asyncTest('AST: detached + MEDIUM env_access (dynamic) → env severity gate blocks AST compound', async () => {
+    // The AST scanner's detached_credential_exfil requires HIGH env_access (named sensitive var).
+    // MEDIUM env_access (dynamic process.env[key]) should NOT trigger the AST path.
+    // We use a two-file package to isolate: env+detached in file A, network in file B.
+    // This prevents the cross-scanner compound (which uses suspicious_dataflow) from firing.
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-detached-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'test-pm', version: '1.0.0' }));
+    // File A: detached process + dynamic env access (MEDIUM) — no network in this file
+    fs.writeFileSync(path.join(tmp, 'daemon.js'), `
+const { spawn } = require('child_process');
+const envKey = 'HOME';
+const val = process.env[envKey];
+console.log('running as:', val);
+const child = spawn('node', ['worker.js'], { detached: true, stdio: 'ignore' });
+child.unref();
+`);
+    // File B: network call (separate file, no detached process)
+    fs.writeFileSync(path.join(tmp, 'telemetry.js'), `
+const https = require('https');
+https.request({ hostname: 'telemetry.example.com', path: '/report' }, () => {}).end('{}');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'detached_credential_exfil');
+      assert(!t, 'MEDIUM env_access (dynamic process.env[key]) should NOT trigger detached_credential_exfil');
+    } finally { cleanupTemp(tmp); }
+  });
+
   await asyncTest('AST: env_access WITHOUT detached process → no detached_credential_exfil', async () => {
     const tmp = makeTempPkg(`
 const https = require('https');
@@ -2396,6 +2424,28 @@ eval(Buffer.from(payload).toString());
       const t = result.threats.find(t => t.type === 'unicode_variation_decoder');
       assert(t, 'Should detect unicode_variation_decoder');
       assert(t.severity === 'CRITICAL', `Expected CRITICAL, got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: codePointAt + 0xFE00 WITHOUT eval → unicode_variation_decoder MEDIUM', async () => {
+    const tmp = makeTempPkg(`
+// Legitimate Unicode processing (font/text library)
+const payload = [];
+for (let i = 0; i < encoded.length; i++) {
+  const cp = encoded.codePointAt(i);
+  if (cp >= 0xFE00 && cp <= 0xFE0F) {
+    payload.push(cp - 0xFE00);
+  } else if (cp >= 0xE0100 && cp <= 0xE01EF) {
+    payload.push(cp - 0xE0100 + 16);
+  }
+}
+console.log(payload);
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'unicode_variation_decoder');
+      assert(t, 'Should detect unicode_variation_decoder even without eval');
+      assert(t.severity === 'MEDIUM', `Expected MEDIUM without eval, got ${t.severity}`);
     } finally { cleanupTemp(tmp); }
   });
 

@@ -23,7 +23,9 @@ function detectObfuscation(targetPath) {
     // P6: Any JS file > 100KB is overwhelmingly bundled output regardless of directory name.
     // Real obfuscated malware is typically small (<50KB). Catches prettier plugins/, svelte compiler/, etc.
     const isLargeJs = basename.endsWith('.js') && content.length > 100 * 1024;
-    const isPackageOutput = isMinified || isBundled || isInDistOrBuild || isLargeCjsMjs || isLargeJs;
+    // Locale/i18n files legitimately contain invisible Unicode (e.g. Persian ZWNJ U+200C)
+    const isLocaleFile = /(?:^|[/\\])(?:locale|locales|i18n|intl|lang|languages|translations)[/\\]/i.test(relativePath);
+    const isPackageOutput = isMinified || isBundled || isInDistOrBuild || isLargeCjsMjs || isLargeJs || isLocaleFile;
 
     // 1. Ratio code sur une seule ligne (skip .min.js — minification, not obfuscation)
     if (!isMinified) {
@@ -73,11 +75,11 @@ function detectObfuscation(targetPath) {
     // 7. Unicode invisible character injection (GlassWorm — mars 2026)
     // Detects zero-width chars, variation selectors, tag characters embedded in source
     const invisibleCount = countInvisibleUnicode(content);
-    if (invisibleCount >= 3) {
+    if (invisibleCount >= 10) {
       threats.push({
         type: 'unicode_invisible_injection',
         severity: isPackageOutput ? 'LOW' : 'CRITICAL',
-        message: `${invisibleCount} invisible Unicode characters detected (zero-width, variation selectors, tag chars). GlassWorm technique: payload encoded via invisible codepoints.`,
+        message: `${invisibleCount} invisible Unicode characters detected (zero-width, variation selectors, tag chars). Possible hidden payload encoded via invisible codepoints.`,
         file: relativePath
       });
     }
@@ -151,7 +153,7 @@ function hasLargeStringArray(content) {
  * - U+200B, U+200C, U+200D (zero-width space/joiner/non-joiner)
  * - U+FEFF (BOM — only if position > 0; pos 0 is legitimate BOM)
  * - U+2060 (word joiner), U+180E (Mongolian vowel separator)
- * - U+FE00-U+FE0F (variation selectors — GlassWorm 256-value encoding)
+ * - U+FE00-U+FE0E (variation selectors — excludes U+FE0F emoji presentation selector)
  * - U+E0100-U+E01EF (variation selectors supplement)
  * - U+E0001-U+E007F (tag characters)
  */
@@ -168,8 +170,8 @@ function countInvisibleUnicode(content) {
     else if (cp === 0xFEFF && i > 0) {
       count++;
     }
-    // BMP variation selectors (U+FE00-U+FE0F)
-    else if (cp >= 0xFE00 && cp <= 0xFE0F) {
+    // BMP variation selectors (U+FE00-U+FE0E) — excludes U+FE0F (emoji presentation selector)
+    else if (cp >= 0xFE00 && cp <= 0xFE0E) {
       count++;
     }
     // Supplementary plane: variation selectors supplement (U+E0100-U+E01EF)

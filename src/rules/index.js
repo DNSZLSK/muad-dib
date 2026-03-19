@@ -1621,18 +1621,6 @@ const RULES = {
     ],
     mitre: 'T1195.002'
   },
-  credential_env_exfil: {
-    id: 'MUADDIB-COMPOUND-003',
-    name: 'Credential Tampering + Env Access',
-    severity: 'CRITICAL',
-    confidence: 'high',
-    description: 'Ecriture dans un chemin sensible (cache npm/yarn, credentials) combinee avec acces aux variables d\'environnement. Chaine d\'exfiltration de credentials par double vecteur.',
-    references: [
-      'https://attack.mitre.org/techniques/T1552/001/',
-      'https://attack.mitre.org/techniques/T1565/001/'
-    ],
-    mitre: 'T1552.001'
-  },
   lifecycle_inline_exec: {
     id: 'MUADDIB-COMPOUND-004',
     name: 'Lifecycle Hook + Inline Node Execution',
@@ -1656,18 +1644,6 @@ const RULES = {
       'https://attack.mitre.org/techniques/T1195/002/'
     ],
     mitre: 'T1105'
-  },
-  obfuscated_credential_tampering: {
-    id: 'MUADDIB-COMPOUND-006',
-    name: 'Obfuscated Code + Credential Tampering',
-    severity: 'CRITICAL',
-    confidence: 'high',
-    description: 'Code obfusque combine avec ecriture dans des chemins sensibles (cache npm/yarn, credentials). Dissimulation de vol de credentials.',
-    references: [
-      'https://attack.mitre.org/techniques/T1027/',
-      'https://attack.mitre.org/techniques/T1565/001/'
-    ],
-    mitre: 'T1027'
   },
 };
 

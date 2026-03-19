@@ -570,6 +570,7 @@ async function run(targetPath, options = {}) {
   // Cross-scanner compound: detached_process + suspicious_dataflow in same file
   // Catches cases where credential flow is detected by dataflow scanner, not AST scanner
   {
+    const DIST_RE = /(?:^|[/\\])(?:dist|build|out|output)[/\\]|\.min\.js$|\.bundle\.js$/i;
     const fileMap = Object.create(null);
     for (const t of deduped) {
       if (t.file) {
@@ -578,6 +579,9 @@ async function run(targetPath, options = {}) {
       }
     }
     for (const file of Object.keys(fileMap)) {
+      // Skip dist/build files — bundler aggregation creates coincidental co-occurrence
+      // of detached_process + suspicious_dataflow. Real DPRK attacks target root files.
+      if (DIST_RE.test(file)) continue;
       const fileThreats = fileMap[file];
       const hasDetached = fileThreats.some(t => t.type === 'detached_process');
       const hasCredFlow = fileThreats.some(t => t.type === 'suspicious_dataflow');

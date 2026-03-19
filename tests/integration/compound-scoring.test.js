@@ -87,40 +87,7 @@ async function runCompoundScoringTests() {
   });
 
   // ===================================================================
-  // 3. credential_env_exfil — credential_tampering + env_access
-  // ===================================================================
-  test('Compound: credential_env_exfil — positive', () => {
-    const threats = [
-      { type: 'credential_tampering', severity: 'CRITICAL', file: 'steal.js', message: 'write to _cacache' },
-      { type: 'env_access', severity: 'HIGH', file: 'config.js', message: 'NPM_TOKEN' }
-    ];
-    applyCompoundBoosts(threats);
-    const compound = threats.find(t => t.type === 'credential_env_exfil');
-    assert(compound, 'credential_env_exfil compound should be added');
-    assert(compound.severity === 'CRITICAL', `Should be CRITICAL, got ${compound.severity}`);
-    assert(compound.file === 'steal.js', `File should come from credential_tampering`);
-  });
-
-  test('Compound: credential_env_exfil — negative (only credential_tampering)', () => {
-    const threats = [
-      { type: 'credential_tampering', severity: 'CRITICAL', file: 'steal.js', message: 'write to _cacache' }
-    ];
-    applyCompoundBoosts(threats);
-    const compound = threats.find(t => t.type === 'credential_env_exfil');
-    assert(!compound, 'Should NOT add compound with only credential_tampering');
-  });
-
-  test('Compound: credential_env_exfil — negative (only env_access)', () => {
-    const threats = [
-      { type: 'env_access', severity: 'HIGH', file: 'config.js', message: 'NPM_TOKEN' }
-    ];
-    applyCompoundBoosts(threats);
-    const compound = threats.find(t => t.type === 'credential_env_exfil');
-    assert(!compound, 'Should NOT add compound with only env_access');
-  });
-
-  // ===================================================================
-  // 4. lifecycle_inline_exec — lifecycle_script + node_inline_exec
+  // 3. lifecycle_inline_exec — lifecycle_script + node_inline_exec
   // ===================================================================
   test('Compound: lifecycle_inline_exec — positive', () => {
     const threats = [
@@ -144,7 +111,7 @@ async function runCompoundScoringTests() {
   });
 
   // ===================================================================
-  // 5. lifecycle_remote_require — lifecycle_script + network_require
+  // 4. lifecycle_remote_require — lifecycle_script + network_require
   // ===================================================================
   test('Compound: lifecycle_remote_require — positive', () => {
     const threats = [
@@ -168,27 +135,50 @@ async function runCompoundScoringTests() {
   });
 
   // ===================================================================
-  // 6. obfuscated_credential_tampering — credential_tampering + obfuscation_detected
+  // Disabled compounds — verify they do NOT fire
   // ===================================================================
-  test('Compound: obfuscated_credential_tampering — positive', () => {
+  test('Disabled: credential_env_exfil does NOT fire (too noisy)', () => {
+    const threats = [
+      { type: 'credential_tampering', severity: 'CRITICAL', file: 'steal.js', message: 'write to _cacache' },
+      { type: 'env_access', severity: 'HIGH', file: 'config.js', message: 'NPM_TOKEN' }
+    ];
+    applyCompoundBoosts(threats);
+    const compound = threats.find(t => t.type === 'credential_env_exfil');
+    assert(!compound, 'credential_env_exfil should be disabled — fires on legitimate SDKs');
+  });
+
+  test('Disabled: obfuscated_credential_tampering does NOT fire (too noisy)', () => {
     const threats = [
       { type: 'credential_tampering', severity: 'CRITICAL', file: 'payload.js', message: 'write to _cacache' },
       { type: 'obfuscation_detected', severity: 'HIGH', file: 'payload.js', message: 'obfuscated code' }
     ];
     applyCompoundBoosts(threats);
     const compound = threats.find(t => t.type === 'obfuscated_credential_tampering');
-    assert(compound, 'obfuscated_credential_tampering compound should be added');
-    assert(compound.severity === 'CRITICAL', `Should be CRITICAL, got ${compound.severity}`);
-    assert(compound.file === 'payload.js', `File should come from credential_tampering`);
+    assert(!compound, 'obfuscated_credential_tampering should be disabled — fires on minified SDKs');
   });
 
-  test('Compound: obfuscated_credential_tampering — negative (only obfuscation_detected)', () => {
+  // ===================================================================
+  // Same-file constraint for crypto_staged_payload
+  // ===================================================================
+  test('Compound: crypto_staged_payload — cross-file does NOT fire (sameFile constraint)', () => {
     const threats = [
-      { type: 'obfuscation_detected', severity: 'HIGH', file: 'payload.js', message: 'obfuscated code' }
+      { type: 'staged_binary_payload', severity: 'HIGH', file: 'dist/compiled/nft/index.js', message: 'Binary ref' },
+      { type: 'crypto_decipher', severity: 'HIGH', file: 'lib/crypto.js', message: 'createDecipher' }
     ];
     applyCompoundBoosts(threats);
-    const compound = threats.find(t => t.type === 'obfuscated_credential_tampering');
-    assert(!compound, 'Should NOT add compound with only obfuscation_detected');
+    const compound = threats.find(t => t.type === 'crypto_staged_payload');
+    assert(!compound, 'crypto_staged_payload should NOT fire when types are in different files');
+  });
+
+  test('Compound: crypto_staged_payload — same file fires (sameFile constraint)', () => {
+    const threats = [
+      { type: 'staged_binary_payload', severity: 'HIGH', file: 'index.js', message: 'Binary ref' },
+      { type: 'crypto_decipher', severity: 'HIGH', file: 'index.js', message: 'createDecipher' }
+    ];
+    applyCompoundBoosts(threats);
+    const compound = threats.find(t => t.type === 'crypto_staged_payload');
+    assert(compound, 'crypto_staged_payload should fire when both types are in the same file');
+    assert(compound.severity === 'CRITICAL', `Should be CRITICAL, got ${compound.severity}`);
   });
 
   // ===================================================================
@@ -197,23 +187,12 @@ async function runCompoundScoringTests() {
   test('Compound: file assignment uses fileFrom component', () => {
     const threats = [
       { type: 'staged_binary_payload', severity: 'HIGH', file: 'src/main.js', message: 'Binary ref' },
-      { type: 'crypto_decipher', severity: 'HIGH', file: 'lib/crypto.js', message: 'createDecipher' }
+      { type: 'crypto_decipher', severity: 'HIGH', file: 'src/main.js', message: 'createDecipher' }
     ];
     applyCompoundBoosts(threats);
     const compound = threats.find(t => t.type === 'crypto_staged_payload');
     assert(compound, 'Should add compound');
     assert(compound.file === 'src/main.js', `Should use staged_binary_payload file, got ${compound.file}`);
-  });
-
-  test('Compound: file assignment — credential_env_exfil uses credential_tampering file', () => {
-    const threats = [
-      { type: 'env_access', severity: 'HIGH', file: 'config.js', message: 'NPM_TOKEN' },
-      { type: 'credential_tampering', severity: 'CRITICAL', file: 'steal.js', message: 'write to _cacache' }
-    ];
-    applyCompoundBoosts(threats);
-    const compound = threats.find(t => t.type === 'credential_env_exfil');
-    assert(compound, 'Should add compound');
-    assert(compound.file === 'steal.js', `Should use credential_tampering file, got ${compound.file}`);
   });
 
   // ===================================================================
@@ -277,27 +256,41 @@ async function runCompoundScoringTests() {
   });
 
   // ===================================================================
-  // Compound types in dist/ stay exempt
+  // Compound types in dist/ — components downgraded to LOW by DIST_BUNDLER_ARTIFACT_TYPES
   // ===================================================================
-  test('DIST_EXEMPT: compound types in dist/ stay CRITICAL', () => {
+  test('DIST_BUNDLER: crypto_staged_payload blocked in dist/ (components → LOW)', () => {
     const threats = [
       { type: 'staged_binary_payload', severity: 'HIGH', file: 'dist/main.js', message: 'Binary ref' },
       { type: 'crypto_decipher', severity: 'HIGH', file: 'dist/main.js', message: 'createDecipher' }
     ];
     applyFPReductions(threats, null, null);
+    // After FP reductions, both are LOW (two-notch downgrade in dist/)
+    assert(threats[0].severity === 'LOW', `staged_binary_payload should be LOW in dist/, got ${threats[0].severity}`);
+    assert(threats[1].severity === 'LOW', `crypto_decipher should be LOW in dist/, got ${threats[1].severity}`);
     applyCompoundBoosts(threats);
     const compound = threats.find(t => t.type === 'crypto_staged_payload');
-    assert(compound, 'Compound should be added');
-    assert(compound.severity === 'CRITICAL', `Compound in dist/ should stay CRITICAL, got ${compound.severity}`);
+    assert(!compound, 'crypto_staged_payload should NOT fire when both components are LOW in dist/');
+  });
+
+  test('DIST_BUNDLER: crypto_staged_payload fires at root (components stay HIGH)', () => {
+    const threats = [
+      { type: 'staged_binary_payload', severity: 'HIGH', file: 'index.js', message: 'Binary ref' },
+      { type: 'crypto_decipher', severity: 'HIGH', file: 'index.js', message: 'createDecipher' }
+    ];
+    applyFPReductions(threats, null, null);
+    applyCompoundBoosts(threats);
+    const compound = threats.find(t => t.type === 'crypto_staged_payload');
+    assert(compound, 'crypto_staged_payload should fire at root (not in dist/)');
+    assert(compound.severity === 'CRITICAL', `Should be CRITICAL, got ${compound.severity}`);
   });
 
   // ===================================================================
-  // Rules and playbooks exist for all compound types
+  // Rules and playbooks exist for all 4 active compound types
   // ===================================================================
-  test('Rules: all 6 compound rules exist with correct IDs', () => {
+  test('Rules: all 4 active compound rules exist with correct IDs', () => {
     const compoundTypes = [
-      'crypto_staged_payload', 'lifecycle_typosquat', 'credential_env_exfil',
-      'lifecycle_inline_exec', 'lifecycle_remote_require', 'obfuscated_credential_tampering'
+      'crypto_staged_payload', 'lifecycle_typosquat',
+      'lifecycle_inline_exec', 'lifecycle_remote_require'
     ];
     for (const type of compoundTypes) {
       const rule = getRule(type);
@@ -308,10 +301,10 @@ async function runCompoundScoringTests() {
     }
   });
 
-  test('Playbooks: all 6 compound playbooks exist', () => {
+  test('Playbooks: all 4 active compound playbooks exist', () => {
     const compoundTypes = [
-      'crypto_staged_payload', 'lifecycle_typosquat', 'credential_env_exfil',
-      'lifecycle_inline_exec', 'lifecycle_remote_require', 'obfuscated_credential_tampering'
+      'crypto_staged_payload', 'lifecycle_typosquat',
+      'lifecycle_inline_exec', 'lifecycle_remote_require'
     ];
     for (const type of compoundTypes) {
       const playbook = getPlaybook(type);
@@ -322,55 +315,37 @@ async function runCompoundScoringTests() {
   });
 
   // ===================================================================
-  // Compounds after FP reductions — verify recovery works
+  // Severity gate: compound blocked when ALL components are LOW
   // ===================================================================
-  test('Compound recovery: credential_tampering downgraded to LOW but compound still fires', () => {
-    // Simulate 6 credential_tampering (count > 5 → downgraded to LOW)
-    // Need enough other threats to bring credential_tampering ratio below 40% percentage guard
+  test('Severity gate: crypto_staged_payload blocked when both LOW', () => {
     const threats = [
-      { type: 'credential_tampering', severity: 'CRITICAL', file: 'a.js', message: 'ct1' },
-      { type: 'credential_tampering', severity: 'CRITICAL', file: 'a.js', message: 'ct2' },
-      { type: 'credential_tampering', severity: 'CRITICAL', file: 'a.js', message: 'ct3' },
-      { type: 'credential_tampering', severity: 'CRITICAL', file: 'a.js', message: 'ct4' },
-      { type: 'credential_tampering', severity: 'CRITICAL', file: 'a.js', message: 'ct5' },
-      { type: 'credential_tampering', severity: 'CRITICAL', file: 'a.js', message: 'ct6' },
-      { type: 'env_access', severity: 'HIGH', file: 'b.js', message: 'NPM_TOKEN' },
-      // Padding threats to bring credential_tampering ratio below 40%
-      { type: 'dynamic_require', severity: 'HIGH', file: 'c.js', message: 'dr1' },
-      { type: 'dynamic_require', severity: 'HIGH', file: 'c.js', message: 'dr2' },
-      { type: 'dynamic_require', severity: 'HIGH', file: 'c.js', message: 'dr3' },
-      { type: 'dynamic_require', severity: 'HIGH', file: 'c.js', message: 'dr4' },
-      { type: 'dynamic_require', severity: 'HIGH', file: 'c.js', message: 'dr5' },
-      { type: 'dynamic_require', severity: 'HIGH', file: 'c.js', message: 'dr6' },
-      { type: 'dynamic_require', severity: 'HIGH', file: 'c.js', message: 'dr7' },
-      { type: 'dynamic_require', severity: 'HIGH', file: 'c.js', message: 'dr8' },
-      { type: 'dynamic_require', severity: 'HIGH', file: 'c.js', message: 'dr9' },
-      { type: 'dynamic_require', severity: 'HIGH', file: 'c.js', message: 'dr10' }
+      { type: 'staged_binary_payload', severity: 'LOW', file: 'a.js', message: 'bin' },
+      { type: 'crypto_decipher', severity: 'LOW', file: 'a.js', message: 'decipher' }
     ];
-    applyFPReductions(threats, null, null);
-    // credential_tampering should be downgraded to LOW (ratio 6/17 = 0.35 < 0.4)
-    assert(threats[0].severity === 'LOW', `credential_tampering count>5 should be LOW, got ${threats[0].severity}`);
-    // But compound should still fire because the TYPE is present
     applyCompoundBoosts(threats);
-    const compound = threats.find(t => t.type === 'credential_env_exfil');
-    assert(compound, 'credential_env_exfil should fire even after FP reductions downgraded severity');
-    assert(compound.severity === 'CRITICAL', `Compound should be CRITICAL, got ${compound.severity}`);
+    const compound = threats.find(t => t.type === 'crypto_staged_payload');
+    assert(!compound, 'Should NOT fire when all components are LOW');
   });
 
-  test('Compound recovery: obfuscation_detected downgraded to LOW but compound still fires', () => {
-    // Simulate 4 obfuscation_detected (count > 3 → downgraded to LOW)
+  test('Severity gate: fires when one component is MEDIUM and other is LOW', () => {
     const threats = [
-      { type: 'obfuscation_detected', severity: 'HIGH', file: 'a.js', message: 'obf1' },
-      { type: 'obfuscation_detected', severity: 'HIGH', file: 'a.js', message: 'obf2' },
-      { type: 'obfuscation_detected', severity: 'HIGH', file: 'a.js', message: 'obf3' },
-      { type: 'obfuscation_detected', severity: 'HIGH', file: 'a.js', message: 'obf4' },
-      { type: 'credential_tampering', severity: 'CRITICAL', file: 'b.js', message: 'ct1' }
+      { type: 'staged_binary_payload', severity: 'LOW', file: 'a.js', message: 'bin' },
+      { type: 'crypto_decipher', severity: 'MEDIUM', file: 'a.js', message: 'decipher' }
     ];
-    applyFPReductions(threats, null, null);
     applyCompoundBoosts(threats);
-    const compound = threats.find(t => t.type === 'obfuscated_credential_tampering');
-    assert(compound, 'obfuscated_credential_tampering should fire after FP reductions');
-    assert(compound.severity === 'CRITICAL', `Compound should be CRITICAL, got ${compound.severity}`);
+    const compound = threats.find(t => t.type === 'crypto_staged_payload');
+    assert(compound, 'Should fire when at least one component is >= MEDIUM');
+    assert(compound.severity === 'CRITICAL', `Should be CRITICAL, got ${compound.severity}`);
+  });
+
+  test('Severity gate: lifecycle compounds pass (lifecycle_script MEDIUM counts)', () => {
+    const threats = [
+      { type: 'lifecycle_script', severity: 'MEDIUM', file: 'package.json', message: 'preinstall' },
+      { type: 'typosquat_detected', severity: 'LOW', file: 'package.json', message: 'typo' }
+    ];
+    applyCompoundBoosts(threats);
+    const compound = threats.find(t => t.type === 'lifecycle_typosquat');
+    assert(compound, 'lifecycle_typosquat should fire because lifecycle_script is MEDIUM');
   });
 
   // ===================================================================
