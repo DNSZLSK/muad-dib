@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { findFiles, forEachSafeFile } = require('../utils.js');
+const { findFiles, forEachSafeFile, debugLog } = require('../utils.js');
 const { MAX_FILE_SIZE } = require('../shared/constants.js');
 
 const SHELL_EXCLUDED_DIRS = ['node_modules', '.git', '.muaddib-cache'];
@@ -56,7 +56,7 @@ function scanFileContent(file, content, targetPath, threats) {
 function findExtensionlessFiles(dir, excludedDirs, results = [], depth = 0) {
   if (depth > 20) return results;
   let items;
-  try { items = fs.readdirSync(dir); } catch { return results; }
+  try { items = fs.readdirSync(dir); } catch (e) { debugLog('[SHELL] readdirSync error:', e?.message); return results; }
 
   for (const item of items) {
     if (excludedDirs.includes(item)) continue;
@@ -69,7 +69,7 @@ function findExtensionlessFiles(dir, excludedDirs, results = [], depth = 0) {
       } else if (lstat.isFile() && !path.extname(item) && lstat.size <= MAX_FILE_SIZE) {
         results.push(fullPath);
       }
-    } catch { /* permission error */ }
+    } catch (e) { debugLog('[SHELL] stat error:', e?.message); }
   }
   return results;
 }
@@ -94,7 +94,7 @@ async function scanShellScripts(targetPath) {
       if (SHEBANG_RE.test(firstLine)) {
         scanFileContent(file, content, targetPath, threats);
       }
-    } catch { /* ignore unreadable files */ }
+    } catch (e) { debugLog('[SHELL] readFile error:', e?.message); }
   }
 
   return threats;

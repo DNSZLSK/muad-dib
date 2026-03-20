@@ -154,6 +154,27 @@ function deobfuscate(sourceCode) {
       const hexResult = tryResolveHexArrayMap(node, sourceCode);
       if (hexResult !== null) {
         replacements.push(hexResult);
+        return;
+      }
+
+      // ---- 5. ARRAY JOIN ----
+      // ['e','v','a','l'].join('') → "eval"
+      if (node.callee?.type === 'MemberExpression' &&
+          node.callee.property?.name === 'join' &&
+          node.callee.object?.type === 'ArrayExpression' &&
+          node.arguments?.length === 1 &&
+          node.arguments[0]?.type === 'Literal' &&
+          node.arguments[0].value === '') {
+        const elements = node.callee.object.elements;
+        if (elements.length > 0 && elements.every(el => el?.type === 'Literal' && typeof el.value === 'string')) {
+          const joined = elements.map(el => el.value).join('');
+          const before = sourceCode.slice(node.start, node.end);
+          replacements.push({
+            start: node.start, end: node.end,
+            value: quoteString(joined),
+            type: 'array_join', before
+          });
+        }
       }
     }
   });

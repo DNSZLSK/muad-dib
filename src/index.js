@@ -186,8 +186,8 @@ function scanParanoid(targetPath) {
           }
         }
       });
-    } catch {
-      // Ignore read/parse errors
+    } catch (e) {
+      debugLog('[PARANOID] AST parse error:', e?.message);
     }
   }
 
@@ -218,8 +218,8 @@ function scanParanoid(targetPath) {
         const relFile = path.relative(targetPath, filePath);
         scanFileContent(filePath, content, relFile);
       }
-    } catch {
-      // Ignore read errors
+    } catch (e) {
+      debugLog('[PARANOID] file read error:', e?.message);
     }
   }
 
@@ -247,8 +247,8 @@ function scanParanoid(targetPath) {
           scanFile(fullPath);
         }
       }
-    } catch {
-      // Ignore walk errors
+    } catch (e) {
+      debugLog('[PARANOID] walkDir error:', e?.message);
     }
   }
 
@@ -550,7 +550,8 @@ async function run(targetPath, options = {}) {
       if (!reachability.skipped) {
         reachableFiles = reachability.reachableFiles;
       }
-    } catch {
+    } catch (e) {
+      debugLog('[REACHABILITY] error:', e?.message);
       // Graceful fallback — treat all files as reachable
     }
   }

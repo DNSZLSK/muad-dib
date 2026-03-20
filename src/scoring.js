@@ -279,11 +279,11 @@ function applyCompoundBoosts(threats) {
 
     // Check all required types are present
     if (compound.requires.every(req => typeSet.has(req))) {
-      // Severity gate: at least one component must have severity >= MEDIUM
-      // after FP reductions. If all components were downgraded to LOW,
-      // the compound signal is not strong enough to justify a CRITICAL boost.
+      // Severity gate: at least one component must have had original severity >= MEDIUM.
+      // Uses originalSeverity (pre-FP-reduction) to prevent attackers from
+      // manipulating compound gates via count-threshold or dist-file downgrades.
       const hasSignificantComponent = compound.requires.some(req =>
-        threats.some(t => t.type === req && t.severity !== 'LOW')
+        threats.some(t => t.type === req && (t.originalSeverity || t.severity) !== 'LOW')
       );
       if (!hasSignificantComponent) continue;
 
@@ -323,8 +323,11 @@ const FRAMEWORK_PROTO_RE = new RegExp(
 
 function applyFPReductions(threats, reachableFiles, packageName, packageDeps) {
   // Initialize reductions audit trail on each threat
+  // Store original severity before any FP reductions, so compound
+  // severity gates can check pre-reduction severity (GAP 4b).
   for (const t of threats) {
     t.reductions = [];
+    t.originalSeverity = t.severity;
   }
 
   // Count occurrences of each threat type (package-level, across all files)
@@ -384,6 +387,29 @@ function applyFPReductions(threats, reachableFiles, packageName, packageDeps) {
     // The READ/WRITE distinction in ast-detectors already handles the FP case:
     // READ-only → LOW (hot-reload, introspection), WRITE → CRITICAL (malicious replacement).
     // A single cache WRITE is genuinely malicious — no downgrade needed.
+  }
+
+  // Dilution floor: retain at least one instance at original severity per type
+  // to prevent complete count-threshold dilution by injected benign patterns.
+  // Only applies to types with low maxCount (≤3) and a severity constraint (from field),
+  // where injection of benign patterns is feasible. High-count types (dynamic_require,
+  // env_access) and unconstrained types (suspicious_dataflow) represent legitimate
+  // framework patterns and should allow full downgrade.
+  const restoredTypes = new Set();
+  for (const t of threats) {
+    const lastReduction = t.reductions?.find(r => r.rule === 'count_threshold');
+    if (lastReduction && !restoredTypes.has(t.type)) {
+      const rule = FP_COUNT_THRESHOLDS[t.type];
+      if (rule && rule.from && rule.maxCount <= 3) {
+        t.severity = lastReduction.from;
+        t.reductions = t.reductions.filter(r => r.rule !== 'count_threshold');
+        t.reductions.push({ rule: 'count_threshold_floor', note: 'retained one instance at original severity' });
+        restoredTypes.add(t.type);
+      }
+    }
+  }
+
+  for (const t of threats) {
 
     // Prototype hook: framework class prototypes → MEDIUM
     // Core Node.js prototypes (http.IncomingMessage, net.Socket) stay CRITICAL
