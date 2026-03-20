@@ -278,8 +278,25 @@ function createOptimizedIOCs(iocs) {
   const wildcardPackages = new Set();
 
   for (const pkg of iocs.packages) {
+    // Sanitize: split comma-separated version strings into individual entries
+    if (pkg.version && pkg.version.includes(',')) {
+      const versions = pkg.version.split(',').map(v => v.trim()).filter(Boolean);
+      for (const ver of versions) {
+        const entry = Object.assign({}, pkg, { version: ver });
+        if (ver === '*' && !NEVER_WILDCARD.has(pkg.name)) {
+          wildcardPackages.add(pkg.name);
+        }
+        if (!packagesMap.has(pkg.name)) packagesMap.set(pkg.name, []);
+        packagesMap.get(pkg.name).push(entry);
+      }
+      continue;
+    }
+
     if (pkg.version === '*') {
-      wildcardPackages.add(pkg.name);
+      // Defense-in-depth: NEVER_WILDCARD packages must not be wildcarded
+      if (!NEVER_WILDCARD.has(pkg.name)) {
+        wildcardPackages.add(pkg.name);
+      }
     }
 
     if (!packagesMap.has(pkg.name)) {
@@ -293,6 +310,18 @@ function createOptimizedIOCs(iocs) {
   const pypiWildcardPackages = new Set();
 
   for (const pkg of iocs.pypi_packages || []) {
+    // Sanitize: split comma-separated version strings
+    if (pkg.version && pkg.version.includes(',')) {
+      const versions = pkg.version.split(',').map(v => v.trim()).filter(Boolean);
+      for (const ver of versions) {
+        const entry = Object.assign({}, pkg, { version: ver });
+        if (ver === '*') pypiWildcardPackages.add(pkg.name);
+        if (!pypiPackagesMap.has(pkg.name)) pypiPackagesMap.set(pkg.name, []);
+        pypiPackagesMap.get(pkg.name).push(entry);
+      }
+      continue;
+    }
+
     if (pkg.version === '*') {
       pypiWildcardPackages.add(pkg.name);
     }
@@ -369,7 +398,15 @@ function generateCompactIOCs(fullIOCs) {
       wildcards.push(p.name);
     } else {
       if (!versioned[p.name]) versioned[p.name] = [];
-      versioned[p.name].push(p.version);
+      // Sanitize: split comma-separated version strings into individual entries
+      if (p.version && p.version.includes(',')) {
+        const parts = p.version.split(',').map(v => v.trim()).filter(Boolean);
+        for (const v of parts) {
+          if (!versioned[p.name].includes(v)) versioned[p.name].push(v);
+        }
+      } else {
+        versioned[p.name].push(p.version);
+      }
     }
   }
 
@@ -417,10 +454,11 @@ function expandCompactIOCs(compact) {
   const defaultSev = compact.defaultSeverity || 'critical';
   const overrides = compact.severityOverrides || {};
 
-  // Expand npm wildcards (deduplicate via Set)
+  // Expand npm wildcards (deduplicate via Set, enforce NEVER_WILDCARD)
   const seenWildcards = new Set();
   for (const name of compact.wildcards || []) {
     if (seenWildcards.has(name)) continue;
+    if (NEVER_WILDCARD.has(name)) continue; // Defense-in-depth: skip wildcards for legitimate packages
     seenWildcards.add(name);
     const severity = (overrides[name] && overrides[name]['*']) || defaultSev;
     packages.push({ name: name, version: '*', severity: severity });
@@ -429,8 +467,17 @@ function expandCompactIOCs(compact) {
   // Expand npm versioned
   for (const name of Object.keys(compact.versioned || {})) {
     for (const version of compact.versioned[name]) {
-      const severity = (overrides[name] && overrides[name][version]) || defaultSev;
-      packages.push({ name: name, version: version, severity: severity });
+      // Sanitize: split comma-separated version strings into individual entries
+      if (version && version.includes(',')) {
+        const parts = version.split(',').map(function(v) { return v.trim(); }).filter(Boolean);
+        for (const v of parts) {
+          const severity = (overrides[name] && overrides[name][v]) || defaultSev;
+          packages.push({ name: name, version: v, severity: severity });
+        }
+      } else {
+        const severity = (overrides[name] && overrides[name][version]) || defaultSev;
+        packages.push({ name: name, version: version, severity: severity });
+      }
     }
   }
 
@@ -443,7 +490,15 @@ function expandCompactIOCs(compact) {
   // Expand PyPI versioned
   for (const name of Object.keys(compact.pypi_versioned || {})) {
     for (const version of compact.pypi_versioned[name]) {
-      pypiPackages.push({ name: name, version: version, severity: defaultSev });
+      // Sanitize: split comma-separated version strings
+      if (version && version.includes(',')) {
+        const parts = version.split(',').map(function(v) { return v.trim(); }).filter(Boolean);
+        for (const v of parts) {
+          pypiPackages.push({ name: name, version: v, severity: defaultSev });
+        }
+      } else {
+        pypiPackages.push({ name: name, version: version, severity: defaultSev });
+      }
     }
   }
 

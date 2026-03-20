@@ -1,0 +1,124 @@
+/* MUAD'DIB */
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: Georgia, "Times New Roman", serif;
+  background: #111;
+  color: #999;
+  line-height: 1.7;
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 1.5rem 2rem;
+  font-size: 15px;
+}
+
+a { color: #6a9fb5; text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* Nav */
+nav { margin-bottom: 1.5rem; padding-bottom: 0.8rem; border-bottom: 1px solid #1a1a1a; font-family: Consolas, monospace; font-size: 13px; }
+nav a { text-decoration: none; margin-right: 1rem; color: #555; }
+nav a:hover { color: #888; }
+nav a.active { color: #888; }
+nav .site-name { color: #ccc; font-weight: normal; }
+
+/* Headings */
+h1 { font-size: 1.4rem; font-weight: normal; margin-bottom: 0.4rem; color: #ddd; font-family: Georgia, serif; }
+h2 { font-size: 1.1rem; font-weight: bold; margin: 2rem 0 0.4rem; color: #ccc; }
+h3 { font-size: 1rem; font-weight: bold; margin: 1.3rem 0 0.3rem; color: #bbb; }
+
+p { margin-bottom: 0.8rem; }
+hr { border: none; border-top: 1px solid #1a1a1a; margin: 1.2rem 0; }
+
+strong { color: #ccc; font-weight: bold; }
+em { color: #999; }
+
+/* Lists */
+ul, ol { margin: 0.4rem 0 0.8rem 1.3rem; }
+li { margin-bottom: 0.2rem; }
+
+/* Code */
+code {
+  font-family: Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+  color: #8a8a6a;
+}
+
+pre {
+  background: #0e0e0e;
+  padding: 0.8rem;
+  margin: 0.8rem 0;
+  overflow-x: auto;
+  line-height: 1.45;
+  font-size: 13px;
+  border-left: 2px solid #222;
+}
+
+pre code { color: #8a8a6a; }
+
+/* Tables */
+table { width: 100%; border-collapse: collapse; margin: 0.8rem 0; font-size: 13px; }
+th, td { padding: 0.3rem 0.5rem; text-align: left; border-bottom: 1px solid #1a1a1a; }
+th { color: #666; font-weight: normal; text-transform: uppercase; font-size: 11px; letter-spacing: 0.05em; font-family: Consolas, monospace; }
+
+/* Blockquote */
+blockquote {
+  border-left: 1px solid #333;
+  padding-left: 0.8rem;
+  margin: 0.8rem 0;
+  color: #777;
+  font-style: italic;
+}
+
+/* Tags */
+.tags { margin: 0.2rem 0 0.3rem; font-family: Consolas, monospace; }
+.tag { display: inline; font-size: 12px; color: #555; }
+.tag::before { content: "#"; }
+.tag + .tag { margin-left: 0.3rem; }
+
+/* Home */
+.version { font-family: Consolas, monospace; font-size: 12px; color: #555; }
+
+.install {
+  font-family: Consolas, monospace;
+  font-size: 13px;
+  padding: 0.4rem 0;
+  margin: 0.6rem 0;
+  color: #8a8a6a;
+}
+
+.install .prompt { color: #444; user-select: none; }
+
+.metrics { margin: 0.8rem 0; font-family: Consolas, monospace; font-size: 13px; }
+.metric { display: inline-block; margin-right: 1.2rem; margin-bottom: 0.3rem; }
+.metric .value { color: #ccc; }
+.metric .label { color: #555; font-size: 11px; }
+
+.links-row { margin: 1rem 0; font-size: 14px; }
+.links-row a { margin-right: 1rem; }
+
+/* Blog list */
+.post-list { list-style: none; padding: 0; margin: 0; }
+.post-list li { padding: 0.5rem 0; }
+.post-date { font-size: 12px; color: #444; font-family: Consolas, monospace; }
+.post-title { font-weight: normal; font-size: 15px; }
+.post-title a { color: #ccc; text-decoration: none; }
+.post-title a:hover { color: #6a9fb5; }
+.post-summary { color: #666; font-size: 14px; margin-top: 0.15rem; }
+
+/* Article */
+.article-meta { margin-bottom: 1rem; }
+.article-meta .date { font-size: 12px; color: #444; font-family: Consolas, monospace; }
+
+.back-link { font-size: 13px; color: #555; display: inline-block; margin-bottom: 0.8rem; text-decoration: none; font-family: Consolas, monospace; }
+.back-link:hover { color: #888; }
+
+/* Footer */
+footer { margin-top: 2rem; padding-top: 0.6rem; border-top: 1px solid #1a1a1a; font-size: 12px; color: #333; font-family: Consolas, monospace; }
+footer a { color: #333; }
+footer a:hover { color: #555; }
+
+@media (max-width: 600px) {
+  body { padding: 1rem; }
+}

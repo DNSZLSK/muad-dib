@@ -528,22 +528,29 @@ async function scrapeShaiHuludDetector() {
       for (const pkg of pkgList) {
         const versions = pkg.affectedVersions || [];
         if (versions.length === 0) continue; // Skip packages with no version info — avoids false wildcard
-        for (const ver of versions) {
-          packages.push({
-            id: `SHAI-HULUD-${pkg.name}-${ver}`,
-            name: pkg.name,
-            version: ver,
-            severity: pkg.severity || 'critical',
-            confidence: 'high',
-            source: 'shai-hulud-detector',
-            description: 'Compromised by Shai-Hulud 2.0 supply chain attack',
-            references: ['https://github.com/gensecaihq/Shai-Hulud-2.0-Detector'],
-            mitre: 'T1195.002',
-            freshness: createFreshness('gensecai', 'high')
-          });
+        for (const rawVer of versions) {
+          // Sanitize: split comma-separated version strings (e.g. "4.18.1, 5.11.3")
+          const splitVersions = rawVer && rawVer.includes(',')
+            ? rawVer.split(',').map(v => v.trim()).filter(Boolean)
+            : [rawVer];
+          for (const ver of splitVersions) {
+            if (!ver) continue;
+            packages.push({
+              id: `SHAI-HULUD-${pkg.name}-${ver}`,
+              name: pkg.name,
+              version: ver,
+              severity: pkg.severity || 'critical',
+              confidence: 'high',
+              source: 'shai-hulud-detector',
+              description: 'Compromised by Shai-Hulud 2.0 supply chain attack',
+              references: ['https://github.com/gensecaihq/Shai-Hulud-2.0-Detector'],
+              mitre: 'T1195.002',
+              freshness: createFreshness('gensecai', 'high')
+            });
+          }
         }
       }
-      
+
       // Extract hashes
       if (data.indicators && data.indicators.fileHashes) {
         const fileHashes = data.indicators.fileHashes;
@@ -1186,8 +1193,21 @@ async function runScraper() {
   dedupSpinner.start('Deduplicating ' + allPackages.length + ' npm + ' + pypiPackages.length + ' PyPI entries...');
   const dedupMap = new Map();
 
-  // Seed with existing IOCs
+  // Seed with existing IOCs (with sanitization of stale comma-in-version entries)
   for (const pkg of existingIOCs.packages) {
+    // Split comma-separated version strings into individual entries
+    if (pkg.version && pkg.version.includes(',')) {
+      const parts = pkg.version.split(',').map(v => v.trim()).filter(Boolean);
+      for (const v of parts) {
+        const key = pkg.name + '@' + v;
+        if (!dedupMap.has(key)) {
+          dedupMap.set(key, Object.assign({}, pkg, { version: v }));
+        }
+      }
+      continue;
+    }
+    // Skip wildcard entries for NEVER_WILDCARD packages in existing data
+    if (pkg.version === '*' && NEVER_WILDCARD.has(pkg.name)) continue;
     const key = pkg.name + '@' + pkg.version;
     dedupMap.set(key, pkg);
   }

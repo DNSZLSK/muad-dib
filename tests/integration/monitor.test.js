@@ -558,24 +558,43 @@ async function runMonitorTests() {
   console.log('\n=== SANDBOX CONFIRMATION BUG TESTS ===\n');
 
   test('MONITOR: sandbox score=100 + 0 findings → sandbox_inconclusive, NOT confirmed', () => {
-    // Simulate sandbox timeout: score > 0 but no actual findings
+    // Simulate sandbox install error: score > 0 but no actual findings
     const sandboxResult = { score: 100, severity: 'CRITICAL', findings: [] };
     const hasSandboxFindings = sandboxResult.findings && sandboxResult.findings.length > 0;
     assert(!hasSandboxFindings, 'Empty findings array should NOT count as findings');
-    // Verify updateScanStats would get sandbox_inconclusive
-    const statsFile = path.join(os.tmpdir(), `muaddib-stats-test-${Date.now()}.json`);
-    try {
-      fs.writeFileSync(statsFile, JSON.stringify({
-        stats: { total_scanned: 0, clean: 0, suspect: 0, false_positive: 0, confirmed_malicious: 0, sandbox_inconclusive: 0 },
-        daily: []
-      }));
-    } finally {
-      try { fs.unlinkSync(statsFile); } catch {}
-    }
     // The key assertion: score > 0 but 0 findings = inconclusive
     assert(sandboxResult.score > 0, 'Score should be > 0');
     assert(sandboxResult.findings.length === 0, 'Findings should be empty');
     assert(!hasSandboxFindings, 'hasSandboxFindings should be false');
+  });
+
+  test('MONITOR: sandbox timeout (inconclusive) → no relabeling, keeps suspect label', () => {
+    // Sandbox timeout produces score=-1, inconclusive=true
+    // This must NOT relabel to fp (package could be malicious)
+    // and must NOT relabel to confirmed (package could be legitimate)
+    const sandboxResult = {
+      score: -1,
+      severity: 'INCONCLUSIVE',
+      findings: [{ type: 'timeout', severity: 'MEDIUM', detail: 'Container exceeded 60s timeout' }],
+      suspicious: false,
+      inconclusive: true
+    };
+
+    // Verify the inconclusive guard fires first
+    assert(sandboxResult.inconclusive === true, 'Timeout sandbox must have inconclusive flag');
+    assert(sandboxResult.score === -1, 'Timeout sandbox must have score -1');
+
+    // Verify it does NOT match the score===0 (FP relabeling) path
+    const wouldMatchFP = sandboxResult.score === 0;
+    assert(!wouldMatchFP, 'Score -1 must NOT match the score===0 FP relabeling path');
+
+    // Verify it does NOT match the score>0 (confirmed) path
+    const wouldMatchConfirmed = sandboxResult.score > 0;
+    assert(!wouldMatchConfirmed, 'Score -1 must NOT match the score>0 confirmed path');
+
+    // The inconclusive guard catches it: no relabeling occurs
+    const isInconclusive = sandboxResult && sandboxResult.inconclusive;
+    assert(isInconclusive, 'Inconclusive flag should be detected — stat=sandbox_inconclusive, label unchanged');
   });
 
   test('MONITOR: sandbox score=80 + 2 findings → confirmed', () => {

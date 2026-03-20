@@ -37,6 +37,9 @@ const BENIGN_THRESHOLD = 20;
 const ADR_THRESHOLD = 20;  // v2.6.5: global threshold (aligned with BENIGN_THRESHOLD, no per-sample overfitting)
 const PACK_TIMEOUT_MS = 30000;
 
+// Validate npm package name to prevent shell injection (names come from our own datasets)
+const SAFE_PKG_RE = /^(@[\w._-]+\/)?[\w._-]+$/;
+
 // =========================================================================
 // Scan result cache — avoids re-scanning when src/ hasn't changed
 // =========================================================================
@@ -348,7 +351,8 @@ function downloadAndExtract(pkg, options = {}) {
 
   let tgzFilename;
   try {
-    const output = execFileSync('npm', ['pack', pkg], {
+    if (!SAFE_PKG_RE.test(pkg)) throw new Error('invalid package name');
+    const output = execSync(`npm pack ${pkg}`, {
       cwd: pkgCacheDir,
       encoding: 'utf8',
       timeout: PACK_TIMEOUT_MS,
@@ -697,7 +701,8 @@ async function evaluateBenignRandom(options = {}) {
       fs.mkdirSync(pkgCacheDir, { recursive: true });
       let tgzFilename;
       try {
-        tgzFilename = execFileSync('npm', ['pack', pkg], {
+        if (!SAFE_PKG_RE.test(pkg)) throw new Error('invalid package name');
+        tgzFilename = execSync(`npm pack ${pkg}`, {
           cwd: pkgCacheDir,
           encoding: 'utf8',
           timeout: PACK_TIMEOUT_MS,

