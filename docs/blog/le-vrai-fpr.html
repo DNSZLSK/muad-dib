@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Le vrai FPR : quand 0% cache la realite — MUAD'DIB</title>
+  <title>Le vrai FPR : quand 0% cache la realite - MUAD'DIB</title>
   <meta name="description" content="Comment on a decouvert que notre taux de faux positifs de 0% etait completement faux, et le parcours de 38% a 7%.">
   <link rel="stylesheet" href="../style.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
@@ -55,7 +55,7 @@
       <p>Reecriture complete pour telecharger et scanner les vrais tarballs npm. Et les galeres Windows en bonus :</p>
 
       <ul>
-        <li><code>execFileSync('npm', ...)</code> echoue sur Windows — npm est un wrapper <code>.cmd</code></li>
+        <li><code>execFileSync('npm', ...)</code> echoue sur Windows - npm est un wrapper <code>.cmd</code></li>
         <li><code>tar xzf "C:\path\file.tgz"</code> interprete <code>C:</code> comme un remote host SSH</li>
         <li>Solution : extracteur tar natif en Node.js (<code>zlib.gunzipSync</code> + parsing des headers tar 512 octets)</li>
       </ul>
@@ -79,11 +79,11 @@
 
       <p>En analysant les 19 faux positifs initiaux, un pattern est apparu : <strong>les packages legitimes produisent des volumes massifs de certains types de menaces, alors que les malwares n'en ont que 1 a 3.</strong></p>
 
-      <p>Un framework est bruyant — il utilise des centaines de patterns qui declenchent les heuristiques. Un malware est furtif — il utilise le minimum de techniques pour atteindre son objectif.</p>
+      <p>Un framework est bruyant - il utilise des centaines de patterns qui declenchent les heuristiques. Un malware est furtif - il utilise le minimum de techniques pour atteindre son objectif.</p>
 
       <h2>Le parcours : 38% &rarr; 7%</h2>
 
-      <h3>Pass 1 — Seuils de volume (38% &rarr; 19.4%)</h3>
+      <h3>Pass 1 - Seuils de volume (38% &rarr; 19.4%)</h3>
       <ul>
         <li><code>dynamic_require</code> &gt;10 hits &rarr; tous LOW</li>
         <li><code>dangerous_call_function</code> &gt;5 hits &rarr; tous LOW</li>
@@ -91,14 +91,14 @@
         <li><code>require_cache_poison</code> &gt;3 hits &rarr; tous LOW</li>
       </ul>
 
-      <h3>Pass 2 — Filtrage au scanner (19.4% &rarr; 17.5%)</h3>
+      <h3>Pass 2 - Filtrage au scanner (19.4% &rarr; 17.5%)</h3>
       <ul>
         <li>Expansion de <code>SAFE_ENV_VARS</code> (+13 variables de config)</li>
         <li>Fichiers dans <code>dist/</code>, <code>build/</code> &rarr; obfuscation LOW</li>
         <li>Cap scoring pour <code>prototype_hook</code> MEDIUM en volume</li>
       </ul>
 
-      <h3>Le changement structurel — Per-file max scoring (17.5% &rarr; 13%)</h3>
+      <h3>Le changement structurel - Per-file max scoring (17.5% &rarr; 13%)</h3>
 
       <p>Le levier le plus puissant. Au lieu d'additionner les findings de tous les fichiers :</p>
 
@@ -110,7 +110,7 @@ Nouvelle formule :
 
       <p>Un package n'est suspect que si <strong>au moins un fichier</strong> est suspect. Next.js avec 3162 fichiers .js accumule des findings LOW/MEDIUM partout, mais aucun fichier individuel n'est vraiment suspect.</p>
 
-      <h3>Passes 3-4 — Precision (13% &rarr; 7.4%)</h3>
+      <h3>Passes 3-4 - Precision (13% &rarr; 7.4%)</h3>
       <ul>
         <li>Categorisation <code>os.platform</code>/<code>os.arch</code> comme telemetrie (pas credentials)</li>
         <li><code>module_compile</code> count-based downgrade (&gt;3 hits &rarr; LOW)</li>
@@ -149,7 +149,7 @@ Nouvelle formule :
 
       <h2>Lecon</h2>
 
-      <p>Un scanner qui affiche 0% de faux positifs ment probablement. Le 38% etait embarrassant mais honnete — c'etait la premiere mesure reelle. La suite a montre que la distinction malware/legitime repose souvent sur le <strong>volume</strong> (un malware est furtif) et la <strong>concentration</strong> (un malware agit dans 1-2 fichiers, pas dans 3162).</p>
+      <p>Un scanner qui affiche 0% de faux positifs ment probablement. Le 38% etait embarrassant mais honnete - c'etait la premiere mesure reelle. La suite a montre que la distinction malware/legitime repose souvent sur le <strong>volume</strong> (un malware est furtif) et la <strong>concentration</strong> (un malware agit dans 1-2 fichiers, pas dans 3162).</p>
 
       <p>La transparence sur les metriques n'est pas optionnelle. Si on avait continue avec le 0% fictif, toutes les decisions d'amelioration auraient ete basees sur une metrique fausse.</p>
 

@@ -2,7 +2,7 @@
 
 This document consolidates the historical FP audits performed during development. For the full evaluation methodology (TPR, FPR, ADR, holdout protocol), see [EVALUATION_METHODOLOGY.md](EVALUATION_METHODOLOGY.md).
 
-## Current FPR: 12.9% (68/529) — v2.9.4
+## Current FPR: 12.9% (68/529) — v2.10.0
 
 ---
 
