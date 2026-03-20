@@ -555,6 +555,7 @@ const stats = {
   errors: 0,
   errorsByType: { too_large: 0, tar_failed: 0, http_error: 0, timeout: 0, other: 0 },
   totalTimeMs: 0,
+  mlFiltered: 0, // ML Phase 2: T1 packages classified as clean by ML classifier
   lastReportTime: Date.now(),
   lastDailyReportDate: null // YYYY-MM-DD (Paris) of last daily report sent
 };
@@ -1927,6 +1928,7 @@ function updateScanStats(result) {
   if (data.stats.sandbox_inconclusive === undefined) data.stats.sandbox_inconclusive = 0;
 
   if (result === 'clean') data.stats.clean++;
+  else if (result === 'ml_clean') data.stats.clean++; // ML classifier FP filter — counts as clean
   else if (result === 'suspect') data.stats.suspect++;
   else if (result === 'false_positive') data.stats.false_positive++;
   else if (result === 'confirmed') data.stats.confirmed_malicious++;
@@ -1941,6 +1943,7 @@ function updateScanStats(result) {
   dayEntry.scanned++;
 
   if (result === 'clean') dayEntry.clean++;
+  else if (result === 'ml_clean') dayEntry.clean++; // ML classifier FP filter — counts as clean
   else if (result === 'suspect') dayEntry.suspect++;
   else if (result === 'false_positive') dayEntry.false_positive++;
   else if (result === 'confirmed') dayEntry.confirmed++;
@@ -1980,6 +1983,7 @@ function loadDailyStats() {
         stats.errorsByType.other = data.errorsByType.other || 0;
       }
       stats.totalTimeMs = data.totalTimeMs || 0;
+      stats.mlFiltered = data.mlFiltered || 0;
       if (Array.isArray(data.dailyAlerts)) {
         dailyAlerts.length = 0;
         dailyAlerts.push(...data.dailyAlerts);
@@ -2003,6 +2007,7 @@ function saveDailyStats() {
       errors: stats.errors,
       errorsByType: { ...stats.errorsByType },
       totalTimeMs: stats.totalTimeMs,
+      mlFiltered: stats.mlFiltered,
       dailyAlerts: dailyAlerts.slice()
     };
     atomicWriteFileSync(DAILY_STATS_FILE, JSON.stringify(data, null, 2));
@@ -2062,6 +2067,9 @@ function recordTrainingSample(result, params) {
       ecosystem: params.ecosystem,
       unpackedSize: params.unpackedSize || 0,
       registryMeta: params.registryMeta || {},
+      npmRegistryMeta: params.npmRegistryMeta || null,
+      fileCountTotal: params.fileCountTotal || 0,
+      hasTests: params.hasTests || false,
       label: params.label || 'clean',
       tier: params.tier || null,
       sandboxResult: params.sandboxResult || null
@@ -2071,6 +2079,43 @@ function recordTrainingSample(result, params) {
     // Non-fatal: ML export must never crash the monitor
     console.error(`[ML] Failed to record training sample for ${params.name}: ${err.message}`);
   }
+}
+
+// --- Package file counting (ML features, depth-limited) ---
+
+const ML_EXCLUDED_DIRS = new Set(['node_modules', '.git', '.svn', 'vendor']);
+const TEST_PATTERNS = /(?:^|\/)(?:test|tests|spec|specs|__tests__|__test__|__mocks__)\//i;
+const TEST_FILE_PATTERN = /\.(?:test|spec)\.[jt]sx?$/i;
+
+/**
+ * Count total JS files and detect test presence in an extracted package dir.
+ * Depth-limited (max 5 levels) to avoid traversal bombs.
+ * @param {string} dir - extracted package directory
+ * @returns {{ fileCountTotal: number, hasTests: boolean }}
+ */
+function countPackageFiles(dir) {
+  let fileCountTotal = 0;
+  let hasTests = false;
+
+  function walk(current, depth) {
+    if (depth > 5) return;
+    let entries;
+    try { entries = fs.readdirSync(current, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        if (ML_EXCLUDED_DIRS.has(entry.name)) continue;
+        const rel = path.relative(dir, path.join(current, entry.name));
+        if (TEST_PATTERNS.test(rel + '/')) hasTests = true;
+        walk(path.join(current, entry.name), depth + 1);
+      } else if (entry.isFile() && /\.[jt]sx?$/.test(entry.name)) {
+        fileCountTotal++;
+        if (TEST_FILE_PATTERN.test(entry.name)) hasTests = true;
+      }
+    }
+  }
+
+  walk(dir, 0);
+  return { fileCountTotal, hasTests };
 }
 
 // --- Package scanning ---
@@ -2161,7 +2206,23 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta) {
     }
 
     const extractedDir = extractTarGz(tgzPath, tmpDir);
+
+    // ML Phase 2a: Count JS files and detect test presence for enriched features
+    const { fileCountTotal, hasTests } = countPackageFiles(extractedDir);
+
     const result = await run(extractedDir, { _capture: true });
+
+    // ML Phase 2a: Fetch npm registry metadata once for packages with findings.
+    // Reused for both training records (enriched features) and reputation scoring.
+    let npmRegistryMeta = null;
+    if (result.summary.total > 0 && ecosystem === 'npm') {
+      try {
+        const { getPackageMetadata } = require('./scanner/npm-registry.js');
+        npmRegistryMeta = await getPackageMetadata(name);
+      } catch (err) {
+        console.error(`[ML] npm registry fetch failed for ${name}: ${err.message}`);
+      }
+    }
 
     if (result.summary.total === 0) {
       stats.scanned++;
@@ -2170,7 +2231,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta) {
       stats.clean++;
       console.log(`[MONITOR] CLEAN: ${name}@${version} (0 findings, ${(elapsed / 1000).toFixed(1)}s)`);
       updateScanStats('clean');
-      recordTrainingSample(result, { name, version, ecosystem, label: 'clean', registryMeta: meta, unpackedSize: meta.unpackedSize });
+      recordTrainingSample(result, { name, version, ecosystem, label: 'clean', registryMeta: meta, unpackedSize: meta.unpackedSize, npmRegistryMeta, fileCountTotal, hasTests });
       return { sandboxResult: null, staticClean: true };
     } else {
       const counts = [];
@@ -2205,7 +2266,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta) {
         };
         appendAlert(alert);
         updateScanStats('clean');
-        recordTrainingSample(result, { name, version, ecosystem, label: 'clean', registryMeta: meta, unpackedSize: meta.unpackedSize });
+        recordTrainingSample(result, { name, version, ecosystem, label: 'clean', registryMeta: meta, unpackedSize: meta.unpackedSize, npmRegistryMeta, fileCountTotal, hasTests });
         return { sandboxResult: null, staticClean: true };
       } else {
         // Popularity pre-filter: skip sandbox for popular npm packages with only MEDIUM/LOW
@@ -2218,7 +2279,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta) {
             stats.clean++;
             console.log(`[MONITOR] TRUSTED (popular): ${name}@${version} (${Math.round(downloads / 1000)}k downloads/week, ${counts.join(', ')})`);
             updateScanStats('clean');
-            recordTrainingSample(result, { name, version, ecosystem, label: 'clean', registryMeta: meta, unpackedSize: meta.unpackedSize });
+            recordTrainingSample(result, { name, version, ecosystem, label: 'clean', registryMeta: meta, unpackedSize: meta.unpackedSize, npmRegistryMeta, fileCountTotal, hasTests });
             return { sandboxResult: null, staticClean: true };
           }
         }
@@ -2231,7 +2292,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta) {
           stats.clean++;
           console.log(`[MONITOR] CLEAN (low-signal): ${name}@${version} (${counts.join(', ')})`);
           updateScanStats('clean');
-          recordTrainingSample(result, { name, version, ecosystem, label: 'clean', registryMeta: meta, unpackedSize: meta.unpackedSize });
+          recordTrainingSample(result, { name, version, ecosystem, label: 'clean', registryMeta: meta, unpackedSize: meta.unpackedSize, npmRegistryMeta, fileCountTotal, hasTests });
           return { sandboxResult: null, staticClean: true };
         }
 
@@ -2246,16 +2307,47 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta) {
           console.log(`[MONITOR] SUSPECT T3 (low-intent): ${name}@${version} (${counts.join(', ')})`);
           console.log(`[MONITOR] FINDINGS: ${name}@${version} → ${formatFindings(result)}`);
           updateScanStats('clean'); // T3 does not inflate suspect stats
-          recordTrainingSample(result, { name, version, ecosystem, label: 'clean', tier: 3, registryMeta: meta, unpackedSize: meta.unpackedSize });
+          recordTrainingSample(result, { name, version, ecosystem, label: 'clean', tier: 3, registryMeta: meta, unpackedSize: meta.unpackedSize, npmRegistryMeta, fileCountTotal, hasTests });
           return { sandboxResult: null, staticClean: true, tier: 3 };
         }
 
         // Tier 1 and Tier 2: count as suspect
-        stats.suspect++;
         stats.suspectByTier[tier === 1 ? 't1' : 't2']++;
         const tierLabel = tier === 1 ? 'T1' : 'T2';
         console.log(`[MONITOR] SUSPECT ${tierLabel}: ${name}@${version} (${counts.join(', ')})`);
         console.log(`[MONITOR] FINDINGS: ${name}@${version} → ${formatFindings(result)}`);
+
+        // ML Phase 2: classifier filter for T1 zone (score 20-34)
+        // Reduces FP webhook noise by filtering clean packages before sandbox/webhook.
+        // Guard rails in classifyPackage() ensure HC types and high-score packages are never suppressed.
+        const riskScore = result.summary.riskScore || 0;
+        if (tier === 1 && riskScore >= 20 && riskScore < 35) {
+          try {
+            const { classifyPackage, isModelAvailable } = require('./ml/classifier.js');
+            if (isModelAvailable()) {
+              const enrichedMeta = { npmRegistryMeta, fileCountTotal, hasTests, unpackedSize: meta.unpackedSize, registryMeta: meta };
+              const mlResult = classifyPackage(result, enrichedMeta);
+              if (mlResult.prediction === 'clean') {
+                console.log(`[MONITOR] ML CLEAN: ${name}@${version} (p=${mlResult.probability}, score=${riskScore})`);
+                stats.mlFiltered++;
+                stats.scanned++;
+                const elapsed = Date.now() - startTime;
+                stats.totalTimeMs += elapsed;
+                // Count as clean (ML-filtered), skip sandbox/webhook
+                updateScanStats('ml_clean');
+                recordTrainingSample(result, { name, version, ecosystem, label: 'ml_clean', tier, registryMeta: meta, unpackedSize: meta.unpackedSize, npmRegistryMeta, fileCountTotal, hasTests });
+                return { sandboxResult: null, mlFiltered: true, tier };
+              }
+              // Not clean — proceed normally
+              console.log(`[MONITOR] ML SUSPECT: ${name}@${version} (p=${mlResult.probability}, reason=${mlResult.reason})`);
+            }
+          } catch (err) {
+            // Non-fatal: ML failure must never block the scan pipeline
+            console.error(`[ML] Classifier error for ${name}@${version}: ${err.message}`);
+          }
+        }
+
+        stats.suspect++;
 
         // Sandbox decision based on tier
         let sandboxResult = null;
@@ -2355,7 +2447,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta) {
           : result.summary.high > 0 ? 'HIGH'
           : result.summary.medium > 0 ? 'MEDIUM' : 'LOW';
         appendDetection(name, version, ecosystem, findingTypes, maxSeverity);
-        recordTrainingSample(result, { name, version, ecosystem, label: 'suspect', tier, sandboxResult, registryMeta: meta, unpackedSize: meta.unpackedSize });
+        recordTrainingSample(result, { name, version, ecosystem, label: 'suspect', tier, sandboxResult, registryMeta: meta, unpackedSize: meta.unpackedSize, npmRegistryMeta, fileCountTotal, hasTests });
 
         dailyAlerts.push({ name, version, ecosystem, findingsCount: result.summary.total, tier });
         // Persist alert locally for ALL suspects (independent of webhook filtering)
@@ -2365,12 +2457,11 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta) {
         // Reputation scoring (monitor-only, npm only)
         // Adjusts score for webhook decision without mutating persisted alert data.
         // High-confidence malice types BYPASS reputation — supply-chain compromise protection.
+        // Reuses npmRegistryMeta fetched earlier (ML Phase 2a) — no duplicate HTTP call.
         let adjustedResult = result;
         if (ecosystem === 'npm' && !hasHighConfidenceThreat(result)) {
           try {
-            const { getPackageMetadata } = require('./scanner/npm-registry.js');
-            const metadata = await getPackageMetadata(name);
-            const reputationFactor = computeReputationFactor(metadata);
+            const reputationFactor = computeReputationFactor(npmRegistryMeta);
             if (reputationFactor !== 1.0) {
               const originalScore = result.summary.riskScore || 0;
               const adjustedScore = Math.round(originalScore * reputationFactor);
@@ -2587,6 +2678,7 @@ function buildDailyReportEmbed() {
         { name: 'Suspects', value: `${stats.suspect}`, inline: true },
         { name: 'Errors', value: formatErrorBreakdown(stats.errors, stats.errorsByType), inline: true },
         { name: 'Avg Scan Time', value: `${avg}s/pkg`, inline: true },
+        ...(stats.mlFiltered > 0 ? [{ name: 'ML Filtered', value: `${stats.mlFiltered}`, inline: true }] : []),
         { name: 'Top Suspects', value: top3Text, inline: false }
       ],
       footer: {

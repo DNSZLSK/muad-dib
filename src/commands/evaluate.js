@@ -995,6 +995,105 @@ async function evaluate(options = {}) {
 }
 
 /**
+ * Evaluate ML classifier performance on existing bench results.
+ * Replays the classifier on benign, ground-truth, and adversarial results
+ * within the T1 zone (score 20-34). Verifies zero regression on GT/ADR.
+ *
+ * @param {Object} benignResults - array of { name, score, threats } from evaluateBenign
+ * @param {Object} gtResults - array of { name, score, threats } from evaluateGroundTruth
+ * @param {Object} adrResults - array of { name, score, threats } from evaluateAdversarial
+ * @returns {Object} { t1Benign, t1GT, t1ADR, mlCleanBenign, mlCleanGT, mlCleanADR, fpReduction, gtSuppressed, adrSuppressed }
+ */
+function evaluateMLClassifier(benignResults, gtResults, adrResults) {
+  let classifyPackage, isModelAvailable;
+  try {
+    const classifier = require('../ml/classifier.js');
+    classifyPackage = classifier.classifyPackage;
+    isModelAvailable = classifier.isModelAvailable;
+  } catch {
+    console.log('\n[ML] Classifier module not found — skipping ML evaluation');
+    return null;
+  }
+
+  if (!isModelAvailable()) {
+    console.log('\n[ML] Model not available — skipping ML evaluation (stub mode)');
+    return null;
+  }
+
+  console.log('\n--- ML Classifier Evaluation ---\n');
+
+  // Filter to T1 zone (score 20-34)
+  const inT1 = (r) => r.score >= 20 && r.score < 35;
+
+  const t1Benign = (benignResults || []).filter(inT1);
+  const t1GT = (gtResults || []).filter(inT1);
+  const t1ADR = (adrResults || []).filter(inT1);
+
+  let mlCleanBenign = 0;
+  let mlCleanGT = 0;
+  let mlCleanADR = 0;
+
+  // Classify T1 benign (FP candidates — we WANT these classified as clean)
+  for (const r of t1Benign) {
+    const fakeResult = { threats: r.threats || [], summary: { riskScore: r.score, total: (r.threats || []).length } };
+    const ml = classifyPackage(fakeResult, {});
+    if (ml.prediction === 'clean') mlCleanBenign++;
+  }
+
+  // Classify T1 ground truth (must NOT be classified as clean — zero regression)
+  const gtSuppressed = [];
+  for (const r of t1GT) {
+    const fakeResult = { threats: r.threats || [], summary: { riskScore: r.score, total: (r.threats || []).length } };
+    const ml = classifyPackage(fakeResult, {});
+    if (ml.prediction === 'clean') {
+      mlCleanGT++;
+      gtSuppressed.push(r.name);
+    }
+  }
+
+  // Classify T1 adversarial (must NOT be classified as clean — zero regression)
+  const adrSuppressedList = [];
+  for (const r of t1ADR) {
+    const fakeResult = { threats: r.threats || [], summary: { riskScore: r.score, total: (r.threats || []).length } };
+    const ml = classifyPackage(fakeResult, {});
+    if (ml.prediction === 'clean') {
+      mlCleanADR++;
+      adrSuppressedList.push(r.name);
+    }
+  }
+
+  const fpReduction = t1Benign.length > 0
+    ? Math.round((mlCleanBenign / t1Benign.length) * 100 * 10) / 10
+    : 0;
+
+  console.log(`  T1 Benign: ${t1Benign.length} packages, ${mlCleanBenign} ML-clean (${fpReduction}% FP reduction)`);
+  console.log(`  T1 Ground Truth: ${t1GT.length} packages, ${mlCleanGT} ML-clean (MUST be 0)`);
+  console.log(`  T1 Adversarial: ${t1ADR.length} packages, ${mlCleanADR} ML-clean (MUST be 0)`);
+
+  if (mlCleanGT > 0) {
+    console.log(`\n  [FAIL] GT suppressed by ML: ${gtSuppressed.join(', ')}`);
+  }
+  if (mlCleanADR > 0) {
+    console.log(`\n  [FAIL] ADR suppressed by ML: ${adrSuppressedList.join(', ')}`);
+  }
+  if (mlCleanGT === 0 && mlCleanADR === 0) {
+    console.log(`\n  [PASS] Zero regression on GT and ADR`);
+  }
+
+  return {
+    t1Benign: t1Benign.length,
+    t1GT: t1GT.length,
+    t1ADR: t1ADR.length,
+    mlCleanBenign,
+    mlCleanGT,
+    mlCleanADR,
+    fpReduction,
+    gtSuppressed: gtSuppressed.length,
+    adrSuppressed: adrSuppressedList.length
+  };
+}
+
+/**
  * Classify whether a detection was made via IOC lookup or heuristic analysis.
  * IOC-based: known malicious packages, PyPI IOCs, Shai-Hulud markers
  * Heuristic-based: AST patterns, dataflow, obfuscation, typosquat, etc.
@@ -1017,6 +1116,7 @@ module.exports = {
   evaluateBenignPyPI,
   evaluateBenignRandom,
   evaluateAdversarial,
+  evaluateMLClassifier,
   saveMetrics,
   silentScan,
   classifyDetectionSource,

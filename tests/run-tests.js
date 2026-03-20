@@ -35,6 +35,7 @@ const { runWebhookTests } = require('./report/webhook.test');
 const { runSandboxTests } = require('./sandbox/sandbox.test');
 const { runPreloadTests } = require('./unit/preload.test');
 const { runMLFeatureExtractorTests } = require('./unit/ml-feature-extractor.test');
+const { runMLClassifierTests } = require('./unit/ml-classifier.test');
 const { runSandboxPreloadTests } = require('./integration/sandbox-preload.test');
 
 // Integration tests (fast subset — CLI, monitor, diff)
@@ -58,6 +59,7 @@ const { runGapRemediationTests } = require('./integration/gap-remediation.test')
 const { runConfigTests } = require('./integration/config.test');
 const { runBenignRandomTests } = require('./integration/benign-random.test');
 const { runAuditV2RemediationTests } = require('./integration/audit-v2-remediation.test');
+const { runMLPipelineTests } = require('./integration/ml-pipeline.test');
 
 // Temporal analysis tests
 const { runTemporalAnalysisTests } = require('./temporal/temporal-analysis.test');
@@ -172,6 +174,12 @@ async function timed(name, fn) {
 
   // ML feature extraction tests (v2.8.7)
   await timed('ml-feature-extractor', runMLFeatureExtractorTests);
+
+  // ML classifier tests (v2.10.0)
+  await timed('ml-classifier', runMLClassifierTests);
+
+  // ML pipeline integration tests (v2.10.0)
+  await timed('ml-pipeline', runMLPipelineTests);
 
   // Utility tests
   await timed('utils', runUtilsTests);

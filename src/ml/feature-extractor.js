@@ -145,6 +145,20 @@ function extractFeatures(result, meta) {
   // --- Reputation factor (if computed by monitor) ---
   features.reputation_factor = summary.reputationFactor || 1.0;
 
+  // --- Enriched registry/package metadata (Phase 2a) ---
+  const npmMeta = (meta && meta.npmRegistryMeta) || {};
+  features.package_age_days = npmMeta.age_days || 0;
+  features.weekly_downloads = npmMeta.weekly_downloads || 0;
+  features.version_count = npmMeta.version_count || 0;
+  features.author_package_count = npmMeta.author_package_count || 0;
+  features.has_repository = npmMeta.has_repository ? 1 : 0;
+  features.readme_size = npmMeta.readme_size || 0;
+  features.file_count_total = (meta && meta.fileCountTotal) || 0;
+  features.has_tests = (meta && meta.hasTests) ? 1 : 0;
+  features.threat_density = features.file_count_with_threats > 0
+    ? Math.round((features.count_total / features.file_count_with_threats) * 100) / 100
+    : 0;
+
   return features;
 }
 
@@ -170,12 +184,14 @@ function buildTrainingRecord(result, params) {
   const {
     name, version, ecosystem,
     unpackedSize, registryMeta,
+    npmRegistryMeta, fileCountTotal, hasTests,
     label, tier, sandboxResult
   } = params;
 
   const features = extractFeatures(result, {
     name, version, ecosystem,
-    unpackedSize, registryMeta
+    unpackedSize, registryMeta,
+    npmRegistryMeta, fileCountTotal, hasTests
   });
 
   const record = Object.create(null);
