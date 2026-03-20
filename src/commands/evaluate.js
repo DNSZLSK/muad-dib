@@ -139,26 +139,9 @@ function wilsonCI(successes, total, z = 1.96) {
 
 // v2.6.9: Replaced per-sample thresholds with flat sample list.
 // All samples use global ADR_THRESHOLD (no per-sample overfitting).
+// Vagues 1-4 removed: samples never committed to repo (43 missing directories).
+// To be recreated in a structured red team / blue team exercise.
 const ADVERSARIAL_SAMPLES = [
-  // Vague 1 (20 samples)
-  'ci-trigger-exfil', 'delayed-exfil', 'docker-aware', 'staged-fetch',
-  'dns-chunk-exfil', 'string-concat-obfuscation', 'postinstall-download',
-  'dynamic-require', 'iife-exfil', 'conditional-chain',
-  'template-literal-obfuscation', 'proxy-env-intercept', 'nested-payload',
-  'dynamic-import', 'websocket-exfil', 'bun-runtime-evasion',
-  'preinstall-exec', 'remote-dynamic-dependency', 'github-exfil', 'detached-background',
-  // Vague 3 (5 samples)
-  'ai-agent-weaponization', 'ai-config-injection', 'rdd-zero-deps',
-  'discord-webhook-exfil', 'preinstall-background-fork',
-  // Holdout promoted (10 samples)
-  'silent-error-swallow', 'double-base64-exfil', 'crypto-wallet-harvest',
-  'self-hosted-runner-backdoor', 'dead-mans-switch', 'fake-captcha-fingerprint',
-  'pyinstaller-dropper', 'gh-cli-token-steal', 'triple-base64-github-push', 'browser-api-hook',
-  // Audit bypass samples (v2.2.13)
-  'indirect-eval-bypass', 'muaddib-ignore-bypass', 'mjs-extension-bypass',
-  // Vague 4 (5 samples)
-  'git-hook-persistence', 'native-addon-camouflage', 'stego-png-payload',
-  'stegabin-vscode-persistence', 'mcp-server-injection',
   // Vague 5 (27 samples)
   'async-iterator-exfil', 'console-override-exfil', 'cross-file-callback-exfil',
   'error-reporting-exfil', 'error-stack-exfil', 'event-emitter-exfil',
@@ -174,6 +157,25 @@ const ADVERSARIAL_SAMPLES = [
   'stream-transform-kit', 'cache-warmup-utils',
   'fn-return-eval', 'call-chain-eval', 'regex-source-require',
   'charcode-arithmetic', 'object-method-alias',
+  // Vague 7 — Red Team campaigns (30 samples)
+  // Campaign 1: DPRK/Lazarus Interview (5)
+  'lazarus-interview-1', 'lazarus-interview-2', 'lazarus-interview-3',
+  'lazarus-interview-4', 'lazarus-interview-5',
+  // Campaign 2: GlassWorm Evolution (5)
+  'glassworm-v6-1', 'glassworm-v6-2', 'glassworm-v6-3',
+  'glassworm-v6-4', 'glassworm-v6-5',
+  // Campaign 3: Dependency Confusion APT (5)
+  'depconfusion-1', 'depconfusion-2', 'depconfusion-3',
+  'depconfusion-4', 'depconfusion-5',
+  // Campaign 4: Compromised Maintainer Backdoor (5)
+  'maintainer-backdoor-1', 'maintainer-backdoor-2', 'maintainer-backdoor-3',
+  'maintainer-backdoor-4', 'maintainer-backdoor-5',
+  // Campaign 5: Anti-Scanner / DoS (5)
+  'anti-scanner-1', 'anti-scanner-2', 'anti-scanner-3',
+  'anti-scanner-4', 'anti-scanner-5',
+  // Campaign 6: Emerging Techniques 2026 (5)
+  'emerging-2026-1', 'emerging-2026-2', 'emerging-2026-3',
+  'emerging-2026-4', 'emerging-2026-5',
 ];
 
 const HOLDOUT_SAMPLES = [

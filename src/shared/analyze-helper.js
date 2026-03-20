@@ -22,14 +22,29 @@ function analyzeWithDeobfuscation(targetPath, analyzeFileFn, options = {}) {
     if (options.excludedFiles && options.excludedFiles.includes(relativePath)) return;
     if (options.skipDevFiles !== false && isDevFile(relativePath)) return;
 
+    // .d.ts files: strip TypeScript declaration syntax before JS parsing.
+    // Legitimate .d.ts files contain only type declarations (no executable code).
+    // Any require/exec/network calls in a .d.ts are high-confidence malicious payload hiding.
+    let effectiveContent = content;
+    if (file.endsWith('.d.ts')) {
+      effectiveContent = content.split('\n').map(line => {
+        const trimmed = line.trim();
+        // Strip lines that are pure TypeScript declarations (Acorn can't parse these)
+        if (/^export\s+declare\s+/.test(trimmed)) return '// [ts-stripped]';
+        if (/^declare\s+(function|class|const|let|var|type|interface|enum|namespace|module|global)\s/.test(trimmed)) return '// [ts-stripped]';
+        if (/^(export\s+)?(type|interface)\s/.test(trimmed)) return '// [ts-stripped]';
+        return line;
+      }).join('\n');
+    }
+
     // Analyze original code first (preserves obfuscation-detection rules)
-    const fileThreats = analyzeFileFn(content, file, targetPath);
+    const fileThreats = analyzeFileFn(effectiveContent, file, targetPath);
     threats.push(...fileThreats);
 
     // Also analyze deobfuscated code for additional findings hidden by obfuscation
     if (typeof options.deobfuscate === 'function') {
       try {
-        const result = options.deobfuscate(content);
+        const result = options.deobfuscate(effectiveContent);
         if (result.transforms.length > 0) {
           const deobThreats = analyzeFileFn(result.code, file, targetPath);
           const existingKeys = new Set(fileThreats.map(t => `${t.type}::${t.message}`));

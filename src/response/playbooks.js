@@ -349,6 +349,11 @@ const PLAYBOOKS = {
     'pour eviter la detection statique. Technique de vol de GITHUB_TOKEN, NPM_TOKEN, etc. ' +
     'Verifier quelles variables sont accedees et si elles sont exfiltrees.',
 
+  lifecycle_hidden_payload:
+    'CRITIQUE: Le script lifecycle pointe vers un fichier cache dans node_modules/. ' +
+    'Ce pattern est utilise par les attaques DPRK/Lazarus pour cacher le payload dans un repertoire ' +
+    'que les scanners excluent par defaut. Examiner le fichier cible immediatement.',
+
   lifecycle_shell_pipe:
     'CRITIQUE: Le script lifecycle (preinstall/postinstall) pipe du code distant vers un shell (curl | sh). ' +
     'NE PAS installer. Ceci execute du code arbitraire a l\'installation. ' +

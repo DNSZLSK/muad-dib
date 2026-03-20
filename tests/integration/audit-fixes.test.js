@@ -282,9 +282,9 @@ async function runAuditFix6Tests() {
 async function runAuditFix7Tests() {
   console.log('\n=== AUDIT FIX 7: Percentage-based FP thresholds ===\n');
 
-  test('FIX7: Single require_cache_poison stays CRITICAL when flooding other types', () => {
+  test('FIX7: Single require_cache_poison WRITE stays CRITICAL (no single-hit downgrade)', () => {
     const { applyFPReductions } = require('../../src/scoring.js');
-    // 1 real require_cache_poison + 20 other threats
+    // 1 real require_cache_poison WRITE + 20 other threats
     const threats = [
       { type: 'require_cache_poison', severity: 'CRITICAL', file: 'evil.js', message: 'cache poison' }
     ];
@@ -294,8 +294,8 @@ async function runAuditFix7Tests() {
     }
     applyFPReductions(threats, null, null);
     const rcp = threats.find(t => t.type === 'require_cache_poison');
-    // Single hit should be HIGH (existing rule), not LOW
-    assert(rcp.severity === 'HIGH', `Single require_cache_poison should be HIGH, got ${rcp.severity}`);
+    // WRITE stays CRITICAL — the READ/WRITE distinction in ast-detectors handles FPs
+    assert(rcp.severity === 'CRITICAL', `Single require_cache_poison WRITE should stay CRITICAL, got ${rcp.severity}`);
   });
 
   test('FIX7: 4 require_cache_poison does NOT downgrade to LOW when total threats < threshold ratio', () => {

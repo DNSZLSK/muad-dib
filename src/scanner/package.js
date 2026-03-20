@@ -103,6 +103,19 @@ async function scanPackageJson(targetPath) {
         }
       }
 
+      // Escalate: lifecycle script targeting node_modules/ — payload hiding technique.
+      // Legitimate postinstall scripts run from the package's own directory, not from node_modules/.
+      // Lazarus/DPRK interview attacks hide payloads in node_modules/.cache/ or similar paths.
+      if (['preinstall', 'install', 'postinstall'].includes(scriptName) &&
+          /\bnode_modules[\/\\]/.test(scriptContent)) {
+        threats.push({
+          type: 'lifecycle_hidden_payload',
+          severity: 'CRITICAL',
+          message: `Critical: "${scriptName}" targets file inside node_modules/ — payload hiding technique to evade scanners.`,
+          file: 'package.json'
+        });
+      }
+
       // Detect Bun runtime evasion in lifecycle scripts (Shai-Hulud 2.0)
       if (/\bbun\s+(run|exec|install|x)\b/.test(scriptContent) || /\bbunx\s+/.test(scriptContent)) {
         threats.push({

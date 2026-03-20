@@ -183,7 +183,9 @@ function _findFilesImpl(dir, { extensions, excludedDirs, maxDepth, results, visi
  * @returns {string[]} List of .js file paths
  */
 function findJsFiles(dir, results = []) {
-  return findFiles(dir, { extensions: ['.js', '.mjs', '.cjs'], results });
+  // .d.ts included: legitimate .d.ts files never contain require/exec/network calls,
+  // so any executable code in .d.ts is a high-confidence malicious payload hiding technique.
+  return findFiles(dir, { extensions: ['.js', '.mjs', '.cjs', '.d.ts'], results });
 }
 
 function clearFileListCache() {

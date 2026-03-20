@@ -131,7 +131,8 @@ const FP_COUNT_THRESHOLDS = {
   // P4: bundled credential_tampering from minified alias resolution (jspdf, lerna)
   credential_tampering: { maxCount: 5, to: 'LOW' },
   // B1 FP reduction: bundled code aliases eval/Function (sinon, storybook, vitest)
-  dangerous_call_eval: { maxCount: 3, from: 'MEDIUM', to: 'LOW' },
+  // FP fix: also cover HIGH severity (setTimeout+stringBuildVar in minified code)
+  dangerous_call_eval: { maxCount: 3, to: 'LOW' },
   // P6: HTTP client libraries (undici, aws-sdk, nodemailer, jsdom) parse Authorization/Bearer headers
   // with 3+ credential regexes. Real harvesters use 1-2 targeted regexes.
   credential_regex_harvest: { maxCount: 2, from: 'HIGH', to: 'LOW' },
@@ -379,13 +380,10 @@ function applyFPReductions(threats, reachableFiles, packageName, packageDeps) {
       }
     }
 
-    // require_cache_poison: single hit → HIGH (plugin dedup/hot-reload, not malware)
-    // Malware poisons cache repeatedly; a single access is framework behavior
-    if (t.type === 'require_cache_poison' && t.severity === 'CRITICAL' &&
-        typeCounts.require_cache_poison === 1) {
-      t.reductions.push({ rule: 'cache_poison_single', from: 'CRITICAL', to: 'HIGH' });
-      t.severity = 'HIGH';
-    }
+    // require_cache_poison: single-hit downgrade removed.
+    // The READ/WRITE distinction in ast-detectors already handles the FP case:
+    // READ-only → LOW (hot-reload, introspection), WRITE → CRITICAL (malicious replacement).
+    // A single cache WRITE is genuinely malicious — no downgrade needed.
 
     // Prototype hook: framework class prototypes → MEDIUM
     // Core Node.js prototypes (http.IncomingMessage, net.Socket) stay CRITICAL
@@ -432,9 +430,12 @@ function applyFPReductions(threats, reachableFiles, packageName, packageDeps) {
     }
 
     // Reachability: findings in files not reachable from entry points → LOW
+    // Exception: .d.ts files are never require()'d by JS but are executed by ts-node/tsx/bun.
+    // Executable code in .d.ts is always malicious — exempt from unreachable downgrade.
+    const isDtsFile = t.file && t.file.endsWith('.d.ts');
     if (reachableFiles && reachableFiles.size > 0 && t.file &&
         !REACHABILITY_EXEMPT_TYPES.has(t.type) &&
-        !isPackageLevelThreat(t)) {
+        !isPackageLevelThreat(t) && !isDtsFile) {
       const normalizedFile = t.file.replace(/\\/g, '/');
       if (!reachableFiles.has(normalizedFile)) {
         t.reductions.push({ rule: 'unreachable', from: t.severity, to: 'LOW' });
