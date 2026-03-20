@@ -56,6 +56,7 @@ const { runEvaluationSmokeTests } = require('./integration/evaluation-smoke.test
 const { runCompoundScoringTests } = require('./integration/compound-scoring.test');
 const { runGapRemediationTests } = require('./integration/gap-remediation.test');
 const { runConfigTests } = require('./integration/config.test');
+const { runBenignRandomTests } = require('./integration/benign-random.test');
 
 // Temporal analysis tests
 const { runTemporalAnalysisTests } = require('./temporal/temporal-analysis.test');
@@ -161,6 +162,9 @@ async function timed(name, fn) {
 
   // Config system tests (v2.9.7)
   await timed('config', runConfigTests);
+
+  // Benign random corpus tests (v2.9.7)
+  await timed('benign-random', runBenignRandomTests);
 
   // ML feature extraction tests (v2.8.7)
   await timed('ml-feature-extractor', runMLFeatureExtractorTests);
