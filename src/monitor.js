@@ -699,6 +699,8 @@ const HIGH_CONFIDENCE_MALICE_TYPES = new Set([
   'lifecycle_shell_pipe',                  // curl|sh in preinstall
   'fetch_decrypt_exec',                    // steganographic payload chain
   'download_exec_binary',                  // download+chmod+exec
+  'reverse_shell',                         // reverse shell (always malicious)
+  'crypto_staged_payload',                 // decrypt→eval staged payload chain
   'intent_credential_exfil',               // intra-file credential→network
   'intent_command_exfil',                  // intra-file command→network
   'cross_file_dataflow',                   // proven taint cross-modules
@@ -2386,7 +2388,9 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta) {
         }
         await trySendWebhook(name, version, ecosystem, adjustedResult, sandboxResult);
         const staticScore = result.summary.riskScore || 0;
-        return { sandboxResult, staticClean: false, tier, staticScore };
+        const hasHCThreats = hasHighConfidenceThreat(result);
+        const isDormant = sandboxResult && sandboxResult.score === 0 && (result.summary.riskScore || 0) >= 20;
+        return { sandboxResult, staticClean: false, tier, staticScore, hasHCThreats, isDormant };
       }
     }
   } catch (err) {
@@ -3457,8 +3461,20 @@ async function resolveTarballAndScan(item) {
   if (scanResult) {
     if (!staticClean) {
       if (sandboxResult && sandboxResult.score === 0) {
-        updateScanStats('false_positive');
-        relabelRecords(item.name, 'fp');
+        const hasHC = scanResult.hasHCThreats || false;
+        const isDormant = scanResult.isDormant || false;
+        const staticScore = scanResult.staticScore || 0;
+
+        if (hasHC) {
+          updateScanStats('sandbox_inconclusive');
+          console.log(`[MONITOR] RELABEL BLOCKED (HC threats): ${item.name} — sandbox clean but has high-confidence malice types, keeping suspect label`);
+        } else if (isDormant || staticScore >= 70) {
+          updateScanStats('sandbox_inconclusive');
+          console.log(`[MONITOR] RELABEL BLOCKED (high static): ${item.name} — static score=${staticScore}, keeping suspect label`);
+        } else {
+          updateScanStats('false_positive');
+          relabelRecords(item.name, 'fp');
+        }
       } else if (sandboxResult && sandboxResult.score > 0) {
         const hasSandboxFindings = sandboxResult.findings && sandboxResult.findings.length > 0;
         if (hasSandboxFindings) {

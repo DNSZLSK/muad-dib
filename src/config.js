@@ -205,12 +205,23 @@ function validateConfig(raw) {
 
 /**
  * Resolve which config file to load.
- * Priority: --config <path> > .muaddibrc.json at targetPath root
+ * Priority: --config <path> > ~/.muaddibrc.json > CWD/.muaddibrc.json (if CWD ≠ targetPath)
+ *
+ * SECURITY: NEVER auto-detect config from targetPath (the scanned directory).
+ * An attacker can place .muaddibrc.json in their npm package with
+ * severityWeights: {critical:0, high:0, medium:0, low:0} to neutralize the scanner.
+ * Only load config from trusted locations:
+ * - Explicit --config <path>
+ * - User home directory (~/.muaddibrc.json)
+ * - CWD, but ONLY when CWD is different from the scan target
+ *
  * @param {string} targetPath - scan target directory
  * @param {string|null} configPath - explicit --config path (or null)
  * @returns {{ config: object|null, warnings: string[], errors: string[], source: string|null }}
  */
 function resolveConfig(targetPath, configPath) {
+  const warnings = [];
+
   // Explicit --config path
   if (configPath) {
     const absPath = path.isAbsolute(configPath) ? configPath : path.resolve(configPath);
@@ -229,22 +240,39 @@ function resolveConfig(targetPath, configPath) {
     return result;
   }
 
-  // Auto-detect .muaddibrc.json at target root
-  const rcPath = path.join(targetPath, '.muaddibrc.json');
-  if (!fs.existsSync(rcPath)) {
-    return { config: null, warnings: [], errors: [], source: null };
+  // SECURITY: Warn if .muaddibrc.json is found INSIDE the scanned package (informational only)
+  const targetRcPath = path.join(targetPath, '.muaddibrc.json');
+  if (fs.existsSync(targetRcPath)) {
+    warnings.push('[SECURITY] .muaddibrc.json found inside scanned package — ignored (potential config neutralization attack)');
   }
-  const { raw, error } = loadConfigFile(rcPath);
-  if (error) {
-    // Auto-detected config with errors is a warning, not a fatal error
-    return { config: null, warnings: [`[CONFIG] ${error} — .muaddibrc.json ignored`], errors: [], source: null };
+
+  // Auto-detect ONLY from safe locations (NOT from scan target)
+  const cwd = process.cwd();
+  const homedir = require('os').homedir();
+  const candidates = [
+    path.join(homedir, '.muaddibrc.json'),
+    // CWD config only if CWD is NOT the scan target (developer scanning an external package)
+    ...(path.resolve(cwd) !== path.resolve(targetPath) ? [path.join(cwd, '.muaddibrc.json')] : [])
+  ];
+
+  for (const rcPath of candidates) {
+    if (!fs.existsSync(rcPath)) continue;
+    const { raw, error } = loadConfigFile(rcPath);
+    if (error) {
+      warnings.push(`[CONFIG] ${error} — ${rcPath} ignored`);
+      continue;
+    }
+    const result = validateConfig(raw);
+    // Prepend any security warnings accumulated before this config was found
+    result.warnings = [...warnings, ...result.warnings];
+    if (result.config) {
+      result.warnings.unshift(`Loaded custom thresholds from ${rcPath}`);
+    }
+    result.source = rcPath;
+    return result;
   }
-  const result = validateConfig(raw);
-  if (result.config) {
-    result.warnings.unshift('Loaded custom thresholds from .muaddibrc.json');
-  }
-  result.source = rcPath;
-  return result;
+
+  return { config: null, warnings, errors: [], source: null };
 }
 
 module.exports = { DEFAULTS, loadConfigFile, validateConfig, resolveConfig };

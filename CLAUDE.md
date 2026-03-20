@@ -84,13 +84,13 @@ Never skip documentation updates when publishing a new version.
 - Never commit directly to master
 - Do not create commits automatically — the user handles commits manually
 
-## Current Metrics (v2.9.4)
+## Current Metrics (v2.9.9)
 
 | Metric | Value |
 |--------|-------|
-| Version | **2.9.4** |
-| Tests | **2336** passed, 0 failed, across 50 files |
-| Rules | **152** (147 RULES + 5 PARANOID) |
+| Version | **2.9.9** |
+| Tests | **2435** passed, 0 failed, across 54 files |
+| Rules | **153** (148 RULES + 5 PARANOID) |
 | Scanners | **14** modules (13 parallel + 1 pre-analysis) |
 | TPR | **93.9%** (46/49 ground truth) |
 | FPR | **12.9%** (68/529 benign packages) |

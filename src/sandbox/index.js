@@ -240,18 +240,8 @@ async function runSingleSandbox(packageName, options = {}) {
     proc.on('close', (code) => {
       clearTimeout(timer);
 
-      // Docker-level failure: log error and return clean result
-      if (code !== 0 && !stdout.includes('---MUADDIB-REPORT-START---')) {
-        const errLines = stderr.split(/\r?\n/).filter(l => l && !l.includes('[SANDBOX]'));
-        if (errLines.length > 0) {
-          console.log(`[SANDBOX] Docker error (exit ${code}): ${errLines[0]}`);
-        } else {
-          console.log(`[SANDBOX] Container exited with code ${code} (no output)`);
-        }
-        resolve(cleanResult);
-        return;
-      }
-
+      // TIMEOUT FIRST: docker kill causes non-zero exit (code 137/SIGKILL),
+      // must check before Docker error handler to avoid returning CLEAN on timeout
       if (timedOut) {
         const result = {
           score: 100,
@@ -266,6 +256,18 @@ async function runSingleSandbox(packageName, options = {}) {
           suspicious: true
         };
         resolve(result);
+        return;
+      }
+
+      // Docker-level failure (non-timeout): log error and return clean result
+      if (code !== 0 && !stdout.includes('---MUADDIB-REPORT-START---')) {
+        const errLines = stderr.split(/\r?\n/).filter(l => l && !l.includes('[SANDBOX]'));
+        if (errLines.length > 0) {
+          console.log(`[SANDBOX] Docker error (exit ${code}): ${errLines[0]}`);
+        } else {
+          console.log(`[SANDBOX] Container exited with code ${code} (no output)`);
+        }
+        resolve(cleanResult);
         return;
       }
 

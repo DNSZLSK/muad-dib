@@ -282,6 +282,40 @@ function resolveStringConcat(node) {
 }
 
 /**
+ * Like resolveStringConcat, but additionally resolves Identifier nodes via
+ * a stringVarValues Map (variable name → known string value).
+ * Used for double-indirection patterns: var a='ev',b='al'; globalThis[a+b]()
+ */
+function resolveStringConcatWithVars(node, stringVarValues) {
+  if (!node) return null;
+  if (node.type === 'Literal' && typeof node.value === 'string') return node.value;
+  if (node.type === 'Identifier' && stringVarValues && stringVarValues.has(node.name)) {
+    return stringVarValues.get(node.name);
+  }
+  if (node.type === 'TemplateLiteral' && node.expressions.length === 0) {
+    return node.quasis.map(q => q.value.raw).join('');
+  }
+  if (node.type === 'TemplateLiteral' && node.expressions.length > 0) {
+    const parts = [];
+    for (let i = 0; i < node.quasis.length; i++) {
+      parts.push(node.quasis[i].value.raw);
+      if (i < node.expressions.length) {
+        const resolved = resolveStringConcatWithVars(node.expressions[i], stringVarValues);
+        if (resolved === null) return null;
+        parts.push(resolved);
+      }
+    }
+    return parts.join('');
+  }
+  if (node.type === 'BinaryExpression' && node.operator === '+') {
+    const left = resolveStringConcatWithVars(node.left, stringVarValues);
+    const right = resolveStringConcatWithVars(node.right, stringVarValues);
+    if (left !== null && right !== null) return left + right;
+  }
+  return null;
+}
+
+/**
  * Extract string value from a node, including BinaryExpression resolution.
  * Falls back to extractStringValue if concat resolution fails.
  */
@@ -383,13 +417,19 @@ function handleVariableDeclarator(node, ctx) {
       ctx.staticAssignments.add(node.id.name);
     }
 
-    // Track dynamic require vars
+    // Track dynamic require vars + module aliases
     if (node.init?.type === 'CallExpression') {
       const initCallName = getCallName(node.init);
       if (initCallName === 'require' && node.init.arguments.length > 0) {
         const arg = node.init.arguments[0];
         if (arg.type !== 'Literal') {
           ctx.dynamicRequireVars.add(node.id.name);
+        }
+        // Track require('module') or require('node:module') aliases for Module._load detection
+        const reqVal = extractStringValueDeep(arg);
+        if (reqVal === 'module') {
+          if (!ctx.moduleAliases) ctx.moduleAliases = new Set();
+          ctx.moduleAliases.add(node.id.name);
         }
       }
     }
@@ -714,6 +754,35 @@ function handleCallExpression(node, ctx) {
     // GlassWorm: track Solana/Web3 require imports for compound blockchain C2 detection
     if (reqStr && SOLANA_PACKAGES.some(pkg => reqStr === pkg)) {
       ctx.hasSolanaImport = true;
+    }
+  }
+
+  // Detect process.mainModule.require('child_process') — module system bypass
+  if (node.callee.type === 'MemberExpression' &&
+      node.callee.property?.type === 'Identifier' && node.callee.property.name === 'require' &&
+      node.callee.object?.type === 'MemberExpression' &&
+      node.callee.object.object?.type === 'Identifier' &&
+      node.callee.object.object.name === 'process' &&
+      node.callee.object.property?.type === 'Identifier' &&
+      node.callee.object.property.name === 'mainModule' &&
+      node.arguments.length > 0) {
+    const arg = node.arguments[0];
+    const modName = extractStringValueDeep(arg);
+    const DANGEROUS_MODS = ['child_process', 'fs', 'net', 'dns', 'http', 'https', 'tls'];
+    if (modName && DANGEROUS_MODS.includes(modName)) {
+      ctx.threats.push({
+        type: 'dynamic_require',
+        severity: 'CRITICAL',
+        message: `process.mainModule.require('${modName}') — bypasses module system restrictions.`,
+        file: ctx.relFile
+      });
+    } else {
+      ctx.threats.push({
+        type: 'dynamic_require',
+        severity: 'HIGH',
+        message: `process.mainModule.require() detected — module system bypass.`,
+        file: ctx.relFile
+      });
     }
   }
 
@@ -1490,22 +1559,45 @@ function handleCallExpression(node, ctx) {
         });
       }
     }
-    // Detect computed call on globalThis/global alias with variable property
+    // Detect computed call on globalThis/global alias with variable or expression property
     const obj = node.callee.object;
-    if (prop.type === 'Identifier' && obj?.type === 'Identifier' &&
+    if (obj?.type === 'Identifier' &&
         (ctx.globalThisAliases.has(obj.name) || obj.name === 'globalThis' || obj.name === 'global')) {
-      ctx.hasEvalInFile = true;
-      // Resolve variable value via stringVarValues (e.g., const f = 'eval'; globalThis[f]())
-      const resolvedValue = ctx.stringVarValues.get(prop.name);
-      const isEvalOrFunction = resolvedValue === 'eval' || resolvedValue === 'Function';
-      ctx.threats.push({
-        type: 'dangerous_call_eval',
-        severity: isEvalOrFunction ? 'CRITICAL' : 'HIGH',
-        message: isEvalOrFunction
-          ? `Resolved indirect ${resolvedValue}() via computed property (${obj.name}[${prop.name}="${resolvedValue}"]) — confirmed eval evasion.`
-          : `Dynamic global dispatch via computed property (${obj.name}[${prop.name}]) — likely indirect eval evasion.`,
-        file: ctx.relFile
-      });
+      if (prop.type === 'Identifier') {
+        ctx.hasEvalInFile = true;
+        // Resolve variable value via stringVarValues (e.g., const f = 'eval'; globalThis[f]())
+        const resolvedValue = ctx.stringVarValues.get(prop.name);
+        const isEvalOrFunction = resolvedValue === 'eval' || resolvedValue === 'Function';
+        ctx.threats.push({
+          type: 'dangerous_call_eval',
+          severity: isEvalOrFunction ? 'CRITICAL' : 'HIGH',
+          message: isEvalOrFunction
+            ? `Resolved indirect ${resolvedValue}() via computed property (${obj.name}[${prop.name}="${resolvedValue}"]) — confirmed eval evasion.`
+            : `Dynamic global dispatch via computed property (${obj.name}[${prop.name}]) — likely indirect eval evasion.`,
+          file: ctx.relFile
+        });
+      } else {
+        // BinaryExpression, TemplateLiteral, or other computed expression
+        // Try to resolve via stringVarValues (e.g., var a='ev',b='al'; globalThis[a+b]())
+        const resolvedProp = resolveStringConcatWithVars(prop, ctx.stringVarValues);
+        if (resolvedProp === 'eval' || resolvedProp === 'Function') {
+          ctx.hasEvalInFile = true;
+          ctx.threats.push({
+            type: 'dangerous_call_eval',
+            severity: 'CRITICAL',
+            message: `Resolved indirect ${resolvedProp}() via computed expression (${obj.name}[...="${resolvedProp}"]) — concat evasion.`,
+            file: ctx.relFile
+          });
+        } else if (resolvedProp !== null) {
+          ctx.hasEvalInFile = true;
+          ctx.threats.push({
+            type: 'dangerous_call_eval',
+            severity: 'HIGH',
+            message: `Dynamic global dispatch via computed expression (${obj.name}[...="${resolvedProp}"]).`,
+            file: ctx.relFile
+          });
+        }
+      }
     }
   }
 
@@ -1606,6 +1698,24 @@ function handleCallExpression(node, ctx) {
         }
         // Module._compile counts as temp file exec for write-execute-delete pattern
         ctx.hasTempFileExec = ctx.hasTempFileExec || ctx.hasDevShmInContent;
+      }
+    }
+
+    // Module._load() — internal module loader bypass (ANSSI audit v2)
+    if (propName === '_load') {
+      const calleeObj = node.callee.object;
+      const isModuleIdentifier = calleeObj.type === 'Identifier' &&
+        (calleeObj.name === 'Module' || calleeObj.name === 'module' ||
+         (ctx.moduleAliases && ctx.moduleAliases.has(calleeObj.name)));
+      const isMemberChain = calleeObj.type === 'MemberExpression';
+      const isConstructed = calleeObj.type === 'NewExpression' || calleeObj.type === 'CallExpression';
+      if (isModuleIdentifier || isMemberChain || isConstructed || ctx.hasModuleImport) {
+        ctx.threats.push({
+          type: 'module_load_bypass',
+          severity: 'CRITICAL',
+          message: 'Module._load() detected — internal module loader bypass for dynamic code loading.',
+          file: ctx.relFile
+        });
       }
     }
 

@@ -1595,6 +1595,19 @@ const RULES = {
     ],
     mitre: 'T1102'
   },
+  module_load_bypass: {
+    id: 'MUADDIB-AST-056',
+    name: 'Module._load() Internal Loader Bypass',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Module._load() detecte — bypass du module loader interne de Node.js pour charger dynamiquement des modules sans passer par require(). Technique d\'evasion contournant les restrictions de chargement de modules.',
+    references: [
+      'https://nodejs.org/api/modules.html',
+      'https://attack.mitre.org/techniques/T1059/007/'
+    ],
+    mitre: 'T1059.007'
+  },
+
   blockchain_rpc_endpoint: {
     id: 'MUADDIB-AST-055',
     name: 'Hardcoded Blockchain RPC Endpoint',
