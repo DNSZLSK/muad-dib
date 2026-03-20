@@ -240,8 +240,10 @@ function runConfigTests() {
     resetConfigOverrides();
   });
 
-  // CONFIG-16: .muaddibrc.json auto-detection at target root
-  test('CONFIG-16: .muaddibrc.json auto-detected at target root', () => {
+  // CONFIG-16: .muaddibrc.json at target root is IGNORED (v2.9.9 security fix)
+  // An attacker can place .muaddibrc.json in their npm package to neutralize the scanner.
+  // Config auto-detection from targetPath is disabled — only homedir/CWD/--config supported.
+  test('CONFIG-16: .muaddibrc.json at target root is IGNORED (security fix)', () => {
     const tmpDir = createTempDir();
     try {
       const rcConfig = { riskThresholds: { critical: 85, high: 60, medium: 35 } };
@@ -249,9 +251,8 @@ function runConfigTests() {
 
       const result = resolveConfig(tmpDir, null);
       assert(result.errors.length === 0, `Expected no errors, got: ${result.errors.join(', ')}`);
-      assert(result.config !== null, 'Expected config from auto-detected .muaddibrc.json');
-      assert(result.config.riskThresholds.critical === 85, `Expected critical=85, got ${result.config.riskThresholds.critical}`);
-      assert(result.warnings.some(w => w.includes('.muaddibrc.json')), 'Expected warning mentioning .muaddibrc.json');
+      assert(result.config === null, 'Config from scanned target should be IGNORED');
+      assert(result.warnings.some(w => w.includes('SECURITY')), 'Expected SECURITY warning about config in scanned package');
     } finally {
       cleanup(tmpDir);
     }

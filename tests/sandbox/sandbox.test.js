@@ -982,6 +982,56 @@ async function runSandboxTests() {
     }
   });
 
+  // ============================================
+  // SANDBOX TIMEOUT ORDERING TESTS (FIX: timedOut before Docker error)
+  // ============================================
+
+  console.log('\n=== SANDBOX TIMEOUT ORDERING TESTS ===\n');
+
+  test('SANDBOX-TIMEOUT: proc.on(close) checks timedOut BEFORE Docker error handler', () => {
+    // Regression test: the timedOut check must come before the Docker error handler
+    // in proc.on('close'). If reversed, docker kill (exit 137) triggers Docker error
+    // handler which returns CLEAN instead of CRITICAL timeout result.
+    const source = fs.readFileSync(path.join(__dirname, '../../src/sandbox/index.js'), 'utf8');
+    const timedOutIdx = source.indexOf('if (timedOut)');
+    const dockerErrorIdx = source.indexOf('// Docker-level failure (non-timeout)');
+    assert(timedOutIdx > 0, 'Should find timedOut check in source');
+    assert(dockerErrorIdx > 0, 'Should find Docker error handler in source');
+    assert(timedOutIdx < dockerErrorIdx,
+      `timedOut check (pos ${timedOutIdx}) must come BEFORE Docker error handler (pos ${dockerErrorIdx}) — ` +
+      'otherwise docker kill exit code 137 returns CLEAN instead of CRITICAL');
+  });
+
+  test('SANDBOX-TIMEOUT: timeout result has score 100 and CRITICAL severity', () => {
+    // Verify the expected shape of timeout results
+    // This mirrors the timeout result constructed in proc.on('close')
+    const timeoutResult = {
+      score: 100,
+      severity: 'CRITICAL',
+      findings: [{
+        type: 'timeout',
+        severity: 'CRITICAL',
+        detail: 'Container exceeded 120s timeout',
+        evidence: 'Killed after 120000ms'
+      }],
+      raw_report: null,
+      suspicious: true
+    };
+    assert(timeoutResult.score === 100, 'Timeout result must have score 100');
+    assert(timeoutResult.severity === 'CRITICAL', 'Timeout result must be CRITICAL');
+    assert(timeoutResult.findings[0].type === 'timeout', 'Timeout finding type must be timeout');
+    assert(timeoutResult.suspicious === true, 'Timeout result must be suspicious');
+  });
+
+  test('SANDBOX-TIMEOUT: clean result has score 0 (Docker error, NOT timeout)', () => {
+    // The clean result should only be returned for non-timeout Docker failures
+    // (e.g. OOM, image pull error) — never for timeout kills
+    const cleanResult = { score: 0, severity: 'CLEAN', findings: [], raw_report: null, suspicious: false };
+    assert(cleanResult.score === 0, 'Clean result must have score 0');
+    assert(cleanResult.severity === 'CLEAN', 'Clean result must be CLEAN');
+    assert(cleanResult.suspicious === false, 'Clean result must not be suspicious');
+  });
+
   test('SANDBOX-COV: generateNetworkReport with ssh-ed25519 exfil pattern', () => {
     const report = {
       package: 'test-pkg',

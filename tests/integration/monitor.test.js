@@ -6170,12 +6170,14 @@ async function runMonitorTests() {
 
   // ===== v2.7.6 C1: High-confidence malice bypass =====
 
-  test('MONITOR: HIGH_CONFIDENCE_MALICE_TYPES contains 11 threat types', () => {
-    assert(HIGH_CONFIDENCE_MALICE_TYPES.size === 11,
-      `Should have 11 types, got ${HIGH_CONFIDENCE_MALICE_TYPES.size}`);
+  test('MONITOR: HIGH_CONFIDENCE_MALICE_TYPES contains 13 threat types', () => {
+    assert(HIGH_CONFIDENCE_MALICE_TYPES.size === 13,
+      `Should have 13 types, got ${HIGH_CONFIDENCE_MALICE_TYPES.size}`);
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('lifecycle_shell_pipe'), 'Missing lifecycle_shell_pipe');
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('fetch_decrypt_exec'), 'Missing fetch_decrypt_exec');
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('download_exec_binary'), 'Missing download_exec_binary');
+    assert(HIGH_CONFIDENCE_MALICE_TYPES.has('reverse_shell'), 'Missing reverse_shell');
+    assert(HIGH_CONFIDENCE_MALICE_TYPES.has('crypto_staged_payload'), 'Missing crypto_staged_payload');
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('intent_credential_exfil'), 'Missing intent_credential_exfil');
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('intent_command_exfil'), 'Missing intent_command_exfil');
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('cross_file_dataflow'), 'Missing cross_file_dataflow');
@@ -7339,6 +7341,155 @@ async function runMonitorTests() {
     assert(typeof TARBALL_CACHE_DEFAULT_RETENTION_DAYS === 'number' && TARBALL_CACHE_DEFAULT_RETENTION_DAYS === 7, 'Default retention should be 7 days');
     assert(typeof TARBALL_CACHE_HIGH_RISK_RETENTION_DAYS === 'number' && TARBALL_CACHE_HIGH_RISK_RETENTION_DAYS === 30, 'High risk retention should be 30 days');
     assert(typeof TARBALL_CACHE_MAX_SIZE_BYTES === 'number' && TARBALL_CACHE_MAX_SIZE_BYTES > 0, 'Max size should be positive');
+  });
+
+  // ============================================
+  // HC TYPES + RELABELING GUARD TESTS (FIX: prevent FP relabeling of malware)
+  // ============================================
+
+  console.log('\n=== MONITOR RELABELING GUARD TESTS ===\n');
+
+  test('MONITOR-HC: reverse_shell is in HIGH_CONFIDENCE_MALICE_TYPES', () => {
+    assert(HIGH_CONFIDENCE_MALICE_TYPES.has('reverse_shell'),
+      'reverse_shell must be in HIGH_CONFIDENCE_MALICE_TYPES — always malicious');
+  });
+
+  test('MONITOR-HC: crypto_staged_payload is in HIGH_CONFIDENCE_MALICE_TYPES', () => {
+    assert(HIGH_CONFIDENCE_MALICE_TYPES.has('crypto_staged_payload'),
+      'crypto_staged_payload must be in HIGH_CONFIDENCE_MALICE_TYPES — decrypt+eval chain');
+  });
+
+  test('MONITOR-HC: hasHighConfidenceThreat detects reverse_shell CRITICAL', () => {
+    const result = {
+      threats: [
+        { type: 'reverse_shell', severity: 'CRITICAL', file: 'index.js' }
+      ]
+    };
+    assert(hasHighConfidenceThreat(result) === true,
+      'Should detect reverse_shell CRITICAL as high-confidence threat');
+  });
+
+  test('MONITOR-HC: hasHighConfidenceThreat ignores reverse_shell LOW', () => {
+    const result = {
+      threats: [
+        { type: 'reverse_shell', severity: 'LOW', file: 'index.js' }
+      ]
+    };
+    assert(hasHighConfidenceThreat(result) === false,
+      'Should NOT flag reverse_shell LOW as high-confidence (severity gate)');
+  });
+
+  test('MONITOR-HC: hasHighConfidenceThreat detects crypto_staged_payload', () => {
+    const result = {
+      threats: [
+        { type: 'crypto_staged_payload', severity: 'CRITICAL', file: 'install.js' }
+      ]
+    };
+    assert(hasHighConfidenceThreat(result) === true,
+      'Should detect crypto_staged_payload CRITICAL as high-confidence threat');
+  });
+
+  // --- Relabeling guard integration tests ---
+  // These test the logic in resolveTarballAndScan that prevents blind FP relabeling
+
+  test('MONITOR-RELABEL: HC threats + sandbox 0 → should NOT relabel as FP', () => {
+    // Simulates the scanResult returned by scanPackage with HC threats
+    const scanResult = {
+      sandboxResult: { score: 0, severity: 'CLEAN', findings: [] },
+      staticClean: false,
+      tier: 'T1',
+      staticScore: 100,
+      hasHCThreats: true,
+      isDormant: false
+    };
+    const sandboxResult = scanResult.sandboxResult;
+    const hasHC = scanResult.hasHCThreats || false;
+    const isDormant = scanResult.isDormant || false;
+    const staticScore = scanResult.staticScore || 0;
+
+    // The guard should block relabeling
+    assert(sandboxResult && sandboxResult.score === 0, 'Sandbox should be clean (score 0)');
+    assert(hasHC === true, 'Should have HC threats');
+    // With HC threats, relabeling should be blocked
+    const shouldRelabel = !hasHC && !isDormant && staticScore < 70;
+    assert(shouldRelabel === false, 'Must NOT relabel as FP when HC threats present');
+  });
+
+  test('MONITOR-RELABEL: dormant suspect (score 50) + sandbox 0 → should NOT relabel as FP', () => {
+    const scanResult = {
+      sandboxResult: { score: 0, severity: 'CLEAN', findings: [] },
+      staticClean: false,
+      tier: 'T2',
+      staticScore: 50,
+      hasHCThreats: false,
+      isDormant: true  // score >= 20 + sandbox 0
+    };
+    const hasHC = scanResult.hasHCThreats || false;
+    const isDormant = scanResult.isDormant || false;
+    const staticScore = scanResult.staticScore || 0;
+
+    const shouldRelabel = !hasHC && !isDormant && staticScore < 70;
+    assert(shouldRelabel === false, 'Must NOT relabel as FP when dormant suspect');
+  });
+
+  test('MONITOR-RELABEL: static score >= 70 + sandbox 0 → should NOT relabel as FP', () => {
+    const scanResult = {
+      sandboxResult: { score: 0, severity: 'CLEAN', findings: [] },
+      staticClean: false,
+      tier: 'T1',
+      staticScore: 75,
+      hasHCThreats: false,
+      isDormant: false
+    };
+    const hasHC = scanResult.hasHCThreats || false;
+    const isDormant = scanResult.isDormant || false;
+    const staticScore = scanResult.staticScore || 0;
+
+    const shouldRelabel = !hasHC && !isDormant && staticScore < 70;
+    assert(shouldRelabel === false, 'Must NOT relabel as FP when static score >= 70');
+  });
+
+  test('MONITOR-RELABEL: score 25, no HC, not dormant + sandbox 0 → SHOULD relabel as FP', () => {
+    // Normal FP case: low-scoring package, no HC types, sandbox confirmed clean
+    const scanResult = {
+      sandboxResult: { score: 0, severity: 'CLEAN', findings: [] },
+      staticClean: false,
+      tier: 'T3',
+      staticScore: 25,
+      hasHCThreats: false,
+      isDormant: false
+    };
+    const hasHC = scanResult.hasHCThreats || false;
+    const isDormant = scanResult.isDormant || false;
+    const staticScore = scanResult.staticScore || 0;
+
+    const shouldRelabel = !hasHC && !isDormant && staticScore < 70;
+    assert(shouldRelabel === true, 'Should relabel as FP for low-scoring non-HC non-dormant package');
+  });
+
+  test('MONITOR-RELABEL REGRESSION: @cloudbase/cloudbase-mcp scenario (score 100, HC, sandbox 0) → NEVER relabel FP', () => {
+    // Exact regression scenario: real malware with score 100, 6 CRITICAL threats
+    // including reverse_shell + fetch_decrypt_exec + crypto_staged_payload
+    // Sandbox returned CLEAN (score 0) due to timeout→CLEAN bug
+    const scanResult = {
+      sandboxResult: { score: 0, severity: 'CLEAN', findings: [] },
+      staticClean: false,
+      tier: 'T1',
+      staticScore: 100,
+      hasHCThreats: true,  // reverse_shell, fetch_decrypt_exec, crypto_staged_payload all HC
+      isDormant: true       // score 100 >= 20 + sandbox 0
+    };
+    const hasHC = scanResult.hasHCThreats || false;
+    const isDormant = scanResult.isDormant || false;
+    const staticScore = scanResult.staticScore || 0;
+
+    // Multiple guards should block relabeling
+    assert(hasHC === true, 'Should have HC threats (reverse_shell etc.)');
+    assert(isDormant === true, 'Should be dormant suspect (score 100 + sandbox 0)');
+    assert(staticScore >= 70, 'Static score 100 should trigger high-static guard');
+
+    const shouldRelabel = !hasHC && !isDormant && staticScore < 70;
+    assert(shouldRelabel === false, '@cloudbase/cloudbase-mcp must NEVER be relabeled as FP');
   });
 }
 

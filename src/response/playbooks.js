@@ -537,6 +537,12 @@ const PLAYBOOKS = {
     'Cout de rotation: 0.000005 SOL par changement d\'adresse C2 — censorship-resistant. ' +
     'Bloquer les connexions vers les RPC Solana. Supprimer le package.',
 
+  module_load_bypass:
+    'CRITIQUE: Module._load() detecte — bypass du module loader interne de Node.js. ' +
+    'Permet de charger dynamiquement des modules (child_process, fs, net) sans passer par require(), ' +
+    'contournant les restrictions et les hooks de chargement. ' +
+    'Supprimer le package immediatement. Auditer les modules charges dynamiquement.',
+
   blockchain_rpc_endpoint:
     'Endpoint RPC blockchain hardcode detecte (Solana mainnet, Infura Ethereum). ' +
     'Dans un package non-crypto, cela indique un potentiel canal C2 via blockchain. ' +

@@ -179,7 +179,7 @@ See [Intent Graph](#intent-graph) section for `isSDKPattern()` details and 22 SD
 
 ## Detection Rules
 
-**Rules & playbooks:** Threat types map to rules in `src/rules/index.js` (152 rules: 147 RULES + 5 PARANOID, MITRE ATT&CK mapped) and remediation text in `src/response/playbooks.js`. Both keyed by threat `type` string.
+**Rules & playbooks:** Threat types map to rules in `src/rules/index.js` (153 rules: 148 RULES + 5 PARANOID, MITRE ATT&CK mapped) and remediation text in `src/response/playbooks.js`. Both keyed by threat `type` string.
 
 ### AST Detection Rules (v2.2+)
 
@@ -267,7 +267,23 @@ GlassWorm campaign (March 2026, 433+ packages): Unicode invisible characters + B
 - 6 GlassWorm C2 IPs added to SUSPICIOUS_DOMAINS_HIGH
 - IOC: 4 markers, 2 files, 1 hash, 8 compromised packages (builtin.yaml)
 
+### ANSSI Audit v2 Remediation (v2.9.9)
+
+5 bypass remediations from ANSSI audit v2 (score 71.9/100):
+
+- **Config security** (CRITIQUE): `.muaddibrc.json` in scanned package is IGNORED. Config auto-detection now only from `~/.muaddibrc.json` or CWD (if CWD ≠ targetPath). Emits `[SECURITY]` warning if config found inside scanned package.
+- **BinaryExpression computed property**: `resolveStringConcatWithVars()` resolves double-indirection patterns like `var a='ev',b='al'; globalThis[a+b]()` → CRITICAL.
+- **process.mainModule.require**: Detection of `process.mainModule.require('child_process')` as CRITICAL `dynamic_require`.
+- **Module._load**: Detection of `Module._load()` / `require('module')._load()` as CRITICAL `module_load_bypass`.
+- **AST-056**: `module_load_bypass` — Module._load() internal loader bypass (CRITICAL, T1059.007)
+
 ## Version History
+
+### v2.9.9 — ANSSI Audit v2 Remediation
+- 5 bypass remediations (config neutralization, BinaryExpression concat, process.mainModule.require, Module._load)
+- 1 new rule: AST-056 `module_load_bypass`
+- Tests: **2435** across 54 files
+- Rules: **153** (148 RULES + 5 PARANOID)
 
 ### v2.9.4 — Red Team v7 Blue Team
 - 3 FP fixes, 3 quick wins
