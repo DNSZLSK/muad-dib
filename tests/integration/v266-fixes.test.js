@@ -157,11 +157,11 @@ jobs:
   });
 
   // 3.3b Rule count check
-  test('P3: rule count is 151 (146 RULES + 5 PARANOID)', () => {
+  test('P3: rule count is 152 (147 RULES + 5 PARANOID)', () => {
     const { RULES, PARANOID_RULES } = require('../../src/rules/index.js');
     const ruleCount = Object.keys(RULES).length;
     const paranoidCount = Object.keys(PARANOID_RULES).length;
-    assert(ruleCount === 146, `Expected 146 RULES, got ${ruleCount}`);
+    assert(ruleCount === 147, `Expected 147 RULES, got ${ruleCount}`);
     assert(paranoidCount === 5, `Expected 5 PARANOID, got ${paranoidCount}`);
   });
 

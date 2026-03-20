@@ -205,9 +205,17 @@ function analyzeFile(content, filePath, basePath) {
   // Fix #23: Function param tainting — track function declarations
   const functionDefs = new Map(); // functionName → { params: [paramNames] }
 
+  // Fix #24: Callback exposure — track function parameters (potential callbacks)
+  // When a callback parameter is invoked with tainted data, it's credential exposure.
+  const callbackParams = new Set(); // parameter names of enclosing functions
+  const callbackExposures = []; // { callbackName, argName, line }
+
+  // Pre-scan: collect function declarations and callback params BEFORE the main walk.
+  // acorn-walk.simple uses post-order traversal (children before parents), so
+  // FunctionDeclaration handlers fire AFTER CallExpressions inside the function body.
+  // This pre-scan ensures callbackParams and functionDefs are populated before analysis.
   walk.simple(ast, {
     FunctionDeclaration(node) {
-      // Fix #23: Track function declarations for param tainting
       if (node.id && node.id.name && node.params) {
         const paramNames = node.params
           .filter(p => p.type === 'Identifier')
@@ -215,8 +223,16 @@ function analyzeFile(content, filePath, basePath) {
         if (paramNames.length > 0) {
           functionDefs.set(node.id.name, { params: paramNames });
         }
+        // FP fix: skip 1-char parameter names (minified code noise: e, t, n, r, a, b, etc.)
+        // Real callback exposure attacks use descriptive names (callback, handler, cb, fn, done).
+        for (const p of node.params) {
+          if (p.type === 'Identifier' && p.name.length > 1) callbackParams.add(p.name);
+        }
       }
-    },
+    }
+  });
+
+  walk.simple(ast, {
 
     VariableDeclarator(node) {
       // B9: Array destructuring taint propagation: const [data] = [fs.readFileSync('.npmrc')]
@@ -268,6 +284,19 @@ function analyzeFile(content, filePath, basePath) {
             }
           }
         }
+        // Fix #24: Propagate taint through fs.readFileSync/readFile results
+        // const data = fs.readFileSync(npmrc) where npmrc is sensitive → data is tainted
+        if (initNode.type === 'CallExpression' && initNode.callee?.type === 'MemberExpression') {
+          const callProp = initNode.callee.property;
+          if (callProp?.type === 'Identifier' &&
+              (callProp.name === 'readFileSync' || callProp.name === 'readFile')) {
+            const readArg = initNode.arguments[0];
+            if (readArg && isCredentialPath(readArg, sensitivePathVars)) {
+              sensitivePathVars.add(node.id.name);
+            }
+          }
+        }
+
         // B7: Taint propagation through data-preserving wrappers
         if (initNode.type === 'CallExpression') {
           const callee = initNode.callee;
@@ -653,6 +682,22 @@ function analyzeFile(content, filePath, basePath) {
         }
       }
 
+      // Fix #24: Callback exposure — detect callback(taintedData)
+      // When a function parameter is called with tainted data, it exposes credentials
+      // to the caller (cross-module credential exposure pattern).
+      if (node.callee.type === 'Identifier' && callbackParams.has(node.callee.name) &&
+          node.arguments.length >= 1) {
+        for (const arg of node.arguments) {
+          if (arg.type === 'Identifier' && sensitivePathVars.has(arg.name)) {
+            callbackExposures.push({
+              callbackName: node.callee.name,
+              argName: arg.name,
+              line: node.loc?.start?.line || 0
+            });
+          }
+        }
+      }
+
       // Exec callback: exec('cmd', (err, stdout) => {...}) — output will be used
       if (!execResultNodes.has(node) && node.arguments.length >= 2) {
         const lastArg = node.arguments[node.arguments.length - 1];
@@ -755,6 +800,7 @@ function analyzeFile(content, filePath, basePath) {
   for (const eventName of emitTaintedEvents) {
     const handler = eventHandlers.get(eventName);
     if (handler && handler.hasNetworkSink) {
+      // Same-file emit→on with network sink: full suspicious_dataflow
       sources.push({
         type: 'credential_read',
         name: `EventEmitter.emit('${eventName}')`,
@@ -767,7 +813,29 @@ function analyzeFile(content, filePath, basePath) {
         line: 0,
         taint_tracked: true
       });
+    } else {
+      // Cross-file: tainted data emitted on EventEmitter without same-file listener.
+      // The data is broadcasted to other modules — credential exposure pattern.
+      sinks.push({
+        type: 'network_send',
+        name: `EventEmitter.emit('${eventName}') [cross-module broadcast]`,
+        line: 0,
+        taint_tracked: true
+      });
     }
+  }
+
+  // Fix #24: Callback exposure — add sinks for callback invocations with tainted data
+  // FP fix: cap at 5 exposures per file. Real attacks have 1-2 targeted callbacks,
+  // >5 is minified code noise (jspdf, etc.)
+  const cappedExposures = callbackExposures.slice(0, 5);
+  for (const exposure of cappedExposures) {
+    sinks.push({
+      type: 'network_send',
+      name: `${exposure.callbackName}(${exposure.argName}) [callback exposure]`,
+      line: exposure.line,
+      taint_tracked: true
+    });
   }
 
   // Check if any source or sink was resolved via taint tracking
@@ -803,6 +871,17 @@ function analyzeFile(content, filePath, basePath) {
         }
       }
       if (severity === 'CRITICAL') break;
+    }
+    // Fix #24: EventEmitter broadcast and callback exposure sinks are always CRITICAL
+    // when combined with credential sources — the data is being sent to external consumers
+    if (severity !== 'CRITICAL') {
+      const hasExposureSink = exfilSinks.some(s =>
+        s.name.includes('[cross-module broadcast]') || s.name.includes('[callback exposure]')
+      );
+      const hasCredentialSource = sources.some(s => s.type === 'credential_read');
+      if (hasExposureSink && hasCredentialSource) {
+        severity = 'CRITICAL';
+      }
     }
 
     // Downgrade: if ALL sources are pure telemetry (os.platform, os.arch), cap at HIGH

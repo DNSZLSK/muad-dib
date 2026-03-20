@@ -475,6 +475,45 @@ function handleVariableDeclarator(node, ctx) {
       ctx.stringVarValues.set(node.id.name, strVal);
     }
 
+    // Track variables assigned from require.cache[...] (module cache references)
+    // Used to detect writes to cached module exports (require.cache poisoning)
+    if (node.init?.type === 'MemberExpression' && node.init.computed) {
+      const obj = node.init.object;
+      if (obj?.type === 'MemberExpression' &&
+          obj.object?.type === 'Identifier' && obj.object.name === 'require' &&
+          obj.property?.type === 'Identifier' && obj.property.name === 'cache') {
+        ctx.requireCacheVars.add(node.id.name);
+      }
+    }
+
+    // Track variables assigned from BinaryExpression with '+' (string concatenation building)
+    // Used to detect setTimeout(concatVar, delay) — eval via timer with built string
+    // FP fix: only track when at least one operand is demonstrably a string (literal, template,
+    // or known string var). Filters out arithmetic `var e = a + 1` in minified code.
+    if (node.init?.type === 'BinaryExpression' && node.init.operator === '+') {
+      const left = node.init.left;
+      const right = node.init.right;
+      const isStringOperand = (n) =>
+        (n.type === 'Literal' && typeof n.value === 'string') ||
+        n.type === 'TemplateLiteral' ||
+        (n.type === 'Identifier' && ctx.stringVarValues?.has(n.name)) ||
+        (n.type === 'Identifier' && ctx.stringBuildVars?.has(n.name));
+      if (isStringOperand(left) || isStringOperand(right)) {
+        ctx.stringBuildVars.add(node.id.name);
+      }
+    }
+
+    // Track object variables with Proxy trap properties (set/get/apply/construct)
+    // Used to detect new Proxy(target, handlerVar) when handler is not inline
+    if (node.init?.type === 'ObjectExpression') {
+      const hasTrap = node.init.properties?.some(p =>
+        p.key?.type === 'Identifier' && ['set', 'get', 'apply', 'construct'].includes(p.key.name)
+      );
+      if (hasTrap) {
+        ctx.proxyHandlerVars.add(node.id.name);
+      }
+    }
+
     // Track variables assigned from path.join containing .github/workflows
     if (node.init?.type === 'CallExpression' && node.init.callee?.type === 'MemberExpression') {
       const obj = node.init.callee.object;
@@ -1294,6 +1333,29 @@ function handleCallExpression(node, ctx) {
         file: ctx.relFile
       });
     }
+    // BinaryExpression with '+' as first arg = string concatenation for eval via timer
+    else if (firstArg.type === 'BinaryExpression' && firstArg.operator === '+') {
+      ctx.hasEvalInFile = true;
+      ctx.hasDynamicExec = true;
+      ctx.threats.push({
+        type: 'dangerous_call_eval',
+        severity: 'HIGH',
+        message: `${callName}() with concatenated string argument — eval equivalent, dynamically built code string.`,
+        file: ctx.relFile
+      });
+    }
+    // Identifier arg that was tracked as string value or string concatenation result
+    else if (firstArg.type === 'Identifier' &&
+             (ctx.stringVarValues?.has(firstArg.name) || ctx.stringBuildVars?.has(firstArg.name))) {
+      ctx.hasEvalInFile = true;
+      ctx.hasDynamicExec = true;
+      ctx.threats.push({
+        type: 'dangerous_call_eval',
+        severity: 'HIGH',
+        message: `${callName}() with variable "${firstArg.name}" containing built string — eval equivalent, executes the string as code.`,
+        file: ctx.relFile
+      });
+    }
 
     // Static timer bomb: setTimeout/setInterval with delay > 1 hour (PhantomRaven 48h delay)
     if (node.arguments.length >= 2) {
@@ -1757,7 +1819,16 @@ function handleNewExpression(node, ctx) {
         );
         if (hasTrap) {
           ctx.hasProxyTrap = true;
+          const hasSetTrap = handler.properties?.some(p =>
+            p.key?.type === 'Identifier' && p.key.name === 'set'
+          );
+          if (hasSetTrap) ctx.hasProxySetTrap = true;
         }
+      }
+      // Also detect when handler is a variable reference that was tracked as having trap properties
+      if (handler?.type === 'Identifier' && ctx.proxyHandlerVars?.has(handler.name)) {
+        ctx.hasProxyTrap = true;
+        ctx.hasProxySetTrap = true; // proxyHandlerVars tracks objects with any trap including set
       }
     }
   }
@@ -1966,6 +2037,29 @@ function handleAssignmentExpression(node, ctx) {
   if (node.left?.type === 'MemberExpression') {
     const left = node.left;
 
+    // require.cache[...].exports = ... — module cache poisoning WRITE (not just read)
+    // This is always malicious: replacing a core module's exports to intercept all usage.
+    // Also detects: mod.exports.X = ... where mod is from require.cache[...]
+    if (left.property?.type === 'Identifier' && left.property.name === 'exports') {
+      // Direct pattern: require.cache[...].exports = ...
+      const obj = left.object;
+      if (obj?.type === 'MemberExpression' && obj.computed) {
+        const deep = obj.object;
+        if (deep?.type === 'MemberExpression' &&
+            deep.object?.type === 'Identifier' && deep.object.name === 'require' &&
+            deep.property?.type === 'Identifier' && deep.property.name === 'cache') {
+          ctx.hasRequireCacheWrite = true;
+        }
+      }
+    }
+    // Indirect pattern: mod.exports.X = ... where mod = require.cache[...]
+    if (left.object?.type === 'MemberExpression' &&
+        left.object.property?.type === 'Identifier' && left.object.property.name === 'exports' &&
+        left.object.object?.type === 'Identifier' &&
+        ctx.requireCacheVars?.has(left.object.object.name)) {
+      ctx.hasRequireCacheWrite = true;
+    }
+
     // globalThis.fetch = ... or globalThis.XMLHttpRequest = ... (B2: include aliases)
     if (left.object?.type === 'Identifier' &&
         (left.object.name === 'globalThis' || left.object.name === 'global' ||
@@ -2045,15 +2139,11 @@ function handleAssignmentExpression(node, ctx) {
 }
 
 function handleMemberExpression(node, ctx) {
-  // Detect require.cache access
+  // Detect require.cache access — set flag, defer threat emission to handlePostWalk
+  // FP fix: distinguish READ (hot-reload, delete, introspection) from WRITE (.exports = ...)
   if (node.object?.type === 'Identifier' && node.object.name === 'require' &&
       node.property?.type === 'Identifier' && node.property.name === 'cache') {
-    ctx.threats.push({
-      type: 'require_cache_poison',
-      severity: 'CRITICAL',
-      message: 'require.cache accessed — module cache poisoning to hijack or replace core Node.js modules.',
-      file: ctx.relFile
-    });
+    ctx.hasRequireCacheRead = true;
   }
 
   // GlassWorm: track .codePointAt() calls (variation selector decoder pattern)
@@ -2307,11 +2397,15 @@ function handlePostWalk(ctx) {
 
   // Built-in method override + network: console.X = function or Object.defineProperty = function
   // combined with network calls. Monkey-patching built-in APIs for data interception.
+  // CRITICAL when Object.defineProperty itself is reassigned (global hook on all property defs).
   if (ctx.hasBuiltinOverride && ctx.hasNetworkCallInFile) {
+    const isGlobalHook = ctx.hasBuiltinGlobalHook;
     ctx.threats.push({
       type: 'builtin_override_exfil',
-      severity: 'HIGH',
-      message: 'Built-in method override (console/Object.defineProperty) + network call — runtime API hijacking for data interception and exfiltration.',
+      severity: isGlobalHook ? 'CRITICAL' : 'HIGH',
+      message: isGlobalHook
+        ? 'Object.defineProperty reassigned + network call — global hook intercepts all property definitions for credential exfiltration.'
+        : 'Built-in method override (console/Object.defineProperty) + network call — runtime API hijacking for data interception and exfiltration.',
       file: ctx.relFile
     });
   }
@@ -2335,10 +2429,15 @@ function handlePostWalk(ctx) {
     const hasCredentialSignal = ctx.threats.some(t =>
       t.type === 'env_access' || t.type === 'suspicious_dataflow'
     );
+    // CRITICAL when: credential signals co-occur, OR set trap (intercepts all property writes)
+    // A set trap with network call = universal data capture + exfiltration
+    const isCritical = hasCredentialSignal || ctx.hasProxySetTrap;
     ctx.threats.push({
       type: 'proxy_data_intercept',
-      severity: hasCredentialSignal ? 'CRITICAL' : 'HIGH',
-      message: 'Proxy trap (set/get/apply) with network call in same file — data interception and exfiltration via Proxy handler.',
+      severity: isCritical ? 'CRITICAL' : 'HIGH',
+      message: ctx.hasProxySetTrap
+        ? 'Proxy set trap with network call — intercepts ALL property writes for exfiltration via Proxy handler.'
+        : 'Proxy trap (set/get/apply) with network call in same file — data interception and exfiltration via Proxy handler.',
       file: ctx.relFile
     });
   }
@@ -2349,6 +2448,24 @@ function handlePostWalk(ctx) {
       type: 'mcp_config_injection',
       severity: 'CRITICAL',
       message: 'MCP config injection: code contains MCP server configuration keywords (mcpServers/mcp.json/claude_desktop_config) with filesystem writes. AI toolchain poisoning.',
+      file: ctx.relFile
+    });
+  }
+
+  // require.cache: distinguish WRITE (actual poisoning) from READ-only (hot-reload, introspection)
+  // FP fix: READ-only emits LOW (informational), WRITE emits CRITICAL (malicious module replacement).
+  if (ctx.hasRequireCacheWrite) {
+    ctx.threats.push({
+      type: 'require_cache_poison',
+      severity: 'CRITICAL',
+      message: 'require.cache[...].exports = ... — module cache write: replaces core module exports to intercept all callers.',
+      file: ctx.relFile
+    });
+  } else if (ctx.hasRequireCacheRead) {
+    ctx.threats.push({
+      type: 'require_cache_poison',
+      severity: 'LOW',
+      message: 'require.cache accessed — module cache read (hot-reload/introspection pattern).',
       file: ctx.relFile
     });
   }

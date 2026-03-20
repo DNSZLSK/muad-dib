@@ -649,6 +649,19 @@ const RULES = {
     mitre: 'T1027'
   },
 
+  lifecycle_hidden_payload: {
+    id: 'MUADDIB-PKG-016',
+    name: 'Lifecycle Script Targets Hidden Payload',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Script lifecycle pointe vers un fichier dans node_modules/ — technique de dissimulation de payload. Les scanners excluent node_modules/ par defaut, rendant le payload invisible. Pattern DPRK/Lazarus interview attack.',
+    references: [
+      'https://unit42.paloaltonetworks.com/operation-dream-job/',
+      'https://blog.phylum.io/shai-hulud-npm-worm'
+    ],
+    mitre: 'T1027.009'
+  },
+
   lifecycle_shell_pipe: {
     id: 'MUADDIB-PKG-010',
     name: 'Lifecycle Script Pipes to Shell',

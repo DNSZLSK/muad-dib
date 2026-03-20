@@ -120,6 +120,8 @@ function analyzeFile(content, filePath, basePath) {
     hasBuiltinOverride: /\bconsole\s*\.\s*\w+\s*=\s*function/.test(content) ||
                         /\bconsole\s*\[\s*\w+\s*\]\s*=\s*function/.test(content) ||
                         /\bObject\s*\.\s*defineProperty\s*=\s*function/.test(content),
+    // Critical builtin override: Object.defineProperty itself is reassigned (global hook)
+    hasBuiltinGlobalHook: /\bObject\s*\.\s*defineProperty\s*=\s*function/.test(content),
     // Stream interceptor: class extending Transform/Duplex/Writable (data wiretap pattern)
     hasStreamInterceptor: /\bextends\s+(Transform|Duplex|Writable)\b/.test(content),
     // SANDWORM_MODE P2: DNS exfiltration co-occurrence
@@ -157,6 +159,12 @@ function analyzeFile(content, filePath, basePath) {
     hasWasmLoad: /\bWebAssembly\s*\.\s*(compile|instantiate|compileStreaming|instantiateStreaming)\b/.test(content),
     hasWasmHostSink: false,  // set in handleCallExpression when WASM import object contains network/fs sinks
     hasProxyTrap: false,  // set in handleNewExpression when Proxy has set/get/apply trap
+    hasProxySetTrap: false, // set when Proxy specifically has a 'set' trap (data interception)
+    hasRequireCacheRead: false,  // set when require.cache is accessed (read)
+    hasRequireCacheWrite: false, // set when require.cache exports are modified
+    requireCacheVars: new Set(), // variables assigned from require.cache[...]
+    proxyHandlerVars: new Set(),  // variables assigned object literals with set/get/apply/construct traps
+    stringBuildVars: new Set(),   // variables assigned from BinaryExpression with '+' (string concat)
     // C10: Hash verification — legitimate binary installers verify checksums
     // Requires BOTH createHash() call AND .digest() call — false positives from
     // standalone mentions of 'sha256' or 'integrity' in comments/descriptions

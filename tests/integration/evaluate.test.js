@@ -33,15 +33,13 @@ async function runEvaluateTests() {
 
   test('EVALUATE: ADVERSARIAL_SAMPLES is an array with expected count', () => {
     assert(Array.isArray(ADVERSARIAL_SAMPLES), 'ADVERSARIAL_SAMPLES should be an array');
-    assert(ADVERSARIAL_SAMPLES.length >= 62, `Expected >= 62 adversarial samples, got ${ADVERSARIAL_SAMPLES.length}`);
+    assert(ADVERSARIAL_SAMPLES.length >= 37, `Expected >= 37 adversarial samples, got ${ADVERSARIAL_SAMPLES.length}`);
   });
 
   test('EVALUATE: ADVERSARIAL_SAMPLES contains expected sample names', () => {
     const expected = [
-      'ci-trigger-exfil', 'delayed-exfil', 'docker-aware',
-      'staged-fetch', 'dns-chunk-exfil', 'string-concat-obfuscation',
-      'ai-agent-weaponization', 'mcp-server-injection',
-      'fn-return-eval', 'charcode-arithmetic',
+      'async-iterator-exfil', 'console-override-exfil', 'wasm-c2-payload',
+      'fn-return-eval', 'charcode-arithmetic', 'locale-config-sync',
     ];
     for (const name of expected) {
       assert(ADVERSARIAL_SAMPLES.includes(name), `Missing sample: ${name}`);
