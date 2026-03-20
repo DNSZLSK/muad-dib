@@ -258,7 +258,7 @@ async function runCompoundScoringTests() {
   // ===================================================================
   // Compound types in dist/ — components downgraded to LOW by DIST_BUNDLER_ARTIFACT_TYPES
   // ===================================================================
-  test('DIST_BUNDLER: crypto_staged_payload blocked in dist/ (components → LOW)', () => {
+  test('DIST_BUNDLER: crypto_staged_payload fires in dist/ (originalSeverity gate, v2.9.6)', () => {
     const threats = [
       { type: 'staged_binary_payload', severity: 'HIGH', file: 'dist/main.js', message: 'Binary ref' },
       { type: 'crypto_decipher', severity: 'HIGH', file: 'dist/main.js', message: 'createDecipher' }
@@ -267,9 +267,14 @@ async function runCompoundScoringTests() {
     // After FP reductions, both are LOW (two-notch downgrade in dist/)
     assert(threats[0].severity === 'LOW', `staged_binary_payload should be LOW in dist/, got ${threats[0].severity}`);
     assert(threats[1].severity === 'LOW', `crypto_decipher should be LOW in dist/, got ${threats[1].severity}`);
+    // But originalSeverity is still HIGH (set before FP reductions)
+    assert(threats[0].originalSeverity === 'HIGH', `originalSeverity should be HIGH, got ${threats[0].originalSeverity}`);
     applyCompoundBoosts(threats);
     const compound = threats.find(t => t.type === 'crypto_staged_payload');
-    assert(!compound, 'crypto_staged_payload should NOT fire when both components are LOW in dist/');
+    // v2.9.6: compound NOW fires — originalSeverity gate prevents attackers from
+    // placing code in dist/ to evade compound detection (GAP 4b hardening).
+    assert(compound, 'crypto_staged_payload should fire — originalSeverity was HIGH');
+    assert(compound.severity === 'CRITICAL', `Should be CRITICAL, got ${compound.severity}`);
   });
 
   test('DIST_BUNDLER: crypto_staged_payload fires at root (components stay HIGH)', () => {

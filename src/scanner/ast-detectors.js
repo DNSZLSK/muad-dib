@@ -1495,10 +1495,15 @@ function handleCallExpression(node, ctx) {
     if (prop.type === 'Identifier' && obj?.type === 'Identifier' &&
         (ctx.globalThisAliases.has(obj.name) || obj.name === 'globalThis' || obj.name === 'global')) {
       ctx.hasEvalInFile = true;
+      // Resolve variable value via stringVarValues (e.g., const f = 'eval'; globalThis[f]())
+      const resolvedValue = ctx.stringVarValues.get(prop.name);
+      const isEvalOrFunction = resolvedValue === 'eval' || resolvedValue === 'Function';
       ctx.threats.push({
         type: 'dangerous_call_eval',
-        severity: 'HIGH',
-        message: `Dynamic global dispatch via computed property (${obj.name}[${prop.name}]) — likely indirect eval evasion.`,
+        severity: isEvalOrFunction ? 'CRITICAL' : 'HIGH',
+        message: isEvalOrFunction
+          ? `Resolved indirect ${resolvedValue}() via computed property (${obj.name}[${prop.name}="${resolvedValue}"]) — confirmed eval evasion.`
+          : `Dynamic global dispatch via computed property (${obj.name}[${prop.name}]) — likely indirect eval evasion.`,
         file: ctx.relFile
       });
     }

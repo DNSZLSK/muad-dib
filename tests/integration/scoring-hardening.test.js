@@ -253,7 +253,7 @@ async function runScoringHardeningTests() {
   // FP-P6 Fix 1: credential_regex_harvest count-based downgrade
   // ==========================================================================
   // P7: credential_regex_harvest threshold lowered from >4 to >2
-  test('FP-P7: credential_regex_harvest >2 hits → LOW', () => {
+  test('FP-P7: credential_regex_harvest >2 hits → mostly LOW (one retained by dilution floor)', () => {
     const threats = [];
     for (let i = 0; i < 4; i++) {
       threats.push({ type: 'credential_regex_harvest', severity: 'HIGH', file: 'lib/http.js', message: `regex${i}` });
@@ -263,8 +263,14 @@ async function runScoringHardeningTests() {
       threats.push({ type: 'env_access', severity: 'MEDIUM', file: `f${i}.js`, message: `env${i}` });
     }
     applyFPReductions(threats, null, null);
-    assert(threats[0].severity === 'LOW',
-      `credential_regex_harvest with 4 hits should be LOW (P7 threshold >2), got ${threats[0].severity}`);
+    const credThreats = threats.filter(t => t.type === 'credential_regex_harvest');
+    const highOnes = credThreats.filter(t => t.severity === 'HIGH');
+    const lowOnes = credThreats.filter(t => t.severity === 'LOW');
+    // v2.9.6 dilution floor: one instance retained at HIGH to prevent complete dilution
+    assert(highOnes.length === 1,
+      `Exactly one should retain HIGH (dilution floor), got ${highOnes.length}`);
+    assert(lowOnes.length === 3,
+      `Remaining 3 should be LOW, got ${lowOnes.length}`);
   });
 
   test('FP-P7: credential_regex_harvest <=2 hits stays HIGH', () => {

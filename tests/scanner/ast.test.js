@@ -101,13 +101,13 @@ async function runAstTests() {
     } finally { cleanupTemp(tmp); }
   });
 
-  await asyncTest('AST: Detects globalThis alias + variable computed call g[k]()', async () => {
+  await asyncTest('AST: Detects globalThis alias + variable computed call g[k]() → CRITICAL when k="eval"', async () => {
     const tmp = makeTempPkg('const g = globalThis;\nconst k = "eval";\ng[k]("code");');
     try {
       const result = await runScanDirect(tmp);
-      const t = result.threats.find(t => t.type === 'dangerous_call_eval' && t.message.includes('Dynamic global dispatch'));
-      assert(t, 'Should detect globalThis alias + variable computed call as dangerous_call_eval');
-      assert(t.severity === 'HIGH', 'Should be HIGH severity');
+      const t = result.threats.find(t => t.type === 'dangerous_call_eval' && t.message.includes('Resolved indirect eval'));
+      assert(t, 'Should detect globalThis alias + resolved variable computed call as dangerous_call_eval');
+      assert(t.severity === 'CRITICAL', `Should be CRITICAL (resolved eval), got ${t.severity}`);
     } finally { cleanupTemp(tmp); }
   });
 

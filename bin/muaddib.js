@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-const { exec } = require('child_process');
+const { execFile } = require('child_process');
 const { run } = require('../src/index.js');
 const { updateIOCs } = require('../src/ioc/updater.js');
 const { watch } = require('../src/watch.js');
@@ -160,7 +160,8 @@ for (let i = 0; i < options.length; i++) {
 if (!jsonOutput && !sarifOutput && command !== 'feed' && command !== 'serve') {
   try {
     const currentVersion = require('../package.json').version;
-    exec('npm view muaddib-scanner version', { timeout: 5000 }, (err, stdout) => {
+    const npmBin = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+    execFile(npmBin, ['view', 'muaddib-scanner', 'version'], { timeout: 5000 }, (err, stdout) => {
       if (err) return; // No network or npm unavailable
       const latest = (stdout || '').toString().trim();
       if (!latest || latest === currentVersion) return;
