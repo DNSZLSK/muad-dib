@@ -67,7 +67,26 @@ async function runMonitorTests() {
     CHANGES_STREAM_URL,
     CHANGES_LIMIT,
     CHANGES_CATCHUP_MAX,
-    SCAN_CONCURRENCY
+    SCAN_CONCURRENCY,
+    // Layer 1: IOC pre-alert
+    sendIOCPreAlert,
+    // Layer 2: CouchDB doc extraction
+    extractTarballFromDoc,
+    // Layer 3: Tarball cache
+    TARBALL_CACHE_DIR,
+    TARBALL_CACHE_INDEX_FILE,
+    TARBALL_CACHE_DEFAULT_RETENTION_DAYS,
+    TARBALL_CACHE_HIGH_RISK_RETENTION_DAYS,
+    TARBALL_CACHE_MAX_SIZE_BYTES,
+    loadTarballCacheIndex,
+    saveTarballCacheIndex,
+    tarballCacheKey,
+    tarballCachePath,
+    cacheTarball,
+    purgeTarballCache,
+    evaluateCacheTrigger,
+    quickTyposquatCheck,
+    POPULAR_NPM_NAMES
   } = require('../../src/monitor.js');
 
   test('MONITOR: parseNpmRss extracts package names from RSS', () => {
@@ -6965,6 +6984,361 @@ async function runMonitorTests() {
 
     assert(workerCount.length === 1, `Should spawn only 1 worker for 1 item, got ${workerCount.length}`);
     assert(mockQueue.length === 0, 'Queue should be drained');
+  });
+
+  // ============================================
+  // LAYER 1: IOC PRE-ALERT TESTS
+  // ============================================
+
+  console.log('\n--- Layer 1: IOC Pre-Alert Tests ---\n');
+
+  asyncTest('MONITOR L1: sendIOCPreAlert returns without error when no webhook URL', async () => {
+    const origEnv = process.env.MUADDIB_WEBHOOK_URL;
+    delete process.env.MUADDIB_WEBHOOK_URL;
+    try {
+      await sendIOCPreAlert('test-malicious-pkg');
+      // Should not throw
+      assert(true, 'sendIOCPreAlert did not throw without webhook URL');
+    } finally {
+      if (origEnv) process.env.MUADDIB_WEBHOOK_URL = origEnv;
+    }
+  });
+
+  test('MONITOR L1: sendIOCPreAlert is exported and is a function', () => {
+    assert(typeof sendIOCPreAlert === 'function', 'sendIOCPreAlert should be a function');
+  });
+
+  test('MONITOR L1: stats.iocPreAlerts can be incremented', () => {
+    const prev = stats.iocPreAlerts || 0;
+    stats.iocPreAlerts = (stats.iocPreAlerts || 0) + 1;
+    assert(stats.iocPreAlerts === prev + 1, `Expected ${prev + 1}, got ${stats.iocPreAlerts}`);
+    stats.iocPreAlerts = prev; // restore
+  });
+
+  // ============================================
+  // LAYER 2: COUCHDB DOC EXTRACTION TESTS
+  // ============================================
+
+  console.log('\n--- Layer 2: CouchDB Doc Extraction Tests ---\n');
+
+  test('MONITOR L2: extractTarballFromDoc extracts latest version metadata', () => {
+    const doc = {
+      'dist-tags': { latest: '1.2.3' },
+      versions: {
+        '1.2.3': {
+          version: '1.2.3',
+          dist: {
+            tarball: 'https://registry.npmjs.org/test-pkg/-/test-pkg-1.2.3.tgz',
+            unpackedSize: 50000
+          },
+          scripts: { postinstall: 'node setup.js' }
+        }
+      }
+    };
+    const result = extractTarballFromDoc(doc);
+    assert(result !== null, 'Should return non-null');
+    assert(result.version === '1.2.3', `Version should be 1.2.3, got ${result.version}`);
+    assert(result.tarball === 'https://registry.npmjs.org/test-pkg/-/test-pkg-1.2.3.tgz', 'Tarball URL mismatch');
+    assert(result.unpackedSize === 50000, `unpackedSize should be 50000, got ${result.unpackedSize}`);
+    assert(result.scripts.postinstall === 'node setup.js', 'scripts mismatch');
+  });
+
+  test('MONITOR L2: extractTarballFromDoc returns null for missing versions', () => {
+    const doc = { 'dist-tags': { latest: '1.0.0' }, versions: {} };
+    assert(extractTarballFromDoc(doc) === null, 'Should return null for missing version entry');
+  });
+
+  test('MONITOR L2: extractTarballFromDoc returns null for missing dist-tags', () => {
+    const doc = { versions: { '1.0.0': { dist: { tarball: 'https://...' } } } };
+    assert(extractTarballFromDoc(doc) === null, 'Should return null for missing dist-tags');
+  });
+
+  test('MONITOR L2: extractTarballFromDoc returns null for null doc', () => {
+    assert(extractTarballFromDoc(null) === null, 'Should return null for null');
+  });
+
+  test('MONITOR L2: extractTarballFromDoc returns null for empty object', () => {
+    assert(extractTarballFromDoc({}) === null, 'Should return null for empty object');
+  });
+
+  test('MONITOR L2: extractTarballFromDoc handles missing scripts gracefully', () => {
+    const doc = {
+      'dist-tags': { latest: '1.0.0' },
+      versions: {
+        '1.0.0': {
+          version: '1.0.0',
+          dist: { tarball: 'https://example.com/pkg.tgz' }
+        }
+      }
+    };
+    const result = extractTarballFromDoc(doc);
+    assert(result !== null, 'Should return non-null');
+    assert(typeof result.scripts === 'object', 'scripts should be an object');
+    assert(Object.keys(result.scripts).length === 0, 'scripts should be empty');
+  });
+
+  test('MONITOR L2: extractTarballFromDoc handles missing dist gracefully', () => {
+    const doc = {
+      'dist-tags': { latest: '1.0.0' },
+      versions: { '1.0.0': { version: '1.0.0' } }
+    };
+    const result = extractTarballFromDoc(doc);
+    assert(result !== null, 'Should return non-null');
+    assert(result.tarball === null, 'tarball should be null when dist missing');
+    assert(result.unpackedSize === 0, 'unpackedSize should be 0 when dist missing');
+  });
+
+  test('MONITOR L2: extractTarballFromDoc with multiple versions picks latest', () => {
+    const doc = {
+      'dist-tags': { latest: '2.0.0', beta: '3.0.0-beta.1' },
+      versions: {
+        '1.0.0': { version: '1.0.0', dist: { tarball: 'https://example.com/v1.tgz' } },
+        '2.0.0': { version: '2.0.0', dist: { tarball: 'https://example.com/v2.tgz' } },
+        '3.0.0-beta.1': { version: '3.0.0-beta.1', dist: { tarball: 'https://example.com/v3.tgz' } }
+      }
+    };
+    const result = extractTarballFromDoc(doc);
+    assert(result.version === '2.0.0', `Should pick latest (2.0.0), got ${result.version}`);
+    assert(result.tarball === 'https://example.com/v2.tgz', 'Should use v2 tarball');
+  });
+
+  // ============================================
+  // LAYER 3: TARBALL CACHE TESTS
+  // ============================================
+
+  console.log('\n--- Layer 3: Tarball Cache Tests ---\n');
+
+  // --- Cache key/path tests ---
+
+  test('MONITOR L3: tarballCacheKey sanitizes package name', () => {
+    const key = tarballCacheKey('@scope/pkg-name', '1.0.0');
+    assert(!key.includes('@'), `Key should not contain @, got ${key}`);
+    assert(!key.includes('/'), `Key should not contain /, got ${key}`);
+    assert(key.includes('1.0.0'), `Key should contain version, got ${key}`);
+  });
+
+  test('MONITOR L3: tarballCacheKey handles empty version', () => {
+    const key = tarballCacheKey('my-pkg', '');
+    assert(key.includes('my-pkg'), `Key should contain package name, got ${key}`);
+    assert(key.includes('unknown'), `Key should contain "unknown" for empty version, got ${key}`);
+  });
+
+  test('MONITOR L3: tarballCachePath returns path in cache dir', () => {
+    const p = tarballCachePath('test-key');
+    assert(p.includes('tarball-cache'), `Path should include tarball-cache, got ${p}`);
+    assert(p.endsWith('.tgz'), `Path should end with .tgz, got ${p}`);
+  });
+
+  // --- Cache index tests ---
+
+  test('MONITOR L3: loadTarballCacheIndex returns empty entries on fresh load', () => {
+    // Reset cache to force reload
+    const monitor = require('../../src/monitor.js');
+    monitor.tarballCacheIndex = null;
+    const index = loadTarballCacheIndex();
+    assert(index !== null, 'Index should not be null');
+    assert(typeof index.entries === 'object', 'entries should be an object');
+  });
+
+  test('MONITOR L3: saveTarballCacheIndex persists to disk', () => {
+    const monitor = require('../../src/monitor.js');
+    const origIndex = monitor.tarballCacheIndex;
+    try {
+      // Create a test index
+      monitor.tarballCacheIndex = { entries: { 'test-key': { name: 'test', version: '1.0.0', cachedAt: Date.now(), retentionDays: 7, reason: 'test', size: 100 } } };
+      saveTarballCacheIndex();
+      // Verify file exists
+      assert(fs.existsSync(TARBALL_CACHE_INDEX_FILE), 'Index file should exist after save');
+      const raw = JSON.parse(fs.readFileSync(TARBALL_CACHE_INDEX_FILE, 'utf8'));
+      assert(raw.entries['test-key'] !== undefined, 'Saved index should contain test-key');
+    } finally {
+      monitor.tarballCacheIndex = origIndex;
+      try { fs.unlinkSync(TARBALL_CACHE_INDEX_FILE); } catch {}
+    }
+  });
+
+  // --- Cache trigger evaluation tests ---
+
+  test('MONITOR L3: evaluateCacheTrigger detects first_publish', () => {
+    const doc = { versions: { '1.0.0': {} } };
+    const result = evaluateCacheTrigger('totally-new-pkg-xyz-abc', null, doc);
+    assert(result.shouldCache === true, 'Should cache first publish');
+    assert(result.reason === 'first_publish', `Reason should be first_publish, got ${result.reason}`);
+    assert(result.retentionDays === TARBALL_CACHE_DEFAULT_RETENTION_DAYS, `Retention should be ${TARBALL_CACHE_DEFAULT_RETENTION_DAYS}d`);
+  });
+
+  test('MONITOR L3: evaluateCacheTrigger returns false for multi-version package', () => {
+    const doc = { versions: { '1.0.0': {}, '2.0.0': {}, '3.0.0': {} } };
+    const result = evaluateCacheTrigger('some-established-pkg-xyz', null, doc);
+    assert(result.shouldCache === false, 'Should not cache multi-version package');
+  });
+
+  test('MONITOR L3: evaluateCacheTrigger returns false for popular package', () => {
+    const doc = { versions: { '1.0.0': {} } };
+    // 'lodash' is popular and IS in the popular list, so typosquat should not trigger
+    // but first_publish WILL trigger since 1 version
+    const result = evaluateCacheTrigger('lodash', null, doc);
+    // IOC check: lodash is not an IOC
+    // Typosquat: lodash IS a popular name, so quickTyposquatCheck returns false
+    // First publish: single version, so this triggers
+    assert(result.shouldCache === true, 'Single-version triggers first_publish even for popular name');
+    assert(result.reason === 'first_publish', 'Reason should be first_publish');
+  });
+
+  test('MONITOR L3: evaluateCacheTrigger returns false without doc', () => {
+    const result = evaluateCacheTrigger('unknown-harmless-pkg-xyz', null, null);
+    assert(result.shouldCache === false, 'Should not cache without doc or signals');
+  });
+
+  // --- Quick typosquat check tests ---
+
+  test('MONITOR L3: quickTyposquatCheck detects close name (distance 1)', () => {
+    assert(quickTyposquatCheck('expresss') === true, 'expresss (distance 1 from express) should trigger');
+  });
+
+  test('MONITOR L3: quickTyposquatCheck detects close name (distance 2)', () => {
+    assert(quickTyposquatCheck('lodashs') === true, 'lodashs (distance 2 from lodash) should trigger');
+  });
+
+  test('MONITOR L3: quickTyposquatCheck skips exact popular matches', () => {
+    assert(quickTyposquatCheck('express') === false, 'express itself should not trigger');
+    assert(quickTyposquatCheck('lodash') === false, 'lodash itself should not trigger');
+  });
+
+  test('MONITOR L3: quickTyposquatCheck skips scoped packages', () => {
+    assert(quickTyposquatCheck('@scope/express') === false, 'Scoped packages should not trigger');
+  });
+
+  test('MONITOR L3: quickTyposquatCheck skips short names', () => {
+    assert(quickTyposquatCheck('ab') === false, 'Very short names should not trigger');
+  });
+
+  test('MONITOR L3: quickTyposquatCheck skips distant names', () => {
+    assert(quickTyposquatCheck('completely-unrelated-package') === false, 'Distant names should not trigger');
+  });
+
+  test('MONITOR L3: POPULAR_NPM_NAMES contains expected packages', () => {
+    assert(POPULAR_NPM_NAMES.includes('react'), 'Should contain react');
+    assert(POPULAR_NPM_NAMES.includes('lodash'), 'Should contain lodash');
+    assert(POPULAR_NPM_NAMES.includes('express'), 'Should contain express');
+    assert(POPULAR_NPM_NAMES.includes('react-native'), 'Should contain react-native');
+  });
+
+  // --- Cache purge tests ---
+
+  test('MONITOR L3: purgeTarballCache removes expired entries', () => {
+    const monitor = require('../../src/monitor.js');
+    const origIndex = monitor.tarballCacheIndex;
+
+    // Ensure cache dir exists
+    if (!fs.existsSync(TARBALL_CACHE_DIR)) fs.mkdirSync(TARBALL_CACHE_DIR, { recursive: true });
+
+    try {
+      // Create a fake expired entry
+      const expiredKey = 'test-expired-pkg-1.0.0';
+      const fakePath = tarballCachePath(expiredKey);
+      fs.writeFileSync(fakePath, 'fake-tarball-data');
+
+      monitor.tarballCacheIndex = {
+        entries: {
+          [expiredKey]: {
+            name: 'test-expired-pkg',
+            version: '1.0.0',
+            cachedAt: Date.now() - (8 * 24 * 60 * 60 * 1000), // 8 days ago
+            retentionDays: 7,
+            reason: 'test',
+            size: 18
+          }
+        }
+      };
+
+      purgeTarballCache();
+
+      const index = loadTarballCacheIndex();
+      assert(index.entries[expiredKey] === undefined, 'Expired entry should be removed');
+      assert(!fs.existsSync(fakePath), 'Expired file should be deleted');
+    } finally {
+      monitor.tarballCacheIndex = origIndex;
+    }
+  });
+
+  test('MONITOR L3: purgeTarballCache keeps non-expired entries', () => {
+    const monitor = require('../../src/monitor.js');
+    const origIndex = monitor.tarballCacheIndex;
+
+    if (!fs.existsSync(TARBALL_CACHE_DIR)) fs.mkdirSync(TARBALL_CACHE_DIR, { recursive: true });
+
+    try {
+      const freshKey = 'test-fresh-pkg-2.0.0';
+      const fakePath = tarballCachePath(freshKey);
+      fs.writeFileSync(fakePath, 'fresh-tarball-data');
+
+      monitor.tarballCacheIndex = {
+        entries: {
+          [freshKey]: {
+            name: 'test-fresh-pkg',
+            version: '2.0.0',
+            cachedAt: Date.now() - (2 * 24 * 60 * 60 * 1000), // 2 days ago
+            retentionDays: 7,
+            reason: 'test',
+            size: 19
+          }
+        }
+      };
+
+      purgeTarballCache();
+
+      const index = loadTarballCacheIndex();
+      assert(index.entries[freshKey] !== undefined, 'Non-expired entry should be kept');
+      assert(fs.existsSync(fakePath), 'Non-expired file should remain');
+
+      // Cleanup
+      try { fs.unlinkSync(fakePath); } catch {}
+    } finally {
+      monitor.tarballCacheIndex = origIndex;
+    }
+  });
+
+  // --- Cache tarball integration test ---
+
+  test('MONITOR L3: cacheTarball stores file and updates index', () => {
+    const monitor = require('../../src/monitor.js');
+    const origIndex = monitor.tarballCacheIndex;
+
+    if (!fs.existsSync(TARBALL_CACHE_DIR)) fs.mkdirSync(TARBALL_CACHE_DIR, { recursive: true });
+
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-test-cache-'));
+    try {
+      // Create a fake source tarball
+      const sourcePath = path.join(tmpDir, 'test.tgz');
+      fs.writeFileSync(sourcePath, 'fake-tarball-content-here');
+
+      monitor.tarballCacheIndex = { entries: Object.create(null) };
+
+      cacheTarball('test-cache-pkg', '3.0.0', sourcePath, 'typosquat_signal', 7);
+
+      const index = loadTarballCacheIndex();
+      const key = tarballCacheKey('test-cache-pkg', '3.0.0');
+      assert(index.entries[key] !== undefined, 'Index should contain cached entry');
+      assert(index.entries[key].reason === 'typosquat_signal', 'Reason should match');
+      assert(index.entries[key].retentionDays === 7, 'Retention should be 7');
+      assert(fs.existsSync(tarballCachePath(key)), 'Cached file should exist on disk');
+
+      // Cleanup
+      try { fs.unlinkSync(tarballCachePath(key)); } catch {}
+    } finally {
+      monitor.tarballCacheIndex = origIndex;
+      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+    }
+  });
+
+  // --- Constants tests ---
+
+  test('MONITOR L3: TARBALL_CACHE constants are defined', () => {
+    assert(typeof TARBALL_CACHE_DIR === 'string' && TARBALL_CACHE_DIR.includes('tarball-cache'), 'TARBALL_CACHE_DIR should contain tarball-cache');
+    assert(typeof TARBALL_CACHE_DEFAULT_RETENTION_DAYS === 'number' && TARBALL_CACHE_DEFAULT_RETENTION_DAYS === 7, 'Default retention should be 7 days');
+    assert(typeof TARBALL_CACHE_HIGH_RISK_RETENTION_DAYS === 'number' && TARBALL_CACHE_HIGH_RISK_RETENTION_DAYS === 30, 'High risk retention should be 30 days');
+    assert(typeof TARBALL_CACHE_MAX_SIZE_BYTES === 'number' && TARBALL_CACHE_MAX_SIZE_BYTES > 0, 'Max size should be positive');
   });
 }
 

@@ -4,7 +4,7 @@
 
 DNSZLSK
 Formation CDA - AFPA
-Janvier - Fevrier 2026
+Janvier - Mars 2026
 
 ---
 
@@ -1909,6 +1909,308 @@ La detection de teinte inter-modules necessite de gerer non seulement les import
 
 ---
 
+## v2.6.2 — FP Reduction P7 (13 Mars 2026)
+
+Passe de reduction de faux positifs post-intent-graph. Scoring downgrades pour les patterns de bruit les plus courants : `env_access` en volume, entropie dans les fichiers de configuration, dataflow telemetry. Ajout du scope grouping pour les publications dans le moniteur, et filtrage des alertes LOW.
+
+Resultats : FPR **12.1% (64/529)**, ADR **94.8% (73/77)**. Tests : **1940** passes.
+
+---
+
+## v2.6.5–v2.6.6 — Audit remediation ANSSI (13 Mars 2026)
+
+### Post-audit
+
+Remediation en 6+5 phases suite a l'audit technique ANSSI :
+- **Self-dependency fix** : MUAD'DIB ne se scanne plus lui-meme dans les dependances
+- **MAX_TAINT_DEPTH=50** : garde anti-recursion dans le dataflow
+- **MAX_REDIRECTS=5** : limite les redirects HTTP pour prevenir les boucles
+- **ADR_THRESHOLD=20** : seuil global unique, suppression des seuils par echantillon
+- **IOC input validation** : verification du format nom de package + version
+- **Paranoid mode** : tracking des alias eval/Function/require
+- **Object.create(null)** : prevention prototype pollution dans plusieurs structures
+- **3 regles shell IFS evasion** : SHELL-016/017/018 pour contourner les splits IFS
+- **Charcode validation** : verification des limites dans les reconstructions String.fromCharCode
+
+Tests : **1974 → 2042**. Regles : **129 → 133** (128 RULES + 5 PARANOID).
+
+---
+
+## v2.6.9 — Audit remediation P2 (14 Mars 2026)
+
+4 phases supplementaires :
+- **SSRF IPv6** : `safeDnsResolve` verifie IPv4 ET IPv6 (loopback ::1, link-local fe80::)
+- **Monitor weights** : alignement des poids du moniteur avec le scoring principal
+- **Methodology** : suppression des `ADVERSARIAL_SAMPLES/HOLDOUT_SAMPLES` arrays, FPR operateur `>=`, tests smoke evaluation
+- **Code hardening** : `Object.create(null)` supplementaires, 3 regles shell IFS
+
+Tests : **2042**. FPR **12.1%**. ADR utilise seuil global 20.
+
+---
+
+## v2.7.0–v2.7.2 — Alerting & packaging fixes (14-15 Mars 2026)
+
+- **v2.7.0** : Fix critique de l'alerting des malwares dormants — 9 bugs dans le pipeline `shouldSendWebhook()`
+- **v2.7.1** : `remote_code_load` dist downgrade (FP dans le code bundle), NEVER_WILDCARD dans le scraper, SANDWORM_MODE depth check
+- **v2.7.2** : Fix ghost dependency `loadash` — suppression du repertoire `package/` tracke accidentellement par git
+
+---
+
+## v2.7.5 — Reduction du bruit webhook (14 Mars 2026)
+
+### Le probleme
+
+Le moniteur zero-day generait trop d'alertes Discord. Sur une journee, des centaines de notifications noyaient les vrais positifs. 4 chantiers de reduction du bruit :
+
+**C1 — Self-exclude** : `SELF_PACKAGE_NAME` pour ne pas scanner `muaddib-scanner` lui-meme dans le flux npm.
+
+**C2 — Scope grouping** : `bufferScopedWebhook()` — regroupement des alertes par scope npm pendant 5 minutes. Un monorepo qui publie 20 packages en rafale ne genere qu'une seule alerte Discord avec un embed groupe.
+
+**C3a — WASM split** : `wasm_standalone` (AST-046, MEDIUM) — WebAssembly sans reseau est separe de `wasm_host_sink`. Un package qui charge du WASM sans faire de requetes reseau n'est pas suspect.
+
+**C4 — Reputation scoring** : `computeReputationFactor()` — facteur [0.3, 1.5] base sur l'age, le nombre de versions, et les telechargements. Les packages jeunes sans historique sont scrutines plus severement. Les IOC sont immunes (toujours score maximum).
+
+Tests : **2093**. 134 regles. 14 scanners.
+
+---
+
+## v2.7.6 — HC bypass + graduated threshold (15 Mars 2026)
+
+**HIGH_CONFIDENCE_MALICE_TYPES** : 8 types de menaces a haute confiance (lifecycle_shell_pipe, detached_credential_exfil, etc.) qui contournent la reputation. Un package age avec beaucoup de telechargements mais qui contient un `curl | sh` dans son postinstall reste flagge.
+
+Graduated threshold : seuils d'alerte differencies selon la confiance — 35/25/20 pour differentier les alertes critiques des alertes de surveillance.
+
+---
+
+## v2.7.7 — Destination-aware intent (15 Mars 2026)
+
+`isSDKPattern()` avec 22 mappings env-var → domaine SDK (ex: `DATADOG_API_KEY` → `datadoghq.com`, `SENTRY_DSN` → `sentry.io`). Quand une variable d'environnement est lue et envoyee vers le domaine attendu du SDK, c'est de la telemetrie legitime, pas de l'exfiltration.
+
+`SUSPICIOUS_DOMAIN_PATTERNS` pour detecter les domaines C2 generiques. HC bypass severity check pour ne pas downgrader les alertes haute confiance.
+
+Tests : **2143**.
+
+---
+
+## v2.7.8 — Size cap + MCP + scan memory (15 Mars 2026)
+
+- **Size cap 20MB** : les packages de plus de 20MB sautent le scan complet (sauf IOC et lifecycle). Evite les timeouts sur les gros packages comme tensorflow ou aws-sdk
+- **MCP server awareness** : `mcp_config_injection` passe de CRITICAL a MEDIUM pour les packages SDK MCP reconnus (modelcontextprotocol, etc.)
+- **Scan history memory** : `scan-memory.json` stocke les scores des 30 derniers jours (50K max). Alerte uniquement si le score change de plus de ±15% par rapport au dernier scan. Reduit le bruit des re-publications identiques.
+
+Tests : **2166**. 134 regles. 14 scanners.
+
+---
+
+## v2.7.9–v2.7.10 — Hardening & confidence (15 Mars 2026)
+
+- **v2.7.9** : Fix SSRF IPv6 supplementaire dans `safeDnsResolve`, hardening preload sandbox, FP audit trail pour tracer les changements de FP entre versions
+- **v2.7.10** : Confidence-weighted scoring (les poids de severite sont ajustes par la confiance de detection), protection zip bomb (verification de taille avant decompression)
+
+---
+
+## v2.8.0 — npm changes stream (16 Mars 2026)
+
+### Le changement majeur
+
+Remplacement du polling RSS npm par le **changes stream** CouchDB. L'ancien moniteur interrogeait le flux RSS toutes les 60 secondes — avec un delai de 1-2 minutes et des publications manquees si plus de 50 packages etaient publies dans la fenetre.
+
+Le changes stream est un flux continu de la base CouchDB de npm. Chaque publication est recue en temps reel, sans delai, sans omission. Le moniteur passe de "interroger periodiquement" a "ecouter en continu".
+
+### Galeres techniques
+
+- **HTTP 400 au demarrage** : le `since` initial doit etre le `update_seq` du document root, pas "now" ou un timestamp. Fix en v2.8.1.
+- **Reconnection** : le stream peut se couper (timeout TCP, maintenance npm). Ajout d'un reconnect automatique avec backoff exponentiel.
+- **Parallel scan** : `SCAN_CONCURRENCY=3` pour scanner plusieurs packages en parallele depuis le stream (v2.8.1-v2.8.2)
+
+---
+
+## v2.8.3–v2.8.5 — Monitor stabilisation (16 Mars 2026)
+
+- **v2.8.3** : Fix wildcard IOC edge cases, discrimination WASM amelioree, SDK dataflow FP, verification hash binaire
+- **v2.8.5** : Persistence des stats quotidiennes, concurrence x5, queue 1000, aggregation des logs scraper
+
+---
+
+## v2.8.6–v2.8.7 — ML pipeline & test optimization (17 Mars 2026)
+
+### Test optimization P1-P3
+
+Reduction du temps de test de **373s a 134s** (-64%). Remplacement de `runScan()` (spawn process ~2.5s par test) par `runScanDirect()` (appel in-process ~0.1s). Cache `_scanCache` Map pour eviter de re-scanner les memes fixtures.
+
+### ML pipeline Phase 1
+
+Creation du pipeline d'extraction de features ML en format JSONL. Chaque scan produit un enregistrement avec **62 features** :
+- AST patterns (eval, Function, dynamic require, etc.)
+- Entropie (moyenne, max, fichiers haute entropie)
+- Obfuscation (score, patterns detectes)
+- Lifecycle (scripts, types)
+- Dataflow (sources, sinks, flows)
+- Metadata package (taille, fichiers, age)
+
+Le pipeline genere des fichiers `.jsonl` utilisables pour entrainer un modele ML futur. Pour l'instant, c'est de la collecte de donnees — pas encore de modele.
+
+---
+
+## v2.8.8 — DPRK scoring & sandbox fix (17 Mars 2026)
+
+- Fix bug de confirmation sandbox (les detections sandbox n'etaient pas correctement reportees)
+- **DPRK scoring** : nouvelle regle `detached_credential_exfil` (AST-047, CRITICAL) — detection de l'exfiltration de credentials dans un process detache (fork + credential read + network send). Pattern utilise par les groupes DPRK (Lazarus, etc.)
+
+Tests : **2222**.
+
+---
+
+## v2.9.0 — 8 nouvelles regles supply-chain (18 Mars 2026)
+
+### Couverture des gaps
+
+Analyse des techniques d'attaque recentes non couvertes par les regles existantes. 8+3 nouvelles regles :
+
+| Regle | ID | Severite | Pattern |
+|-------|----|----------|---------|
+| `network_require` | PKG-011 | CRITICAL | `require('https')` dans lifecycle scripts |
+| `node_inline_exec` | PKG-012 | CRITICAL | `node -e "..."` dans lifecycle scripts |
+| `bin_field_hijack` | PKG-013 | HIGH | Hijacking du champ `bin` du package.json |
+| `git_dependency_rce` | PKG-014 | HIGH | Dependance git avec postinstall RCE |
+| `npmrc_git_override` | PKG-015 | CRITICAL | Override .npmrc/git config dans lifecycle |
+| `lifecycle_hidden_payload` | PKG-016 | CRITICAL | Payload cache dans les scripts lifecycle |
+| `node_modules_write` | AST-048 | HIGH | Ecriture dans node_modules (persistence) |
+| `bun_runtime_evasion` | AST-049 | HIGH | Detection d'evasion runtime Bun |
+| `static_timer_bomb` | AST-050 | HIGH | Bombe a retardement statique |
+| `npm_publish_worm` | AST-051 | CRITICAL | Ver auto-propagateur npm publish |
+| `ollama_local_llm` | AST-052 | MEDIUM | Abus LLM local Ollama |
+
+Regles : 134 → **143** (138 RULES + 5 PARANOID). Tests : **2266**.
+
+---
+
+## v2.9.1 — Detection GlassWorm (18 Mars 2026)
+
+### La campagne GlassWorm
+
+Mars 2026 : decouverte de la campagne GlassWorm — **433+ packages npm** compromis utilisant deux techniques inedites :
+
+**1. Caracteres Unicode invisibles** : Le code malveillant est cache dans des caracteres zero-width (U+200B, U+200C, U+200D), BOM hors position 0 (U+FEFF), variation selectors (U+FE00-FE0F, U+E0100-E01EF), et tag characters (U+E0001-U+E007F). Le fichier semble vide ou inoffensif a l'oeil nu, mais contient du code executable.
+
+Detection : `countInvisibleUnicode()` dans `obfuscation.js` — seuil >= 3 caracteres invisibles → `unicode_invisible_injection` (OBF-003, HIGH).
+
+**2. C2 via blockchain** : Au lieu d'un serveur C2 classique (facile a takedown), les attaquants stockent les commandes dans des transactions Solana. Le malware utilise `@solana/web3.js` pour lire les instructions via `getSignaturesForAddress`, `getTransaction`, `getParsedTransaction`. Le serveur C2 est la blockchain elle-meme — immuable et impossible a saisir.
+
+Detection :
+- `blockchain_c2_resolution` (AST-054) : import Solana + methodes C2. CRITICAL si combine avec eval/exec, HIGH sinon.
+- `blockchain_rpc_endpoint` (AST-055, MEDIUM) : endpoints RPC hardcodes (Solana, Infura, Ankr)
+- `unicode_variation_decoder` (AST-053) : `.codePointAt()` combine avec 0xFE00/0xE0100
+
+6 IPs C2 GlassWorm ajoutees a `SUSPICIOUS_DOMAINS_HIGH`. 8 packages compromis ajoutes aux IOC builtin.
+
+Regles : **147** (142 RULES + 5 PARANOID). Tests : **2300**.
+
+---
+
+## v2.9.2 — Compound scoring rules (19 Mars 2026)
+
+### Le probleme du Datadog benchmark
+
+Le benchmark Datadog 17K (17 922 packages malveillants confirmes) revelait un gap : MUAD'DIB detectait ~88% des packages avec le seuil standard (score >= 20). Les ~12% restants avaient des scores entre 10 et 19 — des packages avec des signaux individuellement faibles mais dont la **combinaison** est quasi-certaine d'etre malveillante.
+
+### Les compound rules
+
+Analyse des co-occurrences de threat types dans les packages benins vs malveillants. Identification de 6 combinaisons qui n'apparaissent **jamais** dans les 529 packages benins mais sont frequentes dans les malwares :
+
+| Compound | Composants | Logique |
+|----------|-----------|---------|
+| `crypto_staged_payload` (COMPOUND-001) | staged_binary_payload + crypto_decipher | Payload chiffre + execution |
+| `lifecycle_typosquat` (COMPOUND-002) | lifecycle_script + typosquat_detected | Script lifecycle sur un package typosquat |
+| `lifecycle_inline_exec` (COMPOUND-004) | lifecycle_script + node_inline_exec | Script lifecycle avec `node -e` |
+| `lifecycle_remote_require` (COMPOUND-005) | lifecycle_script + network_require | Script lifecycle avec `require('https')` |
+
+`applyCompoundBoosts()` injecte des findings CRITICAL synthetiques quand les composants co-existent. Appele APRES `applyFPReductions` pour ne pas etre annule par les downgrades FP.
+
+`dangerous_exec` ajoute a `DIST_EXEMPT_TYPES` : `curl|bash` dans dist/ est toujours malveillant, meme dans du code bundle.
+
+Regles : **152** (147 RULES + 5 PARANOID). Tests : **2329**.
+
+### Impact estime sur le benchmark Datadog
+
+Recuperation estimee de ~300-359 packages sous-seuil. Wild TPR attendu en hausse significative.
+
+---
+
+## v2.9.3 — Benchmark cleanup (19 Mars 2026)
+
+Maintenance du pipeline d'evaluation. Nettoyage des resultats de benchmark (suppression des donnees contenant des secrets scannes).
+
+---
+
+## v2.9.4 — Red Team v7 & Datadog benchmark 17K (20 Mars 2026)
+
+### Red Team v7 Blue Team
+
+Derniere campagne adversariale : 3 corrections de faux positifs sur les nouvelles regles + 3 quick wins ameliorant la detection sur des cas limites.
+
+### Benchmark Datadog 17K — resultats reels
+
+Execution complete du benchmark sur le VPS (32 141 secondes, ~9 heures) :
+
+| Metrique | Valeur |
+|----------|--------|
+| **Wild TPR global** | **92.5%** (13 486/14 587 in-scope) |
+| **compromised_lib** | **97.8%** (904/924) |
+| **malicious_intent** | **92.1%** (12 582/13 663 in-scope) |
+| Out-of-scope (skipped) | 3 335 (no JS files) |
+| Erreurs | 0 |
+
+Distribution des scores (in-scope) :
+
+| Score | Count |
+|-------|-------|
+| 0 | 1 101 |
+| 1-9 | 2 488 |
+| 10-24 | 2 125 |
+| 25-49 | 4 900 |
+| 50-74 | 1 527 |
+| 75-100 | 2 446 |
+
+Les MISS (score=0, threats=0) incluent principalement des packages `@react-native-aria/*` (compromised_lib sans code JS malveillant detectable statiquement) et quelques packages `xrpl` (bibliotheque crypto legitime compromise sur des versions specifiques).
+
+### Metriques finales v2.9.4
+
+| Metrique | Valeur | Details |
+|----------|--------|---------|
+| **TPR** (Ground Truth) | **93.9%** (46/49) | 51 attaques reelles, 49 actives |
+| **FPR** (Benign) | **12.9%** (68/529) | 529 packages npm benins |
+| **ADR** (Adversarial) | **96.3%** (103/107) | 67 adversariaux + 40 holdouts |
+| **Wild TPR** (Datadog 17K) | **92.5%** (13 486/14 587) | 17 922 packages, 3 335 skips |
+
+**2336 tests**, 0 echecs, 50 fichiers. **152 regles** (147 RULES + 5 PARANOID). **14 scanners**.
+
+---
+
+## v2.9.5 — Monitor 3 couches : IOC pre-alert, CouchDB extraction, tarball cache (20 Mars 2026)
+
+### Le probleme GlassWorm
+
+La campagne GlassWorm (v2.9.1) a revele un angle mort dans le moniteur : certains packages malveillants connus (IOC match) n'etaient pas scannes parce que le roundtrip vers `registry.npmjs.org/{name}/latest` retournait 404 (package deja supprime par npm). Le tarball existait encore sur le CDN mais l'URL n'etait plus resolvable via l'API standard.
+
+### La solution : 3 couches complementaires
+
+**L1 — IOC pre-check** : `sendIOCPreAlert()` verifie chaque nouveau package contre la base IOC **avant** tout download. Si le package est un IOC match, un webhook PRE-ALERT est envoye immediatement en fire-and-forget, sans attendre le scan complet. Integre dans `pollNpmChanges()` et `pollNpmRss()`. (~50 lignes)
+
+**L2 — CouchDB doc extraction** : Le changes stream utilise maintenant `include_docs=true` pour recevoir le document CouchDB complet avec chaque changement. `extractTarballFromDoc()` extrait l'URL du tarball directement depuis le doc, eliminant le roundtrip vers l'API registry. La queue de scan est pre-populee avec les URLs resolues. (~40 lignes)
+
+**L3 — Tarball cache conditionnel** : Cache local des tarballs pour les packages a haute priorite (IOC match, score eleve). Index de cache, `cacheTarball()`, `purgeTarballCache()`, lookup dans `scanPackage()`, `evaluateCacheTrigger()`, `quickTyposquatCheck()`. Retention 30 jours avec priorite haute pour les IOC. (~200 lignes)
+
+### Comment ca elimine le miss GlassWorm
+
+1. **L1** : Quand `react-native-country-select` apparait dans le changes stream, un webhook IOC PRE-ALERT est envoye immediatement, avant tout download
+2. **L2** : Le tarball URL est extrait du doc CouchDB directement, plus besoin du roundtrip vers `registry.npmjs.org/{name}/latest` qui peut 404
+3. **L3** : Le package etant un IOC match, son tarball est cache localement pendant 30 jours avec retention haute priorite
+
+Tests : 2336 → **2367** (+31), 0 echecs.
+
+---
+
 ## Etat actuel
 
 ### Ce qui fonctionne
@@ -1917,12 +2219,12 @@ La detection de teinte inter-modules necessite de gerer non seulement les import
 |---------|---------|
 | CLI complète | scan, watch, update, scrape, install, safe-install, daemon, sandbox, **diff**, **init-hooks**, **remove-hooks**, **feed**, **serve**, **stats**, **detections**, **replay**, **evaluate** (v2.2) |
 | Base IOCs | 225 000+ npm + 14 000+ PyPI packages malveillants |
-| Détection Shai-Hulud | v1, v2, v3 couverts |
+| Détection campagnes | Shai-Hulud (v1, v2, v3), GlassWorm (433+ packages, mars 2026) |
 | Exports | JSON, HTML, SARIF |
 | Extension VS Code | Publiée sur Marketplace |
 | Webhooks | Discord / Slack (envoi uniquement si menaces détectées) |
 | Docker Sandbox (analyse dynamique) | Analyse comportementale isolée, CI-aware (6 env CI simulés), canary tokens enrichis (6 honeypots), strace, tcpdump, filesystem diff, DNS/HTTP/TLS capture, 16 patterns exfiltration, mode strict iptables, **monkey-patching preload** (time warp, timer acceleration, API interception), **multi-run** [0h, 72h, 7j] |
-| **Moniteur Zero-Day** | Polling RSS npm + PyPI (60s), scan automatique, alertes Discord temps réel, rapport quotidien, filtre bundled tooling |
+| **Moniteur Zero-Day** | npm changes stream (temps reel) + PyPI RSS (60s), scan parallele (concurrency=3), alertes Discord temps reel, rapport quotidien, reputation scoring, scope grouping, filtre bundled tooling |
 | GitHub Actions Backdoor | Détection discussion.yaml (Shai-Hulud 2.0) |
 | **Diff entre versions** | Compare et montre uniquement les NOUVELLES menaces |
 | **Pre-commit hooks** | Support pre-commit, husky, git natif |
@@ -1930,16 +2232,22 @@ La detection de teinte inter-modules necessite de gerer non seulement les import
 | Version check | Notification automatique des nouvelles versions au demarrage |
 | **Detection comportementale (v2.0)** | Temporal lifecycle, AST diff, publish anomaly, maintainer change, canary tokens |
 | **Validation & Observabilite (v2.1)** | Ground truth (51 attaques, 93.9% TPR), detection time logging, FP rate tracking, score breakdown, threat feed API |
-| **Evaluation & Red Team (v2.2-v2.5)** | `muaddib evaluate`, 102 samples evasifs (62 adversariaux + 40 holdouts), TPR **93.9% (46/49)**, **FPR 12.3% (65/529)**, ADR **94.0% (63/67)** (4 misses documentes), 14 scanners, 121 regles, AI config scanner, 529 packages benins npm, 132 PyPI, 65 malwares documentes |
+| **Evaluation & Red Team (v2.2-v2.9)** | `muaddib evaluate`, 107 samples evasifs (67 adversariaux + 40 holdouts), TPR **93.9% (46/49)**, **FPR 12.9% (68/529)**, ADR **96.3% (103/107)** (4 misses documentes), 14 scanners, 152 regles, AI config scanner, 529 packages benins npm, 132 PyPI, 65 malwares documentes |
 | **Desobfuscation (v2.2.5)** | `src/scanner/deobfuscate.js`, 4 transformations AST + const propagation, approche additive (original + desobfusque), `--no-deobfuscate` flag |
 | **Dataflow inter-module (v2.2.6)** | `src/scanner/module-graph.js`, graphe de dependances, propagation de teinte inter-fichiers, 3-hop re-export, class methods, named exports, `--no-module-graph` flag |
-| Tests | **1869 tests unitaires** (43 fichiers) + 56 fuzz + 102 adversariaux/holdout, **86% coverage** (c8/Codecov) |
+| Tests | **2367 tests unitaires** (50 fichiers) + 56 fuzz + 107 adversariaux/holdout, **86% coverage** (c8/Codecov) |
 | **Hardening securite (v2.1.2)** | SSRF protection (shared/download.js), command injection prevention (execFileSync), path traversal (sanitizePackageName), JSON.parse protege, webhook strict |
+| **Compound scoring (v2.9.2)** | 4 regles compound zero-FP, `applyCompoundBoosts()`, detection de co-occurrences malveillantes |
+| **GlassWorm detection (v2.9.1)** | Unicode invisible (OBF-003), blockchain C2 Solana (AST-054/055), variation decoder (AST-053) |
+| **Reputation scoring (v2.7.5)** | `computeReputationFactor()` — age, versions, downloads. HC bypass pour 8 types haute confiance |
+| **Scan memory (v2.7.8)** | `scan-memory.json` — cache 30j, alerte ±15% score delta seulement |
+| **ML pipeline (v2.8.7)** | Extraction JSONL 62 features par scan, collecte pour futur modele |
+| **Benchmark Datadog 17K** | Wild TPR **92.5%** (13 486/14 587), compromised_lib **97.8%**, malicious_intent **92.1%** |
 | Audit securite | 3 audits complets, **99 issues corrigees** (58 v1.4 + 41 v2.5), [rapport PDF](MUADDIB_Security_Audit_Report_v1.4.1.pdf) |
 
 ### Ce qui manque (honnêtement)
 
-**Pas de ML/machine learning** : L'analyse repose sur des patterns statiques, des IOCs connus, et des heuristiques comportementales (v2.0). La detection comportementale reduit le besoin de ML, mais un attaquant sophistique qui obfusque differemment peut encore passer a travers.
+**ML en cours** : Le pipeline d'extraction de features (62 features JSONL, v2.8.7) collecte des donnees pour un futur modele ML. L'analyse repose encore sur des patterns statiques, des IOCs connus, et des heuristiques comportementales. Un attaquant sophistique qui obfusque differemment peut encore passer a travers — le ML devrait combler ce gap.
 
 **Pas d'interception TLS type MITM** : Le sandbox capture le SNI (Server Name Indication) et corrèle DNS/TLS, mais ne déchiffre pas le contenu des connexions HTTPS.
 

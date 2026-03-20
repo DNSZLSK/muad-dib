@@ -391,6 +391,7 @@ Détecte les patterns malveillants dans les fichiers YAML `.github/workflows/`, 
 
 | Campagne | Packages | Status |
 |----------|----------|--------|
+| GlassWorm (Mars 2026) | 433+ packages (Unicode invisible + Blockchain C2) | Détecté |
 | Shai-Hulud v1 (Sept 2025) | @ctrl/tinycolor, ng2-file-upload | Détecté |
 | Shai-Hulud v2 (Nov 2025) | @asyncapi/specs, posthog-node, kill-port | Détecté |
 | Shai-Hulud v3 (Dec 2025) | @vietmoney/react-big-calendar | Détecté |
@@ -641,7 +642,7 @@ Les alertes apparaissent dans Security > Code scanning alerts.
 ## Architecture
 
 ```
-MUAD'DIB 2.6.1 Scanner
+MUAD'DIB 2.9.4 Scanner
 |
 +-- IOC Match (225 000+ packages, JSON DB)
 |   +-- OSV.dev npm dump (200K+ entrées MAL-*)
@@ -668,7 +669,7 @@ MUAD'DIB 2.6.1 Scanner
 |   +-- Corrélation entre signaux faibles de multiples scanners
 |   +-- Élévation de sévérité sur combinaisons suspectes
 |
-+-- 14 Scanners Parallèles (129 règles)
++-- 14 Scanners Parallèles (147 règles)
 |   +-- AST Parse (acorn) — eval/Function, credential CLI theft, binary droppers, prototype hooks
 |   +-- Pattern Matching (shell, scripts)
 |   +-- Typosquat Detection (npm + PyPI, Levenshtein)
@@ -736,20 +737,26 @@ Output (CLI, JSON, HTML, SARIF, Webhook, Threat Feed)
 
 | Metrique | Resultat | Details |
 |----------|----------|---------|
-| **Wild TPR** (Datadog 17K) | **88.2%** brut · **~100%** ajuste | 17 922 packages malveillants reels. 2 077 misses hors scope (voir ci-dessous) |
+| **Wild TPR** (Datadog 17K) | **92.5%** (13 486/14 587 in-scope) | 17 922 packages. 3 335 sans JS (hors scope). Par categorie : compromised_lib 97.8%, malicious_intent 92.1% |
 | **TPR** (Ground Truth) | **93.9%** (46/49) | 51 attaques reelles (49 actives). 3 hors scope : browser-only (3) |
-| **FPR** (Benign, global) | **12.1%** (64/529) | 529 packages npm, vrai code source via `npm pack`, seuil > 20 |
-| **ADR** (Adversarial + Holdout) | **92.2%** (71/77) | 53 adversariaux + 40 holdouts (77 disponibles), seuil global=20 |
+| **FPR** (Benign, global) | **12.9%** (68/529) | 529 packages npm, vrai code source via `npm pack`, seuil > 20 |
+| **ADR** (Adversarial + Holdout) | **96.3%** (103/107) | 67 adversariaux + 40 holdouts (107 disponibles), seuil global=20 |
 
-**Benchmark Datadog 17K** — [DataDog Malicious Software Packages Dataset](https://github.com/DataDog/malicious-software-packages-dataset), 17 922 packages malveillants npm. TPR brut : 88.2% (15 810/17 922). Les 2 077 misses (score=0) ont ete categorises :
+**Benchmark Datadog 17K (v2.9.4)** — [DataDog Malicious Software Packages Dataset](https://github.com/DataDog/malicious-software-packages-dataset), 17 922 packages malveillants npm. Wild TPR : **92.5%** (13 486/14 587 in-scope). 3 335 packages sans fichiers JS exclus comme hors scope. Erreurs : 0.
 
-| Categorie | Nombre | Raison |
-|-----------|--------|--------|
-| Pages de phishing (HTML/CSS/JS frontend) | 1 233 | Aucune API Node.js (`require`, `child_process`, `fs`, `process.env`). Pages de login, redirects, captchas. |
-| Binaires natifs (pas de fichiers JS) | 824 | Binaires multi-plateforme (darwin-arm64, linux-x64, etc.). 201 de @42ailab. |
-| Bibliotheques corrigees | 20 | Code malveillant retire avant le scan. |
+| Metrique | Valeur |
+|----------|--------|
+| Total packages | 17 922 |
+| Hors scope (pas de JS) | 3 335 |
+| In-scope | 14 587 |
+| Detectes | 13 486 |
+| Misses (score=0, in-scope) | 1 101 |
 
-TPR ajuste sur malware JS/Node.js : **~100%** (15 810/~15 845). Voir [Evaluation Methodology](docs/EVALUATION_METHODOLOGY.md#14-datadog-17k-benchmark).
+**Par categorie :**
+- compromised_lib : **97.8%** (904/924)
+- malicious_intent : **92.1%** (12 582/13 663 in-scope, 3 335 hors scope)
+
+Voir [Evaluation Methodology](docs/EVALUATION_METHODOLOGY.md#14-datadog-17k-benchmark).
 
 **FPR par taille de package** — Le FPR correle lineairement avec la taille du package. Le scoring per-file max (v2.2.11) reduit significativement les FP sur les packages moyens/gros :
 
@@ -760,7 +767,7 @@ TPR ajuste sur malware JS/Node.js : **~100%** (15 810/~15 845). Voir [Evaluation
 | Gros (50-100 fichiers JS) | 40 | 10 | 25.0% |
 | Tres gros (100+ fichiers JS) | 62 | 25 | 40.3% |
 
-**Progression FPR** : 0% (invalide, dirs vides, v2.2.0-v2.2.6) → 38% (premiere vraie mesure, v2.2.7) → 19.4% (v2.2.8) → 17.5% (v2.2.9) → ~13% (v2.2.11, scoring per-file max) → 8.9% (v2.3.0, P2) → 7.4% (v2.3.1, P3) → 6.0% (v2.5.8, P4 + audit IOC wildcards) → ~13.6% (v2.5.14, hardening audit) → **12.3%** (v2.5.16, P5+P6, 65/532) → **12.3%** (v2.6.1, module-graph bounded path — zero FP)
+**Progression FPR** : 0% (invalide, dirs vides, v2.2.0-v2.2.6) → 38% (premiere vraie mesure, v2.2.7) → 19.4% (v2.2.8) → 17.5% (v2.2.9) → ~13% (v2.2.11, scoring per-file max) → 8.9% (v2.3.0, P2) → 7.4% (v2.3.1, P3) → 6.0% (v2.5.8, P4 + audit IOC wildcards) → ~13.6% (v2.5.14, hardening audit) → **12.3%** (v2.5.16, P5+P6, 65/532) → **12.3%** (v2.6.1, module-graph bounded path — zero FP) → **12.1%** (v2.6.2, P7) → **12.9%** (v2.9.4, compound scoring + nouveaux detecteurs)
 
 > **Note sur l'evolution du FPR :** Le FPR historique de 6.0% (v2.5.8) reposait sur un `BENIGN_PACKAGE_WHITELIST` qui excluait certains packages connus du scoring — un biais de data leakage supprime en v2.5.10. Le FPR actuel de 12.3% est une mesure honnete sans whitelisting, contre 532 packages benins reels. Les reductions P5/P6 (precision setTimeout, dist/ two-notch downgrade, credential_regex count-based, env segment matching, etc.) sont des ameliorations de precision des detecteurs, pas du whitelisting.
 
@@ -774,13 +781,13 @@ TPR ajuste sur malware JS/Node.js : **~100%** (15 810/~15 845). Voir [Evaluation
 | v4 | **80%** (8/10) | Efficacite desobfuscation |
 | v5 | 50% (5/10) | Dataflow inter-module (nouveau scanner) |
 
-- **Wild TPR** (Benchmark Datadog) : taux de detection sur 17 922 packages malveillants reels du [DataDog Malicious Software Packages Dataset](https://github.com/DataDog/malicious-software-packages-dataset). TPR brut 88.2% (15 810/17 922). TPR ajuste ~100% sur malware JS/Node.js (2 077 misses hors scope : 1 233 phishing HTML, 824 binaires natifs, 20 libs corrigees). Voir [Evaluation Methodology](docs/EVALUATION_METHODOLOGY.md#14-datadog-17k-benchmark).
+- **Wild TPR** (Benchmark Datadog) : taux de detection sur 17 922 packages malveillants reels du [DataDog Malicious Software Packages Dataset](https://github.com/DataDog/malicious-software-packages-dataset). Wild TPR **92.5%** (13 486/14 587 in-scope). 3 335 packages sans fichiers JS exclus comme hors scope. Par categorie : compromised_lib 97.8%, malicious_intent 92.1%. Voir [Evaluation Methodology](docs/EVALUATION_METHODOLOGY.md#14-datadog-17k-benchmark).
 - **TPR** (True Positive Rate) : taux de detection sur 49 attaques supply-chain reelles (event-stream, ua-parser-js, coa, flatmap-stream, eslint-scope, solana-web3js, et 43 autres). 4 misses : browser-only (lottie-player, polyfill-io, trojanized-jquery) ou risque FP (websocket-rat) — voir [Threat Model](docs/threat-model.md).
 - **FPR** (False Positive Rate) : packages avec score > 20 sur 532 packages npm reels (code source scanne, pas des dirs vides). Le 6.2% sur les packages standard (<10 fichiers JS, 290 packages) est la metrique la plus representative pour un usage typique — la plupart des packages npm sont petits.
-- **ADR** (Adversarial Detection Rate) : taux de detection sur 93 samples malveillants evasifs — 53 adversariaux (6 vagues red team) + 40 holdouts (4 batches de 10). 77 disponibles sur disque, seuil global=20. 2 misses documentes.
+- **ADR** (Adversarial Detection Rate) : taux de detection sur 107 samples malveillants evasifs — 67 adversariaux (7 vagues red team) + 40 holdouts (4 batches de 10). 107 disponibles sur disque, seuil global=20.
 - **Holdout** (pre-tuning) : taux de detection sur 10 samples jamais vus avec regles gelees (mesure de generalisation)
 
-Datasets : 17 922 samples Datadog, 532 npm + 132 PyPI packages benins, 93 samples adversariaux/holdout, 51 attaques ground-truth (65 packages malveillants documentes). **1974 tests**, 86% coverage.
+Datasets : 17 922 samples Datadog, 532 npm + 132 PyPI packages benins, 107 samples adversariaux/holdout, 51 attaques ground-truth (65 packages malveillants documentes). **2336 tests**, 50 fichiers.
 
 Voir [Evaluation Methodology](docs/EVALUATION_METHODOLOGY.md) pour le protocole experimental complet.
 
@@ -816,12 +823,12 @@ npm test
 
 ### Tests
 
-- **1932 tests unitaires/integration** sur 44 fichiers modulaires - 86% coverage via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
+- **2336 tests unitaires/integration** sur 50 fichiers modulaires via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
 - **56 tests de fuzzing** - YAML malforme, JSON invalide, fichiers binaires, ReDoS, unicode, inputs 10MB
-- **Benchmark Datadog 17K** - 17 922 packages malveillants reels, 88.2% TPR brut, ~100% sur malware JS/Node.js (2 077 misses hors scope : phishing, binaires, libs corrigees)
-- **93 samples adversariaux/holdout** - 53 adversariaux + 40 holdouts, 71/77 taux de detection sur samples disponibles (92.2% ADR, seuil global=20). 2 misses documentes
+- **Benchmark Datadog 17K** - 17 922 packages malveillants reels, 92.5% Wild TPR (13 486/14 587 in-scope, 3 335 hors scope sans JS). compromised_lib 97.8%, malicious_intent 92.1%
+- **107 samples adversariaux/holdout** - 67 adversariaux + 40 holdouts, 103/107 taux de detection sur samples disponibles (96.3% ADR, seuil global=20)
 - **Validation ground truth** - 51 attaques reelles (46/49 detectees = 93.9% TPR). 3 hors scope : browser-only (lottie-player, polyfill-io, trojanized-jquery)
-- **Validation faux positifs** - 12.1% FPR global (64/529) sur vrai code source npm via `npm pack`
+- **Validation faux positifs** - 12.9% FPR global (68/529) sur vrai code source npm via `npm pack`
 - **Audit ESLint securite** - `eslint-plugin-security` avec 14 regles activees
 
 ---

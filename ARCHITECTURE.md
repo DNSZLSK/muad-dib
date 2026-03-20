@@ -28,12 +28,12 @@ bin/muaddib.js (yargs CLI)
         ├─► Deduplication
         ├─► FP reductions (src/scoring.js — applyFPReductions)
         ├─► Intent coherence analysis (src/intent-graph.js — buildIntentPairs)
-        ├─► Rule enrichment (src/rules/index.js — 134 rules)
+        ├─► Rule enrichment (src/rules/index.js — 152 rules)
         ├─► Scoring (src/scoring.js — per-file max)
         └─► Output (CLI / JSON / HTML / SARIF)
 ```
 
-**Core orchestration:** `src/index.js` — `run(targetPath, options)` runs cross-file module graph analysis first, then launches 13 individual scanners in parallel via `Promise.all` (14 scanner modules total), then deduplicates, applies FP reductions, scores using per-file max (v2.2.11: `riskScore = min(100, max(file_scores) + package_level_score)`, severity weights: CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1), applies intent coherence analysis (intra-file source-sink pairing), enriches with rules/playbooks (134 rules), and outputs (CLI/JSON/HTML/SARIF). Result includes `warnings: []` array (v2.6.5) for incomplete scan notifications (module graph timeout/skip, deobfuscation failures). Exports `isPackageLevelThreat` and `computeGroupScore` for testing.
+**Core orchestration:** `src/index.js` — `run(targetPath, options)` runs cross-file module graph analysis first, then launches 13 individual scanners in parallel via `Promise.all` (14 scanner modules total), then deduplicates, applies FP reductions, scores using per-file max (v2.2.11: `riskScore = min(100, max(file_scores) + package_level_score)`, severity weights: CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1), applies intent coherence analysis (intra-file source-sink pairing), enriches with rules/playbooks (152 rules), and outputs (CLI/JSON/HTML/SARIF). Result includes `warnings: []` array (v2.6.5) for incomplete scan notifications (module graph timeout/skip, deobfuscation failures). Exports `isPackageLevelThreat` and `computeGroupScore` for testing.
 
 ## Scanner Modules
 
@@ -112,12 +112,12 @@ Replaces global score accumulation with per-file max scoring. Formula: `riskScor
 
 ## Evaluation Framework
 
-**Evaluation Framework (v2.2, corrected v2.2.7, updated through v2.6.2):** `src/commands/evaluate.js` measures TPR (Ground Truth, 49 real attacks from 51 samples), FPR (Benign, 529 npm packages — real source code via `npm pack` + native tar extraction), and ADR (Adversarial + Holdout, 83 evasive samples — 43 adversarial + 40 holdout). Benign tarballs cached in `.muaddib-cache/benign-tarballs/`. Flags: `--benign-limit N`, `--refresh-benign`. Results saved to `metrics/v{version}.json`.
+**Evaluation Framework (v2.2, corrected v2.2.7, updated through v2.9.4):** `src/commands/evaluate.js` measures TPR (Ground Truth, 49 real attacks from 51 samples), FPR (Benign, 529 npm packages — real source code via `npm pack` + native tar extraction), and ADR (Adversarial + Holdout, 107 evasive samples — 67 adversarial + 40 holdout). Benign tarballs cached in `.muaddib-cache/benign-tarballs/`. Flags: `--benign-limit N`, `--refresh-benign`. Results saved to `metrics/v{version}.json`.
 
-**FPR progression:** 0% (invalid, v2.2.0–v2.2.6) → 38% (v2.2.7) → 19.4% (v2.2.8) → 17.5% (v2.2.9) → ~13% (69/527, v2.2.11) → 8.9% (47/527, v2.3.0) → 7.4% (39/525, v2.3.1) → 6.0% (32/529, v2.5.8, included BENIGN_PACKAGE_WHITELIST bias) → ~13.6% (72/529, v2.5.14, audit hardening + whitelist removed in v2.5.10) → **12.3% (65/529, v2.5.16, P5+P6, honest measurement without whitelisting)** → **12.3% (65/532, v2.6.0, intent graph v2, zero FP added)** → **12.1% (64/529, v2.6.2, FP reduction P7)**.
+**FPR progression:** 0% (invalid, v2.2.0–v2.2.6) → 38% (v2.2.7) → 19.4% (v2.2.8) → 17.5% (v2.2.9) → ~13% (69/527, v2.2.11) → 8.9% (47/527, v2.3.0) → 7.4% (39/525, v2.3.1) → 6.0% (32/529, v2.5.8, included BENIGN_PACKAGE_WHITELIST bias) → ~13.6% (72/529, v2.5.14, audit hardening + whitelist removed in v2.5.10) → 12.3% (65/529, v2.5.16, P5+P6) → 12.1% (64/529, v2.6.2, P7) → **12.9% (68/529, v2.9.4, compound scoring + new rules)**.
 
 **Datasets:**
-- Adversarial samples in `datasets/adversarial/` (53 samples)
+- Adversarial samples in `datasets/adversarial/` (67 samples)
 - Holdout samples in `datasets/holdout-v2/` through `datasets/holdout-v5/` (40 samples)
 - Benign package lists in `datasets/benign/packages-npm.txt` (532 packages) and `datasets/benign/packages-pypi.txt` (132 packages)
 - Ground truth attacks in `tests/ground-truth/attacks.json` (51 entries)
@@ -125,7 +125,7 @@ Replaces global score accumulation with per-file max scoring. Formula: `riskScor
 
 ### Ground Truth Expansion (v2.2.12)
 
-51 real-world attack samples in `tests/ground-truth/` (49 active, 2 with min_threats=0). TPR: **93.9% (46/49)** as of v2.5.16. 3 out-of-scope misses: lottie-player, polyfill-io, trojanized-jquery (browser-only). 3 new detection rules: `crypto_decipher` (MUADDIB-AST-022, T1140), `module_compile` (MUADDIB-AST-023, T1059), `.secretKey`/`.privateKey` credential source in dataflow. ADR consolidated: 120 samples (53 adversarial + 40 holdout, 75 available on disk). ADR: **94.8% (73/77 available)** as of v2.6.2. 2 misses: `require-cache-poison` (P3 trade-off), `getter-defineProperty-exfil`.
+51 real-world attack samples in `tests/ground-truth/` (49 active, 2 with min_threats=0). TPR: **93.9% (46/49)** as of v2.9.4. 3 out-of-scope misses: lottie-player, polyfill-io, trojanized-jquery (browser-only). ADR: 107 samples (67 adversarial + 40 holdout). ADR: **96.3% (103/107 available)** as of v2.9.4.
 
 ## Monitor
 
@@ -179,7 +179,7 @@ See [Intent Graph](#intent-graph) section for `isSDKPattern()` details and 22 SD
 
 ## Detection Rules
 
-**Rules & playbooks:** Threat types map to rules in `src/rules/index.js` (134 rules: 129 RULES + 5 PARANOID, MITRE ATT&CK mapped) and remediation text in `src/response/playbooks.js`. Both keyed by threat `type` string.
+**Rules & playbooks:** Threat types map to rules in `src/rules/index.js` (152 rules: 147 RULES + 5 PARANOID, MITRE ATT&CK mapped) and remediation text in `src/response/playbooks.js`. Both keyed by threat `type` string.
 
 ### AST Detection Rules (v2.2+)
 
@@ -242,7 +242,68 @@ The following commands are internal infrastructure/dev tools. They work when cal
 - `muaddib stats` — Daily scan statistics and FP rate. Uses monitor exports.
 - `src/commands/evaluate.js` — `muaddib evaluate` measures TPR/FPR/ADR. Dev-only evaluation command.
 
+## Compound Scoring Rules (v2.9.2)
+
+`applyCompoundBoosts()` in `src/scoring.js` injects synthetic CRITICAL threats when co-occurring threat types are detected — combinations that never appear in benign packages. Called after `applyFPReductions`. 4 compound rules:
+
+| Rule ID | Name | Required Types | Severity |
+|---------|------|---------------|----------|
+| MUADDIB-COMPOUND-001 | Crypto Staged Payload | staged_binary_payload + crypto_decipher | CRITICAL |
+| MUADDIB-COMPOUND-002 | Lifecycle Typosquat | lifecycle_script + typosquat_detected | CRITICAL |
+| MUADDIB-COMPOUND-004 | Lifecycle Inline Exec | lifecycle_script + node_inline_exec | CRITICAL |
+| MUADDIB-COMPOUND-005 | Lifecycle Remote Require | lifecycle_script + network_require | CRITICAL |
+
+3 package-level compounds (COMPOUND-002, 004, 005) are in `PACKAGE_LEVEL_TYPES`. `dangerous_exec` added to `DIST_EXEMPT_TYPES` (curl|bash in dist/ is always malicious).
+
+## GlassWorm Detection (v2.9.1)
+
+GlassWorm campaign (March 2026, 433+ packages): Unicode invisible characters + Blockchain C2.
+
+- **Unicode invisible detection**: `countInvisibleUnicode()` in `obfuscation.js`, threshold >=3 chars. Detects zero-width (U+200B/C/D), BOM (U+FEFF pos>0), word joiner (U+2060), Mongolian vowel separator (U+180E), variation selectors (U+FE00-FE0F, U+E0100-E01EF), tag characters (U+E0001-E007F).
+- **OBF-003**: `unicode_invisible_injection` rule
+- **AST-053**: `unicode_variation_decoder` — .codePointAt + 0xFE00/0xE0100 compound
+- **AST-054**: `blockchain_c2_resolution` — Solana import + C2 methods (getSignaturesForAddress etc.). CRITICAL with eval/exec, HIGH otherwise
+- **AST-055**: `blockchain_rpc_endpoint` — hardcoded Solana/Infura/Ankr endpoints (MEDIUM)
+- 6 GlassWorm C2 IPs added to SUSPICIOUS_DOMAINS_HIGH
+- IOC: 4 markers, 2 files, 1 hash, 8 compromised packages (builtin.yaml)
+
 ## Version History
+
+### v2.9.4 — Red Team v7 Blue Team
+- 3 FP fixes, 3 quick wins
+- ADR: **96.3%** (103/107)
+- Tests: **2336** across 50 files
+
+### v2.9.2 — Compound Scoring Rules
+- 4 compound scoring rules: co-occurring threat types that never appear in benign packages
+- `applyCompoundBoosts()` in scoring.js, called after applyFPReductions
+- `dangerous_exec` added to DIST_EXEMPT_TYPES
+- Tests: 2300 → **2329**. Rules: 147 → **152** (147 RULES + 5 PARANOID)
+
+### v2.9.1 — GlassWorm Detection
+- GlassWorm campaign: Unicode invisible + Blockchain C2 detection
+- 3 new AST rules (AST-053/054/055), 1 new OBF rule (OBF-003)
+- 6 GlassWorm C2 IPs, 8 compromised packages IOC
+- Tests: 2266 → **2300**. Rules: 143 → **147** (142 RULES + 5 PARANOID)
+
+### v2.9.0 — Supply-Chain Detection Expansion
+- 8 new rules: bin_field_hijack (PKG-013), npm_publish_worm (AST-051), node_modules_write (AST-048), bun_runtime_evasion (AST-049), static_timer_bomb (AST-050), ollama_local_llm (AST-052), network_require (PKG-011), node_inline_exec (PKG-012)
+- Additional PKG rules: git_dependency_rce (PKG-014), npmrc_git_override (PKG-015), lifecycle_hidden_payload (PKG-016)
+- Tests: 2222 → **2266**. Rules: 134 → **143** (138 RULES + 5 PARANOID)
+
+### v2.8.6–v2.8.7 — ML Pipeline
+- ML feature extraction pipeline: 62 features per package scan
+- JSONL feature export for offline model training
+- Test optimization P1-P3 (373s → 134s)
+
+### v2.8.0 — npm Changes Stream
+- Real-time npm monitoring via changes stream (replaces RSS polling)
+- Parallel scan processing (concurrency=3→5)
+- Daily stats persistence
+
+### v2.7.9–v2.7.10 — Hardening
+- v2.7.9: IPv6 SSRF fix, preload hardening, FP audit trail
+- v2.7.10: Confidence-weighted scoring, zip bomb protection
 
 ### v2.7.8 — Size Cap, MCP Awareness, Scan Memory
 - Size cap 20MB: bypass full scan for packages >20MB (IOC and lifecycle exceptions)

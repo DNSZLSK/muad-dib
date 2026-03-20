@@ -130,9 +130,9 @@ Impact on TPR: 46/49 = 93.9% (3 documented and accepted misses).
 
 ## Adversarial Testing Results
 
-### Detection rate: 71/77 (92.2% ADR, global threshold=20)
+### Detection rate: 103/107 (96.3% ADR, global threshold=20)
 
-77 available adversarial/holdout evasive samples (53 adversarial + 40 holdout across 6 red team waves + 4 holdout batches) tested with real-world evasion techniques. 6 misses with global threshold (score >= 20): `require-cache-poison` (10), `getter-defineProperty-exfil` (10), `callback-exfil` (13), `event-emitter-flow` (10), plus 2 others.
+107 available adversarial/holdout evasive samples (67 adversarial + 40 holdout across 7 red team waves + 4 holdout batches) tested with real-world evasion techniques.
 
 See [Evaluation Methodology](EVALUATION_METHODOLOGY.md) for pre-tuning and post-tuning score details.
 
@@ -156,7 +156,7 @@ Full coverage of scanners, parsers, IOC matching, typosquatting, CLI integration
 
 ### Datadog 17K Benchmark
 
-Validated against 17,922 real npm malware samples. Raw TPR: **88.2%** (15,810/17,922). Adjusted TPR on JS/Node.js malware: **~100%**. 2,077 misses are all out-of-scope (1,233 phishing pages, 824 native binaries, 20 corrected libraries).
+Validated against 17,922 real npm malware samples (v2.9.4 benchmark). Wild TPR: **92.5%** (13,486/14,587 in-scope). 3,335 packages skipped (no JS files). By category: compromised_lib **97.8%** (904/924), malicious_intent **92.1%** (12,582/13,663 in-scope).
 
 ## MITRE ATT&CK Mapping
 
