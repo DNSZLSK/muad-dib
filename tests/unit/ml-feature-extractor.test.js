@@ -324,8 +324,88 @@ function runMLFeatureExtractorTests() {
     const features = extractFeatures(result, {});
     const keys = Object.keys(features);
     // Core: 4 + Severity: 5 + Distinct: 1 + Per-type: 32 + Booleans: 10
-    // + File dist: 3 + Ratios: 3 + Meta: 3 + Reputation: 1 = 62
-    assert(keys.length >= 55, `Feature vector should have 55+ keys, got ${keys.length}`);
+    // + File dist: 3 + Ratios: 3 + Meta: 3 + Reputation: 1 + Enriched: 9 = 71
+    assert(keys.length >= 64, `Feature vector should have 64+ keys, got ${keys.length}`);
+  });
+
+  // --- Enriched features (Phase 2a) ---
+
+  test('extractFeatures: enriched registry features from npmRegistryMeta', () => {
+    const result = {
+      threats: [{ type: 'env_access', severity: 'HIGH', file: 'x.js' }],
+      summary: { total: 1, critical: 0, high: 1, medium: 0, low: 0, riskScore: 10, fileScores: { 'x.js': 10 } }
+    };
+    const meta = {
+      npmRegistryMeta: {
+        age_days: 730,
+        weekly_downloads: 100000,
+        version_count: 25,
+        author_package_count: 10,
+        has_repository: true,
+        readme_size: 5000
+      },
+      fileCountTotal: 20,
+      hasTests: true
+    };
+    const features = extractFeatures(result, meta);
+    assert(features.package_age_days === 730, `package_age_days should be 730, got ${features.package_age_days}`);
+    assert(features.weekly_downloads === 100000, `weekly_downloads should be 100000, got ${features.weekly_downloads}`);
+    assert(features.version_count === 25, `version_count should be 25, got ${features.version_count}`);
+    assert(features.author_package_count === 10, `author_package_count should be 10, got ${features.author_package_count}`);
+    assert(features.has_repository === 1, `has_repository should be 1, got ${features.has_repository}`);
+    assert(features.readme_size === 5000, `readme_size should be 5000, got ${features.readme_size}`);
+    assert(features.file_count_total === 20, `file_count_total should be 20, got ${features.file_count_total}`);
+    assert(features.has_tests === 1, `has_tests should be 1, got ${features.has_tests}`);
+  });
+
+  test('extractFeatures: enriched features default to 0 when npmRegistryMeta absent', () => {
+    const result = {
+      threats: [],
+      summary: { total: 0, critical: 0, high: 0, medium: 0, low: 0, riskScore: 0 }
+    };
+    const features = extractFeatures(result, {});
+    assert(features.package_age_days === 0, `package_age_days should default to 0`);
+    assert(features.weekly_downloads === 0, `weekly_downloads should default to 0`);
+    assert(features.version_count === 0, `version_count should default to 0`);
+    assert(features.has_repository === 0, `has_repository should default to 0`);
+    assert(features.readme_size === 0, `readme_size should default to 0`);
+    assert(features.file_count_total === 0, `file_count_total should default to 0`);
+    assert(features.has_tests === 0, `has_tests should default to 0`);
+    assert(features.threat_density === 0, `threat_density should default to 0`);
+  });
+
+  test('extractFeatures: threat_density calculation', () => {
+    const result = {
+      threats: [
+        { type: 'env_access', severity: 'HIGH', file: 'a.js' },
+        { type: 'env_access', severity: 'HIGH', file: 'a.js' },
+        { type: 'env_access', severity: 'MEDIUM', file: 'b.js' }
+      ],
+      summary: { total: 3, critical: 0, high: 2, medium: 1, low: 0, riskScore: 20, fileScores: { 'a.js': 15, 'b.js': 5 } }
+    };
+    const features = extractFeatures(result, {});
+    // 3 threats / 2 files with threats = 1.5
+    assert(features.threat_density === 1.5, `threat_density should be 1.5, got ${features.threat_density}`);
+  });
+
+  test('buildTrainingRecord: enriched features key count >= 64', () => {
+    const result = {
+      threats: [{ type: 'env_access', severity: 'HIGH', file: 'x.js' }],
+      summary: { total: 1, critical: 0, high: 1, medium: 0, low: 0, riskScore: 10 }
+    };
+    const record = buildTrainingRecord(result, {
+      name: 'test',
+      version: '1.0.0',
+      label: 'suspect',
+      npmRegistryMeta: { age_days: 1, weekly_downloads: 1, version_count: 1, author_package_count: 1, has_repository: false, readme_size: 0 },
+      fileCountTotal: 3,
+      hasTests: false
+    });
+    const keys = Object.keys(record);
+    // Identity (4) + label (2) + features (71) + sandbox (2) = 79
+    assert(keys.length >= 70, `Record should have 70+ keys, got ${keys.length}`);
+    assert(typeof record.package_age_days === 'number', 'should have package_age_days');
+    assert(typeof record.threat_density === 'number', 'should have threat_density');
   });
 
   // Cleanup

@@ -123,7 +123,8 @@ async function getPackageMetadata(packageName) {
     author_package_count: authorPackageCount,
     has_readme: hasReadme,
     has_repository: hasRepository,
-    version_count: versionCount
+    version_count: versionCount,
+    readme_size: readmeText.length
   };
 }
 
