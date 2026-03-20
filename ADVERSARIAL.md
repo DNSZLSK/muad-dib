@@ -4,15 +4,11 @@ This document describes the adversarial malware samples used to evaluate MUAD'DI
 
 ## Overview
 
-- **53 adversarial samples** across 6 red-team waves
+- **67 adversarial samples** across 7 red-team waves
 - **40 holdout samples** across 4 holdout sets (holdout-v2 through holdout-v5)
-- **ADR (Adversarial Detection Rate): 92.2% (71/77 available)** on waves 1-6 + holdout (v2.6.5, global threshold=20)
-- **Wave 5: 24/27 detected on available samples** (3 misses: `getter-defineProperty-exfil`, `setTimeout-eval-chain`, `setter-trap-exfil`)
-- **Wave 6: 10/10 detected** (all pass)
-- **1974 tests**, **130 rules** (125 RULES + 5 PARANOID)
-- 2 documented misses on available samples:
-  - `require-cache-poison` (accepted trade-off from FP reduction P3)
-  - `getter-defineProperty-exfil` (Object.defineProperty interception — no AST pattern)
+- **ADR (Adversarial Detection Rate): 96.3% (103/107 available)** on waves 1-7 + holdout (v2.9.4, global threshold=20)
+- **Wave 7: 3 FP fixes + 3 quick wins** (v2.9.4)
+- **2336 tests**, **152 rules** (147 RULES + 5 PARANOID)
 
 ## Wave 1 — Core Evasion Techniques (20 samples)
 

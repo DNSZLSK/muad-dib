@@ -19,7 +19,7 @@ Priorites :
 ## Commands
 
 ```bash
-npm test          # Run all tests (custom framework, 2166 tests across 49 files)
+npm test          # Run all tests (custom framework, 2336 tests across 50 files)
 npm run lint      # ESLint with security plugin
 npm run scan      # Self-scan: node bin/muaddib.js scan .
 npm run update    # Download latest IOCs
@@ -56,12 +56,12 @@ For full technical details on each scanner, scoring system, sandbox, IOC system,
 2. Import in `src/index.js`, add to the Promise.all destructuring and the threats spread
 3. Add rule entry in `src/rules/index.js` with id, name, severity, confidence, description, mitre
 4. Add playbook entry in `src/response/playbooks.js`
-5. Add tests in the appropriate test file under `tests/` (49 modular test files)
+5. Add tests in the appropriate test file under `tests/` (50 modular test files)
 6. Create test fixtures in `tests/samples/my-scanner/`
 
 ## Key Constraints
 
-- **No external runtime deps** beyond what's in package.json (acorn, acorn-walk, chalk, yargs, js-yaml, adm-zip, @inquirer/prompts)
+- **No external runtime deps** beyond what's in package.json (acorn, acorn-walk, js-yaml, adm-zip, @inquirer/prompts)
 - **Windows paths:** Always use `path.relative()` for file references in threats; never shell `!` in scripts
 - **Symlink protection:** `findFiles` uses `lstatSync` + inode tracking (maxDepth fallback on Windows where ino=0)
 - **Python typosquat false positives:** Typosquat check must skip packages that ARE in the popular list to avoid false positives (flask<->black)
@@ -84,17 +84,17 @@ Never skip documentation updates when publishing a new version.
 - Never commit directly to master
 - Do not create commits automatically — the user handles commits manually
 
-## Current Metrics (v2.7.8)
+## Current Metrics (v2.9.4)
 
 | Metric | Value |
 |--------|-------|
-| Version | **2.7.8** |
-| Tests | **2166** passed, 0 failed, across 49 files |
-| Rules | **134** (129 RULES + 5 PARANOID) |
+| Version | **2.9.4** |
+| Tests | **2336** passed, 0 failed, across 50 files |
+| Rules | **152** (147 RULES + 5 PARANOID) |
 | Scanners | **14** modules (13 parallel + 1 pre-analysis) |
 | TPR | **93.9%** (46/49 ground truth) |
-| FPR | **12.1%** (64/529 benign packages) |
-| ADR | **94.8%** (73/77 available adversarial + holdout) |
+| FPR | **12.9%** (68/529 benign packages) |
+| ADR | **96.3%** (103/107 available adversarial + holdout) |
 
 ## Interdictions
 

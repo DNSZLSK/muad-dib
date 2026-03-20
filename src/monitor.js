@@ -12,6 +12,7 @@ const { detectMaintainerChange } = require('./maintainer-change.js');
 const { downloadToFile, extractTarGz, sanitizePackageName } = require('./shared/download.js');
 const { MAX_TARBALL_SIZE } = require('./shared/constants.js');
 const { loadCachedIOCs } = require('./ioc/updater.js');
+const { levenshteinDistance } = require('./scanner/typosquat.js');
 const { buildTrainingRecord } = require('./ml/feature-extractor.js');
 const { appendRecord: appendTrainingRecord, relabelRecords, getStats: getTrainingStats } = require('./ml/jsonl-writer.js');
 
@@ -87,6 +88,14 @@ const SCAN_MEMORY_FILE = path.join(__dirname, '..', 'data', 'scan-memory.json');
 const SCAN_MEMORY_EXPIRY_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const MAX_MEMORY_ENTRIES = 50000;
 const MEMORY_SCORE_TOLERANCE = 0.15; // ±15% score tolerance
+
+// --- Layer 3: Tarball cache (race condition mitigation) ---
+// Caches tarballs locally for high-risk packages so they survive unpublishing.
+const TARBALL_CACHE_DIR = path.join(__dirname, '..', 'data', 'tarball-cache');
+const TARBALL_CACHE_INDEX_FILE = path.join(TARBALL_CACHE_DIR, 'cache-index.json');
+const TARBALL_CACHE_DEFAULT_RETENTION_DAYS = 7;
+const TARBALL_CACHE_HIGH_RISK_RETENTION_DAYS = 30;
+const TARBALL_CACHE_MAX_SIZE_BYTES = (parseInt(process.env.MUADDIB_TARBALL_CACHE_MAX_GB, 10) || 5) * 1024 * 1024 * 1024; // 5GB default
 
 /**
  * Atomic file write: write to .tmp then rename (crash-safe).
@@ -280,6 +289,210 @@ function shouldSuppressByMemory(name, result) {
   }
 
   return { suppress: true, reason: `memory match (prev score=${prevScore}, current=${currentScore})` };
+}
+
+// --- Layer 3: Tarball cache management ---
+// Caches tarballs locally for high-risk packages to survive unpublishing.
+
+let tarballCacheIndex = null;
+
+/**
+ * Load tarball cache index from disk. Creates cache directory if needed.
+ * @returns {{ entries: Object }} Cache index
+ */
+function loadTarballCacheIndex() {
+  if (tarballCacheIndex) return tarballCacheIndex;
+  const index = { entries: Object.create(null) };
+  try {
+    if (!fs.existsSync(TARBALL_CACHE_DIR)) {
+      fs.mkdirSync(TARBALL_CACHE_DIR, { recursive: true });
+    }
+    if (fs.existsSync(TARBALL_CACHE_INDEX_FILE)) {
+      const raw = JSON.parse(fs.readFileSync(TARBALL_CACHE_INDEX_FILE, 'utf8'));
+      if (raw && raw.entries) {
+        for (const [key, entry] of Object.entries(raw.entries)) {
+          index.entries[key] = entry;
+        }
+      }
+    }
+  } catch (err) {
+    if (err.code === 'EROFS' || err.code === 'EACCES' || err.code === 'EPERM') {
+      console.warn(`[MONITOR] TARBALL CACHE: cannot access cache directory (${err.code})`);
+    } else {
+      console.warn(`[MONITOR] TARBALL CACHE: failed to load index: ${err.message}`);
+    }
+  }
+  tarballCacheIndex = index;
+  return index;
+}
+
+function saveTarballCacheIndex() {
+  if (!tarballCacheIndex) return;
+  try {
+    atomicWriteFileSync(TARBALL_CACHE_INDEX_FILE, JSON.stringify(tarballCacheIndex, null, 2));
+  } catch (err) {
+    console.warn(`[MONITOR] TARBALL CACHE: failed to save index: ${err.message}`);
+  }
+}
+
+function tarballCacheKey(name, version) {
+  return `${sanitizePackageName(name)}-${sanitizePackageName(version || 'unknown')}`;
+}
+
+function tarballCachePath(key) {
+  return path.join(TARBALL_CACHE_DIR, `${key}.tgz`);
+}
+
+/**
+ * Copy a downloaded tarball into the cache directory.
+ * @param {string} name - Package name
+ * @param {string} version - Package version
+ * @param {string} sourcePath - Path to the downloaded .tgz file
+ * @param {string} reason - Why cached (ioc_match, typosquat_signal, first_publish)
+ * @param {number} retentionDays - How many days to retain
+ */
+function cacheTarball(name, version, sourcePath, reason, retentionDays) {
+  const index = loadTarballCacheIndex();
+  const key = tarballCacheKey(name, version);
+  const destPath = tarballCachePath(key);
+
+  if (!fs.existsSync(TARBALL_CACHE_DIR)) {
+    fs.mkdirSync(TARBALL_CACHE_DIR, { recursive: true });
+  }
+
+  fs.copyFileSync(sourcePath, destPath);
+  const fileSize = fs.statSync(destPath).size;
+
+  index.entries[key] = {
+    name,
+    version,
+    cachedAt: Date.now(),
+    retentionDays,
+    reason,
+    size: fileSize
+  };
+
+  saveTarballCacheIndex();
+  console.log(`[MONITOR] TARBALL CACHE: cached ${name}@${version} (${reason}, ${retentionDays}d, ${(fileSize / 1024).toFixed(0)}KB)`);
+}
+
+/**
+ * Purge expired entries and enforce size budget.
+ * Called at startup and hourly.
+ */
+function purgeTarballCache() {
+  const index = loadTarballCacheIndex();
+  const now = Date.now();
+  let totalSize = 0;
+  let purgedExpired = 0;
+  let purgedBudget = 0;
+
+  // Phase 1: Remove expired entries
+  for (const [key, entry] of Object.entries(index.entries)) {
+    const expiryMs = entry.retentionDays * 24 * 60 * 60 * 1000;
+    if (now - entry.cachedAt > expiryMs) {
+      try {
+        const filePath = tarballCachePath(key);
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+      } catch { /* ignore cleanup errors */ }
+      delete index.entries[key];
+      purgedExpired++;
+    } else {
+      totalSize += entry.size || 0;
+    }
+  }
+
+  // Phase 2: Enforce size budget — evict oldest first
+  if (totalSize > TARBALL_CACHE_MAX_SIZE_BYTES) {
+    const sorted = Object.entries(index.entries)
+      .sort((a, b) => a[1].cachedAt - b[1].cachedAt);
+
+    for (const [key, entry] of sorted) {
+      if (totalSize <= TARBALL_CACHE_MAX_SIZE_BYTES) break;
+      try {
+        const filePath = tarballCachePath(key);
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+      } catch { /* ignore */ }
+      totalSize -= entry.size || 0;
+      delete index.entries[key];
+      purgedBudget++;
+    }
+  }
+
+  if (purgedExpired > 0 || purgedBudget > 0) {
+    saveTarballCacheIndex();
+    const remaining = Object.keys(index.entries).length;
+    console.log(`[MONITOR] TARBALL CACHE: purged ${purgedExpired} expired + ${purgedBudget} budget entries (${remaining} remaining, ${(totalSize / 1024 / 1024).toFixed(1)}MB)`);
+  }
+}
+
+// --- Layer 3: Quick typosquat check (cache trigger, not detection) ---
+
+const POPULAR_NPM_NAMES = [
+  'lodash', 'express', 'react', 'axios', 'chalk', 'commander', 'moment',
+  'request', 'async', 'bluebird', 'underscore', 'uuid', 'debug',
+  'webpack', 'typescript', 'eslint', 'prettier', 'jest',
+  'mongoose', 'redis', 'mongodb', 'socket.io', 'dotenv',
+  'jsonwebtoken', 'bcrypt', 'passport', 'aws-sdk', 'stripe',
+  'firebase', 'graphql', 'electron', 'puppeteer',
+  'react-native', 'next', 'nuxt', 'gatsby', 'svelte',
+  'node-fetch', 'got', 'pino', 'winston'
+];
+
+/**
+ * Quick typosquat check using only package name (no API calls).
+ * Used as cache trigger — not for detection (full scanner handles that).
+ * @param {string} name - Package name
+ * @returns {boolean} True if name is suspiciously close to a popular package
+ */
+function quickTyposquatCheck(name) {
+  const lower = name.toLowerCase();
+  if (lower.startsWith('@')) return false;
+  if (lower.length < 4) return false;
+  if (POPULAR_NPM_NAMES.includes(lower)) return false;
+
+  for (const popular of POPULAR_NPM_NAMES) {
+    if (Math.abs(lower.length - popular.length) > 2) continue;
+    const dist = levenshteinDistance(lower, popular);
+    if (dist <= 2 && popular.length >= 5) return true;
+    if (dist === 1) return true;
+  }
+  return false;
+}
+
+/**
+ * Layer 3: Determine if a package should be cached and at what retention level.
+ * @param {string} name - Package name
+ * @param {Object|null} docMeta - Metadata from extractTarballFromDoc
+ * @param {Object|null} doc - Full CouchDB doc
+ * @returns {{ shouldCache: boolean, reason: string, retentionDays: number }}
+ */
+function evaluateCacheTrigger(name, docMeta, doc) {
+  // Trigger 1: IOC match — 30-day retention
+  try {
+    const iocs = loadCachedIOCs();
+    if ((iocs.wildcardPackages && iocs.wildcardPackages.has(name)) ||
+        (iocs.packagesMap && iocs.packagesMap.has(name))) {
+      return { shouldCache: true, reason: 'ioc_match', retentionDays: TARBALL_CACHE_HIGH_RISK_RETENTION_DAYS };
+    }
+  } catch { /* non-fatal */ }
+
+  // Trigger 2: Typosquat signal — 7-day retention
+  try {
+    if (quickTyposquatCheck(name)) {
+      return { shouldCache: true, reason: 'typosquat_signal', retentionDays: TARBALL_CACHE_DEFAULT_RETENTION_DAYS };
+    }
+  } catch { /* non-fatal */ }
+
+  // Trigger 3: First publish (single version in doc) — 7-day retention
+  if (doc && doc.versions) {
+    const versionCount = Object.keys(doc.versions).length;
+    if (versionCount === 1) {
+      return { shouldCache: true, reason: 'first_publish', retentionDays: TARBALL_CACHE_DEFAULT_RETENTION_DAYS };
+    }
+  }
+
+  return { shouldCache: false, reason: '', retentionDays: 0 };
 }
 
 /**
@@ -766,6 +979,40 @@ function buildMonitorWebhookPayload(name, version, ecosystem, result, sandboxRes
     };
   }
   return payload;
+}
+
+/**
+ * Layer 1: Send immediate IOC pre-alert webhook when a known malicious package
+ * appears in the changes stream, BEFORE tarball download.
+ * Safety net for packages that get unpublished before scanning completes.
+ * @param {string} name - Package name matching IOC database
+ * @param {string} [version] - Version if known (from CouchDB doc)
+ */
+async function sendIOCPreAlert(name, version) {
+  const url = getWebhookUrl();
+  if (!url) return;
+
+  const npmLink = `https://www.npmjs.com/package/${encodeURIComponent(name)}`;
+  const versionStr = version ? `@${version}` : '';
+
+  const payload = {
+    embeds: [{
+      title: '\u26a0\ufe0f IOC PRE-ALERT \u2014 Known Malicious Package',
+      color: 0xe74c3c,
+      fields: [
+        { name: 'Package', value: `[${name}${versionStr}](${npmLink})`, inline: true },
+        { name: 'Source', value: 'IOC Database Match', inline: true },
+        { name: 'Detection', value: 'Changes stream pre-scan', inline: true },
+        { name: 'Status', value: 'Full scan queued \u2014 this is an early warning. Package may be unpublished before scan completes.', inline: false }
+      ],
+      footer: {
+        text: `MUAD'DIB IOC Pre-Alert | ${new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, ' UTC')}`
+      },
+      timestamp: new Date().toISOString()
+    }]
+  };
+
+  await sendWebhook(url, payload, { rawPayload: true });
 }
 
 function computeRiskLevel(summary) {
@@ -1832,10 +2079,39 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta) {
   if (!fs.existsSync(tmpBase)) fs.mkdirSync(tmpBase, { recursive: true });
   const tmpDir = fs.mkdtempSync(path.join(tmpBase, `${sanitizePackageName(name)}-`));
   const meta = registryMeta || {};
+  const cacheTrigger = meta._cacheTrigger || null;
 
   try {
     const tgzPath = path.join(tmpDir, 'package.tar.gz');
-    await downloadToFile(tarballUrl, tgzPath);
+
+    // Layer 3: Check tarball cache before downloading
+    const cacheKey = tarballCacheKey(name, version);
+    const cachedPath = tarballCachePath(cacheKey);
+    let usedCache = false;
+
+    if (version && fs.existsSync(cachedPath)) {
+      try {
+        fs.copyFileSync(cachedPath, tgzPath);
+        usedCache = true;
+        console.log(`[MONITOR] TARBALL CACHE HIT: ${name}@${version}`);
+        stats.tarballCacheHits = (stats.tarballCacheHits || 0) + 1;
+      } catch (err) {
+        console.warn(`[MONITOR] TARBALL CACHE: read failed for ${name}@${version}: ${err.message}`);
+      }
+    }
+
+    if (!usedCache) {
+      await downloadToFile(tarballUrl, tgzPath);
+
+      // Layer 3: Cache tarball for high-risk packages
+      if (cacheTrigger) {
+        try {
+          cacheTarball(name, version, tgzPath, cacheTrigger.reason, cacheTrigger.retentionDays);
+        } catch (err) {
+          console.warn(`[MONITOR] TARBALL CACHE: write failed for ${name}@${version}: ${err.message}`);
+        }
+      }
+    }
 
     // Check downloaded size
     const fileSize = fs.statSync(tgzPath).size;
@@ -2192,6 +2468,12 @@ function reportStats() {
   }
   if (stats.rssFallbackCount) {
     console.log(`[MONITOR]   RSS fallback activations: ${stats.rssFallbackCount}`);
+  }
+  if (stats.iocPreAlerts) {
+    console.log(`[MONITOR]   IOC pre-alerts: ${stats.iocPreAlerts}`);
+  }
+  if (stats.tarballCacheHits) {
+    console.log(`[MONITOR]   Tarball cache hits: ${stats.tarballCacheHits}`);
   }
   stats.lastReportTime = Date.now();
 }
@@ -2560,6 +2842,35 @@ function parseNpmRss(xml) {
 }
 
 /**
+ * Layer 2: Extract the latest version's tarball URL from a CouchDB changes document
+ * (when using include_docs=true). Eliminates the separate registry roundtrip
+ * that can 404 if the package is unpublished between detection and scan.
+ *
+ * @param {Object} doc - CouchDB document (change.doc)
+ * @returns {{ version: string, tarball: string|null, unpackedSize: number, scripts: Object }|null}
+ */
+function extractTarballFromDoc(doc) {
+  try {
+    if (!doc || !doc.versions || !doc['dist-tags']) return null;
+
+    const latestTag = doc['dist-tags'].latest;
+    if (!latestTag) return null;
+
+    const versionData = doc.versions[latestTag];
+    if (!versionData) return null;
+
+    const tarball = (versionData.dist && versionData.dist.tarball) || null;
+    const unpackedSize = (versionData.dist && versionData.dist.unpackedSize) || 0;
+    const version = versionData.version || latestTag;
+    const scripts = versionData.scripts || {};
+
+    return { version, tarball, unpackedSize, scripts };
+  } catch {
+    return null; // Parse failure -> fallback to lazy resolution
+  }
+}
+
+/**
  * Fetch latest version metadata for an npm package.
  * Returns { version, tarball } or null on failure.
  */
@@ -2603,8 +2914,10 @@ async function pollNpmChanges(state) {
       return 0;
     }
 
-    const url = `${CHANGES_STREAM_URL}?since=${lastSeq}&limit=${CHANGES_LIMIT}`;
-    const body = await httpsGet(url, 30000);
+    // Layer 2: include_docs=true to extract tarball URL directly from CouchDB doc,
+    // eliminating the separate registry roundtrip that can 404 if package is unpublished.
+    const url = `${CHANGES_STREAM_URL}?since=${lastSeq}&limit=${CHANGES_LIMIT}&include_docs=true`;
+    const body = await httpsGet(url, 60000);
     const data = JSON.parse(body);
 
     if (!data.results || !Array.isArray(data.results)) {
@@ -2639,12 +2952,39 @@ async function pollNpmChanges(state) {
       // Skip self
       if (name === SELF_PACKAGE_NAME) continue;
 
-      // Push to queue — version resolution happens in resolveTarballAndScan()
+      // Layer 1: IOC pre-alert — send immediate webhook for known malicious packages
+      // before queueing. Catches packages that may be unpublished before scan completes.
+      try {
+        const iocs = loadCachedIOCs(); // 10s TTL cache, negligible cost per poll cycle
+        const isKnownIOC = (iocs.wildcardPackages && iocs.wildcardPackages.has(name)) ||
+                           (iocs.packagesMap && iocs.packagesMap.has(name));
+        if (isKnownIOC) {
+          console.log(`[MONITOR] IOC PRE-ALERT: ${name} — known malicious package detected in changes stream`);
+          stats.iocPreAlerts = (stats.iocPreAlerts || 0) + 1;
+          // Fire-and-forget: do not block polling
+          sendIOCPreAlert(name).catch(err => {
+            console.error(`[MONITOR] IOC pre-alert webhook failed for ${name}: ${err.message}`);
+          });
+        }
+      } catch (err) {
+        // IOC load failure is non-fatal — proceed with normal queue
+        console.warn(`[MONITOR] IOC pre-check failed: ${err.message}`);
+      }
+
+      // Layer 2: Extract tarball URL from CouchDB doc (eliminates lazy resolution 404 race)
+      const docMeta = change.doc ? extractTarballFromDoc(change.doc) : null;
+
+      // Layer 3: Evaluate if this package should be cached
+      const cacheTrigger = evaluateCacheTrigger(name, docMeta, change.doc || null);
+
       scanQueue.push({
         name,
-        version: '',
+        version: docMeta ? docMeta.version : '',
         ecosystem: 'npm',
-        tarballUrl: null
+        tarballUrl: docMeta ? docMeta.tarball : null,
+        unpackedSize: docMeta ? docMeta.unpackedSize : 0,
+        registryScripts: docMeta ? docMeta.scripts : null,
+        _cacheTrigger: cacheTrigger.shouldCache ? cacheTrigger : null
       });
       queued++;
     }
@@ -2699,12 +3039,27 @@ async function pollNpmRss(state) {
         continue;
       }
       console.log(`[MONITOR] New npm: ${name}`);
+
+      // Layer 1: IOC pre-alert (RSS fallback path)
+      try {
+        const iocs = loadCachedIOCs();
+        const isKnownIOC = (iocs.wildcardPackages && iocs.wildcardPackages.has(name)) ||
+                           (iocs.packagesMap && iocs.packagesMap.has(name));
+        if (isKnownIOC) {
+          console.log(`[MONITOR] IOC PRE-ALERT: ${name} — known malicious package detected via RSS`);
+          stats.iocPreAlerts = (stats.iocPreAlerts || 0) + 1;
+          sendIOCPreAlert(name).catch(err => {
+            console.error(`[MONITOR] IOC pre-alert webhook failed for ${name}: ${err.message}`);
+          });
+        }
+      } catch { /* IOC load failure is non-fatal */ }
+
       // Queue npm packages — tarball URL resolved during scan
       scanQueue.push({
         name,
         version: '',
         ecosystem: 'npm',
-        tarballUrl: null // resolved lazily via resolveTarballAndScan
+        tarballUrl: null // resolved lazily via resolveTarballAndScan (no CouchDB doc in RSS)
       });
     }
 
@@ -2836,6 +3191,8 @@ async function startMonitor(options) {
 
   // Cleanup temp dirs from previous runs (SIGTERM/crash may leave orphans)
   cleanupOrphanTmpDirs();
+  // Layer 3: Purge expired cached tarballs on startup
+  purgeTarballCache();
 
   console.log(`
 ╔════════════════════════════════════════════╗
@@ -2940,9 +3297,10 @@ async function startMonitor(options) {
     saveState(state);
     await processQueue();
 
-    // Hourly stats report
+    // Hourly stats report + cache purge
     if (Date.now() - stats.lastReportTime >= 3600_000) {
       reportStats();
+      purgeTarballCache();
     }
 
     // Daily webhook report at 08:00 Paris time
@@ -3089,7 +3447,8 @@ async function resolveTarballAndScan(item) {
 
   const scanResult = await scanPackage(item.name, item.version, item.ecosystem, item.tarballUrl, {
     unpackedSize: item.unpackedSize || 0,
-    registryScripts: item.registryScripts || null
+    registryScripts: item.registryScripts || null,
+    _cacheTrigger: item._cacheTrigger || null
   });
   const sandboxResult = scanResult && scanResult.sandboxResult;
   const staticClean = scanResult && scanResult.staticClean;
@@ -3318,7 +3677,28 @@ module.exports = {
   // ML training data exports
   recordTrainingSample,
   relabelRecords,
-  getTrainingStats
+  getTrainingStats,
+  // Layer 1: IOC pre-alert
+  sendIOCPreAlert,
+  // Layer 2: CouchDB doc extraction
+  extractTarballFromDoc,
+  // Layer 3: Tarball cache
+  TARBALL_CACHE_DIR,
+  TARBALL_CACHE_INDEX_FILE,
+  TARBALL_CACHE_DEFAULT_RETENTION_DAYS,
+  TARBALL_CACHE_HIGH_RISK_RETENTION_DAYS,
+  TARBALL_CACHE_MAX_SIZE_BYTES,
+  loadTarballCacheIndex,
+  saveTarballCacheIndex,
+  tarballCacheKey,
+  tarballCachePath,
+  cacheTarball,
+  purgeTarballCache,
+  evaluateCacheTrigger,
+  quickTyposquatCheck,
+  POPULAR_NPM_NAMES,
+  get tarballCacheIndex() { return tarballCacheIndex; },
+  set tarballCacheIndex(v) { tarballCacheIndex = v; }
 };
 
 // Standalone entry point: node src/monitor.js

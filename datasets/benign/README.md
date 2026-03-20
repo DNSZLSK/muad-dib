@@ -19,4 +19,4 @@ A package scoring above 20 on a known-legitimate package is considered a false p
 
 ## Current Results
 
-**FPR ~12.1%** (64/529 npm packages flagged as of v2.6.5).
+**FPR ~12.9%** (68/529 npm packages flagged as of v2.9.4).

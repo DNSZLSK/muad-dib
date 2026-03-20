@@ -7,6 +7,137 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.9.4] - 2026-03-20
+
+### Fixed
+- **Red Team v7 Blue Team**: 3 FP fixes reducing false positive noise from new rules
+- 3 quick wins improving detection on edge cases
+
+### Changed
+- **Datadog 17K benchmark v2**: Wild TPR **92.5%** (13,486/14,587 in-scope). 3,335 packages skipped (no JS files). compromised_lib 97.8%, malicious_intent 92.1%. 0 errors. Methodology improved: packages with no JS files are now automatically excluded as out-of-scope instead of counted as misses (previously 88.2% raw / ~100% adjusted in v2.3.0).
+- ADR: **96.3%** (103/107 available adversarial + holdout)
+- FPR: **12.9%** (68/529)
+- Tests: **2336** passed, 0 failed, across 50 files
+
+## [2.9.3] - 2026-03-19
+
+### Changed
+- Benchmark cleanup and evaluation pipeline maintenance
+
+## [2.9.2] - 2026-03-19
+
+### Added
+- **Compound scoring rules**: 4 zero-FP compound rules that detect co-occurring threat types never seen in benign packages
+  - `crypto_staged_payload` (COMPOUND-001): staged_binary_payload + crypto_decipher
+  - `lifecycle_typosquat` (COMPOUND-002): lifecycle_script + typosquat_detected
+  - `lifecycle_inline_exec` (COMPOUND-004): lifecycle_script + node_inline_exec
+  - `lifecycle_remote_require` (COMPOUND-005): lifecycle_script + network_require
+- `applyCompoundBoosts()` in scoring.js, called after applyFPReductions
+- `dangerous_exec` added to DIST_EXEMPT_TYPES (curl|bash in dist/ is always malicious)
+- 3 package-level compounds in PACKAGE_LEVEL_TYPES
+
+### Changed
+- Rule count: 147 → **152** (147 RULES + 5 PARANOID, includes 4 compound rules)
+- Tests: 2300 → **2329**
+
+## [2.9.1] - 2026-03-18
+
+### Added
+- **GlassWorm detection** (March 2026 campaign, 433+ packages): Unicode invisible characters + Blockchain C2
+- **Unicode invisible detection**: `countInvisibleUnicode()` in obfuscation.js, threshold >=3 chars
+  - Zero-width (U+200B/C/D), BOM (U+FEFF pos>0), word joiner (U+2060), Mongolian (U+180E)
+  - Variation selectors (U+FE00-FE0F), supplement (U+E0100-E01EF), tag chars (U+E0001-E007F)
+- 3 new AST rules: `unicode_variation_decoder` (AST-053), `blockchain_c2_resolution` (AST-054, CRITICAL/HIGH), `blockchain_rpc_endpoint` (AST-055, MEDIUM)
+- 1 new OBF rule: `unicode_invisible_injection` (OBF-003, HIGH)
+- 6 GlassWorm C2 IPs added to SUSPICIOUS_DOMAINS_HIGH
+- IOC: 4 markers, 2 files, 1 hash, 8 compromised packages (builtin.yaml)
+
+### Changed
+- Rule count: 143 → **147** (142 RULES + 5 PARANOID)
+- Tests: 2266 → **2300**
+
+## [2.9.0] - 2026-03-18
+
+### Added
+- **8 new supply-chain detection rules**:
+  - `bin_field_hijack` (PKG-013, HIGH): Package bin field hijacking
+  - `npm_publish_worm` (AST-051, CRITICAL): Self-propagating npm publish worm
+  - `node_modules_write` (AST-048, HIGH): Writing to node_modules
+  - `bun_runtime_evasion` (AST-049, HIGH): Bun runtime detection evasion
+  - `static_timer_bomb` (AST-050, HIGH): Static timer bomb patterns
+  - `ollama_local_llm` (AST-052, MEDIUM): Ollama local LLM abuse
+  - `network_require` (PKG-011, CRITICAL): Network require in lifecycle
+  - `node_inline_exec` (PKG-012, CRITICAL): Node inline exec in lifecycle
+- Additional PKG rules: `git_dependency_rce` (PKG-014), `npmrc_git_override` (PKG-015), `lifecycle_hidden_payload` (PKG-016)
+- `detached_credential_exfil` (AST-047, CRITICAL): Detached credential exfiltration
+
+### Changed
+- Rule count: 134 → **143** (138 RULES + 5 PARANOID)
+- Tests: 2222 → **2266**
+
+## [2.8.8] - 2026-03-17
+
+### Fixed
+- Sandbox confirmation bug fix
+- DPRK scoring improvements
+
+### Changed
+- Tests: 2210 → **2222**
+
+## [2.8.7] - 2026-03-17
+
+### Added
+- **ML pipeline Phase 1**: JSONL feature extraction (62 features per package scan)
+- Feature categories: AST patterns, entropy, obfuscation, lifecycle, dataflow, package metadata
+
+## [2.8.6] - 2026-03-17
+
+### Changed
+- **Test optimization P1-P3**: Test suite execution time reduced from 373s to 134s
+- Converted runScan() to runScanDirect() for in-process scanning
+
+## [2.8.5] - 2026-03-16
+
+### Changed
+- Daily stats persistence for monitor
+- Monitor concurrency increased to x5
+
+## [2.8.3] - 2026-03-16
+
+### Fixed
+- Wildcard IOC fix for edge cases
+- WASM discrimination improvements
+- SDK dataflow false positive fixes
+
+## [2.8.1] - 2026-03-16
+
+### Added
+- Parallel scan processing (concurrency=3)
+
+## [2.8.0] - 2026-03-16
+
+### Added
+- **npm changes stream**: Real-time npm monitoring via changes stream, replacing RSS polling for faster detection
+- Parallel scan processing infrastructure
+
+### Changed
+- Monitor architecture: RSS polling → changes stream
+
+## [2.7.10] - 2026-03-15
+
+### Added
+- **Confidence-weighted scoring**: Severity weights adjusted by detection confidence
+- **Zip bomb protection**: Size checks prevent decompression bombs in package analysis
+
+## [2.7.9] - 2026-03-15
+
+### Fixed
+- **IPv6 SSRF fix**: Additional hardening for IPv6 loopback detection in safeDnsResolve
+- **Preload hardening**: Sandbox preload robustness improvements
+
+### Added
+- FP audit trail for tracking false positive changes across versions
+
 ## [2.7.8] - 2026-03-15
 
 ### Added

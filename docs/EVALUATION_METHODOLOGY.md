@@ -710,10 +710,10 @@ Each run uses `runSingleSandbox()` with a 60s timeout. Early exit on score >= 80
 
 | Metric | Result | Description |
 |--------|--------|-------------|
-| **Wild TPR** (Datadog 17K) | **88.2%** raw · **~100%** adjusted | 17,922 real malware samples. 2,077 out-of-scope misses (see section 15) |
+| **Wild TPR** (Datadog 17K) | **92.5%** (13,486/14,587 in-scope) | 17,922 packages. 3,335 skipped (no JS). compromised_lib 97.8%, malicious_intent 92.1% (see section 15) |
 | **TPR** (Ground Truth) | **93.9% (46/49)** | 51 real-world attacks (49 active). 3 out-of-scope: browser-only (3) |
-| **FPR** (Benign, global) | **12.1% (64/529)** | 529 npm packages, real source code, threshold > 20. Honest measurement without whitelisting |
-| **ADR** (Adversarial + Holdout) | **92.2% (71/77)** | 53 adversarial + 40 holdout. 77 available on disk. Global threshold=20. 6 misses on available samples |
+| **FPR** (Benign, global) | **12.9% (68/529)** | 529 npm packages, real source code, threshold > 20. Honest measurement without whitelisting |
+| **ADR** (Adversarial + Holdout) | **96.3% (103/107)** | 67 adversarial + 40 holdout. 107 available on disk. Global threshold=20 |
 | **Holdout v1** (pre-tuning) | 30% (3/10) | 10 unseen samples before rule corrections |
 | **Holdout v2** (pre-tuning) | 40% (4/10) | 10 unseen samples before rule corrections |
 | **Holdout v3** (pre-tuning) | 60% (6/10) | 10 unseen samples before rule corrections |
@@ -723,9 +723,9 @@ Each run uses `runSingleSandbox()` with a 60s timeout. Early exit on score >= 80
 
 v2.2.12: Ground truth expanded from 4 to 49 samples. v2.2.13: ADR 75/75 → 78/78. v2.2.22: scan freeze fix. v2.2.23: .npmignore excludes malware. v2.2.24: tests 862 → 1317, coverage 72% → 86%. v2.3.0: FPR ~13% → 8.9% (P2). v2.3.1: FPR 8.2% → 7.4% (P3), 8 new rules (102 total), tests 1317 → 1387, ADR 100% → 98.7% (1 documented miss). **v2.4.7**: Vague 4 (5 adversarial samples, 5 bypass corrections, 3 new rules), ADR 98.7% → 98.8% (82/83), 107 total rules (102 RULES + 5 PARANOID). **v2.4.9**: Sandbox preload monkey-patching (multi-run [0h, 72h, 7d], time-bomb detection), 6 new sandbox preload rules (SANDBOX-009 to 014), 113 total rules (108 RULES + 5 PARANOID), tests 1471 → 1522. **v2.5.0-v2.5.6**: Security audit (41 issues remediated). **v2.5.7-v2.5.8**: FP Reduction P4, FPR 7.4% → 6.0% (included BENIGN_PACKAGE_WHITELIST bias). **v2.5.13-v2.5.14**: Audit hardening (scoring, IOC, sandbox, dataflow, deobfuscation, AST bypasses, shell patterns, entropy, typosquat), 121 rules (116 RULES + 5 PARANOID), tests 1656 → 1815. **v2.5.15-v2.5.16**: FP Reduction P5/P6, FPR ~13.6% → 12.3% (honest measurement without whitelisting), TPR 91.8% → 93.9%. **v2.6.0**: Intent graph v2, Red Team DPRK (10 adversarial samples), zero FP added. **v2.6.1**: Module-graph bounded path, zero FP added. **v2.6.2**: FP Reduction P7, FPR 12.3% → 12.1%, ADR denominator fixed (count only available samples).
 
-**FPR progression**: 0% (invalid, v2.2.0–v2.2.6) → 38% (first real measurement, v2.2.7) → 19.4% (v2.2.8) → 17.5% (v2.2.9) → ~13% (v2.2.11, per-file max scoring) → 8.9% (v2.3.0, P2) → 7.4% (v2.3.1, P3) → 6.0% (v2.5.8, P4 + whitelist bias) → ~13.6% (v2.5.14, audit hardening + whitelist removed) → 12.3% (v2.5.16, P5+P6) → **12.1%** (v2.6.2, P7)
+**FPR progression**: 0% (invalid, v2.2.0–v2.2.6) → 38% (first real measurement, v2.2.7) → 19.4% (v2.2.8) → 17.5% (v2.2.9) → ~13% (v2.2.11, per-file max scoring) → 8.9% (v2.3.0, P2) → 7.4% (v2.3.1, P3) → 6.0% (v2.5.8, P4 + whitelist bias) → ~13.6% (v2.5.14, audit hardening + whitelist removed) → 12.3% (v2.5.16, P5+P6) → 12.1% (v2.6.2, P7) → **12.9%** (v2.9.4, compound scoring + new rules)
 
-> **Note on FPR evolution:** The historic 6.0% FPR (v2.5.8) relied on a `BENIGN_PACKAGE_WHITELIST` that excluded certain known packages from scoring — a data leakage bias removed in v2.5.10. The current 12.1% FPR is an honest measurement without whitelisting, against 529 real benign packages.
+> **Note on FPR evolution:** The historic 6.0% FPR (v2.5.8) relied on a `BENIGN_PACKAGE_WHITELIST` that excluded certain known packages from scoring — a data leakage bias removed in v2.5.10. The current 12.9% FPR is an honest measurement without whitelisting, against 529 real benign packages.
 
 Run `muaddib evaluate` to reproduce these metrics locally. Results are saved to `metrics/v{version}.json`.
 
@@ -740,40 +740,39 @@ The [DataDog Malicious Software Packages Dataset](https://github.com/DataDog/mal
 ### Methodology
 
 1. **Automated scan**: All 17,922 samples were extracted and scanned using `run()` from `src/index.js` with `_capture: true` and `deobfuscate: true`. Results saved to `datasets/real-world/datadog-benchmark-results.json`.
-2. **Miss categorization**: The 2,077 samples with score=0 were manually analyzed. For each miss, the extracted package contents were examined for the presence of Node.js malware patterns: `require()`, `child_process`, `execSync`, `exec`, `spawn`, `fs.readFileSync`, `fs.writeFileSync`, `process.env`, `http.request`, `https.request`, `net.connect`, `dns.resolve`, `eval`, `Function()`, `Buffer.from`, `crypto`.
-3. **Classification**: Each miss was assigned to one of three categories based on its contents.
+2. **Out-of-scope filtering**: Packages containing no JavaScript files (no `.js`, `.mjs`, `.cjs` files) are classified as out-of-scope and skipped. These are packages that MUAD'DIB cannot analyze by design (native binaries, phishing HTML pages, etc.).
+3. **In-scope detection**: The Wild TPR is computed only on in-scope packages (those containing at least one JS file).
 
-### Raw Results
+### Results (v2.9.4)
 
 | Metric | Value |
 |--------|-------|
-| Total samples | 17,922 |
-| Detected (score > 0) | 15,810 |
-| Missed (score = 0) | 2,077 |
-| Errors/timeouts | 35 |
-| **Raw TPR** | **88.2%** (15,810 / 17,922) |
+| Total packages | 17,922 |
+| Out-of-scope (no JS files) | 3,335 |
+| In-scope | 14,587 |
+| Detected (score > 0) | 13,486 |
+| Missed (score = 0, in-scope) | 1,101 |
+| Errors | 0 |
+| **Wild TPR** | **92.5%** (13,486 / 14,587) |
 
-### Miss Categorization
+### Results by Category
 
-| Category | Count | Description |
-|----------|-------|-------------|
-| **Phishing pages** | 1,233 | HTML/CSS/JS frontend packages containing fake login pages, redirects, fake captchas, credential harvesting forms. No Node.js APIs present — these are browser-only payloads served to end users. No `require()`, `child_process`, `fs`, `process.env`, or any Node.js module usage. |
-| **Native binaries** | 824 | Packages containing only platform-specific compiled binaries (ELF, Mach-O, PE) with no JavaScript files. 201 from @42ailab (multi-platform binary packages: darwin-arm64, darwin-x64, linux-arm64, linux-x64, win32-x64, etc.) + 623 other native-only packages. |
-| **Corrected libraries** | 20 | Temporarily compromised legitimate libraries where the malicious code was removed before our scan. The version in the dataset is the post-fix version. Classification `compromised_lib` in the dataset. |
+| Category | In-scope | Detected | Skipped (no JS) | Wild TPR |
+|----------|----------|----------|-----------------|----------|
+| **compromised_lib** | 924 | 904 | 0 | **97.8%** |
+| **malicious_intent** | 13,663 | 12,582 | 3,335 | **92.1%** |
 
-**Total out-of-scope: 2,077** (1,233 + 824 + 20)
+### Methodology Change from v1 Benchmark
 
-### Adjusted TPR
+The original benchmark (v2.3.0) reported 88.2% raw TPR (15,810/17,922) with 2,077 misses manually categorized as out-of-scope (1,233 phishing HTML, 824 native binaries, 20 corrected libraries) and an adjusted TPR of ~100%.
 
-When excluding out-of-scope samples that contain no Node.js malware patterns:
+The v2 benchmark (v2.9.4) improves the methodology by automatically skipping packages with no JS files as out-of-scope, rather than counting them as misses. This gives a more honest and reproducible metric:
+- **v1 (v2.3.0)**: 88.2% raw, ~100% adjusted (manual categorization)
+- **v2 (v2.9.4)**: 92.5% Wild TPR (automated scope filtering, 1,101 in-scope misses)
 
-- In-scope samples: 17,922 - 2,077 = ~15,845
-- Detected: 15,810
-- **Adjusted TPR: ~100%** (15,810 / ~15,845)
+The 1,101 in-scope misses are genuine detection gaps where JS files exist but the scanner does not flag them. These represent opportunities for future detection improvement.
 
-The ~35 gap between 15,810 and 15,845 corresponds to scan errors and timeouts, not detection failures.
-
-### Why These Misses Are Out of Scope
+### Why Out-of-Scope Packages Are Skipped
 
 MUAD'DIB is a **Node.js static analyzer** that performs AST parsing, dataflow analysis, and behavioral pattern matching on JavaScript code. Its detection engine looks for:
 - Dangerous API calls (`child_process.exec`, `eval`, `Function()`)
@@ -782,12 +781,8 @@ MUAD'DIB is a **Node.js static analyzer** that performs AST parsing, dataflow an
 - Obfuscation patterns (charcode reconstruction, base64 encoding, hex arrays)
 - Supply-chain signals (lifecycle scripts, typosquatting, IOC matches)
 
-**Phishing pages** (1,233 misses) are HTML documents designed for browser rendering. They contain `<form>`, `<script>`, CSS, and browser JavaScript (`document.getElementById`, `window.location`, `XMLHttpRequest`) — none of which are Node.js APIs. Detecting phishing requires HTML/DOM analysis, which is a fundamentally different problem from supply-chain malware detection.
-
-**Native binaries** (824 misses) contain no JavaScript at all. Detecting malware in compiled binaries requires binary analysis (disassembly, sandbox execution), not AST parsing.
-
-**Corrected libraries** (20 misses) are false entries in the dataset — the malicious code was already removed. The scanner correctly finds no threats because there are none.
+Packages with no JavaScript files (native binaries, phishing HTML pages) cannot be analyzed by a JS static analyzer. Skipping them provides a more meaningful detection rate than counting them as misses.
 
 ### Transparency
 
-Both the raw TPR (88.2%) and the adjusted TPR (~100%) are reported. The raw number honestly reflects what the scanner scores on the full dataset. The adjusted number reflects detection capability within the scanner's designed scope (Node.js/JavaScript malware). Neither number is hidden or minimized.
+The Wild TPR of 92.5% reflects detection on in-scope packages only (those containing JS files). The 3,335 out-of-scope packages and 1,101 in-scope misses are reported transparently. The in-scope misses are not hidden or excused — they are genuine gaps where the scanner has room for improvement.

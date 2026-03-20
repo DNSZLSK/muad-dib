@@ -4,9 +4,11 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
+| 2.9.x   | :white_check_mark: |
+| 2.8.x   | :white_check_mark: |
 | 2.7.x   | :white_check_mark: |
-| 2.6.x   | :white_check_mark: |
-| 2.5.x   | :white_check_mark: |
+| 2.6.x   | :x:                |
+| 2.5.x   | :x:                |
 | 2.4.x   | :x:                |
 | 2.3.x   | :x:                |
 | 2.2.x   | :x:                |
@@ -65,9 +67,9 @@ Please include the following information in your report:
 - We aim to release fixes before public disclosure
 - We request a 90-day disclosure window for complex issues
 
-## Detection Rules (v2.7.8)
+## Detection Rules (v2.9.4)
 
-MUAD'DIB uses 14 scanner modules (module-graph pre-analysis + 13 parallel scanners) + 5 behavioral anomaly detection features + ground truth validation, producing 134 rule IDs (129 RULES + 5 PARANOID):
+MUAD'DIB uses 14 scanner modules (module-graph pre-analysis + 13 parallel scanners) + 5 behavioral anomaly detection features + ground truth validation, producing 152 rule IDs (147 RULES + 5 PARANOID):
 
 ### AST Scanner
 
@@ -116,6 +118,12 @@ MUAD'DIB uses 14 scanner modules (module-graph pre-analysis + 13 parallel scanne
 | MUADDIB-PKG-008 | AWS Credential Access | HIGH |
 | MUADDIB-PKG-009 | Base64 Encoding in Script | MEDIUM |
 | MUADDIB-PKG-010 | Lifecycle Shell Pipe | CRITICAL |
+| MUADDIB-PKG-011 | Network Module in Lifecycle Script | HIGH |
+| MUADDIB-PKG-012 | Node Inline Execution in Lifecycle Script | HIGH |
+| MUADDIB-PKG-013 | Bin Field PATH Hijack | CRITICAL |
+| MUADDIB-PKG-014 | Git Dependency RCE (PackageGate) | HIGH |
+| MUADDIB-PKG-015 | .npmrc Git Binary Override | CRITICAL |
+| MUADDIB-PKG-016 | Lifecycle Script Targets Hidden Payload | CRITICAL |
 
 ### AST Scanner (v2.2+)
 
@@ -159,6 +167,15 @@ MUAD'DIB uses 14 scanner modules (module-graph pre-analysis + 13 parallel scanne
 | MUADDIB-AST-044 | Built-in Method Override Exfiltration | HIGH | T1557 |
 | MUADDIB-AST-045 | Stream Credential Interception (Transform/Duplex + regex) | HIGH | T1557 |
 | MUADDIB-AST-046 | WASM Module Load Standalone (no network sinks) | MEDIUM | T1027 |
+| MUADDIB-AST-047 | Detached Process Credential Exfiltration | CRITICAL | T1041 |
+| MUADDIB-AST-048 | Write to node_modules/ (Worm Propagation) | CRITICAL | T1195.002 |
+| MUADDIB-AST-049 | Bun Runtime Evasion | HIGH | T1059 |
+| MUADDIB-AST-050 | Static Timer Bomb | MEDIUM | T1497.003 |
+| MUADDIB-AST-051 | npm publish Worm Propagation | CRITICAL | T1195.002 |
+| MUADDIB-AST-052 | Ollama Local LLM (Polymorphic Engine) | HIGH | T1027.005 |
+| MUADDIB-AST-053 | Unicode Variation Selector Decoder (GlassWorm) | CRITICAL | T1140 |
+| MUADDIB-AST-054 | Blockchain C2 Resolution (GlassWorm) | HIGH | T1102 |
+| MUADDIB-AST-055 | Hardcoded Blockchain RPC Endpoint (GlassWorm) | MEDIUM | T1102 |
 
 ### AI Config Scanner (v2.2)
 
@@ -180,6 +197,18 @@ MUAD'DIB uses 14 scanner modules (module-graph pre-analysis + 13 parallel scanne
 |---------|------|----------|-------|
 | MUADDIB-OBF-001 | Code Obfuscation Detected | HIGH | Hex/unicode escapes alone no longer trigger; .min.js long lines ignored |
 | MUADDIB-OBF-002 | Possible Code Obfuscation | MEDIUM | Parse failure + dense code |
+| MUADDIB-OBF-003 | Unicode Invisible Injection (GlassWorm) | HIGH | >=3 invisible Unicode chars |
+
+### Compound Scoring Rules (v2.9.2)
+
+Co-occurring threat type combinations that never appear in benign packages. Inject synthetic CRITICAL threats.
+
+| Rule ID | Name | Required Types | Severity |
+|---------|------|---------------|----------|
+| MUADDIB-COMPOUND-001 | Crypto Staged Payload | staged_binary_payload + crypto_decipher | CRITICAL |
+| MUADDIB-COMPOUND-002 | Lifecycle Typosquat | lifecycle_script + typosquat_detected | CRITICAL |
+| MUADDIB-COMPOUND-004 | Lifecycle Inline Exec | lifecycle_script + node_inline_exec | CRITICAL |
+| MUADDIB-COMPOUND-005 | Lifecycle Remote Require | lifecycle_script + network_require | CRITICAL |
 
 ### Dependency Scanner
 
@@ -358,7 +387,7 @@ The sandbox simulates CI environments by setting: `CI=true`, `GITHUB_ACTIONS=tru
 
 - All dependencies are pinned to exact versions
 - Regular updates via Dependabot (when enabled)
-- Minimal dependency footprint (7 production dependencies)
+- Minimal dependency footprint (5 production dependencies)
 
 ## Security Best Practices for Users
 
@@ -375,15 +404,15 @@ The sandbox simulates CI environments by setting: `CI=true`, `GITHUB_ACTIONS=tru
 2. **Signed commits**: Use GPG-signed commits when possible
 3. **Review dependencies**: Check new dependencies before adding them
 
-## Threat Model (v2.7.8)
+## Threat Model (v2.9.4)
 
-MUAD'DIB 2.6 uses a **triple detection approach**:
+MUAD'DIB 2.9 uses a **triple detection approach**:
 
 1. **IOC-based detection** (v1.x): Matches packages against 225,000+ known malicious packages from OSV, DataDog, OSSF, GitHub Advisory, and other sources. Fast and reliable for known threats.
 
 2. **Behavioral anomaly detection** (v2.0): Analyzes changes between package versions to detect supply-chain attacks before they appear in IOC databases. Compares lifecycle scripts, AST, publish frequency, and maintainer metadata across versions. This approach can detect 0-day behavioral anomalies without any prior knowledge of the specific attack.
 
-3. **Ground truth validation** (v2.1–v2.6.5): Validates detection accuracy against 51 real-world attacks (49 active samples), tracks detection lead times vs. public advisories, and monitors false positive rates over time. 1974 tests with 86% code coverage. Provides observability into scanner effectiveness.
+3. **Ground truth validation** (v2.1–v2.9.4): Validates detection accuracy against 51 real-world attacks (49 active samples), tracks detection lead times vs. public advisories, and monitors false positive rates over time. 2336 tests across 50 files. Provides observability into scanner effectiveness.
 
 The behavioral detection features are opt-in (`--temporal-full`) and query the npm registry at scan time. They are particularly effective against:
 - Account takeover attacks (event-stream pattern)
@@ -391,7 +420,7 @@ The behavioral detection features are opt-in (`--temporal-full`) and query the n
 - Dormant package hijacking (abandonware takeover)
 - Sudden code injection (Shai-Hulud, ua-parser-js pattern)
 
-## Ground Truth Validation (v2.6.5)
+## Ground Truth Validation (v2.9.4)
 
 MUAD'DIB includes a ground truth dataset of 51 real-world supply-chain attacks (49 active samples) to continuously validate detection coverage.
 
@@ -402,28 +431,34 @@ MUAD'DIB includes a ground truth dataset of 51 real-world supply-chain attacks (
 
 Run `muaddib evaluate --ground-truth` to validate detection at any time.
 
-## Evaluation Methodology Caveats (v2.6.5)
+## Evaluation Methodology Caveats (v2.9.4)
 
 The metrics reported above should be interpreted with the following caveats:
 
 - **TPR scope:** Measured on 49 Node.js attack samples from 51 total. 3 browser-only attacks (lottie-player, polyfill-io, trojanized-jquery) are excluded because MUAD'DIB is a Node.js static analyzer and cannot detect DOM/browser-only patterns.
 - **FPR dataset:** Measured on 529 curated popular npm packages, not a random sample. FPR varies significantly by package size: small packages (<10 JS files) have lower FPR than very large packages (100+ files) due to accumulation of benign patterns that resemble threats.
-- **ADR methodology:** As of v2.6.5, ADR uses a global threshold (score >= 20) aligned with the benign threshold. Earlier versions used per-sample tuned thresholds which inflated the ADR metric.
+- **ADR methodology:** As of v2.6.5+, ADR uses a global threshold (score >= 20) aligned with the benign threshold. Earlier versions used per-sample tuned thresholds which inflated the ADR metric. Current ADR: 96.3% (103/107).
 - **Node.js scope:** MUAD'DIB is designed for Node.js/npm supply-chain attacks. Browser-only attacks, native binary payloads, and phishing pages are out of scope.
 - **Static analysis limitations:** Dynamic obfuscation, encrypted payloads that require runtime keys, and multi-stage attacks fetching payloads from external servers may evade static detection.
 
-## Datadog 17K Benchmark (v2.6.5)
+## Datadog 17K Benchmark (v2.9.4)
 
 Validated against the [DataDog Malicious Software Packages Dataset](https://github.com/DataDog/malicious-software-packages-dataset) (17,922 real malware npm packages).
 
-**Raw TPR: 88.2% (15,810/17,922)**
+**Wild TPR: 92.5% (13,486/14,587 in-scope)**
 
-The 2,077 misses (score=0) are all out-of-scope:
-- 1,233 phishing pages (HTML/CSS/JS frontend — no Node.js APIs)
-- 824 native binaries (no JS files)
-- 20 corrected libraries (malicious code already removed)
+- Total packages: 17,922
+- Out-of-scope (no JS files): 3,335 skipped
+- In-scope: 14,587
+- Detected: 13,486
+- Score=0 misses: 1,101 in-scope packages
+- Errors: 0
 
-**Adjusted TPR on JS/Node.js malware: ~100%** (15,810/~15,845). See [Evaluation Methodology](docs/EVALUATION_METHODOLOGY.md#14-datadog-17k-benchmark) for the full categorization methodology.
+**By category:**
+- compromised_lib: **97.8%** (904/924)
+- malicious_intent: **92.1%** (12,582/13,663 in-scope, 3,335 skipped)
+
+See [Evaluation Methodology](docs/EVALUATION_METHODOLOGY.md#14-datadog-17k-benchmark) for the full methodology.
 
 ## Threat Feed API Security
 
@@ -433,7 +468,7 @@ The `muaddib serve` HTTP server binds to `localhost` (127.0.0.1) by default. It 
 - **No sensitive data**: the feed contains detection metadata (package names, severities, timestamps), not raw file contents or credentials.
 - **Localhost binding**: default port 3000, binds to 127.0.0.1 only.
 
-## Scoring & FP Reduction (v2.6.5)
+## Scoring & FP Reduction (v2.9.4)
 
 ### Risk Score Formula
 
@@ -494,7 +529,7 @@ A percentage guard (< 40% of total threats) prevents downgrading when a type dom
 MUAD'DIB is an educational tool and first-line defense. It has known limitations:
 
 - **Behavioral detection requires network**: Temporal features query the npm registry (requires internet access)
-- **No ML/AI**: Pattern matching is deterministic, sophisticated obfuscation may bypass
+- **ML pipeline (experimental)**: v2.8.6 adds JSONL feature extraction (62 features) for offline model training, but detection remains deterministic rule-based
 - **npm and PyPI only**: Does not scan other package ecosystems (RubyGems, Maven, Go, etc.)
 - **Sandbox requires Docker**: Behavioral analysis needs Docker Desktop
 - **Temporal analysis is npm-only**: Behavioral anomaly detection (`--temporal-*`) currently only supports npm packages, not PyPI
