@@ -2211,6 +2211,53 @@ Tests : 2336 → **2367** (+31), 0 echecs.
 
 ---
 
+## v2.10.0 — ML Classifier Phase 2 (20 Mars 2026)
+
+### Le plafond du rule-based
+
+Depuis v2.8.7 on collecte des features en JSONL sur chaque scan du moniteur. 62 features numeriques par package : composition des menaces, distribution de severite, decomposition du score, metadata du registre. Apres 2 semaines de collecte, le constat est clair : le FPR prod est a 27.3% avec 1409 T1/jour. Les heuristiques seules ne peuvent plus distinguer les vrais positifs des faux dans la zone grise T1 (score 20-34).
+
+La litterature academique confirme l'approche : USENIX 2025 montre que XGBoost/Random Forest atteint P=99.6%, R=98.4% sur la detection supply-chain. C'est le bon algorithme.
+
+### Ce qu'on a construit
+
+**Enrichissement des features (62 → 71)** : 9 nouvelles features structurelles/metadata ajoutees a `feature-extractor.js` :
+- `package_age_days`, `weekly_downloads`, `version_count`, `author_package_count` — metadata npm registry
+- `has_repository`, `readme_size` — signaux de legitimite
+- `file_count_total`, `has_tests` — structure du package
+- `threat_density` — concentration des menaces par fichier
+
+Optimisation cle : un seul appel `getPackageMetadata()` par package suspect, reutilise pour les features enrichies ET le reputation scoring. Elimine un appel HTTP redondant par suspect.
+
+**Classifier pur JavaScript** : `src/ml/classifier.js` — traverse les arbres XGBoost en JS pur, zero dependance externe. 4 guard rails de securite :
+1. Score < 20 → clean (en dessous de T1)
+2. Score >= 35 → bypass (au dessus de T1, les regles decident)
+3. Types haute confiance → bypass (jamais supprimer un IOC match ou un reverse shell)
+4. Modele absent → bypass (degradation gracieuse)
+
+Le modele est un stub `null` pour l'instant (`src/ml/model-trees.js`). Quand on aura assez de donnees enrichies, le pipeline Python (`tools/train-classifier.py`) entraine un XGBoost avec selection SHAP des top 30-40 features, et `tools/export-model-js.py` genere le fichier JS.
+
+**Integration moniteur** : Le classifier s'insere entre la classification T1/T2 et la decision sandbox. Si le ML dit "clean" pour un T1 dans [20,34] sans types haute confiance, on skip sandbox+webhook et on log `[MONITOR] ML CLEAN`. Le compteur `mlFiltered` apparait dans le rapport quotidien.
+
+**Evaluation zero-regression** : `evaluateMLClassifier()` dans evaluate.js rejoue le classifier sur les resultats du bench. Contrainte dure : 0 ground-truth supprime, 0 adversarial supprime.
+
+### Metriques
+
+| Avant | Apres |
+|-------|-------|
+| 62 features | **71 features** |
+| 2435 tests, 54 fichiers | **2477 tests, 56 fichiers** |
+| 2 appels HTTP/suspect | **1 appel HTTP/suspect** |
+| Pas de ML | Classifier pret (stub, en attente de donnees enrichies) |
+
+Regles : 153 (inchange). Scanners : 14 (inchange). TPR/FPR/ADR : inchanges (pas de modification du scoring).
+
+### La suite
+
+Phase 2a est deployable immediatement — le VPS collectera les 71 features enrichies. Apres ~1 semaine de collecte, on entraine le modele et on active le filtrage. D'abord en shadow mode (log sans supprimer) pendant 1 semaine, puis activation du filtrage ML. Objectif : precision T1 >= 95%, soit une reduction massive du bruit webhook.
+
+---
+
 ## Etat actuel
 
 ### Ce qui fonctionne
@@ -2232,22 +2279,22 @@ Tests : 2336 → **2367** (+31), 0 echecs.
 | Version check | Notification automatique des nouvelles versions au demarrage |
 | **Detection comportementale (v2.0)** | Temporal lifecycle, AST diff, publish anomaly, maintainer change, canary tokens |
 | **Validation & Observabilite (v2.1)** | Ground truth (51 attaques, 93.9% TPR), detection time logging, FP rate tracking, score breakdown, threat feed API |
-| **Evaluation & Red Team (v2.2-v2.9)** | `muaddib evaluate`, 107 samples evasifs (67 adversariaux + 40 holdouts), TPR **93.9% (46/49)**, **FPR 12.9% (68/529)**, ADR **96.3% (103/107)** (4 misses documentes), 14 scanners, 152 regles, AI config scanner, 529 packages benins npm, 132 PyPI, 65 malwares documentes |
+| **Evaluation & Red Team (v2.2-v2.9)** | `muaddib evaluate`, 107 samples evasifs (67 adversariaux + 40 holdouts), TPR **93.9% (46/49)**, **FPR 12.9% (68/529)**, ADR **96.3% (103/107)** (4 misses documentes), 14 scanners, 153 regles, AI config scanner, 529 packages benins npm, 132 PyPI, 65 malwares documentes |
 | **Desobfuscation (v2.2.5)** | `src/scanner/deobfuscate.js`, 4 transformations AST + const propagation, approche additive (original + desobfusque), `--no-deobfuscate` flag |
 | **Dataflow inter-module (v2.2.6)** | `src/scanner/module-graph.js`, graphe de dependances, propagation de teinte inter-fichiers, 3-hop re-export, class methods, named exports, `--no-module-graph` flag |
-| Tests | **2367 tests unitaires** (50 fichiers) + 56 fuzz + 107 adversariaux/holdout, **86% coverage** (c8/Codecov) |
+| Tests | **2477 tests unitaires** (56 fichiers) + 56 fuzz + 107 adversariaux/holdout, **86% coverage** (c8/Codecov) |
 | **Hardening securite (v2.1.2)** | SSRF protection (shared/download.js), command injection prevention (execFileSync), path traversal (sanitizePackageName), JSON.parse protege, webhook strict |
 | **Compound scoring (v2.9.2)** | 4 regles compound zero-FP, `applyCompoundBoosts()`, detection de co-occurrences malveillantes |
 | **GlassWorm detection (v2.9.1)** | Unicode invisible (OBF-003), blockchain C2 Solana (AST-054/055), variation decoder (AST-053) |
 | **Reputation scoring (v2.7.5)** | `computeReputationFactor()` — age, versions, downloads. HC bypass pour 8 types haute confiance |
 | **Scan memory (v2.7.8)** | `scan-memory.json` — cache 30j, alerte ±15% score delta seulement |
-| **ML pipeline (v2.8.7)** | Extraction JSONL 62 features par scan, collecte pour futur modele |
+| **ML pipeline (v2.8.7-v2.10.0)** | Extraction JSONL 71 features par scan, classifier XGBoost pur JS avec guard rails, pipeline d'entrainement Python (SHAP + 5-fold CV) |
 | **Benchmark Datadog 17K** | Wild TPR **92.5%** (13 486/14 587), compromised_lib **97.8%**, malicious_intent **92.1%** |
 | Audit securite | 3 audits complets, **99 issues corrigees** (58 v1.4 + 41 v2.5), [rapport PDF](MUADDIB_Security_Audit_Report_v1.4.1.pdf) |
 
 ### Ce qui manque (honnêtement)
 
-**ML en cours** : Le pipeline d'extraction de features (62 features JSONL, v2.8.7) collecte des donnees pour un futur modele ML. L'analyse repose encore sur des patterns statiques, des IOCs connus, et des heuristiques comportementales. Un attaquant sophistique qui obfusque differemment peut encore passer a travers — le ML devrait combler ce gap.
+**ML en shadow mode** : Le classifier XGBoost est implemente (v2.10.0) avec 71 features enrichies, mais le modele est un stub en attente de donnees enrichies suffisantes. Le pipeline Python est pret (`tools/train-classifier.py`). Une fois entraine et valide en shadow mode (log sans filtrage), il sera active pour reduire le FPR T1 prod. L'analyse repose encore principalement sur des patterns statiques, des IOCs connus, et des heuristiques comportementales.
 
 **Pas d'interception TLS type MITM** : Le sandbox capture le SNI (Server Name Indication) et corrèle DNS/TLS, mais ne déchiffre pas le contenu des connexions HTTPS.
 

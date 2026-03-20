@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>92.5% de detection sur 17 000 malwares reels — MUAD'DIB</title>
+  <title>92.5% de detection sur 17 000 malwares reels - MUAD'DIB</title>
   <meta name="description" content="Benchmark sur le dataset Datadog : 14 587 packages in-scope, 13 486 detectes, 9 heures de scan.">
   <link rel="stylesheet" href="../style.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
@@ -46,8 +46,8 @@
 
       <p>Sur les 17 922 packages :</p>
       <ul>
-        <li><strong>3 335 skips</strong> — packages sans fichiers JavaScript (binaires purs, assets, packages vides). Exclus du calcul.</li>
-        <li><strong>14 587 in-scope</strong> — packages avec du code JavaScript analysable</li>
+        <li><strong>3 335 skips</strong> - packages sans fichiers JavaScript (binaires purs, assets, packages vides). Exclus du calcul.</li>
+        <li><strong>14 587 in-scope</strong> - packages avec du code JavaScript analysable</li>
       </ul>
 
       <h2>Les resultats</h2>
@@ -74,16 +74,16 @@
         <tr><td>75-100</td><td>2 446</td><td>Detectes avec tres haute confiance</td></tr>
       </table>
 
-      <p>La majorite des detections (8 873 packages, 61%) ont un score >= 25. Ce n'est pas du scoring marginal — ce sont des detections claires.</p>
+      <p>La majorite des detections (8 873 packages, 61%) ont un score >= 25. Ce n'est pas du scoring marginal - ce sont des detections claires.</p>
 
       <h2>Les MISS : qu'est-ce qu'on rate ?</h2>
 
       <p>1 101 packages avec score 0 et 0 menaces. Analyse des causes :</p>
 
       <ul>
-        <li><strong><code>@react-native-aria/*</code></strong> — Packages marques <code>compromised_lib</code> dans le dataset Datadog, mais sans code JS malveillant detectable statiquement. La compromission est au niveau du registre/maintainer, pas du code source.</li>
-        <li><strong><code>xrpl</code></strong> — Bibliotheque crypto legitime dont des versions specifiques ont ete compromisees. Le code malveillant a ete injecte via un processus de build, pas directement dans les sources.</li>
-        <li><strong>Packages sans code</strong> — Certains packages ne contiennent que des fichiers de configuration ou des assets. Aucun code a analyser = aucune detection possible.</li>
+        <li><strong><code>@react-native-aria/*</code></strong> - Packages marques <code>compromised_lib</code> dans le dataset Datadog, mais sans code JS malveillant detectable statiquement. La compromission est au niveau du registre/maintainer, pas du code source.</li>
+        <li><strong><code>xrpl</code></strong> - Bibliotheque crypto legitime dont des versions specifiques ont ete compromisees. Le code malveillant a ete injecte via un processus de build, pas directement dans les sources.</li>
+        <li><strong>Packages sans code</strong> - Certains packages ne contiennent que des fichiers de configuration ou des assets. Aucun code a analyser = aucune detection possible.</li>
       </ul>
 
       <p>Ces MISS sont coherents avec les limites connues de l'analyse statique : si le code malveillant n'est pas dans les sources scannees (build-time injection, registre compromis, binaires pre-compiles), un scanner statique ne peut pas le detecter.</p>
@@ -107,15 +107,15 @@
       <table>
         <tr><th>Metrique</th><th>Interne</th><th>Wild (Datadog)</th></tr>
         <tr><td>TPR</td><td>93.9% (46/49)</td><td>92.5% (13 486/14 587)</td></tr>
-        <tr><td>ADR</td><td>96.3% (103/107)</td><td>—</td></tr>
-        <tr><td>compromised_lib</td><td>—</td><td>97.8%</td></tr>
+        <tr><td>ADR</td><td>96.3% (103/107)</td><td>-</td></tr>
+        <tr><td>compromised_lib</td><td>-</td><td>97.8%</td></tr>
       </table>
 
       <p>Les metriques internes et sauvages convergent (~93% vs ~92.5%). C'est un bon signe : le ground truth de 49 samples et les 107 adversariaux ne sont pas sur-ajustes. La performance generalise au-dela du dataset de developpement.</p>
 
       <h2>Lecon</h2>
 
-      <p>Un benchmark sur 17K packages reels ne ment pas. Les metriques internes sur 49+107 echantillons etaient honnetes — la performance sauvage le confirme. Mais le benchmark revele aussi les limites structurelles de l'analyse statique : les compromissions build-time, les injections registre, et les binaires pre-compiles restent hors de portee.</p>
+      <p>Un benchmark sur 17K packages reels ne ment pas. Les metriques internes sur 49+107 echantillons etaient honnetes - la performance sauvage le confirme. Mais le benchmark revele aussi les limites structurelles de l'analyse statique : les compromissions build-time, les injections registre, et les binaires pre-compiles restent hors de portee.</p>
 
       <p>92.5% n'est pas 100%. Les 7.5% restants sont un rappel que la detection statique est une couche de defense, pas la seule.</p>
 

@@ -4,6 +4,7 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
+| 2.10.x  | :white_check_mark: |
 | 2.9.x   | :white_check_mark: |
 | 2.8.x   | :white_check_mark: |
 | 2.7.x   | :white_check_mark: |
@@ -67,9 +68,9 @@ Please include the following information in your report:
 - We aim to release fixes before public disclosure
 - We request a 90-day disclosure window for complex issues
 
-## Detection Rules (v2.9.4)
+## Detection Rules (v2.10.0)
 
-MUAD'DIB uses 14 scanner modules (module-graph pre-analysis + 13 parallel scanners) + 5 behavioral anomaly detection features + ground truth validation, producing 152 rule IDs (147 RULES + 5 PARANOID):
+MUAD'DIB uses 14 scanner modules (module-graph pre-analysis + 13 parallel scanners) + 5 behavioral anomaly detection features + ground truth validation, producing 153 rule IDs (148 RULES + 5 PARANOID):
 
 ### AST Scanner
 

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Red Team vs Blue Team : 107 echantillons adversariaux — MUAD'DIB</title>
+  <title>Red Team vs Blue Team : 107 echantillons adversariaux - MUAD'DIB</title>
   <meta name="description" content="7 campagnes adversariales pour tester un scanner supply-chain. 107 echantillons, ADR 96.3%.">
   <link rel="stylesheet" href="../style.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
@@ -42,39 +42,39 @@
 
       <p>Le cycle est toujours le meme :</p>
       <ol>
-        <li><strong>Geler les regles</strong> — aucune modification du scanner</li>
-        <li><strong>Creer les echantillons</strong> — techniques d'evasion basees sur des attaques reelles documentees</li>
-        <li><strong>Scanner avec les regles gelees</strong> — enregistrer les scores bruts</li>
-        <li><strong>Corriger les detections</strong> — ajouter/modifier les regles</li>
-        <li><strong>Verifier zero regression</strong> — les corrections ne doivent casser aucun test existant</li>
+        <li><strong>Geler les regles</strong> - aucune modification du scanner</li>
+        <li><strong>Creer les echantillons</strong> - techniques d'evasion basees sur des attaques reelles documentees</li>
+        <li><strong>Scanner avec les regles gelees</strong> - enregistrer les scores bruts</li>
+        <li><strong>Corriger les detections</strong> - ajouter/modifier les regles</li>
+        <li><strong>Verifier zero regression</strong> - les corrections ne doivent casser aucun test existant</li>
       </ol>
 
       <p>Le <strong>score pre-tuning</strong> est la metrique la plus honnete. Il mesure la capacite de generalisation sur des patterns jamais vus pendant le developpement.</p>
 
       <h2>Les 7 campagnes</h2>
 
-      <h3>Vague 1 — Le baseline (20 echantillons)</h3>
+      <h3>Vague 1 - Le baseline (20 echantillons)</h3>
 
       <p>Score pre-tuning : <strong>~14%</strong>. Le scanner ne detectait presque rien. Les patterns de base (<code>require()</code> obfusque, DNS exfiltration, staged payload) passaient a travers. Corrections massives du scanner AST et dataflow. 5 nouvelles regles. Resultat post-tuning : 20/20.</p>
 
-      <h3>Vague 2 — Techniques emergentes (5 echantillons)</h3>
+      <h3>Vague 2 - Techniques emergentes (5 echantillons)</h3>
 
-      <p>Score pre-tuning : <strong>0%</strong>. Template literal obfuscation, proxy env intercept, nested payload, dynamic import, websocket exfil — rien n'etait couvert. Le pire score de toutes les campagnes. Resultat post-tuning : 25/25.</p>
+      <p>Score pre-tuning : <strong>0%</strong>. Template literal obfuscation, proxy env intercept, nested payload, dynamic import, websocket exfil - rien n'etait couvert. Le pire score de toutes les campagnes. Resultat post-tuning : 25/25.</p>
 
-      <h3>Vague 3 — Attaques reelles 2025-2026 (5 echantillons)</h3>
+      <h3>Vague 3 - Attaques reelles 2025-2026 (5 echantillons)</h3>
 
       <p>Score pre-tuning : <strong>60%</strong>. Premiere amelioration significative. Les techniques testees :</p>
       <ul>
-        <li><strong>AI agent weaponization</strong> — invocation de Claude/Gemini avec <code>--dangerously-skip-permissions</code> (pattern s1ngularity/Nx)</li>
-        <li><strong>AI config injection</strong> — injection de prompts dans <code>.cursorrules</code>, <code>CLAUDE.md</code> (pattern ToxicSkills)</li>
-        <li><strong>Zero-deps RDD</strong> — inline <code>https.get</code> + <code>eval()</code> dans postinstall (pattern PhantomRaven)</li>
-        <li><strong>Discord webhook exfil</strong> — credentials vers webhook Discord (pattern Shai-Hulud)</li>
-        <li><strong>Background fork</strong> — preinstall + fork detache + vol de credentials (pattern StepSecurity)</li>
+        <li><strong>AI agent weaponization</strong> - invocation de Claude/Gemini avec <code>--dangerously-skip-permissions</code> (pattern s1ngularity/Nx)</li>
+        <li><strong>AI config injection</strong> - injection de prompts dans <code>.cursorrules</code>, <code>CLAUDE.md</code> (pattern ToxicSkills)</li>
+        <li><strong>Zero-deps RDD</strong> - inline <code>https.get</code> + <code>eval()</code> dans postinstall (pattern PhantomRaven)</li>
+        <li><strong>Discord webhook exfil</strong> - credentials vers webhook Discord (pattern Shai-Hulud)</li>
+        <li><strong>Background fork</strong> - preinstall + fork detache + vol de credentials (pattern StepSecurity)</li>
       </ul>
 
       <p>Cette vague a donne naissance au 13eme scanner : <code>ai-config.js</code>, dedie a la detection d'injection de prompts dans les fichiers de configuration d'agents IA.</p>
 
-      <h3>Holdout v1 a v5 — Le test de generalisation (50 echantillons)</h3>
+      <h3>Holdout v1 a v5 - Le test de generalisation (50 echantillons)</h3>
 
       <p>5 batches de 10 echantillons, chacun cree avec les regles gelees. C'est la mesure de generalisation pure :</p>
 
@@ -89,7 +89,7 @@
 
       <p>La tendance 30% &rarr; 40% &rarr; 60% &rarr; 80% montre une amelioration constante de la generalisation. La chute a 50% au holdout v5 est attendue : c'etait un scanner entierement nouveau (module-graph) teste pour la premiere fois.</p>
 
-      <h3>Vague 4 — Les 5 bypasses (5 echantillons)</h3>
+      <h3>Vague 4 - Les 5 bypasses (5 echantillons)</h3>
 
       <p>Score pre-tuning : <strong>0%</strong>. Les 5 techniques d'evasion les plus vicieuses :</p>
 
@@ -106,17 +106,17 @@
 
       <p>Autre lecon : quand la resolution de chemins AST echoue, la detection par co-occurrence au niveau contenu est un filet de securite efficace. Si un fichier mentionne <code>tasks.json</code> ET <code>runOn</code> ET <code>writeFileSync</code>, c'est suspect independamment de la construction des chemins.</p>
 
-      <h3>Red Team DPRK — Techniques nord-coreennes (10 echantillons)</h3>
+      <h3>Red Team DPRK - Techniques nord-coreennes (10 echantillons)</h3>
 
       <p>10 echantillons simulant les techniques observees dans les campagnes Lazarus/APT38 :</p>
       <ul>
-        <li><strong>5 echantillons pure API multi-fichiers</strong> — exfiltration repartie sur plusieurs modules avec imports locaux</li>
-        <li><strong>5 echantillons evasion eval</strong> — eval factory, <code>.call.call(eval)</code>, <code>require(/regex/.source)</code>, charcode arithmetique, object-method-alias</li>
+        <li><strong>5 echantillons pure API multi-fichiers</strong> - exfiltration repartie sur plusieurs modules avec imports locaux</li>
+        <li><strong>5 echantillons evasion eval</strong> - eval factory, <code>.call.call(eval)</code>, <code>require(/regex/.source)</code>, charcode arithmetique, object-method-alias</li>
       </ul>
 
       <p>Cette campagne a donne naissance au graphe d'intention (analyse de coherence source-sink intra-fichier) et a 8 nouvelles regles.</p>
 
-      <h3>Red Team v7 — Derniere campagne (corrections)</h3>
+      <h3>Red Team v7 - Derniere campagne (corrections)</h3>
 
       <p>3 corrections de faux positifs sur les nouvelles regles + 3 quick wins ameliorant la detection sur des cas limites. Alignement final des metriques pour le benchmark Datadog.</p>
 
@@ -147,9 +147,9 @@
 
       <h2>Lecon</h2>
 
-      <p>Le score pre-tuning est la seule metrique honnete de generalisation. Le score post-tuning (100%) est tautologique — on a corrige ce qu'on savait casse. La progression 14% &rarr; 0% &rarr; 60% &rarr; 30% &rarr; 40% &rarr; 60% &rarr; 80% &rarr; 50% montre les oscillations reelles : chaque nouveau type de technique revele des angles morts, meme quand les corrections precedentes ont ameliore la couverture generale.</p>
+      <p>Le score pre-tuning est la seule metrique honnete de generalisation. Le score post-tuning (100%) est tautologique - on a corrige ce qu'on savait casse. La progression 14% &rarr; 0% &rarr; 60% &rarr; 30% &rarr; 40% &rarr; 60% &rarr; 80% &rarr; 50% montre les oscillations reelles : chaque nouveau type de technique revele des angles morts, meme quand les corrections precedentes ont ameliore la couverture generale.</p>
 
-      <p>L'ADR de 96.3% signifie que 4 echantillons passent encore a travers. Et c'est normal — un attaquant suffisamment motive trouvera toujours une technique non couverte. L'objectif n'est pas 100%, c'est de rendre l'evasion <em>couteuse</em>.</p>
+      <p>L'ADR de 96.3% signifie que 4 echantillons passent encore a travers. Et c'est normal - un attaquant suffisamment motive trouvera toujours une technique non couverte. L'objectif n'est pas 100%, c'est de rendre l'evasion <em>couteuse</em>.</p>
 
     </div>
   </article>

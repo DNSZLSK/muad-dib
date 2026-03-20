@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Le sandbox qui voyage dans le temps — MUAD'DIB</title>
+  <title>Le sandbox qui voyage dans le temps - MUAD'DIB</title>
   <meta name="description" content="Monkey-patching des APIs de temps pour detecter les malwares qui attendent 72h avant de voler des credentials.">
   <link rel="stylesheet" href="../style.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
@@ -36,7 +36,7 @@
 
     <div class="article-content">
 
-      <p>MITRE ATT&CK T1497.003 — Time Based Evasion Checks — est dans le top 10 des techniques d'evasion en 2026. L'idee est simple : le malware attend 72 heures avant de voler les credentials. Le sandbox Docker a un timeout de 120 secondes. Le payload ne s'execute jamais pendant l'analyse.</p>
+      <p>MITRE ATT&CK T1497.003 - Time Based Evasion Checks - est dans le top 10 des techniques d'evasion en 2026. L'idee est simple : le malware attend 72 heures avant de voler les credentials. Le sandbox Docker a un timeout de 120 secondes. Le payload ne s'execute jamais pendant l'analyse.</p>
 
       <p>La solution : on accelere le temps.</p>
 
@@ -90,10 +90,10 @@ globalThis.setTimeout = (fn, delay, ...args) => {
 
       <p>Les APIs patchees de maniere coherente :</p>
       <ul>
-        <li><code>Date.now()</code> — retourne le temps reel + offset</li>
-        <li><code>new Date()</code> sans argument — date decalee</li>
-        <li><code>performance.now()</code>, <code>process.hrtime()</code>, <code>process.uptime()</code> — tous synchronises</li>
-        <li><code>setTimeout(fn, 72h)</code> &rarr; <code>setTimeout(fn, 0)</code> — execution immediate</li>
+        <li><code>Date.now()</code> - retourne le temps reel + offset</li>
+        <li><code>new Date()</code> sans argument - date decalee</li>
+        <li><code>performance.now()</code>, <code>process.hrtime()</code>, <code>process.uptime()</code> - tous synchronises</li>
+        <li><code>setTimeout(fn, 72h)</code> &rarr; <code>setTimeout(fn, 0)</code> - execution immediate</li>
         <li><code>setInterval(fn, delay)</code> &rarr; premiere execution immediate</li>
       </ul>
 
@@ -103,7 +103,7 @@ globalThis.setTimeout = (fn, delay, ...args) => {
 
       <table>
         <tr><th>Run</th><th>Offset</th><th>Cible</th></tr>
-        <tr><td>Run 1</td><td>0h</td><td>Baseline — comportement immediat</td></tr>
+        <tr><td>Run 1</td><td>0h</td><td>Baseline - comportement immediat</td></tr>
         <tr><td>Run 2</td><td>+72h</td><td>Time-bombs 3 jours</td></tr>
         <tr><td>Run 3</td><td>+7 jours</td><td>Time-bombs 1 semaine</td></tr>
       </table>
@@ -135,7 +135,7 @@ globalThis.setTimeout = (fn, delay, ...args) => {
         <tr><td>Acces env sensible</td><td>MEDIUM</td><td>TOKEN, SECRET, KEY, PASSWORD</td></tr>
       </table>
 
-      <p>La regle composite "reseau apres lecture sensible" est la plus puissante. Elle detecte la sequence exacte d'exfiltration : lire un fichier de credentials, puis envoyer les donnees sur le reseau. Score : +40 points — suffisant pour declencher l'alerte a lui seul.</p>
+      <p>La regle composite "reseau apres lecture sensible" est la plus puissante. Elle detecte la sequence exacte d'exfiltration : lire un fichier de credentials, puis envoyer les donnees sur le reseau. Score : +40 points - suffisant pour declencher l'alerte a lui seul.</p>
 
       <h2>Canary tokens : les honeypots</h2>
 
@@ -153,10 +153,10 @@ DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/canary</code></pre>
       <h2>Securite du preload</h2>
 
       <ul>
-        <li>Tout est encapsule dans une IIFE — le package cible ne peut pas acceder aux references originales</li>
-        <li>Chaque patch est protege par <code>try/catch</code> — le preload ne peut jamais casser le package analyse</li>
-        <li><code>NODE_OPTIONS</code> est verrouille via <code>Object.defineProperty</code> apres injection — empeche le bypass dans les processus enfants</li>
-        <li>L'injection est differee au point d'entree du package, pas pendant <code>npm install</code> — evite d'intercepter les appels reseau de npm lui-meme</li>
+        <li>Tout est encapsule dans une IIFE - le package cible ne peut pas acceder aux references originales</li>
+        <li>Chaque patch est protege par <code>try/catch</code> - le preload ne peut jamais casser le package analyse</li>
+        <li><code>NODE_OPTIONS</code> est verrouille via <code>Object.defineProperty</code> apres injection - empeche le bypass dans les processus enfants</li>
+        <li>L'injection est differee au point d'entree du package, pas pendant <code>npm install</code> - evite d'intercepter les appels reseau de npm lui-meme</li>
       </ul>
 
       <h2>Resultats</h2>
@@ -170,7 +170,7 @@ DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/canary</code></pre>
 
       <h2>Lecon</h2>
 
-      <p>Les malwares modernes ne s'executent pas immediatement. Ils attendent que le scanner ait fini son analyse, que l'environnement CI/CD soit passe, que l'attention du developpeur se soit relachee. L'acceleration du temps dans le sandbox transforme un <code>setTimeout(fn, 72h)</code> en <code>setTimeout(fn, 0)</code> — le malware croit que 3 jours se sont ecoules, et declenche son payload pendant l'analyse.</p>
+      <p>Les malwares modernes ne s'executent pas immediatement. Ils attendent que le scanner ait fini son analyse, que l'environnement CI/CD soit passe, que l'attention du developpeur se soit relachee. L'acceleration du temps dans le sandbox transforme un <code>setTimeout(fn, 72h)</code> en <code>setTimeout(fn, 0)</code> - le malware croit que 3 jours se sont ecoules, et declenche son payload pendant l'analyse.</p>
 
       <p>Le monkey-patching coherent est essentiel. Si <code>Date.now()</code> dit +72h mais que <code>process.uptime()</code> dit 2 secondes, un malware sophistique detecte l'inconsistance. Toutes les APIs de temps doivent raconter la meme histoire.</p>
 

@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.10.0] - 2026-03-20
+
+### Added
+- **ML Classifier Phase 2**: XGBoost-based binary classifier for T1 zone FP reduction
+  - `src/ml/classifier.js`: Pure-JS XGBoost tree traversal with 4 guard rails (below T1 → clean, above T1 → bypass, HC threats → bypass, model absent → bypass)
+  - `src/ml/model-trees.js`: Null stub (replaced after training)
+- 9 new enriched features in feature extractor (62 → 71 features): `package_age_days`, `weekly_downloads`, `version_count`, `author_package_count`, `has_repository`, `readme_size`, `file_count_total`, `has_tests`, `threat_density`
+- ML filter integrated in `monitor.js` between T1 classification and sandbox decision
+- `ml_clean` label support in `updateScanStats`
+- `mlFiltered` counter in daily report embed
+- Python training pipeline: `tools/train-classifier.py` (XGBoost + SHAP), `tools/export-model-js.py`
+- `evaluateMLClassifier()` in `evaluate.js` for zero-regression validation
+
+### Changed
+- npm registry `getPackageMetadata` now returns `readme_size`
+- Optimized: single npm registry fetch per suspect package (reused for both ML features and reputation scoring, eliminates duplicate HTTP call)
+- Tests: 2435 → **2477** (+42) across 54 → **56** test files
+- Rules: **153** (unchanged), Scanners: **14** (unchanged)
+- TPR/FPR/ADR: unchanged (no scoring changes)
+
 ## [2.9.4] - 2026-03-20
 
 ### Fixed

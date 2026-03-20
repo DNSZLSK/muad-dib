@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>GlassWorm : Unicode invisible et C2 blockchain Solana — MUAD'DIB</title>
+  <title>GlassWorm : Unicode invisible et C2 blockchain Solana - MUAD'DIB</title>
   <meta name="description" content="Detection de la campagne GlassWorm : 433 packages npm compromis utilisant des caracteres Unicode invisibles et un C2 via la blockchain Solana.">
   <link rel="stylesheet" href="../style.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
@@ -43,12 +43,12 @@
 
       <h2>Le probleme : du code invisible</h2>
 
-      <p>Le premier vecteur est elegant dans sa simplicite. Le fichier JavaScript semble vide ou inoffensif a l'oeil nu. Mais il contient des dizaines de caracteres Unicode <strong>zero-width</strong> — des caracteres qui ne s'affichent pas mais qui existent bien dans le fichier.</p>
+      <p>Le premier vecteur est elegant dans sa simplicite. Le fichier JavaScript semble vide ou inoffensif a l'oeil nu. Mais il contient des dizaines de caracteres Unicode <strong>zero-width</strong> - des caracteres qui ne s'affichent pas mais qui existent bien dans le fichier.</p>
 
       <p>Les caracteres utilises :</p>
       <ul>
         <li><strong>Zero-width</strong> : U+200B (space), U+200C (non-joiner), U+200D (joiner)</li>
-        <li><strong>BOM hors position 0</strong> : U+FEFF — le Byte Order Mark est normal en debut de fichier, suspect ailleurs</li>
+        <li><strong>BOM hors position 0</strong> : U+FEFF - le Byte Order Mark est normal en debut de fichier, suspect ailleurs</li>
         <li><strong>Word joiner</strong> : U+2060, <strong>Mongolian vowel separator</strong> : U+180E</li>
         <li><strong>Variation selectors</strong> : U+FE00-FE0F et U+E0100-E01EF</li>
         <li><strong>Tag characters</strong> : U+E0001-U+E007F</li>
@@ -74,7 +74,7 @@ eval(decode(tx.data));</code></pre>
 
       <h2>Les 4 nouvelles regles</h2>
 
-      <h3>OBF-003 — unicode_invisible_injection</h3>
+      <h3>OBF-003 - unicode_invisible_injection</h3>
 
       <p>Detection des caracteres Unicode invisibles dans le code source. La fonction <code>countInvisibleUnicode()</code> dans <code>obfuscation.js</code> compte les caracteres zero-width, BOM hors position, variation selectors, et tag characters. Seuil : <strong>>= 3 caracteres invisibles</strong> dans un fichier = alerte HIGH.</p>
 
@@ -95,21 +95,21 @@ eval(decode(tx.data));</code></pre>
 
       <p>Pourquoi le seuil de 3 ? Un BOM isole ou un zero-width joiner dans du texte internationalise est normal. Trois ou plus dans du code JavaScript ne l'est jamais.</p>
 
-      <h3>AST-053 — unicode_variation_decoder</h3>
+      <h3>AST-053 - unicode_variation_decoder</h3>
 
       <p>Detection du pattern de decodage : <code>.codePointAt()</code> combine avec des constantes <code>0xFE00</code> ou <code>0xE0100</code> dans le meme fichier. Ce compound est specifique au decoder GlassWorm.</p>
 
-      <h3>AST-054 — blockchain_c2_resolution</h3>
+      <h3>AST-054 - blockchain_c2_resolution</h3>
 
       <p>Detection de l'import <code>@solana/web3.js</code> combine avec les methodes C2 (<code>getSignaturesForAddress</code>, <code>getTransaction</code>, <code>getParsedTransaction</code>). Severite adaptative :</p>
       <ul>
-        <li><strong>CRITICAL</strong> si combine avec <code>eval()</code> ou <code>exec()</code> — c'est l'execution du payload C2</li>
-        <li><strong>HIGH</strong> sinon — l'import Solana avec ces methodes est suspect mais pourrait etre un usage DeFi legitime</li>
+        <li><strong>CRITICAL</strong> si combine avec <code>eval()</code> ou <code>exec()</code> - c'est l'execution du payload C2</li>
+        <li><strong>HIGH</strong> sinon - l'import Solana avec ces methodes est suspect mais pourrait etre un usage DeFi legitime</li>
       </ul>
 
-      <h3>AST-055 — blockchain_rpc_endpoint</h3>
+      <h3>AST-055 - blockchain_rpc_endpoint</h3>
 
-      <p>Detection des endpoints RPC hardcodes vers Solana (<code>api.mainnet-beta.solana.com</code>), Infura, ou Ankr. Severite MEDIUM — c'est un signal faible qui contribue au score composite.</p>
+      <p>Detection des endpoints RPC hardcodes vers Solana (<code>api.mainnet-beta.solana.com</code>), Infura, ou Ankr. Severite MEDIUM - c'est un signal faible qui contribue au score composite.</p>
 
       <h2>IOC et infrastructure</h2>
 
@@ -133,7 +133,7 @@ eval(decode(tx.data));</code></pre>
 
       <h2>Lecon</h2>
 
-      <p>GlassWorm montre que les attaquants innovent sur deux fronts simultanement : l'obfuscation (Unicode invisible) et l'infrastructure (blockchain C2). La detection doit couvrir les deux. Les IOC seuls ne suffisent pas — il faut des heuristiques comportementales pour detecter les <em>techniques</em>, pas juste les <em>instances</em>.</p>
+      <p>GlassWorm montre que les attaquants innovent sur deux fronts simultanement : l'obfuscation (Unicode invisible) et l'infrastructure (blockchain C2). La detection doit couvrir les deux. Les IOC seuls ne suffisent pas - il faut des heuristiques comportementales pour detecter les <em>techniques</em>, pas juste les <em>instances</em>.</p>
 
       <p>La blockchain comme C2 est un changement de paradigme. On ne peut plus compter sur le takedown de l'infrastructure pour stopper une campagne. La detection cote client devient la seule ligne de defense.</p>
 
