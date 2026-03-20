@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const { MAX_FILE_SIZE } = require('../shared/constants.js');
+const { MAX_FILE_SIZE, getMaxFileSize } = require('../shared/constants.js');
 
 const YAML_EXTENSIONS = ['.yml', '.yaml'];
 const MAX_DEPTH = 10;
@@ -40,7 +40,7 @@ function scanDirRecursive(dirPath, targetPath, threats, depth = 0) {
         continue;
       }
       if (!stat.isFile()) continue;
-      if (stat.size > MAX_FILE_SIZE) continue;
+      if (stat.size > getMaxFileSize()) continue;
     } catch {
       continue;
     }

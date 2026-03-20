@@ -55,6 +55,7 @@ const { runV266FixesTests } = require('./integration/v266-fixes.test');
 const { runEvaluationSmokeTests } = require('./integration/evaluation-smoke.test');
 const { runCompoundScoringTests } = require('./integration/compound-scoring.test');
 const { runGapRemediationTests } = require('./integration/gap-remediation.test');
+const { runConfigTests } = require('./integration/config.test');
 
 // Temporal analysis tests
 const { runTemporalAnalysisTests } = require('./temporal/temporal-analysis.test');
@@ -157,6 +158,9 @@ async function timed(name, fn) {
 
   // GAP remediation tests (v2.9.6)
   await timed('gap-remediation', runGapRemediationTests);
+
+  // Config system tests (v2.9.7)
+  await timed('config', runConfigTests);
 
   // ML feature extraction tests (v2.8.7)
   await timed('ml-feature-extractor', runMLFeatureExtractorTests);

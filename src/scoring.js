@@ -47,6 +47,44 @@ const PROTO_HOOK_MEDIUM_CAP = 15;
 // Unknown/paranoid rules default to 1.0 (no penalty).
 const CONFIDENCE_FACTORS = { high: 1.0, medium: 0.85, low: 0.6 };
 
+// Mutable copies for configurable overrides (reset after each scan)
+let _severityWeights = { ...SEVERITY_WEIGHTS };
+let _riskThresholds = { ...RISK_THRESHOLDS };
+
+/**
+ * Apply config overrides to scoring parameters.
+ * @param {object} config - validated config from config.js
+ */
+function applyConfigOverrides(config) {
+  if (config.severityWeights) {
+    if (config.severityWeights.critical !== undefined) _severityWeights.CRITICAL = config.severityWeights.critical;
+    if (config.severityWeights.high !== undefined) _severityWeights.HIGH = config.severityWeights.high;
+    if (config.severityWeights.medium !== undefined) _severityWeights.MEDIUM = config.severityWeights.medium;
+    if (config.severityWeights.low !== undefined) _severityWeights.LOW = config.severityWeights.low;
+  }
+  if (config.riskThresholds) {
+    if (config.riskThresholds.critical !== undefined) _riskThresholds.CRITICAL = config.riskThresholds.critical;
+    if (config.riskThresholds.high !== undefined) _riskThresholds.HIGH = config.riskThresholds.high;
+    if (config.riskThresholds.medium !== undefined) _riskThresholds.MEDIUM = config.riskThresholds.medium;
+  }
+}
+
+/** Reset scoring parameters to defaults (call after each scan to prevent state leak). */
+function resetConfigOverrides() {
+  _severityWeights = { ...SEVERITY_WEIGHTS };
+  _riskThresholds = { ...RISK_THRESHOLDS };
+}
+
+/** Get current severity weights (for enrichment in index.js). */
+function getSeverityWeights() {
+  return _severityWeights;
+}
+
+/** Get current risk thresholds (for external consumers). */
+function getRiskThresholds() {
+  return _riskThresholds;
+}
+
 // ============================================
 // PER-FILE MAX SCORING (v2.2.11)
 // ============================================
@@ -91,7 +129,7 @@ function computeGroupScore(threats) {
   let protoHookMediumPoints = 0;
 
   for (const t of threats) {
-    const weight = SEVERITY_WEIGHTS[t.severity] || 0;
+    const weight = _severityWeights[t.severity] || 0;
     const rule = getRule(t.type);
     const factor = CONFIDENCE_FACTORS[rule.confidence] || 1.0;
 
@@ -585,9 +623,9 @@ function calculateRiskScore(deduped, intentResult) {
   const mediumCount = deduped.filter(t => t.severity === 'MEDIUM').length;
   const lowCount = deduped.filter(t => t.severity === 'LOW').length;
 
-  const riskLevel = riskScore >= RISK_THRESHOLDS.CRITICAL ? 'CRITICAL'
-                  : riskScore >= RISK_THRESHOLDS.HIGH ? 'HIGH'
-                  : riskScore >= RISK_THRESHOLDS.MEDIUM ? 'MEDIUM'
+  const riskLevel = riskScore >= _riskThresholds.CRITICAL ? 'CRITICAL'
+                  : riskScore >= _riskThresholds.HIGH ? 'HIGH'
+                  : riskScore >= _riskThresholds.MEDIUM ? 'MEDIUM'
                   : riskScore > 0 ? 'LOW'
                   : 'SAFE';
 
@@ -600,5 +638,6 @@ function calculateRiskScore(deduped, intentResult) {
 
 module.exports = {
   SEVERITY_WEIGHTS, RISK_THRESHOLDS, MAX_RISK_SCORE, CONFIDENCE_FACTORS,
-  isPackageLevelThreat, computeGroupScore, applyFPReductions, applyCompoundBoosts, calculateRiskScore
+  isPackageLevelThreat, computeGroupScore, applyFPReductions, applyCompoundBoosts, calculateRiskScore,
+  applyConfigOverrides, resetConfigOverrides, getSeverityWeights, getRiskThresholds
 };

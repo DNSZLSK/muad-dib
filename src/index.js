@@ -28,10 +28,11 @@ const { computeReachableFiles } = require('./scanner/reachability.js');
 const { runTemporalAnalyses } = require('./temporal-runner.js');
 const { formatOutput } = require('./output-formatter.js');
 const { setExtraExcludes, getExtraExcludes, Spinner, listInstalledPackages, clearFileListCache, debugLog } = require('./utils.js');
-const { SEVERITY_WEIGHTS, RISK_THRESHOLDS, MAX_RISK_SCORE, isPackageLevelThreat, computeGroupScore, applyFPReductions, applyCompoundBoosts, calculateRiskScore } = require('./scoring.js');
+const { SEVERITY_WEIGHTS, RISK_THRESHOLDS, MAX_RISK_SCORE, isPackageLevelThreat, computeGroupScore, applyFPReductions, applyCompoundBoosts, calculateRiskScore, applyConfigOverrides, resetConfigOverrides, getSeverityWeights } = require('./scoring.js');
+const { resolveConfig } = require('./config.js');
 const { buildIntentPairs } = require('./intent-graph.js');
 
-const { MAX_FILE_SIZE, safeParse } = require('./shared/constants.js');
+const { MAX_FILE_SIZE, getMaxFileSize, setMaxFileSize, resetMaxFileSize, safeParse } = require('./shared/constants.js');
 const walk = require('acorn-walk');
 
 // Paranoid mode scanner
@@ -75,7 +76,7 @@ function scanParanoid(targetPath) {
   function scanFileAST(filePath) {
     try {
       const stat = fs.statSync(filePath);
-      if (stat.size > MAX_FILE_SIZE) return;
+      if (stat.size > getMaxFileSize()) return;
       const content = fs.readFileSync(filePath, 'utf8');
       const relFile = path.relative(targetPath, filePath);
 
@@ -209,7 +210,7 @@ function scanParanoid(targetPath) {
   function scanFile(filePath) {
     try {
       const stat = fs.statSync(filePath);
-      if (stat.size > MAX_FILE_SIZE) return;
+      if (stat.size > getMaxFileSize()) return;
       const ext = path.extname(filePath);
       if (ext === '.js' || ext === '.mjs' || ext === '.cjs') {
         scanFileAST(filePath);
@@ -353,6 +354,19 @@ async function run(targetPath, options = {}) {
     setExtraExcludes(options.exclude, targetPath);
   }
 
+  // Load custom configuration (.muaddibrc.json or --config)
+  let configApplied = false;
+  const configResult = resolveConfig(targetPath, options.configPath || null);
+  if (configResult.errors.length > 0) {
+    for (const err of configResult.errors) console.error(`[CONFIG ERROR] ${err}`);
+    throw new Error('Invalid configuration file.');
+  }
+  if (configResult.config) {
+    applyConfigOverrides(configResult.config);
+    if (configResult.config.maxFileSize) setMaxFileSize(configResult.config.maxFileSize);
+    configApplied = true;
+  }
+
   // Detect Python project (synchronous, fast file reads)
   const pythonDeps = detectPythonProject(targetPath);
 
@@ -376,6 +390,9 @@ async function run(targetPath, options = {}) {
   const MODULE_GRAPH_TIMEOUT_MS = 5000;
   const warnings = [];
   if (iocStalenessWarning) warnings.push(iocStalenessWarning);
+  if (configResult.warnings.length > 0) {
+    for (const w of configResult.warnings) warnings.push(`[CONFIG] ${w}`);
+  }
   let crossFileFlows = [];
   if (!options.noModuleGraph) {
     const moduleGraphWork = async () => {
@@ -630,7 +647,7 @@ async function run(targetPath, options = {}) {
   const enrichedThreats = deduped.map(t => {
     const rule = getRule(t.type);
     const confFactor = { high: 1.0, medium: 0.85, low: 0.6 }[rule.confidence] || 1.0;
-    const points = Math.round((SEVERITY_WEIGHTS[t.severity] || 0) * confFactor);
+    const points = Math.round((getSeverityWeights()[t.severity] || 0) * confFactor);
     return {
       ...t,
       rule_id: rule.id || t.type,
@@ -695,6 +712,7 @@ async function run(targetPath, options = {}) {
   if (options._capture) {
     setExtraExcludes([]);
     clearFileListCache();
+    if (configApplied) { resetConfigOverrides(); resetMaxFileSize(); }
     return result;
   }
 
@@ -729,6 +747,7 @@ async function run(targetPath, options = {}) {
   // Clear runtime state
   setExtraExcludes([]);
   clearFileListCache();
+  if (configApplied) { resetConfigOverrides(); resetMaxFileSize(); }
 
   return Math.min(failingThreats.length, 125);
 }

@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { findFiles, forEachSafeFile, debugLog } = require('../utils.js');
-const { MAX_FILE_SIZE } = require('../shared/constants.js');
+const { MAX_FILE_SIZE, getMaxFileSize } = require('../shared/constants.js');
 
 const SHELL_EXCLUDED_DIRS = ['node_modules', '.git', '.muaddib-cache'];
 
@@ -66,7 +66,7 @@ function findExtensionlessFiles(dir, excludedDirs, results = [], depth = 0) {
       if (lstat.isSymbolicLink()) continue;
       if (lstat.isDirectory()) {
         findExtensionlessFiles(fullPath, excludedDirs, results, depth + 1);
-      } else if (lstat.isFile() && !path.extname(item) && lstat.size <= MAX_FILE_SIZE) {
+      } else if (lstat.isFile() && !path.extname(item) && lstat.size <= getMaxFileSize()) {
         results.push(fullPath);
       }
     } catch (e) { debugLog('[SHELL] stat error:', e?.message); }

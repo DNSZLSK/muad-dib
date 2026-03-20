@@ -88,6 +88,14 @@ const DOWNLOAD_TIMEOUT = 30_000; // 30 seconds
 
 // Shared scanner constants
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB — skip files larger than this to avoid memory issues
+let _maxFileSize = MAX_FILE_SIZE;
+
+/** Get current max file size (configurable via .muaddibrc.json). */
+function getMaxFileSize() { return _maxFileSize; }
+/** Set max file size override. */
+function setMaxFileSize(size) { _maxFileSize = size; }
+/** Reset max file size to default. */
+function resetMaxFileSize() { _maxFileSize = MAX_FILE_SIZE; }
 const ACORN_OPTIONS = { ecmaVersion: 2024, sourceType: 'module', allowHashBang: true };
 
 const acorn = require('acorn');
@@ -110,4 +118,4 @@ function safeParse(code, extraOptions = {}) {
   }
 }
 
-module.exports = { REHABILITATED_PACKAGES, NPM_PACKAGE_REGEX, MAX_TARBALL_SIZE, DOWNLOAD_TIMEOUT, MAX_FILE_SIZE, ACORN_OPTIONS, safeParse };
+module.exports = { REHABILITATED_PACKAGES, NPM_PACKAGE_REGEX, MAX_TARBALL_SIZE, DOWNLOAD_TIMEOUT, MAX_FILE_SIZE, ACORN_OPTIONS, safeParse, getMaxFileSize, setMaxFileSize, resetMaxFileSize };
