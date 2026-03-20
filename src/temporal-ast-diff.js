@@ -8,7 +8,7 @@ const { findJsFiles, forEachSafeFile, debugLog } = require('./utils.js');
 const { fetchPackageMetadata, getLatestVersions } = require('./temporal-analysis.js');
 const { downloadToFile, extractTarGz, sanitizePackageName } = require('./shared/download.js');
 
-const { MAX_FILE_SIZE, ACORN_OPTIONS, safeParse } = require('./shared/constants.js');
+const { MAX_FILE_SIZE, getMaxFileSize, ACORN_OPTIONS, safeParse } = require('./shared/constants.js');
 
 const REGISTRY_URL = 'https://registry.npmjs.org';
 const METADATA_TIMEOUT = 10_000;

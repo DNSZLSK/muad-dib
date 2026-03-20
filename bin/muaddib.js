@@ -33,6 +33,7 @@ let breakdownMode = false;
 let noDeobfuscate = false;
 let noModuleGraph = false;
 let noReachability = false;
+let configPath = null;
 let feedLimit = null;
 let feedSeverity = null;
 let feedSince = null;
@@ -124,6 +125,18 @@ for (let i = 0; i < options.length; i++) {
     noModuleGraph = true;
   } else if (options[i] === '--no-reachability') {
     noReachability = true;
+  } else if (options[i] === '--config') {
+    const cfgPath = options[i + 1];
+    if (!cfgPath || cfgPath.startsWith('-')) {
+      console.error('[ERROR] --config requires a file path argument');
+      process.exit(1);
+    }
+    if (cfgPath.includes('..')) {
+      console.error('[ERROR] --config path must not contain path traversal (..)');
+      process.exit(1);
+    }
+    configPath = cfgPath;
+    i++;
   } else if (options[i] === '--temporal') {
     temporalMode = true;
   } else if (options[i] === '--limit') {
@@ -426,6 +439,7 @@ const helpText = `
     --since [date]      Filter detections after date (ISO 8601)
     --port [n]          HTTP server port (default: 3000, serve only)
     --entropy-threshold [n]  Custom string-level entropy threshold (default: 5.5)
+    --config [file]     Custom config file (.muaddibrc.json format)
     --save-dev, -D      Install as dev dependency
     -g, --global        Install globally
     --force             Force install despite threats
@@ -467,7 +481,8 @@ if (command === 'version' || command === '--version' || command === '-v') {
     breakdown: breakdownMode,
     noDeobfuscate: noDeobfuscate,
     noModuleGraph: noModuleGraph,
-    noReachability: noReachability
+    noReachability: noReachability,
+    configPath: configPath
   }).then(exitCode => {
     process.exit(exitCode);
   }).catch(err => {

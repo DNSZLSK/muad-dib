@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { MAX_FILE_SIZE } = require('./shared/constants.js');
+const { MAX_FILE_SIZE, getMaxFileSize } = require('./shared/constants.js');
 
 /**
  * Directories excluded from scanning.
@@ -285,7 +285,7 @@ function forEachSafeFile(files, callback) {
   for (const file of files) {
     try {
       const stat = fs.statSync(file);
-      if (stat.size > MAX_FILE_SIZE) continue;
+      if (stat.size > getMaxFileSize()) continue;
     } catch { continue; }
     let content;
     try {
