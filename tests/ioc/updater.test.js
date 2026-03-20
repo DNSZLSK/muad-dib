@@ -1128,6 +1128,187 @@ test('UPDATER: generateCompactIOCs allows non-NEVER_WILDCARD wildcards', () => {
   assert(compact.wildcards.includes('another-malware'), 'Non-protected pkg should be in wildcards');
 });
 
+// ============================================
+// COMMA-IN-VERSION SANITIZATION TESTS
+// ============================================
+
+test('UPDATER: generateCompactIOCs splits comma-in-version into individual entries', () => {
+  const { generateCompactIOCs } = require('../../src/ioc/updater.js');
+  const fullIOCs = {
+    packages: [
+      { name: 'posthog-node', version: '4.18.1, 5.11.3, 5.13.3', severity: 'critical' },
+      { name: 'kill-port', version: '2.0.2, 2.0.3', severity: 'critical' }
+    ],
+    pypi_packages: []
+  };
+  const compact = generateCompactIOCs(fullIOCs);
+
+  // posthog-node: comma-version should be split into 3 individual entries
+  const phVersions = compact.versioned['posthog-node'] || [];
+  assert(phVersions.includes('4.18.1'), 'posthog-node should have 4.18.1');
+  assert(phVersions.includes('5.11.3'), 'posthog-node should have 5.11.3');
+  assert(phVersions.includes('5.13.3'), 'posthog-node should have 5.13.3');
+  // Must NOT contain the concatenated string
+  for (const v of phVersions) {
+    assert(!v.includes(','), 'posthog-node version must not contain commas: ' + v);
+  }
+
+  // kill-port: same
+  const kpVersions = compact.versioned['kill-port'] || [];
+  assert(kpVersions.includes('2.0.2'), 'kill-port should have 2.0.2');
+  assert(kpVersions.includes('2.0.3'), 'kill-port should have 2.0.3');
+  for (const v of kpVersions) {
+    assert(!v.includes(','), 'kill-port version must not contain commas: ' + v);
+  }
+});
+
+test('UPDATER: expandCompactIOCs splits comma-in-version entries', () => {
+  const { expandCompactIOCs } = require('../../src/ioc/updater.js');
+  const compact = {
+    defaultSeverity: 'critical',
+    wildcards: [],
+    versioned: {
+      'posthog-node': ['4.18.1', '5.11.3, 5.13.3'],
+      'clean-pkg': ['1.0.0']
+    },
+    pypi_wildcards: [],
+    pypi_versioned: {},
+    hashes: [], markers: [], files: []
+  };
+  const expanded = expandCompactIOCs(compact);
+
+  const phEntries = expanded.packages.filter(p => p.name === 'posthog-node');
+  const phVersions = phEntries.map(p => p.version);
+  assert(phVersions.includes('4.18.1'), 'expand should have 4.18.1');
+  assert(phVersions.includes('5.11.3'), 'expand should have 5.11.3');
+  assert(phVersions.includes('5.13.3'), 'expand should have 5.13.3');
+  for (const v of phVersions) {
+    assert(!v.includes(','), 'expanded version must not contain commas: ' + v);
+  }
+
+  // clean-pkg should work normally
+  const cleanEntries = expanded.packages.filter(p => p.name === 'clean-pkg');
+  assert(cleanEntries.length === 1, 'clean-pkg should have 1 entry');
+  assert(cleanEntries[0].version === '1.0.0', 'clean-pkg version should be 1.0.0');
+});
+
+test('UPDATER: expandCompactIOCs enforces NEVER_WILDCARD guard', () => {
+  const { expandCompactIOCs, NEVER_WILDCARD } = require('../../src/ioc/updater.js');
+  const compact = {
+    defaultSeverity: 'critical',
+    wildcards: ['posthog-node', 'evil-pkg'],
+    versioned: { 'posthog-node': ['4.18.1'] },
+    pypi_wildcards: [],
+    pypi_versioned: {},
+    hashes: [], markers: [], files: []
+  };
+  const expanded = expandCompactIOCs(compact);
+
+  // posthog-node should NOT have a wildcard entry (NEVER_WILDCARD)
+  const phEntries = expanded.packages.filter(p => p.name === 'posthog-node');
+  const hasWildcard = phEntries.some(p => p.version === '*');
+  assert(!hasWildcard, 'posthog-node must not have wildcard entry after expand');
+  // But should have versioned entry
+  assert(phEntries.some(p => p.version === '4.18.1'), 'posthog-node should have 4.18.1');
+
+  // evil-pkg should still have its wildcard
+  const evilEntries = expanded.packages.filter(p => p.name === 'evil-pkg');
+  assert(evilEntries.some(p => p.version === '*'), 'evil-pkg should have wildcard');
+});
+
+test('UPDATER: createOptimizedIOCs splits comma-in-version and enforces NEVER_WILDCARD', () => {
+  const { createOptimizedIOCs, NEVER_WILDCARD } = require('../../src/ioc/updater.js');
+  const iocs = {
+    packages: [
+      { name: 'posthog-node', version: '4.18.1, 5.11.3, 5.13.3', source: 'test' },
+      { name: 'posthog-node', version: '*', source: 'test' },
+      { name: 'evil-pkg', version: '*', source: 'test' },
+      { name: 'another-pkg', version: '1.0.0, 2.0.0', source: 'test' }
+    ],
+    pypi_packages: []
+  };
+  const optimized = createOptimizedIOCs(iocs);
+
+  // posthog-node must NOT be in wildcardPackages
+  assert(!optimized.wildcardPackages.has('posthog-node'), 'posthog-node must not be wildcarded');
+
+  // posthog-node should have 3 individual versions from split + the * entry (but not wildcarded)
+  const phEntries = optimized.packagesMap.get('posthog-node');
+  assert(phEntries !== undefined, 'posthog-node should be in packagesMap');
+  const phVersions = phEntries.map(p => p.version);
+  assert(phVersions.includes('4.18.1'), 'should have 4.18.1');
+  assert(phVersions.includes('5.11.3'), 'should have 5.11.3');
+  assert(phVersions.includes('5.13.3'), 'should have 5.13.3');
+  for (const v of phVersions) {
+    assert(!v.includes(','), 'version must not contain commas: ' + v);
+  }
+
+  // evil-pkg should still be wildcarded
+  assert(optimized.wildcardPackages.has('evil-pkg'), 'evil-pkg should be wildcarded');
+
+  // another-pkg comma-version should be split
+  const anotherEntries = optimized.packagesMap.get('another-pkg');
+  assert(anotherEntries !== undefined, 'another-pkg should be in packagesMap');
+  const anotherVersions = anotherEntries.map(p => p.version);
+  assert(anotherVersions.includes('1.0.0'), 'should have 1.0.0');
+  assert(anotherVersions.includes('2.0.0'), 'should have 2.0.0');
+});
+
+test('UPDATER: loadCachedIOCs posthog-node is NOT wildcarded', () => {
+  const { loadCachedIOCs, invalidateCache, NEVER_WILDCARD } = require('../../src/ioc/updater.js');
+  invalidateCache();
+  const iocs = loadCachedIOCs();
+
+  // posthog-node must not be in wildcardPackages
+  assert(!iocs.wildcardPackages.has('posthog-node'), 'posthog-node must not be in wildcardPackages');
+  assert(!iocs.wildcardPackages.has('posthog-js'), 'posthog-js must not be in wildcardPackages');
+
+  // No NEVER_WILDCARD package should be in wildcardPackages
+  for (const name of NEVER_WILDCARD) {
+    assert(!iocs.wildcardPackages.has(name), name + ' (NEVER_WILDCARD) must not be in wildcardPackages');
+  }
+
+  // posthog-node@5.11.3 (compromised) should match
+  if (iocs.packagesMap.has('posthog-node')) {
+    const versions = iocs.packagesMap.get('posthog-node').map(p => p.version);
+    assert(versions.includes('5.11.3'), 'posthog-node@5.11.3 (compromised) should match');
+    assert(versions.includes('4.18.1'), 'posthog-node@4.18.1 (compromised) should match');
+    assert(versions.includes('5.13.3'), 'posthog-node@5.13.3 (compromised) should match');
+    // 5.28.4 (legitimate) should NOT match
+    assert(!versions.includes('5.28.4'), 'posthog-node@5.28.4 (legitimate) should NOT match');
+  }
+
+  // No comma-in-version entries should exist in packagesMap
+  let commaVersionCount = 0;
+  for (const [name, entries] of iocs.packagesMap) {
+    for (const e of entries) {
+      if (e.version && e.version.includes(',')) {
+        commaVersionCount++;
+      }
+    }
+  }
+  assert(commaVersionCount === 0, 'No comma-in-version entries should exist in packagesMap, found: ' + commaVersionCount);
+});
+
+test('UPDATER: generateCompactIOCs deduplicates split comma versions', () => {
+  const { generateCompactIOCs } = require('../../src/ioc/updater.js');
+  const fullIOCs = {
+    packages: [
+      { name: 'posthog-node', version: '4.18.1', severity: 'critical' },
+      { name: 'posthog-node', version: '5.11.3', severity: 'critical' },
+      { name: 'posthog-node', version: '4.18.1, 5.11.3', severity: 'critical' }
+    ],
+    pypi_packages: []
+  };
+  const compact = generateCompactIOCs(fullIOCs);
+  const versions = compact.versioned['posthog-node'] || [];
+  // 4.18.1 and 5.11.3 should appear only once each (no duplicates from split)
+  const count418 = versions.filter(v => v === '4.18.1').length;
+  const count511 = versions.filter(v => v === '5.11.3').length;
+  assert(count418 === 1, '4.18.1 should appear exactly once, got: ' + count418);
+  assert(count511 === 1, '5.11.3 should appear exactly once, got: ' + count511);
+});
+
 }
 
 module.exports = { runUpdaterTests };

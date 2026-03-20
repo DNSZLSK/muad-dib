@@ -3460,7 +3460,11 @@ async function resolveTarballAndScan(item) {
   // FP rate tracking + ML label refinement
   if (scanResult) {
     if (!staticClean) {
-      if (sandboxResult && sandboxResult.score === 0) {
+      if (sandboxResult && sandboxResult.inconclusive) {
+        // Sandbox timeout: cannot conclude — do NOT relabel (neither fp nor confirmed)
+        updateScanStats('sandbox_inconclusive');
+        console.log(`[MONITOR] SANDBOX INCONCLUSIVE (timeout): ${item.name} — keeping original label`);
+      } else if (sandboxResult && sandboxResult.score === 0) {
         const hasHC = scanResult.hasHCThreats || false;
         const isDormant = scanResult.isDormant || false;
         const staticScore = scanResult.staticScore || 0;
@@ -3481,9 +3485,9 @@ async function resolveTarballAndScan(item) {
           updateScanStats('confirmed');
           relabelRecords(item.name, 'confirmed', sandboxResult.findings.length);
         } else {
-          // Sandbox score > 0 but no detailed findings = timeout/install error
+          // Sandbox score > 0 but no detailed findings = install error
           updateScanStats('sandbox_inconclusive');
-          console.log(`[MONITOR] SANDBOX INCONCLUSIVE: ${item.name} score=${sandboxResult.score} but 0 findings — probable timeout or install error`);
+          console.log(`[MONITOR] SANDBOX INCONCLUSIVE: ${item.name} score=${sandboxResult.score} but 0 findings — probable install error`);
         }
       } else {
         updateScanStats('suspect');

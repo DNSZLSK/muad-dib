@@ -244,16 +244,17 @@ async function runSingleSandbox(packageName, options = {}) {
       // must check before Docker error handler to avoid returning CLEAN on timeout
       if (timedOut) {
         const result = {
-          score: 100,
-          severity: 'CRITICAL',
+          score: -1,
+          severity: 'INCONCLUSIVE',
           findings: [{
             type: 'timeout',
-            severity: 'CRITICAL',
-            detail: `Container exceeded ${runTimeout / 1000}s timeout`,
+            severity: 'MEDIUM',
+            detail: `Container exceeded ${runTimeout / 1000}s timeout — package too large or slow install`,
             evidence: `Killed after ${runTimeout}ms`
           }],
           raw_report: null,
-          suspicious: true
+          suspicious: false,
+          inconclusive: true
         };
         resolve(result);
         return;
@@ -454,6 +455,24 @@ async function runSandbox(packageName, options = {}) {
       console.log(`[SANDBOX] Critical score (${runResult.score}) detected in run ${i + 1}. Skipping remaining runs.`);
       break;
     }
+  }
+
+  // If all runs were inconclusive (timeout), propagate inconclusive status
+  // instead of returning CLEAN (which would cause false FP relabeling)
+  if (bestResult.score === 0 && allRuns.length > 0 && allRuns.every(r => r.score === -1)) {
+    bestResult = {
+      score: -1,
+      severity: 'INCONCLUSIVE',
+      findings: [{
+        type: 'timeout',
+        severity: 'MEDIUM',
+        detail: `All ${allRuns.length} runs exceeded timeout — package too large or slow install`,
+        evidence: `All ${allRuns.length} runs timed out`
+      }],
+      raw_report: null,
+      suspicious: false,
+      inconclusive: true
+    };
   }
 
   // Attach multi-run metadata

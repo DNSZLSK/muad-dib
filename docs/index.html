@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MUAD'DIB</title>
+  <meta name="description" content="Scanner open source de menaces supply-chain pour npm et PyPI.">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<nav>
+  <a href="./" class="site-name">muad-dib</a>
+  <a href="./" class="active">accueil</a>
+  <a href="./blog/">blog</a>
+  <a href="https://github.com/DNSZLSK/muad-dib" target="_blank" rel="noopener">github</a>
+  <a href="https://www.npmjs.com/package/muaddib-scanner" target="_blank" rel="noopener">npm</a>
+</nav>
+
+<h1>MUAD'DIB</h1>
+<p><span class="version">v2.9.9</span></p>
+<p>Scanner de menaces supply-chain pour npm et PyPI. Open source, zero cloud, une seule commande.</p>
+
+<div class="install">
+  <span class="prompt">$ </span>npm install -g muaddib-scanner
+</div>
+
+<p>MUAD'DIB analyse les packages npm et PyPI pour detecter les malwares, les backdoors et les tentatives d'exfiltration de credentials. 14 scanners paralleles, 225 000+ IOC, sandbox Docker avec time-warp, moniteur temps reel sur le flux npm.</p>
+
+<hr>
+
+<div class="metrics">
+  <span class="metric"><span class="value">93.9%</span> <span class="label">TPR</span></span>
+  <span class="metric"><span class="value">12.9%</span> <span class="label">FPR</span></span>
+  <span class="metric"><span class="value">96.3%</span> <span class="label">ADR</span></span>
+  <span class="metric"><span class="value">92.5%</span> <span class="label">Wild TPR (17K)</span></span>
+  <span class="metric"><span class="value">2435</span> <span class="label">tests</span></span>
+  <span class="metric"><span class="value">153</span> <span class="label">regles</span></span>
+</div>
+
+<hr>
+
+<h2>Fonctionnalites</h2>
+<ul>
+  <li><strong>14 scanners paralleles</strong> : AST, dataflow, obfuscation, entropie, typosquat, shell, module-graph, intent-graph</li>
+  <li><strong>Sandbox Docker</strong> : monkey-patching time-warp, multi-run [0h, 72h, 7j], canary tokens</li>
+  <li><strong>Moniteur temps reel</strong> : flux CouchDB npm, alertes Discord</li>
+  <li><strong>Desobfuscation statique</strong> : charcode, base64, hex arrays, const propagation</li>
+  <li><strong>Diff entre versions</strong> : <code>muaddib diff v1.2.0</code></li>
+  <li><strong>Detection comportementale</strong> : anomalies lifecycle, AST diff temporel, changement de maintainer</li>
+  <li><strong>Compound scoring</strong> : co-occurrences zero-FP</li>
+  <li><strong>225 000+ IOC</strong> npm + 14 000+ PyPI, format compact 5MB</li>
+</ul>
+
+<hr>
+
+<div class="links-row">
+  <a href="https://github.com/DNSZLSK/muad-dib" target="_blank" rel="noopener">GitHub</a>
+  <a href="https://www.npmjs.com/package/muaddib-scanner" target="_blank" rel="noopener">npm</a>
+  <a href="https://marketplace.visualstudio.com/items?itemName=dnszlsk.muaddib-vscode" target="_blank" rel="noopener">VS Code</a>
+  <a href="./blog/">Blog</a>
+</div>
+
+<footer>
+  MUAD'DIB / DNSZLSK / <a href="https://github.com/DNSZLSK/muad-dib" target="_blank" rel="noopener">source</a>
+</footer>
+
+</body>
+</html>

@@ -991,7 +991,7 @@ async function runSandboxTests() {
   test('SANDBOX-TIMEOUT: proc.on(close) checks timedOut BEFORE Docker error handler', () => {
     // Regression test: the timedOut check must come before the Docker error handler
     // in proc.on('close'). If reversed, docker kill (exit 137) triggers Docker error
-    // handler which returns CLEAN instead of CRITICAL timeout result.
+    // handler which returns CLEAN instead of INCONCLUSIVE timeout result.
     const source = fs.readFileSync(path.join(__dirname, '../../src/sandbox/index.js'), 'utf8');
     const timedOutIdx = source.indexOf('if (timedOut)');
     const dockerErrorIdx = source.indexOf('// Docker-level failure (non-timeout)');
@@ -999,28 +999,31 @@ async function runSandboxTests() {
     assert(dockerErrorIdx > 0, 'Should find Docker error handler in source');
     assert(timedOutIdx < dockerErrorIdx,
       `timedOut check (pos ${timedOutIdx}) must come BEFORE Docker error handler (pos ${dockerErrorIdx}) — ` +
-      'otherwise docker kill exit code 137 returns CLEAN instead of CRITICAL');
+      'otherwise docker kill exit code 137 returns CLEAN instead of INCONCLUSIVE');
   });
 
-  test('SANDBOX-TIMEOUT: timeout result has score 100 and CRITICAL severity', () => {
+  test('SANDBOX-TIMEOUT: timeout result has score -1 and INCONCLUSIVE severity', () => {
     // Verify the expected shape of timeout results
     // This mirrors the timeout result constructed in proc.on('close')
+    // Timeout = INCONCLUSIVE: cannot determine if package is malicious or just slow
     const timeoutResult = {
-      score: 100,
-      severity: 'CRITICAL',
+      score: -1,
+      severity: 'INCONCLUSIVE',
       findings: [{
         type: 'timeout',
-        severity: 'CRITICAL',
-        detail: 'Container exceeded 120s timeout',
+        severity: 'MEDIUM',
+        detail: 'Container exceeded 120s timeout — package too large or slow install',
         evidence: 'Killed after 120000ms'
       }],
       raw_report: null,
-      suspicious: true
+      suspicious: false,
+      inconclusive: true
     };
-    assert(timeoutResult.score === 100, 'Timeout result must have score 100');
-    assert(timeoutResult.severity === 'CRITICAL', 'Timeout result must be CRITICAL');
+    assert(timeoutResult.score === -1, 'Timeout result must have score -1 (INCONCLUSIVE)');
+    assert(timeoutResult.severity === 'INCONCLUSIVE', 'Timeout result must be INCONCLUSIVE');
     assert(timeoutResult.findings[0].type === 'timeout', 'Timeout finding type must be timeout');
-    assert(timeoutResult.suspicious === true, 'Timeout result must be suspicious');
+    assert(timeoutResult.suspicious === false, 'Timeout result must NOT be suspicious');
+    assert(timeoutResult.inconclusive === true, 'Timeout result must have inconclusive flag');
   });
 
   test('SANDBOX-TIMEOUT: clean result has score 0 (Docker error, NOT timeout)', () => {

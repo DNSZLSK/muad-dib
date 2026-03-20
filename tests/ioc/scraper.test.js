@@ -3077,6 +3077,67 @@ async function runScraperTests() {
     assert(normalShouldNotSkip === false, 'Non-NEVER_WILDCARD package@* should NOT be skipped');
   });
 
+  // --- Comma-in-version sanitization in GenSecAI scraper ---
+
+  test('SCRAPER: GenSecAI comma-separated affectedVersions are split into individual entries', () => {
+    // Simulate what scrapeShaiHuludDetector does with comma-separated versions
+    const rawVersions = ['4.18.1, 5.11.3, 5.13.3'];
+    const result = [];
+    for (const rawVer of rawVersions) {
+      const splitVersions = rawVer && rawVer.includes(',')
+        ? rawVer.split(',').map(v => v.trim()).filter(Boolean)
+        : [rawVer];
+      for (const ver of splitVersions) {
+        if (!ver) continue;
+        result.push(ver);
+      }
+    }
+    assert(result.length === 3, 'Should split into 3 versions, got: ' + result.length);
+    assert(result.includes('4.18.1'), 'Should include 4.18.1');
+    assert(result.includes('5.11.3'), 'Should include 5.11.3');
+    assert(result.includes('5.13.3'), 'Should include 5.13.3');
+    for (const v of result) {
+      assert(!v.includes(','), 'Version must not contain commas: ' + v);
+    }
+  });
+
+  test('SCRAPER: existing IOC seed with comma-in-version is split during dedup', () => {
+    const { NEVER_WILDCARD } = require('../../src/ioc/updater.js');
+    // Simulate scraper seed logic
+    const existingPackages = [
+      { name: 'posthog-node', version: '4.18.1, 5.11.3, 5.13.3', source: 'old' },
+      { name: 'posthog-node', version: '4.18.1', source: 'yaml' },
+      { name: 'posthog-node', version: '*', source: 'bad' }
+    ];
+    const dedupMap = new Map();
+    for (const pkg of existingPackages) {
+      if (pkg.version && pkg.version.includes(',')) {
+        const parts = pkg.version.split(',').map(v => v.trim()).filter(Boolean);
+        for (const v of parts) {
+          const key = pkg.name + '@' + v;
+          if (!dedupMap.has(key)) {
+            dedupMap.set(key, Object.assign({}, pkg, { version: v }));
+          }
+        }
+        continue;
+      }
+      if (pkg.version === '*' && NEVER_WILDCARD.has(pkg.name)) continue;
+      const key = pkg.name + '@' + pkg.version;
+      dedupMap.set(key, pkg);
+    }
+    const result = [...dedupMap.values()];
+    // Should have 3 individual versions, no commas, no wildcards
+    assert(result.length === 3, 'Should have 3 entries, got: ' + result.length);
+    const versions = result.map(p => p.version);
+    assert(versions.includes('4.18.1'), 'Should have 4.18.1');
+    assert(versions.includes('5.11.3'), 'Should have 5.11.3');
+    assert(versions.includes('5.13.3'), 'Should have 5.13.3');
+    assert(!versions.includes('*'), 'Should not have wildcard');
+    for (const v of versions) {
+      assert(!v.includes(','), 'Version must not contain commas: ' + v);
+    }
+  });
+
   test('IOC-VALIDATE: PyPI name with slashes rejected', () => {
     const origWarn = console.warn;
     console.warn = () => {};
