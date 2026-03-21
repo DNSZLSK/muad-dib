@@ -37,7 +37,7 @@
 
     <div class="article-content">
 
-      <p>Le moniteur MUAD'DIB scanne chaque nouveau package npm en temps reel. Le probleme : sur ~5000 packages/jour, environ 1400 tombent en zone T1 (score 20-34) et declenchent une alerte. La plupart sont des faux positifs. Le FPR prod est a 27.3%. Le pipeline rule-based a atteint son plafond.</p>
+      <p>Le moniteur MUAD'DIB scanne chaque nouveau package npm en temps reel. Le probleme : sur ~10 000-12 000 packages/jour, environ 1400 tombent en zone T1 (score 20-34) et declenchent une alerte. La plupart sont des faux positifs. Le FPR prod est a 27.3%. Le pipeline rule-based a atteint son plafond.</p>
 
       <p>La solution : un classifier binaire XGBoost qui filtre les FP <strong>avant</strong> le sandbox et le webhook. Pas pour remplacer les regles - pour les completer la ou elles hesitent.</p>
 

@@ -34,8 +34,6 @@ function getExtraExcludes() {
  * Patterns to identify dev/test files
  */
 const DEV_PATTERNS = [
-  /^scripts\//,
-  /^bin\//,
   /^tools\//,
   /^build\//,
   /^fixtures\//,

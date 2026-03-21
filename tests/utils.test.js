@@ -101,8 +101,6 @@ async function runUtilsTests() {
   });
 
   test('UTILS: isDevFile identifies dev directories', () => {
-    assert(isDevFile('scripts/build.js') === true, 'scripts/ should be dev');
-    assert(isDevFile('bin/cli.js') === true, 'bin/ should be dev');
     assert(isDevFile('__tests__/unit.js') === true, '__tests__/ should be dev');
     assert(isDevFile('__mocks__/fs.js') === true, '__mocks__/ should be dev');
     assert(isDevFile('build/output.js') === true, 'build/ should be dev');
@@ -110,6 +108,13 @@ async function runUtilsTests() {
     assert(isDevFile('examples/demo.js') === true, 'examples/ should be dev');
     assert(isDevFile('docs/api.js') === true, 'docs/ should be dev');
     assert(isDevFile('benchmark/perf.js') === true, 'benchmark/ should be dev');
+  });
+
+  test('UTILS: isDevFile does NOT classify bin/ and scripts/ as dev (entry points)', () => {
+    assert(isDevFile('bin/cli.js') === false, 'bin/ should NOT be dev — executable entry point');
+    assert(isDevFile('scripts/setup.js') === false, 'scripts/ should NOT be dev — lifecycle hook target');
+    assert(isDevFile('scripts/postinstall.js') === false, 'scripts/postinstall.js should NOT be dev');
+    assert(isDevFile('bin/index.js') === false, 'bin/index.js should NOT be dev');
   });
 
   test('UTILS: isDevFile returns false for source files', () => {
