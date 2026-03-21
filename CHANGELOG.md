@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.10.1] - 2026-03-21
+
+### Added
+- **Security Audit v3 Remediation**: 6 bypasses closed, 5 new detection rules
+  - `suspicious_module_sink` (DATAFLOW-002): Third-party module network sinks (ws, mqtt, socket.io-client)
+  - `websocket_credential_exfil` (COMPOUND-007): Credential exfiltration via WebSocket/MQTT/Socket.IO
+  - `dangerous_constructor` (AST-057): AsyncFunction/GeneratorFunction via prototype chain access
+  - `split_entropy_payload` (ENTROPY-005): High-entropy payload split across string concatenation
+  - `lifecycle_file_exec` (COMPOUND-008): Lifecycle script references file containing threats
+- WebSocket/MQTT/Socket.IO sink detection in dataflow scanner (ws, mqtt, socket.io-client modules)
+- Destructuring tracking for `require('module')._load` and `globalThis` eval/Function aliases
+- `Object.getPrototypeOf(async function(){}).constructor` detection
+- Split high-entropy payload detection (3+ chunks, combined entropy >= 5.5)
+- Lifecycle-file-exec compound: cross-references lifecycle script JS file references with scan results
+
+### Fixed
+- **B1**: WebSocket/MQTT/Socket.IO sinks were undetected as exfiltration channels
+- **B2**: Split high-entropy payloads evaded entropy scanner by fragmenting strings
+- **B3**: Destructuring + prototype chain evasion bypassed alias tracking
+- **B4**: Count-threshold dilution for `dynamic_require` targeting dangerous modules (now immune)
+- **B5**: Percentage guard noise for `env_access` with network sink (now immune)
+- **B6**: Lifecycle script referencing files with threats was not correlated
+
+### Changed
+- **FP Reduction**: credential_regex_harvest dilution floor removed, framework prototype patterns extended, lifecycle benign commands downgrade
+- FPR curated: 13.2% → **10.8%** (70 → 57/529, -2.4pp)
+- FPR random: 8.0% → **7.5%** (16 → 15/200, -0.5pp)
+- Tests: 2477 → **2533** (+56) across 56 test files
+- Rules: 153 → **158** (153 RULES + 5 PARANOID)
+- TPR: **93.9%** (unchanged), ADR: **96.3%** (unchanged)
+
 ## [2.10.0] - 2026-03-20
 
 ### Added

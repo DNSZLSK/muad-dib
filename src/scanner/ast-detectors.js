@@ -244,6 +244,41 @@ function extractStringValue(node) {
 }
 
 /**
+ * Audit v3 B2: Shannon entropy calculation for split-entropy detection.
+ * Replicates the algorithm from entropy.js for inline use in AST scanner.
+ */
+function calculateShannonEntropy(str) {
+  if (!str || str.length === 0) return 0;
+  const freq = Object.create(null);
+  for (let i = 0; i < str.length; i++) {
+    const ch = str[i];
+    freq[ch] = (freq[ch] || 0) + 1;
+  }
+  let entropy = 0;
+  const len = str.length;
+  for (const ch in freq) {
+    const p = freq[ch] / len;
+    entropy -= p * Math.log2(p);
+  }
+  return entropy;
+}
+
+/**
+ * Audit v3 B2: Count the number of leaf string operands in a BinaryExpression chain.
+ * Used to identify split payloads (≥3 chunks concatenated).
+ */
+function countConcatOperands(node) {
+  if (!node) return 0;
+  if (node.type === 'Literal' && typeof node.value === 'string') return 1;
+  if (node.type === 'Identifier') return 1;
+  if (node.type === 'TemplateLiteral') return 1;
+  if (node.type === 'BinaryExpression' && node.operator === '+') {
+    return countConcatOperands(node.left) + countConcatOperands(node.right);
+  }
+  return 0;
+}
+
+/**
  * Recursively resolve BinaryExpression with '+' operator to reconstruct
  * concatenated strings like '.gi' + 't' → '.git' or 'ho' + 'oks' → 'hooks'.
  * Returns null if any part is non-literal.
@@ -486,6 +521,29 @@ function handleVariableDeclarator(node, ctx) {
       }
     }
 
+    // Audit v3 B3: const AF = Object.getPrototypeOf(async function(){}).constructor
+    if (node.init?.type === 'MemberExpression') {
+      const initProp = node.init.computed
+        ? (node.init.property?.type === 'Literal' ? String(node.init.property.value) : null)
+        : node.init.property?.name;
+      if (initProp === 'constructor' && node.init.object?.type === 'CallExpression') {
+        const innerCall = node.init.object;
+        if (innerCall.callee?.type === 'MemberExpression') {
+          const innerObj = innerCall.callee.object;
+          const innerPropName = innerCall.callee.property?.name;
+          if (innerObj?.type === 'Identifier' &&
+              (innerObj.name === 'Object' || innerObj.name === 'Reflect') &&
+              innerPropName === 'getPrototypeOf' &&
+              innerCall.arguments?.length >= 1) {
+            const arg = innerCall.arguments[0];
+            if (arg.type === 'FunctionExpression' && (arg.async || arg.generator)) {
+              ctx.evalAliases.set(node.id.name, 'Function');
+            }
+          }
+        }
+      }
+    }
+
     // B1 fix: const compiler = getCompiler() where getCompiler is eval_factory
     if (node.init?.type === 'CallExpression' &&
         node.init.callee?.type === 'Identifier' &&
@@ -540,6 +598,14 @@ function handleVariableDeclarator(node, ctx) {
         (n.type === 'Identifier' && ctx.stringBuildVars?.has(n.name));
       if (isStringOperand(left) || isStringOperand(right)) {
         ctx.stringBuildVars.add(node.id.name);
+        // Audit v3 B2: Resolve concat value and track for split-entropy detection
+        const operands = countConcatOperands(node.init);
+        if (operands >= 3) {
+          const resolved = resolveStringConcatWithVars(node.init, ctx.stringVarValues);
+          if (resolved && resolved.length >= 20) {
+            ctx.concatValues.set(node.id.name, { value: resolved, operands });
+          }
+        }
       }
     }
 
@@ -593,6 +659,42 @@ function handleVariableDeclarator(node, ctx) {
             return extractStringValueDeep(a) || '';
           }).join('/');
           ctx.ideConfigPathVars.set(node.id.name, parentPath);
+        }
+      }
+    }
+  }
+
+  // Audit v3 B3: Destructuring of require('module') → track _load as direct function alias
+  if (node.id?.type === 'ObjectPattern' &&
+      node.init?.type === 'CallExpression') {
+    const initCallName = getCallName(node.init);
+    if (initCallName === 'require' && node.init.arguments.length > 0) {
+      const reqVal = extractStringValueDeep(node.init.arguments[0]);
+      if (reqVal === 'module') {
+        for (const prop of node.id.properties) {
+          if (prop.type === 'Property' && prop.key?.type === 'Identifier') {
+            const localName = prop.value?.type === 'Identifier' ? prop.value.name : prop.key.name;
+            if (prop.key.name === '_load') {
+              ctx.moduleLoadDirectAliases.add(localName);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Audit v3 B3: Destructuring of globalThis/global → track eval/Function aliases
+  if (node.id?.type === 'ObjectPattern' &&
+      node.init?.type === 'Identifier' &&
+      (node.init.name === 'globalThis' || node.init.name === 'global' ||
+       node.init.name === 'window' || node.init.name === 'self' ||
+       ctx.globalThisAliases.has(node.init.name))) {
+    for (const prop of node.id.properties) {
+      if (prop.type === 'Property' && prop.key?.type === 'Identifier') {
+        const originalName = prop.key.name;
+        const localName = prop.value?.type === 'Identifier' ? prop.value.name : prop.key.name;
+        if (originalName === 'eval' || originalName === 'Function') {
+          ctx.evalAliases.set(localName, originalName);
         }
       }
     }
@@ -1323,6 +1425,16 @@ function handleCallExpression(node, ctx) {
     }
   }
 
+  // Audit v3 B3: Bare call to destructured _load — e.g. const { _load } = require('module'); _load('child_process')
+  if (node.callee.type === 'Identifier' && ctx.moduleLoadDirectAliases?.has(node.callee.name)) {
+    ctx.threats.push({
+      type: 'module_load_bypass',
+      severity: 'CRITICAL',
+      message: `Module._load() via destructured alias "${node.callee.name}" — internal module loader bypass.`,
+      file: ctx.relFile
+    });
+  }
+
   if (callName === 'eval') {
     ctx.hasEvalInFile = true;
     // Detect staged eval decode
@@ -1382,6 +1494,78 @@ function handleCallExpression(node, ctx) {
         message: 'Function() with dynamic expression (template/factory pattern).',
         file: ctx.relFile
       });
+    }
+  }
+
+  // Audit v3 B2: Split entropy detection — concatenated strings passed to eval/Function/decode
+  // Detects payloads split across ≥3 chunks to bypass per-string entropy thresholds.
+  if (callName === 'eval' || callName === 'Function' || callName === 'atob') {
+    // Threshold lower than standard (5.5) because the triple signal
+    // (concat ≥3 + eval/decode + entropy) provides high confidence at 4.5.
+    const SPLIT_ENTROPY_THRESHOLD = 4.5;
+    const SPLIT_ENTROPY_MIN_OPERANDS = 3;
+    for (const arg of node.arguments) {
+      // Direct concat: eval('ch1' + 'ch2' + 'ch3')
+      if (arg.type === 'BinaryExpression' && arg.operator === '+') {
+        const operands = countConcatOperands(arg);
+        if (operands >= SPLIT_ENTROPY_MIN_OPERANDS) {
+          const resolved = resolveStringConcatWithVars(arg, ctx.stringVarValues);
+          if (resolved && resolved.length >= 20 && calculateShannonEntropy(resolved) > SPLIT_ENTROPY_THRESHOLD) {
+            ctx.threats.push({
+              type: 'split_entropy_payload',
+              severity: 'CRITICAL',
+              message: `Split high-entropy string (${operands} chunks, ${calculateShannonEntropy(resolved).toFixed(2)} bits) passed to ${callName}() — payload fragmentation evasion.`,
+              file: ctx.relFile
+            });
+            break;
+          }
+        }
+      }
+      // Variable indirection: eval(payload) where payload was built from concat
+      if (arg.type === 'Identifier' && ctx.concatValues?.has(arg.name)) {
+        const cv = ctx.concatValues.get(arg.name);
+        if (calculateShannonEntropy(cv.value) > SPLIT_ENTROPY_THRESHOLD) {
+          ctx.threats.push({
+            type: 'split_entropy_payload',
+            severity: 'CRITICAL',
+            message: `Split high-entropy variable "${arg.name}" (${cv.operands} chunks, ${calculateShannonEntropy(cv.value).toFixed(2)} bits) passed to ${callName}() — payload fragmentation evasion.`,
+            file: ctx.relFile
+          });
+          break;
+        }
+      }
+    }
+  }
+
+  // Also check Buffer.from arguments for split entropy (decode context)
+  if (node.callee?.type === 'MemberExpression' &&
+      node.callee.object?.name === 'Buffer' && node.callee.property?.name === 'from') {
+    const SPLIT_ENTROPY_THRESHOLD = 4.5;
+    const arg = node.arguments?.[0];
+    if (arg?.type === 'BinaryExpression' && arg.operator === '+') {
+      const operands = countConcatOperands(arg);
+      if (operands >= 3) {
+        const resolved = resolveStringConcatWithVars(arg, ctx.stringVarValues);
+        if (resolved && resolved.length >= 20 && calculateShannonEntropy(resolved) > SPLIT_ENTROPY_THRESHOLD) {
+          ctx.threats.push({
+            type: 'split_entropy_payload',
+            severity: 'CRITICAL',
+            message: `Split high-entropy string (${operands} chunks, ${calculateShannonEntropy(resolved).toFixed(2)} bits) in Buffer.from() — payload fragmentation evasion.`,
+            file: ctx.relFile
+          });
+        }
+      }
+    }
+    if (arg?.type === 'Identifier' && ctx.concatValues?.has(arg.name)) {
+      const cv = ctx.concatValues.get(arg.name);
+      if (calculateShannonEntropy(cv.value) > SPLIT_ENTROPY_THRESHOLD) {
+        ctx.threats.push({
+          type: 'split_entropy_payload',
+          severity: 'CRITICAL',
+          message: `Split high-entropy variable "${arg.name}" (${cv.operands} chunks, ${calculateShannonEntropy(cv.value).toFixed(2)} bits) in Buffer.from() — payload fragmentation evasion.`,
+          file: ctx.relFile
+        });
+      }
     }
   }
 
@@ -1716,6 +1900,34 @@ function handleCallExpression(node, ctx) {
           message: 'Module._load() detected — internal module loader bypass for dynamic code loading.',
           file: ctx.relFile
         });
+      }
+    }
+
+    // Audit v3 B3: AsyncFunction/GeneratorFunction constructor via prototype chain
+    // Pattern: Object.getPrototypeOf(async function(){}).constructor('code')()
+    // or: Reflect.getPrototypeOf(function*(){}).constructor('code')()
+    if (propName === 'constructor') {
+      const obj = node.callee.object;
+      if (obj?.type === 'CallExpression' && obj.callee?.type === 'MemberExpression') {
+        const innerObj = obj.callee.object;
+        const innerProp = obj.callee.property;
+        if (innerObj?.type === 'Identifier' &&
+            (innerObj.name === 'Object' || innerObj.name === 'Reflect') &&
+            innerProp?.type === 'Identifier' && innerProp.name === 'getPrototypeOf' &&
+            obj.arguments?.length >= 1) {
+          const arg = obj.arguments[0];
+          if (arg.type === 'FunctionExpression' && (arg.async || arg.generator)) {
+            const kind = arg.async ? 'AsyncFunction' : 'GeneratorFunction';
+            ctx.hasEvalInFile = true;
+            ctx.hasDynamicExec = true;
+            ctx.threats.push({
+              type: 'dangerous_constructor',
+              severity: 'CRITICAL',
+              message: `${kind} constructor accessed via Object.getPrototypeOf() — prototype chain code execution bypass.`,
+              file: ctx.relFile
+            });
+          }
+        }
       }
     }
 

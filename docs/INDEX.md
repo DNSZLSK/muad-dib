@@ -6,7 +6,7 @@
 |----------|-------------|
 | [README](../README.md) | Project overview, installation, usage |
 | [README.fr.md](README.fr.md) | French version of the README |
-| [SECURITY.md](../SECURITY.md) | Security policy, 153 detection rules reference (canonical source) |
+| [SECURITY.md](../SECURITY.md) | Security policy, 158 detection rules reference (canonical source) |
 | [ADVERSARIAL.md](../ADVERSARIAL.md) | Red team adversarial samples and ADR results |
 | [CHANGELOG.md](../CHANGELOG.md) | Version history and release notes |
 
@@ -25,15 +25,16 @@
 |----------|-------------|
 | [Carnet de Bord](CARNET_DE_BORD_MUADDIB.md) | Development journal (French) — project history and decisions |
 
-## Current Metrics (v2.10.0)
+## Current Metrics (v2.10.1)
 
 | Metric | Value |
 |--------|-------|
-| Tests | 2477 across 56 files |
-| Rules | 153 (148 RULES + 5 PARANOID) |
+| Tests | 2533 across 56 files |
+| Rules | 158 (153 RULES + 5 PARANOID) |
 | Scanners | 14 parallel |
 | TPR (Ground Truth) | 93.9% (46/49) |
-| FPR (Benign) | 12.9% (68/529) |
+| FPR (Benign curated) | 10.8% (57/529) |
+| FPR (Benign random) | 7.5% (15/200) |
 | ADR (Adversarial + Holdout) | 96.3% (103/107) |
 | Wild TPR (Datadog 17K) | 92.5% (13486/14587 in-scope) |
 
@@ -55,7 +56,7 @@ src/
 │   ├── ai-config.js       # AI agent config injection
 │   └── ...                # package, shell, typosquat, dependencies, hash, etc.
 ├── ml/                    # ML classifier (Phase 2)
-├── rules/index.js         # 148 threat rules (MITRE mapped)
+├── rules/index.js         # 153 threat rules (MITRE mapped)
 ├── response/playbooks.js  # Remediation playbooks
 ├── sandbox/               # Docker dynamic analysis
 │   ├── index.js           # Multi-run orchestration [0h, 72h, 7d]

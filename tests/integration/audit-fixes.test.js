@@ -1695,7 +1695,7 @@ https.get('https://registry.npmjs.org/express/-/express-4.18.2.tgz', (res) => {
 
   // --- Fix 2.4: HTTP prototype regex narrowed ---
 
-  test('AUDIT-S7: HTTP proto regex does NOT match getCredentials', () => {
+  test('AUDIT-S7: HTTP proto regex does NOT match getCredentials (count-threshold applies)', () => {
     const threats = [
       { type: 'prototype_hook', severity: 'HIGH', file: 'a.js', message: 'SomeClass.prototype.getCredentials overridden' },
       // Pad to >20 prototype_hook hits
@@ -1704,8 +1704,10 @@ https.get('https://registry.npmjs.org/express/-/express-4.18.2.tgz', (res) => {
       }))
     ];
     applyFPReductions(threats, null, null);
-    assert(threats[0].severity === 'HIGH',
-      `getCredentials should NOT match HTTP proto regex, got ${threats[0].severity}`);
+    // Audit v3 B3: With >10 prototype_hook, remaining HIGH instances are downgraded to LOW
+    // (framework noise). getCredentials doesn't match HTTP proto regex → not MEDIUM.
+    assert(threats[0].severity === 'LOW',
+      `getCredentials should be LOW (count-threshold, not HTTP proto), got ${threats[0].severity}`);
   });
 
   test('AUDIT-S7: HTTP proto regex DOES match Request.prototype', () => {

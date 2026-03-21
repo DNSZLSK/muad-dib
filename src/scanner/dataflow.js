@@ -35,7 +35,11 @@ const MODULE_SINK_METHODS = {
   net: { connect: 'network_send', createConnection: 'network_send' },
   tls: { connect: 'network_send', createConnection: 'network_send' },
   dns: { resolve: 'network_send', lookup: 'network_send', resolve4: 'network_send', resolve6: 'network_send', resolveTxt: 'network_send' },
-  fs: { writeFileSync: 'file_tamper', writeFile: 'file_tamper' }
+  fs: { writeFileSync: 'file_tamper', writeFile: 'file_tamper' },
+  ws: { send: 'network_send', write: 'network_send' },
+  mqtt: { publish: 'network_send', send: 'network_send' },
+  'socket.io-client': { emit: 'network_send', send: 'network_send' },
+  'socket.io': { emit: 'network_send', send: 'network_send' }
 };
 
 // All tracked module names (for filtering in buildTaintMap)
@@ -68,6 +72,21 @@ function buildTaintMap(ast) {
           const arg = init.arguments[0];
           if (arg.type === 'Literal' && typeof arg.value === 'string' && TRACKED_MODULES.has(arg.value)) {
             taintMap.set(node.id.name, { source: arg.value, detail: arg.value });
+          }
+        }
+        // Pattern: const client = mqtt.connect(url) — method call on tainted module
+        // Propagates module taint to the result (e.g. mqtt.connect → client inherits mqtt)
+        if (callee.type === 'MemberExpression' && callee.object?.type === 'Identifier') {
+          const parentTaint = taintMap.get(callee.object.name);
+          if (parentTaint && TRACKED_MODULES.has(parentTaint.source)) {
+            taintMap.set(node.id.name, { source: parentTaint.source, detail: parentTaint.source });
+          }
+        }
+        // Pattern: const socket = io(url) — bare call on tainted variable (e.g. socket.io-client)
+        if (callee.type === 'Identifier' && callee.name !== 'require') {
+          const parentTaint = taintMap.get(callee.name);
+          if (parentTaint && TRACKED_MODULES.has(parentTaint.source)) {
+            taintMap.set(node.id.name, { source: parentTaint.source, detail: parentTaint.source });
           }
         }
       }
@@ -117,6 +136,18 @@ function buildTaintMap(ast) {
         const aliasTaint = taintMap.get(aliasKey);
         if (aliasTaint && TRACKED_MODULES.has(aliasTaint.source)) {
           taintMap.set(node.id.name, aliasTaint);
+        }
+      }
+
+      // Pattern: const socket = new ws(...) — constructor instantiation taint
+      // Allows tracking methods on instances of tracked modules (e.g. socket.send)
+      if (node.id.type === 'Identifier' && init.type === 'NewExpression') {
+        const ctor = init.callee;
+        if (ctor.type === 'Identifier') {
+          const parentTaint = taintMap.get(ctor.name);
+          if (parentTaint && TRACKED_MODULES.has(parentTaint.source)) {
+            taintMap.set(node.id.name, { source: parentTaint.source, detail: parentTaint.source });
+          }
         }
       }
 
@@ -840,6 +871,21 @@ function analyzeFile(content, filePath, basePath) {
 
   // Check if any source or sink was resolved via taint tracking
   const hasTaintTracked = sources.some(s => s.taint_tracked) || sinks.some(s => s.taint_tracked);
+
+  // Detect suspicious real-time module sinks (ws, mqtt, socket.io)
+  // These modules are rarely used in benign packages and indicate non-HTTP exfil channels
+  const SUSPICIOUS_RT_MODULES = ['ws', 'mqtt', 'socket.io-client', 'socket.io'];
+  const suspiciousModuleSinks = sinks.filter(s =>
+    SUSPICIOUS_RT_MODULES.some(mod => s.name.startsWith(mod + '.'))
+  );
+  if (suspiciousModuleSinks.length > 0) {
+    threats.push({
+      type: 'suspicious_module_sink',
+      severity: 'MEDIUM',
+      message: `Non-HTTP network sink detected: ${suspiciousModuleSinks.map(s => s.name).join(', ')}`,
+      file: path.relative(basePath, filePath)
+    });
+  }
 
   // Detect staged payload: network fetch + eval in same file (no credential source needed)
   const hasNetworkSink = sinks.some(s => s.type === 'network_send' || s.type === 'exec_network');

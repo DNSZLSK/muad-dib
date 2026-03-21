@@ -75,7 +75,7 @@ async function scanPackageJson(targetPath) {
       threats.push({
         type: 'lifecycle_script',
         severity: 'MEDIUM',
-        message: `Script "${scriptName}" detected. Common attack vector.`,
+        message: `Script "${scriptName}" detected: ${scriptContent.substring(0, 200)}`,
         file: 'package.json'
       });
 

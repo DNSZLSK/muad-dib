@@ -1595,6 +1595,30 @@ const RULES = {
     ],
     mitre: 'T1102'
   },
+  dangerous_constructor: {
+    id: 'MUADDIB-AST-057',
+    name: 'Prototype Chain Constructor Access',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Acces au constructeur AsyncFunction ou GeneratorFunction via Object.getPrototypeOf(). Technique d\'evasion permettant d\'executer du code arbitraire sans reference directe a eval() ou Function().',
+    references: [
+      'https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AsyncFunction',
+      'https://attack.mitre.org/techniques/T1059/007/'
+    ],
+    mitre: 'T1059.007'
+  },
+  split_entropy_payload: {
+    id: 'MUADDIB-AST-058',
+    name: 'Split High-Entropy Payload',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Payload haute entropie fragmente en ≥3 chunks concatenes pour contourner la detection par string individuelle. Le resultat concatene passe par eval/Function/atob/Buffer.from, indiquant un dechiffrement ou une execution staged.',
+    references: [
+      'https://attack.mitre.org/techniques/T1027/002/',
+      'https://attack.mitre.org/techniques/T1140/'
+    ],
+    mitre: 'T1027.002'
+  },
   module_load_bypass: {
     id: 'MUADDIB-AST-056',
     name: 'Module._load() Internal Loader Bypass',
@@ -1670,6 +1694,41 @@ const RULES = {
       'https://attack.mitre.org/techniques/T1195/002/'
     ],
     mitre: 'T1105'
+  },
+  lifecycle_file_exec: {
+    id: 'MUADDIB-COMPOUND-007',
+    name: 'Lifecycle Script Executes Malicious File',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Un script lifecycle (preinstall/install/postinstall) reference un fichier JS local qui contient des menaces HIGH/CRITICAL. Indicateur fort de malware install-time: le fichier malveillant est cache derriere une indirection lifecycle.',
+    references: [
+      'https://blog.phylum.io/shai-hulud-npm-worm',
+      'https://attack.mitre.org/techniques/T1204/002/'
+    ],
+    mitre: 'T1204.002'
+  },
+  websocket_credential_exfil: {
+    id: 'MUADDIB-COMPOUND-006',
+    name: 'WebSocket/MQTT Credential Exfiltration',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Acces a une variable d\'environnement sensible combine avec un sink reseau non-HTTP (WebSocket, MQTT, Socket.io) dans le meme fichier. Canal d\'exfiltration furtif evitant les proxies HTTP.',
+    references: [
+      'https://attack.mitre.org/techniques/T1041/',
+      'https://attack.mitre.org/techniques/T1071/001/'
+    ],
+    mitre: 'T1041'
+  },
+  suspicious_module_sink: {
+    id: 'MUADDIB-FLOW-005',
+    name: 'Non-HTTP Network Module Sink',
+    severity: 'MEDIUM',
+    confidence: 'medium',
+    description: 'Utilisation d\'un module reseau non-HTTP (ws, mqtt, socket.io) comme sink de donnees. Ces modules sont rarement utilises dans les packages benins et peuvent indiquer un canal d\'exfiltration furtif.',
+    references: [
+      'https://attack.mitre.org/techniques/T1071/'
+    ],
+    mitre: 'T1071'
   },
 };
 

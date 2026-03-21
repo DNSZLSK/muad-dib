@@ -112,7 +112,11 @@ const WHITELIST = new Set([
 
   // FPR P4: Benign packages falsely flagged as typosquat in evaluation
   'mocks',      // karma dep, resembles mocha (wrong_char)
-  'reactor'     // stencil dep, resembles react (suffix)
+  'reactor',    // stencil dep, resembles react (suffix)
+
+  // Audit v3 B3: well-established packages flagged as typosquat of multiple popular packages
+  'color',        // resembles colors (18M dl/week, 5385d old)
+  'ttypescript'   // resembles typescript (70K dl/week, 3198d old)
 ]);
 
 

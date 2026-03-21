@@ -118,16 +118,18 @@ async function runGapRemediationTests() {
 
   // ===================================================================
   // GAP 4a: Count-Threshold Dilution Floor (2 tests)
-  // credential_regex_harvest: maxCount=2, from='HIGH' — floor applies (maxCount≤3 + from)
-  // Need >2 instances AND ratio < 40% for count-threshold to fire
+  // module_compile: maxCount=3, from='HIGH' — floor applies (maxCount≤3 + from)
+  // Need >3 instances AND ratio < 40% for count-threshold to fire
+  // NOTE: credential_regex_harvest was used here pre-v2.10.1, but Audit v3 B3 removed
+  // its `from` constraint for complete suppression. Using module_compile instead.
   // ===================================================================
 
-  test('GAP4a: 4x credential_regex_harvest → at least one retains HIGH (dilution floor)', () => {
+  test('GAP4a: 4x module_compile → at least one retains HIGH (dilution floor)', () => {
     const threats = [];
     for (let i = 0; i < 4; i++) {
       threats.push({
-        type: 'credential_regex_harvest', severity: 'HIGH',
-        file: `file${i}.js`, message: `Credential regex ${i}`
+        type: 'module_compile', severity: 'HIGH',
+        file: `file${i}.js`, message: `Module._compile ${i}`
       });
     }
     // Add enough other threats to keep ratio below 40% (4/14 ≈ 28.6%)
@@ -137,9 +139,9 @@ async function runGapRemediationTests() {
 
     applyFPReductions(threats, null, null);
 
-    const credThreats = threats.filter(t => t.type === 'credential_regex_harvest');
-    const highOnes = credThreats.filter(t => t.severity === 'HIGH');
-    const lowOnes = credThreats.filter(t => t.severity === 'LOW');
+    const modThreats = threats.filter(t => t.type === 'module_compile');
+    const highOnes = modThreats.filter(t => t.severity === 'HIGH');
+    const lowOnes = modThreats.filter(t => t.severity === 'LOW');
 
     assert(highOnes.length === 1,
       `Exactly one should retain HIGH (dilution floor), got ${highOnes.length}`);
@@ -155,8 +157,8 @@ async function runGapRemediationTests() {
     const threats = [];
     for (let i = 0; i < 4; i++) {
       threats.push({
-        type: 'credential_regex_harvest', severity: 'HIGH',
-        file: `file${i}.js`, message: `Credential regex ${i}`
+        type: 'module_compile', severity: 'HIGH',
+        file: `file${i}.js`, message: `Module._compile ${i}`
       });
     }
     for (let i = 0; i < 10; i++) {
@@ -165,8 +167,8 @@ async function runGapRemediationTests() {
 
     applyFPReductions(threats, null, null);
 
-    const credThreats = threats.filter(t => t.type === 'credential_regex_harvest');
-    const lowOnes = credThreats.filter(t => t.severity === 'LOW');
+    const modThreats = threats.filter(t => t.type === 'module_compile');
+    const lowOnes = modThreats.filter(t => t.severity === 'LOW');
     assert(lowOnes.length === 3, `3 should be downgraded to LOW, got ${lowOnes.length}`);
     // Verify the downgraded ones have count_threshold reduction
     for (const lt of lowOnes) {

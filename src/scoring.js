@@ -153,7 +153,10 @@ function computeGroupScore(threats) {
 // exceeds thresholds only seen in legitimate codebases.
 const FP_COUNT_THRESHOLDS = {
   dynamic_require: { maxCount: 10, from: 'HIGH', to: 'LOW' },
-  dangerous_call_function: { maxCount: 5, from: 'MEDIUM', to: 'LOW' },
+  // Audit v3 B3: removed `from` constraint (was MEDIUM-only). Frameworks like sinon/superagent/riot
+  // use 5+ Function() calls at MEDIUM and HIGH severity for spy/mock/template compilation.
+  // Real malware uses 1-2 targeted Function() calls.
+  dangerous_call_function: { maxCount: 5, to: 'LOW' },
   require_cache_poison: { maxCount: 3, from: 'CRITICAL', to: 'LOW' },
   suspicious_dataflow: { maxCount: 3, to: 'LOW' },
   obfuscation_detected: { maxCount: 3, to: 'LOW' },
@@ -173,13 +176,39 @@ const FP_COUNT_THRESHOLDS = {
   dangerous_call_eval: { maxCount: 3, to: 'LOW' },
   // P6: HTTP client libraries (undici, aws-sdk, nodemailer, jsdom) parse Authorization/Bearer headers
   // with 3+ credential regexes. Real harvesters use 1-2 targeted regexes.
-  credential_regex_harvest: { maxCount: 2, from: 'HIGH', to: 'LOW' },
-  // P7: Config frameworks (pm2, nx, dotenv, aws-sdk) read 10+ env vars — not credential theft.
-  // Real stealers access 1-5 targeted env vars. Count >10 = config loader pattern.
-  env_access: { maxCount: 10, from: 'HIGH', to: 'LOW' },
+  // Audit v3: removed `from` constraint — ALL severity levels downgraded when count > 2.
+  // This eliminates the dilution floor (floor requires `from` field) for complete suppression.
+  credential_regex_harvest: { maxCount: 2, to: 'LOW' },
+  // P7→Audit v3: Config frameworks (pm2, nx, dotenv, aws-sdk, oclif) read 5+ env vars — not credential theft.
+  // Real stealers access 1-4 targeted env vars. Count >4 = config loader pattern.
+  // Lowered from 10→4 for better FP reduction. B5 network_sink_immunity protects genuine exfiltration.
+  env_access: { maxCount: 4, from: 'HIGH', to: 'LOW' },
   // P7: Bundled files with 5+ high-entropy strings are data files, not malware payloads.
   // Real payloads use 1-2 targeted encoded strings. Count >5 = bundled assets/data.
-  high_entropy_string: { maxCount: 5, to: 'LOW' }
+  high_entropy_string: { maxCount: 5, to: 'LOW' },
+  // Audit v3: Libraries with >10 prototype modifications are frameworks/protocol implementations,
+  // not targeted prototype hooking attacks. Real malware hooks 1-3 specific prototypes.
+  prototype_hook: { maxCount: 10, to: 'LOW' },
+  // Audit v3 B3: Crypto libraries (node-forge, crypto-js) legitimately use 4+ createDecipher calls.
+  // Real malware uses 1-2 targeted decipher operations. Count >3 = crypto library.
+  crypto_decipher: { maxCount: 3, from: 'HIGH', to: 'LOW' },
+  // Audit v3 B3: HTML template engines (bull, handlebars) have many possible_obfuscation hits
+  // from complex string manipulation. Real obfuscation uses intentional encoding, not template patterns.
+  possible_obfuscation: { maxCount: 5, to: 'LOW' },
+  // Audit v3 B3: Formatter/parser libraries (prettier, svelte) use multiple Unicode variation
+  // selectors for character normalization. Real attacks use 1-2 targeted decoders.
+  unicode_variation_decoder: { maxCount: 3, to: 'LOW' },
+  // Audit v3 B3: State management/reactive frameworks (MobX, Vue, Immer, htmx) use multiple
+  // Proxy traps for reactivity/observation. Real data interception uses 1-2 targeted traps.
+  proxy_data_intercept: { maxCount: 3, to: 'LOW' },
+  // Audit v3 B3: Config/CLI libraries (dotenv, oclif, np) read multiple sensitive env vars
+  // as part of their core functionality. Lowered from 10→5 for env_access count threshold.
+  // The B5 network_sink_immunity above protects genuine exfiltration scenarios.
+  sensitive_string: { maxCount: 5, to: 'LOW' },
+  // Audit v3 B3: Template engines (htmx, marko) with many staged_payload hits are using
+  // fetch+eval for dynamic content loading, not payload staging. fetch_decrypt_exec (triple
+  // signal) remains unaffected. Also in DIST_BUNDLER_ARTIFACT_TYPES for dist/ files.
+  staged_payload: { maxCount: 3, to: 'LOW' }
 };
 
 // Types exempt from dist/ downgrade — IOC matches, lifecycle scripts, and
@@ -204,7 +233,8 @@ const DIST_EXEMPT_TYPES = new Set([
   'dangerous_exec',
   // Compound scoring rules — co-occurrence signals, never FP
   'crypto_staged_payload', 'lifecycle_typosquat',
-  'lifecycle_inline_exec', 'lifecycle_remote_require'
+  'lifecycle_inline_exec', 'lifecycle_remote_require',
+  'lifecycle_file_exec'  // B6: lifecycle → malicious file compound
   // P6: remote_code_load and proxy_data_intercept removed — in bundled dist/ files,
   // fetch + eval co-occurrence is coincidental (bundler combines HTTP client + template compilation).
   // fetch_decrypt_exec (fetch+decrypt+eval triple) remains exempt — never coincidental.
@@ -235,7 +265,10 @@ const DIST_BUNDLER_ARTIFACT_TYPES = new Set([
   // (webpack bundles crypto utils alongside image processing). Real steganographic attacks
   // (flatmap-stream) have these at package root, not dist/. Compound (crypto_staged_payload)
   // is in DIST_EXEMPT_TYPES so the overall signal is preserved when truly malicious.
-  'staged_binary_payload', 'crypto_decipher'
+  'staged_binary_payload', 'crypto_decipher',
+  // Audit v3 B3: staged_payload (fetch+eval) in dist/ is code splitting / lazy loading,
+  // not malicious payload staging. fetch_decrypt_exec remains exempt (triple signal).
+  'staged_payload'
 ]);
 
 // Types exempt from reachability downgrade — IOC matches, lifecycle, and package-level types.
@@ -291,6 +324,14 @@ const SCORING_COMPOUNDS = [
     severity: 'CRITICAL',
     message: 'Lifecycle hook loading remote code (require http/https) — supply chain payload delivery (scoring compound).',
     fileFrom: 'network_require'
+  },
+  {
+    type: 'websocket_credential_exfil',
+    requires: ['env_access', 'suspicious_module_sink'],
+    severity: 'CRITICAL',
+    message: 'Sensitive env var access + WebSocket/MQTT/Socket.io send in same file — credential exfiltration via non-HTTP channel (scoring compound).',
+    fileFrom: 'env_access',
+    sameFile: true
   },
 ];
 
@@ -352,9 +393,14 @@ function applyCompoundBoosts(threats) {
   }
 }
 
-// Custom class prototypes that HTTP frameworks legitimately extend.
+// Custom class prototypes that HTTP frameworks and common libraries legitimately extend.
 // Distinguished from dangerous core Node.js prototype hooks.
-const FRAMEWORK_PROTOTYPES = ['Request', 'Response', 'App', 'Router'];
+// Audit v3: added WebSocket, EventEmitter, Buffer, Stream, Sender, Receiver — legitimate protocol/framework classes
+const FRAMEWORK_PROTOTYPES = [
+  'Request', 'Response', 'App', 'Router',
+  'WebSocket', 'Sender', 'Receiver', 'EventEmitter',
+  'Buffer', 'Stream', 'Readable', 'Writable', 'Transform', 'Duplex'
+];
 const FRAMEWORK_PROTO_RE = new RegExp(
   '^(' + FRAMEWORK_PROTOTYPES.join('|') + ')\\.prototype\\.'
 );
@@ -401,6 +447,20 @@ function applyFPReductions(threats, reachableFiles, packageName, packageDeps) {
     }
   }
 
+  // Audit v3 B4: Identify dynamic_require instances targeting dangerous modules.
+  // These must be immune to count-threshold dilution regardless of typeRatio.
+  const DANGEROUS_MODULE_RE = /\b(child_process|net|dns|http|https|tls|dgram|cluster|vm)\b/;
+
+  // Audit v3 B5: Identify files with network sinks (for env_access immunity).
+  // env_access in a file containing a network sink is likely credential exfiltration.
+  const networkSinkFiles = new Set();
+  for (const t of threats) {
+    if (t.type === 'suspicious_dataflow' || t.type === 'suspicious_module_sink' ||
+        (t.type === 'cross_file_dataflow' && t.message && /network_send/.test(t.message))) {
+      if (t.file) networkSinkFiles.add(t.file);
+    }
+  }
+
   for (const t of threats) {
     // Count-based downgrade: if a threat type appears too many times,
     // it's a framework/plugin system, not malware.
@@ -408,6 +468,21 @@ function applyFPReductions(threats, reachableFiles, packageName, packageDeps) {
     // When a type dominates findings (> 50%), it may be real malware, not framework noise.
     const rule = FP_COUNT_THRESHOLDS[t.type];
     if (rule && typeCounts[t.type] > rule.maxCount && (!rule.from || t.severity === rule.from)) {
+      // Audit v3 B4: Skip downgrade for dynamic_require targeting dangerous modules.
+      // An attacker can inject 11+ benign dynamic_require to dilute, but any instance
+      // resolved to child_process/net/dns/http must retain its severity.
+      if (t.type === 'dynamic_require' && t.message && DANGEROUS_MODULE_RE.test(t.message)) {
+        t.reductions.push({ rule: 'dangerous_module_immunity', note: 'retained — targets dangerous module' });
+        continue;
+      }
+
+      // Audit v3 B5: Skip downgrade for env_access in files with network sinks.
+      // Credentials read in the same file as a network send are exfiltration, not config.
+      if (t.type === 'env_access' && t.file && networkSinkFiles.has(t.file)) {
+        t.reductions.push({ rule: 'network_sink_immunity', note: 'retained — same file has network sink' });
+        continue;
+      }
+
       const typeRatio = typeCounts[t.type] / totalThreats;
       // suspicious_dataflow: bypass percentage guard when count exceeds threshold.
       // Packages with >3 suspicious_dataflow findings are always legitimate SDKs.
@@ -415,7 +490,25 @@ function applyFPReductions(threats, reachableFiles, packageName, packageDeps) {
       // vm_code_execution: same logic — bypass only when count exceeds threshold.
       if (typeRatio < 0.4 ||
           (t.type === 'suspicious_dataflow' && typeCounts[t.type] > rule.maxCount) ||
-          (t.type === 'vm_code_execution' && typeCounts[t.type] > rule.maxCount)) {
+          (t.type === 'vm_code_execution' && typeCounts[t.type] > rule.maxCount) ||
+          // Audit v3 B3: credential_regex_harvest always downgrades when count exceeds
+          // threshold, regardless of ratio. HTTP parsers legitimately use 3+ credential regexes.
+          (t.type === 'credential_regex_harvest' && typeCounts[t.type] > rule.maxCount) ||
+          // Audit v3 B3: dynamic_require always downgrades when count exceeds threshold.
+          // Plugin loaders (eslint, sails, karma) may have 100% dynamic_require findings.
+          // The B4 dangerous_module_immunity above protects genuine threats.
+          (t.type === 'dynamic_require' && typeCounts[t.type] > rule.maxCount) ||
+          // Audit v3 B3: possible_obfuscation, unicode_variation_decoder, crypto_decipher
+          // bypass ratio when count exceeds threshold — library noise patterns.
+          (t.type === 'possible_obfuscation' && typeCounts[t.type] > rule.maxCount) ||
+          (t.type === 'unicode_variation_decoder' && typeCounts[t.type] > rule.maxCount) ||
+          (t.type === 'crypto_decipher' && typeCounts[t.type] > rule.maxCount) ||
+          (t.type === 'dangerous_call_function' && typeCounts[t.type] > rule.maxCount) ||
+          (t.type === 'dangerous_call_eval' && typeCounts[t.type] > rule.maxCount) ||
+          (t.type === 'proxy_data_intercept' && typeCounts[t.type] > rule.maxCount) ||
+          // Audit v3 B3: env_access ratio bypass — B5 network_sink_immunity protects
+          // env_access instances in files with network sinks. Remaining instances are config.
+          (t.type === 'env_access' && typeCounts[t.type] > rule.maxCount)) {
         t.reductions.push({ rule: 'count_threshold', from: t.severity, to: rule.to });
         t.severity = rule.to;
       }
@@ -449,6 +542,25 @@ function applyFPReductions(threats, reachableFiles, packageName, packageDeps) {
 
   for (const t of threats) {
 
+    // Audit v3 B3: typosquat with LOW confidence → MEDIUM
+    // LOW confidence means Levenshtein distance >= 2, less likely to be an actual typosquat.
+    // Reduces score contribution from 10 (HIGH) to 3 (MEDIUM).
+    if (t.type === 'typosquat_detected' && t.severity === 'HIGH' &&
+        t.message && t.message.includes('Confidence: LOW')) {
+      t.reductions.push({ rule: 'typosquat_low_confidence', from: 'HIGH', to: 'MEDIUM' });
+      t.severity = 'MEDIUM';
+    }
+
+    // Audit v3: lifecycle_script with common build tool patterns → LOW
+    // Native addon builders, husky, patch-package, tsc etc. are benign lifecycle usage
+    if (t.type === 'lifecycle_script' && t.severity === 'MEDIUM') {
+      const BENIGN_LIFECYCLE_RE = /\b(node-gyp|prebuild|cmake-js|cmake|napi|prebuildify|husky|patch-package|rimraf|mkdirp|cross-env|tsc\b|ngcc\b|esbuild\b|electron-builder|electron-rebuild|neon\b)/i;
+      if (BENIGN_LIFECYCLE_RE.test(t.message)) {
+        t.reductions.push({ rule: 'benign_lifecycle', from: 'MEDIUM', to: 'LOW' });
+        t.severity = 'LOW';
+      }
+    }
+
     // Prototype hook: framework class prototypes → MEDIUM
     // Core Node.js prototypes (http.IncomingMessage, net.Socket) stay CRITICAL
     // Browser/native APIs (globalThis.fetch, XMLHttpRequest) stay HIGH
@@ -468,6 +580,15 @@ function applyFPReductions(threats, reachableFiles, packageName, packageDeps) {
         t.reductions.push({ rule: 'http_client_whitelist', from: t.severity, to: 'MEDIUM' });
         t.severity = 'MEDIUM';
       }
+    }
+
+    // Audit v3 B3: Libraries with >10 prototype modifications that are still HIGH
+    // after framework/HTTP checks are protocol implementations, not targeted attacks.
+    // Applied AFTER framework_prototype and http_client_whitelist to preserve MEDIUM.
+    if (t.type === 'prototype_hook' && t.severity === 'HIGH' &&
+        typeCounts.prototype_hook > 10) {
+      t.reductions.push({ rule: 'prototype_hook_count', from: 'HIGH', to: 'LOW' });
+      t.severity = 'LOW';
     }
 
     // Dist/build/minified files: severity downgrade for bundler output.
