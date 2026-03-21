@@ -68,9 +68,9 @@ Please include the following information in your report:
 - We aim to release fixes before public disclosure
 - We request a 90-day disclosure window for complex issues
 
-## Detection Rules (v2.10.0)
+## Detection Rules (v2.10.1)
 
-MUAD'DIB uses 14 scanner modules (module-graph pre-analysis + 13 parallel scanners) + 5 behavioral anomaly detection features + ground truth validation, producing 153 rule IDs (148 RULES + 5 PARANOID):
+MUAD'DIB uses 14 scanner modules (module-graph pre-analysis + 13 parallel scanners) + 5 behavioral anomaly detection features + ground truth validation, producing 158 rule IDs (153 RULES + 5 PARANOID):
 
 ### AST Scanner
 
@@ -177,6 +177,8 @@ MUAD'DIB uses 14 scanner modules (module-graph pre-analysis + 13 parallel scanne
 | MUADDIB-AST-053 | Unicode Variation Selector Decoder (GlassWorm) | CRITICAL | T1140 |
 | MUADDIB-AST-054 | Blockchain C2 Resolution (GlassWorm) | HIGH | T1102 |
 | MUADDIB-AST-055 | Hardcoded Blockchain RPC Endpoint (GlassWorm) | MEDIUM | T1102 |
+| MUADDIB-AST-056 | Module._load() Internal Loader Bypass | CRITICAL | T1059 |
+| MUADDIB-AST-057 | Dangerous Constructor (AsyncFunction/GeneratorFunction via prototype chain) | CRITICAL | T1059.007 |
 
 ### AI Config Scanner (v2.2)
 
@@ -189,6 +191,7 @@ MUAD'DIB uses 14 scanner modules (module-graph pre-analysis + 13 parallel scanne
 
 | Rule ID | Name | Severity |
 |---------|------|----------|
+| MUADDIB-FLOW-002 | Suspicious Module Sink (ws/mqtt/socket.io) | HIGH |
 | MUADDIB-FLOW-003 | Credential Tampering / Cache Poisoning | CRITICAL |
 | MUADDIB-FLOW-004 | Cross-File Dataflow | CRITICAL |
 
@@ -210,6 +213,8 @@ Co-occurring threat type combinations that never appear in benign packages. Inje
 | MUADDIB-COMPOUND-002 | Lifecycle Typosquat | lifecycle_script + typosquat_detected | CRITICAL |
 | MUADDIB-COMPOUND-004 | Lifecycle Inline Exec | lifecycle_script + node_inline_exec | CRITICAL |
 | MUADDIB-COMPOUND-005 | Lifecycle Remote Require | lifecycle_script + network_require | CRITICAL |
+| MUADDIB-COMPOUND-006 | WebSocket/MQTT Credential Exfil | env_access + ws/mqtt/socket.io sink (same file) | CRITICAL |
+| MUADDIB-COMPOUND-007 | Lifecycle File Exec | lifecycle_script + threats in referenced file | CRITICAL |
 
 ### Dependency Scanner
 
@@ -228,6 +233,7 @@ Co-occurring threat type combinations that never appear in benign packages. Inje
 | ~~MUADDIB-ENTROPY-002~~ | ~~High Entropy File~~ | ~~removed~~ | Removed in v1.6.16 — replaced by ENTROPY-003 |
 | MUADDIB-ENTROPY-003 | JS Obfuscation Pattern | HIGH | _0x* vars, encoded string arrays, eval+entropy, long base64 |
 | MUADDIB-ENTROPY-004 | Fragmented High Entropy Cluster | MEDIUM | Many short high-entropy strings bypassing MIN_STRING_LENGTH |
+| MUADDIB-ENTROPY-005 | Split Entropy Payload | CRITICAL/HIGH | High-entropy payload split across string concatenation (3+ chunks, entropy >= 5.5) |
 
 ### Other Scanners
 

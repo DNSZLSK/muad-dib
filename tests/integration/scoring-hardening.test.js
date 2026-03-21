@@ -253,7 +253,8 @@ async function runScoringHardeningTests() {
   // FP-P6 Fix 1: credential_regex_harvest count-based downgrade
   // ==========================================================================
   // P7: credential_regex_harvest threshold lowered from >4 to >2
-  test('FP-P7: credential_regex_harvest >2 hits → mostly LOW (one retained by dilution floor)', () => {
+  // Audit v3 B3: removed `from` constraint → no dilution floor, ALL go LOW
+  test('FP-P7: credential_regex_harvest >2 hits → ALL go LOW (no dilution floor)', () => {
     const threats = [];
     for (let i = 0; i < 4; i++) {
       threats.push({ type: 'credential_regex_harvest', severity: 'HIGH', file: 'lib/http.js', message: `regex${i}` });
@@ -266,11 +267,11 @@ async function runScoringHardeningTests() {
     const credThreats = threats.filter(t => t.type === 'credential_regex_harvest');
     const highOnes = credThreats.filter(t => t.severity === 'HIGH');
     const lowOnes = credThreats.filter(t => t.severity === 'LOW');
-    // v2.9.6 dilution floor: one instance retained at HIGH to prevent complete dilution
-    assert(highOnes.length === 1,
-      `Exactly one should retain HIGH (dilution floor), got ${highOnes.length}`);
-    assert(lowOnes.length === 3,
-      `Remaining 3 should be LOW, got ${lowOnes.length}`);
+    // Audit v3 B3: no dilution floor — all instances go LOW for complete FP suppression
+    assert(highOnes.length === 0,
+      `Expected 0 HIGH (no dilution floor), got ${highOnes.length}`);
+    assert(lowOnes.length === 4,
+      `All 4 should be LOW, got ${lowOnes.length}`);
   });
 
   test('FP-P7: credential_regex_harvest <=2 hits stays HIGH', () => {
@@ -367,9 +368,10 @@ async function runScoringHardeningTests() {
       `env_access with 12 hits should be LOW, got ${threats[0].severity}`);
   });
 
-  test('FP-P7: env_access <=10 hits stays HIGH', () => {
+  // Audit v3 B3: env_access maxCount lowered from 10→4
+  test('FP-P7: env_access <=4 hits stays HIGH', () => {
     const threats = [];
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 4; i++) {
       threats.push({ type: 'env_access', severity: 'HIGH', file: `config${i}.js`, message: `env${i}` });
     }
     for (let i = 0; i < 10; i++) {
@@ -377,7 +379,7 @@ async function runScoringHardeningTests() {
     }
     applyFPReductions(threats, null, null);
     assert(threats[0].severity === 'HIGH',
-      `env_access with 5 hits should stay HIGH, got ${threats[0].severity}`);
+      `env_access with 4 hits should stay HIGH, got ${threats[0].severity}`);
   });
 
   // ==========================================================================

@@ -89,7 +89,9 @@ function analyzeFile(content, filePath, basePath) {
     execPathVars: new Map(),
     globalThisAliases: new Set(),
     evalAliases: new Map(),           // B1: variable name → 'eval'|'Function'
+    moduleLoadDirectAliases: new Set(), // B3: destructured _load from require('module')
     objectPropertyMap: new Map(),     // B5: objName → Map<propName, stringValue>
+    concatValues: new Map(),          // B2: varName → { value, operands } for concat strings with ≥3 operands
     stringVarValues: new Map(),       // Variable reassignment tracking: varName → string value
     hasFromCharCode: content.includes('fromCharCode'),
     hasJsReverseShell: /\bnet\.Socket\b/.test(content) &&
@@ -165,6 +167,8 @@ function analyzeFile(content, filePath, basePath) {
     requireCacheVars: new Set(), // variables assigned from require.cache[...]
     proxyHandlerVars: new Set(),  // variables assigned object literals with set/get/apply/construct traps
     stringBuildVars: new Set(),   // variables assigned from BinaryExpression with '+' (string concat)
+    // Audit v3 B2: Entropy split detection — high-entropy string concat + eval/decode
+    highEntropyConcatFound: false, // set when a concat chain with >=3 leaves and high combined entropy is found
     // C10: Hash verification — legitimate binary installers verify checksums
     // Requires BOTH createHash() call AND .digest() call — false positives from
     // standalone mentions of 'sha256' or 'integrity' in comments/descriptions

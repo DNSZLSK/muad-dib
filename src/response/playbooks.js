@@ -537,11 +537,23 @@ const PLAYBOOKS = {
     'Cout de rotation: 0.000005 SOL par changement d\'adresse C2 — censorship-resistant. ' +
     'Bloquer les connexions vers les RPC Solana. Supprimer le package.',
 
+  dangerous_constructor:
+    'CRITIQUE: Acces au constructeur AsyncFunction/GeneratorFunction via Object.getPrototypeOf(). ' +
+    'Technique d\'evasion avancee: le constructeur n\'est pas accessible directement comme eval() ou Function(), ' +
+    'mais peut etre obtenu via la chaine prototype. Permet l\'execution de code arbitraire asynchrone. ' +
+    'Supprimer le package immediatement. Auditer le code genere dynamiquement.',
+
   module_load_bypass:
     'CRITIQUE: Module._load() detecte — bypass du module loader interne de Node.js. ' +
     'Permet de charger dynamiquement des modules (child_process, fs, net) sans passer par require(), ' +
     'contournant les restrictions et les hooks de chargement. ' +
     'Supprimer le package immediatement. Auditer les modules charges dynamiquement.',
+
+  split_entropy_payload:
+    'CRITIQUE: Payload haute entropie fragmente en ≥3 chunks concatenes pour contourner la detection. ' +
+    'Le resultat concatene est passe a eval/Function/atob/Buffer.from, indiquant un dechiffrement ou une execution staged. ' +
+    'Technique d\'evasion: chaque chunk individuel a une entropie basse, mais la concatenation revele le payload. ' +
+    'Supprimer le package immediatement. Analyser le payload decode dans un sandbox.',
 
   blockchain_rpc_endpoint:
     'Endpoint RPC blockchain hardcode detecte (Solana mainnet, Infura Ethereum). ' +
@@ -567,6 +579,21 @@ const PLAYBOOKS = {
     'CRITIQUE: Script lifecycle avec require(http/https) pour charger du code distant. ' +
     'Le payload est telecharge et execute automatiquement a l\'installation. ' +
     'NE PAS installer. Bloquer les connexions sortantes. Supprimer le package.',
+
+  lifecycle_file_exec:
+    'CRITIQUE: Un script lifecycle (preinstall/postinstall) execute un fichier JS contenant des menaces HIGH/CRITICAL. ' +
+    'Le malware est cache derriere une indirection: package.json → node setup.js → payload malveillant. ' +
+    'NE PAS installer. Supprimer le package immediatement. Auditer le fichier reference.',
+
+  websocket_credential_exfil:
+    'CRITIQUE: Exfiltration de credentials via canal non-HTTP (WebSocket, MQTT, Socket.io). ' +
+    'Les proxies HTTP ne detectent pas ce trafic. Regenerer immediatement tous les secrets exposes. ' +
+    'Bloquer les connexions sortantes sur les ports non-HTTP. Supprimer le package.',
+
+  suspicious_module_sink:
+    'Module reseau non-HTTP (ws, mqtt, socket.io) utilise comme sink de donnees. ' +
+    'Verifier si des donnees sensibles sont envoyees via ce canal. ' +
+    'Les proxies HTTP classiques ne filtrent pas ce trafic.',
 
   bin_field_hijack:
     'CRITIQUE: Le champ "bin" de package.json shadow une commande systeme (node, npm, git, bash, etc.). ' +

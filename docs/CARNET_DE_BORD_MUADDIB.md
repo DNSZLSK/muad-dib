@@ -1723,7 +1723,7 @@ Audit complet des entrees IOC wildcards : identification et correction des packa
 | Tests | **1656**, 0 failures, 42 fichiers de test |
 | Scanners | 14 |
 
-**Progression FPR** : 38% → 19.4% → 17.5% → ~13% → 8.9% → 7.4% → **6.0%**
+**Progression FPR curated** : 38% → 19.4% → 17.5% → ~13% → 8.9% → 7.4% → 6.0% → 12.9% (v2.9.4, post-audit) → **10.8%** (v2.10.1)
 
 ---
 
@@ -2258,6 +2258,49 @@ Phase 2a est deployable immediatement — le VPS collectera les 71 features enri
 
 ---
 
+## v2.10.1 — Security Audit v3 Fixes (21 Mars 2026)
+
+### 6 bypasses, 24 heures
+
+Un audit de securite a identifie 6 contournements exploitables (B1-B6). Session intensive de remediation : chaque bypass ferme, teste, valide. Zero regression sur les detections existantes.
+
+### Les 6 bypasses
+
+**B1 — Sinks reseau non detectes** : WebSocket (`ws`), MQTT, Socket.IO n'etaient pas suivis comme canaux d'exfiltration. Ajout de `MODULE_SINK_METHODS` dans le dataflow scanner, plus un compound `websocket_credential_exfil` (COMPOUND-007) quand env_access + module sink co-occurrent dans le meme fichier.
+
+**B2 — Entropie fragmentee** : Un payload haute entropie coupe en 3+ morceaux concatenes echappait au scanner d'entropie. Nouvelle detection `split_entropy_payload` (ENTROPY-005) qui recombine les chunks et calcule l'entropie combinee (seuil >= 5.5).
+
+**B3 — Destructuring + chaine de prototypes** : `const { _load } = require('module')` et `Object.getPrototypeOf(async function(){}).constructor` contournaient le tracking d'alias. Ajout du suivi des destructurations dans `handleVariableDeclarator` et detection des appels de constructeur de prototype.
+
+**B4 — Dilution `dynamic_require`** : Le mecanisme de reduction par comptage diminuait la severite des `dynamic_require` ciblant des modules dangereux (child_process, dns, net). Ajout d'une immunite anti-dilution pour ces cas specifiques.
+
+**B5 — Bruit `env_access`** : Le percentage guard degradait `env_access` quand il co-occurrait avec un sink reseau, cassant le signal compound. Immunite ajoutee quand env_access est dans le meme fichier qu'un sink reseau.
+
+**B6 — Correlation lifecycle-file** : Un lifecycle script referencant `node malicious.js` n'etait pas correle avec les menaces trouvees dans ce fichier. Nouveau compound `lifecycle_file_exec` (COMPOUND-008) qui croise les references JS des lifecycle scripts avec les resultats de scan.
+
+### FP Reduction
+
+En parallele des corrections de bypass, 3 strategies de reduction de FP :
+1. **credential_regex_harvest** : suppression du dilution floor (contrainte `from`) — toutes les instances au-dela du seuil passent LOW
+2. **Prototype hook framework patterns** : extension de `FRAMEWORK_PROTO_RE` avec WebSocket, EventEmitter, Buffer, Stream, etc.
+3. **Lifecycle benign commands** : `BENIGN_LIFECYCLE_RE` pour node-gyp, husky, tsc, esbuild etc. -> downgrade LOW
+
+### Metriques
+
+| Metrique | v2.10.0 | v2.10.1 | Delta |
+|----------|---------|---------|-------|
+| Tests | 2477 | **2533** | +56 |
+| Rules | 153 (148+5) | **158** (153+5) | +5 |
+| TPR | 93.9% | **93.9%** | stable |
+| FPR curated | 13.2% (70) | **10.8%** (57) | -2.4pp |
+| FPR random | 8.0% (16) | **7.5%** (15) | -0.5pp |
+| ADR | 96.3% | **96.3%** | stable |
+| Bypasses | 6 open | **0 open** | -6 |
+
+TPR intacte. FPR curated -2.4pp, FPR random -0.5pp, ADR stable. Zero regression de detection. Le FPR curated a 10.8% est a un cheveu des 10%. Le ML Phase 2b finira le travail — les packages comme typescript, prisma, webpack a score 100 ne peuvent etre resolus que par le ML.
+
+---
+
 ## Etat actuel
 
 ### Ce qui fonctionne
@@ -2279,16 +2322,16 @@ Phase 2a est deployable immediatement — le VPS collectera les 71 features enri
 | Version check | Notification automatique des nouvelles versions au demarrage |
 | **Detection comportementale (v2.0)** | Temporal lifecycle, AST diff, publish anomaly, maintainer change, canary tokens |
 | **Validation & Observabilite (v2.1)** | Ground truth (51 attaques, 93.9% TPR), detection time logging, FP rate tracking, score breakdown, threat feed API |
-| **Evaluation & Red Team (v2.2-v2.9)** | `muaddib evaluate`, 107 samples evasifs (67 adversariaux + 40 holdouts), TPR **93.9% (46/49)**, **FPR 12.9% (68/529)**, ADR **96.3% (103/107)** (4 misses documentes), 14 scanners, 153 regles, AI config scanner, 529 packages benins npm, 132 PyPI, 65 malwares documentes |
+| **Evaluation & Red Team (v2.2-v2.10)** | `muaddib evaluate`, 107 samples evasifs (67 adversariaux + 40 holdouts), TPR **93.9% (46/49)**, **FPR curated 10.8% (57/529)**, **FPR random 7.5% (15/200)**, ADR **96.3% (103/107)** (4 misses documentes), 14 scanners, 158 regles, AI config scanner, 529 packages benins npm + 200 random, 132 PyPI, 65 malwares documentes |
 | **Desobfuscation (v2.2.5)** | `src/scanner/deobfuscate.js`, 4 transformations AST + const propagation, approche additive (original + desobfusque), `--no-deobfuscate` flag |
 | **Dataflow inter-module (v2.2.6)** | `src/scanner/module-graph.js`, graphe de dependances, propagation de teinte inter-fichiers, 3-hop re-export, class methods, named exports, `--no-module-graph` flag |
-| Tests | **2477 tests unitaires** (56 fichiers) + 56 fuzz + 107 adversariaux/holdout, **86% coverage** (c8/Codecov) |
+| Tests | **2533 tests unitaires** (56 fichiers) + 56 fuzz + 107 adversariaux/holdout, **86% coverage** (c8/Codecov) |
 | **Hardening securite (v2.1.2)** | SSRF protection (shared/download.js), command injection prevention (execFileSync), path traversal (sanitizePackageName), JSON.parse protege, webhook strict |
-| **Compound scoring (v2.9.2)** | 4 regles compound zero-FP, `applyCompoundBoosts()`, detection de co-occurrences malveillantes |
+| **Compound scoring (v2.9.2-v2.10.1)** | 7 regles compound zero-FP, `applyCompoundBoosts()`, detection de co-occurrences malveillantes |
 | **GlassWorm detection (v2.9.1)** | Unicode invisible (OBF-003), blockchain C2 Solana (AST-054/055), variation decoder (AST-053) |
 | **Reputation scoring (v2.7.5)** | `computeReputationFactor()` — age, versions, downloads. HC bypass pour 8 types haute confiance |
 | **Scan memory (v2.7.8)** | `scan-memory.json` — cache 30j, alerte ±15% score delta seulement |
-| **ML pipeline (v2.8.7-v2.10.0)** | Extraction JSONL 71 features par scan, classifier XGBoost pur JS avec guard rails, pipeline d'entrainement Python (SHAP + 5-fold CV) |
+| **ML pipeline (v2.8.7-v2.10.1)** | Extraction JSONL 71 features par scan, classifier XGBoost pur JS avec guard rails, pipeline d'entrainement Python (SHAP + 5-fold CV) |
 | **Benchmark Datadog 17K** | Wild TPR **92.5%** (13 486/14 587), compromised_lib **97.8%**, malicious_intent **92.1%** |
 | Audit securite | 3 audits complets, **99 issues corrigees** (58 v1.4 + 41 v2.5), [rapport PDF](MUADDIB_Security_Audit_Report_v1.4.1.pdf) |
 

