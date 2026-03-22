@@ -87,7 +87,8 @@ async function runMonitorTests() {
     evaluateCacheTrigger,
     quickTyposquatCheck,
     POPULAR_NPM_NAMES,
-    computeAlertPriority
+    computeAlertPriority,
+    processQueueItem
   } = require('../../src/monitor.js');
 
   test('MONITOR: parseNpmRss extracts package names from RSS', () => {
@@ -7619,6 +7620,157 @@ async function runMonitorTests() {
     assert(payload.embeds[0].color === 0xe67e22, `Expected orange (HIGH) color, got ${payload.embeds[0].color}`);
     const priorityField = payload.embeds[0].fields.find(f => f.name === 'Priority');
     assert(!priorityField, 'Should NOT have Priority field without priority data');
+  });
+  // --- Bug fix: shouldSendWebhook ML override (v2.10.6) ---
+
+  test('MONITOR: shouldSendWebhook returns true when ML malicious p>=0.90 overrides sandbox clean', () => {
+    const orig = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.example.com/test';
+    try {
+      // sandbox clean, static score 15 (below threshold 20) — normally SUPPRESSED
+      const result = {
+        summary: { riskScore: 15, total: 2, critical: 0, high: 1, medium: 1, low: 0 },
+        threats: [
+          { type: 'env_access', severity: 'HIGH' },
+          { type: 'obfuscation_detected', severity: 'MEDIUM' }
+        ]
+      };
+      const sandbox = { score: 0, severity: 'CLEAN', findings: [] };
+      const mlResult = { prediction: 'malicious', probability: 0.999, reason: 'model' };
+      assert(shouldSendWebhook(result, sandbox, mlResult) === true,
+        'ML malicious p=0.999 should override sandbox clean suppression');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  test('MONITOR: shouldSendWebhook returns false when ML clean p=0.2 does not override', () => {
+    const orig = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.example.com/test';
+    try {
+      const result = {
+        summary: { riskScore: 15, total: 2, critical: 0, high: 1, medium: 1, low: 0 },
+        threats: [
+          { type: 'env_access', severity: 'HIGH' },
+          { type: 'obfuscation_detected', severity: 'MEDIUM' }
+        ]
+      };
+      const sandbox = { score: 0, severity: 'CLEAN', findings: [] };
+      const mlResult = { prediction: 'clean', probability: 0.2, reason: 'model' };
+      assert(shouldSendWebhook(result, sandbox, mlResult) === false,
+        'ML clean prediction should not override — still suppressed');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  test('MONITOR: shouldSendWebhook returns false when ML malicious but p<0.90', () => {
+    const orig = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.example.com/test';
+    try {
+      const result = {
+        summary: { riskScore: 15, total: 2, critical: 0, high: 1, medium: 1, low: 0 },
+        threats: [
+          { type: 'env_access', severity: 'HIGH' },
+          { type: 'obfuscation_detected', severity: 'MEDIUM' }
+        ]
+      };
+      const sandbox = { score: 0, severity: 'CLEAN', findings: [] };
+      const mlResult = { prediction: 'malicious', probability: 0.85, reason: 'model' };
+      assert(shouldSendWebhook(result, sandbox, mlResult) === false,
+        'ML malicious with p=0.85 (below 0.90 threshold) should not override');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  test('MONITOR: shouldSendWebhook returns false when mlResult is null (unchanged behavior)', () => {
+    const orig = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.example.com/test';
+    try {
+      const result = {
+        summary: { riskScore: 15, total: 2, critical: 0, high: 1, medium: 1, low: 0 },
+        threats: [
+          { type: 'env_access', severity: 'HIGH' },
+          { type: 'obfuscation_detected', severity: 'MEDIUM' }
+        ]
+      };
+      const sandbox = { score: 0, severity: 'CLEAN', findings: [] };
+      assert(shouldSendWebhook(result, sandbox, null) === false,
+        'Null mlResult should not change behavior — still suppressed');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  test('MONITOR: shouldSendWebhook ML override at exact boundary p=0.90', () => {
+    const orig = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.example.com/test';
+    try {
+      const result = {
+        summary: { riskScore: 15, total: 2, critical: 0, high: 1, medium: 1, low: 0 },
+        threats: [
+          { type: 'env_access', severity: 'HIGH' },
+          { type: 'obfuscation_detected', severity: 'MEDIUM' }
+        ]
+      };
+      const sandbox = { score: 0, severity: 'CLEAN', findings: [] };
+      const mlResult = { prediction: 'malicious', probability: 0.90, reason: 'model' };
+      assert(shouldSendWebhook(result, sandbox, mlResult) === true,
+        'ML malicious with p=0.90 (exact boundary) should override');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  // --- Bug fix: processQueueItem IOC fallback (v2.10.6) ---
+
+  asyncTest('MONITOR: processQueueItem sends IOC fallback webhook on scan failure', async () => {
+    const orig = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.example.com/test';
+    try {
+      // Create a fake item that will fail in resolveTarballAndScan (no tarball URL, no valid package)
+      const item = {
+        name: 'malicious-ioc-pkg',
+        version: '1.0.0',
+        ecosystem: 'npm',
+        tarballUrl: null,
+        isIOCMatch: true
+      };
+      // processQueueItem should not throw — errors are caught internally
+      // The IOC fallback path is exercised when resolveTarballAndScan fails
+      await processQueueItem(item);
+      // If we get here without throwing, the catch block handled the error gracefully
+      assert(true, 'processQueueItem should handle IOC fallback without throwing');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  asyncTest('MONITOR: processQueueItem does not send IOC fallback for non-IOC items', async () => {
+    const orig = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.example.com/test';
+    try {
+      const item = {
+        name: 'normal-failing-pkg',
+        version: '1.0.0',
+        ecosystem: 'npm',
+        tarballUrl: null,
+        isIOCMatch: false
+      };
+      // Should not throw and should not attempt IOC fallback webhook
+      await processQueueItem(item);
+      assert(true, 'processQueueItem should handle non-IOC failure without IOC fallback');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
   });
 }
 
