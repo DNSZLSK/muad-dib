@@ -22,6 +22,13 @@ function runMLClassifierTests() {
   // Reset model before each test section to ensure isolation
   resetModel();
 
+  // Pre-load models into require cache, then null them for test isolation
+  // (model files may contain trained data from ML pipeline)
+  try { require('../../src/ml/model-trees.js'); } catch {}
+  try { require('../../src/ml/model-bundler.js'); } catch {}
+  restoreNullModel();
+  restoreNullBundlerModel();
+
   // --- Guard rail tests ---
 
   test('classifyPackage: score < 20 returns clean (below_t1)', () => {

@@ -11,6 +11,13 @@ function runMLPipelineTests() {
     resetBundlerModel, isBundlerModelAvailable
   } = require('../../src/ml/classifier');
 
+  // Pre-load models into require cache, then null them for test isolation
+  // (model files may contain trained data from ML pipeline)
+  try { require('../../src/ml/model-trees.js'); } catch {}
+  try { require('../../src/ml/model-bundler.js'); } catch {}
+  restoreModel();
+  restoreBundlerModel();
+
   // --- Round-trip: enriched features → training record ---
 
   test('ML pipeline: enriched features present in training record', () => {
