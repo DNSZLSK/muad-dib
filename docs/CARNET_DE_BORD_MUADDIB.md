@@ -307,11 +307,37 @@ Le systeme injecte des findings CRITICAL synthetiques quand ces composants co-ex
 
 ---
 
+## L'audit fondamental et le ML (22 Mars 2026)
+
+Apres 3 mois de monitoring 24/7 (~10 000 packages/jour), un constat : **0 malware confirme**. Le moniteur envoyait ~600 alertes/jour mais aucune n'etait un vrai positif verifie. L'audit fondamental a pose 20 questions sur le pipeline et identifie 5 causes racines.
+
+La plus grave : **contamination des labels ML**. Quand le sandbox ne trouvait rien, le moniteur marquait automatiquement le package comme "fp" (faux positif). Sauf que le sandbox n'avait pas de honey tokens pendant 3 mois. Un sandbox propre ne prouve rien — le malware peut simplement ne pas s'etre active. 8176 records contamines.
+
+Le nettoyage a ete spectaculaire. Le classifier ML1 avant nettoyage : precision 37.2%, recall 99.8%. Apres nettoyage (8176 "fp" → "unconfirmed", exclus de l'entrainement) : **precision 97.8%, recall 93.3%, F1 0.955**. Le meme code, les memes features, mais avec des donnees propres.
+
+Deux modeles ML entraines :
+- **ML1 XGBoost** (malware detector) : 114 arbres, 21 features, seuil 0.500. Entraine sur 25346 benins + 14587 malwares Datadog. Top features : score, max_single_points, file_score_max, threat_density.
+- **ML2 Bundler detector** : 98 arbres, 30 features, seuil 0.100. Specialise dans les faux positifs de bundlers (webpack, rollup) qui scorent haut. F1 0.996 mais warning de leakage potentiel via unpacked_size_bytes.
+
+6 chantiers de remediation :
+1. **Relabeling assaini** : sandbox clean → "unconfirmed" au lieu de "fp". Guard `manualReview` obligatoire pour le label "fp".
+2. **Webhook triage P1/P2/P3** : P1 rouge (IOC, HC types, sandbox, canary), P2 orange (score >= 50, compounds, lifecycle+intent), P3 jaune (reste). Les ~26 vrais malwares/jour sont visuellement distincts.
+3. **3 nouveaux compounds** : `lifecycle_dataflow` (269 co-occurrences malware, 0 benin), `lifecycle_dangerous_exec` (47 cas), `obfuscated_lifecycle_env` (triple signal).
+4. **Lifecycle guard** : empeche la dilution count-threshold quand lifecycle_script est present.
+5. **Script score-0** : diagnostic des 1049 malwares avec score 0 (categorie : empty, ts_only, binary, etc.)
+6. **Architecture LLM triage** : design doc pour Phase 3 (Claude 3.5 Haiku, ~$17/mois, shadow mode → enforce)
+
+Investigation manuelle de 9 packages live — tous FP, confirmant que le triage humain ne scale pas et que le LLM Phase 3 est indispensable.
+
+Comparaison industrie : Socket (USA, $65M funding), Phylum (rachete par Veracode), Snyk (UK/Israel), Semgrep Multimodal, OSCAR (Chine). MUAD'DIB est le seul acteur francais dans ce domaine.
+
+---
+
 ## Etat actuel
 
 ### Ce qui fonctionne
 
-- **14 scanners paralleles**, 158 regles de detection (153 + 5 paranoid)
+- **14 scanners paralleles**, 162 regles de detection (157 + 5 paranoid)
 - **225 000+ IOCs** npm + 14 000+ PyPI
 - Detection de campagnes : Shai-Hulud (v1/v2/v3), GlassWorm (433+ packages)
 - Sandbox Docker avec simulation CI, canary tokens, monkey-patching preload, multi-run
@@ -321,13 +347,14 @@ Le systeme injecte des findings CRITICAL synthetiques quand ces composants co-ex
 - Detection comportementale : lifecycle temporel, AST diff, anomalie publication, changement maintainer
 - Desobfuscation statique : concat, charcode, base64, hex arrays, propagation de constantes
 - Dataflow inter-module : graphe de dependances, propagation de teinte, 3-hop re-export
-- Compound scoring : 7 regles zero-FP pour les co-occurrences malveillantes
-- Pipeline ML : extraction 71 features, classifier XGBoost JS pur (stub, en attente de donnees)
-- **2533 tests** (56 fichiers), 86% coverage
+- Compound scoring : 11 regles zero-FP pour les co-occurrences malveillantes
+- Pipeline ML : XGBoost classifier ML1 (P=0.978, F1=0.955, 114 arbres) + bundler detector ML2 (P=0.992, F1=0.996, 98 arbres)
+- Webhook triage P1/P2/P3 : classification visuelle des alertes (rouge/orange/jaune)
+- **2643 tests** (57 fichiers), 86% coverage
 
 ### Ce qui manque (honnetement)
 
-**ML en shadow mode** : Le classifier XGBoost est implemente avec 71 features enrichies, mais le modele est un stub en attente de donnees suffisantes. Le pipeline Python est pret. L'analyse repose encore principalement sur des patterns statiques, des IOCs connus, et des heuristiques comportementales.
+**LLM triage (Phase 3)** : Les modeles ML (ML1 malware detector, ML2 bundler detector) sont entraines et operationnels. La prochaine etape est le triage LLM (Claude 3.5 Haiku) pour filtrer automatiquement les alertes P2/P3. Design doc pret, deploiement en shadow mode prevu.
 
 **Pas d'interception TLS** : Le sandbox capture le SNI mais ne dechiffre pas le contenu HTTPS.
 

@@ -68,9 +68,9 @@ Please include the following information in your report:
 - We aim to release fixes before public disclosure
 - We request a 90-day disclosure window for complex issues
 
-## Detection Rules (v2.10.1)
+## Detection Rules (v2.10.5)
 
-MUAD'DIB uses 14 scanner modules (module-graph pre-analysis + 13 parallel scanners) + 5 behavioral anomaly detection features + ground truth validation, producing 158 rule IDs (153 RULES + 5 PARANOID):
+MUAD'DIB uses 14 scanner modules (module-graph pre-analysis + 13 parallel scanners) + 5 behavioral anomaly detection features + ground truth validation, producing 162 rule IDs (157 RULES + 5 PARANOID):
 
 ### AST Scanner
 
@@ -215,6 +215,9 @@ Co-occurring threat type combinations that never appear in benign packages. Inje
 | MUADDIB-COMPOUND-005 | Lifecycle Remote Require | lifecycle_script + network_require | CRITICAL |
 | MUADDIB-COMPOUND-006 | WebSocket/MQTT Credential Exfil | env_access + ws/mqtt/socket.io sink (same file) | CRITICAL |
 | MUADDIB-COMPOUND-007 | Lifecycle File Exec | lifecycle_script + threats in referenced file | CRITICAL |
+| MUADDIB-COMPOUND-009 | Lifecycle Dataflow | lifecycle_script + dataflow threat (same file) | HIGH |
+| MUADDIB-COMPOUND-010 | Lifecycle Dangerous Exec | lifecycle_script + dangerous_exec | CRITICAL |
+| MUADDIB-COMPOUND-011 | Obfuscated Lifecycle Env | lifecycle_script + obfuscation + env_access | HIGH |
 
 ### Dependency Scanner
 

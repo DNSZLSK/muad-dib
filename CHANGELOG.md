@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.10.5] - 2026-03-22
+
+### Added
+- **Audit fondamental pipeline** — 6 chantiers de remediation :
+  - C1: Relabeling assaini — sandbox clean → "unconfirmed" au lieu de "fp", guard `manualReview` pour label "fp"
+  - C2: Webhook triage P1/P2/P3 — `computeAlertPriority()` avec classification visuelle (rouge/orange/jaune)
+  - C3: 3 nouveaux compound scoring rules — `lifecycle_dataflow` (COMPOUND-009, HIGH), `lifecycle_dangerous_exec` (COMPOUND-010, CRITICAL), `obfuscated_lifecycle_env` (COMPOUND-011, HIGH)
+  - C4: Lifecycle-aware FP reduction guard — restaure MEDIUM quand lifecycle present
+  - C5: Score-0 investigation script (`scripts/analyze-score0.js`)
+  - C6: LLM triage design document (`docs/LLM-TRIAGE-DESIGN.md`)
+- **ML1 XGBoost** trained: P=0.978, R=0.933, F1=0.955 (114 trees, 21 features, threshold 0.500)
+- **ML2 Bundler detector** trained: P=0.992, R=1.000, F1=0.996 (98 trees, 30 features, threshold 0.100)
+- `scripts/cleanup-fp-labels.js` — one-shot script to convert contaminated "fp" labels to "unconfirmed"
+- `sameFileTypes` support in `applyCompoundBoosts()` for mixed package-level/file-level compound types
+- Honey environment: canary tokens, Docker camouflage, auto-sandbox (v2.10.3)
+
+### Fixed
+- **ML label contamination**: 8176 records automatically labeled "fp" by sandbox (without honey tokens) → converted to "unconfirmed"
+- ML test isolation: pre-load models and null stubs for test suites (model-trees.js and model-bundler.js now contain trained data)
+- FPR curated: 10.8% → **11.0%** (58/529, +1 from new compound rules)
+
+### Changed
+- Tests: 2533 → **2643** (+110) across 56 → **57** test files
+- Rules: 158 → **162** (157 RULES + 5 PARANOID, +4 from C3 compounds + C2 triage)
+- Compounds: 5 → **8** (6 existing + 3 new lifecycle compounds, minus 1 reclassified)
+- Benchmark Datadog v2: **92.8%** @1 (13538/14587), **69.9%** @20 (10202/14587)
+
 ## [2.10.1] - 2026-03-21
 
 ### Added
@@ -288,7 +315,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.6.5] - 2026-03-13
 
 ### Fixed
-- **Audit remediation (post-ANSSI)** — 6 categories of hardening:
+- **Audit remediation (post-security audit)** — 6 categories of hardening:
   1. **Critical safety**: Removed self-dependency in package.json, recursion depth guard (MAX_TAINT_DEPTH=50) in module-graph.js, redirect limit (MAX_REDIRECTS=5) in download.js, `warnings[]` array in scan results
   2. **Detection bypasses**: `env_access` conditional classification in intent-graph.js (sensitive env vars only), percentage guard count-based fix in scoring.js, array destructuring + object alias taint propagation in dataflow.js
   3. **Evaluation methodology**: Global ADR_THRESHOLD=20 (replaces per-sample thresholds), scoped TPR reporting, stratified FPR by package size, CI smoke tests
