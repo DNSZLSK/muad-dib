@@ -19,7 +19,7 @@ Priorites :
 ## Commands
 
 ```bash
-npm test          # Run all tests (custom framework, 2533 tests across 56 files)
+npm test          # Run all tests (custom framework, 2643 tests across 57 files)
 npm run lint      # ESLint with security plugin
 npm run scan      # Self-scan: node bin/muaddib.js scan .
 npm run update    # Download latest IOCs
@@ -56,7 +56,7 @@ For full technical details on each scanner, scoring system, sandbox, IOC system,
 2. Import in `src/index.js`, add to the Promise.all destructuring and the threats spread
 3. Add rule entry in `src/rules/index.js` with id, name, severity, confidence, description, mitre
 4. Add playbook entry in `src/response/playbooks.js`
-5. Add tests in the appropriate test file under `tests/` (56 modular test files)
+5. Add tests in the appropriate test file under `tests/` (57 modular test files)
 6. Create test fixtures in `tests/samples/my-scanner/`
 
 ## Key Constraints
@@ -84,16 +84,16 @@ Never skip documentation updates when publishing a new version.
 - Never commit directly to master
 - Do not create commits automatically — the user handles commits manually
 
-## Current Metrics (v2.10.1)
+## Current Metrics (v2.10.5)
 
 | Metric | Value |
 |--------|-------|
-| Version | **2.10.1** |
-| Tests | **2533** passed, 0 failed, across 56 files |
-| Rules | **158** (153 RULES + 5 PARANOID) |
+| Version | **2.10.5** |
+| Tests | **2643** passed, 0 failed, across 57 files |
+| Rules | **162** (157 RULES + 5 PARANOID) |
 | Scanners | **14** modules (13 parallel + 1 pre-analysis) |
 | TPR | **93.9%** (46/49 ground truth) |
-| FPR curated | **10.8%** (57/529 benign packages) |
+| FPR curated | **11.0%** (58/529 benign packages) |
 | FPR random | **7.5%** (15/200 random npm packages) |
 | ADR | **96.3%** (103/107 available adversarial + holdout) |
 

@@ -28,13 +28,13 @@ bin/muaddib.js (yargs CLI)
         ├─► Deduplication
         ├─► FP reductions (src/scoring.js — applyFPReductions)
         ├─► Intent coherence analysis (src/intent-graph.js — buildIntentPairs)
-        ├─► Rule enrichment (src/rules/index.js — 158 rules)
+        ├─► Rule enrichment (src/rules/index.js — 162 rules)
         ├─► Scoring (src/scoring.js — per-file max)
         ├─► ML classifier (src/ml/classifier.js — T1 zone filtering)
         └─► Output (CLI / JSON / HTML / SARIF)
 ```
 
-**Core orchestration:** `src/index.js` — `run(targetPath, options)` runs cross-file module graph analysis first, then launches 13 individual scanners in parallel via `Promise.all` (14 scanner modules total), then deduplicates, applies FP reductions, scores using per-file max (v2.2.11: `riskScore = min(100, max(file_scores) + package_level_score)`, severity weights: CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1), applies intent coherence analysis (intra-file source-sink pairing), enriches with rules/playbooks (158 rules), and outputs (CLI/JSON/HTML/SARIF). Result includes `warnings: []` array (v2.6.5) for incomplete scan notifications (module graph timeout/skip, deobfuscation failures). Exports `isPackageLevelThreat` and `computeGroupScore` for testing.
+**Core orchestration:** `src/index.js` — `run(targetPath, options)` runs cross-file module graph analysis first, then launches 13 individual scanners in parallel via `Promise.all` (14 scanner modules total), then deduplicates, applies FP reductions, scores using per-file max (v2.2.11: `riskScore = min(100, max(file_scores) + package_level_score)`, severity weights: CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1), applies intent coherence analysis (intra-file source-sink pairing), enriches with rules/playbooks (162 rules), and outputs (CLI/JSON/HTML/SARIF). Result includes `warnings: []` array (v2.6.5) for incomplete scan notifications (module graph timeout/skip, deobfuscation failures). Exports `isPackageLevelThreat` and `computeGroupScore` for testing.
 
 ## Scanner Modules
 
@@ -180,7 +180,7 @@ See [Intent Graph](#intent-graph) section for `isSDKPattern()` details and 22 SD
 
 ## Detection Rules
 
-**Rules & playbooks:** Threat types map to rules in `src/rules/index.js` (158 rules: 153 RULES + 5 PARANOID, MITRE ATT&CK mapped) and remediation text in `src/response/playbooks.js`. Both keyed by threat `type` string.
+**Rules & playbooks:** Threat types map to rules in `src/rules/index.js` (162 rules: 157 RULES + 5 PARANOID, MITRE ATT&CK mapped) and remediation text in `src/response/playbooks.js`. Both keyed by threat `type` string.
 
 ### AST Detection Rules (v2.2+)
 
@@ -268,9 +268,9 @@ GlassWorm campaign (March 2026, 433+ packages): Unicode invisible characters + B
 - 6 GlassWorm C2 IPs added to SUSPICIOUS_DOMAINS_HIGH
 - IOC: 4 markers, 2 files, 1 hash, 8 compromised packages (builtin.yaml)
 
-### ANSSI Audit v2 Remediation (v2.9.9)
+### Security Audit v2 Remediation (v2.9.9)
 
-5 bypass remediations from ANSSI audit v2 (score 71.9/100):
+5 bypass remediations from security audit v2 (score 71.9/100):
 
 - **Config security** (CRITIQUE): `.muaddibrc.json` in scanned package is IGNORED. Config auto-detection now only from `~/.muaddibrc.json` or CWD (if CWD ≠ targetPath). Emits `[SECURITY]` warning if config found inside scanned package.
 - **BinaryExpression computed property**: `resolveStringConcatWithVars()` resolves double-indirection patterns like `var a='ev',b='al'; globalThis[a+b]()` → CRITICAL.
@@ -280,7 +280,29 @@ GlassWorm campaign (March 2026, 433+ packages): Unicode invisible characters + B
 
 ## Version History
 
-### v2.9.9 — ANSSI Audit v2 Remediation
+### v2.10.5 — ML Models + Audit Fondamental
+- ML1 XGBoost trained: P=0.978, R=0.933, F1=0.955 (114 trees, 21 features)
+- ML2 Bundler detector trained: P=0.992, R=1.000, F1=0.996 (98 trees, 30 features)
+- Audit fondamental: 8176 contaminated "fp" labels cleaned to "unconfirmed"
+- Webhook triage P1/P2/P3: `computeAlertPriority()` with visual classification
+- 3 new compound scoring rules: lifecycle_dataflow, lifecycle_dangerous_exec, obfuscated_lifecycle_env
+- Lifecycle guard, score-0 investigation script, LLM triage design doc
+- Honey environment: canary tokens, Docker camouflage
+- Tests: 2533 → **2643** across 57 files. Rules: 158 → **162** (157 RULES + 5 PARANOID)
+- Wild TPR: **92.8%** (13538/14587). FPR curated: **11.0%** (58/529)
+
+### v2.10.1 — Security Audit v3
+- 6 bypasses closed, 5 new detection rules
+- WebSocket/MQTT/Socket.IO sink detection, split entropy payload, lifecycle-file-exec compound
+- FPR curated: 13.2% → **10.8%** (57/529). FPR random: 8.0% → **7.5%** (15/200)
+- Tests: 2477 → **2533** across 56 files. Rules: 153 → **158** (153 RULES + 5 PARANOID)
+
+### v2.10.0 — ML Classifier Phase 2
+- XGBoost-based binary classifier for T1 zone FP reduction (stub model)
+- 71 features (62 → 71), ML filter in monitor pipeline
+- Tests: 2435 → **2477** across 56 files
+
+### v2.9.9 — Security Audit v2 Remediation
 - 5 bypass remediations (config neutralization, BinaryExpression concat, process.mainModule.require, Module._load)
 - 1 new rule: AST-056 `module_load_bypass`
 - Tests: **2435** across 54 files
@@ -353,7 +375,7 @@ GlassWorm campaign (March 2026, 433+ packages): Unicode invisible characters + B
 - 3 new shell IFS evasion rules (SHELL-016 to SHELL-018), charcode validation
 - Tests: 2009 → **2042** (+33). Rules: 130 → **133** (128 RULES + 5 PARANOID)
 
-### v2.6.5 — Audit Remediation (ANSSI)
+### v2.6.5 — Audit Remediation
 - 6 phases: safety, detection bypasses, evaluation methodology, IOC validation, paranoid mode, documentation
 - Tests: 1940 → **1974** (+34)
 

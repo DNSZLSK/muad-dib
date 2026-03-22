@@ -18,7 +18,7 @@
 </nav>
 
 <h1>MUAD'DIB</h1>
-<p><span class="version">v2.10.1</span></p>
+<p><span class="version">v2.10.5</span></p>
 <p>Scanner de menaces supply-chain pour npm et PyPI. Open source, zero cloud, une seule commande.</p>
 
 <div class="install">
@@ -31,11 +31,11 @@
 
 <div class="metrics">
   <span class="metric"><span class="value">93.9%</span> <span class="label">TPR</span></span>
-  <span class="metric"><span class="value">10.8%</span> <span class="label">FPR</span></span>
+  <span class="metric"><span class="value">11.0%</span> <span class="label">FPR</span></span>
   <span class="metric"><span class="value">96.3%</span> <span class="label">ADR</span></span>
-  <span class="metric"><span class="value">92.5%</span> <span class="label">Wild TPR (17K)</span></span>
-  <span class="metric"><span class="value">2533</span> <span class="label">tests</span></span>
-  <span class="metric"><span class="value">158</span> <span class="label">regles</span></span>
+  <span class="metric"><span class="value">92.8%</span> <span class="label">Wild TPR (17K)</span></span>
+  <span class="metric"><span class="value">2643</span> <span class="label">tests</span></span>
+  <span class="metric"><span class="value">162</span> <span class="label">regles</span></span>
 </div>
 
 <hr>
@@ -48,7 +48,9 @@
   <li><strong>Desobfuscation statique</strong> : charcode, base64, hex arrays, const propagation</li>
   <li><strong>Diff entre versions</strong> : <code>muaddib diff v1.2.0</code></li>
   <li><strong>Detection comportementale</strong> : anomalies lifecycle, AST diff temporel, changement de maintainer</li>
-  <li><strong>Compound scoring</strong> : co-occurrences zero-FP</li>
+  <li><strong>Compound scoring</strong> : co-occurrences zero-FP (11 regles)</li>
+  <li><strong>ML XGBoost</strong> : classifier malware (F1 0.955) + detecteur bundler (F1 0.996)</li>
+  <li><strong>Webhook triage P1/P2/P3</strong> : classification visuelle des alertes</li>
   <li><strong>225 000+ IOC</strong> npm + 14 000+ PyPI, format compact 5MB</li>
 </ul>
 

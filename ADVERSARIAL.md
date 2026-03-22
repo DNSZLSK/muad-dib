@@ -6,9 +6,9 @@ This document describes the adversarial malware samples used to evaluate MUAD'DI
 
 - **67 adversarial samples** across 7 red-team waves
 - **40 holdout samples** across 4 holdout sets (holdout-v2 through holdout-v5)
-- **ADR (Adversarial Detection Rate): 96.3% (103/107 available)** on waves 1-7 + holdout (v2.10.1, global threshold=20)
+- **ADR (Adversarial Detection Rate): 96.3% (103/107 available)** on waves 1-7 + holdout (v2.10.5, global threshold=20)
 - **Wave 7: 3 FP fixes + 3 quick wins** (v2.9.4)
-- **2533 tests**, **158 rules** (153 RULES + 5 PARANOID)
+- **2643 tests**, **162 rules** (157 RULES + 5 PARANOID)
 
 ## Wave 1 — Core Evasion Techniques (20 samples)
 

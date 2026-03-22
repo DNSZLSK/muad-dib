@@ -1,6 +1,6 @@
 /**
  * Audit v3 bypass fix verification tests
- * Tests for 9 evasion techniques identified in ANSSI audit v3.
+ * Tests for 9 evasion techniques identified in security audit v3.
  * All bypasses must score >= 20 (ADR_THRESHOLD).
  */
 const fs = require('fs');

@@ -1929,7 +1929,7 @@ function handleCallExpression(node, ctx) {
       }
     }
 
-    // Module._load() — internal module loader bypass (ANSSI audit v2)
+    // Module._load() — internal module loader bypass (security audit v2)
     if (propName === '_load') {
       const calleeObj = node.callee.object;
       const isModuleIdentifier = calleeObj.type === 'Identifier' &&
