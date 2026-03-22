@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>v2.10.5 — Quand un changement de label fait passer le ML de 37% a 98% - MUAD'DIB</title>
+  <title>v2.10.5 - Quand un changement de label fait passer le ML de 37% a 98% - MUAD'DIB</title>
   <meta name="description" content="3 mois de monitoring, 0 malware confirme, 8176 labels contamines. Comment un nettoyage de donnees a fait passer la precision ML de 37% a 98%.">
   <link rel="stylesheet" href="../style.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
@@ -25,7 +25,7 @@
 
   <article>
     <div class="article-meta">
-      <h1>v2.10.5 — Quand un changement de label fait passer le ML de 37% a 98%</h1>
+      <h1>v2.10.5 - Quand un changement de label fait passer le ML de 37% a 98%</h1>
       <span class="date">2026-03-22</span>
       <div class="tags">
         <span class="tag">ml</span>
@@ -38,135 +38,86 @@
 
     <div class="article-content">
 
-      <h2>3 mois de monitoring, 0 malware confirme</h2>
+      <p>Le moniteur MUAD'DIB tourne depuis decembre 2025. ~10 000 packages npm scannes par jour, 24/7. ~600 alertes webhook Discord quotidiennes. Apres 3 mois : <strong>zero malware confirme</strong>. Pas parce qu'il n'y en a pas, mais parce que 600 cards orange identiques sans hierarchie, personne ne les trie.</p>
 
-      <p>Le moniteur MUAD'DIB tourne depuis decembre 2025. ~10 000 packages npm scannes par jour, 24/7. Environ 600 alertes webhook Discord quotidiennes. Et apres 3 mois : <strong>zero malware confirme</strong>.</p>
+      <h2>Le probleme : labels contamines</h2>
 
-      <p>Pas parce qu'il n'y en a pas. Le dataset Datadog contient 14 587 malwares in-scope, soit environ 26 par jour en moyenne sur la periode couverte. Le probleme : les 600 alertes quotidiennes se ressemblent toutes. Des cards Discord identiques, orange, sans hierarchie. Personne ne les trie, parce que c'est humainement impossible.</p>
-
-      <h2>L'audit fondamental</h2>
-
-      <p>J'ai pose 20 questions sur le pipeline. 5 causes racines identifiees. La plus grave : <strong>la contamination des labels ML</strong>.</p>
-
-      <p>Le schema etait simple :</p>
+      <p>20 questions posees sur le pipeline. 5 causes racines. La plus grave : la contamination des labels ML.</p>
 
       <ol>
         <li>Le moniteur detecte un package suspect (score &ge; 20)</li>
-        <li>Le sandbox Docker l'execute dans un container isole</li>
-        <li>Le sandbox ne detecte rien (pas de canary token exfiltre, pas d'activite reseau suspecte)</li>
-        <li>Le moniteur labellise automatiquement le package comme <code>"fp"</code> (faux positif)</li>
+        <li>Le sandbox Docker l'execute</li>
+        <li>Le sandbox ne detecte rien</li>
+        <li>Le moniteur labellise automatiquement le package comme <code>"fp"</code></li>
       </ol>
 
-      <p>Le probleme : <strong>le sandbox n'avait pas de honey tokens pendant 3 mois</strong>. Un sandbox propre ne prouve rien. Le malware peut simplement ne pas s'etre active (time bomb, environnement CI non detecte, cible specifique). 8176 records contamines avec le label <code>"fp"</code> alors qu'on ne savait pas s'ils etaient vraiment FP.</p>
+      <p>Sauf que le sandbox n'avait pas de honey tokens pendant 3 mois. Un sandbox propre ne prouve rien - le malware peut ne pas s'etre active (time bomb, cible specifique, check d'environnement). 8176 records contamines.</p>
 
-      <p>Resultat : le classifier ML apprenait a dire "tout est FP". Precision 37.2%, recall 99.8%. Il classait quasi tout comme malware (recall eleve) mais la plupart de ses predictions positives etaient fausses (precision catastrophique) parce que ses donnees d'entrainement "FP" contenaient probablement des vrais malwares.</p>
+      <p>Le classifier ML apprenait a dire "tout est FP". Precision 37.2%, recall 99.8%.</p>
 
       <h2>Le nettoyage</h2>
 
-      <p>Le fix : convertir les 8176 labels <code>"fp"</code> automatiques en <code>"unconfirmed"</code> et les exclure de l'entrainement ML. Seuls les labels valides par review manuelle (<code>manualReview: true</code>) sont desormais acceptes comme <code>"fp"</code>.</p>
+      <p>Conversion des 8176 labels <code>"fp"</code> automatiques en <code>"unconfirmed"</code>, exclus de l'entrainement. Seuls les labels valides par review manuelle (<code>manualReview: true</code>) sont acceptes comme <code>"fp"</code>.</p>
 
-      <p>Avant/apres, meme code, memes features, donnees propres :</p>
+      <p>Meme code, memes features, donnees propres :</p>
 
       <table>
-        <thead>
-          <tr><th>Metrique</th><th>Avant nettoyage</th><th>Apres nettoyage</th></tr>
-        </thead>
-        <tbody>
-          <tr><td>Precision</td><td>37.2%</td><td><strong>97.8%</strong></td></tr>
-          <tr><td>Recall</td><td>99.8%</td><td><strong>93.3%</strong></td></tr>
-          <tr><td>F1</td><td>0.541</td><td><strong>0.955</strong></td></tr>
-        </tbody>
+        <tr><th>Metrique</th><th>Avant</th><th>Apres</th></tr>
+        <tr><td>Precision</td><td>37.2%</td><td><strong>97.8%</strong></td></tr>
+        <tr><td>Recall</td><td>99.8%</td><td><strong>93.3%</strong></td></tr>
+        <tr><td>F1</td><td>0.541</td><td><strong>0.955</strong></td></tr>
       </table>
-
-      <p>Le recall a baisse de 99.8% a 93.3% — normal, le modele ne trichait plus en classant tout comme positif. Mais la precision est passee de 37% a 98%. Le meme algorithme, les memes hyperparametres, juste des donnees propres.</p>
 
       <h3>Benchmark Datadog</h3>
 
-      <p>Sur le dataset Datadog (14 587 malwares in-scope) :</p>
-
       <table>
-        <thead>
-          <tr><th>Metrique</th><th>Valeur</th></tr>
-        </thead>
-        <tbody>
-          <tr><td>Total packages</td><td>14 587</td></tr>
-          <tr><td>Detectes (@1, score &ge; 1)</td><td>13 538 (<strong>92.8%</strong>)</td></tr>
-          <tr><td>Detectes (@20, score &ge; 20)</td><td>10 202 (<strong>69.9%</strong>)</td></tr>
-          <tr><td>Score = 0</td><td>1 049</td></tr>
-        </tbody>
+        <tr><th>Metrique</th><th>Valeur</th></tr>
+        <tr><td>In-scope</td><td>14 587</td></tr>
+        <tr><td>Detectes (@1)</td><td>13 538 (<strong>92.8%</strong>)</td></tr>
+        <tr><td>Detectes (@20)</td><td>10 202 (<strong>69.9%</strong>)</td></tr>
+        <tr><td>Score = 0</td><td>1 049</td></tr>
       </table>
 
-      <h2>Les modeles ML</h2>
+      <h2>ML1 - Malware detector</h2>
 
-      <h3>ML1 — Malware detector</h3>
-
-      <p>XGBoost, 114 arbres de decision, 21 features, seuil de classification 0.500.</p>
-
-      <p>Les top features discriminantes :</p>
+      <p>XGBoost, 114 arbres, 21 features, seuil 0.500. Top features :</p>
 
       <ul>
-        <li><strong>score</strong> — le score de risque global. Logique : c'est l'aggregation de toutes les heuristiques</li>
-        <li><strong>max_single_points</strong> — le poids de la finding la plus grave. Un malware a generalement au moins une finding CRITICAL</li>
-        <li><strong>file_score_max</strong> — le score du fichier le plus suspect. Les malwares concentrent le code malveillant dans 1-2 fichiers</li>
-        <li><strong>threat_density</strong> — nombre de findings / nombre de fichiers. Un package avec 3 findings dans 1 fichier est plus suspect que 3 findings dans 500 fichiers</li>
+        <li><strong>score</strong> - score de risque global (aggregation des heuristiques)</li>
+        <li><strong>max_single_points</strong> - poids de la finding la plus grave</li>
+        <li><strong>file_score_max</strong> - score du fichier le plus suspect</li>
+        <li><strong>threat_density</strong> - findings / fichiers (malware = concentre, framework = dilue)</li>
       </ul>
 
-      <p>Le modele est un complement aux regles, pas un remplacement. Les regles decident "quel type de menace", le ML decide "est-ce que l'ensemble de signaux ressemble a un vrai malware ou a du bruit".</p>
+      <p>Le ML decide "est-ce que l'ensemble de signaux ressemble a un malware ou a du bruit". Les regles decident "quel type de menace".</p>
 
-      <h3>ML2 — Bundler detector</h3>
+      <h2>ML2 - Bundler detector</h2>
 
-      <p>XGBoost, 98 arbres, 30 features, seuil 0.100.</p>
+      <p>XGBoost, 98 arbres, 30 features, seuil 0.100. Les bundlers (webpack, rollup) generent du code minifie qui accumule des findings legits - <code>eval</code>, <code>Function</code>, <code>require</code> dynamiques - qui ressemblent a du malware. ML2 detecte ces cas.</p>
 
-      <p>Probleme specifique : les bundlers (webpack, rollup, esbuild) generent du code minifie qui accumule des findings legits — <code>eval</code>, <code>Function</code>, <code>require</code> dynamiques, patterns d'obfuscation — qui ressemblent a du malware. ML2 detecte ces cas et reduit leur score.</p>
+      <p>F1 de 0.996. Warning : <code>unpacked_size_bytes</code> correle fortement avec les bundlers et pourrait constituer un leakage. Le F1 reel en production sera probablement inferieur.</p>
 
-      <p>F1 de 0.996. Un warning honnete : ce F1 > 0.99 est suspectement eleve. La feature <code>unpacked_size_bytes</code> correle fortement avec les bundlers (les bundles sont gros) et pourrait constituer un leakage. Le modele reste utile mais son F1 reel en production sera probablement inferieur.</p>
+      <h2>Triage P1/P2/P3</h2>
 
-      <h2>Le triage P1/P2/P3</h2>
-
-      <p>600 alertes identiques par jour, ca ne sert a rien. Le cerveau humain ne peut pas traiter ca. La solution : classifier visuellement les alertes.</p>
+      <p>Classification visuelle des alertes :</p>
 
       <ul>
-        <li><strong>P1 (rouge)</strong> — IOC match, types haute confiance (lifecycle_shell_pipe, dangerous_binary_dropper...), canary token exfiltre, sandbox positif. Ce sont les vrais malwares. ~26 par jour en moyenne.</li>
-        <li><strong>P2 (orange)</strong> — Score &ge; 50, compound scoring declenche, lifecycle + intent coherence. Suspect mais pas confirme.</li>
-        <li><strong>P3 (jaune)</strong> — Le reste. Score 20-49 sans signal fort. La grande majorite des alertes, et la grande majorite des faux positifs.</li>
+        <li><strong>P1 (rouge)</strong> - IOC match, types haute confiance, canary token exfiltre, sandbox positif. ~26/jour.</li>
+        <li><strong>P2 (orange)</strong> - Score &ge; 50, compound scoring, lifecycle + intent coherence.</li>
+        <li><strong>P3 (jaune)</strong> - Reste. Score 20-49 sans signal fort. Majorite des FP.</li>
       </ul>
 
-      <p>Ce que ca change : les ~26 vrais malwares sont visuellement distincts des ~574 alertes FP/bruit. Un humain peut scanner les P1 en 2 minutes par jour au lieu de noyer dans 600 cards orange.</p>
-
-      <h2>Investigation manuelle : confirmation que ca ne scale pas</h2>
-
-      <p>J'ai investigue manuellement 9 packages live signales par le moniteur. Resultat : <strong>tous FP</strong>. Des bundlers, des fichiers de test, des CLI tools avec <code>child_process</code> legitimes.</p>
-
-      <p>Temps moyen par investigation : 5-10 minutes par package. A 26 vrais malwares + 574 FP par jour, le triage humain exhaustif prendrait 50+ heures/jour. Impossible.</p>
+      <p>Les ~26 vrais malwares sont visuellement distincts des ~574 FP. Triage P1 en 2 minutes/jour au lieu de noyer dans 600 cards identiques.</p>
 
       <h2>La suite : LLM Phase 3</h2>
 
-      <p>Le triage P1/P2/P3 resout le probleme visuel, mais pas le probleme de volume. Il faut un filtre automatique entre P2/P3 et la review humaine.</p>
+      <p>Investigation manuelle de 9 packages live : tous FP. Temps moyen 5-10 minutes par package. A 600 alertes/jour, le triage humain ne scale pas.</p>
 
-      <p>Le plan : Claude 3.5 Haiku en shadow mode pour analyser les alertes P2/P3. Le LLM recoit le contexte complet (findings, code, metadata) et decide : vrai positif probable, faux positif probable, ou incertain. Cout estime : ~$17/mois pour le volume actuel.</p>
+      <p>Plan : Claude 3.5 Haiku en shadow mode pour analyser les alertes P2/P3. ~$17/mois. Phases : shadow &rarr; enforce P3 &rarr; enforce P2+P3. Les P1 ne seront jamais filtrees.</p>
 
-      <p>Phases prevues :</p>
-      <ol>
-        <li><strong>Shadow mode</strong> — le LLM tourne en parallele, ses decisions sont loguees mais n'affectent pas le pipeline. On mesure l'accord avec le triage humain.</li>
-        <li><strong>Enforce P3</strong> — le LLM filtre les alertes P3 (jaunes). Si le LLM dit "FP probable", pas de webhook.</li>
-        <li><strong>Enforce P2+P3</strong> — extension aux alertes P2 (orange).</li>
-      </ol>
+      <h2>Lecon</h2>
 
-      <p>Les P1 ne seront jamais filtrees par le LLM. Un IOC match ou un canary token exfiltre doit toujours declencher une alerte.</p>
-
-      <h2>Comparaison industrie</h2>
-
-      <p>MUAD'DIB n'est pas seul dans ce domaine :</p>
-
-      <ul>
-        <li><strong>Socket</strong> (USA, $65M funding) — ML behavioral analysis, cloud sandboxing, CI/CD integrations</li>
-        <li><strong>Phylum</strong> (rachete par Veracode) — Automated risk analysis, CI blocking</li>
-        <li><strong>Snyk</strong> (UK/Israel) — Vulnerability database massive, ML triage</li>
-        <li><strong>Semgrep Multimodal</strong> — Analysis multi-langage, rules community</li>
-        <li><strong>OSCAR</strong> (Chine) — Academic supply-chain analysis</li>
-      </ul>
-
-      <p>MUAD'DIB est le seul acteur francais dans ce domaine. Un projet open source educatif qui ne remplacera jamais les outils enterprise, mais qui prouve qu'un dev solo peut avoir un impact reel avec des donnees propres et des metriques honnetes.</p>
+      <p>Le meme algorithme XGBoost, les memes hyperparametres, les memes 21 features. Precision 37% &rarr; 98% avec un seul changement : des donnees propres. Un sandbox sans honey tokens qui labellise "fp" automatiquement, c'est du label poisoning sur soi-meme.</p>
 
     </div>
   </article>
