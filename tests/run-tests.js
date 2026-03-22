@@ -60,6 +60,8 @@ const { runConfigTests } = require('./integration/config.test');
 const { runBenignRandomTests } = require('./integration/benign-random.test');
 const { runAuditV2RemediationTests } = require('./integration/audit-v2-remediation.test');
 const { runMLPipelineTests } = require('./integration/ml-pipeline.test');
+const runAuditV3BypassTests = require('./integration/audit-v3-bypasses.test');
+const { runSandboxImprovementTests } = require('./integration/sandbox-improvements.test');
 
 // Temporal analysis tests
 const { runTemporalAnalysisTests } = require('./temporal/temporal-analysis.test');
@@ -180,6 +182,12 @@ async function timed(name, fn) {
 
   // ML pipeline integration tests (v2.10.0)
   await timed('ml-pipeline', runMLPipelineTests);
+
+  // Audit v3 bypass fix tests
+  await timed('audit-v3-bypasses', runAuditV3BypassTests);
+
+  // Sandbox improvements tests (v2.10.2)
+  await timed('sandbox-improvements', runSandboxImprovementTests);
 
   // Utility tests
   await timed('utils', runUtilsTests);

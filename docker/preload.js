@@ -547,6 +547,13 @@
           log('FS_READ', `SPOOFED /proc/uptime (real read intercepted)`);
           return `${fakeUptime.toFixed(2)} ${fakeIdle.toFixed(2)}\n`;
         }
+        // 11b. /proc/1/cgroup SPOOFING (Docker detection evasion)
+        // Malware reads /proc/1/cgroup looking for "docker" or "containerd" to detect sandbox.
+        // Return realistic non-Docker cgroup content (systemd init.scope).
+        if (p === '/proc/1/cgroup') {
+          log('FS_READ', `SPOOFED /proc/1/cgroup (real read intercepted)`);
+          return '0::/init.scope\n';
+        }
       } catch (e) { /* ignore */ }
       return _currentReadFileSync.apply(_fs, arguments);
     };

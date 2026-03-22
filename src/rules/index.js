@@ -1719,6 +1719,18 @@ const RULES = {
     ],
     mitre: 'T1041'
   },
+  uncaught_exception_exfil: {
+    id: 'MUADDIB-COMPOUND-008',
+    name: 'Uncaught Exception Handler Credential Exfiltration',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'process.on("uncaughtException") combine avec acces aux variables d\'environnement sensibles et appel reseau. Technique d\'exfiltration silencieuse: le handler intercepte les erreurs pour envoyer les credentials a un serveur externe sans interruption du processus.',
+    references: [
+      'https://attack.mitre.org/techniques/T1041/',
+      'https://nodejs.org/api/process.html#event-uncaughtexception'
+    ],
+    mitre: 'T1041'
+  },
   suspicious_module_sink: {
     id: 'MUADDIB-FLOW-005',
     name: 'Non-HTTP Network Module Sink',

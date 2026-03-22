@@ -34,6 +34,7 @@ let noDeobfuscate = false;
 let noModuleGraph = false;
 let noReachability = false;
 let configPath = null;
+let autoSandbox = false;
 let feedLimit = null;
 let feedSeverity = null;
 let feedSince = null;
@@ -137,6 +138,8 @@ for (let i = 0; i < options.length; i++) {
     }
     configPath = cfgPath;
     i++;
+  } else if (options[i] === '--auto-sandbox') {
+    autoSandbox = true;
   } else if (options[i] === '--temporal') {
     temporalMode = true;
   } else if (options[i] === '--limit') {
@@ -429,6 +432,7 @@ const helpText = `
     --temporal-publish  Detect publish frequency anomalies (bursts, dormant spikes)
     --temporal-maintainer  Detect maintainer changes (new maintainer, account takeover)
     --temporal-full     All temporal analyses (lifecycle + AST + publish + maintainer)
+    --auto-sandbox      Auto-trigger sandbox when static scan score >= 20 (requires Docker)
     --no-canary         Disable honey token injection in sandbox
     --no-deobfuscate    Disable deobfuscation pre-processing
     --no-module-graph   Disable cross-file dataflow analysis
@@ -482,7 +486,8 @@ if (command === 'version' || command === '--version' || command === '-v') {
     noDeobfuscate: noDeobfuscate,
     noModuleGraph: noModuleGraph,
     noReachability: noReachability,
-    configPath: configPath
+    configPath: configPath,
+    autoSandbox: autoSandbox
   }).then(exitCode => {
     process.exit(exitCode);
   }).catch(err => {

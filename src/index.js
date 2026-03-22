@@ -523,6 +523,35 @@ async function run(targetPath, options = {}) {
     threats.push(...temporalThreats);
   }
 
+  // Auto-sandbox: trigger sandbox analysis when static scan detects threats.
+  // Preliminary score estimate: count CRITICAL/HIGH threats as a quick heuristic.
+  // Only when --auto-sandbox flag is set, no explicit sandboxResult, and Docker available.
+  if (options.autoSandbox && !options.sandboxResult) {
+    const critCount = threats.filter(t => t.severity === 'CRITICAL').length;
+    const highCount = threats.filter(t => t.severity === 'HIGH').length;
+    const prelimScore = Math.min(100, critCount * 25 + highCount * 10);
+    if (prelimScore >= 20) {
+      try {
+        const { isDockerAvailable, buildSandboxImage, runSandbox } = require('./sandbox/index.js');
+        if (isDockerAvailable()) {
+          console.log(`\n[AUTO-SANDBOX] Preliminary score ~${prelimScore} >= 20 — triggering sandbox analysis...`);
+          const built = await buildSandboxImage();
+          if (built) {
+            const sbResult = await runSandbox(targetPath, { local: true, strict: false });
+            if (sbResult && Array.isArray(sbResult.findings)) {
+              options.sandboxResult = sbResult;
+            }
+          }
+        } else {
+          debugLog('[AUTO-SANDBOX] Docker not available — skipping sandbox');
+        }
+      } catch (e) {
+        debugLog('[AUTO-SANDBOX] Error:', e && e.message);
+        // Graceful fallback — sandbox is best-effort
+      }
+    }
+  }
+
   // Sandbox integration
   let sandboxData = null;
   if (options.sandboxResult && Array.isArray(options.sandboxResult.findings)) {

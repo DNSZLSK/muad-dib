@@ -546,7 +546,8 @@ m._compile(payload, '/tmp/test.js');
       const result = await runScanDirect(tmp);
       const t = result.threats.find(t => t.type === 'dynamic_import');
       assert(t, 'Should detect dynamic import of child_process');
-      assert(t.severity === 'HIGH', 'Should be HIGH severity');
+      // Audit v3: dynamic import of child_process elevated to CRITICAL (evasion technique)
+      assert(t.severity === 'CRITICAL', 'Should be CRITICAL severity for child_process');
     } finally { cleanupTemp(tmp); }
   });
 
