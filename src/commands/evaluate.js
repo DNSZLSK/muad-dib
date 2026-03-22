@@ -982,6 +982,13 @@ async function evaluate(options = {}) {
   }
   const datadogTPR = evaluateDatadogTPR();
 
+  // --- ML Classifier evaluation ---
+  const mlEval = evaluateMLClassifier(
+    benign.details || [],
+    groundTruth.details || [],
+    adversarial.details || []
+  );
+
   const report = {
     version,
     date: new Date().toISOString(),
@@ -990,7 +997,8 @@ async function evaluate(options = {}) {
     benignPyPI,
     benignRandom,
     adversarial,
-    datadogTPR
+    datadogTPR,
+    mlEvaluation: mlEval || null
   };
 
   const metricsPath = saveMetrics(report);

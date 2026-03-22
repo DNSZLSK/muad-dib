@@ -112,17 +112,37 @@ async function sendWebhook(url, results, options = {}) {
 
 function formatDiscord(results) {
   const { summary, threats, target } = results;
+  const priority = results.priority;
 
-  const color = summary.riskLevel === 'CRITICAL' ? 0xe74c3c
-              : summary.riskLevel === 'HIGH' ? 0xe67e22
-              : summary.riskLevel === 'MEDIUM' ? 0xf1c40f
-              : summary.riskLevel === 'LOW' ? 0x3498db
-              : 0x2ecc71;
-
-  const emoji = summary.riskLevel === 'CRITICAL' ? '\uD83D\uDD34'
-              : summary.riskLevel === 'HIGH' ? '\uD83D\uDFE0'
-              : summary.riskLevel === 'MEDIUM' ? '\uD83D\uDFE1'
-              : '';
+  // Priority-based colors and emojis (fallback to risk-level if no priority)
+  let color, emoji, priorityLabel;
+  if (priority && priority.level) {
+    if (priority.level === 'P1') {
+      color = 0xe74c3c;   // red
+      emoji = '\uD83D\uDEA8'; // siren
+      priorityLabel = `P1 IMMEDIATE (${priority.reason})`;
+    } else if (priority.level === 'P2') {
+      color = 0xe67e22;   // orange
+      emoji = '\u26A0\uFE0F';  // warning
+      priorityLabel = `P2 REVIEW (${priority.reason})`;
+    } else {
+      color = 0xf1c40f;   // yellow
+      emoji = '\uD83D\uDFE1'; // yellow circle
+      priorityLabel = `P3 MONITOR (${priority.reason})`;
+    }
+  } else {
+    // Backward compat: fallback to risk-level colors
+    color = summary.riskLevel === 'CRITICAL' ? 0xe74c3c
+          : summary.riskLevel === 'HIGH' ? 0xe67e22
+          : summary.riskLevel === 'MEDIUM' ? 0xf1c40f
+          : summary.riskLevel === 'LOW' ? 0x3498db
+          : 0x2ecc71;
+    emoji = summary.riskLevel === 'CRITICAL' ? '\uD83D\uDD34'
+          : summary.riskLevel === 'HIGH' ? '\uD83D\uDFE0'
+          : summary.riskLevel === 'MEDIUM' ? '\uD83D\uDFE1'
+          : '';
+    priorityLabel = null;
+  }
 
   const criticalThreats = threats
     .filter(t => t.severity === 'CRITICAL')
@@ -130,7 +150,18 @@ function formatDiscord(results) {
     .map(t => `- ${t.message}`)
     .join('\n');
 
-  const fields = [
+  const fields = [];
+
+  // Add priority field if available
+  if (priorityLabel) {
+    fields.push({
+      name: 'Priority',
+      value: priorityLabel,
+      inline: true
+    });
+  }
+
+  fields.push(
     {
       name: 'Risk Score',
       value: `**${summary.riskScore}/100** (${summary.riskLevel})`,
@@ -146,7 +177,7 @@ function formatDiscord(results) {
       value: `**${summary.total}** threat(s)`,
       inline: true
     }
-  ];
+  );
 
   // Add ecosystem field if available
   if (results.ecosystem) {
@@ -193,12 +224,13 @@ function formatDiscord(results) {
   }
 
   const titlePrefix = emoji ? `${emoji} ` : '';
+  const prioritySuffix = priority && priority.level ? ` [${priority.level}]` : '';
   const ts = results.timestamp ? new Date(results.timestamp) : new Date();
   const readableTime = ts.toISOString().replace('T', ' ').replace(/\.\d+Z$/, ' UTC');
 
   return {
     embeds: [{
-      title: `${titlePrefix}MUAD'DIB Security Scan`,
+      title: `${titlePrefix}MUAD'DIB Security Scan${prioritySuffix}`,
       description: `Scan of **${target}**`,
       color: color,
       fields: fields,

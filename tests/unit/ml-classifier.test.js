@@ -12,11 +12,22 @@ function runMLClassifierTests() {
     sigmoid,
     traverseTree,
     buildFeatureVector,
-    hasHighConfidenceThreat
+    hasHighConfidenceThreat,
+    isBundlerModelAvailable,
+    resetBundlerModel,
+    buildBundlerFeatureVector,
+    predictBundler
   } = require('../../src/ml/classifier');
 
   // Reset model before each test section to ensure isolation
   resetModel();
+
+  // Pre-load models into require cache, then null them for test isolation
+  // (model files may contain trained data from ML pipeline)
+  try { require('../../src/ml/model-trees.js'); } catch {}
+  try { require('../../src/ml/model-bundler.js'); } catch {}
+  restoreNullModel();
+  restoreNullBundlerModel();
 
   // --- Guard rail tests ---
 
@@ -191,8 +202,251 @@ function runMLClassifierTests() {
     assert(first === second, 'resetModel should produce consistent results');
   });
 
+  // --- Synthetic model tests ---
+
+  const syntheticModel = {
+    version: 1,
+    features: ['score', 'count_total', 'count_critical'],
+    threshold: 0.5,
+    trees: [
+      [
+        { f: 0, t: 25, y: 1, n: 2, v: 0 },   // split on score < 25
+        { f: -1, t: 0, y: 0, n: 0, v: -1.5 }, // leaf: clean (sigmoid(-1.5) ~ 0.18)
+        { f: -1, t: 0, y: 0, n: 0, v: 1.5 }   // leaf: malicious (sigmoid(1.5) ~ 0.82)
+      ]
+    ]
+  };
+
+  function injectSyntheticModel() {
+    resetModel();
+    const modelPath = require.resolve('../../src/ml/model-trees.js');
+    require.cache[modelPath].exports = syntheticModel;
+    resetModel(); // force re-load
+  }
+
+  function restoreNullModel() {
+    const modelPath = require.resolve('../../src/ml/model-trees.js');
+    require.cache[modelPath].exports = null;
+    resetModel();
+  }
+
+  test('classifyPackage: synthetic model returns clean or malicious (not bypass)', () => {
+    injectSyntheticModel();
+    try {
+      // score=22 (in T1 zone), no HC threats → model should decide
+      const result = {
+        threats: [{ type: 'env_access', severity: 'HIGH', file: 'x.js' }],
+        summary: { riskScore: 22, total: 1 }
+      };
+      const ml = classifyPackage(result, {});
+      assert(
+        ml.prediction === 'clean' || ml.prediction === 'malicious',
+        `expected clean or malicious, got ${ml.prediction} (reason: ${ml.reason})`
+      );
+      assert(
+        ml.reason === 'ml_clean' || ml.reason === 'ml_malicious',
+        `expected ml_clean or ml_malicious, got ${ml.reason}`
+      );
+    } finally {
+      restoreNullModel();
+    }
+  });
+
+  test('classifyPackage: synthetic model probability is between 0 and 1', () => {
+    injectSyntheticModel();
+    try {
+      const result = {
+        threats: [{ type: 'env_access', severity: 'HIGH', file: 'x.js' }],
+        summary: { riskScore: 25, total: 1 }
+      };
+      const ml = classifyPackage(result, {});
+      assert(
+        ml.probability >= 0 && ml.probability <= 1,
+        `probability should be [0,1], got ${ml.probability}`
+      );
+    } finally {
+      restoreNullModel();
+    }
+  });
+
+  test('buildFeatureVector: returns correct length matching model features', () => {
+    injectSyntheticModel();
+    try {
+      const result = {
+        threats: [{ type: 'env_access', severity: 'HIGH', file: 'x.js' }],
+        summary: { riskScore: 25, total: 1, critical: 0, high: 1, medium: 0, low: 0 }
+      };
+      const vec = buildFeatureVector(result, {});
+      assert(vec.length === 3, `expected vector length 3, got ${vec.length}`);
+      // First element should be score=25
+      assert(vec[0] === 25, `expected vec[0]=25 (score), got ${vec[0]}`);
+      // Second element should be count_total=1
+      assert(vec[1] === 1, `expected vec[1]=1 (count_total), got ${vec[1]}`);
+      // Third element should be count_critical=0
+      assert(vec[2] === 0, `expected vec[2]=0 (count_critical), got ${vec[2]}`);
+    } finally {
+      restoreNullModel();
+    }
+  });
+
+  // === BUNDLER MODEL TESTS (ML2) ===
+
+  // --- isBundlerModelAvailable tests ---
+
+  test('isBundlerModelAvailable: returns false with null stub', () => {
+    resetBundlerModel();
+    assert(isBundlerModelAvailable() === false, 'expected false with null bundler model stub');
+  });
+
+  test('resetBundlerModel: allows re-evaluation of availability', () => {
+    resetBundlerModel();
+    const first = isBundlerModelAvailable();
+    resetBundlerModel();
+    const second = isBundlerModelAvailable();
+    assert(first === second, 'resetBundlerModel should produce consistent results');
+  });
+
+  // --- Bundler model guard rail tests ---
+
+  // Synthetic bundler model: splits on score — score < 50 → clean, >= 50 → malicious
+  const syntheticBundlerModel = {
+    version: 1,
+    features: ['score', 'count_total', 'count_critical'],
+    threshold: 0.5,
+    trees: [
+      [
+        { f: 0, t: 50, y: 1, n: 2, v: 0 },   // split on score < 50
+        { f: -1, t: 0, y: 0, n: 0, v: -1.5 }, // leaf: clean (sigmoid(-1.5) ~ 0.18)
+        { f: -1, t: 0, y: 0, n: 0, v: 1.5 }   // leaf: malicious (sigmoid(1.5) ~ 0.82)
+      ]
+    ]
+  };
+
+  function injectBundlerModel() {
+    resetBundlerModel();
+    const bundlerPath = require.resolve('../../src/ml/model-bundler.js');
+    require.cache[bundlerPath].exports = syntheticBundlerModel;
+    resetBundlerModel(); // force re-load
+  }
+
+  function restoreNullBundlerModel() {
+    const bundlerPath = require.resolve('../../src/ml/model-bundler.js');
+    require.cache[bundlerPath].exports = null;
+    resetBundlerModel();
+  }
+
+  test('classifyPackage: score >= 35, bundler model absent → bypass (score_above_threshold)', () => {
+    resetModel();
+    restoreNullBundlerModel();
+    const result = {
+      threats: [{ type: 'env_access', severity: 'HIGH', file: 'x.js' }],
+      summary: { riskScore: 40, total: 1 }
+    };
+    const ml = classifyPackage(result, {});
+    assert(ml.prediction === 'bypass', `expected bypass, got ${ml.prediction}`);
+    assert(ml.reason === 'score_above_threshold', `expected score_above_threshold, got ${ml.reason}`);
+  });
+
+  test('classifyPackage: score >= 35, HC type + bundler model → bypass (high_confidence_threat)', () => {
+    resetModel();
+    injectBundlerModel();
+    try {
+      const result = {
+        threats: [
+          { type: 'reverse_shell', severity: 'CRITICAL', file: 'x.js' }
+        ],
+        summary: { riskScore: 40, total: 1 }
+      };
+      const ml = classifyPackage(result, {});
+      assert(ml.prediction === 'bypass', `expected bypass, got ${ml.prediction}`);
+      assert(ml.reason === 'high_confidence_threat', `expected high_confidence_threat, got ${ml.reason}`);
+    } finally {
+      restoreNullBundlerModel();
+    }
+  });
+
+  test('classifyPackage: score >= 35, no HC, bundler model → fp_bundler (clean prediction)', () => {
+    resetModel();
+    injectBundlerModel();
+    try {
+      // score=40 < 50 threshold in bundler tree → leaf value -1.5 → sigmoid ~ 0.18 < 0.5 → clean → fp_bundler
+      const result = {
+        threats: [{ type: 'env_access', severity: 'HIGH', file: 'x.js' }],
+        summary: { riskScore: 40, total: 1 }
+      };
+      const ml = classifyPackage(result, {});
+      assert(ml.prediction === 'fp_bundler', `expected fp_bundler, got ${ml.prediction}`);
+      assert(ml.reason === 'ml_bundler_clean', `expected ml_bundler_clean, got ${ml.reason}`);
+      assert(ml.probability < 0.5, `expected probability < 0.5, got ${ml.probability}`);
+    } finally {
+      restoreNullBundlerModel();
+    }
+  });
+
+  test('classifyPackage: score >= 35, no HC, bundler model → bypass (malicious prediction)', () => {
+    resetModel();
+    injectBundlerModel();
+    try {
+      // score=60 >= 50 threshold in bundler tree → leaf value 1.5 → sigmoid ~ 0.82 >= 0.5 → malicious → bypass
+      const result = {
+        threats: [{ type: 'env_access', severity: 'HIGH', file: 'x.js' }],
+        summary: { riskScore: 60, total: 1 }
+      };
+      const ml = classifyPackage(result, {});
+      assert(ml.prediction === 'bypass', `expected bypass, got ${ml.prediction}`);
+      assert(ml.reason === 'ml_bundler_malicious', `expected ml_bundler_malicious, got ${ml.reason}`);
+      assert(ml.probability >= 0.5, `expected probability >= 0.5, got ${ml.probability}`);
+    } finally {
+      restoreNullBundlerModel();
+    }
+  });
+
+  test('predictBundler: returns bypass when bundler model absent', () => {
+    restoreNullBundlerModel();
+    const result = predictBundler([40, 1, 0]);
+    assert(result.prediction === 'bypass', `expected bypass, got ${result.prediction}`);
+    assert(result.probability === 0.5, `expected 0.5, got ${result.probability}`);
+  });
+
+  test('predictBundler: returns prediction with injected bundler model', () => {
+    injectBundlerModel();
+    try {
+      const result = predictBundler([40, 1, 0]); // score=40 < 50 → clean
+      assert(result.prediction === 'clean', `expected clean, got ${result.prediction}`);
+      assert(result.probability < 0.5, `expected probability < 0.5, got ${result.probability}`);
+    } finally {
+      restoreNullBundlerModel();
+    }
+  });
+
+  test('buildBundlerFeatureVector: returns empty array when model absent', () => {
+    restoreNullBundlerModel();
+    const result = {
+      threats: [{ type: 'env_access', severity: 'HIGH', file: 'x.js' }],
+      summary: { riskScore: 40, total: 1 }
+    };
+    const vec = buildBundlerFeatureVector(result, {});
+    assert(vec.length === 0, `expected empty vector, got length ${vec.length}`);
+  });
+
+  test('buildBundlerFeatureVector: returns correct length with injected model', () => {
+    injectBundlerModel();
+    try {
+      const result = {
+        threats: [{ type: 'env_access', severity: 'HIGH', file: 'x.js' }],
+        summary: { riskScore: 40, total: 1, critical: 0, high: 1, medium: 0, low: 0 }
+      };
+      const vec = buildBundlerFeatureVector(result, {});
+      assert(vec.length === 3, `expected vector length 3, got ${vec.length}`);
+      assert(vec[0] === 40, `expected vec[0]=40 (score), got ${vec[0]}`);
+    } finally {
+      restoreNullBundlerModel();
+    }
+  });
+
   // Cleanup
   resetModel();
+  resetBundlerModel();
 }
 
 module.exports = { runMLClassifierTests };

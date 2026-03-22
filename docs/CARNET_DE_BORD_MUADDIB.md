@@ -263,7 +263,7 @@ Le projet a subi plusieurs vagues d'audit tout au long de son developpement. En 
 
 Le plus gros audit (v2.5.0-v2.5.6) a traite 41 issues en 5 releases. Chaque vague de correction etait conservative : on corrige, on teste, on verifie zero regression, on continue.
 
-L'audit post-ANSSI (v2.6.5-v2.6.9) a ete particulierement structurant. Parmi les changements : suppression de la self-dependency (MUAD'DIB ne se scanne plus lui-meme), garde anti-recursion dans le dataflow (MAX_TAINT_DEPTH=50), seuil ADR global unique (suppression des seuils par echantillon), et mode paranoid avec tracking des alias eval/Function/require.
+L'audit post-sécurité (v2.6.5-v2.6.9) a ete particulierement structurant. Parmi les changements : suppression de la self-dependency (MUAD'DIB ne se scanne plus lui-meme), garde anti-recursion dans le dataflow (MAX_TAINT_DEPTH=50), seuil ADR global unique (suppression des seuils par echantillon), et mode paranoid avec tracking des alias eval/Function/require.
 
 Un dernier audit (v2.10.1) a identifie 6 bypasses exploitables. Session intensive de 24h : WebSocket/MQTT comme sinks, entropie fragmentee, destructuring + chaine de prototypes, dilution `dynamic_require`, bruit `env_access`, correlation lifecycle-file. Tous fermes, zero regression.
 

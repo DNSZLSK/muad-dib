@@ -1731,6 +1731,43 @@ const RULES = {
     ],
     mitre: 'T1041'
   },
+  // C3 compounds (post-audit fondamental)
+  lifecycle_dataflow: {
+    id: 'MUADDIB-COMPOUND-009',
+    name: 'Lifecycle Hook + Suspicious Dataflow',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'Script lifecycle (preinstall/postinstall) combine avec un flux de donnees suspect (credential read → network send). Pattern classique d\'exfiltration install-time.',
+    references: [
+      'https://attack.mitre.org/techniques/T1041/',
+      'https://attack.mitre.org/techniques/T1195/002/'
+    ],
+    mitre: 'T1041'
+  },
+  lifecycle_dangerous_exec: {
+    id: 'MUADDIB-COMPOUND-010',
+    name: 'Lifecycle Hook + Dangerous Shell Execution',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Script lifecycle combine avec execution de commande shell dangereuse (curl, wget, nc, bash). Injection de commande automatique a l\'installation.',
+    references: [
+      'https://attack.mitre.org/techniques/T1059/004/',
+      'https://attack.mitre.org/techniques/T1195/002/'
+    ],
+    mitre: 'T1059.004'
+  },
+  obfuscated_lifecycle_env: {
+    id: 'MUADDIB-COMPOUND-011',
+    name: 'Obfuscated Lifecycle Credential Access',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'Obfuscation + acces aux variables d\'environnement sensibles + script lifecycle. Triple signal: le code est intentionnellement masque pour voler des credentials a l\'installation.',
+    references: [
+      'https://attack.mitre.org/techniques/T1027/',
+      'https://attack.mitre.org/techniques/T1552/001/'
+    ],
+    mitre: 'T1027'
+  },
   suspicious_module_sink: {
     id: 'MUADDIB-FLOW-005',
     name: 'Non-HTTP Network Module Sink',
