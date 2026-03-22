@@ -2257,7 +2257,7 @@ async function runMonitorTests() {
 
       updateScanStats('clean');
       const data = loadScanStats();
-      const today = new Date().toISOString().slice(0, 10);
+      const today = getParisDateString();
       assert(data.daily.length === 1, 'Should have 1 daily entry');
       assert(data.daily[0].date === today, 'Daily entry date should be today: ' + today);
       assert(data.daily[0].scanned === 1, 'Daily scanned should be 1');
@@ -2289,7 +2289,7 @@ async function runMonitorTests() {
       updateScanStats('confirmed');
 
       const data = loadScanStats();
-      const today = new Date().toISOString().slice(0, 10);
+      const today = getParisDateString();
       const dayEntry = data.daily.find(d => d.date === today);
       assert(dayEntry, 'Should have daily entry');
       assert(dayEntry.false_positive === 3, 'false_positive should be 3');

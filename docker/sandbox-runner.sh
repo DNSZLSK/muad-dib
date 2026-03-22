@@ -11,6 +11,47 @@ TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 START_MS=$(date +%s%3N 2>/dev/null || echo 0)
 
 # ══════════════════════════════════════════════════════════════
+# PHASE 0.5: Docker camouflage — anti-sandbox evasion (T1497.001)
+# Modern malware detects Docker before executing (/.dockerenv,
+# /proc/1/cgroup, hex hostname, low uptime, empty home).
+# If detected → stays dormant → sandbox score 0 → false negative.
+# ══════════════════════════════════════════════════════════════
+
+# ── 0.5a. Remove Docker fingerprint files ──
+rm -f /.dockerenv
+
+# ── 0.5b. Realistic bash_history (credible developer activity) ──
+cat > /home/sandboxuser/.bash_history << 'HIST'
+cd ~/projects/my-app
+git pull origin main
+npm install
+npm test
+code .
+git status
+git add -A && git commit -m "fix: update deps"
+npm run build
+ls -la
+cat package.json
+HIST
+chown sandboxuser:sandboxuser /home/sandboxuser/.bash_history
+
+# ── 0.5c. Fake project directory (developer workstation illusion) ──
+mkdir -p /home/sandboxuser/projects/my-app
+cat > /home/sandboxuser/projects/my-app/package.json << 'EOF'
+{"name":"my-app","version":"2.1.0","main":"index.js","scripts":{"start":"node index.js","test":"jest"}}
+EOF
+chown -R sandboxuser:sandboxuser /home/sandboxuser/projects
+
+# ── 0.5d. Realistic home directory structure ──
+# An empty home is a strong sandbox signal. Real dev machines have these dirs.
+mkdir -p /home/sandboxuser/.config /home/sandboxuser/.local/share \
+  /home/sandboxuser/Downloads /home/sandboxuser/Documents \
+  /home/sandboxuser/.vscode
+chown -R sandboxuser:sandboxuser /home/sandboxuser/.config \
+  /home/sandboxuser/.local /home/sandboxuser/Downloads \
+  /home/sandboxuser/Documents /home/sandboxuser/.vscode
+
+# ══════════════════════════════════════════════════════════════
 # PHASE 1: Root-privileged setup (iptables, tcpdump, filesystem snapshot)
 # Runs as root to access raw sockets and kernel netfilter.
 # ══════════════════════════════════════════════════════════════
@@ -78,7 +119,38 @@ export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-wJalrXUtnFEMI/K7MDENG/bPx
 export SLACK_WEBHOOK_URL="${SLACK_WEBHOOK_URL:-https://hooks.example.com/services/TCANARY/BCANARY/canary-slack-token}"
 export DISCORD_WEBHOOK_URL="${DISCORD_WEBHOOK_URL:-https://discord.com/api/webhooks/000000000000000000/abcdefghijklmnopqrstuvwxyz}"
 
-# ── 2d. Preload injection — deferred to entry point (phase 3b) ──
+# ── 2d. Honey environment — write canary files to sandboxuser home ──
+# Realistic credential files trap malware that reads sensitive paths.
+# Content is injected via Docker -e from canary-tokens.js (dynamic per session).
+HONEY_HOME="/home/sandboxuser"
+if [ -n "$CANARY_ENV_CONTENT" ]; then
+  printf '%b' "$CANARY_ENV_CONTENT" > "$HONEY_HOME/.env"
+  chown sandboxuser:sandboxuser "$HONEY_HOME/.env"
+fi
+if [ -n "$CANARY_NPMRC_CONTENT" ]; then
+  printf '%b' "$CANARY_NPMRC_CONTENT" > "$HONEY_HOME/.npmrc"
+  chown sandboxuser:sandboxuser "$HONEY_HOME/.npmrc"
+fi
+if [ -n "$CANARY_AWS_CONTENT" ]; then
+  mkdir -p "$HONEY_HOME/.aws"
+  printf '%b' "$CANARY_AWS_CONTENT" > "$HONEY_HOME/.aws/credentials"
+  chown -R sandboxuser:sandboxuser "$HONEY_HOME/.aws"
+fi
+if [ -n "$CANARY_SSH_KEY" ]; then
+  mkdir -p "$HONEY_HOME/.ssh"
+  printf '%b' "$CANARY_SSH_KEY" > "$HONEY_HOME/.ssh/id_rsa"
+  chmod 600 "$HONEY_HOME/.ssh/id_rsa"
+  chown -R sandboxuser:sandboxuser "$HONEY_HOME/.ssh"
+fi
+if [ -n "$CANARY_GITCONFIG" ]; then
+  printf '%b' "$CANARY_GITCONFIG" > "$HONEY_HOME/.gitconfig"
+  chown sandboxuser:sandboxuser "$HONEY_HOME/.gitconfig"
+fi
+# Clean up canary content env vars (don't leak them to the package process)
+unset CANARY_ENV_CONTENT CANARY_NPMRC_CONTENT CANARY_AWS_CONTENT CANARY_SSH_KEY CANARY_GITCONFIG
+echo "[SANDBOX] Honey environment deployed." >&2
+
+# ── 2e. Preload injection — deferred to entry point (phase 3b) ──
 # NODE_OPTIONS='--require /opt/preload.js' monkey-patches http/https/net/dns.
 # Enabling it during npm install causes timeouts (hundreds of wrapped network calls).
 # tcpdump already captures install-phase network; preload targets runtime behavior.

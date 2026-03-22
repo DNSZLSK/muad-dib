@@ -537,7 +537,16 @@ function handleVariableDeclarator(node, ctx) {
               innerCall.arguments?.length >= 1) {
             const arg = innerCall.arguments[0];
             if (arg.type === 'FunctionExpression' && (arg.async || arg.generator)) {
+              const kind = arg.async ? 'AsyncFunction' : 'GeneratorFunction';
               ctx.evalAliases.set(node.id.name, 'Function');
+              // Emit CRITICAL at declaration — extracting constructor via prototype chain is never benign
+              ctx.hasDynamicExec = true;
+              ctx.threats.push({
+                type: 'dangerous_constructor',
+                severity: 'CRITICAL',
+                message: `${kind} constructor extracted via Object.getPrototypeOf() into "${node.id.name}" — prototype chain code execution evasion.`,
+                file: ctx.relFile
+              });
             }
           }
         }
@@ -659,6 +668,21 @@ function handleVariableDeclarator(node, ctx) {
             return extractStringValueDeep(a) || '';
           }).join('/');
           ctx.ideConfigPathVars.set(node.id.name, parentPath);
+        }
+      }
+    }
+  }
+
+  // Audit v3 bypass fix: Array destructuring eval alias: const [fn] = [eval]
+  if (node.id?.type === 'ArrayPattern' && node.init?.type === 'ArrayExpression') {
+    const elements = node.init.elements;
+    const patterns = node.id.elements;
+    for (let i = 0; i < Math.min(elements?.length || 0, patterns?.length || 0); i++) {
+      const el = elements[i];
+      const pat = patterns[i];
+      if (el?.type === 'Identifier' && pat?.type === 'Identifier') {
+        if (el.name === 'eval' || el.name === 'Function') {
+          ctx.evalAliases.set(pat.name, el.name);
         }
       }
     }
@@ -1398,10 +1422,21 @@ function handleCallExpression(node, ctx) {
     } else {
       ctx.hasEvalInFile = true;
       ctx.hasDynamicExec = true;
+      // Audit v3: elevate to CRITICAL when argument contains dangerous API calls
+      let aliasSev = 'HIGH';
+      let aliasMsg = `Indirect ${aliased} via alias "${node.callee.name}" — eval wrapper evasion.`;
+      if (node.arguments.length >= 1) {
+        const aliasArg = node.arguments[0];
+        if (aliasArg?.type === 'Literal' && typeof aliasArg.value === 'string' &&
+            /\b(require|import|exec|execSync|spawn|child_process|process\.env)\b/.test(aliasArg.value)) {
+          aliasSev = 'CRITICAL';
+          aliasMsg = `Indirect ${aliased} via alias "${node.callee.name}" with dangerous payload: "${aliasArg.value.substring(0, 80)}" — eval evasion + code execution.`;
+        }
+      }
       ctx.threats.push({
         type: aliased === 'eval' ? 'dangerous_call_eval' : 'dangerous_call_function',
-        severity: 'HIGH',
-        message: `Indirect ${aliased} via alias "${node.callee.name}" — eval wrapper evasion.`,
+        severity: aliasSev,
+        message: aliasMsg,
         file: ctx.relFile
       });
     }
@@ -1579,10 +1614,19 @@ function handleCallExpression(node, ctx) {
         firstArg.type === 'TemplateLiteral') {
       ctx.hasEvalInFile = true;
       ctx.hasDynamicExec = true;
+      // Audit v3: elevate to CRITICAL when string contains dangerous API calls
+      let timerSeverity = 'HIGH';
+      let timerMsg = `${callName}() with string argument — eval equivalent, executes the string as code.`;
+      if (firstArg.type === 'Literal' && typeof firstArg.value === 'string') {
+        if (/\b(require|import|exec|execSync|spawn|child_process|\.readFile|\.writeFile|process\.env|\.homedir)\b/.test(firstArg.value)) {
+          timerSeverity = 'CRITICAL';
+          timerMsg = `${callName}() with dangerous API in string: "${firstArg.value.substring(0, 80)}" — eval equivalent code execution.`;
+        }
+      }
       ctx.threats.push({
         type: 'dangerous_call_eval',
-        severity: 'HIGH',
-        message: `${callName}() with string argument — eval equivalent, executes the string as code.`,
+        severity: timerSeverity,
+        message: timerMsg,
         file: ctx.relFile
       });
     }
@@ -1929,6 +1973,24 @@ function handleCallExpression(node, ctx) {
           }
         }
       }
+
+      // Audit v3 bypass fix: .constructor.constructor('code')() — double constructor chain
+      // Any expression.constructor.constructor is traversing to Function constructor
+      if (obj?.type === 'MemberExpression') {
+        const innerPropName = obj.computed
+          ? (obj.property?.type === 'Literal' ? String(obj.property.value) : null)
+          : (obj.property?.type === 'Identifier' ? obj.property.name : null);
+        if (innerPropName === 'constructor') {
+          ctx.hasEvalInFile = true;
+          ctx.hasDynamicExec = true;
+          ctx.threats.push({
+            type: 'dangerous_constructor',
+            severity: 'CRITICAL',
+            message: 'Constructor chain traversal: .constructor.constructor() — accesses Function constructor via prototype chain.',
+            file: ctx.relFile
+          });
+        }
+      }
     }
 
     // SANDWORM_MODE: Track writeFileSync/writeFile to temp paths
@@ -1980,17 +2042,45 @@ function handleCallExpression(node, ctx) {
     }
   }
 
+  // Audit v3: JSON.stringify(process.env) — bulk env serialization = env enumeration
+  if (node.callee.type === 'MemberExpression' &&
+      node.callee.object?.type === 'Identifier' && node.callee.object.name === 'JSON' &&
+      node.callee.property?.type === 'Identifier' && node.callee.property.name === 'stringify' &&
+      node.arguments.length >= 1) {
+    const strArg = node.arguments[0];
+    if (strArg.type === 'MemberExpression' &&
+        strArg.object?.type === 'Identifier' && strArg.object.name === 'process' &&
+        strArg.property?.type === 'Identifier' && strArg.property.name === 'env') {
+      ctx.hasEnvEnumeration = true;
+    }
+  }
+
   // Batch 1: vm.* code execution — vm.runInThisContext, vm.runInNewContext, vm.compileFunction, vm.Script
   if (node.callee.type === 'MemberExpression' && node.callee.property?.type === 'Identifier') {
     const vmMethod = node.callee.property.name;
     if (['runInThisContext', 'runInNewContext', 'compileFunction'].includes(vmMethod)) {
-      // NOTE: Do NOT set ctx.hasDynamicExec — vm.* is legitimately used by bundlers
+      // Audit v3: elevate to CRITICAL when argument contains dangerous API calls
+      let vmSeverity = 'HIGH';
+      let vmMsg = `vm.${vmMethod}() — dynamic code execution via Node.js vm module bypasses eval detection.`;
+      const vmArg = node.arguments?.[0];
+      let vmContent = '';
+      if (vmArg?.type === 'Literal' && typeof vmArg.value === 'string') {
+        vmContent = vmArg.value;
+      } else if (vmArg?.type === 'Identifier' && ctx.stringVarValues?.has(vmArg.name)) {
+        vmContent = ctx.stringVarValues.get(vmArg.name);
+      }
+      if (/\b(require|import|exec|execSync|spawn|child_process|process\.env)\b/.test(vmContent)) {
+        vmSeverity = 'CRITICAL';
+        ctx.hasDynamicExec = true;
+        vmMsg = `vm.${vmMethod}() with dangerous API in code: "${vmContent.substring(0, 80)}" — vm module code execution bypass.`;
+      }
+      // NOTE: Do NOT set ctx.hasDynamicExec for generic vm.* calls — legitimately used by bundlers
       // (webpack, jest, etc.) and must not trigger compound detections (zlib_inflate_eval,
       // fetch_decrypt_exec) which were designed for eval/Function patterns.
       ctx.threats.push({
         type: 'vm_code_execution',
-        severity: 'HIGH',
-        message: `vm.${vmMethod}() — dynamic code execution via Node.js vm module bypasses eval detection.`,
+        severity: vmSeverity,
+        message: vmMsg,
         file: ctx.relFile
       });
     }
@@ -2053,6 +2143,19 @@ function handleCallExpression(node, ctx) {
     }
   }
 
+  // Audit v3 bypass fix: process.on('uncaughtException'/'unhandledRejection', handler)
+  // Error handler hijacking for silent credential exfiltration
+  if (node.callee?.type === 'MemberExpression' &&
+      node.callee.object?.type === 'Identifier' && node.callee.object.name === 'process' &&
+      node.callee.property?.type === 'Identifier' && node.callee.property.name === 'on' &&
+      node.arguments.length >= 2) {
+    const eventArg = node.arguments[0];
+    if (eventArg?.type === 'Literal' &&
+        (eventArg.value === 'uncaughtException' || eventArg.value === 'unhandledRejection')) {
+      ctx.hasUncaughtExceptionHandler = true;
+    }
+  }
+
   // SANDWORM_MODE R8: dns.resolve detection moved to walk.ancestor() in ast.js (FIX 5)
 }
 
@@ -2064,9 +2167,11 @@ function handleImportExpression(node, ctx) {
       // Batch 2: strip node: prefix so import('node:child_process') normalizes
       const modName = src.value.startsWith('node:') ? src.value.slice(5) : src.value;
       if (dangerousModules.includes(modName)) {
+        // Audit v3: dynamic import of code execution modules → CRITICAL (evasion technique)
+        const CRITICAL_IMPORTS = ['child_process', 'net', 'dns', 'worker_threads'];
         ctx.threats.push({
           type: 'dynamic_import',
-          severity: 'HIGH',
+          severity: CRITICAL_IMPORTS.includes(modName) ? 'CRITICAL' : 'HIGH',
           message: `Dynamic import() of dangerous module "${src.value}".`,
           file: ctx.relFile
         });
@@ -2813,6 +2918,29 @@ function handlePostWalk(ctx) {
       message: 'Detached process + sensitive env access + network call — credential exfiltration via background process (DPRK/Lazarus evasion pattern).',
       file: ctx.relFile
     });
+  }
+
+  // Audit v3 bypass fix: uncaughtException + env access + network = silent exfiltration
+  // Pattern: process.on('uncaughtException', handler) that reads env vars and sends to network.
+  // Never legitimate — error handlers don't need to send credentials to external servers.
+  if (ctx.hasUncaughtExceptionHandler && hasSensitiveEnvInFile && ctx.hasNetworkCallInFile) {
+    ctx.threats.push({
+      type: 'uncaught_exception_exfil',
+      severity: 'CRITICAL',
+      message: 'process.on("uncaughtException") + sensitive env access + network — silent credential exfiltration via error handler hijacking.',
+      file: ctx.relFile
+    });
+  }
+  // Also: uncaughtException + env enumeration (Object.entries/keys(process.env)) + network
+  if (ctx.hasUncaughtExceptionHandler && ctx.hasEnvEnumeration && ctx.hasNetworkCallInFile) {
+    if (!ctx.threats.some(t => t.type === 'uncaught_exception_exfil' && t.file === ctx.relFile)) {
+      ctx.threats.push({
+        type: 'uncaught_exception_exfil',
+        severity: 'CRITICAL',
+        message: 'process.on("uncaughtException") + bulk env enumeration + network — silent credential exfiltration via error handler hijacking.',
+        file: ctx.relFile
+      });
+    }
   }
 
   // GlassWorm: Unicode variation selector decoder = .codePointAt + variation selector constants

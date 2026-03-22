@@ -585,6 +585,11 @@ const PLAYBOOKS = {
     'Le malware est cache derriere une indirection: package.json → node setup.js → payload malveillant. ' +
     'NE PAS installer. Supprimer le package immediatement. Auditer le fichier reference.',
 
+  uncaught_exception_exfil:
+    'CRITIQUE: Exfiltration silencieuse via process.on("uncaughtException"). ' +
+    'Le handler intercepte les erreurs pour envoyer les credentials (process.env) a un serveur externe. ' +
+    'Regenerer immediatement tous les secrets. Supprimer le package. Auditer les connexions sortantes.',
+
   websocket_credential_exfil:
     'CRITIQUE: Exfiltration de credentials via canal non-HTTP (WebSocket, MQTT, Socket.io). ' +
     'Les proxies HTTP ne detectent pas ce trafic. Regenerer immediatement tous les secrets exposes. ' +

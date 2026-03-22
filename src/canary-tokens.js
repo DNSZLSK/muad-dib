@@ -72,6 +72,55 @@ function createCanaryNpmrc(tokens) {
 }
 
 /**
+ * Generate fake AWS credentials file content.
+ * Format matches ~/.aws/credentials (INI format, format-valid key IDs).
+ * @param {Record<string, string>} tokens - The token map from generateCanaryTokens()
+ * @returns {string} AWS credentials file content
+ */
+function createCanaryAwsCredentials(tokens) {
+  return [
+    '[default]',
+    `aws_access_key_id = ${tokens.AWS_ACCESS_KEY_ID}`,
+    `aws_secret_access_key = ${tokens.AWS_SECRET_ACCESS_KEY}`,
+    'region = us-east-1',
+    ''
+  ].join('\n');
+}
+
+/**
+ * Generate a fake SSH private key (Ed25519 format).
+ * The key is structurally valid PEM but cryptographically meaningless.
+ * Malware that reads ~/.ssh/id_rsa or id_ed25519 will exfiltrate this.
+ * @returns {string} Fake SSH private key content
+ */
+function createCanarySshKey() {
+  const fakeKeyData = crypto.randomBytes(64).toString('base64');
+  return [
+    '-----BEGIN OPENSSH PRIVATE KEY-----',
+    fakeKeyData.substring(0, 70),
+    fakeKeyData.substring(0, 70),
+    '-----END OPENSSH PRIVATE KEY-----',
+    ''
+  ].join('\n');
+}
+
+/**
+ * Generate a fake .gitconfig with user identity.
+ * Malware fingerprinting the developer will exfiltrate this.
+ * @returns {string} Fake .gitconfig content
+ */
+function createCanaryGitconfig() {
+  return [
+    '[user]',
+    '\tname = John Developer',
+    '\temail = john.dev@company-internal.example.com',
+    '[credential]',
+    '\thelper = store',
+    ''
+  ].join('\n');
+}
+
+/**
  * Search for canary tokens in network logs from sandbox.
  * Network log structure matches sandbox.js report.network:
  *   dns_queries: string[], http_bodies: string[],
@@ -199,6 +248,9 @@ module.exports = {
   generateCanaryTokens,
   createCanaryEnvFile,
   createCanaryNpmrc,
+  createCanaryAwsCredentials,
+  createCanarySshKey,
+  createCanaryGitconfig,
   detectCanaryExfiltration,
   detectCanaryInOutput
 };

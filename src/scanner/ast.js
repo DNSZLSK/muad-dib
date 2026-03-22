@@ -178,7 +178,9 @@ function analyzeFile(content, filePath, basePath) {
     hasVariationSelectorConst: false,
     // GlassWorm: blockchain C2 resolution (Solana import + C2 method + dynamic exec)
     hasSolanaImport: false,
-    hasSolanaC2Method: false
+    hasSolanaC2Method: false,
+    // Audit v3: uncaughtException/unhandledRejection handler for error hijacking detection
+    hasUncaughtExceptionHandler: false
   };
 
   // Compute fetchOnlySafeDomains: check if ALL URLs in file point to known registries

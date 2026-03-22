@@ -6,6 +6,9 @@ const {
   generateCanaryTokens,
   createCanaryEnvFile,
   createCanaryNpmrc,
+  createCanaryAwsCredentials,
+  createCanarySshKey,
+  createCanaryGitconfig,
   detectCanaryExfiltration,
   detectCanaryInOutput
 } = require('../canary-tokens.js');
@@ -154,10 +157,15 @@ async function runSingleSandbox(packageName, options = {}) {
     let timedOut = false;
     const containerName = `npm-audit-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
 
+    // Realistic hostname to evade sandbox detection (T1497.001)
+    // Default Docker hostname is a 12-char hex hash — easily fingerprinted.
+    const fakeHostname = `dev-laptop-${crypto.randomBytes(2).toString('hex')}`;
+
     const dockerArgs = [
       'run',
       '--rm',
       `--name=${containerName}`,
+      `--hostname=${fakeHostname}`,
       '--network=bridge',
       '--memory=512m',
       '--cpus=1',
@@ -173,6 +181,9 @@ async function runSingleSandbox(packageName, options = {}) {
       // Also inject canary file contents as env vars for the entrypoint to write
       dockerArgs.push('-e', `CANARY_ENV_CONTENT=${createCanaryEnvFile(canaryTokens).replace(/\r?\n/g, '\\n')}`);
       dockerArgs.push('-e', `CANARY_NPMRC_CONTENT=${createCanaryNpmrc(canaryTokens).replace(/\r?\n/g, '\\n')}`);
+      dockerArgs.push('-e', `CANARY_AWS_CONTENT=${createCanaryAwsCredentials(canaryTokens).replace(/\r?\n/g, '\\n')}`);
+      dockerArgs.push('-e', `CANARY_SSH_KEY=${createCanarySshKey().replace(/\r?\n/g, '\\n')}`);
+      dockerArgs.push('-e', `CANARY_GITCONFIG=${createCanaryGitconfig().replace(/\r?\n/g, '\\n')}`);
     }
 
     // Inject time offset (preload.js deferred to entry point in sandbox-runner.sh)
