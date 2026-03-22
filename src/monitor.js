@@ -924,7 +924,7 @@ function getWebhookThreshold(reputationFactor) {
   return 20;                                 // new/unknown — default bar
 }
 
-function shouldSendWebhook(result, sandboxResult) {
+function shouldSendWebhook(result, sandboxResult, mlResult) {
   if (!getWebhookUrl()) return false;
 
   const staticScore = (result && result.summary) ? (result.summary.riskScore || 0) : 0;
@@ -940,6 +940,11 @@ function shouldSendWebhook(result, sandboxResult) {
   // IOC matches are highest-confidence (225K+ known malicious packages).
   // Sandbox can miss time-bombs, env-specific, browser-only payloads.
   if (hasIOCMatch(result)) return true;
+
+  // 1b. ML malicious with high probability — prevent suppression.
+  // ML1 saw enough signals to classify as malicious (p >= 0.90).
+  // Sandbox clean doesn't disprove ML (time bombs, env checks, targeted).
+  if (mlResult && mlResult.prediction !== 'clean' && mlResult.probability >= 0.90) return true;
 
   // 2. Real sandbox detection (> 30) — always send
   if (sandboxScore > 30) return true;
@@ -1208,8 +1213,8 @@ function buildAlertData(name, version, ecosystem, result, sandboxResult) {
   return webhookData;
 }
 
-async function trySendWebhook(name, version, ecosystem, result, sandboxResult) {
-  if (!shouldSendWebhook(result, sandboxResult)) {
+async function trySendWebhook(name, version, ecosystem, result, sandboxResult, mlResult) {
+  if (!shouldSendWebhook(result, sandboxResult, mlResult)) {
     if (sandboxResult && sandboxResult.score === 0) {
       console.log(`[MONITOR] SUPPRESSED (sandbox clean, low static): ${name}@${version}`);
     }
@@ -2384,13 +2389,15 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta) {
         // ML Phase 2: classifier filter for T1 zone (score 20-34)
         // Reduces FP webhook noise by filtering clean packages before sandbox/webhook.
         // Guard rails in classifyPackage() ensure HC types and high-score packages are never suppressed.
+        // Hoisted so trySendWebhook can use ML result to prevent suppression (p >= 0.90).
+        let mlResult = null;
         const riskScore = result.summary.riskScore || 0;
         if (tier === 1 && riskScore >= 20 && riskScore < 35) {
           try {
             const { classifyPackage, isModelAvailable } = require('./ml/classifier.js');
             if (isModelAvailable()) {
               const enrichedMeta = { npmRegistryMeta, fileCountTotal, hasTests, unpackedSize: meta.unpackedSize, registryMeta: meta };
-              const mlResult = classifyPackage(result, enrichedMeta);
+              mlResult = classifyPackage(result, enrichedMeta);
               if (mlResult.prediction === 'clean') {
                 console.log(`[MONITOR] ML CLEAN: ${name}@${version} (p=${mlResult.probability}, score=${riskScore})`);
                 stats.mlFiltered++;
@@ -2541,7 +2548,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta) {
         } else if (ecosystem === 'npm' && hasHighConfidenceThreat(result)) {
           console.log(`[MONITOR] REPUTATION BYPASS: ${name} has high-confidence threat — using raw score`);
         }
-        await trySendWebhook(name, version, ecosystem, adjustedResult, sandboxResult);
+        await trySendWebhook(name, version, ecosystem, adjustedResult, sandboxResult, mlResult);
         const staticScore = result.summary.riskScore || 0;
         const hasHCThreats = hasHighConfidenceThreat(result);
         const isDormant = sandboxResult && sandboxResult.score === 0 && (result.summary.riskScore || 0) >= 20;
@@ -2579,6 +2586,33 @@ async function processQueueItem(item) {
   } catch (err) {
     recordError(err);
     console.error(`[MONITOR] Queue error for ${item.name}: ${err.message}`);
+    // IOC fallback: if scan failed for a known malicious package, send P1 alert.
+    // The pre-alert was fire-and-forget; this ensures at least one webhook lands.
+    if (item.isIOCMatch) {
+      console.log(`[MONITOR] IOC FALLBACK: scan failed for ${item.name}@${item.version}, sending IOC alert`);
+      try {
+        const url = getWebhookUrl();
+        if (url) {
+          const payload = {
+            embeds: [{
+              title: '\u26a0\ufe0f IOC ALERT - Scan Failed for Known Malicious Package',
+              color: 0xe74c3c,
+              fields: [
+                { name: 'Package', value: `${item.name}@${item.version || '?'}`, inline: true },
+                { name: 'Source', value: 'IOC Database Match', inline: true },
+                { name: 'Error', value: (err.message || 'Unknown error').slice(0, 200), inline: false },
+                { name: 'Action', value: 'Manual investigation required.', inline: false }
+              ],
+              footer: { text: `MUAD'DIB IOC Fallback | ${new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, ' UTC')}` },
+              timestamp: new Date().toISOString()
+            }]
+          };
+          await sendWebhook(url, payload, { rawPayload: true });
+        }
+      } catch (webhookErr) {
+        console.error(`[MONITOR] IOC fallback webhook failed: ${webhookErr.message}`);
+      }
+    }
   }
   maybePersistDailyStats();
 
@@ -3114,10 +3148,12 @@ async function pollNpmChanges(state) {
 
       // Layer 1: IOC pre-alert — send immediate webhook for known malicious packages
       // before queueing. Catches packages that may be unpublished before scan completes.
+      // Hoisted so scanQueue item can carry isIOCMatch for fallback webhook on scan failure.
+      let isKnownIOC = false;
       try {
         const iocs = loadCachedIOCs(); // 10s TTL cache, negligible cost per poll cycle
-        const isKnownIOC = (iocs.wildcardPackages && iocs.wildcardPackages.has(name)) ||
-                           (iocs.packagesMap && iocs.packagesMap.has(name));
+        isKnownIOC = (iocs.wildcardPackages && iocs.wildcardPackages.has(name)) ||
+                     (iocs.packagesMap && iocs.packagesMap.has(name));
         if (isKnownIOC) {
           console.log(`[MONITOR] IOC PRE-ALERT: ${name} — known malicious package detected in changes stream`);
           stats.iocPreAlerts = (stats.iocPreAlerts || 0) + 1;
@@ -3144,7 +3180,8 @@ async function pollNpmChanges(state) {
         tarballUrl: docMeta ? docMeta.tarball : null,
         unpackedSize: docMeta ? docMeta.unpackedSize : 0,
         registryScripts: docMeta ? docMeta.scripts : null,
-        _cacheTrigger: cacheTrigger.shouldCache ? cacheTrigger : null
+        _cacheTrigger: cacheTrigger.shouldCache ? cacheTrigger : null,
+        isIOCMatch: isKnownIOC
       });
       queued++;
     }
@@ -3876,7 +3913,8 @@ module.exports = {
   get tarballCacheIndex() { return tarballCacheIndex; },
   set tarballCacheIndex(v) { tarballCacheIndex = v; },
   // C2: Alert priority triage
-  computeAlertPriority
+  computeAlertPriority,
+  processQueueItem
 };
 
 // Standalone entry point: node src/monitor.js
