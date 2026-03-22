@@ -838,6 +838,88 @@ async function evaluateAdversarial() {
   return { detected, total, available, adr, adrCI, cohorts, sensitivity, details };
 }
 
+// =========================================================================
+// 4. Datadog Benchmark — TPR on full in-scope dataset (pure JSON read)
+// =========================================================================
+
+const DATADOG_BENCHMARK_FILE = path.join(ROOT, 'datasets', 'real-world', 'datadog-benchmark-results.json');
+const DATADOG_TPR_THRESHOLD = 20;  // aligned with ADR/BENIGN threshold
+
+/**
+ * Evaluate TPR on the full Datadog benchmark in-scope dataset.
+ * Pure JSON read — no re-scan, no download. Uses pre-computed scores
+ * from datadog-benchmark-results.json. Updates automatically when
+ * the benchmark file is re-generated after a VPS re-run.
+ *
+ * @returns {Object|null} TPR results with breakdowns, or null if file missing
+ */
+function evaluateDatadogTPR() {
+  if (!fs.existsSync(DATADOG_BENCHMARK_FILE)) return null;
+
+  const benchmark = JSON.parse(fs.readFileSync(DATADOG_BENCHMARK_FILE, 'utf8'));
+  const inScope = benchmark.results.filter(r => r.status === 'scanned');
+  if (inScope.length === 0) return null;
+
+  let detected = 0;
+  const byCategory = {};
+  const scoreDistribution = { '0': 0, '1-9': 0, '10-19': 0, '20-49': 0, '50+': 0 };
+  const detectedByBucket = { '0': 0, '1-9': 0, '10-19': 0, '20-49': 0, '50+': 0 };
+
+  for (const r of inScope) {
+    const score = r.score || 0;
+    const isDetected = score >= DATADOG_TPR_THRESHOLD;
+    if (isDetected) detected++;
+
+    // Score bucket classification
+    let bucket;
+    if (score === 0) bucket = '0';
+    else if (score <= 9) bucket = '1-9';
+    else if (score <= 19) bucket = '10-19';
+    else if (score <= 49) bucket = '20-49';
+    else bucket = '50+';
+    scoreDistribution[bucket]++;
+    if (isDetected) detectedByBucket[bucket]++;
+
+    // Per-category breakdown
+    const cat = r.category || 'unknown';
+    if (!byCategory[cat]) byCategory[cat] = { detected: 0, total: 0 };
+    byCategory[cat].total++;
+    if (isDetected) byCategory[cat].detected++;
+  }
+
+  const total = inScope.length;
+  const tpr = total > 0 ? detected / total : 0;
+  const tprCI = wilsonCI(detected, total);
+
+  // Compute TPR per category
+  for (const cat of Object.keys(byCategory)) {
+    const c = byCategory[cat];
+    c.tpr = c.total > 0 ? c.detected / c.total : 0;
+    c.tprCI = wilsonCI(c.detected, c.total);
+  }
+
+  // Score bucket breakdown with detection rates
+  const scoreBuckets = {};
+  for (const bucket of Object.keys(scoreDistribution)) {
+    scoreBuckets[bucket] = {
+      total: scoreDistribution[bucket],
+      detected: detectedByBucket[bucket],
+      tpr: scoreDistribution[bucket] > 0 ? detectedByBucket[bucket] / scoreDistribution[bucket] : 0
+    };
+  }
+
+  return {
+    detected,
+    total,
+    tpr,
+    tprCI,
+    threshold: DATADOG_TPR_THRESHOLD,
+    byCategory,
+    scoreBuckets,
+    benchmarkDate: benchmark.metadata && benchmark.metadata.scanned_at || null
+  };
+}
+
 /**
  * Save metrics to metrics/v{version}.json
  */
@@ -871,29 +953,34 @@ async function evaluate(options = {}) {
 
   if (!jsonMode) {
     console.log(`\n  MUAD'DIB Evaluation (v${version})\n`);
-    console.log(`  [1/4] Ground Truth...`);
+    console.log(`  [1/5] Ground Truth...`);
   }
   const groundTruth = await evaluateGroundTruth();
 
   if (!jsonMode) {
-    console.log(`  [2/4] Benign npm packages (real source code)...`);
+    console.log(`  [2/5] Benign npm packages (real source code)...`);
   }
   const benign = await evaluateBenign(options);
 
   if (!jsonMode) {
-    console.log(`  [2b/4] Benign PyPI packages...`);
+    console.log(`  [2b/5] Benign PyPI packages...`);
   }
   const benignPyPI = await evaluateBenignPyPI(options);
 
   if (!jsonMode) {
-    console.log(`  [2c/4] Benign Random npm packages...`);
+    console.log(`  [2c/5] Benign Random npm packages...`);
   }
   const benignRandom = await evaluateBenignRandom(options);
 
   if (!jsonMode) {
-    console.log(`  [3/4] Adversarial samples...`);
+    console.log(`  [3/5] Adversarial samples...`);
   }
   const adversarial = await evaluateAdversarial();
+
+  if (!jsonMode) {
+    console.log(`  [4/5] Datadog benchmark TPR...`);
+  }
+  const datadogTPR = evaluateDatadogTPR();
 
   const report = {
     version,
@@ -902,7 +989,8 @@ async function evaluate(options = {}) {
     benign,
     benignPyPI,
     benignRandom,
-    adversarial
+    adversarial,
+    datadogTPR
   };
 
   const metricsPath = saveMetrics(report);
@@ -956,6 +1044,20 @@ async function evaluate(options = {}) {
       const hold = adversarial.cohorts.holdout;
       console.log(`  ADR (adversarial):     ${adv.detected}/${adv.available}  ${(adv.adr * 100).toFixed(1)}%`);
       console.log(`  ADR (holdout):         ${hold.detected}/${hold.available}  ${(hold.adr * 100).toFixed(1)}%`);
+    }
+    if (datadogTPR) {
+      const ddPct = (datadogTPR.tpr * 100).toFixed(1);
+      const ddCIStr = datadogTPR.tprCI ? ` [95% CI: ${(datadogTPR.tprCI.lower * 100).toFixed(1)}-${(datadogTPR.tprCI.upper * 100).toFixed(1)}%]` : '';
+      console.log(`  Datadog TPR (n=${datadogTPR.total}): ${datadogTPR.detected}/${datadogTPR.total}  ${ddPct}%${ddCIStr}`);
+      for (const [cat, data] of Object.entries(datadogTPR.byCategory)) {
+        const catPct = (data.tpr * 100).toFixed(1);
+        console.log(`    ${cat.padEnd(20)}: ${String(data.detected).padStart(5)}/${String(data.total).padStart(5)}  ${catPct}%`);
+      }
+      console.log(`  Datadog score distribution:`);
+      for (const [bucket, data] of Object.entries(datadogTPR.scoreBuckets)) {
+        const bPct = (data.tpr * 100).toFixed(1);
+        console.log(`    score ${bucket.padEnd(5)}: ${String(data.detected).padStart(5)}/${String(data.total).padStart(5)} detected  ${bPct}%`);
+      }
     }
     console.log('');
 
@@ -1116,6 +1218,7 @@ module.exports = {
   evaluateBenignPyPI,
   evaluateBenignRandom,
   evaluateAdversarial,
+  evaluateDatadogTPR,
   evaluateMLClassifier,
   saveMetrics,
   silentScan,
@@ -1125,6 +1228,7 @@ module.exports = {
   GT_THRESHOLD,
   BENIGN_THRESHOLD,
   ADR_THRESHOLD,
+  DATADOG_TPR_THRESHOLD,
   extractTgz,
   wilsonCI,
   isBenignHoldout,

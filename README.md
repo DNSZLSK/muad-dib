@@ -30,7 +30,7 @@
 
 npm and PyPI supply-chain attacks are exploding. Shai-Hulud compromised 25K+ repos in 2025. Existing tools detect threats but don't help you respond.
 
-MUAD'DIB combines **14 parallel scanners** (158 detection rules), a **deobfuscation engine**, **inter-module dataflow analysis**, **per-file max scoring**, **compound scoring rules**, **ML classifier** for T1 zone FP reduction, Docker sandbox with **monkey-patching preload** for time-bomb detection, **behavioral anomaly detection**, **GlassWorm campaign detection**, and **ground truth validation** to detect threats AND guide your response — even before they appear in any IOC database.
+MUAD'DIB combines **14 parallel scanners** (158 detection rules), a **deobfuscation engine**, **inter-module dataflow analysis**, **compound scoring**, and Docker sandbox to detect known threats and suspicious behavioral patterns in npm and PyPI packages.
 
 ---
 
@@ -339,12 +339,15 @@ npm test
 
 ## Community
 
+- Blog: https://dnszlsk.github.io/muad-dib/blog/
 - Discord: https://discord.gg/y8zxSmue
 
 ---
 
 ## Documentation
 
+- [Blog](https://dnszlsk.github.io/muad-dib/blog/) - Technical articles on supply-chain threat detection
+- [Carnet de bord](docs/CARNET_DE_BORD_MUADDIB.md) - Development journal (in French)
 - [Documentation Index](docs/INDEX.md) - All documentation in one place
 - [Evaluation Methodology](docs/EVALUATION_METHODOLOGY.md) - Experimental protocol, holdout scores
 - [Threat Model](docs/threat-model.md) - What MUAD'DIB detects and doesn't detect

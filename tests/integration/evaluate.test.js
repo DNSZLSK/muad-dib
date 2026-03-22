@@ -11,13 +11,15 @@ async function runEvaluateTests() {
     evaluateGroundTruth,
     evaluateBenign,
     evaluateAdversarial,
+    evaluateDatadogTPR,
     saveMetrics,
     silentScan,
     ADVERSARIAL_SAMPLES,
     HOLDOUT_SAMPLES,
     GT_THRESHOLD,
     BENIGN_THRESHOLD,
-    ADR_THRESHOLD
+    ADR_THRESHOLD,
+    DATADOG_TPR_THRESHOLD
   } = require('../../src/commands/evaluate.js');
 
   // Module structure tests
@@ -208,6 +210,91 @@ async function runEvaluateTests() {
     const holdout = names.filter(n => isBenignHoldout(n)).length;
     const ratio = holdout / names.length;
     assert(ratio >= 0.1 && ratio <= 0.6, `Holdout ratio should be ~30%, got ${(ratio * 100).toFixed(0)}%`);
+  });
+
+  // --- Datadog TPR tests ---
+
+  test('EVALUATE: evaluateDatadogTPR is exported as function', () => {
+    assert(typeof evaluateDatadogTPR === 'function', 'evaluateDatadogTPR should be a function');
+  });
+
+  test('EVALUATE: DATADOG_TPR_THRESHOLD is 20 (aligned with ADR)', () => {
+    assert(typeof DATADOG_TPR_THRESHOLD === 'number', 'DATADOG_TPR_THRESHOLD should be a number');
+    assert(DATADOG_TPR_THRESHOLD === 20, `DATADOG_TPR_THRESHOLD should be 20, got ${DATADOG_TPR_THRESHOLD}`);
+  });
+
+  test('EVALUATE: evaluateDatadogTPR returns correct structure', () => {
+    const result = evaluateDatadogTPR();
+    // May be null if benchmark file is missing
+    if (result === null) {
+      console.log('    [SKIP] datadog-benchmark-results.json not found');
+      return;
+    }
+    assert(typeof result.detected === 'number', 'detected should be number');
+    assert(typeof result.total === 'number', 'total should be number');
+    assert(typeof result.tpr === 'number', 'tpr should be number');
+    assert(result.tprCI !== undefined, 'tprCI should exist');
+    assert(typeof result.tprCI.lower === 'number', 'tprCI.lower should be number');
+    assert(typeof result.tprCI.upper === 'number', 'tprCI.upper should be number');
+    assert(typeof result.byCategory === 'object', 'byCategory should be object');
+    assert(typeof result.scoreBuckets === 'object', 'scoreBuckets should be object');
+    assert(typeof result.threshold === 'number', 'threshold should be number');
+  });
+
+  test('EVALUATE: evaluateDatadogTPR covers full in-scope dataset', () => {
+    const result = evaluateDatadogTPR();
+    if (result === null) { console.log('    [SKIP]'); return; }
+    assert(result.total >= 14000, `Expected >= 14000 in-scope samples, got ${result.total}`);
+    assert(result.total <= 20000, `Expected <= 20000 samples, got ${result.total}`);
+  });
+
+  test('EVALUATE: evaluateDatadogTPR tpr is in [0, 1]', () => {
+    const result = evaluateDatadogTPR();
+    if (result === null) { console.log('    [SKIP]'); return; }
+    assert(result.tpr >= 0 && result.tpr <= 1, `TPR should be in [0,1], got ${result.tpr}`);
+  });
+
+  test('EVALUATE: evaluateDatadogTPR has both categories', () => {
+    const result = evaluateDatadogTPR();
+    if (result === null) { console.log('    [SKIP]'); return; }
+    const cats = Object.keys(result.byCategory);
+    assert(cats.includes('compromised_lib'), 'Should have compromised_lib category');
+    assert(cats.includes('malicious_intent'), 'Should have malicious_intent category');
+    // Each category should have detected, total, tpr
+    for (const cat of cats) {
+      const c = result.byCategory[cat];
+      assert(typeof c.detected === 'number', `${cat}.detected should be number`);
+      assert(typeof c.total === 'number', `${cat}.total should be number`);
+      assert(typeof c.tpr === 'number', `${cat}.tpr should be number`);
+      assert(c.total > 0, `${cat} should have > 0 samples`);
+    }
+  });
+
+  test('EVALUATE: evaluateDatadogTPR has all 5 score buckets', () => {
+    const result = evaluateDatadogTPR();
+    if (result === null) { console.log('    [SKIP]'); return; }
+    const expectedBuckets = ['0', '1-9', '10-19', '20-49', '50+'];
+    for (const bucket of expectedBuckets) {
+      assert(result.scoreBuckets[bucket] !== undefined, `Score bucket "${bucket}" should exist`);
+      const b = result.scoreBuckets[bucket];
+      assert(typeof b.total === 'number', `Bucket "${bucket}" total should be number`);
+      assert(typeof b.detected === 'number', `Bucket "${bucket}" detected should be number`);
+      assert(typeof b.tpr === 'number', `Bucket "${bucket}" tpr should be number`);
+    }
+  });
+
+  test('EVALUATE: evaluateDatadogTPR score buckets sum to total', () => {
+    const result = evaluateDatadogTPR();
+    if (result === null) { console.log('    [SKIP]'); return; }
+    const bucketSum = Object.values(result.scoreBuckets).reduce((s, b) => s + b.total, 0);
+    assert(bucketSum === result.total, `Bucket sum ${bucketSum} should equal total ${result.total}`);
+  });
+
+  test('EVALUATE: evaluateDatadogTPR category totals sum to total', () => {
+    const result = evaluateDatadogTPR();
+    if (result === null) { console.log('    [SKIP]'); return; }
+    const catSum = Object.values(result.byCategory).reduce((s, c) => s + c.total, 0);
+    assert(catSum === result.total, `Category sum ${catSum} should equal total ${result.total}`);
   });
 }
 

@@ -30,7 +30,7 @@
 
 Les attaques supply-chain npm et PyPI explosent. Shai-Hulud a compromis 25K+ repos en 2025. Les outils existants détectent, mais n'aident pas à répondre.
 
-MUAD'DIB combine analyse statique + **moteur de désobfuscation** (v2.2.5) + **dataflow inter-module** (v2.2.6) + **scoring per-file max** (v2.2.11) + analyse dynamique (sandbox Docker avec **monkey-patching preload** pour détection de time-bombs, v2.4.9) + **détection comportementale d'anomalies** (v2.0) + **validation ground truth** (v2.1) + **audit sécurité** (41 issues remédiées, v2.5.0–v2.5.6) pour détecter les menaces ET guider votre réponse — même avant leur apparition dans une base d'IOC.
+MUAD'DIB combine **14 scanners paralleles** (158 regles de detection), un **moteur de desobfuscation**, une **analyse dataflow inter-module**, du **scoring compose**, et un sandbox Docker pour detecter les menaces connues et les patterns comportementaux suspects dans les packages npm et PyPI.
 
 ---
 
@@ -834,18 +834,21 @@ npm test
 
 ---
 
-## Communauté
+## Communaute
 
-- Discord: https://discord.gg/y8zxSmue
+- Blog : https://dnszlsk.github.io/muad-dib/blog/
+- Discord : https://discord.gg/y8zxSmue
 
 ---
 
 ## Documentation
 
-- [Evaluation Methodology](docs/EVALUATION_METHODOLOGY.md) - Protocole expérimental, scores holdout bruts, sources d'attaques
-- [Threat Model](docs/threat-model.md) - Ce que MUAD'DIB détecte et ne détecte pas
-- [Rapport d'audit sécurité v1.4.1](docs/MUADDIB_Security_Audit_Report_v1.4.1.pdf) - Audit complet (58 issues corrigées)
-- [IOCs YAML](iocs/) - Base de données des menaces
+- [Blog](https://dnszlsk.github.io/muad-dib/blog/) - Articles techniques sur la detection de menaces supply-chain
+- [Carnet de bord](CARNET_DE_BORD_MUADDIB.md) - Journal de developpement du projet
+- [Evaluation Methodology](EVALUATION_METHODOLOGY.md) - Protocole experimental, scores holdout bruts, sources d'attaques
+- [Threat Model](threat-model.md) - Ce que MUAD'DIB detecte et ne detecte pas
+- [Rapport d'audit securite v1.4.1](MUADDIB_Security_Audit_Report_v1.4.1.pdf) - Audit complet (58 issues corrigees)
+- [IOCs YAML](../iocs/) - Base de donnees des menaces
 
 ---
 
