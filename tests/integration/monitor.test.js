@@ -86,7 +86,8 @@ async function runMonitorTests() {
     purgeTarballCache,
     evaluateCacheTrigger,
     quickTyposquatCheck,
-    POPULAR_NPM_NAMES
+    POPULAR_NPM_NAMES,
+    computeAlertPriority
   } = require('../../src/monitor.js');
 
   test('MONITOR: parseNpmRss extracts package names from RSS', () => {
@@ -7509,6 +7510,115 @@ async function runMonitorTests() {
 
     const shouldRelabel = !hasHC && !isDormant && staticScore < 70;
     assert(shouldRelabel === false, '@cloudbase/cloudbase-mcp must NEVER be relabeled as FP');
+  });
+
+  // ===================================================================
+  // C2: Alert Priority Triage Tests
+  // ===================================================================
+  console.log('\n  --- C2: Alert Priority Triage ---\n');
+
+  test('C2: P1 — IOC match (known_malicious_package)', () => {
+    const result = { threats: [{ type: 'known_malicious_package', severity: 'CRITICAL' }], summary: { riskScore: 80 } };
+    const p = computeAlertPriority(result, null);
+    assert(p.level === 'P1', `Expected P1, got ${p.level}`);
+    assert(p.reason === 'ioc_match', `Expected ioc_match, got ${p.reason}`);
+  });
+
+  test('C2: P1 — HC type (reverse_shell CRITICAL)', () => {
+    const result = { threats: [{ type: 'reverse_shell', severity: 'CRITICAL' }], summary: { riskScore: 30 } };
+    const p = computeAlertPriority(result, null);
+    assert(p.level === 'P1', `Expected P1, got ${p.level}`);
+    assert(p.reason === 'high_confidence_type', `Expected high_confidence_type, got ${p.reason}`);
+  });
+
+  test('C2: P1 — sandbox score > 30', () => {
+    const result = { threats: [{ type: 'env_access', severity: 'HIGH' }], summary: { riskScore: 25 } };
+    const p = computeAlertPriority(result, { score: 50, severity: 'HIGH' });
+    assert(p.level === 'P1', `Expected P1, got ${p.level}`);
+    assert(p.reason === 'sandbox_detection', `Expected sandbox_detection, got ${p.reason}`);
+  });
+
+  test('C2: P1 — canary exfiltration', () => {
+    const result = { threats: [{ type: 'sandbox_canary_exfiltration', severity: 'CRITICAL' }], summary: { riskScore: 20 } };
+    const p = computeAlertPriority(result, null);
+    assert(p.level === 'P1', `Expected P1, got ${p.level}`);
+    assert(p.reason === 'canary_exfiltration', `Expected canary_exfiltration, got ${p.reason}`);
+  });
+
+  test('C2: P2 — score >= 50, no HC/IOC', () => {
+    const result = { threats: [{ type: 'obfuscation_detected', severity: 'HIGH' }], summary: { riskScore: 60 } };
+    const p = computeAlertPriority(result, null);
+    assert(p.level === 'P2', `Expected P2, got ${p.level}`);
+    assert(p.reason === 'high_score', `Expected high_score, got ${p.reason}`);
+  });
+
+  test('C2: P2 — compound detection present', () => {
+    const result = { threats: [{ type: 'lifecycle_typosquat', severity: 'CRITICAL', compound: true }], summary: { riskScore: 30 } };
+    const p = computeAlertPriority(result, null);
+    assert(p.level === 'P2', `Expected P2, got ${p.level}`);
+    assert(p.reason === 'compound_detection', `Expected compound_detection, got ${p.reason}`);
+  });
+
+  test('C2: P2 — lifecycle_script + suspicious_dataflow (HIGH)', () => {
+    const result = {
+      threats: [
+        { type: 'lifecycle_script', severity: 'MEDIUM' },
+        { type: 'suspicious_dataflow', severity: 'HIGH' }
+      ],
+      summary: { riskScore: 25 }
+    };
+    const p = computeAlertPriority(result, null);
+    assert(p.level === 'P2', `Expected P2, got ${p.level}`);
+    assert(p.reason === 'lifecycle_plus_intent', `Expected lifecycle_plus_intent, got ${p.reason}`);
+  });
+
+  test('C2: P3 — score=25, no HC, no compound', () => {
+    const result = { threats: [{ type: 'high_entropy_string', severity: 'MEDIUM' }], summary: { riskScore: 25 } };
+    const p = computeAlertPriority(result, null);
+    assert(p.level === 'P3', `Expected P3, got ${p.level}`);
+    assert(p.reason === 'default', `Expected default, got ${p.reason}`);
+  });
+
+  test('C2: P3 — lifecycle + LOW intent type stays P3', () => {
+    const result = {
+      threats: [
+        { type: 'lifecycle_script', severity: 'MEDIUM' },
+        { type: 'env_access', severity: 'LOW' }
+      ],
+      summary: { riskScore: 22 }
+    };
+    const p = computeAlertPriority(result, null);
+    assert(p.level === 'P3', `Expected P3 for LOW intent type, got ${p.level}`);
+  });
+
+  // C2: Discord formatting with priority
+  const { formatDiscord } = require('../../src/webhook.js');
+
+  test('C2: Discord — P1 embed has red color and IMMEDIATE title', () => {
+    const data = {
+      target: 'npm/evil-pkg@1.0.0',
+      priority: { level: 'P1', reason: 'ioc_match' },
+      summary: { riskScore: 90, riskLevel: 'CRITICAL', critical: 1, high: 0, medium: 0, total: 1 },
+      threats: [{ type: 'known_malicious_package', severity: 'CRITICAL', message: 'IOC match' }]
+    };
+    const payload = formatDiscord(data);
+    assert(payload.embeds[0].color === 0xe74c3c, `Expected red color, got ${payload.embeds[0].color}`);
+    assert(payload.embeds[0].title.includes('[P1]'), `Title should include [P1], got ${payload.embeds[0].title}`);
+    const priorityField = payload.embeds[0].fields.find(f => f.name === 'Priority');
+    assert(priorityField, 'Should have Priority field');
+    assert(priorityField.value.includes('P1 IMMEDIATE'), `Priority value should include P1 IMMEDIATE, got ${priorityField.value}`);
+  });
+
+  test('C2: Discord — no priority fallback to risk-level colors', () => {
+    const data = {
+      target: 'npm/some-pkg@1.0.0',
+      summary: { riskScore: 50, riskLevel: 'HIGH', critical: 0, high: 2, medium: 0, total: 2 },
+      threats: [{ type: 'env_access', severity: 'HIGH', message: 'NPM_TOKEN' }]
+    };
+    const payload = formatDiscord(data);
+    assert(payload.embeds[0].color === 0xe67e22, `Expected orange (HIGH) color, got ${payload.embeds[0].color}`);
+    const priorityField = payload.embeds[0].fields.find(f => f.name === 'Priority');
+    assert(!priorityField, 'Should NOT have Priority field without priority data');
   });
 }
 

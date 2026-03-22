@@ -776,6 +776,90 @@ async function runScoringHardeningTests() {
     // MEDIUM(3) * 1.0 = 3
     assert(score === 3, `paranoid rule should score at full weight (3), got ${score}`);
   });
+
+  // ===================================================================
+  // C4: Lifecycle-Aware FP Reduction Guard
+  // ===================================================================
+  console.log('\n  --- C4: Lifecycle Guard ---\n');
+
+  test('C4: 5x obfuscation_detected + lifecycle_script (MEDIUM) → 1 instance restored to MEDIUM', () => {
+    const threats = [];
+    for (let i = 0; i < 5; i++) {
+      threats.push({ type: 'obfuscation_detected', severity: 'MEDIUM', file: `obf${i}.js`, message: 'obfuscated code' });
+    }
+    threats.push({ type: 'lifecycle_script', severity: 'MEDIUM', file: 'package.json', message: 'preinstall: node setup.js' });
+    // Add padding to keep typeRatio < 0.4
+    for (let i = 0; i < 15; i++) {
+      threats.push({ type: 'env_access', severity: 'MEDIUM', file: `cfg${i}.js`, message: `env ${i}` });
+    }
+    applyFPReductions(threats);
+    const obfThreats = threats.filter(t => t.type === 'obfuscation_detected');
+    const mediumCount = obfThreats.filter(t => t.severity === 'MEDIUM').length;
+    // Dilution floor restores 1 (from field + maxCount ≤ 3), lifecycle guard restores another OR same
+    // Actually: obfuscation_detected has from:undefined in FP_COUNT_THRESHOLDS → no dilution floor
+    // Lifecycle guard restores 1 to MEDIUM
+    assert(mediumCount >= 1, `At least 1 obfuscation_detected should be MEDIUM (lifecycle guard), got ${mediumCount}`);
+    const guardReductions = obfThreats.filter(t => t.reductions.some(r => r.rule === 'lifecycle_guard'));
+    assert(guardReductions.length === 1, `Exactly 1 should have lifecycle_guard, got ${guardReductions.length}`);
+  });
+
+  test('C4: 12x dynamic_require + lifecycle_script (MEDIUM) → 1 instance restored', () => {
+    const threats = [];
+    for (let i = 0; i < 12; i++) {
+      threats.push({ type: 'dynamic_require', severity: 'HIGH', file: `loader${i}.js`, message: `Dynamic require of ./plugin${i}` });
+    }
+    threats.push({ type: 'lifecycle_script', severity: 'MEDIUM', file: 'package.json', message: 'postinstall: node install.js' });
+    for (let i = 0; i < 25; i++) {
+      threats.push({ type: 'env_access', severity: 'MEDIUM', file: `cfg${i}.js`, message: `env ${i}` });
+    }
+    applyFPReductions(threats);
+    const drThreats = threats.filter(t => t.type === 'dynamic_require');
+    const guardReductions = drThreats.filter(t => t.reductions.some(r => r.rule === 'lifecycle_guard'));
+    assert(guardReductions.length === 1, `Exactly 1 dynamic_require should have lifecycle_guard, got ${guardReductions.length}`);
+    assert(guardReductions[0].severity === 'MEDIUM', `Restored should be MEDIUM, got ${guardReductions[0].severity}`);
+  });
+
+  test('C4: 5x obfuscation_detected WITHOUT lifecycle → no guard', () => {
+    const threats = [];
+    for (let i = 0; i < 5; i++) {
+      threats.push({ type: 'obfuscation_detected', severity: 'MEDIUM', file: `obf${i}.js`, message: 'obfuscated' });
+    }
+    for (let i = 0; i < 15; i++) {
+      threats.push({ type: 'env_access', severity: 'MEDIUM', file: `cfg${i}.js`, message: `env ${i}` });
+    }
+    applyFPReductions(threats);
+    const obfThreats = threats.filter(t => t.type === 'obfuscation_detected');
+    const guardReductions = obfThreats.filter(t => t.reductions.some(r => r.rule === 'lifecycle_guard'));
+    assert(guardReductions.length === 0, `No lifecycle_guard without lifecycle, got ${guardReductions.length}`);
+  });
+
+  test('C4: 5x obfuscation_detected + lifecycle_script LOW (benign) → no guard', () => {
+    const threats = [];
+    for (let i = 0; i < 5; i++) {
+      threats.push({ type: 'obfuscation_detected', severity: 'MEDIUM', file: `obf${i}.js`, message: 'obfuscated' });
+    }
+    // Benign lifecycle (node-gyp) will be downgraded to LOW by benign_lifecycle
+    threats.push({ type: 'lifecycle_script', severity: 'MEDIUM', file: 'package.json', message: 'Script "install" detected: node-gyp rebuild' });
+    for (let i = 0; i < 15; i++) {
+      threats.push({ type: 'env_access', severity: 'MEDIUM', file: `cfg${i}.js`, message: `env ${i}` });
+    }
+    applyFPReductions(threats);
+    const obfThreats = threats.filter(t => t.type === 'obfuscation_detected');
+    const guardReductions = obfThreats.filter(t => t.reductions.some(r => r.rule === 'lifecycle_guard'));
+    assert(guardReductions.length === 0, `No lifecycle_guard when lifecycle is LOW (benign), got ${guardReductions.length}`);
+  });
+
+  test('C4: lifecycle guard only restores types that were count-threshold downgraded', () => {
+    const threats = [
+      { type: 'obfuscation_detected', severity: 'MEDIUM', file: 'a.js', message: 'obf' },
+      { type: 'lifecycle_script', severity: 'MEDIUM', file: 'package.json', message: 'preinstall: node setup.js' }
+    ];
+    // Only 1 instance → count not exceeded → no downgrade → no guard needed
+    applyFPReductions(threats);
+    const obf = threats.find(t => t.type === 'obfuscation_detected');
+    const guardReductions = obf.reductions.filter(r => r.rule === 'lifecycle_guard');
+    assert(guardReductions.length === 0, `No guard needed when not count-threshold downgraded, got ${guardReductions.length}`);
+  });
 }
 
 module.exports = { runScoringHardeningTests };

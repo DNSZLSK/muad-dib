@@ -128,16 +128,33 @@ function getStats() {
   }
 }
 
+// Valid labels for ML training records
+const VALID_LABELS = new Set(['fp', 'confirmed', 'unconfirmed']);
+
 /**
  * Update the label of records matching a given package name.
  * Used when manual confirmation (fp/confirmed) is applied retroactively.
  *
  * @param {string} packageName - package name to relabel
- * @param {string} newLabel - 'fp' or 'confirmed'
+ * @param {string} newLabel - 'fp', 'confirmed', or 'unconfirmed'
  * @param {number} [sandboxFindingCount] - number of sandbox findings (defense-in-depth for 'confirmed')
+ * @param {boolean} [manualReview] - required for 'fp' label (prevents automated contamination)
  * @returns {number} number of records updated
  */
-function relabelRecords(packageName, newLabel, sandboxFindingCount) {
+function relabelRecords(packageName, newLabel, sandboxFindingCount, manualReview) {
+  // Validate label
+  if (!VALID_LABELS.has(newLabel)) {
+    console.warn(`[ML] BLOCKED relabel to '${newLabel}' for ${packageName}: invalid label (valid: ${[...VALID_LABELS].join(', ')})`);
+    return 0;
+  }
+
+  // Defense-in-depth: 'fp' requires explicit manual review flag to prevent
+  // automated sandbox-clean → fp contamination (8176 records in 3 months)
+  if (newLabel === 'fp' && manualReview !== true) {
+    console.warn(`[ML] BLOCKED relabel to 'fp' for ${packageName}: manualReview required (use 'unconfirmed' for automated relabeling)`);
+    return 0;
+  }
+
   // Defense-in-depth: never write 'confirmed' without real sandbox findings
   if (newLabel === 'confirmed' && (!sandboxFindingCount || sandboxFindingCount === 0)) {
     console.warn(`[ML] BLOCKED relabel to 'confirmed' for ${packageName}: sandbox_finding_count=${sandboxFindingCount || 0}`);

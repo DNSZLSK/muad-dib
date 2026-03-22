@@ -339,7 +339,6 @@ npm test
 
 ## Community
 
-- Blog: https://dnszlsk.github.io/muad-dib/blog/
 - Discord: https://discord.gg/y8zxSmue
 
 ---

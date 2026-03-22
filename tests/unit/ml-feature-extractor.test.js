@@ -276,8 +276,50 @@ function runMLFeatureExtractorTests() {
   });
 
   test('JSONL writer: relabelRecords returns 0 for non-existent package', () => {
-    const updated = relabelRecords('non-existent-pkg', 'fp');
+    const updated = relabelRecords('non-existent-pkg', 'fp', undefined, true);
     assert(updated === 0, `Should have updated 0 records, got ${updated}`);
+  });
+
+  // --- C1 Relabeling contamination fix tests ---
+
+  test('C1: relabelRecords(pkg, "unconfirmed") succeeds', () => {
+    // Reset to the original test file with test-pkg
+    setTrainingFile(tmpFile);
+    const updated = relabelRecords('test-pkg', 'unconfirmed');
+    assert(updated === 1, `Should have updated 1 record, got ${updated}`);
+    const records = readRecords();
+    const r = records.find(rec => rec.name === 'test-pkg');
+    assert(r.label === 'unconfirmed', `label should be unconfirmed, got ${r.label}`);
+  });
+
+  test('C1: relabelRecords(pkg, "fp") without manualReview is BLOCKED', () => {
+    setTrainingFile(tmpFile);
+    const updated = relabelRecords('test-pkg', 'fp');
+    assert(updated === 0, `Should block fp without manualReview, got ${updated}`);
+  });
+
+  test('C1: relabelRecords(pkg, "fp", undefined, true) succeeds with manualReview', () => {
+    setTrainingFile(tmpFile);
+    const updated = relabelRecords('test-pkg', 'fp', undefined, true);
+    assert(updated === 1, `Should allow fp with manualReview=true, got ${updated}`);
+    const records = readRecords();
+    const r = records.find(rec => rec.name === 'test-pkg');
+    assert(r.label === 'fp', `label should be fp, got ${r.label}`);
+  });
+
+  test('C1: relabelRecords(pkg, "invalid_label") is BLOCKED', () => {
+    setTrainingFile(tmpFile);
+    const updated = relabelRecords('test-pkg', 'invalid_label');
+    assert(updated === 0, `Should block invalid labels, got ${updated}`);
+  });
+
+  test('C1: relabelRecords(pkg, "confirmed", 3) succeeds (no regression)', () => {
+    setTrainingFile(tmpFile);
+    const updated = relabelRecords('test-pkg', 'confirmed', 3);
+    assert(updated === 1, `Should allow confirmed with findingCount, got ${updated}`);
+    const records = readRecords();
+    const r = records.find(rec => rec.name === 'test-pkg');
+    assert(r.label === 'confirmed', `label should be confirmed, got ${r.label}`);
   });
 
   test('JSONL writer: readRecords handles empty file', () => {

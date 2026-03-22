@@ -102,7 +102,8 @@ const PACKAGE_LEVEL_TYPES = new Set([
   'sandbox_network_activity', 'sandbox_file_changes', 'sandbox_process_spawns',
   'sandbox_canary_exfiltration',
   // Compound scoring rules — package-level co-occurrences
-  'lifecycle_typosquat', 'lifecycle_inline_exec', 'lifecycle_remote_require'
+  'lifecycle_typosquat', 'lifecycle_inline_exec', 'lifecycle_remote_require',
+  'lifecycle_dataflow', 'lifecycle_dangerous_exec', 'obfuscated_lifecycle_env'
 ]);
 
 /**
@@ -234,7 +235,8 @@ const DIST_EXEMPT_TYPES = new Set([
   // Compound scoring rules — co-occurrence signals, never FP
   'crypto_staged_payload', 'lifecycle_typosquat',
   'lifecycle_inline_exec', 'lifecycle_remote_require',
-  'lifecycle_file_exec'  // B6: lifecycle → malicious file compound
+  'lifecycle_file_exec',  // B6: lifecycle → malicious file compound
+  'lifecycle_dataflow', 'lifecycle_dangerous_exec', 'obfuscated_lifecycle_env'
   // P6: remote_code_load and proxy_data_intercept removed — in bundled dist/ files,
   // fetch + eval co-occurrence is coincidental (bundler combines HTTP client + template compilation).
   // fetch_decrypt_exec (fetch+decrypt+eval triple) remains exempt — never coincidental.
@@ -333,6 +335,32 @@ const SCORING_COMPOUNDS = [
     fileFrom: 'env_access',
     sameFile: true
   },
+  // C3 compounds (post-audit fondamental) — recovering 3336 under-threshold malwares
+  {
+    type: 'lifecycle_dataflow',
+    requires: ['lifecycle_script', 'suspicious_dataflow'],
+    severity: 'HIGH',
+    message: 'Lifecycle hook + suspicious dataflow — install-time credential/data exfiltration pattern (scoring compound).',
+    fileFrom: 'suspicious_dataflow'
+    // No sameFile: lifecycle is package-level, dataflow is file-level
+  },
+  {
+    type: 'lifecycle_dangerous_exec',
+    requires: ['lifecycle_script', 'dangerous_exec'],
+    severity: 'CRITICAL',
+    message: 'Lifecycle hook + dangerous shell execution — install-time command injection (scoring compound).',
+    fileFrom: 'dangerous_exec'
+    // No sameFile: lifecycle is package-level
+  },
+  {
+    type: 'obfuscated_lifecycle_env',
+    requires: ['obfuscation_detected', 'env_access', 'lifecycle_script'],
+    severity: 'HIGH',
+    message: 'Obfuscation + credential env access + lifecycle hook — obfuscated install-time credential theft (scoring compound).',
+    fileFrom: 'env_access',
+    // Only obfuscation_detected + env_access must be in the same file (lifecycle_script is package-level)
+    sameFileTypes: ['obfuscation_detected', 'env_access']
+  },
 ];
 
 /**
@@ -366,11 +394,14 @@ function applyCompoundBoosts(threats) {
       );
       if (!hasSignificantComponent) continue;
 
-      // Same-file constraint: all required types must appear in at least one common file.
+      // Same-file constraint: required types must appear in at least one common file.
       // Prevents cross-file coincidental matches (e.g. next.js: staged_binary_payload in
       // dist/compiled/@vercel/nft/index.js + crypto_decipher in a different file).
-      if (compound.sameFile) {
-        const filesByType = compound.requires.map(req =>
+      // sameFile: true = ALL required types must share a file.
+      // sameFileTypes: [...] = only specified types must share a file (for mixed package/file-level).
+      const sameFileCheck = compound.sameFileTypes || (compound.sameFile ? compound.requires : null);
+      if (sameFileCheck) {
+        const filesByType = sameFileCheck.map(req =>
           new Set(threats.filter(t => t.type === req).map(t => t.file))
         );
         // Find intersection of all file sets
@@ -653,6 +684,34 @@ function applyFPReductions(threats, reachableFiles, packageName, packageDeps) {
       if (hasAiSdk && /\b(ANTHROPIC_API_KEY|OPENAI_API_KEY|CLAUDE_API_KEY)\b/.test(t.message)) {
         t.reductions.push({ rule: 'ai_sdk_env', from: 'HIGH', to: 'MEDIUM' });
         t.severity = 'MEDIUM';
+      }
+    }
+  }
+
+  // Lifecycle-aware guard (C4): when lifecycle_script is present and not downgraded
+  // to LOW (not a benign build tool), restore ONE count-threshold-downgraded instance
+  // of high-intent types to MEDIUM. This prevents complete dilution of threat signals
+  // in packages with install-time execution.
+  // MUST run AFTER benign_lifecycle reduction to correctly detect LOW lifecycle_script.
+  const LIFECYCLE_GUARD_TYPES = new Set([
+    'obfuscation_detected', 'dynamic_require', 'dangerous_call_function',
+    'dangerous_call_eval', 'staged_payload'
+  ]);
+
+  const lifecycleThreats = threats.filter(t => t.type === 'lifecycle_script');
+  const hasActiveLifecycle = lifecycleThreats.length > 0 &&
+    lifecycleThreats.some(t => t.severity !== 'LOW');
+
+  if (hasActiveLifecycle) {
+    const lifecycleGuardRestored = new Set();
+    for (const t of threats) {
+      if (LIFECYCLE_GUARD_TYPES.has(t.type) && !lifecycleGuardRestored.has(t.type)) {
+        const wasDowngraded = t.reductions?.some(r => r.rule === 'count_threshold');
+        if (wasDowngraded && t.severity === 'LOW') {
+          t.severity = 'MEDIUM';
+          t.reductions.push({ rule: 'lifecycle_guard', note: 'restored — lifecycle present' });
+          lifecycleGuardRestored.add(t.type);
+        }
       }
     }
   }

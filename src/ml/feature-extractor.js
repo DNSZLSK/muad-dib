@@ -205,8 +205,9 @@ function buildTrainingRecord(result, params) {
   // --- Label ---
   // 'clean' = no findings or T3 only
   // 'suspect' = T1/T2 (pending manual review)
+  // 'unconfirmed' = sandbox clean, not manually reviewed (default for automated relabeling)
   // 'confirmed' = manually confirmed malicious
-  // 'fp' = manually confirmed false positive
+  // 'fp' = manually confirmed false positive (requires manualReview=true)
   record.label = label || 'suspect';
   record.tier = tier || null;
 

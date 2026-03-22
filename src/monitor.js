@@ -1126,11 +1126,72 @@ function persistDailyReport(reportPayload, rawMetrics) {
   }
 }
 
+// --- Alert Priority Triage (C2) ---
+// P1 IMMEDIATE: requires human action within minutes (confirmed malicious)
+// P2 REVIEW: requires human investigation within hours
+// P3 MONITOR: informational, low urgency
+const HIGH_INTENT_TYPES = new Set([
+  'suspicious_dataflow', 'dangerous_call_eval', 'dangerous_call_function',
+  'env_access', 'staged_payload', 'dynamic_require', 'dangerous_exec',
+  'remote_code_load', 'obfuscation_detected'
+]);
+
+function computeAlertPriority(result, sandboxResult) {
+  const threats = (result && result.threats) || [];
+  const score = (result && result.summary) ? (result.summary.riskScore || 0) : 0;
+
+  // P1: IOC match
+  if (threats.some(t => t.type === 'known_malicious_package' || t.type === 'ioc_match' || t.type === 'shai_hulud_marker')) {
+    return { level: 'P1', reason: 'ioc_match' };
+  }
+
+  // P1: High-confidence malice type (non-LOW)
+  if (threats.some(t => HIGH_CONFIDENCE_MALICE_TYPES.has(t.type) && t.severity !== 'LOW')) {
+    return { level: 'P1', reason: 'high_confidence_type' };
+  }
+
+  // P1: Sandbox detection
+  if (sandboxResult && sandboxResult.score > 30) {
+    return { level: 'P1', reason: 'sandbox_detection' };
+  }
+
+  // P1: Canary exfiltration
+  if (threats.some(t => t.type === 'sandbox_canary_exfiltration')) {
+    return { level: 'P1', reason: 'canary_exfiltration' };
+  }
+
+  // P2: High score
+  if (score >= 50) {
+    return { level: 'P2', reason: 'high_score' };
+  }
+
+  // P2: Compound detection present
+  if (threats.some(t => t.compound === true)) {
+    return { level: 'P2', reason: 'compound_detection' };
+  }
+
+  // P2: lifecycle_script + high-intent type (non-LOW)
+  const hasLifecycle = threats.some(t => t.type === 'lifecycle_script');
+  if (hasLifecycle) {
+    const hasHighIntent = threats.some(t =>
+      HIGH_INTENT_TYPES.has(t.type) && t.severity !== 'LOW'
+    );
+    if (hasHighIntent) {
+      return { level: 'P2', reason: 'lifecycle_plus_intent' };
+    }
+  }
+
+  // P3: Everything else
+  return { level: 'P3', reason: 'default' };
+}
+
 function buildAlertData(name, version, ecosystem, result, sandboxResult) {
+  const priority = computeAlertPriority(result, sandboxResult);
   const webhookData = {
     target: `${ecosystem}/${name}@${version}`,
     timestamp: new Date().toISOString(),
     ecosystem,
+    priority,
     summary: {
       ...result.summary,
       riskLevel: result.summary.riskLevel || computeRiskLevel(result.summary),
@@ -1924,8 +1985,9 @@ function loadScanStats() {
 function updateScanStats(result) {
   const data = loadScanStats();
   data.stats.total_scanned++;
-  // Ensure sandbox_inconclusive field exists (backward compat with old stats files)
+  // Ensure backward compat with old stats files
   if (data.stats.sandbox_inconclusive === undefined) data.stats.sandbox_inconclusive = 0;
+  if (data.stats.sandbox_unconfirmed === undefined) data.stats.sandbox_unconfirmed = 0;
 
   if (result === 'clean') data.stats.clean++;
   else if (result === 'ml_clean') data.stats.clean++; // ML classifier FP filter — counts as clean
@@ -1933,6 +1995,7 @@ function updateScanStats(result) {
   else if (result === 'false_positive') data.stats.false_positive++;
   else if (result === 'confirmed') data.stats.confirmed_malicious++;
   else if (result === 'sandbox_inconclusive') data.stats.sandbox_inconclusive++;
+  else if (result === 'sandbox_unconfirmed') { data.stats.sandbox_unconfirmed++; }
 
   const today = getParisDateString();
   let dayEntry = data.daily.find(d => d.date === today);
@@ -1948,6 +2011,7 @@ function updateScanStats(result) {
   else if (result === 'false_positive') dayEntry.false_positive++;
   else if (result === 'confirmed') dayEntry.confirmed++;
   else if (result === 'sandbox_inconclusive') { dayEntry.sandbox_inconclusive = (dayEntry.sandbox_inconclusive || 0) + 1; }
+  else if (result === 'sandbox_unconfirmed') { dayEntry.sandbox_unconfirmed = (dayEntry.sandbox_unconfirmed || 0) + 1; }
 
   const denom = dayEntry.false_positive + dayEntry.confirmed;
   dayEntry.fp_rate = denom > 0 ? dayEntry.false_positive / denom : 0;
@@ -3568,8 +3632,8 @@ async function resolveTarballAndScan(item) {
           updateScanStats('sandbox_inconclusive');
           console.log(`[MONITOR] RELABEL BLOCKED (high static): ${item.name} — static score=${staticScore}, keeping suspect label`);
         } else {
-          updateScanStats('false_positive');
-          relabelRecords(item.name, 'fp');
+          updateScanStats('sandbox_unconfirmed');
+          relabelRecords(item.name, 'unconfirmed');
         }
       } else if (sandboxResult && sandboxResult.score > 0) {
         const hasSandboxFindings = sandboxResult.findings && sandboxResult.findings.length > 0;
@@ -3810,7 +3874,9 @@ module.exports = {
   quickTyposquatCheck,
   POPULAR_NPM_NAMES,
   get tarballCacheIndex() { return tarballCacheIndex; },
-  set tarballCacheIndex(v) { tarballCacheIndex = v; }
+  set tarballCacheIndex(v) { tarballCacheIndex = v; },
+  // C2: Alert priority triage
+  computeAlertPriority
 };
 
 // Standalone entry point: node src/monitor.js

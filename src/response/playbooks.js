@@ -595,6 +595,21 @@ const PLAYBOOKS = {
     'Les proxies HTTP ne detectent pas ce trafic. Regenerer immediatement tous les secrets exposes. ' +
     'Bloquer les connexions sortantes sur les ports non-HTTP. Supprimer le package.',
 
+  lifecycle_dataflow:
+    'CRITIQUE: Script lifecycle (preinstall/postinstall) combine avec un flux de donnees suspect. ' +
+    'Le package lit des credentials et les envoie via le reseau a l\'installation. ' +
+    'NE PAS installer. Regenerer les secrets. Supprimer le package immediatement.',
+
+  lifecycle_dangerous_exec:
+    'CRITIQUE: Script lifecycle combine avec execution de commande shell dangereuse. ' +
+    'Le package execute des commandes systeme arbitraires a l\'installation (curl, wget, nc, bash). ' +
+    'NE PAS installer. Bloquer les connexions sortantes. Supprimer le package immediatement.',
+
+  obfuscated_lifecycle_env:
+    'CRITIQUE: Code obfusque + acces aux variables d\'environnement + script lifecycle. ' +
+    'Triple signal d\'exfiltration install-time: le code est masque pour voler des credentials. ' +
+    'NE PAS installer. Regenerer tous les secrets. Supprimer le package immediatement.',
+
   suspicious_module_sink:
     'Module reseau non-HTTP (ws, mqtt, socket.io) utilise comme sink de donnees. ' +
     'Verifier si des donnees sensibles sont envoyees via ce canal. ' +
