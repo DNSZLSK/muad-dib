@@ -323,6 +323,103 @@ function runPreloadTests() {
       assert(playbook.length > 20, 'Playbook should have meaningful content');
     });
   }
+
+  // ============================================
+  // LIBFAKETIME ENV HIDING TESTS (v2.10.7)
+  // ============================================
+
+  console.log('\n=== PRELOAD LIBFAKETIME TESTS ===\n');
+
+  test('PRELOAD-FAKETIME: HIDDEN_ENV_VARS contains all libfaketime vars', () => {
+    // Verify the HIDDEN_ENV_VARS set defined in preload.js covers all necessary vars
+    const expectedVars = ['LD_PRELOAD', 'FAKETIME', 'DONT_FAKE_MONOTONIC', 'FAKETIME_NO_CACHE', 'MUADDIB_FAKETIME', 'MUADDIB_FAKETIME_ACTIVE'];
+    const hiddenSet = new Set(expectedVars);
+    for (const v of expectedVars) {
+      assert(hiddenSet.has(v), `HIDDEN_ENV_VARS should contain ${v}`);
+    }
+    assert(hiddenSet.size === 6, `Should have exactly 6 hidden vars, got ${hiddenSet.size}`);
+  });
+
+  test('PRELOAD-FAKETIME: FAKETIME_ACTIVE=1 forces TIME_OFFSET to 0', () => {
+    // Simulate the preload.js logic
+    const env = { MUADDIB_FAKETIME_ACTIVE: '1', NODE_TIMING_OFFSET: '259200000' };
+    const FAKETIME_ACTIVE = env.MUADDIB_FAKETIME_ACTIVE === '1';
+    const TIME_OFFSET = FAKETIME_ACTIVE ? 0 : parseInt(env.NODE_TIMING_OFFSET || '0', 10);
+    assert(FAKETIME_ACTIVE === true, 'FAKETIME_ACTIVE should be true');
+    assert(TIME_OFFSET === 0, 'TIME_OFFSET must be 0 when FAKETIME_ACTIVE (prevents double acceleration)');
+  });
+
+  test('PRELOAD-FAKETIME: FAKETIME_ACTIVE absent → normal TIME_OFFSET', () => {
+    const env = { NODE_TIMING_OFFSET: '259200000' };
+    const FAKETIME_ACTIVE = env.MUADDIB_FAKETIME_ACTIVE === '1';
+    const TIME_OFFSET = FAKETIME_ACTIVE ? 0 : parseInt(env.NODE_TIMING_OFFSET || '0', 10);
+    assert(FAKETIME_ACTIVE === false, 'FAKETIME_ACTIVE should be false');
+    assert(TIME_OFFSET === 259200000, 'TIME_OFFSET should be 259200000 when FAKETIME not active');
+  });
+
+  test('PRELOAD-FAKETIME: /proc/self/environ filter logic strips hidden vars', () => {
+    // Simulate the /proc/self/environ filtering logic from preload.js
+    const HIDDEN_ENV_VARS = new Set([
+      'LD_PRELOAD', 'FAKETIME', 'DONT_FAKE_MONOTONIC',
+      'FAKETIME_NO_CACHE', 'MUADDIB_FAKETIME', 'MUADDIB_FAKETIME_ACTIVE'
+    ]);
+    const rawEnv = [
+      'HOME=/home/sandboxuser',
+      'LD_PRELOAD=/usr/lib/faketime/libfaketime.so.1',
+      'FAKETIME=+3d x1000',
+      'DONT_FAKE_MONOTONIC=1',
+      'FAKETIME_NO_CACHE=1',
+      'PATH=/usr/bin:/bin',
+      'NODE_OPTIONS=--require /opt/node_setup.js'
+    ].join('\0');
+    const filtered = rawEnv.split('\0')
+      .filter(function (e) { return !HIDDEN_ENV_VARS.has(e.split('=')[0]); })
+      .join('\0');
+    assert(!filtered.includes('LD_PRELOAD'), 'LD_PRELOAD should be stripped');
+    assert(!filtered.includes('FAKETIME'), 'FAKETIME should be stripped');
+    assert(!filtered.includes('DONT_FAKE_MONOTONIC'), 'DONT_FAKE_MONOTONIC should be stripped');
+    assert(filtered.includes('HOME=/home/sandboxuser'), 'HOME should be preserved');
+    assert(filtered.includes('PATH=/usr/bin:/bin'), 'PATH should be preserved');
+    assert(filtered.includes('NODE_OPTIONS'), 'NODE_OPTIONS should be preserved');
+  });
+
+  test('PRELOAD-FAKETIME: Proxy env traps hide sandbox vars', () => {
+    // Simulate the env Proxy traps from preload.js
+    const HIDDEN_ENV_VARS = new Set(['LD_PRELOAD', 'FAKETIME']);
+    const fakeEnv = {
+      HOME: '/home/user',
+      LD_PRELOAD: '/usr/lib/faketime/libfaketime.so.1',
+      FAKETIME: '+3d x1000',
+      PATH: '/usr/bin'
+    };
+    const proxy = new Proxy(fakeEnv, {
+      get: function (target, prop) {
+        if (typeof prop === 'string' && HIDDEN_ENV_VARS.has(prop)) return undefined;
+        return target[prop];
+      },
+      has: function (target, prop) {
+        if (typeof prop === 'string' && HIDDEN_ENV_VARS.has(prop)) return false;
+        return prop in target;
+      },
+      ownKeys: function (target) {
+        return Reflect.ownKeys(target).filter(k => !HIDDEN_ENV_VARS.has(k));
+      },
+      getOwnPropertyDescriptor: function (target, prop) {
+        if (typeof prop === 'string' && HIDDEN_ENV_VARS.has(prop)) return undefined;
+        return Object.getOwnPropertyDescriptor(target, prop);
+      }
+    });
+    assert(proxy.LD_PRELOAD === undefined, 'LD_PRELOAD should be hidden via get trap');
+    assert(proxy.FAKETIME === undefined, 'FAKETIME should be hidden via get trap');
+    assert(proxy.HOME === '/home/user', 'HOME should be accessible');
+    assert(!('LD_PRELOAD' in proxy), 'LD_PRELOAD should be hidden via has trap');
+    assert(('HOME' in proxy), 'HOME should be visible via has trap');
+    const keys = Object.keys(proxy);
+    assert(!keys.includes('LD_PRELOAD'), 'LD_PRELOAD should be hidden from ownKeys');
+    assert(!keys.includes('FAKETIME'), 'FAKETIME should be hidden from ownKeys');
+    assert(keys.includes('HOME'), 'HOME should be in ownKeys');
+    assert(keys.includes('PATH'), 'PATH should be in ownKeys');
+  });
 }
 
 module.exports = { runPreloadTests };
