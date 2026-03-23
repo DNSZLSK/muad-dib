@@ -52,6 +52,27 @@ chown -R sandboxuser:sandboxuser /home/sandboxuser/.config \
   /home/sandboxuser/Documents /home/sandboxuser/.vscode
 
 # ══════════════════════════════════════════════════════════════
+# PHASE 0.6: Libfaketime setup (cross-process time acceleration)
+# Accelerates C-level timers (nanosleep, clock_gettime, gettimeofday)
+# for ALL child processes (Python, bash, etc.) — complements preload.js
+# which only patches JS-level timers in Node.js.
+# ══════════════════════════════════════════════════════════════
+
+LIBFAKETIME_PATH="/usr/lib/faketime/libfaketime.so.1"
+[ ! -f "$LIBFAKETIME_PATH" ] && LIBFAKETIME_PATH="/usr/local/lib/faketime/libfaketime.so.1"
+[ ! -f "$LIBFAKETIME_PATH" ] && LIBFAKETIME_PATH=""
+
+if [ -n "$MUADDIB_FAKETIME" ] && [ -n "$LIBFAKETIME_PATH" ]; then
+  export LD_PRELOAD="$LIBFAKETIME_PATH"
+  export FAKETIME="$MUADDIB_FAKETIME"
+  export DONT_FAKE_MONOTONIC=1
+  export FAKETIME_NO_CACHE=1
+  echo "[SANDBOX] libfaketime active: FAKETIME=$FAKETIME" >&2
+fi
+# Clean up internal vars (don't expose sandbox internals to the package)
+unset MUADDIB_FAKETIME MUADDIB_FAKETIME_ACTIVE
+
+# ══════════════════════════════════════════════════════════════
 # PHASE 1: Root-privileged setup (iptables, tcpdump, filesystem snapshot)
 # Runs as root to access raw sockets and kernel netfilter.
 # ══════════════════════════════════════════════════════════════

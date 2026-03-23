@@ -17,7 +17,8 @@ async function runSandboxTests() {
     scoreFindings,
     generateNetworkReport,
     EXFIL_PATTERNS,
-    SAFE_DOMAINS
+    SAFE_DOMAINS,
+    TIME_OFFSETS
   } = require('../../src/sandbox/index.js');
 
   test('SANDBOX-NET: scoreFindings handles empty report', () => {
@@ -1053,6 +1054,67 @@ async function runSandboxTests() {
     const output = generateNetworkReport(report);
     assert(output.includes('Data Exfiltration'), 'Should have exfil section');
     assert(output.includes('SSH key'), 'Should identify SSH key in report');
+  });
+
+  // ============================================
+  // LIBFAKETIME INTEGRATION TESTS (v2.10.7)
+  // ============================================
+
+  console.log('\n=== LIBFAKETIME INTEGRATION TESTS ===\n');
+
+  test('SANDBOX-FAKETIME: TIME_OFFSETS[0] has offset=0 (no libfaketime for run 1)', () => {
+    assert(TIME_OFFSETS[0].offset === 0, 'First run should have offset 0');
+  });
+
+  test('SANDBOX-FAKETIME: TIME_OFFSETS[1] has offset=259200000 (72h)', () => {
+    assert(TIME_OFFSETS[1].offset === 259200000, 'Second run should have 72h offset');
+  });
+
+  test('SANDBOX-FAKETIME: TIME_OFFSETS[2] has offset=604800000 (7d)', () => {
+    assert(TIME_OFFSETS[2].offset === 604800000, 'Third run should have 7d offset');
+  });
+
+  test('SANDBOX-FAKETIME: FAKETIME string format for 72h → "+3d x1000"', () => {
+    const timeOffset = 259200000; // 72h
+    const hours = Math.floor(timeOffset / 3600000);
+    const faketimeStr = hours >= 24
+      ? `+${Math.floor(hours / 24)}d x1000`
+      : `+${hours}h x1000`;
+    assert(faketimeStr === '+3d x1000', `Expected "+3d x1000", got "${faketimeStr}"`);
+  });
+
+  test('SANDBOX-FAKETIME: FAKETIME string format for 7d → "+7d x1000"', () => {
+    const timeOffset = 604800000; // 7d
+    const hours = Math.floor(timeOffset / 3600000);
+    const faketimeStr = hours >= 24
+      ? `+${Math.floor(hours / 24)}d x1000`
+      : `+${hours}h x1000`;
+    assert(faketimeStr === '+7d x1000', `Expected "+7d x1000", got "${faketimeStr}"`);
+  });
+
+  test('SANDBOX-FAKETIME: FAKETIME string format for 12h → "+12h x1000"', () => {
+    const timeOffset = 43200000; // 12h
+    const hours = Math.floor(timeOffset / 3600000);
+    const faketimeStr = hours >= 24
+      ? `+${Math.floor(hours / 24)}d x1000`
+      : `+${hours}h x1000`;
+    assert(faketimeStr === '+12h x1000', `Expected "+12h x1000", got "${faketimeStr}"`);
+  });
+
+  test('SANDBOX-FAKETIME: offset=0 → useFaketime=false, NODE_TIMING_OFFSET=0', () => {
+    const timeOffset = 0;
+    const useFaketime = timeOffset > 0;
+    assert(useFaketime === false, 'offset=0 should not use faketime');
+    const nodeTimingOffset = useFaketime ? 0 : timeOffset;
+    assert(nodeTimingOffset === 0, 'NODE_TIMING_OFFSET should be 0');
+  });
+
+  test('SANDBOX-FAKETIME: offset>0 → useFaketime=true, NODE_TIMING_OFFSET=0 (anti double-accel)', () => {
+    const timeOffset = 259200000;
+    const useFaketime = timeOffset > 0;
+    assert(useFaketime === true, 'offset>0 should use faketime');
+    const nodeTimingOffset = useFaketime ? 0 : timeOffset;
+    assert(nodeTimingOffset === 0, 'NODE_TIMING_OFFSET must be 0 when faketime active (prevents double acceleration)');
   });
 }
 

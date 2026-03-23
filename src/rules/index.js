@@ -1519,6 +1519,15 @@ const RULES = {
     references: ['https://attack.mitre.org/techniques/T1059/004/'],
     mitre: 'T1059.004'
   },
+  python_time_delay_exec: {
+    id: 'MUADDIB-SHELL-019',
+    name: 'Python Time Delay Execution',
+    severity: 'HIGH',
+    confidence: 0.80,
+    description: 'Execution Python avec delai time.sleep() >= 100s via child process. Technique d\'evasion sandbox (T1497.003) : le malware attend que la sandbox expire avant d\'executer le payload.',
+    references: ['https://attack.mitre.org/techniques/T1497/003/'],
+    mitre: 'T1497.003'
+  },
 
   // Intent Graph rules (v2.6.0)
   detached_credential_exfil: {

@@ -26,7 +26,9 @@ const MALICIOUS_PATTERNS = [
   { pattern: /eval\s+.*\$\(curl/m, name: 'eval_curl_subshell', severity: 'CRITICAL' },
   { pattern: /sh\s+-c\s+['"].*curl/m, name: 'sh_c_curl_exec', severity: 'HIGH' },
   // Bun runtime evasion (v2.8.9 — Shai-Hulud 2.0)
-  { pattern: /\bbun\s+run\b/m, name: 'bun_runtime_evasion', severity: 'HIGH' }
+  { pattern: /\bbun\s+run\b/m, name: 'bun_runtime_evasion', severity: 'HIGH' },
+  // Python time.sleep sandbox evasion (v2.10.7 — CanisterWorm T1497.003)
+  { pattern: /python[23]?\s+-c\s*['"].*time\.sleep\s*\(\s*[1-9]\d{2,}/m, name: 'python_time_delay_exec', severity: 'HIGH' }
 ];
 
 const SHEBANG_RE = /^#!.*\b(?:ba)?sh\b/;

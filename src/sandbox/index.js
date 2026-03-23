@@ -186,8 +186,21 @@ async function runSingleSandbox(packageName, options = {}) {
       dockerArgs.push('-e', `CANARY_GITCONFIG=${createCanaryGitconfig().replace(/\r?\n/g, '\\n')}`);
     }
 
-    // Inject time offset (preload.js deferred to entry point in sandbox-runner.sh)
-    dockerArgs.push('-e', `NODE_TIMING_OFFSET=${timeOffset}`);
+    // Inject time offset — libfaketime-aware (v2.10.7)
+    // Run 1 (offset=0): no libfaketime, preload.js handles JS-level only
+    // Runs 2+ (offset>0): libfaketime handles C-level time shift for ALL processes
+    //   (Node, Python, bash), preload.js TIME_OFFSET=0 to avoid double acceleration
+    const useFaketime = timeOffset > 0;
+    dockerArgs.push('-e', `NODE_TIMING_OFFSET=${useFaketime ? 0 : timeOffset}`);
+
+    if (useFaketime) {
+      const hours = Math.floor(timeOffset / 3600000);
+      const faketimeStr = hours >= 24
+        ? `+${Math.floor(hours / 24)}d x1000`
+        : `+${hours}h x1000`;
+      dockerArgs.push('-e', `MUADDIB_FAKETIME=${faketimeStr}`);
+      dockerArgs.push('-e', 'MUADDIB_FAKETIME_ACTIVE=1');
+    }
 
     // Both modes need NET_RAW for tcpdump (runs as root in entrypoint).
     // Strict mode also needs NET_ADMIN for iptables network blocking.

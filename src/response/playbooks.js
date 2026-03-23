@@ -183,6 +183,11 @@ const PLAYBOOKS = {
   sh_c_curl_exec:
     'sh -c wrapping autour de curl detecte. Technique d\'evasion pour masquer l\'execution de commandes distantes. Analyser le contenu telecharge.',
 
+  python_time_delay_exec:
+    'ELEVE: Execution Python avec delai time.sleep() important detectee. ' +
+    'Technique d\'evasion sandbox (T1497.003) : le malware attend l\'expiration du timeout sandbox avant d\'executer le payload. ' +
+    'Verifier le code Python execute et les connexions reseau post-delai.',
+
   shai_hulud_backdoor:
     'CRITIQUE: Backdoor Shai-Hulud dans GitHub Actions. Supprimer le workflow et auditer les runs precedents.',
 

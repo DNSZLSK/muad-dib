@@ -1,7 +1,7 @@
 FROM node:20-alpine
 
 # Outils de monitoring
-RUN apk add --no-cache strace curl tcpdump coreutils findutils jq iptables
+RUN apk add --no-cache strace curl tcpdump coreutils findutils jq iptables libfaketime
 
 # Non-root user for npm install (privilege drop via su in sandbox-runner.sh)
 RUN adduser -D sandboxuser

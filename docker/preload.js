@@ -56,10 +56,23 @@
   // 2. CONFIGURATION
   // ═══════════════════════════════════════════════════════
 
-  const TIME_OFFSET = parseInt(process.env.NODE_TIMING_OFFSET || '0', 10);
+  // When libfaketime is active (C-level time shift), set JS TIME_OFFSET=0
+  // to avoid double acceleration (libfaketime already shifts clock_gettime).
+  const FAKETIME_ACTIVE = process.env.MUADDIB_FAKETIME_ACTIVE === '1';
+  const TIME_OFFSET = FAKETIME_ACTIVE ? 0 : parseInt(process.env.NODE_TIMING_OFFSET || '0', 10);
   delete process.env.NODE_TIMING_OFFSET;
+  delete process.env.MUADDIB_FAKETIME_ACTIVE;
   const LOG_FILE = '/tmp/preload.log';
   const realStart = _DateNow.call(Date);
+
+  // ── Hide sandbox env vars from target package ──
+  // libfaketime is already loaded in memory; env vars are no longer needed.
+  // Prevents malware from detecting sandbox via process.env.LD_PRELOAD.
+  const HIDDEN_ENV_VARS = new Set([
+    'LD_PRELOAD', 'FAKETIME', 'DONT_FAKE_MONOTONIC',
+    'FAKETIME_NO_CACHE', 'MUADDIB_FAKETIME', 'MUADDIB_FAKETIME_ACTIVE'
+  ]);
+  for (const v of HIDDEN_ENV_VARS) { try { delete process.env[v]; } catch(e) { /* ignore */ } }
 
   // Lock NODE_OPTIONS to prevent target package from disabling preload in child processes
   try {
@@ -494,12 +507,25 @@
     const _origEnv = process.env;
     const envProxy = new Proxy(_origEnv, {
       get: function (target, prop) {
+        // Hide sandbox env vars (libfaketime, etc.) from target package
+        if (typeof prop === 'string' && HIDDEN_ENV_VARS.has(prop)) return undefined;
         try {
           if (typeof prop === 'string' && SENSITIVE_ENV_RE.test(prop)) {
             log('ENV_ACCESS', `${prop}`);
           }
         } catch (e) { /* ignore */ }
         return target[prop];
+      },
+      has: function (target, prop) {
+        if (typeof prop === 'string' && HIDDEN_ENV_VARS.has(prop)) return false;
+        return prop in target;
+      },
+      ownKeys: function (target) {
+        return Reflect.ownKeys(target).filter(k => !HIDDEN_ENV_VARS.has(k));
+      },
+      getOwnPropertyDescriptor: function (target, prop) {
+        if (typeof prop === 'string' && HIDDEN_ENV_VARS.has(prop)) return undefined;
+        return Object.getOwnPropertyDescriptor(target, prop);
       },
       set: function (target, prop, value) {
         try { target[prop] = value; } catch (e) { /* NODE_OPTIONS is locked */ }
@@ -554,6 +580,23 @@
           log('FS_READ', `SPOOFED /proc/1/cgroup (real read intercepted)`);
           return '0::/init.scope\n';
         }
+        // 11c. /proc/self/environ SPOOFING (libfaketime detection evasion)
+        // Malware reads /proc/self/environ or /proc/<pid>/environ to detect
+        // LD_PRELOAD=libfaketime (sandbox fingerprint). Strip hidden vars.
+        if (p === '/proc/self/environ' || /\/proc\/\d+\/environ/.test(p)) {
+          log('FS_READ', `SPOOFED ${p} (sandbox vars stripped)`);
+          try {
+            const real = _currentReadFileSync.apply(_fs, arguments);
+            const str = (Buffer.isBuffer(real) ? real : Buffer.from(String(real))).toString();
+            const filtered = str.split('\0')
+              .filter(function (e) { return !HIDDEN_ENV_VARS.has(e.split('=')[0]); })
+              .join('\0');
+            return Buffer.from(filtered);
+          } catch (e) {
+            // If real read fails, return empty (better than exposing LD_PRELOAD)
+            return Buffer.from('');
+          }
+        }
       } catch (e) { /* ignore */ }
       return _currentReadFileSync.apply(_fs, arguments);
     };
@@ -571,10 +614,10 @@
       const _OrigWorker = wt.Worker;
       wt.Worker = function (filename, options) {
         options = options || {};
-        // Propagate time offset to worker
-        options.env = Object.assign({}, process.env, options.env || {}, {
-          NODE_TIMING_OFFSET: String(TIME_OFFSET)
-        });
+        // Propagate time offset to worker (FAKETIME_ACTIVE prevents double-accel)
+        const workerEnvExtra = { NODE_TIMING_OFFSET: String(TIME_OFFSET) };
+        if (FAKETIME_ACTIVE) workerEnvExtra.MUADDIB_FAKETIME_ACTIVE = '1';
+        options.env = Object.assign({}, process.env, options.env || {}, workerEnvExtra);
         // Inject preload script into worker
         if (!options.execArgv) options.execArgv = [];
         options.execArgv = options.execArgv.concat(['--require', '/opt/node_setup.js']);
