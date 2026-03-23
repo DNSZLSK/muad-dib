@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CanisterWorm : quand la sandbox est aveugle pendant 5 minutes - MUAD'DIB</title>
+  <meta name="description" content="Detection de CanisterWorm (mars 2026), 7 packages npm detectes, et la reponse libfaketime pour accelerer time.sleep() en sandbox.">
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script>hljs.highlightAll();</script>
+</head>
+<body>
+
+<nav>
+  <a href="../" class="site-name">muad-dib</a>
+  <a href="../">accueil</a>
+  <a href="./">blog</a>
+  <a href="https://github.com/DNSZLSK/muad-dib" target="_blank" rel="noopener">github</a>
+  <a href="https://www.npmjs.com/package/muaddib-scanner" target="_blank" rel="noopener">npm</a>
+</nav>
+
+<main>
+  <a href="./" class="back-link">&larr; Blog</a>
+
+  <article>
+    <div class="article-meta">
+      <h1>CanisterWorm : quand la sandbox est aveugle pendant 5 minutes</h1>
+      <span class="date">2026-03-23</span>
+      <div class="tags">
+        <span class="tag">detection</span>
+        <span class="tag">canisterworm</span>
+        <span class="tag">sandbox</span>
+        <span class="tag">libfaketime</span>
+        <span class="tag">evasion</span>
+      </div>
+    </div>
+
+    <div class="article-content">
+
+      <p>19-21 mars 2026. <strong>CanisterWorm</strong>, un ver auto-propagateur npm, compromet 64+ packages via des tokens npm voles. Le vecteur initial : la compromission de <a href="https://www.wiz.io/blog/trivy-compromised-teampcp-supply-chain-attack" target="_blank" rel="noopener">Trivy</a> (Aqua Security) par le groupe TeamPCP. 75 des 76 tags de trivy-action ont ete force-pushes avec un infostealer. 135+ artefacts malveillants identifies au total.</p>
+
+      <p>MUAD'DIB a detecte 7 packages compromis. Le verdict etait <strong>DORMANT SUSPECT</strong>, pas MALICIOUS. Cet article explique pourquoi, et ce qu'on a corrige.</p>
+
+      <h2>L'attaque</h2>
+
+      <p>CanisterWorm est le premier ver npm documente qui utilise un <strong>C2 sur la blockchain ICP</strong> (Internet Computer Protocol). Le payload vole des tokens npm, puis les utilise pour publier des versions infectees des packages du developpeur compromis. Le ver se propage automatiquement.</p>
+
+      <p><a href="https://www.aikido.dev/blog/teampcp-deploys-worm-npm-trivy-compromise" target="_blank" rel="noopener">Aikido</a> a fait la premiere detection publique le 20 mars a 20:45 UTC.</p>
+
+      <p>Le payload installe un service systemd persistant qui lance un script Python :</p>
+
+      <pre><code class="language-javascript">fs.writeFileSync(unitFilePath, [
+  '[Unit]',
+  `Description=${SERVICE_NAME}`,
+  'After=default.target',
+  '',
+  '[Service]',
+  'Type=simple',
+  `ExecStart=/usr/bin/python3 ${scriptPath}`,
+  'Restart=always',
+  'RestartSec=5',
+  '',
+  '[Install]',
+  'WantedBy=default.target',
+].join('\n'), { mode: 0o644 });
+
+execSync('systemctl --user daemon-reload', { stdio: 'pipe' });
+execSync(`systemctl --user enable ${SERVICE_NAME}.service`, { stdio: 'pipe' });
+execSync(`systemctl --user start  ${SERVICE_NAME}.service`, { stdio: 'pipe' });</code></pre>
+
+      <p>Le script Python execute un <code>time.sleep(300)</code> avant de contacter le canister C2 sur la blockchain ICP. Cinq minutes.</p>
+
+      <h2>Ce que MUAD'DIB a detecte</h2>
+
+      <p>7 packages compromis detectes entre le 20 mars 23:49 UTC et le 21 mars 00:27 UTC, tous confirmes par JFrog XRAY :</p>
+
+      <table>
+        <tr><th>Package</th><th>JFrog XRAY</th><th>Detection</th></tr>
+        <tr><td><code>@emilgroup/document-sdk-node@1.43.6</code></td><td>XRAY-954947</td><td>20 mars 23:49</td></tr>
+        <tr><td><code>@emilgroup/insurance-sdk@1.97.6</code></td><td>XRAY-954928</td><td>21 mars 00:13</td></tr>
+        <tr><td><code>@teale.io/eslint-config@1.8.16</code></td><td>XRAY-954945</td><td>21 mars 00:14</td></tr>
+        <tr><td><code>@opengov/ppf-backend-types@1.141.2</code></td><td>XRAY-954962</td><td>21 mars 00:24</td></tr>
+        <tr><td><code>@airtm/uuid-base32@1.0.2</code></td><td>XRAY-954937</td><td>21 mars 00:26</td></tr>
+        <tr><td><code>@virtahealth/substrate-root@1.0.1</code></td><td>XRAY-955055</td><td>21 mars 00:27</td></tr>
+        <tr><td><code>react-leaflet-heatmap-layer@2.0.1</code></td><td>XRAY-954931</td><td>21 mars 00:27</td></tr>
+      </table>
+
+      <p>C'est 7 sur 64+ packages compromis. L'analyse statique a remonte les signaux suivants sur chaque package :</p>
+
+      <ul>
+        <li><strong>suspicious_dataflow</strong> (CRITICAL), <strong>detached_credential_exfil</strong> (CRITICAL)</li>
+        <li><strong>lifecycle_script</strong>, <strong>detached_process</strong>, <strong>js_obfuscation_pattern</strong>, <strong>high_entropy_string</strong></li>
+        <li><strong>TEMPORAL ANOMALY</strong> : postinstall ajoute entre versions (CRITICAL)</li>
+        <li><strong>AST ANOMALY</strong> : child_process (CRITICAL), process.env (HIGH), https_request (HIGH)</li>
+        <li><strong>PUBLISH ANOMALY</strong> : publish_burst, dormant_spike, rapid_succession</li>
+        <li><strong>MAINTAINER CHANGE</strong> : new_maintainer x5-8, suspicious_maintainer x2-3</li>
+      </ul>
+
+      <p>Score statique : <strong>87/100</strong>. Les webhooks Discord ont ete envoyes automatiquement.</p>
+
+      <h2>Le probleme : sandbox score 0</h2>
+
+      <p>Le verdict final etait <strong>DORMANT SUSPECT</strong>, pas MALICIOUS. Pourquoi ?</p>
+
+      <p>Le payload Python fait <code>time.sleep(300)</code> avant de contacter le C2. La sandbox MUAD'DIB a un timeout de 60 secondes par run (180 secondes pour les 3 runs cumules). Le malware ne s'active jamais pendant l'analyse.</p>
+
+      <p>Le <code>preload.js</code> du sandbox patche les timers Node.js : <code>setTimeout</code> est force a 0, <code>Date.now()</code> est decale. Mais le payload Python est lance via <code>execSync('systemctl --user start ...')</code>. Le processus Python utilise le vrai <code>time.sleep()</code> de la libc. Le monkey-patching JavaScript ne touche pas les processus enfants Python ou bash.</p>
+
+      <p>Resultat : sandbox score <strong>0/100 CLEAN</strong>. L'analyse statique a score 87, mais sans confirmation sandbox, le verdict reste DORMANT SUSPECT.</p>
+
+      <h2>La solution : libfaketime (v2.10.7)</h2>
+
+      <p><a href="https://github.com/wolfcw/libfaketime" target="_blank" rel="noopener">libfaketime</a> est une bibliotheque qui intercepte les appels C de la libc : <code>nanosleep</code>, <code>clock_gettime</code>, <code>gettimeofday</code>. Via <code>LD_PRELOAD</code>, elle affecte <strong>tous les processus</strong> : Node.js, Python, bash, tout ce qui utilise la libc.</p>
+
+      <p>Avec un multiplicateur <code>x1000</code>, <code>time.sleep(300)</code> se complete en <strong>0.3 secondes reelles</strong>.</p>
+
+      <h3>Architecture</h3>
+
+      <p>Deux niveaux complementaires :</p>
+
+      <table>
+        <tr><th>Couche</th><th>Mecanisme</th><th>Cible</th></tr>
+        <tr><td>preload.js (JS)</td><td>Monkey-patching V8</td><td>setTimeout, Date.now, process.hrtime</td></tr>
+        <tr><td>libfaketime (C)</td><td>LD_PRELOAD libc</td><td>nanosleep, clock_gettime, gettimeofday</td></tr>
+      </table>
+
+      <p>Le preload.js continue de logger les appels API (reseau, fichiers, env vars) et d'accelerer les timers JavaScript. libfaketime gere l'acceleration au niveau systeme pour les processus enfants.</p>
+
+      <h3>Implementation en 7 fichiers</h3>
+
+      <p><strong>docker/Dockerfile</strong> : ajout de libfaketime au <code>apk add</code>.</p>
+
+      <pre><code class="language-dockerfile">RUN apk add --no-cache strace curl tcpdump coreutils findutils jq iptables libfaketime</code></pre>
+
+      <p><strong>src/sandbox/index.js</strong> : injection conditionnelle. Run 1 (baseline) n'utilise pas libfaketime. Runs 2 et 3 injectent <code>MUADDIB_FAKETIME</code> et mettent <code>NODE_TIMING_OFFSET=0</code> pour eviter la double acceleration :</p>
+
+      <pre><code class="language-javascript">const useFaketime = timeOffset > 0;
+dockerArgs.push('-e', `NODE_TIMING_OFFSET=${useFaketime ? 0 : timeOffset}`);
+
+if (useFaketime) {
+  const hours = Math.floor(timeOffset / 3600000);
+  const faketimeStr = hours >= 24
+    ? `+${Math.floor(hours / 24)}d x1000`
+    : `+${hours}h x1000`;
+  dockerArgs.push('-e', `MUADDIB_FAKETIME=${faketimeStr}`);
+  dockerArgs.push('-e', 'MUADDIB_FAKETIME_ACTIVE=1');
+}</code></pre>
+
+      <p><strong>docker/sandbox-runner.sh</strong> : setup <code>LD_PRELOAD</code> conditionnel avec <code>DONT_FAKE_MONOTONIC=1</code> (protege la libuv event loop de Node.js).</p>
+
+      <pre><code class="language-bash">if [ -n "$MUADDIB_FAKETIME" ] && [ -n "$LIBFAKETIME_PATH" ]; then
+  export LD_PRELOAD="$LIBFAKETIME_PATH"
+  export FAKETIME="$MUADDIB_FAKETIME"
+  export DONT_FAKE_MONOTONIC=1
+  export FAKETIME_NO_CACHE=1
+fi
+unset MUADDIB_FAKETIME MUADDIB_FAKETIME_ACTIVE</code></pre>
+
+      <p><strong>docker/preload.js</strong> : 4 modifications.</p>
+
+      <ol>
+        <li><strong>Anti-double-acceleration</strong> : si <code>MUADDIB_FAKETIME_ACTIVE=1</code>, alors <code>TIME_OFFSET=0</code>. libfaketime gere deja l'offset au niveau C, ajouter l'offset JavaScript causerait un decalage de +144h au lieu de +72h.</li>
+        <li><strong>Suppression des variables sandbox</strong> : <code>LD_PRELOAD</code>, <code>FAKETIME</code>, <code>DONT_FAKE_MONOTONIC</code>, <code>FAKETIME_NO_CACHE</code> sont supprimes de <code>process.env</code> immediatement apres le chargement. libfaketime est deja charge en memoire, les variables ne sont plus necessaires.</li>
+        <li><strong>Proxy traps enrichis</strong> : le Proxy <code>process.env</code> existant recoit des traps <code>has</code>, <code>ownKeys</code> et <code>getOwnPropertyDescriptor</code> pour cacher les variables sandbox. Un malware qui fait <code>'LD_PRELOAD' in process.env</code> ou <code>Object.keys(process.env)</code> ne voit rien.</li>
+        <li><strong>Spoofing <code>/proc/self/environ</code></strong> : un malware Python peut lire <code>/proc/self/environ</code> pour detecter <code>LD_PRELOAD</code>. Le readFileSync intercepte ce chemin et filtre les variables sandbox du contenu.</li>
+      </ol>
+
+      <h3>Detection statique : SHELL-019</h3>
+
+      <p>En complement du sandbox, une nouvelle regle statique detecte le pattern <code>python3 -c "...time.sleep(N)..."</code> avec N >= 100 secondes dans les scripts shell :</p>
+
+      <pre><code class="language-javascript">// src/scanner/shell.js
+{ pattern: /python[23]?\s+-c\s*['"].*time\.sleep\s*\(\s*[1-9]\d{2,}/m,
+  name: 'python_time_delay_exec', severity: 'HIGH' }</code></pre>
+
+      <p>Regle <code>MUADDIB-SHELL-019</code>, MITRE T1497.003 (Time Based Evasion Checks). Le seuil de 100 secondes evite les faux positifs sur les courts delais legitimes.</p>
+
+      <h2>Logs de production</h2>
+
+      <p>Voici ce que le sandbox affiche sur un package avec libfaketime actif :</p>
+
+      <pre><code class="language-text">[SANDBOX] Run 1/3 (immediate)...
+[SANDBOX] Snapshot filesystem before install...
+[SANDBOX] Installing package as sandboxuser...
+[SANDBOX] Executing package entry point...
+[SANDBOX] Building report...
+[SANDBOX] Run 2/3 (72h offset)...
+[SANDBOX] libfaketime active: FAKETIME=+3d x1000
+[SANDBOX] Installing package as sandboxuser...
+[SANDBOX] Run 3/3 (7d offset)...
+[SANDBOX] libfaketime active: FAKETIME=+7d x1000</code></pre>
+
+      <p>Run 1 : pas de libfaketime, c'est la baseline. Runs 2 et 3 : libfaketime accelere le temps systeme x1000. Le <code>time.sleep(300)</code> Python se termine en 0.3 secondes, le payload C2 se declenche, et tcpdump/strace capturent la connexion reseau.</p>
+
+      <h2>Limitations</h2>
+
+      <table>
+        <tr><th>Langage</th><th>Fonctionne ?</th><th>Detail</th></tr>
+        <tr><td>Python (CPython)</td><td>Oui</td><td><code>time.sleep()</code> accelere. <code>time.monotonic()</code> pas affecte</td></tr>
+        <tr><td>Bash/sh</td><td>Oui</td><td><code>sleep 300</code> accelere</td></tr>
+        <tr><td>Go</td><td>Non</td><td>Link statique libc, bypass <code>LD_PRELOAD</code></td></tr>
+        <tr><td>Rust</td><td>Non</td><td>Idem</td></tr>
+        <tr><td>Java/JVM</td><td>Risque</td><td>Hangs possibles sans <code>DONT_FAKE_MONOTONIC</code></td></tr>
+      </table>
+
+      <p>Go et Rust linkent la libc statiquement par defaut. <code>LD_PRELOAD</code> ne peut pas intercepter leurs appels systeme. C'est une limitation connue et documentee. Pour les malwares Go/Rust, la detection statique reste la seule ligne de defense.</p>
+
+      <h2>Metriques v2.10.7</h2>
+
+      <table>
+        <tr><th>Metrique</th><th>Avant</th><th>Apres</th></tr>
+        <tr><td>Regles</td><td>162 (157+5)</td><td><strong>163</strong> (158+5)</td></tr>
+        <tr><td>Tests</td><td>2643</td><td><strong>2669</strong> (+26)</td></tr>
+        <tr><td>TPR</td><td>93.9%</td><td><strong>93.9%</strong></td></tr>
+        <tr><td>FPR curated</td><td>11.0%</td><td><strong>11.0%</strong></td></tr>
+      </table>
+
+      <p>Zero regression. Zero faux positif ajoute. Le seuil de 100 secondes pour SHELL-019 et la restriction aux scripts shell (<code>.sh</code>, shebang) eliminent les cas benins.</p>
+
+      <h2>Lecon</h2>
+
+      <p>Le monkey-patching JavaScript (preload.js) ne suffit pas. Quand un malware npm lance un processus Python, bash, ou n'importe quel binaire natif, les patches V8 sont invisibles. libfaketime comble ce gap en interceptant au niveau de la libc, avant meme que l'interpreteur Python ne demarre.</p>
+
+      <p>CanisterWorm illustre un pattern recurrent : les attaquants utilisent volontairement un <strong>langage different</strong> pour le payload (Python dans un package npm) precisement pour echapper aux sandboxes qui ne patchent que le runtime principal. La detection doit etre polyglotte.</p>
+
+      <p>Et soyons honnetes : MUAD'DIB a detecte 7 packages sur 64+ compromis, avec un verdict DORMANT SUSPECT et pas MALICIOUS. L'analyse statique a fonctionne. La sandbox non. C'est exactement le type de gap que libfaketime comble.</p>
+
+      <h2>Sources</h2>
+
+      <ul>
+        <li><a href="https://research.jfrog.com/post/canister-worm/" target="_blank" rel="noopener">JFrog Security Research</a></li>
+        <li><a href="https://socket.dev/blog/canisterworm-npm-publisher-compromise-deploys-backdoor-across-29-packages" target="_blank" rel="noopener">Socket</a></li>
+        <li><a href="https://www.aikido.dev/blog/teampcp-deploys-worm-npm-trivy-compromise" target="_blank" rel="noopener">Aikido</a></li>
+        <li><a href="https://www.wiz.io/blog/trivy-compromised-teampcp-supply-chain-attack" target="_blank" rel="noopener">Wiz</a></li>
+        <li><a href="https://www.endorlabs.com/learn/canisterworm" target="_blank" rel="noopener">Endor Labs</a></li>
+      </ul>
+
+    </div>
+  </article>
+</main>
+
+<footer>
+  MUAD'DIB / DNSZLSK / <a href="https://github.com/DNSZLSK/muad-dib" target="_blank" rel="noopener">source</a>
+</footer>
+
+</body>
+</html>
