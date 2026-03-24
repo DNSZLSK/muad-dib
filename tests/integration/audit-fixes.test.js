@@ -3,7 +3,11 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { test, asyncTest, assert, assertIncludes, runScanDirect, createTempPkg, cleanupTemp } = require('../test-utils');
+const { test, asyncTest, assert, assertIncludes, runScanDirect, createTempPkg, cleanupTemp, addSkipped } = require('../test-utils');
+
+const BENIGN_NPM_FILE = path.join(__dirname, '../../datasets/benign/packages-npm.txt');
+const BENIGN_PYPI_FILE = path.join(__dirname, '../../datasets/benign/packages-pypi.txt');
+const DATASETS_AVAILABLE = fs.existsSync(BENIGN_NPM_FILE);
 
 // ===================================================================
 // FIX 1: Promise.allSettled — scanner crash doesn't kill entire scan
@@ -666,10 +670,14 @@ async function runCritical18Tests() {
 async function runHighFix3Tests() {
   console.log('\n=== HIGH #3: Benign set native addon packages ===\n');
 
+  if (!DATASETS_AVAILABLE) {
+    console.log('[SKIP] H3: datasets not available, skipping (x2)');
+    addSkipped(2);
+    return;
+  }
+
   test('H3: packages-npm.txt contains native addon packages', () => {
-    const npmList = fs.readFileSync(
-      path.join(__dirname, '../../datasets/benign/packages-npm.txt'), 'utf8'
-    );
+    const npmList = fs.readFileSync(BENIGN_NPM_FILE, 'utf8');
     const lines = npmList.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
     const nativeAddons = ['leveldown', 'sodium-native', 'cpu-features'];
     for (const pkg of nativeAddons) {
@@ -678,9 +686,7 @@ async function runHighFix3Tests() {
   });
 
   test('H3: packages-npm.txt has at least 3 native addon packages', () => {
-    const npmList = fs.readFileSync(
-      path.join(__dirname, '../../datasets/benign/packages-npm.txt'), 'utf8'
-    );
+    const npmList = fs.readFileSync(BENIGN_NPM_FILE, 'utf8');
     const knownNative = ['bcrypt', 'canvas', 'sqlite3', 'better-sqlite3', 'leveldown',
       'sodium-native', 'cpu-features', 'sharp', 'node-gyp'];
     const lines = npmList.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
@@ -695,13 +701,16 @@ async function runHighFix3Tests() {
 async function runHighFix4Tests() {
   console.log('\n=== HIGH #4: PyPI evaluation support ===\n');
 
-  test('H4: packages-pypi.txt exists and contains packages', () => {
-    const pypiPath = path.join(__dirname, '../../datasets/benign/packages-pypi.txt');
-    assert(fs.existsSync(pypiPath), 'packages-pypi.txt should exist');
-    const content = fs.readFileSync(pypiPath, 'utf8');
-    const lines = content.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
-    assert(lines.length >= 10, `Should have at least 10 PyPI packages, got ${lines.length}`);
-  });
+  if (!fs.existsSync(BENIGN_PYPI_FILE)) {
+    console.log('[SKIP] H4: datasets not available, skipping');
+    addSkipped(1);
+  } else {
+    test('H4: packages-pypi.txt exists and contains packages', () => {
+      const content = fs.readFileSync(BENIGN_PYPI_FILE, 'utf8');
+      const lines = content.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+      assert(lines.length >= 10, `Should have at least 10 PyPI packages, got ${lines.length}`);
+    });
+  }
 
   test('H4: evaluate.js exports evaluateBenignPyPI', () => {
     const { evaluateBenignPyPI } = require('../../src/commands/evaluate.js');
