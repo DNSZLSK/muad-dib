@@ -1,6 +1,0 @@
-{
-  "name": "steganography-payload",
-  "version": "1.0.0",
-  "description": "Image processing utilities",
-  "main": "index.js"
-}

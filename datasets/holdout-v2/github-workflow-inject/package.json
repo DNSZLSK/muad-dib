@@ -1,6 +1,0 @@
-{
-  "name": "github-workflow-inject",
-  "version": "1.0.0",
-  "description": "Holdout v2 — inject step into existing workflow files",
-  "main": "index.js"
-}

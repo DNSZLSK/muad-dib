@@ -1,6 +1,0 @@
-{
-  "name": "env-var-reconstruction",
-  "version": "1.0.0",
-  "description": "Holdout v2 — charCode reconstruction of env var name",
-  "main": "index.js"
-}

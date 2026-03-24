@@ -1,6 +1,0 @@
-{
-  "name": "npm-cache-poison",
-  "version": "1.0.0",
-  "description": "Holdout v2 — local npm cache manipulation",
-  "main": "index.js"
-}

@@ -1,6 +1,0 @@
-{
-  "name": "process-env-proxy-getter",
-  "version": "1.0.0",
-  "description": "Holdout v2 — defineProperty intercept on process.env",
-  "main": "index.js"
-}
