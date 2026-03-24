@@ -7728,6 +7728,92 @@ async function runMonitorTests() {
     }
   });
 
+  // --- Bug fix: ML override hasHighOrCritical guard (v2.10.6) ---
+
+  test('MONITOR: shouldSendWebhook ML p>=0.90 ALL LOW → suppressed (agentcash repro)', () => {
+    const orig = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.example.com/test';
+    try {
+      // Reproduces agentcash@0.13.0: 28 findings ALL LOW, score 22, ML p=0.999
+      const result = {
+        summary: { riskScore: 22, total: 28, critical: 0, high: 0, medium: 0, low: 28 },
+        threats: Array.from({ length: 28 }, (_, i) => ({
+          type: `low_finding_${i}`, severity: 'LOW'
+        }))
+      };
+      const sandbox = { score: 0, severity: 'CLEAN', findings: [] };
+      const mlResult = { prediction: 'malicious', probability: 0.999, reason: 'model' };
+      assert(shouldSendWebhook(result, sandbox, mlResult) === false,
+        'ML p=0.999 with ALL LOW findings should be suppressed (expert FP system overrides ML)');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  test('MONITOR: shouldSendWebhook ML p>=0.90 MEDIUM-only → suppressed', () => {
+    const orig = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.example.com/test';
+    try {
+      const result = {
+        summary: { riskScore: 18, total: 5, critical: 0, high: 0, medium: 5, low: 0 },
+        threats: Array.from({ length: 5 }, (_, i) => ({
+          type: `medium_finding_${i}`, severity: 'MEDIUM'
+        }))
+      };
+      const sandbox = { score: 0, severity: 'CLEAN', findings: [] };
+      const mlResult = { prediction: 'malicious', probability: 0.95, reason: 'model' };
+      assert(shouldSendWebhook(result, sandbox, mlResult) === false,
+        'ML p=0.95 with MEDIUM-only findings should be suppressed (no HIGH/CRITICAL)');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  test('MONITOR: shouldSendWebhook ML p>=0.90 + HIGH → sent (regression guard)', () => {
+    const orig = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.example.com/test';
+    try {
+      const result = {
+        summary: { riskScore: 25, total: 3, critical: 0, high: 1, medium: 2, low: 0 },
+        threats: [
+          { type: 'env_access', severity: 'HIGH' },
+          { type: 'obfuscation_detected', severity: 'MEDIUM' },
+          { type: 'suspicious_string', severity: 'MEDIUM' }
+        ]
+      };
+      const sandbox = { score: 0, severity: 'CLEAN', findings: [] };
+      const mlResult = { prediction: 'malicious', probability: 0.92, reason: 'model' };
+      assert(shouldSendWebhook(result, sandbox, mlResult) === true,
+        'ML p=0.92 with HIGH finding should send webhook (hasHighOrCritical passes)');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
+  test('MONITOR: shouldSendWebhook ML p>=0.90 + CRITICAL → sent (regression guard)', () => {
+    const orig = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.example.com/test';
+    try {
+      const result = {
+        summary: { riskScore: 30, total: 2, critical: 1, high: 0, medium: 1, low: 0 },
+        threats: [
+          { type: 'reverse_shell', severity: 'CRITICAL' },
+          { type: 'obfuscation_detected', severity: 'MEDIUM' }
+        ]
+      };
+      const sandbox = { score: 0, severity: 'CLEAN', findings: [] };
+      const mlResult = { prediction: 'malicious', probability: 0.99, reason: 'model' };
+      assert(shouldSendWebhook(result, sandbox, mlResult) === true,
+        'ML p=0.99 with CRITICAL finding should send webhook (hasHighOrCritical passes)');
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
+  });
+
   // --- Bug fix: processQueueItem IOC fallback (v2.10.6) ---
 
   asyncTest('MONITOR: processQueueItem sends IOC fallback webhook on scan failure', async () => {

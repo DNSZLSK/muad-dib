@@ -1,6 +1,0 @@
-{
-  "name": "conditional-os-payload",
-  "version": "1.0.0",
-  "description": "Holdout v2 — OS-specific credential theft",
-  "main": "index.js"
-}
