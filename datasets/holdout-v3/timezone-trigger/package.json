@@ -1,6 +1,0 @@
-{
-  "name": "timezone-trigger",
-  "version": "1.0.0",
-  "description": "Internationalization support module",
-  "main": "index.js"
-}

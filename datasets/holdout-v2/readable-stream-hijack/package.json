@@ -1,6 +1,0 @@
-{
-  "name": "readable-stream-hijack",
-  "version": "1.0.0",
-  "description": "Holdout v2 — IncomingMessage prototype monkey-patch",
-  "main": "index.js"
-}
