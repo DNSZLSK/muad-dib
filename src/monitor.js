@@ -944,7 +944,9 @@ function shouldSendWebhook(result, sandboxResult, mlResult) {
   // 1b. ML malicious with high probability — prevent suppression.
   // ML1 saw enough signals to classify as malicious (p >= 0.90).
   // Sandbox clean doesn't disprove ML (time bombs, env checks, targeted).
-  if (mlResult && mlResult.prediction !== 'clean' && mlResult.probability >= 0.90) return true;
+  // Guard: require ≥1 HIGH/CRITICAL finding. ALL-LOW = expert FP system overrides ML.
+  if (mlResult && mlResult.prediction !== 'clean' && mlResult.probability >= 0.90
+      && hasHighOrCritical(result)) return true;
 
   // 2. Real sandbox detection (> 30) — always send
   if (sandboxScore > 30) return true;
@@ -1215,7 +1217,10 @@ function buildAlertData(name, version, ecosystem, result, sandboxResult) {
 
 async function trySendWebhook(name, version, ecosystem, result, sandboxResult, mlResult) {
   if (!shouldSendWebhook(result, sandboxResult, mlResult)) {
-    if (sandboxResult && sandboxResult.score === 0) {
+    if (mlResult && mlResult.prediction !== 'clean' && mlResult.probability >= 0.90
+        && !hasHighOrCritical(result)) {
+      console.log(`[MONITOR] ML DEFERRED (all LOW): ${name}@${version} (ML p=${mlResult.probability.toFixed(3)})`);
+    } else if (sandboxResult && sandboxResult.score === 0) {
       console.log(`[MONITOR] SUPPRESSED (sandbox clean, low static): ${name}@${version}`);
     }
     return;

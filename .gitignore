@@ -33,6 +33,3 @@ SESSION-LOG.md
 tests/samples/audit-v3-bypasses/
 
 datasets/
-
-ADVERSARIAL.md
-tests/audit-bypass/

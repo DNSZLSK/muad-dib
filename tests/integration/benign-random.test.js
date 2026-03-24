@@ -25,6 +25,13 @@ function runBenignRandomTests() {
 
   const { evaluateBenignRandom } = require('../../src/commands/evaluate.js');
 
+  if (!DATASETS_AVAILABLE) {
+    console.log('[SKIP] BENIGN-RANDOM-01: datasets not available, skipping');
+    console.log('[SKIP] BENIGN-RANDOM-03: datasets not available, skipping');
+    console.log('[SKIP] BENIGN-RANDOM-04: datasets not available, skipping');
+    addSkipped(3);
+  }
+
   if (DATASETS_AVAILABLE) {
     test('BENIGN-RANDOM-01: packages-npm-random.txt exists and contains >= 200 package names', () => {
       assert(fs.existsSync(RANDOM_FILE), `File not found: ${RANDOM_FILE}`);
@@ -33,7 +40,6 @@ function runBenignRandomTests() {
         .map(l => l.trim())
         .filter(l => l && !l.startsWith('#'));
       assert(lines.length >= 200, `Expected >= 200 packages, got ${lines.length}`);
-      // Verify all lines are valid npm package names (no whitespace, no empty)
       for (const line of lines) {
         assert(line.length > 0, 'Empty package name found');
         assert(!line.includes(' '), `Package name contains space: "${line}"`);
@@ -43,9 +49,6 @@ function runBenignRandomTests() {
 
   test('BENIGN-RANDOM-02: evaluateBenignRandom() returns correct shape', () => {
     assert(typeof evaluateBenignRandom === 'function', 'evaluateBenignRandom should be a function');
-    // We can't actually run it (network-dependent), but verify the export exists
-    // and will return null when file is missing (mock test)
-    // The actual function call requires network; just verify the interface
   });
 
   if (DATASETS_AVAILABLE) {
