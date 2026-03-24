@@ -1,6 +1,0 @@
-{
-  "name": "wasm-loader",
-  "version": "1.0.0",
-  "description": "Holdout v2 — WASM-based credential passing",
-  "main": "index.js"
-}

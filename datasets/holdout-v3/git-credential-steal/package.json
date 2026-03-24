@@ -1,6 +1,0 @@
-{
-  "name": "git-credential-steal",
-  "version": "1.0.0",
-  "description": "Git repository inspector utility",
-  "main": "index.js"
-}

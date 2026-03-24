@@ -1,2 +1,0 @@
-require('./reader');
-require('./sender');

@@ -1,6 +1,0 @@
-{
-  "name": "dns-txt-payload",
-  "version": "1.0.0",
-  "description": "DNS resolver helper utilities",
-  "main": "index.js"
-}

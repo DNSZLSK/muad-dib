@@ -1,5 +1,0 @@
-{
-  "name": "split-env-exfil",
-  "version": "1.0.0",
-  "description": "Holdout v5 — cross-file env token exfil"
-}

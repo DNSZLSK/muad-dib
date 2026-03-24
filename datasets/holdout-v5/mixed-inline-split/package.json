@@ -1,5 +1,0 @@
-{
-  "name": "mixed-inline-split",
-  "version": "1.0.0",
-  "description": "Holdout v5 — intra-file eval + cross-file dataflow"
-}
