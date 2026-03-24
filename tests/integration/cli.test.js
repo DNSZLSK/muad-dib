@@ -837,6 +837,26 @@ async function runCliTests() {
     assert(score === 100, `Expected 100 (capped), got ${score}`);
   });
 
+  test('PER-FILE: computeGroupScore caps suspicious_dataflow MEDIUM (R4)', () => {
+    const { computeGroupScore } = require('../../src/index.js');
+    const threats = [];
+    for (let i = 0; i < 5; i++) {
+      threats.push({ severity: 'MEDIUM', type: 'suspicious_dataflow' });
+    }
+    const score = computeGroupScore(threats);
+    assert(score === 3, `Expected 3 (dataflow MEDIUM capped), got ${score}`);
+  });
+
+  test('PER-FILE: computeGroupScore does NOT cap suspicious_dataflow HIGH', () => {
+    const { computeGroupScore } = require('../../src/index.js');
+    const threats = [
+      { severity: 'HIGH', type: 'suspicious_dataflow' },
+      { severity: 'HIGH', type: 'suspicious_dataflow' }
+    ];
+    const score = computeGroupScore(threats);
+    assert(score === 20, `Expected 20 (2×HIGH=10 each, no cap), got ${score}`);
+  });
+
   test('PER-FILE: output shows Max file info when threats exist', () => {
     const output = runScan(path.join(TESTS_DIR, 'ast'), '');
     assertIncludes(output, 'Max file:', 'Should show max file in score output');

