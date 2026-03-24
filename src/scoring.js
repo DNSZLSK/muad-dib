@@ -40,6 +40,11 @@ const MAX_RISK_SCORE = 100;
 // to limit noise while preserving some signal. CRITICAL and HIGH prototype_hook findings still score normally.
 const PROTO_HOOK_MEDIUM_CAP = 15;
 
+// R4: suspicious_dataflow(MEDIUM) is a co-occurrence signal, not a standalone detection.
+// Multiple env_read/telemetry distant flows in the same file should not inflate the score.
+// Compounds (lifecycle_dataflow) provide the real signal and score separately.
+const DATAFLOW_MEDIUM_CAP = 3;
+
 // Confidence-weighted scoring factors (v2.7.10)
 // High-confidence detections (eval, IOC, shell injection) score at full weight.
 // Medium-confidence heuristics (lifecycle_script, obfuscation, high_entropy) are discounted.
@@ -128,6 +133,7 @@ function isPackageLevelThreat(threat) {
 function computeGroupScore(threats) {
   let score = 0;
   let protoHookMediumPoints = 0;
+  let dataflowMediumPoints = 0;
 
   for (const t of threats) {
     const weight = _severityWeights[t.severity] || 0;
@@ -138,11 +144,16 @@ function computeGroupScore(threats) {
       protoHookMediumPoints += weight * factor;
       continue;
     }
+    if (t.type === 'suspicious_dataflow' && t.severity === 'MEDIUM') {
+      dataflowMediumPoints += weight * factor;
+      continue;
+    }
 
     score += weight * factor;
   }
 
   score += Math.min(protoHookMediumPoints, PROTO_HOOK_MEDIUM_CAP);
+  score += Math.min(dataflowMediumPoints, DATAFLOW_MEDIUM_CAP);
   return Math.min(MAX_RISK_SCORE, Math.round(score));
 }
 

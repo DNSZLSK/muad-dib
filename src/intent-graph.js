@@ -173,25 +173,42 @@ function isSDKPattern(envVarName, fileContent) {
     if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(domain)) return false;
   }
 
-  // 1. Try curated allowlist first
+  // 1. Try curated allowlist first (strict: ALL domains must match)
+  // Curated allowlist is authoritative — no relaxation here to prevent
+  // attacker injecting a legitimate domain alongside their C2 domain.
   for (const mapping of SDK_ENV_DOMAIN_MAP) {
     if (mapping.envPattern.test(envVarName)) {
-      // All domains must match expected SDK domains
       return domains.every(d => domainMatchesSuffix(d, mapping.domains));
     }
   }
+
+  // R2: credential-suffixed env vars get relaxed domain matching (at least ONE match).
+  // SDKs commonly call their own API + CDN/logging/analytics domains.
+  // Safety: suspicious domains and raw IPs are already rejected above.
+  // Only applies to the heuristic fallback — curated allowlist stays strict.
+  const CREDENTIAL_SUFFIXES = ['_API_KEY', '_SECRET', '_TOKEN', '_SECRET_KEY', '_ACCESS_KEY'];
+  const upperName = envVarName.toUpperCase();
+  const hasCredentialSuffix = CREDENTIAL_SUFFIXES.some(s => upperName.endsWith(s));
 
   // 2. Heuristic fallback: extract brand keyword and check domain labels
   const brand = extractBrandFromEnvVar(envVarName);
   if (!brand || brand.length < 3) return false; // Too short for reliable matching
 
   const brandLower = brand.toLowerCase();
-  // Check if every domain has the brand as a whole label
+  // 2a. Strict check: every domain matches brand (existing behavior)
   // e.g., brand "ACME" matches "api.acme.com" (label "acme") but not "api.acmetech.com"
-  return domains.every(d => {
+  if (domains.every(d => {
     const labels = d.split('.');
     return labels.some(label => label === brandLower);
-  });
+  })) return true;
+
+  // 2b. R2 relaxed: credential suffix + at least one domain matches brand
+  if (hasCredentialSuffix && domains.some(d => {
+    const labels = d.split('.');
+    return labels.some(label => label === brandLower);
+  })) return true;
+
+  return false;
 }
 
 
