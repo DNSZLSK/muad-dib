@@ -954,6 +954,19 @@ function analyzeFile(content, filePath, basePath) {
       }
     }
 
+    // Graduation: HIGH → MEDIUM for env/telemetry-only sources (no credential file reads,
+    // no fingerprint reads, no command output). Distant env/telemetry → network_send
+    // is the dominant FP pattern (SDK/API usage, binary wrappers, config libraries).
+    // Real credential exfiltration uses credential_read or fingerprint_read sources.
+    if (severity === 'HIGH') {
+      const hasHighRiskSource = sources.some(s =>
+        s.type === 'credential_read' || s.type === 'fingerprint_read' || s.type === 'command_output'
+      );
+      if (!hasHighRiskSource) {
+        severity = 'MEDIUM';
+      }
+    }
+
     const sourceDesc = hasCommandOutput ? 'command output' : 'credentials read';
     threats.push({
       type: 'suspicious_dataflow',
