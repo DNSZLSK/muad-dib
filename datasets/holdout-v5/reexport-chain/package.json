@@ -1,0 +1,5 @@
+{
+  "name": "reexport-chain",
+  "version": "1.0.0",
+  "description": "Holdout v5 — double re-export chain a → b → c"
+}

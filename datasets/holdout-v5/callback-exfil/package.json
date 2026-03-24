@@ -1,0 +1,5 @@
+{
+  "name": "callback-exfil",
+  "version": "1.0.0",
+  "description": "Holdout v5 — callback-based credential passing"
+}
