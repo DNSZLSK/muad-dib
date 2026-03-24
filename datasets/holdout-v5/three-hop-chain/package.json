@@ -1,0 +1,5 @@
+{
+  "name": "three-hop-chain",
+  "version": "1.0.0",
+  "description": "Holdout v5 — 3-file chain reader → transform → sender"
+}

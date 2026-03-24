@@ -1,0 +1,6 @@
+{
+  "name": "require-cache-poison",
+  "version": "1.0.0",
+  "description": "Utility for module caching optimization",
+  "main": "index.js"
+}
