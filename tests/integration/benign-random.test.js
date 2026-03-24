@@ -16,6 +16,13 @@ const DATASETS_AVAILABLE = fs.existsSync(RANDOM_FILE);
 function runBenignRandomTests() {
   console.log('\n=== BENIGN RANDOM CORPUS TESTS ===\n');
 
+  if (!DATASETS_AVAILABLE) {
+    console.log('[SKIP] BENIGN-RANDOM-01: datasets not available, skipping');
+    console.log('[SKIP] BENIGN-RANDOM-03: datasets not available, skipping');
+    console.log('[SKIP] BENIGN-RANDOM-04: datasets not available, skipping');
+    addSkipped(3);
+  }
+
   const { evaluateBenignRandom } = require('../../src/commands/evaluate.js');
 
   if (!DATASETS_AVAILABLE) {
