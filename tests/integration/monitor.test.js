@@ -6818,8 +6818,8 @@ async function runMonitorTests() {
   });
 
   test('CHANGES: constants have correct values', () => {
-    assert(CHANGES_STREAM_URL === 'https://replicate.npmjs.com/_changes',
-      `CHANGES_STREAM_URL should be replicate.npmjs.com, got ${CHANGES_STREAM_URL}`);
+    assert(CHANGES_STREAM_URL === 'https://replicate.npmjs.com/registry/_changes',
+      `CHANGES_STREAM_URL should be replicate.npmjs.com/registry/_changes, got ${CHANGES_STREAM_URL}`);
     assert(CHANGES_LIMIT === 1000, `CHANGES_LIMIT should be 1000, got ${CHANGES_LIMIT}`);
     assert(CHANGES_CATCHUP_MAX === 500000, `CHANGES_CATCHUP_MAX should be 500000, got ${CHANGES_CATCHUP_MAX}`);
   });
