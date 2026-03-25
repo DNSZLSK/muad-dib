@@ -3613,7 +3613,8 @@ async function runMonitorTests() {
 
   test('MONITOR: updateScanStats creates daily entries', () => {
     const data = loadScanStats();
-    const today = new Date().toISOString().slice(0, 10);
+    // Use getParisDateString() for consistency with updateScanStats which keys entries by Paris date
+    const today = getParisDateString();
     const todayEntry = data.daily.find(d => d.date === today);
     assert(todayEntry, 'Should have a daily entry for today');
     assert(typeof todayEntry.scanned === 'number', 'Daily scanned should be a number');
@@ -4160,6 +4161,7 @@ async function runMonitorTests() {
     stats.suspect = 2;
     stats.errors = 0;
     stats.totalTimeMs = 25000;
+    stats.mlFiltered = 3;
     dailyAlerts.push({ name: 'test', version: '1.0', ecosystem: 'npm', findingsCount: 1 });
     recentlyScanned.add('npm/daily-report-test@1.0.0');
 
@@ -4171,6 +4173,7 @@ async function runMonitorTests() {
       assert(stats.suspect === 0, 'suspect should be reset to 0, got ' + stats.suspect);
       assert(stats.errors === 0, 'errors should be reset to 0');
       assert(stats.totalTimeMs === 0, 'totalTimeMs should be reset to 0');
+      assert(stats.mlFiltered === 0, 'mlFiltered should be reset to 0, got ' + stats.mlFiltered);
       assert(dailyAlerts.length === 0, 'dailyAlerts should be cleared');
       assert(recentlyScanned.size === 0, 'recentlyScanned should be cleared');
       assert(stats.lastDailyReportDate === getParisDateString(), 'lastDailyReportDate should be today');
@@ -4184,6 +4187,7 @@ async function runMonitorTests() {
       stats.suspect = origSuspect;
       stats.errors = origErrors;
       stats.totalTimeMs = origTotalTimeMs;
+      stats.mlFiltered = 0;
       dailyAlerts.length = 0;
       recentlyScanned.clear();
       stats.lastDailyReportDate = origLastDate;
@@ -5352,63 +5356,65 @@ async function runMonitorTests() {
     assert(r.suspect === false && r.tier === null, '2 same-type MEDIUM should be not suspect');
   });
 
-  // --- Tier 1: HIGH, CRITICAL, lifecycle, high-intent types ---
+  // --- Tier 1b: HIGH/CRITICAL without HC type or TIER1_TYPES (bundler FP zone) ---
 
-  test('isSuspectClassification T1: 1 HIGH finding → tier 1', () => {
+  test('isSuspectClassification T1b: 1 HIGH finding (no HC type) → tier 1b', () => {
     const result = { threats: [{ type: 'suspicious_dataflow', severity: 'HIGH' }], summary: { critical: 0, high: 1, medium: 0, low: 0 } };
     const r = isSuspectClassification(result);
-    assert(r.suspect === true && r.tier === 1, 'Single HIGH should be T1, got tier=' + r.tier);
+    assert(r.suspect === true && r.tier === '1b', 'Single HIGH without HC type should be T1b, got tier=' + r.tier);
   });
 
-  test('isSuspectClassification T1: 1 CRITICAL finding → tier 1', () => {
+  test('isSuspectClassification T1b: 1 CRITICAL finding (no HC type) → tier 1b', () => {
     const result = { threats: [{ type: 'known_malicious_package', severity: 'CRITICAL' }], summary: { critical: 1, high: 0, medium: 0, low: 0 } };
     const r = isSuspectClassification(result);
-    assert(r.suspect === true && r.tier === 1, 'Single CRITICAL should be T1, got tier=' + r.tier);
+    assert(r.suspect === true && r.tier === '1b', 'Single CRITICAL without HC type should be T1b, got tier=' + r.tier);
   });
 
-  test('isSuspectClassification T1: lifecycle_script (MEDIUM) → tier 1', () => {
+  // --- Tier 1a: lifecycle scripts, TIER1_TYPES, HC malice types (mandatory sandbox) ---
+
+  test('isSuspectClassification T1a: lifecycle_script (MEDIUM) → tier 1a', () => {
     const result = {
       threats: [{ type: 'lifecycle_script', severity: 'MEDIUM' }],
       summary: { critical: 0, high: 0, medium: 1, low: 0 }
     };
     const r = isSuspectClassification(result);
-    assert(r.suspect === true && r.tier === 1, 'lifecycle_script should be T1, got tier=' + r.tier);
+    assert(r.suspect === true && r.tier === '1a', 'lifecycle_script should be T1a, got tier=' + r.tier);
   });
 
-  test('isSuspectClassification T1: sandbox_evasion type → tier 1', () => {
+  test('isSuspectClassification T1a: sandbox_evasion type → tier 1a', () => {
     const result = {
       threats: [{ type: 'sandbox_evasion', severity: 'MEDIUM' }],
       summary: { critical: 0, high: 0, medium: 1, low: 0 }
     };
     const r = isSuspectClassification(result);
-    assert(r.suspect === true && r.tier === 1, 'sandbox_evasion should be T1, got tier=' + r.tier);
+    assert(r.suspect === true && r.tier === '1a', 'sandbox_evasion should be T1a, got tier=' + r.tier);
   });
 
-  test('isSuspectClassification T1: env_charcode_reconstruction → tier 1', () => {
+  test('isSuspectClassification T1a: env_charcode_reconstruction → tier 1a', () => {
     const result = {
       threats: [{ type: 'env_charcode_reconstruction', severity: 'MEDIUM' }],
       summary: { critical: 0, high: 0, medium: 1, low: 0 }
     };
     const r = isSuspectClassification(result);
-    assert(r.suspect === true && r.tier === 1, 'env_charcode_reconstruction should be T1, got tier=' + r.tier);
+    assert(r.suspect === true && r.tier === '1a', 'env_charcode_reconstruction should be T1a, got tier=' + r.tier);
   });
 
-  test('isSuspectClassification T1: staged_payload → tier 1', () => {
+  test('isSuspectClassification T1a: staged_payload → tier 1a', () => {
     const result = {
       threats: [{ type: 'staged_payload', severity: 'MEDIUM' }],
       summary: { critical: 0, high: 0, medium: 1, low: 0 }
     };
     const r = isSuspectClassification(result);
-    assert(r.suspect === true && r.tier === 1, 'staged_payload should be T1, got tier=' + r.tier);
+    assert(r.suspect === true && r.tier === '1a', 'staged_payload should be T1a, got tier=' + r.tier);
   });
 
-  test('isSuspectClassification T1: staged_binary_payload → tier 1', () => {
+  test('isSuspectClassification T1a: staged_binary_payload → tier 1a', () => {
     const result = {
       threats: [{ type: 'staged_binary_payload', severity: 'MEDIUM' }],
       summary: { critical: 0, high: 0, medium: 1, low: 0 }
     };
     const r = isSuspectClassification(result);
-    assert(r.suspect === true && r.tier === 1, 'staged_binary_payload should be T1, got tier=' + r.tier);
+    assert(r.suspect === true && r.tier === '1a', 'staged_binary_payload should be T1a, got tier=' + r.tier);
   });
 
   // --- Tier 2: 2+ distinct types with active signal ---
@@ -5437,7 +5443,7 @@ async function runMonitorTests() {
     assert(r.suspect === true && r.tier === 2, 'eval + sensitive_string should be T2, got tier=' + r.tier);
   });
 
-  test('isSuspectClassification T1: mcp_config_injection + dynamic_require → tier 1', () => {
+  test('isSuspectClassification T1a: mcp_config_injection + dynamic_require → tier 1a', () => {
     const result = {
       threats: [
         { type: 'mcp_config_injection', severity: 'MEDIUM' },
@@ -5446,7 +5452,7 @@ async function runMonitorTests() {
       summary: { critical: 0, high: 0, medium: 1, low: 1 }
     };
     const r = isSuspectClassification(result);
-    assert(r.suspect === true && r.tier === 1, 'mcp_config_injection should be T1, got tier=' + r.tier);
+    assert(r.suspect === true && r.tier === '1a', 'mcp_config_injection should be T1a, got tier=' + r.tier);
   });
 
   test('isSuspectClassification T2: non-passive non-active types → tier 2 (fallback)', () => {
@@ -5544,9 +5550,9 @@ async function runMonitorTests() {
     assert(TIER3_PASSIVE_TYPES.size === 8, 'TIER3 should have 8 types, got ' + TIER3_PASSIVE_TYPES.size);
   });
 
-  // --- Edge: T1 overrides T2/T3 ---
+  // --- Edge: T1a/T1b overrides T2/T3 ---
 
-  test('isSuspectClassification: HIGH + passive types → still T1', () => {
+  test('isSuspectClassification: HIGH + passive types (no HC type) → T1b', () => {
     const result = {
       threats: [
         { type: 'suspicious_dataflow', severity: 'HIGH' },
@@ -5556,10 +5562,10 @@ async function runMonitorTests() {
       summary: { critical: 0, high: 1, medium: 0, low: 2 }
     };
     const r = isSuspectClassification(result);
-    assert(r.suspect === true && r.tier === 1, 'HIGH severity overrides to T1, got tier=' + r.tier);
+    assert(r.suspect === true && r.tier === '1b', 'HIGH severity without HC type overrides to T1b, got tier=' + r.tier);
   });
 
-  test('isSuspectClassification: sandbox_evasion (no HIGH/CRIT in summary) → T1', () => {
+  test('isSuspectClassification: sandbox_evasion (no HIGH/CRIT in summary) → T1a', () => {
     const result = {
       threats: [
         { type: 'sandbox_evasion', severity: 'MEDIUM' },
@@ -5568,12 +5574,12 @@ async function runMonitorTests() {
       summary: { critical: 0, high: 0, medium: 1, low: 1 }
     };
     const r = isSuspectClassification(result);
-    assert(r.suspect === true && r.tier === 1, 'TIER1 type should override to T1, got tier=' + r.tier);
+    assert(r.suspect === true && r.tier === '1a', 'TIER1 type should override to T1a, got tier=' + r.tier);
   });
 
-  // --- Edge: T2 mixed passive + one active ---
+  // --- Edge: T1a with mixed passive + TIER1 type ---
 
-  test('isSuspectClassification: crypto_miner + 2 passive types → T1', () => {
+  test('isSuspectClassification: crypto_miner + 2 passive types → T1a', () => {
     const result = {
       threats: [
         { type: 'crypto_miner', severity: 'MEDIUM' },
@@ -5583,12 +5589,12 @@ async function runMonitorTests() {
       summary: { critical: 0, high: 0, medium: 1, low: 2 }
     };
     const r = isSuspectClassification(result);
-    assert(r.suspect === true && r.tier === 1, 'crypto_miner is now T1, got tier=' + r.tier);
+    assert(r.suspect === true && r.tier === '1a', 'crypto_miner is T1a (TIER1_TYPES), got tier=' + r.tier);
   });
 
-  // --- Promoted T1 types: always sandbox ---
+  // --- Promoted T1a types: always sandbox ---
 
-  test('isSuspectClassification T1: ai_agent_abuse alone → tier 1', () => {
+  test('isSuspectClassification T1a: ai_agent_abuse alone → tier 1a', () => {
     const result = {
       threats: [
         { type: 'ai_agent_abuse', severity: 'MEDIUM' },
@@ -5597,10 +5603,10 @@ async function runMonitorTests() {
       summary: { critical: 0, high: 0, medium: 1, low: 1 }
     };
     const r = isSuspectClassification(result);
-    assert(r.suspect === true && r.tier === 1, 'ai_agent_abuse should be T1, got tier=' + r.tier);
+    assert(r.suspect === true && r.tier === '1a', 'ai_agent_abuse should be T1a, got tier=' + r.tier);
   });
 
-  test('isSuspectClassification T1: crypto_miner alone → tier 1', () => {
+  test('isSuspectClassification T1a: crypto_miner alone → tier 1a', () => {
     const result = {
       threats: [
         { type: 'crypto_miner', severity: 'MEDIUM' },
@@ -5609,10 +5615,10 @@ async function runMonitorTests() {
       summary: { critical: 0, high: 0, medium: 1, low: 1 }
     };
     const r = isSuspectClassification(result);
-    assert(r.suspect === true && r.tier === 1, 'crypto_miner should be T1, got tier=' + r.tier);
+    assert(r.suspect === true && r.tier === '1a', 'crypto_miner should be T1a, got tier=' + r.tier);
   });
 
-  test('isSuspectClassification T1: mcp_config_injection alone → tier 1', () => {
+  test('isSuspectClassification T1a: mcp_config_injection alone → tier 1a', () => {
     const result = {
       threats: [
         { type: 'mcp_config_injection', severity: 'MEDIUM' },
@@ -5621,7 +5627,59 @@ async function runMonitorTests() {
       summary: { critical: 0, high: 0, medium: 1, low: 1 }
     };
     const r = isSuspectClassification(result);
-    assert(r.suspect === true && r.tier === 1, 'mcp_config_injection should be T1, got tier=' + r.tier);
+    assert(r.suspect === true && r.tier === '1a', 'mcp_config_injection should be T1a, got tier=' + r.tier);
+  });
+
+  // --- T1a: HC malice types → mandatory sandbox ---
+
+  test('isSuspectClassification T1a: lifecycle_shell_pipe (HC type) → tier 1a', () => {
+    const result = {
+      threats: [{ type: 'lifecycle_shell_pipe', severity: 'HIGH' }],
+      summary: { critical: 0, high: 1, medium: 0, low: 0 }
+    };
+    const r = isSuspectClassification(result);
+    assert(r.suspect === true && r.tier === '1a', 'HC type lifecycle_shell_pipe should be T1a, got tier=' + r.tier);
+  });
+
+  test('isSuspectClassification T1a: reverse_shell (HC type) → tier 1a', () => {
+    const result = {
+      threats: [{ type: 'reverse_shell', severity: 'HIGH' }],
+      summary: { critical: 0, high: 1, medium: 0, low: 0 }
+    };
+    const r = isSuspectClassification(result);
+    assert(r.suspect === true && r.tier === '1a', 'HC type reverse_shell should be T1a, got tier=' + r.tier);
+  });
+
+  test('isSuspectClassification T1a: intent_credential_exfil (HC type) → tier 1a', () => {
+    const result = {
+      threats: [{ type: 'intent_credential_exfil', severity: 'HIGH' }],
+      summary: { critical: 0, high: 1, medium: 0, low: 0 }
+    };
+    const r = isSuspectClassification(result);
+    assert(r.suspect === true && r.tier === '1a', 'HC type intent_credential_exfil should be T1a, got tier=' + r.tier);
+  });
+
+  // --- T1b: bundler FP zone (HIGH/CRITICAL without HC or TIER1 types) ---
+
+  test('isSuspectClassification T1b: eval HIGH only (bundler FP) → tier 1b', () => {
+    const result = {
+      threats: [
+        { type: 'dangerous_call_eval', severity: 'HIGH' },
+        { type: 'obfuscation_detected', severity: 'HIGH' }
+      ],
+      summary: { critical: 0, high: 2, medium: 0, low: 0 }
+    };
+    const r = isSuspectClassification(result);
+    assert(r.suspect === true && r.tier === '1b', 'HIGH eval+obfuscation without HC should be T1b, got tier=' + r.tier);
+  });
+
+  test('isSuspectClassification T1b: credential_regex HIGH (auth code FP) → tier 1b', () => {
+    const result = {
+      threats: [{ type: 'credential_regex_harvest', severity: 'HIGH' }],
+      summary: { critical: 0, high: 1, medium: 0, low: 0 }
+    };
+    const r = isSuspectClassification(result);
+    assert(r.suspect === true && r.tier === '1b', 'credential_regex_harvest HIGH should be T1b, got tier=' + r.tier);
   });
 
   // ============================================
