@@ -551,7 +551,7 @@ const stats = {
   scanned: 0,
   clean: 0,
   suspect: 0,
-  suspectByTier: { t1: 0, t2: 0, t3: 0 },
+  suspectByTier: { t1: 0, t1a: 0, t1b: 0, t2: 0, t3: 0 },
   errors: 0,
   errorsByType: { too_large: 0, tar_failed: 0, http_error: 0, timeout: 0, other: 0 },
   totalTimeMs: 0,
@@ -760,8 +760,9 @@ const TIER3_PASSIVE_TYPES = new Set([
 /**
  * Classify a scan result into suspect tiers.
  * @param {Object} result - scan result with threats and summary
- * @returns {{ suspect: boolean, tier: 1|2|3|null }}
- *   - tier 1: sandbox obligatoire (HIGH/CRITICAL, lifecycle, high-intent types)
+ * @returns {{ suspect: boolean, tier: '1a'|'1b'|2|3|null }}
+ *   - tier '1a': mandatory sandbox (HC malice types, TIER1_TYPES, lifecycle scripts)
+ *   - tier '1b': conditional sandbox (HIGH/CRITICAL severity without HC type — bundler FP zone)
  *   - tier 2: sandbox si queue < 50 (2+ distinct types with active signal)
  *   - tier 3: logged only, no sandbox, no stats.suspect (passive-only signals)
  *   - { suspect: false, tier: null } for CLEAN packages
@@ -771,15 +772,23 @@ function isSuspectClassification(result) {
     return { suspect: false, tier: null };
   }
 
-  // Tier 1: HIGH/CRITICAL severity, lifecycle scripts, or high-intent types
-  if (result.summary.critical > 0 || result.summary.high > 0) {
-    return { suspect: true, tier: 1 };
-  }
-  if (hasLifecycleScript(result)) {
-    return { suspect: true, tier: 1 };
+  // Tier 1a: high-confidence malice types, TIER1_TYPES, or lifecycle scripts
+  // These are quasi-never legitimate in benign packages → mandatory sandbox
+  if (hasHighConfidenceThreat(result)) {
+    return { suspect: true, tier: '1a' };
   }
   if (result.threats.some(t => TIER1_TYPES.has(t.type))) {
-    return { suspect: true, tier: 1 };
+    return { suspect: true, tier: '1a' };
+  }
+  if (hasLifecycleScript(result)) {
+    return { suspect: true, tier: '1a' };
+  }
+
+  // Tier 1b: HIGH/CRITICAL severity without HC type or TIER1_TYPES
+  // Typical bundler FP zone (eval in webpack, minification as obfuscation, etc.)
+  // Sandbox conditional on score >= 25 or low queue pressure
+  if (result.summary.critical > 0 || result.summary.high > 0) {
+    return { suspect: true, tier: '1b' };
   }
 
   const distinctTypes = new Set(result.threats.map(t => t.type));
@@ -2061,6 +2070,8 @@ function loadDailyStats() {
       stats.suspect = data.suspect || 0;
       if (data.suspectByTier) {
         stats.suspectByTier.t1 = data.suspectByTier.t1 || 0;
+        stats.suspectByTier.t1a = data.suspectByTier.t1a || 0;
+        stats.suspectByTier.t1b = data.suspectByTier.t1b || 0;
         stats.suspectByTier.t2 = data.suspectByTier.t2 || 0;
         stats.suspectByTier.t3 = data.suspectByTier.t3 || 0;
       }
@@ -2401,9 +2412,12 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta) {
           return { sandboxResult: null, staticClean: true, tier: 3 };
         }
 
-        // Tier 1 and Tier 2: count as suspect
-        stats.suspectByTier[tier === 1 ? 't1' : 't2']++;
-        const tierLabel = tier === 1 ? 'T1' : 'T2';
+        // Tier 1a, 1b and Tier 2: count as suspect
+        const tierKey = tier === '1a' ? 't1a' : tier === '1b' ? 't1b' : 't2';
+        stats.suspectByTier[tierKey]++;
+        // Legacy t1 counter: sum of t1a + t1b for backward compat in persisted stats
+        if (tier === '1a' || tier === '1b') stats.suspectByTier.t1++;
+        const tierLabel = tier === '1a' ? 'T1a' : tier === '1b' ? 'T1b' : 'T2';
         console.log(`[MONITOR] SUSPECT ${tierLabel}: ${name}@${version} (${counts.join(', ')})`);
         console.log(`[MONITOR] FINDINGS: ${name}@${version} → ${formatFindings(result)}`);
 
@@ -2411,9 +2425,10 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta) {
         // Reduces FP webhook noise by filtering clean packages before sandbox/webhook.
         // Guard rails in classifyPackage() ensure HC types and high-score packages are never suppressed.
         // Hoisted so trySendWebhook can use ML result to prevent suppression (p >= 0.90).
+        // Applies to both T1a and T1b (ML can filter both sub-tiers in the [20,35) score range).
         let mlResult = null;
         const riskScore = result.summary.riskScore || 0;
-        if (tier === 1 && riskScore >= 20 && riskScore < 35) {
+        if ((tier === '1a' || tier === '1b') && riskScore >= 20 && riskScore < 35) {
           try {
             const { classifyPackage, isModelAvailable } = require('./ml/classifier.js');
             if (isModelAvailable()) {
@@ -2442,16 +2457,21 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta) {
         stats.suspect++;
 
         // Sandbox decision based on tier
+        // T1a: mandatory sandbox (high-confidence malice types, TIER1_TYPES, lifecycle scripts)
+        // T1b: conditional sandbox (HIGH/CRITICAL without HC type — bundler FP zone)
+        //       → sandbox only if score >= 25 (significant risk) or queue pressure is low
+        // T2: sandbox if queue < 50 (as before)
         let sandboxResult = null;
         const shouldSandbox = isSandboxEnabled() && sandboxAvailable && (
-          tier === 1 ||
+          tier === '1a' ||
+          (tier === '1b' && (riskScore >= 25 || scanQueue.length < 20)) ||
           (tier === 2 && scanQueue.length < 50)
         );
 
         if (shouldSandbox) {
           try {
             const canary = isCanaryEnabled();
-            const reason = tier === 2 ? ' (T2, queue low)' : '';
+            const reason = tier === 2 ? ' (T2, queue low)' : tier === '1b' ? ' (T1b, conditional)' : '';
             console.log(`[MONITOR] SANDBOX${reason}: launching for ${name}@${version}${canary ? ' (canary: on)' : ''}...`);
             sandboxResult = await runSandbox(name, { canary });
             console.log(`[MONITOR] SANDBOX: ${name}@${version} → score: ${sandboxResult.score}, severity: ${sandboxResult.severity}`);
@@ -2492,6 +2512,8 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta) {
           } catch (err) {
             console.error(`[MONITOR] SANDBOX error for ${name}@${version}: ${err.message}`);
           }
+        } else if (tier === '1b') {
+          console.log(`[MONITOR] SANDBOX SKIPPED (T1b, score=${riskScore} < 25, queue ${scanQueue.length} >= 20): ${name}@${version}`);
         } else if (tier === 2) {
           console.log(`[MONITOR] SANDBOX SKIPPED (T2, queue ${scanQueue.length} >= 50): ${name}@${version}`);
         }
@@ -2675,8 +2697,8 @@ async function processQueue() {
 
 function reportStats() {
   const avg = stats.scanned > 0 ? (stats.totalTimeMs / stats.scanned / 1000).toFixed(1) : '0.0';
-  const { t1, t2, t3 } = stats.suspectByTier;
-  console.log(`[MONITOR] Stats: ${stats.scanned} scanned, ${stats.clean} clean, ${stats.suspect} suspect (T1:${t1} T2:${t2} T3:${t3}), ${stats.errors} error${stats.errors !== 1 ? 's' : ''}, avg ${avg}s/pkg`);
+  const { t1, t1a, t1b, t2, t3 } = stats.suspectByTier;
+  console.log(`[MONITOR] Stats: ${stats.scanned} scanned, ${stats.clean} clean, ${stats.suspect} suspect (T1a:${t1a} T1b:${t1b} T1:${t1} T2:${t2} T3:${t3}), ${stats.errors} error${stats.errors !== 1 ? 's' : ''}, avg ${avg}s/pkg`);
   if (stats.changesStreamPackages) {
     console.log(`[MONITOR]   Changes stream packages: ${stats.changesStreamPackages}`);
   }
@@ -2854,6 +2876,8 @@ async function sendDailyReport() {
   stats.clean = 0;
   stats.suspect = 0;
   stats.suspectByTier.t1 = 0;
+  stats.suspectByTier.t1a = 0;
+  stats.suspectByTier.t1b = 0;
   stats.suspectByTier.t2 = 0;
   stats.suspectByTier.t3 = 0;
   stats.errors = 0;
@@ -2863,6 +2887,7 @@ async function sendDailyReport() {
   stats.errorsByType.timeout = 0;
   stats.errorsByType.other = 0;
   stats.totalTimeMs = 0;
+  stats.mlFiltered = 0;
   dailyAlerts.length = 0;
   recentlyScanned.clear();
   alertedPackageRules.clear();
