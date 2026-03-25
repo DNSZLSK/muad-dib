@@ -80,7 +80,7 @@ const ALERTS_LOG_DIR = resolveWritableDir(PRIMARY_ALERTS_DIR, FALLBACK_ALERTS_DI
 // CouchDB changes stream: reliable chronological feed of all npm registry mutations.
 // Primary source for new-package detection; RSS is kept as fallback.
 const NPM_SEQ_FILE = path.join(__dirname, '..', 'data', 'npm-seq.json');
-const CHANGES_STREAM_URL = 'https://replicate.npmjs.com/_changes';
+const CHANGES_STREAM_URL = 'https://replicate.npmjs.com/registry/_changes';
 const CHANGES_LIMIT = 1000;
 const CHANGES_CATCHUP_MAX = 500000; // If behind by more than 500k seqs, skip to "now"
 
@@ -3090,7 +3090,7 @@ async function getNpmLatestTarball(packageName) {
 }
 
 /**
- * Poll npm changes stream (replicate.npmjs.com/_changes).
+ * Poll npm changes stream (replicate.npmjs.com/registry/_changes).
  * Returns count of new packages queued, or -1 on error.
  * Filters out deleted packages and metadata-only updates (no new version).
  */
@@ -3100,7 +3100,7 @@ async function pollNpmChanges(state) {
 
     // First run: initialize to current seq ("now") via root endpoint
     if (lastSeq == null) {
-      const infoBody = await httpsGet('https://replicate.npmjs.com/', 10000);
+      const infoBody = await httpsGet('https://replicate.npmjs.com/registry/', 10000);
       const info = JSON.parse(infoBody);
       const currentSeq = info.update_seq;
       if (currentSeq == null) {
@@ -3113,11 +3113,30 @@ async function pollNpmChanges(state) {
       return 0;
     }
 
-    // Layer 2: include_docs=true to extract tarball URL directly from CouchDB doc,
-    // eliminating the separate registry roundtrip that can 404 if package is unpublished.
-    const url = `${CHANGES_STREAM_URL}?since=${lastSeq}&limit=${CHANGES_LIMIT}&include_docs=true`;
-    const body = await httpsGet(url, 60000);
-    const data = JSON.parse(body);
+    // Post May 2025 npm CouchDB migration: include_docs is no longer supported.
+    // Tarball URLs are resolved lazily in resolveTarballAndScan() via getNpmLatestTarball().
+    const url = `${CHANGES_STREAM_URL}?since=${lastSeq}&limit=${CHANGES_LIMIT}`;
+    let body, data;
+    try {
+      body = await httpsGet(url, 60000);
+      data = JSON.parse(body);
+    } catch (fetchErr) {
+      // Invalid seq (stale from pre-migration CouchDB) or transient error — re-init to current seq
+      console.warn(`[MONITOR] Changes stream fetch failed (${fetchErr.message}) — attempting seq re-init`);
+      try {
+        const reinitBody = await httpsGet('https://replicate.npmjs.com/registry/', 10000);
+        const reinitData = JSON.parse(reinitBody);
+        if (reinitData.update_seq != null) {
+          state.npmLastSeq = reinitData.update_seq;
+          saveNpmSeq(reinitData.update_seq);
+          console.log(`[MONITOR] Changes stream re-initialized at seq ${reinitData.update_seq} (was ${lastSeq})`);
+          return 0;
+        }
+      } catch (reinitErr) {
+        console.error(`[MONITOR] Seq re-init also failed: ${reinitErr.message}`);
+      }
+      return -1;
+    }
 
     if (!data.results || !Array.isArray(data.results)) {
       console.warn('[MONITOR] Changes stream returned unexpected format');
@@ -3126,7 +3145,7 @@ async function pollNpmChanges(state) {
 
     // Catch-up protection: if too far behind, skip to current
     if (data.results.length === CHANGES_LIMIT) {
-      const currentSeqBody = await httpsGet('https://replicate.npmjs.com/', 10000);
+      const currentSeqBody = await httpsGet('https://replicate.npmjs.com/registry/', 10000);
       const currentSeqData = JSON.parse(currentSeqBody);
       const currentSeq = currentSeqData.update_seq;
       if (typeof currentSeq === 'number' && typeof data.last_seq === 'number' &&
