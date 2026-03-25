@@ -174,12 +174,21 @@ const SUSPICIOUS_DOMAINS_HIGH = [
   // GlassWorm C2 IPs (mars 2026)
   '217.69.3.218', '217.69.3.152',
   '199.247.10.166', '199.247.13.106',
-  '140.82.52.31', '45.32.150.251'
+  '140.82.52.31', '45.32.150.251',
+  // TeamPCP/CanisterWorm C2 (mars 2026)
+  'icp0.io', 'raw.icp0.io', 'ic0.app',        // ICP canister C2 (decentralized dead-drop)
+  'hackmoltrepeat.com',                          // hackerbot-claw payload delivery
+  'recv.hackmoltrepeat.com',                     // hackerbot-claw credential receiver
+  'scan.aquasecurtiy.org',                       // Trivy exfil C2 (typosquat of aquasecurity)
+  'api.telegram.org',                            // Telegram bot exfiltration (crypto typosquats)
+  'checkmarx.zone',                              // Checkmarx/LiteLLM exfil C2
+  '45.148.10.212', '83.142.209.11'               // TeamPCP C2 IPs
 ];
 
 // Suspicious tunnel/proxy domains (MEDIUM severity)
 const SUSPICIOUS_DOMAINS_MEDIUM = [
-  'ngrok.io', 'ngrok-free.app', 'serveo.net', 'localhost.run', 'loca.lt'
+  'ngrok.io', 'ngrok-free.app', 'serveo.net', 'localhost.run', 'loca.lt',
+  'trycloudflare.com'   // Cloudflare tunnel C2 (CanisterWorm kamikaze.sh stager)
 ];
 
 // LLM API key environment variable names (3+ = harvesting)
@@ -988,6 +997,16 @@ function handleCallExpression(node, ctx) {
           file: ctx.relFile
         });
       }
+
+      // Token theft: npm config get _authToken / npm whoami (CanisterWorm findNpmTokens)
+      if (/\bnpm\s+(config\s+get\b.*authToken|whoami)\b/i.test(cmdStr)) {
+        ctx.threats.push({
+          type: 'npm_token_steal',
+          severity: 'CRITICAL',
+          message: `exec("${cmdStr.slice(0, 80)}") — npm credential extraction (CanisterWorm findNpmTokens pattern).`,
+          file: ctx.relFile
+        });
+      }
     }
   }
 
@@ -1158,6 +1177,27 @@ function handleCallExpression(node, ctx) {
           type: 'node_modules_write',
           severity: 'CRITICAL',
           message: `${nmWriteMethod}() targeting node_modules/ path: "${nmPathStr.substring(0, 80)}" — package patching / worm propagation technique.`,
+          file: ctx.relFile
+        });
+      }
+    }
+  }
+
+  // Detect writes to systemd service paths — persistence technique (CanisterWorm/TeamPCP T1543.002)
+  // No legitimate npm package creates systemd services.
+  if (node.callee.type === 'MemberExpression' && node.callee.property?.type === 'Identifier') {
+    const sdWriteMethod = node.callee.property.name;
+    if (['writeFileSync', 'writeFile', 'appendFileSync'].includes(sdWriteMethod) && node.arguments.length >= 2) {
+      const sdPathArg = node.arguments[0];
+      let sdPathStr = extractStringValueDeep(sdPathArg);
+      if (!sdPathStr && sdPathArg?.type === 'Identifier' && ctx.stringVarValues?.has(sdPathArg.name)) {
+        sdPathStr = ctx.stringVarValues.get(sdPathArg.name);
+      }
+      if (sdPathStr && (/systemd[/\\]/i.test(sdPathStr) || /\.service$/i.test(sdPathStr))) {
+        ctx.threats.push({
+          type: 'systemd_persistence',
+          severity: 'CRITICAL',
+          message: `${sdWriteMethod}() writes to systemd path: "${sdPathStr.substring(0, 80)}" — persistence technique (CanisterWorm/TeamPCP).`,
           file: ctx.relFile
         });
       }

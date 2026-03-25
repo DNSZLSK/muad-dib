@@ -321,6 +321,102 @@ async function runShellTests() {
     const playbook = getPlaybook('python_time_delay_exec');
     assert(playbook.includes('T1497.003'), 'Playbook should reference T1497.003');
   });
+
+  // --- v2.10.11: TeamPCP/CanisterWorm patterns (SHELL-020, SHELL-021) ---
+
+  await asyncTest('SHELL-020: rm -rf / --no-preserve-root → root_filesystem_wipe', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-shell-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'test-shell', version: '1.0.0' }));
+    fs.writeFileSync(path.join(tmp, 'wiper.sh'), '#!/bin/bash\nrm -rf / --no-preserve-root');
+    try {
+      const result = await runScanDirect(tmp);
+      const t = (result.threats || []).find(t => t.type === 'root_filesystem_wipe');
+      assert(t, 'rm -rf / --no-preserve-root should be detected as root_filesystem_wipe');
+      assert(t.severity === 'CRITICAL', `Expected CRITICAL, got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('SHELL-020: rm -rf / (bare) → root_filesystem_wipe', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-shell-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'test-shell', version: '1.0.0' }));
+    fs.writeFileSync(path.join(tmp, 'destroy.sh'), '#!/bin/bash\nrm -rf / ;echo done');
+    try {
+      const result = await runScanDirect(tmp);
+      const t = (result.threats || []).find(t => t.type === 'root_filesystem_wipe');
+      assert(t, 'rm -rf / should be detected as root_filesystem_wipe');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('SHELL-020: rm -rf /home NOT detected as root_filesystem_wipe (covered by home_deletion)', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-shell-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'test-shell', version: '1.0.0' }));
+    fs.writeFileSync(path.join(tmp, 'clean.sh'), '#!/bin/bash\nrm -rf /home/user');
+    try {
+      const result = await runScanDirect(tmp);
+      const t = (result.threats || []).find(t => t.type === 'root_filesystem_wipe');
+      assert(!t, 'rm -rf /home should NOT trigger root_filesystem_wipe (it triggers home_deletion)');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('SHELL-021: systemctl enable → systemd_persistence', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-shell-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'test-shell', version: '1.0.0' }));
+    fs.writeFileSync(path.join(tmp, 'install.sh'), '#!/bin/bash\nsystemctl --user enable pgmon');
+    try {
+      const result = await runScanDirect(tmp);
+      const t = (result.threats || []).find(t => t.type === 'systemd_persistence');
+      assert(t, 'systemctl enable should be detected as systemd_persistence');
+      assert(t.severity === 'CRITICAL', `Expected CRITICAL, got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('SHELL-021: systemctl daemon-reload → systemd_persistence', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-shell-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'test-shell', version: '1.0.0' }));
+    fs.writeFileSync(path.join(tmp, 'setup.sh'), '#!/bin/bash\nsystemctl daemon-reload');
+    try {
+      const result = await runScanDirect(tmp);
+      const t = (result.threats || []).find(t => t.type === 'systemd_persistence');
+      assert(t, 'systemctl daemon-reload should be detected as systemd_persistence');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('SHELL-022: /proc/pid/mem access → proc_mem_scan', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-shell-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'test-shell', version: '1.0.0' }));
+    fs.writeFileSync(path.join(tmp, 'steal.sh'), '#!/bin/bash\ncat /proc/1234/mem | grep -a isSecret');
+    try {
+      const result = await runScanDirect(tmp);
+      const t = (result.threats || []).find(t => t.type === 'proc_mem_scan');
+      assert(t, '/proc/pid/mem access should be detected as proc_mem_scan');
+      assert(t.severity === 'CRITICAL', `Expected CRITICAL, got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('SHELL-020/021/022: rules and playbooks exist', async () => {
+    const { getRule } = require('../../src/rules/index.js');
+    const { getPlaybook } = require('../../src/response/playbooks.js');
+
+    const r1 = getRule('root_filesystem_wipe');
+    assert(r1.id === 'MUADDIB-SHELL-020', `Expected MUADDIB-SHELL-020, got ${r1.id}`);
+    const p1 = getPlaybook('root_filesystem_wipe');
+    assert(p1.includes('rm -rf'), 'Playbook should reference rm -rf');
+
+    const r2 = getRule('systemd_persistence');
+    assert(r2.id === 'MUADDIB-AST-059', `Expected MUADDIB-AST-059, got ${r2.id}`);
+    const p2 = getPlaybook('systemd_persistence');
+    assert(p2.includes('systemd') || p2.includes('pgmon'), 'Playbook should reference systemd or pgmon');
+
+    const r3 = getRule('proc_mem_scan');
+    assert(r3.id === 'MUADDIB-SHELL-021', `Expected MUADDIB-SHELL-021, got ${r3.id}`);
+    const p3 = getPlaybook('proc_mem_scan');
+    assert(p3.includes('proc') || p3.includes('/mem'), 'Playbook should reference proc or mem');
+
+    const r4 = getRule('npm_token_steal');
+    assert(r4.id === 'MUADDIB-AST-060', `Expected MUADDIB-AST-060, got ${r4.id}`);
+    const p4 = getPlaybook('npm_token_steal');
+    assert(p4.includes('npm') || p4.includes('token'), 'Playbook should reference npm or token');
+  });
 }
 
 module.exports = { runShellTests };

