@@ -1667,6 +1667,18 @@ const RULES = {
     ],
     mitre: 'T1543.002'
   },
+  pth_persistence: {
+    id: 'MUADDIB-AST-061',
+    name: 'Python .pth Auto-Exec Persistence',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Ecriture d\'un fichier .pth detectee. Les fichiers .pth dans site-packages/ sont executes automatiquement par l\'interpreteur Python au demarrage, sans import explicite. Technique de persistence LiteLLM/Checkmarx (litellm_init.pth) : le .pth contient du code Python base64-encode qui installe un stealer.',
+    references: [
+      'https://blog.pypi.org/posts/2026-03-24-litellm-compromise/',
+      'https://attack.mitre.org/techniques/T1546/004/'
+    ],
+    mitre: 'T1546.004'
+  },
   npm_token_steal: {
     id: 'MUADDIB-AST-060',
     name: 'NPM Token Extraction via CLI',

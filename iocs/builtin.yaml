@@ -206,6 +206,8 @@ files:
   # GlassWorm (mars 2026)
   - i.js
   - init.json
+  # LiteLLM/Checkmarx (mars 2026) — .pth = Python auto-exec persistence
+  - litellm_init.pth
 
 hashes:
   # Shai-Hulud v2 payloads

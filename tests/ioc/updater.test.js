@@ -378,6 +378,27 @@ test('COMPACT: loadCachedIOCs works with compact fallback', () => {
   assert(Array.isArray(iocs.pypi_packages), 'Should have pypi_packages array');
 });
 
+test('COMPACT: litellm versioned IOC is present in compact data', () => {
+  const compactPath = path.join(__dirname, '..', '..', 'src', 'ioc', 'data', 'iocs-compact.json');
+  const compact = JSON.parse(fs.readFileSync(compactPath, 'utf8'));
+  assert(compact.pypi_versioned['litellm'], 'litellm should be in pypi_versioned');
+  assert(compact.pypi_versioned['litellm'].includes('1.82.7'), 'litellm should have version 1.82.7');
+  assert(compact.pypi_versioned['litellm'].includes('1.82.8'), 'litellm should have version 1.82.8');
+  assert(!compact.pypi_wildcards.includes('litellm'), 'litellm should NOT be in pypi_wildcards (versioned IOC)');
+});
+
+test('COMPACT: litellm IOC expands correctly via expandCompactIOCs', () => {
+  const { expandCompactIOCs } = require('../../src/ioc/updater.js');
+  const compactPath = path.join(__dirname, '..', '..', 'src', 'ioc', 'data', 'iocs-compact.json');
+  const compact = JSON.parse(fs.readFileSync(compactPath, 'utf8'));
+  const expanded = expandCompactIOCs(compact);
+  const litellmEntries = expanded.pypi_packages.filter(p => p.name === 'litellm');
+  assert(litellmEntries.length === 2, `Expected 2 litellm entries, got ${litellmEntries.length}`);
+  const versions = litellmEntries.map(e => e.version);
+  assert(versions.includes('1.82.7'), 'Should have litellm@1.82.7');
+  assert(versions.includes('1.82.8'), 'Should have litellm@1.82.8');
+});
+
 // ============================================
 // YAML LOADER TESTS
 // ============================================

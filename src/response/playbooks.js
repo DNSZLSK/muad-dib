@@ -690,6 +690,14 @@ const PLAYBOOKS = {
     'pour reecrire le malware a chaque execution, evitant la detection par signature. Moteur polymorphe. ' +
     'Verifier si Ollama est installe: curl http://localhost:11434/api/tags. ' +
     'Aucun package npm legitime n\'appelle un LLM local. Supprimer le package.',
+
+  pth_persistence:
+    'CRITIQUE: Ecriture d\'un fichier .pth detectee. Les fichiers .pth dans site-packages/ sont executes ' +
+    'automatiquement par Python au demarrage — c\'est un vecteur de persistence invisible. ' +
+    'Technique LiteLLM/Checkmarx (mars 2026): litellm_init.pth contient du code base64 qui installe un stealer ' +
+    'dans ~/.config/sysmon/ et exfiltre vers checkmarx.zone. ' +
+    'Verifier: find $(python -c "import site; print(site.getsitepackages()[0])") -name "*.pth" -exec cat {} \\; ' +
+    'Supprimer tout fichier .pth non standard. Rotation des credentials.',
 };
 
 function getPlaybook(threatType) {

