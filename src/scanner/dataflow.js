@@ -1000,7 +1000,8 @@ const SENSITIVE_PATH_PATTERNS = [
   '_cacache', '.cache/yarn', '.cache/pip',
   // P6: Removed discord, leveldb — data directories, not credential paths.
   // _cacache/.cache kept — real cache poisoning vectors (T1195.002).
-  '/proc/mem', '/proc/self'  // v2.10.11: runner secret extraction from process memory (TeamPCP Trivy stealer)
+  '/proc/mem', '/proc/self',  // v2.10.11: runner secret extraction from process memory (TeamPCP Trivy stealer)
+  '.config/sysmon'  // v2.10.13: LiteLLM/Checkmarx credential stealer staging path
 ];
 
 function isSensitivePath(val) {

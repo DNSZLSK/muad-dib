@@ -1201,6 +1201,17 @@ function handleCallExpression(node, ctx) {
           file: ctx.relFile
         });
       }
+      // Detect writes to .pth files — Python auto-exec persistence (LiteLLM/Checkmarx T1546.004)
+      // .pth files in site-packages/ are executed automatically by the Python interpreter at startup.
+      // No legitimate npm package creates .pth files.
+      if (sdPathStr && /\.pth$/i.test(sdPathStr)) {
+        ctx.threats.push({
+          type: 'pth_persistence',
+          severity: 'CRITICAL',
+          message: `${sdWriteMethod}() writes to Python .pth file: "${sdPathStr.substring(0, 80)}" — auto-exec persistence technique (LiteLLM/Checkmarx).`,
+          file: ctx.relFile
+        });
+      }
     }
   }
 
