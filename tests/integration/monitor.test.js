@@ -29,7 +29,7 @@ async function runMonitorTests() {
     isTemporalMaintainerEnabled, buildMaintainerChangeWebhookEmbed,
     isCanaryEnabled, buildCanaryExfiltrationWebhookEmbed,
     getTemporalMaxSeverity, isPublishAnomalyOnly,
-    isVerboseMode, setVerboseMode, hasIOCMatch, IOC_MATCH_TYPES,
+    isVerboseMode, setVerboseMode, hasIOCMatch, matchVersionedIOC, IOC_MATCH_TYPES,
     DETECTIONS_FILE, appendDetection, loadDetections, getDetectionStats,
     SCAN_STATS_FILE, loadScanStats, updateScanStats,
     buildReportFromDisk, buildReportEmbedFromDisk, getReportStatus,
@@ -7041,6 +7041,70 @@ async function runMonitorTests() {
     stats.iocPreAlerts = (stats.iocPreAlerts || 0) + 1;
     assert(stats.iocPreAlerts === prev + 1, `Expected ${prev + 1}, got ${stats.iocPreAlerts}`);
     stats.iocPreAlerts = prev; // restore
+  });
+
+  test('MONITOR L1: PRE-ALERT skips versioned IOC when version does not match', () => {
+    const mockIOCs = {
+      wildcardPackages: new Set(),
+      packagesMap: new Map([
+        ['@mcp-use/inspector', [
+          { name: '@mcp-use/inspector', version: '0.6.2', severity: 'critical' },
+          { name: '@mcp-use/inspector', version: '0.6.3', severity: 'critical' }
+        ]]
+      ])
+    };
+    // Name-only check (changes stream / RSS path): should NOT trigger
+    const isWildcard = mockIOCs.wildcardPackages.has('@mcp-use/inspector');
+    assert(!isWildcard, 'Versioned IOC should NOT be in wildcardPackages');
+    // Version mismatch: should NOT match
+    const mismatch = matchVersionedIOC(mockIOCs, '@mcp-use/inspector', '0.26.0');
+    assert(!mismatch, 'Version 0.26.0 should NOT match IOC entries 0.6.2/0.6.3');
+  });
+
+  test('MONITOR L1: PRE-ALERT triggers for versioned IOC when version matches', () => {
+    const mockIOCs = {
+      wildcardPackages: new Set(),
+      packagesMap: new Map([
+        ['@mcp-use/inspector', [
+          { name: '@mcp-use/inspector', version: '0.6.2', severity: 'critical' },
+          { name: '@mcp-use/inspector', version: '0.6.3', severity: 'critical' }
+        ]]
+      ])
+    };
+    const match = matchVersionedIOC(mockIOCs, '@mcp-use/inspector', '0.6.2');
+    assert(match, 'Version 0.6.2 should match IOC entry');
+    assert(match.version === '0.6.2', `Expected version 0.6.2, got ${match.version}`);
+  });
+
+  test('MONITOR L1: PRE-ALERT triggers immediately for wildcard IOC', () => {
+    const mockIOCs = {
+      wildcardPackages: new Set(['crossenv']),
+      packagesMap: new Map([
+        ['crossenv', [{ name: 'crossenv', version: '*', severity: 'critical' }]]
+      ])
+    };
+    const isWildcard = mockIOCs.wildcardPackages.has('crossenv');
+    assert(isWildcard, 'Wildcard IOC should be in wildcardPackages');
+  });
+
+  test('MONITOR L1: matchVersionedIOC returns null for unknown package', () => {
+    const mockIOCs = {
+      wildcardPackages: new Set(),
+      packagesMap: new Map()
+    };
+    const result = matchVersionedIOC(mockIOCs, 'totally-unknown-pkg', '1.0.0');
+    assert(result === null, 'Unknown package should return null');
+  });
+
+  test('MONITOR L1: matchVersionedIOC returns null when version is empty', () => {
+    const mockIOCs = {
+      wildcardPackages: new Set(),
+      packagesMap: new Map([
+        ['some-pkg', [{ name: 'some-pkg', version: '1.0.0', severity: 'critical' }]]
+      ])
+    };
+    const result = matchVersionedIOC(mockIOCs, 'some-pkg', '');
+    assert(result === null, 'Empty version should return null (cannot verify)');
   });
 
   // ============================================

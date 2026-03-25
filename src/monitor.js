@@ -1029,6 +1029,18 @@ async function sendIOCPreAlert(name, version) {
   await sendWebhook(url, payload, { rawPayload: true });
 }
 
+/**
+ * Check if a specific package@version matches a versioned IOC entry.
+ * Returns the matching IOC entry or null.
+ * Wildcard IOCs are NOT checked here (use wildcardPackages.has() separately).
+ */
+function matchVersionedIOC(iocs, name, version) {
+  if (!version || !iocs.packagesMap) return null;
+  const entries = iocs.packagesMap.get(name);
+  if (!entries) return null;
+  return entries.find(e => e.version === version) || null;
+}
+
 function computeRiskLevel(summary) {
   // Score-based thresholds aligned with src/scoring.js RISK_THRESHOLDS (75/50/25)
   if (summary.riskScore !== undefined) {
@@ -2256,7 +2268,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta) {
       try {
         const iocs = loadCachedIOCs();
         isKnownIOC = (iocs.wildcardPackages && iocs.wildcardPackages.has(name)) ||
-                     (iocs.packagesMap && iocs.packagesMap.has(name));
+                     !!matchVersionedIOC(iocs, name, version);
       } catch { /* IOC load failure — proceed with skip */ }
 
       if (isKnownIOC) {
@@ -3177,11 +3189,12 @@ async function pollNpmChanges(state) {
       // Layer 1: IOC pre-alert — send immediate webhook for known malicious packages
       // before queueing. Catches packages that may be unpublished before scan completes.
       // Hoisted so scanQueue item can carry isIOCMatch for fallback webhook on scan failure.
+      // Only wildcard IOCs trigger here (all versions malicious). Versioned IOCs are checked
+      // later in resolveTarballAndScan() once the exact version is known.
       let isKnownIOC = false;
       try {
         const iocs = loadCachedIOCs(); // 10s TTL cache, negligible cost per poll cycle
-        isKnownIOC = (iocs.wildcardPackages && iocs.wildcardPackages.has(name)) ||
-                     (iocs.packagesMap && iocs.packagesMap.has(name));
+        isKnownIOC = iocs.wildcardPackages && iocs.wildcardPackages.has(name);
         if (isKnownIOC) {
           console.log(`[MONITOR] IOC PRE-ALERT: ${name} — known malicious package detected in changes stream`);
           stats.iocPreAlerts = (stats.iocPreAlerts || 0) + 1;
@@ -3266,10 +3279,10 @@ async function pollNpmRss(state) {
       console.log(`[MONITOR] New npm: ${name}`);
 
       // Layer 1: IOC pre-alert (RSS fallback path)
+      // Only wildcard IOCs trigger here; versioned IOCs checked in resolveTarballAndScan().
       try {
         const iocs = loadCachedIOCs();
-        const isKnownIOC = (iocs.wildcardPackages && iocs.wildcardPackages.has(name)) ||
-                           (iocs.packagesMap && iocs.packagesMap.has(name));
+        const isKnownIOC = iocs.wildcardPackages && iocs.wildcardPackages.has(name);
         if (isKnownIOC) {
           console.log(`[MONITOR] IOC PRE-ALERT: ${name} — known malicious package detected via RSS`);
           stats.iocPreAlerts = (stats.iocPreAlerts || 0) + 1;
@@ -3648,6 +3661,24 @@ async function resolveTarballAndScan(item) {
       return;
     }
   }
+
+  // Deferred IOC PRE-ALERT for versioned IOCs (version now known after registry resolution).
+  // Wildcard IOCs already triggered PRE-ALERT in changes stream / RSS polling.
+  if (item.version && !item.isIOCMatch) {
+    try {
+      const iocs = loadCachedIOCs();
+      const versionMatch = matchVersionedIOC(iocs, item.name, item.version);
+      if (versionMatch) {
+        item.isIOCMatch = true;
+        console.log(`[MONITOR] IOC PRE-ALERT: ${item.name}@${item.version} — versioned IOC match`);
+        stats.iocPreAlerts = (stats.iocPreAlerts || 0) + 1;
+        sendIOCPreAlert(item.name, item.version).catch(err => {
+          console.error(`[MONITOR] IOC pre-alert webhook failed for ${item.name}: ${err.message}`);
+        });
+      }
+    } catch { /* IOC load failure is non-fatal */ }
+  }
+
   // Deduplication: skip if already scanned in the last 24h
   const dedupeKey = `${item.ecosystem}/${item.name}@${item.version}`;
   if (recentlyScanned.has(dedupeKey)) {
@@ -3857,6 +3888,7 @@ module.exports = {
   isVerboseMode,
   setVerboseMode,
   hasIOCMatch,
+  matchVersionedIOC,
   hasTyposquat,
   isSuspectClassification,
   TIER1_TYPES,
