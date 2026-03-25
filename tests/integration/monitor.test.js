@@ -6191,9 +6191,9 @@ async function runMonitorTests() {
 
   // ===== v2.7.6 C1: High-confidence malice bypass =====
 
-  test('MONITOR: HIGH_CONFIDENCE_MALICE_TYPES contains 13 threat types', () => {
-    assert(HIGH_CONFIDENCE_MALICE_TYPES.size === 13,
-      `Should have 13 types, got ${HIGH_CONFIDENCE_MALICE_TYPES.size}`);
+  test('MONITOR: HIGH_CONFIDENCE_MALICE_TYPES contains 17 threat types', () => {
+    assert(HIGH_CONFIDENCE_MALICE_TYPES.size === 17,
+      `Should have 17 types, got ${HIGH_CONFIDENCE_MALICE_TYPES.size}`);
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('lifecycle_shell_pipe'), 'Missing lifecycle_shell_pipe');
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('fetch_decrypt_exec'), 'Missing fetch_decrypt_exec');
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('download_exec_binary'), 'Missing download_exec_binary');
@@ -6206,6 +6206,11 @@ async function runMonitorTests() {
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('sandbox_network_after_sensitive_read'), 'Missing sandbox_network_after_sensitive_read');
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('node_modules_write'), 'Missing node_modules_write');
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('npm_publish_worm'), 'Missing npm_publish_worm');
+    // v2.10.11: TeamPCP/CanisterWorm types
+    assert(HIGH_CONFIDENCE_MALICE_TYPES.has('systemd_persistence'), 'Missing systemd_persistence');
+    assert(HIGH_CONFIDENCE_MALICE_TYPES.has('npm_token_steal'), 'Missing npm_token_steal');
+    assert(HIGH_CONFIDENCE_MALICE_TYPES.has('root_filesystem_wipe'), 'Missing root_filesystem_wipe');
+    assert(HIGH_CONFIDENCE_MALICE_TYPES.has('proc_mem_scan'), 'Missing proc_mem_scan');
   });
 
   test('MONITOR: HIGH_CONFIDENCE_MALICE_TYPES does NOT contain FP-prone types', () => {

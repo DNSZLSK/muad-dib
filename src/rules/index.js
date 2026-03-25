@@ -1654,6 +1654,56 @@ const RULES = {
     mitre: 'T1102'
   },
 
+  // v2.10.11 — TeamPCP/CanisterWorm campaign detections (mars 2026)
+  systemd_persistence: {
+    id: 'MUADDIB-AST-059',
+    name: 'Systemd Service Persistence',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Ecriture dans un chemin systemd (*.service, systemd/) ou execution de systemctl enable/start. Technique de persistence CanisterWorm (pgmon.service) et TeamPCP (sysmon.service). Aucun package npm legitime ne cree de services systemd.',
+    references: [
+      'https://research.jfrog.com/post/canister-worm/',
+      'https://attack.mitre.org/techniques/T1543/002/'
+    ],
+    mitre: 'T1543.002'
+  },
+  npm_token_steal: {
+    id: 'MUADDIB-AST-060',
+    name: 'NPM Token Extraction via CLI',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Execution de npm config get _authToken ou npm whoami — extraction programmatique de credentials npm. Pattern CanisterWorm findNpmTokens() utilise pour la propagation worm.',
+    references: [
+      'https://research.jfrog.com/post/canister-worm/',
+      'https://www.aikido.dev/blog/teampcp-deploys-worm-npm-trivy-compromise'
+    ],
+    mitre: 'T1552.001'
+  },
+  root_filesystem_wipe: {
+    id: 'MUADDIB-SHELL-020',
+    name: 'Root Filesystem Wipe',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Commande rm -rf / detectee — suppression de tout le systeme de fichiers. Pattern kamikaze.sh (CanisterWorm wiper ciblant Iran via timezone Asia/Tehran). Plus destructif que home_deletion.',
+    references: [
+      'https://www.aikido.dev/blog/teampcp-stage-payload-canisterworm-iran',
+      'https://attack.mitre.org/techniques/T1485/'
+    ],
+    mitre: 'T1485'
+  },
+  proc_mem_scan: {
+    id: 'MUADDIB-SHELL-021',
+    name: 'Process Memory Scanning',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Acces a /proc/*/mem detecte — extraction de secrets depuis la memoire des processus. Technique TeamPCP credential stealer (Trivy v0.69.4) : scan des process Runner.Worker pour extraire les secrets CI/CD.',
+    references: [
+      'https://www.wiz.io/blog/trivy-compromised-teampcp-supply-chain-attack',
+      'https://attack.mitre.org/techniques/T1003/007/'
+    ],
+    mitre: 'T1003.007'
+  },
+
   // Compound scoring rules (v2.9.2)
   // Injected by applyCompoundBoosts() when co-occurring threat types indicate unambiguous malice.
   crypto_staged_payload: {

@@ -709,7 +709,11 @@ const HIGH_CONFIDENCE_MALICE_TYPES = new Set([
   'sandbox_network_after_sensitive_read',  // compound sandbox detection
   'detached_credential_exfil',            // detached process + credential exfil (DPRK/Lazarus)
   'node_modules_write',                    // writeFile to node_modules/ (worm propagation)
-  'npm_publish_worm'                       // exec("npm publish") (worm propagation)
+  'npm_publish_worm',                      // exec("npm publish") (worm propagation)
+  'systemd_persistence',                   // writeFile to systemd/ or systemctl enable (CanisterWorm T1543.002)
+  'npm_token_steal',                       // exec("npm config get _authToken") (CanisterWorm findNpmTokens)
+  'root_filesystem_wipe',                  // rm -rf / (CanisterWorm kamikaze.sh wiper T1485)
+  'proc_mem_scan'                          // /proc/mem scanning (TeamPCP Trivy credential stealer)
 ]);
 
 function hasHighConfidenceThreat(result) {

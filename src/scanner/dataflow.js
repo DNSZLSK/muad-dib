@@ -997,9 +997,10 @@ const SENSITIVE_PATH_PATTERNS = [
   '.ethereum', '.electrum', '.config/solana', '.exodus',
   '.atomic', '.metamask', '.ledger-live', '.trezor',
   '.bitcoin', '.monero', '.gnupg',
-  '_cacache', '.cache/yarn', '.cache/pip'
+  '_cacache', '.cache/yarn', '.cache/pip',
   // P6: Removed discord, leveldb — data directories, not credential paths.
   // _cacache/.cache kept — real cache poisoning vectors (T1195.002).
+  '/proc/mem', '/proc/self'  // v2.10.11: runner secret extraction from process memory (TeamPCP Trivy stealer)
 ];
 
 function isSensitivePath(val) {

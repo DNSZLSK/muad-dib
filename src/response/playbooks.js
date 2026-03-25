@@ -660,6 +660,31 @@ const PLAYBOOKS = {
     'Isoler immediatement la machine. Revoquer les tokens npm: npm token revoke. ' +
     'Verifier les packages publies: npm profile ls. Signaler sur npm.',
 
+  systemd_persistence:
+    'CRITIQUE: Ecriture dans un chemin systemd ou execution de systemctl enable/start. ' +
+    'Pattern CanisterWorm (pgmon.service) et TeamPCP (sysmon.service). ' +
+    'Aucun package npm legitime ne cree de services systemd. ' +
+    'Verifier: systemctl --user list-units | grep pgmon. ' +
+    'Supprimer: systemctl --user stop pgmon && rm ~/.config/systemd/user/pgmon.service. ' +
+    'Inspecter ~/.local/share/pgmon/ pour les payloads.',
+
+  npm_token_steal:
+    'CRITIQUE: exec("npm config get _authToken") ou exec("npm whoami") detecte. ' +
+    'Extraction programmatique de credentials npm — pattern findNpmTokens() de CanisterWorm. ' +
+    'Le token vole sera utilise pour publier des versions infectees de vos packages. ' +
+    'Revoquer immediatement: npm token revoke <token>. Verifier les publications recentes.',
+
+  root_filesystem_wipe:
+    'CRITIQUE: rm -rf / detecte — suppression totale du systeme de fichiers. ' +
+    'Pattern kamikaze.sh du wiper CanisterWorm ciblant les systemes Iran (Asia/Tehran). ' +
+    'NE PAS executer. Isoler immediatement. Signaler comme destructware.',
+
+  proc_mem_scan:
+    'CRITIQUE: Acces a /proc/*/mem — extraction de secrets depuis la memoire des processus. ' +
+    'Technique TeamPCP credential stealer dans Trivy v0.69.4. ' +
+    'Scanne les processus CI runner pour extraire les secrets GitHub Actions. ' +
+    'Verifier que Trivy est en version >= 0.69.5. Rotation immediate de tous les secrets CI/CD.',
+
   ollama_local_llm:
     'Reference au port Ollama (11434) detectee. PhantomRaven Wave 4 utilise un LLM local (DeepSeek Coder) ' +
     'pour reecrire le malware a chaque execution, evitant la detection par signature. Moteur polymorphe. ' +

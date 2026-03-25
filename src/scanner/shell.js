@@ -28,7 +28,14 @@ const MALICIOUS_PATTERNS = [
   // Bun runtime evasion (v2.8.9 — Shai-Hulud 2.0)
   { pattern: /\bbun\s+run\b/m, name: 'bun_runtime_evasion', severity: 'HIGH' },
   // Python time.sleep sandbox evasion (v2.10.7 — CanisterWorm T1497.003)
-  { pattern: /python[23]?\s+-c\s*['"].*time\.sleep\s*\(\s*[1-9]\d{2,}/m, name: 'python_time_delay_exec', severity: 'HIGH' }
+  { pattern: /python[23]?\s+-c\s*['"].*time\.sleep\s*\(\s*[1-9]\d{2,}/m, name: 'python_time_delay_exec', severity: 'HIGH' },
+  // v2.10.11 — CanisterWorm/TeamPCP patterns (T1543.002, T1485)
+  // Root filesystem wipe (kamikaze.sh wiper — broader than home_deletion)
+  { pattern: /rm\s+-rf\s+\/\s*(--no-preserve-root|\s|$|;|\|)/m, name: 'root_filesystem_wipe', severity: 'CRITICAL' },
+  // systemd persistence (pgmon.service, sysmon.service — CanisterWorm/TeamPCP T1543.002)
+  { pattern: /systemctl\s+(?:--\S+\s+)*(enable|start|daemon-reload)\b/m, name: 'systemd_persistence', severity: 'CRITICAL' },
+  // /proc/mem scanning for runner secret extraction (Trivy credential stealer)
+  { pattern: /\/proc\/\S*\/mem\b/m, name: 'proc_mem_scan', severity: 'CRITICAL' }
 ];
 
 const SHEBANG_RE = /^#!.*\b(?:ba)?sh\b/;
