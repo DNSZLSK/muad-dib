@@ -88,7 +88,8 @@ async function runMonitorTests() {
     quickTyposquatCheck,
     POPULAR_NPM_NAMES,
     computeAlertPriority,
-    processQueueItem
+    processQueueItem,
+    STATIC_SCAN_TIMEOUT_MS
   } = require('../../src/monitor.js');
 
   test('MONITOR: parseNpmRss extracts package names from RSS', () => {
@@ -5899,13 +5900,61 @@ async function runMonitorTests() {
   });
 
   test('MONITOR: formatErrorBreakdown omits zero categories', () => {
-    const result = formatErrorBreakdown(10, { too_large: 0, tar_failed: 0, http_error: 10, timeout: 0, other: 0 });
+    const result = formatErrorBreakdown(10, { too_large: 0, tar_failed: 0, http_error: 10, timeout: 0, static_timeout: 0, other: 0 });
     assertIncludes(result, '10', 'Should contain total');
     assertIncludes(result, 'HTTP: 10', 'Should contain HTTP');
     assertNotIncludes(result, 'tar:', 'Should not contain tar when 0');
     assertNotIncludes(result, 'too large:', 'Should not contain too_large when 0');
     assertNotIncludes(result, 'timeout:', 'Should not contain timeout when 0');
+    assertNotIncludes(result, 'static:', 'Should not contain static when 0');
     assertNotIncludes(result, 'other:', 'Should not contain other when 0');
+  });
+
+  // ============================================
+  // STATIC SCAN TIMEOUT TESTS
+  // ============================================
+
+  console.log('\n=== STATIC SCAN TIMEOUT TESTS ===\n');
+
+  test('MONITOR: STATIC_SCAN_TIMEOUT_MS is 45 seconds', () => {
+    assert(STATIC_SCAN_TIMEOUT_MS === 45_000,
+      `STATIC_SCAN_TIMEOUT_MS should be 45000, got ${STATIC_SCAN_TIMEOUT_MS}`);
+  });
+
+  test('MONITOR: classifyError recognizes static_timeout before generic timeout', () => {
+    assert(classifyError(new Error('Static scan timeout after 45s for foo@1.0.0')) === 'static_timeout',
+      'Static scan timeout should classify as static_timeout, not timeout');
+  });
+
+  test('MONITOR: classifyError still classifies generic timeout correctly', () => {
+    assert(classifyError(new Error('Scan timeout after 180s')) === 'timeout',
+      'Generic timeout should still classify as timeout');
+  });
+
+  test('MONITOR: formatErrorBreakdown includes static timeout count', () => {
+    const result = formatErrorBreakdown(50, {
+      too_large: 0, tar_failed: 0, http_error: 10, timeout: 5, static_timeout: 8, other: 2
+    });
+    assertIncludes(result, 'static: 8', 'Should contain static timeout breakdown');
+    assertIncludes(result, 'timeout: 5', 'Should contain generic timeout breakdown');
+  });
+
+  test('MONITOR: stats.errorsByType includes static_timeout initialized to 0', () => {
+    assert('static_timeout' in stats.errorsByType,
+      'stats.errorsByType should have static_timeout key');
+    assert(typeof stats.errorsByType.static_timeout === 'number',
+      'static_timeout should be a number');
+  });
+
+  // ============================================
+  // QUICK SCAN IMPORTS TEST
+  // ============================================
+
+  test('MONITOR: scanPackageJson and scanShellScripts are importable functions', () => {
+    const { scanPackageJson } = require('../../src/scanner/package.js');
+    const { scanShellScripts } = require('../../src/scanner/shell.js');
+    assert(typeof scanPackageJson === 'function', 'scanPackageJson should be a function');
+    assert(typeof scanShellScripts === 'function', 'scanShellScripts should be a function');
   });
 
   test('MONITOR: buildDailyReportEmbed includes error breakdown', () => {
@@ -6680,10 +6729,10 @@ async function runMonitorTests() {
   });
 
   // ===================================================================
-  // C1: SIZE CAP 20MB TESTS
+  // C1: SIZE CAP 10MB TESTS
   // ===================================================================
 
-  console.log('\n=== C1: SIZE CAP 20MB TESTS ===\n');
+  console.log('\n=== C1: SIZE CAP 10MB TESTS ===\n');
 
   const {
     LARGE_PACKAGE_SIZE,
@@ -6692,9 +6741,9 @@ async function runMonitorTests() {
     loadScanMemory, saveScanMemory, recordScanMemory, shouldSuppressByMemory,
   } = require('../../src/monitor.js');
 
-  test('C1: LARGE_PACKAGE_SIZE is 20MB', () => {
-    assert(LARGE_PACKAGE_SIZE === 20 * 1024 * 1024,
-      `LARGE_PACKAGE_SIZE should be 20MB, got ${LARGE_PACKAGE_SIZE}`);
+  test('C1: LARGE_PACKAGE_SIZE is 10MB', () => {
+    assert(LARGE_PACKAGE_SIZE === 10 * 1024 * 1024,
+      `LARGE_PACKAGE_SIZE should be 10MB, got ${LARGE_PACKAGE_SIZE}`);
   });
 
   test('C1: getNpmLatestTarball returns unpackedSize and scripts', () => {
