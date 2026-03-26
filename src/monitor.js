@@ -13,16 +13,18 @@ const { downloadToFile, extractTarGz, sanitizePackageName } = require('./shared/
 const { MAX_TARBALL_SIZE } = require('./shared/constants.js');
 const { loadCachedIOCs } = require('./ioc/updater.js');
 const { levenshteinDistance } = require('./scanner/typosquat.js');
+const { scanPackageJson } = require('./scanner/package.js');
+const { scanShellScripts } = require('./scanner/shell.js');
 const { buildTrainingRecord } = require('./ml/feature-extractor.js');
 const { appendRecord: appendTrainingRecord, relabelRecords, getStats: getTrainingStats } = require('./ml/jsonl-writer.js');
 
 // Self-exclude: never scan our own package through the monitor
 const SELF_PACKAGE_NAME = require('../package.json').name; // 'muaddib-scanner'
 
-// C1: Size cap — skip full scan for large packages (>20MB unpacked).
-// Malware payloads are tiny (<1MB typically); 20MB has 20x safety margin.
-// Exceptions: IOC match (always scan), suspicious lifecycle scripts (always scan).
-const LARGE_PACKAGE_SIZE = 20 * 1024 * 1024; // 20MB
+// C1: Size cap — skip full scan for large packages (>10MB unpacked).
+// Malware payloads are tiny (<1MB typically); 10MB has 10x safety margin.
+// Exceptions: IOC match (always scan), quick scan findings (always scan).
+const LARGE_PACKAGE_SIZE = 10 * 1024 * 1024; // 10MB
 
 // Prevent unhandled promise rejections from crashing the monitor process
 process.on('unhandledRejection', (reason, promise) => {
@@ -538,6 +540,7 @@ const DAILY_STATS_PERSIST_INTERVAL = 1; // Persist to disk every scan (crash-saf
 const POLL_INTERVAL = 60_000;
 const POLL_MAX_BACKOFF = 960_000; // 16 minutes max backoff
 const SCAN_TIMEOUT_MS = 180_000; // 3 minutes per package
+const STATIC_SCAN_TIMEOUT_MS = 45_000; // 45s for static analysis only
 const SCAN_CONCURRENCY = Math.max(1, parseInt(process.env.MUADDIB_SCAN_CONCURRENCY, 10) || 5);
 
 // --- Popularity pre-filter ---
@@ -553,7 +556,7 @@ const stats = {
   suspect: 0,
   suspectByTier: { t1: 0, t1a: 0, t1b: 0, t2: 0, t3: 0 },
   errors: 0,
-  errorsByType: { too_large: 0, tar_failed: 0, http_error: 0, timeout: 0, other: 0 },
+  errorsByType: { too_large: 0, tar_failed: 0, http_error: 0, timeout: 0, static_timeout: 0, other: 0 },
   totalTimeMs: 0,
   mlFiltered: 0, // ML Phase 2: T1 packages classified as clean by ML classifier
   lastReportTime: Date.now(),
@@ -563,13 +566,14 @@ const stats = {
 /**
  * Classify an error into a category for the daily report breakdown.
  * @param {Error} err
- * @returns {'too_large'|'tar_failed'|'http_error'|'timeout'|'other'}
+ * @returns {'too_large'|'tar_failed'|'http_error'|'static_timeout'|'timeout'|'other'}
  */
 function classifyError(err) {
   const msg = (err && err.message) || '';
   if (/too large|tarball too large/i.test(msg)) return 'too_large';
   if (/tar\b|extract/i.test(msg)) return 'tar_failed';
   if (/HTTP [45]\d\d|HTTP \d{3}/i.test(msg)) return 'http_error';
+  if (/static scan timeout/i.test(msg)) return 'static_timeout';
   if (/timeout/i.test(msg)) return 'timeout';
   return 'other';
 }
@@ -837,6 +841,7 @@ function formatErrorBreakdown(total, byType) {
   if (byType.tar_failed > 0) parts.push(`tar: ${byType.tar_failed}`);
   if (byType.too_large > 0) parts.push(`too large: ${byType.too_large}`);
   if (byType.timeout > 0) parts.push(`timeout: ${byType.timeout}`);
+  if (byType.static_timeout > 0) parts.push(`static: ${byType.static_timeout}`);
   if (byType.other > 0) parts.push(`other: ${byType.other}`);
   if (parts.length === 0) return `${total}`;
   return `${total} (${parts.join(', ')})`;
@@ -2096,6 +2101,7 @@ function loadDailyStats() {
         stats.errorsByType.tar_failed = data.errorsByType.tar_failed || 0;
         stats.errorsByType.http_error = data.errorsByType.http_error || 0;
         stats.errorsByType.timeout = data.errorsByType.timeout || 0;
+        stats.errorsByType.static_timeout = data.errorsByType.static_timeout || 0;
         stats.errorsByType.other = data.errorsByType.other || 0;
       }
       stats.totalTimeMs = data.totalTimeMs || 0;
@@ -2284,49 +2290,101 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta) {
       return;
     }
 
-    // C1: Size cap — skip full scan for large packages (>20MB unpacked).
-    // Malware payloads are tiny (<1MB); >20MB = real frameworks/apps.
-    // Exceptions: IOC match (always scan), lifecycle scripts (scan if suspicious).
+    // C1: Size cap — skip full scan for large packages (>10MB unpacked).
+    // Malware payloads are tiny (<1MB); 10MB has 10x safety margin.
+    // Quick scan: extract + check package.json + shell scripts for lifecycle threats.
     const unpackedSize = meta.unpackedSize || 0;
+    let alreadyExtracted = false;
+    let extractedDir = null;
+
     if (unpackedSize > LARGE_PACKAGE_SIZE) {
-      // Exception 1: IOC match — always scan known malicious packages
+      // Exception 1: IOC match — always full scan
       let isKnownIOC = false;
       try {
         const iocs = loadCachedIOCs();
         isKnownIOC = (iocs.wildcardPackages && iocs.wildcardPackages.has(name)) ||
                      !!matchVersionedIOC(iocs, name, version);
-      } catch { /* IOC load failure — proceed with skip */ }
+      } catch { /* IOC load failure — proceed with size cap */ }
 
       if (isKnownIOC) {
         console.log(`[MONITOR] SIZE CAP BYPASS (IOC): ${name}@${version} (${(unpackedSize / 1024 / 1024).toFixed(1)}MB — known IOC)`);
       } else {
-        // Exception 2: Lifecycle scripts — check registry scripts before skipping.
-        // A compromised large package could have malicious preinstall/install/postinstall.
-        const scripts = meta.registryScripts || {};
-        const DANGEROUS_LIFECYCLE = ['preinstall', 'install', 'postinstall'];
-        const hasSuspiciousLifecycle = DANGEROUS_LIFECYCLE.some(hook => {
-          const val = scripts[hook];
-          return val && !isSafeLifecycleScript(val);
-        });
+        // Exception 2: Quick scan — extract and check package.json + shell scripts.
+        // Validates actual tarball contents (not just registry metadata).
+        let bypassQuickScan = false;
+        try {
+          alreadyExtracted = true;
+          extractedDir = extractTarGz(tgzPath, tmpDir);
 
-        if (hasSuspiciousLifecycle) {
-          console.log(`[MONITOR] SIZE CAP BYPASS (lifecycle): ${name}@${version} (${(unpackedSize / 1024 / 1024).toFixed(1)}MB — suspicious lifecycle scripts)`);
-        } else {
-          console.log(`[MONITOR] SIZE_SKIP: ${name}@${version} — large package (${(unpackedSize / 1024 / 1024).toFixed(1)}MB unpacked)`);
-          stats.scanned++;
-          stats.clean++;
-          updateScanStats('clean');
-          return;
+          const [pkgThreats, shellThreats] = await Promise.all([
+            scanPackageJson(extractedDir),
+            scanShellScripts(extractedDir)
+          ]);
+          const quickThreats = [...pkgThreats, ...shellThreats];
+
+          bypassQuickScan = quickThreats.some(t =>
+            t.severity === 'CRITICAL' || t.severity === 'HIGH'
+          );
+
+          if (bypassQuickScan) {
+            console.log(`[MONITOR] SIZE CAP BYPASS (quick scan): ${name}@${version} (${(unpackedSize / 1024 / 1024).toFixed(1)}MB — ${quickThreats.length} findings)`);
+          } else {
+            console.log(`[MONITOR] SIZE_SKIP: ${name}@${version} — large package (${(unpackedSize / 1024 / 1024).toFixed(1)}MB, quick scan clean)`);
+            stats.scanned++;
+            stats.clean++;
+            updateScanStats('clean');
+            return;
+          }
+        } catch (extractErr) {
+          // Extract/quick scan failed — fallback to registry metadata check
+          alreadyExtracted = false;
+          extractedDir = null;
+          const scripts = meta.registryScripts || {};
+          const DANGEROUS_LIFECYCLE = ['preinstall', 'install', 'postinstall'];
+          const hasSuspiciousLifecycle = DANGEROUS_LIFECYCLE.some(hook => {
+            const val = scripts[hook];
+            return val && !isSafeLifecycleScript(val);
+          });
+
+          if (hasSuspiciousLifecycle) {
+            console.log(`[MONITOR] SIZE CAP BYPASS (lifecycle fallback): ${name}@${version} (${(unpackedSize / 1024 / 1024).toFixed(1)}MB)`);
+          } else {
+            console.log(`[MONITOR] SIZE_SKIP: ${name}@${version} — large package (${(unpackedSize / 1024 / 1024).toFixed(1)}MB, extract failed)`);
+            stats.scanned++;
+            stats.clean++;
+            updateScanStats('clean');
+            return;
+          }
         }
       }
     }
 
-    const extractedDir = extractTarGz(tgzPath, tmpDir);
+    if (!extractedDir) {
+      extractedDir = extractTarGz(tgzPath, tmpDir);
+    }
 
     // ML Phase 2a: Count JS files and detect test presence for enriched features
     const { fileCountTotal, hasTests } = countPackageFiles(extractedDir);
 
-    const result = await run(extractedDir, { _capture: true });
+    let result;
+    try {
+      result = await Promise.race([
+        run(extractedDir, { _capture: true }),
+        timeoutPromise(STATIC_SCAN_TIMEOUT_MS).catch(() => {
+          throw new Error(`Static scan timeout after ${STATIC_SCAN_TIMEOUT_MS / 1000}s for ${name}@${version}`);
+        })
+      ]);
+    } catch (staticErr) {
+      if (/static scan timeout/i.test(staticErr.message)) {
+        console.error(`[MONITOR] STATIC_TIMEOUT: ${name}@${version} — exceeded ${STATIC_SCAN_TIMEOUT_MS / 1000}s`);
+        recordError(staticErr);
+        stats.scanned++;
+        stats.totalTimeMs += Date.now() - startTime;
+        updateScanStats('clean');
+        return { sandboxResult: null, staticClean: false };
+      }
+      throw staticErr;
+    }
 
     // ML Phase 2a: Fetch npm registry metadata once for packages with findings.
     // Reused for both training records (enriched features) and reputation scoring.
@@ -2900,6 +2958,7 @@ async function sendDailyReport() {
   stats.errorsByType.tar_failed = 0;
   stats.errorsByType.http_error = 0;
   stats.errorsByType.timeout = 0;
+  stats.errorsByType.static_timeout = 0;
   stats.errorsByType.other = 0;
   stats.totalTimeMs = 0;
   stats.mlFiltered = 0;
@@ -3873,6 +3932,7 @@ module.exports = {
   resolveTarballAndScan,
   MAX_TARBALL_SIZE,
   LARGE_PACKAGE_SIZE,
+  STATIC_SCAN_TIMEOUT_MS,
   KNOWN_BUNDLED_FILES,
   KNOWN_BUNDLED_PATHS,
   isBundledToolingOnly,
