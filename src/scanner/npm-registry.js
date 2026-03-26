@@ -1,5 +1,6 @@
 const { NPM_PACKAGE_REGEX } = require('../shared/constants.js');
 const { debugLog } = require('../utils.js');
+const { acquireRegistrySlot, releaseRegistrySlot } = require('../shared/http-limiter.js');
 
 const REGISTRY_URL = 'https://registry.npmjs.org';
 const DOWNLOADS_URL = 'https://api.npmjs.org/downloads/point/last-week';
@@ -94,7 +95,12 @@ async function getPackageMetadata(packageName) {
   }
   if (!meta) {
     const registryUrl = REGISTRY_URL + '/' + encodeURIComponent(packageName);
-    meta = await fetchWithRetry(registryUrl);
+    await acquireRegistrySlot();
+    try {
+      meta = await fetchWithRetry(registryUrl);
+    } finally {
+      releaseRegistrySlot();
+    }
   }
   if (!meta) return null;
 
@@ -121,9 +127,16 @@ async function getPackageMetadata(packageName) {
     ? SEARCH_URL + '?text=maintainer:' + encodeURIComponent(maintainer) + '&size=1'
     : null;
 
+  async function fetchAuthorWithSlot() {
+    if (!authorUrl) return null;
+    await acquireRegistrySlot();
+    try { return await fetchWithRetry(authorUrl); }
+    finally { releaseRegistrySlot(); }
+  }
+
   const [downloadsData, authorData] = await Promise.all([
-    fetchWithRetry(downloadsUrl),
-    authorUrl ? fetchWithRetry(authorUrl) : Promise.resolve(null)
+    fetchWithRetry(downloadsUrl),    // api.npmjs.org — no semaphore needed
+    fetchAuthorWithSlot()            // registry.npmjs.org — semaphore protected
   ]);
 
   const weeklyDownloads = downloadsData?.downloads ?? 0;

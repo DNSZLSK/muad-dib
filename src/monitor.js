@@ -12,6 +12,7 @@ const { detectPublishAnomaly } = require('./publish-anomaly.js');
 const { detectMaintainerChange } = require('./maintainer-change.js');
 const { downloadToFile, extractTarGz, sanitizePackageName } = require('./shared/download.js');
 const { MAX_TARBALL_SIZE } = require('./shared/constants.js');
+const { acquireRegistrySlot, releaseRegistrySlot } = require('./shared/http-limiter.js');
 const { loadCachedIOCs } = require('./ioc/updater.js');
 const { levenshteinDistance } = require('./scanner/typosquat.js');
 const { scanPackageJson } = require('./scanner/package.js');
@@ -2331,7 +2332,12 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta) {
     }
 
     if (!usedCache) {
-      await downloadToFile(tarballUrl, tgzPath);
+      await acquireRegistrySlot();
+      try {
+        await downloadToFile(tarballUrl, tgzPath);
+      } finally {
+        releaseRegistrySlot();
+      }
 
       // Layer 3: Cache tarball for high-risk packages
       if (cacheTrigger) {
@@ -3246,7 +3252,13 @@ function extractTarballFromDoc(doc) {
  */
 async function getNpmLatestTarball(packageName) {
   const url = `https://registry.npmjs.org/${encodeURIComponent(packageName)}/latest`;
-  const body = await httpsGet(url);
+  await acquireRegistrySlot();
+  let body;
+  try {
+    body = await httpsGet(url);
+  } finally {
+    releaseRegistrySlot();
+  }
   let data;
   try {
     data = JSON.parse(body);
@@ -3422,7 +3434,13 @@ async function pollNpmRss(state) {
   const url = 'https://registry.npmjs.org/-/rss?descending=true&limit=200';
 
   try {
-    const body = await httpsGet(url);
+    await acquireRegistrySlot();
+    let body;
+    try {
+      body = await httpsGet(url);
+    } finally {
+      releaseRegistrySlot();
+    }
     const packages = parseNpmRss(body);
 
     // Find new packages (those after the last seen one)
