@@ -4,6 +4,13 @@ const REGISTRY_URL = 'https://registry.npmjs.org';
 const TIMEOUT_MS = 10_000;
 const MAX_RESPONSE_SIZE = 50 * 1024 * 1024; // 50MB (some packages have lots of versions)
 
+// Metadata cache: avoids duplicate HTTP requests when multiple temporal modules
+// fetch the same package metadata within a short window (monitor pipeline).
+const _metadataCache = new Map(); // packageName → { data, fetchedAt }
+const _inflightRequests = new Map(); // packageName → Promise
+const METADATA_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const METADATA_CACHE_MAX = 200;
+
 const LIFECYCLE_SCRIPTS = [
   'preinstall',
   'install',
@@ -16,11 +23,10 @@ const LIFECYCLE_SCRIPTS = [
 ];
 
 /**
- * Fetch full package metadata from the npm registry.
- * @param {string} packageName - npm package name (scoped or unscoped)
- * @returns {Promise<object>} Full registry metadata (versions, time, maintainers, etc.)
+ * Raw HTTP fetch — always hits the npm registry. Use fetchPackageMetadata() instead,
+ * which adds caching and inflight dedup.
  */
-function fetchPackageMetadata(packageName) {
+function _fetchPackageMetadataImpl(packageName) {
   const encodedName = encodeURIComponent(packageName).replace('%40', '@');
   const url = `${REGISTRY_URL}/${encodedName}`;
   const urlObj = new URL(url);
@@ -68,7 +74,15 @@ function fetchPackageMetadata(packageName) {
       res.on('end', () => {
         if (destroyed) return;
         try {
-          resolve(JSON.parse(data));
+          const parsed = JSON.parse(data);
+          // Store in cache on successful fetch
+          if (_metadataCache.size >= METADATA_CACHE_MAX) {
+            // Evict oldest entry
+            const oldestKey = _metadataCache.keys().next().value;
+            _metadataCache.delete(oldestKey);
+          }
+          _metadataCache.set(packageName, { data: parsed, fetchedAt: Date.now() });
+          resolve(parsed);
         } catch (e) {
           reject(new Error(`Invalid JSON from registry for ${packageName}: ${e.message}`));
         }
@@ -86,6 +100,39 @@ function fetchPackageMetadata(packageName) {
 
     req.end();
   });
+}
+
+/**
+ * Fetch full package metadata from the npm registry with caching and inflight dedup.
+ * Multiple callers requesting the same package within 5 minutes share one HTTP request.
+ * @param {string} packageName - npm package name (scoped or unscoped)
+ * @returns {Promise<object>} Full registry metadata (versions, time, maintainers, etc.)
+ */
+function fetchPackageMetadata(packageName) {
+  // Check cache first (TTL-based)
+  const cached = _metadataCache.get(packageName);
+  if (cached && (Date.now() - cached.fetchedAt) < METADATA_CACHE_TTL) {
+    return Promise.resolve(cached.data);
+  }
+
+  // Dedup inflight requests — if the same package is already being fetched, reuse that Promise
+  if (_inflightRequests.has(packageName)) {
+    return _inflightRequests.get(packageName);
+  }
+
+  const promise = _fetchPackageMetadataImpl(packageName).finally(() => {
+    _inflightRequests.delete(packageName);
+  });
+  _inflightRequests.set(packageName, promise);
+  return promise;
+}
+
+/**
+ * Clear the metadata cache. Exported for tests and monitor reset.
+ */
+function clearMetadataCache() {
+  _metadataCache.clear();
+  _inflightRequests.clear();
 }
 
 /**
@@ -253,8 +300,14 @@ async function detectSuddenLifecycleChange(packageName) {
 
 module.exports = {
   fetchPackageMetadata,
+  clearMetadataCache,
   getLifecycleScripts,
   compareLifecycleScripts,
   getLatestVersions,
-  detectSuddenLifecycleChange
+  detectSuddenLifecycleChange,
+  // Exposed for tests only
+  _metadataCache,
+  _inflightRequests,
+  METADATA_CACHE_TTL,
+  METADATA_CACHE_MAX
 };

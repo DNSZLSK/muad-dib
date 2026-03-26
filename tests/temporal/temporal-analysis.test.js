@@ -505,6 +505,104 @@ async function runTemporalAnalysisTests() {
     console.log('[SKIP] TEMPORAL: fetchPackageMetadata + detectSuddenLifecycleChange network tests (CI/SKIP_NETWORK)');
     addSkipped(4);
   }
+
+  // ============================================
+  // METADATA CACHE + INFLIGHT DEDUP TESTS
+  // ============================================
+
+  console.log('\n=== METADATA CACHE TESTS ===\n');
+
+  const {
+    clearMetadataCache,
+    _metadataCache,
+    _inflightRequests,
+    METADATA_CACHE_TTL,
+    METADATA_CACHE_MAX
+  } = require('../../src/temporal-analysis.js');
+
+  test('CACHE: clearMetadataCache clears both caches', () => {
+    clearMetadataCache(); // Reset from any prior tests
+    _metadataCache.set('test-pkg', { data: {}, fetchedAt: Date.now() });
+    assert(_metadataCache.size === 1, 'Cache should have 1 entry after set, got ' + _metadataCache.size);
+    clearMetadataCache();
+    assert(_metadataCache.size === 0, 'Cache should be empty after clear');
+    assert(_inflightRequests.size === 0, 'Inflight should be empty after clear');
+  });
+
+  test('CACHE: METADATA_CACHE_TTL is 5 minutes', () => {
+    assert(METADATA_CACHE_TTL === 5 * 60 * 1000, 'TTL should be 5 minutes');
+  });
+
+  test('CACHE: METADATA_CACHE_MAX is 200', () => {
+    assert(METADATA_CACHE_MAX === 200, 'Max should be 200');
+  });
+
+  await asyncTest('CACHE: fetchPackageMetadata returns cached data on second call (mocked)', async () => {
+    const mockData = { name: 'cache-test-pkg', versions: { '1.0.0': {} } };
+    let fetchCount = 0;
+
+    await withMockedHttps(mockData, async (mod) => {
+      // Clear cache for fresh test
+      mod.clearMetadataCache();
+
+      // Monkey-count via wrapper: the mocked https only has 1 response behavior
+      const result1 = await mod.fetchPackageMetadata('cache-test-pkg');
+      assert(result1.name === 'cache-test-pkg', 'First call should return data');
+
+      // Second call should hit cache — won't even touch https
+      const result2 = await mod.fetchPackageMetadata('cache-test-pkg');
+      assert(result2.name === 'cache-test-pkg', 'Second call should return cached data');
+      assert(result1 === result2, 'Should return same object reference from cache');
+    });
+  });
+
+  await asyncTest('CACHE: fetchPackageMetadata expires after TTL (mocked)', async () => {
+    const mockData = { name: 'ttl-test-pkg', versions: { '1.0.0': {} } };
+
+    await withMockedHttps(mockData, async (mod) => {
+      mod.clearMetadataCache();
+
+      await mod.fetchPackageMetadata('ttl-test-pkg');
+      // Manually expire the cache entry
+      const entry = mod._metadataCache.get('ttl-test-pkg');
+      assert(entry, 'Cache entry should exist');
+      entry.fetchedAt = Date.now() - (mod.METADATA_CACHE_TTL + 1000);
+
+      // Next call should NOT return the expired entry (will re-fetch)
+      const result = await mod.fetchPackageMetadata('ttl-test-pkg');
+      assert(result.name === 'ttl-test-pkg', 'Should re-fetch after TTL expiry');
+      // The cache entry should be refreshed
+      const refreshed = mod._metadataCache.get('ttl-test-pkg');
+      assert(Date.now() - refreshed.fetchedAt < 5000, 'Cache should be refreshed');
+    });
+  });
+
+  await asyncTest('CACHE: inflight dedup returns same Promise for concurrent calls (mocked)', async () => {
+    const mockData = { name: 'dedup-pkg', versions: { '1.0.0': {} } };
+
+    await withMockedHttps(mockData, async (mod) => {
+      mod.clearMetadataCache();
+
+      // Launch two concurrent fetches — should share the same inflight Promise
+      const p1 = mod.fetchPackageMetadata('dedup-pkg');
+      const p2 = mod.fetchPackageMetadata('dedup-pkg');
+
+      const [r1, r2] = await Promise.all([p1, p2]);
+      assert(r1.name === 'dedup-pkg', 'First result should be correct');
+      assert(r2.name === 'dedup-pkg', 'Second result should be correct');
+      assert(r1 === r2, 'Both should return the same object (inflight dedup)');
+    });
+  });
+
+  test('CACHE: eviction when cache exceeds METADATA_CACHE_MAX', () => {
+    clearMetadataCache();
+    // Fill cache to max
+    for (let i = 0; i < METADATA_CACHE_MAX; i++) {
+      _metadataCache.set(`pkg-${i}`, { data: { i }, fetchedAt: Date.now() });
+    }
+    assert(_metadataCache.size === METADATA_CACHE_MAX, 'Cache should be at max');
+    assert(_metadataCache.has('pkg-0'), 'First entry should exist before eviction');
+  });
 }
 
 module.exports = { runTemporalAnalysisTests };

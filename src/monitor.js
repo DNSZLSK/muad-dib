@@ -3871,10 +3871,18 @@ async function resolveTarballAndScan(item) {
   let maintainerResult = null;
 
   if (item.ecosystem === 'npm') {
-    temporalResult = await runTemporalCheck(item.name);
-    astResult = await runTemporalAstCheck(item.name);
-    publishResult = await runTemporalPublishCheck(item.name);
-    maintainerResult = await runTemporalMaintainerCheck(item.name);
+    // Run all 4 temporal checks in parallel — each is independent.
+    // With metadata cache (temporal-analysis.js), the 4 modules share 1 HTTP request.
+    const [tempRes, astRes, pubRes, maintRes] = await Promise.allSettled([
+      runTemporalCheck(item.name),
+      runTemporalAstCheck(item.name),
+      runTemporalPublishCheck(item.name),
+      runTemporalMaintainerCheck(item.name)
+    ]);
+    temporalResult = tempRes.status === 'fulfilled' ? tempRes.value : null;
+    astResult = astRes.status === 'fulfilled' ? astRes.value : null;
+    publishResult = pubRes.status === 'fulfilled' ? pubRes.value : null;
+    maintainerResult = maintRes.status === 'fulfilled' ? maintRes.value : null;
   }
 
   const scanResult = await scanPackage(item.name, item.version, item.ecosystem, item.tarballUrl, {
