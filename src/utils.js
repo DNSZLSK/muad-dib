@@ -28,8 +28,10 @@ let _filesCapped = false;
  * File content cache — read each file once, reused across all scanners in a single scan.
  * Key = absolute file path, Value = file content string.
  * Cleared between scans via clearFileListCache().
+ * Capped at 500 entries to prevent OOM during evaluate (200 packages sequential).
  */
 const _fileContentCache = new Map();
+const _FILE_CONTENT_CACHE_MAX = 500;
 
 function setExtraExcludes(dirs, scanRoot) {
   _extraExcludedDirs = Array.isArray(dirs) ? dirs : [];
@@ -339,7 +341,8 @@ function forEachSafeFile(files, callback) {
       content = fs.readFileSync(file, 'utf8');
     } catch { continue; }
 
-    // Cache for subsequent scanners
+    // Cache for subsequent scanners (evict all if over cap to prevent OOM in evaluate loops)
+    if (_fileContentCache.size >= _FILE_CONTENT_CACHE_MAX) _fileContentCache.clear();
     _fileContentCache.set(file, content);
     callback(file, content);
   }

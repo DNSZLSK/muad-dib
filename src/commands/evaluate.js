@@ -8,6 +8,9 @@
  * with all 13+ scanners (AST, dataflow, obfuscation, entropy, etc.).
  * Tarballs are cached in .muaddib-cache/benign-tarballs/ to avoid
  * re-downloading on every run.
+ *
+ * Memory: For large corpora (200+ packages), run with --expose-gc to enable
+ * explicit GC between scans: node --expose-gc bin/muaddib.js evaluate
  */
 
 const fs = require('fs');
@@ -436,6 +439,7 @@ async function evaluateBenign(options = {}) {
     }
 
     const result = await silentScan(extractedDir);
+    if (global.gc) global.gc(); // Prevent OOM in long sequential evaluate loops
     const score = result.summary.riskScore;
     const isFlagged = score >= BENIGN_THRESHOLD;
     if (isFlagged) flagged++;
@@ -623,6 +627,7 @@ async function evaluateBenignPyPI(options = {}) {
     }
 
     const result = await silentScan(extractedDir);
+    if (global.gc) global.gc(); // Prevent OOM in long sequential evaluate loops
     const score = result.summary.riskScore;
     const isFlagged = score >= BENIGN_THRESHOLD;
     if (isFlagged) flagged++;
@@ -741,6 +746,7 @@ async function evaluateBenignRandom(options = {}) {
     }
 
     const result = await silentScan(extractedDir);
+    if (global.gc) global.gc(); // Prevent OOM in long sequential evaluate loops
     const score = result.summary.riskScore;
     const isFlagged = score >= BENIGN_THRESHOLD;
     if (isFlagged) flagged++;
