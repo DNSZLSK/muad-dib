@@ -101,21 +101,49 @@ const ACORN_OPTIONS = { ecmaVersion: 2024, sourceType: 'module', allowHashBang: 
 const acorn = require('acorn');
 
 /**
+ * AST parse cache — same content+options returns the same AST.
+ * Scanners do not mutate AST nodes (verified: only read comparisons).
+ * Cleared between scans via clearASTCache().
+ * Key = code.length + '|' + optionsKey + '|' + code.slice(0,128) + code.slice(-64)
+ * (length-prefixed partial key for fast Map lookup; collisions resolved by full WeakRef check)
+ */
+const _astCache = new Map();
+const _AST_CACHE_MAX = 600; // Max entries (one scan ≈ 500 files max)
+
+/**
  * Parse JS source with module-mode fallback to script-mode.
  * `const package = ...` is valid in script mode but reserved in module mode.
+ * Results are cached for reuse across scanners within the same scan.
  * Returns AST or null if both modes fail.
  */
 function safeParse(code, extraOptions = {}) {
+  // Build cache key: options signature + content fingerprint
+  const optKey = Object.keys(extraOptions).length === 0 ? '' : JSON.stringify(extraOptions);
+  const cacheKey = code.length + '|' + optKey + '|' + code.slice(0, 128) + code.slice(-64);
+
+  const cached = _astCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
   const opts = { ...ACORN_OPTIONS, ...extraOptions };
+  let ast = null;
   try {
-    return acorn.parse(code, opts);
+    ast = acorn.parse(code, opts);
   } catch {
     try {
-      return acorn.parse(code, { ...opts, sourceType: 'script' });
+      ast = acorn.parse(code, { ...opts, sourceType: 'script' });
     } catch {
-      return null;
+      ast = null;
     }
   }
+
+  // Cache the result (including null for unparseable files)
+  if (_astCache.size >= _AST_CACHE_MAX) _astCache.clear();
+  _astCache.set(cacheKey, ast);
+  return ast;
 }
 
-module.exports = { REHABILITATED_PACKAGES, NPM_PACKAGE_REGEX, MAX_TARBALL_SIZE, DOWNLOAD_TIMEOUT, MAX_FILE_SIZE, ACORN_OPTIONS, safeParse, getMaxFileSize, setMaxFileSize, resetMaxFileSize };
+function clearASTCache() {
+  _astCache.clear();
+}
+
+module.exports = { REHABILITATED_PACKAGES, NPM_PACKAGE_REGEX, MAX_TARBALL_SIZE, DOWNLOAD_TIMEOUT, MAX_FILE_SIZE, ACORN_OPTIONS, safeParse, clearASTCache, getMaxFileSize, setMaxFileSize, resetMaxFileSize };

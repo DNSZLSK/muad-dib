@@ -2,6 +2,7 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { Worker } = require('worker_threads');
 const { run } = require('./index.js');
 const { runSandbox, isDockerAvailable } = require('./sandbox/index.js');
 const { sendWebhook } = require('./webhook.js');
@@ -2240,6 +2241,66 @@ function countPackageFiles(dir) {
   return { fileCountTotal, hasTests };
 }
 
+// --- Worker-based scan with real timeout via terminate() ---
+
+const SCAN_WORKER_PATH = path.join(__dirname, 'scan-worker.js');
+
+/**
+ * Run the static scan in a Worker thread with a hard timeout.
+ * worker.terminate() calls V8::TerminateExecution which can interrupt
+ * synchronous code (unlike Promise.race + setTimeout on sync code).
+ *
+ * @param {string} extractedDir - Path to extracted package
+ * @param {number} timeoutMs - Timeout in milliseconds
+ * @returns {Promise<object>} Scan result (same shape as run(_, {_capture:true}))
+ */
+function runScanInWorker(extractedDir, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(SCAN_WORKER_PATH, {
+      workerData: { extractedDir }
+    });
+
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        worker.terminate().then(() => {
+          reject(new Error(`Static scan timeout after ${timeoutMs / 1000}s (worker terminated)`));
+        }).catch(() => {
+          reject(new Error(`Static scan timeout after ${timeoutMs / 1000}s (worker terminate failed)`));
+        });
+      }
+    }, timeoutMs);
+
+    worker.on('message', (msg) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (msg.type === 'result') {
+        resolve(msg.data);
+      } else if (msg.type === 'error') {
+        reject(new Error(msg.message));
+      }
+    });
+
+    worker.on('error', (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(err);
+    });
+
+    worker.on('exit', (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (code !== 0) {
+        reject(new Error(`Worker exited with code ${code}`));
+      }
+    });
+  });
+}
+
 // --- Package scanning ---
 
 async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta) {
@@ -2368,15 +2429,10 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta) {
 
     let result;
     try {
-      result = await Promise.race([
-        run(extractedDir, { _capture: true }),
-        timeoutPromise(STATIC_SCAN_TIMEOUT_MS).catch(() => {
-          throw new Error(`Static scan timeout after ${STATIC_SCAN_TIMEOUT_MS / 1000}s for ${name}@${version}`);
-        })
-      ]);
+      result = await runScanInWorker(extractedDir, STATIC_SCAN_TIMEOUT_MS);
     } catch (staticErr) {
       if (/static scan timeout/i.test(staticErr.message)) {
-        console.error(`[MONITOR] STATIC_TIMEOUT: ${name}@${version} — exceeded ${STATIC_SCAN_TIMEOUT_MS / 1000}s`);
+        console.error(`[MONITOR] STATIC_TIMEOUT: ${name}@${version} — exceeded ${STATIC_SCAN_TIMEOUT_MS / 1000}s (worker terminated)`);
         recordError(staticErr);
         stats.scanned++;
         stats.totalTimeMs += Date.now() - startTime;
@@ -3285,6 +3341,18 @@ async function pollNpmChanges(state) {
       // Skip self
       if (name === SELF_PACKAGE_NAME) continue;
 
+      // Skip @types/* packages — contain only .d.ts type declarations, no executable JS.
+      // Zero security risk: TypeScript declaration files cannot contain runtime code.
+      // Exception: still check IOC database (a compromised @types package would be listed).
+      if (name.startsWith('@types/')) {
+        let isTypesIOC = false;
+        try {
+          const iocs = loadCachedIOCs();
+          isTypesIOC = iocs.wildcardPackages && iocs.wildcardPackages.has(name);
+        } catch { /* IOC load failure — skip anyway */ }
+        if (!isTypesIOC) continue;
+      }
+
       // Layer 1: IOC pre-alert — send immediate webhook for known malicious packages
       // before queueing. Catches packages that may be unpublished before scan completes.
       // Hoisted so scanQueue item can carry isIOCMatch for fallback webhook on scan failure.
@@ -3374,6 +3442,15 @@ async function pollNpmRss(state) {
       if (name === SELF_PACKAGE_NAME) {
         console.log(`[MONITOR] SKIPPED (self): ${name}`);
         continue;
+      }
+      // Skip @types/* — no executable code (same logic as changes stream)
+      if (name.startsWith('@types/')) {
+        let isTypesIOC = false;
+        try {
+          const iocs = loadCachedIOCs();
+          isTypesIOC = iocs.wildcardPackages && iocs.wildcardPackages.has(name);
+        } catch { /* IOC load failure — skip anyway */ }
+        if (!isTypesIOC) continue;
       }
       console.log(`[MONITOR] New npm: ${name}`);
 
@@ -3933,6 +4010,7 @@ module.exports = {
   MAX_TARBALL_SIZE,
   LARGE_PACKAGE_SIZE,
   STATIC_SCAN_TIMEOUT_MS,
+  runScanInWorker,
   KNOWN_BUNDLED_FILES,
   KNOWN_BUNDLED_PATHS,
   isBundledToolingOnly,
