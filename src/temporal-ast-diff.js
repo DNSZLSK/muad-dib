@@ -7,6 +7,7 @@ const walk = require('acorn-walk');
 const { findJsFiles, forEachSafeFile, debugLog } = require('./utils.js');
 const { fetchPackageMetadata, getLatestVersions } = require('./temporal-analysis.js');
 const { downloadToFile, extractTarGz, sanitizePackageName } = require('./shared/download.js');
+const { acquireRegistrySlot, releaseRegistrySlot } = require('./shared/http-limiter.js');
 
 const { MAX_FILE_SIZE, getMaxFileSize, ACORN_OPTIONS, safeParse } = require('./shared/constants.js');
 
@@ -36,11 +37,21 @@ const PATTERN_SEVERITY = {
 
 /**
  * Fetch version-specific metadata from npm registry.
+ * Acquires a shared HTTP semaphore slot to prevent registry throttling.
  * @param {string} packageName
  * @param {string} version
  * @returns {Promise<object>}
  */
-function fetchVersionMetadata(packageName, version) {
+async function fetchVersionMetadata(packageName, version) {
+  await acquireRegistrySlot();
+  try {
+    return await _fetchVersionMetadataHttp(packageName, version);
+  } finally {
+    releaseRegistrySlot();
+  }
+}
+
+function _fetchVersionMetadataHttp(packageName, version) {
   const encodedName = encodeURIComponent(packageName).replace('%40', '@');
   const url = `${REGISTRY_URL}/${encodedName}/${encodeURIComponent(version)}`;
   const urlObj = new URL(url);
@@ -99,7 +110,13 @@ async function fetchPackageTarball(packageName, version) {
   let extractedDir;
   try {
     const tgzPath = path.join(tmpDir, 'package.tar.gz');
-    await downloadToFile(tarballUrl, tgzPath);
+    // Tarball downloads go through the shared semaphore (npm CDN)
+    await acquireRegistrySlot();
+    try {
+      await downloadToFile(tarballUrl, tgzPath);
+    } finally {
+      releaseRegistrySlot();
+    }
     extractedDir = extractTarGz(tgzPath, tmpDir);
   } catch (err) {
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (e) { debugLog('tmpDir cleanup failed:', e.message); }
