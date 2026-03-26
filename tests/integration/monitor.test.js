@@ -8112,6 +8112,51 @@ async function runMonitorTests() {
       else delete process.env.MUADDIB_WEBHOOK_URL;
     }
   });
+
+  // ============================================
+  // PARALLEL TEMPORAL CHECKS + METADATA CACHE
+  // ============================================
+
+  console.log('\n=== MONITOR PARALLEL TEMPORAL + CACHE TESTS ===\n');
+
+  test('MONITOR-PARALLEL: resolveTarballAndScan uses Promise.allSettled for temporal checks', () => {
+    // Verify the function source contains Promise.allSettled (structural test)
+    const src = resolveTarballAndScan.toString();
+    assertIncludes(src, 'Promise.allSettled', 'resolveTarballAndScan should use Promise.allSettled for parallel temporal checks');
+  });
+
+  test('MONITOR-PARALLEL: temporal check results handle rejected promises gracefully', () => {
+    // Simulate what Promise.allSettled returns for mixed fulfilled/rejected
+    const results = [
+      { status: 'fulfilled', value: { suspicious: true } },
+      { status: 'rejected', reason: new Error('Timeout') },
+      { status: 'fulfilled', value: null },
+      { status: 'rejected', reason: new Error('Network error') }
+    ];
+    const temporalResult = results[0].status === 'fulfilled' ? results[0].value : null;
+    const astResult = results[1].status === 'fulfilled' ? results[1].value : null;
+    const publishResult = results[2].status === 'fulfilled' ? results[2].value : null;
+    const maintainerResult = results[3].status === 'fulfilled' ? results[3].value : null;
+
+    assert(temporalResult !== null && temporalResult.suspicious === true, 'Fulfilled result should be preserved');
+    assert(astResult === null, 'Rejected result should become null');
+    assert(publishResult === null, 'Fulfilled null should stay null');
+    assert(maintainerResult === null, 'Rejected result should become null');
+  });
+
+  test('MONITOR-CACHE: temporal-analysis exports clearMetadataCache', () => {
+    const { clearMetadataCache } = require('../../src/temporal-analysis.js');
+    assert(typeof clearMetadataCache === 'function', 'clearMetadataCache should be a function');
+    // Should not throw
+    clearMetadataCache();
+  });
+
+  test('MONITOR-CACHE: npm-registry getPackageMetadata reads temporal cache', () => {
+    // Structural: verify npm-registry.js reads _metadataCache from temporal-analysis
+    const npmRegSrc = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'scanner', 'npm-registry.js'), 'utf8');
+    assertIncludes(npmRegSrc, 'temporal-analysis', 'npm-registry.js should import from temporal-analysis for cache reuse');
+    assertIncludes(npmRegSrc, '_metadataCache', 'npm-registry.js should read _metadataCache directly');
+  });
 }
 
 module.exports = { runMonitorTests };

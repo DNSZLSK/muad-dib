@@ -79,9 +79,23 @@ async function getPackageMetadata(packageName) {
   // Validate package name before building URL
   if (!NPM_PACKAGE_REGEX.test(packageName)) return null;
 
-  // 1. Registry metadata
-  const registryUrl = REGISTRY_URL + '/' + encodeURIComponent(packageName);
-  const meta = await fetchWithRetry(registryUrl);
+  // 1. Registry metadata — read from temporal-analysis cache if warm (monitor pipeline
+  // pre-fetches metadata for temporal checks). Only reads the Map, never fires HTTP.
+  // Falls back to own fetchWithRetry (with retries + 429 handling) on cache miss.
+  let meta = null;
+  try {
+    const { _metadataCache, METADATA_CACHE_TTL } = require('../temporal-analysis.js');
+    const cached = _metadataCache.get(packageName);
+    if (cached && (Date.now() - cached.fetchedAt) < METADATA_CACHE_TTL) {
+      meta = cached.data;
+    }
+  } catch {
+    // temporal-analysis not available — fall through to fetchWithRetry
+  }
+  if (!meta) {
+    const registryUrl = REGISTRY_URL + '/' + encodeURIComponent(packageName);
+    meta = await fetchWithRetry(registryUrl);
+  }
   if (!meta) return null;
 
   const createdAt = meta.time?.created || null;
