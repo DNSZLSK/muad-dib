@@ -6,10 +6,37 @@ const MAX_RESPONSE_SIZE = 50 * 1024 * 1024; // 50MB (some packages have lots of 
 
 // Metadata cache: avoids duplicate HTTP requests when multiple temporal modules
 // fetch the same package metadata within a short window (monitor pipeline).
-const _metadataCache = new Map(); // packageName → { data, fetchedAt }
+// Entries with error=true are negative cache (shorter TTL) to avoid retry storms.
+const _metadataCache = new Map(); // packageName → { data, fetchedAt, error? }
 const _inflightRequests = new Map(); // packageName → Promise
 const METADATA_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const NEGATIVE_CACHE_TTL = 60 * 1000; // 60 seconds for failed fetches
 const METADATA_CACHE_MAX = 200;
+
+// HTTP semaphore: limits concurrent requests to npm registry to prevent throttling.
+// With 16 monitor workers × 7 requests/package, uncapped concurrency hits 112 simultaneous
+// requests — well above npm's implicit rate limit. Cap at 10 to stay under the threshold.
+const HTTP_SEMAPHORE_MAX = 10;
+const _httpSemaphore = { active: 0, queue: [] };
+
+function _acquireHttpSlot() {
+  if (_httpSemaphore.active < HTTP_SEMAPHORE_MAX) {
+    _httpSemaphore.active++;
+    return Promise.resolve();
+  }
+  return new Promise(resolve => {
+    _httpSemaphore.queue.push(resolve);
+  });
+}
+
+function _releaseHttpSlot() {
+  if (_httpSemaphore.queue.length > 0) {
+    const next = _httpSemaphore.queue.shift();
+    next(); // Transfers the slot to the next waiter (active count stays the same)
+  } else {
+    _httpSemaphore.active--;
+  }
+}
 
 const LIFECYCLE_SCRIPTS = [
   'preinstall',
@@ -24,9 +51,30 @@ const LIFECYCLE_SCRIPTS = [
 
 /**
  * Raw HTTP fetch — always hits the npm registry. Use fetchPackageMetadata() instead,
- * which adds caching and inflight dedup.
+ * which adds caching, inflight dedup, and semaphore.
+ * Acquires an HTTP semaphore slot before making the request.
  */
-function _fetchPackageMetadataImpl(packageName) {
+async function _fetchPackageMetadataImpl(packageName) {
+  await _acquireHttpSlot();
+  try {
+    return await _fetchPackageMetadataHttp(packageName);
+  } catch (err) {
+    // Negative cache: store failure for 60s to prevent retry storms
+    if (_metadataCache.size >= METADATA_CACHE_MAX) {
+      const oldestKey = _metadataCache.keys().next().value;
+      _metadataCache.delete(oldestKey);
+    }
+    _metadataCache.set(packageName, { data: null, error: true, fetchedAt: Date.now() });
+    throw err;
+  } finally {
+    _releaseHttpSlot();
+  }
+}
+
+/**
+ * Low-level HTTP request to npm registry. No caching, no semaphore.
+ */
+function _fetchPackageMetadataHttp(packageName) {
   const encodedName = encodeURIComponent(packageName).replace('%40', '@');
   const url = `${REGISTRY_URL}/${encodedName}`;
   const urlObj = new URL(url);
@@ -103,16 +151,23 @@ function _fetchPackageMetadataImpl(packageName) {
 }
 
 /**
- * Fetch full package metadata from the npm registry with caching and inflight dedup.
- * Multiple callers requesting the same package within 5 minutes share one HTTP request.
+ * Fetch full package metadata from the npm registry with caching, inflight dedup,
+ * negative cache, and HTTP semaphore. Multiple callers requesting the same package
+ * within 5 minutes share one HTTP request. Failed fetches are cached for 60s.
  * @param {string} packageName - npm package name (scoped or unscoped)
  * @returns {Promise<object>} Full registry metadata (versions, time, maintainers, etc.)
  */
 function fetchPackageMetadata(packageName) {
-  // Check cache first (TTL-based)
+  // Check cache first (TTL-based, positive + negative)
   const cached = _metadataCache.get(packageName);
-  if (cached && (Date.now() - cached.fetchedAt) < METADATA_CACHE_TTL) {
-    return Promise.resolve(cached.data);
+  if (cached) {
+    const ttl = cached.error ? NEGATIVE_CACHE_TTL : METADATA_CACHE_TTL;
+    if ((Date.now() - cached.fetchedAt) < ttl) {
+      if (cached.error) {
+        return Promise.reject(new Error(`Negative cache hit for ${packageName} (failed ${Math.round((Date.now() - cached.fetchedAt) / 1000)}s ago)`));
+      }
+      return Promise.resolve(cached.data);
+    }
   }
 
   // Dedup inflight requests — if the same package is already being fetched, reuse that Promise
@@ -128,11 +183,13 @@ function fetchPackageMetadata(packageName) {
 }
 
 /**
- * Clear the metadata cache. Exported for tests and monitor reset.
+ * Clear the metadata cache and reset semaphore. Exported for tests and monitor reset.
  */
 function clearMetadataCache() {
   _metadataCache.clear();
   _inflightRequests.clear();
+  _httpSemaphore.active = 0;
+  _httpSemaphore.queue.length = 0;
 }
 
 /**
@@ -308,6 +365,9 @@ module.exports = {
   // Exposed for tests only
   _metadataCache,
   _inflightRequests,
+  _httpSemaphore,
   METADATA_CACHE_TTL,
-  METADATA_CACHE_MAX
+  METADATA_CACHE_MAX,
+  NEGATIVE_CACHE_TTL,
+  HTTP_SEMAPHORE_MAX
 };

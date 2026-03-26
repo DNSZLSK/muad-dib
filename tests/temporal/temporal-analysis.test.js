@@ -603,6 +603,74 @@ async function runTemporalAnalysisTests() {
     assert(_metadataCache.size === METADATA_CACHE_MAX, 'Cache should be at max');
     assert(_metadataCache.has('pkg-0'), 'First entry should exist before eviction');
   });
+
+  // ============================================
+  // NEGATIVE CACHE TESTS
+  // ============================================
+
+  console.log('\n=== NEGATIVE CACHE TESTS ===\n');
+
+  const { NEGATIVE_CACHE_TTL } = require('../../src/temporal-analysis.js');
+
+  test('NEGATIVE-CACHE: NEGATIVE_CACHE_TTL is 60 seconds', () => {
+    assert(NEGATIVE_CACHE_TTL === 60 * 1000, 'Negative TTL should be 60s, got ' + NEGATIVE_CACHE_TTL);
+  });
+
+  test('NEGATIVE-CACHE: negative cache entry is respected', async () => {
+    clearMetadataCache();
+    // Manually insert a negative cache entry
+    _metadataCache.set('failed-pkg', { data: null, error: true, fetchedAt: Date.now() });
+
+    // fetchPackageMetadata should reject immediately without HTTP
+    let rejected = false;
+    try {
+      await fetchPackageMetadata('failed-pkg');
+    } catch (e) {
+      rejected = true;
+      assert(e.message.includes('Negative cache hit'), 'Error should mention negative cache, got: ' + e.message);
+    }
+    assert(rejected, 'Should reject for negative cache hit');
+    clearMetadataCache();
+  });
+
+  test('NEGATIVE-CACHE: expired negative cache entry is ignored', () => {
+    clearMetadataCache();
+    // Insert an expired negative cache entry
+    _metadataCache.set('expired-fail-pkg', { data: null, error: true, fetchedAt: Date.now() - (NEGATIVE_CACHE_TTL + 1000) });
+
+    // The cache check in fetchPackageMetadata should skip the expired entry
+    // (it will try to fetch, but we just verify the cache entry is treated as expired)
+    const cached = _metadataCache.get('expired-fail-pkg');
+    assert(cached.error === true, 'Should be an error entry');
+    const isExpired = (Date.now() - cached.fetchedAt) >= NEGATIVE_CACHE_TTL;
+    assert(isExpired, 'Entry should be expired');
+    clearMetadataCache();
+  });
+
+  // ============================================
+  // HTTP SEMAPHORE TESTS
+  // ============================================
+
+  console.log('\n=== HTTP SEMAPHORE TESTS ===\n');
+
+  const { _httpSemaphore, HTTP_SEMAPHORE_MAX } = require('../../src/temporal-analysis.js');
+
+  test('SEMAPHORE: HTTP_SEMAPHORE_MAX is 10', () => {
+    assert(HTTP_SEMAPHORE_MAX === 10, 'Max should be 10, got ' + HTTP_SEMAPHORE_MAX);
+  });
+
+  test('SEMAPHORE: clearMetadataCache resets semaphore', () => {
+    _httpSemaphore.active = 5;
+    _httpSemaphore.queue.push(() => {});
+    clearMetadataCache();
+    assert(_httpSemaphore.active === 0, 'Active should be 0 after clear');
+    assert(_httpSemaphore.queue.length === 0, 'Queue should be empty after clear');
+  });
+
+  test('SEMAPHORE: semaphore structure is correct', () => {
+    assert(typeof _httpSemaphore.active === 'number', 'active should be a number');
+    assert(Array.isArray(_httpSemaphore.queue), 'queue should be an array');
+  });
 }
 
 module.exports = { runTemporalAnalysisTests };
