@@ -45,7 +45,7 @@ async function runMonitorTests() {
     loadDailyStats, saveDailyStats, resetDailyStats, maybePersistDailyStats,
     isSafeLifecycleScript,
     getWeeklyDownloads, hasTyposquat, isSuspectClassification, formatFindings,
-    TIER1_TYPES, TIER2_ACTIVE_TYPES, TIER3_PASSIVE_TYPES,
+    TIER1_TYPES, TIER2_ACTIVE_TYPES, TIER3_PASSIVE_TYPES, LIFECYCLE_INTENT_TYPES,
     POPULAR_THRESHOLD, downloadsCache, DOWNLOADS_CACHE_TTL,
     ALERTS_LOG_DIR, DAILY_REPORTS_LOG_DIR, resolveWritableDir,
     atomicWriteFileSync,
@@ -5372,13 +5372,91 @@ async function runMonitorTests() {
 
   // --- Tier 1a: lifecycle scripts, TIER1_TYPES, HC malice types (mandatory sandbox) ---
 
-  test('isSuspectClassification T1a: lifecycle_script (MEDIUM) → tier 1a', () => {
+  test('isSuspectClassification: lifecycle_script alone (MEDIUM) → not suspect (no intent signal)', () => {
     const result = {
       threats: [{ type: 'lifecycle_script', severity: 'MEDIUM' }],
       summary: { critical: 0, high: 0, medium: 1, low: 0 }
     };
     const r = isSuspectClassification(result);
-    assert(r.suspect === true && r.tier === '1a', 'lifecycle_script should be T1a, got tier=' + r.tier);
+    assert(r.suspect === false && r.tier === null, 'lifecycle_script alone should not be suspect, got tier=' + r.tier);
+  });
+
+  test('isSuspectClassification T1a: lifecycle_script + lifecycle_dataflow → tier 1a', () => {
+    const result = {
+      threats: [
+        { type: 'lifecycle_script', severity: 'MEDIUM' },
+        { type: 'lifecycle_dataflow', severity: 'HIGH' }
+      ],
+      summary: { critical: 0, high: 1, medium: 1, low: 0 }
+    };
+    const r = isSuspectClassification(result);
+    assert(r.suspect === true && r.tier === '1a', 'lifecycle + lifecycle_dataflow should be T1a, got tier=' + r.tier);
+  });
+
+  test('isSuspectClassification T1a: lifecycle_script + lifecycle_inline_exec → tier 1a', () => {
+    const result = {
+      threats: [
+        { type: 'lifecycle_script', severity: 'MEDIUM' },
+        { type: 'lifecycle_inline_exec', severity: 'CRITICAL' }
+      ],
+      summary: { critical: 1, high: 0, medium: 1, low: 0 }
+    };
+    const r = isSuspectClassification(result);
+    assert(r.suspect === true && r.tier === '1a', 'lifecycle + lifecycle_inline_exec should be T1a, got tier=' + r.tier);
+  });
+
+  test('isSuspectClassification T1a: lifecycle_script + bun_runtime_evasion → tier 1a', () => {
+    const result = {
+      threats: [
+        { type: 'lifecycle_script', severity: 'MEDIUM' },
+        { type: 'bun_runtime_evasion', severity: 'HIGH' }
+      ],
+      summary: { critical: 0, high: 1, medium: 1, low: 0 }
+    };
+    const r = isSuspectClassification(result);
+    assert(r.suspect === true && r.tier === '1a', 'lifecycle + bun_runtime_evasion should be T1a, got tier=' + r.tier);
+  });
+
+  test('isSuspectClassification T1b: lifecycle_script + HIGH finding (no HC/TIER1/intent) → tier 1b', () => {
+    const result = {
+      threats: [
+        { type: 'lifecycle_script', severity: 'MEDIUM' },
+        { type: 'dynamic_import', severity: 'HIGH' }
+      ],
+      summary: { critical: 0, high: 1, medium: 1, low: 0 }
+    };
+    const r = isSuspectClassification(result);
+    assert(r.suspect === true && r.tier === '1b', 'lifecycle + HIGH non-HC should be T1b, got tier=' + r.tier);
+  });
+
+  test('isSuspectClassification: staged_binary_payload (LOW) → not T1a (severity filter)', () => {
+    const result = {
+      threats: [{ type: 'staged_binary_payload', severity: 'LOW' }],
+      summary: { critical: 0, high: 0, medium: 0, low: 1 }
+    };
+    const r = isSuspectClassification(result);
+    assert(r.tier !== '1a', 'staged_binary_payload(LOW) should not be T1a, got tier=' + r.tier);
+  });
+
+  test('isSuspectClassification T1a: staged_binary_payload (HIGH) → tier 1a', () => {
+    const result = {
+      threats: [{ type: 'staged_binary_payload', severity: 'HIGH' }],
+      summary: { critical: 0, high: 1, medium: 0, low: 0 }
+    };
+    const r = isSuspectClassification(result);
+    assert(r.suspect === true && r.tier === '1a', 'staged_binary_payload(HIGH) should be T1a, got tier=' + r.tier);
+  });
+
+  test('isSuspectClassification: LIFECYCLE_INTENT_TYPES contains expected types', () => {
+    assert(LIFECYCLE_INTENT_TYPES.has('lifecycle_dataflow'), 'lifecycle_dataflow in LIFECYCLE_INTENT_TYPES');
+    assert(LIFECYCLE_INTENT_TYPES.has('lifecycle_dangerous_exec'), 'lifecycle_dangerous_exec in LIFECYCLE_INTENT_TYPES');
+    assert(LIFECYCLE_INTENT_TYPES.has('lifecycle_inline_exec'), 'lifecycle_inline_exec in LIFECYCLE_INTENT_TYPES');
+    assert(LIFECYCLE_INTENT_TYPES.has('lifecycle_remote_require'), 'lifecycle_remote_require in LIFECYCLE_INTENT_TYPES');
+    assert(LIFECYCLE_INTENT_TYPES.has('lifecycle_hidden_payload'), 'lifecycle_hidden_payload in LIFECYCLE_INTENT_TYPES');
+    assert(LIFECYCLE_INTENT_TYPES.has('obfuscated_lifecycle_env'), 'obfuscated_lifecycle_env in LIFECYCLE_INTENT_TYPES');
+    assert(LIFECYCLE_INTENT_TYPES.has('bun_runtime_evasion'), 'bun_runtime_evasion in LIFECYCLE_INTENT_TYPES');
+    assert(LIFECYCLE_INTENT_TYPES.has('lifecycle_shell_pipe'), 'lifecycle_shell_pipe in LIFECYCLE_INTENT_TYPES');
+    assert(LIFECYCLE_INTENT_TYPES.size === 8, 'LIFECYCLE_INTENT_TYPES should have 8 entries, got ' + LIFECYCLE_INTENT_TYPES.size);
   });
 
   test('isSuspectClassification T1a: sandbox_evasion type → tier 1a', () => {

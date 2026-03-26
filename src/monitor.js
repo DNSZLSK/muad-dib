@@ -731,9 +731,24 @@ function hasTyposquat(result) {
   return result.threats.some(t => t.type === 'typosquat_detected' || t.type === 'pypi_typosquat_detected');
 }
 
-function hasLifecycleScript(result) {
+// Lifecycle compound types that indicate real malicious intent beyond a simple postinstall
+const LIFECYCLE_INTENT_TYPES = new Set([
+  'lifecycle_dataflow',           // lifecycle + suspicious dataflow
+  'lifecycle_dangerous_exec',     // lifecycle + dangerous shell
+  'lifecycle_inline_exec',        // lifecycle + node -e
+  'lifecycle_remote_require',     // lifecycle + remote code load
+  'lifecycle_hidden_payload',     // lifecycle targeting node_modules/
+  'obfuscated_lifecycle_env',     // lifecycle + obfuscation + env access
+  'bun_runtime_evasion',          // Bun runtime in lifecycle (sandbox evasion)
+  'lifecycle_shell_pipe',         // curl|sh in preinstall (also HC, but belt+suspenders)
+]);
+
+function hasLifecycleWithIntent(result) {
   if (!result || !result.threats) return false;
-  return result.threats.some(t => t.type === 'lifecycle_script');
+  const hasLifecycle = result.threats.some(t => t.type === 'lifecycle_script');
+  if (!hasLifecycle) return false;
+  // lifecycle_script + any lifecycle compound or HC type → T1a justified
+  return result.threats.some(t => LIFECYCLE_INTENT_TYPES.has(t.type));
 }
 
 // --- Suspect tier constants ---
@@ -761,7 +776,7 @@ const TIER3_PASSIVE_TYPES = new Set([
  * Classify a scan result into suspect tiers.
  * @param {Object} result - scan result with threats and summary
  * @returns {{ suspect: boolean, tier: '1a'|'1b'|2|3|null }}
- *   - tier '1a': mandatory sandbox (HC malice types, TIER1_TYPES, lifecycle scripts)
+ *   - tier '1a': mandatory sandbox (HC malice types, TIER1_TYPES non-LOW, lifecycle + intent compound)
  *   - tier '1b': conditional sandbox (HIGH/CRITICAL severity without HC type — bundler FP zone)
  *   - tier 2: sandbox si queue < 50 (2+ distinct types with active signal)
  *   - tier 3: logged only, no sandbox, no stats.suspect (passive-only signals)
@@ -772,15 +787,15 @@ function isSuspectClassification(result) {
     return { suspect: false, tier: null };
   }
 
-  // Tier 1a: high-confidence malice types, TIER1_TYPES, or lifecycle scripts
+  // Tier 1a: high-confidence malice types, TIER1_TYPES (non-LOW), or lifecycle + intent compound
   // These are quasi-never legitimate in benign packages → mandatory sandbox
   if (hasHighConfidenceThreat(result)) {
     return { suspect: true, tier: '1a' };
   }
-  if (result.threats.some(t => TIER1_TYPES.has(t.type))) {
+  if (result.threats.some(t => TIER1_TYPES.has(t.type) && t.severity !== 'LOW')) {
     return { suspect: true, tier: '1a' };
   }
-  if (hasLifecycleScript(result)) {
+  if (hasLifecycleWithIntent(result)) {
     return { suspect: true, tier: '1a' };
   }
 
@@ -2457,7 +2472,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta) {
         stats.suspect++;
 
         // Sandbox decision based on tier
-        // T1a: mandatory sandbox (high-confidence malice types, TIER1_TYPES, lifecycle scripts)
+        // T1a: mandatory sandbox (HC malice types, TIER1_TYPES non-LOW, lifecycle + intent compound)
         // T1b: conditional sandbox (HIGH/CRITICAL without HC type — bundler FP zone)
         //       → sandbox only if score >= 25 (significant risk) or queue pressure is low
         // T2: sandbox if queue < 50 (as before)
@@ -3919,6 +3934,7 @@ module.exports = {
   TIER1_TYPES,
   TIER2_ACTIVE_TYPES,
   TIER3_PASSIVE_TYPES,
+  LIFECYCLE_INTENT_TYPES,
   formatFindings,
   IOC_MATCH_TYPES,
   getWeeklyDownloads,
