@@ -2,8 +2,10 @@ const fs = require('fs');
 const path = require('path');
 const { findFiles, forEachSafeFile } = require('../utils.js');
 
-// node_modules NOT excluded: detect obfuscated code in dependencies
-const OBF_EXCLUDED_DIRS = ['.git', '.muaddib-cache'];
+// node_modules NOT excluded: detect obfuscated code in dependencies.
+// dist/build/out/output excluded: bundled output is always flagged as isPackageOutput (LOW)
+// and costs significant processing time on large SDKs.
+const OBF_EXCLUDED_DIRS = ['.git', '.muaddib-cache', 'dist', 'build', 'out', 'output'];
 
 function detectObfuscation(targetPath) {
   const threats = [];

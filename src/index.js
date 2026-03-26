@@ -27,7 +27,7 @@ const { buildModuleGraph, annotateTaintedExports, detectCrossFileFlows, annotate
 const { computeReachableFiles } = require('./scanner/reachability.js');
 const { runTemporalAnalyses } = require('./temporal-runner.js');
 const { formatOutput } = require('./output-formatter.js');
-const { setExtraExcludes, getExtraExcludes, Spinner, listInstalledPackages, clearFileListCache, debugLog } = require('./utils.js');
+const { setExtraExcludes, getExtraExcludes, Spinner, listInstalledPackages, clearFileListCache, wasFilesCapped, debugLog } = require('./utils.js');
 const { SEVERITY_WEIGHTS, RISK_THRESHOLDS, MAX_RISK_SCORE, isPackageLevelThreat, computeGroupScore, applyFPReductions, applyCompoundBoosts, calculateRiskScore, applyConfigOverrides, resetConfigOverrides, getSeverityWeights } = require('./scoring.js');
 const { resolveConfig } = require('./config.js');
 const { buildIntentPairs } = require('./intent-graph.js');
@@ -479,6 +479,11 @@ async function run(targetPath, options = {}) {
     entropyThreats,
     aiConfigThreats
   ] = scanResult;
+
+  // Emit warning if file count cap was hit
+  if (wasFilesCapped()) {
+    warnings.push('File count cap reached (500 files) — some files were not scanned. Root-level files were prioritized.');
+  }
 
   // Stop spinner now that scanning is complete
   if (spinner) {

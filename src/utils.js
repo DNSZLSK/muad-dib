@@ -1,12 +1,14 @@
 const fs = require('fs');
 const path = require('path');
-const { MAX_FILE_SIZE, getMaxFileSize } = require('./shared/constants.js');
+const { MAX_FILE_SIZE, getMaxFileSize, clearASTCache } = require('./shared/constants.js');
 
 /**
  * Directories excluded from scanning.
- * Only skip dependency/VCS/cache dirs - never skip user source code.
+ * Skips dependency/VCS/cache dirs and bundled output (dist/build/out).
+ * Bundled output is minified, huge, and produces FPs without security value.
+ * Obfuscation scanner uses its own OBF_EXCLUDED_DIRS to intentionally scan these.
  */
-const EXCLUDED_DIRS = ['node_modules', '.git', '.muaddib-cache'];
+const EXCLUDED_DIRS = ['node_modules', '.git', '.muaddib-cache', 'dist', 'build', 'out', 'output'];
 
 /**
  * Extra directories to exclude (set at runtime via --exclude flag).
@@ -20,6 +22,14 @@ let _scanRoot = '';
  * Cleared between scans via clearFileListCache().
  */
 const _fileListCache = new Map();
+let _filesCapped = false;
+
+/**
+ * File content cache — read each file once, reused across all scanners in a single scan.
+ * Key = absolute file path, Value = file content string.
+ * Cleared between scans via clearFileListCache().
+ */
+const _fileContentCache = new Map();
 
 function setExtraExcludes(dirs, scanRoot) {
   _extraExcludedDirs = Array.isArray(dirs) ? dirs : [];
@@ -60,12 +70,20 @@ function isDevFile(relativePath) {
 }
 
 /**
+ * Maximum number of files to scan per package.
+ * Malware packages rarely have >50 JS files; 500 is a generous safety margin.
+ * Prevents large SDKs (1000+ files) from monopolizing scan time.
+ */
+const MAX_SCAN_FILES = 500;
+
+/**
  * Generic recursive file finder with symlink protection and depth limit.
  * @param {string} dir - Starting directory
  * @param {object} [options] - Options
  * @param {string[]} [options.extensions=['.js']] - File extensions to match
  * @param {string[]} [options.excludedDirs=EXCLUDED_DIRS] - Dirs to skip
  * @param {number} [options.maxDepth=100] - Max recursion depth
+ * @param {number} [options.maxFiles=MAX_SCAN_FILES] - Max files to return (0=unlimited)
  * @param {string[]} [options.results=[]] - Accumulator (internal)
  * @param {Set} [options.visitedInodes=new Set()] - Symlink loop detection (note: inode tracking
  *   is unreliable on Windows where stat.ino may be 0; maxDepth serves as fallback protection)
@@ -77,6 +95,7 @@ function findFiles(dir, options = {}) {
     extensions = ['.js'],
     excludedDirs = EXCLUDED_DIRS,
     maxDepth = 100,
+    maxFiles = MAX_SCAN_FILES,
     results = [],
     visitedInodes = new Set(),
     visitedPaths = new Set(),
@@ -90,6 +109,21 @@ function findFiles(dir, options = {}) {
     const cached = _fileListCache.get(cacheKey);
     if (cached) return [...cached]; // return copy to prevent mutation
     const result = _findFilesImpl(dir, { extensions, excludedDirs, maxDepth, results, visitedInodes, visitedPaths, depth });
+
+    // Apply file count cap: sort by depth (shallowest first) so root-level files
+    // (most likely to contain malicious entry points) are prioritized.
+    if (maxFiles > 0 && result.length > maxFiles) {
+      result.sort((a, b) => {
+        const depthA = a.split(path.sep).length;
+        const depthB = b.split(path.sep).length;
+        return depthA - depthB;
+      });
+      const capped = result.slice(0, maxFiles);
+      _fileListCache.set(cacheKey, [...capped]);
+      _filesCapped = true;
+      return capped;
+    }
+
     _fileListCache.set(cacheKey, [...result]);
     return result;
   }
@@ -188,6 +222,13 @@ function findJsFiles(dir, results = []) {
 
 function clearFileListCache() {
   _fileListCache.clear();
+  _fileContentCache.clear();
+  clearASTCache();
+  _filesCapped = false;
+}
+
+function wasFilesCapped() {
+  return _filesCapped;
 }
 
 /**
@@ -278,9 +319,17 @@ class Spinner {
 /**
  * Iterates files with size guard and error handling.
  * Calls callback(file, content) for each readable file under MAX_FILE_SIZE.
+ * File contents are cached in _fileContentCache for reuse across scanners.
  */
 function forEachSafeFile(files, callback) {
   for (const file of files) {
+    // Check content cache first
+    const cached = _fileContentCache.get(file);
+    if (cached !== undefined) {
+      callback(file, cached);
+      continue;
+    }
+
     try {
       const stat = fs.statSync(file);
       if (stat.size > getMaxFileSize()) continue;
@@ -289,6 +338,9 @@ function forEachSafeFile(files, callback) {
     try {
       content = fs.readFileSync(file, 'utf8');
     } catch { continue; }
+
+    // Cache for subsequent scanners
+    _fileContentCache.set(file, content);
     callback(file, content);
   }
 }
@@ -332,11 +384,13 @@ function debugLog(...args) {
 
 module.exports = {
   EXCLUDED_DIRS,
+  MAX_SCAN_FILES,
   DEV_PATTERNS,
   isDevFile,
   findFiles,
   findJsFiles,
   clearFileListCache,
+  wasFilesCapped,
   escapeHtml,
   getCallName,
   Spinner,

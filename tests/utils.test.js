@@ -350,6 +350,138 @@ async function runUtilsTests() {
     forEachSafeFile(['/nonexistent/file.js'], (file, content) => results.push(file));
     assert(results.length === 0, 'Should skip non-existent files');
   });
+
+  // --- P2: EXCLUDED_DIRS includes dist/build/out/output ---
+
+  test('UTILS: EXCLUDED_DIRS includes dist/build/out/output for bundled output', () => {
+    assert(EXCLUDED_DIRS.includes('dist'), 'Should exclude dist/');
+    assert(EXCLUDED_DIRS.includes('build'), 'Should exclude build/');
+    assert(EXCLUDED_DIRS.includes('out'), 'Should exclude out/');
+    assert(EXCLUDED_DIRS.includes('output'), 'Should exclude output/');
+  });
+
+  test('UTILS: findFiles skips dist/ directory', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-utils-'));
+    fs.writeFileSync(path.join(tmp, 'index.js'), 'module.exports = 1;');
+    fs.mkdirSync(path.join(tmp, 'dist'));
+    fs.writeFileSync(path.join(tmp, 'dist', 'bundle.js'), 'var x = 1;');
+    fs.mkdirSync(path.join(tmp, 'build'));
+    fs.writeFileSync(path.join(tmp, 'build', 'output.js'), 'var y = 2;');
+    try {
+      const { clearFileListCache } = require('../src/utils.js');
+      clearFileListCache();
+      const files = findFiles(tmp);
+      assert(files.length === 1, 'Should find only root index.js, got ' + files.length);
+      assert(files[0].endsWith('index.js'), 'Should be index.js');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- P3: File count cap ---
+
+  test('UTILS: findFiles respects maxFiles cap', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-utils-'));
+    // Create 10 JS files
+    for (let i = 0; i < 10; i++) {
+      fs.writeFileSync(path.join(tmp, `file${i}.js`), `const x = ${i};`);
+    }
+    try {
+      const { clearFileListCache } = require('../src/utils.js');
+      clearFileListCache();
+      const files = findFiles(tmp, { maxFiles: 5 });
+      assert(files.length === 5, 'Should cap at 5 files, got ' + files.length);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  test('UTILS: findFiles with maxFiles=0 returns all files (unlimited)', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-utils-'));
+    for (let i = 0; i < 10; i++) {
+      fs.writeFileSync(path.join(tmp, `file${i}.js`), `const x = ${i};`);
+    }
+    try {
+      const { clearFileListCache } = require('../src/utils.js');
+      clearFileListCache();
+      const files = findFiles(tmp, { maxFiles: 0 });
+      assert(files.length === 10, 'maxFiles=0 should be unlimited, got ' + files.length);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  test('UTILS: wasFilesCapped returns true after cap is hit', () => {
+    const { clearFileListCache, wasFilesCapped } = require('../src/utils.js');
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-utils-'));
+    for (let i = 0; i < 10; i++) {
+      fs.writeFileSync(path.join(tmp, `file${i}.js`), `const x = ${i};`);
+    }
+    try {
+      clearFileListCache();
+      assert(!wasFilesCapped(), 'Should not be capped before scan');
+      findFiles(tmp, { maxFiles: 5 });
+      assert(wasFilesCapped(), 'Should be capped after exceeding maxFiles');
+      clearFileListCache();
+      assert(!wasFilesCapped(), 'Should be reset after clearing cache');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- P4: File content cache ---
+
+  test('UTILS: forEachSafeFile caches content across calls', () => {
+    const { forEachSafeFile, clearFileListCache } = require('../src/utils.js');
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-utils-'));
+    const f1 = path.join(tmp, 'cached.js');
+    fs.writeFileSync(f1, 'const original = true;');
+    try {
+      clearFileListCache(); // clear content cache
+      // First call reads from disk
+      const results1 = [];
+      forEachSafeFile([f1], (file, content) => results1.push(content));
+      assert(results1[0].includes('original'), 'First read should get original content');
+
+      // Modify file on disk
+      fs.writeFileSync(f1, 'const modified = true;');
+
+      // Second call should get cached content (not re-read from disk)
+      const results2 = [];
+      forEachSafeFile([f1], (file, content) => results2.push(content));
+      assert(results2[0].includes('original'), 'Second read should get cached content');
+
+      // After clearing cache, should get fresh content
+      clearFileListCache();
+      const results3 = [];
+      forEachSafeFile([f1], (file, content) => results3.push(content));
+      assert(results3[0].includes('modified'), 'After cache clear should get new content');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- P5: AST cache ---
+
+  test('UTILS: safeParse caches AST across calls', () => {
+    const { safeParse, clearASTCache } = require('../src/shared/constants.js');
+    clearASTCache();
+    const code = 'const x = 1;';
+    const ast1 = safeParse(code);
+    const ast2 = safeParse(code);
+    // Same reference means cache hit
+    assert(ast1 === ast2, 'safeParse should return cached AST for identical code');
+  });
+
+  test('UTILS: safeParse cache distinguishes different options', () => {
+    const { safeParse, clearASTCache } = require('../src/shared/constants.js');
+    clearASTCache();
+    const code = 'const x = 1;';
+    const ast1 = safeParse(code);
+    const ast2 = safeParse(code, { ranges: true });
+    assert(ast1 !== ast2, 'Different options should produce different cache entries');
+  });
+
+  test('UTILS: safeParse caches null for unparseable code', () => {
+    const { safeParse, clearASTCache } = require('../src/shared/constants.js');
+    clearASTCache();
+    const badCode = 'function()'; // syntax error in both module and script mode
+    const ast1 = safeParse(badCode);
+    const ast2 = safeParse(badCode);
+    assert(ast1 === null, 'Unparseable code should return null');
+    assert(ast2 === null, 'Cached unparseable code should return null');
+    assert(ast1 === ast2, 'Both should be the same null reference');
+  });
 }
 
 module.exports = { runUtilsTests };
