@@ -75,6 +75,32 @@ function analyzeFile(content, filePath, basePath) {
         file: path.relative(basePath, filePath)
       });
     }
+
+    // Blue Team v8b (A6): Detect Proxy + require('child_process') + exec in files that fail to parse
+    // This covers 'use strict' + with(Proxy) evasion where acorn can't parse the with statement
+    if (/\bnew\s+Proxy\b/.test(content) && /\brequire\s*\(\s*['"]child_process['"]\s*\)/.test(content)) {
+      const hasExecInContent = /\bexec\s*\(/.test(content) || /\bexecSync\s*\(/.test(content) || /\bspawn\s*\(/.test(content);
+      if (hasExecInContent) {
+        threats.push({
+          type: 'dangerous_exec',
+          severity: 'CRITICAL',
+          message: 'Proxy + require(\'child_process\') + exec in unparseable file — scope hijack evasion (regex fallback).',
+          file: path.relative(basePath, filePath)
+        });
+      }
+    }
+
+    // Content-level: require('child_process') + exec/spawn with shell command patterns
+    if (/\brequire\s*\(\s*['"]child_process['"]\s*\)/.test(content) &&
+        /\bcurl\b.*\|\s*(sh|bash)\b/.test(content)) {
+      threats.push({
+        type: 'dangerous_exec',
+        severity: 'CRITICAL',
+        message: 'require(\'child_process\') + curl pipe to shell in unparseable file — remote code execution (regex fallback).',
+        file: path.relative(basePath, filePath)
+      });
+    }
+
     return threats;
   }
 
@@ -183,6 +209,37 @@ function analyzeFile(content, filePath, basePath) {
     hasUncaughtExceptionHandler: false,
     // Audit v3 B2: FinalizationRegistry deferred exec detection
     hasFinalizationRegistry: false,
+    // Blue Team v8: SharedArrayBuffer + Worker IPC detection
+    hasSharedArrayBuffer: false,
+    hasWorkerThread: false,  // set when Worker (worker_threads) usage detected
+    // Blue Team v8: dgram/UDP exfiltration
+    hasDgramImport: /\brequire\s*\(\s*['"](?:node:)?dgram['"]\s*\)/.test(content),
+    hasDgramSend: false,
+    // Blue Team v8: WebSocket C2
+    hasWebSocketNew: false,  // set when new WebSocket() detected
+    // Blue Team v8: crontab/cron write detection
+    hasCrontabWrite: false,
+    // Blue Team v8b: Module internals hijack (Module._resolveFilename, _compile, _extensions)
+    hasModuleInternalsHijack: false,
+    // Blue Team v8b: JSON.parse reviver with __proto__ check
+    hasJsonReviverProto: false,
+    // Blue Team v8b: vm.runInContext/runInNewContext with dynamic code
+    hasVmDynamicExec: false,
+    // Blue Team v8b: binary file read + new Function/eval in same file (stego)
+    hasBinaryFileRead: false,  // set when fs.readFileSync on .png/.jpg/.gif/.bmp/.ico
+    // Blue Team v8b: AsyncLocalStorage usage
+    hasAsyncLocalStorage: /\bAsyncLocalStorage\b/.test(content),
+    // Blue Team v8b: image file reference for stego detection
+    hasImageFileRef: /\.(png|jpg|jpeg|gif|bmp|ico)\b/i.test(content),
+    // Blue Team v8b: net.Socket creation (for WebSocket C2 detection)
+    hasNetSocketCreate: /\bnew\s+net\.Socket\b/.test(content) || /\bnet\.createConnection\b/.test(content),
+    // Blue Team v8b: execSync/exec in callback contexts (set when exec inside .on('message'|'data'))
+    hasCallbackExec: false,
+    // Blue Team v8b (B2): CI environment fingerprinting — count of CI provider env vars referenced
+    ciProviderCount: (() => {
+      const CI_VARS = ['GITHUB_ACTIONS', 'GITLAB_CI', 'CIRCLECI', 'TRAVIS', 'JENKINS_URL', 'BUILDKITE', 'CONTINUOUS_INTEGRATION', 'TEAMCITY_VERSION', 'CODEBUILD_BUILD_ID', 'BITBUCKET_PIPELINE_UUID'];
+      return CI_VARS.filter(v => content.includes(v)).length;
+    })(),
     // Audit v3: source code reference for callback body analysis
     _sourceCode: content
   };

@@ -108,7 +108,11 @@ const PACKAGE_LEVEL_TYPES = new Set([
   'sandbox_canary_exfiltration',
   // Compound scoring rules — package-level co-occurrences
   'lifecycle_typosquat', 'lifecycle_inline_exec', 'lifecycle_remote_require',
-  'lifecycle_dataflow', 'lifecycle_dangerous_exec', 'obfuscated_lifecycle_env'
+  'lifecycle_dataflow', 'lifecycle_dangerous_exec', 'obfuscated_lifecycle_env',
+  // Blue Team v8: package-level boost signals
+  'isolated_suspicious_file', 'deep_suspicious_file',
+  // Blue Team v8b: phantom lifecycle scripts
+  'lifecycle_missing_script'
 ]);
 
 /**
@@ -299,7 +303,8 @@ const REACHABILITY_EXEMPT_TYPES = new Set([
   'typosquat_detected', 'pypi_typosquat_detected',
   'pypi_malicious_package',
   'ai_config_injection', 'ai_config_injection_compound',
-  'detached_credential_exfil' // DPRK/Lazarus: invoked via lifecycle, not require/import
+  'detached_credential_exfil', // DPRK/Lazarus: invoked via lifecycle, not require/import
+  'native_addon_install' // binding.gyp executes during npm install but isn't require()'d
 ]);
 
 // ============================================
@@ -729,6 +734,50 @@ function applyFPReductions(threats, reachableFiles, packageName, packageDeps) {
 }
 
 /**
+ * Blue Team v8: Inject package-level boost threats that detect dissimulation patterns.
+ * Called within calculateRiskScore after file scores are computed.
+ * @param {Array} deduped - deduplicated threat array (mutated in place)
+ * @param {Object} fileScores - map of file → score
+ * @param {Map} fileGroups - map of file → threats array
+ * @param {Array} packageLevelThreats - package-level threats
+ */
+function applyPackageLevelBoosts(deduped, fileScores, fileGroups, packageLevelThreats) {
+  const fileNames = Object.keys(fileScores);
+  const totalFiles = fileNames.length;
+
+  // 1. isolated_suspicious_file: exactly 1 file has score > 0, 10+ files have score 0
+  if (totalFiles >= 10) {
+    const filesWithScore = fileNames.filter(f => fileScores[f] > 0);
+    const filesWithZero = totalFiles - filesWithScore.length;
+    if (filesWithScore.length === 1 && filesWithZero >= 10) {
+      deduped.push({
+        type: 'isolated_suspicious_file',
+        severity: 'MEDIUM',
+        message: `Single suspicious file among ${totalFiles} files — potential dissimulation pattern (malicious code hidden in clean package).`,
+        file: filesWithScore[0],
+        boostSignal: true
+      });
+    }
+  }
+
+  // 2. deep_suspicious_file: finding in a file at depth > 3 from package root
+  for (const [file, threats] of fileGroups) {
+    if (!file || file === '(unknown)') continue;
+    const segments = file.replace(/\\/g, '/').split('/').filter(Boolean);
+    if (segments.length > 3 && threats.some(t => t.severity !== 'LOW')) {
+      deduped.push({
+        type: 'deep_suspicious_file',
+        severity: 'LOW',
+        message: `Suspicious pattern found in deeply nested file (depth ${segments.length}): ${file} — potential hiding technique.`,
+        file: file,
+        boostSignal: true
+      });
+      break; // Only emit once per package
+    }
+  }
+}
+
+/**
  * Calculate per-file max risk score from deduplicated threats.
  * Formula: riskScore = min(100, max(file_scores + intent_bonus) + package_level_score)
  * @param {Array} deduped - deduplicated threat array
@@ -795,6 +844,27 @@ function calculateRiskScore(deduped, intentResult) {
     crossFileBonus = Math.min(crossFileBonus, 25);
   }
 
+  // 5b. Blue Team v8: Package-level boost signals — detect dissimulation patterns
+  applyPackageLevelBoosts(deduped, fileScores, fileGroups, packageLevelThreats);
+  // Recompute packageScore after boosts may have added new package-level threats
+  const boostPackageThreats = deduped.filter(t => isPackageLevelThreat(t) && t.boostSignal);
+  if (boostPackageThreats.length > 0) {
+    packageScore = computeGroupScore([...packageLevelThreats, ...boostPackageThreats]);
+    if (packageScore >= 25 && [...packageLevelThreats, ...boostPackageThreats].some(t => t.severity === 'CRITICAL')) {
+      packageScore = Math.max(packageScore, 50);
+    }
+  }
+
+  // 5c. Blue Team v8: lifecycle_plus_finding boost — lifecycle + any finding = +10 package score
+  const hasActiveLifecycleForBoost = packageLevelThreats.some(t =>
+    t.type === 'lifecycle_script' && t.severity !== 'LOW'
+  );
+  const hasAnyFileFinding = fileLevelThreats.some(t => t.severity !== 'LOW');
+  let lifecycleBoost = 0;
+  if (hasActiveLifecycleForBoost && hasAnyFileFinding) {
+    lifecycleBoost = 10;
+  }
+
   // 6. Intent coherence bonus: additive score from source→sink pairs
   let intentBonus = 0;
   if (intentResult && intentResult.intentScore > 0) {
@@ -802,8 +872,8 @@ function calculateRiskScore(deduped, intentResult) {
     intentBonus = Math.min(intentResult.intentScore, 30);
   }
 
-  // 7. Final score = max file score + cross-file bonus + intent bonus + package-level score, capped at 100
-  const riskScore = Math.min(MAX_RISK_SCORE, maxFileScore + crossFileBonus + intentBonus + packageScore);
+  // 7. Final score = max file score + cross-file bonus + intent bonus + package-level score + lifecycle boost, capped at 100
+  const riskScore = Math.min(MAX_RISK_SCORE, maxFileScore + crossFileBonus + intentBonus + packageScore + lifecycleBoost);
 
   // 8. Old global score for comparison (sum of ALL findings)
   const globalRiskScore = computeGroupScore(deduped);

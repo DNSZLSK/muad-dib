@@ -1948,6 +1948,212 @@ const RULES = {
     ],
     mitre: 'T1059'
   },
+
+  // Blue Team v8 — New detections (AST-070 to AST-077, SHELL-023, SCORE-001/002)
+  shared_memory_ipc: {
+    id: 'MUADDIB-AST-070',
+    name: 'Shared Memory IPC',
+    severity: 'MEDIUM',
+    confidence: 'medium',
+    description: 'SharedArrayBuffer + Worker Thread detectes — canal IPC memoire partagee qui contourne la surveillance des messages inter-threads.',
+    references: [
+      'https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SharedArrayBuffer',
+      'https://attack.mitre.org/techniques/T1559/'
+    ],
+    mitre: 'T1559'
+  },
+  websocket_c2: {
+    id: 'MUADDIB-AST-071',
+    name: 'WebSocket C2 Channel',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'Connexion WebSocket vers un domaine suspect ou avec execution dynamique — canal C2 bidirectionnel persistant.',
+    references: [
+      'https://attack.mitre.org/techniques/T1071.001/',
+      'https://owasp.org/www-community/attacks/WebSocket_Hijacking'
+    ],
+    mitre: 'T1071.001'
+  },
+  udp_exfiltration: {
+    id: 'MUADDIB-AST-072',
+    name: 'UDP Data Exfiltration',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'Module dgram (UDP) avec envoi de donnees — exfiltration via protocole UDP qui contourne les firewalls HTTP.',
+    references: [
+      'https://nodejs.org/api/dgram.html',
+      'https://attack.mitre.org/techniques/T1048.003/'
+    ],
+    mitre: 'T1048.003'
+  },
+  native_addon_install: {
+    id: 'MUADDIB-AST-073',
+    name: 'Native Addon Installation',
+    severity: 'HIGH',
+    confidence: 'medium',
+    description: 'binding.gyp present avec script lifecycle non-standard — compilation native potentiellement malveillante a l\'installation.',
+    references: [
+      'https://nodejs.org/api/addons.html',
+      'https://attack.mitre.org/techniques/T1195.002/'
+    ],
+    mitre: 'T1195.002'
+  },
+  string_mutation_obfuscation: {
+    id: 'MUADDIB-AST-074',
+    name: 'String Mutation Obfuscation',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'Chaine de 3+ appels .replace() pour reconstruire des noms d\'API dangereuses — technique leet-speak/substitution pour contourner la detection statique.',
+    references: [
+      'https://attack.mitre.org/techniques/T1027/',
+      'https://attack.mitre.org/techniques/T1140/'
+    ],
+    mitre: 'T1027'
+  },
+  crontab_systemd_write: {
+    id: 'MUADDIB-SHELL-023',
+    name: 'Crontab/Cron Write',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Ecriture dans les fichiers cron (/etc/cron*, crontab, /var/spool/cron) — persistence via tache planifiee.',
+    references: [
+      'https://attack.mitre.org/techniques/T1053.003/',
+      'https://attack.mitre.org/techniques/T1543/'
+    ],
+    mitre: 'T1053.003'
+  },
+  isolated_suspicious_file: {
+    id: 'MUADDIB-SCORE-001',
+    name: 'Isolated Suspicious File',
+    severity: 'MEDIUM',
+    confidence: 'medium',
+    description: 'Un seul fichier suspect parmi 10+ fichiers propres — pattern de dissimulation ou le code malveillant est cache dans un package legitime.',
+    references: [
+      'https://attack.mitre.org/techniques/T1036/'
+    ],
+    mitre: 'T1036'
+  },
+  deep_suspicious_file: {
+    id: 'MUADDIB-SCORE-002',
+    name: 'Deeply Nested Suspicious File',
+    severity: 'LOW',
+    confidence: 'low',
+    description: 'Pattern suspect detecte dans un fichier profondement imbrique (profondeur > 3) — technique de dissimulation dans l\'arborescence du package.',
+    references: [
+      'https://attack.mitre.org/techniques/T1036.005/'
+    ],
+    mitre: 'T1036.005'
+  },
+
+  // Blue Team v8b — New detections (AST-075 to AST-082, PKG-017)
+  module_internals_hijack: {
+    id: 'MUADDIB-AST-075',
+    name: 'Module Internals Hijack',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Assignation a Module._resolveFilename, _compile ou _extensions — detournement des mecanismes internes du systeme de modules Node.js. Tous les require() subsequents peuvent etre interceptes.',
+    references: [
+      'https://nodejs.org/api/modules.html',
+      'https://attack.mitre.org/techniques/T1574.006/'
+    ],
+    mitre: 'T1574.006'
+  },
+  json_reviver_pollution: {
+    id: 'MUADDIB-AST-076',
+    name: 'JSON Reviver Prototype Pollution',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'JSON.parse avec fonction reviver accedant a __proto__ ou prototype — pollution de prototype via donnees JSON non fiables.',
+    references: [
+      'https://portswigger.net/web-security/prototype-pollution',
+      'https://attack.mitre.org/techniques/T1059.007/'
+    ],
+    mitre: 'T1059.007'
+  },
+  vm_dynamic_code: {
+    id: 'MUADDIB-AST-077',
+    name: 'VM Dynamic Code Execution',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'vm.runInContext/runInNewContext/compileFunction avec code construit dynamiquement — evasion du sandbox via code genere au runtime.',
+    references: [
+      'https://nodejs.org/api/vm.html',
+      'https://attack.mitre.org/techniques/T1059.007/'
+    ],
+    mitre: 'T1059.007'
+  },
+  callback_exec_rce: {
+    id: 'MUADDIB-AST-078',
+    name: 'Callback Remote Code Execution',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'exec/spawn dans un callback .on(\'message\') ou .on(\'data\') avec child_process — execution de commandes a distance depuis un flux reseau.',
+    references: [
+      'https://attack.mitre.org/techniques/T1059/',
+      'https://attack.mitre.org/techniques/T1071/'
+    ],
+    mitre: 'T1059'
+  },
+  stego_binary_exec: {
+    id: 'MUADDIB-AST-079',
+    name: 'Steganographic Binary Execution',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Lecture de fichier binaire/image (PNG, JPG) + execution dynamique (eval/Function) — extraction et execution de payload steganographique.',
+    references: [
+      'https://attack.mitre.org/techniques/T1027.003/',
+      'https://attack.mitre.org/techniques/T1140/'
+    ],
+    mitre: 'T1027.003'
+  },
+  asynclocal_context_exec: {
+    id: 'MUADDIB-AST-080',
+    name: 'AsyncLocalStorage Context Execution',
+    severity: 'HIGH',
+    confidence: 'medium',
+    description: 'AsyncLocalStorage + execution dynamique — code malveillant cache dans un contexte asynchrone, echappe a l\'analyse de pile d\'appels synchrone.',
+    references: [
+      'https://nodejs.org/api/async_context.html',
+      'https://attack.mitre.org/techniques/T1059.007/'
+    ],
+    mitre: 'T1059.007'
+  },
+  prototype_chain_constructor: {
+    id: 'MUADDIB-AST-081',
+    name: 'Prototype Chain Constructor Access',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Object.getPrototypeOf(variable).constructor extrait dans une variable — traversee de la chaine de prototypes pour atteindre le constructeur Function et executer du code arbitraire.',
+    references: [
+      'https://attack.mitre.org/techniques/T1059.007/',
+      'https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/getPrototypeOf'
+    ],
+    mitre: 'T1059.007'
+  },
+  ci_environment_probe: {
+    id: 'MUADDIB-AST-082',
+    name: 'CI Environment Fingerprinting',
+    severity: 'HIGH',
+    confidence: 'medium',
+    description: 'References a 3+ variables d\'environnement de fournisseurs CI (GITHUB_ACTIONS, GITLAB_CI, etc.) — sondage d\'environnement CI pour activation conditionnelle de payload.',
+    references: [
+      'https://attack.mitre.org/techniques/T1082/',
+      'https://attack.mitre.org/techniques/T1497/'
+    ],
+    mitre: 'T1082'
+  },
+  lifecycle_missing_script: {
+    id: 'MUADDIB-PKG-017',
+    name: 'Phantom Lifecycle Script',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Script lifecycle (preinstall/install) reference un fichier qui n\'existe pas dans le package — script fantome, le payload peut etre injecte au moment de la publication.',
+    references: [
+      'https://attack.mitre.org/techniques/T1195.002/',
+      'https://blog.npmjs.org/post/166316363605/the-lifecycle-script-vulnerability'
+    ],
+    mitre: 'T1195.002'
+  },
 };
 
 function getRule(type) {

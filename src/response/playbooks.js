@@ -740,6 +740,76 @@ const PLAYBOOKS = {
     'CRITIQUE: require("process").mainModule.require() detecte — contournement de la detection ' +
     'process.mainModule.require() via require("process") au lieu de l\'objet global. ' +
     'Aucun package legitime n\'utilise ce pattern. Supprimer immediatement.',
+
+  // Blue Team v8 — New playbook entries
+  shared_memory_ipc:
+    'SharedArrayBuffer + Worker Thread detectes. Canal IPC memoire partagee qui contourne la surveillance. ' +
+    'Verifier si les workers manipulent des donnees sensibles. Isoler si combine avec eval/exec.',
+
+  websocket_c2:
+    'HAUTE: Connexion WebSocket vers domaine suspect ou avec execution dynamique. Canal C2 persistant bidirectionnel. ' +
+    'Analyser l\'URL de connexion. Bloquer les connexions WebSocket sortantes. Verifier les messages echanges.',
+
+  udp_exfiltration:
+    'HAUTE: Socket UDP (dgram) avec envoi de donnees. Exfiltration contournant les firewalls HTTP. ' +
+    'Verifier les destinations IP. Bloquer le trafic UDP sortant non-DNS. Auditer les donnees envoyees.',
+
+  native_addon_install:
+    'HAUTE: binding.gyp avec script lifecycle non-standard. Code natif compile a l\'installation. ' +
+    'Verifier le contenu de binding.gyp et les sources C/C++. Installer avec --ignore-scripts si suspect.',
+
+  string_mutation_obfuscation:
+    'HAUTE: Chaine de .replace() reconstruisant des noms d\'API dangereuses (leet-speak). ' +
+    'Technique d\'evasion par substitution de caracteres. Decoder la chaine finale. Supprimer si malveillant.',
+
+  crontab_systemd_write:
+    'CRITIQUE: Ecriture dans les fichiers cron/crontab. Persistence via tache planifiee. ' +
+    'Verifier /etc/cron*, /var/spool/cron. Supprimer les entrees ajoutees. Auditer crontab -l.',
+
+  isolated_suspicious_file:
+    'Un seul fichier suspect parmi de nombreux fichiers propres. Pattern de dissimulation typique ' +
+    'ou le code malveillant est cache dans un package apparemment legitime. Examiner le fichier suspect en detail.',
+
+  deep_suspicious_file:
+    'Pattern suspect dans un fichier profondement imbrique. Technique pour echapper aux analyses superficielles. ' +
+    'Verifier le contenu du fichier et son role dans l\'arborescence du package.',
+
+  // Blue Team v8b playbooks
+  module_internals_hijack:
+    'CRITIQUE: Assignation a Module._resolveFilename/_compile/_extensions. Detournement du systeme de modules Node.js. ' +
+    'Tous les require() sont interceptes. Supprimer le package immediatement. Auditer tous les modules charges apres installation.',
+
+  json_reviver_pollution:
+    'HAUTE: JSON.parse avec reviver accedant a __proto__/prototype. Pollution de prototype via JSON. ' +
+    'Ne jamais passer de JSON non fiable avec un reviver manipulant __proto__. Verifier les sources de donnees JSON.',
+
+  vm_dynamic_code:
+    'CRITIQUE: vm.runInContext/compileFunction avec code construit dynamiquement. Evasion de sandbox. ' +
+    'Verifier d\'ou provient le code execute. Bloquer l\'acces au module vm. Supprimer si non justifie.',
+
+  callback_exec_rce:
+    'CRITIQUE: exec/spawn dans callback .on(\'message\'|\'data\'). Execution de commandes depuis flux reseau. ' +
+    'Pattern C2: commandes recues par WebSocket/TCP executees via child_process. Supprimer immediatement.',
+
+  stego_binary_exec:
+    'CRITIQUE: Lecture de fichier image/binaire + eval/Function. Payload steganographique. ' +
+    'Verifier le contenu du fichier image. Scanner avec des outils stego. Supprimer le fichier et le code d\'extraction.',
+
+  asynclocal_context_exec:
+    'HAUTE: AsyncLocalStorage + execution dynamique. Code malveillant cache dans un contexte async. ' +
+    'Examiner les callbacks AsyncLocalStorage. Verifier ce qui est stocke et execute dans le store.',
+
+  prototype_chain_constructor:
+    'CRITIQUE: Object.getPrototypeOf(var).constructor stocke dans une variable. Traversee de prototype pour Function. ' +
+    'Technique d\'evasion avancee. Supprimer le code. Verifier si le constructeur est appele avec du code dynamique.',
+
+  ci_environment_probe:
+    'HAUTE: Detection de 3+ fournisseurs CI (GitHub Actions, GitLab CI, etc.) dans le meme fichier. ' +
+    'Sondage d\'environnement CI pour activation conditionnelle. Verifier la logique conditionnelle associee.',
+
+  lifecycle_missing_script:
+    'CRITIQUE: Script lifecycle reference un fichier inexistant dans le package. Script fantome. ' +
+    'Le payload peut etre injecte dynamiquement ou lors d\'une mise a jour. Installer avec --ignore-scripts. Supprimer le package.',
 };
 
 function getPlaybook(threatType) {
