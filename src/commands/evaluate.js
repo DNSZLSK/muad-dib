@@ -18,6 +18,7 @@ const path = require('path');
 const zlib = require('zlib');
 const { execSync, execFileSync } = require('child_process');
 const { run } = require('../index.js');
+const { clearFileListCache } = require('../utils.js');
 
 const ROOT = path.join(__dirname, '..', '..');
 const GT_DIR = path.join(ROOT, 'tests', 'ground-truth');
@@ -216,6 +217,8 @@ const HOLDOUT_SAMPLES = [
  * Scan a directory silently and return the result.
  * Uses scan result cache when available (cache populated by loadScanCache).
  */
+let _silentScanCount = 0;
+
 async function silentScan(dir) {
   // Check cache first
   const cached = getCachedResult(dir);
@@ -224,8 +227,20 @@ async function silentScan(dir) {
   try {
     const result = await run(dir, { _capture: true });
     setCachedResult(dir, result);
+
+    // Aggressive cleanup between scans to prevent OOM during evaluate
+    clearFileListCache(); // clears _fileListCache, _fileContentCache, _astCache
+
+    _silentScanCount++;
+    if (_silentScanCount % 20 === 0 && global.gc) {
+      global.gc();
+      const used = Math.round(process.memoryUsage().heapUsed / 1024 / 1024);
+      console.log(`  [Memory] ${used} MB after ${_silentScanCount} scans`);
+    }
+
     return result;
   } catch (err) {
+    clearFileListCache();
     return { summary: { riskScore: 0, total: 0 }, threats: [], error: err.message };
   }
 }
@@ -439,7 +454,7 @@ async function evaluateBenign(options = {}) {
     }
 
     const result = await silentScan(extractedDir);
-    if (global.gc) global.gc(); // Prevent OOM in long sequential evaluate loops
+
     const score = result.summary.riskScore;
     const isFlagged = score >= BENIGN_THRESHOLD;
     if (isFlagged) flagged++;
@@ -627,7 +642,7 @@ async function evaluateBenignPyPI(options = {}) {
     }
 
     const result = await silentScan(extractedDir);
-    if (global.gc) global.gc(); // Prevent OOM in long sequential evaluate loops
+
     const score = result.summary.riskScore;
     const isFlagged = score >= BENIGN_THRESHOLD;
     if (isFlagged) flagged++;
@@ -746,7 +761,7 @@ async function evaluateBenignRandom(options = {}) {
     }
 
     const result = await silentScan(extractedDir);
-    if (global.gc) global.gc(); // Prevent OOM in long sequential evaluate loops
+
     const score = result.summary.riskScore;
     const isFlagged = score >= BENIGN_THRESHOLD;
     if (isFlagged) flagged++;

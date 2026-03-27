@@ -125,6 +125,25 @@ async function scanPackageJson(targetPath) {
           file: 'package.json'
         });
       }
+
+      // Blue Team v8b (B8): Lifecycle script references non-existent file in package
+      // Pattern: "node path/to/script.js" where the file does not exist — phantom install script
+      // Strong signal: preinstall/install scripts pointing to missing files can't be build artifacts
+      if (['preinstall', 'install', 'postinstall'].includes(scriptName)) {
+        const nodeFileMatch = scriptContent.match(/^node\s+(\S+)/);
+        if (nodeFileMatch) {
+          const scriptFile = nodeFileMatch[1];
+          const fullScriptPath = path.join(targetPath, scriptFile);
+          if (!fs.existsSync(fullScriptPath) && !fs.existsSync(fullScriptPath + '.js')) {
+            threats.push({
+              type: 'lifecycle_missing_script',
+              severity: scriptName === 'postinstall' ? 'HIGH' : 'CRITICAL',
+              message: `Lifecycle "${scriptName}" references "${scriptFile}" which does not exist in the package — phantom install script, payload may be injected at publish time.`,
+              file: 'package.json'
+            });
+          }
+        }
+      }
     }
   }
 
@@ -179,6 +198,57 @@ async function scanPackageJson(targetPath) {
         });
       }
     } catch { /* permission error */ }
+  }
+
+  // Blue Team v8: binding.gyp + lifecycle script = native addon install risk
+  // binding.gyp triggers node-gyp compilation during install. Combined with lifecycle scripts
+  // that aren't standard node-gyp build tools, this indicates potentially malicious native code.
+  const bindingGypPath = path.join(targetPath, 'binding.gyp');
+  if (fs.existsSync(bindingGypPath)) {
+    const hasInstallLifecycle = ['preinstall', 'install', 'postinstall'].some(s => scripts[s]);
+    const installScript = scripts.install || scripts.postinstall || scripts.preinstall || '';
+    // node-gyp rebuild / prebuild-install / cmake-js are legitimate native addon builders
+    const isStandardBuild = /\b(node-gyp|prebuild|cmake-js|napi|prebuildify|neon)\b/i.test(installScript);
+
+    // Blue Team v8b (C7): Check binding.gyp content for shell commands in actions
+    let gypContent = '';
+    try { gypContent = fs.readFileSync(bindingGypPath, 'utf8'); } catch {}
+    const hasShellActions = /\baction\b.*\bsh\b/.test(gypContent) || /\bcurl\b/.test(gypContent) ||
+      /\bwget\b/.test(gypContent) || /\$\(whoami\)/.test(gypContent) || /\$\(uname/.test(gypContent);
+    // Check if binding.gyp references C/C++ source files
+    const hasNativeSources = /\.(c|cc|cpp|cxx|h|hpp)\b/.test(gypContent);
+
+    if (hasShellActions) {
+      threats.push({
+        type: 'native_addon_install',
+        severity: 'CRITICAL',
+        message: `binding.gyp contains shell commands in build actions (curl/sh/whoami) — build-time code execution and exfiltration.`,
+        file: 'binding.gyp'
+      });
+    } else if (hasInstallLifecycle && !isStandardBuild) {
+      threats.push({
+        type: 'native_addon_install',
+        severity: 'HIGH',
+        message: `binding.gyp present with non-standard lifecycle script: "${installScript.substring(0, 100)}" — potential malicious native compilation.`,
+        file: 'package.json'
+      });
+    } else if (hasInstallLifecycle && hasNativeSources) {
+      // Standard build but with native C/C++ sources — HIGH (native code is opaque)
+      threats.push({
+        type: 'native_addon_install',
+        severity: 'HIGH',
+        message: `binding.gyp with C/C++ source files + lifecycle script — native addon compilation. Native code is opaque to static analysis.`,
+        file: 'package.json'
+      });
+    } else if (hasInstallLifecycle) {
+      // Standard build tool — informational only
+      threats.push({
+        type: 'native_addon_install',
+        severity: 'LOW',
+        message: 'binding.gyp with standard build tool (node-gyp/prebuild) in lifecycle script — legitimate native addon.',
+        file: 'package.json'
+      });
+    }
   }
 
   // Scan declared dependencies against IOCs

@@ -1,4 +1,26 @@
 #!/usr/bin/env node
+
+// Auto-respawn with memory flags for evaluate command (OOM prevention)
+if (process.argv[2] === 'evaluate') {
+  const hasMaxOld = process.execArgv.some(a => a.includes('--max-old-space-size'));
+  const hasGC = process.execArgv.some(a => a === '--expose-gc');
+  if (!hasMaxOld || !hasGC) {
+    const { execFileSync } = require('child_process');
+    const flags = [];
+    if (!hasMaxOld) flags.push('--max-old-space-size=8192');
+    if (!hasGC) flags.push('--expose-gc');
+    try {
+      execFileSync(process.execPath, [...flags, __filename, ...process.argv.slice(2)], {
+        stdio: 'inherit',
+        env: process.env
+      });
+      process.exit(0);
+    } catch (e) {
+      process.exit(e.status || 1);
+    }
+  }
+}
+
 const { execFile } = require('child_process');
 const { run } = require('../src/index.js');
 const { updateIOCs } = require('../src/ioc/updater.js');

@@ -223,8 +223,13 @@ const BLOCKCHAIN_RPC_ENDPOINTS = [
 // Solana/Web3 C2 methods — used for dead drop resolver (GlassWorm)
 const SOLANA_C2_METHODS = [
   'getSignaturesForAddress', 'getAccountInfo', 'getTransaction',
-  'getConfirmedSignaturesForAddress2', 'getParsedTransaction'
+  'getConfirmedSignaturesForAddress2', 'getParsedTransaction',
+  // Blue Team v8: extended Ethereum/Web3 C2 methods
+  'eth_call', 'getCode', 'getLogs'
 ];
+
+// Blue Team v8: Ethereum/Web3 package names for compound blockchain C2 detection
+const ETHEREUM_PACKAGES = ['ethers', 'web3', '@ethersproject/providers', '@ethersproject/contracts'];
 
 // Solana/Web3 package names
 const SOLANA_PACKAGES = ['@solana/web3.js', 'solana-web3.js', '@solana/web3'];
@@ -531,6 +536,7 @@ function handleVariableDeclarator(node, ctx) {
     }
 
     // Audit v3 B3: const AF = Object.getPrototypeOf(async function(){}).constructor
+    // Blue Team v8: Extended to detect nested getPrototypeOf chains (2+ levels deep)
     if (node.init?.type === 'MemberExpression') {
       const initProp = node.init.computed
         ? (node.init.property?.type === 'Literal' ? String(node.init.property.value) : null)
@@ -554,6 +560,33 @@ function handleVariableDeclarator(node, ctx) {
                 type: 'dangerous_constructor',
                 severity: 'CRITICAL',
                 message: `${kind} constructor extracted via Object.getPrototypeOf() into "${node.id.name}" — prototype chain code execution evasion.`,
+                file: ctx.relFile
+              });
+            }
+            // Blue Team v8: Nested getPrototypeOf — Object.getPrototypeOf(Object.getPrototypeOf(...)).constructor
+            // Walking up prototype chain 2+ levels to reach Function constructor from any object
+            if (arg.type === 'CallExpression' && arg.callee?.type === 'MemberExpression' &&
+                arg.callee.property?.name === 'getPrototypeOf') {
+              ctx.evalAliases.set(node.id.name, 'Function');
+              ctx.hasDynamicExec = true;
+              ctx.threats.push({
+                type: 'dangerous_constructor',
+                severity: 'CRITICAL',
+                message: `Nested Object.getPrototypeOf() chain (2+ levels) + .constructor into "${node.id.name}" — deep prototype traversal to reach Function constructor.`,
+                file: ctx.relFile
+              });
+            }
+            // Blue Team v8b (A3): Object.getPrototypeOf(variable).constructor
+            // When a variable (possibly holding a prototype chain result) is passed to
+            // getPrototypeOf and .constructor is extracted — prototype chain traversal attack.
+            // Covers: const C = Object.getPrototypeOf(protoVar).constructor
+            if (arg.type === 'Identifier') {
+              ctx.evalAliases.set(node.id.name, 'Function');
+              ctx.hasDynamicExec = true;
+              ctx.threats.push({
+                type: 'prototype_chain_constructor',
+                severity: 'CRITICAL',
+                message: `Object.getPrototypeOf(${arg.name}).constructor extracted into "${node.id.name}" — prototype chain traversal to reach Function constructor.`,
                 file: ctx.relFile
               });
             }
@@ -589,6 +622,21 @@ function handleVariableDeclarator(node, ctx) {
     // Track initial string values for reassignment tracking
     if (strVal !== null && strVal !== undefined) {
       ctx.stringVarValues.set(node.id.name, strVal);
+    }
+
+    // Blue Team v8b (B7): Track path.join() results where last arg is an image/binary filename
+    // Enables steganographic payload detection when the variable is used with fs.readFileSync
+    if (!strVal && node.init?.type === 'CallExpression') {
+      const initCallName = getCallName(node.init);
+      if ((initCallName === 'join' || initCallName === 'resolve') &&
+          node.init.callee?.type === 'MemberExpression' &&
+          node.init.arguments?.length > 0) {
+        const lastArg = node.init.arguments[node.init.arguments.length - 1];
+        if (lastArg?.type === 'Literal' && typeof lastArg.value === 'string') {
+          // Store the last path component so image extension check works later
+          ctx.stringVarValues.set(node.id.name, lastArg.value);
+        }
+      }
     }
 
     // Track variables assigned from require.cache[...] (module cache references)
@@ -890,6 +938,14 @@ function handleCallExpression(node, ctx) {
     if (reqStr && SOLANA_PACKAGES.some(pkg => reqStr === pkg)) {
       ctx.hasSolanaImport = true;
     }
+    // Blue Team v8: track Ethereum/Web3 imports
+    if (reqStr && ETHEREUM_PACKAGES.some(pkg => reqStr === pkg || reqStr.startsWith(pkg))) {
+      ctx.hasSolanaImport = true; // reuse flag — both indicate blockchain SDK usage
+    }
+    // Blue Team v8: track require('ws') for WebSocket C2 detection
+    if (reqStr === 'ws' || reqStr === 'websocket') {
+      ctx.hasWebSocketNew = true; // ws module provides WebSocket functionality
+    }
   }
 
   // Detect process.mainModule.require('child_process') — module system bypass
@@ -1059,6 +1115,29 @@ function handleCallExpression(node, ctx) {
         message: `${method}() chained on dynamic require() — obfuscated module + command execution.`,
         file: ctx.relFile
       });
+    }
+  }
+
+  // Blue Team v8b (C10): require('child_process').execSync/exec(variable) — inline require + variable command
+  // When require is literal 'child_process' but the command argument is not resolvable (MemberExpression, Identifier),
+  // this is a hidden exec with runtime-determined command (C2 pattern: cmd from network data)
+  if ((execName || memberExec) && node.callee.type === 'MemberExpression' &&
+      node.callee.object?.type === 'CallExpression') {
+    const innerCall = node.callee.object;
+    const innerName = getCallName(innerCall);
+    if (innerName === 'require' && innerCall.arguments.length > 0 &&
+        innerCall.arguments[0]?.type === 'Literal' && innerCall.arguments[0].value === 'child_process') {
+      const cmdArg = node.arguments[0];
+      if (cmdArg && cmdArg.type !== 'Literal') {
+        // Non-literal command argument with inline require — opaque shell execution
+        ctx.hasDynamicExec = true;
+        ctx.threats.push({
+          type: 'dangerous_exec',
+          severity: 'HIGH',
+          message: `Inline require('child_process').${execName || memberExec}(variable) — hidden import with runtime-determined command. Typical C2 or RCE payload pattern.`,
+          file: ctx.relFile
+        });
+      }
     }
   }
 
@@ -2260,6 +2339,144 @@ function handleCallExpression(node, ctx) {
     }
   }
 
+  // Blue Team v8: process.dlopen() — direct native module loading bypass
+  if (node.callee.type === 'MemberExpression' &&
+      node.callee.object?.type === 'Identifier' && node.callee.object.name === 'process' &&
+      node.callee.property?.type === 'Identifier' && node.callee.property.name === 'dlopen' &&
+      node.arguments.length >= 1) {
+    ctx.threats.push({
+      type: 'process_binding_abuse',
+      severity: 'CRITICAL',
+      message: 'process.dlopen() — direct native module loading bypasses require() and all module system checks.',
+      file: ctx.relFile
+    });
+  }
+
+  // Blue Team v8: dgram.createSocket() / socket.send() — UDP exfiltration tracking
+  if (node.callee.type === 'MemberExpression' && node.callee.property?.type === 'Identifier') {
+    const dgramMethod = node.callee.property.name;
+    if (dgramMethod === 'createSocket' && ctx.hasDgramImport) {
+      ctx.hasDgramSend = true; // createSocket implies intent to use UDP
+    }
+    if (dgramMethod === 'send' && ctx.hasDgramImport) {
+      ctx.hasDgramSend = true;
+    }
+  }
+
+  // Blue Team v8: Crontab/cron write detection — fs.writeFileSync to cron paths
+  if (node.callee.type === 'MemberExpression' && node.callee.property?.type === 'Identifier') {
+    const cronWriteMethod = node.callee.property.name;
+    if (['writeFileSync', 'writeFile', 'appendFileSync'].includes(cronWriteMethod) && node.arguments.length >= 1) {
+      const cronPathArg = node.arguments[0];
+      let cronPathStr = extractStringValueDeep(cronPathArg);
+      if (!cronPathStr && cronPathArg?.type === 'Identifier' && ctx.stringVarValues?.has(cronPathArg.name)) {
+        cronPathStr = ctx.stringVarValues.get(cronPathArg.name);
+      }
+      if (cronPathStr && (/\/etc\/cron/i.test(cronPathStr) || /crontab/i.test(cronPathStr) ||
+          /\/var\/spool\/cron/i.test(cronPathStr))) {
+        ctx.hasCrontabWrite = true;
+        ctx.threats.push({
+          type: 'crontab_systemd_write',
+          severity: 'CRITICAL',
+          message: `${cronWriteMethod}() writes to cron path: "${cronPathStr.substring(0, 80)}" — scheduled task persistence.`,
+          file: ctx.relFile
+        });
+      }
+    }
+  }
+
+  // Blue Team v8: .replace() chain detection — 3+ chained .replace() calls for string mutation obfuscation
+  // Pattern: 'l33t'.replace(/3/g, 'e').replace(/1/g, 'i') to reconstruct dangerous strings
+  if (node.callee.type === 'MemberExpression' && node.callee.property?.type === 'Identifier' &&
+      node.callee.property.name === 'replace' && node.arguments.length >= 2) {
+    // Walk up the chain to count .replace() depth and try to resolve
+    let depth = 1;
+    let baseNode = node.callee.object;
+    while (baseNode?.type === 'CallExpression' &&
+           baseNode.callee?.type === 'MemberExpression' &&
+           baseNode.callee.property?.type === 'Identifier' &&
+           baseNode.callee.property.name === 'replace' &&
+           baseNode.arguments?.length >= 2) {
+      depth++;
+      baseNode = baseNode.callee.object;
+    }
+    if (depth >= 3) {
+      // Try to statically resolve the chain
+      let resolved = null;
+      if (baseNode?.type === 'Literal' && typeof baseNode.value === 'string') {
+        resolved = baseNode.value;
+      } else if (baseNode?.type === 'Identifier' && ctx.stringVarValues?.has(baseNode.name)) {
+        resolved = ctx.stringVarValues.get(baseNode.name);
+      }
+      if (resolved !== null) {
+        // Apply each .replace() in order (walk the chain from inner to outer)
+        const replaceCalls = [];
+        let currentNode = node;
+        while (currentNode?.type === 'CallExpression' &&
+               currentNode.callee?.type === 'MemberExpression' &&
+               currentNode.callee.property?.name === 'replace') {
+          replaceCalls.unshift(currentNode.arguments);
+          currentNode = currentNode.callee.object;
+        }
+        for (const args of replaceCalls) {
+          if (args.length >= 2) {
+            let pattern = null;
+            let replacement = null;
+            // Extract regex or string pattern
+            if (args[0].type === 'Literal' && args[0].regex) {
+              try { pattern = new RegExp(args[0].regex.pattern, args[0].regex.flags); } catch { /* skip */ }
+            } else if (args[0].type === 'Literal' && typeof args[0].value === 'string') {
+              pattern = args[0].value;
+            }
+            if (args[1].type === 'Literal' && typeof args[1].value === 'string') {
+              replacement = args[1].value;
+            }
+            if (pattern !== null && replacement !== null) {
+              resolved = resolved.replace(pattern, replacement);
+            } else {
+              resolved = null;
+              break;
+            }
+          }
+        }
+      }
+      const DANGEROUS_REPLACE_KEYWORDS = /\b(child_process|eval|exec|spawn|Function|http|net|dns|require|process)\b/;
+      if (resolved && DANGEROUS_REPLACE_KEYWORDS.test(resolved)) {
+        ctx.threats.push({
+          type: 'string_mutation_obfuscation',
+          severity: 'HIGH',
+          message: `String mutation via ${depth} chained .replace() calls resolves to "${resolved.substring(0, 80)}" — leet-speak/substitution evasion.`,
+          file: ctx.relFile
+        });
+      } else if (depth >= 4) {
+        // 4+ replace chains without resolution is still suspicious
+        ctx.threats.push({
+          type: 'string_mutation_obfuscation',
+          severity: 'MEDIUM',
+          message: `${depth} chained .replace() calls detected — potential string mutation obfuscation (could not fully resolve).`,
+          file: ctx.relFile
+        });
+      }
+    }
+  }
+
+  // Blue Team v8b (A1): X.apply(require, null, [...]) — indirect require via Reflect.apply
+  // Detect Reflect.apply(require, ...) or anyVar.apply(require, ...) pattern
+  // This is an evasion where the attacker uses reflection to invoke require dynamically
+  if (node.callee?.type === 'MemberExpression' &&
+      node.callee.property?.type === 'Identifier' && node.callee.property.name === 'apply' &&
+      node.arguments.length >= 2) {
+    const firstArg = node.arguments[0];
+    if (firstArg?.type === 'Identifier' && firstArg.name === 'require') {
+      ctx.threats.push({
+        type: 'dynamic_require',
+        severity: 'CRITICAL',
+        message: '.apply(require, ...) — indirect require() invocation via Reflect.apply or Function.prototype.apply. Evasion technique to dynamically load modules.',
+        file: ctx.relFile
+      });
+    }
+  }
+
   // Audit v3 bypass fix: process.on('uncaughtException'/'unhandledRejection', handler)
   // Error handler hijacking for silent credential exfiltration
   if (node.callee?.type === 'MemberExpression' &&
@@ -2274,6 +2491,116 @@ function handleCallExpression(node, ctx) {
   }
 
   // SANDWORM_MODE R8: dns.resolve detection moved to walk.ancestor() in ast.js (FIX 5)
+
+  // Blue Team v8b (A7): JSON.parse with reviver that checks __proto__
+  // JSON.parse(str, function(key, value) { if (key === '__proto__') ... })
+  // Note: getCallName returns 'parse' (property only), so check object.name === 'JSON'
+  if (callName === 'parse' && node.callee?.type === 'MemberExpression' &&
+      node.callee.object?.type === 'Identifier' && node.callee.object.name === 'JSON' &&
+      node.arguments.length >= 2) {
+    const reviver = node.arguments[1];
+    if (reviver && (reviver.type === 'FunctionExpression' || reviver.type === 'ArrowFunctionExpression')) {
+      // Check if reviver body contains __proto__ reference
+      const reviverSrc = reviver.start !== undefined && reviver.end !== undefined
+        ? ctx._sourceCode?.slice(reviver.start, reviver.end) : '';
+      if (reviverSrc && /__proto__|prototype\s*[.[]/.test(reviverSrc)) {
+        ctx.hasJsonReviverProto = true;
+        const hasRequireInReviver = /\brequire\s*\(/.test(reviverSrc);
+        const hasProtoAssign = /Object\.prototype\s*\./.test(reviverSrc) || /\.__proto__\s*=/.test(reviverSrc);
+        ctx.threats.push({
+          type: 'json_reviver_pollution',
+          severity: (hasRequireInReviver || hasProtoAssign) ? 'CRITICAL' : 'HIGH',
+          message: (hasRequireInReviver || hasProtoAssign)
+            ? 'JSON.parse reviver accesses __proto__/prototype with require() or prototype assignment — prototype pollution for code injection.'
+            : 'JSON.parse reviver accesses __proto__/prototype — potential prototype pollution via untrusted JSON input.',
+          file: ctx.relFile
+        });
+      }
+    }
+  }
+
+  // Blue Team v8b (C2): vm.runInContext/runInNewContext/compileFunction with dynamic code
+  // Detect when the code argument is built from Buffer.from/base64/concat, not a string literal
+  if (node.callee?.type === 'MemberExpression' && node.callee.property?.type === 'Identifier') {
+    const vmMethods = ['runInContext', 'runInNewContext', 'runInThisContext', 'compileFunction'];
+    if (vmMethods.includes(node.callee.property.name) && node.arguments.length > 0) {
+      const codeArg = node.arguments[0];
+      // Dynamic code: not a string literal, could be variable, concat, Buffer.from, etc.
+      if (codeArg && codeArg.type !== 'Literal') {
+        const isDynamic = codeArg.type === 'Identifier' || codeArg.type === 'BinaryExpression' ||
+          codeArg.type === 'CallExpression' || codeArg.type === 'TemplateLiteral';
+        if (isDynamic) {
+          ctx.hasVmDynamicExec = true;
+          ctx.hasDynamicExec = true;
+          ctx.threats.push({
+            type: 'vm_dynamic_code',
+            severity: 'CRITICAL',
+            message: `vm.${node.callee.property.name}() with dynamically constructed code — vm sandbox escape via runtime-built code string.`,
+            file: ctx.relFile
+          });
+        }
+      }
+    }
+  }
+
+  // Blue Team v8b (C2): vm.createContext() with custom require injection + sensitive modules
+  // Detects sandbox setup that provides module access to untrusted code
+  if (callName === 'createContext' && node.callee?.type === 'MemberExpression' &&
+      node.callee.object?.type === 'Identifier') {
+    const src = ctx._sourceCode || '';
+    // Check if the same file defines a custom require for the sandbox
+    const hasRequireInjection = /\.require\s*=\s*(?:\(|function\b)/.test(src) ||
+      /require\s*:\s*(?:\(|function\b)/.test(src);
+    const hasSensitiveModules = /require\s*\(\s*['"](?:fs|http|https|net|child_process)['"]/.test(src);
+    if (hasRequireInjection && hasSensitiveModules) {
+      ctx.hasDynamicExec = true;
+      ctx.threats.push({
+        type: 'vm_dynamic_code',
+        severity: 'CRITICAL',
+        message: 'vm.createContext() with custom require() injection and access to sensitive modules (fs/http/net) — sandbox that enables untrusted code execution with elevated privileges.',
+        file: ctx.relFile
+      });
+    }
+  }
+
+  // Blue Team v8b (B7): fs.readFileSync on image/binary files (stego pattern)
+  if (node.callee?.type === 'MemberExpression' && node.callee.property?.type === 'Identifier' &&
+      ['readFileSync', 'readFile'].includes(node.callee.property.name)) {
+    const fileArg = node.arguments?.[0];
+    let filePath = '';
+    if (fileArg?.type === 'Literal' && typeof fileArg.value === 'string') {
+      filePath = fileArg.value;
+    } else if (fileArg?.type === 'Identifier' && ctx.stringVarValues?.has(fileArg.name)) {
+      filePath = ctx.stringVarValues.get(fileArg.name);
+    }
+    if (/\.(png|jpg|jpeg|gif|bmp|ico|svg)$/i.test(filePath)) {
+      ctx.hasBinaryFileRead = true;
+    }
+  }
+
+  // Blue Team v8b (C10): execSync/exec inside .on('message') or .on('data') callback
+  if (node.callee?.type === 'MemberExpression' && node.callee.property?.type === 'Identifier' &&
+      node.callee.property.name === 'on' && node.arguments.length >= 2) {
+    const eventArg = node.arguments[0];
+    if (eventArg?.type === 'Literal' && ['message', 'data'].includes(eventArg.value)) {
+      const callback = node.arguments[1];
+      if (callback && (callback.type === 'FunctionExpression' || callback.type === 'ArrowFunctionExpression')) {
+        const cbSrc = callback.start !== undefined && callback.end !== undefined
+          ? ctx._sourceCode?.slice(callback.start, callback.end) : '';
+        if (cbSrc && /\b(execSync|exec|spawn|spawnSync)\s*\(/.test(cbSrc) &&
+            /\brequire\s*\(\s*['"]child_process['"]\s*\)/.test(cbSrc)) {
+          ctx.hasCallbackExec = true;
+          ctx.hasDynamicExec = true;
+          ctx.threats.push({
+            type: 'callback_exec_rce',
+            severity: 'CRITICAL',
+            message: `exec/spawn inside .on('${eventArg.value}') callback with require('child_process') — remote command execution from network input.`,
+            file: ctx.relFile
+          });
+        }
+      }
+    }
+  }
 }
 
 function handleImportExpression(node, ctx) {
@@ -2298,10 +2625,16 @@ function handleImportExpression(node, ctx) {
         ctx.hasSolanaImport = true;
       }
     } else {
+      // Blue Team v8b (C6): Dynamic import with non-literal arg — if it's a variable
+      // built from URL manipulation, this is remote code loading
+      const isCritical = node.source.type === 'Identifier' || node.source.type === 'TemplateLiteral' ||
+        (node.source.type === 'CallExpression' && node.source.callee?.property?.name === 'replace');
       ctx.threats.push({
         type: 'dynamic_import',
-        severity: 'HIGH',
-        message: 'Dynamic import() with computed argument (possible obfuscation).',
+        severity: isCritical ? 'CRITICAL' : 'HIGH',
+        message: isCritical
+          ? 'Dynamic import() with computed URL argument — remote code loading from dynamically constructed URL.'
+          : 'Dynamic import() with computed argument (possible obfuscation).',
         file: ctx.relFile
       });
     }
@@ -2384,17 +2717,59 @@ function handleNewExpression(node, ctx) {
 
   // Batch 2: new Worker(code, { eval: true }) — worker_threads code execution
   if (node.callee.type === 'Identifier' && node.callee.name === 'Worker' &&
-      node.arguments.length >= 2) {
-    const opts = node.arguments[1];
-    if (opts?.type === 'ObjectExpression') {
-      const evalProp = opts.properties?.find(p =>
-        p.key?.name === 'eval' && p.value?.value === true);
-      if (evalProp) {
-        ctx.hasDynamicExec = true;
+      node.arguments.length >= 1) {
+    ctx.hasWorkerThread = true;
+    if (node.arguments.length >= 2) {
+      const opts = node.arguments[1];
+      if (opts?.type === 'ObjectExpression') {
+        const evalProp = opts.properties?.find(p =>
+          p.key?.name === 'eval' && p.value?.value === true);
+        if (evalProp) {
+          ctx.hasDynamicExec = true;
+          ctx.threats.push({
+            type: 'worker_thread_exec',
+            severity: 'HIGH',
+            message: 'new Worker() with eval:true — executes arbitrary code in worker thread, bypasses main thread detection.',
+            file: ctx.relFile
+          });
+        }
+      }
+    }
+    // Blue Team v8: new Worker('data:...') — data URL code injection into worker
+    const firstArg = node.arguments[0];
+    if (firstArg?.type === 'Literal' && typeof firstArg.value === 'string' &&
+        firstArg.value.startsWith('data:')) {
+      ctx.hasDynamicExec = true;
+      ctx.threats.push({
+        type: 'worker_thread_exec',
+        severity: 'HIGH',
+        message: 'new Worker() with data: URL — inline code injection into worker thread.',
+        file: ctx.relFile
+      });
+    }
+  }
+
+  // Blue Team v8: new SharedArrayBuffer() — shared memory for covert IPC
+  if (node.callee.type === 'Identifier' && node.callee.name === 'SharedArrayBuffer') {
+    ctx.hasSharedArrayBuffer = true;
+  }
+
+  // Blue Team v8: new WebSocket(url) — track for C2 compound detection
+  if (node.callee.type === 'Identifier' && node.callee.name === 'WebSocket' &&
+      node.arguments.length >= 1) {
+    ctx.hasWebSocketNew = true;
+    // Check if URL points to suspicious domain
+    const wsArg = node.arguments[0];
+    const wsUrl = extractStringValueDeep(wsArg);
+    if (wsUrl) {
+      const wsLower = wsUrl.toLowerCase();
+      const isSuspiciousWs = SUSPICIOUS_DOMAINS_HIGH.some(d => wsLower.includes(d)) ||
+                             SUSPICIOUS_DOMAINS_MEDIUM.some(d => wsLower.includes(d));
+      if (isSuspiciousWs) {
         ctx.threats.push({
-          type: 'worker_thread_exec',
+          type: 'websocket_c2',
           severity: 'HIGH',
-          message: 'new Worker() with eval:true — executes arbitrary code in worker thread, bypasses main thread detection.',
+          message: `new WebSocket() connecting to suspicious domain: "${wsUrl.substring(0, 80)}" — potential C2 channel.`,
           file: ctx.relFile
         });
       }
@@ -2604,6 +2979,32 @@ function handleAssignmentExpression(node, ctx) {
         type: 'module_wrap_override',
         severity: 'CRITICAL',
         message: 'Module.wrap overridden — module wrapper function hijacked, allows injecting code into every loaded module.',
+        file: ctx.relFile
+      });
+    }
+  }
+
+  // Blue Team v8b (A4): Module._resolveFilename / _compile / _extensions hijack
+  // Any assignment to these private Module APIs is a supply-chain attack vector
+  if (node.left?.type === 'MemberExpression' && !node.left.computed &&
+      node.left.property?.type === 'Identifier' &&
+      ['_resolveFilename', '_compile', '_extensions', '_findPath', '_nodeModulePaths'].includes(node.left.property.name)) {
+    // Check if the object is Module, a module alias, or a constructor chain
+    const obj = node.left.object;
+    const isModuleRef = (obj?.type === 'Identifier' && (ctx.moduleAliases?.has(obj.name) || obj.name === 'Module')) ||
+      // require('module')._resolveFilename = ...
+      (obj?.type === 'CallExpression' && getCallName(obj) === 'require' && obj.arguments?.[0]?.value === 'module') ||
+      // x.constructor._resolveFilename = ... (any .constructor chain)
+      (obj?.type === 'MemberExpression' && obj.property?.type === 'Identifier' && obj.property.name === 'constructor');
+    // Also match: proc.mainModule.constructor._resolveFilename (deeper chain)
+    const isDeepChain = obj?.type === 'MemberExpression' && obj.property?.type === 'Identifier' &&
+      ['_resolveFilename', '_compile', '_extensions', '_findPath', '_nodeModulePaths'].includes(node.left.property.name);
+    if (isModuleRef || isDeepChain || (obj?.type === 'MemberExpression' && obj.property?.name === 'constructor')) {
+      ctx.hasModuleInternalsHijack = true;
+      ctx.threats.push({
+        type: 'module_internals_hijack',
+        severity: 'CRITICAL',
+        message: `Assignment to Module.${node.left.property.name} — module system internals hijacked. All subsequent require() calls can be intercepted.`,
         file: ctx.relFile
       });
     }
@@ -3188,6 +3589,150 @@ function handlePostWalk(ctx) {
       file: ctx.relFile
     });
   }
+
+  // Blue Team v8: SharedArrayBuffer + Worker = covert shared memory IPC
+  // Pattern: SharedArrayBuffer enables worker-to-main-thread communication
+  // that bypasses message channel monitoring. Alone = MEDIUM, with exec = HIGH.
+  if (ctx.hasSharedArrayBuffer && ctx.hasWorkerThread) {
+    ctx.threats.push({
+      type: 'shared_memory_ipc',
+      severity: ctx.hasDynamicExec ? 'HIGH' : 'MEDIUM',
+      message: ctx.hasDynamicExec
+        ? 'SharedArrayBuffer + Worker + dynamic execution — covert shared memory IPC with code execution.'
+        : 'SharedArrayBuffer + Worker — shared memory IPC channel bypasses standard message monitoring.',
+      file: ctx.relFile
+    });
+  }
+
+  // Blue Team v8: dgram/UDP exfiltration — dgram import + send in same file
+  if (ctx.hasDgramImport && ctx.hasDgramSend) {
+    const hasExfilSignal = ctx.threats.some(t =>
+      t.file === ctx.relFile && (t.type === 'env_access' || t.type === 'sensitive_string')
+    );
+    ctx.threats.push({
+      type: 'udp_exfiltration',
+      severity: hasExfilSignal ? 'CRITICAL' : 'HIGH',
+      message: hasExfilSignal
+        ? 'UDP socket (dgram) with credential/env access — data exfiltration via UDP bypasses HTTP-level monitoring.'
+        : 'UDP socket (dgram) createSocket + send — non-HTTP data channel. UDP exfiltration bypasses HTTP firewalls.',
+      file: ctx.relFile
+    });
+  }
+
+  // Blue Team v8: WebSocket C2 compound — WebSocket + exec/spawn in same file
+  if (ctx.hasWebSocketNew && ctx.hasDynamicExec) {
+    // Only emit if no websocket_c2 already emitted (from suspicious domain detection)
+    if (!ctx.threats.some(t => t.type === 'websocket_c2' && t.file === ctx.relFile)) {
+      ctx.threats.push({
+        type: 'websocket_c2',
+        severity: 'HIGH',
+        message: 'WebSocket connection + dynamic execution in same file — potential WebSocket C2 channel for remote command execution.',
+        file: ctx.relFile
+      });
+    }
+  }
+
+  // Blue Team v8: Extended blockchain C2 — Ethereum/Web3 import + C2 methods
+  // Extends GlassWorm detection to cover ethers.js/web3.js patterns
+  if (!ctx.hasSolanaImport && ctx.hasSolanaC2Method) {
+    // C2 method detected without Solana import — check if Ethereum packages are used
+    const hasEthImport = /\brequire\s*\(\s*['"](?:ethers|web3|@ethersproject)/i.test(ctx._sourceCode || '');
+    if (hasEthImport) {
+      ctx.threats.push({
+        type: 'blockchain_c2_resolution',
+        severity: ctx.hasDynamicExec ? 'CRITICAL' : 'HIGH',
+        message: 'Ethereum/Web3 import + blockchain C2 method — ' +
+          (ctx.hasDynamicExec
+            ? 'dead drop resolver with dynamic execution. Blockchain C2 pattern confirmed.'
+            : 'potential dead drop resolver. Technique: C2 commands stored in blockchain transactions.'),
+        file: ctx.relFile
+      });
+    }
+  }
+
+  // Blue Team v8b (A6): with statement + Proxy + require/exec in same file = sandbox escape compound
+  // Boost: if with_body_dangerous AND proxy trap detected → ensure minimum CRITICAL score
+  const hasWithDangerous = ctx.threats.some(t => t.type === 'with_body_dangerous' && t.file === ctx.relFile);
+  const hasProxyInFile = ctx.hasProxyTrap || ctx.proxyHandlerVars?.size > 0;
+  if (hasWithDangerous && hasProxyInFile) {
+    // Elevate existing with_body_dangerous to CRITICAL if not already
+    for (const t of ctx.threats) {
+      if (t.type === 'with_body_dangerous' && t.file === ctx.relFile && t.severity !== 'CRITICAL') {
+        t.severity = 'CRITICAL';
+        t.message = 'with() + Proxy compound: Proxy trap intercepts all scope resolution inside with block — complete API hijacking for sandbox escape.';
+      }
+    }
+  }
+
+  // Blue Team v8b (B7): Binary file read + new Function/eval = steganographic payload
+  if (ctx.hasBinaryFileRead && ctx.hasDynamicExec) {
+    ctx.threats.push({
+      type: 'stego_binary_exec',
+      severity: 'CRITICAL',
+      message: 'Binary/image file read + dynamic execution (eval/Function) — steganographic payload extraction and execution.',
+      file: ctx.relFile
+    });
+  } else if (ctx.hasImageFileRef && ctx.hasDynamicExec && ctx.hasWriteFileSyncInContent) {
+    // Fallback: image reference + eval in same file (may not directly readFile the image)
+    ctx.threats.push({
+      type: 'stego_binary_exec',
+      severity: 'HIGH',
+      message: 'Image file reference + dynamic execution + file I/O in same file — potential steganographic payload pattern.',
+      file: ctx.relFile
+    });
+  }
+
+  // Blue Team v8b (C1): AsyncLocalStorage + credential file read + exec/network
+  // Trigger on hasDynamicExec OR when dynamic_require is present (require('child_' + 'process') stored in context)
+  const hasDynReqInFile = ctx.threats.some(t => t.type === 'dynamic_require' && t.file === ctx.relFile);
+  if (ctx.hasAsyncLocalStorage && (ctx.hasDynamicExec || hasDynReqInFile)) {
+    ctx.threats.push({
+      type: 'asynclocal_context_exec',
+      severity: 'HIGH',
+      message: 'AsyncLocalStorage + dynamic execution/require — code execution hidden in async context, evades synchronous call-stack analysis.',
+      file: ctx.relFile
+    });
+  }
+
+  // Blue Team v8b (C10): net.Socket + exec = WebSocket/TCP C2
+  // Trigger on callbackExec (exec in .on('message') callback) OR hasDynamicExec (exec anywhere in file)
+  if (ctx.hasNetSocketCreate && (ctx.hasCallbackExec || ctx.hasDynamicExec)) {
+    if (!ctx.threats.some(t => t.type === 'websocket_c2' && t.file === ctx.relFile)) {
+      ctx.threats.push({
+        type: 'websocket_c2',
+        severity: 'CRITICAL',
+        message: 'net.Socket + exec in same file — persistent TCP/WebSocket C2 with remote command execution.',
+        file: ctx.relFile
+      });
+    }
+  }
+
+  // Blue Team v8b (B2): CI environment fingerprinting probe — 3+ CI provider env vars in same file
+  // Indicates multi-provider CI detection for conditional payload activation
+  if (ctx.ciProviderCount >= 3) {
+    ctx.threats.push({
+      type: 'ci_environment_probe',
+      severity: 'HIGH',
+      message: `File references ${ctx.ciProviderCount} CI provider environment variables (GITHUB_ACTIONS, GITLAB_CI, etc.) — CI environment fingerprinting for targeted execution.`,
+      file: ctx.relFile
+    });
+  }
+
+  // Blue Team v8: Hardcoded contract address (40-char hex) + blockchain import = C2 address
+  if ((ctx.hasSolanaImport || /\brequire\s*\(\s*['"](?:ethers|web3|@ethersproject|@solana)/i.test(ctx._sourceCode || '')) &&
+      /\b0x[0-9a-fA-F]{40}\b/.test(ctx._sourceCode || '')) {
+    const existingBlockchain = ctx.threats.some(t =>
+      t.type === 'blockchain_c2_resolution' && t.file === ctx.relFile
+    );
+    if (!existingBlockchain) {
+      ctx.threats.push({
+        type: 'blockchain_c2_resolution',
+        severity: 'MEDIUM',
+        message: 'Blockchain import + hardcoded contract address (0x...) — potential smart contract C2 endpoint.',
+        file: ctx.relFile
+      });
+    }
+  }
 }
 
 function handleWithStatement(node, ctx) {
@@ -3225,10 +3770,14 @@ function handleWithStatement(node, ctx) {
     const bodySource = node.body.start !== undefined && node.body.end !== undefined
       ? ctx._sourceCode?.slice(node.body.start, node.body.end) : null;
     if (bodySource && /\b(require\s*\(\s*['"]child_process['"]\s*\)|child_process|exec\s*\(|execSync\s*\(|spawn\s*\()/.test(bodySource)) {
+      // Blue Team v8: Elevate to CRITICAL when with() scope object is a known Proxy variable
+      const isProxyScope = node.object?.type === 'Identifier' && ctx.proxyHandlerVars?.has(node.object.name);
       ctx.threats.push({
         type: 'with_body_dangerous',
-        severity: 'HIGH',
-        message: 'with() statement body contains require/exec/spawn — scope injection used to obscure dangerous API calls.',
+        severity: isProxyScope ? 'CRITICAL' : 'HIGH',
+        message: isProxyScope
+          ? `with(Proxy) + exec/require in body — Proxy trap intercepts all name resolution, enabling complete API hijacking.`
+          : 'with() statement body contains require/exec/spawn — scope injection used to obscure dangerous API calls.',
         file: ctx.relFile
       });
     }

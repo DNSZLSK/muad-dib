@@ -1277,9 +1277,10 @@ async function runHighFix31Tests() {
     ];
     const result = calculateRiskScore(threats);
     // dangerous_exec: HIGH(10)*high(1.0)=10. lifecycle_script: MEDIUM(3)*medium(0.85)=round(2.55)=3.
+    // Blue Team v8: lifecycle_plus_finding boost adds +10 when lifecycle_script + file finding both present.
     assert(result.maxFileScore === 10, `Expected maxFileScore=10, got ${result.maxFileScore}`);
     assert(result.packageScore === 3, `Expected packageScore=3, got ${result.packageScore}`);
-    assert(result.riskScore === 13, `Expected riskScore=13, got ${result.riskScore}`);
+    assert(result.riskScore === 23, `Expected riskScore=23 (13 base + 10 lifecycle boost), got ${result.riskScore}`);
   });
 }
 

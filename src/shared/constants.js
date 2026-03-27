@@ -108,7 +108,7 @@ const crypto = require('crypto');
  * Key = sha256(code) + '|' + optionsKey (collision-free content-addressable key)
  */
 const _astCache = new Map();
-const _AST_CACHE_MAX = 600; // Max entries (one scan ≈ 500 files max)
+const _AST_CACHE_MAX = 200; // Max entries (reduced from 600 to limit memory during evaluate)
 
 /**
  * Parse JS source with module-mode fallback to script-mode.
