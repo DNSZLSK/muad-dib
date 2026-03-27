@@ -333,14 +333,51 @@ Comparaison industrie : Socket (USA, $65M funding), Phylum (rachete par Veracode
 
 ---
 
+## De v2.10.6 a v2.10.21 — Performance, IOCs, et CanisterWorm (22-27 Mars 2026)
+
+16 versions en 5 jours. Le rythme s'est accelere parce que le moniteur 24/7 a expose des problemes de performance et de fiabilite en production.
+
+**Detection de nouvelles campagnes :**
+- **TeamPCP/CanisterWorm** (v2.10.12) : 5 nouvelles regles — persistence systemd (pgmon.service, sysmon.service), vol de tokens npm (worm propagation), wipe filesystem (kamikaze.sh ciblant l'Iran), scan memoire /proc/*/mem (vol de secrets CI/CD). CanisterWorm est le premier worm npm auto-replicant documente, TeamPCP a compromis Trivy v0.69.4.
+- **LiteLLM/Checkmarx** (v2.10.14) : persistence `.pth` Python — fichiers executes automatiquement par l'interpreteur au demarrage. IOCs ajoutes pour les versions compromises.
+- **Sandbox libfaketime** (v2.10.7) : acceleration du temps pour detecter les time-bombs Python/bash (pattern CanisterWorm).
+
+**Performance (v2.10.17-v2.10.21) :**
+Le moniteur traitait ~10 000 packages/jour mais certains scans depassaient le timeout de 30s. 6 phases d'optimisation :
+- Worker threads pour les scanners CPU-bound, exclusion automatique des dist/, caches AST/contenu (v2.10.18)
+- Timeout statique 45s, size cap 10MB, quick scan pour les fichiers au-dela du cap (v2.10.17)
+- Cache HTTP, deduplication registre, parallelisation temporal (v2.10.19)
+- Semaphore HTTP, cache negatif, correction OOM (v2.10.20)
+- Limiteur centralise 10 requetes concurrentes max (v2.10.21)
+
+**Precision (v2.10.9-v2.10.10) :**
+- Graduation dataflow : `suspicious_dataflow` HIGH→MEDIUM pour les sources env/telemetry-only
+- Heuristique SDK : credential suffix pour `isSDKPattern` — reduit les FP sur les SDK qui envoient des credentials a leur propre API
+- FPR curated : 11.0% → **10.6%** (56/529, -2 FP)
+
+**Securite :**
+- Self-host highlight.js (suppression dependance CDN dans les rapports HTML)
+- Samples adversariaux/bypass deplaces vers un repo prive
+
+| Metrique | v2.10.5 | v2.10.21 |
+|----------|---------|----------|
+| Rules | 162 (157+5) | **176** (171+5) |
+| Tests | 2643 | **2793** |
+| FPR curated | 11.0% | **10.6%** |
+| ADR | 96.3% | **94.0%** |
+
+La baisse de l'ADR (96.3% → 94.0%) s'explique par le deplacement des samples adversariaux vers un repo prive — certains ne sont plus disponibles sur disque.
+
+---
+
 ## Etat actuel
 
 ### Ce qui fonctionne
 
-- **14 scanners paralleles**, 162 regles de detection (157 + 5 paranoid)
+- **14 scanners paralleles**, 176 regles de detection (171 + 5 paranoid)
 - **225 000+ IOCs** npm + 14 000+ PyPI
-- Detection de campagnes : Shai-Hulud (v1/v2/v3), GlassWorm (433+ packages)
-- Sandbox Docker avec simulation CI, canary tokens, monkey-patching preload, multi-run
+- Detection de campagnes : Shai-Hulud (v1/v2/v3), GlassWorm (433+ packages), CanisterWorm, TeamPCP, LiteLLM
+- Sandbox Docker avec simulation CI, canary tokens, monkey-patching preload, multi-run, libfaketime
 - Moniteur zero-day : npm changes stream + PyPI RSS, alertes Discord temps reel
 - Exports JSON, HTML, SARIF. Extension VS Code. GitHub Action Marketplace
 - Diff entre versions, pre-commit hooks, mode paranoid
@@ -350,7 +387,8 @@ Comparaison industrie : Socket (USA, $65M funding), Phylum (rachete par Veracode
 - Compound scoring : 11 regles zero-FP pour les co-occurrences malveillantes
 - Pipeline ML : XGBoost classifier ML1 (P=0.978, F1=0.955, 114 arbres) + bundler detector ML2 (P=0.992, F1=0.996, 98 arbres)
 - Webhook triage P1/P2/P3 : classification visuelle des alertes (rouge/orange/jaune)
-- **2643 tests** (57 fichiers), 86% coverage
+- Limiteur HTTP centralise : 10 requetes concurrentes max, cache negatif, semaphore anti-OOM
+- **2793 tests** (57 fichiers), 86% coverage
 
 ### Ce qui manque (honnetement)
 

@@ -1523,7 +1523,7 @@ const RULES = {
     id: 'MUADDIB-SHELL-019',
     name: 'Python Time Delay Execution',
     severity: 'HIGH',
-    confidence: 0.80,
+    confidence: 'medium',
     description: 'Execution Python avec delai time.sleep() >= 100s via child process. Technique d\'evasion sandbox (T1497.003) : le malware attend que la sandbox expire avant d\'executer le payload.',
     references: ['https://attack.mitre.org/techniques/T1497/003/'],
     mitre: 'T1497.003'
@@ -1850,6 +1850,104 @@ const RULES = {
     ],
     mitre: 'T1071'
   },
+
+  // Audit v3 Bypass Detections (AST-062 to AST-069)
+  reflect_apply_require: {
+    id: 'MUADDIB-AST-062',
+    name: 'Reflect.apply(require) Bypass',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Reflect.apply(require, null, [module]) detecte — contourne la detection statique de require() en passant par l\'API Reflect. Permet de charger child_process/fs/net sans appel require() direct.',
+    references: [
+      'https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Reflect/apply',
+      'https://attack.mitre.org/techniques/T1059/'
+    ],
+    mitre: 'T1059'
+  },
+  finalization_registry_exec: {
+    id: 'MUADDIB-AST-063',
+    name: 'FinalizationRegistry Deferred Execution',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'new FinalizationRegistry() avec callback contenant child_process/exec/spawn. Le callback s\'execute apres le garbage collection, hors du flux d\'execution normal — technique d\'evasion sandbox qui differe l\'execution malveillante.',
+    references: [
+      'https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/FinalizationRegistry',
+      'https://attack.mitre.org/techniques/T1497/003/'
+    ],
+    mitre: 'T1497.003'
+  },
+  function_prototype_constructor: {
+    id: 'MUADDIB-AST-064',
+    name: 'Function via Prototype Chain',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: '(function(){}).constructor(code) ou [].constructor.constructor(code) detecte — acces au constructeur Function via la chaine de prototypes, contourne les detections de new Function() et eval().',
+    references: [
+      'https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function',
+      'https://attack.mitre.org/techniques/T1059/'
+    ],
+    mitre: 'T1059'
+  },
+  prototype_pollution: {
+    id: 'MUADDIB-AST-065',
+    name: 'Prototype Pollution',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: '__defineGetter__, __defineSetter__ ou assignation __proto__ detectee — pollution de prototype permettant de detourner les proprietes heritees de tous les objets. Vecteur d\'escalade pour injecter du code dans des chemins d\'execution inattendus.',
+    references: [
+      'https://portswigger.net/web-security/prototype-pollution',
+      'https://attack.mitre.org/techniques/T1574/'
+    ],
+    mitre: 'T1574'
+  },
+  module_wrap_override: {
+    id: 'MUADDIB-AST-066',
+    name: 'Module.wrap Override',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Module.wrap = ... detecte — remplacement de la fonction wrapper du module loader Node.js. Permet d\'injecter du code dans CHAQUE module charge apres le remplacement, technique de persistence systemique.',
+    references: [
+      'https://nodejs.org/api/modules.html',
+      'https://attack.mitre.org/techniques/T1574/006/'
+    ],
+    mitre: 'T1574.006'
+  },
+  symbol_property_hiding: {
+    id: 'MUADDIB-AST-067',
+    name: 'Symbol Property Hiding',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'obj[Symbol(...)] = require(module_dangereux) detecte — dissimulation de modules dangereux derriere des proprietes Symbol, invisibles a Object.keys() et JSON.stringify(). Technique anti-forensics.',
+    references: [
+      'https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol',
+      'https://attack.mitre.org/techniques/T1564/'
+    ],
+    mitre: 'T1564'
+  },
+  with_body_dangerous: {
+    id: 'MUADDIB-AST-068',
+    name: 'WithStatement Dangerous Body',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'with() statement dont le body contient require/exec/spawn/child_process — injection de scope pour obscurcir les appels dangereux. Le with() rend tous les identifiants ambigus, empechant l\'analyse statique de tracer les appels.',
+    references: [
+      'https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/with',
+      'https://attack.mitre.org/techniques/T1027/'
+    ],
+    mitre: 'T1027'
+  },
+  require_process_mainmodule: {
+    id: 'MUADDIB-AST-069',
+    name: 'require("process").mainModule Bypass',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'require("process").mainModule.require() detecte — acces indirect au mainModule via require("process") au lieu de l\'objet global process. Contourne la detection de process.mainModule.require() qui ne surveille que l\'identifiant "process".',
+    references: [
+      'https://nodejs.org/api/process.html',
+      'https://attack.mitre.org/techniques/T1059/'
+    ],
+    mitre: 'T1059'
+  },
 };
 
 function getRule(type) {
@@ -1910,6 +2008,25 @@ const PARANOID_RULES = {
 const PARANOID_RULES_BY_ID = {};
 for (const [, rule] of Object.entries(PARANOID_RULES)) {
   PARANOID_RULES_BY_ID[rule.id] = rule;
+}
+
+// Validate all rules at load time
+const VALID_SEVERITIES = new Set(['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']);
+const VALID_CONFIDENCES = new Set(['high', 'medium', 'low']);
+
+for (const [key, rule] of Object.entries(RULES)) {
+  if (!VALID_SEVERITIES.has(rule.severity)) {
+    throw new Error(`Rule "${key}" has invalid severity: ${JSON.stringify(rule.severity)} (expected CRITICAL|HIGH|MEDIUM|LOW)`);
+  }
+  if (!VALID_CONFIDENCES.has(rule.confidence)) {
+    throw new Error(`Rule "${key}" has invalid confidence: ${JSON.stringify(rule.confidence)} (expected high|medium|low)`);
+  }
+}
+// PARANOID_RULES use a different schema (patterns/message, no confidence field)
+for (const [key, rule] of Object.entries(PARANOID_RULES)) {
+  if (!VALID_SEVERITIES.has(rule.severity)) {
+    throw new Error(`Paranoid rule "${key}" has invalid severity: ${JSON.stringify(rule.severity)} (expected CRITICAL|HIGH|MEDIUM|LOW)`);
+  }
 }
 
 module.exports = { RULES, getRule, PARANOID_RULES };

@@ -921,6 +921,28 @@ function handleCallExpression(node, ctx) {
     }
   }
 
+  // B8: require('process').mainModule.require('child_process') — indirect process access
+  // Pattern: require('process').mainModule.require(mod)
+  if (node.callee.type === 'MemberExpression' &&
+      node.callee.property?.type === 'Identifier' && node.callee.property.name === 'require' &&
+      node.callee.object?.type === 'MemberExpression' &&
+      node.callee.object.property?.type === 'Identifier' && node.callee.object.property.name === 'mainModule' &&
+      node.callee.object.object?.type === 'CallExpression' &&
+      getCallName(node.callee.object.object) === 'require' &&
+      node.callee.object.object.arguments?.[0]?.type === 'Literal' &&
+      node.callee.object.object.arguments[0].value === 'process') {
+    const arg = node.arguments?.[0];
+    const modName = arg ? extractStringValueDeep(arg) : null;
+    const DANGEROUS_MODS = ['child_process', 'fs', 'net', 'dns', 'http', 'https', 'tls'];
+    const severity = modName && DANGEROUS_MODS.includes(modName) ? 'CRITICAL' : 'HIGH';
+    ctx.threats.push({
+      type: 'require_process_mainmodule',
+      severity,
+      message: `require('process').mainModule.require(${modName ? "'" + modName + "'" : '...'}) — indirect process access bypasses direct process.mainModule detection.`,
+      file: ctx.relFile
+    });
+  }
+
   // Detect exec/execSync with dangerous shell commands (direct or via MemberExpression)
   const execName = callName === 'exec' || callName === 'execSync' ? callName : null;
   const memberExec = !execName && node.callee.type === 'MemberExpression' &&
@@ -2042,6 +2064,22 @@ function handleCallExpression(node, ctx) {
           });
         }
       }
+
+      // B3: (function(){}).constructor('code')() — direct prototype chain Function access
+      // Also: [].constructor.constructor, ''.constructor.constructor, (0).constructor.constructor
+      if (obj?.type === 'FunctionExpression' || obj?.type === 'ArrowFunctionExpression' ||
+          obj?.type === 'ArrayExpression' || obj?.type === 'Literal') {
+        if (!hasOnlyStringLiteralArgs(node)) {
+          ctx.hasEvalInFile = true;
+          ctx.hasDynamicExec = true;
+          ctx.threats.push({
+            type: 'function_prototype_constructor',
+            severity: 'CRITICAL',
+            message: `Function constructor via prototype chain: (${obj.type === 'FunctionExpression' ? 'function(){}' : obj.type === 'ArrayExpression' ? '[]' : 'literal'}).constructor(code) — bypasses Function/eval detection.`,
+            file: ctx.relFile
+          });
+        }
+      }
     }
 
     // SANDWORM_MODE: Track writeFileSync/writeFile to temp paths
@@ -2164,7 +2202,35 @@ function handleCallExpression(node, ctx) {
           file: ctx.relFile
         });
       }
+      // B1: Reflect.apply(require, null, ['child_process']) — bypasses require() call detection
+      if (target.type === 'Identifier' && target.name === 'require') {
+        const argsArray = node.arguments[2];
+        let modName = null;
+        if (argsArray?.type === 'ArrayExpression' && argsArray.elements.length > 0) {
+          modName = extractStringValueDeep(argsArray.elements[0]);
+        }
+        const severity = modName && ['child_process', 'fs', 'net', 'dns', 'http', 'https'].includes(modName)
+          ? 'CRITICAL' : 'HIGH';
+        ctx.threats.push({
+          type: 'reflect_apply_require',
+          severity,
+          message: `Reflect.apply(require, null, [${modName ? "'" + modName + "'" : '...'}]) — indirect require() bypasses static call detection.`,
+          file: ctx.relFile
+        });
+      }
     }
+  }
+
+  // B4: __defineGetter__ / __defineSetter__ — prototype pollution via legacy API
+  if (node.callee.type === 'MemberExpression' &&
+      node.callee.property?.type === 'Identifier' &&
+      (node.callee.property.name === '__defineGetter__' || node.callee.property.name === '__defineSetter__')) {
+    ctx.threats.push({
+      type: 'prototype_pollution',
+      severity: 'HIGH',
+      message: `${node.callee.property.name}() called — legacy prototype pollution API can hijack property access on any object.`,
+      file: ctx.relFile
+    });
   }
 
   // Batch 1: process.binding('spawn_sync'/'fs') / process._linkedBinding(...)
@@ -2334,6 +2400,37 @@ function handleNewExpression(node, ctx) {
       }
     }
   }
+
+  // B2: new FinalizationRegistry(callback) — deferred execution after GC
+  // Malicious pattern: callback contains require('child_process') or exec/spawn
+  if (node.callee.type === 'Identifier' && node.callee.name === 'FinalizationRegistry' &&
+      node.arguments.length >= 1) {
+    const callback = node.arguments[0];
+    if (callback) {
+      // Check if callback body contains dangerous patterns
+      let hasDangerousBody = false;
+      const cbSource = callback.start !== undefined && callback.end !== undefined
+        ? ctx._sourceCode?.slice(callback.start, callback.end) : null;
+      if (cbSource && /\b(child_process|exec|execSync|spawn|spawnSync)\b/.test(cbSource)) {
+        hasDangerousBody = true;
+      }
+      // Also flag if the callback is a variable known to be dangerous
+      if (callback.type === 'Identifier' && ctx.evalAliases?.has(callback.name)) {
+        hasDangerousBody = true;
+      }
+      if (hasDangerousBody) {
+        ctx.hasDynamicExec = true;
+        ctx.threats.push({
+          type: 'finalization_registry_exec',
+          severity: 'CRITICAL',
+          message: 'new FinalizationRegistry() with dangerous callback — deferred code execution triggered by garbage collection, evades synchronous analysis.',
+          file: ctx.relFile
+        });
+      } else {
+        ctx.hasFinalizationRegistry = true;
+      }
+    }
+  }
 }
 
 function handleLiteral(node, ctx) {
@@ -2463,6 +2560,55 @@ function handleAssignmentExpression(node, ctx) {
     }
   }
 
+  // B6: Symbol property hiding — obj[Symbol(...)] = require('child_process')
+  if (node.left?.type === 'MemberExpression' && node.left.computed &&
+      node.left.property?.type === 'CallExpression' &&
+      node.left.property.callee?.type === 'Identifier' && node.left.property.callee.name === 'Symbol') {
+    // Check if the right side is require('child_process') or similar dangerous module
+    let isDangerous = false;
+    let modName = null;
+    if (node.right?.type === 'CallExpression' && getCallName(node.right) === 'require' &&
+        node.right.arguments?.[0]?.type === 'Literal') {
+      const rawMod = node.right.arguments[0].value;
+      modName = typeof rawMod === 'string' && rawMod.startsWith('node:') ? rawMod.slice(5) : rawMod;
+      if (['child_process', 'fs', 'net', 'dns', 'http', 'https'].includes(modName)) {
+        isDangerous = true;
+      }
+    }
+    // Also detect: obj[Symbol('x')] = eval / Function / exec
+    if (node.right?.type === 'Identifier' && ['eval', 'Function'].includes(node.right.name)) {
+      isDangerous = true;
+    }
+    if (isDangerous) {
+      ctx.threats.push({
+        type: 'symbol_property_hiding',
+        severity: 'HIGH',
+        message: `Dangerous module/function hidden behind Symbol property — obj[Symbol(...)] = ${modName ? "require('" + modName + "')" : node.right?.name || '...'}, evades string-based property enumeration.`,
+        file: ctx.relFile
+      });
+    }
+  }
+
+  // B5: Module.wrap = ... or require('module').wrap = ... — module wrapper override
+  if (node.left?.type === 'MemberExpression' &&
+      node.left.property?.type === 'Identifier' && node.left.property.name === 'wrap') {
+    const obj = node.left.object;
+    // Direct: Module.wrap = ... (where Module was imported via require('module'))
+    const isModuleObj = (obj?.type === 'Identifier' && ctx.moduleAliases?.has(obj.name)) ||
+      (obj?.type === 'Identifier' && obj.name === 'Module');
+    // Inline: require('module').wrap = ...
+    const isInlineRequire = obj?.type === 'CallExpression' && getCallName(obj) === 'require' &&
+      obj.arguments?.[0]?.type === 'Literal' && obj.arguments[0].value === 'module';
+    if (isModuleObj || isInlineRequire) {
+      ctx.threats.push({
+        type: 'module_wrap_override',
+        severity: 'CRITICAL',
+        message: 'Module.wrap overridden — module wrapper function hijacked, allows injecting code into every loaded module.',
+        file: ctx.relFile
+      });
+    }
+  }
+
   // Detect object property indirection: obj.exec = require('child_process').exec
   // or obj.fn = eval — stashing dangerous functions in object properties
   if (node.left?.type === 'MemberExpression' && node.right) {
@@ -2515,6 +2661,17 @@ function handleAssignmentExpression(node, ctx) {
         });
       }
     }
+  }
+
+  // B4: Prototype pollution — __proto__ assignment
+  if (node.left?.type === 'MemberExpression' && !node.left.computed &&
+      node.left.property?.type === 'Identifier' && node.left.property.name === '__proto__') {
+    ctx.threats.push({
+      type: 'prototype_pollution',
+      severity: 'HIGH',
+      message: `__proto__ assignment on ${node.left.object?.name || 'object'} — prototype pollution can hijack inherited properties across all objects.`,
+      file: ctx.relFile
+    });
   }
 
   if (node.left?.type === 'MemberExpression') {
@@ -3021,6 +3178,16 @@ function handlePostWalk(ctx) {
       file: ctx.relFile
     });
   }
+
+  // B2 compound: FinalizationRegistry + exec/network in same file = deferred malicious execution
+  if (ctx.hasFinalizationRegistry && ctx.hasDynamicExec) {
+    ctx.threats.push({
+      type: 'finalization_registry_exec',
+      severity: 'CRITICAL',
+      message: 'FinalizationRegistry + dynamic execution in same file — deferred code execution triggered by garbage collection.',
+      file: ctx.relFile
+    });
+  }
 }
 
 function handleWithStatement(node, ctx) {
@@ -3046,6 +3213,22 @@ function handleWithStatement(node, ctx) {
         type: 'dynamic_require',
         severity: 'HIGH',
         message: 'with(require(...)) — scope injection with dynamic module. Evasion technique.',
+        file: ctx.relFile
+      });
+    }
+    return; // Already handled as direct with(require(...))
+  }
+
+  // B7: with(obj) { ... require('child_process') ... } — body contains dangerous require/exec
+  // The with statement itself is rare in modern code; combined with dangerous APIs in body = evasion
+  if (node.body) {
+    const bodySource = node.body.start !== undefined && node.body.end !== undefined
+      ? ctx._sourceCode?.slice(node.body.start, node.body.end) : null;
+    if (bodySource && /\b(require\s*\(\s*['"]child_process['"]\s*\)|child_process|exec\s*\(|execSync\s*\(|spawn\s*\()/.test(bodySource)) {
+      ctx.threats.push({
+        type: 'with_body_dangerous',
+        severity: 'HIGH',
+        message: 'with() statement body contains require/exec/spawn — scope injection used to obscure dangerous API calls.',
         file: ctx.relFile
       });
     }

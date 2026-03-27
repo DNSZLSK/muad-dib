@@ -7,6 +7,120 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.10.21] - 2026-03-27
+
+### Added
+- **Centralized HTTP limiter**: 10 max concurrent registry requests via shared semaphore
+
+### Changed
+- Tests: 2743 → **2793** (+50) across 57 files
+- Rules: **176** (171 RULES + 5 PARANOID)
+
+## [2.10.20] - 2026-03-27
+
+### Fixed
+- **OOM fix**: Memory leak prevention in large package scans
+- HTTP semaphore deadlock prevention
+- Negative cache for failed registry lookups (avoids retry storms)
+
+## [2.10.19] - 2026-03-26
+
+### Fixed
+- HTTP response cache for parallel temporal checks
+- Registry request deduplication (same package fetched once)
+- Parallel temporal check race conditions
+
+## [2.10.18] - 2026-03-26
+
+### Added
+- **Scan performance P1-P6**: Worker threads for CPU-bound scanners, dist/ directory exclusion, AST/file content caches
+
+### Changed
+- Significant scan speed improvement on large packages
+
+## [2.10.17] - 2026-03-26
+
+### Fixed
+- Static scan timeout raised to 45s (was 30s, insufficient for large packages)
+- Size cap reduced to 10MB (was 20MB) for faster scans
+- Quick scan mode for overflow files beyond cap
+
+## [2.10.16] - 2026-03-25
+
+### Fixed
+- Lifecycle T1a refinement: more precise sandbox triage
+- TIER1_TYPES LOW severity filter (exclude LOW threats from T1 classification)
+
+## [2.10.15] - 2026-03-25
+
+### Added
+- **T1a/T1b sandbox triage**: Split T1 zone into T1a (likely malicious, sandbox) and T1b (likely benign, skip)
+- `mlFiltered` counter reset between daily report cycles
+
+## [2.10.14] - 2026-03-25
+
+### Added
+- **LiteLLM/TeamPCP IOCs**: Compromised LiteLLM versions and TeamPCP indicators added to builtin YAML
+- `.pth` persistence detection (AST-061): Python .pth auto-exec persistence (LiteLLM/Checkmarx pattern)
+
+## [2.10.13] - 2026-03-24
+
+### Fixed
+- IOC PRE-ALERT version-aware matching: check specific version before wildcard match
+
+## [2.10.12] - 2026-03-24
+
+### Added
+- **TeamPCP/CanisterWorm detection rules**:
+  - `systemd_persistence` (AST-059): systemd service creation (CanisterWorm pgmon.service, TeamPCP sysmon.service)
+  - `npm_token_steal` (AST-060): npm config get _authToken extraction (CanisterWorm worm propagation)
+  - `root_filesystem_wipe` (SHELL-020): rm -rf / detection (CanisterWorm kamikaze.sh)
+  - `proc_mem_scan` (SHELL-021): /proc/*/mem scanning (TeamPCP credential stealer)
+
+### Changed
+- Rules: 158 → **163** (158 RULES + 5 PARANOID → 163 RULES + 5 PARANOID)
+
+## [2.10.11] - 2026-03-24
+
+### Fixed
+- Migrate npm changes stream to `/registry/_changes` endpoint (npm deprecated old stream API)
+
+## [2.10.10] - 2026-03-23
+
+### Fixed
+- R2 `isSDKPattern` credential suffix heuristic: reduce false positives on SDK packages sending credentials to their own API
+- R4 dataflow MEDIUM cap: prevent env-only dataflow from escalating to HIGH
+
+## [2.10.9] - 2026-03-23
+
+### Fixed
+- `suspicious_dataflow` severity graduation: HIGH → MEDIUM for env/telemetry-only sources (reduces FP noise)
+
+## [2.10.8] - 2026-03-23
+
+### Fixed
+- ML webhook guard: prevent ML classifier from overriding IOC-confirmed alerts
+- Suppress ALL-LOW override: packages with only LOW threats no longer trigger webhook
+- Skip dataset tests gracefully when adversarial/holdout samples not present
+
+### Security
+- Self-host highlight.js in HTML reports (remove CDN dependency)
+- Adversarial samples and bypass docs moved to private repo (gitignored)
+
+## [2.10.7] - 2026-03-22
+
+### Added
+- **Sandbox libfaketime**: Time acceleration for Python/bash evasion detection (CanisterWorm time-bomb patterns)
+
+### Security
+- Self-host highlight.js, remove external CDN dependency in HTML report
+
+## [2.10.6] - 2026-03-22
+
+### Fixed
+- ML1 suppression override: packages with ML1 probability >= 0.90 bypass suppression
+- IOC fallback webhook: send alert even when ML classifier would suppress
+
 ## [2.10.5] - 2026-03-22
 
 ### Added

@@ -99,13 +99,13 @@ function resetMaxFileSize() { _maxFileSize = MAX_FILE_SIZE; }
 const ACORN_OPTIONS = { ecmaVersion: 2024, sourceType: 'module', allowHashBang: true };
 
 const acorn = require('acorn');
+const crypto = require('crypto');
 
 /**
  * AST parse cache — same content+options returns the same AST.
  * Scanners do not mutate AST nodes (verified: only read comparisons).
  * Cleared between scans via clearASTCache().
- * Key = code.length + '|' + optionsKey + '|' + code.slice(0,128) + code.slice(-64)
- * (length-prefixed partial key for fast Map lookup; collisions resolved by full WeakRef check)
+ * Key = sha256(code) + '|' + optionsKey (collision-free content-addressable key)
  */
 const _astCache = new Map();
 const _AST_CACHE_MAX = 600; // Max entries (one scan ≈ 500 files max)
@@ -117,9 +117,9 @@ const _AST_CACHE_MAX = 600; // Max entries (one scan ≈ 500 files max)
  * Returns AST or null if both modes fail.
  */
 function safeParse(code, extraOptions = {}) {
-  // Build cache key: options signature + content fingerprint
+  // Build cache key: sha256 content hash + options signature
   const optKey = Object.keys(extraOptions).length === 0 ? '' : JSON.stringify(extraOptions);
-  const cacheKey = code.length + '|' + optKey + '|' + code.slice(0, 128) + code.slice(-64);
+  const cacheKey = crypto.createHash('sha256').update(code).digest('hex') + '|' + optKey;
 
   const cached = _astCache.get(cacheKey);
   if (cached !== undefined) return cached;

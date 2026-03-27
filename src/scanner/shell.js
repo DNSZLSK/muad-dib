@@ -6,15 +6,15 @@ const { MAX_FILE_SIZE, getMaxFileSize } = require('../shared/constants.js');
 const SHELL_EXCLUDED_DIRS = ['node_modules', '.git', '.muaddib-cache'];
 
 const MALICIOUS_PATTERNS = [
-  { pattern: /curl.*\|.*sh/m, name: 'curl_pipe_shell', severity: 'HIGH' },
-  { pattern: /wget.*&&.*chmod.*\+x/m, name: 'wget_chmod_exec', severity: 'HIGH' },
+  { pattern: /curl[^\n]{0,5000}\|[^\n]{0,5000}sh/m, name: 'curl_pipe_shell', severity: 'HIGH' },
+  { pattern: /wget[^\n]{0,5000}&&[^\n]{0,5000}chmod[^\n]{0,5000}\+x/m, name: 'wget_chmod_exec', severity: 'HIGH' },
   { pattern: /bash\s+-i\s+>&\s+\/dev\/tcp/m, name: 'reverse_shell', severity: 'CRITICAL' },
   { pattern: /nc\s+-e\s+\/bin\/(ba)?sh/m, name: 'netcat_shell', severity: 'CRITICAL' },
   { pattern: /rm\s+-rf\s+(~\/|\$HOME|\/home)/m, name: 'home_deletion', severity: 'CRITICAL' },
   { pattern: /shred.*\$HOME/m, name: 'shred_home', severity: 'CRITICAL' },
-  { pattern: /curl.*-X\s*POST.*-d/m, name: 'curl_exfiltration', severity: 'HIGH' },
-  { pattern: /(?:cat|readFile|cp|mv|curl\s+file:\/\/|tar\s+.*|scp\s+).*\.npmrc/m, name: 'npmrc_access', severity: 'HIGH' },
-  { pattern: /(?:cat|readFile|cp|mv|curl\s+file:\/\/|tar\s+.*|scp\s+).*\.ssh/m, name: 'ssh_access', severity: 'HIGH' },
+  { pattern: /curl[^\n]{0,5000}-X\s*POST[^\n]{0,5000}-d/m, name: 'curl_exfiltration', severity: 'HIGH' },
+  { pattern: /(?:cat|readFile|cp|mv|curl\s+file:\/\/|tar\s+[^\n]{0,5000}|scp\s+)[^\n]{0,5000}\.npmrc/m, name: 'npmrc_access', severity: 'HIGH' },
+  { pattern: /(?:cat|readFile|cp|mv|curl\s+file:\/\/|tar\s+[^\n]{0,5000}|scp\s+)[^\n]{0,5000}\.ssh/m, name: 'ssh_access', severity: 'HIGH' },
   { pattern: /python\s+-c.*import\s+socket/m, name: 'python_reverse_shell', severity: 'CRITICAL' },
   { pattern: /perl\s+-e.*socket/m, name: 'perl_reverse_shell', severity: 'CRITICAL' },
   { pattern: /mkfifo.*\/dev\/tcp/m, name: 'fifo_reverse_shell', severity: 'CRITICAL' },

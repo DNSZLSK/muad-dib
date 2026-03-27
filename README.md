@@ -30,7 +30,7 @@
 
 npm and PyPI supply-chain attacks are exploding. Shai-Hulud compromised 25K+ repos in 2025. Existing tools detect threats but don't help you respond.
 
-MUAD'DIB combines **14 parallel scanners** (162 detection rules), a **deobfuscation engine**, **inter-module dataflow analysis**, **compound scoring**, **ML classifiers** (XGBoost), and Docker sandbox to detect known threats and suspicious behavioral patterns in npm and PyPI packages.
+MUAD'DIB combines **14 parallel scanners** (176 detection rules), a **deobfuscation engine**, **inter-module dataflow analysis**, **compound scoring**, **ML classifiers** (XGBoost), and Docker sandbox to detect known threats and suspicious behavioral patterns in npm and PyPI packages.
 
 ---
 
@@ -136,7 +136,7 @@ Ultra-strict detection with lower tolerance. Detects any network access, subproc
 muaddib scan . --webhook "https://discord.com/api/webhooks/..."
 ```
 
-Strict filtering (v2.1.2): alerts only for IOC matches, sandbox-confirmed threats, or canary token exfiltration. Priority triage (v2.10.5): P1 (red, IOC/sandbox/canary), P2 (orange, high-score/compounds), P3 (yellow, rest).
+Strict filtering (v2.1.2): alerts only for IOC matches, sandbox-confirmed threats, or canary token exfiltration. Priority triage (v2.10.21): P1 (red, IOC/sandbox/canary), P2 (orange, high-score/compounds), P3 (yellow, rest).
 
 ### Behavioral anomaly detection (v2.0)
 
@@ -195,9 +195,9 @@ muaddib replay                     # Ground truth validation (46/49 TPR)
 | GitHub Actions | Shai-Hulud backdoor detection |
 | Hash Scanner | Known malicious file hashes |
 
-### 162 detection rules
+### 176 detection rules
 
-All rules are mapped to MITRE ATT&CK techniques. See [SECURITY.md](SECURITY.md#detection-rules-v2105) for the complete rules reference.
+All rules are mapped to MITRE ATT&CK techniques. See [SECURITY.md](SECURITY.md#detection-rules-v21021) for the complete rules reference.
 
 ### Detected campaigns
 
@@ -271,7 +271,7 @@ With pre-commit framework:
 ```yaml
 repos:
   - repo: https://github.com/DNSZLSK/muad-dib
-    rev: v2.6.6
+    rev: v2.10.21
     hooks:
       - id: muaddib-scan
 ```
@@ -284,11 +284,11 @@ repos:
 |--------|--------|---------|
 | **Wild TPR** (Datadog 17K) | **92.8%** (13,538/14,587 in-scope) | 17,922 packages. 3,335 skipped (no JS). By category: compromised_lib 97.8%, malicious_intent 92.1% |
 | **TPR** (Ground Truth) | **93.9%** (46/49) | 51 real attacks. 3 out-of-scope: browser-only |
-| **FPR** (Benign curated) | **11.0%** (58/529) | 529 npm packages, real source via `npm pack` |
+| **FPR** (Benign curated) | **10.6%** (56/529) | 529 npm packages, real source via `npm pack` |
 | **FPR** (Benign random) | **7.5%** (15/200) | 200 random npm packages, stratified sampling |
-| **ADR** (Adversarial + Holdout) | **96.3%** (103/107) | 67 adversarial + 40 holdout (107 available on disk), global threshold=20 |
+| **ADR** (Adversarial + Holdout) | **94.0%** (101/107) | 67 adversarial + 40 holdout (107 available on disk), global threshold=20 |
 
-**2643 tests** across 57 files. **162 rules** (157 RULES + 5 PARANOID).
+**2793 tests** across 57 files. **176 rules** (171 RULES + 5 PARANOID).
 
 > **Methodology caveats:**
 > - TPR measured on 49 Node.js attack samples (3 browser-only excluded from 51 total)
@@ -329,11 +329,11 @@ npm test
 
 ### Testing
 
-- **2643 tests** across 57 modular test files
+- **2793 tests** across 57 modular test files
 - **56 fuzz tests** - Malformed inputs, ReDoS, unicode, binary
 - **Datadog 17K benchmark** - 14,587 confirmed malware samples (in-scope)
 - **Ground truth validation** - 51 real-world attacks (93.9% TPR)
-- **False positive validation** - 11.0% FPR on 529 curated npm packages, 7.5% on 200 random
+- **False positive validation** - 10.6% FPR on 529 curated npm packages, 7.5% on 200 random
 
 ---
 
@@ -351,7 +351,7 @@ npm test
 - [Evaluation Methodology](docs/EVALUATION_METHODOLOGY.md) - Experimental protocol, holdout scores
 - [Threat Model](docs/threat-model.md) - What MUAD'DIB detects and doesn't detect
 - [Adversarial Evaluation](ADVERSARIAL.md) - Red team samples and ADR results
-- [Security Policy](SECURITY.md) - Detection rules reference (162 rules)
+- [Security Policy](SECURITY.md) - Detection rules reference (176 rules)
 - [Security Audit](docs/SECURITY_AUDIT.md) - Bypass validation report
 - [FP Analysis](docs/EVALUATION.md) - Historical false positive analysis
 

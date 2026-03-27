@@ -698,6 +698,48 @@ const PLAYBOOKS = {
     'dans ~/.config/sysmon/ et exfiltre vers checkmarx.zone. ' +
     'Verifier: find $(python -c "import site; print(site.getsitepackages()[0])") -name "*.pth" -exec cat {} \\; ' +
     'Supprimer tout fichier .pth non standard. Rotation des credentials.',
+
+  // Audit v3 Bypass Playbooks (AST-062 to AST-069)
+  reflect_apply_require:
+    'CRITIQUE: Reflect.apply(require, null, [module]) detecte — contournement de require() via Reflect API. ' +
+    'Aucun package legitime ne charge des modules via Reflect.apply. ' +
+    'Supprimer le package. Auditer les modules charges dynamiquement.',
+
+  finalization_registry_exec:
+    'CRITIQUE: FinalizationRegistry avec callback dangereux (child_process/exec/spawn). ' +
+    'Le callback s\'execute apres le garbage collection, hors du flux synchrone — evasion sandbox. ' +
+    'Aucun usage legitime ne combine FinalizationRegistry avec des appels systeme. Supprimer le package.',
+
+  function_prototype_constructor:
+    'CRITIQUE: Acces au constructeur Function via chaine de prototypes — (function(){}).constructor(code) ' +
+    'ou [].constructor.constructor(code). Equivalent a eval() mais invisible aux detections statiques de eval/Function. ' +
+    'Supprimer le package. Aucun usage legitime.',
+
+  prototype_pollution:
+    'HAUTE: Pollution de prototype detectee (__proto__, __defineGetter__, __defineSetter__). ' +
+    'Peut detourner les proprietes heritees de tous les objets du runtime. ' +
+    'Verifier si le code modifie Object.prototype ou des prototypes de classes natives. ' +
+    'Si combine avec du code d\'execution dynamique, traiter comme CRITIQUE.',
+
+  module_wrap_override:
+    'CRITIQUE: Module.wrap remplace — la fonction wrapper du module loader est detournee. ' +
+    'Tout module charge apres cette modification execute du code injecte. ' +
+    'Aucun package legitime ne remplace Module.wrap. Supprimer immediatement.',
+
+  symbol_property_hiding:
+    'HAUTE: Module dangereux cache derriere une propriete Symbol. ' +
+    'Invisible a Object.keys(), JSON.stringify() et for...in. Technique anti-forensics. ' +
+    'Auditer toutes les proprietes Symbol du module. Supprimer si combine avec child_process/fs.',
+
+  with_body_dangerous:
+    'HAUTE: with() statement avec require/exec/spawn dans le body. ' +
+    'Le with() rend les identifiants ambigus, empechant l\'analyse statique. ' +
+    'Aucun code moderne legitime n\'utilise with(). Supprimer le package.',
+
+  require_process_mainmodule:
+    'CRITIQUE: require("process").mainModule.require() detecte — contournement de la detection ' +
+    'process.mainModule.require() via require("process") au lieu de l\'objet global. ' +
+    'Aucun package legitime n\'utilise ce pattern. Supprimer immediatement.',
 };
 
 function getPlaybook(threatType) {

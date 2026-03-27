@@ -209,7 +209,7 @@ function loadCachedIOCs() {
     files: yamlIOCs.files.map(function(f) { return f.name; })
   };
 
-  // Priority 2: Local scraped IOCs (full enriched file)
+  // Priority 2a: Local scraped IOCs (full enriched file)
   if (fs.existsSync(LOCAL_IOC_FILE)) {
     try {
       const localIOCs = JSON.parse(fs.readFileSync(LOCAL_IOC_FILE, 'utf8'));
@@ -217,8 +217,10 @@ function loadCachedIOCs() {
     } catch (e) {
       console.log('[WARN] Failed to load IOC database (iocs.json): ' + e.message);
     }
-  } else if (fs.existsSync(LOCAL_COMPACT_FILE)) {
-    // Priority 2b: Compact file (shipped in npm, lightweight)
+  }
+
+  // Priority 2b: Always merge compact file (contains manual IOCs not in full — TeamPCP, LiteLLM, etc.)
+  if (fs.existsSync(LOCAL_COMPACT_FILE)) {
     try {
       const compactData = JSON.parse(fs.readFileSync(LOCAL_COMPACT_FILE, 'utf8'));
       const expandedIOCs = expandCompactIOCs(compactData);
@@ -315,7 +317,9 @@ function createOptimizedIOCs(iocs) {
       const versions = pkg.version.split(',').map(v => v.trim()).filter(Boolean);
       for (const ver of versions) {
         const entry = Object.assign({}, pkg, { version: ver });
-        if (ver === '*') pypiWildcardPackages.add(pkg.name);
+        if (ver === '*' && !NEVER_WILDCARD_PYPI.has(pkg.name)) {
+          pypiWildcardPackages.add(pkg.name);
+        }
         if (!pypiPackagesMap.has(pkg.name)) pypiPackagesMap.set(pkg.name, []);
         pypiPackagesMap.get(pkg.name).push(entry);
       }
@@ -323,7 +327,10 @@ function createOptimizedIOCs(iocs) {
     }
 
     if (pkg.version === '*') {
-      pypiWildcardPackages.add(pkg.name);
+      // Defense-in-depth: NEVER_WILDCARD_PYPI packages must not be wildcarded
+      if (!NEVER_WILDCARD_PYPI.has(pkg.name)) {
+        pypiWildcardPackages.add(pkg.name);
+      }
     }
 
     if (!pypiPackagesMap.has(pkg.name)) {
@@ -377,6 +384,13 @@ const NEVER_WILDCARD = new Set([
   'posthog-node', 'posthog-js', 'ngx-bootstrap', '@asyncapi/specs'
 ]);
 
+// PyPI equivalent: legitimate packages where only specific versions were compromised.
+// These are among the most popular PyPI packages — wildcarding them would cause mass FPs.
+const NEVER_WILDCARD_PYPI = new Set([
+  'flask', 'django', 'requests', 'numpy', 'pandas',
+  'scipy', 'tensorflow', 'torch', 'fastapi', 'uvicorn'
+]);
+
 function generateCompactIOCs(fullIOCs) {
   const wildcards = [];
   const versioned = Object.create(null);
@@ -416,6 +430,7 @@ function generateCompactIOCs(fullIOCs) {
 
   for (const p of fullIOCs.pypi_packages || []) {
     if (p.version === '*') {
+      if (NEVER_WILDCARD_PYPI.has(p.name)) continue;
       pypiWildcards.push(p.name);
     } else {
       if (!pypiVersioned[p.name]) pypiVersioned[p.name] = [];
@@ -481,9 +496,13 @@ function expandCompactIOCs(compact) {
     }
   }
 
-  // Expand PyPI wildcards
+  // Expand PyPI wildcards (deduplicate via Set, enforce NEVER_WILDCARD_PYPI)
   const pypiPackages = [];
+  const seenPyPIWildcards = new Set();
   for (const name of compact.pypi_wildcards || []) {
+    if (seenPyPIWildcards.has(name)) continue;
+    if (NEVER_WILDCARD_PYPI.has(name)) continue;
+    seenPyPIWildcards.add(name);
     pypiPackages.push({ name: name, version: '*', severity: defaultSev });
   }
 
@@ -593,4 +612,4 @@ function verifyIOCHMAC(data, hmac) {
   }
 }
 
-module.exports = { updateIOCs, loadCachedIOCs, invalidateCache, generateCompactIOCs, expandCompactIOCs, mergeIOCs, createOptimizedIOCs, generateIOCHMAC, verifyIOCHMAC, checkIOCStaleness, NEVER_WILDCARD };
+module.exports = { updateIOCs, loadCachedIOCs, invalidateCache, generateCompactIOCs, expandCompactIOCs, mergeIOCs, createOptimizedIOCs, generateIOCHMAC, verifyIOCHMAC, checkIOCStaleness, NEVER_WILDCARD, NEVER_WILDCARD_PYPI };

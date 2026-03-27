@@ -7,7 +7,6 @@ const AdmZip = require('adm-zip');
 const IOC_FILE = path.join(__dirname, 'data/iocs.json');
 const COMPACT_IOC_FILE = path.join(__dirname, 'data/iocs-compact.json');
 const HOME_IOC_FILE = path.join(os.homedir(), '.muaddib', 'data', 'iocs.json');
-const STATIC_IOCS_FILE = path.join(__dirname, '../../data/static-iocs.json');
 const { generateCompactIOCs, NEVER_WILDCARD } = require('./updater.js');
 const { Spinner } = require('../utils.js');
 const { NPM_PACKAGE_REGEX } = require('../shared/constants.js');
@@ -142,17 +141,6 @@ function parseCSV(csvContent, hasHeader = true) {
   }
 
   return results;
-}
-
-function loadStaticIOCs() {
-  try {
-    if (fs.existsSync(STATIC_IOCS_FILE)) {
-      return JSON.parse(fs.readFileSync(STATIC_IOCS_FILE, 'utf8'));
-    }
-  } catch (e) {
-    console.log(`[WARN] Error loading static-iocs.json: ${e.message}`);
-  }
-  return { socket: [], phylum: [], npmRemoved: [] };
 }
 
 const MAX_REDIRECTS = 5;
@@ -973,124 +961,6 @@ async function scrapeGitHubAdvisory() {
 }
 
 // ============================================
-// SOURCE 5: Static IOCs (Socket, Phylum, npm removed)
-// Local file maintained manually
-// ============================================
-async function scrapeStaticIOCs() {
-  console.log('[SCRAPER] Static IOCs (local file)...');
-  const packages = [];
-  const staticIOCs = loadStaticIOCs();
-  
-  // Socket.dev reports
-  for (const pkg of staticIOCs.socket || []) {
-    if (!pkg.version) continue; // Skip entries without version — avoids wildcard cascade
-    packages.push({
-      id: `SOCKET-${pkg.name}`,
-      name: pkg.name,
-      version: pkg.version,
-      severity: pkg.severity || 'critical',
-      confidence: 'high',
-      source: 'socket-dev',
-      description: pkg.description || 'Malicious package reported by Socket.dev',
-      references: ['https://socket.dev/npm/package/' + pkg.name],
-      mitre: 'T1195.002',
-      freshness: createFreshness('socket', 'high')
-    });
-  }
-  
-  // Phylum Research
-  for (const pkg of staticIOCs.phylum || []) {
-    if (!pkg.version) continue; // Skip entries without version — avoids wildcard cascade
-    packages.push({
-      id: `PHYLUM-${pkg.name}`,
-      name: pkg.name,
-      version: pkg.version,
-      severity: pkg.severity || 'critical',
-      confidence: 'high',
-      source: 'phylum',
-      description: pkg.description || 'Malicious package reported by Phylum Research',
-      references: ['https://blog.phylum.io'],
-      mitre: 'T1195.002',
-      freshness: createFreshness('phylum', 'high')
-    });
-  }
-  
-  // npm removed packages
-  for (const pkg of staticIOCs.npmRemoved || []) {
-    if (!pkg.version) continue; // Skip entries without version — avoids wildcard cascade
-    packages.push({
-      id: `NPM-REMOVED-${pkg.name}`,
-      name: pkg.name,
-      version: pkg.version,
-      severity: 'critical',
-      confidence: 'high',
-      source: 'npm-removed',
-      description: 'Removed from npm: ' + (pkg.reason || 'security violation'),
-      references: ['https://www.npmjs.com/policies/security'],
-      mitre: 'T1195.002',
-      freshness: createFreshness('npm-removed', 'medium')
-    });
-  }
-  
-  console.log(`[SCRAPER]   ${packages.length} packages`);
-  return packages;
-}
-
-// ============================================
-// SOURCE 6: Snyk Known Malware
-// Historical attacks database
-// ============================================
-async function scrapeSnykMalware() {
-  console.log('[SCRAPER] Snyk Malware DB...');
-  const packages = [];
-  
-  const knownSnykMalware = [
-    { name: 'event-stream', version: '3.3.6', description: 'Flatmap-stream backdoor (2018)' },
-    { name: 'flatmap-stream', version: '*', description: 'Malicious dependency of event-stream' },
-    { name: 'eslint-scope', version: '3.7.2', description: 'Credential theft (2018)' },
-    { name: 'eslint-config-eslint', version: '5.0.2', description: 'Credential theft (2018)' },
-    { name: 'getcookies', version: '*', description: 'Backdoor malware' },
-    { name: 'mailparser', version: '2.3.0', description: 'Compromised version' },
-    { name: 'node-ipc', version: '10.1.1', description: 'Protestware - file deletion' },
-    { name: 'node-ipc', version: '10.1.2', description: 'Protestware - file deletion' },
-    { name: 'node-ipc', version: '10.1.3', description: 'Protestware - file deletion' },
-    { name: 'colors', version: '1.4.1', description: 'Protestware - infinite loop' },
-    { name: 'colors', version: '1.4.2', description: 'Protestware - infinite loop' },
-    { name: 'faker', version: '6.6.6', description: 'Protestware - breaking change' },
-    { name: 'ua-parser-js', version: '0.7.29', description: 'Cryptominer injection' },
-    { name: 'ua-parser-js', version: '0.8.0', description: 'Cryptominer injection' },
-    { name: 'ua-parser-js', version: '1.0.0', description: 'Cryptominer injection' },
-    { name: 'coa', version: '2.0.3', description: 'Malicious version' },
-    { name: 'coa', version: '2.0.4', description: 'Malicious version' },
-    { name: 'coa', version: '2.1.1', description: 'Malicious version' },
-    { name: 'coa', version: '2.1.3', description: 'Malicious version' },
-    { name: 'coa', version: '3.0.1', description: 'Malicious version' },
-    { name: 'coa', version: '3.1.3', description: 'Malicious version' },
-    { name: 'rc', version: '1.2.9', description: 'Malicious version' },
-    { name: 'rc', version: '1.3.9', description: 'Malicious version' },
-    { name: 'rc', version: '2.3.9', description: 'Malicious version' },
-  ];
-  
-  for (const pkg of knownSnykMalware) {
-    packages.push({
-      id: ('SNYK-' + pkg.name + '-' + pkg.version).replace(/[^a-zA-Z0-9-]/g, '-'),
-      name: pkg.name,
-      version: pkg.version,
-      severity: 'critical',
-      confidence: 'high',
-      source: 'snyk-known',
-      description: pkg.description,
-      references: ['https://snyk.io/advisor'],
-      mitre: 'T1195.002',
-      freshness: createFreshness('snyk', 'high')
-    });
-  }
-  
-  console.log(`[SCRAPER]   ${packages.length} packages`);
-  return packages;
-}
-
-// ============================================
 // MAIN SCRAPER
 // ============================================
 async function runScraper() {
@@ -1152,8 +1022,6 @@ async function runScraper() {
     scrapeDatadogIOCs(),
     scrapeOSSFMaliciousPackages(osvResult.knownIds),
     scrapeGitHubAdvisory(),
-    scrapeStaticIOCs(),
-    scrapeSnykMalware(),
     scrapeOSVPyPIDataDump()
   ]);
 
@@ -1161,9 +1029,7 @@ async function runScraper() {
   const datadogResult = results[1];
   const ossfPackages = results[2];
   const githubPackages = results[3];
-  const staticPackages = results[4];
-  const snykPackages = results[5];
-  const pypiPackages = results[6];
+  const pypiPackages = results[4];
 
   // Log aggregated warnings
   if (_noVersionSkipCount > 0) {
@@ -1176,9 +1042,7 @@ async function runScraper() {
     ...shaiHuludResult.packages,
     ...datadogResult.packages,
     ...ossfPackages,
-    ...githubPackages,
-    ...staticPackages,
-    ...snykPackages
+    ...githubPackages
   ];
 
   // Merge all hashes
@@ -1326,8 +1190,7 @@ async function runScraper() {
     'github-advisory',
     'socket-dev',
     'phylum',
-    'npm-removed',
-    'snyk-known'
+    'npm-removed'
   ];
 
   // Save enriched (full) IOCs — atomic write via .tmp + rename
@@ -1428,7 +1291,7 @@ module.exports = {
   runScraper, scrapeShaiHuludDetector, scrapeDatadogIOCs,
   // Pure utility functions (exported for testing)
   parseCSVLine, parseCSV, extractVersions, parseOSVEntry,
-  createFreshness, isAllowedRedirect, loadStaticIOCs,
+  createFreshness, isAllowedRedirect,
   validateIOCEntry,
   getNoVersionSkipCount, resetNoVersionSkipCount,
   CONFIDENCE_ORDER, ALLOWED_REDIRECT_DOMAINS,

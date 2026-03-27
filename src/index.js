@@ -27,7 +27,7 @@ const { buildModuleGraph, annotateTaintedExports, detectCrossFileFlows, annotate
 const { computeReachableFiles } = require('./scanner/reachability.js');
 const { runTemporalAnalyses } = require('./temporal-runner.js');
 const { formatOutput } = require('./output-formatter.js');
-const { setExtraExcludes, getExtraExcludes, Spinner, listInstalledPackages, clearFileListCache, wasFilesCapped, debugLog } = require('./utils.js');
+const { setExtraExcludes, getExtraExcludes, Spinner, listInstalledPackages, clearFileListCache, wasFilesCapped, getOverflowFiles, debugLog } = require('./utils.js');
 const { SEVERITY_WEIGHTS, RISK_THRESHOLDS, MAX_RISK_SCORE, isPackageLevelThreat, computeGroupScore, applyFPReductions, applyCompoundBoosts, calculateRiskScore, applyConfigOverrides, resetConfigOverrides, getSeverityWeights } = require('./scoring.js');
 const { resolveConfig } = require('./config.js');
 const { buildIntentPairs } = require('./intent-graph.js');
@@ -480,9 +480,39 @@ async function run(targetPath, options = {}) {
     aiConfigThreats
   ] = scanResult;
 
-  // Emit warning if file count cap was hit
+  // Emit warning if file count cap was hit + quick-scan overflow files
+  const quickScanThreats = [];
   if (wasFilesCapped()) {
-    warnings.push('File count cap reached (500 files) — some files were not scanned. Root-level files were prioritized.');
+    warnings.push('File count cap reached (500 files) — overflow files scanned in quick-scan mode (lifecycle + child_process only).');
+    const overflowFiles = getOverflowFiles();
+    const QUICK_SCAN_PATTERNS = [
+      { re: /\brequire\s*\(\s*['"]child_process['"]\s*\)/, type: 'dangerous_exec', severity: 'HIGH', label: 'require("child_process")' },
+      { re: /\brequire\s*\(\s*['"]node:child_process['"]\s*\)/, type: 'dangerous_exec', severity: 'HIGH', label: 'require("node:child_process")' },
+      { re: /\b(?:exec|execSync|spawn|spawnSync)\s*\(/, type: 'dangerous_exec', severity: 'HIGH', label: 'exec/spawn call' },
+      { re: /\bprocess\.mainModule\b/, type: 'dynamic_require', severity: 'HIGH', label: 'process.mainModule' },
+      { re: /\bModule\._load\b/, type: 'module_load_bypass', severity: 'CRITICAL', label: 'Module._load' }
+    ];
+    for (const filePath of overflowFiles) {
+      try {
+        const stat = fs.statSync(filePath);
+        if (stat.size > getMaxFileSize()) continue;
+        const content = fs.readFileSync(filePath, 'utf8');
+        const relFile = path.relative(targetPath, filePath);
+        for (const pat of QUICK_SCAN_PATTERNS) {
+          if (pat.re.test(content)) {
+            quickScanThreats.push({
+              type: pat.type,
+              severity: pat.severity,
+              message: `[quick-scan] ${pat.label} detected in overflow file.`,
+              file: relFile
+            });
+          }
+        }
+      } catch { /* skip unreadable files */ }
+    }
+    if (quickScanThreats.length > 0) {
+      debugLog(`Quick-scan found ${quickScanThreats.length} threats in ${overflowFiles.length} overflow files`);
+    }
   }
 
   // Stop spinner now that scanning is complete
@@ -494,6 +524,7 @@ async function run(targetPath, options = {}) {
     ...packageThreats,
     ...shellThreats,
     ...astThreats,
+    ...quickScanThreats,
     ...obfuscationThreats,
     ...dependencyThreats,
     ...hashThreats,
