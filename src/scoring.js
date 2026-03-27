@@ -102,8 +102,8 @@ const PACKAGE_LEVEL_TYPES = new Set([
   'shai_hulud_marker', 'suspicious_file',
   'pypi_malicious_package', 'pypi_typosquat_detected',
   'dangerous_api_added_critical', 'dangerous_api_added_high', 'dangerous_api_added_medium',
-  'publish_burst', 'publish_dormant_spike', 'publish_rapid_succession',
-  'maintainer_new_suspicious', 'maintainer_sole_change',
+  'publish_burst', 'dormant_spike', 'rapid_succession',
+  'suspicious_maintainer', 'sole_maintainer_change',
   'sandbox_network_activity', 'sandbox_file_changes', 'sandbox_process_spawns',
   'sandbox_canary_exfiltration',
   // Compound scoring rules — package-level co-occurrences

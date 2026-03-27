@@ -68,9 +68,9 @@ Please include the following information in your report:
 - We aim to release fixes before public disclosure
 - We request a 90-day disclosure window for complex issues
 
-## Detection Rules (v2.10.5)
+## Detection Rules (v2.10.21)
 
-MUAD'DIB uses 14 scanner modules (module-graph pre-analysis + 13 parallel scanners) + 5 behavioral anomaly detection features + ground truth validation, producing 162 rule IDs (157 RULES + 5 PARANOID):
+MUAD'DIB uses 14 scanner modules (module-graph pre-analysis + 13 parallel scanners) + 5 behavioral anomaly detection features + ground truth validation, producing 176 rule IDs (171 RULES + 5 PARANOID):
 
 ### AST Scanner
 
@@ -104,6 +104,9 @@ MUAD'DIB uses 14 scanner modules (module-graph pre-analysis + 13 parallel scanne
 | MUADDIB-SHELL-016 | Curl IFS Variable Evasion (curl$IFS \| sh) | CRITICAL |
 | MUADDIB-SHELL-017 | Eval Curl Command Substitution (eval $(curl)) | CRITICAL |
 | MUADDIB-SHELL-018 | Shell -c Curl Execution (sh -c curl) | HIGH |
+| MUADDIB-SHELL-019 | Python Time Delay Execution (time.sleep >= 100s sandbox evasion) | HIGH |
+| MUADDIB-SHELL-020 | Root Filesystem Wipe (rm -rf /, CanisterWorm kamikaze.sh) | CRITICAL |
+| MUADDIB-SHELL-021 | Process Memory Scanning (/proc/*/mem, TeamPCP credential stealer) | CRITICAL |
 
 ### Package Scanner
 
@@ -154,6 +157,7 @@ MUAD'DIB uses 14 scanner modules (module-graph pre-analysis + 13 parallel scanne
 | MUADDIB-AST-029 | Dynamic Environment Variable Harvesting | HIGH | T1552 |
 | MUADDIB-AST-030 | DNS Chunk Exfiltration | HIGH | T1048 |
 | MUADDIB-AST-031 | LLM API Key Harvesting | MEDIUM | T1552 |
+| MUADDIB-AST-032 | Suspicious C2/Exfiltration Domain | HIGH | T1071.001 |
 | MUADDIB-AST-033 | Steganographic Payload Chain (fetch + decrypt + eval) | CRITICAL | T1027.003 |
 | MUADDIB-AST-034 | Download-Execute Binary (download + chmod + execSync) | CRITICAL | T1105 |
 | MUADDIB-AST-035 | IDE Task Persistence (tasks.json + runOn + writeFileSync) | HIGH | T1546 |
@@ -179,6 +183,18 @@ MUAD'DIB uses 14 scanner modules (module-graph pre-analysis + 13 parallel scanne
 | MUADDIB-AST-055 | Hardcoded Blockchain RPC Endpoint (GlassWorm) | MEDIUM | T1102 |
 | MUADDIB-AST-056 | Module._load() Internal Loader Bypass | CRITICAL | T1059 |
 | MUADDIB-AST-057 | Dangerous Constructor (AsyncFunction/GeneratorFunction via prototype chain) | CRITICAL | T1059.007 |
+| MUADDIB-AST-058 | Split High-Entropy Payload (3+ chunks, combined entropy >= 5.5) | CRITICAL | T1027.002 |
+| MUADDIB-AST-059 | Systemd Service Persistence (CanisterWorm/TeamPCP) | CRITICAL | T1543.002 |
+| MUADDIB-AST-060 | NPM Token Extraction via CLI (CanisterWorm worm propagation) | CRITICAL | T1552.001 |
+| MUADDIB-AST-061 | Python .pth Auto-Exec Persistence (LiteLLM/Checkmarx pattern) | CRITICAL | T1546.004 |
+| MUADDIB-AST-062 | Reflect.apply(require) Bypass | CRITICAL | T1059 |
+| MUADDIB-AST-063 | FinalizationRegistry Deferred Execution | CRITICAL | T1497.003 |
+| MUADDIB-AST-064 | Function via Prototype Chain (.constructor.constructor) | CRITICAL | T1059 |
+| MUADDIB-AST-065 | Prototype Pollution (__defineGetter__/__proto__) | HIGH | T1574 |
+| MUADDIB-AST-066 | Module.wrap Override (systemic code injection) | CRITICAL | T1574.006 |
+| MUADDIB-AST-067 | Symbol Property Hiding (anti-forensics) | HIGH | T1564 |
+| MUADDIB-AST-068 | WithStatement Dangerous Body (scope injection) | HIGH | T1027 |
+| MUADDIB-AST-069 | require("process").mainModule Bypass | CRITICAL | T1059 |
 
 ### AI Config Scanner (v2.2)
 
@@ -194,6 +210,7 @@ MUAD'DIB uses 14 scanner modules (module-graph pre-analysis + 13 parallel scanne
 | MUADDIB-FLOW-002 | Suspicious Module Sink (ws/mqtt/socket.io) | HIGH |
 | MUADDIB-FLOW-003 | Credential Tampering / Cache Poisoning | CRITICAL |
 | MUADDIB-FLOW-004 | Cross-File Dataflow | CRITICAL |
+| MUADDIB-FLOW-005 | Non-HTTP Network Module Sink (ws/mqtt/socket.io) | MEDIUM |
 
 ### Obfuscation Scanner
 
@@ -227,6 +244,7 @@ Co-occurring threat type combinations that never appear in benign packages. Inje
 | MUADDIB-DEP-002 | Suspicious File in Dependency | CRITICAL |
 | MUADDIB-DEP-003 | Shai-Hulud Marker | CRITICAL |
 | MUADDIB-DEP-004 | Lifecycle Script in Dependency | MEDIUM |
+| MUADDIB-DEP-005 | Suspicious Dependency URL (HTTP/ngrok/localhost/private IP) | HIGH |
 
 ### Entropy Scanner
 

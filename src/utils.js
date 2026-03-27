@@ -23,6 +23,7 @@ let _scanRoot = '';
  */
 const _fileListCache = new Map();
 let _filesCapped = false;
+let _overflowFiles = [];
 
 /**
  * File content cache — read each file once, reused across all scanners in a single scan.
@@ -121,6 +122,7 @@ function findFiles(dir, options = {}) {
         return depthA - depthB;
       });
       const capped = result.slice(0, maxFiles);
+      _overflowFiles = result.slice(maxFiles);
       _fileListCache.set(cacheKey, [...capped]);
       _filesCapped = true;
       return capped;
@@ -227,10 +229,15 @@ function clearFileListCache() {
   _fileContentCache.clear();
   clearASTCache();
   _filesCapped = false;
+  _overflowFiles = [];
 }
 
 function wasFilesCapped() {
   return _filesCapped;
+}
+
+function getOverflowFiles() {
+  return _overflowFiles;
 }
 
 /**
@@ -394,6 +401,7 @@ module.exports = {
   findJsFiles,
   clearFileListCache,
   wasFilesCapped,
+  getOverflowFiles,
   escapeHtml,
   getCallName,
   Spinner,

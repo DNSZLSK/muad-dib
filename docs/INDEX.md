@@ -6,7 +6,7 @@
 |----------|-------------|
 | [README](../README.md) | Project overview, installation, usage |
 | [README.fr.md](README.fr.md) | French version of the README |
-| [SECURITY.md](../SECURITY.md) | Security policy, 162 detection rules reference (canonical source) |
+| [SECURITY.md](../SECURITY.md) | Security policy, 176 detection rules reference (canonical source) |
 | [ADVERSARIAL.md](../ADVERSARIAL.md) | Red team adversarial samples and ADR results |
 | [CHANGELOG.md](../CHANGELOG.md) | Version history and release notes |
 
@@ -25,17 +25,17 @@
 |----------|-------------|
 | [Carnet de Bord](CARNET_DE_BORD_MUADDIB.md) | Development journal (French) — project history and decisions |
 
-## Current Metrics (v2.10.5)
+## Current Metrics (v2.10.21)
 
 | Metric | Value |
 |--------|-------|
-| Tests | 2643 across 57 files |
-| Rules | 162 (157 RULES + 5 PARANOID) |
+| Tests | 2793 across 57 files |
+| Rules | 176 (171 RULES + 5 PARANOID) |
 | Scanners | 14 parallel |
 | TPR (Ground Truth) | 93.9% (46/49) |
-| FPR (Benign curated) | 11.0% (58/529) |
+| FPR (Benign curated) | 10.6% (56/529) |
 | FPR (Benign random) | 7.5% (15/200) |
-| ADR (Adversarial + Holdout) | 96.3% (103/107) |
+| ADR (Adversarial + Holdout) | 94.0% (101/107) |
 | Wild TPR (Datadog 17K) | 92.8% (13538/14587 in-scope) |
 
 ## Architecture Overview

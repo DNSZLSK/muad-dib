@@ -5,7 +5,7 @@ const { test, assert, cleanupTemp } = require('./test-utils');
 
 const {
   findFiles, findJsFiles, isDevFile, escapeHtml, getCallName,
-  EXCLUDED_DIRS, DEV_PATTERNS
+  EXCLUDED_DIRS, DEV_PATTERNS, getOverflowFiles, clearFileListCache
 } = require('../src/utils.js');
 
 async function runUtilsTests() {
@@ -520,6 +520,34 @@ async function runUtilsTests() {
       forEachSafeFile([extraFile], (file, content) => results.push(content));
       assert(results.length === 1, 'Should still read files after cache eviction');
       assert(results[0].includes('extra'), 'Content should be correct');
+    } finally { cleanupTemp(tmp); clearFileListCache(); }
+  });
+  // Quick-scan overflow: getOverflowFiles returns overflow files when cap is hit
+  test('UTILS: getOverflowFiles returns overflow files when cap is hit', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-overflow-'));
+    try {
+      // Create more files than maxFiles=5 to trigger capping
+      for (let i = 0; i < 10; i++) {
+        fs.writeFileSync(path.join(tmp, `file${i}.js`), `// file ${i}`);
+      }
+      clearFileListCache();
+      const files = findFiles(tmp, { maxFiles: 5 });
+      assert(files.length === 5, `Should return 5 files, got ${files.length}`);
+      const overflow = getOverflowFiles();
+      assert(overflow.length === 5, `Should have 5 overflow files, got ${overflow.length}`);
+    } finally { cleanupTemp(tmp); clearFileListCache(); }
+  });
+
+  test('UTILS: getOverflowFiles returns empty when no cap is hit', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-overflow-'));
+    try {
+      for (let i = 0; i < 3; i++) {
+        fs.writeFileSync(path.join(tmp, `file${i}.js`), `// file ${i}`);
+      }
+      clearFileListCache();
+      findFiles(tmp, { maxFiles: 10 });
+      const overflow = getOverflowFiles();
+      assert(overflow.length === 0, `Should have 0 overflow files, got ${overflow.length}`);
     } finally { cleanupTemp(tmp); clearFileListCache(); }
   });
 }

@@ -130,7 +130,7 @@ Impact on TPR: 46/49 = 93.9% (3 documented and accepted misses).
 
 ## Adversarial Testing Results
 
-### Detection rate: 103/107 (96.3% ADR, global threshold=20)
+### Detection rate: 101/107 (94.0% ADR, global threshold=20)
 
 107 available adversarial/holdout evasive samples (67 adversarial + 40 holdout across 7 red team waves + 4 holdout batches) tested with real-world evasion techniques.
 

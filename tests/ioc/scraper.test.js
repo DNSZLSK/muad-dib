@@ -8,7 +8,7 @@ async function runScraperTests() {
   const {
     runScraper, scrapeShaiHuludDetector, scrapeDatadogIOCs,
     parseCSVLine, parseCSV, extractVersions, parseOSVEntry,
-    createFreshness, isAllowedRedirect, loadStaticIOCs,
+    createFreshness, isAllowedRedirect,
     validateIOCEntry, getNoVersionSkipCount, resetNoVersionSkipCount,
     CONFIDENCE_ORDER, ALLOWED_REDIRECT_DOMAINS,
     MAX_ENTRY_UNCOMPRESSED, MAX_TOTAL_UNCOMPRESSED
@@ -288,15 +288,6 @@ async function runScraperTests() {
     assert(ALLOWED_REDIRECT_DOMAINS.includes('api.github.com'), 'Should include api.github.com');
     assert(ALLOWED_REDIRECT_DOMAINS.includes('api.osv.dev'), 'Should include api.osv.dev');
     assert(ALLOWED_REDIRECT_DOMAINS.includes('storage.googleapis.com'), 'Should include storage.googleapis.com');
-  });
-
-  // --- loadStaticIOCs ---
-
-  test('SCRAPER: loadStaticIOCs returns expected structure', () => {
-    const result = loadStaticIOCs();
-    assert(Array.isArray(result.socket), 'Should have socket array');
-    assert(Array.isArray(result.phylum), 'Should have phylum array');
-    assert(Array.isArray(result.npmRemoved), 'Should have npmRemoved array');
   });
 
   // =========================================================
@@ -1455,7 +1446,7 @@ async function runScraperTests() {
   // runScraper COMPREHENSIVE TESTS
   // Tests internal functions (scrapeOSSFMaliciousPackages,
   // scrapeOSVDataDump, scrapeOSVPyPIDataDump,
-  // scrapeGitHubAdvisory, scrapeStaticIOCs, fetchBuffer,
+  // scrapeGitHubAdvisory, fetchBuffer,
   // fetchBufferWithProgress) through runScraper
   // =========================================================
 
@@ -2726,150 +2717,6 @@ async function runScraperTests() {
       if (savedIocs) {
         const valid = savedIocs.packages.find(p => p.name === 'valid-osv-pkg');
         assert(valid, 'Valid OSV entry should be present despite broken sibling');
-      }
-    } finally {
-      https.request = origRequest;
-      console.log = origLog;
-      process.stdout.write = origWrite;
-      Object.assign(fs, origFs);
-    }
-  });
-
-  await asyncTest('SCRAPER: runScraper scrapeStaticIOCs processes socket/phylum/npmRemoved entries', async () => {
-    const origRequest = https.request;
-    const origLog = console.log;
-    const origWrite = process.stdout.write;
-    const origFs = {
-      existsSync: fs.existsSync,
-      readFileSync: fs.readFileSync,
-      writeFileSync: fs.writeFileSync,
-      mkdirSync: fs.mkdirSync,
-      statSync: fs.statSync,
-      renameSync: fs.renameSync,
-      accessSync: fs.accessSync
-    };
-
-    console.log = () => {};
-    process.stdout.write = () => true;
-
-    https.request = (options, callback) => {
-      const url = 'https://' + options.hostname + options.path;
-      const req = new EventEmitter();
-      req.write = () => {};
-      req.setTimeout = () => {};
-      req.destroy = () => {};
-      req.end = () => {
-        process.nextTick(() => {
-          const res = new EventEmitter();
-          res.headers = { 'content-length': '100' };
-          res.resume = () => {};
-          if (url.includes('npm/all.zip') || url.includes('PyPI/all.zip')) {
-            res.statusCode = 200;
-            callback(res);
-            const zip = new AdmZip();
-            zip.addFile('SKIP.json', Buffer.from('{}'));
-            res.emit('data', zip.toBuffer());
-            res.emit('end');
-          } else if (url.includes('gensecaihq')) {
-            res.statusCode = 200;
-            callback(res);
-            res.emit('data', Buffer.from(JSON.stringify({ packages: [] })));
-            res.emit('end');
-          } else if (url.includes('api.osv.dev')) {
-            res.statusCode = 200;
-            callback(res);
-            res.emit('data', Buffer.from(JSON.stringify({ vulns: [] })));
-            res.emit('end');
-          } else if (url.includes('api.github.com')) {
-            res.statusCode = 200;
-            callback(res);
-            res.emit('data', Buffer.from(JSON.stringify({ sha: 'sha-static-test', tree: [] })));
-            res.emit('end');
-          } else {
-            res.statusCode = 200;
-            callback(res);
-            res.emit('data', Buffer.from('h,v\n'));
-            res.emit('end');
-          }
-        });
-      };
-      return req;
-    };
-
-    // Mock static-iocs.json with known entries for all three categories
-    const staticIocData = {
-      socket: [
-        { name: 'socket-test-pkg', version: '1.0.0', severity: 'critical', description: 'Socket test' },
-        { name: 'socket-test-pkg2', version: '2.0.0', severity: 'high' }
-      ],
-      phylum: [
-        { name: 'phylum-test-pkg', version: '1.0.0', description: 'Phylum test' }
-      ],
-      npmRemoved: [
-        { name: 'npm-removed-test', version: '1.0.0', reason: 'malware detected' }
-      ]
-    };
-
-    const mockFiles = {};
-    let savedIocs = null;
-    fs.existsSync = (p) => {
-      if (typeof p === 'string' && p.includes('static-iocs')) return true;
-      return true;
-    };
-    fs.readFileSync = (p, enc) => {
-      if (typeof p === 'string' && p.includes('static-iocs')) return JSON.stringify(staticIocData);
-      if (typeof p === 'string' && p.includes('.ossf-tree-sha')) return 'sha-static-test';
-      return JSON.stringify({ packages: [], pypi_packages: [], hashes: [], markers: [], files: [] });
-    };
-    fs.writeFileSync = (p, data) => { mockFiles[path.resolve(p)] = data; };
-    fs.mkdirSync = () => {};
-    fs.accessSync = () => {};
-    fs.statSync = (p) => {
-      const resolved = path.resolve(p);
-      if (mockFiles[resolved]) return { size: Buffer.byteLength(mockFiles[resolved]) };
-      return origFs.statSync(p);
-    };
-    fs.renameSync = (from, to) => {
-      const rf = path.resolve(from); const rt = path.resolve(to);
-      if (mockFiles[rf]) { mockFiles[rt] = mockFiles[rf]; delete mockFiles[rf]; }
-      if (typeof to === 'string' && to.includes('iocs.json') && !to.includes('compact') && mockFiles[rt]) {
-        try { savedIocs = JSON.parse(mockFiles[rt]); } catch {}
-      }
-    };
-
-    try {
-      const result = await runScraper();
-
-      if (savedIocs) {
-        // Socket entries
-        const socketPkgs = savedIocs.packages.filter(p => p.source === 'socket-dev');
-        assert(socketPkgs.length >= 2, 'Should have at least 2 socket entries, got ' + socketPkgs.length);
-        const socketTest = socketPkgs.find(p => p.name === 'socket-test-pkg');
-        assert(socketTest, 'Should have socket-test-pkg');
-        assert(socketTest.version === '1.0.0', 'Socket pkg version should be 1.0.0');
-        assert(socketTest.id === 'SOCKET-socket-test-pkg', 'Socket ID format');
-        assert(socketTest.references[0].includes('socket.dev'), 'Socket reference URL');
-
-        const socketTest2 = socketPkgs.find(p => p.name === 'socket-test-pkg2');
-        assert(socketTest2, 'Should have socket-test-pkg2');
-        assert(socketTest2.version === '2.0.0', 'Socket pkg2 version should be 2.0.0');
-
-        // Phylum entries
-        const phylumPkgs = savedIocs.packages.filter(p => p.source === 'phylum');
-        assert(phylumPkgs.length >= 1, 'Should have at least 1 phylum entry');
-        const phylumTest = phylumPkgs.find(p => p.name === 'phylum-test-pkg');
-        assert(phylumTest, 'Should have phylum-test-pkg');
-        assert(phylumTest.id === 'PHYLUM-phylum-test-pkg', 'Phylum ID format');
-        assert(phylumTest.references[0].includes('phylum.io'), 'Phylum reference URL');
-
-        // npm removed entries
-        const npmPkgs = savedIocs.packages.filter(p => p.source === 'npm-removed');
-        assert(npmPkgs.length >= 1, 'Should have at least 1 npm-removed entry');
-        const npmTest = npmPkgs.find(p => p.name === 'npm-removed-test');
-        assert(npmTest, 'Should have npm-removed-test');
-        assert(npmTest.id === 'NPM-REMOVED-npm-removed-test', 'npm-removed ID format');
-        assert(npmTest.description.includes('malware detected'), 'npm-removed description should include reason');
-        assert(npmTest.freshness.confidence === 'medium', 'npm-removed freshness confidence should be medium');
       }
     } finally {
       https.request = origRequest;
