@@ -4,7 +4,7 @@ const { RULES } = require('../rules/index.js');
 
 const pkgVersion = (() => {
   try {
-    return JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8')).version;
+    return JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'package.json'), 'utf8')).version;
   } catch {
     return '0.0.0';
   }

@@ -115,7 +115,7 @@ async function buildSandboxImage() {
   console.log('[SANDBOX] Building Docker image...');
 
   return new Promise((resolve) => {
-    const dockerfilePath = path.join(__dirname, '..', 'docker').replace(/\\/g, '/');
+    const dockerfilePath = path.join(__dirname, '..', '..', 'docker').replace(/\\/g, '/');
     const proc = spawn('docker', ['build', '-t', DOCKER_IMAGE, dockerfilePath], {
       stdio: 'inherit'
     });
