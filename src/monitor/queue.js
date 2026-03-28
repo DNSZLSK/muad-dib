@@ -863,10 +863,10 @@ async function resolveTarballAndScan(item, stats, dailyAlerts, recentlyScanned, 
     // Run all 4 temporal checks in parallel — each is independent.
     // With metadata cache (temporal-analysis.js), the 4 modules share 1 HTTP request.
     const [tempRes, astRes, pubRes, maintRes] = await Promise.allSettled([
-      runTemporalCheck(item.name),
-      runTemporalAstCheck(item.name),
-      runTemporalPublishCheck(item.name),
-      runTemporalMaintainerCheck(item.name)
+      runTemporalCheck(item.name, dailyAlerts),
+      runTemporalAstCheck(item.name, dailyAlerts),
+      runTemporalPublishCheck(item.name, dailyAlerts),
+      runTemporalMaintainerCheck(item.name, dailyAlerts)
     ]);
     temporalResult = tempRes.status === 'fulfilled' ? tempRes.value : null;
     astResult = astRes.status === 'fulfilled' ? astRes.value : null;

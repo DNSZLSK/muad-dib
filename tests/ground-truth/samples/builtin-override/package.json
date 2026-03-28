@@ -1,0 +1,6 @@
+{
+  "name": "builtin-override",
+  "version": "1.0.0",
+  "description": "Builtin override for credential exfiltration",
+  "main": "index.js"
+}

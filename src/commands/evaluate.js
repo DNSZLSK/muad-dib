@@ -290,7 +290,8 @@ async function evaluateGroundTruth() {
   const tprAll = totalAll > 0 ? detected / totalAll : 0;
   const tprCI = wilsonCI(detected, total);
   const tprAt20 = total > 0 ? detectedAt20 / total : 0;
-  return { detected, detectedAt20, total, totalAll, tpr, tprAt20, tprAll, tprCI, iocBased, heuristicOnly, details };
+  const tprAt20CI = wilsonCI(detectedAt20, total);
+  return { detected, detectedAt20, total, totalAll, tpr, tprAt20, tprAll, tprCI, tprAt20CI, iocBased, heuristicOnly, details };
 }
 
 // =========================================================================
@@ -1013,6 +1014,16 @@ async function evaluate(options = {}) {
   const report = {
     version,
     date: new Date().toISOString(),
+    headline: {
+      tpr: groundTruth.tprAt20,
+      tprThreshold: ADR_THRESHOLD,
+      tprLabel: 'TPR@20 (alert rate — operational threshold)',
+      tprDetected: groundTruth.detectedAt20,
+      tprTotal: groundTruth.total,
+      tprCI: groundTruth.tprAt20CI,
+      tprAt3: groundTruth.tpr,
+      tprAt3Label: 'TPR@3 (any signal — detection rate)',
+    },
     groundTruth,
     benign,
     benignPyPI,
@@ -1035,8 +1046,14 @@ async function evaluate(options = {}) {
     console.log('');
     const tprCIStr = groundTruth.tprCI ? ` [95% CI: ${(groundTruth.tprCI.lower * 100).toFixed(1)}-${(groundTruth.tprCI.upper * 100).toFixed(1)}%]` : '';
     const tprAt20Pct = (groundTruth.tprAt20 * 100).toFixed(1);
-    console.log(`  TPR (Node.js attacks): ${groundTruth.detected}/${groundTruth.total}  ${tprPct}%${tprCIStr}`);
-    console.log(`  TPR (threshold=20):    ${groundTruth.detectedAt20}/${groundTruth.total}  ${tprAt20Pct}%`);
+    const tprAt20CIStr = groundTruth.tprAt20CI ? ` [95% CI: ${(groundTruth.tprAt20CI.lower * 100).toFixed(1)}-${(groundTruth.tprAt20CI.upper * 100).toFixed(1)}%]` : '';
+    console.log(`  TPR@20 (alert rate):   ${groundTruth.detectedAt20}/${groundTruth.total}  ${tprAt20Pct}%${tprAt20CIStr}  ← headline metric`);
+    console.log(`  TPR@3  (any signal):   ${groundTruth.detected}/${groundTruth.total}  ${tprPct}%${tprCIStr}`);
+    // Divergence warning: if TPR@3 and TPR@20 differ by >15 points, flag it
+    const divergence = Math.abs(groundTruth.tpr - groundTruth.tprAt20) * 100;
+    if (divergence > 15) {
+      console.log(`  ⚠ WARNING: TPR@3 and TPR@20 diverge by ${divergence.toFixed(1)} points — ${groundTruth.detected - groundTruth.detectedAt20} samples score 3-19 (weak signal only)`);
+    }
     console.log(`  TPR (all samples):     ${groundTruth.detected}/${groundTruth.totalAll}  ${tprAllPct}%  [includes ${groundTruth.totalAll - groundTruth.total} browser-only out-of-scope]`);
     console.log(`  TPR IOC-based:         ${groundTruth.iocBased}/${groundTruth.total}`);
     console.log(`  TPR heuristic-only:    ${groundTruth.heuristicOnly}/${groundTruth.total}`);

