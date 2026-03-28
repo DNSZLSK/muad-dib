@@ -13,7 +13,7 @@ const {
   handleMemberExpression,
   handleWithStatement,
   handlePostWalk
-} = require('./ast-detectors.js');
+} = require('./ast-detectors');
 
 // Check if credential keywords appear INSIDE regex literals or new RegExp() patterns.
 // Only true when the keyword is part of the regex pattern itself, not just a string elsewhere in the file.

@@ -242,26 +242,29 @@ function runSandboxImprovementTests() {
   });
 
   test('C3: index.js has auto-sandbox logic', () => {
-    const indexSrc = fs.readFileSync(
-      path.join(__dirname, '..', '..', 'src', 'index.js'), 'utf8');
-    assertIncludes(indexSrc, 'options.autoSandbox', 'Should check autoSandbox option');
-    assertIncludes(indexSrc, 'isDockerAvailable', 'Should check Docker availability');
-    assertIncludes(indexSrc, 'buildSandboxImage', 'Should build sandbox image');
-    assertIncludes(indexSrc, 'local: true', 'Should run sandbox in local mode');
+    // Auto-sandbox logic moved to pipeline/processor.js in P2 audit refactor
+    const processorSrc = fs.readFileSync(
+      path.join(__dirname, '..', '..', 'src', 'pipeline', 'processor.js'), 'utf8');
+    assertIncludes(processorSrc, 'options.autoSandbox', 'Should check autoSandbox option');
+    assertIncludes(processorSrc, 'isDockerAvailable', 'Should check Docker availability');
+    assertIncludes(processorSrc, 'buildSandboxImage', 'Should build sandbox image');
+    assertIncludes(processorSrc, 'local: true', 'Should run sandbox in local mode');
   });
 
   test('C3: auto-sandbox uses preliminary score (not riskScore)', () => {
-    const indexSrc = fs.readFileSync(
-      path.join(__dirname, '..', '..', 'src', 'index.js'), 'utf8');
-    assertIncludes(indexSrc, 'prelimScore', 'Should compute preliminary score');
-    assertIncludes(indexSrc, 'prelimScore >= 20', 'Should trigger when prelimScore >= 20');
+    // Auto-sandbox logic moved to pipeline/processor.js in P2 audit refactor
+    const processorSrc = fs.readFileSync(
+      path.join(__dirname, '..', '..', 'src', 'pipeline', 'processor.js'), 'utf8');
+    assertIncludes(processorSrc, 'prelimScore', 'Should compute preliminary score');
+    assertIncludes(processorSrc, 'prelimScore >= 20', 'Should trigger when prelimScore >= 20');
   });
 
   test('C3: auto-sandbox is graceful when Docker unavailable', () => {
-    const indexSrc = fs.readFileSync(
-      path.join(__dirname, '..', '..', 'src', 'index.js'), 'utf8');
-    assertIncludes(indexSrc, 'Docker not available', 'Should log when Docker not available');
-    assertIncludes(indexSrc, 'sandbox is best-effort', 'Should treat sandbox as best-effort');
+    // Auto-sandbox logic moved to pipeline/processor.js in P2 audit refactor
+    const processorSrc = fs.readFileSync(
+      path.join(__dirname, '..', '..', 'src', 'pipeline', 'processor.js'), 'utf8');
+    assertIncludes(processorSrc, 'Docker not available', 'Should log when Docker not available');
+    assertIncludes(processorSrc, 'sandbox is best-effort', 'Should treat sandbox as best-effort');
   });
 
   // Auto-sandbox should NOT trigger for benign packages (score < 20)
@@ -283,9 +286,9 @@ function runSandboxImprovementTests() {
   // ═══════════════════════════════════════════════════════════════
 
   test('C3: help text includes --auto-sandbox', () => {
-    const cliSrc = fs.readFileSync(
-      path.join(__dirname, '..', '..', 'bin', 'muaddib.js'), 'utf8');
-    assertIncludes(cliSrc, 'Auto-trigger sandbox when static scan score >= 20',
+    const helpSrc = fs.readFileSync(
+      path.join(__dirname, '..', '..', 'src', 'commands', 'help.js'), 'utf8');
+    assertIncludes(helpSrc, 'Auto-trigger sandbox when static scan score >= 20',
       'Help text should describe --auto-sandbox');
   });
 

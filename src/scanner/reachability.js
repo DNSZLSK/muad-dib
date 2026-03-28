@@ -6,7 +6,7 @@
  */
 const fs = require('fs');
 const path = require('path');
-const { resolveLocal, extractLocalImports, parseFile, isLocalImport, toRel, isFileExists } = require('./module-graph.js');
+const { resolveLocal, extractLocalImports, parseFile, isLocalImport, toRel, isFileExists } = require('./module-graph');
 
 /**
  * Recursively extract file paths from the package.json `exports` field.

@@ -61,7 +61,7 @@ async function runTemporalRunnerTests() {
   // to clear the require cache and re-require after patching detector modules.
 
   const path = require('path');
-  const runnerPath = require.resolve('../../src/temporal-runner.js');
+  const runnerPath = require.resolve('../../src/scanner/temporal-runner.js');
 
   function patchAndRequireRunner(modulePath, patchFn) {
     // Patch the detector module

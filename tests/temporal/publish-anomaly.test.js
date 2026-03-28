@@ -319,8 +319,8 @@ async function runPublishAnomalyTests() {
 
   // --- detectPublishAnomaly (mocked fetchPackageMetadata) ---
 
-  const temporalPath = require.resolve('../../src/temporal-analysis.js');
-  const publishPath = require.resolve('../../src/publish-anomaly.js');
+  const temporalPath = require.resolve('../../src/scanner/temporal-analysis.js');
+  const publishPath = require.resolve('../../src/integrations/publish-anomaly.js');
 
   async function withMockedFetch(mockFn, testFn) {
     const origFetch = require.cache[temporalPath].exports.fetchPackageMetadata;

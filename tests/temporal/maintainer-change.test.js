@@ -380,8 +380,8 @@ async function runMaintainerChangeTests() {
 
   // --- detectMaintainerChange (mocked fetchPackageMetadata) ---
 
-  const temporalPath = require.resolve('../../src/temporal-analysis.js');
-  const maintainerPath = require.resolve('../../src/maintainer-change.js');
+  const temporalPath = require.resolve('../../src/scanner/temporal-analysis.js');
+  const maintainerPath = require.resolve('../../src/integrations/maintainer-change.js');
 
   async function withMockedFetchMaint(mockFn, testFn) {
     const origFetch = require.cache[temporalPath].exports.fetchPackageMetadata;

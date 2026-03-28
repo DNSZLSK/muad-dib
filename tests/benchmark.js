@@ -234,7 +234,7 @@ const { scanGitHubActions } = require('../src/scanner/github-actions.js');
 const { scanEntropy } = require('../src/scanner/entropy.js');
 const { scanAIConfig } = require('../src/scanner/ai-config.js');
 const { deobfuscate } = require('../src/scanner/deobfuscate.js');
-const { buildModuleGraph, annotateTaintedExports, detectCrossFileFlows } = require('../src/scanner/module-graph.js');
+const { buildModuleGraph, annotateTaintedExports, detectCrossFileFlows } = require('../src/scanner/module-graph');
 const { clearFileListCache } = require('../src/utils.js');
 const { loadCachedIOCs } = require('../src/ioc/updater.js');
 
