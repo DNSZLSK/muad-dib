@@ -5,7 +5,7 @@ const path = require('path');
 // Read version from package.json for pre-commit config
 const PKG_VERSION = (() => {
   try {
-    return 'v' + JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8')).version;
+    return 'v' + JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'package.json'), 'utf8')).version;
   } catch {
     return 'v1.0.0';
   }

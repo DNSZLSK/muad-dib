@@ -64,6 +64,7 @@ const runAuditV3BypassTests = require('./integration/audit-v3-bypasses.test');
 const { runSandboxImprovementTests } = require('./integration/sandbox-improvements.test');
 const { runBlueTeamV8bTests } = require('./integration/blue-team-v8b.test');
 const { runHealthcheckTests } = require('./integration/healthcheck.test');
+const { runMonitorWiringTests } = require('./integration/monitor-wiring.test');
 
 // Temporal analysis tests
 const { runTemporalAnalysisTests } = require('./temporal/temporal-analysis.test');
@@ -196,6 +197,9 @@ async function timed(name, fn) {
 
   // Healthcheck tests
   await timed('healthcheck', runHealthcheckTests);
+
+  // Monitor wiring tests (post-refactoring regression guard, v2.10.30)
+  await timed('monitor-wiring', runMonitorWiringTests);
 
   // Utility tests
   await timed('utils', runUtilsTests);

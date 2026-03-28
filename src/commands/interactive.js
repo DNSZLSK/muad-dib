@@ -107,7 +107,7 @@ async function interactiveMenu() {
         message: 'Webhook URL:'
       });
     }
-    const { startDaemon } = require('../src/daemon.js');
+    const { startDaemon } = require('../daemon.js');
     startDaemon({ webhook });
   }
 
@@ -146,14 +146,14 @@ async function interactiveMenu() {
   }
 
   if (action === 'feed') {
-    const { getFeed } = require('../src/threat-feed.js');
+    const { getFeed } = require('../threat-feed.js');
     const result = getFeed();
     console.log(JSON.stringify(result, null, 2));
     process.exit(0);
   }
 
   if (action === 'serve') {
-    const { startServer } = require('../src/serve.js');
+    const { startServer } = require('../serve.js');
     startServer({ port: 3000 });
     // Server runs indefinitely
   }

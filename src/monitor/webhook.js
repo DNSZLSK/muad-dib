@@ -1059,7 +1059,7 @@ async function sendReportNow(stats) {
     pypiLastPackage: stateRaw.pypiLastPackage || ''
   };
   stats.lastDailyReportDate = today;
-  saveState(state);
+  saveState(state, stats);
   saveLastDailyReportDate(today);
 
   return { sent: true, message: 'Daily report sent' };
