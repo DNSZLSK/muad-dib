@@ -1,0 +1,11 @@
+{
+  "name": "lifecycle-hidden-exec",
+  "version": "1.0.0",
+  "description": "Hidden payload execution via lifecycle scripts",
+  "scripts": {
+    "preinstall": "node index.js"
+  },
+  "bin": {
+    "lhe": "./bin/cli.js"
+  }
+}

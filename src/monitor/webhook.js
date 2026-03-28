@@ -744,6 +744,37 @@ function buildCanaryExfiltrationWebhookEmbed(packageName, version, exfiltrations
  * @param {Object} stats - In-memory stats object (scanned, clean, suspect, errors, errorsByType, totalTimeMs, suspectByTier, mlFiltered)
  * @param {Array} dailyAlerts - In-memory daily alerts array
  */
+/**
+ * Load yesterday's persisted report metrics for J-1 comparison.
+ * @returns {Object|null} yesterday's raw metrics or null if unavailable
+ */
+function loadYesterdayMetrics() {
+  try {
+    // Use Paris timezone to match persistDailyReport() which uses getParisDateString()
+    const todayParis = getParisDateString(); // YYYY-MM-DD in Europe/Paris
+    const [y, m, d] = todayParis.split('-').map(Number);
+    const yesterday = new Date(y, m - 1, d);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yStr = yesterday.toISOString().slice(0, 10);
+    const filePath = path.join(DAILY_REPORTS_LOG_DIR, `${yStr}.json`);
+    if (!fs.existsSync(filePath)) return null;
+    const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    return data.metrics || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Format a delta with sign: "+1200" or "-50" or "=0"
+ */
+function formatDelta(current, previous) {
+  const d = current - previous;
+  if (d > 0) return `+${d}`;
+  if (d < 0) return `${d}`;
+  return '=0';
+}
+
 function buildDailyReportEmbed(stats, dailyAlerts) {
   // Use in-memory stats (accumulated since last reset, restored from disk on restart)
   // instead of disk-based daily entries which can undercount due to UTC/Paris date mismatch
@@ -766,6 +797,56 @@ function buildDailyReportEmbed(stats, dailyAlerts) {
   // Avg scan time from in-memory stats
   const avg = stats.scanned > 0 ? (stats.totalTimeMs / stats.scanned / 1000).toFixed(1) : '0.0';
 
+  // --- Coverage estimation ---
+  // changesStreamPackages = total versions seen from npm changes stream (≈ published today)
+  const published = stats.changesStreamPackages || 0;
+  const coverageText = published > 0
+    ? `${stats.scanned}/${published} (${(stats.scanned / published * 100).toFixed(0)}%)`
+    : `${stats.scanned} scanned`;
+
+  // --- Timeouts ---
+  const staticTimeouts = (stats.errorsByType && stats.errorsByType.static_timeout) || 0;
+  const httpTimeouts = (stats.errorsByType && stats.errorsByType.timeout) || 0;
+  const timeoutPct = stats.scanned > 0 ? (staticTimeouts / stats.scanned * 100) : 0;
+  const timeoutWarning = timeoutPct > 15 ? ' \u26a0\ufe0f' : '';
+  const timeoutText = `Static: ${staticTimeouts}/${stats.scanned} (${timeoutPct.toFixed(1)}%)${timeoutWarning}\nHTTP: ${httpTimeouts}`;
+
+  // --- J-1 trends ---
+  const yesterday = loadYesterdayMetrics();
+  let trendsText = 'No data (first day or missing)';
+  if (yesterday) {
+    const dScanned = formatDelta(stats.scanned, yesterday.scanned || 0);
+    const dSuspect = formatDelta(stats.suspect, yesterday.suspect || 0);
+    const dErrors = formatDelta(stats.errors, yesterday.errors || 0);
+    trendsText = `${dScanned} scanned, ${dSuspect} suspects, ${dErrors} errors`;
+  }
+
+  // --- ML stats ---
+  let mlText;
+  try {
+    const { isModelAvailable } = require('../ml/classifier.js');
+    if (isModelAvailable()) {
+      mlText = stats.mlFiltered > 0 ? `${stats.mlFiltered} filtered` : '0 filtered';
+    } else {
+      mlText = 'No model loaded';
+    }
+  } catch {
+    mlText = 'No model loaded';
+  }
+
+  // --- System health ---
+  const uptimeSec = Math.floor(process.uptime());
+  const uptimeH = Math.floor(uptimeSec / 3600);
+  const uptimeM = Math.floor((uptimeSec % 3600) / 60);
+  const heapMB = (process.memoryUsage().heapUsed / 1024 / 1024).toFixed(0);
+  let jsonlInfo = '';
+  try {
+    const { getStats: getTrainingStats } = require('../ml/jsonl-writer.js');
+    const jStats = getTrainingStats();
+    jsonlInfo = ` | JSONL: ${jStats.recordCount} records (${jStats.fileSizeMB}MB)`;
+  } catch { /* non-fatal */ }
+  const healthText = `Up ${uptimeH}h${uptimeM}m | Heap ${heapMB}MB${jsonlInfo}`;
+
   const now = new Date();
   const readableTime = now.toISOString().replace('T', ' ').replace(/\.\d+Z$/, ' UTC');
 
@@ -774,13 +855,16 @@ function buildDailyReportEmbed(stats, dailyAlerts) {
       title: '\uD83D\uDCCA MUAD\'DIB Daily Report',
       color: 0x3498db,
       fields: [
-        { name: 'Packages Scanned', value: `${stats.scanned}`, inline: true },
+        { name: 'Coverage', value: coverageText, inline: true },
         { name: 'Clean', value: `${stats.clean}`, inline: true },
         { name: 'Suspects', value: `${stats.suspect}`, inline: true },
         { name: 'Errors', value: formatErrorBreakdown(stats.errors, stats.errorsByType), inline: true },
         { name: 'Avg Scan Time', value: `${avg}s/pkg`, inline: true },
-        ...(stats.mlFiltered > 0 ? [{ name: 'ML Filtered', value: `${stats.mlFiltered}`, inline: true }] : []),
-        { name: 'Top Suspects', value: top3Text, inline: false }
+        { name: 'Timeouts', value: timeoutText, inline: true },
+        { name: 'vs Yesterday', value: trendsText, inline: false },
+        { name: 'ML', value: mlText, inline: true },
+        { name: 'Top Suspects', value: top3Text, inline: false },
+        { name: 'System', value: healthText, inline: false }
       ],
       footer: {
         text: `MUAD'DIB - Daily summary | ${readableTime}`
@@ -822,6 +906,8 @@ async function sendDailyReport(stats, dailyAlerts, recentlyScanned, downloadsCac
     errorsByType: { ...stats.errorsByType },
     avgScanTimeMs: stats.scanned > 0 ? Math.round(stats.totalTimeMs / stats.scanned) : 0,
     suspectByTier: { ...stats.suspectByTier },
+    mlFiltered: stats.mlFiltered || 0,
+    changesStreamPackages: stats.changesStreamPackages || 0,
     topSuspects: dailyAlerts.slice().sort((a, b) => b.findingsCount - a.findingsCount).slice(0, 10)
   });
 
@@ -856,6 +942,8 @@ async function sendDailyReport(stats, dailyAlerts, recentlyScanned, downloadsCac
   stats.errorsByType.other = 0;
   stats.totalTimeMs = 0;
   stats.mlFiltered = 0;
+  stats.changesStreamPackages = 0;
+  stats.rssFallbackCount = 0;
   dailyAlerts.length = 0;
   recentlyScanned.clear();
   alertedPackageRules.clear();
@@ -1051,5 +1139,7 @@ module.exports = {
   buildReportFromDisk,
   buildReportEmbedFromDisk,
   sendReportNow,
-  getReportStatus
+  getReportStatus,
+  loadYesterdayMetrics,
+  formatDelta
 };

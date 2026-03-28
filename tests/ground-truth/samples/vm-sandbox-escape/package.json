@@ -1,0 +1,6 @@
+{
+  "name": "vm-sandbox-escape",
+  "version": "1.0.0",
+  "description": "VM module sandbox escape for code execution",
+  "main": "index.js"
+}

@@ -1224,15 +1224,25 @@ async function runMonitorTests() {
     assert(embed.embeds[0].title.includes('Daily Report'), 'Title should say Daily Report');
     assert(embed.embeds[0].color === 0x3498db, 'Color should be blue');
 
-    const scannedField = embed.embeds[0].fields.find(f => f.name === 'Packages Scanned');
-    assert(scannedField, 'Should have Packages Scanned field');
-    assert(/^\d+$/.test(scannedField.value), 'Scanned should be a number string');
+    const coverageField = embed.embeds[0].fields.find(f => f.name === 'Coverage');
+    assert(coverageField, 'Should have Coverage field');
+    assert(/\d+/.test(coverageField.value), 'Coverage should contain a number');
 
     const topField = embed.embeds[0].fields.find(f => f.name === 'Top Suspects');
     assert(topField, 'Should have Top Suspects field');
     assertIncludes(topField.value, 'sus-mod', 'Top suspect should be sus-mod (8 findings)');
 
     assertIncludes(embed.embeds[0].footer.text, 'UTC', 'Footer should have UTC timestamp');
+
+    // Check new enriched fields exist
+    const timeoutField = embed.embeds[0].fields.find(f => f.name === 'Timeouts');
+    assert(timeoutField, 'Should have Timeouts field');
+    const trendsField = embed.embeds[0].fields.find(f => f.name === 'vs Yesterday');
+    assert(trendsField, 'Should have vs Yesterday field');
+    const systemField = embed.embeds[0].fields.find(f => f.name === 'System');
+    assert(systemField, 'Should have System field');
+    const mlField = embed.embeds[0].fields.find(f => f.name === 'ML');
+    assert(mlField, 'Should have ML field');
 
     // Restore
     stats.errors = origErrors;
@@ -2396,9 +2406,9 @@ async function runMonitorTests() {
     dailyAlerts.length = 0;
 
     const embed = buildDailyReportEmbed();
-    const scannedField = embed.embeds[0].fields.find(f => f.name === 'Packages Scanned');
-    assert(scannedField, 'Should have Packages Scanned field');
-    assert(/^\d+$/.test(scannedField.value), 'Scanned should be a number string');
+    const coverageField = embed.embeds[0].fields.find(f => f.name === 'Coverage');
+    assert(coverageField, 'Should have Coverage field');
+    assert(/\d+/.test(coverageField.value), 'Coverage should contain a number');
 
     const topField = embed.embeds[0].fields.find(f => f.name === 'Top Suspects');
     assert(topField, 'Top Suspects field should exist');
@@ -3125,8 +3135,8 @@ async function runMonitorTests() {
       assertIncludes(e.title, 'Daily Report', 'Title should mention Daily Report');
       assert(e.color === 0x3498db, 'Color should be blue');
       assert(Array.isArray(e.fields), 'Should have fields array');
-      const scannedField = e.fields.find(f => f.name === 'Packages Scanned');
-      assert(scannedField, 'Should have Packages Scanned field');
+      const coverageField = e.fields.find(f => f.name === 'Coverage');
+      assert(coverageField, 'Should have Coverage field');
       const cleanField = e.fields.find(f => f.name === 'Clean');
       assert(cleanField, 'Should have Clean field');
       const suspectsField = e.fields.find(f => f.name === 'Suspects');
