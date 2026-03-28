@@ -165,7 +165,7 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
   process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 
   // Initial poll + scan
-  await poll(scanQueue, stats);
+  await poll(state, scanQueue, stats);
   saveState(state, stats);
   await processQueue(scanQueue, stats, dailyAlerts, recentlyScanned, downloadsCache, sandboxAvailableRef.value);
 
@@ -173,7 +173,7 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
   while (running) {
     await sleep(POLL_INTERVAL);
     if (!running) break;
-    await poll(scanQueue, stats);
+    await poll(state, scanQueue, stats);
     saveState(state, stats);
     await processQueue(scanQueue, stats, dailyAlerts, recentlyScanned, downloadsCache, sandboxAvailableRef.value);
 
