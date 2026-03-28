@@ -45,6 +45,6 @@ jobs:
         run: node bin/muaddib.js scan . --sarif results.sarif --exclude tests --exclude docker --exclude node_modules --exclude deploy --exclude datasets --exclude src/scanner --exclude src/ioc --exclude vscode-extension --fail-on critical
       - name: Filter SARIF (exclude scanner source — self-referential findings)
         run: node .github/filter-sarif.js results.sarif
-      - uses: github/codeql-action/upload-sarif@b1bff81932f5cdfc8695c7752dcee935dcd061c8 # v3
+      - uses: github/codeql-action/upload-sarif@38697555549f1db7851b81482ff19f1fa5c4fedc # v3
         with:
           sarif_file: results.sarif
