@@ -2142,6 +2142,24 @@ const RULES = {
     ],
     mitre: 'T1082'
   },
+  proxy_globalthis_intercept: {
+    id: 'MUADDIB-AST-083',
+    name: 'Proxy GlobalThis Interception',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'new Proxy(globalThis/global/window/self) — intercepts all global scope access, enabling transparent hooking of eval/Function/require.',
+    references: ['https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Proxy'],
+    mitre: 'T1574'
+  },
+  reflect_bind_code_execution: {
+    id: 'MUADDIB-AST-084',
+    name: 'Reflect.apply Prototype Method Code Execution',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Reflect.apply(Function.prototype.bind/call/apply, Function, [...]) — indirect code execution via Reflect with prototype method as target.',
+    references: ['https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Reflect/apply'],
+    mitre: 'T1059'
+  },
   lifecycle_missing_script: {
     id: 'MUADDIB-PKG-017',
     name: 'Phantom Lifecycle Script',

@@ -323,6 +323,87 @@ cp.execSync('id');
       assert(t, 'Variable reassignment to child_process should be CRITICAL dynamic_require');
     } finally { cleanupTemp(tmp); }
   });
+  // =============================================
+  // ANSSI v4 audit: Bypass fixes
+  // =============================================
+
+  // Bypass 1: Proxy(globalThis) — direct detection
+  await asyncTest('BYPASS-REG: new Proxy(globalThis, {get}) — detected as proxy_globalthis_intercept', async () => {
+    const tmp = makeTempPkg(`
+const p = new Proxy(globalThis, {
+  get(target, prop) { return target[prop]; }
+});
+p.eval('require("child_process").execSync("id")');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const detected = hasType(result, 'proxy_globalthis_intercept');
+      assert(detected, 'new Proxy(globalThis) should be detected as proxy_globalthis_intercept');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // Bypass 1: Proxy(global alias) — detection via ctx.globalThisAliases
+  await asyncTest('BYPASS-REG: const g = global; new Proxy(g, handler) — detected via alias', async () => {
+    const tmp = makeTempPkg(`
+const g = global;
+const p = new Proxy(g, { get(t, k) { return t[k]; } });
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const detected = hasType(result, 'proxy_globalthis_intercept');
+      assert(detected, 'new Proxy(globalAlias) should be detected via ctx.globalThisAliases');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // Bypass 1: Proxy(globalThis) alias propagation — p["eval"] detected downstream
+  await asyncTest('BYPASS-REG: Proxy(globalThis) + p["eval"](code) — eval detected via alias propagation', async () => {
+    const tmp = makeTempPkg(`
+const p = new Proxy(globalThis, { get(t,k) { return t[k]; } });
+p['eval']('process.env.SECRET');
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const evalDetected = hasType(result, 'dangerous_call_eval');
+      assert(evalDetected, 'p["eval"]() after Proxy(globalThis) should be detected as dangerous_call_eval via globalThisAliases');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // Bypass 2: Reflect.apply(Function.prototype.bind, Function, [...])
+  await asyncTest('BYPASS-REG: Reflect.apply(Function.prototype.bind, Function, [...]) — detected', async () => {
+    const tmp = makeTempPkg(`
+const fn = Reflect.apply(Function.prototype.bind, Function, [null, 'return process.env.SECRET']);
+fn()();
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const detected = hasType(result, 'reflect_bind_code_execution');
+      assert(detected, 'Reflect.apply(Function.prototype.bind, Function) should be detected');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // Bypass 2: .call variant
+  await asyncTest('BYPASS-REG: Reflect.apply(Function.prototype.call, Function, [...]) — detected', async () => {
+    const tmp = makeTempPkg(`
+Reflect.apply(Function.prototype.call, Function, [null, 'return process.env.SECRET']);
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const detected = hasType(result, 'reflect_bind_code_execution');
+      assert(detected, 'Reflect.apply(Function.prototype.call, Function) should be detected');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // Bypass 2: .apply variant with eval
+  await asyncTest('BYPASS-REG: Reflect.apply(Function.prototype.apply, eval, [...]) — detected', async () => {
+    const tmp = makeTempPkg(`
+Reflect.apply(Function.prototype.apply, eval, [null, ['process.env.SECRET']]);
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const detected = hasType(result, 'reflect_bind_code_execution');
+      assert(detected, 'Reflect.apply(*.apply, eval) should be detected');
+    } finally { cleanupTemp(tmp); }
+  });
 }
 
 module.exports = { runAstBypassRegressionTests };

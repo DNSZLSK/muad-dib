@@ -58,6 +58,18 @@ function handleNewExpression(node, ctx) {
         file: ctx.relFile
       });
     }
+    // Detect new Proxy(globalThis/global/window/self, handler) — intercepts all global access
+    if (target.type === 'Identifier' &&
+        (target.name === 'globalThis' || target.name === 'global' ||
+         target.name === 'window' || target.name === 'self' ||
+         ctx.globalThisAliases.has(target.name))) {
+      ctx.threats.push({
+        type: 'proxy_globalthis_intercept',
+        severity: 'CRITICAL',
+        message: `new Proxy(${target.name}, handler) — intercepts all global object access. Attacker can hook eval/Function/require transparently.`,
+        file: ctx.relFile
+      });
+    }
     // Detect new Proxy(obj, handler) where handler has set/get traps — data interception
     // Real-world technique: export a Proxy that intercepts all property sets/gets to exfiltrate
     // data flowing through the module. Combined with network (hasNetworkInFile) → credential theft.

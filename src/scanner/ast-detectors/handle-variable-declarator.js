@@ -58,6 +58,19 @@ function handleVariableDeclarator(node, ctx) {
       ctx.globalThisAliases.add(node.id.name);
     }
 
+    // Track Proxy(globalThis) as globalThis alias for downstream detection
+    if (node.init?.type === 'NewExpression' &&
+        node.init.callee?.type === 'Identifier' && node.init.callee.name === 'Proxy' &&
+        node.init.arguments?.length >= 2) {
+      const proxyTarget = node.init.arguments[0];
+      if (proxyTarget?.type === 'Identifier' &&
+          (proxyTarget.name === 'globalThis' || proxyTarget.name === 'global' ||
+           proxyTarget.name === 'window' || proxyTarget.name === 'self' ||
+           ctx.globalThisAliases.has(proxyTarget.name))) {
+        ctx.globalThisAliases.add(node.id.name);
+      }
+    }
+
     // B1: const E = eval; const F = Function;
     if (node.init?.type === 'Identifier' &&
         (node.init.name === 'eval' || node.init.name === 'Function')) {

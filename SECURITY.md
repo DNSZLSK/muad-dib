@@ -68,9 +68,9 @@ Please include the following information in your report:
 - We aim to release fixes before public disclosure
 - We request a 90-day disclosure window for complex issues
 
-## Detection Rules (v2.10.21)
+## Detection Rules (v2.10.31)
 
-MUAD'DIB uses 14 scanner modules (module-graph pre-analysis + 13 parallel scanners) + 5 behavioral anomaly detection features + ground truth validation, producing 176 rule IDs (171 RULES + 5 PARANOID):
+MUAD'DIB uses 14 scanner modules (module-graph pre-analysis + 13 parallel scanners) + 5 behavioral anomaly detection features + ground truth validation, producing 195 rule IDs (190 RULES + 5 PARANOID):
 
 ### AST Scanner
 
