@@ -3,7 +3,7 @@
 ## 1. VPS DOWN (alerte healthcheck)
 
 ```bash
-ssh ubuntu@<VPS_IP>
+ssh muaddib@<VPS_IP>
 sudo systemctl status muaddib-monitor
 ```
 

@@ -4,10 +4,10 @@
 
 ### Fix repo ownership (one-time)
 
-The monitor runs as `ubuntu`. The repo must be owned by this user so that `git pull` (without `sudo`) never clobbers permissions:
+The monitor runs as `muaddib`. The repo must be owned by this user so that `git pull` (without `sudo`) never clobbers permissions:
 
 ```bash
-sudo chown -R ubuntu:ubuntu /opt/muaddib
+sudo chown -R muaddib:muaddib /opt/muaddib
 ```
 
 After this, **never use `sudo git pull`** — plain `git pull` preserves ownership.
@@ -16,12 +16,12 @@ After this, **never use `sudo git pull`** — plain `git pull` preserves ownersh
 
 ```bash
 ls -la /opt/muaddib/
-# Should show ubuntu:ubuntu for all entries
+# Should show muaddib:muaddib for all entries
 
 # Test a pull
 cd /opt/muaddib && git pull
 ls -la data/
-# Should still show ubuntu:ubuntu
+# Should still show muaddib:muaddib
 ```
 
 ## Deploy
@@ -46,7 +46,7 @@ Configuration:
 |----------|---------|-------------|
 | `MUADDIB_DIR` | `/opt/muaddib` | Base directory |
 | `MUADDIB_SERVICE` | `muaddib-monitor` | Systemd service name |
-| `DEPLOY_USER` | `ubuntu` | File owner user |
+| `DEPLOY_USER` | `muaddib` | File owner user |
 
 ## Automated Backup
 
@@ -84,7 +84,7 @@ After=network.target
 
 [Service]
 Type=oneshot
-User=ubuntu
+User=muaddib
 Environment=MUADDIB_DIR=/opt/muaddib
 ExecStart=/opt/muaddib/scripts/backup.sh
 ```

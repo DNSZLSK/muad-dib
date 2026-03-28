@@ -5,13 +5,13 @@
 # Configurable via environment:
 #   MUADDIB_DIR       Base directory (default: /opt/muaddib)
 #   MUADDIB_SERVICE   Systemd service name (default: muaddib-monitor)
-#   DEPLOY_USER       Owner user (default: ubuntu)
+#   DEPLOY_USER       Owner user (default: muaddib)
 
 set -euo pipefail
 
 MUADDIB_DIR="${MUADDIB_DIR:-/opt/muaddib}"
 SERVICE="${MUADDIB_SERVICE:-muaddib-monitor}"
-OWNER="${DEPLOY_USER:-ubuntu}"
+OWNER="${DEPLOY_USER:-muaddib}"
 
 cd "$MUADDIB_DIR"
 

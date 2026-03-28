@@ -51,8 +51,9 @@ function appendRecord(record) {
     fs.appendFileSync(TRAINING_FILE, line, 'utf8');
   } catch (err) {
     // Non-fatal: JSONL export failure should never crash the monitor
+    // Log permission errors so they are visible in journalctl (was silent before v2.10.27)
     if (err.code === 'EROFS' || err.code === 'EACCES' || err.code === 'EPERM') {
-      // Read-only filesystem — silently skip (same pattern as atomicWriteFileSync)
+      console.warn(`[ML] Permission denied writing ${TRAINING_FILE}: ${err.code} — run: sudo chown $(whoami) ${path.dirname(TRAINING_FILE)}`);
       return;
     }
     console.error(`[ML] Failed to append JSONL record: ${err.message}`);
