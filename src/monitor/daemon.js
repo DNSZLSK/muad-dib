@@ -8,6 +8,7 @@ const { isTemporalEnabled, isTemporalAstEnabled, isTemporalPublishEnabled, isTem
 const { pendingGrouped, flushScopeGroup, sendDailyReport, DAILY_REPORT_HOUR } = require('./webhook.js');
 const { poll } = require('./ingestion.js');
 const { processQueue, SCAN_CONCURRENCY } = require('./queue.js');
+const { startHealthcheck } = require('./healthcheck.js');
 
 const POLL_INTERVAL = 60_000;
 
@@ -128,6 +129,9 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
   console.log('[MONITOR]   - Canary token exfiltration');
   console.log('[MONITOR]   NEVER sent: temporal anomaly, AST anomaly, publish anomaly, maintainer change, MEDIUM-only packages');
 
+  // External healthcheck (Healthchecks.io) — sends /start ping now, heartbeat every 10 min
+  const healthcheck = startHealthcheck();
+
   const state = loadState(stats);
   loadDailyStats(stats, dailyAlerts); // Restore counters from previous run (survives restarts)
   console.log(`[MONITOR] State loaded — npm last: ${state.npmLastPackage || 'none'}, pypi last: ${state.pypiLastPackage || 'none'}, npm seq: ${state.npmLastSeq || 'none'}`);
@@ -142,6 +146,7 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
   // Counters are persisted to disk so they survive the restart.
   async function gracefulShutdown(signal) {
     console.log(`\n[MONITOR] Received ${signal} — shutting down...`);
+    healthcheck.stop();
     // Flush all pending scope groups before exit
     for (const [scope, group] of pendingGrouped) {
       clearTimeout(group.timer);

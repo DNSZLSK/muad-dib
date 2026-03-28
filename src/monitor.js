@@ -26,10 +26,12 @@ const temporalModule = require('./monitor/temporal.js');
 const ingestionModule = require('./monitor/ingestion.js');
 const queueModule = require('./monitor/queue.js');
 const daemonModule = require('./monitor/daemon.js');
+const { pingFail: healthcheckPingFail } = require('./monitor/healthcheck.js');
 
 // Prevent unhandled promise rejections from crashing the monitor process
 process.on('unhandledRejection', (reason, promise) => {
   console.error('[MONITOR] Unhandled rejection:', reason);
+  healthcheckPingFail();
 });
 
 // Self-exclude: never scan our own package through the monitor

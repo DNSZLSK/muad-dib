@@ -31,6 +31,12 @@ docs/
 *.md
 !README.md
 
+# Backup & deployment scripts (VPS-only)
+backups/
+scripts/backup.sh
+scripts/deploy.sh
+scripts/fix-permissions.sh
+
 # Config & artifacts
 eslint.config.mjs
 action.yml
