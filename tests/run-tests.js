@@ -63,6 +63,7 @@ const { runMLPipelineTests } = require('./integration/ml-pipeline.test');
 const runAuditV3BypassTests = require('./integration/audit-v3-bypasses.test');
 const { runSandboxImprovementTests } = require('./integration/sandbox-improvements.test');
 const { runBlueTeamV8bTests } = require('./integration/blue-team-v8b.test');
+const { runHealthcheckTests } = require('./integration/healthcheck.test');
 
 // Temporal analysis tests
 const { runTemporalAnalysisTests } = require('./temporal/temporal-analysis.test');
@@ -192,6 +193,9 @@ async function timed(name, fn) {
 
   // Blue Team v8b detection tests
   await timed('blue-team-v8b', runBlueTeamV8bTests);
+
+  // Healthcheck tests
+  await timed('healthcheck', runHealthcheckTests);
 
   // Utility tests
   await timed('utils', runUtilsTests);

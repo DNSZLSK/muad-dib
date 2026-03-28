@@ -28,6 +28,7 @@ v267.txt
 v268.txt
 datasets/real-world/datadog-benchmark-results.json
 SESSION-LOG.md
+backups/
 
 # Audit bypass samples (SECURITY: evasion techniques must not be public)
 tests/samples/audit-v3-bypasses/
