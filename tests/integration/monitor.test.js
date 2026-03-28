@@ -7107,15 +7107,16 @@ async function runMonitorTests() {
   });
 
   test('CONCURRENCY: processQueue source uses worker pool pattern', () => {
-    // Verify the implementation uses the worker pool pattern (not sequential)
-    const src = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'monitor.js'), 'utf8');
+    // Queue logic moved to monitor/queue.js in P2 audit refactor
+    const src = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'monitor', 'queue.js'), 'utf8');
     assertIncludes(src, 'async function worker()', 'processQueue should define inner worker function');
     assertIncludes(src, 'Promise.all(workers)', 'processQueue should await all workers in parallel');
     assertIncludes(src, 'SCAN_CONCURRENCY', 'processQueue should reference SCAN_CONCURRENCY');
   });
 
   test('CONCURRENCY: processQueue source caps workers at queue length', () => {
-    const src = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'monitor.js'), 'utf8');
+    // Queue logic moved to monitor/queue.js in P2 audit refactor
+    const src = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'monitor', 'queue.js'), 'utf8');
     assertIncludes(src, 'Math.min(SCAN_CONCURRENCY, scanQueue.length)',
       'Should not spawn more workers than queue items');
   });
@@ -7170,8 +7171,8 @@ async function runMonitorTests() {
   });
 
   test('CONCURRENCY: concurrency log only when queue > 1 and concurrency > 1', () => {
-    // Verify the source code has the guard condition
-    const src = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'monitor.js'), 'utf8');
+    // Queue logic moved to monitor/queue.js in P2 audit refactor
+    const src = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'monitor', 'queue.js'), 'utf8');
     assertIncludes(src, 'SCAN_CONCURRENCY > 1 && scanQueue.length > 1',
       'processQueue should only log concurrency when both concurrency and queue > 1');
   });
@@ -8120,8 +8121,8 @@ async function runMonitorTests() {
   console.log('\n=== MONITOR PARALLEL TEMPORAL + CACHE TESTS ===\n');
 
   test('MONITOR-PARALLEL: resolveTarballAndScan uses Promise.allSettled for temporal checks', () => {
-    // Verify the function source contains Promise.allSettled (structural test)
-    const src = resolveTarballAndScan.toString();
+    // Queue logic moved to monitor/queue.js in P2 audit refactor
+    const src = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'monitor', 'queue.js'), 'utf8');
     assertIncludes(src, 'Promise.allSettled', 'resolveTarballAndScan should use Promise.allSettled for parallel temporal checks');
   });
 

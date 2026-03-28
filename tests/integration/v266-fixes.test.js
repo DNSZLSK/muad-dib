@@ -47,9 +47,10 @@ async function runV266FixesTests() {
 
   // 1.3 Module graph timer cleanup
   test('P1: index.js clears module graph timeout', () => {
-    const indexSrc = fs.readFileSync(
-      path.join(__dirname, '..', '..', 'src', 'index.js'), 'utf8');
-    assertIncludes(indexSrc, 'clearTimeout(graphTimerId)', 'Should clear timeout');
+    // Module graph execution logic moved to pipeline/executor.js in P2 audit refactor
+    const executorSrc = fs.readFileSync(
+      path.join(__dirname, '..', '..', 'src', 'pipeline', 'executor.js'), 'utf8');
+    assertIncludes(executorSrc, 'clearTimeout(graphTimerId)', 'Should clear timeout');
   });
 
   // 1.4 dormant_spike URL fixed

@@ -46,10 +46,11 @@ async function runAuditFix1Tests() {
   });
 
   await asyncTest('FIX1: Promise.allSettled pattern is used in index.js', async () => {
-    const indexSrc = fs.readFileSync(path.join(__dirname, '../../src/index.js'), 'utf8');
-    assert(indexSrc.includes('Promise.allSettled'), 'Should use Promise.allSettled');
-    assert(!indexSrc.includes('Promise.all(['), 'Should NOT use Promise.all for scanners');
-    assert(indexSrc.includes('SCANNER_NAMES'), 'Should have SCANNER_NAMES for error reporting');
+    // Scanner execution logic moved to pipeline/executor.js in P2 audit refactor
+    const executorSrc = fs.readFileSync(path.join(__dirname, '../../src/pipeline/executor.js'), 'utf8');
+    assert(executorSrc.includes('Promise.allSettled'), 'Should use Promise.allSettled');
+    assert(!executorSrc.includes('Promise.all(['), 'Should NOT use Promise.all for scanners');
+    assert(executorSrc.includes('SCANNER_NAMES'), 'Should have SCANNER_NAMES for error reporting');
   });
 }
 
@@ -377,10 +378,11 @@ async function runAuditFix9Tests() {
   console.log('\n=== AUDIT FIX 9: Scan timeouts ===\n');
 
   test('FIX9: Module graph timeout exists (SCANNER_TIMEOUT/SCAN_TIMEOUT removed as dead code)', () => {
-    const indexSrc = fs.readFileSync(path.join(__dirname, '../../src/index.js'), 'utf8');
+    // Module graph execution logic moved to pipeline/executor.js in P2 audit refactor
+    const executorSrc = fs.readFileSync(path.join(__dirname, '../../src/pipeline/executor.js'), 'utf8');
     // SCANNER_TIMEOUT and SCAN_TIMEOUT were unused dead code, removed in v2.6.6
     // Module graph has its own timeout via MODULE_GRAPH_TIMEOUT_MS
-    assert(indexSrc.includes('MODULE_GRAPH_TIMEOUT_MS'),
+    assert(executorSrc.includes('MODULE_GRAPH_TIMEOUT_MS'),
       'Should define module graph timeout');
   });
 
@@ -1055,7 +1057,7 @@ async function runHighFix24Tests() {
   console.log('\n=== HIGH #24: Module graph 5-hop re-export chain ===\n');
 
   test('H24: module-graph.js uses level < 4 for re-export propagation', () => {
-    const src = fs.readFileSync(path.join(__dirname, '../../src/scanner/module-graph.js'), 'utf8');
+    const src = fs.readFileSync(path.join(__dirname, '../../src/scanner/module-graph/detect-cross-file.js'), 'utf8');
     assert(src.includes('level < 4'), 'Should use level < 4 for 5-hop propagation');
     assert(!src.includes('level < 2;'), 'Should NOT have old level < 2 limit');
   });
@@ -1068,7 +1070,7 @@ async function runHighFix25Tests() {
   console.log('\n=== HIGH #25: Dynamic require string concatenation ===\n');
 
   test('H25: tryResolveConcatRequire resolves simple string concat', () => {
-    const { tryResolveConcatRequire } = require('../../src/scanner/module-graph.js');
+    const { tryResolveConcatRequire } = require('../../src/scanner/module-graph');
     // Simulate a BinaryExpression node: './a' + '/b'
     const node = {
       type: 'BinaryExpression',
@@ -1081,7 +1083,7 @@ async function runHighFix25Tests() {
   });
 
   test('H25: tryResolveConcatRequire resolves nested concat', () => {
-    const { tryResolveConcatRequire } = require('../../src/scanner/module-graph.js');
+    const { tryResolveConcatRequire } = require('../../src/scanner/module-graph');
     // './a' + '/' + 'b'  =  BinaryExpression(BinaryExpression('./a', '/'), 'b')
     const node = {
       type: 'BinaryExpression',
@@ -1099,7 +1101,7 @@ async function runHighFix25Tests() {
   });
 
   test('H25: tryResolveConcatRequire returns null for non-string nodes', () => {
-    const { tryResolveConcatRequire } = require('../../src/scanner/module-graph.js');
+    const { tryResolveConcatRequire } = require('../../src/scanner/module-graph');
     const node = {
       type: 'BinaryExpression',
       operator: '+',
@@ -1111,7 +1113,7 @@ async function runHighFix25Tests() {
   });
 
   test('H25: tryResolveConcatRequire has depth limit', () => {
-    const { tryResolveConcatRequire } = require('../../src/scanner/module-graph.js');
+    const { tryResolveConcatRequire } = require('../../src/scanner/module-graph');
     // Build deeply nested node (25 levels, beyond the 20 limit)
     let node = { type: 'Literal', value: 'a' };
     for (let i = 0; i < 25; i++) {
@@ -1216,7 +1218,8 @@ async function runHighFix30Tests() {
   console.log('\n=== HIGH #30: Module graph error logging ===\n');
 
   test('H30: index.js logs module graph errors with debugLog', () => {
-    const src = fs.readFileSync(path.join(__dirname, '../../src/index.js'), 'utf8');
+    // Module graph execution logic moved to pipeline/executor.js in P2 audit refactor
+    const src = fs.readFileSync(path.join(__dirname, '../../src/pipeline/executor.js'), 'utf8');
     assert(src.includes("debugLog('[MODULE-GRAPH] Error:'"), 'Should log module graph errors via debugLog');
     assert(!src.includes('catch { }') && !src.includes('catch {}'), 'Should NOT have empty catch block for module graph');
   });

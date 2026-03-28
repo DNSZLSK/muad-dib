@@ -265,7 +265,7 @@ async function runTemporalAnalysisTests() {
   const EventEmitter = require('events');
 
   async function withMockedHttps(mockResponseData, testFn) {
-    const temporalPath = require.resolve('../../src/temporal-analysis.js');
+    const temporalPath = require.resolve('../../src/scanner/temporal-analysis.js');
     const savedTemporal = require.cache[temporalPath];
     delete require.cache[temporalPath];
 

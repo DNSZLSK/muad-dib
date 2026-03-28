@@ -341,7 +341,7 @@ async function runDaemonWatchTests() {
     };
 
     // Clear daemon.js cache so it picks up the mocked run
-    const daemonPath = require.resolve('../../src/daemon.js');
+    const daemonPath = require.resolve('../../src/runtime/daemon.js');
     delete require.cache[daemonPath];
     const daemonFresh = require(daemonPath);
 
@@ -384,7 +384,7 @@ async function runDaemonWatchTests() {
     };
 
     // Clear daemon.js cache
-    const daemonPath = require.resolve('../../src/daemon.js');
+    const daemonPath = require.resolve('../../src/runtime/daemon.js');
     delete require.cache[daemonPath];
     const daemonFresh = require(daemonPath);
 
@@ -464,7 +464,7 @@ async function runDaemonWatchTests() {
     };
 
     // Clear watch.js cache so it picks up mocked run
-    const watchPath = require.resolve('../../src/watch.js');
+    const watchPath = require.resolve('../../src/runtime/watch.js');
     delete require.cache[watchPath];
 
     const origLog = console.log;
@@ -515,7 +515,7 @@ async function runDaemonWatchTests() {
       }
     };
 
-    const watchPath = require.resolve('../../src/watch.js');
+    const watchPath = require.resolve('../../src/runtime/watch.js');
     delete require.cache[watchPath];
 
     const origLog = console.log;
@@ -564,7 +564,7 @@ async function runDaemonWatchTests() {
       }
     };
 
-    const watchPath = require.resolve('../../src/watch.js');
+    const watchPath = require.resolve('../../src/runtime/watch.js');
     delete require.cache[watchPath];
 
     const origLog = console.log;
@@ -623,7 +623,7 @@ async function runDaemonWatchTests() {
       }
     };
 
-    const watchPath = require.resolve('../../src/watch.js');
+    const watchPath = require.resolve('../../src/runtime/watch.js');
     delete require.cache[watchPath];
 
     const origLog = console.log;
@@ -686,7 +686,7 @@ async function runDaemonWatchTests() {
       }
     };
 
-    const watchPath = require.resolve('../../src/watch.js');
+    const watchPath = require.resolve('../../src/runtime/watch.js');
     delete require.cache[watchPath];
 
     const origConsoleError = console.error;
