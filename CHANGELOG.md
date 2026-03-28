@@ -7,6 +7,87 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.10.31] - 2026-03-28
+
+### Fixed
+- **Bypass fix: Proxy(globalThis) interception** (AST-083): Detect `new Proxy(globalThis/global/window/self, handler)` — tracks proxy-wrapped globals in `globalThisAliases` for downstream detection
+- **Bypass fix: Reflect.apply prototype bind** (AST-084): Detect `Reflect.apply(Function.prototype.bind/call/apply, Function, [...])` — extends Reflect.apply to handle MemberExpression targets
+
+### Changed
+- Rules: 193 → **195** (190 RULES + 5 PARANOID)
+- Tests: 2862 → **2868**, 0 failed
+- Documentation: corrected stale metrics in CLAUDE.md, README.md, SECURITY.md, ARCHITECTURE.md
+
+## [2.10.30] - 2026-03-28
+
+### Fixed
+- **Post-refactoring audit**: 8 bug fixes (state leak, saveState args, Docker path, interactive menu paths, SARIF version, hooks version)
+- Removed orphaned `src/sandbox.js` (663 lines)
+
+### Added
+- 37 new monitor wiring integration tests (`tests/integration/monitor-wiring.test.js`)
+
+### Changed
+- Tests: 2825 → **2862** across 62 files
+
+## [2.10.29] - 2026-03-28
+
+### Fixed
+- 3 temporal analysis bugs (publish, lifecycle, maintainer — missing dailyAlerts argument)
+
+### Added
+- Daily report: coverage ratio, J-1 trends, timeout rates, health metrics, ML stats
+- Ground truth: 15 new samples (GT-052→066), TPR@20 as headline, divergence warning
+
+## [2.10.28] - 2026-03-28
+
+### Fixed
+- **HOTFIX**: monitor `poll()` missing state argument — production crash fix
+
+## [2.10.27] - 2026-03-28
+
+### Fixed
+- JSONL silent EACCES error — `fix-permissions.sh` now covers `data/` directory
+
+## [2.10.26] - 2026-03-27
+
+### Added
+- **Healthcheck**: Healthchecks.io integration (`src/monitor/healthcheck.js`) — 10min ping, /start on boot, /fail on crash, SSRF protection
+- **Backup**: `scripts/backup.sh` — tar.gz, 7-day retention, configurable
+- **Deploy**: `scripts/deploy.sh` — git pull, conditional sandbox rebuild, systemd restart
+- **Runbook**: `docs/runbook.md` — 6 incident scenarios (VPS down, P1 alert, deploy, backup restore, npm throttle, memory)
+- **Deployment guide**: `docs/DEPLOYMENT.md` — initial setup, deploy workflow
+
+## [2.10.25] - 2026-03-27
+
+### Changed
+- **Architecture refactoring phase 2**: Split large files into modules
+  - `ast-detectors.js` (3797 LOC) → 12 files in `src/scanner/ast-detectors/`
+  - `module-graph.js` (2096 LOC) → 9 files in `src/scanner/module-graph/`
+  - ScanContext: centralized mutable state with `resetAll()`
+  - CLI split: `bin/muaddib.js` (1223→684 LOC) + `src/commands/`
+  - 18 shim files for backward compatibility
+
+## [2.10.23] - 2026-03-27
+
+### Added
+- **Blue Team v8**: 21 new AST/scoring detections (AST-070→082, SHELL-023, SCORE-001/002, PKG-017)
+- Detection: vm, Worker threads, SharedArrayBuffer, dgram, WebSocket C2, process.binding
+- Evasion: string mutation, prototype chain, JSON reviver pollution, Module._resolveFilename
+- Patterns: steganography, CI fingerprinting, lifecycle phantom scripts, git hooks persistence
+- Red team v8 (30 samples) + Holdout v6 (10 samples) datasets
+- OOM fix: auto-respawn `--max-old-space-size=8192 --expose-gc`, GC between scans
+
+### Changed
+- Rules: 176 → **193** (188 RULES + 5 PARANOID)
+
+## [2.10.22] - 2026-03-27
+
+### Fixed
+- **ANSSI v3 audit fixes**: 8 bypasses patched, 5 CRITICAL scoring adjustments
+- IOC: LiteLLM compromised versions added
+- UX/CLI improvements
+
 ## [2.10.21] - 2026-03-27
 
 ### Added

@@ -511,6 +511,13 @@ const PLAYBOOKS = {
     'CRITIQUE: Un Proxy JavaScript avec trap set/get/apply est combine avec un appel reseau. ' +
     'Technique d\'interception: le Proxy capture toutes les ecritures de proprietes (credentials, tokens, config) ' +
     'et les exfiltre via HTTPS/fetch/dgram. Supprimer le package. Auditer tous les modules qui importent ce package.',
+  proxy_globalthis_intercept:
+    'CRITIQUE: new Proxy(globalThis/global) intercepte tous les acces au scope global. ' +
+    'L\'attaquant peut hooker eval, Function, require de maniere transparente via le handler Proxy. ' +
+    'Supprimer le package immediatement.',
+  reflect_bind_code_execution:
+    'CRITIQUE: Reflect.apply() avec methode prototype (bind/call/apply) et thisArg=Function/eval. ' +
+    'Evasion de 2nd niveau contournant la detection Reflect.apply(eval). Supprimer le package.',
   detached_credential_exfil:
     'CRITIQUE: Process detache avec acces aux credentials et exfiltration reseau. ' +
     'Technique DPRK/Lazarus: le process fils survit au parent (detached:true, unref()) et exfiltre des secrets en arriere-plan. ' +

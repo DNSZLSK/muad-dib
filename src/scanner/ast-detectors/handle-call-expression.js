@@ -1496,6 +1496,26 @@ function handleCallExpression(node, ctx) {
           file: ctx.relFile
         });
       }
+      // Bypass fix: Reflect.apply(Function.prototype.bind/call/apply, Function, [...])
+      if (target.type === 'MemberExpression') {
+        const methodProp = target.property;
+        const methodName = methodProp?.type === 'Identifier' ? methodProp.name :
+                           (methodProp?.type === 'Literal' ? String(methodProp.value) : null);
+        if (methodName === 'bind' || methodName === 'call' || methodName === 'apply') {
+          const thisArg = node.arguments[1];
+          if (thisArg?.type === 'Identifier' &&
+              (thisArg.name === 'Function' || thisArg.name === 'eval' ||
+               ctx.evalAliases?.has(thisArg.name))) {
+            ctx.hasDynamicExec = true;
+            ctx.threats.push({
+              type: 'reflect_bind_code_execution',
+              severity: 'CRITICAL',
+              message: `Reflect.apply(*.${methodName}, ${thisArg.name}, [...]) — indirect ${thisArg.name} invocation via prototype method, bypasses Reflect.apply(${thisArg.name}) detection.`,
+              file: ctx.relFile
+            });
+          }
+        }
+      }
       // B1: Reflect.apply(require, null, ['child_process']) — bypasses require() call detection
       if (target.type === 'Identifier' && target.name === 'require') {
         const argsArray = node.arguments[2];

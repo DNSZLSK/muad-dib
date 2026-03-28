@@ -30,7 +30,7 @@
 
 npm and PyPI supply-chain attacks are exploding. Shai-Hulud compromised 25K+ repos in 2025. Existing tools detect threats but don't help you respond.
 
-MUAD'DIB combines **14 parallel scanners** (176 detection rules), a **deobfuscation engine**, **inter-module dataflow analysis**, **compound scoring**, **ML classifiers** (XGBoost), and Docker sandbox to detect known threats and suspicious behavioral patterns in npm and PyPI packages.
+MUAD'DIB combines **14 parallel scanners** (195 detection rules), a **deobfuscation engine**, **inter-module dataflow analysis**, **compound scoring**, **ML classifiers** (XGBoost), and Docker sandbox to detect known threats and suspicious behavioral patterns in npm and PyPI packages.
 
 ---
 
@@ -195,7 +195,7 @@ muaddib replay                     # Ground truth validation (46/49 TPR)
 | GitHub Actions | Shai-Hulud backdoor detection |
 | Hash Scanner | Known malicious file hashes |
 
-### 176 detection rules
+### 195 detection rules
 
 All rules are mapped to MITRE ATT&CK techniques. See [SECURITY.md](SECURITY.md#detection-rules-v21021) for the complete rules reference.
 
@@ -271,7 +271,7 @@ With pre-commit framework:
 ```yaml
 repos:
   - repo: https://github.com/DNSZLSK/muad-dib
-    rev: v2.10.21
+    rev: v2.10.31
     hooks:
       - id: muaddib-scan
 ```
@@ -288,7 +288,7 @@ repos:
 | **FPR** (Benign random) | **7.5%** (15/200) | 200 random npm packages, stratified sampling |
 | **ADR** (Adversarial + Holdout) | **94.0%** (101/107) | 67 adversarial + 40 holdout (107 available on disk), global threshold=20 |
 
-**2793 tests** across 57 files. **176 rules** (171 RULES + 5 PARANOID).
+**2868 tests** across 62 files. **195 rules** (190 RULES + 5 PARANOID).
 
 > **Methodology caveats:**
 > - TPR measured on 49 Node.js attack samples (3 browser-only excluded from 51 total)
@@ -329,7 +329,7 @@ npm test
 
 ### Testing
 
-- **2793 tests** across 57 modular test files
+- **2868 tests** across 62 modular test files
 - **56 fuzz tests** - Malformed inputs, ReDoS, unicode, binary
 - **Datadog 17K benchmark** - 14,587 confirmed malware samples (in-scope)
 - **Ground truth validation** - 51 real-world attacks (93.9% TPR)
@@ -351,7 +351,7 @@ npm test
 - [Evaluation Methodology](docs/EVALUATION_METHODOLOGY.md) - Experimental protocol, holdout scores
 - [Threat Model](docs/threat-model.md) - What MUAD'DIB detects and doesn't detect
 - [Adversarial Evaluation](ADVERSARIAL.md) - Red team samples and ADR results
-- [Security Policy](SECURITY.md) - Detection rules reference (176 rules)
+- [Security Policy](SECURITY.md) - Detection rules reference (195 rules)
 - [Security Audit](docs/SECURITY_AUDIT.md) - Bypass validation report
 - [FP Analysis](docs/EVALUATION.md) - Historical false positive analysis
 
