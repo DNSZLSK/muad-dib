@@ -355,7 +355,7 @@ function computeAlertPriority(result, sandboxResult) {
   return { level: 'P3', reason: 'default' };
 }
 
-function buildAlertData(name, version, ecosystem, result, sandboxResult) {
+function buildAlertData(name, version, ecosystem, result, sandboxResult, llmResult) {
   const priority = computeAlertPriority(result, sandboxResult);
   const webhookData = {
     target: `${ecosystem}/${name}@${version}`,
@@ -375,10 +375,20 @@ function buildAlertData(name, version, ecosystem, result, sandboxResult) {
       severity: sandboxResult.severity
     };
   }
+  if (llmResult && llmResult.verdict) {
+    webhookData.llm = {
+      verdict: llmResult.verdict,
+      confidence: llmResult.confidence,
+      reasoning: (llmResult.reasoning || '').slice(0, 200),
+      attack_type: llmResult.attack_type || null,
+      iocs_found: (llmResult.iocs_found || []).slice(0, 5),
+      mode: llmResult.mode || 'shadow'
+    };
+  }
   return webhookData;
 }
 
-async function trySendWebhook(name, version, ecosystem, result, sandboxResult, mlResult) {
+async function trySendWebhook(name, version, ecosystem, result, sandboxResult, mlResult, llmResult) {
   if (!shouldSendWebhook(result, sandboxResult, mlResult)) {
     if (mlResult && mlResult.prediction !== 'clean' && mlResult.probability >= 0.90
         && !hasHighOrCritical(result)) {
@@ -443,13 +453,13 @@ async function trySendWebhook(name, version, ecosystem, result, sandboxResult, m
   // Scope grouping: buffer scoped npm packages for grouped webhook
   const scope = extractScope(name);
   if (scope && ecosystem === 'npm') {
-    bufferScopedWebhook(scope, name, version, ecosystem, result, sandboxResult);
+    bufferScopedWebhook(scope, name, version, ecosystem, result, sandboxResult, llmResult);
     return;
   }
 
   // Non-scoped: send immediately (existing behavior)
   const url = getWebhookUrl();
-  const webhookData = buildAlertData(name, version, ecosystem, result, sandboxResult);
+  const webhookData = buildAlertData(name, version, ecosystem, result, sandboxResult, llmResult);
   try {
     await sendWebhook(url, webhookData);
     console.log(`[MONITOR] Webhook sent for ${name}@${version}`);
@@ -473,12 +483,13 @@ function extractScope(name) {
  * Multiple packages from the same scope published within SCOPE_GROUP_WINDOW_MS
  * are grouped into a single webhook (monorepo noise reduction).
  */
-function bufferScopedWebhook(scope, name, version, ecosystem, result, sandboxResult) {
+function bufferScopedWebhook(scope, name, version, ecosystem, result, sandboxResult, llmResult) {
   const entry = {
     name, version,
     score: (result && result.summary) ? (result.summary.riskScore || 0) : 0,
     threats: result.threats || [],
-    sandboxResult
+    sandboxResult,
+    llmResult: llmResult || null
   };
 
   const existing = pendingGrouped.get(scope);
@@ -521,7 +532,7 @@ async function flushScopeGroup(scope) {
       threats: pkg.threats,
       summary: { riskScore: pkg.score, critical, high, medium, low, total: pkg.threats.length }
     };
-    const webhookData = buildAlertData(pkg.name, pkg.version, group.ecosystem, result, pkg.sandboxResult);
+    const webhookData = buildAlertData(pkg.name, pkg.version, group.ecosystem, result, pkg.sandboxResult, pkg.llmResult);
     try {
       await sendWebhook(url, webhookData);
       console.log(`[MONITOR] Webhook sent for ${pkg.name}@${pkg.version} (scope group flush, single)`);
@@ -834,6 +845,23 @@ function buildDailyReportEmbed(stats, dailyAlerts) {
     mlText = 'No model loaded';
   }
 
+  // --- LLM Detective stats ---
+  let llmText;
+  try {
+    const { isLlmEnabled, getStats: getLlmStats } = require('../ml/llm-detective.js');
+    if (isLlmEnabled()) {
+      const ls = getLlmStats();
+      llmText = `${ls.analyzed} analyzed (${ls.malicious} mal, ${ls.benign} ben, ${ls.uncertain} unc, ${ls.errors} err)`;
+      if ((stats.llmSuppressed || 0) > 0) {
+        llmText += ` | ${stats.llmSuppressed} suppressed`;
+      }
+    } else {
+      llmText = 'Disabled';
+    }
+  } catch {
+    llmText = 'Not loaded';
+  }
+
   // --- System health ---
   const uptimeSec = Math.floor(process.uptime());
   const uptimeH = Math.floor(uptimeSec / 3600);
@@ -863,6 +891,7 @@ function buildDailyReportEmbed(stats, dailyAlerts) {
         { name: 'Timeouts', value: timeoutText, inline: true },
         { name: 'vs Yesterday', value: trendsText, inline: false },
         { name: 'ML', value: mlText, inline: true },
+        { name: 'LLM Detective', value: llmText, inline: true },
         { name: 'Top Suspects', value: top3Text, inline: false },
         { name: 'System', value: healthText, inline: false }
       ],
@@ -907,6 +936,8 @@ async function sendDailyReport(stats, dailyAlerts, recentlyScanned, downloadsCac
     avgScanTimeMs: stats.scanned > 0 ? Math.round(stats.totalTimeMs / stats.scanned) : 0,
     suspectByTier: { ...stats.suspectByTier },
     mlFiltered: stats.mlFiltered || 0,
+    llmAnalyzed: stats.llmAnalyzed || 0,
+    llmSuppressed: stats.llmSuppressed || 0,
     changesStreamPackages: stats.changesStreamPackages || 0,
     topSuspects: dailyAlerts.slice().sort((a, b) => b.findingsCount - a.findingsCount).slice(0, 10)
   });
@@ -942,6 +973,10 @@ async function sendDailyReport(stats, dailyAlerts, recentlyScanned, downloadsCac
   stats.errorsByType.other = 0;
   stats.totalTimeMs = 0;
   stats.mlFiltered = 0;
+  stats.llmAnalyzed = 0;
+  stats.llmSuppressed = 0;
+  // Reset LLM detective internal stats
+  try { require('../ml/llm-detective.js').resetStats(); } catch {}
   stats.changesStreamPackages = 0;
   stats.rssFallbackCount = 0;
   dailyAlerts.length = 0;

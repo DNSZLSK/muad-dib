@@ -680,6 +680,8 @@ function loadDailyStats(stats, dailyAlerts) {
       }
       stats.totalTimeMs = data.totalTimeMs || 0;
       stats.mlFiltered = data.mlFiltered || 0;
+      stats.llmAnalyzed = data.llmAnalyzed || 0;
+      stats.llmSuppressed = data.llmSuppressed || 0;
       if (Array.isArray(data.dailyAlerts)) {
         dailyAlerts.length = 0;
         dailyAlerts.push(...data.dailyAlerts);
@@ -704,6 +706,8 @@ function saveDailyStats(stats, dailyAlerts) {
       errorsByType: { ...stats.errorsByType },
       totalTimeMs: stats.totalTimeMs,
       mlFiltered: stats.mlFiltered,
+      llmAnalyzed: stats.llmAnalyzed || 0,
+      llmSuppressed: stats.llmSuppressed || 0,
       dailyAlerts: dailyAlerts.slice()
     };
     atomicWriteFileSync(DAILY_STATS_FILE, JSON.stringify(data, null, 2));

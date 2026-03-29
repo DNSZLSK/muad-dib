@@ -50,6 +50,8 @@ const stats = {
   errorsByType: { too_large: 0, tar_failed: 0, http_error: 0, timeout: 0, static_timeout: 0, other: 0 },
   totalTimeMs: 0,
   mlFiltered: 0,
+  llmAnalyzed: 0,
+  llmSuppressed: 0,
   lastReportTime: Date.now(),
   lastDailyReportDate: null
 };
