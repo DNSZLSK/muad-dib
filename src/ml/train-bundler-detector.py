@@ -98,7 +98,10 @@ XGB_PARAMS = {
 N_ESTIMATORS = 200
 N_FOLDS = 5
 
-# Hardcoded 71 features — exact copy of feature-extractor.js output keys
+# Hardcoded 87 features — exact copy of feature-extractor.js output keys
+# v2.10.32: expanded from 71 to 87 (16 new type_* features for code exec bypasses,
+# IoC, GlassWorm, obfuscation, module graph). New features are 0 in pre-existing
+# JSONL records; SHAP handles sparsity gracefully.
 FEATURE_NAMES = [
     # Scoring (4)
     'score', 'max_file_score', 'package_score', 'global_risk_score',
@@ -106,7 +109,8 @@ FEATURE_NAMES = [
     'count_total', 'count_critical', 'count_high', 'count_medium', 'count_low',
     # Distinct types (1)
     'distinct_threat_types',
-    # Per-type counts (31 TOP_THREAT_TYPES + 1 other = 32)
+    # Per-type counts (47 TOP_THREAT_TYPES + 1 other = 48)
+    # --- Original 31 ---
     'type_suspicious_dataflow', 'type_env_access', 'type_sensitive_string',
     'type_dangerous_call_eval', 'type_dangerous_call_exec',
     'type_dangerous_call_function', 'type_obfuscation_detected',
@@ -119,7 +123,24 @@ FEATURE_NAMES = [
     'type_cross_file_dataflow', 'type_module_compile', 'type_crypto_decipher',
     'type_env_charcode_reconstruction', 'type_lifecycle_shell_pipe',
     'type_curl_exec', 'type_reverse_shell', 'type_binary_dropper',
-    'type_mcp_config_injection', 'type_other',
+    'type_mcp_config_injection',
+    # --- Code execution bypasses (v2.9.x–v2.10.x) ---
+    'type_vm_code_execution', 'type_vm_dynamic_code',
+    'type_dangerous_constructor', 'type_module_load_bypass',
+    'type_require_process_mainmodule', 'type_proxy_globalthis_intercept',
+    'type_reflect_bind_code_execution',
+    # --- IoC / supply chain ---
+    'type_known_malicious_package', 'type_known_malicious_hash',
+    # --- GlassWorm ---
+    'type_unicode_invisible_injection', 'type_blockchain_c2_resolution',
+    # --- Shell / exec ---
+    'type_dangerous_exec', 'type_node_inline_exec',
+    # --- Obfuscation ---
+    'type_js_obfuscation_pattern',
+    # --- Module graph / WASM ---
+    'type_suspicious_module_sink', 'type_wasm_host_sink',
+    # --- Aggregated ---
+    'type_other',
     # Boolean behavioral signals (10)
     'has_lifecycle_script', 'has_network_access', 'has_obfuscation',
     'has_env_access', 'has_eval', 'has_staged_payload', 'has_typosquat',
@@ -138,7 +159,7 @@ FEATURE_NAMES = [
     'file_count_total', 'has_tests', 'threat_density',
 ]
 
-assert len(FEATURE_NAMES) == 71, f"Expected 71 features, got {len(FEATURE_NAMES)}"
+assert len(FEATURE_NAMES) == 87, f"Expected 87 features, got {len(FEATURE_NAMES)}"
 
 # Features available for training (after excluding inference-blocked features)
 TRAINABLE_FEATURES = [f for f in FEATURE_NAMES if f not in INFERENCE_EXCLUDED_FEATURES]
