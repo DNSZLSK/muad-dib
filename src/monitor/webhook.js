@@ -379,6 +379,7 @@ function buildAlertData(name, version, ecosystem, result, sandboxResult, llmResu
     webhookData.llm = {
       verdict: llmResult.verdict,
       confidence: llmResult.confidence,
+      investigation_steps: (llmResult.investigation_steps || []).slice(0, 5),
       reasoning: (llmResult.reasoning || '').slice(0, 200),
       attack_type: llmResult.attack_type || null,
       iocs_found: (llmResult.iocs_found || []).slice(0, 5),

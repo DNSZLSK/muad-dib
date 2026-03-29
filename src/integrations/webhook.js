@@ -243,6 +243,15 @@ function formatDiscord(results) {
       value: llmValue.slice(0, 1024),
       inline: false
     });
+    // Show investigation steps as a separate field if present (structured reasoning)
+    if (results.llm.investigation_steps && results.llm.investigation_steps.length > 0) {
+      const stepsText = results.llm.investigation_steps.map(s => `- ${s}`).join('\n');
+      fields.push({
+        name: 'Investigation Steps',
+        value: stepsText.slice(0, 1024),
+        inline: false
+      });
+    }
   }
 
   const titlePrefix = emoji ? `${emoji} ` : '';

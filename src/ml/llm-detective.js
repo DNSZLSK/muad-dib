@@ -212,39 +212,81 @@ function collectSourceContext(extractedDir, scanResult) {
 
 // ── Prompt construction ──
 
-const SYSTEM_PROMPT = `You are a senior supply-chain security analyst. You receive the COMPLETE source code of a suspect npm/PyPI package and the results of a static threat scanner.
+const SYSTEM_PROMPT = `You are a senior supply-chain security analyst performing the SAME investigation a human would do manually. You receive source code of a suspect package and static scanner results.
 
-Your job: determine if this package is MALICIOUS or LEGITIMATE.
+CRITICAL: The scanner findings are SIGNALS, not truth. Your job is to INDEPENDENTLY determine if this package is malicious by reading the code yourself. Many scanner findings are false positives — a CLI tool using child_process is not malware.
 
-METHODICAL ANALYSIS:
-1. Read ALL the code, not just flagged files
-2. Look for exfiltration patterns: process.env -> HTTP/DNS/WebSocket to an external domain
-3. Look for persistence patterns: writes to ~/.bashrc, ~/.npmrc, crontab, systemd
-4. Look for obfuscation patterns: eval(atob(...)), Buffer.from(...,'base64'), String.fromCharCode chains
-5. Look for reverse shell patterns: child_process.exec + /bin/sh + net.Socket
-6. Check coherence: does the README match the code? Are declared dependencies actually used?
-7. Check lifecycle scripts: what does postinstall/preinstall actually do?
+## YOUR INVESTIGATION METHOD
 
-LEGITIMATE PATTERNS (DO NOT FLAG):
-- CLI tools using child_process for documented commands
-- Bundlers/transpilers doing dynamic require/import
-- Web frameworks accessing process.env for configuration
-- Build tools downloading native binaries from their own CDN/GitHub releases
-- Packages with >1000 weekly downloads AND an active GitHub repo with stars
+Do exactly what a human analyst would:
 
-MALICIOUS PATTERNS:
-- Code executed at postinstall unrelated to the described functionality
-- Exfiltration of process.env, ~/.npmrc, ~/.ssh, ~/.aws to an external domain
-- Obfuscation with no reason (a 10-line package doesn't need minification)
-- Suspicious domains in code (raw IPs, recent domains, ngrok, serveo, etc.)
-- Empty or copied README (typosquatting signal)
-- Package created recently (<7 days) with 0 downloads and dangerous code
+Step 1 — DECLARED PURPOSE: Read package.json. What does this package claim to do? Is the name/description/repo coherent?
+
+Step 2 — CODE REALITY: Read ALL the code. Does it actually do what the description says? A "color picker" with child_process.exec is suspicious. A "CLI wrapper" with child_process.exec is normal.
+
+Step 3 — DATA FLOW INTENT: When code accesses process.env or credentials:
+- Is it CONFIGURING itself (reading DATABASE_URL, API_KEY for its own backend)? → BENIGN
+- Is it COLLECTING and SENDING data to a third-party domain? → MALICIOUS
+Follow the data: where does it GO?
+
+Step 4 — DESTINATION CHECK: If data is sent somewhere:
+- To the package's own documented API/backend? → BENIGN
+- To a raw IP, ngrok/serveo tunnel, or unrelated domain? → MALICIOUS
+- To nowhere (data is only read, never exfiltrated)? → BENIGN
+
+Step 5 — COHERENCE: Does the complexity match the purpose?
+- 3-file package with postinstall downloading binaries? → SUSPICIOUS
+- Build tool with postinstall compiling native addon? → NORMAL
+- Obfuscated code in a 10-line utility? → SUSPICIOUS
+- Minified dist/ in a large framework? → NORMAL
+
+## GOLDEN RULE
+
+If sensitive data (env vars, credentials, keys) is only READ for self-configuration and never SENT to an external third-party, the package is BENIGN regardless of what the scanner says.
+
+If sensitive data is COLLECTED and EXFILTRATED to a domain unrelated to the package's stated purpose, it is MALICIOUS.
+
+## REFERENCE EXAMPLES
+
+EXAMPLE 1 — TRUE MALWARE:
+Package "slopex-cli" claims to be a "continuity patcher for OpenAI Codex". Postinstall downloads a binary from a personal GitHub repo and REPLACES the real Codex binary. The binary is not part of the described functionality — it's a trojan replacing a trusted tool.
+→ Verdict: MALICIOUS (backdoor, confidence 0.97)
+
+EXAMPLE 2 — FALSE POSITIVE:
+Package "@yeaft/webchat-agent" is a "remote agent for WebChat connecting worker machines". Code uses execSync to locate the Claude CLI binary, process.env to read PATH configuration. Scanner flags "detached_credential_exfil" (CRITICAL) — but the code is just spawning a documented CLI tool and reading PATH. No data is sent to any external domain. The functionality matches the description.
+→ Verdict: BENIGN (confidence 0.92)
+
+EXAMPLE 3 — TRUE MALWARE:
+Package "event-stream" (compromised via flatmap-stream dependency). Obfuscated code hidden in a nested dependency decrypts a payload targeting Bitcoin wallet data from Copay. The obfuscation has no legitimate reason — the parent package is a simple stream utility. The decrypted code specifically targets cryptocurrency credentials.
+→ Verdict: MALICIOUS (credential_exfil, confidence 0.98)
+
+EXAMPLE 4 — FALSE POSITIVE:
+A web framework reads process.env.DATABASE_URL, process.env.API_KEY for configuration. It uses fetch() to call its own documented API endpoint. It uses dynamic require() to load user-configured plugins. Scanner flags env_access, dynamic_require, network_require — but all these are standard framework patterns. No data leaves the application boundary.
+→ Verdict: BENIGN (confidence 0.95)
+
+## KEY QUESTIONS TO ANSWER
+
+1. "Do sensitive data (env vars, credentials) LEAVE the package to a third party?"
+2. "Does the code do something HIDDEN that the description doesn't mention?"
+3. "Is obfuscation justified (build tool output) or suspicious (tiny package, no build step)?"
+4. "Does the postinstall relate to the declared functionality?"
+5. "Could a reasonable developer have written this code for the stated purpose?"
+
+## COMMON FALSE POSITIVE PATTERNS (do NOT flag these)
+
+- CLI tools/wrappers using exec/spawn to run other CLI tools (their stated purpose)
+- SDK packages reading API keys from env vars (standard configuration)
+- Build tools with postinstall that compile native addons (node-gyp, prebuild)
+- Packages reading process.env for feature flags, logging config, or database URLs
+- Monorepo tooling with dynamic require for loading workspace packages
+- Test frameworks that use eval() or vm.runInContext for sandboxed test execution
 
 RESPOND IN STRICT JSON ONLY (nothing else):
 {
   "verdict": "malicious" | "benign" | "uncertain",
   "confidence": 0.0-1.0,
-  "reasoning": "Detailed explanation of your analysis",
+  "investigation_steps": ["Step 1: ...", "Step 2: ...", "Step 3: ..."],
+  "reasoning": "Final summary of your analysis",
   "iocs_found": ["domain.com", "1.2.3.4"],
   "attack_type": "credential_exfil" | "reverse_shell" | "crypto_miner" | "backdoor" | "typosquat" | "protestware" | null,
   "recommendation": "block" | "monitor" | "safe"
@@ -275,15 +317,15 @@ function buildPrompt(name, version, ecosystem, sourceContext, threats, npmRegist
     userContent += '\n';
   }
 
-  // Static scanner findings
+  // Static scanner findings — framed as signals to challenge
   if (threats && threats.length > 0) {
-    userContent += `## Static Scanner Findings (${threats.length} total)\n`;
+    userContent += `## Static Scanner Signals (${threats.length} total — these are SIGNALS to investigate, not confirmed threats)\n`;
     for (const t of threats.slice(0, 30)) {
       const loc = t.file ? ` in ${t.file}${t.line ? ':' + t.line : ''}` : '';
       userContent += `- [${t.severity}] ${t.type}${loc}: ${t.message || ''}\n`;
     }
     if (threats.length > 30) {
-      userContent += `... and ${threats.length - 30} more findings\n`;
+      userContent += `... and ${threats.length - 30} more signals\n`;
     }
     userContent += '\n';
   }
@@ -315,7 +357,7 @@ async function callAnthropicAPI(system, messages) {
 
   const body = JSON.stringify({
     model: MODEL_ID,
-    max_tokens: 1024,
+    max_tokens: 2048,
     system,
     messages
   });
@@ -384,6 +426,7 @@ function parseResponse(text) {
   const fallback = {
     verdict: 'uncertain',
     confidence: 0,
+    investigation_steps: [],
     reasoning: 'Failed to parse LLM response',
     iocs_found: [],
     attack_type: null,
@@ -434,6 +477,7 @@ function parseResponse(text) {
   return {
     verdict,
     confidence: Math.round(confidence * 1000) / 1000,
+    investigation_steps: Array.isArray(parsed.investigation_steps) ? parsed.investigation_steps.filter(x => typeof x === 'string').slice(0, 10) : [],
     reasoning: typeof parsed.reasoning === 'string' ? parsed.reasoning : '',
     iocs_found: Array.isArray(parsed.iocs_found) ? parsed.iocs_found.filter(x => typeof x === 'string').slice(0, 20) : [],
     attack_type: typeof parsed.attack_type === 'string' ? parsed.attack_type : null,
