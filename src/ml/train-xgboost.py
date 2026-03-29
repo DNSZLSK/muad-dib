@@ -272,46 +272,65 @@ def align_features(negatives: list, positives: list) -> tuple:
 
 
 def filter_leaky_features(X: pd.DataFrame, y: np.ndarray,
-                          min_coverage: float = 0.01) -> tuple:
+                          min_coverage: float = 0.001) -> tuple:
     """
-    Step 2b: Remove features that leak source identity.
+    Step 2b: Remove dead features and source-identity leaks.
 
-    A feature present in >99% of one source but <1% of the other is a proxy
-    for the data source, not a genuine malware signal.
+    A feature is dropped ONLY if:
+      - DEAD: non-zero in < 0.1% of ALL samples (both classes combined)
+      - LEAKY: non-zero in >= 99% of one class AND < 0.1% of the other
+        (proxy for data source, not malware signal)
+
+    Features that are 0% in negatives but high in positives are KEPT —
+    that's discriminative, not leaky (e.g., count_critical, type_* features
+    are legitimately 0 in clean packages).
 
     Returns: (X_filtered, active_features)
     """
     print("\n" + "=" * 60)
-    print("[Step 2b/8] Filtering leaky features (common-only mode)...")
+    print("[Step 2b/8] Filtering dead/leaky features...")
     print("=" * 60)
 
     neg_mask = y == 0
     pos_mask = y == 1
     n_neg = int(neg_mask.sum())
     n_pos = int(pos_mask.sum())
+    n_total = n_neg + n_pos
 
     retained = []
     excluded = []
 
-    print(f"\n  {'Feature':<40s} {'Neg%':>6s} {'Pos%':>6s} {'Status'}")
-    print(f"  {'-' * 40} {'-' * 6} {'-' * 6} {'-' * 8}")
+    print(f"\n  {'Feature':<40s} {'Neg%':>6s} {'Pos%':>6s} {'All%':>6s} {'Status'}")
+    print(f"  {'-' * 40} {'-' * 6} {'-' * 6} {'-' * 6} {'-' * 8}")
 
     for feat in FEATURE_NAMES:
         neg_nonzero = float((X.loc[neg_mask, feat] != 0).sum()) / max(n_neg, 1)
         pos_nonzero = float((X.loc[pos_mask, feat] != 0).sum()) / max(n_pos, 1)
+        all_nonzero = float((X[feat] != 0).sum()) / max(n_total, 1)
 
-        if neg_nonzero >= min_coverage and pos_nonzero >= min_coverage:
-            retained.append(feat)
-            status = 'KEEP'
-        else:
+        status = 'KEEP'
+
+        # DEAD: feature is near-zero across ALL samples — no signal at all
+        if all_nonzero < min_coverage:
+            status = 'DEAD'
+
+        # LEAKY: feature is a source-identity proxy (>=99% in one, <0.1% in other)
+        elif (neg_nonzero >= 0.99 and pos_nonzero < min_coverage):
+            status = 'LEAK'
+        elif (pos_nonzero >= 0.99 and neg_nonzero < min_coverage):
+            status = 'LEAK'
+
+        if status != 'KEEP':
             excluded.append(feat)
-            status = 'DROP'
+        else:
+            retained.append(feat)
 
-        print(f"  {feat:<40s} {neg_nonzero * 100:5.1f}% {pos_nonzero * 100:5.1f}% {status}")
+        print(f"  {feat:<40s} {neg_nonzero * 100:5.1f}% {pos_nonzero * 100:5.1f}% "
+              f"{all_nonzero * 100:5.1f}% {status}")
 
     print(f"\n  Retained: {len(retained)}/{len(FEATURE_NAMES)} features")
     if excluded:
-        print(f"  Excluded: {', '.join(excluded)}")
+        print(f"  Excluded ({len(excluded)}): {', '.join(excluded)}")
 
     X_filtered = X[retained]
     return X_filtered, retained
