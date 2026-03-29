@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { isDockerAvailable, SANDBOX_CONCURRENCY_MAX } = require('../sandbox/index.js');
-const { setVerboseMode, isSandboxEnabled, isCanaryEnabled } = require('./classify.js');
+const { setVerboseMode, isSandboxEnabled, isCanaryEnabled, isLlmDetectiveEnabled, getLlmDetectiveMode } = require('./classify.js');
 const { loadState, saveState, loadDailyStats, saveDailyStats, purgeTarballCache, getParisHour } = require('./state.js');
 const { isTemporalEnabled, isTemporalAstEnabled, isTemporalPublishEnabled, isTemporalMaintainerEnabled } = require('./temporal.js');
 const { pendingGrouped, flushScopeGroup, sendDailyReport, DAILY_REPORT_HOUR } = require('./webhook.js');
@@ -117,6 +117,16 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
     console.log('[MONITOR] Canary tokens enabled — honey tokens injected in sandbox for exfiltration detection');
   } else {
     console.log('[MONITOR] Canary tokens disabled (MUADDIB_MONITOR_CANARY=false)');
+  }
+
+  // LLM Detective status
+  if (isLlmDetectiveEnabled()) {
+    const llmMode = getLlmDetectiveMode();
+    const llmLimit = parseInt(process.env.MUADDIB_LLM_DAILY_LIMIT, 10) || 100;
+    console.log(`[MONITOR] LLM Detective enabled — mode: ${llmMode}, daily limit: ${llmLimit}, model: claude-haiku-4-5`);
+  } else {
+    const reason = !process.env.ANTHROPIC_API_KEY ? 'no ANTHROPIC_API_KEY' : 'MUADDIB_LLM_ENABLED=false';
+    console.log(`[MONITOR] LLM Detective disabled (${reason})`);
   }
 
   // Temporal analysis status

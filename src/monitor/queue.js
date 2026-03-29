@@ -676,11 +676,44 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
         } else if (ecosystem === 'npm' && hasHighConfidenceThreat(result)) {
           console.log(`[MONITOR] REPUTATION BYPASS: ${name} has high-confidence threat — using raw score`);
         }
-        await trySendWebhook(name, version, ecosystem, adjustedResult, sandboxResult, mlResult);
+        // LLM Detective: AI-powered analysis for T1a/T1b suspects
+        let llmResult = null;
+        if ((tier === '1a' || tier === '1b') && (adjustedResult.summary.riskScore || 0) >= 25) {
+          try {
+            const { investigatePackage, isLlmEnabled, getLlmMode } = require('../ml/llm-detective.js');
+            if (isLlmEnabled()) {
+              llmResult = await investigatePackage(extractedDir, result, {
+                name, version, ecosystem,
+                registryMeta: meta,
+                npmRegistryMeta,
+                tier
+              });
+              if (llmResult) {
+                const llmMode = getLlmMode();
+                console.log(`[LLM] ${name}@${version}: verdict=${llmResult.verdict} confidence=${llmResult.confidence} mode=${llmMode}`);
+                stats.llmAnalyzed = (stats.llmAnalyzed || 0) + 1;
+
+                if (llmMode === 'active' && llmResult.verdict === 'benign' && llmResult.confidence > 0.85) {
+                  console.log(`[LLM] SUPPRESS: ${name}@${version} cleared (benign, confidence=${llmResult.confidence})`);
+                  stats.llmSuppressed = (stats.llmSuppressed || 0) + 1;
+                  stats.scanned++;
+                  stats.totalTimeMs += Date.now() - startTime;
+                  updateScanStats('llm_benign');
+                  recordTrainingSample(result, { name, version, ecosystem, label: 'llm_benign', tier, registryMeta: meta, unpackedSize: meta.unpackedSize, npmRegistryMeta, fileCountTotal, hasTests });
+                  return { sandboxResult, llmResult, tier, staticScore: result.summary.riskScore || 0 };
+                }
+              }
+            }
+          } catch (err) {
+            console.error(`[LLM] Error for ${name}@${version}: ${err.message}`);
+          }
+        }
+
+        await trySendWebhook(name, version, ecosystem, adjustedResult, sandboxResult, mlResult, llmResult);
         const staticScore = result.summary.riskScore || 0;
         const hasHCThreats = hasHighConfidenceThreat(result);
         const isDormant = sandboxResult && sandboxResult.score === 0 && (result.summary.riskScore || 0) >= 20;
-        return { sandboxResult, staticClean: false, tier, staticScore, hasHCThreats, isDormant };
+        return { sandboxResult, llmResult, staticClean: false, tier, staticScore, hasHCThreats, isDormant };
       }
     }
   } catch (err) {

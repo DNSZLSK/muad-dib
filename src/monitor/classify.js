@@ -250,6 +250,19 @@ function isCanaryEnabled() {
   return true;
 }
 
+function isLlmDetectiveEnabled() {
+  if (!process.env.ANTHROPIC_API_KEY) return false;
+  const env = process.env.MUADDIB_LLM_ENABLED;
+  if (env !== undefined && env.toLowerCase() === 'false') return false;
+  return true;
+}
+
+function getLlmDetectiveMode() {
+  const env = process.env.MUADDIB_LLM_MODE;
+  if (env && env.toLowerCase() === 'active') return 'active';
+  return 'shadow';
+}
+
 /** @deprecated See comment above verboseMode. */
 function isVerboseMode() {
   if (verboseMode) return true;
@@ -348,6 +361,8 @@ module.exports = {
   formatFindings,
   isSandboxEnabled,
   isCanaryEnabled,
+  isLlmDetectiveEnabled,
+  getLlmDetectiveMode,
   isVerboseMode,
   setVerboseMode,
   quickTyposquatCheck,

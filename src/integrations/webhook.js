@@ -223,6 +223,28 @@ function formatDiscord(results) {
     });
   }
 
+  // Add LLM Detective field if LLM analysis was performed
+  if (results.llm && results.llm.verdict) {
+    const verdictEmoji = results.llm.verdict === 'malicious' ? '\u274C'
+      : results.llm.verdict === 'benign' ? '\u2705' : '\u2753';
+    const modeTag = results.llm.mode === 'shadow' ? ' [shadow]' : '';
+    let llmValue = `${verdictEmoji} **${results.llm.verdict}** (${Math.round(results.llm.confidence * 100)}% confidence)${modeTag}`;
+    if (results.llm.attack_type) {
+      llmValue += `\nType: ${results.llm.attack_type}`;
+    }
+    if (results.llm.iocs_found && results.llm.iocs_found.length > 0) {
+      llmValue += `\nIOCs: ${results.llm.iocs_found.join(', ')}`;
+    }
+    if (results.llm.reasoning) {
+      llmValue += `\n${results.llm.reasoning}`;
+    }
+    fields.push({
+      name: 'LLM Analysis',
+      value: llmValue.slice(0, 1024),
+      inline: false
+    });
+  }
+
   const titlePrefix = emoji ? `${emoji} ` : '';
   const prioritySuffix = priority && priority.level ? ` [${priority.level}]` : '';
   const ts = results.timestamp ? new Date(results.timestamp) : new Date();
