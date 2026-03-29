@@ -21,6 +21,10 @@ const { extractFeatures } = require('./feature-extractor.js');
 // Lazy-loaded models (allows resetModel for testing)
 let _model = undefined; // undefined = not yet loaded, null = absent
 let _bundlerModel = undefined; // undefined = not yet loaded, null = absent
+let _shadowModel = undefined; // undefined = not yet loaded, null = absent
+
+// Shadow mode stats (reset on model reload)
+const _shadowStats = { total: 0, agree: 0, disagree: 0 };
 
 // High-confidence malice types that must NEVER be suppressed by ML
 const HC_TYPES = new Set([
@@ -92,6 +96,80 @@ function isBundlerModelAvailable() {
  */
 function resetBundlerModel() {
   _bundlerModel = undefined;
+}
+
+// --- Shadow model (ML1 v2, logs only, no filtering) ---
+
+/**
+ * Load shadow model from model-trees-shadow.js. Returns model object or null.
+ * Shadow model runs in parallel with the main model for comparison.
+ */
+function loadShadowModel() {
+  if (_shadowModel !== undefined) return _shadowModel;
+  try {
+    _shadowModel = require('./model-trees-shadow.js') || null;
+  } catch {
+    _shadowModel = null;
+  }
+  return _shadowModel;
+}
+
+function isShadowModelAvailable() {
+  return loadShadowModel() !== null;
+}
+
+function resetShadowModel() {
+  _shadowModel = undefined;
+  _shadowStats.total = 0;
+  _shadowStats.agree = 0;
+  _shadowStats.disagree = 0;
+}
+
+/**
+ * Run shadow model prediction and log comparison with main model.
+ * Never affects the actual classification decision.
+ *
+ * @param {Object} result - scan result
+ * @param {Object} meta - enriched metadata
+ * @param {string} mainPrediction - the main model's prediction
+ * @param {number} mainProbability - the main model's probability
+ * @param {string} packageName - for logging
+ */
+function runShadowComparison(result, meta, mainPrediction, mainProbability, packageName) {
+  const shadow = loadShadowModel();
+  if (!shadow) return;
+
+  const features = extractFeatures(result, meta || {});
+  const values = new Array(shadow.features.length);
+  for (let i = 0; i < shadow.features.length; i++) {
+    values[i] = features[shadow.features[i]] || 0;
+  }
+
+  let margin = 0;
+  for (const tree of shadow.trees) {
+    margin += traverseTree(tree, values);
+  }
+
+  const shadowProb = sigmoid(margin);
+  const shadowPred = shadowProb >= shadow.threshold ? 'malicious' : 'clean';
+
+  _shadowStats.total++;
+  if (shadowPred === mainPrediction) {
+    _shadowStats.agree++;
+  } else {
+    _shadowStats.disagree++;
+    console.log(`[ML-SHADOW] Disagreement on ${packageName}: main=${mainPrediction}(${mainProbability}) shadow=${shadowPred}(${Math.round(shadowProb * 1000) / 1000}) [${_shadowStats.disagree}/${_shadowStats.total} disagree]`);
+  }
+
+  // Periodic summary every 100 classifications
+  if (_shadowStats.total % 100 === 0) {
+    const agreeRate = ((_shadowStats.agree / _shadowStats.total) * 100).toFixed(1);
+    console.log(`[ML-SHADOW] Stats: ${_shadowStats.total} total, ${agreeRate}% agree, ${_shadowStats.disagree} disagree`);
+  }
+}
+
+function getShadowStats() {
+  return { ..._shadowStats };
 }
 
 /**
@@ -276,9 +354,18 @@ function classifyPackage(result, meta) {
   const featureValues = buildFeatureVector(result, meta);
   const { probability, prediction } = predict(featureValues);
 
+  const roundedProb = Math.round(probability * 1000) / 1000;
+
+  // Shadow model comparison (log-only, never affects decision)
+  if (isShadowModelAvailable()) {
+    const pkgName = (result && result.summary && result.summary.packageName) ||
+                    (meta && meta.name) || 'unknown';
+    runShadowComparison(result, meta, prediction, roundedProb, pkgName);
+  }
+
   return {
     prediction,
-    probability: Math.round(probability * 1000) / 1000,
+    probability: roundedProb,
     reason: prediction === 'clean' ? 'ml_clean' : 'ml_malicious'
   };
 }
@@ -298,5 +385,10 @@ module.exports = {
   resetBundlerModel,
   loadBundlerModel,
   predictBundler,
-  buildBundlerFeatureVector
+  buildBundlerFeatureVector,
+  // Shadow model (ML1 v2, log-only comparison)
+  isShadowModelAvailable,
+  resetShadowModel,
+  loadShadowModel,
+  getShadowStats
 };
