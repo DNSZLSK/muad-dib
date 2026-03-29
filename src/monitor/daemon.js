@@ -1,7 +1,8 @@
+const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { isDockerAvailable } = require('../sandbox/index.js');
+const { isDockerAvailable, SANDBOX_CONCURRENCY_MAX } = require('../sandbox/index.js');
 const { setVerboseMode, isSandboxEnabled, isCanaryEnabled } = require('./classify.js');
 const { loadState, saveState, loadDailyStats, saveDailyStats, purgeTarballCache, getParisHour } = require('./state.js');
 const { isTemporalEnabled, isTemporalAstEnabled, isTemporalPublishEnabled, isTemporalMaintainerEnabled } = require('./temporal.js');
@@ -31,6 +32,26 @@ function cleanupOrphanTmpDirs() {
       console.log(`[MONITOR] Cleaned up ${entries.length} orphan temp dir(s)`);
     }
   } catch {}
+}
+
+function cleanupOrphanContainers() {
+  try {
+    // List running containers with the sandbox name prefix (npm-audit-*)
+    const output = execFileSync('docker', ['ps', '-q', '--filter', 'name=npm-audit-'], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: 10000
+    }).toString().trim();
+    if (!output) return;
+    const ids = output.split(/\s+/).filter(Boolean);
+    for (const id of ids) {
+      try {
+        execFileSync('docker', ['rm', '-f', id], { stdio: 'pipe', timeout: 10000 });
+      } catch {}
+    }
+    console.log(`[MONITOR] Cleaned up ${ids.length} orphan sandbox container(s)`);
+  } catch {
+    // Docker not available or command failed — skip silently
+  }
 }
 
 function reportStats(stats) {
@@ -67,6 +88,8 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
 
   // Cleanup temp dirs from previous runs (SIGTERM/crash may leave orphans)
   cleanupOrphanTmpDirs();
+  // Kill orphan sandbox containers from previous crash (npm-audit-* prefix)
+  cleanupOrphanContainers();
   // Layer 3: Purge expired cached tarballs on startup
   purgeTarballCache();
 
@@ -137,6 +160,7 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
   console.log(`[MONITOR] State loaded — npm last: ${state.npmLastPackage || 'none'}, pypi last: ${state.pypiLastPackage || 'none'}, npm seq: ${state.npmLastSeq || 'none'}`);
   console.log('[MONITOR] npm changes stream enabled (replicate.npmjs.com) with RSS fallback');
   console.log(`[MONITOR] Scan concurrency: ${SCAN_CONCURRENCY} (MUADDIB_SCAN_CONCURRENCY to override)`);
+  console.log(`[MONITOR] Sandbox concurrency: ${SANDBOX_CONCURRENCY_MAX} (MUADDIB_SANDBOX_CONCURRENCY to override)`);
   console.log(`[MONITOR] Polling every ${POLL_INTERVAL / 1000}s. Ctrl+C to stop.\n`);
 
   let running = true;
@@ -193,6 +217,7 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
 module.exports = {
   startMonitor,
   cleanupOrphanTmpDirs,
+  cleanupOrphanContainers,
   reportStats,
   isDailyReportDue,
   sleep,

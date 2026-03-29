@@ -20,6 +20,41 @@ const DOCKER_IMAGE = 'muaddib-sandbox';
 const CONTAINER_TIMEOUT = 120000; // 120 seconds
 const SINGLE_RUN_TIMEOUT = 60000; // 60 seconds per run in multi-run mode
 
+// ── Sandbox concurrency limiter ──
+// Prevents Docker container saturation under load (16 workers × 3 runs = 48 containers).
+// Pattern: same semaphore as src/shared/http-limiter.js.
+const SANDBOX_CONCURRENCY_MAX = Math.max(1, parseInt(process.env.MUADDIB_SANDBOX_CONCURRENCY, 10) || 3);
+
+const _sandboxSemaphore = { active: 0, queue: [] };
+
+function acquireSandboxSlot() {
+  if (_sandboxSemaphore.active < SANDBOX_CONCURRENCY_MAX) {
+    _sandboxSemaphore.active++;
+    return Promise.resolve();
+  }
+  return new Promise(resolve => {
+    _sandboxSemaphore.queue.push(resolve);
+  });
+}
+
+function releaseSandboxSlot() {
+  if (_sandboxSemaphore.queue.length > 0) {
+    const next = _sandboxSemaphore.queue.shift();
+    next(); // Transfers slot to next waiter (active count stays the same)
+  } else {
+    _sandboxSemaphore.active--;
+  }
+}
+
+function resetSandboxLimiter() {
+  _sandboxSemaphore.active = 0;
+  _sandboxSemaphore.queue.length = 0;
+}
+
+function getSandboxSemaphore() {
+  return _sandboxSemaphore;
+}
+
 // Time offsets for multi-run sandbox execution (ms)
 const TIME_OFFSETS = [
   { offset: 0, label: 'immediate' },
@@ -238,11 +273,17 @@ async function runSingleSandbox(packageName, options = {}) {
     // Timeout: kill container
     const timer = setTimeout(() => {
       timedOut = true;
-      console.log(`[SANDBOX] Timeout (${runTimeout / 1000}s). Killing container...`);
+      console.log(`[SANDBOX] Timeout (${runTimeout / 1000}s). Killing container ${containerName}...`);
       try {
         execFileSync('docker', ['kill', containerName], { stdio: 'pipe', timeout: 5000 });
       } catch {
-        proc.kill('SIGKILL');
+        // docker kill failed (container in intermediate state) — force remove
+        try {
+          execFileSync('docker', ['rm', '-f', containerName], { stdio: 'pipe', timeout: 5000 });
+        } catch {
+          // Last resort: kill the docker client process (container may survive as orphan)
+          proc.kill('SIGKILL');
+        }
       }
     }, runTimeout);
 
@@ -441,69 +482,81 @@ async function runSandbox(packageName, options = {}) {
   }
 
   const mode = strict ? 'strict' : 'permissive';
-  console.log(`[SANDBOX] Analyzing "${displayName}" in isolated container (mode: ${mode}${canaryEnabled ? ', canary: on' : ''}${local ? ', local' : ''}, runs: ${TIME_OFFSETS.length})...`);
 
-  const allRuns = [];
-  let bestResult = cleanResult;
+  // Acquire sandbox slot — blocks if SANDBOX_CONCURRENCY_MAX containers already running
+  const queueLen = _sandboxSemaphore.queue.length;
+  if (queueLen > 0) {
+    console.log(`[SANDBOX] Waiting for sandbox slot (${_sandboxSemaphore.active}/${SANDBOX_CONCURRENCY_MAX} active, ${queueLen} queued)...`);
+  }
+  await acquireSandboxSlot();
 
-  for (let i = 0; i < TIME_OFFSETS.length; i++) {
-    const { offset, label } = TIME_OFFSETS[i];
-    console.log(`[SANDBOX] Run ${i + 1}/${TIME_OFFSETS.length} (${label})...`);
+  try {
+    console.log(`[SANDBOX] Analyzing "${displayName}" in isolated container (mode: ${mode}${canaryEnabled ? ', canary: on' : ''}${local ? ', local' : ''}, runs: ${TIME_OFFSETS.length}, slots: ${_sandboxSemaphore.active}/${SANDBOX_CONCURRENCY_MAX})...`);
 
-    const runResult = await runSingleSandbox(packageName, {
-      strict,
-      canaryTokens,
-      local,
-      localAbsPath,
-      displayName,
-      timeOffset: offset,
-      runTimeout: SINGLE_RUN_TIMEOUT
-    });
+    const allRuns = [];
+    let bestResult = cleanResult;
 
-    allRuns.push({
-      run: i + 1,
-      label,
-      timeOffset: offset,
-      score: runResult.score,
-      severity: runResult.severity,
-      findingCount: runResult.findings.length
-    });
+    for (let i = 0; i < TIME_OFFSETS.length; i++) {
+      const { offset, label } = TIME_OFFSETS[i];
+      console.log(`[SANDBOX] Run ${i + 1}/${TIME_OFFSETS.length} (${label})...`);
 
-    // Keep the result with the highest score
-    if (runResult.score > bestResult.score) {
-      bestResult = runResult;
+      const runResult = await runSingleSandbox(packageName, {
+        strict,
+        canaryTokens,
+        local,
+        localAbsPath,
+        displayName,
+        timeOffset: offset,
+        runTimeout: SINGLE_RUN_TIMEOUT
+      });
+
+      allRuns.push({
+        run: i + 1,
+        label,
+        timeOffset: offset,
+        score: runResult.score,
+        severity: runResult.severity,
+        findingCount: runResult.findings.length
+      });
+
+      // Keep the result with the highest score
+      if (runResult.score > bestResult.score) {
+        bestResult = runResult;
+      }
+
+      // Early exit: CRITICAL found, skip remaining runs
+      if (runResult.score >= 80) {
+        console.log(`[SANDBOX] Critical score (${runResult.score}) detected in run ${i + 1}. Skipping remaining runs.`);
+        break;
+      }
     }
 
-    // Early exit: CRITICAL found, skip remaining runs
-    if (runResult.score >= 80) {
-      console.log(`[SANDBOX] Critical score (${runResult.score}) detected in run ${i + 1}. Skipping remaining runs.`);
-      break;
+    // If all runs were inconclusive (timeout), propagate inconclusive status
+    // instead of returning CLEAN (which would cause false FP relabeling)
+    if (bestResult.score === 0 && allRuns.length > 0 && allRuns.every(r => r.score === -1)) {
+      bestResult = {
+        score: -1,
+        severity: 'INCONCLUSIVE',
+        findings: [{
+          type: 'timeout',
+          severity: 'MEDIUM',
+          detail: `All ${allRuns.length} runs exceeded timeout — package too large or slow install`,
+          evidence: `All ${allRuns.length} runs timed out`
+        }],
+        raw_report: null,
+        suspicious: false,
+        inconclusive: true
+      };
     }
+
+    // Attach multi-run metadata
+    bestResult.all_runs = allRuns;
+
+    displayResults(bestResult);
+    return bestResult;
+  } finally {
+    releaseSandboxSlot();
   }
-
-  // If all runs were inconclusive (timeout), propagate inconclusive status
-  // instead of returning CLEAN (which would cause false FP relabeling)
-  if (bestResult.score === 0 && allRuns.length > 0 && allRuns.every(r => r.score === -1)) {
-    bestResult = {
-      score: -1,
-      severity: 'INCONCLUSIVE',
-      findings: [{
-        type: 'timeout',
-        severity: 'MEDIUM',
-        detail: `All ${allRuns.length} runs exceeded timeout — package too large or slow install`,
-        evidence: `All ${allRuns.length} runs timed out`
-      }],
-      raw_report: null,
-      suspicious: false,
-      inconclusive: true
-    };
-  }
-
-  // Attach multi-run metadata
-  bestResult.all_runs = allRuns;
-
-  displayResults(bestResult);
-  return bestResult;
 }
 
 // ── Static canary detection ──
@@ -812,4 +865,4 @@ function displayResults(result) {
   }
 }
 
-module.exports = { buildSandboxImage, runSandbox, runSingleSandbox, scoreFindings, generateNetworkReport, EXFIL_PATTERNS, SAFE_DOMAINS, getSeverity, displayResults, isDockerAvailable, imageExists, STATIC_CANARY_TOKENS, detectStaticCanaryExfiltration, analyzePreloadLog, TIME_OFFSETS, SAFE_SANDBOX_CMDS };
+module.exports = { buildSandboxImage, runSandbox, runSingleSandbox, scoreFindings, generateNetworkReport, EXFIL_PATTERNS, SAFE_DOMAINS, getSeverity, displayResults, isDockerAvailable, imageExists, STATIC_CANARY_TOKENS, detectStaticCanaryExfiltration, analyzePreloadLog, TIME_OFFSETS, SAFE_SANDBOX_CMDS, SANDBOX_CONCURRENCY_MAX, acquireSandboxSlot, releaseSandboxSlot, resetSandboxLimiter, getSandboxSemaphore };
