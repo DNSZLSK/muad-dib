@@ -336,9 +336,11 @@ async function scanPackageJson(targetPath) {
 
     if (malicious) {
       // C1: Include triggering dependency metadata for diagnostic
+      // Use distinct type for dependency-declared IOC matches (not the package itself)
+      // so they don't bypass all downstream filtering via IOC_MATCH_TYPES
       threats.push({
-        type: 'known_malicious_package',
-        severity: 'CRITICAL',
+        type: 'dependency_ioc_match',
+        severity: 'HIGH',
         message: `Malicious dependency declared: ${depName}@${depVersion} (source: ${malicious.source || 'IOC'})`,
         file: 'package.json',
         matchedDep: depName,

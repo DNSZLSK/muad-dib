@@ -120,6 +120,17 @@ const RULES = {
     ],
     mitre: 'T1195.002'
   },
+  dependency_ioc_match: {
+    id: 'MUADDIB-DEP-006',
+    name: 'Dependency Declared on IOC Package',
+    severity: 'HIGH',
+    confidence: 'medium',
+    description: 'Le package declare une dependance sur un package present dans la base IOC. Signal informatif — ne prouve pas que le package scanne est malveillant.',
+    references: [
+      'https://socket.dev/npm/issue'
+    ],
+    mitre: 'T1195.002'
+  },
   pypi_malicious_package: {
     id: 'MUADDIB-PYPI-001',
     name: 'Malicious PyPI Package',
@@ -1112,7 +1123,7 @@ const RULES = {
   publish_burst: {
     id: 'MUADDIB-PUBLISH-001',
     name: 'Publish Burst Detected',
-    severity: 'HIGH',
+    severity: 'LOW',
     confidence: 'high',
     description: 'Multiple versions publiees en moins de 24h. Possible compromission de compte ou attaque automatisee.',
     references: [

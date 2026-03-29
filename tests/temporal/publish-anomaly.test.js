@@ -447,7 +447,7 @@ async function runPublishAnomalyTests() {
     const { getRule } = require('../../src/rules/index.js');
     const r1 = getRule('publish_burst');
     assert(r1.id === 'MUADDIB-PUBLISH-001', 'publish_burst rule ID should be MUADDIB-PUBLISH-001, got ' + r1.id);
-    assert(r1.severity === 'HIGH', 'publish_burst severity should be HIGH');
+    assert(r1.severity === 'LOW', 'publish_burst severity should be LOW (CI/CD noise reduction)');
 
     const r2 = getRule('dormant_spike');
     assert(r2.id === 'MUADDIB-PUBLISH-002', 'dormant_spike rule ID should be MUADDIB-PUBLISH-002, got ' + r2.id);

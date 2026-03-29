@@ -89,6 +89,9 @@ const PLAYBOOKS = {
   known_malicious_package:
     'CRITIQUE: Supprimer immediatement. rm -rf node_modules && npm cache clean --force && npm install',
 
+  dependency_ioc_match:
+    'Le package declare une dependance sur un package IOC connu. Verifier si la dependance est reellement installee (npm ls). Collision de noms possible.',
+
   pypi_malicious_package:
     'CRITIQUE: Supprimer immediatement. pip uninstall <package> && pip install -r requirements.txt',
 

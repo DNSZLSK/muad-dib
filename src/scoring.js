@@ -98,7 +98,7 @@ function getRiskThresholds() {
 const PACKAGE_LEVEL_TYPES = new Set([
   'lifecycle_script', 'lifecycle_shell_pipe',
   'lifecycle_added_critical', 'lifecycle_added_high', 'lifecycle_modified',
-  'known_malicious_package', 'typosquat_detected',
+  'known_malicious_package', 'dependency_ioc_match', 'typosquat_detected',
   'shai_hulud_marker', 'suspicious_file',
   'pypi_malicious_package', 'pypi_typosquat_detected',
   'dangerous_api_added_critical', 'dangerous_api_added_high', 'dangerous_api_added_medium',

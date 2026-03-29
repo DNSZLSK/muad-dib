@@ -706,7 +706,11 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
                 console.log(`[LLM] ${name}@${version}: verdict=${llmResult.verdict} confidence=${llmResult.confidence} mode=${llmMode}`);
                 stats.llmAnalyzed = (stats.llmAnalyzed || 0) + 1;
 
-                if (llmMode === 'active' && llmResult.verdict === 'benign' && llmResult.confidence > 0.85) {
+                // Safety: never suppress packages with high-confidence threats or positive sandbox
+                const hasHC = hasHighConfidenceThreat(result);
+                const hasSandboxEvidence = sandboxResult && sandboxResult.score > 0;
+                if (llmMode === 'active' && llmResult.verdict === 'benign' && llmResult.confidence > 0.85
+                    && !hasHC && !hasSandboxEvidence) {
                   console.log(`[LLM] SUPPRESS: ${name}@${version} cleared (benign, confidence=${llmResult.confidence})`);
                   stats.llmSuppressed = (stats.llmSuppressed || 0) + 1;
                   stats.scanned++;
