@@ -19,6 +19,20 @@ jobs:
           node-version: '20'
           cache: 'npm'
       - run: npm ci
+      - name: Run tests
+        run: npm test
+
+  coverage:
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-node@54045abd5dcd3b0fee9ca02fa24c57545834c9cc # v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
       - run: npm install -g c8@11.0.0
       - name: Run tests with coverage
         run: c8 --reporter=lcov --reporter=text npm test
@@ -42,9 +56,11 @@ jobs:
           node-version: '20'
       - run: npm ci
       - name: MUAD'DIB self-scan
-        run: node bin/muaddib.js scan . --sarif results.sarif --exclude tests --exclude docker --exclude node_modules --exclude deploy --exclude datasets --exclude src/scanner --exclude src/ioc --exclude vscode-extension --fail-on critical
+        run: node bin/muaddib.js scan . --sarif results.sarif --fail-on none --exclude tests --exclude docker --exclude node_modules --exclude deploy --exclude datasets --exclude src/scanner --exclude src/ioc --exclude vscode-extension
       - name: Filter SARIF (exclude scanner source — self-referential findings)
         run: node .github/filter-sarif.js results.sarif
+      - name: Fail on CRITICAL (post-filter)
+        run: node -e "const s=JSON.parse(require('fs').readFileSync('results.sarif','utf8'));const c=(s.runs[0].results||[]).filter(r=>r.level==='error');if(c.length){c.forEach(r=>console.error(r.ruleId+' in '+(r.locations?.[0]?.physicalLocation?.artifactLocation?.uri||'?')));process.exit(1)}console.log('No CRITICAL findings after filter')"
       - uses: github/codeql-action/upload-sarif@38697555549f1db7851b81482ff19f1fa5c4fedc # v3
         with:
           sarif_file: results.sarif

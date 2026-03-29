@@ -1,0 +1,3796 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "MUADDIB",
+          "version": "2.10.37",
+          "informationUri": "https://github.com/DNSZLSK/muad-dib",
+          "rules": [
+            {
+              "id": "MUADDIB-AST-001",
+              "name": "Sensitive String Reference",
+              "shortDescription": {
+                "text": "Reference a un chemin ou identifiant sensible (.npmrc, .ssh, tokens)"
+              },
+              "fullDescription": {
+                "text": "Reference a un chemin ou identifiant sensible (.npmrc, .ssh, tokens)"
+              },
+              "helpUri": "https://blog.phylum.io/shai-hulud-npm-worm",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "medium",
+                "mitre": "T1552.001"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-002",
+              "name": "Sensitive Environment Variable Access",
+              "shortDescription": {
+                "text": "Acces a une variable d'environnement sensible (GITHUB_TOKEN, NPM_TOKEN, AWS_*)"
+              },
+              "fullDescription": {
+                "text": "Acces a une variable d'environnement sensible (GITHUB_TOKEN, NPM_TOKEN, AWS_*)"
+              },
+              "helpUri": "https://blog.phylum.io/shai-hulud-npm-worm",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1552.001"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-003",
+              "name": "Dangerous Function Call",
+              "shortDescription": {
+                "text": "Appel a une fonction dangereuse (exec, spawn, eval, Function)"
+              },
+              "fullDescription": {
+                "text": "Appel a une fonction dangereuse (exec, spawn, eval, Function)"
+              },
+              "helpUri": "https://owasp.org/www-community/attacks/Command_Injection",
+              "properties": {
+                "severity": "MEDIUM",
+                "confidence": "medium",
+                "mitre": "T1059"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-004",
+              "name": "Eval Usage",
+              "shortDescription": {
+                "text": "Utilisation de eval() ou new Function() - execution de code dynamique"
+              },
+              "fullDescription": {
+                "text": "Utilisation de eval() ou new Function() - execution de code dynamique"
+              },
+              "helpUri": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/eval#never_use_eval!",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1059.007"
+              }
+            },
+            {
+              "id": "MUADDIB-SHELL-001",
+              "name": "Remote Code Execution via Curl",
+              "shortDescription": {
+                "text": "Telecharge et execute du code distant via curl | sh"
+              },
+              "fullDescription": {
+                "text": "Telecharge et execute du code distant via curl | sh"
+              },
+              "helpUri": "https://blog.phylum.io/shai-hulud-npm-worm",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1105"
+              }
+            },
+            {
+              "id": "MUADDIB-SHELL-002",
+              "name": "Reverse Shell",
+              "shortDescription": {
+                "text": "Tentative de connexion reverse shell"
+              },
+              "fullDescription": {
+                "text": "Tentative de connexion reverse shell"
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1059/004/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1059.004"
+              }
+            },
+            {
+              "id": "MUADDIB-SHELL-003",
+              "name": "Dead Man's Switch",
+              "shortDescription": {
+                "text": "Suppression du repertoire home - dead man's switch de Shai-Hulud"
+              },
+              "fullDescription": {
+                "text": "Suppression du repertoire home - dead man's switch de Shai-Hulud"
+              },
+              "helpUri": "https://www.wiz.io/blog/shai-hulud-npm-supply-chain-attack",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1485"
+              }
+            },
+            {
+              "id": "MUADDIB-PKG-001",
+              "name": "Suspicious Lifecycle Script",
+              "shortDescription": {
+                "text": "Script preinstall/postinstall suspect dans package.json"
+              },
+              "fullDescription": {
+                "text": "Script preinstall/postinstall suspect dans package.json"
+              },
+              "helpUri": "https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm",
+              "properties": {
+                "severity": "MEDIUM",
+                "confidence": "medium",
+                "mitre": "T1195.002"
+              }
+            },
+            {
+              "id": "MUADDIB-OBF-001",
+              "name": "Code Obfuscation Detected",
+              "shortDescription": {
+                "text": "Code fortement obfusque detecte - probablement malveillant"
+              },
+              "fullDescription": {
+                "text": "Code fortement obfusque detecte - probablement malveillant"
+              },
+              "helpUri": "https://blog.phylum.io/shai-hulud-npm-worm",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "medium",
+                "mitre": "T1027"
+              }
+            },
+            {
+              "id": "MUADDIB-DEP-001",
+              "name": "Known Malicious Package",
+              "shortDescription": {
+                "text": "Package present dans la base IOC de packages malveillants connus"
+              },
+              "fullDescription": {
+                "text": "Package present dans la base IOC de packages malveillants connus"
+              },
+              "helpUri": "https://socket.dev/npm/issue",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1195.002"
+              }
+            },
+            {
+              "id": "MUADDIB-DEP-006",
+              "name": "Dependency Declared on IOC Package",
+              "shortDescription": {
+                "text": "Le package declare une dependance sur un package present dans la base IOC. Signal informatif — ne prouve pas que le package scanne est malveillant."
+              },
+              "fullDescription": {
+                "text": "Le package declare une dependance sur un package present dans la base IOC. Signal informatif — ne prouve pas que le package scanne est malveillant."
+              },
+              "helpUri": "https://socket.dev/npm/issue",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "medium",
+                "mitre": "T1195.002"
+              }
+            },
+            {
+              "id": "MUADDIB-PYPI-001",
+              "name": "Malicious PyPI Package",
+              "shortDescription": {
+                "text": "Package PyPI present dans la base IOC de packages malveillants connus (source: OSV)"
+              },
+              "fullDescription": {
+                "text": "Package PyPI present dans la base IOC de packages malveillants connus (source: OSV)"
+              },
+              "helpUri": "https://osv.dev/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1195.002"
+              }
+            },
+            {
+              "id": "MUADDIB-PYPI-002",
+              "name": "PyPI Typosquatting Detected",
+              "shortDescription": {
+                "text": "Dependance PyPI suspecte de typosquatting d'un package populaire (Levenshtein)"
+              },
+              "fullDescription": {
+                "text": "Dependance PyPI suspecte de typosquatting d'un package populaire (Levenshtein)"
+              },
+              "helpUri": "https://pypi.org/",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "medium",
+                "mitre": "T1195.002"
+              }
+            },
+            {
+              "id": "MUADDIB-DEP-002",
+              "name": "Suspicious File in Dependency",
+              "shortDescription": {
+                "text": "Fichier suspect detecte dans une dependance (setup_bun.js, etc.)"
+              },
+              "fullDescription": {
+                "text": "Fichier suspect detecte dans une dependance (setup_bun.js, etc.)"
+              },
+              "helpUri": "https://blog.phylum.io/shai-hulud-npm-worm",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1195.002"
+              }
+            },
+            {
+              "id": "MUADDIB-DEP-003",
+              "name": "Shai-Hulud Marker Detected",
+              "shortDescription": {
+                "text": "Marqueur Shai-Hulud detecte dans le code"
+              },
+              "fullDescription": {
+                "text": "Marqueur Shai-Hulud detecte dans le code"
+              },
+              "helpUri": "https://blog.phylum.io/shai-hulud-npm-worm",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1195.002"
+              }
+            },
+            {
+              "id": "MUADDIB-DEP-004",
+              "name": "Lifecycle Script in Dependency",
+              "shortDescription": {
+                "text": "Une dependance a un script preinstall/postinstall"
+              },
+              "fullDescription": {
+                "text": "Une dependance a un script preinstall/postinstall"
+              },
+              "helpUri": "https://docs.npmjs.com/cli/v9/using-npm/scripts#life-cycle-scripts",
+              "properties": {
+                "severity": "MEDIUM",
+                "confidence": "low",
+                "mitre": "T1195.002"
+              }
+            },
+            {
+              "id": "MUADDIB-DEP-005",
+              "name": "Suspicious Dependency URL",
+              "shortDescription": {
+                "text": "Dependance declaree avec une URL HTTP/HTTPS au lieu d'une version npm. Les URLs ngrok/localhost/IP privee sont fortement suspectes."
+              },
+              "fullDescription": {
+                "text": "Dependance declaree avec une URL HTTP/HTTPS au lieu d'une version npm. Les URLs ngrok/localhost/IP privee sont fortement suspectes."
+              },
+              "helpUri": "https://docs.npmjs.com/cli/v9/configuring-npm/package-json#urls-as-dependencies",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1195.002"
+              }
+            },
+            {
+              "id": "MUADDIB-HASH-001",
+              "name": "Known Malicious File Hash",
+              "shortDescription": {
+                "text": "Hash SHA256 correspond a un fichier malveillant connu"
+              },
+              "fullDescription": {
+                "text": "Hash SHA256 correspond a un fichier malveillant connu"
+              },
+              "helpUri": "https://www.virustotal.com",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1195.002"
+              }
+            },
+            {
+              "id": "MUADDIB-FLOW-001",
+              "name": "Suspicious Data Flow",
+              "shortDescription": {
+                "text": "Flux de donnees suspect: lecture de credentials puis envoi reseau"
+              },
+              "fullDescription": {
+                "text": "Flux de donnees suspect: lecture de credentials puis envoi reseau"
+              },
+              "helpUri": "https://blog.phylum.io/shai-hulud-npm-worm",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1041"
+              }
+            },
+            {
+              "id": "MUADDIB-TYPO-001",
+              "name": "Typosquatting Detected",
+              "shortDescription": {
+                "text": "Package avec un nom tres similaire a un package populaire. Possible typosquatting."
+              },
+              "fullDescription": {
+                "text": "Package avec un nom tres similaire a un package populaire. Possible typosquatting."
+              },
+              "helpUri": "https://blog.npmjs.org/post/163723642530/crossenv-malware-on-the-npm-registry",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1195.002"
+              }
+            },
+            {
+              "id": "MUADDIB-PKG-002",
+              "name": "Curl Pipe to Shell in Script",
+              "shortDescription": {
+                "text": "Script lifecycle execute curl | sh - telechargement et execution de code distant"
+              },
+              "fullDescription": {
+                "text": "Script lifecycle execute curl | sh - telechargement et execution de code distant"
+              },
+              "helpUri": "https://blog.phylum.io/shai-hulud-npm-worm",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1105"
+              }
+            },
+            {
+              "id": "MUADDIB-PKG-003",
+              "name": "Wget Pipe to Shell in Script",
+              "shortDescription": {
+                "text": "Script lifecycle execute wget | sh - telechargement et execution de code distant"
+              },
+              "fullDescription": {
+                "text": "Script lifecycle execute wget | sh - telechargement et execution de code distant"
+              },
+              "helpUri": "https://blog.phylum.io/shai-hulud-npm-worm",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1105"
+              }
+            },
+            {
+              "id": "MUADDIB-PKG-004",
+              "name": "Eval in Lifecycle Script",
+              "shortDescription": {
+                "text": "Utilisation de eval() dans un script lifecycle - execution de code dynamique"
+              },
+              "fullDescription": {
+                "text": "Utilisation de eval() dans un script lifecycle - execution de code dynamique"
+              },
+              "helpUri": "https://owasp.org/www-community/attacks/Command_Injection",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "medium",
+                "mitre": "T1059.007"
+              }
+            },
+            {
+              "id": "MUADDIB-PKG-005",
+              "name": "Child Process in Lifecycle Script",
+              "shortDescription": {
+                "text": "Reference a child_process dans un script lifecycle"
+              },
+              "fullDescription": {
+                "text": "Reference a child_process dans un script lifecycle"
+              },
+              "helpUri": "https://owasp.org/www-community/attacks/Command_Injection",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "medium",
+                "mitre": "T1059"
+              }
+            },
+            {
+              "id": "MUADDIB-PKG-006",
+              "name": "npmrc Access",
+              "shortDescription": {
+                "text": "Acces au fichier .npmrc detecte - risque de vol de token npm"
+              },
+              "fullDescription": {
+                "text": "Acces au fichier .npmrc detecte - risque de vol de token npm"
+              },
+              "helpUri": "https://blog.phylum.io/shai-hulud-npm-worm",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1552.001"
+              }
+            },
+            {
+              "id": "MUADDIB-PKG-007",
+              "name": "GitHub Token Access",
+              "shortDescription": {
+                "text": "Acces au GITHUB_TOKEN detecte"
+              },
+              "fullDescription": {
+                "text": "Acces au GITHUB_TOKEN detecte"
+              },
+              "helpUri": "https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1552.001"
+              }
+            },
+            {
+              "id": "MUADDIB-PKG-008",
+              "name": "AWS Credential Access",
+              "shortDescription": {
+                "text": "Acces aux credentials AWS detecte"
+              },
+              "fullDescription": {
+                "text": "Acces aux credentials AWS detecte"
+              },
+              "helpUri": "https://docs.aws.amazon.com/IAM/latest/UserGuide/best-practices.html",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1552.001"
+              }
+            },
+            {
+              "id": "MUADDIB-PKG-009",
+              "name": "Base64 Encoding in Script",
+              "shortDescription": {
+                "text": "Encodage base64 dans un script lifecycle - souvent utilise pour obfusquer du code malveillant"
+              },
+              "fullDescription": {
+                "text": "Encodage base64 dans un script lifecycle - souvent utilise pour obfusquer du code malveillant"
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1027/",
+              "properties": {
+                "severity": "MEDIUM",
+                "confidence": "low",
+                "mitre": "T1027"
+              }
+            },
+            {
+              "id": "MUADDIB-SHELL-004",
+              "name": "Curl Pipe to Shell",
+              "shortDescription": {
+                "text": "Telechargement et execution via curl | sh dans un script shell"
+              },
+              "fullDescription": {
+                "text": "Telechargement et execution via curl | sh dans un script shell"
+              },
+              "helpUri": "https://blog.phylum.io/shai-hulud-npm-worm",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1105"
+              }
+            },
+            {
+              "id": "MUADDIB-SHELL-005",
+              "name": "Wget Download and Execute",
+              "shortDescription": {
+                "text": "Telechargement et execution de binaire via wget + chmod"
+              },
+              "fullDescription": {
+                "text": "Telechargement et execution de binaire via wget + chmod"
+              },
+              "helpUri": "https://blog.phylum.io/shai-hulud-npm-worm",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1105"
+              }
+            },
+            {
+              "id": "MUADDIB-SHELL-006",
+              "name": "Netcat Shell",
+              "shortDescription": {
+                "text": "Shell netcat detecte - acces distant non autorise"
+              },
+              "fullDescription": {
+                "text": "Shell netcat detecte - acces distant non autorise"
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1059/004/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1059.004"
+              }
+            },
+            {
+              "id": "MUADDIB-SHELL-007",
+              "name": "Home Directory Destruction",
+              "shortDescription": {
+                "text": "Destruction de donnees (shred $HOME) - dead man's switch de Shai-Hulud"
+              },
+              "fullDescription": {
+                "text": "Destruction de donnees (shred $HOME) - dead man's switch de Shai-Hulud"
+              },
+              "helpUri": "https://www.wiz.io/blog/shai-hulud-npm-supply-chain-attack",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1485"
+              }
+            },
+            {
+              "id": "MUADDIB-SHELL-008",
+              "name": "Data Exfiltration via Curl",
+              "shortDescription": {
+                "text": "Exfiltration de donnees via curl POST"
+              },
+              "fullDescription": {
+                "text": "Exfiltration de donnees via curl POST"
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1041/",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1041"
+              }
+            },
+            {
+              "id": "MUADDIB-SHELL-009",
+              "name": "SSH Key Access",
+              "shortDescription": {
+                "text": "Acces aux cles SSH detecte"
+              },
+              "fullDescription": {
+                "text": "Acces aux cles SSH detecte"
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1552/004/",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1552.004"
+              }
+            },
+            {
+              "id": "MUADDIB-SHELL-010",
+              "name": "Python Reverse Shell",
+              "shortDescription": {
+                "text": "Reverse shell via python -c import socket detecte"
+              },
+              "fullDescription": {
+                "text": "Reverse shell via python -c import socket detecte"
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1059/004/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1059.006"
+              }
+            },
+            {
+              "id": "MUADDIB-SHELL-011",
+              "name": "Perl Reverse Shell",
+              "shortDescription": {
+                "text": "Reverse shell via perl -e socket detecte"
+              },
+              "fullDescription": {
+                "text": "Reverse shell via perl -e socket detecte"
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1059/004/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1059.006"
+              }
+            },
+            {
+              "id": "MUADDIB-SHELL-012",
+              "name": "FIFO Reverse Shell",
+              "shortDescription": {
+                "text": "Reverse shell via mkfifo /dev/tcp detecte"
+              },
+              "fullDescription": {
+                "text": "Reverse shell via mkfifo /dev/tcp detecte"
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1059/004/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1059.004"
+              }
+            },
+            {
+              "id": "MUADDIB-SHELL-013",
+              "name": "FIFO + Netcat Reverse Shell",
+              "shortDescription": {
+                "text": "Reverse shell via mkfifo + netcat (sans /dev/tcp). Technique alternative de reverse shell utilisant un named pipe."
+              },
+              "fullDescription": {
+                "text": "Reverse shell via mkfifo + netcat (sans /dev/tcp). Technique alternative de reverse shell utilisant un named pipe."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1059/004/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1059.004"
+              }
+            },
+            {
+              "id": "MUADDIB-SHELL-014",
+              "name": "Base64 Decode Pipe to Shell",
+              "shortDescription": {
+                "text": "Payload encode en base64 decode et pipe vers bash/sh. Technique d'obfuscation courante pour cacher des commandes malveillantes."
+              },
+              "fullDescription": {
+                "text": "Payload encode en base64 decode et pipe vers bash/sh. Technique d'obfuscation courante pour cacher des commandes malveillantes."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1140/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1140"
+              }
+            },
+            {
+              "id": "MUADDIB-SHELL-015",
+              "name": "Wget + Base64 Decode",
+              "shortDescription": {
+                "text": "Telechargement via wget suivi de decodage base64. Pattern de staging en deux etapes pour dropper un payload."
+              },
+              "fullDescription": {
+                "text": "Telechargement via wget suivi de decodage base64. Pattern de staging en deux etapes pour dropper un payload."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1105/",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1105"
+              }
+            },
+            {
+              "id": "MUADDIB-OBF-002",
+              "name": "Possible Code Obfuscation",
+              "shortDescription": {
+                "text": "Fichier potentiellement obfusque (parse echoue, code dense)"
+              },
+              "fullDescription": {
+                "text": "Fichier potentiellement obfusque (parse echoue, code dense)"
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1027/",
+              "properties": {
+                "severity": "MEDIUM",
+                "confidence": "low",
+                "mitre": "T1027"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-006",
+              "name": "Dynamic Require with Concatenation",
+              "shortDescription": {
+                "text": "require() avec concatenation de chaines — technique d'obfuscation pour masquer le nom du module"
+              },
+              "fullDescription": {
+                "text": "require() avec concatenation de chaines — technique d'obfuscation pour masquer le nom du module"
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1027/",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1027"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-007",
+              "name": "Dangerous Shell Command Execution",
+              "shortDescription": {
+                "text": "exec() avec commande shell dangereuse (pipe to shell, reverse shell, netcat)"
+              },
+              "fullDescription": {
+                "text": "exec() avec commande shell dangereuse (pipe to shell, reverse shell, netcat)"
+              },
+              "helpUri": "https://owasp.org/www-community/attacks/Command_Injection",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1059.004"
+              }
+            },
+            {
+              "id": "MUADDIB-FLOW-002",
+              "name": "Staged Payload Execution",
+              "shortDescription": {
+                "text": "Telechargement reseau + eval() dans le meme fichier — execution de payload distant"
+              },
+              "fullDescription": {
+                "text": "Telechargement reseau + eval() dans le meme fichier — execution de payload distant"
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1105/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1105"
+              }
+            },
+            {
+              "id": "MUADDIB-PKG-011",
+              "name": "Network Module in Lifecycle Script",
+              "shortDescription": {
+                "text": "require(https/http) dans un script lifecycle — telechargement au moment de l'installation"
+              },
+              "fullDescription": {
+                "text": "require(https/http) dans un script lifecycle — telechargement au moment de l'installation"
+              },
+              "helpUri": "https://blog.phylum.io/shai-hulud-npm-worm",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1105"
+              }
+            },
+            {
+              "id": "MUADDIB-PKG-012",
+              "name": "Node Inline Execution in Lifecycle Script",
+              "shortDescription": {
+                "text": "node -e dans un script lifecycle — execution de code inline au moment de l'installation"
+              },
+              "fullDescription": {
+                "text": "node -e dans un script lifecycle — execution de code inline au moment de l'installation"
+              },
+              "helpUri": "https://owasp.org/www-community/attacks/Command_Injection",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1059.007"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-008",
+              "name": "Dynamic import() of Dangerous Module",
+              "shortDescription": {
+                "text": "import() dynamique pour charger un module dangereux ou avec argument calcule — technique d'evasion pour eviter la detection de require()"
+              },
+              "fullDescription": {
+                "text": "import() dynamique pour charger un module dangereux ou avec argument calcule — technique d'evasion pour eviter la detection de require()"
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1027/",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1027"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-009",
+              "name": "Environment Variable Proxy Interception",
+              "shortDescription": {
+                "text": "new Proxy(process.env) detecte — intercepte silencieusement tous les acces aux variables d'environnement pour exfiltration"
+              },
+              "fullDescription": {
+                "text": "new Proxy(process.env) detecte — intercepte silencieusement tous les acces aux variables d'environnement pour exfiltration"
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1552/001/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1552.001"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-010",
+              "name": "Command Execution via Dynamic Require",
+              "shortDescription": {
+                "text": "exec/execSync appele sur un module charge dynamiquement (require obfusque) — execution de commandes dissimulees"
+              },
+              "fullDescription": {
+                "text": "exec/execSync appele sur un module charge dynamiquement (require obfusque) — execution de commandes dissimulees"
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1059/007/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1059.007"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-011",
+              "name": "Sandbox/Container Evasion",
+              "shortDescription": {
+                "text": "Detection de sandbox/container (/.dockerenv, /proc/cgroup) — technique anti-analyse pour eviter la detection en environnement controle"
+              },
+              "fullDescription": {
+                "text": "Detection de sandbox/container (/.dockerenv, /proc/cgroup) — technique anti-analyse pour eviter la detection en environnement controle"
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1497/001/",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1497.001"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-012",
+              "name": "Detached Background Process",
+              "shortDescription": {
+                "text": "spawn/fork avec {detached: true} — le processus survit a la fin de npm install et execute le payload en arriere-plan"
+              },
+              "fullDescription": {
+                "text": "spawn/fork avec {detached: true} — le processus survit a la fin de npm install et execute le payload en arriere-plan"
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1036/009/",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1036.009"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-005",
+              "name": "new Function() Constructor",
+              "shortDescription": {
+                "text": "Appel new Function() detecte - equivalent a eval()"
+              },
+              "fullDescription": {
+                "text": "Appel new Function() detecte - equivalent a eval()"
+              },
+              "helpUri": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function/Function",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1059.007"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-014",
+              "name": "Credential Theft via CLI Tool",
+              "shortDescription": {
+                "text": "exec/execSync appelle un outil CLI legitime pour voler des tokens d'authentification (gh auth token, gcloud auth, aws sts). Technique s1ngularity/Nx."
+              },
+              "fullDescription": {
+                "text": "exec/execSync appelle un outil CLI legitime pour voler des tokens d'authentification (gh auth token, gcloud auth, aws sts). Technique s1ngularity/Nx."
+              },
+              "helpUri": "https://snyk.io/blog/malicious-npm-packages-abuse-ai-agents/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1059"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-015",
+              "name": "GitHub Actions Workflow Write",
+              "shortDescription": {
+                "text": "fs.writeFileSync cree un fichier dans .github/workflows — injection de workflow GitHub Actions pour persistence. Technique Shai-Hulud 2.0."
+              },
+              "fullDescription": {
+                "text": "fs.writeFileSync cree un fichier dans .github/workflows — injection de workflow GitHub Actions pour persistence. Technique Shai-Hulud 2.0."
+              },
+              "helpUri": "https://www.wiz.io/blog/shai-hulud-npm-supply-chain-attack",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1195.002"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-016",
+              "name": "Binary Dropper Pattern",
+              "shortDescription": {
+                "text": "fs.chmodSync avec permissions executables (0o755/0o777) — pattern de dropper binaire: telecharge, ecrit, chmod, execute."
+              },
+              "fullDescription": {
+                "text": "fs.chmodSync avec permissions executables (0o755/0o777) — pattern de dropper binaire: telecharge, ecrit, chmod, execute."
+              },
+              "helpUri": "https://www.sonatype.com/blog/phantomraven-supply-chain-attack",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1105"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-017",
+              "name": "Native API Prototype Hooking",
+              "shortDescription": {
+                "text": "Modification du prototype ou remplacement de fonctions natives du navigateur/Node.js (fetch, XMLHttpRequest, http.request). Technique chalk/debug (Sygnia, sept 2025) pour intercepter du trafic."
+              },
+              "fullDescription": {
+                "text": "Modification du prototype ou remplacement de fonctions natives du navigateur/Node.js (fetch, XMLHttpRequest, http.request). Technique chalk/debug (Sygnia, sept 2025) pour intercepter du trafic."
+              },
+              "helpUri": "https://www.sygnia.co/blog/malicious-chalk-debug-npm-packages/",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1557"
+              }
+            },
+            {
+              "id": "MUADDIB-AICONF-001",
+              "name": "AI Config Prompt Injection",
+              "shortDescription": {
+                "text": "Fichier de configuration d'agent IA (.cursorrules, CLAUDE.md, copilot-instructions.md) contient des instructions d'execution de commandes shell ou d'acces a des credentials. Technique ToxicSkills/Clinejection."
+              },
+              "fullDescription": {
+                "text": "Fichier de configuration d'agent IA (.cursorrules, CLAUDE.md, copilot-instructions.md) contient des instructions d'execution de commandes shell ou d'acces a des credentials. Technique ToxicSkills/Clinejection."
+              },
+              "helpUri": "https://snyk.io/blog/toxicskills-prompt-injection-ai-agents/",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1059"
+              }
+            },
+            {
+              "id": "MUADDIB-AICONF-002",
+              "name": "AI Config Prompt Injection (Critical)",
+              "shortDescription": {
+                "text": "Fichier de configuration d'agent IA contient des commandes d'exfiltration (curl POST vers un domaine externe, pipe vers shell) ou une combinaison commande shell + acces credentials. Attaque confirmee."
+              },
+              "fullDescription": {
+                "text": "Fichier de configuration d'agent IA contient des commandes d'exfiltration (curl POST vers un domaine externe, pipe vers shell) ou une combinaison commande shell + acces credentials. Attaque confirmee."
+              },
+              "helpUri": "https://snyk.io/blog/toxicskills-prompt-injection-ai-agents/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1059"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-019",
+              "name": "Require Cache Poisoning",
+              "shortDescription": {
+                "text": "Acces a require.cache pour remplacer ou hijacker des modules Node.js charges. Technique de cache poisoning pour intercepter du trafic ou injecter du code."
+              },
+              "fullDescription": {
+                "text": "Acces a require.cache pour remplacer ou hijacker des modules Node.js charges. Technique de cache poisoning pour intercepter du trafic ou injecter du code."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1574/006/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1574.006"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-020",
+              "name": "Staged Binary Payload Execution",
+              "shortDescription": {
+                "text": "Reference a un fichier binaire (.png/.jpg/.wasm) combinee avec eval() dans le meme fichier. Possible execution de payload steganographique cache dans une image."
+              },
+              "fullDescription": {
+                "text": "Reference a un fichier binaire (.png/.jpg/.wasm) combinee avec eval() dans le meme fichier. Possible execution de payload steganographique cache dans une image."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1027/003/",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1027.003"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-021",
+              "name": "Staged Eval Decode",
+              "shortDescription": {
+                "text": "eval() ou Function() recoit un argument decode (atob ou Buffer.from base64). Pattern classique de staged payload: le code malveillant est encode en base64 puis decode et execute dynamiquement."
+              },
+              "fullDescription": {
+                "text": "eval() ou Function() recoit un argument decode (atob ou Buffer.from base64). Pattern classique de staged payload: le code malveillant est encode en base64 puis decode et execute dynamiquement."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1140/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1140"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-018",
+              "name": "Environment Variable Key Reconstruction",
+              "shortDescription": {
+                "text": "process.env accede avec une cle reconstruite dynamiquement via String.fromCharCode. Technique d'obfuscation pour eviter la detection statique des noms de variables sensibles (GITHUB_TOKEN, etc.)."
+              },
+              "fullDescription": {
+                "text": "process.env accede avec une cle reconstruite dynamiquement via String.fromCharCode. Technique d'obfuscation pour eviter la detection statique des noms de variables sensibles (GITHUB_TOKEN, etc.)."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1027/",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1027"
+              }
+            },
+            {
+              "id": "MUADDIB-PKG-016",
+              "name": "Lifecycle Script Targets Hidden Payload",
+              "shortDescription": {
+                "text": "Script lifecycle pointe vers un fichier dans node_modules/ — technique de dissimulation de payload. Les scanners excluent node_modules/ par defaut, rendant le payload invisible. Pattern DPRK/Lazarus interview attack."
+              },
+              "fullDescription": {
+                "text": "Script lifecycle pointe vers un fichier dans node_modules/ — technique de dissimulation de payload. Les scanners excluent node_modules/ par defaut, rendant le payload invisible. Pattern DPRK/Lazarus interview attack."
+              },
+              "helpUri": "https://unit42.paloaltonetworks.com/operation-dream-job/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1027.009"
+              }
+            },
+            {
+              "id": "MUADDIB-PKG-010",
+              "name": "Lifecycle Script Pipes to Shell",
+              "shortDescription": {
+                "text": "Script lifecycle (preinstall/install/postinstall) execute curl | sh ou wget | bash — telecharge et execute du code distant au moment de npm install."
+              },
+              "fullDescription": {
+                "text": "Script lifecycle (preinstall/install/postinstall) execute curl | sh ou wget | bash — telecharge et execute du code distant au moment de npm install."
+              },
+              "helpUri": "https://blog.phylum.io/shai-hulud-npm-worm",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1195.002"
+              }
+            },
+            {
+              "id": "MUADDIB-FLOW-004",
+              "name": "Cross-File Data Exfiltration",
+              "shortDescription": {
+                "text": "Un module lit des credentials (fs.readFileSync, process.env) et les exporte vers un autre module qui les envoie sur le reseau (fetch, https.request). Exfiltration inter-fichiers confirmee."
+              },
+              "fullDescription": {
+                "text": "Un module lit des credentials (fs.readFileSync, process.env) et les exporte vers un autre module qui les envoie sur le reseau (fetch, https.request). Exfiltration inter-fichiers confirmee."
+              },
+              "helpUri": "https://blog.phylum.io/shai-hulud-npm-worm",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1041"
+              }
+            },
+            {
+              "id": "MUADDIB-FLOW-003",
+              "name": "Credential/Cache Tampering",
+              "shortDescription": {
+                "text": "Ecriture dans un chemin sensible (cache npm _cacache, cache yarn, credentials). Possible cache poisoning: injection de code malveillant dans des packages caches."
+              },
+              "fullDescription": {
+                "text": "Ecriture dans un chemin sensible (cache npm _cacache, cache yarn, credentials). Possible cache poisoning: injection de code malveillant dans des packages caches."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1565/001/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1565.001"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-022",
+              "name": "Encrypted Payload Decryption",
+              "shortDescription": {
+                "text": "crypto.createDecipher/createDecipheriv detecte. Dechiffrement runtime de payload embarque. Pattern canonique de flatmap-stream/event-stream."
+              },
+              "fullDescription": {
+                "text": "crypto.createDecipher/createDecipheriv detecte. Dechiffrement runtime de payload embarque. Pattern canonique de flatmap-stream/event-stream."
+              },
+              "helpUri": "https://snyk.io/blog/malicious-code-found-in-npm-package-event-stream/",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1140"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-023",
+              "name": "Module Compile Execution",
+              "shortDescription": {
+                "text": "module._compile() detecte. Execution de code arbitraire a partir d'une chaine dans le contexte module. Technique cle de flatmap-stream."
+              },
+              "fullDescription": {
+                "text": "module._compile() detecte. Execution de code arbitraire a partir d'une chaine dans le contexte module. Technique cle de flatmap-stream."
+              },
+              "helpUri": "https://blog.npmjs.org/post/180565383195/details-about-the-event-stream-incident",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1059"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-024",
+              "name": "Obfuscated Payload via Zlib Inflate",
+              "shortDescription": {
+                "text": "Payload obfusque: zlib inflate + decodage base64 + execution dynamique (eval/Function/Module._compile) dans le meme fichier. Aucun package legitime n'utilise ce pattern. Technique SANDWORM_MODE (fev. 2026)."
+              },
+              "fullDescription": {
+                "text": "Payload obfusque: zlib inflate + decodage base64 + execution dynamique (eval/Function/Module._compile) dans le meme fichier. Aucun package legitime n'utilise ce pattern. Technique SANDWORM_MODE (fev. 2026)."
+              },
+              "helpUri": "https://socket.dev/blog/sandworm-mode-campaign",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1027.002"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-025",
+              "name": "Dynamic Module Compile Execution",
+              "shortDescription": {
+                "text": "Module._compile() avec argument dynamique (non-literal). Execution de code en memoire sans ecriture sur disque. Technique d'evasion malware courante."
+              },
+              "fullDescription": {
+                "text": "Module._compile() avec argument dynamique (non-literal). Execution de code en memoire sans ecriture sur disque. Technique d'evasion malware courante."
+              },
+              "helpUri": "https://blog.npmjs.org/post/180565383195/details-about-the-event-stream-incident",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1059"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-026",
+              "name": "Anti-Forensics Write-Execute-Delete",
+              "shortDescription": {
+                "text": "Anti-forensique: ecriture dans un repertoire temporaire, execution, puis suppression. Pattern typique de staging malware pour eviter la detection post-mortem."
+              },
+              "fullDescription": {
+                "text": "Anti-forensique: ecriture dans un repertoire temporaire, execution, puis suppression. Pattern typique de staging malware pour eviter la detection post-mortem."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1070/004/",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1070.004"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-027",
+              "name": "MCP Config Injection",
+              "shortDescription": {
+                "text": "Injection de configuration MCP: ecriture dans les fichiers de configuration d'assistants IA (.claude/, .cursor/, .continue/, .vscode/, .windsurf/). Technique SANDWORM_MODE pour empoisonner la chaine d'outils IA."
+              },
+              "fullDescription": {
+                "text": "Injection de configuration MCP: ecriture dans les fichiers de configuration d'assistants IA (.claude/, .cursor/, .continue/, .vscode/, .windsurf/). Technique SANDWORM_MODE pour empoisonner la chaine d'outils IA."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1546/016/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1546.016"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-028",
+              "name": "Git Hooks Injection",
+              "shortDescription": {
+                "text": "Injection de hooks Git: ecriture dans .git/hooks/ ou modification de git config init.templateDir. Technique de persistence via hooks pre-commit, pre-push, post-checkout."
+              },
+              "fullDescription": {
+                "text": "Injection de hooks Git: ecriture dans .git/hooks/ ou modification de git config init.templateDir. Technique de persistence via hooks pre-commit, pre-push, post-checkout."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1546/004/",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1546.004"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-029",
+              "name": "Dynamic Environment Variable Harvesting",
+              "shortDescription": {
+                "text": "Collecte dynamique de variables d'environnement via Object.entries/keys/values(process.env) avec filtrage par patterns sensibles (TOKEN, SECRET, KEY, PASSWORD, AWS, SSH). Technique de vol de credentials."
+              },
+              "fullDescription": {
+                "text": "Collecte dynamique de variables d'environnement via Object.entries/keys/values(process.env) avec filtrage par patterns sensibles (TOKEN, SECRET, KEY, PASSWORD, AWS, SSH). Technique de vol de credentials."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1552/001/",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1552.001"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-030",
+              "name": "DNS Chunk Exfiltration",
+              "shortDescription": {
+                "text": "Exfiltration DNS: donnees encodees en base64 dans les requetes DNS. Canal covert pour contourner les firewalls. Pattern: dns.resolve + Buffer.from().toString(\"base64\")."
+              },
+              "fullDescription": {
+                "text": "Exfiltration DNS: donnees encodees en base64 dans les requetes DNS. Canal covert pour contourner les firewalls. Pattern: dns.resolve + Buffer.from().toString(\"base64\")."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1048/003/",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1048.003"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-031",
+              "name": "LLM API Key Harvesting",
+              "shortDescription": {
+                "text": "Collecte de cles API LLM: acces a 3+ variables d'environnement de providers IA (OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLE_API_KEY, etc.). Vecteur de monetisation."
+              },
+              "fullDescription": {
+                "text": "Collecte de cles API LLM: acces a 3+ variables d'environnement de providers IA (OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLE_API_KEY, etc.). Vecteur de monetisation."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1552/001/",
+              "properties": {
+                "severity": "MEDIUM",
+                "confidence": "medium",
+                "mitre": "T1552.001"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-013",
+              "name": "AI Agent Weaponization",
+              "shortDescription": {
+                "text": "Invocation d'un agent IA (Claude, Gemini, Q, Aider) avec des flags qui desactivent les controles de securite (--dangerously-skip-permissions, --yolo, --trust-all-tools). Technique s1ngularity/Nx (aout 2025)."
+              },
+              "fullDescription": {
+                "text": "Invocation d'un agent IA (Claude, Gemini, Q, Aider) avec des flags qui desactivent les controles de securite (--dangerously-skip-permissions, --yolo, --trust-all-tools). Technique s1ngularity/Nx (aout 2025)."
+              },
+              "helpUri": "https://snyk.io/blog/malicious-npm-packages-abuse-ai-agents/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1059"
+              }
+            },
+            {
+              "id": "MUADDIB-GHA-001",
+              "name": "Shai-Hulud GitHub Actions Backdoor",
+              "shortDescription": {
+                "text": "Backdoor Shai-Hulud dans GitHub Actions via workflow discussion.yaml sur self-hosted runner"
+              },
+              "fullDescription": {
+                "text": "Backdoor Shai-Hulud dans GitHub Actions via workflow discussion.yaml sur self-hosted runner"
+              },
+              "helpUri": "https://www.wiz.io/blog/shai-hulud-npm-supply-chain-attack",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1195.002"
+              }
+            },
+            {
+              "id": "MUADDIB-GHA-002",
+              "name": "GitHub Actions Workflow Injection",
+              "shortDescription": {
+                "text": "Injection potentielle dans GitHub Actions via input non sanitise sur self-hosted runner"
+              },
+              "fullDescription": {
+                "text": "Injection potentielle dans GitHub Actions via input non sanitise sur self-hosted runner"
+              },
+              "helpUri": "https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1195.002"
+              }
+            },
+            {
+              "id": "MUADDIB-GHA-003",
+              "name": "GitHub Actions Pwn Request",
+              "shortDescription": {
+                "text": "Workflow pull_request_target avec checkout du head ref/sha de la PR — permet execution de code arbitraire (pwn request)"
+              },
+              "fullDescription": {
+                "text": "Workflow pull_request_target avec checkout du head ref/sha de la PR — permet execution de code arbitraire (pwn request)"
+              },
+              "helpUri": "https://securitylab.github.com/research/github-actions-preventing-pwn-requests/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1195.002"
+              }
+            },
+            {
+              "id": "MUADDIB-SANDBOX-001",
+              "name": "Sandbox: Sensitive File Read",
+              "shortDescription": {
+                "text": "Package reads sensitive credential files during install"
+              },
+              "fullDescription": {
+                "text": "Package reads sensitive credential files during install"
+              },
+              "helpUri": "https://blog.phylum.io/shai-hulud-npm-worm",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1552.001"
+              }
+            },
+            {
+              "id": "MUADDIB-SANDBOX-002",
+              "name": "Sandbox: Sensitive File Write",
+              "shortDescription": {
+                "text": "Package writes to sensitive credential files during install"
+              },
+              "fullDescription": {
+                "text": "Package writes to sensitive credential files during install"
+              },
+              "helpUri": "https://blog.phylum.io/shai-hulud-npm-worm",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1565.001"
+              }
+            },
+            {
+              "id": "MUADDIB-SANDBOX-003",
+              "name": "Sandbox: Suspicious Filesystem Change",
+              "shortDescription": {
+                "text": "Package creates files in suspicious system locations during install"
+              },
+              "fullDescription": {
+                "text": "Package creates files in suspicious system locations during install"
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1543/",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1543"
+              }
+            },
+            {
+              "id": "MUADDIB-SANDBOX-004",
+              "name": "Sandbox: Suspicious DNS Query",
+              "shortDescription": {
+                "text": "Package resolves non-registry domain during install"
+              },
+              "fullDescription": {
+                "text": "Package resolves non-registry domain during install"
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1071/",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "medium",
+                "mitre": "T1071"
+              }
+            },
+            {
+              "id": "MUADDIB-SANDBOX-005",
+              "name": "Sandbox: Suspicious Network Connection",
+              "shortDescription": {
+                "text": "Package makes TCP connection to non-registry host during install"
+              },
+              "fullDescription": {
+                "text": "Package makes TCP connection to non-registry host during install"
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1071/",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "medium",
+                "mitre": "T1071"
+              }
+            },
+            {
+              "id": "MUADDIB-SANDBOX-006",
+              "name": "Sandbox: Dangerous Process Spawned",
+              "shortDescription": {
+                "text": "Package spawns dangerous command during install (curl, wget, nc, etc.)"
+              },
+              "fullDescription": {
+                "text": "Package spawns dangerous command during install (curl, wget, nc, etc.)"
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1059/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1059"
+              }
+            },
+            {
+              "id": "MUADDIB-SANDBOX-007",
+              "name": "Sandbox: Unknown Process Spawned",
+              "shortDescription": {
+                "text": "Package spawns unrecognized process during install"
+              },
+              "fullDescription": {
+                "text": "Package spawns unrecognized process during install"
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1059/",
+              "properties": {
+                "severity": "MEDIUM",
+                "confidence": "low",
+                "mitre": "T1059"
+              }
+            },
+            {
+              "id": "MUADDIB-SANDBOX-008",
+              "name": "Sandbox: Container Timeout",
+              "shortDescription": {
+                "text": "Package install exceeded sandbox timeout - possible infinite loop or resource exhaustion"
+              },
+              "fullDescription": {
+                "text": "Package install exceeded sandbox timeout - possible infinite loop or resource exhaustion"
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1499/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1499"
+              }
+            },
+            {
+              "id": "MUADDIB-SANDBOX-009",
+              "name": "Sandbox: Suspicious Timer Delay",
+              "shortDescription": {
+                "text": "Package uses setTimeout/setInterval with delay > 1 hour. Possible time-bomb to evade sandbox analysis."
+              },
+              "fullDescription": {
+                "text": "Package uses setTimeout/setInterval with delay > 1 hour. Possible time-bomb to evade sandbox analysis."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1497/003/",
+              "properties": {
+                "severity": "MEDIUM",
+                "confidence": "medium",
+                "mitre": "T1497.003"
+              }
+            },
+            {
+              "id": "MUADDIB-SANDBOX-010",
+              "name": "Sandbox: Critical Timer Delay (Time-Bomb)",
+              "shortDescription": {
+                "text": "Package uses setTimeout/setInterval with delay > 24 hours. Strong indicator of time-bomb malware designed to evade sandbox analysis."
+              },
+              "fullDescription": {
+                "text": "Package uses setTimeout/setInterval with delay > 24 hours. Strong indicator of time-bomb malware designed to evade sandbox analysis."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1497/003/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1497.003"
+              }
+            },
+            {
+              "id": "MUADDIB-SANDBOX-011",
+              "name": "Sandbox: Preload Sensitive File Read",
+              "shortDescription": {
+                "text": "Package reads sensitive credential files (.npmrc, .ssh, .aws, .env) detected via runtime monkey-patching."
+              },
+              "fullDescription": {
+                "text": "Package reads sensitive credential files (.npmrc, .ssh, .aws, .env) detected via runtime monkey-patching."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1552/001/",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1552.001"
+              }
+            },
+            {
+              "id": "MUADDIB-SANDBOX-012",
+              "name": "Sandbox: Network After Sensitive Read",
+              "shortDescription": {
+                "text": "Package makes network requests after reading sensitive files. Strong indicator of credential exfiltration."
+              },
+              "fullDescription": {
+                "text": "Package makes network requests after reading sensitive files. Strong indicator of credential exfiltration."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1041/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1041"
+              }
+            },
+            {
+              "id": "MUADDIB-SANDBOX-013",
+              "name": "Sandbox: Suspicious Command Execution",
+              "shortDescription": {
+                "text": "Package executes dangerous commands (curl, wget, bash, sh, powershell) detected via runtime monkey-patching."
+              },
+              "fullDescription": {
+                "text": "Package executes dangerous commands (curl, wget, bash, sh, powershell) detected via runtime monkey-patching."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1059/",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1059"
+              }
+            },
+            {
+              "id": "MUADDIB-SANDBOX-014",
+              "name": "Sandbox: Sensitive Env Var Access",
+              "shortDescription": {
+                "text": "Package accesses sensitive environment variables (TOKEN, SECRET, KEY, PASSWORD) detected via runtime monkey-patching."
+              },
+              "fullDescription": {
+                "text": "Package accesses sensitive environment variables (TOKEN, SECRET, KEY, PASSWORD) detected via runtime monkey-patching."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1552/001/",
+              "properties": {
+                "severity": "MEDIUM",
+                "confidence": "medium",
+                "mitre": "T1552.001"
+              }
+            },
+            {
+              "id": "MUADDIB-ENTROPY-001",
+              "name": "High Entropy String",
+              "shortDescription": {
+                "text": "Chaine a haute entropie detectee (base64, hex, payload chiffre). Souvent signe d'obfuscation ou de donnees encodees."
+              },
+              "fullDescription": {
+                "text": "Chaine a haute entropie detectee (base64, hex, payload chiffre). Souvent signe d'obfuscation ou de donnees encodees."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1027/",
+              "properties": {
+                "severity": "MEDIUM",
+                "confidence": "medium",
+                "mitre": "T1027"
+              }
+            },
+            {
+              "id": "MUADDIB-ENTROPY-004",
+              "name": "Fragmented High Entropy Cluster",
+              "shortDescription": {
+                "text": "Cluster de chaines courtes a haute entropie (8-49 chars) detecte. Technique de fragmentation de payload pour contourner le seuil de longueur minimum d'analyse entropique."
+              },
+              "fullDescription": {
+                "text": "Cluster de chaines courtes a haute entropie (8-49 chars) detecte. Technique de fragmentation de payload pour contourner le seuil de longueur minimum d'analyse entropique."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1027/",
+              "properties": {
+                "severity": "MEDIUM",
+                "confidence": "medium",
+                "mitre": "T1027"
+              }
+            },
+            {
+              "id": "MUADDIB-ENTROPY-003",
+              "name": "JS Obfuscation Pattern",
+              "shortDescription": {
+                "text": "Pattern d'obfuscation JS detecte: variables _0x*, tableaux de strings encodes, eval/Function avec contenu haute entropie, ou long payload base64. Signature de javascript-obfuscator et malwares npm connus."
+              },
+              "fullDescription": {
+                "text": "Pattern d'obfuscation JS detecte: variables _0x*, tableaux de strings encodes, eval/Function avec contenu haute entropie, ou long payload base64. Signature de javascript-obfuscator et malwares npm connus."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1027/002/",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1027.002"
+              }
+            },
+            {
+              "id": "MUADDIB-TEMPORAL-001",
+              "name": "Sudden Lifecycle Script Added (Critical)",
+              "shortDescription": {
+                "text": "Script preinstall/install/postinstall ajoute dans la derniere version. Vecteur d'attaque #1 des supply chain attacks (Shai-Hulud, ua-parser-js, coa)."
+              },
+              "fullDescription": {
+                "text": "Script preinstall/install/postinstall ajoute dans la derniere version. Vecteur d'attaque #1 des supply chain attacks (Shai-Hulud, ua-parser-js, coa)."
+              },
+              "helpUri": "https://blog.phylum.io/shai-hulud-npm-worm",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1195.002"
+              }
+            },
+            {
+              "id": "MUADDIB-TEMPORAL-002",
+              "name": "Sudden Lifecycle Script Added",
+              "shortDescription": {
+                "text": "Script lifecycle (prepare, prepack, etc.) ajoute dans la derniere version. Potentiellement suspect si non justifie."
+              },
+              "fullDescription": {
+                "text": "Script lifecycle (prepare, prepack, etc.) ajoute dans la derniere version. Potentiellement suspect si non justifie."
+              },
+              "helpUri": "https://docs.npmjs.com/cli/v9/using-npm/scripts#life-cycle-scripts",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "medium",
+                "mitre": "T1195.002"
+              }
+            },
+            {
+              "id": "MUADDIB-TEMPORAL-003",
+              "name": "Lifecycle Script Modified",
+              "shortDescription": {
+                "text": "Script lifecycle modifie entre les deux dernieres versions. Verifier si le changement est legitime."
+              },
+              "fullDescription": {
+                "text": "Script lifecycle modifie entre les deux dernieres versions. Verifier si le changement est legitime."
+              },
+              "helpUri": "https://docs.npmjs.com/cli/v9/using-npm/scripts#life-cycle-scripts",
+              "properties": {
+                "severity": "MEDIUM",
+                "confidence": "medium",
+                "mitre": "T1195.002"
+              }
+            },
+            {
+              "id": "MUADDIB-TEMPORAL-AST-001",
+              "name": "Dangerous API Added (Critical)",
+              "shortDescription": {
+                "text": "API dangereuse (child_process, eval, Function, net.connect) apparue dans la derniere version. Absente de la version precedente."
+              },
+              "fullDescription": {
+                "text": "API dangereuse (child_process, eval, Function, net.connect) apparue dans la derniere version. Absente de la version precedente."
+              },
+              "helpUri": "https://blog.phylum.io/shai-hulud-npm-worm",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1195.002"
+              }
+            },
+            {
+              "id": "MUADDIB-TEMPORAL-AST-002",
+              "name": "Dangerous API Added (High)",
+              "shortDescription": {
+                "text": "API suspecte (process.env, fetch, http/https) apparue dans la derniere version. Absente de la version precedente."
+              },
+              "fullDescription": {
+                "text": "API suspecte (process.env, fetch, http/https) apparue dans la derniere version. Absente de la version precedente."
+              },
+              "helpUri": "https://blog.phylum.io/shai-hulud-npm-worm",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "medium",
+                "mitre": "T1195.002"
+              }
+            },
+            {
+              "id": "MUADDIB-TEMPORAL-AST-003",
+              "name": "Dangerous API Added (Medium)",
+              "shortDescription": {
+                "text": "API potentiellement suspecte (dns.lookup, fs.readFile sur chemin sensible) apparue dans la derniere version."
+              },
+              "fullDescription": {
+                "text": "API potentiellement suspecte (dns.lookup, fs.readFile sur chemin sensible) apparue dans la derniere version."
+              },
+              "helpUri": "https://docs.npmjs.com/cli/v9/using-npm/scripts#life-cycle-scripts",
+              "properties": {
+                "severity": "MEDIUM",
+                "confidence": "medium",
+                "mitre": "T1195.002"
+              }
+            },
+            {
+              "id": "MUADDIB-PUBLISH-001",
+              "name": "Publish Burst Detected",
+              "shortDescription": {
+                "text": "Multiple versions publiees en moins de 24h. Possible compromission de compte ou attaque automatisee."
+              },
+              "fullDescription": {
+                "text": "Multiple versions publiees en moins de 24h. Possible compromission de compte ou attaque automatisee."
+              },
+              "helpUri": "https://blog.phylum.io/shai-hulud-npm-worm",
+              "properties": {
+                "severity": "LOW",
+                "confidence": "high",
+                "mitre": "T1195.002"
+              }
+            },
+            {
+              "id": "MUADDIB-PUBLISH-002",
+              "name": "Dormant Package Spike",
+              "shortDescription": {
+                "text": "Package inactif depuis 6+ mois avec une nouvelle version soudaine. Possible changement de mainteneur ou compromission."
+              },
+              "fullDescription": {
+                "text": "Package inactif depuis 6+ mois avec une nouvelle version soudaine. Possible changement de mainteneur ou compromission."
+              },
+              "helpUri": "https://blog.npmjs.org/post/180565383195/details-about-the-event-stream-incident",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "medium",
+                "mitre": "T1195.002"
+              }
+            },
+            {
+              "id": "MUADDIB-PUBLISH-003",
+              "name": "Rapid Version Succession",
+              "shortDescription": {
+                "text": "Versions publiees en succession rapide (moins d'1h). Possible attaque automatisee ou CI/CD compromis."
+              },
+              "fullDescription": {
+                "text": "Versions publiees en succession rapide (moins d'1h). Possible attaque automatisee ou CI/CD compromis."
+              },
+              "helpUri": "https://docs.npmjs.com/cli/v9/using-npm/scripts#life-cycle-scripts",
+              "properties": {
+                "severity": "MEDIUM",
+                "confidence": "medium",
+                "mitre": "T1195.002"
+              }
+            },
+            {
+              "id": "MUADDIB-MAINTAINER-001",
+              "name": "New Maintainer Added",
+              "shortDescription": {
+                "text": "Un nouveau maintainer a ete ajoute au package entre les deux dernieres versions. Verifier si le changement est legitime."
+              },
+              "fullDescription": {
+                "text": "Un nouveau maintainer a ete ajoute au package entre les deux dernieres versions. Verifier si le changement est legitime."
+              },
+              "helpUri": "https://blog.npmjs.org/post/180565383195/details-about-the-event-stream-incident",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1195.002"
+              }
+            },
+            {
+              "id": "MUADDIB-MAINTAINER-002",
+              "name": "Suspicious Maintainer Detected",
+              "shortDescription": {
+                "text": "Maintainer avec un nom suspect (generique, auto-genere, tres court). Risque eleve de compromission de compte."
+              },
+              "fullDescription": {
+                "text": "Maintainer avec un nom suspect (generique, auto-genere, tres court). Risque eleve de compromission de compte."
+              },
+              "helpUri": "https://blog.npmjs.org/post/180565383195/details-about-the-event-stream-incident",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1195.002"
+              }
+            },
+            {
+              "id": "MUADDIB-MAINTAINER-003",
+              "name": "Sole Maintainer Changed",
+              "shortDescription": {
+                "text": "Le seul maintainer du package a change. Indicateur fort de compromission de compte (event-stream attack pattern)."
+              },
+              "fullDescription": {
+                "text": "Le seul maintainer du package a change. Indicateur fort de compromission de compte (event-stream attack pattern)."
+              },
+              "helpUri": "https://blog.npmjs.org/post/180565383195/details-about-the-event-stream-incident",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1195.002"
+              }
+            },
+            {
+              "id": "MUADDIB-MAINTAINER-004",
+              "name": "New Publisher Detected",
+              "shortDescription": {
+                "text": "La derniere version a ete publiee par un utilisateur different de la version precedente. Verifier la legitimite."
+              },
+              "fullDescription": {
+                "text": "La derniere version a ete publiee par un utilisateur different de la version precedente. Verifier la legitimite."
+              },
+              "helpUri": "https://blog.npmjs.org/post/180565383195/details-about-the-event-stream-incident",
+              "properties": {
+                "severity": "MEDIUM",
+                "confidence": "medium",
+                "mitre": "T1195.002"
+              }
+            },
+            {
+              "id": "MUADDIB-CANARY-001",
+              "name": "Canary Token Exfiltration",
+              "shortDescription": {
+                "text": "Le package a tente d'exfiltrer des honey tokens (faux secrets) injectes dans le sandbox. Comportement malveillant confirme."
+              },
+              "fullDescription": {
+                "text": "Le package a tente d'exfiltrer des honey tokens (faux secrets) injectes dans le sandbox. Comportement malveillant confirme."
+              },
+              "helpUri": "https://canarytokens.org/generate",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1552.001"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-032",
+              "name": "Suspicious C2/Exfiltration Domain",
+              "shortDescription": {
+                "text": "Domaine C2 ou d'exfiltration detecte dans le code (oastify.com, burpcollaborator.net, webhook.site, ngrok.io, etc.). Ces domaines sont utilises pour recevoir des donnees volees ou comme relais de commande."
+              },
+              "fullDescription": {
+                "text": "Domaine C2 ou d'exfiltration detecte dans le code (oastify.com, burpcollaborator.net, webhook.site, ngrok.io, etc.). Ces domaines sont utilises pour recevoir des donnees volees ou comme relais de commande."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1071/001/",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1071.001"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-033",
+              "name": "Steganographic Payload Chain",
+              "shortDescription": {
+                "text": "Chaine steganographique: fetch distant + dechiffrement crypto + execution dynamique (eval/Function). Pattern buildrunner-dev: payload cache dans une image, dechiffre a runtime, puis execute."
+              },
+              "fullDescription": {
+                "text": "Chaine steganographique: fetch distant + dechiffrement crypto + execution dynamique (eval/Function). Pattern buildrunner-dev: payload cache dans une image, dechiffre a runtime, puis execute."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1027/003/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1027.003"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-034",
+              "name": "Download-Execute Binary Pattern",
+              "shortDescription": {
+                "text": "Pattern download-execute: telechargement distant + chmod executable + execSync dans le meme fichier. Dropper binaire deguise en compilation native addon (NeoShadow pattern)."
+              },
+              "fullDescription": {
+                "text": "Pattern download-execute: telechargement distant + chmod executable + execSync dans le meme fichier. Dropper binaire deguise en compilation native addon (NeoShadow pattern)."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1105/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1105"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-035",
+              "name": "IDE Task Persistence",
+              "shortDescription": {
+                "text": "Persistence IDE: ecriture dans tasks.json ou Code/User/ avec execution automatique a l'ouverture du dossier (runOn: folderOpen). Pattern FAMOUS CHOLLIMA / StegaBin pour persistance VS Code."
+              },
+              "fullDescription": {
+                "text": "Persistence IDE: ecriture dans tasks.json ou Code/User/ avec execution automatique a l'ouverture du dossier (runOn: folderOpen). Pattern FAMOUS CHOLLIMA / StegaBin pour persistance VS Code."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1546/",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1546"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-036",
+              "name": "VM Module Code Execution",
+              "shortDescription": {
+                "text": "Execution de code dynamique via le module vm de Node.js (vm.runInThisContext, vm.runInNewContext, vm.compileFunction, new vm.Script). Contourne la detection eval/Function."
+              },
+              "fullDescription": {
+                "text": "Execution de code dynamique via le module vm de Node.js (vm.runInThisContext, vm.runInNewContext, vm.compileFunction, new vm.Script). Contourne la detection eval/Function."
+              },
+              "helpUri": "https://nodejs.org/api/vm.html",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1059"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-037",
+              "name": "Reflect API Code Execution",
+              "shortDescription": {
+                "text": "Execution de code dynamique via Reflect.construct(Function, [...]) ou Reflect.apply(eval, ...). Contourne la detection directe de eval/Function/new Function."
+              },
+              "fullDescription": {
+                "text": "Execution de code dynamique via Reflect.construct(Function, [...]) ou Reflect.apply(eval, ...). Contourne la detection directe de eval/Function/new Function."
+              },
+              "helpUri": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Reflect",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1059"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-038",
+              "name": "Process Binding Abuse",
+              "shortDescription": {
+                "text": "Acces direct aux bindings V8 internes via process.binding() ou process._linkedBinding(). Contourne les modules child_process/fs pour execution de commandes ou acces fichiers sans detection."
+              },
+              "fullDescription": {
+                "text": "Acces direct aux bindings V8 internes via process.binding() ou process._linkedBinding(). Contourne les modules child_process/fs pour execution de commandes ou acces fichiers sans detection."
+              },
+              "helpUri": "https://nodejs.org/api/process.html#processbindingname",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1059"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-039",
+              "name": "Worker Thread Code Execution",
+              "shortDescription": {
+                "text": "new Worker() avec eval:true execute du code arbitraire dans un thread worker, contournant la detection du thread principal. Technique d'evasion pour executer du code dynamique hors du scope AST principal."
+              },
+              "fullDescription": {
+                "text": "new Worker() avec eval:true execute du code arbitraire dans un thread worker, contournant la detection du thread principal. Technique d'evasion pour executer du code dynamique hors du scope AST principal."
+              },
+              "helpUri": "https://nodejs.org/api/worker_threads.html",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1059"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-042",
+              "name": "WASM Host Import Sink",
+              "shortDescription": {
+                "text": "Module WebAssembly charge avec des callbacks host contenant des sinks reseau (fetch/http.request). Le WASM peut invoquer ces callbacks pour exfiltrer des donnees tout en cachant le flux de controle. Aucun package npm legitime ne combine WASM + callbacks reseau host."
+              },
+              "fullDescription": {
+                "text": "Module WebAssembly charge avec des callbacks host contenant des sinks reseau (fetch/http.request). Le WASM peut invoquer ces callbacks pour exfiltrer des donnees tout en cachant le flux de controle. Aucun package npm legitime ne combine WASM + callbacks reseau host."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1059/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1059"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-046",
+              "name": "WASM Module Load (Standalone)",
+              "shortDescription": {
+                "text": "Module WebAssembly charge sans sink reseau detectable. Usage legitime frequent (cryptographie, traitement d'image, codecs). Le WASM cache le flux de controle — verifier le fichier .wasm manuellement."
+              },
+              "fullDescription": {
+                "text": "Module WebAssembly charge sans sink reseau detectable. Usage legitime frequent (cryptographie, traitement d'image, codecs). Le WASM cache le flux de controle — verifier le fichier .wasm manuellement."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1027/",
+              "properties": {
+                "severity": "MEDIUM",
+                "confidence": "medium",
+                "mitre": "T1027"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-041",
+              "name": "Credential Regex Harvesting",
+              "shortDescription": {
+                "text": "Regex de detection de credentials (token/password/secret/Bearer) combine avec un appel reseau. Technique de harvesting: le code scanne les donnees de flux (streams, requetes) a la recherche de credentials et les exfiltre."
+              },
+              "fullDescription": {
+                "text": "Regex de detection de credentials (token/password/secret/Bearer) combine avec un appel reseau. Technique de harvesting: le code scanne les donnees de flux (streams, requetes) a la recherche de credentials et les exfiltre."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1552/",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1552"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-044",
+              "name": "Built-in Method Override Exfiltration",
+              "shortDescription": {
+                "text": "Override de methode built-in (console.log/warn/error, Object.defineProperty) combine avec un appel reseau. Technique de monkey-patching: le code remplace une API native pour intercepter les donnees en transit et les exfiltrer."
+              },
+              "fullDescription": {
+                "text": "Override de methode built-in (console.log/warn/error, Object.defineProperty) combine avec un appel reseau. Technique de monkey-patching: le code remplace une API native pour intercepter les donnees en transit et les exfiltrer."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1557/",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1557"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-045",
+              "name": "Stream Credential Interception",
+              "shortDescription": {
+                "text": "Classe stream (Transform/Duplex/Writable) avec regex de credentials et appel reseau. Technique de wiretap: le stream intercepte les donnees en transit, scanne pour des credentials (Bearer, password, token) et les exfiltre."
+              },
+              "fullDescription": {
+                "text": "Classe stream (Transform/Duplex/Writable) avec regex de credentials et appel reseau. Technique de wiretap: le stream intercepte les donnees en transit, scanne pour des credentials (Bearer, password, token) et les exfiltre."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1557/",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1557"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-040",
+              "name": "Remote Code Loading",
+              "shortDescription": {
+                "text": "Fetch reseau + eval/Function dans le meme fichier. Technique multi-stage: le code telecharge un payload distant (SVG, HTML, JSON) et l'execute dynamiquement. Aucun package npm legitime ne combine fetch + eval/Function."
+              },
+              "fullDescription": {
+                "text": "Fetch reseau + eval/Function dans le meme fichier. Technique multi-stage: le code telecharge un payload distant (SVG, HTML, JSON) et l'execute dynamiquement. Aucun package npm legitime ne combine fetch + eval/Function."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1105/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1105"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-043",
+              "name": "Proxy Data Interception",
+              "shortDescription": {
+                "text": "Proxy trap (set/get/apply) combine avec un appel reseau dans le meme fichier. Technique d'interception de donnees: le Proxy capture toutes les ecritures/lectures de proprietes et les exfiltre via le reseau. Utilise pour voler des credentials passees via module.exports."
+              },
+              "fullDescription": {
+                "text": "Proxy trap (set/get/apply) combine avec un appel reseau dans le meme fichier. Technique d'interception de donnees: le Proxy capture toutes les ecritures/lectures de proprietes et les exfiltre via le reseau. Utilise pour voler des credentials passees via module.exports."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1557/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1557"
+              }
+            },
+            {
+              "id": "MUADDIB-PKG-013",
+              "name": "Bin Field PATH Hijack",
+              "shortDescription": {
+                "text": "Le champ \"bin\" de package.json shadow une commande systeme (node, npm, git, bash, etc.). A l'install, npm cree un symlink dans node_modules/.bin/ qui intercepte la commande reelle pour tous les npm scripts."
+              },
+              "fullDescription": {
+                "text": "Le champ \"bin\" de package.json shadow une commande systeme (node, npm, git, bash, etc.). A l'install, npm cree un symlink dans node_modules/.bin/ qui intercepte la commande reelle pour tous les npm scripts."
+              },
+              "helpUri": "https://socket.dev/blog/2025-supply-chain-report",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1574.007"
+              }
+            },
+            {
+              "id": "MUADDIB-PKG-014",
+              "name": "Git Dependency RCE (PackageGate)",
+              "shortDescription": {
+                "text": "Dependance utilisant une URL git+ ou git://. Vecteur PackageGate: un .npmrc malveillant peut overrider le binaire git, permettant l'execution de code meme avec --ignore-scripts."
+              },
+              "fullDescription": {
+                "text": "Dependance utilisant une URL git+ ou git://. Vecteur PackageGate: un .npmrc malveillant peut overrider le binaire git, permettant l'execution de code meme avec --ignore-scripts."
+              },
+              "helpUri": "https://socket.dev/blog/packagegate-npm-rce",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "medium",
+                "mitre": "T1195.002"
+              }
+            },
+            {
+              "id": "MUADDIB-PKG-015",
+              "name": ".npmrc Git Binary Override",
+              "shortDescription": {
+                "text": "Fichier .npmrc contient git= override — technique PackageGate: remplace le binaire git par un script controle par l'attaquant."
+              },
+              "fullDescription": {
+                "text": "Fichier .npmrc contient git= override — technique PackageGate: remplace le binaire git par un script controle par l'attaquant."
+              },
+              "helpUri": "https://socket.dev/blog/packagegate-npm-rce",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1195.002"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-048",
+              "name": "Write to node_modules/ (Worm Propagation)",
+              "shortDescription": {
+                "text": "writeFileSync/writeFile/appendFileSync ciblant node_modules/ — technique de propagation worm Shai-Hulud 2.0: modifie d'autres packages installes pour injecter un backdoor persistent."
+              },
+              "fullDescription": {
+                "text": "writeFileSync/writeFile/appendFileSync ciblant node_modules/ — technique de propagation worm Shai-Hulud 2.0: modifie d'autres packages installes pour injecter un backdoor persistent."
+              },
+              "helpUri": "https://www.wiz.io/blog/shai-hulud-npm-supply-chain-attack",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1195.002"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-049",
+              "name": "Bun Runtime Evasion",
+              "shortDescription": {
+                "text": "Invocation du runtime Bun (bun run/exec/install) via exec/spawn — technique Shai-Hulud 2.0: utilise un runtime alternatif pour echapper aux sandboxes et monitoring Node.js."
+              },
+              "fullDescription": {
+                "text": "Invocation du runtime Bun (bun run/exec/install) via exec/spawn — technique Shai-Hulud 2.0: utilise un runtime alternatif pour echapper aux sandboxes et monitoring Node.js."
+              },
+              "helpUri": "https://www.wiz.io/blog/shai-hulud-npm-supply-chain-attack",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "medium",
+                "mitre": "T1059"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-050",
+              "name": "Static Timer Bomb",
+              "shortDescription": {
+                "text": "setTimeout/setInterval avec delai > 1h detecte statiquement. PhantomRaven active le 2nd stage 48h+ apres install. Evasion temporelle: le payload s'active bien apres l'installation pour echapper aux sandboxes."
+              },
+              "fullDescription": {
+                "text": "setTimeout/setInterval avec delai > 1h detecte statiquement. PhantomRaven active le 2nd stage 48h+ apres install. Evasion temporelle: le payload s'active bien apres l'installation pour echapper aux sandboxes."
+              },
+              "helpUri": "https://www.sonatype.com/blog/phantomraven-supply-chain-attack",
+              "properties": {
+                "severity": "MEDIUM",
+                "confidence": "medium",
+                "mitre": "T1497.003"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-051",
+              "name": "npm publish Worm Propagation",
+              "shortDescription": {
+                "text": "exec(\"npm publish\") detecte — technique de propagation worm Shai-Hulud: utilise les tokens npm voles pour publier des versions infectees des packages de la victime."
+              },
+              "fullDescription": {
+                "text": "exec(\"npm publish\") detecte — technique de propagation worm Shai-Hulud: utilise les tokens npm voles pour publier des versions infectees des packages de la victime."
+              },
+              "helpUri": "https://blog.phylum.io/shai-hulud-npm-worm",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1195.002"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-052",
+              "name": "Ollama Local LLM (Polymorphic Engine)",
+              "shortDescription": {
+                "text": "Reference au port 11434 (Ollama) detectee. PhantomRaven Wave 4 utilise un LLM local pour reecrire le malware et eviter la detection signature. Moteur polymorphe."
+              },
+              "fullDescription": {
+                "text": "Reference au port 11434 (Ollama) detectee. PhantomRaven Wave 4 utilise un LLM local pour reecrire le malware et eviter la detection signature. Moteur polymorphe."
+              },
+              "helpUri": "https://www.sonatype.com/blog/phantomraven-supply-chain-attack",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "medium",
+                "mitre": "T1027.005"
+              }
+            },
+            {
+              "id": "MUADDIB-SHELL-016",
+              "name": "Curl IFS Variable Evasion",
+              "shortDescription": {
+                "text": "Evasion IFS: curl$IFS ou curl${IFS} pipe vers shell. Technique d'evasion pour contourner la detection de curl|sh en utilisant $IFS comme separateur."
+              },
+              "fullDescription": {
+                "text": "Evasion IFS: curl$IFS ou curl${IFS} pipe vers shell. Technique d'evasion pour contourner la detection de curl|sh en utilisant $IFS comme separateur."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1059/004/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1059.004"
+              }
+            },
+            {
+              "id": "MUADDIB-SHELL-017",
+              "name": "Eval Curl Command Substitution",
+              "shortDescription": {
+                "text": "eval $(curl ...) detecte. Telecharge et execute du code distant via command substitution."
+              },
+              "fullDescription": {
+                "text": "eval $(curl ...) detecte. Telecharge et execute du code distant via command substitution."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1059/004/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1059.004"
+              }
+            },
+            {
+              "id": "MUADDIB-SHELL-018",
+              "name": "Shell -c Curl Execution",
+              "shortDescription": {
+                "text": "sh -c wrapping autour de curl. Technique d'evasion pour masquer l'execution de commandes distantes."
+              },
+              "fullDescription": {
+                "text": "sh -c wrapping autour de curl. Technique d'evasion pour masquer l'execution de commandes distantes."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1059/004/",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1059.004"
+              }
+            },
+            {
+              "id": "MUADDIB-SHELL-019",
+              "name": "Python Time Delay Execution",
+              "shortDescription": {
+                "text": "Execution Python avec delai time.sleep() >= 100s via child process. Technique d'evasion sandbox (T1497.003) : le malware attend que la sandbox expire avant d'executer le payload."
+              },
+              "fullDescription": {
+                "text": "Execution Python avec delai time.sleep() >= 100s via child process. Technique d'evasion sandbox (T1497.003) : le malware attend que la sandbox expire avant d'executer le payload."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1497/003/",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "medium",
+                "mitre": "T1497.003"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-047",
+              "name": "Detached Process Credential Exfiltration",
+              "shortDescription": {
+                "text": "Process detache (survit au parent) avec acces aux credentials et appel reseau — technique DPRK/Lazarus pour exfiltrer des secrets en arriere-plan"
+              },
+              "fullDescription": {
+                "text": "Process detache (survit au parent) avec acces aux credentials et appel reseau — technique DPRK/Lazarus pour exfiltrer des secrets en arriere-plan"
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1041/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1041"
+              }
+            },
+            {
+              "id": "MUADDIB-INTENT-001",
+              "name": "Intent Credential Exfiltration",
+              "shortDescription": {
+                "text": "Coherence d'intention: lecture de credentials (fichiers sensibles, env vars) combinee avec un sink reseau ou exec dans le meme package. Pattern typique DPRK/Lazarus: code malveillant fragmente sur plusieurs fichiers avec uniquement des APIs legitimes."
+              },
+              "fullDescription": {
+                "text": "Coherence d'intention: lecture de credentials (fichiers sensibles, env vars) combinee avec un sink reseau ou exec dans le meme package. Pattern typique DPRK/Lazarus: code malveillant fragmente sur plusieurs fichiers avec uniquement des APIs legitimes."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1041/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1041"
+              }
+            },
+            {
+              "id": "MUADDIB-INTENT-002",
+              "name": "Intent Command Output Exfiltration",
+              "shortDescription": {
+                "text": "Coherence d'intention: sortie de commande systeme combinee avec un sink reseau. Le code execute des commandes et transmet les resultats sur le reseau — reconnaissance ou exfiltration."
+              },
+              "fullDescription": {
+                "text": "Coherence d'intention: sortie de commande systeme combinee avec un sink reseau. Le code execute des commandes et transmet les resultats sur le reseau — reconnaissance ou exfiltration."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1059/",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "medium",
+                "mitre": "T1059"
+              }
+            },
+            {
+              "id": "MUADDIB-OBF-003",
+              "name": "Unicode Invisible Character Injection",
+              "shortDescription": {
+                "text": "Caracteres Unicode invisibles detectes (zero-width, variation selectors). Technique GlassWorm: encodage de payload malveillant via variation selectors (U+FE00-FE0F, U+E0100-E01EF) invisible dans les editeurs."
+              },
+              "fullDescription": {
+                "text": "Caracteres Unicode invisibles detectes (zero-width, variation selectors). Technique GlassWorm: encodage de payload malveillant via variation selectors (U+FE00-FE0F, U+E0100-E01EF) invisible dans les editeurs."
+              },
+              "helpUri": "https://www.aikido.dev/blog/glassworm-returns-unicode-attack-github-npm-vscode",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1027"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-053",
+              "name": "Unicode Variation Selector Decoder",
+              "shortDescription": {
+                "text": "Decodeur de payload Unicode via variation selectors (.codePointAt + 0xFE00/0xE0100). Signature GlassWorm: le code reconstruit un payload octet par octet a partir de caracteres invisibles."
+              },
+              "fullDescription": {
+                "text": "Decodeur de payload Unicode via variation selectors (.codePointAt + 0xFE00/0xE0100). Signature GlassWorm: le code reconstruit un payload octet par octet a partir de caracteres invisibles."
+              },
+              "helpUri": "https://www.koi.security/blog/glassworm-first-self-propagating-worm-using-invisible-code-hits-openvsx-marketplace",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1140"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-054",
+              "name": "Blockchain C2 Resolution (Dead Drop)",
+              "shortDescription": {
+                "text": "Import Solana/Web3 + appel API C2 (getSignaturesForAddress, getTransaction). Technique GlassWorm: la blockchain sert de dead drop resolver pour obtenir l'adresse C2 via le champ memo des transactions."
+              },
+              "fullDescription": {
+                "text": "Import Solana/Web3 + appel API C2 (getSignaturesForAddress, getTransaction). Technique GlassWorm: la blockchain sert de dead drop resolver pour obtenir l'adresse C2 via le champ memo des transactions."
+              },
+              "helpUri": "https://www.sonatype.com/blog/hijacked-npm-packages-deliver-malware-via-solana-linked-to-glassworm",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1102"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-057",
+              "name": "Prototype Chain Constructor Access",
+              "shortDescription": {
+                "text": "Acces au constructeur AsyncFunction ou GeneratorFunction via Object.getPrototypeOf(). Technique d'evasion permettant d'executer du code arbitraire sans reference directe a eval() ou Function()."
+              },
+              "fullDescription": {
+                "text": "Acces au constructeur AsyncFunction ou GeneratorFunction via Object.getPrototypeOf(). Technique d'evasion permettant d'executer du code arbitraire sans reference directe a eval() ou Function()."
+              },
+              "helpUri": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AsyncFunction",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1059.007"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-058",
+              "name": "Split High-Entropy Payload",
+              "shortDescription": {
+                "text": "Payload haute entropie fragmente en ≥3 chunks concatenes pour contourner la detection par string individuelle. Le resultat concatene passe par eval/Function/atob/Buffer.from, indiquant un dechiffrement ou une execution staged."
+              },
+              "fullDescription": {
+                "text": "Payload haute entropie fragmente en ≥3 chunks concatenes pour contourner la detection par string individuelle. Le resultat concatene passe par eval/Function/atob/Buffer.from, indiquant un dechiffrement ou une execution staged."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1027/002/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1027.002"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-056",
+              "name": "Module._load() Internal Loader Bypass",
+              "shortDescription": {
+                "text": "Module._load() detecte — bypass du module loader interne de Node.js pour charger dynamiquement des modules sans passer par require(). Technique d'evasion contournant les restrictions de chargement de modules."
+              },
+              "fullDescription": {
+                "text": "Module._load() detecte — bypass du module loader interne de Node.js pour charger dynamiquement des modules sans passer par require(). Technique d'evasion contournant les restrictions de chargement de modules."
+              },
+              "helpUri": "https://nodejs.org/api/modules.html",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1059.007"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-055",
+              "name": "Hardcoded Blockchain RPC Endpoint",
+              "shortDescription": {
+                "text": "Endpoint RPC blockchain hardcode (Solana mainnet, Infura Ethereum). Dans un package non-crypto, indique un potentiel canal C2 via blockchain."
+              },
+              "fullDescription": {
+                "text": "Endpoint RPC blockchain hardcode (Solana mainnet, Infura Ethereum). Dans un package non-crypto, indique un potentiel canal C2 via blockchain."
+              },
+              "helpUri": "https://www.koi.security/blog/glassworm-first-self-propagating-worm-using-invisible-code-hits-openvsx-marketplace",
+              "properties": {
+                "severity": "MEDIUM",
+                "confidence": "medium",
+                "mitre": "T1102"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-059",
+              "name": "Systemd Service Persistence",
+              "shortDescription": {
+                "text": "Ecriture dans un chemin systemd (*.service, systemd/) ou execution de systemctl enable/start. Technique de persistence CanisterWorm (pgmon.service) et TeamPCP (sysmon.service). Aucun package npm legitime ne cree de services systemd."
+              },
+              "fullDescription": {
+                "text": "Ecriture dans un chemin systemd (*.service, systemd/) ou execution de systemctl enable/start. Technique de persistence CanisterWorm (pgmon.service) et TeamPCP (sysmon.service). Aucun package npm legitime ne cree de services systemd."
+              },
+              "helpUri": "https://research.jfrog.com/post/canister-worm/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1543.002"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-061",
+              "name": "Python .pth Auto-Exec Persistence",
+              "shortDescription": {
+                "text": "Ecriture d'un fichier .pth detectee. Les fichiers .pth dans site-packages/ sont executes automatiquement par l'interpreteur Python au demarrage, sans import explicite. Technique de persistence LiteLLM/Checkmarx (litellm_init.pth) : le .pth contient du code Python base64-encode qui installe un stealer."
+              },
+              "fullDescription": {
+                "text": "Ecriture d'un fichier .pth detectee. Les fichiers .pth dans site-packages/ sont executes automatiquement par l'interpreteur Python au demarrage, sans import explicite. Technique de persistence LiteLLM/Checkmarx (litellm_init.pth) : le .pth contient du code Python base64-encode qui installe un stealer."
+              },
+              "helpUri": "https://blog.pypi.org/posts/2026-03-24-litellm-compromise/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1546.004"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-060",
+              "name": "NPM Token Extraction via CLI",
+              "shortDescription": {
+                "text": "Execution de npm config get _authToken ou npm whoami — extraction programmatique de credentials npm. Pattern CanisterWorm findNpmTokens() utilise pour la propagation worm."
+              },
+              "fullDescription": {
+                "text": "Execution de npm config get _authToken ou npm whoami — extraction programmatique de credentials npm. Pattern CanisterWorm findNpmTokens() utilise pour la propagation worm."
+              },
+              "helpUri": "https://research.jfrog.com/post/canister-worm/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1552.001"
+              }
+            },
+            {
+              "id": "MUADDIB-SHELL-020",
+              "name": "Root Filesystem Wipe",
+              "shortDescription": {
+                "text": "Commande rm -rf / detectee — suppression de tout le systeme de fichiers. Pattern kamikaze.sh (CanisterWorm wiper ciblant Iran via timezone Asia/Tehran). Plus destructif que home_deletion."
+              },
+              "fullDescription": {
+                "text": "Commande rm -rf / detectee — suppression de tout le systeme de fichiers. Pattern kamikaze.sh (CanisterWorm wiper ciblant Iran via timezone Asia/Tehran). Plus destructif que home_deletion."
+              },
+              "helpUri": "https://www.aikido.dev/blog/teampcp-stage-payload-canisterworm-iran",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1485"
+              }
+            },
+            {
+              "id": "MUADDIB-SHELL-021",
+              "name": "Process Memory Scanning",
+              "shortDescription": {
+                "text": "Acces a /proc/*/mem detecte — extraction de secrets depuis la memoire des processus. Technique TeamPCP credential stealer (Trivy v0.69.4) : scan des process Runner.Worker pour extraire les secrets CI/CD."
+              },
+              "fullDescription": {
+                "text": "Acces a /proc/*/mem detecte — extraction de secrets depuis la memoire des processus. Technique TeamPCP credential stealer (Trivy v0.69.4) : scan des process Runner.Worker pour extraire les secrets CI/CD."
+              },
+              "helpUri": "https://www.wiz.io/blog/trivy-compromised-teampcp-supply-chain-attack",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1003.007"
+              }
+            },
+            {
+              "id": "MUADDIB-COMPOUND-001",
+              "name": "Steganographic Payload + Crypto Decryption",
+              "shortDescription": {
+                "text": "Reference a un fichier binaire (.png/.jpg/.wasm) avec eval() combinee avec dechiffrement crypto (createDecipher). Chaine steganographique complete: payload cache dans un fichier binaire, dechiffre a runtime."
+              },
+              "fullDescription": {
+                "text": "Reference a un fichier binaire (.png/.jpg/.wasm) avec eval() combinee avec dechiffrement crypto (createDecipher). Chaine steganographique complete: payload cache dans un fichier binaire, dechiffre a runtime."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1140/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1140"
+              }
+            },
+            {
+              "id": "MUADDIB-COMPOUND-002",
+              "name": "Lifecycle Hook on Typosquat Package",
+              "shortDescription": {
+                "text": "Script lifecycle (preinstall/postinstall) sur un package avec nom similaire a un package populaire. Vecteur classique de dependency confusion: le code s'execute automatiquement a l'installation."
+              },
+              "fullDescription": {
+                "text": "Script lifecycle (preinstall/postinstall) sur un package avec nom similaire a un package populaire. Vecteur classique de dependency confusion: le code s'execute automatiquement a l'installation."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1195/002/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1195.002"
+              }
+            },
+            {
+              "id": "MUADDIB-COMPOUND-004",
+              "name": "Lifecycle Hook + Inline Node Execution",
+              "shortDescription": {
+                "text": "Script lifecycle avec execution inline Node.js (node -e). Le code s'execute automatiquement a npm install avec un payload inline."
+              },
+              "fullDescription": {
+                "text": "Script lifecycle avec execution inline Node.js (node -e). Le code s'execute automatiquement a npm install avec un payload inline."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1059/007/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1059.007"
+              }
+            },
+            {
+              "id": "MUADDIB-COMPOUND-005",
+              "name": "Lifecycle Hook + Remote Code Loading",
+              "shortDescription": {
+                "text": "Script lifecycle avec require(http/https) pour charger du code distant. Le payload est telecharge et execute automatiquement a l'installation."
+              },
+              "fullDescription": {
+                "text": "Script lifecycle avec require(http/https) pour charger du code distant. Le payload est telecharge et execute automatiquement a l'installation."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1105/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1105"
+              }
+            },
+            {
+              "id": "MUADDIB-COMPOUND-007",
+              "name": "Lifecycle Script Executes Malicious File",
+              "shortDescription": {
+                "text": "Un script lifecycle (preinstall/install/postinstall) reference un fichier JS local qui contient des menaces HIGH/CRITICAL. Indicateur fort de malware install-time: le fichier malveillant est cache derriere une indirection lifecycle."
+              },
+              "fullDescription": {
+                "text": "Un script lifecycle (preinstall/install/postinstall) reference un fichier JS local qui contient des menaces HIGH/CRITICAL. Indicateur fort de malware install-time: le fichier malveillant est cache derriere une indirection lifecycle."
+              },
+              "helpUri": "https://blog.phylum.io/shai-hulud-npm-worm",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1204.002"
+              }
+            },
+            {
+              "id": "MUADDIB-COMPOUND-006",
+              "name": "WebSocket/MQTT Credential Exfiltration",
+              "shortDescription": {
+                "text": "Acces a une variable d'environnement sensible combine avec un sink reseau non-HTTP (WebSocket, MQTT, Socket.io) dans le meme fichier. Canal d'exfiltration furtif evitant les proxies HTTP."
+              },
+              "fullDescription": {
+                "text": "Acces a une variable d'environnement sensible combine avec un sink reseau non-HTTP (WebSocket, MQTT, Socket.io) dans le meme fichier. Canal d'exfiltration furtif evitant les proxies HTTP."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1041/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1041"
+              }
+            },
+            {
+              "id": "MUADDIB-COMPOUND-008",
+              "name": "Uncaught Exception Handler Credential Exfiltration",
+              "shortDescription": {
+                "text": "process.on(\"uncaughtException\") combine avec acces aux variables d'environnement sensibles et appel reseau. Technique d'exfiltration silencieuse: le handler intercepte les erreurs pour envoyer les credentials a un serveur externe sans interruption du processus."
+              },
+              "fullDescription": {
+                "text": "process.on(\"uncaughtException\") combine avec acces aux variables d'environnement sensibles et appel reseau. Technique d'exfiltration silencieuse: le handler intercepte les erreurs pour envoyer les credentials a un serveur externe sans interruption du processus."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1041/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1041"
+              }
+            },
+            {
+              "id": "MUADDIB-COMPOUND-009",
+              "name": "Lifecycle Hook + Suspicious Dataflow",
+              "shortDescription": {
+                "text": "Script lifecycle (preinstall/postinstall) combine avec un flux de donnees suspect (credential read → network send). Pattern classique d'exfiltration install-time."
+              },
+              "fullDescription": {
+                "text": "Script lifecycle (preinstall/postinstall) combine avec un flux de donnees suspect (credential read → network send). Pattern classique d'exfiltration install-time."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1041/",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1041"
+              }
+            },
+            {
+              "id": "MUADDIB-COMPOUND-010",
+              "name": "Lifecycle Hook + Dangerous Shell Execution",
+              "shortDescription": {
+                "text": "Script lifecycle combine avec execution de commande shell dangereuse (curl, wget, nc, bash). Injection de commande automatique a l'installation."
+              },
+              "fullDescription": {
+                "text": "Script lifecycle combine avec execution de commande shell dangereuse (curl, wget, nc, bash). Injection de commande automatique a l'installation."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1059/004/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1059.004"
+              }
+            },
+            {
+              "id": "MUADDIB-COMPOUND-011",
+              "name": "Obfuscated Lifecycle Credential Access",
+              "shortDescription": {
+                "text": "Obfuscation + acces aux variables d'environnement sensibles + script lifecycle. Triple signal: le code est intentionnellement masque pour voler des credentials a l'installation."
+              },
+              "fullDescription": {
+                "text": "Obfuscation + acces aux variables d'environnement sensibles + script lifecycle. Triple signal: le code est intentionnellement masque pour voler des credentials a l'installation."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1027/",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1027"
+              }
+            },
+            {
+              "id": "MUADDIB-FLOW-005",
+              "name": "Non-HTTP Network Module Sink",
+              "shortDescription": {
+                "text": "Utilisation d'un module reseau non-HTTP (ws, mqtt, socket.io) comme sink de donnees. Ces modules sont rarement utilises dans les packages benins et peuvent indiquer un canal d'exfiltration furtif."
+              },
+              "fullDescription": {
+                "text": "Utilisation d'un module reseau non-HTTP (ws, mqtt, socket.io) comme sink de donnees. Ces modules sont rarement utilises dans les packages benins et peuvent indiquer un canal d'exfiltration furtif."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1071/",
+              "properties": {
+                "severity": "MEDIUM",
+                "confidence": "medium",
+                "mitre": "T1071"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-062",
+              "name": "Reflect.apply(require) Bypass",
+              "shortDescription": {
+                "text": "Reflect.apply(require, null, [module]) detecte — contourne la detection statique de require() en passant par l'API Reflect. Permet de charger child_process/fs/net sans appel require() direct."
+              },
+              "fullDescription": {
+                "text": "Reflect.apply(require, null, [module]) detecte — contourne la detection statique de require() en passant par l'API Reflect. Permet de charger child_process/fs/net sans appel require() direct."
+              },
+              "helpUri": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Reflect/apply",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1059"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-063",
+              "name": "FinalizationRegistry Deferred Execution",
+              "shortDescription": {
+                "text": "new FinalizationRegistry() avec callback contenant child_process/exec/spawn. Le callback s'execute apres le garbage collection, hors du flux d'execution normal — technique d'evasion sandbox qui differe l'execution malveillante."
+              },
+              "fullDescription": {
+                "text": "new FinalizationRegistry() avec callback contenant child_process/exec/spawn. Le callback s'execute apres le garbage collection, hors du flux d'execution normal — technique d'evasion sandbox qui differe l'execution malveillante."
+              },
+              "helpUri": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/FinalizationRegistry",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1497.003"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-064",
+              "name": "Function via Prototype Chain",
+              "shortDescription": {
+                "text": "(function(){}).constructor(code) ou [].constructor.constructor(code) detecte — acces au constructeur Function via la chaine de prototypes, contourne les detections de new Function() et eval()."
+              },
+              "fullDescription": {
+                "text": "(function(){}).constructor(code) ou [].constructor.constructor(code) detecte — acces au constructeur Function via la chaine de prototypes, contourne les detections de new Function() et eval()."
+              },
+              "helpUri": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1059"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-065",
+              "name": "Prototype Pollution",
+              "shortDescription": {
+                "text": "__defineGetter__, __defineSetter__ ou assignation __proto__ detectee — pollution de prototype permettant de detourner les proprietes heritees de tous les objets. Vecteur d'escalade pour injecter du code dans des chemins d'execution inattendus."
+              },
+              "fullDescription": {
+                "text": "__defineGetter__, __defineSetter__ ou assignation __proto__ detectee — pollution de prototype permettant de detourner les proprietes heritees de tous les objets. Vecteur d'escalade pour injecter du code dans des chemins d'execution inattendus."
+              },
+              "helpUri": "https://portswigger.net/web-security/prototype-pollution",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1574"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-066",
+              "name": "Module.wrap Override",
+              "shortDescription": {
+                "text": "Module.wrap = ... detecte — remplacement de la fonction wrapper du module loader Node.js. Permet d'injecter du code dans CHAQUE module charge apres le remplacement, technique de persistence systemique."
+              },
+              "fullDescription": {
+                "text": "Module.wrap = ... detecte — remplacement de la fonction wrapper du module loader Node.js. Permet d'injecter du code dans CHAQUE module charge apres le remplacement, technique de persistence systemique."
+              },
+              "helpUri": "https://nodejs.org/api/modules.html",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1574.006"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-067",
+              "name": "Symbol Property Hiding",
+              "shortDescription": {
+                "text": "obj[Symbol(...)] = require(module_dangereux) detecte — dissimulation de modules dangereux derriere des proprietes Symbol, invisibles a Object.keys() et JSON.stringify(). Technique anti-forensics."
+              },
+              "fullDescription": {
+                "text": "obj[Symbol(...)] = require(module_dangereux) detecte — dissimulation de modules dangereux derriere des proprietes Symbol, invisibles a Object.keys() et JSON.stringify(). Technique anti-forensics."
+              },
+              "helpUri": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1564"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-068",
+              "name": "WithStatement Dangerous Body",
+              "shortDescription": {
+                "text": "with() statement dont le body contient require/exec/spawn/child_process — injection de scope pour obscurcir les appels dangereux. Le with() rend tous les identifiants ambigus, empechant l'analyse statique de tracer les appels."
+              },
+              "fullDescription": {
+                "text": "with() statement dont le body contient require/exec/spawn/child_process — injection de scope pour obscurcir les appels dangereux. Le with() rend tous les identifiants ambigus, empechant l'analyse statique de tracer les appels."
+              },
+              "helpUri": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/with",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1027"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-069",
+              "name": "require(\"process\").mainModule Bypass",
+              "shortDescription": {
+                "text": "require(\"process\").mainModule.require() detecte — acces indirect au mainModule via require(\"process\") au lieu de l'objet global process. Contourne la detection de process.mainModule.require() qui ne surveille que l'identifiant \"process\"."
+              },
+              "fullDescription": {
+                "text": "require(\"process\").mainModule.require() detecte — acces indirect au mainModule via require(\"process\") au lieu de l'objet global process. Contourne la detection de process.mainModule.require() qui ne surveille que l'identifiant \"process\"."
+              },
+              "helpUri": "https://nodejs.org/api/process.html",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1059"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-070",
+              "name": "Shared Memory IPC",
+              "shortDescription": {
+                "text": "SharedArrayBuffer + Worker Thread detectes — canal IPC memoire partagee qui contourne la surveillance des messages inter-threads."
+              },
+              "fullDescription": {
+                "text": "SharedArrayBuffer + Worker Thread detectes — canal IPC memoire partagee qui contourne la surveillance des messages inter-threads."
+              },
+              "helpUri": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SharedArrayBuffer",
+              "properties": {
+                "severity": "MEDIUM",
+                "confidence": "medium",
+                "mitre": "T1559"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-071",
+              "name": "WebSocket C2 Channel",
+              "shortDescription": {
+                "text": "Connexion WebSocket vers un domaine suspect ou avec execution dynamique — canal C2 bidirectionnel persistant."
+              },
+              "fullDescription": {
+                "text": "Connexion WebSocket vers un domaine suspect ou avec execution dynamique — canal C2 bidirectionnel persistant."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1071.001/",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1071.001"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-072",
+              "name": "UDP Data Exfiltration",
+              "shortDescription": {
+                "text": "Module dgram (UDP) avec envoi de donnees — exfiltration via protocole UDP qui contourne les firewalls HTTP."
+              },
+              "fullDescription": {
+                "text": "Module dgram (UDP) avec envoi de donnees — exfiltration via protocole UDP qui contourne les firewalls HTTP."
+              },
+              "helpUri": "https://nodejs.org/api/dgram.html",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1048.003"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-073",
+              "name": "Native Addon Installation",
+              "shortDescription": {
+                "text": "binding.gyp present avec script lifecycle non-standard — compilation native potentiellement malveillante a l'installation."
+              },
+              "fullDescription": {
+                "text": "binding.gyp present avec script lifecycle non-standard — compilation native potentiellement malveillante a l'installation."
+              },
+              "helpUri": "https://nodejs.org/api/addons.html",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "medium",
+                "mitre": "T1195.002"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-074",
+              "name": "String Mutation Obfuscation",
+              "shortDescription": {
+                "text": "Chaine de 3+ appels .replace() pour reconstruire des noms d'API dangereuses — technique leet-speak/substitution pour contourner la detection statique."
+              },
+              "fullDescription": {
+                "text": "Chaine de 3+ appels .replace() pour reconstruire des noms d'API dangereuses — technique leet-speak/substitution pour contourner la detection statique."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1027/",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1027"
+              }
+            },
+            {
+              "id": "MUADDIB-SHELL-023",
+              "name": "Crontab/Cron Write",
+              "shortDescription": {
+                "text": "Ecriture dans les fichiers cron (/etc/cron*, crontab, /var/spool/cron) — persistence via tache planifiee."
+              },
+              "fullDescription": {
+                "text": "Ecriture dans les fichiers cron (/etc/cron*, crontab, /var/spool/cron) — persistence via tache planifiee."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1053.003/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1053.003"
+              }
+            },
+            {
+              "id": "MUADDIB-SCORE-001",
+              "name": "Isolated Suspicious File",
+              "shortDescription": {
+                "text": "Un seul fichier suspect parmi 10+ fichiers propres — pattern de dissimulation ou le code malveillant est cache dans un package legitime."
+              },
+              "fullDescription": {
+                "text": "Un seul fichier suspect parmi 10+ fichiers propres — pattern de dissimulation ou le code malveillant est cache dans un package legitime."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1036/",
+              "properties": {
+                "severity": "MEDIUM",
+                "confidence": "medium",
+                "mitre": "T1036"
+              }
+            },
+            {
+              "id": "MUADDIB-SCORE-002",
+              "name": "Deeply Nested Suspicious File",
+              "shortDescription": {
+                "text": "Pattern suspect detecte dans un fichier profondement imbrique (profondeur > 3) — technique de dissimulation dans l'arborescence du package."
+              },
+              "fullDescription": {
+                "text": "Pattern suspect detecte dans un fichier profondement imbrique (profondeur > 3) — technique de dissimulation dans l'arborescence du package."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1036.005/",
+              "properties": {
+                "severity": "LOW",
+                "confidence": "low",
+                "mitre": "T1036.005"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-075",
+              "name": "Module Internals Hijack",
+              "shortDescription": {
+                "text": "Assignation a Module._resolveFilename, _compile ou _extensions — detournement des mecanismes internes du systeme de modules Node.js. Tous les require() subsequents peuvent etre interceptes."
+              },
+              "fullDescription": {
+                "text": "Assignation a Module._resolveFilename, _compile ou _extensions — detournement des mecanismes internes du systeme de modules Node.js. Tous les require() subsequents peuvent etre interceptes."
+              },
+              "helpUri": "https://nodejs.org/api/modules.html",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1574.006"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-076",
+              "name": "JSON Reviver Prototype Pollution",
+              "shortDescription": {
+                "text": "JSON.parse avec fonction reviver accedant a __proto__ ou prototype — pollution de prototype via donnees JSON non fiables."
+              },
+              "fullDescription": {
+                "text": "JSON.parse avec fonction reviver accedant a __proto__ ou prototype — pollution de prototype via donnees JSON non fiables."
+              },
+              "helpUri": "https://portswigger.net/web-security/prototype-pollution",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "high",
+                "mitre": "T1059.007"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-077",
+              "name": "VM Dynamic Code Execution",
+              "shortDescription": {
+                "text": "vm.runInContext/runInNewContext/compileFunction avec code construit dynamiquement — evasion du sandbox via code genere au runtime."
+              },
+              "fullDescription": {
+                "text": "vm.runInContext/runInNewContext/compileFunction avec code construit dynamiquement — evasion du sandbox via code genere au runtime."
+              },
+              "helpUri": "https://nodejs.org/api/vm.html",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1059.007"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-078",
+              "name": "Callback Remote Code Execution",
+              "shortDescription": {
+                "text": "exec/spawn dans un callback .on('message') ou .on('data') avec child_process — execution de commandes a distance depuis un flux reseau."
+              },
+              "fullDescription": {
+                "text": "exec/spawn dans un callback .on('message') ou .on('data') avec child_process — execution de commandes a distance depuis un flux reseau."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1059/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1059"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-079",
+              "name": "Steganographic Binary Execution",
+              "shortDescription": {
+                "text": "Lecture de fichier binaire/image (PNG, JPG) + execution dynamique (eval/Function) — extraction et execution de payload steganographique."
+              },
+              "fullDescription": {
+                "text": "Lecture de fichier binaire/image (PNG, JPG) + execution dynamique (eval/Function) — extraction et execution de payload steganographique."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1027.003/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1027.003"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-080",
+              "name": "AsyncLocalStorage Context Execution",
+              "shortDescription": {
+                "text": "AsyncLocalStorage + execution dynamique — code malveillant cache dans un contexte asynchrone, echappe a l'analyse de pile d'appels synchrone."
+              },
+              "fullDescription": {
+                "text": "AsyncLocalStorage + execution dynamique — code malveillant cache dans un contexte asynchrone, echappe a l'analyse de pile d'appels synchrone."
+              },
+              "helpUri": "https://nodejs.org/api/async_context.html",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "medium",
+                "mitre": "T1059.007"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-081",
+              "name": "Prototype Chain Constructor Access",
+              "shortDescription": {
+                "text": "Object.getPrototypeOf(variable).constructor extrait dans une variable — traversee de la chaine de prototypes pour atteindre le constructeur Function et executer du code arbitraire."
+              },
+              "fullDescription": {
+                "text": "Object.getPrototypeOf(variable).constructor extrait dans une variable — traversee de la chaine de prototypes pour atteindre le constructeur Function et executer du code arbitraire."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1059.007/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1059.007"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-082",
+              "name": "CI Environment Fingerprinting",
+              "shortDescription": {
+                "text": "References a 3+ variables d'environnement de fournisseurs CI (GITHUB_ACTIONS, GITLAB_CI, etc.) — sondage d'environnement CI pour activation conditionnelle de payload."
+              },
+              "fullDescription": {
+                "text": "References a 3+ variables d'environnement de fournisseurs CI (GITHUB_ACTIONS, GITLAB_CI, etc.) — sondage d'environnement CI pour activation conditionnelle de payload."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1082/",
+              "properties": {
+                "severity": "HIGH",
+                "confidence": "medium",
+                "mitre": "T1082"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-083",
+              "name": "Proxy GlobalThis Interception",
+              "shortDescription": {
+                "text": "new Proxy(globalThis/global/window/self) — intercepts all global scope access, enabling transparent hooking of eval/Function/require."
+              },
+              "fullDescription": {
+                "text": "new Proxy(globalThis/global/window/self) — intercepts all global scope access, enabling transparent hooking of eval/Function/require."
+              },
+              "helpUri": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Proxy",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1574"
+              }
+            },
+            {
+              "id": "MUADDIB-AST-084",
+              "name": "Reflect.apply Prototype Method Code Execution",
+              "shortDescription": {
+                "text": "Reflect.apply(Function.prototype.bind/call/apply, Function, [...]) — indirect code execution via Reflect with prototype method as target."
+              },
+              "fullDescription": {
+                "text": "Reflect.apply(Function.prototype.bind/call/apply, Function, [...]) — indirect code execution via Reflect with prototype method as target."
+              },
+              "helpUri": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Reflect/apply",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1059"
+              }
+            },
+            {
+              "id": "MUADDIB-PKG-017",
+              "name": "Phantom Lifecycle Script",
+              "shortDescription": {
+                "text": "Script lifecycle (preinstall/install) reference un fichier qui n'existe pas dans le package — script fantome, le payload peut etre injecte au moment de la publication."
+              },
+              "fullDescription": {
+                "text": "Script lifecycle (preinstall/install) reference un fichier qui n'existe pas dans le package — script fantome, le payload peut etre injecte au moment de la publication."
+              },
+              "helpUri": "https://attack.mitre.org/techniques/T1195.002/",
+              "properties": {
+                "severity": "CRITICAL",
+                "confidence": "high",
+                "mitre": "T1195.002"
+              }
+            }
+          ]
+        }
+      },
+      "properties": {},
+      "results": [
+        {
+          "ruleId": "MUADDIB-AST-006",
+          "level": "note",
+          "message": {
+            "text": "Dynamic require() with member expression argument (object property obfuscation)."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "scripts/benchmark.js",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "confidence": "high",
+            "mitre": "T1027"
+          }
+        },
+        {
+          "ruleId": "MUADDIB-AST-041",
+          "level": "note",
+          "message": {
+            "text": "Credential regex patterns (token/password/secret/Bearer) + network call in same file — stream data credential harvesting."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "scripts/sample-npm-random.js",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "confidence": "high",
+            "mitre": "T1552"
+          }
+        },
+        {
+          "ruleId": "MUADDIB-AST-041",
+          "level": "note",
+          "message": {
+            "text": "Credential regex patterns (token/password/secret/Bearer) + network call in same file — stream data credential harvesting."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/commands/evaluate.js",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "confidence": "high",
+            "mitre": "T1552"
+          }
+        },
+        {
+          "ruleId": "MUADDIB-AST-028",
+          "level": "error",
+          "message": {
+            "text": "Git hook injection: writeFileSync() writes to .git/hooks/. Persistence technique."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/commands/hooks-init.js",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "confidence": "high",
+            "mitre": "T1546.004"
+          }
+        },
+        {
+          "ruleId": "MUADDIB-AST-041",
+          "level": "note",
+          "message": {
+            "text": "Credential regex patterns (token/password/secret/Bearer) + network call in same file — stream data credential harvesting."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/intent-graph.js",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "confidence": "high",
+            "mitre": "T1552"
+          }
+        },
+        {
+          "ruleId": "MUADDIB-AST-002",
+          "level": "error",
+          "message": {
+            "text": "Access to sensitive variable process.env.ANTHROPIC_API_KEY."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/ml/llm-detective.js",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "confidence": "high",
+            "mitre": "T1552.001"
+          }
+        },
+        {
+          "ruleId": "MUADDIB-AST-041",
+          "level": "note",
+          "message": {
+            "text": "Credential regex patterns (token/password/secret/Bearer) + network call in same file — stream data credential harvesting."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/ml/llm-detective.js",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "confidence": "high",
+            "mitre": "T1552"
+          }
+        },
+        {
+          "ruleId": "MUADDIB-AST-001",
+          "level": "note",
+          "message": {
+            "text": "Reference to \".npmrc\" detected."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/ml/llm-detective.js",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "confidence": "medium",
+            "mitre": "T1552.001"
+          }
+        },
+        {
+          "ruleId": "MUADDIB-AST-001",
+          "level": "note",
+          "message": {
+            "text": "Reference to \".ssh\" detected."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/ml/llm-detective.js",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "confidence": "medium",
+            "mitre": "T1552.001"
+          }
+        },
+        {
+          "ruleId": "MUADDIB-AST-001",
+          "level": "note",
+          "message": {
+            "text": "Reference to \"/etc/passwd\" detected."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/ml/llm-detective.js",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "confidence": "medium",
+            "mitre": "T1552.001"
+          }
+        },
+        {
+          "ruleId": "MUADDIB-AST-002",
+          "level": "error",
+          "message": {
+            "text": "Access to sensitive variable process.env.ANTHROPIC_API_KEY."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/monitor/classify.js",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "confidence": "high",
+            "mitre": "T1552.001"
+          }
+        },
+        {
+          "ruleId": "MUADDIB-AST-041",
+          "level": "note",
+          "message": {
+            "text": "Credential regex patterns (token/password/secret/Bearer) + network call in same file — stream data credential harvesting."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/monitor/classify.js",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "confidence": "high",
+            "mitre": "T1552"
+          }
+        },
+        {
+          "ruleId": "MUADDIB-AST-002",
+          "level": "error",
+          "message": {
+            "text": "Access to sensitive variable process.env.ANTHROPIC_API_KEY."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/monitor/daemon.js",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "confidence": "high",
+            "mitre": "T1552.001"
+          }
+        },
+        {
+          "ruleId": "MUADDIB-AST-041",
+          "level": "note",
+          "message": {
+            "text": "Credential regex patterns (token/password/secret/Bearer) + network call in same file — stream data credential harvesting."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/monitor/queue.js",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "confidence": "high",
+            "mitre": "T1552"
+          }
+        },
+        {
+          "ruleId": "MUADDIB-AST-041",
+          "level": "note",
+          "message": {
+            "text": "Credential regex patterns (token/password/secret/Bearer) + network call in same file — stream data credential harvesting."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/monitor/temporal.js",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "confidence": "high",
+            "mitre": "T1552"
+          }
+        },
+        {
+          "ruleId": "MUADDIB-AST-001",
+          "level": "note",
+          "message": {
+            "text": "Reference to \".npmrc\" detected."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/rules/index.js",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "confidence": "medium",
+            "mitre": "T1552.001"
+          }
+        },
+        {
+          "ruleId": "MUADDIB-AST-001",
+          "level": "note",
+          "message": {
+            "text": "Reference to \".ssh\" detected."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/rules/index.js",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "confidence": "medium",
+            "mitre": "T1552.001"
+          }
+        },
+        {
+          "ruleId": "MUADDIB-AST-001",
+          "level": "note",
+          "message": {
+            "text": "Reference to \"Shai-Hulud\" detected."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/rules/index.js",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "confidence": "medium",
+            "mitre": "T1552.001"
+          }
+        },
+        {
+          "ruleId": "MUADDIB-AST-032",
+          "level": "error",
+          "message": {
+            "text": "Suspicious C2/exfiltration domain \"oastify.com\" found in string literal."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/rules/index.js",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "confidence": "high",
+            "mitre": "T1071.001"
+          }
+        },
+        {
+          "ruleId": "MUADDIB-AST-032",
+          "level": "warning",
+          "message": {
+            "text": "Suspicious tunnel/proxy domain \"ngrok.io\" found in string literal."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/rules/index.js",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "confidence": "high",
+            "mitre": "T1071.001"
+          }
+        },
+        {
+          "ruleId": "MUADDIB-AST-035",
+          "level": "error",
+          "message": {
+            "text": "IDE persistence: writes tasks.json with auto-execution trigger (runOn/folderOpen). VS Code task persistence technique."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/rules/index.js",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "confidence": "high",
+            "mitre": "T1546"
+          }
+        },
+        {
+          "ruleId": "MUADDIB-AST-041",
+          "level": "note",
+          "message": {
+            "text": "Credential regex patterns (token/password/secret/Bearer) + network call in same file — stream data credential harvesting."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/rules/index.js",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "confidence": "high",
+            "mitre": "T1552"
+          }
+        },
+        {
+          "ruleId": "MUADDIB-AST-001",
+          "level": "note",
+          "message": {
+            "text": "Reference to \".npmrc\" detected."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/sandbox/index.js",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "confidence": "medium",
+            "mitre": "T1552.001"
+          }
+        },
+        {
+          "ruleId": "MUADDIB-AST-041",
+          "level": "note",
+          "message": {
+            "text": "Credential regex patterns (token/password/secret/Bearer) + network call in same file — stream data credential harvesting."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/scoring.js",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "confidence": "high",
+            "mitre": "T1552"
+          }
+        },
+        {
+          "ruleId": "MUADDIB-AST-074",
+          "level": "warning",
+          "message": {
+            "text": "4 chained .replace() calls detected — potential string mutation obfuscation (could not fully resolve)."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/shared/download.js",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "confidence": "high",
+            "mitre": "T1027"
+          }
+        },
+        {
+          "ruleId": "MUADDIB-AST-074",
+          "level": "warning",
+          "message": {
+            "text": "5 chained .replace() calls detected — potential string mutation obfuscation (could not fully resolve)."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/shared/download.js",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "confidence": "high",
+            "mitre": "T1027"
+          }
+        },
+        {
+          "ruleId": "MUADDIB-AST-074",
+          "level": "warning",
+          "message": {
+            "text": "4 chained .replace() calls detected — potential string mutation obfuscation (could not fully resolve)."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/utils.js",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "confidence": "high",
+            "mitre": "T1027"
+          }
+        },
+        {
+          "ruleId": "MUADDIB-AST-074",
+          "level": "warning",
+          "message": {
+            "text": "5 chained .replace() calls detected — potential string mutation obfuscation (could not fully resolve)."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/utils.js",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "confidence": "high",
+            "mitre": "T1027"
+          }
+        },
+        {
+          "ruleId": "MUADDIB-FLOW-001",
+          "level": "error",
+          "message": {
+            "text": "Suspicious flow: command output (child_process.spawnSync, child_process.spawnSync) + network send (get, get)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/commands/safe-install.js",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "confidence": "high",
+            "mitre": "T1041"
+          }
+        },
+        {
+          "ruleId": "MUADDIB-FLOW-001",
+          "level": "error",
+          "message": {
+            "text": "Suspicious flow: credentials read (ANTHROPIC_API_KEY, ANTHROPIC_API_KEY) + network send (fetch)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/ml/llm-detective.js",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "confidence": "high",
+            "mitre": "T1041"
+          }
+        }
+      ]
+    }
+  ]
+}

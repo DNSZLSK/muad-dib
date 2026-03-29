@@ -35,6 +35,7 @@ async function output(result, options, processed) {
 
   // Calculate exit code based on fail level
   const failLevel = options.failLevel || 'high';
+  if (failLevel === 'none') return 0;
   const severityLevels = {
     critical: ['CRITICAL'],
     high: ['CRITICAL', 'HIGH'],
