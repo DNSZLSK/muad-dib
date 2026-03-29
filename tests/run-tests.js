@@ -37,6 +37,7 @@ const { runPreloadTests } = require('./unit/preload.test');
 const { runMLFeatureExtractorTests } = require('./unit/ml-feature-extractor.test');
 const { runMLClassifierTests } = require('./unit/ml-classifier.test');
 const { runLlmDetectiveTests } = require('./unit/llm-detective.test');
+const { runTarballArchiveTests } = require('./unit/tarball-archive.test');
 const { runSandboxPreloadTests } = require('./integration/sandbox-preload.test');
 
 // Integration tests (fast subset — CLI, monitor, diff)
@@ -184,6 +185,9 @@ async function timed(name, fn) {
   // ML classifier tests (v2.10.0)
   await timed('ml-classifier', runMLClassifierTests);
   await timed('llm-detective', runLlmDetectiveTests);
+
+  // Tarball archive tests
+  await timed('tarball-archive', runTarballArchiveTests);
 
   // ML pipeline integration tests (v2.10.0)
   await timed('ml-pipeline', runMLPipelineTests);

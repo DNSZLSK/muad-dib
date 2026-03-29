@@ -99,6 +99,9 @@ const {
 // From ./ingestion.js (will be created — currently in monitor.js)
 const { getNpmLatestTarball, getPyPITarballUrl, getWeeklyDownloads } = require('./ingestion.js');
 
+// From ./tarball-archive.js
+const { archiveSuspectTarball } = require('./tarball-archive.js');
+
 // --- Constants ---
 
 const SCAN_CONCURRENCY = Math.max(1, parseInt(process.env.MUADDIB_SCAN_CONCURRENCY, 10) || 5);
@@ -540,6 +543,16 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
         }
 
         stats.suspect++;
+
+        // Fire-and-forget tarball archiving — never blocks the pipeline
+        archiveSuspectTarball(name, version, tarballUrl, {
+          score: riskScore,
+          priority: tierLabel,
+          rulesTriggered: (result.threats || []).map(t => t.ruleId || t.type).filter(Boolean),
+          llmVerdict: null // LLM runs after this point; updated by webhook if needed
+        }).catch(err => {
+          console.warn(`[Archive] Failed for ${name}@${version}: ${err.message}`);
+        });
 
         // Sandbox decision based on tier
         // T1a: mandatory sandbox (HC malice types, TIER1_TYPES non-LOW, lifecycle + intent compound)

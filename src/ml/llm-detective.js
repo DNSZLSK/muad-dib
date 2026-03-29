@@ -240,6 +240,20 @@ Step 5 — COHERENCE: Does the complexity match the purpose?
 - Obfuscated code in a 10-line utility? → SUSPICIOUS
 - Minified dist/ in a large framework? → NORMAL
 
+Step 6 — FALSE POSITIVE CHECKS: Before declaring "malicious", verify the finding isn't one of these known benign patterns:
+
+6a. PHANTOM LIFECYCLE SCRIPTS: package.json declares preinstall/postinstall pointing to a script file, BUT the "files" field in package.json EXCLUDES that directory from the published tarball. The script does NOT exist in the package. npm silently ignores missing lifecycle scripts. → BENIGN (packaging oversight, not a threat).
+
+6b. ANONYMOUS INSTALL TELEMETRY: postinstall sends a single HTTP POST with ONLY: package version, process.platform, process.arch, process.version (Node), timestamp. NO process.env access, NO os.hostname(), NO os.userInfo(), NO file system reads, NO PII. This is standard practice (Next.js, Turborepo, Astro do the same). → BENIGN.
+
+6c. BINARY WRAPPER FROM GITHUB RELEASES: postinstall downloads a platform-specific binary from GitHub Releases (github.com/OWNER/REPO/releases/download/TAG/ASSET), verifies SHA256 checksum, and installs it. This is standard for native tool distribution (esbuild, turbo, biome, swc). → BENIGN if: (a) URL is GitHub Releases, (b) checksum is verified, (c) no fallback to a suspicious third-party domain.
+
+6d. APPLICATION CODE WITH HTTP CLIENTS: Source code contains fetch(), HttpClient, http.get() etc. but in application context (Angular services, React components, Express handlers). URLs are configurable templates (e.g. \`\${this.apiEndpoint}/...\`, \`\${process.env.NEXT_PUBLIC_API_URL}/...\`), not hardcoded suspicious domains. No lifecycle scripts performing network calls. → BENIGN — application code, not exfiltration.
+
+6e. CLI TOOLS USING EXEC/SPAWN FOR LOCAL OPERATIONS: Code uses child_process.execSync() or spawn() for legitimate local operations: git commands, npm/npx invocations, platform tools (screencapture, xdotool), CLI binary discovery. No encoded payloads, no eval(), no Buffer.from(base64) for code execution. → BENIGN — verify WHAT is being executed, not just the presence of execSync.
+
+6f. NPM PLACEHOLDER DEPENDENCIES: Package depends on "http@0.0.1-security" or similar npm placeholder packages. These are official npm placeholder modules (empty packages reserving names to prevent typosquatting). They are NOT suspicious HTTP modules. → BENIGN — ignore these dependencies entirely.
+
 ## GOLDEN RULE
 
 If sensitive data (env vars, credentials, keys) is only READ for self-configuration and never SENT to an external third-party, the package is BENIGN regardless of what the scanner says.
@@ -262,6 +276,22 @@ Package "event-stream" (compromised via flatmap-stream dependency). Obfuscated c
 
 EXAMPLE 4 — FALSE POSITIVE:
 A web framework reads process.env.DATABASE_URL, process.env.API_KEY for configuration. It uses fetch() to call its own documented API endpoint. It uses dynamic require() to load user-configured plugins. Scanner flags env_access, dynamic_require, network_require — but all these are standard framework patterns. No data leaves the application boundary.
+→ Verdict: BENIGN (confidence 0.95)
+
+EXAMPLE 5 — FALSE POSITIVE (phantom lifecycle script):
+Package "instructify@1.0.0" declares "postinstall": "node ./scripts/postinstall.js". But its "files" field is ["dist", ".cursor", "docs/README.md", "README.md", "LICENSE", "CHANGELOG.md", "CONTRIBUTING.md"]. The scripts/ directory does NOT exist in the published tarball because the "files" field excludes it. The postinstall script cannot execute — it is a packaging oversight. The GitHub repository shows the script only prints a welcome message.
+→ Verdict: BENIGN (confidence 0.95)
+
+EXAMPLE 6 — FALSE POSITIVE (anonymous telemetry):
+Package "delimit-cli@3.14.46" has a postinstall that prints CLI setup instructions, then sends anonymous telemetry: POST to delimit.ai/api/telemetry with body {event:'install', version, node:process.version, platform:process.platform, arch:process.arch, ts:ISO}. Silent fail on error, 3s timeout. No PII, no process.env access beyond process.version/platform/arch, no os.hostname(), no file reads. This is standard anonymous install telemetry identical to what Next.js, Turborepo, and Astro do.
+→ Verdict: BENIGN (confidence 0.92)
+
+EXAMPLE 7 — FALSE POSITIVE (binary wrapper with checksum):
+Package "plugin-kit-ai@1.0.1" has a postinstall that downloads a platform-specific binary from GitHub Releases (github.com/777genius/plugin-kit-ai/releases/download/vX.Y.Z/ASSET), verifies SHA256 checksum from checksums.txt, and extracts the binary to vendor/. No data exfiltration, no env access beyond optional GITHUB_TOKEN for rate limits. This is the standard binary distribution pattern used by esbuild, turbo, and biome.
+→ Verdict: BENIGN (confidence 0.95)
+
+EXAMPLE 8 — FALSE POSITIVE (application code with HTTP clients):
+Package "@craft-ng/core@0.1.2" is an Angular state management library. No lifecycle scripts (no postinstall/preinstall). Source contains fetch() and http references but ONLY in JSDoc examples ("const response = await fetch(\`/api/users/\${params}\`)") and Angular service patterns (this.httpClient.get(url)). These are application code patterns, not active network calls during install. No child_process, no eval, no Buffer manipulation.
 → Verdict: BENIGN (confidence 0.95)
 
 ## KEY QUESTIONS TO ANSWER
