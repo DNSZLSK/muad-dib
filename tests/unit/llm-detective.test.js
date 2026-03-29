@@ -146,10 +146,17 @@ async function runLlmDetectiveTests() {
     assert(r.verdict === 'malicious', 'Should extract embedded JSON');
   });
 
+  test('LLM: parseResponse handles investigation_steps', () => {
+    const r = parseResponse('{"verdict":"malicious","confidence":0.9,"investigation_steps":["Step 1: read pkg","Step 2: found exfil"],"reasoning":"bad","iocs_found":[],"attack_type":null,"recommendation":"block"}');
+    assert(r.investigation_steps.length === 2, 'Should parse investigation_steps');
+    assertIncludes(r.investigation_steps[0], 'Step 1', 'Should preserve step content');
+  });
+
   test('LLM: parseResponse returns uncertain on garbage', () => {
     const r = parseResponse('this is not json');
     assert(r.verdict === 'uncertain', 'Should default to uncertain');
     assert(r.confidence === 0, 'Should have 0 confidence');
+    assert(Array.isArray(r.investigation_steps), 'Fallback should have investigation_steps array');
   });
 
   test('LLM: parseResponse returns uncertain on null', () => {
@@ -225,7 +232,7 @@ async function runLlmDetectiveTests() {
   test('LLM: buildPrompt contains package name and version', () => {
     const ctx = { files: [{ path: 'index.js', content: 'var x = 1;' }], truncated: false, totalBytes: 10 };
     const { system, messages } = buildPrompt('evil-pkg', '1.0.0', 'npm', ctx, [], null);
-    assertIncludes(system, 'supply-chain', 'System should mention supply-chain');
+    assertIncludes(system, 'security analyst', 'System should describe analyst role');
     assertIncludes(messages[0].content, 'evil-pkg', 'Should contain package name');
     assertIncludes(messages[0].content, '1.0.0', 'Should contain version');
   });
@@ -244,6 +251,13 @@ async function runLlmDetectiveTests() {
     const { messages } = buildPrompt('pkg', '1.0.0', 'npm', ctx, [], meta);
     assertIncludes(messages[0].content, 'Age: 2 days', 'Should contain age');
     assertIncludes(messages[0].content, 'Weekly downloads: 0', 'Should contain downloads');
+  });
+
+  test('LLM: buildPrompt frames scanner findings as signals', () => {
+    const ctx = { files: [], truncated: false, totalBytes: 0 };
+    const threats = [{ type: 'env_access', severity: 'HIGH', file: 'a.js', message: 'test' }];
+    const { messages } = buildPrompt('pkg', '1.0.0', 'npm', ctx, threats, null);
+    assertIncludes(messages[0].content, 'SIGNALS to investigate', 'Should frame findings as signals, not confirmed threats');
   });
 
   test('LLM: buildPrompt never contains sandbox data', () => {
