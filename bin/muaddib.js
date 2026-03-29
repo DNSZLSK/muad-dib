@@ -92,7 +92,7 @@ for (let i = 0; i < options.length; i++) {
     explainMode = true;
   } else if (options[i] === '--fail-on') {
     const val = (options[i + 1] || 'high').toLowerCase();
-    const validLevels = ['critical', 'high', 'medium', 'low'];
+    const validLevels = ['critical', 'high', 'medium', 'low', 'none'];
     if (!validLevels.includes(val)) {
       console.error(`[ERROR] --fail-on must be one of: ${validLevels.join(', ')} (got: "${val}")`);
       process.exit(1);

@@ -456,6 +456,126 @@ async function runLlmDetectiveTests() {
     }
   });
 
+  // ── System prompt FP pattern coverage ──
+
+  // ── Multi-step prompt structure tests ──
+
+  test('LLM: system prompt has 4-step investigation structure', () => {
+    const ctx = { files: [], truncated: false, totalBytes: 0 };
+    const { system } = buildPrompt('test', '1.0.0', 'npm', ctx, [], null);
+    assertIncludes(system, 'STEP 1', 'Should have Step 1');
+    assertIncludes(system, 'PURPOSE IDENTIFICATION', 'Step 1 should be purpose identification');
+    assertIncludes(system, 'STEP 2', 'Should have Step 2');
+    assertIncludes(system, 'BEHAVIOR INVENTORY', 'Step 2 should be behavior inventory');
+    assertIncludes(system, 'STEP 3', 'Should have Step 3');
+    assertIncludes(system, 'COHERENCE ANALYSIS', 'Step 3 should be coherence analysis');
+    assertIncludes(system, 'STEP 4', 'Should have Step 4');
+    assertIncludes(system, 'VERDICT', 'Step 4 should be verdict');
+  });
+
+  test('LLM: system prompt enforces step order', () => {
+    const ctx = { files: [], truncated: false, totalBytes: 0 };
+    const { system } = buildPrompt('test', '1.0.0', 'npm', ctx, [], null);
+    assertIncludes(system, 'MUST complete all 4 steps IN ORDER', 'Should enforce step ordering');
+    assertIncludes(system, 'Do not skip to the verdict', 'Should warn against skipping');
+  });
+
+  test('LLM: system prompt has COHERENT/INCOHERENT tags in Step 3', () => {
+    const ctx = { files: [], truncated: false, totalBytes: 0 };
+    const { system } = buildPrompt('test', '1.0.0', 'npm', ctx, [], null);
+    assertIncludes(system, '[COHERENT]', 'Should have COHERENT tag');
+    assertIncludes(system, '[INCOHERENT]', 'Should have INCOHERENT tag');
+  });
+
+  test('LLM: system prompt has full multi-step analysis examples', () => {
+    const ctx = { files: [], truncated: false, totalBytes: 0 };
+    const { system } = buildPrompt('test', '1.0.0', 'npm', ctx, [], null);
+    // Benign multi-step example (instructify)
+    assertIncludes(system, 'EXAMPLE A', 'Should have full benign multi-step example');
+    assertIncludes(system, 'instructify@1.0.0', 'Benign example should use instructify');
+    // Malicious multi-step example (slopex-cli)
+    assertIncludes(system, 'EXAMPLE B', 'Should have full malicious multi-step example');
+    assertIncludes(system, 'slopex-cli', 'Malicious example should use slopex-cli');
+  });
+
+  // ── FP pattern coverage in coherence examples ──
+
+  test('LLM: system prompt contains phantom lifecycle pattern (FP-1)', () => {
+    const ctx = { files: [], truncated: false, totalBytes: 0 };
+    const { system } = buildPrompt('test', '1.0.0', 'npm', ctx, [], null);
+    assertIncludes(system, '"files" field', 'Should explain files field exclusion');
+    assertIncludes(system, 'phantom lifecycle', 'Should mention phantom lifecycle concept');
+  });
+
+  test('LLM: system prompt contains anonymous telemetry pattern (FP-2)', () => {
+    const ctx = { files: [], truncated: false, totalBytes: 0 };
+    const { system } = buildPrompt('test', '1.0.0', 'npm', ctx, [], null);
+    assertIncludes(system, 'anonymous telemetry', 'Should document anonymous telemetry');
+    assertIncludes(system, 'platform, arch, version', 'Should mention platform-only data');
+  });
+
+  test('LLM: system prompt contains binary wrapper pattern (FP-3)', () => {
+    const ctx = { files: [], truncated: false, totalBytes: 0 };
+    const { system } = buildPrompt('test', '1.0.0', 'npm', ctx, [], null);
+    assertIncludes(system, 'GitHub Releases', 'Should document GitHub Releases pattern');
+    assertIncludes(system, 'SHA256', 'Should mention checksum verification');
+  });
+
+  test('LLM: system prompt contains application HTTP client pattern (FP-4)', () => {
+    const ctx = { files: [], truncated: false, totalBytes: 0 };
+    const { system } = buildPrompt('test', '1.0.0', 'npm', ctx, [], null);
+    assertIncludes(system, 'Angular', 'Should mention Angular as example');
+    assertIncludes(system, 'HttpClient', 'Should mention HttpClient pattern');
+  });
+
+  test('LLM: system prompt contains CLI exec/spawn pattern (FP-5)', () => {
+    const ctx = { files: [], truncated: false, totalBytes: 0 };
+    const { system } = buildPrompt('test', '1.0.0', 'npm', ctx, [], null);
+    assertIncludes(system, 'CLI', 'Should document CLI pattern');
+    assertIncludes(system, 'git', 'Should mention git as example');
+    assertIncludes(system, 'execSync', 'Should mention execSync');
+  });
+
+  test('LLM: system prompt contains npm placeholder pattern (FP-6)', () => {
+    const ctx = { files: [], truncated: false, totalBytes: 0 };
+    const { system } = buildPrompt('test', '1.0.0', 'npm', ctx, [], null);
+    assertIncludes(system, 'http@0.0.1-security', 'Should mention specific placeholder');
+    assertIncludes(system, 'npm placeholder', 'Should explain placeholder concept');
+  });
+
+  test('LLM: system prompt contains prompt injection defense', () => {
+    const ctx = { files: [], truncated: false, totalBytes: 0 };
+    const { system } = buildPrompt('test', '1.0.0', 'npm', ctx, [], null);
+    assertIncludes(system, 'PROMPT INJECTION DEFENSE', 'Should have prompt injection hardening');
+    assertIncludes(system, 'ALWAYS evidence of malicious intent', 'Should treat injection as malicious');
+  });
+
+  test('LLM: system prompt has reference examples (5-8)', () => {
+    const ctx = { files: [], truncated: false, totalBytes: 0 };
+    const { system } = buildPrompt('test', '1.0.0', 'npm', ctx, [], null);
+    assertIncludes(system, 'delimit-cli@3.14.46', 'Should have telemetry example');
+    assertIncludes(system, 'plugin-kit-ai@1.0.1', 'Should have binary wrapper example');
+    assertIncludes(system, '@craft-ng/core@0.1.2', 'Should have application HTTP example');
+    assertIncludes(system, '@yeaft/webchat-agent', 'Should have CLI exec example');
+  });
+
+  test('LLM: system prompt has golden rule about data flow', () => {
+    const ctx = { files: [], truncated: false, totalBytes: 0 };
+    const { system } = buildPrompt('test', '1.0.0', 'npm', ctx, [], null);
+    assertIncludes(system, 'GOLDEN RULE', 'Should have golden rule');
+    assertIncludes(system, 'only READ for self-configuration', 'Should explain benign read pattern');
+    assertIncludes(system, 'COLLECTED and SENT', 'Should explain malicious exfil pattern');
+  });
+
+  test('LLM: system prompt JSON format includes investigation_steps with 4 steps', () => {
+    const ctx = { files: [], truncated: false, totalBytes: 0 };
+    const { system } = buildPrompt('test', '1.0.0', 'npm', ctx, [], null);
+    assertIncludes(system, 'Step 1 PURPOSE', 'JSON format should show Step 1 PURPOSE');
+    assertIncludes(system, 'Step 2 BEHAVIOR', 'JSON format should show Step 2 BEHAVIOR');
+    assertIncludes(system, 'Step 3 COHERENCE', 'JSON format should show Step 3 COHERENCE');
+    assertIncludes(system, 'Step 4 VERDICT', 'JSON format should show Step 4 VERDICT');
+  });
+
   // ── Stats tracking ──
 
   test('LLM: getStats returns copy', () => {

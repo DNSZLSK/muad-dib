@@ -60,6 +60,7 @@ const TOP_THREAT_TYPES = [
   // --- IoC / supply chain ---
   'known_malicious_package',
   'known_malicious_hash',
+  'dependency_ioc_match',
   // --- GlassWorm (Unicode + Blockchain C2) ---
   'unicode_invisible_injection',
   'blockchain_c2_resolution',
@@ -135,7 +136,7 @@ function extractFeatures(result, meta) {
   features.has_eval = threats.some(t => t.type === 'dangerous_call_eval' || t.type === 'dangerous_call_function') ? 1 : 0;
   features.has_staged_payload = threats.some(t => t.type === 'staged_payload' || t.type === 'staged_binary_payload') ? 1 : 0;
   features.has_typosquat = threats.some(t => t.type === 'typosquat_detected' || t.type === 'pypi_typosquat_detected') ? 1 : 0;
-  features.has_ioc_match = threats.some(t => t.type === 'known_malicious_package' || t.type === 'known_malicious_hash' || t.type === 'pypi_malicious_package') ? 1 : 0;
+  features.has_ioc_match = threats.some(t => t.type === 'known_malicious_package' || t.type === 'known_malicious_hash' || t.type === 'pypi_malicious_package' || t.type === 'dependency_ioc_match') ? 1 : 0;
   features.has_intent_pair = threats.some(t => t.type === 'intent_credential_exfil' || t.type === 'intent_command_exfil') ? 1 : 0;
   features.has_sandbox_finding = threats.some(t => t.type && t.type.startsWith('sandbox_')) ? 1 : 0;
 
