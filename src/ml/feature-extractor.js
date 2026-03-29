@@ -13,7 +13,11 @@
 
 // Top threat types by frequency in production (covers ~95% of all findings).
 // Types not in this list are aggregated into `threat_type_other`.
+// v2.10.32: expanded from 31 to 47 types — code exec bypasses, IoC, GlassWorm,
+// obfuscation patterns, module graph sinks. New features will be 0 for pre-existing
+// JSONL records; SHAP feature selection handles sparsity gracefully.
 const TOP_THREAT_TYPES = [
+  // --- Original 31 types ---
   'suspicious_dataflow',
   'env_access',
   'sensitive_string',
@@ -44,7 +48,29 @@ const TOP_THREAT_TYPES = [
   'curl_exec',
   'reverse_shell',
   'binary_dropper',
-  'mcp_config_injection'
+  'mcp_config_injection',
+  // --- Code execution bypasses (v2.9.x–v2.10.x) ---
+  'vm_code_execution',
+  'vm_dynamic_code',
+  'dangerous_constructor',
+  'module_load_bypass',
+  'require_process_mainmodule',
+  'proxy_globalthis_intercept',
+  'reflect_bind_code_execution',
+  // --- IoC / supply chain ---
+  'known_malicious_package',
+  'known_malicious_hash',
+  // --- GlassWorm (Unicode + Blockchain C2) ---
+  'unicode_invisible_injection',
+  'blockchain_c2_resolution',
+  // --- Shell / exec patterns ---
+  'dangerous_exec',
+  'node_inline_exec',
+  // --- Obfuscation patterns ---
+  'js_obfuscation_pattern',
+  // --- Module graph / WASM ---
+  'suspicious_module_sink',
+  'wasm_host_sink'
 ];
 
 const TOP_THREAT_TYPES_SET = new Set(TOP_THREAT_TYPES);
@@ -78,7 +104,7 @@ function extractFeatures(result, meta) {
   const distinctTypes = new Set(threats.map(t => t.type));
   features.distinct_threat_types = distinctTypes.size;
 
-  // --- Per-type counts (top 31 types) ---
+  // --- Per-type counts (top 47 types) ---
   const typeCounts = Object.create(null);
   for (const t of threats) {
     typeCounts[t.type] = (typeCounts[t.type] || 0) + 1;
