@@ -33,6 +33,7 @@ const { runWebhookTests } = require('./report/webhook.test');
 
 // Sandbox tests
 const { runSandboxTests } = require('./sandbox/sandbox.test');
+const { runGvisorTests } = require('./sandbox/gvisor.test');
 const { runPreloadTests } = require('./unit/preload.test');
 const { runMLFeatureExtractorTests } = require('./unit/ml-feature-extractor.test');
 const { runMLClassifierTests } = require('./unit/ml-classifier.test');
@@ -108,6 +109,7 @@ async function timed(name, fn) {
   await timed('webhook', runWebhookTests);
   await timed('python', runPythonTests);
   await timed('sandbox', runSandboxTests);
+  await timed('gvisor', runGvisorTests);
   await timed('preload', runPreloadTests);
   await timed('sandbox-preload', runSandboxPreloadTests);
   await timed('entropy', runEntropyTests);

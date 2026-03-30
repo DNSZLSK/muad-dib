@@ -10,6 +10,46 @@ function generateBase32(length) {
   return Array.from(bytes).map(b => chars[b % 32]).join('');
 }
 
+// Minimum consecutive chars from an encoded variant to match in a DNS domain.
+// 8 chars avoids FP on short legitimate hex subdomains (e.g. commit SHAs, CDN hashes).
+const MIN_ENCODED_MATCH = 8;
+
+/**
+ * Generate hex/base64/base64url encoded variants of a token value.
+ * Attackers encode tokens before DNS exfiltration to evade raw string matching.
+ * @param {string} value - Raw token value
+ * @returns {Array<{encoding: string, encoded: string}>}
+ */
+function generateEncodedVariants(value) {
+  const buf = Buffer.from(value);
+  return [
+    { encoding: 'hex', encoded: buf.toString('hex') },
+    { encoding: 'base64', encoded: buf.toString('base64') },
+    { encoding: 'base64url', encoded: buf.toString('base64url') }
+  ];
+}
+
+/**
+ * Check if a DNS domain contains an encoded token variant.
+ * Strips dots to reassemble data chunked across DNS labels (RFC 1035: max 63 chars/label).
+ * @param {string} domain - Full DNS query domain
+ * @param {Array<{encoding: string, encoded: string}>} variants
+ * @returns {{encoding: string, match: string}|null}
+ */
+function findEncodedInDomain(domain, variants) {
+  const stripped = domain.replace(/\./g, '');
+  for (const { encoding, encoded } of variants) {
+    if (encoded.length < MIN_ENCODED_MATCH) continue;
+    for (let i = 0; i <= encoded.length - MIN_ENCODED_MATCH; i++) {
+      const chunk = encoded.substring(i, i + MIN_ENCODED_MATCH);
+      if (stripped.includes(chunk)) {
+        return { encoding, match: chunk };
+      }
+    }
+  }
+  return null;
+}
+
 /**
  * Canary token generators.
  * Each generator produces a format-valid token that matches the real service format.
@@ -173,11 +213,24 @@ function detectCanaryExfiltration(networkLogs, tokens) {
   for (const domain of (networkLogs.dns_queries || [])) {
     if (!domain) continue;
     for (const [tokenName, tokenValue] of tokenEntries) {
+      // Raw value match
       if (domain.includes(tokenValue)) {
         exfiltrations.push({
           token: tokenName,
           value: tokenValue,
           foundIn: `DNS query: ${domain}`,
+          severity: 'CRITICAL'
+        });
+        continue;
+      }
+      // Encoded variant match (hex, base64, base64url — catches DNS label chunking)
+      const variants = generateEncodedVariants(tokenValue);
+      const encodedMatch = findEncodedInDomain(domain, variants);
+      if (encodedMatch) {
+        exfiltrations.push({
+          token: tokenName,
+          value: tokenValue,
+          foundIn: `DNS query (${encodedMatch.encoding}-encoded): ${domain}`,
           severity: 'CRITICAL'
         });
       }

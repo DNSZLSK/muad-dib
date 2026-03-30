@@ -221,6 +221,56 @@ async function runCanaryTokensTests() {
   });
 
   // ============================================
+  // Encoded DNS exfiltration (Phase 2)
+  // ============================================
+
+  test('CANARY: detectCanaryExfiltration finds hex-encoded token in DNS subdomain', () => {
+    const { tokens } = generateCanaryTokens();
+    const hexEncoded = Buffer.from(tokens.NPM_TOKEN).toString('hex');
+    // Simulate chunked DNS exfil: hex split across 63-char labels
+    const label1 = hexEncoded.substring(0, 63);
+    const label2 = hexEncoded.substring(63);
+    const domain = `${label1}.${label2}.evil.com`;
+    const networkLogs = { dns_queries: [domain] };
+    const result = detectCanaryExfiltration(networkLogs, tokens);
+    assert(result.detected === true, 'Should detect hex-encoded DNS exfiltration');
+    const found = result.exfiltrations.find(e => e.token === 'NPM_TOKEN');
+    assert(found, 'Should find NPM_TOKEN');
+    assertIncludes(found.foundIn, 'hex-encoded', 'foundIn should mention hex-encoded');
+  });
+
+  test('CANARY: detectCanaryExfiltration finds base64-encoded token in DNS subdomain', () => {
+    const { tokens } = generateCanaryTokens();
+    const b64Encoded = Buffer.from(tokens.GITHUB_TOKEN).toString('base64');
+    const domain = `${b64Encoded.substring(0, 63)}.evil.com`;
+    const networkLogs = { dns_queries: [domain] };
+    const result = detectCanaryExfiltration(networkLogs, tokens);
+    assert(result.detected === true, 'Should detect base64-encoded DNS exfiltration');
+    const found = result.exfiltrations.find(e => e.token === 'GITHUB_TOKEN');
+    assert(found, 'Should find GITHUB_TOKEN');
+    assertIncludes(found.foundIn, 'base64-encoded', 'foundIn should mention base64-encoded');
+  });
+
+  test('CANARY: detectCanaryExfiltration ignores short hex < 8 chars in DNS', () => {
+    const { tokens } = generateCanaryTokens();
+    // 6 hex chars from the token — below MIN_ENCODED_MATCH threshold
+    const shortHex = Buffer.from(tokens.NPM_TOKEN).toString('hex').substring(0, 6);
+    const domain = `${shortHex}.evil.com`;
+    const networkLogs = { dns_queries: [domain] };
+    const result = detectCanaryExfiltration(networkLogs, tokens);
+    assert(result.detected === false, 'Should NOT detect short hex substring as exfiltration');
+  });
+
+  test('CANARY: detectCanaryExfiltration no FP on clean DNS with encoded check', () => {
+    const { tokens } = generateCanaryTokens();
+    const networkLogs = {
+      dns_queries: ['cdn.cloudflare.com', 'api.github.com', 'registry.npmjs.org', 'a1b2c3d4.amazonaws.com']
+    };
+    const result = detectCanaryExfiltration(networkLogs, tokens);
+    assert(result.detected === false, 'Should not detect exfiltration in clean DNS traffic');
+  });
+
+  // ============================================
   // detectCanaryInOutput()
   // ============================================
 

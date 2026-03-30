@@ -16,6 +16,7 @@ const {
 const { NPM_PACKAGE_REGEX } = require('../shared/constants.js');
 const { analyzePreloadLog } = require('./analyzer.js');
 const { classifyDomain } = require('./network-allowlist.js');
+const { parseGvisorLogs, cleanupGvisorLogs } = require('./gvisor-parser.js');
 
 const DOCKER_IMAGE = 'muaddib-sandbox';
 const CONTAINER_TIMEOUT = 120000; // 120 seconds
@@ -135,6 +136,17 @@ function imageExists() {
   }
 }
 
+// ── gVisor availability check ──
+
+function isGvisorAvailable() {
+  try {
+    const info = execSync('docker info', { encoding: 'utf8', stdio: 'pipe', timeout: 10000 });
+    return /\brunsc\b/.test(info);
+  } catch {
+    return false;
+  }
+}
+
 // ── Build image (with cache) ──
 
 async function buildSandboxImage() {
@@ -186,6 +198,7 @@ async function runSingleSandbox(packageName, options = {}) {
   const mode = strict ? 'strict' : 'permissive';
   const timeOffset = options.timeOffset || 0;
   const runTimeout = options.runTimeout || CONTAINER_TIMEOUT;
+  const gvisorMode = options.gvisor || false;
 
   return new Promise((resolve) => {
     let stdout = '';
@@ -208,6 +221,12 @@ async function runSingleSandbox(packageName, options = {}) {
       '--pids-limit=100',
       '--cap-drop=ALL'
     ];
+
+    // gVisor runtime: use runsc instead of default runc
+    if (gvisorMode) {
+      dockerArgs.push('--runtime=runsc');
+      dockerArgs.push('-e', 'MUADDIB_GVISOR=1');
+    }
 
     // Inject canary tokens as environment variables
     if (canaryTokens) {
@@ -239,11 +258,14 @@ async function runSingleSandbox(packageName, options = {}) {
     }
 
     // Both modes need NET_RAW for tcpdump (runs as root in entrypoint).
+    // gVisor mode: no tcpdump needed — gVisor captures via --strace/--log-packets.
     // Strict mode also needs NET_ADMIN for iptables network blocking.
     // SYS_PTRACE is not needed: strace traces its own child (npm install via su).
     // SETUID + SETGID required for su (privilege drop to sandboxuser).
     // CHOWN required for chown in sandbox-runner.sh.
-    dockerArgs.push('--cap-add=NET_RAW');
+    if (!gvisorMode) {
+      dockerArgs.push('--cap-add=NET_RAW');
+    }
     dockerArgs.push('--cap-add=SETUID');
     dockerArgs.push('--cap-add=SETGID');
     dockerArgs.push('--cap-add=CHOWN');
@@ -270,6 +292,7 @@ async function runSingleSandbox(packageName, options = {}) {
     dockerArgs.push(mode);
 
     const proc = spawn('docker', dockerArgs);
+    let gvisorContainerId = null;
 
     // Timeout: kill container
     const timer = setTimeout(() => {
@@ -294,6 +317,16 @@ async function runSingleSandbox(packageName, options = {}) {
 
     proc.stderr.on('data', (data) => {
       stderr += data.toString();
+
+      // Capture container ID for gVisor log retrieval (once, while container is running)
+      if (gvisorMode && !gvisorContainerId) {
+        try {
+          gvisorContainerId = execFileSync('docker', ['inspect', '--format={{.Id}}', containerName], {
+            encoding: 'utf8', stdio: 'pipe', timeout: 5000
+          }).trim();
+        } catch { /* container not yet ready, will retry on next data event */ }
+      }
+
       // Forward sandbox progress logs (sanitize ANSI escape sequences)
       const text = data.toString().replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
       for (const line of text.split(/\r?\n/)) {
@@ -364,6 +397,43 @@ async function runSingleSandbox(packageName, options = {}) {
         console.log('[SANDBOX] Failed to parse container output:', e.message);
         resolve(cleanResult);
         return;
+      }
+
+      // In gVisor mode, merge kernel-level strace data from gVisor debug logs.
+      // sandbox-runner.sh skips strace/tcpdump in gVisor mode, so file access,
+      // connections, and process data come from gVisor's kernel-level tracing.
+      if (gvisorMode && gvisorContainerId) {
+        const gvisorLogDir = process.env.MUADDIB_GVISOR_LOG_DIR || '/tmp/runsc';
+        const gvisorData = parseGvisorLogs(gvisorContainerId, gvisorLogDir);
+
+        // Merge gVisor findings into report without duplicating
+        if (!report.sensitive_files) report.sensitive_files = { read: [], written: [] };
+        if (!report.network) report.network = {};
+        if (!report.processes) report.processes = { spawned: [] };
+
+        const existingReads = new Set(report.sensitive_files.read || []);
+        for (const f of gvisorData.sensitive_files.read) {
+          if (!existingReads.has(f)) report.sensitive_files.read.push(f);
+        }
+
+        const existingWrites = new Set(report.sensitive_files.written || []);
+        for (const f of gvisorData.sensitive_files.written) {
+          if (!existingWrites.has(f)) report.sensitive_files.written.push(f);
+        }
+
+        const existingConns = new Set((report.network.http_connections || []).map(c => `${c.host}:${c.port}`));
+        if (!report.network.http_connections) report.network.http_connections = [];
+        for (const c of gvisorData.network.http_connections) {
+          if (!existingConns.has(`${c.host}:${c.port}`)) report.network.http_connections.push(c);
+        }
+
+        const existingProcs = new Set((report.processes.spawned || []).map(p => p.command));
+        for (const p of gvisorData.processes.spawned) {
+          if (!existingProcs.has(p.command)) report.processes.spawned.push(p);
+        }
+
+        // Cleanup gVisor logs to prevent disk fill
+        cleanupGvisorLogs(gvisorContainerId, gvisorLogDir);
       }
 
       const { score, findings } = scoreFindings(report);
@@ -475,6 +545,17 @@ async function runSandbox(packageName, options = {}) {
     return cleanResult;
   }
 
+  // Detect sandbox runtime (gVisor or default Docker/runc)
+  let useGvisor = process.env.MUADDIB_SANDBOX_RUNTIME === 'gvisor';
+  if (useGvisor) {
+    if (isGvisorAvailable()) {
+      console.log('[SANDBOX] Runtime: gvisor (runsc)');
+    } else {
+      console.log('[SANDBOX] Runtime: gvisor requested but runsc not configured in Docker. Falling back to Docker standard.');
+      useGvisor = false;
+    }
+  }
+
   // Generate canary tokens for this sandbox session
   let canaryTokens = null;
   if (canaryEnabled) {
@@ -492,7 +573,8 @@ async function runSandbox(packageName, options = {}) {
   await acquireSandboxSlot();
 
   try {
-    console.log(`[SANDBOX] Analyzing "${displayName}" in isolated container (mode: ${mode}${canaryEnabled ? ', canary: on' : ''}${local ? ', local' : ''}, runs: ${TIME_OFFSETS.length}, slots: ${_sandboxSemaphore.active}/${SANDBOX_CONCURRENCY_MAX})...`);
+    const runtimeLabel = useGvisor ? 'gvisor' : 'docker';
+    console.log(`[SANDBOX] Analyzing "${displayName}" in isolated container (mode: ${mode}, runtime: ${runtimeLabel}${canaryEnabled ? ', canary: on' : ''}${local ? ', local' : ''}, runs: ${TIME_OFFSETS.length}, slots: ${_sandboxSemaphore.active}/${SANDBOX_CONCURRENCY_MAX})...`);
 
     const allRuns = [];
     let bestResult = cleanResult;
@@ -508,7 +590,8 @@ async function runSandbox(packageName, options = {}) {
         localAbsPath,
         displayName,
         timeOffset: offset,
-        runTimeout: SINGLE_RUN_TIMEOUT
+        runTimeout: SINGLE_RUN_TIMEOUT,
+        gvisor: useGvisor
       });
 
       allRuns.push({
@@ -894,4 +977,4 @@ function displayResults(result) {
   }
 }
 
-module.exports = { buildSandboxImage, runSandbox, runSingleSandbox, scoreFindings, generateNetworkReport, EXFIL_PATTERNS, SAFE_DOMAINS, getSeverity, displayResults, isDockerAvailable, imageExists, STATIC_CANARY_TOKENS, detectStaticCanaryExfiltration, analyzePreloadLog, TIME_OFFSETS, SAFE_SANDBOX_CMDS, SANDBOX_CONCURRENCY_MAX, acquireSandboxSlot, releaseSandboxSlot, resetSandboxLimiter, getSandboxSemaphore };
+module.exports = { buildSandboxImage, runSandbox, runSingleSandbox, scoreFindings, generateNetworkReport, EXFIL_PATTERNS, SAFE_DOMAINS, getSeverity, displayResults, isDockerAvailable, imageExists, isGvisorAvailable, STATIC_CANARY_TOKENS, detectStaticCanaryExfiltration, analyzePreloadLog, TIME_OFFSETS, SAFE_SANDBOX_CMDS, SANDBOX_CONCURRENCY_MAX, acquireSandboxSlot, releaseSandboxSlot, resetSandboxLimiter, getSandboxSemaphore };

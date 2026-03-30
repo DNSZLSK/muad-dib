@@ -100,16 +100,22 @@ echo "[SANDBOX] Snapshot filesystem before install..." >&2
 cp /opt/fs-baseline.txt /tmp/fs-before.txt
 
 # ── 2. tcpdump: separate captures for DNS, HTTP, TLS (requires root + NET_RAW) ──
-echo "[SANDBOX] Starting network capture..." >&2
-tcpdump -i any -nn 'port 53' -l > /tmp/dns.log 2>/dev/null &
-DNS_PID=$!
-tcpdump -i any -nn -A 'tcp port 80' -l > /tmp/http.log 2>/dev/null &
-HTTP_PID=$!
-tcpdump -i any -nn 'tcp port 443' -l > /tmp/tls.log 2>/dev/null &
-TLS_PID=$!
-tcpdump -i any -nn 'not port 53 and not port 80 and not port 443' -l > /tmp/other.log 2>/dev/null &
-OTHER_PID=$!
-sleep 1
+# gVisor mode: skip tcpdump — gVisor captures network at kernel level via --log-packets.
+# tcpdump requires AF_PACKET which gVisor does not fully support.
+if [ -z "$MUADDIB_GVISOR" ]; then
+  echo "[SANDBOX] Starting network capture..." >&2
+  tcpdump -i any -nn 'port 53' -l > /tmp/dns.log 2>/dev/null &
+  DNS_PID=$!
+  tcpdump -i any -nn -A 'tcp port 80' -l > /tmp/http.log 2>/dev/null &
+  HTTP_PID=$!
+  tcpdump -i any -nn 'tcp port 443' -l > /tmp/tls.log 2>/dev/null &
+  TLS_PID=$!
+  tcpdump -i any -nn 'not port 53 and not port 80 and not port 443' -l > /tmp/other.log 2>/dev/null &
+  OTHER_PID=$!
+  sleep 1
+else
+  echo "[SANDBOX] gVisor mode — network captured at kernel level (--log-packets)." >&2
+fi
 
 # ══════════════════════════════════════════════════════════════
 # PHASE 2: Unprivileged install (su sandboxuser)
@@ -181,8 +187,14 @@ echo "[SANDBOX] Installing $PACKAGE as sandboxuser..." >&2
 cd /sandbox/install
 # Ensure sandboxuser owns the install directory
 chown sandboxuser:sandboxuser /sandbox/install
-# Run npm install as sandboxuser via su, wrapped in strace for syscall tracing
-if [ "$MODE" = "strict" ]; then
+# Run npm install as sandboxuser via su, wrapped in strace for syscall tracing.
+# gVisor mode: no strace wrapper — gVisor traces all syscalls at the kernel level.
+if [ -n "$MUADDIB_GVISOR" ]; then
+  touch /tmp/strace.log
+  su sandboxuser -s /bin/sh -c "
+    npm install \"$PACKAGE\" --ignore-scripts=false --fetch-timeout=120000 > /tmp/install.log 2>&1
+  "
+elif [ "$MODE" = "strict" ]; then
   su sandboxuser -s /bin/sh -c "
     strace -f -e trace=network,process,open,openat,connect,execve,sendto,recvfrom \
       -o /tmp/strace.log \
@@ -212,14 +224,21 @@ else
   REQUIRE_PATH="/sandbox/install/node_modules/$PACKAGE"
 fi
 
-su sandboxuser -s /bin/sh -c "
-  strace -f -e trace=network,process,open,openat,connect,execve,sendto,recvfrom \
-    -o /tmp/strace-entrypoint.log \
+# gVisor mode: no strace wrapper — gVisor traces at kernel level.
+if [ -n "$MUADDIB_GVISOR" ]; then
+  su sandboxuser -s /bin/sh -c "
     timeout 10 node -e \"try { require('$REQUIRE_PATH') } catch(e) {}\" > /tmp/entrypoint.log 2>&1
-" || true
+  " || true
+else
+  su sandboxuser -s /bin/sh -c "
+    strace -f -e trace=network,process,open,openat,connect,execve,sendto,recvfrom \
+      -o /tmp/strace-entrypoint.log \
+      timeout 10 node -e \"try { require('$REQUIRE_PATH') } catch(e) {}\" > /tmp/entrypoint.log 2>&1
+  " || true
 
-# Merge entrypoint strace into main strace log for unified analysis
-cat /tmp/strace-entrypoint.log >> /tmp/strace.log 2>/dev/null
+  # Merge entrypoint strace into main strace log for unified analysis
+  cat /tmp/strace-entrypoint.log >> /tmp/strace.log 2>/dev/null
+fi
 
 # ══════════════════════════════════════════════════════════════
 # PHASE 3: Post-install analysis (back as root for full access)
@@ -229,9 +248,11 @@ cat /tmp/strace-entrypoint.log >> /tmp/strace.log 2>/dev/null
 echo "[SANDBOX] Snapshot filesystem after install..." >&2
 find / -type f 2>/dev/null | sort > /tmp/fs-after.txt
 
-# Stop tcpdump
-kill "$DNS_PID" "$HTTP_PID" "$TLS_PID" "$OTHER_PID" 2>/dev/null
-wait "$DNS_PID" "$HTTP_PID" "$TLS_PID" "$OTHER_PID" 2>/dev/null
+# Stop tcpdump (only if started — skipped in gVisor mode)
+if [ -z "$MUADDIB_GVISOR" ]; then
+  kill "$DNS_PID" "$HTTP_PID" "$TLS_PID" "$OTHER_PID" 2>/dev/null
+  wait "$DNS_PID" "$HTTP_PID" "$TLS_PID" "$OTHER_PID" 2>/dev/null
+fi
 
 END_MS=$(date +%s%3N 2>/dev/null || echo 0)
 DURATION_MS=$((END_MS - START_MS))
@@ -243,6 +264,16 @@ comm -13 /tmp/fs-before.txt /tmp/fs-after.txt | grep -v '^/sandbox/install/' | g
 comm -23 /tmp/fs-before.txt /tmp/fs-after.txt | grep -v '^/sandbox/install/' | grep -v '^/sandbox/local-pkg/' > /tmp/fs-deleted.txt
 
 # ── 6. Parse strace ──
+# gVisor mode: strace parsing happens on the host via gvisor-parser.js.
+# Create empty files so the JSON report generation below works with empty arrays.
+if [ -n "$MUADDIB_GVISOR" ]; then
+  echo "[SANDBOX] gVisor mode — strace parsed on host." >&2
+  touch /tmp/sensitive-read.txt /tmp/sensitive-written.txt \
+    /tmp/connections.txt /tmp/suspicious-cmds.txt \
+    /tmp/dns-queries.txt /tmp/dns-resolutions.txt \
+    /tmp/http-requests.txt /tmp/http-bodies.txt \
+    /tmp/tls-connections.txt /tmp/blocked.txt
+else
 echo "[SANDBOX] Parsing strace..." >&2
 
 SENSITIVE='\.npmrc|\.ssh/|\.aws/|\.env|/etc/passwd|/etc/shadow|\.gitconfig|\.bash_history'
@@ -349,6 +380,8 @@ if [ "$MODE" = "strict" ]; then
 else
   touch /tmp/blocked.txt
 fi
+
+fi  # end of non-gVisor strace/network parsing block
 
 # ── 11. Build JSON with jq ──
 echo "[SANDBOX] Building report..." >&2
