@@ -132,7 +132,7 @@ async function detectPublishAnomaly(packageName) {
       const spanHours = Math.round(spanMs / MS_PER_HOUR * 10) / 10;
       findings.push({
         type: 'publish_burst',
-        severity: 'HIGH',
+        severity: 'LOW',
         description: `${inWindow.length} versions published in ${spanHours} hours (avg interval: ${stats.avgIntervalDays} days)`,
         versions: inWindow.map(e => e.version)
       });

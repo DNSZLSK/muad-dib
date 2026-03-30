@@ -1283,12 +1283,99 @@ async function runScraper() {
   };
 }
 
+// ============================================
+// SOURCE 5: OSV.dev Lightweight API
+// Used by `muaddib update` (fast, no zip download)
+// ============================================
+
+/**
+ * Lightweight OSV.dev query — fetches recent npm MAL-* entries via REST API.
+ * Used by `muaddib update` as a fast complement to the full zip scrape.
+ * @returns {Promise<Array>} Parsed IOC package entries
+ */
+async function scrapeOSVLightweightAPI() {
+  console.log('[SCRAPER] OSV.dev lightweight API...');
+  const packages = [];
+
+  try {
+    const resp = await fetchJSON('https://api.osv.dev/v1/query', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: { package: { ecosystem: 'npm' } }
+    });
+
+    if (resp.status === 200 && resp.data && resp.data.vulns) {
+      for (const vuln of resp.data.vulns) {
+        if (vuln.id && vuln.id.startsWith('MAL-')) {
+          const parsed = parseOSVEntry(vuln, 'osv-api');
+          for (const p of parsed) packages.push(p);
+        }
+      }
+    }
+
+    console.log('[SCRAPER]   ' + packages.length + ' MAL-* packages from OSV API');
+  } catch (e) {
+    console.log('[SCRAPER]   OSV API error: ' + e.message);
+  }
+
+  return packages;
+}
+
+/**
+ * Batch query OSV.dev for specific package names.
+ * Returns all MAL-* entries matching the given packages.
+ * Used by the OpenSSF benchmark script (W1).
+ * @param {string[]} packageNames - npm package names to query
+ * @returns {Promise<Array>} Parsed IOC entries with osv_id
+ */
+async function queryOSVBatch(packageNames) {
+  const BATCH_SIZE = 1000;
+  const allResults = [];
+
+  for (let i = 0; i < packageNames.length; i += BATCH_SIZE) {
+    const batch = packageNames.slice(i, i + BATCH_SIZE);
+    const queries = batch.map(function(name) {
+      return { package: { name: name, ecosystem: 'npm' } };
+    });
+
+    try {
+      const resp = await fetchJSON('https://api.osv.dev/v1/querybatch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: { queries: queries }
+      });
+
+      if (resp.status === 200 && resp.data && resp.data.results) {
+        for (let j = 0; j < resp.data.results.length; j++) {
+          const vulns = resp.data.results[j].vulns || [];
+          for (const vuln of vulns) {
+            if (vuln.id && vuln.id.startsWith('MAL-')) {
+              const parsed = parseOSVEntry(vuln, 'osv-batch');
+              for (const p of parsed) allResults.push(p);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.log('[SCRAPER] OSV batch error (offset ' + i + '): ' + e.message);
+    }
+
+    // Courtesy delay between batches
+    if (i + BATCH_SIZE < packageNames.length) {
+      await new Promise(function(r) { setTimeout(r, 200); });
+    }
+  }
+
+  return allResults;
+}
+
 // Test helpers for aggregated warning counters
 function getNoVersionSkipCount() { return _noVersionSkipCount; }
 function resetNoVersionSkipCount() { _noVersionSkipCount = 0; }
 
 module.exports = {
   runScraper, scrapeShaiHuludDetector, scrapeDatadogIOCs,
+  scrapeOSVLightweightAPI, queryOSVBatch,
   // Pure utility functions (exported for testing)
   parseCSVLine, parseCSV, extractVersions, parseOSVEntry,
   createFreshness, isAllowedRedirect,

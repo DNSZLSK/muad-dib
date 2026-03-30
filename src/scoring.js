@@ -1,4 +1,5 @@
 const { getRule } = require('./rules/index.js');
+const { HIGH_CONFIDENCE_MALICE_TYPES } = require('./monitor/classify.js');
 
 // ============================================
 // SCORING CONSTANTS
@@ -873,7 +874,22 @@ function calculateRiskScore(deduped, intentResult) {
   }
 
   // 7. Final score = max file score + cross-file bonus + intent bonus + package-level score + lifecycle boost, capped at 100
-  const riskScore = Math.min(MAX_RISK_SCORE, maxFileScore + crossFileBonus + intentBonus + packageScore + lifecycleBoost);
+  let riskScore = Math.min(MAX_RISK_SCORE, maxFileScore + crossFileBonus + intentBonus + packageScore + lifecycleBoost);
+
+  // 7b. MT-1: Score ceiling for packages without lifecycle scripts.
+  // 56% of real malware uses install scripts. Packages without lifecycle that score high
+  // (minified bundles, frameworks) are quasi-exclusively false positives.
+  // Cap at 35 to prevent webhook triggers (threshold ~20-25 post-reputation).
+  // Bypass: HC malice types, compound detections — these are never benign regardless of lifecycle.
+  const _hasLifecycle = deduped.some(t =>
+    t.type === 'lifecycle_script' || t.type === 'lifecycle_file_exec' ||
+    t.type === 'lifecycle_shell_pipe' || t.type === 'lifecycle_remote_fetch'
+  );
+  const _hasHC = deduped.some(t => HIGH_CONFIDENCE_MALICE_TYPES.has(t.type));
+  const _hasCompound = deduped.some(t => t.compound === true);
+  if (!_hasLifecycle && !_hasHC && !_hasCompound) {
+    riskScore = Math.min(riskScore, 35);
+  }
 
   // 8. Old global score for comparison (sum of ALL findings)
   const globalRiskScore = computeGroupScore(deduped);

@@ -54,6 +54,7 @@ const {
   classifyError,
   formatFindings,
   evaluateCacheTrigger,
+  isFirstPublishHighRisk,
   POPULAR_THRESHOLD,
   downloadsCache: classifyDownloadsCache,
   DOWNLOADS_CACHE_TTL,
@@ -108,6 +109,11 @@ const SCAN_CONCURRENCY = Math.max(1, parseInt(process.env.MUADDIB_SCAN_CONCURREN
 const SCAN_TIMEOUT_MS = 180_000; // 3 minutes per package
 const STATIC_SCAN_TIMEOUT_MS = 45_000; // 45s for static analysis only
 const LARGE_PACKAGE_SIZE = 10 * 1024 * 1024; // 10MB
+
+// First-publish sandbox: max pending sandbox items before deferring first-publish clean scans
+// Prevents starving T1a sandbox capacity when many first-publish packages arrive at once
+const FIRST_PUBLISH_SANDBOX_MAX_QUEUE = parseInt(process.env.MUADDIB_FIRST_PUBLISH_SANDBOX_MAX_QUEUE, 10) || 10;
+const FIRST_PUBLISH_SANDBOX_ENABLED = process.env.MUADDIB_FIRST_PUBLISH_SANDBOX !== '0';
 
 // --- Bundled tooling false-positive filter ---
 
@@ -401,10 +407,14 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
       throw staticErr;
     }
 
-    // ML Phase 2a: Fetch npm registry metadata once for packages with findings.
+    // First-publish detection: used for sandbox priority below
+    const isFirstPublish = cacheTrigger && cacheTrigger.reason === 'first_publish';
+
+    // ML Phase 2a: Fetch npm registry metadata once for packages with findings
+    // OR for first-publish packages (needed for isFirstPublishHighRisk decision).
     // Reused for both training records (enriched features) and reputation scoring.
     let npmRegistryMeta = null;
-    if (result.summary.total > 0 && ecosystem === 'npm') {
+    if ((result.summary.total > 0 || isFirstPublish) && ecosystem === 'npm') {
       try {
         const { getPackageMetadata } = require('../scanner/npm-registry.js');
         npmRegistryMeta = await getPackageMetadata(name);
@@ -413,15 +423,61 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
       }
     }
 
+    // First-publish sandbox priority: sandbox even with 0 static findings
+    // if the package is from a new/unknown maintainer without a linked repository.
+    const firstPublishSandbox = isFirstPublish &&
+      FIRST_PUBLISH_SANDBOX_ENABLED &&
+      isFirstPublishHighRisk(cacheTrigger, npmRegistryMeta) &&
+      isSandboxEnabled() && sandboxAvailable &&
+      scanQueue.length < FIRST_PUBLISH_SANDBOX_MAX_QUEUE;
+
     if (result.summary.total === 0) {
-      stats.scanned++;
-      const elapsed = Date.now() - startTime;
-      stats.totalTimeMs += elapsed;
-      stats.clean++;
-      console.log(`[MONITOR] CLEAN: ${name}@${version} (0 findings, ${(elapsed / 1000).toFixed(1)}s)`);
-      updateScanStats('clean');
-      recordTrainingSample(result, { name, version, ecosystem, label: 'clean', registryMeta: meta, unpackedSize: meta.unpackedSize, npmRegistryMeta, fileCountTotal, hasTests });
-      return { sandboxResult: null, staticClean: true };
+      if (firstPublishSandbox) {
+        // First-publish sandbox priority: run sandbox even with 0 static findings
+        console.log(`[MONITOR] FIRST-PUBLISH SANDBOX: ${name}@${version} (0 findings, sandboxing anyway)`);
+        stats.firstPublishSandboxed = (stats.firstPublishSandboxed || 0) + 1;
+
+        let sandboxResult = null;
+        try {
+          const canary = isCanaryEnabled();
+          console.log(`[MONITOR] SANDBOX (first-publish): launching for ${name}@${version}${canary ? ' (canary: on)' : ''}...`);
+          sandboxResult = await runSandbox(name, { canary });
+          console.log(`[MONITOR] SANDBOX: ${name}@${version} → score: ${sandboxResult.score}, severity: ${sandboxResult.severity}`);
+        } catch (err) {
+          console.error(`[MONITOR] SANDBOX ERROR: ${name}@${version} — ${err.message}`);
+        }
+
+        const sandboxScore = sandboxResult ? (sandboxResult.score || 0) : 0;
+        if (sandboxScore > 0) {
+          // Sandbox found something — treat as suspect
+          stats.suspect++;
+          stats.scanned++;
+          const elapsed = Date.now() - startTime;
+          stats.totalTimeMs += elapsed;
+          updateScanStats('suspect');
+          recordTrainingSample(result, { name, version, ecosystem, label: 'suspect', registryMeta: meta, unpackedSize: meta.unpackedSize, npmRegistryMeta, fileCountTotal, hasTests });
+          return { sandboxResult, staticClean: false, firstPublishSandbox: true };
+        } else {
+          // Sandbox clean — still CLEAN
+          stats.scanned++;
+          const elapsed = Date.now() - startTime;
+          stats.totalTimeMs += elapsed;
+          stats.clean++;
+          console.log(`[MONITOR] CLEAN (first-publish sandbox OK): ${name}@${version} (${(elapsed / 1000).toFixed(1)}s)`);
+          updateScanStats('clean');
+          recordTrainingSample(result, { name, version, ecosystem, label: 'clean', registryMeta: meta, unpackedSize: meta.unpackedSize, npmRegistryMeta, fileCountTotal, hasTests });
+          return { sandboxResult, staticClean: true, firstPublishSandbox: true };
+        }
+      } else {
+        stats.scanned++;
+        const elapsed = Date.now() - startTime;
+        stats.totalTimeMs += elapsed;
+        stats.clean++;
+        console.log(`[MONITOR] CLEAN: ${name}@${version} (0 findings, ${(elapsed / 1000).toFixed(1)}s)`);
+        updateScanStats('clean');
+        recordTrainingSample(result, { name, version, ecosystem, label: 'clean', registryMeta: meta, unpackedSize: meta.unpackedSize, npmRegistryMeta, fileCountTotal, hasTests });
+        return { sandboxResult: null, staticClean: true };
+      }
     } else {
       const counts = [];
       if (result.summary.critical > 0) counts.push(`${result.summary.critical} CRITICAL`);
@@ -1023,6 +1079,8 @@ module.exports = {
   SCAN_TIMEOUT_MS,
   STATIC_SCAN_TIMEOUT_MS,
   LARGE_PACKAGE_SIZE,
+  FIRST_PUBLISH_SANDBOX_MAX_QUEUE,
+  FIRST_PUBLISH_SANDBOX_ENABLED,
   KNOWN_BUNDLED_FILES,
   KNOWN_BUNDLED_PATHS,
   ML_EXCLUDED_DIRS,

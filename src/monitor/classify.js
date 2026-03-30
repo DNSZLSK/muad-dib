@@ -331,6 +331,35 @@ function evaluateCacheTrigger(name, docMeta, doc) {
   return { shouldCache: false, reason: '', retentionDays: 0 };
 }
 
+/**
+ * Determine if a first-publish package is high-risk and should be sandboxed
+ * even with a clean static scan (0 findings).
+ *
+ * First-publish is where malware concentrates: new packages from unknown
+ * maintainers with no linked repository are the highest-risk population.
+ *
+ * @param {Object|null} cacheTrigger - From evaluateCacheTrigger()
+ * @param {Object|null} npmRegistryMeta - From getPackageMetadata()
+ * @returns {boolean} true if package should be sandboxed regardless of static score
+ */
+function isFirstPublishHighRisk(cacheTrigger, npmRegistryMeta) {
+  if (!cacheTrigger || cacheTrigger.reason !== 'first_publish') return false;
+
+  // With registry metadata, require at least one additional risk signal
+  if (npmRegistryMeta) {
+    // No linked repository — high risk
+    if (!npmRegistryMeta.has_repository) return true;
+    // New maintainer (only 1 package ever published)
+    if (npmRegistryMeta.author_package_count <= 1) return true;
+    // Package age < 1 day with registry metadata but no strong signals — skip sandbox
+    // (has repo + experienced maintainer = likely legitimate)
+    return false;
+  }
+
+  // Without registry metadata, sandbox by default (precautionary)
+  return true;
+}
+
 module.exports = {
   // Constants
   IOC_MATCH_TYPES,
@@ -367,4 +396,5 @@ module.exports = {
   setVerboseMode,
   quickTyposquatCheck,
   evaluateCacheTrigger,
+  isFirstPublishHighRisk,
 };

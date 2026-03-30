@@ -92,9 +92,15 @@ function resetDailyCounter() {
   _dailyCounter.resetDate = null;
 }
 
+// ── Credit exhaustion kill switch (session-level) ──
+// When the Anthropic API returns a 400 with "credit balance is too low",
+// we disable the LLM for the rest of the session to avoid error spam.
+let _creditExhausted = false;
+
 // ── Feature flags ──
 
 function isLlmEnabled() {
+  if (_creditExhausted) return false;
   if (!process.env.ANTHROPIC_API_KEY) return false;
   const env = process.env.MUADDIB_LLM_ENABLED;
   if (env !== undefined && env.toLowerCase() === 'false') return false;
@@ -441,6 +447,14 @@ async function callAnthropicAPI(system, messages) {
       }
 
       const errorText = await response.text().catch(() => '');
+
+      // Credit exhaustion: disable LLM for entire session (not just this call)
+      if (response.status === 400 && /credit balance is too low/i.test(errorText)) {
+        _creditExhausted = true;
+        console.warn('[LLM] API credits exhausted — LLM Detective disabled for this session');
+        throw new Error('API credits exhausted');
+      }
+
       throw new Error(`API ${response.status}: ${errorText.slice(0, 200)}`);
     } catch (err) {
       clearTimeout(timeout);
@@ -602,6 +616,14 @@ function resetLlmLimiter() {
   _semaphore.queue.length = 0;
 }
 
+function resetCreditExhausted() {
+  _creditExhausted = false;
+}
+
+function isCreditExhausted() {
+  return _creditExhausted;
+}
+
 module.exports = {
   investigatePackage,
   isLlmEnabled,
@@ -614,6 +636,8 @@ module.exports = {
   resetStats,
   resetDailyCounter,
   resetLlmLimiter,
+  resetCreditExhausted,
+  isCreditExhausted,
   // Exported for testing
   collectSourceContext,
   buildPrompt,

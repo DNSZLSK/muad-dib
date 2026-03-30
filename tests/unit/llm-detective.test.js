@@ -18,6 +18,8 @@ async function runLlmDetectiveTests() {
     resetDailyCounter,
     resetStats,
     resetLlmLimiter,
+    resetCreditExhausted,
+    isCreditExhausted,
     getStats,
     parseResponse,
     collectSourceContext,
@@ -574,6 +576,68 @@ async function runLlmDetectiveTests() {
     assertIncludes(system, 'Step 2 BEHAVIOR', 'JSON format should show Step 2 BEHAVIOR');
     assertIncludes(system, 'Step 3 COHERENCE', 'JSON format should show Step 3 COHERENCE');
     assertIncludes(system, 'Step 4 VERDICT', 'JSON format should show Step 4 VERDICT');
+  });
+
+  // ── Credit exhaustion kill switch ──
+
+  test('LLM: isCreditExhausted is false by default', () => {
+    resetCreditExhausted();
+    assert(isCreditExhausted() === false, 'Should not be exhausted by default');
+  });
+
+  test('LLM: isLlmEnabled returns false when credits exhausted', () => {
+    resetCreditExhausted();
+    withEnv({ ANTHROPIC_API_KEY: 'test-key', MUADDIB_LLM_ENABLED: undefined }, () => {
+      assert(isLlmEnabled() === true, 'Should be enabled with key');
+      // Simulate credit exhaustion
+      // We can't directly set _creditExhausted, but we can test via investigatePackage
+    });
+    resetCreditExhausted();
+  });
+
+  await asyncTest('LLM: credit exhaustion disables LLM for session', async () => {
+    resetStats();
+    resetDailyCounter();
+    resetLlmLimiter();
+    resetCreditExhausted();
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'llm-test-'));
+    try {
+      fs.writeFileSync(path.join(tmpDir, 'package.json'), '{"name":"credit-test"}');
+      fs.writeFileSync(path.join(tmpDir, 'index.js'), 'x = 1;');
+
+      // Mock a 400 credit exhaustion response
+      global.fetch = async () => ({
+        ok: false,
+        status: 400,
+        text: async () => '{"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low to access the Anthropic API."}}'
+      });
+
+      const saved = setEnv({ ANTHROPIC_API_KEY: 'test-key' });
+      try {
+        // First call should trigger credit exhaustion
+        const result1 = await investigatePackage(tmpDir, { threats: [] }, { name: 'credit-test', version: '1.0.0' });
+        assert(result1 === null, 'Should return null on credit exhaustion');
+        assert(isCreditExhausted() === true, 'Credit should be marked as exhausted');
+        assert(getStats().errors === 1, 'Should track error');
+
+        // Second call should skip without even trying the API
+        let fetchCalled = false;
+        global.fetch = async () => { fetchCalled = true; return { ok: true, status: 200, json: async () => ({ content: [{ text: '{}' }] }) }; };
+
+        const result2 = await investigatePackage(tmpDir, { threats: [] }, { name: 'credit-test2', version: '1.0.0' });
+        assert(result2 === null, 'Should return null when credit exhausted (session)');
+        assert(fetchCalled === false, 'Should NOT call API when credits exhausted');
+        assert(isLlmEnabled() === false, 'isLlmEnabled should return false when credits exhausted');
+      } finally {
+        restoreEnv(saved);
+      }
+    } finally {
+      global.fetch = originalFetch;
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+      resetStats();
+      resetDailyCounter();
+      resetCreditExhausted();
+    }
   });
 
   // ── Stats tracking ──

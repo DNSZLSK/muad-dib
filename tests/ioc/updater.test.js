@@ -607,9 +607,25 @@ asyncTest('BOOTSTRAP: ensureIOCs skips download when cache file exists and is la
   }
 });
 
-// SKIPPED: downloadAndDecompress attempts real network connection — run via npm run test:integration
-console.log('[SKIP] BOOTSTRAP: downloadAndDecompress rejects invalid URL gracefully (network)');
-addSkipped(1);
+await asyncTest('BOOTSTRAP-COV: downloadAndDecompress rejects on connection error', async () => {
+  const https = require('https');
+  const origHttpsGet = https.get;
+  https.get = function(_url, _opts, _cb) {
+    const EventEmitter = require('events');
+    const req = new EventEmitter();
+    req.destroy = () => {};
+    setImmediate(() => req.emit('error', new Error('connect ECONNREFUSED')));
+    return req;
+  };
+  try {
+    await downloadAndDecompress('https://fake-host/nonexistent', path.join(os.tmpdir(), 'test-iocs-' + Date.now() + '.json'));
+    assert(false, 'Should have thrown');
+  } catch (err) {
+    assert(err instanceof Error, 'Should throw an Error');
+  } finally {
+    https.get = origHttpsGet;
+  }
+});
 
 // ============================================
 // MERGE IOCs TESTS
@@ -843,31 +859,51 @@ await asyncTest('BOOTSTRAP-COV: ensureIOCs returns true when IOC file exists and
 
 await asyncTest('BOOTSTRAP-COV: ensureIOCs handles download failure gracefully', async () => {
   const origExists = fs.existsSync;
-  const origMkdir = fs.mkdirSync;
   const origStderr = process.stderr.write;
   const stderrOutput = [];
+  // Mock https.get to simulate network failure (never hit real network in tests)
+  const https = require('https');
+  const origHttpsGet = https.get;
   fs.existsSync = (p) => {
     if (p === BOOTSTRAP_HOME_DATA_DIR) return true;
     if (p === BOOTSTRAP_IOCS_PATH) return false; // IOCs don't exist
     return origExists(p);
   };
   process.stderr.write = (msg) => { stderrOutput.push(msg); };
+  https.get = (_url, _opts, _cb) => {
+    const EventEmitter = require('events');
+    const req = new EventEmitter();
+    req.destroy = () => {};
+    process.nextTick(() => req.emit('error', new Error('mocked network failure')));
+    return req;
+  };
   try {
     const result = await bootstrapEnsureIOCs();
-    // Should return false since download fails (no network mock)
     assert(result === false, 'Should return false when download fails');
   } finally {
     fs.existsSync = origExists;
     process.stderr.write = origStderr;
+    https.get = origHttpsGet;
   }
 });
 
 await asyncTest('BOOTSTRAP-COV: downloadAndDecompress rejects on invalid URL', async () => {
+  const https = require('https');
+  const origHttpsGet = https.get;
+  https.get = (_url, _opts, _cb) => {
+    const EventEmitter = require('events');
+    const req = new EventEmitter();
+    req.destroy = () => {};
+    process.nextTick(() => req.emit('error', new Error('connect ECONNREFUSED 127.0.0.1:1')));
+    return req;
+  };
   try {
     await downloadAndDecompress('https://localhost:1/nonexistent', path.join(os.tmpdir(), 'test-iocs-' + Date.now() + '.json'));
     assert(false, 'Should have thrown');
   } catch (err) {
     assert(err instanceof Error, 'Should throw an Error');
+  } finally {
+    https.get = origHttpsGet;
   }
 });
 

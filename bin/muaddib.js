@@ -260,10 +260,12 @@ if (command === 'version' || command === '--version' || command === '-v') {
     configPath: configPath,
     autoSandbox: autoSandbox
   }).then(exitCode => {
-    process.exit(exitCode);
+    // Use process.exitCode instead of process.exit() to let pending async work
+    // (the non-blocking version update check) complete before the process exits.
+    process.exitCode = exitCode;
   }).catch(err => {
     console.error('[ERROR]', err.message);
-    process.exit(1);
+    process.exitCode = 1;
   });
 } else if (command === 'feed') {
   if (wantHelp) showHelp('feed');

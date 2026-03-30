@@ -97,7 +97,12 @@ async function runSandboxPreloadTests() {
     }
   });
 
-  // ── Docker-dependent tests (skip if unavailable) ──
+  // ── Docker-dependent tests (skip if unavailable or in CI) ──
+
+  if (process.env.CI && !process.env.MUADDIB_TEST_DOCKER) {
+    addSkipped('CI environment — skipping Docker sandbox tests (set MUADDIB_TEST_DOCKER=1 to enable)');
+    return;
+  }
 
   if (!isDockerAvailable()) {
     addSkipped('Docker not available — skipping Docker-dependent sandbox preload tests');

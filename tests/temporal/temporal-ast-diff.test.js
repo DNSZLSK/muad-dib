@@ -573,7 +573,9 @@ async function runTemporalAstDiffTests() {
 
   // --- Integration tests (network-dependent) ---
 
-  const skipNetwork = process.env.CI === 'true' || process.env.SKIP_NETWORK === 'true';
+  // Network tests are opt-IN: set MUADDIB_TEST_NETWORK=true to enable.
+  // Default: always skipped (CI must work in airplane mode).
+  const skipNetwork = process.env.MUADDIB_TEST_NETWORK !== 'true';
 
   if (!skipNetwork) {
     await asyncTest('AST-DIFF: fetchVersionMetadata fetches is-number@7.0.0', async () => {
