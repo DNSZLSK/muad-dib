@@ -31,11 +31,17 @@ docs/
 *.md
 !README.md
 
-# Backup & deployment scripts (VPS-only)
+# Backup, deployment & evaluation scripts (VPS-only / internal)
 backups/
-scripts/backup.sh
-scripts/deploy.sh
-scripts/fix-permissions.sh
+scripts/
+
+# IOC data (CRITICAL: contains malicious package names — triggers Socket/npm audit)
+iocs/
+iocs-compact.json
+iocs.json.gz
+src/ioc/data/iocs.json
+src/ioc/data/iocs-compact.json
+src/ioc/data/.ossf-tree-sha
 
 # Config & artifacts
 eslint.config.mjs
@@ -44,8 +50,6 @@ action.yml
 rapport.html
 results.sarif
 index.html
-src/ioc/data/iocs.json
-src/ioc/data/iocs-compact.json
 
 # npm pack extraction residue (CRITICAL: overwrites package.json in tarball)
 package/

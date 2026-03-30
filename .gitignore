@@ -4,6 +4,7 @@ metrics/
 .muaddib-cache/
 datasets/adversarial/
 *.log
+!tests/samples/gvisor/strace-sample.log
 rapport.html
 results.sarif
 .claude/
