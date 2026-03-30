@@ -39,24 +39,25 @@ async function updateIOCs() {
   mergeIOCs(baseIOCs, yamlStandard);
   console.log('[2/4] YAML IOCs: ' + yamlStandard.packages.length + ' packages, ' + yamlStandard.hashes.length + ' hashes');
 
-  // Step 3: Download additional IOCs from GitHub (GenSecAI + DataDog — small files, fast)
-  const { scrapeShaiHuludDetector, scrapeDatadogIOCs } = require('./scraper.js');
-  console.log('[3/4] Downloading GitHub IOCs...');
+  // Step 3: Download additional IOCs from GitHub + OSV API (GenSecAI + DataDog + OSV lightweight)
+  const { scrapeShaiHuludDetector, scrapeDatadogIOCs, scrapeOSVLightweightAPI } = require('./scraper.js');
+  console.log('[3/4] Downloading GitHub + OSV API IOCs...');
 
-  const [shaiHulud, datadog] = await Promise.all([
+  const [shaiHulud, datadog, osvApi] = await Promise.all([
     scrapeShaiHuludDetector(),
-    scrapeDatadogIOCs()
+    scrapeDatadogIOCs(),
+    scrapeOSVLightweightAPI()
   ]);
 
   const githubIOCs = {
-    packages: [].concat(shaiHulud.packages, datadog.packages),
+    packages: [].concat(shaiHulud.packages, datadog.packages, osvApi),
     pypi_packages: [],
     hashes: [].concat(shaiHulud.hashes || [], datadog.hashes || []),
     markers: [],
     files: []
   };
   mergeIOCs(baseIOCs, githubIOCs);
-  console.log('     +' + shaiHulud.packages.length + ' GenSecAI, +' + datadog.packages.length + ' DataDog');
+  console.log('     +' + shaiHulud.packages.length + ' GenSecAI, +' + datadog.packages.length + ' DataDog, +' + osvApi.length + ' OSV API');
 
   // Step 3b: Load existing cache IOCs (from bootstrap download or previous update)
   if (fs.existsSync(CACHE_IOC_FILE)) {
@@ -90,7 +91,7 @@ async function updateIOCs() {
   }
 
   baseIOCs.updated = new Date().toISOString();
-  baseIOCs.sources = ['compact', 'yaml', 'shai-hulud-detector', 'datadog', 'cache'];
+  baseIOCs.sources = ['compact', 'yaml', 'shai-hulud-detector', 'datadog', 'osv-api', 'cache'];
 
   // Clean internal dedup sets before serialization
   delete baseIOCs._pkgKeys;

@@ -85,6 +85,7 @@ async function runMonitorTests() {
     cacheTarball,
     purgeTarballCache,
     evaluateCacheTrigger,
+    isFirstPublishHighRisk,
     quickTyposquatCheck,
     POPULAR_NPM_NAMES,
     computeAlertPriority,
@@ -7043,33 +7044,35 @@ async function runMonitorTests() {
   });
 
   asyncTest('CHANGES: pollNpmChanges filters deleted packages', async () => {
-    // Save original scanQueue length
-    const origLen = scanQueue.length;
+    if (process.env.CI) {
+      // Skip real network call in CI — pollNpmChanges hits replicate.npmjs.com
+      assert(typeof pollNpmChanges === 'function', 'pollNpmChanges should be a function');
+      return;
+    }
     const state = { npmLastSeq: 100 };
-
-    // Mock: we need to temporarily replace the httpsGet behavior
-    // Since pollNpmChanges is not easily mockable without DI, we test by providing
-    // a state with a seq and verifying the function signature and error handling
-    // For deleted package filtering, we rely on the unit-level logic verified below
-    // This test verifies that pollNpmChanges returns -1 on network error (expected in test env)
     const result = await pollNpmChanges(state);
-    // In test environment without network access to replicate.npmjs.com, expect -1 (error)
-    // OR if network is available, any non-negative number
     assert(typeof result === 'number', `pollNpmChanges should return a number, got ${typeof result}`);
   });
 
   asyncTest('CHANGES: pollNpmChanges initial run (no seq)', async () => {
+    if (process.env.CI) {
+      assert(typeof pollNpmChanges === 'function', 'pollNpmChanges should be a function');
+      return;
+    }
     const state = { npmLastSeq: null };
     const result = await pollNpmChanges(state);
-    // In test env: either initializes successfully (returns 0) or fails gracefully (returns -1)
     assert(result === 0 || result === -1, `Initial run should return 0 (success) or -1 (network error), got ${result}`);
     if (result === 0) {
-      // If it succeeded, seq should have been initialized
       assert(state.npmLastSeq != null, 'State should have npmLastSeq after successful init');
     }
   });
 
   asyncTest('CHANGES: pollNpmRss still works (RSS fallback)', async () => {
+    if (process.env.CI) {
+      // Skip real network call in CI — pollNpmRss hits registry.npmjs.org
+      assert(typeof pollNpmRss === 'function', 'pollNpmRss should be a function');
+      return;
+    }
     const state = { npmLastPackage: '' };
     const result = await pollNpmRss(state);
     // In test env: either succeeds with packages or fails with -1
@@ -8167,6 +8170,49 @@ async function runMonitorTests() {
     const npmRegSrc = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'scanner', 'npm-registry.js'), 'utf8');
     assertIncludes(npmRegSrc, 'temporal-analysis', 'npm-registry.js should import from temporal-analysis for cache reuse');
     assertIncludes(npmRegSrc, '_metadataCache', 'npm-registry.js should read _metadataCache directly');
+  });
+
+  // ============================================
+  // FIRST-PUBLISH SANDBOX PRIORITY TESTS
+  // ============================================
+
+  test('MONITOR: isFirstPublishHighRisk returns true for first_publish without repo', () => {
+    const trigger = { shouldCache: true, reason: 'first_publish', retentionDays: 7 };
+    const meta = { has_repository: false, author_package_count: 5 };
+    assert(isFirstPublishHighRisk(trigger, meta) === true,
+      'Should return true when first_publish and no repository');
+  });
+
+  test('MONITOR: isFirstPublishHighRisk returns true for new maintainer', () => {
+    const trigger = { shouldCache: true, reason: 'first_publish', retentionDays: 7 };
+    const meta = { has_repository: true, author_package_count: 1 };
+    assert(isFirstPublishHighRisk(trigger, meta) === true,
+      'Should return true when first_publish and author_package_count <= 1');
+  });
+
+  test('MONITOR: isFirstPublishHighRisk returns false for established maintainer with repo', () => {
+    const trigger = { shouldCache: true, reason: 'first_publish', retentionDays: 7 };
+    const meta = { has_repository: true, author_package_count: 50 };
+    assert(isFirstPublishHighRisk(trigger, meta) === false,
+      'Should return false when first_publish but maintainer is established with repo');
+  });
+
+  test('MONITOR: isFirstPublishHighRisk returns false for non-first_publish', () => {
+    const trigger = { shouldCache: true, reason: 'ioc_match', retentionDays: 30 };
+    const meta = { has_repository: false, author_package_count: 1 };
+    assert(isFirstPublishHighRisk(trigger, meta) === false,
+      'Should return false when reason is not first_publish');
+  });
+
+  test('MONITOR: isFirstPublishHighRisk returns false for null cacheTrigger', () => {
+    assert(isFirstPublishHighRisk(null, null) === false,
+      'Should return false for null cacheTrigger');
+  });
+
+  test('MONITOR: isFirstPublishHighRisk returns true without registry metadata (precautionary)', () => {
+    const trigger = { shouldCache: true, reason: 'first_publish', retentionDays: 7 };
+    assert(isFirstPublishHighRisk(trigger, null) === true,
+      'Should return true when first_publish and no registry metadata (precautionary sandbox)');
   });
 }
 

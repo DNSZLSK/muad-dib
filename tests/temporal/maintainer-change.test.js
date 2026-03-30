@@ -582,7 +582,9 @@ async function runMaintainerChangeTests() {
 
   // --- Integration test (network) ---
 
-  const skipNetwork = process.env.SKIP_NETWORK === 'true' || process.env.CI === 'true';
+  // Network tests are opt-IN: set MUADDIB_TEST_NETWORK=true to enable.
+  // Default: always skipped (CI must work in airplane mode).
+  const skipNetwork = process.env.MUADDIB_TEST_NETWORK !== 'true';
 
   if (!skipNetwork) {
     await asyncTest('MAINTAINER: detectMaintainerChange on lodash returns valid structure', async () => {

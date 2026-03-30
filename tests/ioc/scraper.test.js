@@ -7,6 +7,7 @@ async function runScraperTests() {
 
   const {
     runScraper, scrapeShaiHuludDetector, scrapeDatadogIOCs,
+    scrapeOSVLightweightAPI, queryOSVBatch,
     parseCSVLine, parseCSV, extractVersions, parseOSVEntry,
     createFreshness, isAllowedRedirect,
     validateIOCEntry, getNoVersionSkipCount, resetNoVersionSkipCount,
@@ -3166,6 +3167,189 @@ async function runScraperTests() {
     assert(MAX_ENTRY_UNCOMPRESSED === 50 * 1024 * 1024, 'MAX_ENTRY_UNCOMPRESSED should be 50MB');
     assert(MAX_TOTAL_UNCOMPRESSED === 500 * 1024 * 1024, 'MAX_TOTAL_UNCOMPRESSED should be 500MB');
     assert(MAX_ENTRY_UNCOMPRESSED < MAX_TOTAL_UNCOMPRESSED, 'Per-entry limit should be less than total budget');
+  });
+
+  // --- scrapeOSVLightweightAPI ---
+
+  await asyncTest('SCRAPER: scrapeOSVLightweightAPI returns MAL-* entries only', async () => {
+    const origRequest = https.request;
+    const origLog = console.log;
+    console.log = () => {};
+
+    const mockResponse = {
+      vulns: [
+        {
+          id: 'MAL-2025-1234',
+          summary: 'Malicious code in evil-pkg',
+          affected: [{ package: { ecosystem: 'npm', name: 'evil-pkg' }, versions: ['1.0.0'] }]
+        },
+        {
+          id: 'GHSA-xxxx-yyyy',
+          summary: 'Some advisory',
+          affected: [{ package: { ecosystem: 'npm', name: 'safe-pkg' }, versions: ['2.0.0'] }]
+        },
+        {
+          id: 'MAL-2025-5678',
+          summary: 'Malicious code in bad-pkg',
+          affected: [{ package: { ecosystem: 'npm', name: 'bad-pkg' }, versions: ['3.0.0', '3.0.1'] }]
+        }
+      ]
+    };
+
+    https.request = (options, callback) => {
+      const req = createMockRequest();
+      req.end = () => {
+        process.nextTick(() => {
+          const res = createMockResponse(200, null, {});
+          callback(res);
+          process.nextTick(() => {
+            res.emit('data', Buffer.from(JSON.stringify(mockResponse)));
+            res.emit('end');
+          });
+        });
+      };
+      return req;
+    };
+
+    try {
+      const result = await scrapeOSVLightweightAPI();
+      assert(Array.isArray(result), 'Should return array');
+      // MAL-2025-1234 (1 version) + MAL-2025-5678 (2 versions) = 3 entries
+      assert(result.length === 3, 'Should have 3 entries (MAL only, not GHSA), got ' + result.length);
+      assert(result.every(p => p.source === 'osv-api'), 'All entries should have source osv-api');
+      assert(result[0].name === 'evil-pkg', 'First should be evil-pkg');
+      assert(result[1].name === 'bad-pkg', 'Second should be bad-pkg');
+    } finally {
+      https.request = origRequest;
+      console.log = origLog;
+    }
+  });
+
+  await asyncTest('SCRAPER: scrapeOSVLightweightAPI handles API error gracefully', async () => {
+    const origRequest = https.request;
+    const origLog = console.log;
+    const logs = [];
+    console.log = (...args) => logs.push(args.join(' '));
+
+    https.request = (options, callback) => {
+      const req = createMockRequest();
+      req.end = () => {
+        process.nextTick(() => {
+          req.emit('error', new Error('connection refused'));
+        });
+      };
+      return req;
+    };
+
+    try {
+      const result = await scrapeOSVLightweightAPI();
+      assert(Array.isArray(result), 'Should return empty array on error');
+      assert(result.length === 0, 'Should have 0 entries on error');
+      const errorLog = logs.find(l => l.includes('OSV API error'));
+      assert(errorLog, 'Should log the error');
+    } finally {
+      https.request = origRequest;
+      console.log = origLog;
+    }
+  });
+
+  // --- queryOSVBatch ---
+
+  await asyncTest('SCRAPER: queryOSVBatch returns parsed MAL entries', async () => {
+    const origRequest = https.request;
+    const origLog = console.log;
+    console.log = () => {};
+
+    const mockBatchResponse = {
+      results: [
+        {
+          vulns: [
+            {
+              id: 'MAL-2025-0001',
+              summary: 'Malicious code in pkg-a',
+              affected: [{ package: { ecosystem: 'npm', name: 'pkg-a' }, versions: ['1.0.0'] }]
+            }
+          ]
+        },
+        {
+          vulns: [
+            {
+              id: 'MAL-2025-0002',
+              summary: 'Malicious code in pkg-b',
+              affected: [{ package: { ecosystem: 'npm', name: 'pkg-b' }, versions: ['2.0.0'] }]
+            },
+            {
+              id: 'CVE-2024-9999',
+              summary: 'Not malware',
+              affected: [{ package: { ecosystem: 'npm', name: 'pkg-b' }, versions: ['2.0.0'] }]
+            }
+          ]
+        }
+      ]
+    };
+
+    https.request = (options, callback) => {
+      const req = createMockRequest();
+      req.end = () => {
+        process.nextTick(() => {
+          const res = createMockResponse(200, null, {});
+          callback(res);
+          process.nextTick(() => {
+            res.emit('data', Buffer.from(JSON.stringify(mockBatchResponse)));
+            res.emit('end');
+          });
+        });
+      };
+      return req;
+    };
+
+    try {
+      const result = await queryOSVBatch(['pkg-a', 'pkg-b']);
+      assert(Array.isArray(result), 'Should return array');
+      assert(result.length === 2, 'Should have 2 MAL entries (CVE filtered out), got ' + result.length);
+      assert(result[0].name === 'pkg-a', 'First should be pkg-a');
+      assert(result[0].source === 'osv-batch', 'Source should be osv-batch');
+      assert(result[1].name === 'pkg-b', 'Second should be pkg-b');
+    } finally {
+      https.request = origRequest;
+      console.log = origLog;
+    }
+  });
+
+  await asyncTest('SCRAPER: queryOSVBatch handles empty results', async () => {
+    const origRequest = https.request;
+    const origLog = console.log;
+    console.log = () => {};
+
+    https.request = (options, callback) => {
+      const req = createMockRequest();
+      req.end = () => {
+        process.nextTick(() => {
+          const res = createMockResponse(200, null, {});
+          callback(res);
+          process.nextTick(() => {
+            res.emit('data', Buffer.from(JSON.stringify({ results: [{ vulns: [] }, { vulns: [] }] })));
+            res.emit('end');
+          });
+        });
+      };
+      return req;
+    };
+
+    try {
+      const result = await queryOSVBatch(['clean-pkg-a', 'clean-pkg-b']);
+      assert(Array.isArray(result), 'Should return array');
+      assert(result.length === 0, 'Should have 0 entries for clean packages');
+    } finally {
+      https.request = origRequest;
+      console.log = origLog;
+    }
+  });
+
+  await asyncTest('SCRAPER: queryOSVBatch handles empty input', async () => {
+    const result = await queryOSVBatch([]);
+    assert(Array.isArray(result), 'Should return array');
+    assert(result.length === 0, 'Should have 0 entries for empty input');
   });
 }
 

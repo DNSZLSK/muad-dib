@@ -9,6 +9,7 @@ results.sarif
 .claude/
 src/ioc/data/iocs.json
 src/ioc/data/iocs-compact.json
+iocs-compact.json
 nul
 iocs.json.gz
 *.vsix
@@ -27,6 +28,7 @@ evaluate-*.txt
 v267.txt
 v268.txt
 datasets/real-world/datadog-benchmark-results.json
+datasets/real-world/ossf-benchmark-results.json
 SESSION-LOG.md
 backups/
 

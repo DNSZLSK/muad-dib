@@ -164,7 +164,7 @@ async function runPublishAnomalyTests() {
         const spanHours = Math.round(spanMs / msHour * 10) / 10;
         findings.push({
           type: 'publish_burst',
-          severity: 'HIGH',
+          severity: 'LOW',
           description: `${inWindow.length} versions published in ${spanHours} hours`,
           versions: inWindow.map(e => e.version)
         });
@@ -223,7 +223,7 @@ async function runPublishAnomalyTests() {
     assert(result.suspicious === true, 'Should be suspicious');
     const burst = result.findings.find(f => f.type === 'publish_burst');
     assert(burst, 'Should have publish_burst finding');
-    assert(burst.severity === 'HIGH', 'Burst severity should be HIGH');
+    assert(burst.severity === 'LOW', 'Burst severity should be LOW (QW-2 noise reduction)');
     assert(burst.versions.length >= 3, 'Burst should have 3+ versions, got ' + burst.versions.length);
   });
 
@@ -352,7 +352,7 @@ async function runPublishAnomalyTests() {
       assert(result.packageName === 'test-pkg', 'Package name should match');
       const burst = result.anomalies.find(f => f.type === 'publish_burst');
       assert(burst, 'Should have publish_burst finding');
-      assert(burst.severity === 'HIGH', 'Burst severity should be HIGH');
+      assert(burst.severity === 'LOW', 'Burst severity should be LOW (QW-2 noise reduction)');
     });
   });
 
@@ -472,7 +472,9 @@ async function runPublishAnomalyTests() {
 
   // --- Integration test (network) ---
 
-  const skipNetwork = process.env.SKIP_NETWORK === 'true' || process.env.CI === 'true';
+  // Network tests are opt-IN: set MUADDIB_TEST_NETWORK=true to enable.
+  // Default: always skipped (CI must work in airplane mode).
+  const skipNetwork = process.env.MUADDIB_TEST_NETWORK !== 'true';
 
   if (!skipNetwork) {
     await asyncTest('PUBLISH: detectPublishAnomaly on lodash returns valid structure', async () => {

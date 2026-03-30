@@ -267,13 +267,36 @@ test('FIXTURE: IOC fixture has expected count', () => {
 console.log('\n=== COMPACT IOC TESTS ===\n');
 
 test('COMPACT: iocs-compact.json exists', () => {
-  const compactPath = path.join(__dirname, '..', '..', 'src', 'ioc', 'data', 'iocs-compact.json');
-  assert(fs.existsSync(compactPath), 'src/ioc/data/iocs-compact.json should exist');
+  // iocs-compact.json is no longer shipped in the repo (git rm --cached), downloaded at runtime via bootstrap.
+  // Verify that generateCompactIOCs produces a valid structure that could be written to disk.
+  const { generateCompactIOCs } = require('../../src/ioc/updater.js');
+  const input = {
+    packages: [{ name: 'test-pkg', version: '*', severity: 'critical' }],
+    pypi_packages: [],
+    hashes: [], markers: [], files: [],
+    updated: '2026-01-01T00:00:00.000Z', sources: ['test']
+  };
+  const compact = generateCompactIOCs(input);
+  assert(compact && typeof compact === 'object', 'generateCompactIOCs should produce a valid object');
+  assert(typeof JSON.stringify(compact) === 'string', 'compact IOC data should be serializable to JSON');
 });
 
 test('COMPACT: has expected compact format fields', () => {
-  const compactPath = path.join(__dirname, '..', '..', 'src', 'ioc', 'data', 'iocs-compact.json');
-  const compact = JSON.parse(fs.readFileSync(compactPath, 'utf8'));
+  // Use in-memory fixture via generateCompactIOCs instead of reading file from disk
+  const { generateCompactIOCs } = require('../../src/ioc/updater.js');
+  const input = {
+    packages: [
+      { name: 'evil-pkg', version: '1.0.0', severity: 'critical' },
+      { name: 'bad-lib', version: '*', severity: 'critical' }
+    ],
+    pypi_packages: [
+      { name: 'evil-py', version: '1.0', severity: 'critical' },
+      { name: 'bad-pylib', version: '*', severity: 'critical' }
+    ],
+    hashes: ['abc123'], markers: ['setup_bun.js'], files: ['inject.js'],
+    updated: '2026-01-01T00:00:00.000Z', sources: ['test']
+  };
+  const compact = generateCompactIOCs(input);
   assert(compact.defaultSeverity, 'Should have defaultSeverity');
   assert(Array.isArray(compact.wildcards), 'wildcards should be an array');
   assert(compact.wildcards.length > 0, 'Should have wildcard packages');
@@ -285,8 +308,17 @@ test('COMPACT: has expected compact format fields', () => {
 });
 
 test('COMPACT: does NOT have enriched package objects', () => {
-  const compactPath = path.join(__dirname, '..', '..', 'src', 'ioc', 'data', 'iocs-compact.json');
-  const compact = JSON.parse(fs.readFileSync(compactPath, 'utf8'));
+  // Use in-memory fixture via generateCompactIOCs instead of reading file from disk
+  const { generateCompactIOCs } = require('../../src/ioc/updater.js');
+  const input = {
+    packages: [
+      { name: 'evil-pkg', version: '1.0.0', severity: 'critical', description: 'Bad', references: ['http://x.com'] },
+      { name: 'bad-lib', version: '*', severity: 'critical', description: 'Malware' }
+    ],
+    pypi_packages: [], hashes: [], markers: [], files: [],
+    updated: '2026-01-01T00:00:00.000Z', sources: ['test']
+  };
+  const compact = generateCompactIOCs(input);
   // Compact format stores names as strings, not objects with description/references
   assert(typeof compact.wildcards[0] === 'string', 'Wildcard entries should be plain strings');
   const firstVersionedKey = Object.keys(compact.versioned)[0];
@@ -379,8 +411,19 @@ test('COMPACT: loadCachedIOCs works with compact fallback', () => {
 });
 
 test('COMPACT: litellm versioned IOC is present in compact data', () => {
-  const compactPath = path.join(__dirname, '..', '..', 'src', 'ioc', 'data', 'iocs-compact.json');
-  const compact = JSON.parse(fs.readFileSync(compactPath, 'utf8'));
+  // Use in-memory fixture with litellm-like versioned PyPI IOC
+  const { generateCompactIOCs } = require('../../src/ioc/updater.js');
+  const input = {
+    packages: [],
+    pypi_packages: [
+      { name: 'litellm', version: '1.82.7', severity: 'critical' },
+      { name: 'litellm', version: '1.82.8', severity: 'critical' },
+      { name: 'bad-pylib', version: '*', severity: 'critical' }
+    ],
+    hashes: [], markers: [], files: [],
+    updated: '2026-01-01T00:00:00.000Z', sources: ['test']
+  };
+  const compact = generateCompactIOCs(input);
   assert(compact.pypi_versioned['litellm'], 'litellm should be in pypi_versioned');
   assert(compact.pypi_versioned['litellm'].includes('1.82.7'), 'litellm should have version 1.82.7');
   assert(compact.pypi_versioned['litellm'].includes('1.82.8'), 'litellm should have version 1.82.8');
@@ -388,9 +431,18 @@ test('COMPACT: litellm versioned IOC is present in compact data', () => {
 });
 
 test('COMPACT: litellm IOC expands correctly via expandCompactIOCs', () => {
-  const { expandCompactIOCs } = require('../../src/ioc/updater.js');
-  const compactPath = path.join(__dirname, '..', '..', 'src', 'ioc', 'data', 'iocs-compact.json');
-  const compact = JSON.parse(fs.readFileSync(compactPath, 'utf8'));
+  // Use in-memory fixture with litellm-like versioned PyPI IOC
+  const { generateCompactIOCs, expandCompactIOCs } = require('../../src/ioc/updater.js');
+  const input = {
+    packages: [],
+    pypi_packages: [
+      { name: 'litellm', version: '1.82.7', severity: 'critical' },
+      { name: 'litellm', version: '1.82.8', severity: 'critical' }
+    ],
+    hashes: [], markers: [], files: [],
+    updated: '2026-01-01T00:00:00.000Z', sources: ['test']
+  };
+  const compact = generateCompactIOCs(input);
   const expanded = expandCompactIOCs(compact);
   const litellmEntries = expanded.pypi_packages.filter(p => p.name === 'litellm');
   assert(litellmEntries.length === 2, `Expected 2 litellm entries, got ${litellmEntries.length}`);
@@ -607,9 +659,25 @@ asyncTest('BOOTSTRAP: ensureIOCs skips download when cache file exists and is la
   }
 });
 
-// SKIPPED: downloadAndDecompress attempts real network connection — run via npm run test:integration
-console.log('[SKIP] BOOTSTRAP: downloadAndDecompress rejects invalid URL gracefully (network)');
-addSkipped(1);
+await asyncTest('BOOTSTRAP-COV: downloadAndDecompress rejects on connection error', async () => {
+  const https = require('https');
+  const origHttpsGet = https.get;
+  https.get = function(_url, _opts, _cb) {
+    const EventEmitter = require('events');
+    const req = new EventEmitter();
+    req.destroy = () => {};
+    setImmediate(() => req.emit('error', new Error('connect ECONNREFUSED')));
+    return req;
+  };
+  try {
+    await downloadAndDecompress('https://fake-host/nonexistent', path.join(os.tmpdir(), 'test-iocs-' + Date.now() + '.json'));
+    assert(false, 'Should have thrown');
+  } catch (err) {
+    assert(err instanceof Error, 'Should throw an Error');
+  } finally {
+    https.get = origHttpsGet;
+  }
+});
 
 // ============================================
 // MERGE IOCs TESTS
@@ -843,31 +911,51 @@ await asyncTest('BOOTSTRAP-COV: ensureIOCs returns true when IOC file exists and
 
 await asyncTest('BOOTSTRAP-COV: ensureIOCs handles download failure gracefully', async () => {
   const origExists = fs.existsSync;
-  const origMkdir = fs.mkdirSync;
   const origStderr = process.stderr.write;
   const stderrOutput = [];
+  // Mock https.get to simulate network failure (never hit real network in tests)
+  const https = require('https');
+  const origHttpsGet = https.get;
   fs.existsSync = (p) => {
     if (p === BOOTSTRAP_HOME_DATA_DIR) return true;
     if (p === BOOTSTRAP_IOCS_PATH) return false; // IOCs don't exist
     return origExists(p);
   };
   process.stderr.write = (msg) => { stderrOutput.push(msg); };
+  https.get = (_url, _opts, _cb) => {
+    const EventEmitter = require('events');
+    const req = new EventEmitter();
+    req.destroy = () => {};
+    process.nextTick(() => req.emit('error', new Error('mocked network failure')));
+    return req;
+  };
   try {
     const result = await bootstrapEnsureIOCs();
-    // Should return false since download fails (no network mock)
     assert(result === false, 'Should return false when download fails');
   } finally {
     fs.existsSync = origExists;
     process.stderr.write = origStderr;
+    https.get = origHttpsGet;
   }
 });
 
 await asyncTest('BOOTSTRAP-COV: downloadAndDecompress rejects on invalid URL', async () => {
+  const https = require('https');
+  const origHttpsGet = https.get;
+  https.get = (_url, _opts, _cb) => {
+    const EventEmitter = require('events');
+    const req = new EventEmitter();
+    req.destroy = () => {};
+    process.nextTick(() => req.emit('error', new Error('connect ECONNREFUSED 127.0.0.1:1')));
+    return req;
+  };
   try {
     await downloadAndDecompress('https://localhost:1/nonexistent', path.join(os.tmpdir(), 'test-iocs-' + Date.now() + '.json'));
     assert(false, 'Should have thrown');
   } catch (err) {
     assert(err instanceof Error, 'Should throw an Error');
+  } finally {
+    https.get = origHttpsGet;
   }
 });
 
@@ -957,13 +1045,23 @@ test('UPDATER-COV: loadCachedIOCs compact file fallback path', () => {
   const origExistsSync = fs.existsSync;
   const origReadFileSync = fs.readFileSync;
 
-  // Mock fs.existsSync to simulate: LOCAL_IOC_FILE does not exist, LOCAL_COMPACT_FILE exists
+  // Mock fs to simulate: LOCAL_IOC_FILE does not exist, LOCAL_COMPACT_FILE exists with valid data
   const LOCAL_IOC_FILE = path.join(__dirname, '..', '..', 'src', 'ioc', 'data', 'iocs.json');
   const LOCAL_COMPACT_FILE = path.join(__dirname, '..', '..', 'src', 'ioc', 'data', 'iocs-compact.json');
+  const MOCK_COMPACT = JSON.stringify({
+    defaultSeverity: 'critical', wildcards: ['test-pkg'], versioned: {},
+    hashes: [], markers: [], files: [], pypi_wildcards: [], pypi_versioned: {},
+    updated: '2026-01-01T00:00:00.000Z', sources: ['test']
+  });
 
   fs.existsSync = (p) => {
     if (p === LOCAL_IOC_FILE) return false; // Force compact fallback
+    if (p === LOCAL_COMPACT_FILE) return true; // Simulate compact file present
     return origExistsSync(p);
+  };
+  fs.readFileSync = (p, enc) => {
+    if (p === LOCAL_COMPACT_FILE) return MOCK_COMPACT;
+    return origReadFileSync(p, enc);
   };
 
   try {
@@ -972,6 +1070,7 @@ test('UPDATER-COV: loadCachedIOCs compact file fallback path', () => {
     assert(iocs.wildcardPackages instanceof Set, 'Should return wildcardPackages from compact fallback');
   } finally {
     fs.existsSync = origExistsSync;
+    fs.readFileSync = origReadFileSync;
     // Invalidate cache so mocked results don't affect other tests
     invalidateCache();
   }
@@ -991,6 +1090,7 @@ test('UPDATER-COV: loadCachedIOCs handles compact file load error', () => {
 
   fs.existsSync = (p) => {
     if (p === LOCAL_IOC_FILE) return false; // Force compact fallback
+    if (p === LOCAL_COMPACT_FILE) return true; // Simulate compact file present on disk
     return origExistsSync(p);
   };
   fs.readFileSync = (p, enc) => {

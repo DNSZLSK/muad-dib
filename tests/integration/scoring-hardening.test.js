@@ -862,6 +862,78 @@ async function runScoringHardeningTests() {
     const guardReductions = obf.reductions.filter(r => r.rule === 'lifecycle_guard');
     assert(guardReductions.length === 0, `No guard needed when not count-threshold downgraded, got ${guardReductions.length}`);
   });
+
+  // ===================================================================
+  // MT-1: Score ceiling for packages without lifecycle scripts
+  // ===================================================================
+
+  test('MT-1: No lifecycle + no HC + no compound → score capped at 35', () => {
+    const threats = [
+      { type: 'dynamic_require', severity: 'HIGH', file: 'index.js', message: 'dynamic require' },
+      { type: 'env_access', severity: 'MEDIUM', file: 'index.js', message: 'process.env.SECRET' },
+      { type: 'obfuscation_detected', severity: 'HIGH', file: 'lib/util.js', message: 'hex strings' },
+      { type: 'dangerous_call_eval', severity: 'CRITICAL', file: 'lib/util.js', message: 'eval()' }
+    ];
+    const result = calculateRiskScore(threats);
+    assert(result.riskScore <= 35,
+      `Without lifecycle/HC/compound, score should be capped at 35, got ${result.riskScore}`);
+  });
+
+  test('MT-1: With lifecycle_script → score NOT capped', () => {
+    const threats = [
+      { type: 'lifecycle_script', severity: 'MEDIUM', file: 'package.json', message: 'preinstall: node setup.js' },
+      { type: 'dynamic_require', severity: 'HIGH', file: 'setup.js', message: 'dynamic require' },
+      { type: 'dangerous_call_eval', severity: 'CRITICAL', file: 'setup.js', message: 'eval()' }
+    ];
+    const result = calculateRiskScore(threats);
+    assert(result.riskScore > 35,
+      `With lifecycle_script, score should NOT be capped at 35, got ${result.riskScore}`);
+  });
+
+  test('MT-1: With reverse_shell (HC type) without lifecycle → score NOT capped', () => {
+    const threats = [
+      { type: 'reverse_shell', severity: 'CRITICAL', file: 'index.js', message: 'reverse shell detected' },
+      { type: 'dangerous_call_eval', severity: 'CRITICAL', file: 'index.js', message: 'eval()' },
+      { type: 'env_access', severity: 'HIGH', file: 'index.js', message: 'process.env.HOME' }
+    ];
+    const result = calculateRiskScore(threats);
+    assert(result.riskScore > 35,
+      `With HC type (reverse_shell), score should NOT be capped, got ${result.riskScore}`);
+  });
+
+  test('MT-1: With compound detection without lifecycle → score NOT capped', () => {
+    const threats = [
+      { type: 'crypto_staged_payload', severity: 'CRITICAL', file: 'index.js', message: 'staged payload', compound: true },
+      { type: 'dangerous_call_eval', severity: 'CRITICAL', file: 'index.js', message: 'eval()' },
+      { type: 'env_access', severity: 'HIGH', file: 'index.js', message: 'process.env' }
+    ];
+    const result = calculateRiskScore(threats);
+    assert(result.riskScore > 35,
+      `With compound detection, score should NOT be capped, got ${result.riskScore}`);
+  });
+
+  test('MT-1: With lifecycle_file_exec → score NOT capped', () => {
+    const threats = [
+      { type: 'lifecycle_file_exec', severity: 'CRITICAL', file: 'package.json', message: 'lifecycle executes malicious.js', compound: true },
+      { type: 'dangerous_call_eval', severity: 'CRITICAL', file: 'malicious.js', message: 'eval()' }
+    ];
+    const result = calculateRiskScore(threats);
+    assert(result.riskScore > 35,
+      `With lifecycle_file_exec, score should NOT be capped, got ${result.riskScore}`);
+  });
+
+  test('MT-1: Score exactly at boundary — LOW-only threats without lifecycle stay at score', () => {
+    // 2 LOW threats = score 2 (well under 35), ceiling has no effect
+    const threats = [
+      { type: 'env_access', severity: 'LOW', file: 'index.js', message: 'env1' },
+      { type: 'sensitive_string', severity: 'LOW', file: 'index.js', message: 'str' }
+    ];
+    const result = calculateRiskScore(threats);
+    assert(result.riskScore <= 35,
+      `LOW-only score should naturally be under 35, got ${result.riskScore}`);
+    assert(result.riskScore > 0,
+      `Should have some score, got ${result.riskScore}`);
+  });
 }
 
 module.exports = { runScoringHardeningTests };
