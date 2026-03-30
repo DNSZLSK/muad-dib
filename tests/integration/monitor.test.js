@@ -6387,9 +6387,9 @@ async function runMonitorTests() {
 
   // ===== v2.7.6 C1: High-confidence malice bypass =====
 
-  test('MONITOR: HIGH_CONFIDENCE_MALICE_TYPES contains 17 threat types', () => {
-    assert(HIGH_CONFIDENCE_MALICE_TYPES.size === 17,
-      `Should have 17 types, got ${HIGH_CONFIDENCE_MALICE_TYPES.size}`);
+  test('MONITOR: HIGH_CONFIDENCE_MALICE_TYPES contains 18 threat types', () => {
+    assert(HIGH_CONFIDENCE_MALICE_TYPES.size === 18,
+      `Should have 18 types, got ${HIGH_CONFIDENCE_MALICE_TYPES.size}`);
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('lifecycle_shell_pipe'), 'Missing lifecycle_shell_pipe');
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('fetch_decrypt_exec'), 'Missing fetch_decrypt_exec');
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('download_exec_binary'), 'Missing download_exec_binary');
@@ -6407,6 +6407,8 @@ async function runMonitorTests() {
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('npm_token_steal'), 'Missing npm_token_steal');
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('root_filesystem_wipe'), 'Missing root_filesystem_wipe');
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('proc_mem_scan'), 'Missing proc_mem_scan');
+    // Sandbox network overhaul
+    assert(HIGH_CONFIDENCE_MALICE_TYPES.has('sandbox_known_exfil_domain'), 'Missing sandbox_known_exfil_domain');
   });
 
   test('MONITOR: HIGH_CONFIDENCE_MALICE_TYPES does NOT contain FP-prone types', () => {

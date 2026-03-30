@@ -49,6 +49,7 @@ const HIGH_CONFIDENCE_MALICE_TYPES = new Set([
   'cross_file_dataflow',                   // proven taint cross-modules
   'canary_exfiltration',                   // canary sandbox exfiltrated
   'sandbox_network_after_sensitive_read',  // compound sandbox detection
+  'sandbox_known_exfil_domain',            // known exfil/C2 domain contacted during install
   'detached_credential_exfil',            // detached process + credential exfil (DPRK/Lazarus)
   'node_modules_write',                    // writeFile to node_modules/ (worm propagation)
   'npm_publish_worm',                      // exec("npm publish") (worm propagation)

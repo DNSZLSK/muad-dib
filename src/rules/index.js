@@ -1011,6 +1011,29 @@ const RULES = {
     mitre: 'T1552.001'
   },
 
+  // Sandbox network outlier detections
+  sandbox_network_outlier: {
+    id: 'MUADDIB-SANDBOX-015',
+    name: 'Sandbox: Network Outlier',
+    severity: 'HIGH',
+    confidence: 'medium',
+    description: 'Package contacts a non-registry domain/IP during install. Only 0.027% of packages make DNS queries outside npm infrastructure — this is a high-precision outlier signal.',
+    references: ['https://attack.mitre.org/techniques/T1071/001/'],
+    mitre: 'T1071.001'
+  },
+  sandbox_known_exfil_domain: {
+    id: 'MUADDIB-SANDBOX-016',
+    name: 'Sandbox: Known Exfiltration Domain',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Package contacts a known exfiltration/C2 domain during install (OAST, webhook sinks, campaign infrastructure). Near-zero false positive rate.',
+    references: [
+      'https://attack.mitre.org/techniques/T1041/',
+      'https://attack.mitre.org/techniques/T1071/001/'
+    ],
+    mitre: 'T1041'
+  },
+
   // Entropy detections
   high_entropy_string: {
     id: 'MUADDIB-ENTROPY-001',

@@ -33,7 +33,7 @@ const SCAN_TIMEOUT_MS = 30000;
 const SAFE_PKG_RE = /^(@[\w._-]+\/)?[\w._-]+$/;
 
 // --- CLI args ---
-const SAMPLE_SIZE = parseInt(process.argv.find((a, i) => process.argv[i - 1] === '--sample') || '500', 10);
+const SAMPLE_SIZE = parseInt(process.argv.find((a, i) => process.argv[i - 1] === '--sample') || '5000', 10);
 const SEED = parseInt(process.argv.find((a, i) => process.argv[i - 1] === '--seed') || '42', 10);
 const REFRESH = process.argv.includes('--refresh');
 
@@ -220,9 +220,21 @@ function stratifySample(index, sampleSize, seed) {
   const downloadable = index.filter(e => e.version !== '*' && SAFE_PKG_RE.test(e.name));
   console.log('  Downloadable (non-wildcard, valid name): ' + downloadable.length);
 
+  // Filter out spam packages (SEO junk uploaded to npm — never available, waste time)
+  const SPAM_WORDS = /\b(watch|movie|free|generator|download|stream|online|full|episode|subtitle)\b/i;
+  const filtered = downloadable.filter(function(e) {
+    if (e.name.length > 100) return false;
+    if (/\s/.test(e.name)) return false;
+    if (SPAM_WORDS.test(e.name)) return false;
+    return true;
+  });
+  const spamRemoved = downloadable.length - filtered.length;
+  if (spamRemoved > 0) console.log('  Spam filtered: ' + spamRemoved + ' entries removed');
+  console.log('  After spam filter: ' + filtered.length);
+
   // Group by source
   const bySource = {};
-  for (const entry of downloadable) {
+  for (const entry of filtered) {
     const src = entry.source || 'unknown';
     if (!bySource[src]) bySource[src] = [];
     bySource[src].push(entry);
@@ -243,7 +255,7 @@ function stratifySample(index, sampleSize, seed) {
 
   // Proportional allocation per source
   const sources = Object.keys(bySource);
-  const totalDownloadable = downloadable.length;
+  const totalDownloadable = filtered.length;
   const sample = [];
 
   for (const src of sources) {
