@@ -15,6 +15,7 @@ const {
 
 const { NPM_PACKAGE_REGEX } = require('../shared/constants.js');
 const { analyzePreloadLog } = require('./analyzer.js');
+const { classifyDomain } = require('./network-allowlist.js');
 
 const DOCKER_IMAGE = 'muaddib-sandbox';
 const CONTAINER_TIMEOUT = 120000; // 120 seconds
@@ -646,34 +647,56 @@ function scoreFindings(report) {
     }
   }
 
-  // 4a. DNS queries (exclude safe domains)
+  // 4a. DNS queries — classify via network allowlist
   for (const domain of (report.network?.dns_queries || [])) {
-    if (isSafeDomain(domain)) continue;
-    score += 20;
-    findings.push({ type: 'suspicious_dns', severity: 'HIGH', detail: `DNS query to non-registry domain: ${domain}`, evidence: domain });
+    const cls = classifyDomain(domain);
+    if (cls === 'safe') continue;
+    if (cls === 'blacklisted') {
+      score += 50;
+      findings.push({ type: 'sandbox_known_exfil_domain', severity: 'CRITICAL', detail: `DNS query to known exfiltration domain: ${domain}`, evidence: domain });
+    } else if (cls === 'tunnel') {
+      score += 30;
+      findings.push({ type: 'sandbox_network_outlier', severity: 'HIGH', detail: `DNS query to tunnel/proxy domain: ${domain}`, evidence: domain });
+    } else {
+      score += 20;
+      findings.push({ type: 'sandbox_network_outlier', severity: 'HIGH', detail: `DNS query to non-registry domain: ${domain}`, evidence: domain });
+    }
   }
 
   // 4b. DNS resolutions — extra detail
   for (const res of (report.network?.dns_resolutions || [])) {
-    if (isSafeDomain(res.domain)) continue;
+    const cls = classifyDomain(res.domain);
+    if (cls === 'safe') continue;
     // Already scored in 4a via dns_queries, but flag the resolution for reporting
     findings.push({ type: 'dns_resolution', severity: 'INFO', detail: `${res.domain} → ${res.ip}`, evidence: `${res.domain}:${res.ip}` });
   }
 
-  // 5a. TCP connections (exclude safe hosts, probe ports, localhost)
+  // 5a. TCP connections — classify via network allowlist
   for (const conn of (report.network?.http_connections || [])) {
-    if (isSafeHost(conn.host)) continue;
     if (SAFE_IPS.includes(conn.host)) continue;
     if (PROBE_PORTS.includes(conn.port)) continue;
-    score += 25;
-    findings.push({ type: 'suspicious_connection', severity: 'HIGH', detail: `TCP connection to ${conn.host}:${conn.port}`, evidence: `${conn.host}:${conn.port}` });
+    const cls = classifyDomain(conn.host);
+    if (cls === 'safe') continue;
+    if (cls === 'blacklisted') {
+      score += 50;
+      findings.push({ type: 'sandbox_known_exfil_domain', severity: 'CRITICAL', detail: `TCP connection to known exfiltration host: ${conn.host}:${conn.port}`, evidence: `${conn.host}:${conn.port}` });
+    } else {
+      score += 25;
+      findings.push({ type: 'suspicious_connection', severity: 'HIGH', detail: `TCP connection to ${conn.host}:${conn.port}`, evidence: `${conn.host}:${conn.port}` });
+    }
   }
 
-  // 5b. TLS connections — non-safe domains
+  // 5b. TLS connections — classify via network allowlist
   for (const tls of (report.network?.tls_connections || [])) {
-    if (isSafeDomain(tls.domain)) continue;
-    score += 20;
-    findings.push({ type: 'suspicious_tls', severity: 'HIGH', detail: `TLS connection to ${tls.domain} (${tls.ip}:${tls.port})`, evidence: tls.domain });
+    const cls = classifyDomain(tls.domain);
+    if (cls === 'safe') continue;
+    if (cls === 'blacklisted') {
+      score += 50;
+      findings.push({ type: 'sandbox_known_exfil_domain', severity: 'CRITICAL', detail: `TLS to known exfiltration domain: ${tls.domain} (${tls.ip}:${tls.port})`, evidence: tls.domain });
+    } else {
+      score += 20;
+      findings.push({ type: 'suspicious_tls', severity: 'HIGH', detail: `TLS connection to ${tls.domain} (${tls.ip}:${tls.port})`, evidence: tls.domain });
+    }
   }
 
   // 5c. HTTP exfiltration detection — scan body snippets for sensitive data
@@ -692,11 +715,17 @@ function scoreFindings(report) {
     }
   }
 
-  // 5d. HTTP requests to non-safe hosts
+  // 5d. HTTP requests — classify via network allowlist
   for (const req of (report.network?.http_requests || [])) {
-    if (isSafeDomain(req.host)) continue;
-    score += 20;
-    findings.push({ type: 'suspicious_http_request', severity: 'HIGH', detail: `${req.method} ${req.host}${req.path}`, evidence: `${req.method} ${req.host}${req.path}` });
+    const cls = classifyDomain(req.host);
+    if (cls === 'safe') continue;
+    if (cls === 'blacklisted') {
+      score += 50;
+      findings.push({ type: 'sandbox_known_exfil_domain', severity: 'CRITICAL', detail: `HTTP request to known exfiltration host: ${req.method} ${req.host}${req.path}`, evidence: `${req.method} ${req.host}${req.path}` });
+    } else {
+      score += 20;
+      findings.push({ type: 'suspicious_http_request', severity: 'HIGH', detail: `${req.method} ${req.host}${req.path}`, evidence: `${req.method} ${req.host}${req.path}` });
+    }
   }
 
   // 5e. Blocked connections (strict mode)

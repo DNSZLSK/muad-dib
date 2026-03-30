@@ -27,12 +27,12 @@ async function runSandboxTests() {
     assert(findings.length === 0, 'Empty report should have no findings');
   });
 
-  test('SANDBOX-NET: scoreFindings detects suspicious DNS', () => {
+  test('SANDBOX-NET: scoreFindings detects suspicious DNS (unknown domain → network outlier)', () => {
     const report = { network: { dns_queries: ['evil.com', 'registry.npmjs.org'] } };
     const { score, findings } = scoreFindings(report);
     assert(score > 0, 'Should score > 0 for evil.com DNS');
-    const dnsFindings = findings.filter(f => f.type === 'suspicious_dns');
-    assert(dnsFindings.length === 1, 'Should have 1 suspicious DNS (evil.com), got ' + dnsFindings.length);
+    const dnsFindings = findings.filter(f => f.type === 'sandbox_network_outlier');
+    assert(dnsFindings.length === 1, 'Should have 1 network outlier (evil.com), got ' + dnsFindings.length);
     assert(dnsFindings[0].evidence === 'evil.com', 'Should flag evil.com');
   });
 
@@ -93,7 +93,7 @@ async function runSandboxTests() {
     const { score, findings } = scoreFindings(report);
     assert(score > 0, 'Should score > 0');
     const httpFindings = findings.filter(f => f.type === 'suspicious_http_request');
-    assert(httpFindings.length === 1, 'Should detect 1 suspicious HTTP request');
+    assert(httpFindings.length === 1, 'Should detect 1 suspicious HTTP request (unknown domain)');
     assert(httpFindings[0].detail.includes('POST evil.com'), 'Should flag POST to evil.com');
   });
 
@@ -739,7 +739,7 @@ async function runSandboxTests() {
     assert(baseScore === 20, 'Base DNS score should be 20, got ' + baseScore);
     // In runSandbox, if a canary is also found, finalScore = baseScore + 50 = 70
     const mockFindings = [
-      { type: 'suspicious_dns', severity: 'HIGH', detail: 'DNS to evil.com', evidence: 'evil.com' },
+      { type: 'sandbox_network_outlier', severity: 'HIGH', detail: 'DNS to evil.com', evidence: 'evil.com' },
       { type: 'canary_exfiltration', severity: 'CRITICAL', detail: 'Token stolen', evidence: 'ghp_R8kLmN2pQ4vW7xY9aB3cD5eF6gH8jK0mN2pQ4vW' }
     ];
     const finalScore = Math.min(100, mockFindings.reduce((s, f) => {
@@ -837,8 +837,8 @@ async function runSandboxTests() {
     };
     const { score, findings } = scoreFindings(report);
     assert(score > 0, 'Should still score network findings');
-    const dnsFindings = findings.filter(f => f.type === 'suspicious_dns');
-    assert(dnsFindings.length === 1, 'Should detect DNS finding');
+    const dnsFindings = findings.filter(f => f.type === 'sandbox_network_outlier');
+    assert(dnsFindings.length === 1, 'Should detect DNS network outlier finding');
   });
 
   test('SANDBOX-ENTRYPOINT: detectStaticCanaryExfiltration finds multiple tokens in entrypoint_output', () => {
@@ -871,7 +871,7 @@ async function runSandboxTests() {
     assert(score > 0, 'Combined report should have non-zero score');
     assert(findings.length >= 3, 'Should have findings from DNS, filesystem, and process');
     const types = findings.map(f => f.type);
-    assert(types.includes('suspicious_dns'), 'Should have DNS finding');
+    assert(types.includes('sandbox_network_outlier'), 'Should have network outlier DNS finding');
     assert(types.includes('suspicious_filesystem'), 'Should have filesystem finding');
     assert(types.includes('unknown_process'), 'Should have process finding');
   });
@@ -1115,6 +1115,238 @@ async function runSandboxTests() {
     assert(useFaketime === true, 'offset>0 should use faketime');
     const nodeTimingOffset = useFaketime ? 0 : timeOffset;
     assert(nodeTimingOffset === 0, 'NODE_TIMING_OFFSET must be 0 when faketime active (prevents double acceleration)');
+  });
+
+  // ============================================
+  // NETWORK ALLOWLIST + OUTLIER DETECTION TESTS
+  // ============================================
+
+  console.log('\n=== SANDBOX NETWORK ALLOWLIST TESTS ===\n');
+
+  const {
+    classifyDomain,
+    SAFE_INSTALL_DOMAINS,
+    KNOWN_EXFIL_DOMAINS,
+    KNOWN_EXFIL_PATTERNS,
+    TUNNEL_DOMAINS,
+    getCustomAllowlist
+  } = require('../../src/sandbox/network-allowlist.js');
+
+  // -- classifyDomain unit tests --
+
+  test('SANDBOX-ALLOWLIST: registry.npmjs.org → safe', () => {
+    assert(classifyDomain('registry.npmjs.org') === 'safe', 'npm registry should be safe');
+  });
+
+  test('SANDBOX-ALLOWLIST: github.com → safe', () => {
+    assert(classifyDomain('github.com') === 'safe', 'github.com should be safe');
+  });
+
+  test('SANDBOX-ALLOWLIST: api.github.com → safe (subdomain match)', () => {
+    assert(classifyDomain('api.github.com') === 'safe', 'api.github.com should be safe');
+  });
+
+  test('SANDBOX-ALLOWLIST: foo.amazonaws.com → safe (S3 binaries)', () => {
+    assert(classifyDomain('foo.amazonaws.com') === 'safe', 'S3 subdomain should be safe');
+  });
+
+  test('SANDBOX-ALLOWLIST: nodejs.org → safe', () => {
+    assert(classifyDomain('nodejs.org') === 'safe', 'nodejs.org should be safe');
+  });
+
+  test('SANDBOX-ALLOWLIST: cdn.jsdelivr.net → safe', () => {
+    assert(classifyDomain('cdn.jsdelivr.net') === 'safe', 'jsdelivr should be safe');
+  });
+
+  test('SANDBOX-ALLOWLIST: unpkg.com → safe', () => {
+    assert(classifyDomain('unpkg.com') === 'safe', 'unpkg should be safe');
+  });
+
+  test('SANDBOX-ALLOWLIST: registry.yarnpkg.com → safe', () => {
+    assert(classifyDomain('registry.yarnpkg.com') === 'safe', 'yarn registry should be safe');
+  });
+
+  test('SANDBOX-ALLOWLIST: webhook.site → blacklisted', () => {
+    assert(classifyDomain('webhook.site') === 'blacklisted', 'webhook.site should be blacklisted');
+  });
+
+  test('SANDBOX-ALLOWLIST: oastify.com → blacklisted', () => {
+    assert(classifyDomain('oastify.com') === 'blacklisted', 'oastify.com should be blacklisted');
+  });
+
+  test('SANDBOX-ALLOWLIST: abc123.oast.online → blacklisted (regex pattern)', () => {
+    assert(classifyDomain('abc123.oast.online') === 'blacklisted', 'OAST subdomain should be blacklisted');
+  });
+
+  test('SANDBOX-ALLOWLIST: x.burpcollaborator.net → blacklisted (regex)', () => {
+    assert(classifyDomain('x.burpcollaborator.net') === 'blacklisted', 'Burp collaborator should be blacklisted');
+  });
+
+  test('SANDBOX-ALLOWLIST: recv.hackmoltrepeat.com → blacklisted (campaign C2)', () => {
+    assert(classifyDomain('recv.hackmoltrepeat.com') === 'blacklisted', 'Campaign C2 should be blacklisted');
+  });
+
+  test('SANDBOX-ALLOWLIST: api.telegram.org → blacklisted (exfil)', () => {
+    assert(classifyDomain('api.telegram.org') === 'blacklisted', 'Telegram bot API should be blacklisted');
+  });
+
+  test('SANDBOX-ALLOWLIST: 45.148.10.212 → blacklisted (TeamPCP C2 IP)', () => {
+    assert(classifyDomain('45.148.10.212') === 'blacklisted', 'TeamPCP IP should be blacklisted');
+  });
+
+  test('SANDBOX-ALLOWLIST: ngrok.io → tunnel', () => {
+    assert(classifyDomain('ngrok.io') === 'tunnel', 'ngrok should be tunnel');
+  });
+
+  test('SANDBOX-ALLOWLIST: abc.ngrok-free.app → tunnel (subdomain)', () => {
+    assert(classifyDomain('abc.ngrok-free.app') === 'tunnel', 'ngrok-free subdomain should be tunnel');
+  });
+
+  test('SANDBOX-ALLOWLIST: trycloudflare.com → tunnel', () => {
+    assert(classifyDomain('trycloudflare.com') === 'tunnel', 'Cloudflare tunnel should be tunnel');
+  });
+
+  test('SANDBOX-ALLOWLIST: random-domain.com → unknown', () => {
+    assert(classifyDomain('random-domain.com') === 'unknown', 'Unknown domain should be unknown');
+  });
+
+  test('SANDBOX-ALLOWLIST: 1.2.3.4 → unknown (non-blacklisted IP)', () => {
+    assert(classifyDomain('1.2.3.4') === 'unknown', 'Unknown IP should be unknown');
+  });
+
+  test('SANDBOX-ALLOWLIST: empty/null inputs → unknown', () => {
+    assert(classifyDomain('') === 'unknown', 'Empty string should be unknown');
+    assert(classifyDomain(null) === 'unknown', 'null should be unknown');
+    assert(classifyDomain(undefined) === 'unknown', 'undefined should be unknown');
+  });
+
+  test('SANDBOX-ALLOWLIST: case insensitive matching', () => {
+    assert(classifyDomain('REGISTRY.NPMJS.ORG') === 'safe', 'Upper case safe domain should match');
+    assert(classifyDomain('Webhook.Site') === 'blacklisted', 'Mixed case blacklisted should match');
+    assert(classifyDomain('ABC.OAST.ONLINE') === 'blacklisted', 'Upper case OAST pattern should match');
+  });
+
+  // -- env var extension --
+
+  test('SANDBOX-ALLOWLIST: MUADDIB_SANDBOX_NETWORK_ALLOWLIST env var extends safe list', () => {
+    const orig = process.env.MUADDIB_SANDBOX_NETWORK_ALLOWLIST;
+    try {
+      process.env.MUADDIB_SANDBOX_NETWORK_ALLOWLIST = 'custom-cdn.example.com, my-registry.corp.net';
+      assert(classifyDomain('custom-cdn.example.com') === 'safe', 'Custom allowlisted domain should be safe');
+      assert(classifyDomain('my-registry.corp.net') === 'safe', 'Custom allowlisted domain should be safe');
+      assert(classifyDomain('evil.com') === 'unknown', 'Non-allowlisted domain should still be unknown');
+    } finally {
+      if (orig === undefined) delete process.env.MUADDIB_SANDBOX_NETWORK_ALLOWLIST;
+      else process.env.MUADDIB_SANDBOX_NETWORK_ALLOWLIST = orig;
+    }
+  });
+
+  // -- scoreFindings integration with classifyDomain --
+
+  test('SANDBOX-NET-ALLOWLIST: blacklisted DNS → sandbox_known_exfil_domain CRITICAL', () => {
+    const report = { network: { dns_queries: ['webhook.site'] } };
+    const { score, findings } = scoreFindings(report);
+    assert(score === 50, 'Blacklisted DNS should score 50, got ' + score);
+    const exfilFindings = findings.filter(f => f.type === 'sandbox_known_exfil_domain');
+    assert(exfilFindings.length === 1, 'Should have 1 sandbox_known_exfil_domain finding');
+    assert(exfilFindings[0].severity === 'CRITICAL', 'Should be CRITICAL severity');
+    assert(exfilFindings[0].evidence === 'webhook.site', 'Evidence should be the domain');
+  });
+
+  test('SANDBOX-NET-ALLOWLIST: OAST pattern DNS → sandbox_known_exfil_domain CRITICAL', () => {
+    const report = { network: { dns_queries: ['abc.oast.live'] } };
+    const { score, findings } = scoreFindings(report);
+    assert(score === 50, 'OAST pattern DNS should score 50, got ' + score);
+    const exfilFindings = findings.filter(f => f.type === 'sandbox_known_exfil_domain');
+    assert(exfilFindings.length === 1, 'Should have 1 sandbox_known_exfil_domain finding');
+    assert(exfilFindings[0].severity === 'CRITICAL', 'Should be CRITICAL');
+  });
+
+  test('SANDBOX-NET-ALLOWLIST: unknown DNS → sandbox_network_outlier HIGH', () => {
+    const report = { network: { dns_queries: ['suspicious-cdn.example.com'] } };
+    const { score, findings } = scoreFindings(report);
+    assert(score === 20, 'Unknown DNS should score 20, got ' + score);
+    const outlierFindings = findings.filter(f => f.type === 'sandbox_network_outlier');
+    assert(outlierFindings.length === 1, 'Should have 1 sandbox_network_outlier finding');
+    assert(outlierFindings[0].severity === 'HIGH', 'Should be HIGH severity');
+  });
+
+  test('SANDBOX-NET-ALLOWLIST: tunnel DNS → sandbox_network_outlier HIGH (score 30)', () => {
+    const report = { network: { dns_queries: ['abc.ngrok.io'] } };
+    const { score, findings } = scoreFindings(report);
+    assert(score === 30, 'Tunnel DNS should score 30, got ' + score);
+    const outlierFindings = findings.filter(f => f.type === 'sandbox_network_outlier');
+    assert(outlierFindings.length === 1, 'Should have 1 sandbox_network_outlier finding');
+    assertIncludes(outlierFindings[0].detail, 'tunnel', 'Detail should mention tunnel');
+  });
+
+  test('SANDBOX-NET-ALLOWLIST: safe DNS → no finding', () => {
+    const report = { network: { dns_queries: ['registry.npmjs.org', 'github.com', 'foo.amazonaws.com'] } };
+    const { score, findings } = scoreFindings(report);
+    assert(score === 0, 'All safe domains should score 0, got ' + score);
+    assert(findings.length === 0, 'Should have 0 findings');
+  });
+
+  test('SANDBOX-NET-ALLOWLIST: blacklisted TCP → sandbox_known_exfil_domain CRITICAL', () => {
+    const report = { network: { http_connections: [
+      { host: '45.148.10.212', port: 443 }
+    ] } };
+    const { score, findings } = scoreFindings(report);
+    assert(score === 50, 'Blacklisted TCP should score 50, got ' + score);
+    const exfilFindings = findings.filter(f => f.type === 'sandbox_known_exfil_domain');
+    assert(exfilFindings.length === 1, 'Should have 1 exfil finding');
+    assert(exfilFindings[0].severity === 'CRITICAL', 'Should be CRITICAL');
+  });
+
+  test('SANDBOX-NET-ALLOWLIST: blacklisted TLS → sandbox_known_exfil_domain CRITICAL', () => {
+    const report = { network: { tls_connections: [
+      { domain: 'oastify.com', ip: '1.2.3.4', port: 443 }
+    ] } };
+    const { score, findings } = scoreFindings(report);
+    assert(score === 50, 'Blacklisted TLS should score 50, got ' + score);
+    const exfilFindings = findings.filter(f => f.type === 'sandbox_known_exfil_domain');
+    assert(exfilFindings.length === 1, 'Should have 1 exfil finding');
+  });
+
+  test('SANDBOX-NET-ALLOWLIST: blacklisted HTTP request → sandbox_known_exfil_domain CRITICAL', () => {
+    const report = { network: { http_requests: [
+      { method: 'POST', host: 'webhook.site', path: '/abc' }
+    ] } };
+    const { score, findings } = scoreFindings(report);
+    assert(score === 50, 'Blacklisted HTTP should score 50, got ' + score);
+    const exfilFindings = findings.filter(f => f.type === 'sandbox_known_exfil_domain');
+    assert(exfilFindings.length === 1, 'Should have 1 exfil finding');
+    assert(exfilFindings[0].severity === 'CRITICAL', 'Should be CRITICAL');
+  });
+
+  test('SANDBOX-NET-ALLOWLIST: mixed blacklisted + safe + unknown in single report', () => {
+    const report = { network: {
+      dns_queries: ['webhook.site', 'registry.npmjs.org', 'random-cdn.com'],
+      http_connections: [{ host: 'github.com', port: 443 }]
+    } };
+    const { score, findings } = scoreFindings(report);
+    // webhook.site → 50, random-cdn.com → 20 = 70
+    assert(score === 70, 'Mixed report should score 70, got ' + score);
+    const exfil = findings.filter(f => f.type === 'sandbox_known_exfil_domain');
+    const outlier = findings.filter(f => f.type === 'sandbox_network_outlier');
+    assert(exfil.length === 1, 'Should have 1 exfil finding (webhook.site)');
+    assert(outlier.length === 1, 'Should have 1 outlier finding (random-cdn.com)');
+  });
+
+  test('SANDBOX-NET-ALLOWLIST: GlassWorm C2 IP in DNS → blacklisted', () => {
+    const report = { network: { dns_queries: ['217.69.3.218'] } };
+    const { findings } = scoreFindings(report);
+    const exfil = findings.filter(f => f.type === 'sandbox_known_exfil_domain');
+    assert(exfil.length === 1, 'GlassWorm C2 IP should trigger exfil finding');
+  });
+
+  test('SANDBOX-NET-ALLOWLIST: multiple blacklisted domains score caps at 100', () => {
+    const report = { network: { dns_queries: [
+      'webhook.site', 'oastify.com', 'burpcollaborator.net'
+    ] } };
+    const { score } = scoreFindings(report);
+    // 50 + 50 + 50 = 150 → capped at 100
+    assert(score === 100, 'Score should cap at 100, got ' + score);
   });
 }
 

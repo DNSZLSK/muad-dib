@@ -243,6 +243,15 @@ const PLAYBOOKS = {
     'Acces a des variables d\'environnement sensibles detecte via monkey-patching runtime (TOKEN, SECRET, KEY, PASSWORD). ' +
     'Verifier si le package a une raison legitime d\'acceder a ces variables. Revoquer les credentials si necessaire.',
 
+  sandbox_network_outlier:
+    'Package contacte un domaine/IP hors allowlist pendant l\'installation. Seulement 0.027% des packages font du DNS hors infrastructure npm. ' +
+    'Verifier le domaine contacte. Si aucune raison legitime (CDN de binaires, service declare en dep), considerer comme suspect.',
+
+  sandbox_known_exfil_domain:
+    'CRITIQUE: Package contacte un domaine d\'exfiltration/C2 connu (OAST, webhook.site, infrastructure de campagne). ' +
+    'Taux de faux positif quasi-nul. Actions: 1. NE PAS installer. 2. Signaler au registry. ' +
+    '3. Si deja installe, isoler la machine et regenerer TOUS les secrets.',
+
   high_entropy_string:
     'Chaine a haute entropie detectee. Verifier si c\'est du base64, hex, ou un payload chiffre. Analyser le contexte d\'utilisation.',
   js_obfuscation_pattern:
