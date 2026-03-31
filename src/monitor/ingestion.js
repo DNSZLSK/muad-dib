@@ -81,6 +81,105 @@ async function getWeeklyDownloads(packageName) {
   }
 }
 
+// --- Trusted dependency diff check ---
+
+const TRUSTED_DEP_AGE_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+/**
+ * Check for new dependencies added to a TRUSTED (popular) package.
+ * Detects supply-chain attacks where a compromised maintainer account adds a
+ * malicious dependency in a patch bump (e.g., axios 1.14.0 → 1.14.1 adding
+ * plain-crypto-js, 2026-03-30).
+ *
+ * @param {string} name - Package name
+ * @param {string} newVersion - Newly published version
+ * @returns {Array} Array of findings (empty if no new deps or on error)
+ */
+async function checkTrustedDepDiff(name, newVersion) {
+  const findings = [];
+  try {
+    // Fetch packument to get version list and dependencies
+    const body = await httpsGet(`https://registry.npmjs.org/${encodeURIComponent(name)}`, 10_000);
+    const packument = JSON.parse(body);
+
+    if (!packument.versions || !packument.time) return findings;
+
+    // Sort versions by publish time (not semver — handles prereleases correctly)
+    const timeMap = packument.time;
+    const versionKeys = Object.keys(packument.versions)
+      .filter(v => timeMap[v])
+      .sort((a, b) => new Date(timeMap[a]) - new Date(timeMap[b]));
+
+    const newIdx = versionKeys.indexOf(newVersion);
+    if (newIdx <= 0) return findings; // First version or not found
+
+    const prevVersion = versionKeys[newIdx - 1];
+
+    const prevDeps = (packument.versions[prevVersion] && packument.versions[prevVersion].dependencies) || {};
+    const newDeps = (packument.versions[newVersion] && packument.versions[newVersion].dependencies) || {};
+
+    // Find newly added dependencies (name not present in previous version)
+    const addedDeps = Object.keys(newDeps).filter(dep => !(dep in prevDeps));
+    if (addedDeps.length === 0) return findings;
+
+    console.log(`[MONITOR] TRUSTED dep diff: ${name} ${prevVersion} → ${newVersion}: +${addedDeps.length} new dep(s): ${addedDeps.join(', ')}`);
+
+    for (const dep of addedDeps) {
+      let ageMs = null;
+      try {
+        const depBody = await httpsGet(`https://registry.npmjs.org/${encodeURIComponent(dep)}`, 5_000);
+        const depData = JSON.parse(depBody);
+        const created = depData.time && depData.time.created;
+        if (created) {
+          ageMs = Date.now() - new Date(created).getTime();
+        }
+      } catch (err) {
+        console.log(`[MONITOR] WARNING: could not check age of dependency ${dep}: ${err.message}`);
+      }
+
+      if (ageMs === null || ageMs < TRUSTED_DEP_AGE_THRESHOLD_MS) {
+        // Unknown or < 7 days old — CRITICAL
+        const ageDays = ageMs !== null ? Math.floor(ageMs / 86400000) : 'unknown';
+        findings.push({
+          type: 'trusted_new_unknown_dependency',
+          severity: 'CRITICAL',
+          confidence: ageMs === null ? 'medium' : 'high',
+          file: 'package.json',
+          message: `TRUSTED package ${name} added unknown dependency ${dep} (age: ${ageDays}d) in version ${prevVersion} → ${newVersion}`,
+          rule_id: 'MUADDIB-TRUSTED-001',
+          mitre: 'T1195.002',
+          dep,
+          depAgeDays: ageDays,
+          prevVersion,
+          newVersion
+        });
+      } else {
+        // Known dependency (>= 7 days old) — HIGH
+        const ageDays = Math.floor(ageMs / 86400000);
+        findings.push({
+          type: 'trusted_new_dependency',
+          severity: 'HIGH',
+          confidence: 'medium',
+          file: 'package.json',
+          message: `TRUSTED package ${name} added new dependency ${dep} (age: ${ageDays}d) in version ${prevVersion} → ${newVersion}`,
+          rule_id: 'MUADDIB-TRUSTED-002',
+          mitre: 'T1195.002',
+          dep,
+          depAgeDays: ageDays,
+          prevVersion,
+          newVersion
+        });
+      }
+    }
+
+    return findings;
+  } catch (err) {
+    // Graceful fallback — log warning, continue as TRUSTED
+    console.log(`[MONITOR] WARNING: trusted dep diff check failed for ${name}@${newVersion}: ${err.message}`);
+    return findings;
+  }
+}
+
 // --- Tarball URL helpers ---
 
 function getNpmTarballUrl(pkgData) {
@@ -583,6 +682,8 @@ module.exports = {
   // HTTP helpers
   httpsGet,
   getWeeklyDownloads,
+  checkTrustedDepDiff,
+  TRUSTED_DEP_AGE_THRESHOLD_MS,
 
   // Tarball URL helpers
   getNpmTarballUrl,

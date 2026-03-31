@@ -98,7 +98,7 @@ const {
 } = require('./temporal.js');
 
 // From ./ingestion.js (will be created — currently in monitor.js)
-const { getNpmLatestTarball, getPyPITarballUrl, getWeeklyDownloads } = require('./ingestion.js');
+const { getNpmLatestTarball, getPyPITarballUrl, getWeeklyDownloads, checkTrustedDepDiff } = require('./ingestion.js');
 
 // From ./tarball-archive.js
 const { archiveSuspectTarball } = require('./tarball-archive.js');
@@ -518,14 +518,34 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
         if (ecosystem === 'npm' && !hasIOCMatch(result) && !hasTyposquat(result) && !hasHighOrCritical(result)) {
           const downloads = await getWeeklyDownloads(name);
           if (downloads >= POPULAR_THRESHOLD) {
-            stats.scanned++;
-            const elapsed = Date.now() - startTime;
-            stats.totalTimeMs += elapsed;
-            stats.clean++;
-            console.log(`[MONITOR] TRUSTED (popular): ${name}@${version} (${Math.round(downloads / 1000)}k downloads/week, ${counts.join(', ')})`);
-            updateScanStats('clean');
-            recordTrainingSample(result, { name, version, ecosystem, label: 'clean', registryMeta: meta, unpackedSize: meta.unpackedSize, npmRegistryMeta, fileCountTotal, hasTests });
-            return { sandboxResult: null, staticClean: true };
+            // Dependency diff check: detect supply-chain injection on TRUSTED packages
+            // (e.g., axios 1.14.0 → 1.14.1 adding unknown plain-crypto-js, 2026-03-30)
+            const trustedFindings = await checkTrustedDepDiff(name, version);
+            const hasCriticalDepFinding = trustedFindings.some(f => f.severity === 'CRITICAL');
+
+            if (hasCriticalDepFinding) {
+              // CRITICAL: unknown/new dependency — bypass TRUSTED, route to full scan + sandbox
+              console.log(`[MONITOR] TRUSTED BYPASS: ${name}@${version} — new unknown dependency detected, routing to full scan`);
+              result.threats.push(...trustedFindings);
+              for (const f of trustedFindings) {
+                if (f.severity === 'CRITICAL') result.summary.critical = (result.summary.critical || 0) + 1;
+                else if (f.severity === 'HIGH') result.summary.high = (result.summary.high || 0) + 1;
+              }
+              // Fall through to full classification below (do NOT return)
+            } else {
+              // No CRITICAL dep findings — normal TRUSTED skip (log HIGH findings if any)
+              for (const f of trustedFindings) {
+                console.log(`[MONITOR] TRUSTED dep change: ${f.message}`);
+              }
+              stats.scanned++;
+              const elapsed = Date.now() - startTime;
+              stats.totalTimeMs += elapsed;
+              stats.clean++;
+              console.log(`[MONITOR] TRUSTED (popular): ${name}@${version} (${Math.round(downloads / 1000)}k downloads/week, ${counts.join(', ')})`);
+              updateScanStats('clean');
+              recordTrainingSample(result, { name, version, ecosystem, label: 'clean', registryMeta: meta, unpackedSize: meta.unpackedSize, npmRegistryMeta, fileCountTotal, hasTests });
+              return { sandboxResult: null, staticClean: true };
+            }
           }
         }
 

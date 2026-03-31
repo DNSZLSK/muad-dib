@@ -315,6 +315,20 @@ async function runMonitorWiringTests() {
       `QUEUE_WARNING_THRESHOLD should be 5000, got ${daemon.QUEUE_WARNING_THRESHOLD}`);
   });
 
+  test('WIRING: queue.js imports checkTrustedDepDiff from ingestion.js', () => {
+    assert(typeof ingestion.checkTrustedDepDiff === 'function',
+      'ingestion.checkTrustedDepDiff should be a function');
+    assert(typeof ingestion.TRUSTED_DEP_AGE_THRESHOLD_MS === 'number',
+      'ingestion.TRUSTED_DEP_AGE_THRESHOLD_MS should be a number');
+  });
+
+  test('WIRING: monitor re-exports checkTrustedDepDiff and TRUSTED_DEP_AGE_THRESHOLD_MS', () => {
+    assert(typeof monitor.checkTrustedDepDiff === 'function',
+      'monitor.checkTrustedDepDiff should be a function');
+    assert(monitor.TRUSTED_DEP_AGE_THRESHOLD_MS === ingestion.TRUSTED_DEP_AGE_THRESHOLD_MS,
+      'TRUSTED_DEP_AGE_THRESHOLD_MS should match between monitor and ingestion');
+  });
+
   test('WIRING: monitor re-exports PROCESS_LOOP_INTERVAL and QUEUE_WARNING_THRESHOLD', () => {
     assert(monitor.PROCESS_LOOP_INTERVAL === daemon.PROCESS_LOOP_INTERVAL,
       'monitor.PROCESS_LOOP_INTERVAL should match daemon.PROCESS_LOOP_INTERVAL');
