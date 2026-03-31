@@ -12,6 +12,8 @@ const { processQueue, SCAN_CONCURRENCY } = require('./queue.js');
 const { startHealthcheck } = require('./healthcheck.js');
 
 const POLL_INTERVAL = 60_000;
+const PROCESS_LOOP_INTERVAL = 2_000;    // Queue check interval when empty
+const QUEUE_WARNING_THRESHOLD = 5_000;  // Warn if queue depth exceeds this
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -171,15 +173,21 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
   console.log('[MONITOR] npm changes stream enabled (replicate.npmjs.com) with RSS fallback');
   console.log(`[MONITOR] Scan concurrency: ${SCAN_CONCURRENCY} (MUADDIB_SCAN_CONCURRENCY to override)`);
   console.log(`[MONITOR] Sandbox concurrency: ${SANDBOX_CONCURRENCY_MAX} (MUADDIB_SANDBOX_CONCURRENCY to override)`);
-  console.log(`[MONITOR] Polling every ${POLL_INTERVAL / 1000}s. Ctrl+C to stop.\n`);
+  console.log(`[MONITOR] Polling every ${POLL_INTERVAL / 1000}s (decoupled from processing). Ctrl+C to stop.\n`);
 
   let running = true;
+  let pollIntervalHandle = null;  // Decoupled poll timer — set after initial poll
 
   // Graceful shutdown handler (shared by SIGINT and SIGTERM)
   // Daily report is NEVER sent on shutdown — it only fires at 08:00 Paris time.
   // Counters are persisted to disk so they survive the restart.
   async function gracefulShutdown(signal) {
     console.log(`\n[MONITOR] Received ${signal} — shutting down...`);
+    running = false;
+    if (pollIntervalHandle) {
+      clearInterval(pollIntervalHandle);
+      pollIntervalHandle = null;
+    }
     healthcheck.stop();
     // Flush all pending scope groups before exit
     for (const [scope, group] of pendingGrouped) {
@@ -191,25 +199,47 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
     saveState(state, stats);
     reportStats(stats);
     console.log('[MONITOR] State saved. Bye!');
-    running = false;
     process.exit(0);
   }
 
   process.on('SIGINT', () => gracefulShutdown('SIGINT'));
   process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 
-  // Initial poll + scan
+  // Initial poll + scan (sequential for first run)
   await poll(state, scanQueue, stats);
   saveState(state, stats);
   await processQueue(scanQueue, stats, dailyAlerts, recentlyScanned, downloadsCache, sandboxAvailableRef.value);
 
-  // Interval polling
+  // ─── Decoupled polling ───
+  // Poll runs on its own interval, independent of processing.
+  // This ensures new packages are ingested even while a large batch is being scanned.
+  // Without this, a 2h processing batch blocks all polling — packages published and
+  // removed during that window are never seen (e.g. axios/plain-crypto-js 2026-03-30).
+  let pollInProgress = false;
+  pollIntervalHandle = setInterval(async () => {
+    if (!running || pollInProgress) return;
+    pollInProgress = true;
+    try {
+      await poll(state, scanQueue, stats);
+      saveState(state, stats);
+      if (scanQueue.length > QUEUE_WARNING_THRESHOLD) {
+        console.log(`[MONITOR] WARNING: scan queue depth ${scanQueue.length} — processing may be lagging behind ingestion`);
+      }
+    } catch (err) {
+      console.error('[MONITOR] Poll error (interval):', err.message);
+    } finally {
+      pollInProgress = false;
+    }
+  }, POLL_INTERVAL);
+
+  // ─── Continuous processing loop ───
+  // Consumes scanQueue independently of polling. Workers inside processQueue
+  // check scanQueue.length > 0 after each item, so items added by a concurrent
+  // poll are picked up immediately by running workers.
   while (running) {
-    await sleep(POLL_INTERVAL);
-    if (!running) break;
-    await poll(state, scanQueue, stats);
-    saveState(state, stats);
-    await processQueue(scanQueue, stats, dailyAlerts, recentlyScanned, downloadsCache, sandboxAvailableRef.value);
+    if (scanQueue.length > 0) {
+      await processQueue(scanQueue, stats, dailyAlerts, recentlyScanned, downloadsCache, sandboxAvailableRef.value);
+    }
 
     // Hourly stats report + cache purge
     if (Date.now() - stats.lastReportTime >= 3600_000) {
@@ -221,6 +251,9 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
     if (isDailyReportDue(stats)) {
       await sendDailyReport(stats, dailyAlerts, recentlyScanned, downloadsCache);
     }
+
+    // Short pause before re-checking queue — yields event loop for poll interval
+    await sleep(PROCESS_LOOP_INTERVAL);
   }
 }
 
@@ -231,5 +264,7 @@ module.exports = {
   reportStats,
   isDailyReportDue,
   sleep,
-  POLL_INTERVAL
+  POLL_INTERVAL,
+  PROCESS_LOOP_INTERVAL,
+  QUEUE_WARNING_THRESHOLD
 };

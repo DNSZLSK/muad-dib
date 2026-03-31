@@ -236,6 +236,8 @@ module.exports = {
     set(v) { ingestionModule.setConsecutivePollErrors(v); }
   },
   POLL_MAX_BACKOFF: ingestionModule.POLL_MAX_BACKOFF,
+  PROCESS_LOOP_INTERVAL: daemonModule.PROCESS_LOOP_INTERVAL,
+  QUEUE_WARNING_THRESHOLD: daemonModule.QUEUE_WARNING_THRESHOLD,
   LAST_DAILY_REPORT_FILE: stateModule.LAST_DAILY_REPORT_FILE,
   loadLastDailyReportDate: stateModule.loadLastDailyReportDate,
   saveLastDailyReportDate: stateModule.saveLastDailyReportDate,
