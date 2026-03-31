@@ -298,6 +298,31 @@ async function runMonitorWiringTests() {
   });
 
   // ─────────────────────────────────────────────
+  // 6b. Decoupled polling architecture (v2.10.42)
+  // ─────────────────────────────────────────────
+
+  test('WIRING: daemon exports PROCESS_LOOP_INTERVAL constant', () => {
+    assert(typeof daemon.PROCESS_LOOP_INTERVAL === 'number',
+      `PROCESS_LOOP_INTERVAL should be a number, got ${typeof daemon.PROCESS_LOOP_INTERVAL}`);
+    assert(daemon.PROCESS_LOOP_INTERVAL > 0 && daemon.PROCESS_LOOP_INTERVAL < daemon.POLL_INTERVAL,
+      `PROCESS_LOOP_INTERVAL (${daemon.PROCESS_LOOP_INTERVAL}) should be > 0 and < POLL_INTERVAL (${daemon.POLL_INTERVAL})`);
+  });
+
+  test('WIRING: daemon exports QUEUE_WARNING_THRESHOLD constant', () => {
+    assert(typeof daemon.QUEUE_WARNING_THRESHOLD === 'number',
+      `QUEUE_WARNING_THRESHOLD should be a number, got ${typeof daemon.QUEUE_WARNING_THRESHOLD}`);
+    assert(daemon.QUEUE_WARNING_THRESHOLD === 5000,
+      `QUEUE_WARNING_THRESHOLD should be 5000, got ${daemon.QUEUE_WARNING_THRESHOLD}`);
+  });
+
+  test('WIRING: monitor re-exports PROCESS_LOOP_INTERVAL and QUEUE_WARNING_THRESHOLD', () => {
+    assert(monitor.PROCESS_LOOP_INTERVAL === daemon.PROCESS_LOOP_INTERVAL,
+      'monitor.PROCESS_LOOP_INTERVAL should match daemon.PROCESS_LOOP_INTERVAL');
+    assert(monitor.QUEUE_WARNING_THRESHOLD === daemon.QUEUE_WARNING_THRESHOLD,
+      'monitor.QUEUE_WARNING_THRESHOLD should match daemon.QUEUE_WARNING_THRESHOLD');
+  });
+
+  // ─────────────────────────────────────────────
   // 7. Pipeline wiring: function signatures
   // ─────────────────────────────────────────────
 

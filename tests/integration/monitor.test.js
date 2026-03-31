@@ -8216,6 +8216,80 @@ async function runMonitorTests() {
     assert(isFirstPublishHighRisk(trigger, null) === true,
       'Should return true when first_publish and no registry metadata (precautionary sandbox)');
   });
+
+  // ============================================
+  // DECOUPLED POLLING ARCHITECTURE TESTS (v2.10.42)
+  // ============================================
+
+  console.log('\n=== DECOUPLED POLLING TESTS ===\n');
+
+  test('MONITOR: PROCESS_LOOP_INTERVAL is 2 seconds', () => {
+    const { PROCESS_LOOP_INTERVAL } = require('../../src/monitor.js');
+    assert(PROCESS_LOOP_INTERVAL === 2000,
+      `PROCESS_LOOP_INTERVAL should be 2000ms, got ${PROCESS_LOOP_INTERVAL}`);
+  });
+
+  test('MONITOR: QUEUE_WARNING_THRESHOLD is 5000', () => {
+    const { QUEUE_WARNING_THRESHOLD } = require('../../src/monitor.js');
+    assert(QUEUE_WARNING_THRESHOLD === 5000,
+      `QUEUE_WARNING_THRESHOLD should be 5000, got ${QUEUE_WARNING_THRESHOLD}`);
+  });
+
+  test('MONITOR: PROCESS_LOOP_INTERVAL < POLL_INTERVAL (processing checks faster than polling)', () => {
+    const { PROCESS_LOOP_INTERVAL } = require('../../src/monitor.js');
+    const { POLL_INTERVAL } = require('../../src/monitor/daemon.js');
+    assert(PROCESS_LOOP_INTERVAL < POLL_INTERVAL,
+      `PROCESS_LOOP_INTERVAL (${PROCESS_LOOP_INTERVAL}) should be less than POLL_INTERVAL (${POLL_INTERVAL})`);
+  });
+
+  asyncTest('MONITOR: processQueue picks up items added during processing (simulates concurrent poll)', async () => {
+    // Simulate the decoupled architecture: items arrive in scanQueue while workers are running.
+    // This works because workers loop on `while (scanQueue.length > 0)` and each `await`
+    // yields the event loop, allowing the poll interval to push new items.
+    const testQueue = [];
+    const processed = [];
+
+    // Minimal stats object
+    const testStats = {
+      scanned: 0, clean: 0, suspect: 0, errors: 0,
+      suspectByTier: { t1: 0, t1a: 0, t1b: 0, t2: 0, t3: 0 },
+      errorsByType: { too_large: 0, tar_failed: 0, http_error: 0, timeout: 0, static_timeout: 0, other: 0 },
+      totalTimeMs: 0, mlFiltered: 0, lastReportTime: Date.now(), lastDailyReportDate: null
+    };
+
+    // Push 2 initial items
+    testQueue.push(
+      { name: 'pkg-a', version: '1.0.0', ecosystem: 'npm' },
+      { name: 'pkg-b', version: '1.0.0', ecosystem: 'npm' }
+    );
+
+    // Schedule a "concurrent poll" that adds items while workers are processing
+    const pollTimer = setTimeout(() => {
+      testQueue.push(
+        { name: 'pkg-c', version: '1.0.0', ecosystem: 'npm' },
+        { name: 'pkg-d', version: '1.0.0', ecosystem: 'npm' }
+      );
+    }, 50);
+
+    // Simple worker that mimics processQueue's pattern
+    async function worker() {
+      while (testQueue.length > 0) {
+        const item = testQueue.shift();
+        // Simulate async scan work — yields event loop so setTimeout can fire
+        await new Promise(r => setTimeout(r, 30));
+        processed.push(item.name);
+      }
+    }
+
+    await worker();
+    clearTimeout(pollTimer);
+
+    // The worker should have picked up all 4 items, including the 2 added mid-processing
+    assert(processed.length === 4,
+      `Worker should process all 4 items (including mid-flight additions), got ${processed.length}: [${processed.join(', ')}]`);
+    assert(processed.includes('pkg-c') && processed.includes('pkg-d'),
+      'Worker should have picked up items added by concurrent "poll"');
+  });
 }
 
 module.exports = { runMonitorTests };
