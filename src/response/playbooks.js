@@ -829,6 +829,15 @@ const PLAYBOOKS = {
   lifecycle_missing_script:
     'CRITIQUE: Script lifecycle reference un fichier inexistant dans le package. Script fantome. ' +
     'Le payload peut etre injecte dynamiquement ou lors d\'une mise a jour. Installer avec --ignore-scripts. Supprimer le package.',
+
+  trusted_new_unknown_dependency:
+    'CRITIQUE: Package populaire (TRUSTED) a ajoute une dependance inconnue ou tres recente (<7 jours). ' +
+    'Indicateur de compromission de compte mainteneur (supply-chain attack). Bloquer la mise a jour. ' +
+    'Verifier le changelog, les commits recents, et contacter le mainteneur. Inspecter la nouvelle dependance.',
+
+  trusted_new_dependency:
+    'HAUTE: Package populaire (TRUSTED) a ajoute une nouvelle dependance connue. ' +
+    'Verifier le changelog et la legitimite de l\'ajout. Pas de blocage immediat mais surveillance renforcee.',
 };
 
 function getPlaybook(threatType) {

@@ -2206,6 +2206,30 @@ const RULES = {
     ],
     mitre: 'T1195.002'
   },
+  // Trusted dependency diff detections (monitor-only)
+  trusted_new_unknown_dependency: {
+    id: 'MUADDIB-TRUSTED-001',
+    name: 'Trusted Package Added Unknown Dependency',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Un package TRUSTED (>50k downloads/semaine) a ajoute une nouvelle dependance inconnue ou tres recente (<7 jours) — indicateur de compromission de compte mainteneur (supply-chain attack type axios/plain-crypto-js).',
+    references: [
+      'https://attack.mitre.org/techniques/T1195.002/',
+      'https://blog.sonatype.com/malicious-npm-packages-targeting-popular-libraries'
+    ],
+    mitre: 'T1195.002'
+  },
+  trusted_new_dependency: {
+    id: 'MUADDIB-TRUSTED-002',
+    name: 'Trusted Package Added New Dependency',
+    severity: 'HIGH',
+    confidence: 'medium',
+    description: 'Un package TRUSTED (>50k downloads/semaine) a ajoute une nouvelle dependance connue (>7 jours) dans un bump de version — changement de surface d\'attaque a verifier.',
+    references: [
+      'https://attack.mitre.org/techniques/T1195.002/'
+    ],
+    mitre: 'T1195.002'
+  },
 };
 
 function getRule(type) {

@@ -216,6 +216,8 @@ module.exports = {
   formatFindings: classifyModule.formatFindings,
   IOC_MATCH_TYPES: classifyModule.IOC_MATCH_TYPES,
   getWeeklyDownloads: ingestionModule.getWeeklyDownloads,
+  checkTrustedDepDiff: ingestionModule.checkTrustedDepDiff,
+  TRUSTED_DEP_AGE_THRESHOLD_MS: ingestionModule.TRUSTED_DEP_AGE_THRESHOLD_MS,
   POPULAR_THRESHOLD: classifyModule.POPULAR_THRESHOLD,
   downloadsCache: classifyModule.downloadsCache,
   DOWNLOADS_CACHE_TTL: classifyModule.DOWNLOADS_CACHE_TTL,

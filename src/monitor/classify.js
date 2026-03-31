@@ -56,7 +56,8 @@ const HIGH_CONFIDENCE_MALICE_TYPES = new Set([
   'systemd_persistence',                   // writeFile to systemd/ or systemctl enable (CanisterWorm T1543.002)
   'npm_token_steal',                       // exec("npm config get _authToken") (CanisterWorm findNpmTokens)
   'root_filesystem_wipe',                  // rm -rf / (CanisterWorm kamikaze.sh wiper T1485)
-  'proc_mem_scan'                          // /proc/mem scanning (TeamPCP Trivy credential stealer)
+  'proc_mem_scan',                         // /proc/mem scanning (TeamPCP Trivy credential stealer)
+  'trusted_new_unknown_dependency'         // TRUSTED package added unknown/new (<7d) dependency (account takeover)
 ]);
 
 // Lifecycle compound types that indicate real malicious intent beyond a simple postinstall

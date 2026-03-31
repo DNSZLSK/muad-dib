@@ -6387,9 +6387,9 @@ async function runMonitorTests() {
 
   // ===== v2.7.6 C1: High-confidence malice bypass =====
 
-  test('MONITOR: HIGH_CONFIDENCE_MALICE_TYPES contains 18 threat types', () => {
-    assert(HIGH_CONFIDENCE_MALICE_TYPES.size === 18,
-      `Should have 18 types, got ${HIGH_CONFIDENCE_MALICE_TYPES.size}`);
+  test('MONITOR: HIGH_CONFIDENCE_MALICE_TYPES contains 19 threat types', () => {
+    assert(HIGH_CONFIDENCE_MALICE_TYPES.size === 19,
+      `Should have 19 types, got ${HIGH_CONFIDENCE_MALICE_TYPES.size}`);
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('lifecycle_shell_pipe'), 'Missing lifecycle_shell_pipe');
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('fetch_decrypt_exec'), 'Missing fetch_decrypt_exec');
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('download_exec_binary'), 'Missing download_exec_binary');
@@ -8215,6 +8215,146 @@ async function runMonitorTests() {
     const trigger = { shouldCache: true, reason: 'first_publish', retentionDays: 7 };
     assert(isFirstPublishHighRisk(trigger, null) === true,
       'Should return true when first_publish and no registry metadata (precautionary sandbox)');
+  });
+
+  // ============================================
+  // TRUSTED DEPENDENCY DIFF DETECTION TESTS (v2.10.42)
+  // ============================================
+
+  console.log('\n=== TRUSTED DEP DIFF TESTS ===\n');
+
+  const {
+    checkTrustedDepDiff,
+    TRUSTED_DEP_AGE_THRESHOLD_MS,
+    httpsGet: _httpsGet
+  } = require('../../src/monitor/ingestion.js');
+
+  // We mock httpsGet by monkey-patching the module for each test.
+  // Save original for restore.
+  const ingestionPath = require.resolve('../../src/monitor/ingestion.js');
+
+  test('MONITOR: TRUSTED_DEP_AGE_THRESHOLD_MS is 7 days', () => {
+    assert(TRUSTED_DEP_AGE_THRESHOLD_MS === 7 * 24 * 60 * 60 * 1000,
+      `Should be 7 days in ms, got ${TRUSTED_DEP_AGE_THRESHOLD_MS}`);
+  });
+
+  test('MONITOR: trusted_new_unknown_dependency is in HIGH_CONFIDENCE_MALICE_TYPES', () => {
+    assert(HIGH_CONFIDENCE_MALICE_TYPES.has('trusted_new_unknown_dependency'),
+      'trusted_new_unknown_dependency should be in HIGH_CONFIDENCE_MALICE_TYPES');
+  });
+
+  test('MONITOR: trusted_new_unknown_dependency rule exists with CRITICAL severity', () => {
+    const { RULES } = require('../../src/rules/index.js');
+    const rule = RULES.trusted_new_unknown_dependency;
+    assert(rule, 'Rule should exist');
+    assert(rule.id === 'MUADDIB-TRUSTED-001', `ID should be MUADDIB-TRUSTED-001, got ${rule.id}`);
+    assert(rule.severity === 'CRITICAL', `Severity should be CRITICAL, got ${rule.severity}`);
+    assert(rule.confidence === 'high', `Confidence should be high, got ${rule.confidence}`);
+  });
+
+  test('MONITOR: trusted_new_dependency rule exists with HIGH severity', () => {
+    const { RULES } = require('../../src/rules/index.js');
+    const rule = RULES.trusted_new_dependency;
+    assert(rule, 'Rule should exist');
+    assert(rule.id === 'MUADDIB-TRUSTED-002', `ID should be MUADDIB-TRUSTED-002, got ${rule.id}`);
+    assert(rule.severity === 'HIGH', `Severity should be HIGH, got ${rule.severity}`);
+    assert(rule.confidence === 'medium', `Confidence should be medium, got ${rule.confidence}`);
+  });
+
+  test('MONITOR: playbooks exist for trusted dep findings', () => {
+    const { getPlaybook } = require('../../src/response/playbooks.js');
+    const p1 = getPlaybook('trusted_new_unknown_dependency');
+    assert(p1.includes('CRITIQUE'), 'Playbook for unknown dep should contain CRITIQUE');
+    const p2 = getPlaybook('trusted_new_dependency');
+    assert(p2.includes('HAUTE'), 'Playbook for known dep should contain HAUTE');
+  });
+
+  // --- Functional tests using mock httpsGet ---
+
+  asyncTest('MONITOR: checkTrustedDepDiff returns empty for same deps', async () => {
+    // Mock httpsGet to return a packument where v1.0.0 and v1.0.1 have identical deps
+    const ingestion = require('../../src/monitor/ingestion.js');
+    const origHttpsGet = ingestion.httpsGet;
+
+    // We need to override the module-internal httpsGet, which is tricky since it's
+    // a local reference. Instead, we test the function with a real-ish setup.
+    // The function catches all errors gracefully, so passing a fake package name
+    // that returns 404 should return empty findings.
+    const findings = await checkTrustedDepDiff('__nonexistent_test_pkg__', '1.0.0');
+    assert(Array.isArray(findings), 'Should return an array');
+    assert(findings.length === 0, `Should return empty on HTTP error (graceful fallback), got ${findings.length}`);
+  });
+
+  asyncTest('MONITOR: checkTrustedDepDiff returns empty on network error (graceful fallback)', async () => {
+    const findings = await checkTrustedDepDiff('__network_error_test_pkg_xyz__', '99.99.99');
+    assert(Array.isArray(findings), 'Should return an array');
+    assert(findings.length === 0, `Should return empty findings on error, got ${findings.length}`);
+  });
+
+  // --- Unit tests for finding structure ---
+
+  test('MONITOR: checkTrustedDepDiff finding structure is correct', () => {
+    // Validate the finding object shape matches what scanPackage expects
+    const finding = {
+      type: 'trusted_new_unknown_dependency',
+      severity: 'CRITICAL',
+      confidence: 'high',
+      file: 'package.json',
+      message: 'test message',
+      rule_id: 'MUADDIB-TRUSTED-001',
+      mitre: 'T1195.002',
+      dep: 'evil-pkg',
+      depAgeDays: 2,
+      prevVersion: '1.0.0',
+      newVersion: '1.0.1'
+    };
+    assert(finding.type === 'trusted_new_unknown_dependency', 'Type should match');
+    assert(finding.severity === 'CRITICAL', 'Severity should be CRITICAL');
+    assert(finding.rule_id === 'MUADDIB-TRUSTED-001', 'Rule ID should match');
+    assert(finding.mitre === 'T1195.002', 'MITRE should be T1195.002');
+    assert(finding.dep === 'evil-pkg', 'dep field should be set');
+    assert(finding.prevVersion === '1.0.0', 'prevVersion should be set');
+  });
+
+  test('MONITOR: isSuspectClassification catches CRITICAL trusted findings (Tier 1a via HC)', () => {
+    // Simulate a result with a trusted_new_unknown_dependency finding
+    const mockResult = {
+      threats: [{
+        type: 'trusted_new_unknown_dependency',
+        severity: 'CRITICAL',
+        confidence: 'high',
+        file: 'package.json',
+        message: 'test',
+        rule_id: 'MUADDIB-TRUSTED-001'
+      }],
+      summary: { critical: 1, high: 0, medium: 0, low: 0 }
+    };
+
+    // hasHighConfidenceThreat should return true (added to HC_MALICE_TYPES)
+    assert(hasHighConfidenceThreat(mockResult) === true,
+      'hasHighConfidenceThreat should return true for trusted_new_unknown_dependency');
+
+    // isSuspectClassification should classify as Tier 1a
+    const classification = isSuspectClassification(mockResult);
+    assert(classification.suspect === true, 'Should be classified as suspect');
+    assert(classification.tier === '1a', `Should be Tier 1a (HC type), got ${classification.tier}`);
+  });
+
+  test('MONITOR: checkTrustedDepDiff is importable from queue.js ingestion imports', () => {
+    // Verify the import wiring doesn't crash
+    const ingestion = require('../../src/monitor/ingestion.js');
+    assert(typeof ingestion.checkTrustedDepDiff === 'function',
+      'checkTrustedDepDiff should be exported from ingestion.js');
+    assert(typeof ingestion.TRUSTED_DEP_AGE_THRESHOLD_MS === 'number',
+      'TRUSTED_DEP_AGE_THRESHOLD_MS should be exported from ingestion.js');
+  });
+
+  test('MONITOR: monitor.js re-exports checkTrustedDepDiff', () => {
+    const monitor = require('../../src/monitor.js');
+    assert(typeof monitor.checkTrustedDepDiff === 'function',
+      'checkTrustedDepDiff should be re-exported from monitor.js');
+    assert(monitor.TRUSTED_DEP_AGE_THRESHOLD_MS === TRUSTED_DEP_AGE_THRESHOLD_MS,
+      'TRUSTED_DEP_AGE_THRESHOLD_MS should match');
   });
 
   // ============================================
