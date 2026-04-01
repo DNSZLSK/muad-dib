@@ -103,6 +103,9 @@ const { getNpmLatestTarball, getPyPITarballUrl, getWeeklyDownloads, checkTrusted
 // From ./tarball-archive.js
 const { archiveSuspectTarball } = require('./tarball-archive.js');
 
+// From ./deferred-sandbox.js
+const { enqueueDeferred } = require('./deferred-sandbox.js');
+
 // --- Constants ---
 
 const SCAN_CONCURRENCY = Math.max(1, parseInt(process.env.MUADDIB_SCAN_CONCURRENCY, 10) || 8);
@@ -686,10 +689,30 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
           } catch (err) {
             console.error(`[MONITOR] SANDBOX error for ${name}@${version}: ${err.message}`);
           }
+        } else if (tier === '1b' && sandboxAvailable) {
+          console.log(`[MONITOR] SANDBOX DEFERRED (T1b, score=${riskScore} < 25, queue ${scanQueue.length} >= 20): ${name}@${version}`);
+          enqueueDeferred({
+            name, version, ecosystem, tier, riskScore, tarballUrl,
+            enqueuedAt: Date.now(),
+            staticResult: result,
+            npmRegistryMeta,
+            retries: 0
+          });
+          stats.sandboxDeferred = (stats.sandboxDeferred || 0) + 1;
         } else if (tier === '1b') {
-          console.log(`[MONITOR] SANDBOX SKIPPED (T1b, score=${riskScore} < 25, queue ${scanQueue.length} >= 20): ${name}@${version}`);
+          console.log(`[MONITOR] SANDBOX SKIPPED (T1b, no Docker): ${name}@${version}`);
+        } else if (tier === 2 && sandboxAvailable) {
+          console.log(`[MONITOR] SANDBOX DEFERRED (T2, queue ${scanQueue.length} >= 50): ${name}@${version}`);
+          enqueueDeferred({
+            name, version, ecosystem, tier, riskScore, tarballUrl,
+            enqueuedAt: Date.now(),
+            staticResult: result,
+            npmRegistryMeta,
+            retries: 0
+          });
+          stats.sandboxDeferred = (stats.sandboxDeferred || 0) + 1;
         } else if (tier === 2) {
-          console.log(`[MONITOR] SANDBOX SKIPPED (T2, queue ${scanQueue.length} >= 50): ${name}@${version}`);
+          console.log(`[MONITOR] SANDBOX SKIPPED (T2, no Docker): ${name}@${version}`);
         }
 
         stats.scanned++;

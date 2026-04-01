@@ -68,6 +68,7 @@ const { runSandboxImprovementTests } = require('./integration/sandbox-improvemen
 const { runBlueTeamV8bTests } = require('./integration/blue-team-v8b.test');
 const { runHealthcheckTests } = require('./integration/healthcheck.test');
 const { runMonitorWiringTests } = require('./integration/monitor-wiring.test');
+const { runDeferredSandboxTests } = require('./integration/deferred-sandbox.test');
 
 // Temporal analysis tests
 const { runTemporalAnalysisTests } = require('./temporal/temporal-analysis.test');
@@ -208,6 +209,9 @@ async function timed(name, fn) {
 
   // Monitor wiring tests (post-refactoring regression guard, v2.10.30)
   await timed('monitor-wiring', runMonitorWiringTests);
+
+  // Deferred sandbox queue tests (v2.10.46)
+  await timed('deferred-sandbox', runDeferredSandboxTests);
 
   // Utility tests
   await timed('utils', runUtilsTests);

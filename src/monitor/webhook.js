@@ -894,6 +894,9 @@ function buildDailyReportEmbed(stats, dailyAlerts) {
         { name: 'ML', value: mlText, inline: true },
         { name: 'LLM Detective', value: llmText, inline: true },
         { name: 'Top Suspects', value: top3Text, inline: false },
+        ...((stats.sandboxDeferred || stats.deferredProcessed || stats.deferredExpired)
+          ? [{ name: 'Deferred Sandbox', value: `Enqueued: ${stats.sandboxDeferred || 0} | Processed: ${stats.deferredProcessed || 0} | Expired: ${stats.deferredExpired || 0}`, inline: false }]
+          : []),
         { name: 'System', value: healthText, inline: false }
       ],
       footer: {
@@ -939,6 +942,9 @@ async function sendDailyReport(stats, dailyAlerts, recentlyScanned, downloadsCac
     mlFiltered: stats.mlFiltered || 0,
     llmAnalyzed: stats.llmAnalyzed || 0,
     llmSuppressed: stats.llmSuppressed || 0,
+    sandboxDeferred: stats.sandboxDeferred || 0,
+    deferredProcessed: stats.deferredProcessed || 0,
+    deferredExpired: stats.deferredExpired || 0,
     changesStreamPackages: stats.changesStreamPackages || 0,
     topSuspects: dailyAlerts.slice().sort((a, b) => b.findingsCount - a.findingsCount).slice(0, 10)
   });
@@ -976,6 +982,9 @@ async function sendDailyReport(stats, dailyAlerts, recentlyScanned, downloadsCac
   stats.mlFiltered = 0;
   stats.llmAnalyzed = 0;
   stats.llmSuppressed = 0;
+  stats.sandboxDeferred = 0;
+  stats.deferredProcessed = 0;
+  stats.deferredExpired = 0;
   // Reset LLM detective internal stats
   try { require('../ml/llm-detective.js').resetStats(); } catch {}
   stats.changesStreamPackages = 0;

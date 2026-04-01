@@ -52,6 +52,9 @@ const stats = {
   mlFiltered: 0,
   llmAnalyzed: 0,
   llmSuppressed: 0,
+  sandboxDeferred: 0,
+  deferredProcessed: 0,
+  deferredExpired: 0,
   lastReportTime: Date.now(),
   lastDailyReportDate: null
 };
