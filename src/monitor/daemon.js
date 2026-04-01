@@ -10,6 +10,7 @@ const { pendingGrouped, flushScopeGroup, sendDailyReport, DAILY_REPORT_HOUR } = 
 const { poll } = require('./ingestion.js');
 const { processQueue, SCAN_CONCURRENCY } = require('./queue.js');
 const { startHealthcheck } = require('./healthcheck.js');
+const { startDeferredWorker, stopDeferredWorker, persistDeferredQueue, restoreDeferredQueue } = require('./deferred-sandbox.js');
 
 const POLL_INTERVAL = 60_000;
 const PROCESS_LOOP_INTERVAL = 2_000;    // Queue check interval when empty
@@ -149,6 +150,11 @@ function reportStats(stats) {
   if (stats.tarballCacheHits) {
     console.log(`[MONITOR]   Tarball cache hits: ${stats.tarballCacheHits}`);
   }
+  if (stats.sandboxDeferred || stats.deferredProcessed) {
+    const { getDeferredQueueStats } = require('./deferred-sandbox.js');
+    const dq = getDeferredQueueStats();
+    console.log(`[MONITOR]   Deferred sandbox: ${stats.sandboxDeferred || 0} enqueued, ${stats.deferredProcessed || 0} processed, ${stats.deferredExpired || 0} expired, ${dq.size} pending`);
+  }
   stats.lastReportTime = Date.now();
 }
 
@@ -262,6 +268,12 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
     console.log(`[MONITOR] ${restoredCount} packages pre-loaded from previous session`);
   }
 
+  // Restore deferred sandbox queue from previous run
+  const deferredRestored = restoreDeferredQueue();
+  if (deferredRestored > 0) {
+    console.log(`[MONITOR] ${deferredRestored} deferred sandbox items restored from previous session`);
+  }
+
   // Graceful shutdown handler (shared by SIGINT and SIGTERM)
   // Daily report is NEVER sent on shutdown — it only fires at 08:00 Paris time.
   // Counters are persisted to disk so they survive the restart.
@@ -278,6 +290,9 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
     }
     // Persist remaining queue items so they survive the restart
     persistQueue(scanQueue, state);
+    // Stop deferred sandbox worker and persist its queue
+    stopDeferredWorker();
+    persistDeferredQueue();
     healthcheck.stop();
     // Flush all pending scope groups before exit
     for (const [scope, group] of pendingGrouped) {
@@ -329,7 +344,16 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
   queuePersistHandle = setInterval(() => {
     if (!running) return;
     persistQueue(scanQueue, state);
+    persistDeferredQueue(); // Piggyback: persist deferred sandbox queue on same interval
   }, QUEUE_PERSIST_INTERVAL);
+
+  // ─── Deferred sandbox worker ───
+  // Retries T1b/T2 packages that were skipped when sandbox slots were full.
+  // Runs every 30s, processes at most 1 item per tick, yields to T1a.
+  if (isSandboxEnabled() && sandboxAvailableRef.value) {
+    startDeferredWorker(stats);
+    console.log('[MONITOR] Deferred sandbox worker started (30s interval, T1a-safe)');
+  }
 
   // ─── Continuous processing loop ───
   // Consumes scanQueue independently of polling. Workers inside processQueue
