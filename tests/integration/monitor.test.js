@@ -7109,10 +7109,10 @@ async function runMonitorTests() {
 
   console.log('\n=== SCAN CONCURRENCY TESTS ===\n');
 
-  test('CONCURRENCY: SCAN_CONCURRENCY defaults to 5', () => {
+  test('CONCURRENCY: SCAN_CONCURRENCY defaults to 8', () => {
     assert(SCAN_CONCURRENCY >= 1, `SCAN_CONCURRENCY must be >= 1, got ${SCAN_CONCURRENCY}`);
     if (!process.env.MUADDIB_SCAN_CONCURRENCY) {
-      assert(SCAN_CONCURRENCY === 5, `Default SCAN_CONCURRENCY should be 5, got ${SCAN_CONCURRENCY}`);
+      assert(SCAN_CONCURRENCY === 8, `Default SCAN_CONCURRENCY should be 8, got ${SCAN_CONCURRENCY}`);
     }
   });
 

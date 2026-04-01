@@ -20,7 +20,7 @@ const { parseGvisorLogs, cleanupGvisorLogs } = require('./gvisor-parser.js');
 
 const DOCKER_IMAGE = 'muaddib-sandbox';
 const CONTAINER_TIMEOUT = 120000; // 120 seconds
-const SINGLE_RUN_TIMEOUT = 60000; // 60 seconds per run in multi-run mode
+const SINGLE_RUN_TIMEOUT = 90000; // 90 seconds per run in multi-run mode (gVisor ~30% I/O overhead)
 
 // ── Sandbox concurrency limiter ──
 // Prevents Docker container saturation under load (16 workers × 3 runs = 48 containers).
