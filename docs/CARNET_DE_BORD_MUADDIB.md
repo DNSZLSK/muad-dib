@@ -374,21 +374,23 @@ La baisse de l'ADR (96.3% → 94.0%) s'explique par le deplacement des samples a
 
 ### Ce qui fonctionne
 
-- **14 scanners paralleles**, 176 regles de detection (171 + 5 paranoid)
+- **14 scanners paralleles**, 200 regles de detection (195 + 5 paranoid)
 - **225 000+ IOCs** npm + 14 000+ PyPI
 - Detection de campagnes : Shai-Hulud (v1/v2/v3), GlassWorm (433+ packages), CanisterWorm, TeamPCP, LiteLLM
-- Sandbox Docker avec simulation CI, canary tokens, monkey-patching preload, multi-run, libfaketime
-- Moniteur zero-day : npm changes stream + PyPI RSS, alertes Discord temps reel
+- Sandbox gVisor/Docker : runtime invisible (gVisor), network blacklist (28 safe/24 exfil/7 OAST/6 tunnel), honey tokens DNS (hex/base64/base64url encoding), canary tokens, multi-run [0h, 72h, 7j]
+- Moniteur zero-day : npm changes stream + PyPI RSS, alertes Discord temps reel, poll non-bloquant (60s)
+- Trusted dep-diff : detection de nouvelles dependances inconnues sur les packages populaires (>50k downloads/semaine)
 - Exports JSON, HTML, SARIF. Extension VS Code. GitHub Action Marketplace
 - Diff entre versions, pre-commit hooks, mode paranoid
 - Detection comportementale : lifecycle temporel, AST diff, anomalie publication, changement maintainer
 - Desobfuscation statique : concat, charcode, base64, hex arrays, propagation de constantes
 - Dataflow inter-module : graphe de dependances, propagation de teinte, 3-hop re-export
-- Compound scoring : 11 regles zero-FP pour les co-occurrences malveillantes
+- Compound scoring : co-occurrences zero-FP pour les combinaisons malveillantes
 - Pipeline ML : XGBoost classifier ML1 (P=0.978, F1=0.955, 114 arbres) + bundler detector ML2 (P=0.992, F1=0.996, 98 arbres)
 - Webhook triage P1/P2/P3 : classification visuelle des alertes (rouge/orange/jaune)
 - Limiteur HTTP centralise : 10 requetes concurrentes max, cache negatif, semaphore anti-OOM
-- **2793 tests** (57 fichiers), 86% coverage
+- OpenSSF OSV.dev comme source IOC supplementaire
+- **3034 tests** (65 fichiers), 86% coverage
 
 ### Ce qui manque (honnetement)
 

@@ -18,7 +18,7 @@
 </nav>
 
 <h1>MUAD'DIB</h1>
-<p><span class="version">v2.10.5</span></p>
+<p><span class="version">v2.10.43</span></p>
 <p>Scanner de menaces supply-chain pour npm et PyPI. Open source, zero cloud, une seule commande.</p>
 
 <div class="install">
@@ -34,8 +34,8 @@
   <span class="metric"><span class="value">11.0%</span> <span class="label">FPR</span></span>
   <span class="metric"><span class="value">96.3%</span> <span class="label">ADR</span></span>
   <span class="metric"><span class="value">92.8%</span> <span class="label">Wild TPR (17K)</span></span>
-  <span class="metric"><span class="value">2643</span> <span class="label">tests</span></span>
-  <span class="metric"><span class="value">162</span> <span class="label">regles</span></span>
+  <span class="metric"><span class="value">3034</span> <span class="label">tests</span></span>
+  <span class="metric"><span class="value">200</span> <span class="label">regles</span></span>
 </div>
 
 <hr>
@@ -43,12 +43,12 @@
 <h2>Fonctionnalites</h2>
 <ul>
   <li><strong>14 scanners paralleles</strong> : AST, dataflow, obfuscation, entropie, typosquat, shell, module-graph, intent-graph</li>
-  <li><strong>Sandbox Docker</strong> : monkey-patching time-warp, multi-run [0h, 72h, 7j], canary tokens</li>
+  <li><strong>Sandbox gVisor/Docker</strong> : runtime invisible (gVisor), network blacklist, honey tokens DNS, canary tokens, multi-run [0h, 72h, 7j]</li>
   <li><strong>Moniteur temps reel</strong> : flux CouchDB npm, alertes Discord</li>
   <li><strong>Desobfuscation statique</strong> : charcode, base64, hex arrays, const propagation</li>
   <li><strong>Diff entre versions</strong> : <code>muaddib diff v1.2.0</code></li>
   <li><strong>Detection comportementale</strong> : anomalies lifecycle, AST diff temporel, changement de maintainer</li>
-  <li><strong>Compound scoring</strong> : co-occurrences zero-FP (11 regles)</li>
+  <li><strong>Compound scoring</strong> : co-occurrences zero-FP, trusted dep-diff pour packages populaires</li>
   <li><strong>ML XGBoost</strong> : classifier malware (F1 0.955) + detecteur bundler (F1 0.996)</li>
   <li><strong>Webhook triage P1/P2/P3</strong> : classification visuelle des alertes</li>
   <li><strong>225 000+ IOC</strong> npm + 14 000+ PyPI, format compact 5MB</li>

@@ -30,7 +30,7 @@
 
 Les attaques supply-chain npm et PyPI explosent. Shai-Hulud a compromis 25K+ repos en 2025. Les outils existants détectent, mais n'aident pas à répondre.
 
-MUAD'DIB combine **14 scanners paralleles** (176 regles de detection), un **moteur de desobfuscation**, une **analyse dataflow inter-module**, du **scoring compose**, des **classifiers ML** (XGBoost), et un sandbox Docker pour detecter les menaces connues et les patterns comportementaux suspects dans les packages npm et PyPI.
+MUAD'DIB combine **14 scanners paralleles** (200 regles de detection), un **moteur de desobfuscation**, une **analyse dataflow inter-module**, du **scoring compose**, des **classifiers ML** (XGBoost), et un sandbox gVisor/Docker pour detecter les menaces connues et les patterns comportementaux suspects dans les packages npm et PyPI.
 
 ---
 
@@ -286,7 +286,7 @@ Ajoutez à `.pre-commit-config.yaml` :
 ```yaml
 repos:
   - repo: https://github.com/DNSZLSK/muad-dib
-    rev: v2.10.21
+    rev: v2.10.43
     hooks:
       - id: muaddib-scan        # Scanner toutes les menaces
       # - id: muaddib-diff      # Ou: seulement les nouvelles
@@ -669,7 +669,7 @@ MUAD'DIB 2.10.5 Scanner
 |   +-- Corrélation entre signaux faibles de multiples scanners
 |   +-- Élévation de sévérité sur combinaisons suspectes
 |
-+-- 14 Scanners Parallèles (176 règles)
++-- 14 Scanners Parallèles (200 règles)
 |   +-- AST Parse (acorn) — eval/Function, credential CLI theft, binary droppers, prototype hooks
 |   +-- Pattern Matching (shell, scripts)
 |   +-- Typosquat Detection (npm + PyPI, Levenshtein)
@@ -798,7 +798,7 @@ Voir [Evaluation Methodology](docs/EVALUATION_METHODOLOGY.md#14-datadog-17k-benc
 - **ADR** (Adversarial Detection Rate) : taux de detection sur 107 samples malveillants evasifs — 67 adversariaux (7 vagues red team) + 40 holdouts (4 batches de 10). 107 disponibles sur disque, seuil global=20.
 - **Holdout** (pre-tuning) : taux de detection sur 10 samples jamais vus avec regles gelees (mesure de generalisation)
 
-Datasets : 14 587 samples Datadog in-scope, 529 npm curated + 200 npm random + 132 PyPI packages benins, 107 samples adversariaux/holdout, 51 attaques ground-truth (65 packages malveillants documentes). **2793 tests**, 57 fichiers.
+Datasets : 14 587 samples Datadog in-scope, 529 npm curated + 200 npm random + 132 PyPI packages benins, 107 samples adversariaux/holdout, 51 attaques ground-truth (65 packages malveillants documentes). **3034 tests**, 65 fichiers.
 
 Voir [Evaluation Methodology](docs/EVALUATION_METHODOLOGY.md) pour le protocole experimental complet.
 
@@ -834,7 +834,7 @@ npm test
 
 ### Tests
 
-- **2793 tests unitaires/integration** sur 57 fichiers modulaires via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
+- **3034 tests unitaires/integration** sur 65 fichiers modulaires via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
 - **56 tests de fuzzing** - YAML malforme, JSON invalide, fichiers binaires, ReDoS, unicode, inputs 10MB
 - **Benchmark Datadog 17K** - 14 587 packages malveillants in-scope, 92.8% Wild TPR (13 538/14 587 in-scope, 3 335 hors scope sans JS). compromised_lib 97.8%, malicious_intent 92.1%
 - **107 samples adversariaux/holdout** - 67 adversariaux + 40 holdouts, 101/107 taux de detection sur samples disponibles (94.0% ADR, seuil global=20)

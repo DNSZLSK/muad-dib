@@ -4,7 +4,7 @@ const path = require('path');
 const os = require('os');
 const { isDockerAvailable, SANDBOX_CONCURRENCY_MAX } = require('../sandbox/index.js');
 const { setVerboseMode, isSandboxEnabled, isCanaryEnabled, isLlmDetectiveEnabled, getLlmDetectiveMode } = require('./classify.js');
-const { loadState, saveState, loadDailyStats, saveDailyStats, purgeTarballCache, getParisHour } = require('./state.js');
+const { loadState, saveState, loadDailyStats, saveDailyStats, purgeTarballCache, getParisHour, atomicWriteFileSync } = require('./state.js');
 const { isTemporalEnabled, isTemporalAstEnabled, isTemporalPublishEnabled, isTemporalMaintainerEnabled } = require('./temporal.js');
 const { pendingGrouped, flushScopeGroup, sendDailyReport, DAILY_REPORT_HOUR } = require('./webhook.js');
 const { poll } = require('./ingestion.js');
@@ -14,9 +14,86 @@ const { startHealthcheck } = require('./healthcheck.js');
 const POLL_INTERVAL = 60_000;
 const PROCESS_LOOP_INTERVAL = 2_000;    // Queue check interval when empty
 const QUEUE_WARNING_THRESHOLD = 5_000;  // Warn if queue depth exceeds this
+const QUEUE_PERSIST_INTERVAL = 60_000;  // Persist queue to disk every 60s
+const QUEUE_STATE_FILE = path.join(__dirname, '..', '..', 'data', 'queue-state.json');
+const QUEUE_STATE_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24h expiry
+const MAX_QUEUE_PERSIST_SIZE = 100_000; // Don't persist if queue > 100K items
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Persist scanQueue to disk so it survives restarts.
+ * Uses atomicWriteFileSync (write-to-tmp + rename) for crash safety.
+ * Skips if queue is empty or exceeds MAX_QUEUE_PERSIST_SIZE.
+ */
+function persistQueue(scanQueue, state) {
+  try {
+    if (scanQueue.length === 0) {
+      // Empty queue — remove stale file if it exists
+      try { fs.unlinkSync(QUEUE_STATE_FILE); } catch {}
+      return;
+    }
+    if (scanQueue.length > MAX_QUEUE_PERSIST_SIZE) {
+      console.log(`[MONITOR] WARNING: queue too large to persist (${scanQueue.length} > ${MAX_QUEUE_PERSIST_SIZE})`);
+      return;
+    }
+    const payload = JSON.stringify({
+      savedAt: new Date().toISOString(),
+      lastSeq: state.npmLastSeq || null,
+      count: scanQueue.length,
+      items: scanQueue
+    });
+    atomicWriteFileSync(QUEUE_STATE_FILE, payload);
+  } catch (err) {
+    console.error('[MONITOR] Failed to persist queue:', err.message);
+  }
+}
+
+/**
+ * Restore scanQueue from disk on boot. Items are appended to the (empty) scanQueue.
+ * File is deleted after successful restore to prevent double-restore.
+ * Skips if file is missing, corrupt, or older than 24h.
+ */
+function restoreQueue(scanQueue) {
+  try {
+    if (!fs.existsSync(QUEUE_STATE_FILE)) return 0;
+    const raw = fs.readFileSync(QUEUE_STATE_FILE, 'utf8');
+    const data = JSON.parse(raw);
+
+    // Validate structure
+    if (!data || !Array.isArray(data.items) || !data.savedAt) {
+      console.log('[MONITOR] Queue state file invalid — ignoring');
+      try { fs.unlinkSync(QUEUE_STATE_FILE); } catch {}
+      return 0;
+    }
+
+    // Check age — discard if > 24h
+    const ageMs = Date.now() - new Date(data.savedAt).getTime();
+    if (ageMs > QUEUE_STATE_MAX_AGE_MS) {
+      console.log(`[MONITOR] Queue state expired (${Math.round(ageMs / 3600000)}h old) — ignoring`);
+      try { fs.unlinkSync(QUEUE_STATE_FILE); } catch {}
+      return 0;
+    }
+
+    // Restore items
+    const count = data.items.length;
+    if (count === 0) {
+      try { fs.unlinkSync(QUEUE_STATE_FILE); } catch {}
+      return 0;
+    }
+    scanQueue.push(...data.items);
+    console.log(`[MONITOR] Restored ${count} packages from queue state (saved at ${data.savedAt})`);
+
+    // Delete after successful restore
+    try { fs.unlinkSync(QUEUE_STATE_FILE); } catch {}
+    return count;
+  } catch (err) {
+    console.log(`[MONITOR] WARNING: could not restore queue state: ${err.message}`);
+    try { fs.unlinkSync(QUEUE_STATE_FILE); } catch {}
+    return 0;
+  }
 }
 
 function cleanupOrphanTmpDirs() {
@@ -176,7 +253,14 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
   console.log(`[MONITOR] Polling every ${POLL_INTERVAL / 1000}s (decoupled from processing). Ctrl+C to stop.\n`);
 
   let running = true;
-  let pollIntervalHandle = null;  // Decoupled poll timer — set after initial poll
+  let pollIntervalHandle = null;   // Decoupled poll timer — set after initial poll
+  let queuePersistHandle = null;   // Queue persistence timer
+
+  // Restore queue from previous run (if file exists and is < 24h old)
+  const restoredCount = restoreQueue(scanQueue);
+  if (restoredCount > 0) {
+    console.log(`[MONITOR] ${restoredCount} packages pre-loaded from previous session`);
+  }
 
   // Graceful shutdown handler (shared by SIGINT and SIGTERM)
   // Daily report is NEVER sent on shutdown — it only fires at 08:00 Paris time.
@@ -188,6 +272,12 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
       clearInterval(pollIntervalHandle);
       pollIntervalHandle = null;
     }
+    if (queuePersistHandle) {
+      clearInterval(queuePersistHandle);
+      queuePersistHandle = null;
+    }
+    // Persist remaining queue items so they survive the restart
+    persistQueue(scanQueue, state);
     healthcheck.stop();
     // Flush all pending scope groups before exit
     for (const [scope, group] of pendingGrouped) {
@@ -232,6 +322,15 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
     }
   }, POLL_INTERVAL);
 
+  // ─── Queue persistence ───
+  // Snapshot queue to disk every 60s so items survive restarts/crashes.
+  // Without this, the decoupled poll advances the CouchDB seq but queued
+  // items are lost on restart — they won't be re-polled.
+  queuePersistHandle = setInterval(() => {
+    if (!running) return;
+    persistQueue(scanQueue, state);
+  }, QUEUE_PERSIST_INTERVAL);
+
   // ─── Continuous processing loop ───
   // Consumes scanQueue independently of polling. Workers inside processQueue
   // check scanQueue.length > 0 after each item, so items added by a concurrent
@@ -264,7 +363,13 @@ module.exports = {
   reportStats,
   isDailyReportDue,
   sleep,
+  persistQueue,
+  restoreQueue,
   POLL_INTERVAL,
   PROCESS_LOOP_INTERVAL,
-  QUEUE_WARNING_THRESHOLD
+  QUEUE_WARNING_THRESHOLD,
+  QUEUE_PERSIST_INTERVAL,
+  QUEUE_STATE_FILE,
+  QUEUE_STATE_MAX_AGE_MS,
+  MAX_QUEUE_PERSIST_SIZE
 };

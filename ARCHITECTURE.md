@@ -28,13 +28,13 @@ bin/muaddib.js (yargs CLI)
         ├─► Deduplication
         ├─► FP reductions (src/scoring.js — applyFPReductions)
         ├─► Intent coherence analysis (src/intent-graph.js — buildIntentPairs)
-        ├─► Rule enrichment (src/rules/index.js — 195 rules)
+        ├─► Rule enrichment (src/rules/index.js — 200 rules)
         ├─► Scoring (src/scoring.js — per-file max)
         ├─► ML classifier (src/ml/classifier.js — T1 zone filtering)
         └─► Output (CLI / JSON / HTML / SARIF)
 ```
 
-**Core orchestration:** `src/index.js` — `run(targetPath, options)` runs cross-file module graph analysis first, then launches 13 individual scanners in parallel via `Promise.all` (14 scanner modules total), then deduplicates, applies FP reductions, scores using per-file max (v2.2.11: `riskScore = min(100, max(file_scores) + package_level_score)`, severity weights: CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1), applies intent coherence analysis (intra-file source-sink pairing), enriches with rules/playbooks (195 rules), and outputs (CLI/JSON/HTML/SARIF). Result includes `warnings: []` array (v2.6.5) for incomplete scan notifications (module graph timeout/skip, deobfuscation failures). Exports `isPackageLevelThreat` and `computeGroupScore` for testing.
+**Core orchestration:** `src/index.js` — `run(targetPath, options)` runs cross-file module graph analysis first, then launches 13 individual scanners in parallel via `Promise.all` (14 scanner modules total), then deduplicates, applies FP reductions, scores using per-file max (v2.2.11: `riskScore = min(100, max(file_scores) + package_level_score)`, severity weights: CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1), applies intent coherence analysis (intra-file source-sink pairing), enriches with rules/playbooks (200 rules), and outputs (CLI/JSON/HTML/SARIF). Result includes `warnings: []` array (v2.6.5) for incomplete scan notifications (module graph timeout/skip, deobfuscation failures). Exports `isPackageLevelThreat` and `computeGroupScore` for testing.
 
 ## Scanner Modules
 
@@ -138,7 +138,7 @@ Replaces global score accumulation with per-file max scoring. Formula: `riskScor
 
 ### High-Confidence Malice Bypass (v2.7.6)
 
-`HIGH_CONFIDENCE_MALICE_TYPES` (8 types): `lifecycle_shell_pipe`, `fetch_decrypt_exec`, `download_exec_binary`, `intent_credential_exfil`, `intent_command_exfil`, `cross_file_dataflow`, `canary_exfiltration`, `sandbox_network_after_sensitive_read`. These bypass reputation attenuation — supply-chain compromise of established packages cannot be suppressed.
+`HIGH_CONFIDENCE_MALICE_TYPES` (19 types): `lifecycle_shell_pipe`, `fetch_decrypt_exec`, `download_exec_binary`, `reverse_shell`, `crypto_staged_payload`, `intent_credential_exfil`, `intent_command_exfil`, `cross_file_dataflow`, `canary_exfiltration`, `sandbox_network_after_sensitive_read`, `sandbox_known_exfil_domain`, `detached_credential_exfil`, `node_modules_write`, `npm_publish_worm`, `systemd_persistence`, `npm_token_steal`, `root_filesystem_wipe`, `proc_mem_scan`, `trusted_new_unknown_dependency`. These bypass reputation attenuation — supply-chain compromise of established packages cannot be suppressed.
 
 **Aggressive reputation tiers:** `computeReputationFactor()` floor lowered from 0.30 to 0.10. New tiers: 5+ years age (-0.5), 200+ versions (-0.3), 1M+ weekly downloads (-0.4).
 
@@ -180,7 +180,7 @@ See [Intent Graph](#intent-graph) section for `isSDKPattern()` details and 22 SD
 
 ## Detection Rules
 
-**Rules & playbooks:** Threat types map to rules in `src/rules/index.js` (195 rules: 190 RULES + 5 PARANOID, MITRE ATT&CK mapped) and remediation text in `src/response/playbooks.js`. Both keyed by threat `type` string.
+**Rules & playbooks:** Threat types map to rules in `src/rules/index.js` (200 rules: 195 RULES + 5 PARANOID, MITRE ATT&CK mapped) and remediation text in `src/response/playbooks.js`. Both keyed by threat `type` string.
 
 ### AST Detection Rules (v2.2+)
 
@@ -357,7 +357,7 @@ GlassWorm campaign (March 2026, 433+ packages): Unicode invisible characters + B
 - Tests: 2093 → **2143** (+50)
 
 ### v2.7.6 — HC Bypass, Graduated Threshold
-- HIGH_CONFIDENCE_MALICE_TYPES (8 types) bypass reputation attenuation
+- HIGH_CONFIDENCE_MALICE_TYPES (19 types) bypass reputation attenuation
 - Aggressive reputation tiers: floor 0.30→0.10
 - Graduated webhook threshold: 35/25/20 based on establishment
 - Fix double DORMANT log
