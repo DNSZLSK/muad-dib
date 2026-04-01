@@ -337,6 +337,39 @@ async function runMonitorWiringTests() {
   });
 
   // ─────────────────────────────────────────────
+  // 6c. Queue persistence (v2.10.44)
+  // ─────────────────────────────────────────────
+
+  test('WIRING: daemon exports persistQueue and restoreQueue functions', () => {
+    assert(typeof daemon.persistQueue === 'function',
+      'daemon.persistQueue should be a function');
+    assert(typeof daemon.restoreQueue === 'function',
+      'daemon.restoreQueue should be a function');
+  });
+
+  test('WIRING: daemon exports queue persistence constants', () => {
+    assert(typeof daemon.QUEUE_STATE_FILE === 'string',
+      'QUEUE_STATE_FILE should be a string');
+    assert(typeof daemon.QUEUE_STATE_MAX_AGE_MS === 'number',
+      'QUEUE_STATE_MAX_AGE_MS should be a number');
+    assert(typeof daemon.MAX_QUEUE_PERSIST_SIZE === 'number',
+      'MAX_QUEUE_PERSIST_SIZE should be a number');
+    assert(typeof daemon.QUEUE_PERSIST_INTERVAL === 'number',
+      'QUEUE_PERSIST_INTERVAL should be a number');
+  });
+
+  test('WIRING: monitor re-exports queue persistence functions and constants', () => {
+    assert(monitor.persistQueue === daemon.persistQueue,
+      'monitor.persistQueue should match daemon.persistQueue');
+    assert(monitor.restoreQueue === daemon.restoreQueue,
+      'monitor.restoreQueue should match daemon.restoreQueue');
+    assert(monitor.QUEUE_STATE_FILE === daemon.QUEUE_STATE_FILE,
+      'QUEUE_STATE_FILE should match');
+    assert(monitor.QUEUE_STATE_MAX_AGE_MS === daemon.QUEUE_STATE_MAX_AGE_MS,
+      'QUEUE_STATE_MAX_AGE_MS should match');
+  });
+
+  // ─────────────────────────────────────────────
   // 7. Pipeline wiring: function signatures
   // ─────────────────────────────────────────────
 

@@ -7,6 +7,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.10.43] - 2026-03-31
+
+### Added
+- **Trusted dep-diff detection**: New dependency analysis for TRUSTED (popular) packages
+  - `checkTrustedDepDiff()` compares dependencies between consecutive versions
+  - New dependency < 7 days old on npm: `trusted_new_unknown_dependency` (CRITICAL, TRUSTED-001)
+  - New known dependency: `trusted_new_dependency` (HIGH, TRUSTED-002)
+  - CRITICAL findings bypass TRUSTED skip, route to full scan + sandbox
+  - `trusted_new_unknown_dependency` added to `HIGH_CONFIDENCE_MALICE_TYPES` (19 total)
+  - Context: would have detected plain-crypto-js added to axios@1.14.1
+
+### Changed
+- Rules: 193 → **200** (195 RULES + 5 PARANOID)
+- Tests: 2868 → **3034**, 0 failed, across 65 files
+
+## [2.10.42] - 2026-03-31
+
+### Fixed
+- **Non-blocking poll** (critical bug): Poll and processing are now independent
+  - Poll runs on `setInterval(60s)`, processing in a continuous loop
+  - Before: monitor did not poll while processing a batch (up to 2h of silence)
+  - `pollInProgress` guard prevents overlapping polls
+  - Queue depth warning at 5000 packages
+  - Context: axios/plain-crypto-js attack (2026-03-30) was missed because poll was blocked
+
+## [2.10.41] - 2026-03-31
+
+### Added
+- **gVisor sandbox runtime**: `runsc` as production sandbox runtime
+  - Malware cannot detect it is running in a container (no `/.dockerenv`, no cgroup leaks)
+  - gVisor `--strace` replaces Linux strace (no external tools needed)
+  - gVisor `--log-packets` for network traffic monitoring
+  - `scripts/install-gvisor.sh` for installation
+  - `gvisor-parser.js` for log parsing
+  - Gated behind `MUADDIB_SANDBOX_RUNTIME=gvisor`, fallback to standard Docker
+- **Honey token DNS encoding detection**: hex/base64/base64url encoded subdomains in DNS queries
+
+## [2.10.40] - 2026-03-31
+
+### Added
+- **Sandbox network blacklist**: Domain classification for sandbox network traffic
+  - 28 safe domains (npm, GitHub, CDN, AWS, etc.)
+  - 24 known exfil domains (OAST, webhook.site, pipedream, etc.)
+  - 7 regex patterns for OAST wildcards
+  - 6 tunnel domains (ngrok, serveo, etc.)
+  - `classifyDomain()`: safe/blacklisted/tunnel/unknown
+  - `sandbox_known_exfil_domain`: HC_TYPE CRITICAL (+50 score)
+  - `sandbox_network_outlier`: HIGH (+20 score)
+  - `MUADDIB_SANDBOX_NETWORK_ALLOWLIST` env var for extension
+
+## [2.10.39] - 2026-03-30
+
+### Fixed
+- **publish_burst severity**: Fixed hardcoded HIGH causing 10x score inflation
+- **MT-1 score ceiling**: Score capped at 35 for packages without lifecycle scripts, HC types, or compounds
+
+### Added
+- **OpenSSF OSV.dev IOC source**: `scrapeOSVLightweightAPI`, `queryOSVBatch` for malicious package feeds
+- **OpenSSF benchmark**: `scripts/ossf-benchmark.js`
+- **First-publish sandbox priority**: Sandbox even with 0 findings if first-publish + no repo/new maintainer
+- **Network-gated tests**: `MUADDIB_TEST_NETWORK=true` for opt-in network tests
+
+### Changed
+- LLM Detective disabled (cost 10EUR/day, 0 true positives)
+- IOC files removed from git tracking
+- COMPACT and BOOTSTRAP-COV tests mocked (no network dependency)
+
 ## [2.10.31] - 2026-03-28
 
 ### Fixed

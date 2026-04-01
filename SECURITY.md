@@ -68,9 +68,9 @@ Please include the following information in your report:
 - We aim to release fixes before public disclosure
 - We request a 90-day disclosure window for complex issues
 
-## Detection Rules (v2.10.31)
+## Detection Rules (v2.10.43)
 
-MUAD'DIB uses 14 scanner modules (module-graph pre-analysis + 13 parallel scanners) + 5 behavioral anomaly detection features + ground truth validation, producing 195 rule IDs (190 RULES + 5 PARANOID):
+MUAD'DIB uses 14 scanner modules (module-graph pre-analysis + 13 parallel scanners) + 5 behavioral anomaly detection features + ground truth validation, producing 200 rule IDs (195 RULES + 5 PARANOID):
 
 ### AST Scanner
 
@@ -369,6 +369,15 @@ Detection uses both dynamic tokens (random per session) and static fallback toke
 #### CI-Aware Sandbox (v2.1.2)
 
 The sandbox simulates CI environments by setting: `CI=true`, `GITHUB_ACTIONS=true`, `GITLAB_CI=true`, `TRAVIS=true`, `CIRCLECI=true`, `JENKINS_URL=http://localhost:8080`. This triggers CI-aware malware that checks for these environment variables before activating, which would otherwise stay dormant in local development environments.
+
+### Trusted Package Monitoring (v2.10.43)
+
+| Rule ID | Name | Severity | Notes |
+|---------|------|----------|-------|
+| MUADDIB-TRUSTED-001 | Trusted Package Added Unknown Dependency | CRITICAL | New dep < 7 days old on popular package (HC type) |
+| MUADDIB-TRUSTED-002 | Trusted Package Added New Dependency | HIGH | Known dep added to popular package |
+
+These rules apply only in monitor mode to packages with >= 50,000 weekly downloads. A CRITICAL finding bypasses the TRUSTED fast-track and routes the package to full scan + sandbox.
 
 ### Paranoid Mode Rules
 
