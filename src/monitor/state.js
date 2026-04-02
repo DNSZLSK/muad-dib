@@ -116,6 +116,10 @@ function atomicWriteFileSync(filePath, data) {
       console.warn(`[MONITOR] Cannot create directory ${dir} (${err.code}) — skipping write to ${path.basename(filePath)}`);
       return;
     }
+    if (err.code === 'ENOSPC') {
+      console.warn(`[MONITOR] WARNING: disk full (ENOSPC) — cannot create directory ${dir}. Free space immediately.`);
+      return;
+    }
     throw err;
   }
   const tmpFile = filePath + '.tmp';
@@ -125,7 +129,11 @@ function atomicWriteFileSync(filePath, data) {
   } catch (err) {
     if (err.code === 'EROFS' || err.code === 'EACCES' || err.code === 'EPERM') {
       console.warn(`[MONITOR] Cannot write ${path.basename(filePath)} (${err.code}) — skipping`);
-      // Clean up .tmp if it was partially written
+      try { fs.unlinkSync(tmpFile); } catch (_) { /* ignore */ }
+      return;
+    }
+    if (err.code === 'ENOSPC') {
+      console.warn(`[MONITOR] WARNING: disk full (ENOSPC) — cannot write ${path.basename(filePath)}. Free space in /tmp and data/ immediately.`);
       try { fs.unlinkSync(tmpFile); } catch (_) { /* ignore */ }
       return;
     }

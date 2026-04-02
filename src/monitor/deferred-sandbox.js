@@ -22,12 +22,15 @@ const DEFERRED_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 const DEFERRED_MAX_RETRIES = 2;
 const DEFERRED_WORKER_INTERVAL_MS = 30_000; // 30s
 const DEFERRED_STATE_FILE = path.join(__dirname, '..', '..', 'data', 'deferred-queue.json');
+const SKIP_LOG_INTERVAL = 10;        // Log every N skipped ticks (throttle)
+const ANTI_STARVATION_TICKS = 20;    // Force processing after N consecutive skips (~10min)
 
 // ── Mutable state ──
 const _deferredQueue = [];
 const _deferredSeen = new Set(); // name@version dedup
 let _workerHandle = null;
 let _stats = null; // reference to shared stats object
+let _consecutiveSkips = 0;       // Tracks consecutive yield-skips for anti-starvation
 
 // ── Queue management ──
 
@@ -126,11 +129,24 @@ async function processDeferredItem(stats) {
 
   if (_deferredQueue.length === 0) return null;
 
-  // 2. Yield check: reserve 1 slot for T1a
+  // 2. Yield check: reserve 1 slot for T1a (unless anti-starvation kicks in)
   const sem = getSandboxSemaphore();
-  if (sem.active >= SANDBOX_CONCURRENCY_MAX - 1) {
-    return null; // All slots busy or only 1 free — keep it for T1a
+  const slotsFullForDeferred = sem.active >= SANDBOX_CONCURRENCY_MAX - 1;
+  const forceAntiStarvation = _consecutiveSkips >= ANTI_STARVATION_TICKS && sem.active < SANDBOX_CONCURRENCY_MAX;
+
+  if (slotsFullForDeferred && !forceAntiStarvation) {
+    _consecutiveSkips++;
+    if (stats) stats.deferredSkipped = (stats.deferredSkipped || 0) + 1;
+    if (_consecutiveSkips % SKIP_LOG_INTERVAL === 0) {
+      console.log(`[DEFERRED] YIELD: ${_consecutiveSkips} consecutive skips (slots=${sem.active}/${SANDBOX_CONCURRENCY_MAX}, pending=${_deferredQueue.length})`);
+    }
+    return null;
   }
+
+  if (forceAntiStarvation) {
+    console.log(`[DEFERRED] ANTI-STARVATION: forcing processing after ${_consecutiveSkips} skips (slots=${sem.active}/${SANDBOX_CONCURRENCY_MAX}, pending=${_deferredQueue.length})`);
+  }
+  _consecutiveSkips = 0;
 
   // 3. Pick highest-score item
   const item = _deferredQueue.shift();
@@ -311,6 +327,16 @@ function persistDeferredQueue() {
 }
 
 function restoreDeferredQueue() {
+  // Cleanup orphan .tmp from previous crash / disk-full (ENOSPC)
+  const tmpFile = DEFERRED_STATE_FILE + '.tmp';
+  try {
+    if (fs.existsSync(tmpFile)) {
+      const stat = fs.statSync(tmpFile);
+      console.log(`[DEFERRED] Cleaning up orphan ${path.basename(tmpFile)} (${stat.size} bytes)`);
+      fs.unlinkSync(tmpFile);
+    }
+  } catch { /* best-effort */ }
+
   try {
     if (!fs.existsSync(DEFERRED_STATE_FILE)) return 0;
     const raw = fs.readFileSync(DEFERRED_STATE_FILE, 'utf8');
@@ -365,6 +391,7 @@ function _resetDeferredQueue() {
   _deferredQueue.length = 0;
   _deferredSeen.clear();
   _stats = null;
+  _consecutiveSkips = 0;
   stopDeferredWorker();
 }
 
@@ -384,5 +411,7 @@ module.exports = {
   DEFERRED_TTL_MS,
   DEFERRED_MAX_RETRIES,
   DEFERRED_WORKER_INTERVAL_MS,
-  DEFERRED_STATE_FILE
+  DEFERRED_STATE_FILE,
+  SKIP_LOG_INTERVAL,
+  ANTI_STARVATION_TICKS
 };

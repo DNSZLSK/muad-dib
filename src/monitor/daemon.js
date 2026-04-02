@@ -58,6 +58,15 @@ function persistQueue(scanQueue, state) {
  * Skips if file is missing, corrupt, or older than 24h.
  */
 function restoreQueue(scanQueue) {
+  // Cleanup orphan .tmp from previous crash / disk-full (ENOSPC)
+  const tmpFile = QUEUE_STATE_FILE + '.tmp';
+  try {
+    if (fs.existsSync(tmpFile)) {
+      console.log(`[MONITOR] Cleaning up orphan ${path.basename(tmpFile)}`);
+      fs.unlinkSync(tmpFile);
+    }
+  } catch { /* best-effort */ }
+
   try {
     if (!fs.existsSync(QUEUE_STATE_FILE)) return 0;
     const raw = fs.readFileSync(QUEUE_STATE_FILE, 'utf8');
@@ -134,6 +143,94 @@ function cleanupOrphanContainers() {
   }
 }
 
+/**
+ * Clean up orphan gVisor runtime directories in /tmp/runsc.
+ * runsc creates per-container state dirs that are NOT cleaned up when gVisor or
+ * Docker crashes. In production this reached 61GB and filled the disk (ENOSPC),
+ * cascading into 0-byte .tmp files and total persistence failure.
+ * Removes directories older than maxAgeMs (default: 1h).
+ */
+function cleanupRunscOrphans(maxAgeMs = 3600_000) {
+  const runscDir = process.env.MUADDIB_GVISOR_LOG_DIR || '/tmp/runsc';
+  try {
+    if (!fs.existsSync(runscDir)) return 0;
+    const entries = fs.readdirSync(runscDir);
+    const now = Date.now();
+    let cleaned = 0;
+    for (const entry of entries) {
+      const fullPath = path.join(runscDir, entry);
+      try {
+        const stat = fs.statSync(fullPath);
+        if (now - stat.mtimeMs > maxAgeMs) {
+          fs.rmSync(fullPath, { recursive: true, force: true });
+          cleaned++;
+        }
+      } catch { /* skip unreadable entries */ }
+    }
+    if (cleaned > 0) {
+      console.log(`[MONITOR] Cleaned up ${cleaned} orphan runsc dir(s) in ${runscDir}`);
+    }
+    return cleaned;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Check disk usage at boot. Warns if root partition > 90% full and logs
+ * the largest consumers in /tmp/ and data/ to aid diagnosis.
+ * Uses df + du — Linux-only, silently skips on other platforms.
+ */
+function checkDiskSpace() {
+  try {
+    // df --output=pcent / → "Use%\n 42%\n"
+    const dfOutput = execFileSync('df', ['--output=pcent', '/'], {
+      encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 5000
+    });
+    const match = dfOutput.match(/(\d+)%/);
+    if (!match) return;
+    const usagePercent = parseInt(match[1], 10);
+    if (usagePercent < 90) return;
+
+    console.warn(`[MONITOR] WARNING: disk usage at ${usagePercent}% — persistence may fail (ENOSPC)`);
+
+    // Top consumers in /tmp/
+    try {
+      const tmpDu = execFileSync('du', ['-sh', '--max-depth=1', '/tmp/'], {
+        encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 10000
+      });
+      const lines = tmpDu.trim().split('\n')
+        .map(l => { const m = l.match(/^([\d.]+[KMGT]?)\s+(.+)/); return m ? { size: m[1], path: m[2] } : null; })
+        .filter(Boolean)
+        .sort((a, b) => b.size.localeCompare(a.size))
+        .slice(0, 5);
+      if (lines.length > 0) {
+        console.warn('[MONITOR]   Top /tmp/ consumers:');
+        for (const l of lines) console.warn(`[MONITOR]     ${l.size}\t${l.path}`);
+      }
+    } catch { /* du failed */ }
+
+    // Top consumers in data/
+    const dataDir = path.join(__dirname, '..', '..', 'data');
+    try {
+      const dataDu = execFileSync('du', ['-sh', '--max-depth=1', dataDir], {
+        encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 10000
+      });
+      const lines = dataDu.trim().split('\n')
+        .map(l => { const m = l.match(/^([\d.]+[KMGT]?)\s+(.+)/); return m ? { size: m[1], path: m[2] } : null; })
+        .filter(Boolean)
+        .sort((a, b) => b.size.localeCompare(a.size))
+        .slice(0, 5);
+      if (lines.length > 0) {
+        console.warn('[MONITOR]   Top data/ consumers:');
+        for (const l of lines) console.warn(`[MONITOR]     ${l.size}\t${l.path}`);
+      }
+    } catch { /* du failed */ }
+  } catch {
+    // df not available (non-Linux) — skip silently
+  }
+}
+
 function reportStats(stats) {
   const avg = stats.scanned > 0 ? (stats.totalTimeMs / stats.scanned / 1000).toFixed(1) : '0.0';
   const { t1, t1a, t1b, t2, t3 } = stats.suspectByTier;
@@ -153,7 +250,7 @@ function reportStats(stats) {
   if (stats.sandboxDeferred || stats.deferredProcessed) {
     const { getDeferredQueueStats } = require('./deferred-sandbox.js');
     const dq = getDeferredQueueStats();
-    console.log(`[MONITOR]   Deferred sandbox: ${stats.sandboxDeferred || 0} enqueued, ${stats.deferredProcessed || 0} processed, ${stats.deferredExpired || 0} expired, ${dq.size} pending`);
+    console.log(`[MONITOR]   Deferred sandbox: ${stats.sandboxDeferred || 0} enqueued, ${stats.deferredProcessed || 0} processed, ${stats.deferredExpired || 0} expired, ${stats.deferredSkipped || 0} skipped, ${dq.size} pending`);
   }
   stats.lastReportTime = Date.now();
 }
@@ -171,10 +268,14 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
     setVerboseMode(true);
   }
 
+  // Disk space check — early warning before ENOSPC cascading failure
+  checkDiskSpace();
   // Cleanup temp dirs from previous runs (SIGTERM/crash may leave orphans)
   cleanupOrphanTmpDirs();
   // Kill orphan sandbox containers from previous crash (npm-audit-* prefix)
   cleanupOrphanContainers();
+  // Clean up stale gVisor runtime dirs (runsc leak — caused 61GB disk fill in prod)
+  cleanupRunscOrphans();
   // Layer 3: Purge expired cached tarballs on startup
   purgeTarballCache();
 
@@ -364,10 +465,11 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
       await processQueue(scanQueue, stats, dailyAlerts, recentlyScanned, downloadsCache, sandboxAvailableRef.value);
     }
 
-    // Hourly stats report + cache purge
+    // Hourly stats report + cache purge + runsc cleanup
     if (Date.now() - stats.lastReportTime >= 3600_000) {
       reportStats(stats);
       purgeTarballCache();
+      cleanupRunscOrphans();
     }
 
     // Daily webhook report at 08:00 Paris time
@@ -384,6 +486,8 @@ module.exports = {
   startMonitor,
   cleanupOrphanTmpDirs,
   cleanupOrphanContainers,
+  cleanupRunscOrphans,
+  checkDiskSpace,
   reportStats,
   isDailyReportDue,
   sleep,
