@@ -6,11 +6,15 @@
  * Items are sorted by riskScore DESC (highest-risk first) to defend
  * against queue-poisoning attacks.
  *
- * The worker reserves 1 sandbox slot for T1a (never uses the last slot).
+ * The worker owns a dedicated sandbox slot (_deferredSlotBusy) that is
+ * completely independent from the shared semaphore used by T1a/T1b/T2.
+ * This guarantees the deferred worker can always process, regardless of
+ * how many main-path sandboxes are running. The VPS supports N+1
+ * concurrent gVisor containers (3 main + 1 deferred).
  */
 const fs = require('fs');
 const path = require('path');
-const { runSandbox, getSandboxSemaphore, SANDBOX_CONCURRENCY_MAX } = require('../sandbox/index.js');
+const { runSandbox } = require('../sandbox/index.js');
 const { isCanaryEnabled } = require('./classify.js');
 const { getWebhookUrl, alertedPackageRules, persistAlert, buildAlertData } = require('./webhook.js');
 const { sendWebhook } = require('../webhook.js');
@@ -22,15 +26,13 @@ const DEFERRED_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 const DEFERRED_MAX_RETRIES = 2;
 const DEFERRED_WORKER_INTERVAL_MS = 30_000; // 30s
 const DEFERRED_STATE_FILE = path.join(__dirname, '..', '..', 'data', 'deferred-queue.json');
-const SKIP_LOG_INTERVAL = 10;        // Log every N skipped ticks (throttle)
-const ANTI_STARVATION_TICKS = 20;    // Force processing after N consecutive skips (~10min)
 
 // ── Mutable state ──
 const _deferredQueue = [];
 const _deferredSeen = new Set(); // name@version dedup
 let _workerHandle = null;
 let _stats = null; // reference to shared stats object
-let _consecutiveSkips = 0;       // Tracks consecutive yield-skips for anti-starvation
+let _deferredSlotBusy = false;   // Dedicated slot: true while deferred sandbox is running
 
 // ── Queue management ──
 
@@ -129,24 +131,11 @@ async function processDeferredItem(stats) {
 
   if (_deferredQueue.length === 0) return null;
 
-  // 2. Yield check: reserve 1 slot for T1a (unless anti-starvation kicks in)
-  const sem = getSandboxSemaphore();
-  const slotsFullForDeferred = sem.active >= SANDBOX_CONCURRENCY_MAX - 1;
-  const forceAntiStarvation = _consecutiveSkips >= ANTI_STARVATION_TICKS && sem.active < SANDBOX_CONCURRENCY_MAX;
-
-  if (slotsFullForDeferred && !forceAntiStarvation) {
-    _consecutiveSkips++;
+  // 2. Dedicated slot check — completely independent from main semaphore
+  if (_deferredSlotBusy) {
     if (stats) stats.deferredSkipped = (stats.deferredSkipped || 0) + 1;
-    if (_consecutiveSkips % SKIP_LOG_INTERVAL === 0) {
-      console.log(`[DEFERRED] YIELD: ${_consecutiveSkips} consecutive skips (slots=${sem.active}/${SANDBOX_CONCURRENCY_MAX}, pending=${_deferredQueue.length})`);
-    }
     return null;
   }
-
-  if (forceAntiStarvation) {
-    console.log(`[DEFERRED] ANTI-STARVATION: forcing processing after ${_consecutiveSkips} skips (slots=${sem.active}/${SANDBOX_CONCURRENCY_MAX}, pending=${_deferredQueue.length})`);
-  }
-  _consecutiveSkips = 0;
 
   // 3. Pick highest-score item
   const item = _deferredQueue.shift();
@@ -155,11 +144,12 @@ async function processDeferredItem(stats) {
 
   console.log(`[DEFERRED] PROCESSING: ${key} (tier=${item.tier === 2 ? 'T2' : 'T1b'}, score=${item.riskScore}, retries=${item.retries})`);
 
-  // 4. Run sandbox
+  // 4. Run sandbox on dedicated slot (bypasses shared semaphore)
+  _deferredSlotBusy = true;
   let sandboxResult;
   try {
     const canary = isCanaryEnabled();
-    sandboxResult = await runSandbox(item.name, { canary });
+    sandboxResult = await runSandbox(item.name, { canary, skipSemaphore: true });
     console.log(`[DEFERRED] SANDBOX COMPLETE: ${key} -> score=${sandboxResult.score}, severity=${sandboxResult.severity}`);
   } catch (err) {
     console.error(`[DEFERRED] SANDBOX ERROR: ${key} — ${err.message}`);
@@ -174,6 +164,8 @@ async function processDeferredItem(stats) {
       console.log(`[DEFERRED] RE-ENQUEUED: ${key} for retry (attempt ${item.retries + 1}/${DEFERRED_MAX_RETRIES})`);
     }
     return null;
+  } finally {
+    _deferredSlotBusy = false;
   }
 
   // 5. Follow-up webhook if sandbox found something
@@ -391,8 +383,12 @@ function _resetDeferredQueue() {
   _deferredQueue.length = 0;
   _deferredSeen.clear();
   _stats = null;
-  _consecutiveSkips = 0;
+  _deferredSlotBusy = false;
   stopDeferredWorker();
+}
+
+function isDeferredSlotBusy() {
+  return _deferredSlotBusy;
 }
 
 module.exports = {
@@ -406,12 +402,11 @@ module.exports = {
   restoreDeferredQueue,
   buildDeferredFollowUpEmbed,
   pruneExpired,
+  isDeferredSlotBusy,
   _resetDeferredQueue,
   DEFERRED_QUEUE_MAX,
   DEFERRED_TTL_MS,
   DEFERRED_MAX_RETRIES,
   DEFERRED_WORKER_INTERVAL_MS,
-  DEFERRED_STATE_FILE,
-  SKIP_LOG_INTERVAL,
-  ANTI_STARVATION_TICKS
+  DEFERRED_STATE_FILE
 };

@@ -5176,6 +5176,31 @@ async function runMonitorTests() {
     }
   });
 
+  test('MONITOR: saveDailyStats persists changesStreamPackages across restarts', () => {
+    const origVal = stats.changesStreamPackages;
+    let backup = null;
+    try { backup = fs.readFileSync(DAILY_STATS_FILE, 'utf8'); } catch {}
+
+    try {
+      stats.changesStreamPackages = 8500;
+      saveDailyStats();
+
+      // Simulate restart: reset counter
+      stats.changesStreamPackages = 0;
+      loadDailyStats();
+
+      assert(stats.changesStreamPackages === 8500,
+        'changesStreamPackages should survive restart, got ' + stats.changesStreamPackages);
+    } finally {
+      stats.changesStreamPackages = origVal;
+      if (backup !== null) {
+        fs.writeFileSync(DAILY_STATS_FILE, backup, 'utf8');
+      } else {
+        try { fs.unlinkSync(DAILY_STATS_FILE); } catch {}
+      }
+    }
+  });
+
   test('MONITOR: loadDailyStats starts from zero when file missing', () => {
     const origScanned = stats.scanned;
     let backup = null;
