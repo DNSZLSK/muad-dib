@@ -411,6 +411,14 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
   process.on('SIGINT', () => gracefulShutdown('SIGINT'));
   process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 
+  // ─── Deferred sandbox worker ───
+  // Started BEFORE the first processQueue so it can process T1b/T2 packages
+  // that get deferred during the initial batch (which blocks for 30min-2h).
+  if (isSandboxEnabled() && sandboxAvailableRef.value) {
+    startDeferredWorker(stats);
+    console.log('[MONITOR] Deferred sandbox worker started (30s interval, dedicated slot)');
+  }
+
   // Initial poll + scan (sequential for first run)
   await poll(state, scanQueue, stats);
   saveState(state, stats);
@@ -447,14 +455,6 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
     persistQueue(scanQueue, state);
     persistDeferredQueue(); // Piggyback: persist deferred sandbox queue on same interval
   }, QUEUE_PERSIST_INTERVAL);
-
-  // ─── Deferred sandbox worker ───
-  // Retries T1b/T2 packages that were skipped when sandbox slots were full.
-  // Runs every 30s, processes at most 1 item per tick, yields to T1a.
-  if (isSandboxEnabled() && sandboxAvailableRef.value) {
-    startDeferredWorker(stats);
-    console.log('[MONITOR] Deferred sandbox worker started (30s interval, T1a-safe)');
-  }
 
   // ─── Continuous processing loop ───
   // Consumes scanQueue independently of polling. Workers inside processQueue
