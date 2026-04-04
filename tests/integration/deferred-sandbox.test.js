@@ -207,32 +207,28 @@ function runDeferredSandboxTests() {
 
   // ── Worker logic tests ──
 
-  test('worker yield check — deferred skips when semaphore active >= MAX-1', () => {
-    // The deferred worker checks getSandboxSemaphore().active >= SANDBOX_CONCURRENCY_MAX - 1
-    // before processing. This test verifies the condition logic without calling Docker.
+  test('worker uses dedicated slot independent from shared semaphore', () => {
+    // The deferred worker owns _deferredSlotBusy — it never checks the shared semaphore.
+    // This guarantees processing even when all main-path slots are saturated.
+    const { isDeferredSlotBusy, _resetDeferredQueue } = require('../../src/monitor/deferred-sandbox.js');
     const { getSandboxSemaphore, SANDBOX_CONCURRENCY_MAX } = require('../../src/sandbox/index.js');
     const sem = getSandboxSemaphore();
     const origActive = sem.active;
+    _resetDeferredQueue();
 
     try {
-      assert(SANDBOX_CONCURRENCY_MAX >= 2, `Expected MAX >= 2, got ${SANDBOX_CONCURRENCY_MAX}`);
+      // Deferred slot starts free
+      assert(isDeferredSlotBusy() === false, 'Deferred slot should start free');
 
-      // All slots busy → skip
+      // Even with ALL main-path slots saturated, deferred slot is independent
       sem.active = SANDBOX_CONCURRENCY_MAX;
-      assert(sem.active >= SANDBOX_CONCURRENCY_MAX - 1, 'active=MAX should trigger skip');
+      assert(isDeferredSlotBusy() === false, 'Deferred slot should be free even when main slots full');
 
-      // Only 1 free → skip (reserve for T1a)
-      sem.active = SANDBOX_CONCURRENCY_MAX - 1;
-      assert(sem.active >= SANDBOX_CONCURRENCY_MAX - 1, 'active=MAX-1 should trigger skip (reserve for T1a)');
-
-      // 2+ free → proceed
-      sem.active = SANDBOX_CONCURRENCY_MAX - 2;
-      assert(sem.active < SANDBOX_CONCURRENCY_MAX - 1, 'active=MAX-2 should allow deferred processing');
-
-      sem.active = 0;
-      assert(sem.active < SANDBOX_CONCURRENCY_MAX - 1, 'active=0 should allow deferred processing');
+      sem.active = SANDBOX_CONCURRENCY_MAX * 10;
+      assert(isDeferredSlotBusy() === false, 'Deferred slot is decoupled from semaphore count');
     } finally {
       sem.active = origActive;
+      _resetDeferredQueue();
     }
   });
 

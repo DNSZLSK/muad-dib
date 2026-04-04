@@ -23,7 +23,8 @@ const CONTAINER_TIMEOUT = 120000; // 120 seconds
 const SINGLE_RUN_TIMEOUT = 90000; // 90 seconds per run in multi-run mode (gVisor ~30% I/O overhead)
 
 // ── Sandbox concurrency limiter ──
-// Prevents Docker container saturation under load (16 workers × 3 runs = 48 containers).
+// Prevents Docker container saturation under load (main-path T1a/T1b/T2).
+// The deferred worker manages its own dedicated slot outside this semaphore.
 // Pattern: same semaphore as src/shared/http-limiter.js.
 const SANDBOX_CONCURRENCY_MAX = Math.max(1, parseInt(process.env.MUADDIB_SANDBOX_CONCURRENCY, 10) || 3);
 
@@ -565,16 +566,21 @@ async function runSandbox(packageName, options = {}) {
 
   const mode = strict ? 'strict' : 'permissive';
 
-  // Acquire sandbox slot — blocks if SANDBOX_CONCURRENCY_MAX containers already running
-  const queueLen = _sandboxSemaphore.queue.length;
-  if (queueLen > 0) {
-    console.log(`[SANDBOX] Waiting for sandbox slot (${_sandboxSemaphore.active}/${SANDBOX_CONCURRENCY_MAX} active, ${queueLen} queued)...`);
+  // Acquire sandbox slot — blocks if SANDBOX_CONCURRENCY_MAX containers already running.
+  // skipSemaphore: deferred worker manages its own dedicated slot outside this semaphore.
+  const skipSem = options.skipSemaphore === true;
+  if (!skipSem) {
+    const queueLen = _sandboxSemaphore.queue.length;
+    if (queueLen > 0) {
+      console.log(`[SANDBOX] Waiting for sandbox slot (${_sandboxSemaphore.active}/${SANDBOX_CONCURRENCY_MAX} active, ${queueLen} queued)...`);
+    }
+    await acquireSandboxSlot();
   }
-  await acquireSandboxSlot();
 
   try {
     const runtimeLabel = useGvisor ? 'gvisor' : 'docker';
-    console.log(`[SANDBOX] Analyzing "${displayName}" in isolated container (mode: ${mode}, runtime: ${runtimeLabel}${canaryEnabled ? ', canary: on' : ''}${local ? ', local' : ''}, runs: ${TIME_OFFSETS.length}, slots: ${_sandboxSemaphore.active}/${SANDBOX_CONCURRENCY_MAX})...`);
+    const slotInfo = skipSem ? 'deferred-slot' : `${_sandboxSemaphore.active}/${SANDBOX_CONCURRENCY_MAX}`;
+    console.log(`[SANDBOX] Analyzing "${displayName}" in isolated container (mode: ${mode}, runtime: ${runtimeLabel}${canaryEnabled ? ', canary: on' : ''}${local ? ', local' : ''}, runs: ${TIME_OFFSETS.length}, slots: ${slotInfo})...`);
 
     const allRuns = [];
     let bestResult = cleanResult;
@@ -639,7 +645,7 @@ async function runSandbox(packageName, options = {}) {
     displayResults(bestResult);
     return bestResult;
   } finally {
-    releaseSandboxSlot();
+    if (!skipSem) releaseSandboxSlot();
   }
 }
 
