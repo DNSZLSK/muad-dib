@@ -1,0 +1,225 @@
+{
+  "generated_at": "2026-04-05T06:55:40.434405+00:00",
+  "dataset": {
+    "confirmed_malicious_jsonl": 15,
+    "confirmed_malicious_alert": 0,
+    "confirmed_malicious_no_features": 357,
+    "likely_malicious_excluded": 19,
+    "unconfirmed_as_clean": 898,
+    "pending_excluded": 3971,
+    "clean_no_match": 41064,
+    "datadog_malicious": 14587
+  },
+  "best_hyperparams": {
+    "learning_rate": 0.05,
+    "max_depth": 4,
+    "n_estimators": 300
+  },
+  "grid_search_top5": [
+    {
+      "learning_rate": 0.05,
+      "max_depth": 4,
+      "n_estimators": 300,
+      "mean_f1": 0.9603269422604979
+    },
+    {
+      "learning_rate": 0.2,
+      "max_depth": 4,
+      "n_estimators": 200,
+      "mean_f1": 0.960326424181845
+    },
+    {
+      "learning_rate": 0.2,
+      "max_depth": 4,
+      "n_estimators": 300,
+      "mean_f1": 0.960326424181845
+    },
+    {
+      "learning_rate": 0.2,
+      "max_depth": 6,
+      "n_estimators": 200,
+      "mean_f1": 0.960326424181845
+    },
+    {
+      "learning_rate": 0.2,
+      "max_depth": 6,
+      "n_estimators": 300,
+      "mean_f1": 0.960326424181845
+    }
+  ],
+  "cv_metrics": {
+    "precision": 0.9361788617886179,
+    "recall": 0.9857045026536552,
+    "f1": 0.9603035610040864
+  },
+  "holdout_metrics": {
+    "precision": 0.9243,
+    "recall": 0.9993,
+    "f1": 0.9603,
+    "auc_roc": 0.9989,
+    "fpr": 0.0285,
+    "tpr": 0.9993,
+    "confusion_matrix": [
+      [
+        8154,
+        239
+      ],
+      [
+        2,
+        2918
+      ]
+    ],
+    "tp": 2918,
+    "fp": 239,
+    "fn": 2,
+    "tn": 8154,
+    "top_20_features": [
+      [
+        "unpacked_size_bytes",
+        2504.6235
+      ],
+      [
+        "file_count_total",
+        654.4614
+      ],
+      [
+        "version_count",
+        610.4544
+      ],
+      [
+        "max_single_points",
+        607.4086
+      ],
+      [
+        "score",
+        366.6144
+      ],
+      [
+        "global_risk_score",
+        337.9385
+      ],
+      [
+        "has_tests",
+        171.9633
+      ],
+      [
+        "distinct_threat_types",
+        60.4275
+      ],
+      [
+        "points_concentration",
+        50.8792
+      ],
+      [
+        "has_env_access",
+        31.3521
+      ],
+      [
+        "count_low",
+        28.3965
+      ],
+      [
+        "type_env_access",
+        27.3926
+      ],
+      [
+        "file_score_mean",
+        19.4835
+      ],
+      [
+        "author_package_count",
+        18.6849
+      ],
+      [
+        "package_score",
+        13.6326
+      ],
+      [
+        "count_total",
+        9.09
+      ],
+      [
+        "max_file_score",
+        6.8378
+      ],
+      [
+        "severity_ratio_high",
+        4.6229
+      ],
+      [
+        "has_repository",
+        3.9423
+      ],
+      [
+        "package_age_days",
+        3.6351
+      ]
+    ]
+  },
+  "active_features": [
+    "score",
+    "max_file_score",
+    "package_score",
+    "global_risk_score",
+    "count_total",
+    "count_critical",
+    "count_high",
+    "count_medium",
+    "count_low",
+    "distinct_threat_types",
+    "type_suspicious_dataflow",
+    "type_env_access",
+    "type_sensitive_string",
+    "type_dangerous_call_eval",
+    "type_dangerous_call_exec",
+    "type_dangerous_call_function",
+    "type_obfuscation_detected",
+    "type_high_entropy_string",
+    "type_dynamic_require",
+    "type_dynamic_import",
+    "type_lifecycle_script",
+    "type_typosquat_detected",
+    "type_staged_payload",
+    "type_staged_binary_payload",
+    "type_network_require",
+    "type_sandbox_evasion",
+    "type_credential_regex_harvest",
+    "type_remote_code_load",
+    "type_suspicious_domain",
+    "type_prototype_hook",
+    "type_intent_credential_exfil",
+    "type_crypto_decipher",
+    "type_env_charcode_reconstruction",
+    "type_reverse_shell",
+    "type_mcp_config_injection",
+    "type_js_obfuscation_pattern",
+    "type_other",
+    "has_lifecycle_script",
+    "has_network_access",
+    "has_obfuscation",
+    "has_env_access",
+    "has_eval",
+    "has_staged_payload",
+    "has_typosquat",
+    "has_ioc_match",
+    "has_intent_pair",
+    "has_sandbox_finding",
+    "file_count_with_threats",
+    "file_score_mean",
+    "file_score_max",
+    "severity_ratio_high",
+    "max_single_points",
+    "points_concentration",
+    "unpacked_size_bytes",
+    "reputation_factor",
+    "package_age_days",
+    "weekly_downloads",
+    "version_count",
+    "author_package_count",
+    "has_repository",
+    "readme_size",
+    "file_count_total",
+    "has_tests",
+    "threat_density"
+  ]
+}

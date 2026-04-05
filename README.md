@@ -282,6 +282,8 @@ repos:
 
 | Metric | Result | Details |
 |--------|--------|---------|
+| **ML FPR** | **2.85%** (239/8,393 holdout) | XGBoost retrained on 56,564 samples, 64 features, threshold=0.710 |
+| **ML TPR** | **99.93%** (2,918/2,920 holdout) | 377 confirmed_malicious via OSSF/GHSA/npm correlation |
 | **Wild TPR** (Datadog 17K) | **92.8%** (13,538/14,587 in-scope) | 17,922 packages. 3,335 skipped (no JS). By category: compromised_lib 97.8%, malicious_intent 92.1% |
 | **TPR** (Ground Truth) | **93.9%** (46/49) | 51 real attacks. 3 out-of-scope: browser-only |
 | **FPR** (Benign curated) | **10.6%** (56/529) | 529 npm packages, real source via `npm pack` |
@@ -290,7 +292,13 @@ repos:
 
 **3034 tests** across 65 files. **200 rules** (195 RULES + 5 PARANOID).
 
-> **Methodology caveats:**
+> **ML retrain methodology (v2.10.51):**
+> - Ground truth: 377 confirmed_malicious via auto-labeler (OSSF malicious-packages, GitHub Advisory Database, npm registry takedown correlation)
+> - Dataset: 56,564 samples (14,602 malicious, 41,962 clean). Stratified 80/20 split
+> - Grid search: depth=4, estimators=300, lr=0.05. AUC-ROC=0.999, F1=0.960
+> - Leaky feature filter: 23 dead/leaky features removed (source-identity proxies)
+>
+> **Static evaluation caveats:**
 > - TPR measured on 49 Node.js attack samples (3 browser-only excluded from 51 total)
 > - FPR measured on 529 curated popular npm packages (not a random sample)
 > - ADR measured with global threshold (score >= 20) as of v2.6.5

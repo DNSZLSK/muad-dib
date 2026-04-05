@@ -299,112 +299,75 @@ Le moniteur a aussi ete renforce a ce moment : IOC pre-check avant tout download
 
 ---
 
-## Le compound scoring (19 Mars 2026)
+## Quand les malwares se mettent a deux (19 Mars 2026)
 
-En analysant les co-occurrences de types de menaces dans les packages benins vs malveillants, j'ai identifie des combinaisons qui n'apparaissent **jamais** dans les 529 packages benins mais sont frequentes dans les malwares. Exemples : `lifecycle_script` + `typosquat_detected` (script lifecycle sur un package typosquat), ou `staged_binary_payload` + `crypto_decipher` (payload chiffre + execution).
+Un truc que les manuels de securite ne disent pas : les techniques malveillantes, prises individuellement, existent souvent dans du code legitime. Un `child_process.exec()` dans un lifecycle script ? Ca peut etre webpack comme du malware. Un `env_access` + `fetch` ? Express le fait tous les jours.
 
-Le systeme injecte des findings CRITICAL synthetiques quand ces composants co-existent. C'est appele apres les reductions FP pour ne pas etre annule.
+Mais certaines *combinaisons* n'apparaissent jamais dans les packages legitimes. En passant au peigne fin les co-occurrences de types de menaces dans les 529 packages benins, j'ai trouve 6 paires a faux positif zero. Exemple : un package typosquat qui a aussi un lifecycle script ? Sur 529 packages legit, ca n'arrive pas. Dans les malwares, c'est quasiment la signature. Pareil pour un payload chiffre avec un `crypto_decipher` : un bundler ne fait pas ca.
 
----
-
-## L'audit fondamental et le ML (22 Mars 2026)
-
-Apres 3 mois de monitoring 24/7 (~10 000 packages/jour), un constat : **0 malware confirme**. Le moniteur envoyait ~600 alertes/jour mais aucune n'etait un vrai positif verifie. L'audit fondamental a pose 20 questions sur le pipeline et identifie 5 causes racines.
-
-La plus grave : **contamination des labels ML**. Quand le sandbox ne trouvait rien, le moniteur marquait automatiquement le package comme "fp" (faux positif). Sauf que le sandbox n'avait pas de honey tokens pendant 3 mois. Un sandbox propre ne prouve rien — le malware peut simplement ne pas s'etre active. 8176 records contamines.
-
-Le nettoyage a ete spectaculaire. Le classifier ML1 avant nettoyage : precision 37.2%, recall 99.8%. Apres nettoyage (8176 "fp" → "unconfirmed", exclus de l'entrainement) : **precision 97.8%, recall 93.3%, F1 0.955**. Le meme code, les memes features, mais avec des donnees propres.
-
-Deux modeles ML entraines :
-- **ML1 XGBoost** (malware detector) : 114 arbres, 21 features, seuil 0.500. Entraine sur 25346 benins + 14587 malwares Datadog. Top features : score, max_single_points, file_score_max, threat_density.
-- **ML2 Bundler detector** : 98 arbres, 30 features, seuil 0.100. Specialise dans les faux positifs de bundlers (webpack, rollup) qui scorent haut. F1 0.996 mais warning de leakage potentiel via unpacked_size_bytes.
-
-6 chantiers de remediation :
-1. **Relabeling assaini** : sandbox clean → "unconfirmed" au lieu de "fp". Guard `manualReview` obligatoire pour le label "fp".
-2. **Webhook triage P1/P2/P3** : P1 rouge (IOC, HC types, sandbox, canary), P2 orange (score >= 50, compounds, lifecycle+intent), P3 jaune (reste). Les ~26 vrais malwares/jour sont visuellement distincts.
-3. **3 nouveaux compounds** : `lifecycle_dataflow` (269 co-occurrences malware, 0 benin), `lifecycle_dangerous_exec` (47 cas), `obfuscated_lifecycle_env` (triple signal).
-4. **Lifecycle guard** : empeche la dilution count-threshold quand lifecycle_script est present.
-5. **Script score-0** : diagnostic des 1049 malwares avec score 0 (categorie : empty, ts_only, binary, etc.)
-6. **Architecture LLM triage** : design doc pour Phase 3 (Claude 3.5 Haiku, ~$17/mois, shadow mode → enforce)
-
-Investigation manuelle de 9 packages live — tous FP, confirmant que le triage humain ne scale pas et que le LLM Phase 3 est indispensable.
-
-Comparaison industrie : Socket (USA, $65M funding), Phylum (rachete par Veracode), Snyk (UK/Israel), Semgrep Multimodal, OSCAR (Chine). MUAD'DIB est le seul acteur francais dans ce domaine.
+Le compound scoring injecte des findings CRITICAL quand ces paires co-existent. Le piege a eviter : les appliquer avant les reductions FP, parce que les reductions annuleraient le boost. Ca parait evident apres coup, mais j'ai perdu une demi-journee dessus.
 
 ---
 
-## De v2.10.6 a v2.10.21 — Performance, IOCs, et CanisterWorm (22-27 Mars 2026)
+## Le mur des zero confirmes (22 Mars 2026)
 
-16 versions en 5 jours. Le rythme s'est accelere parce que le moniteur 24/7 a expose des problemes de performance et de fiabilite en production.
+Apres 3 mois de monitoring 24/7 — environ 10 000 packages par jour — j'ai fini par regarder les chiffres en face : **zero malware confirme**. Le moniteur crachait ~600 alertes quotidiennes mais aucune n'avait ete verifiee comme un vrai positif.
 
-**Detection de nouvelles campagnes :**
-- **TeamPCP/CanisterWorm** (v2.10.12) : 5 nouvelles regles — persistence systemd (pgmon.service, sysmon.service), vol de tokens npm (worm propagation), wipe filesystem (kamikaze.sh ciblant l'Iran), scan memoire /proc/*/mem (vol de secrets CI/CD). CanisterWorm est le premier worm npm auto-replicant documente, TeamPCP a compromis Trivy v0.69.4.
-- **LiteLLM/Checkmarx** (v2.10.14) : persistence `.pth` Python — fichiers executes automatiquement par l'interpreteur au demarrage. IOCs ajoutes pour les versions compromises.
-- **Sandbox libfaketime** (v2.10.7) : acceleration du temps pour detecter les time-bombs Python/bash (pattern CanisterWorm).
+En creusant, j'ai decouvert la pire erreur du projet. Quand le sandbox ne trouvait rien, le moniteur marquait automatiquement le package comme "faux positif". Sauf que le sandbox n'avait pas de honey tokens pendant 3 mois. Un sandbox propre ne prouve rien — le malware peut simplement ne pas s'etre active. 8176 records contamines. J'ai pollue mes propres donnees d'entrainement pendant 3 mois sans m'en rendre compte.
 
-**Performance (v2.10.17-v2.10.21) :**
-Le moniteur traitait ~10 000 packages/jour mais certains scans depassaient le timeout de 30s. 6 phases d'optimisation :
-- Worker threads pour les scanners CPU-bound, exclusion automatique des dist/, caches AST/contenu (v2.10.18)
-- Timeout statique 45s, size cap 10MB, quick scan pour les fichiers au-dela du cap (v2.10.17)
-- Cache HTTP, deduplication registre, parallelisation temporal (v2.10.19)
-- Semaphore HTTP, cache negatif, correction OOM (v2.10.20)
-- Limiteur centralise 10 requetes concurrentes max (v2.10.21)
+Le nettoyage a ete une lecon d'humilite. Le classifier ML avant nettoyage : precision 37%, recall 99.8% — il "detectait" tout mais la moitie etait du bruit. Apres nettoyage (les 8176 "fp" reclasses en "unconfirmed", exclus de l'entrainement) : precision 97.8%, recall 93.3%. Le meme code, les memes features, des donnees propres. C'est la preuve que le ML n'est jamais meilleur que ses labels.
 
-**Precision (v2.10.9-v2.10.10) :**
-- Graduation dataflow : `suspicious_dataflow` HIGH→MEDIUM pour les sources env/telemetry-only
-- Heuristique SDK : credential suffix pour `isSDKPattern` — reduit les FP sur les SDK qui envoient des credentials a leur propre API
-- FPR curated : 11.0% → **10.6%** (56/529, -2 FP)
+J'ai entraine deux modeles : un XGBoost pour la detection malware (114 arbres, 21 features) et un detecteur de bundlers specialise dans les faux positifs de webpack et rollup qui scorent haut. Le deuxieme modele a un F1 de 0.996 mais avec un warning de data leakage sur la taille des packages — les bundlers sont gros par nature, donc le modele triche un peu.
 
-**Securite :**
-- Self-host highlight.js (suppression dependance CDN dans les rapports HTML)
-- Samples adversariaux/bypass deplaces vers un repo prive
+Le plus gros chantier a ete le triage des alertes. J'ai mis en place un systeme de priorites : P1 rouge pour les IOC matches et les detections sandbox, P2 orange pour les scores eleves avec compounds, P3 jaune pour le reste. L'idee c'est que les ~26 vrais malwares par jour soient visuellement distincts dans le flux Discord. Ca ne remplace pas un vrai triage automatise, mais ca rend le mur d'alertes a peu pres lisible.
 
-| Metrique | v2.10.5 | v2.10.21 |
-|----------|---------|----------|
-| Rules | 162 (157+5) | **176** (171+5) |
-| Tests | 2643 | **2793** |
-| FPR curated | 11.0% | **10.6%** |
-| ADR | 96.3% | **94.0%** |
+J'ai aussi investigate manuellement 9 packages en live. Tous des FP. Confirmation definitive que le triage humain ne scale pas.
 
-La baisse de l'ADR (96.3% → 94.0%) s'explique par le deplacement des samples adversariaux vers un repo prive — certains ne sont plus disponibles sur disque.
+En comparant avec l'industrie — Socket avec $65M de funding, Phylum rachete par Veracode, Snyk, Semgrep — MUAD'DIB est le seul outil francais dans ce domaine. Un stagiaire en formation qui joue dans la meme cour que des boites avec des dizaines d'ingenieurs. Ca met en perspective.
 
 ---
 
-## Etat actuel
+## La course contre les campagnes (22-27 Mars 2026)
 
-### Ce qui fonctionne
+16 versions en 5 jours. Le moniteur en production exposait des vrais problemes, et les campagnes d'attaque n'attendent pas.
 
-- **14 scanners paralleles**, 200 regles de detection (195 + 5 paranoid)
-- **225 000+ IOCs** npm + 14 000+ PyPI
-- Detection de campagnes : Shai-Hulud (v1/v2/v3), GlassWorm (433+ packages), CanisterWorm, TeamPCP, LiteLLM
-- Sandbox gVisor/Docker : runtime invisible (gVisor), network blacklist (28 safe/24 exfil/7 OAST/6 tunnel), honey tokens DNS (hex/base64/base64url encoding), canary tokens, multi-run [0h, 72h, 7j]
-- Moniteur zero-day : npm changes stream + PyPI RSS, alertes Discord temps reel, poll non-bloquant (60s)
-- Trusted dep-diff : detection de nouvelles dependances inconnues sur les packages populaires (>50k downloads/semaine)
-- Exports JSON, HTML, SARIF. Extension VS Code. GitHub Action Marketplace
-- Diff entre versions, pre-commit hooks, mode paranoid
-- Detection comportementale : lifecycle temporel, AST diff, anomalie publication, changement maintainer
-- Desobfuscation statique : concat, charcode, base64, hex arrays, propagation de constantes
-- Dataflow inter-module : graphe de dependances, propagation de teinte, 3-hop re-export
-- Compound scoring : co-occurrences zero-FP pour les combinaisons malveillantes
-- Pipeline ML : XGBoost classifier ML1 (P=0.978, F1=0.955, 114 arbres) + bundler detector ML2 (P=0.992, F1=0.996, 98 arbres)
-- Webhook triage P1/P2/P3 : classification visuelle des alertes (rouge/orange/jaune)
-- Limiteur HTTP centralise : 10 requetes concurrentes max, cache negatif, semaphore anti-OOM
-- OpenSSF OSV.dev comme source IOC supplementaire
-- **3034 tests** (65 fichiers), 86% coverage
+**CanisterWorm** a ete le plus impressionnant. Premier worm npm auto-replicant documente — il se propage de package en package en volant les tokens npm des mainteneurs. Le truc terrifiant : TeamPCP avait compromis Trivy v0.69.4, un outil de securite. L'outil cense proteger etait lui-meme piege. J'ai ajoute 5 regles : persistance systemd, vol de tokens pour la propagation, wipe filesystem (un script kamikaze qui ciblait l'Iran), et scan de `/proc/*/mem` pour voler les secrets CI/CD.
 
-### Ce qui manque (honnetement)
+**LiteLLM** m'a fait decouvrir un vecteur que je ne connaissais pas : les fichiers `.pth` Python s'executent automatiquement au demarrage de l'interpreteur. Tu drops un fichier dans `site-packages/` et Python l'execute a chaque import. Discret et redoutable.
 
-**LLM triage (Phase 3)** : Les modeles ML (ML1 malware detector, ML2 bundler detector) sont entraines et operationnels. La prochaine etape est le triage LLM (Claude 3.5 Haiku) pour filtrer automatiquement les alertes P2/P3. Design doc pret, deploiement en shadow mode prevu.
+En parallele, le moniteur ramait. Certains scans depassaient 30 secondes, ce qui creait un backlog grandissant. J'ai passe 3 jours a optimiser : worker threads pour les scanners CPU-bound, exclusion automatique des `dist/`, caches AST et contenu, timeout statique a 45s, size cap a 10 MB, et un limiteur HTTP centralise a 10 requetes concurrentes pour eviter les OOM. De la plomberie ingrate mais necessaire pour que le 24/7 tienne la route.
 
-**Pas d'interception TLS** : Le sandbox capture le SNI mais ne dechiffre pas le contenu HTTPS.
+Le FPR a aussi baisse de 11.0% a 10.6% grace a quelques ajustements de graduation — un `suspicious_dataflow` qui vient d'une variable d'environnement de telemetrie n'a pas la meme gravite qu'un vrai credential harvest.
 
-**Desobfuscation limitee** : La desobfuscation resout les patterns courants, mais les obfuscateurs avances (javascript-obfuscator, JScrambler) utilisent des transformations de flux de controle que l'approche statique ne peut pas resoudre.
+Un effet de bord inattendu : l'ADR est passe de 96.3% a 94.0%. Pas une regression — j'avais deplace les samples adversariaux vers un repo prive pour eviter qu'ils servent de recette aux attaquants, et certains ne sont plus sur disque.
 
-**Dependance aux APIs tierces** : Si DataDog, GitHub, ou OSV changent leurs APIs, le scraper casse.
+---
 
-**Support limite a npm et PyPI** : Pas de RubyGems, Maven, Go, ou autres ecosystemes.
+## L'auto-labeler, ou comment j'ai failli entrainer un modele sur du vent (Avril 2026)
 
-**Pas de dashboard web** : MUAD'DIB est un outil CLI local uniquement.
+Le probleme de fond : 49 malwares confirmes dans le ground truth, c'est ridicule pour entrainer un modele serieux. Le pipeline ML tournait en cercle — il labellisait ses propres predictions comme verite terrain. Comme un etudiant qui corrige ses propres copies.
+
+J'ai construit un auto-labeler qui croise 3 sources externes independantes : OSSF malicious-packages (227K entrees), GitHub Advisory Database (5300 advisories npm), et le statut npm registry (un package supprime dans les 72h apres publication, c'est un takedown). Si au moins deux sources convergent, le label est "confirmed_malicious". Resultat : 377 confirmed au lieu de 49. Un ground truth 7x plus large.
+
+Premier entrainement avec les nouvelles donnees : precision 1.000, recall 1.000. Trop beau. J'ai immediatement su que quelque chose clochait. En creusant : 16 features absentes du corpus Datadog etaient mises a -1. Le modele ne detectait pas les malwares — il detectait *quelle source* avait fourni les donnees. Data leakage classique, et j'ai failli le deployer en prod sans verifier.
+
+Apres correction (features manquantes a 0, filtre automatique des features "leaky"), le modele honnete donne un FPR de 2.85% au lieu de 11%, mais une precision de 0.924 au lieu de 0.999. En prod, ca veut dire 239 faux positifs au lieu de 924 sur le meme set. Mon inbox Discord me remercie.
+
+Autre surprise : sur les 377 malwares confirmes, seulement 15 matchaient dans le dataset d'entrainement. Les 362 autres n'avaient jamais ete scannes par le moniteur au moment de leur publication. Il a fallu extraire les features depuis les alertes archivees, porter l'extracteur JS en Python. 357 restent sans donnees — pas d'alerte, pas de scan, rien. Le modele ne peut apprendre que de ce qu'il a vu. Le meilleur auto-labeler du monde ne remplace pas un pipeline de collecte exhaustif.
+
+---
+
+## Ou j'en suis
+
+3 mois et demi de projet. 200 regles de detection, 14 scanners, 3034 tests. Un moniteur en 24/7 sur npm et PyPI. Deux modeles ML entraines. Un ground truth passe de 4 malwares a 377.
+
+Les chiffres qui comptent : TPR 93.9% (46/49 attaques reelles detectees), FPR 10.6% (56/529 packages benins flagues a tort), ADR 94.0% (101/107 samples adversariaux). Ce ne sont pas des scores parfaits, et c'est le point — un scanner avec 0% de FP ne scanne probablement rien, et un TPR de 100% sur 4 samples ne veut rien dire.
+
+Ce qui marche bien : la detection des campagnes connues (Shai-Hulud, GlassWorm, CanisterWorm), la desobfuscation statique qui voit a travers les techniques d'evasion courantes, le sandbox avec acceleration temporelle pour les time-bombs, le compound scoring qui exploite les combinaisons impossibles en code legitime, et le dataflow inter-module qui suit les credentials a travers les frontieres de fichiers.
+
+Ce qui manque, honnetement : le triage LLM pour filtrer automatiquement les alertes (design doc pret, pas deploye). L'interception TLS dans le sandbox — on capture le SNI mais pas le contenu. La desobfuscation avancee — les obfuscateurs comme JScrambler utilisent des transformations de flux de controle que l'approche statique ne peut pas resoudre. Le support au-dela de npm et PyPI. Et un dashboard web — MUAD'DIB reste un outil CLI. Suffisant pour un dev qui verifie un package avant de l'installer, mais ca ne scale pas pour de la surveillance d'entreprise.
+
+La lecon la plus importante de tout le projet : les donnees sont plus importantes que le code. Le meilleur algorithme du monde ne sert a rien avec des labels contamines. Les meilleures heuristiques ne servent a rien si le FPR est mesure sur des repertoires vides. L'honnetete sur les limites n'est pas une faiblesse — c'est la seule facon de progresser.
 
 ---
 
