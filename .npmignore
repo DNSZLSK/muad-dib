@@ -42,6 +42,8 @@ iocs.json.gz
 src/ioc/data/iocs.json
 src/ioc/data/iocs-compact.json
 src/ioc/data/.ossf-tree-sha
+ml-retrain/retrain-dataset.jsonl
+
 
 # Config & artifacts
 eslint.config.mjs

@@ -162,9 +162,7 @@ dnsServer.on('message', function (msg, rinfo) {
   }
 });
 
-dnsServer.on('error', function (e) {
-  console.error('[MOCK-NET] DNS error: ' + e.message);
-});
+// DNS error handler registered in START section (handleBindError)
 
 // ═══════════════════════════════════════════════════════
 // SHARED: plausible response bodies + request handler
@@ -237,9 +235,7 @@ var httpServer = http.createServer(function (req, res) {
   handleMockRequest(req, res, false);
 });
 
-httpServer.on('error', function (e) {
-  console.error('[MOCK-NET] HTTP error: ' + e.message);
-});
+// HTTP error handler registered in START section (handleBindError)
 
 // ═══════════════════════════════════════════════════════
 // HTTPS HONEYPOT (TCP 443 on MOCK_IP)
@@ -316,35 +312,59 @@ try {
   });
 }
 
-httpsServer.on('error', function (e) {
-  console.error('[MOCK-NET] HTTPS error: ' + e.message);
-});
+// HTTPS error handler registered in START section (handleBindError)
 
 // ═══════════════════════════════════════════════════════
 // START
 // ═══════════════════════════════════════════════════════
 
 var readyCount = 0;
+var readyTarget = 3; // DNS + HTTP + HTTPS
+var readyDone = false;
+
 function checkReady() {
-  if (++readyCount === 3) {
+  if (readyDone) return;
+  if (++readyCount >= readyTarget) {
+    readyDone = true;
     try { fs.writeFileSync('/tmp/mock-network-ready', '1'); } catch (e) { /* ignore */ }
-    console.log('[MOCK-NET] All servers ready.');
+    console.log('[MOCK-NET] All servers ready (' + readyCount + '/' + readyTarget + ').');
   }
+}
+
+// If a server fails to bind, reduce the target so the remaining servers
+// can still signal ready (DNS + HTTP alone is sufficient for most captures).
+function handleBindError(label, e) {
+  console.error('[MOCK-NET] ' + label + ' bind failed: ' + e.message);
+  readyTarget--;
+  checkReady(); // re-check with reduced target
 }
 
 dnsServer.bind(53, '127.0.0.1', function () {
   console.log('[MOCK-NET] DNS on 127.0.0.1:53 (upstream: ' + UPSTREAM_DNS + ')');
   checkReady();
 });
+dnsServer.on('error', function (e) { handleBindError('DNS', e); });
 
 httpServer.listen(80, MOCK_IP, function () {
   console.log('[MOCK-NET] HTTP on ' + MOCK_IP + ':80');
   checkReady();
 });
+httpServer.on('error', function (e) { handleBindError('HTTP', e); });
 
 httpsServer.listen(443, MOCK_IP, function () {
   console.log('[MOCK-NET] HTTPS on ' + MOCK_IP + ':443 (SNI dynamic certs)');
   checkReady();
+});
+httpsServer.on('error', function (e) { handleBindError('HTTPS', e); });
+
+// Safety net: if readyTarget drops to 0 (all servers failed), still write ready
+// so sandbox-runner.sh doesn't hang waiting. Also catch unhandled errors.
+process.on('uncaughtException', function (e) {
+  console.error('[MOCK-NET] Uncaught: ' + e.message);
+  if (!readyDone) {
+    readyDone = true;
+    try { fs.writeFileSync('/tmp/mock-network-ready', '1'); } catch (e2) { /* ignore */ }
+  }
 });
 
 process.on('SIGTERM', function () {

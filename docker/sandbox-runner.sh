@@ -107,14 +107,17 @@ UPSTREAM_DNS=$(grep '^nameserver' /etc/resolv.conf 2>/dev/null | head -1 | awk '
 # The CA is added to the system SSL bundle so curl/wget/python trust it.
 # Node.js gets it via NODE_EXTRA_CA_CERTS.
 echo "[SANDBOX] Generating mock TLS CA..." >&2
-openssl genrsa -out /tmp/mock-ca-key.pem 2048 2>/dev/null
+# OpenSSL 3.x outputs info messages to STDOUT (not stderr) — must suppress both
+# to prevent pollution of the container stdout that carries the JSON report.
+openssl genrsa -out /tmp/mock-ca-key.pem 2048 >/dev/null 2>&1
 openssl req -new -x509 -key /tmp/mock-ca-key.pem -out /tmp/mock-ca.pem \
-  -days 1 -subj "/O=Internet Security Research Group/CN=ISRG Root X2" 2>/dev/null
-openssl genrsa -out /tmp/mock-server-key.pem 2048 2>/dev/null
+  -days 1 -subj "/O=Internet Security Research Group/CN=ISRG Root X2" >/dev/null 2>&1
+openssl genrsa -out /tmp/mock-server-key.pem 2048 >/dev/null 2>&1
 # Default cert for TLS connections without SNI header
+# Note: first openssl stdout is piped (CSR), second needs >/dev/null for info messages
 openssl req -new -key /tmp/mock-server-key.pem -subj "/CN=localhost" 2>/dev/null | \
   openssl x509 -req -CA /tmp/mock-ca.pem -CAkey /tmp/mock-ca-key.pem \
-    -CAcreateserial -days 1 -out /tmp/mock-cert-default.pem 2>/dev/null
+    -CAcreateserial -days 1 -out /tmp/mock-cert-default.pem >/dev/null 2>&1
 # Trust the CA system-wide: append to SSL bundle (read-only FS → copy to /tmp)
 cat /etc/ssl/certs/ca-certificates.crt /tmp/mock-ca.pem > /tmp/mock-ca-bundle.pem 2>/dev/null
 export SSL_CERT_FILE=/tmp/mock-ca-bundle.pem
@@ -123,8 +126,9 @@ export NODE_EXTRA_CA_CERTS=/tmp/mock-ca.pem
 echo "[SANDBOX] Starting mock network (upstream DNS: $UPSTREAM_DNS)..." >&2
 MUADDIB_UPSTREAM_DNS=$UPSTREAM_DNS node /opt/mock-network.js >/dev/null 2>&1 &
 MOCK_NET_PID=$!
-# Wait for mock servers to be ready (DNS + HTTP + TLS trap)
-for _i in 1 2 3 4 5 6; do
+# Wait for mock servers to be ready (DNS + HTTP + HTTPS)
+# 10 iterations × 0.5s = 5s max (gVisor I/O overhead can delay Node.js cold start)
+for _i in 1 2 3 4 5 6 7 8 9 10; do
   [ -f /tmp/mock-network-ready ] && break
   sleep 0.5
 done
@@ -133,6 +137,11 @@ if [ -f /tmp/mock-network-ready ]; then
   echo "[SANDBOX] Mock network active — DNS redirected to 127.0.0.1." >&2
 else
   echo "[SANDBOX] Mock network failed to start — using real DNS." >&2
+  # Log why it failed (cert files missing? node crash?)
+  [ ! -f /tmp/mock-ca.pem ] && echo "[SANDBOX] DIAG: mock-ca.pem missing (openssl failed)" >&2
+  [ ! -f /tmp/mock-server-key.pem ] && echo "[SANDBOX] DIAG: mock-server-key.pem missing" >&2
+  [ ! -f /tmp/mock-cert-default.pem ] && echo "[SANDBOX] DIAG: mock-cert-default.pem missing" >&2
+  kill "$MOCK_NET_PID" 2>/dev/null
   MOCK_NET_PID=""
 fi
 
