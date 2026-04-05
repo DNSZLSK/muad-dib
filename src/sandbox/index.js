@@ -396,6 +396,32 @@ async function runSingleSandbox(packageName, options = {}) {
         }
       } catch (e) {
         console.log('[SANDBOX] Failed to parse container output:', e.message);
+        // ── Debug: identify what corrupted the JSON report ──
+        const dbgDelim = stdout.lastIndexOf('---MUADDIB-REPORT-START---');
+        console.log(`[SANDBOX] DEBUG: stdout.length=${stdout.length}, delimiter_pos=${dbgDelim}`);
+        if (dbgDelim !== -1) {
+          const afterDelim = stdout.substring(dbgDelim);
+          // Show first 300 chars after delimiter (where JSON should start)
+          console.log('[SANDBOX] DEBUG after delimiter (first 300):', afterDelim.substring(0, 300));
+          // Show last 300 chars of stdout (where truncation happened)
+          console.log('[SANDBOX] DEBUG stdout tail (last 300):', stdout.substring(Math.max(0, stdout.length - 300)));
+          // Check for non-JSON content mixed in
+          const jsonPart = afterDelim.substring('---MUADDIB-REPORT-START---'.length).trim();
+          const firstBrace = jsonPart.indexOf('{');
+          if (firstBrace > 0) {
+            console.log('[SANDBOX] DEBUG garbage before JSON:', JSON.stringify(jsonPart.substring(0, firstBrace)));
+          }
+          const lastBrace = jsonPart.lastIndexOf('}');
+          if (lastBrace !== -1 && lastBrace < jsonPart.length - 1) {
+            console.log('[SANDBOX] DEBUG garbage after JSON:', JSON.stringify(jsonPart.substring(lastBrace + 1)));
+          }
+          if (lastBrace === -1) {
+            console.log('[SANDBOX] DEBUG no closing brace found — JSON truncated');
+          }
+        } else {
+          // No delimiter at all — show what's in stdout
+          console.log('[SANDBOX] DEBUG no delimiter found, stdout preview:', stdout.substring(0, 500));
+        }
         resolve(cleanResult);
         return;
       }
