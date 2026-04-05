@@ -222,14 +222,16 @@ async function runGapRemediationTests() {
   // GAP 5: exec() → execFile() (1 test)
   // ===================================================================
 
-  test('GAP5: bin/muaddib.js uses execFile instead of exec', () => {
+  test('GAP5: bin/muaddib.js version check uses no shell execution', () => {
     const muaddibSrc = fs.readFileSync(
       path.join(__dirname, '..', '..', 'bin', 'muaddib.js'), 'utf8'
     );
-    assertIncludes(muaddibSrc, 'execFile', 'Should use execFile');
+    // Version check must NOT use exec/shell (command injection risk).
+    // Current approach: HTTPS GET to npm registry (no shell at all).
+    // Previous approach (execFile + npm.cmd) broke on Windows (EINVAL on .cmd files).
     assert(!muaddibSrc.includes("{ exec }"), 'Should NOT import { exec }');
-    assertIncludes(muaddibSrc, "execFile(npmBin", 'Should call execFile with npmBin variable');
     assert(!muaddibSrc.includes('shell: true'), 'Should NOT use shell: true');
+    assertIncludes(muaddibSrc, 'registry.npmjs.org', 'Should query npm registry directly via HTTPS');
   });
 }
 
