@@ -493,114 +493,112 @@ touch /tmp/fs-created.txt /tmp/fs-deleted.txt /tmp/dns-queries.txt \
   /tmp/tls-connections.txt /tmp/blocked.txt /tmp/entrypoint.log \
   /tmp/preload.log
 
-INSTALL_OUTPUT=$(head -c 5000 /tmp/install.log 2>/dev/null || echo "")
-ENTRYPOINT_OUTPUT=$(head -c 5000 /tmp/entrypoint.log 2>/dev/null || echo "")
-PRELOAD_LOG=$(head -c 50000 /tmp/preload.log 2>/dev/null || echo "")
+# ── Pre-bake all data as JSON files ──
+# Previous approach passed all data via --arg/--argjson on the jq CLI.
+# With install_output (5KB) + preload_log (50KB) + arrays, total CLI size
+# exceeded ARG_MAX → "Filename too long" → jq silent crash → empty report.
+# Fix: write each piece to a JSON file, assemble with --slurpfile (reads from disk).
 
-# Helper: each jq must produce valid JSON or default to [].
-# If jq crashes (malformed input, tonumber on null, OOM), the shell variable
-# is empty (""). Passing --argjson name "" to the final jq kills it silently.
-# tonumber? // 0 prevents crash on missing/null tab-split fields.
-jq_array() { jq -R -s "$1" < "$2" 2>/dev/null; }
+# Helper: transform text file → JSON array file. Falls back to [] on any failure.
+jq_to_file() {
+  jq -R -s "$1" < "$2" > "$3" 2>/dev/null
+  [ ! -s "$3" ] && echo '[]' > "$3"
+}
 
-FS_CREATED=$(jq_array 'split("\n") | map(select(length > 0))' /tmp/fs-created.txt)
-FS_DELETED=$(jq_array 'split("\n") | map(select(length > 0))' /tmp/fs-deleted.txt)
-DNS=$(jq_array 'split("\n") | map(select(length > 0))' /tmp/dns-queries.txt)
-SENS_READ=$(jq_array 'split("\n") | map(select(length > 0))' /tmp/sensitive-read.txt)
-SENS_WRITTEN=$(jq_array 'split("\n") | map(select(length > 0))' /tmp/sensitive-written.txt)
+# Simple line arrays
+jq_to_file 'split("\n") | map(select(length > 0))' /tmp/fs-created.txt /tmp/rpt-fs-created.json
+jq_to_file 'split("\n") | map(select(length > 0))' /tmp/fs-deleted.txt /tmp/rpt-fs-deleted.json
+jq_to_file 'split("\n") | map(select(length > 0))' /tmp/dns-queries.txt /tmp/rpt-dns.json
+jq_to_file 'split("\n") | map(select(length > 0))' /tmp/sensitive-read.txt /tmp/rpt-sens-read.json
+jq_to_file 'split("\n") | map(select(length > 0))' /tmp/sensitive-written.txt /tmp/rpt-sens-written.json
+jq_to_file 'split("\n") | map(select(length > 0))' /tmp/http-bodies.txt /tmp/rpt-http-bodies.json
 
-CONNS=$(jq_array 'split("\n") | map(select(length > 0)) | map(
+# Tab-separated → structured JSON arrays (tonumber? // 0 for malformed data)
+jq_to_file 'split("\n") | map(select(length > 0)) | map(
   split("\t") | {host: .[0], port: (.[1] | tonumber? // 0), protocol: "TCP"}
-)' /tmp/connections.txt)
+)' /tmp/connections.txt /tmp/rpt-conns.json
 
-PROCS=$(jq_array 'split("\n") | map(select(length > 0)) | map(
+jq_to_file 'split("\n") | map(select(length > 0)) | map(
   split("\t") | {command: (.[1] // ""), pid: (.[0] | tonumber? // 0)}
-)' /tmp/suspicious-cmds.txt)
+)' /tmp/suspicious-cmds.txt /tmp/rpt-procs.json
 
-DNS_RESOLUTIONS=$(jq_array 'split("\n") | map(select(length > 0)) | map(
+jq_to_file 'split("\n") | map(select(length > 0)) | map(
   split("\t") | {domain: (.[0] // ""), ip: (.[1] // "")}
-)' /tmp/dns-resolutions.txt)
+)' /tmp/dns-resolutions.txt /tmp/rpt-dns-res.json
 
-HTTP_REQUESTS=$(jq_array 'split("\n") | map(select(length > 0)) | map(
+jq_to_file 'split("\n") | map(select(length > 0)) | map(
   split("\t") | {method: (.[0] // ""), host: (.[1] // ""), path: (.[2] // "")}
-)' /tmp/http-requests.txt)
+)' /tmp/http-requests.txt /tmp/rpt-http-req.json
 
-HTTP_BODIES=$(jq_array 'split("\n") | map(select(length > 0))' /tmp/http-bodies.txt)
-
-TLS_CONNS=$(jq_array 'split("\n") | map(select(length > 0)) | map(
+jq_to_file 'split("\n") | map(select(length > 0)) | map(
   split("\t") | {domain: (.[0] // ""), ip: (.[1] // ""), port: (.[2] | tonumber? // 0)}
-)' /tmp/tls-connections.txt)
+)' /tmp/tls-connections.txt /tmp/rpt-tls.json
 
-BLOCKED=$(jq_array 'split("\n") | map(select(length > 0)) | map(
+jq_to_file 'split("\n") | map(select(length > 0)) | map(
   split("\t") | {ip: (.[0] // ""), port: (.[1] | tonumber? // 0)}
-)' /tmp/blocked.txt)
+)' /tmp/blocked.txt /tmp/rpt-blocked.json
 
-# Default empty variables to [] — prevents --argjson crash on empty string
-[ -z "$FS_CREATED" ] && FS_CREATED='[]'
-[ -z "$FS_DELETED" ] && FS_DELETED='[]'
-[ -z "$DNS" ] && DNS='[]'
-[ -z "$SENS_READ" ] && SENS_READ='[]'
-[ -z "$SENS_WRITTEN" ] && SENS_WRITTEN='[]'
-[ -z "$CONNS" ] && CONNS='[]'
-[ -z "$PROCS" ] && PROCS='[]'
-[ -z "$DNS_RESOLUTIONS" ] && DNS_RESOLUTIONS='[]'
-[ -z "$HTTP_REQUESTS" ] && HTTP_REQUESTS='[]'
-[ -z "$HTTP_BODIES" ] && HTTP_BODIES='[]'
-[ -z "$TLS_CONNS" ] && TLS_CONNS='[]'
-[ -z "$BLOCKED" ] && BLOCKED='[]'
+# String values → JSON string files (properly escaped by jq, truncated by head)
+head -c 5000 /tmp/install.log 2>/dev/null | jq -R -s '.' > /tmp/rpt-install.json 2>/dev/null
+head -c 5000 /tmp/entrypoint.log 2>/dev/null | jq -R -s '.' > /tmp/rpt-entrypoint.json 2>/dev/null
+head -c 50000 /tmp/preload.log 2>/dev/null | jq -R -s '.' > /tmp/rpt-preload.json 2>/dev/null
+for _f in /tmp/rpt-install.json /tmp/rpt-entrypoint.json /tmp/rpt-preload.json; do
+  [ ! -s "$_f" ] && echo '""' > "$_f"
+done
 
-# ── Final JSON (prefixed with delimiter for reliable parsing) ──
-# Capture jq output in variable to detect failure before writing to stdout.
+# ── Assemble final JSON from files — zero large CLI arguments ──
+# Only scalars (package name, timestamp, mode, duration, exit_code) on CLI.
+# All arrays and strings read from disk via --slurpfile (jq wraps in array → [0] unwraps).
 REPORT_JSON=$(jq -n \
   --arg package "$PACKAGE" \
   --arg timestamp "$TIMESTAMP" \
   --arg mode "$MODE" \
   --argjson duration "${DURATION_MS:-0}" \
-  --argjson fs_created "$FS_CREATED" \
-  --argjson fs_deleted "$FS_DELETED" \
-  --argjson dns "$DNS" \
-  --argjson connections "$CONNS" \
-  --argjson processes "$PROCS" \
-  --argjson sensitive_read "$SENS_READ" \
-  --argjson sensitive_written "$SENS_WRITTEN" \
-  --argjson dns_resolutions "$DNS_RESOLUTIONS" \
-  --argjson http_requests "$HTTP_REQUESTS" \
-  --argjson http_bodies "$HTTP_BODIES" \
-  --argjson tls_connections "$TLS_CONNS" \
-  --argjson blocked_connections "$BLOCKED" \
-  --arg install_output "$INSTALL_OUTPUT" \
-  --arg entrypoint_output "$ENTRYPOINT_OUTPUT" \
-  --arg preload_log "$PRELOAD_LOG" \
   --argjson exit_code "${EXIT_CODE:-1}" \
+  --slurpfile fs_created /tmp/rpt-fs-created.json \
+  --slurpfile fs_deleted /tmp/rpt-fs-deleted.json \
+  --slurpfile dns /tmp/rpt-dns.json \
+  --slurpfile connections /tmp/rpt-conns.json \
+  --slurpfile processes /tmp/rpt-procs.json \
+  --slurpfile sensitive_read /tmp/rpt-sens-read.json \
+  --slurpfile sensitive_written /tmp/rpt-sens-written.json \
+  --slurpfile dns_resolutions /tmp/rpt-dns-res.json \
+  --slurpfile http_requests /tmp/rpt-http-req.json \
+  --slurpfile http_bodies /tmp/rpt-http-bodies.json \
+  --slurpfile tls_connections /tmp/rpt-tls.json \
+  --slurpfile blocked_connections /tmp/rpt-blocked.json \
+  --slurpfile install_output /tmp/rpt-install.json \
+  --slurpfile entrypoint_output /tmp/rpt-entrypoint.json \
+  --slurpfile preload_log /tmp/rpt-preload.json \
   '{
     package: $package,
     timestamp: $timestamp,
     mode: $mode,
     duration_ms: $duration,
     filesystem: {
-      created: $fs_created,
-      deleted: $fs_deleted,
+      created: $fs_created[0],
+      deleted: $fs_deleted[0],
       modified: []
     },
     network: {
-      dns_queries: $dns,
-      dns_resolutions: $dns_resolutions,
-      http_connections: $connections,
-      http_requests: $http_requests,
-      http_bodies: $http_bodies,
-      tls_connections: $tls_connections,
-      blocked_connections: $blocked_connections
+      dns_queries: $dns[0],
+      dns_resolutions: $dns_resolutions[0],
+      http_connections: $connections[0],
+      http_requests: $http_requests[0],
+      http_bodies: $http_bodies[0],
+      tls_connections: $tls_connections[0],
+      blocked_connections: $blocked_connections[0]
     },
     processes: {
-      spawned: $processes
+      spawned: $processes[0]
     },
     sensitive_files: {
-      read: $sensitive_read,
-      written: $sensitive_written
+      read: $sensitive_read[0],
+      written: $sensitive_written[0]
     },
-    install_output: $install_output,
-    entrypoint_output: $entrypoint_output,
-    preload_log: $preload_log,
+    install_output: $install_output[0],
+    entrypoint_output: $entrypoint_output[0],
+    preload_log: $preload_log[0],
     exit_code: $exit_code
   }' 2>/tmp/jq-final-error.log)
 
@@ -608,14 +606,13 @@ echo "---MUADDIB-REPORT-START---"
 if [ -n "$REPORT_JSON" ]; then
   printf '%s\n' "$REPORT_JSON"
 else
-  # jq crashed — log why, then emit minimal valid JSON so host parser survives
   JQ_ERR=$(head -c 500 /tmp/jq-final-error.log 2>/dev/null)
   echo "[SANDBOX] jq report FAILED: $JQ_ERR" >&2
-  # Diagnose which variable was empty (the likely cause)
-  for _v in FS_CREATED FS_DELETED DNS CONNS PROCS SENS_READ SENS_WRITTEN DNS_RESOLUTIONS HTTP_REQUESTS HTTP_BODIES TLS_CONNS BLOCKED; do
-    eval "_val=\$$_v"
-    [ -z "$_val" ] && echo "[SANDBOX] DIAG: \$$_v was empty" >&2
+  # Diagnose: list any empty/missing report files
+  for _f in /tmp/rpt-*.json; do
+    [ ! -s "$_f" ] && echo "[SANDBOX] DIAG: $_f empty/missing" >&2
   done
+  # Fallback minimal JSON so the host parser doesn't crash
   printf '{"package":"%s","timestamp":"%s","mode":"%s","duration_ms":%s,"filesystem":{"created":[],"deleted":[],"modified":[]},"network":{"dns_queries":[],"dns_resolutions":[],"http_connections":[],"http_requests":[],"http_bodies":[],"tls_connections":[],"blocked_connections":[]},"processes":{"spawned":[]},"sensitive_files":{"read":[],"written":[]},"install_output":"","entrypoint_output":"","preload_log":"","exit_code":%s}\n' \
     "$PACKAGE" "$TIMESTAMP" "$MODE" "${DURATION_MS:-0}" "${EXIT_CODE:-1}"
 fi
