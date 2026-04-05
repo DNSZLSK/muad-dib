@@ -1,7 +1,7 @@
 FROM node:20-alpine
 
 # Outils de monitoring
-RUN apk add --no-cache strace curl tcpdump coreutils findutils jq iptables libfaketime
+RUN apk add --no-cache strace curl tcpdump coreutils findutils jq iptables libfaketime openssl
 
 # Non-root user for npm install (privilege drop via su in sandbox-runner.sh)
 RUN adduser -D sandboxuser
@@ -17,6 +17,9 @@ RUN sed -i 's/\r$//' /sandbox/sandbox-runner.sh && chmod +x /sandbox/sandbox-run
 # Preload script for runtime monkey-patching (time acceleration, API logging)
 # Copied as node_setup.js to avoid revealing tool identity in /proc/self/cmdline
 COPY preload.js /opt/node_setup.js
+
+# Mock network server: DNS proxy + HTTP honeypot for behavioral capture
+COPY mock-network.js /opt/mock-network.js
 
 # Pre-create install directory with correct ownership
 RUN mkdir -p /sandbox/install && chown sandboxuser:sandboxuser /sandbox/install
