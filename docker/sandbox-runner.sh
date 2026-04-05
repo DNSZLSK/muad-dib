@@ -493,45 +493,65 @@ touch /tmp/fs-created.txt /tmp/fs-deleted.txt /tmp/dns-queries.txt \
   /tmp/tls-connections.txt /tmp/blocked.txt /tmp/entrypoint.log \
   /tmp/preload.log
 
-INSTALL_OUTPUT=$(head -c 5000 /tmp/install.log)
+INSTALL_OUTPUT=$(head -c 5000 /tmp/install.log 2>/dev/null || echo "")
 ENTRYPOINT_OUTPUT=$(head -c 5000 /tmp/entrypoint.log 2>/dev/null || echo "")
 PRELOAD_LOG=$(head -c 50000 /tmp/preload.log 2>/dev/null || echo "")
 
-FS_CREATED=$(jq -R -s 'split("\n") | map(select(length > 0))' < /tmp/fs-created.txt)
-FS_DELETED=$(jq -R -s 'split("\n") | map(select(length > 0))' < /tmp/fs-deleted.txt)
-DNS=$(jq -R -s 'split("\n") | map(select(length > 0))' < /tmp/dns-queries.txt)
-SENS_READ=$(jq -R -s 'split("\n") | map(select(length > 0))' < /tmp/sensitive-read.txt)
-SENS_WRITTEN=$(jq -R -s 'split("\n") | map(select(length > 0))' < /tmp/sensitive-written.txt)
+# Helper: each jq must produce valid JSON or default to [].
+# If jq crashes (malformed input, tonumber on null, OOM), the shell variable
+# is empty (""). Passing --argjson name "" to the final jq kills it silently.
+# tonumber? // 0 prevents crash on missing/null tab-split fields.
+jq_array() { jq -R -s "$1" < "$2" 2>/dev/null; }
 
-CONNS=$(jq -R -s 'split("\n") | map(select(length > 0)) | map(
-  split("\t") | {host: .[0], port: (.[1] | tonumber), protocol: "TCP"}
-)' < /tmp/connections.txt)
+FS_CREATED=$(jq_array 'split("\n") | map(select(length > 0))' /tmp/fs-created.txt)
+FS_DELETED=$(jq_array 'split("\n") | map(select(length > 0))' /tmp/fs-deleted.txt)
+DNS=$(jq_array 'split("\n") | map(select(length > 0))' /tmp/dns-queries.txt)
+SENS_READ=$(jq_array 'split("\n") | map(select(length > 0))' /tmp/sensitive-read.txt)
+SENS_WRITTEN=$(jq_array 'split("\n") | map(select(length > 0))' /tmp/sensitive-written.txt)
 
-PROCS=$(jq -R -s 'split("\n") | map(select(length > 0)) | map(
-  split("\t") | {command: .[1], pid: (.[0] | tonumber)}
-)' < /tmp/suspicious-cmds.txt)
+CONNS=$(jq_array 'split("\n") | map(select(length > 0)) | map(
+  split("\t") | {host: .[0], port: (.[1] | tonumber? // 0), protocol: "TCP"}
+)' /tmp/connections.txt)
 
-DNS_RESOLUTIONS=$(jq -R -s 'split("\n") | map(select(length > 0)) | map(
-  split("\t") | {domain: .[0], ip: .[1]}
-)' < /tmp/dns-resolutions.txt)
+PROCS=$(jq_array 'split("\n") | map(select(length > 0)) | map(
+  split("\t") | {command: (.[1] // ""), pid: (.[0] | tonumber? // 0)}
+)' /tmp/suspicious-cmds.txt)
 
-HTTP_REQUESTS=$(jq -R -s 'split("\n") | map(select(length > 0)) | map(
-  split("\t") | {method: .[0], host: .[1], path: .[2]}
-)' < /tmp/http-requests.txt)
+DNS_RESOLUTIONS=$(jq_array 'split("\n") | map(select(length > 0)) | map(
+  split("\t") | {domain: (.[0] // ""), ip: (.[1] // "")}
+)' /tmp/dns-resolutions.txt)
 
-HTTP_BODIES=$(jq -R -s 'split("\n") | map(select(length > 0))' < /tmp/http-bodies.txt)
+HTTP_REQUESTS=$(jq_array 'split("\n") | map(select(length > 0)) | map(
+  split("\t") | {method: (.[0] // ""), host: (.[1] // ""), path: (.[2] // "")}
+)' /tmp/http-requests.txt)
 
-TLS_CONNS=$(jq -R -s 'split("\n") | map(select(length > 0)) | map(
-  split("\t") | {domain: .[0], ip: .[1], port: (.[2] | tonumber)}
-)' < /tmp/tls-connections.txt)
+HTTP_BODIES=$(jq_array 'split("\n") | map(select(length > 0))' /tmp/http-bodies.txt)
 
-BLOCKED=$(jq -R -s 'split("\n") | map(select(length > 0)) | map(
-  split("\t") | {ip: .[0], port: (.[1] | tonumber)}
-)' < /tmp/blocked.txt)
+TLS_CONNS=$(jq_array 'split("\n") | map(select(length > 0)) | map(
+  split("\t") | {domain: (.[0] // ""), ip: (.[1] // ""), port: (.[2] | tonumber? // 0)}
+)' /tmp/tls-connections.txt)
+
+BLOCKED=$(jq_array 'split("\n") | map(select(length > 0)) | map(
+  split("\t") | {ip: (.[0] // ""), port: (.[1] | tonumber? // 0)}
+)' /tmp/blocked.txt)
+
+# Default empty variables to [] — prevents --argjson crash on empty string
+[ -z "$FS_CREATED" ] && FS_CREATED='[]'
+[ -z "$FS_DELETED" ] && FS_DELETED='[]'
+[ -z "$DNS" ] && DNS='[]'
+[ -z "$SENS_READ" ] && SENS_READ='[]'
+[ -z "$SENS_WRITTEN" ] && SENS_WRITTEN='[]'
+[ -z "$CONNS" ] && CONNS='[]'
+[ -z "$PROCS" ] && PROCS='[]'
+[ -z "$DNS_RESOLUTIONS" ] && DNS_RESOLUTIONS='[]'
+[ -z "$HTTP_REQUESTS" ] && HTTP_REQUESTS='[]'
+[ -z "$HTTP_BODIES" ] && HTTP_BODIES='[]'
+[ -z "$TLS_CONNS" ] && TLS_CONNS='[]'
+[ -z "$BLOCKED" ] && BLOCKED='[]'
 
 # ── Final JSON (prefixed with delimiter for reliable parsing) ──
-echo "---MUADDIB-REPORT-START---"
-jq -n \
+# Capture jq output in variable to detect failure before writing to stdout.
+REPORT_JSON=$(jq -n \
   --arg package "$PACKAGE" \
   --arg timestamp "$TIMESTAMP" \
   --arg mode "$MODE" \
@@ -582,4 +602,20 @@ jq -n \
     entrypoint_output: $entrypoint_output,
     preload_log: $preload_log,
     exit_code: $exit_code
-  }'
+  }' 2>/tmp/jq-final-error.log)
+
+echo "---MUADDIB-REPORT-START---"
+if [ -n "$REPORT_JSON" ]; then
+  printf '%s\n' "$REPORT_JSON"
+else
+  # jq crashed — log why, then emit minimal valid JSON so host parser survives
+  JQ_ERR=$(head -c 500 /tmp/jq-final-error.log 2>/dev/null)
+  echo "[SANDBOX] jq report FAILED: $JQ_ERR" >&2
+  # Diagnose which variable was empty (the likely cause)
+  for _v in FS_CREATED FS_DELETED DNS CONNS PROCS SENS_READ SENS_WRITTEN DNS_RESOLUTIONS HTTP_REQUESTS HTTP_BODIES TLS_CONNS BLOCKED; do
+    eval "_val=\$$_v"
+    [ -z "$_val" ] && echo "[SANDBOX] DIAG: \$$_v was empty" >&2
+  done
+  printf '{"package":"%s","timestamp":"%s","mode":"%s","duration_ms":%s,"filesystem":{"created":[],"deleted":[],"modified":[]},"network":{"dns_queries":[],"dns_resolutions":[],"http_connections":[],"http_requests":[],"http_bodies":[],"tls_connections":[],"blocked_connections":[]},"processes":{"spawned":[]},"sensitive_files":{"read":[],"written":[]},"install_output":"","entrypoint_output":"","preload_log":"","exit_code":%s}\n' \
+    "$PACKAGE" "$TIMESTAMP" "$MODE" "${DURATION_MS:-0}" "${EXIT_CODE:-1}"
+fi
