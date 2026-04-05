@@ -103,6 +103,19 @@ fi
 UPSTREAM_DNS=$(grep '^nameserver' /etc/resolv.conf 2>/dev/null | head -1 | awk '{print $2}')
 [ -z "$UPSTREAM_DNS" ] && UPSTREAM_DNS="8.8.8.8"
 
+# ── Temporarily disable libfaketime for mock network infrastructure ──
+# Mock network (openssl + mock-network.js) is sandbox infrastructure, NOT the target.
+# libfaketime's x1000 speed multiplier would:
+#   - make openssl generate certs with future timestamps
+#   - make DNS forward timeouts expire in <3ms instead of 3s
+#   - make the ready-check sleep 0.5 complete in <0.5ms
+# This is why runs 2/3 (with libfaketime) fail: mock can't start in time.
+_SAVED_LD_PRELOAD="${LD_PRELOAD}"
+_SAVED_FAKETIME="${FAKETIME}"
+_SAVED_DONT_FAKE="${DONT_FAKE_MONOTONIC}"
+_SAVED_FT_NOCACHE="${FAKETIME_NO_CACHE}"
+unset LD_PRELOAD FAKETIME DONT_FAKE_MONOTONIC FAKETIME_NO_CACHE
+
 # Generate per-session mock CA for HTTPS interception (unique each run).
 # The CA is added to the system SSL bundle so curl/wget/python trust it.
 # Node.js gets it via NODE_EXTRA_CA_CERTS.
@@ -123,6 +136,7 @@ cat /etc/ssl/certs/ca-certificates.crt /tmp/mock-ca.pem > /tmp/mock-ca-bundle.pe
 export SSL_CERT_FILE=/tmp/mock-ca-bundle.pem
 export NODE_EXTRA_CA_CERTS=/tmp/mock-ca.pem
 
+# Start mock-network.js WITHOUT libfaketime (it inherits the current unset state)
 echo "[SANDBOX] Starting mock network (upstream DNS: $UPSTREAM_DNS)..." >&2
 MUADDIB_UPSTREAM_DNS=$UPSTREAM_DNS node /opt/mock-network.js >/dev/null 2>&1 &
 MOCK_NET_PID=$!
@@ -144,6 +158,15 @@ else
   kill "$MOCK_NET_PID" 2>/dev/null
   MOCK_NET_PID=""
 fi
+
+# ── Restore libfaketime for the target package (npm install + entry point) ──
+if [ -n "$_SAVED_LD_PRELOAD" ]; then
+  export LD_PRELOAD="$_SAVED_LD_PRELOAD"
+  export FAKETIME="$_SAVED_FAKETIME"
+  export DONT_FAKE_MONOTONIC="$_SAVED_DONT_FAKE"
+  export FAKETIME_NO_CACHE="$_SAVED_FT_NOCACHE"
+fi
+unset _SAVED_LD_PRELOAD _SAVED_FAKETIME _SAVED_DONT_FAKE _SAVED_FT_NOCACHE
 
 # ── 1. Filesystem snapshot BEFORE install ──
 echo "[SANDBOX] Snapshot filesystem before install..." >&2
