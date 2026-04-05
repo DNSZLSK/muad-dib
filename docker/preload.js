@@ -70,7 +70,8 @@
   // Prevents malware from detecting sandbox via process.env.LD_PRELOAD.
   const HIDDEN_ENV_VARS = new Set([
     'LD_PRELOAD', 'FAKETIME', 'DONT_FAKE_MONOTONIC',
-    'FAKETIME_NO_CACHE', 'MUADDIB_FAKETIME', 'MUADDIB_FAKETIME_ACTIVE'
+    'FAKETIME_NO_CACHE', 'MUADDIB_FAKETIME', 'MUADDIB_FAKETIME_ACTIVE',
+    'SSL_CERT_FILE', 'NODE_EXTRA_CA_CERTS', 'MUADDIB_UPSTREAM_DNS'
   ]);
   for (const v of HIDDEN_ENV_VARS) { try { delete process.env[v]; } catch(e) { /* ignore */ } }
 
@@ -90,6 +91,37 @@
 
   // Sensitive env var patterns
   const SENSITIVE_ENV_RE = /TOKEN|SECRET|KEY|PASSWORD|CREDENTIAL|AUTH|PRIVATE|API_KEY/i;
+
+  // Safe domains: pass through to real network (npm install, CDN downloads)
+  // Must match the list in mock-network.js
+  const MOCK_SAFE_DOMAINS = [
+    'registry.npmjs.org', 'npmjs.com', 'npmjs.org',
+    'registry.yarnpkg.com', 'yarnpkg.com',
+    'github.com', 'api.github.com', 'objects.githubusercontent.com',
+    'raw.githubusercontent.com', 'codeload.github.com', 'github.githubassets.com',
+    'cdn.jsdelivr.net', 'unpkg.com', 'cdnjs.cloudflare.com', 'cloudflare.com',
+    'amazonaws.com', 'googleapis.com', 'storage.googleapis.com',
+    'nodejs.org', 'gitlab.com', 'bitbucket.org',
+    'fastly.net', 'fastly.com'
+  ];
+
+  function isSafeDomain(host) {
+    if (!host) return true; // unknown host → pass through (safe default)
+    var d = String(host).toLowerCase().replace(/:\d+$/, '');
+    if (d === 'localhost' || d === '127.0.0.1' || d === '::1') return true;
+    return MOCK_SAFE_DOMAINS.some(function (s) { return d === s || d.endsWith('.' + s); });
+  }
+
+  // Per-session realistic mock IP — generated once, used for all dns.lookup mocks.
+  // Range 104.16.0.0 – 104.31.255.255 (Cloudflare) to resist loopback/private-range checks.
+  const MOCK_IP_OCTETS = [104, 16 + Math.floor(Math.random() * 16),
+    Math.floor(Math.random() * 256), 1 + Math.floor(Math.random() * 254)];
+  const MOCK_IP = MOCK_IP_OCTETS.join('.');
+
+  // Plausible mock response bodies (indexed by content type hint)
+  const MOCK_RESPONSE_JSON = '{"status":"ok","data":{}}';
+  const MOCK_RESPONSE_HTML = '<html><body></body></html>';
+  const MOCK_RESPONSE_JS = '""'; // eval('""') is a no-op
 
   // ═══════════════════════════════════════════════════════
   // 3. LOGGER (uses saved originals, silent on error)
@@ -244,36 +276,159 @@
   global.clearInterval = _clearInterval;
 
   // ═══════════════════════════════════════════════════════
-  // 6. NETWORK PATCHES (log only, don't block)
+  // 6. NETWORK PATCHES — Mock non-safe domains, pass through safe
+  //
+  // Safe domains (npm, GitHub, CDNs): real network call + log
+  // Non-safe domains: mock response + log full request details
+  //
+  // This lets the sandbox observe network INTENT (which domains,
+  // what data is sent) without real outbound traffic to C2 servers.
+  // The system-level mock-network.js handles DNS + HTTP for non-Node
+  // processes; this handles Node.js APIs (including HTTPS bodies).
   // ═══════════════════════════════════════════════════════
 
-  // Patch https.request / http.request
+  /**
+   * Create a mock http.ClientRequest that captures the request body
+   * and emits a mock 200 OK response. Compatible with the common
+   * malware patterns: callback-based, event-based, and piped.
+   */
+  function createMockClientRequest(host, method, reqPath, callback) {
+    const EventEmitter = require('events');
+    const req = new EventEmitter();
+    const bodyChunks = [];
+    req.writable = true;
+    req.finished = false;
+    req.headersSent = false;
+
+    req.write = function (data) {
+      try { if (data) bodyChunks.push(String(data)); } catch (e) { /* ignore */ }
+      return true;
+    };
+
+    req.end = function (data, enc, cb) {
+      if (typeof data === 'function') { cb = data; data = null; }
+      else if (typeof enc === 'function') { cb = enc; }
+      try { if (data) bodyChunks.push(String(data)); } catch (e) { /* ignore */ }
+      req.finished = true;
+
+      var body = bodyChunks.join('');
+      if (body) {
+        log('MOCK_HTTP_BODY', 'OUT ' + method + ' ' + host + reqPath + ' ' + body.substring(0, 2000));
+      }
+
+      // Build mock IncomingMessage (response) with plausible body
+      var mockBody = MOCK_RESPONSE_JSON;
+      var mockCT = 'application/json';
+      if (/\.js($|\?)/.test(reqPath)) { mockBody = MOCK_RESPONSE_JS; mockCT = 'application/javascript'; }
+      else if (/\.html?($|\?)/.test(reqPath)) { mockBody = MOCK_RESPONSE_HTML; mockCT = 'text/html'; }
+
+      var res = new EventEmitter();
+      res.statusCode = 200;
+      res.statusMessage = 'OK';
+      res.headers = { 'content-type': mockCT, 'content-length': String(Buffer.byteLength(mockBody)) };
+      res.rawHeaders = ['Content-Type', mockCT, 'Content-Length', String(Buffer.byteLength(mockBody))];
+      res.httpVersion = '1.1';
+      res.readable = true;
+      res.setEncoding = function () { return res; };
+      res.resume = function () { return res; };
+      res.read = function () { return null; };
+      res.pipe = function (dest) { try { dest.end(mockBody); } catch (e) { /* ignore */ } return dest; };
+      res.destroy = function () {};
+
+      process.nextTick(function () {
+        try {
+          if (callback) callback(res);
+          req.emit('response', res);
+          res.emit('data', Buffer.from(mockBody));
+          res.emit('end');
+          if (cb) cb();
+        } catch (e) { /* ignore callback errors */ }
+      });
+
+      return req;
+    };
+
+    req.setTimeout = function (ms, cb) { if (cb) req.on('timeout', cb); return req; };
+    req.abort = function () { req.emit('close'); };
+    req.destroy = function () { req.emit('close'); return req; };
+    req.flushHeaders = function () {};
+    req.setNoDelay = function () { return req; };
+    req.setSocketKeepAlive = function () { return req; };
+    req.setHeader = function () { return req; };
+    req.getHeader = function () { return undefined; };
+    req.removeHeader = function () {};
+    return req;
+  }
+
+  /**
+   * Extract hostname from http.request / https.request arguments.
+   * Handles: request(url, cb), request(url, opts, cb), request(opts, cb)
+   */
+  function extractRequestInfo(args) {
+    var urlOrOpts = args[0];
+    var optsOrCb = args[1];
+    var cb = args[2];
+    var host = 'unknown', method = 'GET', reqPath = '/', callback;
+
+    try {
+      if (typeof urlOrOpts === 'string') {
+        var u = new URL(urlOrOpts);
+        host = u.hostname;
+        reqPath = u.pathname + u.search;
+        method = (typeof optsOrCb === 'object' && optsOrCb ? optsOrCb.method : null) || 'GET';
+        callback = typeof optsOrCb === 'function' ? optsOrCb : cb;
+      } else if (urlOrOpts instanceof URL) {
+        host = urlOrOpts.hostname;
+        reqPath = urlOrOpts.pathname + urlOrOpts.search;
+        method = (typeof optsOrCb === 'object' && optsOrCb ? optsOrCb.method : null) || 'GET';
+        callback = typeof optsOrCb === 'function' ? optsOrCb : cb;
+      } else if (urlOrOpts && typeof urlOrOpts === 'object') {
+        host = urlOrOpts.hostname || urlOrOpts.host || 'unknown';
+        method = urlOrOpts.method || 'GET';
+        reqPath = urlOrOpts.path || '/';
+        callback = typeof optsOrCb === 'function' ? optsOrCb : cb;
+      }
+    } catch (e) { /* ignore parse errors */ }
+
+    // Strip port from host
+    host = String(host).replace(/:\d+$/, '');
+    return { host: host, method: method, path: reqPath, callback: callback };
+  }
+
+  // Patch https.request / http.request — mock non-safe, pass through safe
   function patchHttpModule(modName) {
     try {
       const mod = require(modName);
       const _origRequest = mod.request;
       const _origGet = mod.get;
 
-      mod.request = function (opts, cb) {
-        try {
-          const host = typeof opts === 'string' ? new URL(opts).hostname :
-            (opts && (opts.hostname || opts.host)) || 'unknown';
-          const method = (opts && opts.method) || 'GET';
-          const path = typeof opts === 'string' ? new URL(opts).pathname :
-            (opts && opts.path) || '/';
-          log('NETWORK', `${modName}.request ${method} ${host}${path}`);
-        } catch (e) { /* ignore logging errors */ }
+      mod.request = function () {
+        var info;
+        try { info = extractRequestInfo(arguments); } catch (e) { return _origRequest.apply(mod, arguments); }
+
+        log('NETWORK', modName + '.request ' + info.method + ' ' + info.host + info.path);
+
+        if (!isSafeDomain(info.host)) {
+          log('MOCK_HTTP', modName + ' ' + info.method + ' ' + info.host + info.path);
+          return createMockClientRequest(info.host, info.method, info.path, info.callback);
+        }
+
         return _origRequest.apply(mod, arguments);
       };
 
-      mod.get = function (opts, cb) {
-        try {
-          const host = typeof opts === 'string' ? new URL(opts).hostname :
-            (opts && (opts.hostname || opts.host)) || 'unknown';
-          const path = typeof opts === 'string' ? new URL(opts).pathname :
-            (opts && opts.path) || '/';
-          log('NETWORK', `${modName}.get GET ${host}${path}`);
-        } catch (e) { /* ignore logging errors */ }
+      mod.get = function () {
+        var info;
+        try { info = extractRequestInfo(arguments); } catch (e) { return _origGet.apply(mod, arguments); }
+
+        log('NETWORK', modName + '.get GET ' + info.host + info.path);
+
+        if (!isSafeDomain(info.host)) {
+          log('MOCK_HTTP', modName + ' GET ' + info.host + info.path);
+          var req = createMockClientRequest(info.host, 'GET', info.path, info.callback);
+          process.nextTick(function () { req.end(); });
+          return req;
+        }
+
         return _origGet.apply(mod, arguments);
       };
     } catch (e) { /* module not available */ }
@@ -282,45 +437,88 @@
   patchHttpModule('https');
   patchHttpModule('http');
 
-  // Patch global fetch (Node 18+)
+  // Patch global fetch (Node 18+) — mock non-safe domains
   if (typeof global.fetch === 'function') {
     try {
       const _origFetch = global.fetch;
       global.fetch = function (input, init) {
+        var url, method, hostname;
         try {
-          const url = typeof input === 'string' ? input :
+          url = typeof input === 'string' ? input :
             (input && input.url) ? input.url : String(input);
-          const method = (init && init.method) || 'GET';
-          log('NETWORK', `fetch ${method} ${url}`);
-        } catch (e) { /* ignore */ }
+          method = (init && init.method) || 'GET';
+          hostname = new URL(url).hostname;
+          log('NETWORK', 'fetch ' + method + ' ' + url);
+        } catch (e) {
+          return _origFetch.apply(global, arguments);
+        }
+
+        if (!isSafeDomain(hostname)) {
+          var body = '';
+          try { body = init && init.body ? String(init.body).substring(0, 2000) : ''; } catch (e) { /* ignore */ }
+          log('MOCK_HTTP', 'fetch ' + method + ' ' + url);
+          if (body) log('MOCK_HTTP_BODY', 'OUT ' + method + ' ' + hostname + ' ' + body);
+          // Choose plausible response body based on URL hint
+          var mockBody = MOCK_RESPONSE_JSON;
+          var mockCT = 'application/json';
+          if (/\.js($|\?)/.test(url)) { mockBody = MOCK_RESPONSE_JS; mockCT = 'application/javascript'; }
+          else if (/\.html?($|\?)/.test(url)) { mockBody = MOCK_RESPONSE_HTML; mockCT = 'text/html'; }
+          return Promise.resolve(new Response(mockBody, { status: 200, headers: { 'content-type': mockCT } }));
+        }
+
         return _origFetch.apply(global, arguments);
       };
       global.fetch.toString = function () { return 'function fetch() { [native code] }'; };
     } catch (e) { /* ignore */ }
   }
 
-  // Patch dns.resolve / dns.lookup
+  // Patch dns.resolve / dns.lookup — mock non-safe domains
   try {
     const dns = require('dns');
     const _origResolve = dns.resolve;
     const _origLookup = dns.lookup;
 
-    if (_origResolve) {
-      dns.resolve = function (hostname) {
-        try { log('NETWORK', `dns.resolve ${hostname}`); } catch (e) { /* ignore */ }
-        return _origResolve.apply(dns, arguments);
+    if (_origLookup) {
+      dns.lookup = function (hostname, options, callback) {
+        try { log('NETWORK', 'dns.lookup ' + hostname); } catch (e) { /* ignore */ }
+
+        // Normalize args: lookup(hostname, callback) or lookup(hostname, options, callback)
+        if (typeof options === 'function') { callback = options; options = {}; }
+
+        if (hostname && !isSafeDomain(hostname)) {
+          log('MOCK_DNS', hostname + ' -> ' + MOCK_IP);
+          if (typeof callback === 'function') {
+            process.nextTick(function () { callback(null, MOCK_IP, 4); });
+            return;
+          }
+        }
+
+        return _origLookup.apply(dns, arguments);
       };
     }
 
-    if (_origLookup) {
-      dns.lookup = function (hostname) {
-        try { log('NETWORK', `dns.lookup ${hostname}`); } catch (e) { /* ignore */ }
-        return _origLookup.apply(dns, arguments);
+    if (_origResolve) {
+      dns.resolve = function (hostname, rrtype, callback) {
+        try { log('NETWORK', 'dns.resolve ' + hostname); } catch (e) { /* ignore */ }
+
+        if (typeof rrtype === 'function') { callback = rrtype; rrtype = 'A'; }
+
+        if (hostname && !isSafeDomain(hostname)) {
+          log('MOCK_DNS', hostname + ' -> ' + MOCK_IP);
+          if (typeof callback === 'function') {
+            process.nextTick(function () { callback(null, [MOCK_IP]); });
+            return;
+          }
+        }
+
+        return _origResolve.apply(dns, arguments);
       };
     }
   } catch (e) { /* ignore */ }
 
-  // Patch net.connect / net.createConnection
+  // Patch net.connect / net.createConnection — log and pass through
+  // (mock DNS already redirects non-safe domains to 127.0.0.2 where
+  // mock-network.js HTTP/TLS honeypot captures the traffic)
   try {
     const net = require('net');
     const _origConnect = net.connect;
@@ -330,7 +528,7 @@
       try {
         const host = (opts && opts.host) || 'unknown';
         const port = (opts && opts.port) || 0;
-        log('NETWORK', `net.connect ${host}:${port}`);
+        log('NETWORK', 'net.connect ' + host + ':' + port);
       } catch (e) { /* ignore */ }
       return _origConnect.apply(net, arguments);
     };
@@ -339,7 +537,7 @@
       try {
         const host = (opts && opts.host) || 'unknown';
         const port = (opts && opts.port) || 0;
-        log('NETWORK', `net.createConnection ${host}:${port}`);
+        log('NETWORK', 'net.createConnection ' + host + ':' + port);
       } catch (e) { /* ignore */ }
       return _origCreateConnection.apply(net, arguments);
     };
@@ -580,7 +778,14 @@
           log('FS_READ', `SPOOFED /proc/1/cgroup (real read intercepted)`);
           return '0::/init.scope\n';
         }
-        // 11c. /proc/self/environ SPOOFING (libfaketime detection evasion)
+        // 11c. /etc/resolv.conf SPOOFING (mock DNS detection evasion)
+        // Mock network overrides resolv.conf to 127.0.0.1. Malware can detect this.
+        // Return realistic resolv.conf pointing to Docker bridge DNS or Cloudflare.
+        if (p === '/etc/resolv.conf') {
+          log('FS_READ', 'SPOOFED /etc/resolv.conf (mock DNS hidden)');
+          return 'nameserver 172.17.0.1\nnameserver 1.1.1.1\nsearch localdomain\n';
+        }
+        // 11d. /proc/self/environ SPOOFING (libfaketime detection evasion)
         // Malware reads /proc/self/environ or /proc/<pid>/environ to detect
         // LD_PRELOAD=libfaketime (sandbox fingerprint). Strip hidden vars.
         if (p === '/proc/self/environ' || /\/proc\/\d+\/environ/.test(p)) {

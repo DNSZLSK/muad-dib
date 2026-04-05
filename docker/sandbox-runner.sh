@@ -95,6 +95,47 @@ if [ "$MODE" = "strict" ]; then
   echo "[SANDBOX] iptables rules applied." >&2
 fi
 
+# ── 0b. Mock network: DNS proxy + HTTP/HTTPS honeypot (T1071/T1041 behavioral capture) ──
+# Runs in all modes (permissive + strict, gVisor + runc).
+# Safe domains (npm, GitHub, CDNs) are forwarded to the real upstream DNS.
+# Non-safe domains resolve to 127.0.0.2 where HTTP/HTTPS honeypots capture requests.
+# This allows the sandbox to observe network INTENT without real outbound traffic.
+UPSTREAM_DNS=$(grep '^nameserver' /etc/resolv.conf 2>/dev/null | head -1 | awk '{print $2}')
+[ -z "$UPSTREAM_DNS" ] && UPSTREAM_DNS="8.8.8.8"
+
+# Generate per-session mock CA for HTTPS interception (unique each run).
+# The CA is added to the system SSL bundle so curl/wget/python trust it.
+# Node.js gets it via NODE_EXTRA_CA_CERTS.
+echo "[SANDBOX] Generating mock TLS CA..." >&2
+openssl genrsa -out /tmp/mock-ca-key.pem 2048 2>/dev/null
+openssl req -new -x509 -key /tmp/mock-ca-key.pem -out /tmp/mock-ca.pem \
+  -days 1 -subj "/O=Internet Security Research Group/CN=ISRG Root X2" 2>/dev/null
+openssl genrsa -out /tmp/mock-server-key.pem 2048 2>/dev/null
+# Default cert for TLS connections without SNI header
+openssl req -new -key /tmp/mock-server-key.pem -subj "/CN=localhost" 2>/dev/null | \
+  openssl x509 -req -CA /tmp/mock-ca.pem -CAkey /tmp/mock-ca-key.pem \
+    -CAcreateserial -days 1 -out /tmp/mock-cert-default.pem 2>/dev/null
+# Trust the CA system-wide: append to SSL bundle (read-only FS → copy to /tmp)
+cat /etc/ssl/certs/ca-certificates.crt /tmp/mock-ca.pem > /tmp/mock-ca-bundle.pem 2>/dev/null
+export SSL_CERT_FILE=/tmp/mock-ca-bundle.pem
+export NODE_EXTRA_CA_CERTS=/tmp/mock-ca.pem
+
+echo "[SANDBOX] Starting mock network (upstream DNS: $UPSTREAM_DNS)..." >&2
+MUADDIB_UPSTREAM_DNS=$UPSTREAM_DNS node /opt/mock-network.js >/dev/null 2>&1 &
+MOCK_NET_PID=$!
+# Wait for mock servers to be ready (DNS + HTTP + TLS trap)
+for _i in 1 2 3 4 5 6; do
+  [ -f /tmp/mock-network-ready ] && break
+  sleep 0.5
+done
+if [ -f /tmp/mock-network-ready ]; then
+  echo "nameserver 127.0.0.1" > /etc/resolv.conf
+  echo "[SANDBOX] Mock network active — DNS redirected to 127.0.0.1." >&2
+else
+  echo "[SANDBOX] Mock network failed to start — using real DNS." >&2
+  MOCK_NET_PID=""
+fi
+
 # ── 1. Filesystem snapshot BEFORE install ──
 echo "[SANDBOX] Snapshot filesystem before install..." >&2
 cp /opt/fs-baseline.txt /tmp/fs-before.txt
@@ -227,13 +268,13 @@ fi
 # gVisor mode: no strace wrapper — gVisor traces at kernel level.
 if [ -n "$MUADDIB_GVISOR" ]; then
   su sandboxuser -s /bin/sh -c "
-    timeout 10 node -e \"try { require('$REQUIRE_PATH') } catch(e) {}\" > /tmp/entrypoint.log 2>&1
+    timeout 30 node -e \"try { require('$REQUIRE_PATH') } catch(e) { console.error('[ENTRY_ERROR] ' + (e.code || 'UNKNOWN') + ': ' + e.message); process.exitCode = 42; }\" > /tmp/entrypoint.log 2>&1
   " || true
 else
   su sandboxuser -s /bin/sh -c "
     strace -f -e trace=network,process,open,openat,connect,execve,sendto,recvfrom \
       -o /tmp/strace-entrypoint.log \
-      timeout 10 node -e \"try { require('$REQUIRE_PATH') } catch(e) {}\" > /tmp/entrypoint.log 2>&1
+      timeout 30 node -e \"try { require('$REQUIRE_PATH') } catch(e) { console.error('[ENTRY_ERROR] ' + (e.code || 'UNKNOWN') + ': ' + e.message); process.exitCode = 42; }\" > /tmp/entrypoint.log 2>&1
   " || true
 
   # Merge entrypoint strace into main strace log for unified analysis
@@ -252,6 +293,12 @@ find / -type f 2>/dev/null | sort > /tmp/fs-after.txt
 if [ -z "$MUADDIB_GVISOR" ]; then
   kill "$DNS_PID" "$HTTP_PID" "$TLS_PID" "$OTHER_PID" 2>/dev/null
   wait "$DNS_PID" "$HTTP_PID" "$TLS_PID" "$OTHER_PID" 2>/dev/null
+fi
+
+# Stop mock network server
+if [ -n "$MOCK_NET_PID" ]; then
+  kill "$MOCK_NET_PID" 2>/dev/null
+  wait "$MOCK_NET_PID" 2>/dev/null
 fi
 
 END_MS=$(date +%s%3N 2>/dev/null || echo 0)
@@ -382,6 +429,26 @@ else
 fi
 
 fi  # end of non-gVisor strace/network parsing block
+
+# ── 10b. Parse mock network logs (works in both gVisor and runc) ──
+# Mock DNS: non-safe domain queries → append to dns-queries.txt and dns-resolutions.txt
+# Mock HTTP: captured requests → append to http-requests.txt and http-bodies.txt
+# Also parse preload.js MOCK entries from preload.log
+if [ -f /tmp/mock-dns.log ]; then
+  echo "[SANDBOX] Parsing mock DNS log..." >&2
+  jq -r 'select(.safe == false) | .domain' /tmp/mock-dns.log 2>/dev/null | sort -u >> /tmp/dns-queries.txt
+  jq -r 'select(.safe == false and .mock_ip != null) | "\(.domain)\t\(.mock_ip)"' /tmp/mock-dns.log 2>/dev/null >> /tmp/dns-resolutions.txt
+fi
+if [ -f /tmp/mock-http.log ]; then
+  echo "[SANDBOX] Parsing mock HTTP log..." >&2
+  jq -r 'select(.method != null) | "\(.method)\t\(.host)\t\(.path)"' /tmp/mock-http.log 2>/dev/null >> /tmp/http-requests.txt
+  jq -r 'select(.body != null and (.body | length) > 0) | .body' /tmp/mock-http.log 2>/dev/null >> /tmp/http-bodies.txt
+fi
+# Parse preload.js mock entries: MOCK_FETCH body data and MOCK_HTTP_BODY entries
+if [ -f /tmp/preload.log ]; then
+  grep '\[PRELOAD\] MOCK_HTTP_BODY:' /tmp/preload.log 2>/dev/null | \
+    sed 's/.*MOCK_HTTP_BODY: OUT [^ ]* [^ ]* //' | sed 's/ (t+.*$//' >> /tmp/http-bodies.txt 2>/dev/null
+fi
 
 # ── 11. Build JSON with jq ──
 echo "[SANDBOX] Building report..." >&2

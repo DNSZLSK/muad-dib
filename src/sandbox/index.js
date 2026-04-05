@@ -487,6 +487,35 @@ async function runSingleSandbox(packageName, options = {}) {
         if (f.type === 'canary_exfiltration') return s + 50;
         return s;
       }, score + preloadScore));
+
+      // ── Prevent false CLEAN when sandbox couldn't fully analyze ──
+      // If score is 0 but install or entry point failed, mark INCONCLUSIVE
+      // so downstream (monitor, webhook) doesn't treat this as confirmed benign.
+      if (finalScore === 0) {
+        const entryError = report.entrypoint_output &&
+          /\[ENTRY_ERROR\]/.test(report.entrypoint_output);
+        const installNotFound = report.exit_code !== 0 &&
+          report.exit_code !== undefined &&
+          report.install_output &&
+          /ERR! (?:code E404|404|code ETARGET|code ERESOLVE)/.test(report.install_output);
+        if (entryError || installNotFound) {
+          const reason = installNotFound
+            ? `npm install failed (exit ${report.exit_code})`
+            : 'Entry point require() failed';
+          findings.push({
+            type: 'sandbox_incomplete',
+            severity: 'MEDIUM',
+            detail: `${reason} — behavioral analysis incomplete`,
+            evidence: ((installNotFound ? report.install_output : report.entrypoint_output) || '').substring(0, 300)
+          });
+          resolve({
+            score: -1, severity: 'INCONCLUSIVE', findings, raw_report: report,
+            suspicious: false, inconclusive: true
+          });
+          return;
+        }
+      }
+
       const severity = getSeverity(finalScore);
       const result = { score: finalScore, severity, findings, raw_report: report, suspicious: finalScore > 0 };
 
