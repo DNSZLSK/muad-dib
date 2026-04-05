@@ -21,7 +21,6 @@ if (process.argv[2] === 'evaluate') {
   }
 }
 
-const { execFile } = require('child_process');
 const { run } = require('../src/index.js');
 const { updateIOCs } = require('../src/ioc/updater.js');
 const { watch } = require('../src/watch.js');
@@ -199,25 +198,37 @@ for (let i = 0; i < options.length; i++) {
   }
 }
 
-// Version check (truly non-blocking, skip for machine-readable output)
-if (!jsonOutput && !sarifOutput && command !== 'feed' && command !== 'serve') {
+// Version check (truly non-blocking, skip for machine-readable and short-lived commands)
+// Uses HTTPS to npm registry directly — no shell, no exec, works on all platforms.
+// Previous approach used execFile('npm.cmd') which throws EINVAL on Windows
+// because .cmd batch files require a shell to execute.
+const _skipUpdate = jsonOutput || sarifOutput ||
+  ['feed', 'serve', 'version', '--version', '-v', 'update', 'scrape', '--help', '-h'].includes(command);
+if (!_skipUpdate) {
   try {
     const currentVersion = require('../package.json').version;
-    const npmBin = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-    execFile(npmBin, ['view', 'muaddib-scanner', 'version'], { timeout: 5000 }, (err, stdout) => {
-      if (err) return; // No network or npm unavailable
-      const latest = (stdout || '').toString().trim();
-      if (!latest || latest === currentVersion) return;
-      // Semver comparison: only notify if remote is strictly newer
-      const parse = v => v.split('.').map(Number);
-      const [cM, cm, cp] = parse(currentVersion);
-      const [lM, lm, lp] = parse(latest);
-      const isNewer = lM > cM || (lM === cM && (lm > cm || (lm === cm && lp > cp)));
-      if (isNewer) {
-        console.log(`\n[UPDATE] New version available: ${currentVersion} -> ${latest}`);
-        console.log(`  Run: npm install -g muaddib-scanner@latest\n`);
-      }
+    const _https = require('https');
+    const req = _https.get('https://registry.npmjs.org/muaddib-scanner/latest', { timeout: 5000 }, (res) => {
+      if (res.statusCode !== 200) { res.resume(); return; }
+      let data = '';
+      res.on('data', chunk => { data += chunk; });
+      res.on('end', () => {
+        try {
+          const latest = JSON.parse(data).version;
+          if (!latest || latest === currentVersion) return;
+          const parse = v => v.split('.').map(Number);
+          const [cM, cm, cp] = parse(currentVersion);
+          const [lM, lm, lp] = parse(latest);
+          const isNewer = lM > cM || (lM === cM && (lm > cm || (lm === cm && lp > cp)));
+          if (isNewer) {
+            console.log(`\n[UPDATE] New version available: ${currentVersion} -> ${latest}`);
+            console.log(`  Run: npm install -g muaddib-scanner@latest\n`);
+          }
+        } catch { /* ignore JSON parse errors */ }
+      });
     });
+    req.on('error', () => {}); // No network — skip silently
+    req.setTimeout(5000, () => req.destroy());
   } catch {
     // Skip silently
   }
