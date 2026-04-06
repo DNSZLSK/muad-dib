@@ -29,6 +29,8 @@ const CACHE_DIR = path.join(ROOT, '.muaddib-cache', 'benign-tarballs');
 const RANDOM_CACHE_DIR = path.join(ROOT, '.muaddib-cache', 'benign-random-tarballs');
 const PYPI_CACHE_DIR = path.join(ROOT, '.muaddib-cache', 'benign-pypi');
 const SCAN_CACHE_FILE = path.join(ROOT, '.muaddib-cache', 'evaluate-scan-cache.json');
+const REGISTRY_CACHE_FILE = path.join(ROOT, '.muaddib-cache', 'eval-registry-cache.json');
+const REGISTRY_CACHE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const HOLDOUT_DIRS = [
   path.join(ROOT, 'datasets', 'holdout-v2'),
   path.join(ROOT, 'datasets', 'holdout-v3'),
@@ -104,13 +106,104 @@ function getCachedResult(dir) {
 
 function setCachedResult(dir, result) {
   const key = path.relative(ROOT, dir);
-  // Store minimal result: only what evaluate needs (score, total, threats summary)
+  // Store result with enough detail for ML feature extraction.
+  // Previous version only stored riskScore + total — the ML classifier needs
+  // fileScores, breakdown, severity counts, maxFileScore for its feature vector.
+  const s = result.summary || {};
   _scanCache.results[key] = {
-    summary: { riskScore: result.summary.riskScore, total: result.summary.total },
+    summary: {
+      riskScore: s.riskScore, total: s.total,
+      critical: s.critical, high: s.high, medium: s.medium, low: s.low,
+      maxFileScore: s.maxFileScore, packageScore: s.packageScore,
+      globalRiskScore: s.globalRiskScore,
+      fileScores: s.fileScores, breakdown: s.breakdown,
+      reputationFactor: s.reputationFactor
+    },
     threats: (result.threats || []).map(t => ({
       type: t.type, severity: t.severity, message: t.message, file: t.file
     }))
   };
+}
+
+// =========================================================================
+// npm registry metadata cache — provides ML features (age, downloads, size, versions)
+// Fetched once, cached 30 days. Only queried for packages in the ML T1 zone.
+// =========================================================================
+
+let _registryCache = {};
+
+function loadRegistryCache() {
+  try {
+    if (fs.existsSync(REGISTRY_CACHE_FILE)) {
+      _registryCache = JSON.parse(fs.readFileSync(REGISTRY_CACHE_FILE, 'utf8'));
+    }
+  } catch { _registryCache = {}; }
+}
+
+function saveRegistryCache() {
+  try {
+    fs.mkdirSync(path.dirname(REGISTRY_CACHE_FILE), { recursive: true });
+    fs.writeFileSync(REGISTRY_CACHE_FILE, JSON.stringify(_registryCache));
+  } catch { /* best effort */ }
+}
+
+/**
+ * Fetch npm registry metadata for a package (age, downloads, version count, etc.)
+ * Uses the same API as the monitor's getPackageMetadata() but with simpler caching.
+ * @param {string} pkgName - npm package name
+ * @returns {Promise<Object|null>} { age_days, weekly_downloads, version_count, author_package_count, has_repository, readme_size, unpackedSize }
+ */
+async function fetchRegistryMeta(pkgName) {
+  // Check cache
+  const cached = _registryCache[pkgName];
+  if (cached && (Date.now() - cached._fetchedAt) < REGISTRY_CACHE_MAX_AGE_MS) {
+    return cached;
+  }
+
+  try {
+    const { getPackageMetadata } = require('../scanner/npm-registry.js');
+    const meta = await getPackageMetadata(pkgName);
+    if (!meta) return null;
+
+    // getPackageMetadata() doesn't return unpackedSize — fetch it from the
+    // registry's latest version dist metadata directly.
+    let unpackedSize = 0;
+    try {
+      const https = require('https');
+      const regData = await new Promise((resolve, reject) => {
+        const req = https.get(
+          `https://registry.npmjs.org/${encodeURIComponent(pkgName)}/latest`,
+          { timeout: 5000, headers: { 'Accept': 'application/json' } },
+          (res) => {
+            if (res.statusCode !== 200) { res.resume(); resolve(null); return; }
+            let d = '';
+            res.on('data', c => { d += c; });
+            res.on('end', () => { try { resolve(JSON.parse(d)); } catch { resolve(null); } });
+          }
+        );
+        req.on('error', () => resolve(null));
+        req.setTimeout(5000, () => { req.destroy(); resolve(null); });
+      });
+      if (regData && regData.dist) {
+        unpackedSize = regData.dist.unpackedSize || 0;
+      }
+    } catch { /* ignore */ }
+
+    const entry = {
+      age_days: meta.age_days || 0,
+      weekly_downloads: meta.weekly_downloads || 0,
+      version_count: meta.version_count || 0,
+      author_package_count: meta.author_package_count || 0,
+      has_repository: meta.has_repository || false,
+      readme_size: meta.readme_size || 0,
+      unpackedSize,
+      _fetchedAt: Date.now()
+    };
+    _registryCache[pkgName] = entry;
+    return entry;
+  } catch {
+    return null;
+  }
 }
 
 // --- Holdout benign split ---
@@ -281,7 +374,9 @@ async function evaluateGroundTruth() {
       id: attack.id,
       score,
       detected: isDetected,
-      threshold: GT_THRESHOLD
+      threshold: GT_THRESHOLD,
+      threats: result.threats,
+      _summary: result.summary
     });
   }
 
@@ -490,6 +585,10 @@ async function evaluateBenign(options = {}) {
         file: t.file
       }));
     }
+
+    // Store full summary for ML feature extraction (fileScores, breakdown, severity counts)
+    entry._summary = result.summary || {};
+    entry._fileCountTotal = jsFileCount;
 
     details.push(entry);
   }
@@ -809,7 +908,8 @@ async function evaluateAdversarial() {
     const score = result.summary.riskScore;
     const isDetected = score >= ADR_THRESHOLD;
     if (isDetected) detected++;
-    details.push({ name, score, threshold: ADR_THRESHOLD, detected: isDetected, source: 'adversarial' });
+    details.push({ name, score, threshold: ADR_THRESHOLD, detected: isDetected, source: 'adversarial',
+      threats: result.threats, _summary: result.summary });
   }
 
   // --- Holdout samples (40) ---
@@ -827,7 +927,8 @@ async function evaluateAdversarial() {
     const score = result.summary.riskScore;
     const isDetected = score >= ADR_THRESHOLD;
     if (isDetected) detected++;
-    details.push({ name, score, threshold: ADR_THRESHOLD, detected: isDetected, source: 'holdout' });
+    details.push({ name, score, threshold: ADR_THRESHOLD, detected: isDetected, source: 'holdout',
+      threats: result.threats, _summary: result.summary });
   }
 
   // Count only samples that exist on disk (exclude "directory not found")
@@ -965,6 +1066,8 @@ function evaluateOSSFTPR() {
   const bySource = {};
   const scoreDistribution = { '0': 0, '1-9': 0, '10-19': 0, '20-49': 0, '50+': 0 };
   const detectedByBucket = { '0': 0, '1-9': 0, '10-19': 0, '20-49': 0, '50+': 0 };
+  const details = [];
+  const misses = [];
 
   for (const r of inScope) {
     const score = r.score || 0;
@@ -986,6 +1089,19 @@ function evaluateOSSFTPR() {
     if (!bySource[src]) bySource[src] = { detected: 0, total: 0 };
     bySource[src].total++;
     if (isDetected) bySource[src].detected++;
+
+    // Per-sample detail for triage
+    const threatTypes = (r.threats || []).map(t => t.type);
+    const detail = {
+      name: r.name || r.package || 'unknown',
+      score,
+      source: src,
+      detected: isDetected,
+      threatCount: (r.threats || []).length,
+      topThreats: threatTypes.slice(0, 5)
+    };
+    details.push(detail);
+    if (!isDetected) misses.push(detail);
   }
 
   const total = inScope.length;
@@ -1007,6 +1123,20 @@ function evaluateOSSFTPR() {
     };
   }
 
+  // Miss analysis: group misses by pattern for triage prioritization
+  const missPatterns = {};
+  for (const m of misses) {
+    const key = m.threatCount === 0 ? 'zero_threats' :
+      m.topThreats.length === 1 ? m.topThreats[0] : 'multi_signal';
+    if (!missPatterns[key]) missPatterns[key] = { count: 0, avgScore: 0, samples: [] };
+    missPatterns[key].count++;
+    missPatterns[key].avgScore += m.score;
+    if (missPatterns[key].samples.length < 3) missPatterns[key].samples.push(m.name);
+  }
+  for (const p of Object.values(missPatterns)) {
+    p.avgScore = p.count > 0 ? Math.round(p.avgScore / p.count * 10) / 10 : 0;
+  }
+
   return {
     detected,
     total,
@@ -1015,6 +1145,9 @@ function evaluateOSSFTPR() {
     threshold: OSSF_TPR_THRESHOLD,
     bySource,
     scoreBuckets,
+    missPatterns,
+    misses,
+    details,
     unavailable: benchmark.results.filter(r => r.status === 'unavailable').length,
     coverage: benchmark.metadata && benchmark.metadata.coverage || null,
     benchmarkDate: benchmark.metadata && benchmark.metadata.scanned_at || null
@@ -1089,11 +1222,23 @@ async function evaluate(options = {}) {
   const ossfTPR = evaluateOSSFTPR();
 
   // --- ML Classifier evaluation ---
-  const mlEval = evaluateMLClassifier(
+  const mlEval = await evaluateMLClassifier(
     benign.details || [],
     groundTruth.details || [],
     adversarial.details || []
   );
+
+  // Compute post-ML effective FPR: subtract T1 benign packages reclassified as clean by ML
+  const fprAfterML = mlEval && benign.scanned > 0
+    ? {
+        flagged: benign.flagged - mlEval.mlCleanBenign,
+        scanned: benign.scanned,
+        fpr: (benign.flagged - mlEval.mlCleanBenign) / benign.scanned,
+        fprCI: wilsonCI(benign.flagged - mlEval.mlCleanBenign, benign.scanned),
+        mlCleanBenign: mlEval.mlCleanBenign,
+        t1Benign: mlEval.t1Benign
+      }
+    : null;
 
   const report = {
     version,
@@ -1115,7 +1260,8 @@ async function evaluate(options = {}) {
     adversarial,
     datadogTPR,
     ossfTPR,
-    mlEvaluation: mlEval || null
+    mlEvaluation: mlEval || null,
+    fprAfterML: fprAfterML || null
   };
 
   const metricsPath = saveMetrics(report);
@@ -1144,6 +1290,11 @@ async function evaluate(options = {}) {
     console.log(`  TPR heuristic-only:    ${groundTruth.heuristicOnly}/${groundTruth.total}`);
     const fprCIStr = benign.fprCI ? ` [95% CI: ${(benign.fprCI.lower * 100).toFixed(1)}-${(benign.fprCI.upper * 100).toFixed(1)}%]` : '';
     console.log(`  FPR (global):          ${benign.flagged}/${benign.scanned}  ${fprPct}%${fprCIStr}`);
+    if (fprAfterML) {
+      const fprAfterMLPct = (fprAfterML.fpr * 100).toFixed(1);
+      const fprAfterMLCIStr = fprAfterML.fprCI ? ` [95% CI: ${(fprAfterML.fprCI.lower * 100).toFixed(1)}-${(fprAfterML.fprCI.upper * 100).toFixed(1)}%]` : '';
+      console.log(`  FPR (after ML):        ${fprAfterML.flagged}/${fprAfterML.scanned}  ${fprAfterMLPct}%${fprAfterMLCIStr}  [ML: ${fprAfterML.mlCleanBenign}/${fprAfterML.t1Benign} T1 reclassified clean]`);
+    }
     if (benign.holdoutSplit) {
       const hs = benign.holdoutSplit;
       console.log(`  FPR (training):        ${hs.training.flagged}/${hs.training.total}  ${(hs.training.fpr * 100).toFixed(1)}%  [70% tuning set]`);
@@ -1198,6 +1349,22 @@ async function evaluate(options = {}) {
         const srcPct = (data.tpr * 100).toFixed(1);
         console.log(`    ${src.padEnd(25)}: ${String(data.detected).padStart(5)}/${String(data.total).padStart(5)}  ${srcPct}%`);
       }
+      if (ossfTPR.missPatterns && Object.keys(ossfTPR.missPatterns).length > 0) {
+        console.log(`  OpenSSF miss patterns (${ossfTPR.misses.length} missed):`);
+        const sorted = Object.entries(ossfTPR.missPatterns).sort((a, b) => b[1].count - a[1].count);
+        for (const [pattern, data] of sorted) {
+          console.log(`    ${pattern.padEnd(25)}: ${String(data.count).padStart(3)} samples  avg_score=${data.avgScore}  [${data.samples.join(', ')}]`);
+        }
+      }
+      if (ossfTPR.misses && ossfTPR.misses.length > 0) {
+        console.log(`  OpenSSF misses (score < ${ossfTPR.threshold}):`);
+        const sortedMisses = ossfTPR.misses.slice().sort((a, b) => b.score - a.score);
+        for (const m of sortedMisses.slice(0, 15)) {
+          const threats = m.topThreats.length > 0 ? m.topThreats.join(', ') : 'none';
+          console.log(`    ${m.name.padEnd(40).substring(0, 40)}: score ${String(m.score).padStart(2)}  [${m.source}]  threats: ${threats}`);
+        }
+        if (sortedMisses.length > 15) console.log(`    ... and ${sortedMisses.length - 15} more`);
+      }
     }
     console.log('');
 
@@ -1246,7 +1413,7 @@ async function evaluate(options = {}) {
  * @param {Object} adrResults - array of { name, score, threats } from evaluateAdversarial
  * @returns {Object} { t1Benign, t1GT, t1ADR, mlCleanBenign, mlCleanGT, mlCleanADR, fpReduction, gtSuppressed, adrSuppressed }
  */
-function evaluateMLClassifier(benignResults, gtResults, adrResults) {
+async function evaluateMLClassifier(benignResults, gtResults, adrResults) {
   let classifyPackage, isModelAvailable;
   try {
     const classifier = require('../ml/classifier.js');
@@ -1275,18 +1442,57 @@ function evaluateMLClassifier(benignResults, gtResults, adrResults) {
   let mlCleanGT = 0;
   let mlCleanADR = 0;
 
+  // Fetch npm registry metadata for T1 benign packages (needed for ML top features).
+  // Only fetches for packages we'll actually classify — ~34 packages, ~7 seconds.
+  loadRegistryCache();
+  const t1BenignNames = (benignResults || []).filter(r => r.score >= 20 && r.score < 35).map(r => r.name);
+  if (t1BenignNames.length > 0) {
+    console.log(`  Fetching registry metadata for ${t1BenignNames.length} T1 benign packages...`);
+    for (const name of t1BenignNames) {
+      if (!_registryCache[name] || (Date.now() - _registryCache[name]._fetchedAt) >= REGISTRY_CACHE_MAX_AGE_MS) {
+        await fetchRegistryMeta(name);
+      }
+    }
+    saveRegistryCache();
+    console.log(`  Registry cache: ${Object.keys(_registryCache).length} packages cached.`);
+  }
+
+  // Build a result+meta pair that matches the monitor's classifyPackage() input.
+  // Uses the full summary (fileScores, breakdown, severity counts) and npm registry
+  // metadata (age, downloads, size, versions) — same features the ML sees in prod.
+  function buildMLInput(r) {
+    const summary = r._summary || { riskScore: r.score, total: (r.threats || []).length };
+    const result = { threats: r.threats || [], summary };
+    const regMeta = _registryCache[r.name] || {};
+    const meta = {
+      fileCountTotal: r._fileCountTotal || r.jsFiles || 0,
+      hasTests: false,
+      unpackedSize: regMeta.unpackedSize || 0,
+      registryMeta: {},
+      npmRegistryMeta: {
+        age_days: regMeta.age_days || 0,
+        weekly_downloads: regMeta.weekly_downloads || 0,
+        version_count: regMeta.version_count || 0,
+        author_package_count: regMeta.author_package_count || 0,
+        has_repository: regMeta.has_repository || false,
+        readme_size: regMeta.readme_size || 0
+      }
+    };
+    return { result, meta };
+  }
+
   // Classify T1 benign (FP candidates — we WANT these classified as clean)
   for (const r of t1Benign) {
-    const fakeResult = { threats: r.threats || [], summary: { riskScore: r.score, total: (r.threats || []).length } };
-    const ml = classifyPackage(fakeResult, {});
+    const { result, meta } = buildMLInput(r);
+    const ml = classifyPackage(result, meta);
     if (ml.prediction === 'clean') mlCleanBenign++;
   }
 
   // Classify T1 ground truth (must NOT be classified as clean — zero regression)
   const gtSuppressed = [];
   for (const r of t1GT) {
-    const fakeResult = { threats: r.threats || [], summary: { riskScore: r.score, total: (r.threats || []).length } };
-    const ml = classifyPackage(fakeResult, {});
+    const { result, meta } = buildMLInput(r);
+    const ml = classifyPackage(result, meta);
     if (ml.prediction === 'clean') {
       mlCleanGT++;
       gtSuppressed.push(r.name);
@@ -1296,8 +1502,8 @@ function evaluateMLClassifier(benignResults, gtResults, adrResults) {
   // Classify T1 adversarial (must NOT be classified as clean — zero regression)
   const adrSuppressedList = [];
   for (const r of t1ADR) {
-    const fakeResult = { threats: r.threats || [], summary: { riskScore: r.score, total: (r.threats || []).length } };
-    const ml = classifyPackage(fakeResult, {});
+    const { result, meta } = buildMLInput(r);
+    const ml = classifyPackage(result, meta);
     if (ml.prediction === 'clean') {
       mlCleanADR++;
       adrSuppressedList.push(r.name);
