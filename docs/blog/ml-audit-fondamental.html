@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>v2.10.5 - Quand un changement de label fait passer le ML de 37% a 98% - MUAD'DIB</title>
-  <meta name="description" content="3 mois de monitoring, 0 malware confirme, 8176 labels contamines. Comment un nettoyage de donnees a fait passer la precision ML de 37% a 98%.">
+  <title>v2.10.5 - Quand un changement de label fait passer le ML de 37% à 98% - MUAD'DIB</title>
+  <meta name="description" content="3 mois de monitoring, 0 malware confirmé, 8176 labels contaminés. Comment un nettoyage de données a fait passer la précision ML de 37% à 98%.">
   <link rel="stylesheet" href="../style.css">
   <link rel="stylesheet" href="../vendor/github-dark.min.css">
   <script src="../vendor/highlight.min.js"></script>
@@ -25,7 +25,7 @@
 
   <article>
     <div class="article-meta">
-      <h1>v2.10.5 - Quand un changement de label fait passer le ML de 37% a 98%</h1>
+      <h1>v2.10.5 - Quand un changement de label fait passer le ML de 37% à 98%</h1>
       <span class="date">2026-03-22</span>
       <div class="tags">
         <span class="tag">ml</span>
@@ -38,32 +38,32 @@
 
     <div class="article-content">
 
-      <p>Le moniteur MUAD'DIB tourne depuis decembre 2025. ~10 000 packages npm scannes par jour, 24/7. ~600 alertes webhook Discord quotidiennes. Apres 3 mois : <strong>zero malware confirme</strong>. Pas parce qu'il n'y en a pas, mais parce que 600 cards orange identiques sans hierarchie, personne ne les trie.</p>
+      <p>Le moniteur MUAD'DIB tourne depuis décembre 2025. ~10 000 packages npm scannés par jour, 24/7. ~600 alertes webhook Discord quotidiennes. Après 3 mois : <strong>zéro malware confirmé</strong>. Pas parce qu'il n'y en a pas, mais parce que 600 cards orange identiques sans hiérarchie, personne ne les trie.</p>
 
-      <h2>Le probleme : labels contamines</h2>
+      <h2>Le problème : labels contaminés</h2>
 
-      <p>20 questions posees sur le pipeline. 5 causes racines. La plus grave : la contamination des labels ML.</p>
+      <p>20 questions posées sur le pipeline. 5 causes racines. La plus grave : la contamination des labels ML.</p>
 
       <ol>
-        <li>Le moniteur detecte un package suspect (score &ge; 20)</li>
-        <li>Le sandbox Docker l'execute</li>
-        <li>Le sandbox ne detecte rien</li>
+        <li>Le moniteur détecte un package suspect (score &ge; 20)</li>
+        <li>Le sandbox Docker l'exécute</li>
+        <li>Le sandbox ne détecte rien</li>
         <li>Le moniteur labellise automatiquement le package comme <code>"fp"</code></li>
       </ol>
 
-      <p>Sauf que le sandbox n'avait pas de honey tokens pendant 3 mois. Un sandbox propre ne prouve rien - le malware peut ne pas s'etre active (time bomb, cible specifique, check d'environnement). 8176 records contamines.</p>
+      <p>Sauf que le sandbox n'avait pas de honey tokens pendant 3 mois. Un sandbox propre ne prouve rien - le malware peut ne pas s'être activé (time bomb, cible spécifique, check d'environnement). 8176 records contaminés.</p>
 
-      <p>Le classifier ML apprenait a dire "tout est FP". Precision 37.2%, recall 99.8%.</p>
+      <p>Le classifier ML apprenait à dire "tout est FP". Précision 37.2%, recall 99.8%.</p>
 
       <h2>Le nettoyage</h2>
 
-      <p>Conversion des 8176 labels <code>"fp"</code> automatiques en <code>"unconfirmed"</code>, exclus de l'entrainement. Seuls les labels valides par review manuelle (<code>manualReview: true</code>) sont acceptes comme <code>"fp"</code>.</p>
+      <p>Conversion des 8176 labels <code>"fp"</code> automatiques en <code>"unconfirmed"</code>, exclus de l'entraînement. Seuls les labels validés par review manuelle (<code>manualReview: true</code>) sont acceptés comme <code>"fp"</code>.</p>
 
-      <p>Meme code, memes features, donnees propres :</p>
+      <p>Même code, mêmes features, données propres :</p>
 
       <table>
-        <tr><th>Metrique</th><th>Avant</th><th>Apres</th></tr>
-        <tr><td>Precision</td><td>37.2%</td><td><strong>97.8%</strong></td></tr>
+        <tr><th>Métrique</th><th>Avant</th><th>Après</th></tr>
+        <tr><td>Précision</td><td>37.2%</td><td><strong>97.8%</strong></td></tr>
         <tr><td>Recall</td><td>99.8%</td><td><strong>93.3%</strong></td></tr>
         <tr><td>F1</td><td>0.541</td><td><strong>0.955</strong></td></tr>
       </table>
@@ -71,10 +71,10 @@
       <h3>Benchmark Datadog</h3>
 
       <table>
-        <tr><th>Metrique</th><th>Valeur</th></tr>
+        <tr><th>Métrique</th><th>Valeur</th></tr>
         <tr><td>In-scope</td><td>14 587</td></tr>
-        <tr><td>Detectes (@1)</td><td>13 538 (<strong>92.8%</strong>)</td></tr>
-        <tr><td>Detectes (@20)</td><td>10 202 (<strong>69.9%</strong>)</td></tr>
+        <tr><td>Détectés (@1)</td><td>13 538 (<strong>92.8%</strong>)</td></tr>
+        <tr><td>Détectés (@20)</td><td>10 202 (<strong>69.9%</strong>)</td></tr>
         <tr><td>Score = 0</td><td>1 049</td></tr>
       </table>
 
@@ -83,41 +83,41 @@
       <p>XGBoost, 114 arbres, 21 features, seuil 0.500. Top features :</p>
 
       <ul>
-        <li><strong>score</strong> - score de risque global (aggregation des heuristiques)</li>
+        <li><strong>score</strong> - score de risque global (agrégation des heuristiques)</li>
         <li><strong>max_single_points</strong> - poids de la finding la plus grave</li>
         <li><strong>file_score_max</strong> - score du fichier le plus suspect</li>
-        <li><strong>threat_density</strong> - findings / fichiers (malware = concentre, framework = dilue)</li>
+        <li><strong>threat_density</strong> - findings / fichiers (malware = concentré, framework = dilué)</li>
       </ul>
 
-      <p>Le ML decide "est-ce que l'ensemble de signaux ressemble a un malware ou a du bruit". Les regles decident "quel type de menace".</p>
+      <p>Le ML décide "est-ce que l'ensemble de signaux ressemble à un malware ou à du bruit". Les règles décident "quel type de menace".</p>
 
       <h2>ML2 - Bundler detector</h2>
 
-      <p>XGBoost, 98 arbres, 30 features, seuil 0.100. Les bundlers (webpack, rollup) generent du code minifie qui accumule des findings legits - <code>eval</code>, <code>Function</code>, <code>require</code> dynamiques - qui ressemblent a du malware. ML2 detecte ces cas.</p>
+      <p>XGBoost, 98 arbres, 30 features, seuil 0.100. Les bundlers (webpack, rollup) génèrent du code minifié qui accumule des findings légitimes - <code>eval</code>, <code>Function</code>, <code>require</code> dynamiques - qui ressemblent à du malware. ML2 détecte ces cas.</p>
 
-      <p>F1 de 0.996. Warning : <code>unpacked_size_bytes</code> correle fortement avec les bundlers et pourrait constituer un leakage. Le F1 reel en production sera probablement inferieur.</p>
+      <p>F1 de 0.996. Warning : <code>unpacked_size_bytes</code> corrèle fortement avec les bundlers et pourrait constituer un leakage. Le F1 réel en production sera probablement inférieur.</p>
 
       <h2>Triage P1/P2/P3</h2>
 
       <p>Classification visuelle des alertes :</p>
 
       <ul>
-        <li><strong>P1 (rouge)</strong> - IOC match, types haute confiance, canary token exfiltre, sandbox positif. ~26/jour.</li>
-        <li><strong>P2 (orange)</strong> - Score &ge; 50, compound scoring, lifecycle + intent coherence.</li>
-        <li><strong>P3 (jaune)</strong> - Reste. Score 20-49 sans signal fort. Majorite des FP.</li>
+        <li><strong>P1 (rouge)</strong> - IOC match, types haute confiance, canary token exfiltré, sandbox positif. ~26/jour.</li>
+        <li><strong>P2 (orange)</strong> - Score &ge; 50, compound scoring, lifecycle + intent cohérence.</li>
+        <li><strong>P3 (jaune)</strong> - Reste. Score 20-49 sans signal fort. Majorité des FP.</li>
       </ul>
 
       <p>Les ~26 vrais malwares sont visuellement distincts des ~574 FP. Triage P1 en 2 minutes/jour au lieu de noyer dans 600 cards identiques.</p>
 
       <h2>La suite : LLM Phase 3</h2>
 
-      <p>Investigation manuelle de 9 packages live : tous FP. Temps moyen 5-10 minutes par package. A 600 alertes/jour, le triage humain ne scale pas.</p>
+      <p>Investigation manuelle de 9 packages live : tous FP. Temps moyen 5-10 minutes par package. À 600 alertes/jour, le triage humain ne scale pas.</p>
 
-      <p>Plan : Claude 3.5 Haiku en shadow mode pour analyser les alertes P2/P3. ~$17/mois. Phases : shadow &rarr; enforce P3 &rarr; enforce P2+P3. Les P1 ne seront jamais filtrees.</p>
+      <p>Plan : Claude 3.5 Haiku en shadow mode pour analyser les alertes P2/P3. ~$17/mois. Phases : shadow &rarr; enforce P3 &rarr; enforce P2+P3. Les P1 ne seront jamais filtrées.</p>
 
-      <h2>Lecon</h2>
+      <h2>Leçon</h2>
 
-      <p>Le meme algorithme XGBoost, les memes hyperparametres, les memes 21 features. Precision 37% &rarr; 98% avec un seul changement : des donnees propres. Un sandbox sans honey tokens qui labellise "fp" automatiquement, c'est du label poisoning sur soi-meme.</p>
+      <p>Le même algorithme XGBoost, les mêmes hyperparamètres, les mêmes 21 features. Précision 37% &rarr; 98% avec un seul changement : des données propres. Un sandbox sans honey tokens qui labellise "fp" automatiquement, c'est du label poisoning sur soi-même.</p>
 
     </div>
   </article>

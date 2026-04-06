@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Red Team vs Blue Team : 107 echantillons adversariaux - MUAD'DIB</title>
-  <meta name="description" content="7 campagnes adversariales pour tester un scanner supply-chain. 107 echantillons, ADR 96.3%.">
+  <title>Red Team vs Blue Team : 107 échantillons adversariaux - MUAD'DIB</title>
+  <meta name="description" content="7 campagnes adversariales pour tester un scanner supply-chain. 107 échantillons, ADR 96.3%.">
   <link rel="stylesheet" href="../style.css">
   <link rel="stylesheet" href="../vendor/github-dark.min.css">
   <script src="../vendor/highlight.min.js"></script>
@@ -25,115 +25,115 @@
 
   <article>
     <div class="article-meta">
-      <h1>Red Team vs Blue Team : 107 echantillons adversariaux en 7 campagnes</h1>
+      <h1>Red Team vs Blue Team : 107 échantillons adversariaux en 7 campagnes</h1>
       <span class="date">2026-03-17</span>
       <div class="tags">
         <span class="tag">red-team</span>
         <span class="tag">adversarial</span>
-        <span class="tag">methodologie</span>
+        <span class="tag">méthodologie</span>
       </div>
     </div>
 
     <div class="article-content">
 
-      <p>Comment tester un scanner de securite quand l'attaquant connait les regles ? On cree les attaques soi-meme, on mesure ce qui passe a travers, et on corrige. 7 campagnes, 107 echantillons, et un score pre-tuning qui raconte l'histoire vraie.</p>
+      <p>Comment tester un scanner de sécurité quand l'attaquant connaît les règles ? On crée les attaques soi-même, on mesure ce qui passe à travers, et on corrige. 7 campagnes, 107 échantillons, et un score pre-tuning qui raconte l'histoire vraie.</p>
 
-      <h2>La methodologie</h2>
+      <h2>La méthodologie</h2>
 
-      <p>Le cycle est toujours le meme :</p>
+      <p>Le cycle est toujours le même :</p>
       <ol>
-        <li><strong>Geler les regles</strong> - aucune modification du scanner</li>
-        <li><strong>Creer les echantillons</strong> - techniques d'evasion basees sur des attaques reelles documentees</li>
-        <li><strong>Scanner avec les regles gelees</strong> - enregistrer les scores bruts</li>
-        <li><strong>Corriger les detections</strong> - ajouter/modifier les regles</li>
-        <li><strong>Verifier zero regression</strong> - les corrections ne doivent casser aucun test existant</li>
+        <li><strong>Geler les règles</strong> - aucune modification du scanner</li>
+        <li><strong>Créer les échantillons</strong> - techniques d'évasion basées sur des attaques réelles documentées</li>
+        <li><strong>Scanner avec les règles gelées</strong> - enregistrer les scores bruts</li>
+        <li><strong>Corriger les détections</strong> - ajouter/modifier les règles</li>
+        <li><strong>Vérifier zéro régression</strong> - les corrections ne doivent casser aucun test existant</li>
       </ol>
 
-      <p>Le <strong>score pre-tuning</strong> est la metrique la plus honnete. Il mesure la capacite de generalisation sur des patterns jamais vus pendant le developpement.</p>
+      <p>Le <strong>score pre-tuning</strong> est la métrique la plus honnête. Il mesure la capacité de généralisation sur des patterns jamais vus pendant le développement.</p>
 
       <h2>Les 7 campagnes</h2>
 
-      <h3>Vague 1 - Le baseline (20 echantillons)</h3>
+      <h3>Vague 1 - Le baseline (20 échantillons)</h3>
 
-      <p>Score pre-tuning : <strong>~14%</strong>. Le scanner ne detectait presque rien. Les patterns de base (<code>require()</code> obfusque, DNS exfiltration, staged payload) passaient a travers. Corrections massives du scanner AST et dataflow. 5 nouvelles regles. Resultat post-tuning : 20/20.</p>
+      <p>Score pre-tuning : <strong>~14%</strong>. Le scanner ne détectait presque rien. Les patterns de base (<code>require()</code> obfusqué, DNS exfiltration, staged payload) passaient à travers. Corrections massives du scanner AST et dataflow. 5 nouvelles règles. Résultat post-tuning : 20/20.</p>
 
-      <h3>Vague 2 - Techniques emergentes (5 echantillons)</h3>
+      <h3>Vague 2 - Techniques émergentes (5 échantillons)</h3>
 
-      <p>Score pre-tuning : <strong>0%</strong>. Template literal obfuscation, proxy env intercept, nested payload, dynamic import, websocket exfil - rien n'etait couvert. Le pire score de toutes les campagnes. Resultat post-tuning : 25/25.</p>
+      <p>Score pre-tuning : <strong>0%</strong>. Template literal obfuscation, proxy env intercept, nested payload, dynamic import, websocket exfil - rien n'était couvert. Le pire score de toutes les campagnes. Résultat post-tuning : 25/25.</p>
 
-      <h3>Vague 3 - Attaques reelles 2025-2026 (5 echantillons)</h3>
+      <h3>Vague 3 - Attaques réelles 2025-2026 (5 échantillons)</h3>
 
-      <p>Score pre-tuning : <strong>60%</strong>. Premiere amelioration significative. Les techniques testees :</p>
+      <p>Score pre-tuning : <strong>60%</strong>. Première amélioration significative. Les techniques testées :</p>
       <ul>
         <li><strong>AI agent weaponization</strong> - invocation de Claude/Gemini avec <code>--dangerously-skip-permissions</code> (pattern s1ngularity/Nx)</li>
         <li><strong>AI config injection</strong> - injection de prompts dans <code>.cursorrules</code>, <code>CLAUDE.md</code> (pattern ToxicSkills)</li>
         <li><strong>Zero-deps RDD</strong> - inline <code>https.get</code> + <code>eval()</code> dans postinstall (pattern PhantomRaven)</li>
         <li><strong>Discord webhook exfil</strong> - credentials vers webhook Discord (pattern Shai-Hulud)</li>
-        <li><strong>Background fork</strong> - preinstall + fork detache + vol de credentials (pattern StepSecurity)</li>
+        <li><strong>Background fork</strong> - preinstall + fork détaché + vol de credentials (pattern StepSecurity)</li>
       </ul>
 
-      <p>Cette vague a donne naissance au 13eme scanner : <code>ai-config.js</code>, dedie a la detection d'injection de prompts dans les fichiers de configuration d'agents IA.</p>
+      <p>Cette vague a donné naissance au 13ème scanner : <code>ai-config.js</code>, dédié à la détection d'injection de prompts dans les fichiers de configuration d'agents IA.</p>
 
-      <h3>Holdout v1 a v5 - Le test de generalisation (50 echantillons)</h3>
+      <h3>Holdout v1 à v5 - Le test de généralisation (50 échantillons)</h3>
 
-      <p>5 batches de 10 echantillons, chacun cree avec les regles gelees. C'est la mesure de generalisation pure :</p>
+      <p>5 batches de 10 échantillons, chacun créé avec les règles gelées. C'est la mesure de généralisation pure :</p>
 
       <table>
         <tr><th>Batch</th><th>Score pre-tuning</th><th>Techniques</th></tr>
         <tr><td>Holdout v1</td><td><strong>30%</strong> (3/10)</td><td>Charcode reconstruction, proxy getter, stream hijack, workflow inject</td></tr>
         <tr><td>Holdout v2</td><td><strong>40%</strong> (4/10)</td><td>Env var reconstruction, lifecycle curl, readable stream hijack</td></tr>
-        <tr><td>Holdout v3</td><td><strong>60%</strong> (6/10)</td><td>DNS TXT payload, steganography, reverse shell JS pur, require cache poison</td></tr>
-        <tr><td>Holdout v4</td><td><strong>80%</strong> (8/10)</td><td>Desobfuscation : base64-require, charcode-fetch, hex-array-exec</td></tr>
+        <tr><td>Holdout v3</td><td><strong>60%</strong> (6/10)</td><td>DNS TXT payload, stéganographie, reverse shell JS pur, require cache poison</td></tr>
+        <tr><td>Holdout v4</td><td><strong>80%</strong> (8/10)</td><td>Désobfuscation : base64-require, charcode-fetch, hex-array-exec</td></tr>
         <tr><td>Holdout v5</td><td><strong>50%</strong> (5/10)</td><td>Inter-module : EventEmitter, stream pipeline, class method exfil</td></tr>
       </table>
 
-      <p>La tendance 30% &rarr; 40% &rarr; 60% &rarr; 80% montre une amelioration constante de la generalisation. La chute a 50% au holdout v5 est attendue : c'etait un scanner entierement nouveau (module-graph) teste pour la premiere fois.</p>
+      <p>La tendance 30% &rarr; 40% &rarr; 60% &rarr; 80% montre une amélioration constante de la généralisation. La chute à 50% au holdout v5 est attendue : c'était un scanner entièrement nouveau (module-graph) testé pour la première fois.</p>
 
-      <h3>Vague 4 - Les 5 bypasses (5 echantillons)</h3>
+      <h3>Vague 4 - Les 5 bypasses (5 échantillons)</h3>
 
-      <p>Score pre-tuning : <strong>0%</strong>. Les 5 techniques d'evasion les plus vicieuses :</p>
+      <p>Score pre-tuning : <strong>0%</strong>. Les 5 techniques d'évasion les plus vicieuses :</p>
 
       <table>
         <tr><th>Technique</th><th>Score pre-fix</th><th>Source</th></tr>
-        <tr><td>Concatenation <code>.gi</code> + <code>t</code> &rarr; <code>.git</code></td><td>3</td><td>SANDWORM_MODE</td></tr>
-        <tr><td>Commandes node-gyp legitimes</td><td>3</td><td>NeoShadow / Aikido</td></tr>
+        <tr><td>Concaténation <code>.gi</code> + <code>t</code> &rarr; <code>.git</code></td><td>3</td><td>SANDWORM_MODE</td></tr>
+        <tr><td>Commandes node-gyp légitimes</td><td>3</td><td>NeoShadow / Aikido</td></tr>
         <tr><td><code>new Function()</code> sans flag exec</td><td>16</td><td>buildrunner-dev / Veracode</td></tr>
         <tr><td>Chemin tasks.json via retour fonction</td><td>28</td><td>StegaBin / FAMOUS CHOLLIMA</td></tr>
         <tr><td>Chemins dynamiques <code>os.homedir()</code></td><td>3</td><td>SANDWORM_MODE</td></tr>
       </table>
 
-      <p>La correction cle : <code>resolveStringConcat()</code>, une fonction recursive qui resout les <code>BinaryExpression</code> avec operateur <code>+</code>. <code>.gi</code> + <code>t</code> &rarr; <code>.git</code>. Technique d'evasion redoutablement simple mais efficace contre tout pattern matching statique.</p>
+      <p>La correction clé : <code>resolveStringConcat()</code>, une fonction récursive qui résout les <code>BinaryExpression</code> avec opérateur <code>+</code>. <code>.gi</code> + <code>t</code> &rarr; <code>.git</code>. Technique d'évasion redoutablement simple mais efficace contre tout pattern matching statique.</p>
 
-      <p>Autre lecon : quand la resolution de chemins AST echoue, la detection par co-occurrence au niveau contenu est un filet de securite efficace. Si un fichier mentionne <code>tasks.json</code> ET <code>runOn</code> ET <code>writeFileSync</code>, c'est suspect independamment de la construction des chemins.</p>
+      <p>Autre leçon : quand la résolution de chemins AST échoue, la détection par co-occurrence au niveau contenu est un filet de sécurité efficace. Si un fichier mentionne <code>tasks.json</code> ET <code>runOn</code> ET <code>writeFileSync</code>, c'est suspect indépendamment de la construction des chemins.</p>
 
-      <h3>Red Team DPRK - Techniques nord-coreennes (10 echantillons)</h3>
+      <h3>Red Team DPRK - Techniques nord-coréennes (10 échantillons)</h3>
 
-      <p>10 echantillons simulant les techniques observees dans les campagnes Lazarus/APT38 :</p>
+      <p>10 échantillons simulant les techniques observées dans les campagnes Lazarus/APT38 :</p>
       <ul>
-        <li><strong>5 echantillons pure API multi-fichiers</strong> - exfiltration repartie sur plusieurs modules avec imports locaux</li>
-        <li><strong>5 echantillons evasion eval</strong> - eval factory, <code>.call.call(eval)</code>, <code>require(/regex/.source)</code>, charcode arithmetique, object-method-alias</li>
+        <li><strong>5 échantillons pure API multi-fichiers</strong> - exfiltration répartie sur plusieurs modules avec imports locaux</li>
+        <li><strong>5 échantillons évasion eval</strong> - eval factory, <code>.call.call(eval)</code>, <code>require(/regex/.source)</code>, charcode arithmétique, object-method-alias</li>
       </ul>
 
-      <p>Cette campagne a donne naissance au graphe d'intention (analyse de coherence source-sink intra-fichier) et a 8 nouvelles regles.</p>
+      <p>Cette campagne a donné naissance au graphe d'intention (analyse de cohérence source-sink intra-fichier) et à 8 nouvelles règles.</p>
 
-      <h3>Red Team v7 - Derniere campagne (corrections)</h3>
+      <h3>Red Team v7 - Dernière campagne (corrections)</h3>
 
-      <p>3 corrections de faux positifs sur les nouvelles regles + 3 quick wins ameliorant la detection sur des cas limites. Alignement final des metriques pour le benchmark Datadog.</p>
+      <p>3 corrections de faux positifs sur les nouvelles règles + 3 quick wins améliorant la détection sur des cas limites. Alignement final des métriques pour le benchmark Datadog.</p>
 
-      <h2>Resultats finaux</h2>
+      <h2>Résultats finaux</h2>
 
       <table>
-        <tr><th>Metrique</th><th>Valeur</th></tr>
-        <tr><td>Echantillons adversariaux</td><td><strong>67</strong></td></tr>
+        <tr><th>Métrique</th><th>Valeur</th></tr>
+        <tr><td>Échantillons adversariaux</td><td><strong>67</strong></td></tr>
         <tr><td>Holdouts</td><td><strong>40</strong></td></tr>
         <tr><td>Total</td><td><strong>107</strong></td></tr>
         <tr><td>ADR (score &ge; 20)</td><td><strong>96.3%</strong> (103/107)</td></tr>
-        <tr><td>Misses documentes</td><td>4 (limites acceptees)</td></tr>
+        <tr><td>Misses documentés</td><td>4 (limites acceptées)</td></tr>
       </table>
 
       <h2>Sources des techniques</h2>
 
-      <p>Toutes les techniques sont basees sur des attaques reelles documentees :</p>
+      <p>Toutes les techniques sont basées sur des attaques réelles documentées :</p>
       <ul>
         <li><strong>Snyk</strong> : ToxicSkills, s1ngularity, Clinejection</li>
         <li><strong>Sonatype</strong> : PhantomRaven (zero-deps dropper)</li>
@@ -145,11 +145,11 @@
         <li><strong>Sygnia</strong> : chalk/debug sept 2025 (prototype hooking)</li>
       </ul>
 
-      <h2>Lecon</h2>
+      <h2>Leçon</h2>
 
-      <p>Le score pre-tuning est la seule metrique honnete de generalisation. Le score post-tuning (100%) est tautologique - on a corrige ce qu'on savait casse. La progression 14% &rarr; 0% &rarr; 60% &rarr; 30% &rarr; 40% &rarr; 60% &rarr; 80% &rarr; 50% montre les oscillations reelles : chaque nouveau type de technique revele des angles morts, meme quand les corrections precedentes ont ameliore la couverture generale.</p>
+      <p>Le score pre-tuning est la seule métrique honnête de généralisation. Le score post-tuning (100%) est tautologique - on a corrigé ce qu'on savait cassé. La progression 14% &rarr; 0% &rarr; 60% &rarr; 30% &rarr; 40% &rarr; 60% &rarr; 80% &rarr; 50% montre les oscillations réelles : chaque nouveau type de technique révèle des angles morts, même quand les corrections précédentes ont amélioré la couverture générale.</p>
 
-      <p>L'ADR de 96.3% signifie que 4 echantillons passent encore a travers. Et c'est normal - un attaquant suffisamment motive trouvera toujours une technique non couverte. L'objectif n'est pas 100%, c'est de rendre l'evasion <em>couteuse</em>.</p>
+      <p>L'ADR de 96.3% signifie que 4 échantillons passent encore à travers. Et c'est normal - un attaquant suffisamment motivé trouvera toujours une technique non couverte. L'objectif n'est pas 100%, c'est de rendre l'évasion <em>coûteuse</em>.</p>
 
     </div>
   </article>
