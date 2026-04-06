@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Du rule-based au ML : un classifier XGBoost pour trier les faux positifs - MUAD'DIB</title>
-  <meta name="description" content="Comment on a implemente un classifier XGBoost en JavaScript pur pour reduire le bruit des faux positifs dans la zone grise T1.">
+  <meta name="description" content="Comment on a implémenté un classifier XGBoost en JavaScript pur pour réduire le bruit des faux positifs dans la zone grise T1.">
   <link rel="stylesheet" href="../style.css">
   <link rel="stylesheet" href="../vendor/github-dark.min.css">
   <script src="../vendor/highlight.min.js"></script>
@@ -37,25 +37,25 @@
 
     <div class="article-content">
 
-      <p>Le moniteur MUAD'DIB scanne chaque nouveau package npm en temps reel. Le probleme : sur ~10 000-12 000 packages/jour, environ 1400 tombent en zone T1 (score 20-34) et declenchent une alerte. La plupart sont des faux positifs. Le FPR prod est a 27.3%. Le pipeline rule-based a atteint son plafond.</p>
+      <p>Le moniteur MUAD'DIB scanne chaque nouveau package npm en temps réel. Le problème : sur ~10 000-12 000 packages/jour, environ 1400 tombent en zone T1 (score 20-34) et déclenchent une alerte. La plupart sont des faux positifs. Le FPR prod est à 27.3%. Le pipeline rule-based a atteint son plafond.</p>
 
-      <p>La solution : un classifier binaire XGBoost qui filtre les FP <strong>avant</strong> le sandbox et le webhook. Pas pour remplacer les regles - pour les completer la ou elles hesitent.</p>
+      <p>La solution : un classifier binaire XGBoost qui filtre les FP <strong>avant</strong> le sandbox et le webhook. Pas pour remplacer les règles - pour les compléter là où elles hésitent.</p>
 
-      <h2>Pourquoi la zone T1 est un probleme</h2>
+      <h2>Pourquoi la zone T1 est un problème</h2>
 
-      <p>Le scoring de MUAD'DIB attribue un score 0-100 a chaque package. Les seuils :</p>
+      <p>Le scoring de MUAD'DIB attribue un score 0-100 à chaque package. Les seuils :</p>
 
       <ul>
         <li><strong>Score &lt; 20</strong> : clean. Pas d'alerte.</li>
         <li><strong>Score 20-34 (T1)</strong> : suspect. Sandbox + webhook Discord.</li>
-        <li><strong>Score &ge; 35 (T2)</strong> : tres suspect. Toujours alerte.</li>
+        <li><strong>Score &ge; 35 (T2)</strong> : très suspect. Toujours alerte.</li>
       </ul>
 
-      <p>La zone T1 est la zone grise. Un package avec 2-3 findings MEDIUM (env_access + sensitive_string + obfuscation) atteint facilement score 23. Ca peut etre un malware... ou un bundler webpack qui concatene du code minifie. Les regles seules ne savent pas faire la difference.</p>
+      <p>La zone T1 est la zone grise. Un package avec 2-3 findings MEDIUM (env_access + sensitive_string + obfuscation) atteint facilement score 23. Ça peut être un malware... ou un bundler webpack qui concatène du code minifié. Les règles seules ne savent pas faire la différence.</p>
 
       <h2>L'architecture du classifier</h2>
 
-      <p>Le classifier est un module JavaScript pur (<code>src/ml/classifier.js</code>) qui traverse des arbres de decision XGBoost sans aucune dependance Python en production. Le modele est un fichier JSON converti en JS par un script offline.</p>
+      <p>Le classifier est un module JavaScript pur (<code>src/ml/classifier.js</code>) qui traverse des arbres de décision XGBoost sans aucune dépendance Python en production. Le modèle est un fichier JSON converti en JS par un script offline.</p>
 
       <h3>Le pipeline</h3>
 
@@ -75,89 +75,89 @@
 
       <h3>71 features</h3>
 
-      <p>Le vecteur de features est passe de 62 a 71 avec l'ajout de signaux structurels et metadata :</p>
+      <p>Le vecteur de features est passé de 62 à 71 avec l'ajout de signaux structurels et metadata :</p>
 
       <table>
-        <tr><th>Categorie</th><th>Features</th><th>Exemples</th></tr>
+        <tr><th>Catégorie</th><th>Features</th><th>Exemples</th></tr>
         <tr><td>Scoring</td><td>4</td><td>score, max_file_score, package_score</td></tr>
-        <tr><td>Severite</td><td>5</td><td>count_critical, count_high, count_medium</td></tr>
+        <tr><td>Sévérité</td><td>5</td><td>count_critical, count_high, count_medium</td></tr>
         <tr><td>Types de menaces</td><td>32</td><td>type_env_access, type_obfuscation_detected</td></tr>
-        <tr><td>Signaux booleens</td><td>10</td><td>has_lifecycle, has_eval, has_ioc_match</td></tr>
+        <tr><td>Signaux booléens</td><td>10</td><td>has_lifecycle, has_eval, has_ioc_match</td></tr>
         <tr><td>Distribution fichiers</td><td>3</td><td>file_count_with_threats, file_score_max</td></tr>
         <tr><td>Ratios</td><td>3</td><td>severity_ratio_high, points_concentration</td></tr>
         <tr><td>Metadata package</td><td>3</td><td>unpacked_size, dep_count, reputation</td></tr>
         <tr><td><strong>Enrichies (v2.10)</strong></td><td><strong>9</strong></td><td>package_age_days, weekly_downloads, has_tests</td></tr>
       </table>
 
-      <p>Les 9 nouvelles features sont discriminantes selon la litterature : un package de 3 jours avec 0 downloads et 0 tests a un profil tres different d'un package de 5 ans avec 100K downloads/semaine et un repertoire <code>test/</code>.</p>
+      <p>Les 9 nouvelles features sont discriminantes selon la littérature : un package de 3 jours avec 0 downloads et 0 tests a un profil très différent d'un package de 5 ans avec 100K downloads/semaine et un répertoire <code>test/</code>.</p>
 
       <h2>Les 4 guard rails</h2>
 
-      <p>Le ML ne decide jamais seul. 4 garde-fous empechent toute regression :</p>
+      <p>Le ML ne décide jamais seul. 4 garde-fous empêchent toute régression :</p>
 
       <ol>
-        <li><strong>Score &lt; 20</strong> &rarr; clean sans ML. Pas besoin du modele pour les packages deja sous le seuil.</li>
-        <li><strong>Score &ge; 35</strong> &rarr; bypass. Le ML ne touche pas aux T2+, les regles decident.</li>
-        <li><strong>Type haute confiance</strong> &rarr; bypass. Un IOC match, un reverse shell, un binary dropper ne seront <strong>jamais</strong> filtres par le ML, meme si le score est 22.</li>
-        <li><strong>Modele absent</strong> &rarr; bypass. Si le fichier <code>model-trees.js</code> est le stub <code>null</code>, tout passe comme avant. Zero regression possible.</li>
+        <li><strong>Score &lt; 20</strong> &rarr; clean sans ML. Pas besoin du modèle pour les packages déjà sous le seuil.</li>
+        <li><strong>Score &ge; 35</strong> &rarr; bypass. Le ML ne touche pas aux T2+, les règles décident.</li>
+        <li><strong>Type haute confiance</strong> &rarr; bypass. Un IOC match, un reverse shell, un binary dropper ne seront <strong>jamais</strong> filtrés par le ML, même si le score est 22.</li>
+        <li><strong>Modèle absent</strong> &rarr; bypass. Si le fichier <code>model-trees.js</code> est le stub <code>null</code>, tout passe comme avant. Zéro régression possible.</li>
       </ol>
 
-      <p>L'ordre est important : le check haute confiance est fait <strong>avant</strong> le chargement du modele. Meme si le modele est corrompu, les types critiques ne sont jamais supprimes.</p>
+      <p>L'ordre est important : le check haute confiance est fait <strong>avant</strong> le chargement du modèle. Même si le modèle est corrompu, les types critiques ne sont jamais supprimés.</p>
 
       <h2>XGBoost en JavaScript pur</h2>
 
-      <p>XGBoost produit un ensemble d'arbres de decision. Chaque arbre est un tableau de noeuds :</p>
+      <p>XGBoost produit un ensemble d'arbres de décision. Chaque arbre est un tableau de noeuds :</p>
 
       <pre><code class="language-javascript">// Un noeud : f=feature index, t=seuil, y=fils gauche, n=fils droit, v=valeur feuille
 { f: 0, t: 25.0, y: 1, n: 2, v: 0 }   // si feature[0] < 25 → gauche
 { f: -1, t: 0, y: 0, n: 0, v: 0.8 }    // feuille (f=-1)
 </code></pre>
 
-      <p>La prediction traverse tous les arbres, somme les marges, et passe par une sigmoide :</p>
+      <p>La prédiction traverse tous les arbres, somme les marges, et passe par une sigmoïde :</p>
 
       <pre><code class="language-javascript">function predict(featureValues) {
   let margin = 0;
   for (const tree of model.trees) {
     margin += traverseTree(tree, featureValues);
   }
-  return sigmoid(margin); // → probabilite [0, 1]
+  return sigmoid(margin); // → probabilité [0, 1]
 }
 </code></pre>
 
-      <p>Zero dependance externe. Le module genere par <code>tools/export-model-js.py</code> est un fichier JS statique avec les donnees des arbres. Environ 50-100 KB pour 200 arbres.</p>
+      <p>Zéro dépendance externe. Le module généré par <code>tools/export-model-js.py</code> est un fichier JS statique avec les données des arbres. Environ 50-100 KB pour 200 arbres.</p>
 
-      <h2>Le pipeline d'entrainement</h2>
+      <h2>Le pipeline d'entraînement</h2>
 
-      <p>L'entrainement est offline en Python (<code>tools/train-classifier.py</code>) :</p>
+      <p>L'entraînement est offline en Python (<code>tools/train-classifier.py</code>) :</p>
 
       <ol>
-        <li>Charge les JSONL du moniteur. Positifs = packages <code>confirmed</code> (malware verifie). Negatifs = packages <code>clean</code> (0 findings).</li>
-        <li>Exclut les labels <code>suspect</code> (non verifie) et <code>fp</code> (auto-labele, biaise).</li>
-        <li>Selection SHAP des top 30-40 features les plus discriminantes.</li>
-        <li>5-fold CV stratifiee, optimise precision avec recall &ge; 93.9% (= TPR ground truth).</li>
+        <li>Charge les JSONL du moniteur. Positifs = packages <code>confirmed</code> (malware vérifié). Négatifs = packages <code>clean</code> (0 findings).</li>
+        <li>Exclut les labels <code>suspect</code> (non vérifié) et <code>fp</code> (auto-labélé, biaisé).</li>
+        <li>Sélection SHAP des top 30-40 features les plus discriminantes.</li>
+        <li>5-fold CV stratifiée, optimise précision avec recall &ge; 93.9% (= TPR ground truth).</li>
         <li>Export JSON &rarr; conversion JS via <code>export-model-js.py</code>.</li>
       </ol>
 
-      <p>La contrainte de recall est dure : on ne veut jamais que le ML supprime un vrai malware. C'est le guard rail #3 (HC types) + la validation <code>evaluateMLClassifier()</code> qui garantit 0 ground-truth supprime et 0 adversarial supprime.</p>
+      <p>La contrainte de recall est dure : on ne veut jamais que le ML supprime un vrai malware. C'est le guard rail #3 (HC types) + la validation <code>evaluateMLClassifier()</code> qui garantit 0 ground-truth supprimé et 0 adversarial supprimé.</p>
 
       <h2>Optimisation HTTP : 1 appel au lieu de 2</h2>
 
-      <p>Avant v2.10, chaque package suspect declenchait 2 appels a <code>registry.npmjs.org</code> : un dans <code>recordTrainingSample()</code> (features ML), un dans le reputation scoring (webhook decision). Maintenant, un seul appel <code>getPackageMetadata()</code> est fait apres le scan, et le resultat est reutilise pour les deux. Sur 1400 suspects/jour, ca economise 1400 requetes HTTP.</p>
+      <p>Avant v2.10, chaque package suspect déclenchait 2 appels à <code>registry.npmjs.org</code> : un dans <code>recordTrainingSample()</code> (features ML), un dans le reputation scoring (webhook décision). Maintenant, un seul appel <code>getPackageMetadata()</code> est fait après le scan, et le résultat est réutilisé pour les deux. Sur 1400 suspects/jour, ça économise 1400 requêtes HTTP.</p>
 
       <h2>Et maintenant ?</h2>
 
-      <p>Le classifier est pret mais en mode stub. Le VPS collecte maintenant les 71 features enrichies. Le plan :</p>
+      <p>Le classifier est prêt mais en mode stub. Le VPS collecte maintenant les 71 features enrichies. Le plan :</p>
 
       <ol>
-        <li><strong>Semaine 1</strong> : Collecte des features enrichies (deploy immediat)</li>
-        <li><strong>Semaine 2</strong> : Entrainement du modele sur les donnees collectees</li>
-        <li><strong>Semaine 3</strong> : Shadow mode - le ML log ses predictions mais ne filtre pas</li>
-        <li><strong>Semaine 4</strong> : Activation du filtrage ML apres validation shadow</li>
+        <li><strong>Semaine 1</strong> : Collecte des features enrichies (deploy immédiat)</li>
+        <li><strong>Semaine 2</strong> : Entraînement du modèle sur les données collectées</li>
+        <li><strong>Semaine 3</strong> : Shadow mode - le ML log ses prédictions mais ne filtre pas</li>
+        <li><strong>Semaine 4</strong> : Activation du filtrage ML après validation shadow</li>
       </ol>
 
-      <p>Objectif : precision T1 &ge; 95%, soit une reduction de ~70% du bruit webhook. Avec zero regression sur le TPR et l'ADR.</p>
+      <p>Objectif : précision T1 &ge; 95%, soit une réduction de ~70% du bruit webhook. Avec zéro régression sur le TPR et l'ADR.</p>
 
-      <p>Les heuristiques ne meurent pas. Elles deviennent les features du modele.</p>
+      <p>Les heuristiques ne meurent pas. Elles deviennent les features du modèle.</p>
 
     </div>
   </article>

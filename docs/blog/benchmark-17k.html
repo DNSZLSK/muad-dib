@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>92.5% de detection sur 17 000 malwares reels - MUAD'DIB</title>
-  <meta name="description" content="Benchmark sur le dataset Datadog : 14 587 packages in-scope, 13 486 detectes, 9 heures de scan.">
+  <title>92.5% de détection sur 17 000 malwares réels - MUAD'DIB</title>
+  <meta name="description" content="Benchmark sur le dataset Datadog : 14 587 packages in-scope, 13 486 détectés, 9 heures de scan.">
   <link rel="stylesheet" href="../style.css">
   <link rel="stylesheet" href="../vendor/github-dark.min.css">
   <script src="../vendor/highlight.min.js"></script>
@@ -25,24 +25,24 @@
 
   <article>
     <div class="article-meta">
-      <h1>92.5% de detection sur 17 000 malwares reels</h1>
+      <h1>92.5% de détection sur 17 000 malwares réels</h1>
       <span class="date">2026-03-14</span>
       <div class="tags">
         <span class="tag">benchmark</span>
         <span class="tag">datadog</span>
-        <span class="tag">metriques</span>
+        <span class="tag">métriques</span>
       </div>
     </div>
 
     <div class="article-content">
 
-      <p>Nos metriques internes (TPR sur 49 samples, ADR sur 107 adversariaux) mesurent la precision sur des echantillons choisis. Mais la vraie question est : <strong>que se passe-t-il sur 17 000 malwares reels, en conditions sauvages ?</strong></p>
+      <p>Nos métriques internes (TPR sur 49 samples, ADR sur 107 adversariaux) mesurent la précision sur des échantillons choisis. Mais la vraie question est : <strong>que se passe-t-il sur 17 000 malwares réels, en conditions sauvages ?</strong></p>
 
-      <p>Le dataset Datadog Security Labs contient 17 922 packages npm confirmes malveillants. On les a tous scannes.</p>
+      <p>Le dataset Datadog Security Labs contient 17 922 packages npm confirmés malveillants. On les a tous scannés.</p>
 
       <h2>Le setup</h2>
 
-      <p>Execution sur VPS. 17 922 packages, chacun telecharge, extrait, et scanne avec les 14 scanners. Temps total : <strong>32 141 secondes (~9 heures)</strong>. Zero erreur.</p>
+      <p>Exécution sur VPS. 17 922 packages, chacun téléchargé, extrait, et scanné avec les 14 scanners. Temps total : <strong>32 141 secondes (~9 heures)</strong>. Zéro erreur.</p>
 
       <p>Sur les 17 922 packages :</p>
       <ul>
@@ -50,47 +50,47 @@
         <li><strong>14 587 in-scope</strong> - packages avec du code JavaScript analysable</li>
       </ul>
 
-      <h2>Les resultats</h2>
+      <h2>Les résultats</h2>
 
       <table>
-        <tr><th>Metrique</th><th>Valeur</th></tr>
+        <tr><th>Métrique</th><th>Valeur</th></tr>
         <tr><td>Wild TPR global</td><td><strong>92.5%</strong> (13 486 / 14 587)</td></tr>
         <tr><td>compromised_lib</td><td><strong>97.8%</strong> (904 / 924)</td></tr>
         <tr><td>malicious_intent</td><td><strong>92.1%</strong> (12 582 / 13 663)</td></tr>
         <tr><td>Erreurs</td><td>0</td></tr>
       </table>
 
-      <p>La distinction <code>compromised_lib</code> vs <code>malicious_intent</code> est importante. Les <code>compromised_lib</code> sont des packages legitimes dont une version specifique a ete compromisee (pattern ua-parser-js, event-stream). Les <code>malicious_intent</code> sont des packages crees avec l'intention de nuire (typosquats, droppers, exfiltrators). MUAD'DIB detecte mieux les compromissions (97.8%) car elles laissent plus de traces dans le diff entre versions.</p>
+      <p>La distinction <code>compromised_lib</code> vs <code>malicious_intent</code> est importante. Les <code>compromised_lib</code> sont des packages légitimes dont une version spécifique a été compromise (pattern ua-parser-js, event-stream). Les <code>malicious_intent</code> sont des packages créés avec l'intention de nuire (typosquats, droppers, exfiltrators). MUAD'DIB détecte mieux les compromissions (97.8%) car elles laissent plus de traces dans le diff entre versions.</p>
 
       <h2>Distribution des scores</h2>
 
       <table>
-        <tr><th>Score</th><th>Packages</th><th>Interpretation</th></tr>
-        <tr><td>0</td><td>1 101</td><td>Non detectes (aucune menace trouvee)</td></tr>
+        <tr><th>Score</th><th>Packages</th><th>Interprétation</th></tr>
+        <tr><td>0</td><td>1 101</td><td>Non détectés (aucune menace trouvée)</td></tr>
         <tr><td>1-9</td><td>2 488</td><td>Signaux faibles, sous le seuil</td></tr>
         <tr><td>10-24</td><td>2 125</td><td>Zone grise (seuil standard = 20)</td></tr>
-        <tr><td>25-49</td><td>4 900</td><td>Detectes avec confiance moderee</td></tr>
-        <tr><td>50-74</td><td>1 527</td><td>Detectes avec haute confiance</td></tr>
-        <tr><td>75-100</td><td>2 446</td><td>Detectes avec tres haute confiance</td></tr>
+        <tr><td>25-49</td><td>4 900</td><td>Détectés avec confiance modérée</td></tr>
+        <tr><td>50-74</td><td>1 527</td><td>Détectés avec haute confiance</td></tr>
+        <tr><td>75-100</td><td>2 446</td><td>Détectés avec très haute confiance</td></tr>
       </table>
 
-      <p>La majorite des detections (8 873 packages, 61%) ont un score >= 25. Ce n'est pas du scoring marginal - ce sont des detections claires.</p>
+      <p>La majorité des détections (8 873 packages, 61%) ont un score >= 25. Ce n'est pas du scoring marginal - ce sont des détections claires.</p>
 
       <h2>Les MISS : qu'est-ce qu'on rate ?</h2>
 
       <p>1 101 packages avec score 0 et 0 menaces. Analyse des causes :</p>
 
       <ul>
-        <li><strong><code>@react-native-aria/*</code></strong> - Packages marques <code>compromised_lib</code> dans le dataset Datadog, mais sans code JS malveillant detectable statiquement. La compromission est au niveau du registre/maintainer, pas du code source.</li>
-        <li><strong><code>xrpl</code></strong> - Bibliotheque crypto legitime dont des versions specifiques ont ete compromisees. Le code malveillant a ete injecte via un processus de build, pas directement dans les sources.</li>
-        <li><strong>Packages sans code</strong> - Certains packages ne contiennent que des fichiers de configuration ou des assets. Aucun code a analyser = aucune detection possible.</li>
+        <li><strong><code>@react-native-aria/*</code></strong> - Packages marqués <code>compromised_lib</code> dans le dataset Datadog, mais sans code JS malveillant détectable statiquement. La compromission est au niveau du registre/maintainer, pas du code source.</li>
+        <li><strong><code>xrpl</code></strong> - Bibliothèque crypto légitime dont des versions spécifiques ont été compromises. Le code malveillant a été injecté via un processus de build, pas directement dans les sources.</li>
+        <li><strong>Packages sans code</strong> - Certains packages ne contiennent que des fichiers de configuration ou des assets. Aucun code à analyser = aucune détection possible.</li>
       </ul>
 
-      <p>Ces MISS sont coherents avec les limites connues de l'analyse statique : si le code malveillant n'est pas dans les sources scannees (build-time injection, registre compromis, binaires pre-compiles), un scanner statique ne peut pas le detecter.</p>
+      <p>Ces MISS sont cohérents avec les limites connues de l'analyse statique : si le code malveillant n'est pas dans les sources scannées (build-time injection, registre compromis, binaires pré-compilés), un scanner statique ne peut pas le détecter.</p>
 
-      <h2>Le role des compound rules</h2>
+      <h2>Le rôle des compound rules</h2>
 
-      <p>Avant les compound rules (v2.9.2), le Wild TPR estime etait autour de ~88%. Le gap de ~4.5% a ete comble par 6 regles de scoring compose :</p>
+      <p>Avant les compound rules (v2.9.2), le Wild TPR estimé était autour de ~88%. Le gap de ~4.5% a été comblé par 6 règles de scoring composé :</p>
 
       <table>
         <tr><th>Compound</th><th>Composants</th></tr>
@@ -100,24 +100,24 @@
         <tr><td>lifecycle_remote_require</td><td>lifecycle_script + network_require</td></tr>
       </table>
 
-      <p>Ces combinaisons n'apparaissent <strong>jamais</strong> dans les 529 packages benins du dataset de reference. Un package avec un script lifecycle ET un nom typosquat est toujours malveillant. Un script lifecycle qui fait <code>require('https')</code> aussi.</p>
+      <p>Ces combinaisons n'apparaissent <strong>jamais</strong> dans les 529 packages bénins du dataset de référence. Un package avec un script lifecycle ET un nom typosquat est toujours malveillant. Un script lifecycle qui fait <code>require('https')</code> aussi.</p>
 
-      <h2>Comparaison avec les metriques internes</h2>
+      <h2>Comparaison avec les métriques internes</h2>
 
       <table>
-        <tr><th>Metrique</th><th>Interne</th><th>Wild (Datadog)</th></tr>
+        <tr><th>Métrique</th><th>Interne</th><th>Wild (Datadog)</th></tr>
         <tr><td>TPR</td><td>93.9% (46/49)</td><td>92.5% (13 486/14 587)</td></tr>
         <tr><td>ADR</td><td>96.3% (103/107)</td><td>-</td></tr>
         <tr><td>compromised_lib</td><td>-</td><td>97.8%</td></tr>
       </table>
 
-      <p>Les metriques internes et sauvages convergent (~93% vs ~92.5%). C'est un bon signe : le ground truth de 49 samples et les 107 adversariaux ne sont pas sur-ajustes. La performance generalise au-dela du dataset de developpement.</p>
+      <p>Les métriques internes et sauvages convergent (~93% vs ~92.5%). C'est un bon signe : le ground truth de 49 samples et les 107 adversariaux ne sont pas sur-ajustés. La performance généralise au-delà du dataset de développement.</p>
 
-      <h2>Lecon</h2>
+      <h2>Leçon</h2>
 
-      <p>Un benchmark sur 17K packages reels ne ment pas. Les metriques internes sur 49+107 echantillons etaient honnetes - la performance sauvage le confirme. Mais le benchmark revele aussi les limites structurelles de l'analyse statique : les compromissions build-time, les injections registre, et les binaires pre-compiles restent hors de portee.</p>
+      <p>Un benchmark sur 17K packages réels ne ment pas. Les métriques internes sur 49+107 échantillons étaient honnêtes - la performance sauvage le confirme. Mais le benchmark révèle aussi les limites structurelles de l'analyse statique : les compromissions build-time, les injections registre, et les binaires pré-compilés restent hors de portée.</p>
 
-      <p>92.5% n'est pas 100%. Les 7.5% restants sont un rappel que la detection statique est une couche de defense, pas la seule.</p>
+      <p>92.5% n'est pas 100%. Les 7.5% restants sont un rappel que la détection statique est une couche de défense, pas la seule.</p>
 
     </div>
   </article>
