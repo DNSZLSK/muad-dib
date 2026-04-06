@@ -10,11 +10,15 @@
  *
  * Usage:
  *   node scripts/ossf-benchmark.js [--sample N] [--seed N] [--refresh]
+ *   node scripts/ossf-benchmark.js --prefetch [--concurrency N]
  *
  * Options:
- *   --sample N   Number of packages to sample (default: 500)
- *   --seed N     Random seed for reproducibility (default: 42)
- *   --refresh    Force re-download of cached tarballs
+ *   --sample N       Number of packages to sample (default: 5000)
+ *   --seed N         Random seed for reproducibility (default: 42)
+ *   --refresh        Force re-download of cached tarballs
+ *   --prefetch       Download-only mode: cache tarballs for ALL entries, no scan.
+ *                    Run daily to capture packages before npm unpublishes them.
+ *   --concurrency N  Concurrent downloads in prefetch mode (default: 5)
  *
  * Output:
  *   datasets/real-world/ossf-benchmark-results.json
@@ -36,6 +40,8 @@ const SAFE_PKG_RE = /^(@[\w._-]+\/)?[\w._-]+$/;
 const SAMPLE_SIZE = parseInt(process.argv.find((a, i) => process.argv[i - 1] === '--sample') || '5000', 10);
 const SEED = parseInt(process.argv.find((a, i) => process.argv[i - 1] === '--seed') || '42', 10);
 const REFRESH = process.argv.includes('--refresh');
+const PREFETCH_MODE = process.argv.includes('--prefetch');
+const PREFETCH_CONCURRENCY = parseInt(process.argv.find((a, i) => process.argv[i - 1] === '--concurrency') || '5', 10);
 
 // --- Seeded PRNG (Mulberry32) ---
 function mulberry32(seed) {
@@ -513,17 +519,114 @@ function saveResults(sample, index, stats) {
   return results;
 }
 
+// --- Prefetch mode: download tarballs for ALL entries, no scan ---
+// Captures packages before npm unpublishes them (~hours after OSSF report).
+// Skips already-cached packages. No sampling, no availability check, no scan.
+// Run daily: node scripts/ossf-benchmark.js --prefetch
+async function prefetchTarballs(index) {
+  console.log('\n[PREFETCH] Downloading tarballs for ' + index.length + ' entries (concurrency: ' + PREFETCH_CONCURRENCY + ')...');
+
+  fs.mkdirSync(CACHE_DIR, { recursive: true });
+
+  // Filter to entries with valid name+version that aren't already cached
+  const eligible = index.filter(function(entry) {
+    if (!entry.name || !entry.version || entry.version === '*') return false;
+    if (!SAFE_PKG_RE.test(entry.name)) return false;
+    const cacheName = pkgToCacheName(entry.name, entry.version);
+    const pkgDir = path.join(CACHE_DIR, cacheName, 'package');
+    if (!REFRESH && fs.existsSync(pkgDir)) return false; // already cached
+    return true;
+  });
+
+  const alreadyCached = index.length - eligible.length;
+  console.log('  Already cached: ' + alreadyCached + ', To fetch: ' + eligible.length);
+
+  let fetched = 0;
+  let failed = 0;
+  let i = 0;
+
+  // Process in batches of PREFETCH_CONCURRENCY
+  while (i < eligible.length) {
+    const batch = eligible.slice(i, i + PREFETCH_CONCURRENCY);
+    const promises = batch.map(function(entry) {
+      return new Promise(function(resolve) {
+        const cacheName = pkgToCacheName(entry.name, entry.version);
+        const pkgCacheDir = path.join(CACHE_DIR, cacheName);
+        fs.mkdirSync(pkgCacheDir, { recursive: true });
+        try {
+          const output = execSync('npm pack ' + entry.name + '@' + entry.version, {
+            cwd: pkgCacheDir,
+            encoding: 'utf8',
+            timeout: PACK_TIMEOUT_MS,
+            stdio: ['pipe', 'pipe', 'pipe']
+          });
+          const tgzFilename = output.trim().split(/\r?\n/).pop().trim();
+          const tgzPath = path.join(pkgCacheDir, tgzFilename);
+          if (fs.existsSync(tgzPath)) {
+            extractTgz(tgzPath, pkgCacheDir);
+            try { fs.unlinkSync(tgzPath); } catch { /* ignore */ }
+            if (fs.existsSync(path.join(pkgCacheDir, 'package'))) {
+              fetched++;
+              resolve('ok');
+              return;
+            }
+          }
+          fs.rmSync(pkgCacheDir, { recursive: true, force: true });
+          failed++;
+          resolve('fail');
+        } catch {
+          fs.rmSync(pkgCacheDir, { recursive: true, force: true });
+          failed++;
+          resolve('fail');
+        }
+      });
+    });
+
+    await Promise.all(promises);
+    i += batch.length;
+
+    if (process.stdout.isTTY) {
+      process.stdout.write('\r  Progress: ' + i + '/' + eligible.length +
+        '  fetched=' + fetched + '  failed=' + failed + '          ');
+    }
+  }
+
+  if (process.stdout.isTTY) process.stdout.write('\n');
+  console.log('  Done. Fetched: ' + fetched + ', Failed (unavailable): ' + failed +
+    ', Already cached: ' + alreadyCached + ', Total cached: ' + (alreadyCached + fetched));
+  return { fetched, failed, alreadyCached };
+}
+
 // --- Main ---
 async function main() {
   const startTime = Date.now();
 
   console.log('='.repeat(60));
-  console.log('  MUAD\'DIB OpenSSF Benchmark');
-  console.log('  Sample: ' + SAMPLE_SIZE + ', Seed: ' + SEED);
+  console.log('  MUAD\'DIB OpenSSF Benchmark' + (PREFETCH_MODE ? ' (PREFETCH)' : ''));
+  if (!PREFETCH_MODE) console.log('  Sample: ' + SAMPLE_SIZE + ', Seed: ' + SEED);
   console.log('='.repeat(60));
 
   // 1. Fetch full OSV npm index
   const index = await fetchOSSFIndex();
+
+  // --- Prefetch mode: just download tarballs, no scan ---
+  if (PREFETCH_MODE) {
+    const stats = await prefetchTarballs(index);
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+    console.log('\n' + '='.repeat(60));
+    console.log('  PREFETCH COMPLETE');
+    console.log('='.repeat(60));
+    console.log('  OSV index size:    ' + index.length);
+    console.log('  Already cached:    ' + stats.alreadyCached);
+    console.log('  Newly fetched:     ' + stats.fetched);
+    console.log('  Unavailable:       ' + stats.failed);
+    console.log('  Total cached:      ' + (stats.alreadyCached + stats.fetched));
+    console.log('  Elapsed:           ' + elapsed + 's');
+    console.log('='.repeat(60) + '\n');
+    return;
+  }
+
+  // --- Normal mode: sample, check, scan, report ---
 
   // 2. Stratified sample
   const sample = stratifySample(index, SAMPLE_SIZE, SEED);
