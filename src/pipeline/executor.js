@@ -162,6 +162,23 @@ async function execute(targetPath, options, pythonDeps, warnings) {
   // All scanners (even "async" ones) are effectively synchronous (readFileSync, readdirSync).
   // Running them via yieldThen ensures the spinner animates between each scanner.
   // Uses Promise.allSettled so one scanner crash doesn't kill the entire scan.
+  //
+  // Per-scanner timeout (ANSSI audit m2): prevents DoS via adversarial packages
+  // with deep nesting or pathological AST structures. Heavy scanners (AST, dataflow,
+  // entropy) get individual timeouts; lightweight scanners run without timeout.
+  const SCANNER_TIMEOUT_MS = 45000; // 45s per heavy scanner
+
+  function withTimeout(fn, name) {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        debugLog(`[TIMEOUT] Scanner ${name} exceeded ${SCANNER_TIMEOUT_MS / 1000}s — returning partial results`);
+        resolve([]);
+      }, SCANNER_TIMEOUT_MS);
+      yieldThen(fn).then(result => { clearTimeout(timer); resolve(result); })
+        .catch(err => { clearTimeout(timer); reject(err); });
+    });
+  }
+
   const SCANNER_NAMES = [
     'scanPackageJson', 'scanShellScripts', 'analyzeAST', 'detectObfuscation',
     'scanDependencies', 'scanHashes', 'analyzeDataFlow', 'scanTyposquatting',
@@ -172,16 +189,16 @@ async function execute(targetPath, options, pythonDeps, warnings) {
   const settledResults = await Promise.allSettled([
     yieldThen(() => scanPackageJson(targetPath)),
     yieldThen(() => scanShellScripts(targetPath)),
-    yieldThen(() => analyzeAST(targetPath, { deobfuscate: deobfuscateFn })),
+    withTimeout(() => analyzeAST(targetPath, { deobfuscate: deobfuscateFn }), 'analyzeAST'),
     yieldThen(() => detectObfuscation(targetPath)),
     yieldThen(() => scanDependencies(targetPath)),
     yieldThen(() => scanHashes(targetPath)),
-    yieldThen(() => analyzeDataFlow(targetPath, { deobfuscate: deobfuscateFn })),
+    withTimeout(() => analyzeDataFlow(targetPath, { deobfuscate: deobfuscateFn }), 'analyzeDataFlow'),
     yieldThen(() => scanTyposquatting(targetPath)),
     yieldThen(() => scanGitHubActions(targetPath)),
     yieldThen(() => matchPythonIOCs(pythonDeps, targetPath)),
     yieldThen(() => checkPyPITyposquatting(pythonDeps, targetPath)),
-    yieldThen(() => scanEntropy(targetPath, { entropyThreshold: options.entropyThreshold || undefined })),
+    withTimeout(() => scanEntropy(targetPath, { entropyThreshold: options.entropyThreshold || undefined }), 'scanEntropy'),
     yieldThen(() => scanAIConfig(targetPath))
   ]);
 

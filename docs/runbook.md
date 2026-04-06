@@ -144,3 +144,65 @@ ls -lh /opt/muaddib/data/ml-training.jsonl
 # Redemarrer le monitor (libere les caches in-memory)
 sudo systemctl restart muaddib-monitor
 ```
+
+## 7. PLAN DR MINIMAL (ANSSI audit m10)
+
+### Architecture actuelle
+
+- **SPOF** : VPS OVH unique (6 vCores, 12 GB RAM), processus Node.js unique
+- **Attenuation** : `systemd restart=always` (RestartSec=10), healthcheck externe (hc-ping.com)
+- **Backup** : `scripts/backup.sh` (cron quotidien, data/ + config, local uniquement)
+
+### RTO / RPO cibles
+
+| Scenario | RTO (temps indispo max) | RPO (perte donnees max) |
+|----------|------------------------|------------------------|
+| Process crash | ~10s (systemd restart) | 0 (queue persistee toutes les 60s) |
+| VPS reboot | ~2min (boot + service start) | ~60s de queue non persistee |
+| VPS perte totale | ~1h (redeploy sur nouveau VPS) | ~24h (dernier backup) |
+| Region OVH down | ~2h (deploy autre DC) | ~24h |
+
+### Procedures
+
+**Backup quotidien (deja en place) :**
+```bash
+# Cron existant — verifie avec : crontab -l
+0 3 * * * /opt/muaddib/scripts/backup.sh
+```
+
+**Backup off-site (recommande, pas encore en place) :**
+```bash
+# Ajouter au cron : copie du backup vers un stockage externe
+0 4 * * * rsync /opt/muaddib/backups/latest.tar.gz user@backup-host:/backups/muaddib/
+```
+
+**Redeploy sur nouveau VPS :**
+```bash
+# 1. Provisionner un nouveau VPS OVH (meme spec ou superieur)
+# 2. Cloner le repo
+git clone https://github.com/DNSZLSK/muad-dib /opt/muaddib
+cd /opt/muaddib && npm install
+# 3. Restaurer les donnees depuis backup
+scp user@backup-host:/backups/muaddib/latest.tar.gz /tmp/
+tar xzf /tmp/latest.tar.gz -C /opt/muaddib/
+# 4. Copier la config
+cp /chemin/vers/.env /opt/muaddib/.env
+# 5. Installer les services systemd
+bash deploy/setup.sh
+# 6. Verifier
+sudo systemctl status muaddib-monitor
+curl -s localhost:3000/health  # si serve actif
+```
+
+### Limites connues
+
+- **Pas de HA** : un seul processus = fenetre d'indisponibilite pendant les redemarrages
+- **Pas de replication** : les detections pendant l'indisponibilite sont perdues (npm changes stream avance)
+- **Backup local uniquement** : si le VPS est compromis, le backup l'est aussi
+- **Solo operator** : le bus factor est 1 — documenter suffisamment pour qu'un tiers puisse reprendre
+
+### Ameliorations futures (hors scope solo-dev)
+
+- Backup off-site automatise (S3, Backblaze B2)
+- Second VPS en standby froid (scripts de failover)
+- Queue externe (Redis) pour persistence inter-instances

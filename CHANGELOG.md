@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **ANSSI audit remediation (v3)**: 10 findings addressed (3 CRITICAL, 7 MAJOR, 10 MINOR)
+  - C1: Resolved merge conflict in package.json (v2.10.60)
+  - C2: Added `clearASTCache()` to `resetAll()` in scan-context.js (cross-scan state leak)
+  - C3: Added `dependency_ioc_match` to `IOC_TYPES` in evaluate.js (iocBased classification bug)
+  - M1/M2: Updated CLAUDE.md and README.md with v2.10.57 metrics (dual TPR@3/TPR@20)
+  - M3: Extended evaluate cache fingerprint to include IOC/GT/benign data files
+  - M4: Set `has_ioc_match=0` in ML feature extractor (circular IOC leakage prevention)
+  - M5: Added temporal guard (30-day max age) to auto-labeler npm takedown confirmation
+  - M6: Documented bundler model threshold=0.1 as intentionally conservative
+  - M7: Added holdout sealing procedure to EVALUATION_METHODOLOGY.md
+  - m1: Annotated catch blocks in llm-detective.js
+  - m2: Added per-scanner timeout (45s) for AST, dataflow, entropy in executor.js
+  - m3: Added architecture comment to handle-call-expression.js (95 patterns, 7 categories)
+  - m4: Replaced AWS doc example canary tokens with project-specific values
+  - m5: Lowered sandbox timer detection threshold from 1h to 15min
+  - m6: Added gVisor kernel version spoofing in preload.js (os.release + /proc/sys/kernel/osrelease)
+  - m7: Added WebAssembly.compile/instantiate logging in sandbox preload.js
+  - m8: Documented rule ID gaps (see below)
+
+### Notes
+- **Rule ID gaps** (ANSSI audit m8): MUADDIB-SHELL-022 and MUADDIB-COMPOUND-003 are
+  unassigned IDs (reserved but never used), not deleted rules. MUADDIB-ENTROPY-002
+  was removed in v2.5.14 (file-level entropy scan, documented in that version's changelog).
+  These gaps are intentional — rule IDs are stable identifiers and are never reassigned.
+
 ## [2.10.43] - 2026-03-31
 
 ### Added

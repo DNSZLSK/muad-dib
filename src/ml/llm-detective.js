@@ -194,7 +194,7 @@ function collectSourceContext(extractedDir, scanResult) {
         const bins = typeof pkgJson.bin === 'string' ? [pkgJson.bin] : Object.values(pkgJson.bin || {});
         for (const b of bins) if (b) priorityRelPaths.add(b);
       }
-    } catch {}
+    } catch { /* package.json may not exist or be invalid — optional for context building */ }
 
     priorityRelPaths.add('README.md');
     priorityRelPaths.add('readme.md');
@@ -209,7 +209,7 @@ function collectSourceContext(extractedDir, scanResult) {
         const content = fs.readFileSync(absPath, 'utf8');
         totalBytes += Buffer.byteLength(content, 'utf8');
         fileEntries.push({ path: relPath.replace(/\\/g, '/'), content });
-      } catch {}
+      } catch { /* skip unreadable/binary priority files — non-fatal for context */ }
     }
   }
 

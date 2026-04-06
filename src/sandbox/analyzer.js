@@ -13,8 +13,11 @@
  *   7. sandbox_native_addon_load      — native .node addon loaded (MEDIUM, +15)
  */
 
-const ONE_HOUR_MS = 3600000;
-const TWENTY_FOUR_HOURS_MS = 24 * ONE_HOUR_MS;
+// ANSSI audit m5: lowered suspicious threshold from 1h to 15min.
+// Real time-bombs often use 5-30min delays. 15min balances detection vs FP
+// (legitimate polling/refresh timers rarely exceed 10min).
+const FIFTEEN_MINUTES_MS = 900000;
+const TWENTY_FOUR_HOURS_MS = 24 * 3600000;
 
 /**
  * Parse [PRELOAD] log content and produce scored findings.
@@ -100,14 +103,14 @@ function analyzePreloadLog(logContent) {
           evidence: line.trim()
         });
       }
-    } else if (delay > ONE_HOUR_MS) {
+    } else if (delay > FIFTEEN_MINUTES_MS) {
       if (!hasSuspiciousTimer && !hasCriticalTimer) {
         hasSuspiciousTimer = true;
         score += 15;
         findings.push({
           type: 'sandbox_timer_delay_suspicious',
           severity: 'MEDIUM',
-          detail: `Timer delay > 1h detected: ${delay}ms (${(delay / 3600000).toFixed(1)}h) — possible time-bomb`,
+          detail: `Timer delay > 15min detected: ${delay}ms (${(delay / 60000).toFixed(0)}min) — possible time-bomb`,
           evidence: line.trim()
         });
       }

@@ -15,7 +15,7 @@
 
 const { setExtraExcludes, clearFileListCache } = require('./utils.js');
 const { resetConfigOverrides } = require('./scoring.js');
-const { resetMaxFileSize } = require('./shared/constants.js');
+const { resetMaxFileSize, clearASTCache } = require('./shared/constants.js');
 
 /**
  * Reset all per-scan mutable state.
@@ -26,6 +26,7 @@ function resetAll() {
   clearFileListCache();
   resetConfigOverrides();
   resetMaxFileSize();
+  clearASTCache();
 }
 
 module.exports = { resetAll };

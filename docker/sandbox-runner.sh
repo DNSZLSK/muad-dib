@@ -210,12 +210,13 @@ case $CI_PROFILE in
 esac
 
 # ── 2c. Canary tokens (honeypots) ──
-# Use Docker-injected dynamic tokens if available, otherwise static fallbacks.
+# Dynamic tokens are injected by sandbox/index.js via Docker -e flags.
+# Static fallbacks below are project-specific (NOT AWS doc examples — ANSSI audit m4).
 # If exfiltrated via network/DNS/files, sandbox.js detects the theft.
-export GITHUB_TOKEN="${GITHUB_TOKEN:-ghp_R8kLmN2pQ4vW7xY9aB3cD5eF6gH8jK0mN2pQ4vW}"
-export NPM_TOKEN="${NPM_TOKEN:-npm_a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8}"
-export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-AKIAIOSFODNN7EXAMPLE}"
-export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY}"
+export GITHUB_TOKEN="${GITHUB_TOKEN:-ghp_mD9kX3pL7vR1wN5qT8yB2cF4hJ6sA0eU3iO9gK}"
+export NPM_TOKEN="${NPM_TOKEN:-npm_7f3e8a2d1b9c4f6e0d5a7b3c8f1e2d4a9b6c0d5e}"
+export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-AKIAMDB7X9R2K4P1N5Q3}"
+export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-mDb8xR3kP7vN2qT5yW1cF9hJ4sA6eU0iO3gK7nL}"
 export SLACK_WEBHOOK_URL="${SLACK_WEBHOOK_URL:-https://hooks.example.com/services/TCANARY/BCANARY/canary-slack-token}"
 export DISCORD_WEBHOOK_URL="${DISCORD_WEBHOOK_URL:-https://discord.com/api/webhooks/000000000000000000/abcdefghijklmnopqrstuvwxyz}"
 

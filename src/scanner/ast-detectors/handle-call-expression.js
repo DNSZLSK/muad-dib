@@ -1,5 +1,26 @@
 'use strict';
 
+/**
+ * AST CallExpression handler — the largest single detection module.
+ *
+ * Architecture note (ANSSI audit m3):
+ * This file detects ~95 distinct threat patterns across 7 categories:
+ *   1. Dynamic require/import (lines ~36-163)   — 8 patterns
+ *   2. Process.mainModule bypasses (~166-215)    — 2 patterns
+ *   3. Shell execution variants (~217-404)       — 8+ patterns (exec, spawn, npm worm, token steal)
+ *   4. File write interception (~449-700)        — 7 patterns (workflows, node_modules, systemd, MCP, git hooks, IDE)
+ *   5. Credential access (~700-1200)             — 15+ patterns (env harvest, regex harvest, CLI steal)
+ *   6. Network/eval combos (~1200-1600)          — 10+ patterns (fetch+eval, download+exec, WASM)
+ *   7. Prototype/proxy hooks (~1600-1842)        — 10+ patterns (globalThis, Reflect, defineProperty)
+ *
+ * Why monolithic: Each pattern shares AST context (ctx.moduleAliases, ctx.stringVarValues,
+ * ctx.trackedVars) built incrementally during the walk. Splitting into separate files would
+ * require passing a large mutable context object, adding complexity without reducing LOC.
+ *
+ * Refactoring TODO: If the file exceeds ~2500 lines, extract categories 4-7 into
+ * handle-call-expression-fs.js and handle-call-expression-network.js with shared ctx.
+ */
+
 const path = require('path');
 const { getCallName } = require('../../utils.js');
 const {

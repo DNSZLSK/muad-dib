@@ -169,7 +169,7 @@ muaddib scrape                     # Full IOC refresh (~5min)
 muaddib diff HEAD~1                # Compare threats with previous commit
 muaddib init-hooks                 # Pre-commit hooks (husky/pre-commit/git)
 muaddib scan . --breakdown         # Explainable score decomposition
-muaddib replay                     # Ground truth validation (46/49 TPR)
+muaddib replay                     # Ground truth validation (60/64 TPR@3)
 ```
 
 ---
@@ -271,7 +271,7 @@ With pre-commit framework:
 ```yaml
 repos:
   - repo: https://github.com/DNSZLSK/muad-dib
-    rev: v2.10.43
+    rev: v2.10.57
     hooks:
       - id: muaddib-scan
 ```
@@ -285,12 +285,14 @@ repos:
 | **ML FPR** | **2.85%** (239/8,393 holdout) | XGBoost retrained on 56,564 samples, 64 features, threshold=0.710 |
 | **ML TPR** | **99.93%** (2,918/2,920 holdout) | 377 confirmed_malicious via OSSF/GHSA/npm correlation |
 | **Wild TPR** (Datadog 17K) | **92.8%** (13,538/14,587 in-scope) | 17,922 packages. 3,335 skipped (no JS). By category: compromised_lib 97.8%, malicious_intent 92.1% |
-| **TPR** (Ground Truth) | **93.9%** (46/49) | 51 real attacks. 3 out-of-scope: browser-only |
-| **FPR** (Benign curated) | **10.6%** (56/529) | 529 npm packages, real source via `npm pack` |
+| **TPR@3** (detection rate) | **93.75%** (60/64) | 66 real attacks (64 active, 2 out-of-scope). Threshold=3: any signal |
+| **TPR@20** (alert rate) | **85.9%** (55/64) | Operational alert threshold=20, aligned with ADR/FPR |
+| **FPR rules** (Benign curated) | **14.0%** (74/532) | 532 npm packages, real source via `npm pack` |
+| **FPR after ML** | **8.3%** (44/529) | ML filters 30/31 T1 benign, 0 GT/ADR suppressed |
 | **FPR** (Benign random) | **7.5%** (15/200) | 200 random npm packages, stratified sampling |
-| **ADR** (Adversarial + Holdout) | **94.0%** (101/107) | 67 adversarial + 40 holdout (107 available on disk), global threshold=20 |
+| **ADR** (Adversarial + Holdout) | **96.3%** (103/107) | 67 adversarial + 40 holdout (107 available on disk), global threshold=20 |
 
-**3034 tests** across 65 files. **200 rules** (195 RULES + 5 PARANOID).
+**3068 tests** across 66 files. **200 rules** (195 RULES + 5 PARANOID).
 
 > **ML retrain methodology (v2.10.51):**
 > - Ground truth: 377 confirmed_malicious via auto-labeler (OSSF malicious-packages, GitHub Advisory Database, npm registry takedown correlation)
@@ -299,8 +301,9 @@ repos:
 > - Leaky feature filter: 23 dead/leaky features removed (source-identity proxies)
 >
 > **Static evaluation caveats:**
-> - TPR measured on 49 Node.js attack samples (3 browser-only excluded from 51 total)
-> - FPR measured on 529 curated popular npm packages (not a random sample)
+> - TPR measured on 64 active Node.js attack samples (2 out-of-scope from 66 total)
+> - TPR@3 = detection rate (any signal); TPR@20 = operational alert threshold
+> - FPR measured on 532 curated popular npm packages (not a random sample)
 > - ADR measured with global threshold (score >= 20) as of v2.6.5
 
 See [Evaluation Methodology](docs/EVALUATION_METHODOLOGY.md) for the full experimental protocol, holdout history, and Datadog benchmark details.
@@ -337,11 +340,11 @@ npm test
 
 ### Testing
 
-- **3034 tests** across 65 modular test files
+- **3068 tests** across 66 modular test files
 - **56 fuzz tests** - Malformed inputs, ReDoS, unicode, binary
 - **Datadog 17K benchmark** - 14,587 confirmed malware samples (in-scope)
-- **Ground truth validation** - 51 real-world attacks (93.9% TPR)
-- **False positive validation** - 10.6% FPR on 529 curated npm packages, 7.5% on 200 random
+- **Ground truth validation** - 66 real-world attacks (93.75% TPR@3, 85.9% TPR@20)
+- **False positive validation** - 14.0% FPR rules, 8.3% after ML on 532 curated npm packages, 7.5% on 200 random
 
 ---
 
