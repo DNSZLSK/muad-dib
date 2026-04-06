@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>FPR 11% a 2.85% : quand le ground truth vient de l'exterieur - MUAD'DIB</title>
-  <meta name="description" content="49 malwares confirmes, un modele qui tourne en rond, et un retrain a 100% de precision. Tout ce qui pouvait mal tourner a mal tourne.">
+  <title>FPR 11% à 2.85% : quand le ground truth vient de l'extérieur - MUAD'DIB</title>
+  <meta name="description" content="49 malwares confirmés, un modèle qui tourne en rond, et un retrain à 100% de précision. Tout ce qui pouvait mal tourner a mal tourné.">
   <link rel="stylesheet" href="../style.css">
   <link rel="stylesheet" href="../vendor/github-dark.min.css">
   <script src="../vendor/highlight.min.js"></script>
@@ -25,7 +25,7 @@
 
   <article>
     <div class="article-meta">
-      <h1>FPR 11% a 2.85% : quand le ground truth vient de l'exterieur</h1>
+      <h1>FPR 11% à 2.85% : quand le ground truth vient de l'extérieur</h1>
       <span class="date">2026-04-05</span>
       <div class="tags">
         <span class="tag">ml</span>
@@ -38,63 +38,63 @@
 
     <div class="article-content">
 
-      <p>Le classifier XGBoost de MUAD'DIB tournait en prod depuis mars 2026. 114 arbres, 40 features, seuil 0.52. Il filtrait les faux positifs de la zone T1 (score 20-34). Le probleme : son ground truth etait circulaire.</p>
+      <p>Le classifier XGBoost de MUAD'DIB tournait en prod depuis mars 2026. 114 arbres, 40 features, seuil 0.52. Il filtrait les faux positifs de la zone T1 (score 20-34). Le problème : son ground truth était circulaire.</p>
 
       <h2>Le cercle vicieux</h2>
 
-      <p>49 malwares confirmes dans le ground truth. 49. Pour entrainer un modele binaire sur 87 features. Le reste des positifs venait du corpus Datadog (14 587 packages). Les negatifs venaient du moniteur lui-meme : les packages que MUAD'DIB scannait et declarait "clean".</p>
+      <p>49 malwares confirmés dans le ground truth. 49. Pour entraîner un modèle binaire sur 87 features. Le reste des positifs venait du corpus Datadog (14 587 packages). Les négatifs venaient du moniteur lui-même : les packages que MUAD'DIB scannait et déclarait "clean".</p>
 
-      <p>Le modele apprenait a reproduire ses propres decisions. Un package que le scanner rate, le modele le rate aussi, parce qu'il n'a jamais vu de contre-exemple. FPR a 11%, TPR a 93.9%. Correct, mais pas brillant.</p>
+      <p>Le modèle apprenait à reproduire ses propres décisions. Un package que le scanner rate, le modèle le rate aussi, parce qu'il n'a jamais vu de contre-exemple. FPR à 11%, TPR à 93.9%. Correct, mais pas brillant.</p>
 
-      <h2>L'idee : correler avec des sources externes</h2>
+      <h2>L'idée : corréler avec des sources externes</h2>
 
       <p>Si je ne peux pas confirmer manuellement des milliers de packages, les bases publiques peuvent le faire pour moi. Trois sources :</p>
 
       <ul>
-        <li><strong>OSSF malicious-packages</strong> : le repo de l'OpenSSF. 227 000 entrees malveillantes documentees en format OSV JSON. Clone sparse, npm uniquement.</li>
-        <li><strong>GitHub Advisory Database</strong> : 5 300 advisories de type malware pour npm. API publique, paginee.</li>
-        <li><strong>npm registry</strong> : un package supprime (404) apres notre detection, c'est un signal de takedown par l'equipe securite npm.</li>
+        <li><strong>OSSF malicious-packages</strong> : le repo de l'OpenSSF. 227 000 entrées malveillantes documentées en format OSV JSON. Clone sparse, npm uniquement.</li>
+        <li><strong>GitHub Advisory Database</strong> : 5 300 advisories de type malware pour npm. API publique, paginée.</li>
+        <li><strong>npm registry</strong> : un package supprimé (404) après notre détection, c'est un signal de takedown par l'équipe sécurité npm.</li>
       </ul>
 
-      <p>Un suspect confirme par OSSF ou GHSA = <code>confirmed_malicious</code>. Un package supprime de npm dans les 72h apres publish avec un score MUAD'DIB &ge; 50 = <code>confirmed_malicious</code> aussi (pattern takedown). Un package supprime sans autre signal = <code>likely_malicious</code> (label separe, pas dans le ground truth hard). Un suspect toujours sur npm sans signal externe apres 7 jours = <code>unconfirmed</code> (probable FP, utilise comme negatif).</p>
+      <p>Un suspect confirmé par OSSF ou GHSA = <code>confirmed_malicious</code>. Un package supprimé de npm dans les 72h après publish avec un score MUAD'DIB &ge; 50 = <code>confirmed_malicious</code> aussi (pattern takedown). Un package supprimé sans autre signal = <code>likely_malicious</code> (label séparé, pas dans le ground truth hard). Un suspect toujours sur npm sans signal externe après 7 jours = <code>unconfirmed</code> (probable FP, utilisé comme négatif).</p>
 
-      <p>Resultat : 377 confirmed_malicious au lieu de 49. Et 211 000 "missed" historiques dans OSSF qui n'etaient pas dans nos detections (attendu : l'OSSF couvre des annees d'historique, le moniteur tourne depuis decembre 2025).</p>
+      <p>Résultat : 377 confirmed_malicious au lieu de 49. Et 211 000 "missed" historiques dans OSSF qui n'étaient pas dans nos détections (attendu : l'OSSF couvre des années d'historique, le moniteur tourne depuis décembre 2025).</p>
 
-      <h2>Le retrain a 100%</h2>
+      <h2>Le retrain à 100%</h2>
 
-      <p>Premier retrain avec le nouveau dataset. 56 564 samples. Le modele sort :</p>
+      <p>Premier retrain avec le nouveau dataset. 56 564 samples. Le modèle sort :</p>
 
       <pre><code>Precision:  1.0000
 Recall/TPR: 1.0000
 FPR:        0.0000</code></pre>
 
-      <p>Precision 1.000, recall 1.000, FPR 0.000. J'ai deja vu ce film. Un modele parfait, c'est un modele casse.</p>
+      <p>Précision 1.000, recall 1.000, FPR 0.000. J'ai déjà vu ce film. Un modèle parfait, c'est un modèle cassé.</p>
 
-      <h2>Le piege : data leakage par features manquantes</h2>
+      <h2>Le piège : data leakage par features manquantes</h2>
 
-      <p>Le corpus Datadog contient les features de base (score, counts, types) mais pas les features enrichies ajoutees en v2.10 : <code>package_age_days</code>, <code>weekly_downloads</code>, <code>version_count</code>, <code>author_package_count</code>, etc. 16 features absentes.</p>
+      <p>Le corpus Datadog contient les features de base (score, counts, types) mais pas les features enrichies ajoutées en v2.10 : <code>package_age_days</code>, <code>weekly_downloads</code>, <code>version_count</code>, <code>author_package_count</code>, etc. 16 features absentes.</p>
 
-      <p>Mon code mettait <code>-1</code> pour les features manquantes du Datadog, et <code>0</code> pour les features manquantes du moniteur. XGBoost apprend les directions de split pour les valeurs manquantes. Resultat : le modele apprenait "si <code>package_age_days == -1</code> alors malicious" - il distinguait la <em>source des donnees</em>, pas le <em>comportement malveillant</em>.</p>
+      <p>Mon code mettait <code>-1</code> pour les features manquantes du Datadog, et <code>0</code> pour les features manquantes du moniteur. XGBoost apprend les directions de split pour les valeurs manquantes. Résultat : le modèle apprenait "si <code>package_age_days == -1</code> alors malicious" - il distinguait la <em>source des données</em>, pas le <em>comportement malveillant</em>.</p>
 
-      <p>Un seul split sur une feature a -1 suffit a separer parfaitement les deux classes. P=1, R=1, zero signal utile.</p>
+      <p>Un seul split sur une feature à -1 suffit à séparer parfaitement les deux classes. P=1, R=1, zéro signal utile.</p>
 
       <h2>Le fix</h2>
 
       <p>Trois corrections :</p>
 
       <ol>
-        <li><strong>Features a 0 partout</strong>. Plus de -1. Si une feature est absente, c'est 0, point. Pas de signal de source.</li>
-        <li><strong>Filtre leaky features</strong>. Porte depuis <code>train-xgboost.py</code> : si une feature est non-zero dans &ge; 99% d'une classe et &lt; 0.1% de l'autre, c'est un proxy de source, pas un signal. Ejectee. 23 features mortes ou leaky sur 87.</li>
-        <li><strong>Features depuis les alertes</strong>. Sur 377 confirmed_malicious, seulement 15 avaient un enregistrement JSONL. Les 362 autres n'avaient pas de features. Port Python de <code>feature-extractor.js</code> pour reconstruire les features depuis les fichiers d'alerte (<code>logs/alerts/*.json</code>). Les metadata registry restent a 0 (pas disponibles dans les alertes).</li>
+        <li><strong>Features à 0 partout</strong>. Plus de -1. Si une feature est absente, c'est 0, point. Pas de signal de source.</li>
+        <li><strong>Filtre leaky features</strong>. Porté depuis <code>train-xgboost.py</code> : si une feature est non-zero dans &ge; 99% d'une classe et &lt; 0.1% de l'autre, c'est un proxy de source, pas un signal. Éjectée. 23 features mortes ou leaky sur 87.</li>
+        <li><strong>Features depuis les alertes</strong>. Sur 377 confirmed_malicious, seulement 15 avaient un enregistrement JSONL. Les 362 autres n'avaient pas de features. Port Python de <code>feature-extractor.js</code> pour reconstruire les features depuis les fichiers d'alerte (<code>logs/alerts/*.json</code>). Les metadata registry restent à 0 (pas disponibles dans les alertes).</li>
       </ol>
 
-      <h2>Les resultats honnetes</h2>
+      <h2>Les résultats honnêtes</h2>
 
       <table>
-        <tr><th>Metrique</th><th>Avant</th><th>Apres</th></tr>
+        <tr><th>Métrique</th><th>Avant</th><th>Après</th></tr>
         <tr><td>FPR</td><td>11.0%</td><td><strong>2.85%</strong></td></tr>
         <tr><td>TPR</td><td>93.9%</td><td><strong>99.93%</strong></td></tr>
-        <tr><td>Precision</td><td>0.999</td><td>0.924</td></tr>
+        <tr><td>Précision</td><td>0.999</td><td>0.924</td></tr>
         <tr><td>F1</td><td>-</td><td><strong>0.960</strong></td></tr>
         <tr><td>AUC-ROC</td><td>-</td><td><strong>0.999</strong></td></tr>
         <tr><td>Features</td><td>87 (8 dead)</td><td>64 actives</td></tr>
@@ -109,31 +109,31 @@ FPR:        0.0000</code></pre>
 Actual  Clean    8154      239
      Malicious      2     2918</code></pre>
 
-      <p>239 faux positifs sur 8 393 clean. 2 faux negatifs sur 2 920 malicious. Le FPR passe de 11% a 2.85%. Le TPR monte de 93.9% a 99.93%.</p>
+      <p>239 faux positifs sur 8 393 clean. 2 faux négatifs sur 2 920 malicious. Le FPR passe de 11% à 2.85%. Le TPR monte de 93.9% à 99.93%.</p>
 
-      <p>La precision baisse de 0.999 a 0.924. Normal : l'ancien modele avait une precision artificielle parce qu'il ne voyait que ses propres predictions comme negatifs. Le nouveau voit des negatifs reels (packages non-confirmes apres 7 jours).</p>
+      <p>La précision baisse de 0.999 à 0.924. Normal : l'ancien modèle avait une précision artificielle parce qu'il ne voyait que ses propres prédictions comme négatifs. Le nouveau voit des négatifs réels (packages non-confirmés après 7 jours).</p>
 
       <h3>Grid search</h3>
 
-      <p>27 combinaisons testees (depth [4,6,8] x estimators [100,200,300] x lr [0.05,0.1,0.2]). Plateau a F1=0.9603 pour presque toutes les configs. Le modele final : depth=4, 300 estimators, lr=0.05. Plus simple et plus regulier que les alternatives.</p>
+      <p>27 combinaisons testées (depth [4,6,8] x estimators [100,200,300] x lr [0.05,0.1,0.2]). Plateau à F1=0.9603 pour presque toutes les configs. Le modèle final : depth=4, 300 estimators, lr=0.05. Plus simple et plus régulier que les alternatives.</p>
 
       <h3>Top features</h3>
 
       <ol>
         <li><code>unpacked_size_bytes</code> - les malwares sont petits, les frameworks sont gros</li>
-        <li><code>file_count_total</code> - meme logique : 3 fichiers vs 500</li>
-        <li><code>version_count</code> - un malware a 1-2 versions, un package etabli en a 50</li>
+        <li><code>file_count_total</code> - même logique : 3 fichiers vs 500</li>
+        <li><code>version_count</code> - un malware a 1-2 versions, un package établi en a 50</li>
         <li><code>max_single_points</code> - poids de la finding la plus grave</li>
         <li><code>score</code> - le score de risque global</li>
       </ol>
 
-      <p>Les 3 premieres features sont des proxies de "taille et maturite du package". Un malware est typiquement petit, recent, avec peu de versions. Un framework legitime est gros, ancien, avec des dizaines de versions. Le modele a appris cette asymetrie.</p>
+      <p>Les 3 premières features sont des proxies de "taille et maturité du package". Un malware est typiquement petit, récent, avec peu de versions. Un framework légitime est gros, ancien, avec des dizaines de versions. Le modèle a appris cette asymétrie.</p>
 
       <h2>Ce qui reste</h2>
 
-      <p>357 confirmed_malicious sans features (ni JSONL ni alerte). Le moniteur ne gardait pas les features extraites pour tous les packages avant v2.10. Ces samples sont perdus pour le training actuel. Le fix : le pipeline d'entrainement enregistre maintenant les features pour tous les suspects, pas seulement les clean.</p>
+      <p>357 confirmed_malicious sans features (ni JSONL ni alerte). Le moniteur ne gardait pas les features extraites pour tous les packages avant v2.10. Ces samples sont perdus pour le training actuel. Le fix : le pipeline d'entraînement enregistre maintenant les features pour tous les suspects, pas seulement les clean.</p>
 
-      <p>Le retrain mensuel est prevu : l'auto-labeler tourne en cron quotidien, re-check les "pending" qui passent 7 jours, refresh les indices OSSF/GHSA, et re-labellise. Le prochain retrain aura plus de confirmed et moins de trous.</p>
+      <p>Le retrain mensuel est prévu : l'auto-labeler tourne en cron quotidien, re-check les "pending" qui passent 7 jours, refresh les indices OSSF/GHSA, et re-labellise. Le prochain retrain aura plus de confirmed et moins de trous.</p>
 
     </div>
   </article>

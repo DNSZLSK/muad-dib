@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Blog / MUAD'DIB</title>
-  <meta name="description" content="Articles techniques sur la detection de menaces supply-chain npm et PyPI.">
+  <meta name="description" content="Articles techniques sur la détection de menaces supply-chain npm et PyPI.">
   <link rel="stylesheet" href="../style.css">
 </head>
 <body>
@@ -18,82 +18,82 @@
 </nav>
 
 <h1>Blog</h1>
-<p>Notes de terrain sur la detection de menaces supply-chain.</p>
+<p>Notes de terrain sur la détection de menaces supply-chain.</p>
 
 <hr>
 
 <ul class="post-list">
 
   <li>
-    <span class="post-title"><a href="34-malwares-7-jours.html">34 malwares en 7 jours : ce que le monitoring 24/7 attrape vraiment</a></span>
-    <br><span class="post-date">2026-04-06</span> <span class="tags"><span class="tag">detection</span> <span class="tag">malware</span> <span class="tag">npm</span> <span class="tag">pypi</span> <span class="tag">takedown</span> <span class="tag">monitoring</span> <span class="tag">live</span></span>
-    <p class="post-summary">Croisement des alertes MUAD'DIB avec les takedowns npm/PyPI sur 7 jours. 34 packages malveillants detectes et archives avant suppression. ~5 par jour.</p>
+    <span class="post-title"><a href="34-malwares-7-jours.html">34 packages suspects supprimés en 7 jours : tous détectés avant takedown</a></span>
+    <br><span class="post-date">2026-04-06</span> <span class="tags"><span class="tag">détection</span> <span class="tag">malware</span> <span class="tag">npm</span> <span class="tag">pypi</span> <span class="tag">takedown</span> <span class="tag">monitoring</span> <span class="tag">live</span></span>
+    <p class="post-summary">Croisement des alertes MUAD'DIB avec les takedowns npm/PyPI sur 7 jours. 34 packages supprimés avec score >= 25, détectés et archivés avant suppression.</p>
   </li>
 
   <li>
-    <span class="post-title"><a href="react-emits-malware.html">react-emits : un malware npm detecte en live et reporte</a></span>
-    <br><span class="post-date">2026-04-05</span> <span class="tags"><span class="tag">detection</span> <span class="tag">malware</span> <span class="tag">npm</span> <span class="tag">report</span> <span class="tag">live</span></span>
-    <p class="post-summary">4 versions en 4 heures, un path.js copie du module natif avec deux IIFE fetch+eval injectees, et des dependances qui shadow fs, process et path. Score 100, reporte a npm.</p>
+    <span class="post-title"><a href="react-emits-malware.html">react-emits : un malware npm détecté en live et reporté</a></span>
+    <br><span class="post-date">2026-04-05</span> <span class="tags"><span class="tag">détection</span> <span class="tag">malware</span> <span class="tag">npm</span> <span class="tag">report</span> <span class="tag">live</span></span>
+    <p class="post-summary">4 versions en 4 heures, un path.js copie du module natif avec deux IIFE fetch+eval injectées, et des dépendances qui shadow fs, process et path. Score 100, reporté à npm.</p>
   </li>
 
   <li>
-    <span class="post-title"><a href="retrain-auto-labeler.html">FPR 11% a 2.85% : quand le ground truth vient de l'exterieur</a></span>
+    <span class="post-title"><a href="retrain-auto-labeler.html">FPR 11% à 2.85% : quand le ground truth vient de l'extérieur</a></span>
     <br><span class="post-date">2026-04-05</span> <span class="tags"><span class="tag">ml</span> <span class="tag">retrain</span> <span class="tag">auto-labeler</span> <span class="tag">xgboost</span> <span class="tag">data-leakage</span></span>
-    <p class="post-summary">49 malwares confirmes, un modele qui tourne en rond, et un retrain a 100% de precision. Tout ce qui pouvait mal tourner a mal tourne.</p>
+    <p class="post-summary">49 malwares confirmés, un modèle qui tourne en rond, et un retrain à 100% de précision. Tout ce qui pouvait mal tourner a mal tourné.</p>
   </li>
 
   <li>
     <span class="post-title"><a href="gvisor-sandbox-invisible.html">gVisor : le kernel qui rend la sandbox invisible</a></span>
-    <br><span class="post-date">2026-03-31</span> <span class="tags"><span class="tag">sandbox</span> <span class="tag">gvisor</span> <span class="tag">evasion</span> <span class="tag">detection</span></span>
-    <p class="post-summary">Les malwares detectent Docker en 3 lignes. gVisor intercepte les syscalls au niveau kernel. Le malware pense qu'il tourne sur une vraie machine.</p>
+    <br><span class="post-date">2026-03-31</span> <span class="tags"><span class="tag">sandbox</span> <span class="tag">gvisor</span> <span class="tag">évasion</span> <span class="tag">détection</span></span>
+    <p class="post-summary">Les malwares détectent Docker en 3 lignes. gVisor intercepte les syscalls au niveau kernel. Le malware pense qu'il tourne sur une vraie machine.</p>
   </li>
 
   <li>
     <span class="post-title"><a href="canisterworm-libfaketime.html">CanisterWorm : quand la sandbox est aveugle pendant 5 minutes</a></span>
-    <br><span class="post-date">2026-03-23</span> <span class="tags"><span class="tag">detection</span> <span class="tag">canisterworm</span> <span class="tag">sandbox</span> <span class="tag">libfaketime</span> <span class="tag">evasion</span></span>
-    <p class="post-summary">7 packages compromis detectes, verdict DORMANT SUSPECT au lieu de MALICIOUS. Le payload Python attendait 5 minutes. La sandbox n'attendait pas.</p>
+    <br><span class="post-date">2026-03-23</span> <span class="tags"><span class="tag">détection</span> <span class="tag">canisterworm</span> <span class="tag">sandbox</span> <span class="tag">libfaketime</span> <span class="tag">évasion</span></span>
+    <p class="post-summary">7 packages compromis détectés, verdict DORMANT SUSPECT au lieu de MALICIOUS. Le payload Python attendait 5 minutes. La sandbox n'attendait pas.</p>
   </li>
 
   <li>
-    <span class="post-title"><a href="ml-audit-fondamental.html">v2.10.5 - Quand un changement de label fait passer le ML de 37% a 98%</a></span>
+    <span class="post-title"><a href="ml-audit-fondamental.html">v2.10.5 - Quand un changement de label fait passer le ML de 37% à 98%</a></span>
     <br><span class="post-date">2026-03-22</span> <span class="tags"><span class="tag">ml</span> <span class="tag">audit</span> <span class="tag">xgboost</span> <span class="tag">monitoring</span> <span class="tag">pipeline</span></span>
-    <p class="post-summary">3 mois de monitoring, 0 malware confirme, 8176 labels contamines. Comment un nettoyage de donnees a fait passer la precision ML de 37% a 98%.</p>
+    <p class="post-summary">3 mois de monitoring, 0 malware confirmé, 8176 labels contaminés. Comment un nettoyage de données a fait passer la précision ML de 37% à 98%.</p>
   </li>
 
   <li>
     <span class="post-title"><a href="ml-classifier-phase2.html">Du rule-based au ML : un classifier XGBoost pour trier les faux positifs</a></span>
     <br><span class="post-date">2026-03-20</span> <span class="tags"><span class="tag">ml</span> <span class="tag">xgboost</span> <span class="tag">faux-positifs</span> <span class="tag">architecture</span></span>
-    <p class="post-summary">Un classifier binaire XGBoost en JavaScript pur pour filtrer les faux positifs de la zone grise T1, sans aucune dependance Python en production.</p>
+    <p class="post-summary">Un classifier binaire XGBoost en JavaScript pur pour filtrer les faux positifs de la zone grise T1, sans aucune dépendance Python en production.</p>
   </li>
 
   <li>
-    <span class="post-title"><a href="red-team-blue-team.html">Red Team vs Blue Team : 107 echantillons adversariaux en 7 campagnes</a></span>
-    <br><span class="post-date">2026-03-17</span> <span class="tags"><span class="tag">red-team</span> <span class="tag">adversarial</span> <span class="tag">methodologie</span></span>
-    <p class="post-summary">Comment tester un scanner de securite quand l'attaquant connait les regles.</p>
+    <span class="post-title"><a href="red-team-blue-team.html">Red Team vs Blue Team : 107 échantillons adversariaux en 7 campagnes</a></span>
+    <br><span class="post-date">2026-03-17</span> <span class="tags"><span class="tag">red-team</span> <span class="tag">adversarial</span> <span class="tag">méthodologie</span></span>
+    <p class="post-summary">Comment tester un scanner de sécurité quand l'attaquant connaît les règles.</p>
   </li>
 
   <li>
-    <span class="post-title"><a href="benchmark-17k.html">92.5% de detection sur 17 000 malwares reels</a></span>
-    <br><span class="post-date">2026-03-14</span> <span class="tags"><span class="tag">benchmark</span> <span class="tag">datadog</span> <span class="tag">metriques</span></span>
-    <p class="post-summary">9 heures de benchmark sur le dataset Datadog. 14 587 packages in-scope, 13 486 detectes.</p>
+    <span class="post-title"><a href="benchmark-17k.html">92.5% de détection sur 17 000 malwares réels</a></span>
+    <br><span class="post-date">2026-03-14</span> <span class="tags"><span class="tag">benchmark</span> <span class="tag">datadog</span> <span class="tag">métriques</span></span>
+    <p class="post-summary">9 heures de benchmark sur le dataset Datadog. 14 587 packages in-scope, 13 486 détectés.</p>
   </li>
 
   <li>
     <span class="post-title"><a href="glassworm-detection.html">GlassWorm : Unicode invisible et C2 blockchain Solana</a></span>
-    <br><span class="post-date">2026-03-10</span> <span class="tags"><span class="tag">detection</span> <span class="tag">glassworm</span> <span class="tag">unicode</span> <span class="tag">solana</span></span>
-    <p class="post-summary">433 packages npm compromis, du code cache dans des caracteres zero-width, et un C2 sur la blockchain.</p>
+    <br><span class="post-date">2026-03-10</span> <span class="tags"><span class="tag">détection</span> <span class="tag">glassworm</span> <span class="tag">unicode</span> <span class="tag">solana</span></span>
+    <p class="post-summary">433 packages npm compromis, du code caché dans des caractères zero-width, et un C2 sur la blockchain.</p>
   </li>
 
   <li>
     <span class="post-title"><a href="sandbox-time-travel.html">Le sandbox qui voyage dans le temps</a></span>
-    <br><span class="post-date">2026-03-02</span> <span class="tags"><span class="tag">sandbox</span> <span class="tag">time-bomb</span> <span class="tag">evasion</span></span>
-    <p class="post-summary">Quand les malwares attendent 72h avant de voler les credentials, on accelere le temps.</p>
+    <br><span class="post-date">2026-03-02</span> <span class="tags"><span class="tag">sandbox</span> <span class="tag">time-bomb</span> <span class="tag">évasion</span></span>
+    <p class="post-summary">Quand les malwares attendent 72h avant de voler les credentials, on accélère le temps.</p>
   </li>
 
   <li>
-    <span class="post-title"><a href="le-vrai-fpr.html">Le vrai FPR : quand 0% cache la realite</a></span>
-    <br><span class="post-date">2026-02-21</span> <span class="tags"><span class="tag">metriques</span> <span class="tag">faux-positifs</span> <span class="tag">methodologie</span></span>
-    <p class="post-summary">Notre taux de faux positifs etait de 0%. En realite, il etait de 38%.</p>
+    <span class="post-title"><a href="le-vrai-fpr.html">Le vrai FPR : quand 0% cache la réalité</a></span>
+    <br><span class="post-date">2026-02-21</span> <span class="tags"><span class="tag">métriques</span> <span class="tag">faux-positifs</span> <span class="tag">méthodologie</span></span>
+    <p class="post-summary">Notre taux de faux positifs était de 0%. En réalité, il était de 38%.</p>
   </li>
 
 </ul>
