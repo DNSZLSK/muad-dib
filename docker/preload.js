@@ -105,10 +105,21 @@
     'fastly.net', 'fastly.com'
   ];
 
+  // DNS-over-HTTPS domains that must NEVER pass through, even if they match
+  // a safe domain suffix (e.g. dns.googleapis.com matches .googleapis.com).
+  // ANSSI audit m9: malware can use DoH to bypass the mock DNS interceptor.
+  const DOH_BLOCKED_DOMAINS = [
+    'dns.google', 'dns.google.com', 'dns.googleapis.com',
+    'cloudflare-dns.com', 'mozilla.cloudflare-dns.com',
+    'doh.opendns.com', 'dns.quad9.net', 'doh.cleanbrowsing.org'
+  ];
+
   function isSafeDomain(host) {
     if (!host) return true; // unknown host → pass through (safe default)
     var d = String(host).toLowerCase().replace(/:\d+$/, '');
     if (d === 'localhost' || d === '127.0.0.1' || d === '::1') return true;
+    // Block DoH endpoints before checking safe domains (dns.googleapis.com would match otherwise)
+    if (DOH_BLOCKED_DOMAINS.some(function (b) { return d === b; })) return false;
     return MOCK_SAFE_DOMAINS.some(function (s) { return d === s || d.endsWith('.' + s); });
   }
 
@@ -752,6 +763,39 @@
   } catch (e) { /* ignore — process.dlopen may not be writable */ }
 
   // ═══════════════════════════════════════════════════════
+  // 10b. WEBASSEMBLY INTERCEPTION (ANSSI audit m7)
+  // ═══════════════════════════════════════════════════════
+
+  // WASM modules bypass all JS monkey-patches (timers, network, fs).
+  // We cannot fully sandbox WASM, but we CAN detect and log its use.
+  // WebAssembly.compile/instantiate/compileStreaming are overridden to log
+  // the event before delegating to the real implementation.
+  // NOTE: .node native addons have the same limitation (bypass all JS patches,
+  // call syscalls directly). Detected via process.dlopen above but not prevented.
+  try {
+    if (typeof WebAssembly !== 'undefined') {
+      var _origCompile = WebAssembly.compile;
+      var _origInstantiate = WebAssembly.instantiate;
+      var _origCompileStreaming = WebAssembly.compileStreaming;
+
+      WebAssembly.compile = function (bytes) {
+        log('NATIVE_ADDON', 'WebAssembly.compile() called — WASM module loading');
+        return _origCompile.apply(WebAssembly, arguments);
+      };
+      WebAssembly.instantiate = function (bytes, imports) {
+        log('NATIVE_ADDON', 'WebAssembly.instantiate() called — WASM module loading');
+        return _origInstantiate.apply(WebAssembly, arguments);
+      };
+      if (_origCompileStreaming) {
+        WebAssembly.compileStreaming = function (source) {
+          log('NATIVE_ADDON', 'WebAssembly.compileStreaming() called — WASM module loading');
+          return _origCompileStreaming.apply(WebAssembly, arguments);
+        };
+      }
+    }
+  } catch (e) { /* WebAssembly not available or not writable */ }
+
+  // ═══════════════════════════════════════════════════════
   // 11. /proc/uptime SPOOFING
   // ═══════════════════════════════════════════════════════
 
@@ -802,10 +846,33 @@
             return Buffer.from('');
           }
         }
+        // 11e. /proc/sys/kernel/osrelease SPOOFING (gVisor detection evasion — ANSSI audit m6)
+        // gVisor exposes its identity in /proc/sys/kernel/osrelease (e.g. "4.4.0-gvisor").
+        // Also intercept os.release() which reads this file internally.
+        if (p === '/proc/sys/kernel/osrelease' || p === '/proc/version') {
+          log('FS_READ', `SPOOFED ${p} (gVisor identity hidden)`);
+          if (p === '/proc/version') {
+            return 'Linux version 5.15.0-92-generic (buildd@lcy02-amd64-045) (gcc (Ubuntu 11.4.0-1ubuntu1~22.04) 11.4.0, GNU ld (GNU Binutils for Ubuntu) 2.38) #102-Ubuntu SMP Wed Jan 10 09:33:48 UTC 2024\n';
+          }
+          return '5.15.0-92-generic\n';
+        }
       } catch (e) { /* ignore */ }
       return _currentReadFileSync.apply(_fs, arguments);
     };
   } catch (e) { /* ignore */ }
+
+  // 11f. os.release() SPOOFING (gVisor detection via Node.js os module — ANSSI audit m6)
+  try {
+    var _os = require('os');
+    var _origRelease = _os.release;
+    _os.release = function () {
+      var real = _origRelease.call(_os);
+      if (/gvisor/i.test(real)) {
+        return '5.15.0-92-generic';
+      }
+      return real;
+    };
+  } catch (e) { /* os module not available */ }
 
   // ═══════════════════════════════════════════════════════
   // 12. WORKER THREADS INTERCEPTION

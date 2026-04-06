@@ -23,6 +23,21 @@ The **holdout set** is a separate batch of samples created after rule tuning is 
 
 Both metrics (ADR and Holdout) are published together. The gap between them reveals how much the scanner relies on sample-specific tuning vs. genuine pattern recognition.
 
+### Holdout Sealing Procedure
+
+To prevent post-hoc tuning bias, each holdout batch follows this protocol:
+
+1. **Creation**: samples are designed by the developer (or a third party) using attack techniques not yet covered by existing rules. Samples are committed to a dedicated `datasets/holdout-vN/` directory.
+2. **Git commit before evaluation**: the holdout directory is committed to git **before** `muaddib evaluate` is run. The commit hash serves as a timestamp proof that samples existed before scores were known.
+3. **Rules frozen**: no rule additions, scoring changes, or FP reduction tuning are permitted between the holdout commit and the first evaluation run.
+4. **Raw scores published as-is**: the first-contact scores are recorded in this document (Section 2 below). No retroactive threshold adjustments.
+5. **Post-evaluation rule work**: after raw scores are documented, rules may be improved to address detected gaps. Improved scores are tracked separately as ADR (adversarial detection rate), not as holdout scores.
+
+**Known limitations**:
+- Solo developer project: the same person creates samples and rules. Independent third-party holdout creation would strengthen the methodology but is not currently feasible.
+- The benign FPR holdout split (70/30 by package name hash) is deterministic and inspectable. It prevents accidental overfitting but not deliberate manipulation.
+- Git commit timestamps can be rewritten. For stronger guarantees, an external notarization service (e.g., OpenTimestamps) could anchor commit hashes to a blockchain.
+
 ---
 
 ## 2. Raw Scores Before Correction (Holdout History)

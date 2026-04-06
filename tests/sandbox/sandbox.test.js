@@ -740,7 +740,7 @@ async function runSandboxTests() {
     // In runSandbox, if a canary is also found, finalScore = baseScore + 50 = 70
     const mockFindings = [
       { type: 'sandbox_network_outlier', severity: 'HIGH', detail: 'DNS to evil.com', evidence: 'evil.com' },
-      { type: 'canary_exfiltration', severity: 'CRITICAL', detail: 'Token stolen', evidence: 'ghp_R8kLmN2pQ4vW7xY9aB3cD5eF6gH8jK0mN2pQ4vW' }
+      { type: 'canary_exfiltration', severity: 'CRITICAL', detail: 'Token stolen', evidence: 'ghp_mD9kX3pL7vR1wN5qT8yB2cF4hJ6sA0eU3iO9gK' }
     ];
     const finalScore = Math.min(100, mockFindings.reduce((s, f) => {
       if (f.type === 'canary_exfiltration') return s + 50;

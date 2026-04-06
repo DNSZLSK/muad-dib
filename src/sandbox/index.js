@@ -94,11 +94,12 @@ const SAFE_SANDBOX_CMDS = new Set(['timeout', 'node', 'npm', 'npx', 'su', 'env']
 // These are searched in the sandbox report as a complement to the dynamic
 // tokens from canary-tokens.js (which use random values per session).
 // Format-valid: match real service token formats to resist format-based detection.
+// ANSSI audit m4: replaced AWS doc examples with project-specific values.
 const STATIC_CANARY_TOKENS = {
-  GITHUB_TOKEN: 'ghp_R8kLmN2pQ4vW7xY9aB3cD5eF6gH8jK0mN2pQ4vW',
-  NPM_TOKEN: 'npm_a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8',
-  AWS_ACCESS_KEY_ID: 'AKIAIOSFODNN7EXAMPLE',
-  AWS_SECRET_ACCESS_KEY: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+  GITHUB_TOKEN: 'ghp_mD9kX3pL7vR1wN5qT8yB2cF4hJ6sA0eU3iO9gK',
+  NPM_TOKEN: 'npm_7f3e8a2d1b9c4f6e0d5a7b3c8f1e2d4a9b6c0d5e',
+  AWS_ACCESS_KEY_ID: 'AKIAMDB7X9R2K4P1N5Q3',
+  AWS_SECRET_ACCESS_KEY: 'mDb8xR3kP7vN2qT5yW1cF9hJ4sA6eU0iO3gK7nL',
   SLACK_WEBHOOK_URL: 'https://hooks.example.com/services/TCANARY/BCANARY/canary-slack-token',
   DISCORD_WEBHOOK_URL: 'https://discord.com/api/webhooks/000000000000000000/abcdefghijklmnopqrstuvwxyz'
 };

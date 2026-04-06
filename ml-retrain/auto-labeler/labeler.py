@@ -25,6 +25,7 @@ log = logging.getLogger("auto-labeler.labeler")
 # Thresholds
 SCORE_THRESHOLD_CONFIRMED = 50  # Minimum muaddib score for npm_removed → confirmed
 PENDING_DAYS = 7  # Days before pending → unconfirmed
+MAX_CONFIRMATION_AGE_DAYS = 30  # npm_removed only confirms if detection is recent
 
 
 def _parse_iso(s):
@@ -144,9 +145,15 @@ def _classify(signals, npm_result, detection_date, score):
         return "confirmed_malicious"
 
     # Tier 2: npm takedown pattern (removed + high score + quick removal)
+    # Temporal leakage guard (ANSSI audit M5): only confirm via npm_removed if
+    # the detection is recent. Old detections where the package has since been
+    # removed cannot be reliably confirmed — the removal may be unrelated.
+    # Also, is_quick_takedown already validates detection_date > publish_date.
     if npm_removed and score >= SCORE_THRESHOLD_CONFIRMED:
-        if is_quick_takedown(npm_result, detection_date, threshold_hours=72):
-            return "confirmed_malicious"
+        detection_age = _days_since(detection_date)
+        if detection_age is not None and detection_age <= MAX_CONFIRMATION_AGE_DAYS:
+            if is_quick_takedown(npm_result, detection_date, threshold_hours=72):
+                return "confirmed_malicious"
 
     # Tier 3: npm removed but doesn't meet confirmation criteria
     if npm_removed:

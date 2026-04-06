@@ -19,7 +19,7 @@ Priorites :
 ## Commands
 
 ```bash
-npm test          # Run all tests (custom framework, 3034 tests across 65 files)
+npm test          # Run all tests (custom framework, 3068 tests across 66 files)
 npm run lint      # ESLint with security plugin
 npm run scan      # Self-scan: node bin/muaddib.js scan .
 npm run update    # Download latest IOCs
@@ -56,7 +56,7 @@ For full technical details on each scanner, scoring system, sandbox, IOC system,
 2. Import in `src/index.js`, add to the Promise.all destructuring and the threats spread
 3. Add rule entry in `src/rules/index.js` with id, name, severity, confidence, description, mitre
 4. Add playbook entry in `src/response/playbooks.js`
-5. Add tests in the appropriate test file under `tests/` (65 modular test files)
+5. Add tests in the appropriate test file under `tests/` (66 modular test files)
 6. Create test fixtures in `tests/samples/my-scanner/`
 
 ## Key Constraints
@@ -84,18 +84,20 @@ Never skip documentation updates when publishing a new version.
 - Never commit directly to master
 - Do not create commits automatically — the user handles commits manually
 
-## Current Metrics (v2.10.43)
+## Current Metrics (v2.10.57)
 
 | Metric | Value |
 |--------|-------|
-| Version | **2.10.43** |
-| Tests | **3034** passed, 0 failed, across 65 files |
+| Version | **2.10.57** |
+| Tests | **3068** passed, 0 failed, across 66 files |
 | Rules | **200** (195 RULES + 5 PARANOID) |
 | Scanners | **14** modules (13 parallel + 1 pre-analysis) |
-| TPR | **93.9%** (46/49 ground truth) |
-| FPR curated | **10.6%** (56/529 benign packages) |
+| TPR@3 (detection rate) | **93.75%** (60/64 ground truth) |
+| TPR@20 (alert rate) | **85.9%** (55/64 ground truth) |
+| FPR rules | **14.0%** (74/532 benign packages) |
+| FPR after ML | **8.3%** (44/529 benign packages) |
 | FPR random | **7.5%** (15/200 random npm packages) |
-| ADR | **94.0%** (101/107 available adversarial + holdout) |
+| ADR | **96.3%** (103/107 available adversarial + holdout) |
 
 ## Interdictions
 

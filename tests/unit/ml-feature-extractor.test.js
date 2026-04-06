@@ -115,7 +115,7 @@ function runMLFeatureExtractorTests() {
     assert(features.type_suspicious_dataflow === 0, 'known type should be 0');
   });
 
-  test('extractFeatures: detects IOC match boolean', () => {
+  test('extractFeatures: has_ioc_match always 0 (excluded from ML to prevent circular leakage)', () => {
     const result = {
       threats: [
         { type: 'known_malicious_package', severity: 'CRITICAL', file: 'package.json' }
@@ -123,7 +123,7 @@ function runMLFeatureExtractorTests() {
       summary: { total: 1, critical: 1, high: 0, medium: 0, low: 0, riskScore: 100 }
     };
     const features = extractFeatures(result, {});
-    assert(features.has_ioc_match === 1, 'has_ioc_match should be 1');
+    assert(features.has_ioc_match === 0, 'has_ioc_match should always be 0 (IOC leakage prevention)');
   });
 
   test('extractFeatures: detects sandbox findings', () => {

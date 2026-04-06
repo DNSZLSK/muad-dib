@@ -32,10 +32,10 @@ function runPreloadTests() {
     assert(result.score === 0, 'Undefined should score 0');
   });
 
-  test('PRELOAD-ANALYZER: timer delay > 1h scores MEDIUM', () => {
+  test('PRELOAD-ANALYZER: timer delay > 15min scores MEDIUM', () => {
     const log = '[PRELOAD] TIMER: setTimeout delay=7200000ms (2.0h) forced to 0 (t+100ms)\n';
     const result = analyzePreloadLog(log);
-    assert(result.score === 15, 'Timer > 1h should score 15, got ' + result.score);
+    assert(result.score === 15, 'Timer > 15min should score 15, got ' + result.score);
     assert(result.findings.length === 1, 'Should have 1 finding');
     assert(result.findings[0].type === 'sandbox_timer_delay_suspicious', 'Type should be sandbox_timer_delay_suspicious');
     assert(result.findings[0].severity === 'MEDIUM', 'Severity should be MEDIUM');
@@ -50,7 +50,7 @@ function runPreloadTests() {
     assert(result.findings[0].severity === 'CRITICAL', 'Severity should be CRITICAL');
   });
 
-  test('PRELOAD-ANALYZER: both 1h and 24h timers — critical supersedes suspicious', () => {
+  test('PRELOAD-ANALYZER: both >15min and >24h timers — critical supersedes suspicious', () => {
     const log =
       '[PRELOAD] TIMER: setTimeout delay=7200000ms (2.0h) forced to 0 (t+100ms)\n' +
       '[PRELOAD] TIMER: setTimeout delay=259200000ms (72.0h) forced to 0 (t+200ms)\n';

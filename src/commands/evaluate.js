@@ -51,8 +51,9 @@ const SAFE_PKG_RE = /^(@[\w._-]+\/)?[\w._-]+$/;
 // =========================================================================
 
 /**
- * Compute a fingerprint of all src/*.js files based on size + mtime.
- * Changes when any scanner source file is modified.
+ * Compute a fingerprint of all src/*.js files based on size + mtime,
+ * plus key data files (IOCs, ground truth, benign list) so the cache
+ * is invalidated when detection data changes — not only scanner code.
  */
 function computeSrcFingerprint() {
   const srcDir = path.join(ROOT, 'src');
@@ -70,6 +71,27 @@ function computeSrcFingerprint() {
     }
   };
   walk(srcDir);
+
+  // Include key data files so IOC/dataset changes invalidate the cache
+  const dataFiles = [
+    path.join(ROOT, 'iocs-compact.json'),
+    path.join(ROOT, 'tests', 'ground-truth', 'attacks.json'),
+    path.join(ROOT, 'datasets', 'benign', 'packages-npm.txt'),
+  ];
+  for (const fp of dataFiles) {
+    try {
+      const st = fs.statSync(fp);
+      entries.push(`${path.relative(ROOT, fp)}:${st.size}:${Math.floor(st.mtimeMs)}`);
+    } catch { /* file may not exist */ }
+  }
+
+  // Include ground-truth sample directories (new/removed samples invalidate cache)
+  const gtSamplesDir = path.join(ROOT, 'tests', 'ground-truth', 'samples');
+  try {
+    const dirs = fs.readdirSync(gtSamplesDir);
+    entries.push(`gt-samples-count:${dirs.length}`);
+  } catch { /* skip */ }
+
   entries.sort();
   return hashString(entries.join('|')).toString(36);
 }
@@ -1549,7 +1571,7 @@ async function evaluateMLClassifier(benignResults, gtResults, adrResults) {
  * @returns {'ioc'|'heuristic'} Detection source classification
  */
 const IOC_TYPES = new Set([
-  'known_malicious_package', 'pypi_malicious_package', 'shai_hulud_marker', 'ioc_match'
+  'known_malicious_package', 'pypi_malicious_package', 'shai_hulud_marker', 'ioc_match', 'dependency_ioc_match'
 ]);
 
 function classifyDetectionSource(threat) {
