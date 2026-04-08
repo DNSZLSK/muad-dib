@@ -365,19 +365,19 @@ function runMLClassifierTests() {
     }
   });
 
-  test('classifyPackage: score >= 35, no HC, bundler model → fp_bundler (clean prediction)', () => {
+  test('classifyPackage: score >= 35, no HC, bundler model → bypass (log-only, bundler disabled)', () => {
     resetModel();
     injectBundlerModel();
     try {
-      // score=40 < 50 threshold in bundler tree → leaf value -1.5 → sigmoid ~ 0.18 < 0.5 → clean → fp_bundler
+      // Bundler model disabled (2026-04-08): semi-collapsed, p≈0.37 for all inputs.
+      // Even when bundler predicts clean, classifyPackage returns bypass (log-only mode).
       const result = {
         threats: [{ type: 'env_access', severity: 'HIGH', file: 'x.js' }],
         summary: { riskScore: 40, total: 1 }
       };
       const ml = classifyPackage(result, {});
-      assert(ml.prediction === 'fp_bundler', `expected fp_bundler, got ${ml.prediction}`);
-      assert(ml.reason === 'ml_bundler_clean', `expected ml_bundler_clean, got ${ml.reason}`);
-      assert(ml.probability < 0.5, `expected probability < 0.5, got ${ml.probability}`);
+      assert(ml.prediction === 'bypass', `expected bypass (bundler log-only), got ${ml.prediction}`);
+      assert(ml.reason === 'ml_bundler_clean_disabled', `expected ml_bundler_clean_disabled, got ${ml.reason}`);
     } finally {
       restoreNullBundlerModel();
     }

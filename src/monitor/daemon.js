@@ -558,6 +558,19 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
     // Daily webhook report at 08:00 Paris time
     if (isDailyReportDue(stats)) {
       await sendDailyReport(stats, dailyAlerts, recentlyScanned, downloadsCache);
+      // Auto-relabel JSONL training data after daily report (once per day).
+      // Checks registry takedown status for unconfirmed packages.
+      try {
+        const { relabelDataset } = require('./auto-labeler.js');
+        const summary = await relabelDataset({});
+        const totalRelabeled = summary.relabeled_malicious + summary.relabeled_benign + summary.relabeled_likely_benign;
+        if (totalRelabeled > 0) {
+          console.log(`[MONITOR] Auto-relabel: ${summary.relabeled_malicious} malicious, ${summary.relabeled_benign} benign, ${summary.relabeled_likely_benign} likely_benign (${summary.checked} checked)`);
+        }
+      } catch (err) {
+        // Non-fatal: relabel failure must never crash the monitor
+        console.error(`[MONITOR] Auto-relabel failed: ${err.message}`);
+      }
     }
 
     // Short pause before re-checking queue — yields event loop for poll interval
