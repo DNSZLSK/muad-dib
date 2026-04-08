@@ -644,6 +644,14 @@ async function pollPyPI(state, scanQueue) {
  * @param {Object} stats - Mutable stats object
  */
 async function poll(state, scanQueue, stats) {
+  // Backpressure: skip ingestion when queue is saturated.
+  // CouchDB seq and PyPI lastPackage are NOT advanced — next poll resumes from same point.
+  const MAX_SCAN_QUEUE = 10_000;
+  if (scanQueue.length >= MAX_SCAN_QUEUE) {
+    console.log(`[MONITOR] BACKPRESSURE: skipping poll (queue ${scanQueue.length} >= ${MAX_SCAN_QUEUE})`);
+    return;
+  }
+
   const timestamp = new Date().toISOString().slice(0, 19).replace('T', ' ');
   console.log(`[MONITOR] ${timestamp} — polling registries...`);
 
