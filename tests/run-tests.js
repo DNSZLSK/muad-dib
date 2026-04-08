@@ -69,6 +69,7 @@ const { runBlueTeamV8bTests } = require('./integration/blue-team-v8b.test');
 const { runHealthcheckTests } = require('./integration/healthcheck.test');
 const { runMonitorWiringTests } = require('./integration/monitor-wiring.test');
 const { runDeferredSandboxTests } = require('./integration/deferred-sandbox.test');
+const { runMonitorMemoryTests } = require('./integration/monitor-memory.test');
 
 // Temporal analysis tests
 const { runTemporalAnalysisTests } = require('./temporal/temporal-analysis.test');
@@ -212,6 +213,9 @@ async function timed(name, fn) {
 
   // Deferred sandbox queue tests (v2.10.46)
   await timed('deferred-sandbox', runDeferredSandboxTests);
+
+  // Monitor memory management tests (OOM prevention)
+  await timed('monitor-memory', runMonitorMemoryTests);
 
   // Utility tests
   await timed('utils', runUtilsTests);
