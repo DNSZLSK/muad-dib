@@ -413,11 +413,15 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
     // First-publish detection: used for sandbox priority below
     const isFirstPublish = cacheTrigger && cacheTrigger.reason === 'first_publish';
 
-    // ML Phase 2a: Fetch npm registry metadata once for packages with findings
-    // OR for first-publish packages (needed for isFirstPublishHighRisk decision).
-    // Reused for both training records (enriched features) and reputation scoring.
+    // Fetch npm registry metadata for ALL npm packages (not just those with findings).
+    // Needed for: (1) isFirstPublishHighRisk decision, (2) ML classifier features,
+    // (3) JSONL training records — clean packages MUST have metadata to prevent
+    // data leakage (model learning "metadata=0 → clean" instead of behavioral signals).
+    // Cost: near-zero for npm packages because temporal checks (line ~1014) already
+    // pre-fetch registry metadata into temporal-analysis._metadataCache, and
+    // getPackageMetadata() reads this cache first (npm-registry.js:87-95).
     let npmRegistryMeta = null;
-    if ((result.summary.total > 0 || isFirstPublish) && ecosystem === 'npm') {
+    if (ecosystem === 'npm') {
       try {
         const { getPackageMetadata } = require('../scanner/npm-registry.js');
         npmRegistryMeta = await getPackageMetadata(name);
@@ -589,19 +593,43 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
         console.log(`[MONITOR] FINDINGS: ${name}@${version} → ${formatFindings(result)}`);
 
         // ML Phase 2: classifier filter for T1 zone (score 20-34)
-        // Reduces FP webhook noise by filtering clean packages before sandbox/webhook.
         // Guard rails in classifyPackage() ensure HC types and high-score packages are never suppressed.
         // Hoisted so trySendWebhook can use ML result to prevent suppression (p >= 0.90).
-        // Applies to both T1a and T1b (ML can filter both sub-tiers in the [20,35) score range).
+        //
+        // DISABLED (2026-04-08): Model has collapsed — predicts p≈0.002 for ALL inputs (always "clean"),
+        // including clearly malicious patterns (lifecycle+exec+staged_payload). This suppresses real
+        // threats as ml_clean (false negatives). Disabled until model is retrained on corrected JSONL
+        // data with balanced labels. The classifier still runs in LOG-ONLY mode to collect data for
+        // retraining validation, but its prediction is never used for filtering.
+        //
+        // Guards added: ecosystem === 'npm' (PyPI has no npm registry metadata),
+        // npmRegistryMeta fallback fetch (ensure metadata is never null for ML features).
         let mlResult = null;
         const riskScore = result.summary.riskScore || 0;
-        if ((tier === '1a' || tier === '1b') && riskScore >= 20 && riskScore < 35) {
+        if ((tier === '1a' || tier === '1b') && riskScore >= 20 && riskScore < 35 && ecosystem === 'npm') {
           try {
             const { classifyPackage, isModelAvailable } = require('../ml/classifier.js');
             if (isModelAvailable()) {
+              // Defensive: ensure npmRegistryMeta is fetched (should already be from line ~420,
+              // but network failures can silently leave it null)
+              if (!npmRegistryMeta) {
+                try {
+                  const { getPackageMetadata } = require('../scanner/npm-registry.js');
+                  npmRegistryMeta = await getPackageMetadata(name);
+                  if (!npmRegistryMeta) {
+                    console.warn(`[ML] Registry metadata unavailable for ${name} — ML features will be zero-filled`);
+                  }
+                } catch (fetchErr) {
+                  console.warn(`[ML] Registry metadata fetch failed for ${name}: ${fetchErr.message}`);
+                }
+              }
               const enrichedMeta = { npmRegistryMeta, fileCountTotal, hasTests, unpackedSize: meta.unpackedSize, registryMeta: meta };
               mlResult = classifyPackage(result, enrichedMeta);
-              if (mlResult.prediction === 'clean') {
+              // LOG-ONLY: record ML prediction for retraining data but do NOT filter.
+              // When model is retrained and validated, remove the 'true ||' guard below.
+              console.log(`[MONITOR] ML LOG-ONLY: ${name}@${version} (prediction=${mlResult.prediction}, p=${mlResult.probability}, score=${riskScore})`);
+              if (false && mlResult.prediction === 'clean') {
+                // DISABLED: model collapsed (p≈0.002 for all inputs). Re-enable after retrain.
                 console.log(`[MONITOR] ML CLEAN: ${name}@${version} (p=${mlResult.probability}, score=${riskScore})`);
                 stats.mlFiltered++;
                 stats.scanned++;
@@ -612,8 +640,6 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
                 recordTrainingSample(result, { name, version, ecosystem, label: 'ml_clean', tier, registryMeta: meta, unpackedSize: meta.unpackedSize, npmRegistryMeta, fileCountTotal, hasTests });
                 return { sandboxResult: null, mlFiltered: true, tier };
               }
-              // Not clean — proceed normally
-              console.log(`[MONITOR] ML SUSPECT: ${name}@${version} (p=${mlResult.probability}, reason=${mlResult.reason})`);
             }
           } catch (err) {
             // Non-fatal: ML failure must never block the scan pipeline

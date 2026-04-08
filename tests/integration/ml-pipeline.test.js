@@ -263,10 +263,11 @@ function runMLPipelineTests() {
     resetBundlerModel();
   }
 
-  test('ML pipeline: end-to-end bundler model — low score → fp_bundler', () => {
+  test('ML pipeline: end-to-end bundler model — low score → bypass (bundler log-only)', () => {
     injectBundlerModel();
     try {
-      // score=40 < 50 threshold in bundler tree → clean → fp_bundler
+      // Bundler model disabled (2026-04-08): semi-collapsed, returns bypass even when
+      // bundler predicts clean. Log-only mode — fp_bundler prediction never returned.
       const result = {
         threats: [{ type: 'env_access', severity: 'HIGH', file: 'x.js' }],
         summary: {
@@ -276,8 +277,8 @@ function runMLPipelineTests() {
         }
       };
       const ml = classifyPackage(result, {});
-      assert(ml.prediction === 'fp_bundler', `expected fp_bundler for score=40, got ${ml.prediction}`);
-      assert(ml.reason === 'ml_bundler_clean', `expected ml_bundler_clean, got ${ml.reason}`);
+      assert(ml.prediction === 'bypass', `expected bypass (bundler log-only) for score=40, got ${ml.prediction}`);
+      assert(ml.reason === 'ml_bundler_clean_disabled', `expected ml_bundler_clean_disabled, got ${ml.reason}`);
     } finally {
       restoreBundlerModel();
     }
