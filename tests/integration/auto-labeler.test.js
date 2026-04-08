@@ -163,8 +163,8 @@ async function runAutoLabelerTests() {
     assert(SURVIVAL_DAYS === 30, `Expected 30, got ${SURVIVAL_DAYS}`);
   });
 
-  test('RELABEL: DEFAULT_DELAY_MS is 200 (5 req/s)', () => {
-    assert(DEFAULT_DELAY_MS === 200, `Expected 200, got ${DEFAULT_DELAY_MS}`);
+  test('RELABEL: DEFAULT_DELAY_MS is 50 (20 req/s)', () => {
+    assert(DEFAULT_DELAY_MS === 50, `Expected 50, got ${DEFAULT_DELAY_MS}`);
   });
 
   // ─── Module exports ───
