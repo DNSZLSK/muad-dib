@@ -22,7 +22,7 @@ const { atomicWriteFileSync } = require('./state.js');
 
 const DEFAULT_INPUT = path.join(__dirname, '..', '..', 'data', 'ml-training.jsonl');
 const DEFAULT_OUTPUT = path.join(__dirname, '..', '..', 'data', 'ml-training-relabeled.jsonl');
-const DEFAULT_DELAY_MS = 200; // 5 req/s max — gentle on registries
+const DEFAULT_DELAY_MS = 50; // 20 req/s — CLI one-shot, no monitor slot sharing needed
 const SURVIVAL_DAYS = 30;
 
 // Labels eligible for auto-relabeling
@@ -72,8 +72,8 @@ function sleep(ms) {
  * @param {string} name - package name
  * @returns {Promise<{status: string, latestVersion?: string, detail?: string}>}
  */
-async function checkNpmStatus(name) {
-  await acquireRegistrySlot();
+async function checkNpmStatus(name, options = {}) {
+  if (!options.skipSemaphore) await acquireRegistrySlot();
   try {
     const data = await httpsGetJson(`https://registry.npmjs.org/${encodeURIComponent(name)}`);
 
@@ -90,7 +90,7 @@ async function checkNpmStatus(name) {
   } catch (err) {
     return { status: 'error', detail: err.message };
   } finally {
-    releaseRegistrySlot();
+    if (!options.skipSemaphore) releaseRegistrySlot();
   }
 }
 
@@ -250,11 +250,13 @@ async function relabelDataset(options = {}) {
 
   const labelChanges = new Map(); // packageKey → { label, source }
 
+  const total = packageMap.size;
   for (const [key, pkg] of packageMap) {
+    const t0 = Date.now();
     let registryStatus;
     try {
       if (pkg.ecosystem === 'npm') {
-        registryStatus = await checkNpmStatus(pkg.name);
+        registryStatus = await checkNpmStatus(pkg.name, { skipSemaphore: true });
       } else if (pkg.ecosystem === 'pypi') {
         registryStatus = await checkPyPIStatus(pkg.name);
       } else {
@@ -265,18 +267,25 @@ async function relabelDataset(options = {}) {
     } catch (err) {
       summary.errors++;
       summary.checked++;
+      console.log(`[RELABEL] ${key} → error (${Date.now() - t0}ms): ${err.message}`);
       continue;
     }
 
     if (registryStatus.status === 'error') {
       summary.errors++;
       summary.checked++;
+      console.log(`[RELABEL] ${key} → error (${Date.now() - t0}ms): ${registryStatus.detail}`);
       if (delayMs > 0) await sleep(delayMs);
       continue;
     }
 
     const newLabel = computeNewLabel(pkg, registryStatus);
     summary.checked++;
+    console.log(`[RELABEL] ${key} → ${newLabel ? newLabel.label : 'unchanged'} (${registryStatus.status}, ${Date.now() - t0}ms)`);
+
+    if (summary.checked % 100 === 0) {
+      console.log(`[RELABEL] Progress: ${summary.checked}/${total} checked`);
+    }
 
     if (newLabel) {
       labelChanges.set(key, newLabel);
