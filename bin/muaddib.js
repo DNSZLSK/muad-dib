@@ -687,6 +687,36 @@ if (command === 'version' || command === '--version' || command === '-v') {
     console.log('Usage: muaddib report --now | --status');
     process.exit(1);
   }
+} else if (command === 'relabel') {
+  if (wantHelp) {
+    console.log('Usage: muaddib relabel [--input <path>] [--output <path>] [--dry-run]');
+    console.log('');
+    console.log('Auto-relabel ML training data by checking registry takedown status.');
+    console.log('Verifies each package against npm/PyPI registries:');
+    console.log('  - npm 0.0.1-security → confirmed_malicious');
+    console.log('  - HTTP 404 + score >= 50 → confirmed_malicious');
+    console.log('  - Alive > 30 days + score < 20 → confirmed_benign');
+    console.log('');
+    console.log('Options:');
+    console.log('  --input <path>   Input JSONL file (default: data/ml-training.jsonl)');
+    console.log('  --output <path>  Output JSONL file (default: data/ml-training-relabeled.jsonl)');
+    console.log('  --dry-run        Log changes without writing');
+    process.exit(0);
+  }
+  const { relabelDataset } = require('../src/monitor/auto-labeler.js');
+  let inputPath, outputPath;
+  for (let i = 0; i < options.length; i++) {
+    if (options[i] === '--input' && options[i + 1]) { inputPath = options[++i]; }
+    else if (options[i] === '--output' && options[i + 1]) { outputPath = options[++i]; }
+  }
+  const dryRun = options.includes('--dry-run');
+  relabelDataset({ input: inputPath, output: outputPath, dryRun }).then(summary => {
+    console.log(JSON.stringify(summary, null, 2));
+    process.exit(0);
+  }).catch(err => {
+    console.error('[ERROR]', err.message);
+    process.exit(1);
+  });
 } else if (command === 'help') {
   // muaddib help <command> — show per-command help
   const helpCmd = options.filter(o => !o.startsWith('-'))[0];
