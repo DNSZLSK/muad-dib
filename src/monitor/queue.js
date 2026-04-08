@@ -865,10 +865,18 @@ function isDailyReportDue(stats) {
  * Encapsulates the full per-package flow: scan -> sandbox -> reputation -> webhook.
  */
 async function processQueueItem(item, stats, dailyAlerts, recentlyScanned, downloadsCache, scanQueue, sandboxAvailable) {
+  // AbortController: signals the scan to stop after timeout.
+  // Prevents zombie scans from continuing expensive work (HTTP, sandbox) in the background.
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), SCAN_TIMEOUT_MS);
   try {
     await Promise.race([
-      resolveTarballAndScan(item, stats, dailyAlerts, recentlyScanned, downloadsCache, scanQueue, sandboxAvailable),
-      timeoutPromise(SCAN_TIMEOUT_MS)
+      resolveTarballAndScan(item, stats, dailyAlerts, recentlyScanned, downloadsCache, scanQueue, sandboxAvailable, controller.signal),
+      new Promise((_, reject) => {
+        controller.signal.addEventListener('abort', () => {
+          reject(new Error(`Scan timeout after ${SCAN_TIMEOUT_MS / 1000}s`));
+        }, { once: true });
+      })
     ]);
   } catch (err) {
     recordError(err, stats);
@@ -900,6 +908,8 @@ async function processQueueItem(item, stats, dailyAlerts, recentlyScanned, downl
         console.error(`[MONITOR] IOC fallback webhook failed: ${webhookErr.message}`);
       }
     }
+  } finally {
+    clearTimeout(timeoutId);
   }
   maybePersistDailyStats(stats, dailyAlerts);
 
@@ -942,7 +952,9 @@ async function processQueue(scanQueue, stats, dailyAlerts, recentlyScanned, down
  * For npm packages, tarballUrl is already set from the registry response.
  * For PyPI packages, we need to fetch the JSON API to get the tarball URL.
  */
-async function resolveTarballAndScan(item, stats, dailyAlerts, recentlyScanned, downloadsCache, scanQueue, sandboxAvailable) {
+async function resolveTarballAndScan(item, stats, dailyAlerts, recentlyScanned, downloadsCache, scanQueue, sandboxAvailable, signal) {
+  if (signal && signal.aborted) return;
+
   if (item.ecosystem === 'npm' && !item.tarballUrl) {
     try {
       const npmInfo = await getNpmLatestTarball(item.name);
@@ -1001,6 +1013,9 @@ async function resolveTarballAndScan(item, stats, dailyAlerts, recentlyScanned, 
   }
   recentlyScanned.add(dedupeKey);
 
+  // Abort check: if timeout fired during URL resolution or dedup, bail out
+  if (signal && signal.aborted) return;
+
   // Temporal analysis: check for sudden lifecycle script changes (npm only)
   // Webhooks are deferred until after sandbox confirms the threat
   let temporalResult = null;
@@ -1022,6 +1037,9 @@ async function resolveTarballAndScan(item, stats, dailyAlerts, recentlyScanned, 
     publishResult = pubRes.status === 'fulfilled' ? pubRes.value : null;
     maintainerResult = maintRes.status === 'fulfilled' ? maintRes.value : null;
   }
+
+  // Abort check: if timeout fired during temporal checks, skip the expensive scan
+  if (signal && signal.aborted) return;
 
   const scanResult = await scanPackage(item.name, item.version, item.ecosystem, item.tarballUrl, {
     unpackedSize: item.unpackedSize || 0,

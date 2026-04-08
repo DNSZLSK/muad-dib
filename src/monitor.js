@@ -95,7 +95,7 @@ function poll(state) { return ingestionModule.poll(state, scanQueue, stats); }
 function processQueue() { return queueModule.processQueue(scanQueue, stats, dailyAlerts, recentlyScanned, classifyModule.downloadsCache, sandboxAvailable); }
 function processQueueItem(item) { return queueModule.processQueueItem(item, stats, dailyAlerts, recentlyScanned, classifyModule.downloadsCache, scanQueue, sandboxAvailable); }
 function scanPackage(name, version, ecosystem, tarballUrl, registryMeta) { return queueModule.scanPackage(name, version, ecosystem, tarballUrl, registryMeta, stats, dailyAlerts, recentlyScanned, classifyModule.downloadsCache, scanQueue, sandboxAvailable); }
-function resolveTarballAndScan(item) { return queueModule.resolveTarballAndScan(item, stats, dailyAlerts, recentlyScanned, classifyModule.downloadsCache, scanQueue, sandboxAvailable); }
+function resolveTarballAndScan(item, signal) { return queueModule.resolveTarballAndScan(item, stats, dailyAlerts, recentlyScanned, classifyModule.downloadsCache, scanQueue, sandboxAvailable, signal); }
 
 // --- Temporal wrappers ---
 function runTemporalCheck(name) { return temporalModule.runTemporalCheck(name, dailyAlerts); }
@@ -247,6 +247,7 @@ module.exports = {
   QUEUE_STATE_FILE: daemonModule.QUEUE_STATE_FILE,
   QUEUE_STATE_MAX_AGE_MS: daemonModule.QUEUE_STATE_MAX_AGE_MS,
   MAX_QUEUE_PERSIST_SIZE: daemonModule.MAX_QUEUE_PERSIST_SIZE,
+  MAX_SCAN_QUEUE: daemonModule.MAX_SCAN_QUEUE,
   persistQueue: daemonModule.persistQueue,
   restoreQueue: daemonModule.restoreQueue,
   LAST_DAILY_REPORT_FILE: stateModule.LAST_DAILY_REPORT_FILE,

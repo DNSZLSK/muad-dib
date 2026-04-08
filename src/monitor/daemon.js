@@ -3,10 +3,10 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { isDockerAvailable, SANDBOX_CONCURRENCY_MAX } = require('../sandbox/index.js');
-const { setVerboseMode, isSandboxEnabled, isCanaryEnabled, isLlmDetectiveEnabled, getLlmDetectiveMode } = require('./classify.js');
+const { setVerboseMode, isSandboxEnabled, isCanaryEnabled, isLlmDetectiveEnabled, getLlmDetectiveMode, DOWNLOADS_CACHE_TTL } = require('./classify.js');
 const { loadState, saveState, loadDailyStats, saveDailyStats, purgeTarballCache, getParisHour, atomicWriteFileSync } = require('./state.js');
 const { isTemporalEnabled, isTemporalAstEnabled, isTemporalPublishEnabled, isTemporalMaintainerEnabled } = require('./temporal.js');
-const { pendingGrouped, flushScopeGroup, sendDailyReport, DAILY_REPORT_HOUR } = require('./webhook.js');
+const { pendingGrouped, flushScopeGroup, sendDailyReport, DAILY_REPORT_HOUR, alertedPackageRules } = require('./webhook.js');
 const { poll } = require('./ingestion.js');
 const { processQueue, SCAN_CONCURRENCY } = require('./queue.js');
 const { startHealthcheck } = require('./healthcheck.js');
@@ -19,6 +19,7 @@ const QUEUE_PERSIST_INTERVAL = 60_000;  // Persist queue to disk every 60s
 const QUEUE_STATE_FILE = path.join(__dirname, '..', '..', 'data', 'queue-state.json');
 const QUEUE_STATE_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24h expiry
 const MAX_QUEUE_PERSIST_SIZE = 100_000; // Don't persist if queue > 100K items
+const MAX_SCAN_QUEUE = 10_000;          // Backpressure: skip polling when queue exceeds this
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -87,13 +88,18 @@ function restoreQueue(scanQueue) {
       return 0;
     }
 
-    // Restore items
-    const count = data.items.length;
+    // Restore items (cap at MAX_SCAN_QUEUE to prevent OOM from stale persisted queues)
+    let items = data.items;
+    if (items.length > MAX_SCAN_QUEUE) {
+      console.log(`[MONITOR] Truncating restored queue from ${items.length} to ${MAX_SCAN_QUEUE} items`);
+      items = items.slice(0, MAX_SCAN_QUEUE);
+    }
+    const count = items.length;
     if (count === 0) {
       try { fs.unlinkSync(QUEUE_STATE_FILE); } catch {}
       return 0;
     }
-    scanQueue.push(...data.items);
+    scanQueue.push(...items);
     console.log(`[MONITOR] Restored ${count} packages from queue state (saved at ${data.savedAt})`);
 
     // Delete after successful restore
@@ -228,6 +234,49 @@ function checkDiskSpace() {
     } catch { /* du failed */ }
   } catch {
     // df not available (non-Linux) — skip silently
+  }
+}
+
+// --- Memory management ---
+
+const MAX_RECENTLY_SCANNED = 50_000;
+const MAX_ALERTED_PACKAGES = 5_000;
+
+/**
+ * Prune in-memory caches to prevent unbounded growth between daily resets.
+ * Called hourly from the main loop. Targets:
+ * - recentlyScanned: Set used for 24h dedup (no TTL, only cleared at daily report)
+ * - downloadsCache: Map with 24h TTL but no proactive eviction
+ * - alertedPackageRules: Map for webhook dedup (only cleared at daily report)
+ */
+function pruneMemoryCaches(recentlyScanned, downloadsCache, alertedPackageRules) {
+  let pruned = 0;
+
+  // 1. recentlyScanned — cap size (FIFO semantics: oldest entries are irrelevant)
+  if (recentlyScanned.size > MAX_RECENTLY_SCANNED) {
+    console.log(`[MONITOR] PRUNE: recentlyScanned ${recentlyScanned.size} > ${MAX_RECENTLY_SCANNED} — clearing`);
+    recentlyScanned.clear();
+    pruned++;
+  }
+
+  // 2. downloadsCache — evict entries past 24h TTL
+  const now = Date.now();
+  for (const [key, entry] of downloadsCache) {
+    if (now - entry.fetchedAt > DOWNLOADS_CACHE_TTL) {
+      downloadsCache.delete(key);
+      pruned++;
+    }
+  }
+
+  // 3. alertedPackageRules — cap size
+  if (alertedPackageRules.size > MAX_ALERTED_PACKAGES) {
+    console.log(`[MONITOR] PRUNE: alertedPackageRules ${alertedPackageRules.size} > ${MAX_ALERTED_PACKAGES} — clearing`);
+    alertedPackageRules.clear();
+    pruned++;
+  }
+
+  if (pruned > 0) {
+    console.log(`[MONITOR] PRUNE: ${pruned} cache entries/collections pruned`);
   }
 }
 
@@ -432,6 +481,12 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
   let pollInProgress = false;
   pollIntervalHandle = setInterval(async () => {
     if (!running || pollInProgress) return;
+    // Backpressure: skip poll when queue is too deep.
+    // CouchDB seq is NOT advanced — next poll resumes from the same point. No packages lost.
+    if (scanQueue.length >= MAX_SCAN_QUEUE) {
+      console.log(`[MONITOR] BACKPRESSURE: skipping poll (queue ${scanQueue.length} >= ${MAX_SCAN_QUEUE})`);
+      return;
+    }
     pollInProgress = true;
     try {
       await poll(state, scanQueue, stats);
@@ -460,16 +515,44 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
   // Consumes scanQueue independently of polling. Workers inside processQueue
   // check scanQueue.length > 0 after each item, so items added by a concurrent
   // poll are picked up immediately by running workers.
+  const MEMORY_LOG_INTERVAL = 300_000; // 5 minutes
+  const MEMORY_PRESSURE_THRESHOLD = 0.85; // 85% heap usage triggers emergency prune
+  let lastMemoryLogTime = Date.now();
+
   while (running) {
     if (scanQueue.length > 0) {
       await processQueue(scanQueue, stats, dailyAlerts, recentlyScanned, downloadsCache, sandboxAvailableRef.value);
     }
 
-    // Hourly stats report + cache purge + runsc cleanup
+    // ─── Memory watchdog (every 5 min) ───
+    if (Date.now() - lastMemoryLogTime >= MEMORY_LOG_INTERVAL) {
+      const mem = process.memoryUsage();
+      const heapUsedMB = (mem.heapUsed / 1024 / 1024).toFixed(0);
+      const heapTotalMB = (mem.heapTotal / 1024 / 1024).toFixed(0);
+      const rssMB = (mem.rss / 1024 / 1024).toFixed(0);
+      console.log(`[MONITOR] MEMORY: heap=${heapUsedMB}MB/${heapTotalMB}MB, rss=${rssMB}MB, queue=${scanQueue.length}, dedup=${recentlyScanned.size}, downloads=${downloadsCache.size}, alerts=${alertedPackageRules.size}`);
+
+      // Emergency prune under memory pressure
+      if (mem.heapUsed / mem.heapTotal > MEMORY_PRESSURE_THRESHOLD) {
+        console.error(`[MONITOR] MEMORY PRESSURE: heap at ${((mem.heapUsed / mem.heapTotal) * 100).toFixed(0)}% — emergency prune`);
+        recentlyScanned.clear();
+        downloadsCache.clear();
+        alertedPackageRules.clear();
+        // Force GC if available (requires --expose-gc)
+        if (global.gc) {
+          global.gc();
+          console.log('[MONITOR] Forced garbage collection');
+        }
+      }
+      lastMemoryLogTime = Date.now();
+    }
+
+    // Hourly stats report + cache purge + runsc cleanup + memory pruning
     if (Date.now() - stats.lastReportTime >= 3600_000) {
       reportStats(stats);
       purgeTarballCache();
       cleanupRunscOrphans();
+      pruneMemoryCaches(recentlyScanned, downloadsCache, alertedPackageRules);
     }
 
     // Daily webhook report at 08:00 Paris time
@@ -499,5 +582,9 @@ module.exports = {
   QUEUE_PERSIST_INTERVAL,
   QUEUE_STATE_FILE,
   QUEUE_STATE_MAX_AGE_MS,
-  MAX_QUEUE_PERSIST_SIZE
+  MAX_QUEUE_PERSIST_SIZE,
+  MAX_SCAN_QUEUE,
+  pruneMemoryCaches,
+  MAX_RECENTLY_SCANNED,
+  MAX_ALERTED_PACKAGES
 };
