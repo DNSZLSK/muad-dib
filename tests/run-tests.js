@@ -70,6 +70,7 @@ const { runHealthcheckTests } = require('./integration/healthcheck.test');
 const { runMonitorWiringTests } = require('./integration/monitor-wiring.test');
 const { runDeferredSandboxTests } = require('./integration/deferred-sandbox.test');
 const { runMonitorMemoryTests } = require('./integration/monitor-memory.test');
+const { runAutoLabelerTests } = require('./integration/auto-labeler.test');
 
 // Temporal analysis tests
 const { runTemporalAnalysisTests } = require('./temporal/temporal-analysis.test');
@@ -216,6 +217,9 @@ async function timed(name, fn) {
 
   // Monitor memory management tests (OOM prevention)
   await timed('monitor-memory', runMonitorMemoryTests);
+
+  // Auto-labeler tests (registry takedown-based ML label correction)
+  await timed('auto-labeler', runAutoLabelerTests);
 
   // Utility tests
   await timed('utils', runUtilsTests);

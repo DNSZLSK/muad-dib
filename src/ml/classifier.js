@@ -326,21 +326,28 @@ function classifyPackage(result, meta) {
       return { prediction: 'bypass', probability: 1, reason: 'high_confidence_threat' };
     }
 
-    // Guard rail 2b: bundler model available → let it decide
+    // Guard rail 2b: bundler model — LOG-ONLY mode
+    // DISABLED (2026-04-08): Model semi-collapsed — gives p≈0.37 for both bundler FPs
+    // and real malware (identical output despite 11/19 features diverging). Cannot
+    // discriminate. Safe (nothing filtered at threshold 0.1) but useless.
+    // Disabled until retrained alongside ML1 on corrected JSONL data.
     if (isBundlerModelAvailable()) {
       const bundlerVec = buildBundlerFeatureVector(result, meta);
       const bundlerResult = predictBundler(bundlerVec);
-      if (bundlerResult.prediction === 'clean') {
+      // Log-only: record prediction for retraining validation
+      const roundedP = Math.round(bundlerResult.probability * 1000) / 1000;
+      // When retrained and validated, remove the 'false &&' guard below.
+      if (false && bundlerResult.prediction === 'clean') {
         return {
           prediction: 'fp_bundler',
-          probability: Math.round(bundlerResult.probability * 1000) / 1000,
+          probability: roundedP,
           reason: 'ml_bundler_clean'
         };
       }
       return {
         prediction: 'bypass',
-        probability: Math.round(bundlerResult.probability * 1000) / 1000,
-        reason: 'ml_bundler_malicious'
+        probability: roundedP,
+        reason: bundlerResult.prediction === 'clean' ? 'ml_bundler_clean_disabled' : 'ml_bundler_malicious'
       };
     }
 
