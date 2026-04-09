@@ -126,16 +126,20 @@ function resetShadowModel() {
 }
 
 /**
- * Run shadow model prediction and log comparison with main model.
- * Never affects the actual classification decision.
+ * Run shadow model prediction and log result.
+ * NEVER affects the actual classification decision — log-only.
+ *
+ * Runs independently of the main model's guard rails so that shadow
+ * predictions are logged for ALL packages with score >= 20, not just
+ * T1 zone. This provides validation data across the full score range
+ * before the shadow model is promoted to production.
  *
  * @param {Object} result - scan result
  * @param {Object} meta - enriched metadata
- * @param {string} mainPrediction - the main model's prediction
- * @param {number} mainProbability - the main model's probability
  * @param {string} packageName - for logging
+ * @param {number} score - risk score (for log context)
  */
-function runShadowComparison(result, meta, mainPrediction, mainProbability, packageName) {
+function runShadowPrediction(result, meta, packageName, score) {
   const shadow = loadShadowModel();
   if (!shadow) return;
 
@@ -151,20 +155,21 @@ function runShadowComparison(result, meta, mainPrediction, mainProbability, pack
   }
 
   const shadowProb = sigmoid(margin);
+  const roundedP = Math.round(shadowProb * 1000) / 1000;
   const shadowPred = shadowProb >= shadow.threshold ? 'malicious' : 'clean';
 
   _shadowStats.total++;
-  if (shadowPred === mainPrediction) {
-    _shadowStats.agree++;
-  } else {
+  if (shadowPred === 'malicious') {
     _shadowStats.disagree++;
-    console.log(`[ML-SHADOW] Disagreement on ${packageName}: main=${mainPrediction}(${mainProbability}) shadow=${shadowPred}(${Math.round(shadowProb * 1000) / 1000}) [${_shadowStats.disagree}/${_shadowStats.total} disagree]`);
+    console.log(`[ML-SHADOW] ${packageName} → ${shadowPred} (p=${roundedP}, score=${score}) [${_shadowStats.disagree}/${_shadowStats.total} flagged]`);
+  } else {
+    _shadowStats.agree++;
   }
 
   // Periodic summary every 100 classifications
   if (_shadowStats.total % 100 === 0) {
-    const agreeRate = ((_shadowStats.agree / _shadowStats.total) * 100).toFixed(1);
-    console.log(`[ML-SHADOW] Stats: ${_shadowStats.total} total, ${agreeRate}% agree, ${_shadowStats.disagree} disagree`);
+    const flagRate = ((_shadowStats.disagree / _shadowStats.total) * 100).toFixed(1);
+    console.log(`[ML-SHADOW] Stats: ${_shadowStats.total} total, ${_shadowStats.disagree} flagged (${flagRate}%), ${_shadowStats.agree} clean`);
   }
 }
 
@@ -371,13 +376,6 @@ function classifyPackage(result, meta) {
 
   const roundedProb = Math.round(probability * 1000) / 1000;
 
-  // Shadow model comparison (log-only, never affects decision)
-  if (isShadowModelAvailable()) {
-    const pkgName = (result && result.summary && result.summary.packageName) ||
-                    (meta && meta.name) || 'unknown';
-    runShadowComparison(result, meta, prediction, roundedProb, pkgName);
-  }
-
   return {
     prediction,
     probability: roundedProb,
@@ -401,9 +399,10 @@ module.exports = {
   loadBundlerModel,
   predictBundler,
   buildBundlerFeatureVector,
-  // Shadow model (ML1 v2, log-only comparison)
+  // Shadow model (ML1 v2, log-only prediction)
   isShadowModelAvailable,
   resetShadowModel,
   loadShadowModel,
+  runShadowPrediction,
   getShadowStats
 };
