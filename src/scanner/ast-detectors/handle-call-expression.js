@@ -47,7 +47,8 @@ const {
   extractStringValueDeep,
   hasOnlyStringLiteralArgs,
   hasDecodeArg,
-  containsDecodePattern
+  containsDecodePattern,
+  resolveNumericExpression
 } = require('./helpers.js');
 
 function handleCallExpression(node, ctx) {
@@ -1046,9 +1047,7 @@ function handleCallExpression(node, ctx) {
     if (node.arguments.length >= 2) {
       const delayArg = node.arguments[1];
       let delayMs = null;
-      if (delayArg.type === 'Literal' && typeof delayArg.value === 'number') {
-        delayMs = delayArg.value;
-      }
+      delayMs = resolveNumericExpression(delayArg);
       if (delayMs !== null && delayMs > 3600000) { // > 1 hour
         const hours = (delayMs / 3600000).toFixed(1);
         ctx.threats.push({
@@ -1057,6 +1056,36 @@ function handleCallExpression(node, ctx) {
           message: `${callName}() with ${hours}h delay (${delayMs}ms) — time-bomb evasion: payload activates long after install.`,
           file: ctx.relFile
         });
+      }
+
+      // timer_delayed_payload: delay >= 60s + dangerous sink in callback body
+      if (delayMs !== null && delayMs >= 60000) {
+        const callback = node.arguments[0];
+        if (callback && (callback.type === 'ArrowFunctionExpression' || callback.type === 'FunctionExpression')) {
+          const cbSrc = callback.start !== undefined && callback.end !== undefined
+            ? ctx._sourceCode?.slice(callback.start, callback.end) : '';
+          if (cbSrc) {
+            const hasDangerousSink =
+              /\beval\s*\(/.test(cbSrc) ||
+              /\bnew\s+Function\s*\(/.test(cbSrc) ||
+              /\b(execSync|spawn|spawnSync)\s*\(/.test(cbSrc) ||
+              /(?<!\.)\bexec\s*\(/.test(cbSrc) ||
+              /\brequire\s*\(\s*['"](?:node:)?child_process['"]\s*\)/.test(cbSrc) ||
+              /\bModule\._compile\s*\(/.test(cbSrc);
+            if (hasDangerousSink) {
+              const delayDesc = delayMs >= 3600000
+                ? `${(delayMs / 3600000).toFixed(1)}h`
+                : `${(delayMs / 60000).toFixed(0)}min`;
+              ctx.hasTimerDelayedPayload = true;
+              ctx.threats.push({
+                type: 'timer_delayed_payload',
+                severity: delayMs >= 900000 ? 'CRITICAL' : 'HIGH',
+                message: `${callName}() with ${delayDesc} delay (${delayMs}ms) contains dangerous sink in callback — time-delayed payload execution for sandbox evasion.`,
+                file: ctx.relFile
+              });
+            }
+          }
+        }
       }
     }
   }
