@@ -156,6 +156,7 @@ function analyzeFile(content, filePath, basePath) {
     hasDnsRequire: /\brequire\s*\(\s*['"]dns['"]\s*\)/.test(content) || /\bdns\s*\.\s*resolve/.test(content),
     hasBase64Encode: /\.toString\s*\(\s*['"]base64(url)?['"]\s*\)/.test(content),
     hasDnsLoop: false,  // set when dns call inside loop context detected
+    hasTimerDelayedPayload: false,  // set when setTimeout/setInterval >= 60s has dangerous sink in callback
     // SANDWORM_MODE P2: LLM API key harvesting
     llmApiKeyCount: 0,
     // Wave 4: path variable tracking for git hooks and IDE config injection

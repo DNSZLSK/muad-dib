@@ -67,6 +67,20 @@ For full technical details on each scanner, scoring system, sandbox, IOC system,
 - **Python typosquat false positives:** Typosquat check must skip packages that ARE in the popular list to avoid false positives (flask<->black)
 - **Compact IOC format:** 87% of packages are wildcards (all versions malicious); `iocs.json` (112MB) is gitignored, `iocs-compact.json` (~5MB) is committed
 
+## Production Engineering
+
+1. **Defensive by default** — Toute fonction qui ecrit un fichier, ouvre une connexion, ou alloue de la memoire doit gerer le cas d'echec AVANT le happy path. Verifier les prerequis (permissions, reseau, espace disque) dans les premieres lignes et fail fast si absent.
+
+2. **Bounded resources** — Toute structure en memoire (queue, cache, buffer, array de resultats) doit avoir une taille max explicite. Toute boucle longue doit liberer les objets intermediaires (block scope, nulling). Tout process de plus de 30s doit etre observable : progression, memoire, erreurs cumulees.
+
+3. **Crash resilience** — Le travail partiel a de la valeur. Si un process de 5h crash a 90%, les 90% deja faits doivent etre recuperables. Ecrire les resultats au fur et a mesure (streaming, append, checkpoints), jamais tout en memoire pour ecrire a la fin. Toujours logger un resume meme en cas d'erreur.
+
+4. **Production != tests** — Les tests unitaires valident la logique. La production a des permissions restreintes, de la contention reseau, des process concurrents, des volumes 1000x plus grands, et des timeouts reels. Chaque feature qui tourne sur le VPS doit etre testee mentalement avec 30K+ entrees, pas 3.
+
+5. **Metriques honnetes** — Une metrique evaluee sur un dataset contamine par le meme biais que le training set est sans valeur. Toute evaluation ML doit inclure une validation sur des cas reels en production, pas uniquement sur un holdout statique. Documenter les limites de chaque metrique.
+
+6. **CLI vs daemon** — Les commandes CLI sont des one-shots independants. Elles ne partagent pas les ressources du daemon (semaphores, slots, connexions). Elles verifient leurs prerequis dans les 5 premieres secondes et echouent bruyamment si manquant.
+
 ## Post-Release Documentation Checklist
 
 After every version bump / npm publish, update these files:

