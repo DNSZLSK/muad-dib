@@ -152,6 +152,35 @@ function resolveStringConcatWithVars(node, stringVarValues) {
 }
 
 /**
+ * Recursively resolve a numeric expression AST node to a concrete number.
+ * Handles: Literal numbers, BinaryExpression (*, +, -, /), UnaryExpression (-).
+ * Returns null if the expression contains non-resolvable nodes.
+ *
+ * Examples: 60000 → 60000, 60*1000 → 60000, 10*60*1000 → 600000
+ */
+function resolveNumericExpression(node) {
+  if (!node) return null;
+  if (node.type === 'Literal' && typeof node.value === 'number') return node.value;
+  if (node.type === 'UnaryExpression' && node.operator === '-') {
+    const val = resolveNumericExpression(node.argument);
+    return val !== null ? -val : null;
+  }
+  if (node.type === 'BinaryExpression') {
+    const left = resolveNumericExpression(node.left);
+    const right = resolveNumericExpression(node.right);
+    if (left === null || right === null) return null;
+    switch (node.operator) {
+      case '*': return left * right;
+      case '+': return left + right;
+      case '-': return left - right;
+      case '/': return right !== 0 ? left / right : null;
+      default: return null;
+    }
+  }
+  return null;
+}
+
+/**
  * Extract string value from a node, including BinaryExpression resolution.
  * Falls back to extractStringValue if concat resolution fails.
  */
@@ -253,6 +282,7 @@ module.exports = {
   countConcatOperands,
   resolveStringConcat,
   resolveStringConcatWithVars,
+  resolveNumericExpression,
   extractStringValueDeep,
   hasOnlyStringLiteralArgs,
   hasDecodeArg,

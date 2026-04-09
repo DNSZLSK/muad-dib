@@ -2194,6 +2194,18 @@ const RULES = {
     references: ['https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Reflect/apply'],
     mitre: 'T1059'
   },
+  timer_delayed_payload: {
+    id: 'MUADDIB-AST-085',
+    name: 'Timer Delayed Payload',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'setTimeout/setInterval avec delai >= 60s contenant un sink dangereux (eval/exec/spawn/Function) dans le callback. Evasion temporelle: le payload s\'active apres le timeout des sandboxes. Technique PhantomRaven/timer-bomb-exfil.',
+    references: [
+      'https://attack.mitre.org/techniques/T1497/003/',
+      'https://www.sonatype.com/blog/phantomraven-supply-chain-attack'
+    ],
+    mitre: 'T1497.003'
+  },
   lifecycle_missing_script: {
     id: 'MUADDIB-PKG-017',
     name: 'Phantom Lifecycle Script',
