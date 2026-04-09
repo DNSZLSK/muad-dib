@@ -647,6 +647,24 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
           }
         }
 
+        // Shadow model: log-only prediction for ALL score >= 20 npm packages.
+        // Runs independently of classifyPackage — no effect on mlResult, webhooks,
+        // or any decisions. Collects shadow validation data for the retrained model.
+        if (riskScore >= 20 && ecosystem === 'npm') {
+          try {
+            const { isShadowModelAvailable, runShadowPrediction } = require('../ml/classifier.js');
+            if (isShadowModelAvailable()) {
+              const shadowMeta = { npmRegistryMeta, fileCountTotal, hasTests, unpackedSize: meta.unpackedSize, registryMeta: meta };
+              runShadowPrediction(result, shadowMeta, `${name}@${version}`, riskScore);
+            }
+          } catch (err) {
+            // Non-fatal: shadow failure must never block the pipeline
+            if (err.code !== 'MODULE_NOT_FOUND') {
+              console.error(`[ML-SHADOW] Error for ${name}@${version}: ${err.message}`);
+            }
+          }
+        }
+
         stats.suspect++;
 
         // Fire-and-forget tarball archiving — never blocks the pipeline
