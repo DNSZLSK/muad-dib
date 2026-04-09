@@ -673,6 +673,12 @@ const PLAYBOOKS = {
     'Analyser le callback du timer pour identifier le payload retarde. ' +
     'Si delai > 24h: fort indicateur de time-bomb malware. NE PAS installer.',
 
+  timer_delayed_payload:
+    'Timer avec delai >= 60s contenant un sink dangereux (eval/exec/spawn) dans le callback. ' +
+    'Technique d\'evasion temporelle: le payload attend que les sandboxes timeout avant de s\'activer. ' +
+    'Analyser le contenu du callback: rechercher exfiltration de credentials, reverse shell, ou telechargement de payload. ' +
+    'Si delai >= 15min: forte probabilite de malware. NE PAS installer.',
+
   npm_publish_worm:
     'CRITIQUE: exec("npm publish") detecte — propagation worm. Le code utilise des tokens npm voles ' +
     'pour publier des versions infectees des packages de la victime. Technique Shai-Hulud 1.0 et 2.0. ' +

@@ -123,6 +123,25 @@ FEATURE_NAMES = [
 
 assert len(FEATURE_NAMES) == 87, f"Expected 87 features, got {len(FEATURE_NAMES)}"
 
+# Features to exclude: metadata/source-identity proxies that differ between
+# monitor (negatives) and Datadog (positives) for non-behavioral reasons.
+# See corrected retrain plan for full justification of each exclusion.
+EXCLUDED_METADATA = {
+    # npm registry metadata — always 0 in Datadog positives (not fetched),
+    # 8-13% non-zero in monitor negatives → source leak
+    'package_age_days', 'weekly_downloads', 'version_count',
+    'author_package_count', 'has_repository', 'readme_size',
+    # Derived from corrupted npm metadata (age_days, version_count, downloads).
+    # Currently zero-variance (always 1.0) but becomes a leak when future
+    # records have actual computed values.
+    'reputation_factor',
+    # Package-level metadata not from behavioral scan —
+    # 88-95% non-zero in negatives, 0% in positives → massive source proxy
+    'unpacked_size_bytes', 'file_count_total',
+    # 13% non-zero in negatives, 0% in positives → source proxy
+    'has_tests',
+}
+
 
 # --- Data loading ---
 
@@ -300,10 +319,14 @@ def filter_leaky_features(X: pd.DataFrame, y: np.ndarray,
     retained = []
     excluded = []
 
+    # Iterate over columns actually present in X (metadata may have been
+    # dropped by Step 2a before this function is called).
+    available_features = list(X.columns)
+
     print(f"\n  {'Feature':<40s} {'Neg%':>6s} {'Pos%':>6s} {'All%':>6s} {'Status'}")
     print(f"  {'-' * 40} {'-' * 6} {'-' * 6} {'-' * 6} {'-' * 8}")
 
-    for feat in FEATURE_NAMES:
+    for feat in available_features:
         neg_nonzero = float((X.loc[neg_mask, feat] != 0).sum()) / max(n_neg, 1)
         pos_nonzero = float((X.loc[pos_mask, feat] != 0).sum()) / max(n_pos, 1)
         all_nonzero = float((X[feat] != 0).sum()) / max(n_total, 1)
@@ -328,12 +351,91 @@ def filter_leaky_features(X: pd.DataFrame, y: np.ndarray,
         print(f"  {feat:<40s} {neg_nonzero * 100:5.1f}% {pos_nonzero * 100:5.1f}% "
               f"{all_nonzero * 100:5.1f}% {status}")
 
-    print(f"\n  Retained: {len(retained)}/{len(FEATURE_NAMES)} features")
+    print(f"\n  Retained: {len(retained)}/{len(available_features)} features")
     if excluded:
         print(f"  Excluded ({len(excluded)}): {', '.join(excluded)}")
 
     X_filtered = X[retained]
     return X_filtered, retained
+
+
+def source_discrimination_gate(X: pd.DataFrame, y: np.ndarray,
+                                active_features: list,
+                                max_accuracy: float = 0.65) -> bool:
+    """
+    Step 2c: Hard gate — verify that retained behavioral features cannot
+    trivially distinguish data source (monitor vs Datadog).
+
+    Since all negatives come from monitor and all positives from Datadog,
+    y IS the source label. A shallow classifier that achieves accuracy > 65%
+    on the retained features indicates residual source-identity leaks.
+
+    Returns: True if gate passes (accuracy <= max_accuracy), False if fails.
+    Prints SHAP top 10 of the discriminator to identify offending features.
+    """
+    print("\n" + "=" * 60)
+    print(f"[Step 2c/8] Source discrimination gate (threshold={max_accuracy:.0%})...")
+    print("=" * 60)
+
+    X_active = X[active_features]
+
+    # 70/30 split with different seed to avoid overlap with main split
+    X_tr, X_te, y_tr, y_te = train_test_split(
+        X_active, y, test_size=0.3, stratify=y, random_state=99
+    )
+
+    # Shallow model — depth=3, 50 rounds, no class weighting
+    # (we want to detect ANY discriminability, not optimize for one class)
+    params = {
+        'objective': 'binary:logistic',
+        'eval_metric': 'logloss',
+        'max_depth': 3,
+        'learning_rate': 0.1,
+        'subsample': 0.8,
+        'seed': 99,
+        'verbosity': 0,
+    }
+
+    dtrain = xgb.DMatrix(X_tr, label=y_tr, feature_names=active_features)
+    dtest = xgb.DMatrix(X_te, label=y_te, feature_names=active_features)
+
+    model = xgb.train(params, dtrain, num_boost_round=50)
+    probs = model.predict(dtest)
+    preds = (probs >= 0.5).astype(int)
+    accuracy = float((preds == y_te).mean())
+
+    p = precision_score(y_te, preds, zero_division=0)
+    r = recall_score(y_te, preds, zero_division=0)
+
+    print(f"  Discrimination accuracy: {accuracy:.3f} (P={p:.3f} R={r:.3f})")
+
+    # SHAP analysis to identify which features drive discrimination
+    explainer = shap.TreeExplainer(model)
+    shap_values = explainer.shap_values(X_te)
+    mean_abs_shap = np.abs(shap_values).mean(axis=0)
+    importance = sorted(zip(active_features, mean_abs_shap),
+                        key=lambda x: x[1], reverse=True)
+
+    print(f"\n  Top 10 features driving source discrimination:")
+    for i, (name, val) in enumerate(importance[:10]):
+        flag = ""
+        # Flag non-behavioral features that shouldn't be discriminative
+        if name in ('unpacked_size_bytes', 'file_count_total', 'has_tests',
+                     'dep_count', 'dev_dep_count', 'reputation_factor'):
+            flag = " *** NON-BEHAVIORAL"
+        print(f"    {i + 1:2d}. {name:40s} {val:.6f}{flag}")
+
+    if accuracy <= max_accuracy:
+        print(f"\n  [GATE PASS] Accuracy {accuracy:.3f} <= {max_accuracy:.3f}")
+        print(f"  Behavioral features do not trivially encode source identity.")
+        return True
+    else:
+        print(f"\n  [GATE FAIL] Accuracy {accuracy:.3f} > {max_accuracy:.3f}")
+        print(f"  Retained features still encode source identity.")
+        print(f"  Offending features (exclude and re-run):")
+        for name, val in importance[:5]:
+            print(f"    - {name} (SHAP={val:.6f})")
+        return False
 
 
 def split_data(X: pd.DataFrame, y: np.ndarray) -> tuple:
@@ -693,13 +795,15 @@ def main():
                         help='Path to negatives JSONL (clean/fp labels)')
     parser.add_argument('--positives', required=True,
                         help='Path to positives JSONL (malicious labels)')
-    parser.add_argument('--output', default='src/ml/model-trees.js',
-                        help='Output JS file path (default: src/ml/model-trees.js)')
-    parser.add_argument('--top-features', type=int, default=40,
-                        help='Number of top SHAP features to select (default: 40)')
+    parser.add_argument('--output', default='src/ml/model-trees-shadow.js',
+                        help='Output JS file path (default: src/ml/model-trees-shadow.js)')
+    parser.add_argument('--top-features', type=int, default=50,
+                        help='Number of top SHAP features to select (default: 50)')
     parser.add_argument('--common-only', action=argparse.BooleanOptionalAction,
                         default=True,
                         help='Only use features with >=1%% non-zero coverage in BOTH sources (default: on)')
+    parser.add_argument('--skip-gate', action='store_true',
+                        help='Skip source discrimination gate (dangerous — use only for debugging)')
     args = parser.parse_args()
 
     # Validate inputs
@@ -716,11 +820,34 @@ def main():
     # Step 2: Align features
     X, y, stats = align_features(negatives, positives)
 
-    # Step 2b: Filter leaky features
+    # Step 2a: Remove known metadata/source-proxy features BEFORE leak filter.
+    # These features differ between sources for non-behavioral reasons and would
+    # cause the model to learn source identity instead of malicious behavior.
+    metadata_cols = [f for f in FEATURE_NAMES if f in EXCLUDED_METADATA]
+    X = X.drop(columns=metadata_cols, errors='ignore')
+    remaining_features = [f for f in FEATURE_NAMES if f not in EXCLUDED_METADATA]
+    print(f"\n  [Step 2a] Excluded {len(metadata_cols)} metadata features: "
+          f"{', '.join(metadata_cols)}")
+    print(f"  Remaining: {len(remaining_features)} features")
+
+    # Step 2b: Filter dead/leaky features (on remaining behavioral features)
     if args.common_only:
         X, active_features = filter_leaky_features(X, y)
     else:
-        active_features = list(FEATURE_NAMES)
+        active_features = list(remaining_features)
+
+    # Step 2c: Source discrimination gate — HARD STOP if features encode source
+    if not args.skip_gate:
+        gate_pass = source_discrimination_gate(X, y, active_features)
+        if not gate_pass:
+            print("\n" + "=" * 60)
+            print("ABORTED: Source discrimination gate failed.")
+            print("The retained features still encode source identity.")
+            print("Add offending features to EXCLUDED_METADATA and re-run.")
+            print("=" * 60)
+            sys.exit(1)
+    else:
+        print("\n  [Step 2c] Source discrimination gate SKIPPED (--skip-gate)")
 
     # Class imbalance weight
     n_neg = stats['n_neg']
@@ -756,7 +883,8 @@ def main():
     print("TRAINING COMPLETE")
     print("=" * 60)
     print(f"  Samples: {n_neg} negatives + {n_pos} positives = {n_neg + n_pos}")
-    print(f"  Features: {len(selected)} selected (from {len(active_features)} active / {len(FEATURE_NAMES)} total)")
+    print(f"  Features: {len(selected)} selected (from {len(active_features)} active / "
+          f"{len(FEATURE_NAMES)} total, {len(EXCLUDED_METADATA)} metadata excluded)")
     print(f"  Threshold: {cv_metrics['threshold']:.3f}")
     print(f"  CV:      P={cv_metrics['precision']:.3f} R={cv_metrics['recall']:.3f} F1={cv_metrics['f1']:.3f}")
     print(f"  Holdout: P={holdout_metrics['precision']:.3f} R={holdout_metrics['recall']:.3f} F1={holdout_metrics['f1']:.3f}")
