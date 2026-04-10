@@ -127,6 +127,18 @@ assert len(FEATURE_NAMES) == 87, f"Expected 87 features, got {len(FEATURE_NAMES)
 # monitor (negatives) and Datadog (positives) for non-behavioral reasons.
 # See corrected retrain plan for full justification of each exclusion.
 EXCLUDED_METADATA = {
+    # Score features — direct label leak by construction of the labeling
+    # pipeline in monitor/queue.js: all negatives (label='clean') have
+    # score<20 by definition (0 findings or T3-only), while all positives
+    # (Datadog malware corpus) have score≥20. Leaving these as model features
+    # gives xgboost a trivial shortcut: split on 'score', ignore all
+    # behavioral signals. The model then fails to generalize on high-score
+    # legitimate packages (playwright-core, @salesforce/cli, webpack, ...)
+    # because it never had to learn the behavioral signature.
+    # Removing them forces the model to learn from type_*/has_*/severity_ratio_*
+    # — the actual behavioral ground truth. count_* severity counts are kept
+    # because they reflect threat distribution, not aggregated risk.
+    'score', 'max_file_score', 'package_score', 'global_risk_score',
     # npm registry metadata — always 0 in Datadog positives (not fetched),
     # 8-13% non-zero in monitor negatives → source leak
     'package_age_days', 'weekly_downloads', 'version_count',
@@ -175,18 +187,36 @@ def load_and_prepare(args) -> tuple:
     neg_records = load_jsonl(args.negatives)
     print(f"  Negatives file: {len(neg_records)} total records")
 
-    # Filter: keep only clean and fp labels (exclude suspect and unconfirmed)
-    # 'unconfirmed' = sandbox clean but not manually reviewed — excluded from both
-    # positive and negative sets to prevent contamination (see C1 remediation)
+    # Filter negatives: accept three label classes, all with verified ground truth.
+    #   'clean'           — scanner found 0 findings or T3-only (passive signals).
+    #                       Labelled by monitor/queue.js, low-score by construction.
+    #   'fp'              — manually reviewed false positive. Requires manualReview=true
+    #                       flag in jsonl-writer.js (defense-in-depth vs C1 contamination).
+    #   'curated_benign'  — hand-curated popular legitimate packages scanned via
+    #                       scripts/scan-benign-training.js. These are the ONLY source
+    #                       of high-score negatives: playwright-core, webpack, next,
+    #                       @salesforce/cli, etc. trip behavioral heuristics while
+    #                       being verifiably benign. Without them the model has no
+    #                       high-score negatives and cannot generalize to complex
+    #                       legitimate tooling.
+    # Explicitly EXCLUDED: 'suspect', 'unconfirmed', 'ml_clean', 'llm_benign',
+    # 'likely_benign', 'removed_unlabeled' — these are either uncertain or were
+    # auto-labelled by sandbox-clean heuristics (see C1 remediation: 8176 records
+    # contaminated before the manualReview gate was added).
     neg_label_counts = {}
     for r in neg_records:
         lbl = r.get('label', 'unknown')
         neg_label_counts[lbl] = neg_label_counts.get(lbl, 0) + 1
     print(f"  Negative label distribution: {neg_label_counts}")
 
-    negatives = [r for r in neg_records if r.get('label') in ('clean', 'fp')]
+    VALID_NEGATIVE_LABELS = ('clean', 'fp', 'curated_benign')
+    negatives = [r for r in neg_records if r.get('label') in VALID_NEGATIVE_LABELS]
+    n_clean = sum(1 for r in negatives if r.get('label') == 'clean')
+    n_fp = sum(1 for r in negatives if r.get('label') == 'fp')
+    n_curated = sum(1 for r in negatives if r.get('label') == 'curated_benign')
     n_unconfirmed = sum(1 for r in neg_records if r.get('label') == 'unconfirmed')
-    print(f"  Kept {len(negatives)} negatives (clean + fp)")
+    print(f"  Kept {len(negatives)} negatives "
+          f"(clean={n_clean}, fp={n_fp}, curated_benign={n_curated})")
     if n_unconfirmed > 0:
         print(f"  Excluded {n_unconfirmed} 'unconfirmed' records (not manually reviewed)")
 
