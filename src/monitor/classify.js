@@ -179,8 +179,21 @@ function isSuspectClassification(result) {
     return { suspect: true, tier: 3 };
   }
 
-  // 2+ distinct types with non-passive types not in tier 2 active list -- tier 2
-  return { suspect: true, tier: 2 };
+  // Fallback: 2+ distinct types with non-passive types not in tier 2 active list.
+  // Previously this returned tier 2 unconditionally, but that was permissive —
+  // packages with 2 LOW findings in uncategorized types (e.g., @eeacms/* with
+  // score 2 observed 2026-04-11) landed in tier 2 and flooded the deferred
+  // sandbox queue, starving legitimate T1b/T2 candidates of the dedicated
+  // deferred slot.
+  //
+  // A sandbox slot is only justified when there is real signal. Require at
+  // least one non-LOW finding to reach tier 2 via this fallback — otherwise
+  // downgrade to tier 3 (log only, no sandbox consumption).
+  const hasNonLowFinding = result.threats.some(t => t.severity !== 'LOW');
+  if (hasNonLowFinding) {
+    return { suspect: true, tier: 2 };
+  }
+  return { suspect: true, tier: 3 };
 }
 
 /**

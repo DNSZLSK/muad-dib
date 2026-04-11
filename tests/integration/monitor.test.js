@@ -5582,6 +5582,33 @@ async function runMonitorTests() {
     assert(r.suspect === true && r.tier === 2, 'non-passive non-active 2+ types should be T2, got tier=' + r.tier);
   });
 
+  // Fallback downgrade: packages reaching the tier-2 fallback with ALL findings at
+  // LOW severity (previously observed in @eeacms/* burst 2026-04-11 flooding the
+  // deferred sandbox queue with score-2 noise) should downgrade to tier 3.
+  test('isSuspectClassification T3: non-passive non-active 2+ types all LOW → tier 3 (fallback downgrade)', () => {
+    const result = {
+      threats: [
+        { type: 'credential_tampering', severity: 'LOW' },
+        { type: 'require_cache_poison', severity: 'LOW' }
+      ],
+      summary: { critical: 0, high: 0, medium: 0, low: 2 }
+    };
+    const r = isSuspectClassification(result);
+    assert(r.suspect === true && r.tier === 3, 'LOW-only fallback should be T3, got tier=' + r.tier);
+  });
+
+  test('isSuspectClassification T2: non-passive non-active 1 MEDIUM + 1 LOW → tier 2 (hasNonLow preserved)', () => {
+    const result = {
+      threats: [
+        { type: 'credential_tampering', severity: 'MEDIUM' },
+        { type: 'require_cache_poison', severity: 'LOW' }
+      ],
+      summary: { critical: 0, high: 0, medium: 1, low: 1 }
+    };
+    const r = isSuspectClassification(result);
+    assert(r.suspect === true && r.tier === 2, 'MEDIUM+LOW fallback should stay T2 (non-LOW present), got tier=' + r.tier);
+  });
+
   // --- Tier 3: passive-only types ---
 
   test('isSuspectClassification T3: sensitive_string + obfuscation_detected → tier 3', () => {
