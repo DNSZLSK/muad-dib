@@ -5,7 +5,7 @@ All notable changes to MUAD'DIB will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.10.73] - 2026-04-11
+## [2.10.74] - 2026-04-11
 
 ### Fixed — FP cluster reduction (audit forensique v2.10.72)
 
@@ -102,7 +102,7 @@ in 4 clusters. Full methodology documented in `.claude/plans/recursive-splashing
 - Rules count unchanged: **200** (195 RULES + 5 PARANOID). P2 extends AST-006
   without splitting it into two rule IDs.
 - New ground-truth fixture react-emits brings total GT count to **67 samples**.
-- Carry-over backlog for v2.10.74:
+- Carry-over backlog for v2.10.75:
   - **P5** Refine `PKG-014` git-URL deps owner mismatch FP — confirmed FP
     on `baron-baileys-v2@1.4.3` (legit German hobby dev with separate GitHub
     org). Downgrade to MEDIUM unless combined with compound risk signals.

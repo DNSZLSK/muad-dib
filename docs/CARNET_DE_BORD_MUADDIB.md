@@ -357,9 +357,39 @@ Autre surprise : sur les 377 malwares confirmes, seulement 15 matchaient dans le
 
 ---
 
+## L'audit forensique, le cluster FP, et un merge qui a failli tout casser (11 Avril 2026)
+
+Le moniteur en 24/7 sur npm crachait entre 500 et 900 alertes par jour. J'en recevais une fraction sur Discord grace a la reduction de bruit webhook (v2.7.5), mais j'avais l'impression de regarder un firehose. Les quelques que je prenais le temps d'ouvrir ressemblaient a des faux positifs sur des bundles minifies — `babylonjs`, `electron`, `@testim/testim-cli`, des trucs que personne de sense ne classerait comme malveillant.
+
+Le probleme : j'avais aucune idee de combien de mes alertes etaient vraiment des FPs versus des vrais malwares que je manquais faute de revue. Apres 3 mois, le moniteur avait accumule **53 953 alertes** dans `logs/alerts/`. Je ne pouvais pas les lire une par une.
+
+J'ai decide de lancer un audit forensique massif sur le VPS avec l'aide de Claude Code, en mode analyste malware. Pas un data engineer qui croise des APIs externes — un analyste qui lit le code reel de chaque package pour dire ce que le code fait vraiment. Extraire le tarball, ouvrir les scripts lifecycle, tracer le flux de credentials, classer le comportement observable.
+
+Sur les 8 396 packages avec un score ≥ 50, j'ai tire un echantillon stratifie de 180 packages (30 par bande de score), le VPS a fait une passe de deep-review, puis une passe 2 sur les 43 cas ou un flag "angle mort" s'est declenche (le scanner tirait HIGH/CRITICAL sur des fichiers hors lifecycle). Total : 78 packages lus en profondeur.
+
+Le verdict : **~71-79% des high-score alerts sont des FPs structurels** concentres dans 4 clusters precis.
+
+**Cluster 1 : les bundles minifies legitimes.** Les rules AST/dataflow/obfuscation tiraient sur des helpers bundler standards — `__webpack_require__`, `Function("return this")()`, `var __copyProps = (to, from, except, desc) => ...`, des chaines de `.replace()`. 14 packages impactes : babylonjs, electron, @kitware/vtk.js, dprint, @jetbrains/junie, @zuplo/core, @stencil/core, playwright, @equinor/echo-*, @alipay/ams-checkout, @testim/testim-cli, @vanwei-wcs/video-player-v2, @bookolosystem/engine, @epie/bi-crud. Le probleme : le `DIST_FILE_RE` etait trop etroit. Il ne matchait pas `.umd.js`, `.esm.js`, `.es.js`, `.common.js`, `.max.js`, les chunks avec hash-suffix (`assets/index-a1b2c3d4.js`), les dossiers `fesm*/`, `browser/`, `chunks/`, `_app/`. Toute une cartographie du monde JS moderne qui etait invisible au scoring.
+
+**Cluster 2 : AST-006 `dynamic_require` plugin loaders.** 53 fires sur des packages qui font `config.plugins.forEach(name => require(name))` ou `require(path.join(__dirname, 'plugins', name))`. Pattern legitime. La distinction LOW/HIGH existante ne capturait pas la source reelle de la variable. J'ai ajoute un tracking de source par variable (`string_literal`, `array_literal`, `fs_readdir`, `require_json`, `env_var`) pour distinguer un plugin loader (LOW) d'une vraie obfuscation (HIGH) d'un vecteur d'exfil `require(process.env.X)` (CRITICAL). C'etait surtout une extension du systeme `ctx.staticAssignments` existant, pas une refonte.
+
+**Cluster 3 : AST-007 quick-scan sur les overflow files.** 18+ fires sur `rsshub/dist-lib/*.mjs` — des RSS route handlers qui appellent `child_process.spawn(ffmpeg)` dans des fonctions runtime (pas au top-level install-time). Le quick-scan est un fallback regex quand le file count cap (500) est atteint. Par definition il n'a pas de scope tracking — il ne peut pas distinguer un `exec()` dans `module.exports.handler = () => {...}` d'un `exec()` au top-level. J'ai downgrade toutes les detections quick-scan a MEDIUM (au lieu de HIGH), avec une exception CRITICAL pour `Module._load` qui reste specifique au malware. Les threats "degraded" vont dans un bucket separe cape a 15 points dans le scoring, donc meme 30 fires quick-scan ne peuvent plus dominer un score.
+
+**Cluster 4 : `@leoqlin/openclaw-qqbot` et les WASM bundles.** 52 fires ENTROPY-001 sur UN seul fichier : `node_modules/mpg123-decoder/src/EmscriptenWasm.js`. Le package shippait ses node_modules dans son tarball publie, et l'obfuscation scanner (qui n'exclut pas node_modules volontairement, pour detecter les deps compromises) tirait sur du WASM compile Emscripten qui est high-entropy par construction. Fix chirurgical : detecter les artefacts WASM/Emscripten par basename (`mpg123-decoder`, `wasm-audio-decoders`, etc.) OU par content markers (`Module["asm"]`, `WebAssembly.instantiate`, `HEAPU8`, `_emscripten_`, base64 magic `AGFzbQ`) et skipper juste le scanner d'obfuscation. Les autres scanners continuent a analyser ces fichiers — si un vrai malware se cache dedans, l'AST scanner ou le dataflow le verra.
+
+En cadeau bonus, l'audit a reconfirme **react-emits**, un malware que j'avais detecte en live le 5 avril et que j'avais documente dans un blog post. Mais le VPS a trouve une info que le blog n'avait pas : l'attaquant a fait 4 versions en 4 heures, et entre la v1.0.0 (split payload/trigger via 5 deps malveillantes) et la v1.0.2, il a hardcode les URLs C2 directement dans `path.js` aux lignes 75-76 (`var randomStringRe = "aHR0cDovLzE3My4yMTEuNDYuMjIwL2x2ZXJsYS5qcw=="`). La v1.0.3 etait un retract partiel casse — il a retire les variables mais laisse les IIFE, ce qui fait crasher le package au load avec `ReferenceError: randomStringRe is not defined`. Un attaquant en panique qui se coupe lui-meme la branche. J'ai ajoute react-emits en fixture ground-truth (GT-067) avec l'IP C2 `173.211.46.220` dans le fichier d'IOC markers.
+
+18 heures de travail pour les 4 fixes + la fixture + les tests + la doc. Et puis j'ai voulu synchroniser ma branche avec master avant de push la PR. **`git merge master`**. Conflit. Mauvaise resolution. Le merger a garde l'appel a `isWasmEmscriptenArtifact(file, content)` dans `obfuscation.js:20` mais a jete la declaration de la fonction (et les constants WASM_BASENAME_RE / WASM_CONTENT_MARKERS). Meme chose pour les 10 autres fichiers P1-P4 — 701 lignes de mon travail supprimees en un commit. La CI a casse avec `ReferenceError: isWasmEmscriptenArtifact is not defined`.
+
+J'ai panique pendant 30 secondes, puis je me suis rappele que git ne perd jamais un commit reference. Mon commit valide etait toujours dans l'historique (`72626b8`), juste enterre sous le merge casse. Un `git checkout 72626b8 -- <les 13 fichiers impactes>` a tout restaure. Tests relances, 3134 passed 0 failed (apres avoir aussi restaure 4 fichiers WIP qui contenaient un fix de securite TIER1 anti-evasion dans le sandbox deferred — protege contre un adversaire qui tune son malware a fire uniquement des TIER1_TYPES en LOW severity pour bypass la revue sandbox), commit "fix: restore P1-P4 FP cluster changes lost in master merge" + "fix: restore TIER1 sandbox evasion guard", push. CI relancee. Lecon : toujours tester apres un merge, meme (surtout) quand tu crois que c'etait propre.
+
+Estimation du gain FPR : **14% → 6-9%**. Je mesurerai pour de vrai apres la release. Le TPR reste a 93.75% (aucune regression sur le ground truth, maintenant 67 samples avec react-emits). La release est v2.10.74.
+
+---
+
 ## Ou j'en suis
 
-3 mois et demi de projet. 200 regles de detection, 14 scanners, 3034 tests. Un moniteur en 24/7 sur npm et PyPI. Deux modeles ML entraines. Un ground truth passe de 4 malwares a 377.
+3 mois et demi de projet. 200 regles de detection, 14 scanners, 3134 tests. Un moniteur en 24/7 sur npm et PyPI. Deux modeles ML entraines. Un ground truth passe de 4 malwares a 67 samples + 377 confirmed_malicious dans l'auto-labeler.
 
 Les chiffres qui comptent : TPR 93.9% (46/49 attaques reelles detectees), FPR 10.6% (56/529 packages benins flagues a tort), ADR 94.0% (101/107 samples adversariaux). Ce ne sont pas des scores parfaits, et c'est le point — un scanner avec 0% de FP ne scanne probablement rien, et un TPR de 100% sur 4 samples ne veut rien dire.
 
