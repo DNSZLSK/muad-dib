@@ -292,7 +292,7 @@ repos:
 | **FPR** (Benign random) | **7.5%** (15/200) | 200 random npm packages, stratified sampling |
 | **ADR** (Adversarial + Holdout) | **96.3%** (103/107) | 67 adversarial + 40 holdout (107 available on disk), global threshold=20 |
 
-**3068 tests** across 66 files. **200 rules** (195 RULES + 5 PARANOID).
+**3134 tests** across 66 files. **200 rules** (195 RULES + 5 PARANOID).
 
 > **ML retrain methodology (v2.10.51):**
 > - Ground truth: 377 confirmed_malicious via auto-labeler (OSSF malicious-packages, GitHub Advisory Database, npm registry takedown correlation)
@@ -340,10 +340,10 @@ npm test
 
 ### Testing
 
-- **3068 tests** across 66 modular test files
+- **3134 tests** across 66 modular test files
 - **56 fuzz tests** - Malformed inputs, ReDoS, unicode, binary
 - **Datadog 17K benchmark** - 14,587 confirmed malware samples (in-scope)
-- **Ground truth validation** - 66 real-world attacks (93.75% TPR@3, 85.9% TPR@20)
+- **Ground truth validation** - 67 real-world attacks (93.75% TPR@3, 85.9% TPR@20)
 - **False positive validation** - 14.0% FPR rules, 8.3% after ML on 532 curated npm packages, 7.5% on 200 random
 
 ---

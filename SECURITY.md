@@ -68,7 +68,7 @@ Please include the following information in your report:
 - We aim to release fixes before public disclosure
 - We request a 90-day disclosure window for complex issues
 
-## Detection Rules (v2.10.43)
+## Detection Rules (v2.10.74)
 
 MUAD'DIB uses 14 scanner modules (module-graph pre-analysis + 13 parallel scanners) + 5 behavioral anomaly detection features + ground truth validation, producing 200 rule IDs (195 RULES + 5 PARANOID):
 
@@ -370,7 +370,7 @@ Detection uses both dynamic tokens (random per session) and static fallback toke
 
 The sandbox simulates CI environments by setting: `CI=true`, `GITHUB_ACTIONS=true`, `GITLAB_CI=true`, `TRAVIS=true`, `CIRCLECI=true`, `JENKINS_URL=http://localhost:8080`. This triggers CI-aware malware that checks for these environment variables before activating, which would otherwise stay dormant in local development environments.
 
-### Trusted Package Monitoring (v2.10.43)
+### Trusted Package Monitoring (v2.10.74)
 
 | Rule ID | Name | Severity | Notes |
 |---------|------|----------|-------|

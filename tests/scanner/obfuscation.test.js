@@ -203,6 +203,94 @@ async function runObfuscationTests() {
       assert(!t, 'Textual unicode escapes (not real chars) should NOT trigger');
     } finally { cleanupTemp(tmp); }
   });
+
+  // --- v2.10.73 P4: WASM/Emscripten artifact skip ---
+  // Audit forensique v2.10.72 : 52 ENTROPY-001 fires sur un seul fichier
+  // node_modules/mpg123-decoder/src/EmscriptenWasm.js inside @leoqlin/openclaw-qqbot.
+  // WASM/Emscripten compiled output is high-entropy by construction.
+
+  await asyncTest('OBFUSCATION P4: WASM file via basename pattern → skipped', async () => {
+    // mpg123-decoder basename triggers WASM_BASENAME_RE regardless of content
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-obf-wasm-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'test-wasm', version: '1.0.0' }));
+    const subdir = path.join(tmp, 'node_modules', 'mpg123-decoder', 'src');
+    fs.mkdirSync(subdir, { recursive: true });
+    // High-entropy content that WOULD normally trigger obfuscation detection
+    // 30 long lines with hex escapes + _0x variables + string array
+    const hexLines = Array(30).fill('').map((_, i) =>
+      `var _0x${i.toString(16).padStart(4, '0')} = ['\\x41\\x42\\x43\\x44\\x45\\x46\\x47\\x48\\x49\\x4a\\x4b\\x4c\\x4d\\x4e\\x4f\\x50\\x51\\x52\\x53\\x54', '\\u0061\\u0062\\u0063\\u0064\\u0065\\u0066\\u0067\\u0068', '\\x61\\x62\\x63\\x64\\x65\\x66', '\\x41\\x42\\x43\\x44\\x45\\x46\\x47\\x48\\x49\\x4a'];`
+    ).join('\n');
+    fs.writeFileSync(path.join(subdir, 'EmscriptenWasm.js'), hexLines);
+    try {
+      const result = await runScanDirect(tmp);
+      const obfThreats = (result.threats || []).filter(t =>
+        (t.type === 'obfuscation_detected' || t.type === 'unicode_invisible_injection') &&
+        t.file && t.file.includes('EmscriptenWasm.js')
+      );
+      assert(obfThreats.length === 0,
+        `WASM-named file (mpg123-decoder/EmscriptenWasm.js) should be skipped from obfuscation detection, got ${obfThreats.length} threats`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('OBFUSCATION P4: WASM file via Module["asm"] content marker → skipped', async () => {
+    // Generic filename but Emscripten content markers
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-obf-wasm-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'test-wasm-marker', version: '1.0.0' }));
+    // Generic name, but content has Module["asm"] + HEAPU8 + hex array
+    const content = `var Module = {};
+Module["asm"] = (function() {
+  var HEAPU8 = new Uint8Array(wasmMemory.buffer);
+  var _emscripten_ = 1;
+  var _0xabc1 = ['\\x41\\x42\\x43\\x44\\x45\\x46', '\\x47\\x48\\x49\\x4a\\x4b', '\\x4c\\x4d\\x4e\\x4f\\x50'];
+  ${Array(20).fill('').map((_, i) => `var _0x${i.toString(16)} = '\\x${i.toString(16).padStart(2, '0')}\\x${(i+1).toString(16).padStart(2, '0')}\\x${(i+2).toString(16).padStart(2, '0')}\\x${(i+3).toString(16).padStart(2, '0')}\\x${(i+4).toString(16).padStart(2, '0')}\\x${(i+5).toString(16).padStart(2, '0')}\\x${(i+6).toString(16).padStart(2, '0')}';`).join('\n  ')}
+  return { memory: wasmMemory, table: wasmTable };
+})();`;
+    fs.writeFileSync(path.join(tmp, 'audio-decoder.js'), content);
+    try {
+      const result = await runScanDirect(tmp);
+      const obfThreats = (result.threats || []).filter(t =>
+        (t.type === 'obfuscation_detected' || t.type === 'unicode_invisible_injection') &&
+        t.file && t.file.includes('audio-decoder.js')
+      );
+      assert(obfThreats.length === 0,
+        `File with Module["asm"] + HEAPU8 content markers should be skipped, got ${obfThreats.length} threats`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('OBFUSCATION P4: Regression — real obfuscated malware (no WASM markers) still detected', async () => {
+    // Anti-regression: non-WASM obfuscated code must still fire.
+    // Generic name, no Emscripten markers, but heavy obfuscation.
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-obf-regression-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'test-obf-regression', version: '1.0.0' }));
+    // 10 _0x vars + atob + eval = strong obfuscation signal, no WASM markers
+    const code = `
+var _0xabc1 = atob('Y2hpbGRfcHJvY2Vzcw==');
+var _0xdef2 = atob('ZXhlY1N5bmM=');
+var _0x1234 = eval;
+var _0x5678 = Function;
+var _0x9abc = require(_0xabc1);
+var _0xdead = _0x9abc[_0xdef2];
+var _0xbeef = _0x1234('process.env.HOME');
+var _0xcafe = _0x5678('return this')();
+var _0x1111 = 'w' + 'h' + 'o' + 'a' + 'm' + 'i';
+var _0x2222 = _0xdead(_0x1111);
+`;
+    fs.writeFileSync(path.join(tmp, 'payload.js'), code);
+    try {
+      const result = await runScanDirect(tmp);
+      const threats = result.threats || [];
+      // At least one obfuscation/AST detection should fire
+      const detected = threats.some(t =>
+        t.type === 'obfuscation_detected' ||
+        t.type === 'js_obfuscation_pattern' ||
+        t.type === 'dynamic_require' ||
+        t.type === 'dangerous_call_eval' ||
+        t.type === 'dangerous_call_function'
+      );
+      assert(detected,
+        `Non-WASM obfuscated code must still be detected (regression check). Threats seen: ${threats.map(t => t.type).join(', ')}`);
+    } finally { cleanupTemp(tmp); }
+  });
 }
 
 module.exports = { runObfuscationTests };

@@ -6,7 +6,7 @@
 |----------|-------------|
 | [README](../README.md) | Project overview, installation, usage |
 | [README.fr.md](README.fr.md) | French version of the README |
-| [SECURITY.md](../SECURITY.md) | Security policy, 176 detection rules reference (canonical source) |
+| [SECURITY.md](../SECURITY.md) | Security policy, 200 detection rules reference (canonical source) |
 | [ADVERSARIAL.md](../ADVERSARIAL.md) | Red team adversarial samples and ADR results |
 | [CHANGELOG.md](../CHANGELOG.md) | Version history and release notes |
 
@@ -25,18 +25,21 @@
 |----------|-------------|
 | [Carnet de Bord](CARNET_DE_BORD_MUADDIB.md) | Development journal (French) — project history and decisions |
 
-## Current Metrics (v2.10.21)
+## Current Metrics (v2.10.74)
 
 | Metric | Value |
 |--------|-------|
-| Tests | 2793 across 57 files |
-| Rules | 176 (171 RULES + 5 PARANOID) |
+| Tests | 3134 across 66 files |
+| Rules | 200 (195 RULES + 5 PARANOID) |
 | Scanners | 14 parallel |
-| TPR (Ground Truth) | 93.9% (46/49) |
-| FPR (Benign curated) | 10.6% (56/529) |
+| TPR@3 (Ground Truth) | 93.75% (60/64) |
+| TPR@20 (Ground Truth) | 85.9% (55/64) |
+| FPR rules (Benign curated) | 14.0% (74/532) — **estimated 6-9% post v2.10.74 FP cluster fixes** |
+| FPR after ML | 8.3% (44/529) |
 | FPR (Benign random) | 7.5% (15/200) |
-| ADR (Adversarial + Holdout) | 94.0% (101/107) |
+| ADR (Adversarial + Holdout) | 96.3% (103/107) |
 | Wild TPR (Datadog 17K) | 92.8% (13538/14587 in-scope) |
+| Ground truth samples | 67 (added react-emits GT-067 in v2.10.74) |
 
 ## Architecture Overview
 

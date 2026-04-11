@@ -1078,6 +1078,22 @@
       "mitre": ["T1552.001", "T1546", "T1041"],
       "sample_dir": "samples/ai-agent-exploit/",
       "expected": { "min_threats": 3, "rules": ["MUADDIB-PKG-001"], "severities": ["MEDIUM", "HIGH", "CRITICAL"], "scanners": ["package", "ast", "dataflow"] }
+    },
+    {
+      "id": "GT-067",
+      "name": "react-emits",
+      "version": "1.0.2",
+      "ecosystem": "npm",
+      "year": 2026,
+      "vector": ["typosquat", "staged_rce_loader", "fetch_decrypt_exec"],
+      "published_at": "2026-04-05",
+      "disclosed_at": "2026-04-05",
+      "severity": "CRITICAL",
+      "description": "Fake Node.js 'path' module port (main: ./path.js) — any require('react-emits') triggers two top-level IIFEs doing fetch(atob(VAR)).then(.json()).then(eval(data.content)), loading a staged RCE payload from http://173.211.46.220/. Variables randomStringRe and tokenStringRe are hardcoded base64 of the bare-IP C2 URLs. Detected live by MUAD'DIB monitor 2026-04-05 03:46 UTC, reported to npm Security, confirmed in v2.10.72 audit (2026-04-11 VPS forensics). Attack evolved across 4 versions in 4 hours: v1.0.0 used split payload/trigger via 5 malicious deps (sandbox-clean), v1.0.2 hardcoded URLs directly in path.js, v1.0.3 half-retract broke the package.",
+      "source": "https://github.com/DNSZLSK/muaddib-scanner/blob/master/docs/blog/react-emits-malware.html",
+      "mitre": ["T1027", "T1059.007", "T1105"],
+      "sample_dir": "samples/react-emits/",
+      "expected": { "min_threats": 3, "rules": ["MUADDIB-AST-004", "MUADDIB-AST-040", "MUADDIB-INTENT-001"], "severities": ["HIGH", "CRITICAL"], "scanners": ["ast", "dataflow"] }
     }
   ]
 }
