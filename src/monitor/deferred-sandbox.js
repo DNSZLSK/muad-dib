@@ -26,6 +26,12 @@ const DEFERRED_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 const DEFERRED_MAX_RETRIES = 2;
 const DEFERRED_WORKER_INTERVAL_MS = 30_000; // 30s
 const DEFERRED_STATE_FILE = path.join(__dirname, '..', '..', 'data', 'deferred-queue.json');
+// Defense-in-depth: sandbox slot is precious. A T1b/T2 below this score
+// threshold is almost certainly a classification fallback false positive
+// (cf. classify.js:183 remediation) and should never consume the deferred
+// slot. HIGH=10 pts is the intended T1b floor — values below 5 are LOW-only
+// aggregates which carry no actionable sandbox signal.
+const DEFERRED_MIN_SCORE = 5;
 
 // ── Mutable state ──
 const _deferredQueue = [];
@@ -48,6 +54,16 @@ function enqueueDeferred(item) {
   // Guard: only T1b and T2 are allowed
   if (item.tier !== '1b' && item.tier !== 2) {
     console.error(`[DEFERRED] REJECTED: ${item.name}@${item.version} — tier ${item.tier} not eligible`);
+    return false;
+  }
+
+  // Defense-in-depth: block low-score items regardless of tier. With the
+  // classify.js:183 fallback fix in place, no legitimate enqueue should
+  // reach this function with score < DEFERRED_MIN_SCORE. Logging with
+  // console.error makes a future regression (new classification path that
+  // leaks low-score items) loud in operator logs.
+  if ((item.riskScore || 0) < DEFERRED_MIN_SCORE) {
+    console.error(`[DEFERRED] REJECTED: ${item.name}@${item.version} — score=${item.riskScore || 0} below minimum ${DEFERRED_MIN_SCORE} (possible classification regression)`);
     return false;
   }
 
