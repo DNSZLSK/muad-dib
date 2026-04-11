@@ -24,60 +24,6 @@ function handleVariableDeclarator(node, ctx) {
       ctx.staticAssignments.add(node.id.name);
     }
 
-    // v2.10.73 P2: Track WHERE the variable's value originated — used by AST-006
-    // to distinguish plugin loaders (LOW) from real obfuscation (HIGH) from
-    // credential exfil vectors (CRITICAL). See src/scanner/ast-detectors/handle-call-expression.js
-    // around line 103 for consumption.
-    if (ctx.varSource && node.init) {
-      const init = node.init;
-      let source = null;
-      if (init.type === 'Literal' && typeof init.value === 'string') {
-        source = 'string_literal';
-      } else if (init.type === 'TemplateLiteral' && (init.expressions?.length || 0) === 0) {
-        source = 'string_literal'; // template with no interpolations is effectively a literal
-      } else if (init.type === 'ArrayExpression') {
-        source = 'array_literal';
-      } else if (init.type === 'ObjectExpression') {
-        source = 'object_literal';
-      } else if (init.type === 'MemberExpression' &&
-                 init.object?.type === 'MemberExpression' &&
-                 init.object.object?.type === 'Identifier' &&
-                 init.object.object.name === 'process' &&
-                 init.object.property?.type === 'Identifier' &&
-                 init.object.property.name === 'env') {
-        source = 'env_var'; // const m = process.env.MODULE_NAME
-      } else if (init.type === 'CallExpression') {
-        const callee = init.callee;
-        // fs.readdirSync / fs.readdir / fs.promises.readdir — directory listings
-        // are not attacker-controllable unless the dir itself is, which is rare.
-        if (callee?.type === 'MemberExpression') {
-          const propName = callee.property?.type === 'Identifier' ? callee.property.name : null;
-          const objName = callee.object?.type === 'Identifier' ? callee.object.name : null;
-          const objPropName = callee.object?.type === 'MemberExpression' &&
-                              callee.object.property?.type === 'Identifier'
-                              ? callee.object.property.name : null;
-          if (objName === 'fs' && propName && /^readdir/.test(propName)) {
-            source = 'fs_readdir';
-          } else if (objPropName === 'promises' && propName === 'readdir') {
-            source = 'fs_readdir'; // fs.promises.readdir
-          }
-        }
-        // require('./config.json') or require('./cfg.json') — loading a local JSON
-        // config is a legit plugin loader pattern (consumer-owned JSON file).
-        if (!source &&
-            callee?.type === 'Identifier' && callee.name === 'require' &&
-            init.arguments?.[0]?.type === 'Literal' &&
-            typeof init.arguments[0].value === 'string' &&
-            /\.json$/.test(init.arguments[0].value)) {
-          source = 'require_json';
-        }
-        if (!source) source = 'function_call';
-      } else {
-        source = 'computed_expression';
-      }
-      ctx.varSource.set(node.id.name, source);
-    }
-
     // Track dynamic require vars + module aliases
     if (node.init?.type === 'CallExpression') {
       const initCallName = getCallName(node.init);

@@ -232,18 +232,11 @@ async function execute(targetPath, options, pythonDeps, warnings) {
   if (wasFilesCapped()) {
     warnings.push('File count cap reached (500 files) — overflow files scanned in quick-scan mode (lifecycle + child_process only).');
     const overflowFiles = getOverflowFiles();
-    // v2.10.73 P3: Quick-scan is a DEGRADED regex-based pass — no AST, no scope
-    // tracking. It cannot distinguish exec() at module top-level (CRITICAL) from
-    // exec() inside an exported route handler (LOW runtime). Audit forensique v2.10.72:
-    // 18+ fires AST-007 sur rsshub/dist-lib/*.mjs where spawn() lives inside exported
-    // route handlers. Default severity is now MEDIUM (downgraded from HIGH). Module._load
-    // remains CRITICAL — very rare outside of malware. Threats are flagged `degraded:true`
-    // so scoring.js excludes them from max_file_score (see applyFPReductions).
     const QUICK_SCAN_PATTERNS = [
-      { re: /\brequire\s*\(\s*['"]child_process['"]\s*\)/, type: 'dangerous_exec', severity: 'MEDIUM', label: 'require("child_process")' },
-      { re: /\brequire\s*\(\s*['"]node:child_process['"]\s*\)/, type: 'dangerous_exec', severity: 'MEDIUM', label: 'require("node:child_process")' },
-      { re: /\b(?:exec|execSync|spawn|spawnSync)\s*\(/, type: 'dangerous_exec', severity: 'MEDIUM', label: 'exec/spawn call' },
-      { re: /\bprocess\.mainModule\b/, type: 'dynamic_require', severity: 'MEDIUM', label: 'process.mainModule' },
+      { re: /\brequire\s*\(\s*['"]child_process['"]\s*\)/, type: 'dangerous_exec', severity: 'HIGH', label: 'require("child_process")' },
+      { re: /\brequire\s*\(\s*['"]node:child_process['"]\s*\)/, type: 'dangerous_exec', severity: 'HIGH', label: 'require("node:child_process")' },
+      { re: /\b(?:exec|execSync|spawn|spawnSync)\s*\(/, type: 'dangerous_exec', severity: 'HIGH', label: 'exec/spawn call' },
+      { re: /\bprocess\.mainModule\b/, type: 'dynamic_require', severity: 'HIGH', label: 'process.mainModule' },
       { re: /\bModule\._load\b/, type: 'module_load_bypass', severity: 'CRITICAL', label: 'Module._load' }
     ];
     for (const filePath of overflowFiles) {
@@ -258,9 +251,7 @@ async function execute(targetPath, options, pythonDeps, warnings) {
               type: pat.type,
               severity: pat.severity,
               message: `[quick-scan] ${pat.label} detected in overflow file.`,
-              file: relFile,
-              degraded: true,  // P3: regex-only detection, no semantic context
-              quickScan: true
+              file: relFile
             });
           }
         }

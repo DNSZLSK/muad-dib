@@ -237,8 +237,3 @@ markers:
   - "28PKnu7RzizxBzFPoLp69HLXp9bJL3JFtT2s5QzHsEA2"
   - "BjVeAjPrSKFiingBn4vZvghsGj9KCE8AJVtbc9S8o8SC"
   - "6YGcuyFRJKZtcaYCCFba9fScNUvPkGXodXE1mJiSzqDJ"
-  # react-emits (avril 2026) — bare IP C2 for staged RCE loader
-  # Blog post: docs/blog/react-emits-malware.html, ground truth GT-067
-  # Decoded base64 URLs: http://173.211.46.220/lverla.js and http://173.211.46.220/lverl
-  - "173.211.46.220"
-  - "aHR0cDovLzE3My4yMTEuNDYuMjIw"

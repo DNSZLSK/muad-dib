@@ -5609,36 +5609,6 @@ async function runMonitorTests() {
     assert(r.suspect === true && r.tier === 2, 'MEDIUM+LOW fallback should stay T2 (non-LOW present), got tier=' + r.tier);
   });
 
-  // Threat-model guard: prevent adversaries from exploiting the fallback
-  // downgrade by tuning malware to fire ONLY weak (LOW severity) TIER1_TYPES
-  // patterns. TIER1_TYPES are quasi-never legitimate in benign packages —
-  // weak matches still warrant sandbox verification, so the fallback must
-  // preserve tier 2 when any TIER1_TYPES finding is present regardless of
-  // severity.
-  test('isSuspectClassification T2: staged_payload LOW + credential_tampering LOW → tier 2 (Tier1 signal preserved)', () => {
-    const result = {
-      threats: [
-        { type: 'staged_payload', severity: 'LOW' },
-        { type: 'credential_tampering', severity: 'LOW' }
-      ],
-      summary: { critical: 0, high: 0, medium: 0, low: 2 }
-    };
-    const r = isSuspectClassification(result);
-    assert(r.suspect === true && r.tier === 2, 'TIER1 type at LOW must preserve T2 (weak match still warrants sandbox), got tier=' + r.tier);
-  });
-
-  test('isSuspectClassification T2: sandbox_evasion LOW + credential_tampering LOW → tier 2 (Tier1 signal preserved)', () => {
-    const result = {
-      threats: [
-        { type: 'sandbox_evasion', severity: 'LOW' },
-        { type: 'credential_tampering', severity: 'LOW' }
-      ],
-      summary: { critical: 0, high: 0, medium: 0, low: 2 }
-    };
-    const r = isSuspectClassification(result);
-    assert(r.suspect === true && r.tier === 2, 'sandbox_evasion at LOW must preserve T2, got tier=' + r.tier);
-  });
-
   // --- Tier 3: passive-only types ---
 
   test('isSuspectClassification T3: sensitive_string + obfuscation_detected → tier 3', () => {

@@ -110,11 +110,6 @@ function analyzeFile(content, filePath, basePath) {
     relFile: path.relative(basePath, filePath),
     dynamicRequireVars: new Set(),
     staticAssignments: new Set(),
-    // v2.10.73 P2: AST-006 source qualification — tracks WHERE a variable's value came from.
-    // Used by dynamic_require to distinguish plugin loaders (LOW: string_literal/array_literal/
-    // object_literal/fs_readdir/require_json) from real obfuscation (HIGH: function_call/
-    // computed_expression) or credential theft vectors (CRITICAL: env_var).
-    varSource: new Map(),
     dangerousCmdVars: new Map(),
     workflowPathVars: new Set(),
     execPathVars: new Map(),

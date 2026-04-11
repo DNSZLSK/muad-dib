@@ -89,15 +89,6 @@ function handleCallExpression(node, ctx) {
       // Check if variable was reassignment-tracked to a dangerous module
       const DANGEROUS_MODS_REQ = ['child_process', 'fs', 'net', 'dns', 'http', 'https', 'tls'];
       const resolvedVal = ctx.stringVarValues?.get(arg.name);
-      // v2.10.73 P2: source-aware severity (AST-006 plugin loader FP fix)
-      // Distinguishes plugin loaders (LOW) from obfuscation (HIGH) from env exfil (CRITICAL).
-      // See src/scanner/ast-detectors/handle-variable-declarator.js ctx.varSource tracking.
-      const varSource = ctx.varSource?.get(arg.name) || null;
-      const isStaticSource =
-        varSource === 'string_literal' || varSource === 'array_literal' ||
-        varSource === 'object_literal' || varSource === 'fs_readdir' ||
-        varSource === 'require_json';
-      const isCriticalSource = varSource === 'env_var';
       if (resolvedVal) {
         const norm = resolvedVal.startsWith('node:') ? resolvedVal.slice(5) : resolvedVal;
         if (DANGEROUS_MODS_REQ.includes(norm)) {
@@ -107,46 +98,28 @@ function handleCallExpression(node, ctx) {
             file: ctx.relFile
           });
         } else {
-          // Plugin loader qualification:
-          //  - string_literal/array_literal/object_literal/fs_readdir/require_json → LOW (legit plugin loader)
-          //  - env_var → CRITICAL (require(process.env.X) = credential/path exfil vector)
-          //  - fallback to staticAssignments for legacy coverage
-          //  - else → HIGH (real obfuscation candidate)
-          let severity, message;
-          if (isCriticalSource) {
-            severity = 'CRITICAL';
-            message = `Dynamic require() with variable "${arg.name}" sourced from process.env — environment-driven module loading (credential or path exfil vector).`;
-          } else if (isStaticSource || ctx.staticAssignments.has(arg.name)) {
-            severity = 'LOW';
-            message = `Dynamic require() with statically-assigned variable "${arg.name}" (plugin loader pattern, source: ${varSource || 'static-value'}).`;
-          } else {
-            severity = 'HIGH';
-            message = 'Dynamic require() with variable argument (module name obfuscation).';
-          }
+          // If the variable was assigned from a static value (string literal,
+          // array of strings, object with string values), it's a plugin loader pattern
+          const severity = ctx.staticAssignments.has(arg.name) ? 'LOW' : 'HIGH';
           ctx.threats.push({
             type: 'dynamic_require',
             severity,
-            message,
+            message: severity === 'LOW'
+              ? `Dynamic require() with statically-assigned variable "${arg.name}" (plugin loader pattern).`
+              : 'Dynamic require() with variable argument (module name obfuscation).',
             file: ctx.relFile
           });
         }
       } else {
-        // Same qualification flow without resolvedVal context
-        let severity, message;
-        if (isCriticalSource) {
-          severity = 'CRITICAL';
-          message = `Dynamic require() with variable "${arg.name}" sourced from process.env — environment-driven module loading (credential or path exfil vector).`;
-        } else if (isStaticSource || ctx.staticAssignments.has(arg.name)) {
-          severity = 'LOW';
-          message = `Dynamic require() with statically-assigned variable "${arg.name}" (plugin loader pattern, source: ${varSource || 'static-value'}).`;
-        } else {
-          severity = 'HIGH';
-          message = 'Dynamic require() with variable argument (module name obfuscation).';
-        }
+        // If the variable was assigned from a static value (string literal,
+        // array of strings, object with string values), it's a plugin loader pattern
+        const severity = ctx.staticAssignments.has(arg.name) ? 'LOW' : 'HIGH';
         ctx.threats.push({
           type: 'dynamic_require',
           severity,
-          message,
+          message: severity === 'LOW'
+            ? `Dynamic require() with statically-assigned variable "${arg.name}" (plugin loader pattern).`
+            : 'Dynamic require() with variable argument (module name obfuscation).',
           file: ctx.relFile
         });
       }

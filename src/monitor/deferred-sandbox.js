@@ -15,7 +15,7 @@
 const fs = require('fs');
 const path = require('path');
 const { runSandbox } = require('../sandbox/index.js');
-const { isCanaryEnabled, TIER1_TYPES } = require('./classify.js');
+const { isCanaryEnabled } = require('./classify.js');
 const { getWebhookUrl, alertedPackageRules, persistAlert, buildAlertData } = require('./webhook.js');
 const { sendWebhook } = require('../webhook.js');
 const { atomicWriteFileSync } = require('./state.js');
@@ -59,21 +59,11 @@ function enqueueDeferred(item) {
 
   // Defense-in-depth: block low-score items regardless of tier. With the
   // classify.js:183 fallback fix in place, no legitimate enqueue should
-  // reach this function with score < DEFERRED_MIN_SCORE unless it carries
-  // a TIER1_TYPES signal. Logging with console.error makes a future
-  // regression (new classification path that leaks low-score items) loud
-  // in operator logs.
-  //
-  // Threat-model exception: packages containing any TIER1_TYPES finding
-  // (even at LOW severity) must bypass this min-score guard. TIER1_TYPES
-  // are "quasi-never legitimate in benign packages" and weak matches
-  // still warrant sandbox verification — an adversary could otherwise
-  // tune their malware to fire only LOW-severity TIER1 patterns to
-  // bypass sandbox entirely.
-  const itemThreats = (item.staticResult && item.staticResult.threats) || [];
-  const hasTier1Signal = itemThreats.some(t => TIER1_TYPES.has(t.type));
-  if ((item.riskScore || 0) < DEFERRED_MIN_SCORE && !hasTier1Signal) {
-    console.error(`[DEFERRED] REJECTED: ${item.name}@${item.version} — score=${item.riskScore || 0} below minimum ${DEFERRED_MIN_SCORE}, no TIER1 signal (possible classification regression)`);
+  // reach this function with score < DEFERRED_MIN_SCORE. Logging with
+  // console.error makes a future regression (new classification path that
+  // leaks low-score items) loud in operator logs.
+  if ((item.riskScore || 0) < DEFERRED_MIN_SCORE) {
+    console.error(`[DEFERRED] REJECTED: ${item.name}@${item.version} — score=${item.riskScore || 0} below minimum ${DEFERRED_MIN_SCORE} (possible classification regression)`);
     return false;
   }
 
