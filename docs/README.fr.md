@@ -748,10 +748,12 @@ Output (CLI, JSON, HTML, SARIF, Webhook, Threat Feed)
 | Metrique | Resultat | Details |
 |----------|----------|---------|
 | **Wild TPR** (Datadog 17K) | **92.8%** (13 538/14 587 in-scope) | 17 922 packages. 3 335 sans JS (hors scope). Par categorie : compromised_lib 97.8%, malicious_intent 92.1% |
-| **TPR** (Ground Truth) | **93.9%** (46/49) | 51 attaques reelles (49 actives). 3 hors scope : browser-only (3) |
-| **FPR** (Benign curated) | **10.6%** (56/529) | 529 packages npm, vrai code source via `npm pack`, seuil > 20 |
+| **TPR@3** (Ground Truth) | **93.75%** (60/64) | 67 attaques reelles (64 actives + 3 hors scope browser-only) |
+| **TPR@20** (Ground Truth) | **85.9%** (55/64) | Seuil alerte = 20 (threshold operationnel) |
+| **FPR rules** (Benign curated) | **14.0%** (74/532) → **estimee 6-9% post v2.10.74** | 532 packages npm, vrai code source via `npm pack`, seuil > 20. v2.10.74 : 4 fixes FP cluster (P1-P4) basees sur audit forensique de 53 953 alertes en production |
+| **FPR after ML** | **8.3%** (44/529) | Filtre ML XGBoost applique en plus des reductions FP |
 | **FPR** (Benign random) | **7.5%** (15/200) | 200 packages npm aleatoires, echantillonnage stratifie |
-| **ADR** (Adversarial + Holdout) | **94.0%** (101/107) | 67 adversariaux + 40 holdouts (107 disponibles), seuil global=20 |
+| **ADR** (Adversarial + Holdout) | **96.3%** (103/107) | 67 adversariaux + 40 holdouts (107 disponibles), seuil global=20 |
 
 **Benchmark Datadog 17K (v2.10.21)** — [DataDog Malicious Software Packages Dataset](https://github.com/DataDog/malicious-software-packages-dataset), 17 922 packages malveillants npm. Wild TPR : **92.8%** (13 538/14 587 in-scope). 3 335 packages sans fichiers JS exclus comme hors scope. Erreurs : 0.
 
@@ -778,9 +780,9 @@ Voir [Evaluation Methodology](docs/EVALUATION_METHODOLOGY.md#14-datadog-17k-benc
 | Gros (50-100 fichiers JS) | 40 | 10 | 25.0% |
 | Tres gros (100+ fichiers JS) | 62 | 25 | 40.3% |
 
-**Progression FPR** : 0% (invalide, dirs vides, v2.2.0-v2.2.6) → 38% (premiere vraie mesure, v2.2.7) → 19.4% (v2.2.8) → 17.5% (v2.2.9) → ~13% (v2.2.11, scoring per-file max) → 8.9% (v2.3.0, P2) → 7.4% (v2.3.1, P3) → 6.0% (v2.5.8, P4 + audit IOC wildcards) → ~13.6% (v2.5.14, hardening audit) → **12.3%** (v2.5.16, P5+P6, 65/532) → **12.3%** (v2.6.1, module-graph bounded path — zero FP) → **12.1%** (v2.6.2, P7) → **12.9%** (v2.9.4, compound scoring + nouveaux detecteurs) → **10.8%** (v2.10.1, audit v3 FP reduction, 57/529) → **11.0%** (v2.10.5, ML + compounds, 58/529) → **10.6%** (v2.10.21, dataflow graduation + SDK heuristic, 56/529)
+**Progression FPR** : 0% (invalide, dirs vides, v2.2.0-v2.2.6) → 38% (premiere vraie mesure, v2.2.7) → 19.4% (v2.2.8) → 17.5% (v2.2.9) → ~13% (v2.2.11, scoring per-file max) → 8.9% (v2.3.0, P2) → 7.4% (v2.3.1, P3) → 6.0% (v2.5.8, P4 + audit IOC wildcards) → ~13.6% (v2.5.14, hardening audit) → **12.3%** (v2.5.16, P5+P6, 65/532) → **12.3%** (v2.6.1, module-graph bounded path — zero FP) → **12.1%** (v2.6.2, P7) → **12.9%** (v2.9.4, compound scoring + nouveaux detecteurs) → **10.8%** (v2.10.1, audit v3 FP reduction, 57/529) → **11.0%** (v2.10.5, ML + compounds, 58/529) → **10.6%** (v2.10.21, dataflow graduation + SDK heuristic, 56/529) → **14.0%** (v2.10.57, reconstruction corpus benin curate, 74/532) → **estimee 6-9%** (v2.10.74, fixes FP cluster P1-P4 basees sur audit forensique de 53 953 alertes — extension regex bundle + qualification source AST-006 + degradation quick-scan + skip WASM/Emscripten ; mesure reelle apres release)
 
-> **Note sur l'evolution du FPR :** Le FPR historique de 6.0% (v2.5.8) reposait sur un `BENIGN_PACKAGE_WHITELIST` qui excluait certains packages connus du scoring — un biais de data leakage supprime en v2.5.10. Le FPR actuel de 10.6% est une mesure honnete sans whitelisting, contre 529 packages benins reels. La baisse v2.10.5→v2.10.21 (-2 FP) vient de la graduation dataflow et de l'heuristique SDK.
+> **Note sur l'evolution du FPR :** Le FPR historique de 6.0% (v2.5.8) reposait sur un `BENIGN_PACKAGE_WHITELIST` qui excluait certains packages connus du scoring — un biais de data leakage supprime en v2.5.10. Le FPR v2.10.21-v2.10.57 sont des mesures honnetes sans whitelisting. Le bump 10.6% → 14.0% en v2.10.57 vient de la reconstruction du corpus benin curate (3 packages supplementaires + re-tuning seuils). La projection 6-9% en v2.10.74 repose sur les 4 clusters FP identifies dans l'audit forensique de 78 packages deep-reviewed — extension de la regex bundle path (babylonjs, electron, @testim, @stencil, playwright, etc.), qualification source des dynamic_require, degradation quick-scan sur les fichiers overflow, et skip des artefacts WASM/Emscripten dans le scanner d'obfuscation.
 
 **Progression holdout** (scores pre-tuning, regles gelees) :
 

@@ -2,7 +2,17 @@
 
 This document consolidates the historical FP audits performed during development. For the full evaluation methodology (TPR, FPR, ADR, holdout protocol), see [EVALUATION_METHODOLOGY.md](EVALUATION_METHODOLOGY.md).
 
-## Current FPR: 10.8% (57/529) — v2.10.1
+## Current FPR: 14.0% (74/532) — v2.10.57, estimated **6-9% post v2.10.74** (FP cluster fixes)
+
+> **v2.10.74 (11 Apr 2026)** — FP cluster fixes based on forensic audit of 53,953
+> production alerts on 8,396 high-score packages. 4 structural FP clusters identified
+> and fixed (P1-P4): bundle minified path regex extended, AST-006 dynamic_require
+> source qualification, AST-007 quick-scan degrade + capped bucket, obfuscation
+> scanner WASM/Emscripten artifact skip. Expected improvement: **14.0% → 6-9%**
+> (-5 to -8 points). Actual measurement deferred to post-release sweep on the same
+> benign 532 corpus. See CHANGELOG.md and ARCHITECTURE.md for full details.
+
+## Historical FPR: 10.8% (57/529) — v2.10.1
 
 ---
 
