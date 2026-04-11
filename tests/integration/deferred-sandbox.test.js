@@ -64,6 +64,50 @@ function runDeferredSandboxTests() {
     _resetDeferredQueue();
   });
 
+  // Defense-in-depth min score guard (DEFERRED_MIN_SCORE = 5). Paired with the
+  // classify.js:183 fallback fix: prevents low-score items (observed 2026-04-11
+  // as @eeacms/* burst at score 2 flooding the deferred queue) from consuming
+  // the dedicated deferred sandbox slot.
+  test('enqueueDeferred rejects score below DEFERRED_MIN_SCORE (score=2, T2)', () => {
+    const { enqueueDeferred, getDeferredQueue, _resetDeferredQueue } = require('../../src/monitor/deferred-sandbox.js');
+    _resetDeferredQueue();
+
+    const r = enqueueDeferred(makeItem({ name: 'eeacms-like', tier: 2, riskScore: 2 }));
+    assert(r === false, 'Should reject score-2 items below DEFERRED_MIN_SCORE');
+    assert(getDeferredQueue().length === 0, 'Queue should remain empty');
+    _resetDeferredQueue();
+  });
+
+  test('enqueueDeferred rejects score below DEFERRED_MIN_SCORE regardless of tier (score=3, T1b)', () => {
+    const { enqueueDeferred, getDeferredQueue, _resetDeferredQueue } = require('../../src/monitor/deferred-sandbox.js');
+    _resetDeferredQueue();
+
+    const r = enqueueDeferred(makeItem({ name: 'low-t1b', tier: '1b', riskScore: 3 }));
+    assert(r === false, 'Should reject score-3 even for T1b tier');
+    assert(getDeferredQueue().length === 0, 'Queue should remain empty');
+    _resetDeferredQueue();
+  });
+
+  test('enqueueDeferred accepts items at exactly DEFERRED_MIN_SCORE (score=5)', () => {
+    const { enqueueDeferred, getDeferredQueue, _resetDeferredQueue } = require('../../src/monitor/deferred-sandbox.js');
+    _resetDeferredQueue();
+
+    const r = enqueueDeferred(makeItem({ name: 'at-floor', tier: 2, riskScore: 5 }));
+    assert(r === true, 'Should accept score=5 (not strictly below threshold)');
+    assert(getDeferredQueue().length === 1, 'Queue should contain the item');
+    _resetDeferredQueue();
+  });
+
+  test('enqueueDeferred accepts single HIGH finding (score=10, legitimate T1b)', () => {
+    const { enqueueDeferred, getDeferredQueue, _resetDeferredQueue } = require('../../src/monitor/deferred-sandbox.js');
+    _resetDeferredQueue();
+
+    const r = enqueueDeferred(makeItem({ name: 'single-high', tier: '1b', riskScore: 10 }));
+    assert(r === true, 'Should accept legitimate T1b at HIGH severity (score=10)');
+    assert(getDeferredQueue().length === 1, 'Queue should contain the item');
+    _resetDeferredQueue();
+  });
+
   test('enqueueDeferred deduplicates name@version', () => {
     const { enqueueDeferred, getDeferredQueue, _resetDeferredQueue } = require('../../src/monitor/deferred-sandbox.js');
     _resetDeferredQueue();
