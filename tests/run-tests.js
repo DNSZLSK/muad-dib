@@ -4,6 +4,7 @@ const { getCounters } = require('./test-utils');
 const { runAstTests } = require('./scanner/ast.test');
 const { runShellTests } = require('./scanner/shell.test');
 const { runObfuscationTests } = require('./scanner/obfuscation.test');
+const { runBundleDetectTests } = require('./scanner/bundle-detect.test');
 const { runDataflowTests } = require('./scanner/dataflow.test');
 const { runPackageTests } = require('./scanner/package.test');
 const { runTyposquatTests } = require('./scanner/typosquat.test');
@@ -98,6 +99,7 @@ async function timed(name, fn) {
   await timed('ast', runAstTests);
   await timed('shell', runShellTests);
   await timed('obfuscation', runObfuscationTests);
+  await timed('bundle-detect', runBundleDetectTests);
   await timed('dataflow', runDataflowTests);
   await timed('package', runPackageTests);
   await timed('typosquat', runTyposquatTests);
