@@ -1,18 +1,60 @@
 const fs = require('fs');
 const path = require('path');
-const { findFiles, forEachSafeFile } = require('../utils.js');
+const { findFiles, forEachSafeFile, debugLog } = require('../utils.js');
 
 // node_modules NOT excluded: detect obfuscated code in dependencies.
 // dist/build/out/output excluded: bundled output is always flagged as isPackageOutput (LOW)
 // and costs significant processing time on large SDKs.
 const OBF_EXCLUDED_DIRS = ['.git', '.muaddib-cache', 'dist', 'build', 'out', 'output'];
 
+// v2.10.73 P4: WASM/Emscripten artifact detection
+// These files are high-entropy by construction (compiled WebAssembly, asm.js bytecode
+// tables, Emscripten output). They produced 52+ ENTROPY/obfuscation FP fires in the
+// v2.10.72 audit (e.g. node_modules/mpg123-decoder/src/EmscriptenWasm.js inside
+// @leoqlin/openclaw-qqbot's bundled deps). Skipped from obfuscation detection only —
+// other scanners (AST, dataflow, hash, IOC) still analyze them, so actual malware
+// hidden in a WASM file can still be caught through those channels.
+const WASM_BASENAME_RE = /(?:wasm|emscripten|dcmtk|ffmpeg-wasm|opus-decoder|mpg123-decoder|wasm-audio-decoders)/i;
+const WASM_CONTENT_MARKERS = [
+  'Module["asm"]',
+  'Module.asm',
+  'WebAssembly.instantiate',
+  'WebAssembly.compile',
+  '_emscripten_',
+  'asmLibraryArg',
+  'wasmMemory',
+  'wasmTable',
+  'HEAPU8',
+  'HEAP32',
+  'AGFzbQ' // base64 of WASM magic bytes \x00asm — TRES specific marker
+];
+
+function isWasmEmscriptenArtifact(filePath, content) {
+  const basename = path.basename(filePath);
+  if (WASM_BASENAME_RE.test(basename)) return true;
+  // Sample first 64KB to avoid scanning huge files fully (WASM blobs are often >1MB)
+  const sample = content.length > 65536 ? content.slice(0, 65536) : content;
+  for (const marker of WASM_CONTENT_MARKERS) {
+    if (sample.indexOf(marker) !== -1) return true;
+  }
+  return false;
+}
+
 function detectObfuscation(targetPath) {
   const threats = [];
+  let wasmSkipped = 0;
   const files = findFiles(targetPath, { extensions: ['.js', '.mjs', '.cjs'], excludedDirs: OBF_EXCLUDED_DIRS });
 
   forEachSafeFile(files, (file, content) => {
     const relativePath = path.relative(targetPath, file);
+
+    // v2.10.73 P4: Skip WASM/Emscripten artifacts — high-entropy by construction,
+    // produced 52+ FP fires in v2.10.72 audit (mpg123-decoder in @leoqlin/openclaw-qqbot).
+    // Other scanners still analyze these files — this only filters obfuscation heuristics.
+    if (isWasmEmscriptenArtifact(file, content)) {
+      wasmSkipped++;
+      return;
+    }
 
     const signals = [];
     let score = 0;
@@ -102,6 +144,10 @@ function detectObfuscation(targetPath) {
       });
     }
   });
+
+  if (wasmSkipped > 0) {
+    debugLog(`[obfuscation] skipped ${wasmSkipped} WASM/Emscripten artifact(s) — high-entropy by construction`);
+  }
 
   return threats;
 }

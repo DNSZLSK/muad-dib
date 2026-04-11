@@ -1,0 +1,7 @@
+{
+  "name": "react-emits",
+  "version": "1.0.2",
+  "description": "Node.js path module",
+  "main": "./path.js",
+  "author": "react-jason <ohoney554@gmail.com>"
+}

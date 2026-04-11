@@ -186,11 +186,21 @@ function isSuspectClassification(result) {
   // sandbox queue, starving legitimate T1b/T2 candidates of the dedicated
   // deferred slot.
   //
-  // A sandbox slot is only justified when there is real signal. Require at
-  // least one non-LOW finding to reach tier 2 via this fallback — otherwise
-  // downgrade to tier 3 (log only, no sandbox consumption).
+  // Threat model for this downgrade: an adversary reading the open-source
+  // rules can intentionally tune their malware to fire only LOW-severity
+  // patterns + 2 distinct non-T3 types to land in this fallback. If we
+  // downgrade ALL such cases to tier 3, a weak TIER1_TYPES match (e.g.,
+  // staged_payload at LOW, sandbox_evasion at LOW) would bypass sandbox
+  // verification entirely — TIER1_TYPES are "quasi-never legitimate" and
+  // weak matches still warrant dynamic inspection.
+  //
+  // Therefore: preserve tier 2 when EITHER (a) any finding is non-LOW
+  // severity OR (b) any finding is in TIER1_TYPES even at LOW severity.
+  // Downgrade to tier 3 only for packages with 2+ distinct LOW findings
+  // where NONE are in the quasi-never-legit TIER1 zone.
   const hasNonLowFinding = result.threats.some(t => t.severity !== 'LOW');
-  if (hasNonLowFinding) {
+  const hasTier1Signal = result.threats.some(t => TIER1_TYPES.has(t.type));
+  if (hasNonLowFinding || hasTier1Signal) {
     return { suspect: true, tier: 2 };
   }
   return { suspect: true, tier: 3 };

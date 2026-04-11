@@ -1085,6 +1085,52 @@ const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
     } finally { cleanupTemp(tmp); }
   });
 
+  // --- v2.10.73 P2: AST-006 source qualification (extends DREQ-QUAL) ---
+  // Audit forensique v2.10.72: 53 fires AST-006 sur plugin loaders légitimes.
+  // Distinction souce-based : fs_readdir / require_json → LOW ; env_var → CRITICAL.
+
+  await asyncTest('DREQ-QUAL P2: require(envVar) → CRITICAL (environment exfil vector)', async () => {
+    // require(process.env.MODULE_NAME) — attacker-controlled module name via env
+    const tmp = makeTempPkg(`const mod = process.env.MODULE_NAME;\nrequire(mod);`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'dynamic_require');
+      assert(t, 'Should detect require(envVar)');
+      assert(t.severity === 'CRITICAL',
+        `require(process.env.X) should be CRITICAL (env-driven module loading), got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('DREQ-QUAL P2: require(fsReaddirVar) → LOW (directory-listing plugin loader)', async () => {
+    // Plugin loader pattern: list ./plugins/ and require each entry
+    const tmp = makeTempPkg(`const fs = require('fs');\nconst names = fs.readdirSync('./plugins');\nrequire(names);`);
+    try {
+      const result = await runScanDirect(tmp);
+      const dynReqs = result.threats.filter(t => t.type === 'dynamic_require');
+      // Filter to the one from require(names) specifically (not require('fs'))
+      const t = dynReqs.find(t => /names|statically-assigned|fs_readdir/.test(t.message));
+      assert(t, `Should detect require(names) as dynamic_require. Got: ${dynReqs.map(x => x.message).join(' || ')}`);
+      assert(t.severity === 'LOW',
+        `require(fs.readdirSync result) should be LOW (plugin loader pattern), got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('DREQ-QUAL P2: require(requireJsonVar) → LOW (local JSON config plugin)', async () => {
+    // const cfg = require('./cfg.json'); require(cfg); — cfg is object, source=require_json
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-dreq-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'test-dreq', version: '1.0.0' }));
+    fs.writeFileSync(path.join(tmp, 'cfg.json'), '{"entry":"./main.js"}');
+    fs.writeFileSync(path.join(tmp, 'index.js'), `const cfg = require('./cfg.json');\nrequire(cfg);`);
+    try {
+      const result = await runScanDirect(tmp);
+      const dynReqs = (result.threats || []).filter(t => t.type === 'dynamic_require');
+      const t = dynReqs.find(t => /\bcfg\b|statically-assigned|require_json/.test(t.message));
+      assert(t, `Should detect require(cfg) as dynamic_require. Got: ${dynReqs.map(x => x.message).join(' || ')}`);
+      assert(t.severity === 'LOW',
+        `require(require('./cfg.json')) should be LOW (local JSON config), got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
   // ============================
   // Batch 1: vm module detection
   // ============================
@@ -2930,6 +2976,88 @@ https.get('https://souls-entire-defined-routes.trycloudflare.com/kube.py');
       const quickThreats = result.threats.filter(t => t.message && t.message.includes('[quick-scan]'));
       assert(quickThreats.length > 0, 'Should find threats via quick-scan in overflow files');
       assert(quickThreats.some(t => t.type === 'dangerous_exec'), 'Should detect dangerous_exec in overflow');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- v2.10.73 P3: Quick-scan downgrade HIGH → MEDIUM + degraded bucket cap ---
+  // Audit v2.10.72: 18+ AST-007 fires on rsshub/dist-lib/*.mjs where spawn() lives
+  // in exported route handlers (not install-time). Regex-only quick-scan cannot
+  // distinguish scope. Downgrade to MEDIUM + separate capped bucket in scoring.
+
+  await asyncTest('AST P3: quick-scan child_process threats are MEDIUM (not HIGH) + flagged degraded', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-quickscan-p3-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'test-p3-overflow', version: '1.0.0' }));
+    const deepDir = path.join(tmp, 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h');
+    fs.mkdirSync(deepDir, { recursive: true });
+    for (let i = 0; i < 500; i++) {
+      fs.writeFileSync(path.join(tmp, `benign${i}.js`), `const x${i} = ${i};`);
+    }
+    // Overflow file with spawn() — simulates rsshub dist-lib pattern
+    fs.writeFileSync(path.join(deepDir, 'route.mjs'), `export async function handler() { const { spawn } = require('child_process'); return spawn('ffmpeg', []); }`);
+    try {
+      const result = await runScanDirect(tmp);
+      const quickThreats = result.threats.filter(t => t.message && t.message.includes('[quick-scan]'));
+      assert(quickThreats.length > 0, 'Quick-scan should still produce threats');
+      // All dangerous_exec threats from quick-scan must be MEDIUM
+      const dangerExec = quickThreats.filter(t => t.type === 'dangerous_exec');
+      assert(dangerExec.length > 0, 'Should detect dangerous_exec via quick-scan');
+      assert(dangerExec.every(t => t.severity === 'MEDIUM'),
+        `quick-scan dangerous_exec should be MEDIUM (degraded), got: ${dangerExec.map(t => t.severity).join(',')}`);
+      // All should have degraded:true flag
+      assert(dangerExec.every(t => t.degraded === true),
+        'quick-scan dangerous_exec should be marked degraded:true');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST P3: quick-scan Module._load stays CRITICAL (exception)', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-quickscan-mload-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'test-mload', version: '1.0.0' }));
+    const deepDir = path.join(tmp, 'a', 'b', 'c', 'd', 'e', 'f');
+    fs.mkdirSync(deepDir, { recursive: true });
+    for (let i = 0; i < 500; i++) {
+      fs.writeFileSync(path.join(tmp, `benign${i}.js`), `const x${i} = ${i};`);
+    }
+    // Overflow file with Module._load — attacker bypass, should stay CRITICAL.
+    // Use literal `Module._load` (capital M) to match the quick-scan regex /\bModule\._load\b/.
+    fs.writeFileSync(path.join(deepDir, 'evil.js'), `const Module = require('module'); Module._load('child_process');`);
+    try {
+      const result = await runScanDirect(tmp);
+      const mloadThreats = result.threats.filter(t =>
+        t.message && t.message.includes('[quick-scan]') && t.type === 'module_load_bypass'
+      );
+      assert(mloadThreats.length > 0, 'Should detect Module._load via quick-scan');
+      assert(mloadThreats.every(t => t.severity === 'CRITICAL'),
+        `Module._load should stay CRITICAL even in quick-scan, got: ${mloadThreats.map(t => t.severity).join(',')}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST P3: degraded threats contribute at most 15 to package score', async () => {
+    // Create an overflow scenario with MANY quick-scan MEDIUM threats
+    // The degraded bucket should cap contribution at 15 regardless of threat count
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-quickscan-cap-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'test-p3-cap', version: '1.0.0' }));
+    const deepDir = path.join(tmp, 'a', 'b', 'c', 'd', 'e', 'f', 'g');
+    fs.mkdirSync(deepDir, { recursive: true });
+    for (let i = 0; i < 500; i++) {
+      fs.writeFileSync(path.join(tmp, `benign${i}.js`), `const x${i} = ${i};`);
+    }
+    // 20 files in overflow with spawn — 20 MEDIUM threats = 60 raw, capped to 15
+    for (let i = 0; i < 20; i++) {
+      fs.writeFileSync(path.join(deepDir, `route${i}.mjs`),
+        `export async function h${i}() { const { spawn } = require('child_process'); return spawn('ffmpeg'); }`);
+    }
+    try {
+      const result = await runScanDirect(tmp);
+      // Verify many quick-scan threats were produced
+      const quickThreats = result.threats.filter(t => t.message && t.message.includes('[quick-scan]'));
+      assert(quickThreats.length >= 20,
+        `Should produce 20+ quick-scan threats, got ${quickThreats.length}`);
+      // Risk score should not be dominated by the 20 MEDIUM quick-scan threats.
+      // Without the cap, 20 MEDIUM * 3 = 60 points. With cap, +15 max.
+      // Package has no lifecycle, no other threats → score should stay LOW-ish (≤50).
+      const score = result.summary?.riskScore || 0;
+      assert(score <= 50,
+        `Risk score should be capped by degraded bucket (expected ≤50, got ${score}). 20 MEDIUM quick-scan threats should not dominate score.`);
     } finally { cleanupTemp(tmp); }
   });
 

@@ -1,5 +1,7 @@
 const { getRule } = require('./rules/index.js');
 const { HIGH_CONFIDENCE_MALICE_TYPES } = require('./monitor/classify.js');
+// v2.10.73 P1: bundle detection helpers — extended bundle path regex + veto check
+const { BUNDLE_PATH_RE, hasBundleVetoSignal } = require('./shared/bundle-detect.js');
 
 // ============================================
 // SCORING CONSTANTS
@@ -258,8 +260,13 @@ const DIST_EXEMPT_TYPES = new Set([
   // fetch_decrypt_exec (fetch+decrypt+eval triple) remains exempt — never coincidental.
 ]);
 
-// Regex matching dist/build/out/output/minified/bundled file paths
+// Regex matching dist/build/out/output/minified/bundled file paths.
 // P7: added out/ and output/ — common build output directories (esbuild, custom build scripts)
+// v2.10.73 P1: DIST_FILE_RE is kept as the narrow legacy regex for backwards compat
+// with existing call sites (other rules reference it). The EXTENDED bundle match is
+// done via BUNDLE_PATH_RE from src/shared/bundle-detect.js — used in the new gate below.
+// BUNDLE_PATH_RE covers: .umd.js, .esm.js, .es.js, .common.js, .max.js, hash chunks,
+// fesm*/, browser/, assets/, chunks/, _app/, lib/bundled/.
 const DIST_FILE_RE = /(?:^|[/\\])(?:dist|build|out|output)[/\\]|\.min\.js$|\.bundle\.js$/i;
 
 // Bundler artifact types: get two-notch downgrade in dist/ files (CRITICAL→MEDIUM, HIGH→LOW).
@@ -287,6 +294,15 @@ const DIST_BUNDLER_ARTIFACT_TYPES = new Set([
   // Audit v3 B3: staged_payload (fetch+eval) in dist/ is code splitting / lazy loading,
   // not malicious payload staging. fetch_decrypt_exec remains exempt (triple signal).
   'staged_payload'
+  // v2.10.73 P1: credential_regex_harvest, suspicious_dataflow, string_mutation_obfuscation
+  // are NOT added here (kept in the one-notch path) — existing scoring-hardening tests
+  // (FP-P7 etc.) require these to receive a single-notch downgrade to stay visible as
+  // MEDIUM in bundles. The real benefit for these types comes from the extended
+  // BUNDLE_PATH_RE (src/shared/bundle-detect.js) which now matches .umd/.esm/.es/.common/
+  // .max suffixes, fesm*/, browser/, assets/, chunks/, hash-suffixed chunks — paths
+  // where the old narrow DIST_FILE_RE missed the bundle files entirely. One-notch
+  // downgrade on a broader set of bundle paths is enough to bring FP clusters under
+  // the webhook threshold without compromising true positive detection.
 ]);
 
 // Types exempt from reachability downgrade — IOC matches, lifecycle, and package-level types.
@@ -644,8 +660,29 @@ function applyFPReductions(threats, reachableFiles, packageName, packageDeps) {
     // Bundler artifact types (eval, dynamic_require, obfuscation) get two-notch downgrade
     // (CRITICAL→MEDIUM, HIGH→LOW) since bundlers routinely produce these patterns.
     // Other non-exempt types keep one-notch downgrade.
-    if (t.file && !DIST_EXEMPT_TYPES.has(t.type) && DIST_FILE_RE.test(t.file)) {
-      if (DIST_BUNDLER_ARTIFACT_TYPES.has(t.type)) {
+    //
+    // v2.10.73 P1: two changes to this gate :
+    //  (a) Match either the narrow legacy DIST_FILE_RE OR the extended BUNDLE_PATH_RE
+    //      from src/shared/bundle-detect.js (which adds .umd.js/.esm.js/.common.js/
+    //      hash-chunks/fesm*/browser/assets/chunks/_app). Rationale : the narrow regex
+    //      missed babylonjs/electron/@testim/@vanwei-wcs/etc. bundle files.
+    //  (b) Before applying the downgrade, call hasBundleVetoSignal() — if the same
+    //      file has a threat of type {staged_binary_payload, fetch_decrypt_exec,
+    //      reverse_shell, node_modules_write, ...} OR an env_access on a sensitive env
+    //      var (NPM_TOKEN, AWS_*, SSH_*, ...), BLOCK the downgrade. This preserves
+    //      detection of event-stream / flatmap-stream style injections where malware
+    //      is packed inside a legitimate-looking bundle.
+    const isBundleFile = t.file && (DIST_FILE_RE.test(t.file) || BUNDLE_PATH_RE.test(t.file));
+    if (isBundleFile && !DIST_EXEMPT_TYPES.has(t.type)) {
+      // Veto check: don't downgrade if the bundle is suspected of injection
+      if (hasBundleVetoSignal(threats, t.file)) {
+        // Leave the threat at its original severity — the bundle contains a
+        // suspicious co-occurring signal (staged payload, credential env read,
+        // reverse shell, etc.) so all threats on this file stay un-downgraded.
+        // Record it in reductions for audit trail.
+        if (!t.reductions) t.reductions = [];
+        t.reductions.push({ rule: 'bundle_veto_preserved', from: t.severity, to: t.severity });
+      } else if (DIST_BUNDLER_ARTIFACT_TYPES.has(t.type)) {
         // Two-notch downgrade for bundler artifacts
         const fromSev = t.severity;
         if (t.severity === 'CRITICAL') t.severity = 'MEDIUM';
@@ -789,8 +826,15 @@ function calculateRiskScore(deduped, intentResult) {
   // 1. Separate deduped threats into package-level and file-level
   const packageLevelThreats = [];
   const fileLevelThreats = [];
+  // v2.10.73 P3: Degraded quick-scan threats get a separate bucket so they
+  // contribute a bounded amount to the package score but never inflate max_file_score.
+  // Exception: CRITICAL degraded threats (Module._load pattern) pass through normal
+  // file-level processing — they are rare and nearly always malicious.
+  const degradedNonCriticalThreats = [];
   for (const t of deduped) {
-    if (isPackageLevelThreat(t)) {
+    if (t.degraded === true && t.severity !== 'CRITICAL') {
+      degradedNonCriticalThreats.push(t);
+    } else if (isPackageLevelThreat(t)) {
       packageLevelThreats.push(t);
     } else {
       fileLevelThreats.push(t);
@@ -873,8 +917,21 @@ function calculateRiskScore(deduped, intentResult) {
     intentBonus = Math.min(intentResult.intentScore, 30);
   }
 
-  // 7. Final score = max file score + cross-file bonus + intent bonus + package-level score + lifecycle boost, capped at 100
-  let riskScore = Math.min(MAX_RISK_SCORE, maxFileScore + crossFileBonus + intentBonus + packageScore + lifecycleBoost);
+  // 6b. v2.10.73 P3: Degraded (quick-scan) non-CRITICAL threats contribute a
+  // bounded bonus to the final score — they are visible in the report but never
+  // inflate max_file_score. Cap at 15 (= 5 MEDIUM threats OR 1 HIGH + small).
+  // Rationale: quick-scan is regex-only, cannot distinguish top-level from
+  // exported function scope, so detections are low-confidence by construction.
+  let degradedScore = 0;
+  if (degradedNonCriticalThreats.length > 0) {
+    for (const t of degradedNonCriticalThreats) {
+      degradedScore += _severityWeights[t.severity] || 0;
+    }
+    degradedScore = Math.min(15, degradedScore);
+  }
+
+  // 7. Final score = max file score + cross-file bonus + intent bonus + package-level score + lifecycle boost + degraded bucket, capped at 100
+  let riskScore = Math.min(MAX_RISK_SCORE, maxFileScore + crossFileBonus + intentBonus + packageScore + lifecycleBoost + degradedScore);
 
   // 7b. MT-1: Score ceiling for packages without lifecycle scripts.
   // 56% of real malware uses install scripts. Packages without lifecycle that score high
