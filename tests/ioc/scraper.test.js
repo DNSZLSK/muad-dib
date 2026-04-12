@@ -109,14 +109,28 @@ async function runScraperTests() {
     assert(result.includes('1.0.0'), 'Should include introduced version 1.0.0');
   });
 
-  test('SCRAPER: extractVersions skips introduced=0 (C2: returns empty, no wildcard)', () => {
+  test('SCRAPER: extractVersions returns wildcard for unbounded introduced=0 (all versions malicious)', () => {
+    // introduced=0 with no fixed event = all versions malicious = wildcard
+    // This is the standard format for Amazon Inspector bulk imports (tea.xyz campaign)
     const affected = {
       ranges: [{
         events: [{ introduced: '0' }]
       }]
     };
     const result = extractVersions(affected);
-    assert(result.length === 0, 'Should return empty — C2 prevents wildcard fallback for introduced=0');
+    assert(result.length === 1, 'Should return 1 entry (wildcard), got ' + result.length);
+    assert(result[0] === '*', 'Should be wildcard * for unbounded introduced=0');
+  });
+
+  test('SCRAPER: extractVersions does NOT wildcard when introduced=0 has fixed', () => {
+    // introduced=0 + fixed=1.0.1 = bounded range, not a wildcard
+    const affected = {
+      ranges: [{
+        events: [{ introduced: '0' }, { fixed: '1.0.1' }]
+      }]
+    };
+    const result = extractVersions(affected);
+    assert(!result.includes('*'), 'Bounded range should not produce wildcard');
   });
 
   test('SCRAPER: extractVersions deduplicates versions', () => {
@@ -131,12 +145,13 @@ async function runScraperTests() {
 
   // --- noVersionSkipCount aggregated warning ---
 
-  test('SCRAPER: extractVersions increments noVersionSkipCount on empty affected', () => {
+  test('SCRAPER: extractVersions increments noVersionSkipCount on truly empty affected', () => {
     resetNoVersionSkipCount();
-    extractVersions({});
-    extractVersions({ ranges: [{ events: [{ introduced: '0' }] }] });
-    extractVersions({});
-    assert(getNoVersionSkipCount() === 3, 'Should have counted 3 skips, got ' + getNoVersionSkipCount());
+    extractVersions({});                                                         // skip: no versions, no ranges
+    extractVersions({ ranges: [{ events: [{ introduced: '0' }] }] });           // NOT a skip: unbounded → wildcard
+    extractVersions({});                                                         // skip: no versions, no ranges
+    extractVersions({ ranges: [{ events: [{ introduced: '0' }, { fixed: '1.0' }] }] }); // skip: bounded range, no versions
+    assert(getNoVersionSkipCount() === 3, 'Should have counted 3 skips (2 empty + 1 bounded range), got ' + getNoVersionSkipCount());
   });
 
   test('SCRAPER: resetNoVersionSkipCount resets counter to 0', () => {
@@ -201,6 +216,22 @@ async function runScraperTests() {
     const result = parseOSVEntry(vuln, 'osv-pypi', 'PyPI');
     assert(result.length === 1, 'Should produce 1 PyPI package');
     assert(result[0].name === 'py-evil', 'Name should be py-evil');
+  });
+
+  test('SCRAPER: parseOSVEntry produces wildcard entry for Amazon Inspector format (introduced=0, no versions)', () => {
+    // This is the exact format of 150K+ tea.xyz campaign packages in OSV
+    const vuln = {
+      id: 'MAL-2025-12345',
+      affected: [{
+        package: { ecosystem: 'npm', name: 'tea-farm-pkg' },
+        ranges: [{ type: 'SEMVER', events: [{ introduced: '0' }] }]
+      }],
+      summary: 'Malicious tea.xyz token farming package'
+    };
+    const result = parseOSVEntry(vuln, 'osv-malicious');
+    assert(result.length === 1, 'Should produce 1 wildcard entry, got ' + result.length);
+    assert(result[0].name === 'tea-farm-pkg', 'Name should match');
+    assert(result[0].version === '*', 'Version should be wildcard *');
   });
 
   test('SCRAPER: parseOSVEntry returns empty for null/no affected', () => {

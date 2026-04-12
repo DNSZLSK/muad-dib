@@ -434,6 +434,7 @@ function createFreshness(source, confidence) {
  */
 function extractVersions(affected) {
   const versions = new Set();
+  let hasUnboundedRange = false;
 
   if (affected.versions && affected.versions.length > 0) {
     for (const v of affected.versions) {
@@ -445,12 +446,26 @@ function extractVersions(affected) {
     for (const range of affected.ranges) {
       if (range.events) {
         for (const event of range.events) {
-          if (event.introduced && event.introduced !== '0') {
+          if (event.introduced === '0') {
+            // "introduced": "0" with no "fixed" = all versions malicious (wildcard).
+            // This is the standard OSV format used by Amazon Inspector bulk imports
+            // (tea.xyz campaign, 150K+ packages). Without this, these entries are
+            // silently dropped and the IOC database loses ~185K packages.
+            const hasFixed = range.events.some(e => e.fixed);
+            if (!hasFixed) {
+              hasUnboundedRange = true;
+            }
+          } else if (event.introduced) {
             versions.add(event.introduced);
           }
         }
       }
     }
+  }
+
+  // Wildcard: unbounded range (introduced=0, no fixed) and no explicit versions
+  if (versions.size === 0 && hasUnboundedRange) {
+    return ['*'];
   }
 
   if (versions.size === 0) {

@@ -247,7 +247,7 @@ module.exports = {
   QUEUE_STATE_FILE: daemonModule.QUEUE_STATE_FILE,
   QUEUE_STATE_MAX_AGE_MS: daemonModule.QUEUE_STATE_MAX_AGE_MS,
   MAX_QUEUE_PERSIST_SIZE: daemonModule.MAX_QUEUE_PERSIST_SIZE,
-  MAX_SCAN_QUEUE: daemonModule.MAX_SCAN_QUEUE,
+  MAX_RESTORE_QUEUE_SIZE: daemonModule.MAX_RESTORE_QUEUE_SIZE,
   persistQueue: daemonModule.persistQueue,
   restoreQueue: daemonModule.restoreQueue,
   LAST_DAILY_REPORT_FILE: stateModule.LAST_DAILY_REPORT_FILE,
