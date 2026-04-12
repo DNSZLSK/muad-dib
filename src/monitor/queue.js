@@ -11,7 +11,7 @@ const path = require('path');
 const os = require('os');
 const { Worker } = require('worker_threads');
 const { run } = require('../index.js');
-const { runSandbox, isDockerAvailable } = require('../sandbox/index.js');
+const { runSandbox, isDockerAvailable, tryAcquireSandboxSlot, SANDBOX_CONCURRENCY_MAX } = require('../sandbox/index.js');
 const { sendWebhook } = require('../webhook.js');
 const { downloadToFile, extractTarGz, sanitizePackageName } = require('../shared/download.js');
 const { MAX_TARBALL_SIZE } = require('../shared/constants.js');
@@ -737,43 +737,61 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
         if (shouldSandbox) {
           try {
             const canary = isCanaryEnabled();
-            const reason = tier === 2 ? ' (T2, queue low)' : tier === '1b' ? ' (T1b, conditional)' : '';
-            console.log(`[MONITOR] SANDBOX${reason}: launching for ${name}@${version}${canary ? ' (canary: on)' : ''}...`);
-            // T1a: 3 runs (time bomb detection via libfaketime — mandatory for high-confidence threats)
-            // T1b/T2: 1 run (270s→90s — time bombs are rare, throughput matters more under load)
             const maxRuns = tier === '1a' ? undefined : 1;
-            sandboxResult = await runSandbox(name, { canary, maxRuns });
-            console.log(`[MONITOR] SANDBOX: ${name}@${version} → score: ${sandboxResult.score}, severity: ${sandboxResult.severity}`);
 
-            // Check for canary exfiltration findings and send dedicated alert
-            const canaryFindings = (sandboxResult.findings || []).filter(f => f.type === 'canary_exfiltration');
-            if (canaryFindings.length > 0) {
-              console.log(`[MONITOR] CANARY EXFILTRATION: ${name}@${version} — ${canaryFindings.length} token(s) stolen!`);
-              // Dedup: skip if this package was already alerted with canary_exfiltration
-              const canaryRuleId = 'canary_exfiltration';
-              const previousRules = alertedPackageRules.get(name);
-              const alreadyAlerted = previousRules && previousRules.has(canaryRuleId);
-              if (alreadyAlerted) {
-                console.log(`[MONITOR] DEDUP: ${name} canary exfiltration (already alerted today)`);
-              } else {
-                const url = getWebhookUrl();
-                if (url) {
-                  const exfiltrations = canaryFindings.map(f => ({
-                    token: f.detail.match(/exfiltrate (\S+)/)?.[1] || 'UNKNOWN',
-                    foundIn: f.detail
-                  }));
-                  const payload = buildCanaryExfiltrationWebhookEmbed(name, version, exfiltrations);
-                  try {
-                    await sendWebhook(url, payload, { rawPayload: true });
-                    console.log(`[MONITOR] Canary exfiltration webhook sent for ${name}@${version}`);
-                    // Track in dedup map
-                    if (previousRules) {
-                      previousRules.add(canaryRuleId);
-                    } else {
-                      alertedPackageRules.set(name, new Set([canaryRuleId]));
+            if (tier === '1a') {
+              // T1a: mandatory sandbox — block-wait (high-confidence threats MUST get sandbox)
+              console.log(`[MONITOR] SANDBOX: launching for ${name}@${version}${canary ? ' (canary: on)' : ''}...`);
+              sandboxResult = await runSandbox(name, { canary, maxRuns });
+            } else if (tryAcquireSandboxSlot()) {
+              // T1b/T2: non-blocking — slot acquired atomically, run with skipSemaphore
+              const reason = tier === 2 ? ' (T2, queue low)' : ' (T1b, conditional)';
+              console.log(`[MONITOR] SANDBOX${reason}: launching for ${name}@${version}${canary ? ' (canary: on)' : ''}...`);
+              sandboxResult = await runSandbox(name, { canary, maxRuns, skipSemaphore: true });
+            } else {
+              // T1b/T2: all sandbox slots busy — defer instead of blocking worker
+              console.log(`[MONITOR] SANDBOX DEFER (slots full): ${name}@${version} (tier=${tier}, score=${riskScore})`);
+              enqueueDeferred({
+                name, version, ecosystem, tier, riskScore, tarballUrl,
+                enqueuedAt: Date.now(),
+                staticResult: result,
+                npmRegistryMeta,
+                retries: 0
+              });
+              stats.sandboxDeferred = (stats.sandboxDeferred || 0) + 1;
+            }
+
+            if (sandboxResult) {
+              console.log(`[MONITOR] SANDBOX: ${name}@${version} → score: ${sandboxResult.score}, severity: ${sandboxResult.severity}`);
+
+              // Check for canary exfiltration findings and send dedicated alert
+              const canaryFindings = (sandboxResult.findings || []).filter(f => f.type === 'canary_exfiltration');
+              if (canaryFindings.length > 0) {
+                console.log(`[MONITOR] CANARY EXFILTRATION: ${name}@${version} — ${canaryFindings.length} token(s) stolen!`);
+                const canaryRuleId = 'canary_exfiltration';
+                const previousRules = alertedPackageRules.get(name);
+                const alreadyAlerted = previousRules && previousRules.has(canaryRuleId);
+                if (alreadyAlerted) {
+                  console.log(`[MONITOR] DEDUP: ${name} canary exfiltration (already alerted today)`);
+                } else {
+                  const url = getWebhookUrl();
+                  if (url) {
+                    const exfiltrations = canaryFindings.map(f => ({
+                      token: f.detail.match(/exfiltrate (\S+)/)?.[1] || 'UNKNOWN',
+                      foundIn: f.detail
+                    }));
+                    const payload = buildCanaryExfiltrationWebhookEmbed(name, version, exfiltrations);
+                    try {
+                      await sendWebhook(url, payload, { rawPayload: true });
+                      console.log(`[MONITOR] Canary exfiltration webhook sent for ${name}@${version}`);
+                      if (previousRules) {
+                        previousRules.add(canaryRuleId);
+                      } else {
+                        alertedPackageRules.set(name, new Set([canaryRuleId]));
+                      }
+                    } catch (webhookErr) {
+                      console.error(`[MONITOR] Canary webhook failed for ${name}@${version}: ${webhookErr.message}`);
                     }
-                  } catch (webhookErr) {
-                    console.error(`[MONITOR] Canary webhook failed for ${name}@${version}: ${webhookErr.message}`);
                   }
                 }
               }

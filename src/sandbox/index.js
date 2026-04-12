@@ -40,6 +40,19 @@ function acquireSandboxSlot() {
   });
 }
 
+/**
+ * Non-blocking slot acquisition. Returns true if slot acquired, false if all busy.
+ * Atomic: check + acquire in a single synchronous call — no race condition.
+ * Used by T1b/T2 to defer instead of blocking when slots are full.
+ */
+function tryAcquireSandboxSlot() {
+  if (_sandboxSemaphore.active < SANDBOX_CONCURRENCY_MAX) {
+    _sandboxSemaphore.active++;
+    return true;
+  }
+  return false;
+}
+
 function releaseSandboxSlot() {
   if (_sandboxSemaphore.queue.length > 0) {
     const next = _sandboxSemaphore.queue.shift();
@@ -1047,4 +1060,4 @@ function displayResults(result) {
   }
 }
 
-module.exports = { buildSandboxImage, runSandbox, runSingleSandbox, scoreFindings, generateNetworkReport, EXFIL_PATTERNS, SAFE_DOMAINS, getSeverity, displayResults, isDockerAvailable, imageExists, isGvisorAvailable, STATIC_CANARY_TOKENS, detectStaticCanaryExfiltration, analyzePreloadLog, TIME_OFFSETS, SAFE_SANDBOX_CMDS, SANDBOX_CONCURRENCY_MAX, acquireSandboxSlot, releaseSandboxSlot, resetSandboxLimiter, getSandboxSemaphore };
+module.exports = { buildSandboxImage, runSandbox, runSingleSandbox, scoreFindings, generateNetworkReport, EXFIL_PATTERNS, SAFE_DOMAINS, getSeverity, displayResults, isDockerAvailable, imageExists, isGvisorAvailable, STATIC_CANARY_TOKENS, detectStaticCanaryExfiltration, analyzePreloadLog, TIME_OFFSETS, SAFE_SANDBOX_CMDS, SANDBOX_CONCURRENCY_MAX, acquireSandboxSlot, tryAcquireSandboxSlot, releaseSandboxSlot, resetSandboxLimiter, getSandboxSemaphore };

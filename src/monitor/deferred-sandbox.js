@@ -175,7 +175,9 @@ async function processDeferredItem(stats) {
   let sandboxResult;
   try {
     const canary = isCanaryEnabled();
-    sandboxResult = await runSandbox(item.name, { canary, skipSemaphore: true });
+    // maxRuns=1: deferred items are T1b/T2, time bomb detection (3 runs) is a luxury.
+    // 90s instead of 270s per item → 3× faster deferred queue drain.
+    sandboxResult = await runSandbox(item.name, { canary, skipSemaphore: true, maxRuns: 1 });
     console.log(`[DEFERRED] SANDBOX COMPLETE: ${key} -> score=${sandboxResult.score}, severity=${sandboxResult.severity}`);
   } catch (err) {
     console.error(`[DEFERRED] SANDBOX ERROR: ${key} — ${err.message}`);
