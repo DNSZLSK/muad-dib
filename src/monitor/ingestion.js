@@ -442,15 +442,26 @@ async function pollNpmChanges(state, scanQueue, stats) {
       // Layer 3: Evaluate if this package should be cached
       const cacheTrigger = evaluateCacheTrigger(name, docMeta, change.doc || null);
 
+      // Fast-track: large packages (>15MB) with no lifecycle scripts and no IOC match
+      // are flagged for static-only processing — no sandbox, no LLM, no archiving.
+      // These packages systematically timeout in sandbox (90s × 3 = INCONCLUSIVE = 0 info).
+      // Static-only processes them in ~5s, freeing worker capacity for real suspects.
+      const FAST_TRACK_SIZE_BYTES = 15 * 1024 * 1024;
+      const size = docMeta ? docMeta.unpackedSize : 0;
+      const scripts = docMeta ? docMeta.scripts : null;
+      const hasLifecycleScript = scripts && (scripts.preinstall || scripts.postinstall || scripts.install);
+      const isFastTrack = !isKnownIOC && size > FAST_TRACK_SIZE_BYTES && !hasLifecycleScript;
+
       scanQueue.push({
         name,
         version: docMeta ? docMeta.version : '',
         ecosystem: 'npm',
         tarballUrl: docMeta ? docMeta.tarball : null,
-        unpackedSize: docMeta ? docMeta.unpackedSize : 0,
-        registryScripts: docMeta ? docMeta.scripts : null,
+        unpackedSize: size,
+        registryScripts: scripts,
         _cacheTrigger: cacheTrigger.shouldCache ? cacheTrigger : null,
-        isIOCMatch: isKnownIOC
+        isIOCMatch: isKnownIOC,
+        fastTrack: isFastTrack || undefined
       });
       queued++;
     }
@@ -643,7 +654,7 @@ async function pollPyPI(state, scanQueue) {
  * @param {Array} scanQueue - Mutable scan queue array
  * @param {Object} stats - Mutable stats object
  */
-const SOFT_BACKPRESSURE_THRESHOLD = 10_000;
+const SOFT_BACKPRESSURE_THRESHOLD = 30_000;
 
 async function poll(state, scanQueue, stats) {
   // Soft backpressure: skip poll when queue is very deep.
