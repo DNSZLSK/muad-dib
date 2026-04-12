@@ -224,7 +224,12 @@ async function runSingleSandbox(packageName, options = {}) {
       '--cap-drop=ALL'
     ];
 
-    // gVisor runtime: use runsc instead of default runc
+    // gVisor runtime: use runsc instead of default runc.
+    // Performance: configure --directfs and --overlay2=all:memory in daemon.json:
+    //   "runsc": { "path": "/usr/bin/runsc", "runtimeArgs": ["--directfs", "--overlay2=all:memory"] }
+    // --directfs: bypass gofer process for direct filesystem access (fewer RPCs, faster I/O)
+    // --overlay2=all:memory: sandbox writes go to tmpfs instead of host (faster, isolated)
+    // These flags require gVisor >= 2023-06-01.
     if (gvisorMode) {
       dockerArgs.push('--runtime=runsc');
       dockerArgs.push('-e', 'MUADDIB_GVISOR=1');

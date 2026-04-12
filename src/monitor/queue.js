@@ -678,7 +678,10 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
         stats.suspect++;
 
         // Fire-and-forget tarball archiving — never blocks the pipeline
-        archiveSuspectTarball(name, version, tarballUrl, {
+        // Skip for fast-track packages (large boring enterprise packages — not worth archiving)
+        if (meta.fastTrack) {
+          console.log(`[MONITOR] FAST-TRACK SKIP: ${name}@${version} — skipping archive + LLM (static-only)`);
+        } else archiveSuspectTarball(name, version, tarballUrl, {
           score: riskScore,
           priority: tierLabel,
           rulesTriggered: (result.threats || []).map(t => t.ruleId || t.type).filter(Boolean),
@@ -687,13 +690,35 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
           console.warn(`[Archive] Failed for ${name}@${version}: ${err.message}`);
         });
 
-        // Sandbox decision based on tier
+        // Sandbox decision based on tier + smart skip for large low-signal packages.
+        // Large packages (>15MB or >80 deps) with only MEDIUM/LOW findings timeout
+        // systematically (90s × 3 = INCONCLUSIVE = 0 detection). Skipping frees slots
+        // for real suspects. Guard-fous: any HIGH/CRITICAL, temporal anomaly, maintainer
+        // change, or dormant spike → sandbox runs regardless of size.
+        const SANDBOX_SIZE_SKIP_BYTES = 15 * 1024 * 1024; // 15MB
+        const SANDBOX_DEPS_SKIP = 80;
+        const isLargePackage = (meta.unpackedSize || 0) > SANDBOX_SIZE_SKIP_BYTES ||
+          (meta.dependencyCount || 0) > SANDBOX_DEPS_SKIP;
+        const hasHighOrCriticalFinding = (result.summary.critical || 0) > 0 || (result.summary.high || 0) > 0;
+        const hasTemporalSignal = (result.threats || []).some(t =>
+          t.type === 'postinstall_added' || t.type === 'preinstall_added' ||
+          t.type === 'install_added' || t.type === 'maintainer_change' ||
+          t.type === 'dormant_spike' || t.type === 'publish_anomaly'
+        );
+        const skipSandboxLargePackage = (isLargePackage || meta.fastTrack) && !hasHighOrCriticalFinding && !hasTemporalSignal;
+
+        if (skipSandboxLargePackage && meta.fastTrack) {
+          console.log(`[MONITOR] FAST-TRACK: ${name}@${version} — large package static-only (${((meta.unpackedSize || 0) / 1024 / 1024).toFixed(1)}MB, no lifecycle scripts)`);
+        } else if (skipSandboxLargePackage) {
+          console.log(`[MONITOR] SANDBOX SKIP (large low-signal): ${name}@${version} (${((meta.unpackedSize || 0) / 1024 / 1024).toFixed(1)}MB, deps=${meta.dependencyCount || '?'}, no HIGH/CRIT, no temporal)`);
+        }
+
         // T1a: mandatory sandbox (HC malice types, TIER1_TYPES non-LOW, lifecycle + intent compound)
         // T1b: conditional sandbox (HIGH/CRITICAL without HC type — bundler FP zone)
         //       → sandbox only if score >= 25 (significant risk) or queue pressure is low
         // T2: sandbox if queue < 50 (as before)
         let sandboxResult = null;
-        const shouldSandbox = isSandboxEnabled() && sandboxAvailable && (
+        const shouldSandbox = !skipSandboxLargePackage && isSandboxEnabled() && sandboxAvailable && (
           tier === '1a' ||
           (tier === '1b' && (riskScore >= 25 || scanQueue.length < 20)) ||
           (tier === 2 && scanQueue.length < 50)
@@ -845,8 +870,9 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
         // Record daily alert with post-reputation score for top suspects ranking
         dailyAlerts.push({ name, version, ecosystem, findingsCount: result.summary.total, score: adjustedResult.summary.riskScore || 0, tier });
         // LLM Detective: AI-powered analysis for T1a/T1b suspects
+        // Skip for fast-track (large boring packages — LLM analysis adds 10-30s for no value)
         let llmResult = null;
-        if ((tier === '1a' || tier === '1b') && (adjustedResult.summary.riskScore || 0) >= 25) {
+        if (!meta.fastTrack && (tier === '1a' || tier === '1b') && (adjustedResult.summary.riskScore || 0) >= 25) {
           try {
             const { investigatePackage, isLlmEnabled, getLlmMode } = require('../ml/llm-detective.js');
             if (isLlmEnabled()) {
@@ -1135,7 +1161,8 @@ async function resolveTarballAndScan(item, stats, dailyAlerts, recentlyScanned, 
   const scanResult = await scanPackage(item.name, item.version, item.ecosystem, item.tarballUrl, {
     unpackedSize: item.unpackedSize || 0,
     registryScripts: item.registryScripts || null,
-    _cacheTrigger: item._cacheTrigger || null
+    _cacheTrigger: item._cacheTrigger || null,
+    fastTrack: item.fastTrack || false
   }, stats, dailyAlerts, recentlyScanned, downloadsCache, scanQueue, sandboxAvailable);
   const sandboxResult = scanResult && scanResult.sandboxResult;
   const staticClean = scanResult && scanResult.staticClean;
