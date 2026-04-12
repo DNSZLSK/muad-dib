@@ -39,16 +39,37 @@
 //    fesm*/, esm/, esm5/, esm2015/, esm2020/, bundles/, assets/, chunks/, _app/)
 //  - Basename suffixes (.min.js, .bundle.js, .umd.js, .esm.js, .es.js,
 //    .common.js, .max.js, .prod.js, .production.js, + .cjs / .mjs variants)
+//  - Double-extension bundler outputs (index.cjs.js, index.esm.js, index.umd.js
+//    at package root — common pattern for @equinor/*, tsdx/rollup bundled libs)
 //  - Hash-suffixed chunks (esbuild/vite/rollup/webpack convention):
 //    `basename-[a-f0-9]{6,16}.js|mjs|cjs`
+//  - Tool-specific subdirectories that contain vendored bundles (v2.10.75):
+//    * `lib/[name]Bundle*/` — Playwright-style `lib/utilsBundleImpl/`
+//    * `.yarn/releases/` — vendored yarn/pnpm releases shipped in template packages
+//    * `sys/(node|browser|deno)/` — Stencil-style platform-specific bundle
+//    * `compiled/` — SWC/Stencil compiled output
+//    * `typings/` — only if matches a .d.ts file (defensive)
 const BUNDLE_PATH_RE = new RegExp(
-  // Path prefix group
+  // Path prefix group (directories that almost always contain bundled output)
   '(?:^|[/\\\\])' +
-  '(?:dist|build|out|output|browser|bundles|assets|chunks|_app|' +
+  '(?:dist|build|out|output|browser|bundles|assets|chunks|_app|compiled|' +
   'lib[/\\\\]bundled|fesm\\d*|esm|esm5|esm2015|esm2020)' +
   '[/\\\\]' +
-  // OR basename suffix group
-  '|\\.(?:min|bundle|umd|esm|es|common|max|prod|production)\\.(?:m?js|cjs)$' +
+  // OR Playwright-style lib/xxxBundle*/ (e.g. lib/utilsBundleImpl/, lib/mcpBundleImpl/,
+  // lib/transform/babelBundleImpl.js) — matches the directory form
+  // `lib/.../xxxBundleImpl/index.js` and the flat form `lib/.../xxxBundleImpl.js`
+  // at any depth under lib/.
+  '|(?:^|[/\\\\])lib[/\\\\][^\\n]*[Bb]undle[\\w-]*(?:[/\\\\]|\\.(?:m?js|cjs)$)' +
+  // OR vendored yarn/pnpm releases (@backstage/create-app templates etc.)
+  '|(?:^|[/\\\\])\\.yarn[/\\\\]releases[/\\\\]' +
+  '|(?:^|[/\\\\])\\.pnpm[/\\\\](?:releases|dist)[/\\\\]' +
+  // OR Stencil-style sys/(node|browser|deno) containing compiled platform bundles
+  '|(?:^|[/\\\\])sys[/\\\\](?:node|browser|deno)[/\\\\]' +
+  // OR basename suffix group (single extension)
+  '|\\.(?:min|bundle|umd|esm|es|cjs|common|max|prod|production|iife)\\.(?:m?js|cjs)$' +
+  // OR double-extension bundler outputs at root: index.cjs.js, index.esm.js, etc.
+  // Anchored by `^` or path separator + basename with exactly the double extension.
+  '|(?:^|[/\\\\])[\\w-]+\\.(?:cjs|esm|umd|es|iife|min)\\.js$' +
   // OR hash-suffixed chunk
   '|(?:^|[/\\\\])[\\w-]+[-.][a-f0-9]{6,16}\\.(?:m?js|cjs)$',
   'i'
@@ -131,6 +152,13 @@ function hasBundleVetoSignal(threats, targetFile) {
   if (!Array.isArray(threats) || !targetFile) return false;
   for (const t of threats) {
     if (t.file !== targetFile) continue;
+    // v2.10.75 fix: a LOW severity threat should never block the bundle downgrade
+    // of unrelated co-occurring threats. Typical regression case: a locale file
+    // (locales/fa-IR/*.js) contains `unicode_invisible_injection` at LOW (already
+    // downgraded by `isLocaleFile` in obfuscation.js) but also contains bundler
+    // helpers. Before this fix, the LOW unicode signal vetoed the bundle downgrade
+    // of the other threats, so the package scored higher than pre-v2.10.74.
+    if (t.severity === 'LOW') continue;
     if (VETO_TYPES.has(t.type)) return true;
     if (t.type === 'env_access' && t.message && SENSITIVE_ENV_RE.test(t.message)) {
       return true;

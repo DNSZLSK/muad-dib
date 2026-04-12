@@ -794,7 +794,7 @@ function buildDailyReportEmbed(stats, dailyAlerts) {
 
   // Prefer in-memory dailyAlerts for top suspects (richer data), fallback to disk
   const top3 = dailyAlerts.length > 0
-    ? dailyAlerts.slice().sort((a, b) => b.findingsCount - a.findingsCount).slice(0, 3)
+    ? dailyAlerts.slice().sort((a, b) => (b.score || 0) - (a.score || 0) || b.findingsCount - a.findingsCount).slice(0, 3)
     : diskTop3;
 
   const top3Text = top3.length > 0
@@ -802,7 +802,8 @@ function buildDailyReportEmbed(stats, dailyAlerts) {
         const name = a.ecosystem ? `${a.ecosystem}/${a.name || a.package}` : (a.name || a.package);
         const version = a.version || 'N/A';
         const count = a.findingsCount || (a.findings ? a.findings.length : 0);
-        return `${i + 1}. **${name}@${version}** — ${count} finding(s)`;
+        const scoreText = a.score != null ? `score ${a.score}, ` : '';
+        return `${i + 1}. **${name}@${version}** — ${scoreText}${count} finding(s)`;
       }).join('\n')
     : 'None';
 
@@ -946,7 +947,7 @@ async function sendDailyReport(stats, dailyAlerts, recentlyScanned, downloadsCac
     deferredProcessed: stats.deferredProcessed || 0,
     deferredExpired: stats.deferredExpired || 0,
     changesStreamPackages: stats.changesStreamPackages || 0,
-    topSuspects: dailyAlerts.slice().sort((a, b) => b.findingsCount - a.findingsCount).slice(0, 10)
+    topSuspects: dailyAlerts.slice().sort((a, b) => (b.score || 0) - (a.score || 0) || b.findingsCount - a.findingsCount).slice(0, 10)
   });
 
   // Send webhook only if configured

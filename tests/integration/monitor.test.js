@@ -1215,10 +1215,10 @@ async function runMonitorTests() {
     stats.totalTimeMs = 50000;
 
     dailyAlerts.length = 0;
-    dailyAlerts.push({ name: 'evil-pkg', version: '1.0.0', ecosystem: 'npm', findingsCount: 5 });
-    dailyAlerts.push({ name: 'bad-lib', version: '0.1.0', ecosystem: 'pypi', findingsCount: 3 });
-    dailyAlerts.push({ name: 'sus-mod', version: '2.0.0', ecosystem: 'npm', findingsCount: 8 });
-    dailyAlerts.push({ name: 'minor', version: '1.0.0', ecosystem: 'npm', findingsCount: 1 });
+    dailyAlerts.push({ name: 'evil-pkg', version: '1.0.0', ecosystem: 'npm', findingsCount: 5, score: 65 });
+    dailyAlerts.push({ name: 'bad-lib', version: '0.1.0', ecosystem: 'pypi', findingsCount: 3, score: 40 });
+    dailyAlerts.push({ name: 'sus-mod', version: '2.0.0', ecosystem: 'npm', findingsCount: 8, score: 12 });
+    dailyAlerts.push({ name: 'minor', version: '1.0.0', ecosystem: 'npm', findingsCount: 1, score: 5 });
 
     const embed = buildDailyReportEmbed();
     assert(embed.embeds, 'Should have embeds array');
@@ -1231,7 +1231,7 @@ async function runMonitorTests() {
 
     const topField = embed.embeds[0].fields.find(f => f.name === 'Top Suspects');
     assert(topField, 'Should have Top Suspects field');
-    assertIncludes(topField.value, 'sus-mod', 'Top suspect should be sus-mod (8 findings)');
+    assertIncludes(topField.value, 'evil-pkg', 'Top suspect should be evil-pkg (highest score 65)');
 
     assertIncludes(embed.embeds[0].footer.text, 'UTC', 'Footer should have UTC timestamp');
 
@@ -1244,6 +1244,36 @@ async function runMonitorTests() {
     assert(systemField, 'Should have System field');
     const mlField = embed.embeds[0].fields.find(f => f.name === 'ML');
     assert(mlField, 'Should have ML field');
+
+    // Restore
+    stats.errors = origErrors;
+    dailyAlerts.length = 0;
+  });
+
+  test('MONITOR: buildDailyReportEmbed sorts top suspects by score, not findingsCount', () => {
+    const origErrors = stats.errors;
+    stats.errors = 0;
+    stats.totalTimeMs = 10000;
+
+    dailyAlerts.length = 0;
+    // Bundled noise: 726 findings but score 5 (FP-reduced bundled package)
+    dailyAlerts.push({ name: 'bundled-noise', version: '1.0.0', ecosystem: 'npm', findingsCount: 726, score: 5 });
+    // Real suspect: 3 findings but score 85 (post-install + exec + exfil)
+    dailyAlerts.push({ name: 'real-suspect', version: '0.1.0', ecosystem: 'npm', findingsCount: 3, score: 85 });
+    // Medium suspect: 10 findings, score 40
+    dailyAlerts.push({ name: 'medium-risk', version: '2.0.0', ecosystem: 'npm', findingsCount: 10, score: 40 });
+
+    const embed = buildDailyReportEmbed();
+    const topField = embed.embeds[0].fields.find(f => f.name === 'Top Suspects');
+    assert(topField, 'Should have Top Suspects field');
+
+    // real-suspect (score 85) must appear before bundled-noise (score 5, 726 findings)
+    const realIdx = topField.value.indexOf('real-suspect');
+    const noiseIdx = topField.value.indexOf('bundled-noise');
+    assert(realIdx < noiseIdx, 'real-suspect (score 85) should rank above bundled-noise (score 5, 726 findings)');
+
+    // Verify score is displayed in the text
+    assertIncludes(topField.value, 'score 85', 'Should display score for top suspect');
 
     // Restore
     stats.errors = origErrors;
@@ -4174,7 +4204,7 @@ async function runMonitorTests() {
     stats.errors = 0;
     stats.totalTimeMs = 25000;
     stats.mlFiltered = 3;
-    dailyAlerts.push({ name: 'test', version: '1.0', ecosystem: 'npm', findingsCount: 1 });
+    dailyAlerts.push({ name: 'test', version: '1.0', ecosystem: 'npm', findingsCount: 1, score: 25 });
     recentlyScanned.add('npm/daily-report-test@1.0.0');
 
     try {
@@ -4468,8 +4498,8 @@ async function runMonitorTests() {
 
     // Add some daily alerts
     const origLen = dailyAlerts.length;
-    dailyAlerts.push({ name: 'suspect-a', version: '1.0', ecosystem: 'npm', findingsCount: 3 });
-    dailyAlerts.push({ name: 'suspect-b', version: '2.0', ecosystem: 'pypi', findingsCount: 1 });
+    dailyAlerts.push({ name: 'suspect-a', version: '1.0', ecosystem: 'npm', findingsCount: 3, score: 30 });
+    dailyAlerts.push({ name: 'suspect-b', version: '2.0', ecosystem: 'pypi', findingsCount: 1, score: 15 });
 
     try {
       const embed = buildDailyReportEmbed();
@@ -5139,7 +5169,7 @@ async function runMonitorTests() {
       stats.errors = 2;
       stats.totalTimeMs = 99000;
       dailyAlerts.length = 0;
-      dailyAlerts.push({ name: 'test-pkg', version: '1.0.0', ecosystem: 'npm', findingsCount: 3 });
+      dailyAlerts.push({ name: 'test-pkg', version: '1.0.0', ecosystem: 'npm', findingsCount: 3, score: 45 });
 
       saveDailyStats();
 
