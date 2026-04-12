@@ -14,7 +14,7 @@ async function runMonitorMemoryTests() {
 
   const {
     scanQueue, recentlyScanned, alertedPackageRules, downloadsCache,
-    MAX_SCAN_QUEUE, MAX_QUEUE_PERSIST_SIZE,
+    MAX_RESTORE_QUEUE_SIZE, MAX_QUEUE_PERSIST_SIZE,
     QUEUE_STATE_FILE, persistQueue, restoreQueue,
     timeoutPromise, resolveTarballAndScan, dailyAlerts
   } = require('../../src/monitor.js');
@@ -25,22 +25,25 @@ async function runMonitorMemoryTests() {
 
   // ─── Chantier 1: Queue backpressure ───
 
-  test('MEMORY: MAX_SCAN_QUEUE is exported and reasonable', () => {
-    assert(typeof MAX_SCAN_QUEUE === 'number', 'MAX_SCAN_QUEUE should be a number');
-    assert(MAX_SCAN_QUEUE === 10_000, `MAX_SCAN_QUEUE should be 10000, got ${MAX_SCAN_QUEUE}`);
-    assert(MAX_SCAN_QUEUE < MAX_QUEUE_PERSIST_SIZE, 'MAX_SCAN_QUEUE should be less than MAX_QUEUE_PERSIST_SIZE');
+  test('MEMORY: MAX_RESTORE_QUEUE_SIZE is exported and reasonable', () => {
+    assert(typeof MAX_RESTORE_QUEUE_SIZE === 'number', 'MAX_RESTORE_QUEUE_SIZE should be a number');
+    assert(MAX_RESTORE_QUEUE_SIZE === 100_000, `MAX_RESTORE_QUEUE_SIZE should be 100000, got ${MAX_RESTORE_QUEUE_SIZE}`);
+    assert(MAX_RESTORE_QUEUE_SIZE < MAX_QUEUE_PERSIST_SIZE, 'MAX_RESTORE_QUEUE_SIZE should be less than MAX_QUEUE_PERSIST_SIZE');
   });
 
-  test('MEMORY: restoreQueue truncates at MAX_SCAN_QUEUE', () => {
-    // Setup: create a queue state file with more items than MAX_SCAN_QUEUE
+  test('MEMORY: restoreQueue truncates at MAX_RESTORE_QUEUE_SIZE', () => {
+    // Setup: create a queue state file with more items than MAX_RESTORE_QUEUE_SIZE
     const dataDir = path.dirname(QUEUE_STATE_FILE);
     if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
 
     // Clear scanQueue before test
     scanQueue.length = 0;
 
+    // Build oversize items (> 100K would be too slow; use 150K scaled test)
+    const cap = MAX_RESTORE_QUEUE_SIZE;
+    const oversizeCount = cap + 5_000;
     const oversizeItems = [];
-    for (let i = 0; i < 15_000; i++) {
+    for (let i = 0; i < oversizeCount; i++) {
       oversizeItems.push({ name: `pkg-${i}`, version: '1.0.0', ecosystem: 'npm' });
     }
 
@@ -51,29 +54,32 @@ async function runMonitorMemoryTests() {
     }));
 
     const restored = restoreQueue(scanQueue);
-    assert(restored <= MAX_SCAN_QUEUE, `Restored ${restored} items — should be capped at ${MAX_SCAN_QUEUE}`);
-    assert(scanQueue.length <= MAX_SCAN_QUEUE, `Queue length ${scanQueue.length} — should be capped at ${MAX_SCAN_QUEUE}`);
+    assert(restored <= cap, `Restored ${restored} items — should be capped at ${cap}`);
+    assert(scanQueue.length <= cap, `Queue length ${scanQueue.length} — should be capped at ${cap}`);
 
     // Cleanup
     scanQueue.length = 0;
     try { fs.unlinkSync(QUEUE_STATE_FILE); } catch {}
   });
 
-  test('MEMORY: ingestion poll() skips when queue is full', () => {
-    // This is a structural test — verify the guard exists in the poll function source
+  test('MEMORY: ingestion poll() always runs (no backpressure skip)', () => {
+    // Verify backpressure skip was removed — poll always runs regardless of queue depth
     const ingestionSource = fs.readFileSync(
       path.join(__dirname, '..', '..', 'src', 'monitor', 'ingestion.js'), 'utf8'
     );
-    assertIncludes(ingestionSource, 'BACKPRESSURE', 'ingestion.js should contain BACKPRESSURE guard');
-    assertIncludes(ingestionSource, 'MAX_SCAN_QUEUE', 'ingestion.js should reference MAX_SCAN_QUEUE');
+    assertIncludes(ingestionSource, 'QUEUE_DEPTH', 'ingestion.js should log queue depth');
+    assertIncludes(ingestionSource, 'no backpressure skip', 'ingestion.js should document no backpressure skip');
   });
 
-  test('MEMORY: daemon poll interval has backpressure guard', () => {
+  test('MEMORY: daemon poll interval has no backpressure skip', () => {
     const daemonSource = fs.readFileSync(
       path.join(__dirname, '..', '..', 'src', 'monitor', 'daemon.js'), 'utf8'
     );
-    assertIncludes(daemonSource, 'BACKPRESSURE: skipping poll', 'daemon.js should contain backpressure log');
-    assertIncludes(daemonSource, 'scanQueue.length >= MAX_SCAN_QUEUE', 'daemon.js should check queue against MAX_SCAN_QUEUE');
+    // Verify backpressure skip was removed
+    assert(!daemonSource.includes('BACKPRESSURE: skipping poll'), 'daemon.js should NOT contain backpressure skip');
+    // Verify adaptive concurrency is integrated
+    assertIncludes(daemonSource, 'computeTarget', 'daemon.js should use adaptive concurrency');
+    assertIncludes(daemonSource, 'ADAPTIVE:', 'daemon.js should log adaptive concurrency changes');
   });
 
   // ─── Chantier 2: Periodic memory pruning ───
@@ -180,16 +186,13 @@ async function runMonitorMemoryTests() {
 
   // ─── Chantier 5: systemd config documented ───
 
-  test('MEMORY: MAX_SCAN_QUEUE constant is consistent between daemon and ingestion', () => {
+  test('MEMORY: seq/queue atomicity — persistQueue called after each poll', () => {
     const daemonSource = fs.readFileSync(
       path.join(__dirname, '..', '..', 'src', 'monitor', 'daemon.js'), 'utf8'
     );
-    const ingestionSource = fs.readFileSync(
-      path.join(__dirname, '..', '..', 'src', 'monitor', 'ingestion.js'), 'utf8'
-    );
-    // Both should use 10_000
-    assertIncludes(daemonSource, '10_000', 'daemon.js MAX_SCAN_QUEUE should be 10000');
-    assertIncludes(ingestionSource, '10_000', 'ingestion.js MAX_SCAN_QUEUE should be 10000');
+    // Verify seq is persisted atomically with queue after each poll
+    assertIncludes(daemonSource, 'persistQueue(scanQueue, state)', 'daemon.js should persist queue after poll');
+    assertIncludes(daemonSource, 'saveNpmSeq(state.npmLastSeq)', 'daemon.js should save seq after queue persist');
   });
 }
 

@@ -281,6 +281,10 @@ async function runMonitorWiringTests() {
     // daemon imports from queue
     assert(typeof queue.processQueue === 'function', 'queue.processQueue should exist');
     assert(typeof queue.SCAN_CONCURRENCY === 'number', 'queue.SCAN_CONCURRENCY should be a number');
+    assert(typeof queue.ensureWorkers === 'function', 'queue.ensureWorkers should exist');
+    assert(typeof queue.drainWorkers === 'function', 'queue.drainWorkers should exist');
+    assert(typeof queue.getTargetConcurrency === 'function', 'queue.getTargetConcurrency should exist');
+    assert(typeof queue.setTargetConcurrency === 'function', 'queue.setTargetConcurrency should exist');
 
     // daemon imports from ingestion
     assert(typeof ingestion.poll === 'function', 'ingestion.poll should exist');

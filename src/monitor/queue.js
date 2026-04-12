@@ -106,9 +106,19 @@ const { archiveSuspectTarball } = require('./tarball-archive.js');
 // From ./deferred-sandbox.js
 const { enqueueDeferred } = require('./deferred-sandbox.js');
 
-// --- Constants ---
+// --- Adaptive concurrency ---
 
-const SCAN_CONCURRENCY = Math.max(1, parseInt(process.env.MUADDIB_SCAN_CONCURRENCY, 10) || 8);
+const { BASE_CONCURRENCY, MIN_CONCURRENCY, MAX_CONCURRENCY } = require('./adaptive-concurrency.js');
+
+// SCAN_CONCURRENCY kept as getter for backward compatibility (tests, logging)
+let _targetConcurrency = BASE_CONCURRENCY;
+const SCAN_CONCURRENCY = BASE_CONCURRENCY; // legacy export — tests check this value
+let _activeWorkers = 0;
+const _workerPromises = new Set();
+
+function getTargetConcurrency() { return _targetConcurrency; }
+function setTargetConcurrency(n) { _targetConcurrency = Math.max(MIN_CONCURRENCY, Math.min(MAX_CONCURRENCY, n)); }
+function getActiveWorkers() { return _activeWorkers; }
 const SCAN_TIMEOUT_MS = 300_000; // 5 minutes per package (3 sandbox runs × 90s + static scan headroom)
 const STATIC_SCAN_TIMEOUT_MS = 45_000; // 45s for static analysis only
 const LARGE_PACKAGE_SIZE = 10 * 1024 * 1024; // 10MB
@@ -967,30 +977,65 @@ async function processQueueItem(item, stats, dailyAlerts, recentlyScanned, downl
 }
 
 /**
- * Worker-pool consumer for the scan queue.
- * Runs up to SCAN_CONCURRENCY scans in parallel. Each worker pulls from the
- * shared scanQueue until it's empty. Node.js is single-threaded so
- * scanQueue.shift() is atomic — no race conditions between workers.
+ * Spawn a single worker that pulls from scanQueue until:
+ *   - queue is empty, OR
+ *   - activeWorkers exceeds targetConcurrency (soft drain on scale-down)
+ *
+ * Workers are fire-and-forget: they run as background promises tracked
+ * in _workerPromises. Node.js is single-threaded so scanQueue.shift()
+ * is atomic — no race conditions between workers.
+ */
+async function _spawnWorker(scanQueue, stats, dailyAlerts, recentlyScanned, downloadsCache, sandboxAvailable) {
+  _activeWorkers++;
+  try {
+    while (scanQueue.length > 0 && _activeWorkers <= _targetConcurrency) {
+      const item = scanQueue.shift();
+      if (!item) break;
+      await processQueueItem(item, stats, dailyAlerts, recentlyScanned, downloadsCache, scanQueue, sandboxAvailable);
+    }
+  } finally {
+    _activeWorkers--;
+  }
+}
+
+/**
+ * Ensure the target number of workers are running. Non-blocking: spawns
+ * missing workers as background promises. Called from the daemon main loop
+ * every PROCESS_LOOP_INTERVAL (2s), and after concurrency adjustments.
+ */
+function ensureWorkers(scanQueue, stats, dailyAlerts, recentlyScanned, downloadsCache, sandboxAvailable) {
+  if (scanQueue.length === 0) return;
+  const toSpawn = Math.min(_targetConcurrency - _activeWorkers, scanQueue.length);
+  if (toSpawn <= 0) return;
+
+  console.log(`[MONITOR] Spawning ${toSpawn} worker(s) (active: ${_activeWorkers}, target: ${_targetConcurrency}, queue: ${scanQueue.length})`);
+  for (let i = 0; i < toSpawn; i++) {
+    const p = _spawnWorker(scanQueue, stats, dailyAlerts, recentlyScanned, downloadsCache, sandboxAvailable)
+      .catch(err => console.error('[MONITOR] Worker error:', err.message))
+      .finally(() => _workerPromises.delete(p));
+    _workerPromises.add(p);
+  }
+}
+
+/**
+ * Wait for all active workers to finish. Used for:
+ *   - Graceful shutdown (drain in-flight scans)
+ *   - Tests (backward-compatible await)
+ */
+async function drainWorkers() {
+  if (_workerPromises.size === 0) return;
+  await Promise.all(_workerPromises);
+}
+
+/**
+ * Backward-compatible processQueue: ensure workers + await completion.
+ * Used by tests and the initial sequential scan at startup.
+ * The daemon main loop uses ensureWorkers() directly (non-blocking).
  */
 async function processQueue(scanQueue, stats, dailyAlerts, recentlyScanned, downloadsCache, sandboxAvailable) {
   if (scanQueue.length === 0) return;
-
-  if (SCAN_CONCURRENCY > 1 && scanQueue.length > 1) {
-    console.log(`[MONITOR] Processing ${scanQueue.length} queued packages (concurrency: ${SCAN_CONCURRENCY})`);
-  }
-
-  async function worker() {
-    while (scanQueue.length > 0) {
-      const item = scanQueue.shift();
-      await processQueueItem(item, stats, dailyAlerts, recentlyScanned, downloadsCache, scanQueue, sandboxAvailable);
-    }
-  }
-
-  const workers = [];
-  for (let i = 0; i < Math.min(SCAN_CONCURRENCY, scanQueue.length); i++) {
-    workers.push(worker());
-  }
-  await Promise.all(workers);
+  ensureWorkers(scanQueue, stats, dailyAlerts, recentlyScanned, downloadsCache, sandboxAvailable);
+  await drainWorkers();
 }
 
 /**
@@ -1194,6 +1239,13 @@ module.exports = {
   TEST_PATTERNS,
   TEST_FILE_PATTERN,
   SCAN_WORKER_PATH,
+
+  // Adaptive concurrency
+  getTargetConcurrency,
+  setTargetConcurrency,
+  getActiveWorkers,
+  ensureWorkers,
+  drainWorkers,
 
   // Functions
   isBundledToolingOnly,

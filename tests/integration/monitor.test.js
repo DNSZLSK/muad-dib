@@ -7233,19 +7233,18 @@ async function runMonitorTests() {
     assert(Number.isInteger(SCAN_CONCURRENCY), `SCAN_CONCURRENCY should be integer, got ${SCAN_CONCURRENCY}`);
   });
 
-  test('CONCURRENCY: processQueue source uses worker pool pattern', () => {
-    // Queue logic moved to monitor/queue.js in P2 audit refactor
+  test('CONCURRENCY: queue.js uses adaptive worker pool pattern', () => {
     const src = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'monitor', 'queue.js'), 'utf8');
-    assertIncludes(src, 'async function worker()', 'processQueue should define inner worker function');
-    assertIncludes(src, 'Promise.all(workers)', 'processQueue should await all workers in parallel');
-    assertIncludes(src, 'SCAN_CONCURRENCY', 'processQueue should reference SCAN_CONCURRENCY');
+    assertIncludes(src, 'async function _spawnWorker(', 'queue.js should define _spawnWorker');
+    assertIncludes(src, 'function ensureWorkers(', 'queue.js should define ensureWorkers');
+    assertIncludes(src, 'async function drainWorkers(', 'queue.js should define drainWorkers');
+    assertIncludes(src, '_targetConcurrency', 'queue.js should use adaptive _targetConcurrency');
   });
 
-  test('CONCURRENCY: processQueue source caps workers at queue length', () => {
-    // Queue logic moved to monitor/queue.js in P2 audit refactor
+  test('CONCURRENCY: ensureWorkers caps spawning at target minus active', () => {
     const src = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'monitor', 'queue.js'), 'utf8');
-    assertIncludes(src, 'Math.min(SCAN_CONCURRENCY, scanQueue.length)',
-      'Should not spawn more workers than queue items');
+    assertIncludes(src, '_targetConcurrency - _activeWorkers',
+      'Should not spawn more workers than target allows');
   });
 
   await asyncTest('CONCURRENCY: processQueue handles empty queue', async () => {
@@ -7297,11 +7296,10 @@ async function runMonitorTests() {
     assert(maxConcurrent <= concurrency, `Should not exceed concurrency limit (max: ${maxConcurrent}, limit: ${concurrency})`);
   });
 
-  test('CONCURRENCY: concurrency log only when queue > 1 and concurrency > 1', () => {
-    // Queue logic moved to monitor/queue.js in P2 audit refactor
+  test('CONCURRENCY: workers self-drain when over target concurrency', () => {
     const src = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'monitor', 'queue.js'), 'utf8');
-    assertIncludes(src, 'SCAN_CONCURRENCY > 1 && scanQueue.length > 1',
-      'processQueue should only log concurrency when both concurrency and queue > 1');
+    assertIncludes(src, '_activeWorkers <= _targetConcurrency',
+      '_spawnWorker should exit when over target (soft drain on scale-down)');
   });
 
   await asyncTest('CONCURRENCY: mock worker pool with 1 item does not run multiple workers', async () => {
@@ -7325,6 +7323,103 @@ async function runMonitorTests() {
 
     assert(workerCount.length === 1, `Should spawn only 1 worker for 1 item, got ${workerCount.length}`);
     assert(mockQueue.length === 0, 'Queue should be drained');
+  });
+
+  // ============================================
+  // ADAPTIVE CONCURRENCY TESTS
+  // ============================================
+
+  console.log('\n=== ADAPTIVE CONCURRENCY TESTS ===\n');
+
+  test('ADAPTIVE: computeTarget scales up on backlog (queue > 1000)', () => {
+    const { computeTarget, resetDeltas } = require('../../src/monitor/adaptive-concurrency.js');
+    resetDeltas();
+    const mockStats = { scanned: 0, errorsByType: { static_timeout: 0 } };
+    const { target, reason } = computeTarget(8, 2000, mockStats);
+    assert(target === 12, `Should scale up from 8 to 12, got ${target}`);
+    assertIncludes(reason, 'backlog', 'Reason should mention backlog');
+  });
+
+  test('ADAPTIVE: computeTarget scales down when idle (queue < 100)', () => {
+    const { computeTarget, BASE_CONCURRENCY, resetDeltas } = require('../../src/monitor/adaptive-concurrency.js');
+    resetDeltas();
+    const mockStats = { scanned: 0, errorsByType: { static_timeout: 0 } };
+    const { target, reason } = computeTarget(16, 50, mockStats);
+    assert(target === 14, `Should scale down from 16 to 14, got ${target}`);
+    assertIncludes(reason, 'idle', 'Reason should mention idle');
+  });
+
+  test('ADAPTIVE: computeTarget does not go below BASE when idle', () => {
+    const { computeTarget, BASE_CONCURRENCY, resetDeltas } = require('../../src/monitor/adaptive-concurrency.js');
+    resetDeltas();
+    const mockStats = { scanned: 0, errorsByType: { static_timeout: 0 } };
+    const { target } = computeTarget(BASE_CONCURRENCY, 10, mockStats);
+    assert(target >= BASE_CONCURRENCY, `Should not go below BASE (${BASE_CONCURRENCY}), got ${target}`);
+  });
+
+  test('ADAPTIVE: computeTarget reduces under memory pressure', () => {
+    const { computeTarget, resetDeltas } = require('../../src/monitor/adaptive-concurrency.js');
+    resetDeltas();
+    const mockStats = { scanned: 0, errorsByType: { static_timeout: 0 } };
+    // Mock memory pressure by temporarily patching process.memoryUsage
+    const origMemUsage = process.memoryUsage;
+    process.memoryUsage = () => ({ heapUsed: 900, heapTotal: 1000, rss: 1000, external: 0 });
+    try {
+      const { target, reason } = computeTarget(24, 5000, mockStats);
+      assert(target === 20, `Should reduce from 24 to 20, got ${target}`);
+      assertIncludes(reason, 'memory_pressure', 'Reason should mention memory pressure');
+    } finally {
+      process.memoryUsage = origMemUsage;
+    }
+  });
+
+  test('ADAPTIVE: computeTarget reduces on high timeout rate', () => {
+    const { computeTarget, resetDeltas } = require('../../src/monitor/adaptive-concurrency.js');
+    resetDeltas();
+    // First call: set baseline at 0/0
+    const mockStats1 = { scanned: 0, errorsByType: { static_timeout: 0 } };
+    computeTarget(16, 500, mockStats1);
+    // Second call: simulate 25 scans with 5 timeouts (20%)
+    const mockStats2 = { scanned: 25, errorsByType: { static_timeout: 5 } };
+    const { target, reason } = computeTarget(16, 500, mockStats2);
+    assert(target === 14, `Should reduce from 16 to 14, got ${target}`);
+    assertIncludes(reason, 'timeout_rate', 'Reason should mention timeout rate');
+  });
+
+  test('ADAPTIVE: computeTarget stays stable when queue is moderate', () => {
+    const { computeTarget, resetDeltas } = require('../../src/monitor/adaptive-concurrency.js');
+    resetDeltas();
+    const mockStats = { scanned: 0, errorsByType: { static_timeout: 0 } };
+    const { target, reason } = computeTarget(12, 500, mockStats);
+    assert(target === 12, `Should stay at 12, got ${target}`);
+    assertIncludes(reason, 'stable', 'Reason should be stable');
+  });
+
+  test('ADAPTIVE: MIN/BASE/MAX constants are reasonable', () => {
+    const { MIN_CONCURRENCY, BASE_CONCURRENCY, MAX_CONCURRENCY } = require('../../src/monitor/adaptive-concurrency.js');
+    assert(MIN_CONCURRENCY === 4, `MIN should be 4, got ${MIN_CONCURRENCY}`);
+    assert(BASE_CONCURRENCY >= MIN_CONCURRENCY, 'BASE should be >= MIN');
+    assert(MAX_CONCURRENCY >= BASE_CONCURRENCY, 'MAX should be >= BASE');
+    assert(MAX_CONCURRENCY <= 64, `MAX should be reasonable, got ${MAX_CONCURRENCY}`);
+  });
+
+  test('ADAPTIVE: getTargetConcurrency and setTargetConcurrency work', () => {
+    const { getTargetConcurrency, setTargetConcurrency } = require('../../src/monitor/queue.js');
+    const orig = getTargetConcurrency();
+    setTargetConcurrency(20);
+    assert(getTargetConcurrency() === 20, `Should be 20, got ${getTargetConcurrency()}`);
+    setTargetConcurrency(orig); // restore
+  });
+
+  test('ADAPTIVE: setTargetConcurrency clamps to MIN/MAX', () => {
+    const { getTargetConcurrency, setTargetConcurrency } = require('../../src/monitor/queue.js');
+    const { MIN_CONCURRENCY, MAX_CONCURRENCY } = require('../../src/monitor/adaptive-concurrency.js');
+    const orig = getTargetConcurrency();
+    setTargetConcurrency(1);
+    assert(getTargetConcurrency() === MIN_CONCURRENCY, `Should clamp to MIN (${MIN_CONCURRENCY}), got ${getTargetConcurrency()}`);
+    setTargetConcurrency(999);
+    assert(getTargetConcurrency() === MAX_CONCURRENCY, `Should clamp to MAX (${MAX_CONCURRENCY}), got ${getTargetConcurrency()}`);
+    setTargetConcurrency(orig); // restore
   });
 
   // ============================================
@@ -8490,9 +8585,9 @@ async function runMonitorTests() {
       `Should be 24h in ms, got ${QUEUE_STATE_MAX_AGE_MS}`);
   });
 
-  test('MONITOR: MAX_QUEUE_PERSIST_SIZE is 100000', () => {
-    assert(MAX_QUEUE_PERSIST_SIZE === 100_000,
-      `Should be 100000, got ${MAX_QUEUE_PERSIST_SIZE}`);
+  test('MONITOR: MAX_QUEUE_PERSIST_SIZE is 200000', () => {
+    assert(MAX_QUEUE_PERSIST_SIZE === 200_000,
+      `Should be 200000, got ${MAX_QUEUE_PERSIST_SIZE}`);
   });
 
   test('MONITOR: persistQueue writes queue to disk and restoreQueue reads it back', () => {
@@ -8605,8 +8700,8 @@ async function runMonitorTests() {
 
     // Create a fake queue that's "too large" — we can't actually create 100K items,
     // but we verify the guard by checking the constant exists and is reasonable
-    assert(MAX_QUEUE_PERSIST_SIZE === 100_000,
-      `Guard should be 100K, got ${MAX_QUEUE_PERSIST_SIZE}`);
+    assert(MAX_QUEUE_PERSIST_SIZE === 200_000,
+      `Guard should be 200K, got ${MAX_QUEUE_PERSIST_SIZE}`);
 
     // Verify normal-sized queue persists fine
     const smallQueue = [{ name: 'test', version: '1.0.0', ecosystem: 'npm' }];

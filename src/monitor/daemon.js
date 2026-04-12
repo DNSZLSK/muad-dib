@@ -4,11 +4,12 @@ const path = require('path');
 const os = require('os');
 const { isDockerAvailable, SANDBOX_CONCURRENCY_MAX } = require('../sandbox/index.js');
 const { setVerboseMode, isSandboxEnabled, isCanaryEnabled, isLlmDetectiveEnabled, getLlmDetectiveMode, DOWNLOADS_CACHE_TTL } = require('./classify.js');
-const { loadState, saveState, loadDailyStats, saveDailyStats, purgeTarballCache, getParisHour, atomicWriteFileSync } = require('./state.js');
+const { loadState, saveState, loadDailyStats, saveDailyStats, purgeTarballCache, getParisHour, atomicWriteFileSync, saveNpmSeq } = require('./state.js');
 const { isTemporalEnabled, isTemporalAstEnabled, isTemporalPublishEnabled, isTemporalMaintainerEnabled } = require('./temporal.js');
 const { pendingGrouped, flushScopeGroup, sendDailyReport, DAILY_REPORT_HOUR, alertedPackageRules } = require('./webhook.js');
 const { poll } = require('./ingestion.js');
-const { processQueue, SCAN_CONCURRENCY } = require('./queue.js');
+const { processQueue, ensureWorkers, drainWorkers, getTargetConcurrency, setTargetConcurrency, getActiveWorkers, SCAN_CONCURRENCY } = require('./queue.js');
+const { computeTarget, ADJUST_INTERVAL_MS, BASE_CONCURRENCY, resetDeltas } = require('./adaptive-concurrency.js');
 const { startHealthcheck } = require('./healthcheck.js');
 const { startDeferredWorker, stopDeferredWorker, persistDeferredQueue, restoreDeferredQueue } = require('./deferred-sandbox.js');
 
@@ -18,8 +19,11 @@ const QUEUE_WARNING_THRESHOLD = 5_000;  // Warn if queue depth exceeds this
 const QUEUE_PERSIST_INTERVAL = 60_000;  // Persist queue to disk every 60s
 const QUEUE_STATE_FILE = path.join(__dirname, '..', '..', 'data', 'queue-state.json');
 const QUEUE_STATE_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24h expiry
-const MAX_QUEUE_PERSIST_SIZE = 100_000; // Don't persist if queue > 100K items
-const MAX_SCAN_QUEUE = 10_000;          // Backpressure: skip polling when queue exceeds this
+const MAX_QUEUE_PERSIST_SIZE = 200_000; // Don't persist if queue > 200K items (OOM guard)
+const MAX_RESTORE_QUEUE_SIZE = 100_000; // Cap restored queue at 100K items
+// MAX_SCAN_QUEUE removed: backpressure no longer skips polling.
+// Queue grows unbounded in memory (entries are ~300B, 100K = 30MB on 12GB VPS).
+// Adaptive concurrency adjusts processing speed to match ingestion rate.
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -88,11 +92,11 @@ function restoreQueue(scanQueue) {
       return 0;
     }
 
-    // Restore items (cap at MAX_SCAN_QUEUE to prevent OOM from stale persisted queues)
+    // Restore items (cap at MAX_RESTORE_QUEUE_SIZE to prevent OOM from stale persisted queues)
     let items = data.items;
-    if (items.length > MAX_SCAN_QUEUE) {
-      console.log(`[MONITOR] Truncating restored queue from ${items.length} to ${MAX_SCAN_QUEUE} items`);
-      items = items.slice(0, MAX_SCAN_QUEUE);
+    if (items.length > MAX_RESTORE_QUEUE_SIZE) {
+      console.log(`[MONITOR] Truncating restored queue from ${items.length} to ${MAX_RESTORE_QUEUE_SIZE} items`);
+      items = items.slice(0, MAX_RESTORE_QUEUE_SIZE);
     }
     const count = items.length;
     if (count === 0) {
@@ -404,13 +408,14 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
   loadDailyStats(stats, dailyAlerts); // Restore counters from previous run (survives restarts)
   console.log(`[MONITOR] State loaded — npm last: ${state.npmLastPackage || 'none'}, pypi last: ${state.pypiLastPackage || 'none'}, npm seq: ${state.npmLastSeq || 'none'}`);
   console.log('[MONITOR] npm changes stream enabled (replicate.npmjs.com) with RSS fallback');
-  console.log(`[MONITOR] Scan concurrency: ${SCAN_CONCURRENCY} (MUADDIB_SCAN_CONCURRENCY to override)`);
+  console.log(`[MONITOR] Scan concurrency: adaptive ${BASE_CONCURRENCY}→${getTargetConcurrency()} (base MUADDIB_SCAN_CONCURRENCY=${BASE_CONCURRENCY}, max MUADDIB_MAX_CONCURRENCY)`);
   console.log(`[MONITOR] Sandbox concurrency: ${SANDBOX_CONCURRENCY_MAX} (MUADDIB_SANDBOX_CONCURRENCY to override)`);
   console.log(`[MONITOR] Polling every ${POLL_INTERVAL / 1000}s (decoupled from processing). Ctrl+C to stop.\n`);
 
   let running = true;
   let pollIntervalHandle = null;   // Decoupled poll timer — set after initial poll
   let queuePersistHandle = null;   // Queue persistence timer
+  let concurrencyAdjustHandle = null; // Adaptive concurrency timer
 
   // Restore queue from previous run (if file exists and is < 24h old)
   const restoredCount = restoreQueue(scanQueue);
@@ -438,6 +443,13 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
       clearInterval(queuePersistHandle);
       queuePersistHandle = null;
     }
+    if (concurrencyAdjustHandle) {
+      clearInterval(concurrencyAdjustHandle);
+      concurrencyAdjustHandle = null;
+    }
+    // Wait for in-flight scans to complete (soft drain)
+    console.log(`[MONITOR] Draining ${getActiveWorkers()} active worker(s)...`);
+    await drainWorkers();
     // Persist remaining queue items so they survive the restart
     persistQueue(scanQueue, state);
     // Stop deferred sandbox worker and persist its queue
@@ -470,26 +482,28 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
 
   // Initial poll + scan (sequential for first run)
   await poll(state, scanQueue, stats);
+  // Atomicity fix: persist queue AND seq together after each poll.
+  // Previously, seq was saved inside pollNpmChanges() but queue persisted
+  // every 60s ��� crash between the two lost queued items permanently.
+  persistQueue(scanQueue, state);
+  saveNpmSeq(state.npmLastSeq);
   saveState(state, stats);
   await processQueue(scanQueue, stats, dailyAlerts, recentlyScanned, downloadsCache, sandboxAvailableRef.value);
 
   // ─── Decoupled polling ───
   // Poll runs on its own interval, independent of processing.
   // This ensures new packages are ingested even while a large batch is being scanned.
-  // Without this, a 2h processing batch blocks all polling — packages published and
-  // removed during that window are never seen (e.g. axios/plain-crypto-js 2026-03-30).
+  // Backpressure removed: polling ALWAYS runs. Queue grows unbounded in memory
+  // (entries ~300B, 100K = 30MB). Adaptive concurrency adjusts scan throughput.
   let pollInProgress = false;
   pollIntervalHandle = setInterval(async () => {
     if (!running || pollInProgress) return;
-    // Backpressure: skip poll when queue is too deep.
-    // CouchDB seq is NOT advanced — next poll resumes from the same point. No packages lost.
-    if (scanQueue.length >= MAX_SCAN_QUEUE) {
-      console.log(`[MONITOR] BACKPRESSURE: skipping poll (queue ${scanQueue.length} >= ${MAX_SCAN_QUEUE})`);
-      return;
-    }
     pollInProgress = true;
     try {
       await poll(state, scanQueue, stats);
+      // Atomicity: persist queue + seq together after each poll
+      persistQueue(scanQueue, state);
+      saveNpmSeq(state.npmLastSeq);
       saveState(state, stats);
       if (scanQueue.length > QUEUE_WARNING_THRESHOLD) {
         console.log(`[MONITOR] WARNING: scan queue depth ${scanQueue.length} — processing may be lagging behind ingestion`);
@@ -502,27 +516,41 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
   }, POLL_INTERVAL);
 
   // ─── Queue persistence ───
-  // Snapshot queue to disk every 60s so items survive restarts/crashes.
-  // Without this, the decoupled poll advances the CouchDB seq but queued
-  // items are lost on restart — they won't be re-polled.
+  // Periodic snapshot as safety net (in addition to post-poll persist).
   queuePersistHandle = setInterval(() => {
     if (!running) return;
     persistQueue(scanQueue, state);
     persistDeferredQueue(); // Piggyback: persist deferred sandbox queue on same interval
   }, QUEUE_PERSIST_INTERVAL);
 
+  // ─── Adaptive concurrency ───
+  // Adjusts scan worker count every 30s based on queue depth, memory, timeout rate.
+  // Scale-up is aggressive (+4) during backlog, scale-down is gradual (-2) when idle.
+  concurrencyAdjustHandle = setInterval(() => {
+    if (!running) return;
+    const current = getTargetConcurrency();
+    const { target, reason } = computeTarget(current, scanQueue.length, stats);
+    if (target !== current) {
+      console.log(`[MONITOR] ADAPTIVE: concurrency ${current} → ${target} (${reason}, active=${getActiveWorkers()})`);
+      setTargetConcurrency(target);
+      // Immediately spawn new workers if scaling up (don't wait for next loop tick)
+      if (target > current) {
+        ensureWorkers(scanQueue, stats, dailyAlerts, recentlyScanned, downloadsCache, sandboxAvailableRef.value);
+      }
+    }
+  }, ADJUST_INTERVAL_MS);
+
   // ─── Continuous processing loop ───
-  // Consumes scanQueue independently of polling. Workers inside processQueue
-  // check scanQueue.length > 0 after each item, so items added by a concurrent
-  // poll are picked up immediately by running workers.
+  // Non-blocking: ensureWorkers spawns fire-and-forget background workers.
+  // This loop tops up workers every 2s AND runs housekeeping (memory, daily report)
+  // without being blocked by long-running scans.
   const MEMORY_LOG_INTERVAL = 300_000; // 5 minutes
   const MEMORY_PRESSURE_THRESHOLD = 0.85; // 85% heap usage triggers emergency prune
   let lastMemoryLogTime = Date.now();
 
   while (running) {
-    if (scanQueue.length > 0) {
-      await processQueue(scanQueue, stats, dailyAlerts, recentlyScanned, downloadsCache, sandboxAvailableRef.value);
-    }
+    // Top up workers (non-blocking — spawns missing workers as background promises)
+    ensureWorkers(scanQueue, stats, dailyAlerts, recentlyScanned, downloadsCache, sandboxAvailableRef.value);
 
     // ─── Memory watchdog (every 5 min) ───
     if (Date.now() - lastMemoryLogTime >= MEMORY_LOG_INTERVAL) {
@@ -596,7 +624,7 @@ module.exports = {
   QUEUE_STATE_FILE,
   QUEUE_STATE_MAX_AGE_MS,
   MAX_QUEUE_PERSIST_SIZE,
-  MAX_SCAN_QUEUE,
+  MAX_RESTORE_QUEUE_SIZE,
   pruneMemoryCaches,
   MAX_RECENTLY_SCANNED,
   MAX_ALERTED_PACKAGES

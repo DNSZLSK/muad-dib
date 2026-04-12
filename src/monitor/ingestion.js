@@ -455,10 +455,10 @@ async function pollNpmChanges(state, scanQueue, stats) {
       queued++;
     }
 
-    // Persist new seq
+    // Update seq in memory only — disk persistence is handled by daemon.js
+    // after both queue and seq are saved atomically (prevents data loss on crash).
     if (data.last_seq != null) {
       state.npmLastSeq = data.last_seq;
-      saveNpmSeq(data.last_seq);
     }
 
     if (queued > 0) {
@@ -644,12 +644,12 @@ async function pollPyPI(state, scanQueue) {
  * @param {Object} stats - Mutable stats object
  */
 async function poll(state, scanQueue, stats) {
-  // Backpressure: skip ingestion when queue is saturated.
-  // CouchDB seq and PyPI lastPackage are NOT advanced — next poll resumes from same point.
-  const MAX_SCAN_QUEUE = 10_000;
-  if (scanQueue.length >= MAX_SCAN_QUEUE) {
-    console.log(`[MONITOR] BACKPRESSURE: skipping poll (queue ${scanQueue.length} >= ${MAX_SCAN_QUEUE})`);
-    return;
+  // Backpressure removed: polling ALWAYS runs regardless of queue depth.
+  // The queue can grow unbounded in memory (entries are ~300 bytes, 100K = 30MB).
+  // This prevents the data loss scenario where the CouchDB seq advances but
+  // queued items are not persisted — packages would be permanently invisible.
+  if (scanQueue.length > 5_000) {
+    console.log(`[MONITOR] QUEUE_DEPTH: ${scanQueue.length} items — polling continues (no backpressure skip)`);
   }
 
   const timestamp = new Date().toISOString().slice(0, 19).replace('T', ' ');
