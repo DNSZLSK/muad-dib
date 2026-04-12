@@ -442,26 +442,19 @@ async function pollNpmChanges(state, scanQueue, stats) {
       // Layer 3: Evaluate if this package should be cached
       const cacheTrigger = evaluateCacheTrigger(name, docMeta, change.doc || null);
 
-      // Fast-track: large packages (>15MB) with no lifecycle scripts and no IOC match
-      // are flagged for static-only processing — no sandbox, no LLM, no archiving.
-      // These packages systematically timeout in sandbox (90s × 3 = INCONCLUSIVE = 0 info).
-      // Static-only processes them in ~5s, freeing worker capacity for real suspects.
-      const FAST_TRACK_SIZE_BYTES = 15 * 1024 * 1024;
-      const size = docMeta ? docMeta.unpackedSize : 0;
-      const scripts = docMeta ? docMeta.scripts : null;
-      const hasLifecycleScript = scripts && (scripts.preinstall || scripts.postinstall || scripts.install);
-      const isFastTrack = !isKnownIOC && size > FAST_TRACK_SIZE_BYTES && !hasLifecycleScript;
-
+      // Layer 2: Extract tarball URL from CouchDB doc (eliminates lazy resolution 404 race)
+      // NOTE: fastTrack flag is computed in resolveTarballAndScan() AFTER metadata
+      // resolution via getNpmLatestTarball(). It cannot be computed here because
+      // post-May 2025, include_docs is deprecated and change.doc is always null.
       scanQueue.push({
         name,
         version: docMeta ? docMeta.version : '',
         ecosystem: 'npm',
         tarballUrl: docMeta ? docMeta.tarball : null,
-        unpackedSize: size,
-        registryScripts: scripts,
+        unpackedSize: docMeta ? docMeta.unpackedSize : 0,
+        registryScripts: docMeta ? docMeta.scripts : null,
         _cacheTrigger: cacheTrigger.shouldCache ? cacheTrigger : null,
-        isIOCMatch: isKnownIOC,
-        fastTrack: isFastTrack || undefined
+        isIOCMatch: isKnownIOC
       });
       queued++;
     }
