@@ -804,7 +804,6 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
         appendDetection(name, version, ecosystem, findingTypes, maxSeverity);
         recordTrainingSample(result, { name, version, ecosystem, label: 'suspect', tier, sandboxResult, registryMeta: meta, unpackedSize: meta.unpackedSize, npmRegistryMeta, fileCountTotal, hasTests });
 
-        dailyAlerts.push({ name, version, ecosystem, findingsCount: result.summary.total, tier });
         // Persist alert locally for ALL suspects (independent of webhook filtering)
         const alertData = buildAlertData(name, version, ecosystem, result, sandboxResult);
         persistAlert(name, version, ecosystem, alertData);
@@ -832,6 +831,9 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
         } else if (ecosystem === 'npm' && hasHighConfidenceThreat(result)) {
           console.log(`[MONITOR] REPUTATION BYPASS: ${name} has high-confidence threat — using raw score`);
         }
+
+        // Record daily alert with post-reputation score for top suspects ranking
+        dailyAlerts.push({ name, version, ecosystem, findingsCount: result.summary.total, score: adjustedResult.summary.riskScore || 0, tier });
         // LLM Detective: AI-powered analysis for T1a/T1b suspects
         let llmResult = null;
         if ((tier === '1a' || tier === '1b') && (adjustedResult.summary.riskScore || 0) >= 25) {
