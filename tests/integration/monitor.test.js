@@ -7405,7 +7405,7 @@ async function runMonitorTests() {
     assertIncludes(reason, 'stable', 'Reason should be stable');
   });
 
-  test('ADAPTIVE: throughput plateau — scales down when more workers did not help', () => {
+  test('ADAPTIVE: throughput plateau — requires 2 consecutive flat windows to trigger', () => {
     const { computeTarget, resetDeltas } = require('../../src/monitor/adaptive-concurrency.js');
     resetDeltas();
     const stats = { scanned: 0, errorsByType: { static_timeout: 0 } };
@@ -7422,11 +7422,39 @@ async function runMonitorTests() {
     assert(r2.target === 12, `Tick 2: should scale up to 12 (throughput improved 50→80), got ${r2.target}`);
     assertIncludes(r2.reason, 'backlog', 'Tick 2 should be backlog');
 
-    // Tick 3: throughput FLAT (80 scans again despite 12 workers vs 8) → PLATEAU
-    stats.scanned = 210; // delta = 80 (same as tick 2)
+    // Tick 3: throughput FLAT (80 again) — streak=1, NOT enough to trigger plateau yet
+    stats.scanned = 210; // delta = 80
     const r3 = computeTarget(12, 5000, stats);
-    assert(r3.target === 10, `Tick 3: should scale DOWN to 10 (plateau: 80→80), got ${r3.target}`);
-    assertIncludes(r3.reason, 'throughput_plateau', 'Tick 3 should detect plateau');
+    assert(r3.target === 12, `Tick 3: should HOLD at 12 (1st flat window, not enough), got ${r3.target}`);
+    assertIncludes(r3.reason, 'plateau_warning', 'Tick 3 should be plateau warning');
+
+    // Tick 4: throughput STILL FLAT (80 again) — streak=2, NOW trigger plateau → scale down
+    stats.scanned = 290; // delta = 80
+    const r4 = computeTarget(12, 5000, stats);
+    assert(r4.target === 10, `Tick 4: should scale DOWN to 10 (plateau confirmed × 2), got ${r4.target}`);
+    assertIncludes(r4.reason, 'throughput_plateau', 'Tick 4 should detect confirmed plateau');
+  });
+
+  test('ADAPTIVE: single flat window does NOT trigger plateau (noise filter)', () => {
+    const { computeTarget, resetDeltas } = require('../../src/monitor/adaptive-concurrency.js');
+    resetDeltas();
+    const stats = { scanned: 0, errorsByType: { static_timeout: 0 } };
+
+    // Tick 1: backlog, scale up
+    stats.scanned = 50;
+    computeTarget(4, 5000, stats);
+
+    // Tick 2: throughput flat (50 = 50) — streak=1, should NOT trigger
+    stats.scanned = 100; // delta = 50
+    const r2 = computeTarget(8, 5000, stats);
+    assert(r2.target === 8, `Single flat window should NOT scale down, got ${r2.target}`);
+    assertIncludes(r2.reason, 'plateau_warning', 'Should be warning, not trigger');
+
+    // Tick 3: throughput IMPROVES (70 > 50) — streak reset, scale up continues
+    stats.scanned = 170; // delta = 70
+    const r3 = computeTarget(8, 5000, stats);
+    assert(r3.target === 12, `Throughput improved → should scale up, got ${r3.target}`);
+    assertIncludes(r3.reason, 'backlog', 'Should continue scaling on improvement');
   });
 
   test('ADAPTIVE: MIN/BASE/MAX constants are reasonable', () => {
