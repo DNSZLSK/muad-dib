@@ -7374,8 +7374,8 @@ async function runMonitorTests() {
     _os.freemem = () => 500 * 1024 * 1024;    // 500MB free
     _os.totalmem = () => 12000 * 1024 * 1024;  // 12GB total → 4.2% free
     try {
-      const { target, reason } = computeTarget(24, 5000, mockStats);
-      assert(target === 20, `Should reduce from 24 to 20, got ${target}`);
+      const { target, reason } = computeTarget(16, 5000, mockStats);
+      assert(target === 12, `Should reduce from 16 to 12, got ${target}`);
       assertIncludes(reason, 'memory_pressure', 'Reason should mention memory pressure');
     } finally {
       _os.freemem = origFreemem;
@@ -7405,19 +7405,43 @@ async function runMonitorTests() {
     assertIncludes(reason, 'stable', 'Reason should be stable');
   });
 
+  test('ADAPTIVE: throughput plateau — scales down when more workers did not help', () => {
+    const { computeTarget, resetDeltas } = require('../../src/monitor/adaptive-concurrency.js');
+    resetDeltas();
+    const stats = { scanned: 0, errorsByType: { static_timeout: 0 } };
+
+    // Tick 1: backlog, scale up 4→8 (50 scans done, records throughput=50)
+    stats.scanned = 50;
+    const r1 = computeTarget(4, 5000, stats);
+    assert(r1.target === 8, `Tick 1: should scale up to 8, got ${r1.target}`);
+    assertIncludes(r1.reason, 'backlog', 'Tick 1 should be backlog');
+
+    // Tick 2: throughput IMPROVED (80 scans vs 50) — scale-up worked → continue scaling
+    stats.scanned = 130; // delta = 80
+    const r2 = computeTarget(8, 5000, stats);
+    assert(r2.target === 12, `Tick 2: should scale up to 12 (throughput improved 50→80), got ${r2.target}`);
+    assertIncludes(r2.reason, 'backlog', 'Tick 2 should be backlog');
+
+    // Tick 3: throughput FLAT (80 scans again despite 12 workers vs 8) → PLATEAU
+    stats.scanned = 210; // delta = 80 (same as tick 2)
+    const r3 = computeTarget(12, 5000, stats);
+    assert(r3.target === 10, `Tick 3: should scale DOWN to 10 (plateau: 80→80), got ${r3.target}`);
+    assertIncludes(r3.reason, 'throughput_plateau', 'Tick 3 should detect plateau');
+  });
+
   test('ADAPTIVE: MIN/BASE/MAX constants are reasonable', () => {
     const { MIN_CONCURRENCY, BASE_CONCURRENCY, MAX_CONCURRENCY } = require('../../src/monitor/adaptive-concurrency.js');
     assert(MIN_CONCURRENCY === 4, `MIN should be 4, got ${MIN_CONCURRENCY}`);
     assert(BASE_CONCURRENCY >= MIN_CONCURRENCY, 'BASE should be >= MIN');
     assert(MAX_CONCURRENCY >= BASE_CONCURRENCY, 'MAX should be >= BASE');
-    assert(MAX_CONCURRENCY <= 64, `MAX should be reasonable, got ${MAX_CONCURRENCY}`);
+    assert(MAX_CONCURRENCY <= 32, `MAX should be reasonable, got ${MAX_CONCURRENCY}`);
   });
 
   test('ADAPTIVE: getTargetConcurrency and setTargetConcurrency work', () => {
     const { getTargetConcurrency, setTargetConcurrency } = require('../../src/monitor/queue.js');
     const orig = getTargetConcurrency();
-    setTargetConcurrency(20);
-    assert(getTargetConcurrency() === 20, `Should be 20, got ${getTargetConcurrency()}`);
+    setTargetConcurrency(12);
+    assert(getTargetConcurrency() === 12, `Should be 12, got ${getTargetConcurrency()}`);
     setTargetConcurrency(orig); // restore
   });
 

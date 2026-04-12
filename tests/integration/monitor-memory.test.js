@@ -62,24 +62,22 @@ async function runMonitorMemoryTests() {
     try { fs.unlinkSync(QUEUE_STATE_FILE); } catch {}
   });
 
-  test('MEMORY: ingestion poll() always runs (no backpressure skip)', () => {
-    // Verify backpressure skip was removed — poll always runs regardless of queue depth
+  test('MEMORY: ingestion poll() has soft backpressure at 10K', () => {
     const ingestionSource = fs.readFileSync(
       path.join(__dirname, '..', '..', 'src', 'monitor', 'ingestion.js'), 'utf8'
     );
-    assertIncludes(ingestionSource, 'QUEUE_DEPTH', 'ingestion.js should log queue depth');
-    assertIncludes(ingestionSource, 'no backpressure skip', 'ingestion.js should document no backpressure skip');
+    assertIncludes(ingestionSource, 'SOFT_BACKPRESSURE_THRESHOLD', 'ingestion.js should define soft backpressure threshold');
+    assertIncludes(ingestionSource, 'BACKPRESSURE: skipping poll', 'ingestion.js should log backpressure skip');
+    assertIncludes(ingestionSource, 'seq not advanced, 0 packages lost', 'ingestion.js should document seq safety');
   });
 
-  test('MEMORY: daemon poll interval has no backpressure skip', () => {
+  test('MEMORY: daemon uses adaptive concurrency', () => {
     const daemonSource = fs.readFileSync(
       path.join(__dirname, '..', '..', 'src', 'monitor', 'daemon.js'), 'utf8'
     );
-    // Verify backpressure skip was removed
-    assert(!daemonSource.includes('BACKPRESSURE: skipping poll'), 'daemon.js should NOT contain backpressure skip');
-    // Verify adaptive concurrency is integrated
     assertIncludes(daemonSource, 'computeTarget', 'daemon.js should use adaptive concurrency');
     assertIncludes(daemonSource, 'ADAPTIVE:', 'daemon.js should log adaptive concurrency changes');
+    assertIncludes(daemonSource, 'ensureWorkers', 'daemon.js should use non-blocking ensureWorkers');
   });
 
   // ─── Chantier 2: Periodic memory pruning ───

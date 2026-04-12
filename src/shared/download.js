@@ -171,6 +171,12 @@ function downloadToFile(url, destPath, timeoutMs = DOWNLOAD_TIMEOUT) {
             }
             return doRequest(absoluteLocation, redirectCount + 1);
           }
+          if (res.statusCode === 429) {
+            res.resume();
+            // Signal rate limiter to back off — drains tokens, forces ~1s pause
+            try { require('./http-limiter.js').signal429(); } catch {}
+            return reject(new Error(`HTTP 429 rate limited for ${requestUrl}`));
+          }
           if (res.statusCode < 200 || res.statusCode >= 300) {
             res.resume();
             return reject(new Error(`HTTP ${res.statusCode} for ${requestUrl}`));

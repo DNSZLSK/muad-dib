@@ -643,13 +643,20 @@ async function pollPyPI(state, scanQueue) {
  * @param {Array} scanQueue - Mutable scan queue array
  * @param {Object} stats - Mutable stats object
  */
+const SOFT_BACKPRESSURE_THRESHOLD = 10_000;
+
 async function poll(state, scanQueue, stats) {
-  // Backpressure removed: polling ALWAYS runs regardless of queue depth.
-  // The queue can grow unbounded in memory (entries are ~300 bytes, 100K = 30MB).
-  // This prevents the data loss scenario where the CouchDB seq advances but
-  // queued items are not persisted — packages would be permanently invisible.
+  // Soft backpressure: skip poll when queue is very deep.
+  // Safe because: CouchDB seq is NOT advanced (stays in memory only, persisted
+  // by daemon.js AFTER poll returns) — next poll resumes from the same point.
+  // Combined with adaptive concurrency: workers scale up → queue drains → poll resumes.
+  // This prevents the queue from growing to 30-40K during catch-up (OOM risk).
+  if (scanQueue.length >= SOFT_BACKPRESSURE_THRESHOLD) {
+    console.log(`[MONITOR] BACKPRESSURE: skipping poll (queue ${scanQueue.length} >= ${SOFT_BACKPRESSURE_THRESHOLD}) — seq not advanced, 0 packages lost`);
+    return;
+  }
   if (scanQueue.length > 5_000) {
-    console.log(`[MONITOR] QUEUE_DEPTH: ${scanQueue.length} items — polling continues (no backpressure skip)`);
+    console.log(`[MONITOR] QUEUE_DEPTH: ${scanQueue.length} items — polling continues`);
   }
 
   const timestamp = new Date().toISOString().slice(0, 19).replace('T', ' ');
