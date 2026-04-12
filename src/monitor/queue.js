@@ -336,7 +336,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
     let alreadyExtracted = false;
     let extractedDir = null;
 
-    if (unpackedSize > LARGE_PACKAGE_SIZE) {
+    if (unpackedSize > LARGE_PACKAGE_SIZE || meta.fastTrack) {
       // Exception 1: IOC match — always full scan
       let isKnownIOC = false;
       try {
@@ -1083,6 +1083,19 @@ async function resolveTarballAndScan(item, stats, dailyAlerts, recentlyScanned, 
       if (npmInfo.version) item.version = npmInfo.version;
       if (npmInfo.unpackedSize) item.unpackedSize = npmInfo.unpackedSize;
       if (npmInfo.scripts) item.registryScripts = npmInfo.scripts;
+
+      // Fast-track decision: large packages (>15MB) with no lifecycle scripts and no IOC match.
+      // Computed HERE (after metadata resolution), not at ingestion time — post-May 2025
+      // CouchDB changes feed has no docs, so metadata is only available after lazy fetch.
+      // Fast-track packages get: quick static scan (package.json + shell only), no AST,
+      // no sandbox, no LLM, no archiving. Exits in ~2-3s instead of 30-300s.
+      const FAST_TRACK_SIZE_BYTES = 15 * 1024 * 1024;
+      if (!item.isIOCMatch && (item.unpackedSize || 0) > FAST_TRACK_SIZE_BYTES) {
+        const scripts = item.registryScripts || {};
+        if (!scripts.preinstall && !scripts.postinstall && !scripts.install) {
+          item.fastTrack = true;
+        }
+      }
     } catch (err) {
       console.error(`[MONITOR] ERROR resolving npm tarball for ${item.name}: ${err.message}`);
       recordError(err, stats);
@@ -1140,9 +1153,11 @@ async function resolveTarballAndScan(item, stats, dailyAlerts, recentlyScanned, 
   let publishResult = null;
   let maintainerResult = null;
 
-  if (item.ecosystem === 'npm') {
+  if (item.ecosystem === 'npm' && !item.fastTrack) {
     // Run all 4 temporal checks in parallel — each is independent.
     // With metadata cache (temporal-analysis.js), the 4 modules share 1 HTTP request.
+    // Skipped for fast-track packages (large boring packages — temporal checks make
+    // 4 HTTP requests to npm registry per package, pointless for 50MB enterprise packages).
     const [tempRes, astRes, pubRes, maintRes] = await Promise.allSettled([
       runTemporalCheck(item.name, dailyAlerts),
       runTemporalAstCheck(item.name, dailyAlerts),
