@@ -480,15 +480,37 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
     console.log('[MONITOR] Deferred sandbox worker started (30s interval, dedicated slot)');
   }
 
-  // Initial poll + scan (sequential for first run)
+  // ─── Initial poll ───
+  // Fills the queue with pending packages. Processing starts in the main loop
+  // via ensureWorkers (non-blocking) — NOT await processQueue (blocking).
+  // A blocking processQueue here would prevent adaptive concurrency from
+  // firing until the entire initial batch is drained at BASE_CONCURRENCY.
   await poll(state, scanQueue, stats);
   // Atomicity fix: persist queue AND seq together after each poll.
   // Previously, seq was saved inside pollNpmChanges() but queue persisted
-  // every 60s ��� crash between the two lost queued items permanently.
+  // every 60s — crash between the two lost queued items permanently.
   persistQueue(scanQueue, state);
   saveNpmSeq(state.npmLastSeq);
   saveState(state, stats);
-  await processQueue(scanQueue, stats, dailyAlerts, recentlyScanned, downloadsCache, sandboxAvailableRef.value);
+  console.log(`[MONITOR] Initial poll complete — ${scanQueue.length} packages queued for processing`);
+
+  // ─── Adaptive concurrency ───
+  // Set up BEFORE the main loop so it fires during the initial batch.
+  // Adjusts scan worker count every 30s based on queue depth, memory, timeout rate.
+  // Scale-up is aggressive (+4) during backlog, scale-down is gradual (-2) when idle.
+  concurrencyAdjustHandle = setInterval(() => {
+    if (!running) return;
+    const current = getTargetConcurrency();
+    const { target, reason } = computeTarget(current, scanQueue.length, stats);
+    if (target !== current) {
+      console.log(`[MONITOR] ADAPTIVE: concurrency ${current} → ${target} (${reason}, active=${getActiveWorkers()})`);
+      setTargetConcurrency(target);
+      // Immediately spawn new workers if scaling up (don't wait for next loop tick)
+      if (target > current) {
+        ensureWorkers(scanQueue, stats, dailyAlerts, recentlyScanned, downloadsCache, sandboxAvailableRef.value);
+      }
+    }
+  }, ADJUST_INTERVAL_MS);
 
   // ─── Decoupled polling ───
   // Poll runs on its own interval, independent of processing.
@@ -522,23 +544,6 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
     persistQueue(scanQueue, state);
     persistDeferredQueue(); // Piggyback: persist deferred sandbox queue on same interval
   }, QUEUE_PERSIST_INTERVAL);
-
-  // ─── Adaptive concurrency ───
-  // Adjusts scan worker count every 30s based on queue depth, memory, timeout rate.
-  // Scale-up is aggressive (+4) during backlog, scale-down is gradual (-2) when idle.
-  concurrencyAdjustHandle = setInterval(() => {
-    if (!running) return;
-    const current = getTargetConcurrency();
-    const { target, reason } = computeTarget(current, scanQueue.length, stats);
-    if (target !== current) {
-      console.log(`[MONITOR] ADAPTIVE: concurrency ${current} → ${target} (${reason}, active=${getActiveWorkers()})`);
-      setTargetConcurrency(target);
-      // Immediately spawn new workers if scaling up (don't wait for next loop tick)
-      if (target > current) {
-        ensureWorkers(scanQueue, stats, dailyAlerts, recentlyScanned, downloadsCache, sandboxAvailableRef.value);
-      }
-    }
-  }, ADJUST_INTERVAL_MS);
 
   // ─── Continuous processing loop ───
   // Non-blocking: ensureWorkers spawns fire-and-forget background workers.
