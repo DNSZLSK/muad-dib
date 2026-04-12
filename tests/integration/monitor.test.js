@@ -7331,102 +7331,78 @@ async function runMonitorTests() {
 
   console.log('\n=== ADAPTIVE CONCURRENCY TESTS ===\n');
 
-  // All computeTarget tests mock process.memoryUsage to isolate from CI heap state.
-  // Without this, CI environments with >75% heap usage trigger the memory_pressure
-  // override and all tests return MIN_CONCURRENCY instead of the expected value.
-  const _lowMem = () => ({ heapUsed: 100, heapTotal: 1000, rss: 500, external: 0, arrayBuffers: 0 });
+  // computeTarget now uses os.freemem()/os.totalmem() for memory pressure instead
+  // of process.memoryUsage() heapUsed/heapTotal. The V8 heap ratio is structurally
+  // 75-85% (V8 adjusts heapTotal dynamically) even with 8GB system RAM free.
+  // os.freemem()/os.totalmem() reflects actual system memory — no mocking needed
+  // for non-memory tests since CI/local always have > 15% RAM free.
 
   test('ADAPTIVE: computeTarget scales up on backlog (queue > 1000)', () => {
     const { computeTarget, resetDeltas } = require('../../src/monitor/adaptive-concurrency.js');
     resetDeltas();
-    const origMemUsage = process.memoryUsage;
-    process.memoryUsage = _lowMem;
-    try {
-      const mockStats = { scanned: 0, errorsByType: { static_timeout: 0 } };
-      const { target, reason } = computeTarget(8, 2000, mockStats);
-      assert(target === 12, `Should scale up from 8 to 12, got ${target}`);
-      assertIncludes(reason, 'backlog', 'Reason should mention backlog');
-    } finally {
-      process.memoryUsage = origMemUsage;
-    }
+    const mockStats = { scanned: 0, errorsByType: { static_timeout: 0 } };
+    const { target, reason } = computeTarget(8, 2000, mockStats);
+    assert(target === 12, `Should scale up from 8 to 12, got ${target}`);
+    assertIncludes(reason, 'backlog', 'Reason should mention backlog');
   });
 
   test('ADAPTIVE: computeTarget scales down when idle (queue < 100)', () => {
     const { computeTarget, resetDeltas } = require('../../src/monitor/adaptive-concurrency.js');
     resetDeltas();
-    const origMemUsage = process.memoryUsage;
-    process.memoryUsage = _lowMem;
-    try {
-      const mockStats = { scanned: 0, errorsByType: { static_timeout: 0 } };
-      const { target, reason } = computeTarget(16, 50, mockStats);
-      assert(target === 14, `Should scale down from 16 to 14, got ${target}`);
-      assertIncludes(reason, 'idle', 'Reason should mention idle');
-    } finally {
-      process.memoryUsage = origMemUsage;
-    }
+    const mockStats = { scanned: 0, errorsByType: { static_timeout: 0 } };
+    const { target, reason } = computeTarget(16, 50, mockStats);
+    assert(target === 14, `Should scale down from 16 to 14, got ${target}`);
+    assertIncludes(reason, 'idle', 'Reason should mention idle');
   });
 
   test('ADAPTIVE: computeTarget does not go below BASE when idle', () => {
     const { computeTarget, BASE_CONCURRENCY, resetDeltas } = require('../../src/monitor/adaptive-concurrency.js');
     resetDeltas();
-    const origMemUsage = process.memoryUsage;
-    process.memoryUsage = _lowMem;
-    try {
-      const mockStats = { scanned: 0, errorsByType: { static_timeout: 0 } };
-      const { target } = computeTarget(BASE_CONCURRENCY, 10, mockStats);
-      assert(target >= BASE_CONCURRENCY, `Should not go below BASE (${BASE_CONCURRENCY}), got ${target}`);
-    } finally {
-      process.memoryUsage = origMemUsage;
-    }
+    const mockStats = { scanned: 0, errorsByType: { static_timeout: 0 } };
+    const { target } = computeTarget(BASE_CONCURRENCY, 10, mockStats);
+    assert(target >= BASE_CONCURRENCY, `Should not go below BASE (${BASE_CONCURRENCY}), got ${target}`);
   });
 
   test('ADAPTIVE: computeTarget reduces under memory pressure', () => {
     const { computeTarget, resetDeltas } = require('../../src/monitor/adaptive-concurrency.js');
     resetDeltas();
     const mockStats = { scanned: 0, errorsByType: { static_timeout: 0 } };
-    const origMemUsage = process.memoryUsage;
-    process.memoryUsage = () => ({ heapUsed: 900, heapTotal: 1000, rss: 1000, external: 0, arrayBuffers: 0 });
+    // Mock os.freemem/totalmem to simulate < 15% system RAM free
+    const _os = require('os');
+    const origFreemem = _os.freemem;
+    const origTotalmem = _os.totalmem;
+    _os.freemem = () => 500 * 1024 * 1024;    // 500MB free
+    _os.totalmem = () => 12000 * 1024 * 1024;  // 12GB total → 4.2% free
     try {
       const { target, reason } = computeTarget(24, 5000, mockStats);
       assert(target === 20, `Should reduce from 24 to 20, got ${target}`);
       assertIncludes(reason, 'memory_pressure', 'Reason should mention memory pressure');
     } finally {
-      process.memoryUsage = origMemUsage;
+      _os.freemem = origFreemem;
+      _os.totalmem = origTotalmem;
     }
   });
 
   test('ADAPTIVE: computeTarget reduces on high timeout rate', () => {
     const { computeTarget, resetDeltas } = require('../../src/monitor/adaptive-concurrency.js');
     resetDeltas();
-    const origMemUsage = process.memoryUsage;
-    process.memoryUsage = _lowMem;
-    try {
-      // First call: set baseline at 0/0
-      const mockStats1 = { scanned: 0, errorsByType: { static_timeout: 0 } };
-      computeTarget(16, 500, mockStats1);
-      // Second call: simulate 25 scans with 5 timeouts (20%)
-      const mockStats2 = { scanned: 25, errorsByType: { static_timeout: 5 } };
-      const { target, reason } = computeTarget(16, 500, mockStats2);
-      assert(target === 14, `Should reduce from 16 to 14, got ${target}`);
-      assertIncludes(reason, 'timeout_rate', 'Reason should mention timeout rate');
-    } finally {
-      process.memoryUsage = origMemUsage;
-    }
+    // First call: set baseline at 0/0
+    const mockStats1 = { scanned: 0, errorsByType: { static_timeout: 0 } };
+    computeTarget(16, 500, mockStats1);
+    // Second call: simulate 25 scans with 5 timeouts (20%)
+    const mockStats2 = { scanned: 25, errorsByType: { static_timeout: 5 } };
+    const { target, reason } = computeTarget(16, 500, mockStats2);
+    assert(target === 14, `Should reduce from 16 to 14, got ${target}`);
+    assertIncludes(reason, 'timeout_rate', 'Reason should mention timeout rate');
   });
 
   test('ADAPTIVE: computeTarget stays stable when queue is moderate', () => {
     const { computeTarget, resetDeltas } = require('../../src/monitor/adaptive-concurrency.js');
     resetDeltas();
-    const origMemUsage = process.memoryUsage;
-    process.memoryUsage = _lowMem;
-    try {
-      const mockStats = { scanned: 0, errorsByType: { static_timeout: 0 } };
-      const { target, reason } = computeTarget(12, 500, mockStats);
-      assert(target === 12, `Should stay at 12, got ${target}`);
-      assertIncludes(reason, 'stable', 'Reason should be stable');
-    } finally {
-      process.memoryUsage = origMemUsage;
-    }
+    const mockStats = { scanned: 0, errorsByType: { static_timeout: 0 } };
+    const { target, reason } = computeTarget(12, 500, mockStats);
+    assert(target === 12, `Should stay at 12, got ${target}`);
+    assertIncludes(reason, 'stable', 'Reason should be stable');
   });
 
   test('ADAPTIVE: MIN/BASE/MAX constants are reasonable', () => {

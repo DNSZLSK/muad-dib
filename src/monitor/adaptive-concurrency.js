@@ -5,13 +5,15 @@
  *
  * Adjusts target concurrency every ADJUST_INTERVAL_MS based on three signals:
  *   1. Queue depth — scale up when backlog grows, down when idle
- *   2. Memory pressure — always reduce under heap pressure
+ *   2. Memory pressure — always reduce under system RAM pressure
  *   3. Timeout rate — reduce when system is saturated (I/O contention)
  *
  * Scale-up is aggressive (+4) because backlog = lost coverage.
  * Scale-down is gradual (-2) to avoid thrashing.
  * Memory pressure overrides everything (OOM kills lose the in-memory queue).
  */
+
+const os = require('os');
 
 const MIN_CONCURRENCY = 4;
 const BASE_CONCURRENCY = Math.max(MIN_CONCURRENCY, parseInt(process.env.MUADDIB_SCAN_CONCURRENCY, 10) || 8);
@@ -23,7 +25,11 @@ const QUEUE_BACKLOG_THRESHOLD = 1000;
 const QUEUE_IDLE_THRESHOLD = 100;
 
 // System pressure thresholds
-const MEMORY_PRESSURE_THRESHOLD = 0.75;
+// Uses os.freemem()/os.totalmem() (real system RAM), NOT process.memoryUsage()
+// heapUsed/heapTotal. V8 adjusts heapTotal dynamically — the ratio is structurally
+// 75-85% even when the OS has 8+ GB free. On a 12GB VPS with 3MB heap,
+// heapUsed/heapTotal = 76% but freemem/totalmem = 75% (8.3GB available).
+const MEMORY_FREE_THRESHOLD = 0.15; // < 15% system RAM free = pressure
 const TIMEOUT_RATE_THRESHOLD = 0.15;
 const TIMEOUT_RATE_MIN_SAMPLES = 20;
 
@@ -41,15 +47,18 @@ let _prevTimeouts = 0;
  * @returns {{ target: number, reason: string }}
  */
 function computeTarget(current, queueDepth, stats) {
-  const mem = process.memoryUsage();
-  const memPressure = mem.heapUsed / mem.heapTotal;
+  // Use system RAM, not V8 heap ratio (see MEMORY_FREE_THRESHOLD comment above)
+  const freeMem = os.freemem();
+  const totalMem = os.totalmem();
+  const freeRatio = totalMem > 0 ? freeMem / totalMem : 1;
 
-  // Priority 1: Memory pressure — always reduce, overrides everything
-  if (memPressure > MEMORY_PRESSURE_THRESHOLD) {
+  // Priority 1: System memory pressure — always reduce, overrides everything
+  if (freeRatio < MEMORY_FREE_THRESHOLD) {
     const target = clamp(current - 4);
     _prevScanned = stats.scanned || 0;
     _prevTimeouts = (stats.errorsByType && stats.errorsByType.static_timeout) || 0;
-    return { target, reason: `memory_pressure (${(memPressure * 100).toFixed(0)}%)` };
+    const freeMB = Math.round(freeMem / 1024 / 1024);
+    return { target, reason: `memory_pressure (${freeMB}MB free, ${(freeRatio * 100).toFixed(0)}%)` };
   }
 
   // Compute timeout rate from stats deltas (sliding window between adjustments)
