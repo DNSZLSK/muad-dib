@@ -17,7 +17,7 @@ const os = require('os');
 
 const MIN_CONCURRENCY = 4;
 const BASE_CONCURRENCY = Math.max(MIN_CONCURRENCY, parseInt(process.env.MUADDIB_SCAN_CONCURRENCY, 10) || 8);
-const MAX_CONCURRENCY = Math.max(BASE_CONCURRENCY, parseInt(process.env.MUADDIB_MAX_CONCURRENCY, 10) || 32);
+const MAX_CONCURRENCY = Math.max(BASE_CONCURRENCY, parseInt(process.env.MUADDIB_MAX_CONCURRENCY, 10) || 16);
 const ADJUST_INTERVAL_MS = 30_000;
 
 // Queue depth thresholds
@@ -36,6 +36,12 @@ const TIMEOUT_RATE_MIN_SAMPLES = 20;
 // Track previous stats snapshot for delta computation
 let _prevScanned = 0;
 let _prevTimeouts = 0;
+
+// Throughput plateau detection: if we scaled up but throughput didn't increase,
+// we've hit I/O saturation (npm registry rate limiting, disk contention).
+// More workers would make it worse — scale back instead.
+let _prevThroughput = 0;
+let _lastScaleDirection = 0; // +1 = scaled up, -1 = scaled down, 0 = stable
 
 /**
  * Compute new target concurrency from system signals.
@@ -74,21 +80,39 @@ function computeTarget(current, queueDepth, stats) {
   // Priority 2: High timeout rate — system saturated, adding workers makes it worse
   if (timeoutRate > TIMEOUT_RATE_THRESHOLD) {
     const target = clamp(current - 2);
+    _prevThroughput = scannedDelta;
+    _lastScaleDirection = target < current ? -1 : 0;
     return { target, reason: `high_timeout_rate (${(timeoutRate * 100).toFixed(0)}%, ${timeoutDelta}/${scannedDelta})` };
   }
 
-  // Priority 3: Queue depth — scale up for backlog, down toward base when idle
+  // Priority 3: Throughput plateau — scaled up last tick but throughput flat/down.
+  // This catches I/O saturation: more workers = more concurrent HTTP to npm registry
+  // = rate limiting + contention = scan times 10s→90s = throughput drops.
+  // Scale back instead of continuing to add workers.
+  if (_lastScaleDirection > 0 && _prevThroughput > 0 && scannedDelta > 0 && scannedDelta <= _prevThroughput) {
+    const prevTp = _prevThroughput;
+    _prevThroughput = scannedDelta;
+    _lastScaleDirection = -1;
+    return { target: clamp(current - 2), reason: `throughput_plateau (${prevTp}→${scannedDelta} scans/30s, more workers didn't help)` };
+  }
+
+  // Priority 4: Queue depth — scale up for backlog, down toward base when idle
   if (queueDepth > QUEUE_BACKLOG_THRESHOLD) {
     const target = clamp(current + 4);
+    // Record throughput at the point of scale-up — next tick compares against this
+    _prevThroughput = scannedDelta;
+    _lastScaleDirection = target > current ? 1 : 0;
     return { target, reason: `backlog (queue=${queueDepth})` };
   }
 
   if (queueDepth < QUEUE_IDLE_THRESHOLD) {
     // Converge toward BASE, not MIN — normal traffic needs BASE capacity
     const target = Math.max(BASE_CONCURRENCY, clamp(current - 2));
+    _lastScaleDirection = target < current ? -1 : 0;
     return { target, reason: `idle (queue=${queueDepth})` };
   }
 
+  _lastScaleDirection = 0;
   return { target: current, reason: 'stable' };
 }
 
@@ -102,6 +126,8 @@ function clamp(n) {
 function resetDeltas() {
   _prevScanned = 0;
   _prevTimeouts = 0;
+  _prevThroughput = 0;
+  _lastScaleDirection = 0;
 }
 
 module.exports = {
