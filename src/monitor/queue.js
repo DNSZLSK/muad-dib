@@ -285,6 +285,16 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
   const cacheTrigger = meta._cacheTrigger || null;
 
   try {
+    // Pre-download size check: reject packages known to exceed MAX_TARBALL_SIZE
+    // from registry metadata, without wasting a download + 300s timeout.
+    // unpackedSize is available from getNpmLatestTarball() after lazy resolution.
+    const metaSize = meta.unpackedSize || 0;
+    if (metaSize > MAX_TARBALL_SIZE) {
+      console.log(`[MONITOR] SIZE_REJECT: ${name}@${version} — metadata size ${(metaSize / 1024 / 1024).toFixed(1)}MB exceeds ${(MAX_TARBALL_SIZE / 1024 / 1024).toFixed(0)}MB limit (skipped without download)`);
+      stats.scanned++;
+      return;
+    }
+
     const tgzPath = path.join(tmpDir, 'package.tar.gz');
 
     // Layer 3: Check tarball cache before downloading
@@ -729,7 +739,10 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
             const canary = isCanaryEnabled();
             const reason = tier === 2 ? ' (T2, queue low)' : tier === '1b' ? ' (T1b, conditional)' : '';
             console.log(`[MONITOR] SANDBOX${reason}: launching for ${name}@${version}${canary ? ' (canary: on)' : ''}...`);
-            sandboxResult = await runSandbox(name, { canary });
+            // T1a: 3 runs (time bomb detection via libfaketime — mandatory for high-confidence threats)
+            // T1b/T2: 1 run (270s→90s — time bombs are rare, throughput matters more under load)
+            const maxRuns = tier === '1a' ? undefined : 1;
+            sandboxResult = await runSandbox(name, { canary, maxRuns });
             console.log(`[MONITOR] SANDBOX: ${name}@${version} → score: ${sandboxResult.score}, severity: ${sandboxResult.severity}`);
 
             // Check for canary exfiltration findings and send dedicated alert
@@ -1153,11 +1166,13 @@ async function resolveTarballAndScan(item, stats, dailyAlerts, recentlyScanned, 
   let publishResult = null;
   let maintainerResult = null;
 
-  if (item.ecosystem === 'npm' && !item.fastTrack) {
+  const TEMPORAL_LOAD_SHED_THRESHOLD = 2000;
+  const skipTemporal = item.fastTrack || scanQueue.length > TEMPORAL_LOAD_SHED_THRESHOLD;
+  if (item.ecosystem === 'npm' && !skipTemporal) {
     // Run all 4 temporal checks in parallel — each is independent.
-    // With metadata cache (temporal-analysis.js), the 4 modules share 1 HTTP request.
-    // Skipped for fast-track packages (large boring packages — temporal checks make
-    // 4 HTTP requests to npm registry per package, pointless for 50MB enterprise packages).
+    // AST diff alone consumes 5 HTTP semaphore slots per package (2 tarball downloads + 3 metadata).
+    // With 16 workers that's 80 slot requests for 10 slots → workers blocked 80% of the time.
+    // Load-shed when queue > 2000: temporal analysis is a luxury during catch-up.
     const [tempRes, astRes, pubRes, maintRes] = await Promise.allSettled([
       runTemporalCheck(item.name, dailyAlerts),
       runTemporalAstCheck(item.name, dailyAlerts),
@@ -1168,6 +1183,8 @@ async function resolveTarballAndScan(item, stats, dailyAlerts, recentlyScanned, 
     astResult = astRes.status === 'fulfilled' ? astRes.value : null;
     publishResult = pubRes.status === 'fulfilled' ? pubRes.value : null;
     maintainerResult = maintRes.status === 'fulfilled' ? maintRes.value : null;
+  } else if (skipTemporal && item.ecosystem === 'npm' && !item.fastTrack) {
+    console.log(`[MONITOR] TEMPORAL LOAD-SHED: ${item.name}@${item.version} (queue=${scanQueue.length} > ${TEMPORAL_LOAD_SHED_THRESHOLD})`);
   }
 
   // Abort check: if timeout fired during temporal checks, skip the expensive scan

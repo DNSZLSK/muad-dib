@@ -641,12 +641,15 @@ async function runSandbox(packageName, options = {}) {
   try {
     const runtimeLabel = useGvisor ? 'gvisor' : 'docker';
     const slotInfo = skipSem ? 'deferred-slot' : `${_sandboxSemaphore.active}/${SANDBOX_CONCURRENCY_MAX}`;
-    console.log(`[SANDBOX] Analyzing "${displayName}" in isolated container (mode: ${mode}, runtime: ${runtimeLabel}${canaryEnabled ? ', canary: on' : ''}${local ? ', local' : ''}, runs: ${TIME_OFFSETS.length}, slots: ${slotInfo})...`);
+    // maxRuns: cap number of time-offset runs. Default: all TIME_OFFSETS (3 runs).
+    // T1b/T2 use maxRuns=1 to reduce 270s→90s — time bomb detection is a luxury under load.
+    const effectiveRuns = Math.min(options.maxRuns || TIME_OFFSETS.length, TIME_OFFSETS.length);
+    console.log(`[SANDBOX] Analyzing "${displayName}" in isolated container (mode: ${mode}, runtime: ${runtimeLabel}${canaryEnabled ? ', canary: on' : ''}${local ? ', local' : ''}, runs: ${effectiveRuns}, slots: ${slotInfo})...`);
 
     const allRuns = [];
     let bestResult = cleanResult;
 
-    for (let i = 0; i < TIME_OFFSETS.length; i++) {
+    for (let i = 0; i < effectiveRuns; i++) {
       const { offset, label } = TIME_OFFSETS[i];
       console.log(`[SANDBOX] Run ${i + 1}/${TIME_OFFSETS.length} (${label})...`);
 
