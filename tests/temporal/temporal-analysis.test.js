@@ -657,8 +657,8 @@ async function runTemporalAnalysisTests() {
 
   const { _httpSemaphore, HTTP_SEMAPHORE_MAX } = require('../../src/temporal-analysis.js');
 
-  test('SEMAPHORE: HTTP_SEMAPHORE_MAX is 10', () => {
-    assert(HTTP_SEMAPHORE_MAX === 10, 'Max should be 10, got ' + HTTP_SEMAPHORE_MAX);
+  test('SEMAPHORE: HTTP_SEMAPHORE_MAX is 20', () => {
+    assert(HTTP_SEMAPHORE_MAX === 20, 'Max should be 20, got ' + HTTP_SEMAPHORE_MAX);
   });
 
   test('SEMAPHORE: clearMetadataCache resets semaphore', () => {

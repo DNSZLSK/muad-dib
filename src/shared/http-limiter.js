@@ -14,7 +14,7 @@
  * NOT covered: api.npmjs.org (different server), replicate.npmjs.com (CouchDB changes stream).
  */
 
-const REGISTRY_SEMAPHORE_MAX = 10;
+const REGISTRY_SEMAPHORE_MAX = 20;
 const RATE_LIMIT_PER_SEC = 30;
 
 // --- Concurrency semaphore ---
