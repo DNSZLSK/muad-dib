@@ -37,11 +37,14 @@ const TIMEOUT_RATE_MIN_SAMPLES = 20;
 let _prevScanned = 0;
 let _prevTimeouts = 0;
 
-// Throughput plateau detection: if we scaled up but throughput didn't increase,
-// we've hit I/O saturation (npm registry rate limiting, disk contention).
-// More workers would make it worse — scale back instead.
+// Throughput plateau detection: if we scaled up but throughput didn't increase
+// over MULTIPLE consecutive windows, we've hit I/O saturation.
+// Requires 2 consecutive flat windows to trigger — a single 30s window has too
+// much variance from sandbox timeouts (90-270s) to be reliable.
 let _prevThroughput = 0;
 let _lastScaleDirection = 0; // +1 = scaled up, -1 = scaled down, 0 = stable
+let _plateauStreak = 0;      // consecutive windows where throughput didn't improve after scale-up
+const PLATEAU_STREAK_REQUIRED = 2; // must see flat throughput N times before triggering
 
 /**
  * Compute new target concurrency from system signals.
@@ -85,16 +88,24 @@ function computeTarget(current, queueDepth, stats) {
     return { target, reason: `high_timeout_rate (${(timeoutRate * 100).toFixed(0)}%, ${timeoutDelta}/${scannedDelta})` };
   }
 
-  // Priority 3: Throughput plateau — scaled up last tick but throughput flat/down.
-  // This catches I/O saturation: more workers = more concurrent HTTP to npm registry
-  // = rate limiting + contention = scan times 10s→90s = throughput drops.
-  // Scale back instead of continuing to add workers.
+  // Priority 3: Throughput plateau — scaled up recently but throughput flat/down.
+  // Requires PLATEAU_STREAK_REQUIRED consecutive flat windows to trigger.
+  // A single bad window (sandbox timeout finishing in wrong 30s slot) is noise, not saturation.
   if (_lastScaleDirection > 0 && _prevThroughput > 0 && scannedDelta > 0 && scannedDelta <= _prevThroughput) {
-    const prevTp = _prevThroughput;
+    _plateauStreak++;
+    if (_plateauStreak >= PLATEAU_STREAK_REQUIRED) {
+      const prevTp = _prevThroughput;
+      _prevThroughput = scannedDelta;
+      _lastScaleDirection = -1;
+      _plateauStreak = 0;
+      return { target: clamp(current - 2), reason: `throughput_plateau (${prevTp}→${scannedDelta} scans/30s × ${PLATEAU_STREAK_REQUIRED} windows)` };
+    }
+    // Not enough consecutive flat windows yet — keep current level, don't scale up further
     _prevThroughput = scannedDelta;
-    _lastScaleDirection = -1;
-    return { target: clamp(current - 2), reason: `throughput_plateau (${prevTp}→${scannedDelta} scans/30s, more workers didn't help)` };
+    return { target: current, reason: `plateau_warning (${_plateauStreak}/${PLATEAU_STREAK_REQUIRED}, ${scannedDelta} scans/30s)` };
   }
+  // Throughput improved or no scale-up context — reset streak
+  _plateauStreak = 0;
 
   // Priority 4: Queue depth — scale up for backlog, down toward base when idle
   if (queueDepth > QUEUE_BACKLOG_THRESHOLD) {
@@ -128,6 +139,7 @@ function resetDeltas() {
   _prevTimeouts = 0;
   _prevThroughput = 0;
   _lastScaleDirection = 0;
+  _plateauStreak = 0;
 }
 
 module.exports = {
