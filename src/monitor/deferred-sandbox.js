@@ -419,6 +419,18 @@ function isDeferredSlotBusy() {
   return _deferredSlotBusy;
 }
 
+/**
+ * Emergency clear: drop all deferred items and free their staticResult references.
+ * Called by daemon.js memory circuit breaker at EMERGENCY level.
+ * Returns the count of items dropped for logging.
+ */
+function clearDeferredQueue() {
+  const count = _deferredQueue.length;
+  _deferredQueue.length = 0;
+  _deferredSeen.clear();
+  return count;
+}
+
 module.exports = {
   enqueueDeferred,
   getDeferredQueue,
@@ -431,6 +443,7 @@ module.exports = {
   buildDeferredFollowUpEmbed,
   pruneExpired,
   isDeferredSlotBusy,
+  clearDeferredQueue,
   _resetDeferredQueue,
   DEFERRED_QUEUE_MAX,
   DEFERRED_TTL_MS,
