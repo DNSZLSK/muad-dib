@@ -11,7 +11,8 @@ const { poll } = require('./ingestion.js');
 const { processQueue, ensureWorkers, drainWorkers, getTargetConcurrency, setTargetConcurrency, getActiveWorkers, SCAN_CONCURRENCY } = require('./queue.js');
 const { computeTarget, ADJUST_INTERVAL_MS, BASE_CONCURRENCY, resetDeltas } = require('./adaptive-concurrency.js');
 const { startHealthcheck } = require('./healthcheck.js');
-const { startDeferredWorker, stopDeferredWorker, persistDeferredQueue, restoreDeferredQueue } = require('./deferred-sandbox.js');
+const { startDeferredWorker, stopDeferredWorker, persistDeferredQueue, restoreDeferredQueue, clearDeferredQueue } = require('./deferred-sandbox.js');
+const { clearMetadataCache } = require('../scanner/temporal-analysis.js');
 
 const POLL_INTERVAL = 60_000;
 const PROCESS_LOOP_INTERVAL = 2_000;    // Queue check interval when empty
@@ -21,9 +22,44 @@ const QUEUE_STATE_FILE = path.join(__dirname, '..', '..', 'data', 'queue-state.j
 const QUEUE_STATE_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24h expiry
 const MAX_QUEUE_PERSIST_SIZE = 200_000; // Don't persist if queue > 200K items (OOM guard)
 const MAX_RESTORE_QUEUE_SIZE = 100_000; // Cap restored queue at 100K items
-// MAX_SCAN_QUEUE removed: backpressure no longer skips polling.
-// Queue grows unbounded in memory (entries are ~300B, 100K = 30MB on 12GB VPS).
-// Adaptive concurrency adjusts processing speed to match ingestion rate.
+
+// ─── Memory pressure circuit breaker ───
+// Graduated response based on V8 heap usage ratio.
+// Threat model: when GC thrashing starts (>90% heap), throughput drops to 0 and
+// the queue grows unbounded because ingestion continues. Without a circuit breaker,
+// the only recovery is OOM kill or manual restart — losing the entire in-memory queue.
+//
+// Levels:
+//   NONE    (<75%)  — normal operation
+//   ELEVATED (75%)  — log warning, reduce concurrency target
+//   HIGH    (85%)  — prune caches, stop spawning new workers
+//   CRITICAL (90%) — stop ingestion, clear scanner caches, force GC
+//   EMERGENCY (95%) — truncate queue to most recent N items, clear deferred queue
+//
+// The key insight from the 2026-04-13 incident: emergency prune at 85% only cleared
+// ~4MB of auxiliary caches (recentlyScanned, downloadsCache, alertedPackageRules) on a
+// 3571MB heap. The real memory was held by N concurrent scan workers retaining AST trees,
+// scan results, and extracted file references. Stopping worker spawning is the only way
+// to let running scans finish and release their memory.
+const MEMORY_PRESSURE_LEVELS = {
+  NONE: 0,
+  ELEVATED: 1,
+  HIGH: 2,
+  CRITICAL: 3,
+  EMERGENCY: 4
+};
+const MEMORY_THRESHOLD_ELEVATED = 0.75;
+const MEMORY_THRESHOLD_HIGH = 0.85;
+const MEMORY_THRESHOLD_CRITICAL = 0.90;
+const MEMORY_THRESHOLD_EMERGENCY = 0.95;
+// When truncating queue under EMERGENCY, keep the N most recent items.
+// These are the newest packages — most likely to still be on npm for re-scan.
+const EMERGENCY_QUEUE_KEEP = 500;
+// Memory check interval adapts: 5min under NONE/ELEVATED, 15s under HIGH+.
+// Fast checks are critical because at 50 pkg/min ingestion, 5min = 250 new items.
+const MEMORY_LOG_INTERVAL_NORMAL = 300_000;   // 5 minutes
+const MEMORY_LOG_INTERVAL_PRESSURE = 15_000;  // 15 seconds
+let _memoryPressureLevel = MEMORY_PRESSURE_LEVELS.NONE;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -247,6 +283,37 @@ const MAX_RECENTLY_SCANNED = 50_000;
 const MAX_ALERTED_PACKAGES = 5_000;
 
 /**
+ * Compute current memory pressure level from V8 heap usage.
+ * Returns one of MEMORY_PRESSURE_LEVELS and updates the module-level _memoryPressureLevel.
+ * Cheap call (~0.1ms) — safe to run every 2s in the main loop.
+ */
+function computeMemoryPressure() {
+  const mem = process.memoryUsage();
+  const ratio = mem.heapTotal > 0 ? mem.heapUsed / mem.heapTotal : 0;
+
+  if (ratio >= MEMORY_THRESHOLD_EMERGENCY) {
+    _memoryPressureLevel = MEMORY_PRESSURE_LEVELS.EMERGENCY;
+  } else if (ratio >= MEMORY_THRESHOLD_CRITICAL) {
+    _memoryPressureLevel = MEMORY_PRESSURE_LEVELS.CRITICAL;
+  } else if (ratio >= MEMORY_THRESHOLD_HIGH) {
+    _memoryPressureLevel = MEMORY_PRESSURE_LEVELS.HIGH;
+  } else if (ratio >= MEMORY_THRESHOLD_ELEVATED) {
+    _memoryPressureLevel = MEMORY_PRESSURE_LEVELS.ELEVATED;
+  } else {
+    _memoryPressureLevel = MEMORY_PRESSURE_LEVELS.NONE;
+  }
+  return { level: _memoryPressureLevel, mem, ratio };
+}
+
+/**
+ * Get the current memory pressure level.
+ * Used by ingestion.js to decide whether to skip polling.
+ */
+function getMemoryPressureLevel() {
+  return _memoryPressureLevel;
+}
+
+/**
  * Prune in-memory caches to prevent unbounded growth between daily resets.
  * Called hourly from the main loop. Targets:
  * - recentlyScanned: Set used for 24h dedup (no TTL, only cleared at daily report)
@@ -281,6 +348,76 @@ function pruneMemoryCaches(recentlyScanned, downloadsCache, alertedPackageRules)
 
   if (pruned > 0) {
     console.log(`[MONITOR] PRUNE: ${pruned} cache entries/collections pruned`);
+  }
+}
+
+/**
+ * Graduated memory pressure response. Called from the main loop when
+ * computeMemoryPressure() detects a level >= HIGH.
+ *
+ * The key principle: clearing caches alone is futile when the real memory is held
+ * by N concurrent scan workers retaining AST trees, scan results, and extracted
+ * file references. The only effective response is to STOP creating new work and
+ * let running scans finish/timeout and release their memory.
+ *
+ * Level actions (cumulative — higher levels include lower-level actions):
+ *   HIGH (85%):     clear auxiliary caches (recentlyScanned, downloadsCache, etc.)
+ *   CRITICAL (90%): clear scanner caches (temporal metadata), force GC, log loudly
+ *   EMERGENCY (95%): truncate queue to EMERGENCY_QUEUE_KEEP, clear deferred queue
+ *
+ * Worker spawning is gated separately in the main loop (ensureWorkers skipped at HIGH+).
+ * Ingestion is gated in ingestion.js via getMemoryPressureLevel() (skipped at CRITICAL+).
+ */
+function handleMemoryPressure(level, ratio, recentlyScanned, downloadsCache, scanQueue) {
+  const pct = (ratio * 100).toFixed(0);
+
+  // HIGH (85%+): clear auxiliary caches — same as old emergency prune
+  if (level >= MEMORY_PRESSURE_LEVELS.HIGH) {
+    console.error(`[MONITOR] MEMORY PRESSURE HIGH: heap at ${pct}% — pruning caches, stopping new workers`);
+    recentlyScanned.clear();
+    downloadsCache.clear();
+    alertedPackageRules.clear();
+  }
+
+  // CRITICAL (90%+): clear scanner caches, force GC
+  if (level >= MEMORY_PRESSURE_LEVELS.CRITICAL) {
+    console.error(`[MONITOR] MEMORY PRESSURE CRITICAL: heap at ${pct}% — stopping ingestion, clearing scanner caches`);
+    // temporal-analysis._metadataCache (200 entries × full npm registry metadata)
+    try { clearMetadataCache(); } catch {}
+    // pendingGrouped webhook buffers
+    for (const [scope, group] of pendingGrouped) {
+      clearTimeout(group.timer);
+    }
+    pendingGrouped.clear();
+    // Force GC if available (requires --expose-gc)
+    if (global.gc) {
+      global.gc();
+      console.log('[MONITOR] Forced garbage collection');
+    }
+  }
+
+  // EMERGENCY (95%+): queue truncation + deferred queue clear
+  if (level >= MEMORY_PRESSURE_LEVELS.EMERGENCY) {
+    const queueBefore = scanQueue.length;
+    if (queueBefore > EMERGENCY_QUEUE_KEEP) {
+      // Keep the LAST N items (most recently added = newest packages).
+      // These are the packages most likely to still exist on npm for re-scan later.
+      // Dropped items are public packages — they'll appear again on republish or
+      // can be re-fetched from the registry if needed.
+      const dropped = queueBefore - EMERGENCY_QUEUE_KEEP;
+      // splice from the front: older items were pushed first
+      scanQueue.splice(0, dropped);
+      console.error(`[MONITOR] MEMORY EMERGENCY: heap at ${pct}% — truncated queue ${queueBefore} → ${scanQueue.length} (dropped ${dropped} oldest items)`);
+    }
+    // Clear deferred sandbox queue (holds full staticResult objects)
+    const deferredDropped = clearDeferredQueue();
+    if (deferredDropped > 0) {
+      console.error(`[MONITOR] MEMORY EMERGENCY: cleared ${deferredDropped} deferred sandbox items`);
+    }
+    // Second GC pass after freeing queue + deferred references
+    if (global.gc) {
+      global.gc();
+    }
   }
 }
 
@@ -515,8 +652,8 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
   // ─── Decoupled polling ───
   // Poll runs on its own interval, independent of processing.
   // This ensures new packages are ingested even while a large batch is being scanned.
-  // Backpressure removed: polling ALWAYS runs. Queue grows unbounded in memory
-  // (entries ~300B, 100K = 30MB). Adaptive concurrency adjusts scan throughput.
+  // Backpressure: poll() skips when queue >= 30K or memory pressure >= CRITICAL (90%).
+  // Adaptive concurrency adjusts scan throughput to match ingestion rate.
   let pollInProgress = false;
   pollIntervalHandle = setInterval(async () => {
     if (!running || pollInProgress) return;
@@ -549,33 +686,39 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
   // Non-blocking: ensureWorkers spawns fire-and-forget background workers.
   // This loop tops up workers every 2s AND runs housekeeping (memory, daily report)
   // without being blocked by long-running scans.
-  const MEMORY_LOG_INTERVAL = 300_000; // 5 minutes
-  const MEMORY_PRESSURE_THRESHOLD = 0.85; // 85% heap usage triggers emergency prune
   let lastMemoryLogTime = Date.now();
 
   while (running) {
-    // Top up workers (non-blocking — spawns missing workers as background promises)
-    ensureWorkers(scanQueue, stats, dailyAlerts, recentlyScanned, downloadsCache, sandboxAvailableRef.value);
+    // ─── Memory circuit breaker (every iteration) ───
+    // computeMemoryPressure() is cheap (~0.1ms). Running every 2s ensures fast
+    // reaction to memory spikes — the 2026-04-13 incident showed that checking
+    // every 5min is too slow (250 packages ingested between checks).
+    const { level: pressureLevel, mem: currentMem, ratio: heapRatio } = computeMemoryPressure();
 
-    // ─── Memory watchdog (every 5 min) ───
-    if (Date.now() - lastMemoryLogTime >= MEMORY_LOG_INTERVAL) {
-      const mem = process.memoryUsage();
-      const heapUsedMB = (mem.heapUsed / 1024 / 1024).toFixed(0);
-      const heapTotalMB = (mem.heapTotal / 1024 / 1024).toFixed(0);
-      const rssMB = (mem.rss / 1024 / 1024).toFixed(0);
-      console.log(`[MONITOR] MEMORY: heap=${heapUsedMB}MB/${heapTotalMB}MB, rss=${rssMB}MB, queue=${scanQueue.length}, dedup=${recentlyScanned.size}, downloads=${downloadsCache.size}, alerts=${alertedPackageRules.size}`);
+    // Top up workers ONLY when memory pressure is below HIGH.
+    // At HIGH+, existing workers continue (they'll finish or timeout) but no new
+    // ones are spawned. This is the core mechanism: let running scans release their
+    // memory (AST trees, scan results, extracted files) before starting new ones.
+    if (pressureLevel < MEMORY_PRESSURE_LEVELS.HIGH) {
+      ensureWorkers(scanQueue, stats, dailyAlerts, recentlyScanned, downloadsCache, sandboxAvailableRef.value);
+    }
 
-      // Emergency prune under memory pressure
-      if (mem.heapUsed / mem.heapTotal > MEMORY_PRESSURE_THRESHOLD) {
-        console.error(`[MONITOR] MEMORY PRESSURE: heap at ${((mem.heapUsed / mem.heapTotal) * 100).toFixed(0)}% — emergency prune`);
-        recentlyScanned.clear();
-        downloadsCache.clear();
-        alertedPackageRules.clear();
-        // Force GC if available (requires --expose-gc)
-        if (global.gc) {
-          global.gc();
-          console.log('[MONITOR] Forced garbage collection');
-        }
+    // ─── Memory watchdog (adaptive interval) ───
+    // Log every 5min normally, every 15s under pressure.
+    const memLogInterval = pressureLevel >= MEMORY_PRESSURE_LEVELS.HIGH
+      ? MEMORY_LOG_INTERVAL_PRESSURE
+      : MEMORY_LOG_INTERVAL_NORMAL;
+
+    if (Date.now() - lastMemoryLogTime >= memLogInterval) {
+      const heapUsedMB = (currentMem.heapUsed / 1024 / 1024).toFixed(0);
+      const heapTotalMB = (currentMem.heapTotal / 1024 / 1024).toFixed(0);
+      const rssMB = (currentMem.rss / 1024 / 1024).toFixed(0);
+      const levelName = Object.keys(MEMORY_PRESSURE_LEVELS).find(k => MEMORY_PRESSURE_LEVELS[k] === pressureLevel) || 'UNKNOWN';
+      console.log(`[MONITOR] MEMORY: heap=${heapUsedMB}MB/${heapTotalMB}MB, rss=${rssMB}MB, queue=${scanQueue.length}, dedup=${recentlyScanned.size}, downloads=${downloadsCache.size}, alerts=${alertedPackageRules.size}, pressure=${levelName}`);
+
+      // Graduated response at HIGH+
+      if (pressureLevel >= MEMORY_PRESSURE_LEVELS.HIGH) {
+        handleMemoryPressure(pressureLevel, heapRatio, recentlyScanned, downloadsCache, scanQueue);
       }
       lastMemoryLogTime = Date.now();
     }
@@ -632,5 +775,17 @@ module.exports = {
   MAX_RESTORE_QUEUE_SIZE,
   pruneMemoryCaches,
   MAX_RECENTLY_SCANNED,
-  MAX_ALERTED_PACKAGES
+  MAX_ALERTED_PACKAGES,
+  // Memory circuit breaker
+  computeMemoryPressure,
+  getMemoryPressureLevel,
+  handleMemoryPressure,
+  MEMORY_PRESSURE_LEVELS,
+  MEMORY_THRESHOLD_ELEVATED,
+  MEMORY_THRESHOLD_HIGH,
+  MEMORY_THRESHOLD_CRITICAL,
+  MEMORY_THRESHOLD_EMERGENCY,
+  EMERGENCY_QUEUE_KEEP,
+  MEMORY_LOG_INTERVAL_NORMAL,
+  MEMORY_LOG_INTERVAL_PRESSURE
 };

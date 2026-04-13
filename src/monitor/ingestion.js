@@ -650,7 +650,21 @@ async function pollPyPI(state, scanQueue) {
 const SOFT_BACKPRESSURE_THRESHOLD = 30_000;
 
 async function poll(state, scanQueue, stats) {
-  // Soft backpressure: skip poll when queue is very deep.
+  // Memory-based backpressure: skip poll when heap is at CRITICAL+ (90%+).
+  // This is the primary defense against the 2026-04-13 death spiral where
+  // ingestion continued at 50 pkg/min while processing was at 0 throughput.
+  // Safe because: CouchDB seq is NOT advanced — next poll resumes from same point.
+  try {
+    const { getMemoryPressureLevel } = require('./daemon.js');
+    const pressureLevel = getMemoryPressureLevel();
+    // CRITICAL=3, EMERGENCY=4
+    if (pressureLevel >= 3) {
+      console.log(`[MONITOR] MEMORY BACKPRESSURE: skipping poll (pressure level ${pressureLevel} >= CRITICAL) — seq not advanced, 0 packages lost`);
+      return;
+    }
+  } catch { /* daemon.js not loaded yet (initial poll) — proceed normally */ }
+
+  // Queue-depth backpressure: skip poll when queue is very deep.
   // Safe because: CouchDB seq is NOT advanced (stays in memory only, persisted
   // by daemon.js AFTER poll returns) — next poll resumes from the same point.
   // Combined with adaptive concurrency: workers scale up → queue drains → poll resumes.

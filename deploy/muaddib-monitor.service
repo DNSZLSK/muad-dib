@@ -9,7 +9,7 @@ Type=simple
 User=muaddib
 Group=muaddib
 WorkingDirectory=/opt/muaddib
-ExecStart=/usr/bin/node src/monitor.js
+ExecStart=/usr/bin/node --expose-gc --max-old-space-size=3072 src/monitor.js
 Restart=always
 RestartSec=10
 StandardOutput=journal
