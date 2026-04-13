@@ -25,6 +25,10 @@ log "Update found: ${LOCAL_SHA:0:8} -> ${REMOTE_SHA:0:8}"
 
 git pull origin "$BRANCH" >> "$LOG_FILE" 2>&1
 npm ci --production >> "$LOG_FILE" 2>&1
+
+# Fix ownership: git pull + npm ci run as root, monitor runs as muaddib
+chown -R muaddib:muaddib "$INSTALL_DIR" >> "$LOG_FILE" 2>&1
+
 systemctl restart muaddib-monitor
 
 log "Update complete — muaddib-monitor restarted"

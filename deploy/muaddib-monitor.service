@@ -9,6 +9,7 @@ Type=simple
 User=muaddib
 Group=muaddib
 WorkingDirectory=/opt/muaddib
+ExecStartPre=+/bin/chown -R muaddib:muaddib /opt/muaddib/data /opt/muaddib/logs
 ExecStart=/usr/bin/node --expose-gc --max-old-space-size=3072 src/monitor.js
 Restart=always
 RestartSec=10
@@ -23,7 +24,7 @@ EnvironmentFile=-/opt/muaddib/.env
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/opt/muaddib/data
+ReadWritePaths=/opt/muaddib/data /opt/muaddib/logs
 PrivateTmp=true
 
 [Install]

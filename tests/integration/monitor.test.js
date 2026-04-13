@@ -3764,10 +3764,10 @@ async function runMonitorTests() {
       findings: [{ rule: 'TEST-001', severity: 'LOW' }]
     };
     appendAlert(alert);
-    // Verify it was appended
+    // Verify it was appended (JSONL format: one JSON object per line)
     const raw = fs.readFileSync(ALERTS_FILE, 'utf8');
-    const alerts = JSON.parse(raw);
-    const found = alerts.find(a => a.name === 'test-append-alert-pkg');
+    const lines = raw.trim().split('\n');
+    const found = lines.map(l => JSON.parse(l)).find(a => a.name === 'test-append-alert-pkg');
     assert(found, 'Should find the appended alert');
     assert(found.version === '1.0.0', 'Version should match');
   });
