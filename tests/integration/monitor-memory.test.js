@@ -27,6 +27,9 @@ async function runMonitorMemoryTests() {
   } = require('../../src/monitor/daemon.js');
   const { DOWNLOADS_CACHE_TTL } = require('../../src/monitor/classify.js');
   const { clearDeferredQueue } = require('../../src/monitor/deferred-sandbox.js');
+  const {
+    appendAlert, ALERTS_FILE, ALERTS_MAX_SIZE, MAX_DETECTIONS
+  } = require('../../src/monitor/state.js');
 
   // ─── Chantier 1: Queue backpressure ───
 
@@ -326,6 +329,109 @@ async function runMonitorMemoryTests() {
     // Verify seq is persisted atomically with queue after each poll
     assertIncludes(daemonSource, 'persistQueue(scanQueue, state)', 'daemon.js should persist queue after poll');
     assertIncludes(daemonSource, 'saveNpmSeq(state.npmLastSeq)', 'daemon.js should save seq after queue persist');
+  });
+
+  // ─── Bug fix: heap pressure uses v8.getHeapStatistics ───
+
+  test('BUG1: computeMemoryPressure uses v8 heap_size_limit (not hardcoded)', () => {
+    const daemonSource = fs.readFileSync(
+      path.join(__dirname, '..', '..', 'src', 'monitor', 'daemon.js'), 'utf8'
+    );
+    assertIncludes(daemonSource, "require('v8')", 'daemon.js should import v8 module');
+    assertIncludes(daemonSource, 'getHeapStatistics', 'daemon.js should use v8.getHeapStatistics()');
+    assertIncludes(daemonSource, 'heap_size_limit', 'daemon.js should use heap_size_limit as denominator');
+    assert(!daemonSource.includes('3072 * 1024 * 1024'),
+      'daemon.js should not use hardcoded 3072MB denominator');
+  });
+
+  test('BUG1: computeMemoryPressure ratio matches v8 heap limit', () => {
+    const v8 = require('v8');
+    const { level, mem, ratio } = computeMemoryPressure();
+    const heapLimit = v8.getHeapStatistics().heap_size_limit;
+    const expectedRatio = mem.heapUsed / heapLimit;
+    // Allow 1% tolerance for timing drift between calls
+    assert(Math.abs(ratio - expectedRatio) < 0.01,
+      `ratio ${ratio.toFixed(4)} should be close to heapUsed/heap_size_limit (${expectedRatio.toFixed(4)})`);
+  });
+
+  // ─── Bug fix: alerts JSONL append-only ───
+
+  test('BUG2a: appendAlert uses JSONL append (not JSON read-parse-rewrite)', () => {
+    const stateSource = fs.readFileSync(
+      path.join(__dirname, '..', '..', 'src', 'monitor', 'state.js'), 'utf8'
+    );
+    assertIncludes(stateSource, 'appendFileSync', 'state.js should use appendFileSync for alerts');
+    assertIncludes(stateSource, 'monitor-alerts.jsonl', 'ALERTS_FILE should use .jsonl extension');
+    assert(!stateSource.includes("JSON.parse(fs.readFileSync(ALERTS_FILE"),
+      'appendAlert should not read+parse the full alerts file');
+  });
+
+  test('BUG2a: alerts file has rotation', () => {
+    const stateSource = fs.readFileSync(
+      path.join(__dirname, '..', '..', 'src', 'monitor', 'state.js'), 'utf8'
+    );
+    assertIncludes(stateSource, 'maybeRotateAlerts', 'state.js should have alerts rotation');
+    assert(typeof ALERTS_MAX_SIZE === 'number', 'ALERTS_MAX_SIZE should be exported');
+    assert(ALERTS_MAX_SIZE === 100 * 1024 * 1024, `ALERTS_MAX_SIZE should be 100MB, got ${ALERTS_MAX_SIZE}`);
+  });
+
+  test('BUG2a: appendAlert writes valid JSONL lines', () => {
+    // Test that appendAlert produces valid JSONL by checking the format:
+    // appendAlert calls appendFileSync with JSON.stringify(alert) + '\n'
+    const stateSource = fs.readFileSync(
+      path.join(__dirname, '..', '..', 'src', 'monitor', 'state.js'), 'utf8'
+    );
+    // Verify the append pattern: JSON.stringify(alert) + '\n' followed by appendFileSync
+    assertIncludes(stateSource, "JSON.stringify(alert) + '\\n'",
+      'appendAlert should write single-line JSON with newline');
+    assertIncludes(stateSource, 'appendFileSync(ALERTS_FILE, line',
+      'appendAlert should use appendFileSync');
+  });
+
+  // ─── Bug fix: detections cap ───
+
+  test('BUG2b: detections.json has MAX_DETECTIONS cap', () => {
+    const stateSource = fs.readFileSync(
+      path.join(__dirname, '..', '..', 'src', 'monitor', 'state.js'), 'utf8'
+    );
+    assertIncludes(stateSource, 'MAX_DETECTIONS', 'state.js should define MAX_DETECTIONS');
+    assert(typeof MAX_DETECTIONS === 'number', 'MAX_DETECTIONS should be exported');
+    assert(MAX_DETECTIONS === 10_000, `MAX_DETECTIONS should be 10000, got ${MAX_DETECTIONS}`);
+    assertIncludes(stateSource, 'slice(-MAX_DETECTIONS)', 'appendDetection should cap with slice');
+  });
+
+  // ─── Bug fix: temporal findings trimmed ───
+
+  test('BUG2c: temporal findings are trimmed before persistence', () => {
+    const stateSource = fs.readFileSync(
+      path.join(__dirname, '..', '..', 'src', 'monitor', 'state.js'), 'utf8'
+    );
+    assertIncludes(stateSource, 'trimTemporalFindings', 'state.js should have trimTemporalFindings');
+    assertIncludes(stateSource, 'trimTemporalFindings(findings)', 'appendTemporalDetection should trim findings');
+  });
+
+  // ─── Bug fix: deploy permissions ───
+
+  test('BUG3: auto-update.sh fixes ownership after git pull', () => {
+    const updateScript = fs.readFileSync(
+      path.join(__dirname, '..', '..', 'deploy', 'auto-update.sh'), 'utf8'
+    );
+    assertIncludes(updateScript, 'chown', 'auto-update.sh should fix file ownership');
+    assertIncludes(updateScript, 'muaddib:muaddib', 'auto-update.sh should chown to muaddib user');
+    // chown must come AFTER npm ci and BEFORE systemctl restart
+    const chownIdx = updateScript.indexOf('chown');
+    const npmIdx = updateScript.indexOf('npm ci');
+    const restartIdx = updateScript.indexOf('systemctl restart');
+    assert(chownIdx > npmIdx, 'chown should come after npm ci');
+    assert(chownIdx < restartIdx, 'chown should come before systemctl restart');
+  });
+
+  test('BUG3: monitor service has ExecStartPre for ownership fix', () => {
+    const serviceFile = fs.readFileSync(
+      path.join(__dirname, '..', '..', 'deploy', 'muaddib-monitor.service'), 'utf8'
+    );
+    assertIncludes(serviceFile, 'ExecStartPre', 'service should have ExecStartPre for ownership fix');
+    assertIncludes(serviceFile, 'chown', 'ExecStartPre should run chown');
   });
 }
 

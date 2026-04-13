@@ -10,12 +10,16 @@ const { sanitizePackageName } = require('../shared/download.js');
 // --- File path constants ---
 
 const STATE_FILE = path.join(__dirname, '..', '..', 'data', 'monitor-state.json');
-const ALERTS_FILE = path.join(__dirname, '..', '..', 'data', 'monitor-alerts.json');
+const ALERTS_FILE = path.join(__dirname, '..', '..', 'data', 'monitor-alerts.jsonl');
 const DETECTIONS_FILE = path.join(__dirname, '..', '..', 'data', 'detections.json');
 const SCAN_STATS_FILE = path.join(__dirname, '..', '..', 'data', 'scan-stats.json');
 const LAST_DAILY_REPORT_FILE = path.join(__dirname, '..', '..', 'data', 'last-daily-report.json');
 const DAILY_STATS_FILE = path.join(__dirname, '..', '..', 'data', 'daily-stats.json');
 const TEMPORAL_DETECTIONS_FILE = path.join(__dirname, '..', '..', 'data', 'temporal-detections.json');
+
+// --- Alerts/detections persistence limits ---
+const ALERTS_MAX_SIZE = 100 * 1024 * 1024; // 100MB rotation threshold (matches ml-training.jsonl)
+const MAX_DETECTIONS = 10_000;              // Cap detections array — oldest entries discarded
 
 // Local log persistence directories (parallel to Discord webhooks for offline analysis)
 // Primary: logs/ relative to project root. Fallback: /tmp/ if primary is read-only (EROFS/EACCES).
@@ -437,6 +441,27 @@ function purgeTarballCache() {
 // --- Temporal detections ---
 
 /**
+ * Trim temporal findings to essential fields only.
+ * Production findings arrive as { type, data: { suspicious, message, score, findings: [...], ... } }
+ * with the data object containing full AST diffs, metadata snapshots, etc (~80KB each).
+ * This retains only type, severity, suspicious, message, and score for persistence.
+ */
+function trimTemporalFindings(findings) {
+  return findings.map(f => {
+    const trimmed = { type: f.type };
+    if (f.severity) trimmed.severity = f.severity;
+    if (f.message) trimmed.message = f.message;
+    if (f.data) {
+      if (f.data.suspicious !== undefined) trimmed.suspicious = f.data.suspicious;
+      if (f.data.message) trimmed.message = trimmed.message || f.data.message;
+      if (f.data.score !== undefined) trimmed.score = f.data.score;
+      if (f.data.severity) trimmed.severity = trimmed.severity || f.data.severity;
+    }
+    return trimmed;
+  });
+}
+
+/**
  * Append a temporal detection to the temporal detections file.
  * @param {string} name - Package name
  * @param {string} version - Package version
@@ -452,7 +477,7 @@ function appendTemporalDetection(name, version, findings) {
   detections.push({
     name,
     version,
-    findings,
+    findings: trimTemporalFindings(findings),
     timestamp: new Date().toISOString()
   });
   // Keep last 1000 entries
@@ -520,7 +545,21 @@ function saveState(state, stats) {
   }
 }
 
-// --- Alerts persistence ---
+// --- Alerts persistence (JSONL append-only) ---
+
+function maybeRotateAlerts() {
+  try {
+    if (!fs.existsSync(ALERTS_FILE)) return;
+    const stat = fs.statSync(ALERTS_FILE);
+    if (stat.size < ALERTS_MAX_SIZE) return;
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const rotatedName = ALERTS_FILE.replace('.jsonl', `-${timestamp}.jsonl`);
+    fs.renameSync(ALERTS_FILE, rotatedName);
+    console.log(`[MONITOR] Rotated alerts -> ${path.basename(rotatedName)} (${(stat.size / 1024 / 1024).toFixed(1)}MB)`);
+  } catch (err) {
+    console.error(`[MONITOR] Alerts rotation failed: ${err.message}`);
+  }
+}
 
 function appendAlert(alert) {
   try {
@@ -528,13 +567,14 @@ function appendAlert(alert) {
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
-    let alerts = [];
-    try {
-      alerts = JSON.parse(fs.readFileSync(ALERTS_FILE, 'utf8'));
-    } catch {}
-    alerts.push(alert);
-    atomicWriteFileSync(ALERTS_FILE, JSON.stringify(alerts, null, 2));
+    maybeRotateAlerts();
+    const line = JSON.stringify(alert) + '\n';
+    fs.appendFileSync(ALERTS_FILE, line, 'utf8');
   } catch (err) {
+    if (err.code === 'EROFS' || err.code === 'EACCES' || err.code === 'EPERM') {
+      console.warn(`[MONITOR] Permission denied writing alerts: ${err.code}`);
+      return;
+    }
     console.error(`[MONITOR] Failed to save alert: ${err.message}`);
   }
 }
@@ -573,6 +613,10 @@ function appendDetection(name, version, ecosystem, findings, severity) {
       advisory_at: null,
       lead_time_hours: null
     });
+    // Cap at MAX_DETECTIONS — discard oldest entries
+    if (data.detections.length > MAX_DETECTIONS) {
+      data.detections = data.detections.slice(-MAX_DETECTIONS);
+    }
     atomicWriteFileSync(DETECTIONS_FILE, JSON.stringify(data, null, 2));
   } catch (err) {
     console.error(`[MONITOR] Failed to save detection: ${err.message}`);
@@ -846,6 +890,8 @@ module.exports = {
   TARBALL_CACHE_HIGH_RISK_RETENTION_DAYS,
   TARBALL_CACHE_MAX_SIZE_BYTES,
   DAILY_STATS_PERSIST_INTERVAL,
+  ALERTS_MAX_SIZE,
+  MAX_DETECTIONS,
 
   // Mutable state getters/setters
   getScanMemoryCache,

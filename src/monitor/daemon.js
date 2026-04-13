@@ -2,9 +2,10 @@ const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const v8 = require('v8');
 const { isDockerAvailable, SANDBOX_CONCURRENCY_MAX } = require('../sandbox/index.js');
 const { setVerboseMode, isSandboxEnabled, isCanaryEnabled, isLlmDetectiveEnabled, getLlmDetectiveMode, DOWNLOADS_CACHE_TTL } = require('./classify.js');
-const { loadState, saveState, loadDailyStats, saveDailyStats, purgeTarballCache, getParisHour, atomicWriteFileSync, saveNpmSeq } = require('./state.js');
+const { loadState, saveState, loadDailyStats, saveDailyStats, purgeTarballCache, getParisHour, atomicWriteFileSync, saveNpmSeq, ALERTS_FILE } = require('./state.js');
 const { isTemporalEnabled, isTemporalAstEnabled, isTemporalPublishEnabled, isTemporalMaintainerEnabled } = require('./temporal.js');
 const { pendingGrouped, flushScopeGroup, sendDailyReport, DAILY_REPORT_HOUR, alertedPackageRules } = require('./webhook.js');
 const { poll } = require('./ingestion.js');
@@ -289,7 +290,8 @@ const MAX_ALERTED_PACKAGES = 5_000;
  */
 function computeMemoryPressure() {
   const mem = process.memoryUsage();
-  const ratio = mem.heapTotal > 0 ? mem.heapUsed / mem.heapTotal : 0;
+  const heapLimit = v8.getHeapStatistics().heap_size_limit;
+  const ratio = heapLimit > 0 ? mem.heapUsed / heapLimit : 0;
 
   if (ratio >= MEMORY_THRESHOLD_EMERGENCY) {
     _memoryPressureLevel = MEMORY_PRESSURE_LEVELS.EMERGENCY;
@@ -475,6 +477,15 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
 ║     Scanning npm + PyPI new packages      ║
 ╚════════════════════════════════════════════╝
   `);
+
+  // Note: alerts file migrated from .json to .jsonl in v2.10.89
+  const oldAlertsJson = ALERTS_FILE.replace('.jsonl', '.json');
+  if (fs.existsSync(oldAlertsJson)) {
+    try {
+      const sizeMB = (fs.statSync(oldAlertsJson).size / 1024 / 1024).toFixed(0);
+      console.log(`[MONITOR] Legacy ${path.basename(oldAlertsJson)} found (${sizeMB}MB). Safe to archive — alerts now use JSONL.`);
+    } catch {}
+  }
 
   // Check sandbox availability
   if (isSandboxEnabled()) {
