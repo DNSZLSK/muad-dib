@@ -966,7 +966,11 @@ function calculateRiskScore(deduped, intentResult) {
   );
   const _hasHC = deduped.some(t => HIGH_CONFIDENCE_MALICE_TYPES.has(t.type));
   const _hasCompound = deduped.some(t => t.compound === true);
-  if (!_hasLifecycle && !_hasHC && !_hasCompound) {
+  // v2.10.89: staged_payload + suspicious_domain(HIGH) = confirmed C2 eval, bypass MT-1 cap
+  // json-spacer, reactvora: eval(data.content) from jsonkeeper.com is always malicious
+  const _hasStagedC2 = deduped.some(t => t.type === 'staged_payload') &&
+    deduped.some(t => t.type === 'suspicious_domain' && t.severity === 'HIGH');
+  if (!_hasLifecycle && !_hasHC && !_hasCompound && !_hasStagedC2) {
     riskScore = Math.min(riskScore, 35);
   }
 
