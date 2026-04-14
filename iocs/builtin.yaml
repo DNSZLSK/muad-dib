@@ -188,6 +188,134 @@ packages:
     version: "*"
     source: typosquat
 
+  # Security review apr-2026 — 40 confirmed malware packages
+  # Baileys Newsletter Hijack (13 packages, 5+ distinct attackers)
+  - name: "@fadelsm/baileys"
+    version: "7.0.3"
+    source: review-apr-2026-baileys
+  - name: "alipclutch-baileys"
+    version: "8.6.46"
+    source: review-apr-2026-baileys
+  - name: "mrxd-baileys"
+    version: "1.0.1"
+    source: review-apr-2026-baileys
+  - name: "riftcore"
+    version: "1.4.6"
+    source: review-apr-2026-baileys
+  - name: "@budetzz/baileys"
+    version: "2.0.4"
+    source: review-apr-2026-baileys
+  - name: "@archeron-dev/baileys"
+    version: "2.0.4"
+    source: review-apr-2026-baileys
+  - name: "@badzz88/baileys"
+    version: "8.1.0"
+    source: review-apr-2026-baileys
+  - name: "@devil-fight/baileys"
+    version: "1.0.5"
+    source: review-apr-2026-baileys
+  - name: "@zeppeliorg/wbails"
+    version: "1.0.4"
+    source: review-apr-2026-baileys
+  - name: "rsembilaneks-baileys"
+    version: "2.0.4"
+    source: review-apr-2026-baileys
+  - name: "@zephkiel/wbails"
+    version: "2.0.8"
+    source: review-apr-2026-baileys
+  - name: "jagproject"
+    version: "26.3.30"
+    source: review-apr-2026-baileys
+  # RCE trojan campaign "173.211.46.220"
+  - name: "react-emits"
+    version: "1.0.2"
+    source: review-apr-2026-rce-173
+  - name: "react-emits"
+    version: "1.0.3"
+    source: review-apr-2026-rce-173
+  - name: "buffer-util-extend"
+    version: "1.0.5"
+    source: review-apr-2026-rce-173
+  - name: "jsontoken-extend"
+    version: "1.0.5"
+    source: review-apr-2026-rce-173
+  - name: "path-extend"
+    version: "1.0.1"
+    source: review-apr-2026-rce-173
+  # RCE trojan campaign "Robert King" / npoint.io
+  - name: "request-js-validator"
+    version: "1.0.2"
+    source: review-apr-2026-rce-npoint
+  - name: "chai-as-inserted"
+    version: "1.2.1"
+    source: review-apr-2026-rce-npoint
+  - name: "cookie-parseflow"
+    version: "1.5.8"
+    source: review-apr-2026-rce-npoint
+  # Strapi/Guardarian targeted attack
+  - name: "strapi-plugin-api"
+    version: "*"
+    source: review-apr-2026-strapi
+  - name: "strapi-plugin-events"
+    version: "*"
+    source: review-apr-2026-strapi
+  - name: "strapi-plugin-health"
+    version: "*"
+    source: review-apr-2026-strapi
+  - name: "strapi-plugin-locale"
+    version: "*"
+    source: review-apr-2026-strapi
+  - name: "strapi-plugin-logger"
+    version: "*"
+    source: review-apr-2026-strapi
+  - name: "strapi-plugin-monitor"
+    version: "*"
+    source: review-apr-2026-strapi
+  - name: "strapi-plugin-notify"
+    version: "*"
+    source: review-apr-2026-strapi
+  # Dependency confusion
+  - name: "@corpweb-ui/wmkt-library"
+    version: "*"
+    source: review-apr-2026-depconf
+  - name: "@toprank/partner"
+    version: "*"
+    source: review-apr-2026-depconf
+  - name: "@adac-fahrzeugplattform/ui"
+    version: "*"
+    source: review-apr-2026-depconf
+  - name: "@signals-notebook/annotation-editor"
+    version: "*"
+    source: review-apr-2026-depconf
+  - name: "@signals-notebook/utils"
+    version: "*"
+    source: review-apr-2026-depconf
+  - name: "apache-arrow-14"
+    version: "1.0.0"
+    source: review-apr-2026-depconf
+  - name: "@kucoin-gbiz-next/tools"
+    version: "*"
+    source: review-apr-2026-depconf
+  # Individual malware
+  - name: "@opengov/form-renderer"
+    version: "0.2.20"
+    source: review-apr-2026-worm
+  - name: "black-moon-js"
+    version: "1.0.0"
+    source: review-apr-2026-stealer
+  - name: "rimo-env-validator"
+    version: "1.0.1"
+    source: review-apr-2026-envstealer
+  - name: "js-logger-pack"
+    version: "*"
+    source: review-apr-2026-obfuscated
+  - name: "dsk-coder-cli"
+    version: "*"
+    source: review-apr-2026-dropper
+  - name: "cchubber"
+    version: "0.4.1"
+    source: review-apr-2026-claude-stealer
+
 files:
   # Shai-Hulud v2
   - setup_bun.js
@@ -242,3 +370,8 @@ markers:
   # Decoded base64 URLs: http://173.211.46.220/lverla.js and http://173.211.46.220/lverl
   - "173.211.46.220"
   - "aHR0cDovLzE3My4yMTEuNDYuMjIw"
+  # Security review apr-2026 — C2 markers
+  - "cdn.malvintech.sbs"
+  - "cchubber-telemetry.asmirkhan087.workers.dev"
+  - "144.31.107.231"
+  - "minhdong.site"

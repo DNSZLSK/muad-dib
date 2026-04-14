@@ -78,6 +78,18 @@ function handleVariableDeclarator(node, ctx) {
       ctx.varSource.set(node.id.name, source);
     }
 
+    // v2.10.89: Detect process variable shadowing — evasion technique
+    // Catches: Robert King campaign (process shadow to hide C2 URLs in fake process.env)
+    // Pattern: const process = { env: { DEV_API_KEY: "https://evil.com/..." } }
+    if (node.id.name === 'process' && node.init?.type === 'ObjectExpression') {
+      ctx.threats.push({
+        type: 'process_variable_shadow',
+        severity: 'HIGH',
+        message: 'Global "process" shadowed with local ObjectExpression — evasion technique to hide C2 URLs in fake process.env.',
+        file: ctx.relFile
+      });
+    }
+
     // Track dynamic require vars + module aliases
     if (node.init?.type === 'CallExpression') {
       const initCallName = getCallName(node.init);

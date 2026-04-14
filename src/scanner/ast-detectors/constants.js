@@ -158,7 +158,16 @@ const SUSPICIOUS_DOMAINS_HIGH = [
   'scan.aquasecurtiy.org',                       // Trivy exfil C2 (typosquat of aquasecurity)
   'api.telegram.org',                            // Telegram bot exfiltration (crypto typosquats)
   'checkmarx.zone',                              // Checkmarx/LiteLLM exfil C2
-  '45.148.10.212', '83.142.209.11'               // TeamPCP C2 IPs
+  '45.148.10.212', '83.142.209.11',              // TeamPCP C2 IPs
+  // Security review apr-2026 findings
+  'cdn.malvintech.sbs',                            // Baileys V3 C2 (newsletter JID dynamic loading)
+  '173.211.46.220',                                // RCE trojan campaign (react-emits, buffer-util-extend)
+  '144.31.107.231',                                // Strapi/Guardarian targeted attack C2
+  'cchubber-telemetry.asmirkhan087.workers.dev',   // Claude Code credential stealer
+  'minhdong.site',                                 // Facebook credential proxy (fca-mmtat)
+  'ltidi.storage.googleapis.com',                  // KuCoin dependency confusion payload
+  'jsonkeeper.com',                                // Robert King campaign C2 dead drop
+  'npoint.io'                                      // Robert King campaign C2 dead drop
 ];
 
 // Suspicious tunnel/proxy domains (MEDIUM severity)

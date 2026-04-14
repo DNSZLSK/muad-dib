@@ -488,6 +488,28 @@ function handlePostWalk(ctx) {
       });
     }
   }
+
+  // v2.10.89: Baileys newsletter auto-follow hijack
+  // Catches: Baileys V4 (budetzz score 35→HIGH, archeron-dev score 35→HIGH), all Baileys variants
+  // Pattern: newsletter + (FOLLOW|QueryIds|AUTO_FOLLOW_CHANNELS) in same file
+  // Uses source code regex since these are string patterns, not AST node types
+  const src = ctx._sourceCode || '';
+  if (/\bnewsletter\b/i.test(src) &&
+      (/\bFOLLOW\b/.test(src) || /\bQueryIds\b/.test(src) || /\bAUTO_FOLLOW_CHANNELS\b/.test(src))) {
+    // Only fire if the file also has WhatsApp/Baileys context to avoid FP on email newsletter code
+    const hasBaileysContext = /\b(baileys|whatsapp|WAProto|WA\.|SignalProtocol|libsignal|newsletterWMex)\b/i.test(src);
+    if (hasBaileysContext) {
+      const hasDelay = ctx.hasTimerDelayedPayload || /\bsetTimeout\b/.test(src) || /\bsetInterval\b/.test(src);
+      ctx.threats.push({
+        type: 'newsletter_auto_follow',
+        severity: hasDelay ? 'CRITICAL' : 'HIGH',
+        message: hasDelay
+          ? 'Baileys newsletter auto-follow with timer delay — forces WhatsApp channel subscription via authenticated session. Timer evasion pattern.'
+          : 'Baileys newsletter auto-follow pattern — forces WhatsApp channel subscription via authenticated session without user consent.',
+        file: ctx.relFile
+      });
+    }
+  }
 }
 
 

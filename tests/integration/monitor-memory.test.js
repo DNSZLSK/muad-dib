@@ -172,14 +172,29 @@ async function runMonitorMemoryTests() {
     assert(MEMORY_THRESHOLD_EMERGENCY <= 0.99, 'EMERGENCY should be <= 99%');
   });
 
-  test('MEMORY CIRCUIT BREAKER: computeMemoryPressure returns valid level', () => {
+  test('MEMORY CIRCUIT BREAKER: computeMemoryPressure uses heap_size_limit not heapTotal', () => {
     const { level, mem, ratio } = computeMemoryPressure();
     assert(typeof level === 'number', 'level should be a number');
     assert(level >= 0 && level <= 4, `level should be 0-4, got ${level}`);
     assert(typeof ratio === 'number', 'ratio should be a number');
     assert(ratio >= 0 && ratio <= 1, `ratio should be 0-1, got ${ratio}`);
     assert(typeof mem.heapUsed === 'number', 'mem.heapUsed should be a number');
-    assert(typeof mem.heapTotal === 'number', 'mem.heapTotal should be a number');
+    // Ratio should be against heap_size_limit (~4GB default), NOT heapTotal (~6MB).
+    // With heapTotal, ratio would be ~70% even at startup. With heap_size_limit,
+    // it should be < 5% in test context.
+    assert(ratio < 0.50, `ratio ${ratio.toFixed(3)} looks like heapUsed/heapTotal — should use heap_size_limit`);
+  });
+
+  test('MEMORY CIRCUIT BREAKER: daemon uses v8.getHeapStatistics().heap_size_limit', () => {
+    const daemonSource = fs.readFileSync(
+      path.join(__dirname, '..', '..', 'src', 'monitor', 'daemon.js'), 'utf8'
+    );
+    assertIncludes(daemonSource, "require('v8')", 'daemon.js should import v8 module');
+    assertIncludes(daemonSource, 'heap_size_limit', 'daemon.js should use heap_size_limit');
+    // Must NOT use heapUsed / heapTotal for the ratio
+    const badPattern = /mem\.heapUsed\s*\/\s*mem\.heapTotal/;
+    assert(!badPattern.test(daemonSource),
+      'daemon.js must NOT use heapUsed/heapTotal — V8 heapTotal is dynamic and structurally 70-85%');
   });
 
   test('MEMORY CIRCUIT BREAKER: getMemoryPressureLevel returns current level', () => {
