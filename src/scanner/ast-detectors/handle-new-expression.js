@@ -23,6 +23,27 @@ function handleNewExpression(node, ctx) {
     }
   }
 
+  // v2.10.89: new Function.constructor("require", code) — RCE evasion
+  // Catches: chai-as-inserted (score 10→CRITICAL), cookie-parseflow (score 10→CRITICAL)
+  // Pattern: new Function.constructor("require", s); handler(require) — passes real require to dynamic code
+  if (node.callee.type === 'MemberExpression' &&
+      node.callee.property?.type === 'Identifier' && node.callee.property.name === 'constructor' &&
+      node.callee.object?.type === 'Identifier' && node.callee.object.name === 'Function' &&
+      node.arguments.length >= 1) {
+    const hasRequireArg = node.arguments.some(arg =>
+      arg.type === 'Literal' && typeof arg.value === 'string' && arg.value === 'require'
+    );
+    if (hasRequireArg) {
+      ctx.hasDynamicExec = true;
+      ctx.threats.push({
+        type: 'function_constructor_require',
+        severity: 'CRITICAL',
+        message: 'new Function.constructor("require", ...) — dynamic code execution bypassing require() detection. Attacker passes real require to execute arbitrary code.',
+        file: ctx.relFile
+      });
+    }
+  }
+
   // Batch 1: new vm.Script(code) — dynamic code compilation via vm module
   if (node.callee.type === 'MemberExpression' &&
       node.callee.property?.type === 'Identifier' && node.callee.property.name === 'Script' &&

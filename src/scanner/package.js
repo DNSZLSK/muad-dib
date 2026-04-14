@@ -116,6 +116,22 @@ async function scanPackageJson(targetPath) {
         });
       }
 
+      // v2.10.89: curl/wget + env/base64 exfiltration in lifecycle scripts
+      // Catches: apache-arrow-14 (score 9→CRITICAL), @signals-notebook (score 9→CRITICAL)
+      // Pattern: curl -d $(env|base64) URL, curl -X POST URL?env=$(env|base64 -w0)
+      if (['preinstall', 'install', 'postinstall'].includes(scriptName) &&
+          /\b(curl|wget)\b/.test(scriptContent) &&
+          (/\$\(.*\b(env|id|whoami|uname|hostname)\b/.test(scriptContent) ||
+           (/\bbase64\b/.test(scriptContent) && !/\|\s*(sh|bash)\b/.test(scriptContent)))) {
+        // Exclude curl|sh which is already caught by lifecycle_shell_pipe
+        threats.push({
+          type: 'curl_env_exfil',
+          severity: 'CRITICAL',
+          message: `Critical: "${scriptName}" uses curl/wget with env/base64 exfiltration — credential theft via lifecycle script.`,
+          file: 'package.json'
+        });
+      }
+
       // Detect Bun runtime evasion in lifecycle scripts (Shai-Hulud 2.0)
       if (/\bbun\s+(run|exec|install|x)\b/.test(scriptContent) || /\bbunx\s+/.test(scriptContent)) {
         threats.push({
@@ -144,6 +160,22 @@ async function scanPackageJson(targetPath) {
           }
         }
       }
+    }
+  }
+
+  // v2.10.89: Dependency confusion indicator — version >= 99 with install hooks
+  // Catches: @corpweb-ui/wmkt-library, @toprank/partner, @adac-fahrzeugplattform/ui
+  const versionStr = pkg.version || '';
+  const majorVersion = parseInt(versionStr.split('.')[0], 10);
+  if (majorVersion >= 99) {
+    const hasInstallHook = ['preinstall', 'install', 'postinstall'].some(s => scripts[s]);
+    if (hasInstallHook) {
+      threats.push({
+        type: 'version_99_preinstall',
+        severity: 'HIGH',
+        message: `Version ${versionStr} (major >= 99) with lifecycle hook — dependency confusion attack pattern.`,
+        file: 'package.json'
+      });
     }
   }
 

@@ -2,6 +2,7 @@ const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const v8 = require('v8');
 const { isDockerAvailable, SANDBOX_CONCURRENCY_MAX } = require('../sandbox/index.js');
 const { setVerboseMode, isSandboxEnabled, isCanaryEnabled, isLlmDetectiveEnabled, getLlmDetectiveMode, DOWNLOADS_CACHE_TTL } = require('./classify.js');
 const { loadState, saveState, loadDailyStats, saveDailyStats, purgeTarballCache, getParisHour, atomicWriteFileSync, saveNpmSeq } = require('./state.js');
@@ -24,10 +25,15 @@ const MAX_QUEUE_PERSIST_SIZE = 200_000; // Don't persist if queue > 200K items (
 const MAX_RESTORE_QUEUE_SIZE = 100_000; // Cap restored queue at 100K items
 
 // ─── Memory pressure circuit breaker ───
-// Graduated response based on V8 heap usage ratio.
-// Threat model: when GC thrashing starts (>90% heap), throughput drops to 0 and
-// the queue grows unbounded because ingestion continues. Without a circuit breaker,
-// the only recovery is OOM kill or manual restart — losing the entire in-memory queue.
+// Graduated response based on V8 heap usage against heap_size_limit.
+// Threat model: when GC thrashing starts (>90% heap limit), throughput drops to 0
+// and the queue grows unbounded because ingestion continues. Without a circuit
+// breaker, the only recovery is OOM kill or manual restart.
+//
+// Denominator: v8.getHeapStatistics().heap_size_limit (NOT process.memoryUsage().heapTotal).
+// V8 dynamically adjusts heapTotal so heapUsed/heapTotal is structurally 70-85%
+// even when actual usage is 0.1% of the --max-old-space-size limit. heap_size_limit
+// reflects the actual V8 ceiling (~3264MB with --max-old-space-size=3072).
 //
 // Levels:
 //   NONE    (<75%)  — normal operation
@@ -286,10 +292,21 @@ const MAX_ALERTED_PACKAGES = 5_000;
  * Compute current memory pressure level from V8 heap usage.
  * Returns one of MEMORY_PRESSURE_LEVELS and updates the module-level _memoryPressureLevel.
  * Cheap call (~0.1ms) — safe to run every 2s in the main loop.
+ *
+ * IMPORTANT: Uses v8.getHeapStatistics().heap_size_limit as the denominator,
+ * NOT process.memoryUsage().heapTotal. V8 adjusts heapTotal dynamically so
+ * heapUsed/heapTotal is structurally 70-85% even when actual usage is 0.1%
+ * of the --max-old-space-size limit. This caused the initial v2.10.88 circuit
+ * breaker to trigger at ELEVATED/HIGH permanently in normal operation.
+ *
+ * heap_size_limit reflects the actual V8 ceiling:
+ *   - With --max-old-space-size=3072: ~3264MB (3072 + new space overhead)
+ *   - Without the flag: ~4288MB (V8 default on 64-bit)
  */
 function computeMemoryPressure() {
   const mem = process.memoryUsage();
-  const ratio = mem.heapTotal > 0 ? mem.heapUsed / mem.heapTotal : 0;
+  const heapLimit = v8.getHeapStatistics().heap_size_limit;
+  const ratio = heapLimit > 0 ? mem.heapUsed / heapLimit : 0;
 
   if (ratio >= MEMORY_THRESHOLD_EMERGENCY) {
     _memoryPressureLevel = MEMORY_PRESSURE_LEVELS.EMERGENCY;
@@ -547,6 +564,8 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
   console.log('[MONITOR] npm changes stream enabled (replicate.npmjs.com) with RSS fallback');
   console.log(`[MONITOR] Scan concurrency: adaptive ${BASE_CONCURRENCY}→${getTargetConcurrency()} (base MUADDIB_SCAN_CONCURRENCY=${BASE_CONCURRENCY}, max MUADDIB_MAX_CONCURRENCY)`);
   console.log(`[MONITOR] Sandbox concurrency: ${SANDBOX_CONCURRENCY_MAX} (MUADDIB_SANDBOX_CONCURRENCY to override)`);
+  const heapLimitMB = (v8.getHeapStatistics().heap_size_limit / 1024 / 1024).toFixed(0);
+  console.log(`[MONITOR] Memory circuit breaker: heap limit ${heapLimitMB}MB, thresholds HIGH=${(MEMORY_THRESHOLD_HIGH * 100).toFixed(0)}% CRITICAL=${(MEMORY_THRESHOLD_CRITICAL * 100).toFixed(0)}% EMERGENCY=${(MEMORY_THRESHOLD_EMERGENCY * 100).toFixed(0)}%, GC=${typeof global.gc === 'function' ? 'available' : 'unavailable (start with --expose-gc)'}`);
   console.log(`[MONITOR] Polling every ${POLL_INTERVAL / 1000}s (decoupled from processing). Ctrl+C to stop.\n`);
 
   let running = true;
@@ -711,10 +730,11 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
 
     if (Date.now() - lastMemoryLogTime >= memLogInterval) {
       const heapUsedMB = (currentMem.heapUsed / 1024 / 1024).toFixed(0);
-      const heapTotalMB = (currentMem.heapTotal / 1024 / 1024).toFixed(0);
+      const heapLimitMB = (v8.getHeapStatistics().heap_size_limit / 1024 / 1024).toFixed(0);
       const rssMB = (currentMem.rss / 1024 / 1024).toFixed(0);
+      const pctUsed = (heapRatio * 100).toFixed(0);
       const levelName = Object.keys(MEMORY_PRESSURE_LEVELS).find(k => MEMORY_PRESSURE_LEVELS[k] === pressureLevel) || 'UNKNOWN';
-      console.log(`[MONITOR] MEMORY: heap=${heapUsedMB}MB/${heapTotalMB}MB, rss=${rssMB}MB, queue=${scanQueue.length}, dedup=${recentlyScanned.size}, downloads=${downloadsCache.size}, alerts=${alertedPackageRules.size}, pressure=${levelName}`);
+      console.log(`[MONITOR] MEMORY: heap=${heapUsedMB}MB/${heapLimitMB}MB (${pctUsed}%), rss=${rssMB}MB, queue=${scanQueue.length}, dedup=${recentlyScanned.size}, downloads=${downloadsCache.size}, alerts=${alertedPackageRules.size}, pressure=${levelName}`);
 
       // Graduated response at HIGH+
       if (pressureLevel >= MEMORY_PRESSURE_LEVELS.HIGH) {

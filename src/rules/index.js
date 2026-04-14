@@ -2218,6 +2218,64 @@ const RULES = {
     ],
     mitre: 'T1195.002'
   },
+  // v2.10.89: Security review findings (apr-2026) — 5 new rules from 14K tarball review
+  curl_env_exfil: {
+    id: 'MUADDIB-PKG-018',
+    name: 'Curl/Wget Environment Exfiltration',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'curl/wget combine avec base64 ou env dans un lifecycle script — exfiltration de credentials a l\'installation. Pattern: curl -d $(env|base64) URL dans preinstall/postinstall.',
+    references: [
+      'https://attack.mitre.org/techniques/T1041/',
+      'https://blog.phylum.io/npm-dependency-confusion-attacks'
+    ],
+    mitre: 'T1041'
+  },
+  function_constructor_require: {
+    id: 'MUADDIB-AST-086',
+    name: 'Function Constructor Require Evasion',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'new Function.constructor("require", code) — execution de code dynamique via le constructeur Function avec acces au require reel. Technique d\'evasion: contourne la detection de eval/require en passant par le prototype de Function.',
+    references: [
+      'https://attack.mitre.org/techniques/T1059/007/'
+    ],
+    mitre: 'T1059.007'
+  },
+  process_variable_shadow: {
+    id: 'MUADDIB-AST-087',
+    name: 'Process Variable Shadowing',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'Le global process est shadow par une variable locale (const process = {...}). Technique d\'evasion: cache les URLs C2 dans un faux process.env pour contourner la detection de domaines suspects. Campagne "Robert King" (npoint.io/jsonkeeper.com).',
+    references: [
+      'https://attack.mitre.org/techniques/T1036/'
+    ],
+    mitre: 'T1036'
+  },
+  newsletter_auto_follow: {
+    id: 'MUADDIB-AST-088',
+    name: 'Baileys Newsletter Auto-Follow Hijack',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'Pattern de detournement WhatsApp Baileys: newsletter + FOLLOW/QueryIds ou AUTO_FOLLOW_CHANNELS dans le meme fichier. Force l\'abonnement a des channels WhatsApp via la session authentifiee de la victime sans consentement.',
+    references: [
+      'https://attack.mitre.org/techniques/T1496/'
+    ],
+    mitre: 'T1496'
+  },
+  version_99_preinstall: {
+    id: 'MUADDIB-PKG-019',
+    name: 'Dependency Confusion Version Indicator',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'Version >= 99.x.x avec hook lifecycle (preinstall/postinstall). Indicateur fort de dependency confusion: la version elevee force la resolution npm vers le package public malveillant au lieu du package interne prive.',
+    references: [
+      'https://medium.com/@alex.birsan/dependency-confusion-4a5d60fec610',
+      'https://attack.mitre.org/techniques/T1195.002/'
+    ],
+    mitre: 'T1195.002'
+  },
   // Trusted dependency diff detections (monitor-only)
   trusted_new_unknown_dependency: {
     id: 'MUADDIB-TRUSTED-001',

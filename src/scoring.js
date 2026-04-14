@@ -115,7 +115,10 @@ const PACKAGE_LEVEL_TYPES = new Set([
   // Blue Team v8: package-level boost signals
   'isolated_suspicious_file', 'deep_suspicious_file',
   // Blue Team v8b: phantom lifecycle scripts
-  'lifecycle_missing_script'
+  'lifecycle_missing_script',
+  // v2.10.89: Security review compounds
+  'lifecycle_newsletter_hijack', 'lifecycle_env_exfil',
+  'curl_env_exfil', 'version_99_preinstall'
 ]);
 
 /**
@@ -248,6 +251,8 @@ const DIST_EXEMPT_TYPES = new Set([
   // Kept in REACHABILITY_EXEMPT_TYPES (lifecycle invocation is valid).
   'node_modules_write',       // writeFile to node_modules/ (worm propagation)
   'npm_publish_worm',         // exec("npm publish") (worm propagation)
+  'curl_env_exfil',           // curl/wget env exfil in lifecycle (always malicious)
+  'function_constructor_require', // new Function.constructor("require") (always malicious)
   // Dangerous shell commands in dist/ are real threats, never bundler output
   'dangerous_exec',
   // Compound scoring rules — co-occurrence signals, never FP
@@ -393,6 +398,23 @@ const SCORING_COMPOUNDS = [
     fileFrom: 'env_access',
     // Only obfuscation_detected + env_access must be in the same file (lifecycle_script is package-level)
     sameFileTypes: ['obfuscation_detected', 'env_access']
+  },
+  // v2.10.89: Security review compounds
+  {
+    type: 'lifecycle_newsletter_hijack',
+    requires: ['lifecycle_script', 'newsletter_auto_follow'],
+    severity: 'CRITICAL',
+    message: 'Lifecycle hook + newsletter auto-follow — WhatsApp Baileys channel hijack via install-time hook (scoring compound).',
+    fileFrom: 'newsletter_auto_follow'
+    // No sameFile: lifecycle is package-level, newsletter_auto_follow is file-level
+  },
+  {
+    type: 'lifecycle_env_exfil',
+    requires: ['lifecycle_script', 'curl_env_exfil'],
+    severity: 'CRITICAL',
+    message: 'Lifecycle hook + curl/wget env exfiltration — install-time credential theft (scoring compound).',
+    fileFrom: 'curl_env_exfil'
+    // No sameFile: both are package-level
   },
 ];
 

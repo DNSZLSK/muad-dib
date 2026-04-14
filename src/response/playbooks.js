@@ -844,6 +844,43 @@ const PLAYBOOKS = {
   trusted_new_dependency:
     'HAUTE: Package populaire (TRUSTED) a ajoute une nouvelle dependance connue. ' +
     'Verifier le changelog et la legitimite de l\'ajout. Pas de blocage immediat mais surveillance renforcee.',
+
+  // v2.10.89: Security review findings (apr-2026)
+  curl_env_exfil:
+    'CRITIQUE: curl/wget exfiltre les variables d\'environnement ou des donnees systeme via lifecycle script. ' +
+    'Machine potentiellement compromise si deja installe. Rotation immediate de TOUS les secrets ' +
+    '(npm tokens, AWS keys, GitHub tokens, etc.). Verifier les connexions sortantes recentes.',
+
+  function_constructor_require:
+    'CRITIQUE: new Function.constructor("require", code) — execution de code dynamique avec acces au require reel. ' +
+    'Le code telecharge probablement un payload depuis un C2 (jsonkeeper.com, npoint.io, etc.) et l\'execute. ' +
+    'Isoler la machine. Supprimer le package. Regenerer TOUS les secrets.',
+
+  process_variable_shadow:
+    'ELEVE: Le global process est shadow par une variable locale pour cacher des URLs C2 dans process.env. ' +
+    'Technique d\'evasion de la campagne "Robert King" (npoint.io/jsonkeeper.com). ' +
+    'Verifier les URLs dans les valeurs de la fausse variable process. Supprimer le package.',
+
+  newsletter_auto_follow:
+    'ELEVE: Fork Baileys malveillant qui force l\'abonnement a des channels WhatsApp via la session authentifiee. ' +
+    'Les JIDs des channels sont hardcodes ou telecharges depuis un C2 (cdn.malvintech.sbs). ' +
+    'Desinstaller immediatement. Verifier les channels WhatsApp auxquels la session est abonnee. ' +
+    'Revoquer la session WhatsApp Web si compromise.',
+
+  version_99_preinstall:
+    'ELEVE: Version >= 99.x.x avec hook lifecycle — indicateur de dependency confusion. ' +
+    'La version elevee force npm a resoudre vers le package public au lieu du package interne prive. ' +
+    'NE PAS installer. Configurer un registry scope pour les packages internes. ' +
+    'Signaler le package sur npm comme dependency confusion.',
+
+  lifecycle_newsletter_hijack:
+    'CRITIQUE: Lifecycle hook + newsletter auto-follow WhatsApp — channel hijack a l\'installation. ' +
+    'Desinstaller immediatement. Revoquer la session WhatsApp Web. ' +
+    'Verifier les channels auxquels la session est abonnee.',
+
+  lifecycle_env_exfil:
+    'CRITIQUE: Lifecycle hook + exfiltration env via curl/wget a l\'installation. ' +
+    'Machine compromise si deja installe. Rotation immediate de TOUS les secrets.',
 };
 
 function getPlaybook(threatType) {
