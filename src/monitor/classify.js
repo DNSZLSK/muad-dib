@@ -57,7 +57,11 @@ const HIGH_CONFIDENCE_MALICE_TYPES = new Set([
   'npm_token_steal',                       // exec("npm config get _authToken") (CanisterWorm findNpmTokens)
   'root_filesystem_wipe',                  // rm -rf / (CanisterWorm kamikaze.sh wiper T1485)
   'proc_mem_scan',                         // /proc/mem scanning (TeamPCP Trivy credential stealer)
-  'trusted_new_unknown_dependency'         // TRUSTED package added unknown/new (<7d) dependency (account takeover)
+  'trusted_new_unknown_dependency',        // TRUSTED package added unknown/new (<7d) dependency (account takeover)
+  // v2.10.89: Security review findings — always malicious regardless of lifecycle
+  'curl_env_exfil',                        // curl/wget + env/base64 in lifecycle (exfiltration)
+  'function_constructor_require',          // new Function.constructor("require") (RCE evasion)
+  'newsletter_auto_follow'                 // Baileys WhatsApp newsletter hijack
 ]);
 
 // Lifecycle compound types that indicate real malicious intent beyond a simple postinstall
