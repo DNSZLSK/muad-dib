@@ -5,6 +5,80 @@ All notable changes to MUAD'DIB will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.10.93] - 2026-04-17
+
+### Added — Security review 2026-04-10→17 remediation
+
+Manual security review of 22 858 tarballs across 8 days surfaced 37 confirmed
+malware packages (up from 31 in the initial pass), including two campaigns that
+completely bypassed the triage threshold (ADR_THRESHOLD=20):
+
+- **ltidi chain attack** (9 packages, score 10) — stub packages with no install
+  hooks, payload hosted on `ltidi.storage.googleapis.com` as tarball dependency.
+  Payload analysis confirmed DNS exfil of hostname/homedir/username via
+  `*.oastify.com` hex-encoded subdomains.
+- **csec credential stealer** (3 packages, score 19) — XOR (key `OrDeR_7077`) +
+  `new Function()` + `unlinkSync(__filename)` anti-forensics, exfiltrates
+  `.env` / `.ssh` / `.npmrc` / `.aws/credentials` to
+  `csec-supply-chain-attack.vercel.app`.
+
+Three code changes address the bypass:
+
+- **Package scanner — external tarball URL escalation** (`src/scanner/package.js`):
+  `dependency_url_suspicious` now escalates to **CRITICAL** when the URL ends in
+  `.tgz` / `.tar.gz` / `.tar.bz2` / `.zip` AND the host is NOT on an allowlist
+  of legitimate tarball sources (`github.com`, `codeload.github.com`,
+  `objects.githubusercontent.com`, `gitlab.com`, `bitbucket.org`,
+  `registry.npmjs.org`, `registry.yarnpkg.com`). Raw tarball URLs on cloud
+  storage (GCS, S3, Azure blob, CDN hosts) bypass npm registry audit entirely
+  — always the ltidi pattern. Non-tarball URLs stay HIGH. Github release
+  tarballs stay HIGH.
+- **AST compound — self-destruct eval** (`src/scanner/ast.js`,
+  `src/scanner/ast-detectors/handle-post-walk.js`,
+  `src/rules/index.js` AST-089, `src/response/playbooks.js`,
+  `src/scoring.js` DIST_EXEMPT + `src/monitor/classify.js` HC_TYPES):
+  new `self_destruct_eval` detection fires **CRITICAL** when a file contains
+  both (a) dynamic code execution (`eval`/`new Function`/`Module._compile` with
+  non-literal args) and (b) self-deletion of the executing file via
+  `unlinkSync`/`rmSync`/`renameSync` targeting `__filename`,
+  `module.filename`, or `require.main.filename`. Zero legitimate use case —
+  legitimate packages do not destroy their own source after running obfuscated
+  code. Exempt from dist-file downgrade (HIGH minimum in bundles). Added to
+  `HIGH_CONFIDENCE_MALICE_TYPES` (reputation attenuation bypass).
+- **IOC enrichment** (`iocs/builtin.yaml`,
+  `src/scanner/ast-detectors/constants.js`):
+  - Added `oast.online`, `oast.pro`, `interact.sh`, `projectdiscovery.io` to
+    `SUSPICIOUS_DOMAINS_HIGH` (OAST callback domains — always malicious in
+    published npm packages).
+  - Added `csec-supply-chain-attack.vercel.app`, `files.giftedtech.co.ke`
+    (Baileys V3 C2), `phish.sh` (JET/SkipTheDishes depconf webhook) to
+    `SUSPICIOUS_DOMAINS_HIGH`.
+  - Added 9 ltidi stub packages + `ltidisafe` (wildcard, all versions) to
+    `compromised_packages` under `review-apr-2026-ltidi`.
+  - Added 3 csec variants (`csec-crypto-toolkit@4.2.2`, `@4.2.4`,
+    `ccsseecc-crypto-toolkit@4.5.1`) under `review-apr-2026-csec`.
+  - Added `koa-v3@9.4.0` (typosquat with ping DNS exfil to `.oast.fun`) under
+    `review-apr-2026-ping-dns-exfil`.
+  - Added `cmp-api-stub@99.9.1` to the ltidi bucket (found session 2).
+
+### Impact on detection
+
+- **ltidi campaign (9 packages)**: score 10 → 50+ (dep URL CRITICAL 25 pts +
+  dependency_ioc_match HIGH 10 pts + package-level CRITICAL floor 50). Crosses
+  ADR_THRESHOLD=20.
+- **csec campaign (3 packages)**: score 19 → 90+ (self_destruct_eval CRITICAL
+  25 pts file-level + existing signals, bypasses reputation attenuation via
+  HC_TYPES). Crosses ADR_THRESHOLD=20.
+- **OAST domains**: packages using `.oast.online` or `.oast.pro` now fire
+  `suspicious_domain` HIGH at the AST string literal level.
+
+### Tests
+
+- 3222 → **3228 passed**, 0 failed (added 5 self_destruct_eval tests + 3 new
+  dep URL escalation tests; updated 2 existing dep URL tests from HIGH → CRITICAL
+  expectation; updated 2 rule count tests 201 → 202; updated HC_TYPES count 22
+  → 23).
+
 ## [2.10.74] - 2026-04-11
 
 ### Fixed — FP cluster reduction (audit forensique v2.10.72)

@@ -140,6 +140,10 @@ function analyzeFile(content, filePath, basePath) {
     hasTempFileExec: false,
     hasFileDelete: false,
     hasDevShmInContent: /\/dev\/shm\b/.test(content),
+    // v2.10.93: csec-style self-deletion — unlink/rename of __filename targets the
+    // executing file itself. Distinct from hasFileDelete (any file). Combined with
+    // hasDynamicExec in a compound to flag anti-forensics obfuscated stealers.
+    hasSelfDelete: /\b(?:unlinkSync|unlink|rmSync|renameSync|rm)\s*\(\s*(?:__filename|module\.filename|require\.main\.filename)\b/.test(content),
     // SANDWORM_MODE P2: env harvesting co-occurrence
     hasEnvEnumeration: false,  // Object.entries/keys/values(process.env)
     hasEnvHarvestPattern: /\b(KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL|NPM|AWS|SSH|WEBHOOK)\b/.test(content),

@@ -61,7 +61,9 @@ const HIGH_CONFIDENCE_MALICE_TYPES = new Set([
   // v2.10.89: Security review findings — always malicious regardless of lifecycle
   'curl_env_exfil',                        // curl/wget + env/base64 in lifecycle (exfiltration)
   'function_constructor_require',          // new Function.constructor("require") (RCE evasion)
-  'newsletter_auto_follow'                 // Baileys WhatsApp newsletter hijack
+  'newsletter_auto_follow',                // Baileys WhatsApp newsletter hijack
+  // v2.10.93: Security review 2026-04-10→17 findings
+  'self_destruct_eval'                     // dynamic exec + unlink __filename (csec anti-forensics)
 ]);
 
 // Lifecycle compound types that indicate real malicious intent beyond a simple postinstall

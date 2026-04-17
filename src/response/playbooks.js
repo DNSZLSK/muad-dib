@@ -881,6 +881,11 @@ const PLAYBOOKS = {
   lifecycle_env_exfil:
     'CRITIQUE: Lifecycle hook + exfiltration env via curl/wget a l\'installation. ' +
     'Machine compromise si deja installe. Rotation immediate de TOUS les secrets.',
+
+  self_destruct_eval:
+    'CRITIQUE: Execution dynamique de code (eval/new Function/Module._compile) + auto-suppression du fichier execute (unlinkSync/renameSync sur __filename). ' +
+    'Pattern anti-forensique professionnel: le malware execute son payload obfusque puis efface ses traces. Campagne csec-crypto-toolkit (avril 2026) exfiltre .env, GITHUB_TOKEN, NPM_TOKEN, AWS/SSH keys vers csec-supply-chain-attack.vercel.app, puis unlinkSync(__filename). ' +
+    'Machine compromise si deja installe. Rotation immediate de TOUS les secrets (.env, tokens CI/CD, cles SSH). Verifier les .env des repertoires parents jusqu\'a 6 niveaux. Supprimer le package.',
 };
 
 function getPlaybook(threatType) {

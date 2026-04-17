@@ -324,11 +324,41 @@ async function scanPackageJson(targetPath) {
         /\/\/192\.168\.\d{1,3}\.\d{1,3}[:/]/,
         /\/\/172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}[:/]/
       ].some(p => p.test(urlLower));
+
+      // v2.10.93: External raw tarball URL as dep — ltidi chain attack pattern.
+      // GitHub/GitLab/Bitbucket release tarballs are legitimate; everything else
+      // pointing to .tgz/.tar.gz/.zip is payload delivery via third-party storage
+      // (GCS, S3, CDNs). The stub package bypasses all lifecycle/obfuscation scanners
+      // because the malicious code lives in the external tarball fetched at install.
+      const isTarballUrl = /\.(tgz|tar\.gz|tar\.bz2|zip)(\?|#|$)/.test(urlLower);
+      const isLegitTarballHost = [
+        /\/\/github\.com\//,
+        /\/\/codeload\.github\.com\//,
+        /\/\/objects\.githubusercontent\.com\//,
+        /\/\/gitlab\.com\//,
+        /\/\/bitbucket\.org\//,
+        /\/\/registry\.npmjs\.org\//,
+        /\/\/registry\.yarnpkg\.com\//
+      ].some(p => p.test(urlLower));
+      const isExternalTarball = isTarballUrl && !isLegitTarballHost;
+
+      let severity;
+      let note;
+      if (isSuspicious) {
+        severity = 'CRITICAL';
+        note = ' (tunnel/private/localhost)';
+      } else if (isExternalTarball) {
+        severity = 'CRITICAL';
+        note = ' (external raw tarball on third-party host — chain attack pattern, npm registry audit bypass)';
+      } else {
+        severity = 'HIGH';
+        note = ' (unusual, verify source)';
+      }
+
       threats.push({
         type: 'dependency_url_suspicious',
-        severity: isSuspicious ? 'CRITICAL' : 'HIGH',
-        message: `Dependency "${depName}" uses HTTP URL: ${depVersion}` +
-          (isSuspicious ? ' (tunnel/private/localhost)' : ' (unusual, verify source)'),
+        severity,
+        message: `Dependency "${depName}" uses HTTP URL: ${depVersion}${note}`,
         file: 'package.json'
       });
     }

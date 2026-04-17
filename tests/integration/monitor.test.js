@@ -6499,9 +6499,9 @@ async function runMonitorTests() {
 
   // ===== v2.7.6 C1: High-confidence malice bypass =====
 
-  test('MONITOR: HIGH_CONFIDENCE_MALICE_TYPES contains 22 threat types', () => {
-    assert(HIGH_CONFIDENCE_MALICE_TYPES.size === 22,
-      `Should have 22 types, got ${HIGH_CONFIDENCE_MALICE_TYPES.size}`);
+  test('MONITOR: HIGH_CONFIDENCE_MALICE_TYPES contains 23 threat types', () => {
+    assert(HIGH_CONFIDENCE_MALICE_TYPES.size === 23,
+      `Should have 23 types, got ${HIGH_CONFIDENCE_MALICE_TYPES.size}`);
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('lifecycle_shell_pipe'), 'Missing lifecycle_shell_pipe');
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('fetch_decrypt_exec'), 'Missing fetch_decrypt_exec');
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('download_exec_binary'), 'Missing download_exec_binary');
@@ -6521,6 +6521,8 @@ async function runMonitorTests() {
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('proc_mem_scan'), 'Missing proc_mem_scan');
     // Sandbox network overhaul
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('sandbox_known_exfil_domain'), 'Missing sandbox_known_exfil_domain');
+    // v2.10.93: Security review 2026-04-10→17 findings
+    assert(HIGH_CONFIDENCE_MALICE_TYPES.has('self_destruct_eval'), 'Missing self_destruct_eval');
   });
 
   test('MONITOR: HIGH_CONFIDENCE_MALICE_TYPES does NOT contain FP-prone types', () => {

@@ -144,7 +144,12 @@ const GIT_HOOKS = [
 
 // Suspicious C2/exfiltration domains (HIGH severity)
 const SUSPICIOUS_DOMAINS_HIGH = [
+  // OAST (Out-of-band Application Security Testing) callback domains.
+  // Legitimate only for authorized pentesting — in published npm packages,
+  // these are always reconnaissance/exfiltration callbacks (dependency confusion, SSRF confirmation).
   'oastify.com', 'oast.fun', 'oast.me', 'oast.live',
+  'oast.online', 'oast.pro',
+  'interact.sh', 'projectdiscovery.io',
   'burpcollaborator.net', 'webhook.site', 'pipedream.net',
   'requestbin.com', 'hookbin.com', 'canarytokens.com',
   // GlassWorm C2 IPs (mars 2026)
@@ -167,7 +172,11 @@ const SUSPICIOUS_DOMAINS_HIGH = [
   'minhdong.site',                                 // Facebook credential proxy (fca-mmtat)
   'ltidi.storage.googleapis.com',                  // KuCoin dependency confusion payload
   'jsonkeeper.com',                                // Robert King campaign C2 dead drop
-  'npoint.io'                                      // Robert King campaign C2 dead drop
+  'npoint.io',                                     // Robert King campaign C2 dead drop
+  // v2.10.93: Security review 2026-04-10→17 findings
+  'csec-supply-chain-attack.vercel.app',           // csec-crypto-toolkit credential stealer C2 (XOR+Function+unlink)
+  'files.giftedtech.co.ke',                        // silva-baileys V3 newsletter JID remote loader
+  'phish.sh'                                       // JET/SkipTheDishes depconf webhook exfil
 ];
 
 // Suspicious tunnel/proxy domains (MEDIUM severity)

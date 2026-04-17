@@ -19,7 +19,7 @@ Priorites :
 ## Commands
 
 ```bash
-npm test          # Run all tests (custom framework, 3068 tests across 66 files)
+npm test          # Run all tests (custom framework, 3230 tests across 66 files)
 npm run lint      # ESLint with security plugin
 npm run scan      # Self-scan: node bin/muaddib.js scan .
 npm run update    # Download latest IOCs
@@ -98,13 +98,13 @@ Never skip documentation updates when publishing a new version.
 - Never commit directly to master
 - Do not create commits automatically — the user handles commits manually
 
-## Current Metrics (v2.10.57)
+## Current Metrics (v2.10.93)
 
 | Metric | Value |
 |--------|-------|
-| Version | **2.10.57** |
-| Tests | **3068** passed, 0 failed, across 66 files |
-| Rules | **200** (195 RULES + 5 PARANOID) |
+| Version | **2.10.93** |
+| Tests | **3230** passed, 0 failed, across 66 files |
+| Rules | **207** (202 RULES + 5 PARANOID) |
 | Scanners | **14** modules (13 parallel + 1 pre-analysis) |
 | TPR@3 (detection rate) | **93.75%** (60/64 ground truth) |
 | TPR@20 (alert rate) | **85.9%** (55/64 ground truth) |

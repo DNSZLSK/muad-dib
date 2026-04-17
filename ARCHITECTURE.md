@@ -28,13 +28,13 @@ bin/muaddib.js (yargs CLI)
         ├─► Deduplication
         ├─► FP reductions (src/scoring.js — applyFPReductions)
         ├─► Intent coherence analysis (src/intent-graph.js — buildIntentPairs)
-        ├─► Rule enrichment (src/rules/index.js — 200 rules)
+        ├─► Rule enrichment (src/rules/index.js — 207 rules)
         ├─► Scoring (src/scoring.js — per-file max)
         ├─► ML classifier (src/ml/classifier.js — T1 zone filtering)
         └─► Output (CLI / JSON / HTML / SARIF)
 ```
 
-**Core orchestration:** `src/index.js` — `run(targetPath, options)` runs cross-file module graph analysis first, then launches 13 individual scanners in parallel via `Promise.all` (14 scanner modules total), then deduplicates, applies FP reductions, scores using per-file max (v2.2.11: `riskScore = min(100, max(file_scores) + package_level_score)`, severity weights: CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1), applies intent coherence analysis (intra-file source-sink pairing), enriches with rules/playbooks (200 rules), and outputs (CLI/JSON/HTML/SARIF). Result includes `warnings: []` array (v2.6.5) for incomplete scan notifications (module graph timeout/skip, deobfuscation failures). Exports `isPackageLevelThreat` and `computeGroupScore` for testing.
+**Core orchestration:** `src/index.js` — `run(targetPath, options)` runs cross-file module graph analysis first, then launches 13 individual scanners in parallel via `Promise.all` (14 scanner modules total), then deduplicates, applies FP reductions, scores using per-file max (v2.2.11: `riskScore = min(100, max(file_scores) + package_level_score)`, severity weights: CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1), applies intent coherence analysis (intra-file source-sink pairing), enriches with rules/playbooks (207 rules), and outputs (CLI/JSON/HTML/SARIF). Result includes `warnings: []` array (v2.6.5) for incomplete scan notifications (module graph timeout/skip, deobfuscation failures). Exports `isPackageLevelThreat` and `computeGroupScore` for testing.
 
 ## Scanner Modules
 
@@ -180,7 +180,7 @@ See [Intent Graph](#intent-graph) section for `isSDKPattern()` details and 22 SD
 
 ## Detection Rules
 
-**Rules & playbooks:** Threat types map to rules in `src/rules/index.js` (200 rules: 195 RULES + 5 PARANOID, MITRE ATT&CK mapped) and remediation text in `src/response/playbooks.js`. Both keyed by threat `type` string.
+**Rules & playbooks:** Threat types map to rules in `src/rules/index.js` (207 rules: 202 RULES + 5 PARANOID, MITRE ATT&CK mapped) and remediation text in `src/response/playbooks.js`. Both keyed by threat `type` string.
 
 ### AST Detection Rules (v2.2+)
 
@@ -279,6 +279,17 @@ GlassWorm campaign (March 2026, 433+ packages): Unicode invisible characters + B
 - **AST-056**: `module_load_bypass` — Module._load() internal loader bypass (CRITICAL, T1059.007)
 
 ## Version History
+
+### v2.10.93 — Security review 2026-04-10 to 04-17 : ltidi + csec + OAST remediation
+- Review manuelle de 22 858 tarballs sur 8 jours, 37 malwares confirmés dont 10 sous le seuil de triage (ADR_THRESHOLD=20). Deux campagnes bypassaient entièrement la détection :
+- **ltidi dependency chain attack** (9 packages, score 10) : stub packages sans install hooks, charge utile dans la dépendance `ltidisafe` hébergée sur `ltidi.storage.googleapis.com` comme tarball HTTPS. Payload confirmée par téléchargement et analyse : DNS exfil de hostname/homedir/username via sous-domaines hex `*.v519dosgqsrbgub2skqpw9azyq4oseg3.oastify.com`.
+- **csec credential stealer** (3 packages, score 19) : variante de la campagne `plain-crypto-js` documentée par Resecurity (mars 2026). XOR avec clé `OrDeR_7077` + `new Function(decoded)` + `unlinkSync(__filename)` pour effacer les traces. Exfiltre `.env` sur 6 niveaux parents, tokens (GITHUB_TOKEN/NPM_TOKEN/AWS_*), clés SSH, `.npmrc`, `.aws/credentials` vers `csec-supply-chain-attack.vercel.app`.
+- **package.js — `dependency_url_suspicious` escalation** : severity CRITICAL quand l'URL est une tarball (`.tgz`/`.tar.gz`/`.tar.bz2`/`.zip`) ET l'hôte n'est PAS sur une allowlist (`github.com`, `codeload.github.com`, `objects.githubusercontent.com`, `gitlab.com`, `bitbucket.org`, `registry.npmjs.org`, `registry.yarnpkg.com`). Les tarballs de cloud storage (GCS, S3, Azure blob) bypassent l'audit npm registry et correspondent au pattern ltidi.
+- **ast.js + handle-post-walk.js — `self_destruct_eval` compound** (AST-089) : nouveau flag `ctx.hasSelfDelete` via regex content pour `unlinkSync`/`rmSync`/`renameSync` ciblant `__filename`/`module.filename`/`require.main.filename`. Compound CRITICAL quand `hasDynamicExec` ET `hasSelfDelete` dans le même fichier. Exempt de dist-file downgrade, dans `HIGH_CONFIDENCE_MALICE_TYPES` (bypass reputation attenuation).
+- **constants.js — SUSPICIOUS_DOMAINS_HIGH** : ajout de `oast.online`, `oast.pro`, `interact.sh`, `projectdiscovery.io`, `csec-supply-chain-attack.vercel.app`, `files.giftedtech.co.ke` (Baileys V3 C2), `phish.sh` (depconf webhook exfil).
+- **iocs/builtin.yaml** : +9 stubs ltidi + `ltidisafe` wildcard + 3 csec variants + `koa-v3@9.4.0` (typosquat + ping DNS exfil) + `cmp-api-stub@99.9.1` (ltidi session 2).
+- Tests : 3134 → **3230** (8 nouveaux tests self_destruct_eval + 3 nouveaux tests dep URL escalation + 2 tests existants mis à jour de HIGH → CRITICAL pour les tarballs externes + 2 tests de compteur rule count mis à jour + 1 test compteur HC_TYPES mis à jour). Rules : 200 → **207** (202 RULES + 5 PARANOID). HC_TYPES : 22 → 23.
+- Attendu en post-merge : ltidi stubs passent de score 10 à 50+ (dep_url CRITICAL 25 pts + dependency_ioc_match HIGH 10 pts + floor CRITICAL à 50). csec variants passent de 19 à 90+ (self_destruct_eval CRITICAL file-level + signaux existants, bypass reputation via HC_TYPES). Les 2 campagnes sortent du radar sous-threshold.
 
 ### v2.10.74 — FP Cluster Fixes (P1-P4) + TIER1 Sandbox Evasion Guard
 - Forensic audit of 53,953 production alerts on 8,396 high-score packages, 78 deep-reviewed

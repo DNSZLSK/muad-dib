@@ -774,6 +774,96 @@ require(tmpFile);
   });
 
   // ============================================
+  // v2.10.93: self_destruct_eval (AST-089) — csec credential stealer
+  // ============================================
+
+  await asyncTest('AST: Detects new Function + unlinkSync(__filename) → self_destruct_eval CRITICAL', async () => {
+    // Reproduces the csec-crypto-toolkit pattern: XOR-decoded payload executed via
+    // new Function(), then the source file deletes itself to erase traces.
+    const code = `
+const fs = require('fs');
+const encoded = 'OrDeR_7077!...';
+const decoded = Buffer.from(encoded, 'base64').toString();
+new Function('require', '__dirname', '__filename', decoded)(require, __dirname, __filename);
+fs.unlinkSync(__filename);
+`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'self_destruct_eval');
+      assert(t, 'Should detect self_destruct_eval compound');
+      assert(t.severity === 'CRITICAL', `Expected CRITICAL, got ${t.severity}`);
+      assertIncludes(t.message, 'Anti-forensics', 'Should mention anti-forensics');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: eval + renameSync(__filename) → self_destruct_eval CRITICAL', async () => {
+    // Variant: rename __filename to hide the payload (csec replaces package.json with package.md)
+    const code = `
+const fs = require('fs');
+eval(atob(encodedPayload));
+fs.renameSync(__filename, __filename + '.bak');
+`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'self_destruct_eval');
+      assert(t, 'Should detect rename-based self-destruction');
+      assert(t.severity === 'CRITICAL', `Expected CRITICAL, got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: new Function alone (no self-delete) → no self_destruct_eval', async () => {
+    // Negative case: new Function without self-deletion is NOT the csec pattern.
+    // Legitimate bundlers and template engines use new Function frequently.
+    const code = `
+const compileTemplate = function(tpl) {
+  return new Function('data', 'return \`' + tpl + '\`');
+};
+module.exports = compileTemplate;
+`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'self_destruct_eval');
+      assert(!t, 'Should NOT trigger without self-delete of __filename');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: unlinkSync(__filename) alone (no dynamic exec) → no self_destruct_eval', async () => {
+    // Negative case: self-cleanup without dynamic exec (e.g., a self-installer) is not csec pattern.
+    const code = `
+const fs = require('fs');
+console.log('install complete, cleaning up');
+fs.unlinkSync(__filename);
+`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'self_destruct_eval');
+      assert(!t, 'Should NOT trigger without dynamic code execution');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: unlinkSync on non-__filename variable → no self_destruct_eval', async () => {
+    // Negative case: deleting another file (not __filename) + dynamic exec is not self-destruction.
+    // Still flagged by write_execute_delete if write+exec+delete triad matches, but not self_destruct_eval.
+    const code = `
+const fs = require('fs');
+const tmpFile = '/tmp/helper.js';
+fs.writeFileSync(tmpFile, code);
+new Function(loadedCode)();
+fs.unlinkSync(tmpFile);
+`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'self_destruct_eval');
+      assert(!t, 'Should NOT trigger — deletion target is a variable, not __filename');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // ============================================
   // SANDWORM_MODE P2: R5 — MCP Config Injection (AST-027)
   // ============================================
 
