@@ -253,6 +253,7 @@ const DIST_EXEMPT_TYPES = new Set([
   'npm_publish_worm',         // exec("npm publish") (worm propagation)
   'curl_env_exfil',           // curl/wget env exfil in lifecycle (always malicious)
   'function_constructor_require', // new Function.constructor("require") (always malicious)
+  'self_destruct_eval',       // dynamic exec + unlink __filename (csec anti-forensics)
   // Dangerous shell commands in dist/ are real threats, never bundler output
   'dangerous_exec',
   // Compound scoring rules — co-occurrence signals, never FP

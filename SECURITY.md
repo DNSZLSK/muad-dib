@@ -68,9 +68,9 @@ Please include the following information in your report:
 - We aim to release fixes before public disclosure
 - We request a 90-day disclosure window for complex issues
 
-## Detection Rules (v2.10.74)
+## Detection Rules (v2.10.93)
 
-MUAD'DIB uses 14 scanner modules (module-graph pre-analysis + 13 parallel scanners) + 5 behavioral anomaly detection features + ground truth validation, producing 200 rule IDs (195 RULES + 5 PARANOID):
+MUAD'DIB uses 14 scanner modules (module-graph pre-analysis + 13 parallel scanners) + 5 behavioral anomaly detection features + ground truth validation, producing 207 rule IDs (202 RULES + 5 PARANOID):
 
 ### AST Scanner
 
@@ -195,6 +195,26 @@ MUAD'DIB uses 14 scanner modules (module-graph pre-analysis + 13 parallel scanne
 | MUADDIB-AST-067 | Symbol Property Hiding (anti-forensics) | HIGH | T1564 |
 | MUADDIB-AST-068 | WithStatement Dangerous Body (scope injection) | HIGH | T1027 |
 | MUADDIB-AST-069 | require("process").mainModule Bypass | CRITICAL | T1059 |
+| MUADDIB-AST-070 | Shared Memory IPC (SharedArrayBuffer + Worker) | MEDIUM | T1559 |
+| MUADDIB-AST-071 | WebSocket C2 Channel | HIGH | T1071.001 |
+| MUADDIB-AST-072 | dgram UDP Exfiltration | HIGH | T1048 |
+| MUADDIB-AST-073 | Crontab Persistence Injection | CRITICAL | T1053.003 |
+| MUADDIB-AST-074 | Module Internals Hijack (_resolveFilename/_compile/_extensions) | CRITICAL | T1574.006 |
+| MUADDIB-AST-075 | JSON.parse Reviver with __proto__ Check | HIGH | T1027 |
+| MUADDIB-AST-076 | vm.runInContext Dynamic Execution | CRITICAL | T1059.007 |
+| MUADDIB-AST-077 | Stego Binary Read + eval/Function | CRITICAL | T1027.003 |
+| MUADDIB-AST-078 | Proxy Set Trap Data Interception | HIGH | T1056.004 |
+| MUADDIB-AST-079 | Callback Exec (exec/spawn inside .on message/data) | CRITICAL | T1059 |
+| MUADDIB-AST-080 | CI Provider Fingerprinting (>=3 CI env vars) | MEDIUM | T1082 |
+| MUADDIB-AST-081 | AsyncLocalStorage Abuse | MEDIUM | T1027 |
+| MUADDIB-AST-082 | Image File Read + Dynamic Exec (steganography) | HIGH | T1027.003 |
+| MUADDIB-AST-083 | net.Socket / net.createConnection (low-level network) | MEDIUM | T1071 |
+| MUADDIB-AST-084 | uncaughtException / unhandledRejection hijack | HIGH | T1564 |
+| MUADDIB-AST-085 | FinalizationRegistry Deferred Exec (v8 variant) | HIGH | T1497.003 |
+| MUADDIB-AST-086 | Function.constructor("require") RCE (Robert King) | CRITICAL | T1059 |
+| MUADDIB-AST-087 | process Variable Shadow (const process = {...}) | HIGH | T1036 |
+| MUADDIB-AST-088 | Baileys Newsletter Auto-Follow Hijack | HIGH | T1496 |
+| MUADDIB-AST-089 | Self-Destructing Dynamic Execution (csec pattern) | CRITICAL | T1070.004 |
 
 ### AI Config Scanner (v2.2)
 

@@ -2264,6 +2264,18 @@ const RULES = {
     ],
     mitre: 'T1496'
   },
+  self_destruct_eval: {
+    id: 'MUADDIB-AST-089',
+    name: 'Self-Destructing Dynamic Execution',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Execution dynamique de code (eval/new Function/Module._compile) combinee a la suppression ou renommage du fichier en cours d\'execution (unlinkSync/rmSync/renameSync sur __filename, module.filename, ou require.main.filename). Anti-forensics: le malware execute son payload obfusque puis efface ses traces. Aucun package legitime ne detruit son propre source apres execution de code dynamique. Campagne csec-crypto-toolkit (avril 2026): XOR(OrDeR_7077)+base64+new Function, exfiltre .env/.ssh/.npmrc vers csec-supply-chain-attack.vercel.app, puis unlinkSync(__filename).',
+    references: [
+      'https://attack.mitre.org/techniques/T1070.004/',
+      'https://attack.mitre.org/techniques/T1140/'
+    ],
+    mitre: 'T1070.004'
+  },
   version_99_preinstall: {
     id: 'MUADDIB-PKG-019',
     name: 'Dependency Confusion Version Indicator',

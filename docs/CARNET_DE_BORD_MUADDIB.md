@@ -389,7 +389,7 @@ Estimation du gain FPR : **14% → 6-9%**. Je mesurerai pour de vrai apres la re
 
 ## Ou j'en suis
 
-3 mois et demi de projet. 200 regles de detection, 14 scanners, 3134 tests. Un moniteur en 24/7 sur npm et PyPI. Deux modeles ML entraines. Un ground truth passe de 4 malwares a 67 samples + 377 confirmed_malicious dans l'auto-labeler.
+3 mois et demi de projet. 207 regles de detection, 14 scanners, 3230 tests. Un moniteur en 24/7 sur npm et PyPI. Deux modeles ML entraines. Un ground truth passe de 4 malwares a 67 samples + 377 confirmed_malicious dans l'auto-labeler.
 
 Les chiffres qui comptent : TPR 93.9% (46/49 attaques reelles detectees), FPR 10.6% (56/529 packages benins flagues a tort), ADR 94.0% (101/107 samples adversariaux). Ce ne sont pas des scores parfaits, et c'est le point — un scanner avec 0% de FP ne scanne probablement rien, et un TPR de 100% sur 4 samples ne veut rien dire.
 

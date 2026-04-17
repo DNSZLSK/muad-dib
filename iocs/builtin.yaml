@@ -316,6 +316,60 @@ packages:
     version: "0.4.1"
     source: review-apr-2026-claude-stealer
 
+  # Security review 2026-04-10→17 — ltidi chain attack (GCS payload delivery)
+  # 7 stub packages with ltidisafe dep hosted on ltidi.storage.googleapis.com.
+  # Stub code is console.log() only; payload lives in external tarball fetched at install.
+  - name: "ltidisafe"
+    version: "*"
+    source: review-apr-2026-ltidi
+    description: "Ltidi chain attack payload — hosted on Google Cloud Storage, all versions malicious"
+  - name: "viewer-assets-generator"
+    version: "99.9.1"
+    source: review-apr-2026-ltidi
+  - name: "@veygo/component-library"
+    version: "99.9.2"
+    source: review-apr-2026-ltidi
+  - name: "@bapiweb-ux/bapi-header"
+    version: "99.9.1"
+    source: review-apr-2026-ltidi
+  - name: "@grappi/automations"
+    version: "99.9.1"
+    source: review-apr-2026-ltidi
+  - name: "@mcconnect/mcc-common-lib"
+    version: "99.9.1"
+    source: review-apr-2026-ltidi
+  - name: "eslint-plugin-totara"
+    version: "99.9.1"
+    source: review-apr-2026-ltidi
+  - name: "ing-web-v5"
+    version: "99.9.1"
+    source: review-apr-2026-ltidi
+  - name: "cmp-api-stub"
+    version: "99.9.1"
+    source: review-apr-2026-ltidi
+    description: "ltidi stub — DNS exfil via ltidisafe-1.7.2.tgz (oastify.com subdomain)"
+  # Note: @kucoin-gbiz-next/tools is part of the ltidi campaign (loads ltidisafe-1.5.7.tgz from GCS)
+  # but already tracked in review-apr-2026-depconf with wildcard version above — not duplicated here.
+
+  # Security review apr-2026 — typosquat + DNS ping exfil
+  - name: "koa-v3"
+    version: "9.4.0"
+    source: review-apr-2026-ping-dns-exfil
+    description: "Typosquat of koa framework — preinstall ping DNS exfil via .oast.fun subdomain (whoami+hostname)"
+
+  # Security review 2026-04-10→17 — csec credential stealer
+  # XOR (key OrDeR_7077) + base64 + new Function + unlinkSync(__filename).
+  # Exfiltrates .env walking up 6 dirs, GITHUB_TOKEN/NPM_TOKEN/AWS/SSH/.npmrc.
+  - name: "csec-crypto-toolkit"
+    version: "4.2.2"
+    source: review-apr-2026-csec
+  - name: "csec-crypto-toolkit"
+    version: "4.2.4"
+    source: review-apr-2026-csec
+  - name: "ccsseecc-crypto-toolkit"
+    version: "4.5.1"
+    source: review-apr-2026-csec
+
 files:
   # Shai-Hulud v2
   - setup_bun.js

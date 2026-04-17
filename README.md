@@ -292,7 +292,7 @@ repos:
 | **FPR** (Benign random) | **7.5%** (15/200) | 200 random npm packages, stratified sampling |
 | **ADR** (Adversarial + Holdout) | **96.3%** (103/107) | 67 adversarial + 40 holdout (107 available on disk), global threshold=20 |
 
-**3134 tests** across 66 files. **200 rules** (195 RULES + 5 PARANOID).
+**3230 tests** across 66 files. **207 rules** (202 RULES + 5 PARANOID).
 
 > **ML retrain methodology (v2.10.51):**
 > - Ground truth: 377 confirmed_malicious via auto-labeler (OSSF malicious-packages, GitHub Advisory Database, npm registry takedown correlation)
@@ -340,7 +340,7 @@ npm test
 
 ### Testing
 
-- **3134 tests** across 66 modular test files
+- **3230 tests** across 66 modular test files
 - **56 fuzz tests** - Malformed inputs, ReDoS, unicode, binary
 - **Datadog 17K benchmark** - 14,587 confirmed malware samples (in-scope)
 - **Ground truth validation** - 67 real-world attacks (93.75% TPR@3, 85.9% TPR@20)
@@ -362,7 +362,7 @@ npm test
 - [Evaluation Methodology](docs/EVALUATION_METHODOLOGY.md) - Experimental protocol, holdout scores
 - [Threat Model](docs/threat-model.md) - What MUAD'DIB detects and doesn't detect
 - [Adversarial Evaluation](ADVERSARIAL.md) - Red team samples and ADR results
-- [Security Policy](SECURITY.md) - Detection rules reference (200 rules)
+- [Security Policy](SECURITY.md) - Detection rules reference (207 rules)
 - [Security Audit](docs/SECURITY_AUDIT.md) - Bypass validation report
 - [FP Analysis](docs/EVALUATION.md) - Historical false positive analysis
 

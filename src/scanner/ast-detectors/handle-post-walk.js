@@ -23,6 +23,26 @@ function handlePostWalk(ctx) {
     });
   }
 
+  // v2.10.93: csec-style credential stealer — dynamic exec + self-deletion of __filename.
+  // csec-crypto-toolkit (avril 2026): XOR-obfuscated setup.js that exfiltrates
+  // .env/.ssh/.npmrc to csec-supply-chain-attack.vercel.app, then unlinks itself
+  // and replaces package.json with package.md to erase traces.
+  // Threat model: the combination of (a) dynamic code execution from a variable
+  // (eval/new Function/Module._compile) with (b) self-deletion of the currently
+  // executing file is a professional anti-forensics signature. Legitimate packages
+  // do not destroy their own source after executing obfuscated code.
+  // Suppressed in dist/build to avoid bundler self-cleanup FPs (rare but possible).
+  if (ctx.hasDynamicExec && ctx.hasSelfDelete) {
+    const isDistFile = /^(dist|build|out|output)[/\\]/i.test(ctx.relFile) ||
+                       /\.(bundle|min)\.js$/i.test(ctx.relFile);
+    ctx.threats.push({
+      type: 'self_destruct_eval',
+      severity: isDistFile ? 'HIGH' : 'CRITICAL',
+      message: 'Anti-forensics: dynamic code execution (eval/new Function/Module._compile) + self-deletion of __filename — malware staging with trace removal (csec pattern).',
+      file: ctx.relFile
+    });
+  }
+
   // SANDWORM_MODE R7: env harvesting = Object.entries/keys/values(process.env) + sensitive pattern in file
   if (ctx.hasEnvEnumeration && ctx.hasEnvHarvestPattern && ctx.hasNetworkCallInFile) {
     ctx.threats.push({
