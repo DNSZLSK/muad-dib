@@ -76,6 +76,504 @@ const TOP_THREAT_TYPES = [
 
 const TOP_THREAT_TYPES_SET = new Set(TOP_THREAT_TYPES);
 
+// --- Cluster FP contextual feature helpers (v2.10.96) ---
+//
+// Target: P1 CRITICAL webhook suppression (score >= 75). The four helpers
+// below encode the four FP clusters identified in the v2.10.9x weekly FP
+// review: Cluster A (native binary installers via GitHub releases),
+// Cluster B (minified bundles w/o install scripts), Cluster C (dev tooling
+// writing git hooks from local files), Cluster E (first-party SDKs exfil
+// pattern on their own API).
+//
+// These features intentionally operate on scan-result signals ONLY so they
+// can be recomputed on historical JSONL records without re-scanning.
+
+// Threats whose presence implies the package performs a network call.
+const NETWORK_ADJACENT_TYPES = new Set([
+  'suspicious_dataflow',
+  'network_require',
+  'remote_code_load',
+  'curl_exec',
+  'intent_credential_exfil',
+  'intent_command_exfil',
+  'dangerous_call_fetch',
+  'external_tarball_dep',
+  'dependency_url_suspicious'
+]);
+
+// Package-scope -> first-party domain mapping for well-known SDK publishers.
+// Keys are lowercase npm scope names (without '@'). Used by
+// `network_destination_first_party` when the package is scoped.
+const SCOPE_FIRST_PARTY_DOMAINS = {
+  'anthropic-ai': ['anthropic.com'],
+  'openai': ['openai.com'],
+  'google-cloud': ['googleapis.com', 'google.com'],
+  'google-ai': ['googleapis.com', 'google.com'],
+  'aws-sdk': ['amazonaws.com', 'aws.amazon.com'],
+  'aws-amplify': ['amazonaws.com'],
+  'azure': ['azure.com', 'microsoft.com'],
+  'microsoft': ['microsoft.com', 'azure.com'],
+  'supabase': ['supabase.co', 'supabase.com'],
+  'stripe': ['stripe.com'],
+  'twilio': ['twilio.com'],
+  'sendgrid': ['sendgrid.com', 'sendgrid.net'],
+  'datadog': ['datadoghq.com'],
+  'sentry': ['sentry.io'],
+  'slack': ['slack.com'],
+  'octokit': ['github.com', 'githubusercontent.com'],
+  'cloudflare': ['cloudflare.com'],
+  'auth0': ['auth0.com'],
+  'hubspot': ['hubspot.com', 'hubapi.com'],
+  'contentful': ['contentful.com'],
+  'mongodb': ['mongodb.com', 'mongodb.net'],
+  'mailgun': ['mailgun.net', 'mailgun.com'],
+  'vercel': ['vercel.com', 'vercel.app'],
+  'netlify': ['netlify.com', 'netlify.app'],
+  'pinecone-database': ['pinecone.io'],
+  'langchain': ['langchain.com']
+};
+
+// GitHub release hosts (install_url_github_releases).
+const GITHUB_RELEASE_HOSTS = ['github.com', 'objects.githubusercontent.com', 'raw.githubusercontent.com'];
+
+// Bundle file-shape patterns. Conservative: only flag paths that clearly
+// correspond to build output, so the feature stays specific to Cluster B.
+const BUNDLE_PATH_RE = /(?:^|[\\/])(?:dist|build|lib|out|umd|esm|cjs|bundle|_next[\\/]static|\.next[\\/]static|public[\\/]static|webpack|rollup)[\\/]/i;
+const BUNDLE_FILE_RE = /\.(?:min|bundle|prod|umd|iife|esm|cjs)\.(?:m?js|cjs)$|\.min\.js$|chunk-[0-9a-f]+\.js$|vendors?~?.*\.js$/i;
+
+// Threat types that indicate remote content fetch in a file (for
+// `git_hook_source_local` heuristic: absence => local source).
+const REMOTE_FETCH_TYPES = new Set([
+  'remote_code_load',
+  'network_require',
+  'curl_exec',
+  'suspicious_dataflow',
+  'suspicious_domain',
+  'dangerous_call_fetch',
+  'external_tarball_dep',
+  'dependency_url_suspicious',
+  'binary_dropper',
+  'download_exec_binary'
+]);
+
+// Match URLs inside threat message strings (legacy fallback when threats
+// predate v2.10.96 URL enrichment — historical JSONL scan results).
+const MESSAGE_URL_RE = /https?:\/\/([a-zA-Z0-9._-]+)(?:[:/?#][^\s'"`)<>]*)?/g;
+
+function hostFromUrl(url) {
+  if (typeof url !== 'string') return null;
+  const m = url.match(/^https?:\/\/([^/:?#\s'"`)<>]+)/i);
+  return m ? m[1].toLowerCase() : null;
+}
+
+function extractHostsFromThreats(threats) {
+  const hosts = new Set();
+  let sawStructured = false;
+  for (const t of threats) {
+    if (t && Array.isArray(t.urls) && t.urls.length > 0) {
+      sawStructured = true;
+      for (const u of t.urls) {
+        const h = hostFromUrl(u);
+        if (h) hosts.add(h);
+      }
+    }
+  }
+  // If no threat carries structured URLs, fall back to message-regex so that
+  // callers can still reason about old scan records. Once the scan fleet is
+  // fully on v2.10.96+ the regex branch becomes dead.
+  if (sawStructured) return hosts;
+  for (const t of threats) {
+    const msg = t && t.message;
+    if (!msg || typeof msg !== 'string') continue;
+    MESSAGE_URL_RE.lastIndex = 0;
+    let m;
+    while ((m = MESSAGE_URL_RE.exec(msg)) !== null) {
+      if (m[1]) hosts.add(m[1].toLowerCase());
+    }
+  }
+  return hosts;
+}
+
+function hostMatchesSuffix(host, candidates) {
+  for (const c of candidates) {
+    if (host === c || host.endsWith('.' + c)) return true;
+  }
+  return false;
+}
+
+function getPackageScope(name) {
+  if (!name || typeof name !== 'string') return null;
+  const m = name.match(/^@([^/]+)\//);
+  return m ? m[1].toLowerCase() : null;
+}
+
+function getHomepageHost(meta) {
+  if (!meta) return null;
+  const candidates = [
+    meta.homepage,
+    meta.registryMeta && meta.registryMeta.homepage,
+    meta.npmRegistryMeta && meta.npmRegistryMeta.homepage
+  ];
+  for (const raw of candidates) {
+    if (!raw || typeof raw !== 'string') continue;
+    const m = raw.match(/^https?:\/\/([^/:?#]+)/i);
+    if (m) return m[1].toLowerCase();
+  }
+  return null;
+}
+
+/**
+ * Feature 1 — TRUE iff the package performs a network call AND every
+ * extractable destination is a first-party host of that package.
+ * First-party = package-scope SDK publisher or package.homepage host.
+ *
+ * Targets Cluster E: Claude Code / OpenAI / Anthropic SDK wrappers that
+ * read API keys from env and POST them to their legitimate vendor API.
+ */
+function networkDestinationFirstParty(result, meta) {
+  const threats = (result && result.threats) || [];
+  const hasNetwork = threats.some(t => NETWORK_ADJACENT_TYPES.has(t.type));
+  if (!hasNetwork) return false;
+
+  const firstParty = [];
+  const scope = getPackageScope(meta && meta.name);
+  if (scope && SCOPE_FIRST_PARTY_DOMAINS[scope]) {
+    firstParty.push(...SCOPE_FIRST_PARTY_DOMAINS[scope]);
+  }
+  // Unscoped packages: accept exact-name match against the scope table for
+  // packages whose own identifier IS the publisher (e.g., `stripe`, `twilio`).
+  const baseName = (meta && meta.name && String(meta.name).replace(/^@[^/]+\//, '').toLowerCase()) || '';
+  if (!scope && SCOPE_FIRST_PARTY_DOMAINS[baseName]) {
+    firstParty.push(...SCOPE_FIRST_PARTY_DOMAINS[baseName]);
+  }
+  const homepageHost = getHomepageHost(meta);
+  if (homepageHost) firstParty.push(homepageHost);
+  if (firstParty.length === 0) return false;
+
+  const hosts = extractHostsFromThreats(threats);
+  // No destination host was observable (scanner saw the network sink but
+  // no URL literal leaked into threat messages). Accept as first-party only
+  // when the package identity alone is a strong signal (scoped SDK).
+  if (hosts.size === 0) return scope !== null && SCOPE_FIRST_PARTY_DOMAINS[scope] !== undefined;
+
+  for (const h of hosts) {
+    if (!hostMatchesSuffix(h, firstParty)) return false;
+  }
+  return true;
+}
+
+/**
+ * Feature 2 — TRUE iff the package behaves as a native-binary installer
+ * AND every URL visible in its threat messages points to GitHub releases.
+ *
+ * Targets Cluster A: esbuild / swc / prisma style platform binary drops.
+ */
+function installUrlGithubReleases(result) {
+  const threats = (result && result.threats) || [];
+  const hasInstaller = threats.some(t => t.type === 'binary_dropper' || t.type === 'download_exec_binary');
+  if (!hasInstaller) return false;
+  // Any known-suspicious destination present => not a github-only installer.
+  if (threats.some(t => t.type === 'suspicious_domain')) return false;
+
+  const hosts = extractHostsFromThreats(threats);
+  if (hosts.size === 0) return false;
+  for (const h of hosts) {
+    if (!hostMatchesSuffix(h, GITHUB_RELEASE_HOSTS)) return false;
+  }
+  // At least one host must be a github release host (guards against the
+  // degenerate case where every extracted host happened to be unrelated
+  // allowlist traffic — e.g., registry.npmjs.org).
+  for (const h of hosts) {
+    if (hostMatchesSuffix(h, GITHUB_RELEASE_HOSTS)) return true;
+  }
+  return false;
+}
+
+function hasBundlePath(file) {
+  if (!file || typeof file !== 'string') return false;
+  return BUNDLE_PATH_RE.test(file) || BUNDLE_FILE_RE.test(file);
+}
+
+function hasLifecycleScripts(meta) {
+  const scripts = (meta && meta.registryMeta && meta.registryMeta.scripts) || null;
+  if (!scripts || typeof scripts !== 'object') return false;
+  for (const key of ['preinstall', 'install', 'postinstall']) {
+    const v = scripts[key];
+    if (typeof v === 'string' && v.trim().length > 0) return true;
+  }
+  return false;
+}
+
+// Threshold derived from the v2.10.9x FP review of minified bundles:
+// Cluster B FPs all ship at least one > 100KB file (typical webpack chunk
+// is 200-800KB). 100KB is low enough to catch small bundlers yet high
+// enough to exclude hand-written source.
+const BUNDLE_FILE_MIN_BYTES = 100 * 1024;
+
+/**
+ * Feature 3 — TRUE iff the package ships at least one large (>100KB) file
+ * AND the findings all sit in those large files AND the package declares
+ * no install lifecycle script. Targets Cluster B: minified webpack/rollup
+ * output triggering eval / obfuscation heuristics without any runtime
+ * install vector.
+ *
+ * Primary size source: `summary.fileSizes` (populated by processor.js in
+ * v2.10.96+). When sizes are absent (historical JSONL records), fall back
+ * to the path-shape proxy (`dist/`, `.min.js`, etc.).
+ *
+ * `registryMeta.scripts` is REQUIRED: callers that do not populate it will
+ * always get FALSE — we must not claim a package has no install hook when
+ * we never looked.
+ */
+function bundleWithoutInstallScripts(result, meta) {
+  if (!meta || !meta.registryMeta || meta.registryMeta.scripts === undefined) return false;
+  if (hasLifecycleScripts(meta)) return false;
+
+  const threats = (result && result.threats) || [];
+  if (threats.length === 0) return false;
+
+  const threatFiles = new Set();
+  for (const t of threats) {
+    if (t.file) threatFiles.add(t.file);
+  }
+  if (threatFiles.size === 0) return false;
+
+  const summary = (result && result.summary) || {};
+  const fileSizes = summary.fileSizes;
+  const haveSizes = fileSizes && typeof fileSizes === 'object' && Object.keys(fileSizes).length > 0;
+
+  if (haveSizes) {
+    let sawLargeFile = false;
+    for (const f of threatFiles) {
+      const size = fileSizes[f];
+      if (typeof size !== 'number') return false;
+      if (size < BUNDLE_FILE_MIN_BYTES) return false;
+      sawLargeFile = true;
+    }
+    return sawLargeFile;
+  }
+
+  // Legacy proxy: no file sizes available, fall back to path shape.
+  for (const f of threatFiles) {
+    if (!hasBundlePath(f)) return false;
+  }
+  return true;
+}
+
+/**
+ * Feature 4 — TRUE iff the package fires `git_hooks_injection` AND none of
+ * the files that triggered it also show a remote-fetch signal. Proxy for
+ * "hook body was read from a local source file", i.e. dev tooling like
+ * husky / simple-git-hooks installing its own canned hook.
+ */
+function gitHookSourceLocal(result) {
+  const threats = (result && result.threats) || [];
+  const hookThreats = threats.filter(t => t.type === 'git_hooks_injection');
+  if (hookThreats.length === 0) return false;
+
+  const remoteByFile = new Map();
+  for (const t of threats) {
+    if (!t.file || !REMOTE_FETCH_TYPES.has(t.type)) continue;
+    remoteByFile.set(t.file, true);
+  }
+  for (const h of hookThreats) {
+    if (h.file && remoteByFile.has(h.file)) return false;
+  }
+  return true;
+}
+
+// --- v2.10.96 extended FP features (F5-F8, VPS review 2026-04-18) ---
+//
+// Covers an additional 319 FP (15.2%) on top of F1-F4; combined F1-F8
+// cover 2069/2104 reviewed FP = 98.3%.
+
+// Obfuscation-shape threats used by Feature 6.
+const OBFUSCATION_TYPES = new Set([
+  'obfuscation_detected',
+  'js_obfuscation_pattern',
+  'high_entropy_string',
+  'unicode_invisible_injection'
+]);
+
+// Threat types that indicate a runtime vector (install, env, network).
+// Their presence disqualifies Feature 6 (obfuscation-without-vector).
+const VECTOR_TYPES = new Set([
+  // install / lifecycle
+  'lifecycle_script',
+  'lifecycle_shell_pipe',
+  // env read (credential source)
+  'env_access',
+  'env_charcode_reconstruction',
+  'credential_regex_harvest',
+  // network / exec / dynamic code
+  'suspicious_dataflow',
+  'network_require',
+  'remote_code_load',
+  'curl_exec',
+  'intent_credential_exfil',
+  'intent_command_exfil',
+  'dangerous_call_fetch',
+  'external_tarball_dep',
+  'dependency_url_suspicious',
+  'dangerous_exec',
+  'dangerous_call_eval',
+  'dangerous_call_exec',
+  'dangerous_call_function',
+  'module_compile',
+  'binary_dropper',
+  'download_exec_binary',
+  'fetch_decrypt_exec',
+  'suspicious_domain',
+  'reverse_shell'
+]);
+
+// Threats that indicate a network egress capability somewhere in the
+// package. Broader than NETWORK_ADJACENT_TYPES: includes domain literals,
+// drop-exec pairs, and suspicious dataflows. Used by Feature 8.
+const EGRESS_TYPES = new Set([
+  'suspicious_dataflow',
+  'network_require',
+  'remote_code_load',
+  'curl_exec',
+  'intent_credential_exfil',
+  'intent_command_exfil',
+  'dangerous_call_fetch',
+  'external_tarball_dep',
+  'dependency_url_suspicious',
+  'suspicious_domain',
+  'binary_dropper',
+  'download_exec_binary',
+  'fetch_decrypt_exec',
+  'reverse_shell'
+]);
+
+// Dep-confusion / defensive-placeholder phrases matched against the
+// package description. Case-insensitive, whole-phrase (no substring
+// inside an unrelated word). The list is deliberately conservative —
+// a real README that happens to mention "dependency confusion" once
+// still needs to look like a placeholder in every other dimension
+// (see `placeholderAntiDepConfusion`).
+const PLACEHOLDER_DESCRIPTION_RE = new RegExp([
+  'dependency[- ]?confusion',
+  'dep[- ]?confusion',
+  'namespace[- ]?squatt?ing',
+  'name[- ]?squatt?ing',
+  'squatting[- ]?prevention',
+  'defensive[- ]?(?:registration|publish|package|placeholder)',
+  'placeholder[- ]?(?:package|to[- ]?reserve|for[- ]?the[- ]?name)',
+  'reserv(?:e|ing|ation)[- ]?(?:this[- ]?)?(?:name|package|namespace)',
+  'prevents?[- ]+(?:malicious[- ]+)?dependency[- ]+confusion',
+  'blocks?[- ]+(?:malicious[- ]+)?dependency[- ]+confusion',
+  'reserved[- ]+by[- ]+.*?(?:to[- ]+prevent|against)'
+].join('|'), 'i');
+
+// Alias — same semantics as hasLifecycleScripts (used by F3), just named
+// from the perspective of F7/F8 which reason about install vectors.
+const hasInstallScript = hasLifecycleScripts;
+
+function getDescription(meta) {
+  if (!meta) return '';
+  const candidates = [
+    meta.description,
+    meta.registryMeta && meta.registryMeta.description,
+    meta.npmRegistryMeta && meta.npmRegistryMeta.description
+  ];
+  for (const c of candidates) {
+    if (typeof c === 'string' && c.length > 0) return c;
+  }
+  return '';
+}
+
+/**
+ * Feature 5 — TRUE iff a `typosquat_detected` threat fires on a scoped
+ * package (`@scope/name`). Rationale: the typosquat rule computes edit
+ * distance on the bare name (`@vendor/client-foo` -> `client-foo`) and
+ * will sometimes treat `@scope/adapter-rubrik` as a typosquat of the
+ * unscoped `rubrik`. Scoping implies a separate namespace, so the
+ * collision is structurally false.
+ *
+ * Covers 52 FP (2.5%) on the VPS extended corpus.
+ */
+function typosquatScopedPackage(result, meta) {
+  const threats = (result && result.threats) || [];
+  const hasTyposquat = threats.some(t =>
+    t.type === 'typosquat_detected' || t.type === 'pypi_typosquat_detected'
+  );
+  if (!hasTyposquat) return false;
+  const name = (meta && meta.name && String(meta.name)) || '';
+  return name.startsWith('@') && name.includes('/');
+}
+
+/**
+ * Feature 6 — TRUE iff the package shows only obfuscation-shape findings
+ * (obfuscation_detected, js_obfuscation_pattern, high_entropy_string,
+ * unicode_invisible_injection) AND carries no install / env / network
+ * vector threat. This is the commercial-obfuscator pattern: webpack
+ * output or a hardening vendor (jsjiami, obfuscator.io) trips heuristics
+ * but the package has no runtime capability to exfiltrate anything.
+ *
+ * Mutually exclusive with F8 by construction (F8 requires a lifecycle
+ * script, which is a VECTOR_TYPE here).
+ *
+ * Covers 33 FP (1.6%).
+ */
+function obfuscationWithoutVector(result) {
+  const threats = (result && result.threats) || [];
+  if (threats.length === 0) return false;
+  let sawObf = false;
+  for (const t of threats) {
+    if (OBFUSCATION_TYPES.has(t.type)) { sawObf = true; continue; }
+    if (VECTOR_TYPES.has(t.type)) return false;
+  }
+  return sawObf;
+}
+
+/**
+ * Feature 7 — TRUE iff the package description explicitly declares a
+ * defensive / placeholder / dependency-confusion-prevention purpose AND
+ * the package body is effectively empty (no install script, trivial
+ * footprint). These are namespace reservations published by vendors to
+ * block attackers from squatting internal package names.
+ *
+ * Covers 15 FP (0.7%). Conservative double-check (description + empty
+ * body) protects against real packages whose README merely mentions
+ * dep-confusion as a discussed topic.
+ */
+function placeholderAntiDepConfusion(result, meta) {
+  const desc = getDescription(meta);
+  if (!desc || !PLACEHOLDER_DESCRIPTION_RE.test(desc)) return false;
+  if (hasInstallScript(meta)) return false;
+  const threats = (result && result.threats) || [];
+  // Real placeholder packages should not carry any CRITICAL/HIGH static
+  // finding — empty by construction.
+  for (const t of threats) {
+    if (t.severity === 'CRITICAL' || t.severity === 'HIGH') return false;
+  }
+  return true;
+}
+
+/**
+ * Feature 8 — TRUE iff the package declares at least one install
+ * lifecycle script AND the scan shows no network egress capability
+ * anywhere (no fetch/curl/dns/suspicious dataflow/drop-exec).
+ *
+ * Install scripts that only do `echo`, `mkdir`, `chmod`, `npm run
+ * build`, or call a local node script without network access cannot
+ * exfiltrate data — the 219 FP this covers are almost entirely build
+ * helpers and version/engine gates.
+ *
+ * Mutually exclusive with F1 (requires no install) and F2 (requires
+ * a binary downloader, hence network egress).
+ */
+function installScriptNoNetworkEgress(result, meta) {
+  if (!hasInstallScript(meta)) return false;
+  const threats = (result && result.threats) || [];
+  for (const t of threats) {
+    if (EGRESS_TYPES.has(t.type)) return false;
+  }
+  return true;
+}
+
 /**
  * Extract ML features from a scan result object.
  *
@@ -190,6 +688,16 @@ function extractFeatures(result, meta) {
     ? Math.round((features.count_total / features.file_count_with_threats) * 100) / 100
     : 0;
 
+  // --- Cluster FP contextual features (v2.10.96) ---
+  features.network_destination_first_party = networkDestinationFirstParty(result, meta) ? 1 : 0;
+  features.install_url_github_releases = installUrlGithubReleases(result) ? 1 : 0;
+  features.bundle_without_install_scripts = bundleWithoutInstallScripts(result, meta) ? 1 : 0;
+  features.git_hook_source_local = gitHookSourceLocal(result) ? 1 : 0;
+  features.typosquat_scoped_package = typosquatScopedPackage(result, meta) ? 1 : 0;
+  features.obfuscation_without_vector = obfuscationWithoutVector(result) ? 1 : 0;
+  features.placeholder_anti_dep_confusion = placeholderAntiDepConfusion(result, meta) ? 1 : 0;
+  features.install_script_no_network_egress = installScriptNoNetworkEgress(result, meta) ? 1 : 0;
+
   return features;
 }
 
@@ -258,5 +766,14 @@ module.exports = {
   extractFeatures,
   buildTrainingRecord,
   TOP_THREAT_TYPES,
-  TOP_THREAT_TYPES_SET
+  TOP_THREAT_TYPES_SET,
+  // Exported for direct unit testing of the cluster-FP helpers.
+  networkDestinationFirstParty,
+  installUrlGithubReleases,
+  bundleWithoutInstallScripts,
+  gitHookSourceLocal,
+  typosquatScopedPackage,
+  obfuscationWithoutVector,
+  placeholderAntiDepConfusion,
+  installScriptNoNetworkEgress
 };

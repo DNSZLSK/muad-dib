@@ -282,8 +282,10 @@ function extractTarballFromDoc(doc) {
     const unpackedSize = (versionData.dist && versionData.dist.unpackedSize) || 0;
     const version = versionData.version || latestTag;
     const scripts = versionData.scripts || {};
+    const homepage = (typeof versionData.homepage === 'string') ? versionData.homepage : '';
+    const description = (typeof versionData.description === 'string') ? versionData.description : '';
 
-    return { version, tarball, unpackedSize, scripts };
+    return { version, tarball, unpackedSize, scripts, homepage, description };
   } catch {
     return null; // Parse failure -> fallback to lazy resolution
   }
@@ -312,7 +314,9 @@ async function getNpmLatestTarball(packageName) {
   const tarball = (data.dist && data.dist.tarball) || null;
   const unpackedSize = (data.dist && data.dist.unpackedSize) || 0;
   const scripts = (data.scripts) || {};
-  return { version, tarball, unpackedSize, scripts };
+  const homepage = (typeof data.homepage === 'string') ? data.homepage : '';
+  const description = (typeof data.description === 'string') ? data.description : '';
+  return { version, tarball, unpackedSize, scripts, homepage, description };
 }
 
 // --- npm polling ---

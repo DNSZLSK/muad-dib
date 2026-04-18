@@ -251,6 +251,23 @@ async function process(threats, targetPath, options, pythonDeps, warnings, scann
     criticalCount, highCount, mediumCount, lowCount
   } = calculateRiskScore(deduped, intentResult);
 
+  // v2.10.96: stat each file that carries a threat and expose sizes on the
+  // scan result. Used by ML cluster-FP features (bundle_without_install_scripts)
+  // to replace the bundle-path-shape proxy with a real ">100KB" check.
+  // Cost: one statSync per unique threatened file (typically <30); same
+  // operation already runs elsewhere in the pipeline (executor.js:251).
+  const fileSizes = {};
+  for (const rel of Object.keys(fileScores)) {
+    if (!rel || rel === '(unknown)' || rel.startsWith('[SANDBOX]')) continue;
+    try {
+      const abs = path.isAbsolute(rel) ? rel : path.join(targetPath, rel);
+      const st = fs.statSync(abs);
+      if (st.isFile()) fileSizes[rel] = st.size;
+    } catch {
+      // File removed between scan and stat, or unreadable: skip silently.
+    }
+  }
+
   // Python scan metadata
   const pythonInfo = pythonDeps.length > 0 ? {
     dependencies: pythonDeps.length,
@@ -276,6 +293,7 @@ async function process(threats, targetPath, options, pythonDeps, warnings, scann
       packageScore,
       mostSuspiciousFile,
       fileScores,
+      fileSizes,
       breakdown
     },
     sandbox: sandboxData,

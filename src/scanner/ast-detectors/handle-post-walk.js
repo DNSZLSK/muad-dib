@@ -90,12 +90,14 @@ function handlePostWalk(ctx) {
       t.file === ctx.relFile && execTypes.includes(t.type)
     );
     if (hasExecInFile) {
-      ctx.threats.push({
+      const t = {
         type: 'binary_dropper',
         severity: 'CRITICAL',
         message: `${ctx.chmodMessage} + exec/spawn in same file — binary dropper pattern.`,
         file: ctx.relFile
-      });
+      };
+      if (ctx.fetchUrls && ctx.fetchUrls.length > 0) t.urls = ctx.fetchUrls.slice();
+      ctx.threats.push(t);
     }
   }
 
@@ -112,22 +114,26 @@ function handlePostWalk(ctx) {
   // Remote code loading: fetch + eval/Function in same file = multi-stage payload
   // Distinct from fetch_decrypt_exec which also requires crypto. This catches SVG/HTML payload extraction.
   if (ctx.hasRemoteFetch && ctx.hasDynamicExec && !ctx.hasCryptoDecipher) {
-    ctx.threats.push({
+    const t = {
       type: 'remote_code_load',
       severity: 'CRITICAL',
       message: 'Remote code loading: network fetch + dynamic eval/Function in same file — multi-stage payload execution.',
       file: ctx.relFile
-    });
+    };
+    if (ctx.fetchUrls && ctx.fetchUrls.length > 0) t.urls = ctx.fetchUrls.slice();
+    ctx.threats.push(t);
   }
 
   // Wave 4: Remote fetch + crypto decrypt + dynamic eval = steganographic payload chain
   if (ctx.hasRemoteFetch && ctx.hasCryptoDecipher && ctx.hasDynamicExec) {
-    ctx.threats.push({
+    const t = {
       type: 'fetch_decrypt_exec',
       severity: 'CRITICAL',
       message: 'Steganographic payload chain: remote fetch + crypto decryption + dynamic execution. No legitimate package uses this pattern.',
       file: ctx.relFile
-    });
+    };
+    if (ctx.fetchUrls && ctx.fetchUrls.length > 0) t.urls = ctx.fetchUrls.slice();
+    ctx.threats.push(t);
   }
 
   // Wave 4: Download-execute-cleanup — https download + chmod executable + execSync + unlink
@@ -142,13 +148,15 @@ function handlePostWalk(ctx) {
   // dominated by other CRITICAL rules, so a MEDIUM tier here had 0 FPR impact.
   // Full validation in data/fp-v2.10.95-validation.md.
   if (ctx.hasRemoteFetch && ctx.hasChmodExecutable && ctx.hasExecSyncCall) {
-    ctx.threats.push({
+    const t = {
       type: 'download_exec_binary',
       severity: ctx.hasHashVerification ? 'HIGH' : 'CRITICAL',
       message: 'Download-execute pattern: remote fetch + chmod executable + execSync in same file.' +
         (ctx.hasHashVerification ? ' Hash verification detected — likely legitimate binary installer.' : ' Binary dropper camouflaged as native addon build.'),
       file: ctx.relFile
-    });
+    };
+    if (ctx.fetchUrls && ctx.fetchUrls.length > 0) t.urls = ctx.fetchUrls.slice();
+    ctx.threats.push(t);
   }
 
   // Wave 4: IDE persistence via content co-occurrence — tasks.json + runOn + writeFileSync
