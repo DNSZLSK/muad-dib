@@ -281,6 +281,10 @@ function analyzeFile(content, filePath, basePath) {
     })) {
       ctx.fetchOnlySafeDomains = true;
     }
+    // v2.10.96: retain the URL set on ctx so post-walk detectors can attach
+    // it to download/install-shaped threats. Consumed by ML feature
+    // install_url_github_releases to avoid regex-on-message proxying.
+    ctx.fetchUrls = urlMatches.slice(0, 32);
   }
 
   walk.simple(ast, {
