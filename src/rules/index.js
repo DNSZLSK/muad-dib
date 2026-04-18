@@ -2276,6 +2276,30 @@ const RULES = {
     ],
     mitre: 'T1070.004'
   },
+  function_runtime_args: {
+    id: 'MUADDIB-AST-090',
+    name: 'Function() with Runtime Identifiers as Arguments',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'new Function() appele avec des identifiants runtime (require, __dirname, __filename, module, exports, process) passes comme arguments string literal, et un corps dynamique (variable, expression). Pattern csec-crypto-toolkit: l\'attaquant injecte le contexte Node complet dans un payload obfusque execute en memoire, contournant la detection require() standard. Aucun package legitime ne passe require + __filename a new Function.',
+    references: [
+      'https://attack.mitre.org/techniques/T1059.007/',
+      'https://attack.mitre.org/techniques/T1027/'
+    ],
+    mitre: 'T1059.007'
+  },
+  external_tarball_dep: {
+    id: 'MUADDIB-PKG-020',
+    name: 'External Tarball Dependency URL',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Dependance declaree avec une URL tarball (.tgz/.tar.gz/.tar.bz2/.zip) hebergee hors des registres npm legitimes (github.com, gitlab.com, bitbucket.org, registry.npmjs.org, registry.yarnpkg.com). Pattern ltidi chain attack (avril 2026): le stub publie sur npm n\'a pas d\'install hook visible, la charge utile est hebergee sur un cloud storage (GCS, S3, CDN) et contourne entierement l\'audit du registre npm. Attention: MT-1 score ceiling (cap non-lifecycle a 35) bypasse via HIGH_CONFIDENCE_MALICE_TYPES.',
+    references: [
+      'https://attack.mitre.org/techniques/T1195.002/',
+      'https://attack.mitre.org/techniques/T1105/'
+    ],
+    mitre: 'T1195.002'
+  },
   version_99_preinstall: {
     id: 'MUADDIB-PKG-019',
     name: 'Dependency Confusion Version Indicator',

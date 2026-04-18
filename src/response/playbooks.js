@@ -886,6 +886,16 @@ const PLAYBOOKS = {
     'CRITIQUE: Execution dynamique de code (eval/new Function/Module._compile) + auto-suppression du fichier execute (unlinkSync/renameSync sur __filename). ' +
     'Pattern anti-forensique professionnel: le malware execute son payload obfusque puis efface ses traces. Campagne csec-crypto-toolkit (avril 2026) exfiltre .env, GITHUB_TOKEN, NPM_TOKEN, AWS/SSH keys vers csec-supply-chain-attack.vercel.app, puis unlinkSync(__filename). ' +
     'Machine compromise si deja installe. Rotation immediate de TOUS les secrets (.env, tokens CI/CD, cles SSH). Verifier les .env des repertoires parents jusqu\'a 6 niveaux. Supprimer le package.',
+
+  function_runtime_args:
+    'CRITIQUE: new Function() appele avec les identifiants runtime Node (require, __dirname, __filename) passes comme arguments string literal + corps dynamique. ' +
+    'Pattern csec-crypto-toolkit: l\'attaquant injecte le contexte Node complet dans un payload obfusque execute en memoire, contournant la detection de require() standard. Aucun package legitime n\'utilise ce pattern. ' +
+    'Lire le contenu de l\'argument body. Tracer la source (souvent XOR/base64 decode). Isoler et supprimer.',
+
+  external_tarball_dep:
+    'CRITIQUE: Dependance declaree avec URL tarball (.tgz/.tar.gz) hebergee hors des registres npm legitimes (github.com, gitlab.com, bitbucket.org, registry.npmjs.org). ' +
+    'Pattern ltidi chain attack (avril 2026): le stub publie sur npm n\'a aucun install hook visible, la charge utile est hebergee sur un cloud storage (GCS, S3, CDN) et contourne entierement l\'audit du registre npm. ' +
+    'Verifier le contenu de la tarball distante avant toute installation. Supprimer le package. Signaler au registre npm.',
 };
 
 function getPlaybook(threatType) {

