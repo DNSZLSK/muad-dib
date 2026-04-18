@@ -63,7 +63,10 @@ const HIGH_CONFIDENCE_MALICE_TYPES = new Set([
   'function_constructor_require',          // new Function.constructor("require") (RCE evasion)
   'newsletter_auto_follow',                // Baileys WhatsApp newsletter hijack
   // v2.10.93: Security review 2026-04-10→17 findings
-  'self_destruct_eval'                     // dynamic exec + unlink __filename (csec anti-forensics)
+  'self_destruct_eval',                    // dynamic exec + unlink __filename (csec anti-forensics)
+  // v2.10.94: MT-1 ceiling bypass for ltidi and csec under-threshold cases
+  'external_tarball_dep',                  // dep URL = tarball on third-party host (ltidi chain)
+  'function_runtime_args'                  // new Function('require','__dirname','__filename',...) pattern (csec)
 ]);
 
 // Lifecycle compound types that indicate real malicious intent beyond a simple postinstall

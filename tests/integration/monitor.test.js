@@ -6499,9 +6499,9 @@ async function runMonitorTests() {
 
   // ===== v2.7.6 C1: High-confidence malice bypass =====
 
-  test('MONITOR: HIGH_CONFIDENCE_MALICE_TYPES contains 23 threat types', () => {
-    assert(HIGH_CONFIDENCE_MALICE_TYPES.size === 23,
-      `Should have 23 types, got ${HIGH_CONFIDENCE_MALICE_TYPES.size}`);
+  test('MONITOR: HIGH_CONFIDENCE_MALICE_TYPES contains 25 threat types', () => {
+    assert(HIGH_CONFIDENCE_MALICE_TYPES.size === 25,
+      `Should have 25 types, got ${HIGH_CONFIDENCE_MALICE_TYPES.size}`);
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('lifecycle_shell_pipe'), 'Missing lifecycle_shell_pipe');
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('fetch_decrypt_exec'), 'Missing fetch_decrypt_exec');
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('download_exec_binary'), 'Missing download_exec_binary');
@@ -6523,6 +6523,9 @@ async function runMonitorTests() {
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('sandbox_known_exfil_domain'), 'Missing sandbox_known_exfil_domain');
     // v2.10.93: Security review 2026-04-10→17 findings
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('self_destruct_eval'), 'Missing self_destruct_eval');
+    // v2.10.94: MT-1 ceiling bypass types
+    assert(HIGH_CONFIDENCE_MALICE_TYPES.has('external_tarball_dep'), 'Missing external_tarball_dep');
+    assert(HIGH_CONFIDENCE_MALICE_TYPES.has('function_runtime_args'), 'Missing function_runtime_args');
   });
 
   test('MONITOR: HIGH_CONFIDENCE_MALICE_TYPES does NOT contain FP-prone types', () => {

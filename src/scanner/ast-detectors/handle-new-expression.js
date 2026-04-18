@@ -11,6 +11,35 @@ const {
 
 function handleNewExpression(node, ctx) {
   if (node.callee.type === 'Identifier' && node.callee.name === 'Function') {
+    // v2.10.94: detect new Function('require', '__dirname', '__filename', <dynamic>)
+    // csec-crypto-toolkit pattern. Gated by obfuscation signal to avoid FP on
+    // legitimate CommonJS module wrappers used by babel-register, ts-node, pirates,
+    // jest, nyc, vitest etc. which call new Function('module', 'exports', 'require',
+    // compiledCode). Those transpilers DO NOT have fromCharCode/base64 decode loops
+    // in the same file — csec does.
+    if (node.arguments.length >= 3) {
+      const RUNTIME_ARG_NAMES = new Set(['require', '__dirname', '__filename', 'module', 'exports', 'process']);
+      const bodyArg = node.arguments[node.arguments.length - 1];
+      const argNameLiterals = node.arguments.slice(0, -1)
+        .map(a => (a.type === 'Literal' && typeof a.value === 'string') ? a.value : null);
+      const runtimeArgCount = argNameLiterals.filter(v => v !== null && RUNTIME_ARG_NAMES.has(v)).length;
+      const bodyIsDynamic = bodyArg.type !== 'Literal';
+      // FP gate: require an obfuscation/decode signal in the same file.
+      // ctx.hasFromCharCode catches XOR/charcode loops (csec).
+      // ctx.hasBase64Decode catches Buffer.from(..., 'base64') patterns.
+      // ctx.hasZlibInflate catches zlib + base64 payloads.
+      const hasObfuscationContext = ctx.hasFromCharCode || ctx.hasBase64Decode || ctx.hasZlibInflate;
+      if (runtimeArgCount >= 2 && bodyIsDynamic && hasObfuscationContext) {
+        ctx.hasDynamicExec = true;
+        ctx.threats.push({
+          type: 'function_runtime_args',
+          severity: 'CRITICAL',
+          message: `new Function() passes runtime identifiers (${argNameLiterals.filter(Boolean).join(', ')}) to a dynamic body in a file containing decode/obfuscation patterns — csec-style obfuscated payload with full Node.js context.`,
+          file: ctx.relFile
+        });
+        return;
+      }
+    }
     // Skip string literal args — zero-risk globalThis polyfills used by every bundler
     if (!hasOnlyStringLiteralArgs(node)) {
       ctx.hasDynamicExec = true;
