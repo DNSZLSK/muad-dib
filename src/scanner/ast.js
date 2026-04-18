@@ -205,10 +205,20 @@ function analyzeFile(content, filePath, basePath) {
     stringBuildVars: new Set(),   // variables assigned from BinaryExpression with '+' (string concat)
     // Audit v3 B2: Entropy split detection — high-entropy string concat + eval/decode
     highEntropyConcatFound: false, // set when a concat chain with >=3 leaves and high combined entropy is found
-    // C10: Hash verification — legitimate binary installers verify checksums
-    // Requires BOTH createHash() call AND .digest() call — false positives from
-    // standalone mentions of 'sha256' or 'integrity' in comments/descriptions
-    hasHashVerification: /\bcreateHash\s*\(/.test(content) && /\.digest\s*\(/.test(content),
+    // C10: Hash verification — legitimate binary installers verify checksums.
+    // v2.10.95: file-level heuristic durcie par un check de comparaison. Requires
+    // createHash+digest AND at least one comparison/assert/throw in the same file.
+    // THIS IS NOT A PROOF that the hash is actually verified — a malicious author
+    // can include a === or assert elsewhere in the file without comparing the
+    // digest result. This gate is best-effort and gains value only through the
+    // triple-gate in handle-post-walk.js (requires also fetchOnlySafeDomains).
+    // Proper fix would require function-scope AST tracking to confirm the
+    // comparison consumes the digest result — deferred until a dedicated
+    // taint-tracking PR.
+    hasHashVerification:
+      /\bcreateHash\s*\(/.test(content) &&
+      /\.digest\s*\(/.test(content) &&
+      /\b(===|!==|\.equals\s*\(|assert\.(strictEqual|equal|deepEqual|deepStrictEqual)\s*\(|\bthrow\b)/.test(content),
     // GlassWorm: variation selector decoder pattern (.codePointAt + 0xFE00/0xE0100)
     hasCodePointAt: false,
     hasVariationSelectorConst: false,

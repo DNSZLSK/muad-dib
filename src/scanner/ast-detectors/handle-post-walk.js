@@ -135,6 +135,12 @@ function handlePostWalk(ctx) {
   // B4: removed fetchOnlySafeDomains guard — compound requires fetch+chmod+exec, which is never legitimate
   // C10: If file also contains hash/checksum verification, downgrade to HIGH — real droppers
   // don't verify payload integrity; legitimate installers (esbuild, sharp) do.
+  // v2.10.95: hasHashVerification is now gated by presence of a comparison operator
+  // in the same file (see ast.js:211 — best-effort heuristic). No additional tier
+  // added: diagnostic on 545 benign packages showed download_exec_binary fires on
+  // only 3 packages (esbuild, yarn, @backstage/create-app) and their final score is
+  // dominated by other CRITICAL rules, so a MEDIUM tier here had 0 FPR impact.
+  // Full validation in data/fp-v2.10.95-validation.md.
   if (ctx.hasRemoteFetch && ctx.hasChmodExecutable && ctx.hasExecSyncCall) {
     ctx.threats.push({
       type: 'download_exec_binary',

