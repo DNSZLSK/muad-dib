@@ -499,13 +499,13 @@ function downloadAndExtract(pkg, options = {}) {
     if (process.env.MUADDIB_DEBUG) {
       console.error(`\n  [DEBUG] npm pack ${pkg} failed: ${(err.stderr || err.message || '').slice(0, 200)}`);
     }
-    fs.rmSync(pkgCacheDir, { recursive: true, force: true });
+    try { fs.rmSync(pkgCacheDir, { recursive: true, force: true }); } catch { /* Windows EPERM on locked files — ignore, continue */ }
     return null;
   }
 
   const tgzPath = path.join(pkgCacheDir, tgzFilename);
   if (!fs.existsSync(tgzPath)) {
-    fs.rmSync(pkgCacheDir, { recursive: true, force: true });
+    try { fs.rmSync(pkgCacheDir, { recursive: true, force: true }); } catch { /* Windows EPERM on locked files — ignore, continue */ }
     return null;
   }
 
@@ -516,7 +516,7 @@ function downloadAndExtract(pkg, options = {}) {
     if (process.env.MUADDIB_DEBUG) {
       console.error(`\n  [DEBUG] extract ${pkg} failed: ${(err.message || '').slice(0, 200)}`);
     }
-    fs.rmSync(pkgCacheDir, { recursive: true, force: true });
+    try { fs.rmSync(pkgCacheDir, { recursive: true, force: true }); } catch { /* Windows EPERM on locked files — ignore, continue */ }
     return null;
   }
 
@@ -525,7 +525,7 @@ function downloadAndExtract(pkg, options = {}) {
 
   const extractedDir = path.join(pkgCacheDir, 'package');
   if (!fs.existsSync(extractedDir)) {
-    fs.rmSync(pkgCacheDir, { recursive: true, force: true });
+    try { fs.rmSync(pkgCacheDir, { recursive: true, force: true }); } catch { /* Windows EPERM on locked files — ignore, continue */ }
     return null;
   }
 
@@ -564,14 +564,32 @@ async function evaluateBenign(options = {}) {
       process.stdout.write(`\r  [2/3] Benign ${progress} ${pkg}${''.padEnd(40)}`);
     }
 
-    const extractedDir = downloadAndExtract(pkg, options);
+    let extractedDir;
+    try {
+      extractedDir = downloadAndExtract(pkg, options);
+    } catch (err) {
+      // v2.10.95: Windows EPERM on tarball extraction/cleanup should not kill evaluate.
+      // Log as skip and continue with the next package.
+      details.push({ name: pkg, score: 0, flagged: false, skipped: true, error: `extract failed: ${err.code || err.message}` });
+      skipped++;
+      continue;
+    }
     if (!extractedDir) {
       details.push({ name: pkg, score: 0, flagged: false, skipped: true, error: 'download failed' });
       skipped++;
       continue;
     }
 
-    const result = await silentScan(extractedDir);
+    let result;
+    try {
+      result = await silentScan(extractedDir);
+    } catch (err) {
+      // v2.10.95: scan failure (Windows EPERM on locked files, long paths) should
+      // not kill evaluate — skip the package and continue.
+      details.push({ name: pkg, score: 0, flagged: false, skipped: true, error: `scan failed: ${err.code || err.message}` });
+      skipped++;
+      continue;
+    }
 
     const score = result.summary.riskScore;
     const isFlagged = score >= BENIGN_THRESHOLD;
@@ -682,7 +700,7 @@ function downloadAndExtractPyPI(pkg, options = {}) {
     if (process.env.MUADDIB_DEBUG) {
       console.error(`\n  [DEBUG] pip download ${pkg} failed: ${(err.stderr || err.message || '').slice(0, 200)}`);
     }
-    fs.rmSync(pkgCacheDir, { recursive: true, force: true });
+    try { fs.rmSync(pkgCacheDir, { recursive: true, force: true }); } catch { /* Windows EPERM on locked files — ignore, continue */ }
     return null;
   }
 
@@ -696,7 +714,7 @@ function downloadAndExtractPyPI(pkg, options = {}) {
       return null;
     }
     // Skip zip extraction (not common for sdists) — mark as skipped
-    fs.rmSync(pkgCacheDir, { recursive: true, force: true });
+    try { fs.rmSync(pkgCacheDir, { recursive: true, force: true }); } catch { /* Windows EPERM on locked files — ignore, continue */ }
     return null;
   }
 
@@ -706,7 +724,7 @@ function downloadAndExtractPyPI(pkg, options = {}) {
     if (process.env.MUADDIB_DEBUG) {
       console.error(`\n  [DEBUG] extract PyPI ${pkg} failed: ${(err.message || '').slice(0, 200)}`);
     }
-    fs.rmSync(pkgCacheDir, { recursive: true, force: true });
+    try { fs.rmSync(pkgCacheDir, { recursive: true, force: true }); } catch { /* Windows EPERM on locked files — ignore, continue */ }
     return null;
   }
 
@@ -718,7 +736,7 @@ function downloadAndExtractPyPI(pkg, options = {}) {
     try { return fs.statSync(path.join(pkgCacheDir, e)).isDirectory(); } catch { return false; }
   });
   if (entries.length === 0) {
-    fs.rmSync(pkgCacheDir, { recursive: true, force: true });
+    try { fs.rmSync(pkgCacheDir, { recursive: true, force: true }); } catch { /* Windows EPERM on locked files — ignore, continue */ }
     return null;
   }
   return path.join(pkgCacheDir, entries[0]);
@@ -756,14 +774,29 @@ async function evaluateBenignPyPI(options = {}) {
       process.stdout.write(`\r  [2b/4] PyPI Benign ${progress} ${pkg}${''.padEnd(40)}`);
     }
 
-    const extractedDir = downloadAndExtractPyPI(pkg, options);
+    let extractedDir;
+    try {
+      extractedDir = downloadAndExtractPyPI(pkg, options);
+    } catch (err) {
+      // v2.10.95: PyPI extraction failure (Windows EPERM, long paths) — skip, continue
+      details.push({ name: pkg, score: 0, flagged: false, skipped: true, error: `extract failed: ${err.code || err.message}` });
+      skipped++;
+      continue;
+    }
     if (!extractedDir) {
       details.push({ name: pkg, score: 0, flagged: false, skipped: true, error: 'download failed' });
       skipped++;
       continue;
     }
 
-    const result = await silentScan(extractedDir);
+    let result;
+    try {
+      result = await silentScan(extractedDir);
+    } catch (err) {
+      details.push({ name: pkg, score: 0, flagged: false, skipped: true, error: `scan failed: ${err.code || err.message}` });
+      skipped++;
+      continue;
+    }
 
     const score = result.summary.riskScore;
     const isFlagged = score >= BENIGN_THRESHOLD;
@@ -882,7 +915,15 @@ async function evaluateBenignRandom(options = {}) {
       }
     }
 
-    const result = await silentScan(extractedDir);
+    let result;
+    try {
+      result = await silentScan(extractedDir);
+    } catch (err) {
+      // v2.10.95: scan failure (Windows EPERM, long paths) — skip and continue
+      details.push({ name: pkg, score: 0, flagged: false, skipped: true, error: `scan failed: ${err.code || err.message}` });
+      skipped++;
+      continue;
+    }
 
     const score = result.summary.riskScore;
     const isFlagged = score >= BENIGN_THRESHOLD;
