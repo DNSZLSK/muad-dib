@@ -46,6 +46,10 @@
 
     <div class="article-content">
 
+      <div class="update-notice">
+        <strong>Mise à jour du 19 avril 2026 :</strong> les chiffres annoncés dans cet article étaient basés sur un corpus pollué par des labels automatiques (44 807 records labellisés <code>clean</code> par le scanner, sans review humaine). La vraie performance mesurée sur un corpus de 302 labels humains est AUC 0.9917, pas 0.999. Voir <a href="quand-le-ml-ne-marche-pas.html">Quand le ML ne marche pas</a> pour la retrospective complète et le pivot vers un post-filtre déterministe en v2.10.97.
+      </div>
+
       <p>Le moniteur MUAD'DIB scanne chaque nouveau package npm en temps réel. Le problème : sur ~10 000-12 000 packages/jour, environ 1400 tombent en zone T1 (score 20-34) et déclenchent une alerte. La plupart sont des faux positifs. Le FPR prod est à 27.3%. Le pipeline rule-based a atteint son plafond.</p>
 
       <p>La solution : un classifier binaire XGBoost qui filtre les FP <strong>avant</strong> le sandbox et le webhook. Pas pour remplacer les règles - pour les compléter là où elles hésitent.</p>

@@ -47,6 +47,10 @@
 
     <div class="article-content">
 
+      <div class="update-notice">
+        <strong>Mise à jour du 19 avril 2026 :</strong> les chiffres annoncés dans cet article étaient basés sur un corpus pollué par des labels automatiques (44 807 records labellisés <code>clean</code> par le scanner, sans review humaine). La vraie performance mesurée sur un corpus de 302 labels humains est AUC 0.9917, pas 0.999. Voir <a href="quand-le-ml-ne-marche-pas.html">Quand le ML ne marche pas</a> pour la retrospective complète et le pivot vers un post-filtre déterministe en v2.10.97.
+      </div>
+
       <p>Le classifier XGBoost de MUAD'DIB tournait en prod depuis mars 2026. 114 arbres, 40 features, seuil 0.52. Il filtrait les faux positifs de la zone T1 (score 20-34). Le problème : son ground truth était circulaire.</p>
 
       <h2>Le cercle vicieux</h2>
