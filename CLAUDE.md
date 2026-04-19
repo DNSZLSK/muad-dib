@@ -19,7 +19,7 @@ Priorites :
 ## Commands
 
 ```bash
-npm test          # Run all tests (custom framework, 3230 tests across 66 files)
+npm test          # Run all tests (custom framework, 3280 tests across 69 files)
 npm run lint      # ESLint with security plugin
 npm run scan      # Self-scan: node bin/muaddib.js scan .
 npm run update    # Download latest IOCs
@@ -56,7 +56,7 @@ For full technical details on each scanner, scoring system, sandbox, IOC system,
 2. Import in `src/index.js`, add to the Promise.all destructuring and the threats spread
 3. Add rule entry in `src/rules/index.js` with id, name, severity, confidence, description, mitre
 4. Add playbook entry in `src/response/playbooks.js`
-5. Add tests in the appropriate test file under `tests/` (66 modular test files)
+5. Add tests in the appropriate test file under `tests/` (69 modular test files)
 6. Create test fixtures in `tests/samples/my-scanner/`
 
 ## Key Constraints
@@ -98,20 +98,20 @@ Never skip documentation updates when publishing a new version.
 - Never commit directly to master
 - Do not create commits automatically — the user handles commits manually
 
-## Current Metrics (v2.10.93)
+## Current Metrics (v2.10.97)
 
 | Metric | Value |
 |--------|-------|
-| Version | **2.10.93** |
-| Tests | **3230** passed, 0 failed, across 66 files |
-| Rules | **207** (202 RULES + 5 PARANOID) |
+| Version | **2.10.97** |
+| Tests | **3280** passed, 0 failed, across 69 files |
+| Rules | **209** (204 RULES + 5 PARANOID) |
 | Scanners | **14** modules (13 parallel + 1 pre-analysis) |
-| TPR@3 (detection rate) | **93.75%** (60/64 ground truth) |
-| TPR@20 (alert rate) | **85.9%** (55/64 ground truth) |
-| FPR rules | **14.0%** (74/532 benign packages) |
-| FPR after ML | **8.3%** (44/529 benign packages) |
-| FPR random | **7.5%** (15/200 random npm packages) |
-| ADR | **96.3%** (103/107 available adversarial + holdout) |
+| TPR@3 (detection rate) | **93.85%** (61/65 ground truth, v2.10.95 metrics) |
+| TPR@20 (alert rate) | **86.2%** (56/65 ground truth, v2.10.95 metrics) |
+| FPR rules (curated, v2.10.95 measure) | **15.6%** (85/545 scanned of 548 benign packages) |
+| FPR after ML (v2.10.95 measure) | **10.28%** (56/545 scanned benign packages) |
+| FPR random (v2.10.95 measure) | **7.0%** (14/200 random npm packages) |
+| ADR | **96.3%** (103/107 available adversarial + holdout, v2.10.95 metrics) |
 
 ## Interdictions
 

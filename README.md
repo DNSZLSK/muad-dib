@@ -30,7 +30,7 @@
 
 npm and PyPI supply-chain attacks are exploding. Shai-Hulud compromised 25K+ repos in 2025. Existing tools detect threats but don't help you respond.
 
-MUAD'DIB combines **14 parallel scanners** (200 detection rules), a **deobfuscation engine**, **inter-module dataflow analysis**, **compound scoring**, **ML classifiers** (XGBoost), and gVisor/Docker sandbox to detect known threats and suspicious behavioral patterns in npm and PyPI packages.
+MUAD'DIB combines **14 parallel scanners** (209 detection rules), a **deobfuscation engine**, **inter-module dataflow analysis**, **compound scoring**, **ML classifiers** (XGBoost), and gVisor/Docker sandbox to detect known threats and suspicious behavioral patterns in npm and PyPI packages.
 
 ---
 
@@ -169,7 +169,7 @@ muaddib scrape                     # Full IOC refresh (~5min)
 muaddib diff HEAD~1                # Compare threats with previous commit
 muaddib init-hooks                 # Pre-commit hooks (husky/pre-commit/git)
 muaddib scan . --breakdown         # Explainable score decomposition
-muaddib replay                     # Ground truth validation (60/64 TPR@3)
+muaddib replay                     # Ground truth validation (61/65 TPR@3)
 ```
 
 ---
@@ -195,7 +195,7 @@ muaddib replay                     # Ground truth validation (60/64 TPR@3)
 | GitHub Actions | Shai-Hulud backdoor detection |
 | Hash Scanner | Known malicious file hashes |
 
-### 200 detection rules
+### 209 detection rules
 
 All rules are mapped to MITRE ATT&CK techniques. See [SECURITY.md](SECURITY.md#detection-rules-v21021) for the complete rules reference.
 
@@ -271,7 +271,7 @@ With pre-commit framework:
 ```yaml
 repos:
   - repo: https://github.com/DNSZLSK/muad-dib
-    rev: v2.10.57
+    rev: v2.10.97
     hooks:
       - id: muaddib-scan
 ```
@@ -285,14 +285,14 @@ repos:
 | **ML FPR** | **2.85%** (239/8,393 holdout) | XGBoost retrained on 56,564 samples, 64 features, threshold=0.710 |
 | **ML TPR** | **99.93%** (2,918/2,920 holdout) | 377 confirmed_malicious via OSSF/GHSA/npm correlation |
 | **Wild TPR** (Datadog 17K) | **92.8%** (13,538/14,587 in-scope) | 17,922 packages. 3,335 skipped (no JS). By category: compromised_lib 97.8%, malicious_intent 92.1% |
-| **TPR@3** (detection rate) | **93.75%** (60/64) | 66 real attacks (64 active, 2 out-of-scope). Threshold=3: any signal |
-| **TPR@20** (alert rate) | **85.9%** (55/64) | Operational alert threshold=20, aligned with ADR/FPR |
-| **FPR rules** (Benign curated) | **14.0%** (74/532) | 532 npm packages, real source via `npm pack` |
-| **FPR after ML** | **8.3%** (44/529) | ML filters 30/31 T1 benign, 0 GT/ADR suppressed |
-| **FPR** (Benign random) | **7.5%** (15/200) | 200 random npm packages, stratified sampling |
+| **TPR@3** (detection rate) | **93.85%** (61/65) | 67 real attacks (65 active, 2 out-of-scope: GT-005 colors, GT-009 faker — protestware with min_threats=0). Threshold=3: any signal |
+| **TPR@20** (alert rate) | **86.2%** (56/65) | Operational alert threshold=20, aligned with ADR/FPR |
+| **FPR rules** (Benign curated, v2.10.95 measure) | **15.6%** (85/545 scanned, 548 total) | npm packages, real source via `npm pack`; v2.10.74 estimated 6-9% reduction did NOT materialize on rebuilt corpus |
+| **FPR after ML** (v2.10.95 measure) | **10.28%** (56/545 scanned) | ML filters 29/30 T1 benign, 0 GT/ADR suppressed |
+| **FPR** (Benign random, v2.10.95 measure) | **7.0%** (14/200) | 200 random npm packages, stratified sampling |
 | **ADR** (Adversarial + Holdout) | **96.3%** (103/107) | 67 adversarial + 40 holdout (107 available on disk), global threshold=20 |
 
-**3230 tests** across 66 files. **207 rules** (202 RULES + 5 PARANOID).
+**3280 tests** across 69 files. **209 rules** (204 RULES + 5 PARANOID).
 
 > **ML retrain methodology (v2.10.51):**
 > - Ground truth: 377 confirmed_malicious via auto-labeler (OSSF malicious-packages, GitHub Advisory Database, npm registry takedown correlation)
@@ -301,7 +301,7 @@ repos:
 > - Leaky feature filter: 23 dead/leaky features removed (source-identity proxies)
 >
 > **Static evaluation caveats:**
-> - TPR measured on 64 active Node.js attack samples (2 out-of-scope from 66 total)
+> - TPR measured on 65 active Node.js attack samples (2 out-of-scope: GT-005 colors, GT-009 faker, both protestware with min_threats=0; from 67 total)
 > - TPR@3 = detection rate (any signal); TPR@20 = operational alert threshold
 > - FPR measured on 532 curated popular npm packages (not a random sample)
 > - ADR measured with global threshold (score >= 20) as of v2.6.5
@@ -340,11 +340,11 @@ npm test
 
 ### Testing
 
-- **3230 tests** across 66 modular test files
+- **3280 tests** across 69 modular test files
 - **56 fuzz tests** - Malformed inputs, ReDoS, unicode, binary
 - **Datadog 17K benchmark** - 14,587 confirmed malware samples (in-scope)
-- **Ground truth validation** - 67 real-world attacks (93.75% TPR@3, 85.9% TPR@20)
-- **False positive validation** - 14.0% FPR rules, 8.3% after ML on 532 curated npm packages, 7.5% on 200 random
+- **Ground truth validation** - 67 real-world attacks (93.85% TPR@3, 86.2% TPR@20 — v2.10.95 measure)
+- **False positive validation** (v2.10.95 measure) - 15.6% FPR rules (85/545 scanned), 10.28% after ML (56/545 scanned), 7.0% on 200 random
 
 ---
 
@@ -361,8 +361,7 @@ npm test
 - [Documentation Index](docs/INDEX.md) - All documentation in one place
 - [Evaluation Methodology](docs/EVALUATION_METHODOLOGY.md) - Experimental protocol, holdout scores
 - [Threat Model](docs/threat-model.md) - What MUAD'DIB detects and doesn't detect
-- [Adversarial Evaluation](ADVERSARIAL.md) - Red team samples and ADR results
-- [Security Policy](SECURITY.md) - Detection rules reference (207 rules)
+- [Security Policy](SECURITY.md) - Detection rules reference (209 rules)
 - [Security Audit](docs/SECURITY_AUDIT.md) - Bypass validation report
 - [FP Analysis](docs/EVALUATION.md) - Historical false positive analysis
 

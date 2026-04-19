@@ -2,15 +2,31 @@
 
 This document consolidates the historical FP audits performed during development. For the full evaluation methodology (TPR, FPR, ADR, holdout protocol), see [EVALUATION_METHODOLOGY.md](EVALUATION_METHODOLOGY.md).
 
-## Current FPR: 14.0% (74/532) — v2.10.57, estimated **6-9% post v2.10.74** (FP cluster fixes)
+## Current FPR: 15.6% measured (85/545 scanned of 548, v2.10.95 metrics file). v2.10.74 estimated 6-9% reduction did NOT materialize on the rebuilt corpus.
 
 > **v2.10.74 (11 Apr 2026)** — FP cluster fixes based on forensic audit of 53,953
 > production alerts on 8,396 high-score packages. 4 structural FP clusters identified
 > and fixed (P1-P4): bundle minified path regex extended, AST-006 dynamic_require
 > source qualification, AST-007 quick-scan degrade + capped bucket, obfuscation
-> scanner WASM/Emscripten artifact skip. Expected improvement: **14.0% → 6-9%**
-> (-5 to -8 points). Actual measurement deferred to post-release sweep on the same
-> benign 532 corpus. See CHANGELOG.md and ARCHITECTURE.md for full details.
+> scanner WASM/Emscripten artifact skip. Expected improvement at the time: **14.0% → 6-9%**
+> (-5 to -8 points).
+
+> **v2.10.95 (18 Apr 2026)** — Actual re-measurement on the 548-package corpus
+> produced **15.6% FPR (85/545 scanned, 3 skipped)**. The estimated 6-9% reduction
+> did NOT materialize: the rebuilt corpus and the FP clusters had drifted enough
+> that the P1-P4 fixes were absorbed by other increases. Measurement is in
+> `metrics/v2.10.95.json`. This is the canonical FPR for v2.10.95.
+
+> **v2.10.97 (19 Apr 2026)** — Contextual FP post-filter F1-F7 in `src/scoring.js`
+> (`applyContextualFPCaps`). 7 deterministic caps wired on the `feature-extractor.js`
+> helpers (bundle without install scripts, GitHub Releases installer, first-party
+> network destination, local git hooks, scoped typosquat, commercial obfuscation
+> without vector, placeholder anti-dep-confusion). Validated on a separate
+> 302-package human-reviewed corpus (198 FP + 104 malware): **67/198 FP capped (33.8 %)**,
+> **0/104 malware impacted**. The 131 remaining FP CRITICAL packages don't match
+> any of the 7 clusters and need a different approach (compound scoring dedup,
+> roadmap v2.10.98+). Full re-measurement of the post-filter on the 548 curated
+> corpus still pending.
 
 ## Historical FPR: 10.8% (57/529) — v2.10.1
 

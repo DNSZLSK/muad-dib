@@ -75,7 +75,7 @@ MUAD'DIB is a Node.js static analyzer. Attacks using exclusively browser APIs (D
 | **polyfill-io** | Script injection via browser CDN | Client-side resource modification, no Node.js code |
 | **trojanized-jquery** | jQuery DOM manipulation | jQuery/DOM browser API, no Node.js API |
 
-Impact on TPR: 46/49 = 93.9% (3 documented and accepted misses).
+Impact on TPR: 61/65 = 93.85% (v2.10.95 measure). 4 misses include the 3 browser-only attacks above plus 1 other. Ground truth expanded to 67 samples in v2.10.74 (react-emits GT-067 added); 65 active samples (2 out-of-scope: GT-005 colors and GT-009 faker, both protestware with min_threats=0).
 
 ### Known Limitations
 
@@ -130,7 +130,7 @@ Impact on TPR: 46/49 = 93.9% (3 documented and accepted misses).
 
 ## Adversarial Testing Results
 
-### Detection rate: 101/107 (94.0% ADR, global threshold=20)
+### Detection rate: 103/107 (96.3% ADR, global threshold=20)
 
 107 available adversarial/holdout evasive samples (67 adversarial + 40 holdout across 7 red team waves + 4 holdout batches) tested with real-world evasion techniques.
 
@@ -146,17 +146,17 @@ Parsers tested with malformed inputs:
 
 Result: **56/56 pass**. No crashes, no uncaught exceptions.
 
-### 1940 unit and integration tests
+### 3280 unit and integration tests
 
 Full coverage of scanners, parsers, IOC matching, typosquatting, CLI integrations, diff, temporal analysis, ground truth, canary tokens, and security (SSRF, injection). 86% code coverage (c8).
 
 ### Ground Truth Validation
 
-51 real-world supply-chain attacks replayed automatically. Detection rate: **93.9%** (46/49 active attacks). Includes event-stream, ua-parser-js, coa, node-ipc, eslint-scope, flatmap-stream, solana-web3js, and 43 more.
+67 real-world supply-chain attacks replayed automatically (65 active, 2 out-of-scope protestware). Detection rate (v2.10.95 measure): **93.85%** (61/65 active attacks, TPR@3) and **86.2%** (56/65, TPR@20 operational threshold). Includes event-stream, ua-parser-js, coa, node-ipc, eslint-scope, flatmap-stream, solana-web3js, react-emits, and 60 more.
 
 ### Datadog 17K Benchmark
 
-Validated against 17,922 real npm malware samples (v2.9.4 benchmark). Wild TPR: **92.5%** (13,486/14,587 in-scope). 3,335 packages skipped (no JS files). By category: compromised_lib **97.8%** (904/924), malicious_intent **92.1%** (12,582/13,663 in-scope).
+Validated against 17,922 real npm malware samples. Wild TPR: **92.8%** (13,538/14,587 in-scope). 3,335 packages skipped (no JS files). By category: compromised_lib **97.8%** (904/924), malicious_intent **92.1%** (12,582/13,663 in-scope).
 
 ## MITRE ATT&CK Mapping
 
@@ -174,7 +174,7 @@ Validated against 17,922 real npm malware samples (v2.9.4 benchmark). Wild TPR: 
 | Ingress Tool Transfer | T1105 | Pattern matching |
 | Data Destruction | T1485 | Pattern matching |
 
-See [SECURITY.md](../SECURITY.md#detection-rules-v262) for the complete 129-rule reference.
+See [SECURITY.md](../SECURITY.md#detection-rules-v21097) for the complete 209-rule reference.
 
 ## Assumptions
 
