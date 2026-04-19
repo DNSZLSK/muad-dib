@@ -1011,8 +1011,110 @@ function calculateRiskScore(deduped, intentResult) {
   };
 }
 
+// ============================================
+// v2.10.97: CONTEXTUAL FP POST-FILTER
+// ============================================
+// Deterministic score caps for packages matching well-known FP clusters.
+// Each feature has 100% precision on 302 human-reviewed packages (zero
+// malware misclassified).  Applied AFTER calculateRiskScore() so that
+// compound boosts and lifecycle floors have already had their say.
+const {
+  bundleWithoutInstallScripts,
+  installUrlGithubReleases,
+  networkDestinationFirstParty,
+  gitHookSourceLocal,
+  typosquatScopedPackage,
+  obfuscationWithoutVector,
+  placeholderAntiDepConfusion,
+} = require('./ml/feature-extractor.js');
+
+/**
+ * Apply contextual FP score caps to a scan result.
+ * Mutates result.summary.riskScore / riskLevel in-place.
+ * Returns array of { feature, cap } describing applied caps (empty if none).
+ */
+function applyContextualFPCaps(result, pkgMeta) {
+  if (!result || !result.summary) return [];
+
+  const meta = {
+    name: pkgMeta && pkgMeta.name,
+    registryMeta: {
+      scripts: (pkgMeta && pkgMeta.scripts) || {},
+      description: (pkgMeta && pkgMeta.description) || '',
+      homepage: (pkgMeta && pkgMeta.homepage) || '',
+      dependencies: (pkgMeta && pkgMeta.dependencies),
+      devDependencies: (pkgMeta && pkgMeta.devDependencies),
+    },
+  };
+
+  const applied = [];
+
+  // F7: placeholder anti-dep-confusion → MAX 20
+  if (placeholderAntiDepConfusion(result, meta)) {
+    applied.push({ feature: 'placeholder_anti_dep_confusion', cap: 20 });
+  }
+  // F1: minified bundle without install scripts → MAX 30
+  if (bundleWithoutInstallScripts(result, meta)) {
+    applied.push({ feature: 'bundle_without_install_scripts', cap: 30 });
+  }
+  // F3: credential destination first-party API → MAX 30
+  if (networkDestinationFirstParty(result, meta)) {
+    applied.push({ feature: 'network_destination_first_party', cap: 30 });
+  }
+  // F2: binary installer from GitHub Releases → MAX 35
+  if (installUrlGithubReleases(result)) {
+    applied.push({ feature: 'install_url_github_releases', cap: 35 });
+  }
+  // F4: git hooks from local source → MAX 35
+  if (gitHookSourceLocal(result)) {
+    applied.push({ feature: 'git_hook_source_local', cap: 35 });
+  }
+  // F6: commercial obfuscation without attack vector → MAX 35
+  if (obfuscationWithoutVector(result)) {
+    applied.push({ feature: 'obfuscation_without_vector', cap: 35 });
+  }
+  // F5: typosquat on scoped package → suppress typosquat points
+  if (typosquatScopedPackage(result, meta)) {
+    applied.push({ feature: 'typosquat_scoped_package', cap: -1 });
+  }
+
+  if (applied.length === 0) return applied;
+
+  // Apply the tightest (lowest) cap
+  const caps = applied.filter(a => a.cap > 0);
+  const lowestCap = caps.length > 0 ? Math.min(...caps.map(a => a.cap)) : Infinity;
+
+  if (lowestCap < result.summary.riskScore) {
+    result.summary.riskScore = lowestCap;
+    result.summary.riskLevel =
+      lowestCap >= _riskThresholds.CRITICAL ? 'CRITICAL'
+        : lowestCap >= _riskThresholds.HIGH ? 'HIGH'
+        : lowestCap >= _riskThresholds.MEDIUM ? 'MEDIUM'
+        : lowestCap > 0 ? 'LOW' : 'SAFE';
+  }
+
+  // F5: subtract typosquat points from score
+  if (applied.find(a => a.feature === 'typosquat_scoped_package')) {
+    const typoPoints = result.threats
+      .filter(t => t.type === 'typosquat_detected' || t.type === 'lifecycle_typosquat')
+      .reduce((s, t) => s + (t.points || 0), 0);
+    if (typoPoints > 0) {
+      result.summary.riskScore = Math.max(0, result.summary.riskScore - typoPoints);
+      const rs = result.summary.riskScore;
+      result.summary.riskLevel =
+        rs >= _riskThresholds.CRITICAL ? 'CRITICAL'
+          : rs >= _riskThresholds.HIGH ? 'HIGH'
+          : rs >= _riskThresholds.MEDIUM ? 'MEDIUM'
+          : rs > 0 ? 'LOW' : 'SAFE';
+    }
+  }
+
+  return applied;
+}
+
 module.exports = {
   SEVERITY_WEIGHTS, RISK_THRESHOLDS, MAX_RISK_SCORE, CONFIDENCE_FACTORS,
   isPackageLevelThreat, computeGroupScore, applyFPReductions, applyCompoundBoosts, calculateRiskScore,
-  applyConfigOverrides, resetConfigOverrides, getSeverityWeights, getRiskThresholds
+  applyConfigOverrides, resetConfigOverrides, getSeverityWeights, getRiskThresholds,
+  applyContextualFPCaps
 };
