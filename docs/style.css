@@ -119,6 +119,20 @@ footer { margin-top: 2rem; padding-top: 0.6rem; border-top: 1px solid #1a1a1a; f
 footer a { color: #333; }
 footer a:hover { color: #555; }
 
+/* Update notice (post-publication corrections) */
+.update-notice {
+  background: #1f1810;
+  border-left: 4px solid #d97706;
+  padding: 0.9rem 1.1rem;
+  margin: 0 0 1.6rem;
+  color: #b8a98c;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.update-notice strong { color: #d97706; }
+.update-notice a { color: #e8b87a; }
+.update-notice a:hover { color: #ffd9a3; }
+
 @media (max-width: 600px) {
   body { padding: 1rem; }
 }
