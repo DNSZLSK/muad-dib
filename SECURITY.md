@@ -68,9 +68,9 @@ Please include the following information in your report:
 - We aim to release fixes before public disclosure
 - We request a 90-day disclosure window for complex issues
 
-## Detection Rules (v2.10.93)
+## Detection Rules (v2.10.97)
 
-MUAD'DIB uses 14 scanner modules (module-graph pre-analysis + 13 parallel scanners) + 5 behavioral anomaly detection features + ground truth validation, producing 207 rule IDs (202 RULES + 5 PARANOID):
+MUAD'DIB uses 14 scanner modules (module-graph pre-analysis + 13 parallel scanners) + 5 behavioral anomaly detection features + ground truth validation, producing 209 rule IDs (204 RULES + 5 PARANOID):
 
 ### AST Scanner
 
@@ -128,6 +128,7 @@ MUAD'DIB uses 14 scanner modules (module-graph pre-analysis + 13 parallel scanne
 | MUADDIB-PKG-014 | Git Dependency RCE (PackageGate) | HIGH |
 | MUADDIB-PKG-015 | .npmrc Git Binary Override | CRITICAL |
 | MUADDIB-PKG-016 | Lifecycle Script Targets Hidden Payload | CRITICAL |
+| MUADDIB-PKG-020 | External Tarball Dependency URL (ltidi pattern, cloud storage non-allowlist) | CRITICAL |
 
 ### AST Scanner (v2.2+)
 
@@ -215,6 +216,7 @@ MUAD'DIB uses 14 scanner modules (module-graph pre-analysis + 13 parallel scanne
 | MUADDIB-AST-087 | process Variable Shadow (const process = {...}) | HIGH | T1036 |
 | MUADDIB-AST-088 | Baileys Newsletter Auto-Follow Hijack | HIGH | T1496 |
 | MUADDIB-AST-089 | Self-Destructing Dynamic Execution (csec pattern) | CRITICAL | T1070.004 |
+| MUADDIB-AST-090 | new Function() with Runtime Args + Obfuscation (csec pattern) | CRITICAL | T1059.007 |
 
 ### AI Config Scanner (v2.2)
 
@@ -469,7 +471,7 @@ MUAD'DIB 2.9 uses a **triple detection approach**:
 
 2. **Behavioral anomaly detection** (v2.0): Analyzes changes between package versions to detect supply-chain attacks before they appear in IOC databases. Compares lifecycle scripts, AST, publish frequency, and maintainer metadata across versions. This approach can detect 0-day behavioral anomalies without any prior knowledge of the specific attack.
 
-3. **Ground truth validation** (v2.1–v2.9.4): Validates detection accuracy against 51 real-world attacks (49 active samples), tracks detection lead times vs. public advisories, and monitors false positive rates over time. 2336 tests across 50 files. Provides observability into scanner effectiveness.
+3. **Ground truth validation** (v2.1–v2.10.95): Validates detection accuracy against 67 real-world attacks (65 active samples; 2 out-of-scope: GT-005 colors and GT-009 faker protestware with min_threats=0), tracks detection lead times vs. public advisories, and monitors false positive rates over time. 3280 tests across 69 files. Current TPR@3: 93.85% (61/65), ADR: 96.3% (103/107). Provides observability into scanner effectiveness.
 
 The behavioral detection features are opt-in (`--temporal-full`) and query the npm registry at scan time. They are particularly effective against:
 - Account takeover attacks (event-stream pattern)

@@ -5,6 +5,149 @@ All notable changes to MUAD'DIB will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.10.97] - 2026-04-19
+
+### Context
+
+Suite logique de v2.10.96 qui a ajoute 8 features ML contextuelles dans
+`feature-extractor.js` mais sans les utiliser pour le scoring : la v2.10.96 etait
+de la pure plomberie (extraire les signaux, les exporter dans les records ML).
+v2.10.97 ferme la boucle en branchant 7 de ces 8 features (F8 reste desactivee,
+voir v2.10.96) directement dans le scoring comme post-filtre deterministe.
+
+L'objectif : caper le score des packages qui matchent un cluster FP a haute
+precision, sans toucher au score des packages malveillants. Le post-filtre est
+applique APRES `calculateRiskScore`, donc les compound boosts et les lifecycle
+floors ont deja eu le dernier mot. Si plusieurs caps s'appliquent au meme
+package, c'est le plus serre (la valeur la plus basse) qui gagne.
+
+### Added — `applyContextualFPCaps()` dans `src/scoring.js`
+
+Sept caps deterministes plumes sur les helpers de `feature-extractor.js`. Chacun
+a ete valide individuellement sur le corpus humain 302 packages (198 FP + 104
+malware) avec **0 malware impacte** comme critere de merge non-negociable.
+
+| Code | Feature | Cap | Rationale |
+|------|---------|-----|-----------|
+| F1 | `bundle_without_install_scripts` | 30 | Bundle minifie publie sans lifecycle = bibliotheque, pas un dropper |
+| F2 | `install_url_github_releases` | 35 | Installer binaire telecharge depuis GitHub Releases = pattern legitime (ex: esbuild, swc) |
+| F3 | `network_destination_first_party` | 30 | Endpoint reseau = scope du package lui-meme (ex: @stripe -> api.stripe.com) |
+| F4 | `git_hook_source_local` | 35 | Git hooks ecrits depuis source locale, pas downloade |
+| F5 | `typosquat_scoped_package` | soustrait points typosquat | Typosquat detecte sur un nom scoped (`@scope/foo`) = false trigger Levenshtein |
+| F6 | `obfuscation_without_vector` | 35 | Obfuscation commerciale (jscrambler, javascript-obfuscator) sans signaux d'attaque |
+| F7 | `placeholder_anti_dep_confusion` | 20 | Package placeholder publie pour bloquer du dependency confusion |
+
+Quand plusieurs caps s'appliquent, la logique est :
+1. F5 est traite separement (il soustrait les points typosquat au score, ne cap pas).
+2. Pour F1-F4, F6, F7 : on prend le `Math.min()` des caps actifs.
+3. Le `riskLevel` est recalcule selon les nouveaux thresholds (CRITICAL/HIGH/MEDIUM/LOW/SAFE).
+
+### Mesure empirique sur corpus humain (302 packages)
+
+Validation faite sur le corpus humain-only (pas de synthetiques, pas
+d'auto-labels). 198 FP humains + 104 malware humains, chacun re-scanne v2.10.96
+puis v2.10.97 et compare.
+
+| Metrique | v2.10.96 | v2.10.97 | Delta |
+|----------|----------|----------|-------|
+| FP cappes (sur 198) | 0 | **67** | +33.8 % |
+| Malware impactes (sur 104) | 0 | **0** | 0 |
+| FP CRITICAL (score >= 80) restants | 198 | 131 | -67 |
+| Malware CRITICAL (score >= 80) | 104 | 104 | inchange |
+
+La couverture de 33.8 % sur les FP est la borne inferieure : seuls les packages
+matchant exactement un des 7 features sont touches. Les 131 FP CRITICAL restants
+ne matchent aucun cluster connu et exigent une approche differente (probablement
+de la dedup compound scoring dans `src/scoring.js`, voir roadmap v2.10.98+).
+
+### Tests
+
+- 3258 -> **3280** tests passes, 0 failed. Tests positifs et negatifs pour chaque
+  cap : pour F1, un bundle minifie sans install scripts cap a 30, mais le meme
+  bundle avec un script `postinstall` malveillant n'est PAS cap (preserve
+  l'escalation). Idem pour F2-F7.
+- Test de composition : un package qui matche F1 et F3 simultanement est cap au
+  min des deux (30, pas 35).
+- Test de regression : sur 67 packages adversariaux (datasets/adversarial/), zero
+  cap applique.
+
+### Notes operationnelles
+
+- Le post-filtre tourne sur le scanner complet ET dans le monitor. Le monitor
+  emet maintenant un champ `summary.contextualCaps[]` quand un ou plusieurs caps
+  s'appliquent, format `[{ feature: 'bundle_without_install_scripts', cap: 30 }]`.
+- Le ML retrain (cible v2.11) utilisera les memes 7 features comme entrees, plus
+  les autres features ML existantes. Le post-filtre v2.10.97 est volontairement
+  deterministe (pas de threshold ML) pour decoupler la stabilisation FPR de la
+  prochaine iteration ML.
+
+## [2.10.96] - 2026-04-18
+
+### Context
+
+Apres la v2.10.95 ou le diagnostic empirique a montre qu'aucun ajustement de
+heuristique ne reduisait significativement le FPR sur les 545 packages benign
+curated, il fallait changer d'approche. Plutot que d'ajouter encore des regles
+de FP reduction au scanner, on commence a construire les **features
+contextuelles** dont le ML aura besoin pour discriminer les clusters FP des
+vrais malwares.
+
+Cette release est de la pure plomberie : 8 features extraites par scan + les
+signaux d'environnement (homepage, fileSizes, threat.urls) propages jusqu'aux
+records ML. Les features sont stockees dans `ml-training*.jsonl` mais ne
+modifient PAS encore le scoring. Le branchement scoring vient en v2.10.97.
+
+### Added — 8 features contextuelles dans `src/ml/feature-extractor.js`
+
+Chaque feature retourne un boolean (cast en 0/1) calculable depuis le scan
+result + les metadonnees du package (npm registry meta, file sizes, scripts).
+
+| ID | Feature key | Cible cluster FP |
+|----|-------------|------------------|
+| F1 | `bundle_without_install_scripts` | Bundles minifies publies sans lifecycle scripts |
+| F2 | `install_url_github_releases` | Installers binaires depuis GitHub Releases (esbuild, swc, sharp) |
+| F3 | `network_destination_first_party` | Endpoint reseau dans le scope du package (api.stripe.com pour @stripe) |
+| F4 | `git_hook_source_local` | Git hooks ecrits depuis source locale (husky, simple-git-hooks) |
+| F5 | `typosquat_scoped_package` | Typosquat sur nom scoped `@scope/foo` (false trigger Levenshtein) |
+| F6 | `obfuscation_without_vector` | Obfuscation commerciale sans signaux d'attaque |
+| F7 | `placeholder_anti_dep_confusion` | Placeholder publie pour bloquer dependency confusion |
+| F8 | `install_script_no_network_egress` | **DESACTIVEE** : EGRESS_TYPES incomplet (manque `dangerous_exec`, `lifecycle_dangerous_exec`, `node_inline_exec`) -> fire sur malwares confirmes |
+
+F8 est volontairement laissee inerte (`features.install_script_no_network_egress = 0`)
+en attente d'un fix de `EGRESS_TYPES` dans une release ulterieure. La validation
+empirique a montre qu'elle classifie comme "install script sans egress reseau"
+des malwares qui exfiltrent via `dangerous_exec` (curl/wget directs), faussant
+le ML retrain. Mieux vaut une feature inactive qu'une feature qui pollue.
+
+### Plomberie
+
+- `src/scanner/npm-registry.js` : extraction de `homepage` depuis le manifest
+  npm pour detection F3 (matching domain vs scope).
+- `src/scanner/ast-detectors/handle-post-walk.js` : ajout de `threat.urls[]`
+  (host extrait de chaque URL detectee) pour cross-ref avec homepage.
+- `src/scanner/ast.js` : passage du contexte au post-walk handler pour acces
+  aux URLs.
+- `src/pipeline/processor.js` : propagation `fileSizes`, `homepage` et
+  `threat.urls` jusqu'au build du record ML.
+- `src/monitor/ingestion.js` : passage des memes signaux au monitor pour
+  ecriture dans `ml-training-monitor.jsonl`.
+
+### Tests
+
+- 3236 -> **3258** tests passes, 0 failed. 22 nouveaux tests dans
+  `tests/unit/ml-feature-extractor.test.js` couvrant les 7 features actives :
+  positif (le cluster FP attendu fire), negatif (un malware ne fire pas),
+  edge cases (URLs malformees, scope vide, fichier de taille zero).
+
+### Notes operationnelles
+
+- Aucun changement de scoring, aucun changement de detection. Les scans v2.10.96
+  produisent les memes scores que v2.10.95 sur tous les packages.
+- Les records ML emis par le monitor incluent maintenant 8 nouvelles colonnes
+  features. Le retrain qui suivra (cible v2.11) consommera ces colonnes.
+- Datasets ML training pre-v2.10.96 n'ont PAS ces features. Le retrain ne pourra
+  donc s'appuyer que sur les scans post-deploy (a partir du 2026-04-18).
+
 ## [2.10.95] - 2026-04-18
 
 ### Context

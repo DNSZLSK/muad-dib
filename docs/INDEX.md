@@ -6,8 +6,7 @@
 |----------|-------------|
 | [README](../README.md) | Project overview, installation, usage |
 | [README.fr.md](README.fr.md) | French version of the README |
-| [SECURITY.md](../SECURITY.md) | Security policy, 200 detection rules reference (canonical source) |
-| [ADVERSARIAL.md](../ADVERSARIAL.md) | Red team adversarial samples and ADR results |
+| [SECURITY.md](../SECURITY.md) | Security policy, 209 detection rules reference (canonical source) |
 | [CHANGELOG.md](../CHANGELOG.md) | Version history and release notes |
 
 ## Technical Documentation
@@ -25,21 +24,21 @@
 |----------|-------------|
 | [Carnet de Bord](CARNET_DE_BORD_MUADDIB.md) | Development journal (French) — project history and decisions |
 
-## Current Metrics (v2.10.93)
+## Current Metrics (v2.10.97)
 
 | Metric | Value |
 |--------|-------|
-| Tests | 3230 across 66 files |
-| Rules | 207 (202 RULES + 5 PARANOID) |
+| Tests | 3280 across 69 files |
+| Rules | 209 (204 RULES + 5 PARANOID) |
 | Scanners | 14 parallel |
-| TPR@3 (Ground Truth) | 93.75% (60/64) |
-| TPR@20 (Ground Truth) | 85.9% (55/64) |
-| FPR rules (Benign curated) | 14.0% (74/532) — **estimated 6-9% post v2.10.74 FP cluster fixes** |
-| FPR after ML | 8.3% (44/529) |
-| FPR (Benign random) | 7.5% (15/200) |
+| TPR@3 (Ground Truth, v2.10.95 measure) | 93.85% (61/65 active) |
+| TPR@20 (Ground Truth, v2.10.95 measure) | 86.2% (56/65 active) |
+| FPR rules (Benign curated, v2.10.95 measure) | **15.6%** (85/545 scanned of 548) — v2.10.74 estimated 6-9% reduction did NOT materialize on rebuilt corpus. Contextual FP post-filter v2.10.97 caps an additional 67/198 FP on a separate 302-package human corpus, 0/104 malware impacted |
+| FPR after ML (v2.10.95 measure) | 10.28% (56/545) |
+| FPR (Benign random, v2.10.95 measure) | 7.0% (14/200) |
 | ADR (Adversarial + Holdout) | 96.3% (103/107) |
 | Wild TPR (Datadog 17K) | 92.8% (13538/14587 in-scope) |
-| Ground truth samples | 67 (added react-emits GT-067 in v2.10.74) |
+| Ground truth samples | 67 (65 active + 2 protestware with min_threats=0; react-emits GT-067 added in v2.10.74) |
 
 ## Architecture Overview
 
@@ -59,7 +58,7 @@ src/
 │   ├── ai-config.js       # AI agent config injection
 │   └── ...                # package, shell, typosquat, dependencies, hash, etc.
 ├── ml/                    # ML classifier (Phase 2)
-├── rules/index.js         # 157 threat rules (MITRE mapped)
+├── rules/index.js         # 209 threat rules (204 RULES + 5 PARANOID, MITRE mapped)
 ├── response/playbooks.js  # Remediation playbooks
 ├── sandbox/               # Docker dynamic analysis
 │   ├── index.js           # Multi-run orchestration [0h, 72h, 7d]
