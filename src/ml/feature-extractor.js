@@ -696,7 +696,11 @@ function extractFeatures(result, meta) {
   features.typosquat_scoped_package = typosquatScopedPackage(result, meta) ? 1 : 0;
   features.obfuscation_without_vector = obfuscationWithoutVector(result) ? 1 : 0;
   features.placeholder_anti_dep_confusion = placeholderAntiDepConfusion(result, meta) ? 1 : 0;
-  features.install_script_no_network_egress = installScriptNoNetworkEgress(result, meta) ? 1 : 0;
+  // F8 disabled for retrain — fires on malware due to incomplete EGRESS_TYPES
+  // (missing dangerous_exec, lifecycle_dangerous_exec, node_inline_exec).
+  // Re-enable in v2.10.97 after EGRESS_TYPES fix + re-validation.
+  // See ml-retrain/ml-auc-v2.10.96.md for details.
+  features.install_script_no_network_egress = 0; // installScriptNoNetworkEgress(result, meta) ? 1 : 0;
 
   return features;
 }

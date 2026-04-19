@@ -3,7 +3,7 @@ const path = require('path');
 const { getRule } = require('../rules/index.js');
 const { getPlaybook } = require('../response/playbooks.js');
 const { computeReachableFiles } = require('../scanner/reachability.js');
-const { applyFPReductions, applyCompoundBoosts, calculateRiskScore, getSeverityWeights } = require('../scoring.js');
+const { applyFPReductions, applyCompoundBoosts, calculateRiskScore, getSeverityWeights, applyContextualFPCaps } = require('../scoring.js');
 const { buildIntentPairs } = require('../intent-graph.js');
 const { debugLog } = require('../utils.js');
 
@@ -100,12 +100,21 @@ async function process(threats, targetPath, options, pythonDeps, warnings, scann
   // Read package name and dependencies for FP reduction heuristics
   let packageName = null;
   let packageDeps = null;
+  let _pkgMeta = null; // v2.10.97: full pkg metadata for contextual FP caps
   try {
     const pkgPath = path.join(targetPath, 'package.json');
     if (fs.existsSync(pkgPath)) {
       const pkgData = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
       packageName = pkgData.name || null;
       packageDeps = pkgData.dependencies || null;
+      _pkgMeta = {
+        name: pkgData.name,
+        scripts: pkgData.scripts || {},
+        description: pkgData.description || '',
+        homepage: pkgData.homepage || (typeof pkgData.repository === 'string' ? pkgData.repository : (pkgData.repository && pkgData.repository.url) || ''),
+        dependencies: pkgData.dependencies,
+        devDependencies: pkgData.devDependencies,
+      };
     }
   } catch { /* graceful fallback */ }
 
@@ -300,6 +309,15 @@ async function process(threats, targetPath, options, pythonDeps, warnings, scann
     warnings: warnings.length > 0 ? warnings : undefined,
     scannerErrors: scannerErrors.length > 0 ? scannerErrors : undefined
   };
+
+  // v2.10.97: contextual FP post-filter — deterministic score caps for
+  // packages matching well-known FP clusters (100% precision, 302 human labels).
+  const fpCaps = applyContextualFPCaps(result, _pkgMeta);
+  if (fpCaps.length > 0) {
+    debugLog('[FP-CAP] ' + (packageName || targetPath) + ': ' +
+      fpCaps.map(c => c.feature + (c.cap > 0 ? '→MAX' + c.cap : '→suppress')).join(', ') +
+      ' → score=' + result.summary.riskScore);
+  }
 
   return {
     result,
