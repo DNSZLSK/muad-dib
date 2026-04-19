@@ -49,9 +49,11 @@
 
       <p>L'article du 5 avril annonçait FPR 11% à 2.85%, TPR 99.93%, AUC 0.999. Ces chiffres étaient faux. Pas inventés : mesurés sur un corpus de validation contenant 44 807 packages labellisés <code>clean</code> par le scanner lui-même, sans supervision externe. Le modèle apprenait à reproduire les décisions du scanner, pas à corriger ses faux positifs.</p>
 
-      <p><strong>Note méthodologique :</strong> MUAD'DIB est un projet où je (Kéwin) définis la direction technique, les décisions architecturales et le scope. Le code est écrit par Claude Code sous supervision. Les reviews de packages sont faites par des agents Claude Code en parallèle sur VPS avec spot-check humain. Je valide les patterns, je décide des pivots, je mesure les résultats. Cette retrospective raconte une session de travail du 18-19 avril où un classifier ML a été remplacé par un post-filtre déterministe.</p>
+      <p><strong>Note méthodologique :</strong> MUAD'DIB est un projet où je définis la direction technique, les décisions architecturales et le scope. Le code est écrit par Claude Code sous supervision. Les reviews de packages sont faites par des agents Claude Code en parallèle sur VPS avec spot-check humain. Je valide les patterns, je décide des pivots, je mesure les résultats. Cette retrospective raconte une session de travail du 18-19 avril où un classifier ML a été remplacé par un post-filtre déterministe.</p>
 
       <h2>Le diagnostic de contamination</h2>
+
+      <p>Le FPR production du scanner restait élevé après les fixes de v2.10.74 (P1-P4 FP cluster fixes basés sur l'audit forensique de 53 953 alertes). Les clusters faciles avaient été capturés. Les FP qui restaient en zone CRITICAL généraient des webhooks Discord P1 qui noyaient les vraies alertes. Avant d'ajouter encore des heuristiques au scanner, il fallait comprendre quels patterns produisaient ces FP résiduels.</p>
 
       <p>La semaine du 10 au 18 avril, le moniteur a flaggé 2 146 packages avec un score &ge; 70. La review a été lancée sur le VPS : plusieurs agents Claude Code en parallèle, chacun ouvre les tarballs, lit le code, classe malware ou FP. Spot-check humain sur 20 packages tirés au hasard (17/20 FP confirmés, 3 reclassés en faveur du verdict d'agent). Première passe sur 1 481 packages, puis review étendue jusqu'à 2 146.</p>
 
@@ -74,7 +76,7 @@
 
       <h2>Les 8 features F1-F8 (v2.10.96)</h2>
 
-      <p>Plutôt que d'ajouter encore 8 heuristiques au scanner, 8 features contextuelles sont implémentées dans <code>src/ml/feature-extractor.js</code>. Chaque feature est un boolean ciblant un cluster :</p>
+      <p>L'approche retenue : au lieu d'ajouter encore 8 heuristiques au scanner (qui finiraient par tirer aussi sur des malwares qui imitent ces patterns), construire 8 features contextuelles pour que le ML puisse les utiliser comme inputs. 8 features contextuelles sont implémentées dans <code>src/ml/feature-extractor.js</code>. Chaque feature est un boolean ciblant un cluster :</p>
 
       <table>
         <tr><th>ID</th><th>Feature</th><th>Cluster</th></tr>
