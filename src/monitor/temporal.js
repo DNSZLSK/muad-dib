@@ -286,7 +286,12 @@ async function runTemporalPublishCheck(packageName, dailyAlerts) {
         }))
       });
 
-      if (dailyAlerts.length < MAX_DAILY_ALERTS) {
+      // Only track in dailyAlerts if at least one HIGH+ anomaly.
+      // publish_burst (LOW) and rapid_succession (MEDIUM) on monorepos
+      // generate thousands of entries/day that never appear in the top
+      // suspects and waste RAM. The JSONL alert above still logs everything.
+      const hasHighAnomaly = result.anomalies.some(a => a.severity === 'HIGH' || a.severity === 'CRITICAL');
+      if (hasHighAnomaly && dailyAlerts.length < MAX_DAILY_ALERTS) {
         dailyAlerts.push({
           name: packageName,
           version: 'N/A',
