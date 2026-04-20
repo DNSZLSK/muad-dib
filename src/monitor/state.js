@@ -20,6 +20,7 @@ const TEMPORAL_DETECTIONS_FILE = path.join(__dirname, '..', '..', 'data', 'tempo
 // --- Alerts/detections persistence limits ---
 const ALERTS_MAX_SIZE = 100 * 1024 * 1024; // 100MB rotation threshold (matches ml-training.jsonl)
 const MAX_DETECTIONS = 10_000;              // Cap detections array — oldest entries discarded
+const MAX_DAILY_ALERTS = 50_000;            // Cap dailyAlerts array — prevents unbounded growth between daily resets
 
 // Local log persistence directories (parallel to Discord webhooks for offline analysis)
 // Primary: logs/ relative to project root. Fallback: /tmp/ if primary is read-only (EROFS/EACCES).
@@ -736,8 +737,9 @@ function loadDailyStats(stats, dailyAlerts) {
       stats.llmSuppressed = data.llmSuppressed || 0;
       stats.changesStreamPackages = data.changesStreamPackages || 0;
       if (Array.isArray(data.dailyAlerts)) {
+        const restored = data.dailyAlerts.slice(-MAX_DAILY_ALERTS);
         dailyAlerts.length = 0;
-        dailyAlerts.push(...data.dailyAlerts);
+        dailyAlerts.push(...restored);
       }
       console.log(`[MONITOR] Restored daily stats: ${stats.scanned} scanned, ${stats.clean} clean, ${stats.suspect} suspect`);
     }
@@ -892,6 +894,7 @@ module.exports = {
   DAILY_STATS_PERSIST_INTERVAL,
   ALERTS_MAX_SIZE,
   MAX_DETECTIONS,
+  MAX_DAILY_ALERTS,
 
   // Mutable state getters/setters
   getScanMemoryCache,

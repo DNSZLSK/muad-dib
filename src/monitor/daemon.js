@@ -57,7 +57,7 @@ const MEMORY_PRESSURE_LEVELS = {
 const MEMORY_THRESHOLD_ELEVATED = 0.75;
 const MEMORY_THRESHOLD_HIGH = 0.85;
 const MEMORY_THRESHOLD_CRITICAL = 0.90;
-const MEMORY_THRESHOLD_EMERGENCY = 0.95;
+const MEMORY_THRESHOLD_EMERGENCY = 0.92;
 // When truncating queue under EMERGENCY, keep the N most recent items.
 // These are the newest packages — most likely to still be on npm for re-scan.
 const EMERGENCY_QUEUE_KEEP = 500;
@@ -743,7 +743,7 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
       const rssMB = (currentMem.rss / 1024 / 1024).toFixed(0);
       const pctUsed = (heapRatio * 100).toFixed(0);
       const levelName = Object.keys(MEMORY_PRESSURE_LEVELS).find(k => MEMORY_PRESSURE_LEVELS[k] === pressureLevel) || 'UNKNOWN';
-      console.log(`[MONITOR] MEMORY: heap=${heapUsedMB}MB/${heapLimitMB}MB (${pctUsed}%), rss=${rssMB}MB, queue=${scanQueue.length}, dedup=${recentlyScanned.size}, downloads=${downloadsCache.size}, alerts=${alertedPackageRules.size}, pressure=${levelName}`);
+      console.log(`[MONITOR] MEMORY: heap=${heapUsedMB}MB/${heapLimitMB}MB (${pctUsed}%), rss=${rssMB}MB, queue=${scanQueue.length}, dedup=${recentlyScanned.size}, downloads=${downloadsCache.size}, alerts=${alertedPackageRules.size}, dailyAlerts=${dailyAlerts.length}, pressure=${levelName}`);
 
       // Graduated response at HIGH+
       if (pressureLevel >= MEMORY_PRESSURE_LEVELS.HIGH) {
@@ -765,12 +765,19 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
       await sendDailyReport(stats, dailyAlerts, recentlyScanned, downloadsCache);
       // Auto-relabel JSONL training data after daily report (once per day).
       // Checks registry takedown status for unconfirmed packages.
+      // Guard: relabel reads the entire JSONL into memory (21-100MB). Skip if
+      // heap is already under pressure — will fire tomorrow instead.
       try {
-        const { relabelDataset } = require('./auto-labeler.js');
-        const summary = await relabelDataset({});
-        const totalRelabeled = summary.relabeled_malicious + summary.relabeled_benign + summary.relabeled_likely_benign;
-        if (totalRelabeled > 0) {
-          console.log(`[MONITOR] Auto-relabel: ${summary.relabeled_malicious} malicious, ${summary.relabeled_benign} benign, ${summary.relabeled_likely_benign} likely_benign (${summary.checked} checked)`);
+        const relabelPressure = computeMemoryPressure();
+        if (relabelPressure.level >= MEMORY_PRESSURE_LEVELS.HIGH) {
+          console.log(`[MONITOR] Auto-relabel SKIPPED: memory pressure at ${(relabelPressure.ratio * 100).toFixed(0)}% — will retry tomorrow`);
+        } else {
+          const { relabelDataset } = require('./auto-labeler.js');
+          const summary = await relabelDataset({});
+          const totalRelabeled = summary.relabeled_malicious + summary.relabeled_benign + summary.relabeled_likely_benign;
+          if (totalRelabeled > 0) {
+            console.log(`[MONITOR] Auto-relabel: ${summary.relabeled_malicious} malicious, ${summary.relabeled_benign} benign, ${summary.relabeled_likely_benign} likely_benign (${summary.checked} checked)`);
+          }
         }
       } catch (err) {
         // Non-fatal: relabel failure must never crash the monitor

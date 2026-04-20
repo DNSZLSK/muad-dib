@@ -56,6 +56,27 @@ const PLATEAU_STREAK_REQUIRED = 2; // must see flat throughput N times before tr
  * @returns {{ target: number, reason: string }}
  */
 function computeTarget(current, queueDepth, stats) {
+  // Priority 0: V8 heap pressure — os.freemem() misses this entirely.
+  // With --max-old-space-size=8192 on a 12GB VPS, system RAM can show 7GB free
+  // while V8 heap is at 90% and GC is thrashing. Use the daemon's circuit breaker
+  // level to gate concurrency before system RAM pressure kicks in.
+  try {
+    const { getMemoryPressureLevel, MEMORY_PRESSURE_LEVELS } = require('./daemon.js');
+    const heapPressure = getMemoryPressureLevel();
+    if (heapPressure >= MEMORY_PRESSURE_LEVELS.HIGH) {
+      const target = clamp(MIN_CONCURRENCY);
+      _prevScanned = stats.scanned || 0;
+      _prevTimeouts = (stats.errorsByType && stats.errorsByType.static_timeout) || 0;
+      return { target, reason: `heap_pressure_high (level=${heapPressure}, dropping to min=${MIN_CONCURRENCY})` };
+    }
+    if (heapPressure >= MEMORY_PRESSURE_LEVELS.ELEVATED) {
+      const target = clamp(Math.min(current, BASE_CONCURRENCY));
+      _prevScanned = stats.scanned || 0;
+      _prevTimeouts = (stats.errorsByType && stats.errorsByType.static_timeout) || 0;
+      return { target, reason: `heap_elevated (level=${heapPressure}, capping at base=${BASE_CONCURRENCY})` };
+    }
+  } catch { /* daemon.js not loaded yet on first tick — proceed with system RAM check */ }
+
   // Use system RAM, not V8 heap ratio (see MEMORY_FREE_THRESHOLD comment above)
   const freeMem = os.freemem();
   const totalMem = os.totalmem();

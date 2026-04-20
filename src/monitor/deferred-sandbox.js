@@ -101,6 +101,23 @@ function enqueueDeferred(item) {
 
   _deferredQueue.push(item);
   _deferredSeen.add(key);
+  // Strip large fields to reduce in-memory footprint.
+  // Keep minimal staticResult for buildAlertData() if sandbox detects something.
+  // Disk persistence already strips staticResult (persistDeferredQueue), this
+  // does the same in-memory — each item drops from ~10-50KB to ~1-2KB.
+  if (item.staticResult) {
+    item.staticResult = {
+      threats: (item.staticResult.threats || []).map(t => ({
+        type: t.type, severity: t.severity, rule_id: t.rule_id, file: t.file
+      })),
+      summary: item.staticResult.summary ? {
+        total: item.staticResult.summary.total,
+        riskScore: item.staticResult.summary.riskScore,
+        maxSeverity: item.staticResult.summary.maxSeverity
+      } : {}
+    };
+  }
+  delete item.npmRegistryMeta;
   // Sort by riskScore DESC (highest first)
   _deferredQueue.sort((a, b) => b.riskScore - a.riskScore);
   console.log(`[DEFERRED] ENQUEUED: ${key} (tier=${item.tier === 2 ? 'T2' : 'T1b'}, score=${item.riskScore}, queue=${_deferredQueue.length})`);
