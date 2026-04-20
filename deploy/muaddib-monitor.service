@@ -10,7 +10,7 @@ User=muaddib
 Group=muaddib
 WorkingDirectory=/opt/muaddib
 ExecStartPre=+/bin/chown -R muaddib:muaddib /opt/muaddib/data /opt/muaddib/logs
-ExecStart=/usr/bin/node --expose-gc --max-old-space-size=3072 src/monitor.js
+ExecStart=/usr/bin/node --expose-gc --max-old-space-size=8192 src/monitor.js
 Restart=always
 RestartSec=10
 StandardOutput=journal

@@ -38,7 +38,8 @@ const {
   tarballCachePath,
   appendAlert,
   getParisHour,
-  hasReportBeenSentToday
+  hasReportBeenSentToday,
+  MAX_DAILY_ALERTS
 } = require('./state.js');
 
 // From ./classify.js
@@ -899,7 +900,9 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
         }
 
         // Record daily alert with post-reputation score for top suspects ranking
-        dailyAlerts.push({ name, version, ecosystem, findingsCount: result.summary.total, score: adjustedResult.summary.riskScore || 0, tier });
+        if (dailyAlerts.length < MAX_DAILY_ALERTS) {
+          dailyAlerts.push({ name, version, ecosystem, findingsCount: result.summary.total, score: adjustedResult.summary.riskScore || 0, tier });
+        }
         // LLM Detective: AI-powered analysis for T1a/T1b suspects
         // Skip for fast-track (large boring packages — LLM analysis adds 10-30s for no value)
         let llmResult = null;

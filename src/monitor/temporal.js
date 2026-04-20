@@ -11,7 +11,7 @@ const { detectSuddenLifecycleChange } = require('../temporal-analysis.js');
 const { detectSuddenAstChanges } = require('../temporal-ast-diff.js');
 const { detectPublishAnomaly } = require('../publish-anomaly.js');
 const { detectMaintainerChange } = require('../maintainer-change.js');
-const { appendAlert } = require('./state.js');
+const { appendAlert, MAX_DAILY_ALERTS } = require('./state.js');
 
 // ---------------------------------------------------------------------------
 // Feature-flag helpers
@@ -190,13 +190,15 @@ async function runTemporalCheck(packageName, dailyAlerts) {
         }))
       });
 
-      dailyAlerts.push({
-        name: packageName,
-        version: result.latestVersion,
-        ecosystem: 'npm',
-        findingsCount: result.findings.length,
-        temporal: true
-      });
+      if (dailyAlerts.length < MAX_DAILY_ALERTS) {
+        dailyAlerts.push({
+          name: packageName,
+          version: result.latestVersion,
+          ecosystem: 'npm',
+          findingsCount: result.findings.length,
+          temporal: true
+        });
+      }
 
       // Webhook deferred — sent after sandbox confirms (see resolveTarballAndScan)
     }
@@ -236,13 +238,15 @@ async function runTemporalAstCheck(packageName, dailyAlerts) {
         }))
       });
 
-      dailyAlerts.push({
-        name: packageName,
-        version: result.latestVersion,
-        ecosystem: 'npm',
-        findingsCount: result.findings.length,
-        temporalAst: true
-      });
+      if (dailyAlerts.length < MAX_DAILY_ALERTS) {
+        dailyAlerts.push({
+          name: packageName,
+          version: result.latestVersion,
+          ecosystem: 'npm',
+          findingsCount: result.findings.length,
+          temporalAst: true
+        });
+      }
 
       // Webhook deferred — sent after sandbox confirms (see resolveTarballAndScan)
     }
@@ -282,13 +286,15 @@ async function runTemporalPublishCheck(packageName, dailyAlerts) {
         }))
       });
 
-      dailyAlerts.push({
-        name: packageName,
-        version: 'N/A',
-        ecosystem: 'npm',
-        findingsCount: result.anomalies.length,
-        temporalPublish: true
-      });
+      if (dailyAlerts.length < MAX_DAILY_ALERTS) {
+        dailyAlerts.push({
+          name: packageName,
+          version: 'N/A',
+          ecosystem: 'npm',
+          findingsCount: result.anomalies.length,
+          temporalPublish: true
+        });
+      }
 
       // Webhook deferred — sent after sandbox confirms (see resolveTarballAndScan)
     }
@@ -329,13 +335,15 @@ async function runTemporalMaintainerCheck(packageName, dailyAlerts) {
         }))
       });
 
-      dailyAlerts.push({
-        name: packageName,
-        version: 'N/A',
-        ecosystem: 'npm',
-        findingsCount: result.findings.length,
-        temporalMaintainer: true
-      });
+      if (dailyAlerts.length < MAX_DAILY_ALERTS) {
+        dailyAlerts.push({
+          name: packageName,
+          version: 'N/A',
+          ecosystem: 'npm',
+          findingsCount: result.findings.length,
+          temporalMaintainer: true
+        });
+      }
 
       // Webhook deferred — sent after sandbox confirms (see resolveTarballAndScan)
     }
