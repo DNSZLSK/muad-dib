@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Packages @athena-ui-components : analyse d'une campagne de dependency confusion revendiquant un programme bug bounty non listé publiquement - MUAD'DIB</title>
+  <meta name="description" content="Analyse de 22 tarballs publiés sous @athena-ui-components, 3 variantes de payload, exfiltration triple canal (HTTP, DNS, Discord), revendication d'un programme YesWeHack DBS Bank non vérifiable publiquement.">
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="article">
+  <meta property="og:title" content="Packages @athena-ui-components : analyse d'une campagne de dependency confusion revendiquant un programme bug bounty non listé publiquement">
+  <meta property="og:description" content="Analyse de 22 tarballs publiés sous @athena-ui-components, 3 variantes de payload, exfiltration triple canal (HTTP, DNS, Discord), revendication d'un programme YesWeHack DBS Bank non vérifiable publiquement.">
+  <meta property="og:image" content="../img/og-default.png">
+  <meta property="og:site_name" content="MUAD'DIB">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="../img/og-default.png">
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="../vendor/github-dark.min.css">
+  <script src="../vendor/highlight.min.js"></script>
+  <script>hljs.highlightAll();</script>
+</head>
+<body>
+
+<nav>
+  <a href="../" class="site-name">muad-dib</a>
+  <a href="../">accueil</a>
+  <a href="./">blog</a>
+  <a href="https://github.com/DNSZLSK/muad-dib" target="_blank" rel="noopener">github</a>
+  <a href="https://www.npmjs.com/package/muaddib-scanner" target="_blank" rel="noopener">npm</a>
+</nav>
+
+<main>
+  <a href="./" class="back-link">&larr; Blog</a>
+
+  <article>
+    <div class="article-meta">
+      <h1>Packages @athena-ui-components : analyse d'une campagne de dependency confusion revendiquant un programme bug bounty non listé publiquement</h1>
+      <span class="date">2026-04-20</span>
+      <div class="tags">
+        <span class="tag">détection</span>
+        <span class="tag">npm</span>
+        <span class="tag">dependency-confusion</span>
+        <span class="tag">oast</span>
+        <span class="tag">bug-bounty</span>
+      </div>
+    </div>
+
+    <div class="article-content">
+
+      <p>Le 14 avril 2026, le moniteur MUAD'DIB archive un premier tarball publié sous le scope npm <code>@athena-ui-components</code> : <code>utils-99.99.99</code>. Les 15 et 16 avril, 21 tarballs supplémentaires sont archivés sur 10 autres packages du même scope. Au total, 22 tarballs ont été conservés, répartis sur 11 noms de packages distincts.</p>
+
+      <p>La description déclarée dans chaque <code>package.json</code> est identique : <code>"Security Research PoC for YesWeHack DBS Bug Bounty Program. THIS IS BENIGN."</code>. La lecture du code contredit cette affirmation : les scripts <code>preinstall</code> et <code>postinstall</code> exécutent un <code>index.js</code> qui collecte des informations sur la machine d'installation et les exfiltre vers trois canaux distincts (HTTP OAST, DNS OAST, webhook Discord), sans mécanisme d'opt-in ni de restriction sur les destinataires.</p>
+
+      <p>Cet article documente les 22 tarballs archivés, les 3 variantes de payload identifiées par hash, la revendication de bug bounty qui les accompagne, et liste les IOCs observés pour faciliter la corrélation avec d'autres jeux de données.</p>
+
+      <h2>Note méthodologique</h2>
+
+      <p>L'analyse byte à byte des tarballs de cette campagne a été réalisée par des agents Claude Code exécutés sur VPS, avec validation humaine des verdicts. Un tarball représentatif par variante a été examiné byte à byte ; les 19 autres ont été extraits et leur <code>index.js</code> haché individuellement pour assignation à l'une des variantes. Trois hashes SHA-256 distincts ressortent, correspondant aux trois variantes documentées plus bas. Les extraits de code et les commentaires cités dans cet article sont issus de la lecture directe des tarballs archivés, pas de reconstruction.</p>
+
+      <h2>Chronologie</h2>
+
+      <ul>
+        <li><strong>2026-04-14</strong> : archivage de <code>utils-99.99.99</code>.</li>
+        <li><strong>2026-04-15</strong> : archivage de 21 tarballs supplémentaires couvrant 10 packages additionnels (deux versions par package pour neuf d'entre eux, une version pour <code>utils</code>).</li>
+        <li><strong>2026-04-20</strong> : au moment de la vérification, les 11 packages retournent HTTP 404 sur <code>registry.npmjs.org</code>. Ce statut est cohérent avec une suppression par l'équipe de sécurité de npm ou un unpublish par l'auteur ; les deux hypothèses ne peuvent pas être départagées avec les éléments dont je dispose.</li>
+      </ul>
+
+      <h2>Packages et versions archivés</h2>
+
+      <table>
+        <tr><th>Package</th><th>Versions archivées</th><th>Date d'archivage</th></tr>
+        <tr><td><code>@athena-ui-components/utils</code></td><td>99.99.99, 99.99.100</td><td>2026-04-14, 2026-04-15</td></tr>
+        <tr><td><code>@athena-ui-components/axios</code></td><td>0.8.16, 0.8.17</td><td>2026-04-15</td></tr>
+        <tr><td><code>@athena-ui-components/dashboard-widget</code></td><td>1.6.17, 1.6.18</td><td>2026-04-15</td></tr>
+        <tr><td><code>@athena-ui-components/deeplink</code></td><td>0.0.41, 0.0.42</td><td>2026-04-15</td></tr>
+        <tr><td><code>@athena-ui-components/graceful-degradation</code></td><td>1.1.26, 1.1.27</td><td>2026-04-15</td></tr>
+        <tr><td><code>@athena-ui-components/helpers</code></td><td>1.1.23, 1.1.24</td><td>2026-04-15</td></tr>
+        <tr><td><code>@athena-ui-components/hooks</code></td><td>0.2.13, 0.2.14</td><td>2026-04-15</td></tr>
+        <tr><td><code>@athena-ui-components/lang</code></td><td>0.1.17, 0.1.18</td><td>2026-04-15</td></tr>
+        <tr><td><code>@athena-ui-components/layout</code></td><td>1.2.23, 1.2.24</td><td>2026-04-15</td></tr>
+        <tr><td><code>@athena-ui-components/pubsub-bridge</code></td><td>0.0.16, 0.0.17</td><td>2026-04-15</td></tr>
+        <tr><td><code>@athena-ui-components/user-activity</code></td><td>1.9.35, 1.9.36</td><td>2026-04-15</td></tr>
+      </table>
+
+      <p>Le numéro <code>99.99.99</code> pour <code>utils</code> est caractéristique d'une tentative de dependency confusion : un attaquant publie sur le registre public une version très élevée d'un nom de package interne, pariant sur une résolution défavorable de la configuration npm chez la cible. La séquence de deux versions publiées à quelques minutes d'intervalle (par exemple <code>0.8.16</code> puis <code>0.8.17</code>) sur neuf des onze packages, le 15 avril, relève vraisemblablement d'une même opération itérative.</p>
+
+      <h2>Les trois variantes du payload</h2>
+
+      <table>
+        <tr><th>Variante</th><th>SHA-256 de index.js</th><th>OAST endpoint</th><th>Branche AD Windows</th><th>Tarballs</th></tr>
+        <tr><td>v1</td><td><code>1231d67f366f1395b048b35225fc84e1f79facb957e22a378786b3b1f876f199</code></td><td><code>d7f0gcli191ibqke3ccgzmskrnqybqmuh.oast.online</code></td><td>non</td><td>1 (<code>utils-99.99.99</code>)</td></tr>
+        <tr><td>v2</td><td><code>3b3788f9ff54135784369806f74612100ce93888ab77aca7edfc8cd265db8930</code></td><td><code>d7fiu1ti191hj9ru0i8gukx3n3accmmdr.oast.pro</code></td><td>oui</td><td>10</td></tr>
+        <tr><td>v3</td><td><code>1e9a5aaa99a1fbcd7e8d2e91e1c873ed8156cd4ad0745d36869587ae9fc0d214</code></td><td><code>d7fiu1ti191hj9ru0i8gukx3n3accmmdr.oast.pro</code></td><td>oui</td><td>11</td></tr>
+      </table>
+
+      <p>v1 est isolée sur le premier tarball archivé et seule à contenir des fichiers annexes (README.md, <code>.vscode/settings.json</code>, <code>scriptbase64.py</code>, <code>logs_dbs.txt</code>), documentés plus bas. v2 et v3 correspondent aux versions publiées le 15 avril : v2 pour la première vague, v3 pour les versions bumped de quelques minutes plus tard et pour <code>utils-99.99.100</code>. La différence principale entre v2 et v3 se situe dans le libellé du titre envoyé au webhook Discord (voir section suivante).</p>
+
+      <h2>Logique commune aux trois variantes</h2>
+
+      <p>Section du <code>package.json</code> commune aux 22 tarballs :</p>
+
+      <pre><code>{
+  "description": "Security Research PoC for YesWeHack DBS Bug Bounty Program. THIS IS BENIGN.",
+  "author": "Security Researcher",
+  "scripts": {
+    "preinstall": "node index.js",
+    "postinstall": "node index.js"
+  }
+}</code></pre>
+
+      <p>Données collectées par les trois variantes au lancement de <code>index.js</code> :</p>
+
+      <ul>
+        <li><code>os.hostname()</code></li>
+        <li><code>os.userInfo().username</code></li>
+        <li><code>process.platform</code> et <code>os.release()</code></li>
+        <li>Première adresse IPv4 non <em>internal</em> retournée par <code>os.networkInterfaces()</code></li>
+        <li><code>process.cwd()</code></li>
+        <li>500 premiers caractères des <em>noms</em> des variables d'environnement (pas les valeurs)</li>
+      </ul>
+
+      <p>v2 et v3 ajoutent une branche exécutée uniquement si <code>process.platform === 'win32'</code>, qui invoque les commandes suivantes pour récupérer des informations de domaine Active Directory :</p>
+
+      <ul>
+        <li><code>wmic computersystem get domain /value</code></li>
+        <li><code>systeminfo | findstr /B /C:"Domain"</code></li>
+        <li><code>whoami /fqdn</code></li>
+        <li><code>powershell Get-CimInstance Win32_ComputerSystem</code></li>
+        <li><code>reg query HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion /v RegisteredOrganization</code></li>
+      </ul>
+
+      <p>Trois canaux d'exfiltration sont utilisés en parallèle, sans négociation ni fallback conditionnel :</p>
+
+      <ol>
+        <li><strong>HTTP GET</strong> vers <code>OAST_HOST/hit?d={base64(JSON)}</code>.</li>
+        <li><strong>DNS</strong> via <code>nslookup</code> vers un sous-domaine construit <code>{hostname}.{username}.OAST_HOST</code>. La résolution DNS sortante n'est généralement pas filtrée par les firewalls de périmètre, ce qui en fait un canal complémentaire à l'HTTP.</li>
+        <li><strong>HTTPS POST</strong> vers un webhook Discord, avec un payload formaté en embed JSON.</li>
+      </ol>
+
+      <p>Le titre de l'embed Discord diffère entre les variantes :</p>
+
+      <ul>
+        <li>v1 : <code>🚨 **DBS BANK - DEPENDENCY CONFUSION CONFIRMED** 🚨</code></li>
+        <li>v3 : <code>🚨 **DBS BANK - DEPENDENCY CONFIRMED** 🚨</code></li>
+      </ul>
+
+      <p>Titre et footer communs aux trois variantes :</p>
+
+      <ul>
+        <li>Title : <code>Proof of Concept - Authorized Execution</code></li>
+        <li>Footer : <code>Authorized DBS Bug Bounty Research</code></li>
+      </ul>
+
+      <h2>La revendication "Security Research PoC for YesWeHack DBS Bug Bounty Program"</h2>
+
+      <p>Le tarball <code>utils-99.99.99</code> (v1) contient un <code>README.md</code> de 285 octets dont le contenu littéral est le suivant :</p>
+
+      <blockquote>This package is created for an authorized Bug Bounty program via YesWeHack (DBS Bank). It contains no malicious code, does not read sensitive data, and only executes permitted diagnostic commands (whoami/hostname) to verify internal routing. If found, please contact the security team.</blockquote>
+
+      <p>L'affirmation "contains no malicious code, does not read sensitive data, and only executes permitted diagnostic commands (whoami/hostname)" est contredite par le code lu dans le même tarball :</p>
+
+      <ul>
+        <li>Le code lit l'IP interne via <code>os.networkInterfaces()</code>, ce qui dépasse <code>whoami</code>/<code>hostname</code>.</li>
+        <li>Le code lit <code>process.cwd()</code> ainsi que les noms des variables d'environnement, qui peuvent révéler des informations contextuelles (ex. <code>DBS_PROD_CI</code>) sur le pipeline ou l'environnement CI.</li>
+        <li>Dans v2 et v3, la branche Windows exécute <code>wmic</code>, <code>systeminfo</code>, <code>whoami /fqdn</code>, <code>powershell Get-CimInstance</code> et <code>reg query</code>, qui sortent du périmètre "whoami/hostname".</li>
+        <li>L'exfiltration est envoyée par défaut à trois destinataires distants, sans restriction sur l'origine des installations.</li>
+      </ul>
+
+      <p>Après consultation des programmes publics <a href="https://yeswehack.com/programs" target="_blank" rel="noopener">YesWeHack</a>, <a href="https://hackerone.com/directory/programs" target="_blank" rel="noopener">HackerOne</a> et <a href="https://bugcrowd.com/engagements" target="_blank" rel="noopener">Bugcrowd</a>, aucun programme bug bounty de DBS Bank n'y est listé. L'existence d'un programme privé non listé publiquement ne peut pas être exclue. Un contact a été envoyé à YesWeHack le 2026-04-17 pour demander une vérification. Aucun retour n'avait été reçu à la date de publication de cet article.</p>
+
+      <p>Indépendamment de l'existence ou non d'un tel programme, publier des packages sur le registre npm public provoque leur exécution via <code>preinstall</code>/<code>postinstall</code> chez n'importe quel tiers qui résoudrait ces noms (accidentellement ou par confusion de scope). Ces tiers ne sont pas parties à un programme bug bounty éventuel, et leur consentement n'est pas recueilli. Ce mode de publication est en dehors du scope de tout programme de recherche de vulnérabilités éthique documenté publiquement, y compris chez YesWeHack, HackerOne et Bugcrowd.</p>
+
+      <h2>Fichiers annexes observés dans v1</h2>
+
+      <p>Le tarball <code>utils-99.99.99</code> contient quatre fichiers au-delà de <code>package.json</code> et <code>index.js</code> :</p>
+
+      <table>
+        <tr><th>Fichier</th><th>Taille</th><th>Observation</th></tr>
+        <tr><td><code>README.md</code></td><td>285 octets</td><td>Revendication bug bounty citée ci-dessus.</td></tr>
+        <tr><td><code>.vscode/settings.json</code></td><td>~54 octets</td><td>Contenu : <code>{"snyk.advanced.autoSelectOrganization": true}</code>. L'extension VS Code Snyk est configurée dans l'environnement de développement de l'auteur du package.</td></tr>
+        <tr><td><code>scriptbase64.py</code></td><td>1781 octets</td><td>Script Python écrit en espagnol. La docstring contient la mention <code>Uso: python3 scriptbase64.py logs_paypal.txt</code>. Le fichier qui accompagne effectivement le script dans le tarball est <code>logs_dbs.txt</code>, pas <code>logs_paypal.txt</code>. Cette observation ne permet pas de conclure sur une opération antérieure.</td></tr>
+        <tr><td><code>logs_dbs.txt</code></td><td>0 octet</td><td>Fichier vide. SHA-256 <code>e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855</code> (hash canonique du fichier vide).</td></tr>
+      </table>
+
+      <p>Ces fichiers annexes semblent être des artefacts de l'environnement de développement de l'auteur, restés dans le tarball publié. v2 et v3 ne les contiennent plus.</p>
+
+      <h2>Observations linguistiques</h2>
+
+      <p>La variante v1 contient plusieurs commentaires en espagnol dans <code>index.js</code>. Citations littérales :</p>
+
+      <pre><code>// --- CONFIGURACIÓN ---
+// 1. RECOLECCIÓN PERMITIDA POR DBS (whoami, hostname, ifconfig equivalentes)
+// Extraemos SOLO LOS NOMBRES de las variables de entorno, NUNCA LOS VALORES.
+// Esto demuestra el contexto (ej. si hay variables como DBS_PROD_CI) sin robar secretos.
+// Equivalente a 'whoami'
+// Equivalente a 'hostname'
+// Equivalente a 'ifconfig' - Solo IP interna
+// EXFILTRACIÓN VÍA HTTP
+// EXFILTRACIÓN VÍA DNS (Excelente para bypassear firewalls de salida)
+// ¡Pon tu webhook bien!
+// Verde, indicando que es seguro</code></pre>
+
+      <p>Le commentaire <code>// ¡Pon tu webhook bien!</code> est placé directement sur la ligne où l'URL du webhook Discord est définie. Le script Python <code>scriptbase64.py</code> est également rédigé en espagnol. Les variantes v2 et v3 ne contiennent plus ces commentaires : le fichier <code>index.js</code> y est dépourvu de commentaires explicatifs.</p>
+
+      <p>Ces observations sont factuelles. Elles ne permettent pas d'attribution géographique, linguistique ou identitaire : des commentaires en espagnol dans du code peuvent provenir de n'importe quel développeur hispanophone sur n'importe quel fuseau horaire, ou avoir été insérés volontairement à des fins de brouillage.</p>
+
+      <h2>Indicateurs de compromission</h2>
+
+      <table>
+        <tr><th>Type</th><th>Valeur</th></tr>
+        <tr><td>Scope npm</td><td><code>@athena-ui-components</code> (11 packages, 22 versions archivées)</td></tr>
+        <tr><td>SHA-256 payload v1</td><td><code>1231d67f366f1395b048b35225fc84e1f79facb957e22a378786b3b1f876f199</code></td></tr>
+        <tr><td>SHA-256 payload v2</td><td><code>3b3788f9ff54135784369806f74612100ce93888ab77aca7edfc8cd265db8930</code></td></tr>
+        <tr><td>SHA-256 payload v3</td><td><code>1e9a5aaa99a1fbcd7e8d2e91e1c873ed8156cd4ad0745d36869587ae9fc0d214</code></td></tr>
+        <tr><td>OAST v1</td><td><code>d7f0gcli191ibqke3ccgzmskrnqybqmuh.oast.online</code> &rarr; <code>178.128.87.9</code></td></tr>
+        <tr><td>OAST v2/v3</td><td><code>d7fiu1ti191hj9ru0i8gukx3n3accmmdr.oast.pro</code> &rarr; <code>178.128.212.209</code></td></tr>
+        <tr><td>Webhook Discord ID</td><td><code>1487009597175890022</code></td></tr>
+        <tr><td>Webhook Discord nom</td><td><code>LasitoBoy_Webhook</code></td></tr>
+        <tr><td>Webhook Discord token (masqué)</td><td><code>DE6xfM-***</code></td></tr>
+        <tr><td>Webhook Discord status (2026-04-20)</td><td>HTTP 200 sur GET public, encore actif</td></tr>
+      </table>
+
+      <p>Les deux endpoints OAST (<code>oast.online</code> et <code>oast.pro</code>) appartiennent à l'infrastructure Interactsh publique, maintenue par le projet <a href="https://github.com/projectdiscovery/interactsh" target="_blank" rel="noopener">ProjectDiscovery</a>, hébergée sur DigitalOcean (AS14061). Interactsh est un service public utilisé indifféremment par des équipes de pentest légitimes et par des acteurs malveillants pour exfiltrer des données via DNS et HTTP. La présence d'un sous-domaine <code>oast.online</code> ou <code>oast.pro</code> ne fait pas d'une campagne une opération autorisée : elle indique seulement que l'opérateur a utilisé l'outil par défaut plutôt que d'héberger son propre collecteur.</p>
+
+      <h2>Campagnes similaires documentées publiquement</h2>
+
+      <p>Plusieurs campagnes antérieures présentent une combinaison comparable (dependency confusion, scope scoped privé, exfiltration via OAST ou webhook, revendication de recherche de sécurité) :</p>
+
+      <ul>
+        <li><a href="https://socket.dev/blog/weaponizing-oast-how-malicious-packages-exploit-npm-pypi-and-rubygems" target="_blank" rel="noopener">Socket, janvier 2025, "Weaponizing OAST"</a> : packages <code>adobe-dcapi-web</code> publiés en version <code>99.99.x</code>, exfiltration vers infrastructure OAST.</li>
+        <li><a href="https://safedep.io/malicious-genoma-ui-npm-dependency-confusion-campaign/" target="_blank" rel="noopener">SafeDep, avril 2026, campagne Genoma UI</a> : <code>@genoma-ui/components</code>, <code>@needl-ai/common</code>, <code>rrweb-v1</code>, publiés par un compte npm <code>victim59</code>, description "benign placeholder".</li>
+        <li><a href="https://snyk.io/blog/npm-dependency-confusion-attack-gxm-reference/" target="_blank" rel="noopener">Snyk, 2022, "gxm-reference-web-auth-server"</a>.</li>
+        <li><a href="https://www.sonatype.com/blog/malicious-dependency-confusion-copycats-exfiltrate-bash-history-and-etc-shadow-files" target="_blank" rel="noopener">Sonatype, 2021, "Malicious dependency confusion copycats"</a>.</li>
+        <li><a href="https://medium.com/@alex.birsan/dependency-confusion-4a5d60fec610" target="_blank" rel="noopener">Alex Birsan, 2021, article fondateur sur la dependency confusion</a>.</li>
+      </ul>
+
+      <p>La campagne <code>@athena-ui-components</code> s'inscrit dans une série documentée de campagnes comparables. Elle se distingue par une revendication explicite et répétée d'un programme bug bounty identifié (YesWeHack, DBS Bank) dans la description des packages, dans le README, et dans le payload Discord. Cette spécificité justifie la vérification auprès de YesWeHack avant toute attribution à une recherche autorisée ou à une opération malveillante déguisée.</p>
+
+      <h2>Actions entreprises</h2>
+
+      <ul>
+        <li><strong>2026-04-14</strong> : archivage automatique du premier tarball par le moniteur MUAD'DIB.</li>
+        <li><strong>2026-04-15</strong> : archivage automatique des 21 tarballs supplémentaires.</li>
+        <li><strong>2026-04-15 à 2026-04-20</strong> : examen manuel des trois variantes de payload (hash distincts) et lecture byte à byte de <code>utils-99.99.99</code>, <code>axios-0.8.16</code> et <code>axios-0.8.17</code> (un tarball représentatif par variante). Les 19 autres tarballs ont été extraits et leur <code>index.js</code> haché pour assignation à l'une des trois variantes.</li>
+        <li><strong>2026-04-17</strong> : envoi d'un courriel à <code>contact@yeswehack.com</code> pour vérifier l'existence d'un programme DBS Bank chez YesWeHack et l'autorisation éventuelle de la publication. Aucun retour reçu à la date de publication.</li>
+        <li><strong>2026-04-20</strong> : vérification HTTP sur <code>registry.npmjs.org</code>. Les 11 packages retournent HTTP 404. Ce statut est cohérent avec une suppression par l'équipe de sécurité de npm ou un unpublish par l'auteur.</li>
+      </ul>
+
+      <h2>Limites de cette analyse</h2>
+
+      <ul>
+        <li>Trois tarballs ont été examinés byte à byte (<code>utils-99.99.99</code>, <code>axios-0.8.16</code>, <code>axios-0.8.17</code>), un par variante de payload. Les 19 autres tarballs ont été extraits et leur <code>index.js</code> haché pour comparaison avec les trois variantes connues. Les autres fichiers présents (par exemple les <code>package.json</code> individuels et d'éventuels fichiers annexes spécifiques à certaines versions) n'ont pas été examinés exhaustivement sur l'ensemble des 22 tarballs.</li>
+        <li>L'identité de l'opérateur est inconnue. Les commentaires en espagnol dans v1, le nom du webhook (<code>LasitoBoy_Webhook</code>) et la référence à <code>logs_paypal.txt</code> dans la docstring du script Python ne permettent pas d'attribution fiable.</li>
+        <li>MUAD'DIB est un scanner en cours de développement. Cette analyse n'a pas été revue par des pairs externes à la date de publication.</li>
+        <li>Aucune confirmation ou infirmation de l'existence d'un programme DBS Bank autorisé n'a été obtenue auprès de YesWeHack au moment de la publication.</li>
+      </ul>
+
+      <h2>Conclusion</h2>
+
+      <p>La campagne <code>@athena-ui-components</code> se compose de 11 packages et 22 tarballs, déclinant 3 variantes de payload qui exfiltrent via HTTP OAST, DNS OAST et webhook Discord. Chaque tarball revendique une autorisation de bug bounty YesWeHack pour DBS Bank, revendication qui n'a pu être vérifiée publiquement et qui est en toute hypothèse indépendante du fait que l'exécution a lieu chez des tiers non consentants. Au 2026-04-20, les 11 packages sont inaccessibles sur <code>registry.npmjs.org</code>.</p>
+
+      <p>Les IOCs listés ci-dessus sont publiés pour faciliter la corrélation avec d'autres jeux de données. Cet article sera mis à jour si un retour de YesWeHack ou une information complémentaire modifie le tableau présenté.</p>
+
+      <p><em>Dernière vérification : 2026-04-20. Dernier contact YesWeHack : 2026-04-17, sans retour.</em></p>
+
+    </div>
+  </article>
+</main>
+
+<footer>
+  MUAD'DIB / DNSZLSK / <a href="https://github.com/DNSZLSK/muad-dib" target="_blank" rel="noopener">source</a>
+</footer>
+
+</body>
+</html>
