@@ -5,7 +5,7 @@ const os = require('os');
 const v8 = require('v8');
 const { isDockerAvailable, SANDBOX_CONCURRENCY_MAX } = require('../sandbox/index.js');
 const { setVerboseMode, isSandboxEnabled, isCanaryEnabled, isLlmDetectiveEnabled, getLlmDetectiveMode, DOWNLOADS_CACHE_TTL } = require('./classify.js');
-const { loadState, saveState, loadDailyStats, saveDailyStats, purgeTarballCache, getParisHour, atomicWriteFileSync, saveNpmSeq, ALERTS_FILE } = require('./state.js');
+const { loadState, saveState, loadDailyStats, saveDailyStats, purgeTarballCache, getParisHour, atomicWriteFileSync, saveNpmSeq, ALERTS_FILE, runStateMigrations } = require('./state.js');
 const { isTemporalEnabled, isTemporalAstEnabled, isTemporalPublishEnabled, isTemporalMaintainerEnabled } = require('./temporal.js');
 const { pendingGrouped, flushScopeGroup, sendDailyReport, DAILY_REPORT_HOUR, alertedPackageRules } = require('./webhook.js');
 const { poll } = require('./ingestion.js');
@@ -14,6 +14,12 @@ const { computeTarget, ADJUST_INTERVAL_MS, BASE_CONCURRENCY, resetDeltas } = req
 const { startHealthcheck } = require('./healthcheck.js');
 const { startDeferredWorker, stopDeferredWorker, persistDeferredQueue, restoreDeferredQueue, clearDeferredQueue } = require('./deferred-sandbox.js');
 const { clearMetadataCache } = require('../scanner/temporal-analysis.js');
+// Caches not previously cleared by handleMemoryPressure (OOM fix). These live
+// in the main thread and are populated by temporal-ast-diff and the typosquat
+// scanner, neither of which runs in the static-scan worker.
+const { clearMetadataCache: clearTyposquatMetadataCache } = require('../scanner/typosquat.js');
+const { clearFileListCache } = require('../utils.js');
+const { clearASTCache } = require('../shared/constants.js');
 
 const POLL_INTERVAL = 60_000;
 const PROCESS_LOOP_INTERVAL = 2_000;    // Queue check interval when empty
@@ -401,6 +407,13 @@ function handleMemoryPressure(level, ratio, recentlyScanned, downloadsCache, sca
     console.error(`[MONITOR] MEMORY PRESSURE CRITICAL: heap at ${pct}% — stopping ingestion, clearing scanner caches`);
     // temporal-analysis._metadataCache (200 entries × full npm registry metadata)
     try { clearMetadataCache(); } catch {}
+    // typosquat metadataCache (500 entries × npm registry metadata for typosquat scoring)
+    try { clearTyposquatMetadataCache(); } catch {}
+    // utils._fileListCache, utils._fileContentCache, shared/constants._astCache
+    // — populated by temporal-ast-diff (main-thread tarball download + AST parse).
+    // Each AST entry can be MB-sized for bundled outputs.
+    try { clearFileListCache(); } catch {}
+    try { clearASTCache(); } catch {}
     // pendingGrouped webhook buffers
     for (const [scope, group] of pendingGrouped) {
       clearTimeout(group.timer);
@@ -566,6 +579,13 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
 
   // External healthcheck (Healthchecks.io) — sends /start ping now, heartbeat every 10 min
   const healthcheck = startHealthcheck();
+
+  // OOM fix: convert legacy detections.json / temporal-detections.json into
+  // append-only JSONL on first boot after upgrade. Idempotent and safe to call
+  // every boot (skips when JSONL already exists).
+  try { runStateMigrations(); } catch (err) {
+    console.error(`[MONITOR] runStateMigrations failed: ${err.message}`);
+  }
 
   const state = loadState(stats);
   loadDailyStats(stats, dailyAlerts); // Restore counters from previous run (survives restarts)
