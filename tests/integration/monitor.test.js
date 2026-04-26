@@ -30,7 +30,7 @@ async function runMonitorTests() {
     isCanaryEnabled, buildCanaryExfiltrationWebhookEmbed,
     getTemporalMaxSeverity, isPublishAnomalyOnly,
     isVerboseMode, setVerboseMode, hasIOCMatch, matchVersionedIOC, IOC_MATCH_TYPES,
-    DETECTIONS_FILE, appendDetection, loadDetections, getDetectionStats,
+    DETECTIONS_FILE, appendDetection, loadDetections, getDetectionStats, _resetDetectionState,
     SCAN_STATS_FILE, loadScanStats, updateScanStats,
     buildReportFromDisk, buildReportEmbedFromDisk, getReportStatus,
     buildAlertData, trySendWebhook, classifyError, recordError, formatErrorBreakdown,
@@ -2048,18 +2048,20 @@ async function runMonitorTests() {
   });
 
   test('MONITOR: appendDetection deduplicates same name@version', () => {
-    // Use the actual appendDetection function — it writes to DETECTIONS_FILE
-    // We need to ensure it doesn't exist before, then clean up after
+    // Use the actual appendDetection function — it writes to DETECTIONS_FILE.
+    // Detections moved to JSONL append-only since the OOM fix; reset the
+    // module-level dedup Set so leftover state from earlier tests does not
+    // cause a false positive dedup.
     const backupExists = fs.existsSync(DETECTIONS_FILE);
     let backup = null;
     if (backupExists) {
       backup = fs.readFileSync(DETECTIONS_FILE, 'utf8');
     }
     try {
-      // Clear the file
       const dir = path.dirname(DETECTIONS_FILE);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(DETECTIONS_FILE, JSON.stringify({ detections: [] }), 'utf8');
+      try { fs.unlinkSync(DETECTIONS_FILE); } catch {}
+      _resetDetectionState();
 
       appendDetection('dedup-pkg', '2.0.0', 'npm', ['eval'], 'HIGH');
       appendDetection('dedup-pkg', '2.0.0', 'npm', ['eval', 'obfuscation'], 'CRITICAL');
@@ -2073,6 +2075,7 @@ async function runMonitorTests() {
       } else {
         try { fs.unlinkSync(DETECTIONS_FILE); } catch {}
       }
+      _resetDetectionState();
     }
   });
 
@@ -2103,12 +2106,9 @@ async function runMonitorTests() {
     try {
       const dir = path.dirname(DETECTIONS_FILE);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      const testData = {
-        detections: [
-          { package: 'a', version: '1.0.0', ecosystem: 'npm', first_seen_at: '2026-01-01T00:00:00.000Z', findings: ['eval'], severity: 'HIGH', advisory_at: null, lead_time_hours: null }
-        ]
-      };
-      fs.writeFileSync(DETECTIONS_FILE, JSON.stringify(testData), 'utf8');
+      // JSONL: one detection per line.
+      const entry = { package: 'a', version: '1.0.0', ecosystem: 'npm', first_seen_at: '2026-01-01T00:00:00.000Z', findings: ['eval'], severity: 'HIGH', advisory_at: null, lead_time_hours: null };
+      fs.writeFileSync(DETECTIONS_FILE, JSON.stringify(entry) + '\n', 'utf8');
       const data = loadDetections();
       assert(data.detections.length === 1, 'Should have 1 detection');
       assert(data.detections[0].package === 'a', 'Package should be a');
@@ -2130,14 +2130,12 @@ async function runMonitorTests() {
     try {
       const dir = path.dirname(DETECTIONS_FILE);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      const testData = {
-        detections: [
-          { package: 'a', version: '1.0.0', ecosystem: 'npm', findings: ['eval'], severity: 'CRITICAL', advisory_at: null, lead_time_hours: null },
-          { package: 'b', version: '2.0.0', ecosystem: 'pypi', findings: ['shell'], severity: 'HIGH', advisory_at: null, lead_time_hours: null },
-          { package: 'c', version: '1.0.0', ecosystem: 'npm', findings: ['obfuscation'], severity: 'CRITICAL', advisory_at: null, lead_time_hours: null }
-        ]
-      };
-      fs.writeFileSync(DETECTIONS_FILE, JSON.stringify(testData), 'utf8');
+      const entries = [
+        { package: 'a', version: '1.0.0', ecosystem: 'npm', findings: ['eval'], severity: 'CRITICAL', advisory_at: null, lead_time_hours: null },
+        { package: 'b', version: '2.0.0', ecosystem: 'pypi', findings: ['shell'], severity: 'HIGH', advisory_at: null, lead_time_hours: null },
+        { package: 'c', version: '1.0.0', ecosystem: 'npm', findings: ['obfuscation'], severity: 'CRITICAL', advisory_at: null, lead_time_hours: null }
+      ];
+      fs.writeFileSync(DETECTIONS_FILE, entries.map(e => JSON.stringify(e)).join('\n') + '\n', 'utf8');
       const s = getDetectionStats();
       assert(s.total === 3, 'Total should be 3, got ' + s.total);
       assert(s.bySeverity.CRITICAL === 2, 'CRITICAL should be 2');
@@ -2163,14 +2161,12 @@ async function runMonitorTests() {
     try {
       const dir = path.dirname(DETECTIONS_FILE);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      const testData = {
-        detections: [
-          { package: 'a', version: '1.0.0', ecosystem: 'npm', findings: ['eval'], severity: 'HIGH', advisory_at: '2026-01-02T00:00:00.000Z', lead_time_hours: 24 },
-          { package: 'b', version: '1.0.0', ecosystem: 'npm', findings: ['shell'], severity: 'CRITICAL', advisory_at: '2026-01-03T00:00:00.000Z', lead_time_hours: 48 },
-          { package: 'c', version: '1.0.0', ecosystem: 'pypi', findings: ['obfuscation'], severity: 'MEDIUM', advisory_at: null, lead_time_hours: null }
-        ]
-      };
-      fs.writeFileSync(DETECTIONS_FILE, JSON.stringify(testData), 'utf8');
+      const entries = [
+        { package: 'a', version: '1.0.0', ecosystem: 'npm', findings: ['eval'], severity: 'HIGH', advisory_at: '2026-01-02T00:00:00.000Z', lead_time_hours: 24 },
+        { package: 'b', version: '1.0.0', ecosystem: 'npm', findings: ['shell'], severity: 'CRITICAL', advisory_at: '2026-01-03T00:00:00.000Z', lead_time_hours: 48 },
+        { package: 'c', version: '1.0.0', ecosystem: 'pypi', findings: ['obfuscation'], severity: 'MEDIUM', advisory_at: null, lead_time_hours: null }
+      ];
+      fs.writeFileSync(DETECTIONS_FILE, entries.map(e => JSON.stringify(e)).join('\n') + '\n', 'utf8');
       const s = getDetectionStats();
       assert(s.leadTime !== null, 'leadTime should not be null');
       assert(s.leadTime.count === 2, 'leadTime count should be 2');

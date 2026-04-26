@@ -405,14 +405,17 @@ async function runMonitorMemoryTests() {
 
   // ─── Bug fix: detections cap ───
 
-  test('BUG2b: detections.json has MAX_DETECTIONS cap', () => {
+  test('BUG2b: detections JSONL has MAX_DETECTIONS cap', () => {
     const stateSource = fs.readFileSync(
       path.join(__dirname, '..', '..', 'src', 'monitor', 'state.js'), 'utf8'
     );
     assertIncludes(stateSource, 'MAX_DETECTIONS', 'state.js should define MAX_DETECTIONS');
     assert(typeof MAX_DETECTIONS === 'number', 'MAX_DETECTIONS should be exported');
     assert(MAX_DETECTIONS === 10_000, `MAX_DETECTIONS should be 10000, got ${MAX_DETECTIONS}`);
-    assertIncludes(stateSource, 'slice(-MAX_DETECTIONS)', 'appendDetection should cap with slice');
+    // Post OOM-fix: cap is enforced by _compactDetectionsJsonl (called from
+    // appendDetection on a counter trigger) instead of slice() on every write.
+    assertIncludes(stateSource, '_compactDetectionsJsonl', 'state.js should define the JSONL compactor');
+    assertIncludes(stateSource, 'total <= MAX_DETECTIONS', 'compaction should short-circuit below cap');
   });
 
   // ─── Bug fix: temporal findings trimmed ───

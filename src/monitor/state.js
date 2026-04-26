@@ -11,16 +11,26 @@ const { sanitizePackageName } = require('../shared/download.js');
 
 const STATE_FILE = path.join(__dirname, '..', '..', 'data', 'monitor-state.json');
 const ALERTS_FILE = path.join(__dirname, '..', '..', 'data', 'monitor-alerts.jsonl');
-const DETECTIONS_FILE = path.join(__dirname, '..', '..', 'data', 'detections.json');
+// Detections + temporal detections are append-only JSONL since the OOM fix.
+// Legacy *.json files are migrated once at boot via runStateMigrations() and
+// kept as *.json.migrated for forensic recovery (no longer read by the monitor).
+const DETECTIONS_FILE = path.join(__dirname, '..', '..', 'data', 'detections.jsonl');
+const DETECTIONS_FILE_LEGACY = path.join(__dirname, '..', '..', 'data', 'detections.json');
 const SCAN_STATS_FILE = path.join(__dirname, '..', '..', 'data', 'scan-stats.json');
 const LAST_DAILY_REPORT_FILE = path.join(__dirname, '..', '..', 'data', 'last-daily-report.json');
 const DAILY_STATS_FILE = path.join(__dirname, '..', '..', 'data', 'daily-stats.json');
-const TEMPORAL_DETECTIONS_FILE = path.join(__dirname, '..', '..', 'data', 'temporal-detections.json');
+const TEMPORAL_DETECTIONS_FILE = path.join(__dirname, '..', '..', 'data', 'temporal-detections.jsonl');
+const TEMPORAL_DETECTIONS_FILE_LEGACY = path.join(__dirname, '..', '..', 'data', 'temporal-detections.json');
 
 // --- Alerts/detections persistence limits ---
 const ALERTS_MAX_SIZE = 100 * 1024 * 1024; // 100MB rotation threshold (matches ml-training.jsonl)
-const MAX_DETECTIONS = 10_000;              // Cap detections array — oldest entries discarded
+const MAX_DETECTIONS = 10_000;              // Cap detections JSONL — older entries pruned at compaction
+const MAX_TEMPORAL_DETECTIONS = 1000;       // Cap temporal detections JSONL — pruned at compaction
 const MAX_DAILY_ALERTS = 50_000;            // Cap dailyAlerts array — prevents unbounded growth between daily resets
+// Append count between automatic compactions. Compaction is O(file size) so we
+// avoid running it on every append. With 350 detections/h on the VPS, a value
+// of 100 means ~17 min between compactions, acceptable overhead for the fix.
+const DETECTION_COMPACT_INTERVAL = 100;
 
 // Local log persistence directories (parallel to Discord webhooks for offline analysis)
 // Primary: logs/ relative to project root. Fallback: /tmp/ if primary is read-only (EROFS/EACCES).
@@ -91,6 +101,13 @@ let scanMemoryCache = null;
 let tarballCacheIndex = null;
 let scansSinceLastPersist = 0;
 let scansSinceLastMemoryPersist = 0;
+
+// Detection JSONL state (OOM fix — see runStateMigrations).
+// In-memory dedup Set replaces the previous "JSON.parse(file).some(...)" lookup
+// that allocated ~15 MB of transient objects per appendDetection call.
+let _detectionDedupSet = null;          // Set<"package@version">, lazy-init from JSONL
+let _detectionsAppendedSinceCompact = 0; // counter for lazy compaction trigger
+let _temporalAppendedSinceCompact = 0;
 
 // --- Mutable state getters/setters ---
 
@@ -439,7 +456,83 @@ function purgeTarballCache() {
   }
 }
 
-// --- Temporal detections ---
+// --- JSONL streaming helper (OOM fix — keeps memory bounded for large files) ---
+
+/**
+ * Iterate JSONL lines from a file using chunked sync reads. Avoids loading the
+ * full file into memory (which is what the previous read-modify-write pattern
+ * did and what triggered the V8 OOM under 16-worker concurrency).
+ *
+ * Bad lines are silently skipped (the file is human-edited only in incidents).
+ * The callback may return `false` to stop iteration early.
+ *
+ * @param {string} filePath
+ * @param {(entry:object) => boolean|void} callback
+ */
+function _iterateJsonlSync(filePath, callback) {
+  if (!fs.existsSync(filePath)) return;
+  const BUF_SIZE = 64 * 1024;
+  const fd = fs.openSync(filePath, 'r');
+  const buf = Buffer.alloc(BUF_SIZE);
+  let leftover = '';
+  try {
+    while (true) {
+      const bytesRead = fs.readSync(fd, buf, 0, BUF_SIZE, null);
+      if (bytesRead === 0) break;
+      const chunk = leftover + buf.slice(0, bytesRead).toString('utf8');
+      const lines = chunk.split('\n');
+      leftover = lines.pop() || '';
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        let entry;
+        try { entry = JSON.parse(line); } catch { continue; }
+        if (callback(entry) === false) return;
+      }
+    }
+    if (leftover.trim()) {
+      try {
+        const entry = JSON.parse(leftover);
+        callback(entry);
+      } catch { /* trailing partial line — ignore */ }
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+/**
+ * Count newline-terminated lines without parsing JSON. Used by compaction to
+ * skip the rewrite path when the file is already under the cap.
+ */
+function _countJsonlLines(filePath) {
+  if (!fs.existsSync(filePath)) return 0;
+  const BUF_SIZE = 64 * 1024;
+  const fd = fs.openSync(filePath, 'r');
+  const buf = Buffer.alloc(BUF_SIZE);
+  let count = 0;
+  let endsWithNewline = false;
+  try {
+    while (true) {
+      const bytesRead = fs.readSync(fd, buf, 0, BUF_SIZE, null);
+      if (bytesRead === 0) break;
+      for (let i = 0; i < bytesRead; i++) {
+        if (buf[i] === 0x0a) count++;
+      }
+      endsWithNewline = (buf[bytesRead - 1] === 0x0a);
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
+  // If the file's last line lacks a trailing newline it still counts as one entry.
+  if (!endsWithNewline) {
+    try {
+      if (fs.statSync(filePath).size > 0) count++;
+    } catch { /* ignore */ }
+  }
+  return count;
+}
+
+// --- Temporal detections (append-only JSONL since OOM fix) ---
 
 /**
  * Trim temporal findings to essential fields only.
@@ -463,42 +556,79 @@ function trimTemporalFindings(findings) {
 }
 
 /**
- * Append a temporal detection to the temporal detections file.
+ * Append a temporal detection to the temporal detections JSONL file. Append-only
+ * (O(1) regardless of file size) — the previous read-modify-write loaded the
+ * entire file on every call which was a major OOM contributor.
+ *
  * @param {string} name - Package name
  * @param {string} version - Package version
- * @param {Array} findings - Temporal findings array
+ * @param {Array} findings - Temporal findings array (will be trimmed)
  */
 function appendTemporalDetection(name, version, findings) {
-  let detections = [];
   try {
-    if (fs.existsSync(TEMPORAL_DETECTIONS_FILE)) {
-      detections = JSON.parse(fs.readFileSync(TEMPORAL_DETECTIONS_FILE, 'utf8'));
+    const dir = path.dirname(TEMPORAL_DETECTIONS_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const entry = {
+      name,
+      version,
+      findings: trimTemporalFindings(findings),
+      timestamp: new Date().toISOString()
+    };
+    fs.appendFileSync(TEMPORAL_DETECTIONS_FILE, JSON.stringify(entry) + '\n', 'utf8');
+    _temporalAppendedSinceCompact++;
+    if (_temporalAppendedSinceCompact >= DETECTION_COMPACT_INTERVAL) {
+      _temporalAppendedSinceCompact = 0;
+      _compactTemporalDetectionsJsonl();
     }
-  } catch { /* corrupted file — start fresh */ }
-  detections.push({
-    name,
-    version,
-    findings: trimTemporalFindings(findings),
-    timestamp: new Date().toISOString()
-  });
-  // Keep last 1000 entries
-  if (detections.length > 1000) {
-    detections = detections.slice(-1000);
+  } catch (err) {
+    if (err.code === 'EROFS' || err.code === 'EACCES' || err.code === 'EPERM') {
+      console.warn(`[MONITOR] Permission denied writing temporal detection: ${err.code}`);
+      return;
+    }
+    if (err.code === 'ENOSPC') {
+      console.warn('[MONITOR] WARNING: disk full (ENOSPC) — cannot persist temporal detection.');
+      return;
+    }
+    console.error(`[MONITOR] Failed to save temporal detection: ${err.message}`);
   }
-  atomicWriteFileSync(TEMPORAL_DETECTIONS_FILE, JSON.stringify(detections, null, 2));
 }
 
 /**
- * Load temporal detections from file.
- * @returns {Array} Array of temporal detection entries
+ * Load temporal detections from file using streaming reads.
+ * @returns {Array} Array of temporal detection entries (oldest first, capped to MAX_TEMPORAL_DETECTIONS)
  */
 function loadTemporalDetections() {
+  const detections = [];
   try {
-    if (fs.existsSync(TEMPORAL_DETECTIONS_FILE)) {
-      return JSON.parse(fs.readFileSync(TEMPORAL_DETECTIONS_FILE, 'utf8'));
-    }
+    _iterateJsonlSync(TEMPORAL_DETECTIONS_FILE, (entry) => { detections.push(entry); });
   } catch { /* ignore */ }
-  return [];
+  return detections;
+}
+
+/**
+ * Compact the temporal detections JSONL file: keep only the most recent
+ * MAX_TEMPORAL_DETECTIONS entries. No-op when the file is already under cap.
+ * Internal — called from appendTemporalDetection on a counter trigger and from
+ * runStateMigrations to enforce caps after migration.
+ */
+function _compactTemporalDetectionsJsonl() {
+  try {
+    const total = _countJsonlLines(TEMPORAL_DETECTIONS_FILE);
+    if (total <= MAX_TEMPORAL_DETECTIONS) return;
+    const toDrop = total - MAX_TEMPORAL_DETECTIONS;
+    let skipped = 0;
+    const kept = [];
+    _iterateJsonlSync(TEMPORAL_DETECTIONS_FILE, (entry) => {
+      if (skipped < toDrop) { skipped++; return; }
+      kept.push(JSON.stringify(entry));
+    });
+    const tmpFile = TEMPORAL_DETECTIONS_FILE + '.tmp';
+    fs.writeFileSync(tmpFile, kept.length ? kept.join('\n') + '\n' : '', 'utf8');
+    fs.renameSync(tmpFile, TEMPORAL_DETECTIONS_FILE);
+    console.log(`[MONITOR] COMPACT temporal-detections: ${total} -> ${kept.length} entries`);
+  } catch (err) {
+    console.error(`[MONITOR] Temporal detections compaction failed: ${err.message}`);
+  }
 }
 
 // --- State persistence ---
@@ -580,17 +710,46 @@ function appendAlert(alert) {
   }
 }
 
-// --- Detection time logging ---
+// --- Detection time logging (append-only JSONL since OOM fix) ---
 
-function loadDetections() {
+/**
+ * Lazy initialization of the in-memory dedup Set. Reading the JSONL file once
+ * at first use replaces the per-call read-modify-write that allocated ~15 MB
+ * of transient parsed objects on every appendDetection invocation.
+ */
+function _initDetectionDedupSet() {
+  if (_detectionDedupSet !== null) return;
+  _detectionDedupSet = new Set();
   try {
-    const raw = fs.readFileSync(DETECTIONS_FILE, 'utf8');
-    const data = JSON.parse(raw);
-    if (data && Array.isArray(data.detections)) return data;
-    return { detections: [] };
-  } catch {
-    return { detections: [] };
-  }
+    _iterateJsonlSync(DETECTIONS_FILE, (entry) => {
+      if (entry && entry.package && entry.version) {
+        _detectionDedupSet.add(`${entry.package}@${entry.version}`);
+      }
+    });
+  } catch { /* ignore — Set stays empty */ }
+}
+
+/**
+ * Reset internal detection state. Test-only: lets the test suite control file
+ * lifecycle without leaking dedup state between cases.
+ */
+function _resetDetectionState() {
+  _detectionDedupSet = null;
+  _detectionsAppendedSinceCompact = 0;
+  _temporalAppendedSinceCompact = 0;
+}
+
+/**
+ * Load all detections by streaming the JSONL file. Returns the same
+ * { detections: [...] } shape as before so downstream consumers
+ * (buildReportFromDisk, daily report) are unchanged.
+ */
+function loadDetections() {
+  const detections = [];
+  try {
+    _iterateJsonlSync(DETECTIONS_FILE, (entry) => { detections.push(entry); });
+  } catch { /* ignore */ }
+  return { detections };
 }
 
 function appendDetection(name, version, ecosystem, findings, severity) {
@@ -599,12 +758,11 @@ function appendDetection(name, version, ecosystem, findings, severity) {
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
-    const data = loadDetections();
+    _initDetectionDedupSet();
     const key = `${name}@${version}`;
-    if (data.detections.some(d => `${d.package}@${d.version}` === key)) {
-      return; // dedup
-    }
-    data.detections.push({
+    if (_detectionDedupSet.has(key)) return; // dedup
+
+    const entry = {
       package: name,
       version,
       ecosystem,
@@ -613,42 +771,98 @@ function appendDetection(name, version, ecosystem, findings, severity) {
       severity,
       advisory_at: null,
       lead_time_hours: null
-    });
-    // Cap at MAX_DETECTIONS — discard oldest entries
-    if (data.detections.length > MAX_DETECTIONS) {
-      data.detections = data.detections.slice(-MAX_DETECTIONS);
+    };
+    fs.appendFileSync(DETECTIONS_FILE, JSON.stringify(entry) + '\n', 'utf8');
+    _detectionDedupSet.add(key);
+
+    _detectionsAppendedSinceCompact++;
+    if (_detectionsAppendedSinceCompact >= DETECTION_COMPACT_INTERVAL) {
+      _detectionsAppendedSinceCompact = 0;
+      _compactDetectionsJsonl();
     }
-    atomicWriteFileSync(DETECTIONS_FILE, JSON.stringify(data, null, 2));
   } catch (err) {
+    if (err.code === 'EROFS' || err.code === 'EACCES' || err.code === 'EPERM') {
+      console.warn(`[MONITOR] Permission denied writing detection: ${err.code}`);
+      return;
+    }
+    if (err.code === 'ENOSPC') {
+      console.warn('[MONITOR] WARNING: disk full (ENOSPC) — cannot persist detection.');
+      return;
+    }
     console.error(`[MONITOR] Failed to save detection: ${err.message}`);
   }
 }
 
+/**
+ * Compute detection stats by streaming the JSONL file: a single accumulator
+ * pass that never holds more than one parsed entry in memory at a time.
+ */
 function getDetectionStats() {
-  const data = loadDetections();
-  const detections = data.detections;
-  const total = detections.length;
-
+  let total = 0;
   const bySeverity = {};
   const byEcosystem = {};
-  for (const d of detections) {
-    bySeverity[d.severity] = (bySeverity[d.severity] || 0) + 1;
-    byEcosystem[d.ecosystem] = (byEcosystem[d.ecosystem] || 0) + 1;
-  }
+  const leadHours = [];
 
-  const withLeadTime = detections.filter(d => d.advisory_at && d.lead_time_hours != null);
+  try {
+    _iterateJsonlSync(DETECTIONS_FILE, (d) => {
+      total++;
+      if (d.severity) bySeverity[d.severity] = (bySeverity[d.severity] || 0) + 1;
+      if (d.ecosystem) byEcosystem[d.ecosystem] = (byEcosystem[d.ecosystem] || 0) + 1;
+      if (d.advisory_at && d.lead_time_hours != null) {
+        leadHours.push(d.lead_time_hours);
+      }
+    });
+  } catch { /* fallthrough — return whatever we accumulated */ }
+
   let leadTime = null;
-  if (withLeadTime.length > 0) {
-    const hours = withLeadTime.map(d => d.lead_time_hours);
+  if (leadHours.length > 0) {
+    let min = leadHours[0];
+    let max = leadHours[0];
+    let sum = 0;
+    for (const h of leadHours) {
+      if (h < min) min = h;
+      if (h > max) max = h;
+      sum += h;
+    }
     leadTime = {
-      count: withLeadTime.length,
-      avg: hours.reduce((a, b) => a + b, 0) / hours.length,
-      min: Math.min(...hours),
-      max: Math.max(...hours)
+      count: leadHours.length,
+      avg: sum / leadHours.length,
+      min,
+      max
     };
   }
 
   return { total, bySeverity, byEcosystem, leadTime };
+}
+
+/**
+ * Compact the detections JSONL file: keep only the most recent MAX_DETECTIONS
+ * entries. Rebuilds the in-memory dedup Set from the kept entries so dedup
+ * stays consistent. No-op when the file is already under cap.
+ */
+function _compactDetectionsJsonl() {
+  try {
+    const total = _countJsonlLines(DETECTIONS_FILE);
+    if (total <= MAX_DETECTIONS) return;
+    const toDrop = total - MAX_DETECTIONS;
+    let skipped = 0;
+    const kept = [];
+    const newDedup = new Set();
+    _iterateJsonlSync(DETECTIONS_FILE, (entry) => {
+      if (skipped < toDrop) { skipped++; return; }
+      kept.push(JSON.stringify(entry));
+      if (entry && entry.package && entry.version) {
+        newDedup.add(`${entry.package}@${entry.version}`);
+      }
+    });
+    const tmpFile = DETECTIONS_FILE + '.tmp';
+    fs.writeFileSync(tmpFile, kept.length ? kept.join('\n') + '\n' : '', 'utf8');
+    fs.renameSync(tmpFile, DETECTIONS_FILE);
+    _detectionDedupSet = newDedup;
+    console.log(`[MONITOR] COMPACT detections: ${total} -> ${kept.length} entries`);
+  } catch (err) {
+    console.error(`[MONITOR] Detections compaction failed: ${err.message}`);
+  }
 }
 
 // --- Scan stats (FP rate tracking) ---
@@ -851,6 +1065,88 @@ function getParisDateString() {
 
 // --- Raw state loader (CLI report helpers) ---
 
+// --- JSONL migration (one-shot, idempotent) ---
+
+/**
+ * Convert a legacy JSON detections file into the new JSONL format.
+ * Idempotent: skips when the JSONL file already exists, or when the legacy
+ * file is missing. After successful migration the legacy file is renamed to
+ * `<basename>.json.migrated` so the next boot is a no-op and a forensic copy
+ * remains on disk.
+ *
+ * @param {object} opts
+ * @param {string} opts.legacyFile  - Path to the legacy `*.json` file
+ * @param {string} opts.targetFile  - Path to the destination `*.jsonl` file
+ * @param {(parsed:any) => any[]|null} opts.extractEntries - Returns the array of
+ *   entries from the parsed JSON, or null if the file shape is unexpected.
+ * @param {string} opts.label       - Short label used in log messages
+ * @returns {{migrated:boolean, entries:number}}
+ */
+function _migrateJsonToJsonl({ legacyFile, targetFile, extractEntries, label }) {
+  if (!fs.existsSync(legacyFile)) return { migrated: false, entries: 0 };
+  if (fs.existsSync(targetFile)) {
+    // JSONL already in use. Leave the legacy file alone if it's still there
+    // (operator may want to inspect it). Renaming it could surprise scripts.
+    return { migrated: false, entries: 0 };
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(fs.readFileSync(legacyFile, 'utf8'));
+  } catch (err) {
+    console.warn(`[MONITOR] MIGRATION ${label}: legacy file unreadable (${err.message}) — leaving in place`);
+    return { migrated: false, entries: 0 };
+  }
+  const entries = extractEntries(parsed);
+  if (!Array.isArray(entries)) {
+    console.warn(`[MONITOR] MIGRATION ${label}: unexpected legacy shape — leaving in place`);
+    return { migrated: false, entries: 0 };
+  }
+  const tmpFile = targetFile + '.tmp';
+  try {
+    const dir = path.dirname(targetFile);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const lines = entries.map(e => JSON.stringify(e));
+    fs.writeFileSync(tmpFile, lines.length ? lines.join('\n') + '\n' : '', 'utf8');
+    fs.renameSync(tmpFile, targetFile);
+    fs.renameSync(legacyFile, legacyFile + '.migrated');
+    console.log(`[MONITOR] MIGRATION ${label}: ${entries.length} entries -> ${path.basename(targetFile)} (legacy kept as ${path.basename(legacyFile)}.migrated)`);
+    return { migrated: true, entries: entries.length };
+  } catch (err) {
+    try { fs.unlinkSync(tmpFile); } catch { /* ignore */ }
+    console.error(`[MONITOR] MIGRATION ${label} failed: ${err.message}`);
+    return { migrated: false, entries: 0 };
+  }
+}
+
+/**
+ * Run all state migrations. Called once at startup before any append/load
+ * touches the new JSONL files. Idempotent — safe to call on every boot.
+ *
+ * After migration this function also enforces the post-migration size caps,
+ * so an oversized legacy file is immediately compacted instead of waiting
+ * for DETECTION_COMPACT_INTERVAL appends.
+ */
+function runStateMigrations() {
+  // Reset internal counters/dedup so the first append re-reads from disk.
+  _resetDetectionState();
+
+  const det = _migrateJsonToJsonl({
+    legacyFile: DETECTIONS_FILE_LEGACY,
+    targetFile: DETECTIONS_FILE,
+    extractEntries: (parsed) => (parsed && Array.isArray(parsed.detections)) ? parsed.detections : null,
+    label: 'detections'
+  });
+  if (det.migrated && det.entries > MAX_DETECTIONS) _compactDetectionsJsonl();
+
+  const tmp = _migrateJsonToJsonl({
+    legacyFile: TEMPORAL_DETECTIONS_FILE_LEGACY,
+    targetFile: TEMPORAL_DETECTIONS_FILE,
+    extractEntries: (parsed) => Array.isArray(parsed) ? parsed : null,
+    label: 'temporal-detections'
+  });
+  if (tmp.migrated && tmp.entries > MAX_TEMPORAL_DETECTIONS) _compactTemporalDetectionsJsonl();
+}
+
 /**
  * Read raw state file (without restoring into stats).
  */
@@ -868,10 +1164,12 @@ module.exports = {
   STATE_FILE,
   ALERTS_FILE,
   DETECTIONS_FILE,
+  DETECTIONS_FILE_LEGACY,
   SCAN_STATS_FILE,
   LAST_DAILY_REPORT_FILE,
   DAILY_STATS_FILE,
   TEMPORAL_DETECTIONS_FILE,
+  TEMPORAL_DETECTIONS_FILE_LEGACY,
   PRIMARY_DAILY_REPORTS_DIR,
   PRIMARY_ALERTS_DIR,
   FALLBACK_DAILY_REPORTS_DIR,
@@ -894,7 +1192,9 @@ module.exports = {
   DAILY_STATS_PERSIST_INTERVAL,
   ALERTS_MAX_SIZE,
   MAX_DETECTIONS,
+  MAX_TEMPORAL_DETECTIONS,
   MAX_DAILY_ALERTS,
+  DETECTION_COMPACT_INTERVAL,
 
   // Mutable state getters/setters
   getScanMemoryCache,
@@ -929,6 +1229,13 @@ module.exports = {
   loadDetections,
   appendDetection,
   getDetectionStats,
+  runStateMigrations,
+  // Internal — exported for tests and for the daemon hourly housekeeping.
+  _compactDetectionsJsonl,
+  _compactTemporalDetectionsJsonl,
+  _resetDetectionState,
+  _iterateJsonlSync,
+  _countJsonlLines,
   loadScanStats,
   updateScanStats,
   loadDailyStats,
