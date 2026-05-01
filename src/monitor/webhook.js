@@ -420,6 +420,14 @@ async function trySendWebhook(name, version, ecosystem, result, sandboxResult, m
   const memoryCheck = shouldSuppressByMemory(name, result);
   // Always record current scan (updates timestamp + fingerprint for future checks)
   recordScanMemory(name, currentScore, currentTypes, currentHCTypes);
+
+  // Push to muad-api dashboard. Fires for every alert that passes shouldSendWebhook,
+  // independent of Discord dedup. The API's ON CONFLICT DO UPDATE absorbs duplicates;
+  // dedup downstream is a Discord noise filter, not a data filter.
+  if (isIngestConfigured()) {
+    sendIngest(name, version, result).catch(() => {});
+  }
+
   // Persist periodically (throttled to every 10 scans to avoid disk I/O overhead)
   let scansSinceLastMemoryPersist = getScansSinceLastMemoryPersist();
   scansSinceLastMemoryPersist++;
@@ -450,12 +458,6 @@ async function trySendWebhook(name, version, ecosystem, result, sandboxResult, m
     for (const r of currentRules) previousRules.add(r);
   } else {
     alertedPackageRules.set(name, new Set(currentRules));
-  }
-
-  // Push to muad-api dashboard (fire-and-forget, fires once per unique package
-  // even when scope grouping batches the Discord webhook).
-  if (isIngestConfigured()) {
-    sendIngest(name, version, result).catch(() => {});
   }
 
   // Scope grouping: buffer scoped npm packages for grouped webhook
