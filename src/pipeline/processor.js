@@ -3,7 +3,7 @@ const path = require('path');
 const { getRule } = require('../rules/index.js');
 const { getPlaybook } = require('../response/playbooks.js');
 const { computeReachableFiles } = require('../scanner/reachability.js');
-const { applyFPReductions, applyCompoundBoosts, calculateRiskScore, getSeverityWeights, applyContextualFPCaps } = require('../scoring.js');
+const { applyFPReductions, applyCompoundBoosts, calculateRiskScore, getSeverityWeights, applyContextualFPCaps, applySingleFireCriticalFloor, applyReputationFactor } = require('../scoring.js');
 const { buildIntentPairs } = require('../intent-graph.js');
 const { debugLog } = require('../utils.js');
 
@@ -317,6 +317,32 @@ async function process(threats, targetPath, options, pythonDeps, warnings, scann
     debugLog('[FP-CAP] ' + (packageName || targetPath) + ': ' +
       fpCaps.map(c => c.feature + (c.cap > 0 ? '→MAX' + c.cap : '→suppress')).join(', ') +
       ' → score=' + result.summary.riskScore);
+  }
+
+  // Hybrid v3 Phase 1: single-fire critical floor — applied AFTER contextual
+  // caps so a deterministic IOC match (known_malicious_hash, lifecycle_shell_pipe…)
+  // stays CRITICAL even if the package also matches a benign FP cluster.
+  const sfTriggers = applySingleFireCriticalFloor(result);
+  if (sfTriggers.length > 0) {
+    debugLog('[SF-FLOOR] ' + (packageName || targetPath) + ': ' +
+      sfTriggers.map(t => t.type + '/' + t.severity).join(', ') +
+      ' → score=' + result.summary.riskScore);
+  }
+
+  // Hybrid v3 Phase 4: metadata-first reputation factor — multiplies the score
+  // by a factor in [0.10, 1.5] derived from npm registry signals. Applied LAST
+  // so all severity logic completes first; the factor is the final, package-
+  // wide context filter. Gated behind MUADDIB_METADATA_FACTOR=1; no-op when
+  // metadata is absent (CLI scans, offline) or the gate is off.
+  // NOTE: this module's exported function is named `process`, which shadows
+  // the global `process` inside its body. Use globalThis.process.env to reach
+  // the real environment.
+  if (globalThis.process.env.MUADDIB_METADATA_FACTOR === '1') {
+    const repAdjust = applyReputationFactor(result, _pkgMeta && _pkgMeta.npmRegistryMeta);
+    if (repAdjust) {
+      debugLog('[META-FACTOR] ' + (packageName || targetPath) + ': factor=' +
+        repAdjust.factor.toFixed(2) + ' (' + repAdjust.oldScore + ' → ' + repAdjust.newScore + ')');
+    }
   }
 
   return {

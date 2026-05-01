@@ -123,6 +123,37 @@ const PACKAGE_LEVEL_TYPES = new Set([
   'external_tarball_dep'
 ]);
 
+// ============================================
+// Hybrid v3 Phase 1: SINGLE-FIRE CRITICAL FLOOR
+// ============================================
+// Threat types that, when fired at HIGH+ severity, deterministically push the
+// package score to a CRITICAL floor — bypassing additive aggregation, FP
+// caps, and contextual reductions.
+//
+// Empirically validated on a 2508-pkg labeled corpus (2332 FP / 176 MW):
+// every entry produced 0 FP false-lifts at MIN severity HIGH. The IOC-based
+// types are deterministic by construction (equality match against curated
+// IOC lists). lifecycle_shell_pipe is the "curl evil.com | sh" pattern in an
+// install script — observed 1mw / 0fp.
+//
+// Rejected during validation (precision data attached):
+//   cross_file_dataflow      26fp / 13mw  (67%)
+//   reverse_shell            16fp /  3mw  (16%)
+//   module_load_bypass        4fp /  1mw  (20%)
+//   newsletter_auto_follow    1fp /  1mw  (50%)
+//
+// Re-evaluate the candidate list when the corpus or rule definitions change.
+const SINGLE_FIRE_CRITICAL_TYPES = new Set([
+  'known_malicious_hash',
+  'known_malicious_package',
+  'pypi_malicious_package',
+  'shai_hulud_marker',
+  'lifecycle_shell_pipe'
+]);
+const SINGLE_FIRE_CRITICAL_FLOOR = 75;
+const SINGLE_FIRE_MIN_SEVERITY_RANK = 2; // HIGH
+const _SEV_RANK = { LOW: 0, MEDIUM: 1, HIGH: 2, CRITICAL: 3 };
+
 /**
  * Classify a threat as package-level or file-level.
  * Package-level: metadata findings (package.json, node_modules, sandbox)
@@ -142,12 +173,22 @@ function isPackageLevelThreat(threat) {
  * @param {Array} threats - array of threat objects (after FP reductions)
  * @returns {number} score 0-100
  */
+// Hybrid v3 Phase 3: when enabled, threats tagged with replacedByCompound
+// (their compound has fired and represents their score) contribute 0 to the
+// group score. Avoids the additive double-count of compound + constituents.
+const _COMPOUND_REPLACE_ENABLED = () => process.env.MUADDIB_COMPOUND_REPLACE === '1';
+function _isReplacedByCompound(t) {
+  return _COMPOUND_REPLACE_ENABLED() && t.replacedByCompound;
+}
+
 function computeGroupScore(threats) {
+  if (process.env.MUADDIB_DECAY === '1') return computeGroupScoreDecay(threats);
   let score = 0;
   let protoHookMediumPoints = 0;
   let dataflowMediumPoints = 0;
 
   for (const t of threats) {
+    if (_isReplacedByCompound(t)) continue;
     const weight = _severityWeights[t.severity] || 0;
     const rule = getRule(t.type);
     const factor = CONFIDENCE_FACTORS[rule.confidence] || 1.0;
@@ -164,6 +205,75 @@ function computeGroupScore(threats) {
     score += weight * factor;
   }
 
+  score += Math.min(protoHookMediumPoints, PROTO_HOOK_MEDIUM_CAP);
+  score += Math.min(dataflowMediumPoints, DATAFLOW_MEDIUM_CAP);
+  return Math.min(MAX_RISK_SCORE, Math.round(score));
+}
+
+// ============================================
+// Hybrid v3 Phase 2: PER-TYPE BOUNDED DECAY
+// ============================================
+// Replaces additive sum-of-weights with geometric decay per (severity, type)
+// pair, then sums distinct buckets. Repetitions of the SAME type within a
+// severity bucket get diminishing weight (the second emission counts ~half,
+// the third ~quarter…); distinct types each get their own full-weight first
+// emission. This rewards diversity (multiple distinct dangerous behaviors)
+// and dampens repetition (the same finding scattered across many files —
+// the typical FP signature of minified bundles, framework loaders, HTTP
+// libraries with multiple credential-parsing paths).
+//
+// CRITICAL is kept additive — typical malware presents 1-3 CRITICALs and
+// dampening them risks dropping detections below the CRITICAL tier.
+//
+// Per-(severity, type) cap: sev_weight / (1 - α). Default α:
+//   HIGH α=0.5 → cap 10 / 0.5 = 20 per type
+//   MEDIUM α=0.4 → cap 3 / 0.6 = 5 per type
+//   LOW α=0.3 → cap 1 / 0.7 ≈ 1.43 per type
+// Special MEDIUM caps (prototype_hook, suspicious_dataflow) survive as
+// stricter outside-bucket caps.
+// HIGH α=1.0 = additive (no decay) — HIGH threats are already discriminative
+// per AUC analysis; capping them risks dropping malware at the 75 boundary.
+// Decay applies only to MEDIUM/LOW where pile-up FP signature is dominant
+// (minified bundles, framework loaders, HTTP credential parsers).
+const DECAY_ALPHA = { HIGH: 1.0, MEDIUM: 0.4, LOW: 0.3 };
+
+function computeGroupScoreDecay(threats) {
+  let criticalSum = 0;
+  let protoHookMediumPoints = 0;
+  let dataflowMediumPoints = 0;
+  // Per-(severity, type) array of points. Within each, decay applies.
+  // Across types, scores sum.
+  const typeBuckets = new Map();
+
+  for (const t of threats) {
+    if (_isReplacedByCompound(t)) continue;
+    const weight = _severityWeights[t.severity] || 0;
+    const rule = getRule(t.type);
+    const factor = CONFIDENCE_FACTORS[rule.confidence] || 1.0;
+    const points = weight * factor;
+
+    if (t.severity === 'CRITICAL') { criticalSum += points; continue; }
+    if (t.type === 'prototype_hook' && t.severity === 'MEDIUM') {
+      protoHookMediumPoints += points; continue;
+    }
+    if (t.type === 'suspicious_dataflow' && t.severity === 'MEDIUM') {
+      dataflowMediumPoints += points; continue;
+    }
+
+    const key = t.severity + '|' + t.type;
+    if (!typeBuckets.has(key)) typeBuckets.set(key, []);
+    typeBuckets.get(key).push(points);
+  }
+
+  let score = criticalSum;
+  for (const [key, arr] of typeBuckets) {
+    const sev = key.slice(0, key.indexOf('|'));
+    const alpha = DECAY_ALPHA[sev] || 0;
+    arr.sort((a, b) => b - a);
+    let typeScore = 0;
+    for (let i = 0; i < arr.length; i++) typeScore += arr[i] * Math.pow(alpha, i);
+    score += typeScore;
+  }
   score += Math.min(protoHookMediumPoints, PROTO_HOOK_MEDIUM_CAP);
   score += Math.min(dataflowMediumPoints, DATAFLOW_MEDIUM_CAP);
   return Math.min(MAX_RISK_SCORE, Math.round(score));
@@ -441,36 +551,34 @@ function applyCompoundBoosts(threats) {
   }
 
   for (const compound of SCORING_COMPOUNDS) {
-    // Skip if compound already present (e.g. from a scanner)
-    if (typeSet.has(compound.type)) continue;
+    const compoundAlreadyPresent = typeSet.has(compound.type);
 
     // Check all required types are present
-    if (compound.requires.every(req => typeSet.has(req))) {
-      // Severity gate: at least one component must have had original severity >= MEDIUM.
-      // Uses originalSeverity (pre-FP-reduction) to prevent attackers from
-      // manipulating compound gates via count-threshold or dist-file downgrades.
-      const hasSignificantComponent = compound.requires.some(req =>
-        threats.some(t => t.type === req && (t.originalSeverity || t.severity) !== 'LOW')
+    if (!compound.requires.every(req => typeSet.has(req))) continue;
+
+    // Severity gate: at least one component must have had original severity >= MEDIUM.
+    // Uses originalSeverity (pre-FP-reduction) to prevent attackers from
+    // manipulating compound gates via count-threshold or dist-file downgrades.
+    const hasSignificantComponent = compound.requires.some(req =>
+      threats.some(t => t.type === req && (t.originalSeverity || t.severity) !== 'LOW')
+    );
+    if (!hasSignificantComponent) continue;
+
+    // Same-file constraint: required types must appear in at least one common file.
+    // sameFile: true = ALL required types must share a file.
+    // sameFileTypes: [...] = only specified types must share a file.
+    const sameFileCheck = compound.sameFileTypes || (compound.sameFile ? compound.requires : null);
+    if (sameFileCheck) {
+      const filesByType = sameFileCheck.map(req =>
+        new Set(threats.filter(t => t.type === req).map(t => t.file))
       );
-      if (!hasSignificantComponent) continue;
+      const commonFiles = [...filesByType[0]].filter(f =>
+        filesByType.every(s => s.has(f))
+      );
+      if (commonFiles.length === 0) continue;
+    }
 
-      // Same-file constraint: required types must appear in at least one common file.
-      // Prevents cross-file coincidental matches (e.g. next.js: staged_binary_payload in
-      // dist/compiled/@vercel/nft/index.js + crypto_decipher in a different file).
-      // sameFile: true = ALL required types must share a file.
-      // sameFileTypes: [...] = only specified types must share a file (for mixed package/file-level).
-      const sameFileCheck = compound.sameFileTypes || (compound.sameFile ? compound.requires : null);
-      if (sameFileCheck) {
-        const filesByType = sameFileCheck.map(req =>
-          new Set(threats.filter(t => t.type === req).map(t => t.file))
-        );
-        // Find intersection of all file sets
-        const commonFiles = [...filesByType[0]].filter(f =>
-          filesByType.every(s => s.has(f))
-        );
-        if (commonFiles.length === 0) continue;
-      }
-
+    if (!compoundAlreadyPresent) {
       threats.push({
         type: compound.type,
         severity: compound.severity,
@@ -480,6 +588,26 @@ function applyCompoundBoosts(threats) {
         compound: true
       });
       typeSet.add(compound.type);
+    }
+
+    // Hybrid v3 Phase 3: tag constituent threats with replacedByCompound so
+    // computeGroupScore* can suppress their score contribution (avoiding the
+    // additive double-count of compound + constituents). Only tag instances
+    // whose own severity is strictly LESS than the compound's severity —
+    // otherwise the constituent already represents an equivalent or stronger
+    // signal and dampening it would under-score real malware. Runs whether
+    // the compound was just added or pre-existing (handles re-entry on
+    // cached threats arrays).
+    const compoundSevRank = _SEV_RANK[compound.severity];
+    for (const req of compound.requires) {
+      // Idempotency guard: if some instance of this required type is already
+      // tagged for THIS compound, skip — a previous run already performed the
+      // tagging for this (compound, requirement) pair.
+      if (threats.some(t => t.type === req && t.replacedByCompound === compound.type)) continue;
+      const inst = threats.find(t => t.type === req && !t.replacedByCompound);
+      if (!inst) continue;
+      const instSevRank = _SEV_RANK[inst.severity] ?? 0;
+      if (instSevRank < compoundSevRank) inst.replacedByCompound = compound.type;
     }
   }
 }
@@ -1112,9 +1240,141 @@ function applyContextualFPCaps(result, pkgMeta) {
   return applied;
 }
 
+// ============================================
+// Hybrid v3 Phase 4: METADATA-FIRST REPUTATION FACTOR
+// ============================================
+// Applied AFTER all severity-based adjustments. Multiplies the final score by
+// a factor derived from package metadata (age, version count, weekly
+// downloads, repository presence, author breadth). AUC analysis on 246 FP
+// + 179 MW labeled corpus shows these are the strongest single discriminants
+// (top features 0.75-0.81 AUC, vs no rule type above 0.6).
+//
+// No-op when metadata is absent (CLI scans without registry context).
+// Gated behind MUADDIB_METADATA_FACTOR=1 — the equivalent computation has
+// existed monitor-side (src/monitor/webhook.js#computeReputationFactor) for
+// webhook decisions only; this lifts it into the persisted score so that
+// reports, alerts, and downstream consumers all see the corrected number.
+const REPUTATION_FACTOR_BOUNDS = { min: 0.10, max: 1.5 };
+
+function _hasNumeric(v) { return typeof v === 'number' && !Number.isNaN(v); }
+
+function _factorFromMetadata(meta) {
+  let factor = 1.0;
+  let signalsApplied = 0;
+  // Age (AUC 0.81 — strongest single discriminator). Old packages = benign.
+  const age = meta.age_days ?? meta.package_age_days;
+  if (_hasNumeric(age) && age > 0) {
+    if (age > 1825) factor -= 0.5;       // 5+ years
+    else if (age > 730) factor -= 0.3;   // 2+ years
+    else if (age > 365) factor -= 0.15;  // 1+ year
+    else if (age < 7) factor += 0.3;     // freshly published
+    else if (age < 30) factor += 0.2;
+    signalsApplied++;
+  }
+  // Version count (AUC 0.81). Many published versions = mature project.
+  // Skip when value is missing (null/undefined/0) — 0 is the "metadata absent"
+  // sentinel in ml-training data and cannot be distinguished from "single
+  // unpublished version" without additional context.
+  const versions = meta.version_count;
+  if (_hasNumeric(versions) && versions > 0) {
+    if (versions > 200) factor -= 0.3;
+    else if (versions > 50) factor -= 0.2;
+    else if (versions > 20) factor -= 0.1;
+    else if (versions === 1) factor += 0.2;
+    else if (versions <= 2) factor += 0.15;
+    signalsApplied++;
+  }
+  // Weekly downloads (AUC 0.80). Top-tier traffic = hard to weaponise silently.
+  const downloads = meta.weekly_downloads;
+  if (_hasNumeric(downloads) && downloads > 0) {
+    if (downloads > 1000000) factor -= 0.4;
+    else if (downloads > 100000) factor -= 0.2;
+    else if (downloads > 50000) factor -= 0.1;
+    else if (downloads < 10) factor += 0.15;
+    else if (downloads < 100) factor += 0.1;
+    signalsApplied++;
+  }
+  // Repository presence (AUC 0.75). Tri-state: true → known repo, false →
+  // explicitly absent (suspicious), null/undefined → unknown (no signal).
+  if (meta.has_repository === false) {
+    factor += 0.15;
+    signalsApplied++;
+  } else if (meta.has_repository === true) {
+    // Slight reassurance — mature established projects almost always have repo
+    factor -= 0.05;
+    signalsApplied++;
+  }
+  // Author package count (AUC 0.75). 1 package = fresh author.
+  const authorPkgs = meta.author_package_count;
+  if (_hasNumeric(authorPkgs) && authorPkgs > 0) {
+    if (authorPkgs === 1) factor += 0.15;
+    else if (authorPkgs > 50) factor -= 0.1;
+    signalsApplied++;
+  }
+  // If no signals applied (metadata fully absent), return neutral 1.0 rather
+  // than the default-shaped factor — avoid spurious adjustments on rows where
+  // the registry data is simply missing.
+  if (signalsApplied === 0) return 1.0;
+  return Math.max(REPUTATION_FACTOR_BOUNDS.min, Math.min(REPUTATION_FACTOR_BOUNDS.max, factor));
+}
+
+function applyReputationFactor(result, metadata) {
+  if (!result || !result.summary || !metadata) return null;
+  const factor = _factorFromMetadata(metadata);
+  if (factor === 1.0) {
+    result.summary.reputationFactor = 1.0;
+    return null;
+  }
+  const oldScore = result.summary.riskScore;
+  const newScore = Math.max(0, Math.min(MAX_RISK_SCORE, Math.round(oldScore * factor)));
+  result.summary.riskScore = newScore;
+  result.summary.reputationFactor = factor;
+  const rs = newScore;
+  result.summary.riskLevel = rs >= _riskThresholds.CRITICAL ? 'CRITICAL'
+    : rs >= _riskThresholds.HIGH ? 'HIGH'
+      : rs >= _riskThresholds.MEDIUM ? 'MEDIUM'
+        : rs > 0 ? 'LOW' : 'SAFE';
+  return { factor, oldScore, newScore };
+}
+
+/**
+ * Hybrid v3 Phase 1: apply CRITICAL floor when a deterministic single-fire
+ * type is present at HIGH+ severity. Mutates result.summary.riskScore /
+ * riskLevel in-place. Always raises score, never lowers — cannot regress TPR.
+ * Returns the list of triggering types (empty if no floor applied).
+ *
+ * Called AFTER applyContextualFPCaps so the floor wins over any contextual
+ * reduction (an IOC hash match remains CRITICAL even if the package matches
+ * a benign FP cluster pattern like "minified bundle without install").
+ */
+function applySingleFireCriticalFloor(result) {
+  if (!result || !result.summary || !Array.isArray(result.threats)) return [];
+  const triggers = [];
+  for (const t of result.threats) {
+    if (!SINGLE_FIRE_CRITICAL_TYPES.has(t.type)) continue;
+    const rank = _SEV_RANK[t.severity];
+    if (rank === undefined || rank < SINGLE_FIRE_MIN_SEVERITY_RANK) continue;
+    triggers.push({ type: t.type, severity: t.severity, file: t.file });
+  }
+  if (triggers.length === 0) return [];
+  if (result.summary.riskScore < SINGLE_FIRE_CRITICAL_FLOOR) {
+    result.summary.riskScore = SINGLE_FIRE_CRITICAL_FLOOR;
+    const rs = result.summary.riskScore;
+    result.summary.riskLevel =
+      rs >= _riskThresholds.CRITICAL ? 'CRITICAL'
+        : rs >= _riskThresholds.HIGH ? 'HIGH'
+          : rs >= _riskThresholds.MEDIUM ? 'MEDIUM'
+            : rs > 0 ? 'LOW' : 'SAFE';
+  }
+  return triggers;
+}
+
 module.exports = {
   SEVERITY_WEIGHTS, RISK_THRESHOLDS, MAX_RISK_SCORE, CONFIDENCE_FACTORS,
-  isPackageLevelThreat, computeGroupScore, applyFPReductions, applyCompoundBoosts, calculateRiskScore,
+  SINGLE_FIRE_CRITICAL_TYPES, SINGLE_FIRE_CRITICAL_FLOOR, DECAY_ALPHA,
+  REPUTATION_FACTOR_BOUNDS,
+  isPackageLevelThreat, computeGroupScore, computeGroupScoreDecay,
+  applyFPReductions, applyCompoundBoosts, calculateRiskScore,
   applyConfigOverrides, resetConfigOverrides, getSeverityWeights, getRiskThresholds,
-  applyContextualFPCaps
+  applyContextualFPCaps, applySingleFireCriticalFloor, applyReputationFactor
 };
