@@ -178,6 +178,89 @@ const RULES = {
     ],
     mitre: 'T1195.002'
   },
+  ioc_string_match: {
+    id: 'MUADDIB-IOC-001',
+    name: 'YARA-style String IOC Match',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Literal substring uniquement attribuable a une campagne malware connue (XOR key, RAT command name, C2 path, build artifact). Le match en source = signal CRITICAL transverse a toutes les variantes qui reuse le meme stager.',
+    references: [
+      'iocs/string-iocs.yaml',
+      'https://gist.github.com/N3mes1s/0c0fc7a0c23cdb5e1c8f66b208053ed6',
+      'https://unit42.paloaltonetworks.com/axios-supply-chain-attack/',
+      'https://blog.gitguardian.com/three-supply-chain-campaigns-hit-npm-pypi-and-docker-hub-in-48-hours/'
+    ],
+    mitre: 'T1195.002'
+  },
+  anti_forensic_xor_autodelete: {
+    id: 'MUADDIB-AF-001',
+    name: 'Anti-Forensic XOR + Self-Delete + Decoy Write',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Compound AST pattern: XOR loop with literal-derived operand + fs.unlink/rename of self file + fs.writeFile to a decoy extension (.md/.bak/.tmp/.txt/.log) all in the same source file. Catches the Axios npm 2026-03 setup.js dropper and the csec autodelete family even when the XOR key string is rotated.',
+    references: [
+      'https://gist.github.com/N3mes1s/0c0fc7a0c23cdb5e1c8f66b208053ed6',
+      'https://unit42.paloaltonetworks.com/axios-supply-chain-attack/'
+    ],
+    mitre: 'T1140'
+  },
+  anti_forensic_partial: {
+    id: 'MUADDIB-AF-002',
+    name: 'Anti-Forensic Partial (2 of 3 patterns)',
+    severity: 'HIGH',
+    confidence: 'medium',
+    description: '2 of 3 anti-forensic patterns in a single file (XOR loop, self-delete, decoy write). Insufficient for CRITICAL alone but elevates a package that already shows other signals.',
+    references: [
+      'https://gist.github.com/N3mes1s/0c0fc7a0c23cdb5e1c8f66b208053ed6'
+    ],
+    mitre: 'T1140'
+  },
+  stub_package_external_payload: {
+    id: 'MUADDIB-STUB-001',
+    name: 'Stub Package + External URL Dep + Lifecycle Hook',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Package main file is essentially empty AND declares a non-npm-registry URL dependency AND has an install lifecycle hook. The malicious payload lives in the resolved external dep, not the published tarball. Closes the ltidi chain attack class that bypassed ADR_THRESHOLD=20.',
+    references: [
+      'project_detection_gap_ltidi_chain memory entry',
+      'https://blog.gitguardian.com/three-supply-chain-campaigns-hit-npm-pypi-and-docker-hub-in-48-hours/'
+    ],
+    mitre: 'T1195.002'
+  },
+  stub_package_external_dep: {
+    id: 'MUADDIB-STUB-002',
+    name: 'Stub Package + External URL Dep (no lifecycle)',
+    severity: 'HIGH',
+    confidence: 'medium',
+    description: 'Package main file is essentially empty AND declares a non-npm-registry URL dependency. No lifecycle hook so the payload requires an explicit require() — manual review still warranted because legitimate libs that pull a payload via URL would re-export the dep.',
+    references: [
+      'project_detection_gap_ltidi_chain memory entry'
+    ],
+    mitre: 'T1195.002'
+  },
+  axios_family: {
+    id: 'MUADDIB-COMPOUND-AXIOS',
+    name: 'Axios / csec Family Compound',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Compound: IOC string match + lifecycle hook + anti-forensic partial pattern. Identifies the BlueNoroff/Sapphire Sleet Axios family and the csec autodelete family at a single glance.',
+    references: [
+      'https://gist.github.com/N3mes1s/0c0fc7a0c23cdb5e1c8f66b208053ed6',
+      'https://unit42.paloaltonetworks.com/axios-supply-chain-attack/'
+    ],
+    mitre: 'T1195.002'
+  },
+  stub_with_string_ioc: {
+    id: 'MUADDIB-COMPOUND-STUB-IOC',
+    name: 'Stub Package + Known String IOC',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Compound: stub package (small main, external URL dep) AND a known string IOC in source. Unambiguous chain-attack staging.',
+    references: [
+      'project_detection_gap_ltidi_chain memory entry'
+    ],
+    mitre: 'T1195.002'
+  },
   lifecycle_script_dependency: {
     id: 'MUADDIB-DEP-004',
     name: 'Lifecycle Script in Dependency',

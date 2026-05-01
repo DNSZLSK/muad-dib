@@ -1,0 +1,6 @@
+{
+  "name": "axios-clone-sample",
+  "version": "1.14.1",
+  "main": "lib/index.js",
+  "description": "Test fixture: simulates Axios npm 2026-03 compromise IOCs"
+}

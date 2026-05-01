@@ -1037,7 +1037,8 @@ async function runScraper() {
     scrapeDatadogIOCs(),
     scrapeOSSFMaliciousPackages(osvResult.knownIds),
     scrapeGitHubAdvisory(),
-    scrapeOSVPyPIDataDump()
+    scrapeOSVPyPIDataDump(),
+    scrapeAikidoMalwareFeed()
   ]);
 
   const shaiHuludResult = results[0];
@@ -1045,6 +1046,7 @@ async function runScraper() {
   const ossfPackages = results[2];
   const githubPackages = results[3];
   const pypiPackages = results[4];
+  const aikidoResult = results[5];
 
   // Log aggregated warnings
   if (_noVersionSkipCount > 0) {
@@ -1057,7 +1059,8 @@ async function runScraper() {
     ...shaiHuludResult.packages,
     ...datadogResult.packages,
     ...ossfPackages,
-    ...githubPackages
+    ...githubPackages,
+    ...aikidoResult.packages
   ];
 
   // Merge all hashes
@@ -1069,7 +1072,7 @@ async function runScraper() {
   // Smart deduplication: build map of best entry per key
   // For duplicates, keep the one with highest confidence, then most recent date
   const dedupSpinner = new Spinner();
-  dedupSpinner.start('Deduplicating ' + allPackages.length + ' npm + ' + pypiPackages.length + ' PyPI entries...');
+  dedupSpinner.start('Deduplicating ' + allPackages.length + ' npm + ' + (pypiPackages.length + (aikidoResult.pypi_packages || []).length) + ' PyPI entries...');
   const dedupMap = new Map();
 
   // Seed with existing IOCs (with sanitization of stale comma-in-version entries)
@@ -1091,11 +1094,34 @@ async function runScraper() {
     dedupMap.set(key, pkg);
   }
 
-  // Merge new IOCs with smart replacement (with input validation)
+  // Merge new IOCs with smart replacement (with input validation).
+  // Source-aware: each entry accumulates a `sources: [{name, added_at}]` array
+  // tracking every feed that reported this (name, version). A package
+  // reported by >= 3 distinct sources is treated as confidence-max
+  // (used by `getSourceConfidence` for webhook gating).
   let addedPackages = 0;
   let upgradedPackages = 0;
   let skippedInvalid = 0;
   let skippedNeverWildcard = 0;
+  function appendSource(target, pkg) {
+    if (!Array.isArray(target.sources)) target.sources = [];
+    const newSrc = pkg.source || (pkg.freshness && pkg.freshness.source) || 'unknown';
+    if (!target.sources.some(s => s.name === newSrc)) {
+      target.sources.push({
+        name: newSrc,
+        added_at: (pkg.freshness && pkg.freshness.added_at) || pkg.published || new Date().toISOString()
+      });
+    }
+  }
+  function seedSources(pkg) {
+    if (!Array.isArray(pkg.sources)) {
+      const src = pkg.source || (pkg.freshness && pkg.freshness.source) || 'unknown';
+      pkg.sources = [{
+        name: src,
+        added_at: (pkg.freshness && pkg.freshness.added_at) || pkg.published || new Date().toISOString()
+      }];
+    }
+  }
   for (const pkg of allPackages) {
     if (!validateIOCEntry(pkg.name, pkg.version, 'npm')) {
       skippedInvalid++;
@@ -1108,21 +1134,28 @@ async function runScraper() {
     }
     const key = pkg.name + '@' + pkg.version;
     if (!dedupMap.has(key)) {
+      seedSources(pkg);
       dedupMap.set(key, pkg);
       addedPackages++;
     } else {
       const existing = dedupMap.get(key);
+      // Always accumulate source attribution before any replacement decision.
+      seedSources(existing);
+      appendSource(existing, pkg);
       const existingConf = CONFIDENCE_ORDER[existing.confidence] || 0;
       const newConf = CONFIDENCE_ORDER[pkg.confidence] || 0;
       if (newConf > existingConf) {
-        dedupMap.set(key, pkg);
+        // Replace with the higher-confidence entry but preserve the merged sources list
+        const mergedSources = existing.sources;
+        dedupMap.set(key, Object.assign({}, pkg, { sources: mergedSources }));
         upgradedPackages++;
       } else if (newConf === existingConf) {
         // Same confidence: keep most recent
         const existingDate = existing.published || (existing.freshness && existing.freshness.added_at) || '';
         const newDate = pkg.published || (pkg.freshness && pkg.freshness.added_at) || '';
         if (newDate > existingDate) {
-          dedupMap.set(key, pkg);
+          const mergedSources = existing.sources;
+          dedupMap.set(key, Object.assign({}, pkg, { sources: mergedSources }));
           upgradedPackages++;
         }
       }
@@ -1139,21 +1172,27 @@ async function runScraper() {
     pypiDedupMap.set(key, pkg);
   }
   let addedPyPIPackages = 0;
-  for (const pkg of pypiPackages) {
+  // Merge Aikido PyPI feed into the same loop
+  const allPyPIPackages = pypiPackages.concat(aikidoResult.pypi_packages || []);
+  for (const pkg of allPyPIPackages) {
     if (!validateIOCEntry(pkg.name, pkg.version, 'pypi')) {
       skippedInvalid++;
       continue;
     }
     const key = pkg.name + '@' + pkg.version;
     if (!pypiDedupMap.has(key)) {
+      seedSources(pkg);
       pypiDedupMap.set(key, pkg);
       addedPyPIPackages++;
     } else {
       const existing = pypiDedupMap.get(key);
+      seedSources(existing);
+      appendSource(existing, pkg);
       const existingConf = CONFIDENCE_ORDER[existing.confidence] || 0;
       const newConf = CONFIDENCE_ORDER[pkg.confidence] || 0;
       if (newConf > existingConf) {
-        pypiDedupMap.set(key, pkg);
+        const mergedSources = existing.sources;
+        pypiDedupMap.set(key, Object.assign({}, pkg, { sources: mergedSources }));
       }
     }
   }
@@ -1299,6 +1338,80 @@ async function runScraper() {
 }
 
 // ============================================
+// SOURCE 6: Aikido Open Source Malware Feed (npm + PyPI)
+// Free flat JSON feed at malware-list.aikido.dev. Each entry:
+//   { package_name, version, reason: 'MALWARE'|'TELEMETRY'|'PROTESTWARE' }
+// Source: https://github.com/AikidoSec/safe-chain (open-source consumer)
+// ============================================
+async function scrapeAikidoMalwareFeed() {
+  console.log('[SCRAPER] Aikido Open Source Malware Feed...');
+  const npmPackages = [];
+  const pypiPackages = [];
+
+  // npm
+  try {
+    const { status, data } = await fetchJSON('https://malware-list.aikido.dev/malware_predictions.json');
+    if (status === 200 && Array.isArray(data)) {
+      for (const entry of data) {
+        if (!entry || typeof entry.package_name !== 'string') continue;
+        // Only keep MALWARE; TELEMETRY/PROTESTWARE are policy decisions, not security
+        if (entry.reason !== 'MALWARE') continue;
+        const ver = (entry.version && entry.version !== '') ? String(entry.version) : '*';
+        npmPackages.push({
+          id: 'AIKIDO-' + entry.package_name + '-' + ver,
+          name: entry.package_name,
+          version: ver,
+          severity: 'critical',
+          confidence: 'high',
+          source: 'aikido',
+          description: 'Flagged by Aikido Open Source Malware Feed',
+          references: ['https://malware-list.aikido.dev/malware_predictions.json',
+                       'https://www.aikido.dev/code/malware-detection-in-dependencies'],
+          mitre: 'T1195.002',
+          freshness: createFreshness('aikido', 'high')
+        });
+      }
+      console.log('[SCRAPER]   ' + npmPackages.length + ' npm MALWARE entries from Aikido');
+    } else {
+      console.log('[SCRAPER]   Aikido npm feed: HTTP ' + status);
+    }
+  } catch (e) {
+    console.log('[SCRAPER]   Aikido npm error: ' + e.message);
+  }
+
+  // PyPI
+  try {
+    const { status, data } = await fetchJSON('https://malware-list.aikido.dev/malware_pypi.json');
+    if (status === 200 && Array.isArray(data)) {
+      for (const entry of data) {
+        if (!entry || typeof entry.package_name !== 'string') continue;
+        if (entry.reason !== 'MALWARE') continue;
+        const ver = (entry.version && entry.version !== '') ? String(entry.version) : '*';
+        pypiPackages.push({
+          id: 'AIKIDO-PYPI-' + entry.package_name + '-' + ver,
+          name: entry.package_name,
+          version: ver,
+          severity: 'critical',
+          confidence: 'high',
+          source: 'aikido',
+          description: 'Flagged by Aikido Open Source Malware Feed',
+          references: ['https://malware-list.aikido.dev/malware_pypi.json'],
+          mitre: 'T1195.002',
+          freshness: createFreshness('aikido', 'high')
+        });
+      }
+      console.log('[SCRAPER]   ' + pypiPackages.length + ' PyPI MALWARE entries from Aikido');
+    } else {
+      console.log('[SCRAPER]   Aikido PyPI feed: HTTP ' + status);
+    }
+  } catch (e) {
+    console.log('[SCRAPER]   Aikido PyPI error: ' + e.message);
+  }
+
+  return { packages: npmPackages, pypi_packages: pypiPackages };
+}
+
+// ============================================
 // SOURCE 5: OSV.dev Lightweight API
 // Used by `muaddib update` (fast, no zip download)
 // ============================================
@@ -1388,9 +1501,36 @@ async function queryOSVBatch(packageNames) {
 function getNoVersionSkipCount() { return _noVersionSkipCount; }
 function resetNoVersionSkipCount() { _noVersionSkipCount = 0; }
 
+/**
+ * Source-aware confidence: a package reported by N distinct feeds is more
+ * confident than one reported by a single source. Used by webhook gating
+ * and the /diff command to prioritize multi-confirmed alerts.
+ *
+ * Tiers:
+ *   N >= 3 → 'high'   (cross-confirmed, alert immediately)
+ *   N === 2 → 'medium' (single-corroboration, alert with sandbox confirm)
+ *   N <= 1 → 'low'    (single-feed only, log + sandbox before alert)
+ *
+ * @param {object} pkg - IOC package entry (with optional `sources` array)
+ * @returns {{ tier: 'high'|'medium'|'low', count: number, sources: string[] }}
+ */
+function getSourceConfidence(pkg) {
+  if (!pkg) return { tier: 'low', count: 0, sources: [] };
+  const sources = Array.isArray(pkg.sources) && pkg.sources.length > 0
+    ? pkg.sources.map(s => s.name || 'unknown')
+    : [pkg.source || (pkg.freshness && pkg.freshness.source) || 'unknown'];
+  const unique = Array.from(new Set(sources));
+  let tier = 'low';
+  if (unique.length >= 3) tier = 'high';
+  else if (unique.length === 2) tier = 'medium';
+  return { tier, count: unique.length, sources: unique };
+}
+
 module.exports = {
   runScraper, scrapeShaiHuludDetector, scrapeDatadogIOCs,
+  scrapeAikidoMalwareFeed,
   scrapeOSVLightweightAPI, queryOSVBatch,
+  getSourceConfidence,
   // Pure utility functions (exported for testing)
   parseCSVLine, parseCSV, extractVersions, parseOSVEntry,
   createFreshness, isAllowedRedirect,

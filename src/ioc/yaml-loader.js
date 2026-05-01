@@ -34,7 +34,10 @@ function loadYAMLIOCs() {
     packages: [],
     hashes: [],
     markers: [],
-    files: []
+    files: [],
+    // string-IOCs (YARA-style high-precision artifacts) — see iocs/string-iocs.yaml
+    // Each entry: { string, campaign, severity, source, description }
+    stringIocs: []
   };
 
   // Dedup sets for O(1) lookup during loading
@@ -42,6 +45,7 @@ function loadYAMLIOCs() {
   const seenHashes = new Set();
   const seenMarkers = new Set();
   const seenFiles = new Set();
+  const seenStrings = new Set();
 
   // Charger packages.yaml
   loadPackagesYAML(path.join(IOCS_DIR, 'packages.yaml'), iocs, seenPkgs);
@@ -52,7 +56,51 @@ function loadYAMLIOCs() {
   // Charger hashes.yaml
   loadHashesYAML(path.join(IOCS_DIR, 'hashes.yaml'), iocs, seenHashes, seenMarkers, seenFiles);
 
+  // Charger string-iocs.yaml (YARA-style)
+  loadStringIocsYAML(path.join(IOCS_DIR, 'string-iocs.yaml'), iocs, seenStrings);
+
   return iocs;
+}
+
+/**
+ * Load YARA-style string IOCs from string-iocs.yaml.
+ * Each entry must satisfy the inclusion criteria documented in that file:
+ *   - length >= 6 chars
+ *   - confirmed in >= 1 sample malware
+ *   - absent from benign corpus
+ *   - unique enough that substring match is decisive
+ * Length floor enforced here (defense-in-depth) — anything shorter is dropped
+ * silently with a single warning to avoid spamming the console.
+ */
+function loadStringIocsYAML(filePath, iocs, seenStrings) {
+  if (!fs.existsSync(filePath)) return;
+  const MIN_STRING_LEN = 6;
+  let dropped = 0;
+
+  try {
+    const data = yaml.load(readVerifiedYAML(filePath), { schema: yaml.JSON_SCHEMA });
+    if (!data || !Array.isArray(data.strings)) return;
+
+    for (const s of data.strings) {
+      if (!s || typeof s.string !== 'string') { dropped++; continue; }
+      const literal = s.string;
+      if (literal.length < MIN_STRING_LEN) { dropped++; continue; }
+      if (seenStrings.has(literal)) continue;
+      seenStrings.add(literal);
+      iocs.stringIocs.push({
+        string: literal,
+        campaign: typeof s.campaign === 'string' ? s.campaign : 'unknown',
+        severity: (s.severity === 'HIGH' || s.severity === 'MEDIUM') ? s.severity : 'CRITICAL',
+        source: typeof s.source === 'string' ? s.source : '',
+        description: typeof s.description === 'string' ? s.description : ''
+      });
+    }
+    if (dropped > 0) {
+      console.error(`[WARN] string-iocs.yaml: ${dropped} entries dropped (missing string field or below ${MIN_STRING_LEN} chars)`);
+    }
+  } catch (e) {
+    console.error('[WARN] Erreur parsing string-iocs.yaml:', e.message);
+  }
 }
 
 function loadPackagesYAML(filePath, iocs, seenPkgs) {

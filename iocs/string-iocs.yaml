@@ -1,0 +1,199 @@
+version: "1.0.0"
+updated: "2026-05-01"
+# String IOCs (YARA-style) — high-precision unique malware artifacts.
+# Each entry is a literal string searched in source files (.js, .cjs, .mjs,
+# .ts, .tsx, .py). Match in any source file fires the rule with score 100.
+#
+# Inclusion criteria (any string promoted here MUST satisfy):
+#   1. length >= 6 chars
+#   2. confirmed presence in >= 1 sample malware (link in `source`)
+#   3. absent from the curated benign corpus (532 npm packages)
+#   4. unique enough that a substring match is decisive (no common english
+#      words, no library-style names, no version numbers)
+#
+# Format:
+#   - string: <literal substring>
+#     campaign: <stable identifier, kebab-case, year-month suffix recommended>
+#     severity: CRITICAL | HIGH
+#     source: <URL to the writeup / RE / advisory that documented it>
+#     description: <one-sentence what this string is in the malware>
+
+strings:
+  # ── Axios npm compromise (BlueNoroff / Sapphire Sleet, 2026-03-31) ──
+  # Source: gist.github.com/N3mes1s/0c0fc7a0c23cdb5e1c8f66b208053ed6
+  # 8 YARA rules, 100% recall on all known samples (Daytona RE).
+  - string: "OrDeR_7077"
+    campaign: "axios-2026-03"
+    severity: CRITICAL
+    source: "https://gist.github.com/N3mes1s/0c0fc7a0c23cdb5e1c8f66b208053ed6"
+    description: "XOR key used by Axios setup.js dropper (also seen in csec autodelete family)"
+  - string: "rsp_peinject"
+    campaign: "axios-2026-03"
+    severity: CRITICAL
+    source: "https://gist.github.com/N3mes1s/0c0fc7a0c23cdb5e1c8f66b208053ed6"
+    description: "RAT command for Windows PE injection (Axios family)"
+  - string: "rsp_runscript"
+    campaign: "axios-2026-03"
+    severity: CRITICAL
+    source: "https://gist.github.com/N3mes1s/0c0fc7a0c23cdb5e1c8f66b208053ed6"
+    description: "RAT command for arbitrary script execution (Axios family)"
+  - string: "rsp_kill"
+    campaign: "axios-2026-03"
+    severity: CRITICAL
+    source: "https://gist.github.com/N3mes1s/0c0fc7a0c23cdb5e1c8f66b208053ed6"
+    description: "RAT command to terminate the agent (Axios family)"
+  - string: "rsp_rundir"
+    campaign: "axios-2026-03"
+    severity: CRITICAL
+    source: "https://gist.github.com/N3mes1s/0c0fc7a0c23cdb5e1c8f66b208053ed6"
+    description: "RAT command for directory enumeration + exfil (Axios family)"
+  - string: "macWebT"
+    campaign: "axios-2026-03"
+    severity: CRITICAL
+    source: "https://gist.github.com/N3mes1s/0c0fc7a0c23cdb5e1c8f66b208053ed6"
+    description: "Build path artifact (macOS variant) leaked by the Axios linker"
+  - string: "Jain_DEV"
+    campaign: "axios-2026-03"
+    severity: CRITICAL
+    source: "https://gist.github.com/N3mes1s/0c0fc7a0c23cdb5e1c8f66b208053ed6"
+    description: "Build path / developer alias artifact (Axios family)"
+  - string: "Extension.SubRoutine"
+    campaign: "axios-2026-03"
+    severity: CRITICAL
+    source: "https://gist.github.com/N3mes1s/0c0fc7a0c23cdb5e1c8f66b208053ed6"
+    description: ".NET injector class name used by the Windows variant of Axios RAT"
+  - string: "packages.npm.org/product"
+    campaign: "axios-2026-03"
+    severity: CRITICAL
+    source: "https://unit42.paloaltonetworks.com/axios-supply-chain-attack/"
+    description: "C2 path mimicking npm registry traffic (SIEM evasion); 0/1/2 suffix per OS"
+
+  # ── TeamPCP / @bitwarden/cli campaign (mars 2026) ──
+  # Source: ARCHITECTURE.md monitor + builtin.yaml (already partially covered)
+  - string: "checkmarx.zone"
+    campaign: "teampcp-2026"
+    severity: CRITICAL
+    source: "https://blog.gitguardian.com/three-supply-chain-campaigns-hit-npm-pypi-and-docker-hub-in-48-hours/"
+    description: "TeamPCP exfil C2 (typosquat of checkmarx.com)"
+  - string: "scan.aquasecurtiy.org"
+    campaign: "teampcp-2026"
+    severity: CRITICAL
+    source: "https://blog.gitguardian.com/three-supply-chain-campaigns-hit-npm-pypi-and-docker-hub-in-48-hours/"
+    description: "Trivy exfil C2 (typosquat of aquasecurity.com)"
+  - string: "hackmoltrepeat.com"
+    campaign: "teampcp-2026"
+    severity: CRITICAL
+    source: "https://access.redhat.com/security/supply-chain-attacks-NPM-packages"
+    description: "TeamPCP secondary C2"
+
+  # ── GlassWorm (mars 2026, 433+ packages) ──
+  # Source: builtin.yaml v2.9.1
+  - string: "getSignaturesForAddress"
+    campaign: "glassworm-2026"
+    severity: HIGH
+    source: "ARCHITECTURE.md v2.9.1"
+    description: "Solana RPC method used by GlassWorm to read C2 commands from blockchain"
+
+  # ── CanisterSprawl / CanisterWorm (avril 2026, ~16+ packages) ──
+  # Source: stepsecurity.io / socket.dev / mend.io
+  # Hard-coded ICP canister ID = the C2 endpoint, unique enough to be a high-precision IOC.
+  - string: "cjn37-uyaaa-aaaac-qgnva-cai"
+    campaign: "canistersprawl-2026"
+    severity: CRITICAL
+    source: "https://www.stepsecurity.io/blog/pgserve-compromised-on-npm-malicious-versions-harvest-credentials"
+    description: "ICP canister ID used by CanisterSprawl worm for credential exfiltration"
+  - string: "dist/env-compat.cjs"
+    campaign: "canistersprawl-2026"
+    severity: HIGH
+    source: "https://www.stepsecurity.io/blog/pgserve-compromised-on-npm-malicious-versions-harvest-credentials"
+    description: "Dropper file path used by CanisterSprawl postinstall hook"
+
+  # ── Hugging Face C2 / CDN family (2026) ──
+  # Source: cybersecuritynews.com/malicious-npm-package-turns-hugging-face/
+  # Specific HF API endpoints abused by malware for payload hosting.
+  - string: "huggingface.co/api/models"
+    campaign: "huggingface-cdn-2026"
+    severity: HIGH
+    source: "https://cybersecuritynews.com/malicious-npm-package-turns-hugging-face/"
+    description: "Hugging Face API endpoint used by malware to host binary payloads (C2/CDN abuse)"
+
+  # ── Mini Shai-Hulud / SAP CAP campaign (TeamPCP, 2026-04-29) ──
+  # Sources cross-confirmed:
+  #   https://www.wiz.io/blog/mini-shai-hulud-supply-chain-sap-npm
+  #   https://kudelskisecurity.com/research/mini-shai-hulud-supply-chain-attack
+  #   https://www.darkreading.com/cloud-security/teampcp-sap-packages-mini-shai-hulud
+  #   https://snyk.io/blog/bun-based-stealer-hits-sap-cap-js-mbt-npm-packages/
+  # Affected packages : @cap-js/sqlite@2.2.2, @cap-js/postgres@2.2.2,
+  # @cap-js/db-service@2.10.1, mbt@1.2.48, intercom-client@7.0.4-7.0.5,
+  # lightning (PyPI) 2.6.2-2.6.3.
+  # Pattern : preinstall hook → setup.mjs → download Bun runtime →
+  # execute ~11.6 MB obfuscated credential stealer → exfil via attacker
+  # GitHub repos. Self-propagation via stolen tokens (worm characteristic).
+  - string: "OhNoWhatsGoingOnWithGitHub"
+    campaign: "mini-shai-hulud-2026-04"
+    severity: CRITICAL
+    source: "https://www.wiz.io/blog/mini-shai-hulud-supply-chain-sap-npm"
+    description: "Commit message signature used by Mini Shai-Hulud for fallback exfil to attacker GitHub repos"
+  - string: "beautifulcastle"
+    campaign: "mini-shai-hulud-2026-04"
+    severity: CRITICAL
+    source: "https://www.wiz.io/blog/mini-shai-hulud-supply-chain-sap-npm"
+    description: "GitHub commit search keyword used by Mini Shai-Hulud to retrieve dynamic config"
+  - string: "Checkmarx Configuration Storage"
+    campaign: "mini-shai-hulud-2026-04"
+    severity: CRITICAL
+    source: "https://www.wiz.io/blog/mini-shai-hulud-supply-chain-sap-npm"
+    description: "Repository description string used by Mini Shai-Hulud to disguise exfil repos as Checkmarx infra"
+  - string: "zero.masscan.cloud"
+    campaign: "mini-shai-hulud-2026-04"
+    severity: CRITICAL
+    source: "https://www.wiz.io/blog/mini-shai-hulud-supply-chain-sap-npm"
+    description: "Primary exfiltration domain for Mini Shai-Hulud"
+  - string: "94.154.172.43"
+    campaign: "mini-shai-hulud-2026-04"
+    severity: CRITICAL
+    source: "https://www.wiz.io/blog/mini-shai-hulud-supply-chain-sap-npm"
+    description: "Fallback C2 IP for Mini Shai-Hulud (with /v1/telemetry endpoint)"
+  - string: ".claude/execution.js"
+    campaign: "mini-shai-hulud-2026-04"
+    severity: CRITICAL
+    source: "https://www.wiz.io/blog/mini-shai-hulud-supply-chain-sap-npm"
+    description: "Dropped payload path inside .claude/ — Mini Shai-Hulud hides in IDE config dir"
+
+  # ── Axios C2 IPs / domains (DPRK / Sapphire Sleet) ──
+  # Source: Microsoft / Unit42 mitigation guides
+  - string: "sfrclak.com"
+    campaign: "axios-2026-03"
+    severity: CRITICAL
+    source: "https://www.microsoft.com/en-us/security/blog/2026/04/01/mitigating-the-axios-npm-supply-chain-compromise/"
+    description: "C2 host for Axios npm compromise (Sapphire Sleet)"
+  - string: "/Library/Caches/com.apple.act.mond"
+    campaign: "axios-2026-03"
+    severity: CRITICAL
+    source: "https://www.microsoft.com/en-us/security/blog/2026/04/01/mitigating-the-axios-npm-supply-chain-compromise/"
+    description: "macOS persistence path used by Axios payload"
+  - string: "MicrosoftUpdate"
+    campaign: "axios-2026-03"
+    severity: HIGH
+    source: "https://www.microsoft.com/en-us/security/blog/2026/04/01/mitigating-the-axios-npm-supply-chain-compromise/"
+    description: "Windows registry run-key persistence string used by Axios payload (low FP only when combined with other Axios IOCs)"
+  - string: "ProgramData\\wt.exe"
+    campaign: "axios-2026-03"
+    severity: CRITICAL
+    source: "https://www.microsoft.com/en-us/security/blog/2026/04/01/mitigating-the-axios-npm-supply-chain-compromise/"
+    description: "PowerShell renamed to wt.exe in ProgramData (process-name spoofing as Windows Terminal)"
+  - string: "/tmp/ld.py"
+    campaign: "axios-2026-03"
+    severity: CRITICAL
+    source: "https://www.microsoft.com/en-us/security/blog/2026/04/01/mitigating-the-axios-npm-supply-chain-compromise/"
+    description: "Linux dropper path used by Axios payload"
+  - string: "recv.hackmoltrepeat.com"
+    campaign: "teampcp-2026"
+    severity: CRITICAL
+    source: "https://access.redhat.com/security/supply-chain-attacks-NPM-packages"
+    description: "TeamPCP secondary C2 (receive endpoint subdomain)"
+  - string: "/6202033"
+    campaign: "axios-2026-03"
+    severity: HIGH
+    source: "https://gist.github.com/N3mes1s/0c0fc7a0c23cdb5e1c8f66b208053ed6"
+    description: "Axios C2 path campaign ID (when combined with packages.npm.org/product)"

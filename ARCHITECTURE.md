@@ -11,7 +11,7 @@ bin/muaddib.js (yargs CLI)
   └─► src/index.js — run(targetPath, options)
         ├─► Module Graph pre-analysis (src/scanner/module-graph.js)
         ├─► Deobfuscation pre-processing (src/scanner/deobfuscate.js)
-        ├─► 13 parallel scanners (Promise.all)
+        ├─► 16 parallel scanners (Promise.all)
         │     ├── AST scanner (src/scanner/ast.js)
         │     ├── Dataflow scanner (src/scanner/dataflow.js)
         │     ├── Shell scanner (src/scanner/shell.js)
@@ -24,17 +24,20 @@ bin/muaddib.js (yargs CLI)
         │     ├── AI Config scanner (src/scanner/ai-config.js)
         │     ├── GitHub Actions scanner (src/scanner/github-actions.js)
         │     ├── Hash scanner (src/scanner/hash.js)
+        │     ├── IOC strings (src/scanner/ioc-strings.js, intel-triage P1.1)
+        │     ├── Anti-forensic AST (src/scanner/anti-forensic.js, intel-triage P1.2)
+        │     ├── Stub package (src/scanner/stub-package.js, intel-triage P1.3)
         │     └── Intent coherence (src/intent-graph.js)
         ├─► Deduplication
         ├─► FP reductions (src/scoring.js — applyFPReductions)
         ├─► Intent coherence analysis (src/intent-graph.js — buildIntentPairs)
-        ├─► Rule enrichment (src/rules/index.js — 209 rules)
+        ├─► Rule enrichment (src/rules/index.js — 211 rules)
         ├─► Scoring (src/scoring.js — per-file max)
         ├─► ML classifier (src/ml/classifier.js — T1 zone filtering)
         └─► Output (CLI / JSON / HTML / SARIF)
 ```
 
-**Core orchestration:** `src/index.js` — `run(targetPath, options)` runs cross-file module graph analysis first, then launches 13 individual scanners in parallel via `Promise.all` (14 scanner modules total), then deduplicates, applies FP reductions, scores using per-file max (v2.2.11: `riskScore = min(100, max(file_scores) + package_level_score)`, severity weights: CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1), applies intent coherence analysis (intra-file source-sink pairing), enriches with rules/playbooks (209 rules), and outputs (CLI/JSON/HTML/SARIF). Result includes `warnings: []` array (v2.6.5) for incomplete scan notifications (module graph timeout/skip, deobfuscation failures). Exports `isPackageLevelThreat` and `computeGroupScore` for testing.
+**Core orchestration:** `src/index.js` — `run(targetPath, options)` runs cross-file module graph analysis first, then launches 16 individual scanners in parallel via `Promise.all` (intel-triage P1 added: `scanIocStrings`, `scanAntiForensic`, `scanStubPackage`), then deduplicates, applies FP reductions, scores using per-file max (v2.2.11: `riskScore = min(100, max(file_scores) + package_level_score)`, severity weights: CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1), applies intent coherence analysis (intra-file source-sink pairing), enriches with rules/playbooks (211 rules), and outputs (CLI/JSON/HTML/SARIF). Result includes `warnings: []` array (v2.6.5) for incomplete scan notifications (module graph timeout/skip, deobfuscation failures). Exports `isPackageLevelThreat` and `computeGroupScore` for testing.
 
 ## Scanner Modules
 
@@ -102,6 +105,63 @@ Replaces global score accumulation with per-file max scoring. Formula: `riskScor
 - **Preload patches** (IIFE, closure-scoped originals): Time APIs (Date.now, constructor, performance.now, process.hrtime/bigint, process.uptime), timers (setTimeout→0, setInterval→immediate first exec), network (http/https.request, fetch, dns, net.connect), filesystem (sensitive path detection via regex), process (child_process.* with dangerous command detection), environment (Proxy on process.env for sensitive key access).
 - **Analyzer**: `src/sandbox/analyzer.js` parses `[PRELOAD]` log lines with 6 scoring rules: timer delay suspicious (>1h, MEDIUM +15), timer delay critical (>24h, CRITICAL +30, supersedes suspicious), sensitive file read (HIGH +20), network after sensitive read (CRITICAL +40, compound), exec suspicious (HIGH +25), env token access (MEDIUM +10).
 - **Docker changes**: `docker/Dockerfile` copies `preload.js` to `/opt/preload.js`. `docker/sandbox-runner.sh` sets `NODE_OPTIONS`, captures `/tmp/preload.log`, includes `preload_log` in JSON report.
+
+### Intel Triage (mai 2026) — static-first detection alignee sur 2026
+
+Trois nouveaux scanners statiques + l'extension du scraper IOC. Aligne le
+projet sur la realite du marche : Zenbox (sandbox commercial) a classe
+Axios npm CLEAN avec 99% de confiance ; les malwares 2026 defeat les
+sandbox runtime by design (hardware fingerprinting, C2-side detection,
+keys in response headers, 48h rate limit). Les outils SOTA (Socket.dev,
+GuardDog, Semgrep, Phylum) sont tous static. Cf. `feedback_static_over_dynamic`
+memoire.
+
+**Scanner P1.1 `src/scanner/ioc-strings.js`** (rule `MUADDIB-IOC-001`,
+threat `ioc_string_match` CRITICAL): YARA-style substring match contre
+`iocs/string-iocs.yaml`. Bootstrap avec 15 strings (9 Axios par
+N3mes1s gist + 3 TeamPCP + 1 GlassWorm + 2 CanisterSprawl + extensions).
+Loader `loadStringIocsYAML` ajoute dans `src/ioc/yaml-loader.js` ;
+expose `iocs.stringIocs` + `iocs.stringIocsMap` via `loadCachedIOCs`.
+Match en source = signal CRITICAL transverse a tous les variants qui
+reuse un meme stager / XOR key / RAT command name.
+
+**Scanner P1.2 `src/scanner/anti-forensic.js`** (rules `MUADDIB-AF-001/002`):
+detection AST compound de la classe Axios/csec autodelete. Trois patterns :
+(1) XOR loop avec literal-derived operand (charCodeAt sur literal, ou XOR
+avec literal number), (2) self-delete (fs.unlink/rename de __filename ou
+path matchant `node_modules/<pkg>/<file>.(c|m)?js`), (3) decoy write
+(fs.writeFile vers `.md|.bak|.tmp|.txt|.log`). 3 of 3 = CRITICAL ; 2 of 3
+= HIGH partial. Pre-filtre regex pour skipper les bundles benign sans
+operateur `^`.
+
+**Scanner P1.3 `src/scanner/stub-package.js`** (rules `MUADDIB-STUB-001/002`):
+ferme le gap ltidi chain attack documente en memoire. Conditions :
+(1) package.json declare au moins une dep avec URL externe (https/git/github),
+(2) main file < 500 octets meaningful (comments stripped), (3) lifecycle hook
+present. Triggers `stub_package_external_payload` CRITICAL. Sans lifecycle
+= `stub_package_external_dep` HIGH. Walks node_modules sub-deps avec scoped
+package handling.
+
+**Aikido feed `src/ioc/scraper.js:scrapeAikidoMalwareFeed`** : pull
+`malware-list.aikido.dev/malware_predictions.json` + `_pypi.json`. Smoke
+live mai 2026 : 121 521 npm + 3 064 PyPI MALWARE entries source-tagged
+`aikido`. Plug into runScraper Phase 2 + dedup avec source accumulation.
+
+**Source-aware confidence `getSourceConfidence(pkg)`** : la dedup au scraper
+maintient un array `sources: [{name, added_at}]` par entree (name@version).
+Helper retourne `{tier: 'high'|'medium'|'low', count, sources}` ou tier
+`high` = 3+ feeds distincts. Permet aux consumers (webhook, /diff) de
+prioriser les alertes cross-confirmees.
+
+**Compounds intel-triage** : `axios_family` (ioc_string_match + lifecycle_script
++ anti_forensic_partial) et `stub_with_string_ioc` (stub_package_external_dep
++ ioc_string_match). Rules `MUADDIB-COMPOUND-AXIOS` et `MUADDIB-COMPOUND-STUB-IOC`.
+
+**CLI tool `scripts/git-vs-npm-diff.js`** : telecharge tarball npm + archive
+GitHub correspondant au tag, hash chaque fichier .js/.cjs/.mjs/.ts/.tsx/.json,
+signale les `npm-only` (publish-time injection) ou `hash-differs`. Catch les
+compromissions par token vole (Axios mode). Usage manuel par l'operateur
+quand un package suspect est surface.
 
 ## IOC System (3-tier)
 
