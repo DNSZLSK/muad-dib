@@ -9,6 +9,7 @@ const fs = require('fs');
 const path = require('path');
 
 const { sendWebhook } = require('../webhook.js');
+const { sendIngest, isIngestConfigured } = require('../integrations/api-ingest.js');
 const {
   atomicWriteFileSync,
   ALERTS_LOG_DIR,
@@ -449,6 +450,12 @@ async function trySendWebhook(name, version, ecosystem, result, sandboxResult, m
     for (const r of currentRules) previousRules.add(r);
   } else {
     alertedPackageRules.set(name, new Set(currentRules));
+  }
+
+  // Push to muad-api dashboard (fire-and-forget, fires once per unique package
+  // even when scope grouping batches the Discord webhook).
+  if (isIngestConfigured()) {
+    sendIngest(name, version, result).catch(() => {});
   }
 
   // Scope grouping: buffer scoped npm packages for grouped webhook
