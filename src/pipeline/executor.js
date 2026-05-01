@@ -6,6 +6,9 @@ const { analyzeAST } = require('../scanner/ast.js');
 const { detectObfuscation } = require('../scanner/obfuscation.js');
 const { scanDependencies } = require('../scanner/dependencies.js');
 const { scanHashes } = require('../scanner/hash.js');
+const { scanIocStrings } = require('../scanner/ioc-strings.js');
+const { scanAntiForensic } = require('../scanner/anti-forensic.js');
+const { scanStubPackage } = require('../scanner/stub-package.js');
 const { analyzeDataFlow } = require('../scanner/dataflow.js');
 const { scanTyposquatting, findPyPITyposquatMatch } = require('../scanner/typosquat.js');
 const { scanGitHubActions } = require('../scanner/github-actions.js');
@@ -183,7 +186,8 @@ async function execute(targetPath, options, pythonDeps, warnings) {
     'scanPackageJson', 'scanShellScripts', 'analyzeAST', 'detectObfuscation',
     'scanDependencies', 'scanHashes', 'analyzeDataFlow', 'scanTyposquatting',
     'scanGitHubActions', 'matchPythonIOCs', 'checkPyPITyposquatting',
-    'scanEntropy', 'scanAIConfig'
+    'scanEntropy', 'scanAIConfig', 'scanIocStrings', 'scanAntiForensic',
+    'scanStubPackage'
   ];
 
   const settledResults = await Promise.allSettled([
@@ -199,7 +203,10 @@ async function execute(targetPath, options, pythonDeps, warnings) {
     yieldThen(() => matchPythonIOCs(pythonDeps, targetPath)),
     yieldThen(() => checkPyPITyposquatting(pythonDeps, targetPath)),
     withTimeout(() => scanEntropy(targetPath, { entropyThreshold: options.entropyThreshold || undefined }), 'scanEntropy'),
-    yieldThen(() => scanAIConfig(targetPath))
+    yieldThen(() => scanAIConfig(targetPath)),
+    yieldThen(() => scanIocStrings(targetPath)),
+    withTimeout(() => scanAntiForensic(targetPath), 'scanAntiForensic'),
+    yieldThen(() => scanStubPackage(targetPath))
   ]);
 
   // Extract results: use empty array for rejected scanners, log errors
@@ -224,7 +231,10 @@ async function execute(targetPath, options, pythonDeps, warnings) {
     pythonThreats,
     pypiTyposquatThreats,
     entropyThreats,
-    aiConfigThreats
+    aiConfigThreats,
+    iocStringThreats,
+    antiForensicThreats,
+    stubPackageThreats
   ] = scanResult;
 
   // Emit warning if file count cap was hit + quick-scan overflow files
@@ -291,6 +301,9 @@ async function execute(targetPath, options, pythonDeps, warnings) {
     ...pypiTyposquatThreats,
     ...entropyThreats,
     ...aiConfigThreats,
+    ...iocStringThreats,
+    ...antiForensicThreats,
+    ...stubPackageThreats,
     ...crossFileFlows.filter(f => f && f.sourceFile && f.sinkFile).map(f => ({
       type: f.type,
       severity: f.severity,

@@ -9,6 +9,9 @@ const { runDataflowTests } = require('./scanner/dataflow.test');
 const { runPackageTests } = require('./scanner/package.test');
 const { runTyposquatTests } = require('./scanner/typosquat.test');
 const { runDependencyTests } = require('./scanner/dependency.test');
+const { runIocStringsTests } = require('./scanner/ioc-strings.test');
+const { runAntiForensicTests } = require('./scanner/anti-forensic.test');
+const { runStubPackageTests } = require('./scanner/stub-package.test');
 const { runHashTests } = require('./scanner/hash.test');
 const { runEntropyTests } = require('./scanner/entropy.test');
 const { runPythonTests } = require('./scanner/python.test');
@@ -111,6 +114,9 @@ async function timed(name, fn) {
   // IOC / report / sandbox
   await timed('updater', runUpdaterTests);
   await timed('dependency', runDependencyTests);
+  await timed('ioc-strings', runIocStringsTests);
+  await timed('anti-forensic', runAntiForensicTests);
+  await timed('stub-package', runStubPackageTests);
   await timed('hash', runHashTests);
   await timed('webhook', runWebhookTests);
   await timed('python', runPythonTests);

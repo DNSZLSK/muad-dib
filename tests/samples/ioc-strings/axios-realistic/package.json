@@ -1,0 +1,9 @@
+{
+  "name": "axios-realistic-mock",
+  "version": "1.14.1",
+  "description": "Test fixture: realistic clone of Axios npm 2026-03 setup.js dropper",
+  "main": "lib/index.js",
+  "scripts": {
+    "postinstall": "node lib/setup.js"
+  }
+}

@@ -1152,18 +1152,34 @@ console.log('\n=== IOC STALENESS TESTS ===\n');
 
 test('STALENESS: checkIOCStaleness returns null for fresh files', () => {
   const { checkIOCStaleness } = require('../../src/ioc/updater.js');
-  // Compact file should exist and be recent (we just ran tests)
+  const os = require('os');
+  // checkIOCStaleness inspects the NEWEST mtime among 3 files. Mirror that
+  // logic in the test or it falsely fails when only the local compact is
+  // stale but the cached HOME copy has been refreshed by `muaddib update`.
+  const filesToCheck = [
+    path.join(os.homedir(), '.muaddib', 'data', 'iocs.json'),
+    path.join(__dirname, '..', '..', 'src', 'ioc', 'data', 'iocs.json'),
+    path.join(__dirname, '..', '..', 'src', 'ioc', 'data', 'iocs-compact.json')
+  ];
+  let newestMtime = 0;
+  for (const f of filesToCheck) {
+    try {
+      const stat = fs.statSync(f);
+      if (stat.mtimeMs > newestMtime) newestMtime = stat.mtimeMs;
+    } catch { /* missing file — skip */ }
+  }
+  if (newestMtime === 0) {
+    // No IOC files at all → function should return null per its contract
+    assert(checkIOCStaleness(30) === null, 'No files should return null');
+    return;
+  }
+  const ageDays = (Date.now() - newestMtime) / (1000 * 60 * 60 * 24);
   const result = checkIOCStaleness(30);
-  // If the file is less than 30 days old, should return null
-  const compactPath = path.join(__dirname, '..', '..', 'src', 'ioc', 'data', 'iocs-compact.json');
-  if (fs.existsSync(compactPath)) {
-    const ageDays = (Date.now() - fs.statSync(compactPath).mtimeMs) / (1000 * 60 * 60 * 24);
-    if (ageDays <= 30) {
-      assert(result === null, 'Fresh files should return null, got: ' + result);
-    } else {
-      assert(typeof result === 'string', 'Old files should return a warning string');
-      assert(result.includes('muaddib update'), 'Warning should suggest running muaddib update');
-    }
+  if (ageDays <= 30) {
+    assert(result === null, 'Fresh files should return null, got: ' + result);
+  } else {
+    assert(typeof result === 'string', 'Old files should return a warning string');
+    assert(result.includes('muaddib update'), 'Warning should suggest running muaddib update');
   }
 });
 

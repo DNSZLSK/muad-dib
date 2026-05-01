@@ -5,6 +5,115 @@ All notable changes to MUAD'DIB will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — Intel Triage : detection statique aligned sur 2026
+
+### Contexte
+
+Constat operateur : "ça fait des mois que la sandbox n'attrape rien". Recherche
+internet confirme : Zenbox (sandbox commercial de pointe) a classe Axios npm
+2026-03 CLEAN avec 99% de confiance ; les malwares 2026 (Sapphire Sleet/Axios,
+TeamPCP, CanisterSprawl, xinference) cumulent hardware fingerprinting,
+C2-side detection, decryption-keys-in-response-headers et rate-limit 48h pour
+defaire les sandbox runtime. Le bon layer en 2026 = static IOC strings +
+threat intel feeds + AST family compounds + git/registry diff. Cf. les 8
+regles YARA d'Axios qui catch 100% des samples avec 5 string literals.
+
+Ce changeset livre les briques static qui MARCHENT contre les attaques
+courantes de 2026, et abandonne explicitement le sandbox v2 / honeypot
+multi-port qui etait en chantier sur cette branche (memoire
+`feedback_sandbox_wrong_layer.md` enregistree pour ne plus reproposer).
+
+### Phase 1 — Quick wins (en place)
+
+- **P1.1 Scanner IOC strings (YARA-style)** : `src/scanner/ioc-strings.js`
+  + `iocs/string-iocs.yaml` (15 strings bootstrap : 9 d'Axios via
+  N3mes1s gist + 3 TeamPCP + 1 GlassWorm + 2 CanisterSprawl). Loader
+  `src/ioc/yaml-loader.js` etendu avec `loadStringIocsYAML()`. Match en
+  source = score CRITICAL transverse a toutes les variantes qui reuse
+  un meme stager. Rule `MUADDIB-IOC-001`. 8 unit tests.
+- **P1.2 Rule C en AST static** : `src/scanner/anti-forensic.js` detecte
+  le compound XOR loop + self-delete (unlink __filename / rename to .md/.bak)
+  + decoy write (writeFile vers package.md/.bak/...). 3 of 3 = `anti_forensic_xor_autodelete`
+  CRITICAL ; 2 of 3 = `anti_forensic_partial` HIGH. Rules `MUADDIB-AF-001/002`.
+  Catch la classe csec autodelete (memoire) sans dependre du sandbox. 12 tests.
+- **P1.3 Stub package detector (gap ltidi)** : `src/scanner/stub-package.js`
+  fire CRITICAL `stub_package_external_payload` quand main file < 500 octets
+  meaningful + dep URL externe (https/git) + lifecycle hook ; HIGH
+  `stub_package_external_dep` sans lifecycle. Comments stripped avant la
+  mesure. Rules `MUADDIB-STUB-001/002`. 11 tests.
+- **P1.4 Bugfix deferred queue T2 fallback** : VERIFIE deja en place
+  (Layer A dans classify.js + Layer B dans deferred-sandbox.js avec
+  TIER1 carve-out). Memoire `project_deferred_queue_t2_fallback_bug.md`
+  marquee FIXED.
+
+### Phase 2 — Threat intel feeds
+
+- **P2.3 Aikido Open Source Malware Feed** (nouveau) : npm + PyPI JSON
+  pull depuis `malware-list.aikido.dev`. Smoke test live : **121 521 npm
+  + 3 064 PyPI** entries MALWARE recuperees. Source-tagged `aikido`.
+- **P2.6 Source-aware confidence scoring** : la dedup au scraper accumule
+  desormais un array `sources: [{name, added_at}]` par entree IOC. Helper
+  exporte `getSourceConfidence(pkg)` retourne `{tier, count, sources}` avec
+  tiers `low` (1 source), `medium` (2), `high` (3+). Permet aux consumers
+  webhook/diff de prioriser les alertes cross-confirmees.
+- **P2.1 OSSF malicious-packages** + **P2.4 OSV.dev** : verifies en place
+  (scrapeOSSFMaliciousPackages, scrapeOSVDataDump, scrapeOSVLightweightAPI).
+- **P2.2 OpenSourceMalware.com** + **P2.5 Sonatype OSS Index** : differes
+  (pas d'endpoint bulk documente / token operateur requis).
+
+### Phase 3 — Compounds et IOCs supplementaires
+
+Plutot qu'ajouter 6 detecteurs AST par famille, j'ai etendu `string-iocs.yaml`
+avec les marqueurs uniques de chaque campagne. Le scanner P1.1 catch ainsi
+les familles directement, sans nouveau code :
+
+- **CanisterSprawl** : ICP canister ID `cjn37-uyaaa-aaaac-qgnva-cai` +
+  dropper path `dist/env-compat.cjs`.
+- **Hugging Face C2/CDN** : `huggingface.co/api/models` endpoint.
+- **SAP credential stealer** : `Mini-Framework`.
+- **Axios extension** : `sfrclak.com` C2 + macOS persistence path
+  `/Library/Caches/com.apple.act.mond` + Windows registry key
+  `MicrosoftUpdate`.
+
+Deux compounds declaratifs ajoutes dans scoring.js :
+- **`axios_family`** : `ioc_string_match` + `lifecycle_script` + `anti_forensic_partial`.
+- **`stub_with_string_ioc`** : `stub_package_external_dep` + `ioc_string_match`.
+
+### Phase 5 — Git vs npm diff
+
+- **P5.1 `scripts/git-vs-npm-diff.js`** : CLI tool qui telecharge le tarball
+  npm + l'archive GitHub correspondant au tag, hash chaque fichier source,
+  et signale les `npm-only` ou `hash-differs`. Catch les compromissions
+  publish-time (mode Axios = token vole, push de tarballs altered).
+  Usage : `node scripts/git-vs-npm-diff.js <package> <version>`.
+
+### Differes (avec raisons)
+
+- **OpenSourceMalware.com** (P2.2) — pas d'endpoint bulk public.
+- **Sonatype OSS Index** (P2.5), **Socket.dev API** (P6.1), **Phylum API**
+  (P6.2), **VirusTotal hash matching** (P6.3) — tokens / comptes operateur
+  requis.
+- **P3.5 Ethereum smart contract C2 compound** — manque samples concrets.
+- **P3.6 SAP credential compound** complet, **P5.2 maintainer history
+  scoring** complet, **P5.3 CI/release tag mismatch** — chaque morceau
+  necessite des heures supplementaires de detecteurs AST. Documente comme
+  candidat enhancement.
+- **Phase 4 entiere (auto-rule generation)** — bloquee sur le pipeline de
+  collection de samples (P4.1) qui necessite tokens API ou seed list curate.
+
+### Verification
+
+- `node tests/run-tests.js` : **3380 passes, 0 failed** (STALENESS flake fix
+  inclus dans cette PR).
+- `node bin/muaddib.js scan tests/samples/ioc-strings/axios-realistic`
+  fire **riskScore 100 CRITICAL** : 7 `ioc_string_match` distincts (Axios IOCs)
+  + `anti_forensic_xor_autodelete` + `lifecycle_file_exec` + `lifecycle_script`.
+- Fixture clean (`tests/samples/ioc-strings/clean-lib`) → riskScore 0 (zero FP).
+- Smoke-test live Aikido feed : 121 521 npm + 3 064 PyPI MALWARE entries.
+- 4 memories sauvegardees : `feedback_sandbox_wrong_layer`,
+  `feedback_static_over_dynamic`, `reference_threat_intel_feeds`,
+  `project_axios_2026_yara`. MEMORY.md index mis a jour.
+
 ## [2.10.97] - 2026-04-19
 
 ### Context

@@ -136,7 +136,9 @@ function mergeIOCs(target, source) {
     target._hashSet = new Set(target.hashes);
     target._markerSet = new Set(target.markers);
     target._fileSet = new Set(target.files);
+    target._stringIocSet = new Set((target.stringIocs || []).map(s => s.string));
   }
+  if (!target.stringIocs) target.stringIocs = [];
 
   let added = 0;
 
@@ -184,6 +186,16 @@ function mergeIOCs(target, source) {
     }
   }
 
+  // Merge string IOCs (YARA-style)
+  for (const sIoc of source.stringIocs || []) {
+    const literal = sIoc && typeof sIoc.string === 'string' ? sIoc.string : null;
+    if (!literal) continue;
+    if (!target._stringIocSet.has(literal)) {
+      target.stringIocs.push(sIoc);
+      target._stringIocSet.add(literal);
+    }
+  }
+
   return added;
 }
 
@@ -207,7 +219,9 @@ function loadCachedIOCs() {
     pypi_packages: [],
     hashes: yamlIOCs.hashes.map(function(h) { return h.sha256; }),
     markers: yamlIOCs.markers.map(function(m) { return m.pattern; }),
-    files: yamlIOCs.files.map(function(f) { return f.name; })
+    files: yamlIOCs.files.map(function(f) { return f.name; }),
+    // string-IOCs from string-iocs.yaml (YARA-style high-precision artifacts)
+    stringIocs: Array.isArray(yamlIOCs.stringIocs) ? [...yamlIOCs.stringIocs] : []
   };
 
   // Priority 2a: Local scraped IOCs (full enriched file)
@@ -349,6 +363,11 @@ function createOptimizedIOCs(iocs) {
   // Set for suspicious files
   const filesSet = new Set(iocs.files);
 
+  // String IOCs (YARA-style): keep both array (for metadata) and Map keyed by string
+  // for O(1) campaign lookup once a substring match has been confirmed.
+  const stringIocsArr = Array.isArray(iocs.stringIocs) ? iocs.stringIocs : [];
+  const stringIocsMap = new Map(stringIocsArr.map(s => [s.string, s]));
+
   return {
     // Optimized structures (npm)
     packagesMap,
@@ -360,6 +379,9 @@ function createOptimizedIOCs(iocs) {
     hashesSet,
     markersSet,
     filesSet,
+    // String IOCs (YARA-style)
+    stringIocs: stringIocsArr,
+    stringIocsMap,
     // Original arrays for compatibility
     packages: iocs.packages,
     pypi_packages: iocs.pypi_packages || [],

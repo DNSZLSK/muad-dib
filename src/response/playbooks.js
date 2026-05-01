@@ -128,6 +128,27 @@ const PLAYBOOKS = {
   shai_hulud_marker:
     'CRITIQUE: Marqueur Shai-Hulud detecte. Package compromis. Supprimer immediatement et regenerer tous les tokens.',
 
+  ioc_string_match:
+    'CRITIQUE: String IOC YARA-style matched (campagne malware connue). Verifier le fichier signale et le champ campaign. Si match dans node_modules, considerer le package compromis. Source du IOC dans `iocs/string-iocs.yaml`.',
+
+  anti_forensic_xor_autodelete:
+    'CRITIQUE: Pattern complet anti-forensique (XOR + self-delete + decoy write) dans un seul fichier. Style Axios npm 2026-03 / csec autodelete. Considerer le package compromis. Inspecter le fichier signale et regenerer tous les secrets si le code a deja tourne.',
+
+  anti_forensic_partial:
+    'ATTENTION: 2 patterns anti-forensiques sur 3 dans un meme fichier. Soit malware en cours de developpement, soit faux positif sur lib de crypto/build qui combine XOR + ecriture .bak. Inspection manuelle requise.',
+
+  stub_package_external_payload:
+    'CRITIQUE: Package stub avec dep URL externe + lifecycle hook = pattern ltidi chain. Le code malveillant est dans la dep externe, pas le tarball npm. Bloquer le package + resoudre la dep externe pour audit.',
+
+  stub_package_external_dep:
+    'ATTENTION: Package stub avec dep URL externe (sans lifecycle). Lib legitime qui pull un payload via URL devrait re-exporter la dep. Inspecter la dep cible avant install.',
+
+  axios_family:
+    'CRITIQUE: Famille Axios/csec confirmee (IOC + lifecycle + anti-forensic). Bloquer le package, regenerer tous les secrets, isoler les machines qui ont fait `npm install` recemment.',
+
+  stub_with_string_ioc:
+    'CRITIQUE: Package stub + IOC string connu = staging chain-attack confirme. Bloquer le package + sa dep externe. Regenerer secrets si install effectue.',
+
   known_malicious_hash:
     'CRITIQUE: Fichier malveillant confirme par hash. Supprimer immediatement. Considerer la machine compromise.',
 

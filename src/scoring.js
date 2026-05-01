@@ -120,7 +120,11 @@ const PACKAGE_LEVEL_TYPES = new Set([
   'lifecycle_newsletter_hijack', 'lifecycle_env_exfil',
   'curl_env_exfil', 'version_99_preinstall',
   // v2.10.94: new package-level type for ltidi chain attack (dep URL on third-party host)
-  'external_tarball_dep'
+  'external_tarball_dep',
+  // intel-triage P1.3: stub-package detector closes ltidi gap (memory project_detection_gap_ltidi_chain)
+  'stub_package_external_payload', 'stub_package_external_dep',
+  // intel-triage P3.1 family compounds
+  'axios_family', 'stub_with_string_ioc'
 ]);
 
 /**
@@ -239,6 +243,7 @@ const FP_COUNT_THRESHOLDS = {
 // high-confidence compound detections are always real even in dist/ files
 const DIST_EXEMPT_TYPES = new Set([
   'ioc_match', 'known_malicious_package', 'pypi_malicious_package', 'shai_hulud_marker',
+  'ioc_string_match', 'anti_forensic_xor_autodelete', 'anti_forensic_partial',
   'lifecycle_script', 'lifecycle_shell_pipe',
   'lifecycle_added_critical', 'lifecycle_added_high', 'lifecycle_modified',
   // Compound detections — require multiple correlated signals, not single-pattern FPs
@@ -321,6 +326,7 @@ const DIST_BUNDLER_ARTIFACT_TYPES = new Set([
 // downgraded if the file is truly unreachable, since unreachable code cannot execute.
 const REACHABILITY_BASE_EXEMPT = new Set([
   'ioc_match', 'known_malicious_package', 'pypi_malicious_package', 'shai_hulud_marker',
+  'ioc_string_match', 'anti_forensic_xor_autodelete', 'anti_forensic_partial',
   'lifecycle_script', 'lifecycle_shell_pipe',
   'lifecycle_added_critical', 'lifecycle_added_high', 'lifecycle_modified'
 ]);
@@ -420,6 +426,27 @@ const SCORING_COMPOUNDS = [
     message: 'Lifecycle hook + curl/wget env exfiltration — install-time credential theft (scoring compound).',
     fileFrom: 'curl_env_exfil'
     // No sameFile: both are package-level
+  },
+  // intel-triage P3.1 — Axios family compound. Fires when a package combines:
+  //   ioc_string_match (any campaign) + lifecycle_script + anti_forensic_partial
+  // Each individual signal is already CRITICAL/HIGH, so the compound mainly
+  // produces a unified "axios_family" event for monitor + webhook clarity.
+  {
+    type: 'axios_family',
+    requires: ['ioc_string_match', 'lifecycle_script', 'anti_forensic_partial'],
+    severity: 'CRITICAL',
+    message: 'IOC string match + lifecycle hook + anti-forensic partial in one package — Axios/csec family signature (scoring compound).',
+    fileFrom: 'ioc_string_match'
+  },
+  // intel-triage P3.x — Stub package + IOC string compound.
+  // A package that is both a stub (P1.3 detection) AND contains a known
+  // string IOC is unambiguously a chain-attack staging package.
+  {
+    type: 'stub_with_string_ioc',
+    requires: ['stub_package_external_dep', 'ioc_string_match'],
+    severity: 'CRITICAL',
+    message: 'Stub package with external URL dep + known string IOC — chain-attack staging package (scoring compound).',
+    fileFrom: 'ioc_string_match'
   },
 ];
 
