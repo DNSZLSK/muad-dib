@@ -13,6 +13,7 @@ const { processQueue, ensureWorkers, drainWorkers, getTargetConcurrency, setTarg
 const { computeTarget, ADJUST_INTERVAL_MS, BASE_CONCURRENCY, resetDeltas } = require('./adaptive-concurrency.js');
 const { startHealthcheck } = require('./healthcheck.js');
 const { startDeferredWorker, stopDeferredWorker, persistDeferredQueue, restoreDeferredQueue, clearDeferredQueue } = require('./deferred-sandbox.js');
+const { cleanupOldArchives, getRetentionDays } = require('./tarball-archive.js');
 const { clearMetadataCache } = require('../scanner/temporal-analysis.js');
 // Caches not previously cleared by handleMemoryPressure (OOM fix). These live
 // in the main thread and are populated by temporal-ast-diff and the typosquat
@@ -498,6 +499,11 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
   cleanupRunscOrphans();
   // Layer 3: Purge expired cached tarballs on startup
   purgeTarballCache();
+  // Purge archived tarballs older than MUADDIB_ARCHIVE_RETENTION_DAYS (default 30).
+  // Runs in-process at startup so no external cron is required.
+  try { cleanupOldArchives(getRetentionDays()); } catch (err) {
+    console.warn(`[Archive] Startup cleanup failed: ${err.message}`);
+  }
 
   console.log(`
 ╔════════════════════════════════════════════╗

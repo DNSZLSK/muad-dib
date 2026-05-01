@@ -19,6 +19,17 @@ const { downloadToFile } = require('../shared/download.js');
 const ARCHIVE_DIR = process.env.MUADDIB_ARCHIVE_DIR || '/opt/muaddib/archive';
 const ARCHIVE_TIMEOUT_MS = 10_000;
 
+// Retention window for archived tarballs. Anything older is purged on startup.
+// Bounded to [1, 365] days; non-numeric or out-of-range values fall back to 30.
+const DEFAULT_RETENTION_DAYS = 30;
+function getRetentionDays() {
+  const raw = process.env.MUADDIB_ARCHIVE_RETENTION_DAYS;
+  if (raw === undefined || raw === '') return DEFAULT_RETENTION_DAYS;
+  const n = parseInt(raw, 10);
+  if (!Number.isFinite(n) || n < 1 || n > 365) return DEFAULT_RETENTION_DAYS;
+  return n;
+}
+
 /**
  * Get the date string in YYYY-MM-DD format (Paris timezone, consistent with monitor).
  * Falls back to UTC if Intl is unavailable.
@@ -70,6 +81,16 @@ function sha256File(filePath) {
 async function archiveSuspectTarball(packageName, version, tarballUrl, scanResult) {
   if (!tarballUrl || !packageName || !version) return false;
 
+  // Defense-in-depth: never archive packages that are statically clean.
+  // Callers in the pipeline already gate on tier 1a/1b/2 classification, but a
+  // numeric score of 0 with no triggered rules is unambiguously CLEAN — those
+  // dominated archive volume in production.
+  const score = (scanResult && typeof scanResult.score === 'number') ? scanResult.score : 0;
+  const rules = (scanResult && Array.isArray(scanResult.rulesTriggered)) ? scanResult.rulesTriggered : [];
+  if (score === 0 && rules.length === 0) {
+    return false;
+  }
+
   const dateStr = getArchiveDateString();
   const dayDir = path.join(ARCHIVE_DIR, dateStr);
   const safeName = sanitizeForFilename(packageName);
@@ -110,11 +131,91 @@ async function archiveSuspectTarball(packageName, version, tarballUrl, scanResul
   return true;
 }
 
+/**
+ * Parse a YYYY-MM-DD directory name into a UTC midnight Date.
+ * Returns null for malformed names (so we never delete an unrelated directory).
+ */
+function parseArchiveDayDir(name) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(name);
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+  const date = new Date(Date.UTC(y, mo - 1, d));
+  if (Number.isNaN(date.getTime())) return null;
+  return date;
+}
+
+/**
+ * Recursively delete a directory, swallowing per-file errors so one bad file
+ * doesn't abort the cleanup of the rest of the archive.
+ */
+function rmDirRecursiveSafe(dirPath) {
+  try {
+    fs.rmSync(dirPath, { recursive: true, force: true });
+    return true;
+  } catch (err) {
+    console.warn(`[Archive] Failed to remove ${dirPath}: ${err.message}`);
+    return false;
+  }
+}
+
+/**
+ * Purge archived tarballs older than the retention window. Runs at monitor
+ * startup so no external cron is needed.
+ *
+ * Streams stats: { kept, purged, freedBytes }. Errors are logged, never thrown.
+ */
+function cleanupOldArchives(retentionDays = getRetentionDays()) {
+  const stats = { kept: 0, purged: 0, freedBytes: 0 };
+  if (!fs.existsSync(ARCHIVE_DIR)) return stats;
+
+  const cutoff = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
+  let entries;
+  try {
+    entries = fs.readdirSync(ARCHIVE_DIR, { withFileTypes: true });
+  } catch (err) {
+    console.warn(`[Archive] Cannot read ${ARCHIVE_DIR}: ${err.message}`);
+    return stats;
+  }
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const date = parseArchiveDayDir(entry.name);
+    if (!date) continue; // ignore unrelated subdirs
+    if (date.getTime() >= cutoff) {
+      stats.kept++;
+      continue;
+    }
+    const fullPath = path.join(ARCHIVE_DIR, entry.name);
+    let bytes = 0;
+    try {
+      for (const f of fs.readdirSync(fullPath)) {
+        try { bytes += fs.statSync(path.join(fullPath, f)).size; } catch { /* ignore */ }
+      }
+    } catch { /* ignore */ }
+    if (rmDirRecursiveSafe(fullPath)) {
+      stats.purged++;
+      stats.freedBytes += bytes;
+    }
+  }
+
+  if (stats.purged > 0) {
+    const mb = (stats.freedBytes / 1024 / 1024).toFixed(0);
+    console.log(`[Archive] Purged ${stats.purged} day(s) older than ${retentionDays}d (~${mb}MB freed). Kept ${stats.kept}.`);
+  }
+  return stats;
+}
+
 module.exports = {
   archiveSuspectTarball,
+  cleanupOldArchives,
   ARCHIVE_DIR,
   // Exported for testing
   sanitizeForFilename,
   sha256File,
-  getArchiveDateString
+  getArchiveDateString,
+  getRetentionDays,
+  parseArchiveDayDir
 };
