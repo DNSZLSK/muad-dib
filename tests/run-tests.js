@@ -62,6 +62,10 @@ const { runGroundTruthSmokeTests } = require('./integration/ground-truth-smoke.t
 const { runV266FixesTests } = require('./integration/v266-fixes.test');
 const { runEvaluationSmokeTests } = require('./integration/evaluation-smoke.test');
 const { runCompoundScoringTests } = require('./integration/compound-scoring.test');
+const { runSingleFireCriticalFloorTests } = require('./integration/single-fire-critical-floor.test');
+const { runDecayAggregationTests } = require('./integration/decay-aggregation.test');
+const { runCompoundReplacementTests } = require('./integration/compound-replacement.test');
+const { runReputationFactorTests } = require('./integration/reputation-factor.test');
 const { runGapRemediationTests } = require('./integration/gap-remediation.test');
 const { runConfigTests } = require('./integration/config.test');
 const { runBenignRandomTests } = require('./integration/benign-random.test');
@@ -180,6 +184,18 @@ async function timed(name, fn) {
 
   // Compound scoring tests (v2.9.2)
   await timed('compound-scoring', runCompoundScoringTests);
+
+  // Hybrid v3 Phase 1: single-fire critical floor
+  await timed('single-fire-critical-floor', runSingleFireCriticalFloorTests);
+
+  // Hybrid v3 Phase 2: per-type bounded decay aggregation
+  await timed('decay-aggregation', runDecayAggregationTests);
+
+  // Hybrid v3 Phase 3: compound-replacement (no additive double-count)
+  await timed('compound-replacement', runCompoundReplacementTests);
+
+  // Hybrid v3 Phase 4: metadata-first reputation factor
+  await timed('reputation-factor', runReputationFactorTests);
 
   // GAP remediation tests (v2.9.6)
   await timed('gap-remediation', runGapRemediationTests);
