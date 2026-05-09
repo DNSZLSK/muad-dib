@@ -1117,6 +1117,81 @@ const RULES = {
     mitre: 'T1041'
   },
 
+  // Honey-trap and 2026 supply chain runtime signals
+  sandbox_honey_read: {
+    id: 'MUADDIB-SANDBOX-017',
+    name: 'Sandbox: Honeypot Decoy File Read',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Le package lit un fichier decoy de credentials plante par la sandbox (.npmrc-decoy, .ssh/id_rsa-decoy, wallet decoy, etc.). Aucun outil legitime ne lit ces chemins. Capture les zero-days qui scannent aveuglement les chemins de credentials connus.',
+    references: [
+      'https://attack.mitre.org/techniques/T1552/001/',
+      'https://blog.phylum.io/shai-hulud-npm-worm'
+    ],
+    mitre: 'T1552.001'
+  },
+  sandbox_credential_target_read: {
+    id: 'MUADDIB-SANDBOX-018',
+    name: 'Sandbox: Credential Target File Read',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'Le package lit un fichier de credentials cible des malwares 2026 (cloud creds, wallets, browser data, GPG, kubernetes config). Pattern PhantomRaven, Shai-Hulud.',
+    references: [
+      'https://attack.mitre.org/techniques/T1552/001/',
+      'https://attack.mitre.org/techniques/T1555/'
+    ],
+    mitre: 'T1555'
+  },
+  sandbox_persistence_write: {
+    id: 'MUADDIB-SANDBOX-019',
+    name: 'Sandbox: Persistence File Write',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Le package ecrit dans un emplacement de persistance (.bashrc, .zshrc, autostart, cron, systemd user, LaunchAgents, registry Run keys). Aucun cas legitime en npm install.',
+    references: [
+      'https://attack.mitre.org/techniques/T1547/',
+      'https://attack.mitre.org/techniques/T1546/004/'
+    ],
+    mitre: 'T1547'
+  },
+  sandbox_execve_chain_depth: {
+    id: 'MUADDIB-SANDBOX-020',
+    name: 'Sandbox: Suspicious Execve Chain Depth',
+    severity: 'HIGH',
+    confidence: 'medium',
+    description: 'Chaine de processus depuis npm install au-dela de la profondeur attendue (npm install -> script -> binaire externe). Pattern Shai-Hulud preinstall worm avec curl/wget/bash final.',
+    references: [
+      'https://unit42.paloaltonetworks.com/npm-supply-chain-attack/',
+      'https://attack.mitre.org/techniques/T1059/'
+    ],
+    mitre: 'T1059'
+  },
+  sandbox_npm_self_invoke: {
+    id: 'MUADDIB-SANDBOX-021',
+    name: 'Sandbox: npm CLI Self-Invocation',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Le package invoque npm publish/deprecate/owner/token/access (ou yarn publish) depuis l\'arborescence npm install. Pattern CanisterWorm self-propagation. Aucun cas legitime.',
+    references: [
+      'https://www.stepsecurity.io/blog/canisterworm-how-a-self-propagating-npm-worm-is-spreading-backdoors-across-the-ecosystem/',
+      'https://attack.mitre.org/techniques/T1195.002/'
+    ],
+    mitre: 'T1195.002'
+  },
+  sandbox_runtime_deobfuscation_executed: {
+    id: 'MUADDIB-SANDBOX-022',
+    name: 'Sandbox: Runtime Deobfuscation Executed',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'new Function() ou eval() execute avec un body de plus de 500 octets, derive d\'une string source obfusquee (high entropy ou taille >1KB). Pattern Axios 2026 OrDeR_7077: XOR + base64 decoded at runtime then executed.',
+    references: [
+      'https://snyk.io/blog/axios-npm-package-compromised-supply-chain-attack-delivers-cross-platform/',
+      'https://attack.mitre.org/techniques/T1027/',
+      'https://attack.mitre.org/techniques/T1059.007/'
+    ],
+    mitre: 'T1027'
+  },
+
   // Entropy detections
   high_entropy_string: {
     id: 'MUADDIB-ENTROPY-001',

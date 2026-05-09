@@ -3,6 +3,40 @@
 const http = require('http');
 const url = require('url');
 const { getFeed } = require('../threat-feed.js');
+// Monitor-feed routes : optional out-of-tree dependency. Lazy-load so the
+// /feed and /health routes still work when the file is absent. Missing-file
+// case returns 503 on /monitor/* routes instead of crashing module load.
+let _monitorFeedCache = null;
+function _loadMonitorFeed() {
+  if (_monitorFeedCache !== null) return _monitorFeedCache;
+  try {
+    _monitorFeedCache = require('./monitor-feed.js');
+  } catch {
+    _monitorFeedCache = {
+      buildMonitorDaily: null,
+      buildMonitorWindow: null,
+      buildMonitorAll: null,
+      SUPPORTED_RANGES: new Set(['7d', '30d'])
+    };
+  }
+  return _monitorFeedCache;
+}
+function buildMonitorDaily() {
+  const m = _loadMonitorFeed();
+  if (!m.buildMonitorDaily) throw new Error('monitor-feed module not installed');
+  return m.buildMonitorDaily();
+}
+function buildMonitorWindow(range) {
+  const m = _loadMonitorFeed();
+  if (!m.buildMonitorWindow) throw new Error('monitor-feed module not installed');
+  return m.buildMonitorWindow(range);
+}
+function buildMonitorAll() {
+  const m = _loadMonitorFeed();
+  if (!m.buildMonitorAll) throw new Error('monitor-feed module not installed');
+  return m.buildMonitorAll();
+}
+const SUPPORTED_RANGES = _loadMonitorFeed().SUPPORTED_RANGES;
 const pkg = require('../../package.json');
 
 const SECURITY_HEADERS = {
@@ -108,16 +142,39 @@ function startServer(options = {}) {
 
       const result = getFeed(feedOptions);
       sendJson(res, 200, result);
+    } else if (pathname === '/monitor/daily') {
+      try {
+        sendJson(res, 200, buildMonitorDaily());
+      } catch (err) {
+        sendJson(res, 500, { error: 'monitor_daily_failed', message: err.message });
+      }
+    } else if (pathname === '/monitor/window') {
+      const range = (parsed.query && parsed.query.range) ? String(parsed.query.range) : '7d';
+      if (!SUPPORTED_RANGES.has(range) || range === 'all') {
+        sendJson(res, 400, { error: 'invalid_range', message: 'range must be one of: 7d, 30d' });
+        return;
+      }
+      try {
+        sendJson(res, 200, buildMonitorWindow(range));
+      } catch (err) {
+        sendJson(res, 500, { error: 'monitor_window_failed', message: err.message });
+      }
+    } else if (pathname === '/monitor/stats') {
+      try {
+        sendJson(res, 200, buildMonitorAll());
+      } catch (err) {
+        sendJson(res, 500, { error: 'monitor_stats_failed', message: err.message });
+      }
     } else if (pathname === '/health') {
       sendJson(res, 200, { status: 'ok', version: pkg.version });
     } else {
-      sendJson(res, 404, { error: 'Not found. Available: GET /feed, GET /health' });
+      sendJson(res, 404, { error: 'Not found. Available: GET /feed, GET /monitor/daily, GET /monitor/window?range=7d|30d, GET /monitor/stats, GET /health' });
     }
   });
 
   server.listen(port, '127.0.0.1', () => {
     console.log(`[SERVE] Threat feed server listening on http://127.0.0.1:${port}`);
-    console.log(`[SERVE] Endpoints: GET /feed, GET /health`);
+    console.log(`[SERVE] Endpoints: GET /feed, GET /monitor/daily, GET /monitor/window?range=7d|30d, GET /monitor/stats, GET /health`);
   });
 
   return server;

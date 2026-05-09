@@ -50,6 +50,17 @@ if git diff "$PRE_PULL_HEAD" --name-only | grep -q "^package-lock.json$"; then
   npm ci --production
 fi
 
+# Re-deploy the systemd unit file when its repo copy changed. setup.sh does
+# this on first install ; deploy.sh would otherwise keep restarting against
+# the stale /etc/systemd/system/ copy when only the unit file changes (e.g.
+# new Environment= entries added for the FPR plan flags). Skip cleanly when
+# unit file is unchanged so most deploys remain a one-line restart.
+if git diff "$PRE_PULL_HEAD" --name-only | grep -q "^deploy/muaddib-monitor\.service$"; then
+  echo "[deploy] systemd unit file changed, copying to /etc/systemd/system/..."
+  sudo cp deploy/muaddib-monitor.service /etc/systemd/system/
+  sudo systemctl daemon-reload
+fi
+
 # Restart monitor
 sudo systemctl restart "$SERVICE"
 

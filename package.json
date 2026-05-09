@@ -1,6 +1,6 @@
 {
   "name": "muaddib-scanner",
-  "version": "2.11.4",
+  "version": "2.11.6",
   "description": "Supply-chain threat detection & response for npm & PyPI/Python",
   "main": "src/index.js",
   "bin": {
@@ -9,6 +9,8 @@
   "scripts": {
     "test": "node tests/run-tests.js",
     "test:integration": "node tests/run-tests-integration.js",
+    "test:regression-check": "node scripts/regression-check.js",
+    "fp-clusters": "node scripts/analyze-fp-clusters.js",
     "scan": "node bin/muaddib.js scan .",
     "update": "node bin/muaddib.js update",
     "lint": "eslint src bin --ext .js",

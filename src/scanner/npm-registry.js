@@ -1,6 +1,7 @@
 const { NPM_PACKAGE_REGEX } = require('../shared/constants.js');
 const { debugLog } = require('../utils.js');
 const { acquireRegistrySlot, releaseRegistrySlot } = require('../shared/http-limiter.js');
+const { computeAdvancedRegistrySignals } = require('../integrations/registry-signals.js');
 
 const REGISTRY_URL = 'https://registry.npmjs.org';
 const DOWNLOADS_URL = 'https://api.npmjs.org/downloads/point/last-week';
@@ -145,6 +146,27 @@ async function getPackageMetadata(packageName) {
   const description = (typeof latestMeta?.description === 'string' ? latestMeta.description
     : (typeof meta.description === 'string' ? meta.description : ''));
 
+  let advancedSignals = {};
+  try {
+    advancedSignals = computeAdvancedRegistrySignals(meta);
+  } catch (err) {
+    debugLog('[registry-signals] failed for ' + packageName + ': ' + err.message);
+  }
+
+  // FPR plan Chantier 3 : the delta multiplier needs the per-version publish
+  // timeline to pick the 3 versions immediately preceding the scanned one.
+  // We export it as a compact { version : ISO string } map so consumers don't
+  // have to re-fetch the packument. Skip the meta-keys "created" / "modified"
+  // - those are top-level package timestamps, not version timestamps.
+  const versionTimes = {};
+  if (meta.time && typeof meta.time === 'object') {
+    for (const [k, v] of Object.entries(meta.time)) {
+      if (k === 'created' || k === 'modified') continue;
+      if (typeof v !== 'string') continue;
+      versionTimes[k] = v;
+    }
+  }
+
   return {
     created_at: createdAt,
     age_days: ageDays,
@@ -154,7 +176,15 @@ async function getPackageMetadata(packageName) {
     has_repository: hasRepository,
     version_count: versionCount,
     readme_size: readmeText.length,
-    description
+    description,
+    // FPR plan : the "live latest" version for the package, used by the mature
+    // stable cap to fire only when the scanned version IS this one. Historical
+    // / pinned-old / vendored versions bypass the cap so we don't mask attacks
+    // captured in static fixtures (e.g. eslint-scope 3.7.2, chalk 5.6.1).
+    latest_version: latestVersion || null,
+    // C3 : per-version publish timestamps for delta-mode selectPriorVersions.
+    time: versionTimes,
+    ...advancedSignals
   };
 }
 

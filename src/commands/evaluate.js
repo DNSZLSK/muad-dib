@@ -350,7 +350,8 @@ async function silentScan(dir) {
     if (_silentScanCount % 20 === 0 && global.gc) {
       global.gc();
       const used = Math.round(process.memoryUsage().heapUsed / 1024 / 1024);
-      console.log(`  [Memory] ${used} MB after ${_silentScanCount} scans`);
+      // Route memory log to stderr so --json output remains parseable
+      process.stderr.write(`  [Memory] ${used} MB after ${_silentScanCount} scans\n`);
     }
 
     return result;
@@ -830,7 +831,11 @@ async function evaluateBenignPyPI(options = {}) {
  * Reports FPR separately — this measures FPR on representative npm, not curated.
  */
 async function evaluateBenignRandom(options = {}) {
-  const listFile = path.join(BENIGN_DIR, 'packages-npm-random.txt');
+  // FPR plan : allow swapping the corpus to test on a fresh random sample
+  // (seed 2026 v2.txt etc.) without overwriting the seed-42 reference corpus.
+  const listFile = options.corpusFile
+    ? (path.isAbsolute(options.corpusFile) ? options.corpusFile : path.join(BENIGN_DIR, options.corpusFile))
+    : path.join(BENIGN_DIR, 'packages-npm-random.txt');
   if (!fs.existsSync(listFile)) return null;
 
   let packages = fs.readFileSync(listFile, 'utf8')
@@ -1218,6 +1223,122 @@ function evaluateOSSFTPR() {
 }
 
 /**
+ * Cluster false positives by (rule type, normalized file pattern, is_bundle).
+ *
+ * Drives Chantier 1 of the FPR improvement plan : surface the dominant
+ * FP buckets so subsequent chantiers (call-graph reachability, delta scanning,
+ * mature gate, etc.) can target the right detections instead of guessing.
+ *
+ * Each cluster contains :
+ *   - key : human-readable cluster identifier
+ *   - count : number of FP occurrences across all corpora
+ *   - rule_type : threat type
+ *   - file_pattern : normalized path (digits, hashes, versions, basenames stripped)
+ *   - is_bundle : whether the file matches BUNDLE_PATH_RE
+ *   - severity_distribution : count by severity
+ *   - corpus_distribution : count by corpus (curated/random/pypi)
+ *   - examples : up to 5 (package, file, severity) tuples
+ *
+ * @param {Object} sources - { curated: details[], random: details[], pypi: details[] }
+ * @returns {Object} { totalFps, totalUniqueClusters, topClusters, schema_version }
+ */
+function clusterFalsePositives(sources) {
+  let BUNDLE_PATH_RE = null;
+  try {
+    BUNDLE_PATH_RE = require('../shared/bundle-detect.js').BUNDLE_PATH_RE;
+  } catch { /* fallback : no bundle classification */ }
+
+  const normalizeFilePattern = (file) => {
+    if (!file || typeof file !== 'string') return '<no-file>';
+    let p = file.replace(/\\/g, '/');
+    // Strip leading "package/" prefix produced by tarball extraction
+    p = p.replace(/^(?:[\w@.\-]+\/)?package\//, '');
+    // Replace hex hashes (>=6 chars) with <HASH>
+    p = p.replace(/\b[a-f0-9]{6,40}\b/gi, '<HASH>');
+    // Replace version-like tokens
+    p = p.replace(/\bv?\d+\.\d+(?:\.\d+)?(?:-[\w.]+)?\b/g, '<VER>');
+    // Replace digit runs of length >=2
+    p = p.replace(/\d{2,}/g, '<N>');
+    // Normalize basename : last path segment becomes <NAME> if it's a filename
+    const segs = p.split('/');
+    if (segs.length > 0) {
+      const last = segs[segs.length - 1];
+      const m = /^(.+?)(\.\w+)$/.exec(last);
+      if (m) {
+        // Keep the structural suffix (.min.js, .esm.js, .bundle.js) but anonymize the stem
+        const stem = m[1];
+        const ext = m[2];
+        const structuralSuffix = /\.(min|bundle|umd|esm|es|common|max|prod|production|iife|cjs|mjs)$/i.exec(stem);
+        if (structuralSuffix) {
+          segs[segs.length - 1] = '<NAME>' + structuralSuffix[0] + ext;
+        } else {
+          segs[segs.length - 1] = '<NAME>' + ext;
+        }
+      }
+    }
+    return segs.join('/');
+  };
+
+  const clusters = new Map();
+  let totalFps = 0;
+
+  const ingest = (details, corpus) => {
+    if (!Array.isArray(details)) return;
+    for (const entry of details) {
+      if (!entry || !entry.flagged || !entry.threats) continue;
+      for (const t of entry.threats) {
+        if (!t || !t.type) continue;
+        totalFps++;
+        const filePattern = normalizeFilePattern(t.file);
+        const isBundle = BUNDLE_PATH_RE && t.file ? BUNDLE_PATH_RE.test(t.file) : false;
+        const key = `${t.type} | ${filePattern} | ${isBundle ? 'bundle' : 'src'}`;
+        let c = clusters.get(key);
+        if (!c) {
+          c = {
+            key,
+            count: 0,
+            rule_type: t.type,
+            file_pattern: filePattern,
+            is_bundle: isBundle,
+            severity_distribution: { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0 },
+            corpus_distribution: { curated: 0, random: 0, pypi: 0 },
+            packages: new Set(),
+            examples: []
+          };
+          clusters.set(key, c);
+        }
+        c.count++;
+        if (c.severity_distribution[t.severity] !== undefined) c.severity_distribution[t.severity]++;
+        if (c.corpus_distribution[corpus] !== undefined) c.corpus_distribution[corpus]++;
+        c.packages.add(entry.name);
+        if (c.examples.length < 5) {
+          c.examples.push({ package: entry.name, file: t.file || null, severity: t.severity });
+        }
+      }
+    }
+  };
+
+  ingest(sources.curated || [], 'curated');
+  ingest(sources.random || [], 'random');
+  ingest(sources.pypi || [], 'pypi');
+
+  // Materialize clusters, drop Set, sort by count desc
+  const all = Array.from(clusters.values()).map(c => ({
+    ...c,
+    distinct_packages: c.packages.size,
+    packages: undefined
+  }));
+  all.sort((a, b) => b.count - a.count);
+
+  return {
+    schema_version: 1,
+    totalFps,
+    totalUniqueClusters: all.length,
+    topClusters: all.slice(0, 30)
+  };
+}
+
+/**
  * Save metrics to metrics/v{version}.json
  */
 function saveMetrics(report) {
@@ -1303,6 +1424,12 @@ async function evaluate(options = {}) {
       }
     : null;
 
+  const fpClusters = clusterFalsePositives({
+    curated: benign && benign.details,
+    random: benignRandom && benignRandom.details,
+    pypi: benignPyPI && benignPyPI.details
+  });
+
   const report = {
     version,
     date: new Date().toISOString(),
@@ -1324,7 +1451,8 @@ async function evaluate(options = {}) {
     datadogTPR,
     ossfTPR,
     mlEvaluation: mlEval || null,
-    fprAfterML: fprAfterML || null
+    fprAfterML: fprAfterML || null,
+    fpClusters
   };
 
   const metricsPath = saveMetrics(report);
@@ -1631,6 +1759,7 @@ module.exports = {
   evaluateOSSFTPR,
   evaluateMLClassifier,
   saveMetrics,
+  clusterFalsePositives,
   silentScan,
   classifyDetectionSource,
   ADVERSARIAL_SAMPLES,

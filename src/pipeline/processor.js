@@ -2,10 +2,29 @@ const fs = require('fs');
 const path = require('path');
 const { getRule } = require('../rules/index.js');
 const { getPlaybook } = require('../response/playbooks.js');
-const { computeReachableFiles } = require('../scanner/reachability.js');
-const { applyFPReductions, applyCompoundBoosts, calculateRiskScore, getSeverityWeights, applyContextualFPCaps, applySingleFireCriticalFloor, applyReputationFactor } = require('../scoring.js');
+const { computeReachableFiles, computeReachableFunctions } = require('../scanner/reachability.js');
+const { applyFPReductions, applyCompoundBoosts, calculateRiskScore, getSeverityWeights, applyContextualFPCaps, applySingleFireCriticalFloor, applyReputationFactor, applyMatureStableCap, applySandboxVerdict, applyDeltaMultiplier } = require('../scoring.js');
+const { loadPriorVersionSignatures, computeSignatures, saveCachedSignatures } = require('../scoring/delta-multiplier.js');
+const { annotateConfidenceTiers, tierAtLeast } = require('../rules/confidence-tiers.js');
 const { buildIntentPairs } = require('../intent-graph.js');
 const { debugLog } = require('../utils.js');
+const { getPackageMetadata } = require('../scanner/npm-registry.js');
+
+// Auto-sandbox compound trigger : optional out-of-tree dependency. Lazy-load
+// it so the pipeline still works when the file is absent (some dev machines
+// have it untracked, CI does not). When missing, evaluateSandboxTrigger
+// degrades to a no-op {shouldRun:false} so the auto-sandbox branch skips.
+let _sandboxTriggerCache = null;
+function evaluateSandboxTrigger(threats, prelimScore) {
+  if (_sandboxTriggerCache === null) {
+    try {
+      _sandboxTriggerCache = require('../sandbox/compound-triggers.js').evaluateSandboxTrigger;
+    } catch {
+      _sandboxTriggerCache = () => ({ shouldRun: false });
+    }
+  }
+  return _sandboxTriggerCache(threats, prelimScore);
+}
 
 /**
  * Process raw threats: sandbox integration, dedup, compounds, FP reductions,
@@ -18,32 +37,48 @@ const { debugLog } = require('../utils.js');
  * @returns {Promise<{result: object, deduped: Array, enrichedThreats: Array, sandboxData: object|null, pythonInfo: object|null, breakdown: Array, mostSuspiciousFile: string|null, maxFileScore: number, packageScore: number, globalRiskScore: number, scannerErrors: Array}>}
  */
 async function process(threats, targetPath, options, pythonDeps, warnings, scannerErrors) {
-  // Auto-sandbox: trigger sandbox analysis when static scan detects threats.
-  // Preliminary score estimate: count CRITICAL/HIGH threats as a quick heuristic.
-  // Only when --auto-sandbox flag is set, no explicit sandboxResult, and Docker available.
+  // Auto-sandbox: surgical trigger only when a sandbox-friendly compound
+  // matches AND the preliminary score is in the borderline window [15, 35].
+  // See src/sandbox/compound-triggers.js for the 6 compounds and rationale.
+  // Score < 15 = clean, no need to run; score > 35 = already definitive,
+  // no second-tier verdict needed. The verdict is then applied below via
+  // applySandboxVerdict (floor at 75/60 for malicious, -8 for clean).
   if (options.autoSandbox && !options.sandboxResult) {
     const critCount = threats.filter(t => t.severity === 'CRITICAL').length;
     const highCount = threats.filter(t => t.severity === 'HIGH').length;
     const prelimScore = Math.min(100, critCount * 25 + highCount * 10);
-    if (prelimScore >= 20) {
+    const sandboxTrigger = evaluateSandboxTrigger(threats, prelimScore);
+    if (sandboxTrigger.shouldRun) {
       try {
         const { isDockerAvailable, buildSandboxImage, runSandbox } = require('../sandbox/index.js');
         if (isDockerAvailable()) {
-          console.log(`\n[AUTO-SANDBOX] Preliminary score ~${prelimScore} >= 20 — triggering sandbox analysis...`);
+          console.log(`\n[AUTO-SANDBOX] Compound "${sandboxTrigger.compound}" matched (score ~${prelimScore}) - triggering sandbox analysis...`);
           const built = await buildSandboxImage();
           if (built) {
-            const sbResult = await runSandbox(targetPath, { local: true, strict: false });
+            const sbResult = await runSandbox(targetPath, {
+              local: true,
+              strict: false,
+              compound: sandboxTrigger.compound,
+              watchpoints: sandboxTrigger.watchpoints
+            });
             if (sbResult && Array.isArray(sbResult.findings)) {
+              if (sbResult.meta) {
+                sbResult.meta.compound = sandboxTrigger.compound;
+                sbResult.meta.watchpoints = sandboxTrigger.watchpoints;
+              } else {
+                sbResult.meta = { compound: sandboxTrigger.compound, watchpoints: sandboxTrigger.watchpoints };
+              }
               options.sandboxResult = sbResult;
             }
           }
         } else {
-          debugLog('[AUTO-SANDBOX] Docker not available — skipping sandbox');
+          debugLog('[AUTO-SANDBOX] Docker not available - skipping sandbox');
         }
       } catch (e) {
         debugLog('[AUTO-SANDBOX] Error:', e && e.message);
-        // Graceful fallback — sandbox is best-effort
       }
+    } else {
+      debugLog('[AUTO-SANDBOX] No compound matched (score ~' + prelimScore + ') - ' + sandboxTrigger.reason);
     }
   }
 
@@ -85,6 +120,7 @@ async function process(threats, targetPath, options, pythonDeps, warnings, scann
 
   // Reachability analysis: determine which files are reachable from entry points
   let reachableFiles = null;
+  let reachableFunctions = null; // FPR plan C2 : intra-file fn-level reachability
   if (!options.noReachability) {
     try {
       const reachability = computeReachableFiles(targetPath);
@@ -95,11 +131,24 @@ async function process(threats, targetPath, options, pythonDeps, warnings, scann
       debugLog('[REACHABILITY] error:', e?.message);
       // Graceful fallback — treat all files as reachable
     }
+    // FPR plan C2 : function-level reachability sits behind a flag while we
+    // measure FPR delta on the corpus. Off by default so production scans stay
+    // identical until the flag is flipped. Activated only when file-level
+    // reachability succeeded (otherwise no entry-point context to seed from).
+    if (reachableFiles && globalThis.process.env.MUADDIB_FN_REACHABILITY === '1') {
+      try {
+        reachableFunctions = computeReachableFunctions(targetPath, reachableFiles);
+      } catch (e) {
+        debugLog('[FN-REACHABILITY] error:', e?.message);
+        reachableFunctions = null;
+      }
+    }
   }
 
   // Read package name and dependencies for FP reduction heuristics
   let packageName = null;
   let packageDeps = null;
+  let packageVersion = null;
   let _pkgMeta = null; // v2.10.97: full pkg metadata for contextual FP caps
   try {
     const pkgPath = path.join(targetPath, 'package.json');
@@ -107,8 +156,10 @@ async function process(threats, targetPath, options, pythonDeps, warnings, scann
       const pkgData = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
       packageName = pkgData.name || null;
       packageDeps = pkgData.dependencies || null;
+      packageVersion = (typeof pkgData.version === 'string') ? pkgData.version : null;
       _pkgMeta = {
         name: pkgData.name,
+        version: packageVersion,
         scripts: pkgData.scripts || {},
         description: pkgData.description || '',
         homepage: pkgData.homepage || (typeof pkgData.repository === 'string' ? pkgData.repository : (pkgData.repository && pkgData.repository.url) || ''),
@@ -117,6 +168,39 @@ async function process(threats, targetPath, options, pythonDeps, warnings, scann
       };
     }
   } catch { /* graceful fallback */ }
+
+  // FPR plan Chantier 4 + 5 wiring : when a package name is known and at least
+  // one of the metadata-driven gates is ON, fetch the npm registry packument
+  // and attach it as _pkgMeta.npmRegistryMeta. Without this, applyReputation-
+  // Factor and applyMatureStableCap cannot fire outside the monitor's own
+  // queue.js (which already pre-fetches the metadata bundle). getPackageMeta-
+  // data has its own in-process cache, so repeated scans of the same package
+  // hit the cache and never re-fetch. Network failure / unknown package -> the
+  // call returns null and both downstream functions degrade gracefully.
+  if (
+    packageName &&
+    _pkgMeta &&
+    (
+      globalThis.process.env.MUADDIB_METADATA_FACTOR === '1' ||
+      globalThis.process.env.MUADDIB_MATURE_CAP === '1' ||
+      globalThis.process.env.MUADDIB_DELTA_MODE === '1'
+    )
+  ) {
+    try {
+      const meta = await getPackageMetadata(packageName);
+      if (meta) {
+        // Attach the scanned version so applyMatureStableCap can require
+        // scan_version === latest_version. Without this gate, scanning a
+        // historical compromised version (e.g. eslint-scope 3.7.2, chalk
+        // 5.6.1) would inherit the live registry's "stable" reputation and
+        // mask the attack.
+        meta.scan_version = packageVersion;
+        _pkgMeta.npmRegistryMeta = meta;
+      }
+    } catch (err) {
+      debugLog('[REGISTRY-META] fetch failed for ' + packageName + ': ' + err.message);
+    }
+  }
 
   // Cross-scanner compound: detached_process + suspicious_dataflow in same file
   // Catches cases where credential flow is detected by dataflow scanner, not AST scanner
@@ -206,11 +290,30 @@ async function process(threats, targetPath, options, pythonDeps, warnings, scann
 
   // FP reduction: legitimate frameworks produce high volumes of certain threat types.
   // A malware package typically has 1-3 occurrences, not dozens.
-  applyFPReductions(deduped, reachableFiles, packageName, packageDeps);
+  applyFPReductions(deduped, reachableFiles, packageName, packageDeps, reachableFunctions);
+
+  // FPR plan Chantier 3 - delta-aware decay. Threats present in the last 3
+  // published versions (and not HC/IOC) decay to LOW. Off by default until
+  // the cache is warm and we've measured the FPR delta on the corpus.
+  let _deltaResult = null;
+  if (
+    packageName && packageVersion &&
+    _pkgMeta && _pkgMeta.npmRegistryMeta &&
+    globalThis.process.env.MUADDIB_DELTA_MODE === '1'
+  ) {
+    try {
+      const packument = _pkgMeta.npmRegistryMeta.packument || _pkgMeta.npmRegistryMeta;
+      const priorSigs = loadPriorVersionSignatures(packageName, packageVersion, packument);
+      _deltaResult = applyDeltaMultiplier(deduped, priorSigs);
+    } catch (e) {
+      debugLog('[DELTA] error:', e?.message);
+      _deltaResult = null;
+    }
+  }
 
   // Compound scoring: inject synthetic CRITICAL threats when co-occurring types
   // indicate unambiguous malice. Applied AFTER FP reductions to recover signals
-  // that were individually downgraded (count-based, dist, reachability).
+  // that were individually downgraded (count-based, dist, reachability, delta).
   applyCompoundBoosts(deduped);
 
   // Intent coherence analysis: detect source→sink pairs within files
@@ -231,6 +334,13 @@ async function process(threats, targetPath, options, pythonDeps, warnings, scann
     }
   }
 
+  // FPR plan Chantier 6 - tag every threat with its confidence tier so the
+  // CLI / JSON / SARIF formatters can filter to verified+high by default and
+  // evaluate.js can report a "FPR perceived" headline alongside "FPR all".
+  // Annotation reads severity AFTER all FP reductions, so reductions trail
+  // (count_threshold, unreachable, delta_stable, ...) influences the tier.
+  annotateConfidenceTiers(deduped);
+
   // Enrich each threat with rules
   const enrichedThreats = deduped.map(t => {
     const rule = getRule(t.type);
@@ -241,6 +351,7 @@ async function process(threats, targetPath, options, pythonDeps, warnings, scann
       rule_id: rule.id || t.type,
       rule_name: rule.name || t.type,
       confidence: rule.confidence || 'medium',
+      confidenceTier: t.confidenceTier || 'medium',
       references: rule.references || [],
       mitre: t.mitre || rule.mitre,
       playbook: getPlaybook(t.type),
@@ -284,6 +395,16 @@ async function process(threats, targetPath, options, pythonDeps, warnings, scann
     threats: threats.filter(t => t.type === 'pypi_malicious_package' || t.type === 'pypi_typosquat_detected').length
   } : null;
 
+  // FPR plan Chantier 6 - tier counts let downstream metrics report FPR
+  // perceived (verified + high) alongside FPR all. The CLI reads these to
+  // decide whether to print a finding by default vs hide behind --show-low.
+  const tierCounts = { verified: 0, high: 0, medium: 0, low: 0 };
+  for (const t of deduped) {
+    const tier = t.confidenceTier || 'medium';
+    if (tierCounts[tier] !== undefined) tierCounts[tier]++;
+  }
+  const perceivedFlagged = tierCounts.verified + tierCounts.high;
+
   const result = {
     target: targetPath,
     timestamp: new Date().toISOString(),
@@ -303,7 +424,10 @@ async function process(threats, targetPath, options, pythonDeps, warnings, scann
       mostSuspiciousFile,
       fileScores,
       fileSizes,
-      breakdown
+      breakdown,
+      // C6 : confidence tier rollup
+      tierCounts,
+      perceivedFlagged
     },
     sandbox: sandboxData,
     warnings: warnings.length > 0 ? warnings : undefined,
@@ -317,6 +441,20 @@ async function process(threats, targetPath, options, pythonDeps, warnings, scann
     debugLog('[FP-CAP] ' + (packageName || targetPath) + ': ' +
       fpCaps.map(c => c.feature + (c.cap > 0 ? '→MAX' + c.cap : '→suppress')).join(', ') +
       ' → score=' + result.summary.riskScore);
+  }
+
+  // FPR plan Chantier 5 : mature stable cap — caps mature, well-owned, high-
+  // traffic packages at MEDIUM unless an HC type or IOC is present. Sits
+  // BETWEEN the contextual caps (which it composes with) and the single-fire
+  // floor (which can override on hard signals). Gated behind
+  // MUADDIB_MATURE_CAP=1 until measured against the full evaluation corpus.
+  if (globalThis.process.env.MUADDIB_MATURE_CAP === '1') {
+    const matureCap = applyMatureStableCap(result, _pkgMeta && _pkgMeta.npmRegistryMeta);
+    if (matureCap && matureCap.applied) {
+      debugLog('[MATURE-CAP] ' + (packageName || targetPath) + ': ' +
+        matureCap.oldScore + ' -> ' + matureCap.newScore + ' (' +
+        Object.entries(matureCap.reasons).map(([k, v]) => k + '=' + v).join(', ') + ')');
+    }
   }
 
   // Hybrid v3 Phase 1: single-fire critical floor — applied AFTER contextual
@@ -343,6 +481,45 @@ async function process(threats, targetPath, options, pythonDeps, warnings, scann
       debugLog('[META-FACTOR] ' + (packageName || targetPath) + ': factor=' +
         repAdjust.factor.toFixed(2) + ' (' + repAdjust.oldScore + ' → ' + repAdjust.newScore + ')');
     }
+  }
+
+  // Sandbox verdict: meta-layer applied after every other scoring step.
+  // MALICIOUS_CONFIRMED floors the score at 75 (any honey READ correlated
+  // outbound, or critical preload signal). MALICIOUS_CHAIN floors at 60
+  // (>=2 high preload signals). CLEAN_HIGH_CONFIDENCE applies a -8 delta when
+  // the sandbox completed cleanly with no fingerprint detected. INCONCLUSIVE
+  // leaves the score unchanged with a warning attached.
+  if (options.sandboxResult) {
+    const verdict = applySandboxVerdict(result, options.sandboxResult);
+    if (verdict) {
+      debugLog('[SANDBOX-VERDICT] ' + (packageName || targetPath) + ': ' +
+        verdict.verdict + ' ' + verdict.oldScore + ' -> ' + verdict.newScore +
+        (verdict.signals.length > 0 ? ' [' + verdict.signals.slice(0, 3).join(', ') + ']' : ''));
+    }
+  }
+
+  // FPR plan Chantier 3 : persist this version's signature set so future scans
+  // (or future versions) can use it as a baseline for delta decay. Best-effort
+  // and idempotent ; cache misses on read are silent so a missed write never
+  // blocks scoring. Only write when the user opted in to delta-mode AND we
+  // have a concrete package@version pair.
+  if (
+    globalThis.process.env.MUADDIB_DELTA_MODE === '1' &&
+    packageName && packageVersion
+  ) {
+    try {
+      const sigs = computeSignatures(deduped);
+      saveCachedSignatures(packageName, packageVersion, sigs);
+      debugLog('[DELTA] cached ' + sigs.size + ' signatures for ' + packageName + '@' + packageVersion);
+    } catch (e) {
+      debugLog('[DELTA] cache write failed:', e?.message);
+    }
+  }
+
+  if (_deltaResult && _deltaResult.downgraded > 0) {
+    debugLog('[DELTA] ' + (packageName || targetPath) + ': ' +
+      _deltaResult.downgraded + ' threats decayed to LOW (baseline=' +
+      _deltaResult.baselineSize + ', new=' + _deltaResult.newThreats + ')');
   }
 
   return {

@@ -114,6 +114,125 @@ Deux compounds declaratifs ajoutes dans scoring.js :
   `feedback_static_over_dynamic`, `reference_threat_intel_feeds`,
   `project_axios_2026_yara`. MEMORY.md index mis a jour.
 
+### Phase 5 (2026-05-09) : Sandbox observation hardening 2026
+
+Pas un retour au "sandbox v2" abandonne plus haut. Cette phase durcit la
+sandbox **existante** (`docker/`, `src/sandbox/`) avec un trigger chirurgical
+sur compounds static-only, des honeypots elargis pour les cibles 2026, et un
+hardening anti-fingerprint complet. Le statique reste la couche primaire ; la
+sandbox passe de "scan par defaut" a "tribunal borderline" sur la fenetre de
+score `[15, 35]` quand un compound static suspect tire.
+
+**Trigger chirurgical (nouveau module)**
+
+`src/sandbox/compound-triggers.js` exporte `evaluateSandboxTrigger(threats, score, fileSizes)`
+qui retourne `{shouldRun, compound, watchpoints, reason}`. 6 compounds finis,
+fenetre de score `[15, 35]` (en-dessous = clean, au-dessus = deja definitif) :
+
+- `lifecycle_install_chain` : cible Shai-Hulud, PhantomRaven
+- `obfuscated_oversize` : cible Shai-Hulud `bun_environment.js` (10MB)
+- `decrypt_then_execute` : cible Axios 2026 OrDeR_7077
+- `stub_with_external_dep` : cible ltidi chain attack
+- `invisible_blockchain` : cible GlassWorm Solana RPC
+- `npm_token_self_use` : cible CanisterWorm self-publish
+
+**Analyzer preload : 5 nouveaux signaux**
+
+`src/sandbox/analyzer.js` reconnait 5 patterns supplementaires :
+
+| Type | Severity | Trigger |
+|------|----------|---------|
+| `sandbox_honey_read` | CRITICAL si correle outbound non-registre, HIGH sinon | Lecture d'un fichier `*-decoy` (zero-day catcher) |
+| `sandbox_persistence_write` | CRITICAL | WRITE `.bashrc`, `.zshrc`, `autostart`, `cron`, `systemd/user`, `LaunchAgents` |
+| `sandbox_execve_chain_depth` | HIGH | `>=2` EXEC + dernier dangereux avec URL ou pipe |
+| `sandbox_npm_self_invoke` | CRITICAL | `npm publish/deprecate/owner/token` depuis l'arbre install |
+| `sandbox_runtime_deobfuscation_executed` | HIGH | `new Function()` avec body `>= 500` octets |
+
+`VALID_CATEGORIES` etend `NEW_FUNCTION`, `MOCK_HTTP`, `MOCK_HTTP_BODY`,
+`MOCK_DNS`, `MOCK_FETCH`.
+
+**Network allowlist 2026** (`src/sandbox/network-allowlist.js`)
+
+- `sfrclak.com` (Axios 2026 C2 hardcode), `discord.com`, `discordapp.com`
+  ajoutes a `KNOWN_EXFIL_DOMAINS`
+- Patterns famille pastebin (`pastebin.com`, `paste.ee`, `ghostbin.co`,
+  `hastebin.com`)
+- Patterns dynamic DNS abuse (`*.duckdns.org`, `*.no-ip.com`, `*.no-ip.org`,
+  `*.dynu.net`, `*.afraid.org`, `*.hopto.org`, `*.zapto.org`)
+- Patterns dead-drop (`npoint.io`, `jsonkeeper.com`, `glitch.me`, `repl.co`)
+- Nouvelle classification `'blockchain'` pour Solana mainnet/devnet/testnet,
+  Infura, Ankr, Alchemy, QuickNode, Chainstack, Moralis (14 endpoints + 7
+  patterns regex). Le compound `invisible_blockchain` correle un acces ici
+  avec un decodeur Unicode invisible pour upgrader le verdict.
+
+**Preload Function constructor instrumentation** (`docker/preload.js`)
+
+- Section 8b : Proxy sur `Function` qui logge `bodyLen`, `argsCount`,
+  `bodyStart` pour chaque `new Function(...)` et `Function(...)`.
+  `Reflect.construct/apply` preservent la semantique du constructeur. Wrap
+  try/catch silencieux : aucune regression possible si V8 ou un module Node
+  refuse le Proxy.
+- `SENSITIVE_RE` etendu pour le catalogue 2026 : `.gcloud`, `.azure`, `.kube`,
+  `.docker`, `.ethereum`, `.bitcoin`, `solana/id.json`, `Login Data`,
+  `Web Data`, `cookies.sqlite`, `logins.json`, `key4.db`, MetaMask/Phantom/
+  Coinbase IDs, Telegram tdata, Steam loginusers.
+- Spoof additionnel : `/proc/cpuinfo` (4 cores AMD EPYC 7763, ~700 lignes
+  generees), `/proc/meminfo` (8 GiB realistes), `/proc/loadavg`,
+  `/sys/class/dmi/id/sys_vendor=LENOVO`, `product_name=ThinkPad X1 Carbon Gen 11`.
+- `/proc/version` aligne sur `6.5.0-1015-aws` (matche le uname spoof).
+
+**Docker hardening**
+
+- `docker/uname-spoof.c` (~25 lignes C) : LD_PRELOAD shim qui reecrit
+  `utsname.release` (`6.5.0-1015-aws`) et `utsname.version`. Cache la
+  signature gVisor pour les outils natifs (uname, Python platform.uname,
+  Go syscall, Rust uname, etc.).
+- `docker/Dockerfile` : ajout `gcc + musl-dev`, COPY `uname-spoof.c`, RUN
+  `gcc -shared -fPIC -o /opt/uname-spoof.so`, suppression du `.c` apres
+  build.
+- `docker/sandbox-runner.sh` :
+  - Layer LD_PRELOAD : `uname-spoof.so` prepend, `libfaketime` append, save/
+    restore preserve toujours autour de la mock-network (pas de regression).
+  - 30 processus idle background pour `ps aux | wc -l` realiste (defeats
+    process count fingerprint).
+  - bash_history etendu de 9 a 50+ commandes plausibles (ssh prod, kubectl,
+    aws s3, gh pr, terraform, etc.). Mirroir vers `.zsh_history`.
+  - 4 projets fake : `~/projects/{my-app, api-server, dashboard, legacy-tool}`
+    avec `package.json` + `README.md` + `.gitignore`.
+  - `~/Documents/notes.txt`, `~/Downloads/invoice-*.pdf`, `~/Desktop/`.
+  - Honey catalog 2026 elargi :
+    - Cloud creds : gcloud `application_default_credentials.json`, azure
+      `accessTokens.json` + `azureProfile.json`, doctl `config.yaml`, kube
+      `config`, docker `config.json`
+    - VCS : gh `hosts.yml`, `.git-credentials`, `.yarnrc`
+    - Wallets : Solana `id.json`, Bitcoin `wallet.dat`, Ethereum
+      `keystore/UTC--2026-01-01T00-00-00.000000000Z--decoy*`
+    - Browser : Chrome `Login Data`/`Cookies`/`Web Data`, Firefox
+      `logins.json`/`key4.db`/`cookies.sqlite`
+  - 4 fichiers `*-decoy` synthetiques (zero-day catchers via
+    `HONEY_DECOY_RE`) avec marker `MUADDIB-DECOY-DO-NOT-EXFIL` dans le
+    contenu non-token.
+
+**Tests**
+
+- `tests/unit/sandbox-compound-triggers.test.js` : 13 tests (positif/negatif
+  chaque compound + bornes de score + defensif sur threats invalides)
+- `tests/unit/sandbox-analyzer-2026.test.js` : 14 tests (chaque nouveau
+  signal + scenario combine Shai-Hulud)
+- `tests/integration/sandbox-2026-pipeline.test.js` : 10 tests (network IOC
+  + compound + analyzer en bout-en-bout, pas de Docker requis)
+- **+37 tests verts**, aucune regression sur les suites existantes
+
+**Hors scope assume**
+
+- Integration BigQuery OSSF Package Analysis (consume leur feed) : ticket
+  separe ; OSSF tourne deja gVisor sur tout npm/PyPI live
+- libfaketime au-dela de 7 jours : couvre 95% des time bombs vues 2024-2026,
+  cout ops disproportionne pour les 5% restants
+- gVisor Linux uniquement : cibles Windows-specifiques (registry Run keys,
+  Telegram tdata Windows path) traitees uniquement statiquement
+- Mode `package surveillance` 24/7 type Socket : ticket separe
+
 ## [2.10.97] - 2026-04-19
 
 ### Context

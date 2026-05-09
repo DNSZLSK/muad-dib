@@ -41,6 +41,14 @@ const { runGvisorTests } = require('./sandbox/gvisor.test');
 const { runPreloadTests } = require('./unit/preload.test');
 const { runMLFeatureExtractorTests } = require('./unit/ml-feature-extractor.test');
 const { runMLClassifierTests } = require('./unit/ml-classifier.test');
+const { runFpClustersTests } = require('./unit/fp-clusters.test');
+const { runRegressionCheckTests } = require('./unit/regression-check.test');
+const { runRegistrySignalsTests } = require('./unit/registry-signals.test');
+const { runMatureStableCapTests } = require('./unit/mature-stable-cap.test');
+const { runReachabilityFunctionsTests } = require('./unit/reachability-functions.test');
+const { runDeltaMultiplierTests } = require('./unit/delta-multiplier.test');
+const { runConfidenceTiersTests } = require('./unit/confidence-tiers.test');
+const { runCompoundTighteningTests } = require('./unit/compound-tightening.test');
 const { runLlmDetectiveTests } = require('./unit/llm-detective.test');
 const { runTarballArchiveTests } = require('./unit/tarball-archive.test');
 const { runSandboxPreloadTests } = require('./integration/sandbox-preload.test');
@@ -211,6 +219,30 @@ async function timed(name, fn) {
 
   // ML feature extraction tests (v2.8.7)
   await timed('ml-feature-extractor', runMLFeatureExtractorTests);
+
+  // FP cluster aggregation (FPR Improvement Plan - Chantier 1)
+  await timed('fp-clusters', runFpClustersTests);
+
+  // Regression check helpers (FPR Improvement Plan - Chantier 8)
+  await timed('regression-check', runRegressionCheckTests);
+
+  // Advanced npm registry signals (FPR Improvement Plan - Chantier 4)
+  await timed('registry-signals', runRegistrySignalsTests);
+
+  // Mature stable cap (FPR Improvement Plan - Chantier 5)
+  await timed('mature-stable-cap', runMatureStableCapTests);
+
+  // Function-level reachability (FPR Improvement Plan - Chantier 2)
+  await timed('reachability-functions', runReachabilityFunctionsTests);
+
+  // Delta-aware decay multiplier (FPR Improvement Plan - Chantier 3)
+  await timed('delta-multiplier', runDeltaMultiplierTests);
+
+  // Multi-tier confidence (FPR Improvement Plan - Chantier 6)
+  await timed('confidence-tiers', runConfidenceTiersTests);
+
+  // Compound precision tightening (FPR Improvement Plan - Chantier 7)
+  await timed('compound-tightening', runCompoundTighteningTests);
 
   // ML classifier tests (v2.10.0)
   await timed('ml-classifier', runMLClassifierTests);
