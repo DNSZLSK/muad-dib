@@ -917,6 +917,37 @@ const PLAYBOOKS = {
     'CRITIQUE: Dependance declaree avec URL tarball (.tgz/.tar.gz) hebergee hors des registres npm legitimes (github.com, gitlab.com, bitbucket.org, registry.npmjs.org). ' +
     'Pattern ltidi chain attack (avril 2026): le stub publie sur npm n\'a aucun install hook visible, la charge utile est hebergee sur un cloud storage (GCS, S3, CDN) et contourne entierement l\'audit du registre npm. ' +
     'Verifier le contenu de la tarball distante avant toute installation. Supprimer le package. Signaler au registre npm.',
+
+  // Sandbox 2026: honey traps + persistence + chain analysis
+  sandbox_honey_read:
+    'CRITIQUE: Le package a lu un fichier decoy plante par la sandbox (.npmrc-decoy, .ssh/id_rsa-decoy, wallet decoy, etc.). ' +
+    'Aucun outil legitime ne lit ces chemins decoy. Indicateur fort de scan aveugle de credentials, meme pour des malwares zero-day. ' +
+    'Isoler la machine. Supprimer le package. Si un decoy a ete exfiltre via HTTP, le canary token apparaitra dans les logs reseau.',
+
+  sandbox_credential_target_read:
+    'ELEVE: Le package a lu un fichier de credentials connu (cloud creds, wallets, browser data, .gnupg, .kube/config). ' +
+    'Pattern PhantomRaven, Shai-Hulud. Verifier la correlation avec une connexion sortante non-registre dans la meme run. ' +
+    'Si le decoy a ete exfiltre (canary detection): rotation immediate de tous les secrets correspondants.',
+
+  sandbox_persistence_write:
+    'CRITIQUE: Le package a ecrit dans un emplacement de persistance (.bashrc, .zshrc, autostart, cron, systemd user, LaunchAgents). ' +
+    'Aucun cas legitime en npm install. Implant probable. ' +
+    'Inspecter le contenu ecrit, le supprimer, isoler la machine, regenerer la session shell.',
+
+  sandbox_execve_chain_depth:
+    'ELEVE: La chaine de processus depasse la profondeur attendue depuis npm install (npm install -> script -> binaire externe). ' +
+    'Pattern Shai-Hulud preinstall worm: install script lance node/sh qui lance curl|wget|bash. ' +
+    'Tracer chaque processus de la chaine, supprimer le package, verifier les fichiers crees dans /tmp et le home.',
+
+  sandbox_npm_self_invoke:
+    'CRITIQUE: Le package invoque npm publish/deprecate/owner/token/access depuis l\'arborescence npm install. ' +
+    'Pattern CanisterWorm self-propagation: le malware utilise le token npm de la machine pour publier des versions backdoorees d\'autres packages mainteneurs par l\'utilisateur. ' +
+    'Isoler immediatement. Revoquer tous les tokens npm. Auditer les versions publiees recemment depuis le compte.',
+
+  sandbox_runtime_deobfuscation_executed:
+    'ELEVE: new Function() ou eval() a execute un body de >500 octets derive d\'une string source obfusquee. ' +
+    'Pattern Axios 2026 OrDeR_7077: XOR + base64 decoded a l\'install puis execute en memoire. ' +
+    'Le statique voit l\'obfuscation, la sandbox confirme l\'execution effective. Lire le contenu deobfusque dans les logs preload, isoler la machine.',
 };
 
 function getPlaybook(threatType) {

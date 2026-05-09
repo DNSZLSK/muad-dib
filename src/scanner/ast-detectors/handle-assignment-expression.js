@@ -237,11 +237,16 @@ function handleAssignmentExpression(node, ctx) {
         left.object.property?.type === 'Identifier' &&
         left.object.property.name === 'prototype' &&
         left.object.object?.type === 'Identifier') {
-      if (HOOKABLE_NATIVES.includes(left.object.object.name)) {
+      const targetName = left.object.object.name;
+      // FPR plan : skip when the target name is a local declaration. A file
+      // that does `function Request () {}` then `Request.prototype.X = ...`
+      // is implementing its own class, not hijacking the Fetch API.
+      const isSelfHook = ctx.localClassNames && ctx.localClassNames.has(targetName);
+      if (HOOKABLE_NATIVES.includes(targetName) && !isSelfHook) {
         ctx.threats.push({
           type: 'prototype_hook',
           severity: 'HIGH',
-          message: `${left.object.object.name}.prototype.${left.property?.name || '?'} overridden — native API hooking for traffic interception.`,
+          message: `${targetName}.prototype.${left.property?.name || '?'} overridden — native API hooking for traffic interception.`,
           file: ctx.relFile
         });
       }

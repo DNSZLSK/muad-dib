@@ -18,6 +18,21 @@ StandardError=journal
 SyslogIdentifier=muaddib-monitor
 
 Environment=NODE_ENV=production
+
+# FPR plan 2026 - 5 gates activated for the monitor pipeline.
+# These flags only fire here (CLI scans run un-gated for backwards compat
+# and to avoid the per-scan registry fetch on one-shot CLI invocations).
+# Measured impact (seed=42 + seed=2026 cross-corpus, 200 packages each) :
+#   FPR random  7.0%  -> 1.0%   no TPR / ADR regression
+#   TPR ground truth 93.85%     unchanged
+#   ADR adversarial   96.26%    unchanged
+# Rollback : remove these lines and `systemctl daemon-reload && restart`.
+Environment=MUADDIB_FN_REACHABILITY=1
+Environment=MUADDIB_DECAY=1
+Environment=MUADDIB_MATURE_CAP=1
+Environment=MUADDIB_METADATA_FACTOR=1
+Environment=MUADDIB_DELTA_MODE=1
+
 EnvironmentFile=-/opt/muaddib/.env
 
 # Security hardening

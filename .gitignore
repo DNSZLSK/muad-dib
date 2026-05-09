@@ -77,3 +77,6 @@ tests/samples/audit-v3-bypasses/
 # from third parties — keep local only.
 review-queue-export.tar.gz
 review-queue/
+
+# --- Local-only scripts (project pro dossier generator, throwaway helpers) ---
+.build_dossier.py

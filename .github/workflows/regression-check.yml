@@ -1,0 +1,36 @@
+name: FPR regression check
+
+# Triggers when metrics/ JSON snapshots change (PR or push). Compares the two
+# most recent metrics/v{version}.json files and fails if any FPR metric
+# regressed beyond tolerance, or if TPR / ADR dropped beyond tolerance.
+#
+# This guards against silent regressions per CLAUDE.md interdiction
+# "pas de regression silencieuse" : when an evaluation snapshot is committed,
+# CI confirms the snapshot is at least as good as the previous one.
+
+on:
+  push:
+    branches: [master, main]
+    paths:
+      - 'metrics/v*.json'
+      - 'scripts/regression-check.js'
+  pull_request:
+    branches: [master, main]
+    paths:
+      - 'metrics/v*.json'
+      - 'scripts/regression-check.js'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  regression-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-node@54045abd5dcd3b0fee9ca02fa24c57545834c9cc # v4
+        with:
+          node-version: '20'
+      - name: Run regression check
+        run: node scripts/regression-check.js

@@ -119,6 +119,24 @@ function analyzeFile(content, filePath, basePath) {
     workflowPathVars: new Set(),
     execPathVars: new Map(),
     globalThisAliases: new Set(),
+    // FPR plan : prototype_hook on a name like `Request` or `WebSocket` is
+    // a strong malice signal when it targets the *global* (Fetch / native)
+    // class. When the file declares its OWN class with the same name, the
+    // hook is just self-instrumentation (sl-request, ws's own Server, etc.).
+    // Pre-compute the set of locally declared class / function-constructor
+    // names via a cheap regex so handle-assignment-expression can skip the
+    // self-hook pattern. Matches : `function X (`, `class X {`, `class X(`,
+    // `const X = function`, `let X = class`, etc.
+    localClassNames: (() => {
+      const names = new Set();
+      const re = /\b(?:function|class)\s+(\w+)\s*[(\{]|\b(?:const|let|var)\s+(\w+)\s*=\s*(?:function|class)\b/g;
+      let m;
+      while ((m = re.exec(content)) !== null) {
+        const id = m[1] || m[2];
+        if (id) names.add(id);
+      }
+      return names;
+    })(),
     evalAliases: new Map(),           // B1: variable name → 'eval'|'Function'
     moduleLoadDirectAliases: new Set(), // B3: destructured _load from require('module')
     objectPropertyMap: new Map(),     // B5: objName → Map<propName, stringValue>

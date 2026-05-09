@@ -116,7 +116,10 @@ const WHITELIST = new Set([
 
   // Audit v3 B3: well-established packages flagged as typosquat of multiple popular packages
   'color',        // resembles colors (18M dl/week, 5385d old)
-  'ttypescript'   // resembles typescript (70K dl/week, 3198d old)
+  'ttypescript',  // resembles typescript (70K dl/week, 3198d old)
+  // FPR plan : established alternative utility libraries falsely matched
+  // against lodash/express by the wrong_char + similarity heuristic.
+  'radash'        // utility library, ~1.5M dl/week — wrong_char vs lodash
 ]);
 
 
@@ -131,7 +134,8 @@ const WHITELIST_PAIRS = new Map([
   ['cypress', 'express'], ['colord', 'colors'], ['read', 'react'],
   ['ulid', 'uuid'], ['tslint', 'eslint'], ['jison', 'sinon'],
   ['reds', 'redis'], ['docdash', 'lodash'], ['yarpm', 'yargs'],
-  ['canvg', 'canvas'], ['mocks', 'mocha'], ['reactor', 'react']
+  ['canvg', 'canvas'], ['mocks', 'mocha'], ['reactor', 'react'],
+  ['radash', 'lodash']
 ]);
 
 // Pre-computed lowercase versions for performance

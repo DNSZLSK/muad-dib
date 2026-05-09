@@ -500,8 +500,12 @@ const SCORING_COMPOUNDS = [
     requires: ['lifecycle_script', 'suspicious_dataflow'],
     severity: 'HIGH',
     message: 'Lifecycle hook + suspicious dataflow — install-time credential/data exfiltration pattern (scoring compound).',
-    fileFrom: 'suspicious_dataflow'
+    fileFrom: 'suspicious_dataflow',
     // No sameFile: lifecycle is package-level, dataflow is file-level
+    // C7 : when every component lives only in dist/build/out, the cooccurrence
+    // is bundler aggregation (a postinstall mention + a pre-bundled HTTP client
+    // with credential fields), not real exfiltration. Skip the compound.
+    excludeIfBundled: true
   },
   {
     type: 'lifecycle_dangerous_exec',
@@ -510,6 +514,8 @@ const SCORING_COMPOUNDS = [
     message: 'Lifecycle hook + dangerous shell execution — install-time command injection (scoring compound).',
     fileFrom: 'dangerous_exec'
     // No sameFile: lifecycle is package-level
+    // dangerous_exec is in DIST_EXEMPT_TYPES so it is never coincidental in
+    // dist/ ; no excludeIfBundled gate added here.
   },
   {
     type: 'obfuscated_lifecycle_env',
@@ -518,7 +524,12 @@ const SCORING_COMPOUNDS = [
     message: 'Obfuscation + credential env access + lifecycle hook — obfuscated install-time credential theft (scoring compound).',
     fileFrom: 'env_access',
     // Only obfuscation_detected + env_access must be in the same file (lifecycle_script is package-level)
-    sameFileTypes: ['obfuscation_detected', 'env_access']
+    sameFileTypes: ['obfuscation_detected', 'env_access'],
+    // C7 : tighter gate - a single MEDIUM env_access alongside generic
+    // obfuscation_detected in a bundler is not proof of credential theft.
+    // Require at least one component with originalSeverity HIGH+ to fire.
+    requireOriginalSeverityHigh: true,
+    excludeIfBundled: true
   },
   // v2.10.89: Security review compounds
   {
@@ -591,6 +602,41 @@ function applyCompoundBoosts(threats) {
     );
     if (!hasSignificantComponent) continue;
 
+    // FPR plan Chantier 7 : tighter severity gate. requireOriginalSeverityHigh
+    // raises the bar from MEDIUM+ to HIGH+ on at least one component. Compounds
+    // whose constituents are mostly heuristic (env_access, obfuscation_detected)
+    // need HIGH+ to confirm a real signal versus framework noise.
+    if (compound.requireOriginalSeverityHigh) {
+      const hasHighOrigin = compound.requires.some(req =>
+        threats.some(t => t.type === req && (
+          (t.originalSeverity || t.severity) === 'HIGH' ||
+          (t.originalSeverity || t.severity) === 'CRITICAL'
+        ))
+      );
+      if (!hasHighOrigin) continue;
+    }
+
+    // FPR plan Chantier 7 : excludeIfBundled. When every required component
+    // appears only in bundle files, the co-occurrence is bundler aggregation
+    // (e.g. an HTTP client compiled into the same chunk as the credential-
+    // handling code), not malice. lifecycle_script is package-level
+    // (file = package.json) so it bypasses this gate naturally. Uses the
+    // canonical BUNDLE_PATH_RE which covers dist/build/out/.yarn/releases/
+    // assets/chunks/_app/fesm*/esm5/esm2015 etc. (vs the narrow DIST_FILE_RE).
+    if (compound.excludeIfBundled) {
+      const { BUNDLE_PATH_RE } = require('./shared/bundle-detect.js');
+      const allComponentsBundled = compound.requires.every(req => {
+        const fileBearingThreats = threats.filter(t => t.type === req && t.file && t.file !== 'package.json');
+        if (fileBearingThreats.length === 0) return true; // package-level, ignore for bundle test
+        return fileBearingThreats.every(t => BUNDLE_PATH_RE.test(t.file));
+      });
+      // Only skip when there is at least one file-bearing component AND all are bundled
+      const anyFileBearing = compound.requires.some(req =>
+        threats.some(t => t.type === req && t.file && t.file !== 'package.json')
+      );
+      if (anyFileBearing && allComponentsBundled) continue;
+    }
+
     // Same-file constraint: required types must appear in at least one common file.
     // sameFile: true = ALL required types must share a file.
     // sameFileTypes: [...] = only specified types must share a file.
@@ -651,7 +697,7 @@ const FRAMEWORK_PROTO_RE = new RegExp(
   '^(' + FRAMEWORK_PROTOTYPES.join('|') + ')\\.prototype\\.'
 );
 
-function applyFPReductions(threats, reachableFiles, packageName, packageDeps) {
+function applyFPReductions(threats, reachableFiles, packageName, packageDeps, reachableFunctions) {
   // Initialize reductions audit trail on each threat
   // Store original severity before any FP reductions, so compound
   // severity gates can check pre-reduction severity (GAP 4b).
@@ -893,6 +939,25 @@ function applyFPReductions(threats, reachableFiles, packageName, packageDeps) {
         t.reductions.push({ rule: 'unreachable', from: t.severity, to: 'LOW' });
         t.severity = 'LOW';
         t.unreachable = true;
+      }
+      // FPR plan C2 : the file IS reachable but the surrounding function is
+      // not. Only fires when reachableFunctions is provided (env-flagged) and
+      // the threat carries a t.line (dataflow + anti-forensic emit lines ;
+      // most other scanners do not, so this is a no-op for them).
+      else if (reachableFunctions && typeof t.line === 'number' && t.line > 0) {
+        const fnInfo = reachableFunctions.get(normalizedFile);
+        if (fnInfo && !fnInfo.dynamic && Array.isArray(fnInfo.deadRanges)) {
+          for (const range of fnInfo.deadRanges) {
+            if (t.line >= range.startLine && t.line <= range.endLine) {
+              if (t.severity !== 'LOW') {
+                t.reductions.push({ rule: 'unreachable_function', from: t.severity, to: 'LOW' });
+                t.severity = 'LOW';
+              }
+              t.unreachableFunction = range.name || true;
+              break;
+            }
+          }
+        }
       }
     }
 
@@ -1338,6 +1403,26 @@ function _factorFromMetadata(meta) {
     else if (authorPkgs > 50) factor -= 0.1;
     signalsApplied++;
   }
+  // FPR plan Chantier 4 : advanced registry signals. These complement the
+  // basic AUC-tuned signals above. The first three are *boosts* used as a
+  // safety net for Chantier 5's mature stable cap : an account takeover on a
+  // mature package would otherwise be hidden by a passive multiplier.
+  //
+  //   maintainer_change_recent  -> +0.20 (Shai-Hulud / Axios pattern in 2026)
+  //   publish_cadence_anomaly   -> +0.10 (publish frequency suddenly off)
+  //   stable_ownership_2y       -> -0.15 (suppression douce, only structural)
+  if (meta.maintainer_change_recent === true) {
+    factor += 0.20;
+    signalsApplied++;
+  }
+  if (meta.publish_cadence_anomaly === true) {
+    factor += 0.10;
+    signalsApplied++;
+  }
+  if (meta.stable_ownership_2y === true) {
+    factor -= 0.15;
+    signalsApplied++;
+  }
   // If no signals applied (metadata fully absent), return neutral 1.0 rather
   // than the default-shaped factor — avoid spurious adjustments on rows where
   // the registry data is simply missing.
@@ -1347,6 +1432,27 @@ function _factorFromMetadata(meta) {
 
 function applyReputationFactor(result, metadata) {
   if (!result || !result.summary || !metadata) return null;
+  // FPR plan : the reputation factor describes "how trustworthy this package
+  // looks TODAY in the registry". Applying it to a historical / pinned-old /
+  // vendored version with the same name would import today's good reputation
+  // onto a code snapshot that may have been compromised at the time.
+  // When both version fields are present we require them to match. When the
+  // scan version is unknown (CLI scanning a directory without version field),
+  // we fail open : skip the factor entirely rather than apply a multiplier
+  // we cannot situate in time.
+  if (
+    typeof metadata.latest_version === 'string' &&
+    typeof metadata.scan_version === 'string' &&
+    metadata.latest_version !== metadata.scan_version
+  ) {
+    return null;
+  }
+  if (
+    typeof metadata.latest_version === 'string' &&
+    typeof metadata.scan_version !== 'string'
+  ) {
+    return null;
+  }
   const factor = _factorFromMetadata(metadata);
   if (factor === 1.0) {
     result.summary.reputationFactor = 1.0;
@@ -1362,6 +1468,119 @@ function applyReputationFactor(result, metadata) {
       : rs >= _riskThresholds.MEDIUM ? 'MEDIUM'
         : rs > 0 ? 'LOW' : 'SAFE';
   return { factor, oldScore, newScore };
+}
+
+// ============================================
+// FPR plan Chantier 5 : MATURE STABLE PACKAGE CAP
+// ============================================
+//
+// Caps the risk score at MEDIUM (25) when a package satisfies *all* of the
+// following structural conditions, none of which are recoverable by simple
+// rule heuristics :
+//
+//   - >= 5 years old
+//   - >= 50 published versions
+//   - >= 10 000 weekly downloads
+//   - stable_ownership_2y (registry signal from Chantier 4)
+//   - no HIGH_CONFIDENCE_MALICE_TYPES present
+//   - no IOC match
+//   - no delta-added threats (skipped while Chantier 3 ships - the cap still
+//     applies because the caller has not provided the field, and we treat
+//     that as "no positive evidence of fresh malicious additions")
+//
+// This is the single structural suppression introduced by the FPR plan and
+// always sits BETWEEN applyContextualFPCaps (which it composes with) and
+// applySingleFireCriticalFloor (which can override it on hard signals). The
+// reputation factor downstream multiplies what's left.
+//
+// Disabled by default ; gated behind MUADDIB_MATURE_CAP=1 until measured
+// against the full evaluation corpus.
+
+const MATURE_CAP_SCORE = 25;
+const MATURE_MIN_AGE_DAYS = 5 * 365;
+const MATURE_MIN_VERSION_COUNT = 50;
+const MATURE_MIN_WEEKLY_DOWNLOADS = 10000;
+
+const MATURE_CAP_IOC_TYPES = new Set([
+  'ioc_match',
+  'ioc_string_match',
+  'known_malicious_hash',
+  'known_malicious_package',
+  'pypi_malicious_package',
+  'shai_hulud_marker',
+  'dependency_ioc_match'
+]);
+
+function applyMatureStableCap(result, registryMeta) {
+  if (!result || !result.summary || !Array.isArray(result.threats)) return null;
+  if (!registryMeta) return null;
+
+  const reasons = {};
+
+  // FPR plan : the cap MUST only fire when scanning the package's current
+  // latest version. Historical / pinned-old / vendored versions of mature
+  // packages bypass the cap so we never mask a static fixture of a real
+  // attack (eslint-scope 3.7.2, chalk 5.6.1, coa 2.0.3, rc, solana-web3js,
+  // ledgerhq-connect-kit etc.). Both fields must be present and equal.
+  if (
+    typeof registryMeta.latest_version !== 'string' ||
+    typeof registryMeta.scan_version !== 'string' ||
+    registryMeta.latest_version !== registryMeta.scan_version
+  ) {
+    return null;
+  }
+  reasons.scan_version = registryMeta.scan_version;
+  reasons.latest_version = registryMeta.latest_version;
+
+  if (!_hasNumeric(registryMeta.age_days) || registryMeta.age_days < MATURE_MIN_AGE_DAYS) {
+    return null;
+  }
+  reasons.age_days = registryMeta.age_days;
+
+  if (!_hasNumeric(registryMeta.version_count) || registryMeta.version_count < MATURE_MIN_VERSION_COUNT) {
+    return null;
+  }
+  reasons.version_count = registryMeta.version_count;
+
+  if (!_hasNumeric(registryMeta.weekly_downloads) || registryMeta.weekly_downloads < MATURE_MIN_WEEKLY_DOWNLOADS) {
+    return null;
+  }
+  reasons.weekly_downloads = registryMeta.weekly_downloads;
+
+  if (registryMeta.stable_ownership_2y !== true) {
+    return null;
+  }
+  reasons.stable_ownership_2y = true;
+
+  // delta_added_threats is provided by Chantier 3 ; treat undefined as 0 to
+  // ship Chantier 5 standalone. When C3 wires through a real number, the
+  // condition `> 0` correctly disables the cap on suspicious deltas.
+  const deltaAdded = registryMeta.delta_added_threats;
+  if (typeof deltaAdded === 'number' && deltaAdded > 0) {
+    return null;
+  }
+  reasons.delta_added_threats = deltaAdded == null ? 0 : deltaAdded;
+
+  for (const t of result.threats) {
+    if (HIGH_CONFIDENCE_MALICE_TYPES.has(t.type)) return null;
+    if (MATURE_CAP_IOC_TYPES.has(t.type)) return null;
+  }
+
+  if (result.summary.riskScore <= MATURE_CAP_SCORE) {
+    return null; // already at/below cap, nothing to do
+  }
+
+  const oldScore = result.summary.riskScore;
+  result.summary.riskScore = MATURE_CAP_SCORE;
+  result.summary.matureStableCap = true;
+  result.summary.matureStableCapReasons = reasons;
+  const rs = MATURE_CAP_SCORE;
+  result.summary.riskLevel =
+    rs >= _riskThresholds.CRITICAL ? 'CRITICAL'
+      : rs >= _riskThresholds.HIGH ? 'HIGH'
+        : rs >= _riskThresholds.MEDIUM ? 'MEDIUM'
+          : rs > 0 ? 'LOW' : 'SAFE';
+  return { applied: true, oldScore, newScore: MATURE_CAP_SCORE, reasons };
 }
 
 /**
@@ -1396,10 +1615,151 @@ function applySingleFireCriticalFloor(result) {
   return triggers;
 }
 
+// ── Sandbox verdict scoring contract ──
+// Applied AFTER the sandbox completes a run triggered by evaluateSandboxTrigger.
+// The verdict adjusts the static riskScore based on dynamic confirmation.
+// Static stays the primary detection layer; sandbox is a borderline tribunal.
+const SANDBOX_VERDICT_CONFIRMED_FLOOR = 75;
+const SANDBOX_VERDICT_CHAIN_FLOOR = 60;
+const SANDBOX_VERDICT_CLEAN_DELTA = 8;
+
+const _CRITICAL_PRELOAD_TYPES = new Set([
+  'sandbox_network_after_sensitive_read',
+  'sandbox_known_exfil_domain',
+  'sandbox_timer_delay_critical',
+  'canary_exfiltration',
+  'sandbox_honey_read',
+  'sandbox_persistence_write',
+  'sandbox_npm_self_invoke',
+  'sandbox_runtime_deobfuscation_executed'
+]);
+
+const _HIGH_COMPOUND_TYPES = new Set([
+  'sandbox_preload_sensitive_read',
+  'sandbox_exec_suspicious',
+  'sandbox_network_outlier',
+  'sandbox_execve_chain_depth',
+  'sandbox_credential_target_read'
+]);
+
+/**
+ * Classify a sandbox run into a verdict and apply the score contract.
+ *
+ * Verdicts:
+ *   - MALICIOUS_CONFIRMED: >=1 critical preload signal OR honey read correlated
+ *     with non-registry outbound. Floor score at 75.
+ *   - MALICIOUS_CHAIN: >=2 high-severity compound signals in the same run.
+ *     Floor score at 60.
+ *   - CLEAN_HIGH_CONFIDENCE: install completed, no fingerprint detected, no
+ *     sandbox findings beyond DNS resolutions/registry traffic. Apply -8 delta.
+ *   - INCONCLUSIVE: gVisor unavailable, install crashed, or fingerprint
+ *     detected. Score unchanged, warning attached.
+ *
+ * Mutates result.summary.riskScore, riskLevel, and adds result.summary.sandboxVerdict.
+ *
+ * @param {object} result - Scan result with summary.{riskScore, riskLevel, ...}.
+ * @param {object} sandboxResult - Output of runSandbox(): {score, severity, findings, raw_report, suspicious, inconclusive}.
+ * @returns {{verdict:string, oldScore:number, newScore:number, signals:string[]}|null}
+ */
+function applySandboxVerdict(result, sandboxResult) {
+  if (!result || !result.summary || !sandboxResult) return null;
+
+  const findings = Array.isArray(sandboxResult.findings) ? sandboxResult.findings : [];
+  const oldScore = result.summary.riskScore || 0;
+
+  // Inconclusive path: explicit flag, or score === -1 sentinel.
+  if (sandboxResult.inconclusive === true || sandboxResult.score === -1) {
+    result.summary.sandboxVerdict = {
+      verdict: 'INCONCLUSIVE',
+      oldScore,
+      newScore: oldScore,
+      signals: findings.filter(f => f && f.type).map(f => f.type)
+    };
+    return result.summary.sandboxVerdict;
+  }
+
+  const findingTypes = findings.filter(f => f && f.type).map(f => f.type);
+  const criticalSignals = findingTypes.filter(t => _CRITICAL_PRELOAD_TYPES.has(t));
+  const highSignals = findingTypes.filter(t => _HIGH_COMPOUND_TYPES.has(t));
+
+  // MALICIOUS_CONFIRMED: any single critical preload/honey signal is enough.
+  if (criticalSignals.length >= 1) {
+    const newScore = Math.max(oldScore, SANDBOX_VERDICT_CONFIRMED_FLOOR);
+    result.summary.riskScore = newScore;
+    _refreshRiskLevel(result);
+    result.summary.sandboxVerdict = {
+      verdict: 'MALICIOUS_CONFIRMED',
+      oldScore,
+      newScore,
+      signals: criticalSignals
+    };
+    return result.summary.sandboxVerdict;
+  }
+
+  // MALICIOUS_CHAIN: 2+ high-severity compound signals from preload analyzer.
+  if (highSignals.length >= 2) {
+    const newScore = Math.max(oldScore, SANDBOX_VERDICT_CHAIN_FLOOR);
+    result.summary.riskScore = newScore;
+    _refreshRiskLevel(result);
+    result.summary.sandboxVerdict = {
+      verdict: 'MALICIOUS_CHAIN',
+      oldScore,
+      newScore,
+      signals: highSignals
+    };
+    return result.summary.sandboxVerdict;
+  }
+
+  // CLEAN_HIGH_CONFIDENCE: install completed, sandbox score 0, no findings
+  // beyond INFO (DNS resolutions). Anti-fingerprint must NOT have been
+  // detected (fingerprint detection is treated as inconclusive above).
+  const actionableFindings = findings.filter(f => f && f.severity && f.severity !== 'INFO');
+  const installCompleted = sandboxResult.score === 0 && !sandboxResult.inconclusive;
+  if (installCompleted && actionableFindings.length === 0) {
+    const newScore = Math.max(0, oldScore - SANDBOX_VERDICT_CLEAN_DELTA);
+    result.summary.riskScore = newScore;
+    _refreshRiskLevel(result);
+    result.summary.sandboxVerdict = {
+      verdict: 'CLEAN_HIGH_CONFIDENCE',
+      oldScore,
+      newScore,
+      signals: []
+    };
+    return result.summary.sandboxVerdict;
+  }
+
+  // Default: signals present but below thresholds — record verdict, no change.
+  result.summary.sandboxVerdict = {
+    verdict: 'INCONCLUSIVE',
+    oldScore,
+    newScore: oldScore,
+    signals: findingTypes
+  };
+  return result.summary.sandboxVerdict;
+}
+
+function _refreshRiskLevel(result) {
+  const rs = result.summary.riskScore;
+  result.summary.riskLevel =
+    rs >= _riskThresholds.CRITICAL ? 'CRITICAL'
+      : rs >= _riskThresholds.HIGH ? 'HIGH'
+        : rs >= _riskThresholds.MEDIUM ? 'MEDIUM'
+          : rs > 0 ? 'LOW' : 'SAFE';
+}
+
+// FPR plan Chantier 3 - delta-aware decay. Re-exported here so the pipeline
+// can call it after applyFPReductions and before applyCompoundBoosts (matching
+// the plan : compounds operate on freshly-introduced patterns, never on stable
+// long-standing ones, so we suppress noise BEFORE compound boosts run).
+const { applyDeltaMultiplier } = require('./scoring/delta-multiplier.js');
+
 module.exports = {
   SEVERITY_WEIGHTS, RISK_THRESHOLDS, MAX_RISK_SCORE, CONFIDENCE_FACTORS,
   SINGLE_FIRE_CRITICAL_TYPES, SINGLE_FIRE_CRITICAL_FLOOR, DECAY_ALPHA,
   REPUTATION_FACTOR_BOUNDS,
+  MATURE_CAP_SCORE, MATURE_MIN_AGE_DAYS, MATURE_MIN_VERSION_COUNT, MATURE_MIN_WEEKLY_DOWNLOADS,
+  SANDBOX_VERDICT_CONFIRMED_FLOOR, SANDBOX_VERDICT_CHAIN_FLOOR, SANDBOX_VERDICT_CLEAN_DELTA,
+  applyMatureStableCap, applySandboxVerdict, applyDeltaMultiplier,
   isPackageLevelThreat, computeGroupScore, computeGroupScoreDecay,
   applyFPReductions, applyCompoundBoosts, calculateRiskScore,
   applyConfigOverrides, resetConfigOverrides, getSeverityWeights, getRiskThresholds,

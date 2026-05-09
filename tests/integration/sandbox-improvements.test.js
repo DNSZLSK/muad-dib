@@ -251,20 +251,23 @@ function runSandboxImprovementTests() {
     assertIncludes(processorSrc, 'local: true', 'Should run sandbox in local mode');
   });
 
-  test('C3: auto-sandbox uses preliminary score (not riskScore)', () => {
-    // Auto-sandbox logic moved to pipeline/processor.js in P2 audit refactor
+  test('C3: auto-sandbox uses preliminary score (compound trigger gate)', () => {
+    // Auto-sandbox logic moved to pipeline/processor.js in P2 audit refactor.
+    // Phase 5 (2026-05-09): the >=20 threshold was replaced by a surgical
+    // compound trigger via evaluateSandboxTrigger (window [15, 35]).
     const processorSrc = fs.readFileSync(
       path.join(__dirname, '..', '..', 'src', 'pipeline', 'processor.js'), 'utf8');
     assertIncludes(processorSrc, 'prelimScore', 'Should compute preliminary score');
-    assertIncludes(processorSrc, 'prelimScore >= 20', 'Should trigger when prelimScore >= 20');
+    assertIncludes(processorSrc, 'evaluateSandboxTrigger', 'Should use compound trigger gate');
+    assertIncludes(processorSrc, 'sandboxTrigger.shouldRun', 'Should branch on shouldRun');
   });
 
   test('C3: auto-sandbox is graceful when Docker unavailable', () => {
-    // Auto-sandbox logic moved to pipeline/processor.js in P2 audit refactor
+    // Auto-sandbox logic moved to pipeline/processor.js in P2 audit refactor.
     const processorSrc = fs.readFileSync(
       path.join(__dirname, '..', '..', 'src', 'pipeline', 'processor.js'), 'utf8');
     assertIncludes(processorSrc, 'Docker not available', 'Should log when Docker not available');
-    assertIncludes(processorSrc, 'sandbox is best-effort', 'Should treat sandbox as best-effort');
+    assertIncludes(processorSrc, 'isDockerAvailable', 'Should check Docker availability before running');
   });
 
   // Auto-sandbox should NOT trigger for benign packages (score < 20)
