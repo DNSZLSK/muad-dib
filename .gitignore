@@ -10,6 +10,8 @@ node_modules/
 # --- Environment & secrets (SECURITY: never commit) ---
 .env
 .env.*
+# Exception: .env.example is the documented template (no real values).
+!.env.example
 
 # --- Build artifacts & output files ---
 *.tgz

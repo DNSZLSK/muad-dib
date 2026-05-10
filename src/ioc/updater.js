@@ -39,25 +39,28 @@ async function updateIOCs() {
   mergeIOCs(baseIOCs, yamlStandard);
   console.log('[2/4] YAML IOCs: ' + yamlStandard.packages.length + ' packages, ' + yamlStandard.hashes.length + ' hashes');
 
-  // Step 3: Download additional IOCs from GitHub + OSV API (GenSecAI + DataDog + OSV lightweight)
-  const { scrapeShaiHuludDetector, scrapeDatadogIOCs, scrapeOSVLightweightAPI } = require('./scraper.js');
-  console.log('[3/4] Downloading GitHub + OSV API IOCs...');
+  // Step 3: Download additional IOCs from GitHub + OSV API (GenSecAI + DataDog + OSV lightweight + OSM)
+  // Light path: JSON/REST only, NO heavy zip dumps. Designed to be safe at 15min cadence.
+  // For the deep refresh (OSV zip dumps + OSSF + Aikido + GitHub Advisory), use `muaddib scrape` (~5min).
+  const { scrapeShaiHuludDetector, scrapeDatadogIOCs, scrapeOSVLightweightAPI, scrapeOSMQueryLatest } = require('./scraper.js');
+  console.log('[3/4] Downloading GitHub + OSV API + OSM IOCs...');
 
-  const [shaiHulud, datadog, osvApi] = await Promise.all([
+  const [shaiHulud, datadog, osvApi, osmResult] = await Promise.all([
     scrapeShaiHuludDetector(),
     scrapeDatadogIOCs(),
-    scrapeOSVLightweightAPI()
+    scrapeOSVLightweightAPI(),
+    scrapeOSMQueryLatest()
   ]);
 
   const githubIOCs = {
-    packages: [].concat(shaiHulud.packages, datadog.packages, osvApi),
-    pypi_packages: [],
+    packages: [].concat(shaiHulud.packages, datadog.packages, osvApi, osmResult.packages),
+    pypi_packages: (osmResult.pypi_packages || []).slice(),
     hashes: [].concat(shaiHulud.hashes || [], datadog.hashes || []),
     markers: [],
     files: []
   };
   mergeIOCs(baseIOCs, githubIOCs);
-  console.log('     +' + shaiHulud.packages.length + ' GenSecAI, +' + datadog.packages.length + ' DataDog, +' + osvApi.length + ' OSV API');
+  console.log('     +' + shaiHulud.packages.length + ' GenSecAI, +' + datadog.packages.length + ' DataDog, +' + osvApi.length + ' OSV API, +' + osmResult.packages.length + ' OSM npm, +' + (osmResult.pypi_packages || []).length + ' OSM PyPI');
 
   // Step 3b: Load existing cache IOCs (from bootstrap download or previous update)
   if (fs.existsSync(CACHE_IOC_FILE)) {

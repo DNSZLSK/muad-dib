@@ -10,6 +10,10 @@ REPO_URL="https://github.com/DNSZLSK/muad-dib.git"
 INSTALL_DIR="/opt/muaddib"
 SERVICE_USER="muaddib"
 SERVICE_FILE="muaddib-monitor.service"
+SCRAPE_SERVICE="muaddib-scrape.service"
+SCRAPE_TIMER="muaddib-scrape.timer"
+SCRAPE_LIGHT_SERVICE="muaddib-scrape-light.service"
+SCRAPE_LIGHT_TIMER="muaddib-scrape-light.timer"
 
 echo "============================================"
 echo "  MUAD'DIB Monitor — Automated Setup"
@@ -87,19 +91,35 @@ else
 fi
 
 # --- 6. Install and start systemd service ---
-echo "[6/6] Installing systemd service..."
+echo "[6/6] Installing systemd service + IOC scrape timers..."
 cp "$INSTALL_DIR/deploy/${SERVICE_FILE}" /etc/systemd/system/
+cp "$INSTALL_DIR/deploy/${SCRAPE_SERVICE}" /etc/systemd/system/
+cp "$INSTALL_DIR/deploy/${SCRAPE_TIMER}" /etc/systemd/system/
+cp "$INSTALL_DIR/deploy/${SCRAPE_LIGHT_SERVICE}" /etc/systemd/system/
+cp "$INSTALL_DIR/deploy/${SCRAPE_LIGHT_TIMER}" /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable "$SERVICE_FILE"
 systemctl start "$SERVICE_FILE"
+# Two timers drive IOC refresh:
+#   - muaddib-scrape-light.timer (every 15min): light feeds incl. OSM, Shai-Hulud, Datadog, OSV-API
+#   - muaddib-scrape.timer (every 6h): deep refresh incl. OSV zip dumps, OSSF, Aikido, GitHub Advisory
+# We enable the .timer units (not the .service units) so systemd schedules them.
+systemctl enable "$SCRAPE_LIGHT_TIMER"
+systemctl start "$SCRAPE_LIGHT_TIMER"
+systemctl enable "$SCRAPE_TIMER"
+systemctl start "$SCRAPE_TIMER"
 
 echo ""
 echo "============================================"
 echo "  Setup complete!"
 echo "============================================"
 echo ""
-echo "  Service status:  systemctl status muaddib-monitor"
-echo "  View logs:       journalctl -u muaddib-monitor -f"
+echo "  Monitor status:    systemctl status muaddib-monitor"
+echo "  Light scrape:      systemctl list-timers muaddib-scrape-light"
+echo "  Full scrape:       systemctl list-timers muaddib-scrape"
+echo "  View logs:         journalctl -u muaddib-monitor -f"
+echo "                     journalctl -u muaddib-scrape-light -f"
+echo "                     journalctl -u muaddib-scrape -f"
 echo "  Configuration:   /opt/muaddib/.env"
 echo ""
 echo "  Create /opt/muaddib/.env with:"
@@ -108,4 +128,6 @@ echo "    MUADDIB_WEBHOOK_URL=https://hooks.slack.com/services/..."
 echo "    # Optional: real-time push of alerts to muad-api dashboard"
 echo "    MUADDIB_API_URL=https://api.muaddib.example.com"
 echo "    MUADDIB_INGEST_TOKEN=<must match muad-api INGEST_TOKEN>"
+echo "    # Optional: OpenSourceMalware.com community feed (60 req/min free tier)"
+echo "    OSM_API_TOKEN=osm_<your-token-from-opensourcemalware.com>"
 echo ""

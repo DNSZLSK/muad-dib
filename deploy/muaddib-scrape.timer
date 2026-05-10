@@ -1,0 +1,20 @@
+[Unit]
+Description=MUAD'DIB IOC Scraper Timer (full deep refresh every 6 hours)
+Documentation=https://github.com/DNSZLSK/muad-dib
+
+[Timer]
+# Boot delay: 10min so the light scraper gets a chance to run first on fresh boot.
+OnBootSec=10min
+# Recurring: 6 hours between deep refreshes.
+# Rationale: this timer drives the FULL muaddib scrape (~5min run, downloads OSV
+# zip dumps + OSSF GitHub trees + Aikido bulk feed + GitHub Advisory). These
+# sources update slowly — daily-ish at most — so 6h gives current data without
+# wasting bandwidth. Fast feeds (OSM, Shai-Hulud, Datadog, OSV-lightweight)
+# refresh on the separate muaddib-scrape-light.timer at 15min cadence.
+OnUnitActiveSec=6h
+# Run missed firings if the system was off (laptop suspend, VPS reboot, etc.).
+Persistent=true
+Unit=muaddib-scrape.service
+
+[Install]
+WantedBy=timers.target

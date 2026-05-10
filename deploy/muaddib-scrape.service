@@ -1,0 +1,50 @@
+[Unit]
+Description=MUAD'DIB IOC Scraper (full refresh: OSV + OSSF + GenSecAI + DataDog + Aikido + OSM)
+Documentation=https://github.com/DNSZLSK/muad-dib
+After=network-online.target
+Wants=network-online.target
+# Don't run while the auto-update is rewriting code on disk.
+After=muaddib-update.service
+
+[Service]
+Type=oneshot
+User=muaddib
+Group=muaddib
+WorkingDirectory=/opt/muaddib
+ExecStart=/usr/bin/node --max-old-space-size=4096 bin/muaddib.js scrape
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=muaddib-scrape
+
+# Loads OSM_API_TOKEN (and any other secrets) from /opt/muaddib/.env.
+# Leading dash = optional file (not an error if absent — scraper degrades gracefully).
+EnvironmentFile=-/opt/muaddib/.env
+
+Environment=NODE_ENV=production
+
+# Network-bound, IO-bound. Cap CPU to avoid stealing cycles from the live monitor.
+Nice=10
+CPUWeight=50
+IOWeight=50
+
+# Bound runtime: a healthy scrape finishes in ~5min; kill anything that drags past 15.
+TimeoutStartSec=15min
+
+# Security hardening (parity with muaddib-monitor.service)
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/opt/muaddib/data /opt/muaddib/logs /opt/muaddib/src/ioc/data
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+RestrictRealtime=true
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target
