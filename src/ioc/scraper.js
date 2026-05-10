@@ -12,10 +12,37 @@ const { Spinner } = require('../utils.js');
 const { NPM_PACKAGE_REGEX } = require('../shared/constants.js');
 
 // Version format validation (semver-like + wildcard)
-const VERSION_RE = /^(\*|0|[1-9]\d*(\.\d+){0,2}(-[\w.]+)?(\+[\w.]+)?)$/;
+// Permissive version validator — accepts:
+//   - npm semver (1.2.3, 1.2.3-beta.1+build42, 0.x.y)
+//   - PEP 440 (0.1.0b7, 1.2.post1, 1.2.dev0, 0.1.0rc1)
+//   - calendar versioning (2024.5.0)
+//   - 4-segment versions (99.99.99.1, 0.0.7.5)
+//   - wildcard (*)
+// Rejects only structural abuse: path traversal (..), shell metachars,
+// whitespace, slashes, length > 100. The previous regex required first
+// char in [1-9] after a '0' which broke ALL 0.x.y versions (false negative
+// spam in scraper logs ; ~600 valid PyPI/npm versions wrongly skipped per scrape).
+const VERSION_INVALID_CHARS = /[\s\\/'"`;|&$<>(){}\[\]?]/;
+function isValidVersion(version) {
+  if (!version || typeof version !== 'string') return false;
+  if (version === '*') return true;
+  if (version.length > 100) return false;
+  if (version.includes('..')) return false;
+  if (VERSION_INVALID_CHARS.test(version)) return false;
+  // Must start with a digit (or 'v' prefix), and contain only word chars / . / + / -
+  if (!/^v?\d/.test(version)) return false;
+  return /^[\w.+\-]+$/.test(version);
+}
+// Backwards compat: keep VERSION_RE as a no-op test wrapper for any legacy
+// caller that imports it. Prefer isValidVersion() in new code.
+const VERSION_RE = { test: isValidVersion };
 
-// Aggregated warning counter for noisy logs (reset per scraper run)
+// Aggregated warning counters for noisy logs (reset per scraper run).
+// Avoids spamming hundreds of WARN lines for malware feeds with non-standard
+// version strings — a single summary line is logged at the end of runScraper.
 let _noVersionSkipCount = 0;
+let _invalidVersionSkipCount = 0;
+let _invalidVersionSamples = [];  // first 3 samples for context
 
 /**
  * Validate an IOC package entry before insertion.
@@ -37,9 +64,13 @@ function validateIOCEntry(pkgName, version, ecosystem) {
       return false;
     }
   }
-  // Version validation
+  // Version validation — silent counter (aggregated log emitted by runScraper).
+  // The previous per-line WARN was spamming ~600 lines per scrape on PyPI feeds.
   if (version && !VERSION_RE.test(version)) {
-    console.warn(`[WARN] Invalid version skipped: ${version} for ${pkgName}`);
+    _invalidVersionSkipCount++;
+    if (_invalidVersionSamples.length < 3) {
+      _invalidVersionSamples.push(`${version} for ${pkgName}`);
+    }
     return false;
   }
   return true;
@@ -986,6 +1017,8 @@ async function runScraper() {
 
   // Reset aggregated warning counters
   _noVersionSkipCount = 0;
+  _invalidVersionSkipCount = 0;
+  _invalidVersionSamples = [];
 
   // Create data directory if needed
   const dataDir = path.dirname(IOC_FILE);
@@ -1053,6 +1086,12 @@ async function runScraper() {
   // Log aggregated warnings
   if (_noVersionSkipCount > 0) {
     console.log('[SCRAPER] WARN: ' + _noVersionSkipCount + ' packages skipped (no version info, wildcard fallback avoided)');
+  }
+  if (_invalidVersionSkipCount > 0) {
+    const samples = _invalidVersionSamples.length > 0
+      ? ' (samples: ' + _invalidVersionSamples.join(', ') + ')'
+      : '';
+    console.log('[SCRAPER] WARN: ' + _invalidVersionSkipCount + ' entries skipped (malformed version)' + samples);
   }
 
   // Merge all scraped packages
