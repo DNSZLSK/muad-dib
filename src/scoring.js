@@ -447,7 +447,16 @@ const REACHABILITY_EXEMPT_TYPES = new Set([
   'pypi_malicious_package',
   'ai_config_injection', 'ai_config_injection_compound',
   'detached_credential_exfil', // DPRK/Lazarus: invoked via lifecycle, not require/import
-  'native_addon_install' // binding.gyp executes during npm install but isn't require()'d
+  'native_addon_install', // binding.gyp executes during npm install but isn't require()'d
+  // Staged loader pattern (chai-* / poxios-chain campaign 2026-05): the malicious
+  // file is loaded indirectly (transport.js requires caller.js) and reachability
+  // resolution can fail, demoting CRITICAL to LOW. These types are unambiguously
+  // malicious — no legitimate code shadows process, calls Function.constructor("require"),
+  // or self-destructs after running new Function(...).
+  'function_constructor_require',  // AST-086 — Function.constructor("require", body)
+  'process_variable_shadow',       // AST-087 — const process = {env:{...}}
+  'function_runtime_args',         // AST-090 — new Function('require','__dirname',...)
+  'self_destruct_eval'             // AST-089 — dynamic exec + unlink __filename
 ]);
 
 // ============================================
@@ -568,6 +577,20 @@ const SCORING_COMPOUNDS = [
     severity: 'CRITICAL',
     message: 'Stub package with external URL dep + known string IOC — chain-attack staging package (scoring compound).',
     fileFrom: 'ioc_string_match'
+  },
+  // Security review 2026-05-09 — chai-* / poxios-chain / express-guardrail / justenv
+  // campaign. Pattern: fork pino + caller.js with `const process = {env: {DEV_API_KEY: <base64>}}`
+  // + axios.get(decoded URL) + new Function.constructor("require", body). The package
+  // body is otherwise legitimate pino code — only the injected file is malicious.
+  // Each individual signal is already CRITICAL/HIGH but reachability/per-file scoring
+  // can demote them. The compound recovers the signal when 2+ co-occur in the same file.
+  {
+    type: 'staged_remote_loader',
+    requires: ['function_constructor_require', 'process_variable_shadow'],
+    severity: 'CRITICAL',
+    message: 'Function.constructor("require", body) + shadowed process env in same file — staged remote loader (chai-* / poxios-chain pattern). Payload fetched at runtime from external paste service.',
+    fileFrom: 'function_constructor_require',
+    sameFile: true
   },
 ];
 

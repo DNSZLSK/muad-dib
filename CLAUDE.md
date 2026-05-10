@@ -19,7 +19,7 @@ Priorites :
 ## Commands
 
 ```bash
-npm test          # Run all tests (custom framework, 3280 tests across 69 files)
+npm test          # Run all tests (custom framework, 3529 tests across 89 files)
 npm run lint      # ESLint with security plugin
 npm run scan      # Self-scan: node bin/muaddib.js scan .
 npm run update    # Download latest IOCs
@@ -42,9 +42,9 @@ Tests use a custom framework in `tests/run-tests.js` (no Jest). Test helpers:
 
 **CLI entry:** `bin/muaddib.js` (yargs) delegates to `src/index.js`.
 
-**Pipeline:** Module graph pre-analysis → deobfuscation → 13 parallel scanners (Promise.all) → deduplication → FP reductions → intent coherence → rule enrichment → per-file max scoring → output (CLI/JSON/HTML/SARIF).
+**Pipeline:** Module graph pre-analysis → deobfuscation → 16 parallel scanners (Promise.allSettled) → deduplication → FP reductions → intent coherence → rule enrichment → per-file max scoring → ML T1 filter → contextual FP caps → output (CLI/JSON/HTML/SARIF).
 
-**14 scanner modules:** AST, dataflow, shell, package, dependencies, obfuscation, entropy, typosquat, python, ai-config, github-actions, hash, module-graph (pre-analysis), intent-graph (coherence).
+**Scanner modules (16 parallel + 2 pre-analysis):** AST, dataflow, shell, package, dependencies, obfuscation, entropy, typosquat (npm + PyPI), python, ai-config, github-actions, hash, ioc-strings (YARA-style, intel-triage P1.1), anti-forensic (intel-triage P1.2), stub-package (intel-triage P1.3); module-graph + deobfuscate run pre-analysis; intent-graph runs in pipeline processor.
 
 **Scoring:** `riskScore = min(100, max(file_scores) + package_level_score)`. Severity weights: CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1.
 
@@ -98,14 +98,14 @@ Never skip documentation updates when publishing a new version.
 - Never commit directly to master
 - Do not create commits automatically — the user handles commits manually
 
-## Current Metrics (v2.10.97)
+## Current Metrics (v2.11.6)
 
 | Metric | Value |
 |--------|-------|
-| Version | **2.10.97** |
-| Tests | **3280** passed, 0 failed, across 69 files |
-| Rules | **209** (204 RULES + 5 PARANOID) |
-| Scanners | **14** modules (13 parallel + 1 pre-analysis) |
+| Version | **2.11.6** |
+| Tests | **3529** passed, 0 failed, across 89 files |
+| Rules | **223** (218 RULES + 5 PARANOID) |
+| Scanners | **18** modules (16 parallel + 2 pre-analysis: module-graph, deobfuscate) |
 | TPR@3 (detection rate) | **93.85%** (61/65 ground truth, v2.10.95 metrics) |
 | TPR@20 (alert rate) | **86.2%** (56/65 ground truth, v2.10.95 metrics) |
 | FPR rules (curated, v2.10.95 measure) | **15.6%** (85/545 scanned of 548 benign packages) |

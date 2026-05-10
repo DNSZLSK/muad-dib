@@ -49,6 +49,7 @@ const { runReachabilityFunctionsTests } = require('./unit/reachability-functions
 const { runDeltaMultiplierTests } = require('./unit/delta-multiplier.test');
 const { runConfidenceTiersTests } = require('./unit/confidence-tiers.test');
 const { runCompoundTighteningTests } = require('./unit/compound-tightening.test');
+const { runStagedRemoteLoaderTests } = require('./unit/staged-remote-loader.test');
 const { runLlmDetectiveTests } = require('./unit/llm-detective.test');
 const { runTarballArchiveTests } = require('./unit/tarball-archive.test');
 const { runSandboxPreloadTests } = require('./integration/sandbox-preload.test');
@@ -243,6 +244,9 @@ async function timed(name, fn) {
 
   // Compound precision tightening (FPR Improvement Plan - Chantier 7)
   await timed('compound-tightening', runCompoundTighteningTests);
+
+  // Staged remote loader compound (chai-* / poxios-chain campaign 2026-05)
+  await timed('staged-remote-loader', runStagedRemoteLoaderTests);
 
   // ML classifier tests (v2.10.0)
   await timed('ml-classifier', runMLClassifierTests);

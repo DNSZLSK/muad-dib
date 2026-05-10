@@ -197,3 +197,18 @@ strings:
     severity: HIGH
     source: "https://gist.github.com/N3mes1s/0c0fc7a0c23cdb5e1c8f66b208053ed6"
     description: "Axios C2 path campaign ID (when combined with packages.npm.org/product)"
+
+  # ── chai-* / poxios-chain staged loader campaign (semaine 2026-05-04 a 2026-05-09) ──
+  # Source: data/security-review-2026-05-04-10.md ; project_detection_gap_chai_staged_loader memoire
+  # Affected packages: chai-as-test, chai-use-test, chai-extention-utils, chai-as-attracted,
+  # poxios-chain, express-guardrail, justenv (7 confirmes a score 10).
+  # Pattern: caller.js stocke une URL base64 dans `process.env.DEV_API_KEY` (process shadowed),
+  # decode via atob, fetch via axios.get, execute via new Function.constructor("require", body).
+  # Le payload reel est stocke sur jsonkeeper.com/b/<id> (paste service public).
+  # jsonkeeper.com/b/ est un substring tres rarement legitime ; les rares mentions sont
+  # essentiellement dans des advisories / writeups eux-memes.
+  - string: "jsonkeeper.com/b/"
+    campaign: "chai-staged-loader-2026-05"
+    severity: CRITICAL
+    source: "data/security-review-2026-05-04-10.md"
+    description: "Paste-as-payload host used by the chai-* / poxios-chain staged loader campaign to deliver runtime RCE bodies"
