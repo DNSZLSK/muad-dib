@@ -500,7 +500,7 @@ Tests : 3258 → **3280**. Pas de nouvelle rule, pas de nouveau scanner. Le post
 
 ## Ou j'en suis
 
-3 mois et demi de projet. 209 regles de detection, 14 scanners, 3280 tests. Un moniteur en 24/7 sur npm et PyPI. Deux modeles ML entraines plus 7 features contextuelles branches en post-filtre deterministe. Un ground truth passe de 4 malwares a 67 samples + 377 confirmed_malicious dans l'auto-labeler.
+3 mois et demi de projet. 223 regles de detection, 16 scanners paralleles plus 2 modules de pre-analyse, 3529 tests. Un moniteur en 24/7 sur npm et PyPI. Deux modeles ML entraines plus 7 features contextuelles branches en post-filtre deterministe. Un ground truth passe de 4 malwares a 67 samples + 377 confirmed_malicious dans l'auto-labeler. La phase intel-triage de mai 2026 (v2.11) ajoute trois scanners statiques alignes sur 2026 : IOC strings YARA-style (Axios 2026, TeamPCP, GlassWorm, CanisterSprawl), anti-forensique AST (XOR + self-delete + decoy write), stub package (main file < 500 octets + dep URL externe + lifecycle).
 
 Les chiffres qui comptent (mesure canonique v2.10.95) : **TPR@3 93.85%** (61/65 attaques actives detectees, 67 totales avec 2 protestware hors-scope), **TPR@20 86.2%** (56/65 sur le seuil operationnel), **FPR curated 15.6%** (85/545 scannes sur 548), **FPR random 7.0%** (14/200), **ADR 96.3%** (103/107 samples adversariaux). Ce ne sont pas des scores parfaits, et c'est le point : un scanner avec 0% de FP ne scanne probablement rien, et un TPR de 100% sur 4 samples ne veut rien dire.
 

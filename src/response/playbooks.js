@@ -149,6 +149,9 @@ const PLAYBOOKS = {
   stub_with_string_ioc:
     'CRITIQUE: Package stub + IOC string connu = staging chain-attack confirme. Bloquer le package + sa dep externe. Regenerer secrets si install effectue.',
 
+  staged_remote_loader:
+    'CRITIQUE: Staged remote loader detecte (Function.constructor("require", body) + process shadow). Le payload reel est sur un pastebin externe (jsonkeeper.com ou autre). Pattern campagne chai-* / poxios-chain. Bloquer le package, isoler les machines qui ont fait `npm install`, regenerer credentials. Inspecter l\'URL paste-service decodee depuis la base64.',
+
   known_malicious_hash:
     'CRITIQUE: Fichier malveillant confirme par hash. Supprimer immediatement. Considerer la machine compromise.',
 

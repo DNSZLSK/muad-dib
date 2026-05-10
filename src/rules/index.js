@@ -261,6 +261,18 @@ const RULES = {
     ],
     mitre: 'T1195.002'
   },
+  staged_remote_loader: {
+    id: 'MUADDIB-COMPOUND-012',
+    name: 'Staged Remote Loader (Function.constructor + shadowed process)',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Compound: new Function.constructor("require", body) co-occurs with `const process = {...}` shadowing in the same file. Pattern observed in the chai-* / poxios-chain / express-guardrail / justenv campaign (semaine 2026-05-04 a 2026-05-09): fork de pino avec caller.js qui decode une URL base64 (jsonkeeper.com), fetch le payload distant via axios, et l\'execute via Function.constructor en passant require comme parametre. Le tarball npm ne contient aucun code malveillant statique — la charge utile est externalisee sur un pastebin.',
+    references: [
+      'project_detection_gap_chai_staged_loader memory entry',
+      'data/security-review-2026-05-04-10.md'
+    ],
+    mitre: 'T1059.007'
+  },
   lifecycle_script_dependency: {
     id: 'MUADDIB-DEP-004',
     name: 'Lifecycle Script in Dependency',
@@ -1798,7 +1810,7 @@ const RULES = {
   },
   dangerous_constructor: {
     id: 'MUADDIB-AST-057',
-    name: 'Prototype Chain Constructor Access',
+    name: 'AsyncFunction/GeneratorFunction Constructor via Prototype Chain',
     severity: 'CRITICAL',
     confidence: 'high',
     description: 'Acces au constructeur AsyncFunction ou GeneratorFunction via Object.getPrototypeOf(). Technique d\'evasion permettant d\'executer du code arbitraire sans reference directe a eval() ou Function().',
@@ -2312,7 +2324,7 @@ const RULES = {
   },
   prototype_chain_constructor: {
     id: 'MUADDIB-AST-081',
-    name: 'Prototype Chain Constructor Access',
+    name: 'Prototype Chain Constructor Access via Variable',
     severity: 'CRITICAL',
     confidence: 'high',
     description: 'Object.getPrototypeOf(variable).constructor extrait dans une variable — traversee de la chaine de prototypes pour atteindre le constructeur Function et executer du code arbitraire.',

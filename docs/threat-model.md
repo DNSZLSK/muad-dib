@@ -146,7 +146,7 @@ Parsers tested with malformed inputs:
 
 Result: **56/56 pass**. No crashes, no uncaught exceptions.
 
-### 3280 unit and integration tests
+### 3529 unit and integration tests
 
 Full coverage of scanners, parsers, IOC matching, typosquatting, CLI integrations, diff, temporal analysis, ground truth, canary tokens, and security (SSRF, injection). 86% code coverage (c8).
 

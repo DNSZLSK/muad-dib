@@ -31,17 +31,17 @@ bin/muaddib.js (yargs CLI)
         ├─► Deduplication
         ├─► FP reductions (src/scoring.js — applyFPReductions)
         ├─► Intent coherence analysis (src/intent-graph.js — buildIntentPairs)
-        ├─► Rule enrichment (src/rules/index.js — 211 rules)
+        ├─► Rule enrichment (src/rules/index.js — 223 rules)
         ├─► Scoring (src/scoring.js — per-file max)
         ├─► ML classifier (src/ml/classifier.js — T1 zone filtering)
         └─► Output (CLI / JSON / HTML / SARIF)
 ```
 
-**Core orchestration:** `src/index.js` — `run(targetPath, options)` runs cross-file module graph analysis first, then launches 16 individual scanners in parallel via `Promise.all` (intel-triage P1 added: `scanIocStrings`, `scanAntiForensic`, `scanStubPackage`), then deduplicates, applies FP reductions, scores using per-file max (v2.2.11: `riskScore = min(100, max(file_scores) + package_level_score)`, severity weights: CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1), applies intent coherence analysis (intra-file source-sink pairing), enriches with rules/playbooks (211 rules), and outputs (CLI/JSON/HTML/SARIF). Result includes `warnings: []` array (v2.6.5) for incomplete scan notifications (module graph timeout/skip, deobfuscation failures). Exports `isPackageLevelThreat` and `computeGroupScore` for testing.
+**Core orchestration:** `src/index.js` delegates to `src/pipeline/{initializer,executor,processor,outputter}.js`. `executor.js` runs cross-file module graph analysis first, then launches 16 individual scanners in parallel via `Promise.allSettled` (intel-triage P1 added: `scanIocStrings`, `scanAntiForensic`, `scanStubPackage`), then `processor.js` deduplicates, applies FP reductions, scores using per-file max (v2.2.11: `riskScore = min(100, max(file_scores) + package_level_score)`, severity weights: CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1), applies intent coherence analysis (intra-file source-sink pairing), enriches with rules/playbooks (223 rules), and `outputter.js` formats CLI/JSON/HTML/SARIF. Result includes `warnings: []` array (v2.6.5) for incomplete scan notifications (module graph timeout/skip, deobfuscation failures). Exports `isPackageLevelThreat` and `computeGroupScore` for testing.
 
 ## Scanner Modules
 
-**Scanner pattern:** Each of the 13 individual scanners in `src/scanner/` returns `Array<{type, severity, message, file}>`:
+**Scanner pattern:** Each of the 16 individual scanners in `src/scanner/` returns `Array<{type, severity, message, file}>`:
 - `file` must use `path.relative(targetPath, absolutePath)` for Windows compatibility
 - Sync scanners are wrapped in `Promise.resolve()` in the Promise.all
 - Use `findFiles(dir, { extensions, excludedDirs })` from `src/utils.js` for file walking
@@ -240,7 +240,7 @@ See [Intent Graph](#intent-graph) section for `isSDKPattern()` details and 22 SD
 
 ## Detection Rules
 
-**Rules & playbooks:** Threat types map to rules in `src/rules/index.js` (209 rules: 204 RULES + 5 PARANOID, MITRE ATT&CK mapped) and remediation text in `src/response/playbooks.js`. Both keyed by threat `type` string.
+**Rules & playbooks:** Threat types map to rules in `src/rules/index.js` (223 rules: 218 RULES + 5 PARANOID, MITRE ATT&CK mapped) and remediation text in `src/response/playbooks.js`. Both keyed by threat `type` string.
 
 ### AST Detection Rules (v2.2+)
 
