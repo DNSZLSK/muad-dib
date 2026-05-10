@@ -7,6 +7,7 @@ async function runScraperTests() {
 
   const {
     runScraper, scrapeShaiHuludDetector, scrapeDatadogIOCs,
+    scrapeOSMQueryLatest,
     scrapeOSVLightweightAPI, queryOSVBatch,
     parseCSVLine, parseCSV, extractVersions, parseOSVEntry,
     createFreshness, isAllowedRedirect,
@@ -3381,6 +3382,289 @@ async function runScraperTests() {
     const result = await queryOSVBatch([]);
     assert(Array.isArray(result), 'Should return array');
     assert(result.length === 0, 'Should have 0 entries for empty input');
+  });
+
+  // =========================================================
+  // scrapeOSMQueryLatest — OpenSourceMalware.com community feed
+  // =========================================================
+
+  await asyncTest('SCRAPER: scrapeOSMQueryLatest skips gracefully when OSM_API_TOKEN unset', async () => {
+    const origToken = process.env.OSM_API_TOKEN;
+    const origLog = console.log;
+    delete process.env.OSM_API_TOKEN;
+    const logs = [];
+    console.log = (...a) => logs.push(a.join(' '));
+    try {
+      const result = await scrapeOSMQueryLatest();
+      assert(result.packages.length === 0, 'No packages when token missing');
+      assert(result.pypi_packages.length === 0, 'No pypi packages when token missing');
+      assert(logs.some(l => l.includes('OSM_API_TOKEN not set')), 'Should log graceful skip');
+    } finally {
+      if (origToken !== undefined) process.env.OSM_API_TOKEN = origToken;
+      console.log = origLog;
+    }
+  });
+
+  await asyncTest('SCRAPER: scrapeOSMQueryLatest skips on malformed token (wrong prefix)', async () => {
+    const origToken = process.env.OSM_API_TOKEN;
+    const origLog = console.log;
+    process.env.OSM_API_TOKEN = 'invalid_token_format_12345';
+    console.log = () => {};
+    try {
+      const result = await scrapeOSMQueryLatest();
+      assert(result.packages.length === 0, 'Should reject non-osm_ prefix');
+    } finally {
+      if (origToken !== undefined) process.env.OSM_API_TOKEN = origToken;
+      else delete process.env.OSM_API_TOKEN;
+      console.log = origLog;
+    }
+  });
+
+  await asyncTest('SCRAPER: scrapeOSMQueryLatest sends Bearer header and maps npm threats correctly', async () => {
+    const origToken = process.env.OSM_API_TOKEN;
+    const origRequest = https.request;
+    const origLog = console.log;
+    process.env.OSM_API_TOKEN = 'osm_testfaketoken_1234567890abc';
+    console.log = () => {};
+    const seenAuthHeaders = [];
+    const seenPaths = [];
+
+    https.request = (options, callback) => {
+      seenAuthHeaders.push(options.headers && options.headers.Authorization);
+      seenPaths.push(options.path);
+      const req = createMockRequest();
+      req.end = () => {
+        process.nextTick(() => {
+          const res = createMockResponse(200, null, {});
+          callback(res);
+          process.nextTick(() => {
+            const body = options.path.includes('ecosystem=npm')
+              ? JSON.stringify({
+                  count: 2,
+                  threats: [
+                    {
+                      id: 'uuid-1',
+                      package_name: 'evil-staged-loader',
+                      version_info: '1.2.3',
+                      severity_level: 'critical',
+                      threat_description: 'Staged remote loader pattern',
+                      tags: ['rce', 'staged'],
+                      researcher: 'octobot',
+                      created_at: '2026-05-10T06:00:00Z',
+                      verified_at: '2026-05-10T06:30:00Z',
+                      registry: 'npm',
+                      report_type: 'package',
+                      osv_advisory_url: 'https://osv.dev/MAL-1234',
+                      ghsa_advisory_url: 'https://github.com/advisories/GHSA-xxxx'
+                    },
+                    {
+                      id: 'uuid-2',
+                      package_name: 'wildcard-malware',
+                      version_info: 'all',  // OSM free-form → must normalize to *
+                      severity_level: 'HIGH',  // case-insensitive
+                      threat_description: 'Cred theft',
+                      registry: 'npm',
+                      report_type: 'package'
+                    }
+                  ]
+                })
+              : JSON.stringify({ count: 0, threats: [] });
+            res.emit('data', Buffer.from(body));
+            res.emit('end');
+          });
+        });
+      };
+      return req;
+    };
+
+    try {
+      const result = await scrapeOSMQueryLatest();
+      assert(seenAuthHeaders.length === 2, 'Two requests (npm + pypi), got ' + seenAuthHeaders.length);
+      assert(seenAuthHeaders[0] === 'Bearer osm_testfaketoken_1234567890abc', 'Bearer header sent: ' + seenAuthHeaders[0]);
+      assert(seenPaths.some(p => p.includes('ecosystem=npm')), 'npm endpoint queried');
+      assert(seenPaths.some(p => p.includes('ecosystem=pypi')), 'pypi endpoint queried');
+
+      assert(result.packages.length === 2, '2 npm threats parsed, got ' + result.packages.length);
+
+      const first = result.packages[0];
+      assert(first.id === 'OSM-evil-staged-loader-1.2.3', 'id: ' + first.id);
+      assert(first.name === 'evil-staged-loader', 'name');
+      assert(first.version === '1.2.3', 'specific version preserved');
+      assert(first.severity === 'critical', 'critical severity');
+      assert(first.confidence === 'high', 'confidence high');
+      assert(first.source === 'osm', 'source=osm');
+      assert(first.mitre === 'T1195.002', 'MITRE tag');
+      assert(first.references.includes('https://osv.dev/MAL-1234'), 'osv ref included');
+      assert(first.references.includes('https://github.com/advisories/GHSA-xxxx'), 'ghsa ref included');
+      assert(first.references.some(r => r.includes('opensourcemalware.com/npm/evil-staged-loader')), 'canonical OSM ref');
+      assert(first.description.includes('Staged remote loader pattern'), 'description preserved');
+      assert(first.description.includes('rce'), 'tags appended to description');
+      assert(first.description.includes('octobot'), 'researcher appended');
+      assert(first.freshness.added_at === '2026-05-10T06:30:00Z', 'verified_at preferred for added_at');
+      assert(first.freshness.source === 'osm', 'freshness source');
+
+      const second = result.packages[1];
+      assert(second.version === '*', 'version_info=all normalized to *');
+      assert(second.severity === 'high', 'HIGH lowered to high');
+    } finally {
+      if (origToken !== undefined) process.env.OSM_API_TOKEN = origToken;
+      else delete process.env.OSM_API_TOKEN;
+      https.request = origRequest;
+      console.log = origLog;
+    }
+  });
+
+  await asyncTest('SCRAPER: scrapeOSMQueryLatest defaults severity=high on missing/unknown severity_level', async () => {
+    const origToken = process.env.OSM_API_TOKEN;
+    const origRequest = https.request;
+    const origLog = console.log;
+    process.env.OSM_API_TOKEN = 'osm_testfaketoken_1234567890abc';
+    console.log = () => {};
+    https.request = (options, callback) => {
+      const req = createMockRequest();
+      req.end = () => {
+        process.nextTick(() => {
+          const res = createMockResponse(200, null, {});
+          callback(res);
+          process.nextTick(() => {
+            const body = options.path.includes('ecosystem=npm')
+              ? JSON.stringify({ threats: [
+                  { package_name: 'a', version_info: null, /* no severity */ report_type: 'package' },
+                  { package_name: 'b', version_info: '', severity_level: 'weird-value', report_type: 'package' }
+                ] })
+              : JSON.stringify({ threats: [] });
+            res.emit('data', Buffer.from(body));
+            res.emit('end');
+          });
+        });
+      };
+      return req;
+    };
+    try {
+      const result = await scrapeOSMQueryLatest();
+      assert(result.packages.length === 2, '2 npm threats');
+      assert(result.packages[0].severity === 'high', 'missing severity → high');
+      assert(result.packages[1].severity === 'high', 'unknown severity → high');
+      assert(result.packages[0].version === '*', 'null version → wildcard');
+      assert(result.packages[1].version === '*', 'empty version → wildcard');
+    } finally {
+      if (origToken !== undefined) process.env.OSM_API_TOKEN = origToken;
+      else delete process.env.OSM_API_TOKEN;
+      https.request = origRequest;
+      console.log = origLog;
+    }
+  });
+
+  await asyncTest('SCRAPER: scrapeOSMQueryLatest filters non-package report_type', async () => {
+    const origToken = process.env.OSM_API_TOKEN;
+    const origRequest = https.request;
+    const origLog = console.log;
+    process.env.OSM_API_TOKEN = 'osm_testfaketoken_1234567890abc';
+    console.log = () => {};
+    https.request = (options, callback) => {
+      const req = createMockRequest();
+      req.end = () => {
+        process.nextTick(() => {
+          const res = createMockResponse(200, null, {});
+          callback(res);
+          process.nextTick(() => {
+            const body = options.path.includes('ecosystem=npm')
+              ? JSON.stringify({ threats: [
+                  { package_name: 'real-pkg', report_type: 'package', version_info: '1.0.0' },
+                  { package_name: 'should-skip-domain', report_type: 'domain' },
+                  { package_name: 'should-skip-url', report_type: 'url' }
+                ] })
+              : JSON.stringify({ threats: [] });
+            res.emit('data', Buffer.from(body));
+            res.emit('end');
+          });
+        });
+      };
+      return req;
+    };
+    try {
+      const result = await scrapeOSMQueryLatest();
+      assert(result.packages.length === 1, 'Only package report_type kept, got ' + result.packages.length);
+      assert(result.packages[0].name === 'real-pkg', 'right entry');
+    } finally {
+      if (origToken !== undefined) process.env.OSM_API_TOKEN = origToken;
+      else delete process.env.OSM_API_TOKEN;
+      https.request = origRequest;
+      console.log = origLog;
+    }
+  });
+
+  await asyncTest('SCRAPER: scrapeOSMQueryLatest handles 401 unauthorized gracefully', async () => {
+    const origToken = process.env.OSM_API_TOKEN;
+    const origRequest = https.request;
+    const origLog = console.log;
+    process.env.OSM_API_TOKEN = 'osm_testfaketoken_1234567890abc';
+    const logs = [];
+    console.log = (...a) => logs.push(a.join(' '));
+    https.request = (options, callback) => {
+      const req = createMockRequest();
+      req.end = () => {
+        process.nextTick(() => {
+          const res = createMockResponse(401, null, {});
+          callback(res);
+          process.nextTick(() => {
+            res.emit('data', Buffer.from(JSON.stringify({ error: 'Unauthorized' })));
+            res.emit('end');
+          });
+        });
+      };
+      return req;
+    };
+    try {
+      const result = await scrapeOSMQueryLatest();
+      assert(result.packages.length === 0, 'No packages on 401');
+      assert(result.pypi_packages.length === 0, 'No pypi on 401');
+      assert(logs.some(l => l.includes('token rejected')), 'Should log token rejected');
+    } finally {
+      if (origToken !== undefined) process.env.OSM_API_TOKEN = origToken;
+      else delete process.env.OSM_API_TOKEN;
+      https.request = origRequest;
+      console.log = origLog;
+    }
+  });
+
+  await asyncTest('SCRAPER: scrapeOSMQueryLatest pypi entries get OSM-PYPI- prefix', async () => {
+    const origToken = process.env.OSM_API_TOKEN;
+    const origRequest = https.request;
+    const origLog = console.log;
+    process.env.OSM_API_TOKEN = 'osm_testfaketoken_1234567890abc';
+    console.log = () => {};
+    https.request = (options, callback) => {
+      const req = createMockRequest();
+      req.end = () => {
+        process.nextTick(() => {
+          const res = createMockResponse(200, null, {});
+          callback(res);
+          process.nextTick(() => {
+            const body = options.path.includes('ecosystem=pypi')
+              ? JSON.stringify({ threats: [
+                  { package_name: 'evil-py', version_info: '0.1.0', severity_level: 'critical', report_type: 'package' }
+                ] })
+              : JSON.stringify({ threats: [] });
+            res.emit('data', Buffer.from(body));
+            res.emit('end');
+          });
+        });
+      };
+      return req;
+    };
+    try {
+      const result = await scrapeOSMQueryLatest();
+      assert(result.pypi_packages.length === 1, '1 pypi threat');
+      assert(result.pypi_packages[0].id === 'OSM-PYPI-evil-py-0.1.0', 'pypi id prefix: ' + result.pypi_packages[0].id);
+      assert(result.pypi_packages[0].source === 'osm', 'source osm');
+      assert(result.pypi_packages[0].references.some(r => r.includes('opensourcemalware.com/pypi/evil-py')), 'pypi canonical ref');
+    } finally {
+      if (origToken !== undefined) process.env.OSM_API_TOKEN = origToken;
+      else delete process.env.OSM_API_TOKEN;
+      https.request = origRequest;
+      console.log = origLog;
+    }
   });
 }
 

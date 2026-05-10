@@ -980,8 +980,8 @@ async function scrapeGitHubAdvisory() {
 // ============================================
 async function runScraper() {
   console.log('\n' + '='.repeat(60));
-  console.log('  MUAD\'DIB IOC Scraper v4.0');
-  console.log('  OSV + OSSF + GenSecAI + DataDog + Snyk');
+  console.log('  MUAD\'DIB IOC Scraper v4.1');
+  console.log('  OSV + OSSF + GenSecAI + DataDog + Aikido + OSM');
   console.log('='.repeat(60) + '\n');
 
   // Reset aggregated warning counters
@@ -1038,7 +1038,8 @@ async function runScraper() {
     scrapeOSSFMaliciousPackages(osvResult.knownIds),
     scrapeGitHubAdvisory(),
     scrapeOSVPyPIDataDump(),
-    scrapeAikidoMalwareFeed()
+    scrapeAikidoMalwareFeed(),
+    scrapeOSMQueryLatest()
   ]);
 
   const shaiHuludResult = results[0];
@@ -1047,6 +1048,7 @@ async function runScraper() {
   const githubPackages = results[3];
   const pypiPackages = results[4];
   const aikidoResult = results[5];
+  const osmResult = results[6];
 
   // Log aggregated warnings
   if (_noVersionSkipCount > 0) {
@@ -1060,7 +1062,8 @@ async function runScraper() {
     ...datadogResult.packages,
     ...ossfPackages,
     ...githubPackages,
-    ...aikidoResult.packages
+    ...aikidoResult.packages,
+    ...osmResult.packages
   ];
 
   // Merge all hashes
@@ -1072,7 +1075,7 @@ async function runScraper() {
   // Smart deduplication: build map of best entry per key
   // For duplicates, keep the one with highest confidence, then most recent date
   const dedupSpinner = new Spinner();
-  dedupSpinner.start('Deduplicating ' + allPackages.length + ' npm + ' + (pypiPackages.length + (aikidoResult.pypi_packages || []).length) + ' PyPI entries...');
+  dedupSpinner.start('Deduplicating ' + allPackages.length + ' npm + ' + (pypiPackages.length + (aikidoResult.pypi_packages || []).length + (osmResult.pypi_packages || []).length) + ' PyPI entries...');
   const dedupMap = new Map();
 
   // Seed with existing IOCs (with sanitization of stale comma-in-version entries)
@@ -1173,7 +1176,7 @@ async function runScraper() {
   }
   let addedPyPIPackages = 0;
   // Merge Aikido PyPI feed into the same loop
-  const allPyPIPackages = pypiPackages.concat(aikidoResult.pypi_packages || []);
+  const allPyPIPackages = pypiPackages.concat(aikidoResult.pypi_packages || [], osmResult.pypi_packages || []);
   for (const pkg of allPyPIPackages) {
     if (!validateIOCEntry(pkg.name, pkg.version, 'pypi')) {
       skippedInvalid++;
@@ -1412,6 +1415,131 @@ async function scrapeAikidoMalwareFeed() {
 }
 
 // ============================================
+// SOURCE 7: OpenSourceMalware.com (community-verified threat intel)
+// Free tier: 60 req/min, /query-latest returns 100 most recent verified threats per
+// ecosystem. Token stored in OSM_API_TOKEN env var (NEVER hardcoded — public repo).
+// API: https://api.opensourcemalware.com/functions/v1/query-latest?ecosystem={npm|pypi}
+// Docs: https://docs.opensourcemalware.com/api/query-latest.md
+// Rate-limit ref: https://docs.opensourcemalware.com/api/rate-limits.md
+// ============================================
+async function scrapeOSMQueryLatest() {
+  console.log('[SCRAPER] OpenSourceMalware.com query-latest...');
+  const token = process.env.OSM_API_TOKEN;
+  if (!token) {
+    console.log('[SCRAPER]   OSM_API_TOKEN not set — skipping (graceful, no error).');
+    return { packages: [], pypi_packages: [] };
+  }
+  // Defensive token shape check (don't log the value)
+  if (typeof token !== 'string' || !token.startsWith('osm_') || token.length < 16) {
+    console.log('[SCRAPER]   OSM_API_TOKEN malformed (expected osm_<chars>) — skipping.');
+    return { packages: [], pypi_packages: [] };
+  }
+
+  const npmPackages = [];
+  const pypiPackages = [];
+  const headers = { Authorization: 'Bearer ' + token };
+
+  // Map OSM severity_level (low/medium/high/critical) to MUAD'DIB severity (lowercase).
+  // OSM doesn't always populate severity; default to 'high' (verified threats are high-confidence by definition).
+  function mapSeverity(s) {
+    if (!s || typeof s !== 'string') return 'high';
+    const v = s.toLowerCase().trim();
+    if (v === 'low' || v === 'medium' || v === 'high' || v === 'critical') return v;
+    return 'high';
+  }
+
+  function buildReferences(threat, ecosystem) {
+    const refs = [];
+    if (threat.osv_advisory_url && typeof threat.osv_advisory_url === 'string') refs.push(threat.osv_advisory_url);
+    if (threat.ghsa_advisory_url && typeof threat.ghsa_advisory_url === 'string') refs.push(threat.ghsa_advisory_url);
+    // Canonical OSM page for this threat. Best-effort URL — if 404 it's harmless metadata.
+    if (threat.package_name) {
+      refs.push('https://opensourcemalware.com/' + ecosystem + '/' + encodeURIComponent(threat.package_name));
+    }
+    return refs;
+  }
+
+  function buildDescription(threat) {
+    const parts = [];
+    if (threat.threat_description) parts.push(String(threat.threat_description));
+    if (Array.isArray(threat.tags) && threat.tags.length > 0) {
+      parts.push('Tags: ' + threat.tags.filter(t => typeof t === 'string').join(', '));
+    }
+    if (threat.researcher) parts.push('Reporter: ' + String(threat.researcher));
+    return parts.length > 0 ? parts.join(' — ') : 'Verified by OpenSourceMalware.com community';
+  }
+
+  async function pull(ecosystem, target) {
+    try {
+      const { status, data } = await fetchJSON(
+        'https://api.opensourcemalware.com/functions/v1/query-latest?ecosystem=' + encodeURIComponent(ecosystem),
+        { headers }
+      );
+      if (status === 401 || status === 403) {
+        console.log('[SCRAPER]   OSM ' + ecosystem + ': HTTP ' + status + ' — token rejected, check OSM_API_TOKEN.');
+        return;
+      }
+      if (status !== 200) {
+        console.log('[SCRAPER]   OSM ' + ecosystem + ' feed: HTTP ' + status);
+        return;
+      }
+      if (!data || !Array.isArray(data.threats)) {
+        console.log('[SCRAPER]   OSM ' + ecosystem + ' feed: unexpected response shape (no threats[]).');
+        return;
+      }
+      let count = 0;
+      for (const t of data.threats) {
+        if (!t || typeof t.package_name !== 'string' || t.package_name.length === 0) continue;
+        // OSM verifies report_type === 'package' threats. Skip anything else (repository/url/domain).
+        // The query is filtered by ecosystem, but defensive check on registry field.
+        if (t.report_type && t.report_type !== 'package') continue;
+        // Normalize version: OSM uses free-form strings ('all', 'any', 'unknown', null, etc.)
+        // Wildcard placeholders must be MUAD'DIB's canonical '*' so the IOC matcher hits.
+        let ver = '*';
+        if (t.version_info && typeof t.version_info === 'string') {
+          const trimmed = t.version_info.trim();
+          const lc = trimmed.toLowerCase();
+          if (trimmed !== '' && lc !== 'all' && lc !== 'any' && lc !== 'unknown' && lc !== '*' && lc !== 'n/a') {
+            ver = trimmed;
+          }
+        }
+        const severity = mapSeverity(t.severity_level);
+        const addedAt = t.verified_at || t.created_at || t.first_seen || new Date().toISOString();
+        const idPrefix = ecosystem === 'pypi' ? 'OSM-PYPI-' : 'OSM-';
+        target.push({
+          id: idPrefix + t.package_name + '-' + ver,
+          name: t.package_name,
+          version: ver,
+          severity: severity,
+          confidence: 'high',
+          source: 'osm',
+          description: buildDescription(t),
+          references: buildReferences(t, ecosystem),
+          mitre: 'T1195.002',
+          freshness: {
+            added_at: addedAt,
+            source: 'osm',
+            confidence: 'high'
+          }
+        });
+        count++;
+      }
+      console.log('[SCRAPER]   ' + count + ' ' + ecosystem + ' verified threats from OSM');
+    } catch (e) {
+      // Defensive: do NOT echo any token-bearing URL or header in the error.
+      console.log('[SCRAPER]   OSM ' + ecosystem + ' error: ' + (e && e.message ? e.message : 'unknown'));
+    }
+  }
+
+  // Sequential (not parallel): keeps us well under the 60 req/min rate limit
+  // and gives clearer logs. Two ecosystems = ~200ms total.
+  await pull('npm', npmPackages);
+  await pull('pypi', pypiPackages);
+
+  return { packages: npmPackages, pypi_packages: pypiPackages };
+}
+
+// ============================================
 // SOURCE 5: OSV.dev Lightweight API
 // Used by `muaddib update` (fast, no zip download)
 // ============================================
@@ -1529,6 +1657,7 @@ function getSourceConfidence(pkg) {
 module.exports = {
   runScraper, scrapeShaiHuludDetector, scrapeDatadogIOCs,
   scrapeAikidoMalwareFeed,
+  scrapeOSMQueryLatest,
   scrapeOSVLightweightAPI, queryOSVBatch,
   getSourceConfidence,
   // Pure utility functions (exported for testing)

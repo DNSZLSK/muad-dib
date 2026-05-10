@@ -1,0 +1,51 @@
+[Unit]
+Description=MUAD'DIB IOC Scraper (light: GenSecAI + Datadog + OSV-API + OSM, ~5s)
+Documentation=https://github.com/DNSZLSK/muad-dib
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=muaddib
+Group=muaddib
+WorkingDirectory=/opt/muaddib
+# `muaddib update` calls updateIOCs() which runs the 4 light scrapers in parallel:
+#   scrapeShaiHuludDetector + scrapeDatadogIOCs + scrapeOSVLightweightAPI + scrapeOSMQueryLatest
+# Heavy zip downloads (OSV bulk dumps, OSSF, Aikido, GitHub Advisory) are NOT in this path —
+# they fire on the muaddib-scrape.timer (every 6h).
+ExecStart=/usr/bin/node bin/muaddib.js update
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=muaddib-scrape-light
+
+# Loads OSM_API_TOKEN (and any other secrets) from /opt/muaddib/.env.
+EnvironmentFile=-/opt/muaddib/.env
+
+Environment=NODE_ENV=production
+
+# Light scrape — should complete in seconds. Cap at 2 min to flush stuck sockets.
+TimeoutStartSec=2min
+
+# Light load profile (cap so we never starve the live monitor).
+Nice=5
+CPUWeight=80
+IOWeight=80
+
+# Security hardening (parity with muaddib-scrape.service)
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/opt/muaddib/data /opt/muaddib/logs /opt/muaddib/src/ioc/data
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+RestrictRealtime=true
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

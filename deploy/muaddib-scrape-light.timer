@@ -1,0 +1,21 @@
+[Unit]
+Description=MUAD'DIB IOC Scraper Light Timer (every 15 minutes)
+Documentation=https://github.com/DNSZLSK/muad-dib
+
+[Timer]
+# Boot delay: 2min so the monitor and other services start cleanly first.
+OnBootSec=2min
+# Recurring: 15 minutes between light refreshes.
+# Rationale: OSM query-latest returns the 100 most recent threats per ecosystem.
+# In peak hours OSM verifies ~1 threat every 4-5s, so a 100-record window covers
+# ~7-8 minutes. 15min strikes a balance: zero risk of missing during normal volume,
+# acceptable rare gaps during burst hours (re-captured the next tick anyway).
+# Same cadence covers Shai-Hulud, Datadog, and OSV-lightweight which are also
+# JSON/REST (no zip downloads).
+OnUnitActiveSec=15min
+# Run missed firings if the system was off (laptop suspend, VPS reboot, etc.).
+Persistent=true
+Unit=muaddib-scrape-light.service
+
+[Install]
+WantedBy=timers.target

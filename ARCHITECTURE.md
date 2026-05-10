@@ -167,9 +167,17 @@ quand un package suspect est surface.
 
 1. `src/ioc/data/iocs-compact.json` (~5MB, ships with npm) — wildcards[] + versioned{} Maps for O(1) lookup
 2. YAML files in `iocs/` — builtin rules
-3. External sources (downloaded by `muaddib update`) — Shai-Hulud, DataDog, OSV dump
+3. External sources, two refresh paths:
+   - **Light path** — `muaddib update` (~5s, JSON/REST only): Shai-Hulud, DataDog, OSV-lightweight API, OpenSourceMalware (`scrapeOSMQueryLatest`, requires `OSM_API_TOKEN`).
+   - **Full path** — `muaddib scrape` (~5min, includes heavy zip downloads): all of the above PLUS OSV bulk dump (npm + PyPI), OSSF malicious-packages, GitHub Advisory, Aikido bulk feed.
 
-`loadCachedIOCs()` from `src/ioc/updater.js` merges all tiers and returns optimized Maps/Sets.
+   On the VPS, two systemd timers drive these automatically:
+   - `muaddib-scrape-light.timer` (every 15 min) → `muaddib update` — fast feeds incl. OSM
+   - `muaddib-scrape.timer` (every 6 h) → `muaddib scrape` — deep refresh
+
+   The `OSM_API_TOKEN` for OpenSourceMalware lives in `/opt/muaddib/.env` (loaded via `EnvironmentFile=-` in the unit). Absent token = scraper skips OSM gracefully, no error.
+
+`loadCachedIOCs()` from `src/ioc/updater.js` merges all tiers and returns optimized Maps/Sets. Source attribution is preserved per IOC entry via `sources: [{name, added_at}]` accumulation, exposed by `getSourceConfidence()` for cross-feed confirmation gating.
 
 ## Evaluation Framework
 

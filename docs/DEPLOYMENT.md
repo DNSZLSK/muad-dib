@@ -48,6 +48,80 @@ Configuration:
 | `MUADDIB_SERVICE` | `muaddib-monitor` | Systemd service name |
 | `DEPLOY_USER` | `muaddib` | File owner user |
 
+## IOC Refresh Timers
+
+The IOC store is refreshed by two complementary systemd timers (installed by `deploy/setup.sh`).
+
+### Light refresh — every 15 minutes
+
+`muaddib-scrape-light.timer` triggers `muaddib-scrape-light.service`, which runs `muaddib update` (~5 s). Sources covered (JSON/REST only, no zip downloads):
+
+- Shai-Hulud Detector (GenSecAI)
+- Datadog IOCs
+- OSV.dev lightweight API
+- OpenSourceMalware.com `query-latest` (npm + PyPI) — requires `OSM_API_TOKEN`
+
+```bash
+systemctl list-timers muaddib-scrape-light
+journalctl -u muaddib-scrape-light -n 50 --no-pager
+journalctl -u muaddib-scrape-light -f
+```
+
+### Full refresh — every 6 hours
+
+`muaddib-scrape.timer` triggers `muaddib-scrape.service`, which runs `muaddib scrape` (~5 min). Adds the heavy bulk feeds on top of the light path:
+
+- OSV.dev npm bulk dump (zip)
+- OSV.dev PyPI bulk dump (zip)
+- OSSF malicious-packages (GitHub trees)
+- Aikido OSS Malware Feed (~12 MB JSON)
+- GitHub Advisory Database
+
+```bash
+systemctl list-timers muaddib-scrape
+journalctl -u muaddib-scrape -n 50 --no-pager
+```
+
+### OSM API token setup
+
+The OpenSourceMalware feed requires a free API token (60 req/min limit). Get one from https://opensourcemalware.com → profile → API Tokens.
+
+```bash
+# Add to /opt/muaddib/.env (already loaded via EnvironmentFile in the unit files)
+sudo bash -c 'echo "OSM_API_TOKEN=osm_<your-token>" >> /opt/muaddib/.env'
+sudo chown muaddib:muaddib /opt/muaddib/.env
+sudo chmod 600 /opt/muaddib/.env
+sudo systemctl restart muaddib-scrape-light.timer
+```
+
+If `OSM_API_TOKEN` is unset or malformed, the OSM scraper logs `OSM_API_TOKEN not set — skipping (graceful)` and continues with the other feeds. Other scrapers are unaffected.
+
+### Manual refresh
+
+```bash
+# As root, run on the VPS — equivalent to one tick of the light timer
+sudo -u muaddib bash -c 'cd /opt/muaddib && /usr/bin/node bin/muaddib.js update'
+
+# Equivalent to one tick of the full timer
+sudo -u muaddib bash -c 'cd /opt/muaddib && /usr/bin/node bin/muaddib.js scrape'
+```
+
+### Disable a timer
+
+```bash
+sudo systemctl disable --now muaddib-scrape-light.timer
+sudo systemctl disable --now muaddib-scrape.timer
+```
+
+### Change frequency
+
+Edit `OnUnitActiveSec=` in `/etc/systemd/system/muaddib-scrape-light.timer` (or the full one), then:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart muaddib-scrape-light.timer
+```
+
 ## Automated Backup
 
 ### What is backed up
