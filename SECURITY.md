@@ -68,19 +68,21 @@ Please include the following information in your report:
 - We aim to release fixes before public disclosure
 - We request a 90-day disclosure window for complex issues
 
-## Detection Rules (v2.10.97)
+## Detection Rules (v2.11.6)
 
-MUAD'DIB uses 14 scanner modules (module-graph pre-analysis + 13 parallel scanners) + 5 behavioral anomaly detection features + ground truth validation, producing 209 rule IDs (204 RULES + 5 PARANOID):
+MUAD'DIB uses 18 scanner modules (2 pre-analysis: `module-graph` + `deobfuscate`; 16 parallel scanners; plus paranoid mode) + 5 behavioral anomaly detection features + ground truth validation, producing 223 rule IDs (218 RULES + 5 PARANOID). The 16 parallel scanners include the v2.11 intel-triage trio: `ioc-strings` (YARA-style), `anti-forensic` (XOR/self-delete compound), `stub-package` (tiny main + external dep + lifecycle):
 
-### AST Scanner
+### AST Scanner (core rules)
 
 | Rule ID | Name | Severity | Notes |
 |---------|------|----------|-------|
 | MUADDIB-AST-001 | Sensitive String Reference | HIGH | .npmrc, .ssh, tokens |
-| MUADDIB-AST-002 | Sensitive Env Variable Access | HIGH | GITHUB_TOKEN, NPM_TOKEN, AWS_* |
-| MUADDIB-AST-003 | Dangerous Function Call (exec/spawn) | MEDIUM | |
+| MUADDIB-AST-002 | Sensitive Environment Variable Access | HIGH | GITHUB_TOKEN, NPM_TOKEN, AWS_* |
+| MUADDIB-AST-003 | Dangerous Function Call | MEDIUM | exec/spawn |
 | MUADDIB-AST-004 | Eval Usage | HIGH | eval(variable) = HIGH, eval('literal') = LOW |
 | MUADDIB-AST-005 | new Function() Constructor | HIGH | Function(variable) = MEDIUM, Function('literal') = LOW |
+| MUADDIB-AST-006 | Dynamic Require with Concatenation | HIGH | T1027 |
+| MUADDIB-AST-007 | Dangerous Shell Command Execution | CRITICAL | T1059.004 |
 
 ### Shell Scanner
 
@@ -128,36 +130,39 @@ MUAD'DIB uses 14 scanner modules (module-graph pre-analysis + 13 parallel scanne
 | MUADDIB-PKG-014 | Git Dependency RCE (PackageGate) | HIGH |
 | MUADDIB-PKG-015 | .npmrc Git Binary Override | CRITICAL |
 | MUADDIB-PKG-016 | Lifecycle Script Targets Hidden Payload | CRITICAL |
+| MUADDIB-PKG-017 | Phantom Lifecycle Script | CRITICAL |
+| MUADDIB-PKG-018 | Curl/Wget Environment Exfiltration | CRITICAL |
+| MUADDIB-PKG-019 | Dependency Confusion Version Indicator | HIGH |
 | MUADDIB-PKG-020 | External Tarball Dependency URL (ltidi pattern, cloud storage non-allowlist) | CRITICAL |
 
 ### AST Scanner (v2.2+)
 
 | Rule ID | Name | Severity | MITRE |
 |---------|------|----------|-------|
-| MUADDIB-AST-008 | Dynamic Require with Decode | HIGH | T1059 |
-| MUADDIB-AST-009 | Sandbox Evasion | HIGH | T1497 |
-| MUADDIB-AST-010 | Detached Process | HIGH | T1059 |
-| MUADDIB-AST-011 | Binary Dropper Pattern | CRITICAL | T1105 |
-| MUADDIB-AST-012 | Dynamic Require Decode | HIGH | T1059 |
-| MUADDIB-AST-013 | AI Agent Abuse | CRITICAL | T1059 |
-| MUADDIB-AST-014 | Credential CLI Theft | CRITICAL | T1552 |
-| MUADDIB-AST-015 | Workflow Write | CRITICAL | T1195.002 |
-| MUADDIB-AST-016 | Binary Dropper | CRITICAL | T1105 |
-| MUADDIB-AST-017 | Prototype Hooking | HIGH | T1574 |
-| MUADDIB-AST-018 | Env Charcode Reconstruction | HIGH | T1027 |
-| MUADDIB-AST-019 | Require Cache Poisoning | CRITICAL | T1574 |
-| MUADDIB-AST-020 | Staged Binary Payload | CRITICAL | T1027 |
+| MUADDIB-AST-008 | Dynamic import() of Dangerous Module | HIGH | T1027 |
+| MUADDIB-AST-009 | Environment Variable Proxy Interception | CRITICAL | T1552.001 |
+| MUADDIB-AST-010 | Command Execution via Dynamic Require | CRITICAL | T1059.007 |
+| MUADDIB-AST-011 | Sandbox/Container Evasion | HIGH | T1497.001 |
+| MUADDIB-AST-012 | Detached Background Process | HIGH | T1036.009 |
+| MUADDIB-AST-013 | AI Agent Weaponization | CRITICAL | T1059 |
+| MUADDIB-AST-014 | Credential Theft via CLI Tool | CRITICAL | T1059 |
+| MUADDIB-AST-015 | GitHub Actions Workflow Write | CRITICAL | T1195.002 |
+| MUADDIB-AST-016 | Binary Dropper Pattern | CRITICAL | T1105 |
+| MUADDIB-AST-017 | Native API Prototype Hooking | HIGH | T1557 |
+| MUADDIB-AST-018 | Environment Variable Key Reconstruction | HIGH | T1027 |
+| MUADDIB-AST-019 | Require Cache Poisoning | CRITICAL | T1574.006 |
+| MUADDIB-AST-020 | Staged Binary Payload Execution | HIGH | T1027.003 |
 | MUADDIB-AST-021 | Staged Eval Decode | CRITICAL | T1140 |
 | MUADDIB-AST-022 | Encrypted Payload Decryption | HIGH | T1140 |
 | MUADDIB-AST-023 | Module Compile Execution | HIGH | T1059 |
-| MUADDIB-AST-024 | Obfuscated Payload via Zlib Inflate | CRITICAL | T1140 |
+| MUADDIB-AST-024 | Obfuscated Payload via Zlib Inflate | CRITICAL | T1027.002 |
 | MUADDIB-AST-025 | Dynamic Module Compile Execution | HIGH | T1059 |
-| MUADDIB-AST-026 | Anti-Forensics Write-Execute-Delete | HIGH | T1070 |
-| MUADDIB-AST-027 | MCP Config Injection | CRITICAL | T1059 |
-| MUADDIB-AST-028 | Git Hooks Injection | HIGH | T1195.002 |
-| MUADDIB-AST-029 | Dynamic Environment Variable Harvesting | HIGH | T1552 |
-| MUADDIB-AST-030 | DNS Chunk Exfiltration | HIGH | T1048 |
-| MUADDIB-AST-031 | LLM API Key Harvesting | MEDIUM | T1552 |
+| MUADDIB-AST-026 | Anti-Forensics Write-Execute-Delete | HIGH | T1070.004 |
+| MUADDIB-AST-027 | MCP Config Injection | CRITICAL | T1546.016 |
+| MUADDIB-AST-028 | Git Hooks Injection | HIGH | T1546.004 |
+| MUADDIB-AST-029 | Dynamic Environment Variable Harvesting | HIGH | T1552.001 |
+| MUADDIB-AST-030 | DNS Chunk Exfiltration | HIGH | T1048.003 |
+| MUADDIB-AST-031 | LLM API Key Harvesting | MEDIUM | T1552.001 |
 | MUADDIB-AST-032 | Suspicious C2/Exfiltration Domain | HIGH | T1071.001 |
 | MUADDIB-AST-033 | Steganographic Payload Chain (fetch + decrypt + eval) | CRITICAL | T1027.003 |
 | MUADDIB-AST-034 | Download-Execute Binary (download + chmod + execSync) | CRITICAL | T1105 |
@@ -183,40 +188,40 @@ MUAD'DIB uses 14 scanner modules (module-graph pre-analysis + 13 parallel scanne
 | MUADDIB-AST-054 | Blockchain C2 Resolution (GlassWorm) | HIGH | T1102 |
 | MUADDIB-AST-055 | Hardcoded Blockchain RPC Endpoint (GlassWorm) | MEDIUM | T1102 |
 | MUADDIB-AST-056 | Module._load() Internal Loader Bypass | CRITICAL | T1059 |
-| MUADDIB-AST-057 | Dangerous Constructor (AsyncFunction/GeneratorFunction via prototype chain) | CRITICAL | T1059.007 |
-| MUADDIB-AST-058 | Split High-Entropy Payload (3+ chunks, combined entropy >= 5.5) | CRITICAL | T1027.002 |
-| MUADDIB-AST-059 | Systemd Service Persistence (CanisterWorm/TeamPCP) | CRITICAL | T1543.002 |
-| MUADDIB-AST-060 | NPM Token Extraction via CLI (CanisterWorm worm propagation) | CRITICAL | T1552.001 |
-| MUADDIB-AST-061 | Python .pth Auto-Exec Persistence (LiteLLM/Checkmarx pattern) | CRITICAL | T1546.004 |
+| MUADDIB-AST-057 | AsyncFunction/GeneratorFunction Constructor via Prototype Chain | CRITICAL | T1059.007 |
+| MUADDIB-AST-058 | Split High-Entropy Payload | CRITICAL | T1027.002 |
+| MUADDIB-AST-059 | Systemd Service Persistence | CRITICAL | T1543.002 |
+| MUADDIB-AST-060 | NPM Token Extraction via CLI | CRITICAL | T1552.001 |
+| MUADDIB-AST-061 | Python .pth Auto-Exec Persistence | CRITICAL | T1546.004 |
 | MUADDIB-AST-062 | Reflect.apply(require) Bypass | CRITICAL | T1059 |
 | MUADDIB-AST-063 | FinalizationRegistry Deferred Execution | CRITICAL | T1497.003 |
-| MUADDIB-AST-064 | Function via Prototype Chain (.constructor.constructor) | CRITICAL | T1059 |
-| MUADDIB-AST-065 | Prototype Pollution (__defineGetter__/__proto__) | HIGH | T1574 |
-| MUADDIB-AST-066 | Module.wrap Override (systemic code injection) | CRITICAL | T1574.006 |
-| MUADDIB-AST-067 | Symbol Property Hiding (anti-forensics) | HIGH | T1564 |
-| MUADDIB-AST-068 | WithStatement Dangerous Body (scope injection) | HIGH | T1027 |
+| MUADDIB-AST-064 | Function via Prototype Chain | CRITICAL | T1059 |
+| MUADDIB-AST-065 | Prototype Pollution | HIGH | T1574 |
+| MUADDIB-AST-066 | Module.wrap Override | CRITICAL | T1574.006 |
+| MUADDIB-AST-067 | Symbol Property Hiding | HIGH | T1564 |
+| MUADDIB-AST-068 | WithStatement Dangerous Body | HIGH | T1027 |
 | MUADDIB-AST-069 | require("process").mainModule Bypass | CRITICAL | T1059 |
-| MUADDIB-AST-070 | Shared Memory IPC (SharedArrayBuffer + Worker) | MEDIUM | T1559 |
+| MUADDIB-AST-070 | Shared Memory IPC | MEDIUM | T1559 |
 | MUADDIB-AST-071 | WebSocket C2 Channel | HIGH | T1071.001 |
-| MUADDIB-AST-072 | dgram UDP Exfiltration | HIGH | T1048 |
-| MUADDIB-AST-073 | Crontab Persistence Injection | CRITICAL | T1053.003 |
-| MUADDIB-AST-074 | Module Internals Hijack (_resolveFilename/_compile/_extensions) | CRITICAL | T1574.006 |
-| MUADDIB-AST-075 | JSON.parse Reviver with __proto__ Check | HIGH | T1027 |
-| MUADDIB-AST-076 | vm.runInContext Dynamic Execution | CRITICAL | T1059.007 |
-| MUADDIB-AST-077 | Stego Binary Read + eval/Function | CRITICAL | T1027.003 |
-| MUADDIB-AST-078 | Proxy Set Trap Data Interception | HIGH | T1056.004 |
-| MUADDIB-AST-079 | Callback Exec (exec/spawn inside .on message/data) | CRITICAL | T1059 |
-| MUADDIB-AST-080 | CI Provider Fingerprinting (>=3 CI env vars) | MEDIUM | T1082 |
-| MUADDIB-AST-081 | AsyncLocalStorage Abuse | MEDIUM | T1027 |
-| MUADDIB-AST-082 | Image File Read + Dynamic Exec (steganography) | HIGH | T1027.003 |
-| MUADDIB-AST-083 | net.Socket / net.createConnection (low-level network) | MEDIUM | T1071 |
-| MUADDIB-AST-084 | uncaughtException / unhandledRejection hijack | HIGH | T1564 |
-| MUADDIB-AST-085 | FinalizationRegistry Deferred Exec (v8 variant) | HIGH | T1497.003 |
-| MUADDIB-AST-086 | Function.constructor("require") RCE (Robert King) | CRITICAL | T1059 |
-| MUADDIB-AST-087 | process Variable Shadow (const process = {...}) | HIGH | T1036 |
+| MUADDIB-AST-072 | UDP Data Exfiltration | HIGH | T1048.003 |
+| MUADDIB-AST-073 | Native Addon Installation | HIGH | T1195.002 |
+| MUADDIB-AST-074 | String Mutation Obfuscation | HIGH | T1027 |
+| MUADDIB-AST-075 | Module Internals Hijack (_resolveFilename/_compile/_extensions) | CRITICAL | T1574.006 |
+| MUADDIB-AST-076 | JSON Reviver Prototype Pollution | HIGH | T1059.007 |
+| MUADDIB-AST-077 | VM Dynamic Code Execution (vm.runInContext + variable code) | CRITICAL | T1059.007 |
+| MUADDIB-AST-078 | Callback Remote Code Execution (exec/spawn inside .on message/data) | CRITICAL | T1059 |
+| MUADDIB-AST-079 | Steganographic Binary Execution (image read + dynamic exec) | CRITICAL | T1027.003 |
+| MUADDIB-AST-080 | AsyncLocalStorage Context Execution | HIGH | T1059.007 |
+| MUADDIB-AST-081 | Prototype Chain Constructor Access via Variable | CRITICAL | T1059.007 |
+| MUADDIB-AST-082 | CI Environment Fingerprinting (>=3 CI env vars) | HIGH | T1082 |
+| MUADDIB-AST-083 | Proxy GlobalThis Interception | CRITICAL | T1574 |
+| MUADDIB-AST-084 | Reflect.apply Prototype Method Code Execution | CRITICAL | T1059 |
+| MUADDIB-AST-085 | Timer Delayed Payload | HIGH | T1497.003 |
+| MUADDIB-AST-086 | Function Constructor Require Evasion | CRITICAL | T1059.007 |
+| MUADDIB-AST-087 | Process Variable Shadowing (const process = {...}) | HIGH | T1036 |
 | MUADDIB-AST-088 | Baileys Newsletter Auto-Follow Hijack | HIGH | T1496 |
 | MUADDIB-AST-089 | Self-Destructing Dynamic Execution (csec pattern) | CRITICAL | T1070.004 |
-| MUADDIB-AST-090 | new Function() with Runtime Args + Obfuscation (csec pattern) | CRITICAL | T1059.007 |
+| MUADDIB-AST-090 | Function() with Runtime Identifiers as Arguments (csec pattern) | CRITICAL | T1059.007 |
 
 ### AI Config Scanner (v2.2)
 
@@ -254,9 +259,25 @@ Co-occurring threat type combinations that never appear in benign packages. Inje
 | MUADDIB-COMPOUND-005 | Lifecycle Remote Require | lifecycle_script + network_require | CRITICAL |
 | MUADDIB-COMPOUND-006 | WebSocket/MQTT Credential Exfil | env_access + ws/mqtt/socket.io sink (same file) | CRITICAL |
 | MUADDIB-COMPOUND-007 | Lifecycle File Exec | lifecycle_script + threats in referenced file | CRITICAL |
+| MUADDIB-COMPOUND-008 | Uncaught Exception Handler Credential Exfil | uncaughtException/unhandledRejection hijack + credential read | CRITICAL |
 | MUADDIB-COMPOUND-009 | Lifecycle Dataflow | lifecycle_script + dataflow threat (same file) | HIGH |
 | MUADDIB-COMPOUND-010 | Lifecycle Dangerous Exec | lifecycle_script + dangerous_exec | CRITICAL |
 | MUADDIB-COMPOUND-011 | Obfuscated Lifecycle Env | lifecycle_script + obfuscation + env_access | HIGH |
+| MUADDIB-COMPOUND-012 | Staged Remote Loader (Function.constructor + shadowed process) | function_constructor_require + process_variable_shadow (same file) | CRITICAL |
+| MUADDIB-COMPOUND-AXIOS | Axios / csec Family Compound | ioc_string_match + lifecycle_script + anti_forensic_partial | CRITICAL |
+| MUADDIB-COMPOUND-STUB-IOC | Stub Package + Known String IOC | stub_package_external_dep + ioc_string_match | CRITICAL |
+
+### Intel-Triage Scanners (v2.11, mai 2026) — Static-First Detection
+
+Trio of static scanners aligned on 2026 npm/PyPI threat landscape. The rationale (commercial sandboxes flag Axios 2026 as CLEAN with 99% confidence; modern malware defeats sandboxes by design) is documented in `feedback_static_over_dynamic` and `feedback_sandbox_wrong_layer` memories.
+
+| Rule ID | Name | Severity | MITRE |
+|---------|------|----------|-------|
+| MUADDIB-IOC-001 | YARA-Style String IOC Match (Axios 2026, TeamPCP, GlassWorm, CanisterSprawl) | CRITICAL | T1195.002 |
+| MUADDIB-AF-001 | Anti-Forensic XOR + Self-Delete + Decoy Write (3 of 3 patterns) | CRITICAL | T1140 |
+| MUADDIB-AF-002 | Anti-Forensic Partial (2 of 3 patterns) | HIGH | T1140 |
+| MUADDIB-STUB-001 | Stub Package + External URL Dep + Lifecycle Hook (ltidi pattern) | CRITICAL | T1195.002 |
+| MUADDIB-STUB-002 | Stub Package + External URL Dep (no lifecycle) | HIGH | T1195.002 |
 
 ### Dependency Scanner
 
@@ -471,7 +492,7 @@ MUAD'DIB 2.9 uses a **triple detection approach**:
 
 2. **Behavioral anomaly detection** (v2.0): Analyzes changes between package versions to detect supply-chain attacks before they appear in IOC databases. Compares lifecycle scripts, AST, publish frequency, and maintainer metadata across versions. This approach can detect 0-day behavioral anomalies without any prior knowledge of the specific attack.
 
-3. **Ground truth validation** (v2.1–v2.10.95): Validates detection accuracy against 67 real-world attacks (65 active samples; 2 out-of-scope: GT-005 colors and GT-009 faker protestware with min_threats=0), tracks detection lead times vs. public advisories, and monitors false positive rates over time. 3280 tests across 69 files. Current TPR@3: 93.85% (61/65), ADR: 96.3% (103/107). Provides observability into scanner effectiveness.
+3. **Ground truth validation** (v2.1–v2.10.95): Validates detection accuracy against 67 real-world attacks (65 active samples; 2 out-of-scope: GT-005 colors and GT-009 faker protestware with min_threats=0), tracks detection lead times vs. public advisories, and monitors false positive rates over time. 3529 tests across 89 files. Current TPR@3: 93.85% (61/65), ADR: 96.3% (103/107). Provides observability into scanner effectiveness.
 
 The behavioral detection features are opt-in (`--temporal-full`) and query the npm registry at scan time. They are particularly effective against:
 - Account takeover attacks (event-stream pattern)

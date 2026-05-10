@@ -30,7 +30,7 @@
 
 npm and PyPI supply-chain attacks are exploding. Shai-Hulud compromised 25K+ repos in 2025. Existing tools detect threats but don't help you respond.
 
-MUAD'DIB combines **14 parallel scanners** (209 detection rules), a **deobfuscation engine**, **inter-module dataflow analysis**, **compound scoring**, **ML classifiers** (XGBoost), and gVisor/Docker sandbox to detect known threats and suspicious behavioral patterns in npm and PyPI packages.
+MUAD'DIB combines **16 parallel scanners** (223 detection rules), a **deobfuscation engine**, **inter-module dataflow analysis**, **compound scoring**, **ML classifiers** (XGBoost), and gVisor/Docker sandbox to detect known threats and suspicious behavioral patterns in npm and PyPI packages.
 
 ---
 
@@ -176,7 +176,7 @@ muaddib replay                     # Ground truth validation (61/65 TPR@3)
 
 ## Features
 
-### 14 parallel scanners
+### 16 parallel scanners
 
 | Scanner | Detection |
 |---------|-----------|
@@ -194,8 +194,11 @@ muaddib replay                     # Ground truth validation (61/65 TPR@3)
 | Package/Dependencies | Lifecycle scripts, IOC matching (225K+ packages) |
 | GitHub Actions | Shai-Hulud backdoor detection |
 | Hash Scanner | Known malicious file hashes |
+| IOC Strings (intel-triage P1.1) | YARA-style string matching (Axios 2026, TeamPCP, GlassWorm, CanisterSprawl) |
+| Anti-Forensic AST (intel-triage P1.2) | XOR loop + self-delete + decoy write compound (csec autodelete) |
+| Stub Package (intel-triage P1.3) | Tiny main file + external dep URL + lifecycle hook (ltidi chain) |
 
-### 209 detection rules
+### 223 detection rules
 
 All rules are mapped to MITRE ATT&CK techniques. See [SECURITY.md](SECURITY.md#detection-rules-v21021) for the complete rules reference.
 
@@ -271,7 +274,7 @@ With pre-commit framework:
 ```yaml
 repos:
   - repo: https://github.com/DNSZLSK/muad-dib
-    rev: v2.10.97
+    rev: v2.11.6
     hooks:
       - id: muaddib-scan
 ```
@@ -292,7 +295,7 @@ repos:
 | **FPR** (Benign random, v2.10.95 measure) | **7.0%** (14/200) | 200 random npm packages, stratified sampling |
 | **ADR** (Adversarial + Holdout) | **96.3%** (103/107) | 67 adversarial + 40 holdout (107 available on disk), global threshold=20 |
 
-**3280 tests** across 69 files. **209 rules** (204 RULES + 5 PARANOID).
+**3529 tests** across 89 files. **223 rules** (218 RULES + 5 PARANOID).
 
 > **ML retrain methodology (v2.10.51):**
 > - Ground truth: 377 confirmed_malicious via auto-labeler (OSSF malicious-packages, GitHub Advisory Database, npm registry takedown correlation)
@@ -340,7 +343,7 @@ npm test
 
 ### Testing
 
-- **3280 tests** across 69 modular test files
+- **3529 tests** across 89 modular test files
 - **56 fuzz tests** - Malformed inputs, ReDoS, unicode, binary
 - **Datadog 17K benchmark** - 14,587 confirmed malware samples (in-scope)
 - **Ground truth validation** - 67 real-world attacks (93.85% TPR@3, 86.2% TPR@20 — v2.10.95 measure)
@@ -361,7 +364,7 @@ npm test
 - [Documentation Index](docs/INDEX.md) - All documentation in one place
 - [Evaluation Methodology](docs/EVALUATION_METHODOLOGY.md) - Experimental protocol, holdout scores
 - [Threat Model](docs/threat-model.md) - What MUAD'DIB detects and doesn't detect
-- [Security Policy](SECURITY.md) - Detection rules reference (209 rules)
+- [Security Policy](SECURITY.md) - Detection rules reference (223 rules)
 - [Security Audit](docs/SECURITY_AUDIT.md) - Bypass validation report
 - [FP Analysis](docs/EVALUATION.md) - Historical false positive analysis
 
