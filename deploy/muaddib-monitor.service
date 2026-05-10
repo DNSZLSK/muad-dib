@@ -19,19 +19,17 @@ SyslogIdentifier=muaddib-monitor
 
 Environment=NODE_ENV=production
 
-# FPR plan 2026 - 5 gates activated for the monitor pipeline.
-# These flags only fire here (CLI scans run un-gated for backwards compat
-# and to avoid the per-scan registry fetch on one-shot CLI invocations).
-# Measured impact (seed=42 + seed=2026 cross-corpus, 200 packages each) :
-#   FPR random  7.0%  -> 1.0%   no TPR / ADR regression
-#   TPR ground truth 93.85%     unchanged
-#   ADR adversarial   96.26%    unchanged
-# Rollback : remove these lines and `systemctl daemon-reload && restart`.
-Environment=MUADDIB_FN_REACHABILITY=1
-Environment=MUADDIB_DECAY=1
-Environment=MUADDIB_MATURE_CAP=1
-Environment=MUADDIB_METADATA_FACTOR=1
-Environment=MUADDIB_DELTA_MODE=1
+# FPR plan 2026 - 5 gates ARE NOW DEFAULT ON since v2.11.9.
+# Measured impact (v2.11.4 corpus, 1054 packages, gates ON vs OFF):
+#   FPR curated    15.6%  -> 9.36%  (-6.24 pp)
+#   FPR random      7.0%  -> 2.0%   (-5.00 pp)
+#   TPR@3 / TPR@20             unchanged (93.85% / 86.15%)
+#   ADR adversarial            unchanged (96.26%)
+# To OPT OUT of any individual gate, set its env var to 0 below:
+#   MUADDIB_FN_REACHABILITY, MUADDIB_DECAY, MUADDIB_MATURE_CAP,
+#   MUADDIB_METADATA_FACTOR, MUADDIB_DELTA_MODE
+# To skip ALL registry-fetching gates at once (air-gap, offline CI):
+#   MUADDIB_NO_REGISTRY_FETCH=1
 
 EnvironmentFile=-/opt/muaddib/.env
 

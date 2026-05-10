@@ -131,11 +131,12 @@ async function process(threats, targetPath, options, pythonDeps, warnings, scann
       debugLog('[REACHABILITY] error:', e?.message);
       // Graceful fallback — treat all files as reachable
     }
-    // FPR plan C2 : function-level reachability sits behind a flag while we
-    // measure FPR delta on the corpus. Off by default so production scans stay
-    // identical until the flag is flipped. Activated only when file-level
-    // reachability succeeded (otherwise no entry-point context to seed from).
-    if (reachableFiles && globalThis.process.env.MUADDIB_FN_REACHABILITY === '1') {
+    // FPR plan C2 : function-level reachability. Default ON since v2.11.9 after
+    // measuring -2.0 pp FPR (curated 11.4% -> 9.4%) with zero TPR/ADR regression
+    // on the full evaluation corpus (1054 packages). Opt-out via
+    // MUADDIB_FN_REACHABILITY=0. Activated only when file-level reachability
+    // succeeded (otherwise no entry-point context to seed from).
+    if (reachableFiles && globalThis.process.env.MUADDIB_FN_REACHABILITY !== '0') {
       try {
         reachableFunctions = computeReachableFunctions(targetPath, reachableFiles);
       } catch (e) {
@@ -169,21 +170,25 @@ async function process(threats, targetPath, options, pythonDeps, warnings, scann
     }
   } catch { /* graceful fallback */ }
 
-  // FPR plan Chantier 4 + 5 wiring : when a package name is known and at least
-  // one of the metadata-driven gates is ON, fetch the npm registry packument
-  // and attach it as _pkgMeta.npmRegistryMeta. Without this, applyReputation-
-  // Factor and applyMatureStableCap cannot fire outside the monitor's own
-  // queue.js (which already pre-fetches the metadata bundle). getPackageMeta-
-  // data has its own in-process cache, so repeated scans of the same package
-  // hit the cache and never re-fetch. Network failure / unknown package -> the
-  // call returns null and both downstream functions degrade gracefully.
+  // FPR plan Chantier 4 + 5 wiring : fetch npm registry packument and attach
+  // it as _pkgMeta.npmRegistryMeta so applyReputationFactor, applyMatureStable-
+  // Cap, and applyDeltaMultiplier can fire. getPackageMetadata has an in-
+  // process cache, so repeated scans of the same package hit the cache and
+  // never re-fetch. Network failure / unknown package -> returns null and all
+  // downstream functions degrade gracefully.
+  //
+  // Default ON since v2.11.9. To skip the fetch entirely (air-gap, offline CI,
+  // perf-critical batch), set MUADDIB_NO_REGISTRY_FETCH=1 — this disables the
+  // 3 metadata-dependent gates (METADATA_FACTOR, MATURE_CAP, DELTA_MODE) in
+  // one shot. Individual gates can still be turned off via their own =0 flag.
   if (
     packageName &&
     _pkgMeta &&
+    globalThis.process.env.MUADDIB_NO_REGISTRY_FETCH !== '1' &&
     (
-      globalThis.process.env.MUADDIB_METADATA_FACTOR === '1' ||
-      globalThis.process.env.MUADDIB_MATURE_CAP === '1' ||
-      globalThis.process.env.MUADDIB_DELTA_MODE === '1'
+      globalThis.process.env.MUADDIB_METADATA_FACTOR !== '0' ||
+      globalThis.process.env.MUADDIB_MATURE_CAP !== '0' ||
+      globalThis.process.env.MUADDIB_DELTA_MODE !== '0'
     )
   ) {
     try {
@@ -293,13 +298,15 @@ async function process(threats, targetPath, options, pythonDeps, warnings, scann
   applyFPReductions(deduped, reachableFiles, packageName, packageDeps, reachableFunctions);
 
   // FPR plan Chantier 3 - delta-aware decay. Threats present in the last 3
-  // published versions (and not HC/IOC) decay to LOW. Off by default until
-  // the cache is warm and we've measured the FPR delta on the corpus.
+  // published versions (and not HC/IOC) decay to LOW. Default ON since v2.11.9.
+  // Opt-out: MUADDIB_DELTA_MODE=0 (or set MUADDIB_NO_REGISTRY_FETCH=1 to skip
+  // the registry fetch upstream). No-op when registry meta is absent (CLI
+  // scans on private packages, offline, or unknown package).
   let _deltaResult = null;
   if (
     packageName && packageVersion &&
     _pkgMeta && _pkgMeta.npmRegistryMeta &&
-    globalThis.process.env.MUADDIB_DELTA_MODE === '1'
+    globalThis.process.env.MUADDIB_DELTA_MODE !== '0'
   ) {
     try {
       const packument = _pkgMeta.npmRegistryMeta.packument || _pkgMeta.npmRegistryMeta;
@@ -446,9 +453,9 @@ async function process(threats, targetPath, options, pythonDeps, warnings, scann
   // FPR plan Chantier 5 : mature stable cap — caps mature, well-owned, high-
   // traffic packages at MEDIUM unless an HC type or IOC is present. Sits
   // BETWEEN the contextual caps (which it composes with) and the single-fire
-  // floor (which can override on hard signals). Gated behind
-  // MUADDIB_MATURE_CAP=1 until measured against the full evaluation corpus.
-  if (globalThis.process.env.MUADDIB_MATURE_CAP === '1') {
+  // floor (which can override on hard signals). Default ON since v2.11.9.
+  // Opt-out: MUADDIB_MATURE_CAP=0. No-op when registry meta is absent.
+  if (globalThis.process.env.MUADDIB_MATURE_CAP !== '0') {
     const matureCap = applyMatureStableCap(result, _pkgMeta && _pkgMeta.npmRegistryMeta);
     if (matureCap && matureCap.applied) {
       debugLog('[MATURE-CAP] ' + (packageName || targetPath) + ': ' +
@@ -470,12 +477,13 @@ async function process(threats, targetPath, options, pythonDeps, warnings, scann
   // Hybrid v3 Phase 4: metadata-first reputation factor — multiplies the score
   // by a factor in [0.10, 1.5] derived from npm registry signals. Applied LAST
   // so all severity logic completes first; the factor is the final, package-
-  // wide context filter. Gated behind MUADDIB_METADATA_FACTOR=1; no-op when
-  // metadata is absent (CLI scans, offline) or the gate is off.
+  // wide context filter. Default ON since v2.11.9. Opt-out:
+  // MUADDIB_METADATA_FACTOR=0. No-op when metadata is absent (CLI scans on
+  // unknown package, offline, MUADDIB_NO_REGISTRY_FETCH=1).
   // NOTE: this module's exported function is named `process`, which shadows
   // the global `process` inside its body. Use globalThis.process.env to reach
   // the real environment.
-  if (globalThis.process.env.MUADDIB_METADATA_FACTOR === '1') {
+  if (globalThis.process.env.MUADDIB_METADATA_FACTOR !== '0') {
     const repAdjust = applyReputationFactor(result, _pkgMeta && _pkgMeta.npmRegistryMeta);
     if (repAdjust) {
       debugLog('[META-FACTOR] ' + (packageName || targetPath) + ': factor=' +
@@ -501,10 +509,10 @@ async function process(threats, targetPath, options, pythonDeps, warnings, scann
   // FPR plan Chantier 3 : persist this version's signature set so future scans
   // (or future versions) can use it as a baseline for delta decay. Best-effort
   // and idempotent ; cache misses on read are silent so a missed write never
-  // blocks scoring. Only write when the user opted in to delta-mode AND we
+  // blocks scoring. Write whenever delta-mode is enabled (default ON) AND we
   // have a concrete package@version pair.
   if (
-    globalThis.process.env.MUADDIB_DELTA_MODE === '1' &&
+    globalThis.process.env.MUADDIB_DELTA_MODE !== '0' &&
     packageName && packageVersion
   ) {
     try {

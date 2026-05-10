@@ -46,7 +46,13 @@ async function runDecayAggregationTests() {
       type: 'env_access', severity: 'MEDIUM', file: `f${i}.js`, message: 'm'
     }));
     const decay = computeGroupScoreDecay(threats);
+    // Since v2.11.9, computeGroupScore takes the decay path by default. To get
+    // the legacy additive comparison we must explicitly opt out.
+    const before = process.env.MUADDIB_DECAY;
+    process.env.MUADDIB_DECAY = '0';
     const add = computeGroupScore(threats);
+    if (before === undefined) delete process.env.MUADDIB_DECAY;
+    else process.env.MUADDIB_DECAY = before;
     assert(decay < add, `5x same type MEDIUM: decay (${decay}) should be less than additive (${add})`);
     // Per-type cap = MEDIUM weight / (1 - 0.4) = 3 / 0.6 = 5 (rounded)
     assert(decay <= 6, `Decay should be <= per-type cap of ~6, got ${decay}`);
@@ -110,15 +116,18 @@ async function runDecayAggregationTests() {
     assert(computeGroupScoreDecay([]) === 0);
   });
 
-  test('Decay: env flag toggles computeGroupScore behaviour', () => {
+  test('Decay: env flag toggles computeGroupScore behaviour (default ON since v2.11.9)', () => {
     const threats = Array.from({ length: 8 }, (_, i) => ({
       type: 'env_access', severity: 'MEDIUM', file: `f${i}.js`, message: 'm'
     }));
     const before = process.env.MUADDIB_DECAY;
-    delete process.env.MUADDIB_DECAY;
+    // Opt-out path : MUADDIB_DECAY=0 takes the additive (legacy) computation.
+    process.env.MUADDIB_DECAY = '0';
     const additivePath = computeGroupScore(threats);
-    process.env.MUADDIB_DECAY = '1';
+    // Default-ON path : unset (or any value other than '0') takes the decay path.
+    delete process.env.MUADDIB_DECAY;
     const decayPath = computeGroupScore(threats);
+    // Restore env
     if (before === undefined) delete process.env.MUADDIB_DECAY;
     else process.env.MUADDIB_DECAY = before;
     assert(decayPath < additivePath, `Decay flag: decay (${decayPath}) should be < additive (${additivePath})`);

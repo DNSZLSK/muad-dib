@@ -186,7 +186,8 @@ function _isReplacedByCompound(t) {
 }
 
 function computeGroupScore(threats) {
-  if (process.env.MUADDIB_DECAY === '1') return computeGroupScoreDecay(threats);
+  // Score decay default ON since v2.11.9 (FPR plan Chantier 1). Opt-out: MUADDIB_DECAY=0.
+  if (process.env.MUADDIB_DECAY !== '0') return computeGroupScoreDecay(threats);
   let score = 0;
   let protoHookMediumPoints = 0;
   let dataflowMediumPoints = 0;
