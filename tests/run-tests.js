@@ -1,3 +1,19 @@
+// Test environment hardening — MUST be set BEFORE any scanner module is required.
+// Reason: since v2.11.9 the FPR-plan gates are default ON, which means each scan
+// triggers a `getPackageMetadata()` fetch to the npm registry to populate
+// MATURE_CAP / METADATA_FACTOR / DELTA_MODE. Test fixtures use synthetic package
+// names ("evil-pkg", "test-foo", etc.) that 404 on npm with a 1-2s timeout per
+// fetch. On a CI run with hundreds of scan-based tests this adds 15+ minutes of
+// pointless network round-trips. We force NO_REGISTRY_FETCH=1 here so tests
+// stay fast and offline-clean. Individual tests that need the registry path
+// can still set their own env via runScan options or sub-process env.
+//
+// Per-CLI-user usage is unaffected: this hardening only applies when the
+// in-process test runner imports the scanner modules.
+if (!process.env.MUADDIB_NO_REGISTRY_FETCH) {
+  process.env.MUADDIB_NO_REGISTRY_FETCH = '1';
+}
+
 const { getCounters } = require('./test-utils');
 
 // Scanner tests (fast — pure unit tests, no process spawns)

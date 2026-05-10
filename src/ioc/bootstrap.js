@@ -149,6 +149,17 @@ async function ensureIOCs() {
       }
     }
 
+    // Offline / CI escape hatch: cache is empty/missing AND we don't want to
+    // hit the network. Tests and air-gapped environments use this to avoid
+    // 1-2s timeouts × N tests when the asset is unavailable. Same env var as
+    // the per-scan registry fetch hatch so a single MUADDIB_NO_REGISTRY_FETCH=1
+    // covers both bootstrap + per-scan paths. Important: this gate sits AFTER
+    // the cache check so a healthy cache still returns true even in offline
+    // mode (otherwise tests that pre-populate the cache would falsely fail).
+    if (process.env.MUADDIB_NO_REGISTRY_FETCH === '1') {
+      return false;
+    }
+
     // Download IOCs (messages go to stderr to avoid contaminating JSON/SARIF stdout)
     process.stderr.write('[MUADDIB] First run: downloading IOC database...\n');
     await downloadAndDecompress(IOCS_URL, IOCS_PATH);
