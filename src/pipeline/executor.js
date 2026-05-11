@@ -256,17 +256,26 @@ async function execute(targetPath, options, pythonDeps, warnings) {
       { re: /\bprocess\.mainModule\b/, type: 'dynamic_require', severity: 'MEDIUM', label: 'process.mainModule' },
       { re: /\bModule\._load\b/, type: 'module_load_bypass', severity: 'CRITICAL', label: 'Module._load' }
     ];
+    // v2.11.11: Tooling path detection for quick-scan. Files in standard monorepo
+    // tooling directories (scripts/, test/, examples/, .github/, compiler/) carry
+    // much lower signal than root/src files — build/CI/test scripts legitimately
+    // use child_process. Downgrade non-CRITICAL findings to LOW in these paths.
+    // Module._load remains CRITICAL — it is never legitimate in tooling scripts.
+    const TOOLING_PATH_RE = /(?:^|[/\\])(?:scripts|test|tests|__tests__|spec|examples|fixtures|compiler[/\\]scripts|\.github)[/\\]/i;
     for (const filePath of overflowFiles) {
       try {
         const stat = fs.statSync(filePath);
         if (stat.size > getMaxFileSize()) continue;
         const content = fs.readFileSync(filePath, 'utf8');
         const relFile = path.relative(targetPath, filePath);
+        const isToolingPath = TOOLING_PATH_RE.test(relFile);
         for (const pat of QUICK_SCAN_PATTERNS) {
           if (pat.re.test(content)) {
+            // Downgrade non-CRITICAL findings in tooling paths to LOW
+            const severity = (isToolingPath && pat.severity !== 'CRITICAL') ? 'LOW' : pat.severity;
             quickScanThreats.push({
               type: pat.type,
-              severity: pat.severity,
+              severity,
               message: `[quick-scan] ${pat.label} detected in overflow file.`,
               file: relFile,
               degraded: true,  // P3: regex-only detection, no semantic context
