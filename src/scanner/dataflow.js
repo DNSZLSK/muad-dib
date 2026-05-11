@@ -458,7 +458,11 @@ function analyzeFile(content, filePath, basePath) {
         }
       }
 
-      if (callName === 'request' || callName === 'fetch' || callName === 'post' || callName === 'get') {
+      // v2.11.11: Removed bare 'get' — getCallName() returns just the method name
+      // for member expressions (Map.get(), cache.get() → 'get'), causing massive FP
+      // on any file that calls .get(). Qualified http.get/https.get are already
+      // caught by MODULE_SINK_METHODS (lines 33-34) via taint-tracked module analysis.
+      if (callName === 'request' || callName === 'fetch' || callName === 'post') {
         sinks.push({
           type: 'network_send',
           name: callName,

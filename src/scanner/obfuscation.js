@@ -64,9 +64,15 @@ function detectObfuscation(targetPath) {
     const pathParts = relativePath.split(path.sep);
     const isInDistOrBuild = pathParts.some(p => p === 'dist' || p === 'build');
     const isLargeCjsMjs = (basename.endsWith('.cjs') || basename.endsWith('.mjs')) && content.length > 100 * 1024;
-    // P6: Any JS file > 100KB is overwhelmingly bundled output regardless of directory name.
-    // Real obfuscated malware is typically small (<50KB). Catches prettier plugins/, svelte compiler/, etc.
-    const isLargeJs = basename.endsWith('.js') && content.length > 100 * 1024;
+    // P6: Any JS file > 100KB is overwhelmingly bundled output regardless of directory name,
+    // UNLESS it contains javascript-obfuscator markers (_0x hex variables). Bundlers
+    // (webpack/rollup/esbuild) never produce _0x vars — this is a discriminant unique to
+    // javascript-obfuscator, which is only used to hide malicious intent.
+    // Mini Shai-Hulud campaign (2026-05): 2.3MB payload exploited the original blanket
+    // exemption to evade detection on @tanstack/react-router (12M weekly downloads).
+    const isLargeJsCandidate = basename.endsWith('.js') && content.length > 100 * 1024;
+    const hasObfuscatorMarkers = isLargeJsCandidate && /\b_0x[a-f0-9]{4,}\b/.test(content.slice(0, 8192));
+    const isLargeJs = isLargeJsCandidate && !hasObfuscatorMarkers;
     // Locale/i18n files legitimately contain invisible Unicode (e.g. Persian ZWNJ U+200C)
     const isLocaleFile = /(?:^|[/\\])(?:locale|locales|i18n|intl|lang|languages|translations)[/\\]/i.test(relativePath);
     const isPackageOutput = isMinified || isBundled || isInDistOrBuild || isLargeCjsMjs || isLargeJs || isLocaleFile;

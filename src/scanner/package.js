@@ -370,7 +370,11 @@ async function scanPackageJson(targetPath) {
       });
     }
     // Detect git-based dependencies — potential PackageGate RCE vector
-    if (typeof depVersion === 'string' && /^git[+:]/.test(depVersion)) {
+    // Covers git+https://, git://, and platform shorthands (github:, gitlab:, bitbucket:)
+    // which resolve to git repos and execute lifecycle hooks (prepare) on install.
+    // Mini Shai-Hulud campaign (2026-05): github:tanstack/router#commit exploited the
+    // prepare hook to execute tanstack_runner.js.
+    if (typeof depVersion === 'string' && /^(?:git[+:]|github:|gitlab:|bitbucket:)/.test(depVersion)) {
       threats.push({
         type: 'git_dependency_rce',
         severity: 'HIGH',

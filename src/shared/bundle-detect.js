@@ -105,7 +105,13 @@ const VETO_TYPES = new Set([
   // IOC hits (never downgraded regardless of context)
   'ioc_match',
   'known_malicious_package',
-  'shai_hulud_marker'
+  'shai_hulud_marker',
+  // Mini Shai-Hulud campaign (2026-05): detached process + credential harvest + network
+  // is the DPRK/Lazarus evasion pattern. Writing to .claude/settings.json or
+  // .vscode/tasks.json is developer tooling persistence — never produced by a bundler.
+  'detached_credential_exfil',   // AST-047 — spawn detached + env + network
+  'ai_config_injection',         // AST-027 — writes to .claude/ MCP config
+  'ide_task_persistence'         // AST-035 — writes to .vscode/tasks.json
 ]);
 
 // Sensitive environment variable patterns. An `env_access` threat whose
