@@ -157,18 +157,31 @@ function formatOutput(result, options, ctx) {
     if (deduped.length === 0) {
       console.log('[OK] No threats detected.\n');
     } else {
-      console.log(`[ALERT] ${deduped.length} threat(s) detected:\n`);
-      deduped.forEach((t, i) => {
-        const countStr = t.count > 1 ? ` (x${t.count})` : '';
-        console.log(`  ${i + 1}. [${t.severity}] ${t.type}${countStr}`);
-        console.log(`     ${t.message}`);
-        console.log(`     File: ${t.file}`);
-        const playbook = getPlaybook(t.type);
-        if (playbook) {
-          console.log(`     \u2192 ${playbook}`);
+      // v2.11.11: Filter degraded LOW quick-scan signals from default output.
+      // These are regex-only detections in overflow files (no AST context) and
+      // clutter the output on monorepos. Show with --verbose. Scoring, JSON,
+      // SARIF, and HTML output are unaffected — this is display-only.
+      const hiddenCount = options.verbose ? 0 : deduped.filter(t => t.degraded && t.severity === 'LOW').length;
+      const displayThreats = options.verbose ? deduped : deduped.filter(t => !(t.degraded && t.severity === 'LOW'));
+      if (displayThreats.length === 0 && hiddenCount > 0) {
+        console.log(`[OK] No high-confidence threats detected (${hiddenCount} low-confidence signal(s) hidden, use --verbose to show).\n`);
+      } else {
+        console.log(`[ALERT] ${displayThreats.length} threat(s) detected:\n`);
+        displayThreats.forEach((t, i) => {
+          const countStr = t.count > 1 ? ` (x${t.count})` : '';
+          console.log(`  ${i + 1}. [${t.severity}] ${t.type}${countStr}`);
+          console.log(`     ${t.message}`);
+          console.log(`     File: ${t.file}`);
+          const playbook = getPlaybook(t.type);
+          if (playbook) {
+            console.log(`     \u2192 ${playbook}`);
+          }
+          console.log('');
+        });
+        if (hiddenCount > 0) {
+          console.log(`  + ${hiddenCount} low-confidence signal(s) hidden (use --verbose to show)\n`);
         }
-        console.log('');
-      });
+      }
     }
 
     // Sandbox section (normal)

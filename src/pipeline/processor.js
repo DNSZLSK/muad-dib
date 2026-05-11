@@ -321,7 +321,7 @@ async function process(threats, targetPath, options, pythonDeps, warnings, scann
   // Compound scoring: inject synthetic CRITICAL threats when co-occurring types
   // indicate unambiguous malice. Applied AFTER FP reductions to recover signals
   // that were individually downgraded (count-based, dist, reachability, delta).
-  applyCompoundBoosts(deduped);
+  applyCompoundBoosts(deduped, targetPath);
 
   // Intent coherence analysis: detect source→sink pairs within files
   // Pass targetPath for destination-aware SDK pattern detection
