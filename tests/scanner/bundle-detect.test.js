@@ -306,7 +306,8 @@ function runBundleDetectTests() {
     // Sanity check on the set contents — regression guard against accidental removal.
     const expected = ['reverse_shell', 'node_modules_write', 'npm_publish_worm',
       'npm_token_steal', 'systemd_persistence', 'unicode_invisible_injection',
-      'ioc_match', 'known_malicious_package', 'shai_hulud_marker'];
+      'ioc_match', 'known_malicious_package', 'shai_hulud_marker',
+      'detached_credential_exfil', 'ai_config_injection', 'ide_task_persistence'];
     for (const t of expected) {
       assert(VETO_TYPES.has(t), 'VETO_TYPES must contain ' + t);
     }

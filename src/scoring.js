@@ -457,7 +457,13 @@ const REACHABILITY_EXEMPT_TYPES = new Set([
   'function_constructor_require',  // AST-086 — Function.constructor("require", body)
   'process_variable_shadow',       // AST-087 — const process = {env:{...}}
   'function_runtime_args',         // AST-090 — new Function('require','__dirname',...)
-  'self_destruct_eval'             // AST-089 — dynamic exec + unlink __filename
+  'self_destruct_eval',            // AST-089 — dynamic exec + unlink __filename
+  // Mini Shai-Hulud campaign (2026-05): env var names reconstructed via
+  // String.fromCharCode() to evade static analysis. Structurally unique to malware —
+  // no legitimate code reconstructs env var names from character codes. Injected files
+  // (router_init.js) are unreachable via require/import but execute via lifecycle hooks
+  // or optionalDependencies with prepare scripts.
+  'env_charcode_reconstruction'    // AST-018 — fromCharCode + process.env[computed]
 ]);
 
 // ============================================
@@ -880,6 +886,16 @@ function applyFPReductions(threats, reachableFiles, packageName, packageDeps, re
     typeCounts[t.type] = (typeCounts[t.type] || 0) + 1;
   }
 
+  // Mini Shai-Hulud (2026-05): pre-compute files that contain reachability-exempt
+  // findings. Co-occurring threats in these files are also exempt from the
+  // unreachable downgrade — the exempt finding proves structural malice.
+  const _filesWithExemptThreats = new Set();
+  for (const t of threats) {
+    if (t.file && REACHABILITY_EXEMPT_TYPES.has(t.type)) {
+      _filesWithExemptThreats.add(t.file.replace(/\\/g, '/'));
+    }
+  }
+
   const totalThreats = threats.length;
 
   // P4: Plugin loader pattern — packages with 5+ dynamic_require + dynamic_import combined
@@ -1098,12 +1114,18 @@ function applyFPReductions(threats, reachableFiles, packageName, packageDeps, re
     // Reachability: findings in files not reachable from entry points → LOW
     // Exception: .d.ts files are never require()'d by JS but are executed by ts-node/tsx/bun.
     // Executable code in .d.ts is always malicious — exempt from unreachable downgrade.
+    // Exception 2 (Mini Shai-Hulud, 2026-05): if the same file contains at least one
+    // reachability-exempt finding (env_charcode_reconstruction, function_constructor_require,
+    // etc.), all other findings in that file are also exempt. Rationale: the exempt
+    // finding proves the file contains structurally malicious code, so co-occurring
+    // signals (obfuscation, dataflow, credential harvest) are scoring-relevant regardless
+    // of whether the file is reachable via require/import.
     const isDtsFile = t.file && t.file.endsWith('.d.ts');
     if (reachableFiles && reachableFiles.size > 0 && t.file &&
         !REACHABILITY_EXEMPT_TYPES.has(t.type) &&
         !isPackageLevelThreat(t) && !isDtsFile) {
       const normalizedFile = t.file.replace(/\\/g, '/');
-      if (!reachableFiles.has(normalizedFile)) {
+      if (!reachableFiles.has(normalizedFile) && !_filesWithExemptThreats.has(normalizedFile)) {
         t.reductions.push({ rule: 'unreachable', from: t.severity, to: 'LOW' });
         t.severity = 'LOW';
         t.unreachable = true;

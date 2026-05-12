@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mini Shai-Hulud : 206 packages scannés, 113 passés sous le radar, autopsie d'un gap de scoring - MUAD'DIB</title>
+  <meta name="description" content="La campagne Mini Shai-Hulud de TeamPCP a compromis 200+ packages npm dont @tanstack/react-router (12M téléchargements/semaine). MUAD'DIB a détecté les patterns mais le scoring les a écrasés à 2/100. Analyse de la cause racine et des 5 correctifs appliqués.">
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="article">
+  <meta property="og:title" content="Mini Shai-Hulud : 206 packages scannés, 113 passés sous le radar">
+  <meta property="og:description" content="La campagne TeamPCP a compromis 200+ packages npm. MUAD'DIB a détecté les patterns mais le scoring les a écrasés. Autopsie d'un gap de scoring.">
+  <meta property="og:image" content="../img/og-default.png">
+  <meta property="og:site_name" content="MUAD'DIB">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="../img/og-default.png">
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="../vendor/github-dark.min.css">
+  <script src="../vendor/highlight.min.js"></script>
+  <script>hljs.highlightAll();</script>
+</head>
+<body>
+
+<nav>
+  <a href="../" class="site-name">muad-dib</a>
+  <a href="../">accueil</a>
+  <a href="./">blog</a>
+  <a href="https://github.com/DNSZLSK/muad-dib" target="_blank" rel="noopener">github</a>
+  <a href="https://www.npmjs.com/package/muaddib-scanner" target="_blank" rel="noopener">npm</a>
+</nav>
+
+<main>
+  <a href="./" class="back-link">&larr; Blog</a>
+
+  <article>
+    <div class="article-meta">
+      <h1>Mini Shai-Hulud : 206 packages scannés, 113 passés sous le radar, autopsie d'un gap de scoring</h1>
+      <span class="date">2026-05-12</span>
+      <div class="tags">
+        <span class="tag">scoring</span>
+        <span class="tag">supply-chain</span>
+        <span class="tag">npm</span>
+        <span class="tag">retrospective</span>
+        <span class="tag">TeamPCP</span>
+        <span class="tag">shai-hulud</span>
+      </div>
+    </div>
+
+    <div class="article-content">
+
+      <p>11 mai 2026, 19:26 UTC. Socket détecte les premiers packages compromis dans le namespace <code>@tanstack</code>. En 12 heures, la campagne « Mini Shai-Hulud » de TeamPCP touche 200+ artefacts npm et PyPI : TanStack, Mistral AI, UiPath, OpenSearch, Guardrails AI, Squawk, et des dizaines de packages secondaires. <code>@tanstack/react-router</code> a 12 millions de téléchargements hebdomadaires.</p>
+
+      <p>MUAD'DIB a scanné 206 de ces packages entre le 11 et le 12 mai. Résultat : 93 alertés, 113 passés sous le seuil. <code>@tanstack/react-router</code> a scoré <strong>2/100</strong>. Le payload était un fichier de 2.3 MB contenant 78 accès dynamiques à <code>process.env</code>, 30 188 variables <code>_0x</code>, un canal d'exfiltration vers le réseau Session, et une persistance dans <code>.claude/settings.json</code>.</p>
+
+      <p>Les règles se sont déclenchées. Le scoring les a écrasées. Cet article est l'autopsie de ce gap.</p>
+
+
+      <h2>L'attaque</h2>
+
+      <p>L'analyse technique détaillée provient de <a href="https://socket.dev/blog/tanstack-npm-packages-compromised-mini-shai-hulud-supply-chain-attack" target="_blank" rel="noopener">Socket</a>, <a href="https://www.stepsecurity.io/blog/mini-shai-hulud-is-back-a-self-spreading-supply-chain-attack-hits-the-npm-ecosystem" target="_blank" rel="noopener">StepSecurity</a> et <a href="https://snyk.io/fr/blog/tanstack-npm-packages-compromised/" target="_blank" rel="noopener">Snyk</a>. Ce qui suit est un résumé du point de vue détection.</p>
+
+      <p>TeamPCP a exploité une chaîne de trois vulnérabilités dans le workflow GitHub Actions de TanStack :</p>
+
+      <ol>
+        <li><strong>Pwn Request</strong> : un workflow <code>pull_request_target</code> checkout le code du fork attaquant tout en conservant l'accès au cache du repo base</li>
+        <li><strong>Cache poisoning</strong> : le store pnpm est empoisonné via le fork, le workflow légitime de release charge les dépendances corrompues</li>
+        <li><strong>Extraction mémoire</strong> : le payload lit <code>/proc/{pid}/mem</code> du Runner.Worker pour extraire le token OIDC en clair (les secrets GitHub Actions sont masqués dans les logs mais pas chiffrés en RAM)</li>
+      </ol>
+
+      <p>Le token OIDC est échangé contre un droit de publication npm via la fédération trusted-publisher. Les packages publiés portent des attestations <strong>SLSA Build Level 3 valides</strong>. C'est le premier cas documenté de packages malveillants avec provenance Sigstore authentique.</p>
+
+      <h3>Le payload : router_init.js</h3>
+
+      <p>Un fichier unique de 2.3 MB, une seule ligne, trois couches d'obfuscation imbriquées :</p>
+
+      <table>
+        <thead><tr><th>Couche</th><th>Technique</th><th>Objectif</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td>String-array rotation (obfuscator.io)</td><td>Variables <code>_0x253b</code>, 30 188 identifiants hex</td></tr>
+          <tr><td>2</td><td><code>beautify()</code>, PBKDF2 cipher</td><td>148 noms d'env vars chiffrés, invisibles à grep</td></tr>
+          <tr><td>3</td><td>AES-256-GCM + <code>Bun.gunzipSync</code></td><td>Payload secondaire décompressé au runtime Bun</td></tr>
+        </tbody>
+      </table>
+
+      <p>Capacités du payload :</p>
+      <ul>
+        <li><strong>Credential sweep</strong> : GitHub Actions (OIDC token, secrets via API), AWS (IMDSv2, Secrets Manager, SSM), Vault (svc.cluster.local:8200), Kubernetes (serviceaccount token)</li>
+        <li><strong>Exfiltration</strong> : réseau Session P2P (<code>filev2.getsession.org</code>) avec protobuf signalservice embarqué. Trafic indiscernable d'une app de messagerie chiffrée au niveau réseau. Second canal : dead-drop GitHub GraphQL, commits signés <code>claude@users.noreply.github.com</code></li>
+        <li><strong>Persistance</strong> : écriture dans <code>.claude/settings.json</code> (hooks Claude Code) et <code>.vscode/tasks.json</code> (auto-run VS Code). Survit à <code>npm uninstall</code> et aux reboots</li>
+        <li><strong>Worm npm</strong> : acquisition OIDC → publication automatique sous l'identité du mainteneur compromis, avec attestations Sigstore valides</li>
+        <li><strong>Dead man's switch</strong> : le token npm porte le message <code>IfYouRevokeThisTokenItWillWipeTheComputerOfTheOwner</code>. Un service <code>systemd</code>/<code>launchctl</code> (<code>com.user.gh-token-monitor</code>) surveille le token et déclenche une destruction du home directory si révoqué</li>
+      </ul>
+
+      <p>Le choix de <strong>Bun comme runtime</strong> est tactique : il bypass les hooks <code>--require</code> utilisés par les outils de monitoring Node.js (dd-trace, opentelemetry, newrelic). Et le <code>&& exit 1</code> sur le script <code>prepare</code> fait « échouer » l'optional dependency proprement, sans log suspect, pendant que le child process détaché continue en background.</p>
+
+
+      <h2>Ce que MUAD'DIB a détecté</h2>
+
+      <p>Sur le tarball réel de <code>@tanstack/react-router@1.169.8</code>, 17 règles se sont déclenchées :</p>
+
+      <table>
+        <thead><tr><th>Règle</th><th>Type</th><th>Sévérité originale</th><th>Sévérité finale</th><th>Raison du downgrade</th></tr></thead>
+        <tbody>
+          <tr><td>MUADDIB-AST-018</td><td>env_charcode_reconstruction (x78)</td><td>HIGH</td><td>LOW</td><td>unreachable</td></tr>
+          <tr><td>MUADDIB-AST-002</td><td>env_access (x78 dynamic)</td><td>MEDIUM</td><td>LOW</td><td>unreachable</td></tr>
+          <tr><td>MUADDIB-AST-002</td><td>env_access (ACTIONS_ID_TOKEN_REQUEST_TOKEN)</td><td>HIGH</td><td>LOW</td><td>unreachable + count > 4</td></tr>
+          <tr><td>MUADDIB-AST-002</td><td>env_access (AWS_SECRET_ACCESS_KEY)</td><td>HIGH</td><td>LOW</td><td>unreachable + count > 4</td></tr>
+          <tr><td>MUADDIB-AST-002</td><td>env_access (VAULT_TOKEN, VAULT_AUTH_TOKEN)</td><td>HIGH</td><td>LOW</td><td>unreachable + count > 4</td></tr>
+          <tr><td>MUADDIB-AST-041</td><td>credential_regex_harvest</td><td>HIGH</td><td>LOW</td><td>unreachable</td></tr>
+          <tr><td>MUADDIB-OBF-001</td><td>obfuscation_detected (score 80)</td><td>LOW</td><td>LOW</td><td>isLargeJs (> 100KB)</td></tr>
+          <tr><td>MUADDIB-FLOW-001</td><td>suspicious_dataflow (creds → fetch x9)</td><td>CRITICAL</td><td>LOW</td><td>unreachable</td></tr>
+          <tr><td>MUADDIB-ENTROPY-003</td><td>js_obfuscation_pattern (30 188 _0x vars)</td><td>HIGH</td><td>LOW</td><td>unreachable + count > 1</td></tr>
+          <tr><td>MUADDIB-ENTROPY-001</td><td>high_entropy_string (x3)</td><td>MEDIUM</td><td>LOW</td><td>unreachable</td></tr>
+        </tbody>
+      </table>
+
+      <p><strong>Score final : 2/100.</strong> Seuil d'alerte pour un package établi : 35. Pas d'alerte envoyée.</p>
+
+
+      <h2>Trois causes racines</h2>
+
+      <p>Le score de 2 n'est pas un bug unique. C'est la composition de trois mécanismes de FP reduction qui fonctionnent correctement sur les packages bénins mais que l'attaquant exploite, consciemment ou non.</p>
+
+      <h3>1. Reachability : le fichier injecté est invisible au module-graph</h3>
+
+      <p><code>router_init.js</code> n'est importé par aucun fichier du package. Le module-graph le marque <em>unreachable</em>. Toutes les détections non exemptées passent à LOW (scoring.js:1106). C'est le mécanisme qui a le plus d'impact : il transforme 2 CRITICAL + 6 HIGH en 17 LOW.</p>
+
+      <p>Le fichier s'exécute en réalité via <code>optionalDependencies</code> → <code>github:tanstack/router#79ac49ee</code> → <code>prepare: "bun run tanstack_runner.js"</code>. C'est un vecteur d'exécution que le module-graph ne trace pas : la dépendance git exécute un hook lifecycle dans un sous-package, pas un <code>require()</code> depuis le code principal.</p>
+
+      <h3>2. isLargeJs : un fichier de 2.3 MB est forcément un bundle</h3>
+
+      <p>L'obfuscation scanner (obfuscation.js:69) traite tout fichier <code>.js</code> > 100 KB comme du « bundled output » et émet les findings à LOW :</p>
+
+      <pre><code class="language-javascript">// P6: Any JS file > 100KB is overwhelmingly bundled output
+const isLargeJs = basename.endsWith('.js') && content.length > 100 * 1024;
+const isPackageOutput = isMinified || isBundled || isInDistOrBuild || isLargeJs;</code></pre>
+
+      <p>L'hypothèse est statistiquement correcte :99%+ des fichiers JS > 100 KB sont du webpack, rollup ou esbuild. Mais un payload javascript-obfuscator de 2.3 MB n'est pas un bundle, et le scanner ne fait pas la différence.</p>
+
+      <h3>3. MT-1 : pas de lifecycle = pas de score > 35</h3>
+
+      <p>Le plafond MT-1 (scoring.js:1401) limite le score à 35 pour les packages sans lifecycle script. <code>@tanstack/react-router</code> n'a ni <code>preinstall</code>, ni <code>install</code>, ni <code>postinstall</code>. L'exécution passe par l'<code>optionalDependencies</code> git, pas par un script du package principal.</p>
+
+      <p>Le bypass MT-1 vérifie la présence de <code>HIGH_CONFIDENCE_MALICE_TYPES</code>. <code>env_charcode_reconstruction</code> n'y était pas.</p>
+
+
+      <h2>Cinq correctifs</h2>
+
+      <table>
+        <thead><tr><th>Fichier</th><th>Changement</th><th>Impact</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>scoring.js</td>
+            <td><code>env_charcode_reconstruction</code> ajouté à <code>REACHABILITY_EXEMPT_TYPES</code></td>
+            <td>fromCharCode + process.env[computed] est structurellement unique au malware. Le finding reste HIGH même sur un fichier unreachable.</td>
+          </tr>
+          <tr>
+            <td>scoring.js</td>
+            <td>Les findings co-localisés avec un type exempt sont eux aussi exemptés du downgrade reachability</td>
+            <td>Si un fichier contient <code>env_charcode_reconstruction</code> (preuve de malice), les <code>obfuscation_detected</code> CRITICAL et <code>suspicious_dataflow</code> CRITICAL du même fichier ne sont plus écrasés.</td>
+          </tr>
+          <tr>
+            <td>classify.js</td>
+            <td><code>env_charcode_reconstruction</code> ajouté à <code>HIGH_CONFIDENCE_MALICE_TYPES</code></td>
+            <td>Bypass du plafond MT-1 (35). Le score n'est plus artificiellement cappé pour les packages sans lifecycle direct.</td>
+          </tr>
+          <tr>
+            <td>obfuscation.js</td>
+            <td><code>isLargeJs</code> vérifie l'absence de markers <code>_0x</code> dans les premiers 8 KB</td>
+            <td>webpack/rollup/esbuild ne produisent jamais de variables <code>_0x</code>. Un fichier > 100 KB avec des <code>_0x</code> est du javascript-obfuscator, pas du bundle output.</td>
+          </tr>
+          <tr>
+            <td>package.js</td>
+            <td>PKG-014 étendu pour matcher <code>github:</code>, <code>gitlab:</code>, <code>bitbucket:</code></td>
+            <td>La regex <code>/^git[+:]/</code> ne matchait pas <code>github:tanstack/router#commit</code>. Le format shorthand exécute des hooks <code>prepare</code> à l'installation.</td>
+          </tr>
+          <tr>
+            <td>bundle-detect.js</td>
+            <td><code>detached_credential_exfil</code>, <code>ai_config_injection</code>, <code>ide_task_persistence</code> ajoutés à <code>VETO_TYPES</code></td>
+            <td>Ces patterns ne sont jamais produits par un bundler. Un fichier <code>dist/</code> qui spawn un detached process + lit des credentials + écrit dans <code>.claude/</code> n'est pas du code bundlé.</td>
+          </tr>
+        </tbody>
+      </table>
+
+
+      <h2>Résultat : avant / après</h2>
+
+      <p>Scan de <code>@tanstack/react-router@1.169.8</code> (tarball réel de la campagne) :</p>
+
+      <table>
+        <thead><tr><th></th><th>Avant</th><th>Après</th></tr></thead>
+        <tbody>
+          <tr><td>Score</td><td>2/100 LOW</td><td><strong>100/100 CRITICAL</strong></td></tr>
+          <tr><td>Findings CRITICAL</td><td>0</td><td>2 (obfuscation_detected, suspicious_dataflow)</td></tr>
+          <tr><td>Findings HIGH</td><td>0</td><td>8 (env_charcode, env_access x5, credential_regex, js_obf, git_dep_rce)</td></tr>
+          <tr><td>Alerte envoyée</td><td>Non</td><td>Oui</td></tr>
+          <tr><td>Tests passants</td><td>878</td><td>878 (0 régression)</td></tr>
+        </tbody>
+      </table>
+
+      <p>Échantillon de 18 packages re-scannés sur les tarballs archivés (tous les namespaces de la campagne : @tanstack, @mistralai, @squawk, @beproduct, @draftlab, @supersurkhet, @tolka, @ml-toolkit-ts, git-git-git, nextmove-mcp, cmux-agent-mcp, safe-action, dirigible-ai) :</p>
+
+      <table>
+        <thead><tr><th>Package</th><th>Score avant</th><th>Score après</th></tr></thead>
+        <tbody>
+          <tr><td>@tanstack/react-router@1.169.8</td><td>2</td><td>100</td></tr>
+          <tr><td>@tanstack/react-start@1.167.71</td><td>2</td><td>100</td></tr>
+          <tr><td>@tanstack/solid-router@1.169.8</td><td>2</td><td>100</td></tr>
+          <tr><td>@tanstack/history@1.161.12</td><td>2</td><td>100</td></tr>
+          <tr><td>@mistralai/mistralai-azure@1.7.3</td><td>17</td><td>100</td></tr>
+          <tr><td>@squawk/mcp@0.9.2</td><td>23</td><td>100</td></tr>
+          <tr><td>git-git-git@1.0.8</td><td>9</td><td>100</td></tr>
+          <tr><td>nextmove-mcp@0.1.3</td><td>23</td><td>100</td></tr>
+          <tr><td>safe-action@0.8.4</td><td>15</td><td>100</td></tr>
+          <tr><td>@dirigible-ai/sdk@0.6.3</td><td>17</td><td>100</td></tr>
+          <tr><td>@beproduct/nestjs-auth@0.1.19</td><td>25</td><td>100</td></tr>
+          <tr><td>@draftlab/auth@0.24.2</td><td>17</td><td>100</td></tr>
+        </tbody>
+      </table>
+
+      <p>Re-scan complet des 206 tarballs archivés :</p>
+
+      <table>
+        <thead><tr><th></th><th>Avant</th><th>Après</th></tr></thead>
+        <tbody>
+          <tr><td>Score == 100</td><td>0</td><td><strong>165 (80%)</strong></td></tr>
+          <tr><td>Score &ge; 35</td><td>0</td><td>168 (81%)</td></tr>
+          <tr><td>Score &ge; 20</td><td>93 (45%)</td><td>170 (82%)</td></tr>
+          <tr><td>Score &lt; 20</td><td>113 (55%)</td><td>36 (18%)</td></tr>
+        </tbody>
+      </table>
+
+      <p>Les 36 restants sous le seuil sont des packages adjacents dans l'archive qui n'ont pas été compromis : 14 <code>@tanstack/preact-*</code> sans payload (versions légitimes publiées pendant la même fenêtre), des <code>@uipath/packager-*</code> dont les tarballs n'ont pas le <code>router_init.js</code>, et quelques <code>mobx-tanstack-query-api</code> qui sont des packages tiers non ciblés par TeamPCP.</p>
+
+
+      <h2>Ce que MUAD'DIB ne détecte toujours pas</h2>
+
+      <ul>
+        <li><strong>PyPI (mises à jour de packages existants)</strong> : le monitor PyPI consomme le flux RSS <code>pypi.org/rss/packages.xml</code>, qui ne liste que les <em>nouveaux</em> packages, pas les nouvelles versions de packages existants. <code>mistralai@2.4.6</code> et <code>guardrails-ai@0.10.1</code> sont des mises à jour de packages établis. Ils ne sont jamais apparus dans le feed, jamais téléchargés, jamais scannés. Le feed PyPI a bien tourné pendant la fenêtre de compromission (18 détections PyPI entre le 11 et le 12 mai), mais il ne capte structurellement pas ce type de publication.</li>
+        <li><strong>IMDS</strong> :l'adresse <code>169.254.169.254</code> (AWS metadata) n'a pas de règle dédiée. Le dataflow la capture indirectement s'il co-existe avec un env_access, mais l'IP elle-même n'est pas flaggée.</li>
+        <li><strong>Session P2P</strong> :<code>filev2.getsession.org</code> n'est pas dans les IOC strings. Le trafic vers ce domaine est indiscernable de l'usage légitime de l'app Session au niveau réseau.</li>
+        <li><strong>Provenance Sigstore</strong> :MUAD'DIB ne vérifie pas les attestations SLSA. Même si elle l'avait fait, les attestations étaient techniquement valides. SLSA prouve que le workflow a signé le package, pas que le code est sûr.</li>
+        <li><strong>Le dead man's switch</strong> :le service systemd/launchctl de destruction conditionnelle (<code>com.user.gh-token-monitor</code>) n'a pas de détection dédiée.</li>
+      </ul>
+
+
+      <h2>IOC</h2>
+
+      <h3>Fichiers</h3>
+      <pre><code class="language-text"># router_init.js (payload principal)
+SHA256  ab4fcadaec49c03278063dd269ea5eef82d24f2124a8e15d7b90f2fa8601266c
+SHA1    12ed9a3c1f73617aefdb740480695c04405d7b4b
+
+# tanstack_runner.js (variante 2, propagation worm)
+SHA256  2ec78d556d696e208927cc503d48e4b5eb56b31abc2870c2ed2e98d6be27fc96
+SHA1    e7d582b98ca80690883175470e96f703ef6dc497
+
+# Commit malveillant dans TanStack/router
+79ac49eedf774dd4b0cfa308722bc463cfe5885c</code></pre>
+
+      <h3>Réseau</h3>
+      <pre><code class="language-text">filev2.getsession[.]org      # exfiltration Session P2P
+api.masscan[.]cloud           # C2 direct (StepSecurity)
+git-tanstack[.]com            # domaine C2 pour payload Python guardrails-ai</code></pre>
+
+      <h3>Persistance</h3>
+      <pre><code class="language-text">.claude/router_runtime.js
+.claude/settings.json          # hooks Claude Code
+.claude/setup.mjs
+.vscode/setup.mjs
+.vscode/tasks.json             # auto-run VS Code
+com.user.gh-token-monitor      # service systemd/launchctl dead man's switch</code></pre>
+
+      <h3>Identités</h3>
+      <pre><code class="language-text">voicproducoes                  # compte GitHub attaquant
+claude@users.noreply.github.com  # auteur spoofé des commits dead-drop</code></pre>
+
+
+      <h2>Sources</h2>
+
+      <ul>
+        <li>Socket Research Team :<a href="https://socket.dev/blog/tanstack-npm-packages-compromised-mini-shai-hulud-supply-chain-attack" target="_blank" rel="noopener">TanStack npm Packages Compromised in Ongoing Mini Shai-Hulud Supply-Chain Attack</a> (2026-05-11)</li>
+        <li>Ashish Kurmi / StepSecurity :<a href="https://www.stepsecurity.io/blog/mini-shai-hulud-is-back-a-self-spreading-supply-chain-attack-hits-the-npm-ecosystem" target="_blank" rel="noopener">Mini Shai-Hulud Is Back: A Self-Spreading Supply Chain Attack Hits the npm Ecosystem</a> (2026-05-11)</li>
+        <li>Stephen Thoemmes / Snyk :<a href="https://snyk.io/fr/blog/tanstack-npm-packages-compromised/" target="_blank" rel="noopener">TanStack npm Packages Compromised Inside The Mini Shai Hulud Supply Chain Attack</a> (2026-05-11)</li>
+      </ul>
+
+
+      <h2>Leçon</h2>
+
+      <p>Les règles de détection ont fonctionné. Le scoring les a écrasées. C'est un pattern récurrent en sécurité : l'ingénierie de fiabilité (réduction des faux positifs) et l'ingénierie de détection (couverture des vrais positifs) se battent pour les mêmes leviers. Chaque threshold conçu pour supprimer les bundles bénins est un threshold qu'un attaquant peut exploiter.</p>
+
+      <p>TeamPCP ne contourne pas les détections. Ils contournent le scoring. Leur payload de 2.3 MB exploite l'hypothèse « gros fichier = bundle inoffensif ». Leur absence de lifecycle script exploite le plafond MT-1. Leur fichier injecté exploite le downgrade reachability. Trois assumptions raisonnables individuellement, catastrophiques en combinaison.</p>
+
+      <p>La leçon pour MUAD'DIB : les signaux structurellement uniques au malware :<code>env_charcode_reconstruction</code>, <code>function_constructor_require</code>, <code>detached_credential_exfil</code>, ne doivent jamais être atténués par des heuristiques statistiques. Si un fichier reconstruit des noms de variables d'environnement via <code>String.fromCharCode</code>, aucune quantité de FP reduction ne change ce que ça signifie.</p>
+
+      <p>La leçon plus large : les attestations SLSA, les badges provenance, les Sigstore transparency logs :tout ce qui prouve <em>qui a signé</em>, ne prouve pas <em>quoi a été signé</em>. Un pipeline compromis produit des attestations parfaitement valides pour du code parfaitement malveillant. La supply chain n'est pas sécurisée par la provenance. Elle est sécurisée par l'analyse du contenu.</p>
+
+    </div>
+  </article>
+</main>
+
+<footer>
+  MUAD'DIB / DNSZLSK / <a href="https://github.com/DNSZLSK/muad-dib" target="_blank" rel="noopener">source</a>
+</footer>
+</body>
+</html>

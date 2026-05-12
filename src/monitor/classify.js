@@ -66,7 +66,12 @@ const HIGH_CONFIDENCE_MALICE_TYPES = new Set([
   'self_destruct_eval',                    // dynamic exec + unlink __filename (csec anti-forensics)
   // v2.10.94: MT-1 ceiling bypass for ltidi and csec under-threshold cases
   'external_tarball_dep',                  // dep URL = tarball on third-party host (ltidi chain)
-  'function_runtime_args'                  // new Function('require','__dirname','__filename',...) pattern (csec)
+  'function_runtime_args',                 // new Function('require','__dirname','__filename',...) pattern (csec)
+  // Mini Shai-Hulud campaign (2026-05): env var names reconstructed via
+  // String.fromCharCode() to evade static analysis. Structurally unique to malware —
+  // no legitimate code reconstructs env var names from character codes. Bypasses MT-1
+  // cap since the attack uses optionalDependencies + prepare hook (no direct lifecycle).
+  'env_charcode_reconstruction'            // fromCharCode + process.env[computed] (TeamPCP credential stealer)
 ]);
 
 // Lifecycle compound types that indicate real malicious intent beyond a simple postinstall
