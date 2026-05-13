@@ -212,3 +212,34 @@ strings:
     severity: CRITICAL
     source: "data/security-review-2026-05-04-10.md"
     description: "Paste-as-payload host used by the chai-* / poxios-chain staged loader campaign to deliver runtime RCE bodies"
+
+  # ── Shai-Hulud Open Source (TeamPCP, mai 2026) ──
+  # Source: github.com/g00dfe11ow/Shai-Hulud-Open-Source (published 2026-05-12)
+  # Full toolkit open-sourced: credential stealer, RSA+AES encrypted exfil,
+  # systemd/launchd persistence, GitHub repo exfil, npm OIDC publish forgery,
+  # IDE infection (.claude/settings.json, .vscode/tasks.json).
+  - string: "git-tanstack.com"
+    campaign: "shai-hulud-2026-05"
+    severity: CRITICAL
+    source: "https://github.com/g00dfe11ow/Shai-Hulud-Open-Source"
+    description: "Primary C2 domain for Shai-Hulud (typosquat of tanstack.com)"
+  - string: "IfYouRevokeThisTokenItWillWipeTheComputerOfTheOwner"
+    campaign: "shai-hulud-2026-05"
+    severity: CRITICAL
+    source: "https://github.com/g00dfe11ow/Shai-Hulud-Open-Source"
+    description: "GitHub commit search string used by Shai-Hulud to locate exfil repos + deadman switch threat"
+  - string: "Shai-Hulud: Here We Go Again"
+    campaign: "shai-hulud-2026-05"
+    severity: CRITICAL
+    source: "https://github.com/g00dfe11ow/Shai-Hulud-Open-Source"
+    description: "Repository description string used by Shai-Hulud exfil repos"
+  - string: "opensearch_init.js"
+    campaign: "shai-hulud-2026-05"
+    severity: CRITICAL
+    source: "https://github.com/g00dfe11ow/Shai-Hulud-Open-Source"
+    description: "Payload entry point filename used by Shai-Hulud dropper"
+  - string: "router_runtime.js"
+    campaign: "shai-hulud-2026-05"
+    severity: HIGH
+    source: "https://github.com/g00dfe11ow/Shai-Hulud-Open-Source"
+    description: "Alternative payload entry point filename used by Shai-Hulud Python dropper"

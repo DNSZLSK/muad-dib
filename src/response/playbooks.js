@@ -224,6 +224,11 @@ const PLAYBOOKS = {
   workflow_pwn_request:
     'CRITIQUE: Pwn request detecte — pull_request_target avec checkout du head de la PR permet l\'execution de code arbitraire. Remplacer par pull_request ou utiliser une strategie de checkout securisee (base ref uniquement).',
 
+  workflow_secrets_dump:
+    'CRITIQUE: Workflow GitHub Actions utilise toJSON(secrets) pour dumper tous les secrets du repository. ' +
+    'Technique Shai-Hulud (TeamPCP). Supprimer le workflow immediatement. ' +
+    'Si le workflow a ete execute, considerer tous les secrets du repository compromis et les regenerer.',
+
   sandbox_sensitive_file_read:
     'CRITIQUE: Package lit des fichiers sensibles (credentials) lors de l\'installation. Ne pas installer. Supprimer immediatement.',
   sandbox_sensitive_file_write:
@@ -373,6 +378,13 @@ const PLAYBOOKS = {
     'CRITIQUE: Fichier de config d\'agent IA contient des commandes d\'exfiltration ou un combo shell + credential access. ' +
     'NE PAS ouvrir ce projet avec un agent IA. Supprimer les fichiers de config compromis. ' +
     'Si deja ouvert avec un agent IA, considerer la machine compromise. Regenerer tous les secrets.',
+
+  ide_hook_autoexec:
+    'CRITIQUE: Fichier de configuration IDE avec hooks d\'auto-execution detecte. ' +
+    'NE PAS ouvrir ce projet dans un IDE ou agent IA. Le fichier execute du code ' +
+    'automatiquement a l\'ouverture du projet (SessionStart, folderOpen). ' +
+    'Technique Shai-Hulud (TeamPCP). Supprimer les fichiers .claude/settings.json ' +
+    'et .vscode/tasks.json avant ouverture.',
 
   ai_agent_abuse:
     'CRITIQUE: Un agent IA (Claude, Gemini, Q) est invoque avec des flags de bypass de securite ' +
@@ -727,6 +739,11 @@ const PLAYBOOKS = {
     'CRITIQUE: rm -rf / detecte — suppression totale du systeme de fichiers. ' +
     'Pattern kamikaze.sh du wiper CanisterWorm ciblant les systemes Iran (Asia/Tehran). ' +
     'NE PAS executer. Isoler immediatement. Signaler comme destructware.',
+
+  geo_evasion_killswitch:
+    'Code verifie la locale systeme pour "ru" et fait process.exit — technique CIS kill switch ' +
+    'classique de malware (TeamPCP, Lazarus) pour eviter de cibler les systemes russophones. ' +
+    'Signal fort en combinaison avec d\'autres indicateurs. Analyser le code complet du package.',
 
   proc_mem_scan:
     'CRITIQUE: Acces a /proc/*/mem — extraction de secrets depuis la memoire des processus. ' +

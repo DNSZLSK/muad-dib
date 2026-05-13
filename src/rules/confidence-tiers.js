@@ -100,7 +100,9 @@ const HIGH_TIER_EXTRA = new Set([
   'anti_forensic_xor_autodelete',
   'detached_credential_exfil',
   // Workflow injection
-  'workflow_write'
+  'workflow_write',
+  // Geo-evasion (locale check + country code + exit = compound evidence)
+  'geo_evasion_killswitch'
 ]);
 
 // Heuristic / count-based / weak-signal types. Always low tier regardless

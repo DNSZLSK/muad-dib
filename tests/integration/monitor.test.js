@@ -6495,9 +6495,9 @@ async function runMonitorTests() {
 
   // ===== v2.7.6 C1: High-confidence malice bypass =====
 
-  test('MONITOR: HIGH_CONFIDENCE_MALICE_TYPES contains 26 threat types', () => {
-    assert(HIGH_CONFIDENCE_MALICE_TYPES.size === 26,
-      `Should have 26 types, got ${HIGH_CONFIDENCE_MALICE_TYPES.size}`);
+  test('MONITOR: HIGH_CONFIDENCE_MALICE_TYPES contains 28 threat types', () => {
+    assert(HIGH_CONFIDENCE_MALICE_TYPES.size === 28,
+      `Should have 28 types, got ${HIGH_CONFIDENCE_MALICE_TYPES.size}`);
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('lifecycle_shell_pipe'), 'Missing lifecycle_shell_pipe');
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('fetch_decrypt_exec'), 'Missing fetch_decrypt_exec');
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('download_exec_binary'), 'Missing download_exec_binary');
@@ -6524,6 +6524,9 @@ async function runMonitorTests() {
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('function_runtime_args'), 'Missing function_runtime_args');
     // Mini Shai-Hulud (2026-05): fromCharCode env reconstruction
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('env_charcode_reconstruction'), 'Missing env_charcode_reconstruction');
+    // Shai-Hulud Open Source (2026-05): IDE hooks + workflow secrets dump
+    assert(HIGH_CONFIDENCE_MALICE_TYPES.has('ide_hook_autoexec'), 'Missing ide_hook_autoexec');
+    assert(HIGH_CONFIDENCE_MALICE_TYPES.has('workflow_secrets_dump'), 'Missing workflow_secrets_dump');
   });
 
   test('MONITOR: HIGH_CONFIDENCE_MALICE_TYPES does NOT contain FP-prone types', () => {

@@ -102,6 +102,18 @@ function scanDirRecursive(dirPath, targetPath, threats, depth = 0) {
           file: relFile
         });
       }
+
+      // GHA-004: Secrets dump via toJSON(secrets) — exfiltrates ALL repository secrets
+      // Technique: Shai-Hulud (TeamPCP, May 2026) — workflow dumps toJSON(secrets) to a
+      // file and uploads it as an artifact. No legitimate workflow uses toJSON(secrets).
+      if (/toJSON\s*\(\s*secrets\s*\)/.test(activeContent)) {
+        threats.push({
+          type: 'workflow_secrets_dump',
+          severity: 'CRITICAL',
+          message: 'GitHub Actions secrets dump: toJSON(secrets) exfiltrates all repository secrets',
+          file: relFile
+        });
+      }
     }
 }
 

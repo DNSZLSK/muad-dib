@@ -71,7 +71,9 @@ const HIGH_CONFIDENCE_MALICE_TYPES = new Set([
   // String.fromCharCode() to evade static analysis. Structurally unique to malware —
   // no legitimate code reconstructs env var names from character codes. Bypasses MT-1
   // cap since the attack uses optionalDependencies + prepare hook (no direct lifecycle).
-  'env_charcode_reconstruction'            // fromCharCode + process.env[computed] (TeamPCP credential stealer)
+  'env_charcode_reconstruction',           // fromCharCode + process.env[computed] (TeamPCP credential stealer)
+  'ide_hook_autoexec',                     // .claude/settings.json SessionStart hook, .vscode/tasks.json folderOpen (Shai-Hulud)
+  'workflow_secrets_dump'                  // toJSON(secrets) in GitHub Actions workflow (Shai-Hulud)
 ]);
 
 // Lifecycle compound types that indicate real malicious intent beyond a simple postinstall

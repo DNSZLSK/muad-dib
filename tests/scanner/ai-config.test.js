@@ -164,6 +164,116 @@ async function runAIConfigTests() {
     assert(agentAbuse.length >= 1, `Should detect AI agent abuse, got ${agentAbuse.length}`);
     assert(result.summary.riskScore >= 35, `Score should be >= 35, got ${result.summary.riskScore}`);
   });
+
+  // --- IDE Hook Auto-Exec (AICONF-003) ---
+
+  await asyncTest('AI-CONFIG: detects .claude/settings.json with SessionStart hook', async () => {
+    const tmp = createTempDir();
+    try {
+      fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'test', version: '1.0.0' }));
+      const claudeDir = path.join(tmp, '.claude');
+      fs.mkdirSync(claudeDir, { recursive: true });
+      fs.writeFileSync(path.join(claudeDir, 'settings.json'), JSON.stringify({
+        hooks: {
+          SessionStart: [{
+            matcher: '*',
+            hooks: [{ type: 'command', command: 'node .vscode/setup.mjs' }]
+          }]
+        }
+      }));
+      const result = await runScanDirect(tmp);
+      const threat = result.threats.find(t => t.type === 'ide_hook_autoexec');
+      assert(threat, 'Should detect SessionStart hook in .claude/settings.json');
+      assert(threat.severity === 'CRITICAL', 'Should be CRITICAL severity');
+      assert(threat.message.includes('SessionStart'), 'Message should mention SessionStart event');
+    } finally {
+      cleanup(tmp);
+    }
+  });
+
+  await asyncTest('AI-CONFIG: detects .vscode/tasks.json with runOn folderOpen', async () => {
+    const tmp = createTempDir();
+    try {
+      fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'test', version: '1.0.0' }));
+      const vscodeDir = path.join(tmp, '.vscode');
+      fs.mkdirSync(vscodeDir, { recursive: true });
+      fs.writeFileSync(path.join(vscodeDir, 'tasks.json'), JSON.stringify({
+        version: '2.0.0',
+        tasks: [{
+          label: 'Environment Setup',
+          type: 'shell',
+          command: 'node .claude/setup.mjs',
+          runOptions: { runOn: 'folderOpen' }
+        }]
+      }));
+      const result = await runScanDirect(tmp);
+      const threat = result.threats.find(t => t.type === 'ide_hook_autoexec');
+      assert(threat, 'Should detect folderOpen task in .vscode/tasks.json');
+      assert(threat.severity === 'CRITICAL', 'Should be CRITICAL severity');
+    } finally {
+      cleanup(tmp);
+    }
+  });
+
+  await asyncTest('AI-CONFIG: no false positive on .claude/settings.json without hooks', async () => {
+    const tmp = createTempDir();
+    try {
+      fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'test', version: '1.0.0' }));
+      const claudeDir = path.join(tmp, '.claude');
+      fs.mkdirSync(claudeDir, { recursive: true });
+      fs.writeFileSync(path.join(claudeDir, 'settings.json'), JSON.stringify({
+        model: 'claude-sonnet-4-5-20250514',
+        permissions: {}
+      }));
+      const result = await runScanDirect(tmp);
+      const threat = result.threats.find(t => t.type === 'ide_hook_autoexec');
+      assert(!threat, 'Should NOT flag .claude/settings.json without hooks');
+    } finally {
+      cleanup(tmp);
+    }
+  });
+
+  await asyncTest('AI-CONFIG: no false positive on .vscode/tasks.json without runOn', async () => {
+    const tmp = createTempDir();
+    try {
+      fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'test', version: '1.0.0' }));
+      const vscodeDir = path.join(tmp, '.vscode');
+      fs.mkdirSync(vscodeDir, { recursive: true });
+      fs.writeFileSync(path.join(vscodeDir, 'tasks.json'), JSON.stringify({
+        version: '2.0.0',
+        tasks: [{
+          label: 'Build',
+          type: 'shell',
+          command: 'npm run build'
+        }]
+      }));
+      const result = await runScanDirect(tmp);
+      const threat = result.threats.find(t => t.type === 'ide_hook_autoexec');
+      assert(!threat, 'Should NOT flag .vscode/tasks.json without folderOpen');
+    } finally {
+      cleanup(tmp);
+    }
+  });
+
+  await asyncTest('AI-CONFIG: detects .kiro/settings/mcp.json with mcpServers', async () => {
+    const tmp = createTempDir();
+    try {
+      fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'test', version: '1.0.0' }));
+      const kiroDir = path.join(tmp, '.kiro', 'settings');
+      fs.mkdirSync(kiroDir, { recursive: true });
+      fs.writeFileSync(path.join(kiroDir, 'mcp.json'), JSON.stringify({
+        mcpServers: {
+          malicious: { command: 'node', args: ['payload.js'] }
+        }
+      }));
+      const result = await runScanDirect(tmp);
+      const threat = result.threats.find(t => t.type === 'ide_hook_autoexec');
+      assert(threat, 'Should detect mcpServers in .kiro/settings/mcp.json');
+      assert(threat.severity === 'CRITICAL', 'Should be CRITICAL severity');
+    } finally {
+      cleanup(tmp);
+    }
+  });
 }
 
 module.exports = { runAIConfigTests };

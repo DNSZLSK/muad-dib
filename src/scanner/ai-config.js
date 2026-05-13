@@ -19,7 +19,7 @@
 const fs = require('fs');
 const path = require('path');
 
-// AI agent config files to scan (relative to project root)
+// AI agent config files to scan for prompt injection (relative to project root)
 const AI_CONFIG_FILES = [
   '.cursorrules',
   '.cursorignore',
@@ -29,6 +29,17 @@ const AI_CONFIG_FILES = [
   '.github/copilot-instructions.md',
   'copilot-setup-steps.yml',
   '.github/copilot-setup-steps.yml'
+];
+
+// IDE/agent config files to scan for auto-exec hooks (JSON, relative to project root)
+// These are distinct from AI_CONFIG_FILES: they contain machine-readable hooks
+// that execute code on project open, not human-readable prompt injection.
+// Technique: Shai-Hulud (TeamPCP, May 2026) — .claude/settings.json SessionStart hook.
+const IDE_HOOK_FILES = [
+  '.claude/settings.json',
+  '.claude/settings.local.json',
+  '.vscode/tasks.json',
+  '.kiro/settings/mcp.json'
 ];
 
 // Dangerous shell command patterns in AI config files
@@ -102,6 +113,105 @@ function scanAIConfig(targetPath) {
     const relPath = configFile;
     const fileThreats = analyzeAIConfigFile(content, relPath);
     threats.push(...fileThreats);
+  }
+
+  // Scan IDE hook files for auto-exec patterns (separate from prompt injection)
+  for (const hookFile of IDE_HOOK_FILES) {
+    const filePath = path.join(targetPath, hookFile);
+    if (!fs.existsSync(filePath)) continue;
+
+    let content;
+    try {
+      const stat = fs.statSync(filePath);
+      if (stat.size > 1024 * 1024) continue;
+      content = fs.readFileSync(filePath, 'utf8');
+    } catch {
+      continue;
+    }
+
+    const hookThreats = analyzeIDEHookFile(content, hookFile);
+    threats.push(...hookThreats);
+  }
+
+  return threats;
+}
+
+/**
+ * Analyze an IDE/agent config JSON file for auto-exec hooks.
+ *
+ * Distinct from prompt injection: these files contain machine-readable
+ * hooks that execute arbitrary commands when the project is opened.
+ * No legitimate npm package should ship these files with hooks.
+ */
+function analyzeIDEHookFile(content, relPath) {
+  const threats = [];
+
+  let parsed;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    return threats; // invalid JSON — skip silently
+  }
+
+  if (!parsed || typeof parsed !== 'object') return threats;
+
+  // .claude/settings.json / .claude/settings.local.json
+  // Structure: { hooks: { EventName: [{ matcher, hooks: [{ type, command }] }] } }
+  if (relPath.includes('.claude/') && relPath.endsWith('settings.json')) {
+    const hooks = parsed.hooks;
+    if (hooks && typeof hooks === 'object') {
+      for (const [event, matchers] of Object.entries(hooks)) {
+        if (!Array.isArray(matchers)) continue;
+        for (const matcher of matchers) {
+          if (!matcher || !Array.isArray(matcher.hooks)) continue;
+          for (const hook of matcher.hooks) {
+            if (hook && hook.command) {
+              threats.push({
+                type: 'ide_hook_autoexec',
+                severity: 'CRITICAL',
+                message: `IDE auto-exec hook: .claude/settings.json ${event} event executes "${hook.command}" — Shai-Hulud (TeamPCP) pattern`,
+                file: relPath
+              });
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // .vscode/tasks.json
+  // Structure: { tasks: [{ label, command, runOptions: { runOn: "folderOpen" } }] }
+  if (relPath.includes('.vscode/') && relPath.endsWith('tasks.json')) {
+    const tasks = Array.isArray(parsed.tasks) ? parsed.tasks : [];
+    for (const task of tasks) {
+      if (task && task.runOptions && task.runOptions.runOn === 'folderOpen') {
+        const cmd = task.command || task.label || 'unknown';
+        threats.push({
+          type: 'ide_hook_autoexec',
+          severity: 'CRITICAL',
+          message: `IDE auto-exec hook: .vscode/tasks.json task "${cmd}" runs on folder open — Shai-Hulud (TeamPCP) pattern`,
+          file: relPath
+        });
+      }
+    }
+  }
+
+  // .kiro/settings/mcp.json
+  // Structure: { mcpServers: { name: { command, args } } }
+  if (relPath.includes('.kiro/') && relPath.endsWith('mcp.json')) {
+    const mcpServers = parsed.mcpServers;
+    if (mcpServers && typeof mcpServers === 'object') {
+      for (const [name, config] of Object.entries(mcpServers)) {
+        if (config && typeof config === 'object' && config.command) {
+          threats.push({
+            type: 'ide_hook_autoexec',
+            severity: 'CRITICAL',
+            message: `IDE auto-exec hook: .kiro/settings/mcp.json server "${name}" executes "${config.command}" on project open`,
+            file: relPath
+          });
+        }
+      }
+    }
   }
 
   return threats;
