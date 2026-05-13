@@ -10,7 +10,10 @@
 const https = require('https');
 const { acquireRegistrySlot, releaseRegistrySlot } = require('../shared/http-limiter.js');
 const { loadCachedIOCs } = require('../ioc/updater.js');
-const { loadNpmSeq, saveNpmSeq, CHANGES_STREAM_URL, CHANGES_LIMIT, CHANGES_CATCHUP_MAX } = require('./state.js');
+const {
+  loadNpmSeq, saveNpmSeq, CHANGES_STREAM_URL, CHANGES_LIMIT, CHANGES_CATCHUP_MAX,
+  savePypiSerial, PYPI_XMLRPC_URL, PYPI_CATCHUP_MAX
+} = require('./state.js');
 const { sendIOCPreAlert } = require('./webhook.js');
 const { evaluateCacheTrigger, POPULAR_THRESHOLD, downloadsCache, DOWNLOADS_CACHE_TTL } = require('./classify.js');
 
@@ -21,6 +24,14 @@ const POLL_MAX_BACKOFF = 960_000; // 16 minutes max backoff
 
 // --- Mutable state ---
 let consecutivePollErrors = 0;
+
+// Test seam: code paths that need to be stubbed in tests call these through
+// `_deps` instead of the bare module-local name, so a test can swap
+// `ingestion._deps.httpsPost = fakePost` and have it take effect inside
+// pollPyPIChangelog. Kept tiny on purpose — only network I/O lives here.
+const _deps = {
+  httpsPost: null // populated below once httpsPost is defined
+};
 
 function getConsecutivePollErrors() {
   return consecutivePollErrors;
@@ -63,6 +74,47 @@ function httpsGet(url, timeoutMs = 30_000) {
     });
   });
 }
+
+/**
+ * Minimal HTTPS POST. Used for PyPI XML-RPC; kept inside the ingestion module
+ * (rather than pulled into shared/) because XML-RPC is its only consumer today.
+ */
+function httpsPost(url, body, headers = {}, timeoutMs = 30_000) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const options = {
+      method: 'POST',
+      hostname: u.hostname,
+      port: u.port || 443,
+      path: u.pathname + (u.search || ''),
+      timeout: timeoutMs,
+      headers: {
+        'Content-Type': 'text/xml',
+        'Content-Length': Buffer.byteLength(body),
+        ...headers
+      }
+    };
+    const req = https.request(options, (res) => {
+      if (res.statusCode < 200 || res.statusCode >= 300) {
+        res.resume();
+        return reject(new Error(`HTTP ${res.statusCode} for POST ${url}`));
+      }
+      const chunks = [];
+      res.on('data', (chunk) => chunks.push(chunk));
+      res.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+      res.on('error', reject);
+    });
+    req.on('error', reject);
+    req.on('timeout', () => {
+      req.destroy();
+      reject(new Error(`Timeout for POST ${url}`));
+    });
+    req.write(body);
+    req.end();
+  });
+}
+
+_deps.httpsPost = httpsPost;
 
 async function getWeeklyDownloads(packageName) {
   const cached = downloadsCache.get(packageName);
@@ -186,8 +238,13 @@ function getNpmTarballUrl(pkgData) {
   return (pkgData.dist && pkgData.dist.tarball) || null;
 }
 
-async function getPyPITarballUrl(packageName) {
-  const url = `https://pypi.org/pypi/${encodeURIComponent(packageName)}/json`;
+async function getPyPITarballUrl(packageName, packageVersion = '') {
+  // Per-version endpoint when we know the version (e.g. from the XML-RPC changelog) —
+  // guarantees we scan the artifact that just landed, not whatever became "latest"
+  // between event detection and scan. Falls back to /pypi/<name>/json (latest) otherwise.
+  const url = packageVersion
+    ? `https://pypi.org/pypi/${encodeURIComponent(packageName)}/${encodeURIComponent(packageVersion)}/json`
+    : `https://pypi.org/pypi/${encodeURIComponent(packageName)}/json`;
   const body = await httpsGet(url);
   let data;
   try {
@@ -195,7 +252,7 @@ async function getPyPITarballUrl(packageName) {
   } catch (e) {
     throw new Error(`Invalid JSON from PyPI for ${packageName}: ${e.message}`);
   }
-  const version = (data.info && data.info.version) || '';
+  const version = (data.info && data.info.version) || packageVersion || '';
   const urls = data.urls || [];
   // Prefer sdist (.tar.gz)
   const sdist = urls.find(u => u.packagetype === 'sdist' && u.url);
@@ -386,7 +443,10 @@ async function pollNpmChanges(state, scanQueue, stats) {
       const currentSeq = currentSeqData.update_seq;
       if (typeof currentSeq === 'number' && typeof data.last_seq === 'number' &&
           (currentSeq - data.last_seq) > CHANGES_CATCHUP_MAX) {
-        console.warn(`[MONITOR] Changes stream too far behind (${currentSeq - lastSeq} changes) — skipping to current`);
+        const gap = currentSeq - lastSeq;
+        console.warn(`[MONITOR] Changes stream too far behind (${gap} changes) — skipping to current`);
+        stats.npmCatchupSkips = (stats.npmCatchupSkips || 0) + 1;
+        stats.npmCatchupSkippedSeqs = (stats.npmCatchupSkippedSeqs || 0) + gap;
         state.npmLastSeq = currentSeq;
         saveNpmSeq(currentSeq);
         return 0;
@@ -590,13 +650,271 @@ async function pollNpm(state, scanQueue, stats) {
 
 // --- PyPI polling ---
 
+const PYPI_USER_AGENT = `${SELF_PACKAGE_NAME} (security-monitor; +https://github.com/DNSZLSK/muaddib)`;
+
 /**
- * Poll PyPI RSS feed for new packages.
+ * Build an XML-RPC methodCall envelope. PyPI accepts only <int> and <string>
+ * params for the methods we use (changelog_last_serial, changelog_since_serial),
+ * so this builder is deliberately minimal.
+ */
+function buildXmlRpcCall(method, params) {
+  const paramXml = params.map((p) => {
+    if (typeof p === 'number' && Number.isInteger(p)) {
+      return `<param><value><int>${p}</int></value></param>`;
+    }
+    if (typeof p === 'string') {
+      // Method names + serial numbers only — no user-supplied strings reach this path.
+      const escaped = p.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      return `<param><value><string>${escaped}</string></value></param>`;
+    }
+    throw new Error(`Unsupported XML-RPC param type: ${typeof p}`);
+  }).join('');
+  return `<?xml version="1.0"?><methodCall><methodName>${method}</methodName><params>${paramXml}</params></methodCall>`;
+}
+
+/**
+ * Parse a PyPI changelog_since_serial response.
+ *
+ * Response shape (per https://warehouse.pypa.io/api-reference/xml-rpc.html):
+ *   <array><data>
+ *     <value><array><data>
+ *       <value><string>NAME</string></value>     <!-- index 0 -->
+ *       <value><string>VERSION</string></value>  <!-- index 1, may be empty -->
+ *       <value><int>TIMESTAMP</int></value>      <!-- index 2 -->
+ *       <value><string>ACTION</string></value>   <!-- index 3 -->
+ *       <value><int>SERIAL</int></value>         <!-- index 4 -->
+ *     </data></array></value>
+ *     ...
+ *   </data></array>
+ *
+ * Returns array of { name, version, timestamp, action, serial }. Invalid tuples
+ * are skipped silently — partial data is better than dropping the whole batch.
+ */
+function parseXmlRpcChangelog(xml) {
+  const out = [];
+  if (typeof xml !== 'string' || !xml.includes('<methodResponse>')) return out;
+  if (xml.includes('<fault>')) return out; // PyPI fault → caller should treat as failure
+
+  // The response is a nested array: outer <array><data>...inner tuples...</data></array>.
+  // We strip the outer wrapper first so the inner-tuple regex can't accidentally
+  // greedy-match across the outer boundary (which would swallow tuple #1).
+  const outerArrayStart = xml.indexOf('<array>');
+  if (outerArrayStart === -1) return out;
+  const outerDataStart = xml.indexOf('<data>', outerArrayStart);
+  if (outerDataStart === -1) return out;
+  const outerDataEnd = xml.lastIndexOf('</data>');
+  if (outerDataEnd === -1 || outerDataEnd <= outerDataStart) return out;
+  const body = xml.slice(outerDataStart + '<data>'.length, outerDataEnd);
+
+  // Each tuple inside `body` is exactly: <value><array><data>...</data></array></value>
+  const tupleRegex = /<value>\s*<array>\s*<data>([\s\S]*?)<\/data>\s*<\/array>\s*<\/value>/g;
+  let m;
+  while ((m = tupleRegex.exec(body)) !== null) {
+    const inner = m[1];
+    const values = [];
+    const valRegex = /<value>\s*(?:<string>([\s\S]*?)<\/string>|<int>(-?\d+)<\/int>)\s*<\/value>/g;
+    let v;
+    while ((v = valRegex.exec(inner)) !== null) {
+      if (v[1] !== undefined) {
+        // Decode the XML entities we encode on the way in
+        values.push(v[1].replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&'));
+      } else {
+        values.push(parseInt(v[2], 10));
+      }
+    }
+    if (values.length !== 5) continue;
+    const [name, version, timestamp, action, serial] = values;
+    if (typeof name !== 'string' || typeof action !== 'string' ||
+        typeof timestamp !== 'number' || typeof serial !== 'number') continue;
+    out.push({ name, version: typeof version === 'string' ? version : '', timestamp, action, serial });
+  }
+  return out;
+}
+
+/**
+ * Parse a changelog_last_serial response. Returns the integer or null.
+ */
+function parseXmlRpcInt(xml) {
+  if (typeof xml !== 'string' || xml.includes('<fault>')) return null;
+  const m = xml.match(/<value>\s*<int>(-?\d+)<\/int>\s*<\/value>/);
+  return m ? parseInt(m[1], 10) : null;
+}
+
+/**
+ * Decide whether a changelog event introduces scannable content.
+ *
+ * KEEP (something new was published, scan the release):
+ *   - "new release"               → version metadata created
+ *   - "add source file …"         → sdist uploaded
+ *   - "add py3 file …" / "add cp… file …" / "add … file …" → wheel uploaded
+ *
+ * SKIP (no new artifact to scan):
+ *   - "remove …", "yank release", "unyank release" → removal, not a new threat
+ *   - "create"                                      → package shell, no version yet
+ *   - "add Owner", "remove Owner", "accepted Owner" → ACL changes
+ *   - empty version → administrative event at the package level
+ */
+function isPypiScannableAction(action, version) {
+  if (!version) return false;
+  if (typeof action !== 'string') return false;
+  if (action === 'new release') return true;
+  if (action.startsWith('add ') && action.includes(' file ')) return true;
+  return false;
+}
+
+/**
+ * Poll PyPI changelog via XML-RPC (primary path).
+ * Equivalent of pollNpmChanges: strictly monotonic serial, lossless resume.
+ *
+ * @param {Object} state - Monitor state (pypiLastSerial)
+ * @param {Array} scanQueue - Mutable scan queue array
+ * @param {Object} stats - Mutable stats object
+ * @returns {Promise<number>} Number of packages queued, or -1 on error
+ */
+async function pollPyPIChangelog(state, scanQueue, stats) {
+  try {
+    let lastSerial = state.pypiLastSerial;
+
+    // First run: anchor to "now" rather than replaying months of history
+    if (lastSerial == null) {
+      await acquireRegistrySlot();
+      let initBody;
+      try {
+        initBody = await _deps.httpsPost(
+          PYPI_XMLRPC_URL,
+          buildXmlRpcCall('changelog_last_serial', []),
+          { 'User-Agent': PYPI_USER_AGENT },
+          10_000
+        );
+      } finally {
+        releaseRegistrySlot();
+      }
+      const current = parseXmlRpcInt(initBody);
+      if (current == null) {
+        console.warn('[MONITOR] PyPI changelog init: no serial in response');
+        return -1;
+      }
+      state.pypiLastSerial = current;
+      savePypiSerial(current);
+      console.log(`[MONITOR] PyPI changelog initialized at serial ${current}`);
+      return 0;
+    }
+
+    await acquireRegistrySlot();
+    let body;
+    try {
+      body = await _deps.httpsPost(
+        PYPI_XMLRPC_URL,
+        buildXmlRpcCall('changelog_since_serial', [lastSerial]),
+        { 'User-Agent': PYPI_USER_AGENT },
+        60_000
+      );
+    } finally {
+      releaseRegistrySlot();
+    }
+
+    const events = parseXmlRpcChangelog(body);
+    if (events.length === 0) {
+      // Either nothing happened or the response was a fault — distinguish.
+      if (body && body.includes('<fault>')) {
+        console.error('[MONITOR] PyPI changelog returned XML-RPC fault — falling back to RSS');
+        return -1;
+      }
+      return 0;
+    }
+
+    // Catch-up protection: if events span more than PYPI_CATCHUP_MAX serials,
+    // skip to the latest serial to avoid an avalanche after long downtime.
+    const lastEventSerial = events[events.length - 1].serial;
+    const gap = lastEventSerial - lastSerial;
+    if (gap > PYPI_CATCHUP_MAX) {
+      console.warn(`[MONITOR] PyPI changelog too far behind (${gap} events) — skipping to current`);
+      stats.pypiCatchupSkips = (stats.pypiCatchupSkips || 0) + 1;
+      stats.pypiCatchupSkippedEvents = (stats.pypiCatchupSkippedEvents || 0) + gap;
+      state.pypiLastSerial = lastEventSerial;
+      savePypiSerial(lastEventSerial);
+      return 0;
+    }
+
+    // Dedupe (name, version) within the batch: a single release usually emits
+    // multiple events (new release + add source file + add wheel files…), but
+    // there's only one thing to scan.
+    const seen = new Set();
+    let queued = 0;
+    let maxSerial = lastSerial;
+
+    for (const ev of events) {
+      if (ev.serial > maxSerial) maxSerial = ev.serial;
+
+      if (!isPypiScannableAction(ev.action, ev.version)) continue;
+
+      const key = `${ev.name}@${ev.version}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      // Skip self (mirror of the npm path — defensive even though we don't publish to PyPI)
+      if (ev.name === SELF_PACKAGE_NAME) continue;
+
+      // IOC pre-alert for known-malicious PyPI packages
+      let isKnownIOC = false;
+      try {
+        const iocs = loadCachedIOCs();
+        // PyPI IOCs are namespaced "pypi:<name>" in the wildcardPackages set
+        const pypiKey = `pypi:${ev.name}`;
+        isKnownIOC = iocs.wildcardPackages && (
+          iocs.wildcardPackages.has(pypiKey) || iocs.wildcardPackages.has(ev.name)
+        );
+        if (isKnownIOC) {
+          console.log(`[MONITOR] IOC PRE-ALERT (pypi): ${ev.name} — known malicious package`);
+          stats.iocPreAlerts = (stats.iocPreAlerts || 0) + 1;
+          sendIOCPreAlert(ev.name).catch(err => {
+            console.error(`[MONITOR] IOC pre-alert webhook failed for ${ev.name}: ${err.message}`);
+          });
+        }
+      } catch { /* IOC load failure is non-fatal */ }
+
+      scanQueue.push({
+        name: ev.name,
+        version: ev.version,
+        ecosystem: 'pypi',
+        tarballUrl: null, // resolved lazily via getPyPITarballUrl()
+        isIOCMatch: isKnownIOC
+      });
+      queued++;
+    }
+
+    // Persist the serial both in memory and on disk before returning.
+    // daemon.js also flushes state.json after the queue is saved, but writing the
+    // dedicated serial file here means a crash between the two flush points costs
+    // at most one poll of replay — and re-queuing the same (name, version) is
+    // handled idempotently by the scan-memory dedupe downstream.
+    state.pypiLastSerial = maxSerial;
+    if (maxSerial !== lastSerial) {
+      savePypiSerial(maxSerial);
+    }
+
+    if (queued > 0) {
+      console.log(`[MONITOR] PyPI changelog: ${queued} packages queued (serial ${lastSerial} → ${maxSerial}, ${events.length} events)`);
+    }
+    stats.pypiChangelogPackages = (stats.pypiChangelogPackages || 0) + queued;
+    stats.pypiChangelogEvents = (stats.pypiChangelogEvents || 0) + events.length;
+
+    return queued;
+  } catch (err) {
+    console.error(`[MONITOR] PyPI changelog error: ${err.message} — falling back to RSS`);
+    return -1;
+  }
+}
+
+/**
+ * Poll PyPI RSS feed (legacy fallback).
+ * Only covers newly-registered packages (first-ever publish) and is capped at ~40 items —
+ * a single burst can silently lose events. Used only when the XML-RPC changelog fails.
  *
  * @param {Object} state - Monitor state object (pypiLastPackage)
  * @param {Array} scanQueue - Mutable scan queue array
  */
-async function pollPyPI(state, scanQueue) {
+async function pollPyPIRss(state, scanQueue) {
   const url = 'https://pypi.org/rss/packages.xml';
 
   try {
@@ -620,7 +938,7 @@ async function pollPyPI(state, scanQueue) {
     }
 
     for (const name of newPackages) {
-      console.log(`[MONITOR] New pypi: ${name}`);
+      console.log(`[MONITOR] New pypi (rss): ${name}`);
       // Queue PyPI packages — tarball URL resolved during scan
       scanQueue.push({
         name,
@@ -637,9 +955,26 @@ async function pollPyPI(state, scanQueue) {
 
     return newPackages.length;
   } catch (err) {
-    console.error(`[MONITOR] PyPI poll error: ${err.message}`);
+    console.error(`[MONITOR] PyPI RSS poll error: ${err.message}`);
     return -1;
   }
+}
+
+/**
+ * Poll PyPI for new packages and versions.
+ * Primary: XML-RPC changelog_since_serial (lossless, captures new versions).
+ * Fallback: RSS feed (new registrations only, lossy on bursts).
+ *
+ * @param {Object} state - Monitor state object
+ * @param {Array} scanQueue - Mutable scan queue array
+ * @param {Object} stats - Mutable stats object
+ */
+async function pollPyPI(state, scanQueue, stats = {}) {
+  const count = await pollPyPIChangelog(state, scanQueue, stats);
+  if (count >= 0) return count;
+  console.log('[MONITOR] Using RSS fallback for PyPI');
+  stats.pypiRssFallbackCount = (stats.pypiRssFallbackCount || 0) + 1;
+  return pollPyPIRss(state, scanQueue);
 }
 
 // --- Main poll orchestrator ---
@@ -686,7 +1021,7 @@ async function poll(state, scanQueue, stats) {
 
   const [npmCount, pypiCount] = await Promise.all([
     pollNpm(state, scanQueue, stats),
-    pollPyPI(state, scanQueue)
+    pollPyPI(state, scanQueue, stats)
   ]);
 
   // Track consecutive poll failures for backoff
@@ -718,6 +1053,7 @@ module.exports = {
 
   // HTTP helpers
   httpsGet,
+  httpsPost,
   getWeeklyDownloads,
   checkTrustedDepDiff,
   TRUSTED_DEP_AGE_THRESHOLD_MS,
@@ -731,6 +1067,12 @@ module.exports = {
   parseNpmRss,
   parsePyPIRss,
 
+  // XML-RPC (PyPI changelog)
+  buildXmlRpcCall,
+  parseXmlRpcChangelog,
+  parseXmlRpcInt,
+  isPypiScannableAction,
+
   // CouchDB doc extraction
   extractTarballFromDoc,
 
@@ -738,6 +1080,11 @@ module.exports = {
   pollNpmChanges,
   pollNpmRss,
   pollNpm,
+  pollPyPIChangelog,
+  pollPyPIRss,
   pollPyPI,
-  poll
+  poll,
+
+  // Test seam — see _deps definition near the top of this file.
+  _deps
 };

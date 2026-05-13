@@ -76,6 +76,20 @@ const CHANGES_STREAM_URL = 'https://replicate.npmjs.com/registry/_changes';
 const CHANGES_LIMIT = 1000;
 const CHANGES_CATCHUP_MAX = 500000; // If behind by more than 500k seqs, skip to "now"
 
+// --- PyPI serial constants ---
+//
+// PyPI's XML-RPC changelog endpoint is the canonical equivalent of npm's CouchDB
+// `_changes` stream: every package event (release, file upload, removal, owner
+// change…) gets a strictly monotonic integer "serial". `changelog_since_serial(n)`
+// returns every event with serial > n, letting us resume losslessly across restarts.
+//
+// PYPI_CATCHUP_MAX is the staleness cap: if we are behind by more than this many
+// serials (≈ days of activity at ~30k events/day in 2026), skip to "now" rather
+// than fetch a monster batch. Mirrors CHANGES_CATCHUP_MAX for npm.
+const PYPI_SERIAL_FILE = path.join(__dirname, '..', '..', 'data', 'pypi-serial.json');
+const PYPI_XMLRPC_URL = 'https://pypi.org/pypi';
+const PYPI_CATCHUP_MAX = 100000;
+
 // --- Scan memory constants ---
 
 const SCAN_MEMORY_FILE = path.join(__dirname, '..', '..', 'data', 'scan-memory.json');
@@ -189,6 +203,37 @@ function loadNpmSeq() {
  */
 function saveNpmSeq(seq) {
   atomicWriteFileSync(NPM_SEQ_FILE, JSON.stringify({ lastSeq: seq, updatedAt: new Date().toISOString() }, null, 2));
+}
+
+// --- PyPI serial persistence ---
+
+/**
+ * Load the last processed PyPI changelog serial from the dedicated file.
+ * Returns null if no file exists or file is invalid (triggers "now" initialization).
+ */
+function loadPypiSerial() {
+  try {
+    if (fs.existsSync(PYPI_SERIAL_FILE)) {
+      const data = JSON.parse(fs.readFileSync(PYPI_SERIAL_FILE, 'utf8'));
+      if (typeof data.lastSerial === 'number' && Number.isFinite(data.lastSerial)) {
+        return data.lastSerial;
+      }
+    }
+  } catch (err) {
+    console.warn(`[MONITOR] Failed to load PyPI serial: ${err.message}`);
+  }
+  return null;
+}
+
+/**
+ * Persist the last processed PyPI changelog serial to a dedicated file.
+ * Atomic write (crash-safe). Also mirrored in monitor-state.json via saveState().
+ */
+function savePypiSerial(serial) {
+  atomicWriteFileSync(
+    PYPI_SERIAL_FILE,
+    JSON.stringify({ lastSerial: serial, updatedAt: new Date().toISOString() }, null, 2)
+  );
 }
 
 // --- C3: Scan Memory Management ---
@@ -649,10 +694,16 @@ function loadState(stats) {
     return {
       npmLastPackage: typeof state.npmLastPackage === 'string' ? state.npmLastPackage : '',
       pypiLastPackage: typeof state.pypiLastPackage === 'string' ? state.pypiLastPackage : '',
-      npmLastSeq: state.npmLastSeq != null ? state.npmLastSeq : loadNpmSeq()
+      npmLastSeq: state.npmLastSeq != null ? state.npmLastSeq : loadNpmSeq(),
+      pypiLastSerial: state.pypiLastSerial != null ? state.pypiLastSerial : loadPypiSerial()
     };
   } catch {
-    return { npmLastPackage: '', pypiLastPackage: '', npmLastSeq: loadNpmSeq() };
+    return {
+      npmLastPackage: '',
+      pypiLastPackage: '',
+      npmLastSeq: loadNpmSeq(),
+      pypiLastSerial: loadPypiSerial()
+    };
   }
 }
 
@@ -1180,6 +1231,9 @@ module.exports = {
   CHANGES_STREAM_URL,
   CHANGES_LIMIT,
   CHANGES_CATCHUP_MAX,
+  PYPI_SERIAL_FILE,
+  PYPI_XMLRPC_URL,
+  PYPI_CATCHUP_MAX,
   SCAN_MEMORY_FILE,
   SCAN_MEMORY_EXPIRY_MS,
   MAX_MEMORY_ENTRIES,
@@ -1211,6 +1265,8 @@ module.exports = {
   atomicWriteFileSync,
   loadNpmSeq,
   saveNpmSeq,
+  loadPypiSerial,
+  savePypiSerial,
   loadScanMemory,
   saveScanMemory,
   recordScanMemory,

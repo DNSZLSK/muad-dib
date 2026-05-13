@@ -1138,7 +1138,7 @@ async function resolveTarballAndScan(item, stats, dailyAlerts, recentlyScanned, 
   }
   if (item.ecosystem === 'pypi' && !item.tarballUrl) {
     try {
-      const pypiInfo = await getPyPITarballUrl(item.name);
+      const pypiInfo = await getPyPITarballUrl(item.name, item.version || '');
       if (!pypiInfo.url) {
         console.log(`[MONITOR] SKIP: ${item.name} — no tarball URL found on PyPI`);
         return;

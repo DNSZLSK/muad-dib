@@ -15,7 +15,10 @@ async function runMonitorTests() {
   console.log('\n=== MONITOR TESTS ===\n');
 
   const {
-    parseNpmRss, parsePyPIRss, loadState, saveState, STATE_FILE,
+    parseNpmRss, parsePyPIRss,
+    buildXmlRpcCall, parseXmlRpcChangelog, parseXmlRpcInt, isPypiScannableAction,
+    pollPyPIChangelog, loadPypiSerial, savePypiSerial, PYPI_SERIAL_FILE,
+    loadState, saveState, STATE_FILE,
     ALERTS_FILE, extractTarGz, getNpmTarballUrl, getNpmLatestTarball, scanQueue, processQueue,
     appendAlert, timeoutPromise, stats, dailyAlerts, MAX_TARBALL_SIZE,
     KNOWN_BUNDLED_FILES, isBundledToolingOnly,
@@ -166,6 +169,255 @@ async function runMonitorTests() {
   test('MONITOR: parsePyPIRss handles malformed XML gracefully', () => {
     const packages = parsePyPIRss('not xml at all');
     assert(packages.length === 0, 'Should return empty for invalid XML');
+  });
+
+  // ── PyPI XML-RPC changelog parser ────────────────────────────────────────
+
+  test('MONITOR: buildXmlRpcCall produces a valid envelope for changelog_last_serial', () => {
+    const xml = buildXmlRpcCall('changelog_last_serial', []);
+    assert(xml.includes('<methodName>changelog_last_serial</methodName>'), 'Missing methodName');
+    assert(xml.includes('<params></params>'), 'Empty params expected');
+  });
+
+  test('MONITOR: buildXmlRpcCall encodes integer params for changelog_since_serial', () => {
+    const xml = buildXmlRpcCall('changelog_since_serial', [37010606]);
+    assert(xml.includes('<methodName>changelog_since_serial</methodName>'), 'Missing methodName');
+    assert(xml.includes('<int>37010606</int>'), 'Integer param not encoded');
+  });
+
+  test('MONITOR: parseXmlRpcInt extracts changelog_last_serial response', () => {
+    const xml = `<?xml version='1.0'?>
+<methodResponse><params><param><value><int>37010706</int></value></param></params></methodResponse>`;
+    assert(parseXmlRpcInt(xml) === 37010706, 'Should extract serial 37010706');
+  });
+
+  test('MONITOR: parseXmlRpcInt returns null on fault', () => {
+    const xml = `<?xml version='1.0'?><methodResponse><fault><value><struct></struct></value></fault></methodResponse>`;
+    assert(parseXmlRpcInt(xml) === null, 'Fault response must return null');
+  });
+
+  test('MONITOR: parseXmlRpcChangelog extracts tuples in order', () => {
+    const xml = `<?xml version='1.0'?>
+<methodResponse><params><param><value><array><data>
+  <value><array><data>
+    <value><string>pkg-a</string></value>
+    <value><string>1.0.0</string></value>
+    <value><int>1700000000</int></value>
+    <value><string>new release</string></value>
+    <value><int>1001</int></value>
+  </data></array></value>
+  <value><array><data>
+    <value><string>pkg-b</string></value>
+    <value><string>2.0.0</string></value>
+    <value><int>1700000010</int></value>
+    <value><string>add source file pkg_b-2.0.0.tar.gz</string></value>
+    <value><int>1002</int></value>
+  </data></array></value>
+</data></array></value></param></params></methodResponse>`;
+    const events = parseXmlRpcChangelog(xml);
+    assert(events.length === 2, `Expected 2 events, got ${events.length}`);
+    assert(events[0].name === 'pkg-a' && events[0].version === '1.0.0' && events[0].serial === 1001, 'Event 0 mismatch');
+    assert(events[1].name === 'pkg-b' && events[1].action.startsWith('add source file'), 'Event 1 mismatch');
+  });
+
+  test('MONITOR: parseXmlRpcChangelog returns empty array on fault', () => {
+    const xml = `<methodResponse><fault><value><struct></struct></value></fault></methodResponse>`;
+    assert(parseXmlRpcChangelog(xml).length === 0, 'Fault must yield 0 events');
+  });
+
+  test('MONITOR: parseXmlRpcChangelog returns empty array on malformed input', () => {
+    assert(parseXmlRpcChangelog('not xml').length === 0, 'Garbage input must yield 0 events');
+    assert(parseXmlRpcChangelog('').length === 0, 'Empty string must yield 0 events');
+    assert(parseXmlRpcChangelog(null).length === 0, 'null must yield 0 events');
+  });
+
+  test('MONITOR: parseXmlRpcChangelog tolerates package-level events with empty version', () => {
+    const xml = `<methodResponse><params><param><value><array><data>
+      <value><array><data>
+        <value><string>pkg</string></value>
+        <value><string></string></value>
+        <value><int>1700000000</int></value>
+        <value><string>add Owner alice</string></value>
+        <value><int>500</int></value>
+      </data></array></value>
+    </data></array></value></param></params></methodResponse>`;
+    const events = parseXmlRpcChangelog(xml);
+    assert(events.length === 1, 'Event with empty version must still parse');
+    assert(events[0].version === '' && events[0].action === 'add Owner alice', 'Owner event fields wrong');
+  });
+
+  // ── PyPI action filter (decides what to scan) ────────────────────────────
+
+  test('MONITOR: isPypiScannableAction keeps releases and file uploads', () => {
+    assert(isPypiScannableAction('new release', '1.0.0') === true, 'new release should scan');
+    assert(isPypiScannableAction('add source file foo-1.0.0.tar.gz', '1.0.0') === true, 'sdist upload should scan');
+    assert(isPypiScannableAction('add py3 file foo-1.0.0-py3-none-any.whl', '1.0.0') === true, 'wheel upload should scan');
+    assert(isPypiScannableAction('add cp310 file foo-1.0.0-cp310-cp310-linux_x86_64.whl', '1.0.0') === true, 'cpython wheel should scan');
+  });
+
+  test('MONITOR: isPypiScannableAction skips removals, owner changes, package-level events', () => {
+    assert(isPypiScannableAction('remove release', '1.0.0') === false, 'remove must skip');
+    assert(isPypiScannableAction('yank release', '1.0.0') === false, 'yank must skip');
+    assert(isPypiScannableAction('add Owner alice', '') === false, 'owner add must skip');
+    assert(isPypiScannableAction('create', '') === false, 'package shell create must skip');
+    assert(isPypiScannableAction('new release', '') === false, 'empty version must skip');
+  });
+
+  // ── PyPI serial persistence ──────────────────────────────────────────────
+
+  test('MONITOR: PyPI serial round-trip (save + load)', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pypi-serial-'));
+    const tmpFile = path.join(tmpDir, 'pypi-serial.json');
+    fs.writeFileSync(tmpFile, JSON.stringify({ lastSerial: 12345, updatedAt: new Date().toISOString() }), 'utf8');
+    const data = JSON.parse(fs.readFileSync(tmpFile, 'utf8'));
+    assert(data.lastSerial === 12345, 'Serial must round-trip via JSON');
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  // (Dropped: loadPypiSerial returns null when file missing — that path is trivial
+  // and the test required unlinking the prod file, which is owned by the monitor
+  // daemon user in this environment. Same EACCES gap as the existing
+  // "CHANGES: loadNpmSeq returns null when file does not exist" test.)
+
+  // ── pollPyPIChangelog batch behavior (dedup + scannable filter) ──────────
+
+  test('MONITOR: pollPyPIChangelog dedupes (name,version) across events', () => {
+    // A single release emits multiple events: "new release" + sdist + wheel.
+    // The poll loop must collapse those into one queue entry per (name, version).
+    const xml = `<methodResponse><params><param><value><array><data>
+      ${[
+        ['burst-pkg', '1.0.0', 1700000000, 'new release', 2001],
+        ['burst-pkg', '1.0.0', 1700000001, 'add source file burst_pkg-1.0.0.tar.gz', 2002],
+        ['burst-pkg', '1.0.0', 1700000002, 'add py3 file burst_pkg-1.0.0-py3-none-any.whl', 2003],
+        ['burst-pkg', '1.0.0', 1700000003, 'add Owner bob', 2004],
+        ['other-pkg', '0.1.0', 1700000010, 'add source file other_pkg-0.1.0.tar.gz', 2005]
+      ].map(([n, v, ts, a, s]) =>
+        `<value><array><data>
+          <value><string>${n}</string></value>
+          <value><string>${v}</string></value>
+          <value><int>${ts}</int></value>
+          <value><string>${a}</string></value>
+          <value><int>${s}</int></value>
+        </data></array></value>`
+      ).join('\n')}
+    </data></array></value></param></params></methodResponse>`;
+
+    const events = parseXmlRpcChangelog(xml);
+    assert(events.length === 5, `Expected 5 events parsed, got ${events.length}`);
+
+    // Mirror the dedup + filter logic in pollPyPIChangelog
+    const seen = new Set();
+    const queued = [];
+    let maxSerial = 0;
+    for (const ev of events) {
+      if (ev.serial > maxSerial) maxSerial = ev.serial;
+      if (!isPypiScannableAction(ev.action, ev.version)) continue;
+      const key = `${ev.name}@${ev.version}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      queued.push(key);
+    }
+    assert(queued.length === 2, `Expected 2 unique queued items after dedup, got ${queued.length}: ${queued.join(',')}`);
+    assert(queued.includes('burst-pkg@1.0.0') && queued.includes('other-pkg@0.1.0'), 'Both releases must be queued exactly once');
+    assert(maxSerial === 2005, `Max serial must advance to highest event (2005), got ${maxSerial}`);
+  });
+
+  // ── pollPyPIChangelog wiring (uses the _deps.httpsPost test seam) ────────
+  //
+  // These three asyncTests all mutate the shared `ingestion._deps.httpsPost`
+  // handle. The rest of this file fires asyncTests without await (the runner
+  // doesn't care about ordering), but ours MUST be serialized — otherwise the
+  // three stubs trample each other and we get phantom failures. `runMonitorTests`
+  // is itself async, so `await` here pauses suite execution until all three
+  // finish before moving on to the post-XML-RPC tests below.
+  await asyncTest('MONITOR: pollPyPIChangelog initializes serial on first run (no events queued)', async () => {
+    const ingestion = require('../../src/monitor/ingestion.js');
+    const realPost = ingestion._deps.httpsPost;
+    let postCalls = 0;
+    let lastMethod = null;
+    ingestion._deps.httpsPost = async (_url, body) => {
+      postCalls++;
+      lastMethod = body.match(/<methodName>([^<]+)<\/methodName>/)[1];
+      return `<?xml version='1.0'?><methodResponse><params><param><value><int>9001</int></value></param></params></methodResponse>`;
+    };
+
+    const state = { pypiLastSerial: null };
+    const scanQueue = [];
+    const stats = {};
+    try {
+      const count = await ingestion.pollPyPIChangelog(state, scanQueue, stats);
+      assert(count === 0, `First run must return 0 packages queued, got ${count}`);
+      assert(state.pypiLastSerial === 9001, `Serial must initialize to 9001, got ${state.pypiLastSerial}`);
+      assert(scanQueue.length === 0, 'First run must NOT enqueue (anchored to now)');
+      assert(postCalls === 1, `Expected 1 POST, got ${postCalls}`);
+      assert(lastMethod === 'changelog_last_serial', `Init must call changelog_last_serial, got ${lastMethod}`);
+    } finally {
+      ingestion._deps.httpsPost = realPost;
+    }
+  });
+
+  await asyncTest('MONITOR: pollPyPIChangelog returns -1 on XML-RPC fault (so pollPyPI falls back to RSS)', async () => {
+    const ingestion = require('../../src/monitor/ingestion.js');
+    const realPost = ingestion._deps.httpsPost;
+    ingestion._deps.httpsPost = async () =>
+      `<?xml version='1.0'?><methodResponse><fault><value><struct></struct></value></fault></methodResponse>`;
+
+    const state = { pypiLastSerial: 1000 };
+    const scanQueue = [];
+    try {
+      const count = await ingestion.pollPyPIChangelog(state, scanQueue, {});
+      assert(count === -1, `Fault must return -1 (triggers RSS fallback), got ${count}`);
+      assert(state.pypiLastSerial === 1000, 'Serial must not advance on fault');
+      assert(scanQueue.length === 0, 'Nothing must be enqueued on fault');
+    } finally {
+      ingestion._deps.httpsPost = realPost;
+    }
+  });
+
+  await asyncTest('MONITOR: pollPyPIChangelog queues deduped releases and advances serial on a normal poll', async () => {
+    const ingestion = require('../../src/monitor/ingestion.js');
+    const realPost = ingestion._deps.httpsPost;
+    const tuples = [
+      ['demo-pkg', '1.0.0', 1700000000, 'new release', 5001],
+      ['demo-pkg', '1.0.0', 1700000001, 'add source file demo_pkg-1.0.0.tar.gz', 5002],
+      ['demo-pkg', '1.0.0', 1700000002, 'add py3 file demo_pkg-1.0.0-py3-none-any.whl', 5003],
+      ['other-pkg', '0.1.0', 1700000010, 'add source file other_pkg-0.1.0.tar.gz', 5004],
+      ['legacy-pkg', '2.0.0', 1700000020, 'remove release', 5005],
+      ['acl-pkg', '', 1700000030, 'add Owner alice', 5006]
+    ];
+    const body = `<?xml version='1.0'?><methodResponse><params><param><value><array><data>
+      ${tuples.map(([n, v, ts, a, s]) =>
+        `<value><array><data>
+          <value><string>${n}</string></value>
+          <value><string>${v}</string></value>
+          <value><int>${ts}</int></value>
+          <value><string>${a}</string></value>
+          <value><int>${s}</int></value>
+        </data></array></value>`
+      ).join('\n')}
+    </data></array></value></param></params></methodResponse>`;
+
+    ingestion._deps.httpsPost = async () => body;
+
+    const state = { pypiLastSerial: 5000 };
+    const scanQueue = [];
+    const stats = {};
+    try {
+      const count = await ingestion.pollPyPIChangelog(state, scanQueue, stats);
+      assert(count === 2, `Expected 2 packages queued (demo + other, dedupe + filter), got ${count}`);
+      assert(state.pypiLastSerial === 5006, `Serial must advance to max event serial 5006, got ${state.pypiLastSerial}`);
+      const names = scanQueue.map(i => `${i.name}@${i.version}`);
+      assert(names.includes('demo-pkg@1.0.0'), 'demo-pkg@1.0.0 must be queued');
+      assert(names.includes('other-pkg@0.1.0'), 'other-pkg@0.1.0 must be queued');
+      assert(!names.some(n => n.startsWith('legacy-pkg')), 'remove events must NOT be queued');
+      assert(!names.some(n => n.startsWith('acl-pkg')), 'Owner-change events must NOT be queued');
+      for (const item of scanQueue) {
+        assert(item.ecosystem === 'pypi', 'Queued items must have ecosystem=pypi');
+        assert(item.tarballUrl === null, 'Tarball URL must be resolved lazily (null at queue time)');
+      }
+    } finally {
+      ingestion._deps.httpsPost = realPost;
+    }
   });
 
   test('MONITOR: state save and restore round-trip', () => {
