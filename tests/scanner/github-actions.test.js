@@ -239,6 +239,93 @@ jobs:
       assert(!threats[0].file.includes('\\'), 'File path should not contain backslashes: ' + threats[0].file);
     } finally { cleanupTemp(tmp); }
   });
+
+  // --- GHA-004: workflow_secrets_dump ---
+
+  test('GHA: Detects toJSON(secrets) secrets dump', () => {
+    const tmp = makeTempWorkflow(`
+name: Run Copilot
+run-name: Run Copilot
+on:
+  push:
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    env:
+      VARIABLE_STORE: \${{ toJSON(secrets) }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Copilot Setup
+        run: echo "$VARIABLE_STORE" > format-results.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: format-results
+          path: format-results.txt
+`);
+    try {
+      const threats = scanGitHubActions(tmp);
+      const t = threats.find(t => t.type === 'workflow_secrets_dump');
+      assert(t, 'Should detect toJSON(secrets) secrets dump');
+      assert(t.severity === 'CRITICAL', 'Should be CRITICAL severity');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  test('GHA: Detects toJSON( secrets ) with spaces', () => {
+    const tmp = makeTempWorkflow(`
+name: Exfil
+on: push
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    env:
+      ALL_SECRETS: \${{ toJSON( secrets ) }}
+    steps:
+      - run: echo "$ALL_SECRETS"
+`);
+    try {
+      const threats = scanGitHubActions(tmp);
+      const t = threats.find(t => t.type === 'workflow_secrets_dump');
+      assert(t, 'Should detect toJSON( secrets ) with spaces');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  test('GHA: No false positive on secrets.GITHUB_TOKEN (normal usage)', () => {
+    const tmp = makeTempWorkflow(`
+name: CI
+on: push
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "deploying"
+        env:
+          GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
+`);
+    try {
+      const threats = scanGitHubActions(tmp);
+      const t = threats.find(t => t.type === 'workflow_secrets_dump');
+      assert(!t, 'Should NOT flag normal secrets.GITHUB_TOKEN usage');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  test('GHA: No false positive on toJSON(secrets) in YAML comment', () => {
+    const tmp = makeTempWorkflow(`
+name: CI
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      # WARNING: never use toJSON(secrets) in production
+      - run: echo "safe"
+`);
+    try {
+      const threats = scanGitHubActions(tmp);
+      const t = threats.find(t => t.type === 'workflow_secrets_dump');
+      assert(!t, 'Should NOT flag toJSON(secrets) inside a YAML comment');
+    } finally { cleanupTemp(tmp); }
+  });
 }
 
 module.exports = { runGitHubActionsTests };

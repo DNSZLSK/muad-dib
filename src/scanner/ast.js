@@ -345,6 +345,23 @@ function analyzeFile(content, filePath, basePath) {
     });
   }
 
+  // Geo-evasion CIS kill switch: locale check for "ru" + process.exit
+  // Pattern: TeamPCP/Shai-Hulud isSystemRussian() — checks Intl.DateTimeFormat
+  // locale or LC_ALL/LANG env vars for Russian locale, then process.exit(0).
+  // Triple-gate: (1) locale API or env var check, (2) "ru" string comparison,
+  // (3) process.exit in same file. No legitimate npm package does this.
+  const hasLocaleCheck = /resolvedOptions\s*\(\s*\)\s*\.locale/.test(content) ||
+                         (/\bLC_ALL\b/.test(content) && /\bLANG\b/.test(content));
+  const hasRuCheck = /['"`]ru['"`]/.test(content) && /startsWith|===|==/.test(content);
+  if (hasLocaleCheck && hasRuCheck && /process\.exit/.test(content)) {
+    threats.push({
+      type: 'geo_evasion_killswitch',
+      severity: 'HIGH',
+      message: 'Geo-evasion CIS kill switch: locale check for "ru" + process.exit — malware avoids targeting operator\'s country (TeamPCP pattern)',
+      file: ctx.relPath
+    });
+  }
+
   handlePostWalk(ctx);
 
   return threats;

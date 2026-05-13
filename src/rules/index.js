@@ -705,6 +705,18 @@ const RULES = {
     ],
     mitre: 'T1059'
   },
+  ide_hook_autoexec: {
+    id: 'MUADDIB-AICONF-003',
+    name: 'IDE Hook Auto-Execution',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Fichier de configuration IDE (.claude/settings.json, .vscode/tasks.json, .kiro/settings/mcp.json) contient des hooks qui executent du code automatiquement a l\'ouverture du projet. Technique Shai-Hulud (TeamPCP, mai 2026).',
+    references: [
+      'https://github.com/g00dfe11ow/Shai-Hulud-Open-Source',
+      'https://www.wiz.io/blog/mini-shai-hulud-supply-chain-sap-npm'
+    ],
+    mitre: 'T1546'
+  },
 
   require_cache_poison: {
     id: 'MUADDIB-AST-019',
@@ -974,6 +986,18 @@ const RULES = {
       'https://attack.mitre.org/techniques/T1195/002/'
     ],
     mitre: 'T1195.002'
+  },
+  workflow_secrets_dump: {
+    id: 'MUADDIB-GHA-004',
+    name: 'GitHub Actions Secrets Dump',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Workflow utilise toJSON(secrets) pour exfiltrer tous les secrets du repository. Technique Shai-Hulud (TeamPCP, mai 2026).',
+    references: [
+      'https://github.com/g00dfe11ow/Shai-Hulud-Open-Source',
+      'https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions'
+    ],
+    mitre: 'T1552.001'
   },
 
   // Sandbox detections
@@ -2457,6 +2481,18 @@ const RULES = {
       'https://attack.mitre.org/techniques/T1027/'
     ],
     mitre: 'T1059.007'
+  },
+  geo_evasion_killswitch: {
+    id: 'MUADDIB-AST-091',
+    name: 'Geo-Evasion CIS Kill Switch',
+    severity: 'HIGH',
+    confidence: 'medium',
+    description: 'Code verifie la locale systeme (Intl.DateTimeFormat, LC_ALL/LANG) pour "ru" et fait process.exit — technique CIS kill switch pour eviter de cibler les pays de l\'operateur. Pattern TeamPCP/Shai-Hulud.',
+    references: [
+      'https://github.com/g00dfe11ow/Shai-Hulud-Open-Source',
+      'https://attack.mitre.org/techniques/T1614/'
+    ],
+    mitre: 'T1614'
   },
   external_tarball_dep: {
     id: 'MUADDIB-PKG-020',

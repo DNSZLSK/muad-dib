@@ -157,12 +157,12 @@ jobs:
     }
   });
 
-  // 3.3b Rule count check (security review 2026-05: +1 COMPOUND-012 staged_remote_loader → 218 RULES)
-  test('P3: rule count is 223 (218 RULES + 5 PARANOID)', () => {
+  // 3.3b Rule count check (Shai-Hulud open source: +3 AICONF-003, GHA-004, AST-091 → 221 RULES)
+  test('P3: rule count is 226 (221 RULES + 5 PARANOID)', () => {
     const { RULES, PARANOID_RULES } = require('../../src/rules/index.js');
     const ruleCount = Object.keys(RULES).length;
     const paranoidCount = Object.keys(PARANOID_RULES).length;
-    assert(ruleCount === 218, `Expected 218 RULES, got ${ruleCount}`);
+    assert(ruleCount === 221, `Expected 221 RULES, got ${ruleCount}`);
     assert(paranoidCount === 5, `Expected 5 PARANOID, got ${paranoidCount}`);
   });
 
