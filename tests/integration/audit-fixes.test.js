@@ -1641,7 +1641,7 @@ https.get('https://registry.npmjs.org/express/-/express-4.18.2.tgz', (res) => {
 
   // P7: suspicious_dataflow now has full bypass (80% guard removed).
   // Packages with >3 suspicious_dataflow findings are always legitimate SDKs.
-  test('AUDIT-S5-P7: suspicious_dataflow at 100% ratio IS downgraded (full bypass)', () => {
+  test('AUDIT-S5-P7: suspicious_dataflow at 100% ratio IS downgraded except floor-restored instance (SC-C2)', () => {
     const threats = [
       { type: 'suspicious_dataflow', severity: 'CRITICAL', file: 'a.js', message: 'cred→net' },
       { type: 'suspicious_dataflow', severity: 'CRITICAL', file: 'b.js', message: 'cred→net' },
@@ -1650,11 +1650,14 @@ https.get('https://registry.npmjs.org/express/-/express-4.18.2.tgz', (res) => {
     ];
     applyFPReductions(threats, null, null);
     // P7: full bypass — downgraded regardless of ratio
-    const allLow = threats.every(t => t.severity === 'LOW');
-    assert(allLow, 'suspicious_dataflow at 100% should be LOW (P7 full bypass)');
+    // SC-C2: floorEligible restores 1 instance at original CRITICAL severity
+    const lows = threats.filter(t => t.severity === 'LOW');
+    const criticals = threats.filter(t => t.severity === 'CRITICAL');
+    assert(lows.length === 3, `Expected 3 LOW after floor restoration, got ${lows.length}`);
+    assert(criticals.length === 1, `Expected 1 CRITICAL restored by floor, got ${criticals.length}`);
   });
 
-  test('AUDIT-S5: suspicious_dataflow at 33% ratio IS downgraded', () => {
+  test('AUDIT-S5: suspicious_dataflow at 33% ratio IS downgraded except floor-restored instance (SC-C2)', () => {
     const threats = [
       { type: 'suspicious_dataflow', severity: 'CRITICAL', file: 'a.js', message: 'cred→net' },
       { type: 'suspicious_dataflow', severity: 'CRITICAL', file: 'b.js', message: 'cred→net' },
@@ -1670,9 +1673,12 @@ https.get('https://registry.npmjs.org/express/-/express-4.18.2.tgz', (res) => {
       { type: 'env_access', severity: 'MEDIUM', file: 'l.js', message: 'env' }
     ];
     applyFPReductions(threats, null, null);
-    // 4/12 = 33% ratio, below 80% — should be downgraded to LOW
-    const allLow = threats.filter(t => t.type === 'suspicious_dataflow').every(t => t.severity === 'LOW');
-    assert(allLow, 'suspicious_dataflow at 33% ratio should be downgraded to LOW');
+    // 4/12 = 33% ratio, below 80% — count > 3 → downgraded except floor-restored instance
+    const dataflow = threats.filter(t => t.type === 'suspicious_dataflow');
+    const lows = dataflow.filter(t => t.severity === 'LOW');
+    const criticals = dataflow.filter(t => t.severity === 'CRITICAL');
+    assert(lows.length === 3, `Expected 3 LOW suspicious_dataflow, got ${lows.length}`);
+    assert(criticals.length === 1, `Expected 1 CRITICAL restored by floor, got ${criticals.length}`);
   });
 
   // --- Fix 2.3: eval string literal content inspection ---

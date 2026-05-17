@@ -301,7 +301,11 @@ const FP_COUNT_THRESHOLDS = {
   // Real malware uses 1-2 targeted Function() calls.
   dangerous_call_function: { maxCount: 5, to: 'LOW' },
   require_cache_poison: { maxCount: 3, from: 'CRITICAL', to: 'LOW' },
-  suspicious_dataflow: { maxCount: 3, to: 'LOW' },
+  // Audit 2026-05 SC-C2: floorEligible: true opts suspicious_dataflow into the
+  // dilution floor without adding a `from` constraint (which would block MEDIUM
+  // count-threshold downgrades). Restores 1 instance at original severity so an
+  // attacker can't dilute real exfil flows by injecting benign data flows.
+  suspicious_dataflow: { maxCount: 3, to: 'LOW', floorEligible: true },
   obfuscation_detected: { maxCount: 3, to: 'LOW' },
   module_compile_dynamic: { maxCount: 3, from: 'HIGH', to: 'LOW' },
   module_compile: { maxCount: 3, from: 'HIGH', to: 'LOW' },
@@ -320,8 +324,10 @@ const FP_COUNT_THRESHOLDS = {
   // P6: HTTP client libraries (undici, aws-sdk, nodemailer, jsdom) parse Authorization/Bearer headers
   // with 3+ credential regexes. Real harvesters use 1-2 targeted regexes.
   // Audit v3: removed `from` constraint — ALL severity levels downgraded when count > 2.
-  // This eliminates the dilution floor (floor requires `from` field) for complete suppression.
-  credential_regex_harvest: { maxCount: 2, to: 'LOW' },
+  // Audit 2026-05 SC-C2: floorEligible: true restores 1 instance at original
+  // severity. Without it an attacker injects 3+ benign header regexes (Authorization,
+  // Cookie, X-Forwarded-For) and downgrades all real exfil regexes to LOW.
+  credential_regex_harvest: { maxCount: 2, to: 'LOW', floorEligible: true },
   // P7→Audit v3: Config frameworks (pm2, nx, dotenv, aws-sdk, oclif) read 5+ env vars — not credential theft.
   // Real stealers access 1-4 targeted env vars. Count >4 = config loader pattern.
   // Lowered from 10→4 for better FP reduction. B5 network_sink_immunity protects genuine exfiltration.
@@ -1013,16 +1019,16 @@ function applyFPReductions(threats, reachableFiles, packageName, packageDeps, re
 
   // Dilution floor: retain at least one instance at original severity per type
   // to prevent complete count-threshold dilution by injected benign patterns.
-  // Only applies to types with low maxCount (≤3) and a severity constraint (from field),
-  // where injection of benign patterns is feasible. High-count types (dynamic_require,
-  // env_access) and unconstrained types (suspicious_dataflow) represent legitimate
-  // framework patterns and should allow full downgrade.
+  // Applies to types with low maxCount (≤3) AND either a `from` severity
+  // constraint OR an explicit `floorEligible: true` opt-in (audit 2026-05 SC-C2).
+  // High-count types (dynamic_require, env_access) represent legitimate framework
+  // patterns and remain ineligible (no floor → full downgrade allowed).
   const restoredTypes = new Set();
   for (const t of threats) {
     const lastReduction = t.reductions?.find(r => r.rule === 'count_threshold');
     if (lastReduction && !restoredTypes.has(t.type)) {
       const rule = FP_COUNT_THRESHOLDS[t.type];
-      if (rule && rule.from && rule.maxCount <= 3) {
+      if (rule && (rule.from || rule.floorEligible) && rule.maxCount <= 3) {
         t.severity = lastReduction.from;
         t.reductions = t.reductions.filter(r => r.rule !== 'count_threshold');
         t.reductions.push({ rule: 'count_threshold_floor', note: 'retained one instance at original severity' });

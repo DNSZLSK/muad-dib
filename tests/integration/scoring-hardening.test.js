@@ -143,7 +143,7 @@ async function runScoringHardeningTests() {
   // ===================================================================
   // H7: suspicious_dataflow 80% exception still works
   // ===================================================================
-  test('H7: suspicious_dataflow at 75% IS downgraded (under 80% guard)', () => {
+  test('H7: suspicious_dataflow at 75% IS downgraded except floor-restored instance (SC-C2)', () => {
     const threats = [];
     // 6 dataflow + 2 other = 75%
     for (let i = 0; i < 6; i++) {
@@ -152,14 +152,17 @@ async function runScoringHardeningTests() {
     threats.push({ type: 'obfuscation_detected', severity: 'HIGH', file: 'a.js', message: 'obf' });
     threats.push({ type: 'dangerous_call_function', severity: 'MEDIUM', file: 'b.js', message: 'call' });
     applyFPReductions(threats, null, null);
-    // 6/8 = 75% < 80% and count > 3 → should be downgraded to LOW
-    assert(threats[0].severity === 'LOW',
-      `suspicious_dataflow at 75% should be LOW, got ${threats[0].severity}`);
+    // 6/8 = 75% < 80% and count > 3 → downgraded except 1 floor-restored to CRITICAL
+    const dataflow = threats.filter(t => t.type === 'suspicious_dataflow');
+    const lows = dataflow.filter(t => t.severity === 'LOW');
+    const criticals = dataflow.filter(t => t.severity === 'CRITICAL');
+    assert(lows.length === 5, `Expected 5 LOW suspicious_dataflow, got ${lows.length}`);
+    assert(criticals.length === 1, `Expected 1 CRITICAL restored by floor, got ${criticals.length}`);
   });
 
   // P7: suspicious_dataflow now has full bypass (like vm_code_execution).
   // The 80% ratio guard was removed — packages with >3 suspicious_dataflow are always SDKs.
-  test('H7-P7: suspicious_dataflow at 90% IS downgraded (full bypass, no 80% guard)', () => {
+  test('H7-P7: suspicious_dataflow at 90% IS downgraded except floor-restored instance (SC-C2)', () => {
     const threats = [];
     // 9 dataflow + 1 other = 90%
     for (let i = 0; i < 9; i++) {
@@ -167,9 +170,12 @@ async function runScoringHardeningTests() {
     }
     threats.push({ type: 'obfuscation_detected', severity: 'HIGH', file: 'a.js', message: 'obf' });
     applyFPReductions(threats, null, null);
-    // P7: full bypass → downgraded regardless of ratio
-    assert(threats[0].severity === 'LOW',
-      `suspicious_dataflow at 90% should be LOW (P7 full bypass), got ${threats[0].severity}`);
+    // P7: full bypass → downgraded except 1 floor-restored to CRITICAL
+    const dataflow = threats.filter(t => t.type === 'suspicious_dataflow');
+    const lows = dataflow.filter(t => t.severity === 'LOW');
+    const criticals = dataflow.filter(t => t.severity === 'CRITICAL');
+    assert(lows.length === 8, `Expected 8 LOW suspicious_dataflow, got ${lows.length}`);
+    assert(criticals.length === 1, `Expected 1 CRITICAL restored by floor, got ${criticals.length}`);
   });
 
   // ===================================================================
@@ -253,8 +259,8 @@ async function runScoringHardeningTests() {
   // FP-P6 Fix 1: credential_regex_harvest count-based downgrade
   // ==========================================================================
   // P7: credential_regex_harvest threshold lowered from >4 to >2
-  // Audit v3 B3: removed `from` constraint → no dilution floor, ALL go LOW
-  test('FP-P7: credential_regex_harvest >2 hits → ALL go LOW (no dilution floor)', () => {
+  // Audit 2026-05 SC-C2: dilution floor restored via floorEligible — 1 instance kept HIGH.
+  test('FP-P7: credential_regex_harvest >2 hits → 1 stays HIGH (floor restored, SC-C2)', () => {
     const threats = [];
     for (let i = 0; i < 4; i++) {
       threats.push({ type: 'credential_regex_harvest', severity: 'HIGH', file: 'lib/http.js', message: `regex${i}` });
@@ -267,11 +273,11 @@ async function runScoringHardeningTests() {
     const credThreats = threats.filter(t => t.type === 'credential_regex_harvest');
     const highOnes = credThreats.filter(t => t.severity === 'HIGH');
     const lowOnes = credThreats.filter(t => t.severity === 'LOW');
-    // Audit v3 B3: no dilution floor — all instances go LOW for complete FP suppression
-    assert(highOnes.length === 0,
-      `Expected 0 HIGH (no dilution floor), got ${highOnes.length}`);
-    assert(lowOnes.length === 4,
-      `All 4 should be LOW, got ${lowOnes.length}`);
+    // SC-C2: floorEligible restores 1 instance at original HIGH severity
+    assert(highOnes.length === 1,
+      `Expected 1 HIGH restored by floor, got ${highOnes.length}`);
+    assert(lowOnes.length === 3,
+      `Expected 3 LOW after floor restoration, got ${lowOnes.length}`);
   });
 
   test('FP-P7: credential_regex_harvest <=2 hits stays HIGH', () => {
@@ -437,14 +443,16 @@ async function runScoringHardeningTests() {
   // ==========================================================================
   // FP-P7: suspicious_dataflow full bypass — 100% ratio still downgrades
   // ==========================================================================
-  test('FP-P7: suspicious_dataflow at 100% IS downgraded (full bypass)', () => {
+  test('FP-P7: suspicious_dataflow at 100% IS downgraded except floor-restored instance (SC-C2)', () => {
     const threats = [];
     for (let i = 0; i < 5; i++) {
       threats.push({ type: 'suspicious_dataflow', severity: 'CRITICAL', file: `f${i}.js`, message: `flow${i}` });
     }
     applyFPReductions(threats, null, null);
-    assert(threats[0].severity === 'LOW',
-      `suspicious_dataflow at 100% should be LOW (full bypass), got ${threats[0].severity}`);
+    const lows = threats.filter(t => t.severity === 'LOW');
+    const criticals = threats.filter(t => t.severity === 'CRITICAL');
+    assert(lows.length === 4, `Expected 4 LOW suspicious_dataflow, got ${lows.length}`);
+    assert(criticals.length === 1, `Expected 1 CRITICAL restored by floor, got ${criticals.length}`);
   });
 
   test('FP-P7: suspicious_dataflow <=3 stays CRITICAL (below count threshold)', () => {
@@ -472,7 +480,7 @@ async function runScoringHardeningTests() {
       `Single suspicious_dataflow at 50% ratio should stay CRITICAL, got ${threats[0].severity}`);
   });
 
-  test('v2.6.5: 4 suspicious_dataflow in SDK package → downgrade (count > 3)', () => {
+  test('v2.6.5: 4 suspicious_dataflow in SDK package → downgrade (count > 3) except floor-restored (SC-C2)', () => {
     const threats = [
       { type: 'suspicious_dataflow', severity: 'CRITICAL', file: 'a.js', message: 'flow1' },
       { type: 'suspicious_dataflow', severity: 'CRITICAL', file: 'b.js', message: 'flow2' },
@@ -481,8 +489,11 @@ async function runScoringHardeningTests() {
       { type: 'obfuscation_detected', severity: 'HIGH', file: 'e.js', message: 'obf1' }
     ];
     applyFPReductions(threats, null, null);
-    assert(threats[0].severity === 'LOW',
-      `4 suspicious_dataflow (count > 3) should be LOW, got ${threats[0].severity}`);
+    const dataflow = threats.filter(t => t.type === 'suspicious_dataflow');
+    const lows = dataflow.filter(t => t.severity === 'LOW');
+    const criticals = dataflow.filter(t => t.severity === 'CRITICAL');
+    assert(lows.length === 3, `Expected 3 LOW suspicious_dataflow, got ${lows.length}`);
+    assert(criticals.length === 1, `Expected 1 CRITICAL restored by floor, got ${criticals.length}`);
   });
 
   test('v2.6.5: 2 suspicious_dataflow at 60% ratio stays CRITICAL (count <= 3)', () => {
