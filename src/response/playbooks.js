@@ -161,6 +161,14 @@ const PLAYBOOKS = {
   typosquat_detected:
     'ATTENTION: Ce package a un nom tres similaire a un package populaire. Verifier que c\'est bien le bon package. Si erreur de frappe, corriger immediatement.',
 
+  // RT-C1: dependency boundary-squat (Axios UNC1069 March 2026)
+  dependency_typosquat:
+    'Une dependance declaree ressemble a un package populaire avec un prefixe/suffixe suspect. Verifier le nom exact dans package.json et confirmer avec npm view <package>. Si erreur de frappe, corriger immediatement.',
+  dependency_typosquat_used:
+    'Le code charge cette dep typosquattee via require/import. Si ce n\'est pas intentionnel, supprimer la dep et la reference, puis reinstaller avec --ignore-scripts.',
+  dependency_typosquat_require:
+    'CRITIQUE — pattern Axios UNC1069 detecte: dep typosquattee declaree ET chargee dans le code. Le wrapper apparent est probablement legitime mais sa dep contient le payload. Bloquer l\'install (--ignore-scripts), supprimer la dep, auditer le history de modifications.',
+
   dangerous_call_function:
     'Appel new Function() detecte. Equivalent a eval(). Verifier la source des donnees.',
 
