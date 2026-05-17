@@ -142,8 +142,12 @@ function getEntryPoints(packagePath) {
     candidates.push(pkg.module);
   }
 
-  // Lifecycle scripts: extract .js files from preinstall/install/postinstall/prepare
-  const lifecycleKeys = ['preinstall', 'install', 'postinstall', 'prepare'];
+  // Lifecycle scripts: extract .js files from npm lifecycle hooks
+  const lifecycleKeys = [
+    'preinstall', 'install', 'postinstall', 'prepare',
+    'prepack', 'postpack', 'prepublishOnly', 'prepublish',
+    'preuninstall', 'uninstall', 'postuninstall'
+  ];
   if (pkg.scripts) {
     for (const key of lifecycleKeys) {
       if (typeof pkg.scripts[key] === 'string') {
