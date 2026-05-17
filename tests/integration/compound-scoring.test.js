@@ -500,17 +500,17 @@ async function runCompoundScoringTests() {
 
   console.log('\n  --- Audit v3 Bloc 3: FP Reduction ---\n');
 
-  // FP Fix 1: credential_regex_harvest — no dilution floor
-  test('FP-B3-1: credential_regex_harvest >2 instances → ALL go LOW (no dilution floor)', () => {
+  // FP Fix 1: credential_regex_harvest — dilution floor restores 1 instance (SC-C2)
+  test('FP-B3-1: credential_regex_harvest >2 instances → 1 stays HIGH (dilution floor restored, SC-C2)', () => {
     const threats = [];
     for (let i = 0; i < 5; i++) {
       threats.push({ type: 'credential_regex_harvest', severity: 'HIGH', file: `lib/auth${i}.js`, message: 'regex' });
     }
     applyFPReductions(threats);
     const highInstances = threats.filter(t => t.type === 'credential_regex_harvest' && t.severity === 'HIGH');
-    assert(highInstances.length === 0, `Expected 0 HIGH credential_regex_harvest (dilution floor removed), got ${highInstances.length}`);
+    assert(highInstances.length === 1, `Expected 1 HIGH credential_regex_harvest restored by dilution floor, got ${highInstances.length}`);
     const lowInstances = threats.filter(t => t.type === 'credential_regex_harvest' && t.severity === 'LOW');
-    assert(lowInstances.length === 5, `Expected all 5 instances to be LOW, got ${lowInstances.length}`);
+    assert(lowInstances.length === 4, `Expected 4 LOW instances after floor restoration, got ${lowInstances.length}`);
   });
 
   test('FP-B3-1: credential_regex_harvest ≤2 instances → stays at original severity', () => {
@@ -675,7 +675,7 @@ async function runCompoundScoringTests() {
 
   // --- Bloc 3 edge cases: FP reduction precision ---
 
-  test('FP-B3-5: credential_regex_harvest count > 2 → ALL go LOW (no dilution floor)', () => {
+  test('FP-B3-5: credential_regex_harvest count > 2 → 1 stays HIGH (dilution floor restored, SC-C2)', () => {
     const threats = [];
     for (let i = 0; i < 5; i++) {
       threats.push({ type: 'credential_regex_harvest', severity: 'HIGH', file: `f${i}.js`, message: `Regex ${i}` });
@@ -686,7 +686,7 @@ async function runCompoundScoringTests() {
     applyFPReductions(threats);
     const crh = threats.filter(t => t.type === 'credential_regex_harvest');
     const highCount = crh.filter(t => t.severity === 'HIGH').length;
-    assert(highCount === 0, `No credential_regex_harvest should stay HIGH (no dilution floor), got ${highCount}`);
+    assert(highCount === 1, `1 credential_regex_harvest should stay HIGH (floorEligible), got ${highCount}`);
   });
 
   test('FP-B3-5: credential_regex_harvest count ≤ 2 → stays HIGH', () => {
