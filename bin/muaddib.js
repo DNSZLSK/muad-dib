@@ -297,6 +297,7 @@ if (command === 'version' || command === '--version' || command === '-v') {
   if (wantHelp) showHelp('watch');
   watch(target);
 } else if (command === 'update') {
+  if (wantHelp) showHelp('update');
   updateIOCs().then(() => {
     process.exit(0);
   }).catch(err => {
@@ -304,6 +305,7 @@ if (command === 'version' || command === '--version' || command === '-v') {
     process.exit(1);
   });
 } else if (command === 'scrape') {
+  if (wantHelp) showHelp('scrape');
   runScraper().then(result => {
     console.log(`[OK] ${result.added} new IOCs (total: ${result.total})`);
     process.exit(0);

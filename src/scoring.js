@@ -1186,7 +1186,7 @@ function applyFPReductions(threats, reachableFiles, packageName, packageDeps, re
   // MUST run AFTER benign_lifecycle reduction to correctly detect LOW lifecycle_script.
   const LIFECYCLE_GUARD_TYPES = new Set([
     'obfuscation_detected', 'dynamic_require', 'dangerous_call_function',
-    'dangerous_call_eval', 'staged_payload'
+    'dangerous_call_eval', 'staged_payload', 'env_access'
   ]);
 
   const lifecycleThreats = threats.filter(t => t.type === 'lifecycle_script');
