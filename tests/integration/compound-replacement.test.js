@@ -3,14 +3,6 @@
 const { test, assert } = require('../test-utils');
 const { applyCompoundBoosts, computeGroupScore } = require('../../src/scoring.js');
 
-function withFlag(name, val, fn) {
-  const before = process.env[name];
-  if (val === undefined) delete process.env[name]; else process.env[name] = val;
-  try { return fn(); } finally {
-    if (before === undefined) delete process.env[name]; else process.env[name] = before;
-  }
-}
-
 async function runCompoundReplacementTests() {
   console.log('\n=== COMPOUND REPLACEMENT TESTS (Hybrid v3 Phase 3) ===\n');
 
@@ -42,28 +34,14 @@ async function runCompoundReplacementTests() {
     assert(ls.replacedByCompound === 'lifecycle_dangerous_exec', `MEDIUM constituent should be tagged: got ${ls.replacedByCompound}`);
   });
 
-  test('Phase 3 OFF: replacedByCompound tag has no scoring effect', () => {
+  test('Phase 3: tagged constituent contributes 0 to score (SC-C1 — gate removed, tag honored unconditionally)', () => {
     const threats = [
       { type: 'staged_binary_payload', severity: 'HIGH', file: 'a.js', message: 'm', replacedByCompound: 'crypto_staged_payload' },
       { type: 'crypto_decipher', severity: 'HIGH', file: 'a.js', message: 'm' }
     ];
-    withFlag('MUADDIB_COMPOUND_REPLACE', undefined, () => {
-      const score = computeGroupScore(threats);
-      // Both HIGHs count → 10 + 10 = 20 (subject to confidence factor — at minimum >= 10)
-      assert(score >= 15, `Phase 3 OFF: tag ignored, score >= 15 expected, got ${score}`);
-    });
-  });
-
-  test('Phase 3 ON: tagged constituent contributes 0 to score', () => {
-    const threats = [
-      { type: 'staged_binary_payload', severity: 'HIGH', file: 'a.js', message: 'm', replacedByCompound: 'crypto_staged_payload' },
-      { type: 'crypto_decipher', severity: 'HIGH', file: 'a.js', message: 'm' }
-    ];
-    withFlag('MUADDIB_COMPOUND_REPLACE', '1', () => {
-      const score = computeGroupScore(threats);
-      // Tagged threat (HIGH=10) suppressed; only crypto_decipher counts
-      assert(score < 15, `Phase 3 ON: tagged constituent suppressed, expected <15, got ${score}`);
-    });
+    const score = computeGroupScore(threats);
+    // Tagged threat (HIGH=10) suppressed; only crypto_decipher counts
+    assert(score < 15, `Tagged constituent should be suppressed, expected <15, got ${score}`);
   });
 
   test('Phase 3: re-running applyCompoundBoosts on cached threats with compound already present still tags', () => {

@@ -183,13 +183,11 @@ function isPackageLevelThreat(threat) {
  * @param {Array} threats - array of threat objects (after FP reductions)
  * @returns {number} score 0-100
  */
-// Hybrid v3 Phase 3: when enabled, threats tagged with replacedByCompound
-// (their compound has fired and represents their score) contribute 0 to the
-// group score. Avoids the additive double-count of compound + constituents.
-const _COMPOUND_REPLACE_ENABLED = () => process.env.MUADDIB_COMPOUND_REPLACE === '1';
-function _isReplacedByCompound(t) {
-  return _COMPOUND_REPLACE_ENABLED() && t.replacedByCompound;
-}
+// Hybrid v3 Phase 3: threats tagged with replacedByCompound (their compound has
+// fired and represents their score) contribute 0 to the group score. Avoids the
+// additive double-count of compound + constituents. Audit 2026-05 SC-C1: the
+// previous MUADDIB_COMPOUND_REPLACE env-var gate is removed — the tag posed by
+// applyCompoundBoosts is now honored unconditionally.
 
 function computeGroupScore(threats) {
   // Score decay default ON since v2.11.9 (FPR plan Chantier 1). Opt-out: MUADDIB_DECAY=0.
@@ -199,7 +197,7 @@ function computeGroupScore(threats) {
   let dataflowMediumPoints = 0;
 
   for (const t of threats) {
-    if (_isReplacedByCompound(t)) continue;
+    if (t.replacedByCompound) continue;
     const weight = _severityWeights[t.severity] || 0;
     const rule = getRule(t.type);
     const factor = CONFIDENCE_FACTORS[rule.confidence] || 1.0;
@@ -257,7 +255,7 @@ function computeGroupScoreDecay(threats) {
   const typeBuckets = new Map();
 
   for (const t of threats) {
-    if (_isReplacedByCompound(t)) continue;
+    if (t.replacedByCompound) continue;
     const weight = _severityWeights[t.severity] || 0;
     const rule = getRule(t.type);
     const factor = CONFIDENCE_FACTORS[rule.confidence] || 1.0;
