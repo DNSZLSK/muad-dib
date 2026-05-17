@@ -94,6 +94,17 @@ const RULES = {
     ],
     mitre: 'T1195.002'
   },
+  monorepo_detected: {
+    id: 'MUADDIB-PKG-021',
+    name: 'Monorepo Detected',
+    severity: 'MEDIUM',
+    confidence: 'high',
+    description: 'Workspace monorepo detecte (yarn/pnpm/lerna/turbo). Le perimetre du scan depasse un seul package — auditer chaque workspace separement pour un scoring per-package.',
+    references: [
+      'https://docs.npmjs.com/cli/v10/using-npm/workspaces'
+    ],
+    mitre: 'T1195.002'
+  },
 
   // Obfuscation detections
   obfuscation_detected: {
@@ -2109,6 +2120,17 @@ const RULES = {
       'https://attack.mitre.org/techniques/T1071/'
     ],
     mitre: 'T1071'
+  },
+  large_package_graph_truncated: {
+    id: 'MUADDIB-FLOW-006',
+    name: 'Large Package Graph Truncated',
+    severity: 'MEDIUM',
+    confidence: 'medium',
+    description: 'Le graphe de modules depasse la limite (MAX_GRAPH_NODES). Cross-file dataflow non analyse — risque de blind spot sur monorepo ou large package. Auditer les sous-modules manuellement.',
+    references: [
+      'https://attack.mitre.org/techniques/T1195/002/'
+    ],
+    mitre: 'T1195.002'
   },
 
   // Audit v3 Bypass Detections (AST-062 to AST-069)

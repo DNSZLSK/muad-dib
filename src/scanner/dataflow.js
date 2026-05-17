@@ -40,13 +40,39 @@ const MODULE_SINK_METHODS = {
   ws: { send: 'network_send', write: 'network_send' },
   mqtt: { publish: 'network_send', send: 'network_send' },
   'socket.io-client': { emit: 'network_send', send: 'network_send' },
-  'socket.io': { emit: 'network_send', send: 'network_send' }
+  'socket.io': { emit: 'network_send', send: 'network_send' },
+  // audit DF-H1 v2.11.15: 2026 sinks with clean direct call patterns
+  undici: { request: 'network_send', fetch: 'network_send', stream: 'network_send' },
+  'graphql-request': { request: 'network_send', gql: 'network_send' },
+  '@apollo/client': { query: 'network_send', mutate: 'network_send' },
+  '@grpc/grpc-js': {
+    makeUnaryRequest: 'network_send',
+    makeClientStreamRequest: 'network_send',
+    makeServerStreamRequest: 'network_send',
+    makeBidiStreamRequest: 'network_send'
+  }
 };
 
-// All tracked module names (for filtering in buildTaintMap)
+// audit DF-H1 v2.11.15: 2026 exfil-prone modules. When imported, ANY call with a
+// credential/env source in the same file → suspicious_module_sink MEDIUM with
+// module attribution. Catches chained access (bot.telegram.sendMessage), dynamic
+// methods (actor.exfil), and SDK fluent APIs that direct method matching misses.
+const EXFIL_PRONE_MODULES = new Set([
+  'telegraf', 'node-telegram-bot-api',
+  'discord.js',
+  '@dfinity/agent',
+  'undici',
+  '@grpc/grpc-js',
+  '@apollo/client', 'graphql-request'
+]);
+
+// All tracked module names (for filtering in buildTaintMap). EXFIL_PRONE_MODULES
+// must be tracked even when not in MODULE_SINK_METHODS so buildTaintMap registers
+// them (e.g. require('telegraf') populates taintMap, enabling the heuristic).
 const TRACKED_MODULES = new Set([
   ...Object.keys(MODULE_SOURCE_METHODS),
-  ...Object.keys(MODULE_SINK_METHODS)
+  ...Object.keys(MODULE_SINK_METHODS),
+  ...EXFIL_PRONE_MODULES
 ]);
 
 // Methods that execute commands — used for exec result capture detection
@@ -908,6 +934,29 @@ function analyzeFile(content, filePath, basePath) {
       severity: 'MEDIUM',
       message: `Non-HTTP network sink detected: ${suspiciousModuleSinks.map(s => s.name).join(', ')}`,
       file: path.relative(basePath, filePath)
+    });
+  }
+
+  // audit DF-H1 v2.11.15: 2026 exfil-prone module heuristic.
+  // If any EXFIL_PRONE_MODULES (telegraf, discord.js, @dfinity/agent, undici, gRPC,
+  // GraphQL clients) is imported AND a credential/env_read source is present in
+  // the same file, emit suspicious_module_sink with module attribution. Catches
+  // chained access (bot.telegram.sendMessage) and dynamic methods (actor.exfil)
+  // that direct MODULE_SINK_METHODS matching cannot reach.
+  const exfilProneInScope = [];
+  for (const taint of taintMap.values()) {
+    if (taint && EXFIL_PRONE_MODULES.has(taint.source)) exfilProneInScope.push(taint.source);
+  }
+  if (exfilProneInScope.length > 0 &&
+      sources.some(s => s.type === 'env_read' || s.type === 'credential_read')) {
+    const moduleList = [...new Set(exfilProneInScope)].join(', ');
+    const firstSourceLine = sources.find(s => s.line)?.line || 0;
+    threats.push({
+      type: 'suspicious_module_sink',
+      severity: 'MEDIUM',
+      message: `Module exfil-prone 2026 (${moduleList}) avec credential/env source dans le meme fichier — canal d'exfiltration potentiel.`,
+      file: path.relative(basePath, filePath),
+      line: firstSourceLine
     });
   }
 
