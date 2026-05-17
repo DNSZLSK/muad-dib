@@ -168,6 +168,11 @@ const PLAYBOOKS = {
     'Le code charge cette dep typosquattee via require/import. Si ce n\'est pas intentionnel, supprimer la dep et la reference, puis reinstaller avec --ignore-scripts.',
   dependency_typosquat_require:
     'CRITIQUE — pattern Axios UNC1069 detecte: dep typosquattee declaree ET chargee dans le code. Le wrapper apparent est probablement legitime mais sa dep contient le payload. Bloquer l\'install (--ignore-scripts), supprimer la dep, auditer le history de modifications.',
+  // RT-C1-FPR (audit 2026-05)
+  typosquat_lifecycle:
+    'CRITIQUE — pattern boundary-squat avec hook lifecycle: la dep typosquattee sera executee a l\'install. Bloquer l\'install (--ignore-scripts), supprimer la dep, regenerer les secrets exposes, auditer le history.',
+  typosquat_dataflow:
+    'IMPORTANT — dep boundary-squat coexistante avec un flux credentials → reseau dans le code. Verifier si la dep est require()d depuis le fichier d\'exfil. Si oui = CRITICAL (compound dependency_typosquat_require complementaire).',
 
   dangerous_call_function:
     'Appel new Function() detecte. Equivalent a eval(). Verifier la source des donnees.',

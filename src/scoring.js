@@ -510,6 +510,30 @@ const SCORING_COMPOUNDS = [
     fileFrom: 'dependency_typosquat_used'
   },
   {
+    // RT-C1-FPR (audit 2026-05): boundary-squat dep + lifecycle hook → install-time
+    // payload delivery via typosquat sub-dep. Mirror of dependency_typosquat_require
+    // but with lifecycle instead of _used: stronger signal — proves install-time
+    // execution intent without requiring explicit require() in scanned code.
+    type: 'typosquat_lifecycle',
+    requires: ['dependency_typosquat', 'lifecycle_script'],
+    severity: 'CRITICAL',
+    message: 'Boundary-squat dependency + lifecycle hook — install-time payload delivery via typosquat sub-dep (scoring compound).',
+    fileFrom: 'dependency_typosquat'
+    // No sameFile: both are package.json-level
+  },
+  {
+    // RT-C1-FPR (audit 2026-05): boundary-squat dep + suspicious dataflow → typosquat
+    // dep co-occurring with credential exfil. Mirror of lifecycle_dataflow (HIGH) —
+    // co-occurrence without direct causal link, so HIGH not CRITICAL.
+    type: 'typosquat_dataflow',
+    requires: ['dependency_typosquat', 'suspicious_dataflow'],
+    severity: 'HIGH',
+    message: 'Boundary-squat dependency + suspicious dataflow — typosquat dep co-occurring with credential exfil (scoring compound).',
+    fileFrom: 'suspicious_dataflow',
+    // No sameFile: dep is package.json, dataflow is src/*.js
+    excludeIfBundled: true
+  },
+  {
     type: 'lifecycle_inline_exec',
     requires: ['lifecycle_script', 'node_inline_exec'],
     severity: 'CRITICAL',
