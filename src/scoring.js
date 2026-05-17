@@ -112,6 +112,8 @@ const PACKAGE_LEVEL_TYPES = new Set([
   // Compound scoring rules — package-level co-occurrences
   'lifecycle_typosquat', 'lifecycle_inline_exec', 'lifecycle_remote_require',
   'lifecycle_dataflow', 'lifecycle_dangerous_exec', 'obfuscated_lifecycle_env',
+  // RT-C1: dependency boundary-squat family (Axios UNC1069 March 2026)
+  'dependency_typosquat', 'dependency_typosquat_require',
   // Blue Team v8: package-level boost signals
   'isolated_suspicious_file', 'deep_suspicious_file',
   // Blue Team v8b: phantom lifecycle scripts
@@ -380,7 +382,9 @@ const DIST_EXEMPT_TYPES = new Set([
   'crypto_staged_payload', 'lifecycle_typosquat',
   'lifecycle_inline_exec', 'lifecycle_remote_require',
   'lifecycle_file_exec',  // B6: lifecycle → malicious file compound
-  'lifecycle_dataflow', 'lifecycle_dangerous_exec', 'obfuscated_lifecycle_env'
+  'lifecycle_dataflow', 'lifecycle_dangerous_exec', 'obfuscated_lifecycle_env',
+  // RT-C1: Boundary-squat compound is never coincidental (dep declared AND require()d)
+  'dependency_typosquat_require'
   // P6: remote_code_load and proxy_data_intercept removed — in bundled dist/ files,
   // fetch + eval co-occurrence is coincidental (bundler combines HTTP client + template compilation).
   // fetch_decrypt_exec (fetch+decrypt+eval triple) remains exempt — never coincidental.
@@ -487,6 +491,15 @@ const SCORING_COMPOUNDS = [
     severity: 'CRITICAL',
     message: 'Lifecycle hook on typosquat package — dependency confusion attack vector (scoring compound).',
     fileFrom: 'typosquat_detected'
+  },
+  {
+    // RT-C1: Boundary-squat dep declared AND require()d in code → CRITICAL.
+    // Pattern Axios UNC1069 (March 2026): wrapper looks benign, payload is in the dep.
+    type: 'dependency_typosquat_require',
+    requires: ['dependency_typosquat', 'dependency_typosquat_used'],
+    severity: 'CRITICAL',
+    message: 'Boundary-squat dependency declared AND require()d in code — Axios UNC1069 pattern (scoring compound).',
+    fileFrom: 'dependency_typosquat_used'
   },
   {
     type: 'lifecycle_inline_exec',

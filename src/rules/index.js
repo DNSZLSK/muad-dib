@@ -335,6 +335,38 @@ const RULES = {
     mitre: 'T1195.002'
   },
 
+  // RT-C1: Dependency boundary-squat (Axios UNC1069 March 2026)
+  dependency_typosquat: {
+    id: 'MUADDIB-TYPO-002',
+    name: 'Dependency Boundary-Squat',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'Une dependance declaree porte le nom d\'un package populaire prefixe/suffixe d\'un token suspect (Axios UNC1069, mars 2026). Le wrapper innocent declare un sub-dep malveillant.',
+    references: [
+      'https://snyk.io/blog/typosquatting-attacks/',
+      'https://attack.mitre.org/techniques/T1195/002/'
+    ],
+    mitre: 'T1195.002'
+  },
+  dependency_typosquat_used: {
+    id: 'MUADDIB-TYPO-003',
+    name: 'Boundary-Squat Dependency Used in Code',
+    severity: 'MEDIUM',
+    confidence: 'high',
+    description: 'Le code du package require/import un nom de dependance identifie comme boundary-squat. Signal fort que la dep typosquattee est intentionnellement chargee.',
+    references: ['https://attack.mitre.org/techniques/T1195/002/'],
+    mitre: 'T1195.002'
+  },
+  dependency_typosquat_require: {
+    id: 'MUADDIB-COMPOUND-013',
+    name: 'Boundary-Squat Dep Required at Runtime',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Dependance boundary-squat declaree ET chargee via require/import dans le code: pattern Axios UNC1069 (sub-dep injection avec wrapper innocent).',
+    references: ['https://attack.mitre.org/techniques/T1195/002/'],
+    mitre: 'T1195.002'
+  },
+
   // Package.json script patterns
   curl_pipe_sh: {
     id: 'MUADDIB-PKG-002',

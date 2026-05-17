@@ -24,8 +24,29 @@ const POPULAR_PACKAGES = [
   'mobx', 'redux', 'zustand', 'formik', 'yup', 'ajv', 'validator',
   'date-fns', 'dayjs', 'luxon', 'numeral', 'accounting', 'currency.js',
   'lodash-es', 'core-js', 'regenerator-runtime', 'tslib', 'classnames',
-  'prop-types', 'cross-env', 'node-fetch', 'got'
+  'prop-types', 'cross-env', 'node-fetch', 'got',
+  // RT-C1 (Axios UNC1069 March 2026): crypto-js missing — wrapper packages declared
+  // `plain-crypto-js` as sub-dep. Added so dependency boundary-squat catches it.
+  'crypto-js'
 ];
+
+// RT-C1: Hyphen tokens that legitimately PREFIX or SUFFIX popular package names.
+// `<token>-<popular>` or `<popular>-<token>` is considered benign when the extra
+// token is in this set (ecosystem qualifiers, framework prefixes, official scopes).
+const LEGIT_BOUNDARY_TOKENS = new Set([
+  // Frameworks / build tools (also common official sub-packages)
+  'react', 'vue', 'angular', 'svelte', 'next', 'nuxt', 'gatsby', 'expo',
+  'eslint', 'babel', 'webpack', 'rollup', 'vite', 'parcel', 'esbuild',
+  'jest', 'mocha', 'vitest', 'karma', 'cypress', 'playwright',
+  'typescript', 'ts', 'tsdx', 'koa', 'fastify', 'express', 'nest',
+  'redux', 'mobx', 'apollo', 'graphql', 'rxjs',
+  // Build / runtime variants
+  'cli', 'core', 'utils', 'plugin', 'loader', 'preset', 'config',
+  'common', 'browser', 'node', 'native', 'web', 'mobile',
+  'esm', 'cjs', 'umd', 'es', 'types', 'typings',
+  // Versions / channels
+  'v2', 'v3', 'v4', 'next', 'latest', 'stable', 'lts', 'legacy', 'beta', 'alpha'
+]);
 
 // Packages legitimes courts ou qui ressemblent a des populaires
 const WHITELIST = new Set([
@@ -275,8 +296,6 @@ async function scanTyposquatting(targetPath) {
     }
   }
 
-  if (candidates.length === 0) return threats;
-
   // Phase 2: API enrichment (batched to avoid socket exhaustion)
   const BATCH_SIZE = 10;
   const metadataResults = [];
@@ -333,7 +352,150 @@ async function scanTyposquatting(targetPath) {
     });
   }
 
+  // ============================================
+  // RT-C1: dependency boundary-squat detection (Axios UNC1069 March 2026)
+  // ============================================
+  // Runs on deps that did NOT match Levenshtein (length filter excludes them).
+  // Catches `<prefix>-<popular>` / `<popular>-<suffix>` injections in package.json
+  // deps, plus require/import usage cross-check inside the package source.
+  const levenshteinMatches = new Set(candidates.map(c => c.depName));
+  const RT_C1_MAX_DEPS = 50;
+  let depsEvaluated = 0;
+  for (const depName of Object.keys(dependencies)) {
+    if (depsEvaluated >= RT_C1_MAX_DEPS) break;
+    if (levenshteinMatches.has(depName)) continue; // already flagged by Levenshtein path
+    const bMatch = findDependencyBoundarySquat(depName);
+    if (!bMatch) continue;
+    depsEvaluated++;
+
+    const declMsg = 'Dependency "' + depName + '" looks like a boundary-squat of "'
+      + bMatch.original + '" (extra token: "' + bMatch.extra + '"). Axios UNC1069 pattern.';
+    threats.push({
+      type: 'dependency_typosquat',
+      severity: 'HIGH',
+      message: declMsg,
+      file: 'package.json',
+      details: {
+        suspicious: depName,
+        legitimate: bMatch.original,
+        technique: bMatch.type,
+        extra: bMatch.extra,
+        distance: bMatch.distance
+      }
+    });
+
+    // Cross-check: scan package source for require/import of this dep name
+    const usages = findDependencyUsages(targetPath, depName);
+    for (const u of usages) {
+      threats.push({
+        type: 'dependency_typosquat_used',
+        severity: 'MEDIUM',
+        message: 'Boundary-squat dep "' + depName + '" is require()/import()d in source code',
+        file: u.file,
+        line: u.line,
+        details: {
+          suspicious: depName,
+          legitimate: bMatch.original
+        }
+      });
+    }
+  }
+
   return threats;
+}
+
+/**
+ * RT-C1: Detects "boundary squat" patterns: <prefix>-<popular> or <popular>-<suffix>
+ * where the hyphenated tokens fully contain a popular package name and the extra
+ * material is NOT in LEGIT_BOUNDARY_TOKENS. This catches Axios UNC1069-style
+ * sub-dependency injection like `plain-crypto-js` (resembles `crypto-js`) that
+ * the Levenshtein matcher misses because length-diff is too large.
+ */
+function findDependencyBoundarySquat(name) {
+  const lower = name.toLowerCase();
+  if (!lower || lower.startsWith('@')) return null;            // skip scoped
+  if (lower.length < MIN_PACKAGE_LENGTH) return null;
+  if (WHITELIST.has(lower)) return null;
+  if (isLegitimateVariant(lower)) return null;
+  if (!lower.includes('-')) return null;                       // need a boundary
+  // If it's an exact match to a popular package, not a squat
+  if (POPULAR_PACKAGES_LOWER.indexOf(lower) !== -1) return null;
+
+  for (let i = 0; i < POPULAR_PACKAGES.length; i++) {
+    const popular = POPULAR_PACKAGES_LOWER[i];
+    if (popular.length < MIN_PACKAGE_LENGTH) continue;
+    if (lower === popular) continue;
+
+    if (popular.includes('-')) {
+      // Multi-token popular (e.g. crypto-js): match prefix or suffix at hyphen boundary
+      let extra = null;
+      if (lower.endsWith('-' + popular)) {
+        extra = lower.slice(0, lower.length - popular.length - 1);
+      } else if (lower.startsWith(popular + '-')) {
+        extra = lower.slice(popular.length + 1);
+      }
+      if (extra === null || extra.length === 0) continue;
+      // Reject if extra is a legit boundary token (single token only)
+      if (!extra.includes('-') && LEGIT_BOUNDARY_TOKENS.has(extra)) continue;
+      return { original: POPULAR_PACKAGES[i], type: 'boundary_squat', distance: extra.length, extra };
+    } else {
+      // Single-token popular: must appear as a full hyphen-bounded token in name
+      const tokens = lower.split('-');
+      const idx = tokens.indexOf(popular);
+      if (idx === -1) continue;
+      if (tokens.length === 1) continue;
+      const siblings = tokens.filter((_, j) => j !== idx);
+      // If all siblings are legit boundary tokens → benign variant (e.g. react-router)
+      if (siblings.every(t => LEGIT_BOUNDARY_TOKENS.has(t) || isLegitimateVariant(t))) continue;
+      const extra = siblings.join('-');
+      return { original: POPULAR_PACKAGES[i], type: 'boundary_squat', distance: extra.length, extra };
+    }
+  }
+  return null;
+}
+
+// RT-C1: Bounded scan of the package source for require/import of a given dep name.
+// Returns array of { file, line } usage sites. Bounds: 200 files, 256KB per file.
+const _DEP_USE_MAX_FILES = 200;
+const _DEP_USE_MAX_FILE_BYTES = 256 * 1024;
+function findDependencyUsages(targetPath, depName) {
+  const out = [];
+  if (!depName) return out;
+
+  let files;
+  try {
+    // Use a local require to avoid a circular import surface — utils.js is stable.
+    const { findFiles } = require('../utils.js');
+    files = findFiles(targetPath, { extensions: ['.js', '.mjs', '.cjs'], maxFiles: _DEP_USE_MAX_FILES });
+  } catch {
+    return out;
+  }
+  if (!files || files.length === 0) return out;
+
+  // Pre-build matchers — escape regex metacharacters in dep name
+  const escaped = depName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const reRequire = new RegExp(`require\\s*\\(\\s*['\"]${escaped}['\"]\\s*\\)`);
+  const reFrom = new RegExp(`from\\s+['\"]${escaped}['\"]`);
+  const reDynamic = new RegExp(`import\\s*\\(\\s*['\"]${escaped}['\"]\\s*\\)`);
+
+  for (const abs of files) {
+    let stat;
+    try { stat = fs.statSync(abs); } catch { continue; }
+    if (!stat.isFile() || stat.size > _DEP_USE_MAX_FILE_BYTES) continue;
+    let content;
+    try { content = fs.readFileSync(abs, 'utf8'); } catch { continue; }
+    // Fast-path early bail
+    if (!content.includes(depName)) continue;
+    const lines = content.split(/\r?\n/);
+    for (let i = 0; i < lines.length; i++) {
+      const ln = lines[i];
+      if (reRequire.test(ln) || reFrom.test(ln) || reDynamic.test(ln)) {
+        out.push({ file: path.relative(targetPath, abs), line: i + 1 });
+        break; // one match per file is enough — keeps signal density honest
+      }
+    }
+  }
+  return out;
 }
 
 function findTyposquatMatch(name) {

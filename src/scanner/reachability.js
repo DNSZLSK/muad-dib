@@ -214,6 +214,20 @@ function walkForSpawnTargets(node, fileDir, packagePath, targets) {
     }
   }
 
+  // RC-C3: new Worker('./worker.js') / new w.Worker(...) — worker_threads spawn.
+  // Stable since Node 12 (2019). Resolves only when first arg points to a real .js/.mjs/.cjs.
+  if (node.type === 'NewExpression' && node.callee && node.arguments && node.arguments.length >= 1) {
+    const ctorName = node.callee.type === 'Identifier'
+      ? node.callee.name
+      : (node.callee.type === 'MemberExpression' && node.callee.property
+          ? (node.callee.property.name || node.callee.property.value || '')
+          : '');
+    if (ctorName === 'Worker') {
+      const target = resolvePathArg(node.arguments[0], fileDir, packagePath);
+      if (target) targets.push(target);
+    }
+  }
+
   for (const key of Object.keys(node)) {
     if (key === 'type') continue;
     const child = node[key];

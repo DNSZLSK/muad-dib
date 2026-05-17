@@ -24,12 +24,13 @@ const MODULE_SOURCE_METHODS = {
   },
   child_process: {
     exec: 'command_output', execSync: 'command_output',
-    spawn: 'command_output', spawnSync: 'command_output'
+    spawn: 'command_output', spawnSync: 'command_output',
+    execFile: 'command_output', execFileSync: 'command_output', fork: 'command_output'
   }
 };
 
 const MODULE_SINK_METHODS = {
-  child_process: { exec: 'exec_sink', execSync: 'exec_sink', spawn: 'exec_sink' },
+  child_process: { exec: 'exec_sink', execSync: 'exec_sink', spawn: 'exec_sink', execFile: 'exec_sink', execFileSync: 'exec_sink', fork: 'exec_sink' },
   http: { request: 'network_send', get: 'network_send' },
   https: { request: 'network_send', get: 'network_send' },
   net: { connect: 'network_send', createConnection: 'network_send' },
@@ -49,7 +50,7 @@ const TRACKED_MODULES = new Set([
 ]);
 
 // Methods that execute commands — used for exec result capture detection
-const EXEC_METHODS = new Set(['exec', 'execSync', 'spawn', 'spawnSync']);
+const EXEC_METHODS = new Set(['exec', 'execSync', 'spawn', 'spawnSync', 'execFile', 'execFileSync', 'fork']);
 
 /**
  * Pre-pass: builds a taint map from require() assignments.
@@ -60,6 +61,24 @@ function buildTaintMap(ast) {
   const taintMap = new Map();
 
   walk.simple(ast, {
+    // ESM: import fs from 'fs' / import * as fs from 'fs' / import { exec } from 'child_process'
+    // Mirrors module-graph/annotate-tainted.js so ESM and CJS produce symmetric taint maps.
+    ImportDeclaration(node) {
+      if (!node.source || typeof node.source.value !== 'string') return;
+      const modName = node.source.value;
+      if (!TRACKED_MODULES.has(modName)) return;
+      for (const spec of node.specifiers) {
+        if (!spec.local || spec.local.type !== 'Identifier') continue;
+        if (spec.type === 'ImportDefaultSpecifier' || spec.type === 'ImportNamespaceSpecifier') {
+          taintMap.set(spec.local.name, { source: modName, detail: modName });
+        } else if (spec.type === 'ImportSpecifier') {
+          const imported = spec.imported && spec.imported.type === 'Identifier'
+            ? spec.imported.name
+            : (spec.imported && spec.imported.value ? spec.imported.value : spec.local.name);
+          taintMap.set(spec.local.name, { source: modName, detail: `${modName}.${imported}` });
+        }
+      }
+    },
     VariableDeclarator(node) {
       if (!node.init) return;
       let init = node.init;
@@ -471,7 +490,9 @@ function analyzeFile(content, filePath, basePath) {
 
       }
 
-      if (callName === 'exec' || callName === 'execSync') {
+      // DF-H2: extend exec_network classification to all EXEC_METHODS
+      // (execFile/execFileSync/fork were previously missed — trivial evasion vector).
+      if (EXEC_METHODS.has(callName)) {
         const arg = node.arguments[0];
         if (arg && arg.type === 'Literal' && typeof arg.value === 'string') {
           if (arg.value.includes('curl') || arg.value.includes('wget')) {
@@ -480,7 +501,6 @@ function analyzeFile(content, filePath, basePath) {
               name: callName,
               line: node.loc?.start?.line
             });
-    
           }
         }
       }
