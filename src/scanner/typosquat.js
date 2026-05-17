@@ -30,6 +30,23 @@ const POPULAR_PACKAGES = [
   'crypto-js'
 ];
 
+// RT-C1-FPR (audit 2026-05): frameworks dont les packages d'ecosysteme ont la
+// convention <framework>-<role>-<extension> (eslint-plugin-react, babel-preset-env,
+// gatsby-plugin-mdx, eslint-import-resolver-typescript). Un dep dont le PREMIER
+// segment hyphene est dans ce Set est une extension legitime du framework, jamais
+// un squat d'un autre package -- quelles que soient les autres segments.
+// EXCLUS volontairement : react, vue, angular, svelte, typescript. Leurs packages
+// d'ecosysteme ont le framework EN SUFFIXE (eslint-plugin-react), donc la convention
+// prefixe ne s'applique pas et conserver la detection de squats `react-token-exfil`
+// reste prioritaire.
+const ECOSYSTEM_FRAMEWORK_PREFIXES = new Set([
+  'eslint', 'babel', 'webpack', 'rollup', 'vite', 'parcel', 'esbuild', 'swc', 'tsup',
+  'gatsby', 'next', 'nuxt', 'remix', 'expo', 'metro',
+  'jest', 'mocha', 'karma', 'cypress', 'playwright', 'vitest',
+  'postcss', 'stylelint', 'prettier', 'typedoc',
+  'storybook', 'docusaurus', 'astro'
+]);
+
 // RT-C1: Hyphen tokens that legitimately PREFIX or SUFFIX popular package names.
 // `<token>-<popular>` or `<popular>-<token>` is considered benign when the extra
 // token is in this set (ecosystem qualifiers, framework prefixes, official scopes).
@@ -557,6 +574,14 @@ function findTyposquatMatch(name) {
 }
 
 function isLegitimateVariant(name) {
+  // RT-C1-FPR (audit 2026-05): ecosystem framework prefix -> legitimate extension.
+  // Ex: eslint-import-resolver-typescript, babel-loader-svelte, gatsby-source-fs.
+  const firstHyphen = name.indexOf('-');
+  if (firstHyphen > 0) {
+    const prefix = name.slice(0, firstHyphen);
+    if (ECOSYSTEM_FRAMEWORK_PREFIXES.has(prefix)) return true;
+  }
+
   // Suffixes legitimes qui ne sont PAS du typosquatting
   const legitimateSuffixes = [
     '-cli', '-core', '-utils', '-plugin', '-loader', '-webpack',
