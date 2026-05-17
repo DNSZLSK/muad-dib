@@ -831,7 +831,7 @@ function analyzeFile(content, filePath, basePath) {
             const envVar = node.property?.name || '';
             if (isSensitiveEnv(envVar)) {
               sources.push({
-                type: 'env_read',
+                type: isCredentialEnv(envVar) ? 'credential_env_read' : 'env_read',
                 name: envVar,
                 line: node.loc?.start?.line,
                 taint_tracked: true
@@ -857,7 +857,7 @@ function analyzeFile(content, filePath, basePath) {
         const envVar = node.property?.name || '';
         if (isSensitiveEnv(envVar)) {
           sources.push({
-            type: 'env_read',
+            type: isCredentialEnv(envVar) ? 'credential_env_read' : 'env_read',
             name: envVar,
             line: node.loc?.start?.line
           });
@@ -948,7 +948,7 @@ function analyzeFile(content, filePath, basePath) {
     if (taint && EXFIL_PRONE_MODULES.has(taint.source)) exfilProneInScope.push(taint.source);
   }
   if (exfilProneInScope.length > 0 &&
-      sources.some(s => s.type === 'env_read' || s.type === 'credential_read')) {
+      sources.some(s => s.type === 'env_read' || s.type === 'credential_env_read' || s.type === 'credential_read')) {
     const moduleList = [...new Set(exfilProneInScope)].join(', ');
     const firstSourceLine = sources.find(s => s.line)?.line || 0;
     threats.push({
@@ -1028,12 +1028,16 @@ function analyzeFile(content, filePath, basePath) {
     }
 
     // Graduation: HIGH → MEDIUM for env/telemetry-only sources (no credential file reads,
-    // no fingerprint reads, no command output). Distant env/telemetry → network_send
-    // is the dominant FP pattern (SDK/API usage, binary wrappers, config libraries).
-    // Real credential exfiltration uses credential_read or fingerprint_read sources.
+    // no fingerprint reads, no command output, no credential-tier env vars). Distant
+    // env/telemetry → network_send is the dominant FP pattern (SDK/API usage, binary
+    // wrappers, config libraries). Real credential exfiltration uses credential_read,
+    // fingerprint_read, or credential_env_read sources (audit 2026-05 DF-C4: NPM_TOKEN,
+    // GITHUB_TOKEN, AWS_SECRET_* now classified as credential_env_read upstream and
+    // retained at HIGH instead of downgrading to MEDIUM with the rest of env_read).
     if (severity === 'HIGH') {
       const hasHighRiskSource = sources.some(s =>
-        s.type === 'credential_read' || s.type === 'fingerprint_read' || s.type === 'command_output'
+        s.type === 'credential_read' || s.type === 'fingerprint_read' ||
+        s.type === 'command_output' || s.type === 'credential_env_read'
       );
       if (!hasHighRiskSource) {
         severity = 'MEDIUM';
@@ -1167,6 +1171,31 @@ function isSensitiveEnv(name) {
   if (SAFE_ENV_PREFIXES.some(p => upper.startsWith(p))) return false;
   const sensitive = ['TOKEN', 'SECRET', 'KEY', 'PASSWORD', 'CREDENTIAL', 'AUTH', 'NPM', 'AWS', 'AZURE', 'GCP'];
   return sensitive.some(s => upper.includes(s));
+}
+
+// Audit 2026-05 DF-C4: credential-tier env vars distinguished from generic env_read.
+// These represent authentication material (NPM_TOKEN, GITHUB_TOKEN, AWS_SECRET_ACCESS_KEY,
+// STRIPE_API_KEY etc.) — strictly narrower than isSensitiveEnv. Sources of this type
+// participate in hasHighRiskSource so credential exfil patterns are NOT downgraded by the
+// HIGH→MEDIUM graduation. System identity vars (HOME, USER) remain plain env_read since
+// they are fingerprinting signals, not credentials.
+const KNOWN_CREDENTIAL_ENV_VARS = new Set([
+  'NPM_TOKEN', 'GITHUB_TOKEN', 'GH_TOKEN', 'NODE_AUTH_TOKEN',
+  'CIRCLE_TOKEN', 'GITLAB_TOKEN', 'CARGO_REGISTRY_TOKEN', 'PYPI_TOKEN',
+  'GOOGLE_APPLICATION_CREDENTIALS', 'AZURE_CLIENT_SECRET',
+  'SENTRY_AUTH_TOKEN', 'NPM_AUTH_TOKEN', 'NPM_CONFIG_AUTHTOKEN'
+]);
+
+const CREDENTIAL_ENV_SUFFIX_RE = /(?:^|_)(?:TOKEN|SECRET|PASSWORD|PASSPHRASE|CREDENTIAL|CREDENTIALS|API_KEY|ACCESS_KEY|ACCESS_KEY_ID|SECRET_KEY|PRIVATE_KEY|SIGNING_KEY|SESSION_TOKEN|REFRESH_TOKEN|AUTH_TOKEN)$/;
+
+function isCredentialEnv(name) {
+  const upper = name.toUpperCase();
+  // System identity vars are fingerprinting, not credentials
+  if (SYSTEM_IDENTITY_ENVS.has(upper)) return false;
+  // Public keys are not credentials (e.g., SSH_PUBLIC_KEY, GPG_PUBLIC_KEY)
+  if (upper.includes('PUBLIC_KEY') || upper.includes('PUBKEY')) return false;
+  if (KNOWN_CREDENTIAL_ENV_VARS.has(upper)) return true;
+  return CREDENTIAL_ENV_SUFFIX_RE.test(upper);
 }
 
 module.exports = { analyzeDataFlow };
