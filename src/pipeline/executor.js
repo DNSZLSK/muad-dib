@@ -9,6 +9,7 @@ const { scanHashes } = require('../scanner/hash.js');
 const { scanIocStrings } = require('../scanner/ioc-strings.js');
 const { scanAntiForensic } = require('../scanner/anti-forensic.js');
 const { scanStubPackage } = require('../scanner/stub-package.js');
+const { scanMonorepo } = require('../scanner/monorepo.js');
 const { analyzeDataFlow } = require('../scanner/dataflow.js');
 const { scanTyposquatting, findPyPITyposquatMatch } = require('../scanner/typosquat.js');
 const { scanGitHubActions } = require('../scanner/github-actions.js');
@@ -200,7 +201,7 @@ async function execute(targetPath, options, pythonDeps, warnings) {
     'scanDependencies', 'scanHashes', 'analyzeDataFlow', 'scanTyposquatting',
     'scanGitHubActions', 'matchPythonIOCs', 'checkPyPITyposquatting',
     'scanEntropy', 'scanAIConfig', 'scanIocStrings', 'scanAntiForensic',
-    'scanStubPackage'
+    'scanStubPackage', 'scanMonorepo'
   ];
 
   const settledResults = await Promise.allSettled([
@@ -219,7 +220,8 @@ async function execute(targetPath, options, pythonDeps, warnings) {
     yieldThen(() => scanAIConfig(targetPath)),
     yieldThen(() => scanIocStrings(targetPath)),
     withTimeout(() => scanAntiForensic(targetPath), 'scanAntiForensic'),
-    yieldThen(() => scanStubPackage(targetPath))
+    yieldThen(() => scanStubPackage(targetPath)),
+    yieldThen(() => scanMonorepo(targetPath))
   ]);
 
   // Extract results: use empty array for rejected scanners, log errors
@@ -247,7 +249,8 @@ async function execute(targetPath, options, pythonDeps, warnings) {
     aiConfigThreats,
     iocStringThreats,
     antiForensicThreats,
-    stubPackageThreats
+    stubPackageThreats,
+    monorepoThreats
   ] = scanResult;
 
   // Emit warning if file count cap was hit + quick-scan overflow files
@@ -326,6 +329,7 @@ async function execute(targetPath, options, pythonDeps, warnings) {
     ...iocStringThreats,
     ...antiForensicThreats,
     ...stubPackageThreats,
+    ...monorepoThreats,
     ...crossFileFlows.filter(f => f && f.sourceFile && f.sinkFile).map(f => ({
       type: f.type,
       severity: f.severity,

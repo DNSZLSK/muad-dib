@@ -128,7 +128,9 @@ const PACKAGE_LEVEL_TYPES = new Set([
   // intel-triage P3.1 family compounds
   'axios_family', 'stub_with_string_ioc',
   // audit DF-C1: emitted when MAX_GRAPH_NODES exceeded so cross-file blind spot is visible in scoring
-  'large_package_graph_truncated'
+  'large_package_graph_truncated',
+  // audit MR-C1: informational signal that the scan target is a monorepo root (per-workspace scoring TBD)
+  'monorepo_detected'
 ]);
 
 // ============================================

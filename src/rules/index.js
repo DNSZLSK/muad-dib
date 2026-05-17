@@ -94,6 +94,17 @@ const RULES = {
     ],
     mitre: 'T1195.002'
   },
+  monorepo_detected: {
+    id: 'MUADDIB-PKG-021',
+    name: 'Monorepo Detected',
+    severity: 'MEDIUM',
+    confidence: 'high',
+    description: 'Workspace monorepo detecte (yarn/pnpm/lerna/turbo). Le perimetre du scan depasse un seul package — auditer chaque workspace separement pour un scoring per-package.',
+    references: [
+      'https://docs.npmjs.com/cli/v10/using-npm/workspaces'
+    ],
+    mitre: 'T1195.002'
+  },
 
   // Obfuscation detections
   obfuscation_detected: {
