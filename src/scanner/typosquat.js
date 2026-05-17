@@ -389,7 +389,11 @@ async function scanTyposquatting(targetPath) {
       + bMatch.original + '" (extra token: "' + bMatch.extra + '"). Axios UNC1069 pattern.';
     threats.push({
       type: 'dependency_typosquat',
-      severity: 'HIGH',
+      // RT-C1-FPR (audit 2026-05): demoted HIGH -> MEDIUM. Boundary-squat alone is
+      // a heuristic signal (name resemblance, no execution proof). The compounds
+      // typosquat_lifecycle (CRITICAL) and typosquat_dataflow (HIGH) escalate when
+      // co-occurring with real execution/exfil signals.
+      severity: 'MEDIUM',
       message: declMsg,
       file: 'package.json',
       details: {

@@ -854,6 +854,82 @@ async function runCompoundScoringTests() {
     const compounds = threats.filter(t => t.type === 'obfuscated_lifecycle_env');
     assert(compounds.length === 1, `Should not duplicate, got ${compounds.length}`);
   });
+
+  // ===================================================================
+  // RT-C1-FPR (audit 2026-05): typosquat compounds escalating dependency_typosquat MEDIUM
+  // ===================================================================
+  console.log('\n  --- RT-C1-FPR: typosquat compounds ---\n');
+
+  // --- typosquat_lifecycle ---
+  test('RT-C1-FPR: typosquat_lifecycle — positive (dep + lifecycle)', () => {
+    const threats = [
+      { type: 'dependency_typosquat', severity: 'MEDIUM', file: 'package.json', message: 'plain-crypto-js boundary-squat of crypto-js' },
+      { type: 'lifecycle_script', severity: 'MEDIUM', file: 'package.json', message: 'postinstall: node ./bootstrap.js' }
+    ];
+    applyCompoundBoosts(threats);
+    const compound = threats.find(t => t.type === 'typosquat_lifecycle');
+    assert(compound, 'typosquat_lifecycle compound should fire');
+    assert(compound.severity === 'CRITICAL', `Should be CRITICAL, got ${compound.severity}`);
+    assert(compound.compound === true, 'Should have compound flag');
+    assert(compound.file === 'package.json', `File should come from dependency_typosquat`);
+  });
+
+  test('RT-C1-FPR: typosquat_lifecycle — negative (only dep)', () => {
+    const threats = [
+      { type: 'dependency_typosquat', severity: 'MEDIUM', file: 'package.json', message: 'plain-crypto-js' }
+    ];
+    applyCompoundBoosts(threats);
+    assert(!threats.find(t => t.type === 'typosquat_lifecycle'), 'Should NOT fire without lifecycle');
+  });
+
+  test('RT-C1-FPR: typosquat_lifecycle — negative (only lifecycle)', () => {
+    const threats = [
+      { type: 'lifecycle_script', severity: 'MEDIUM', file: 'package.json', message: 'preinstall' }
+    ];
+    applyCompoundBoosts(threats);
+    assert(!threats.find(t => t.type === 'typosquat_lifecycle'), 'Should NOT fire without typosquat dep');
+  });
+
+  test('RT-C1-FPR: typosquat_lifecycle — severity gate (all LOW)', () => {
+    // Compounds require at least one component originalSeverity >= MEDIUM.
+    const threats = [
+      { type: 'dependency_typosquat', severity: 'LOW', file: 'package.json', message: 'dep' },
+      { type: 'lifecycle_script', severity: 'LOW', file: 'package.json', message: 'node-gyp rebuild' }
+    ];
+    applyCompoundBoosts(threats);
+    assert(!threats.find(t => t.type === 'typosquat_lifecycle'), 'Should NOT fire when all LOW');
+  });
+
+  // --- typosquat_dataflow ---
+  test('RT-C1-FPR: typosquat_dataflow — positive (dep + dataflow)', () => {
+    const threats = [
+      { type: 'dependency_typosquat', severity: 'MEDIUM', file: 'package.json', message: 'plain-crypto-js' },
+      { type: 'suspicious_dataflow', severity: 'HIGH', file: 'src/exfil.js', message: 'process.env.NPM_TOKEN -> fetch' }
+    ];
+    applyCompoundBoosts(threats);
+    const compound = threats.find(t => t.type === 'typosquat_dataflow');
+    assert(compound, 'typosquat_dataflow compound should fire');
+    assert(compound.severity === 'HIGH', `Should be HIGH, got ${compound.severity}`);
+    assert(compound.file === 'src/exfil.js', `File should come from suspicious_dataflow`);
+  });
+
+  test('RT-C1-FPR: typosquat_dataflow — excludeIfBundled (dataflow in dist/)', () => {
+    const threats = [
+      { type: 'dependency_typosquat', severity: 'MEDIUM', file: 'package.json', message: 'plain-crypto-js' },
+      { type: 'suspicious_dataflow', severity: 'HIGH', file: 'dist/bundle.min.js', message: 'env -> fetch (bundled)' }
+    ];
+    applyCompoundBoosts(threats);
+    assert(!threats.find(t => t.type === 'typosquat_dataflow'),
+      'Should NOT fire when dataflow is in bundled dist/ (excludeIfBundled)');
+  });
+
+  test('RT-C1-FPR: typosquat_dataflow — negative (only dep)', () => {
+    const threats = [
+      { type: 'dependency_typosquat', severity: 'MEDIUM', file: 'package.json', message: 'plain-crypto-js' }
+    ];
+    applyCompoundBoosts(threats);
+    assert(!threats.find(t => t.type === 'typosquat_dataflow'), 'Should NOT fire without dataflow');
+  });
 }
 
 module.exports = { runCompoundScoringTests };

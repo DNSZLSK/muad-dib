@@ -350,9 +350,13 @@ const RULES = {
   dependency_typosquat: {
     id: 'MUADDIB-TYPO-002',
     name: 'Dependency Boundary-Squat',
-    severity: 'HIGH',
+    // RT-C1-FPR (audit 2026-05): demoted HIGH -> MEDIUM. Boundary-squat alone is
+    // a name-resemblance heuristic without execution proof. Compounds typosquat_lifecycle
+    // (CRITICAL), typosquat_dataflow (HIGH), dependency_typosquat_require (CRITICAL)
+    // escalate when co-occurring with real execution/exfil signals.
+    severity: 'MEDIUM',
     confidence: 'high',
-    description: 'Une dependance declaree porte le nom d\'un package populaire prefixe/suffixe d\'un token suspect (Axios UNC1069, mars 2026). Le wrapper innocent declare un sub-dep malveillant.',
+    description: 'Une dependance declaree porte le nom d\'un package populaire prefixe/suffixe d\'un token suspect (Axios UNC1069, mars 2026). Le wrapper innocent declare un sub-dep malveillant. Signal solo MEDIUM, escalade CRITICAL via compounds lifecycle/dataflow/require.',
     references: [
       'https://snyk.io/blog/typosquatting-attacks/',
       'https://attack.mitre.org/techniques/T1195/002/'
@@ -374,6 +378,25 @@ const RULES = {
     severity: 'CRITICAL',
     confidence: 'high',
     description: 'Dependance boundary-squat declaree ET chargee via require/import dans le code: pattern Axios UNC1069 (sub-dep injection avec wrapper innocent).',
+    references: ['https://attack.mitre.org/techniques/T1195/002/'],
+    mitre: 'T1195.002'
+  },
+  // RT-C1-FPR (audit 2026-05): compounds escaladant dependency_typosquat solo (MEDIUM)
+  typosquat_lifecycle: {
+    id: 'MUADDIB-COMPOUND-014',
+    name: 'Boundary-Squat Dep + Lifecycle Hook',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'Dependance boundary-squat declaree avec script lifecycle (preinstall/postinstall) — install-time payload delivery via typosquat sub-dep.',
+    references: ['https://attack.mitre.org/techniques/T1195/002/'],
+    mitre: 'T1195.002'
+  },
+  typosquat_dataflow: {
+    id: 'MUADDIB-COMPOUND-015',
+    name: 'Boundary-Squat Dep + Suspicious Dataflow',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'Dependance boundary-squat declaree avec flux de donnees suspect (lecture credentials + envoi reseau) — typosquat dep co-occurring with exfiltration.',
     references: ['https://attack.mitre.org/techniques/T1195/002/'],
     mitre: 'T1195.002'
   },
