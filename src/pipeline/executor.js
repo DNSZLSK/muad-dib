@@ -127,12 +127,25 @@ async function execute(targetPath, options, pythonDeps, warnings) {
   // Bounded: 5s timeout to prevent DoS on large/adversarial packages
   const MODULE_GRAPH_TIMEOUT_MS = 5000;
   let crossFileFlows = [];
+  // Threats ABOUT the module graph (audit DF-C1): truncation when the package
+  // exceeds MAX_GRAPH_NODES. Separate from crossFileFlows because the latter
+  // gets filtered/reshaped (line ~316 requires sourceFile && sinkFile).
+  const moduleGraphThreats = [];
   if (!options.noModuleGraph) {
     const moduleGraphWork = async () => {
-      const graph = await yieldThen(() => buildModuleGraph(targetPath));
-      if (Object.keys(graph).length === 0) {
-        // buildModuleGraph returns empty when MAX_GRAPH_NODES exceeded
-        warnings.push('Module graph skipped: package exceeds 100 files limit');
+      const graphMeta = {};
+      const graph = await yieldThen(() => buildModuleGraph(targetPath, graphMeta));
+      if (graphMeta.truncated) {
+        warnings.push(`Module graph skipped: ${graphMeta.fileCount} files exceeds MAX_GRAPH_NODES (${graphMeta.maxNodes})`);
+        moduleGraphThreats.push({
+          type: 'large_package_graph_truncated',
+          severity: 'MEDIUM',
+          message: `Cross-file analysis désactivée : ${graphMeta.fileCount} fichiers dépassent la limite (${graphMeta.maxNodes}). Risque de blind spot sur monorepo / large package — auditer les sous-modules manuellement.`,
+          file: 'package.json',
+          line: 0,
+          fileCount: graphMeta.fileCount,
+          maxNodes: graphMeta.maxNodes
+        });
       }
       const tainted = await yieldThen(() => annotateTaintedExports(graph, targetPath));
       const sinkAnnotations = await yieldThen(() => annotateSinkExports(graph, targetPath));
@@ -318,7 +331,8 @@ async function execute(targetPath, options, pythonDeps, warnings) {
       severity: f.severity,
       message: `Cross-file dataflow: ${f.source} in ${f.sourceFile} → ${f.sink} in ${f.sinkFile}`,
       file: f.sinkFile
-    }))
+    })),
+    ...moduleGraphThreats
   ];
 
   // Paranoid mode

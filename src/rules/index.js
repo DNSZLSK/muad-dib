@@ -2110,6 +2110,17 @@ const RULES = {
     ],
     mitre: 'T1071'
   },
+  large_package_graph_truncated: {
+    id: 'MUADDIB-FLOW-006',
+    name: 'Large Package Graph Truncated',
+    severity: 'MEDIUM',
+    confidence: 'medium',
+    description: 'Le graphe de modules depasse la limite (MAX_GRAPH_NODES). Cross-file dataflow non analyse — risque de blind spot sur monorepo ou large package. Auditer les sous-modules manuellement.',
+    references: [
+      'https://attack.mitre.org/techniques/T1195/002/'
+    ],
+    mitre: 'T1195.002'
+  },
 
   // Audit v3 Bypass Detections (AST-062 to AST-069)
   reflect_apply_require: {

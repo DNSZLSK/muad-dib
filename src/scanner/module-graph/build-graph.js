@@ -8,17 +8,30 @@ const { parseFile, isLocalImport, resolveLocal, toRel } = require('./parse-utils
 /**
  * Build a dependency graph of local modules within a package.
  * Only tracks local imports (./  ../) — node_modules are ignored.
+ *
+ * @param {string} packagePath
+ * @param {Object} [meta] - Optional out-param: mutated with { fileCount, truncated, maxNodes }
+ *                          so the caller can emit a `large_package_graph_truncated` threat
+ *                          when the package exceeds MAX_GRAPH_NODES (audit DF-C1).
  */
-function buildModuleGraph(packagePath) {
+function buildModuleGraph(packagePath, meta = {}) {
   const graph = {};
+  // maxFiles: 0 (unlimited) — we need the true count to detect monorepo / large package
+  // truncation. MAX_GRAPH_NODES below caps the AST work; MODULE_GRAPH_TIMEOUT_MS in
+  // executor.js bounds the wall-time (audit DF-C1).
   const files = findFiles(packagePath, {
     extensions: ['.js', '.mjs', '.cjs'],
     excludedDirs: EXCLUDED_DIRS,
+    maxFiles: 0,
   });
+
+  meta.fileCount = files.length;
+  meta.maxNodes = MAX_GRAPH_NODES;
 
   // Bounded path: skip module graph for very large packages
   if (files.length > MAX_GRAPH_NODES) {
     debugLog(`[MODULE-GRAPH] Skipping: ${files.length} files exceeds MAX_GRAPH_NODES (${MAX_GRAPH_NODES})`);
+    meta.truncated = true;
     return graph;
   }
 

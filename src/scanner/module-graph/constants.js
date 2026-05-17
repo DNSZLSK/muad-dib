@@ -3,7 +3,7 @@
 const { ACORN_OPTIONS: BASE_ACORN_OPTIONS } = require('../../shared/constants.js');
 
 // --- Bounded path limits ---
-const MAX_GRAPH_NODES = 100;  // Max files in dependency graph (covers ~86% of npm packages)
+const MAX_GRAPH_NODES = 5000; // Max files in dependency graph (covers ~99.5% of npm packages — audit DF-C1 v2.11.15)
 const MAX_GRAPH_EDGES = 400;  // Max total import edges
 const MAX_FLOWS = 20;         // Max cross-file flow findings per package
 const MAX_TAINT_DEPTH = 50;   // Max AST recursion depth (DoS guard)

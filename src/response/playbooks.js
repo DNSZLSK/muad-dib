@@ -683,6 +683,11 @@ const PLAYBOOKS = {
     'Verifier si des donnees sensibles sont envoyees via ce canal. ' +
     'Les proxies HTTP classiques ne filtrent pas ce trafic.',
 
+  large_package_graph_truncated:
+    'Package volumineux (> MAX_GRAPH_NODES fichiers). Cross-file dataflow non analyse. ' +
+    'Auditer les sous-modules manuellement ou scanner par sous-paquet. ' +
+    'Sur un monorepo, scanner chaque workspace independamment.',
+
   bin_field_hijack:
     'CRITIQUE: Le champ "bin" de package.json shadow une commande systeme (node, npm, git, bash, etc.). ' +
     'A l\'installation, npm cree un symlink dans node_modules/.bin/ qui intercepte la commande reelle. ' +

@@ -157,12 +157,12 @@ jobs:
     }
   });
 
-  // 3.3b Rule count check (audit 2026-05 Sprint 2 RT-C1: +3 TYPO-002, TYPO-003, COMPOUND-013 → 224 RULES)
-  test('P3: rule count is 229 (224 RULES + 5 PARANOID)', () => {
+  // 3.3b Rule count check (audit 2026-05 Sprint 3 DF-C1: +1 FLOW-006 large_package_graph_truncated → 225 RULES)
+  test('P3: rule count is 230 (225 RULES + 5 PARANOID)', () => {
     const { RULES, PARANOID_RULES } = require('../../src/rules/index.js');
     const ruleCount = Object.keys(RULES).length;
     const paranoidCount = Object.keys(PARANOID_RULES).length;
-    assert(ruleCount === 224, `Expected 224 RULES, got ${ruleCount}`);
+    assert(ruleCount === 225, `Expected 225 RULES, got ${ruleCount}`);
     assert(paranoidCount === 5, `Expected 5 PARANOID, got ${paranoidCount}`);
   });
 
