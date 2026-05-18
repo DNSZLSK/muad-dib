@@ -9,39 +9,52 @@ For development instructions, constraints, and workflow, see [CLAUDE.md](CLAUDE.
 ```
 bin/muaddib.js (yargs CLI)
   └─► src/index.js — run(targetPath, options)
-        ├─► Module Graph pre-analysis (src/scanner/module-graph.js)
+        ├─► Module Graph pre-analysis (src/scanner/module-graph/, directory of 9 files, 5s timeout)
         ├─► Deobfuscation pre-processing (src/scanner/deobfuscate.js)
-        ├─► 16 parallel scanners (Promise.all)
-        │     ├── AST scanner (src/scanner/ast.js)
-        │     ├── Dataflow scanner (src/scanner/dataflow.js)
+        ├─► 17 parallel scanners (Promise.allSettled)
+        │     ├── AST scanner (src/scanner/ast.js)                          [timeout 45s]
+        │     ├── Dataflow scanner (src/scanner/dataflow.js)                [timeout 45s]
         │     ├── Shell scanner (src/scanner/shell.js)
         │     ├── Package scanner (src/scanner/package.js)
         │     ├── Dependencies scanner (src/scanner/dependencies.js)
         │     ├── Obfuscation scanner (src/scanner/obfuscation.js)
-        │     ├── Entropy scanner (src/scanner/entropy.js)
+        │     ├── Entropy scanner (src/scanner/entropy.js)                  [timeout 45s]
         │     ├── Typosquat scanner (src/scanner/typosquat.js)
-        │     ├── Python scanner (src/scanner/python.js)
+        │     ├── Python IOC scanner (src/scanner/python.js — matchPythonIOCs)
+        │     ├── PyPI typosquat (src/scanner/python.js — checkPyPITyposquatting)
         │     ├── AI Config scanner (src/scanner/ai-config.js)
         │     ├── GitHub Actions scanner (src/scanner/github-actions.js)
         │     ├── Hash scanner (src/scanner/hash.js)
         │     ├── IOC strings (src/scanner/ioc-strings.js, intel-triage P1.1)
-        │     ├── Anti-forensic AST (src/scanner/anti-forensic.js, intel-triage P1.2)
+        │     ├── Anti-forensic AST (src/scanner/anti-forensic.js, intel-triage P1.2)  [timeout 45s]
         │     ├── Stub package (src/scanner/stub-package.js, intel-triage P1.3)
-        │     └── Intent coherence (src/intent-graph.js)
+        │     └── Monorepo scanner (src/scanner/monorepo.js, Sprint 1 audit MR-C2 fix)
         ├─► Deduplication
         ├─► FP reductions (src/scoring.js — applyFPReductions)
+        ├─► Reachability post-processing (src/scanner/reachability.js — file-level + function-level FP downgrade)
         ├─► Intent coherence analysis (src/intent-graph.js — buildIntentPairs)
-        ├─► Rule enrichment (src/rules/index.js — 223 rules)
-        ├─► Scoring (src/scoring.js — per-file max)
+        ├─► Rule enrichment (src/rules/index.js — 234 rules)
+        ├─► Scoring (src/scoring.js — per-file max + compound boosts)
         ├─► ML classifier (src/ml/classifier.js — T1 zone filtering)
         └─► Output (CLI / JSON / HTML / SARIF)
 ```
 
-**Core orchestration:** `src/index.js` delegates to `src/pipeline/{initializer,executor,processor,outputter}.js`. `executor.js` runs cross-file module graph analysis first, then launches 16 individual scanners in parallel via `Promise.allSettled` (intel-triage P1 added: `scanIocStrings`, `scanAntiForensic`, `scanStubPackage`), then `processor.js` deduplicates, applies FP reductions, scores using per-file max (v2.2.11: `riskScore = min(100, max(file_scores) + package_level_score)`, severity weights: CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1), applies intent coherence analysis (intra-file source-sink pairing), enriches with rules/playbooks (223 rules), and `outputter.js` formats CLI/JSON/HTML/SARIF. Result includes `warnings: []` array (v2.6.5) for incomplete scan notifications (module graph timeout/skip, deobfuscation failures). Exports `isPackageLevelThreat` and `computeGroupScore` for testing.
+**Core orchestration:** `src/index.js` delegates to `src/pipeline/{initializer,executor,processor,outputter}.js`. `executor.js` runs cross-file module graph analysis first (pre-analysis, 5s timeout), then launches 17 individual scanners in parallel via `Promise.allSettled` (intel-triage P1 added: `scanIocStrings`, `scanAntiForensic`, `scanStubPackage`; Sprint 1 added: `scanMonorepo` for audit MR-C2 fix), then `processor.js` deduplicates, applies FP reductions + reachability post-processing, scores using per-file max (v2.2.11: `riskScore = min(100, max(file_scores) + package_level_score)`, severity weights: CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1), applies intent coherence analysis (intra-file source-sink pairing), enriches with rules/playbooks (234 rules), and `outputter.js` formats CLI/JSON/HTML/SARIF. Result includes `warnings: []` array (v2.6.5) for incomplete scan notifications (module graph timeout/skip, deobfuscation failures). Exports `isPackageLevelThreat` and `computeGroupScore` for testing.
 
 ## Scanner Modules
 
-**Scanner pattern:** Each of the 16 individual scanners in `src/scanner/` returns `Array<{type, severity, message, file}>`:
+### Execution Phases
+
+| Phase | Count | Modules | Mechanism |
+|-------|-------|---------|-----------|
+| Pre-analysis | 2 | `module-graph/` (directory, 9 files, 5s timeout), `deobfuscate.js` (passed as arg to AST + dataflow) | Sequential, before parallel phase |
+| Parallel | 17 | AST, dataflow, shell, package, dependencies, obfuscation, entropy, typosquat, python (IOC + PyPI typosquat = 2 functions), ai-config, github-actions, hash, ioc-strings (P1.1), anti-forensic (P1.2), stub-package (P1.3), monorepo | `Promise.allSettled` (executor.js:207-225) |
+| Conditional / post-processing | 5 | `paranoid.js` (--paranoid), `temporal-runner.js` + `temporal-analysis.js` + `temporal-ast-diff.js` (--temporal*), `reachability.js` (post-processor FP downgrade) | Skipped unless flag or post-pipeline |
+| Metadata fetcher | 1 | `npm-registry.js` | NPM API for age/downloads/maintainers (ML features, monitor, evaluate) |
+
+Total: **23 `.js` files** at `src/scanner/` root + **1 directory** `module-graph/` (9 files). Intent coherence (`src/intent-graph.js`) runs in pipeline processor, not in `src/scanner/`.
+
+**Scanner pattern:** Each of the 17 individual scanners in `src/scanner/` returns `Array<{type, severity, message, file}>`:
 - `file` must use `path.relative(targetPath, absolutePath)` for Windows compatibility
 - Sync scanners are wrapped in `Promise.resolve()` in the Promise.all
 - Use `findFiles(dir, { extensions, excludedDirs })` from `src/utils.js` for file walking
@@ -61,13 +74,46 @@ bin/muaddib.js (yargs CLI)
 
 ### Inter-module Dataflow (v2.2.6, bounded path v2.6.1)
 
-`src/scanner/module-graph.js` builds a dependency graph of local modules, annotates tainted exports (fs.readFileSync, process.env, os.homedir, os.hostname, os.userInfo, os.networkInterfaces, child_process, dns), and detects when credentials read in one module reach a network/exec sink in another module. Features: 3-hop re-export chain propagation, class method analysis, named export destructuring, inline require re-export, function-wrapped taint propagation. v2.6.1 additions: bounded path (MAX_GRAPH_NODES=50, MAX_GRAPH_EDGES=200, MAX_FLOWS=20, 5s timeout), imported sink method detection, class `this.X` instance taint, stream pipeline `.pipe()` chain following, EventEmitter cross-module detection, pipe chain cross-file flows. Runs before individual scanners. Disable with `--no-module-graph`.
+`src/scanner/module-graph/` (directory of 9 files: `index.js`, `build-graph.js`, `constants.js`, `parse-utils.js`, `annotate-tainted.js`, `annotate-sinks.js`, `detect-cross-file.js`, `detect-callback-flows.js`, `detect-event-flows.js`) builds a dependency graph of local modules, annotates tainted exports (fs.readFileSync, process.env, os.homedir, os.hostname, os.userInfo, os.networkInterfaces, child_process, dns), and detects when credentials read in one module reach a network/exec sink in another module. Features: 3-hop re-export chain propagation, class method analysis, named export destructuring, inline require re-export, function-wrapped taint propagation. v2.6.1 additions: bounded path (`MAX_GRAPH_NODES=50` at the time, raised to 5000 in v2.11.x post-audit DF-C1; `MAX_GRAPH_EDGES=200` raised to 400; `MAX_FLOWS=20`, 5s timeout), imported sink method detection, class `this.X` instance taint, stream pipeline `.pipe()` chain following, EventEmitter cross-module detection, pipe chain cross-file flows. Runs before individual scanners. Disable with `--no-module-graph`.
+
+#### Bounded limits — module-graph (DoS guard + cap on cross-file flows)
+
+Centralized constants in `src/scanner/module-graph/constants.js` + per-detector caps. Listed here for transparency since bypass via cap saturation is part of the threat model.
+
+| Constant | Value | File:line | Role |
+|---|---|---|---|
+| `MAX_GRAPH_NODES` | 5000 | `module-graph/constants.js:6` | Max files in dependency graph. Raised from 50 (v2.6.1) to 5000 in v2.11.x post-audit DF-C1 — now covers ~99.5% of npm packages. If exceeded, the graph build short-circuits and a warning is appended to scan result (`warnings[]`). |
+| `MAX_GRAPH_EDGES` | 400 | `module-graph/constants.js:7` | Max total import edges (prevents explosion on monorepos that still fit under node cap). |
+| `MAX_FLOWS` | 20 | `module-graph/constants.js:8` | Max `cross_file_dataflow` flows reported per package. Saturated flows are dropped silently in insertion order (audit DF-C2 — future fix: priority queue by severity). |
+| `MAX_TAINT_DEPTH` | 50 | `module-graph/constants.js:9` | Max AST recursion depth in the walker (DoS guard against pathologically nested minified code). |
+| `MAX_PIPE_DEPTH` | 5 | `module-graph/detect-cross-file.js` | Walk depth for `.pipe()` chain taint following. |
+| `MAX_EMITTER_FLOWS` | 2 | `module-graph/detect-event-flows.js` | Cross-file EventEmitter flow cap per package (prevents explosion on event-heavy libraries). |
+| Module-graph timeout | 5 s | `src/pipeline/executor.js` | Hard timeout on the whole pre-analysis phase. Emits `module_graph_timeout` warning if exceeded. |
+
+#### Bounded limits — intra-file dataflow (`src/scanner/dataflow.js`)
+
+| Constant | Value | File:line | Role |
+|---|---|---|---|
+| Source-sink proximity | 50 lines | `dataflow.js:987` | If `Math.abs(src.line - sink.line) < 50` → CRITICAL ; otherwise HIGH (graduation telemetry-only). Recovered to CRITICAL when `hasExposureSink && hasCredentialSource` regardless of distance. |
+| `analyzeAST` / `analyzeDataFlow` / `scanEntropy` / `scanAntiForensic` timeout | 45 s | `src/pipeline/executor.js` | Per-scanner timeout via `withTimeout()`; rejected scanners contribute an empty result + logged warning. |
 
 ## Scoring System
 
 ### Per-File Max Scoring (v2.2.11)
 
 Replaces global score accumulation with per-file max scoring. Formula: `riskScore = min(100, max(file_scores) + package_level_score)`. Threats are split into package-level (lifecycle scripts, typosquat, IOC matches, sandbox findings — classified by `PACKAGE_LEVEL_TYPES` Set + file heuristics) and file-level (AST, dataflow, obfuscation). File-level threats grouped by `threat.file`, each group scored independently via `computeGroupScore()`. Package-level threats scored separately. Result includes `globalRiskScore` (old sum), `maxFileScore`, `packageScore`, `mostSuspiciousFile`, `fileScores` map.
+
+### Confidence Factors (`src/scoring.js:56`)
+
+Each threat's contribution to the score is multiplied by a confidence factor derived from `rule.confidence` (declared per rule in `src/rules/index.js`). A rule marked `confidence: 'low'` therefore contributes less than the nominal severity weight, even when the threat itself is HIGH/CRITICAL.
+
+| `rule.confidence` | Multiplier | Effect on score contribution |
+|---|---|---|
+| `high` | **1.0** | Nominal weight (CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1) |
+| `medium` | **0.85** | −15% vs nominal |
+| `low` | **0.6** | −40% vs nominal |
+
+Source: `const CONFIDENCE_FACTORS = { high: 1.0, medium: 0.85, low: 0.6 };` applied in `applyConfidenceFactor()` (called at scoring.js:203 and 261). Unknown / missing `rule.confidence` falls back to 1.0. Used by `--explain` output to attribute the actual numeric contribution of each finding: `effective_points = severity_weight × CONFIDENCE_FACTORS[rule.confidence]`.
 
 ### FP Reduction Post-processing (v2.2.8–v2.3.1, v2.5.15–v2.5.16, v2.6.2)
 
@@ -81,9 +127,24 @@ Replaces global score accumulation with per-file max scoring. Formula: `riskScor
 
 ## Intent Graph
 
-**Intent Graph Analysis (v2.6.0):** `src/intent-graph.js` performs intra-file source-sink coherence analysis. When a single file contains both a high-confidence credential source (sensitive_string, env_harvesting_dynamic, credential_regex_harvest) AND a dangerous sink (eval, exec, network), the intent graph boosts the score via a coherence matrix. Design principles: (1) INTRA-FILE pairing only — cross-file co-occurrence without proven data flow causes FP explosion on SDKs. (2) Cross-file detection delegated to module-graph.js (proven taint paths). (3) LOW severity threats excluded from pairing (respects FP reductions). (4) env_access and suspicious_dataflow excluded (standard config / double-counting). Intent bonus capped at 30 in scoring.js. Pipeline: deduplication → applyFPReductions → buildIntentPairs → enrichWithRules → calculateRiskScore.
+**Intent Graph Analysis (v2.6.0):** `src/intent-graph.js` performs intra-file source-sink coherence analysis. When a single file contains both a high-confidence credential source (sensitive_string, env_harvesting_dynamic, credential_regex_harvest) AND a dangerous sink (eval, exec, network), the intent graph boosts the score via a coherence matrix. Design principles: (1) INTRA-FILE pairing only — cross-file co-occurrence without proven data flow causes FP explosion on SDKs. (2) Cross-file detection delegated to `src/scanner/module-graph/` (proven taint paths). (3) LOW severity threats excluded from pairing (respects FP reductions). (4) env_access and suspicious_dataflow excluded (standard config / double-counting). Intent bonus capped at 30 in scoring.js. Pipeline: deduplication → applyFPReductions → buildIntentPairs → enrichWithRules → calculateRiskScore.
 
 **Destination-aware Intent (v2.7.7):** `isSDKPattern()` with 22 curated SDK env-domain mappings (AWS, Azure, Google, Firebase, Stripe, Twilio, SendGrid, Datadog, Sentry, Slack, GitHub, GitLab, Cloudflare, OpenAI, Anthropic, MongoDB, Auth0, HubSpot, Contentful, Salesforce, Supabase, Mailgun). Heuristic brand-matching fallback for unknown SDKs. `SUSPICIOUS_DOMAIN_PATTERNS` blocks tunneling services (ngrok, serveo, localtunnel) and raw IP addresses from SDK exemption. `buildIntentPairs()` accepts `targetPath` parameter for file reading (SDK pattern detection). Helpers: `extractEnvVarFromMessage()`, `extractBrandFromEnvVar()`, `domainMatchesSuffix()`.
+
+## Reachability Analysis
+
+`src/scanner/reachability.js` (v2.5.x file-level, v2.11.9 function-level default ON via `MUADDIB_FN_REACHABILITY !== '0'`) computes the set of files and functions actually reachable from package entry points (`package.json` `main` / `bin` / `exports` / `module` / `browser` + lifecycle scripts + spawn/fork/Worker targets). Consumed by `applyFPReductions` (scoring.js:874): any non-exempt threat located in an unreachable file is downgraded to LOW and tagged `t.unreachable = true`. Threats in dead function ranges of a reachable file are tagged `t.unreachableFunction = true` (function-level pass).
+
+**Exempt types** (`REACHABILITY_EXEMPT_TYPES`, scoring.js:444-467): intel-triage P1 types + AI config injection + `function_constructor_require` + `env_charcode_reconstruction` (Mini Shai-Hulud) + ~16 other types structurally malicious independent of reachability. Files containing exempt threats also shield their other findings from the unreachable downgrade.
+
+### Bounded limits — reachability (`src/scanner/reachability.js`)
+
+| Constant | Value | File:line | Role |
+|---|---|---|---|
+| `MAX_FN_REACH_FILES` | 250 | `reachability.js:370` | Max files processed by function-level reachability. Beyond this cap, the function-level BFS short-circuits and all threats remain considered live (fail-open). |
+| `MAX_FN_REACH_BYTES` | 1 MiB (1024×1024) | `reachability.js:371` | Per-file size cap. Files larger than 1 MB (typically minified bundles) are skipped — their threats remain live (fail-open). |
+
+**Known limitation** : cross-file function reachability is not implemented (intra-file BFS only, file-level approximation handles cross-file). Documented backlog item RC-M1: a non-exported helper called only via dynamic dispatch from another file is marked dead → severity LOW (FP). Combined with ESM `ImportDeclaration` gaps (DF-C3 backlog), the fail-direction is biased toward LOW, so cap saturation degrades coverage rather than introducing FPs.
 
 ## Sandbox
 
@@ -248,7 +309,7 @@ See [Intent Graph](#intent-graph) section for `isSDKPattern()` details and 22 SD
 
 ## Detection Rules
 
-**Rules & playbooks:** Threat types map to rules in `src/rules/index.js` (223 rules: 218 RULES + 5 PARANOID, MITRE ATT&CK mapped) and remediation text in `src/response/playbooks.js`. Both keyed by threat `type` string.
+**Rules & playbooks:** Threat types map to rules in `src/rules/index.js` (234 rules: 229 RULES + 5 PARANOID, MITRE ATT&CK mapped) and remediation text in `src/response/playbooks.js`. Both keyed by threat `type` string.
 
 ### AST Detection Rules (v2.2+)
 
@@ -311,18 +372,49 @@ The following commands are internal infrastructure/dev tools. They work when cal
 - `muaddib stats` — Daily scan statistics and FP rate. Uses monitor exports.
 - `src/commands/evaluate.js` — `muaddib evaluate` measures TPR/FPR/ADR. Dev-only evaluation command.
 
-## Compound Scoring Rules (v2.9.2)
+## Compound Scoring Rules
 
-`applyCompoundBoosts()` in `src/scoring.js` injects synthetic CRITICAL threats when co-occurring threat types are detected — combinations that never appear in benign packages. Called after `applyFPReductions`. 4 compound rules:
+`applyCompoundBoosts()` in `src/scoring.js` (array `SCORING_COMPOUNDS` lines 487-657) injects synthetic threats when co-occurring threat types are detected — combinations rarely seen in benign packages. Called after `applyFPReductions`. Currently **16 compound rules** (13 CRITICAL + 3 HIGH).
 
-| Rule ID | Name | Required Types | Severity |
-|---------|------|---------------|----------|
-| MUADDIB-COMPOUND-001 | Crypto Staged Payload | staged_binary_payload + crypto_decipher | CRITICAL |
-| MUADDIB-COMPOUND-002 | Lifecycle Typosquat | lifecycle_script + typosquat_detected | CRITICAL |
-| MUADDIB-COMPOUND-004 | Lifecycle Inline Exec | lifecycle_script + node_inline_exec | CRITICAL |
-| MUADDIB-COMPOUND-005 | Lifecycle Remote Require | lifecycle_script + network_require | CRITICAL |
+| # | Type | Required types | Severity | Flags |
+|---|------|----------------|----------|-------|
+| 1 | `crypto_staged_payload` | staged_binary_payload + crypto_decipher | CRITICAL | sameFile |
+| 2 | `lifecycle_typosquat` | lifecycle_script + typosquat_detected | CRITICAL | — |
+| 3 | `dependency_typosquat_require` | dependency_typosquat + dependency_typosquat_used | CRITICAL | — |
+| 4 | `typosquat_lifecycle` | dependency_typosquat + lifecycle_script | CRITICAL | — |
+| 5 | `typosquat_dataflow` | dependency_typosquat + suspicious_dataflow | HIGH | excludeIfBundled |
+| 6 | `lifecycle_inline_exec` | lifecycle_script + node_inline_exec | CRITICAL | — |
+| 7 | `lifecycle_remote_require` | lifecycle_script + network_require | CRITICAL | — |
+| 8 | `websocket_credential_exfil` | env_access + suspicious_module_sink | CRITICAL | sameFile |
+| 9 | `lifecycle_dataflow` | lifecycle_script + suspicious_dataflow | HIGH | lifecycleScoped, excludeIfBundled |
+| 10 | `lifecycle_dangerous_exec` | lifecycle_script + dangerous_exec | CRITICAL | lifecycleScoped |
+| 11 | `obfuscated_lifecycle_env` | obfuscation_detected + env_access + lifecycle_script | HIGH | sameFileTypes, requireOriginalSeverityHigh, excludeIfBundled |
+| 12 | `lifecycle_newsletter_hijack` | lifecycle_script + newsletter_auto_follow | CRITICAL | — |
+| 13 | `lifecycle_env_exfil` | lifecycle_script + curl_env_exfil | CRITICAL | — |
+| 14 | `axios_family` | ioc_string_match + lifecycle_script + anti_forensic_partial | CRITICAL | — |
+| 15 | `stub_with_string_ioc` | stub_package_external_dep + ioc_string_match | CRITICAL | — |
+| 16 | `staged_remote_loader` | function_constructor_require + process_variable_shadow | CRITICAL | sameFile |
 
-3 package-level compounds (COMPOUND-002, 004, 005) are in `PACKAGE_LEVEL_TYPES`. `dangerous_exec` added to `DIST_EXEMPT_TYPES` (curl|bash in dist/ is always malicious).
+### Flag semantics
+
+- `sameFile` : all required types must co-occur in the same file (vs package-level).
+- `lifecycleScoped` : compound fires only when the co-occurring file-level signal is in the file directly executed by the lifecycle script or in its 1-level static imports (v2.11.11 — monorepo FP fix).
+- `excludeIfBundled` : compound suppressed when all components live in `dist`/`build`/`out`/`output` (bundler aggregation artefact, not real malware).
+- `sameFileTypes` : explicit subset of required types that must be co-located (for compounds mixing file-level + package-level components — e.g. `obfuscated_lifecycle_env` requires obfuscation_detected + env_access in the same file, lifecycle_script can be elsewhere).
+- `requireOriginalSeverityHigh` : at least one component must have `originalSeverity` HIGH+ (filters MEDIUM-only dilutions of a CRITICAL signal).
+
+### Sprint provenance
+
+- Compounds 1, 2, 6, 7, 8 : foundational (v2.5–v2.7).
+- Compounds 9, 10, 11 : v2.10.5 (post-audit fondamental, recover 3336 under-threshold malwares).
+- Compounds 12, 13 : v2.10.89 (security review).
+- Compound 14 : intel-triage P3.1 (Axios/csec family signature).
+- Compound 15 : intel-triage P3.x (stub package chain-attack staging).
+- Compound 16 : security review 2026-05-09 (chai-* / poxios-chain / express-guardrail / justenv pattern).
+- Compound 3 : audit 2026-05 Sprint 5 (RT-C1, Axios UNC1069 boundary-squat).
+- Compounds 4, 5 : audit 2026-05 Sprint 5 (RT-C1-FPR boundary-squat lifecycle + dataflow mirrors).
+
+3 compounds are also in `PACKAGE_LEVEL_TYPES` (lifecycle_typosquat, lifecycle_inline_exec, lifecycle_remote_require). `dangerous_exec` is in `DIST_EXEMPT_TYPES` (curl|bash in `dist/` is always malicious).
 
 ## GlassWorm Detection (v2.9.1)
 
