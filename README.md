@@ -274,7 +274,7 @@ With pre-commit framework:
 ```yaml
 repos:
   - repo: https://github.com/DNSZLSK/muad-dib
-    rev: v2.11.6
+    rev: v2.11.20
     hooks:
       - id: muaddib-scan
 ```
