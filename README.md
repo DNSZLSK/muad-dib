@@ -30,7 +30,7 @@
 
 npm and PyPI supply-chain attacks are exploding. Shai-Hulud compromised 25K+ repos in 2025. Existing tools detect threats but don't help you respond.
 
-MUAD'DIB combines **16 parallel scanners** (223 detection rules), a **deobfuscation engine**, **inter-module dataflow analysis**, **compound scoring**, **ML classifiers** (XGBoost), and gVisor/Docker sandbox to detect known threats and suspicious behavioral patterns in npm and PyPI packages.
+MUAD'DIB combines **17 parallel scanners** (234 detection rules), a **deobfuscation engine**, **inter-module dataflow analysis**, **compound scoring** (16 compound rules), **ML classifiers** (XGBoost), and gVisor/Docker sandbox to detect known threats and suspicious behavioral patterns in npm and PyPI packages.
 
 ---
 
@@ -176,7 +176,7 @@ muaddib replay                     # Ground truth validation (61/65 TPR@3)
 
 ## Features
 
-### 16 parallel scanners
+### 17 parallel scanners
 
 | Scanner | Detection |
 |---------|-----------|
@@ -197,10 +197,11 @@ muaddib replay                     # Ground truth validation (61/65 TPR@3)
 | IOC Strings (intel-triage P1.1) | YARA-style string matching (Axios 2026, TeamPCP, GlassWorm, CanisterSprawl) |
 | Anti-Forensic AST (intel-triage P1.2) | XOR loop + self-delete + decoy write compound (csec autodelete) |
 | Stub Package (intel-triage P1.3) | Tiny main file + external dep URL + lifecycle hook (ltidi chain) |
+| Monorepo Scanner | Lerna/pnpm-workspace/turbo detection (Sprint 1 audit MR-C2 fix) |
 
-### 223 detection rules
+### 234 detection rules
 
-All rules are mapped to MITRE ATT&CK techniques. See [SECURITY.md](SECURITY.md#detection-rules-v21021) for the complete rules reference.
+All rules (229 RULES + 5 PARANOID) are mapped to MITRE ATT&CK techniques. See [SECURITY.md](SECURITY.md#detection-rules-v21021) for the complete rules reference.
 
 ### Detected campaigns
 
@@ -295,7 +296,7 @@ repos:
 | **FPR** (Benign random, v2.10.95 measure) | **7.0%** (14/200) | 200 random npm packages, stratified sampling |
 | **ADR** (Adversarial + Holdout) | **96.3%** (103/107) | 67 adversarial + 40 holdout (107 available on disk), global threshold=20 |
 
-**3529 tests** across 89 files. **223 rules** (218 RULES + 5 PARANOID).
+**3570 tests** across 93 files. **234 rules** (229 RULES + 5 PARANOID).
 
 > **ML retrain methodology (v2.10.51):**
 > - Ground truth: 377 confirmed_malicious via auto-labeler (OSSF malicious-packages, GitHub Advisory Database, npm registry takedown correlation)
@@ -343,7 +344,7 @@ npm test
 
 ### Testing
 
-- **3529 tests** across 89 modular test files
+- **3570 tests** across 93 modular test files
 - **56 fuzz tests** - Malformed inputs, ReDoS, unicode, binary
 - **Datadog 17K benchmark** - 14,587 confirmed malware samples (in-scope)
 - **Ground truth validation** - 67 real-world attacks (93.85% TPR@3, 86.2% TPR@20 — v2.10.95 measure)
@@ -364,7 +365,7 @@ npm test
 - [Documentation Index](docs/INDEX.md) - All documentation in one place
 - [Evaluation Methodology](docs/EVALUATION_METHODOLOGY.md) - Experimental protocol, holdout scores
 - [Threat Model](docs/threat-model.md) - What MUAD'DIB detects and doesn't detect
-- [Security Policy](SECURITY.md) - Detection rules reference (223 rules)
+- [Security Policy](SECURITY.md) - Detection rules reference (234 rules)
 - [Security Audit](docs/SECURITY_AUDIT.md) - Bypass validation report
 - [FP Analysis](docs/EVALUATION.md) - Historical false positive analysis
 
