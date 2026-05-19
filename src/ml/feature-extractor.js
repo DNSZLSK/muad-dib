@@ -552,6 +552,157 @@ function placeholderAntiDepConfusion(result, meta) {
   return true;
 }
 
+// ============================================================================
+// Feature 9 — mcp_server_env_access (v2.11.22, audit week3 cluster, 25 FP)
+// ============================================================================
+//
+// Targets legitimate MCP installers / servers (Cachly, Roadmapfy, Llama
+// Ventures, Flomenco, Supericons, cf-memory-mcp, mcp-memory-service, etc.)
+// that currently score 75-99 from `mcp_config_injection` CRITICAL +
+// env_access + credential_regex_harvest triple-stacking on legitimate
+// provider-key reads. The conjunction below discriminates them from
+// SANDWORM_MODE droppers (which also emit mcp_config_injection) by requiring
+// the package to (a) self-identify as MCP, (b) be opt-in (no lifecycle
+// hook), (c) read ONLY known provider API keys (not .npmrc / .aws / SSH),
+// and (d) show no third-party exfil capability.
+
+// Provider API key env vars that legitimate MCP installers read to populate
+// the .mcp.json server config they write to the user's tool dirs.
+// Case-sensitive exact-name match; pattern match for *_API_KEY / *_TOKEN /
+// MCP_* / .*_KEY is allowed via PROVIDER_KEY_SUFFIX_RE.
+const KNOWN_PROVIDER_KEYS_LITERAL = new Set([
+  'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY',
+  'GOOGLE_GENERATIVE_AI_API_KEY',
+  'STRIPE_SECRET_KEY', 'STRIPE_PUBLISHABLE_KEY', 'STRIPE_API_KEY', 'STRIPE_KEY',
+  'BRAVE_API_KEY', 'FIGMA_TOKEN', 'FIGMA_ACCESS_TOKEN', 'POSTHOG_KEY',
+  'PERPLEXITY_API_KEY', 'GROQ_API_KEY', 'COHERE_API_KEY', 'MISTRAL_API_KEY',
+  'OPENROUTER_API_KEY', 'TOGETHER_API_KEY', 'DEEPSEEK_API_KEY', 'XAI_API_KEY',
+  'SUPABASE_ANON_KEY', 'SUPABASE_URL', 'CLAUDE_API_KEY', 'CLAUDE_KEY',
+  'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL', 'OPENAI_BASE_URL'
+]);
+const PROVIDER_KEY_SUFFIX_RE = /^(?:MCP_[A-Z0-9_]+|[A-Z][A-Z0-9_]*_API_KEY|[A-Z][A-Z0-9_]*_TOKEN|[A-Z][A-Z0-9_]*_API_TOKEN)$/;
+
+// Infra / build env vars that any well-behaved package can read without
+// disqualifying F9 (their presence doesn't indicate credential harvest).
+const F9_INFRA_KEYS = new Set([
+  'HOME', 'USERPROFILE', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_CACHE_HOME',
+  'PATH', 'NODE_ENV', 'NODE_PATH', 'DEBUG', 'CI', 'CWD', 'PWD',
+  'APPDATA', 'LOCALAPPDATA', 'TEMP', 'TMP', 'TMPDIR', 'SHELL',
+  'LANG', 'LC_ALL', 'TERM', 'COLORTERM'
+]);
+
+// Credential file paths that a malicious MCP dropper would harvest.
+// Appearance in any threat message disqualifies F9.
+const F9_CREDENTIAL_FILE_RE = /\.npmrc\b|\.aws[\/\\](?:credentials|config)\b|\bid_rsa\b|\bid_ed25519\b|\.ssh[\/\\]|\.kube[\/\\]config\b|\.docker[\/\\]config\b|\.netrc\b|\.git-credentials\b|wallet\.dat\b|\bsecret_token\b/i;
+
+// Threat types that signal third-party network egress. F9 disqualifies on
+// any of these — a legit MCP installer writes .mcp.json and reads env, it
+// does NOT download payloads or call back to attacker hosts.
+const F9_EXFIL_TYPES = new Set([
+  'suspicious_domain',
+  'suspicious_dataflow',
+  'remote_code_load',
+  'intent_credential_exfil',
+  'intent_command_exfil',
+  'fetch_decrypt_exec',
+  'reverse_shell',
+  'binary_dropper',
+  'download_exec_binary',
+  'curl_env_exfil',
+  'curl_exec',
+  'external_tarball_dep',
+  'dependency_url_suspicious',
+  'blockchain_c2_resolution',
+  'dns_exfil'
+]);
+
+// MCP identity signals — package SELF-identifies as an MCP installer/server.
+const MCP_NAME_RE = /(?:^|[/_-])mcp(?:[_-]|$)|claude[_-]plugin[_-]mcp|mcp[_-](?:server|init|bridge|installer|memory|plugin|core|router|host|client|gateway|relay|stdio|transport|orchestrator)/i;
+const MCP_DESC_RE = /\bmodel context protocol\b|\bmcp[ -](?:server|installer|bridge|plugin|memory|core|gateway|relay|orchestrator|transport)\b|\b(?:claude|cursor|windsurf)[ -]mcp\b/i;
+
+function _f9Keywords(meta) {
+  const m = (meta && meta.registryMeta) || {};
+  return Array.isArray(m.keywords) ? m.keywords.map(k => String(k).toLowerCase()) : [];
+}
+
+function _f9HasMcpIdentity(meta) {
+  if (!meta) return false;
+  const name = String(meta.name || '').toLowerCase();
+  if (MCP_NAME_RE.test(name)) return true;
+  const desc = (meta.registryMeta && meta.registryMeta.description) || meta.description || '';
+  if (MCP_DESC_RE.test(desc)) return true;
+  const kw = _f9Keywords(meta);
+  for (const k of kw) {
+    if (k === 'mcp' || k === 'model-context-protocol' || k === 'model context protocol' ||
+        k.startsWith('mcp-') || k.startsWith('mcp_')) return true;
+  }
+  const bin = meta.registryMeta && meta.registryMeta.bin;
+  if (bin && typeof bin === 'object') {
+    for (const b of Object.keys(bin)) {
+      if (/mcp/i.test(b)) return true;
+    }
+  } else if (typeof bin === 'string' && /mcp/i.test(bin)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Feature 9 — TRUE iff the package self-identifies as an MCP installer/server
+ * AND emits `mcp_config_injection` (legit scaffolding signal) AND has no
+ * install lifecycle script AND its env_access / credential_regex_harvest
+ * threats cite ONLY known provider API keys (Anthropic/OpenAI/Stripe/etc.)
+ * — never credential files like .npmrc, .aws/credentials, or SSH keys —
+ * AND shows no third-party exfil capability.
+ *
+ * Targets the v2.11 audit week3 cluster of 25 legitimate MCP plugin
+ * installers that currently score 75-99 from mcp_config_injection +
+ * env_access + credential_regex_harvest triple-stacking. Cap to 30 (MEDIUM).
+ *
+ * Mutually exclusive with SANDWORM_MODE MCP droppers: condition C3 blocks
+ * preinstall/postinstall droppers; C4 blocks .npmrc/SSH/AWS harvests; C5
+ * blocks downloaders. None of the 15 MALWARE + 29 PENTEST samples in the
+ * week3 audit satisfy all five conditions simultaneously.
+ *
+ * Covers 25 FP (8.7% of audit week3 FP corpus).
+ */
+function mcpServerEnvAccess(result, meta) {
+  // C1 — MCP identity
+  if (!_f9HasMcpIdentity(meta)) return false;
+  const threats = (result && result.threats) || [];
+  if (threats.length === 0) return false;
+  // C2 — mcp_config_injection present (the positive signal that the package
+  // actually does MCP work, not just claims to)
+  if (!threats.some(t => t.type === 'mcp_config_injection')) return false;
+  // C3 — no install lifecycle hook
+  if (hasLifecycleScripts(meta)) return false;
+  // C4 — env_access / credential_regex_harvest must cite only known provider
+  // keys (literal whitelist + suffix pattern) or infra vars; never credential
+  // file paths
+  for (const t of threats) {
+    if (t.type !== 'env_access' && t.type !== 'credential_regex_harvest' &&
+        t.type !== 'env_charcode_reconstruction') continue;
+    const msg = String(t.message || '');
+    if (F9_CREDENTIAL_FILE_RE.test(msg)) return false;
+    // Extract candidate env var names from the message
+    const candidates = msg.match(/\b[A-Z][A-Z0-9_]{2,}\b/g);
+    if (!candidates) continue;
+    for (const v of candidates) {
+      if (KNOWN_PROVIDER_KEYS_LITERAL.has(v)) continue;
+      if (PROVIDER_KEY_SUFFIX_RE.test(v)) continue;
+      if (F9_INFRA_KEYS.has(v)) continue;
+      // Unknown all-caps token in a credential threat message — could be an
+      // attacker-specific var. Don't vouch for legitimacy.
+      return false;
+    }
+  }
+  // C5 — no third-party exfil capability
+  for (const t of threats) {
+    if (F9_EXFIL_TYPES.has(t.type)) return false;
+  }
+  return true;
+}
+
 /**
  * Feature 8 — TRUE iff the package declares at least one install
  * lifecycle script AND the scan shows no network egress capability
@@ -702,6 +853,9 @@ function extractFeatures(result, meta) {
   // See ml-retrain/ml-auc-v2.10.96.md for details.
   features.install_script_no_network_egress = 0; // installScriptNoNetworkEgress(result, meta) ? 1 : 0;
 
+  // --- v2.11.22 Feature 9 (audit week3 cluster — 25 FP) ---
+  features.mcp_server_env_access = mcpServerEnvAccess(result, meta) ? 1 : 0;
+
   return features;
 }
 
@@ -779,5 +933,6 @@ module.exports = {
   typosquatScopedPackage,
   obfuscationWithoutVector,
   placeholderAntiDepConfusion,
-  installScriptNoNetworkEgress
+  installScriptNoNetworkEgress,
+  mcpServerEnvAccess
 };

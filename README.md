@@ -275,7 +275,7 @@ With pre-commit framework:
 ```yaml
 repos:
   - repo: https://github.com/DNSZLSK/muad-dib
-    rev: v2.11.20
+    rev: v2.11.22
     hooks:
       - id: muaddib-scan
 ```
@@ -296,7 +296,7 @@ repos:
 | **FPR** (Benign random, v2.10.95 measure) | **7.0%** (14/200) | 200 random npm packages, stratified sampling |
 | **ADR** (Adversarial + Holdout) | **96.3%** (103/107) | 67 adversarial + 40 holdout (107 available on disk), global threshold=20 |
 
-**3570 tests** across 93 files. **234 rules** (229 RULES + 5 PARANOID).
+**3586 tests** across 93 files. **234 rules** (229 RULES + 5 PARANOID).
 
 > **ML retrain methodology (v2.10.51):**
 > - Ground truth: 377 confirmed_malicious via auto-labeler (OSSF malicious-packages, GitHub Advisory Database, npm registry takedown correlation)
@@ -344,7 +344,7 @@ npm test
 
 ### Testing
 
-- **3570 tests** across 93 modular test files
+- **3586 tests** across 93 modular test files
 - **56 fuzz tests** - Malformed inputs, ReDoS, unicode, binary
 - **Datadog 17K benchmark** - 14,587 confirmed malware samples (in-scope)
 - **Ground truth validation** - 67 real-world attacks (93.85% TPR@3, 86.2% TPR@20 — v2.10.95 measure)

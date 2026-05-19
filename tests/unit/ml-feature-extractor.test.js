@@ -19,7 +19,8 @@ function runMLFeatureExtractorTests() {
     typosquatScopedPackage,
     obfuscationWithoutVector,
     placeholderAntiDepConfusion,
-    installScriptNoNetworkEgress
+    installScriptNoNetworkEgress,
+    mcpServerEnvAccess
   } = require('../../src/ml/feature-extractor');
   const { appendRecord, readRecords, getStats, relabelRecords, setTrainingFile, resetTrainingFile } = require('../../src/ml/jsonl-writer');
 
@@ -1071,9 +1072,154 @@ function runMLFeatureExtractorTests() {
       'binary_dropper is an egress type — this case belongs to F2, not F8');
   });
 
+  // --- Feature 9: mcp_server_env_access (v2.11.21, audit week3 cluster) ---
+
+  test('mcp_server_env_access: TRUE on legit MCP installer reading provider keys', () => {
+    const result = {
+      threats: [
+        { type: 'mcp_config_injection', severity: 'CRITICAL', file: 'install.js',
+          message: 'Writes MCP server entry to ~/.cursor/mcp.json with command and args.' },
+        { type: 'env_access', severity: 'HIGH', file: 'install.js',
+          message: 'Reads process.env.ANTHROPIC_API_KEY and process.env.OPENAI_API_KEY.' },
+        { type: 'credential_regex_harvest', severity: 'HIGH', file: 'install.js',
+          message: 'Matches BRAVE_API_KEY pattern in config template.' }
+      ],
+      summary: { total: 3, critical: 1, high: 2, medium: 0, low: 0, riskScore: 95 }
+    };
+    const meta = {
+      name: '@roadmapfy/mcp-init',
+      registryMeta: {
+        scripts: {},
+        keywords: ['mcp', 'claude', 'cursor'],
+        description: 'Roadmapfy MCP installer'
+      }
+    };
+    assert(mcpServerEnvAccess(result, meta) === true,
+      'identity + mcp_config_injection + no lifecycle + provider keys only + no exfil = F9');
+    const features = extractFeatures(result, meta);
+    assert(features.mcp_server_env_access === 1, 'feature flag should be 1');
+  });
+
+  test('mcp_server_env_access: FALSE when package has no MCP identity', () => {
+    const result = {
+      threats: [
+        { type: 'mcp_config_injection', severity: 'CRITICAL', file: 'preinstall.js',
+          message: 'Writes MCP server entry to .claude/mcp_servers.json.' },
+        { type: 'env_access', severity: 'HIGH',
+          message: 'Reads process.env.ANTHROPIC_API_KEY.' }
+      ],
+      summary: { total: 2, critical: 1, high: 1, medium: 0, low: 0, riskScore: 90 }
+    };
+    const meta = {
+      name: 'innocent-helper',
+      registryMeta: { scripts: {}, description: 'A small utility.' }
+    };
+    assert(mcpServerEnvAccess(result, meta) === false,
+      'a non-MCP package injecting MCP config is a SANDWORM_MODE dropper — not F9');
+  });
+
+  test('mcp_server_env_access: FALSE when package has install lifecycle hook', () => {
+    const result = {
+      threats: [
+        { type: 'mcp_config_injection', severity: 'CRITICAL', file: 'preinstall.js',
+          message: 'Writes MCP server entry to ~/.cursor/mcp.json.' },
+        { type: 'env_access', severity: 'HIGH',
+          message: 'Reads process.env.ANTHROPIC_API_KEY.' }
+      ],
+      summary: { total: 2, critical: 1, high: 1, medium: 0, low: 0, riskScore: 90 }
+    };
+    const meta = {
+      name: '@vendor/mcp-server',
+      registryMeta: {
+        scripts: { preinstall: 'node preinstall.js' },
+        description: 'MCP server bridge.'
+      }
+    };
+    assert(mcpServerEnvAccess(result, meta) === false,
+      'legit MCP installers are opt-in (npx) — a preinstall hook means malicious dropper');
+  });
+
+  test('mcp_server_env_access: FALSE when env_access cites a credential file (.npmrc)', () => {
+    const result = {
+      threats: [
+        { type: 'mcp_config_injection', severity: 'CRITICAL', file: 'install.js',
+          message: 'Writes to .mcp.json.' },
+        { type: 'credential_regex_harvest', severity: 'CRITICAL', file: 'install.js',
+          message: 'Reads ~/.npmrc to harvest npm tokens.' }
+      ],
+      summary: { total: 2, critical: 2, high: 0, medium: 0, low: 0, riskScore: 95 }
+    };
+    const meta = {
+      name: '@vendor/mcp-installer',
+      registryMeta: { scripts: {}, keywords: ['mcp'] }
+    };
+    assert(mcpServerEnvAccess(result, meta) === false,
+      '.npmrc read is the SANDWORM_MODE harvest pattern — disqualify');
+  });
+
+  test('mcp_server_env_access: FALSE when exfil signal present (suspicious_domain)', () => {
+    const result = {
+      threats: [
+        { type: 'mcp_config_injection', severity: 'CRITICAL', file: 'install.js',
+          message: 'Writes MCP server entry.' },
+        { type: 'env_access', severity: 'HIGH',
+          message: 'Reads ANTHROPIC_API_KEY.' },
+        { type: 'suspicious_domain', severity: 'CRITICAL', file: 'install.js',
+          message: 'POST to https://kaixin8.top/relay' }
+      ],
+      summary: { total: 3, critical: 2, high: 1, medium: 0, low: 0, riskScore: 95 }
+    };
+    const meta = {
+      name: '@vendor/mcp-bridge',
+      registryMeta: { scripts: {}, keywords: ['mcp'] }
+    };
+    assert(mcpServerEnvAccess(result, meta) === false,
+      'any third-party exfil signal disqualifies F9 — legit MCP installers do not call back to attacker hosts');
+  });
+
+  test('mcp_server_env_access: FALSE when env_access cites an unknown all-caps var', () => {
+    const result = {
+      threats: [
+        { type: 'mcp_config_injection', severity: 'CRITICAL', file: 'install.js',
+          message: 'Writes .mcp.json.' },
+        { type: 'env_access', severity: 'HIGH',
+          message: 'Reads process.env.WALLET_PRIVATE_KEY (not a known provider key).' }
+      ],
+      summary: { total: 2, critical: 1, high: 1, medium: 0, low: 0, riskScore: 90 }
+    };
+    const meta = {
+      name: 'mcp-vendor-cli',
+      registryMeta: { scripts: {}, description: 'MCP server for vendor X.' }
+    };
+    assert(mcpServerEnvAccess(result, meta) === false,
+      'unknown env var (not in provider whitelist, not infra) — cannot vouch for legitimacy');
+  });
+
+  test('mcp_server_env_access: TRUE via bin/keywords identity (no name match)', () => {
+    const result = {
+      threats: [
+        { type: 'mcp_config_injection', severity: 'CRITICAL', file: 'cli.js',
+          message: 'Writes mcp.json to user dirs.' },
+        { type: 'env_access', severity: 'MEDIUM',
+          message: 'Reads process.env.STRIPE_SECRET_KEY and STRIPE_PUBLISHABLE_KEY.' }
+      ],
+      summary: { total: 2, critical: 1, high: 0, medium: 1, low: 0, riskScore: 80 }
+    };
+    const meta = {
+      name: '@llamaventures/cli',
+      registryMeta: {
+        scripts: {},
+        bin: { 'llamaventures-mcp-server': './bin/server.js' },
+        description: 'Llama Ventures CLI'
+      }
+    };
+    assert(mcpServerEnvAccess(result, meta) === true,
+      'bin entry with mcp name segment satisfies identity check even when package name does not');
+  });
+
   // --- Feature vector integration ---
 
-  test('extractFeatures: exposes all 8 cluster FP features as 0/1 integers', () => {
+  test('extractFeatures: exposes all 9 cluster FP features as 0/1 integers', () => {
     const result = {
       threats: [
         { type: 'git_hooks_injection', severity: 'HIGH', file: 'bin/install.js',
@@ -1090,7 +1236,8 @@ function runMLFeatureExtractorTests() {
       'typosquat_scoped_package',
       'obfuscation_without_vector',
       'placeholder_anti_dep_confusion',
-      'install_script_no_network_egress'
+      'install_script_no_network_egress',
+      'mcp_server_env_access'
     ];
     for (const k of keys) {
       assert(features[k] === 0 || features[k] === 1, `${k} must be 0/1, got ${features[k]}`);
@@ -1098,6 +1245,7 @@ function runMLFeatureExtractorTests() {
     assert(features.git_hook_source_local === 1, 'hook w/o remote fetch -> 1');
     assert(features.network_destination_first_party === 0, 'no network signal -> 0');
     assert(features.install_script_no_network_egress === 0, 'no install script passed -> 0');
+    assert(features.mcp_server_env_access === 0, 'no MCP identity -> 0');
   });
 
   // Cleanup

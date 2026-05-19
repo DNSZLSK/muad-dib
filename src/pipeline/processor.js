@@ -166,6 +166,9 @@ async function process(threats, targetPath, options, pythonDeps, warnings, scann
         homepage: pkgData.homepage || (typeof pkgData.repository === 'string' ? pkgData.repository : (pkgData.repository && pkgData.repository.url) || ''),
         dependencies: pkgData.dependencies,
         devDependencies: pkgData.devDependencies,
+        // v2.11.22 — used by F9 (mcp_server_env_access) identity check.
+        keywords: Array.isArray(pkgData.keywords) ? pkgData.keywords : undefined,
+        bin: pkgData.bin,
       };
     }
   } catch { /* graceful fallback */ }

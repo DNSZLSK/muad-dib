@@ -440,6 +440,22 @@ GlassWorm campaign (March 2026, 433+ packages): Unicode invisible characters + B
 
 ## Version History
 
+### v2.11.22 — Contextual FP cap F9 (mcp_server_env_access) — audit week3 cluster
+
+- New helper `mcpServerEnvAccess(result, meta)` in `src/ml/feature-extractor.js`, wired as F9 in `applyContextualFPCaps()` (`src/scoring.js`) with cap **30** (CRITICAL → MEDIUM).
+- Targets the audit 2026-05-week3 cluster of 25 legitimate MCP installers/servers (Cachly, Roadmapfy, Llama Ventures, Flomenco, Supericons, cf-memory-mcp, mcp-memory-service, etc.) that currently score 75-99 from `mcp_config_injection` CRITICAL + `env_access` + `credential_regex_harvest` triple-stacking on legitimate provider-key reads.
+- Conjunction of 5 conditions (AND), discriminant vs SANDWORM_MODE droppers:
+  - **C1** MCP self-identity (`name` / `keywords` / `bin` / `description` matches `mcp`, `mcp-server`, `mcp-init`, `model context protocol`, etc.).
+  - **C2** Threat `mcp_config_injection` is present (positive signal that the package actually does MCP work).
+  - **C3** No install lifecycle hook (`preinstall|install|postinstall` absent). Legit MCP installers are opt-in (`npx pkg init`).
+  - **C4** `env_access` / `credential_regex_harvest` cite ONLY known provider keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `STRIPE_*`, `GEMINI_API_KEY`, etc., 28 literals + `*_API_KEY|*_TOKEN|MCP_*` suffix pattern) or infra vars (`HOME`, `PATH`, …). Never `~/.npmrc`, `~/.aws/credentials`, `id_rsa`, `.ssh/`.
+  - **C5** No third-party exfil signal (`suspicious_domain`, `remote_code_load`, `download_exec_binary`, `curl_env_exfil`, `binary_dropper`, etc. — 15 exfil types).
+- `applyContextualFPCaps()`'s `Math.min` lowest-wins arbitrates if F9 co-fires with another cap.
+- Plumbing: `_pkgMeta` in `src/pipeline/processor.js` extended with `keywords` + `bin`; `meta.registryMeta` construction in `applyContextualFPCaps` extended in kind.
+- Tests: 3578 → **3586** passed, 0 failed. 7 unit tests on `mcpServerEnvAccess` + extended `extractFeatures: exposes all 9 cluster FP features` integration vector test in `tests/unit/ml-feature-extractor.test.js`.
+- No new rule, no scoring change beyond the cap. Pure additive post-filter.
+- FPR delta measurement on 545 curated benign + ground truth regression check **pending** (will be measured post-merge).
+
 ### v2.10.97 — Contextual FP post-filter (F1-F7) in scoring.js
 
 - New `applyContextualFPCaps()` in `src/scoring.js` (lines 1036-1119), called after `calculateRiskScore()` so compound boosts and lifecycle floors keep the last word.
