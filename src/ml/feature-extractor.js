@@ -703,6 +703,95 @@ function mcpServerEnvAccess(result, meta) {
   return true;
 }
 
+// ============================================================================
+// Feature 10 — vendor_cli_sdk (v2.11.23, audit week3 cluster, 96 FP)
+// ============================================================================
+//
+// Targets the largest residual FP cluster from the audit 2026-05-week3
+// (96 entries, 33.6% of FP): legitimate vendor / community CLIs and SDKs
+// that fire `credential_regex_harvest` + `env_access` on their OWN
+// in-package credential handling (Stripe checkout, OAuth-PKCE, bearer
+// tokens to vendor APIs, .env template scaffolding). Examples observed:
+// @nocobase/cli-v1, @posterly/cli, @super-hands/cli, codeapp-js-cli
+// (Microsoft Power Apps), nodebb-plugin-flawless-donations (Stripe),
+// @aiyiran/myclaw (Chinese OpenClaw wrapper), usegrain (scaffolder),
+// @tapestry-mud/cli, db-model-router, etc.
+//
+// Discriminator vs vendor-impersonating malware: SANDWORM_MODE droppers
+// (a) typically have no `bin` entry (they install via lifecycle hook,
+// not user-invoked CLI), (b) emit `mcp_config_injection` (F9 catches
+// those), (c) cite credential file paths (.npmrc / .ssh / .aws), (d)
+// emit third-party exfil threats. F10's conjunction requires NONE of
+// these and additionally requires a vendor identity hint (homepage or
+// scoped name).
+
+function _f10HasBinEntry(meta) {
+  const bin = meta && meta.registryMeta && meta.registryMeta.bin;
+  if (!bin) return false;
+  if (typeof bin === 'string' && bin.trim().length > 0) return true;
+  if (typeof bin === 'object' && Object.keys(bin).length > 0) return true;
+  return false;
+}
+
+function _f10HasVendorIdentity(meta) {
+  if (!meta) return false;
+  if (getHomepageHost(meta)) return true;
+  const name = meta.name && String(meta.name);
+  if (name && name.startsWith('@') && name.includes('/')) return true;
+  return false;
+}
+
+/**
+ * Feature 10 — TRUE iff the package looks structurally like a legitimate
+ * vendor / community CLI / SDK whose credential-handling threats are
+ * intrinsic to its functionality, not an exfil vector.
+ *
+ * Conjunction of 7 conditions (see file header for SANDWORM_MODE
+ * discriminator rationale):
+ *
+ *   C1  has `bin` entry                       — CLI signal
+ *   C2  credential_regex_harvest OR env_access fires
+ *   C3  no `mcp_config_injection`             — F9 catches MCP installers
+ *   C4  no install lifecycle hook             — legit CLIs are opt-in
+ *   C5  no third-party exfil threat (15 types)
+ *   C6  no credential file path (.npmrc/.ssh/.aws) in any threat message
+ *   C7  vendor identity present (homepage host OR scoped @vendor/name)
+ *
+ * Cap value 35 (CRITICAL → MEDIUM-HIGH boundary). Reuses the F9 constants
+ * F9_EXFIL_TYPES and F9_CREDENTIAL_FILE_RE for C5/C6.
+ *
+ * Covers up to 96 FP (33.6% of audit week3 FP corpus). Estimated effective
+ * coverage 60-75 after the conjunction filters (some week3 entries lack
+ * a bin field, e.g. design-system asset packages — those fall under F1
+ * `bundle_without_install_scripts` instead).
+ */
+function vendorCliSdk(result, meta) {
+  // C1 — has bin entry
+  if (!_f10HasBinEntry(meta)) return false;
+  const threats = (result && result.threats) || [];
+  if (threats.length === 0) return false;
+  // C2 — at least one credential-noise threat (the FP source)
+  const hasCredentialNoise = threats.some(t =>
+    t.type === 'credential_regex_harvest' ||
+    t.type === 'env_access' ||
+    t.type === 'env_charcode_reconstruction' ||
+    t.type === 'credential_tampering'
+  );
+  if (!hasCredentialNoise) return false;
+  // C3 — no mcp_config_injection (F9 territory)
+  if (threats.some(t => t.type === 'mcp_config_injection')) return false;
+  // C4 — no install lifecycle hook
+  if (hasLifecycleScripts(meta)) return false;
+  // C5 + C6 — scan threats for exfil signal and credential-file mentions
+  for (const t of threats) {
+    if (F9_EXFIL_TYPES.has(t.type)) return false;       // C5
+    if (F9_CREDENTIAL_FILE_RE.test(String(t.message || ''))) return false;  // C6
+  }
+  // C7 — vendor identity
+  if (!_f10HasVendorIdentity(meta)) return false;
+  return true;
+}
+
 /**
  * Feature 8 — TRUE iff the package declares at least one install
  * lifecycle script AND the scan shows no network egress capability
@@ -855,6 +944,8 @@ function extractFeatures(result, meta) {
 
   // --- v2.11.22 Feature 9 (audit week3 cluster — 25 FP) ---
   features.mcp_server_env_access = mcpServerEnvAccess(result, meta) ? 1 : 0;
+  // --- v2.11.23 Feature 10 (audit week3 cluster — up to 96 FP) ---
+  features.vendor_cli_sdk = vendorCliSdk(result, meta) ? 1 : 0;
 
   return features;
 }
@@ -934,5 +1025,6 @@ module.exports = {
   obfuscationWithoutVector,
   placeholderAntiDepConfusion,
   installScriptNoNetworkEgress,
-  mcpServerEnvAccess
+  mcpServerEnvAccess,
+  vendorCliSdk
 };

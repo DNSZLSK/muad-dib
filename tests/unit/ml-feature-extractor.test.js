@@ -20,7 +20,8 @@ function runMLFeatureExtractorTests() {
     obfuscationWithoutVector,
     placeholderAntiDepConfusion,
     installScriptNoNetworkEgress,
-    mcpServerEnvAccess
+    mcpServerEnvAccess,
+    vendorCliSdk
   } = require('../../src/ml/feature-extractor');
   const { appendRecord, readRecords, getStats, relabelRecords, setTrainingFile, resetTrainingFile } = require('../../src/ml/jsonl-writer');
 
@@ -1217,9 +1218,149 @@ function runMLFeatureExtractorTests() {
       'bin entry with mcp name segment satisfies identity check even when package name does not');
   });
 
+  // --- Feature 10: vendor_cli_sdk (v2.11.23, audit week3 cluster, 96 FP) ---
+
+  test('vendor_cli_sdk: TRUE on legit vendor CLI with bin + credential noise + homepage', () => {
+    const result = {
+      threats: [
+        { type: 'credential_regex_harvest', severity: 'HIGH', file: 'src/auth.js',
+          message: 'STRIPE_SECRET_KEY pattern matched in env read.' },
+        { type: 'env_access', severity: 'MEDIUM', file: 'src/auth.js',
+          message: 'Reads process.env.STRIPE_SECRET_KEY and PAYPAL_CLIENT_SECRET.' }
+      ],
+      summary: { total: 2, critical: 0, high: 1, medium: 1, low: 0, riskScore: 90 }
+    };
+    const meta = {
+      name: 'nodebb-plugin-flawless-donations',
+      registryMeta: {
+        scripts: {},
+        bin: { 'flawless-donations': './bin/cli.js' },
+        homepage: 'https://github.com/example/flawless-donations'
+      }
+    };
+    assert(vendorCliSdk(result, meta) === true,
+      'bin + cred noise + homepage + no exfil + no lifecycle + no MCP = F10');
+    const features = extractFeatures(result, meta);
+    assert(features.vendor_cli_sdk === 1, 'feature flag should be 1');
+  });
+
+  test('vendor_cli_sdk: TRUE on scoped CLI without homepage (scope identity)', () => {
+    const result = {
+      threats: [
+        { type: 'env_access', severity: 'HIGH',
+          message: 'Reads process.env.API_TOKEN at index.js:42.' }
+      ],
+      summary: { total: 1, critical: 0, high: 1, medium: 0, low: 0, riskScore: 80 }
+    };
+    const meta = {
+      name: '@vendor/cli',
+      registryMeta: { scripts: {}, bin: './bin/vendor-cli.js' }
+    };
+    assert(vendorCliSdk(result, meta) === true,
+      'scoped @vendor/cli with bin satisfies C7 even without homepage');
+  });
+
+  test('vendor_cli_sdk: FALSE when no bin entry (not a CLI)', () => {
+    const result = {
+      threats: [
+        { type: 'credential_regex_harvest', severity: 'HIGH', message: 'API key in source.' }
+      ],
+      summary: { total: 1, critical: 0, high: 1, medium: 0, low: 0, riskScore: 75 }
+    };
+    const meta = {
+      name: '@vendor/library',
+      registryMeta: { scripts: {}, homepage: 'https://vendor.example.com' }
+    };
+    assert(vendorCliSdk(result, meta) === false,
+      'a library without a bin entry is not a CLI — F10 does not apply');
+  });
+
+  test('vendor_cli_sdk: FALSE when install lifecycle hook present', () => {
+    const result = {
+      threats: [
+        { type: 'credential_regex_harvest', severity: 'CRITICAL', message: 'API_TOKEN harvested.' }
+      ],
+      summary: { total: 1, critical: 1, high: 0, medium: 0, low: 0, riskScore: 95 }
+    };
+    const meta = {
+      name: '@vendor/cli',
+      registryMeta: {
+        scripts: { postinstall: 'node ./install.js' },
+        bin: './bin/cli.js',
+        homepage: 'https://vendor.example.com'
+      }
+    };
+    assert(vendorCliSdk(result, meta) === false,
+      'install lifecycle hook disqualifies — legit vendor CLIs are opt-in');
+  });
+
+  test('vendor_cli_sdk: FALSE when mcp_config_injection fires (F9 territory)', () => {
+    const result = {
+      threats: [
+        { type: 'mcp_config_injection', severity: 'CRITICAL', message: 'Writes .mcp.json.' },
+        { type: 'env_access', severity: 'HIGH', message: 'Reads ANTHROPIC_API_KEY.' }
+      ],
+      summary: { total: 2, critical: 1, high: 1, medium: 0, low: 0, riskScore: 90 }
+    };
+    const meta = {
+      name: '@vendor/mcp-cli',
+      registryMeta: { scripts: {}, bin: './bin/cli.js', homepage: 'https://mcp.vendor.com' }
+    };
+    assert(vendorCliSdk(result, meta) === false,
+      'MCP packages must go through F9 not F10');
+  });
+
+  test('vendor_cli_sdk: FALSE when exfil signal present (suspicious_domain)', () => {
+    const result = {
+      threats: [
+        { type: 'env_access', severity: 'HIGH', message: 'Reads OAuth tokens from env.' },
+        { type: 'suspicious_domain', severity: 'CRITICAL',
+          message: 'POST to https://exfil.attacker.example' }
+      ],
+      summary: { total: 2, critical: 1, high: 1, medium: 0, low: 0, riskScore: 95 }
+    };
+    const meta = {
+      name: '@vendor/cli',
+      registryMeta: { scripts: {}, bin: './bin/cli.js', homepage: 'https://vendor.example.com' }
+    };
+    assert(vendorCliSdk(result, meta) === false,
+      'any third-party exfil signal disqualifies — could be a vendor-impersonating dropper');
+  });
+
+  test('vendor_cli_sdk: FALSE when credential file path in threat message (.npmrc)', () => {
+    const result = {
+      threats: [
+        { type: 'credential_regex_harvest', severity: 'CRITICAL', file: 'cli.js',
+          message: 'Reads ~/.npmrc to extract npm authToken.' }
+      ],
+      summary: { total: 1, critical: 1, high: 0, medium: 0, low: 0, riskScore: 95 }
+    };
+    const meta = {
+      name: '@vendor/cli',
+      registryMeta: { scripts: {}, bin: './bin/cli.js', homepage: 'https://vendor.example.com' }
+    };
+    assert(vendorCliSdk(result, meta) === false,
+      '.npmrc harvest is SANDWORM_MODE — disqualify');
+  });
+
+  test('vendor_cli_sdk: FALSE when no vendor identity (unscoped + no homepage)', () => {
+    const result = {
+      threats: [
+        { type: 'credential_regex_harvest', severity: 'HIGH', message: 'API_TOKEN read.' }
+      ],
+      summary: { total: 1, critical: 0, high: 1, medium: 0, low: 0, riskScore: 75 }
+    };
+    const meta = {
+      name: 'random-helper',
+      registryMeta: { scripts: {}, bin: './bin/run.js' }
+    };
+    assert(vendorCliSdk(result, meta) === false,
+      'unscoped name + no homepage = no vendor identity hint — too loose to cap');
+  });
+
   // --- Feature vector integration ---
 
-  test('extractFeatures: exposes all 9 cluster FP features as 0/1 integers', () => {
+  test('extractFeatures: exposes all 10 cluster FP features as 0/1 integers', () => {
     const result = {
       threats: [
         { type: 'git_hooks_injection', severity: 'HIGH', file: 'bin/install.js',
@@ -1237,7 +1378,8 @@ function runMLFeatureExtractorTests() {
       'obfuscation_without_vector',
       'placeholder_anti_dep_confusion',
       'install_script_no_network_egress',
-      'mcp_server_env_access'
+      'mcp_server_env_access',
+      'vendor_cli_sdk'
     ];
     for (const k of keys) {
       assert(features[k] === 0 || features[k] === 1, `${k} must be 0/1, got ${features[k]}`);
@@ -1246,6 +1388,7 @@ function runMLFeatureExtractorTests() {
     assert(features.network_destination_first_party === 0, 'no network signal -> 0');
     assert(features.install_script_no_network_egress === 0, 'no install script passed -> 0');
     assert(features.mcp_server_env_access === 0, 'no MCP identity -> 0');
+    assert(features.vendor_cli_sdk === 0, 'no bin entry -> 0');
   });
 
   // Cleanup
