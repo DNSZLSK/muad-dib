@@ -1118,13 +1118,49 @@ async function resolveTarballAndScan(item, stats, dailyAlerts, recentlyScanned, 
       if (npmInfo.unpackedSize) item.unpackedSize = npmInfo.unpackedSize;
       if (npmInfo.scripts) item.registryScripts = npmInfo.scripts;
 
+      // ATO signature: most-recently-published version differs from current
+      // dist-tags.latest. Pattern observed in TeamPCP / @antv 2026-05-19:
+      // attacker publishes 1-2 versions per package but does NOT bump the latest
+      // tag. semver resolution on `npm install <pkg>@^x.y` still pulls the
+      // malicious version. The mismatch is a strong ATO signal — legitimate
+      // maintainers almost always move latest when publishing.
+      if (npmInfo.latestTagVersion && npmInfo.version && npmInfo.version !== npmInfo.latestTagVersion) {
+        item.atoSignal = true;
+        console.log(`[MONITOR] ATO SIGNAL: ${item.name}@${item.version} published but dist-tags.latest=${npmInfo.latestTagVersion}`);
+      }
+
+      // Burst-publish coverage: enqueue extra versions published in the same
+      // recent window. Single change event in the CouchDB feed can correspond
+      // to multiple version publishes when the attacker fires several in a
+      // burst (TeamPCP averaged ~2 versions per package). Without this we'd
+      // only scan whichever version happened to be the most recent at resolution
+      // time, racing the publish stream.
+      const recents = Array.isArray(npmInfo.recentVersions) ? npmInfo.recentVersions : [];
+      for (const recent of recents) {
+        if (!recent || !recent.tarball || !recent.version) continue;
+        const dedupeKey = `${item.name}@${recent.version}`;
+        if (recentlyScanned.has(dedupeKey)) continue;
+        scanQueue.push({
+          name: item.name,
+          version: recent.version,
+          ecosystem: 'npm',
+          tarballUrl: recent.tarball,
+          unpackedSize: recent.unpackedSize || 0,
+          registryScripts: recent.scripts || null,
+          atoSignal: item.atoSignal === true,
+          isATOBurstExtra: true,
+        });
+      }
+
       // Fast-track decision: large packages (>15MB) with no lifecycle scripts and no IOC match.
       // Computed HERE (after metadata resolution), not at ingestion time — post-May 2025
       // CouchDB changes feed has no docs, so metadata is only available after lazy fetch.
       // Fast-track packages get: quick static scan (package.json + shell only), no AST,
       // no sandbox, no LLM, no archiving. Exits in ~2-3s instead of 30-300s.
+      // ATO-signalled packages bypass fast-track regardless of size — we want
+      // the full pipeline (AST + sandbox) on anything that smells like an ATO.
       const FAST_TRACK_SIZE_BYTES = 15 * 1024 * 1024;
-      if (!item.isIOCMatch && (item.unpackedSize || 0) > FAST_TRACK_SIZE_BYTES) {
+      if (!item.isIOCMatch && !item.atoSignal && (item.unpackedSize || 0) > FAST_TRACK_SIZE_BYTES) {
         const scripts = item.registryScripts || {};
         if (!scripts.preinstall && !scripts.postinstall && !scripts.install) {
           item.fastTrack = true;
