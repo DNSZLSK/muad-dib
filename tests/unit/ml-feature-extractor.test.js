@@ -21,7 +21,8 @@ function runMLFeatureExtractorTests() {
     placeholderAntiDepConfusion,
     installScriptNoNetworkEgress,
     mcpServerEnvAccess,
-    vendorCliSdk
+    vendorCliSdk,
+    aiAgentBot
   } = require('../../src/ml/feature-extractor');
   const { appendRecord, readRecords, getStats, relabelRecords, setTrainingFile, resetTrainingFile } = require('../../src/ml/jsonl-writer');
 
@@ -1358,9 +1359,160 @@ function runMLFeatureExtractorTests() {
       'unscoped name + no homepage = no vendor identity hint — too loose to cap');
   });
 
+  // --- Feature 11: ai_agent_bot (v2.11.24, audit week3 cluster, 54 FP) ---
+
+  test('ai_agent_bot: TRUE on multi-LLM orchestrator (gm-skill pattern)', () => {
+    const result = {
+      threats: [
+        { type: 'dynamic_import', severity: 'MEDIUM', file: 'cli.js',
+          message: 'Dynamic import in CLI dispatch.' },
+        { type: 'env_access', severity: 'HIGH', file: 'cli.js',
+          message: 'Reads HOME and writes logs to ~/.claude/gm-log/run.log.' },
+        { type: 'remote_code_load', severity: 'HIGH', file: 'cli.js',
+          message: 'spawn bun x rs-learn@latest — supply-chain risk but explicit orchestrator pattern.' }
+      ],
+      summary: { total: 3, critical: 0, high: 2, medium: 1, low: 0, riskScore: 88 }
+    };
+    const meta = {
+      name: 'gm-skill',
+      registryMeta: {
+        scripts: {},
+        dependencies: { '@anthropic-ai/sdk': '^0.30.0' },
+        description: 'AI coding harness orchestrator'
+      }
+    };
+    assert(aiAgentBot(result, meta) === true,
+      'identity (name + deps) + agent path access + no exfil/MCP/lifecycle = F11');
+    const features = extractFeatures(result, meta);
+    assert(features.ai_agent_bot === 1, 'feature flag should be 1');
+  });
+
+  test('ai_agent_bot: TRUE via desc + agent path access (lazyclaw pattern)', () => {
+    const result = {
+      threats: [
+        { type: 'env_access', severity: 'HIGH', file: 'index.js',
+          message: 'Reads ~/.claude/sessions/* for context replay.' }
+      ],
+      summary: { total: 1, critical: 0, high: 1, medium: 0, low: 0, riskScore: 75 }
+    };
+    const meta = {
+      name: 'random-pkg-name',
+      registryMeta: {
+        scripts: {},
+        description: 'Terminal CLI for multi-provider LLM (Anthropic/OpenAI/Gemini/Ollama).'
+      }
+    };
+    assert(aiAgentBot(result, meta) === true,
+      'description signal alone satisfies C1 identity; ~/.claude/sessions/ satisfies C6');
+  });
+
+  test('ai_agent_bot: FALSE when no AI agent identity (random helper)', () => {
+    const result = {
+      threats: [
+        { type: 'env_access', severity: 'HIGH', file: 'helper.js',
+          message: 'Touches ~/.claude/somefile but for unrelated reasons.' }
+      ],
+      summary: { total: 1, critical: 0, high: 1, medium: 0, low: 0, riskScore: 70 }
+    };
+    const meta = {
+      name: 'random-helper',
+      registryMeta: { scripts: {}, description: 'A small helper.' }
+    };
+    assert(aiAgentBot(result, meta) === false,
+      'no identity signal (name/desc/keywords/deps) — F11 should not vouch');
+  });
+
+  test('ai_agent_bot: FALSE when install lifecycle hook present', () => {
+    const result = {
+      threats: [
+        { type: 'env_access', severity: 'HIGH', message: 'Reads ~/.claude/config.' }
+      ],
+      summary: { total: 1, critical: 0, high: 1, medium: 0, low: 0, riskScore: 75 }
+    };
+    const meta = {
+      name: '@vendor/claude-agent',
+      registryMeta: {
+        scripts: { preinstall: 'node setup.js' },
+        dependencies: { '@anthropic-ai/sdk': '^0.30.0' }
+      }
+    };
+    assert(aiAgentBot(result, meta) === false,
+      'preinstall lifecycle hook disqualifies — legit agents are opt-in (CLI invoke)');
+  });
+
+  test('ai_agent_bot: FALSE when mcp_config_injection fires (F9 territory)', () => {
+    const result = {
+      threats: [
+        { type: 'mcp_config_injection', severity: 'CRITICAL', file: 'install.js',
+          message: 'Writes ~/.cursor/mcp.json with server config.' },
+        { type: 'env_access', severity: 'HIGH',
+          message: 'Reads ~/.claude/settings.json.' }
+      ],
+      summary: { total: 2, critical: 1, high: 1, medium: 0, low: 0, riskScore: 92 }
+    };
+    const meta = {
+      name: 'gm-skill',
+      registryMeta: { scripts: {}, dependencies: { '@anthropic-ai/sdk': '^0.30.0' } }
+    };
+    assert(aiAgentBot(result, meta) === false,
+      'MCP packages go through F9 not F11');
+  });
+
+  test('ai_agent_bot: FALSE when suspicious_domain (third-party exfil)', () => {
+    const result = {
+      threats: [
+        { type: 'env_access', severity: 'HIGH',
+          message: 'Reads ~/.claude/sessions/.' },
+        { type: 'suspicious_domain', severity: 'CRITICAL', file: 'exfil.js',
+          message: 'POST to https://exfil.attacker.com/agent-data' }
+      ],
+      summary: { total: 2, critical: 1, high: 1, medium: 0, low: 0, riskScore: 95 }
+    };
+    const meta = {
+      name: '@vendor/claude-agent',
+      registryMeta: { scripts: {}, dependencies: { '@anthropic-ai/sdk': '^0.30.0' } }
+    };
+    assert(aiAgentBot(result, meta) === false,
+      'third-party suspicious_domain blocks F11 — could be agent-impersonating exfil');
+  });
+
+  test('ai_agent_bot: FALSE when credential file path in message (.npmrc)', () => {
+    const result = {
+      threats: [
+        { type: 'env_access', severity: 'HIGH',
+          message: 'Reads ~/.claude/sessions/.' },
+        { type: 'credential_regex_harvest', severity: 'CRITICAL', file: 'steal.js',
+          message: 'Harvests ~/.npmrc auth tokens.' }
+      ],
+      summary: { total: 2, critical: 1, high: 1, medium: 0, low: 0, riskScore: 95 }
+    };
+    const meta = {
+      name: 'gm-skill',
+      registryMeta: { scripts: {}, dependencies: { '@anthropic-ai/sdk': '^0.30.0' } }
+    };
+    assert(aiAgentBot(result, meta) === false,
+      '.npmrc harvest is SANDWORM_MODE — disqualify');
+  });
+
+  test('ai_agent_bot: FALSE when no agent runtime path in any threat', () => {
+    const result = {
+      threats: [
+        { type: 'env_access', severity: 'HIGH',
+          message: 'Reads process.env.API_TOKEN at index.js:42.' }
+      ],
+      summary: { total: 1, critical: 0, high: 1, medium: 0, low: 0, riskScore: 75 }
+    };
+    const meta = {
+      name: '@vendor/claude-agent',
+      registryMeta: { scripts: {}, dependencies: { openai: '^4.0.0' } }
+    };
+    assert(aiAgentBot(result, meta) === false,
+      'no ~/.claude/ or other agent runtime path in any threat → no positive operating signal');
+  });
+
   // --- Feature vector integration ---
 
-  test('extractFeatures: exposes all 10 cluster FP features as 0/1 integers', () => {
+  test('extractFeatures: exposes all 11 cluster FP features as 0/1 integers', () => {
     const result = {
       threats: [
         { type: 'git_hooks_injection', severity: 'HIGH', file: 'bin/install.js',
@@ -1379,7 +1531,8 @@ function runMLFeatureExtractorTests() {
       'placeholder_anti_dep_confusion',
       'install_script_no_network_egress',
       'mcp_server_env_access',
-      'vendor_cli_sdk'
+      'vendor_cli_sdk',
+      'ai_agent_bot'
     ];
     for (const k of keys) {
       assert(features[k] === 0 || features[k] === 1, `${k} must be 0/1, got ${features[k]}`);
@@ -1389,6 +1542,7 @@ function runMLFeatureExtractorTests() {
     assert(features.install_script_no_network_egress === 0, 'no install script passed -> 0');
     assert(features.mcp_server_env_access === 0, 'no MCP identity -> 0');
     assert(features.vendor_cli_sdk === 0, 'no bin entry -> 0');
+    assert(features.ai_agent_bot === 0, 'no agent identity -> 0');
   });
 
   // Cleanup

@@ -19,7 +19,7 @@ Priorites :
 ## Commands
 
 ```bash
-npm test          # Run all tests (custom framework, 3594 tests across 93 files)
+npm test          # Run all tests (custom framework, 3602 tests across 93 files)
 npm run lint      # ESLint with security plugin
 npm run scan      # Self-scan: node bin/muaddib.js scan .
 npm run update    # Download latest IOCs
@@ -105,12 +105,12 @@ Never skip documentation updates when publishing a new version.
 - Never commit directly to master
 - Do not create commits automatically — the user handles commits manually
 
-## Current Metrics (v2.11.23)
+## Current Metrics (v2.11.24)
 
 | Metric | Value |
 |--------|-------|
-| Version | **2.11.23** |
-| Tests | **3594** passed, 0 failed, across 93 files (14511 skipped when Docker absent) |
+| Version | **2.11.24** |
+| Tests | **3602** passed, 0 failed, across 93 files (14511 skipped when Docker absent) |
 | Rules | **234** (229 RULES + 5 PARANOID) |
 | Scanners | **17 parallel** (Promise.allSettled) + **2 pre-analysis** (module-graph/, deobfuscate) + **5 conditional/post-processing** (paranoid, 3× temporal-*, reachability) + **1 metadata** (npm-registry). 23 fichiers `src/scanner/*.js` + 1 dir `module-graph/` (9 fichiers). Détails : ARCHITECTURE.md. |
 | TPR@3 (detection rate) | **93.85%** (61/65 ground truth, v2.10.95 metrics — re-measure pending P0-04 audit) |
