@@ -1483,6 +1483,7 @@ const {
   typosquatScopedPackage,
   obfuscationWithoutVector,
   placeholderAntiDepConfusion,
+  mcpServerEnvAccess,
 } = require('./ml/feature-extractor.js');
 
 /**
@@ -1501,6 +1502,9 @@ function applyContextualFPCaps(result, pkgMeta) {
       homepage: (pkgMeta && pkgMeta.homepage) || '',
       dependencies: (pkgMeta && pkgMeta.dependencies),
       devDependencies: (pkgMeta && pkgMeta.devDependencies),
+      // v2.11.22 — used by F9 (mcp_server_env_access) identity check.
+      keywords: (pkgMeta && pkgMeta.keywords),
+      bin: (pkgMeta && pkgMeta.bin),
     },
   };
 
@@ -1517,6 +1521,10 @@ function applyContextualFPCaps(result, pkgMeta) {
   // F3: credential destination first-party API → MAX 30
   if (networkDestinationFirstParty(result, meta)) {
     applied.push({ feature: 'network_destination_first_party', cap: 30 });
+  }
+  // F9: legit MCP installer/server with env_access on provider keys → MAX 30
+  if (mcpServerEnvAccess(result, meta)) {
+    applied.push({ feature: 'mcp_server_env_access', cap: 30 });
   }
   // F2: binary installer from GitHub Releases → MAX 35
   if (installUrlGithubReleases(result)) {

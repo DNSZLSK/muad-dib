@@ -5,6 +5,67 @@ All notable changes to MUAD'DIB will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.11.22] - 2026-05-19
+
+### Audit week3 — Feature 9 (mcp_server_env_access) — 25 FP cluster
+
+Premier contextual FP cap derive de l'audit 2026-05-week3 (Mini Shai-Hulud
+aftermath). Le cluster `mcp_server_env_access` regroupe 25 FP legit MCP
+installers/servers (Cachly, Roadmapfy, Llama Ventures, Flomenco, Supericons,
+cf-memory-mcp, mcp-memory-service, etc.) qui scoraient 75-99 a cause du
+triple-stacking `mcp_config_injection` CRITICAL + `env_access` + `credential_regex_harvest`
+sur des lectures de cles provider parfaitement legitimes
+(`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `STRIPE_*`, etc.).
+
+#### F9 (`mcp_server_env_access`) — cap 30
+
+Conjonction de 5 conditions (le AND est le discriminant vs SANDWORM_MODE) :
+
+- **C1** Package self-identifies as MCP : `name` / `keywords` / `bin` / `description` match `mcp` / `mcp-server` / `mcp-init` / `model context protocol`, etc.
+- **C2** Threat `mcp_config_injection` est present (signal positif que le package fait du MCP reellement, pas juste claim).
+- **C3** Pas d'install lifecycle hook (`scripts.preinstall|install|postinstall` absent). Les MCP installers legitimes sont opt-in (`npx pkg init`).
+- **C4** `env_access` / `credential_regex_harvest` citent UNIQUEMENT des cles provider connues (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `STRIPE_*`, `GEMINI_API_KEY`, etc.) ou des vars infra (`HOME`, `PATH`). Jamais `~/.npmrc`, `~/.aws/credentials`, `id_rsa`, `.ssh/`.
+- **C5** Aucun signal d'exfil third-party (`suspicious_domain`, `remote_code_load`, `download_exec_binary`, `curl_env_exfil`, etc.). Un MCP installer legit ecrit `.mcp.json` et lit des env vars — il ne telecharge pas de payload.
+
+Cap value **30** (aligne F1/F3). Ramene CRITICAL → MEDIUM. Le mecanisme
+`Math.min` lowest-wins de `applyContextualFPCaps` arbitre proprement si
+F9 co-fire avec un autre cap.
+
+#### Pourquoi le AND est solide
+
+Aucun des 15 MALWARE + 29 PENTEST samples de l'audit week3 ne satisfait
+les 5 conditions simultanement :
+- Les droppers SANDWORM_MODE n'ont pas l'identite MCP (C1) ou ont un
+  preinstall (C3).
+- Les credential harvests citent `.npmrc`/SSH/AWS (viole C4).
+- Les MCP-imitating malware appellent home (viole C5).
+
+#### Wiring
+
+- `src/ml/feature-extractor.js` — helper `mcpServerEnvAccess(result, meta)`, constantes `KNOWN_PROVIDER_KEYS_LITERAL` (28 keys), `PROVIDER_KEY_SUFFIX_RE`, `F9_INFRA_KEYS`, `F9_CREDENTIAL_FILE_RE`, `F9_EXFIL_TYPES` (15 types), `MCP_NAME_RE`, `MCP_DESC_RE`. Feature flag expose dans `extractFeatures()` comme `features.mcp_server_env_access`.
+- `src/scoring.js` — F9 ajoute apres F3 dans `applyContextualFPCaps()`. Construction de `meta.registryMeta` etendue avec `keywords` + `bin` (utilises par l'identite F9).
+- `src/pipeline/processor.js` — `_pkgMeta` etendue avec `keywords` + `bin` lus depuis `package.json`.
+
+#### Tests : 3577 → 3586 (+9)
+
+- 7 unit tests sur `mcpServerEnvAccess` dans `tests/unit/ml-feature-extractor.test.js` :
+  - TP : legit MCP installer (Roadmapfy) avec ANTHROPIC_API_KEY + OPENAI_API_KEY.
+  - TP alternatif : identite via `bin: {*mcp*: ...}` + `keywords: ['mcp']` (Llama Ventures pattern).
+  - FN : no MCP identity (innocent-helper dropper).
+  - FN : preinstall lifecycle hook present.
+  - FN : env_access cite `.npmrc` (SANDWORM harvest).
+  - FN : exfil signal `suspicious_domain → kaixin8.top`.
+  - FN : env_access cite un var inconnu (`WALLET_PRIVATE_KEY`).
+- Test `extractFeatures: exposes all 9 cluster FP features as 0/1 integers` (etait `all 8`) etendu pour inclure `mcp_server_env_access`.
+
+#### Out of scope de ce release
+
+- F10 (`vendor_cli_sdk`, 96 FP) — sprint suivant, spec posee mais plus large.
+- F11 (`ai_agent_bot`, 54 FP) — sprint suivant.
+- Re-mesure FPR sur les 545 curated — a faire post-merge.
+
+---
+
 ## [Unreleased] — Intel Triage : detection statique aligned sur 2026
 
 ### Contexte
