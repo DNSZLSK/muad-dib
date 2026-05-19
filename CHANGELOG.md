@@ -5,6 +5,121 @@ All notable changes to MUAD'DIB will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.11.24] - 2026-05-19
+
+### Audit week3 — Feature 11 (ai_agent_bot) — 54 FP cluster
+
+Troisieme et dernier contextual FP cap derive de l'audit 2026-05-week3.
+Cible le cluster `ai_agent_bot` (54 entries, 18.9 % des FP) : packages
+qui SONT eux-memes des AI agents / multi-LLM orchestrators / chatbots /
+IM⇄AI bridges. Examples : `gm-skill` (AI coding harness), `codexmate`
+(multi-provider orchestrator), `lazyclaw` (terminal multi-LLM CLI),
+`linco-connect` (WeChat→Claude bridge), `natureco-cli` (WhatsApp+Telegram),
+`multis` (Telegram chatbot), `@aitne-sh/aitne` (personal AI daemon),
+`@jhizzard/termdeck` (browser term mux), `triflux` (Claude Code router),
+`opuscode` (Claude config wizard).
+
+#### F11 (`ai_agent_bot`) — cap 35
+
+Architecture du discriminator : ces packages firent legitimement
+`dangerous_call_eval` (LLM tool-use feature), `remote_code_load`
+(`bun x pkg@latest` pattern), `detached_credential_exfil` (local session
+storage). F11 ne peut PAS blacklister ces threat types — ce sont les
+capabilites core. Le discriminant vient de :
+
+- **Preuve positive d'identite agent** (name/desc/keywords/deps signal)
+- **Preuve d'operation sur agent runtime data** (paths `~/.claude/`,
+  `~/.codex/`, `~/.cursor/`, etc.)
+- **Absence de signatures SANDWORM_MODE** (no preinstall, no
+  `mcp_config_injection` → F9, no `suspicious_domain`, no credential
+  file harvest, no `binary_dropper` → F2).
+
+Conjonction de 7 conditions :
+
+- **C1** Identite AI agent — match d'au moins UN de : `meta.name` regex sur `AGENT_NAME_RE`, OU `meta.description` regex sur `AGENT_DESC_RE` (multi-provider, AI agent/bot/orchestrator/harness, telegram/whatsapp/wechat bridge), OU `meta.registryMeta.keywords` inclut un de `{agent, ai, llm, chatbot, bot, claude, codex, cursor, copilot, ollama, ...}`, OU `meta.registryMeta.dependencies` inclut un de `{@anthropic-ai/sdk, openai, @google/genai, ollama, telegraf, @whiskeysockets/baileys, whatsapp-web.js, discord.js, node-pty, ...}`.
+- **C2** Pas d'install lifecycle hook (legit agents sont opt-in CLI invoke).
+- **C3** Pas de `mcp_config_injection` (F9 garde la main).
+- **C4** Pas de `suspicious_domain` threat (third-party exfil discriminator le plus clair).
+- **C5** Pas de chemin credential file dans aucun message threat (anti-SANDWORM, reuse `F9_CREDENTIAL_FILE_RE`).
+- **C6** Au moins UN threat reference un agent runtime path (`AGENT_RUNTIME_PATHS_RE` sur `threat.message` ET `threat.file`).
+- **C7** Pas de `binary_dropper` ni `download_exec_binary` (F2 garde la main).
+
+Cap value **35** (aligne F10). `Math.min` lowest-wins arbitre — C3 rend la
+co-fire F9-F11 impossible par construction.
+
+#### Pourquoi le AND est solide
+
+Aucun MALWARE/PENTEST connu de l'audit week3 ne satisfait simultanement
+les 7 conditions :
+- Les droppers SANDWORM_MODE utilisent preinstall/postinstall (viole C2)
+  OU lisent `.npmrc`/SSH/AWS (viole C5).
+- Les MCP-impersonating malware firent `mcp_config_injection` (viole C3
+  → F9 territory).
+- Les exfilers ont `suspicious_domain` vers attacker host (viole C4).
+- Les downloaders firent `binary_dropper` ou `download_exec_binary`
+  (viole C7).
+- Un malware qui fake l'identite agent ET passe toutes les autres
+  conditions ET touche `~/.claude/` est theoriquement possible mais
+  extremement specifique. Le cap reste a 35 (MEDIUM-HIGH, toujours
+  alerte au monitor), pas une suppression complete.
+
+#### Reutilisation (zero duplication)
+
+- **Reuses depuis F9 (v2.11.22)** : `F9_CREDENTIAL_FILE_RE` pour C5.
+- **Reuses depuis F10 (v2.11.23)** : aucun (pas besoin de bin entry — gm-hermes par ex n'a pas de bin).
+- **Reuses existants** : `hasLifecycleScripts(meta)` pour C2.
+
+#### Wiring
+
+- `src/ml/feature-extractor.js` — helper `aiAgentBot(result, meta)`, 2 helpers internes (`_f11HasAgentIdentity`, `_f11HasAgentPathReference`), 5 constantes (`AGENT_RUNTIME_PATHS_RE`, `AGENT_NAME_RE`, `AGENT_KEYWORDS_SET`, `AGENT_DESC_RE`, `AGENT_DEPS`). Feature flag expose dans `extractFeatures()` comme `features.ai_agent_bot`.
+- `src/scoring.js` — F11 ajoute apres F10 dans `applyContextualFPCaps()` avec cap 35.
+
+#### Tests : 3594 → 3602 (+8)
+
+- 8 unit tests sur `aiAgentBot` dans `tests/unit/ml-feature-extractor.test.js` :
+  - TP : gm-skill pattern (name + deps `@anthropic-ai/sdk` + `~/.claude/gm-log` path access + remote_code_load).
+  - TP alternatif : identite via description seule + `~/.claude/sessions/` path access (lazyclaw pattern).
+  - FN : no AI agent identity (random-helper).
+  - FN : preinstall lifecycle hook present.
+  - FN : `mcp_config_injection` fires (F9 territory).
+  - FN : `suspicious_domain` exfil signal.
+  - FN : `.npmrc` cite dans message (SANDWORM harvest).
+  - FN : pas de agent runtime path dans threats.
+- Integration vector test etendu de 10 a 11 features.
+
+#### Couverture estimee
+
+30-40 des 54 entries (55-75 %). Le reste tombe dans d'autres clusters :
+- Skill packs trivials sans path access direct (gm-hermes copies skills,
+  ne touche pas `~/.claude/`) → tomberont sous F1 ou autre.
+- Packages avec `suspicious_domain` legit vers providers chinois
+  (yingclaw rerouting vers bigmodel.cn/api.deepseek.com) si la
+  blacklist domain les marque suspects.
+
+#### Out of scope
+
+- ML retraining sur la feature `ai_agent_bot=1` — pipeline separe.
+- Detection runtime des AI agent capabilities (sandbox) — F11 est un
+  post-filter deterministe, pas une nouvelle scanner.
+- Modification de F9 ou F10 — F11 est strictement additif.
+- Re-mesure FPR sur les 545 curated — apres merge sur VPS.
+
+#### Trajectoire restante
+
+Les 3 caps F9/F10/F11 couvrent environ **115-150 entries sur 286** du
+cluster audit (40-52 %). Le reste se repartit :
+- `defensive_tool` (20) → F12 candidate sprint ulterieur
+- `pypi_wrong_ecosystem` (23) → pipeline fix, pas un score cap
+- `vendor_bundle_minified` (22) → couvert F1 partiellement
+- `installer_binary_download` (19) → couvert F2 partiellement
+- `cdp_playwright_automation` (12), `legitimate_crypto_vault` (6),
+  `calendar_version_fp` (5), `wasm_bindgen_codegen` (4) → clusters
+  mineurs, F-features dediees si confirme audit suivant.
+
+F11 est le dernier cap "gros volume" du sprint week3.
+
+---
+
 ## [2.11.23] - 2026-05-19
 
 ### Audit week3 — Feature 10 (vendor_cli_sdk) — 96 FP cluster

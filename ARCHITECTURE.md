@@ -440,6 +440,28 @@ GlassWorm campaign (March 2026, 433+ packages): Unicode invisible characters + B
 
 ## Version History
 
+### v2.11.24 — Contextual FP cap F11 (ai_agent_bot) — audit week3 cluster
+
+- New helper `aiAgentBot(result, meta)` in `src/ml/feature-extractor.js`, wired as F11 in `applyContextualFPCaps()` (`src/scoring.js`) with cap **35** (CRITICAL → MEDIUM-HIGH boundary).
+- Targets the third cluster from the audit 2026-05-week3 (54 entries, 18.9% of FP): packages that ARE multi-provider AI agents / orchestrators / chatbots / IM⇄AI bridges. Examples: `gm-skill`, `codexmate`, `lazyclaw`, `linco-connect` (WeChat→Claude), `natureco-cli` (WhatsApp+Telegram), `multis` (Telegram chatbot), `@aitne-sh/aitne`, `@jhizzard/termdeck`, `triflux`, `opuscode`.
+- Discriminator architecture: these packages legitimately fire `dangerous_call_eval` (LLM tool-use feature), `remote_code_load` (`bun x pkg@latest` orchestrator pattern), `detached_credential_exfil` (local session token storage). F11 cannot blacklist these threat types because they ARE the core capabilities of AI agents. Instead it requires:
+  - **Positive AI agent identity** (name/desc/keywords/deps signal)
+  - **Demonstrable operation on agent runtime data** (touches paths like `~/.claude/`, `~/.codex/`, `~/.cursor/`, etc.)
+  - **Absence of SANDWORM_MODE signatures** (no preinstall hook, no `mcp_config_injection` → F9, no `suspicious_domain` exfil, no credential file harvest, no `binary_dropper`/`download_exec_binary` → F2).
+- Conjunction of 7 conditions:
+  - **C1** AI agent identity — `meta.name` matches `AGENT_NAME_RE` OR `meta.description` matches `AGENT_DESC_RE` (multi-provider, AI agent/bot/orchestrator/harness, telegram/whatsapp/wechat bridge, etc.) OR `meta.registryMeta.keywords` includes one of `AGENT_KEYWORDS_SET` OR `meta.registryMeta.dependencies` includes one of `AGENT_DEPS` (`@anthropic-ai/sdk`, `openai`, `@google/genai`, `ollama`, `telegraf`, `@whiskeysockets/baileys`, `whatsapp-web.js`, `discord.js`, `node-pty`, etc.).
+  - **C2** No install lifecycle hook.
+  - **C3** No `mcp_config_injection` (F9 priority).
+  - **C4** No `suspicious_domain` threat (third-party exfil discriminator).
+  - **C5** No credential file path in any threat message (reuses `F9_CREDENTIAL_FILE_RE`).
+  - **C6** At least one threat references an agent runtime path (regex `AGENT_RUNTIME_PATHS_RE` over `threat.message` AND `threat.file` — `~/.claude/`, `~/.codex/`, `~/.cursor/`, `~/.windsurf/`, `~/.continue/`, `~/.openclaude/`, `~/.openclaudia/`, `~/.hermes/`, `~/.aiflow/`, `~/.tdpilot/`, `~/.aitne/`, `~/.kimi/`, `~/.opuscode/`, `~/.freddie/`, `~/.gm-log/`, `~/.termdeck/`, `~/.relaydesk/`, `~/.natureco/`).
+  - **C7** No `binary_dropper` / `download_exec_binary` (F2 priority).
+- Cap 35 (same as F10 — broader conjunction than F9). `Math.min` lowest-wins arbitrates if F11 co-fires with another cap; C3 makes F9-F11 co-firing impossible by construction; F2 vs F11 mutual exclusion via C7.
+- Reuses `F9_CREDENTIAL_FILE_RE` from v2.11.22. Reuses `hasLifecycleScripts` helper. No duplication.
+- Tests: 3594 → **3602** passed, 0 failed. 8 unit tests on `aiAgentBot` (TP gm-skill via deps + path + identity, TP lazyclaw via desc, 6 disqualifying FN paths) + extended cluster-FP integration vector test (10 → 11 features).
+- Estimated effective coverage: 30-40 of the 54 cluster entries (55-75%). The remainder fails C4 (yingclaw rerouting via Chinese providers if flagged as suspicious_domain) or C6 (skill packs that don't directly read agent runtime paths).
+- FPR delta measurement on 545 curated benign + ground truth regression check **pending** (post-merge on VPS).
+
 ### v2.11.23 — Contextual FP cap F10 (vendor_cli_sdk) — audit week3 cluster
 
 - New helper `vendorCliSdk(result, meta)` in `src/ml/feature-extractor.js`, wired as F10 in `applyContextualFPCaps()` (`src/scoring.js`) with cap **35** (CRITICAL → MEDIUM-HIGH boundary).

@@ -1485,6 +1485,7 @@ const {
   placeholderAntiDepConfusion,
   mcpServerEnvAccess,
   vendorCliSdk,
+  aiAgentBot,
 } = require('./ml/feature-extractor.js');
 
 /**
@@ -1542,6 +1543,10 @@ function applyContextualFPCaps(result, pkgMeta) {
   // F10: legit vendor CLI/SDK with intrinsic credential handling → MAX 35
   if (vendorCliSdk(result, meta)) {
     applied.push({ feature: 'vendor_cli_sdk', cap: 35 });
+  }
+  // F11: legit AI agent / bot / multi-LLM orchestrator → MAX 35
+  if (aiAgentBot(result, meta)) {
+    applied.push({ feature: 'ai_agent_bot', cap: 35 });
   }
   // F5: typosquat on scoped package → suppress typosquat points
   if (typosquatScopedPackage(result, meta)) {

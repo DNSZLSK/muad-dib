@@ -792,6 +792,148 @@ function vendorCliSdk(result, meta) {
   return true;
 }
 
+// ============================================================================
+// Feature 11 — ai_agent_bot (v2.11.24, audit week3 cluster, 54 FP)
+// ============================================================================
+//
+// Targets the third cluster from the audit 2026-05-week3 (54 entries,
+// 18.9 % of FP): packages that ARE themselves multi-provider AI agents,
+// orchestrators, chatbots, or IM⇄AI bridges. Examples: gm-skill (AI coding
+// harness), codexmate (multi-provider orchestrator), lazyclaw (terminal
+// multi-LLM CLI), linco-connect (WeChat→Claude bridge), natureco-cli
+// (WhatsApp+Telegram bot), multis (Telegram chatbot), @aitne-sh/aitne
+// (personal AI daemon), @jhizzard/termdeck (browser term mux with AI),
+// triflux (Claude Code router), opuscode (Claude config wizard).
+//
+// These packages legitimately fire `dangerous_call_eval` (LLM tool-use
+// execute_code feature), `remote_code_load` (bun x pkg@latest fetching),
+// `detached_credential_exfil` (local session token storage), and lots
+// of `env_access` + `suspicious_dataflow`. F11 cannot blacklist these —
+// they ARE the core capabilities. Instead the conjunction requires:
+//
+//   - Positive AI agent identity (name/desc/keywords/deps signal)
+//   - Evidence the package operates on agent runtime data (touches paths
+//     like ~/.claude/, ~/.codex/, ~/.cursor/, etc.)
+//   - Absence of SANDWORM_MODE signatures: no preinstall, no
+//     mcp_config_injection (F9 priority), no third-party suspicious_domain,
+//     no credential file harvest, no binary dropper (F2 priority).
+//
+// Cap 35 (aligned with F10 — broader conjunction than F9).
+
+// Agent runtime directory regex — matches references in threat messages to
+// AI tool runtime paths. Both '~/.X/' and 'os.homedir() + "/.X"' patterns
+// surface as substrings here.
+const AGENT_RUNTIME_PATHS_RE = /[~/\\\\]\.(?:claude|codex|cursor|windsurf|continue|openclaude|openclaudia|hermes|aiflow|tdpilot|aitne|kimi|opuscode|freddie|gm-?log|gm-?skill|termdeck|relaydesk|natureco|grok|gemini|copilot|cline|aider|cody|tabnine|cursor-ai|cursorrules|claude-?desktop|claude-?code|llm[- ]?cache)\b/i;
+
+// AI agent name regex — package name signals identity.
+const AGENT_NAME_RE = /(?:^|[/_-])(?:agent|bot|chat|chatbot|claw|codex|coder|swarm|harness|brain|orchestr|orchestrator|claude|llm|hermes|aider|kimi|cline|cody|aitne|opuscode|relaydesk|termdeck|gm-skill|gm-hermes|gm-qwen|gm-thebird|gm-plugkit|relipa|triflux|protocol-proxy|codexmate|lazy?claw|natureco)(?:[_-]|$)/i;
+
+// Keywords that signal AI agent purpose (case-insensitive).
+const AGENT_KEYWORDS_SET = new Set([
+  'agent', 'ai', 'llm', 'chatbot', 'bot', 'claude', 'codex',
+  'cursor', 'copilot', 'ollama', 'openai', 'anthropic', 'gemini',
+  'multi-llm', 'multi-provider', 'orchestrator', 'coding-agent',
+  'ai-agent', 'llm-agent', 'mcp-agent'
+]);
+
+// Description regex — matches agent purpose phrases.
+const AGENT_DESC_RE = /\b(?:ai|llm|claude|codex|gemini|openai|anthropic|ollama)[ -]?(?:agent|bot|chatbot|orchestrator|harness|cli|assistant|coding[ -]?agent|gateway|relay|router|harness|workspace)\b|\bmulti[ -]?provider\b|\bcoding[ -]?agent\b|\bagent[ -]?(?:bridge|router|orchestrator)\b|telegram[ -]?(?:bot|bridge)|whatsapp[ -]?(?:bot|bridge)|wechat[ -]?(?:bot|bridge)/i;
+
+// Dependency names that signal AI agent / bot framework usage.
+const AGENT_DEPS = new Set([
+  '@anthropic-ai/sdk', '@anthropic-ai/claude-code', '@openai/agents', 'openai',
+  '@google/genai', '@google/generative-ai', 'ai', 'ollama', 'groq-sdk',
+  'telegraf', 'node-telegram-bot-api', '@whiskeysockets/baileys',
+  'whatsapp-web.js', 'discord.js', 'eventsource', 'node-pty',
+  '@anthropic-ai/bedrock-sdk', '@openai/realtime-api-beta'
+]);
+
+function _f11HasAgentIdentity(meta) {
+  if (!meta) return false;
+  const name = String(meta.name || '');
+  if (AGENT_NAME_RE.test(name)) return true;
+  const r = (meta.registryMeta || {});
+  const desc = r.description || meta.description || '';
+  if (AGENT_DESC_RE.test(desc)) return true;
+  if (Array.isArray(r.keywords)) {
+    for (const k of r.keywords) {
+      if (AGENT_KEYWORDS_SET.has(String(k).toLowerCase())) return true;
+    }
+  }
+  const deps = r.dependencies || meta.dependencies;
+  if (deps && typeof deps === 'object') {
+    for (const d of Object.keys(deps)) {
+      if (AGENT_DEPS.has(d)) return true;
+    }
+  }
+  return false;
+}
+
+function _f11HasAgentPathReference(threats) {
+  for (const t of threats) {
+    const msg = String(t.message || '');
+    if (AGENT_RUNTIME_PATHS_RE.test(msg)) return true;
+    // Also accept the threat's file field — sometimes the path leaks via the
+    // file location rather than the message body.
+    const file = String(t.file || '');
+    if (AGENT_RUNTIME_PATHS_RE.test(file)) return true;
+  }
+  return false;
+}
+
+/**
+ * Feature 11 — TRUE iff the package self-identifies as an AI agent / bot /
+ * multi-LLM orchestrator AND demonstrably operates on AI tool runtime
+ * data (~/.claude/, ~/.codex/, ~/.cursor/, etc.) AND lacks the
+ * SANDWORM_MODE / vendor-impersonation signatures.
+ *
+ * Conjunction of 7 conditions:
+ *
+ *   C1  AI agent identity (name|desc|keywords|deps signal)
+ *   C2  no install lifecycle hook
+ *   C3  no `mcp_config_injection` (F9 priority)
+ *   C4  no `suspicious_domain` threat (third-party exfil discriminator)
+ *   C5  no credential file path in any threat message (reuse F9 regex)
+ *   C6  >=1 threat references an agent runtime path (positive operating signal)
+ *   C7  no `binary_dropper` / `download_exec_binary` (F2 priority)
+ *
+ * Cap 35. Same cap as F10 (broader conjunction than F9). Reuses
+ * `F9_CREDENTIAL_FILE_RE` from v2.11.22.
+ *
+ * Discriminator vs malware:
+ *   - SANDWORM droppers use preinstall/postinstall (C2 blocks).
+ *   - MCP-impersonating malware emits mcp_config_injection (C3 → F9).
+ *   - Exfilers have suspicious_domain (C4 blocks).
+ *   - Binary droppers (C7 → F2 territory).
+ *   - Credential file harvesters (C5 blocks).
+ *
+ * Covers up to 54 FP (18.9% of audit week3). Effective estimated coverage
+ * 30-40 (55-75%): the rest lack agent runtime path references or fire on
+ * suspicious_domain due to Chinese model rerouting (yingclaw pattern).
+ */
+function aiAgentBot(result, meta) {
+  // C1 — identity
+  if (!_f11HasAgentIdentity(meta)) return false;
+  const threats = (result && result.threats) || [];
+  if (threats.length === 0) return false;
+  // C2 — no install lifecycle hook
+  if (hasLifecycleScripts(meta)) return false;
+  // C3, C4, C7 — fast threat-type checks
+  for (const t of threats) {
+    if (t.type === 'mcp_config_injection') return false;   // C3
+    if (t.type === 'suspicious_domain') return false;      // C4
+    if (t.type === 'binary_dropper') return false;         // C7
+    if (t.type === 'download_exec_binary') return false;   // C7
+  }
+  // C5 — no credential file path in any message
+  for (const t of threats) {
+    if (F9_CREDENTIAL_FILE_RE.test(String(t.message || ''))) return false;
+  }
+  // C6 — at least one threat references an agent runtime path
+  if (!_f11HasAgentPathReference(threats)) return false;
+  return true;
+}
+
 /**
  * Feature 8 — TRUE iff the package declares at least one install
  * lifecycle script AND the scan shows no network egress capability
@@ -946,6 +1088,8 @@ function extractFeatures(result, meta) {
   features.mcp_server_env_access = mcpServerEnvAccess(result, meta) ? 1 : 0;
   // --- v2.11.23 Feature 10 (audit week3 cluster — up to 96 FP) ---
   features.vendor_cli_sdk = vendorCliSdk(result, meta) ? 1 : 0;
+  // --- v2.11.24 Feature 11 (audit week3 cluster — up to 54 FP) ---
+  features.ai_agent_bot = aiAgentBot(result, meta) ? 1 : 0;
 
   return features;
 }
@@ -1026,5 +1170,6 @@ module.exports = {
   placeholderAntiDepConfusion,
   installScriptNoNetworkEgress,
   mcpServerEnvAccess,
-  vendorCliSdk
+  vendorCliSdk,
+  aiAgentBot
 };
