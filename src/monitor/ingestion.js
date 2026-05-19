@@ -317,43 +317,136 @@ function parsePyPIRss(xml) {
 
 // --- CouchDB doc extraction ---
 
+// Burst-publish window: extra versions published within this window before the
+// most-recent one are also enqueued for scanning. Covers the case where an
+// account-takeover attacker publishes several versions in a short burst.
+const RECENT_PUBLISH_WINDOW_MS = 24 * 60 * 60 * 1000;
+const RECENT_PUBLISH_MAX = 5;
+
 /**
- * Layer 2: Extract the latest version's tarball URL from a CouchDB changes document
- * (when using include_docs=true). Eliminates the separate registry roundtrip
- * that can 404 if the package is unpublished between detection and scan.
+ * Pure function: pick the most-recently-published version from a packument and
+ * return its metadata, plus context useful for ATO detection.
  *
- * @param {Object} doc - CouchDB document (change.doc)
- * @returns {{ version: string, tarball: string|null, unpackedSize: number, scripts: Object }|null}
+ * Critical: we sort by `time[version]` publish timestamp, NOT `dist-tags.latest`.
+ * Account-takeover attacks (TeamPCP / @antv 2026-05-19, SAP, every Shai-Hulud
+ * derivative) publish malicious versions without moving the latest tag — semver
+ * resolution on `npm install` will still pull them. Selecting by latest tag
+ * scans the wrong (clean) version and lets the malicious tarball ship.
+ *
+ * Falls back to `dist-tags.latest` only when `time` is missing or yields no
+ * usable entries (very old legacy packages).
+ *
+ * @param {Object} packument - npm packument (full /<pkg> response or CouchDB doc)
+ * @param {Object} [options]
+ * @param {number} [options.recentWindowMs=86400000] - window for collecting extra recent versions
+ * @param {number} [options.maxRecent=5] - hard cap on extras returned
+ * @returns {Object|null} - {
+ *   version, tarball, unpackedSize, scripts, homepage, description,
+ *   latestTagVersion,       // dist-tags.latest (may differ from `version` under ATO)
+ *   recentVersions: [{ version, tarball, unpackedSize, scripts }, ...]
+ * } or null if no usable version found
+ */
+function selectMostRecentVersion(packument, options = {}) {
+  const recentWindowMs = options.recentWindowMs != null ? options.recentWindowMs : RECENT_PUBLISH_WINDOW_MS;
+  const maxRecent = options.maxRecent != null ? options.maxRecent : RECENT_PUBLISH_MAX;
+
+  if (!packument || typeof packument !== 'object') return null;
+  const versions = packument.versions || {};
+  const time = packument.time || {};
+  const distTags = packument['dist-tags'] || {};
+  const latestTagVersion = (typeof distTags.latest === 'string') ? distTags.latest : null;
+
+  // Build [version, timestamp] pairs from `time`, skipping non-version keys
+  // (created/modified) and entries for unpublished versions (present in `time`
+  // but absent from `versions` — npm leaves the tombstone after `npm unpublish`).
+  const versionTimes = [];
+  for (const [v, tsStr] of Object.entries(time)) {
+    if (v === 'created' || v === 'modified') continue;
+    if (!versions[v]) continue;
+    const ts = Date.parse(tsStr);
+    if (!Number.isFinite(ts)) continue;
+    versionTimes.push([v, ts]);
+  }
+
+  let mostRecentVersion = null;
+  if (versionTimes.length > 0) {
+    versionTimes.sort((a, b) => b[1] - a[1]);
+    mostRecentVersion = versionTimes[0][0];
+  } else if (latestTagVersion && versions[latestTagVersion]) {
+    // Legacy fallback: no usable time data, accept dist-tag latest
+    mostRecentVersion = latestTagVersion;
+  }
+  if (!mostRecentVersion) return null;
+
+  const versionData = versions[mostRecentVersion];
+  if (!versionData) return null;
+
+  const result = {
+    version: versionData.version || mostRecentVersion,
+    tarball: (versionData.dist && versionData.dist.tarball) || null,
+    unpackedSize: (versionData.dist && versionData.dist.unpackedSize) || 0,
+    scripts: versionData.scripts || {},
+    homepage: (typeof versionData.homepage === 'string') ? versionData.homepage : '',
+    description: (typeof versionData.description === 'string') ? versionData.description : '',
+    latestTagVersion,
+    recentVersions: [],
+  };
+
+  // Burst extras: other versions published within the recent window, excluding
+  // the most-recent one. Bounded by maxRecent. Each extra carries enough
+  // metadata for the queue to enqueue it directly without re-fetching the packument.
+  if (versionTimes.length > 1) {
+    const cutoff = versionTimes[0][1] - recentWindowMs;
+    for (let i = 1; i < versionTimes.length && result.recentVersions.length < maxRecent; i++) {
+      const [v, ts] = versionTimes[i];
+      if (ts < cutoff) break; // sorted desc, so once we cross the cutoff we're done
+      const vData = versions[v];
+      if (!vData) continue;
+      result.recentVersions.push({
+        version: vData.version || v,
+        tarball: (vData.dist && vData.dist.tarball) || null,
+        unpackedSize: (vData.dist && vData.dist.unpackedSize) || 0,
+        scripts: vData.scripts || {},
+      });
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Layer 2: Extract metadata for the most-recently-published version from a
+ * CouchDB changes document (when using include_docs=true). Eliminates the
+ * separate registry roundtrip that can 404 if the package is unpublished
+ * between detection and scan.
+ *
+ * Currently dead code post-May 2025 CouchDB migration (include_docs deprecated,
+ * change.doc is always null). Kept defensive in case the registry restores it
+ * or a different upstream mirror provides docs again.
+ *
+ * @param {Object} doc - CouchDB document (change.doc), structurally a packument
  */
 function extractTarballFromDoc(doc) {
   try {
     if (!doc || !doc.versions || !doc['dist-tags']) return null;
-
-    const latestTag = doc['dist-tags'].latest;
-    if (!latestTag) return null;
-
-    const versionData = doc.versions[latestTag];
-    if (!versionData) return null;
-
-    const tarball = (versionData.dist && versionData.dist.tarball) || null;
-    const unpackedSize = (versionData.dist && versionData.dist.unpackedSize) || 0;
-    const version = versionData.version || latestTag;
-    const scripts = versionData.scripts || {};
-    const homepage = (typeof versionData.homepage === 'string') ? versionData.homepage : '';
-    const description = (typeof versionData.description === 'string') ? versionData.description : '';
-
-    return { version, tarball, unpackedSize, scripts, homepage, description };
+    return selectMostRecentVersion(doc);
   } catch {
     return null; // Parse failure -> fallback to lazy resolution
   }
 }
 
 /**
- * Fetch latest version metadata for an npm package.
- * Returns { version, tarball } or null on failure.
+ * Fetch most-recently-published version metadata for an npm package.
+ *
+ * Uses the full packument (`registry.npmjs.org/<pkg>`) rather than the `/latest`
+ * endpoint so we can detect ATO attacks that publish without moving the latest
+ * dist-tag (see selectMostRecentVersion for full threat model).
+ *
+ * Returned object includes `latestTagVersion` and `recentVersions` so callers
+ * can flag the ATO signature and enqueue burst extras for scanning.
  */
 async function getNpmLatestTarball(packageName) {
-  const url = `https://registry.npmjs.org/${encodeURIComponent(packageName)}/latest`;
+  const url = `https://registry.npmjs.org/${encodeURIComponent(packageName)}`;
   await acquireRegistrySlot();
   let body;
   try {
@@ -361,19 +454,21 @@ async function getNpmLatestTarball(packageName) {
   } finally {
     releaseRegistrySlot();
   }
-  let data;
+  let packument;
   try {
-    data = JSON.parse(body);
+    packument = JSON.parse(body);
   } catch (e) {
     throw new Error(`Invalid JSON from npm registry for ${packageName}: ${e.message}`);
   }
-  const version = data.version || '';
-  const tarball = (data.dist && data.dist.tarball) || null;
-  const unpackedSize = (data.dist && data.dist.unpackedSize) || 0;
-  const scripts = (data.scripts) || {};
-  const homepage = (typeof data.homepage === 'string') ? data.homepage : '';
-  const description = (typeof data.description === 'string') ? data.description : '';
-  return { version, tarball, unpackedSize, scripts, homepage, description };
+  const result = selectMostRecentVersion(packument);
+  if (!result) {
+    return {
+      version: '', tarball: null, unpackedSize: 0, scripts: {},
+      homepage: '', description: '',
+      latestTagVersion: null, recentVersions: [],
+    };
+  }
+  return result;
 }
 
 // --- npm polling ---
@@ -1075,6 +1170,9 @@ module.exports = {
 
   // CouchDB doc extraction
   extractTarballFromDoc,
+  selectMostRecentVersion,
+  RECENT_PUBLISH_WINDOW_MS,
+  RECENT_PUBLISH_MAX,
 
   // Polling functions
   pollNpmChanges,

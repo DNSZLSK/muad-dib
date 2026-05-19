@@ -7135,6 +7135,188 @@ async function runMonitorTests() {
     assert(typeof fn === 'function', 'getNpmLatestTarball should be a function');
   });
 
+  // ===================================================================
+  // ATO MOST-RECENT-VERSION RESOLUTION TESTS
+  //
+  // Threat model: TeamPCP / @antv 2026-05-19 — attacker publishes malicious
+  // versions WITHOUT moving dist-tags.latest. /latest endpoint returns the
+  // clean version, semver resolution still pulls the malicious one. Fix:
+  // pick most-recently-published version via `time` field, fall back to
+  // dist-tag latest only when `time` is missing.
+  // ===================================================================
+
+  console.log('\n=== ATO MOST-RECENT-VERSION RESOLUTION ===\n');
+
+  const { selectMostRecentVersion } = require('../../src/monitor/ingestion.js');
+
+  test('ATO: returns most-recently-published version when latest tag points to older version', () => {
+    // Simulates the @antv scenario: attacker published 3.2.7 maliciously but
+    // did not move dist-tags.latest off the legitimate 3.0.6.
+    const packument = {
+      'dist-tags': { latest: '3.0.6' },
+      versions: {
+        '3.0.6': { version: '3.0.6', dist: { tarball: 'https://reg/3.0.6.tgz', unpackedSize: 100 }, scripts: {} },
+        '3.2.7': { version: '3.2.7', dist: { tarball: 'https://reg/3.2.7.tgz', unpackedSize: 500 }, scripts: { preinstall: 'bun run index.js' } },
+      },
+      time: {
+        created: '2020-01-01T00:00:00Z',
+        modified: '2026-05-19T01:39:00Z',
+        '3.0.6': '2024-08-15T10:00:00Z',
+        '3.2.7': '2026-05-19T01:39:00Z',
+      },
+    };
+    const result = selectMostRecentVersion(packument);
+    assert(result !== null, 'should return a result');
+    assert(result.version === '3.2.7', `expected 3.2.7 (most-recent by time), got ${result.version}`);
+    assert(result.tarball === 'https://reg/3.2.7.tgz', `expected malicious tarball URL, got ${result.tarball}`);
+    assert(result.scripts.preinstall === 'bun run index.js', 'should return scripts from the malicious version');
+    assert(result.latestTagVersion === '3.0.6', `latestTagVersion should be 3.0.6, got ${result.latestTagVersion}`);
+  });
+
+  test('ATO: normal case — latest tag matches most-recent-by-time', () => {
+    const packument = {
+      'dist-tags': { latest: '2.0.0' },
+      versions: {
+        '1.0.0': { version: '1.0.0', dist: { tarball: 'https://reg/1.0.0.tgz' }, scripts: {} },
+        '2.0.0': { version: '2.0.0', dist: { tarball: 'https://reg/2.0.0.tgz' }, scripts: {} },
+      },
+      time: {
+        '1.0.0': '2025-01-01T00:00:00Z',
+        '2.0.0': '2025-06-01T00:00:00Z',
+      },
+    };
+    const result = selectMostRecentVersion(packument);
+    assert(result.version === '2.0.0', `expected 2.0.0, got ${result.version}`);
+    assert(result.latestTagVersion === '2.0.0', 'latestTagVersion should equal version');
+    assert(result.recentVersions.length === 0,
+      `no other versions within 24h window, got ${result.recentVersions.length} extras`);
+  });
+
+  test('ATO: burst publish — 3 versions in 1 hour, returns 2 extras', () => {
+    // Attacker publishes 3 versions in a 30-minute window (TeamPCP burst pattern).
+    const base = Date.parse('2026-05-19T01:00:00Z');
+    const packument = {
+      'dist-tags': { latest: '4.0.0' },
+      versions: {
+        '4.0.0': { version: '4.0.0', dist: { tarball: 'https://reg/4.0.0.tgz' } },
+        '4.0.1': { version: '4.0.1', dist: { tarball: 'https://reg/4.0.1.tgz' }, scripts: { postinstall: 'node payload.js' } },
+        '4.0.2': { version: '4.0.2', dist: { tarball: 'https://reg/4.0.2.tgz' }, scripts: { preinstall: 'bun run index.js' } },
+        '4.0.3': { version: '4.0.3', dist: { tarball: 'https://reg/4.0.3.tgz' }, scripts: {} },
+      },
+      time: {
+        '4.0.0': '2024-01-01T00:00:00Z',
+        '4.0.1': new Date(base + 10 * 60 * 1000).toISOString(),       // +10 min
+        '4.0.2': new Date(base + 20 * 60 * 1000).toISOString(),       // +20 min
+        '4.0.3': new Date(base + 30 * 60 * 1000).toISOString(),       // +30 min (most recent)
+      },
+    };
+    const result = selectMostRecentVersion(packument);
+    assert(result.version === '4.0.3', `expected most-recent 4.0.3, got ${result.version}`);
+    assert(result.recentVersions.length === 2,
+      `expected 2 extras (4.0.2 and 4.0.1, both <24h before 4.0.3), got ${result.recentVersions.length}`);
+    const extraVersions = result.recentVersions.map(r => r.version).sort();
+    assert(extraVersions[0] === '4.0.1' && extraVersions[1] === '4.0.2',
+      `extras should be 4.0.1 and 4.0.2, got ${extraVersions.join(',')}`);
+    // 4.0.0 published 2024-01-01 is far outside the 24h window — must be excluded
+    assert(!result.recentVersions.some(r => r.version === '4.0.0'),
+      '4.0.0 is outside 24h window and must not appear in recentVersions');
+  });
+
+  test('ATO: edge — recentVersions capped by maxRecent option', () => {
+    const base = Date.parse('2026-05-19T01:00:00Z');
+    const versions = {};
+    const time = {};
+    for (let i = 0; i < 10; i++) {
+      const v = `1.0.${i}`;
+      versions[v] = { version: v, dist: { tarball: `https://reg/${v}.tgz` } };
+      time[v] = new Date(base + i * 60 * 1000).toISOString();
+    }
+    const packument = { 'dist-tags': { latest: '1.0.9' }, versions, time };
+    const result = selectMostRecentVersion(packument, { maxRecent: 3 });
+    assert(result.version === '1.0.9', `expected 1.0.9, got ${result.version}`);
+    assert(result.recentVersions.length === 3,
+      `expected cap of 3 extras, got ${result.recentVersions.length}`);
+  });
+
+  test('ATO: edge — `time` field missing falls back to dist-tags.latest', () => {
+    const packument = {
+      'dist-tags': { latest: '1.5.0' },
+      versions: {
+        '1.0.0': { version: '1.0.0', dist: { tarball: 'https://reg/1.0.0.tgz' } },
+        '1.5.0': { version: '1.5.0', dist: { tarball: 'https://reg/1.5.0.tgz' } },
+      },
+      // no time field — legacy package
+    };
+    const result = selectMostRecentVersion(packument);
+    assert(result !== null, 'should still return a result via fallback');
+    assert(result.version === '1.5.0', `fallback should return latest tag 1.5.0, got ${result.version}`);
+    assert(result.latestTagVersion === '1.5.0', 'latestTagVersion should be reported');
+    assert(result.recentVersions.length === 0, 'no recentVersions without time data');
+  });
+
+  test('ATO: edge — version in `time` but missing from `versions` (unpublished) is skipped', () => {
+    // After `npm unpublish`, the version is removed from `versions` but the
+    // timestamp tombstone remains in `time`. We must not pick that version.
+    const packument = {
+      'dist-tags': { latest: '1.0.0' },
+      versions: {
+        '1.0.0': { version: '1.0.0', dist: { tarball: 'https://reg/1.0.0.tgz' } },
+      },
+      time: {
+        '1.0.0': '2024-01-01T00:00:00Z',
+        '2.0.0-malicious': '2026-05-19T01:39:00Z', // unpublished, tombstone only
+      },
+    };
+    const result = selectMostRecentVersion(packument);
+    assert(result.version === '1.0.0',
+      `unpublished 2.0.0-malicious must be skipped, expected 1.0.0, got ${result.version}`);
+  });
+
+  test('ATO: edge — empty or malformed input returns null', () => {
+    assert(selectMostRecentVersion(null) === null, 'null input should return null');
+    assert(selectMostRecentVersion(undefined) === null, 'undefined input should return null');
+    assert(selectMostRecentVersion({}) === null, 'empty object should return null');
+    assert(selectMostRecentVersion({ versions: {}, 'dist-tags': {} }) === null,
+      'no usable versions and no latest tag should return null');
+  });
+
+  test('ATO: edge — malformed timestamp on a version is skipped, falls back to next valid', () => {
+    const packument = {
+      'dist-tags': { latest: '1.0.0' },
+      versions: {
+        '1.0.0': { version: '1.0.0', dist: { tarball: 'https://reg/1.0.0.tgz' } },
+        '2.0.0': { version: '2.0.0', dist: { tarball: 'https://reg/2.0.0.tgz' } },
+      },
+      time: {
+        '1.0.0': '2024-01-01T00:00:00Z',
+        '2.0.0': 'not-a-date',
+      },
+    };
+    const result = selectMostRecentVersion(packument);
+    assert(result.version === '1.0.0',
+      `malformed timestamp on 2.0.0 should make 1.0.0 most-recent, got ${result.version}`);
+  });
+
+  test('ATO: extractTarballFromDoc uses same logic (post-include_docs defense in depth)', () => {
+    const { extractTarballFromDoc } = require('../../src/monitor/ingestion.js');
+    // Same @antv scenario but via CouchDB doc path
+    const doc = {
+      'dist-tags': { latest: '3.0.6' },
+      versions: {
+        '3.0.6': { version: '3.0.6', dist: { tarball: 'https://reg/3.0.6.tgz' } },
+        '3.2.7': { version: '3.2.7', dist: { tarball: 'https://reg/3.2.7.tgz' } },
+      },
+      time: {
+        '3.0.6': '2024-08-15T10:00:00Z',
+        '3.2.7': '2026-05-19T01:39:00Z',
+      },
+    };
+    const result = extractTarballFromDoc(doc);
+    assert(result !== null, 'should return a result');
+    assert(result.version === '3.2.7',
+      `extractTarballFromDoc must also return most-recent (not latest tag), got ${result.version}`);
+  });
+
   test('C1: isSafeLifecycleScript allows safe scripts', () => {
     assert(isSafeLifecycleScript('npm run build') === true, 'npm run build should be safe');
     assert(isSafeLifecycleScript('tsc') === true, 'tsc should be safe');
