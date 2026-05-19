@@ -440,6 +440,24 @@ GlassWorm campaign (March 2026, 433+ packages): Unicode invisible characters + B
 
 ## Version History
 
+### v2.11.23 — Contextual FP cap F10 (vendor_cli_sdk) — audit week3 cluster
+
+- New helper `vendorCliSdk(result, meta)` in `src/ml/feature-extractor.js`, wired as F10 in `applyContextualFPCaps()` (`src/scoring.js`) with cap **35** (CRITICAL → MEDIUM-HIGH boundary).
+- Targets the largest residual FP cluster from the audit 2026-05-week3 (96 entries, 33.6% of FP): legitimate vendor / community CLIs and SDKs that fire `credential_regex_harvest` + `env_access` on their OWN credential handling (Stripe checkout, OAuth-PKCE, bearer tokens to vendor APIs, .env template scaffolding). Examples: `@nocobase/cli-v1`, `@posterly/cli`, `@super-hands/cli`, `codeapp-js-cli`, `nodebb-plugin-flawless-donations`, `@aiyiran/myclaw`, `usegrain`, `@tapestry-mud/cli`, `db-model-router`.
+- Conjunction of 7 conditions, discriminator vs vendor-impersonating SANDWORM_MODE droppers:
+  - **C1** `bin` field present (CLI signal — droppers rarely expose a bin)
+  - **C2** `credential_regex_harvest` / `env_access` / `env_charcode_reconstruction` / `credential_tampering` fires (the FP source)
+  - **C3** No `mcp_config_injection` (F9 garde la main on MCP packages)
+  - **C4** No install lifecycle hook (legit vendor CLIs are opt-in)
+  - **C5** No third-party exfil threat (reuses `F9_EXFIL_TYPES`, 15 types)
+  - **C6** No credential file path in any threat message (reuses `F9_CREDENTIAL_FILE_RE` — blocks `.npmrc` / `.aws` / SSH / `.kube` / `.docker` / `.netrc` / `.git-credentials`)
+  - **C7** Vendor identity hint: `homepage` host non-empty OR scoped `@vendor/name`
+- Cap value 35 (vs F9 at 30 because the conjunction is structurally weaker — broader cluster, less restrictive identity). `Math.min` lowest-wins still arbitrates if F10 co-fires with another cap (e.g., F9 wins if both fire, but C3 excludes that combination by construction).
+- Reuses F9 constants `F9_EXFIL_TYPES` and `F9_CREDENTIAL_FILE_RE` — no duplication.
+- Tests: 3586 → **3594** passed, 0 failed. 8 unit tests on `vendorCliSdk` covering TP fixture, scoped-identity alternative, and 6 disqualifying FN paths (no bin, lifecycle hook, MCP territory, exfil signal, credential file path, no vendor identity). Integration vector test extended from 9 to 10 features.
+- Estimated effective coverage 60-75 of the 96 cluster entries (some lack a bin field — e.g., design-system asset packages that fall under F1 `bundle_without_install_scripts` instead).
+- FPR delta measurement on 545 curated benign + ground truth regression check **pending** (post-merge on VPS).
+
 ### v2.11.22 — Contextual FP cap F9 (mcp_server_env_access) — audit week3 cluster
 
 - New helper `mcpServerEnvAccess(result, meta)` in `src/ml/feature-extractor.js`, wired as F9 in `applyContextualFPCaps()` (`src/scoring.js`) with cap **30** (CRITICAL → MEDIUM).

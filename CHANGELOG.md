@@ -5,6 +5,83 @@ All notable changes to MUAD'DIB will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.11.23] - 2026-05-19
+
+### Audit week3 — Feature 10 (vendor_cli_sdk) — 96 FP cluster
+
+Deuxieme contextual FP cap derive de l'audit 2026-05-week3. Cible le plus
+gros cluster residuel (96 entries, 33.6 % des FP) : vendor / community
+CLIs et SDKs qui scoraient 75-100 a cause de `credential_regex_harvest`
++ `env_access` sur leur PROPRE gestion de credentials (Stripe checkout,
+OAuth-PKCE, bearer tokens vers l'API vendor, .env template scaffolding).
+Examples : `@nocobase/cli-v1`, `@posterly/cli`, `@super-hands/cli`,
+`codeapp-js-cli`, `nodebb-plugin-flawless-donations`, `@aiyiran/myclaw`,
+`usegrain`, `@tapestry-mud/cli`, `db-model-router`.
+
+#### F10 (`vendor_cli_sdk`) — cap 35
+
+Conjonction de 7 conditions :
+
+- **C1** `bin` field present (CLI signal — droppers rarement exposent un bin).
+- **C2** `credential_regex_harvest` / `env_access` / `env_charcode_reconstruction` / `credential_tampering` fire (le bruit FP).
+- **C3** Pas de `mcp_config_injection` (F9 garde la main).
+- **C4** Pas d'install lifecycle hook (legit vendor CLIs sont opt-in).
+- **C5** Pas de signal d'exfil third-party (reutilise `F9_EXFIL_TYPES`, 15 types).
+- **C6** Pas de chemin credential file dans les messages (reutilise `F9_CREDENTIAL_FILE_RE` — `.npmrc` / `.aws` / SSH / `.kube` / `.docker` / `.netrc` / `.git-credentials`).
+- **C7** Vendor identity hint : `homepage` host present OU package scoped `@vendor/name`.
+
+Cap value **35** (vs F9 a 30 car la conjonction est structurellement plus
+faible — cluster plus large, identite moins restrictive). Le `Math.min`
+lowest-wins arbitre proprement : F9 (cap 30) gagne si les deux firent —
+mais C3 exclut cette combinaison par construction.
+
+#### Pourquoi le AND est solide
+
+Les droppers vendor-impersonating SANDWORM_MODE :
+- N'exposent rarement un `bin` (viole C1).
+- Utilisent preinstall/postinstall (viole C4).
+- Exfilent vers attacker host (viole C5).
+- Lisent `.npmrc` / SSH / AWS (viole C6).
+
+#### Reutilisation
+
+F10 ne dupplique aucun code F9 : reuse direct des constantes
+`F9_EXFIL_TYPES` et `F9_CREDENTIAL_FILE_RE` definies en v2.11.22. Helpers
+internes `_f10HasBinEntry` et `_f10HasVendorIdentity` sont specifiques a
+F10.
+
+#### Wiring
+
+- `src/ml/feature-extractor.js` — helper `vendorCliSdk(result, meta)`, 2 helpers internes (`_f10HasBinEntry`, `_f10HasVendorIdentity`). Feature flag expose dans `extractFeatures()` comme `features.vendor_cli_sdk`.
+- `src/scoring.js` — F10 ajoute apres F6 dans `applyContextualFPCaps()` avec cap 35.
+
+#### Tests : 3586 → 3594 (+8)
+
+- 8 unit tests sur `vendorCliSdk` dans `tests/unit/ml-feature-extractor.test.js` :
+  - TP : nodebb Stripe plugin avec bin + Stripe env reads + homepage.
+  - TP alternatif : identite via scoped `@vendor/cli` (pas de homepage).
+  - FN : pas de bin entry.
+  - FN : postinstall lifecycle hook.
+  - FN : `mcp_config_injection` fires (F9 territory).
+  - FN : `suspicious_domain` exfil signal.
+  - FN : `.npmrc` cite dans le message (SANDWORM harvest).
+  - FN : unscoped name + pas de homepage (identite manquante).
+- Integration vector test etendu de 9 a 10 features.
+
+#### Couverture estimee
+
+60-75 des 96 entries du cluster (conjonction conservative). Les ~30
+restants tombent dans d'autres clusters :
+- Asset packages sans `bin` (Stencil components, design system bundles) → F1 (`bundle_without_install_scripts`)
+- Quelques `vat-validator-mcp` mal-labelles dans le dataset → devraient passer F9 si MCP keyword detecte
+
+#### Out of scope
+
+- F11 (`ai_agent_bot`, 54 FP) — sprint suivant, spec esquissee dans le plan F9.
+- Re-mesure FPR sur les 545 curated — apres merge sur VPS.
+
+---
+
 ## [2.11.22] - 2026-05-19
 
 ### Audit week3 — Feature 9 (mcp_server_env_access) — 25 FP cluster
