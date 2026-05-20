@@ -73,6 +73,10 @@ async function runMonitorTests() {
     SCAN_CONCURRENCY,
     // Layer 1: IOC pre-alert
     sendIOCPreAlert,
+    // Layer 1b: Campaign name-pattern pre-alert
+    sendCampaignPreAlert,
+    CAMPAIGN_PATTERNS,
+    matchCampaignPattern,
     // Layer 2: CouchDB doc extraction
     extractTarballFromDoc,
     // Layer 3: Tarball cache
@@ -7983,6 +7987,63 @@ async function runMonitorTests() {
     };
     const result = matchVersionedIOC(mockIOCs, 'some-pkg', '');
     assert(result === null, 'Empty version should return null (cannot verify)');
+  });
+
+  // ============================================
+  // LAYER 1b: CAMPAIGN PRE-ALERT TESTS (did-NNNN, etc.)
+  // ============================================
+
+  console.log('\n--- Layer 1b: Campaign Pre-Alert Tests ---\n');
+
+  test('MONITOR L1b: matchCampaignPattern flags did-NNNN names', () => {
+    assert(matchCampaignPattern('did-0001') === 'did-NNNN', 'did-0001 should match');
+    assert(matchCampaignPattern('did-1234') === 'did-NNNN', 'did-1234 should match');
+    assert(matchCampaignPattern('did-9999') === 'did-NNNN', 'did-9999 should match');
+  });
+
+  test('MONITOR L1b: matchCampaignPattern rejects non-matching names', () => {
+    // Wrong digit count
+    assert(matchCampaignPattern('did-1') === null, 'did-1 must not match (3 digits short)');
+    assert(matchCampaignPattern('did-12345') === null, 'did-12345 must not match (5 digits)');
+    // Wrong prefix
+    assert(matchCampaignPattern('dido-1234') === null, 'dido-1234 must not match');
+    assert(matchCampaignPattern('did_1234') === null, 'did_1234 must not match (underscore)');
+    // Scoped — campaign pattern is for unscoped packages only
+    assert(matchCampaignPattern('@did/1234') === null, 'scoped did/1234 must not match');
+    // Trailing content
+    assert(matchCampaignPattern('did-1234-foo') === null, 'did-1234-foo must not match');
+    // Common benign names
+    assert(matchCampaignPattern('react') === null, 'react must not match');
+    assert(matchCampaignPattern('@types/node') === null, 'types must not match');
+  });
+
+  test('MONITOR L1b: CAMPAIGN_PATTERNS exposes did-NNNN entry', () => {
+    assert(Array.isArray(CAMPAIGN_PATTERNS), 'CAMPAIGN_PATTERNS should be an array');
+    const didEntry = CAMPAIGN_PATTERNS.find(c => c.name === 'did-NNNN');
+    assert(didEntry, 'did-NNNN entry must exist');
+    assert(didEntry.re instanceof RegExp, 'entry must carry a RegExp');
+  });
+
+  asyncTest('MONITOR L1b: sendCampaignPreAlert returns without error when no webhook URL', async () => {
+    const origEnv = process.env.MUADDIB_WEBHOOK_URL;
+    delete process.env.MUADDIB_WEBHOOK_URL;
+    try {
+      await sendCampaignPreAlert('did-0042', 'did-NNNN');
+      assert(true, 'sendCampaignPreAlert did not throw without webhook URL');
+    } finally {
+      if (origEnv) process.env.MUADDIB_WEBHOOK_URL = origEnv;
+    }
+  });
+
+  test('MONITOR L1b: sendCampaignPreAlert is exported as a function', () => {
+    assert(typeof sendCampaignPreAlert === 'function', 'sendCampaignPreAlert should be a function');
+  });
+
+  test('MONITOR L1b: stats.campaignPreAlerts can be incremented', () => {
+    const prev = stats.campaignPreAlerts || 0;
+    stats.campaignPreAlerts = (stats.campaignPreAlerts || 0) + 1;
+    assert(stats.campaignPreAlerts === prev + 1, `Expected ${prev + 1}, got ${stats.campaignPreAlerts}`);
+    stats.campaignPreAlerts = prev; // restore
   });
 
   // ============================================
