@@ -5139,11 +5139,11 @@ async function runMonitorTests() {
     }
   });
 
-  // --- Popularity pre-filter tests ---
-
-  test('MONITOR: POPULAR_THRESHOLD is 50000', () => {
-    assert(POPULAR_THRESHOLD === 50000, 'POPULAR_THRESHOLD should be 50000, got ' + POPULAR_THRESHOLD);
-  });
+  // --- Popularity / typosquat helper tests ---
+  // (NOTE: the TRUSTED popularity skip was removed — see commit ripping
+  //  src/monitor/queue.js TRUSTED block. The downloads cache + threshold
+  //  constants are retained because they are still consumed by the daemon
+  //  pruning + daily-report path; they no longer gate any pipeline skip.)
 
   test('MONITOR: downloadsCache stores and returns cached value', () => {
     downloadsCache.clear();
@@ -5202,38 +5202,6 @@ async function runMonitorTests() {
     assert(formatFindings(null) === '', 'Should return empty for null');
     assert(formatFindings({}) === '', 'Should return empty for no threats');
     assert(formatFindings({ threats: [] }) === '', 'Should return empty for empty threats');
-  });
-
-  test('MONITOR: popular package without IOC/typosquat/HIGH would be TRUSTED (logic test)', () => {
-    // Test the logic conditions for pre-filter eligibility
-    const result = {
-      threats: [{ type: 'obfuscation_detected', severity: 'MEDIUM' }],
-      summary: { critical: 0, high: 0, medium: 1, low: 0, total: 1 }
-    };
-    const ecosystem = 'npm';
-    const eligible = ecosystem === 'npm'
-      && !hasIOCMatch(result)
-      && !hasTyposquat(result)
-      && !hasHighOrCritical(result);
-    assert(eligible === true, 'Package with only MEDIUM findings and no IOC/typosquat should be eligible');
-  });
-
-  test('MONITOR: popular package WITH IOC is not skipped', () => {
-    const result = {
-      threats: [{ type: 'known_malicious_package', severity: 'CRITICAL' }],
-      summary: { critical: 1, high: 0, medium: 0, low: 0, total: 1 }
-    };
-    const eligible = !hasIOCMatch(result) && !hasTyposquat(result) && !hasHighOrCritical(result);
-    assert(eligible === false, 'Package with IOC match should NOT be eligible for pre-filter');
-  });
-
-  test('MONITOR: popular package WITH HIGH findings is not skipped', () => {
-    const result = {
-      threats: [{ type: 'suspicious_dataflow', severity: 'HIGH' }],
-      summary: { critical: 0, high: 1, medium: 0, low: 0, total: 1 }
-    };
-    const eligible = !hasIOCMatch(result) && !hasTyposquat(result) && !hasHighOrCritical(result);
-    assert(eligible === false, 'Package with HIGH findings should NOT be eligible for pre-filter');
   });
 
   await asyncTest('MONITOR: sendDailyReport clears downloadsCache', async () => {
@@ -8928,19 +8896,17 @@ async function runMonitorTests() {
 
   // ============================================
   // TRUSTED DEPENDENCY DIFF DETECTION TESTS (v2.10.42)
+  // Source moved from src/monitor/ingestion.js to src/scanner/trusted-dep-diff.js —
+  // the dep-diff check is now a first-class pipeline scanner (opt-in), not a
+  // gated bypass inside the now-removed TRUSTED popularity filter.
   // ============================================
 
   console.log('\n=== TRUSTED DEP DIFF TESTS ===\n');
 
   const {
     checkTrustedDepDiff,
-    TRUSTED_DEP_AGE_THRESHOLD_MS,
-    httpsGet: _httpsGet
-  } = require('../../src/monitor/ingestion.js');
-
-  // We mock httpsGet by monkey-patching the module for each test.
-  // Save original for restore.
-  const ingestionPath = require.resolve('../../src/monitor/ingestion.js');
+    TRUSTED_DEP_AGE_THRESHOLD_MS
+  } = require('../../src/scanner/trusted-dep-diff.js');
 
   test('MONITOR: TRUSTED_DEP_AGE_THRESHOLD_MS is 7 days', () => {
     assert(TRUSTED_DEP_AGE_THRESHOLD_MS === 7 * 24 * 60 * 60 * 1000,
@@ -8981,12 +8947,6 @@ async function runMonitorTests() {
   // --- Functional tests using mock httpsGet ---
 
   asyncTest('MONITOR: checkTrustedDepDiff returns empty for same deps', async () => {
-    // Mock httpsGet to return a packument where v1.0.0 and v1.0.1 have identical deps
-    const ingestion = require('../../src/monitor/ingestion.js');
-    const origHttpsGet = ingestion.httpsGet;
-
-    // We need to override the module-internal httpsGet, which is tricky since it's
-    // a local reference. Instead, we test the function with a real-ish setup.
     // The function catches all errors gracefully, so passing a fake package name
     // that returns 404 should return empty findings.
     const findings = await checkTrustedDepDiff('__nonexistent_test_pkg__', '1.0.0');
@@ -9049,21 +9009,35 @@ async function runMonitorTests() {
     assert(classification.tier === '1a', `Should be Tier 1a (HC type), got ${classification.tier}`);
   });
 
-  test('MONITOR: checkTrustedDepDiff is importable from queue.js ingestion imports', () => {
-    // Verify the import wiring doesn't crash
-    const ingestion = require('../../src/monitor/ingestion.js');
-    assert(typeof ingestion.checkTrustedDepDiff === 'function',
-      'checkTrustedDepDiff should be exported from ingestion.js');
-    assert(typeof ingestion.TRUSTED_DEP_AGE_THRESHOLD_MS === 'number',
-      'TRUSTED_DEP_AGE_THRESHOLD_MS should be exported from ingestion.js');
+  test('MONITOR: checkTrustedDepDiff is importable from the standalone scanner', () => {
+    const scanner = require('../../src/scanner/trusted-dep-diff.js');
+    assert(typeof scanner.checkTrustedDepDiff === 'function',
+      'checkTrustedDepDiff should be exported from src/scanner/trusted-dep-diff.js');
+    assert(typeof scanner.checkDepDiff === 'function',
+      'checkDepDiff should be exported as the canonical name');
+    assert(typeof scanner.scanTrustedDepDiff === 'function',
+      'scanTrustedDepDiff pipeline entrypoint should be exported');
+    assert(typeof scanner.TRUSTED_DEP_AGE_THRESHOLD_MS === 'number',
+      'TRUSTED_DEP_AGE_THRESHOLD_MS should be exported');
   });
 
-  test('MONITOR: monitor.js re-exports checkTrustedDepDiff', () => {
-    const monitor = require('../../src/monitor.js');
-    assert(typeof monitor.checkTrustedDepDiff === 'function',
-      'checkTrustedDepDiff should be re-exported from monitor.js');
-    assert(monitor.TRUSTED_DEP_AGE_THRESHOLD_MS === TRUSTED_DEP_AGE_THRESHOLD_MS,
-      'TRUSTED_DEP_AGE_THRESHOLD_MS should match');
+  asyncTest('MONITOR: scanTrustedDepDiff is opt-in (returns [] without flag)', async () => {
+    const { scanTrustedDepDiff } = require('../../src/scanner/trusted-dep-diff.js');
+    const findings = await scanTrustedDepDiff('.', {});
+    assert(Array.isArray(findings), 'Should return an array');
+    assert(findings.length === 0, 'Should return empty without trustedDepDiff/monitorMode flag');
+  });
+
+  asyncTest('MONITOR: scanTrustedDepDiff skips non-npm ecosystems', async () => {
+    const { scanTrustedDepDiff } = require('../../src/scanner/trusted-dep-diff.js');
+    const findings = await scanTrustedDepDiff('.', { monitorMode: true, ecosystem: 'pypi', name: 'foo', version: '1.0.0' });
+    assert(findings.length === 0, 'Should return empty for non-npm ecosystem');
+  });
+
+  asyncTest('MONITOR: scanTrustedDepDiff skips when package.json missing and no overrides', async () => {
+    const { scanTrustedDepDiff } = require('../../src/scanner/trusted-dep-diff.js');
+    const findings = await scanTrustedDepDiff('/nonexistent_dir_for_test_only', { trustedDepDiff: true });
+    assert(findings.length === 0, 'Should return empty when package.json is unreadable');
   });
 
   // ============================================

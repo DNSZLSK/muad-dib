@@ -319,18 +319,36 @@ async function runMonitorWiringTests() {
       `QUEUE_WARNING_THRESHOLD should be 5000, got ${daemon.QUEUE_WARNING_THRESHOLD}`);
   });
 
-  test('WIRING: queue.js imports checkTrustedDepDiff from ingestion.js', () => {
-    assert(typeof ingestion.checkTrustedDepDiff === 'function',
-      'ingestion.checkTrustedDepDiff should be a function');
-    assert(typeof ingestion.TRUSTED_DEP_AGE_THRESHOLD_MS === 'number',
-      'ingestion.TRUSTED_DEP_AGE_THRESHOLD_MS should be a number');
+  // The dep-diff check moved out of monitor/ingestion.js into the standalone
+  // scanner src/scanner/trusted-dep-diff.js. monitor.js no longer re-exports it.
+  test('WIRING: trusted-dep-diff scanner exposes checkTrustedDepDiff + scanTrustedDepDiff', () => {
+    const scanner = require('../../src/scanner/trusted-dep-diff.js');
+    assert(typeof scanner.checkTrustedDepDiff === 'function',
+      'scanner.checkTrustedDepDiff alias should be a function');
+    assert(typeof scanner.scanTrustedDepDiff === 'function',
+      'scanner.scanTrustedDepDiff pipeline entry should be a function');
+    assert(typeof scanner.TRUSTED_DEP_AGE_THRESHOLD_MS === 'number',
+      'scanner.TRUSTED_DEP_AGE_THRESHOLD_MS should be a number');
   });
 
-  test('WIRING: monitor re-exports checkTrustedDepDiff and TRUSTED_DEP_AGE_THRESHOLD_MS', () => {
-    assert(typeof monitor.checkTrustedDepDiff === 'function',
-      'monitor.checkTrustedDepDiff should be a function');
-    assert(monitor.TRUSTED_DEP_AGE_THRESHOLD_MS === ingestion.TRUSTED_DEP_AGE_THRESHOLD_MS,
-      'TRUSTED_DEP_AGE_THRESHOLD_MS should match between monitor and ingestion');
+  test('WIRING: trusted-dep-diff scanner is referenced from pipeline executor', () => {
+    // Pipeline must wire the scanner into Promise.allSettled so the monitor path
+    // gets its findings; the scanner itself is opt-in via options flags.
+    const executorSrc = require('fs').readFileSync(
+      require('path').join(__dirname, '..', '..', 'src', 'pipeline', 'executor.js'),
+      'utf8'
+    );
+    assert(executorSrc.includes("require('../scanner/trusted-dep-diff.js')"),
+      'executor.js should require src/scanner/trusted-dep-diff.js');
+    assert(executorSrc.includes('scanTrustedDepDiff'),
+      'executor.js should invoke scanTrustedDepDiff');
+  });
+
+  test('WIRING: monitor does NOT re-export checkTrustedDepDiff (moved to scanner)', () => {
+    assert(monitor.checkTrustedDepDiff === undefined,
+      'monitor.checkTrustedDepDiff must be undefined — the function moved to src/scanner/trusted-dep-diff.js');
+    assert(monitor.TRUSTED_DEP_AGE_THRESHOLD_MS === undefined,
+      'monitor.TRUSTED_DEP_AGE_THRESHOLD_MS must be undefined — the constant moved to src/scanner/trusted-dep-diff.js');
   });
 
   test('WIRING: monitor re-exports PROCESS_LOOP_INTERVAL and QUEUE_WARNING_THRESHOLD', () => {
