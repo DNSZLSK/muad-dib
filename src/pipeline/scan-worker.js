@@ -23,7 +23,12 @@ const { run } = require('../index.js');
 
 (async () => {
   try {
-    const result = await run(workerData.extractedDir, { _capture: true });
+    // scanContext (optional) carries monitor-side info that opt-in scanners need
+    // (e.g. trusted-dep-diff requires package name + version to query the registry).
+    // It is spread INTO the pipeline options, but `_capture: true` always wins so
+    // the worker keeps returning the result object — never prints.
+    const scanContext = workerData.scanContext || {};
+    const result = await run(workerData.extractedDir, { ...scanContext, _capture: true });
     parentPort.postMessage({ type: 'result', data: result });
   } catch (err) {
     parentPort.postMessage({ type: 'error', message: err.message || String(err) });

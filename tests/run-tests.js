@@ -40,6 +40,7 @@ const { runNpmRegistryTests } = require('./scanner/npm-registry.test');
 const { runAstNegativeTests } = require('./scanner/ast-negative.test');
 const { runAstBypassRegressionTests } = require('./scanner/ast-bypass-regression.test');
 const { runIntentGraphTests } = require('./scanner/intent-graph.test');
+const { runTrustedDepDiffTests } = require('./scanner/trusted-dep-diff.test');
 
 // Utility tests
 const { runUtilsTests } = require('./utils.test');
@@ -175,6 +176,7 @@ async function timed(name, fn) {
   await timed('npm-registry', runNpmRegistryTests);
   await timed('ast-negative', runAstNegativeTests);
   await timed('ast-bypass-regression', runAstBypassRegressionTests);
+  await timed('trusted-dep-diff', runTrustedDepDiffTests);
 
   // IOC scraper tests (Phase 3)
   await timed('scraper', runScraperTests);

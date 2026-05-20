@@ -56,8 +56,6 @@ const {
   formatFindings,
   evaluateCacheTrigger,
   isFirstPublishHighRisk,
-  POPULAR_THRESHOLD,
-  downloadsCache: classifyDownloadsCache,
   DOWNLOADS_CACHE_TTL,
   HIGH_CONFIDENCE_MALICE_TYPES,
   IOC_MATCH_TYPES,
@@ -98,8 +96,8 @@ const {
   isSafeLifecycleScript
 } = require('./temporal.js');
 
-// From ./ingestion.js (will be created — currently in monitor.js)
-const { getNpmLatestTarball, getPyPITarballUrl, getWeeklyDownloads, checkTrustedDepDiff } = require('./ingestion.js');
+// From ./ingestion.js
+const { getNpmLatestTarball, getPyPITarballUrl } = require('./ingestion.js');
 
 // From ./tarball-archive.js
 const { archiveSuspectTarball } = require('./tarball-archive.js');
@@ -226,12 +224,15 @@ function countPackageFiles(dir) {
  *
  * @param {string} extractedDir - Path to extracted package
  * @param {number} timeoutMs - Timeout in milliseconds
+ * @param {object} [scanContext] - Monitor-side context spread into pipeline options.
+ *   Required by opt-in scanners (e.g. trusted-dep-diff) that need name/version/ecosystem
+ *   and a monitorMode flag to perform registry queries.
  * @returns {Promise<object>} Scan result (same shape as run(_, {_capture:true}))
  */
-function runScanInWorker(extractedDir, timeoutMs) {
+function runScanInWorker(extractedDir, timeoutMs, scanContext = null) {
   return new Promise((resolve, reject) => {
     const worker = new Worker(SCAN_WORKER_PATH, {
-      workerData: { extractedDir }
+      workerData: { extractedDir, scanContext: scanContext || {} }
     });
 
     let settled = false;
@@ -418,7 +419,19 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
 
     let result;
     try {
-      result = await runScanInWorker(extractedDir, STATIC_SCAN_TIMEOUT_MS);
+      // scanContext: feeds monitor-side info (name/version/ecosystem) and the
+      // monitorMode + trustedDepDiff flags into opt-in pipeline scanners.
+      // The trusted-dep-diff scanner needs both name and version to query the
+      // registry for the previous-version dependency list — that information
+      // is meaningless in offline CLI mode but available here.
+      const scanContext = {
+        name,
+        version,
+        ecosystem,
+        monitorMode: true,
+        trustedDepDiff: true
+      };
+      result = await runScanInWorker(extractedDir, STATIC_SCAN_TIMEOUT_MS, scanContext);
     } catch (staticErr) {
       if (/static scan timeout/i.test(staticErr.message)) {
         console.error(`[MONITOR] STATIC_TIMEOUT: ${name}@${version} — exceeded ${STATIC_SCAN_TIMEOUT_MS / 1000}s (worker terminated)`);
@@ -542,40 +555,20 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
         recordTrainingSample(result, { name, version, ecosystem, label: 'clean', registryMeta: meta, unpackedSize: meta.unpackedSize, npmRegistryMeta, fileCountTotal, hasTests });
         return { sandboxResult: null, staticClean: true };
       } else {
-        // Popularity pre-filter: skip sandbox for popular npm packages with only MEDIUM/LOW
-        if (ecosystem === 'npm' && !hasIOCMatch(result) && !hasTyposquat(result) && !hasHighOrCritical(result)) {
-          const downloads = await getWeeklyDownloads(name);
-          if (downloads >= POPULAR_THRESHOLD) {
-            // Dependency diff check: detect supply-chain injection on TRUSTED packages
-            // (e.g., axios 1.14.0 → 1.14.1 adding unknown plain-crypto-js, 2026-03-30)
-            const trustedFindings = await checkTrustedDepDiff(name, version);
-            const hasCriticalDepFinding = trustedFindings.some(f => f.severity === 'CRITICAL');
-
-            if (hasCriticalDepFinding) {
-              // CRITICAL: unknown/new dependency — bypass TRUSTED, route to full scan + sandbox
-              console.log(`[MONITOR] TRUSTED BYPASS: ${name}@${version} — new unknown dependency detected, routing to full scan`);
-              result.threats.push(...trustedFindings);
-              for (const f of trustedFindings) {
-                if (f.severity === 'CRITICAL') result.summary.critical = (result.summary.critical || 0) + 1;
-                else if (f.severity === 'HIGH') result.summary.high = (result.summary.high || 0) + 1;
-              }
-              // Fall through to full classification below (do NOT return)
-            } else {
-              // No CRITICAL dep findings — normal TRUSTED skip (log HIGH findings if any)
-              for (const f of trustedFindings) {
-                console.log(`[MONITOR] TRUSTED dep change: ${f.message}`);
-              }
-              stats.scanned++;
-              const elapsed = Date.now() - startTime;
-              stats.totalTimeMs += elapsed;
-              stats.clean++;
-              console.log(`[MONITOR] TRUSTED (popular): ${name}@${version} (${Math.round(downloads / 1000)}k downloads/week, ${counts.join(', ')})`);
-              updateScanStats('clean');
-              recordTrainingSample(result, { name, version, ecosystem, label: 'clean', registryMeta: meta, unpackedSize: meta.unpackedSize, npmRegistryMeta, fileCountTotal, hasTests });
-              return { sandboxResult: null, staticClean: true };
-            }
-          }
-        }
+        // No popularity-based skip here. The TRUSTED (popular) shortcut that used
+        // to live at this point was a whitelist-by-downloads — CLAUDE.md forbids
+        // FP-reducing whitelists, and the Shai-Hulud wave-2 ATO attacks of May 2026
+        // proved that popular packages are precisely the prime target for ATO.
+        // Downstream attenuation handles the FP load via computeReputationFactor()
+        // and the graduated webhook threshold (webhook.js:83-87) — popular packages
+        // need a higher static score to fire a webhook, but they remain visible in
+        // the pipeline (sandbox, persisted detections, training samples) the same
+        // way every other package is. The supply-chain dep-diff check that the
+        // old block used as bypass logic now runs as a first-class scanner
+        // (src/scanner/trusted-dep-diff.js, wired in via executor.js); its findings
+        // arrive in result.threats before this point, so isSuspectClassification
+        // and the reputation bypass for HIGH_CONFIDENCE_MALICE_TYPES take the
+        // package straight to tier 1a + mandatory sandbox + webhook.
 
         const classification = isSuspectClassification(result);
         if (!classification.suspect) {
