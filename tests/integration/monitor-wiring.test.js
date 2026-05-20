@@ -265,6 +265,15 @@ async function runMonitorWiringTests() {
     }
   });
 
+  test('WIRING: ingestion.js exports campaign pre-alert helpers used by pollers', () => {
+    assert(Array.isArray(ingestion.CAMPAIGN_PATTERNS),
+      'ingestion.CAMPAIGN_PATTERNS should be an array');
+    assert(typeof ingestion.matchCampaignPattern === 'function',
+      `ingestion.matchCampaignPattern should be a function, got ${typeof ingestion.matchCampaignPattern}`);
+    assert(typeof webhook.sendCampaignPreAlert === 'function',
+      `webhook.sendCampaignPreAlert should be a function, got ${typeof webhook.sendCampaignPreAlert}`);
+  });
+
   test('WIRING: all queue.js imports from classify.js exist', () => {
     const expectedFromClassify = [
       'isSuspectClassification', 'hasHighConfidenceThreat', 'hasIOCMatch',

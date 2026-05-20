@@ -14,7 +14,23 @@ const {
   loadNpmSeq, saveNpmSeq, CHANGES_STREAM_URL, CHANGES_LIMIT, CHANGES_CATCHUP_MAX,
   savePypiSerial, PYPI_XMLRPC_URL, PYPI_CATCHUP_MAX
 } = require('./state.js');
-const { sendIOCPreAlert } = require('./webhook.js');
+const { sendIOCPreAlert, sendCampaignPreAlert } = require('./webhook.js');
+
+// Active-campaign name patterns. Pre-alert fires on match BEFORE tarball
+// download so operators have visibility while IOC lists catch up (typical
+// lag: hours to days).
+// did-NNNN (May 2026): wave of did-0001..did-9999 publications observed in
+// the changes stream — name shape alone is enough to flag for fast triage.
+const CAMPAIGN_PATTERNS = [
+  { name: 'did-NNNN', re: /^did-\d{4}$/ }
+];
+
+function matchCampaignPattern(name) {
+  for (const c of CAMPAIGN_PATTERNS) {
+    if (c.re.test(name)) return c.name;
+  }
+  return null;
+}
 const { evaluateCacheTrigger, POPULAR_THRESHOLD, downloadsCache, DOWNLOADS_CACHE_TTL } = require('./classify.js');
 
 const SELF_PACKAGE_NAME = require('../../package.json').name;
@@ -496,6 +512,20 @@ async function pollNpmChanges(state, scanQueue, stats) {
         console.warn(`[MONITOR] IOC pre-check failed: ${err.message}`);
       }
 
+      // Layer 1b: Campaign pre-alert — fire on name-pattern matches when the
+      // package isn't already a known IOC (avoid duplicate webhooks for the
+      // same publication). Lets us flag campaign waves while IOC lists lag.
+      if (!isKnownIOC) {
+        const campaign = matchCampaignPattern(name);
+        if (campaign) {
+          console.log(`[MONITOR] CAMPAIGN PRE-ALERT: ${name} — matches ${campaign}`);
+          stats.campaignPreAlerts = (stats.campaignPreAlerts || 0) + 1;
+          sendCampaignPreAlert(name, campaign).catch(err => {
+            console.error(`[MONITOR] campaign pre-alert webhook failed for ${name}: ${err.message}`);
+          });
+        }
+      }
+
       // Layer 2: Extract tarball URL from CouchDB doc (eliminates lazy resolution 404 race)
       const docMeta = change.doc ? extractTarballFromDoc(change.doc) : null;
 
@@ -591,9 +621,10 @@ async function pollNpmRss(state, scanQueue, stats) {
 
       // Layer 1: IOC pre-alert (RSS fallback path)
       // Only wildcard IOCs trigger here; versioned IOCs checked in resolveTarballAndScan().
+      let isKnownIOC = false;
       try {
         const iocs = loadCachedIOCs();
-        const isKnownIOC = iocs.wildcardPackages && iocs.wildcardPackages.has(name);
+        isKnownIOC = iocs.wildcardPackages && iocs.wildcardPackages.has(name);
         if (isKnownIOC) {
           console.log(`[MONITOR] IOC PRE-ALERT: ${name} — known malicious package detected via RSS`);
           stats.iocPreAlerts = (stats.iocPreAlerts || 0) + 1;
@@ -602,6 +633,18 @@ async function pollNpmRss(state, scanQueue, stats) {
           });
         }
       } catch { /* IOC load failure is non-fatal */ }
+
+      // Layer 1b: Campaign pre-alert (RSS fallback path) — mirrors pollNpmChanges.
+      if (!isKnownIOC) {
+        const campaign = matchCampaignPattern(name);
+        if (campaign) {
+          console.log(`[MONITOR] CAMPAIGN PRE-ALERT: ${name} — matches ${campaign} (RSS)`);
+          stats.campaignPreAlerts = (stats.campaignPreAlerts || 0) + 1;
+          sendCampaignPreAlert(name, campaign).catch(err => {
+            console.error(`[MONITOR] campaign pre-alert webhook failed for ${name}: ${err.message}`);
+          });
+        }
+      }
 
       // Queue npm packages — tarball URL resolved during scan
       scanQueue.push({
@@ -1081,6 +1124,10 @@ module.exports = {
   pollPyPIRss,
   pollPyPI,
   poll,
+
+  // Active-campaign name watch (did-NNNN, etc.)
+  CAMPAIGN_PATTERNS,
+  matchCampaignPattern,
 
   // Test seam — see _deps definition near the top of this file.
   _deps

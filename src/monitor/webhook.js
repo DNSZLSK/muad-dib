@@ -188,6 +188,41 @@ async function sendIOCPreAlert(name, version) {
 }
 
 /**
+ * Layer 1b: Send immediate pre-alert webhook when a package name matches an
+ * active-campaign pattern (e.g. `did-NNNN` in May 2026). Fires BEFORE tarball
+ * download \u2014 IOC lists are eventually-consistent and lag the campaign by
+ * hours to days, so name-pattern watch is the only signal available in real
+ * time while the campaign is in flight.
+ * @param {string} name - Package name that matched the campaign pattern
+ * @param {string} campaign - Short campaign label (e.g. 'did-NNNN')
+ */
+async function sendCampaignPreAlert(name, campaign) {
+  const url = getWebhookUrl();
+  if (!url) return;
+
+  const npmLink = `https://www.npmjs.com/package/${encodeURIComponent(name)}`;
+
+  const payload = {
+    embeds: [{
+      title: '\u26a0\ufe0f CAMPAIGN PRE-ALERT \u2014 Suspected Active Campaign',
+      color: 0xe67e22,
+      fields: [
+        { name: 'Package', value: `[${name}](${npmLink})`, inline: true },
+        { name: 'Source', value: `Name pattern: ${campaign}`, inline: true },
+        { name: 'Detection', value: 'Changes stream pre-scan', inline: true },
+        { name: 'Status', value: 'Suspected campaign publication \u2014 not yet confirmed malicious. Full scan queued; treat as suspect until verdict lands.', inline: false }
+      ],
+      footer: {
+        text: `MUAD'DIB Campaign Pre-Alert | ${new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, ' UTC')}`
+      },
+      timestamp: new Date().toISOString()
+    }]
+  };
+
+  await sendWebhook(url, payload, { rawPayload: true });
+}
+
+/**
  * Check if a specific package@version matches a versioned IOC entry.
  * Returns the matching IOC entry or null.
  * Wildcard IOCs are NOT checked here (use wildcardPackages.has() separately).
@@ -1172,6 +1207,7 @@ module.exports = {
   shouldSendWebhook,
   buildMonitorWebhookPayload,
   sendIOCPreAlert,
+  sendCampaignPreAlert,
   matchVersionedIOC,
   computeRiskLevel,
   computeRiskScore,

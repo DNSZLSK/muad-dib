@@ -312,6 +312,10 @@ module.exports = {
   getTrainingStats,
   // Layer 1: IOC pre-alert
   sendIOCPreAlert: webhookModule.sendIOCPreAlert,
+  // Layer 1b: Campaign name-pattern pre-alert
+  sendCampaignPreAlert: webhookModule.sendCampaignPreAlert,
+  CAMPAIGN_PATTERNS: ingestionModule.CAMPAIGN_PATTERNS,
+  matchCampaignPattern: ingestionModule.matchCampaignPattern,
   // Layer 2: CouchDB doc extraction
   extractTarballFromDoc: ingestionModule.extractTarballFromDoc,
   // Layer 3: Tarball cache
