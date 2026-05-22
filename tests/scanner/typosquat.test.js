@@ -141,6 +141,38 @@ async function runTyposquatTests() {
       } finally { cleanupTemp(tmp); }
     }
   });
+
+  // v2.11.29: findTyposquatMatch is exported as a pure utility for the
+  // publish-pipeline guard (scripts/check-deps-typosquats.js). It must
+  // match real typosquats and skip whitelisted / scoped / short names.
+  test('TYPOSQUAT export: findTyposquatMatch catches loadash -> lodash', () => {
+    const { findTyposquatMatch } = require('../../src/scanner/typosquat.js');
+    const m = findTyposquatMatch('loadash');
+    assert(m && m.original === 'lodash' && m.distance === 1,
+      `findTyposquatMatch('loadash') should return {original:'lodash', distance:1}, got ${JSON.stringify(m)}`);
+  });
+
+  test('TYPOSQUAT export: findTyposquatMatch catches chlk/expresss/requestt', () => {
+    const { findTyposquatMatch } = require('../../src/scanner/typosquat.js');
+    const cases = [
+      { name: 'chlk', original: 'chalk' },
+      { name: 'expresss', original: 'express' },
+      { name: 'requestt', original: 'request' }
+    ];
+    for (const c of cases) {
+      const m = findTyposquatMatch(c.name);
+      assert(m && m.original === c.original,
+        `findTyposquatMatch('${c.name}') should match '${c.original}', got ${JSON.stringify(m)}`);
+    }
+  });
+
+  test('TYPOSQUAT export: findTyposquatMatch returns null for legit deps (acorn, js-yaml, scoped)', () => {
+    const { findTyposquatMatch } = require('../../src/scanner/typosquat.js');
+    assert(findTyposquatMatch('acorn') === null, 'acorn is whitelisted');
+    assert(findTyposquatMatch('js-yaml') === null, 'js-yaml is whitelisted');
+    assert(findTyposquatMatch('@inquirer/prompts') === null, 'scoped packages skipped');
+    assert(findTyposquatMatch('fs') === null, 'short names skipped (< 4 chars)');
+  });
 }
 
 module.exports = { runTyposquatTests };

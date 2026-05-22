@@ -5,6 +5,58 @@ All notable changes to MUAD'DIB will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.11.29] - 2026-05-22
+
+### Publish pipeline hardening — defense in depth
+
+Refonte du gate publish suite a l'incident `npm ci` EOVERRIDE en CI (runner
+ubuntu-24.04 update du 2026-05-13, npm strict sur orphan overrides).
+Remplacement de la protection symptomatique `overrides.loadash` par une
+defense en profondeur cryptographique.
+
+#### Changements
+
+- **Retire** `package.json` `overrides.loadash` — protection symptomatique
+  sur un seul nom typosquat, dependant d'une semantique d'override npm qui
+  a derive entre runners.
+- **Ajoute** `scripts.prepublishOnly` — bloque les `npm publish` hors-CI
+  (requiert `CI=true`). Le seul path de publish autorise est tag `v*` push
+  → workflow `publish.yml`.
+- **Ajoute** etape `npm audit signatures` dans `publish.yml` (blocking) —
+  verification SLSA des deps installees avant `npm test` et `npm publish`.
+  Detecte tampering / MITM / registry compromise, pas seulement les
+  typosquats hardcoded.
+- **Ajoute** etape self-scan `node_modules` JSON dans `publish.yml`
+  (informatif, non-blocking — FPs connus sur ajv/eslint). Archive dans les
+  logs CI pour forensic post-incident.
+- **Generalise** Guard 2 dans `publish.yml` : remplace le check hardcoded
+  sur `dependencies.loadash` par `scripts/check-deps-typosquats.js`, qui
+  appelle `findTyposquatMatch` (la propre detection du scanner) sur
+  toutes les `dependencies` + `devDependencies` + `optional` + `peer`.
+  Catch loadash/chlk/expresss/requestt/etc, plus juste un nom canary.
+- **Exporte** `findTyposquatMatch` depuis `src/scanner/typosquat.js`
+  (utilitaire pur, sync, sans network).
+
+#### Threat model
+
+L'override ne couvrait qu'un nom (`loadash`) et dependait d'un detail npm
+fragile. Le nouveau gate couvre une surface plus large :
+
+- **`npm audit signatures`** : detection cryptographique d'alteration de
+  package depuis le registry (toutes deps, pas un nom).
+- **Local-publish lockdown** : empeche un attacker avec acces workstation
+  de publier en bypassant CI.
+- **Self-scan forensic** : evidence d'investigation post-incident.
+
+#### Versions intermediaires
+
+Versions 2.11.25 a 2.11.28 absentes du CHANGELOG (a backfill hors-scope) :
+
+- v2.11.25 — `fix: rip TRUSTED popularity whitelist, extract dep-diff scanner`
+- v2.11.26 — `feat(monitor): did-NNNN campaign pre-alert watch`
+- v2.11.27 — `fix(scoring): F12 vendor_minified_bundle FP cap`
+- v2.11.28 — `fix(scoring): F13 typosquat_benign_lifecycle FP cap`
+
 ## [2.11.24] - 2026-05-19
 
 ### Audit week3 — Feature 11 (ai_agent_bot) — 54 FP cluster
