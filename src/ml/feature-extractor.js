@@ -141,6 +141,15 @@ const GITHUB_RELEASE_HOSTS = ['github.com', 'objects.githubusercontent.com', 'ra
 const BUNDLE_PATH_RE = /(?:^|[\\/])(?:dist|build|lib|out|umd|esm|cjs|bundle|_next[\\/]static|\.next[\\/]static|public[\\/]static|webpack|rollup)[\\/]/i;
 const BUNDLE_FILE_RE = /\.(?:min|bundle|prod|umd|iife|esm|cjs)\.(?:m?js|cjs)$|\.min\.js$|chunk-[0-9a-f]+\.js$|vendors?~?.*\.js$/i;
 
+// v2.11.27 F12: reuse the exhaustive shared regex + veto helper from the
+// scanner side (covers @kitware/vtk.js, playwright/lib/utilsBundleImpl,
+// .yarn/releases, hash-suffixed chunks, Stencil sys/* dirs — patterns the
+// narrower local BUNDLE_PATH_RE misses).
+const {
+  BUNDLE_PATH_RE: SHARED_BUNDLE_PATH_RE,
+  hasBundleVetoSignal
+} = require('../shared/bundle-detect.js');
+
 // Threat types that indicate remote content fetch in a file (for
 // `git_hook_source_local` heuristic: absence => local source).
 const REMOTE_FETCH_TYPES = new Set([
@@ -934,6 +943,97 @@ function aiAgentBot(result, meta) {
   return true;
 }
 
+// ============================================================================
+// Feature 12 — vendor_minified_bundle (v2.11.27, weekly review 2026-05-22, 9 FP)
+// ============================================================================
+//
+// Targets the @photoroom/ui (1.8MB UMD bundle, 6 cascade types) and
+// @vkontakte/videoplayer-shared (32KB min, 4 cascade types) cluster: vendor
+// React/JS bundles where webpack/rollup/esbuild output legitimately produces
+// `eval`, `new Function`, prototype mutations for framework reactivity,
+// `Proxy({set/get})` interceptors, credential-regex-looking strings, and
+// minified blobs that trip the obfuscation heuristic. Per-file co-occurrence
+// of >=3 of those patterns on a path matching BUNDLE_PATH_RE is the signal.
+//
+// Complements F1 (bundleWithoutInstallScripts, cap 30) which requires ALL
+// threat files to exceed 100KB and ALL threats to carry t.file — both
+// conditions are too strict for the v2.11.27 cluster (vkontakte is 32KB; the
+// cluster co-occurs with package-level `intent_credential_exfil` for some
+// packages). F12 uses a 20KB floor per cascade file and an explicit C3
+// veto on package-level exfil intents instead of disqualifying outright.
+
+const CASCADE_TYPES = new Set([
+  'credential_regex_harvest',     // MUADDIB-AST-041
+  'dangerous_call_eval',          // MUADDIB-AST-004
+  'dangerous_call_function',      // MUADDIB-AST-005
+  'prototype_pollution',          // MUADDIB-AST-065
+  'proxy_data_intercept',         // MUADDIB-AST-043
+  'remote_code_load',             // MUADDIB-AST-040
+  'obfuscation_detected',         // src/scanner/obfuscation.js
+  'js_obfuscation_pattern'
+]);
+const CASCADE_MIN_TYPES = 3;
+const CASCADE_MIN_FILE_BYTES = 20 * 1024;
+
+/**
+ * Feature 12 — TRUE iff the package ships at least one minified vendor
+ * bundle file with >=3 distinct CASCADE_TYPES firing on it AND has no
+ * install lifecycle script AND no veto signal AND no package-level exfil
+ * intent.
+ *
+ * Discriminator vs malware injected into a bundle:
+ *   - hasBundleVetoSignal (src/shared/bundle-detect.js) catches reverse_shell,
+ *     node_modules_write, npm_publish_worm, npm_token_steal, systemd_persistence,
+ *     unicode_invisible_injection (GlassWorm), ioc_match,
+ *     known_malicious_package, shai_hulud_marker, detached_credential_exfil,
+ *     ai_config_injection, ide_task_persistence, plus env_access on
+ *     SENSITIVE_ENV_RE (NPM_TOKEN, AWS_*, SSH_*, etc.).
+ *   - C3 catches Axios UNC1069-style package-level intent_credential_exfil /
+ *     intent_command_exfil (no `t.file` → not file-scoped → real campaign).
+ *   - C2 (no lifecycle) catches postinstall droppers.
+ *   - C7 (20KB floor) catches hand-written 4KB eval injections in dist/.
+ *
+ * Cap 25 (MEDIUM). Tighter than F1=30: the cascade of >=3 bundler-emitted
+ * heuristics on a single file is a stronger structural bundler signature
+ * than "any large file with no install hook".
+ */
+function vendorMinifiedBundle(result, meta) {
+  if (!meta || !meta.registryMeta || meta.registryMeta.scripts === undefined) return false;
+  if (hasLifecycleScripts(meta)) return false;
+
+  const threats = (result && result.threats) || [];
+  if (threats.length === 0) return false;
+
+  // C3 — package-level exfil intent disqualifies (real campaign signal,
+  // not bundler artifact: bundlers never produce intent threats without
+  // a backing file).
+  for (const t of threats) {
+    if ((t.type === 'intent_credential_exfil' || t.type === 'intent_command_exfil') && !t.file) {
+      return false;
+    }
+  }
+
+  const summary = (result && result.summary) || {};
+  const fileSizes = summary.fileSizes || {};
+  const typesByFile = new Map();
+
+  for (const t of threats) {
+    if (!t.file || !CASCADE_TYPES.has(t.type)) continue;
+    if (!SHARED_BUNDLE_PATH_RE.test(t.file) && !BUNDLE_FILE_RE.test(t.file)) continue;
+    if (!typesByFile.has(t.file)) typesByFile.set(t.file, new Set());
+    typesByFile.get(t.file).add(t.type);
+  }
+
+  for (const [file, types] of typesByFile) {
+    if (types.size < CASCADE_MIN_TYPES) continue;
+    if (hasBundleVetoSignal(threats, file)) continue;
+    const size = fileSizes[file];
+    if (typeof size === 'number' && size < CASCADE_MIN_FILE_BYTES) continue;
+    return true;
+  }
+  return false;
+}
+
 /**
  * Feature 8 — TRUE iff the package declares at least one install
  * lifecycle script AND the scan shows no network egress capability
@@ -1171,5 +1271,6 @@ module.exports = {
   installScriptNoNetworkEgress,
   mcpServerEnvAccess,
   vendorCliSdk,
-  aiAgentBot
+  aiAgentBot,
+  vendorMinifiedBundle
 };

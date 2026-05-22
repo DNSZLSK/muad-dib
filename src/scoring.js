@@ -1486,6 +1486,7 @@ const {
   mcpServerEnvAccess,
   vendorCliSdk,
   aiAgentBot,
+  vendorMinifiedBundle,
 } = require('./ml/feature-extractor.js');
 
 /**
@@ -1519,6 +1520,13 @@ function applyContextualFPCaps(result, pkgMeta) {
   // F1: minified bundle without install scripts → MAX 30
   if (bundleWithoutInstallScripts(result, meta)) {
     applied.push({ feature: 'bundle_without_install_scripts', cap: 30 });
+  }
+  // F12: vendor minified bundle cascade (>=3 CASCADE_TYPES on a single
+  // bundle file, no lifecycle, no veto) → MAX 25. Targets the v2.11.27
+  // weekly review cluster (@photoroom/ui, @vkontakte/videoplayer-shared).
+  // Tighter than F1 because the cascade is a stronger structural signature.
+  if (vendorMinifiedBundle(result, meta)) {
+    applied.push({ feature: 'vendor_minified_bundle', cap: 25 });
   }
   // F3: credential destination first-party API → MAX 30
   if (networkDestinationFirstParty(result, meta)) {
