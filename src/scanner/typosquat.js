@@ -1,6 +1,14 @@
 const fs = require('fs');
 const path = require('path');
-const { getPackageMetadata } = require('./npm-registry.js');
+
+// Lazy import: npm-registry transitively requires acorn. Keeping it lazy lets
+// pure sync helpers (findTyposquatMatch, levenshteinDistance) load before
+// `npm ci` — used by scripts/check-deps-typosquats.js in the publish guard.
+let _getPackageMetadata;
+function getPackageMetadata(name) {
+  if (!_getPackageMetadata) _getPackageMetadata = require('./npm-registry.js').getPackageMetadata;
+  return _getPackageMetadata(name);
+}
 
 // In-memory cache to avoid re-querying the same package in one scan
 const metadataCache = new Map();

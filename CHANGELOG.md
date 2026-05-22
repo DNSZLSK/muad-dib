@@ -35,7 +35,12 @@ defense en profondeur cryptographique.
   toutes les `dependencies` + `devDependencies` + `optional` + `peer`.
   Catch loadash/chlk/expresss/requestt/etc, plus juste un nom canary.
 - **Exporte** `findTyposquatMatch` depuis `src/scanner/typosquat.js`
-  (utilitaire pur, sync, sans network).
+  (utilitaire pur, sync, sans network). Le require de `npm-registry.js`
+  (qui tire `acorn` via `constants.js`) est rendu lazy pour que le guard
+  `scripts/check-deps-typosquats.js` puisse tourner **avant `npm ci`**
+  (sans aucune dep installee). Sinon le guard rate sa fonction de
+  fail-fast preinstall et expose le runner aux lifecycle scripts d'un
+  typosquat avant detection.
 
 #### Threat model
 
