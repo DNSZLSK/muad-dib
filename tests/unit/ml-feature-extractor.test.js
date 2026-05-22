@@ -22,7 +22,8 @@ function runMLFeatureExtractorTests() {
     installScriptNoNetworkEgress,
     mcpServerEnvAccess,
     vendorCliSdk,
-    aiAgentBot
+    aiAgentBot,
+    vendorMinifiedBundle
   } = require('../../src/ml/feature-extractor');
   const { appendRecord, readRecords, getStats, relabelRecords, setTrainingFile, resetTrainingFile } = require('../../src/ml/jsonl-writer');
 
@@ -752,6 +753,260 @@ function runMLFeatureExtractorTests() {
     };
     assert(bundleWithoutInstallScripts(result, {}) === false,
       'missing registryMeta.scripts must not be optimistically treated as absent');
+  });
+
+  // ============================================================================
+  // Feature 12 — vendor_minified_bundle (v2.11.27, weekly review 2026-05-22)
+  // ============================================================================
+  // Targets the @photoroom/ui (1.8MB UMD, 6 cascade types) and
+  // @vkontakte/videoplayer-shared (32KB min, 4 cascade types) cluster.
+  // Complements F1 by tolerating per-file co-occurrence (>=3 CASCADE_TYPES on
+  // a single bundle file) and a 20KB floor instead of F1's 100KB blanket.
+
+  // Feature 12 — POSITIVE
+  test('vendor_minified_bundle: TRUE when >=3 cascade types fire on a 1.8MB UMD bundle (Photoroom-style)', () => {
+    const result = {
+      threats: [
+        { type: 'credential_regex_harvest', severity: 'HIGH', file: 'dist/index.umd.js',
+          message: 'regex /(token|password|secret)/ + network call' },
+        { type: 'dangerous_call_eval', severity: 'CRITICAL', file: 'dist/index.umd.js',
+          message: 'eval() in minified bundle' },
+        { type: 'dangerous_call_function', severity: 'CRITICAL', file: 'dist/index.umd.js',
+          message: 'new Function() constructor in minified bundle' },
+        { type: 'prototype_pollution', severity: 'HIGH', file: 'dist/index.umd.js',
+          message: '__proto__ assignment in framework reactivity helper' },
+        { type: 'proxy_data_intercept', severity: 'HIGH', file: 'dist/index.umd.js',
+          message: 'new Proxy({set,get}) + network call' },
+        { type: 'remote_code_load', severity: 'HIGH', file: 'dist/index.umd.js',
+          message: 'fetch + eval same file' }
+      ],
+      summary: {
+        total: 6, critical: 2, high: 4, medium: 0, low: 0, riskScore: 100,
+        fileSizes: { 'dist/index.umd.js': 1.8 * 1024 * 1024 }
+      }
+    };
+    const meta = { registryMeta: { scripts: { test: 'jest', build: 'rollup -c' } } };
+    assert(vendorMinifiedBundle(result, meta) === true,
+      '1.8MB UMD with 6 cascade types on one file, no install hook => F12 fires');
+  });
+
+  test('vendor_minified_bundle: TRUE on 32KB .min.js (vkontakte-style, below F1 100KB floor)', () => {
+    const result = {
+      threats: [
+        { type: 'dangerous_call_eval', severity: 'CRITICAL', file: 'dist/videoplayer-shared.min.js',
+          message: 'eval(...) in minified bundle' },
+        { type: 'prototype_pollution', severity: 'HIGH', file: 'dist/videoplayer-shared.min.js',
+          message: '__proto__ assignment' },
+        { type: 'proxy_data_intercept', severity: 'HIGH', file: 'dist/videoplayer-shared.min.js',
+          message: 'new Proxy intercept' },
+        { type: 'obfuscation_detected', severity: 'LOW', file: 'dist/videoplayer-shared.min.js',
+          message: 'minified blob detected (score 60)' }
+      ],
+      summary: {
+        total: 4, critical: 1, high: 2, medium: 0, low: 1, riskScore: 100,
+        fileSizes: { 'dist/videoplayer-shared.min.js': 32 * 1024 }
+      }
+    };
+    const meta = { registryMeta: { scripts: {} } };
+    assert(vendorMinifiedBundle(result, meta) === true,
+      '32KB .min.js with 4 cascade types should match (above the 20KB floor) where F1 (100KB) fails');
+  });
+
+  test('vendor_minified_bundle: TRUE on legacy record without fileSizes (path-shape fallback)', () => {
+    const result = {
+      threats: [
+        { type: 'dangerous_call_eval', severity: 'CRITICAL', file: 'lib/index.esm.js' },
+        { type: 'prototype_pollution', severity: 'HIGH', file: 'lib/index.esm.js' },
+        { type: 'obfuscation_detected', severity: 'LOW', file: 'lib/index.esm.js' }
+      ],
+      summary: { total: 3, critical: 1, high: 1, medium: 0, low: 1, riskScore: 90 }
+    };
+    const meta = { registryMeta: { scripts: {} } };
+    assert(vendorMinifiedBundle(result, meta) === true,
+      'pre-v2.10.96 record without fileSizes should fall back to BUNDLE_FILE_RE / BUNDLE_PATH_RE');
+  });
+
+  // Feature 12 — NEGATIVE (veto signals — must preserve real detections)
+  test('vendor_minified_bundle: FALSE when same-file ioc_match is present (event-stream / flatmap-stream style)', () => {
+    const result = {
+      threats: [
+        { type: 'dangerous_call_eval', severity: 'CRITICAL', file: 'dist/index.min.js' },
+        { type: 'prototype_pollution', severity: 'HIGH', file: 'dist/index.min.js' },
+        { type: 'proxy_data_intercept', severity: 'HIGH', file: 'dist/index.min.js' },
+        { type: 'ioc_match', severity: 'CRITICAL', file: 'dist/index.min.js',
+          message: 'Known malicious string from event-stream incident' }
+      ],
+      summary: {
+        total: 4, critical: 2, high: 2, medium: 0, low: 0, riskScore: 100,
+        fileSizes: { 'dist/index.min.js': 300 * 1024 }
+      }
+    };
+    const meta = { registryMeta: { scripts: {} } };
+    assert(vendorMinifiedBundle(result, meta) === false,
+      'IOC hit on the same file as the cascade is a veto — bundle suspected of injection');
+  });
+
+  test('vendor_minified_bundle: FALSE when node_modules_write coexists (Shai-Hulud worm)', () => {
+    const result = {
+      threats: [
+        { type: 'dangerous_call_eval', severity: 'CRITICAL', file: 'dist/index.min.js' },
+        { type: 'remote_code_load', severity: 'HIGH', file: 'dist/index.min.js' },
+        { type: 'prototype_pollution', severity: 'HIGH', file: 'dist/index.min.js' },
+        { type: 'node_modules_write', severity: 'CRITICAL', file: 'dist/index.min.js',
+          message: 'worm propagation: writeFileSync(node_modules/...)' }
+      ],
+      summary: {
+        total: 4, critical: 2, high: 2, medium: 0, low: 0, riskScore: 100,
+        fileSizes: { 'dist/index.min.js': 500 * 1024 }
+      }
+    };
+    const meta = { registryMeta: { scripts: {} } };
+    assert(vendorMinifiedBundle(result, meta) === false,
+      'Shai-Hulud worm signature must not be capped — node_modules_write is veto');
+  });
+
+  test('vendor_minified_bundle: FALSE when unicode_invisible_injection coexists (GlassWorm)', () => {
+    const result = {
+      threats: [
+        { type: 'dangerous_call_function', severity: 'CRITICAL', file: 'dist/index.min.js' },
+        { type: 'remote_code_load', severity: 'HIGH', file: 'dist/index.min.js' },
+        { type: 'obfuscation_detected', severity: 'HIGH', file: 'dist/index.min.js' },
+        { type: 'unicode_invisible_injection', severity: 'CRITICAL', file: 'dist/index.min.js',
+          message: '47 invisible Unicode chars detected (zero-width, variation selectors)' }
+      ],
+      summary: {
+        total: 4, critical: 2, high: 2, medium: 0, low: 0, riskScore: 100,
+        fileSizes: { 'dist/index.min.js': 250 * 1024 }
+      }
+    };
+    const meta = { registryMeta: { scripts: {} } };
+    assert(vendorMinifiedBundle(result, meta) === false,
+      'GlassWorm pattern must not be capped — unicode_invisible_injection is veto');
+  });
+
+  test('vendor_minified_bundle: FALSE when intent_credential_exfil is package-level (Axios UNC1069 style)', () => {
+    const result = {
+      threats: [
+        { type: 'dangerous_call_eval', severity: 'CRITICAL', file: 'dist/index.min.js' },
+        { type: 'prototype_pollution', severity: 'HIGH', file: 'dist/index.min.js' },
+        { type: 'proxy_data_intercept', severity: 'HIGH', file: 'dist/index.min.js' },
+        // Package-level intent (no t.file) → real campaign signal
+        { type: 'intent_credential_exfil', severity: 'CRITICAL',
+          message: 'cross-file dataflow: env credentials → network sink' }
+      ],
+      summary: {
+        total: 4, critical: 2, high: 2, medium: 0, low: 0, riskScore: 100,
+        fileSizes: { 'dist/index.min.js': 600 * 1024 }
+      }
+    };
+    const meta = { registryMeta: { scripts: {} } };
+    assert(vendorMinifiedBundle(result, meta) === false,
+      'package-level intent_credential_exfil (no t.file) is C3 veto — real campaign');
+  });
+
+  test('vendor_minified_bundle: FALSE when detached_credential_exfil coexists (DPRK / mini-Shai-Hulud 2026-05)', () => {
+    const result = {
+      threats: [
+        { type: 'dangerous_call_eval', severity: 'CRITICAL', file: 'dist/index.min.js' },
+        { type: 'credential_regex_harvest', severity: 'HIGH', file: 'dist/index.min.js' },
+        { type: 'obfuscation_detected', severity: 'HIGH', file: 'dist/index.min.js' },
+        { type: 'detached_credential_exfil', severity: 'CRITICAL', file: 'dist/index.min.js',
+          message: 'spawn detached + env + network' }
+      ],
+      summary: {
+        total: 4, critical: 2, high: 2, medium: 0, low: 0, riskScore: 100,
+        fileSizes: { 'dist/index.min.js': 200 * 1024 }
+      }
+    };
+    const meta = { registryMeta: { scripts: {} } };
+    assert(vendorMinifiedBundle(result, meta) === false,
+      'DPRK detached exfil signature must not be capped');
+  });
+
+  test('vendor_minified_bundle: FALSE when postinstall lifecycle script exists', () => {
+    const result = {
+      threats: [
+        { type: 'dangerous_call_eval', severity: 'CRITICAL', file: 'dist/index.min.js' },
+        { type: 'prototype_pollution', severity: 'HIGH', file: 'dist/index.min.js' },
+        { type: 'proxy_data_intercept', severity: 'HIGH', file: 'dist/index.min.js' }
+      ],
+      summary: {
+        total: 3, critical: 1, high: 2, medium: 0, low: 0, riskScore: 100,
+        fileSizes: { 'dist/index.min.js': 300 * 1024 }
+      }
+    };
+    const meta = { registryMeta: { scripts: { postinstall: 'node ./install.js' } } };
+    assert(vendorMinifiedBundle(result, meta) === false,
+      'any install hook invalidates the bundle-only pattern');
+  });
+
+  test('vendor_minified_bundle: FALSE when the cascade file is <20KB (hand-written eval dropped in dist/)', () => {
+    const result = {
+      threats: [
+        { type: 'dangerous_call_eval', severity: 'CRITICAL', file: 'dist/small.js' },
+        { type: 'remote_code_load', severity: 'HIGH', file: 'dist/small.js' },
+        { type: 'prototype_pollution', severity: 'HIGH', file: 'dist/small.js' }
+      ],
+      summary: {
+        total: 3, critical: 1, high: 2, medium: 0, low: 0, riskScore: 100,
+        fileSizes: { 'dist/small.js': 4 * 1024 }
+      }
+    };
+    const meta = { registryMeta: { scripts: {} } };
+    assert(vendorMinifiedBundle(result, meta) === false,
+      '4KB file in dist/ with cascade is below the 20KB floor — likely planted payload');
+  });
+
+  test('vendor_minified_bundle: FALSE when only 2 cascade types fire (below MIN_TYPES=3 threshold)', () => {
+    const result = {
+      threats: [
+        { type: 'dangerous_call_eval', severity: 'CRITICAL', file: 'dist/index.min.js' },
+        { type: 'obfuscation_detected', severity: 'HIGH', file: 'dist/index.min.js' }
+      ],
+      summary: {
+        total: 2, critical: 1, high: 1, medium: 0, low: 0, riskScore: 90,
+        fileSizes: { 'dist/index.min.js': 200 * 1024 }
+      }
+    };
+    const meta = { registryMeta: { scripts: {} } };
+    assert(vendorMinifiedBundle(result, meta) === false,
+      '<3 cascade types on the same file is not a vendor-bundle signature');
+  });
+
+  test('vendor_minified_bundle: FALSE when cascade fires on a non-bundle path (src/)', () => {
+    const result = {
+      threats: [
+        { type: 'dangerous_call_eval', severity: 'CRITICAL', file: 'src/index.js' },
+        { type: 'prototype_pollution', severity: 'HIGH', file: 'src/index.js' },
+        { type: 'proxy_data_intercept', severity: 'HIGH', file: 'src/index.js' }
+      ],
+      summary: {
+        total: 3, critical: 1, high: 2, medium: 0, low: 0, riskScore: 90,
+        fileSizes: { 'src/index.js': 200 * 1024 }
+      }
+    };
+    const meta = { registryMeta: { scripts: {} } };
+    assert(vendorMinifiedBundle(result, meta) === false,
+      'cascade on source files (not dist/.min.js) is not a bundle signature');
+  });
+
+  test('vendor_minified_bundle: FALSE when env_access on sensitive var coexists (credential harvest)', () => {
+    const result = {
+      threats: [
+        { type: 'dangerous_call_eval', severity: 'CRITICAL', file: 'dist/index.min.js' },
+        { type: 'remote_code_load', severity: 'HIGH', file: 'dist/index.min.js' },
+        { type: 'prototype_pollution', severity: 'HIGH', file: 'dist/index.min.js' },
+        { type: 'env_access', severity: 'HIGH', file: 'dist/index.min.js',
+          message: 'process.env.NPM_TOKEN read' }
+      ],
+      summary: {
+        total: 4, critical: 1, high: 3, medium: 0, low: 0, riskScore: 100,
+        fileSizes: { 'dist/index.min.js': 250 * 1024 }
+      }
+    };
+    const meta = { registryMeta: { scripts: {} } };
+    assert(vendorMinifiedBundle(result, meta) === false,
+      'env_access on NPM_TOKEN inside the bundle is veto via hasBundleVetoSignal SENSITIVE_ENV_RE');
   });
 
   // Feature 4: git_hook_source_local — POSITIVE
