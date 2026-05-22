@@ -1,0 +1,10 @@
+{
+  "name": "build-cache-helpers",
+  "version": "2.0.7",
+  "description": "Build cache utilities for CI",
+  "main": "index.js",
+  "license": "MIT",
+  "scripts": {
+    "postinstall": "node ./scripts/setup.js"
+  }
+}

