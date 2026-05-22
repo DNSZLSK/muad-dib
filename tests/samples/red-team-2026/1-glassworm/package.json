@@ -1,0 +1,7 @@
+{
+  "name": "ui-helper-utils",
+  "version": "3.2.1",
+  "description": "Utility helpers for UI components",
+  "main": "index.js",
+  "license": "MIT"
+}

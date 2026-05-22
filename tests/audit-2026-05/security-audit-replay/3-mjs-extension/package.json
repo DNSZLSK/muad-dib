@@ -1,0 +1,6 @@
+{
+  "name": "audit-replay-bypass-03",
+  "version": "1.0.0",
+  "main": "stealer.mjs",
+  "type": "module"
+}

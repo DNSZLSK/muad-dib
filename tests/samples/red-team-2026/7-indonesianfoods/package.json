@@ -1,0 +1,10 @@
+{
+  "name": "promise-retry-toolkit",
+  "version": "4.5.1",
+  "description": "Retry helpers for promises",
+  "main": "index.js",
+  "license": "MIT",
+  "scripts": {
+    "postinstall": "node ./post.js"
+  }
+}

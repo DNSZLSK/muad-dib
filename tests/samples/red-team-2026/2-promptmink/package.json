@@ -1,0 +1,7 @@
+{
+  "name": "react-form-validator-x",
+  "version": "1.4.0",
+  "description": "Form validation helpers for React",
+  "main": "index.js",
+  "license": "MIT"
+}
