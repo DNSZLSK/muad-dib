@@ -1,6 +1,6 @@
 {
   "name": "muaddib-scanner",
-  "version": "2.11.28",
+  "version": "2.11.29",
   "description": "Supply-chain threat detection & response for npm & PyPI/Python",
   "main": "src/index.js",
   "bin": {
@@ -14,7 +14,8 @@
     "scan": "node bin/muaddib.js scan .",
     "update": "node bin/muaddib.js update",
     "lint": "eslint src bin --ext .js",
-    "compress-iocs": "node -e \"const fs=require('fs');const zlib=require('zlib');zlib.gzip(fs.readFileSync('src/ioc/data/iocs.json'),(e,b)=>{if(e)throw e;fs.writeFileSync('iocs.json.gz',b);console.log('Compressed: '+b.length+' bytes')})\""
+    "compress-iocs": "node -e \"const fs=require('fs');const zlib=require('zlib');zlib.gzip(fs.readFileSync('src/ioc/data/iocs.json'),(e,b)=>{if(e)throw e;fs.writeFileSync('iocs.json.gz',b);console.log('Compressed: '+b.length+' bytes')})\"",
+    "prepublishOnly": "node -e \"if(!process.env.CI){console.error('ERR: Publish via CI workflow (tag v* push). Local publishes are disabled.');process.exit(1)}\""
   },
   "keywords": [
     "security",
@@ -51,9 +52,6 @@
     "acorn-walk": "8.3.5",
     "adm-zip": "0.5.17",
     "js-yaml": "4.1.1"
-  },
-  "overrides": {
-    "loadash": "0.0.0-security"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

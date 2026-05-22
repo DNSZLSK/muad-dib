@@ -756,4 +756,4 @@ function findPyPITyposquatMatch(name) {
   return null;
 }
 
-module.exports = { scanTyposquatting, levenshteinDistance, clearMetadataCache, findPyPITyposquatMatch };
+module.exports = { scanTyposquatting, levenshteinDistance, clearMetadataCache, findPyPITyposquatMatch, findTyposquatMatch };
