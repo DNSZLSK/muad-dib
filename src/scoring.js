@@ -1487,6 +1487,7 @@ const {
   vendorCliSdk,
   aiAgentBot,
   vendorMinifiedBundle,
+  typosquatBenignLifecycle,
 } = require('./ml/feature-extractor.js');
 
 /**
@@ -1559,6 +1560,14 @@ function applyContextualFPCaps(result, pkgMeta) {
   // F5: typosquat on scoped package → suppress typosquat points
   if (typosquatScopedPackage(result, meta)) {
     applied.push({ feature: 'typosquat_scoped_package', cap: -1 });
+  }
+  // F13: boundary-squat dep + provably benign lifecycle (husky install,
+  // npm run build, patches/apply-patches) → MAX 30. Targets the v2.11.28
+  // weekly review cluster (@doyourjob/gravity-ui-page-constructor,
+  // magmastream, balena-cli, @1d1s/design-system, etc.). Vetoes on any
+  // exfil signal, IOC hit, or Axios UNC1069 dep-usage compound.
+  if (typosquatBenignLifecycle(result, meta)) {
+    applied.push({ feature: 'typosquat_benign_lifecycle', cap: 30 });
   }
 
   if (applied.length === 0) return applied;
