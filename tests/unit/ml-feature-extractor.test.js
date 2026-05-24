@@ -1833,17 +1833,22 @@ function runMLFeatureExtractorTests() {
 
   // --- Feature 11: ai_agent_bot (v2.11.24, audit week3 cluster, 54 FP) ---
 
-  test('ai_agent_bot: TRUE on multi-LLM orchestrator (gm-skill pattern)', () => {
+  test('ai_agent_bot: TRUE on multi-LLM orchestrator (gm-skill-like pattern, no remote_code_load)', () => {
+    // Note (v2.11.31 F14): pre-F14 this test allowed `remote_code_load`
+    // (bun x pkg@latest). F14 unifies the HARD-exfil veto across F9/F10/F11
+    // and remote_code_load is now correctly classified as a slopsquat-staging
+    // signal that disqualifies F11. The orchestrator pattern itself
+    // (identity + agent runtime path access) still caps without it; the
+    // remote_code_load disqualifier is covered by a dedicated F14 negative
+    // test below.
     const result = {
       threats: [
         { type: 'dynamic_import', severity: 'MEDIUM', file: 'cli.js',
           message: 'Dynamic import in CLI dispatch.' },
         { type: 'env_access', severity: 'HIGH', file: 'cli.js',
-          message: 'Reads HOME and writes logs to ~/.claude/gm-log/run.log.' },
-        { type: 'remote_code_load', severity: 'HIGH', file: 'cli.js',
-          message: 'spawn bun x rs-learn@latest — supply-chain risk but explicit orchestrator pattern.' }
+          message: 'Reads HOME and writes logs to ~/.claude/gm-log/run.log.' }
       ],
-      summary: { total: 3, critical: 0, high: 2, medium: 1, low: 0, riskScore: 88 }
+      summary: { total: 2, critical: 0, high: 1, medium: 1, low: 0, riskScore: 75 }
     };
     const meta = {
       name: 'gm-skill',
@@ -1980,6 +1985,201 @@ function runMLFeatureExtractorTests() {
     };
     assert(aiAgentBot(result, meta) === false,
       'no ~/.claude/ or other agent runtime path in any threat → no positive operating signal');
+  });
+
+  // --- F14: HARD vs SOFT exfil split (v2.11.31) ---
+  // C5 disqualifier used to fail on any compound/intent threat. F14 restricts
+  // it to HARD signals (real malware): suspicious_domain, binary_dropper,
+  // remote_code_load, external_tarball_dep, etc. SOFT compounds
+  // (suspicious_dataflow, intent_*, detached_credential_exfil) legitimately
+  // fire on AI proxies + MCP installers + vendor CLIs and must not disqualify.
+
+  test('F14 F9: TRUE when ONLY soft compound exfil signals present (no HARD)', () => {
+    // @cachly-dev/init / @roadmapfy/mcp-init pattern: MCP installer that
+    // reads env API keys, writes .mcp.json, and the compound graph fires
+    // intent_credential_exfil + suspicious_dataflow on the read→POST pattern
+    // but the destination is the legit configured MCP endpoint.
+    const result = {
+      threats: [
+        { type: 'mcp_config_injection', severity: 'CRITICAL', file: 'install.js',
+          message: 'Writes MCP server entry to ~/.cursor/mcp.json.' },
+        { type: 'credential_regex_harvest', severity: 'HIGH', file: 'install.js',
+          message: 'process.env.ANTHROPIC_API_KEY pattern matched.' },
+        { type: 'suspicious_dataflow', severity: 'CRITICAL', file: 'install.js',
+          message: 'credentials read (ANTHROPIC_API_KEY) + network send (fetch)' },
+        { type: 'intent_credential_exfil', severity: 'CRITICAL', file: 'install.js',
+          message: 'Intent coherence: credential_read → network_external' }
+      ],
+      summary: { total: 4, critical: 3, high: 1, medium: 0, low: 0, riskScore: 100 }
+    };
+    const meta = {
+      name: '@cachly-dev/init',
+      registryMeta: { scripts: {}, keywords: ['mcp', 'claude'], description: 'Cachly MCP installer' }
+    };
+    assert(mcpServerEnvAccess(result, meta) === true,
+      'soft compound intents are intrinsic to MCP installer behaviour — must not disqualify F9');
+  });
+
+  test('F14 F9: FALSE when HARD exfil present (binary_dropper) alongside soft', () => {
+    // Same shape as above but with a binary_dropper added — Shai-Hulud-class
+    // signal. Must still disqualify.
+    const result = {
+      threats: [
+        { type: 'mcp_config_injection', severity: 'CRITICAL', file: 'install.js',
+          message: 'Writes MCP entry.' },
+        { type: 'env_access', severity: 'HIGH', message: 'Reads ANTHROPIC_API_KEY.' },
+        { type: 'suspicious_dataflow', severity: 'CRITICAL', file: 'install.js',
+          message: 'credentials + network' },
+        { type: 'binary_dropper', severity: 'CRITICAL', file: 'install.js',
+          message: 'Drops trufflehog binary to .truffler-cache/' }
+      ],
+      summary: { total: 4, critical: 3, high: 1, medium: 0, low: 0, riskScore: 100 }
+    };
+    const meta = {
+      name: '@vendor/mcp-installer',
+      registryMeta: { scripts: {}, keywords: ['mcp'] }
+    };
+    assert(mcpServerEnvAccess(result, meta) === false,
+      'binary_dropper is a HARD malware signal — must still disqualify F9 post-F14');
+  });
+
+  test('F14 F9: FALSE when HARD exfil present (external_tarball_dep)', () => {
+    // Dep-confusion staging signal — non-npm dep URL. Always HARD.
+    const result = {
+      threats: [
+        { type: 'mcp_config_injection', severity: 'CRITICAL', file: 'install.js',
+          message: 'Writes MCP entry.' },
+        { type: 'env_access', severity: 'HIGH', message: 'Reads ANTHROPIC_API_KEY.' },
+        { type: 'external_tarball_dep', severity: 'CRITICAL',
+          message: 'Dependency points to https://attacker.example.com/payload.tgz' }
+      ],
+      summary: { total: 3, critical: 2, high: 1, medium: 0, low: 0, riskScore: 95 }
+    };
+    const meta = {
+      name: '@vendor/mcp-bridge',
+      registryMeta: { scripts: {}, keywords: ['mcp'] }
+    };
+    assert(mcpServerEnvAccess(result, meta) === false,
+      'external_tarball_dep (dep-confusion staging) is HARD — must disqualify F9');
+  });
+
+  test('F14 F10: TRUE when soft compound + bin + vendor identity, no HARD', () => {
+    // nodebb-plugin-flawless-donations pattern: Stripe checkout web plugin.
+    // Reads STRIPE_SECRET_KEY, POSTs to Stripe API — compound graph fires
+    // suspicious_dataflow but destination is first-party Stripe.
+    const result = {
+      threats: [
+        { type: 'credential_regex_harvest', severity: 'HIGH', file: 'src/checkout.js',
+          message: 'STRIPE_SECRET_KEY pattern matched.' },
+        { type: 'env_access', severity: 'HIGH', file: 'src/checkout.js',
+          message: 'process.env.STRIPE_SECRET_KEY and PAYPAL_CLIENT_SECRET.' },
+        { type: 'suspicious_dataflow', severity: 'CRITICAL', file: 'src/checkout.js',
+          message: 'credentials + network POST to api.stripe.com' },
+        { type: 'intent_credential_exfil', severity: 'CRITICAL', file: 'src/checkout.js',
+          message: 'Intent: credential_read → network_external' }
+      ],
+      summary: { total: 4, critical: 2, high: 2, medium: 0, low: 0, riskScore: 100 }
+    };
+    const meta = {
+      name: 'nodebb-plugin-flawless-donations',
+      registryMeta: {
+        scripts: {},
+        bin: { 'donations': './bin/cli.js' },
+        homepage: 'https://github.com/example/flawless-donations'
+      }
+    };
+    assert(vendorCliSdk(result, meta) === true,
+      'soft compound intents on first-party API endpoints must not disqualify F10');
+  });
+
+  test('F14 F10: FALSE when HARD exfil present (dependency_url_suspicious)', () => {
+    const result = {
+      threats: [
+        { type: 'credential_regex_harvest', severity: 'HIGH', file: 'cli.js',
+          message: 'STRIPE_SECRET_KEY pattern matched.' },
+        { type: 'suspicious_dataflow', severity: 'CRITICAL', file: 'cli.js',
+          message: 'credentials + network' },
+        { type: 'dependency_url_suspicious', severity: 'CRITICAL',
+          message: 'Dep URL points to https://attacker.io/pkg.tgz' }
+      ],
+      summary: { total: 3, critical: 2, high: 1, medium: 0, low: 0, riskScore: 95 }
+    };
+    const meta = {
+      name: '@vendor/cli',
+      registryMeta: { scripts: {}, bin: './bin/cli.js', homepage: 'https://vendor.example.com' }
+    };
+    assert(vendorCliSdk(result, meta) === false,
+      'dependency_url_suspicious is HARD (Shai-Hulud-class) — must disqualify F10');
+  });
+
+  test('F14 F11: TRUE when soft compound + agent identity + agent path, no HARD', () => {
+    // codexmate / lazyclaw pattern: multi-LLM CLI that proxies to Anthropic/
+    // OpenAI/Gemini. Reads ANTHROPIC_API_KEY, POSTs to api.anthropic.com,
+    // spawns detached daemon. detached_credential_exfil + suspicious_dataflow
+    // fire on the legit proxy pattern.
+    const result = {
+      threats: [
+        { type: 'env_access', severity: 'HIGH', file: 'cli/proxy.js',
+          message: 'Reads ~/.codex/sessions/ and ANTHROPIC_API_KEY.' },
+        { type: 'credential_regex_harvest', severity: 'HIGH', file: 'cli/proxy.js',
+          message: 'Token/Bearer regex + network call in same file.' },
+        { type: 'detached_credential_exfil', severity: 'CRITICAL', file: 'cli/proxy.js',
+          message: 'Detached process + sensitive env access + network call' },
+        { type: 'suspicious_dataflow', severity: 'CRITICAL', file: 'cli/proxy.js',
+          message: 'credentials + network POST api.anthropic.com' }
+      ],
+      summary: { total: 4, critical: 2, high: 2, medium: 0, low: 0, riskScore: 100 }
+    };
+    const meta = {
+      name: 'codexmate',
+      registryMeta: {
+        scripts: {},
+        bin: { 'codexmate': './cli.js' },
+        description: 'Multi-provider AI agent CLI for Claude/Codex/OpenClaw'
+      }
+    };
+    assert(aiAgentBot(result, meta) === true,
+      'soft compound intents on first-party AI provider endpoints must not disqualify F11');
+  });
+
+  test('F14 F11: FALSE when HARD exfil present (remote_code_load) — new in F14', () => {
+    // Pre-F14 F11 only blocked on suspicious_domain/binary_dropper/
+    // download_exec_binary. F14 unifies the hard-exfil veto to also include
+    // remote_code_load — slopsquat-staging signal: `bun x pkg@latest` where
+    // pkg is attacker-controlled.
+    const result = {
+      threats: [
+        { type: 'env_access', severity: 'HIGH', file: 'cli.js',
+          message: 'Reads ~/.claude/sessions/.' },
+        { type: 'remote_code_load', severity: 'CRITICAL', file: 'cli.js',
+          message: 'spawn bun x attacker-pkg@latest at runtime' }
+      ],
+      summary: { total: 2, critical: 1, high: 1, medium: 0, low: 0, riskScore: 90 }
+    };
+    const meta = {
+      name: '@vendor/claude-agent',
+      registryMeta: { scripts: {}, dependencies: { '@anthropic-ai/sdk': '^0.30.0' } }
+    };
+    assert(aiAgentBot(result, meta) === false,
+      'F14 unifies HARD veto across F9/F10/F11; remote_code_load now blocks F11');
+  });
+
+  test('F14 F11: FALSE when HARD exfil present (external_tarball_dep) — new in F14', () => {
+    const result = {
+      threats: [
+        { type: 'env_access', severity: 'HIGH', file: 'cli.js',
+          message: 'Reads ~/.claude/sessions/.' },
+        { type: 'external_tarball_dep', severity: 'CRITICAL',
+          message: 'Dep points to git+https://attacker/repo.git#main' }
+      ],
+      summary: { total: 2, critical: 1, high: 1, medium: 0, low: 0, riskScore: 90 }
+    };
+    const meta = {
+      name: '@vendor/claude-agent',
+      registryMeta: { scripts: {}, dependencies: { '@anthropic-ai/sdk': '^0.30.0' } }
+    };
+    assert(aiAgentBot(result, meta) === false,
+      'external_tarball_dep is HARD (dep-confusion staging) — must block F11 post-F14');
   });
 
   // --- Feature vector integration ---
