@@ -491,6 +491,31 @@ function handleCallExpression(node, ctx) {
           message: `${callName}() with {detached: true} — background process survives parent exit (evasion technique).`,
           file: ctx.relFile
         });
+        // F6 — silent_stealth_process: detached + stdio:'ignore' = full I/O
+        // silence. Combo is a stronger stealth indicator (Shai-Hulud pattern).
+        // Emitted ADDITIONALLY (not replacing) so existing compounds that
+        // depend on detached_process (detached_credential_exfil, binary_dropper)
+        // continue to fire. Inspired by GuardDog's npm-silent-process-execution.yml.
+        const hasStdioIgnore = lastArg.properties.some(p => {
+          if (p.key?.type !== 'Identifier' || p.key.name !== 'stdio') return false;
+          // stdio: 'ignore'
+          if (p.value?.type === 'Literal' && p.value.value === 'ignore') return true;
+          // stdio: ['ignore', 'ignore', 'ignore'] — array form, all elements 'ignore'
+          if (p.value?.type === 'ArrayExpression' && p.value.elements.length > 0) {
+            return p.value.elements.every(el =>
+              el?.type === 'Literal' && el.value === 'ignore'
+            );
+          }
+          return false;
+        });
+        if (hasStdioIgnore) {
+          ctx.threats.push({
+            type: 'silent_stealth_process',
+            severity: 'CRITICAL',
+            message: `${callName}() with {detached: true, stdio: 'ignore'} — fully detached silent background process (stealth payload pattern).`,
+            file: ctx.relFile
+          });
+        }
       }
     }
   }
