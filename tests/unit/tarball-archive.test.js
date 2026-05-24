@@ -226,6 +226,67 @@ async function runTarballArchiveTests() {
     }
     assert(!importError, `queue.js integration check failed: ${importError}`);
   });
+
+  // --- Defense in depth: retention default, periodic cleanup, disk-space gate ---
+
+  test('getRetentionDays: default is 7 days when env unset', () => {
+    const origRetention = process.env.MUADDIB_ARCHIVE_RETENTION_DAYS;
+    delete process.env.MUADDIB_ARCHIVE_RETENTION_DAYS;
+    delete require.cache[require.resolve('../../src/monitor/tarball-archive.js')];
+    const { getRetentionDays } = require('../../src/monitor/tarball-archive.js');
+    const result = getRetentionDays();
+    if (origRetention !== undefined) process.env.MUADDIB_ARCHIVE_RETENTION_DAYS = origRetention;
+    assert(result === 7, `expected 7, got ${result}`);
+  });
+
+  await asyncTest('startPeriodicCleanup: triggers cleanupOldArchives on tick', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-periodic-'));
+    const oldDir = path.join(tmp, '2020-01-01');
+    fs.mkdirSync(oldDir, { recursive: true });
+    fs.writeFileSync(path.join(oldDir, 'x.tgz'), 'x');
+    const origDir = process.env.MUADDIB_ARCHIVE_DIR;
+    process.env.MUADDIB_ARCHIVE_DIR = tmp;
+    delete require.cache[require.resolve('../../src/monitor/tarball-archive.js')];
+    const mod = require('../../src/monitor/tarball-archive.js');
+    const timer = mod.startPeriodicCleanup(50); // 50ms test interval
+    try {
+      await new Promise(r => setTimeout(r, 150));
+      assert(!fs.existsSync(oldDir), 'old day directory should be purged after tick');
+    } finally {
+      clearInterval(timer);
+      process.env.MUADDIB_ARCHIVE_DIR = origDir || '';
+      if (!origDir) delete process.env.MUADDIB_ARCHIVE_DIR;
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  await asyncTest('archiveSuspectTarball: skips when free space below threshold', async () => {
+    const origDir = process.env.MUADDIB_ARCHIVE_DIR;
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-diskgate-'));
+    process.env.MUADDIB_ARCHIVE_DIR = tmp;
+    delete require.cache[require.resolve('../../src/monitor/tarball-archive.js')];
+    const realStatfs = fs.statfsSync;
+    fs.statfsSync = () => ({ bavail: 0, bsize: 4096 }); // simulate ~0 bytes free
+    try {
+      const { archiveSuspectTarball, getArchiveDateString } = require('../../src/monitor/tarball-archive.js');
+      // Pass BOTH score>0 and rulesTriggered so the disk gate is what fires —
+      // not the score===0 && rules.length===0 early return. Otherwise a future
+      // refactor of the score gate could make this test pass for the wrong reason.
+      const result = await archiveSuspectTarball(
+        'pkg', '1.0.0', 'https://example.com/x.tgz',
+        { score: 50, rulesTriggered: [{ rule: 'TEST-DISK-GATE' }] }
+      );
+      assert(result === false, 'archive should be skipped when disk almost full');
+      // Belt-and-suspenders: confirm the gate stopped us before mkdir touched the disk.
+      const dayDir = path.join(tmp, getArchiveDateString());
+      assert(!fs.existsSync(dayDir), 'day dir should not exist — disk gate must fire before mkdirSync');
+    } finally {
+      fs.statfsSync = realStatfs;
+      process.env.MUADDIB_ARCHIVE_DIR = origDir || '';
+      if (!origDir) delete process.env.MUADDIB_ARCHIVE_DIR;
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
 }
 
 module.exports = { runTarballArchiveTests };
