@@ -19,15 +19,41 @@ const { downloadToFile } = require('../shared/download.js');
 const ARCHIVE_DIR = process.env.MUADDIB_ARCHIVE_DIR || '/opt/muaddib/archive';
 const ARCHIVE_TIMEOUT_MS = 10_000;
 
-// Retention window for archived tarballs. Anything older is purged on startup.
-// Bounded to [1, 365] days; non-numeric or out-of-range values fall back to 30.
-const DEFAULT_RETENTION_DAYS = 30;
+// Retention window for archived tarballs. Purged at startup and every 6h thereafter.
+// Bounded to [1, 365] days; non-numeric or out-of-range values fall back to 7.
+// Math: ~4.5GB/day average → 7d ≈ 31GB, fits in 96GB disk with safe margin.
+const DEFAULT_RETENTION_DAYS = 7;
 function getRetentionDays() {
   const raw = process.env.MUADDIB_ARCHIVE_RETENTION_DAYS;
   if (raw === undefined || raw === '') return DEFAULT_RETENTION_DAYS;
   const n = parseInt(raw, 10);
   if (!Number.isFinite(n) || n < 1 || n > 365) return DEFAULT_RETENTION_DAYS;
   return n;
+}
+
+// Defensive disk-space gate. Skip archiving when free space falls below threshold,
+// so a burst of suspects can't run the volume to 100% between periodic cleanups.
+// Bounded to [1, 100] GB, default 5GB.
+const DEFAULT_MIN_FREE_GB = 5;
+function getMinFreeBytes() {
+  const raw = process.env.MUADDIB_ARCHIVE_MIN_FREE_GB;
+  let gb = DEFAULT_MIN_FREE_GB;
+  if (raw !== undefined && raw !== '') {
+    const n = parseInt(raw, 10);
+    if (Number.isFinite(n) && n >= 1 && n <= 100) gb = n;
+  }
+  return gb * 1024 * 1024 * 1024;
+}
+
+function hasEnoughSpace(targetDir) {
+  try {
+    if (typeof fs.statfsSync !== 'function') return true; // Node <18.15 — fail-open
+    const dirForStat = fs.existsSync(targetDir) ? targetDir : path.dirname(targetDir);
+    const s = fs.statfsSync(dirForStat);
+    return s.bavail * s.bsize > getMinFreeBytes();
+  } catch {
+    return true; // never block archiving on a stat error
+  }
 }
 
 /**
@@ -100,6 +126,14 @@ async function archiveSuspectTarball(packageName, version, tarballUrl, scanResul
 
   // Dedup: skip if already archived
   if (fs.existsSync(tgzPath)) {
+    return false;
+  }
+
+  // Defense layer 3: skip if disk is nearly full, even if retention is well-configured.
+  // Prevents a burst of malicious campaigns from blowing past the 7-day budget
+  // before the 6h periodic cleanup tick can catch up.
+  if (!hasEnoughSpace(ARCHIVE_DIR)) {
+    console.warn(`[Archive] Skip ${packageName}@${version}: free space below ${DEFAULT_MIN_FREE_GB}GB threshold`);
     return false;
   }
 
@@ -208,14 +242,35 @@ function cleanupOldArchives(retentionDays = getRetentionDays()) {
   return stats;
 }
 
+/**
+ * Periodically re-run cleanupOldArchives so a long-running daemon (no restarts for
+ * weeks) can't accumulate archives past the retention window. Defaults to every 6h.
+ * .unref()'d so the timer never keeps the event loop alive on shutdown.
+ */
+const DEFAULT_PERIODIC_INTERVAL_MS = 6 * 60 * 60 * 1000;
+function startPeriodicCleanup(intervalMs = DEFAULT_PERIODIC_INTERVAL_MS) {
+  const timer = setInterval(() => {
+    try {
+      cleanupOldArchives();
+    } catch (err) {
+      console.warn(`[Archive] Periodic cleanup failed: ${err.message}`);
+    }
+  }, intervalMs);
+  timer.unref();
+  return timer;
+}
+
 module.exports = {
   archiveSuspectTarball,
   cleanupOldArchives,
+  startPeriodicCleanup,
+  hasEnoughSpace,
   ARCHIVE_DIR,
   // Exported for testing
   sanitizeForFilename,
   sha256File,
   getArchiveDateString,
   getRetentionDays,
+  getMinFreeBytes,
   parseArchiveDayDir
 };

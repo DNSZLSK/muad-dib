@@ -19,6 +19,12 @@ SyslogIdentifier=muaddib-monitor
 
 Environment=NODE_ENV=production
 
+# Archive retention — belt-and-suspenders with src/monitor/tarball-archive.js default.
+# Math: ~4.5GB/day average, 96GB disk → 7d ≈ 53% baseline, 14d ≈ 86% (no margin).
+Environment=MUADDIB_ARCHIVE_RETENTION_DAYS=7
+# Optional disk-space gate (default 5GB free required before archiving):
+# Environment=MUADDIB_ARCHIVE_MIN_FREE_GB=5
+
 # FPR plan 2026 - 5 gates ARE NOW DEFAULT ON since v2.11.9.
 # Measured impact (v2.11.4 corpus, 1054 packages, gates ON vs OFF):
 #   FPR curated    15.6%  -> 9.36%  (-6.24 pp)

@@ -5,6 +5,79 @@ All notable changes to MUAD'DIB will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.11.30] - 2026-05-24
+
+### Archive retention — defense in depth (disk-fill incident fix)
+
+Reaction a l'incident du 2026-05-24 ou le VPS prod (96 GB) est passe a 100 %
+disque, ce qui a corrompu `~/.claude.json` (writes tronques) et propage
++89 563 erreurs "other" cote monitor (impossibilite d'ecrire resultats /
+tarballs). Recovery manuelle : suppression des archives > 7 jours, retour a
+53 % d'occupation.
+
+Cause racine : trois defaillances cumulees.
+
+1. `DEFAULT_RETENTION_DAYS = 30` dans `src/monitor/tarball-archive.js`.
+2. `MUADDIB_ARCHIVE_RETENTION_DAYS` jamais set (ni systemd, ni `.env`).
+3. `cleanupOldArchives()` cable uniquement au startup (`daemon.js:502`) —
+   service long-running = aucune purge en regime stationnaire.
+
+Math : ~4.5 GB/jour d'archives x 30 jours = ~135 GB, mathematiquement
+impossible sur 96 GB.
+
+#### Changements
+
+- **Baisse** `DEFAULT_RETENTION_DAYS` 30 → **7** dans
+  `src/monitor/tarball-archive.js`. Math : 7d x 4.5 GB ≈ 31 GB, ~36 GB de
+  marge sur disque 96 GB meme en regime de pic (5.8 GB/j).
+- **Ajoute** `startPeriodicCleanup(intervalMs)` dans `tarball-archive.js` :
+  setInterval `.unref()` qui re-execute `cleanupOldArchives()` toutes les
+  6 h. Empeche un daemon up plusieurs semaines d'accumuler des archives
+  au-dela de la fenetre de retention.
+- **Cable** `startPeriodicCleanup()` dans `src/monitor/daemon.js` apres le
+  cleanup de startup.
+- **Ajoute** `hasEnoughSpace(targetDir)` + gate dans `archiveSuspectTarball`
+  (avant `fs.mkdirSync`). Utilise `fs.statfsSync` (Node ≥ 18.15, fail-open
+  sinon). Skip si `<5 GB` libre, env-configurable via
+  `MUADDIB_ARCHIVE_MIN_FREE_GB` (borne [1, 100] GB). Filet de securite si
+  une campagne malveillante deborde le budget 7 j avant le prochain tick
+  periodique.
+- **Ajoute** `Environment=MUADDIB_ARCHIVE_RETENTION_DAYS=7` dans
+  `deploy/muaddib-monitor.service` — ceinture + bretelles avec le default
+  code, survit a un revert accidentel.
+
+#### Threat model
+
+Defense en profondeur : trois couches independantes, chacune suffisante a
+elle seule pour empecher le crash, qui n'ont aucun point commun de
+defaillance.
+
+| Couche | Mecanisme | Empeche |
+|---|---|---|
+| 1 | `DEFAULT_RETENTION_DAYS = 7` | Croissance unbounded (cause racine) |
+| 2 | `startPeriodicCleanup()` (every 6h, `.unref()`) | Service long-running qui n'a jamais l'occasion de purger |
+| 3 | `hasEnoughSpace()` pre-check | Burst de campagne malveillante qui depasse le budget 7 j avant tick 6h |
+
+#### Tests
+
+- 3 nouveaux dans `tests/unit/tarball-archive.test.js` : default = 7,
+  tick periodique purge bien le repertoire ancien (interval 50 ms),
+  archive skip quand `fs.statfsSync` mockee retourne ~0 octets libres.
+- Total : 3653 → **3656** tests, 0 failed.
+
+#### Deploiement VPS (manuel post-merge)
+
+```
+cd /opt/muaddib && git pull
+sudo cp deploy/muaddib-monitor.service /etc/systemd/system/muaddib-monitor.service
+sudo systemctl daemon-reload
+sudo systemctl restart muaddib-monitor
+```
+
+Verification 24-48 h : `df -h /` doit rester < 70 %, `journalctl -u
+muaddib-monitor | grep "Archive\] Purged"` doit montrer 1-2 ticks
+periodiques, `ls /opt/muaddib/archive/ | wc -l` doit converger vers 7.
+
 ## [2.11.29] - 2026-05-22
 
 ### Publish pipeline hardening — defense in depth

@@ -287,6 +287,22 @@ See [Intent Graph](#intent-graph) section for `isSDKPattern()` details and 22 SD
 
 **Scan history memory** (monitor-only): Cross-session webhook dedup via `scan-memory.json`. `shouldSuppressByMemory()` suppresses duplicate webhooks when score within ±15% and no new threat types. 30-day expiry, 50K max entries. IOC match and HC types bypass memory suppression.
 
+### Archive Retention — Defense in Depth (v2.11.30)
+
+**Tarball archive** (`src/monitor/tarball-archive.js`): suspect packages are downloaded + persisted to `/opt/muaddib/archive/YYYY-MM-DD/` for retrospective audit (when npm/PyPI unpublish a malicious package). Fire-and-forget, never blocks the scan pipeline.
+
+**Three independent retention layers** added after the 2026-05-24 disk-fill incident (96 GB VPS hit 100% → `~/.claude.json` corrupted → +89K monitor errors). Each layer is sufficient alone to prevent the crash; they have no shared failure mode.
+
+| Layer | Mechanism | Prevents |
+|---|---|---|
+| 1 | `DEFAULT_RETENTION_DAYS = 7` (env `MUADDIB_ARCHIVE_RETENTION_DAYS`, bounded [1, 365]) | Unbounded growth (root cause: ~4.5 GB/day × 30 d default = ~135 GB, impossible on 96 GB) |
+| 2 | `startPeriodicCleanup()` re-runs `cleanupOldArchives()` every 6 h, `.unref()`'d | Long-running daemon (no restarts for weeks) never gets a chance to purge |
+| 3 | `hasEnoughSpace(targetDir)` pre-check via `fs.statfsSync`, skip archive if < 5 GB free (env `MUADDIB_ARCHIVE_MIN_FREE_GB`, bounded [1, 100], Node ≥ 18.15 — fail-open below) | Burst of malicious campaigns blows past the 7-day budget between periodic ticks |
+
+**Wiring:** `src/monitor/daemon.js` calls `cleanupOldArchives()` at startup AND `startPeriodicCleanup()` after the startup phase. Systemd `deploy/muaddib-monitor.service` sets `Environment=MUADDIB_ARCHIVE_RETENTION_DAYS=7` explicitly (belt-and-suspenders with the code default).
+
+**Math:** 7 d × 4.5 GB/day ≈ 31 GB archives + ~20 GB base = ~53 % of 96 GB disk in steady state. Even at peak ingestion days (5.8 GB), 14 d would push to 86 % (no margin); 7 d stays at ~63 %.
+
 ## Behavioral Anomaly Detection
 
 **Supply Chain Anomaly Detection (v2.0):** 5 behavioral detection features that detect attacks before IOCs exist:
