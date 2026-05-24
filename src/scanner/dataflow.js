@@ -1075,6 +1075,12 @@ const SENSITIVE_PATH_PATTERNS = [
   '.atomic', '.metamask', '.ledger-live', '.trezor',
   '.bitcoin', '.monero', '.gnupg',
   '_cacache', '.cache/yarn', '.cache/pip',
+  // F5 — guarddog-inspired cloud/DB/HTTP auth file coverage. Substring
+  // match means '.docker/config' catches '.docker/config.json'. Narrow
+  // patterns (.pgpass/.netrc/.boto) are unique filenames — FP-safe.
+  '.docker/config', '.kube/config',
+  '.pgpass', '.netrc', '.boto',
+  '.azure/', '.gcloud/', '.config/gcloud/',
   // P6: Removed discord, leveldb — data directories, not credential paths.
   // _cacache/.cache kept — real cache poisoning vectors (T1195.002).
   '/proc/mem', '/proc/self',  // v2.10.11: runner secret extraction from process memory (TeamPCP Trivy stealer)
