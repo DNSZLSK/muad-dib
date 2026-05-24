@@ -1,6 +1,17 @@
 const { saveReport } = require('../report.js');
 const { saveSARIF } = require('../sarif.js');
 const { getPlaybook } = require('../response/playbooks.js');
+const { DOMAIN_CODES, getRuleDomain } = require('../rules/index.js');
+
+// P0a — domain tag formatter for CLI text output.
+// Returns a bracketed 3-letter code like "[MAL]" / "[AUT]" / "[ENG]" / "[VUL]"
+// to display next to the severity prefix. Resolves the domain from the threat
+// type if not already set on the threat object (defense in depth).
+function domainTag(threat) {
+  const d = (threat && threat.domain) || (threat && threat.type ? getRuleDomain(threat.type) : 'malware');
+  const code = DOMAIN_CODES[d] || 'UNK';
+  return '[' + code + ']';
+}
 
 /**
  * Format and print scan output in the requested format.
@@ -85,8 +96,9 @@ function formatOutput(result, options, ctx) {
       enrichedThreats.forEach((t, i) => {
         console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
         const countStr = t.count > 1 ? ` (x${t.count})` : '';
-        console.log(`  ${i + 1}. [${t.severity}] ${t.rule_name}${countStr}`);
+        console.log(`  ${i + 1}. [${t.severity}] ${domainTag(t)} ${t.rule_name}${countStr}`);
         console.log(`     Rule ID:    ${t.rule_id}`);
+        console.log(`     Domain:     ${t.domain || getRuleDomain(t.type)}`);
         console.log(`     File:       ${t.file}`);
         if (t.line) console.log(`     Line:       ${t.line}`);
         console.log(`     Confidence: ${t.confidence}`);
@@ -162,14 +174,28 @@ function formatOutput(result, options, ctx) {
       // clutter the output on monorepos. Show with --verbose. Scoring, JSON,
       // SARIF, and HTML output are unaffected — this is display-only.
       const hiddenCount = options.verbose ? 0 : deduped.filter(t => t.degraded && t.severity === 'LOW').length;
-      const displayThreats = options.verbose ? deduped : deduped.filter(t => !(t.degraded && t.severity === 'LOW'));
+      let displayThreats = options.verbose ? deduped : deduped.filter(t => !(t.degraded && t.severity === 'LOW'));
+      // P0a — --domain filter is DISPLAY ONLY. Score/exit code are computed
+      // from the full set; this only narrows the printed threats. Allows
+      // workflows like "show me only author-risk threats" without changing
+      // the underlying alert level.
+      let domainFilteredOut = 0;
+      if (Array.isArray(options.domainFilter) && options.domainFilter.length > 0) {
+        const allowed = new Set(options.domainFilter);
+        const before = displayThreats.length;
+        displayThreats = displayThreats.filter(t => {
+          const d = t.domain || getRuleDomain(t.type);
+          return allowed.has(d);
+        });
+        domainFilteredOut = before - displayThreats.length;
+      }
       if (displayThreats.length === 0 && hiddenCount > 0) {
         console.log(`[OK] No high-confidence threats detected (${hiddenCount} low-confidence signal(s) hidden, use --verbose to show).\n`);
       } else {
         console.log(`[ALERT] ${displayThreats.length} threat(s) detected:\n`);
         displayThreats.forEach((t, i) => {
           const countStr = t.count > 1 ? ` (x${t.count})` : '';
-          console.log(`  ${i + 1}. [${t.severity}] ${t.type}${countStr}`);
+          console.log(`  ${i + 1}. [${t.severity}] ${domainTag(t)} ${t.type}${countStr}`);
           console.log(`     ${t.message}`);
           console.log(`     File: ${t.file}`);
           const playbook = getPlaybook(t.type);
@@ -180,6 +206,9 @@ function formatOutput(result, options, ctx) {
         });
         if (hiddenCount > 0) {
           console.log(`  + ${hiddenCount} low-confidence signal(s) hidden (use --verbose to show)\n`);
+        }
+        if (domainFilteredOut > 0) {
+          console.log(`  + ${domainFilteredOut} threat(s) hidden by --domain filter (score unchanged)\n`);
         }
       }
     }

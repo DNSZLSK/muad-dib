@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { RULES } = require('../rules/index.js');
+const { RULES, getRuleDomain } = require('../rules/index.js');
 
 const pkgVersion = (() => {
   try {
@@ -26,7 +26,7 @@ function generateSARIF(results) {
             name: 'MUADDIB',
             version: pkgVersion,
             informationUri: 'https://github.com/DNSZLSK/muad-dib',
-            rules: Object.values(RULES).map(rule => ({
+            rules: Object.entries(RULES).map(([type, rule]) => ({
               id: rule.id,
               name: rule.name,
               shortDescription: { text: rule.description },
@@ -35,7 +35,10 @@ function generateSARIF(results) {
               properties: {
                 severity: rule.severity,
                 confidence: rule.confidence,
-                mitre: rule.mitre
+                mitre: rule.mitre,
+                // P0a — Risk Domains taxonomy. Either set explicitly on the rule
+                // or resolved via getRuleDomain default (currently 'malware').
+                risk_domain: getRuleDomain(type)
               }
             }))
           }
@@ -66,7 +69,9 @@ function generateSARIF(results) {
           ],
           properties: {
             confidence: threat.confidence,
-            mitre: threat.mitre
+            mitre: threat.mitre,
+            // P0a — per-result risk domain (resolved from threat.type).
+            risk_domain: getRuleDomain(threat.type)
           }
         }))
       }
