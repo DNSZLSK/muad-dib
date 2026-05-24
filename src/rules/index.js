@@ -2595,6 +2595,18 @@ const RULES = {
     ],
     mitre: 'T1195.002'
   },
+  release_zero_package: {
+    id: 'MUADDIB-PKG-022',
+    name: 'Release Zero Package',
+    severity: 'MEDIUM',
+    confidence: 'high',
+    description: 'Package publie en version 0.0.0 / 0.0 / 0 combine avec install scripts ou publication recente (<30j). Pattern de squat de namespace ou placeholder pre-payload. Conjonction (zero-version AND (scripts OR recent)) pour eviter les FP sur placeholders abandonnes.',
+    references: [
+      'https://github.com/DataDog/guarddog/blob/main/guarddog/analyzer/metadata/npm/release_zero.py',
+      'https://attack.mitre.org/techniques/T1195.002/'
+    ],
+    mitre: 'T1195.002'
+  },
   // Trusted dependency diff detections (monitor-only)
   trusted_new_unknown_dependency: {
     id: 'MUADDIB-TRUSTED-001',

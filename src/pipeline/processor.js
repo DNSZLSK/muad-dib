@@ -9,6 +9,7 @@ const { annotateConfidenceTiers, tierAtLeast } = require('../rules/confidence-ti
 const { buildIntentPairs } = require('../intent-graph.js');
 const { debugLog } = require('../utils.js');
 const { getPackageMetadata } = require('../scanner/npm-registry.js');
+const { checkReleaseZero } = require('../scanner/release-zero.js');
 
 // Auto-sandbox compound trigger : optional out-of-tree dependency. Lazy-load
 // it so the pipeline still works when the file is absent (some dev machines
@@ -208,6 +209,17 @@ async function process(threats, targetPath, options, pythonDeps, warnings, scann
     } catch (err) {
       debugLog('[REGISTRY-META] fetch failed for ' + packageName + ': ' + err.message);
     }
+  }
+
+  // F2 — release_zero detection. Fires when local package.json version is
+  // "0", "0.0", or "0.0.0" AND EITHER install scripts are present OR registry
+  // says publish age <30d. Helper returns null when conjunction unmet → no FP
+  // on abandoned-but-honest placeholders. See src/scanner/release-zero.js.
+  try {
+    const rz = checkReleaseZero(packageVersion, _pkgMeta && _pkgMeta.scripts, _pkgMeta && _pkgMeta.npmRegistryMeta);
+    if (rz) deduped.push(rz);
+  } catch (err) {
+    debugLog('[RELEASE-ZERO] check failed: ' + err.message);
   }
 
   // Cross-scanner compound: detached_process + suspicious_dataflow in same file
