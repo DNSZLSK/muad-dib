@@ -685,6 +685,19 @@ const RULES = {
     references: ['https://attack.mitre.org/techniques/T1036/009/'],
     mitre: 'T1036.009'
   },
+  silent_stealth_process: {
+    id: 'MUADDIB-AST-092',
+    name: 'Silent Stealth Background Process',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    description: 'spawn/fork avec {detached: true, stdio: \'ignore\'} — combinaison qui detache le processus ET silence tous ses I/O. Signal de stealth specifique aux payloads installes via lifecycle (Shai-Hulud) qui doivent survivre a npm install sans laisser de trace dans les logs.',
+    references: [
+      'https://github.com/DataDog/guarddog/blob/main/guarddog/analyzer/sourcecode/npm-silent-process-execution.yml',
+      'https://attack.mitre.org/techniques/T1036/009/',
+      'https://attack.mitre.org/techniques/T1564/'
+    ],
+    mitre: 'T1564'
+  },
   dangerous_call_function: {
     id: 'MUADDIB-AST-005',
     name: 'new Function() Constructor',
