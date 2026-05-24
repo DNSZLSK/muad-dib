@@ -157,12 +157,12 @@ jobs:
     }
   });
 
-  // 3.3b Rule count check (F6 silent_stealth_process: +1 rule → 230 RULES)
-  test('P3: rule count is 235 (230 RULES + 5 PARANOID)', () => {
+  // 3.3b Rule count check (F3 unclaimed_maintainer_email: +1 rule → 231 RULES)
+  test('P3: rule count is 236 (231 RULES + 5 PARANOID)', () => {
     const { RULES, PARANOID_RULES } = require('../../src/rules/index.js');
     const ruleCount = Object.keys(RULES).length;
     const paranoidCount = Object.keys(PARANOID_RULES).length;
-    assert(ruleCount === 230, `Expected 230 RULES, got ${ruleCount}`);
+    assert(ruleCount === 231, `Expected 231 RULES, got ${ruleCount}`);
     assert(paranoidCount === 5, `Expected 5 PARANOID, got ${paranoidCount}`);
   });
 

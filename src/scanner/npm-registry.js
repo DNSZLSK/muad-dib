@@ -117,6 +117,21 @@ async function getPackageMetadata(packageName) {
     || meta.maintainers?.[0]?.name
     || null;
 
+  // F3 — extract ALL maintainer emails (latest version + top-level merged,
+  // deduped) for unclaimed-domain MX check downstream.
+  const maintainerEmails = (() => {
+    const out = new Set();
+    const sources = [
+      ...(Array.isArray(latestMeta?.maintainers) ? latestMeta.maintainers : []),
+      ...(Array.isArray(meta.maintainers) ? meta.maintainers : [])
+    ];
+    for (const m of sources) {
+      const e = m && typeof m === 'object' ? m.email : null;
+      if (typeof e === 'string' && e.includes('@')) out.add(e.toLowerCase().trim());
+    }
+    return Array.from(out);
+  })();
+
   const readmeText = meta.readme || '';
   const hasReadme = readmeText.length > 100;
 
@@ -182,6 +197,9 @@ async function getPackageMetadata(packageName) {
     // / pinned-old / vendored versions bypass the cap so we don't mask attacks
     // captured in static fixtures (e.g. eslint-scope 3.7.2, chalk 5.6.1).
     latest_version: latestVersion || null,
+    // F3 : list of maintainer email addresses (lowercased, unique) for DNS
+    // MX / RDAP downstream checks. Empty array if no emails published.
+    maintainer_emails: maintainerEmails,
     // C3 : per-version publish timestamps for delta-mode selectPriorVersions.
     time: versionTimes,
     ...advancedSignals

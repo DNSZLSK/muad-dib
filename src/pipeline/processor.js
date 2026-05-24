@@ -10,6 +10,7 @@ const { buildIntentPairs } = require('../intent-graph.js');
 const { debugLog } = require('../utils.js');
 const { getPackageMetadata } = require('../scanner/npm-registry.js');
 const { checkReleaseZero } = require('../scanner/release-zero.js');
+const { checkUnclaimedMaintainerEmail } = require('../scanner/email-domain.js');
 
 // Auto-sandbox compound trigger : optional out-of-tree dependency. Lazy-load
 // it so the pipeline still works when the file is absent (some dev machines
@@ -220,6 +221,20 @@ async function process(threats, targetPath, options, pythonDeps, warnings, scann
     if (rz) deduped.push(rz);
   } catch (err) {
     debugLog('[RELEASE-ZERO] check failed: ' + err.message);
+  }
+
+  // F3 — unclaimed maintainer email domain (DNS MX). Best-effort, silent on
+  // network failure (per feedback_weak_signals_composite_scoring). Severity
+  // HIGH × confidence medium = 8.5 points isolated → composite-only signal.
+  // Skipped automatically when MUADDIB_NO_REGISTRY_FETCH=1 (no meta available)
+  // or MUADDIB_EMAIL_DOMAIN_CHECK=0 (explicit opt-out).
+  if (_pkgMeta && _pkgMeta.npmRegistryMeta) {
+    try {
+      const emailThreats = await checkUnclaimedMaintainerEmail(_pkgMeta.npmRegistryMeta);
+      for (const t of emailThreats) deduped.push(t);
+    } catch (err) {
+      debugLog('[EMAIL-DOMAIN] check failed: ' + err.message);
+    }
   }
 
   // Cross-scanner compound: detached_process + suspicious_dataflow in same file
