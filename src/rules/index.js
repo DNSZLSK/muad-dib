@@ -1,3 +1,47 @@
+// =============================================================================
+// Risk Domains taxonomy (P0a — inspired by Phylum's 5-domain model).
+// Each rule SHOULD declare a `domain` field. Untagged rules default to
+// 'malware' (the majority case). The 6 valid values are:
+//
+//  - malware       : explicit malicious code/behavior (eval+exfil, reverse
+//                    shell, lifecycle hijack, IOC match, typosquat, etc.)
+//  - author        : maintainer/author identity issues (unclaimed/compromised
+//                    email domain, new publisher, deceptive author)
+//  - engineering   : package quality / supply-chain hygiene (release_zero,
+//                    version 99 dep-confusion, direct URL deps, missing repo)
+//  - vulnerability : code-quality weaknesses that may not be intentional
+//                    (eval usage, prototype pollution, dangerous APIs)
+//  - license       : licensing conflicts (reserved — none currently)
+//  - unknown       : fallback for unclassified threats
+//
+// Output exposure:
+//  - SARIF: result.properties.risk_domain
+//  - JSON : threat.domain field
+//  - HTML : grouped section + colored badge per domain
+//  - CLI  : [MAL]/[AUT]/[ENG]/[VUL]/[LIC] prefix
+// =============================================================================
+
+const RISK_DOMAINS = Object.freeze({
+  MALWARE: 'malware',
+  AUTHOR: 'author',
+  ENGINEERING: 'engineering',
+  VULNERABILITY: 'vulnerability',
+  LICENSE: 'license',
+  UNKNOWN: 'unknown'
+});
+
+const VALID_DOMAINS = new Set(Object.values(RISK_DOMAINS));
+
+// 3-letter codes for compact CLI/output display (matches Phylum convention).
+const DOMAIN_CODES = Object.freeze({
+  malware: 'MAL',
+  author: 'AUT',
+  engineering: 'ENG',
+  vulnerability: 'VUL',
+  license: 'LIC',
+  unknown: 'UNK'
+});
+
 const RULES = {
   // AST detections
   sensitive_string: {
@@ -5,6 +49,7 @@ const RULES = {
     name: 'Sensitive String Reference',
     severity: 'HIGH',
     confidence: 'medium',
+    domain: 'malware',
     description: 'Reference a un chemin ou identifiant sensible (.npmrc, .ssh, tokens)',
     references: [
       'https://blog.phylum.io/shai-hulud-npm-worm',
@@ -17,6 +62,7 @@ const RULES = {
     name: 'Sensitive Environment Variable Access',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'Acces a une variable d\'environnement sensible (GITHUB_TOKEN, NPM_TOKEN, AWS_*)',
     references: [
       'https://blog.phylum.io/shai-hulud-npm-worm',
@@ -29,6 +75,7 @@ const RULES = {
     name: 'Dangerous Function Call',
     severity: 'MEDIUM',
     confidence: 'medium',
+    domain: 'vulnerability',
     description: 'Appel a une fonction dangereuse (exec, spawn, eval, Function)',
     references: [
       'https://owasp.org/www-community/attacks/Command_Injection'
@@ -40,6 +87,7 @@ const RULES = {
     name: 'Eval Usage',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'vulnerability',
     description: 'Utilisation de eval() ou new Function() - execution de code dynamique',
     references: [
       'https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/eval#never_use_eval!'
@@ -53,6 +101,7 @@ const RULES = {
     name: 'Remote Code Execution via Curl',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Telecharge et execute du code distant via curl | sh',
     references: [
       'https://blog.phylum.io/shai-hulud-npm-worm'
@@ -64,6 +113,7 @@ const RULES = {
     name: 'Reverse Shell',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Tentative de connexion reverse shell',
     references: [
       'https://attack.mitre.org/techniques/T1059/004/'
@@ -75,6 +125,7 @@ const RULES = {
     name: 'Dead Man\'s Switch',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Suppression du repertoire home - dead man\'s switch de Shai-Hulud',
     references: [
       'https://www.wiz.io/blog/shai-hulud-npm-supply-chain-attack'
@@ -88,6 +139,7 @@ const RULES = {
     name: 'Suspicious Lifecycle Script',
     severity: 'MEDIUM',
     confidence: 'medium',
+    domain: 'malware',
     description: 'Script preinstall/postinstall suspect dans package.json',
     references: [
       'https://blog.npmjs.org/post/141577284765/kik-left-pad-and-npm'
@@ -99,6 +151,7 @@ const RULES = {
     name: 'Monorepo Detected',
     severity: 'MEDIUM',
     confidence: 'high',
+    domain: 'malware',
     description: 'Workspace monorepo detecte (yarn/pnpm/lerna/turbo). Le perimetre du scan depasse un seul package — auditer chaque workspace separement pour un scoring per-package.',
     references: [
       'https://docs.npmjs.com/cli/v10/using-npm/workspaces'
@@ -112,6 +165,7 @@ const RULES = {
     name: 'Code Obfuscation Detected',
     severity: 'HIGH',
     confidence: 'medium',
+    domain: 'malware',
     description: 'Code fortement obfusque detecte - probablement malveillant',
     references: [
       'https://blog.phylum.io/shai-hulud-npm-worm'
@@ -125,6 +179,7 @@ const RULES = {
     name: 'Known Malicious Package',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Package present dans la base IOC de packages malveillants connus',
     references: [
       'https://socket.dev/npm/issue'
@@ -136,6 +191,7 @@ const RULES = {
     name: 'Dependency Declared on IOC Package',
     severity: 'HIGH',
     confidence: 'medium',
+    domain: 'malware',
     description: 'Le package declare une dependance sur un package present dans la base IOC. Signal informatif — ne prouve pas que le package scanne est malveillant.',
     references: [
       'https://socket.dev/npm/issue'
@@ -147,6 +203,7 @@ const RULES = {
     name: 'Malicious PyPI Package',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Package PyPI present dans la base IOC de packages malveillants connus (source: OSV)',
     references: [
       'https://osv.dev/',
@@ -159,6 +216,7 @@ const RULES = {
     name: 'PyPI Typosquatting Detected',
     severity: 'HIGH',
     confidence: 'medium',
+    domain: 'malware',
     description: 'Dependance PyPI suspecte de typosquatting d\'un package populaire (Levenshtein)',
     references: [
       'https://pypi.org/',
@@ -171,6 +229,7 @@ const RULES = {
     name: 'Suspicious File in Dependency',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Fichier suspect detecte dans une dependance (setup_bun.js, etc.)',
     references: [
       'https://blog.phylum.io/shai-hulud-npm-worm'
@@ -182,6 +241,7 @@ const RULES = {
     name: 'Shai-Hulud Marker Detected',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Marqueur Shai-Hulud detecte dans le code',
     references: [
       'https://blog.phylum.io/shai-hulud-npm-worm',
@@ -194,6 +254,7 @@ const RULES = {
     name: 'YARA-style String IOC Match',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Literal substring uniquement attribuable a une campagne malware connue (XOR key, RAT command name, C2 path, build artifact). Le match en source = signal CRITICAL transverse a toutes les variantes qui reuse le meme stager.',
     references: [
       'iocs/string-iocs.yaml',
@@ -208,6 +269,7 @@ const RULES = {
     name: 'Anti-Forensic XOR + Self-Delete + Decoy Write',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Compound AST pattern: XOR loop with literal-derived operand + fs.unlink/rename of self file + fs.writeFile to a decoy extension (.md/.bak/.tmp/.txt/.log) all in the same source file. Catches the Axios npm 2026-03 setup.js dropper and the csec autodelete family even when the XOR key string is rotated.',
     references: [
       'https://gist.github.com/N3mes1s/0c0fc7a0c23cdb5e1c8f66b208053ed6',
@@ -220,6 +282,7 @@ const RULES = {
     name: 'Anti-Forensic Partial (2 of 3 patterns)',
     severity: 'HIGH',
     confidence: 'medium',
+    domain: 'malware',
     description: '2 of 3 anti-forensic patterns in a single file (XOR loop, self-delete, decoy write). Insufficient for CRITICAL alone but elevates a package that already shows other signals.',
     references: [
       'https://gist.github.com/N3mes1s/0c0fc7a0c23cdb5e1c8f66b208053ed6'
@@ -231,6 +294,7 @@ const RULES = {
     name: 'Stub Package + External URL Dep + Lifecycle Hook',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Package main file is essentially empty AND declares a non-npm-registry URL dependency AND has an install lifecycle hook. The malicious payload lives in the resolved external dep, not the published tarball. Closes the ltidi chain attack class that bypassed ADR_THRESHOLD=20.',
     references: [
       'project_detection_gap_ltidi_chain memory entry',
@@ -243,6 +307,7 @@ const RULES = {
     name: 'Stub Package + External URL Dep (no lifecycle)',
     severity: 'HIGH',
     confidence: 'medium',
+    domain: 'malware',
     description: 'Package main file is essentially empty AND declares a non-npm-registry URL dependency. No lifecycle hook so the payload requires an explicit require() — manual review still warranted because legitimate libs that pull a payload via URL would re-export the dep.',
     references: [
       'project_detection_gap_ltidi_chain memory entry'
@@ -254,6 +319,7 @@ const RULES = {
     name: 'Axios / csec Family Compound',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Compound: IOC string match + lifecycle hook + anti-forensic partial pattern. Identifies the BlueNoroff/Sapphire Sleet Axios family and the csec autodelete family at a single glance.',
     references: [
       'https://gist.github.com/N3mes1s/0c0fc7a0c23cdb5e1c8f66b208053ed6',
@@ -266,6 +332,7 @@ const RULES = {
     name: 'Stub Package + Known String IOC',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Compound: stub package (small main, external URL dep) AND a known string IOC in source. Unambiguous chain-attack staging.',
     references: [
       'project_detection_gap_ltidi_chain memory entry'
@@ -277,6 +344,7 @@ const RULES = {
     name: 'Staged Remote Loader (Function.constructor + shadowed process)',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Compound: new Function.constructor("require", body) co-occurs with `const process = {...}` shadowing in the same file. Pattern observed in the chai-* / poxios-chain / express-guardrail / justenv campaign (semaine 2026-05-04 a 2026-05-09): fork de pino avec caller.js qui decode une URL base64 (jsonkeeper.com), fetch le payload distant via axios, et l\'execute via Function.constructor en passant require comme parametre. Le tarball npm ne contient aucun code malveillant statique — la charge utile est externalisee sur un pastebin.',
     references: [
       'project_detection_gap_chai_staged_loader memory entry',
@@ -289,6 +357,7 @@ const RULES = {
     name: 'Lifecycle Script in Dependency',
     severity: 'MEDIUM',
     confidence: 'low',
+    domain: 'malware',
     description: 'Une dependance a un script preinstall/postinstall',
     references: [
       'https://docs.npmjs.com/cli/v9/using-npm/scripts#life-cycle-scripts'
@@ -300,6 +369,7 @@ const RULES = {
     name: 'Suspicious Dependency URL',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'Dependance declaree avec une URL HTTP/HTTPS au lieu d\'une version npm. Les URLs ngrok/localhost/IP privee sont fortement suspectes.',
     references: [
       'https://docs.npmjs.com/cli/v9/configuring-npm/package-json#urls-as-dependencies'
@@ -313,6 +383,7 @@ const RULES = {
     name: 'Known Malicious File Hash',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Hash SHA256 correspond a un fichier malveillant connu',
     references: [
       'https://www.virustotal.com'
@@ -326,6 +397,7 @@ const RULES = {
     name: 'Suspicious Data Flow',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Flux de donnees suspect: lecture de credentials puis envoi reseau',
     references: [
       'https://blog.phylum.io/shai-hulud-npm-worm'
@@ -338,6 +410,7 @@ const RULES = {
     name: 'Typosquatting Detected',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'Package avec un nom tres similaire a un package populaire. Possible typosquatting.',
     references: [
       'https://blog.npmjs.org/post/163723642530/crossenv-malware-on-the-npm-registry',
@@ -356,6 +429,7 @@ const RULES = {
     // escalate when co-occurring with real execution/exfil signals.
     severity: 'MEDIUM',
     confidence: 'high',
+    domain: 'malware',
     description: 'Une dependance declaree porte le nom d\'un package populaire prefixe/suffixe d\'un token suspect (Axios UNC1069, mars 2026). Le wrapper innocent declare un sub-dep malveillant. Signal solo MEDIUM, escalade CRITICAL via compounds lifecycle/dataflow/require.',
     references: [
       'https://snyk.io/blog/typosquatting-attacks/',
@@ -368,6 +442,7 @@ const RULES = {
     name: 'Boundary-Squat Dependency Used in Code',
     severity: 'MEDIUM',
     confidence: 'high',
+    domain: 'malware',
     description: 'Le code du package require/import un nom de dependance identifie comme boundary-squat. Signal fort que la dep typosquattee est intentionnellement chargee.',
     references: ['https://attack.mitre.org/techniques/T1195/002/'],
     mitre: 'T1195.002'
@@ -377,6 +452,7 @@ const RULES = {
     name: 'Boundary-Squat Dep Required at Runtime',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Dependance boundary-squat declaree ET chargee via require/import dans le code: pattern Axios UNC1069 (sub-dep injection avec wrapper innocent).',
     references: ['https://attack.mitre.org/techniques/T1195/002/'],
     mitre: 'T1195.002'
@@ -387,6 +463,7 @@ const RULES = {
     name: 'Boundary-Squat Dep + Lifecycle Hook',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Dependance boundary-squat declaree avec script lifecycle (preinstall/postinstall) — install-time payload delivery via typosquat sub-dep.',
     references: ['https://attack.mitre.org/techniques/T1195/002/'],
     mitre: 'T1195.002'
@@ -396,6 +473,7 @@ const RULES = {
     name: 'Boundary-Squat Dep + Suspicious Dataflow',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'Dependance boundary-squat declaree avec flux de donnees suspect (lecture credentials + envoi reseau) — typosquat dep co-occurring with exfiltration.',
     references: ['https://attack.mitre.org/techniques/T1195/002/'],
     mitre: 'T1195.002'
@@ -407,6 +485,7 @@ const RULES = {
     name: 'Curl Pipe to Shell in Script',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Script lifecycle execute curl | sh - telechargement et execution de code distant',
     references: ['https://blog.phylum.io/shai-hulud-npm-worm'],
     mitre: 'T1105'
@@ -416,6 +495,7 @@ const RULES = {
     name: 'Wget Pipe to Shell in Script',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Script lifecycle execute wget | sh - telechargement et execution de code distant',
     references: ['https://blog.phylum.io/shai-hulud-npm-worm'],
     mitre: 'T1105'
@@ -425,6 +505,7 @@ const RULES = {
     name: 'Eval in Lifecycle Script',
     severity: 'HIGH',
     confidence: 'medium',
+    domain: 'malware',
     description: 'Utilisation de eval() dans un script lifecycle - execution de code dynamique',
     references: ['https://owasp.org/www-community/attacks/Command_Injection'],
     mitre: 'T1059.007'
@@ -434,6 +515,7 @@ const RULES = {
     name: 'Child Process in Lifecycle Script',
     severity: 'HIGH',
     confidence: 'medium',
+    domain: 'malware',
     description: 'Reference a child_process dans un script lifecycle',
     references: ['https://owasp.org/www-community/attacks/Command_Injection'],
     mitre: 'T1059'
@@ -443,6 +525,7 @@ const RULES = {
     name: 'npmrc Access',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'Acces au fichier .npmrc detecte - risque de vol de token npm',
     references: ['https://blog.phylum.io/shai-hulud-npm-worm'],
     mitre: 'T1552.001'
@@ -452,6 +535,7 @@ const RULES = {
     name: 'GitHub Token Access',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'Acces au GITHUB_TOKEN detecte',
     references: ['https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions'],
     mitre: 'T1552.001'
@@ -461,6 +545,7 @@ const RULES = {
     name: 'AWS Credential Access',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'Acces aux credentials AWS detecte',
     references: ['https://docs.aws.amazon.com/IAM/latest/UserGuide/best-practices.html'],
     mitre: 'T1552.001'
@@ -470,6 +555,7 @@ const RULES = {
     name: 'Base64 Encoding in Script',
     severity: 'MEDIUM',
     confidence: 'low',
+    domain: 'malware',
     description: 'Encodage base64 dans un script lifecycle - souvent utilise pour obfusquer du code malveillant',
     references: ['https://attack.mitre.org/techniques/T1027/'],
     mitre: 'T1027'
@@ -481,6 +567,7 @@ const RULES = {
     name: 'Curl Pipe to Shell',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Telechargement et execution via curl | sh dans un script shell',
     references: ['https://blog.phylum.io/shai-hulud-npm-worm'],
     mitre: 'T1105'
@@ -490,6 +577,7 @@ const RULES = {
     name: 'Wget Download and Execute',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Telechargement et execution de binaire via wget + chmod',
     references: ['https://blog.phylum.io/shai-hulud-npm-worm'],
     mitre: 'T1105'
@@ -499,6 +587,7 @@ const RULES = {
     name: 'Netcat Shell',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Shell netcat detecte - acces distant non autorise',
     references: ['https://attack.mitre.org/techniques/T1059/004/'],
     mitre: 'T1059.004'
@@ -508,6 +597,7 @@ const RULES = {
     name: 'Home Directory Destruction',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Destruction de donnees (shred $HOME) - dead man\'s switch de Shai-Hulud',
     references: ['https://www.wiz.io/blog/shai-hulud-npm-supply-chain-attack'],
     mitre: 'T1485'
@@ -517,6 +607,7 @@ const RULES = {
     name: 'Data Exfiltration via Curl',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'Exfiltration de donnees via curl POST',
     references: ['https://attack.mitre.org/techniques/T1041/'],
     mitre: 'T1041'
@@ -526,6 +617,7 @@ const RULES = {
     name: 'SSH Key Access',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'Acces aux cles SSH detecte',
     references: ['https://attack.mitre.org/techniques/T1552/004/'],
     mitre: 'T1552.004'
@@ -535,6 +627,7 @@ const RULES = {
     name: 'Python Reverse Shell',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Reverse shell via python -c import socket detecte',
     references: ['https://attack.mitre.org/techniques/T1059/004/'],
     mitre: 'T1059.006'
@@ -544,6 +637,7 @@ const RULES = {
     name: 'Perl Reverse Shell',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Reverse shell via perl -e socket detecte',
     references: ['https://attack.mitre.org/techniques/T1059/004/'],
     mitre: 'T1059.006'
@@ -553,6 +647,7 @@ const RULES = {
     name: 'FIFO Reverse Shell',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Reverse shell via mkfifo /dev/tcp detecte',
     references: ['https://attack.mitre.org/techniques/T1059/004/'],
     mitre: 'T1059.004'
@@ -562,6 +657,7 @@ const RULES = {
     name: 'FIFO + Netcat Reverse Shell',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Reverse shell via mkfifo + netcat (sans /dev/tcp). Technique alternative de reverse shell utilisant un named pipe.',
     references: ['https://attack.mitre.org/techniques/T1059/004/'],
     mitre: 'T1059.004'
@@ -571,6 +667,7 @@ const RULES = {
     name: 'Base64 Decode Pipe to Shell',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Payload encode en base64 decode et pipe vers bash/sh. Technique d\'obfuscation courante pour cacher des commandes malveillantes.',
     references: ['https://attack.mitre.org/techniques/T1140/'],
     mitre: 'T1140'
@@ -580,6 +677,7 @@ const RULES = {
     name: 'Wget + Base64 Decode',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'Telechargement via wget suivi de decodage base64. Pattern de staging en deux etapes pour dropper un payload.',
     references: ['https://attack.mitre.org/techniques/T1105/'],
     mitre: 'T1105'
@@ -591,6 +689,7 @@ const RULES = {
     name: 'Possible Code Obfuscation',
     severity: 'MEDIUM',
     confidence: 'low',
+    domain: 'malware',
     description: 'Fichier potentiellement obfusque (parse echoue, code dense)',
     references: ['https://attack.mitre.org/techniques/T1027/'],
     mitre: 'T1027'
@@ -600,6 +699,7 @@ const RULES = {
     name: 'Dynamic Require with Concatenation',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'require() avec concatenation de chaines — technique d\'obfuscation pour masquer le nom du module',
     references: ['https://attack.mitre.org/techniques/T1027/'],
     mitre: 'T1027'
@@ -609,6 +709,7 @@ const RULES = {
     name: 'Dangerous Shell Command Execution',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'exec() avec commande shell dangereuse (pipe to shell, reverse shell, netcat)',
     references: ['https://owasp.org/www-community/attacks/Command_Injection'],
     mitre: 'T1059.004'
@@ -618,6 +719,7 @@ const RULES = {
     name: 'Staged Payload Execution',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Telechargement reseau + eval() dans le meme fichier — execution de payload distant',
     references: ['https://attack.mitre.org/techniques/T1105/'],
     mitre: 'T1105'
@@ -627,6 +729,7 @@ const RULES = {
     name: 'Network Module in Lifecycle Script',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'require(https/http) dans un script lifecycle — telechargement au moment de l\'installation',
     references: ['https://blog.phylum.io/shai-hulud-npm-worm'],
     mitre: 'T1105'
@@ -636,6 +739,7 @@ const RULES = {
     name: 'Node Inline Execution in Lifecycle Script',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'node -e dans un script lifecycle — execution de code inline au moment de l\'installation',
     references: ['https://owasp.org/www-community/attacks/Command_Injection'],
     mitre: 'T1059.007'
@@ -645,6 +749,7 @@ const RULES = {
     name: 'Dynamic import() of Dangerous Module',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'import() dynamique pour charger un module dangereux ou avec argument calcule — technique d\'evasion pour eviter la detection de require()',
     references: ['https://attack.mitre.org/techniques/T1027/'],
     mitre: 'T1027'
@@ -654,6 +759,7 @@ const RULES = {
     name: 'Environment Variable Proxy Interception',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'new Proxy(process.env) detecte — intercepte silencieusement tous les acces aux variables d\'environnement pour exfiltration',
     references: ['https://attack.mitre.org/techniques/T1552/001/'],
     mitre: 'T1552.001'
@@ -663,6 +769,7 @@ const RULES = {
     name: 'Command Execution via Dynamic Require',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'exec/execSync appele sur un module charge dynamiquement (require obfusque) — execution de commandes dissimulees',
     references: ['https://attack.mitre.org/techniques/T1059/007/'],
     mitre: 'T1059.007'
@@ -672,6 +779,7 @@ const RULES = {
     name: 'Sandbox/Container Evasion',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'Detection de sandbox/container (/.dockerenv, /proc/cgroup) — technique anti-analyse pour eviter la detection en environnement controle',
     references: ['https://attack.mitre.org/techniques/T1497/001/'],
     mitre: 'T1497.001'
@@ -681,6 +789,7 @@ const RULES = {
     name: 'Detached Background Process',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'spawn/fork avec {detached: true} — le processus survit a la fin de npm install et execute le payload en arriere-plan',
     references: ['https://attack.mitre.org/techniques/T1036/009/'],
     mitre: 'T1036.009'
@@ -690,6 +799,7 @@ const RULES = {
     name: 'Silent Stealth Background Process',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'spawn/fork avec {detached: true, stdio: \'ignore\'} — combinaison qui detache le processus ET silence tous ses I/O. Signal de stealth specifique aux payloads installes via lifecycle (Shai-Hulud) qui doivent survivre a npm install sans laisser de trace dans les logs.',
     references: [
       'https://github.com/DataDog/guarddog/blob/main/guarddog/analyzer/sourcecode/npm-silent-process-execution.yml',
@@ -703,6 +813,7 @@ const RULES = {
     name: 'new Function() Constructor',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'vulnerability',
     description: 'Appel new Function() detecte - equivalent a eval()',
     references: ['https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function/Function'],
     mitre: 'T1059.007'
@@ -713,6 +824,7 @@ const RULES = {
     name: 'Credential Theft via CLI Tool',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'exec/execSync appelle un outil CLI legitime pour voler des tokens d\'authentification (gh auth token, gcloud auth, aws sts). Technique s1ngularity/Nx.',
     references: [
       'https://snyk.io/blog/malicious-npm-packages-abuse-ai-agents/',
@@ -725,6 +837,7 @@ const RULES = {
     name: 'GitHub Actions Workflow Write',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'fs.writeFileSync cree un fichier dans .github/workflows — injection de workflow GitHub Actions pour persistence. Technique Shai-Hulud 2.0.',
     references: [
       'https://www.wiz.io/blog/shai-hulud-npm-supply-chain-attack',
@@ -737,6 +850,7 @@ const RULES = {
     name: 'Binary Dropper Pattern',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'fs.chmodSync avec permissions executables (0o755/0o777) — pattern de dropper binaire: telecharge, ecrit, chmod, execute.',
     references: [
       'https://www.sonatype.com/blog/phantomraven-supply-chain-attack',
@@ -749,6 +863,7 @@ const RULES = {
     name: 'Native API Prototype Hooking',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'Modification du prototype ou remplacement de fonctions natives du navigateur/Node.js (fetch, XMLHttpRequest, http.request). Technique chalk/debug (Sygnia, sept 2025) pour intercepter du trafic.',
     references: [
       'https://www.sygnia.co/blog/malicious-chalk-debug-npm-packages/',
@@ -762,6 +877,7 @@ const RULES = {
     name: 'AI Config Prompt Injection',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'Fichier de configuration d\'agent IA (.cursorrules, CLAUDE.md, copilot-instructions.md) contient des instructions d\'execution de commandes shell ou d\'acces a des credentials. Technique ToxicSkills/Clinejection.',
     references: [
       'https://snyk.io/blog/toxicskills-prompt-injection-ai-agents/',
@@ -775,6 +891,7 @@ const RULES = {
     name: 'AI Config Prompt Injection (Critical)',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Fichier de configuration d\'agent IA contient des commandes d\'exfiltration (curl POST vers un domaine externe, pipe vers shell) ou une combinaison commande shell + acces credentials. Attaque confirmee.',
     references: [
       'https://snyk.io/blog/toxicskills-prompt-injection-ai-agents/',
@@ -789,6 +906,7 @@ const RULES = {
     name: 'IDE Hook Auto-Execution',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Fichier de configuration IDE (.claude/settings.json, .vscode/tasks.json, .kiro/settings/mcp.json) contient des hooks qui executent du code automatiquement a l\'ouverture du projet. Technique Shai-Hulud (TeamPCP, mai 2026).',
     references: [
       'https://github.com/g00dfe11ow/Shai-Hulud-Open-Source',
@@ -802,6 +920,7 @@ const RULES = {
     name: 'Require Cache Poisoning',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Acces a require.cache pour remplacer ou hijacker des modules Node.js charges. Technique de cache poisoning pour intercepter du trafic ou injecter du code.',
     references: [
       'https://attack.mitre.org/techniques/T1574/006/'
@@ -813,6 +932,7 @@ const RULES = {
     name: 'Staged Binary Payload Execution',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'Reference a un fichier binaire (.png/.jpg/.wasm) combinee avec eval() dans le meme fichier. Possible execution de payload steganographique cache dans une image.',
     references: [
       'https://attack.mitre.org/techniques/T1027/003/'
@@ -825,6 +945,7 @@ const RULES = {
     name: 'Staged Eval Decode',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'eval() ou Function() recoit un argument decode (atob ou Buffer.from base64). Pattern classique de staged payload: le code malveillant est encode en base64 puis decode et execute dynamiquement.',
     references: [
       'https://attack.mitre.org/techniques/T1140/',
@@ -838,6 +959,7 @@ const RULES = {
     name: 'Environment Variable Key Reconstruction',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'process.env accede avec une cle reconstruite dynamiquement via String.fromCharCode. Technique d\'obfuscation pour eviter la detection statique des noms de variables sensibles (GITHUB_TOKEN, etc.).',
     references: [
       'https://attack.mitre.org/techniques/T1027/',
@@ -851,6 +973,7 @@ const RULES = {
     name: 'Lifecycle Script Targets Hidden Payload',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Script lifecycle pointe vers un fichier dans node_modules/ — technique de dissimulation de payload. Les scanners excluent node_modules/ par defaut, rendant le payload invisible. Pattern DPRK/Lazarus interview attack.',
     references: [
       'https://unit42.paloaltonetworks.com/operation-dream-job/',
@@ -864,6 +987,7 @@ const RULES = {
     name: 'Lifecycle Script Pipes to Shell',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Script lifecycle (preinstall/install/postinstall) execute curl | sh ou wget | bash — telecharge et execute du code distant au moment de npm install.',
     references: [
       'https://blog.phylum.io/shai-hulud-npm-worm',
@@ -877,6 +1001,7 @@ const RULES = {
     name: 'Cross-File Data Exfiltration',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Un module lit des credentials (fs.readFileSync, process.env) et les exporte vers un autre module qui les envoie sur le reseau (fetch, https.request). Exfiltration inter-fichiers confirmee.',
     references: [
       'https://blog.phylum.io/shai-hulud-npm-worm',
@@ -890,6 +1015,7 @@ const RULES = {
     name: 'Credential/Cache Tampering',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Ecriture dans un chemin sensible (cache npm _cacache, cache yarn, credentials). Possible cache poisoning: injection de code malveillant dans des packages caches.',
     references: [
       'https://attack.mitre.org/techniques/T1565/001/'
@@ -902,6 +1028,7 @@ const RULES = {
     name: 'Encrypted Payload Decryption',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'crypto.createDecipher/createDecipheriv detecte. Dechiffrement runtime de payload embarque. Pattern canonique de flatmap-stream/event-stream.',
     references: [
       'https://snyk.io/blog/malicious-code-found-in-npm-package-event-stream/',
@@ -915,6 +1042,7 @@ const RULES = {
     name: 'Module Compile Execution',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'module._compile() detecte. Execution de code arbitraire a partir d\'une chaine dans le contexte module. Technique cle de flatmap-stream.',
     references: [
       'https://blog.npmjs.org/post/180565383195/details-about-the-event-stream-incident',
@@ -928,6 +1056,7 @@ const RULES = {
     name: 'Obfuscated Payload via Zlib Inflate',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Payload obfusque: zlib inflate + decodage base64 + execution dynamique (eval/Function/Module._compile) dans le meme fichier. Aucun package legitime n\'utilise ce pattern. Technique SANDWORM_MODE (fev. 2026).',
     references: [
       'https://socket.dev/blog/sandworm-mode-campaign',
@@ -941,6 +1070,7 @@ const RULES = {
     name: 'Dynamic Module Compile Execution',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'Module._compile() avec argument dynamique (non-literal). Execution de code en memoire sans ecriture sur disque. Technique d\'evasion malware courante.',
     references: [
       'https://blog.npmjs.org/post/180565383195/details-about-the-event-stream-incident',
@@ -954,6 +1084,7 @@ const RULES = {
     name: 'Anti-Forensics Write-Execute-Delete',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'Anti-forensique: ecriture dans un repertoire temporaire, execution, puis suppression. Pattern typique de staging malware pour eviter la detection post-mortem.',
     references: [
       'https://attack.mitre.org/techniques/T1070/004/'
@@ -966,6 +1097,7 @@ const RULES = {
     name: 'MCP Config Injection',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Injection de configuration MCP: ecriture dans les fichiers de configuration d\'assistants IA (.claude/, .cursor/, .continue/, .vscode/, .windsurf/). Technique SANDWORM_MODE pour empoisonner la chaine d\'outils IA.',
     references: [
       'https://attack.mitre.org/techniques/T1546/016/'
@@ -978,6 +1110,7 @@ const RULES = {
     name: 'Git Hooks Injection',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'Injection de hooks Git: ecriture dans .git/hooks/ ou modification de git config init.templateDir. Technique de persistence via hooks pre-commit, pre-push, post-checkout.',
     references: [
       'https://attack.mitre.org/techniques/T1546/004/'
@@ -990,6 +1123,7 @@ const RULES = {
     name: 'Dynamic Environment Variable Harvesting',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'Collecte dynamique de variables d\'environnement via Object.entries/keys/values(process.env) avec filtrage par patterns sensibles (TOKEN, SECRET, KEY, PASSWORD, AWS, SSH). Technique de vol de credentials.',
     references: [
       'https://attack.mitre.org/techniques/T1552/001/'
@@ -1002,6 +1136,7 @@ const RULES = {
     name: 'DNS Chunk Exfiltration',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'Exfiltration DNS: donnees encodees en base64 dans les requetes DNS. Canal covert pour contourner les firewalls. Pattern: dns.resolve + Buffer.from().toString("base64").',
     references: [
       'https://attack.mitre.org/techniques/T1048/003/'
@@ -1014,6 +1149,7 @@ const RULES = {
     name: 'LLM API Key Harvesting',
     severity: 'MEDIUM',
     confidence: 'medium',
+    domain: 'malware',
     description: 'Collecte de cles API LLM: acces a 3+ variables d\'environnement de providers IA (OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLE_API_KEY, etc.). Vecteur de monetisation.',
     references: [
       'https://attack.mitre.org/techniques/T1552/001/'
@@ -1026,6 +1162,7 @@ const RULES = {
     name: 'AI Agent Weaponization',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Invocation d\'un agent IA (Claude, Gemini, Q, Aider) avec des flags qui desactivent les controles de securite (--dangerously-skip-permissions, --yolo, --trust-all-tools). Technique s1ngularity/Nx (aout 2025).',
     references: [
       'https://snyk.io/blog/malicious-npm-packages-abuse-ai-agents/',
@@ -1041,6 +1178,7 @@ const RULES = {
     name: 'Shai-Hulud GitHub Actions Backdoor',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Backdoor Shai-Hulud dans GitHub Actions via workflow discussion.yaml sur self-hosted runner',
     references: ['https://www.wiz.io/blog/shai-hulud-npm-supply-chain-attack'],
     mitre: 'T1195.002'
@@ -1050,6 +1188,7 @@ const RULES = {
     name: 'GitHub Actions Workflow Injection',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'Injection potentielle dans GitHub Actions via input non sanitise sur self-hosted runner',
     references: ['https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions'],
     mitre: 'T1195.002'
@@ -1059,6 +1198,7 @@ const RULES = {
     name: 'GitHub Actions Pwn Request',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Workflow pull_request_target avec checkout du head ref/sha de la PR — permet execution de code arbitraire (pwn request)',
     references: [
       'https://securitylab.github.com/research/github-actions-preventing-pwn-requests/',
@@ -1071,6 +1211,7 @@ const RULES = {
     name: 'GitHub Actions Secrets Dump',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Workflow utilise toJSON(secrets) pour exfiltrer tous les secrets du repository. Technique Shai-Hulud (TeamPCP, mai 2026).',
     references: [
       'https://github.com/g00dfe11ow/Shai-Hulud-Open-Source',
@@ -1085,6 +1226,7 @@ const RULES = {
     name: 'Sandbox: Sensitive File Read',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Package reads sensitive credential files during install',
     references: ['https://blog.phylum.io/shai-hulud-npm-worm'],
     mitre: 'T1552.001'
@@ -1094,6 +1236,7 @@ const RULES = {
     name: 'Sandbox: Sensitive File Write',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Package writes to sensitive credential files during install',
     references: ['https://blog.phylum.io/shai-hulud-npm-worm'],
     mitre: 'T1565.001'
@@ -1103,6 +1246,7 @@ const RULES = {
     name: 'Sandbox: Suspicious Filesystem Change',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'Package creates files in suspicious system locations during install',
     references: ['https://attack.mitre.org/techniques/T1543/'],
     mitre: 'T1543'
@@ -1112,6 +1256,7 @@ const RULES = {
     name: 'Sandbox: Suspicious DNS Query',
     severity: 'HIGH',
     confidence: 'medium',
+    domain: 'malware',
     description: 'Package resolves non-registry domain during install',
     references: ['https://attack.mitre.org/techniques/T1071/'],
     mitre: 'T1071'
@@ -1121,6 +1266,7 @@ const RULES = {
     name: 'Sandbox: Suspicious Network Connection',
     severity: 'HIGH',
     confidence: 'medium',
+    domain: 'malware',
     description: 'Package makes TCP connection to non-registry host during install',
     references: ['https://attack.mitre.org/techniques/T1071/'],
     mitre: 'T1071'
@@ -1130,6 +1276,7 @@ const RULES = {
     name: 'Sandbox: Dangerous Process Spawned',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Package spawns dangerous command during install (curl, wget, nc, etc.)',
     references: ['https://attack.mitre.org/techniques/T1059/'],
     mitre: 'T1059'
@@ -1139,6 +1286,7 @@ const RULES = {
     name: 'Sandbox: Unknown Process Spawned',
     severity: 'MEDIUM',
     confidence: 'low',
+    domain: 'malware',
     description: 'Package spawns unrecognized process during install',
     references: ['https://attack.mitre.org/techniques/T1059/'],
     mitre: 'T1059'
@@ -1148,6 +1296,7 @@ const RULES = {
     name: 'Sandbox: Container Timeout',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Package install exceeded sandbox timeout - possible infinite loop or resource exhaustion',
     references: ['https://attack.mitre.org/techniques/T1499/'],
     mitre: 'T1499'
@@ -1159,6 +1308,7 @@ const RULES = {
     name: 'Sandbox: Suspicious Timer Delay',
     severity: 'MEDIUM',
     confidence: 'medium',
+    domain: 'malware',
     description: 'Package uses setTimeout/setInterval with delay > 1 hour. Possible time-bomb to evade sandbox analysis.',
     references: ['https://attack.mitre.org/techniques/T1497/003/'],
     mitre: 'T1497.003'
@@ -1168,6 +1318,7 @@ const RULES = {
     name: 'Sandbox: Critical Timer Delay (Time-Bomb)',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Package uses setTimeout/setInterval with delay > 24 hours. Strong indicator of time-bomb malware designed to evade sandbox analysis.',
     references: ['https://attack.mitre.org/techniques/T1497/003/'],
     mitre: 'T1497.003'
@@ -1177,6 +1328,7 @@ const RULES = {
     name: 'Sandbox: Preload Sensitive File Read',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'Package reads sensitive credential files (.npmrc, .ssh, .aws, .env) detected via runtime monkey-patching.',
     references: ['https://attack.mitre.org/techniques/T1552/001/'],
     mitre: 'T1552.001'
@@ -1186,6 +1338,7 @@ const RULES = {
     name: 'Sandbox: Network After Sensitive Read',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Package makes network requests after reading sensitive files. Strong indicator of credential exfiltration.',
     references: ['https://attack.mitre.org/techniques/T1041/'],
     mitre: 'T1041'
@@ -1195,6 +1348,7 @@ const RULES = {
     name: 'Sandbox: Suspicious Command Execution',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'Package executes dangerous commands (curl, wget, bash, sh, powershell) detected via runtime monkey-patching.',
     references: ['https://attack.mitre.org/techniques/T1059/'],
     mitre: 'T1059'
@@ -1204,6 +1358,7 @@ const RULES = {
     name: 'Sandbox: Sensitive Env Var Access',
     severity: 'MEDIUM',
     confidence: 'medium',
+    domain: 'malware',
     description: 'Package accesses sensitive environment variables (TOKEN, SECRET, KEY, PASSWORD) detected via runtime monkey-patching.',
     references: ['https://attack.mitre.org/techniques/T1552/001/'],
     mitre: 'T1552.001'
@@ -1215,6 +1370,7 @@ const RULES = {
     name: 'Sandbox: Network Outlier',
     severity: 'HIGH',
     confidence: 'medium',
+    domain: 'malware',
     description: 'Package contacts a non-registry domain/IP during install. Only 0.027% of packages make DNS queries outside npm infrastructure — this is a high-precision outlier signal.',
     references: ['https://attack.mitre.org/techniques/T1071/001/'],
     mitre: 'T1071.001'
@@ -1224,6 +1380,7 @@ const RULES = {
     name: 'Sandbox: Known Exfiltration Domain',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Package contacts a known exfiltration/C2 domain during install (OAST, webhook sinks, campaign infrastructure). Near-zero false positive rate.',
     references: [
       'https://attack.mitre.org/techniques/T1041/',
@@ -1238,6 +1395,7 @@ const RULES = {
     name: 'Sandbox: Honeypot Decoy File Read',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Le package lit un fichier decoy de credentials plante par la sandbox (.npmrc-decoy, .ssh/id_rsa-decoy, wallet decoy, etc.). Aucun outil legitime ne lit ces chemins. Capture les zero-days qui scannent aveuglement les chemins de credentials connus.',
     references: [
       'https://attack.mitre.org/techniques/T1552/001/',
@@ -1250,6 +1408,7 @@ const RULES = {
     name: 'Sandbox: Credential Target File Read',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'Le package lit un fichier de credentials cible des malwares 2026 (cloud creds, wallets, browser data, GPG, kubernetes config). Pattern PhantomRaven, Shai-Hulud.',
     references: [
       'https://attack.mitre.org/techniques/T1552/001/',
@@ -1262,6 +1421,7 @@ const RULES = {
     name: 'Sandbox: Persistence File Write',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Le package ecrit dans un emplacement de persistance (.bashrc, .zshrc, autostart, cron, systemd user, LaunchAgents, registry Run keys). Aucun cas legitime en npm install.',
     references: [
       'https://attack.mitre.org/techniques/T1547/',
@@ -1274,6 +1434,7 @@ const RULES = {
     name: 'Sandbox: Suspicious Execve Chain Depth',
     severity: 'HIGH',
     confidence: 'medium',
+    domain: 'malware',
     description: 'Chaine de processus depuis npm install au-dela de la profondeur attendue (npm install -> script -> binaire externe). Pattern Shai-Hulud preinstall worm avec curl/wget/bash final.',
     references: [
       'https://unit42.paloaltonetworks.com/npm-supply-chain-attack/',
@@ -1286,6 +1447,7 @@ const RULES = {
     name: 'Sandbox: npm CLI Self-Invocation',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Le package invoque npm publish/deprecate/owner/token/access (ou yarn publish) depuis l\'arborescence npm install. Pattern CanisterWorm self-propagation. Aucun cas legitime.',
     references: [
       'https://www.stepsecurity.io/blog/canisterworm-how-a-self-propagating-npm-worm-is-spreading-backdoors-across-the-ecosystem/',
@@ -1298,6 +1460,7 @@ const RULES = {
     name: 'Sandbox: Runtime Deobfuscation Executed',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'new Function() ou eval() execute avec un body de plus de 500 octets, derive d\'une string source obfusquee (high entropy ou taille >1KB). Pattern Axios 2026 OrDeR_7077: XOR + base64 decoded at runtime then executed.',
     references: [
       'https://snyk.io/blog/axios-npm-package-compromised-supply-chain-attack-delivers-cross-platform/',
@@ -1313,6 +1476,7 @@ const RULES = {
     name: 'High Entropy String',
     severity: 'MEDIUM',
     confidence: 'medium',
+    domain: 'malware',
     description: 'Chaine a haute entropie detectee (base64, hex, payload chiffre). Souvent signe d\'obfuscation ou de donnees encodees.',
     references: ['https://attack.mitre.org/techniques/T1027/'],
     mitre: 'T1027'
@@ -1322,6 +1486,7 @@ const RULES = {
     name: 'Fragmented High Entropy Cluster',
     severity: 'MEDIUM',
     confidence: 'medium',
+    domain: 'malware',
     description: 'Cluster de chaines courtes a haute entropie (8-49 chars) detecte. Technique de fragmentation de payload pour contourner le seuil de longueur minimum d\'analyse entropique.',
     references: ['https://attack.mitre.org/techniques/T1027/'],
     mitre: 'T1027'
@@ -1331,6 +1496,7 @@ const RULES = {
     name: 'JS Obfuscation Pattern',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'Pattern d\'obfuscation JS detecte: variables _0x*, tableaux de strings encodes, eval/Function avec contenu haute entropie, ou long payload base64. Signature de javascript-obfuscator et malwares npm connus.',
     references: [
       'https://attack.mitre.org/techniques/T1027/002/',
@@ -1346,6 +1512,7 @@ const RULES = {
     name: 'Sudden Lifecycle Script Added (Critical)',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Script preinstall/install/postinstall ajoute dans la derniere version. Vecteur d\'attaque #1 des supply chain attacks (Shai-Hulud, ua-parser-js, coa).',
     references: [
       'https://blog.phylum.io/shai-hulud-npm-worm',
@@ -1359,6 +1526,7 @@ const RULES = {
     name: 'Sudden Lifecycle Script Added',
     severity: 'HIGH',
     confidence: 'medium',
+    domain: 'malware',
     description: 'Script lifecycle (prepare, prepack, etc.) ajoute dans la derniere version. Potentiellement suspect si non justifie.',
     references: [
       'https://docs.npmjs.com/cli/v9/using-npm/scripts#life-cycle-scripts',
@@ -1371,6 +1539,7 @@ const RULES = {
     name: 'Lifecycle Script Modified',
     severity: 'MEDIUM',
     confidence: 'medium',
+    domain: 'malware',
     description: 'Script lifecycle modifie entre les deux dernieres versions. Verifier si le changement est legitime.',
     references: [
       'https://docs.npmjs.com/cli/v9/using-npm/scripts#life-cycle-scripts'
@@ -1384,6 +1553,7 @@ const RULES = {
     name: 'Dangerous API Added (Critical)',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'API dangereuse (child_process, eval, Function, net.connect) apparue dans la derniere version. Absente de la version precedente.',
     references: [
       'https://blog.phylum.io/shai-hulud-npm-worm',
@@ -1396,6 +1566,7 @@ const RULES = {
     name: 'Dangerous API Added (High)',
     severity: 'HIGH',
     confidence: 'medium',
+    domain: 'malware',
     description: 'API suspecte (process.env, fetch, http/https) apparue dans la derniere version. Absente de la version precedente.',
     references: [
       'https://blog.phylum.io/shai-hulud-npm-worm',
@@ -1408,6 +1579,7 @@ const RULES = {
     name: 'Dangerous API Added (Medium)',
     severity: 'MEDIUM',
     confidence: 'medium',
+    domain: 'malware',
     description: 'API potentiellement suspecte (dns.lookup, fs.readFile sur chemin sensible) apparue dans la derniere version.',
     references: [
       'https://docs.npmjs.com/cli/v9/using-npm/scripts#life-cycle-scripts'
@@ -1421,6 +1593,7 @@ const RULES = {
     name: 'Publish Burst Detected',
     severity: 'LOW',
     confidence: 'high',
+    domain: 'author',
     description: 'Multiple versions publiees en moins de 24h. Possible compromission de compte ou attaque automatisee.',
     references: [
       'https://blog.phylum.io/shai-hulud-npm-worm',
@@ -1433,6 +1606,7 @@ const RULES = {
     name: 'Dormant Package Spike',
     severity: 'HIGH',
     confidence: 'medium',
+    domain: 'author',
     description: 'Package inactif depuis 6+ mois avec une nouvelle version soudaine. Possible changement de mainteneur ou compromission.',
     references: [
       'https://blog.npmjs.org/post/180565383195/details-about-the-event-stream-incident',
@@ -1445,6 +1619,7 @@ const RULES = {
     name: 'Rapid Version Succession',
     severity: 'MEDIUM',
     confidence: 'medium',
+    domain: 'author',
     description: 'Versions publiees en succession rapide (moins d\'1h). Possible attaque automatisee ou CI/CD compromis.',
     references: [
       'https://docs.npmjs.com/cli/v9/using-npm/scripts#life-cycle-scripts'
@@ -1458,6 +1633,7 @@ const RULES = {
     name: 'New Maintainer Added',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'author',
     description: 'Un nouveau maintainer a ete ajoute au package entre les deux dernieres versions. Verifier si le changement est legitime.',
     references: [
       'https://blog.npmjs.org/post/180565383195/details-about-the-event-stream-incident',
@@ -1470,6 +1646,7 @@ const RULES = {
     name: 'Suspicious Maintainer Detected',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'author',
     description: 'Maintainer avec un nom suspect (generique, auto-genere, tres court). Risque eleve de compromission de compte.',
     references: [
       'https://blog.npmjs.org/post/180565383195/details-about-the-event-stream-incident',
@@ -1482,6 +1659,7 @@ const RULES = {
     name: 'Sole Maintainer Changed',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'author',
     description: 'Le seul maintainer du package a change. Indicateur fort de compromission de compte (event-stream attack pattern).',
     references: [
       'https://blog.npmjs.org/post/180565383195/details-about-the-event-stream-incident',
@@ -1494,6 +1672,7 @@ const RULES = {
     name: 'New Publisher Detected',
     severity: 'MEDIUM',
     confidence: 'medium',
+    domain: 'author',
     description: 'La derniere version a ete publiee par un utilisateur different de la version precedente. Verifier la legitimite.',
     references: [
       'https://blog.npmjs.org/post/180565383195/details-about-the-event-stream-incident'
@@ -1505,6 +1684,7 @@ const RULES = {
     name: 'Unclaimed Maintainer Email Domain',
     severity: 'HIGH',
     confidence: 'medium',
+    domain: 'author',
     description: 'Le domaine de l\'email du mainteneur n\'a aucun MX record valide. Un attaquant peut enregistrer le domaine, creer la boite mail, declencher un reset de mot de passe npm, prendre le compte. Signal composite-only (HIGH x medium = 8.5 pts isole, sous T1).',
     references: [
       'https://github.com/DataDog/guarddog/blob/main/guarddog/analyzer/metadata/npm/unclaimed_maintainer_email_domain.py',
@@ -1517,6 +1697,7 @@ const RULES = {
     name: 'Compromised Maintainer Email Domain',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'author',
     description: 'Le domaine de l\'email du mainteneur a ete enregistre APRES la premiere publication du package (marge 30j). Pattern de rachat de domaine expire: l\'attaquant reprend le mail, declenche un reset de mot de passe npm, prend le compte. Signal composite-only (HIGH x high = 10 pts isole, sous T1).',
     references: [
       'https://github.com/DataDog/guarddog/blob/main/guarddog/analyzer/metadata/npm/potentially_compromised_email_domain.py',
@@ -1532,6 +1713,7 @@ const RULES = {
     name: 'Canary Token Exfiltration',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Le package a tente d\'exfiltrer des honey tokens (faux secrets) injectes dans le sandbox. Comportement malveillant confirme.',
     references: [
       'https://canarytokens.org/generate',
@@ -1545,6 +1727,7 @@ const RULES = {
     name: 'Suspicious C2/Exfiltration Domain',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'Domaine C2 ou d\'exfiltration detecte dans le code (oastify.com, burpcollaborator.net, webhook.site, ngrok.io, etc.). Ces domaines sont utilises pour recevoir des donnees volees ou comme relais de commande.',
     references: [
       'https://attack.mitre.org/techniques/T1071/001/',
@@ -1558,6 +1741,7 @@ const RULES = {
     name: 'Steganographic Payload Chain',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Chaine steganographique: fetch distant + dechiffrement crypto + execution dynamique (eval/Function). Pattern buildrunner-dev: payload cache dans une image, dechiffre a runtime, puis execute.',
     references: [
       'https://attack.mitre.org/techniques/T1027/003/',
@@ -1571,6 +1755,7 @@ const RULES = {
     name: 'Download-Execute Binary Pattern',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Pattern download-execute: telechargement distant + chmod executable + execSync dans le meme fichier. Dropper binaire deguise en compilation native addon (NeoShadow pattern).',
     references: [
       'https://attack.mitre.org/techniques/T1105/',
@@ -1584,6 +1769,7 @@ const RULES = {
     name: 'IDE Task Persistence',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'Persistence IDE: ecriture dans tasks.json ou Code/User/ avec execution automatique a l\'ouverture du dossier (runOn: folderOpen). Pattern FAMOUS CHOLLIMA / StegaBin pour persistance VS Code.',
     references: [
       'https://attack.mitre.org/techniques/T1546/'
@@ -1596,6 +1782,7 @@ const RULES = {
     name: 'VM Module Code Execution',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'Execution de code dynamique via le module vm de Node.js (vm.runInThisContext, vm.runInNewContext, vm.compileFunction, new vm.Script). Contourne la detection eval/Function.',
     references: [
       'https://nodejs.org/api/vm.html',
@@ -1609,6 +1796,7 @@ const RULES = {
     name: 'Reflect API Code Execution',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Execution de code dynamique via Reflect.construct(Function, [...]) ou Reflect.apply(eval, ...). Contourne la detection directe de eval/Function/new Function.',
     references: [
       'https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Reflect',
@@ -1622,6 +1810,7 @@ const RULES = {
     name: 'Process Binding Abuse',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Acces direct aux bindings V8 internes via process.binding() ou process._linkedBinding(). Contourne les modules child_process/fs pour execution de commandes ou acces fichiers sans detection.',
     references: [
       'https://nodejs.org/api/process.html#processbindingname',
@@ -1635,6 +1824,7 @@ const RULES = {
     name: 'Worker Thread Code Execution',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'new Worker() avec eval:true execute du code arbitraire dans un thread worker, contournant la detection du thread principal. Technique d\'evasion pour executer du code dynamique hors du scope AST principal.',
     references: [
       'https://nodejs.org/api/worker_threads.html',
@@ -1647,6 +1837,7 @@ const RULES = {
     name: 'WASM Host Import Sink',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Module WebAssembly charge avec des callbacks host contenant des sinks reseau (fetch/http.request). Le WASM peut invoquer ces callbacks pour exfiltrer des donnees tout en cachant le flux de controle. Aucun package npm legitime ne combine WASM + callbacks reseau host.',
     references: [
       'https://attack.mitre.org/techniques/T1059/',
@@ -1659,6 +1850,7 @@ const RULES = {
     name: 'WASM Module Load (Standalone)',
     severity: 'MEDIUM',
     confidence: 'medium',
+    domain: 'malware',
     description: 'Module WebAssembly charge sans sink reseau detectable. Usage legitime frequent (cryptographie, traitement d\'image, codecs). Le WASM cache le flux de controle — verifier le fichier .wasm manuellement.',
     references: ['https://attack.mitre.org/techniques/T1027/'],
     mitre: 'T1027'
@@ -1668,6 +1860,7 @@ const RULES = {
     name: 'Credential Regex Harvesting',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'Regex de detection de credentials (token/password/secret/Bearer) combine avec un appel reseau. Technique de harvesting: le code scanne les donnees de flux (streams, requetes) a la recherche de credentials et les exfiltre.',
     references: [
       'https://attack.mitre.org/techniques/T1552/',
@@ -1680,6 +1873,7 @@ const RULES = {
     name: 'Built-in Method Override Exfiltration',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'Override de methode built-in (console.log/warn/error, Object.defineProperty) combine avec un appel reseau. Technique de monkey-patching: le code remplace une API native pour intercepter les donnees en transit et les exfiltrer.',
     references: [
       'https://attack.mitre.org/techniques/T1557/',
@@ -1692,6 +1886,7 @@ const RULES = {
     name: 'Stream Credential Interception',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'Classe stream (Transform/Duplex/Writable) avec regex de credentials et appel reseau. Technique de wiretap: le stream intercepte les donnees en transit, scanne pour des credentials (Bearer, password, token) et les exfiltre.',
     references: [
       'https://attack.mitre.org/techniques/T1557/',
@@ -1704,6 +1899,7 @@ const RULES = {
     name: 'Remote Code Loading',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Fetch reseau + eval/Function dans le meme fichier. Technique multi-stage: le code telecharge un payload distant (SVG, HTML, JSON) et l\'execute dynamiquement. Aucun package npm legitime ne combine fetch + eval/Function.',
     references: [
       'https://attack.mitre.org/techniques/T1105/',
@@ -1716,6 +1912,7 @@ const RULES = {
     name: 'Proxy Data Interception',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Proxy trap (set/get/apply) combine avec un appel reseau dans le meme fichier. Technique d\'interception de donnees: le Proxy capture toutes les ecritures/lectures de proprietes et les exfiltre via le reseau. Utilise pour voler des credentials passees via module.exports.',
     references: [
       'https://attack.mitre.org/techniques/T1557/',
@@ -1729,6 +1926,7 @@ const RULES = {
     name: 'Bin Field PATH Hijack',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Le champ "bin" de package.json shadow une commande systeme (node, npm, git, bash, etc.). A l\'install, npm cree un symlink dans node_modules/.bin/ qui intercepte la commande reelle pour tous les npm scripts.',
     references: [
       'https://socket.dev/blog/2025-supply-chain-report',
@@ -1741,6 +1939,7 @@ const RULES = {
     name: 'Git Dependency RCE (PackageGate)',
     severity: 'HIGH',
     confidence: 'medium',
+    domain: 'malware',
     description: 'Dependance utilisant une URL git+ ou git://. Vecteur PackageGate: un .npmrc malveillant peut overrider le binaire git, permettant l\'execution de code meme avec --ignore-scripts.',
     references: [
       'https://socket.dev/blog/packagegate-npm-rce',
@@ -1753,6 +1952,7 @@ const RULES = {
     name: '.npmrc Git Binary Override',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Fichier .npmrc contient git= override — technique PackageGate: remplace le binaire git par un script controle par l\'attaquant.',
     references: [
       'https://socket.dev/blog/packagegate-npm-rce'
@@ -1766,6 +1966,7 @@ const RULES = {
     name: 'Write to node_modules/ (Worm Propagation)',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'writeFileSync/writeFile/appendFileSync ciblant node_modules/ — technique de propagation worm Shai-Hulud 2.0: modifie d\'autres packages installes pour injecter un backdoor persistent.',
     references: [
       'https://www.wiz.io/blog/shai-hulud-npm-supply-chain-attack',
@@ -1778,6 +1979,7 @@ const RULES = {
     name: 'Bun Runtime Evasion',
     severity: 'HIGH',
     confidence: 'medium',
+    domain: 'malware',
     description: 'Invocation du runtime Bun (bun run/exec/install) via exec/spawn — technique Shai-Hulud 2.0: utilise un runtime alternatif pour echapper aux sandboxes et monitoring Node.js.',
     references: [
       'https://www.wiz.io/blog/shai-hulud-npm-supply-chain-attack',
@@ -1790,6 +1992,7 @@ const RULES = {
     name: 'Static Timer Bomb',
     severity: 'MEDIUM',
     confidence: 'medium',
+    domain: 'malware',
     description: 'setTimeout/setInterval avec delai > 1h detecte statiquement. PhantomRaven active le 2nd stage 48h+ apres install. Evasion temporelle: le payload s\'active bien apres l\'installation pour echapper aux sandboxes.',
     references: [
       'https://www.sonatype.com/blog/phantomraven-supply-chain-attack',
@@ -1802,6 +2005,7 @@ const RULES = {
     name: 'npm publish Worm Propagation',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'exec("npm publish") detecte — technique de propagation worm Shai-Hulud: utilise les tokens npm voles pour publier des versions infectees des packages de la victime.',
     references: [
       'https://blog.phylum.io/shai-hulud-npm-worm',
@@ -1815,6 +2019,7 @@ const RULES = {
     name: 'Ollama Local LLM (Polymorphic Engine)',
     severity: 'HIGH',
     confidence: 'medium',
+    domain: 'malware',
     description: 'Reference au port 11434 (Ollama) detectee. PhantomRaven Wave 4 utilise un LLM local pour reecrire le malware et eviter la detection signature. Moteur polymorphe.',
     references: [
       'https://www.sonatype.com/blog/phantomraven-supply-chain-attack',
@@ -1829,6 +2034,7 @@ const RULES = {
     name: 'Curl IFS Variable Evasion',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Evasion IFS: curl$IFS ou curl${IFS} pipe vers shell. Technique d\'evasion pour contourner la detection de curl|sh en utilisant $IFS comme separateur.',
     references: ['https://attack.mitre.org/techniques/T1059/004/'],
     mitre: 'T1059.004'
@@ -1838,6 +2044,7 @@ const RULES = {
     name: 'Eval Curl Command Substitution',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'eval $(curl ...) detecte. Telecharge et execute du code distant via command substitution.',
     references: ['https://attack.mitre.org/techniques/T1059/004/'],
     mitre: 'T1059.004'
@@ -1847,6 +2054,7 @@ const RULES = {
     name: 'Shell -c Curl Execution',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'sh -c wrapping autour de curl. Technique d\'evasion pour masquer l\'execution de commandes distantes.',
     references: ['https://attack.mitre.org/techniques/T1059/004/'],
     mitre: 'T1059.004'
@@ -1856,6 +2064,7 @@ const RULES = {
     name: 'Python Time Delay Execution',
     severity: 'HIGH',
     confidence: 'medium',
+    domain: 'malware',
     description: 'Execution Python avec delai time.sleep() >= 100s via child process. Technique d\'evasion sandbox (T1497.003) : le malware attend que la sandbox expire avant d\'executer le payload.',
     references: ['https://attack.mitre.org/techniques/T1497/003/'],
     mitre: 'T1497.003'
@@ -1867,6 +2076,7 @@ const RULES = {
     name: 'Detached Process Credential Exfiltration',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Process detache (survit au parent) avec acces aux credentials et appel reseau — technique DPRK/Lazarus pour exfiltrer des secrets en arriere-plan',
     references: [
       'https://attack.mitre.org/techniques/T1041/',
@@ -1879,6 +2089,7 @@ const RULES = {
     name: 'Intent Credential Exfiltration',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Coherence d\'intention: lecture de credentials (fichiers sensibles, env vars) combinee avec un sink reseau ou exec dans le meme package. Pattern typique DPRK/Lazarus: code malveillant fragmente sur plusieurs fichiers avec uniquement des APIs legitimes.',
     references: [
       'https://attack.mitre.org/techniques/T1041/',
@@ -1891,6 +2102,7 @@ const RULES = {
     name: 'Intent Command Output Exfiltration',
     severity: 'HIGH',
     confidence: 'medium',
+    domain: 'malware',
     description: 'Coherence d\'intention: sortie de commande systeme combinee avec un sink reseau. Le code execute des commandes et transmet les resultats sur le reseau — reconnaissance ou exfiltration.',
     references: [
       'https://attack.mitre.org/techniques/T1059/',
@@ -1905,6 +2117,7 @@ const RULES = {
     name: 'Unicode Invisible Character Injection',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Caracteres Unicode invisibles detectes (zero-width, variation selectors). Technique GlassWorm: encodage de payload malveillant via variation selectors (U+FE00-FE0F, U+E0100-E01EF) invisible dans les editeurs.',
     references: [
       'https://www.aikido.dev/blog/glassworm-returns-unicode-attack-github-npm-vscode',
@@ -1917,6 +2130,7 @@ const RULES = {
     name: 'Unicode Variation Selector Decoder',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Decodeur de payload Unicode via variation selectors (.codePointAt + 0xFE00/0xE0100). Signature GlassWorm: le code reconstruit un payload octet par octet a partir de caracteres invisibles.',
     references: [
       'https://www.koi.security/blog/glassworm-first-self-propagating-worm-using-invisible-code-hits-openvsx-marketplace',
@@ -1929,6 +2143,7 @@ const RULES = {
     name: 'Blockchain C2 Resolution (Dead Drop)',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'Import Solana/Web3 + appel API C2 (getSignaturesForAddress, getTransaction). Technique GlassWorm: la blockchain sert de dead drop resolver pour obtenir l\'adresse C2 via le champ memo des transactions.',
     references: [
       'https://www.sonatype.com/blog/hijacked-npm-packages-deliver-malware-via-solana-linked-to-glassworm',
@@ -1941,6 +2156,7 @@ const RULES = {
     name: 'AsyncFunction/GeneratorFunction Constructor via Prototype Chain',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Acces au constructeur AsyncFunction ou GeneratorFunction via Object.getPrototypeOf(). Technique d\'evasion permettant d\'executer du code arbitraire sans reference directe a eval() ou Function().',
     references: [
       'https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/AsyncFunction',
@@ -1953,6 +2169,7 @@ const RULES = {
     name: 'Split High-Entropy Payload',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Payload haute entropie fragmente en ≥3 chunks concatenes pour contourner la detection par string individuelle. Le resultat concatene passe par eval/Function/atob/Buffer.from, indiquant un dechiffrement ou une execution staged.',
     references: [
       'https://attack.mitre.org/techniques/T1027/002/',
@@ -1965,6 +2182,7 @@ const RULES = {
     name: 'Module._load() Internal Loader Bypass',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Module._load() detecte — bypass du module loader interne de Node.js pour charger dynamiquement des modules sans passer par require(). Technique d\'evasion contournant les restrictions de chargement de modules.',
     references: [
       'https://nodejs.org/api/modules.html',
@@ -1978,6 +2196,7 @@ const RULES = {
     name: 'Hardcoded Blockchain RPC Endpoint',
     severity: 'MEDIUM',
     confidence: 'medium',
+    domain: 'malware',
     description: 'Endpoint RPC blockchain hardcode (Solana mainnet, Infura Ethereum). Dans un package non-crypto, indique un potentiel canal C2 via blockchain.',
     references: [
       'https://www.koi.security/blog/glassworm-first-self-propagating-worm-using-invisible-code-hits-openvsx-marketplace',
@@ -1992,6 +2211,7 @@ const RULES = {
     name: 'Systemd Service Persistence',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Ecriture dans un chemin systemd (*.service, systemd/) ou execution de systemctl enable/start. Technique de persistence CanisterWorm (pgmon.service) et TeamPCP (sysmon.service). Aucun package npm legitime ne cree de services systemd.',
     references: [
       'https://research.jfrog.com/post/canister-worm/',
@@ -2004,6 +2224,7 @@ const RULES = {
     name: 'Python .pth Auto-Exec Persistence',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Ecriture d\'un fichier .pth detectee. Les fichiers .pth dans site-packages/ sont executes automatiquement par l\'interpreteur Python au demarrage, sans import explicite. Technique de persistence LiteLLM/Checkmarx (litellm_init.pth) : le .pth contient du code Python base64-encode qui installe un stealer.',
     references: [
       'https://blog.pypi.org/posts/2026-03-24-litellm-compromise/',
@@ -2016,6 +2237,7 @@ const RULES = {
     name: 'NPM Token Extraction via CLI',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Execution de npm config get _authToken ou npm whoami — extraction programmatique de credentials npm. Pattern CanisterWorm findNpmTokens() utilise pour la propagation worm.',
     references: [
       'https://research.jfrog.com/post/canister-worm/',
@@ -2028,6 +2250,7 @@ const RULES = {
     name: 'Root Filesystem Wipe',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Commande rm -rf / detectee — suppression de tout le systeme de fichiers. Pattern kamikaze.sh (CanisterWorm wiper ciblant Iran via timezone Asia/Tehran). Plus destructif que home_deletion.',
     references: [
       'https://www.aikido.dev/blog/teampcp-stage-payload-canisterworm-iran',
@@ -2040,6 +2263,7 @@ const RULES = {
     name: 'Process Memory Scanning',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Acces a /proc/*/mem detecte — extraction de secrets depuis la memoire des processus. Technique TeamPCP credential stealer (Trivy v0.69.4) : scan des process Runner.Worker pour extraire les secrets CI/CD.',
     references: [
       'https://www.wiz.io/blog/trivy-compromised-teampcp-supply-chain-attack',
@@ -2055,6 +2279,7 @@ const RULES = {
     name: 'Steganographic Payload + Crypto Decryption',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Reference a un fichier binaire (.png/.jpg/.wasm) avec eval() combinee avec dechiffrement crypto (createDecipher). Chaine steganographique complete: payload cache dans un fichier binaire, dechiffre a runtime.',
     references: [
       'https://attack.mitre.org/techniques/T1140/',
@@ -2067,6 +2292,7 @@ const RULES = {
     name: 'Lifecycle Hook on Typosquat Package',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Script lifecycle (preinstall/postinstall) sur un package avec nom similaire a un package populaire. Vecteur classique de dependency confusion: le code s\'execute automatiquement a l\'installation.',
     references: [
       'https://attack.mitre.org/techniques/T1195/002/',
@@ -2079,6 +2305,7 @@ const RULES = {
     name: 'Lifecycle Hook + Inline Node Execution',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Script lifecycle avec execution inline Node.js (node -e). Le code s\'execute automatiquement a npm install avec un payload inline.',
     references: [
       'https://attack.mitre.org/techniques/T1059/007/',
@@ -2091,6 +2318,7 @@ const RULES = {
     name: 'Lifecycle Hook + Remote Code Loading',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Script lifecycle avec require(http/https) pour charger du code distant. Le payload est telecharge et execute automatiquement a l\'installation.',
     references: [
       'https://attack.mitre.org/techniques/T1105/',
@@ -2103,6 +2331,7 @@ const RULES = {
     name: 'Lifecycle Script Executes Malicious File',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Un script lifecycle (preinstall/install/postinstall) reference un fichier JS local qui contient des menaces HIGH/CRITICAL. Indicateur fort de malware install-time: le fichier malveillant est cache derriere une indirection lifecycle.',
     references: [
       'https://blog.phylum.io/shai-hulud-npm-worm',
@@ -2115,6 +2344,7 @@ const RULES = {
     name: 'WebSocket/MQTT Credential Exfiltration',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Acces a une variable d\'environnement sensible combine avec un sink reseau non-HTTP (WebSocket, MQTT, Socket.io) dans le meme fichier. Canal d\'exfiltration furtif evitant les proxies HTTP.',
     references: [
       'https://attack.mitre.org/techniques/T1041/',
@@ -2127,6 +2357,7 @@ const RULES = {
     name: 'Uncaught Exception Handler Credential Exfiltration',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'process.on("uncaughtException") combine avec acces aux variables d\'environnement sensibles et appel reseau. Technique d\'exfiltration silencieuse: le handler intercepte les erreurs pour envoyer les credentials a un serveur externe sans interruption du processus.',
     references: [
       'https://attack.mitre.org/techniques/T1041/',
@@ -2140,6 +2371,7 @@ const RULES = {
     name: 'Lifecycle Hook + Suspicious Dataflow',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'Script lifecycle (preinstall/postinstall) combine avec un flux de donnees suspect (credential read → network send). Pattern classique d\'exfiltration install-time.',
     references: [
       'https://attack.mitre.org/techniques/T1041/',
@@ -2152,6 +2384,7 @@ const RULES = {
     name: 'Lifecycle Hook + Dangerous Shell Execution',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Script lifecycle combine avec execution de commande shell dangereuse (curl, wget, nc, bash). Injection de commande automatique a l\'installation.',
     references: [
       'https://attack.mitre.org/techniques/T1059/004/',
@@ -2164,6 +2397,7 @@ const RULES = {
     name: 'Obfuscated Lifecycle Credential Access',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'Obfuscation + acces aux variables d\'environnement sensibles + script lifecycle. Triple signal: le code est intentionnellement masque pour voler des credentials a l\'installation.',
     references: [
       'https://attack.mitre.org/techniques/T1027/',
@@ -2176,6 +2410,7 @@ const RULES = {
     name: 'Non-HTTP Network Module Sink',
     severity: 'MEDIUM',
     confidence: 'medium',
+    domain: 'malware',
     description: 'Utilisation d\'un module reseau non-HTTP (ws, mqtt, socket.io) comme sink de donnees. Ces modules sont rarement utilises dans les packages benins et peuvent indiquer un canal d\'exfiltration furtif.',
     references: [
       'https://attack.mitre.org/techniques/T1071/'
@@ -2187,6 +2422,7 @@ const RULES = {
     name: 'Large Package Graph Truncated',
     severity: 'MEDIUM',
     confidence: 'medium',
+    domain: 'malware',
     description: 'Le graphe de modules depasse la limite (MAX_GRAPH_NODES). Cross-file dataflow non analyse — risque de blind spot sur monorepo ou large package. Auditer les sous-modules manuellement.',
     references: [
       'https://attack.mitre.org/techniques/T1195/002/'
@@ -2200,6 +2436,7 @@ const RULES = {
     name: 'Reflect.apply(require) Bypass',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Reflect.apply(require, null, [module]) detecte — contourne la detection statique de require() en passant par l\'API Reflect. Permet de charger child_process/fs/net sans appel require() direct.',
     references: [
       'https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Reflect/apply',
@@ -2212,6 +2449,7 @@ const RULES = {
     name: 'FinalizationRegistry Deferred Execution',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'new FinalizationRegistry() avec callback contenant child_process/exec/spawn. Le callback s\'execute apres le garbage collection, hors du flux d\'execution normal — technique d\'evasion sandbox qui differe l\'execution malveillante.',
     references: [
       'https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/FinalizationRegistry',
@@ -2224,6 +2462,7 @@ const RULES = {
     name: 'Function via Prototype Chain',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: '(function(){}).constructor(code) ou [].constructor.constructor(code) detecte — acces au constructeur Function via la chaine de prototypes, contourne les detections de new Function() et eval().',
     references: [
       'https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function',
@@ -2236,6 +2475,7 @@ const RULES = {
     name: 'Prototype Pollution',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'vulnerability',
     description: '__defineGetter__, __defineSetter__ ou assignation __proto__ detectee — pollution de prototype permettant de detourner les proprietes heritees de tous les objets. Vecteur d\'escalade pour injecter du code dans des chemins d\'execution inattendus.',
     references: [
       'https://portswigger.net/web-security/prototype-pollution',
@@ -2248,6 +2488,7 @@ const RULES = {
     name: 'Module.wrap Override',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Module.wrap = ... detecte — remplacement de la fonction wrapper du module loader Node.js. Permet d\'injecter du code dans CHAQUE module charge apres le remplacement, technique de persistence systemique.',
     references: [
       'https://nodejs.org/api/modules.html',
@@ -2260,6 +2501,7 @@ const RULES = {
     name: 'Symbol Property Hiding',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'obj[Symbol(...)] = require(module_dangereux) detecte — dissimulation de modules dangereux derriere des proprietes Symbol, invisibles a Object.keys() et JSON.stringify(). Technique anti-forensics.',
     references: [
       'https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Symbol',
@@ -2272,6 +2514,7 @@ const RULES = {
     name: 'WithStatement Dangerous Body',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'with() statement dont le body contient require/exec/spawn/child_process — injection de scope pour obscurcir les appels dangereux. Le with() rend tous les identifiants ambigus, empechant l\'analyse statique de tracer les appels.',
     references: [
       'https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/with',
@@ -2284,6 +2527,7 @@ const RULES = {
     name: 'require("process").mainModule Bypass',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'require("process").mainModule.require() detecte — acces indirect au mainModule via require("process") au lieu de l\'objet global process. Contourne la detection de process.mainModule.require() qui ne surveille que l\'identifiant "process".',
     references: [
       'https://nodejs.org/api/process.html',
@@ -2298,6 +2542,7 @@ const RULES = {
     name: 'Shared Memory IPC',
     severity: 'MEDIUM',
     confidence: 'medium',
+    domain: 'malware',
     description: 'SharedArrayBuffer + Worker Thread detectes — canal IPC memoire partagee qui contourne la surveillance des messages inter-threads.',
     references: [
       'https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SharedArrayBuffer',
@@ -2310,6 +2555,7 @@ const RULES = {
     name: 'WebSocket C2 Channel',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'Connexion WebSocket vers un domaine suspect ou avec execution dynamique — canal C2 bidirectionnel persistant.',
     references: [
       'https://attack.mitre.org/techniques/T1071.001/',
@@ -2322,6 +2568,7 @@ const RULES = {
     name: 'UDP Data Exfiltration',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'Module dgram (UDP) avec envoi de donnees — exfiltration via protocole UDP qui contourne les firewalls HTTP.',
     references: [
       'https://nodejs.org/api/dgram.html',
@@ -2334,6 +2581,7 @@ const RULES = {
     name: 'Native Addon Installation',
     severity: 'HIGH',
     confidence: 'medium',
+    domain: 'malware',
     description: 'binding.gyp present avec script lifecycle non-standard — compilation native potentiellement malveillante a l\'installation.',
     references: [
       'https://nodejs.org/api/addons.html',
@@ -2346,6 +2594,7 @@ const RULES = {
     name: 'String Mutation Obfuscation',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'Chaine de 3+ appels .replace() pour reconstruire des noms d\'API dangereuses — technique leet-speak/substitution pour contourner la detection statique.',
     references: [
       'https://attack.mitre.org/techniques/T1027/',
@@ -2358,6 +2607,7 @@ const RULES = {
     name: 'Crontab/Cron Write',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Ecriture dans les fichiers cron (/etc/cron*, crontab, /var/spool/cron) — persistence via tache planifiee.',
     references: [
       'https://attack.mitre.org/techniques/T1053.003/',
@@ -2370,6 +2620,7 @@ const RULES = {
     name: 'Isolated Suspicious File',
     severity: 'MEDIUM',
     confidence: 'medium',
+    domain: 'malware',
     description: 'Un seul fichier suspect parmi 10+ fichiers propres — pattern de dissimulation ou le code malveillant est cache dans un package legitime.',
     references: [
       'https://attack.mitre.org/techniques/T1036/'
@@ -2381,6 +2632,7 @@ const RULES = {
     name: 'Deeply Nested Suspicious File',
     severity: 'LOW',
     confidence: 'low',
+    domain: 'malware',
     description: 'Pattern suspect detecte dans un fichier profondement imbrique (profondeur > 3) — technique de dissimulation dans l\'arborescence du package.',
     references: [
       'https://attack.mitre.org/techniques/T1036.005/'
@@ -2394,6 +2646,7 @@ const RULES = {
     name: 'Module Internals Hijack',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Assignation a Module._resolveFilename, _compile ou _extensions — detournement des mecanismes internes du systeme de modules Node.js. Tous les require() subsequents peuvent etre interceptes.',
     references: [
       'https://nodejs.org/api/modules.html',
@@ -2406,6 +2659,7 @@ const RULES = {
     name: 'JSON Reviver Prototype Pollution',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'vulnerability',
     description: 'JSON.parse avec fonction reviver accedant a __proto__ ou prototype — pollution de prototype via donnees JSON non fiables.',
     references: [
       'https://portswigger.net/web-security/prototype-pollution',
@@ -2418,6 +2672,7 @@ const RULES = {
     name: 'VM Dynamic Code Execution',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'vm.runInContext/runInNewContext/compileFunction avec code construit dynamiquement — evasion du sandbox via code genere au runtime.',
     references: [
       'https://nodejs.org/api/vm.html',
@@ -2430,6 +2685,7 @@ const RULES = {
     name: 'Callback Remote Code Execution',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'exec/spawn dans un callback .on(\'message\') ou .on(\'data\') avec child_process — execution de commandes a distance depuis un flux reseau.',
     references: [
       'https://attack.mitre.org/techniques/T1059/',
@@ -2442,6 +2698,7 @@ const RULES = {
     name: 'Steganographic Binary Execution',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Lecture de fichier binaire/image (PNG, JPG) + execution dynamique (eval/Function) — extraction et execution de payload steganographique.',
     references: [
       'https://attack.mitre.org/techniques/T1027.003/',
@@ -2454,6 +2711,7 @@ const RULES = {
     name: 'AsyncLocalStorage Context Execution',
     severity: 'HIGH',
     confidence: 'medium',
+    domain: 'malware',
     description: 'AsyncLocalStorage + execution dynamique — code malveillant cache dans un contexte asynchrone, echappe a l\'analyse de pile d\'appels synchrone.',
     references: [
       'https://nodejs.org/api/async_context.html',
@@ -2466,6 +2724,7 @@ const RULES = {
     name: 'Prototype Chain Constructor Access via Variable',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Object.getPrototypeOf(variable).constructor extrait dans une variable — traversee de la chaine de prototypes pour atteindre le constructeur Function et executer du code arbitraire.',
     references: [
       'https://attack.mitre.org/techniques/T1059.007/',
@@ -2478,6 +2737,7 @@ const RULES = {
     name: 'CI Environment Fingerprinting',
     severity: 'HIGH',
     confidence: 'medium',
+    domain: 'malware',
     description: 'References a 3+ variables d\'environnement de fournisseurs CI (GITHUB_ACTIONS, GITLAB_CI, etc.) — sondage d\'environnement CI pour activation conditionnelle de payload.',
     references: [
       'https://attack.mitre.org/techniques/T1082/',
@@ -2490,6 +2750,7 @@ const RULES = {
     name: 'Proxy GlobalThis Interception',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'new Proxy(globalThis/global/window/self) — intercepts all global scope access, enabling transparent hooking of eval/Function/require.',
     references: ['https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Proxy'],
     mitre: 'T1574'
@@ -2499,6 +2760,7 @@ const RULES = {
     name: 'Reflect.apply Prototype Method Code Execution',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Reflect.apply(Function.prototype.bind/call/apply, Function, [...]) — indirect code execution via Reflect with prototype method as target.',
     references: ['https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Reflect/apply'],
     mitre: 'T1059'
@@ -2508,6 +2770,7 @@ const RULES = {
     name: 'Timer Delayed Payload',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'setTimeout/setInterval avec delai >= 60s contenant un sink dangereux (eval/exec/spawn/Function) dans le callback. Evasion temporelle: le payload s\'active apres le timeout des sandboxes. Technique PhantomRaven/timer-bomb-exfil.',
     references: [
       'https://attack.mitre.org/techniques/T1497/003/',
@@ -2520,6 +2783,7 @@ const RULES = {
     name: 'Phantom Lifecycle Script',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Script lifecycle (preinstall/install) reference un fichier qui n\'existe pas dans le package — script fantome, le payload peut etre injecte au moment de la publication.',
     references: [
       'https://attack.mitre.org/techniques/T1195.002/',
@@ -2533,6 +2797,7 @@ const RULES = {
     name: 'Curl/Wget Environment Exfiltration',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'curl/wget combine avec base64 ou env dans un lifecycle script — exfiltration de credentials a l\'installation. Pattern: curl -d $(env|base64) URL dans preinstall/postinstall.',
     references: [
       'https://attack.mitre.org/techniques/T1041/',
@@ -2545,6 +2810,7 @@ const RULES = {
     name: 'Function Constructor Require Evasion',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'new Function.constructor("require", code) — execution de code dynamique via le constructeur Function avec acces au require reel. Technique d\'evasion: contourne la detection de eval/require en passant par le prototype de Function.',
     references: [
       'https://attack.mitre.org/techniques/T1059/007/'
@@ -2556,6 +2822,7 @@ const RULES = {
     name: 'Process Variable Shadowing',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'Le global process est shadow par une variable locale (const process = {...}). Technique d\'evasion: cache les URLs C2 dans un faux process.env pour contourner la detection de domaines suspects. Campagne "Robert King" (npoint.io/jsonkeeper.com).',
     references: [
       'https://attack.mitre.org/techniques/T1036/'
@@ -2567,6 +2834,7 @@ const RULES = {
     name: 'Baileys Newsletter Auto-Follow Hijack',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'malware',
     description: 'Pattern de detournement WhatsApp Baileys: newsletter + FOLLOW/QueryIds ou AUTO_FOLLOW_CHANNELS dans le meme fichier. Force l\'abonnement a des channels WhatsApp via la session authentifiee de la victime sans consentement.',
     references: [
       'https://attack.mitre.org/techniques/T1496/'
@@ -2578,6 +2846,7 @@ const RULES = {
     name: 'Self-Destructing Dynamic Execution',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Execution dynamique de code (eval/new Function/Module._compile) combinee a la suppression ou renommage du fichier en cours d\'execution (unlinkSync/rmSync/renameSync sur __filename, module.filename, ou require.main.filename). Anti-forensics: le malware execute son payload obfusque puis efface ses traces. Aucun package legitime ne detruit son propre source apres execution de code dynamique. Campagne csec-crypto-toolkit (avril 2026): XOR(OrDeR_7077)+base64+new Function, exfiltre .env/.ssh/.npmrc vers csec-supply-chain-attack.vercel.app, puis unlinkSync(__filename).',
     references: [
       'https://attack.mitre.org/techniques/T1070.004/',
@@ -2590,6 +2859,7 @@ const RULES = {
     name: 'Function() with Runtime Identifiers as Arguments',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'new Function() appele avec des identifiants runtime (require, __dirname, __filename, module, exports, process) passes comme arguments string literal, et un corps dynamique (variable, expression). Pattern csec-crypto-toolkit: l\'attaquant injecte le contexte Node complet dans un payload obfusque execute en memoire, contournant la detection require() standard. Aucun package legitime ne passe require + __filename a new Function.',
     references: [
       'https://attack.mitre.org/techniques/T1059.007/',
@@ -2602,6 +2872,7 @@ const RULES = {
     name: 'Geo-Evasion CIS Kill Switch',
     severity: 'HIGH',
     confidence: 'medium',
+    domain: 'malware',
     description: 'Code verifie la locale systeme (Intl.DateTimeFormat, LC_ALL/LANG) pour "ru" et fait process.exit — technique CIS kill switch pour eviter de cibler les pays de l\'operateur. Pattern TeamPCP/Shai-Hulud.',
     references: [
       'https://github.com/g00dfe11ow/Shai-Hulud-Open-Source',
@@ -2614,6 +2885,7 @@ const RULES = {
     name: 'External Tarball Dependency URL',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'malware',
     description: 'Dependance declaree avec une URL tarball (.tgz/.tar.gz/.tar.bz2/.zip) hebergee hors des registres npm legitimes (github.com, gitlab.com, bitbucket.org, registry.npmjs.org, registry.yarnpkg.com). Pattern ltidi chain attack (avril 2026): le stub publie sur npm n\'a pas d\'install hook visible, la charge utile est hebergee sur un cloud storage (GCS, S3, CDN) et contourne entierement l\'audit du registre npm. Attention: MT-1 score ceiling (cap non-lifecycle a 35) bypasse via HIGH_CONFIDENCE_MALICE_TYPES.',
     references: [
       'https://attack.mitre.org/techniques/T1195.002/',
@@ -2626,6 +2898,7 @@ const RULES = {
     name: 'Dependency Confusion Version Indicator',
     severity: 'HIGH',
     confidence: 'high',
+    domain: 'engineering',
     description: 'Version >= 99.x.x avec hook lifecycle (preinstall/postinstall). Indicateur fort de dependency confusion: la version elevee force la resolution npm vers le package public malveillant au lieu du package interne prive.',
     references: [
       'https://medium.com/@alex.birsan/dependency-confusion-4a5d60fec610',
@@ -2638,6 +2911,7 @@ const RULES = {
     name: 'Release Zero Package',
     severity: 'MEDIUM',
     confidence: 'high',
+    domain: 'engineering',
     description: 'Package publie en version 0.0.0 / 0.0 / 0 combine avec install scripts ou publication recente (<30j). Pattern de squat de namespace ou placeholder pre-payload. Conjonction (zero-version AND (scripts OR recent)) pour eviter les FP sur placeholders abandonnes.',
     references: [
       'https://github.com/DataDog/guarddog/blob/main/guarddog/analyzer/metadata/npm/release_zero.py',
@@ -2651,6 +2925,7 @@ const RULES = {
     name: 'Trusted Package Added Unknown Dependency',
     severity: 'CRITICAL',
     confidence: 'high',
+    domain: 'author',
     description: 'Un package TRUSTED (>50k downloads/semaine) a ajoute une nouvelle dependance inconnue ou tres recente (<7 jours) — indicateur de compromission de compte mainteneur (supply-chain attack type axios/plain-crypto-js).',
     references: [
       'https://attack.mitre.org/techniques/T1195.002/',
@@ -2663,6 +2938,7 @@ const RULES = {
     name: 'Trusted Package Added New Dependency',
     severity: 'HIGH',
     confidence: 'medium',
+    domain: 'malware',
     description: 'Un package TRUSTED (>50k downloads/semaine) a ajoute une nouvelle dependance connue (>7 jours) dans un bump de version — changement de surface d\'attaque a verifier.',
     references: [
       'https://attack.mitre.org/techniques/T1195.002/'
@@ -2680,10 +2956,31 @@ function getRule(type) {
     name: 'Unknown Threat',
     severity: 'MEDIUM',
     confidence: 'low',
+    domain: 'unknown',
     description: 'Menace non categorisee',
     references: [],
     mitre: null
   };
+}
+
+/**
+ * Resolve the risk domain for a given threat type. Returns the rule's declared
+ * `domain` field if set, otherwise 'malware' (the safe default — most untagged
+ * threats are malware-class detections). Returns 'unknown' only for fully
+ * unknown threat types (no rule + no paranoid match).
+ *
+ * Phase rollout: as the ~217 remaining untagged rules get a `domain` field,
+ * the 'malware' default rate will decrease toward zero.
+ */
+function getRuleDomain(type) {
+  const rule = getRule(type);
+  if (rule && typeof rule.domain === 'string' && VALID_DOMAINS.has(rule.domain)) {
+    return rule.domain;
+  }
+  // Fallback for the unknown-rule path
+  if (rule && rule.id === 'MUADDIB-UNK-001') return 'unknown';
+  // Default for untagged but otherwise valid rules — most rules are malware-class
+  return 'malware';
 }
 
 // Paranoid rules (ultra-strict)
@@ -2742,6 +3039,11 @@ for (const [key, rule] of Object.entries(RULES)) {
   if (!VALID_CONFIDENCES.has(rule.confidence)) {
     throw new Error(`Rule "${key}" has invalid confidence: ${JSON.stringify(rule.confidence)} (expected high|medium|low)`);
   }
+  // P0a: domain is optional during rollout — validated only if present.
+  // Once all rules are tagged (P0a-5), make this mandatory.
+  if (rule.domain !== undefined && !VALID_DOMAINS.has(rule.domain)) {
+    throw new Error(`Rule "${key}" has invalid domain: ${JSON.stringify(rule.domain)} (expected ${Array.from(VALID_DOMAINS).join('|')})`);
+  }
 }
 // PARANOID_RULES use a different schema (patterns/message, no confidence field)
 for (const [key, rule] of Object.entries(PARANOID_RULES)) {
@@ -2750,4 +3052,13 @@ for (const [key, rule] of Object.entries(PARANOID_RULES)) {
   }
 }
 
-module.exports = { RULES, getRule, PARANOID_RULES };
+module.exports = {
+  RULES,
+  getRule,
+  PARANOID_RULES,
+  // P0a — Risk Domains taxonomy
+  RISK_DOMAINS,
+  DOMAIN_CODES,
+  VALID_DOMAINS,
+  getRuleDomain
+};

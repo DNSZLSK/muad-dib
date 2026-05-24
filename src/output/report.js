@@ -1,12 +1,39 @@
 const fs = require('fs');
 const { escapeHtml } = require('../utils.js');
+const { DOMAIN_CODES, getRuleDomain } = require('../rules/index.js');
+
+// P0a — color palette for risk domain badges in the HTML report.
+const DOMAIN_COLORS = {
+  malware: '#e94560',        // red — top threat
+  author: '#ff6b35',         // orange — identity/maintainer issues
+  engineering: '#f9c74f',    // yellow — quality/hygiene
+  vulnerability: '#9b59b6',  // purple — CWE-class defects
+  license: '#4ecdc4',        // cyan — reserved
+  unknown: '#888888'         // gray — fallback
+};
+
+function domainBadge(threat) {
+  const d = (threat && threat.domain) || (threat && threat.type ? getRuleDomain(threat.type) : 'malware');
+  const code = DOMAIN_CODES[d] || 'UNK';
+  const color = DOMAIN_COLORS[d] || DOMAIN_COLORS.unknown;
+  return `<span class="domain-badge" style="background:${color};color:#fff;padding:2px 8px;border-radius:3px;font-size:11px;font-weight:bold;">${escapeHtml(code)}</span>`;
+}
 
 function generateHTML(results) {
   const { target, timestamp, threats, summary } = results;
 
+  // P0a — Risk by Domain breakdown
+  const domainCounts = { malware: 0, author: 0, engineering: 0, vulnerability: 0, license: 0, unknown: 0 };
+  for (const t of threats) {
+    const d = t.domain || getRuleDomain(t.type);
+    if (domainCounts[d] !== undefined) domainCounts[d]++;
+    else domainCounts.unknown++;
+  }
+
   const threatRows = threats.map(t => `
     <tr class="${escapeHtml(t.severity).toLowerCase()}">
       <td>${escapeHtml(t.severity)}</td>
+      <td>${domainBadge(t)}</td>
       <td>${escapeHtml(t.type)}</td>
       <td>${escapeHtml(t.message)}</td>
       <td>${escapeHtml(t.file)}</td>
@@ -142,10 +169,23 @@ function generateHTML(results) {
     </div>
 
     ${threats.length > 0 ? `
+    <div class="domain-breakdown" style="background:#16213e;padding:20px;border-radius:8px;margin:20px 0;">
+      <h3 style="color:#e94560;margin-top:0;">Risk by Domain</h3>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;">
+        ${Object.entries(domainCounts).filter(([, n]) => n > 0).map(([d, n]) => `
+          <div style="background:${DOMAIN_COLORS[d]};color:#fff;padding:8px 14px;border-radius:6px;min-width:90px;">
+            <div style="font-size:11px;opacity:0.8;">${escapeHtml(DOMAIN_CODES[d])}</div>
+            <div style="font-size:22px;font-weight:bold;">${n}</div>
+            <div style="font-size:11px;opacity:0.8;text-transform:capitalize;">${escapeHtml(d)}</div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
     <table>
       <thead>
         <tr>
           <th>Severity</th>
+          <th>Domain</th>
           <th>Type</th>
           <th>Message</th>
           <th>File</th>

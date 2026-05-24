@@ -56,6 +56,7 @@ let temporalPublishMode = false;
 let temporalMaintainerMode = false;
 let temporalFullMode = false;
 let breakdownMode = false;
+let domainFilter = null;  // P0a: --domain malware,author → filter output by risk domain
 let noDeobfuscate = false;
 let noModuleGraph = false;
 let noReachability = false;
@@ -146,6 +147,24 @@ for (let i = 0; i < options.length; i++) {
     temporalMaintainerMode = true;
   } else if (options[i] === '--breakdown') {
     breakdownMode = true;
+  } else if (options[i] === '--domain') {
+    // P0a: comma-separated list of risk domains to DISPLAY (filter only, not
+    // a score modifier). Valid values: malware, author, engineering,
+    // vulnerability, license, unknown. Example: --domain malware,author
+    const val = options[i + 1];
+    if (!val || val.startsWith('-')) {
+      console.error('[ERROR] --domain requires a comma-separated list (e.g. malware,author)');
+      process.exit(1);
+    }
+    const VALID = new Set(['malware', 'author', 'engineering', 'vulnerability', 'license', 'unknown']);
+    const parts = val.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+    const invalid = parts.filter(p => !VALID.has(p));
+    if (invalid.length > 0) {
+      console.error('[ERROR] --domain invalid value(s): ' + invalid.join(',') + ' (valid: ' + Array.from(VALID).join('|') + ')');
+      process.exit(1);
+    }
+    domainFilter = parts;
+    i++;
   } else if (options[i] === '--no-deobfuscate') {
     noDeobfuscate = true;
   } else if (options[i] === '--no-module-graph') {
@@ -265,6 +284,7 @@ if (command === 'version' || command === '--version' || command === '-v') {
     exclude: excludeDirs,
     entropyThreshold: entropyThreshold,
     breakdown: breakdownMode,
+    domainFilter: domainFilter,
     noDeobfuscate: noDeobfuscate,
     noModuleGraph: noModuleGraph,
     noReachability: noReachability,

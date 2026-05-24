@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { getRule } = require('../rules/index.js');
+const { getRule, getRuleDomain } = require('../rules/index.js');
 const { getPlaybook } = require('../response/playbooks.js');
 const { computeReachableFiles, computeReachableFunctions } = require('../scanner/reachability.js');
 const { applyFPReductions, applyCompoundBoosts, calculateRiskScore, getSeverityWeights, applyContextualFPCaps, applySingleFireCriticalFloor, applyReputationFactor, applyMatureStableCap, applySandboxVerdict, applyDeltaMultiplier } = require('../scoring.js');
@@ -399,6 +399,10 @@ async function process(threats, targetPath, options, pythonDeps, warnings, scann
       rule_name: rule.name || t.type,
       confidence: rule.confidence || 'medium',
       confidenceTier: t.confidenceTier || 'medium',
+      // P0a — Risk Domains taxonomy (inspired by Phylum's 5-domain model).
+      // Lets downstream tooling filter by risk category (malware/author/
+      // engineering/vulnerability/license) without re-mapping threat types.
+      domain: getRuleDomain(t.type),
       references: rule.references || [],
       mitre: t.mitre || rule.mitre,
       playbook: getPlaybook(t.type),

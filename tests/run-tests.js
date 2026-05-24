@@ -42,6 +42,7 @@ const { runSilentStealthTests } = require('./scanner/silent-stealth.test');
 const { runSensitiveFilesCoverageTests } = require('./scanner/sensitive-files-coverage.test');
 const { runEmailDomainTests } = require('./scanner/email-domain.test');
 const { runRdapCompromisedDomainTests } = require('./scanner/rdap-compromised-domain.test');
+const { runRiskDomainsTests } = require('./scanner/risk-domains.test');
 const { runAstNegativeTests } = require('./scanner/ast-negative.test');
 const { runAstBypassRegressionTests } = require('./scanner/ast-bypass-regression.test');
 const { runIntentGraphTests } = require('./scanner/intent-graph.test');
@@ -184,6 +185,7 @@ async function timed(name, fn) {
   await timed('sensitive-files-coverage', runSensitiveFilesCoverageTests);
   await timed('email-domain', runEmailDomainTests);
   await timed('rdap-compromised-domain', runRdapCompromisedDomainTests);
+  await timed('risk-domains', runRiskDomainsTests);
   await timed('ast-negative', runAstNegativeTests);
   await timed('ast-bypass-regression', runAstBypassRegressionTests);
   await timed('trusted-dep-diff', runTrustedDepDiffTests);
