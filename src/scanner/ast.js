@@ -37,7 +37,11 @@ const EXCLUDED_FILES = [
   'src/scanner/ast.js',
   'src/scanner/shell.js',
   'src/scanner/package.js',
-  'src/response/playbooks.js'
+  'src/response/playbooks.js',
+  // Meta-rule descriptions contain quoted threat keywords (e.g. "ru", LC_ALL,
+  // LANG, process.exit in the AST-091 geo_evasion rule). Scanning the rule
+  // catalog itself yields self-detections — exclude it.
+  'src/rules/index.js'
 ];
 
 async function analyzeAST(targetPath, options = {}) {
@@ -358,7 +362,7 @@ function analyzeFile(content, filePath, basePath) {
       type: 'geo_evasion_killswitch',
       severity: 'HIGH',
       message: 'Geo-evasion CIS kill switch: locale check for "ru" + process.exit — malware avoids targeting operator\'s country (TeamPCP pattern)',
-      file: ctx.relPath
+      file: ctx.relFile
     });
   }
 

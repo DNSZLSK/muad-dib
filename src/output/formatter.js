@@ -1,5 +1,6 @@
 const { saveReport } = require('../report.js');
 const { saveSARIF } = require('../sarif.js');
+const { saveCycloneDX } = require('./cyclonedx.js');
 const { getPlaybook } = require('../response/playbooks.js');
 const { DOMAIN_CODES, getRuleDomain } = require('../rules/index.js');
 
@@ -51,6 +52,11 @@ function formatOutput(result, options, ctx) {
   else if (options.sarif) {
     saveSARIF(result, options.sarif);
     console.log(`[OK] SARIF report generated: ${options.sarif}`);
+  }
+  // P1b — CycloneDX 1.5 SBOM output
+  else if (options.cyclonedx) {
+    saveCycloneDX(result, options.cyclonedx);
+    console.log(`[OK] CycloneDX BOM generated: ${options.cyclonedx}`);
   }
   // Explain output
   else if (options.explain) {

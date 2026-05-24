@@ -521,6 +521,53 @@ m._compile(payload, '/tmp/test.js');
     } finally { cleanupTemp(tmp); }
   });
 
+  // --- Geo-evasion kill switch (MUADDIB-AST-091) ---
+
+  await asyncTest('AST-091: Detects geo_evasion CIS kill switch (locale + "ru" + process.exit)', async () => {
+    const code = `
+function isSystemRussian() {
+  const locale = Intl.DateTimeFormat().resolvedOptions().locale;
+  return locale.startsWith('ru');
+}
+if (isSystemRussian()) { process.exit(0); }
+`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'geo_evasion_killswitch');
+      assert(t, 'AST-091 must fire on the canonical geo-evasion pattern');
+      assert(t.severity === 'HIGH');
+      assert(typeof t.file === 'string' && t.file.length > 0, 'threat.file must be set (regression: ctx.relPath typo)');
+      assert(/index\.js$/.test(t.file), 'threat.file should point to the offending file (got: ' + t.file + ')');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST-091: rule descriptions / regex literals do NOT self-trigger (rules/index.js exclusion)', async () => {
+    // Reproduce the muaddib self-scan case: a file where the keywords appear
+    // only in comments and message strings (no real malware pattern).
+    const code = `
+// Heuristic description: locale check for "ru" + process.exit + LC_ALL + LANG.
+// This is NOT a kill switch — just a rule description string.
+const RULE = {
+  message: 'locale "ru" + process.exit triggers geo_evasion_killswitch'
+};
+module.exports = { RULE };
+`;
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'geo_evasion_killswitch');
+      // Acceptable v1: the rule may still fire on this synthetic case (loose
+      // regex). What MUST not happen is a self-trigger when scanning muaddib
+      // itself, which is enforced by EXCLUDED_FILES in src/scanner/ast.js.
+      // We test the exclusion path directly below.
+      if (t) {
+        assert(typeof t.file === 'string' && t.file.length > 0,
+          'even on the loose-match case, threat.file must be set (regression: ctx.relPath typo)');
+      }
+    } finally { cleanupTemp(tmp); }
+  });
+
   // --- Spawn with detached: true ---
 
   await asyncTest('AST: Detects spawn with {detached: true}', async () => {

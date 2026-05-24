@@ -44,6 +44,7 @@ let target = '.';
 let jsonOutput = false;
 let htmlOutput = null;
 let sarifOutput = null;
+let cyclonedxOutput = null;
 let explainMode = false;
 let failLevel = 'high';
 let webhookUrl = null;
@@ -87,6 +88,16 @@ for (let i = 0; i < options.length; i++) {
       process.exit(1);
     }
     sarifOutput = sarifPath;
+    i++;
+  } else if (options[i] === '--cyclonedx') {
+    // P1b: CycloneDX 1.5 SBOM export (https://cyclonedx.org)
+    const bomPath = options[i + 1] || 'muaddib-bom.cdx.json';
+    // CLI-001: Block path traversal
+    if (bomPath.includes('..')) {
+      console.error('[ERROR] --cyclonedx path must not contain path traversal (..)');
+      process.exit(1);
+    }
+    cyclonedxOutput = bomPath;
     i++;
   } else if (options[i] === '--explain') {
     explainMode = true;
@@ -273,6 +284,7 @@ if (command === 'version' || command === '--version' || command === '-v') {
     json: jsonOutput,
     html: htmlOutput,
     sarif: sarifOutput,
+    cyclonedx: cyclonedxOutput,
     explain: explainMode,
     failLevel: failLevel,
     webhook: webhookUrl,
