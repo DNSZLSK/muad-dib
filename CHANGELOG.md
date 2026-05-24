@@ -5,6 +5,96 @@ All notable changes to MUAD'DIB will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.11.31] - 2026-05-24
+
+### F14 contextual FP cap — HARD vs SOFT exfil split (F9/F10/F11)
+
+Suite au diagnostic du 2026-05-24 sur les 124 FPs >= 90 du corpus
+`Data/all-review-results.json` (rescan v2.11.30 + matrice des conditions
+F-cap dans `data/rescan/REPORT.md`), 46/107 packages restaient a 90-100
+post-cap. Pour 41 d'entre eux, le bloqueur etait la condition `C5 — no
+third-party exfil` des features F9/F10/F11 — qui se disqualifiaient sur
+des threats compound/intent (`intent_credential_exfil`,
+`suspicious_dataflow`, `detached_credential_exfil`) qui fire
+legitimement sur tout proxy AI faisant `process.env.ANTHROPIC_API_KEY` →
+POST `api.anthropic.com`.
+
+Ces threats compound co-occurrent sur n'importe quel package AI/MCP/CLI
+qui lit une cle API et la POST vers son endpoint legitime. Ils ne sont
+malveillants qu'en combinaison avec un signal HARD (destination
+suspecte, fetch+exec binaire, dep non-npm). Les disqualifier sur ces
+seuls signaux laissait codexmate, @cachly-dev/init, @roadmapfy/mcp-init,
+poseidon-flow, nodebb-plugin-flawless-donations (Stripe), usegrain,
+lazyclaw, multis, atel-mcp-openclaw, opuscode, etc. — tous a 100/100.
+
+#### Changements
+
+- **Ajoute** `HARD_EXFIL_TYPES` set dans `src/ml/feature-extractor.js`
+  (12 types) — signaux malware sans ambiguite : `suspicious_domain`,
+  `remote_code_load`, `fetch_decrypt_exec`, `reverse_shell`,
+  `binary_dropper`, `download_exec_binary`, `curl_env_exfil`, `curl_exec`,
+  `external_tarball_dep`, `dependency_url_suspicious`,
+  `blockchain_c2_resolution`, `dns_exfil`.
+- **Ajoute** `SOFT_EXFIL_TYPES` set (4 types) — compounds/intents qui
+  fire sur AI proxies legit : `suspicious_dataflow`,
+  `intent_credential_exfil`, `intent_command_exfil`,
+  `detached_credential_exfil`.
+- **F9 (mcpServerEnvAccess)** : C5 utilise `HARD_EXFIL_TYPES.has(t.type)`
+  au lieu de `F9_EXFIL_TYPES.has(t.type)`.
+- **F10 (vendorCliSdk)** : meme changement sur C5.
+- **F11 (aiAgentBot)** : unifie la veto hard-exfil avec F9/F10. Pre-F14,
+  F11 ne bloquait que sur 4 types (`mcp_config_injection`,
+  `suspicious_domain`, `binary_dropper`, `download_exec_binary`). Post-
+  F14, F11 bloque sur les 12 `HARD_EXFIL_TYPES` — `remote_code_load`
+  (slopsquat staging via `bun x pkg@latest`) et `external_tarball_dep`
+  (dep-confusion) deviennent disqualifiants.
+- **`F9_EXFIL_TYPES`** conserve pour back-compat externe (audit scripts) :
+  union HARD + 3 SOFT historiques (`suspicious_dataflow`,
+  `intent_credential_exfil`, `intent_command_exfil`).
+
+#### Threat model
+
+Verifie contre les 3 MALWARE de la semaine HEBDO 2026-05-18→24
+(`@cseo-hr/trpweb-shared` dep-confusion, `build-scripts-utils` +
+`project-init-tools` twin staging campagne P-2024-001) : tous emettent
+au moins un signal HARD (`external_tarball_dep`, `remote_code_load`,
+`binary_dropper`) → restent bloques par F14. Verifie contre les
+signatures Shai-Hulud 2.0/3.0 (`suspicious_domain` C2 attaquant,
+`binary_dropper` TruffleHog, `download_exec_binary`,
+`external_tarball_dep` Bun runtime fetch) → tous HARD → bloques.
+`postmark-mcp` (premier MCP malveillant publique) : `suspicious_domain`
+vers mailbox attaquant → bloque.
+
+L'ajout de `remote_code_load` + `external_tarball_dep` a F11 ferme la
+porte slopsquat 2026 (LLM hallucine `bun x fake-pkg@latest` → attaquant
+register le nom → F11 ne capait pas avant F14).
+
+#### Impact mesure (sample 107 FP rescannes)
+
+| Bucket | Pre-F14 | Post-F14 projete |
+|---|---|---|
+| Capes (score < 90) | 61 (57%) | 86 (80%) |
+| Encore >= 90 | 46 (43%) | 21 (20%) |
+
+Les 21 restants ont tous au moins un signal HARD (`remote_code_load`
+pour gm-skill cluster, `binary_dropper` pour threatspan/tokentracker,
+`suspicious_domain` pour @inetafrica/open-claudia cluster Chinese MCP
+rerouting). Ce sont des cas qui meritent review humaine — le scoring
+fait son travail.
+
+#### Tests
+
+`tests/unit/ml-feature-extractor.test.js` : 8 nouveaux tests F14 (3
+positifs SOFT-only TRUE pour F9/F10/F11 + 5 negatifs HARD-present FALSE
+couvrant `binary_dropper`, `external_tarball_dep`,
+`dependency_url_suspicious`, `remote_code_load`). 1 test existant
+(`ai_agent_bot: TRUE on multi-LLM orchestrator (gm-skill pattern)`) mis
+a jour : retrait du threat `remote_code_load` du fixture (correctement
+bloquant post-F14) ; le cas avec `remote_code_load` est desormais
+couvert par le test F14 dedie.
+
+Total : **3664 passed, 0 failed** (14511 skipped Docker).
+
 ## [2.11.30] - 2026-05-24
 
 ### Archive retention — defense in depth (disk-fill incident fix)

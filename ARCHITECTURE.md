@@ -456,6 +456,18 @@ GlassWorm campaign (March 2026, 433+ packages): Unicode invisible characters + B
 
 ## Version History
 
+### v2.11.31 — Contextual FP cap F14: HARD vs SOFT exfil split (F9/F10/F11)
+
+- Splits the `F9_EXFIL_TYPES` set (used by F9 mcpServerEnvAccess, F10 vendorCliSdk, F11 aiAgentBot for the "no third-party exfil" C5 condition) into two semantically distinct sets in `src/ml/feature-extractor.js`:
+  - `HARD_EXFIL_TYPES` (12 types) — unambiguous adversary capability: `suspicious_domain`, `remote_code_load`, `fetch_decrypt_exec`, `reverse_shell`, `binary_dropper`, `download_exec_binary`, `curl_env_exfil`, `curl_exec`, `external_tarball_dep`, `dependency_url_suspicious`, `blockchain_c2_resolution`, `dns_exfil`.
+  - `SOFT_EXFIL_TYPES` (4 types) — compound/intent co-occurrence signals that fire on legit AI proxies: `suspicious_dataflow`, `intent_credential_exfil`, `intent_command_exfil`, `detached_credential_exfil`.
+- **Root cause** (diagnostic 2026-05-24, `data/rescan/REPORT.md`): rescanning 107 high-score FPs from `Data/all-review-results.json` against v2.11.30 showed 46 packages still at 90-100. For 41/46, the C5 disqualifier triggered on a SOFT compound — packages reading `process.env.ANTHROPIC_API_KEY` and POSTing to `api.anthropic.com` fire `intent_credential_exfil` + `suspicious_dataflow` by construction, even when the destination is the legit first-party AI provider.
+- F9/F10/F11 now disqualify on `HARD_EXFIL_TYPES.has(t.type)` only. F11 additionally absorbs the same hard-veto (pre-F14, F11 only checked `mcp_config_injection`, `suspicious_domain`, `binary_dropper`, `download_exec_binary` — now also `remote_code_load` for slopsquat staging, `external_tarball_dep` + `dependency_url_suspicious` for dep-confusion, the curl/shell channels, and the covert egress types).
+- **Threat-model safety**: validated against the 3 MALWARE labels from the HEBDO 2026-05-18→24 review (`@cseo-hr/trpweb-shared` dep-confusion, twin staging `build-scripts-utils`/`project-init-tools` campaign P-2024-001) — all emit ≥1 HARD signal. Shai-Hulud 2.0/3.0 signatures (`suspicious_domain` C2, `binary_dropper` TruffleHog, `external_tarball_dep` Bun fetch) → all HARD → still blocked. `postmark-mcp` (first public malicious MCP) → `suspicious_domain` → blocked.
+- `F9_EXFIL_TYPES` preserved as a back-compat union (HARD ∪ 3 SOFT) for any external audit script referencing it.
+- Tests: 3656 → **3664** passed, 0 failed. 8 new F14 unit tests in `tests/unit/ml-feature-extractor.test.js` (3 positive SOFT-only TRUE for F9/F10/F11 + 5 negative HARD-present FALSE covering `binary_dropper`, `external_tarball_dep`, `dependency_url_suspicious`, `remote_code_load`). 1 existing test updated (`ai_agent_bot: TRUE on multi-LLM orchestrator (gm-skill pattern)`) — removed `remote_code_load` from fixture, since the post-F14 behaviour is correctly blocking; the `remote_code_load` case is now covered by the dedicated F14 negative test.
+- **Projected impact** on the 107-package FP corpus: cap coverage 57% → 80% (+25 packages dropped from 90-100). The 21 remaining at 90-100 all have ≥1 HARD signal — gray-zone packages that legitimately warrant manual review (gm-skill cluster with `bun x` patterns, `@inetafrica/open-claudia` Chinese MCP rerouting via `suspicious_domain`).
+
 ### v2.11.24 — Contextual FP cap F11 (ai_agent_bot) — audit week3 cluster
 
 - New helper `aiAgentBot(result, meta)` in `src/ml/feature-extractor.js`, wired as F11 in `applyContextualFPCaps()` (`src/scoring.js`) with cap **35** (CRITICAL → MEDIUM-HIGH boundary).

@@ -604,15 +604,35 @@ const F9_INFRA_KEYS = new Set([
 // Appearance in any threat message disqualifies F9.
 const F9_CREDENTIAL_FILE_RE = /\.npmrc\b|\.aws[\/\\](?:credentials|config)\b|\bid_rsa\b|\bid_ed25519\b|\.ssh[\/\\]|\.kube[\/\\]config\b|\.docker[\/\\]config\b|\.netrc\b|\.git-credentials\b|wallet\.dat\b|\bsecret_token\b/i;
 
-// Threat types that signal third-party network egress. F9 disqualifies on
-// any of these — a legit MCP installer writes .mcp.json and reads env, it
-// does NOT download payloads or call back to attacker hosts.
-const F9_EXFIL_TYPES = new Set([
+// v2.11.31 F14: split exfil types into HARD (real malware signals) vs
+// SOFT (compound/intent threats that legitimately fire on AI proxies +
+// MCP installers + vendor CLIs).
+//
+// Rescan of 107 high-score FPs against v2.11.30 (data/rescan/REPORT.md)
+// showed C5 disqualifying 41/42 not-capped packages. Of those, 25 had
+// ONLY soft signals — packages doing `process.env.ANTHROPIC_API_KEY` →
+// POST `api.anthropic.com`. The intent_*/detached_credential_exfil/
+// suspicious_dataflow threats fire on that combo even though the network
+// destination is the legit first-party AI provider.
+//
+// HARD signals always indicate adversary capability: a network host that
+// is NOT first-party (suspicious_domain), a binary fetch+exec
+// (binary_dropper, download_exec_binary, fetch_decrypt_exec, remote_code_load),
+// a non-npm dep (external_tarball_dep, dependency_url_suspicious), a
+// shell-out channel (reverse_shell, curl_env_exfil, curl_exec), or a
+// covert egress (blockchain_c2_resolution, dns_exfil). Shai-Hulud 2.0/3.0,
+// postmark-mcp, and dep-confusion samples all emit ≥1 HARD signal.
+//
+// SOFT signals are co-occurrence intents — env_read + network_call in the
+// same intent or file. Legit on AI proxies; relied on by the malware
+// detection only when combined with a HARD signal.
+//
+// `F9_EXFIL_TYPES` is kept as the union for back-compat (no external
+// consumers as of v2.11.30 but the symbol is referenced by older audit
+// scripts).
+const HARD_EXFIL_TYPES = new Set([
   'suspicious_domain',
-  'suspicious_dataflow',
   'remote_code_load',
-  'intent_credential_exfil',
-  'intent_command_exfil',
   'fetch_decrypt_exec',
   'reverse_shell',
   'binary_dropper',
@@ -623,6 +643,22 @@ const F9_EXFIL_TYPES = new Set([
   'dependency_url_suspicious',
   'blockchain_c2_resolution',
   'dns_exfil'
+]);
+
+const SOFT_EXFIL_TYPES = new Set([
+  'suspicious_dataflow',
+  'intent_credential_exfil',
+  'intent_command_exfil',
+  'detached_credential_exfil'
+]);
+
+// Back-compat union (HARD ∪ SOFT minus detached_credential_exfil which
+// was never in F9_EXFIL_TYPES historically; preserve original membership).
+const F9_EXFIL_TYPES = new Set([
+  ...HARD_EXFIL_TYPES,
+  'suspicious_dataflow',
+  'intent_credential_exfil',
+  'intent_command_exfil'
 ]);
 
 // MCP identity signals — package SELF-identifies as an MCP installer/server.
@@ -705,9 +741,12 @@ function mcpServerEnvAccess(result, meta) {
       return false;
     }
   }
-  // C5 — no third-party exfil capability
+  // C5 — no HARD third-party exfil capability (v2.11.31 F14: SOFT compound
+  // intent threats are intrinsic to MCP installer behaviour — env_read +
+  // POST first-party endpoint — and no longer disqualify here. HARD signals
+  // — suspicious_domain, binary_dropper, remote_code_load, etc. — still do.)
   for (const t of threats) {
-    if (F9_EXFIL_TYPES.has(t.type)) return false;
+    if (HARD_EXFIL_TYPES.has(t.type)) return false;
   }
   return true;
 }
@@ -791,9 +830,14 @@ function vendorCliSdk(result, meta) {
   if (threats.some(t => t.type === 'mcp_config_injection')) return false;
   // C4 — no install lifecycle hook
   if (hasLifecycleScripts(meta)) return false;
-  // C5 + C6 — scan threats for exfil signal and credential-file mentions
+  // C5 + C6 — scan threats for HARD exfil signal and credential-file
+  // mentions. v2.11.31 F14: SOFT compound intent threats (suspicious_dataflow,
+  // intent_*, detached_credential_exfil) no longer disqualify C5 — a legit
+  // vendor CLI does env_read + POST own API endpoint, which trips those
+  // compounds without being malicious. HARD signals (suspicious_domain,
+  // binary_dropper, remote_code_load, external_tarball_dep, etc.) remain.
   for (const t of threats) {
-    if (F9_EXFIL_TYPES.has(t.type)) return false;       // C5
+    if (HARD_EXFIL_TYPES.has(t.type)) return false;       // C5
     if (F9_CREDENTIAL_FILE_RE.test(String(t.message || ''))) return false;  // C6
   }
   // C7 — vendor identity
@@ -927,12 +971,19 @@ function aiAgentBot(result, meta) {
   if (threats.length === 0) return false;
   // C2 — no install lifecycle hook
   if (hasLifecycleScripts(meta)) return false;
-  // C3, C4, C7 — fast threat-type checks
+  // C3 — no mcp_config_injection (F9 priority)
   for (const t of threats) {
-    if (t.type === 'mcp_config_injection') return false;   // C3
-    if (t.type === 'suspicious_domain') return false;      // C4
-    if (t.type === 'binary_dropper') return false;         // C7
-    if (t.type === 'download_exec_binary') return false;   // C7
+    if (t.type === 'mcp_config_injection') return false;
+  }
+  // C4 + C7 — v2.11.31 F14: unify hard-exfil veto across F9/F10/F11.
+  // Pre-F14 F11 only blocked on suspicious_domain / binary_dropper /
+  // download_exec_binary; now also blocks on remote_code_load (slopsquat
+  // staging), external_tarball_dep (non-npm dep), dependency_url_suspicious
+  // (attacker-controlled dep URL), curl_*/reverse_shell (shell exfil),
+  // dns_exfil + blockchain_c2_resolution (covert egress), fetch_decrypt_exec
+  // (multistage). Soft compound intents still don't disqualify here.
+  for (const t of threats) {
+    if (HARD_EXFIL_TYPES.has(t.type)) return false;
   }
   // C5 — no credential file path in any message
   for (const t of threats) {
@@ -1379,5 +1430,10 @@ module.exports = {
   aiAgentBot,
   vendorMinifiedBundle,
   typosquatBenignLifecycle,
-  isBenignLifecycleScript
+  isBenignLifecycleScript,
+  // v2.11.31 F14: exposed so audit scripts can introspect the HARD/SOFT
+  // classification when triaging cluster FPs.
+  HARD_EXFIL_TYPES,
+  SOFT_EXFIL_TYPES,
+  F9_EXFIL_TYPES
 };
