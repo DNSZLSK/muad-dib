@@ -1500,6 +1500,18 @@ const RULES = {
     ],
     mitre: 'T1195.002'
   },
+  unclaimed_maintainer_email: {
+    id: 'MUADDIB-MAINTAINER-005',
+    name: 'Unclaimed Maintainer Email Domain',
+    severity: 'HIGH',
+    confidence: 'medium',
+    description: 'Le domaine de l\'email du mainteneur n\'a aucun MX record valide. Un attaquant peut enregistrer le domaine, creer la boite mail, declencher un reset de mot de passe npm, prendre le compte. Signal composite-only (HIGH x medium = 8.5 pts isole, sous T1).',
+    references: [
+      'https://github.com/DataDog/guarddog/blob/main/guarddog/analyzer/metadata/npm/unclaimed_maintainer_email_domain.py',
+      'https://attack.mitre.org/techniques/T1556/'
+    ],
+    mitre: 'T1556'
+  },
 
   // Canary token detections
   canary_exfiltration: {
