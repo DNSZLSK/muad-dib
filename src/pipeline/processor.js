@@ -10,7 +10,7 @@ const { buildIntentPairs } = require('../intent-graph.js');
 const { debugLog } = require('../utils.js');
 const { getPackageMetadata } = require('../scanner/npm-registry.js');
 const { checkReleaseZero } = require('../scanner/release-zero.js');
-const { checkUnclaimedMaintainerEmail } = require('../scanner/email-domain.js');
+const { checkUnclaimedMaintainerEmail, checkCompromisedDomain } = require('../scanner/email-domain.js');
 
 // Auto-sandbox compound trigger : optional out-of-tree dependency. Lazy-load
 // it so the pipeline still works when the file is absent (some dev machines
@@ -228,12 +228,22 @@ async function process(threats, targetPath, options, pythonDeps, warnings, scann
   // HIGH × confidence medium = 8.5 points isolated → composite-only signal.
   // Skipped automatically when MUADDIB_NO_REGISTRY_FETCH=1 (no meta available)
   // or MUADDIB_EMAIL_DOMAIN_CHECK=0 (explicit opt-out).
+  //
+  // F1 — RDAP compromised email domain. Same best-effort + silent contract.
+  // Severity HIGH × confidence high = 10 points isolated → composite-only.
+  // Opt-out via MUADDIB_RDAP_CHECK=0.
   if (_pkgMeta && _pkgMeta.npmRegistryMeta) {
     try {
       const emailThreats = await checkUnclaimedMaintainerEmail(_pkgMeta.npmRegistryMeta);
       for (const t of emailThreats) deduped.push(t);
     } catch (err) {
       debugLog('[EMAIL-DOMAIN] check failed: ' + err.message);
+    }
+    try {
+      const rdapThreats = await checkCompromisedDomain(_pkgMeta.npmRegistryMeta);
+      for (const t of rdapThreats) deduped.push(t);
+    } catch (err) {
+      debugLog('[RDAP] check failed: ' + err.message);
     }
   }
 

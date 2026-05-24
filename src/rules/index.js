@@ -1512,6 +1512,19 @@ const RULES = {
     ],
     mitre: 'T1556'
   },
+  compromised_email_domain: {
+    id: 'MUADDIB-MAINTAINER-006',
+    name: 'Compromised Maintainer Email Domain',
+    severity: 'HIGH',
+    confidence: 'high',
+    description: 'Le domaine de l\'email du mainteneur a ete enregistre APRES la premiere publication du package (marge 30j). Pattern de rachat de domaine expire: l\'attaquant reprend le mail, declenche un reset de mot de passe npm, prend le compte. Signal composite-only (HIGH x high = 10 pts isole, sous T1).',
+    references: [
+      'https://github.com/DataDog/guarddog/blob/main/guarddog/analyzer/metadata/npm/potentially_compromised_email_domain.py',
+      'https://attack.mitre.org/techniques/T1556/',
+      'https://datatracker.ietf.org/doc/html/rfc7480'
+    ],
+    mitre: 'T1556'
+  },
 
   // Canary token detections
   canary_exfiltration: {
