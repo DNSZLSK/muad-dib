@@ -16,7 +16,12 @@ const METADATA_TIMEOUT = 10_000;
 
 const SENSITIVE_PATHS = [
   '/etc/passwd', '/etc/shadow', '.env', '.npmrc', '.ssh',
-  '.aws/credentials', '.bash_history', '.gitconfig'
+  '.aws/credentials', '.bash_history', '.gitconfig',
+  // F5 — guarddog-inspired cloud/DB/HTTP auth files (newly-introduced
+  // access to any of these via a version bump is a strong temporal signal).
+  '.docker/config', '.kube/config',
+  '.pgpass', '.netrc', '.boto',
+  '.azure/credentials', '.gcloud/credentials'
 ];
 
 // Severity mapping for each pattern

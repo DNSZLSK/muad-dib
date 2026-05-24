@@ -16,7 +16,14 @@ const SENSITIVE_STRINGS = [
   'The Second Coming',
   'Goldox-T3chs',
   '/etc/passwd',
-  '/etc/shadow'
+  '/etc/shadow',
+  // F5 — guarddog-inspired cloud credential paths (narrow specific forms
+  // only, to keep FP rate flat: .pgpass/.netrc/.boto are NOT added here
+  // because legitimate JS DB clients reference them. Those still trigger
+  // via dataflow SENSITIVE_PATH_PATTERNS when followed by exfil sinks).
+  '.aws/credentials',
+  '.docker/config.json',
+  '.kube/config'
 ];
 
 // Env vars that are safe and should NOT be flagged (common config/runtime vars)

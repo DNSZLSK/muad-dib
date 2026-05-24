@@ -39,6 +39,7 @@ const { runGitHubActionsTests } = require('./scanner/github-actions.test');
 const { runNpmRegistryTests } = require('./scanner/npm-registry.test');
 const { runReleaseZeroTests } = require('./scanner/release-zero.test');
 const { runSilentStealthTests } = require('./scanner/silent-stealth.test');
+const { runSensitiveFilesCoverageTests } = require('./scanner/sensitive-files-coverage.test');
 const { runAstNegativeTests } = require('./scanner/ast-negative.test');
 const { runAstBypassRegressionTests } = require('./scanner/ast-bypass-regression.test');
 const { runIntentGraphTests } = require('./scanner/intent-graph.test');
@@ -178,6 +179,7 @@ async function timed(name, fn) {
   await timed('npm-registry', runNpmRegistryTests);
   await timed('release-zero', runReleaseZeroTests);
   await timed('silent-stealth', runSilentStealthTests);
+  await timed('sensitive-files-coverage', runSensitiveFilesCoverageTests);
   await timed('ast-negative', runAstNegativeTests);
   await timed('ast-bypass-regression', runAstBypassRegressionTests);
   await timed('trusted-dep-diff', runTrustedDepDiffTests);
