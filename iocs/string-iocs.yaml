@@ -243,3 +243,53 @@ strings:
     severity: HIGH
     source: "https://github.com/g00dfe11ow/Shai-Hulud-Open-Source"
     description: "Alternative payload entry point filename used by Shai-Hulud Python dropper"
+
+  # ── TrapDoor (2026-05-22 a 2026-05-25) ──
+  # Source : https://socket.dev/blog/trapdoor-crypto-stealer-npm-pypi-crates
+  # 34 packages malveillants sur npm (21) / PyPI (7) / Crates.io (6) ciblant
+  # developers crypto / DeFi / Solana / AI. Vecteurs :
+  #  - npm: postinstall + trap-core.js (1149-line credential harvester)
+  #  - PyPI: __init__.py fetch+exec via urllib + GitHub Pages payload
+  #  - Crates.io: build.rs auto-execute pendant cargo build
+  #  - Empoisonnement des .cursorrules / CLAUDE.md (zero-width Unicode) pour
+  #    abuser Cursor / Claude Code (couvert par AICONF-004 v2.11.40 + PYSRC-008).
+  - string: "P-2024-001"
+    campaign: "trapdoor-2026-05"
+    severity: CRITICAL
+    source: "https://socket.dev/blog/trapdoor-crypto-stealer-npm-pypi-crates"
+    description: "TrapDoor campaign identifier embedded in AUDIT-MATRIX.md and poisoned AI config files"
+  - string: "cargo-build-helper-2026"
+    campaign: "trapdoor-2026-05"
+    severity: CRITICAL
+    source: "https://socket.dev/blog/trapdoor-crypto-stealer-npm-pypi-crates"
+    description: "Hardcoded XOR key used by TrapDoor Rust build.rs payload to encrypt stolen keystores before exfil via GitHub Gists"
+  - string: "ddjidd564.github.io"
+    campaign: "trapdoor-2026-05"
+    severity: CRITICAL
+    source: "https://socket.dev/blog/trapdoor-crypto-stealer-npm-pypi-crates"
+    description: "TrapDoor payload host (GitHub Pages account of attacker), fetched via node -e from PyPI __init__.py"
+  - string: "trap-core.js"
+    campaign: "trapdoor-2026-05"
+    severity: CRITICAL
+    source: "https://socket.dev/blog/trapdoor-crypto-stealer-npm-pypi-crates"
+    description: "1149-line credential harvester shipped via postinstall in TrapDoor npm packages (AWS + GitHub token validation, multi-channel exfil)"
+  - string: "ddjidd564"
+    campaign: "trapdoor-2026-05"
+    severity: HIGH
+    source: "https://socket.dev/blog/trapdoor-crypto-stealer-npm-pypi-crates"
+    description: "Attacker GitHub account name — HIGH (not CRITICAL) because the bare token could match unrelated user IDs"
+  - string: "defi-security-best-practices"
+    campaign: "trapdoor-2026-05"
+    severity: HIGH
+    source: "https://socket.dev/blog/trapdoor-crypto-stealer-npm-pypi-crates"
+    description: "TrapDoor lure repo / path pattern injected into poisoned .cursorrules — HIGH (could also appear in legit DeFi docs)"
+  - string: "eth-security-auditor"
+    campaign: "trapdoor-2026-05"
+    severity: HIGH
+    source: "https://socket.dev/blog/trapdoor-crypto-stealer-npm-pypi-crates"
+    description: "TrapDoor PyPI package name (initial observation 2026-05-22 20:20 UTC) — HIGH because advisories may legitimately mention it"
+  - string: "defi-threat-scanner"
+    campaign: "trapdoor-2026-05"
+    severity: HIGH
+    source: "https://socket.dev/blog/trapdoor-crypto-stealer-npm-pypi-crates"
+    description: "TrapDoor npm package name (one of the 21 compromised on npm) — HIGH for same reason as eth-security-auditor"

