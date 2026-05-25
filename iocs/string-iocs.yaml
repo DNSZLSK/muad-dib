@@ -293,3 +293,29 @@ strings:
     severity: HIGH
     source: "https://socket.dev/blog/trapdoor-crypto-stealer-npm-pypi-crates"
     description: "TrapDoor npm package name (one of the 21 compromised on npm) — HIGH for same reason as eth-security-auditor"
+  # Additional TrapDoor PyPI package names — the initial PR (v2.11.42) was too
+  # conservative and only added 1/7 PyPI names. These 4 are unique enough multi-word
+  # strings to be CRITICAL (low FP risk on legit packages). v2.11.43.
+  - string: "cryptowallet-safety"
+    campaign: "trapdoor-2026-05"
+    severity: CRITICAL
+    source: "https://socket.dev/blog/trapdoor-crypto-stealer-npm-pypi-crates"
+    description: "TrapDoor PyPI package name (1 of 7 compromised on PyPI) — unique multi-word string, CRITICAL"
+  - string: "data-pipeline-check"
+    campaign: "trapdoor-2026-05"
+    severity: CRITICAL
+    source: "https://socket.dev/blog/trapdoor-crypto-stealer-npm-pypi-crates"
+    description: "TrapDoor PyPI package name (1 of 7 compromised on PyPI) — unique multi-word string, CRITICAL"
+  - string: "defi-risk-scanner"
+    campaign: "trapdoor-2026-05"
+    severity: CRITICAL
+    source: "https://socket.dev/blog/trapdoor-crypto-stealer-npm-pypi-crates"
+    description: "TrapDoor PyPI package name (1 of 7 compromised on PyPI) — unique multi-word string, CRITICAL"
+  - string: "solidity-build-guard"
+    campaign: "trapdoor-2026-05"
+    severity: CRITICAL
+    source: "https://socket.dev/blog/trapdoor-crypto-stealer-npm-pypi-crates"
+    description: "TrapDoor PyPI package name (1 of 7 compromised on PyPI) — unique multi-word string, CRITICAL"
+  # The remaining 2/7 PyPI names are too generic to add as string-IOCs without FP risk:
+  # `env-loader-cli` and `git-config-sync` would match legit advisories or unrelated
+  # tools. They stay covered via the PyPI IOC base (matched by name in python.js).
