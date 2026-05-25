@@ -1,0 +1,1 @@
+{ "name": "pysrc-fixture-docstring-exec", "version": "0.0.0", "description": "Negative fixture: docstring mentions exec/subprocess, expect 0 findings (docstring is stripped before regex)." }

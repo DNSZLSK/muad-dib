@@ -1,0 +1,1 @@
+{ "name": "pysrc-fixture-base64-exec", "version": "0.0.0", "description": "Test fixture: PYSRC-001 + PYSRC-005 (base64.b64decode + exec compound). NOT REAL MALWARE." }

@@ -1,0 +1,1 @@
+{ "name": "pysrc-fixture-clean-init", "version": "0.0.0", "description": "Negative fixture: clean __init__.py, expect 0 PYSRC findings." }

@@ -1,0 +1,1 @@
+{ "name": "pysrc-fixture-setup-cext", "version": "0.0.0", "description": "Negative fixture: legitimate setup.py with C extension, expect 0 findings." }
