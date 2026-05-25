@@ -433,10 +433,87 @@ function escapeRegex(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+/**
+ * Try to detect the NAME of the Python package being scanned. Used by
+ * `pypi-registry.js` to fetch metadata for the scanned package itself.
+ *
+ * Priority order :
+ *  1. pyproject.toml [project] name      (PEP 621)
+ *  2. pyproject.toml [tool.poetry] name
+ *  3. setup.py setup(name="...")
+ *  4. setup.cfg [metadata] name
+ *
+ * Returns null if no canonical name can be extracted.
+ *
+ * @param {string} targetPath
+ * @returns {string | null}
+ */
+function detectScannedPackageName(targetPath) {
+  // Generic helper: extract a section [section_header] up to the next [section]
+  // or end of file. JS regex has no \Z, so we use `(?=\n\[|$)` with no /m flag
+  // on the lookahead anchor.
+  function extractSection(content, header) {
+    // Find [header] line, then capture until the next [ at column 0 or EOF.
+    const startRe = new RegExp('^\\[' + header.replace(/[.[\]\\]/g, '\\$&') + '\\][^\\n]*\\n', 'm');
+    const startMatch = content.match(startRe);
+    if (!startMatch) return null;
+    const start = startMatch.index + startMatch[0].length;
+    const rest = content.slice(start);
+    const nextSection = rest.search(/^\[/m);
+    return nextSection === -1 ? rest : rest.slice(0, nextSection);
+  }
+
+  // 1. pyproject.toml
+  const pyproject = path.join(targetPath, 'pyproject.toml');
+  if (fs.existsSync(pyproject)) {
+    let content;
+    try { content = fs.readFileSync(pyproject, 'utf8'); } catch { content = ''; }
+    // [project] name = "X" — PEP 621
+    const projectSection = extractSection(content, 'project');
+    if (projectSection) {
+      const m = projectSection.match(/^\s*name\s*=\s*["']([^"']+)["']/m);
+      if (m) return m[1].trim();
+    }
+    // [tool.poetry] name = "X"
+    const poetrySection = extractSection(content, 'tool.poetry');
+    if (poetrySection) {
+      const m = poetrySection.match(/^\s*name\s*=\s*["']([^"']+)["']/m);
+      if (m) return m[1].trim();
+    }
+  }
+
+  // 2. setup.py — regex on setup(... name="X" ...). Dotall flag for multi-line args.
+  const setupPy = path.join(targetPath, 'setup.py');
+  if (fs.existsSync(setupPy)) {
+    let content;
+    try { content = fs.readFileSync(setupPy, 'utf8'); } catch { content = ''; }
+    const m = content.match(/\bsetup\s*\(([\s\S]*?)\)/);
+    if (m) {
+      const nameMatch = m[1].match(/\bname\s*=\s*["']([^"']+)["']/);
+      if (nameMatch) return nameMatch[1].trim();
+    }
+  }
+
+  // 3. setup.cfg [metadata] name = X
+  const setupCfg = path.join(targetPath, 'setup.cfg');
+  if (fs.existsSync(setupCfg)) {
+    let content;
+    try { content = fs.readFileSync(setupCfg, 'utf8'); } catch { content = ''; }
+    const metaSection = extractSection(content, 'metadata');
+    if (metaSection) {
+      const m = metaSection.match(/^\s*name\s*=\s*(.+?)\s*$/m);
+      if (m) return m[1].trim();
+    }
+  }
+
+  return null;
+}
+
 module.exports = {
   parseRequirementsTxt,
   parseSetupPy,
   parsePyprojectToml,
   detectPythonProject,
+  detectScannedPackageName,
   normalizePythonName
 };
