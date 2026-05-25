@@ -399,6 +399,16 @@ const PLAYBOOKS = {
     'Technique Shai-Hulud (TeamPCP). Supprimer les fichiers .claude/settings.json ' +
     'et .vscode/tasks.json avant ouverture.',
 
+  aiconf_unicode_obfuscation:
+    'CRITIQUE: Fichier de config d\'agent IA contient des caracteres Unicode invisibles ' +
+    '(zero-width, directional override, variation selectors). Technique TrapDoor (mai 2026): ' +
+    'l\'attaquant insere des U+200B au milieu de mots-cles pour echapper a la revue humaine ' +
+    'et aux regex statiques, tandis que l\'agent IA (Claude, Cursor) lit le contenu normalise ' +
+    'et execute le payload cache. NE PAS ouvrir ce projet avec un agent IA. Ouvrir le fichier ' +
+    'dans un editeur qui affiche les caracteres invisibles (VS Code: "editor.renderControlCharacters") ' +
+    'pour inspecter le contenu reel. Supprimer le fichier ou nettoyer les caracteres invisibles ' +
+    'avant toute utilisation. Si deja ouvert avec un agent IA, regenerer tous les secrets touches.',
+
   ai_agent_abuse:
     'CRITIQUE: Un agent IA (Claude, Gemini, Q) est invoque avec des flags de bypass de securite ' +
     '(--dangerously-skip-permissions, --yolo, --trust-all-tools). Technique s1ngularity/Nx. ' +

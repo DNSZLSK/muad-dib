@@ -914,6 +914,21 @@ const RULES = {
     ],
     mitre: 'T1546'
   },
+  aiconf_unicode_obfuscation: {
+    id: 'MUADDIB-AICONF-004',
+    name: 'Zero-Width Unicode Obfuscation in AI Config',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    domain: 'malware',
+    description: 'Fichier de configuration d\'agent IA (.cursorrules, CLAUDE.md, copilot-instructions.md) contient des caracteres Unicode invisibles (zero-width, directional override, variation selectors) qui cachent des instructions a la revue humaine ou cassent des mots-cles pour echapper a la detection regex. Technique TrapDoor (mai 2026): cu​rl|sh interspersee de U+200B passe au travers du regex /curl/ tandis que l\'agent IA execute le payload normalise.',
+    references: [
+      'https://socket.dev/blog/trapdoor-crypto-stealer-npm-pypi-crates',
+      'https://www.aikido.dev/blog/glassworm-returns-unicode-attack-github-npm-vscode',
+      'https://trojansource.codes/',
+      'https://attack.mitre.org/techniques/T1027/'
+    ],
+    mitre: 'T1027.013'
+  },
 
   require_cache_poison: {
     id: 'MUADDIB-AST-019',

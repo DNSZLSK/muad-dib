@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { findFiles, forEachSafeFile, debugLog } = require('../utils.js');
+const { countInvisibleUnicode } = require('../shared/unicode-invisibles.js');
 
 // node_modules NOT excluded: detect obfuscated code in dependencies.
 // dist/build/out/output excluded: bundled output is always flagged as isPackageOutput (LOW)
@@ -196,54 +197,6 @@ function hasLargeStringArray(content) {
     if (count >= 10) return true;
   }
   return false;
-}
-
-/**
- * Count invisible Unicode codepoints in content (GlassWorm detection).
- * Covers BMP zero-width chars, variation selectors, and supplementary plane
- * tag characters / variation selectors supplement via codePointAt iteration.
- *
- * Codepoints detected:
- * - U+200B, U+200C, U+200D (zero-width space/joiner/non-joiner)
- * - U+FEFF (BOM — only if position > 0; pos 0 is legitimate BOM)
- * - U+2060 (word joiner), U+180E (Mongolian vowel separator)
- * - U+FE00-U+FE0E (variation selectors — excludes U+FE0F emoji presentation selector)
- * - U+E0100-U+E01EF (variation selectors supplement)
- * - U+E0001-U+E007F (tag characters)
- */
-function countInvisibleUnicode(content) {
-  let count = 0;
-  for (let i = 0; i < content.length; i++) {
-    const cp = content.codePointAt(i);
-    // BMP invisible chars
-    if (cp === 0x200B || cp === 0x200C || cp === 0x200D ||
-        cp === 0x2060 || cp === 0x180E) {
-      count++;
-    }
-    // BOM only suspicious after position 0
-    else if (cp === 0xFEFF && i > 0) {
-      count++;
-    }
-    // BMP variation selectors (U+FE00-U+FE0E) — excludes U+FE0F (emoji presentation selector)
-    else if (cp >= 0xFE00 && cp <= 0xFE0E) {
-      count++;
-    }
-    // Supplementary plane: variation selectors supplement (U+E0100-U+E01EF)
-    else if (cp >= 0xE0100 && cp <= 0xE01EF) {
-      count++;
-      i++; // skip surrogate pair low half
-    }
-    // Supplementary plane: tag characters (U+E0001-U+E007F)
-    else if (cp >= 0xE0001 && cp <= 0xE007F) {
-      count++;
-      i++; // skip surrogate pair low half
-    }
-    // Skip surrogate pair low half for other supplementary chars
-    else if (cp > 0xFFFF) {
-      i++;
-    }
-  }
-  return count;
 }
 
 module.exports = { detectObfuscation };
