@@ -8093,6 +8093,55 @@ async function runMonitorTests() {
     }
   });
 
+  // ============================================
+  // SCAN TIME ACCURACY GUARD-RAIL (commit 3)
+  // ============================================
+
+  test('TIMING: every stats.scanned++ in queue.js is paired with a stats.totalTimeMs += in the same block', () => {
+    // Static guard-rail: ensures the avg scan time formula
+    //   avg = totalTimeMs / scanned
+    // stays meaningful. Each scan-decision branch that increments scanned
+    // must also accumulate elapsed time — otherwise (+1 scanned, +0 ms)
+    // pairs drag the average toward zero, exactly the failure mode that
+    // caused 67s → 24s drift in the 2026-05-25 daily report.
+    //
+    // Strategy: read queue.js as text, strip line + block comments so a
+    // commented-out `stats.scanned++` cannot cause a false positive,
+    // then for each remaining `stats.scanned++` line scan the surrounding
+    // ±6 lines for a `stats.totalTimeMs +=`. Six lines covers the
+    // current widest in-block gap (CLEAN path has 4 statements between
+    // them); raise if the codebase grows wider.
+    const queueSrc = fs.readFileSync(
+      path.join(__dirname, '..', '..', 'src', 'monitor', 'queue.js'),
+      'utf8'
+    );
+    // Strip block comments first, then line comments — order matters:
+    // block comments can contain // sequences.
+    const stripped = queueSrc
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^\s*\/\/.*$/gm, '');
+    const lines = stripped.split('\n');
+    const offenders = [];
+    const WINDOW = 6;
+    for (let i = 0; i < lines.length; i++) {
+      if (!/stats\.scanned\+\+/.test(lines[i])) continue;
+      const lo = Math.max(0, i - WINDOW);
+      const hi = Math.min(lines.length - 1, i + WINDOW);
+      let pairOk = false;
+      for (let j = lo; j <= hi; j++) {
+        if (/stats\.totalTimeMs\s*\+=/.test(lines[j])) {
+          pairOk = true;
+          break;
+        }
+      }
+      if (!pairOk) {
+        offenders.push(`line ${i + 1}: ${lines[i].trim()}`);
+      }
+    }
+    assert(offenders.length === 0,
+      `stats.scanned++ paths missing a paired stats.totalTimeMs += (within ${WINDOW} lines):\n  ${offenders.join('\n  ')}`);
+  });
+
   // Cleanup seq file after all changes stream tests
   try { fs.unlinkSync(NPM_SEQ_FILE); } catch {}
 

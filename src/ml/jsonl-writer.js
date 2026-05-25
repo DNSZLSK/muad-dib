@@ -18,12 +18,19 @@ const DEFAULT_TRAINING_FILE = path.join(__dirname, '..', '..', 'data', 'ml-train
 let TRAINING_FILE = DEFAULT_TRAINING_FILE;
 const MAX_JSONL_SIZE = 100 * 1024 * 1024; // 100MB rotation threshold
 
+// In-memory line counter. null = needs recompute (cold boot, file rewrite, or
+// path swap). Maintained incrementally by appendRecord and invalidated by
+// relabelRecords and setTrainingFile. Prior to this cache, getStats read the
+// entire JSONL into RAM on every daily report (72MB allocation × ~30K records).
+let _cachedLineCount = null;
+
 /**
  * Override the training file path (for testing).
  * @param {string} filePath - new file path
  */
 function setTrainingFile(filePath) {
   TRAINING_FILE = filePath;
+  _cachedLineCount = null; // different file → recompute on next getStats
 }
 
 /**
@@ -31,6 +38,7 @@ function setTrainingFile(filePath) {
  */
 function resetTrainingFile() {
   TRAINING_FILE = DEFAULT_TRAINING_FILE;
+  _cachedLineCount = null;
 }
 
 /**
@@ -49,6 +57,7 @@ function appendRecord(record) {
 
     const line = JSON.stringify(record) + '\n';
     fs.appendFileSync(TRAINING_FILE, line, 'utf8');
+    if (_cachedLineCount !== null) _cachedLineCount++;
   } catch (err) {
     // Non-fatal: JSONL export failure should never crash the monitor
     // Log permission errors so they are visible in journalctl (was silent before v2.10.27)
@@ -73,6 +82,7 @@ function maybeRotate() {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const rotatedName = TRAINING_FILE.replace('.jsonl', `-${timestamp}.jsonl`);
     fs.renameSync(TRAINING_FILE, rotatedName);
+    _cachedLineCount = 0; // fresh file starts empty
     console.log(`[ML] Rotated training file → ${path.basename(rotatedName)} (${(stat.size / 1024 / 1024).toFixed(1)}MB)`);
   } catch (err) {
     console.error(`[ML] Rotation failed: ${err.message}`);
@@ -107,25 +117,71 @@ function readRecords() {
 }
 
 /**
- * Get stats about the current JSONL file.
+ * Stream-count newlines in a file using 64KB chunks. Counts non-empty
+ * logical records: each `\n`-terminated line that contains at least one
+ * non-whitespace byte. Matches the semantics of the old split-based count
+ * while avoiding the full-file readFileSync.
+ *
+ * @param {string} filePath
+ * @returns {number}
+ */
+function countLinesStreaming(filePath) {
+  const BUFFER_SIZE = 64 * 1024;
+  let fd;
+  try {
+    fd = fs.openSync(filePath, 'r');
+  } catch {
+    return 0;
+  }
+  try {
+    const buf = Buffer.alloc(BUFFER_SIZE);
+    let count = 0;
+    let sawContent = false;
+    let bytesRead;
+    while ((bytesRead = fs.readSync(fd, buf, 0, BUFFER_SIZE, null)) > 0) {
+      for (let i = 0; i < bytesRead; i++) {
+        const b = buf[i];
+        if (b === 0x0A) {            // '\n'
+          if (sawContent) count++;
+          sawContent = false;
+        } else if (b !== 0x20 && b !== 0x09 && b !== 0x0D) {
+          // any non-whitespace byte (space, tab, CR are still whitespace)
+          sawContent = true;
+        }
+      }
+    }
+    if (sawContent) count++; // trailing record without final newline
+    return count;
+  } finally {
+    try { fs.closeSync(fd); } catch {}
+  }
+}
+
+/**
+ * Get stats about the current JSONL file. Uses an in-memory line counter
+ * that is maintained incrementally by appendRecord and invalidated by
+ * rewrite operations — so getStats is O(1) on the hot path of the daily
+ * report (previously O(file size) via readFileSync on a 72MB+ file).
+ *
  * @returns {{ recordCount: number, fileSizeBytes: number, fileSizeMB: string }}
  */
 function getStats() {
   try {
     if (!fs.existsSync(TRAINING_FILE)) {
+      _cachedLineCount = 0;
       return { recordCount: 0, fileSizeBytes: 0, fileSizeMB: '0.0' };
     }
     const stat = fs.statSync(TRAINING_FILE);
-    // Count lines without reading the entire file into memory
-    const content = fs.readFileSync(TRAINING_FILE, 'utf8');
-    const lineCount = content.split('\n').filter(l => l.trim()).length;
+    if (_cachedLineCount === null) {
+      _cachedLineCount = countLinesStreaming(TRAINING_FILE);
+    }
     return {
-      recordCount: lineCount,
+      recordCount: _cachedLineCount,
       fileSizeBytes: stat.size,
       fileSizeMB: (stat.size / 1024 / 1024).toFixed(1)
     };
   } catch {
-    return { recordCount: 0, fileSizeBytes: 0, fileSizeMB: '0.0' };
+    return { recordCount: _cachedLineCount || 0, fileSizeBytes: 0, fileSizeMB: '0.0' };
   }
 }
 
@@ -183,6 +239,8 @@ function relabelRecords(packageName, newLabel, sandboxFindingCount, manualReview
 
     if (updated > 0) {
       fs.writeFileSync(TRAINING_FILE, newLines.join('\n'), 'utf8');
+      // File was rewritten — line count cache must be recomputed on next read.
+      _cachedLineCount = null;
       console.log(`[ML] Relabeled ${updated} records for ${packageName} → ${newLabel}`);
     }
     return updated;

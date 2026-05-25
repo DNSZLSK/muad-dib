@@ -294,6 +294,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
     if (metaSize > MAX_TARBALL_SIZE) {
       console.log(`[MONITOR] SIZE_REJECT: ${name}@${version} — metadata size ${(metaSize / 1024 / 1024).toFixed(1)}MB exceeds ${(MAX_TARBALL_SIZE / 1024 / 1024).toFixed(0)}MB limit (skipped without download)`);
       stats.scanned++;
+      stats.totalTimeMs += Date.now() - startTime;
       return;
     }
 
@@ -349,6 +350,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
     if (fileSize > MAX_TARBALL_SIZE) {
       console.log(`[MONITOR] SKIP: ${name}@${version} — tarball too large (${(fileSize / 1024 / 1024).toFixed(1)}MB)`);
       stats.scanned++;
+      stats.totalTimeMs += Date.now() - startTime;
       return;
     }
 
@@ -393,6 +395,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
           } else {
             console.log(`[MONITOR] SIZE_SKIP: ${name}@${version} — large package (${(unpackedSize / 1024 / 1024).toFixed(1)}MB, quick scan clean)`);
             stats.scanned++;
+            stats.totalTimeMs += Date.now() - startTime;
             stats.clean++;
             updateScanStats('clean');
             return;
@@ -413,6 +416,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
           } else {
             console.log(`[MONITOR] SIZE_SKIP: ${name}@${version} — large package (${(unpackedSize / 1024 / 1024).toFixed(1)}MB, extract failed)`);
             stats.scanned++;
+            stats.totalTimeMs += Date.now() - startTime;
             stats.clean++;
             updateScanStats('clean');
             return;
