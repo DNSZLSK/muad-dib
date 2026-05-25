@@ -219,6 +219,71 @@ async function runPythonSourceTests() {
       cleanup(tmp);
     }
   });
+
+  // =========================================================================
+  // PYSRC-009 / 010 — fork-exec inline interpreter (TrapDoor gap, v2.11.46)
+  // =========================================================================
+
+  await asyncTest('PYSRC-009: subprocess.run(["node", "-e", ...]) fires HIGH', async () => {
+    const result = await runScanDirect(path.join(FIXTURES, 'fork-exec-node-e'));
+    const t = result.threats.find(t => t.type === 'fork_exec_inline_interpreter');
+    assert(t, 'PYSRC-009 should fire on node -e fork-exec');
+    assert(t.severity === 'HIGH', `expected HIGH, got ${t.severity}`);
+  });
+
+  await asyncTest('PYSRC-010: fetch + fork-exec compound fires CRITICAL (TrapDoor signature)', async () => {
+    const result = await runScanDirect(path.join(FIXTURES, 'trapdoor-fetch-fork-exec'));
+    const atomic = result.threats.find(t => t.type === 'fork_exec_inline_interpreter');
+    const compound = result.threats.find(t => t.type === 'fetch_to_fork_exec_inline');
+    assert(atomic, 'PYSRC-009 should also fire (atomic + compound coexist)');
+    assert(compound, 'PYSRC-010 (fetch + fork-exec compound) should fire');
+    assert(compound.severity === 'CRITICAL', `expected CRITICAL, got ${compound.severity}`);
+  });
+
+  await asyncTest('PYSRC-009: bash -c variant fires', async () => {
+    const result = await runScanDirect(path.join(FIXTURES, 'fork-exec-bash-c'));
+    const t = result.threats.find(t => t.type === 'fork_exec_inline_interpreter');
+    assert(t, 'PYSRC-009 should fire on bash -c fork-exec');
+  });
+
+  await asyncTest('PYSRC-009: python -c variant fires', async () => {
+    const result = await runScanDirect(path.join(FIXTURES, 'fork-exec-python-c'));
+    const t = result.threats.find(t => t.type === 'fork_exec_inline_interpreter');
+    assert(t, 'PYSRC-009 should fire on python -c fork-exec');
+  });
+
+  await asyncTest('PYSRC-009: subprocess.run(["node", "script.js"]) without inline flag — no fire', async () => {
+    const result = await runScanDirect(path.join(FIXTURES, 'subprocess-script-not-inline'));
+    const t = result.threats.find(t => t.type === 'fork_exec_inline_interpreter');
+    assert(!t,
+      'PYSRC-009 should NOT fire when the list cmd has no inline flag (-e/-c); ' +
+      'running a real script file is not the targeted pattern.');
+  });
+
+  await asyncTest('PYSRC-009: subprocess shell=True with string cmd — no PYSRC-009 fire', async () => {
+    const result = await runScanDirect(path.join(FIXTURES, 'subprocess-no-list-cmd'));
+    const t = result.threats.find(t => t.type === 'fork_exec_inline_interpreter');
+    assert(!t,
+      'PYSRC-009 targets the list-form `["node", "-e", code]`. String cmd via shell=True ' +
+      'is handled by PYAST-004 separately, so PYSRC-009 must not fire here.');
+  });
+
+  await asyncTest('PYSRC-009: ruby -e and perl -e variants fire', async () => {
+    const { _internal } = require('../../src/scanner/python-source.js');
+    const { detectForkExecInlineInterpreter } = _internal;
+    assert(detectForkExecInlineInterpreter('subprocess.run(["ruby", "-e", "puts 1"])\n'),
+      'ruby -e should fire');
+    assert(detectForkExecInlineInterpreter('subprocess.run(["perl", "-e", "print 1"])\n'),
+      'perl -e should fire');
+    assert(detectForkExecInlineInterpreter('subprocess.Popen(["php", "-r", "echo 1;"])\n'),
+      'php -r should fire');
+    assert(detectForkExecInlineInterpreter('subprocess.run(["powershell", "-c", "Get-Date"])\n'),
+      'powershell -c should fire');
+    assert(!detectForkExecInlineInterpreter('subprocess.run(["node", "build.js"])\n'),
+      'node + script (no flag) should NOT fire');
+    assert(!detectForkExecInlineInterpreter('subprocess.run(["unknown_tool", "-e", "x"])\n'),
+      'unknown interpreter should NOT fire');
+  });
 }
 
 module.exports = { runPythonSourceTests };

@@ -157,12 +157,12 @@ jobs:
     }
   });
 
-  // 3.3b Rule count check (PYAST-005/006/009/010 Phase 1b: +4 rules → 251 RULES)
-  test('P3: rule count is 256 (251 RULES + 5 PARANOID)', () => {
+  // 3.3b Rule count check (PYSRC-009/010 fork-exec inline: +2 rules → 253 RULES)
+  test('P3: rule count is 258 (253 RULES + 5 PARANOID)', () => {
     const { RULES, PARANOID_RULES } = require('../../src/rules/index.js');
     const ruleCount = Object.keys(RULES).length;
     const paranoidCount = Object.keys(PARANOID_RULES).length;
-    assert(ruleCount === 251, `Expected 251 RULES, got ${ruleCount}`);
+    assert(ruleCount === 253, `Expected 253 RULES, got ${ruleCount}`);
     assert(paranoidCount === 5, `Expected 5 PARANOID, got ${paranoidCount}`);
   });
 

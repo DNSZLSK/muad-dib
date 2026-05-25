@@ -188,6 +188,34 @@ function detectDynamicDangerousImport(content) {
   return /__import__\s*\(\s*['"](subprocess|os|requests|urllib|urllib2|socket|http|ssl|ctypes|importlib)['"]/.test(content);
 }
 
+// PYSRC-009 — fork-exec d'un interpréteur inline. Pattern :
+//   subprocess.{Popen,run,call,check_output,check_call,getoutput}(
+//       [ "<interpreter>", "<inline-flag>", <code>, ... ], ...)
+// Le premier élément de la liste est un nom d'interpréteur (literal string),
+// le deuxième est un flag d'exécution inline (-e, -c, --eval, --command, -r).
+// C'est le signe canonique d'un staging multi-langage (Python ouvre un
+// interpréteur Node/Bash/Ruby/... et lui passe du code dans argv).
+// Référence : TrapDoor (mai 2026) — `subprocess.run(["node", "-e", payload])`
+// avec payload fetched depuis le C2 — pattern qui échappe à PYAST-005 parce
+// qu'il n'y a pas d'`exec()`/`eval()` Python, l'exécution est côté interpréteur
+// forked.
+const FORK_EXEC_INLINE_INTERPRETER_RE = (() => {
+  const SUBPROC_CALLEES = 'Popen|run|call|check_output|check_call|getoutput|getstatusoutput';
+  const INTERPRETERS = 'node|nodejs|deno|bun|python|python2|python3|python3\\.\\d+|bash|sh|zsh|dash|ksh|ash|ruby|perl|php|lua|powershell|pwsh|cmd';
+  const INLINE_FLAGS = '-e|-c|--eval|--command|-r';
+  // All template inputs above are file-local constants — no user input flows
+  // here, so the security/detect-non-literal-regexp warning is a false positive.
+  // eslint-disable-next-line security/detect-non-literal-regexp
+  return new RegExp(
+    String.raw`\bsubprocess\.(?:${SUBPROC_CALLEES})\s*\(\s*\[\s*['"](?:${INTERPRETERS})['"]\s*,\s*['"](?:${INLINE_FLAGS})['"]`,
+    'i'
+  );
+})();
+
+function detectForkExecInlineInterpreter(content) {
+  return FORK_EXEC_INLINE_INTERPRETER_RE.test(content);
+}
+
 /**
  * Scan Python source files under targetPath for import-time / install-time RCE.
  *
@@ -237,6 +265,7 @@ function scanPythonSource(targetPath) {
     const hasBase64 = detectBase64Decode(cleaned);
     const hasDeser = detectDeserialization(cleaned);
     const hasDynImport = detectDynamicDangerousImport(cleaned);
+    const hasForkExecInline = detectForkExecInlineInterpreter(cleaned);
 
     if (hasExec) {
       threats.push({
@@ -296,6 +325,28 @@ function scanPythonSource(targetPath) {
         file: relPath
       });
     }
+    // PYSRC-009: fork-exec inline interpreter — pattern transversal (node -e,
+    // python -c, bash -c, ...). HIGH because it's structurally suspicious in
+    // __init__.py / setup.py but has some legit uses (build scripts).
+    if (hasForkExecInline) {
+      threats.push({
+        type: 'fork_exec_inline_interpreter',
+        severity: 'HIGH',
+        message: `${relPath}: subprocess.X(['<interpreter>', '-e|-c', ...]) — fork-exec of an inline interpreter (node/python/bash/ruby/perl/...). Canonical staging pattern for multi-language malware.`,
+        file: relPath
+      });
+    }
+    // PYSRC-010: fetch + fork-exec inline = TrapDoor signature exact. CRITICAL
+    // because the file fetches remote bytes and feeds them to a forked
+    // interpreter — RCE-equivalent without using Python's exec/eval.
+    if (hasFetch && hasForkExecInline) {
+      threats.push({
+        type: 'fetch_to_fork_exec_inline',
+        severity: 'CRITICAL',
+        message: `${relPath}: network fetch (urllib/requests/...) AND subprocess.X(['<interpreter>', '-e', ...]) in same file — TrapDoor signature: fetch remote payload then fork-exec it through an inline interpreter. Escapes PYAST-005 (which only tracks Python exec/eval) because execution is on the forked interpreter side.`,
+        file: relPath
+      });
+    }
   }
 
   return threats;
@@ -314,6 +365,7 @@ module.exports = {
     detectNetworkFetch,
     detectBase64Decode,
     detectDeserialization,
-    detectDynamicDangerousImport
+    detectDynamicDangerousImport,
+    detectForkExecInlineInterpreter
   }
 };
