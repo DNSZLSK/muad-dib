@@ -7624,6 +7624,206 @@ async function runMonitorTests() {
     stats.rssFallbackCount = prevVal;
   });
 
+  // ============================================
+  // COVERAGE COUNTER TESTS (fix/daily-metrics-accuracy)
+  // ============================================
+
+  await asyncTest('COVERAGE: pollNpmChanges counts raw events BEFORE per-package filters', async () => {
+    const ingestion = require('../../src/monitor/ingestion.js');
+    const realGet = ingestion._deps.httpsGet;
+    // Fake CouchDB response: 4 events, 3 of which the loop will filter out.
+    // We want npmPublishEventsSeen += 4 anyway (the events still happened on npm).
+    const fakeBody = JSON.stringify({
+      last_seq: 200,
+      results: [
+        { id: 'real-pkg', deleted: false },
+        { id: 'deleted-pkg', deleted: true },        // filtered: deleted
+        { id: '_design/whatever' },                  // filtered: design doc
+        { id: '@types/foo' }                         // filtered: @types
+      ]
+    });
+    ingestion._deps.httpsGet = async () => fakeBody;
+    const state = { npmLastSeq: 100 };
+    const queue = [];
+    const stats = {};
+    try {
+      const queued = await ingestion.pollNpmChanges(state, queue, stats);
+      assert(queued === 1, `Only real-pkg should make the queue, got queued=${queued}`);
+      assert(stats.npmPublishEventsSeen === 4,
+        `npmPublishEventsSeen must count BEFORE filters (4 raw events), got ${stats.npmPublishEventsSeen}`);
+      assert(stats.changesStreamPackages === 1,
+        `changesStreamPackages must count AFTER filters (1 queued), got ${stats.changesStreamPackages}`);
+    } finally {
+      ingestion._deps.httpsGet = realGet;
+    }
+  });
+
+  await asyncTest('COVERAGE: pollNpmChanges catch-up branch adds gap to both npmPublishEventsSeen and npmCatchupSkippedSeqs', async () => {
+    const ingestion = require('../../src/monitor/ingestion.js');
+    const realGet = ingestion._deps.httpsGet;
+    const { CHANGES_LIMIT, CHANGES_CATCHUP_MAX } = require('../../src/monitor/state.js');
+    // Fill results to CHANGES_LIMIT so catch-up branch triggers, then return a
+    // root update_seq far beyond data.last_seq (gap > CHANGES_CATCHUP_MAX).
+    const filler = Array.from({ length: CHANGES_LIMIT }, (_, i) => ({ id: `pkg-${i}`, deleted: false }));
+    const lastSeq = 1000;
+    const dataLastSeq = lastSeq + CHANGES_LIMIT;
+    const currentSeq = dataLastSeq + CHANGES_CATCHUP_MAX + 5000; // gap > threshold
+    const expectedGap = currentSeq - lastSeq;
+    ingestion._deps.httpsGet = async (url) => {
+      if (url.includes('_changes')) {
+        return JSON.stringify({ last_seq: dataLastSeq, results: filler });
+      }
+      return JSON.stringify({ update_seq: currentSeq });
+    };
+    const state = { npmLastSeq: lastSeq };
+    const queue = [];
+    const stats = {};
+    try {
+      const queued = await ingestion.pollNpmChanges(state, queue, stats);
+      assert(queued === 0, `Catch-up branch must return 0 (skipped), got ${queued}`);
+      assert(stats.npmCatchupSkippedSeqs === expectedGap,
+        `npmCatchupSkippedSeqs must equal gap=${expectedGap}, got ${stats.npmCatchupSkippedSeqs}`);
+      assert(stats.npmPublishEventsSeen === expectedGap,
+        `npmPublishEventsSeen must equal gap=${expectedGap} (the publishes we skipped), got ${stats.npmPublishEventsSeen}`);
+      assert(state.npmLastSeq === currentSeq, 'seq must advance to currentSeq after catch-up skip');
+    } finally {
+      ingestion._deps.httpsGet = realGet;
+    }
+  });
+
+  await asyncTest('COVERAGE: pollNpmRss fallback also increments npmPublishEventsSeen', async () => {
+    const ingestion = require('../../src/monitor/ingestion.js');
+    const realGet = ingestion._deps.httpsGet;
+    const fakeRss = `<?xml version="1.0"?><rss><channel>
+      <item><title>alpha 1.0.0</title></item>
+      <item><title>beta 2.0.0</title></item>
+      <item><title>gamma 3.0.0</title></item>
+    </channel></rss>`;
+    ingestion._deps.httpsGet = async () => fakeRss;
+    const state = { npmLastPackage: '' }; // null state → all packages counted as new
+    const queue = [];
+    const stats = {};
+    try {
+      const queued = await ingestion.pollNpmRss(state, queue, stats);
+      assert(queued >= 0, `pollNpmRss should return a number, got ${queued}`);
+      assert(stats.npmPublishEventsSeen === 3,
+        `RSS fallback must count 3 raw events, got ${stats.npmPublishEventsSeen}`);
+    } finally {
+      ingestion._deps.httpsGet = realGet;
+    }
+  });
+
+  test('COVERAGE: buildDailyReportEmbed renders attempted/(npmPub+pypiPub) ratio', () => {
+    const origScanned = stats.scanned;
+    const origAttempts = stats.uniqueScanAttempts;
+    const origNpmPub = stats.npmPublishEventsSeen;
+    const origPypiPub = stats.pypiChangelogPackages;
+    const origErrors = stats.errors;
+    const origTime = stats.totalTimeMs;
+    try {
+      stats.scanned = 9999; // must NOT appear in numerator anymore
+      stats.uniqueScanAttempts = 7200;
+      stats.npmPublishEventsSeen = 6000;
+      stats.pypiChangelogPackages = 2000;
+      stats.errors = 0;
+      stats.totalTimeMs = 0;
+      dailyAlerts.length = 0;
+
+      const embed = buildDailyReportEmbed();
+      const coverageField = embed.embeds[0].fields.find(f => f.name === 'Coverage');
+      assert(coverageField, 'Coverage field must exist');
+      assertIncludes(coverageField.value, '7200/8000',
+        `Coverage must show attempted/published, got "${coverageField.value}"`);
+      assertIncludes(coverageField.value, '90%',
+        `Coverage must show 90% ratio (7200/8000), got "${coverageField.value}"`);
+      assertIncludes(coverageField.value, 'Ops: 9999',
+        `Ops sub-line must expose stats.scanned, got "${coverageField.value}"`);
+    } finally {
+      stats.scanned = origScanned;
+      stats.uniqueScanAttempts = origAttempts;
+      stats.npmPublishEventsSeen = origNpmPub;
+      stats.pypiChangelogPackages = origPypiPub;
+      stats.errors = origErrors;
+      stats.totalTimeMs = origTime;
+    }
+  });
+
+  test('COVERAGE: buildDailyReportEmbed surfaces catch-up skip when present', () => {
+    const orig = {
+      attempts: stats.uniqueScanAttempts,
+      npmPub: stats.npmPublishEventsSeen,
+      pypiPub: stats.pypiChangelogPackages,
+      npmGap: stats.npmCatchupSkippedSeqs,
+      pypiGap: stats.pypiCatchupSkippedEvents
+    };
+    try {
+      stats.uniqueScanAttempts = 1000;
+      stats.npmPublishEventsSeen = 2500;
+      stats.pypiChangelogPackages = 500;
+      stats.npmCatchupSkippedSeqs = 800;
+      stats.pypiCatchupSkippedEvents = 200;
+      const embed = buildDailyReportEmbed();
+      const coverageField = embed.embeds[0].fields.find(f => f.name === 'Coverage');
+      assertIncludes(coverageField.value, 'Catch-up skip: 1000',
+        `Catch-up skip total must be 800+200=1000, got "${coverageField.value}"`);
+    } finally {
+      stats.uniqueScanAttempts = orig.attempts;
+      stats.npmPublishEventsSeen = orig.npmPub;
+      stats.pypiChangelogPackages = orig.pypiPub;
+      stats.npmCatchupSkippedSeqs = orig.npmGap;
+      stats.pypiCatchupSkippedEvents = orig.pypiGap;
+    }
+  });
+
+  test('COVERAGE: saveDailyStats persists all new coverage counters across restarts', () => {
+    const orig = {
+      attempts: stats.uniqueScanAttempts,
+      npmPub: stats.npmPublishEventsSeen,
+      pypiPub: stats.pypiChangelogPackages,
+      pypiEv: stats.pypiChangelogEvents,
+      npmGap: stats.npmCatchupSkippedSeqs,
+      pypiGap: stats.pypiCatchupSkippedEvents
+    };
+    let backup = null;
+    try { backup = fs.readFileSync(DAILY_STATS_FILE, 'utf8'); } catch {}
+    try {
+      stats.uniqueScanAttempts = 5500;
+      stats.npmPublishEventsSeen = 7000;
+      stats.pypiChangelogPackages = 1500;
+      stats.pypiChangelogEvents = 4200;
+      stats.npmCatchupSkippedSeqs = 333;
+      stats.pypiCatchupSkippedEvents = 111;
+      saveDailyStats();
+
+      stats.uniqueScanAttempts = 0;
+      stats.npmPublishEventsSeen = 0;
+      stats.pypiChangelogPackages = 0;
+      stats.pypiChangelogEvents = 0;
+      stats.npmCatchupSkippedSeqs = 0;
+      stats.pypiCatchupSkippedEvents = 0;
+      loadDailyStats();
+
+      assert(stats.uniqueScanAttempts === 5500, `uniqueScanAttempts should restore to 5500, got ${stats.uniqueScanAttempts}`);
+      assert(stats.npmPublishEventsSeen === 7000, `npmPublishEventsSeen should restore to 7000, got ${stats.npmPublishEventsSeen}`);
+      assert(stats.pypiChangelogPackages === 1500, `pypiChangelogPackages should restore to 1500, got ${stats.pypiChangelogPackages}`);
+      assert(stats.pypiChangelogEvents === 4200, `pypiChangelogEvents should restore to 4200, got ${stats.pypiChangelogEvents}`);
+      assert(stats.npmCatchupSkippedSeqs === 333, `npmCatchupSkippedSeqs should restore to 333, got ${stats.npmCatchupSkippedSeqs}`);
+      assert(stats.pypiCatchupSkippedEvents === 111, `pypiCatchupSkippedEvents should restore to 111, got ${stats.pypiCatchupSkippedEvents}`);
+    } finally {
+      stats.uniqueScanAttempts = orig.attempts;
+      stats.npmPublishEventsSeen = orig.npmPub;
+      stats.pypiChangelogPackages = orig.pypiPub;
+      stats.pypiChangelogEvents = orig.pypiEv;
+      stats.npmCatchupSkippedSeqs = orig.npmGap;
+      stats.pypiCatchupSkippedEvents = orig.pypiGap;
+      if (backup !== null) {
+        fs.writeFileSync(DAILY_STATS_FILE, backup, 'utf8');
+      } else {
+        try { fs.unlinkSync(DAILY_STATS_FILE); } catch {}
+      }
+    }
+  });
+
   // Cleanup seq file after all changes stream tests
   try { fs.unlinkSync(NPM_SEQ_FILE); } catch {}
 

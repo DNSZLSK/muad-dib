@@ -46,7 +46,8 @@ let consecutivePollErrors = 0;
 // `ingestion._deps.httpsPost = fakePost` and have it take effect inside
 // pollPyPIChangelog. Kept tiny on purpose — only network I/O lives here.
 const _deps = {
-  httpsPost: null // populated below once httpsPost is defined
+  httpsPost: null, // populated below once httpsPost is defined
+  httpsGet: null   // populated below; used by npm pollers so tests can stub
 };
 
 function getConsecutivePollErrors() {
@@ -131,6 +132,7 @@ function httpsPost(url, body, headers = {}, timeoutMs = 30_000) {
 }
 
 _deps.httpsPost = httpsPost;
+_deps.httpsGet = httpsGet;
 
 async function getWeeklyDownloads(packageName) {
   const cached = downloadsCache.get(packageName);
@@ -405,7 +407,7 @@ async function pollNpmChanges(state, scanQueue, stats) {
 
     // First run: initialize to current seq ("now") via root endpoint
     if (lastSeq == null) {
-      const infoBody = await httpsGet('https://replicate.npmjs.com/registry/', 10000);
+      const infoBody = await _deps.httpsGet('https://replicate.npmjs.com/registry/', 10000);
       const info = JSON.parse(infoBody);
       const currentSeq = info.update_seq;
       if (currentSeq == null) {
@@ -423,13 +425,13 @@ async function pollNpmChanges(state, scanQueue, stats) {
     const url = `${CHANGES_STREAM_URL}?since=${lastSeq}&limit=${CHANGES_LIMIT}`;
     let body, data;
     try {
-      body = await httpsGet(url, 60000);
+      body = await _deps.httpsGet(url, 60000);
       data = JSON.parse(body);
     } catch (fetchErr) {
       // Invalid seq (stale from pre-migration CouchDB) or transient error — re-init to current seq
       console.warn(`[MONITOR] Changes stream fetch failed (${fetchErr.message}) — attempting seq re-init`);
       try {
-        const reinitBody = await httpsGet('https://replicate.npmjs.com/registry/', 10000);
+        const reinitBody = await _deps.httpsGet('https://replicate.npmjs.com/registry/', 10000);
         const reinitData = JSON.parse(reinitBody);
         if (reinitData.update_seq != null) {
           state.npmLastSeq = reinitData.update_seq;
@@ -450,7 +452,7 @@ async function pollNpmChanges(state, scanQueue, stats) {
 
     // Catch-up protection: if too far behind, skip to current
     if (data.results.length === CHANGES_LIMIT) {
-      const currentSeqBody = await httpsGet('https://replicate.npmjs.com/registry/', 10000);
+      const currentSeqBody = await _deps.httpsGet('https://replicate.npmjs.com/registry/', 10000);
       const currentSeqData = JSON.parse(currentSeqBody);
       const currentSeq = currentSeqData.update_seq;
       if (typeof currentSeq === 'number' && typeof data.last_seq === 'number' &&
@@ -459,11 +461,21 @@ async function pollNpmChanges(state, scanQueue, stats) {
         console.warn(`[MONITOR] Changes stream too far behind (${gap} changes) — skipping to current`);
         stats.npmCatchupSkips = (stats.npmCatchupSkips || 0) + 1;
         stats.npmCatchupSkippedSeqs = (stats.npmCatchupSkippedSeqs || 0) + gap;
+        // Catch-up gap = events we know happened but chose to skip. They must
+        // appear in the coverage denominator so the daily report exposes the
+        // gap as low coverage (and the catch-up line explains why).
+        stats.npmPublishEventsSeen = (stats.npmPublishEventsSeen || 0) + gap;
         state.npmLastSeq = currentSeq;
         saveNpmSeq(currentSeq);
         return 0;
       }
     }
+
+    // IMPORTANT: count raw events BEFORE filtering — otherwise the coverage
+    // denominator is biased (matches "events we queued", not "events npm
+    // emitted"). The filters below drop _design/self/@types/deleted, but
+    // those were still real changes-stream events.
+    stats.npmPublishEventsSeen = (stats.npmPublishEventsSeen || 0) + data.results.length;
 
     let queued = 0;
     for (const change of data.results) {
@@ -584,7 +596,7 @@ async function pollNpmRss(state, scanQueue, stats) {
     await acquireRegistrySlot();
     let body;
     try {
-      body = await httpsGet(url);
+      body = await _deps.httpsGet(url);
     } finally {
       releaseRegistrySlot();
     }
@@ -602,6 +614,11 @@ async function pollNpmRss(state, scanQueue, stats) {
         newPackages = packages.slice(0, lastIdx);
       }
     }
+
+    // Mirror pollNpmChanges: count raw events BEFORE per-package filters
+    // so the coverage denominator stays accurate when the changes stream
+    // falls back to RSS.
+    stats.npmPublishEventsSeen = (stats.npmPublishEventsSeen || 0) + newPackages.length;
 
     for (const name of newPackages) {
       if (name === SELF_PACKAGE_NAME) {

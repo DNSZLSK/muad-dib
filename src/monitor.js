@@ -55,6 +55,18 @@ const stats = {
   sandboxDeferred: 0,
   deferredProcessed: 0,
   deferredExpired: 0,
+  // Coverage accounting (Commit 1 of fix/daily-metrics-accuracy)
+  // - npmPublishEventsSeen: raw changes-stream events, BEFORE per-package filters
+  // - uniqueScanAttempts: distinct (eco, name, version) tuples that reached scanPackage
+  // - pypiChangelogPackages/Events tracked here too so reset/restore stays atomic
+  uniqueScanAttempts: 0,
+  npmPublishEventsSeen: 0,
+  pypiChangelogPackages: 0,
+  pypiChangelogEvents: 0,
+  npmCatchupSkippedSeqs: 0,
+  npmCatchupSkips: 0,
+  pypiCatchupSkippedEvents: 0,
+  pypiCatchupSkips: 0,
   lastReportTime: Date.now(),
   lastDailyReportDate: null
 };

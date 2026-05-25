@@ -1205,6 +1205,11 @@ async function resolveTarballAndScan(item, stats, dailyAlerts, recentlyScanned, 
     return;
   }
   recentlyScanned.add(dedupeKey);
+  // Coverage numerator: one count per unique (ecosystem, name, version) that
+  // reaches a scan attempt. Excludes ATO burst extras that lose the dedup
+  // race, retries, size-cap rejections — those inflate stats.scanned but
+  // would distort the "% of publishes we covered" reading.
+  stats.uniqueScanAttempts = (stats.uniqueScanAttempts || 0) + 1;
 
   // Abort check: if timeout fired during URL resolution or dedup, bail out
   if (signal && signal.aborted) return;

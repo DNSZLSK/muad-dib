@@ -855,11 +855,24 @@ function buildDailyReportEmbed(stats, dailyAlerts) {
   const avg = stats.scanned > 0 ? (stats.totalTimeMs / stats.scanned / 1000).toFixed(1) : '0.0';
 
   // --- Coverage estimation ---
-  // changesStreamPackages = total versions seen from npm changes stream (≈ published today)
-  const published = stats.changesStreamPackages || 0;
+  // Numerator: unique (ecosystem, name, version) tuples that reached a scan
+  // attempt (post-dedup). Denominator: raw publish events seen on either
+  // changes stream BEFORE per-package filtering, plus npm catch-up gaps and
+  // PyPI publish events that survived per-(name,version) dedup. This stays
+  // bounded near 100% — old "scanned/changesStreamPackages" was racing PyPI
+  // scans and ATO burst extras against an npm-only denominator.
+  const attempted = stats.uniqueScanAttempts || 0;
+  const npmPub = stats.npmPublishEventsSeen || 0;
+  const pypiPub = stats.pypiChangelogPackages || 0;
+  const published = npmPub + pypiPub;
+  const coverageRatio = published > 0 ? (attempted / published * 100).toFixed(0) : '0';
+  const catchupSkipped = (stats.npmCatchupSkippedSeqs || 0) + (stats.pypiCatchupSkippedEvents || 0);
+  const opsSuffix = catchupSkipped > 0
+    ? `\nOps: ${stats.scanned} | Catch-up skip: ${catchupSkipped}`
+    : `\nOps: ${stats.scanned}`;
   const coverageText = published > 0
-    ? `${stats.scanned}/${published} (${(stats.scanned / published * 100).toFixed(0)}%)`
-    : `${stats.scanned} scanned`;
+    ? `${attempted}/${published} (${coverageRatio}%)${opsSuffix}`
+    : `${attempted} attempted${opsSuffix}`;
 
   // --- Timeouts ---
   const staticTimeouts = (stats.errorsByType && stats.errorsByType.static_timeout) || 0;
@@ -1033,6 +1046,14 @@ async function sendDailyReport(stats, dailyAlerts, recentlyScanned, downloadsCac
   // Reset LLM detective internal stats
   try { require('../ml/llm-detective.js').resetStats(); } catch {}
   stats.changesStreamPackages = 0;
+  stats.uniqueScanAttempts = 0;
+  stats.npmPublishEventsSeen = 0;
+  stats.pypiChangelogPackages = 0;
+  stats.pypiChangelogEvents = 0;
+  stats.npmCatchupSkippedSeqs = 0;
+  stats.npmCatchupSkips = 0;
+  stats.pypiCatchupSkippedEvents = 0;
+  stats.pypiCatchupSkips = 0;
   stats.rssFallbackCount = 0;
   dailyAlerts.length = 0;
   recentlyScanned.clear();
