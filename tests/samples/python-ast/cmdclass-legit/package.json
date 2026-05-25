@@ -1,0 +1,1 @@
+{ "name": "pyast-cmdclass-legit-fixture", "version": "0.0.0", "description": "PYAST-001 negative: legitimate build_ext override only — should still fire HIGH per current heuristic." }

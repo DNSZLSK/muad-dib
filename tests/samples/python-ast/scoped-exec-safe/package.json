@@ -1,0 +1,1 @@
+{ "name": "pyast-scoped-exec-safe-fixture", "version": "0.0.0", "description": "PYAST-003 negative: exec inside a function (not at module level) should NOT fire." }

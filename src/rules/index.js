@@ -339,6 +339,94 @@ const RULES = {
     mitre: 'T1027.013'
   },
 
+  // PYAST-001 a 008 — Python AST scanner via tree-sitter (TrapDoor PyPI parity,
+  // v2.11.42+). Mirror du `ast.js` cote npm : full CST walk avec scope tracking,
+  // detecteurs scope-aware. Coexiste avec PYSRC-001..008 (regex) en defense
+  // en profondeur — PYAST emet des findings plus precis (scope-aware), PYSRC
+  // sert de fast-path.
+  // IDs 005, 006, 009, 010 sont RESERVES pour Phase 1b (detecteurs taint-aware :
+  // fetch->exec, base64->exec, ctypes shellcode, env->network).
+  pyast_setup_cmdclass_override: {
+    id: 'MUADDIB-PYAST-001',
+    name: 'setup.py cmdclass Override',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    domain: 'malware',
+    description: 'setup.py contient setup(cmdclass={...}) qui override une commande install-time (install / develop / build_ext / etc.). C\'est le vecteur #1 d\'install-time RCE sur PyPI : la classe custom override .run() pour executer du code arbitraire pendant pip install. Pattern central de TrapDoor (mai 2026) et de la plupart des Lazarus/SilentSync PyPI.',
+    references: [
+      'https://socket.dev/blog/trapdoor-crypto-stealer-npm-pypi-crates',
+      'https://securitylabs.datadoghq.com/articles/guarddog-identify-malicious-pypi-packages/',
+      'https://attack.mitre.org/techniques/T1195/002/'
+    ],
+    mitre: 'T1195.002'
+  },
+  pyast_setup_entry_points_suspicious: {
+    id: 'MUADDIB-PYAST-002',
+    name: 'setup.py Suspicious Entry Points',
+    severity: 'HIGH',
+    confidence: 'medium',
+    domain: 'malware',
+    description: 'setup.py declare console_scripts ou distutils.commands avec des noms suspects (commence par _, post_install, setup_, install_) — souvent utilise pour s\'executer apres install ou s\'enregistrer comme hook systeme. Heuristique : confidence medium (les entry_points legit sont la majorite).',
+    references: [
+      'https://docs.python.org/3/distutils/setupscript.html',
+      'https://attack.mitre.org/techniques/T1546/'
+    ],
+    mitre: 'T1546'
+  },
+  pyast_module_level_exec: {
+    id: 'MUADDIB-PYAST-003',
+    name: 'Python Module-Level exec/eval (AST-confirmed)',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    domain: 'malware',
+    description: 'AST-confirmed : exec()/eval() au niveau module (scope_depth == 0, hors function/class/lambda). S\'execute systematiquement a l\'import ou pip install. RCE direct. Plus precis que PYSRC-001 (regex) qui flag aussi exec dans des fonctions non-appelees.',
+    references: [
+      'https://socket.dev/blog/trapdoor-crypto-stealer-npm-pypi-crates',
+      'https://attack.mitre.org/techniques/T1059/006/'
+    ],
+    mitre: 'T1059.006'
+  },
+  pyast_module_level_subprocess_shell: {
+    id: 'MUADDIB-PYAST-004',
+    name: 'Python Module-Level subprocess shell=True (AST-confirmed)',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    domain: 'malware',
+    description: 'AST-confirmed : subprocess.Popen/run/call/check_output/getoutput(..., shell=True) au niveau module. shell=True ouvre la porte a l\'injection de commande shell ; combine a une execution a l\'import, c\'est un vecteur direct de RCE. Equivalent Bandit B602.',
+    references: [
+      'https://bandit.readthedocs.io/en/latest/plugins/b602_subprocess_popen_with_shell_equals_true.html',
+      'https://attack.mitre.org/techniques/T1059/006/'
+    ],
+    mitre: 'T1059.006'
+  },
+  pyast_module_level_unsafe_deserialization: {
+    id: 'MUADDIB-PYAST-007',
+    name: 'Python Module-Level Unsafe Deserialization (AST-confirmed)',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    domain: 'vulnerability',
+    description: 'AST-confirmed : pickle/cPickle/marshal/dill/cloudpickle/jsonpickle/shelve .loads()/.load() au niveau module. Ces fonctions sont trivialement RCE sur input attaquant-controle (CWE-502). Au niveau module ca s\'execute a l\'import. Equivalent Bandit B301.',
+    references: [
+      'https://bandit.readthedocs.io/en/latest/blacklists/blacklist_calls.html#b301-pickle',
+      'https://docs.python.org/3/library/pickle.html#restricting-globals',
+      'https://cwe.mitre.org/data/definitions/502.html'
+    ],
+    mitre: 'T1059.006'
+  },
+  pyast_dynamic_dangerous_import: {
+    id: 'MUADDIB-PYAST-008',
+    name: 'Python Dynamic __import__ of Dangerous Module (AST-confirmed)',
+    severity: 'HIGH',
+    confidence: 'high',
+    domain: 'malware',
+    description: 'AST-confirmed : __import__() avec un nom hardcode dangereux (subprocess, os, requests, urllib, socket, http, ssl, ctypes, importlib). Pattern d\'obfuscation pour eviter "import X" statique et echapper aux scanners qui tracent uniquement les declarations d\'import. Plus precis que PYSRC-007 (regex) — confirme via AST que c\'est bien un appel a __import__ et pas une mention dans une string ou un commentaire.',
+    references: [
+      'https://docs.python.org/3/library/functions.html#import__',
+      'https://attack.mitre.org/techniques/T1027/'
+    ],
+    mitre: 'T1027'
+  },
+
   suspicious_file: {
     id: 'MUADDIB-DEP-002',
     name: 'Suspicious File in Dependency',

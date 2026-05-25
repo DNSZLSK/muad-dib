@@ -32,6 +32,7 @@ const { runHashTests } = require('./scanner/hash.test');
 const { runEntropyTests } = require('./scanner/entropy.test');
 const { runPythonTests } = require('./scanner/python.test');
 const { runPythonSourceTests } = require('./scanner/python-source.test');
+const { runPythonAstTests } = require('./scanner/python-ast.test');
 const { runAIConfigTests } = require('./scanner/ai-config.test');
 const { runDeobfuscateTests } = require('./scanner/deobfuscate.test');
 const { runModuleGraphTests } = require('./scanner/module-graph.test');
@@ -159,6 +160,7 @@ async function timed(name, fn) {
   await timed('webhook', runWebhookTests);
   await timed('python', runPythonTests);
   await timed('python-source', runPythonSourceTests);
+  await timed('python-ast', runPythonAstTests);
   await timed('sandbox', runSandboxTests);
   await timed('gvisor', runGvisorTests);
   await timed('preload', runPreloadTests);

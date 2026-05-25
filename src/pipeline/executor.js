@@ -21,6 +21,7 @@ const { buildModuleGraph, annotateTaintedExports, detectCrossFileFlows, annotate
 const { loadCachedIOCs, checkIOCStaleness } = require('../ioc/updater.js');
 const { detectPythonProject, normalizePythonName } = require('../scanner/python.js');
 const { scanPythonSource } = require('../scanner/python-source.js');
+const { initPythonParser, scanPythonAST } = require('../scanner/python-ast.js');
 const { Spinner, listInstalledPackages, wasFilesCapped, getOverflowFiles, debugLog } = require('../utils.js');
 const { getMaxFileSize } = require('../shared/constants.js');
 const { scanParanoid } = require('../scanner/paranoid.js');
@@ -177,6 +178,17 @@ async function execute(targetPath, options, pythonDeps, warnings) {
     }
   }
 
+  // Pre-analysis stage: init the tree-sitter Python parser (async WASM load).
+  // Same pattern as the module-graph block above — runs once before the
+  // parallel scanner batch. If init fails (web-tree-sitter missing, WASM
+  // corrupted, etc.), the PYAST scanner silently returns [] downstream;
+  // we never block the whole scan on this.
+  try {
+    await initPythonParser();
+  } catch (e) {
+    debugLog('[PYAST-INIT] failed (continuing without Python AST scanner):', e && e.message);
+  }
+
   // Sequential execution of scanners with event loop yields between each.
   // All scanners (even "async" ones) are effectively synchronous (readFileSync, readdirSync).
   // Running them via yieldThen ensures the spinner animates between each scanner.
@@ -203,7 +215,8 @@ async function execute(targetPath, options, pythonDeps, warnings) {
     'scanDependencies', 'scanHashes', 'analyzeDataFlow', 'scanTyposquatting',
     'scanGitHubActions', 'matchPythonIOCs', 'checkPyPITyposquatting',
     'scanEntropy', 'scanAIConfig', 'scanIocStrings', 'scanAntiForensic',
-    'scanStubPackage', 'scanMonorepo', 'scanTrustedDepDiff', 'scanPythonSource'
+    'scanStubPackage', 'scanMonorepo', 'scanTrustedDepDiff', 'scanPythonSource',
+    'scanPythonAST'
   ];
 
   const settledResults = await Promise.allSettled([
@@ -234,7 +247,13 @@ async function execute(targetPath, options, pythonDeps, warnings) {
     // in __init__.py / setup.py / top-level .py files. Runs always — not gated
     // on detectPythonProject() because an attacker can ship a malicious __init__.py
     // without a requirements.txt. Walker is cheap (just a depth-1 readdir).
-    yieldThen(() => scanPythonSource(targetPath))
+    yieldThen(() => scanPythonSource(targetPath)),
+    // PYAST-001..008 (v2.11.42+, npm/PyPI parity Phase 1). Full Python CST
+    // analysis via tree-sitter-python WASM. Scope-aware module-level detection
+    // of cmdclass override, exec, subprocess shell=True, pickle.loads,
+    // __import__ dangerous, entry_points. Parser init happens at pre-analysis
+    // stage above; this call is sync from the caller's POV.
+    yieldThen(() => scanPythonAST(targetPath))
   ]);
 
   // Extract results: use empty array for rejected scanners, log errors
@@ -265,7 +284,8 @@ async function execute(targetPath, options, pythonDeps, warnings) {
     stubPackageThreats,
     monorepoThreats,
     trustedDepDiffThreats,
-    pythonSourceThreats
+    pythonSourceThreats,
+    pythonAstThreats
   ] = scanResult;
 
   // Emit warning if file count cap was hit + quick-scan overflow files
@@ -347,6 +367,7 @@ async function execute(targetPath, options, pythonDeps, warnings) {
     ...monorepoThreats,
     ...trustedDepDiffThreats,
     ...pythonSourceThreats,
+    ...pythonAstThreats,
     ...crossFileFlows.filter(f => f && f.sourceFile && f.sinkFile).map(f => ({
       type: f.type,
       severity: f.severity,
