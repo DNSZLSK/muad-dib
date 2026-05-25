@@ -462,6 +462,42 @@ const PLAYBOOKS = {
     'NE PAS installer. Ouvrir le fichier dans un editeur affichant les caracteres invisibles ' +
     '(VS Code: "editor.renderControlCharacters") pour inspecter le contenu reel.',
 
+  pyast_setup_cmdclass_override:
+    'CRITIQUE: setup.py override une commande install-time via cmdclass={...}. La classe custom va executer ' +
+    'son .run() pendant pip install — RCE direct sur la machine de l\'utilisateur. C\'est le vecteur ' +
+    '#1 des supply chain attacks PyPI (TrapDoor mai 2026, Lazarus, SilentSync). NE PAS installer. ' +
+    'Inspecter la classe override pour identifier le payload (subprocess, urllib, exec, ecriture de fichiers ' +
+    'sensibles). Si deja installe: considerer la machine compromise, regenerer tous les credentials.',
+
+  pyast_setup_entry_points_suspicious:
+    'HIGH: setup.py declare des console_scripts avec des noms suspects (commence par _, post_install, ' +
+    'setup_, install_). Vecteur de persistence ou de hook auto-execute. Inspecter le module:fn cible ' +
+    'pour confirmer la malveillance avant install. Beaucoup de FPs possibles — confidence medium.',
+
+  pyast_module_level_exec:
+    'CRITIQUE: AST confirme exec()/eval() au niveau module (hors function/class). S\'execute systematiquement ' +
+    'a l\'import ou pip install. RCE direct. Plus precis que PYSRC-001 — le scope check garantit que ce ' +
+    'n\'est pas un exec dans une fonction non-appelee. NE PAS installer. Identifier la string passee ' +
+    'a exec/eval pour comprendre le payload.',
+
+  pyast_module_level_subprocess_shell:
+    'CRITIQUE: AST confirme subprocess.Popen/run/call(..., shell=True) au niveau module. shell=True ' +
+    'permet l\'injection de commande shell ; combine a une execution a l\'import, RCE direct. Equivalent ' +
+    'Bandit B602. NE PAS installer. Inspecter la commande passee — generalement "curl|sh" ou ' +
+    '"wget|bash" pour fetch+exec d\'un payload distant.',
+
+  pyast_module_level_unsafe_deserialization:
+    'CRITIQUE: AST confirme pickle/marshal/dill/cloudpickle .loads()/.load() au niveau module. ' +
+    'Ces fonctions sont trivialement RCE si l\'input deserialize vient d\'une source attaquant-controlee ' +
+    '(fichier sur disque, requete HTTP, variable d\'env). CWE-502. Equivalent Bandit B301. NE PAS ' +
+    'installer si la source du blob deserialize est externe ou non-trustee.',
+
+  pyast_dynamic_dangerous_import:
+    'HIGH: AST confirme __import__() avec un nom de module dangereux hardcode (subprocess, os, requests, ' +
+    'urllib, socket, http, ssl, ctypes). Pattern d\'obfuscation classique pour echapper aux scanners ' +
+    'qui ne tracent que les "import X" statiques. Inspecter les appels suivants au module dynamiquement ' +
+    'importe — combine a exec/subprocess/fetch indique malveillance avec haute confiance.',
+
   ai_agent_abuse:
     'CRITIQUE: Un agent IA (Claude, Gemini, Q) est invoque avec des flags de bypass de securite ' +
     '(--dangerously-skip-permissions, --yolo, --trust-all-tools). Technique s1ngularity/Nx. ' +

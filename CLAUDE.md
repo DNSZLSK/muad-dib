@@ -19,7 +19,7 @@ Priorites :
 ## Commands
 
 ```bash
-npm test          # Run all tests (custom framework, 3843 tests across 104 files)
+npm test          # Run all tests (custom framework, 3873 tests across 105 files)
 npm run lint      # ESLint with security plugin
 npm run scan      # Self-scan: node bin/muaddib.js scan .
 npm run update    # Download latest IOCs
@@ -42,16 +42,16 @@ Tests use a custom framework in `tests/run-tests.js` (no Jest). Test helpers:
 
 **CLI entry:** `bin/muaddib.js` (yargs) delegates to `src/index.js`.
 
-**Pipeline:** Module graph pre-analysis → deobfuscation → 19 parallel scanners (Promise.allSettled) → deduplication → FP reductions → intent coherence → rule enrichment → per-file max scoring → ML T1 filter → contextual FP caps → output (CLI/JSON/HTML/SARIF).
+**Pipeline:** Module graph pre-analysis → tree-sitter-python parser bootstrap (async WASM load, no analysis) → deobfuscation → 20 parallel scanners (Promise.allSettled) → deduplication → FP reductions → intent coherence → rule enrichment → per-file max scoring → ML T1 filter → contextual FP caps → output (CLI/JSON/HTML/SARIF).
 
-**Scanner modules (19 parallel + 2 pre-analysis + 5 conditional/post-processing + 1 metadata):**
+**Scanner modules (20 parallel + 2 pre-analysis + 5 conditional/post-processing + 1 metadata):**
 
-- **19 parallel** via `Promise.allSettled` (`src/pipeline/executor.js`): AST, dataflow, shell, package, dependencies, obfuscation, entropy, typosquat (npm + PyPI from python.js), python (IOC match), ai-config, github-actions, hash, ioc-strings (intel-triage P1.1), anti-forensic (P1.2), stub-package (P1.3), monorepo (Sprint 1 audit MR-C2 fix), trusted-dep-diff (opt-in via flag), python-source (PYSRC-001..008, TrapDoor PyPI gap fix v2.11.41).
-- **2 pre-analysis** (before Promise.allSettled): `module-graph/` (directory, 9 files, 5s timeout), `deobfuscate.js` (passed as arg to AST + dataflow).
+- **20 parallel** via `Promise.allSettled` (`src/pipeline/executor.js`): AST, dataflow, shell, package, dependencies, obfuscation, entropy, typosquat (npm + PyPI from python.js), python (IOC match), ai-config, github-actions, hash, ioc-strings (intel-triage P1.1), anti-forensic (P1.2), stub-package (P1.3), monorepo (Sprint 1 audit MR-C2 fix), trusted-dep-diff (opt-in via flag), python-source (PYSRC-001..008, TrapDoor PyPI gap fix v2.11.41), python-ast (PYAST-001..008, tree-sitter Python AST scanner v2.11.42+).
+- **2 pre-analysis** (before Promise.allSettled): `module-graph/` (directory, 9 files, 5s timeout — builds cross-file flow graph, emits crossFileFlows + moduleGraphThreats), `deobfuscate.js` (transformation helper, passed as arg to AST + dataflow scanners). The `python-ast` scanner additionally requires an async parser bootstrap (`initPythonParser()` loads the WASM grammar once before the parallel batch) — this bootstrap performs no analysis and emits no threats, so it is NOT counted as a pre-analysis scanner.
 - **5 conditional/post-processing**: `paranoid.js` (--paranoid flag), `temporal-runner.js` + `temporal-analysis.js` + `temporal-ast-diff.js` (--temporal* flags), `reachability.js` (post-processor FP downgrade, called from pipeline processor).
 - **1 metadata fetcher**: `npm-registry.js` (NPM API for age/downloads/maintainers — ML features, used by monitor/evaluate).
 
-Intent coherence (`src/intent-graph.js`) runs in pipeline processor (not in `src/scanner/`). Total: 24 `.js` files in `src/scanner/` + 1 directory `module-graph/` (9 files).
+Intent coherence (`src/intent-graph.js`) runs in pipeline processor (not in `src/scanner/`). Total: 25 `.js` files in `src/scanner/` + 1 directory `module-graph/` (9 files) + 1 directory `python-ast-detectors/` (4 files).
 
 **Scoring:** `riskScore = min(100, max(file_scores) + package_level_score)`. Severity weights: CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1 — multiplied by `CONFIDENCE_FACTORS` (`high=1.0`, `medium=0.85`, `low=0.6`) based on `rule.confidence`. Details: ARCHITECTURE.md `### Confidence Factors`.
 
@@ -63,12 +63,12 @@ For full technical details on each scanner, scoring system, sandbox, IOC system,
 2. Import in `src/index.js`, add to the Promise.all destructuring and the threats spread
 3. Add rule entry in `src/rules/index.js` with id, name, severity, confidence, description, mitre
 4. Add playbook entry in `src/response/playbooks.js`
-5. Add tests in the appropriate test file under `tests/` (104 modular test files)
+5. Add tests in the appropriate test file under `tests/` (105 modular test files)
 6. Create test fixtures in `tests/samples/my-scanner/`
 
 ## Key Constraints
 
-- **No external runtime deps** beyond what's in package.json (acorn, acorn-walk, js-yaml, adm-zip, @inquirer/prompts)
+- **No external runtime deps** beyond what's in package.json (acorn, acorn-walk, js-yaml, adm-zip, @inquirer/prompts, web-tree-sitter). The `web-tree-sitter` dep loads the vendored `src/vendor/tree-sitter-python.wasm` (449 KB, SHA-256 audited via `src/vendor/tree-sitter-python.wasm.sha256`) for the PYAST scanner.
 - **Windows paths:** Always use `path.relative()` for file references in threats; never shell `!` in scripts
 - **Symlink protection:** `findFiles` uses `lstatSync` + inode tracking (maxDepth fallback on Windows where ino=0)
 - **Python typosquat false positives:** Typosquat check must skip packages that ARE in the popular list to avoid false positives (flask<->black)
@@ -105,14 +105,14 @@ Never skip documentation updates when publishing a new version.
 - Never commit directly to master
 - Do not create commits automatically — the user handles commits manually
 
-## Current Metrics (v2.11.41)
+## Current Metrics (v2.11.43)
 
 | Metric | Value |
 |--------|-------|
-| Version | **2.11.41** |
-| Tests | **3843** passed, 0 failed, across 104 files (14511 skipped when Docker absent) |
-| Rules | **246** (241 RULES + 5 PARANOID) |
-| Scanners | **19 parallel** (Promise.allSettled) + **2 pre-analysis** (module-graph/, deobfuscate) + **5 conditional/post-processing** (paranoid, 3× temporal-*, reachability) + **1 metadata** (npm-registry). 24 fichiers `src/scanner/*.js` + 1 dir `module-graph/` (9 fichiers). Détails : ARCHITECTURE.md. |
+| Version | **2.11.43** |
+| Tests | **3873** passed, 0 failed, across 105 files (14511 skipped when Docker absent) |
+| Rules | **252** (247 RULES + 5 PARANOID) |
+| Scanners | **20 parallel** (Promise.allSettled) + **2 pre-analysis** (module-graph/, deobfuscate) + **1 async parser bootstrap** (python-ast WASM init, no analysis emitted) + **5 conditional/post-processing** (paranoid, 3× temporal-*, reachability) + **1 metadata** (npm-registry). 25 fichiers `src/scanner/*.js` + 1 dir `module-graph/` (9 fichiers) + 1 dir `python-ast-detectors/` (4 fichiers). Détails : ARCHITECTURE.md. |
 | TPR@3 (detection rate) | **93.85%** (61/65 ground truth, v2.10.95 metrics — re-measure pending P0-04 audit) |
 | TPR@20 (alert rate) | **86.2%** (56/65 ground truth, v2.10.95 metrics) |
 | FPR rules (curated, v2.10.95 measure) | **15.6%** (85/545 scanned of 548 benign packages) |
