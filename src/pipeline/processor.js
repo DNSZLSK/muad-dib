@@ -11,6 +11,10 @@ const { debugLog } = require('../utils.js');
 const { getPackageMetadata } = require('../scanner/npm-registry.js');
 const { checkReleaseZero } = require('../scanner/release-zero.js');
 const { checkUnclaimedMaintainerEmail, checkCompromisedDomain } = require('../scanner/email-domain.js');
+const { getPyPIPackageMetadata } = require('../scanner/pypi-registry.js');
+const { runPyPIMaintainerChecks } = require('../scanner/pypi-maintainer.js');
+const { checkPyPIReleaseZero } = require('../scanner/pypi-release-zero.js');
+const { detectScannedPackageName } = require('../scanner/python.js');
 
 // Auto-sandbox compound trigger : optional out-of-tree dependency. Lazy-load
 // it so the pipeline still works when the file is absent (some dev machines
@@ -244,6 +248,56 @@ async function process(threats, targetPath, options, pythonDeps, warnings, scann
       for (const t of rdapThreats) deduped.push(t);
     } catch (err) {
       debugLog('[RDAP] check failed: ' + err.message);
+    }
+  }
+
+  // ───── PyPI side — same shape as the npm block above (v2.11.47, Phase 2) ─────
+  // Fetch PyPI registry metadata for the scanned package iff we can identify it
+  // (pyproject.toml / setup.py / setup.cfg). Same MUADDIB_NO_REGISTRY_FETCH
+  // master switch. Failure mode: silent (returns null), all downstream PyPI
+  // checks degrade gracefully.
+  if (
+    _pkgMeta &&
+    globalThis.process.env.MUADDIB_NO_REGISTRY_FETCH !== '1'
+  ) {
+    let pypiPackageName = null;
+    try {
+      pypiPackageName = detectScannedPackageName(targetPath);
+    } catch (err) {
+      debugLog('[PYPI-NAME] detect failed: ' + err.message);
+    }
+    if (pypiPackageName) {
+      try {
+        const pypiMeta = await getPyPIPackageMetadata(pypiPackageName);
+        if (pypiMeta) {
+          _pkgMeta.pypiPackageName = pypiPackageName;
+          _pkgMeta.pypiRegistryMeta = pypiMeta;
+        }
+      } catch (err) {
+        debugLog('[PYPI-REGISTRY-META] fetch failed for ' + pypiPackageName + ': ' + err.message);
+      }
+    }
+  }
+
+  if (_pkgMeta && _pkgMeta.pypiRegistryMeta) {
+    // PYPI-003 — release-zero (v0.x.x + age <30d). MEDIUM, composite-only.
+    try {
+      const rz = checkPyPIReleaseZero(_pkgMeta.pypiRegistryMeta.latest_version, _pkgMeta.pypiRegistryMeta);
+      if (rz) deduped.push(rz);
+    } catch (err) {
+      debugLog('[PYPI-RELEASE-ZERO] check failed: ' + err.message);
+    }
+    // MAINTAINER-005 + MAINTAINER-006, PyPI-flavoured (file → pyproject.toml,
+    // wording mentions PyPI). Same env opt-outs as npm
+    // (MUADDIB_EMAIL_DOMAIN_CHECK=0, MUADDIB_RDAP_CHECK=0).
+    try {
+      const pypiThreats = await runPyPIMaintainerChecks(
+        _pkgMeta.pypiPackageName,
+        _pkgMeta.pypiRegistryMeta
+      );
+      for (const t of pypiThreats) deduped.push(t);
+    } catch (err) {
+      debugLog('[PYPI-MAINTAINER] check failed: ' + err.message);
     }
   }
 

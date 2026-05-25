@@ -224,6 +224,19 @@ const RULES = {
     ],
     mitre: 'T1195.002'
   },
+  pypi_release_zero: {
+    id: 'MUADDIB-PYPI-003',
+    name: 'PyPI Release-Zero (v0.x.x recently published)',
+    severity: 'MEDIUM',
+    confidence: 'medium',
+    domain: 'malware',
+    description: 'Package PyPI dont la latest_version est 0.x.x (release-zero PEP 440) ET dont la premiere publication est < 30 jours. Pattern de lure / ship-as-vulnerable / typosquat-staging. Equivalent PyPI de PKG-022 cote npm. Composite-only : la severite reste MEDIUM pour eviter les FPs sur les vrais projets early-stage.',
+    references: [
+      'https://attack.mitre.org/techniques/T1195/002/',
+      'https://peps.python.org/pep-0440/'
+    ],
+    mitre: 'T1195.002'
+  },
 
   // PYSRC-001 a 008 — Python source scanner (TrapDoor PyPI gap, v2.11.25).
   // python.js est manifest-only ; ast.js/dataflow.js sont JS-only ; ioc-strings.js

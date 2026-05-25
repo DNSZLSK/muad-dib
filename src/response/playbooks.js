@@ -498,6 +498,13 @@ const PLAYBOOKS = {
     'qui ne tracent que les "import X" statiques. Inspecter les appels suivants au module dynamiquement ' +
     'importe — combine a exec/subprocess/fetch indique malveillance avec haute confiance.',
 
+  pypi_release_zero:
+    'MEDIUM: Package PyPI v0.x.x publie il y a moins de 30 jours. Pattern de lure / ship-as-vulnerable. ' +
+    'Composite-only: cette regle seule ne suffit pas, mais combinee avec PYAST-001 (cmdclass) ou un IOC ' +
+    'string TrapDoor, c\'est un signal fort. Inspecter manuellement: qui est l\'auteur, est-ce que d\'autres ' +
+    'packages aux noms similaires ont ete publies le meme jour, est-ce que le code source ressemble a une ' +
+    'lib utile ou a un stub vide.',
+
   fork_exec_inline_interpreter:
     'HIGH: subprocess.X([<interpreter>, -e|-c, ...]) — fork-exec d\'un interpreteur inline ' +
     '(node -e, python -c, bash -c, ruby -e, perl -e, php -r, ...). Pattern transversal: Python ouvre ' +
