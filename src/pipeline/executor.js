@@ -20,6 +20,7 @@ const { deobfuscate } = require('../scanner/deobfuscate.js');
 const { buildModuleGraph, annotateTaintedExports, detectCrossFileFlows, annotateSinkExports, detectCallbackCrossFileFlows, detectEventEmitterFlows } = require('../scanner/module-graph');
 const { loadCachedIOCs, checkIOCStaleness } = require('../ioc/updater.js');
 const { detectPythonProject, normalizePythonName } = require('../scanner/python.js');
+const { scanPythonSource } = require('../scanner/python-source.js');
 const { Spinner, listInstalledPackages, wasFilesCapped, getOverflowFiles, debugLog } = require('../utils.js');
 const { getMaxFileSize } = require('../shared/constants.js');
 const { scanParanoid } = require('../scanner/paranoid.js');
@@ -202,7 +203,7 @@ async function execute(targetPath, options, pythonDeps, warnings) {
     'scanDependencies', 'scanHashes', 'analyzeDataFlow', 'scanTyposquatting',
     'scanGitHubActions', 'matchPythonIOCs', 'checkPyPITyposquatting',
     'scanEntropy', 'scanAIConfig', 'scanIocStrings', 'scanAntiForensic',
-    'scanStubPackage', 'scanMonorepo', 'scanTrustedDepDiff'
+    'scanStubPackage', 'scanMonorepo', 'scanTrustedDepDiff', 'scanPythonSource'
   ];
 
   const settledResults = await Promise.allSettled([
@@ -228,7 +229,12 @@ async function execute(targetPath, options, pythonDeps, warnings) {
     // Wrapped in withTimeout as defense in depth: scanner has its own 10s + 5s × N
     // internal timeouts, but a registry slowdown with many added deps could exceed
     // the static-scan budget without this cap.
-    withTimeout(() => scanTrustedDepDiff(targetPath, options), 'scanTrustedDepDiff')
+    withTimeout(() => scanTrustedDepDiff(targetPath, options), 'scanTrustedDepDiff'),
+    // PYSRC-001..008 (v2.11.25, TrapDoor PyPI gap). Detect import-time RCE
+    // in __init__.py / setup.py / top-level .py files. Runs always — not gated
+    // on detectPythonProject() because an attacker can ship a malicious __init__.py
+    // without a requirements.txt. Walker is cheap (just a depth-1 readdir).
+    yieldThen(() => scanPythonSource(targetPath))
   ]);
 
   // Extract results: use empty array for rejected scanners, log errors
@@ -258,7 +264,8 @@ async function execute(targetPath, options, pythonDeps, warnings) {
     antiForensicThreats,
     stubPackageThreats,
     monorepoThreats,
-    trustedDepDiffThreats
+    trustedDepDiffThreats,
+    pythonSourceThreats
   ] = scanResult;
 
   // Emit warning if file count cap was hit + quick-scan overflow files
@@ -339,6 +346,7 @@ async function execute(targetPath, options, pythonDeps, warnings) {
     ...stubPackageThreats,
     ...monorepoThreats,
     ...trustedDepDiffThreats,
+    ...pythonSourceThreats,
     ...crossFileFlows.filter(f => f && f.sourceFile && f.sinkFile).map(f => ({
       type: f.type,
       severity: f.severity,

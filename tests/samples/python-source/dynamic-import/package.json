@@ -1,0 +1,1 @@
+{ "name": "pysrc-fixture-dynamic-import", "version": "0.0.0", "description": "Test fixture: PYSRC-007 (dynamic __import__ + subprocess use). NOT REAL MALWARE." }

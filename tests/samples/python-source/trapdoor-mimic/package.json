@@ -1,0 +1,1 @@
+{ "name": "pysrc-fixture-trapdoor-mimic", "version": "0.0.0", "description": "Test fixture: PYSRC-001 + PYSRC-004 (fetch + exec compound). Mimics TrapDoor flow, NOT real malware." }

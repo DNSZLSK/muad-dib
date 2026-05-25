@@ -224,6 +224,121 @@ const RULES = {
     ],
     mitre: 'T1195.002'
   },
+
+  // PYSRC-001 a 008 — Python source scanner (TrapDoor PyPI gap, v2.11.25).
+  // python.js est manifest-only ; ast.js/dataflow.js sont JS-only ; ioc-strings.js
+  // fait du literal match. Aucun ne couvre l'execution a l'import via __init__.py
+  // / setup.py. Ces 8 regles ferment ce gap.
+  import_time_exec: {
+    id: 'MUADDIB-PYSRC-001',
+    name: 'Python Import-Time exec/eval',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    domain: 'malware',
+    description: 'Fichier Python (__init__.py, setup.py, top-level *.py) contient exec()/eval() — execution directe de code a l\'import ou a pip install. RCE immediat sur la machine de l\'utilisateur. Pattern central de TrapDoor (mai 2026).',
+    references: [
+      'https://socket.dev/blog/trapdoor-crypto-stealer-npm-pypi-crates',
+      'https://attack.mitre.org/techniques/T1059/006/'
+    ],
+    mitre: 'T1059.006'
+  },
+  import_time_subprocess: {
+    id: 'MUADDIB-PYSRC-002',
+    name: 'Python Import-Time subprocess',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    domain: 'malware',
+    description: 'Fichier Python contient subprocess.Popen/run/call/check_output au niveau module — spawn d\'un processus externe a l\'import ou pip install. Utilise pour fetch + execute remote payload ou pour latteral movement.',
+    references: [
+      'https://socket.dev/blog/trapdoor-crypto-stealer-npm-pypi-crates',
+      'https://attack.mitre.org/techniques/T1059/006/'
+    ],
+    mitre: 'T1059.006'
+  },
+  import_time_os_system: {
+    id: 'MUADDIB-PYSRC-003',
+    name: 'Python Import-Time os.system / os.popen / os.spawn / os.exec',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    domain: 'malware',
+    description: 'Fichier Python contient os.system(), os.popen(), os.spawn*() ou os.exec*() au niveau module — shell execution a l\'import ou pip install. Generalement utilise pour curl|sh ou wget|bash remote payload.',
+    references: [
+      'https://attack.mitre.org/techniques/T1059/006/',
+      'https://attack.mitre.org/techniques/T1059/004/'
+    ],
+    mitre: 'T1059.006'
+  },
+  import_time_fetch_exec: {
+    id: 'MUADDIB-PYSRC-004',
+    name: 'Python Import-Time Fetch + Exec (TrapDoor pattern)',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    domain: 'malware',
+    description: 'Compound detection : le meme fichier Python contient (urllib.request / requests / http.client / httpx / aiohttp) ET exec()/eval(). Signature directe de TrapDoor : telecharge un payload depuis le C2 et l\'execute. Implique RCE + capacite C2 active.',
+    references: [
+      'https://socket.dev/blog/trapdoor-crypto-stealer-npm-pypi-crates',
+      'https://attack.mitre.org/techniques/T1105/',
+      'https://attack.mitre.org/techniques/T1059/006/'
+    ],
+    mitre: 'T1105'
+  },
+  import_time_base64_exec: {
+    id: 'MUADDIB-PYSRC-005',
+    name: 'Python Import-Time Base64 Decode + Exec',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    domain: 'malware',
+    description: 'Compound detection : le meme fichier Python contient base64.b64decode / codecs.decode ET exec()/eval(). Pattern d\'obfuscation classique : payload encode en base64 (parfois chaine multiple) puis execute. Vu dans Lazarus PyPI campaigns + TrapDoor.',
+    references: [
+      'https://socket.dev/blog/trapdoor-crypto-stealer-npm-pypi-crates',
+      'https://attack.mitre.org/techniques/T1027/',
+      'https://attack.mitre.org/techniques/T1059/006/'
+    ],
+    mitre: 'T1027'
+  },
+  import_time_deserialization: {
+    id: 'MUADDIB-PYSRC-006',
+    name: 'Python Import-Time Unsafe Deserialization',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    domain: 'vulnerability',
+    description: 'Fichier Python utilise pickle/cPickle/marshal/dill/cloudpickle/jsonpickle/shelve .loads() au niveau module. Ces fonctions sont trivialement RCE si l\'input est attaquant-controle (deserialization = code execution). Risque critique meme sans malveillance prouvee.',
+    references: [
+      'https://docs.python.org/3/library/pickle.html#restricting-globals',
+      'https://attack.mitre.org/techniques/T1059/006/',
+      'https://cwe.mitre.org/data/definitions/502.html'
+    ],
+    mitre: 'T1059.006'
+  },
+  dynamic_dangerous_import: {
+    id: 'MUADDIB-PYSRC-007',
+    name: 'Python Dynamic __import__ of Dangerous Module',
+    severity: 'HIGH',
+    confidence: 'medium',
+    domain: 'malware',
+    description: 'Fichier Python utilise __import__() avec un nom hardcode dangereux (subprocess, os, requests, urllib, socket, http, ssl, ctypes, importlib). Pattern d\'obfuscation : evite l\'instruction "import X" statique pour echapper aux scanners qui ne tracent que les imports declares.',
+    references: [
+      'https://attack.mitre.org/techniques/T1027/',
+      'https://docs.python.org/3/library/functions.html#import__'
+    ],
+    mitre: 'T1027'
+  },
+  python_source_unicode_obfuscation: {
+    id: 'MUADDIB-PYSRC-008',
+    name: 'Python Source Unicode Obfuscation',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    domain: 'malware',
+    description: 'Fichier Python contient ≥5 caracteres Unicode invisibles (zero-width, directional override, variation selectors, tag characters). Mirror de AICONF-004 pour les sources .py. Python rejette les identifiers avec ZW chars (SyntaxError, PEP 3131), donc le vecteur principal c\'est l\'obfuscation dans les strings (GlassWorm-style payload encoding) ou dans les comments (mislead human review).',
+    references: [
+      'https://www.aikido.dev/blog/glassworm-returns-unicode-attack-github-npm-vscode',
+      'https://socket.dev/blog/trapdoor-crypto-stealer-npm-pypi-crates',
+      'https://trojansource.codes/',
+      'https://attack.mitre.org/techniques/T1027/'
+    ],
+    mitre: 'T1027.013'
+  },
+
   suspicious_file: {
     id: 'MUADDIB-DEP-002',
     name: 'Suspicious File in Dependency',

