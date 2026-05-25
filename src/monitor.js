@@ -47,7 +47,7 @@ const stats = {
   suspect: 0,
   suspectByTier: { t1: 0, t1a: 0, t1b: 0, t2: 0, t3: 0 },
   errors: 0,
-  errorsByType: { too_large: 0, tar_failed: 0, http_error: 0, timeout: 0, static_timeout: 0, other: 0 },
+  errorsByType: { too_large: 0, tar_failed: 0, archive_failed: 0, unsupported_format: 0, http_error: 0, timeout: 0, static_timeout: 0, other: 0 },
   totalTimeMs: 0,
   mlFiltered: 0,
   llmAnalyzed: 0,
@@ -67,6 +67,8 @@ const stats = {
   npmCatchupSkips: 0,
   pypiCatchupSkippedEvents: 0,
   pypiCatchupSkips: 0,
+  pypiWheelsScanned: 0,
+  pypiSkippedNoArchive: 0,
   lastReportTime: Date.now(),
   lastDailyReportDate: null
 };

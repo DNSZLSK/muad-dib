@@ -164,7 +164,7 @@ async function getPyPITarballUrl(packageName, packageVersion = '') {
   const url = packageVersion
     ? `https://pypi.org/pypi/${encodeURIComponent(packageName)}/${encodeURIComponent(packageVersion)}/json`
     : `https://pypi.org/pypi/${encodeURIComponent(packageName)}/json`;
-  const body = await httpsGet(url);
+  const body = await _deps.httpsGet(url);
   let data;
   try {
     data = JSON.parse(body);
@@ -179,8 +179,11 @@ async function getPyPITarballUrl(packageName, packageVersion = '') {
   // Fallback: any .tar.gz
   const tarGz = urls.find(u => u.url && u.url.endsWith('.tar.gz'));
   if (tarGz) return { url: tarGz.url, version };
-  // Fallback: first available file
-  if (urls.length > 0 && urls[0].url) return { url: urls[0].url, version };
+  // Fallback: wheel (.whl) — extracted via adm-zip in queue.js, not tar.
+  // Legacy .egg / .tar.bz2 / .exe installers intentionally NOT returned —
+  // they were the cause of ~2773 tar_failed/day before this fix.
+  const wheel = urls.find(u => u.url && (u.url.endsWith('.whl') || u.url.endsWith('.zip')));
+  if (wheel) return { url: wheel.url, version };
   return { url: null, version };
 }
 

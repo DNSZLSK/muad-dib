@@ -1032,6 +1032,8 @@ async function sendDailyReport(stats, dailyAlerts, recentlyScanned, downloadsCac
   stats.errors = 0;
   stats.errorsByType.too_large = 0;
   stats.errorsByType.tar_failed = 0;
+  stats.errorsByType.archive_failed = 0;
+  stats.errorsByType.unsupported_format = 0;
   stats.errorsByType.http_error = 0;
   stats.errorsByType.timeout = 0;
   stats.errorsByType.static_timeout = 0;
@@ -1054,6 +1056,8 @@ async function sendDailyReport(stats, dailyAlerts, recentlyScanned, downloadsCac
   stats.npmCatchupSkips = 0;
   stats.pypiCatchupSkippedEvents = 0;
   stats.pypiCatchupSkips = 0;
+  stats.pypiWheelsScanned = 0;
+  stats.pypiSkippedNoArchive = 0;
   stats.rssFallbackCount = 0;
   dailyAlerts.length = 0;
   recentlyScanned.clear();

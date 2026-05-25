@@ -225,11 +225,15 @@ function isSuspectClassification(result) {
 /**
  * Classify an error into a category for the daily report breakdown.
  * @param {Error} err
- * @returns {'too_large'|'tar_failed'|'http_error'|'static_timeout'|'timeout'|'other'}
+ * @returns {'too_large'|'tar_failed'|'archive_failed'|'unsupported_format'|'http_error'|'static_timeout'|'timeout'|'other'}
  */
 function classifyError(err) {
   const msg = (err && err.message) || '';
-  if (/too large|tarball too large/i.test(msg)) return 'too_large';
+  if (/too large|tarball too large|exceeds \d+/i.test(msg)) return 'too_large';
+  // Wheel/zip extraction failures must NOT be lumped with tar failures —
+  // they were the dominant noise before adm-zip dispatch.
+  if (/unsupported archive format/i.test(msg)) return 'unsupported_format';
+  if (/zip[\s_-]|wheel|whl\b/i.test(msg)) return 'archive_failed';
   if (/tar\b|extract/i.test(msg)) return 'tar_failed';
   if (/HTTP [45]\d\d|HTTP \d{3}/i.test(msg)) return 'http_error';
   if (/static scan timeout/i.test(msg)) return 'static_timeout';
@@ -257,6 +261,8 @@ function formatErrorBreakdown(total, byType) {
   const parts = [];
   if (byType.http_error > 0) parts.push(`HTTP: ${byType.http_error}`);
   if (byType.tar_failed > 0) parts.push(`tar: ${byType.tar_failed}`);
+  if (byType.archive_failed > 0) parts.push(`zip: ${byType.archive_failed}`);
+  if (byType.unsupported_format > 0) parts.push(`unsupported: ${byType.unsupported_format}`);
   if (byType.too_large > 0) parts.push(`too large: ${byType.too_large}`);
   if (byType.timeout > 0) parts.push(`timeout: ${byType.timeout}`);
   if (byType.static_timeout > 0) parts.push(`static: ${byType.static_timeout}`);

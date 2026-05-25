@@ -13,7 +13,7 @@ const { Worker } = require('worker_threads');
 const { run } = require('../index.js');
 const { runSandbox, isDockerAvailable, tryAcquireSandboxSlot, SANDBOX_CONCURRENCY_MAX } = require('../sandbox/index.js');
 const { sendWebhook } = require('../webhook.js');
-const { downloadToFile, extractTarGz, sanitizePackageName } = require('../shared/download.js');
+const { downloadToFile, extractTarGz, extractArchive, sanitizePackageName } = require('../shared/download.js');
 const { MAX_TARBALL_SIZE } = require('../shared/constants.js');
 const { acquireRegistrySlot, releaseRegistrySlot } = require('../shared/http-limiter.js');
 const { loadCachedIOCs } = require('../ioc/updater.js');
@@ -297,7 +297,18 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
       return;
     }
 
-    const tgzPath = path.join(tmpDir, 'package.tar.gz');
+    // Pick the local filename extension from the URL so adm-zip / tar both
+    // read the magic correctly. PyPI wheels arrive as .whl, npm tarballs as
+    // .tgz, sdists as .tar.gz. Anything else falls through to .tar.gz
+    // (ingestion now returns null for unsupported types, so this branch is
+    // a defensive default rather than a real fallback).
+    const urlLower = (tarballUrl || '').toLowerCase();
+    const isWheel = urlLower.endsWith('.whl') || urlLower.endsWith('.zip');
+    const archiveExt = isWheel ? '.whl' : '.tar.gz';
+    const tgzPath = path.join(tmpDir, `package${archiveExt}`);
+    if (isWheel && ecosystem === 'pypi') {
+      stats.pypiWheelsScanned = (stats.pypiWheelsScanned || 0) + 1;
+    }
 
     // Layer 3: Check tarball cache before downloading
     const cacheKey = tarballCacheKey(name, version);
@@ -365,7 +376,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
         let bypassQuickScan = false;
         try {
           alreadyExtracted = true;
-          extractedDir = extractTarGz(tgzPath, tmpDir);
+          extractedDir = extractArchive(tgzPath, tmpDir);
 
           const [pkgThreats, shellThreats] = await Promise.all([
             scanPackageJson(extractedDir),
@@ -411,7 +422,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
     }
 
     if (!extractedDir) {
-      extractedDir = extractTarGz(tgzPath, tmpDir);
+      extractedDir = extractArchive(tgzPath, tmpDir);
     }
 
     // ML Phase 2a: Count JS files and detect test presence for enriched features
@@ -1169,6 +1180,11 @@ async function resolveTarballAndScan(item, stats, dailyAlerts, recentlyScanned, 
     try {
       const pypiInfo = await getPyPITarballUrl(item.name, item.version || '');
       if (!pypiInfo.url) {
+        // No sdist / .tar.gz / wheel — likely a legacy egg or msi-only
+        // release. Clean skip: do NOT touch stats.scanned or stats.errors
+        // (those would distort the Commit 1 coverage ratios). The dedicated
+        // pypiSkippedNoArchive counter surfaces volume in the daily report.
+        stats.pypiSkippedNoArchive = (stats.pypiSkippedNoArchive || 0) + 1;
         console.log(`[MONITOR] SKIP: ${item.name} — no tarball URL found on PyPI`);
         return;
       }

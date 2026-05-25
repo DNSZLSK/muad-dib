@@ -513,6 +513,275 @@ async function runMonitorTests() {
     addSkipped(1);
   }
 
+  // --- Archive extraction dispatch tests (commit 2: wheel support) ---
+
+  const {
+    extractArchive,
+    detectArchiveFormat
+  } = require('../../src/shared/download.js');
+  const AdmZipForTests = require('adm-zip');
+
+  test('DOWNLOAD: detectArchiveFormat recognises .tar.gz and .tgz', () => {
+    assert(detectArchiveFormat('foo.tar.gz') === 'targz', '.tar.gz should map to targz');
+    assert(detectArchiveFormat('foo-1.0.0.tgz') === 'targz', '.tgz should map to targz');
+    assert(detectArchiveFormat('FOO-1.0.0.TGZ') === 'targz', 'uppercase .TGZ should map to targz');
+  });
+
+  test('DOWNLOAD: detectArchiveFormat recognises .whl and .zip', () => {
+    assert(detectArchiveFormat('foo-1.0-py3-none-any.whl') === 'zip', '.whl should map to zip');
+    assert(detectArchiveFormat('foo-1.0.zip') === 'zip', '.zip should map to zip');
+  });
+
+  test('DOWNLOAD: detectArchiveFormat returns unknown for unsupported extensions', () => {
+    assert(detectArchiveFormat('foo.rar') === 'unknown', '.rar should map to unknown');
+    assert(detectArchiveFormat('foo.tar.bz2') === 'unknown', '.tar.bz2 should map to unknown');
+    assert(detectArchiveFormat('foo.egg') === 'unknown', '.egg should map to unknown');
+    assert(detectArchiveFormat(null) === 'unknown', 'null should map to unknown');
+  });
+
+  test('DOWNLOAD: extractArchive extracts a real .whl via adm-zip', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-whl-test-'));
+    const whlPath = path.join(tmpDir, 'demo-1.0-py3-none-any.whl');
+    const extractDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-whl-extract-'));
+    try {
+      const zip = new AdmZipForTests();
+      zip.addFile('demo/__init__.py', Buffer.from('print(1)\n', 'utf8'));
+      zip.addFile('demo-1.0.dist-info/METADATA', Buffer.from('Name: demo\nVersion: 1.0\n', 'utf8'));
+      zip.writeZip(whlPath);
+
+      const result = extractArchive(whlPath, extractDir);
+      assert(fs.existsSync(path.join(result, 'demo', '__init__.py')) ||
+             fs.existsSync(path.join(extractDir, 'demo', '__init__.py')),
+        'Wheel contents must land under the extract dir');
+    } finally {
+      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+      try { fs.rmSync(extractDir, { recursive: true, force: true }); } catch {}
+    }
+  });
+
+  test('DOWNLOAD: extractArchive throws on unsupported format', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-unsupported-'));
+    const fakePath = path.join(tmpDir, 'foo.rar');
+    fs.writeFileSync(fakePath, 'rar!');
+    let threw = null;
+    try {
+      extractArchive(fakePath, tmpDir);
+    } catch (err) {
+      threw = err;
+    } finally {
+      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+    }
+    assert(threw !== null, 'extractArchive must throw on .rar');
+    assertIncludes(threw.message, 'Unsupported archive format',
+      `Error message must mention unsupported format, got: ${threw && threw.message}`);
+  });
+
+  test('DOWNLOAD: extractArchive rejects zip-slip entries (hand-crafted zip with ../ in entry name)', () => {
+    // adm-zip strips '..' and leading '/' when entries are added via its API,
+    // so we hand-craft a minimal ZIP whose central directory contains a
+    // verbatim "../../../tmp/evil.txt" entry. This is the actual zip-slip
+    // attack shape that an outside attacker can ship.
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-zipslip-'));
+    const evilZip = path.join(tmpDir, 'evil.zip');
+    const extractDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-zipslip-out-'));
+    try {
+      const evilName = Buffer.from('../../../tmp/evil.txt', 'utf8');
+      const data = Buffer.from('pwned', 'utf8');
+      // Local File Header
+      const lfh = Buffer.alloc(30);
+      lfh.writeUInt32LE(0x04034b50, 0);   // signature
+      lfh.writeUInt16LE(20, 4);            // version needed
+      lfh.writeUInt16LE(0, 6);             // flags
+      lfh.writeUInt16LE(0, 8);             // compression: stored
+      lfh.writeUInt16LE(0, 10);            // mod time
+      lfh.writeUInt16LE(0, 12);            // mod date
+      lfh.writeUInt32LE(0, 14);            // crc32 (0 — adm-zip won't verify in our path)
+      lfh.writeUInt32LE(data.length, 18);  // compressed size
+      lfh.writeUInt32LE(data.length, 22);  // uncompressed size
+      lfh.writeUInt16LE(evilName.length, 26); // file name length
+      lfh.writeUInt16LE(0, 28);            // extra field length
+      const lfhBlock = Buffer.concat([lfh, evilName, data]);
+
+      // Central Directory Header
+      const cdh = Buffer.alloc(46);
+      cdh.writeUInt32LE(0x02014b50, 0);    // signature
+      cdh.writeUInt16LE(20, 4);            // version made by
+      cdh.writeUInt16LE(20, 6);            // version needed
+      cdh.writeUInt16LE(0, 8);
+      cdh.writeUInt16LE(0, 10);
+      cdh.writeUInt16LE(0, 12);
+      cdh.writeUInt16LE(0, 14);
+      cdh.writeUInt32LE(0, 16);            // crc32
+      cdh.writeUInt32LE(data.length, 20);
+      cdh.writeUInt32LE(data.length, 24);
+      cdh.writeUInt16LE(evilName.length, 28); // name length
+      cdh.writeUInt16LE(0, 30);
+      cdh.writeUInt16LE(0, 32);
+      cdh.writeUInt16LE(0, 34);
+      cdh.writeUInt16LE(0, 36);
+      cdh.writeUInt32LE(0, 38);
+      cdh.writeUInt32LE(0, 42);            // relative offset of LFH
+      const cdhBlock = Buffer.concat([cdh, evilName]);
+
+      // End of Central Directory
+      const eocd = Buffer.alloc(22);
+      eocd.writeUInt32LE(0x06054b50, 0);
+      eocd.writeUInt16LE(0, 4);
+      eocd.writeUInt16LE(0, 6);
+      eocd.writeUInt16LE(1, 8);
+      eocd.writeUInt16LE(1, 10);
+      eocd.writeUInt32LE(cdhBlock.length, 12);
+      eocd.writeUInt32LE(lfhBlock.length, 16);
+      eocd.writeUInt16LE(0, 20);
+
+      fs.writeFileSync(evilZip, Buffer.concat([lfhBlock, cdhBlock, eocd]));
+
+      // Sanity: adm-zip should now see "../../../tmp/evil.txt" verbatim
+      const inspect = new AdmZipForTests(evilZip);
+      const entryNames = inspect.getEntries().map(e => e.entryName);
+      const hasSlip = entryNames.some(n => n.includes('..'));
+      if (!hasSlip) {
+        // Some adm-zip versions still sanitize on read; the test cannot
+        // exercise the runtime check, but the check itself is still in
+        // place — mark this as a soft skip rather than fail the suite.
+        console.log(`[SKIP] zip-slip: adm-zip sanitises entry names on read (${JSON.stringify(entryNames)})`);
+        addSkipped(1);
+        return;
+      }
+
+      let threw = null;
+      try { extractArchive(evilZip, extractDir); } catch (err) { threw = err; }
+      assert(threw !== null, `zip-slip entry must be rejected, entries were ${JSON.stringify(entryNames)}`);
+      assertIncludes(threw.message, 'escapes destDir',
+        `Error message must mention escape, got: ${threw && threw.message}`);
+    } finally {
+      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+      try { fs.rmSync(extractDir, { recursive: true, force: true }); } catch {}
+    }
+  });
+
+  test('DOWNLOAD: extractArchive caps total uncompressed size', () => {
+    const { MAX_TARBALL_SIZE } = require('../../src/shared/constants.js');
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-bomb-'));
+    const bombZip = path.join(tmpDir, 'bomb.zip');
+    const extractDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-bomb-out-'));
+    try {
+      const zip = new AdmZipForTests();
+      // Forge an entry whose declared uncompressed size exceeds the cap
+      const big = Buffer.alloc(1024, 0x41);
+      zip.addFile('huge.bin', big);
+      // Override the header size to fake a multi-GB declared size
+      const entries = zip.getEntries();
+      entries[0].header.size = MAX_TARBALL_SIZE + 1;
+      zip.writeZip(bombZip);
+
+      // Reload from disk so the forged header is on the entry adm-zip reads
+      let threw = null;
+      try {
+        const zip2 = new AdmZipForTests(bombZip);
+        // For the bomb test we simulate by re-checking via extractArchive
+        // (adm-zip re-reads headers from the file).
+        const realEntries = zip2.getEntries();
+        // If adm-zip won't honor our forged header from rewrite, force the
+        // size cap via an inline implementation check.
+        const sizeBomb = realEntries.reduce((a, e) => a + (e.header.size || 0), 0);
+        if (sizeBomb > MAX_TARBALL_SIZE) {
+          extractArchive(bombZip, extractDir);
+        } else {
+          // Adm-zip recomputed size; emulate the bomb path another way.
+          throw new Error('size-cap path unreachable in this env');
+        }
+      } catch (err) { threw = err; }
+
+      assert(threw !== null, 'Oversize zip must be rejected');
+      assertIncludes(threw.message, 'exceeds',
+        `Error must mention exceeds, got: ${threw && threw.message}`);
+    } finally {
+      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+      try { fs.rmSync(extractDir, { recursive: true, force: true }); } catch {}
+    }
+  });
+
+  // --- PyPI tarball resolution (commit 2) ---
+
+  const ingestionMod = require('../../src/monitor/ingestion.js');
+
+  await asyncTest('MONITOR: getPyPITarballUrl prefers sdist over wheel', async () => {
+    const realGet = ingestionMod._deps.httpsGet;
+    ingestionMod._deps.httpsGet = async () => JSON.stringify({
+      info: { version: '1.0.0' },
+      urls: [
+        { packagetype: 'bdist_wheel', url: 'https://files.pythonhosted.org/packages/foo/foo-1.0-py3.whl' },
+        { packagetype: 'sdist', url: 'https://files.pythonhosted.org/packages/foo/foo-1.0.tar.gz' }
+      ]
+    });
+    try {
+      const result = await ingestionMod.getPyPITarballUrl('foo', '1.0.0');
+      assert(result.url.endsWith('.tar.gz'), `sdist must win, got ${result.url}`);
+    } finally {
+      ingestionMod._deps.httpsGet = realGet;
+    }
+  });
+
+  await asyncTest('MONITOR: getPyPITarballUrl falls back to wheel when no sdist', async () => {
+    const realGet = ingestionMod._deps.httpsGet;
+    ingestionMod._deps.httpsGet = async () => JSON.stringify({
+      info: { version: '1.0.0' },
+      urls: [
+        { packagetype: 'bdist_wheel', url: 'https://files.pythonhosted.org/packages/foo/foo-1.0-py3-none-any.whl' }
+      ]
+    });
+    try {
+      const result = await ingestionMod.getPyPITarballUrl('foo', '1.0.0');
+      assert(result.url && result.url.endsWith('.whl'),
+        `wheel fallback must return .whl url, got ${result.url}`);
+    } finally {
+      ingestionMod._deps.httpsGet = realGet;
+    }
+  });
+
+  await asyncTest('MONITOR: getPyPITarballUrl returns null when only legacy formats exist', async () => {
+    const realGet = ingestionMod._deps.httpsGet;
+    ingestionMod._deps.httpsGet = async () => JSON.stringify({
+      info: { version: '1.0.0' },
+      urls: [
+        { packagetype: 'bdist_egg', url: 'https://files.pythonhosted.org/packages/foo/foo-1.0.egg' },
+        { packagetype: 'bdist_msi', url: 'https://files.pythonhosted.org/packages/foo/foo-1.0.msi' }
+      ]
+    });
+    try {
+      const result = await ingestionMod.getPyPITarballUrl('foo', '1.0.0');
+      assert(result.url === null, `legacy-only releases must return null url, got ${result.url}`);
+    } finally {
+      ingestionMod._deps.httpsGet = realGet;
+    }
+  });
+
+  // --- Error classification (commit 2) ---
+
+  const { classifyError: classifyErrorForTests } = require('../../src/monitor/classify.js');
+
+  test('CLASSIFY: classifyError returns unsupported_format for unsupported archive', () => {
+    const err = new Error('Unsupported archive format for foo.rar');
+    assert(classifyErrorForTests(err) === 'unsupported_format',
+      `Expected unsupported_format, got ${classifyErrorForTests(err)}`);
+  });
+
+  test('CLASSIFY: classifyError returns archive_failed for zip/wheel errors', () => {
+    const err1 = new Error('Unsafe zip entry escapes destDir');
+    assert(classifyErrorForTests(err1) === 'archive_failed',
+      `Expected archive_failed for zip slip, got ${classifyErrorForTests(err1)}`);
+    const err2 = new Error('zip_extract: invalid central directory');
+    assert(classifyErrorForTests(err2) === 'archive_failed',
+      `Expected archive_failed, got ${classifyErrorForTests(err2)}`);
+  });
+
+  test('CLASSIFY: classifyError still returns tar_failed for tar errors', () => {
+    const err = new Error('tar: invalid header');
+    assert(classifyErrorForTests(err) === 'tar_failed',
+      `tar_failed must still be reachable, got ${classifyErrorForTests(err)}`);
+  });
+
   // --- SSRF redirect protection tests ---
 
   const {

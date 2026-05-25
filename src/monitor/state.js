@@ -991,6 +991,8 @@ function loadDailyStats(stats, dailyAlerts) {
       if (data.errorsByType) {
         stats.errorsByType.too_large = data.errorsByType.too_large || 0;
         stats.errorsByType.tar_failed = data.errorsByType.tar_failed || 0;
+        stats.errorsByType.archive_failed = data.errorsByType.archive_failed || 0;
+        stats.errorsByType.unsupported_format = data.errorsByType.unsupported_format || 0;
         stats.errorsByType.http_error = data.errorsByType.http_error || 0;
         stats.errorsByType.timeout = data.errorsByType.timeout || 0;
         stats.errorsByType.static_timeout = data.errorsByType.static_timeout || 0;
@@ -1009,6 +1011,8 @@ function loadDailyStats(stats, dailyAlerts) {
       stats.npmCatchupSkips = data.npmCatchupSkips || 0;
       stats.pypiCatchupSkippedEvents = data.pypiCatchupSkippedEvents || 0;
       stats.pypiCatchupSkips = data.pypiCatchupSkips || 0;
+      stats.pypiWheelsScanned = data.pypiWheelsScanned || 0;
+      stats.pypiSkippedNoArchive = data.pypiSkippedNoArchive || 0;
       if (Array.isArray(data.dailyAlerts)) {
         const restored = data.dailyAlerts.slice(-MAX_DAILY_ALERTS);
         dailyAlerts.length = 0;
@@ -1045,6 +1049,8 @@ function saveDailyStats(stats, dailyAlerts) {
       npmCatchupSkips: stats.npmCatchupSkips || 0,
       pypiCatchupSkippedEvents: stats.pypiCatchupSkippedEvents || 0,
       pypiCatchupSkips: stats.pypiCatchupSkips || 0,
+      pypiWheelsScanned: stats.pypiWheelsScanned || 0,
+      pypiSkippedNoArchive: stats.pypiSkippedNoArchive || 0,
       dailyAlerts: dailyAlerts.slice()
     };
     atomicWriteFileSync(DAILY_STATS_FILE, JSON.stringify(data, null, 2));
