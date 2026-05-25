@@ -157,12 +157,12 @@ jobs:
     }
   });
 
-  // 3.3b Rule count check (F1 compromised_email_domain: +1 rule → 232 RULES)
-  test('P3: rule count is 237 (232 RULES + 5 PARANOID)', () => {
+  // 3.3b Rule count check (AICONF-004 ZW Unicode obfuscation: +1 rule → 233 RULES)
+  test('P3: rule count is 238 (233 RULES + 5 PARANOID)', () => {
     const { RULES, PARANOID_RULES } = require('../../src/rules/index.js');
     const ruleCount = Object.keys(RULES).length;
     const paranoidCount = Object.keys(PARANOID_RULES).length;
-    assert(ruleCount === 232, `Expected 232 RULES, got ${ruleCount}`);
+    assert(ruleCount === 233, `Expected 233 RULES, got ${ruleCount}`);
     assert(paranoidCount === 5, `Expected 5 PARANOID, got ${paranoidCount}`);
   });
 

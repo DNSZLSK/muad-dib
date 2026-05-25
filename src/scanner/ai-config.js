@@ -18,6 +18,14 @@
 
 const fs = require('fs');
 const path = require('path');
+const { countInvisibleUnicode, stripInvisibleUnicode } = require('../shared/unicode-invisibles.js');
+
+// Threshold above which an AI config file is flagged as ZW-Unicode-obfuscated.
+// Lower than obfuscation.js (10) because .cursorrules / CLAUDE.md should never
+// legitimately contain invisible codepoints — even international content uses
+// only visible chars (CJK, accents, emoji with U+FE0F variation selector are
+// NOT counted by countInvisibleUnicode).
+const AI_CONFIG_ZW_THRESHOLD = 5;
 
 // AI agent config files to scan for prompt injection (relative to project root)
 const AI_CONFIG_FILES = [
@@ -111,7 +119,12 @@ function scanAIConfig(targetPath) {
     }
 
     const relPath = configFile;
-    const fileThreats = analyzeAIConfigFile(content, relPath);
+    // Normalize invisible Unicode BEFORE running regex patterns.
+    // Without this, an attacker can split keywords with U+200B (`cu​rl`) to
+    // evade /curl\s+/ — the exact TrapDoor (mai 2026) .cursorrules vector.
+    const invisibleCount = countInvisibleUnicode(content);
+    const normalized = invisibleCount > 0 ? stripInvisibleUnicode(content) : content;
+    const fileThreats = analyzeAIConfigFile(normalized, relPath, invisibleCount);
     threats.push(...fileThreats);
   }
 
@@ -218,13 +231,29 @@ function analyzeIDEHookFile(content, relPath) {
 }
 
 /**
- * Analyze a single AI config file for prompt injection patterns
+ * Analyze a single AI config file for prompt injection patterns.
+ *
+ * @param {string} content - File content, already normalized (invisible Unicode stripped).
+ * @param {string} relPath - Relative path of the config file.
+ * @param {number} invisibleCount - Number of invisible Unicode codepoints in the original (pre-strip) content.
  */
-function analyzeAIConfigFile(content, relPath) {
+function analyzeAIConfigFile(content, relPath, invisibleCount) {
   const threats = [];
   let hasShellCommand = false;
   let hasExfiltration = false;
   let hasCredentialAccess = false;
+
+  // Zero-width / directional Unicode obfuscation (TrapDoor, mai 2026).
+  // An attacker can hide instructions or split keywords with U+200B etc. so
+  // human reviewers see "harmless" text while the AI agent reads the payload.
+  if (invisibleCount >= AI_CONFIG_ZW_THRESHOLD) {
+    threats.push({
+      type: 'aiconf_unicode_obfuscation',
+      severity: 'CRITICAL',
+      message: `AI config contains ${invisibleCount} invisible Unicode characters (zero-width / directional / variation selectors) in ${relPath} — content was normalized before pattern matching. Possible hidden instructions or keyword-splitting evasion (TrapDoor pattern).`,
+      file: relPath
+    });
+  }
 
   // Check shell command patterns
   for (const pattern of SHELL_COMMAND_PATTERNS) {
