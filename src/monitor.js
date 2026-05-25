@@ -47,7 +47,7 @@ const stats = {
   suspect: 0,
   suspectByTier: { t1: 0, t1a: 0, t1b: 0, t2: 0, t3: 0 },
   errors: 0,
-  errorsByType: { too_large: 0, tar_failed: 0, http_error: 0, timeout: 0, static_timeout: 0, other: 0 },
+  errorsByType: { too_large: 0, tar_failed: 0, archive_failed: 0, unsupported_format: 0, http_error: 0, timeout: 0, static_timeout: 0, other: 0 },
   totalTimeMs: 0,
   mlFiltered: 0,
   llmAnalyzed: 0,
@@ -55,6 +55,20 @@ const stats = {
   sandboxDeferred: 0,
   deferredProcessed: 0,
   deferredExpired: 0,
+  // Coverage accounting (Commit 1 of fix/daily-metrics-accuracy)
+  // - npmPublishEventsSeen: raw changes-stream events, BEFORE per-package filters
+  // - uniqueScanAttempts: distinct (eco, name, version) tuples that reached scanPackage
+  // - pypiChangelogPackages/Events tracked here too so reset/restore stays atomic
+  uniqueScanAttempts: 0,
+  npmPublishEventsSeen: 0,
+  pypiChangelogPackages: 0,
+  pypiChangelogEvents: 0,
+  npmCatchupSkippedSeqs: 0,
+  npmCatchupSkips: 0,
+  pypiCatchupSkippedEvents: 0,
+  pypiCatchupSkips: 0,
+  pypiWheelsScanned: 0,
+  pypiSkippedNoArchive: 0,
   lastReportTime: Date.now(),
   lastDailyReportDate: null
 };

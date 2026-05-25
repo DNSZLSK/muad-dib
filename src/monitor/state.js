@@ -991,6 +991,8 @@ function loadDailyStats(stats, dailyAlerts) {
       if (data.errorsByType) {
         stats.errorsByType.too_large = data.errorsByType.too_large || 0;
         stats.errorsByType.tar_failed = data.errorsByType.tar_failed || 0;
+        stats.errorsByType.archive_failed = data.errorsByType.archive_failed || 0;
+        stats.errorsByType.unsupported_format = data.errorsByType.unsupported_format || 0;
         stats.errorsByType.http_error = data.errorsByType.http_error || 0;
         stats.errorsByType.timeout = data.errorsByType.timeout || 0;
         stats.errorsByType.static_timeout = data.errorsByType.static_timeout || 0;
@@ -1001,6 +1003,16 @@ function loadDailyStats(stats, dailyAlerts) {
       stats.llmAnalyzed = data.llmAnalyzed || 0;
       stats.llmSuppressed = data.llmSuppressed || 0;
       stats.changesStreamPackages = data.changesStreamPackages || 0;
+      stats.uniqueScanAttempts = data.uniqueScanAttempts || 0;
+      stats.npmPublishEventsSeen = data.npmPublishEventsSeen || 0;
+      stats.pypiChangelogPackages = data.pypiChangelogPackages || 0;
+      stats.pypiChangelogEvents = data.pypiChangelogEvents || 0;
+      stats.npmCatchupSkippedSeqs = data.npmCatchupSkippedSeqs || 0;
+      stats.npmCatchupSkips = data.npmCatchupSkips || 0;
+      stats.pypiCatchupSkippedEvents = data.pypiCatchupSkippedEvents || 0;
+      stats.pypiCatchupSkips = data.pypiCatchupSkips || 0;
+      stats.pypiWheelsScanned = data.pypiWheelsScanned || 0;
+      stats.pypiSkippedNoArchive = data.pypiSkippedNoArchive || 0;
       if (Array.isArray(data.dailyAlerts)) {
         const restored = data.dailyAlerts.slice(-MAX_DAILY_ALERTS);
         dailyAlerts.length = 0;
@@ -1029,6 +1041,16 @@ function saveDailyStats(stats, dailyAlerts) {
       llmAnalyzed: stats.llmAnalyzed || 0,
       llmSuppressed: stats.llmSuppressed || 0,
       changesStreamPackages: stats.changesStreamPackages || 0,
+      uniqueScanAttempts: stats.uniqueScanAttempts || 0,
+      npmPublishEventsSeen: stats.npmPublishEventsSeen || 0,
+      pypiChangelogPackages: stats.pypiChangelogPackages || 0,
+      pypiChangelogEvents: stats.pypiChangelogEvents || 0,
+      npmCatchupSkippedSeqs: stats.npmCatchupSkippedSeqs || 0,
+      npmCatchupSkips: stats.npmCatchupSkips || 0,
+      pypiCatchupSkippedEvents: stats.pypiCatchupSkippedEvents || 0,
+      pypiCatchupSkips: stats.pypiCatchupSkips || 0,
+      pypiWheelsScanned: stats.pypiWheelsScanned || 0,
+      pypiSkippedNoArchive: stats.pypiSkippedNoArchive || 0,
       dailyAlerts: dailyAlerts.slice()
     };
     atomicWriteFileSync(DAILY_STATS_FILE, JSON.stringify(data, null, 2));

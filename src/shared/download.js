@@ -2,6 +2,7 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
+const AdmZip = require('adm-zip');
 const { MAX_TARBALL_SIZE, DOWNLOAD_TIMEOUT } = require('./constants.js');
 
 // Allowed redirect domains for tarball downloads (SSRF protection)
@@ -221,13 +222,30 @@ function downloadToFile(url, destPath, timeoutMs = DOWNLOAD_TIMEOUT) {
 }
 
 /**
- * Extract a .tar.gz to a directory. Returns the package root.
- * Uses execFileSync (no shell) to prevent command injection.
- * @param {string} tgzPath - Path to the .tar.gz file
- * @param {string} destDir - Destination directory
- * @returns {string} Path to extracted package root
+ * Detect archive format from a path/URL extension.
+ * URL-derived names are reliable enough here: PyPI's `urls[].packagetype`
+ * + filename are authoritative, npm tarballs are always `.tgz`. Returns
+ * 'targz', 'zip', or 'unknown'. Callers either pass an `options.format`
+ * override or trust this detection.
+ *
+ * @param {string} archivePath - Path or URL ending in the archive filename
+ * @returns {'targz'|'zip'|'unknown'}
  */
-function extractTarGz(tgzPath, destDir) {
+function detectArchiveFormat(archivePath) {
+  if (typeof archivePath !== 'string') return 'unknown';
+  const lower = archivePath.toLowerCase();
+  if (lower.endsWith('.tar.gz') || lower.endsWith('.tgz')) return 'targz';
+  if (lower.endsWith('.whl') || lower.endsWith('.zip')) return 'zip';
+  return 'unknown';
+}
+
+/**
+ * Extract a tar.gz tarball with the system `tar` binary. Used for npm
+ * tarballs and PyPI sdists. Internal implementation — call extractArchive
+ * for new code; extractTarGz remains as a thin wrapper for the existing
+ * scanner/temporal-ast-diff.js callsite.
+ */
+function _extractTarGzImpl(tgzPath, destDir) {
   // Use cwd + relative paths so C: never appears in tar arguments
   // (GNU tar treats C: as remote host, bsdtar doesn't support --force-local)
   const tgzDir = path.dirname(path.resolve(tgzPath));
@@ -259,6 +277,77 @@ function extractTarGz(tgzPath, destDir) {
 }
 
 /**
+ * Extract a ZIP archive (PyPI wheels, generic zips) to a directory.
+ * adm-zip is already a runtime dependency (used by src/ioc/scraper.js).
+ *
+ * Two hardening layers before extraction touches disk:
+ *  1. zip-slip: resolve each entry path against destDir and reject anything
+ *     that escapes. path.resolve normalizes ../, mixed separators, and
+ *     absolute paths in a single pass.
+ *  2. size cap: sum of uncompressed entry sizes must stay below
+ *     MAX_TARBALL_SIZE — defends against zip bombs that pass tarball
+ *     size checks but expand into multi-GB on disk.
+ */
+function _extractZipImpl(zipPath, destDir) {
+  const zip = new AdmZip(zipPath);
+  const entries = zip.getEntries();
+  const resolvedDest = path.resolve(destDir);
+  let totalUncompressed = 0;
+  for (const entry of entries) {
+    totalUncompressed += (entry.header && entry.header.size) || 0;
+    if (totalUncompressed > MAX_TARBALL_SIZE) {
+      throw new Error(
+        `Zip extract refused: total uncompressed size ${totalUncompressed} exceeds ${MAX_TARBALL_SIZE}`
+      );
+    }
+    const target = path.resolve(destDir, entry.entryName);
+    if (target !== resolvedDest && !target.startsWith(resolvedDest + path.sep)) {
+      throw new Error(`Unsafe zip entry escapes destDir: ${entry.entryName}`);
+    }
+  }
+  zip.extractAllTo(destDir, /* overwrite */ true);
+  // Wheels carry a flat layout (no leading `package/`); collapse into the
+  // single top-level dir if there is exactly one (matches sdist behavior so
+  // the scanner pipeline can treat the result uniformly).
+  try {
+    const top = fs.readdirSync(destDir);
+    if (top.length === 1) {
+      const single = path.join(destDir, top[0]);
+      const stat = fs.lstatSync(single);
+      if (!stat.isSymbolicLink() && stat.isDirectory()) return single;
+    }
+  } catch { /* ignore — fall back to destDir */ }
+  return destDir;
+}
+
+/**
+ * Extract an archive to a directory, dispatching on file extension.
+ * Supports `.tar.gz` / `.tgz` (tar) and `.whl` / `.zip` (adm-zip).
+ *
+ * @param {string} archivePath - Path to the archive on disk
+ * @param {string} destDir - Destination directory (must exist)
+ * @param {Object} [options]
+ * @param {'targz'|'zip'} [options.format] - override auto-detection
+ * @returns {string} Path to extracted package root
+ * @throws {Error} when the format is unknown or extraction fails
+ */
+function extractArchive(archivePath, destDir, options = {}) {
+  const format = options.format || detectArchiveFormat(archivePath);
+  if (format === 'targz') return _extractTarGzImpl(archivePath, destDir);
+  if (format === 'zip') return _extractZipImpl(archivePath, destDir);
+  throw new Error(`Unsupported archive format for ${path.basename(archivePath)}`);
+}
+
+/**
+ * Backwards-compatible wrapper for the original tar.gz-only extractor.
+ * Kept because src/scanner/temporal-ast-diff.js and existing tests still
+ * import it by name. New code should call extractArchive instead.
+ */
+function extractTarGz(tgzPath, destDir) {
+  return _extractTarGzImpl(tgzPath, destDir);
+}
+
+/**
  * Sanitize a package name for use in temporary directory names.
  * Removes path traversal sequences, slashes, and @ symbols.
  * @param {string} packageName - Raw package name
@@ -277,6 +366,8 @@ function sanitizePackageName(packageName) {
 module.exports = {
   downloadToFile,
   extractTarGz,
+  extractArchive,
+  detectArchiveFormat,
   sanitizePackageName,
   isAllowedDownloadRedirect,
   normalizeHostname,

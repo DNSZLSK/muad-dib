@@ -363,6 +363,96 @@ function runMLFeatureExtractorTests() {
     assert(s.fileSizeBytes === 0, 'fileSizeBytes should be 0');
   });
 
+  // --- JSONL line-count cache tests (commit 3: avoid full-file reads) ---
+
+  test('JSONL writer: getStats uses cached count after appendRecord (no full file read)', () => {
+    const cacheFile = path.join(tmpDir, 'cache-stats.jsonl');
+    setTrainingFile(cacheFile);
+
+    // Seed file with 3 records via the writer (cache should be primed
+    // incrementally as appendRecord runs)
+    appendRecord({ name: 'a', version: '1' });
+    appendRecord({ name: 'b', version: '1' });
+    appendRecord({ name: 'c', version: '1' });
+    const before = getStats();
+    assert(before.recordCount === 3, `Cache must report 3 records, got ${before.recordCount}`);
+
+    // Now block full-file reads. If getStats falls back to readFileSync,
+    // this throw bubbles up and the test fails.
+    const realReadFileSync = fs.readFileSync;
+    let leakedRead = false;
+    fs.readFileSync = (...args) => {
+      if (typeof args[0] === 'string' && args[0] === cacheFile) {
+        leakedRead = true;
+        throw new Error('cache must not read JSONL on getStats');
+      }
+      return realReadFileSync.apply(fs, args);
+    };
+    try {
+      const after = getStats();
+      assert(after.recordCount === 3, `Cache must still report 3, got ${after.recordCount}`);
+      assert(!leakedRead, 'getStats must NOT call fs.readFileSync on the JSONL when cache is warm');
+    } finally {
+      fs.readFileSync = realReadFileSync;
+    }
+  });
+
+  test('JSONL writer: relabelRecords invalidates cache so next getStats recomputes', () => {
+    const cacheFile = path.join(tmpDir, 'cache-relabel.jsonl');
+    setTrainingFile(cacheFile);
+    appendRecord({ name: 'pkg-relabel', version: '1' });
+    appendRecord({ name: 'pkg-relabel', version: '2' });
+    appendRecord({ name: 'other', version: '1' });
+    assert(getStats().recordCount === 3, 'Initial count must be 3');
+
+    // Relabel: rewrites the entire file → cache must be invalidated
+    const updated = relabelRecords('pkg-relabel', 'unconfirmed');
+    assert(updated === 2, `Should relabel 2 records, got ${updated}`);
+
+    // getStats post-rewrite must still report 3 (recomputed via streaming),
+    // and the cache must work for subsequent calls.
+    const after = getStats();
+    assert(after.recordCount === 3, `Recomputed count must be 3, got ${after.recordCount}`);
+    const cached = getStats();
+    assert(cached.recordCount === 3, `Cached count must still be 3, got ${cached.recordCount}`);
+  });
+
+  test('JSONL writer: streaming count matches split count on cold boot', () => {
+    const cacheFile = path.join(tmpDir, 'cache-coldboot.jsonl');
+    // Write 7 records straight to disk WITHOUT going through appendRecord,
+    // so the in-memory cache starts cold.
+    const records = Array.from({ length: 7 }, (_, i) =>
+      JSON.stringify({ name: `boot-${i}`, version: '1.0.0', label: 'clean' }));
+    fs.writeFileSync(cacheFile, records.join('\n') + '\n', 'utf8');
+
+    // setTrainingFile invalidates the cache → next getStats must stream-count
+    setTrainingFile(cacheFile);
+    const s = getStats();
+    assert(s.recordCount === 7, `Streaming count must equal disk count of 7, got ${s.recordCount}`);
+  });
+
+  test('JSONL writer: streaming count handles trailing record without newline', () => {
+    const cacheFile = path.join(tmpDir, 'cache-no-trailing-nl.jsonl');
+    fs.writeFileSync(cacheFile, '{"a":1}\n{"b":2}\n{"c":3}', 'utf8'); // no final \n
+    setTrainingFile(cacheFile);
+    const s = getStats();
+    assert(s.recordCount === 3, `Must count 3 records even without trailing newline, got ${s.recordCount}`);
+  });
+
+  test('JSONL writer: setTrainingFile invalidates cache when switching files', () => {
+    const fileA = path.join(tmpDir, 'cache-switch-a.jsonl');
+    const fileB = path.join(tmpDir, 'cache-switch-b.jsonl');
+    fs.writeFileSync(fileA, '{"a":1}\n{"b":2}\n', 'utf8'); // 2 lines
+    fs.writeFileSync(fileB, '{"x":1}\n{"y":2}\n{"z":3}\n{"w":4}\n', 'utf8'); // 4 lines
+
+    setTrainingFile(fileA);
+    assert(getStats().recordCount === 2, 'File A must report 2');
+
+    setTrainingFile(fileB);
+    // Cache MUST NOT carry the count from A into B
+    assert(getStats().recordCount === 4, 'File B must report 4 (no cache leak from A)');
+  });
+
   // --- TOP_THREAT_TYPES coverage ---
 
   test('TOP_THREAT_TYPES contains at least 20 types', () => {
