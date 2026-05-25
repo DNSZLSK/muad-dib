@@ -338,6 +338,37 @@ const RULES = {
     ],
     mitre: 'T1027.013'
   },
+  // PYSRC-009 / 010 — fork-exec inline interpreter (v2.11.46). Comble le gap
+  // TrapDoor exact : subprocess.run(["node"|"bash"|..., "-e"|"-c", payload]).
+  // Pattern transversal multi-langage qui echappe a PYAST-005 parce qu'il n'y
+  // a pas d'exec()/eval() Python — l'execution est cote interpreter forked.
+  fork_exec_inline_interpreter: {
+    id: 'MUADDIB-PYSRC-009',
+    name: 'Python Fork-Exec Inline Interpreter',
+    severity: 'HIGH',
+    confidence: 'high',
+    domain: 'malware',
+    description: 'subprocess.{Popen,run,call,check_output,check_call,getoutput}([<interpreter>, <inline-flag>, ...]) — fork-exec d\'un interpreteur inline (node -e, python -c, bash -c, ruby -e, perl -e, php -r, ...). Signe canonique d\'un staging multi-langage : Python ouvre un autre interpreteur et lui passe du code dans argv. Pattern central de TrapDoor (mai 2026).',
+    references: [
+      'https://socket.dev/blog/trapdoor-crypto-stealer-npm-pypi-crates',
+      'https://attack.mitre.org/techniques/T1059/'
+    ],
+    mitre: 'T1059'
+  },
+  fetch_to_fork_exec_inline: {
+    id: 'MUADDIB-PYSRC-010',
+    name: 'Python Fetch + Fork-Exec Inline Interpreter (TrapDoor signature)',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    domain: 'malware',
+    description: 'Compound : le meme fichier Python contient un fetch reseau (urllib/requests/httpx/aiohttp/http.client) ET un subprocess.X([<interpreter>, -e|-c, ...]). Signature directe de TrapDoor : telecharge un payload depuis le C2 puis l\'execute via fork-exec d\'un interpreteur inline. Echappe a PYAST-005 (fetch+exec taint) parce que l\'execution est cote Node/Bash/Ruby/... pas cote Python.',
+    references: [
+      'https://socket.dev/blog/trapdoor-crypto-stealer-npm-pypi-crates',
+      'https://attack.mitre.org/techniques/T1105/',
+      'https://attack.mitre.org/techniques/T1059/'
+    ],
+    mitre: 'T1105'
+  },
 
   // PYAST-001 a 008 — Python AST scanner via tree-sitter (TrapDoor PyPI parity,
   // v2.11.42+). Mirror du `ast.js` cote npm : full CST walk avec scope tracking,

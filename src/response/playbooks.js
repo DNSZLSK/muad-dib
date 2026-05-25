@@ -498,6 +498,21 @@ const PLAYBOOKS = {
     'qui ne tracent que les "import X" statiques. Inspecter les appels suivants au module dynamiquement ' +
     'importe — combine a exec/subprocess/fetch indique malveillance avec haute confiance.',
 
+  fork_exec_inline_interpreter:
+    'HIGH: subprocess.X([<interpreter>, -e|-c, ...]) — fork-exec d\'un interpreteur inline ' +
+    '(node -e, python -c, bash -c, ruby -e, perl -e, php -r, ...). Pattern transversal: Python ouvre ' +
+    'un interpreteur d\'un autre langage et lui passe du code dans argv. Signe canonique d\'un staging ' +
+    'multi-langage (TrapDoor mai 2026). NE PAS installer. Inspecter le code passe en argv pour identifier ' +
+    'le payload reel. Si le 3eme element de la liste est une variable, suivre l\'assignment en amont.',
+
+  fetch_to_fork_exec_inline:
+    'CRITIQUE: Pattern TrapDoor exact. Le meme fichier Python fetch un payload reseau ' +
+    '(urllib/requests/httpx/aiohttp) ET le passe a subprocess.X([<interpreter>, -e, ...]) dans le meme ' +
+    'fichier. Le payload distant est execute cote interpreter forked (Node/Bash/Ruby/...) — echappe a ' +
+    'PYAST-005 parce qu\'il n\'y a pas d\'exec/eval Python. NE PAS installer. Bloquer le domaine du fetch ' +
+    'au firewall. Si execute: incident response complet, regenerer tous les secrets — le payload distant ' +
+    'a pu exfiltrer SSH, AWS, GitHub, npm tokens.',
+
   ai_agent_abuse:
     'CRITIQUE: Un agent IA (Claude, Gemini, Q) est invoque avec des flags de bypass de securite ' +
     '(--dangerously-skip-permissions, --yolo, --trust-all-tools). Technique s1ngularity/Nx. ' +

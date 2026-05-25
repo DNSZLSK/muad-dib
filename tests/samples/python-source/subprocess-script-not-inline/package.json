@@ -1,0 +1,1 @@
+{ "name": "pysrc-subprocess-script-not-inline-fixture", "version": "0.0.0", "description": "Negative: subprocess.run(['node', 'script.js']) — list-cmd but no inline flag. Should NOT fire PYSRC-009." }

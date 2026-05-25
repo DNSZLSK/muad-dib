@@ -1,0 +1,1 @@
+{ "name": "pysrc-subprocess-no-list-cmd-fixture", "version": "0.0.0", "description": "Negative: subprocess('node -e ...', shell=True) — string cmd via shell, not list cmd. Should NOT fire PYSRC-009 (PYAST-004 catches it via shell=True separately)." }
