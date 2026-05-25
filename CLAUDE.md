@@ -105,14 +105,14 @@ Never skip documentation updates when publishing a new version.
 - Never commit directly to master
 - Do not create commits automatically — the user handles commits manually
 
-## Current Metrics (v2.11.43)
+## Current Metrics (v2.11.45)
 
 | Metric | Value |
 |--------|-------|
-| Version | **2.11.43** |
-| Tests | **3873** passed, 0 failed, across 105 files (14511 skipped when Docker absent) |
-| Rules | **252** (247 RULES + 5 PARANOID) |
-| Scanners | **20 parallel** (Promise.allSettled) + **2 pre-analysis** (module-graph/, deobfuscate) + **1 async parser bootstrap** (python-ast WASM init, no analysis emitted) + **5 conditional/post-processing** (paranoid, 3× temporal-*, reachability) + **1 metadata** (npm-registry). 25 fichiers `src/scanner/*.js` + 1 dir `module-graph/` (9 fichiers) + 1 dir `python-ast-detectors/` (4 fichiers). Détails : ARCHITECTURE.md. |
+| Version | **2.11.45** |
+| Tests | **3870** passed, 0 failed, across 105 files (14511 skipped when Docker absent) |
+| Rules | **256** (251 RULES + 5 PARANOID) |
+| Scanners | **20 parallel** (Promise.allSettled) + **2 pre-analysis** (module-graph/, deobfuscate) + **1 async parser bootstrap** (python-ast WASM init, no analysis emitted) + **5 conditional/post-processing** (paranoid, 3× temporal-*, reachability) + **1 metadata** (npm-registry). 25 fichiers `src/scanner/*.js` + 1 dir `module-graph/` (9 fichiers) + 1 dir `python-ast-detectors/` (6 fichiers, +taint-tracker + handle-assignment depuis Phase 1b). Détails : ARCHITECTURE.md. |
 | TPR@3 (detection rate) | **93.85%** (61/65 ground truth, v2.10.95 metrics — re-measure pending P0-04 audit) |
 | TPR@20 (alert rate) | **86.2%** (56/65 ground truth, v2.10.95 metrics) |
 | FPR rules (curated, v2.10.95 measure) | **15.6%** (85/545 scanned of 548 benign packages) |

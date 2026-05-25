@@ -1,0 +1,1 @@
+{ "name": "pyast-multi-hop-fixture", "version": "0.0.0", "description": "Documented V1 limitation: multi-hop taint (a = source(); b = a; sink(b)) is NOT detected. PYAST-003 fires for exec; PYAST-005 must NOT (Phase 3 will handle multi-hop)." }

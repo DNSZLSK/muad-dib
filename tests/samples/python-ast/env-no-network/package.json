@@ -1,0 +1,1 @@
+{ "name": "pyast-env-no-network-fixture", "version": "0.0.0", "description": "Negative: env read but no network sink — no PYAST-010 fire." }

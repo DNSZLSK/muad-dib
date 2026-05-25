@@ -1,0 +1,1 @@
+{ "name": "pyast-reassignment-cleared-fixture", "version": "0.0.0", "description": "Negative: reassignment to safe value clears taint. PYAST-003 still fires (always for exec at module level), but PYAST-005 must NOT." }

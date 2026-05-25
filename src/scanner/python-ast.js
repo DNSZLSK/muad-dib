@@ -147,7 +147,11 @@ function scanPythonAST(targetPath) {
       threats,
       relFile: path.relative(targetPath, file),
       source,
-      invisibleCount
+      invisibleCount,
+      // Per-file taint map populated by handle-assignment.js at scope_depth==0
+      // and read by handle-call-expression.js for compound detections
+      // (PYAST-005/006/009/010). See python-ast-detectors/taint-tracker.js.
+      moduleTaint: new Map()
     };
 
     walk(tree.rootNode, ctx, visitors);

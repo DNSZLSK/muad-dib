@@ -427,6 +427,64 @@ const RULES = {
     mitre: 'T1027'
   },
 
+  // PYAST-005, 006, 009, 010 — Phase 1b (v2.11.45) : detecteurs taint-aware
+  // qui utilisent ctx.moduleTaint populee par handle-assignment.js.
+  // Mini-taint intra-procedural mono-fichier, single-hop. Voir python-ast-detectors/
+  // taint-tracker.js pour les sources + le plan Phase 1b pour les limitations.
+  pyast_fetch_to_exec_taint: {
+    id: 'MUADDIB-PYAST-005',
+    name: 'Python Fetch + Exec Taint (TrapDoor compound)',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    domain: 'malware',
+    description: 'Compound taint-aware : variable assignee depuis un fetch reseau (urllib / requests / httpx / aiohttp / http.client) puis passee a exec()/eval() au niveau module. Signature directe de remote-payload-then-RCE — pattern TrapDoor mai 2026 et Lazarus PyPI series.',
+    references: [
+      'https://socket.dev/blog/trapdoor-crypto-stealer-npm-pypi-crates',
+      'https://attack.mitre.org/techniques/T1105/',
+      'https://attack.mitre.org/techniques/T1059/006/'
+    ],
+    mitre: 'T1105'
+  },
+  pyast_base64_to_exec_taint: {
+    id: 'MUADDIB-PYAST-006',
+    name: 'Python Base64/Decode + Exec Taint (Obfuscated Payload)',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    domain: 'malware',
+    description: 'Compound taint-aware : variable assignee depuis un decode (base64 / codecs / zlib / gzip / binascii / bytes.fromhex) puis passee a exec()/eval() au niveau module. Pattern d\'obfuscation pour echapper a la revue + grep statique. Vu dans W4SP / Crystal / Lumma stealers PyPI.',
+    references: [
+      'https://attack.mitre.org/techniques/T1027/',
+      'https://attack.mitre.org/techniques/T1059/006/'
+    ],
+    mitre: 'T1027'
+  },
+  pyast_ctypes_shellcode_load: {
+    id: 'MUADDIB-PYAST-009',
+    name: 'Python ctypes Shellcode Loader',
+    severity: 'HIGH',
+    confidence: 'medium',
+    domain: 'malware',
+    description: 'ctypes.CDLL / WinDLL / LoadLibrary appele avec (a) un path suspect (/tmp, /var/tmp, /dev/shm, ~/, C:\\Windows\\Temp\\, ...) ou (b) un argument taintee venant d\'un fetch ou d\'un decode. Pattern de loader de shellcode native (.so / .dll dropped sur disque puis charge en memoire). Vu dans les campagnes RATs Python.',
+    references: [
+      'https://docs.python.org/3/library/ctypes.html',
+      'https://attack.mitre.org/techniques/T1055/'
+    ],
+    mitre: 'T1055'
+  },
+  pyast_env_to_network_write: {
+    id: 'MUADDIB-PYAST-010',
+    name: 'Python Env Read + Network POST Taint (Credential Exfil)',
+    severity: 'HIGH',
+    confidence: 'high',
+    domain: 'malware',
+    description: 'Compound taint-aware : variable assignee depuis os.environ[X] / os.environ.get(X) / os.getenv(X) puis envoyee dans le body d\'une requete POST/PUT/PATCH (requests / httpx / urllib.Request). Pattern d\'exfiltration de credentials. Severity escaladee a CRITICAL si le nom de la variable d\'env match un pattern sensible (TOKEN, KEY, SECRET, PASSWORD, NPM_, AWS_, SSH, API, GITHUB_, HF_, ANTHROPIC, ...).',
+    references: [
+      'https://attack.mitre.org/techniques/T1041/',
+      'https://attack.mitre.org/techniques/T1552/001/'
+    ],
+    mitre: 'T1041'
+  },
+
   suspicious_file: {
     id: 'MUADDIB-DEP-002',
     name: 'Suspicious File in Dependency',
