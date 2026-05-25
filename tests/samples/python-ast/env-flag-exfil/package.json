@@ -1,0 +1,1 @@
+{ "name": "pyast-env-flag-exfil-fixture", "version": "0.0.0", "description": "PYAST-010 HIGH (non-sensitive env name → network)." }

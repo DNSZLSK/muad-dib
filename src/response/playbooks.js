@@ -504,6 +504,30 @@ const PLAYBOOKS = {
     'NE PAS installer. Verifier si l\'agent a ete execute. Si oui, considerer la machine compromise. ' +
     'Auditer les fichiers sensibles (.ssh, .aws, .env) pour des acces non autorises.',
 
+  pyast_fetch_to_exec_taint:
+    'CRITIQUE: Pattern TrapDoor confirme par taint AST. Une variable Python a recu un payload via un fetch reseau ' +
+    '(urllib/requests/httpx/aiohttp/http.client) puis est passee a exec()/eval() au niveau module — RCE direct ' +
+    'a l\'import / pip install. NE PAS installer. Bloquer le domaine du fetch dans le firewall. ' +
+    'Si execute: incident response complet, regenerer TOUS les secrets sur la machine.',
+
+  pyast_base64_to_exec_taint:
+    'CRITIQUE: Pattern d\'obfuscation confirme par taint AST. Une variable Python a recu un payload decodé ' +
+    '(base64/codecs/zlib/gzip/binascii) puis est passee a exec()/eval() au niveau module. NE PAS installer. ' +
+    'Decoder manuellement le payload (python3 -c "import base64; print(base64.b64decode(b\'<blob>\'))") pour ' +
+    'identifier le code masque avant d\'evaluer la portee.',
+
+  pyast_ctypes_shellcode_load:
+    'HIGH: Loader de shellcode native suspect — ctypes.CDLL/WinDLL/LoadLibrary avec (a) un path en zone ' +
+    'world-writable (/tmp, /var/tmp, /dev/shm, ~/, C:\\Windows\\Temp\\) ou (b) un argument taintee venant ' +
+    'd\'un fetch reseau ou d\'un decode. Pattern classique RAT Python (charge un .so/.dll droppe en memoire). ' +
+    'NE PAS installer. Inspecter le path / la variable pour confirmer la provenance du binaire native.',
+
+  pyast_env_to_network_write:
+    'HIGH (ou CRITIQUE si env name match credential pattern): exfiltration de credentials confirmee par taint ' +
+    'AST. Une variable Python a recu une valeur depuis os.environ / os.getenv puis est envoyee dans le body ' +
+    'd\'une requete POST/PUT/PATCH (requests/httpx/urllib.Request). NE PAS installer. Si l\'env var name est ' +
+    'sensible (TOKEN/KEY/SECRET/...), revoke immediatement la credential exposee. Bloquer le domaine du POST.',
+
   canary_exfiltration:
     'CRITIQUE: Le package a tente de voler des credentials (honey tokens). Comportement malveillant confirme. ' +
     'NE PAS installer. Signaler immediatement sur npm/PyPI. ' +

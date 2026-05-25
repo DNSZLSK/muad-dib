@@ -2,6 +2,7 @@
 
 const { handleCallExpression } = require('./handle-call-expression.js');
 const { handleSetupCall } = require('./handle-setup-call.js');
+const { handleAssignment } = require('./handle-assignment.js');
 const helpers = require('./helpers.js');
 
 // Two visitors run on the `call` node type. `walk()` only dispatches one
@@ -13,7 +14,8 @@ function callDispatcher(node, ctx, scopeDepth) {
 
 module.exports = {
   visitors: {
-    call: callDispatcher
+    call: callDispatcher,
+    assignment: handleAssignment
   },
   helpers
 };

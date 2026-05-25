@@ -168,6 +168,111 @@ async function runPythonAstTests() {
       cleanup(tmp);
     }
   });
+
+  // =========================================================================
+  // Phase 1b — taint-aware detectors (PYAST-005, 006, 009, 010)
+  // =========================================================================
+
+  await asyncTest('PYAST-005: fetch → exec taint fires CRITICAL', async () => {
+    const result = await runScanDirect(path.join(FIXTURES, 'trapdoor-fetch-exec'));
+    const exec3 = result.threats.find(t => t.type === 'pyast_module_level_exec');
+    const taint5 = result.threats.find(t => t.type === 'pyast_fetch_to_exec_taint');
+    assert(exec3, 'PYAST-003 (module-level exec) should still fire as baseline');
+    assert(taint5, 'PYAST-005 (fetch+exec taint compound) should fire');
+    assert(taint5.severity === 'CRITICAL', `PYAST-005 expected CRITICAL, got ${taint5.severity}`);
+  });
+
+  await asyncTest('PYAST-006: base64 → exec taint fires CRITICAL', async () => {
+    const result = await runScanDirect(path.join(FIXTURES, 'base64-exec-taint'));
+    const taint6 = result.threats.find(t => t.type === 'pyast_base64_to_exec_taint');
+    assert(taint6, 'PYAST-006 should fire on base64→exec compound');
+    assert(taint6.severity === 'CRITICAL', `PYAST-006 expected CRITICAL, got ${taint6.severity}`);
+  });
+
+  await asyncTest('PYAST-010: env (sensitive) → network POST fires CRITICAL', async () => {
+    const result = await runScanDirect(path.join(FIXTURES, 'env-token-exfil'));
+    const exfil = result.threats.find(t => t.type === 'pyast_env_to_network_write');
+    assert(exfil, 'PYAST-010 should fire on env-token+POST');
+    assert(exfil.severity === 'CRITICAL', `expected CRITICAL (sensitive env name GITHUB_TOKEN), got ${exfil.severity}`);
+  });
+
+  await asyncTest('PYAST-010: env (non-sensitive) → network POST fires HIGH', async () => {
+    const result = await runScanDirect(path.join(FIXTURES, 'env-flag-exfil'));
+    const exfil = result.threats.find(t => t.type === 'pyast_env_to_network_write');
+    assert(exfil, 'PYAST-010 should still fire on non-sensitive env name (defense in depth)');
+    assert(exfil.severity === 'HIGH', `expected HIGH (non-sensitive env name MY_FEATURE_FLAG), got ${exfil.severity}`);
+  });
+
+  await asyncTest('PYAST-009: ctypes literal suspicious path fires HIGH', async () => {
+    const result = await runScanDirect(path.join(FIXTURES, 'ctypes-tmp-path'));
+    const ctypes = result.threats.find(t => t.type === 'pyast_ctypes_shellcode_load');
+    assert(ctypes, 'PYAST-009 should fire on ctypes.CDLL("/tmp/...")');
+    assert(ctypes.severity === 'HIGH', `expected HIGH, got ${ctypes.severity}`);
+  });
+
+  await asyncTest('PYAST-009: ctypes with tainted-fetch arg fires HIGH', async () => {
+    const result = await runScanDirect(path.join(FIXTURES, 'ctypes-tainted-fetch'));
+    const ctypes = result.threats.find(t => t.type === 'pyast_ctypes_shellcode_load');
+    assert(ctypes, 'PYAST-009 should fire when ctypes arg was assigned from a fetch');
+  });
+
+  // ---------- Phase 1b negatives ----------
+
+  await asyncTest('PYAST-005: reassignment clears taint (no PYAST-005, but PYAST-003 still fires)', async () => {
+    const result = await runScanDirect(path.join(FIXTURES, 'reassignment-cleared'));
+    const taint5 = result.threats.find(t => t.type === 'pyast_fetch_to_exec_taint');
+    const exec3 = result.threats.find(t => t.type === 'pyast_module_level_exec');
+    assert(!taint5, 'PYAST-005 must NOT fire after reassignment clears the taint');
+    assert(exec3, 'PYAST-003 (module-level exec) still fires regardless of taint');
+  });
+
+  await asyncTest('PYAST-005: V1 documented limitation — multi-hop alias NOT detected', async () => {
+    const result = await runScanDirect(path.join(FIXTURES, 'multi-hop-not-detected'));
+    const taint5 = result.threats.find(t => t.type === 'pyast_fetch_to_exec_taint');
+    assert(!taint5,
+      'V1 of the taint tracker does NOT propagate across `a = src(); b = a; sink(b)`. ' +
+      'If this test starts failing, the implementation grew multi-hop support — bump to Phase 3.');
+  });
+
+  await asyncTest('PYAST-009: legit ctypes (system lib path) does NOT fire', async () => {
+    const result = await runScanDirect(path.join(FIXTURES, 'ctypes-legit-lib'));
+    const ctypes = result.threats.find(t => t.type === 'pyast_ctypes_shellcode_load');
+    assert(!ctypes, 'ctypes.CDLL("libssl.so") / ctypes.CDLL("/usr/lib/libc.so") are legit, must NOT fire');
+  });
+
+  await asyncTest('PYAST-010: env read without network sink does NOT fire', async () => {
+    const result = await runScanDirect(path.join(FIXTURES, 'env-no-network'));
+    const exfil = result.threats.find(t => t.type === 'pyast_env_to_network_write');
+    assert(!exfil, 'reading os.environ without POSTing it must NOT fire PYAST-010');
+  });
+
+  // ---------- Taint tracker unit tests (direct API) ----------
+
+  await asyncTest('PYAST taint: classifyTaintSource detects fetch chains', async () => {
+    const tsModule = require('web-tree-sitter');
+    await tsModule.Parser.init();
+    const lang = await tsModule.Language.load(
+      path.join(__dirname, '..', '..', 'src', 'vendor', 'tree-sitter-python.wasm')
+    );
+    const parser = new tsModule.Parser();
+    parser.setLanguage(lang);
+    const { classifyTaintSource } = require('../../src/scanner/python-ast-detectors/taint-tracker.js');
+
+    function rhsOf(src) {
+      const tree = parser.parse(src);
+      return tree.rootNode.firstChild.firstChild.childForFieldName('right');
+    }
+
+    assert(classifyTaintSource(rhsOf('x = requests.get("u").text')).sourceType === 'fetch',
+      'requests.get(...).text should classify as fetch');
+    assert(classifyTaintSource(rhsOf('x = base64.b64decode(b"a")')).sourceType === 'base64',
+      'base64.b64decode should classify as base64');
+    const env = classifyTaintSource(rhsOf('x = os.environ["NPM_TOKEN"]'));
+    assert(env.sourceType === 'env' && env.envVarName === 'NPM_TOKEN',
+      'os.environ["NPM_TOKEN"] should classify as env with name NPM_TOKEN');
+    assert(classifyTaintSource(rhsOf('x = "harmless"')) === null,
+      'plain string literal should not classify');
+  });
 }
 
 module.exports = { runPythonAstTests };
