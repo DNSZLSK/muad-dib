@@ -141,7 +141,10 @@ async function getWeeklyDownloads(packageName) {
   }
   try {
     const url = `https://api.npmjs.org/downloads/point/last-week/${encodeURIComponent(packageName)}`;
-    const body = await httpsGet(url, 3000);
+    // Routed via _deps so tests can stub the downloads endpoint independently
+    // of the registry endpoint (Stage 2.1 added parallel-fetch from
+    // preResolveNpmBatch).
+    const body = await _deps.httpsGet(url, 3000);
     const data = JSON.parse(body);
     const downloads = typeof data.downloads === 'number' ? data.downloads : -1;
     downloadsCache.set(packageName, { downloads, fetchedAt: Date.now() });
@@ -429,8 +432,23 @@ async function getNpmLatestTarball(packageName) {
       version: '', tarball: null, unpackedSize: 0, scripts: {},
       homepage: '', description: '',
       latestTagVersion: null, recentVersions: [],
+      age_days: null, version_count: 0,
     };
   }
+  // Stage 2.1 — extract reputation signals from the packument we already have,
+  // so triageRisk in queue.js doesn't have to refetch metadata via
+  // getPackageMetadata. Two fields are derivable from the packument alone:
+  //   - age_days   : time.created (package creation timestamp)
+  //   - version_count : Object.keys(versions).length (excludes unpublished
+  //                     tombstones kept only in `time`)
+  // weekly_downloads requires a separate api.npmjs.org call and is fetched in
+  // parallel by preResolveNpmBatch (it has its own cache + no semaphore).
+  const createdAt = (packument && packument.time && packument.time.created) || null;
+  result.age_days = createdAt
+    ? Math.floor((Date.now() - new Date(createdAt).getTime()) / 86_400_000)
+    : null;
+  result.version_count = (packument && packument.versions)
+    ? Object.keys(packument.versions).length : 0;
   return result;
 }
 
@@ -465,15 +483,30 @@ async function preResolveNpmBatch(items, stats, scanQueue) {
     await Promise.all(chunk.map(async (item) => {
       if (item.tarballUrl) { alreadyResolved++; return; }
       try {
-        const npmInfo = await getNpmLatestTarball(item.name);
+        // Stage 2.1 — fetch downloads in parallel with the packument. The
+        // downloads endpoint (api.npmjs.org) is not on the registry semaphore
+        // and has its own internal cache, so this is effectively free in the
+        // warm-cache case and adds at most one parallel HTTP otherwise.
+        const [npmInfo, weeklyDownloads] = await Promise.all([
+          getNpmLatestTarball(item.name),
+          getWeeklyDownloads(item.name).catch(() => null)
+        ]);
         if (npmInfo && npmInfo.tarball) {
           item.tarballUrl = npmInfo.tarball;
           if (!item.version) item.version = npmInfo.version || '';
           if (!item.unpackedSize) item.unpackedSize = npmInfo.unpackedSize || 0;
           if (!item.registryScripts) item.registryScripts = npmInfo.scripts || null;
+          // weekly_downloads is best-effort. getWeeklyDownloads returns -1 on
+          // failure; normalize that to null so triageRisk treats it as missing
+          // (rather than silently biasing the reputation factor toward "suspect").
+          npmInfo.weekly_downloads = (typeof weeklyDownloads === 'number' && weeklyDownloads >= 0)
+            ? weeklyDownloads : null;
           // Stash full packument-derived metadata for resolveTarballAndScan so
           // the worker can run ATO-signature, burst-extras, and fast-track logic
-          // without a second registry call.
+          // without a second registry call. Stage 2.1 enriches this with
+          // age_days / version_count (from getNpmLatestTarball) and
+          // weekly_downloads (from getWeeklyDownloads) so the triage block in
+          // queue.js can read meta directly without re-fetching.
           item._npmInfo = npmInfo;
           resolved++;
         } else {
