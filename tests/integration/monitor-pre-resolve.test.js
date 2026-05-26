@@ -94,6 +94,106 @@ async function runMonitorPreResolveTests() {
     }
   });
 
+  // ── Stage 2.1 — _npmInfo reputation signals ──────────────────────────────
+
+  await asyncTest('PRE-RESOLVE npm: _npmInfo carries age_days from time.created (Stage 2.1)', async () => {
+    const realGet = ingestion._deps.httpsGet;
+    // 200 days ago — easy to verify
+    const created = new Date(Date.now() - 200 * 86_400_000).toISOString();
+    ingestion._deps.httpsGet = async (url) => {
+      if (url.includes('api.npmjs.org/downloads')) {
+        return JSON.stringify({ downloads: 12345 });
+      }
+      return JSON.stringify({
+        name: 'pkg-aged',
+        'dist-tags': { latest: '1.0.0' },
+        versions: { '1.0.0': { version: '1.0.0', dist: { tarball: 'https://r/pkg-aged-1.0.0.tgz' }, scripts: {} } },
+        time: { created, '1.0.0': new Date().toISOString() }
+      });
+    };
+    const items = [{ name: 'pkg-aged', version: '', ecosystem: 'npm', tarballUrl: null }];
+    try {
+      await ingestion.preResolveNpmBatch(items, {});
+      assert(items[0]._npmInfo, '_npmInfo must be set');
+      assert(items[0]._npmInfo.age_days >= 199 && items[0]._npmInfo.age_days <= 201,
+        `age_days should be ~200, got ${items[0]._npmInfo.age_days}`);
+    } finally {
+      ingestion._deps.httpsGet = realGet;
+    }
+  });
+
+  await asyncTest('PRE-RESOLVE npm: _npmInfo.version_count counts entries in versions (Stage 2.1)', async () => {
+    const realGet = ingestion._deps.httpsGet;
+    const now = new Date().toISOString();
+    ingestion._deps.httpsGet = async (url) => {
+      if (url.includes('api.npmjs.org/downloads')) return JSON.stringify({ downloads: 1 });
+      return JSON.stringify({
+        name: 'pkg-many',
+        'dist-tags': { latest: '3.0.0' },
+        versions: {
+          '1.0.0': { version: '1.0.0', dist: { tarball: 'https://r/pkg-many-1.0.0.tgz' }, scripts: {} },
+          '2.0.0': { version: '2.0.0', dist: { tarball: 'https://r/pkg-many-2.0.0.tgz' }, scripts: {} },
+          '3.0.0': { version: '3.0.0', dist: { tarball: 'https://r/pkg-many-3.0.0.tgz' }, scripts: {} }
+        },
+        time: { created: now, '1.0.0': now, '2.0.0': now, '3.0.0': now }
+      });
+    };
+    const items = [{ name: 'pkg-many', version: '', ecosystem: 'npm', tarballUrl: null }];
+    try {
+      await ingestion.preResolveNpmBatch(items, {});
+      assert(items[0]._npmInfo.version_count === 3,
+        `version_count should be 3, got ${items[0]._npmInfo.version_count}`);
+    } finally {
+      ingestion._deps.httpsGet = realGet;
+    }
+  });
+
+  await asyncTest('PRE-RESOLVE npm: _npmInfo.weekly_downloads stashed from api.npmjs.org (Stage 2.1)', async () => {
+    const realGet = ingestion._deps.httpsGet;
+    ingestion._deps.httpsGet = async (url) => {
+      if (url.includes('api.npmjs.org/downloads')) {
+        return JSON.stringify({ downloads: 42_000_000 });
+      }
+      return JSON.stringify({
+        name: 'pkg-popular',
+        'dist-tags': { latest: '1.0.0' },
+        versions: { '1.0.0': { version: '1.0.0', dist: { tarball: 'https://r/pkg-popular-1.0.0.tgz' }, scripts: {} } },
+        time: { created: new Date().toISOString(), '1.0.0': new Date().toISOString() }
+      });
+    };
+    const items = [{ name: 'pkg-popular', version: '', ecosystem: 'npm', tarballUrl: null }];
+    try {
+      await ingestion.preResolveNpmBatch(items, {});
+      assert(items[0]._npmInfo.weekly_downloads === 42_000_000,
+        `weekly_downloads should be 42M, got ${items[0]._npmInfo.weekly_downloads}`);
+    } finally {
+      ingestion._deps.httpsGet = realGet;
+    }
+  });
+
+  await asyncTest('PRE-RESOLVE npm: weekly_downloads failure → null (best-effort, not -1)', async () => {
+    const realGet = ingestion._deps.httpsGet;
+    ingestion._deps.httpsGet = async (url) => {
+      if (url.includes('api.npmjs.org/downloads')) {
+        throw new Error('test: simulated downloads endpoint failure');
+      }
+      return JSON.stringify({
+        name: 'pkg-no-downloads',
+        'dist-tags': { latest: '1.0.0' },
+        versions: { '1.0.0': { version: '1.0.0', dist: { tarball: 'https://r/pkg-no-downloads-1.0.0.tgz' }, scripts: {} } },
+        time: { created: new Date().toISOString(), '1.0.0': new Date().toISOString() }
+      });
+    };
+    const items = [{ name: 'pkg-no-downloads', version: '', ecosystem: 'npm', tarballUrl: null }];
+    try {
+      await ingestion.preResolveNpmBatch(items, {});
+      assert(items[0]._npmInfo.weekly_downloads === null,
+        `weekly_downloads on failure must be null (so triage treats it as missing, not 0), got ${items[0]._npmInfo.weekly_downloads}`);
+    } finally {
+      ingestion._deps.httpsGet = realGet;
+    }
+  });
+
   await asyncTest('PRE-RESOLVE pypi: happy path sets tarballUrl + stats', async () => {
     const realGet = ingestion._deps.httpsGet;
     ingestion._deps.httpsGet = async () => JSON.stringify({

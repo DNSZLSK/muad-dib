@@ -128,6 +128,22 @@ const LARGE_PACKAGE_SIZE = 10 * 1024 * 1024; // 10MB
 const FIRST_PUBLISH_SANDBOX_MAX_QUEUE = parseInt(process.env.MUADDIB_FIRST_PUBLISH_SANDBOX_MAX_QUEUE, 10) || 10;
 const FIRST_PUBLISH_SANDBOX_ENABLED = process.env.MUADDIB_FIRST_PUBLISH_SANDBOX !== '0';
 
+// Stage 3 — sandbox gate. Static-score threshold below which T1b/T2 packages
+// are NOT sandboxed (static result alone is authoritative). Tightens the prior
+// "T1b sandbox if score >= 25 or queue < 20" to remove low-signal sandbox runs
+// that consume slots without producing actionable findings (the dominant cost
+// in the queue-saturation diagnostic). Validated by axon-enterprise@1.0.0
+// (static 52, sandbox confirmed 100) — gate >= 40 still catches it.
+// T1a (high-confidence malice) bypasses this gate; it's mandatory.
+// Override via env var to widen the gate (lower threshold) for a short
+// rollback window without redeploying. Clamped to [0, 100].
+function computeSandboxScoreThreshold(envValue) {
+  const parsed = parseInt(envValue, 10);
+  const value = Number.isFinite(parsed) ? parsed : 40;
+  return Math.max(0, Math.min(100, value));
+}
+const SANDBOX_SCORE_THRESHOLD = computeSandboxScoreThreshold(process.env.MUADDIB_SANDBOX_SCORE_THRESHOLD);
+
 // --- Bundled tooling false-positive filter ---
 
 const KNOWN_BUNDLED_FILES = ['yarn.js', 'webpack.js', 'terser.js', 'esbuild.js', 'polyfills.js'];
@@ -738,14 +754,16 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
         }
 
         // T1a: mandatory sandbox (HC malice types, TIER1_TYPES non-LOW, lifecycle + intent compound)
-        // T1b: conditional sandbox (HIGH/CRITICAL without HC type — bundler FP zone)
-        //       → sandbox only if score >= 25 (significant risk) or queue pressure is low
-        // T2: sandbox if queue < 50 (as before)
+        // T1b: conditional sandbox — gated by SANDBOX_SCORE_THRESHOLD (Stage 3).
+        //       Previously gated at >= 25 OR queue < 20; tightened to >= 40 by
+        //       default because the 25-39 band produced no decisive sandbox
+        //       findings in 4 months of prod data (axon-enterprise was at 52).
+        // T2:  conditional sandbox — same score gate AND queue < 50.
         let sandboxResult = null;
         const shouldSandbox = !skipSandboxLargePackage && isSandboxEnabled() && sandboxAvailable && (
           tier === '1a' ||
-          (tier === '1b' && (riskScore >= 25 || scanQueue.length < 20)) ||
-          (tier === 2 && scanQueue.length < 50)
+          (tier === '1b' && riskScore >= SANDBOX_SCORE_THRESHOLD) ||
+          (tier === 2 && riskScore >= SANDBOX_SCORE_THRESHOLD && scanQueue.length < 50)
         );
 
         if (shouldSandbox) {
@@ -813,8 +831,12 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
           } catch (err) {
             console.error(`[MONITOR] SANDBOX error for ${name}@${version}: ${err.message}`);
           }
-        } else if (tier === '1b' && sandboxAvailable) {
-          console.log(`[MONITOR] SANDBOX DEFERRED (T1b, score=${riskScore} < 25, queue ${scanQueue.length} >= 20): ${name}@${version}`);
+        } else if (tier === '1b' && sandboxAvailable && riskScore >= SANDBOX_SCORE_THRESHOLD) {
+          // Stage 3 — defer only when the score crosses the gate. Below the
+          // threshold, sandbox is skipped entirely (static result is final).
+          // This stops the deferred-queue from filling with low-score items
+          // that would never produce decisive sandbox findings.
+          console.log(`[MONITOR] SANDBOX DEFERRED (T1b, score=${riskScore}, queue ${scanQueue.length}): ${name}@${version}`);
           enqueueDeferred({
             name, version, ecosystem, tier, riskScore, tarballUrl,
             enqueuedAt: Date.now(),
@@ -823,10 +845,14 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
             retries: 0
           });
           stats.sandboxDeferred = (stats.sandboxDeferred || 0) + 1;
+        } else if (tier === '1b' && sandboxAvailable) {
+          // Below SANDBOX_SCORE_THRESHOLD — no sandbox, no defer.
+          console.log(`[MONITOR] SANDBOX GATED (T1b, score=${riskScore} < ${SANDBOX_SCORE_THRESHOLD}): ${name}@${version}`);
+          stats.sandboxGated = (stats.sandboxGated || 0) + 1;
         } else if (tier === '1b') {
           console.log(`[MONITOR] SANDBOX SKIPPED (T1b, no Docker): ${name}@${version}`);
-        } else if (tier === 2 && sandboxAvailable) {
-          console.log(`[MONITOR] SANDBOX DEFERRED (T2, queue ${scanQueue.length} >= 50): ${name}@${version}`);
+        } else if (tier === 2 && sandboxAvailable && riskScore >= SANDBOX_SCORE_THRESHOLD) {
+          console.log(`[MONITOR] SANDBOX DEFERRED (T2, score=${riskScore}, queue ${scanQueue.length}): ${name}@${version}`);
           enqueueDeferred({
             name, version, ecosystem, tier, riskScore, tarballUrl,
             enqueuedAt: Date.now(),
@@ -835,6 +861,11 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
             retries: 0
           });
           stats.sandboxDeferred = (stats.sandboxDeferred || 0) + 1;
+        } else if (tier === 2 && sandboxAvailable) {
+          // Below SANDBOX_SCORE_THRESHOLD — T2 was already passive; staying
+          // static-only matches the existing T3 behaviour.
+          console.log(`[MONITOR] SANDBOX GATED (T2, score=${riskScore} < ${SANDBOX_SCORE_THRESHOLD}): ${name}@${version}`);
+          stats.sandboxGated = (stats.sandboxGated || 0) + 1;
         } else if (tier === 2) {
           console.log(`[MONITOR] SANDBOX SKIPPED (T2, no Docker): ${name}@${version}`);
         }
@@ -1295,10 +1326,23 @@ async function resolveTarballAndScan(item, stats, dailyAlerts, recentlyScanned, 
   if (triageMode !== 'off' && !item.fastTrack) {
     let triageMeta = null;
     if (item.ecosystem === 'npm') {
-      try {
-        const { getPackageMetadata } = require('../scanner/npm-registry.js');
-        triageMeta = await getPackageMetadata(item.name);
-      } catch { /* metadata unavailable → triageRisk will see null and pick 'full' */ }
+      // Stage 2.1 — Stage 1 pre-resolve already fetched the packument and
+      // (Stage 2.1) computed age_days + version_count, plus parallel-fetched
+      // weekly_downloads. Read those directly to skip the second
+      // registry round-trip via getPackageMetadata. Fallback to the lazy
+      // metadata fetch only when _npmInfo is absent (lazy-resolve path).
+      if (item._npmInfo) {
+        triageMeta = {
+          age_days: item._npmInfo.age_days,
+          version_count: item._npmInfo.version_count,
+          weekly_downloads: item._npmInfo.weekly_downloads,
+        };
+      } else {
+        try {
+          const { getPackageMetadata } = require('../scanner/npm-registry.js');
+          triageMeta = await getPackageMetadata(item.name);
+        } catch { /* metadata unavailable → triageRisk will see null and pick 'full' */ }
+      }
     } else if (item.ecosystem === 'pypi') {
       triageMeta = item._pypiInfo || null;
     }
@@ -1413,6 +1457,8 @@ module.exports = {
   LARGE_PACKAGE_SIZE,
   FIRST_PUBLISH_SANDBOX_MAX_QUEUE,
   FIRST_PUBLISH_SANDBOX_ENABLED,
+  SANDBOX_SCORE_THRESHOLD,
+  computeSandboxScoreThreshold,
   KNOWN_BUNDLED_FILES,
   KNOWN_BUNDLED_PATHS,
   ML_EXCLUDED_DIRS,

@@ -120,6 +120,7 @@ const { runMonitorMemoryTests } = require('./integration/monitor-memory.test');
 const { runMonitorPreResolveTests } = require('./integration/monitor-pre-resolve.test');
 const { runTriageTests } = require('./integration/triage.test');
 const { runTriageGtTests } = require('./integration/triage-gt.test');
+const { runSandboxGateTests } = require('./integration/sandbox-gate.test');
 const { runOomDetectionsJsonlTests } = require('./integration/oom-detections-jsonl.test');
 const { runAutoLabelerTests } = require('./integration/auto-labeler.test');
 
@@ -182,6 +183,7 @@ async function timed(name, fn) {
   await timed('monitor-pre-resolve', runMonitorPreResolveTests);
   await timed('triage', runTriageTests);
   await timed('triage-gt', runTriageGtTests);
+  await timed('sandbox-gate', runSandboxGateTests);
   await timed('diff', runDiffTests);
 
   // Temporal analysis
