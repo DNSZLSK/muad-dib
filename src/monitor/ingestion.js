@@ -158,12 +158,15 @@ function getNpmTarballUrl(pkgData) {
 }
 
 async function getPyPITarballUrl(packageName, packageVersion = '') {
-  // Per-version endpoint when we know the version (e.g. from the XML-RPC changelog) —
-  // guarantees we scan the artifact that just landed, not whatever became "latest"
-  // between event detection and scan. Falls back to /pypi/<name>/json (latest) otherwise.
-  const url = packageVersion
-    ? `https://pypi.org/pypi/${encodeURIComponent(packageName)}/${encodeURIComponent(packageVersion)}/json`
-    : `https://pypi.org/pypi/${encodeURIComponent(packageName)}/json`;
+  // Always hit the package-level endpoint. It contains:
+  //   - info.version  → latest version
+  //   - urls          → files for the latest version
+  //   - releases      → files for ALL versions (so we can find packageVersion's
+  //                     exact artifact, same anti-race guarantee as the per-
+  //                     version endpoint used to provide)
+  // We extract triage metadata (age_days, version_count) from `releases` in
+  // the same round-trip — keeps Stage 2's PyPI cost at 1 HTTP call.
+  const url = `https://pypi.org/pypi/${encodeURIComponent(packageName)}/json`;
   const body = await _deps.httpsGet(url);
   let data;
   try {
@@ -171,20 +174,58 @@ async function getPyPITarballUrl(packageName, packageVersion = '') {
   } catch (e) {
     throw new Error(`Invalid JSON from PyPI for ${packageName}: ${e.message}`);
   }
-  const version = (data.info && data.info.version) || packageVersion || '';
-  const urls = data.urls || [];
-  // Prefer sdist (.tar.gz)
-  const sdist = urls.find(u => u.packagetype === 'sdist' && u.url);
-  if (sdist) return { url: sdist.url, version };
-  // Fallback: any .tar.gz
-  const tarGz = urls.find(u => u.url && u.url.endsWith('.tar.gz'));
-  if (tarGz) return { url: tarGz.url, version };
-  // Fallback: wheel (.whl) — extracted via adm-zip in queue.js, not tar.
-  // Legacy .egg / .tar.bz2 / .exe installers intentionally NOT returned —
-  // they were the cause of ~2773 tar_failed/day before this fix.
-  const wheel = urls.find(u => u.url && (u.url.endsWith('.whl') || u.url.endsWith('.zip')));
-  if (wheel) return { url: wheel.url, version };
-  return { url: null, version };
+
+  const latestVersion = (data.info && data.info.version) || '';
+  const version = packageVersion || latestVersion;
+  const releases = (data && data.releases) || {};
+
+  // Pick files for the requested version (preserves the original anti-race
+  // guarantee — we scan the exact version flagged by the changelog). If
+  // absent (e.g. lazy resolution without a known version), use latest urls.
+  const files = (packageVersion && Array.isArray(releases[packageVersion]))
+    ? releases[packageVersion]
+    : (Array.isArray(data.urls) ? data.urls : []);
+
+  // Tarball selection priority unchanged: sdist > .tar.gz > .whl/.zip.
+  // Legacy .egg / .tar.bz2 / .exe intentionally not returned (they were the
+  // cause of ~2773 tar_failed/day before the original fix).
+  let tarballUrl = null;
+  const sdist = files.find(u => u && u.packagetype === 'sdist' && u.url);
+  if (sdist) {
+    tarballUrl = sdist.url;
+  } else {
+    const tarGz = files.find(u => u && u.url && u.url.endsWith('.tar.gz'));
+    if (tarGz) {
+      tarballUrl = tarGz.url;
+    } else {
+      const wheel = files.find(u => u && u.url && (u.url.endsWith('.whl') || u.url.endsWith('.zip')));
+      if (wheel) tarballUrl = wheel.url;
+    }
+  }
+
+  // Stage 2 triage metadata: derived from `releases` once per fetch.
+  const versionCount = Object.keys(releases).length;
+  let earliestUpload = Number.MAX_SAFE_INTEGER;
+  for (const v of Object.keys(releases)) {
+    const versionFiles = releases[v];
+    if (!Array.isArray(versionFiles)) continue;
+    for (const f of versionFiles) {
+      if (f && f.upload_time) {
+        const ts = Date.parse(f.upload_time);
+        if (Number.isFinite(ts) && ts < earliestUpload) earliestUpload = ts;
+      }
+    }
+  }
+  const ageDays = earliestUpload !== Number.MAX_SAFE_INTEGER
+    ? Math.floor((Date.now() - earliestUpload) / 86_400_000)
+    : null;
+
+  return {
+    url: tarballUrl,
+    version,
+    age_days: ageDays,
+    version_count: versionCount,
+  };
 }
 
 // --- RSS parsing ---
@@ -477,6 +518,12 @@ async function preResolvePyPIBatch(items, stats, scanQueue) {
         if (pypiInfo && pypiInfo.url) {
           item.tarballUrl = pypiInfo.url;
           if (!item.version && pypiInfo.version) item.version = pypiInfo.version;
+          // Stage 2 triage signals: stash age_days + version_count for
+          // triageRisk() to read in queue.js without a second registry call.
+          item._pypiInfo = {
+            age_days: pypiInfo.age_days,
+            version_count: pypiInfo.version_count,
+          };
           resolved++;
         } else {
           failed++;

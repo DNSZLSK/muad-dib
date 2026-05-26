@@ -73,6 +73,7 @@ const {
   buildCanaryExfiltrationWebhookEmbed,
   getWebhookUrl,
   computeReputationFactor,
+  triageRisk,
   computeRiskLevel,
   sendDailyReport,
   alertedPackageRules,
@@ -444,7 +445,11 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
         version,
         ecosystem,
         monitorMode: true,
-        trustedDepDiff: true
+        trustedDepDiff: true,
+        // Stage 2: set by processQueueItem when MUADDIB_TRIAGE_MODE=enforce.
+        // Defaults to 'full' so any CLI/test caller that bypasses triage gets
+        // the full 20-scanner pipeline (unchanged behaviour).
+        scanMode: (meta && meta.scanMode) || 'full'
       };
       result = await runScanInWorker(extractedDir, STATIC_SCAN_TIMEOUT_MS, scanContext);
     } catch (staticErr) {
@@ -1278,11 +1283,39 @@ async function resolveTarballAndScan(item, stats, dailyAlerts, recentlyScanned, 
   // Abort check: if timeout fired during temporal checks, skip the expensive scan
   if (signal && signal.aborted) return;
 
+  // Stage 2 — Pass A triage. Decides whether the static scan runs all 20
+  // scanners or a quick_scan subset. Defaults to full when:
+  //   - env MUADDIB_TRIAGE_MODE !== 'enforce' (off | shadow | unset)
+  //   - the item is fastTrack-elected (already a more aggressive subset)
+  //   - any suspect signal flips triageRisk to 'full'
+  // Shadow mode computes + logs the decision but still runs full — safe way
+  // to observe classification share before flipping enforce.
+  const triageMode = (process.env.MUADDIB_TRIAGE_MODE || 'off').toLowerCase();
+  let effectiveScanMode = 'full';
+  if (triageMode !== 'off' && !item.fastTrack) {
+    let triageMeta = null;
+    if (item.ecosystem === 'npm') {
+      try {
+        const { getPackageMetadata } = require('../scanner/npm-registry.js');
+        triageMeta = await getPackageMetadata(item.name);
+      } catch { /* metadata unavailable → triageRisk will see null and pick 'full' */ }
+    } else if (item.ecosystem === 'pypi') {
+      triageMeta = item._pypiInfo || null;
+    }
+    const triage = triageRisk(item, triageMeta);
+    item.scanMode = triage.mode;
+    stats.triageQuick = (stats.triageQuick || 0) + (triage.mode === 'quick' ? 1 : 0);
+    stats.triageFull = (stats.triageFull || 0) + (triage.mode === 'full' ? 1 : 0);
+    console.log(`[TRIAGE] ${item.name}@${item.version || '?'}: mode=${triage.mode} reasons=[${triage.reasons.join(',') || 'none'}]`);
+    if (triageMode === 'enforce') effectiveScanMode = triage.mode;
+  }
+
   const scanResult = await scanPackage(item.name, item.version, item.ecosystem, item.tarballUrl, {
     unpackedSize: item.unpackedSize || 0,
     registryScripts: item.registryScripts || null,
     _cacheTrigger: item._cacheTrigger || null,
-    fastTrack: item.fastTrack || false
+    fastTrack: item.fastTrack || false,
+    scanMode: effectiveScanMode
   }, stats, dailyAlerts, recentlyScanned, downloadsCache, scanQueue, sandboxAvailable);
   const sandboxResult = scanResult && scanResult.sandboxResult;
   const staticClean = scanResult && scanResult.staticClean;

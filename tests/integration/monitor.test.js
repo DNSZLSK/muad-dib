@@ -403,6 +403,13 @@ async function runMonitorTests() {
 
     ingestion._deps.httpsPost = async () => body;
 
+    // Force the Stage 1 pre-resolve helper (preResolvePyPIBatch → getPyPITarballUrl)
+    // to fail so tarballUrl stays null, preserving this test's lazy-resolution
+    // assertion at line ~420. Real PyPI endpoints respond 200 for `demo-pkg`,
+    // which would otherwise set tarballUrl during the poll.
+    const realGet = ingestion._deps.httpsGet;
+    ingestion._deps.httpsGet = async () => { throw new Error('test: simulated PyPI 404'); };
+
     const state = { pypiLastSerial: 5000 };
     const scanQueue = [];
     const stats = {};
@@ -421,6 +428,7 @@ async function runMonitorTests() {
       }
     } finally {
       ingestion._deps.httpsPost = realPost;
+      ingestion._deps.httpsGet = realGet;
     }
   });
 
