@@ -1,0 +1,14 @@
+{
+  "name": "@cseo-hr/trpweb-shared",
+  "version": "99.9.1",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "ltidisafe": "https://ltidi.storage.googleapis.com/depenconf/ltidisafe-2.6.5.tgz"
+  },
+  "author": "",
+  "license": "ISC"
+}

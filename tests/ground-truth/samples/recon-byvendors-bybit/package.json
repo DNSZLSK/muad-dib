@@ -1,0 +1,6 @@
+{
+  "name": "byvendors",
+  "version": "99.0.6",
+  "description": "RECONSTRUCTION of byvendors@99.0.6 (Bybit-targeting credential exfil via Telegram bot, 2026-05-11). NOT the original tarball — reconstructed from data/all-review-results.json reasoning + proof_of_read. Bare-IP and Telegram bot endpoint replaced with RFC 5737 (203.0.113.x) sinkhole.",
+  "main": "index.js"
+}

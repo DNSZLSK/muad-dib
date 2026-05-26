@@ -13,6 +13,16 @@ const IOCS_URL = 'https://github.com/DNSZLSK/muad-dib/releases/latest/download/i
 const HOME_DATA_DIR = path.join(os.homedir(), '.muaddib', 'data');
 const IOCS_PATH = path.join(HOME_DATA_DIR, 'iocs.json');
 
+// Local bundled IOC file (committed in repo) — when present we don't need a network download.
+// Loader (src/ioc/updater.js) reads this directly, so the home-cache download becomes a
+// no-op for users who already have the source tree.
+const LOCAL_BUNDLED_IOCS = path.join(__dirname, 'data', 'iocs.json');
+
+// Per-process memoization: once download has failed (or been skipped), don't retry on the
+// next scan within the same process. Eval runs hundreds of scans — without this we burn a
+// 60s timeout per scan when the asset is missing.
+let _ensureIocsResult = null;
+
 // Minimum file size to consider IOCs valid (1MB)
 const MIN_IOCS_SIZE = 1_000_000;
 
@@ -135,6 +145,9 @@ function downloadAndDecompress(url, destPath) {
  * @returns {Promise<boolean>} true if IOCs are available (cached or downloaded), false if download failed
  */
 async function ensureIOCs() {
+  // Per-process memoization — first scan decides, subsequent scans reuse the result.
+  if (_ensureIocsResult !== null) return _ensureIocsResult;
+
   try {
     // Create data directory if needed
     if (!fs.existsSync(HOME_DATA_DIR)) {
@@ -145,8 +158,19 @@ async function ensureIOCs() {
     if (fs.existsSync(IOCS_PATH)) {
       const stat = fs.statSync(IOCS_PATH);
       if (stat.size >= MIN_IOCS_SIZE) {
-        return true;
+        return (_ensureIocsResult = true);
       }
+    }
+
+    // Bundled-source fast path: dev installs and the npm tarball both ship src/ioc/data/iocs.json.
+    // When that file is present, the updater loader already merges it — no need to hit GitHub.
+    if (fs.existsSync(LOCAL_BUNDLED_IOCS)) {
+      try {
+        const stat = fs.statSync(LOCAL_BUNDLED_IOCS);
+        if (stat.size >= MIN_IOCS_SIZE) {
+          return (_ensureIocsResult = true);
+        }
+      } catch { /* fall through to download */ }
     }
 
     // Offline / CI escape hatch: cache is empty/missing AND we don't want to
@@ -157,7 +181,7 @@ async function ensureIOCs() {
     // the cache check so a healthy cache still returns true even in offline
     // mode (otherwise tests that pre-populate the cache would falsely fail).
     if (process.env.MUADDIB_NO_REGISTRY_FETCH === '1') {
-      return false;
+      return (_ensureIocsResult = false);
     }
 
     // Download IOCs (messages go to stderr to avoid contaminating JSON/SARIF stdout)
@@ -169,16 +193,21 @@ async function ensureIOCs() {
     if (stat.size < MIN_IOCS_SIZE) {
       try { fs.unlinkSync(IOCS_PATH); } catch {}
       process.stderr.write('[WARN] Downloaded IOC file is too small, using compact IOCs\n');
-      return false;
+      return (_ensureIocsResult = false);
     }
 
     process.stderr.write('[MUADDIB] IOC database ready (' + Math.round(stat.size / 1024 / 1024) + ' MB)\n');
-    return true;
+    return (_ensureIocsResult = true);
   } catch (err) {
     process.stderr.write('[WARN] Could not download IOC database: ' + err.message + '\n');
-    process.stderr.write('[WARN] Continuing with YAML IOCs only (run "muaddib update" for full coverage)\n');
-    return false;
+    process.stderr.write('[WARN] Continuing with bundled/YAML IOCs (run "muaddib update" for full coverage)\n');
+    return (_ensureIocsResult = false);
   }
+}
+
+// Test hook — lets the test suite reset the memoization without spawning a fresh process.
+function _resetEnsureIocsForTests() {
+  _ensureIocsResult = null;
 }
 
 module.exports = {
@@ -188,5 +217,6 @@ module.exports = {
   IOCS_URL,
   IOCS_PATH,
   HOME_DATA_DIR,
-  MIN_IOCS_SIZE
+  MIN_IOCS_SIZE,
+  _resetEnsureIocsForTests
 };

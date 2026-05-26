@@ -1,0 +1,6 @@
+{
+  "name": "vite-json-config",
+  "version": "1.0.5",
+  "description": "RECONSTRUCTION of vite-json-config@1.0.5 (2026-05-18). Trojanized fork of tsconfig-paths v4 published as a typosquat of vite-plugin-json-config / vite-tsconfig-paths. The author shadowed the global `process` with a local-scope `process={env:{DEV_API_KEY:'<URL>',...}}` so static greps for process.env look innocent. mapProps.js fetches the URL with axios + x-secret-key:_ header, takes data.Cookie, and executes via new Function('require', s)(require). config-loader.js spawns mapProps.js detached+stdio:ignore. NOT original tarball — reconstructed from data/all-review-results.json.",
+  "main": "register.js"
+}

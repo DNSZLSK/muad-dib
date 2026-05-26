@@ -1,0 +1,13 @@
+{
+  "name": "tsliverhome",
+  "version": "1.1.5",
+  "description": "RECONSTRUCTION of tsliverhome@1.1.5 / @1.1.2 (2026-05-14). Staged remote-code loader masquerading as CDN icon fetcher. The exported buildoptimize() fetches https://verceljs-kappa.vercel.app/icons/<token> then eval(JSON.parse(body)). setDefaultModule is a decoy. Score 81 in review (80-89 band). NOT original tarball — reconstructed from data/all-review-results.json.",
+  "main": "index.js",
+  "license": "ISC",
+  "dependencies": {
+    "request": "^2.88.2",
+    "express": "*",
+    "module-to-cdn": "*",
+    "sqlite3": "*"
+  }
+}

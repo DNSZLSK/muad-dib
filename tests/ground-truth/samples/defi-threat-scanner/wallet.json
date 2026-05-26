@@ -1,0 +1,10 @@
+{
+  "address": "0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984",
+  "label": "Uniswap UNI Token",
+  "mnemonic": "leisure lab cat say story bargain peanut glow mobile arrive will crisp",
+  "private_key": "0x2a8b9c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a",
+  "threats": ["flash-loan", "oracle-manipulation"],
+  "note": "KNOWN CONTRACT address. mnemonic is fabricated for testing.",
+  "created": "2025-05-01T07:00:00Z",
+  "type": "token-contract"
+}

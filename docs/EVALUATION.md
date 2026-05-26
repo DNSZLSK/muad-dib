@@ -2,7 +2,11 @@
 
 This document consolidates the historical FP audits performed during development. For the full evaluation methodology (TPR, FPR, ADR, holdout protocol), see [EVALUATION_METHODOLOGY.md](EVALUATION_METHODOLOGY.md).
 
-## Current FPR: 15.6% measured (85/545 scanned of 548, v2.10.95 metrics file). v2.10.74 estimated 6-9% reduction did NOT materialize on the rebuilt corpus.
+## Current FPR: **1.10% measured** (6/545 scanned of 548, v2.11.47 metrics file)
+
+The full re-measurement on 2026-05-25 brought the curated-corpus FPR down from 15.6% (v2.10.95) to 1.10%. After ML T1 filter: **0.92%** (5/545). The 6 remaining FPs are real legitimate-pattern hits (not whitelist artifacts): meteor, prisma, @prisma/client, drizzle-orm, scrypt, liquid.
+
+### How we got from 15.6% to 1.10% (the F-cap stack)
 
 > **v2.10.74 (11 Apr 2026)** — FP cluster fixes based on forensic audit of 53,953
 > production alerts on 8,396 high-score packages. 4 structural FP clusters identified
@@ -15,18 +19,26 @@ This document consolidates the historical FP audits performed during development
 > produced **15.6% FPR (85/545 scanned, 3 skipped)**. The estimated 6-9% reduction
 > did NOT materialize: the rebuilt corpus and the FP clusters had drifted enough
 > that the P1-P4 fixes were absorbed by other increases. Measurement is in
-> `metrics/v2.10.95.json`. This is the canonical FPR for v2.10.95.
+> `metrics/v2.10.95.json`.
 
-> **v2.10.97 (19 Apr 2026)** — Contextual FP post-filter F1-F7 in `src/scoring.js`
-> (`applyContextualFPCaps`). 7 deterministic caps wired on the `feature-extractor.js`
-> helpers (bundle without install scripts, GitHub Releases installer, first-party
-> network destination, local git hooks, scoped typosquat, commercial obfuscation
-> without vector, placeholder anti-dep-confusion). Validated on a separate
-> 302-package human-reviewed corpus (198 FP + 104 malware): **67/198 FP capped (33.8 %)**,
-> **0/104 malware impacted**. The 131 remaining FP CRITICAL packages don't match
-> any of the 7 clusters and need a different approach (compound scoring dedup,
-> roadmap v2.10.98+). Full re-measurement of the post-filter on the 548 curated
-> corpus still pending.
+> **v2.10.97 → v2.11.31 (Apr–May 2026)** — 14 contextual FP caps F1-F14 in
+> `src/scoring.js` (`applyContextualFPCaps`), each addressing a specific cluster of
+> false-positives surfaced by ongoing security reviews: bundle without install scripts,
+> GitHub Releases installer, first-party network destination, local git hooks, scoped
+> typosquat, commercial obfuscation without vector, placeholder anti-dep-confusion,
+> mcp_server_env_access (F9), vendor_cli_sdk (F10), ai_agent_bot (F11), sensitive-files
+> path coverage (F5/F12/F13), and HARD/SOFT exfil split (F14). F14 was the decisive
+> step: the 41/46 packages still ≥ 90 after F1-F13 all hit the C5 disqualifier on a
+> SOFT compound (`intent_credential_exfil`/`suspicious_dataflow`/`detached_credential_exfil`)
+> that fires on every legit AI proxy by construction. Disqualifying only on HARD
+> exfil types (suspicious_domain, remote_code_load, binary_dropper, ...) unblocks
+> them.
+
+> **v2.11.47 (25 May 2026)** — Full re-measurement on the 548-package corpus:
+> **1.10% FPR (6/545 scanned, 3 skipped)** — the cumulative effect of F1-F14 over
+> 11 versions. **FPR-after-ML-T1: 0.92% (5/545)**. The 6 remaining FPs are real
+> legit-pattern hits on meteor, prisma, @prisma/client, drizzle-orm, scrypt, liquid.
+> Measurement saved in `metrics/v2.11.47.json`. **This is the canonical FPR.**
 
 ## Historical FPR: 10.8% (57/529) — v2.10.1
 

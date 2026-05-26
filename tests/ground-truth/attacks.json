@@ -7,20 +7,36 @@
       "version": "3.3.6",
       "ecosystem": "npm",
       "year": 2018,
-      "vector": ["dependency_injection", "obfuscation", "crypto_theft"],
+      "vector": [
+        "dependency_injection",
+        "obfuscation",
+        "crypto_theft"
+      ],
       "published_at": "2018-09-09",
       "disclosed_at": "2018-11-26",
       "severity": "CRITICAL",
       "description": "Malicious maintainer added flatmap-stream dependency containing AES-encrypted payload targeting Copay bitcoin wallet. Used hex-encoded strings, require('crypto').createDecipher, and module._compile() to execute decrypted code in memory.",
       "source": "https://blog.npmjs.org/post/180565383195/details-about-the-event-stream-incident",
-      "mitre": ["T1195.002", "T1027", "T1059.007"],
+      "mitre": [
+        "T1195.002",
+        "T1027",
+        "T1059.007"
+      ],
       "sample_dir": "samples/event-stream/",
-      "expected_detections": ["known_malicious_package"],
+      "expected_detections": [
+        "known_malicious_package"
+      ],
       "expected": {
         "min_threats": 1,
-        "rules": ["MUADDIB-DEP-001"],
-        "severities": ["CRITICAL"],
-        "scanners": ["package"]
+        "rules": [
+          "MUADDIB-DEP-001"
+        ],
+        "severities": [
+          "CRITICAL"
+        ],
+        "scanners": [
+          "package"
+        ]
       }
     },
     {
@@ -29,20 +45,38 @@
       "version": "0.7.29",
       "ecosystem": "npm",
       "year": 2021,
-      "vector": ["account_hijack", "preinstall_script", "crypto_miner", "credential_stealer"],
+      "vector": [
+        "account_hijack",
+        "preinstall_script",
+        "crypto_miner",
+        "credential_stealer"
+      ],
       "published_at": "2021-10-22",
       "disclosed_at": "2021-10-22",
       "severity": "CRITICAL",
       "description": "Hijacked npm account published version with preinstall script that downloads XMRig crypto miner (Linux) and DanaBot password stealer (Windows). Uses curl/wget/certutil fallback chain. Geofences out CIS countries on Linux.",
       "source": "https://github.com/advisories/GHSA-pjwm-rvh2-c87w",
-      "mitre": ["T1195.002", "T1059.007", "T1059.004", "T1496"],
+      "mitre": [
+        "T1195.002",
+        "T1059.007",
+        "T1059.004",
+        "T1496"
+      ],
       "sample_dir": "samples/ua-parser-js/",
-      "expected_detections": ["lifecycle_script"],
+      "expected_detections": [
+        "lifecycle_script"
+      ],
       "expected": {
         "min_threats": 1,
-        "rules": ["MUADDIB-PKG-001"],
-        "severities": ["MEDIUM"],
-        "scanners": ["package"]
+        "rules": [
+          "MUADDIB-PKG-001"
+        ],
+        "severities": [
+          "MEDIUM"
+        ],
+        "scanners": [
+          "package"
+        ]
       },
       "gaps": "Shell scripts (.sh/.bat) and child_process exec/spawn in preinstall.js not flagged by AST scanner. Could improve with shell file scanning and child_process pattern detection."
     },
@@ -52,20 +86,42 @@
       "version": "2.0.3",
       "ecosystem": "npm",
       "year": 2021,
-      "vector": ["account_hijack", "preinstall_script", "obfuscation", "credential_stealer"],
+      "vector": [
+        "account_hijack",
+        "preinstall_script",
+        "obfuscation",
+        "credential_stealer"
+      ],
       "published_at": "2021-11-04",
       "disclosed_at": "2021-11-04",
       "severity": "CRITICAL",
       "description": "Hijacked npm account published version with preinstall script and obfuscated compile.js (obfuscator.io _0x pattern). Windows payload downloads DanaBot stealer DLL via curl/wget/certutil, registers with regsvr32.",
       "source": "https://github.com/advisories/GHSA-73qr-pfmq-6rp8",
-      "mitre": ["T1195.002", "T1059.007", "T1027", "T1218.010"],
+      "mitre": [
+        "T1195.002",
+        "T1059.007",
+        "T1027",
+        "T1218.010"
+      ],
       "sample_dir": "samples/coa/",
-      "expected_detections": ["lifecycle_script", "js_obfuscation_pattern"],
+      "expected_detections": [
+        "lifecycle_script",
+        "js_obfuscation_pattern"
+      ],
       "expected": {
         "min_threats": 2,
-        "rules": ["MUADDIB-PKG-001", "MUADDIB-ENTROPY-003"],
-        "severities": ["MEDIUM", "HIGH"],
-        "scanners": ["package", "entropy"]
+        "rules": [
+          "MUADDIB-PKG-001",
+          "MUADDIB-ENTROPY-003"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH"
+        ],
+        "scanners": [
+          "package",
+          "entropy"
+        ]
       }
     },
     {
@@ -74,20 +130,37 @@
       "version": "10.1.1",
       "ecosystem": "npm",
       "year": 2022,
-      "vector": ["protestware", "geolocation_wiper", "base64_obfuscation"],
+      "vector": [
+        "protestware",
+        "geolocation_wiper",
+        "base64_obfuscation"
+      ],
       "published_at": "2022-03-07",
       "disclosed_at": "2022-03-15",
       "severity": "CRITICAL",
       "description": "Maintainer added geolocation-based file wiper (dao/ssl-geospec.js) that checks IP against Russia/Belarus via API, then recursively overwrites all files with heart emoji. Also added peacenotwar dependency that drops text file on Desktop.",
       "source": "https://github.com/advisories/GHSA-97m3-w2cp-4xx6",
-      "mitre": ["T1195.002", "T1485", "T1614.001", "T1027"],
+      "mitre": [
+        "T1195.002",
+        "T1485",
+        "T1614.001",
+        "T1027"
+      ],
       "sample_dir": "samples/node-ipc/",
-      "expected_detections": ["known_malicious_package"],
+      "expected_detections": [
+        "known_malicious_package"
+      ],
       "expected": {
         "min_threats": 1,
-        "rules": ["MUADDIB-DEP-001"],
-        "severities": ["CRITICAL"],
-        "scanners": ["package"]
+        "rules": [
+          "MUADDIB-DEP-001"
+        ],
+        "severities": [
+          "CRITICAL"
+        ],
+        "scanners": [
+          "package"
+        ]
       },
       "gaps": "ssl-geospec.js base64 obfuscation (Buffer.from + base64), https.get network call, and fs.writeFile destructive pattern not detected by AST/entropy scanners. ESM import syntax may not be parsed. Could improve with base64 string detection and network+fs combined pattern analysis."
     },
@@ -97,13 +170,20 @@
       "version": "1.4.1",
       "ecosystem": "npm",
       "year": 2022,
-      "vector": ["maintainer_sabotage", "infinite_loop", "denial_of_service"],
+      "vector": [
+        "maintainer_sabotage",
+        "infinite_loop",
+        "denial_of_service"
+      ],
       "published_at": "2022-01-07",
       "disclosed_at": "2022-01-08",
       "severity": "HIGH",
       "description": "Maintainer self-sabotage: added infinite for-loop (i=666 to Infinity) printing zalgo-encoded text to stdout, causing DoS on any application requiring colors. Also added American flag ASCII art module.",
       "source": "https://github.com/Marak/colors.js/commit/074a0f8",
-      "mitre": ["T1195.002", "T1499"],
+      "mitre": [
+        "T1195.002",
+        "T1499"
+      ],
       "sample_dir": "samples/colors/",
       "expected_detections": [],
       "expected": {
@@ -120,20 +200,37 @@
       "version": "0.1.1",
       "ecosystem": "npm",
       "year": 2018,
-      "vector": ["obfuscation", "crypto_theft", "encrypted_payload", "dynamic_compilation"],
+      "vector": [
+        "obfuscation",
+        "crypto_theft",
+        "encrypted_payload",
+        "dynamic_compilation"
+      ],
       "published_at": "2018-09-09",
       "disclosed_at": "2018-11-26",
       "severity": "CRITICAL",
       "description": "AES-encrypted payload targeting Copay bitcoin wallet. Hex-encoded require paths, crypto.createDecipher for AES-256-CBC decryption, module._compile() for in-memory code execution from encrypted data file.",
       "source": "https://blog.npmjs.org/post/180565383195/details-about-the-event-stream-incident",
-      "mitre": ["T1027", "T1059.007", "T1560"],
+      "mitre": [
+        "T1027",
+        "T1059.007",
+        "T1560"
+      ],
       "sample_dir": "samples/flatmap-stream/",
-      "expected_detections": ["obfuscation_detected", "suspicious_dataflow"],
+      "expected_detections": [
+        "obfuscation_detected",
+        "suspicious_dataflow"
+      ],
       "expected": {
         "min_threats": 1,
         "rules": [],
-        "severities": ["HIGH"],
-        "scanners": ["ast", "obfuscation"]
+        "severities": [
+          "HIGH"
+        ],
+        "scanners": [
+          "ast",
+          "obfuscation"
+        ]
       }
     },
     {
@@ -142,20 +239,41 @@
       "version": "3.7.2",
       "ecosystem": "npm",
       "year": 2018,
-      "vector": ["account_hijack", "postinstall_script", "credential_theft", "npmrc_exfiltration"],
+      "vector": [
+        "account_hijack",
+        "postinstall_script",
+        "credential_theft",
+        "npmrc_exfiltration"
+      ],
       "published_at": "2018-07-12",
       "disclosed_at": "2018-07-12",
       "severity": "CRITICAL",
       "description": "Hijacked npm account published version with postinstall script that reads ~/.npmrc, extracts _authToken, and exfiltrates via HTTPS POST to histats.com. First major npm credential theft incident.",
       "source": "https://eslint.org/blog/2018/07/postmortem-for-malicious-package-publishes",
-      "mitre": ["T1195.002", "T1552.001", "T1041"],
+      "mitre": [
+        "T1195.002",
+        "T1552.001",
+        "T1041"
+      ],
       "sample_dir": "samples/eslint-scope/",
-      "expected_detections": ["lifecycle_script", "env_access", "suspicious_dataflow"],
+      "expected_detections": [
+        "lifecycle_script",
+        "env_access",
+        "suspicious_dataflow"
+      ],
       "expected": {
         "min_threats": 2,
-        "rules": ["MUADDIB-PKG-001"],
-        "severities": ["MEDIUM", "HIGH"],
-        "scanners": ["package", "ast"]
+        "rules": [
+          "MUADDIB-PKG-001"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH"
+        ],
+        "scanners": [
+          "package",
+          "ast"
+        ]
       }
     },
     {
@@ -164,20 +282,41 @@
       "version": "1.3.0",
       "ecosystem": "npm",
       "year": 2021,
-      "vector": ["account_hijack", "preinstall_script", "obfuscation", "credential_stealer"],
+      "vector": [
+        "account_hijack",
+        "preinstall_script",
+        "obfuscation",
+        "credential_stealer"
+      ],
       "published_at": "2021-11-04",
       "disclosed_at": "2021-11-04",
       "severity": "CRITICAL",
       "description": "Same campaign as coa (GT-003). Hijacked npm account, preinstall script with obfuscated compile.js (obfuscator.io pattern), downloads DanaBot DLL via curl/certutil. Uses cmd.exe /c compile.bat for execution.",
       "source": "https://github.com/advisories/GHSA-g2q5-5433-rhkg",
-      "mitre": ["T1195.002", "T1059.007", "T1027", "T1218.010"],
+      "mitre": [
+        "T1195.002",
+        "T1059.007",
+        "T1027",
+        "T1218.010"
+      ],
       "sample_dir": "samples/rc/",
-      "expected_detections": ["lifecycle_script", "js_obfuscation_pattern"],
+      "expected_detections": [
+        "lifecycle_script",
+        "js_obfuscation_pattern"
+      ],
       "expected": {
         "min_threats": 2,
-        "rules": ["MUADDIB-PKG-001"],
-        "severities": ["MEDIUM", "HIGH"],
-        "scanners": ["package", "entropy"]
+        "rules": [
+          "MUADDIB-PKG-001"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH"
+        ],
+        "scanners": [
+          "package",
+          "entropy"
+        ]
       }
     },
     {
@@ -186,13 +325,20 @@
       "version": "6.6.6",
       "ecosystem": "npm",
       "year": 2022,
-      "vector": ["maintainer_sabotage", "infinite_loop", "denial_of_service"],
+      "vector": [
+        "maintainer_sabotage",
+        "infinite_loop",
+        "denial_of_service"
+      ],
       "published_at": "2022-01-05",
       "disclosed_at": "2022-01-06",
       "severity": "HIGH",
       "description": "Maintainer self-sabotage, same actor as colors. Infinite for-loop (i=666 to Infinity) printing zalgo-encoded text. DoS protestware, not data exfiltration.",
       "source": "https://github.com/Marak/faker.js/blob/master/index.js",
-      "mitre": ["T1195.002", "T1499"],
+      "mitre": [
+        "T1195.002",
+        "T1499"
+      ],
       "sample_dir": "samples/faker/",
       "expected_detections": [],
       "expected": {
@@ -209,20 +355,38 @@
       "version": "1.95.6",
       "ecosystem": "npm",
       "year": 2024,
-      "vector": ["account_hijack", "prototype_hooking", "crypto_key_theft", "exfiltration"],
+      "vector": [
+        "account_hijack",
+        "prototype_hooking",
+        "crypto_key_theft",
+        "exfiltration"
+      ],
       "published_at": "2024-12-03",
       "disclosed_at": "2024-12-03",
       "severity": "CRITICAL",
       "description": "Hijacked @solana/web3.js npm account. Backdoor hooked Keypair class to exfiltrate private keys via HTTPS POST to sol-rpc.xyz. Used base64 encoding for key data and addToQueue() batching.",
       "source": "https://socket.dev/blog/supply-chain-attack-solana-web3-js",
-      "mitre": ["T1195.002", "T1056", "T1041"],
+      "mitre": [
+        "T1195.002",
+        "T1056",
+        "T1041"
+      ],
       "sample_dir": "samples/solana-web3js/",
-      "expected_detections": ["suspicious_dataflow", "env_access"],
+      "expected_detections": [
+        "suspicious_dataflow",
+        "env_access"
+      ],
       "expected": {
         "min_threats": 2,
         "rules": [],
-        "severities": ["MEDIUM", "HIGH"],
-        "scanners": ["ast", "dataflow"]
+        "severities": [
+          "MEDIUM",
+          "HIGH"
+        ],
+        "scanners": [
+          "ast",
+          "dataflow"
+        ]
       }
     },
     {
@@ -231,20 +395,40 @@
       "version": "5.6.1",
       "ecosystem": "npm",
       "year": 2025,
-      "vector": ["account_hijack", "prototype_hooking", "wallet_interception", "exfiltration"],
+      "vector": [
+        "account_hijack",
+        "prototype_hooking",
+        "wallet_interception",
+        "exfiltration"
+      ],
       "published_at": "2025-01-15",
       "disclosed_at": "2025-01-15",
       "severity": "CRITICAL",
       "description": "Compromised chalk/debug packages. globalThis.fetch and XMLHttpRequest.prototype hooking to intercept Ethereum transactions (eth_sendTransaction, eth_signTransaction). Exfiltration to cdn-gstatic.com.se.",
       "source": "https://socket.dev/blog/compromised-npm-packages-chalk-debug-steal-cryptocurrency",
-      "mitre": ["T1195.002", "T1056", "T1185", "T1041"],
+      "mitre": [
+        "T1195.002",
+        "T1056",
+        "T1185",
+        "T1041"
+      ],
       "sample_dir": "samples/chalk-compromised/",
-      "expected_detections": ["prototype_hook", "suspicious_dataflow"],
+      "expected_detections": [
+        "prototype_hook",
+        "suspicious_dataflow"
+      ],
       "expected": {
         "min_threats": 2,
-        "rules": ["MUADDIB-AST-017"],
-        "severities": ["HIGH", "CRITICAL"],
-        "scanners": ["ast"]
+        "rules": [
+          "MUADDIB-AST-017"
+        ],
+        "severities": [
+          "HIGH",
+          "CRITICAL"
+        ],
+        "scanners": [
+          "ast"
+        ]
       }
     },
     {
@@ -253,20 +437,37 @@
       "version": "1.1.7",
       "ecosystem": "npm",
       "year": 2023,
-      "vector": ["account_hijack", "cdn_injection", "wallet_drainer", "dynamic_eval"],
+      "vector": [
+        "account_hijack",
+        "cdn_injection",
+        "wallet_drainer",
+        "dynamic_eval"
+      ],
       "published_at": "2023-12-14",
       "disclosed_at": "2023-12-14",
       "severity": "CRITICAL",
       "description": "Compromised @ledgerhq/connect-kit npm account. Injected script loading from attacker CDN via document.createElement('script'). Downloaded wallet drainer that hooks provider.request to redirect eth_sendTransaction to attacker wallet. Used new Function() for dynamic eval.",
       "source": "https://www.ledger.com/blog/a-]letter-from-ledger-chairman-ceo-pascal-gauthier-regarding-ledger-connect-kit-exploit",
-      "mitre": ["T1195.002", "T1059.007", "T1185"],
+      "mitre": [
+        "T1195.002",
+        "T1059.007",
+        "T1185"
+      ],
       "sample_dir": "samples/ledgerhq-connect-kit/",
-      "expected_detections": ["dangerous_call_function", "suspicious_dataflow"],
+      "expected_detections": [
+        "dangerous_call_function",
+        "suspicious_dataflow"
+      ],
       "expected": {
         "min_threats": 2,
         "rules": [],
-        "severities": ["MEDIUM", "HIGH"],
-        "scanners": ["ast"]
+        "severities": [
+          "MEDIUM",
+          "HIGH"
+        ],
+        "scanners": [
+          "ast"
+        ]
       }
     },
     {
@@ -275,20 +476,36 @@
       "version": "2.0.7",
       "ecosystem": "npm",
       "year": 2024,
-      "vector": ["account_hijack", "wallet_drainer", "erc20_approve"],
+      "vector": [
+        "account_hijack",
+        "wallet_drainer",
+        "erc20_approve"
+      ],
       "published_at": "2024-10-30",
       "disclosed_at": "2024-10-30",
       "severity": "CRITICAL",
       "description": "Compromised @lottiefiles/lottie-player. Injected wallet drainer using window.ethereum.request for eth_requestAccounts, wallet address exfiltration to castleservices01.com, ERC-20 approve transaction to drain tokens.",
       "source": "https://blog.lottiefiles.com/what-happened-on-oct-30th-2024/",
-      "mitre": ["T1195.002", "T1185", "T1041"],
+      "mitre": [
+        "T1195.002",
+        "T1185",
+        "T1041"
+      ],
       "sample_dir": "samples/lottie-player/",
-      "expected_detections": ["suspicious_dataflow"],
+      "expected_detections": [
+        "suspicious_dataflow"
+      ],
       "expected": {
         "min_threats": 1,
         "rules": [],
-        "severities": ["MEDIUM", "HIGH"],
-        "scanners": ["ast", "dataflow"]
+        "severities": [
+          "MEDIUM",
+          "HIGH"
+        ],
+        "scanners": [
+          "ast",
+          "dataflow"
+        ]
       }
     },
     {
@@ -297,20 +514,44 @@
       "version": "1.0.0",
       "ecosystem": "npm",
       "year": 2025,
-      "vector": ["worm", "self_replication", "credential_theft", "token_exfiltration"],
+      "vector": [
+        "worm",
+        "self_replication",
+        "credential_theft",
+        "token_exfiltration"
+      ],
       "published_at": "2025-03-01",
       "disclosed_at": "2025-03-01",
       "severity": "CRITICAL",
       "description": "Self-replicating npm worm. Preinstall script harvests .npmrc tokens and env vars (NPM_TOKEN, GITHUB_TOKEN, AWS keys), exfiltrates to euw.bfrntend.com, then self-replicates via npm publish to infect more packages.",
       "source": "https://socket.dev/blog/shai-hulud-npm-worm",
-      "mitre": ["T1195.002", "T1552.001", "T1041", "T1525"],
+      "mitre": [
+        "T1195.002",
+        "T1552.001",
+        "T1041",
+        "T1525"
+      ],
       "sample_dir": "samples/shai-hulud/",
-      "expected_detections": ["lifecycle_script", "env_access", "suspicious_dataflow"],
+      "expected_detections": [
+        "lifecycle_script",
+        "env_access",
+        "suspicious_dataflow"
+      ],
       "expected": {
         "min_threats": 3,
-        "rules": ["MUADDIB-PKG-001"],
-        "severities": ["MEDIUM", "HIGH", "CRITICAL"],
-        "scanners": ["package", "ast", "dataflow"]
+        "rules": [
+          "MUADDIB-PKG-001"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH",
+          "CRITICAL"
+        ],
+        "scanners": [
+          "package",
+          "ast",
+          "dataflow"
+        ]
       }
     },
     {
@@ -319,20 +560,47 @@
       "version": "1.0.0",
       "ecosystem": "npm",
       "year": 2024,
-      "vector": ["apt", "multi_stage", "credential_theft", "ssh_theft", "crypto_wallet_theft"],
+      "vector": [
+        "apt",
+        "multi_stage",
+        "credential_theft",
+        "ssh_theft",
+        "crypto_wallet_theft"
+      ],
       "published_at": "2024-06-01",
       "disclosed_at": "2024-11-01",
       "severity": "CRITICAL",
       "description": "North Korean APT campaign (Lazarus). Multi-stage attack: preinstall fingerprinting, SSH key harvesting (~/.ssh/id_rsa, id_ed25519), crypto wallet scanning, env token theft, second-stage payload download + exec.",
       "source": "https://unit42.paloaltonetworks.com/two-campaigns-by-north-korea-bad-actors-target-job-seekers/",
-      "mitre": ["T1195.002", "T1552.004", "T1059.007", "T1041", "T1105"],
+      "mitre": [
+        "T1195.002",
+        "T1552.004",
+        "T1059.007",
+        "T1041",
+        "T1105"
+      ],
       "sample_dir": "samples/contagious-interview/",
-      "expected_detections": ["lifecycle_script", "env_access", "suspicious_dataflow", "dangerous_call_function"],
+      "expected_detections": [
+        "lifecycle_script",
+        "env_access",
+        "suspicious_dataflow",
+        "dangerous_call_function"
+      ],
       "expected": {
         "min_threats": 3,
-        "rules": ["MUADDIB-PKG-001"],
-        "severities": ["MEDIUM", "HIGH", "CRITICAL"],
-        "scanners": ["package", "ast", "dataflow"]
+        "rules": [
+          "MUADDIB-PKG-001"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH",
+          "CRITICAL"
+        ],
+        "scanners": [
+          "package",
+          "ast",
+          "dataflow"
+        ]
       }
     },
     {
@@ -341,20 +609,40 @@
       "version": "1.0.0",
       "ecosystem": "npm",
       "year": 2024,
-      "vector": ["typosquat", "reverse_shell", "postinstall_script"],
+      "vector": [
+        "typosquat",
+        "reverse_shell",
+        "postinstall_script"
+      ],
       "published_at": "2024-01-01",
       "disclosed_at": "2024-01-01",
       "severity": "CRITICAL",
       "description": "Typosquat of twilio package. Postinstall script opens a reverse shell via net.Socket piped to child_process.spawn('/bin/sh'). Classic reverse shell pattern: client.pipe(sh.stdin), sh.stdout.pipe(client).",
       "source": "https://www.reversinglabs.com/blog/threat-analysis-malicious-npm-packages",
-      "mitre": ["T1195.002", "T1059.004", "T1571"],
+      "mitre": [
+        "T1195.002",
+        "T1059.004",
+        "T1571"
+      ],
       "sample_dir": "samples/twilio-npm/",
-      "expected_detections": ["lifecycle_script", "dangerous_call_function", "suspicious_dataflow"],
+      "expected_detections": [
+        "lifecycle_script",
+        "dangerous_call_function",
+        "suspicious_dataflow"
+      ],
       "expected": {
         "min_threats": 2,
-        "rules": ["MUADDIB-PKG-001"],
-        "severities": ["MEDIUM", "HIGH"],
-        "scanners": ["package", "ast"]
+        "rules": [
+          "MUADDIB-PKG-001"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH"
+        ],
+        "scanners": [
+          "package",
+          "ast"
+        ]
       }
     },
     {
@@ -363,20 +651,40 @@
       "version": "1.0.0",
       "ecosystem": "npm",
       "year": 2024,
-      "vector": ["typosquat", "discord_token_theft", "webhook_exfiltration"],
+      "vector": [
+        "typosquat",
+        "discord_token_theft",
+        "webhook_exfiltration"
+      ],
       "published_at": "2024-01-01",
       "disclosed_at": "2024-01-01",
       "severity": "CRITICAL",
       "description": "Typosquat of noblox.js targeting Roblox developers. Discord token theft from leveldb storage using regex matching, exfiltration via Discord webhook with rich embeds.",
       "source": "https://blog.phylum.io/discord-token-stealers-on-npm/",
-      "mitre": ["T1195.002", "T1539", "T1041"],
+      "mitre": [
+        "T1195.002",
+        "T1539",
+        "T1041"
+      ],
       "sample_dir": "samples/noblox-vps/",
-      "expected_detections": ["lifecycle_script", "env_access", "suspicious_dataflow"],
+      "expected_detections": [
+        "lifecycle_script",
+        "env_access",
+        "suspicious_dataflow"
+      ],
       "expected": {
         "min_threats": 2,
-        "rules": ["MUADDIB-PKG-001"],
-        "severities": ["MEDIUM", "HIGH"],
-        "scanners": ["package", "ast"]
+        "rules": [
+          "MUADDIB-PKG-001"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH"
+        ],
+        "scanners": [
+          "package",
+          "ast"
+        ]
       }
     },
     {
@@ -385,20 +693,39 @@
       "version": "1.0.0",
       "ecosystem": "npm",
       "year": 2024,
-      "vector": ["typosquat", "discord_token_theft", "hex_obfuscation", "webhook_exfiltration"],
+      "vector": [
+        "typosquat",
+        "discord_token_theft",
+        "hex_obfuscation",
+        "webhook_exfiltration"
+      ],
       "published_at": "2024-01-01",
       "disclosed_at": "2024-01-01",
       "severity": "CRITICAL",
       "description": "Typosquat of mathjs. Discord token grabber with hex-encoded strings (Buffer.from hex pattern). Searches leveldb storage for Discord tokens, exfiltrates via Discord webhook.",
       "source": "https://blog.phylum.io/phylum-discovers-npm-package-mathjs-min-contains-discord-token-grabber/",
-      "mitre": ["T1195.002", "T1539", "T1027", "T1041"],
+      "mitre": [
+        "T1195.002",
+        "T1539",
+        "T1027",
+        "T1041"
+      ],
       "sample_dir": "samples/mathjs-min/",
-      "expected_detections": ["obfuscation_detected", "suspicious_dataflow"],
+      "expected_detections": [
+        "obfuscation_detected",
+        "suspicious_dataflow"
+      ],
       "expected": {
         "min_threats": 1,
         "rules": [],
-        "severities": ["MEDIUM", "HIGH"],
-        "scanners": ["ast", "obfuscation"]
+        "severities": [
+          "MEDIUM",
+          "HIGH"
+        ],
+        "scanners": [
+          "ast",
+          "obfuscation"
+        ]
       }
     },
     {
@@ -407,20 +734,43 @@
       "version": "1.0.1",
       "ecosystem": "npm",
       "year": 2026,
-      "vector": ["account_compromise", "device_fingerprint", "wallet_theft", "seed_phrase_theft"],
+      "vector": [
+        "account_compromise",
+        "device_fingerprint",
+        "wallet_theft",
+        "seed_phrase_theft"
+      ],
       "published_at": "2026-02-01",
       "disclosed_at": "2026-02-01",
       "severity": "CRITICAL",
       "description": "Compromised dYdX protocol packages. Device fingerprinting with MD5 hash, multi-wallet harvesting (Ethereum keystore, Solana id.json, MetaMask extension), seed phrase file scanning, HTTPS exfiltration to attacker domain mimicking dydx.",
       "source": "https://socket.dev/blog/malicious-dydx-packages-published-to-npm-and-pypi",
-      "mitre": ["T1195.002", "T1082", "T1552.001", "T1041"],
+      "mitre": [
+        "T1195.002",
+        "T1082",
+        "T1552.001",
+        "T1041"
+      ],
       "sample_dir": "samples/dydx-v4-client/",
-      "expected_detections": ["lifecycle_script", "env_access", "suspicious_dataflow"],
+      "expected_detections": [
+        "lifecycle_script",
+        "env_access",
+        "suspicious_dataflow"
+      ],
       "expected": {
         "min_threats": 2,
-        "rules": ["MUADDIB-PKG-001"],
-        "severities": ["MEDIUM", "HIGH"],
-        "scanners": ["package", "ast", "dataflow"]
+        "rules": [
+          "MUADDIB-PKG-001"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH"
+        ],
+        "scanners": [
+          "package",
+          "ast",
+          "dataflow"
+        ]
       }
     },
     {
@@ -429,20 +779,37 @@
       "version": "1.0.0",
       "ecosystem": "npm",
       "year": 2018,
-      "vector": ["backdoor", "http_header_trigger", "eval_rce", "remote_code_fetch"],
+      "vector": [
+        "backdoor",
+        "http_header_trigger",
+        "eval_rce",
+        "remote_code_fetch"
+      ],
       "published_at": "2018-05-01",
       "disclosed_at": "2018-05-01",
       "severity": "CRITICAL",
       "description": "Hidden backdoor activated via crafted HTTP headers. Base64-decoded header content passed to eval() for RCE. Secondary backdoor fetches remote code via HTTPS and executes with new Function().",
       "source": "https://blog.npmjs.org/post/173526807575/reported-malicious-module-getcookies",
-      "mitre": ["T1059.007", "T1071.001", "T1105"],
+      "mitre": [
+        "T1059.007",
+        "T1071.001",
+        "T1105"
+      ],
       "sample_dir": "samples/getcookies/",
-      "expected_detections": ["dangerous_call_function", "suspicious_dataflow"],
+      "expected_detections": [
+        "dangerous_call_function",
+        "suspicious_dataflow"
+      ],
       "expected": {
         "min_threats": 2,
         "rules": [],
-        "severities": ["HIGH", "CRITICAL"],
-        "scanners": ["ast"]
+        "severities": [
+          "HIGH",
+          "CRITICAL"
+        ],
+        "scanners": [
+          "ast"
+        ]
       }
     },
     {
@@ -451,20 +818,35 @@
       "version": "1.0.0",
       "ecosystem": "npm",
       "year": 2024,
-      "vector": ["cdn_supply_chain", "conditional_redirect", "mobile_targeting", "obfuscation"],
+      "vector": [
+        "cdn_supply_chain",
+        "conditional_redirect",
+        "mobile_targeting",
+        "obfuscation"
+      ],
       "published_at": "2024-06-01",
       "disclosed_at": "2024-06-25",
       "severity": "HIGH",
       "description": "CDN supply chain attack. Acquired polyfill.io domain, injected mobile-only redirects with bot detection, referrer filtering, and delayed execution. Dynamic script injection to typosquat redirect domains.",
       "source": "https://sansec.io/research/polyfill-supply-chain-attack",
-      "mitre": ["T1195.002", "T1204.001", "T1036"],
+      "mitre": [
+        "T1195.002",
+        "T1204.001",
+        "T1036"
+      ],
       "sample_dir": "samples/polyfill-io/",
-      "expected_detections": ["suspicious_dataflow"],
+      "expected_detections": [
+        "suspicious_dataflow"
+      ],
       "expected": {
         "min_threats": 1,
         "rules": [],
-        "severities": ["MEDIUM"],
-        "scanners": ["ast"]
+        "severities": [
+          "MEDIUM"
+        ],
+        "scanners": [
+          "ast"
+        ]
       },
       "gaps": "Browser-only attack (document, window, navigator). AST scanner may not flag browser API patterns as strongly as Node.js patterns."
     },
@@ -474,20 +856,42 @@
       "version": "1.1.6",
       "ecosystem": "npm",
       "year": 2019,
-      "vector": ["social_engineering", "postinstall_script", "credential_theft", "crypto_wallet_theft"],
+      "vector": [
+        "social_engineering",
+        "postinstall_script",
+        "credential_theft",
+        "crypto_wallet_theft"
+      ],
       "published_at": "2019-06-01",
       "disclosed_at": "2019-06-01",
       "severity": "CRITICAL",
       "description": "Social engineering campaign targeting Electron developers. postinstall script harvests .npmrc tokens, env var tokens (NPM_TOKEN, GH_TOKEN, AWS keys), and cryptocurrency wallet files (Bitcoin, Ethereum, Exodus). HTTPS exfiltration to histats.com.",
       "source": "https://blog.npmjs.org/post/185397814280/plot-to-steal-cryptocurrency-foiled-by-the-npm",
-      "mitre": ["T1195.002", "T1552.001", "T1041"],
+      "mitre": [
+        "T1195.002",
+        "T1552.001",
+        "T1041"
+      ],
       "sample_dir": "samples/electron-native-notify/",
-      "expected_detections": ["lifecycle_script", "env_access", "suspicious_dataflow"],
+      "expected_detections": [
+        "lifecycle_script",
+        "env_access",
+        "suspicious_dataflow"
+      ],
       "expected": {
         "min_threats": 2,
-        "rules": ["MUADDIB-PKG-001"],
-        "severities": ["MEDIUM", "HIGH"],
-        "scanners": ["package", "ast", "dataflow"]
+        "rules": [
+          "MUADDIB-PKG-001"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH"
+        ],
+        "scanners": [
+          "package",
+          "ast",
+          "dataflow"
+        ]
       }
     },
     {
@@ -496,20 +900,40 @@
       "version": "3.4.2",
       "ecosystem": "npm",
       "year": 2019,
-      "vector": ["account_takeover", "postinstall_script", "code_injection", "cookie_theft"],
+      "vector": [
+        "account_takeover",
+        "postinstall_script",
+        "code_injection",
+        "cookie_theft"
+      ],
       "published_at": "2019-04-01",
       "disclosed_at": "2019-04-01",
       "severity": "CRITICAL",
       "description": "Account takeover of popular bootstrap-sass package. postinstall script injects cookie-stealing snippet into JS files in project directories (public/static/dist/build). Uses Image beacon for document.cookie exfiltration. Also sends installation beacon to attacker C2.",
       "source": "https://snyk.io/blog/a-malicious-backdoor-in-popular-bootstrap-sass-npm-package/",
-      "mitre": ["T1195.002", "T1059.007", "T1185"],
+      "mitre": [
+        "T1195.002",
+        "T1059.007",
+        "T1185"
+      ],
       "sample_dir": "samples/bootstrap-sass/",
-      "expected_detections": ["lifecycle_script", "suspicious_dataflow"],
+      "expected_detections": [
+        "lifecycle_script",
+        "suspicious_dataflow"
+      ],
       "expected": {
         "min_threats": 2,
-        "rules": ["MUADDIB-PKG-001"],
-        "severities": ["MEDIUM", "HIGH"],
-        "scanners": ["package", "ast"]
+        "rules": [
+          "MUADDIB-PKG-001"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH"
+        ],
+        "scanners": [
+          "package",
+          "ast"
+        ]
       }
     },
     {
@@ -518,20 +942,42 @@
       "version": "2.0.1",
       "ecosystem": "npm",
       "year": 2024,
-      "vector": ["blockchain_c2", "dynamic_eval", "system_fingerprint", "exfiltration"],
+      "vector": [
+        "blockchain_c2",
+        "dynamic_eval",
+        "system_fingerprint",
+        "exfiltration"
+      ],
       "published_at": "2024-01-01",
       "disclosed_at": "2024-01-01",
       "severity": "CRITICAL",
       "description": "Novel blockchain-based C2 technique. Reads Ethereum smart contract via JSON-RPC to retrieve C2 URL (immutable, hard to take down). Fetches and executes remote payload via new Function(). System fingerprinting with HTTPS exfiltration as fallback.",
       "source": "https://checkmarx.com/blog/new-technique-to-hide-malicious-npm-packages-using-ethereum-blockchain/",
-      "mitre": ["T1071.001", "T1059.007", "T1105", "T1082"],
+      "mitre": [
+        "T1071.001",
+        "T1059.007",
+        "T1105",
+        "T1082"
+      ],
       "sample_dir": "samples/haski/",
-      "expected_detections": ["lifecycle_script", "dangerous_call_function", "suspicious_dataflow"],
+      "expected_detections": [
+        "lifecycle_script",
+        "dangerous_call_function",
+        "suspicious_dataflow"
+      ],
       "expected": {
         "min_threats": 2,
-        "rules": ["MUADDIB-PKG-001"],
-        "severities": ["MEDIUM", "HIGH"],
-        "scanners": ["package", "ast"]
+        "rules": [
+          "MUADDIB-PKG-001"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH"
+        ],
+        "scanners": [
+          "package",
+          "ast"
+        ]
       }
     },
     {
@@ -540,20 +986,42 @@
       "version": "1.0.0",
       "ecosystem": "npm",
       "year": 2024,
-      "vector": ["typosquat", "private_key_theft", "env_harvesting", "telegram_exfiltration"],
+      "vector": [
+        "typosquat",
+        "private_key_theft",
+        "env_harvesting",
+        "telegram_exfiltration"
+      ],
       "published_at": "2024-01-01",
       "disclosed_at": "2024-01-01",
       "severity": "CRITICAL",
       "description": "Typosquat targeting Flashbots/Ethereum developers. Harvests private keys from env vars, .env files, and hardhat/truffle config files. Exfiltrates Ethereum private keys to Telegram bot API.",
       "source": "https://socket.dev/blog/typosquatted-flashbots-ethers-provider-bundle-steals-private-keys",
-      "mitre": ["T1195.002", "T1552.001", "T1041"],
+      "mitre": [
+        "T1195.002",
+        "T1552.001",
+        "T1041"
+      ],
       "sample_dir": "samples/flashbots-npm/",
-      "expected_detections": ["lifecycle_script", "env_access", "suspicious_dataflow"],
+      "expected_detections": [
+        "lifecycle_script",
+        "env_access",
+        "suspicious_dataflow"
+      ],
       "expected": {
         "min_threats": 2,
-        "rules": ["MUADDIB-PKG-001"],
-        "severities": ["MEDIUM", "HIGH"],
-        "scanners": ["package", "ast", "dataflow"]
+        "rules": [
+          "MUADDIB-PKG-001"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH"
+        ],
+        "scanners": [
+          "package",
+          "ast",
+          "dataflow"
+        ]
       }
     },
     {
@@ -562,11 +1030,28 @@
       "version": "9.9.9",
       "ecosystem": "npm",
       "year": 2021,
-      "vector": ["dependency_confusion", "dns_exfiltration", "reconnaissance"],
+      "vector": [
+        "dependency_confusion",
+        "dns_exfiltration",
+        "reconnaissance"
+      ],
       "severity": "CRITICAL",
       "source": "https://snyk.io/blog/npm-dependency-confusion-attack-gxm-reference/",
       "sample_dir": "samples/dns-exfil-recon/",
-      "expected": { "min_threats": 2, "rules": ["MUADDIB-PKG-001"], "severities": ["MEDIUM", "HIGH"], "scanners": ["package", "ast"] }
+      "expected": {
+        "min_threats": 2,
+        "rules": [
+          "MUADDIB-PKG-001"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH"
+        ],
+        "scanners": [
+          "package",
+          "ast"
+        ]
+      }
     },
     {
       "id": "GT-027",
@@ -574,11 +1059,29 @@
       "version": "1.0.0",
       "ecosystem": "npm",
       "year": 2025,
-      "vector": ["ssh_backdoor", "authorized_keys_injection", "ssh_key_theft"],
+      "vector": [
+        "ssh_backdoor",
+        "authorized_keys_injection",
+        "ssh_key_theft"
+      ],
       "severity": "CRITICAL",
       "source": "https://github.com/advisories/GHSA-wwg3-329c-vh59",
       "sample_dir": "samples/ssh-authorized-keys/",
-      "expected": { "min_threats": 2, "rules": ["MUADDIB-PKG-001"], "severities": ["MEDIUM", "HIGH"], "scanners": ["package", "ast", "dataflow"] }
+      "expected": {
+        "min_threats": 2,
+        "rules": [
+          "MUADDIB-PKG-001"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH"
+        ],
+        "scanners": [
+          "package",
+          "ast",
+          "dataflow"
+        ]
+      }
     },
     {
       "id": "GT-028",
@@ -586,11 +1089,29 @@
       "version": "1.0.0",
       "ecosystem": "npm",
       "year": 2024,
-      "vector": ["steganography", "jpeg_payload", "dynamic_eval", "detached_process"],
+      "vector": [
+        "steganography",
+        "jpeg_payload",
+        "dynamic_eval",
+        "detached_process"
+      ],
       "severity": "CRITICAL",
       "source": "https://blog.phylum.io/fake-aws-packages-ship-command-and-control-malware-in-jpeg-files/",
       "sample_dir": "samples/jpeg-stego-c2/",
-      "expected": { "min_threats": 2, "rules": ["MUADDIB-PKG-001"], "severities": ["MEDIUM", "HIGH"], "scanners": ["package", "ast"] }
+      "expected": {
+        "min_threats": 2,
+        "rules": [
+          "MUADDIB-PKG-001"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH"
+        ],
+        "scanners": [
+          "package",
+          "ast"
+        ]
+      }
     },
     {
       "id": "GT-029",
@@ -598,11 +1119,28 @@
       "version": "1.0.0",
       "ecosystem": "npm",
       "year": 2024,
-      "vector": ["source_code_theft", "detached_process", "gzip_exfiltration"],
+      "vector": [
+        "source_code_theft",
+        "detached_process",
+        "gzip_exfiltration"
+      ],
       "severity": "CRITICAL",
       "source": "https://blog.phylum.io/targeted-npm-malware-attempts-to-steal-developers-source-code-and-secrets/",
       "sample_dir": "samples/source-code-theft/",
-      "expected": { "min_threats": 2, "rules": ["MUADDIB-PKG-001"], "severities": ["MEDIUM", "HIGH"], "scanners": ["package", "ast"] }
+      "expected": {
+        "min_threats": 2,
+        "rules": [
+          "MUADDIB-PKG-001"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH"
+        ],
+        "scanners": [
+          "package",
+          "ast"
+        ]
+      }
     },
     {
       "id": "GT-030",
@@ -610,11 +1148,28 @@
       "version": "2.0.0",
       "ecosystem": "npm",
       "year": 2024,
-      "vector": ["clipboard_monitor", "private_key_theft", "startup_persistence"],
+      "vector": [
+        "clipboard_monitor",
+        "private_key_theft",
+        "startup_persistence"
+      ],
       "severity": "CRITICAL",
       "source": "https://blog.phylum.io/dormant-npm-package-update-targets-ethereum-private-keys/",
       "sample_dir": "samples/clipboard-hijack/",
-      "expected": { "min_threats": 2, "rules": ["MUADDIB-PKG-001"], "severities": ["MEDIUM", "HIGH"], "scanners": ["package", "ast"] }
+      "expected": {
+        "min_threats": 2,
+        "rules": [
+          "MUADDIB-PKG-001"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH"
+        ],
+        "scanners": [
+          "package",
+          "ast"
+        ]
+      }
     },
     {
       "id": "GT-031",
@@ -622,11 +1177,29 @@
       "version": "99.99.99",
       "ecosystem": "npm",
       "year": 2024,
-      "vector": ["oast_exfiltration", "dependency_confusion", "dns_exfiltration"],
+      "vector": [
+        "oast_exfiltration",
+        "dependency_confusion",
+        "dns_exfiltration"
+      ],
       "severity": "CRITICAL",
       "source": "https://socket.dev/blog/weaponizing-oast-how-malicious-packages-exploit-npm-pypi-and-rubygems",
       "sample_dir": "samples/oast-recon/",
-      "expected": { "min_threats": 2, "rules": ["MUADDIB-PKG-001"], "severities": ["MEDIUM", "HIGH"], "scanners": ["package", "ast", "dataflow"] }
+      "expected": {
+        "min_threats": 2,
+        "rules": [
+          "MUADDIB-PKG-001"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH"
+        ],
+        "scanners": [
+          "package",
+          "ast",
+          "dataflow"
+        ]
+      }
     },
     {
       "id": "GT-032",
@@ -634,11 +1207,26 @@
       "version": "1.0.0",
       "ecosystem": "npm",
       "year": 2024,
-      "vector": ["http_rat", "command_execution", "anti_sandbox", "lock_file"],
+      "vector": [
+        "http_rat",
+        "command_execution",
+        "anti_sandbox",
+        "lock_file"
+      ],
       "severity": "CRITICAL",
       "source": "https://blog.phylum.io/sophisticated-rat-shell-targeting-gulp-projects-on-npm/",
       "sample_dir": "samples/websocket-rat/",
-      "expected": { "min_threats": 1, "rules": [], "severities": ["HIGH", "CRITICAL"], "scanners": ["ast"] }
+      "expected": {
+        "min_threats": 1,
+        "rules": [],
+        "severities": [
+          "HIGH",
+          "CRITICAL"
+        ],
+        "scanners": [
+          "ast"
+        ]
+      }
     },
     {
       "id": "GT-033",
@@ -646,11 +1234,29 @@
       "version": "1.0.0",
       "ecosystem": "npm",
       "year": 2024,
-      "vector": ["ssh_theft", "kubeconfig_theft", "aws_credential_theft"],
+      "vector": [
+        "ssh_theft",
+        "kubeconfig_theft",
+        "aws_credential_theft"
+      ],
       "severity": "CRITICAL",
       "source": "https://blog.phylum.io/sensitive-data-exfiltration-campaign-targets-npm-and-pypi/",
       "sample_dir": "samples/kubeconfig-theft/",
-      "expected": { "min_threats": 2, "rules": ["MUADDIB-PKG-001"], "severities": ["MEDIUM", "HIGH"], "scanners": ["package", "ast", "dataflow"] }
+      "expected": {
+        "min_threats": 2,
+        "rules": [
+          "MUADDIB-PKG-001"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH"
+        ],
+        "scanners": [
+          "package",
+          "ast",
+          "dataflow"
+        ]
+      }
     },
     {
       "id": "GT-034",
@@ -658,11 +1264,29 @@
       "version": "1.0.0",
       "ecosystem": "npm",
       "year": 2024,
-      "vector": ["multi_stage_dropper", "powershell", "xor_decrypt", "rundll32"],
+      "vector": [
+        "multi_stage_dropper",
+        "powershell",
+        "xor_decrypt",
+        "rundll32"
+      ],
       "severity": "CRITICAL",
       "source": "https://blog.phylum.io/crypto-themed-npm-packages-found-delivering-stealthy-malware/",
       "sample_dir": "samples/xor-dll-dropper/",
-      "expected": { "min_threats": 2, "rules": ["MUADDIB-PKG-001"], "severities": ["MEDIUM", "CRITICAL"], "scanners": ["package", "ast"] }
+      "expected": {
+        "min_threats": 2,
+        "rules": [
+          "MUADDIB-PKG-001"
+        ],
+        "severities": [
+          "MEDIUM",
+          "CRITICAL"
+        ],
+        "scanners": [
+          "package",
+          "ast"
+        ]
+      }
     },
     {
       "id": "GT-035",
@@ -670,11 +1294,24 @@
       "version": "1.0.0",
       "ecosystem": "npm",
       "year": 2024,
-      "vector": ["trojanized_library", "form_data_theft", "image_beacon"],
+      "vector": [
+        "trojanized_library",
+        "form_data_theft",
+        "image_beacon"
+      ],
       "severity": "HIGH",
       "source": "https://blog.phylum.io/persistent-npm-campaign-shipping-trojanized-jquery",
       "sample_dir": "samples/trojanized-jquery/",
-      "expected": { "min_threats": 1, "rules": [], "severities": ["MEDIUM"], "scanners": ["ast"] },
+      "expected": {
+        "min_threats": 1,
+        "rules": [],
+        "severities": [
+          "MEDIUM"
+        ],
+        "scanners": [
+          "ast"
+        ]
+      },
       "gaps": "Browser-only patterns (document.addEventListener, Image beacon). Node.js AST scanner may not flag these."
     },
     {
@@ -683,11 +1320,28 @@
       "version": "1.0.0",
       "ecosystem": "npm",
       "year": 2024,
-      "vector": ["electron_injection", "debugger_protocol", "credential_interception"],
+      "vector": [
+        "electron_injection",
+        "debugger_protocol",
+        "credential_interception"
+      ],
       "severity": "CRITICAL",
       "source": "https://research.jfrog.com/post/duer-js-malicious-package/",
       "sample_dir": "samples/discord-electron-inject/",
-      "expected": { "min_threats": 2, "rules": ["MUADDIB-PKG-001"], "severities": ["MEDIUM", "HIGH"], "scanners": ["package", "ast"] }
+      "expected": {
+        "min_threats": 2,
+        "rules": [
+          "MUADDIB-PKG-001"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH"
+        ],
+        "scanners": [
+          "package",
+          "ast"
+        ]
+      }
     },
     {
       "id": "GT-037",
@@ -695,11 +1349,28 @@
       "version": "1.0.0",
       "ecosystem": "npm",
       "year": 2024,
-      "vector": ["crypto_miner", "binary_masquerade", "detached_process"],
+      "vector": [
+        "crypto_miner",
+        "binary_masquerade",
+        "detached_process"
+      ],
       "severity": "CRITICAL",
       "source": "https://blog.phylum.io/cryptocurrency-miner-masquerading-as-gcc-compiler-found-in-npm-package/",
       "sample_dir": "samples/crypto-miner-gcc/",
-      "expected": { "min_threats": 2, "rules": ["MUADDIB-PKG-001"], "severities": ["MEDIUM", "CRITICAL"], "scanners": ["package", "ast"] }
+      "expected": {
+        "min_threats": 2,
+        "rules": [
+          "MUADDIB-PKG-001"
+        ],
+        "severities": [
+          "MEDIUM",
+          "CRITICAL"
+        ],
+        "scanners": [
+          "package",
+          "ast"
+        ]
+      }
     },
     {
       "id": "GT-038",
@@ -707,11 +1378,29 @@
       "version": "1.0.0",
       "ecosystem": "npm",
       "year": 2024,
-      "vector": ["anti_sandbox", "conditional_exfiltration", "network_enum"],
+      "vector": [
+        "anti_sandbox",
+        "conditional_exfiltration",
+        "network_enum"
+      ],
       "severity": "CRITICAL",
       "source": "https://socket.dev/blog/60-malicious-npm-packages-leak-network-and-host-data",
       "sample_dir": "samples/anti-sandbox-evasion/",
-      "expected": { "min_threats": 2, "rules": ["MUADDIB-PKG-001"], "severities": ["MEDIUM", "HIGH"], "scanners": ["package", "ast", "dataflow"] }
+      "expected": {
+        "min_threats": 2,
+        "rules": [
+          "MUADDIB-PKG-001"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH"
+        ],
+        "scanners": [
+          "package",
+          "ast",
+          "dataflow"
+        ]
+      }
     },
     {
       "id": "GT-039",
@@ -719,11 +1408,28 @@
       "version": "1.0.0",
       "ecosystem": "npm",
       "year": 2025,
-      "vector": ["powershell_cradle", "encoded_command", "cobalt_strike"],
+      "vector": [
+        "powershell_cradle",
+        "encoded_command",
+        "cobalt_strike"
+      ],
       "severity": "CRITICAL",
       "source": "https://github.com/advisories/GHSA-6gqx-3gpv-vg7v",
       "sample_dir": "samples/powershell-dropper/",
-      "expected": { "min_threats": 2, "rules": ["MUADDIB-PKG-001"], "severities": ["MEDIUM", "CRITICAL"], "scanners": ["package", "ast"] }
+      "expected": {
+        "min_threats": 2,
+        "rules": [
+          "MUADDIB-PKG-001"
+        ],
+        "severities": [
+          "MEDIUM",
+          "CRITICAL"
+        ],
+        "scanners": [
+          "package",
+          "ast"
+        ]
+      }
     },
     {
       "id": "GT-040",
@@ -731,11 +1437,31 @@
       "version": "1.0.0",
       "ecosystem": "npm",
       "year": 2024,
-      "vector": ["pm2_persistence", "discord_c2", "machine_fingerprint", "env_theft"],
+      "vector": [
+        "pm2_persistence",
+        "discord_c2",
+        "machine_fingerprint",
+        "env_theft"
+      ],
       "severity": "CRITICAL",
       "source": "https://www.zscaler.com/blogs/security-research/malicious-npm-packages-deliver-nodecordrat",
       "sample_dir": "samples/pm2-persistence-rat/",
-      "expected": { "min_threats": 2, "rules": ["MUADDIB-PKG-001"], "severities": ["MEDIUM", "HIGH", "CRITICAL"], "scanners": ["package", "ast", "dataflow"] }
+      "expected": {
+        "min_threats": 2,
+        "rules": [
+          "MUADDIB-PKG-001"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH",
+          "CRITICAL"
+        ],
+        "scanners": [
+          "package",
+          "ast",
+          "dataflow"
+        ]
+      }
     },
     {
       "id": "GT-041",
@@ -743,11 +1469,28 @@
       "version": "1.0.0",
       "ecosystem": "npm",
       "year": 2024,
-      "vector": ["aes_encrypted_c2", "selective_targeting", "delayed_heartbeat"],
+      "vector": [
+        "aes_encrypted_c2",
+        "selective_targeting",
+        "delayed_heartbeat"
+      ],
       "severity": "CRITICAL",
       "source": "https://blog.phylum.io/sophisticated-highly-targeted-attacks-continue-to-plague-npm/",
       "sample_dir": "samples/selective-c2/",
-      "expected": { "min_threats": 2, "rules": ["MUADDIB-PKG-001"], "severities": ["MEDIUM", "HIGH"], "scanners": ["package", "ast"] }
+      "expected": {
+        "min_threats": 2,
+        "rules": [
+          "MUADDIB-PKG-001"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH"
+        ],
+        "scanners": [
+          "package",
+          "ast"
+        ]
+      }
     },
     {
       "id": "GT-042",
@@ -755,11 +1498,31 @@
       "version": "1.0.0",
       "ecosystem": "npm",
       "year": 2025,
-      "vector": ["workflow_injection", "worm", "credential_theft", "github_actions"],
+      "vector": [
+        "workflow_injection",
+        "worm",
+        "credential_theft",
+        "github_actions"
+      ],
       "severity": "CRITICAL",
       "source": "https://www.wiz.io/blog/shai-hulud-2-0-ongoing-supply-chain-attack",
       "sample_dir": "samples/github-actions-inject/",
-      "expected": { "min_threats": 3, "rules": ["MUADDIB-PKG-001"], "severities": ["MEDIUM", "HIGH", "CRITICAL"], "scanners": ["package", "ast", "dataflow"] }
+      "expected": {
+        "min_threats": 3,
+        "rules": [
+          "MUADDIB-PKG-001"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH",
+          "CRITICAL"
+        ],
+        "scanners": [
+          "package",
+          "ast",
+          "dataflow"
+        ]
+      }
     },
     {
       "id": "GT-043",
@@ -767,11 +1530,25 @@
       "version": "3.0.0",
       "ecosystem": "npm",
       "year": 2023,
-      "vector": ["cloud_sdk_impersonation", "credential_injection", "base64_c2"],
+      "vector": [
+        "cloud_sdk_impersonation",
+        "credential_injection",
+        "base64_c2"
+      ],
       "severity": "CRITICAL",
       "source": "https://blog.phylum.io/cloud-provider-credentials-targeted-in-new-pypi-malware-campaign/",
       "sample_dir": "samples/cloud-sdk-credential-inject/",
-      "expected": { "min_threats": 1, "rules": [], "severities": ["HIGH"], "scanners": ["ast", "dataflow"] }
+      "expected": {
+        "min_threats": 1,
+        "rules": [],
+        "severities": [
+          "HIGH"
+        ],
+        "scanners": [
+          "ast",
+          "dataflow"
+        ]
+      }
     },
     {
       "id": "GT-044",
@@ -779,11 +1556,28 @@
       "version": "1.0.0",
       "ecosystem": "npm",
       "year": 2025,
-      "vector": ["electron_patching", "address_replacement", "prototype_hooking"],
+      "vector": [
+        "electron_patching",
+        "address_replacement",
+        "prototype_hooking"
+      ],
       "severity": "CRITICAL",
       "source": "https://thehackernews.com/2025/04/malicious-npm-package-targets-atomic.html",
       "sample_dir": "samples/atomic-wallet-patch/",
-      "expected": { "min_threats": 2, "rules": ["MUADDIB-PKG-001"], "severities": ["MEDIUM", "HIGH"], "scanners": ["package", "ast"] }
+      "expected": {
+        "min_threats": 2,
+        "rules": [
+          "MUADDIB-PKG-001"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH"
+        ],
+        "scanners": [
+          "package",
+          "ast"
+        ]
+      }
     },
     {
       "id": "GT-045",
@@ -791,11 +1585,29 @@
       "version": "1.0.0",
       "ecosystem": "npm",
       "year": 2024,
-      "vector": ["ssh_key_theft", "empire_framework", "dynamic_eval"],
+      "vector": [
+        "ssh_key_theft",
+        "empire_framework",
+        "dynamic_eval"
+      ],
       "severity": "CRITICAL",
       "source": "https://thehackernews.com/2024/01/malicious-npm-packages-exfiltrate-1600.html",
       "sample_dir": "samples/warbeast-ssh-steal/",
-      "expected": { "min_threats": 2, "rules": ["MUADDIB-PKG-001"], "severities": ["MEDIUM", "HIGH"], "scanners": ["package", "ast", "dataflow"] }
+      "expected": {
+        "min_threats": 2,
+        "rules": [
+          "MUADDIB-PKG-001"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH"
+        ],
+        "scanners": [
+          "package",
+          "ast",
+          "dataflow"
+        ]
+      }
     },
     {
       "id": "GT-046",
@@ -803,11 +1615,28 @@
       "version": "9.1.10",
       "ecosystem": "npm",
       "year": 2024,
-      "vector": ["macos_only", "encrypted_exfiltration", "platform_targeting"],
+      "vector": [
+        "macos_only",
+        "encrypted_exfiltration",
+        "platform_targeting"
+      ],
       "severity": "CRITICAL",
       "source": "https://blog.phylum.io/malware-campaign-targets-npm-pypi-and-rubygems-developers/",
       "sample_dir": "samples/macos-targeted/",
-      "expected": { "min_threats": 2, "rules": ["MUADDIB-PKG-001"], "severities": ["MEDIUM", "HIGH"], "scanners": ["package", "ast"] }
+      "expected": {
+        "min_threats": 2,
+        "rules": [
+          "MUADDIB-PKG-001"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH"
+        ],
+        "scanners": [
+          "package",
+          "ast"
+        ]
+      }
     },
     {
       "id": "GT-047",
@@ -815,11 +1644,28 @@
       "version": "1.0.0",
       "ecosystem": "npm",
       "year": 2024,
-      "vector": ["rat_delivery", "multi_stage_obfuscation", "binary_download"],
+      "vector": [
+        "rat_delivery",
+        "multi_stage_obfuscation",
+        "binary_download"
+      ],
       "severity": "CRITICAL",
       "source": "https://github.com/ossf/malicious-packages (MAL-2024-7769)",
       "sample_dir": "samples/quasar-rat-delivery/",
-      "expected": { "min_threats": 2, "rules": ["MUADDIB-PKG-001"], "severities": ["MEDIUM", "CRITICAL"], "scanners": ["package", "ast"] }
+      "expected": {
+        "min_threats": 2,
+        "rules": [
+          "MUADDIB-PKG-001"
+        ],
+        "severities": [
+          "MEDIUM",
+          "CRITICAL"
+        ],
+        "scanners": [
+          "package",
+          "ast"
+        ]
+      }
     },
     {
       "id": "GT-048",
@@ -827,11 +1673,30 @@
       "version": "1.0.0",
       "ecosystem": "npm",
       "year": 2025,
-      "vector": ["keylogger", "vbs_persistence", "browser_data_theft", "slack_exfiltration"],
+      "vector": [
+        "keylogger",
+        "vbs_persistence",
+        "browser_data_theft",
+        "slack_exfiltration"
+      ],
       "severity": "CRITICAL",
       "source": "https://www.sonatype.com/blog/npm-packages-target-solana-devs-drop-keylogging-trojans",
       "sample_dir": "samples/keylogger-persistence/",
-      "expected": { "min_threats": 2, "rules": ["MUADDIB-PKG-001"], "severities": ["MEDIUM", "HIGH"], "scanners": ["package", "ast", "dataflow"] }
+      "expected": {
+        "min_threats": 2,
+        "rules": [
+          "MUADDIB-PKG-001"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH"
+        ],
+        "scanners": [
+          "package",
+          "ast",
+          "dataflow"
+        ]
+      }
     },
     {
       "id": "GT-049",
@@ -839,11 +1704,28 @@
       "version": "1.0.0",
       "ecosystem": "npm",
       "year": 2025,
-      "vector": ["registry_pollution", "auto_publish", "worm_propagation"],
+      "vector": [
+        "registry_pollution",
+        "auto_publish",
+        "worm_propagation"
+      ],
       "severity": "HIGH",
       "source": "https://github.com/ossf/malicious-packages (MAL-2025-67014)",
       "sample_dir": "samples/registry-pollution/",
-      "expected": { "min_threats": 2, "rules": ["MUADDIB-PKG-001"], "severities": ["MEDIUM", "HIGH"], "scanners": ["package", "ast"] }
+      "expected": {
+        "min_threats": 2,
+        "rules": [
+          "MUADDIB-PKG-001"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH"
+        ],
+        "scanners": [
+          "package",
+          "ast"
+        ]
+      }
     },
     {
       "id": "GT-050",
@@ -851,11 +1733,28 @@
       "version": "1.0.8",
       "ecosystem": "npm",
       "year": 2025,
-      "vector": ["unicode_steganography", "google_calendar_c2", "staged_payload"],
+      "vector": [
+        "unicode_steganography",
+        "google_calendar_c2",
+        "staged_payload"
+      ],
       "severity": "CRITICAL",
       "source": "https://thehackernews.com/2025/05/malicious-npm-package-leverages-unicode.html",
       "sample_dir": "samples/calendar-c2-unicode/",
-      "expected": { "min_threats": 2, "rules": ["MUADDIB-PKG-001"], "severities": ["MEDIUM", "HIGH"], "scanners": ["package", "ast"] }
+      "expected": {
+        "min_threats": 2,
+        "rules": [
+          "MUADDIB-PKG-001"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH"
+        ],
+        "scanners": [
+          "package",
+          "ast"
+        ]
+      }
     },
     {
       "id": "GT-051",
@@ -863,11 +1762,29 @@
       "version": "1.0.0",
       "ecosystem": "npm",
       "year": 2025,
-      "vector": ["solana_wallet_theft", "slack_exfiltration", "env_file_theft"],
+      "vector": [
+        "solana_wallet_theft",
+        "slack_exfiltration",
+        "env_file_theft"
+      ],
       "severity": "CRITICAL",
       "source": "https://www.sonatype.com/blog/npm-packages-target-solana-devs-drop-keylogging-trojans",
       "sample_dir": "samples/slack-webhook-exfil/",
-      "expected": { "min_threats": 2, "rules": ["MUADDIB-PKG-001"], "severities": ["MEDIUM", "HIGH"], "scanners": ["package", "ast", "dataflow"] }
+      "expected": {
+        "min_threats": 2,
+        "rules": [
+          "MUADDIB-PKG-001"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH"
+        ],
+        "scanners": [
+          "package",
+          "ast",
+          "dataflow"
+        ]
+      }
     },
     {
       "id": "GT-052",
@@ -875,13 +1792,36 @@
       "version": "1.0.0",
       "ecosystem": "npm",
       "year": 2025,
-      "vector": ["env_charcode_reconstruction", "credential_theft", "obfuscation"],
+      "vector": [
+        "env_charcode_reconstruction",
+        "credential_theft",
+        "obfuscation"
+      ],
       "severity": "CRITICAL",
       "description": "Builds process.env access via String.fromCharCode to evade static analysis, harvests tokens and .npmrc, exfiltrates via HTTP POST.",
       "source": "datadog-benchmark",
-      "mitre": ["T1027", "T1552.001", "T1041"],
+      "mitre": [
+        "T1027",
+        "T1552.001",
+        "T1041"
+      ],
       "sample_dir": "samples/charcode-env-steal/",
-      "expected": { "min_threats": 3, "rules": ["MUADDIB-PKG-001"], "severities": ["MEDIUM", "HIGH", "CRITICAL"], "scanners": ["package", "ast", "dataflow"] }
+      "expected": {
+        "min_threats": 3,
+        "rules": [
+          "MUADDIB-PKG-001"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH",
+          "CRITICAL"
+        ],
+        "scanners": [
+          "package",
+          "ast",
+          "dataflow"
+        ]
+      }
     },
     {
       "id": "GT-053",
@@ -889,13 +1829,36 @@
       "version": "2.0.1",
       "ecosystem": "npm",
       "year": 2025,
-      "vector": ["static_timer_bomb", "credential_theft", "exfiltration"],
+      "vector": [
+        "static_timer_bomb",
+        "credential_theft",
+        "exfiltration"
+      ],
       "severity": "CRITICAL",
       "description": "Delays malicious activity by 30 minutes via setTimeout to evade sandbox analysis, then reads .npmrc and .bash_history and exfiltrates via HTTP.",
       "source": "datadog-benchmark",
-      "mitre": ["T1497.003", "T1552.001", "T1041"],
+      "mitre": [
+        "T1497.003",
+        "T1552.001",
+        "T1041"
+      ],
       "sample_dir": "samples/timer-bomb-exfil/",
-      "expected": { "min_threats": 3, "rules": ["MUADDIB-PKG-001"], "severities": ["MEDIUM", "HIGH", "CRITICAL"], "scanners": ["package", "ast", "dataflow"] }
+      "expected": {
+        "min_threats": 3,
+        "rules": [
+          "MUADDIB-PKG-001"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH",
+          "CRITICAL"
+        ],
+        "scanners": [
+          "package",
+          "ast",
+          "dataflow"
+        ]
+      }
     },
     {
       "id": "GT-054",
@@ -903,13 +1866,33 @@
       "version": "1.0.0",
       "ecosystem": "npm",
       "year": 2025,
-      "vector": ["node_inline_exec", "lifecycle_inline_exec", "env_harvesting"],
+      "vector": [
+        "node_inline_exec",
+        "lifecycle_inline_exec",
+        "env_harvesting"
+      ],
       "severity": "CRITICAL",
       "description": "Uses node -e in preinstall/postinstall to execute inline JavaScript that runs curl|node and exfiltrates process.env.",
       "source": "datadog-benchmark",
-      "mitre": ["T1059.007", "T1041"],
+      "mitre": [
+        "T1059.007",
+        "T1041"
+      ],
       "sample_dir": "samples/node-inline-lifecycle/",
-      "expected": { "min_threats": 3, "rules": ["MUADDIB-PKG-001"], "severities": ["MEDIUM", "HIGH", "CRITICAL"], "scanners": ["package"] }
+      "expected": {
+        "min_threats": 3,
+        "rules": [
+          "MUADDIB-PKG-001"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH",
+          "CRITICAL"
+        ],
+        "scanners": [
+          "package"
+        ]
+      }
     },
     {
       "id": "GT-055",
@@ -917,13 +1900,36 @@
       "version": "3.1.0",
       "ecosystem": "npm",
       "year": 2025,
-      "vector": ["credential_tampering", "credential_theft", "registry_injection"],
+      "vector": [
+        "credential_tampering",
+        "credential_theft",
+        "registry_injection"
+      ],
       "severity": "CRITICAL",
       "description": "Reads .npmrc to steal registry auth tokens, then injects attacker-controlled scoped registry with hardcoded token for supply chain persistence.",
       "source": "datadog-benchmark",
-      "mitre": ["T1552.001", "T1098", "T1195.002"],
+      "mitre": [
+        "T1552.001",
+        "T1098",
+        "T1195.002"
+      ],
       "sample_dir": "samples/npmrc-tampering/",
-      "expected": { "min_threats": 3, "rules": ["MUADDIB-PKG-001"], "severities": ["MEDIUM", "HIGH", "CRITICAL"], "scanners": ["package", "ast", "dataflow"] }
+      "expected": {
+        "min_threats": 3,
+        "rules": [
+          "MUADDIB-PKG-001"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH",
+          "CRITICAL"
+        ],
+        "scanners": [
+          "package",
+          "ast",
+          "dataflow"
+        ]
+      }
     },
     {
       "id": "GT-056",
@@ -931,13 +1937,36 @@
       "version": "1.2.0",
       "ecosystem": "npm",
       "year": 2025,
-      "vector": ["staged_binary_payload", "detached_process", "binary_download"],
+      "vector": [
+        "staged_binary_payload",
+        "detached_process",
+        "binary_download"
+      ],
       "severity": "CRITICAL",
       "description": "Downloads platform-specific binary from CDN, chmod +x, spawns in detached mode. Platform-aware dropper targeting Linux/macOS/Windows.",
       "source": "datadog-benchmark",
-      "mitre": ["T1105", "T1059", "T1036"],
+      "mitre": [
+        "T1105",
+        "T1059",
+        "T1036"
+      ],
       "sample_dir": "samples/binary-dropper/",
-      "expected": { "min_threats": 3, "rules": ["MUADDIB-PKG-001"], "severities": ["MEDIUM", "HIGH", "CRITICAL"], "scanners": ["package", "ast", "dataflow"] }
+      "expected": {
+        "min_threats": 3,
+        "rules": [
+          "MUADDIB-PKG-001"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH",
+          "CRITICAL"
+        ],
+        "scanners": [
+          "package",
+          "ast",
+          "dataflow"
+        ]
+      }
     },
     {
       "id": "GT-057",
@@ -945,13 +1974,36 @@
       "version": "1.0.0",
       "ecosystem": "npm",
       "year": 2025,
-      "vector": ["detached_credential_exfil", "ssh_key_theft", "aws_credential_theft"],
+      "vector": [
+        "detached_credential_exfil",
+        "ssh_key_theft",
+        "aws_credential_theft"
+      ],
       "severity": "CRITICAL",
       "description": "Spawns detached child process that outlives npm install, reads .npmrc, .ssh/id_rsa, .aws/credentials, .docker/config.json and exfiltrates via HTTP.",
       "source": "datadog-benchmark",
-      "mitre": ["T1059.007", "T1552.001", "T1041"],
+      "mitre": [
+        "T1059.007",
+        "T1552.001",
+        "T1041"
+      ],
       "sample_dir": "samples/detached-cred-steal/",
-      "expected": { "min_threats": 3, "rules": ["MUADDIB-PKG-001"], "severities": ["MEDIUM", "HIGH", "CRITICAL"], "scanners": ["package", "ast", "dataflow"] }
+      "expected": {
+        "min_threats": 3,
+        "rules": [
+          "MUADDIB-PKG-001"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH",
+          "CRITICAL"
+        ],
+        "scanners": [
+          "package",
+          "ast",
+          "dataflow"
+        ]
+      }
     },
     {
       "id": "GT-058",
@@ -959,13 +2011,36 @@
       "version": "1.0.0",
       "ecosystem": "npm",
       "year": 2025,
-      "vector": ["env_harvesting", "credential_theft", "exfiltration"],
+      "vector": [
+        "env_harvesting",
+        "credential_theft",
+        "exfiltration"
+      ],
       "severity": "CRITICAL",
       "description": "Uses Object.keys(process.env) to dynamically enumerate all environment variables, filters for tokens/secrets/keys via regex, exfiltrates matches.",
       "source": "datadog-benchmark",
-      "mitre": ["T1082", "T1552.001", "T1041"],
+      "mitre": [
+        "T1082",
+        "T1552.001",
+        "T1041"
+      ],
       "sample_dir": "samples/env-harvest-dynamic/",
-      "expected": { "min_threats": 3, "rules": ["MUADDIB-PKG-001"], "severities": ["MEDIUM", "HIGH", "CRITICAL"], "scanners": ["package", "ast", "dataflow"] }
+      "expected": {
+        "min_threats": 3,
+        "rules": [
+          "MUADDIB-PKG-001"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH",
+          "CRITICAL"
+        ],
+        "scanners": [
+          "package",
+          "ast",
+          "dataflow"
+        ]
+      }
     },
     {
       "id": "GT-059",
@@ -973,13 +2048,35 @@
       "version": "1.0.0",
       "ecosystem": "npm",
       "year": 2025,
-      "vector": ["zlib_inflate_eval", "obfuscation", "dynamic_eval"],
+      "vector": [
+        "zlib_inflate_eval",
+        "obfuscation",
+        "dynamic_eval"
+      ],
       "severity": "CRITICAL",
       "description": "Stores malicious code as base64-encoded zlib-compressed blob, inflates at runtime and eval()s the result to evade static analysis.",
       "source": "datadog-benchmark",
-      "mitre": ["T1027", "T1059.007", "T1140"],
+      "mitre": [
+        "T1027",
+        "T1059.007",
+        "T1140"
+      ],
       "sample_dir": "samples/zlib-eval-payload/",
-      "expected": { "min_threats": 3, "rules": ["MUADDIB-PKG-001"], "severities": ["MEDIUM", "HIGH", "CRITICAL"], "scanners": ["package", "ast"] }
+      "expected": {
+        "min_threats": 3,
+        "rules": [
+          "MUADDIB-PKG-001"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH",
+          "CRITICAL"
+        ],
+        "scanners": [
+          "package",
+          "ast"
+        ]
+      }
     },
     {
       "id": "GT-060",
@@ -987,13 +2084,34 @@
       "version": "1.0.0",
       "ecosystem": "npm",
       "year": 2026,
-      "vector": ["mcp_config_injection", "ai_tool_compromise", "persistence"],
+      "vector": [
+        "mcp_config_injection",
+        "ai_tool_compromise",
+        "persistence"
+      ],
       "severity": "CRITICAL",
       "description": "Writes malicious MCP server entry to Claude/Cursor/VS Code config files. Injected server intercepts AI tool communications and connects to C2.",
       "source": "datadog-benchmark",
-      "mitre": ["T1546", "T1059.007", "T1071.001"],
+      "mitre": [
+        "T1546",
+        "T1059.007",
+        "T1071.001"
+      ],
       "sample_dir": "samples/mcp-config-inject/",
-      "expected": { "min_threats": 2, "rules": ["MUADDIB-PKG-001"], "severities": ["MEDIUM", "CRITICAL"], "scanners": ["package", "ast"] }
+      "expected": {
+        "min_threats": 2,
+        "rules": [
+          "MUADDIB-PKG-001"
+        ],
+        "severities": [
+          "MEDIUM",
+          "CRITICAL"
+        ],
+        "scanners": [
+          "package",
+          "ast"
+        ]
+      }
     },
     {
       "id": "GT-061",
@@ -1001,13 +2119,36 @@
       "version": "1.0.0",
       "ecosystem": "npm",
       "year": 2025,
-      "vector": ["git_dependency_rce", "credential_theft", "ci_cd_targeting"],
+      "vector": [
+        "git_dependency_rce",
+        "credential_theft",
+        "ci_cd_targeting"
+      ],
       "severity": "CRITICAL",
       "description": "Uses git+https dependency URL to bypass npm audit. Prepare script fingerprints CI/CD environment, reads git credentials, exfiltrates to C2.",
       "source": "datadog-benchmark",
-      "mitre": ["T1195.002", "T1552.001", "T1082"],
+      "mitre": [
+        "T1195.002",
+        "T1552.001",
+        "T1082"
+      ],
       "sample_dir": "samples/git-dep-rce/",
-      "expected": { "min_threats": 3, "rules": ["MUADDIB-PKG-001"], "severities": ["MEDIUM", "HIGH", "CRITICAL"], "scanners": ["package", "ast", "dataflow"] }
+      "expected": {
+        "min_threats": 3,
+        "rules": [
+          "MUADDIB-PKG-001"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH",
+          "CRITICAL"
+        ],
+        "scanners": [
+          "package",
+          "ast",
+          "dataflow"
+        ]
+      }
     },
     {
       "id": "GT-062",
@@ -1015,13 +2156,36 @@
       "version": "1.0.0",
       "ecosystem": "npm",
       "year": 2025,
-      "vector": ["reverse_shell", "remote_access", "persistence"],
+      "vector": [
+        "reverse_shell",
+        "remote_access",
+        "persistence"
+      ],
       "severity": "CRITICAL",
       "description": "Creates net.Socket reverse shell connecting to hardcoded IP:port. Pipes stdin/stdout through spawned shell with auto-reconnect on failure.",
       "source": "datadog-benchmark",
-      "mitre": ["T1059.007", "T1571", "T1095"],
+      "mitre": [
+        "T1059.007",
+        "T1571",
+        "T1095"
+      ],
       "sample_dir": "samples/reverse-shell-net/",
-      "expected": { "min_threats": 3, "rules": ["MUADDIB-PKG-001"], "severities": ["MEDIUM", "HIGH", "CRITICAL"], "scanners": ["package", "ast", "dataflow"] }
+      "expected": {
+        "min_threats": 3,
+        "rules": [
+          "MUADDIB-PKG-001"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH",
+          "CRITICAL"
+        ],
+        "scanners": [
+          "package",
+          "ast",
+          "dataflow"
+        ]
+      }
     },
     {
       "id": "GT-063",
@@ -1029,13 +2193,32 @@
       "version": "1.0.0",
       "ecosystem": "npm",
       "year": 2025,
-      "vector": ["builtin_override_exfil", "prototype_hooking", "credential_interception"],
+      "vector": [
+        "builtin_override_exfil",
+        "prototype_hooking",
+        "credential_interception"
+      ],
       "severity": "HIGH",
       "description": "Monkey-patches JSON.parse and Buffer.from to intercept and exfiltrate credentials and private keys as they flow through the application.",
       "source": "datadog-benchmark",
-      "mitre": ["T1574", "T1557", "T1041"],
+      "mitre": [
+        "T1574",
+        "T1557",
+        "T1041"
+      ],
       "sample_dir": "samples/builtin-override/",
-      "expected": { "min_threats": 1, "rules": ["MUADDIB-AST-001"], "severities": ["HIGH"], "scanners": ["ast"] }
+      "expected": {
+        "min_threats": 1,
+        "rules": [
+          "MUADDIB-AST-001"
+        ],
+        "severities": [
+          "HIGH"
+        ],
+        "scanners": [
+          "ast"
+        ]
+      }
     },
     {
       "id": "GT-064",
@@ -1043,13 +2226,34 @@
       "version": "1.0.0",
       "ecosystem": "npm",
       "year": 2025,
-      "vector": ["vm_code_execution", "sandbox_escape", "credential_theft"],
+      "vector": [
+        "vm_code_execution",
+        "sandbox_escape",
+        "credential_theft"
+      ],
       "severity": "CRITICAL",
       "description": "Uses vm.runInNewContext with constructor chain breakout to escape sandbox, access host process, read .npmrc, and exfiltrate process.env.",
       "source": "datadog-benchmark",
-      "mitre": ["T1059.007", "T1552.001", "T1041"],
+      "mitre": [
+        "T1059.007",
+        "T1552.001",
+        "T1041"
+      ],
       "sample_dir": "samples/vm-sandbox-escape/",
-      "expected": { "min_threats": 3, "rules": ["MUADDIB-AST-001"], "severities": ["HIGH", "CRITICAL"], "scanners": ["ast", "dataflow"] }
+      "expected": {
+        "min_threats": 3,
+        "rules": [
+          "MUADDIB-AST-001"
+        ],
+        "severities": [
+          "HIGH",
+          "CRITICAL"
+        ],
+        "scanners": [
+          "ast",
+          "dataflow"
+        ]
+      }
     },
     {
       "id": "GT-065",
@@ -1057,13 +2261,36 @@
       "version": "1.0.0",
       "ecosystem": "npm",
       "year": 2025,
-      "vector": ["lifecycle_hidden_payload", "module_load_bypass", "ssh_theft"],
+      "vector": [
+        "lifecycle_hidden_payload",
+        "module_load_bypass",
+        "ssh_theft"
+      ],
       "severity": "CRITICAL",
       "description": "Preinstall script looks innocent but uses Module._load() to execute hidden payload from deeply nested path. Payload steals .npmrc and SSH keys.",
       "source": "datadog-benchmark",
-      "mitre": ["T1059.007", "T1027", "T1552.001"],
+      "mitre": [
+        "T1059.007",
+        "T1027",
+        "T1552.001"
+      ],
       "sample_dir": "samples/lifecycle-hidden-exec/",
-      "expected": { "min_threats": 3, "rules": ["MUADDIB-PKG-001"], "severities": ["MEDIUM", "HIGH", "CRITICAL"], "scanners": ["package", "ast", "dataflow"] }
+      "expected": {
+        "min_threats": 3,
+        "rules": [
+          "MUADDIB-PKG-001"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH",
+          "CRITICAL"
+        ],
+        "scanners": [
+          "package",
+          "ast",
+          "dataflow"
+        ]
+      }
     },
     {
       "id": "GT-066",
@@ -1071,13 +2298,36 @@
       "version": "1.0.0",
       "ecosystem": "npm",
       "year": 2026,
-      "vector": ["ai_agent_abuse", "llm_api_key_harvesting", "mcp_config_injection"],
+      "vector": [
+        "ai_agent_abuse",
+        "llm_api_key_harvesting",
+        "mcp_config_injection"
+      ],
       "severity": "CRITICAL",
       "description": "Harvests LLM API keys from env vars and config files (OpenAI, Anthropic, Claude), injects malicious MCP server to intercept AI conversations.",
       "source": "datadog-benchmark",
-      "mitre": ["T1552.001", "T1546", "T1041"],
+      "mitre": [
+        "T1552.001",
+        "T1546",
+        "T1041"
+      ],
       "sample_dir": "samples/ai-agent-exploit/",
-      "expected": { "min_threats": 3, "rules": ["MUADDIB-PKG-001"], "severities": ["MEDIUM", "HIGH", "CRITICAL"], "scanners": ["package", "ast", "dataflow"] }
+      "expected": {
+        "min_threats": 3,
+        "rules": [
+          "MUADDIB-PKG-001"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH",
+          "CRITICAL"
+        ],
+        "scanners": [
+          "package",
+          "ast",
+          "dataflow"
+        ]
+      }
     },
     {
       "id": "GT-067",
@@ -1085,15 +2335,1143 @@
       "version": "1.0.2",
       "ecosystem": "npm",
       "year": 2026,
-      "vector": ["typosquat", "staged_rce_loader", "fetch_decrypt_exec"],
+      "vector": [
+        "typosquat",
+        "staged_rce_loader",
+        "fetch_decrypt_exec"
+      ],
       "published_at": "2026-04-05",
       "disclosed_at": "2026-04-05",
       "severity": "CRITICAL",
       "description": "Fake Node.js 'path' module port (main: ./path.js) — any require('react-emits') triggers two top-level IIFEs doing fetch(atob(VAR)).then(.json()).then(eval(data.content)), loading a staged RCE payload from http://173.211.46.220/. Variables randomStringRe and tokenStringRe are hardcoded base64 of the bare-IP C2 URLs. Detected live by MUAD'DIB monitor 2026-04-05 03:46 UTC, reported to npm Security, confirmed in v2.10.72 audit (2026-04-11 VPS forensics). Attack evolved across 4 versions in 4 hours: v1.0.0 used split payload/trigger via 5 malicious deps (sandbox-clean), v1.0.2 hardcoded URLs directly in path.js, v1.0.3 half-retract broke the package.",
       "source": "https://github.com/DNSZLSK/muaddib-scanner/blob/master/docs/blog/react-emits-malware.html",
-      "mitre": ["T1027", "T1059.007", "T1105"],
+      "mitre": [
+        "T1027",
+        "T1059.007",
+        "T1105"
+      ],
       "sample_dir": "samples/react-emits/",
-      "expected": { "min_threats": 3, "rules": ["MUADDIB-AST-004", "MUADDIB-AST-040", "MUADDIB-INTENT-001"], "severities": ["HIGH", "CRITICAL"], "scanners": ["ast", "dataflow"] }
+      "expected": {
+        "min_threats": 3,
+        "rules": [
+          "MUADDIB-AST-004",
+          "MUADDIB-AST-040",
+          "MUADDIB-INTENT-001"
+        ],
+        "severities": [
+          "HIGH",
+          "CRITICAL"
+        ],
+        "scanners": [
+          "ast",
+          "dataflow"
+        ]
+      }
+    },
+    {
+      "id": "GT-068",
+      "name": "pysrc001-import-exec",
+      "version": "0.0.0",
+      "ecosystem": "pypi",
+      "year": 2026,
+      "vector": [
+        "import_time_rce",
+        "synthetic_pyssrc_pattern"
+      ],
+      "severity": "CRITICAL",
+      "description": "Synthetic fixture: PyPI package with module-level exec() at import time. Detects MUADDIB-PYSRC-001 (regex source scanner) and MUADDIB-PYAST-003 (tree-sitter AST scanner) in tandem. Models TrapDoor (mai 2026) PyPI campaign pattern.",
+      "source": "tests/samples/python-source/import-exec/ (PR #480, CHANGELOG v2.11.41)",
+      "mitre": [
+        "T1059.006",
+        "T1027"
+      ],
+      "sample_dir": "samples/pysrc001-import-exec/",
+      "expected": {
+        "min_threats": 1,
+        "rules": [
+          "MUADDIB-PYSRC-001",
+          "MUADDIB-PYAST-003"
+        ],
+        "severities": [
+          "CRITICAL"
+        ],
+        "scanners": [
+          "python-source",
+          "python-ast"
+        ],
+        "score_typical": 35,
+        "tpr_tier": "tpr20"
+      }
+    },
+    {
+      "id": "GT-069",
+      "name": "pysrc003-import-os-system",
+      "version": "0.0.0",
+      "ecosystem": "pypi",
+      "year": 2026,
+      "vector": [
+        "import_time_rce",
+        "os_system"
+      ],
+      "severity": "CRITICAL",
+      "description": "Synthetic fixture: PyPI package with module-level os.system() call at import time. Detects MUADDIB-PYSRC-003 in isolation (no other rule co-fires).",
+      "source": "tests/samples/python-source/import-os-system/ (PR #480)",
+      "mitre": [
+        "T1059.004"
+      ],
+      "sample_dir": "samples/pysrc003-import-os-system/",
+      "expected": {
+        "min_threats": 1,
+        "rules": [
+          "MUADDIB-PYSRC-003"
+        ],
+        "severities": [
+          "CRITICAL"
+        ],
+        "scanners": [
+          "python-source"
+        ],
+        "score_typical": 25,
+        "tpr_tier": "tpr20"
+      }
+    },
+    {
+      "id": "GT-070",
+      "name": "pysrc004-trapdoor-fetch-exec",
+      "version": "0.0.0",
+      "ecosystem": "pypi",
+      "year": 2026,
+      "vector": [
+        "import_time_rce",
+        "fetch_then_exec",
+        "trapdoor_signature"
+      ],
+      "severity": "CRITICAL",
+      "description": "Synthetic fixture: TrapDoor signature — urllib fetch + exec() of fetched payload in the same module-level scope. Detects PYSRC-001 + PYSRC-004 (compound) and PYAST-003 + PYAST-005 (taint-aware AST).",
+      "source": "tests/samples/python-source/trapdoor-mimic/ (PR #480, CHANGELOG v2.11.41 — covers TrapDoor PyPI mai 2026 campaign gap)",
+      "mitre": [
+        "T1105",
+        "T1059.006"
+      ],
+      "sample_dir": "samples/pysrc004-trapdoor-fetch-exec/",
+      "expected": {
+        "min_threats": 2,
+        "rules": [
+          "MUADDIB-PYSRC-001",
+          "MUADDIB-PYSRC-004",
+          "MUADDIB-PYAST-003",
+          "MUADDIB-PYAST-005"
+        ],
+        "severities": [
+          "CRITICAL"
+        ],
+        "scanners": [
+          "python-source",
+          "python-ast"
+        ],
+        "score_typical": 35,
+        "tpr_tier": "tpr20"
+      }
+    },
+    {
+      "id": "GT-071",
+      "name": "pysrc006-pickle-deser",
+      "version": "0.0.0",
+      "ecosystem": "pypi",
+      "year": 2026,
+      "vector": [
+        "unsafe_deserialization",
+        "import_time_rce"
+      ],
+      "severity": "CRITICAL",
+      "description": "Synthetic fixture: module-level pickle.loads() — classic RCE via unsafe deserialization at import time. Detects PYSRC-006 + PYAST-007.",
+      "source": "tests/samples/python-source/pickle-deser/ (PR #480)",
+      "mitre": [
+        "T1059.006",
+        "T1027"
+      ],
+      "sample_dir": "samples/pysrc006-pickle-deser/",
+      "expected": {
+        "min_threats": 1,
+        "rules": [
+          "MUADDIB-PYSRC-006",
+          "MUADDIB-PYAST-007"
+        ],
+        "severities": [
+          "CRITICAL"
+        ],
+        "scanners": [
+          "python-source",
+          "python-ast"
+        ],
+        "score_typical": 35,
+        "tpr_tier": "tpr20"
+      }
+    },
+    {
+      "id": "GT-072",
+      "name": "pysrc007-dynamic-import",
+      "version": "0.0.0",
+      "ecosystem": "pypi",
+      "year": 2026,
+      "vector": [
+        "obfuscation",
+        "dynamic_import_evasion"
+      ],
+      "severity": "HIGH",
+      "description": "Synthetic fixture: __import__(\"subprocess\") at module level — evades static `import subprocess` tracking. Detects PYSRC-007 (HIGH) + PYAST-008 (HIGH). Score 19 in isolation — counted in TPR@3 only (by design; the rule is HIGH-severity, not CRITICAL — it needs to combine with another signal in a real package to reach TPR@20).",
+      "source": "tests/samples/python-source/dynamic-import/ (PR #480)",
+      "mitre": [
+        "T1027",
+        "T1140"
+      ],
+      "sample_dir": "samples/pysrc007-dynamic-import/",
+      "expected": {
+        "min_threats": 1,
+        "rules": [
+          "MUADDIB-PYSRC-007",
+          "MUADDIB-PYAST-008"
+        ],
+        "severities": [
+          "HIGH"
+        ],
+        "scanners": [
+          "python-source",
+          "python-ast"
+        ],
+        "score_typical": 19,
+        "tpr_tier": "tpr3"
+      }
+    },
+    {
+      "id": "GT-073",
+      "name": "pysrc008-zw-unicode",
+      "version": "0.0.0",
+      "ecosystem": "pypi",
+      "year": 2026,
+      "vector": [
+        "unicode_obfuscation",
+        "glassworm_signature"
+      ],
+      "severity": "CRITICAL",
+      "description": "Synthetic fixture: .py file containing ≥5 zero-width / directional / variation-selector codepoints. Mirror of AICONF-004 for Python source — closes the GlassWorm-style payload encoding gap.",
+      "source": "tests/samples/python-source/zw-unicode/ (PR #480, CHANGELOG v2.11.41)",
+      "mitre": [
+        "T1027"
+      ],
+      "sample_dir": "samples/pysrc008-zw-unicode/",
+      "expected": {
+        "min_threats": 1,
+        "rules": [
+          "MUADDIB-PYSRC-008"
+        ],
+        "severities": [
+          "CRITICAL"
+        ],
+        "scanners": [
+          "python-source"
+        ],
+        "score_typical": 25,
+        "tpr_tier": "tpr20"
+      }
+    },
+    {
+      "id": "GT-074",
+      "name": "pysrc009-fork-exec-node-e",
+      "version": "0.0.0",
+      "ecosystem": "pypi",
+      "year": 2026,
+      "vector": [
+        "fork_exec_inline_interpreter",
+        "cross_runtime_escape"
+      ],
+      "severity": "CRITICAL",
+      "description": "Synthetic fixture: import-time subprocess.run([\"node\", \"-e\", payload]) — Python package forking into a Node inline interpreter to execute JS payload (cross-runtime escape). Detects PYSRC-002 + PYSRC-009.",
+      "source": "tests/samples/python-source/fork-exec-node-e/ (PR #485, CHANGELOG v2.11.46)",
+      "mitre": [
+        "T1059.007",
+        "T1106"
+      ],
+      "sample_dir": "samples/pysrc009-fork-exec-node-e/",
+      "expected": {
+        "min_threats": 1,
+        "rules": [
+          "MUADDIB-PYSRC-002",
+          "MUADDIB-PYSRC-009"
+        ],
+        "severities": [
+          "CRITICAL"
+        ],
+        "scanners": [
+          "python-source"
+        ],
+        "score_typical": 35,
+        "tpr_tier": "tpr20"
+      }
+    },
+    {
+      "id": "GT-075",
+      "name": "pysrc010-trapdoor-fetch-fork-exec",
+      "version": "0.0.0",
+      "ecosystem": "pypi",
+      "year": 2026,
+      "vector": [
+        "fetch_then_fork_exec",
+        "trapdoor_compound"
+      ],
+      "severity": "CRITICAL",
+      "description": "Synthetic fixture: exact TrapDoor signature — urllib fetch + subprocess.run([\"node\",\"-e\", payload]). Detects PYSRC-002 + PYSRC-009 + PYSRC-010 (compound: network fetch + fork-exec inline interpreter).",
+      "source": "tests/samples/python-source/trapdoor-fetch-fork-exec/ (PR #485, CHANGELOG v2.11.46)",
+      "mitre": [
+        "T1105",
+        "T1059.007"
+      ],
+      "sample_dir": "samples/pysrc010-trapdoor-fetch-fork-exec/",
+      "expected": {
+        "min_threats": 2,
+        "rules": [
+          "MUADDIB-PYSRC-002",
+          "MUADDIB-PYSRC-009",
+          "MUADDIB-PYSRC-010"
+        ],
+        "severities": [
+          "CRITICAL"
+        ],
+        "scanners": [
+          "python-source"
+        ],
+        "score_typical": 35,
+        "tpr_tier": "tpr20"
+      }
+    },
+    {
+      "id": "GT-076",
+      "name": "pyast001-cmdclass-override",
+      "version": "0.0.1",
+      "ecosystem": "pypi",
+      "year": 2026,
+      "vector": [
+        "setup_py_cmdclass_hijack",
+        "install_time_rce"
+      ],
+      "severity": "CRITICAL",
+      "description": "Synthetic fixture: setup.py with cmdclass overriding the \"install\" command. Pip executes the overridden class on `pip install`, giving the attacker RCE at install time. Detects PYAST-001 in isolation.",
+      "source": "tests/samples/python-ast/cmdclass-override/ (PR #483, CHANGELOG v2.11.44)",
+      "mitre": [
+        "T1546"
+      ],
+      "sample_dir": "samples/pyast001-cmdclass-override/",
+      "expected": {
+        "min_threats": 1,
+        "rules": [
+          "MUADDIB-PYAST-001"
+        ],
+        "severities": [
+          "CRITICAL"
+        ],
+        "scanners": [
+          "python-ast"
+        ],
+        "score_typical": 25,
+        "tpr_tier": "tpr20"
+      }
+    },
+    {
+      "id": "GT-077",
+      "name": "pyast002-entry-points-sus",
+      "version": "0.0.0",
+      "ecosystem": "pypi",
+      "year": 2026,
+      "vector": [
+        "setup_py_entry_points_abuse"
+      ],
+      "severity": "MEDIUM",
+      "description": "Synthetic fixture: setup.py declaring suspicious entry_points (e.g. typosquat console_scripts shadowing a popular CLI). Score 9 in isolation — MEDIUM-severity, counted in TPR@3 only.",
+      "source": "tests/samples/python-ast/entry-points-sus/ (PR #483, CHANGELOG v2.11.44)",
+      "mitre": [
+        "T1546.011"
+      ],
+      "sample_dir": "samples/pyast002-entry-points-sus/",
+      "expected": {
+        "min_threats": 1,
+        "rules": [
+          "MUADDIB-PYAST-002"
+        ],
+        "severities": [
+          "MEDIUM"
+        ],
+        "scanners": [
+          "python-ast"
+        ],
+        "score_typical": 9,
+        "tpr_tier": "tpr3"
+      }
+    },
+    {
+      "id": "GT-078",
+      "name": "pyast004-subprocess-shell",
+      "version": "0.0.0",
+      "ecosystem": "pypi",
+      "year": 2026,
+      "vector": [
+        "shell_injection_subprocess"
+      ],
+      "severity": "CRITICAL",
+      "description": "Synthetic fixture: subprocess call with shell=True at module level — classic shell-injection gateway. Detects PYSRC-002 + PYAST-004.",
+      "source": "tests/samples/python-ast/subprocess-shell/ (PR #483)",
+      "mitre": [
+        "T1059.004"
+      ],
+      "sample_dir": "samples/pyast004-subprocess-shell/",
+      "expected": {
+        "min_threats": 1,
+        "rules": [
+          "MUADDIB-PYSRC-002",
+          "MUADDIB-PYAST-004"
+        ],
+        "severities": [
+          "CRITICAL"
+        ],
+        "scanners": [
+          "python-source",
+          "python-ast"
+        ],
+        "score_typical": 35,
+        "tpr_tier": "tpr20"
+      }
+    },
+    {
+      "id": "GT-079",
+      "name": "pyast006-base64-exec-taint",
+      "version": "0.0.0",
+      "ecosystem": "pypi",
+      "year": 2026,
+      "vector": [
+        "base64_decode_then_exec",
+        "taint_propagation"
+      ],
+      "severity": "CRITICAL",
+      "description": "Synthetic fixture: base64.b64decode(...) assigned to a var, then exec(var) — tests taint propagation across statements. Detects PYSRC-001 + PYSRC-005 (regex) and PYAST-003 + PYAST-006 (taint-aware AST).",
+      "source": "tests/samples/python-ast/base64-exec-taint/ (PR #484, CHANGELOG v2.11.45)",
+      "mitre": [
+        "T1140",
+        "T1027"
+      ],
+      "sample_dir": "samples/pyast006-base64-exec-taint/",
+      "expected": {
+        "min_threats": 2,
+        "rules": [
+          "MUADDIB-PYSRC-001",
+          "MUADDIB-PYSRC-005",
+          "MUADDIB-PYAST-003",
+          "MUADDIB-PYAST-006"
+        ],
+        "severities": [
+          "CRITICAL"
+        ],
+        "scanners": [
+          "python-source",
+          "python-ast"
+        ],
+        "score_typical": 35,
+        "tpr_tier": "tpr20"
+      }
+    },
+    {
+      "id": "GT-080",
+      "name": "pyast010-env-token-exfil",
+      "version": "0.0.0",
+      "ecosystem": "pypi",
+      "year": 2026,
+      "vector": [
+        "env_var_exfiltration",
+        "credential_harvest"
+      ],
+      "severity": "CRITICAL",
+      "description": "Synthetic fixture: os.environ reads tainted into a network write (urllib/requests POST). Detects PYAST-010 (taint-aware env-to-network).",
+      "source": "tests/samples/python-ast/env-token-exfil/ (PR #484)",
+      "mitre": [
+        "T1552.001",
+        "T1041"
+      ],
+      "sample_dir": "samples/pyast010-env-token-exfil/",
+      "expected": {
+        "min_threats": 1,
+        "rules": [
+          "MUADDIB-PYAST-010"
+        ],
+        "severities": [
+          "CRITICAL"
+        ],
+        "scanners": [
+          "python-ast"
+        ],
+        "score_typical": 25,
+        "tpr_tier": "tpr20"
+      }
+    },
+    {
+      "id": "GT-081",
+      "name": "ast092-silent-stealth-process",
+      "version": "1.0.0",
+      "ecosystem": "npm",
+      "year": 2026,
+      "vector": [
+        "detached_silent_process",
+        "shai_hulud_signature",
+        "trapdoor_signature"
+      ],
+      "severity": "CRITICAL",
+      "description": "Synthetic fixture: child_process.spawn with {detached: true, stdio: \"ignore\"} — fully detached silent background process. Pattern observed on TrapDoor build-scripts-utils / async-pipeline-builder (mai 2026). Co-fires AST-012, AST-092, COMPOUND-007, plus PKG-001 from postinstall lifecycle.",
+      "source": "tests/samples/red-team-2026 references (CHANGELOG v2.11.33)",
+      "mitre": [
+        "T1036.009",
+        "T1059.007"
+      ],
+      "sample_dir": "samples/ast092-silent-stealth-process/",
+      "expected": {
+        "min_threats": 2,
+        "rules": [
+          "MUADDIB-AST-012",
+          "MUADDIB-AST-092"
+        ],
+        "severities": [
+          "HIGH",
+          "CRITICAL"
+        ],
+        "scanners": [
+          "ast",
+          "package"
+        ],
+        "score_typical": 95,
+        "tpr_tier": "tpr20"
+      }
+    },
+    {
+      "id": "GT-082",
+      "name": "aiconf004-zw-unicode-cursorrules",
+      "version": "1.0.0",
+      "ecosystem": "npm",
+      "year": 2026,
+      "vector": [
+        "ai_config_injection",
+        "zero_width_unicode_obfuscation",
+        "trapdoor_signature"
+      ],
+      "severity": "CRITICAL",
+      "description": "Synthetic fixture: .cursorrules containing ≥5 zero-width codepoints embedded inside shell-command keywords (curl, sh) — hides the exfil instruction from human review of the file. Closes TrapDoor (mai 2026) AI-config injection vector.",
+      "source": "CHANGELOG v2.11.40 (AICONF-004)",
+      "mitre": [
+        "T1027",
+        "T1059.004"
+      ],
+      "sample_dir": "samples/aiconf004-zw-unicode-cursorrules/",
+      "expected": {
+        "min_threats": 1,
+        "rules": [
+          "MUADDIB-AICONF-004"
+        ],
+        "severities": [
+          "CRITICAL"
+        ],
+        "scanners": [
+          "ai-config"
+        ],
+        "score_typical": 35,
+        "tpr_tier": "tpr20"
+      }
+    },
+    {
+      "id": "GT-083",
+      "name": "pkg022-release-zero-preinstall",
+      "version": "0.0.0",
+      "ecosystem": "npm",
+      "year": 2026,
+      "vector": [
+        "release_zero",
+        "namespace_squat",
+        "pre_payload_placeholder"
+      ],
+      "severity": "MEDIUM",
+      "description": "Synthetic fixture: package.json with version \"0.0.0\" + a preinstall script — namespace squat / ship-as-vulnerable / typosquat-staging pattern. Detects PKG-022, plus the lifecycle-script signals (PKG-001 etc).",
+      "source": "CHANGELOG v2.11.32 (PKG-022)",
+      "mitre": [
+        "T1195.002"
+      ],
+      "sample_dir": "samples/pkg022-release-zero-preinstall/",
+      "expected": {
+        "min_threats": 1,
+        "rules": [
+          "MUADDIB-PKG-022"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH"
+        ],
+        "scanners": [
+          "package"
+        ],
+        "score_typical": 75,
+        "tpr_tier": "tpr20"
+      }
+    },
+    {
+      "id": "GT-084",
+      "name": "project-init-tools",
+      "version": "1.0.0",
+      "ecosystem": "npm",
+      "year": 2026,
+      "vector": [
+        "trapdoor_twin",
+        "credential_harvest",
+        "dormant_payload",
+        "real_world_2026"
+      ],
+      "severity": "CRITICAL",
+      "description": "Real-world malware (security-review verdict: MALWARE, deep, 2026-05-22). Twin of build-scripts-utils@1.0.0 — code is byte-identical except for the PKG_NAME constant ('project-init-tools' vs 'build-scripts-utils'). Same dormant fork pattern, same author 'Open Dev Tools', same 19 versions published 15 seconds apart from twin on 2026-05-22T20:19. v1.5.0 ships the same trap-core.js / scanner-core.js / crypto-ecdh.js credential harvesting engine. See build-scripts-utils@1.0.0 entry for full payload analysis.",
+      "source": "data/all-review-results.json (2026-05-11/2026-05-24) — verdict MALWARE",
+      "mitre": [
+        "T1195.002",
+        "T1059.007",
+        "T1552.001"
+      ],
+      "sample_dir": "samples/project-init-tools/",
+      "expected": {
+        "min_threats": 1,
+        "rules": [
+          "MUADDIB-PKG-001",
+          "MUADDIB-AST-012",
+          "MUADDIB-AST-092",
+          "MUADDIB-AST-001",
+          "MUADDIB-AST-022",
+          "MUADDIB-AST-032"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH",
+          "CRITICAL",
+          "LOW"
+        ],
+        "scanners": [
+          "ast",
+          "package",
+          "intent-coherence"
+        ],
+        "score_typical": 100,
+        "tpr_tier": "tpr20"
+      }
+    },
+    {
+      "id": "GT-085",
+      "name": "build-scripts-utils",
+      "version": "1.0.0",
+      "ecosystem": "npm",
+      "year": 2026,
+      "vector": [
+        "trapdoor_twin",
+        "credential_harvest",
+        "dormant_payload",
+        "real_world_2026"
+      ],
+      "severity": "CRITICAL",
+      "description": "Real-world malware (security-review verdict: MALWARE, deep, 2026-05-22). Twin of project-init-tools — identical setup.js code differing only in PKG_NAME constant. v1.0.0 ships dormant infra: postinstall=node lib/setup.js, which calls cp.fork(workerPath, ['--verify', PKG_NAME], { detached: true, stdio: 'ignore', env: {...process.env, RUN_VERIFICATION: PKG_NAME} }) targeting a worker.js that does NOT exist in v1.0.0. Author 'Open Dev Tools' generic. No homepage/repo URL. CONFIRMED MALWARE by fetching latest version v1.5.0 from npm: now ships worker.js + scanner-core.js + trap-core.js + crypto-ecdh.js. scanner-core.js scans ~/.ssh, ~/.aws, ~/.kube, ~/.docker, ~/.local/share, ~/.config. trap-core.js header: 'Unified credential harvesting & propagation engine' with METRICS { scan_attempts, keys_found, webhook_sends, files_infected, propagate_attempts }. Fernet+ECDH-",
+      "source": "data/all-review-results.json (2026-05-11/2026-05-24) — verdict MALWARE",
+      "mitre": [
+        "T1195.002",
+        "T1059.007",
+        "T1552.001"
+      ],
+      "sample_dir": "samples/build-scripts-utils/",
+      "expected": {
+        "min_threats": 1,
+        "rules": [
+          "MUADDIB-PKG-001",
+          "MUADDIB-AST-012",
+          "MUADDIB-AST-092",
+          "MUADDIB-AST-001",
+          "MUADDIB-AST-022",
+          "MUADDIB-AST-032"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH",
+          "CRITICAL",
+          "LOW"
+        ],
+        "scanners": [
+          "ast",
+          "package",
+          "intent-coherence"
+        ],
+        "score_typical": 100,
+        "tpr_tier": "tpr20"
+      }
+    },
+    {
+      "id": "GT-086",
+      "name": "async-pipeline-builder",
+      "version": "1.0.0",
+      "ecosystem": "npm",
+      "year": 2026,
+      "vector": [
+        "trapdoor_twin",
+        "credential_harvest",
+        "real_world_2026"
+      ],
+      "severity": "CRITICAL",
+      "description": "Real-world npm tarball — verdict not in review benchmark (likely post-2026-05-24 or out-of-scope). Manual annotation required.",
+      "source": "data/all-review-results.json (2026-05-11/2026-05-24)",
+      "mitre": [
+        "T1195.002",
+        "T1059.007",
+        "T1552.001"
+      ],
+      "sample_dir": "samples/async-pipeline-builder/",
+      "expected": {
+        "min_threats": 1,
+        "rules": [
+          "MUADDIB-PKG-001",
+          "MUADDIB-AST-012",
+          "MUADDIB-AST-092",
+          "MUADDIB-AST-001",
+          "MUADDIB-AST-022",
+          "MUADDIB-AST-032"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH",
+          "CRITICAL",
+          "LOW"
+        ],
+        "scanners": [
+          "ast",
+          "package",
+          "intent-coherence"
+        ],
+        "score_typical": 100,
+        "tpr_tier": "tpr20"
+      }
+    },
+    {
+      "id": "GT-087",
+      "name": "@cseo-hr/trpweb-shared",
+      "version": "99.9.1",
+      "ecosystem": "npm",
+      "year": 2026,
+      "vector": [
+        "dep_confusion",
+        "external_tarball_dep",
+        "ltidisafe_link",
+        "real_world_2026"
+      ],
+      "severity": "CRITICAL",
+      "description": "Real-world malware (security-review verdict: MALWARE, deep, 2026-05-21). Classic npm dependency-confusion attack. Version `99.9.1` is a deliberate namespace squat above any plausible private version of an internal @cseo-hr/trpweb-shared package. main = index.js contains only `module.exports = {};` — pure stub re-export. The actual payload is fetched via dependency: `ltidisafe: https://ltidi.storage.googleapis.com/depenconf/ltidisafe-2.6.5.tgz` — non-npm Google Storage URL with literal `depenconf` substring in the path. Description and author both empty. License ISC (lowest-friction). Published 2026-05-21T18:21 by maintainer test+8@mymydirtyhobby.com (disposable email, +8 suffix suggests multiple twin packages from same maintainer). Confirmed still live on npm registry (npm view).",
+      "source": "data/all-review-results.json (2026-05-11/2026-05-24) — verdict MALWARE",
+      "mitre": [
+        "T1195.002",
+        "T1199"
+      ],
+      "sample_dir": "samples/cseo-hr-trpweb-shared/",
+      "expected": {
+        "min_threats": 1,
+        "rules": [
+          "MUADDIB-PKG-020",
+          "MUADDIB-DEP-006",
+          "MUADDIB-STUB-002"
+        ],
+        "severities": [
+          "CRITICAL",
+          "HIGH"
+        ],
+        "scanners": [
+          "package",
+          "dependencies"
+        ],
+        "score_typical": 50,
+        "tpr_tier": "tpr20"
+      }
+    },
+    {
+      "id": "GT-088",
+      "name": "defi-threat-scanner",
+      "version": "2.1.2",
+      "ecosystem": "npm",
+      "year": 2026,
+      "vector": [
+        "mcp_malicious_server",
+        "inline_postinstall_exfil",
+        "wallet_harvest",
+        "real_world_2026"
+      ],
+      "severity": "CRITICAL",
+      "description": "Real-world npm tarball — verdict not in review benchmark (likely post-2026-05-24 or out-of-scope). Manual annotation required.",
+      "source": "data/all-review-results.json (2026-05-11/2026-05-24)",
+      "mitre": [
+        "T1552.001",
+        "T1041",
+        "T1059.007"
+      ],
+      "sample_dir": "samples/defi-threat-scanner/",
+      "expected": {
+        "min_threats": 1,
+        "rules": [
+          "MUADDIB-PKG-001",
+          "MUADDIB-PKG-005",
+          "MUADDIB-PKG-011",
+          "MUADDIB-PKG-012",
+          "MUADDIB-PKG-017",
+          "MUADDIB-AST-032"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH",
+          "CRITICAL"
+        ],
+        "scanners": [
+          "package",
+          "intent-coherence"
+        ],
+        "score_typical": 100,
+        "tpr_tier": "tpr20"
+      }
+    },
+    {
+      "id": "GT-089",
+      "name": "did-0091",
+      "version": "11.2.8",
+      "ecosystem": "npm",
+      "year": 2026,
+      "vector": [
+        "pentest_aggressive",
+        "real_world_2026"
+      ],
+      "severity": "CRITICAL",
+      "description": "Real-world malware (security-review verdict: PENTEST_AGGRESSIVE, deep, 2026-05-20). did-0091@11.2.8 — 977 byte tarball, empty index.js (0 bytes), full payload in scripts.postinstall as inline node -e \"...\". Behavior: get public IP via api.ipify.org, exec `id || ver && whoami && hostname`, POST JSON {time, organization: USERDOMAIN||COMPANY, ip_address, package_name, hostname, current_path, command_output} to http://lszakfghwnvxspyfcmaabd1css99rnq3w.oast.fun (ProjectDiscovery interactsh OAST callback). Numbered package series suggesting dep-confusion research at scale. Goes beyond ping recon (exfiltrates cmd output + env-derived org name) → PENTEST_AGGRESSIVE, not PENTEST_HARMLESS.",
+      "source": "data/all-review-results.json (2026-05-11/2026-05-24) — verdict PENTEST_AGGRESSIVE",
+      "mitre": [
+        "T1195.002"
+      ],
+      "sample_dir": "samples/did-0091/",
+      "expected": {
+        "min_threats": 1,
+        "rules": [
+          "MUADDIB-PKG-001",
+          "MUADDIB-PKG-005",
+          "MUADDIB-PKG-012",
+          "MUADDIB-PKG-017",
+          "MUADDIB-COMPOUND-004"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH",
+          "CRITICAL"
+        ],
+        "scanners": [
+          "package",
+          "ast"
+        ],
+        "score_typical": 50,
+        "tpr_tier": "tpr20"
+      }
+    },
+    {
+      "id": "GT-090",
+      "name": "marginfi-client-v2",
+      "version": "999.0.0",
+      "ecosystem": "npm",
+      "year": 2026,
+      "vector": [
+        "dep_confusion",
+        "wallet_exfil",
+        "solana_defi_target",
+        "reconstruction_from_review",
+        "real_world_2026"
+      ],
+      "severity": "CRITICAL",
+      "description": "Real-world malware (security-review verdict: MALWARE, superficial, 2026-05-12). Dep confusion ciblant MarginFi (DeFi Solana). preinstall.js exfiltre toutes les env vars matchant KEY|SECRET|TOKEN|PASSWORD|PRIVATE|WALLET|MNEMONIC|SEED|RPC|DATABASE|REDIS|MONGO|ELASTIC|API + hostname/user/cwd vers IP directe 72.62.71.201:18443/npm-exfil. index.js est un stub vide. Régex WALLET/MNEMONIC/SEED indique ciblage Web3.",
+      "source": "data/all-review-results.json (2026-05-11/2026-05-24) — verdict MALWARE",
+      "mitre": [
+        "T1195.002",
+        "T1552.001",
+        "T1041"
+      ],
+      "sample_dir": "samples/recon-marginfi-cluster/",
+      "expected": {
+        "min_threats": 1,
+        "rules": [
+          "MUADDIB-PKG-001",
+          "MUADDIB-PKG-019",
+          "MUADDIB-AST-002",
+          "MUADDIB-AST-029",
+          "MUADDIB-AST-041",
+          "MUADDIB-FLOW-001"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH",
+          "CRITICAL"
+        ],
+        "scanners": [
+          "ast",
+          "package",
+          "dataflow",
+          "intent-coherence"
+        ],
+        "score_typical": 100,
+        "tpr_tier": "tpr20"
+      }
+    },
+    {
+      "id": "GT-091",
+      "name": "byvendors",
+      "version": "99.0.6",
+      "ecosystem": "npm",
+      "year": 2026,
+      "vector": [
+        "telegram_exfil",
+        "bybit_target",
+        "reconstruction_from_review",
+        "real_world_2026"
+      ],
+      "severity": "CRITICAL",
+      "description": "Real-world malware (security-review verdict: MALWARE, superficial, 2026-05-11). Active credential exfil to attacker Telegram bot. Self-identifies as targeting Bybit. Public IP via api.ipify.org. Author Chandan Mishra (likely fake).",
+      "source": "data/all-review-results.json (2026-05-11/2026-05-24) — verdict MALWARE",
+      "mitre": [
+        "T1552.001",
+        "T1041"
+      ],
+      "sample_dir": "samples/recon-byvendors-bybit/",
+      "expected": {
+        "min_threats": 1,
+        "rules": [
+          "MUADDIB-AST-041",
+          "MUADDIB-FLOW-001",
+          "MUADDIB-INTENT-001"
+        ],
+        "severities": [
+          "HIGH",
+          "CRITICAL"
+        ],
+        "scanners": [
+          "ast",
+          "intent-coherence"
+        ],
+        "score_typical": 90,
+        "tpr_tier": "tpr20"
+      }
+    },
+    {
+      "id": "GT-092",
+      "name": "heloo131313",
+      "version": "0.0.32",
+      "ecosystem": "npm",
+      "year": 2026,
+      "vector": [
+        "multi_channel_exfil",
+        "dns_tunnel",
+        "curl_passwd_read",
+        "reconstruction_from_review",
+        "real_world_2026"
+      ],
+      "severity": "CRITICAL",
+      "description": "Real-world malware (security-review verdict: MALWARE, superficial, 2026-05-11). Multi-channel exfil (curl /etc/passwd + DNS lookup + HTTP POST). Three independent channels to same C2 = defense evasion. oastify endpoint but payload (curl /etc/passwd) crosses beacon threshold.",
+      "source": "data/all-review-results.json (2026-05-11/2026-05-24) — verdict MALWARE",
+      "mitre": [
+        "T1071",
+        "T1552.001",
+        "T1041"
+      ],
+      "sample_dir": "samples/recon-heloo131313-multichannel/",
+      "expected": {
+        "min_threats": 1,
+        "rules": [
+          "MUADDIB-AST-001",
+          "MUADDIB-FLOW-001",
+          "MUADDIB-INTENT-001"
+        ],
+        "severities": [
+          "HIGH",
+          "CRITICAL"
+        ],
+        "scanners": [
+          "ast",
+          "shell",
+          "intent-coherence"
+        ],
+        "score_typical": 89,
+        "tpr_tier": "tpr20"
+      }
+    },
+    {
+      "id": "GT-093",
+      "name": "backoff-table",
+      "version": "99.9.1",
+      "ecosystem": "npm",
+      "year": 2026,
+      "vector": [
+        "aws_credential_harvest",
+        "imds_lookup",
+        "cloud_metadata_abuse",
+        "reconstruction_from_review",
+        "real_world_2026"
+      ],
+      "severity": "CRITICAL",
+      "description": "Real-world malware (security-review verdict: MALWARE, superficial, 2026-05-12). Full multi-source AWS credential harvester (IMDS + env + filesystem + ECS + K8s SA token). Author mohammednuredin — known campaign from prior reviews. Persists /tmp/.aws-harvest. Far beyond research beacon.",
+      "source": "data/all-review-results.json (2026-05-11/2026-05-24) — verdict MALWARE",
+      "mitre": [
+        "T1552.005",
+        "T1078.004",
+        "T1041"
+      ],
+      "sample_dir": "samples/recon-aws-harvester-backoff-table/",
+      "expected": {
+        "min_threats": 1,
+        "rules": [
+          "MUADDIB-PKG-001",
+          "MUADDIB-PKG-019",
+          "MUADDIB-AST-002",
+          "MUADDIB-AST-012",
+          "MUADDIB-AST-092",
+          "MUADDIB-AST-007"
+        ],
+        "severities": [
+          "MEDIUM",
+          "HIGH",
+          "CRITICAL"
+        ],
+        "scanners": [
+          "ast",
+          "package",
+          "intent-coherence"
+        ],
+        "score_typical": 100,
+        "tpr_tier": "tpr20"
+      }
+    },
+    {
+      "id": "GT-094",
+      "name": "tsliverhome",
+      "version": "1.1.5",
+      "ecosystem": "npm",
+      "year": 2026,
+      "vector": [
+        "staged_remote_code_loader",
+        "cdn_decoy",
+        "fetch_eval_json",
+        "reconstruction_from_review",
+        "real_world_2026"
+      ],
+      "severity": "CRITICAL",
+      "description": "Real-world malware (security-review verdict: MALWARE, superficial, 2026-05-14). Staged remote-code loader masquerading as CDN icon fetcher. The exported function `buildoptimize` (line 70) fetches `https://verceljs-kappa.vercel.app/icons/<token>` (default token=23), then `eval(JSON.parse(body))` at line 82. `setDefaultModule` is decoy/unused — it pretends to fetch font-awesome icons from cdnjs but is never called internally. package.json has no description, no author, no homepage. Score 81 confirms the user's observation that malware exists in 80-89 band.",
+      "source": "data/all-review-results.json (2026-05-11/2026-05-24) — verdict MALWARE",
+      "mitre": [
+        "T1105",
+        "T1027",
+        "T1059.007"
+      ],
+      "sample_dir": "samples/recon-tsliverhome-staged-loader/",
+      "expected": {
+        "min_threats": 1,
+        "rules": [
+          "MUADDIB-AST-004",
+          "MUADDIB-AST-041",
+          "MUADDIB-INTENT-001"
+        ],
+        "severities": [
+          "HIGH",
+          "CRITICAL"
+        ],
+        "scanners": [
+          "ast",
+          "intent-coherence"
+        ],
+        "score_typical": 70,
+        "tpr_tier": "tpr20"
+      }
+    },
+    {
+      "id": "GT-095",
+      "name": "@design-system-coopeuch/web",
+      "version": "999.0.4",
+      "ecosystem": "npm",
+      "year": 2026,
+      "vector": [
+        "direct_ip_exfil",
+        "linux_fingerprint",
+        "reconstruction_from_review",
+        "real_world_2026"
+      ],
+      "severity": "MEDIUM",
+      "description": "RECONSTRUCTION of @design-system-coopeuch/web@999.0.4 (2026-05-13). Real package was MALWARE (verdict=MALWARE, score=47 in review). Pattern: dep-confusion version inflation + direct IP exfil + linux fingerprint via id/uname/lsb_release, no OAST cover. Sinkhole replacement (203.0.113.x RFC 5737) does not trigger suspicious_domain — only FLOW-001 fires (risk=3). KNOWN GAP: review reasoning notes \"Score 47 is too low — same shape as marginfi (direct IP exfil) but model gave T1b. Recommend score raise.\" This sample is intentionally annotated tpr_tier:tpr3 to surface the muaddib gap on direct-IP-exfil-with-linux-fingerprint compound, rather than artificially inflating with extra signals not present in the original payload. Reconstructed from data/all-review-results.json.",
+      "source": "data/all-review-results.json (2026-05-11/2026-05-24) — verdict MALWARE",
+      "mitre": [
+        "T1082",
+        "T1041"
+      ],
+      "sample_dir": "samples/recon-design-system-coopeuch/",
+      "expected": {
+        "min_threats": 1,
+        "rules": [
+          "MUADDIB-FLOW-001"
+        ],
+        "severities": [
+          "LOW",
+          "MEDIUM"
+        ],
+        "scanners": [
+          "dataflow"
+        ],
+        "score_typical": 3,
+        "tpr_tier": "tpr3",
+        "known_gap": "muaddib under-detects direct-IP-exfil + linux-fingerprint compound (review humain noted same)"
+      }
+    },
+    {
+      "id": "GT-096",
+      "name": "vite-json-config",
+      "version": "1.0.5",
+      "ecosystem": "npm",
+      "year": 2026,
+      "vector": [
+        "trojanized_fork",
+        "process_shadow",
+        "dead_drop_loader",
+        "detached_spawn",
+        "reconstruction_from_review",
+        "real_world_2026"
+      ],
+      "severity": "CRITICAL",
+      "description": "Real-world malware (security-review verdict: MALWARE, deep, 2026-05-18). Trojanized fork of tsconfig-paths v4 published as 'vite-json-config' (typosquat of vite-plugin-json-config / vite-tsconfig-paths). The author shadowed the global `process` with a local-scope `process={env:{DEV_API_KEY:'https://www.jsonkeeper.com/b/5IZTJ',...}}` so static greps for `process.env` look innocent. mapProps.js contains a top-level async IIFE that GETs the jsonkeeper.com dead-drop URL (using axios with header x-secret-key:_), takes the `.data.Cookie` field, and executes it via `new Function('require', s)(require)` — providing the attacker arbitrary Node RCE with full `require` scope. config-loader.js inserts a getProps() gadget that spawns `node mapProps.js` detached+stdio:ignore whenever `configJson()` is called (which is exported as a public middleware-looking API from lib/inde",
+      "source": "data/all-review-results.json (2026-05-11/2026-05-24) — verdict MALWARE",
+      "mitre": [
+        "T1027",
+        "T1059.007",
+        "T1105"
+      ],
+      "sample_dir": "samples/recon-vite-json-config/",
+      "expected": {
+        "min_threats": 1,
+        "rules": [
+          "MUADDIB-AST-012",
+          "MUADDIB-AST-092",
+          "MUADDIB-AST-032",
+          "MUADDIB-AST-087",
+          "MUADDIB-AST-002",
+          "MUADDIB-AST-005"
+        ],
+        "severities": [
+          "HIGH",
+          "CRITICAL",
+          "MEDIUM",
+          "LOW"
+        ],
+        "scanners": [
+          "ast",
+          "intent-coherence"
+        ],
+        "score_typical": 93,
+        "tpr_tier": "tpr20"
+      }
     }
   ]
 }

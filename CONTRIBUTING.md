@@ -75,9 +75,9 @@ MUAD'DIB scans Python projects via `src/scanner/python.js` (requirements.txt, se
 
 ### 7. Add adversarial test samples
 
-MUAD'DIB maintains evasive samples to validate scanner robustness (107 samples, 96.3% ADR on available samples, global threshold=20):
-- `datasets/adversarial/` -- 67 samples with evasion techniques (encoding, splitting, indirection)
-- `datasets/holdout-v2/` through `datasets/holdout-v5/` -- 40 holdout samples (4 rounds of 10)
+MUAD'DIB maintains evasive samples to validate scanner robustness (107 samples, **96.26% ADR** on available samples, global threshold=20):
+- `datasets/adversarial/` -- 68 samples with evasion techniques (encoding, splitting, indirection)
+- `datasets/holdout-v2/` through `datasets/holdout-v6/` -- 50 holdout samples (5 rounds of 10)
 
 To add a new adversarial sample:
 1. Create a directory in `datasets/adversarial/` with a malicious pattern that evades detection
@@ -86,10 +86,10 @@ To add a new adversarial sample:
 
 ### 8. Expand ground truth
 
-The ground truth dataset (`tests/ground-truth/`) contains 67 real-world attack samples (65 active, 2 out-of-scope: GT-005 colors and GT-009 faker, protestware with min_threats=0). To add a new sample:
-1. Add the malicious package source to `tests/ground-truth/`
-2. Add an entry in `tests/ground-truth/attacks.json` with `name`, `min_threats`, `expected_types`
-3. Run `node bin/muaddib.js evaluate --ground-truth` to verify TPR
+The ground truth dataset (`tests/ground-truth/`) contains **96 real-world attack samples** (94 in-scope, 2 out-of-scope: GT-005 colors and GT-009 faker, protestware with `min_threats=0`). 22 added 2026-05-25 across three tracks: Track C synthetic for PYSRC/PYAST/AST-092/AICONF-004/PKG-022 (GT-068..083), Track A real-world tarballs from VPS archive (GT-084..089), Track B reconstructions from `data/all-review-results.json` (GT-090..096). 13 PyPI samples (was 0). To add a new sample:
+1. Add the malicious package source to `tests/ground-truth/samples/<name>/`
+2. Add an entry in `tests/ground-truth/attacks.json` with `id`, `name`, `version`, `ecosystem`, `year`, `vector`, `severity`, `description`, `source`, `mitre`, `sample_dir`, `expected` (`min_threats`, `rules`, `severities`, `scanners`, `score_typical`, `tpr_tier`)
+3. Run `node bin/muaddib.js evaluate` to verify TPR; or `scripts/track-a-add-gt-realworld.js <gt-id> <sample-dir>` for real-world tarballs (auto-extracts review reasoning if present)
 
 ## Development
 ```bash
@@ -105,7 +105,7 @@ npm test
 node bin/muaddib.js scan tests/samples --explain
 
 # Run evaluation (TPR, FPR, ADR)
-node bin/muaddib.js evaluate --ground-truth    # TPR on 65 active real attacks
+node bin/muaddib.js evaluate --ground-truth    # TPR on 94 in-scope real attacks
 node bin/muaddib.js evaluate --adversarial     # ADR on 107 evasive samples
 node bin/muaddib.js evaluate --benign          # FPR on 545 scanned npm packages (548 curated)
 ```

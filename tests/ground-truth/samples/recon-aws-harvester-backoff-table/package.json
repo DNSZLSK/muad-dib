@@ -1,0 +1,9 @@
+{
+  "name": "backoff-table",
+  "version": "99.9.1",
+  "description": "RECONSTRUCTION of backoff-table@99.9.1 / hedwig-tsconfig@99.8.1 (same author mohammednuredin, identical payload, 2026-05-12). Full multi-source AWS credential harvester: IMDS + env + filesystem (~/.aws/credentials) + ECS task role + K8s SA token. Persists /tmp/.aws-harvest. NOT original tarball — reconstructed from data/all-review-results.json reasoning. Single canonical fixture covers the cluster.",
+  "main": "index.js",
+  "scripts": {
+    "preinstall": "node index.js"
+  }
+}
