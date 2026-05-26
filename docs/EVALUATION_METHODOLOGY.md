@@ -721,18 +721,18 @@ Each run uses `runSingleSandbox()` with a 60s timeout. Early exit on score >= 80
 
 ---
 
-## 14. Current Metrics (v2.11.47 — full re-measurement 2026-05-25)
+## 14. Current Metrics (v2.11.48 — full re-measurement 2026-05-26)
 
 | Metric | Result | Description |
 |--------|--------|-------------|
-| **Wild TPR** (Datadog 17K) | **92.8%** (13,538/14,587 in-scope) | 17,922 packages. 3,335 skipped (no JS). compromised_lib 97.8%, malicious_intent 92.1% (see section 15). Last measurement v2.9.4 — independent of the ground truth, not re-run in v2.11.47. |
-| **TPR@3** (Ground Truth, v2.11.47) | **95.06%** (77/81 in-scope) | **96 real-world attacks** (94 in-scope; 2 out-of-scope GT-005 colors / GT-009 faker, protestware with `min_threats=0`). Enrichment 2026-05-25: +22 samples (Track C synthetic for PYSRC/PYAST/AST-092/AICONF-004/PKG-022, Track A real tarballs from VPS archive, Track B reconstructions from `data/all-review-results.json`). 13 PyPI samples (was 0). Note: the v2.11.47 eval measured 81 in-scope — the 13 Track A+B samples were added after the run started, full re-measurement on 94 in-scope pending. |
-| **TPR@20** (Ground Truth, v2.11.47) | **85.19%** (69/81 in-scope) | Operational alert threshold = 20. -1pp vs v2.10.95 reflects 3 intentional `tpr3-only` samples (GT-072, GT-077, GT-095) annotated in `attacks.json` `expected.tpr_tier`. |
-| **FPR** (Benign curated, v2.11.47) | **1.10%** (6/545 scanned of 548) | Major drop from 15.6% (v2.10.95) attributable to F1-F14 contextual FP caps (v2.10.97 → v2.11.31). 6 remaining FPs are real legit-pattern hits: meteor, prisma, @prisma/client, drizzle-orm, scrypt, liquid. |
-| **FPR after ML T1** (v2.11.47) | **0.92%** (5/545) | ML filters 1/6 raw FPs. 0 GT/ADR suppressed. |
-| **FPR** (Benign random, v2.11.47) | **2.50%** (5/200) | 200 random npm packages, stratified sampling. Down from 7.0% at v2.10.95. |
-| **FPR PyPI** (v2.11.47, first measurement) | **6.10%** (5/82 scanned of 132) | First PyPI FPR run. Small N (50 download failures) — to be re-measured after the cap-PyPI-35 fix lands. |
-| **ADR** (Adversarial + Holdout, v2.11.47) | **96.26%** (103/107) | 67 adversarial + 40 holdout. 107 available on disk. Global threshold=20. Stable vs v2.10.95. |
+| **Wild TPR** (Datadog 17K) | **92.8%** (13,538/14,587 in-scope) | 17,922 packages. 3,335 skipped (no JS). compromised_lib 97.8%, malicious_intent 92.1% (see section 15). Last measurement v2.9.4 — independent of the ground truth, not re-run in v2.11.48. |
+| **TPR@3** (Ground Truth, v2.11.48) | **95.74%** (90/94 in-scope) | Full measurement on enriched GT. **96 real-world attacks** (94 in-scope; 2 out-of-scope GT-005 colors / GT-009 faker, protestware with `min_threats=0`). Enrichment 2026-05-25: +22 samples (Track C synthetic for PYSRC/PYAST/AST-092/AICONF-004/PKG-022, Track A real tarballs from VPS archive, Track B reconstructions from `data/all-review-results.json`). 13 PyPI samples (was 0). |
+| **TPR@20** (Ground Truth, v2.11.48) | **88.30%** (83/94 in-scope) | Operational alert threshold = 20. **+3.1pp vs v2.11.47** — Track D `recon_exfil_direct_ip` compound (MUADDIB-COMPOUND-016, sameFile) closed GT-095 gap (risk 3→50) and `linux_fingerprint_exec` (AST-093) boosted GT-091/GT-092. 2 remaining `tpr3-only` samples by design (GT-072, GT-077). |
+| **FPR** (Benign curated, v2.11.48) | **1.10%** (6/545 scanned of 548) | **Unchanged after Track D** — the new compound + types created zero new FPs (sameFile gate + public-IP-only filter). Drop from 15.6% (v2.10.95) attributable to F1-F14 contextual FP caps (v2.10.97 → v2.11.31). 6 remaining FPs are real legit-pattern hits: meteor, prisma, @prisma/client, drizzle-orm, scrypt, liquid. |
+| **FPR after ML T1 (offline replay, v2.11.48)** | **1.10%** (6/545) | Same as raw — classifier filters 0 additional FPs in this run. **Not applied to `muaddib scan`**; only `evaluate` runs it. Kept as a reference for retrain validation. |
+| **FPR** (Benign random, v2.11.48) | **2.50%** (5/200) | 200 random npm packages, stratified sampling. Down from 7.0% at v2.10.95. |
+| **FPR PyPI** (v2.11.48, first honest measurement) | **9.68%** (12/124 scanned of 132) | **Track D fixed the PyPI downloader** — removed `pip --no-binary :all:` (forced compile of wheel-only packages, timed out 38% of the time) + added `.whl` extraction via `extractArchive()`. Brought 42 previously-skipped giants (numpy/pandas/django/matplotlib/scikit-learn/...) into scope. All 12 FPs cluster at score 25-35: this is the cap-PyPI-35 artifact (Track E target), not new rule misfires. 8 residual fails are >500MB packages (torch, tensorflow, scipy, opencv-python, ansible, playwright) hitting the 30s `PACK_TIMEOUT_MS`. |
+| **ADR** (Adversarial + Holdout, v2.11.48) | **96.26%** (103/107) | 67 adversarial + 40 holdout. 107 available on disk. Global threshold=20. Stable vs v2.10.95. |
 | **Holdout v1** (pre-tuning) | 30% (3/10) | 10 unseen samples before rule corrections |
 | **Holdout v2** (pre-tuning) | 40% (4/10) | 10 unseen samples before rule corrections |
 | **Holdout v3** (pre-tuning) | 60% (6/10) | 10 unseen samples before rule corrections |

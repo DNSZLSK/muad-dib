@@ -783,6 +783,19 @@ const RULES = {
     references: ['https://attack.mitre.org/techniques/T1195/002/'],
     mitre: 'T1195.002'
   },
+  recon_exfil_direct_ip: {
+    id: 'MUADDIB-COMPOUND-016',
+    name: 'Linux Fingerprint + Direct-IP Exfil',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    domain: 'malware',
+    description: 'execSync(id|uname|lsb_release|hostname|whoami) + http/https vers IPv4 literal publique dans le meme fichier — fingerprint device pour groupement C2 cible. Pattern observe sur la campagne marginfi (mai 2026) et design-system-coopeuch reconstruction. Track D — ferme la gap surfacee par GT-095.',
+    references: [
+      'https://attack.mitre.org/techniques/T1082/',
+      'https://attack.mitre.org/techniques/T1041/'
+    ],
+    mitre: 'T1082'
+  },
 
   // Package.json script patterns
   curl_pipe_sh: {
@@ -1112,6 +1125,33 @@ const RULES = {
       'https://attack.mitre.org/techniques/T1564/'
     ],
     mitre: 'T1564'
+  },
+  linux_fingerprint_exec: {
+    id: 'MUADDIB-AST-093',
+    name: 'Linux System Reconnaissance Exec',
+    severity: 'HIGH',
+    confidence: 'high',
+    domain: 'malware',
+    description: 'execSync/exec/spawn d\'une commande de reconnaissance Linux (id, uname, lsb_release, hostname, whoami). Pattern observe sur les MALWARE direct-IP-exfil (marginfi cluster, design-system-coopeuch) qui collectent un fingerprint device avant exfil C2. HIGH seul (telemetry SDKs peuvent appeler hostname legit) — escalade CRITICAL en compound avec direct_ip_exfil dans le meme fichier.',
+    references: [
+      'https://attack.mitre.org/techniques/T1082/',
+      'https://attack.mitre.org/techniques/T1592/'
+    ],
+    mitre: 'T1082'
+  },
+  direct_ip_exfil: {
+    id: 'MUADDIB-AST-094',
+    name: 'Direct IP Exfiltration Endpoint',
+    severity: 'HIGH',
+    confidence: 'high',
+    domain: 'malware',
+    description: 'Literal IPv4 publique utilise comme endpoint C2 (URL http://1.2.3.4:port/path ou IP nue dans un host:/hostname: option). Bypass DNS resolution = pattern attaque ciblee. Plages skip: 127/8 (localhost), 169.254/16 (link-local incl. IMDS), 10/8 + 172.16/12 + 192.168/16 (RFC 1918 prive). RFC 5737 documentation flagge (aucun usage runtime legit).',
+    references: [
+      'https://attack.mitre.org/techniques/T1071/001/',
+      'https://attack.mitre.org/techniques/T1041/',
+      'https://datatracker.ietf.org/doc/html/rfc5737'
+    ],
+    mitre: 'T1041'
   },
   dangerous_call_function: {
     id: 'MUADDIB-AST-005',

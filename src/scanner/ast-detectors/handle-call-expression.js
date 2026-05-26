@@ -349,6 +349,21 @@ function handleCallExpression(node, ctx) {
           file: ctx.relFile
         });
       }
+
+      // AST-NNN: linux_fingerprint_exec (Track D, v2.11.48+) — recon command
+      // pattern observed on direct-IP-exfil malware (marginfi cluster, GT-095
+      // design-system-coopeuch). HIGH alone (telemetry SDKs may legitimately
+      // call hostname); CRITICAL when compounded with direct_ip_exfil in the
+      // same file (`recon_exfil_direct_ip` in SCORING_COMPOUNDS).
+      if (/^\s*(id|uname|lsb_release|hostname|whoami)(\s|$)/.test(cmdStr)) {
+        const firstTok = cmdStr.trim().split(/\s+/)[0];
+        ctx.threats.push({
+          type: 'linux_fingerprint_exec',
+          severity: 'HIGH',
+          message: `${execName || memberExec}("${cmdStr.slice(0, 60)}") — Linux system reconnaissance (${firstTok}) used for device fingerprinting / C2 grouping.`,
+          file: ctx.relFile
+        });
+      }
     }
   }
 
@@ -424,7 +439,7 @@ function handleCallExpression(node, ctx) {
   }
 
   // Detect spawn/execFile of shell processes
-  if ((callName === 'spawn' || callName === 'execFile') && node.arguments.length >= 1) {
+  if ((callName === 'spawn' || callName === 'execFile' || callName === 'spawnSync' || callName === 'execFileSync') && node.arguments.length >= 1) {
     const shellArg = node.arguments[0];
     if (shellArg.type === 'Literal' && typeof shellArg.value === 'string') {
       const shellBin = shellArg.value.toLowerCase();
@@ -433,6 +448,16 @@ function handleCallExpression(node, ctx) {
           type: 'dangerous_call_exec',
           severity: 'MEDIUM',
           message: `${callName}('${shellArg.value}') — direct shell process spawn detected.`,
+          file: ctx.relFile
+        });
+      }
+      // AST-NNN: linux_fingerprint_exec (Track D, v2.11.48+) — spawn form,
+      // first arg is the bare command (e.g. `spawn('uname', ['-a'])`).
+      if (['id', 'uname', 'lsb_release', 'hostname', 'whoami'].includes(shellBin)) {
+        ctx.threats.push({
+          type: 'linux_fingerprint_exec',
+          severity: 'HIGH',
+          message: `${callName}('${shellArg.value}', ...) — Linux system reconnaissance (${shellBin}) used for device fingerprinting / C2 grouping.`,
           file: ctx.relFile
         });
       }

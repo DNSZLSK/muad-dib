@@ -24,20 +24,20 @@
 |----------|-------------|
 | [Carnet de Bord](CARNET_DE_BORD_MUADDIB.md) | Development journal (French) — project history and decisions |
 
-## Current Metrics (v2.11.47)
+## Current Metrics (v2.11.48)
 
 | Metric | Value |
 |--------|-------|
-| Tests | **3902** across 108 files |
-| Rules | **259** (254 RULES + 5 PARANOID) |
+| Tests | **3913** across 109 files |
+| Rules | **262** (257 RULES + 5 PARANOID — Track D added 3) |
 | Scanners | **20 parallel** + 2 pre-analysis (module-graph, deobfuscate) + 1 async parser bootstrap (python-ast WASM) + 5 conditional/post-processing (paranoid, 3× temporal-*, reachability) + 1 metadata (npm-registry) |
-| TPR@3 (Ground Truth, v2.11.47 measure) | **95.06%** (77/81 in-scope) — pre-Track-A+B subset; re-measurement on 94 in-scope pending |
-| TPR@20 (Ground Truth, v2.11.47 measure) | **85.19%** (69/81 in-scope) — -1pp vs v2.10.95 reflects 3 intentional `tpr3-only` samples |
-| FPR rules (Benign curated, v2.11.47 measure) | **1.10%** (6/545 scanned of 548) — down from 15.6% (v2.10.95), attributable to F1-F14 contextual caps (v2.10.97 → v2.11.31). The 6 remaining FPs are real: meteor, prisma, @prisma/client, drizzle-orm, scrypt, liquid |
-| FPR after ML T1 (v2.11.47 measure) | **0.92%** (5/545) |
-| FPR (Benign random, v2.11.47 measure) | **2.50%** (5/200) |
-| FPR PyPI (v2.11.47, first measurement) | **6.10%** (5/82 scanned of 132) — first PyPI run, small N |
-| ADR (Adversarial + Holdout, v2.11.47) | **96.26%** (103/107) |
+| TPR@3 (Ground Truth, v2.11.48 measure) | **95.74%** (90/94 in-scope) — full re-measurement on enriched GT |
+| TPR@20 (Ground Truth, v2.11.48 measure) | **88.30%** (83/94 in-scope) — **+3.1pp vs v2.11.47** via Track D `recon_exfil_direct_ip` compound (closes GT-095 gap, boosts GT-091/GT-092) |
+| FPR rules (Benign curated, v2.11.48 measure) | **1.10%** (6/545 scanned of 548) — **unchanged after Track D** (sameFile gate + public-IP-only filter prevent new FPs). Drop from 15.6% (v2.10.95) attributable to F1-F14 contextual caps. 6 remaining FPs are real: meteor, prisma, @prisma/client, drizzle-orm, scrypt, liquid |
+| FPR after ML T1 (offline replay, v2.11.48) | **1.10%** (6/545) — same as raw, classifier filters 0 additional. Not applied to `scan`; only `evaluate` runs it |
+| FPR (Benign random, v2.11.48 measure) | **2.50%** (5/200) |
+| FPR PyPI (v2.11.48, first honest measurement) | **9.68%** (12/124 scanned of 132) — Track D fixed the downloader (was 82/132 biased at v2.11.47, 6.10%). All 12 FPs at score 25-35 = cap-PyPI-35 artifact (Track E target) |
+| ADR (Adversarial + Holdout, v2.11.48) | **96.26%** (103/107) |
 | Wild TPR (Datadog 17K) | 92.8% (13,538/14,587 in-scope) — last measurement v2.9.4, independent of GT |
 | Ground truth samples | **96** (94 active + 2 protestware with `min_threats=0`). 22 added 2026-05-25: 16 Track C synthetic + 6 Track A real-world + 7 Track B reconstructions. 13 PyPI (was 0). |
 

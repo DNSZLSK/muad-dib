@@ -86,6 +86,15 @@ const PLAYBOOKS = {
   detached_process:
     'spawn/fork avec {detached: true} detecte. Le processus enfant survit a la fin de npm install et execute le payload en arriere-plan. Verifier les processus en cours: ps aux | grep node. Tuer le processus suspect.',
 
+  linux_fingerprint_exec:
+    'execSync/spawn d\'une commande de reconnaissance Linux (id, uname, lsb_release, hostname, whoami). Seule, peut etre du telemetry legit. Combinee avec un envoi reseau, c\'est du fingerprint pour C2 grouping — verifier le contexte (compound recon_exfil_direct_ip si IP literal publique present dans le meme fichier).',
+
+  direct_ip_exfil:
+    'Endpoint C2 hardcode comme IPv4 literal publique (bypass DNS resolution). Verifier le fichier qui contient l\'IP : si combine avec linux_fingerprint_exec ou credential_regex_harvest, c\'est tres probablement un C2 attaquant. Geolocaliser l\'IP, croiser avec threat intel.',
+
+  recon_exfil_direct_ip:
+    'CRITIQUE: Linux system fingerprint (id/uname/lsb_release/hostname/whoami) + exfil vers IPv4 publique literal dans le meme fichier. Pattern targeted C2 grouping (campagne marginfi mai 2026, design-system-coopeuch). Isoler la machine, blocker l\'IP au firewall, capturer trafic sortant pour forensic.',
+
   known_malicious_package:
     'CRITIQUE: Supprimer immediatement. rm -rf node_modules && npm cache clean --force && npm install',
 
