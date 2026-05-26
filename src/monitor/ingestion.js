@@ -372,7 +372,7 @@ async function getNpmLatestTarball(packageName) {
   await acquireRegistrySlot();
   let body;
   try {
-    body = await httpsGet(url);
+    body = await _deps.httpsGet(url);
   } finally {
     releaseRegistrySlot();
   }
@@ -391,6 +391,112 @@ async function getNpmLatestTarball(packageName) {
     };
   }
   return result;
+}
+
+// --- Pre-resolution helpers ---
+//
+// Resolve tarball URLs and metadata at ingestion time so scan workers do not
+// each pay a separate registry round-trip. Best-effort: any failure leaves
+// item.tarballUrl untouched (null) so resolveTarballAndScan() in queue.js
+// falls back to its existing lazy-resolution path (zero scan loss).
+//
+// HTTP throttling: getNpmLatestTarball / getPyPITarballUrl already acquire
+// the shared REGISTRY_SEMAPHORE_MAX=20 slot + 30 req/sec token bucket, so
+// fan-out is naturally bounded — bursts queue up rather than overrun the
+// registry. We still chunk explicitly below so the Promise closures don't
+// pile up on a 1000-item catch-up batch (each waiting on the semaphore
+// holds ~10KB of state; 1000 of them is a needless heap spike).
+const PRE_RESOLVE_CHUNK_SIZE = 50;
+
+// If a scanQueue is provided, items are pushed onto it as soon as their chunk
+// finishes resolution — so a crash mid-batch only loses the current chunk's
+// in-flight work, not all the chunks that already completed. When scanQueue
+// is omitted (unit tests, lib usage), items are only mutated in place and the
+// caller decides when to push.
+async function preResolveNpmBatch(items, stats, scanQueue) {
+  if (!items || items.length === 0) return;
+  const start = Date.now();
+  let resolved = 0;
+  let alreadyResolved = 0;
+  let failed = 0;
+  for (let i = 0; i < items.length; i += PRE_RESOLVE_CHUNK_SIZE) {
+    const chunk = items.slice(i, i + PRE_RESOLVE_CHUNK_SIZE);
+    await Promise.all(chunk.map(async (item) => {
+      if (item.tarballUrl) { alreadyResolved++; return; }
+      try {
+        const npmInfo = await getNpmLatestTarball(item.name);
+        if (npmInfo && npmInfo.tarball) {
+          item.tarballUrl = npmInfo.tarball;
+          if (!item.version) item.version = npmInfo.version || '';
+          if (!item.unpackedSize) item.unpackedSize = npmInfo.unpackedSize || 0;
+          if (!item.registryScripts) item.registryScripts = npmInfo.scripts || null;
+          // Stash full packument-derived metadata for resolveTarballAndScan so
+          // the worker can run ATO-signature, burst-extras, and fast-track logic
+          // without a second registry call.
+          item._npmInfo = npmInfo;
+          resolved++;
+        } else {
+          failed++;
+        }
+      } catch {
+        // Silent: worker will retry via lazy resolution. Logging here would
+        // double-count errors that the worker already surfaces.
+        failed++;
+      }
+    }));
+    // Crash resilience: surface this chunk to the queue now, before the next
+    // chunk starts. If the process dies between chunks we still keep the work
+    // already done. Items keep their original order because chunks complete
+    // sequentially.
+    if (scanQueue) {
+      for (const item of chunk) scanQueue.push(item);
+    }
+  }
+  if (stats) {
+    stats.npmPreResolved = (stats.npmPreResolved || 0) + resolved;
+    stats.npmPreResolveFailed = (stats.npmPreResolveFailed || 0) + failed;
+  }
+  if (items.length >= 5) {
+    const elapsed = Date.now() - start;
+    console.log(`[MONITOR] PRE-RESOLVE npm: ${resolved}/${items.length} in ${elapsed}ms (${failed} → lazy fallback${alreadyResolved ? `, ${alreadyResolved} already resolved` : ''})`);
+  }
+}
+
+async function preResolvePyPIBatch(items, stats, scanQueue) {
+  if (!items || items.length === 0) return;
+  const start = Date.now();
+  let resolved = 0;
+  let alreadyResolved = 0;
+  let failed = 0;
+  for (let i = 0; i < items.length; i += PRE_RESOLVE_CHUNK_SIZE) {
+    const chunk = items.slice(i, i + PRE_RESOLVE_CHUNK_SIZE);
+    await Promise.all(chunk.map(async (item) => {
+      if (item.tarballUrl) { alreadyResolved++; return; }
+      try {
+        const pypiInfo = await getPyPITarballUrl(item.name, item.version || '');
+        if (pypiInfo && pypiInfo.url) {
+          item.tarballUrl = pypiInfo.url;
+          if (!item.version && pypiInfo.version) item.version = pypiInfo.version;
+          resolved++;
+        } else {
+          failed++;
+        }
+      } catch {
+        failed++;
+      }
+    }));
+    if (scanQueue) {
+      for (const item of chunk) scanQueue.push(item);
+    }
+  }
+  if (stats) {
+    stats.pypiPreResolved = (stats.pypiPreResolved || 0) + resolved;
+    stats.pypiPreResolveFailed = (stats.pypiPreResolveFailed || 0) + failed;
+  }
+  if (items.length >= 5) {
+    const elapsed = Date.now() - start;
+    console.log(`[MONITOR] PRE-RESOLVE pypi: ${resolved}/${items.length} in ${elapsed}ms (${failed} → lazy fallback${alreadyResolved ? `, ${alreadyResolved} already resolved` : ''})`);
+  }
 }
 
 // --- npm polling ---
@@ -481,6 +587,10 @@ async function pollNpmChanges(state, scanQueue, stats) {
     stats.npmPublishEventsSeen = (stats.npmPublishEventsSeen || 0) + data.results.length;
 
     let queued = 0;
+    // Collect items into a local batch so we can pre-resolve tarball URLs in
+    // parallel before pushing to scanQueue. Items reach workers with metadata
+    // already attached → workers skip the per-scan registry round-trip.
+    const newItems = [];
     for (const change of data.results) {
       // Skip deleted packages
       if (change.deleted) continue;
@@ -547,11 +657,10 @@ async function pollNpmChanges(state, scanQueue, stats) {
       // Layer 3: Evaluate if this package should be cached
       const cacheTrigger = evaluateCacheTrigger(name, docMeta, change.doc || null);
 
-      // Layer 2: Extract tarball URL from CouchDB doc (eliminates lazy resolution 404 race)
-      // NOTE: fastTrack flag is computed in resolveTarballAndScan() AFTER metadata
-      // resolution via getNpmLatestTarball(). It cannot be computed here because
-      // post-May 2025, include_docs is deprecated and change.doc is always null.
-      scanQueue.push({
+      // Post-May 2025: change.doc is always null, so docMeta is null and tarballUrl
+      // starts as null. preResolveNpmBatch below fills tarballUrl + metadata via
+      // a parallel registry fetch so workers do not pay the round-trip per scan.
+      newItems.push({
         name,
         version: docMeta ? docMeta.version : '',
         ecosystem: 'npm',
@@ -563,6 +672,11 @@ async function pollNpmChanges(state, scanQueue, stats) {
       });
       queued++;
     }
+
+    // Parallel pre-resolution, pushed chunk by chunk for crash resilience.
+    // Failures leave tarballUrl=null so the existing lazy-resolution path in
+    // resolveTarballAndScan() picks up the slack — zero scan loss.
+    await preResolveNpmBatch(newItems, stats, scanQueue);
 
     // Update seq in memory only — disk persistence is handled by daemon.js
     // after both queue and seq are saved atomically (prevents data loss on crash).
@@ -623,6 +737,7 @@ async function pollNpmRss(state, scanQueue, stats) {
     // falls back to RSS.
     stats.npmPublishEventsSeen = (stats.npmPublishEventsSeen || 0) + newPackages.length;
 
+    const newItems = [];
     for (const name of newPackages) {
       if (name === SELF_PACKAGE_NAME) {
         console.log(`[MONITOR] SKIPPED (self): ${name}`);
@@ -666,14 +781,17 @@ async function pollNpmRss(state, scanQueue, stats) {
         }
       }
 
-      // Queue npm packages — tarball URL resolved during scan
-      scanQueue.push({
+      newItems.push({
         name,
         version: '',
         ecosystem: 'npm',
-        tarballUrl: null // resolved lazily via resolveTarballAndScan (no CouchDB doc in RSS)
+        tarballUrl: null // pre-resolved below; lazy fallback preserved on failure
       });
     }
+
+    // Parallel pre-resolution with per-chunk push → crash-resilient and saves
+    // the worker's per-scan registry round-trip when it succeeds.
+    await preResolveNpmBatch(newItems, stats, scanQueue);
 
     // Remember the most recent package (first in RSS)
     if (packages.length > 0) {
@@ -901,6 +1019,7 @@ async function pollPyPIChangelog(state, scanQueue, stats) {
     const seen = new Set();
     let queued = 0;
     let maxSerial = lastSerial;
+    const newItems = [];
 
     for (const ev of events) {
       if (ev.serial > maxSerial) maxSerial = ev.serial;
@@ -932,15 +1051,19 @@ async function pollPyPIChangelog(state, scanQueue, stats) {
         }
       } catch { /* IOC load failure is non-fatal */ }
 
-      scanQueue.push({
+      newItems.push({
         name: ev.name,
         version: ev.version,
         ecosystem: 'pypi',
-        tarballUrl: null, // resolved lazily via getPyPITarballUrl()
+        tarballUrl: null, // pre-resolved below; lazy fallback preserved
         isIOCMatch: isKnownIOC
       });
       queued++;
     }
+
+    // Parallel pre-resolution with per-chunk push to scanQueue. Failures keep
+    // tarballUrl=null so resolveTarballAndScan() falls back to lazy lookup.
+    await preResolvePyPIBatch(newItems, stats, scanQueue);
 
     // Persist the serial both in memory and on disk before returning.
     // daemon.js also flushes state.json after the queue is saved, but writing the
@@ -996,16 +1119,21 @@ async function pollPyPIRss(state, scanQueue) {
       }
     }
 
+    const newItems = [];
     for (const name of newPackages) {
       console.log(`[MONITOR] New pypi (rss): ${name}`);
-      // Queue PyPI packages — tarball URL resolved during scan
-      scanQueue.push({
+      newItems.push({
         name,
         version: '',
         ecosystem: 'pypi',
-        tarballUrl: null // resolved lazily in scanPackage wrapper
+        tarballUrl: null // pre-resolved below; lazy fallback preserved
       });
     }
+
+    // pollPyPIRss does not have a stats arg today; pass {} so the helper still
+    // runs but per-poll counters are dropped. The PRE-RESOLVE log line gives
+    // operational visibility regardless. scanQueue is passed for per-chunk push.
+    await preResolvePyPIBatch(newItems, {}, scanQueue);
 
     // Remember the most recent package (first in RSS)
     if (packages.length > 0) {
@@ -1119,6 +1247,8 @@ module.exports = {
   getNpmTarballUrl,
   getPyPITarballUrl,
   getNpmLatestTarball,
+  preResolveNpmBatch,
+  preResolvePyPIBatch,
 
   // RSS parsing
   parseNpmRss,
