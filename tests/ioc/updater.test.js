@@ -640,7 +640,8 @@ test('BOOTSTRAP: isAllowedRedirect rejects invalid URLs', () => {
 });
 
 asyncTest('BOOTSTRAP: ensureIOCs skips download when cache file exists and is large enough', async () => {
-  const { ensureIOCs, IOCS_PATH, MIN_IOCS_SIZE } = require('../../src/ioc/bootstrap.js');
+  const { ensureIOCs, IOCS_PATH, MIN_IOCS_SIZE, _resetEnsureIocsForTests } = require('../../src/ioc/bootstrap.js');
+  _resetEnsureIocsForTests();
   // Only test skip behavior if the cache file already exists (from a previous update/scrape)
   if (fs.existsSync(IOCS_PATH) && fs.statSync(IOCS_PATH).size >= MIN_IOCS_SIZE) {
     const result = await ensureIOCs();
@@ -858,7 +859,7 @@ test('COMPACT: generateCompactIOCs skips __proto__ keys', () => {
 
 console.log('\n=== BOOTSTRAP COVERAGE TESTS ===\n');
 
-const { isAllowedRedirect: bootstrapIsAllowedRedirect, ensureIOCs: bootstrapEnsureIOCs, downloadAndDecompress, IOCS_PATH: BOOTSTRAP_IOCS_PATH, HOME_DATA_DIR: BOOTSTRAP_HOME_DATA_DIR, MIN_IOCS_SIZE: BOOTSTRAP_MIN_IOCS_SIZE } = require('../../src/ioc/bootstrap.js');
+const { isAllowedRedirect: bootstrapIsAllowedRedirect, ensureIOCs: bootstrapEnsureIOCs, downloadAndDecompress, IOCS_PATH: BOOTSTRAP_IOCS_PATH, HOME_DATA_DIR: BOOTSTRAP_HOME_DATA_DIR, MIN_IOCS_SIZE: BOOTSTRAP_MIN_IOCS_SIZE, _resetEnsureIocsForTests: bootstrapReset } = require('../../src/ioc/bootstrap.js');
 
 test('BOOTSTRAP-COV: isAllowedRedirect allows github.com', () => {
   assert(bootstrapIsAllowedRedirect('https://github.com/some/path') === true, 'github.com should be allowed');
@@ -889,6 +890,7 @@ test('BOOTSTRAP-COV: isAllowedRedirect blocks empty string', () => {
 });
 
 await asyncTest('BOOTSTRAP-COV: ensureIOCs returns true when IOC file exists and is large enough', async () => {
+  bootstrapReset();
   const origExists = fs.existsSync;
   const origStat = fs.statSync;
   fs.existsSync = (p) => {
@@ -910,15 +912,18 @@ await asyncTest('BOOTSTRAP-COV: ensureIOCs returns true when IOC file exists and
 });
 
 await asyncTest('BOOTSTRAP-COV: ensureIOCs handles download failure gracefully', async () => {
+  bootstrapReset();
   const origExists = fs.existsSync;
   const origStderr = process.stderr.write;
   const stderrOutput = [];
   // Mock https.get to simulate network failure (never hit real network in tests)
   const https = require('https');
   const origHttpsGet = https.get;
+  const BUNDLED_IOCS = path.join(__dirname, '..', '..', 'src', 'ioc', 'data', 'iocs.json');
   fs.existsSync = (p) => {
     if (p === BOOTSTRAP_HOME_DATA_DIR) return true;
     if (p === BOOTSTRAP_IOCS_PATH) return false; // IOCs don't exist
+    if (p === BUNDLED_IOCS) return false; // bundled IOCs also absent — force download path
     return origExists(p);
   };
   process.stderr.write = (msg) => { stderrOutput.push(msg); };

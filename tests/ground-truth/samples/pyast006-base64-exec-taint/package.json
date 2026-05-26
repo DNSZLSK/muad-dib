@@ -1,0 +1,1 @@
+{ "name": "pyast-base64-exec-taint-fixture", "version": "0.0.0", "description": "PYAST-006 positive (base64→exec taint). NOT REAL MALWARE." }

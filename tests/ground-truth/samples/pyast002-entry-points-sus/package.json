@@ -1,0 +1,1 @@
+{ "name": "pyast-entry-points-sus-fixture", "version": "0.0.0", "description": "PYAST-002 positive — entry_points with suspicious _post_install name." }

@@ -125,7 +125,15 @@ async function execute(targetPath, options, pythonDeps, warnings) {
   const deobfuscateFn = options.noDeobfuscate ? null : deobfuscate;
 
   // Helper: yield to event loop so spinner can animate between sync operations
-  const yieldThen = (fn) => new Promise(resolve => setImmediate(() => resolve(fn())));
+  // Yield to the event loop before running `fn`. Without the try/catch the
+  // exception escapes the setImmediate callback as an uncaught exception
+  // (Node's setImmediate handler is outside any await/promise frame) and
+  // crashes the process — which is what was killing evaluate on benigns that
+  // hit a corner-case in detect-cross-file.js. Now sync throws become
+  // promise rejections, picked up by the surrounding try/catch.
+  const yieldThen = (fn) => new Promise((resolve, reject) =>
+    setImmediate(() => { try { resolve(fn()); } catch (e) { reject(e); } })
+  );
 
   // Cross-file module graph analysis (before individual scanners)
   // Bounded: 5s timeout to prevent DoS on large/adversarial packages

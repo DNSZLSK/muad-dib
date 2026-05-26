@@ -395,7 +395,7 @@ function collectImportTaint(ast, currentFile, graph, taintedExports, packagePath
       // const data = reader.getData()  or  const data = reader.data
       if (decl.init.type === 'MemberExpression' && decl.init.object.type === 'Identifier') {
         const modRef = localTaint['__module__' + decl.init.object.name];
-        if (modRef) {
+        if (modRef && modRef.modTaint) {
           const propName = decl.init.property.name || decl.init.property.value;
           if (modRef.modTaint[propName] && modRef.modTaint[propName].tainted) {
             const t = modRef.modTaint[propName];
@@ -411,7 +411,7 @@ function collectImportTaint(ast, currentFile, graph, taintedExports, packagePath
         const callee = decl.init.callee;
         if (callee.object.type === 'Identifier') {
           const modRef = localTaint['__module__' + callee.object.name];
-          if (modRef) {
+          if (modRef && modRef.modTaint) {
             const propName = callee.property.name || callee.property.value;
             if (modRef.modTaint[propName] && modRef.modTaint[propName].tainted) {
               const t = modRef.modTaint[propName];
@@ -474,7 +474,7 @@ function collectImportTaint(ast, currentFile, graph, taintedExports, packagePath
             const thisProp = decl.init.callee.object.property.name || decl.init.callee.object.property.value;
             const methodName = decl.init.callee.property.name || decl.init.callee.property.value;
             const modRef = thisRefs[thisProp];
-            if (modRef && methodName && modRef.modTaint[methodName] && modRef.modTaint[methodName].tainted) {
+            if (modRef && methodName && modRef.modTaint && modRef.modTaint[methodName] && modRef.modTaint[methodName].tainted) {
               const t = modRef.modTaint[methodName];
               localTaint[decl.id.name] = {
                 source: t.source,

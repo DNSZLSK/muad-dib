@@ -1,0 +1,9 @@
+{
+  "name": "marginfi-client-v2",
+  "version": "999.0.0",
+  "description": "RECONSTRUCTION of the marginfi/mrgn-* cluster (5 packages published 2026-05-12 by the same attacker against MarginFi's DeFi Solana ecosystem). NOT the original tarball — the VPS archive retention window (7d) had elapsed by the time we tried to fetch it. Reconstructed from data/all-review-results.json reasoning + proof_of_read.",
+  "main": "index.js",
+  "scripts": {
+    "preinstall": "node preinstall.js"
+  }
+}

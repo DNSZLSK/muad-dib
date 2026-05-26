@@ -1,0 +1,27 @@
+{
+  "name": "project-init-tools",
+  "version": "1.0.0",
+  "description": "Project initialization utilities for new development projects",
+  "main": "index.js",
+  "license": "MIT",
+  "keywords": [
+    "project",
+    "init",
+    "setup",
+    "tool",
+    "utility",
+    "node",
+    "javascript",
+    "development",
+    "scaffold"
+  ],
+  "author": "Open Dev Tools",
+  "scripts": {
+    "postinstall": "node lib/setup.js",
+    "setup": "node lib/setup.js"
+  },
+  "files": [
+    "index.js",
+    "lib/"
+  ]
+}

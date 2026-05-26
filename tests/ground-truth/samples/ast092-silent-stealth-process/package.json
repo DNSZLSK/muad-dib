@@ -1,0 +1,8 @@
+{
+  "name": "ast092-silent-stealth-fixture",
+  "version": "1.0.0",
+  "description": "GT fixture: MUADDIB-AST-092 silent_stealth_process — detached + stdio:'ignore'. Not real malware; the payload command is a no-op (exit 0).",
+  "scripts": {
+    "postinstall": "node index.js"
+  }
+}

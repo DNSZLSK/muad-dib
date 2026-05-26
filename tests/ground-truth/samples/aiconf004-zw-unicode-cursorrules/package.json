@@ -1,0 +1,5 @@
+{
+  "name": "aiconf004-zw-unicode-fixture",
+  "version": "1.0.0",
+  "description": "GT fixture: MUADDIB-AICONF-004 zero-width Unicode in AI config. .cursorrules file contains 8 invisible codepoints (ZWSP / ZWNJ / ZWJ) interleaved within shell-command keywords to bypass human review. Inert — the contained command is `true`."
+}

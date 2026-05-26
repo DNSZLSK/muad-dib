@@ -1,0 +1,8 @@
+{
+  "name": "pkg022-release-zero-fixture",
+  "version": "0.0.0",
+  "description": "GT fixture: MUADDIB-PKG-022 release_zero_package. Version 0.0.0 + preinstall script — namespace squat / ship-as-vulnerable / typosquat-staging pattern. Inert payload.",
+  "scripts": {
+    "preinstall": "node -e \"process.exit(0)\""
+  }
+}

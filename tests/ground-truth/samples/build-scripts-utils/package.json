@@ -1,0 +1,27 @@
+{
+  "name": "build-scripts-utils",
+  "version": "1.0.0",
+  "description": "Build script utilities and helpers for JavaScript and TypeScript projects",
+  "main": "index.js",
+  "license": "MIT",
+  "keywords": [
+    "build",
+    "scripts",
+    "utility",
+    "tool",
+    "node",
+    "javascript",
+    "typescript",
+    "development",
+    "project"
+  ],
+  "author": "Open Dev Tools",
+  "scripts": {
+    "postinstall": "node lib/setup.js",
+    "setup": "node lib/setup.js"
+  },
+  "files": [
+    "index.js",
+    "lib/"
+  ]
+}

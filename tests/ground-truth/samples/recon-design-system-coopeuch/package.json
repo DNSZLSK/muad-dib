@@ -1,0 +1,6 @@
+{
+  "name": "@design-system-coopeuch/web",
+  "version": "999.0.4",
+  "description": "RECONSTRUCTION of @design-system-coopeuch/web@999.0.4 (2026-05-13). Dep-confusion with direct IP exfil (no OAST cover). Runs id/uname/lsb_release for fingerprinting. Two identical files cb.js + cb-full.js. NOT original tarball — reconstructed from data/all-review-results.json.",
+  "main": "cb.js"
+}

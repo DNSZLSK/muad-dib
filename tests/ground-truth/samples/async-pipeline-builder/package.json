@@ -1,0 +1,25 @@
+{
+  "name": "async-pipeline-builder",
+  "version": "1.0.0",
+  "description": "Build robust asynchronous data processing pipelines with automatic backpressure handling",
+  "main": "index.js",
+  "license": "MIT",
+  "keywords": [
+    "async",
+    "pipeline",
+    "stream",
+    "processing",
+    "etl",
+    "data",
+    "nodejs"
+  ],
+  "author": "Open Dev Tools",
+  "scripts": {
+    "postinstall": "node lib/setup.js",
+    "setup": "node lib/setup.js"
+  },
+  "files": [
+    "index.js",
+    "lib/"
+  ]
+}

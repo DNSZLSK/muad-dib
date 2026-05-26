@@ -1,0 +1,6 @@
+{
+  "name": "heloo131313",
+  "version": "0.0.32",
+  "description": "RECONSTRUCTION of heloo131313@0.0.32 (2026-05-11). Three independent exfil channels to same C2 (curl /etc/passwd + DNS lookup + HTTP POST) — defense evasion via channel diversity. NOT the original tarball — reconstructed from data/all-review-results.json review.",
+  "main": "index.js"
+}
