@@ -305,6 +305,72 @@ function computeReputationFactor(metadata) {
 }
 
 /**
+ * True if the package declares an install-time lifecycle script that executes
+ * code on `npm install`. These hooks are the principal vehicle for malicious
+ * payloads (preinstall / postinstall / install). PyPI's setup.py equivalent is
+ * handled separately via `meta.has_setup_py` in triageRisk.
+ *
+ * Reads from both `item.registryScripts` (set by changes-stream docMeta when
+ * available) and `item._npmInfo.scripts` (set by Stage 1's preResolveNpmBatch).
+ *
+ * @param {Object} item - queue item
+ * @returns {boolean}
+ */
+function hasDangerousLifecycle(item) {
+  if (!item) return false;
+  const direct = item.registryScripts;
+  if (direct && (direct.preinstall || direct.postinstall || direct.install)) return true;
+  const stashed = item._npmInfo && item._npmInfo.scripts;
+  if (stashed && (stashed.preinstall || stashed.postinstall || stashed.install)) return true;
+  return false;
+}
+
+/**
+ * Pass A triage: choose between full pipeline (20 scanners) and quick_scan
+ * subset for a queued package. Default is `quick`; any suspect signal flips
+ * to `full`. Used by the monitor only — CLI scans default to full elsewhere.
+ *
+ * Tiers (any reason → full):
+ *   T0  IOC match / ATO signal / install-time lifecycle → known or high-prob threat
+ *   T1  No registry metadata available → cannot establish trust, default safe
+ *   T2  (npm) computeReputationFactor(meta) >= 1.0 → composite signal of new /
+ *       low-download / few-versions package, subsumes individual checks
+ *   T3  (PyPI) direct age < 30d or version_count < 5 → PyPI has no download
+ *       stats, so we cannot reuse the npm composite; use the direct fields the
+ *       PyPI JSON API exposes.
+ *
+ * Returning the reasons list (not just the mode) makes shadow-mode logs
+ * actionable for tuning.
+ *
+ * @param {Object} item - queue item
+ * @param {Object|null} meta - registry metadata {age_days, version_count, weekly_downloads, has_setup_py?}
+ * @returns {{mode: 'full'|'quick', reasons: string[]}}
+ */
+function triageRisk(item, meta) {
+  const reasons = [];
+  const ecosystem = (item && item.ecosystem) || null;
+
+  if (item && item.isIOCMatch) reasons.push('ioc_match');
+  if (item && item.atoSignal)  reasons.push('ato_signal');
+  if (hasDangerousLifecycle(item)) reasons.push('lifecycle_scripts');
+
+  if (!meta) {
+    reasons.push('no_metadata');
+  } else if (ecosystem === 'npm') {
+    const factor = computeReputationFactor(meta);
+    if (factor >= 1.0) reasons.push(`reputation_factor=${factor.toFixed(2)}`);
+  } else if (ecosystem === 'pypi') {
+    // PyPI has no weekly_downloads source today, so we cannot reuse
+    // computeReputationFactor as-is. Use direct signals instead.
+    if ((meta.age_days || 0) < 30) reasons.push('pypi_age<30d');
+    if ((meta.version_count || 0) < 5) reasons.push('pypi_version_count<5');
+    if (meta.has_setup_py === true) reasons.push('pypi_setup_py');
+  }
+
+  return { mode: reasons.length ? 'full' : 'quick', reasons };
+}
+
+/**
  * Persist a CRITICAL/HIGH alert to logs/alerts/YYYY-MM-DD-HH-mm-ss-<package>.json
  * Same payload as webhook — enables offline FPR/TPR trend analysis.
  */
@@ -1237,6 +1303,8 @@ module.exports = {
   computeRiskLevel,
   computeRiskScore,
   computeReputationFactor,
+  hasDangerousLifecycle,
+  triageRisk,
   persistAlert,
   persistDailyReport,
   computeAlertPriority,

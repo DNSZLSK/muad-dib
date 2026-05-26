@@ -227,41 +227,80 @@ async function execute(targetPath, options, pythonDeps, warnings) {
     'scanPythonAST'
   ];
 
+  // Stage 2 quick_scan subset (monitor-only, set via options.scanMode='quick'
+  // by queue.js when MUADDIB_TRIAGE_MODE=enforce). The subset keeps the heavy
+  // detectors that anchor TPR on the 96-sample GT (analyzeAST covers 70/96,
+  // analyzeDataFlow covers 31/96 — non-negotiable), the cheap high-signal
+  // lifecycle/IOC scanners, and the Python detectors (PyPI samples need them;
+  // npm exit immediately on a depth-1 readdir, so the cost is negligible).
+  // Excluded: scanAntiForensic (45s timeout, never the unique trigger on GT),
+  // scanHashes (cheap but GT samples are rebuilt — hashes drift), scanAIConfig,
+  // scanStubPackage, scanMonorepo, scanTrustedDepDiff (opt-in registry diff),
+  // checkPyPITyposquatting (subsumed by scanTyposquatting for npm; PyPI
+  // typosquats already get full via triage signals). CLI mode and shadow mode
+  // never set scanMode so the default branch runs all 20 scanners — fully
+  // backwards-compatible.
+  const QUICK_SCAN_ALLOWLIST = new Set([
+    'scanPackageJson',
+    'scanShellScripts',
+    'analyzeAST',
+    'detectObfuscation',
+    'scanDependencies',
+    'analyzeDataFlow',
+    'scanTyposquatting',
+    'scanGitHubActions',
+    'matchPythonIOCs',
+    'scanEntropy',
+    'scanIocStrings',
+    'scanPythonSource',
+    'scanPythonAST',
+    'scanAIConfig'
+  ]);
+  const isQuick = options.scanMode === 'quick';
+  function ifEnabled(name, fn) {
+    if (isQuick && !QUICK_SCAN_ALLOWLIST.has(name)) return Promise.resolve([]);
+    return fn();
+  }
+  if (isQuick) {
+    const skipped = SCANNER_NAMES.filter(n => !QUICK_SCAN_ALLOWLIST.has(n));
+    debugLog(`[EXECUTOR] scanMode=quick — skipping ${skipped.length} scanners: ${skipped.join(', ')}`);
+  }
+
   const settledResults = await Promise.allSettled([
-    yieldThen(() => scanPackageJson(targetPath)),
-    yieldThen(() => scanShellScripts(targetPath)),
-    withTimeout(() => analyzeAST(targetPath, { deobfuscate: deobfuscateFn }), 'analyzeAST'),
-    yieldThen(() => detectObfuscation(targetPath)),
-    yieldThen(() => scanDependencies(targetPath)),
-    yieldThen(() => scanHashes(targetPath)),
-    withTimeout(() => analyzeDataFlow(targetPath, { deobfuscate: deobfuscateFn }), 'analyzeDataFlow'),
-    yieldThen(() => scanTyposquatting(targetPath)),
-    yieldThen(() => scanGitHubActions(targetPath)),
-    yieldThen(() => matchPythonIOCs(pythonDeps, targetPath)),
-    yieldThen(() => checkPyPITyposquatting(pythonDeps, targetPath)),
-    withTimeout(() => scanEntropy(targetPath, { entropyThreshold: options.entropyThreshold || undefined }), 'scanEntropy'),
-    yieldThen(() => scanAIConfig(targetPath)),
-    yieldThen(() => scanIocStrings(targetPath)),
-    withTimeout(() => scanAntiForensic(targetPath), 'scanAntiForensic'),
-    yieldThen(() => scanStubPackage(targetPath)),
-    yieldThen(() => scanMonorepo(targetPath)),
+    ifEnabled('scanPackageJson', () => yieldThen(() => scanPackageJson(targetPath))),
+    ifEnabled('scanShellScripts', () => yieldThen(() => scanShellScripts(targetPath))),
+    ifEnabled('analyzeAST', () => withTimeout(() => analyzeAST(targetPath, { deobfuscate: deobfuscateFn }), 'analyzeAST')),
+    ifEnabled('detectObfuscation', () => yieldThen(() => detectObfuscation(targetPath))),
+    ifEnabled('scanDependencies', () => yieldThen(() => scanDependencies(targetPath))),
+    ifEnabled('scanHashes', () => yieldThen(() => scanHashes(targetPath))),
+    ifEnabled('analyzeDataFlow', () => withTimeout(() => analyzeDataFlow(targetPath, { deobfuscate: deobfuscateFn }), 'analyzeDataFlow')),
+    ifEnabled('scanTyposquatting', () => yieldThen(() => scanTyposquatting(targetPath))),
+    ifEnabled('scanGitHubActions', () => yieldThen(() => scanGitHubActions(targetPath))),
+    ifEnabled('matchPythonIOCs', () => yieldThen(() => matchPythonIOCs(pythonDeps, targetPath))),
+    ifEnabled('checkPyPITyposquatting', () => yieldThen(() => checkPyPITyposquatting(pythonDeps, targetPath))),
+    ifEnabled('scanEntropy', () => withTimeout(() => scanEntropy(targetPath, { entropyThreshold: options.entropyThreshold || undefined }), 'scanEntropy')),
+    ifEnabled('scanAIConfig', () => yieldThen(() => scanAIConfig(targetPath))),
+    ifEnabled('scanIocStrings', () => yieldThen(() => scanIocStrings(targetPath))),
+    ifEnabled('scanAntiForensic', () => withTimeout(() => scanAntiForensic(targetPath), 'scanAntiForensic')),
+    ifEnabled('scanStubPackage', () => yieldThen(() => scanStubPackage(targetPath))),
+    ifEnabled('scanMonorepo', () => yieldThen(() => scanMonorepo(targetPath))),
     // Opt-in scanner — short-circuits to [] unless options.trustedDepDiff or
     // options.monitorMode is set. CLI runs without flags pay no cost (no I/O).
     // Wrapped in withTimeout as defense in depth: scanner has its own 10s + 5s × N
     // internal timeouts, but a registry slowdown with many added deps could exceed
     // the static-scan budget without this cap.
-    withTimeout(() => scanTrustedDepDiff(targetPath, options), 'scanTrustedDepDiff'),
+    ifEnabled('scanTrustedDepDiff', () => withTimeout(() => scanTrustedDepDiff(targetPath, options), 'scanTrustedDepDiff')),
     // PYSRC-001..008 (v2.11.25, TrapDoor PyPI gap). Detect import-time RCE
     // in __init__.py / setup.py / top-level .py files. Runs always — not gated
     // on detectPythonProject() because an attacker can ship a malicious __init__.py
     // without a requirements.txt. Walker is cheap (just a depth-1 readdir).
-    yieldThen(() => scanPythonSource(targetPath)),
+    ifEnabled('scanPythonSource', () => yieldThen(() => scanPythonSource(targetPath))),
     // PYAST-001..008 (v2.11.42+, npm/PyPI parity Phase 1). Full Python CST
     // analysis via tree-sitter-python WASM. Scope-aware module-level detection
     // of cmdclass override, exec, subprocess shell=True, pickle.loads,
     // __import__ dangerous, entry_points. Parser init happens at pre-analysis
     // stage above; this call is sync from the caller's POV.
-    yieldThen(() => scanPythonAST(targetPath))
+    ifEnabled('scanPythonAST', () => yieldThen(() => scanPythonAST(targetPath)))
   ]);
 
   // Extract results: use empty array for rejected scanners, log errors
