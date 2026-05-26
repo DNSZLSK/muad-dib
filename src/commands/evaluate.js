@@ -19,6 +19,7 @@ const zlib = require('zlib');
 const { execSync, execFileSync } = require('child_process');
 const { run } = require('../index.js');
 const { clearFileListCache } = require('../utils.js');
+const { extractArchive } = require('../shared/download.js');
 
 const ROOT = path.join(__dirname, '..', '..');
 const GT_DIR = path.join(ROOT, 'tests', 'ground-truth');
@@ -690,9 +691,16 @@ function downloadAndExtractPyPI(pkg, options = {}) {
 
   fs.mkdirSync(pkgCacheDir, { recursive: true });
 
-  // Download sdist via pip
+  // Download via pip. We prefer sdists (source) for richer scan coverage but
+  // do NOT pass `--no-binary :all:` — that flag forces pip to prepare a build
+  // environment (cython, meson, setuptools-build…) for compiled packages
+  // (numpy/scipy/pandas/scikit-learn/…), which routinely times out the 30s
+  // PACK_TIMEOUT and produces the 38% PyPI download-fail rate observed in
+  // metrics/v2.11.47.json. Letting pip pick the best available distribution
+  // gives us a wheel for compiled packages — extractable as ZIP, still
+  // contains `.py` files that the python-source / python-ast scanners walk.
   try {
-    execFileSync('pip', ['download', '--no-deps', '--no-binary', ':all:', '-d', pkgCacheDir, pkg], {
+    execFileSync('pip', ['download', '--no-deps', '-d', pkgCacheDir, pkg], {
       encoding: 'utf8',
       timeout: PACK_TIMEOUT_MS,
       stdio: ['pipe', 'pipe', 'pipe']
@@ -705,42 +713,39 @@ function downloadAndExtractPyPI(pkg, options = {}) {
     return null;
   }
 
-  // Find and extract the downloaded archive
-  const archives = fs.readdirSync(pkgCacheDir).filter(f => f.endsWith('.tar.gz') || f.endsWith('.tgz'));
+  // Find the downloaded archive — sdist (.tar.gz/.tgz) or wheel (.whl) or
+  // legacy egg (.zip). All three are extractable by extractArchive() in
+  // src/shared/download.js (tar.gz via _extractTarGzImpl, .whl/.zip via
+  // adm-zip with zip-bomb / path-traversal guards).
+  const archives = fs.readdirSync(pkgCacheDir).filter(f =>
+    f.endsWith('.tar.gz') || f.endsWith('.tgz') || f.endsWith('.whl') || f.endsWith('.zip')
+  );
   if (archives.length === 0) {
-    // Try .zip files
-    const zips = fs.readdirSync(pkgCacheDir).filter(f => f.endsWith('.zip'));
-    if (zips.length === 0) {
-      fs.rmSync(pkgCacheDir, { recursive: true, force: true });
-      return null;
-    }
-    // Skip zip extraction (not common for sdists) — mark as skipped
     try { fs.rmSync(pkgCacheDir, { recursive: true, force: true }); } catch { /* Windows EPERM on locked files — ignore, continue */ }
     return null;
   }
 
+  const archivePath = path.join(pkgCacheDir, archives[0]);
+  let extractedRoot;
   try {
-    extractTgz(path.join(pkgCacheDir, archives[0]), pkgCacheDir);
+    extractedRoot = extractArchive(archivePath, pkgCacheDir);
   } catch (err) {
     if (process.env.MUADDIB_DEBUG) {
-      console.error(`\n  [DEBUG] extract PyPI ${pkg} failed: ${(err.message || '').slice(0, 200)}`);
+      console.error(`\n  [DEBUG] extract PyPI ${pkg} (${archives[0]}) failed: ${(err.message || '').slice(0, 200)}`);
     }
     try { fs.rmSync(pkgCacheDir, { recursive: true, force: true }); } catch { /* Windows EPERM on locked files — ignore, continue */ }
     return null;
   }
 
   // Clean up archive
-  try { fs.unlinkSync(path.join(pkgCacheDir, archives[0])); } catch { /* ignore */ }
+  try { fs.unlinkSync(archivePath); } catch { /* ignore */ }
 
-  // Find extracted directory
-  const entries = fs.readdirSync(pkgCacheDir).filter(e => {
-    try { return fs.statSync(path.join(pkgCacheDir, e)).isDirectory(); } catch { return false; }
-  });
-  if (entries.length === 0) {
-    try { fs.rmSync(pkgCacheDir, { recursive: true, force: true }); } catch { /* Windows EPERM on locked files — ignore, continue */ }
-    return null;
-  }
-  return path.join(pkgCacheDir, entries[0]);
+  // extractArchive returns the single top-level dir for sdists (e.g.
+  // `numpy-1.26.0/`) and the destDir itself for wheels (which have a flat
+  // `{pkg}/`, `{pkg}-{ver}.dist-info/` layout — we want destDir so the
+  // scanner walks both).
+  if (extractedRoot && fs.existsSync(extractedRoot)) return extractedRoot;
+  return pkgCacheDir;
 }
 
 /**

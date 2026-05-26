@@ -73,6 +73,43 @@ function handleLiteral(node, ctx) {
       }
     }
 
+    // AST-NNN: direct_ip_exfil (Track D, v2.11.48+) — IPv4 literal used as
+    // C2 endpoint (URL form `http://1.2.3.4:port/path` OR bare IP literal
+    // outside the safe ranges). Pattern observed on marginfi cluster
+    // (72.62.71.201), design-system-coopeuch GT-095 (direct IP exfil, no
+    // OAST cover), and similar manual-review MALWARE. HIGH alone — combined
+    // with linux_fingerprint_exec in the same file, escalates to CRITICAL
+    // via `recon_exfil_direct_ip` compound.
+    //
+    // Safe ranges (skipped, no fire):
+    //   0.0.0.0           bind-all / server listen address (fastify/express default)
+    //   127.0.0.0/8       localhost
+    //   169.254.0.0/16    link-local (incl. cloud IMDS — separate rules cover abuse)
+    //   10.0.0.0/8        RFC 1918 private
+    //   172.16.0.0/12     RFC 1918 private
+    //   192.168.0.0/16    RFC 1918 private
+    //   255.255.255.255   broadcast
+    // RFC 5737 documentation ranges (192.0.2.x, 198.51.100.x, 203.0.113.x)
+    // are intentionally flagged — no legitimate runtime use, lets our GT
+    // reconstruction fixtures exercise the rule.
+    const IP_SAFE_RE = /^(0\.0\.0\.0$|127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2[0-9]|3[01])\.|255\.255\.255\.255$)/;
+    const urlIpMatch = node.value.match(/^https?:\/\/((?:\d{1,3}\.){3}\d{1,3})(?::\d+)?(?:\/|$)/);
+    const bareIpMatch = node.value.match(/^((?:\d{1,3}\.){3}\d{1,3})$/);
+    const candidateIp = (urlIpMatch && urlIpMatch[1]) || (bareIpMatch && bareIpMatch[1]) || null;
+    if (candidateIp && !IP_SAFE_RE.test(candidateIp)) {
+      // Validate each octet ≤ 255 to avoid matching '999.999.999.999' style noise
+      const octets = candidateIp.split('.').map(n => parseInt(n, 10));
+      if (octets.every(o => o >= 0 && o <= 255)) {
+        const form = urlIpMatch ? 'URL' : 'bare IPv4 literal';
+        ctx.threats.push({
+          type: 'direct_ip_exfil',
+          severity: 'HIGH',
+          message: `Hardcoded ${form} ${candidateIp} — direct-IP exfil endpoint (no DNS, no OAST cover). Classic C2 / dep-confusion pattern.`,
+          file: ctx.relFile
+        });
+      }
+    }
+
     // Ollama LLM local: polymorphic engine indicator (PhantomRaven Wave 4)
     // Port 11434 is Ollama's default port. Legitimate packages don't call local LLMs.
     if (/(?:localhost|127\.0\.0\.1):11434/.test(node.value)) {

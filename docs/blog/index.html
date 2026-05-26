@@ -39,6 +39,12 @@
 <ul class="post-list">
 
   <li>
+    <span class="post-title"><a href="ground-truth-track-d.html">Ground truth +29 samples : pourquoi un TPR figé à 93,85% mesurait surtout l'IOC matching</a></span>
+    <br><span class="post-date">2026-05-26</span> <span class="tags"><span class="tag">ground-truth</span> <span class="tag">métriques</span> <span class="tag">pypi</span> <span class="tag">compound</span> <span class="tag">méthodologie</span></span>
+    <p class="post-summary">60 samples sur 67 attendaient juste MUADDIB-PKG-001. Le TPR mesurait l'IOC database, pas les 250+ règles comportementales. Track C (16 fixtures synthétiques), Track A (6 tarballs réels), Track B (7 reconstructions), Track D (compound direct-IP+linux-fingerprint), fix download PyPI 38% fail rate. TPR@20 +3,1pp (85,19% → 88,30%), FPR npm stable, FPR PyPI honnête à 9,68% sur 124/132 (was 6,10% sur 82/132 biaisé).</p>
+  </li>
+
+  <li>
     <span class="post-title"><a href="mini-shai-hulud-scoring-gap.html">Mini Shai-Hulud : 206 packages scannés, 113 passés sous le radar, autopsie d'un gap de scoring</a></span>
     <br><span class="post-date">2026-05-12</span> <span class="tags"><span class="tag">scoring</span> <span class="tag">supply-chain</span> <span class="tag">npm</span> <span class="tag">retrospective</span> <span class="tag">TeamPCP</span> <span class="tag">shai-hulud</span></span>
     <p class="post-summary">La campagne Mini Shai-Hulud de TeamPCP a compromis 200+ packages npm dont @tanstack/react-router (12M DL/semaine). MUAD'DIB a détecté les patterns mais le scoring les a écrasés à 2/100. Trois causes racines (reachability, isLargeJs, MT-1 cap), cinq correctifs, score final 100/100 CRITICAL.</p>

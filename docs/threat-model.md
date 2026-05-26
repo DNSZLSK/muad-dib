@@ -75,7 +75,7 @@ MUAD'DIB is a Node.js static analyzer. Attacks using exclusively browser APIs (D
 | **polyfill-io** | Script injection via browser CDN | Client-side resource modification, no Node.js code |
 | **trojanized-jquery** | jQuery DOM manipulation | jQuery/DOM browser API, no Node.js API |
 
-Impact on TPR: **77/81 in-scope = 95.06%** (v2.11.47 measure, on the pre-Track-A+B GT subset of 81 in-scope; full re-measurement on 94 in-scope pending). 4 misses include the 3 browser-only attacks above plus 1 other. Ground truth expanded to **96 samples 2026-05-25** (94 active, 2 out-of-scope: GT-005 colors and GT-009 faker, both protestware with min_threats=0). The 2026-05-25 enrichment added 22 samples — 16 synthetic for the new PYSRC/PYAST/AST-092/AICONF-004/PKG-022 rules (GT-068..083), 6 real-world npm tarballs from VPS archive (GT-084..089: TrapDoor twins, dep-confusion, MCP exfil), 7 reconstructions from the in-house security-review benchmark (GT-090..096). First PyPI coverage: 13 samples.
+Impact on TPR: **90/94 in-scope = 95.74%** (v2.11.48 full measurement). 4 misses include the 3 browser-only attacks above plus 1 other. Ground truth expanded to **96 samples 2026-05-25** (94 active, 2 out-of-scope: GT-005 colors and GT-009 faker, both protestware with min_threats=0). The enrichment added 22 samples — 16 synthetic for the new PYSRC/PYAST/AST-092/AICONF-004/PKG-022 rules (GT-068..083), 6 real-world npm tarballs from VPS archive (GT-084..089: TrapDoor twins, dep-confusion, MCP exfil), 7 reconstructions from the in-house security-review benchmark (GT-090..096). First PyPI coverage: 13 samples.
 
 ### Known Limitations
 
@@ -130,7 +130,7 @@ Impact on TPR: **77/81 in-scope = 95.06%** (v2.11.47 measure, on the pre-Track-A
 
 ## Adversarial Testing Results
 
-### Detection rate: 103/107 (96.26% ADR, global threshold=20, v2.11.47)
+### Detection rate: 103/107 (96.26% ADR, global threshold=20, v2.11.48)
 
 107 available adversarial/holdout evasive samples (67 adversarial + 40 holdout across 7 red team waves + 4 holdout batches) tested with real-world evasion techniques.
 
@@ -146,13 +146,13 @@ Parsers tested with malformed inputs:
 
 Result: **56/56 pass**. No crashes, no uncaught exceptions.
 
-### 3902 unit and integration tests
+### 3913 unit and integration tests
 
-Full coverage of scanners, parsers, IOC matching, typosquatting, CLI integrations, diff, temporal analysis, ground truth, canary tokens, and security (SSRF, injection). Tests grew from 3529 (v2.10.x) to 3902 alongside the PYSRC/PYAST scanner additions and F1-F14 contextual FP caps.
+Full coverage of scanners, parsers, IOC matching, typosquatting, CLI integrations, diff, temporal analysis, ground truth, canary tokens, and security (SSRF, injection). Tests grew from 3529 (v2.10.x) to 3913 alongside the PYSRC/PYAST scanner additions, F1-F14 contextual FP caps, and the Track D recon-exfil compound (v2.11.48).
 
 ### Ground Truth Validation
 
-**96 real-world supply-chain attacks** replayed automatically (94 active, 2 out-of-scope protestware). Detection rate (v2.11.47 measure, on the pre-Track-A+B subset of 81 in-scope; full re-measurement on 94 pending): **95.06%** (77/81 active attacks, TPR@3) and **85.19%** (69/81, TPR@20 operational threshold). 22 samples added 2026-05-25 (16 synthetic for PYSRC/PYAST/AST-092/AICONF-004/PKG-022 + 6 real-world npm tarballs from VPS archive + 7 reconstructions from `data/all-review-results.json`). 13 PyPI samples (was 0). Includes event-stream, ua-parser-js, coa, node-ipc, eslint-scope, flatmap-stream, solana-web3js, react-emits, TrapDoor build-scripts-utils + project-init-tools + async-pipeline-builder, defi-threat-scanner, @cseo-hr/trpweb-shared, marginfi cluster, byvendors, heloo131313, vite-json-config, and 80+ more.
+**96 real-world supply-chain attacks** replayed automatically (94 active, 2 out-of-scope protestware). Detection rate (v2.11.48 full measurement): **95.74%** (90/94 active attacks, TPR@3) and **88.30%** (83/94, TPR@20 operational threshold, **+3.1pp vs v2.11.47** via Track D). 22 samples added 2026-05-25 (16 synthetic for PYSRC/PYAST/AST-092/AICONF-004/PKG-022 + 6 real-world npm tarballs from VPS archive + 7 reconstructions from `data/all-review-results.json`). 13 PyPI samples (was 0). Includes event-stream, ua-parser-js, coa, node-ipc, eslint-scope, flatmap-stream, solana-web3js, react-emits, TrapDoor build-scripts-utils + project-init-tools + async-pipeline-builder, defi-threat-scanner, @cseo-hr/trpweb-shared, marginfi cluster, byvendors, heloo131313, vite-json-config, and 80+ more.
 
 ### Datadog 17K Benchmark
 

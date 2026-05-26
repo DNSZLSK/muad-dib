@@ -11,7 +11,7 @@ bin/muaddib.js (yargs CLI)
   └─► src/index.js — run(targetPath, options)
         ├─► Module Graph pre-analysis (src/scanner/module-graph/, directory of 9 files, 5s timeout)
         ├─► Deobfuscation pre-processing (src/scanner/deobfuscate.js)
-        ├─► 17 parallel scanners (Promise.allSettled)
+        ├─► 20 parallel scanners (Promise.allSettled)
         │     ├── AST scanner (src/scanner/ast.js)                          [timeout 45s]
         │     ├── Dataflow scanner (src/scanner/dataflow.js)                [timeout 45s]
         │     ├── Shell scanner (src/scanner/shell.js)
@@ -33,13 +33,17 @@ bin/muaddib.js (yargs CLI)
         ├─► FP reductions (src/scoring.js — applyFPReductions)
         ├─► Reachability post-processing (src/scanner/reachability.js — file-level + function-level FP downgrade)
         ├─► Intent coherence analysis (src/intent-graph.js — buildIntentPairs)
-        ├─► Rule enrichment (src/rules/index.js — 234 rules)
+        ├─► Rule enrichment (src/rules/index.js — 262 rules)
         ├─► Scoring (src/scoring.js — per-file max + compound boosts)
-        ├─► ML classifier (src/ml/classifier.js — T1 zone filtering)
         └─► Output (CLI / JSON / HTML / SARIF)
+
+    Note: `muaddib scan` does NOT invoke the ML classifier. `src/ml/classifier.js` is
+    exercised only by `muaddib evaluate` (offline metric replay) and `muaddib monitor`
+    (LOG-ONLY since 2026-04-08 — model collapsed pending retrain, see
+    src/monitor/queue.js:628).
 ```
 
-**Core orchestration:** `src/index.js` delegates to `src/pipeline/{initializer,executor,processor,outputter}.js`. `executor.js` runs cross-file module graph analysis first (pre-analysis, 5s timeout), then launches 17 individual scanners in parallel via `Promise.allSettled` (intel-triage P1 added: `scanIocStrings`, `scanAntiForensic`, `scanStubPackage`; Sprint 1 added: `scanMonorepo` for audit MR-C2 fix), then `processor.js` deduplicates, applies FP reductions + reachability post-processing, scores using per-file max (v2.2.11: `riskScore = min(100, max(file_scores) + package_level_score)`, severity weights: CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1), applies intent coherence analysis (intra-file source-sink pairing), enriches with rules/playbooks (234 rules), and `outputter.js` formats CLI/JSON/HTML/SARIF. Result includes `warnings: []` array (v2.6.5) for incomplete scan notifications (module graph timeout/skip, deobfuscation failures). Exports `isPackageLevelThreat` and `computeGroupScore` for testing.
+**Core orchestration:** `src/index.js` delegates to `src/pipeline/{initializer,executor,processor,outputter}.js`. `executor.js` runs cross-file module graph analysis first (pre-analysis, 5s timeout), then launches **20 individual scanners** in parallel via `Promise.allSettled` (intel-triage P1: `scanIocStrings` + `scanAntiForensic` + `scanStubPackage`; Sprint 1: `scanMonorepo` audit MR-C2 fix; v2.11.41+: `scanPythonSource` PYSRC + `scanPythonAst` PYAST), then `processor.js` deduplicates, applies FP reductions + reachability post-processing, scores using per-file max (v2.2.11: `riskScore = min(100, max(file_scores) + package_level_score)`, severity weights: CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1), applies intent coherence analysis (intra-file source-sink pairing), enriches with rules/playbooks (262 rules), and `outputter.js` formats CLI/JSON/HTML/SARIF. Result includes `warnings: []` array (v2.6.5) for incomplete scan notifications (module graph timeout/skip, deobfuscation failures). Exports `isPackageLevelThreat` and `computeGroupScore` for testing.
 
 ## Scanner Modules
 
@@ -242,9 +246,9 @@ quand un package suspect est surface.
 
 ## Evaluation Framework
 
-**Evaluation Framework (v2.2, corrected v2.2.7, updated through v2.10.95):** `src/commands/evaluate.js` measures TPR (Ground Truth, 65 active real attacks from 67 samples; 2 out-of-scope GT-005/GT-009 protestware with min_threats=0), FPR (Benign, 548 npm curated packages — real source code via `npm pack` + native tar extraction), and ADR (Adversarial + Holdout, 107 evasive samples — 67 adversarial + 40 holdout). Benign tarballs cached in `.muaddib-cache/benign-tarballs/`. Flags: `--benign-limit N`, `--refresh-benign`. Results saved to `metrics/v{version}.json`.
+**Evaluation Framework (v2.2, corrected v2.2.7, updated through v2.11.48):** `src/commands/evaluate.js` measures TPR (Ground Truth, **94 in-scope** real attacks from **96 samples** — 2026-05-25 enrichment +22 samples: 16 synthetic PYSRC/PYAST/AST-092/AICONF-004/PKG-022 + 6 real-world tarballs from VPS archive + 7 reconstructions from `data/all-review-results.json`; 2 out-of-scope GT-005/GT-009 protestware with `min_threats=0`), FPR (Benign, 548 npm curated packages — real source code via `npm pack` + native tar extraction; **132 PyPI** added 2026-05-25 as `benignPyPI`), and ADR (Adversarial + Holdout, 107 evasive samples — 67 adversarial + 40 holdout). The schema now includes `expected.score_typical` (risk observed in isolation) and `expected.tpr_tier` (`tpr20` or `tpr3` — documentary; 3 samples flagged `tpr3-only` for HIGH/MEDIUM rules that don't cross 20 in isolation). Benign tarballs cached in `.muaddib-cache/benign-tarballs/` (npm), `.muaddib-cache/benign-pypi/` (PyPI). Flags: `--benign-limit N`, `--refresh-benign`. Results saved to `metrics/v{version}.json`.
 
-**FPR progression:** 0% (invalid, v2.2.0–v2.2.6) → 38% (v2.2.7) → 19.4% (v2.2.8) → 17.5% (v2.2.9) → ~13% (69/527, v2.2.11) → 8.9% (47/527, v2.3.0) → 7.4% (39/525, v2.3.1) → 6.0% (32/529, v2.5.8, included BENIGN_PACKAGE_WHITELIST bias) → ~13.6% (72/529, v2.5.14, audit hardening + whitelist removed in v2.5.10) → 12.3% (65/529, v2.5.16, P5+P6) → 12.1% (64/529, v2.6.2, P7) → 12.9% (68/529, v2.9.4, compound scoring + new rules) → **10.8%** (57/529, v2.10.1, audit v3 FP reduction) → **14.0%** (74/532, v2.10.57, curated benign corpus rebuild) → **estimated 6-9%** (v2.10.74, P1-P4 FP cluster fixes — projected gain) → **15.6% measured** (85/545 scanned of 548, v2.10.95 metrics file — the v2.10.74 projected reduction did NOT materialize on the rebuilt corpus) → **post-filtre F1-F7 contextual FP caps** (v2.10.97, validated on a separate 302-package human-only corpus: 67/198 FP capped = 33.8 % reduction on that subset, 0/104 malware impacted; full re-measurement on 548 corpus pending).
+**FPR progression:** 0% (invalid, v2.2.0–v2.2.6) → 38% (v2.2.7) → 19.4% (v2.2.8) → 17.5% (v2.2.9) → ~13% (69/527, v2.2.11) → 8.9% (47/527, v2.3.0) → 7.4% (39/525, v2.3.1) → 6.0% (32/529, v2.5.8, included BENIGN_PACKAGE_WHITELIST bias) → ~13.6% (72/529, v2.5.14, audit hardening + whitelist removed in v2.5.10) → 12.3% (65/529, v2.5.16, P5+P6) → 12.1% (64/529, v2.6.2, P7) → 12.9% (68/529, v2.9.4, compound scoring + new rules) → **10.8%** (57/529, v2.10.1, audit v3 FP reduction) → **14.0%** (74/532, v2.10.57, curated benign corpus rebuild) → **estimated 6-9%** (v2.10.74, P1-P4 FP cluster fixes — projected gain) → **15.6% measured** (85/545 scanned of 548, v2.10.95 metrics file — the v2.10.74 projected reduction did NOT materialize on the rebuilt corpus) → **post-filtre F1-F14 contextual FP caps** (v2.10.97 → v2.11.31) → **1.10% measured** (6/545 scanned of 548, v2.11.47 — the F1-F14 caps + the HARD/SOFT exfil split (F14) compounded over 11 versions to drive the rate down. The 6 remaining FPs are meteor, prisma, @prisma/client, drizzle-orm, scrypt, liquid — all real legitimate-pattern hits, not whitelist artifacts. FPR-after-ML-T1: 0.92% (5/545)).
 
 **Datasets:**
 - Adversarial samples in `datasets/adversarial/` (67 samples)
@@ -255,7 +259,7 @@ quand un package suspect est surface.
 
 ### Ground Truth Expansion (v2.2.12)
 
-67 real-world attack samples in `tests/ground-truth/` (65 active, 2 with min_threats=0: GT-005 colors and GT-009 faker, both protestware). TPR@3: **93.85% (61/65)** as of v2.10.95 (canonical metrics file). TPR@20: **86.2% (56/65)**. 4 active misses include the 3 browser-only attacks (lottie-player, polyfill-io, trojanized-jquery) plus 1 other. ADR: 107 samples (67 adversarial + 40 holdout). ADR: **96.3% (103/107 available)** as of v2.10.95.
+**96 real-world attack samples** in `tests/ground-truth/` (94 in-scope, 2 with `min_threats=0`: GT-005 colors and GT-009 faker, both protestware). 22 samples added 2026-05-25 (Track C synthetic + Track A real-world + Track B reconstructions). 13 PyPI samples (was 0). TPR@3: **95.74% (90/94 in-scope)** as of v2.11.48 (full measurement on the enriched GT). TPR@20: **88.30% (83/94)**, **+3.1pp vs v2.11.47** — Track D `recon_exfil_direct_ip` compound (MUADDIB-COMPOUND-016) closed the GT-095 gap (risk 3→50), plus GT-091/GT-092 gained from `linux_fingerprint_exec`. 4 active misses include the 3 browser-only attacks (lottie-player, polyfill-io, trojanized-jquery) plus 1 other. 2 intentional `tpr3-only` samples remain (GT-072 PYSRC-007, GT-077 PYAST-002 — HIGH/MEDIUM rules that don't cross 20 in isolation by design, see `attacks.json` `expected.tpr_tier` schema). ADR: 107 samples (67 adversarial + 40 holdout). ADR: **96.26% (103/107 available)** as of v2.11.48.
 
 ## Monitor
 
@@ -320,12 +324,12 @@ See [Intent Graph](#intent-graph) section for `isSDKPattern()` details and 22 SD
 - `src/shared/constants.js` — Centralized NPM_PACKAGE_REGEX, MAX_TARBALL_SIZE, DOWNLOAD_TIMEOUT
 
 **Validation & Observability (v2.1):** Features for measuring and validating scanner effectiveness:
-- `src/ground-truth.js` — Ground truth dataset: 67 real-world attacks (65 active, 2 protestware with min_threats=0) replayed against scanner. 93.85% TPR@3 (61/65) as of v2.10.95.
+- `src/ground-truth.js` — Ground truth dataset: 96 real-world attacks (94 in-scope, 2 protestware with `min_threats=0`) replayed against scanner. 95.74% TPR@3 (90/94 in-scope), 88.30% TPR@20 (83/94, +3.1pp vs v2.11.47 — Track D `recon_exfil_direct_ip` compound closed GT-095 gap), v2.11.48 measurement.
 - `--breakdown` flag — Explainable score decomposition showing per-finding contribution
 
 ## Detection Rules
 
-**Rules & playbooks:** Threat types map to rules in `src/rules/index.js` (234 rules: 229 RULES + 5 PARANOID, MITRE ATT&CK mapped) and remediation text in `src/response/playbooks.js`. Both keyed by threat `type` string.
+**Rules & playbooks:** Threat types map to rules in `src/rules/index.js` (**262 rules: 257 RULES + 5 PARANOID** — Track D v2.11.48 added AST-093 `linux_fingerprint_exec`, AST-094 `direct_ip_exfil`, COMPOUND-016 `recon_exfil_direct_ip`; MITRE ATT&CK mapped) and remediation text in `src/response/playbooks.js`. Both keyed by threat `type` string.
 
 ### AST Detection Rules (v2.2+)
 

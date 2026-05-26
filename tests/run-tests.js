@@ -50,6 +50,7 @@ const { runRdapCompromisedDomainTests } = require('./scanner/rdap-compromised-do
 const { runRiskDomainsTests } = require('./scanner/risk-domains.test');
 const { runCyclonedxTests } = require('./scanner/cyclonedx.test');
 const { runAstNegativeTests } = require('./scanner/ast-negative.test');
+const { runAstReconTests } = require('./scanner/ast-recon.test');
 const { runAstBypassRegressionTests } = require('./scanner/ast-bypass-regression.test');
 const { runIntentGraphTests } = require('./scanner/intent-graph.test');
 const { runTrustedDepDiffTests } = require('./scanner/trusted-dep-diff.test');
@@ -199,6 +200,7 @@ async function timed(name, fn) {
   await timed('risk-domains', runRiskDomainsTests);
   await timed('cyclonedx', runCyclonedxTests);
   await timed('ast-negative', runAstNegativeTests);
+  await timed('ast-recon', runAstReconTests);
   await timed('ast-bypass-regression', runAstBypassRegressionTests);
   await timed('trusted-dep-diff', runTrustedDepDiffTests);
 

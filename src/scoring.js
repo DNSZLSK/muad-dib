@@ -654,6 +654,20 @@ const SCORING_COMPOUNDS = [
     fileFrom: 'function_constructor_require',
     sameFile: true
   },
+  // Track D (v2.11.48+) — recon_exfil_direct_ip. Closes GT-095 gap
+  // (design-system-coopeuch reconstruction scoring 3 alone, MALWARE per
+  // in-house review). Pattern: execSync(id|uname|lsb_release|hostname|whoami)
+  // + http(s) call to a direct IPv4 literal (no DNS, no OAST). Same file
+  // gates this to attacker-targeted device fingerprinting; legit telemetry
+  // SDKs talk to named endpoints and never co-occur with bare-IP exfil.
+  {
+    type: 'recon_exfil_direct_ip',
+    requires: ['linux_fingerprint_exec', 'direct_ip_exfil'],
+    severity: 'CRITICAL',
+    message: 'Linux system fingerprint (id/uname/lsb_release/hostname/whoami) + direct-IP exfil in same file — targeted device fingerprinting for C2 grouping (scoring compound).',
+    fileFrom: 'direct_ip_exfil',
+    sameFile: true
+  },
 ];
 
 // v2.11.11: Extract static require/import targets from a JS file (1 level).

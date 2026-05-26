@@ -157,12 +157,12 @@ jobs:
     }
   });
 
-  // 3.3b Rule count check (PYPI-003 pypi_release_zero: +1 rule → 254 RULES)
-  test('P3: rule count is 259 (254 RULES + 5 PARANOID)', () => {
+  // 3.3b Rule count check (Track D: linux_fingerprint_exec + direct_ip_exfil + recon_exfil_direct_ip → 257 RULES)
+  test('P3: rule count is 262 (257 RULES + 5 PARANOID)', () => {
     const { RULES, PARANOID_RULES } = require('../../src/rules/index.js');
     const ruleCount = Object.keys(RULES).length;
     const paranoidCount = Object.keys(PARANOID_RULES).length;
-    assert(ruleCount === 254, `Expected 254 RULES, got ${ruleCount}`);
+    assert(ruleCount === 257, `Expected 257 RULES, got ${ruleCount}`);
     assert(paranoidCount === 5, `Expected 5 PARANOID, got ${paranoidCount}`);
   });
 

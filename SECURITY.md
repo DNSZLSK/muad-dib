@@ -68,9 +68,9 @@ Please include the following information in your report:
 - We aim to release fixes before public disclosure
 - We request a 90-day disclosure window for complex issues
 
-## Detection Rules (v2.11.6)
+## Detection Rules (v2.11.48)
 
-MUAD'DIB uses 18 scanner modules (2 pre-analysis: `module-graph` + `deobfuscate`; 16 parallel scanners; plus paranoid mode) + 5 behavioral anomaly detection features + ground truth validation, producing 223 rule IDs (218 RULES + 5 PARANOID). The 16 parallel scanners include the v2.11 intel-triage trio: `ioc-strings` (YARA-style), `anti-forensic` (XOR/self-delete compound), `stub-package` (tiny main + external dep + lifecycle):
+MUAD'DIB uses 28 scanner modules (2 pre-analysis: `module-graph/` + `deobfuscate`; 1 async parser bootstrap: `python-ast` WASM init; 20 parallel scanners; 5 conditional/post-processing: paranoid + 3× temporal-* + reachability; 1 metadata: `npm-registry`) + 5 behavioral anomaly detection features + ground truth validation, producing 262 rule IDs (257 RULES + 5 PARANOID — Track D added AST-093 `linux_fingerprint_exec` + AST-094 `direct_ip_exfil` + COMPOUND-016 `recon_exfil_direct_ip`). The 20 parallel scanners include the v2.11 intel-triage trio (`ioc-strings` YARA-style, `anti-forensic` XOR/self-delete compound, `stub-package` tiny main + external dep + lifecycle), the PyPI source-analysis pair (`python-source` PYSRC-001..010 regex, `python-ast` PYAST-001..010 tree-sitter AST + taint tracker), and `monorepo`/`trusted-dep-diff`:
 
 ### AST Scanner (core rules)
 
@@ -492,7 +492,7 @@ MUAD'DIB 2.9 uses a **triple detection approach**:
 
 2. **Behavioral anomaly detection** (v2.0): Analyzes changes between package versions to detect supply-chain attacks before they appear in IOC databases. Compares lifecycle scripts, AST, publish frequency, and maintainer metadata across versions. This approach can detect 0-day behavioral anomalies without any prior knowledge of the specific attack.
 
-3. **Ground truth validation** (v2.1–v2.10.95): Validates detection accuracy against 67 real-world attacks (65 active samples; 2 out-of-scope: GT-005 colors and GT-009 faker protestware with min_threats=0), tracks detection lead times vs. public advisories, and monitors false positive rates over time. 3529 tests across 89 files. Current TPR@3: 93.85% (61/65), ADR: 96.3% (103/107). Provides observability into scanner effectiveness.
+3. **Ground truth validation** (v2.1–v2.11.48): Validates detection accuracy against **96 real-world attacks** (94 in-scope; 2 out-of-scope: GT-005 colors and GT-009 faker protestware with min_threats=0). The 2026-05-25 enrichment added 22 samples — 16 synthetic for PYSRC/PYAST/AST-092/AICONF-004/PKG-022 (GT-068..083), 6 real-world npm tarballs from VPS archive (GT-084..089: TrapDoor twins, dep-confusion, MCP exfil), 7 reconstructions from `data/all-review-results.json` review reasoning (GT-090..096). Includes **13 PyPI samples** (was 0). Tracks detection lead times vs. public advisories, and monitors false positive rates over time. 3913 tests across 109 files. Current TPR@3: **95.74%** (90/94 in-scope, v2.11.48 full measurement). TPR@20: **88.30%** (83/94, +3.1pp vs v2.11.47 thanks to Track D `recon_exfil_direct_ip` compound). ADR: **96.26%** (103/107). Provides observability into scanner effectiveness.
 
 The behavioral detection features are opt-in (`--temporal-full`) and query the npm registry at scan time. They are particularly effective against:
 - Account takeover attacks (event-stream pattern)
@@ -500,25 +500,28 @@ The behavioral detection features are opt-in (`--temporal-full`) and query the n
 - Dormant package hijacking (abandonware takeover)
 - Sudden code injection (Shai-Hulud, ua-parser-js pattern)
 
-## Ground Truth Validation (v2.9.4)
+## Ground Truth Validation (v2.11.48)
 
-MUAD'DIB includes a ground truth dataset of 51 real-world supply-chain attacks (49 active samples) to continuously validate detection coverage.
+MUAD'DIB includes a ground truth dataset of **96 real-world supply-chain attacks** (94 active samples; 2 out-of-scope GT-005 colors / GT-009 faker, both protestware with min_threats=0) to continuously validate detection coverage. 13 PyPI samples were added 2026-05-25 (first PyPI coverage in the GT).
 
-**TPR: 93.9% (46/49 detected)**
+**TPR@3: 95.74% (90/94 in-scope detected)** — v2.11.48 full measurement on the enriched GT.
 
-3 out-of-scope misses (browser-only):
-- lottie-player, polyfill-io, trojanized-jquery (browser-only DOM attacks)
+**TPR@20: 88.30% (83/94)** — operational alert threshold, **+3.1pp vs v2.11.47** thanks to Track D `recon_exfil_direct_ip` compound (GT-095 went from risk 3 to 50, plus GT-091/GT-092 gained from `linux_fingerprint_exec`). 2 intentional `tpr3-only` samples remain (GT-072 PYSRC-007, GT-077 PYAST-002 — HIGH/MEDIUM rules that don't cross 20 in isolation by design), documented in `attacks.json` with `expected.tpr_tier: "tpr3"`.
 
-Run `muaddib evaluate --ground-truth` to validate detection at any time.
+4 active misses include the 3 browser-only attacks (lottie-player, polyfill-io, trojanized-jquery) plus 1 other.
 
-## Evaluation Methodology Caveats (v2.9.4)
+Run `muaddib evaluate` to re-measure at any time.
+
+## Evaluation Methodology Caveats (v2.11.48)
 
 The metrics reported above should be interpreted with the following caveats:
 
-- **TPR scope:** Measured on 49 Node.js attack samples from 51 total. 3 browser-only attacks (lottie-player, polyfill-io, trojanized-jquery) are excluded because MUAD'DIB is a Node.js static analyzer and cannot detect DOM/browser-only patterns.
-- **FPR dataset:** Measured on 529 curated popular npm packages, not a random sample. FPR varies significantly by package size: small packages (<10 JS files) have lower FPR than very large packages (100+ files) due to accumulation of benign patterns that resemble threats.
-- **ADR methodology:** As of v2.6.5+, ADR uses a global threshold (score >= 20) aligned with the benign threshold. Earlier versions used per-sample tuned thresholds which inflated the ADR metric. Current ADR: 96.3% (103/107).
-- **Node.js scope:** MUAD'DIB is designed for Node.js/npm supply-chain attacks. Browser-only attacks, native binary payloads, and phishing pages are out of scope.
+- **TPR scope:** Measured on the full 94 in-scope samples from the 96-sample ground truth. 4 misses include 3 browser-only attacks (lottie-player, polyfill-io, trojanized-jquery — DOM patterns outside MUAD'DIB's Node.js static analyzer scope). 2 samples are out-of-scope by design (`min_threats: 0`, protestware).
+- **FPR dataset:** Measured on 545 scanned of 548 curated popular npm packages — not a random sample. FPR varies significantly by package size: small packages (<10 JS files) have lower FPR than very large packages (100+ files). The v2.11.48 FPR of 1.10% (down from 15.6% at v2.10.95) reflects the F1-F14 contextual FP caps shipped between v2.10.97 and v2.11.31; Track D (v2.11.48) added 3 rules without creating new FPs.
+- **FPR random sample:** Measured separately on 200 random npm packages (2.50% v2.11.48).
+- **FPR PyPI:** First honest measurement at v2.11.48 — 9.68% on 124 scanned of 132. Track D fixed the PyPI downloader (removed `pip --no-binary :all:` + added `.whl` extraction), bringing 42 previously-skipped giants (numpy/pandas/django/matplotlib/...) into scope. The previous 6.10% (v2.11.47, 82/132) was biased — small pure-Python packages only. All 12 current FPs cluster at score 25-35: this is the cap-PyPI-35 artifact, not new rule misfires. Lifting the cap (Track E) will drop FPR PyPI to ~0%. 8 residual fails are >500MB packages (torch, tensorflow, scipy, opencv-python, ansible, playwright) hitting the 30s `PACK_TIMEOUT_MS`.
+- **ADR methodology:** As of v2.6.5+, ADR uses a global threshold (score >= 20) aligned with the benign threshold. Earlier versions used per-sample tuned thresholds which inflated the ADR metric. Current ADR: 96.26% (103/107).
+- **Node.js + PyPI scope:** MUAD'DIB now covers npm and PyPI (PYSRC/PYAST scanners added v2.11.41-45). Browser-only attacks, native binary payloads, and phishing pages remain out of scope.
 - **Static analysis limitations:** Dynamic obfuscation, encrypted payloads that require runtime keys, and multi-stage attacks fetching payloads from external servers may evade static detection.
 
 ## Datadog 17K Benchmark (v2.9.4)

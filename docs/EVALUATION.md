@@ -2,7 +2,7 @@
 
 This document consolidates the historical FP audits performed during development. For the full evaluation methodology (TPR, FPR, ADR, holdout protocol), see [EVALUATION_METHODOLOGY.md](EVALUATION_METHODOLOGY.md).
 
-## Current FPR: **1.10% measured** (6/545 scanned of 548, v2.11.47 metrics file)
+## Current FPR: **1.10% measured** (6/545 scanned of 548, v2.11.48 metrics file)
 
 The full re-measurement on 2026-05-25 brought the curated-corpus FPR down from 15.6% (v2.10.95) to 1.10%. After ML T1 filter: **0.92%** (5/545). The 6 remaining FPs are real legitimate-pattern hits (not whitelist artifacts): meteor, prisma, @prisma/client, drizzle-orm, scrypt, liquid.
 
@@ -34,11 +34,20 @@ The full re-measurement on 2026-05-25 brought the curated-corpus FPR down from 1
 > exfil types (suspicious_domain, remote_code_load, binary_dropper, ...) unblocks
 > them.
 
-> **v2.11.47 (25 May 2026)** — Full re-measurement on the 548-package corpus:
+> **v2.11.47 (25 May 2026)** — First post-F14 full re-measurement on the 548-package corpus:
 > **1.10% FPR (6/545 scanned, 3 skipped)** — the cumulative effect of F1-F14 over
-> 11 versions. **FPR-after-ML-T1: 0.92% (5/545)**. The 6 remaining FPs are real
-> legit-pattern hits on meteor, prisma, @prisma/client, drizzle-orm, scrypt, liquid.
-> Measurement saved in `metrics/v2.11.47.json`. **This is the canonical FPR.**
+> 11 versions. The 6 remaining FPs are real legit-pattern hits on meteor, prisma,
+> @prisma/client, drizzle-orm, scrypt, liquid.
+
+> **v2.11.48 (26 May 2026)** — Re-measurement after Track D (linux_fingerprint_exec +
+> direct_ip_exfil + recon_exfil_direct_ip compound) and the PyPI download fix
+> (removed `pip --no-binary :all:` + added `.whl` extraction). **FPR stable at 1.10%
+> (6/545 scanned)** — Track D created zero new FPs (sameFile gate + public-IP-only
+> filter). FPR-after-ML-T1 (offline replay): 1.10% (6/545, classifier filters 0 in
+> this run; not applied to `muaddib scan` in production). FPR PyPI moved from
+> biased 6.10% (82/132) to honest 9.68% (12/124) as 42 previously-skipped giants
+> entered scope. Measurement saved in `metrics/v2.11.48.json`. **This is the
+> canonical FPR.**
 
 ## Historical FPR: 10.8% (57/529) — v2.10.1
 

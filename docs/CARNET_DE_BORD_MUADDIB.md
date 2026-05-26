@@ -498,17 +498,102 @@ Tests : 3258 → **3280**. Pas de nouvelle rule, pas de nouveau scanner. Le post
 
 ---
 
+## Fin mai 2026 : quand un chiffre stable cache un probleme
+
+Depuis fin avril, je publiais dans la doc un TPR de 93,85%. Je trouvais ca rassurant : malgre les dizaines de nouvelles regles ajoutees, le score restait stable. Pas de regression.
+
+Sauf qu'un soir, en regardant les chiffres avec un peu de recul, je me suis pose une question bete : comment se fait-il que le TPR n'ait pas bouge d'un poil alors que j'avais ajoute 25 nouvelles regles ? Soit elles ne servent a rien — peu probable, je les ai ecrites pour des patterns reels —, soit la metrique ne les voit pas.
+
+J'ai ouvert le ground truth et j'ai compte : sur les 67 attaques de reference, **60 attendaient une seule chose** — que le package soit dans la liste IOC connue. Autrement dit, mon TPR mesurait essentiellement "le nom est dans ma base de noms malveillants". Trivial. Toutes les nouvelles regles (les scanners Python, les detections de fingerprint, les patterns d'obfuscation Unicode...) n'avaient simplement aucun sample qui les testait.
+
+Six semaines de travail sur des regles qui, du point de vue de la metrique, n'existaient pas.
+
+### Le ground truth est un produit, pas un dataset fige
+
+J'ai passe la journee a etoffer le ground truth en trois passes.
+
+**D'abord, des fixtures synthetiques.** Pour chaque nouvelle famille de regle, j'ai cree un mini-package qui contient juste ce qu'il faut pour declencher cette regle precise. 16 entrees ajoutees. Pour chaque sample, je le scanne en isolation, je note le score qu'il produit, et je l'annote dans le fichier des attaques. Deux samples scoreent 9 et 19 — sous le seuil d'alerte. C'est normal : ce sont des regles HIGH/MEDIUM qui ne sont pas censees declencher seules. Mais je les garde, je les marque comme "ne compte que pour le seuil bas". Une regle qui contribue a un score combine merite d'etre testee, meme si elle ne franchit pas le seuil toute seule.
+
+**Ensuite, des vrais tarballs.** Le moniteur VPS archive les packages flaggees pendant 7 jours. Croise avec ma base de reviews humaines (488 packages examines en mai, 18 confirmes MALWARE), j'ai pu en recuperer 6 encore presents : trois packages d'une campagne TrapDoor mai 2026, une dep-confusion classique, un faux serveur MCP de securite DeFi, et un pentest agressif. Les 15 autres etaient deja effaces. Tarballs perdus.
+
+**Enfin, des reconstructions.** Pour les 15 perdus, j'avais quand meme dans le fichier de reviews leur description complete : ce qu'ils faisaient, dans quel ordre, avec quels artefacts. Suffisant pour les reconstituer fidelement — sans recopier exactement le code, juste le pattern. 7 reconstructions pour couvrir les attaques uniques : un cluster qui ciblait MarginFi (DeFi Solana) en exfiltrant les variables d'env wallet vers une IP directe, un autre qui visait Bybit via un bot Telegram, un troisieme qui faisait du multi-channel exfil (curl /etc/passwd + DNS + HTTP en parallele), un harvester AWS multi-source, un loader deguise en fetch d'icones CDN, un trojanise de tsconfig-paths qui cachait son URL dead-drop derriere un shadow de `process`, et un dernier — celui qui m'a ouvert les yeux.
+
+### Le sample qui scorait 3 alors qu'il aurait du scorer 47
+
+Ce dernier sample, `design-system-coopeuch`, etait dans la base de reviews avec un verdict MALWARE et un score humain de 47/100. Je le reconstitue, je le scanne, je m'attends a un score similaire. Resultat : **3/100**.
+
+Pourtant le code etait sans equivoque :
+- Trois `execSync` pour recuperer l'identite du systeme (`id`, `uname -a`, `lsb_release -a`)
+- Puis un `http.request` vers une IP litterale publique pour envoyer le tout
+
+Toute la journee, mon scanner regardait ce pattern et ne fire qu'une seule regle, en LOW, parce qu'aucune detection individuelle ne capturait specifiquement "fingerprint Linux + IP directe". J'avais des regles generiques pour `execSync`, oui, mais elles s'eteignaient via les filtres anti-faux-positifs. Et `http.request({host: '203.0.113.99'})` ressemblait a n'importe quelle requete HTTP.
+
+J'ai tagge le sample "ce score 3 est attendu, c'est une gap connue", et j'ai ferme la gap dans la foulee.
+
+### Trois additions, une release
+
+Track D, en condense :
+
+- Une regle qui detecte specifiquement les commandes Linux de reconnaissance (`id`, `uname`, `lsb_release`, `hostname`, `whoami`) en HIGH.
+- Une regle qui detecte les IP publiques utilisees comme endpoint HTTP, en HIGH, en excluant explicitement les plages legitimes (localhost, RFC 1918 prive, link-local cloud).
+- Un compound CRITICAL qui s'active quand les deux signaux sont dans le meme fichier.
+
+Le compound, c'est le gate critique. Un SDK de telemetry legitime peut appeler `hostname` pour un heartbeat, oui — mais rarement vers une IP litterale, et tres rarement les deux dans le meme fichier. Le `sameFile` filtre les co-occurrences fortuites.
+
+Avant de relancer l'eval, smoke test sur 10 packages populaires (express, fastify, axios, prisma...). Aucun ne fire le compound. Un seul fire la regle direct-IP : fastify, qui ecoute par defaut sur `0.0.0.0`. C'est la valeur "bind toutes les interfaces" — j'ajoute `0.0.0.0` a la liste blanche. Re-scan : plus rien. Bien.
+
+### Le bug PyPI qui maquillait les chiffres
+
+Pendant que Track D tournait, j'ai jete un oeil aux chiffres PyPI de la version precedente. 6,10% de FPR — pas mal. Mais en lisant les details : `82 scannes sur 132`. Soit 50 echecs de telechargement. 38%.
+
+Et la liste des echecs ? `django`, `numpy`, `pandas`, `scipy`, `fastapi`, `aiohttp`, `httpx`, `scikit-learn`, `matplotlib`, `plotly`, `bokeh`... Ce ne sont pas des packages obscurs supprimes. Ce sont les plus telecharges de PyPI.
+
+Le bug etait dans une option de la commande `pip download` que j'utilisais : un flag forcait pip a recompiler les packages depuis les sources, ce qui declenchait l'installation de dependances de build (cython, meson, setuptools) — et ces dependances depassaient largement les 30 secondes de timeout pour numpy ou pandas.
+
+Deuxieme bug enchaine derriere : meme quand le telechargement reussissait sous forme de wheel (le format binaire de PyPI), mon code d'extraction ne savait gerer que les sdists (.tar.gz). Il ignorait explicitement les `.whl` avec un commentaire dans le code disant "rare pour les sdists, on skip". Mais les wheels sont des ZIP renommes — et j'avais deja un extracteur ZIP dans le projet.
+
+Deux modifications de quelques lignes chacune : retirer le flag problematique de `pip download`, et utiliser l'extracteur unifie qui sait gerer .tar.gz, .tgz, .zip et .whl. Resultat : 124 packages scannes sur 132 au lieu de 82. Les 8 restants sont les vrais geants (>500 Mo : torch, tensorflow, scipy, opencv, ansible, playwright) qui depassent encore le timeout. Pas grave pour l'instant.
+
+Le FPR PyPI remonte de 6,10% a 9,68%. Au premier coup d'oeil, c'est une regression. En fait c'est une mesure honnete : on scanne 42 packages de plus, dont les plus complexes. Les 12 FP sont tous coinces a un score entre 25 et 35 — pile au cap PyPI documente depuis longtemps. Cette histoire de cap PyPI plafonne tous les samples Python a 35, ce qui regroupe artificiellement les FP et les vrais positifs dans la meme bande. Le lever (Track E) fera tomber le FPR a presque rien et debloquera la detection a des seuils plus hauts. Prochaine release.
+
+### Les chiffres apres tout ca
+
+Sur le ground truth enrichi a 96 samples, Track D actif, fix PyPI applique :
+
+| Metrique | Avant (v2.10.95) | Apres (v2.11.48) |
+|----------|------------------|------------------|
+| Detection (TPR@3) | 93,85% | 95,74% |
+| Alerte operationnelle (TPR@20) | 86,2% | 88,3% |
+| Faux positifs (curated npm) | 15,6% | 1,10% |
+| Faux positifs (random npm) | 7,0% | 2,50% |
+| Faux positifs (PyPI) | non mesure honnetement | 9,68% (limite par le cap) |
+| ADR (samples adversariaux) | 96,3% | 96,26% |
+
+La baisse du FPR de 15,6% a 1,10% n'est pas due a Track D — c'est l'accumulation des 14 caps contextuels F1-F14 depuis avril, mesuree honnetement pour la premiere fois sur le corpus complet. Track D apporte les +2 points de TPR@20 sans creer un seul nouveau faux positif.
+
+### Ce que j'ai retenu
+
+**Une metrique qui ne bouge jamais est suspecte.** Si je modifie le code et que la mesure reste figee, ce n'est pas un signe de stabilite. C'est un signe que la mesure ne capte pas ce que je crois qu'elle capte.
+
+**Le ground truth doit grandir.** 67 incidents historiques c'est bien comme garde-fou anti-regression, mais sans ajout regulier des patterns recents, la couverture des nouvelles regles tombe a zero. J'aimerais automatiser ca : chaque package que le moniteur flag et qu'un humain confirme MALWARE devrait devenir un candidat GT.
+
+**Un chiffre rassurant sur un echantillon biaise est plus dangereux qu'un chiffre defavorable sur un echantillon honnete.** Le 6,10% FPR PyPI precedent me reconfortait, sauf qu'il ne mesurait que les petits packages pure-Python. Le 9,68% actuel est plus eleve mais reflete vraiment la realite.
+
+**Un sample documente une gap.** Avant Track D, le sample design-system-coopeuch etait dans le ground truth en sachant qu'il scorerait 3 — c'est ecrit dans le fichier des attaques avec un champ "known_gap". Une heure apres, la gap etait fermee et le sample passait a 50. Le sample sert d'oracle : il dit ce que le scanner ne sait pas detecter, et il valide la fermeture quand on s'y attaque.
+
+---
+
 ## Ou j'en suis
 
-3 mois et demi de projet. 223 regles de detection, 16 scanners paralleles plus 2 modules de pre-analyse, 3529 tests. Un moniteur en 24/7 sur npm et PyPI. Deux modeles ML entraines plus 7 features contextuelles branches en post-filtre deterministe. Un ground truth passe de 4 malwares a 67 samples + 377 confirmed_malicious dans l'auto-labeler. La phase intel-triage de mai 2026 (v2.11) ajoute trois scanners statiques alignes sur 2026 : IOC strings YARA-style (Axios 2026, TeamPCP, GlassWorm, CanisterSprawl), anti-forensique AST (XOR + self-delete + decoy write), stub package (main file < 500 octets + dep URL externe + lifecycle).
+4 mois de projet. 262 regles de detection, 20 scanners paralleles, 3913 tests. Un moniteur 24/7 qui scanne npm et PyPI en continu. Un ground truth passe de 4 malwares au depart a 96 aujourd'hui, dont 13 PyPI ajoutes ce mois-ci — c'est la premiere fois que l'evaluation couvre vraiment Python.
 
-Les chiffres qui comptent (mesure canonique v2.10.95) : **TPR@3 93.85%** (61/65 attaques actives detectees, 67 totales avec 2 protestware hors-scope), **TPR@20 86.2%** (56/65 sur le seuil operationnel), **FPR curated 15.6%** (85/545 scannes sur 548), **FPR random 7.0%** (14/200), **ADR 96.3%** (103/107 samples adversariaux). Ce ne sont pas des scores parfaits, et c'est le point : un scanner avec 0% de FP ne scanne probablement rien, et un TPR de 100% sur 4 samples ne veut rien dire.
+Les chiffres a la derniere mesure (v2.11.48) : detection a 95,74%, alerte operationnelle a 88,30%, faux positifs sur les packages npm legitimes a 1,10% (contre 15,6% il y a six semaines, le travail sur les filtres anti-faux-positifs a vraiment paye), faux positifs sur PyPI a 9,68% — limite par un bug de scoring qui plafonne tous les packages Python a 35/100 et que je dois lever. Ce ne sont pas des scores parfaits, et c'est le point : un scanner avec 0% de FP ne scanne probablement rien, et un TPR de 100% sur 4 samples ne veut rien dire.
 
-Ce qui marche bien : la detection des campagnes connues (Shai-Hulud, GlassWorm, CanisterWorm), la desobfuscation statique qui voit a travers les techniques d'evasion courantes, le sandbox avec acceleration temporelle pour les time-bombs, le compound scoring qui exploite les combinaisons impossibles en code legitime, et le dataflow inter-module qui suit les credentials a travers les frontieres de fichiers.
+Ce qui marche bien : la detection des campagnes connues (Shai-Hulud, GlassWorm, CanisterWorm, TrapDoor), la desobfuscation statique qui voit a travers les techniques d'evasion courantes, le sandbox avec acceleration temporelle pour les time-bombs, et le dataflow inter-module qui suit les credentials a travers les frontieres de fichiers. Plus recemment, les deux scanners Python qui ferment la gap PyPI, et un compound qui detecte specifiquement le pattern "fingerprint Linux + exfil vers IP directe" qui passait inapercu.
 
-Ce qui manque, honnetement : le triage LLM pour filtrer automatiquement les alertes (design doc pret, pas deploye). L'interception TLS dans le sandbox — on capture le SNI mais pas le contenu. La desobfuscation avancee — les obfuscateurs comme JScrambler utilisent des transformations de flux de controle que l'approche statique ne peut pas resoudre. Le support au-dela de npm et PyPI. Et un dashboard web — MUAD'DIB reste un outil CLI. Suffisant pour un dev qui verifie un package avant de l'installer, mais ca ne scale pas pour de la surveillance d'entreprise.
+Ce qui manque, honnetement : lever le cap PyPI a 35 (les Python plafonnent artificiellement, ce qui pourrit la mesure des faux positifs autant que la detection des vrais malwares Python a haut seuil), un triage LLM pour filtrer les alertes (designe, pas deploye), l'interception TLS dans le sandbox (on capture le SNI mais pas le contenu), la desobfuscation avancee pour les flow obfuscators comme JScrambler, le support au-dela de npm et PyPI (Go, Maven, Cargo), et un dashboard web — MUAD'DIB reste un outil CLI, suffisant pour un dev mais pas pour de la surveillance d'entreprise.
 
-La lecon la plus importante de tout le projet : les donnees sont plus importantes que le code. Le meilleur algorithme du monde ne sert a rien avec des labels contamines. Les meilleures heuristiques ne servent a rien si le FPR est mesure sur des repertoires vides. L'honnetete sur les limites n'est pas une faiblesse — c'est la seule facon de progresser.
+La lecon la plus importante de tout le projet : les donnees sont plus importantes que le code. Le meilleur algorithme du monde ne sert a rien avec des labels contamines. Les meilleures heuristiques ne servent a rien si le FPR est mesure sur des repertoires vides — ou si le TPR n'attend qu'un match de nom dans une liste sur 60 samples sur 67. L'honnetete sur les limites n'est pas une faiblesse — c'est la seule facon de progresser.
 
 ---
 
