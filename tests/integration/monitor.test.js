@@ -9857,6 +9857,65 @@ async function runMonitorTests() {
     assert(processed.includes('pkg-c') && processed.includes('pkg-d'),
       'Worker should have picked up items added by concurrent "poll"');
   });
+
+  // ============================================
+  // PHASE 3 SIGNAL — skill_md_bundled observability
+  // ============================================
+
+  console.log('\n=== MONITOR PHASE 3 SIGNAL (SKILL_MD) TESTS ===\n');
+
+  const { detectSkillMdBundled } = require('../../src/monitor/queue.js');
+
+  test('MONITOR/PHASE-3-SIGNAL: detectSkillMdBundled finds SKILL.md at depth 2', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-skillmd-'));
+    try {
+      const inner = path.join(tmp, 'skills', 'foo');
+      fs.mkdirSync(inner, { recursive: true });
+      fs.writeFileSync(path.join(inner, 'SKILL.md'), '---\nname: foo\n---\n# hi\n');
+      const det = detectSkillMdBundled(tmp, []);
+      assert(det.bundled, 'Should detect bundled SKILL.md via findFiles walk');
+      assert(det.count >= 1, `count should be >= 1, got ${det.count}`);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  test('MONITOR/PHASE-3-SIGNAL: detectSkillMdBundled detects via threats (fast path)', () => {
+    // No filesystem walk — uses threats array with a file pointing at SKILL.md
+    const threats = [
+      { file: 'index.js', type: 'whatever' },
+      { file: 'skills/agent/SKILL.md', type: 'aiconf_unicode_obfuscation' }
+    ];
+    const det = detectSkillMdBundled('/nonexistent/dir', threats);
+    assert(det.bundled, 'Should detect SKILL.md via threats[].file');
+    assert(det.count === 1, `count should be 1 (threats path), got ${det.count}`);
+  });
+
+  test('MONITOR/PHASE-3-SIGNAL: detectSkillMdBundled negative on clean dir', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-skillmd-'));
+    try {
+      fs.writeFileSync(path.join(tmp, 'package.json'), '{"name":"x","version":"0.0.1"}');
+      fs.writeFileSync(path.join(tmp, 'index.js'), 'module.exports = {};');
+      const det = detectSkillMdBundled(tmp, []);
+      assert(!det.bundled, 'Should NOT fire on a clean package without SKILL.md');
+      assert(det.count === 0, `count should be 0, got ${det.count}`);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  test('MONITOR/PHASE-3-SIGNAL: detectSkillMdBundled handles null/missing extractedDir', () => {
+    const det1 = detectSkillMdBundled(null, []);
+    assert(!det1.bundled && det1.count === 0, 'null dir should be a no-op');
+    const det2 = detectSkillMdBundled('/this/path/does/not/exist/anywhere', null);
+    assert(!det2.bundled && det2.count === 0, 'missing dir should be a no-op');
+  });
+
+  test('MONITOR/PHASE-3-SIGNAL: detectSkillMdBundled is case-insensitive on SKILL.md', () => {
+    const threats = [{ file: 'plugins/whatever/Skill.md', type: 't' }];
+    const det = detectSkillMdBundled(null, threats);
+    assert(det.bundled, 'Should match Skill.md case-insensitively');
+  });
 }
 
 module.exports = { runMonitorTests };

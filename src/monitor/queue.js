@@ -480,6 +480,18 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
       throw staticErr;
     }
 
+    // Phase 3 signal — agent-supply-chain lens. Pure observability, no scoring impact.
+    // Cisco AI Defense / SkillSieve / Snyk Agent Scan EVO scan skill marketplaces;
+    // they don't monitor the npm/PyPI firehose. Tracking which packages bundle a
+    // SKILL.md is our unique intersection (npm-package-bundling-malicious-skill).
+    try {
+      const det = detectSkillMdBundled(extractedDir, result && result.threats);
+      if (det.bundled) {
+        stats.skillMdBundled = (stats.skillMdBundled || 0) + 1;
+        console.log(`[MONITOR] SKILL_MD_BUNDLED: ${name}@${version} (${ecosystem}) — ${det.count} file(s)`);
+      }
+    } catch { /* observability signal — never let it break the scan */ }
+
     // First-publish detection: used for sandbox priority below
     const isFirstPublish = cacheTrigger && cacheTrigger.reason === 'first_publish';
 
@@ -1004,6 +1016,34 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
   }
 }
 
+/**
+ * Detect whether a package bundles a SKILL.md (Anthropic Agent Skills spec).
+ * Pure observability — drives the `stats.skillMdBundled` counter, no scoring effect.
+ *
+ * Two-pass check: (1) inspect emitted threats for SKILL.md filenames so we catch
+ * cases the scanner already touched without re-walking the tree; (2) fall back to
+ * a bounded findFiles walk (maxDepth 4, maxFiles 5) for packages where no scanner
+ * has flagged anything.
+ *
+ * @param {string|null} extractedDir - Unpacked tarball root, or null if unknown.
+ * @param {Array<{file?:string}>|null} threats - Threats array from the scan result.
+ * @returns {{bundled: boolean, count: number}}
+ */
+function detectSkillMdBundled(extractedDir, threats) {
+  const fromThreats = Array.isArray(threats) && threats.some(
+    t => /(?:^|[\\/])SKILL\.md$/i.test((t && t.file) || '')
+  );
+  if (fromThreats) return { bundled: true, count: 1 };
+  if (!extractedDir) return { bundled: false, count: 0 };
+  try {
+    const { findFiles } = require('../utils.js');
+    const found = findFiles(extractedDir, { extensions: ['SKILL.md'], maxDepth: 4, maxFiles: 5 });
+    return { bundled: found.length > 0, count: found.length };
+  } catch {
+    return { bundled: false, count: 0 };
+  }
+}
+
 function timeoutPromise(ms) {
   return new Promise((_, reject) => {
     setTimeout(() => reject(new Error(`Scan timeout after ${ms / 1000}s`)), ms);
@@ -1480,6 +1520,7 @@ module.exports = {
   runScanInWorker,
   scanPackage,
   timeoutPromise,
+  detectSkillMdBundled,
   isDailyReportDue,
   processQueueItem,
   processQueue,

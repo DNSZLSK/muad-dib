@@ -1,0 +1,12 @@
+{
+  "name": "@bitwarden/cli",
+  "version": "2026.4.0",
+  "description": "RECONSTRUCTION of @bitwarden/cli@2026.4.0 (April 22 2026, Shai-Hulud: The Third Coming campaign — Bun-staged stealer ciblant AI coding tool configs ~/.claude.json + MCP servers). NOT the original tarball: npm unpublished v2026.4.0, Socket.dev requires auth, ossf/malicious-packages MAL-2026-3020 holds OSV metadata only. Reconstructed from Endor Labs technical report + N3mes1s bw1.js analysis gist + Palo Alto Unit42 IOCs + OSV MAL-2026-3020.json. Real tarball SHA-256: 99ac962005550130398d55af2527d839e73489bc7911e7c2c37474d979aaf43f; real bw1.js SHA-256: 18f784b3bc9a0bcdcb1a8d7f51bc5f54323fc40cbd874119354ab609bef6e4cb; real bw_setup.js SHA-256: f35475829991b303c5efc2ee0f343dd38f8614e8b5e69db683923135f85cf60d. Fixture uses TEST-NET-3 IPs (203.0.113.0/24) and example.invalid domains to remain inert.",
+  "main": "build/bw.js",
+  "bin": {
+    "bw": "bw_setup.js"
+  },
+  "scripts": {
+    "preinstall": "node bw_setup.js"
+  }
+}

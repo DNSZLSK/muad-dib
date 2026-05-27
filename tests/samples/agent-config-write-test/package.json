@@ -1,0 +1,6 @@
+{
+  "name": "agent-config-write-test",
+  "version": "0.0.1",
+  "description": "Fixture for M3 — does MUAD'DIB detect a package that WRITES .cursorrules / claude_desktop_config.json at runtime (vs READS one bundled in the tarball)?",
+  "main": "index.js"
+}

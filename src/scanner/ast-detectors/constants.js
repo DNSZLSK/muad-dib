@@ -136,6 +136,17 @@ const SENSITIVE_AI_CONFIG_FILES_UNIQUE = [
   'claude.md', 'claude_desktop_config.json',
   'mcp.json',
   '.cursorrules', '.windsurfrules',
+  'copilot-instructions.md',
+  'agents.md', 'agent.md'
+];
+
+// Agent prompt files that live at any directory level — written by TrapDoor-style
+// post-install hooks to the user's home or cwd. Detected via a "standalone" branch
+// that does NOT require an MCP_CONFIG_PATHS dir prefix (otherwise homedir + .cursorrules
+// slips through because '.cursorrules'.includes('.cursor/') is false).
+const AGENT_PROMPT_FILENAMES = [
+  '.cursorrules', '.windsurfrules',
+  'claude.md', 'agents.md', 'agent.md',
   'copilot-instructions.md'
 ];
 const SENSITIVE_AI_CONFIG_FILES_ROOT_ONLY = [
@@ -256,6 +267,7 @@ module.exports = {
   NODE_HOOKABLE_CLASSES,
   MCP_CONFIG_PATHS,
   MCP_CONTENT_PATTERNS,
+  AGENT_PROMPT_FILENAMES,
   SENSITIVE_AI_CONFIG_FILES_UNIQUE,
   SENSITIVE_AI_CONFIG_FILES_ROOT_ONLY,
   GIT_HOOKS,

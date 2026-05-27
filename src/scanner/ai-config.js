@@ -43,12 +43,30 @@ const AI_CONFIG_FILES = [
 // These are distinct from AI_CONFIG_FILES: they contain machine-readable hooks
 // that execute code on project open, not human-readable prompt injection.
 // Technique: Shai-Hulud (TeamPCP, May 2026) — .claude/settings.json SessionStart hook.
+// Additional mai 2026 surfaces (Cursor / Windsurf / Continue / root Claude Desktop)
+// added after the TrapDoor + Bitwarden CLI campaigns confirmed cross-agent targeting.
 const IDE_HOOK_FILES = [
   '.claude/settings.json',
   '.claude/settings.local.json',
   '.vscode/tasks.json',
-  '.kiro/settings/mcp.json'
+  '.kiro/settings/mcp.json',
+  '.cursor/mcp.json',
+  '.continue/config.json',
+  '.windsurf/mcp.json',
+  'mcp.json',
+  'claude_desktop_config.json'
 ];
+
+// Paths that follow the standard MCP `mcpServers.{name}.command` schema.
+// A package shipping any of these with a `command` entry is hostile: legitimate
+// npm/PyPI packages never ship per-user MCP configurations.
+const MCP_STANDARD_PATHS = new Set([
+  '.kiro/settings/mcp.json',
+  '.cursor/mcp.json',
+  '.windsurf/mcp.json',
+  'mcp.json',
+  'claude_desktop_config.json'
+]);
 
 // Dangerous shell command patterns in AI config files
 const SHELL_COMMAND_PATTERNS = [
@@ -209,9 +227,12 @@ function analyzeIDEHookFile(content, relPath) {
     }
   }
 
-  // .kiro/settings/mcp.json
+  // Standard MCP config family:
+  //   .kiro/settings/mcp.json | .cursor/mcp.json | .windsurf/mcp.json
+  //   | root mcp.json (Claude Desktop project mode)
+  //   | root claude_desktop_config.json (Claude Desktop global, hostile if shipped)
   // Structure: { mcpServers: { name: { command, args } } }
-  if (relPath.includes('.kiro/') && relPath.endsWith('mcp.json')) {
+  if (MCP_STANDARD_PATHS.has(relPath)) {
     const mcpServers = parsed.mcpServers;
     if (mcpServers && typeof mcpServers === 'object') {
       for (const [name, config] of Object.entries(mcpServers)) {
@@ -219,7 +240,41 @@ function analyzeIDEHookFile(content, relPath) {
           threats.push({
             type: 'ide_hook_autoexec',
             severity: 'CRITICAL',
-            message: `IDE auto-exec hook: .kiro/settings/mcp.json server "${name}" executes "${config.command}" on project open`,
+            message: `IDE auto-exec hook: ${relPath} server "${name}" executes "${config.command}" on project open`,
+            file: relPath
+          });
+        }
+      }
+    }
+  }
+
+  // .continue/config.json — Continue.dev schema. Two MCP surfaces:
+  //   1. experimental.modelContextProtocolServers[].transport.command (canonical)
+  //   2. mcpServers.{name}.command (newer alias)
+  if (relPath === '.continue/config.json') {
+    const exp = parsed.experimental;
+    const mcps = exp && Array.isArray(exp.modelContextProtocolServers)
+      ? exp.modelContextProtocolServers
+      : [];
+    for (const srv of mcps) {
+      const cmd = srv && srv.transport && srv.transport.command;
+      if (cmd) {
+        threats.push({
+          type: 'ide_hook_autoexec',
+          severity: 'CRITICAL',
+          message: `IDE auto-exec hook: .continue/config.json modelContextProtocolServer transport executes "${cmd}" on project open`,
+          file: relPath
+        });
+      }
+    }
+    const mcpServers = parsed.mcpServers;
+    if (mcpServers && typeof mcpServers === 'object') {
+      for (const [name, config] of Object.entries(mcpServers)) {
+        if (config && typeof config === 'object' && config.command) {
+          threats.push({
+            type: 'ide_hook_autoexec',
+            severity: 'CRITICAL',
+            message: `IDE auto-exec hook: .continue/config.json mcpServers "${name}" executes "${config.command}" on project open`,
             file: relPath
           });
         }

@@ -30,6 +30,7 @@ const {
   DANGEROUS_CMD_PATTERNS,
   MCP_CONFIG_PATHS,
   MCP_CONTENT_PATTERNS,
+  AGENT_PROMPT_FILENAMES,
   SENSITIVE_AI_CONFIG_FILES_UNIQUE,
   SENSITIVE_AI_CONFIG_FILES_ROOT_ONLY,
   GIT_HOOKS,
@@ -50,6 +51,56 @@ const {
   containsDecodePattern,
   resolveNumericExpression
 } = require('./helpers.js');
+
+/**
+ * Detect whether an AST node points at a user-level filesystem location:
+ *   os.homedir() | process.cwd() | process.env.HOME | process.env.USERPROFILE
+ *   | string starting with "~/" | absolute "/home/" or "C:\\Users\\" prefix
+ *   | path.join(...) where ANY arg matches the above (recursive)
+ *
+ * Used by SANDWORM_MODE R5b to distinguish hostile TrapDoor-style writes
+ * (homedir + .cursorrules) from legit scaffolder writes (__dirname + tmpl).
+ */
+function _isUserLevelPathArg(node, depth = 0) {
+  if (!node || depth > 4) return false;
+  // os.homedir() / process.cwd()
+  if (node.type === 'CallExpression' && node.callee?.type === 'MemberExpression') {
+    const objName = node.callee.object?.name || node.callee.object?.property?.name;
+    const propName = node.callee.property?.name;
+    if (objName === 'os' && propName === 'homedir') return true;
+    if (objName === 'process' && propName === 'cwd') return true;
+    // path.join() / path.resolve() — recurse into args
+    if (objName === 'path' && (propName === 'join' || propName === 'resolve')) {
+      return Array.isArray(node.arguments) && node.arguments.some(a => _isUserLevelPathArg(a, depth + 1));
+    }
+  }
+  // process.env.HOME / process.env.USERPROFILE
+  if (node.type === 'MemberExpression' && node.object?.type === 'MemberExpression') {
+    const root = node.object.object;
+    const mid = node.object.property;
+    const leaf = node.property;
+    if (root?.name === 'process' && mid?.name === 'env'
+        && (leaf?.name === 'HOME' || leaf?.name === 'USERPROFILE')) return true;
+  }
+  // Literal string indicators
+  if (node.type === 'Literal' && typeof node.value === 'string') {
+    if (node.value.startsWith('~/') || node.value.startsWith('~\\')) return true;
+    if (/^\/home\/|^\/Users\//.test(node.value)) return true;
+    if (/^[A-Za-z]:[\\/]Users[\\/]/.test(node.value)) return true;
+  }
+  // Template literal — check quasi parts for the same prefixes
+  if (node.type === 'TemplateLiteral' && Array.isArray(node.quasis) && node.quasis[0]) {
+    const head = node.quasis[0].value?.cooked || '';
+    if (head.startsWith('~/') || /^\/home\/|^\/Users\/|^[A-Za-z]:[\\/]Users[\\/]/.test(head)) return true;
+    // Also recurse into ${expr} parts: if any expression is a user-level indicator, treat as user-level
+    if (Array.isArray(node.expressions) && node.expressions.some(e => _isUserLevelPathArg(e, depth + 1))) return true;
+  }
+  // BinaryExpression "a + b" — recurse into both sides
+  if (node.type === 'BinaryExpression' && node.operator === '+') {
+    return _isUserLevelPathArg(node.left, depth + 1) || _isUserLevelPathArg(node.right, depth + 1);
+  }
+  return false;
+}
 
 function handleCallExpression(node, ctx) {
   const callName = getCallName(node);
@@ -662,10 +713,13 @@ function handleCallExpression(node, ctx) {
     }
   }
 
-  // SANDWORM_MODE R5: MCP config injection — writeFileSync to AI config paths
+  // SANDWORM_MODE R5: MCP config injection — writeFileSync/appendFileSync to AI config paths.
+  // appendFileSync was added in v2.11.49 to cover the TrapDoor (mai 2026) pattern that
+  // appends ZW-Unicode-poisoned instructions to existing CLAUDE.md / .cursorrules instead
+  // of overwriting them — the original missed M3 fixture's appendFileSync('CLAUDE.md', ...).
   if (node.callee.type === 'MemberExpression' && node.callee.property?.type === 'Identifier') {
     const mcpWriteMethod = node.callee.property.name;
-    if (['writeFileSync', 'writeFile'].includes(mcpWriteMethod) && node.arguments.length >= 2) {
+    if (['writeFileSync', 'writeFile', 'appendFileSync', 'appendFile'].includes(mcpWriteMethod) && node.arguments.length >= 2) {
       const mcpPathArg = node.arguments[0];
       const mcpPathStr = extractStringValueDeep(mcpPathArg);
       // Also check path.join() calls — resolve concat fragments in each argument
@@ -710,6 +764,36 @@ function handleCallExpression(node, ctx) {
             message: `MCP config injection: ${mcpWriteMethod}() writes to AI assistant configuration (${mcpCheckPath}). SANDWORM_MODE technique for AI toolchain poisoning.`,
             file: ctx.relFile
           });
+        }
+      }
+
+      // SANDWORM_MODE R5b (TrapDoor, mai 2026): standalone agent-prompt-file write.
+      // Catches `path.join(os.homedir(), '.cursorrules')` / `appendFileSync(cwd+'/CLAUDE.md', ...)` patterns
+      // that bypass the isMcpPath gatekeeper because `.cursorrules` / `CLAUDE.md` / `AGENTS.md`
+      // are not inside an MCP_CONFIG_PATHS directory.
+      // FP-safe: requires either a user-level path indicator (os.homedir/process.cwd/process.env.HOME/~) OR
+      // shell-command / injection-instruction content. Static scaffolder writes
+      // (path.join(__dirname, 'tmpl', '.cursorrules') + static template) do NOT fire.
+      if (!isMcpPath) {
+        const standaloneFileName = mcpCheckPath.split(/[/\\]/).filter(Boolean).pop() || '';
+        if (AGENT_PROMPT_FILENAMES.some(f => standaloneFileName === f)) {
+          const hasUserLevelPath = _isUserLevelPathArg(mcpPathArg);
+          const contentArg2 = node.arguments[1];
+          const contentStr2 = extractStringValue(contentArg2);
+          const hasShellContent = !!contentStr2 && /(?:curl|wget)\s+[^\n]*\|\s*(?:sh|bash|zsh)\b|\beval\s*\(|\bsh\s+-c\s+|\bbash\s+-c\s+|\bnode\s+-e\s+/i.test(contentStr2);
+          const hasInjectionInstruction = !!contentStr2 && /IMPORTANT[:\s]+(?:before|after|run|execute)|do\s+not\s+(?:display|show|mention)|always\s+run/i.test(contentStr2);
+          if (hasUserLevelPath || hasShellContent || hasInjectionInstruction) {
+            const reasons = [];
+            if (hasUserLevelPath) reasons.push('user-level destination (homedir/cwd/env.HOME)');
+            if (hasShellContent) reasons.push('shell command in content');
+            if (hasInjectionInstruction) reasons.push('AI prompt-injection instruction in content');
+            ctx.threats.push({
+              type: 'mcp_config_injection',
+              severity: 'CRITICAL',
+              message: `MCP config injection: ${mcpWriteMethod}() writes to agent prompt file "${standaloneFileName}" — ${reasons.join(' + ')}. TrapDoor (mai 2026) post-install plant pattern.`,
+              file: ctx.relFile
+            });
+          }
         }
       }
     }

