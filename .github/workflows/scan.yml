@@ -60,6 +60,6 @@ jobs:
         run: node .github/filter-sarif.js results.sarif
       - name: Fail on CRITICAL (post-filter)
         run: node -e "const s=JSON.parse(require('fs').readFileSync('results.sarif','utf8'));const c=(s.runs[0].results||[]).filter(r=>r.level==='error');if(c.length){c.forEach(r=>console.error(r.ruleId+' in '+(r.locations?.[0]?.physicalLocation?.artifactLocation?.uri||'?')));process.exit(1)}console.log('No CRITICAL findings after filter')"
-      - uses: github/codeql-action/upload-sarif@9e0d7b8d25671d64c341c19c0152d693099fb5ba # v3
+      - uses: github/codeql-action/upload-sarif@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v3
         with:
           sarif_file: results.sarif
