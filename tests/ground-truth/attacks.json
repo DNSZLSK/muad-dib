@@ -3476,6 +3476,191 @@
         "score_typical": 93,
         "tpr_tier": "tpr20"
       }
+    },
+    {
+      "id": "GT-097",
+      "name": "@bitwarden/cli",
+      "version": "2026.4.0",
+      "ecosystem": "npm",
+      "year": 2026,
+      "vector": [
+        "shai_hulud_third_coming",
+        "bun_staged_stealer",
+        "ai_tool_config_target",
+        "npm_oidc_abuse",
+        "reconstruction_from_iocs",
+        "real_world_2026"
+      ],
+      "severity": "CRITICAL",
+      "description": "Real-world malware @bitwarden/cli@2026.4.0 (April 22 2026, 17:57-19:30 ET, ~334 downloads). Compromised via npm OIDC trusted publishing. preinstall hook 'node bw_setup.js' downloads Bun 1.3.13 from github.com/oven-sh/bun/releases and executes bw1.js (10.1MB obfuscated) as detached daemon. bw1.js harvests local secrets (~/.ssh/, ~/.aws/, ~/.gcloud/, ~/.azure/, .npmrc, .env, .git-credentials, .kube/config) AND explicitly targets AI coding tool configs (~/.claude.json, ~/.claude/mcp.json, ~/.cursor/, ~/.codeium/) — first npm compromise to enumerate Claude Code/Cursor/Kiro/Codex CLI/Aider. Exfil AES-256-GCM to audit.checkmarx.cx (94.154.172.43). Module 'Butlerian Jihad' probes 6 AI CLIs with test prompt. Persistence via .bashrc/.zshrc append. npm propagation via stolen tokens. RECONSTRUCTION from Endor Labs report + N3mes1s gist + Palo Alto Unit42 + ossf MAL-2026-3020.",
+      "source": "Endor Labs Shai-Hulud Third Coming + N3mes1s/9c210b64760390f1ca2c451100a5ec99 gist + Palo Alto Unit42 + OSV MAL-2026-3020 + GHSA-g98r-qjhg-4fmr",
+      "mitre": [
+        "T1195.002",
+        "T1552.001",
+        "T1041",
+        "T1543",
+        "T1059.007",
+        "T1027"
+      ],
+      "synthetic_reconstruction": true,
+      "ioc_hashes": {
+        "tarball_sha256": "99ac962005550130398d55af2527d839e73489bc7911e7c2c37474d979aaf43f",
+        "bw1_js_sha256": "18f784b3bc9a0bcdcb1a8d7f51bc5f54323fc40cbd874119354ab609bef6e4cb",
+        "bw_setup_js_sha256": "f35475829991b303c5efc2ee0f343dd38f8614e8b5e69db683923135f85cf60d"
+      },
+      "ioc_network": {
+        "c2_domain": "audit.checkmarx.cx",
+        "c2_ip": "94.154.172.43",
+        "c2_endpoint": "/v1/telemetry",
+        "fallback": "api.github.com/search/commits?q=LongLiveTheResistanceAgainstMachines"
+      },
+      "sample_dir": "samples/recon-bitwarden-cli-2026-4-0/",
+      "expected": {
+        "min_threats": 3,
+        "rules": [
+          "MUADDIB-PKG-001",
+          "MUADDIB-PKG-019",
+          "MUADDIB-AST-002",
+          "MUADDIB-AST-012",
+          "MUADDIB-AST-029",
+          "MUADDIB-AST-041",
+          "MUADDIB-AST-092",
+          "MUADDIB-FLOW-001",
+          "MUADDIB-INTENT-001",
+          "MUADDIB-COMPOUND-007"
+        ],
+        "severities": [
+          "HIGH",
+          "CRITICAL"
+        ],
+        "scanners": [
+          "package",
+          "ast",
+          "ioc-strings",
+          "intent-coherence",
+          "dataflow"
+        ],
+        "score_typical": 70,
+        "tpr_tier": "tpr20"
+      }
+    },
+    {
+      "id": "GT-098",
+      "name": "solidity-deploy-guard",
+      "version": "0.1.0",
+      "ecosystem": "npm",
+      "year": 2026,
+      "vector": [
+        "trapdoor_campaign",
+        "cross_ecosystem",
+        "ai_prompt_poisoning",
+        "cursor_rules_plant",
+        "claude_md_plant",
+        "zero_width_unicode_injection",
+        "reconstruction_from_iocs",
+        "real_world_2026"
+      ],
+      "severity": "CRITICAL",
+      "description": "Real-world malware from the TrapDoor campaign (active since 22 mai 2026 — eth-security-auditor@0.1.0 on PyPI 20:20:18 UTC). Cross-ecosystem credential stealer targeting crypto/DeFi/Solana/AI developers. 21 npm packages, 7 PyPI, 6 Crates.io. npm vector: postinstall hook runs trap-core.js (48485 bytes, 1149 lines). Novel innovation: implants .cursorrules and CLAUDE.md files with zero-width-Unicode-hidden instructions that manipulate Claude Code / Cursor to execute attacker-controlled scripts. Campaign marker P-2024-001, XOR key cargo-build-helper-2026, C2 ddjidd564.github.io/defi-security-best-practices/. RECONSTRUCTION from Socket.dev + The Hacker News + Phoenix Security + Aikido reports.",
+      "source": "Socket.dev TrapDoor crypto stealer + The Hacker News + Phoenix Security + Aikido + Socket research blog 2026-05-22..2026-05-25",
+      "mitre": [
+        "T1195.002",
+        "T1552.001",
+        "T1041",
+        "T1543.003",
+        "T1027.013",
+        "T1059.007"
+      ],
+      "synthetic_reconstruction": true,
+      "ioc_network": {
+        "c2_host": "ddjidd564.github.io",
+        "c2_path": "/defi-security-best-practices/audit-matrix",
+        "campaign_marker": "P-2024-001",
+        "xor_key": "cargo-build-helper-2026",
+        "github_account": "ddjidd564",
+        "npm_account": "asdxzxc"
+      },
+      "sample_dir": "samples/recon-trapdoor-npm-solidity-deploy-guard/",
+      "expected": {
+        "min_threats": 5,
+        "rules": [
+          "MUADDIB-PKG-001",
+          "MUADDIB-AST-027",
+          "MUADDIB-AST-028",
+          "MUADDIB-AST-041",
+          "MUADDIB-FLOW-001",
+          "MUADDIB-IOC-001",
+          "MUADDIB-INTENT-001",
+          "MUADDIB-COMPOUND-007",
+          "MUADDIB-COMPOUND-009"
+        ],
+        "severities": [
+          "HIGH",
+          "CRITICAL"
+        ],
+        "scanners": [
+          "package",
+          "ast",
+          "ioc-strings",
+          "intent-coherence",
+          "dataflow"
+        ],
+        "score_typical": 80,
+        "tpr_tier": "tpr20"
+      }
+    },
+    {
+      "id": "GT-099",
+      "name": "eth-security-auditor",
+      "version": "0.1.0",
+      "ecosystem": "pypi",
+      "year": 2026,
+      "vector": [
+        "trapdoor_campaign",
+        "cross_ecosystem",
+        "ai_prompt_poisoning",
+        "cursor_rules_plant",
+        "claude_md_plant",
+        "zero_width_unicode_injection",
+        "pypi_import_time_exec",
+        "reconstruction_from_iocs",
+        "real_world_2026"
+      ],
+      "severity": "CRITICAL",
+      "description": "PyPI variant of the TrapDoor campaign (initial observation 22 mai 2026 20:20:18 UTC). The PyPI vector auto-executes its payload at first `import` of the package — no setup.py code-exec needed. Same campaign as GT-098 (npm solidity-deploy-guard): credential harvest + .cursorrules / CLAUDE.md plant with ZW-Unicode-hidden instructions + XOR exfil to ddjidd564.github.io. 7 PyPI packages in the campaign per Socket. RECONSTRUCTION local-only (no PyPI fetch) following the eth-security-auditor name and pattern from Socket.dev + Aikido reports. NOTE: measured score 35/100 reveals the cap-PyPI-35 artifact (Track E target in CLAUDE.md) — `__init__.py` fileScore 95 but global cap at 35. Only MUADDIB-IOC-001 fires; the AST/FLOW/COMPOUND rules that fire on the npm twin (GT-098) have no PyPI equivalent yet. Documents the cross-ecosystem detection asymmetry.",
+      "source": "Socket.dev TrapDoor crypto stealer + The Hacker News + Phoenix Security + Aikido (PyPI vector named eth-security-auditor, original tarball not fetched to keep session safe)",
+      "mitre": [
+        "T1195.002",
+        "T1552.001",
+        "T1041",
+        "T1543.003",
+        "T1027.013"
+      ],
+      "synthetic_reconstruction": true,
+      "ioc_network": {
+        "c2_host": "ddjidd564.github.io",
+        "c2_path": "/defi-security-best-practices/audit-matrix",
+        "campaign_marker": "P-2024-001",
+        "xor_key": "cargo-build-helper-2026",
+        "github_account": "ddjidd564"
+      },
+      "sample_dir": "samples/recon-trapdoor-pypi-eth-security-auditor/",
+      "expected": {
+        "min_threats": 3,
+        "rules": [
+          "MUADDIB-IOC-001"
+        ],
+        "severities": [
+          "HIGH",
+          "CRITICAL"
+        ],
+        "scanners": [
+          "ioc-strings"
+        ],
+        "score_typical": 35,
+        "tpr_tier": "tpr20",
+        "gaps": "cap-PyPI-35 artifact + no PyPI equivalents for MUADDIB-AST-027 (mcp_config_injection) / MUADDIB-AST-028 (git_hooks_injection) / MUADDIB-FLOW-001 (suspicious_dataflow) / MUADDIB-INTENT-001 / MUADDIB-COMPOUND-007/009. Track E target."
+      }
     }
   ]
 }
