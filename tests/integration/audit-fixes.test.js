@@ -807,12 +807,10 @@ async function runHighFix11Tests() {
 async function runHighFix13Tests() {
   console.log('\n=== HIGH #13: Log injection prevention ===\n');
 
-  test('H13: preload.js sanitizes newlines in log messages', () => {
-    const src = fs.readFileSync(path.join(__dirname, '../../docker/preload.js'), 'utf8');
-    assert(src.includes('safeMsg'), 'Should use safeMsg for sanitization');
-    assert(src.includes('safeCat'), 'Should sanitize category too');
-    assert(src.includes('.substring(0, 1000)'), 'Should truncate to 1000 chars');
-  });
+  // C1: removed source-grep ("preload.js contains safeMsg/safeCat/.substring") — log-injection
+  // sanitization is now covered behaviorally in tests/unit/preload.test.js ("forensic log is
+  // injection-safe"), which runs preload in a subprocess with a newline-injecting path and
+  // asserts no forged log line appears.
 
   test('H13: analyzer.js validates log line format', () => {
     const { isValidPreloadLine } = require('../../src/sandbox/analyzer.js');
@@ -1008,11 +1006,9 @@ emitter.emit('data', secret);
     }
   });
 
-  test('H22: dataflow.js has eventHandlers tracking', () => {
-    const src = fs.readFileSync(path.join(__dirname, '../../src/scanner/dataflow.js'), 'utf8');
-    assert(src.includes('eventHandlers'), 'Should track event handlers');
-    assert(src.includes('emitTaintedEvents'), 'Should track tainted emits');
-  });
+  // C1: removed source-grep ("dataflow.js contains eventHandlers/emitTaintedEvents") —
+  // the behavioral test above ("Should detect EventEmitter taint propagation") already
+  // exercises this by running the scanner on an EventEmitter exfil fixture.
 }
 
 // ===================================================================
@@ -1044,10 +1040,9 @@ exfiltrate(token);
     }
   });
 
-  test('H23: dataflow.js has functionDefs tracking', () => {
-    const src = fs.readFileSync(path.join(__dirname, '../../src/scanner/dataflow.js'), 'utf8');
-    assert(src.includes('functionDefs'), 'Should track function definitions');
-  });
+  // C1: removed source-grep ("dataflow.js contains functionDefs") — the behavioral test
+  // above ("Detects taint propagation through function params") covers it by running the
+  // scanner on a function-parameter exfil fixture.
 }
 
 // ===================================================================
@@ -1056,11 +1051,9 @@ exfiltrate(token);
 async function runHighFix24Tests() {
   console.log('\n=== HIGH #24: Module graph 5-hop re-export chain ===\n');
 
-  test('H24: module-graph.js uses level < 4 for re-export propagation', () => {
-    const src = fs.readFileSync(path.join(__dirname, '../../src/scanner/module-graph/detect-cross-file.js'), 'utf8');
-    assert(src.includes('level < 4'), 'Should use level < 4 for 5-hop propagation');
-    assert(!src.includes('level < 2;'), 'Should NOT have old level < 2 limit');
-  });
+  // C1: removed source-grep ("detect-cross-file.js uses level < 4") — multi-hop re-export
+  // propagation depth is covered behaviorally in tests/scanner/module-graph.test.js (13 tests
+  // exercising hop/level/re-export chains), which would fail if the depth limit regressed.
 }
 
 // ===================================================================
@@ -1496,15 +1489,10 @@ async function runMediumFix34Tests() {
     }
   });
 
-  test('M34: _findFilesImpl source code has visitedPaths cycle detection', () => {
-    const src = fs.readFileSync(path.join(__dirname, '../../src/utils.js'), 'utf8');
-    assert(src.includes('visitedPaths'), 'Should have visitedPaths parameter');
-    assert(src.includes('visitedPaths.has('), 'Should check visitedPaths for cycle detection');
-    assert(src.includes('visitedPaths.add('), 'Should add to visitedPaths');
-    // Verify Windows ino=0 fallback is present
-    assert(src.includes('ino === 0') || src.includes('ino !== 0'),
-      'Should check for ino === 0 (Windows fallback)');
-  });
+  // C1: removed source-grep ("utils.js contains visitedPaths/ino===0") — findFiles cycle
+  // detection, symlink handling and the Windows ino=0 fallback are covered behaviorally in
+  // tests/utils.test.js (26 tests exercising symlink/cycle/findFiles/ino) plus the behavioral
+  // findFiles test directly above.
 }
 
 // ===================================================================

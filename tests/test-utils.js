@@ -215,6 +215,31 @@ function clearScanCache() {
   _cmdCache.clear();
 }
 
+/**
+ * spyOn(obj, method[, impl]) — replace obj[method] with a recording spy so tests can
+ * assert BEHAVIOR (was this called? with what?) instead of grepping the source for a
+ * function name. Omit `impl` for a no-op stub (e.g. intercept fs.appendFileSync so a
+ * write never touches disk); pass `impl` to route the call to a fake. Works on a callee
+ * that captured the module at load time because we mutate a property on the shared
+ * (cached) module object — the same monkey-patch pattern as tests/ioc/scraper.test.js.
+ *
+ * Returns the spy with: spy.calls (array of arg-arrays), spy.callCount (getter),
+ * spy.restore() (put the original back — always call it in a finally block).
+ */
+function spyOn(obj, method, impl) {
+  const original = obj[method];
+  function spy(...args) {
+    spy.calls.push(args);
+    return typeof impl === 'function' ? impl.apply(this, args) : undefined;
+  }
+  spy.calls = [];
+  Object.defineProperty(spy, 'callCount', { get() { return spy.calls.length; } });
+  spy.original = original;
+  spy.restore = () => { obj[method] = original; };
+  obj[method] = spy;
+  return spy;
+}
+
 module.exports = {
   TESTS_DIR,
   BIN,
@@ -235,5 +260,6 @@ module.exports = {
   cleanupTemp,
   clearScanCache,
   getCounters,
-  addSkipped
+  addSkipped,
+  spyOn
 };

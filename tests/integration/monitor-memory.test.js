@@ -6,7 +6,7 @@
 const fs = require('fs');
 const path = require('path');
 const {
-  test, asyncTest, assert, assertIncludes
+  test, asyncTest, assert, assertIncludes, spyOn
 } = require('../test-utils');
 
 async function runMonitorMemoryTests() {
@@ -28,7 +28,8 @@ async function runMonitorMemoryTests() {
   const { DOWNLOADS_CACHE_TTL } = require('../../src/monitor/classify.js');
   const { clearDeferredQueue } = require('../../src/monitor/deferred-sandbox.js');
   const {
-    appendAlert, ALERTS_FILE, ALERTS_MAX_SIZE, MAX_DETECTIONS
+    appendAlert, ALERTS_FILE, ALERTS_MAX_SIZE, MAX_DETECTIONS,
+    _compactDetectionsJsonl, appendTemporalDetection
   } = require('../../src/monitor/state.js');
 
   // ─── Chantier 1: Queue backpressure ───
@@ -185,17 +186,11 @@ async function runMonitorMemoryTests() {
     assert(ratio < 0.50, `ratio ${ratio.toFixed(3)} looks like heapUsed/heapTotal — should use heap_size_limit`);
   });
 
-  test('MEMORY CIRCUIT BREAKER: daemon uses v8.getHeapStatistics().heap_size_limit', () => {
-    const daemonSource = fs.readFileSync(
-      path.join(__dirname, '..', '..', 'src', 'monitor', 'daemon.js'), 'utf8'
-    );
-    assertIncludes(daemonSource, "require('v8')", 'daemon.js should import v8 module');
-    assertIncludes(daemonSource, 'heap_size_limit', 'daemon.js should use heap_size_limit');
-    // Must NOT use heapUsed / heapTotal for the ratio
-    const badPattern = /mem\.heapUsed\s*\/\s*mem\.heapTotal/;
-    assert(!badPattern.test(daemonSource),
-      'daemon.js must NOT use heapUsed/heapTotal — V8 heapTotal is dynamic and structurally 70-85%');
-  });
+  // C1: removed a source-grep that asserted daemon.js *contains* "require('v8')" /
+  // 'heap_size_limit' and *not* the /mem.heapUsed / mem.heapTotal/ pattern. The behavioral
+  // test just above computes computeMemoryPressure()'s ratio and asserts it is < 0.50 — which
+  // only holds if the denominator is heap_size_limit (heapTotal would give ~70%). That proves
+  // the same property by behavior, not by substring.
 
   test('MEMORY CIRCUIT BREAKER: getMemoryPressureLevel returns current level', () => {
     computeMemoryPressure(); // ensure it's computed at least once
@@ -300,24 +295,10 @@ async function runMonitorMemoryTests() {
   });
 
   // ─── Chantier 4: AbortController ───
-
-  test('MEMORY: processQueueItem uses AbortController', () => {
-    const queueSource = fs.readFileSync(
-      path.join(__dirname, '..', '..', 'src', 'monitor', 'queue.js'), 'utf8'
-    );
-    assertIncludes(queueSource, 'AbortController', 'queue.js should use AbortController');
-    assertIncludes(queueSource, 'controller.abort()', 'queue.js should call controller.abort() on timeout');
-    assertIncludes(queueSource, 'clearTimeout(timeoutId)', 'queue.js should clear the timeout timer');
-  });
-
-  test('MEMORY: resolveTarballAndScan checks signal.aborted', () => {
-    const queueSource = fs.readFileSync(
-      path.join(__dirname, '..', '..', 'src', 'monitor', 'queue.js'), 'utf8'
-    );
-    // Should have multiple abort checks at different stages
-    const abortChecks = (queueSource.match(/signal && signal\.aborted/g) || []).length;
-    assert(abortChecks >= 3, `Expected at least 3 abort checks in resolveTarballAndScan, found ${abortChecks}`);
-  });
+  // C1: removed two source-grep tests that asserted queue.js *contains* 'AbortController' /
+  // 'controller.abort()' / 'clearTimeout(timeoutId)' and counted 'signal && signal.aborted'
+  // matches — implementation-coupled and rename-fragile. The observable contract ("an aborted
+  // signal stops the scan") is verified behaviorally by the pre-abort test just below.
 
   await asyncTest('MEMORY: resolveTarballAndScan bails on pre-aborted signal', async () => {
     const controller = new AbortController();
@@ -347,17 +328,11 @@ async function runMonitorMemoryTests() {
   });
 
   // ─── Bug fix: heap pressure uses v8.getHeapStatistics ───
-
-  test('BUG1: computeMemoryPressure uses v8 heap_size_limit (not hardcoded)', () => {
-    const daemonSource = fs.readFileSync(
-      path.join(__dirname, '..', '..', 'src', 'monitor', 'daemon.js'), 'utf8'
-    );
-    assertIncludes(daemonSource, "require('v8')", 'daemon.js should import v8 module');
-    assertIncludes(daemonSource, 'getHeapStatistics', 'daemon.js should use v8.getHeapStatistics()');
-    assertIncludes(daemonSource, 'heap_size_limit', 'daemon.js should use heap_size_limit as denominator');
-    assert(!daemonSource.includes('3072 * 1024 * 1024'),
-      'daemon.js should not use hardcoded 3072MB denominator');
-  });
+  // C1: removed the source-grep test that asserted daemon.js *contains* "require('v8')" /
+  // 'getHeapStatistics' / 'heap_size_limit' and *not* '3072 * 1024 * 1024'. The behavioral
+  // test below calls computeMemoryPressure() and checks its ratio equals heapUsed/heap_size_limit
+  // — which proves the v8 heap limit is the denominator (not a hardcoded constant) far more
+  // robustly than a substring match.
 
   test('BUG1: computeMemoryPressure ratio matches v8 heap limit', () => {
     const v8 = require('v8');
@@ -371,61 +346,118 @@ async function runMonitorMemoryTests() {
 
   // ─── Bug fix: alerts JSONL append-only ───
 
-  test('BUG2a: appendAlert uses JSONL append (not JSON read-parse-rewrite)', () => {
-    const stateSource = fs.readFileSync(
-      path.join(__dirname, '..', '..', 'src', 'monitor', 'state.js'), 'utf8'
-    );
-    assertIncludes(stateSource, 'appendFileSync', 'state.js should use appendFileSync for alerts');
-    assertIncludes(stateSource, 'monitor-alerts.jsonl', 'ALERTS_FILE should use .jsonl extension');
-    assert(!stateSource.includes("JSON.parse(fs.readFileSync(ALERTS_FILE"),
-      'appendAlert should not read+parse the full alerts file');
+  // Behavioral (was source-grep): drive the real appendAlert with fs.appendFileSync and
+  // fs.renameSync spied out, so we assert OBSERVABLE behavior (append-only, rotation,
+  // one valid JSON line per call) without ever touching the real data/monitor-alerts.jsonl.
+  // Rename-safe (internal identifiers can change) and logic-sensitive (reverting to a
+  // read-parse-rewrite, or dropping rotation, fails the test).
+  test('BUG2a: appendAlert appends one JSONL line and never read-parses the alerts file', () => {
+    const appendSpy = spyOn(fs, 'appendFileSync');   // capture write, never hit disk
+    const renameSpy = spyOn(fs, 'renameSync');       // guard: never rotate real data
+    const origRead = fs.readFileSync;
+    const readSpy = spyOn(fs, 'readFileSync', origRead); // record reads, still functional
+    try {
+      appendAlert({ package: 'evil-pkg', version: '6.6.6', severity: 'critical', score: 90 });
+      assert(appendSpy.callCount === 1, `appendAlert should append exactly once, got ${appendSpy.callCount}`);
+      const [filePath, data] = appendSpy.calls[0];
+      assert(String(filePath).endsWith('monitor-alerts.jsonl'), `should append to monitor-alerts.jsonl, got ${filePath}`);
+      // append-only: appendAlert must NOT read+parse the alerts file back
+      const alertReads = readSpy.calls.filter(([p]) => String(p).includes('monitor-alerts'));
+      assert(alertReads.length === 0, 'appendAlert must not read the alerts file (append-only, no read-parse-rewrite)');
+      // exactly one JSON line + trailing newline that round-trips to the alert
+      assert(data.endsWith('\n') && data.indexOf('\n') === data.length - 1, 'should write exactly one line ending in newline');
+      assert(JSON.parse(data.trim()).package === 'evil-pkg', 'written line should round-trip to the alert object');
+    } finally {
+      readSpy.restore();
+      renameSpy.restore();
+      appendSpy.restore();
+    }
   });
 
-  test('BUG2a: alerts file has rotation', () => {
-    const stateSource = fs.readFileSync(
-      path.join(__dirname, '..', '..', 'src', 'monitor', 'state.js'), 'utf8'
-    );
-    assertIncludes(stateSource, 'maybeRotateAlerts', 'state.js should have alerts rotation');
+  test('BUG2a: appendAlert rotates the alerts file when it exceeds ALERTS_MAX_SIZE', () => {
     assert(typeof ALERTS_MAX_SIZE === 'number', 'ALERTS_MAX_SIZE should be exported');
     assert(ALERTS_MAX_SIZE === 100 * 1024 * 1024, `ALERTS_MAX_SIZE should be 100MB, got ${ALERTS_MAX_SIZE}`);
+    const origExists = fs.existsSync;
+    const origStat = fs.statSync;
+    const appendSpy = spyOn(fs, 'appendFileSync');
+    const renameSpy = spyOn(fs, 'renameSync');
+    // Simulate an over-size alerts file; delegate every other path to the real fs.
+    spyOn(fs, 'existsSync', (p) => String(p).includes('monitor-alerts') ? true : origExists(p));
+    spyOn(fs, 'statSync', (p) => String(p).includes('monitor-alerts') ? { size: ALERTS_MAX_SIZE + 1 } : origStat(p));
+    try {
+      appendAlert({ package: 'big-pkg', version: '1.0.0' });
+      assert(renameSpy.callCount === 1, `over-size alerts file should be rotated once, got ${renameSpy.callCount}`);
+      const [from, to] = renameSpy.calls[0];
+      assert(String(from).endsWith('monitor-alerts.jsonl'), `rotation should rename the alerts file, got ${from}`);
+      assert(String(to).includes('monitor-alerts') && String(to) !== String(from), 'rotated name should differ from the original');
+      assert(appendSpy.callCount === 1, 'appendAlert should still append after rotating');
+    } finally {
+      fs.statSync = origStat;
+      fs.existsSync = origExists;
+      renameSpy.restore();
+      appendSpy.restore();
+    }
   });
 
-  test('BUG2a: appendAlert writes valid JSONL lines', () => {
-    // Test that appendAlert produces valid JSONL by checking the format:
-    // appendAlert calls appendFileSync with JSON.stringify(alert) + '\n'
-    const stateSource = fs.readFileSync(
-      path.join(__dirname, '..', '..', 'src', 'monitor', 'state.js'), 'utf8'
-    );
-    // Verify the append pattern: JSON.stringify(alert) + '\n' followed by appendFileSync
-    assertIncludes(stateSource, "JSON.stringify(alert) + '\\n'",
-      'appendAlert should write single-line JSON with newline');
-    assertIncludes(stateSource, 'appendFileSync(ALERTS_FILE, line',
-      'appendAlert should use appendFileSync');
+  test('BUG2a: appendAlert writes one valid JSON line per call', () => {
+    const appendSpy = spyOn(fs, 'appendFileSync');
+    const renameSpy = spyOn(fs, 'renameSync'); // guard: never rotate real data
+    try {
+      appendAlert({ package: 'a', version: '1.0.0', severity: 'high' });
+      appendAlert({ package: 'b', version: '2.0.0', severity: 'critical' });
+      assert(appendSpy.callCount === 2, `two appends should produce two writes, got ${appendSpy.callCount}`);
+      for (const [, data] of appendSpy.calls) {
+        assert(data.endsWith('\n') && data.indexOf('\n') === data.length - 1, 'each write must be exactly one line');
+        JSON.parse(data.trim()); // throws (→ test fails) if the line is not valid JSON
+      }
+      assert(JSON.parse(appendSpy.calls[1][1].trim()).package === 'b', 'second write should be the second alert');
+    } finally {
+      renameSpy.restore();
+      appendSpy.restore();
+    }
   });
 
   // ─── Bug fix: detections cap ───
 
-  test('BUG2b: detections JSONL has MAX_DETECTIONS cap', () => {
-    const stateSource = fs.readFileSync(
-      path.join(__dirname, '..', '..', 'src', 'monitor', 'state.js'), 'utf8'
-    );
-    assertIncludes(stateSource, 'MAX_DETECTIONS', 'state.js should define MAX_DETECTIONS');
+  test('BUG2b: detections cap value + compactor is exported and runs under cap', () => {
     assert(typeof MAX_DETECTIONS === 'number', 'MAX_DETECTIONS should be exported');
     assert(MAX_DETECTIONS === 10_000, `MAX_DETECTIONS should be 10000, got ${MAX_DETECTIONS}`);
-    // Post OOM-fix: cap is enforced by _compactDetectionsJsonl (called from
-    // appendDetection on a counter trigger) instead of slice() on every write.
-    assertIncludes(stateSource, '_compactDetectionsJsonl', 'state.js should define the JSONL compactor');
-    assertIncludes(stateSource, 'total <= MAX_DETECTIONS', 'compaction should short-circuit below cap');
+    // Behavioral: the cap is enforced by _compactDetectionsJsonl (called from appendDetection
+    // on a counter trigger). It is exported for tests + daemon housekeeping and must run
+    // without throwing on the current (under-cap or absent) detections file — it short-circuits
+    // when total <= MAX_DETECTIONS. (A full over-cap pruning test needs a DETECTIONS_FILE path
+    // seam — deferred as a JIT seam candidate.)
+    assert(typeof _compactDetectionsJsonl === 'function', '_compactDetectionsJsonl should be exported');
+    let threw = null;
+    try { _compactDetectionsJsonl(); } catch (e) { threw = e; }
+    assert(threw === null, `_compactDetectionsJsonl should not throw under cap, got ${threw && threw.message}`);
   });
 
   // ─── Bug fix: temporal findings trimmed ───
 
-  test('BUG2c: temporal findings are trimmed before persistence', () => {
-    const stateSource = fs.readFileSync(
-      path.join(__dirname, '..', '..', 'src', 'monitor', 'state.js'), 'utf8'
-    );
-    assertIncludes(stateSource, 'trimTemporalFindings', 'state.js should have trimTemporalFindings');
-    assertIncludes(stateSource, 'trimTemporalFindings(findings)', 'appendTemporalDetection should trim findings');
+  test('BUG2c: appendTemporalDetection trims bulky fields from findings before persisting', () => {
+    const appendSpy = spyOn(fs, 'appendFileSync'); // capture the write, never touch disk
+    const renameSpy = spyOn(fs, 'renameSync');     // guard: never compact real data
+    try {
+      appendTemporalDetection('pkg', '1.0.0', [{
+        type: 'lifecycle_change',
+        severity: 'high',
+        data: { score: 7, bigBlob: 'x'.repeat(5000), rawAst: { huge: true } },
+        extraTopLevel: 'drop-me'
+      }]);
+      assert(appendSpy.callCount === 1, `should append once, got ${appendSpy.callCount}`);
+      const entry = JSON.parse(appendSpy.calls[0][1].trim());
+      assert(Array.isArray(entry.findings) && entry.findings.length === 1, 'one finding persisted');
+      const f = entry.findings[0];
+      assert(f.type === 'lifecycle_change', 'type is kept');
+      assert(f.score === 7, 'data.score is hoisted onto the trimmed finding');
+      assert(!('data' in f), 'the bulky data object must be dropped');
+      assert(!('bigBlob' in f) && !('rawAst' in f), 'bulky payload fields must be dropped');
+      assert(!('extraTopLevel' in f), 'unknown top-level fields must be dropped');
+    } finally {
+      renameSpy.restore();
+      appendSpy.restore();
+    }
   });
 
   // ─── Bug fix: deploy permissions ───

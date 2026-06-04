@@ -183,86 +183,95 @@ function runPreloadTests() {
   // PRELOAD SCRIPT TESTS (vm isolation)
   // ============================================
 
-  console.log('\n=== PRELOAD SCRIPT TESTS ===\n');
+  console.log('\n=== PRELOAD SCRIPT TESTS (behavioral, subprocess) ===\n');
 
-  test('PRELOAD: preload.js file exists and is syntactically valid', () => {
-    const preloadPath = path.join(__dirname, '..', '..', 'docker', 'preload.js');
-    assert(fs.existsSync(preloadPath), 'docker/preload.js should exist');
-    const code = fs.readFileSync(preloadPath, 'utf8');
-    // Should be a valid JavaScript IIFE
-    assert(code.includes('(function'), 'Should be an IIFE');
-    assert(code.trim().endsWith('})();'), 'Should end with IIFE invocation');
-    // Verify it parses
-    new vm.Script(code); // Throws if syntax error
+  // Behavioral harness (was source-grep): preload.js is a sandbox IIFE with no exports that
+  // monkey-patches globals on load, so we can't require it in-process. Instead we inject it
+  // via `node --require` into a CHILD process and observe the OBSERVABLE effects — faked
+  // clock, accelerated timers, hidden env, and the forensic log. Cross-platform: preload's
+  // hardcoded LOG_FILE '/tmp/preload.log' resolves to <drive>:/tmp/preload.log on Windows.
+  const PRELOAD_PATH = path.join(__dirname, '..', '..', 'docker', 'preload.js');
+  const PRELOAD_LOG = path.resolve('/tmp/preload.log');
+  const { execFileSync } = require('child_process');
+
+  function runWithPreload(scriptBody, extraEnv = {}) {
+    try { fs.rmSync(PRELOAD_LOG, { force: true }); } catch { /* ignore */ }
+    let stdout = '';
+    try {
+      stdout = execFileSync(process.execPath, ['--require', PRELOAD_PATH, '-e', scriptBody], {
+        encoding: 'utf8',
+        env: { ...process.env, ...extraEnv },
+        stdio: ['ignore', 'pipe', 'pipe'],
+        timeout: 15000
+      });
+    } catch (e) {
+      stdout = (e.stdout || '') + (e.stderr || '');
+    }
+    let log = '';
+    try { log = fs.readFileSync(PRELOAD_LOG, 'utf8'); } catch { /* no log written */ }
+    return { stdout, log };
+  }
+
+  test('PRELOAD: preload.js exists and is syntactically valid JS', () => {
+    assert(fs.existsSync(PRELOAD_PATH), 'docker/preload.js should exist');
+    new vm.Script(fs.readFileSync(PRELOAD_PATH, 'utf8')); // throws on syntax error
   });
 
-  test('PRELOAD: preload.js contains all required patches', () => {
-    const preloadPath = path.join(__dirname, '..', '..', 'docker', 'preload.js');
-    const code = fs.readFileSync(preloadPath, 'utf8');
-    assertIncludes(code, 'Date.now', 'Should patch Date.now');
-    assertIncludes(code, 'setTimeout', 'Should patch setTimeout');
-    assertIncludes(code, 'setInterval', 'Should patch setInterval');
-    assertIncludes(code, 'NODE_TIMING_OFFSET', 'Should read TIME_OFFSET env var');
-    assertIncludes(code, 'appendFileSync', 'Should use appendFileSync for logging');
-    assertIncludes(code, '[PRELOAD]', 'Should use [PRELOAD] log prefix');
-    assertIncludes(code, '/tmp/preload.log', 'Should log to /tmp/preload.log');
-    assertIncludes(code, 'process.env', 'Should intercept process.env');
-    assertIncludes(code, 'child_process', 'Should intercept child_process');
-    assertIncludes(code, 'SENSITIVE_RE', 'Should have sensitive file regex');
-    assertIncludes(code, 'DANGEROUS_CMD_RE', 'Should have dangerous command regex');
+  test('PRELOAD: loads in a child process and offsets Date.now by NODE_TIMING_OFFSET', () => {
+    const { stdout } = runWithPreload('process.stdout.write(String(Date.now()))',
+      { NODE_TIMING_OFFSET: '3600000' });
+    const faked = parseInt(stdout.trim(), 10);
+    assert(Number.isFinite(faked), `preload should load and print a faked Date.now, got "${stdout.slice(0, 120)}"`);
+    const delta = faked - Date.now();
+    assert(delta > 3_000_000 && delta < 4_200_000,
+      `Date.now should be offset ~+3600000ms (proves the wrapper uses the saved original clock + offset), got delta ${delta}ms`);
   });
 
-  test('PRELOAD: preload.js saves originals in closure', () => {
-    const preloadPath = path.join(__dirname, '..', '..', 'docker', 'preload.js');
-    const code = fs.readFileSync(preloadPath, 'utf8');
-    assertIncludes(code, '_DateNow', 'Should save original Date.now');
-    assertIncludes(code, '_setTimeout', 'Should save original setTimeout');
-    assertIncludes(code, '_setInterval', 'Should save original setInterval');
-    assertIncludes(code, '_appendFileSync', 'Should save original appendFileSync');
-    assertIncludes(code, '_fs', 'Should save original fs');
+  test('PRELOAD: accelerates long timers (a multi-hour setTimeout fires near-immediately)', () => {
+    const { stdout } = runWithPreload(
+      "const t0=Date.now(); setTimeout(()=>process.stdout.write('FIRED'), 7200000);",
+      { NODE_TIMING_OFFSET: '3600000' });
+    assert(stdout.includes('FIRED'),
+      `a 2h setTimeout should fire (delay forced toward 0), stdout="${stdout.slice(0, 200)}"`);
   });
 
-  test('PRELOAD: preload.js wraps patches in try/catch', () => {
-    const preloadPath = path.join(__dirname, '..', '..', 'docker', 'preload.js');
-    const code = fs.readFileSync(preloadPath, 'utf8');
-    // Count try blocks — should have many for safety
-    const tryCount = (code.match(/\btry\s*\{/g) || []).length;
-    assert(tryCount >= 10, 'Should have at least 10 try blocks for safety, got ' + tryCount);
+  test('PRELOAD: patched global timers are non-writable (malware cannot restore them)', () => {
+    const { stdout } = runWithPreload(
+      "try{global.setTimeout=1}catch(e){} try{global.setInterval=1}catch(e){} " +
+      "process.stdout.write('st='+(typeof global.setTimeout)+',si='+(typeof global.setInterval))");
+    assert(stdout.includes('st=function') && stdout.includes('si=function'),
+      `setTimeout/setInterval must stay functions after a reassignment attempt, got "${stdout}"`);
   });
 
-  // ============================================
-  // PRELOAD HARDENING TESTS (v2.7.9)
-  // ============================================
-
-  console.log('\n=== PRELOAD HARDENING (v2.7.9) ===\n');
-
-  test('PRELOAD: setTimeout is non-writable (Object.defineProperty)', () => {
-    const preloadPath = path.join(__dirname, '..', '..', 'docker', 'preload.js');
-    const content = fs.readFileSync(preloadPath, 'utf-8');
-    assert(
-      content.includes("Object.defineProperty(global, 'setTimeout'") ||
-      content.includes('Object.defineProperty(global, "setTimeout"'),
-      'setTimeout should be locked via Object.defineProperty'
-    );
+  test('PRELOAD: hides sandbox-revealing env vars (LD_PRELOAD etc.) from process.env', () => {
+    const { stdout } = runWithPreload(
+      "process.stdout.write('ld='+(process.env.LD_PRELOAD===undefined?'hidden':'LEAKED'))",
+      { LD_PRELOAD: '/x/evil.so' });
+    assert(stdout.includes('ld=hidden'), `LD_PRELOAD should be hidden from process.env, got "${stdout}"`);
   });
 
-  test('PRELOAD: setInterval is non-writable (Object.defineProperty)', () => {
-    const preloadPath = path.join(__dirname, '..', '..', 'docker', 'preload.js');
-    const content = fs.readFileSync(preloadPath, 'utf-8');
-    assert(
-      content.includes("Object.defineProperty(global, 'setInterval'") ||
-      content.includes('Object.defineProperty(global, "setInterval"'),
-      'setInterval should be locked via Object.defineProperty'
-    );
+  test('PRELOAD: logs sensitive file reads to the forensic log with the [PRELOAD] prefix', () => {
+    const { log } = runWithPreload("try{require('fs').readFileSync('/home/user/.ssh/id_rsa')}catch(e){}");
+    assert(log.includes('[PRELOAD]'), 'forensic log should use the [PRELOAD] prefix + appendFileSync');
+    assert(/FS_READ: SENSITIVE.*id_rsa/.test(log),
+      `a read of .ssh/id_rsa should be logged as SENSITIVE, log head="${log.slice(0, 300)}"`);
   });
 
-  test('PRELOAD: safeCat strips brackets from category', () => {
-    const preloadPath = path.join(__dirname, '..', '..', 'docker', 'preload.js');
-    const content = fs.readFileSync(preloadPath, 'utf-8');
-    assert(
-      content.includes('\\[\\]') || content.includes('[\\]'),
-      'safeCat should strip brackets to prevent log injection'
-    );
+  test('PRELOAD: intercepts child_process and flags dangerous commands', () => {
+    // `curl --version` matches the dangerous-command regex but makes NO network call.
+    const { log } = runWithPreload("try{require('child_process').execSync('curl --version')}catch(e){}");
+    assert(/EXEC: DANGEROUS.*curl/.test(log),
+      `a curl exec should be intercepted and flagged DANGEROUS, log head="${log.slice(0, 300)}"`);
+  });
+
+  test('PRELOAD: forensic log is injection-safe (newlines in attacker-controlled paths are escaped)', () => {
+    // A malicious path embeds a newline + a forged "[PRELOAD] FAKE" entry. The log sanitizer
+    // must escape the newline so the attacker cannot inject a standalone forged log line.
+    const { log } = runWithPreload(
+      "try{require('fs').readFileSync('/home/user/.ssh/\\n[PRELOAD] FAKE: pwned\\nid_rsa')}catch(e){}");
+    assert(log.includes('FAKE: pwned'), 'the crafted path should still be captured in the log (escaped)');
+    assert(!/^\[PRELOAD\] FAKE: pwned/m.test(log),
+      'the embedded newline must be escaped — no forged standalone [PRELOAD] log line may appear');
   });
 
   // ============================================

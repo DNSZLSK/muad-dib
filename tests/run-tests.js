@@ -124,6 +124,9 @@ const { runSandboxGateTests } = require('./integration/sandbox-gate.test');
 const { runOomDetectionsJsonlTests } = require('./integration/oom-detections-jsonl.test');
 const { runAutoLabelerTests } = require('./integration/auto-labeler.test');
 
+// Meta tests (test-suite quality guards)
+const { runNoSourceGrepTests } = require('./meta/no-source-grep.test');
+
 // Temporal analysis tests
 const { runTemporalAnalysisTests } = require('./temporal/temporal-analysis.test');
 const { runTemporalAstDiffTests } = require('./temporal/temporal-ast-diff.test');
@@ -339,6 +342,9 @@ async function timed(name, fn) {
 
   // Utility tests
   await timed('utils', runUtilsTests);
+
+  // Meta tests (test-suite quality guards — runs last, fast, no fixtures)
+  await timed('meta-no-source-grep', runNoSourceGrepTests);
 
   // Results
   const elapsed = ((Date.now() - start) / 1000).toFixed(1);
