@@ -3,13 +3,13 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const v8 = require('v8');
-const { isDockerAvailable, SANDBOX_CONCURRENCY_MAX } = require('../sandbox/index.js');
+const { isDockerAvailable, SANDBOX_CONCURRENCY_MAX, killAllSandboxContainers } = require('../sandbox/index.js');
 const { setVerboseMode, isSandboxEnabled, isCanaryEnabled, isLlmDetectiveEnabled, getLlmDetectiveMode, DOWNLOADS_CACHE_TTL } = require('./classify.js');
 const { loadState, saveState, loadDailyStats, saveDailyStats, purgeTarballCache, getParisHour, atomicWriteFileSync, saveNpmSeq, ALERTS_FILE, runStateMigrations } = require('./state.js');
 const { isTemporalEnabled, isTemporalAstEnabled, isTemporalPublishEnabled, isTemporalMaintainerEnabled } = require('./temporal.js');
-const { pendingGrouped, flushScopeGroup, sendDailyReport, DAILY_REPORT_HOUR, alertedPackageRules } = require('./webhook.js');
+const { pendingGrouped, flushScopeGroup, sendDailyReport, DAILY_REPORT_HOUR, alertedPackageRules, ALERTED_PACKAGES_MAX: MAX_ALERTED_PACKAGES } = require('./webhook.js');
 const { poll } = require('./ingestion.js');
-const { processQueue, ensureWorkers, drainWorkers, getTargetConcurrency, setTargetConcurrency, getActiveWorkers, SCAN_CONCURRENCY } = require('./queue.js');
+const { processQueue, ensureWorkers, drainWorkers, getTargetConcurrency, setTargetConcurrency, getActiveWorkers, terminateAllWorkers, SCAN_CONCURRENCY } = require('./queue.js');
 const { computeTarget, ADJUST_INTERVAL_MS, BASE_CONCURRENCY, resetDeltas } = require('./adaptive-concurrency.js');
 const { startHealthcheck } = require('./healthcheck.js');
 const { startDeferredWorker, stopDeferredWorker, persistDeferredQueue, restoreDeferredQueue, clearDeferredQueue } = require('./deferred-sandbox.js');
@@ -65,6 +65,16 @@ const MEMORY_THRESHOLD_ELEVATED = 0.75;
 const MEMORY_THRESHOLD_HIGH = 0.85;
 const MEMORY_THRESHOLD_CRITICAL = 0.90;
 const MEMORY_THRESHOLD_EMERGENCY = 0.92;
+// RSS budget (OOM fix). The heap thresholds above miss the real failure mode: the
+// process dies from total RSS (off-heap — worker isolates, gVisor sandboxes, tarball
+// buffers) while heapUsed/heap_size_limit sits at ~20%. Gate on
+// process.memoryUsage().rss against an absolute budget so EMERGENCY fires before the
+// kernel OOM-killer. Default 8500MB on the 11.7GB VPS (~3GB headroom for
+// docker / gVisor / kernel). Override via MUADDIB_RSS_LIMIT_MB.
+const RSS_LIMIT_MB = (() => {
+  const parsed = parseInt(process.env.MUADDIB_RSS_LIMIT_MB, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 8500;
+})();
 // When truncating queue under EMERGENCY, keep the N most recent items.
 // These are the newest packages — most likely to still be on npm for re-scan.
 const EMERGENCY_QUEUE_KEEP = 500;
@@ -293,7 +303,9 @@ function checkDiskSpace() {
 // --- Memory management ---
 
 const MAX_RECENTLY_SCANNED = 50_000;
-const MAX_ALERTED_PACKAGES = 5_000;
+// MAX_ALERTED_PACKAGES is imported from webhook.js (single source of truth — the
+// alertedPackageRules Map lives there and FIFO-caps itself at insert with the same value).
+const MAX_DOWNLOADS_CACHE = 20_000; // hard size cap on top of the 24h TTL (bounded resource)
 
 /**
  * Compute current memory pressure level from V8 heap usage.
@@ -310,23 +322,30 @@ const MAX_ALERTED_PACKAGES = 5_000;
  *   - With --max-old-space-size=3072: ~3264MB (3072 + new space overhead)
  *   - Without the flag: ~4288MB (V8 default on 64-bit)
  */
-function computeMemoryPressure() {
-  const mem = process.memoryUsage();
+function computeMemoryPressure(memSample = null, rssLimitMb = RSS_LIMIT_MB) {
+  const mem = memSample || process.memoryUsage();
   const heapLimit = v8.getHeapStatistics().heap_size_limit;
   const ratio = heapLimit > 0 ? mem.heapUsed / heapLimit : 0;
+  const rssLimitBytes = rssLimitMb * 1024 * 1024;
+  const rssRatio = rssLimitBytes > 0 ? mem.rss / rssLimitBytes : 0;
 
-  if (ratio >= MEMORY_THRESHOLD_EMERGENCY) {
+  // Pressure is the WORSE of heap and RSS. The RSS arm catches the off-heap leak
+  // that the heap ratio is structurally blind to (heap sat at ~20% during every OOM
+  // while RSS climbed to 10.3GB). `ratio` stays the heap ratio for backward compat.
+  const worst = Math.max(ratio, rssRatio);
+
+  if (worst >= MEMORY_THRESHOLD_EMERGENCY) {
     _memoryPressureLevel = MEMORY_PRESSURE_LEVELS.EMERGENCY;
-  } else if (ratio >= MEMORY_THRESHOLD_CRITICAL) {
+  } else if (worst >= MEMORY_THRESHOLD_CRITICAL) {
     _memoryPressureLevel = MEMORY_PRESSURE_LEVELS.CRITICAL;
-  } else if (ratio >= MEMORY_THRESHOLD_HIGH) {
+  } else if (worst >= MEMORY_THRESHOLD_HIGH) {
     _memoryPressureLevel = MEMORY_PRESSURE_LEVELS.HIGH;
-  } else if (ratio >= MEMORY_THRESHOLD_ELEVATED) {
+  } else if (worst >= MEMORY_THRESHOLD_ELEVATED) {
     _memoryPressureLevel = MEMORY_PRESSURE_LEVELS.ELEVATED;
   } else {
     _memoryPressureLevel = MEMORY_PRESSURE_LEVELS.NONE;
   }
-  return { level: _memoryPressureLevel, mem, ratio };
+  return { level: _memoryPressureLevel, mem, ratio, rssRatio };
 }
 
 /**
@@ -362,6 +381,12 @@ function pruneMemoryCaches(recentlyScanned, downloadsCache, alertedPackageRules)
       pruned++;
     }
   }
+  // 2b. downloadsCache — hard size cap (FIFO) on top of TTL. A Map preserves
+  // insertion order, so the first key is the oldest (bounded resource).
+  while (downloadsCache.size > MAX_DOWNLOADS_CACHE) {
+    downloadsCache.delete(downloadsCache.keys().next().value);
+    pruned++;
+  }
 
   // 3. alertedPackageRules — cap size
   if (alertedPackageRules.size > MAX_ALERTED_PACKAGES) {
@@ -394,6 +419,12 @@ function pruneMemoryCaches(recentlyScanned, downloadsCache, alertedPackageRules)
  */
 function handleMemoryPressure(level, ratio, recentlyScanned, downloadsCache, scanQueue) {
   const pct = (ratio * 100).toFixed(0);
+  // Structured summary of what the breaker actually did this tick. Returned (the poll loop
+  // at the call site ignores it) so the reclaim is observable to callers and tests without
+  // scraping console output — CLAUDE.md §3 "Toujours logger un resume". The two kill fields
+  // stay `undefined` until the EMERGENCY branch sets them, so a reader can distinguish
+  // "reclaim never ran" (undefined) from "ran, nothing to free" (0) from "reclaim threw" (-1).
+  const summary = { level, cachesCleared: false, queueDropped: 0, deferredDropped: 0 };
 
   // HIGH (85%+): clear auxiliary caches — same as old emergency prune
   if (level >= MEMORY_PRESSURE_LEVELS.HIGH) {
@@ -401,6 +432,7 @@ function handleMemoryPressure(level, ratio, recentlyScanned, downloadsCache, sca
     recentlyScanned.clear();
     downloadsCache.clear();
     alertedPackageRules.clear();
+    summary.cachesCleared = true;
   }
 
   // CRITICAL (90%+): clear scanner caches, force GC
@@ -438,18 +470,34 @@ function handleMemoryPressure(level, ratio, recentlyScanned, downloadsCache, sca
       const dropped = queueBefore - EMERGENCY_QUEUE_KEEP;
       // splice from the front: older items were pushed first
       scanQueue.splice(0, dropped);
+      summary.queueDropped = dropped;
       console.error(`[MONITOR] MEMORY EMERGENCY: heap at ${pct}% — truncated queue ${queueBefore} → ${scanQueue.length} (dropped ${dropped} oldest items)`);
     }
     // Clear deferred sandbox queue (holds full staticResult objects)
     const deferredDropped = clearDeferredQueue();
+    summary.deferredDropped = deferredDropped;
     if (deferredDropped > 0) {
       console.error(`[MONITOR] MEMORY EMERGENCY: cleared ${deferredDropped} deferred sandbox items`);
     }
+    // Free the off-heap leak that queue truncation can't touch: orphaned sandbox
+    // containers (gVisor runsc survives `docker kill`) and wedged scan workers.
+    // Under a real RSS leak this — not the queue splice — is what reclaims memory.
+    try {
+      const killed = killAllSandboxContainers();
+      summary.containersKilled = killed;
+      if (killed > 0) console.error(`[MONITOR] MEMORY EMERGENCY: force-removed ${killed} sandbox container(s)`);
+    } catch (err) { summary.containersKilled = -1; console.error(`[MONITOR] EMERGENCY container kill failed: ${err.message}`); }
+    try {
+      const terminated = terminateAllWorkers();
+      summary.workersTerminated = terminated;
+      if (terminated > 0) console.error(`[MONITOR] MEMORY EMERGENCY: terminated ${terminated} scan worker(s)`);
+    } catch (err) { summary.workersTerminated = -1; console.error(`[MONITOR] EMERGENCY worker terminate failed: ${err.message}`); }
     // Second GC pass after freeing queue + deferred references
     if (global.gc) {
       global.gc();
     }
   }
+  return summary;
 }
 
 function reportStats(stats) {
@@ -753,7 +801,7 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
     // computeMemoryPressure() is cheap (~0.1ms). Running every 2s ensures fast
     // reaction to memory spikes — the 2026-04-13 incident showed that checking
     // every 5min is too slow (250 packages ingested between checks).
-    const { level: pressureLevel, mem: currentMem, ratio: heapRatio } = computeMemoryPressure();
+    const { level: pressureLevel, mem: currentMem, ratio: heapRatio, rssRatio } = computeMemoryPressure();
 
     // Top up workers ONLY when memory pressure is below HIGH.
     // At HIGH+, existing workers continue (they'll finish or timeout) but no new
@@ -775,7 +823,7 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
       const rssMB = (currentMem.rss / 1024 / 1024).toFixed(0);
       const pctUsed = (heapRatio * 100).toFixed(0);
       const levelName = Object.keys(MEMORY_PRESSURE_LEVELS).find(k => MEMORY_PRESSURE_LEVELS[k] === pressureLevel) || 'UNKNOWN';
-      console.log(`[MONITOR] MEMORY: heap=${heapUsedMB}MB/${heapLimitMB}MB (${pctUsed}%), rss=${rssMB}MB, queue=${scanQueue.length}, dedup=${recentlyScanned.size}, downloads=${downloadsCache.size}, alerts=${alertedPackageRules.size}, dailyAlerts=${dailyAlerts.length}, pressure=${levelName}`);
+      console.log(`[MONITOR] MEMORY: heap=${heapUsedMB}MB/${heapLimitMB}MB (${pctUsed}%), rss=${rssMB}MB (${(rssRatio * 100).toFixed(0)}%/${RSS_LIMIT_MB}MB), queue=${scanQueue.length}, dedup=${recentlyScanned.size}, downloads=${downloadsCache.size}, alerts=${alertedPackageRules.size}, dailyAlerts=${dailyAlerts.length}, pressure=${levelName}`);
 
       // Graduated response at HIGH+
       if (pressureLevel >= MEMORY_PRESSURE_LEVELS.HIGH) {
@@ -844,6 +892,7 @@ module.exports = {
   pruneMemoryCaches,
   MAX_RECENTLY_SCANNED,
   MAX_ALERTED_PACKAGES,
+  MAX_DOWNLOADS_CACHE,
   // Memory circuit breaker
   computeMemoryPressure,
   getMemoryPressureLevel,
@@ -853,6 +902,7 @@ module.exports = {
   MEMORY_THRESHOLD_HIGH,
   MEMORY_THRESHOLD_CRITICAL,
   MEMORY_THRESHOLD_EMERGENCY,
+  RSS_LIMIT_MB,
   EMERGENCY_QUEUE_KEEP,
   MEMORY_LOG_INTERVAL_NORMAL,
   MEMORY_LOG_INTERVAL_PRESSURE

@@ -115,13 +115,32 @@ let _targetConcurrency = BASE_CONCURRENCY;
 const SCAN_CONCURRENCY = BASE_CONCURRENCY; // legacy export — tests check this value
 let _activeWorkers = 0;
 const _workerPromises = new Set();
+// Live static-scan Worker threads — tracked so the daemon's EMERGENCY memory
+// handler can terminate orphaned workers (each retains its isolate heap + parsed
+// ASTs). Bounded by concurrency, so it stays tiny.
+const _liveWorkers = new Set();
 
 function getTargetConcurrency() { return _targetConcurrency; }
 function setTargetConcurrency(n) { _targetConcurrency = Math.max(MIN_CONCURRENCY, Math.min(MAX_CONCURRENCY, n)); }
 function getActiveWorkers() { return _activeWorkers; }
+
+/**
+ * Terminate every live static-scan Worker (best-effort). Returns the count.
+ * Called by daemon.js handleMemoryPressure() at EMERGENCY — a wedged/slow worker
+ * holds its isolate heap and parsed ASTs, part of the off-heap RSS leak.
+ */
+function terminateAllWorkers() {
+  let n = 0;
+  for (const w of Array.from(_liveWorkers)) {
+    try { w.terminate(); n++; } catch { /* already gone */ }
+    _liveWorkers.delete(w);
+  }
+  return n;
+}
 const SCAN_TIMEOUT_MS = 300_000; // 5 minutes per package (3 sandbox runs × 90s + static scan headroom)
 const STATIC_SCAN_TIMEOUT_MS = 45_000; // 45s for static analysis only
 const LARGE_PACKAGE_SIZE = 10 * 1024 * 1024; // 10MB
+const RECENTLY_SCANNED_MAX = 50_000; // FIFO cap for the dedup Set (P0c — bounded resource)
 
 // First-publish sandbox: max pending sandbox items before deferring first-publish clean scans
 // Prevents starving T1a sandbox capacity when many first-publish packages arrive at once
@@ -246,56 +265,58 @@ function countPackageFiles(dir) {
  *   and a monitorMode flag to perform registry queries.
  * @returns {Promise<object>} Scan result (same shape as run(_, {_capture:true}))
  */
-function runScanInWorker(extractedDir, timeoutMs, scanContext = null) {
+function runScanInWorker(extractedDir, timeoutMs, scanContext = null, signal = null) {
   return new Promise((resolve, reject) => {
     const worker = new Worker(SCAN_WORKER_PATH, {
       workerData: { extractedDir, scanContext: scanContext || {} }
     });
+    _liveWorkers.add(worker);
 
     let settled = false;
-    const timer = setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        worker.terminate().then(() => {
-          reject(new Error(`Static scan timeout after ${timeoutMs / 1000}s (worker terminated)`));
-        }).catch(() => {
-          reject(new Error(`Static scan timeout after ${timeoutMs / 1000}s (worker terminate failed)`));
-        });
-      }
-    }, timeoutMs);
-
-    worker.on('message', (msg) => {
+    let timer = null;
+    const done = (fn) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      if (msg.type === 'result') {
-        resolve(msg.data);
-      } else if (msg.type === 'error') {
-        reject(new Error(msg.message));
-      }
+      if (signal) { try { signal.removeEventListener('abort', onAbort); } catch { /* not added */ } }
+      _liveWorkers.delete(worker);
+      fn();
+    };
+
+    // Outer-timeout abort (processQueueItem's SCAN_TIMEOUT_MS): terminate the worker
+    // so a static scan that outlives the whole-package budget cannot keep its isolate
+    // (heap + ASTs) alive in the background.
+    const onAbort = () => done(() => {
+      worker.terminate().finally(() => reject(new Error('Static scan aborted (outer timeout — worker terminated)')));
     });
 
-    worker.on('error', (err) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      reject(err);
-    });
+    timer = setTimeout(() => done(() => {
+      worker.terminate()
+        .then(() => reject(new Error(`Static scan timeout after ${timeoutMs / 1000}s (worker terminated)`)))
+        .catch(() => reject(new Error(`Static scan timeout after ${timeoutMs / 1000}s (worker terminate failed)`)));
+    }), timeoutMs);
 
-    worker.on('exit', (code) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      if (code !== 0) {
-        reject(new Error(`Worker exited with code ${code}`));
-      }
-    });
+    if (signal) {
+      if (signal.aborted) onAbort();
+      else signal.addEventListener('abort', onAbort, { once: true });
+    }
+
+    worker.on('message', (msg) => done(() => {
+      if (msg.type === 'result') resolve(msg.data);
+      else if (msg.type === 'error') reject(new Error(msg.message));
+    }));
+
+    worker.on('error', (err) => done(() => reject(err)));
+
+    worker.on('exit', (code) => done(() => {
+      if (code !== 0) reject(new Error(`Worker exited with code ${code}`));
+    }));
   });
 }
 
 // --- Package scanning ---
 
-async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, stats, dailyAlerts, recentlyScanned, downloadsCache, scanQueue, sandboxAvailable) {
+async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, stats, dailyAlerts, recentlyScanned, downloadsCache, scanQueue, sandboxAvailable, signal = null) {
   const startTime = Date.now();
   const tmpBase = path.join(os.tmpdir(), 'muaddib-monitor');
   if (!fs.existsSync(tmpBase)) fs.mkdirSync(tmpBase, { recursive: true });
@@ -467,14 +488,17 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
         // the full 20-scanner pipeline (unchanged behaviour).
         scanMode: (meta && meta.scanMode) || 'full'
       };
-      result = await runScanInWorker(extractedDir, STATIC_SCAN_TIMEOUT_MS, scanContext);
+      result = await runScanInWorker(extractedDir, STATIC_SCAN_TIMEOUT_MS, scanContext, signal);
     } catch (staticErr) {
       if (/static scan timeout/i.test(staticErr.message)) {
-        console.error(`[MONITOR] STATIC_TIMEOUT: ${name}@${version} — exceeded ${STATIC_SCAN_TIMEOUT_MS / 1000}s (worker terminated)`);
+        console.error(`[MONITOR] STATIC_TIMEOUT: ${name}@${version} — exceeded ${STATIC_SCAN_TIMEOUT_MS / 1000}s (worker terminated, kept INCONCLUSIVE not clean)`);
         recordError(staticErr, stats);
         stats.scanned++;
         stats.totalTimeMs += Date.now() - startTime;
-        updateScanStats('clean');
+        // Garde-fou: a static-scan timeout must NOT count as clean — a package that
+        // deliberately hangs the parser to evade analysis would otherwise be relabelled
+        // benign. Count as inconclusive (excluded from the FP/TP denominator).
+        updateScanStats('sandbox_inconclusive');
         return { sandboxResult: null, staticClean: false };
       }
       throw staticErr;
@@ -530,7 +554,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
         try {
           const canary = isCanaryEnabled();
           console.log(`[MONITOR] SANDBOX (first-publish): launching for ${name}@${version}${canary ? ' (canary: on)' : ''}...`);
-          sandboxResult = await runSandbox(name, { canary });
+          sandboxResult = await runSandbox(name, { canary, signal });
           console.log(`[MONITOR] SANDBOX: ${name}@${version} → score: ${sandboxResult.score}, severity: ${sandboxResult.severity}`);
         } catch (err) {
           console.error(`[MONITOR] SANDBOX ERROR: ${name}@${version} — ${err.message}`);
@@ -786,12 +810,12 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
             if (tier === '1a') {
               // T1a: mandatory sandbox — block-wait (high-confidence threats MUST get sandbox)
               console.log(`[MONITOR] SANDBOX: launching for ${name}@${version}${canary ? ' (canary: on)' : ''}...`);
-              sandboxResult = await runSandbox(name, { canary, maxRuns });
+              sandboxResult = await runSandbox(name, { canary, maxRuns, signal });
             } else if (tryAcquireSandboxSlot()) {
               // T1b/T2: non-blocking — slot acquired atomically, run with skipSemaphore
               const reason = tier === 2 ? ' (T2, queue low)' : ' (T1b, conditional)';
               console.log(`[MONITOR] SANDBOX${reason}: launching for ${name}@${version}${canary ? ' (canary: on)' : ''}...`);
-              sandboxResult = await runSandbox(name, { canary, maxRuns, skipSemaphore: true });
+              sandboxResult = await runSandbox(name, { canary, maxRuns, skipSemaphore: true, signal });
             } else {
               // T1b/T2: all sandbox slots busy — defer instead of blocking worker
               console.log(`[MONITOR] SANDBOX DEFER (slots full): ${name}@${version} (tier=${tier}, score=${riskScore})`);
@@ -962,7 +986,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
         // LLM Detective: AI-powered analysis for T1a/T1b suspects
         // Skip for fast-track (large boring packages — LLM analysis adds 10-30s for no value)
         let llmResult = null;
-        if (!meta.fastTrack && (tier === '1a' || tier === '1b') && (adjustedResult.summary.riskScore || 0) >= 25) {
+        if (!meta.fastTrack && (tier === '1a' || tier === '1b') && (adjustedResult.summary.riskScore || 0) >= 25 && !(signal && signal.aborted)) {
           try {
             const { investigatePackage, isLlmEnabled, getLlmMode } = require('../ml/llm-detective.js');
             if (isLlmEnabled()) {
@@ -1314,6 +1338,13 @@ async function resolveTarballAndScan(item, stats, dailyAlerts, recentlyScanned, 
     return;
   }
   recentlyScanned.add(dedupeKey);
+  // FIFO eviction (P0c — bounded resource): a Set preserves insertion order, so the
+  // first value is the oldest. Evicting at most one per insert pins the size at the
+  // cap and prevents unbounded heap growth within an uptime (the hourly clear in
+  // daemon.js pruneMemoryCaches remains a coarse backstop).
+  if (recentlyScanned.size > RECENTLY_SCANNED_MAX) {
+    recentlyScanned.delete(recentlyScanned.values().next().value);
+  }
   // Coverage numerator: one count per unique (ecosystem, name, version) that
   // reaches a scan attempt. Excludes ATO burst extras that lose the dedup
   // race, retries, size-cap rejections — those inflate stats.scanned but
@@ -1400,7 +1431,7 @@ async function resolveTarballAndScan(item, stats, dailyAlerts, recentlyScanned, 
     _cacheTrigger: item._cacheTrigger || null,
     fastTrack: item.fastTrack || false,
     scanMode: effectiveScanMode
-  }, stats, dailyAlerts, recentlyScanned, downloadsCache, scanQueue, sandboxAvailable);
+  }, stats, dailyAlerts, recentlyScanned, downloadsCache, scanQueue, sandboxAvailable, signal);
   const sandboxResult = scanResult && scanResult.sandboxResult;
   const staticClean = scanResult && scanResult.staticClean;
 
@@ -1510,6 +1541,7 @@ module.exports = {
   getTargetConcurrency,
   setTargetConcurrency,
   getActiveWorkers,
+  terminateAllWorkers,
   ensureWorkers,
   drainWorkers,
 

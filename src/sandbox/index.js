@@ -21,6 +21,7 @@ const { parseGvisorLogs, cleanupGvisorLogs } = require('./gvisor-parser.js');
 const DOCKER_IMAGE = 'muaddib-sandbox';
 const CONTAINER_TIMEOUT = 120000; // 120 seconds
 const SINGLE_RUN_TIMEOUT = 90000; // 90 seconds per run in multi-run mode (gVisor ~30% I/O overhead)
+const WATCHDOG_GRACE_MS = 15000; // grace after a kill before force-resolving INCONCLUSIVE (anti-hang)
 
 // ── Sandbox concurrency limiter ──
 // Prevents Docker container saturation under load (main-path T1a/T1b/T2).
@@ -69,6 +70,47 @@ function resetSandboxLimiter() {
 
 function getSandboxSemaphore() {
   return _sandboxSemaphore;
+}
+
+// ── Live container registry (OOM leak fix) ──
+// Tracks the docker container name of every in-flight sandbox run. Bounded by
+// SANDBOX_CONCURRENCY_MAX + the deferred slot, so it stays tiny. Lets the daemon's
+// memory circuit breaker force-reap orphaned containers under EMERGENCY pressure —
+// gVisor (runsc) sandboxes can survive a normal `docker kill`, and a wedged one is
+// the dominant off-heap leak. Truncating the in-memory queue does nothing for them.
+const _liveContainers = new Set();
+
+/**
+ * Force-remove every tracked sandbox container (best-effort). Returns the count
+ * a removal was attempted for. Called by daemon.js handleMemoryPressure() at
+ * EMERGENCY level.
+ */
+function killAllSandboxContainers() {
+  const names = Array.from(_liveContainers);
+  for (const name of names) {
+    try { execFileSync('docker', ['rm', '-f', name], { stdio: 'pipe', timeout: 5000 }); } catch { /* already gone */ }
+    _liveContainers.delete(name);
+  }
+  if (names.length > 0) {
+    console.log(`[SANDBOX] killAllSandboxContainers: force-removed ${names.length} orphan container(s)`);
+  }
+  return names.length;
+}
+
+/**
+ * Standard INCONCLUSIVE sandbox result (score -1). A timed-out / aborted / killed
+ * run MUST map to INCONCLUSIVE — never to CLEAN — so a package that deliberately
+ * hangs to evade analysis is not relabelled benign downstream.
+ */
+function inconclusiveResult(detail, evidence) {
+  return {
+    score: -1,
+    severity: 'INCONCLUSIVE',
+    findings: [{ type: 'timeout', severity: 'MEDIUM', detail, evidence: evidence || detail }],
+    raw_report: null,
+    suspicious: false,
+    inconclusive: true
+  };
 }
 
 // Time offsets for multi-run sandbox execution (ms)
@@ -214,12 +256,62 @@ async function runSingleSandbox(packageName, options = {}) {
   const timeOffset = options.timeOffset || 0;
   const runTimeout = options.runTimeout || CONTAINER_TIMEOUT;
   const gvisorMode = options.gvisor || false;
+  const signal = options.signal || null;
 
-  return new Promise((resolve) => {
+  return new Promise((_resolve) => {
     let stdout = '';
     let stderr = '';
     let timedOut = false;
+    let settled = false;
+    let timer = null;
+    let forceTimer = null;
     const containerName = `npm-audit-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+
+    // Single-settle wrapper: every resolve(...) below routes through this, so
+    // cleanup (timers, abort listener, live-container registry) runs exactly once
+    // no matter which path finishes the run.
+    const resolve = (result) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      if (forceTimer) clearTimeout(forceTimer);
+      if (signal) { try { signal.removeEventListener('abort', onAbort); } catch { /* not added */ } }
+      _liveContainers.delete(containerName);
+      _resolve(result);
+    };
+
+    // `docker kill` alone leaves the container record, and under gVisor the runsc
+    // sandbox can survive it — rm -f reaps both. --rm makes this a no-op on clean exit.
+    const killContainer = () => {
+      try { execFileSync('docker', ['kill', containerName], { stdio: 'pipe', timeout: 5000 }); } catch { /* may be gone */ }
+      try { execFileSync('docker', ['rm', '-f', containerName], { stdio: 'pipe', timeout: 5000 }); } catch { /* already removed */ }
+    };
+
+    // Kill + arm a watchdog that force-resolves INCONCLUSIVE if the docker client
+    // never emits 'close' after the kill (wedged runsc gofer / stdio held open by a
+    // grandchild — the multi-hour hang that leaked slots and off-heap memory).
+    const triggerKill = (reason) => {
+      if (settled) return;
+      timedOut = true;
+      console.log(`[SANDBOX] ${reason} — killing container ${containerName}...`);
+      try { killContainer(); } catch { /* best-effort */ }
+      if (!forceTimer) {
+        forceTimer = setTimeout(() => {
+          if (settled) return;
+          console.error(`[SANDBOX] Container ${containerName} did not exit after kill — force-resolving INCONCLUSIVE`);
+          try { proc.kill('SIGKILL'); } catch { /* already dead */ }
+          resolve(inconclusiveResult(`Killed (${reason}) but process did not exit within grace`));
+        }, WATCHDOG_GRACE_MS);
+      }
+    };
+
+    const onAbort = () => triggerKill('Aborted by signal');
+
+    // Early abort: signal already tripped before we spawned anything.
+    if (signal && signal.aborted) {
+      resolve(inconclusiveResult('Aborted before launch'));
+      return;
+    }
 
     // Realistic hostname to evade sandbox detection (T1497.001)
     // Default Docker hostname is a 12-char hex hash — easily fingerprinted.
@@ -312,24 +404,12 @@ async function runSingleSandbox(packageName, options = {}) {
     dockerArgs.push(mode);
 
     const proc = spawn('docker', dockerArgs);
+    _liveContainers.add(containerName);
+    if (signal) signal.addEventListener('abort', onAbort, { once: true });
     let gvisorContainerId = null;
 
-    // Timeout: kill container
-    const timer = setTimeout(() => {
-      timedOut = true;
-      console.log(`[SANDBOX] Timeout (${runTimeout / 1000}s). Killing container ${containerName}...`);
-      try {
-        execFileSync('docker', ['kill', containerName], { stdio: 'pipe', timeout: 5000 });
-      } catch {
-        // docker kill failed (container in intermediate state) — force remove
-        try {
-          execFileSync('docker', ['rm', '-f', containerName], { stdio: 'pipe', timeout: 5000 });
-        } catch {
-          // Last resort: kill the docker client process (container may survive as orphan)
-          proc.kill('SIGKILL');
-        }
-      }
-    }, runTimeout);
+    // Timeout: kill container + arm anti-hang watchdog (see triggerKill).
+    timer = setTimeout(() => triggerKill(`Timeout (${runTimeout / 1000}s)`), runTimeout);
 
     proc.stdout.on('data', (data) => {
       stdout += data.toString();
@@ -663,6 +743,10 @@ async function runSandbox(packageName, options = {}) {
     let bestResult = cleanResult;
 
     for (let i = 0; i < effectiveRuns; i++) {
+      if (options.signal && options.signal.aborted) {
+        console.log(`[SANDBOX] Aborted — stopping before run ${i + 1}/${effectiveRuns}`);
+        break;
+      }
       const { offset, label } = TIME_OFFSETS[i];
       console.log(`[SANDBOX] Run ${i + 1}/${TIME_OFFSETS.length} (${label})...`);
 
@@ -674,7 +758,8 @@ async function runSandbox(packageName, options = {}) {
         displayName,
         timeOffset: offset,
         runTimeout: SINGLE_RUN_TIMEOUT,
-        gvisor: useGvisor
+        gvisor: useGvisor,
+        signal: options.signal || null
       });
 
       allRuns.push({
@@ -714,6 +799,11 @@ async function runSandbox(packageName, options = {}) {
         suspicious: false,
         inconclusive: true
       };
+    }
+
+    // Aborted before any run could conclude → INCONCLUSIVE, never CLEAN.
+    if (options.signal && options.signal.aborted && bestResult.score <= 0) {
+      bestResult = inconclusiveResult('Sandbox aborted before completing a run');
     }
 
     // Attach multi-run metadata
@@ -1060,4 +1150,4 @@ function displayResults(result) {
   }
 }
 
-module.exports = { buildSandboxImage, runSandbox, runSingleSandbox, scoreFindings, generateNetworkReport, EXFIL_PATTERNS, SAFE_DOMAINS, getSeverity, displayResults, isDockerAvailable, imageExists, isGvisorAvailable, STATIC_CANARY_TOKENS, detectStaticCanaryExfiltration, analyzePreloadLog, TIME_OFFSETS, SAFE_SANDBOX_CMDS, SANDBOX_CONCURRENCY_MAX, acquireSandboxSlot, tryAcquireSandboxSlot, releaseSandboxSlot, resetSandboxLimiter, getSandboxSemaphore };
+module.exports = { buildSandboxImage, runSandbox, runSingleSandbox, scoreFindings, generateNetworkReport, EXFIL_PATTERNS, SAFE_DOMAINS, getSeverity, displayResults, isDockerAvailable, imageExists, isGvisorAvailable, STATIC_CANARY_TOKENS, detectStaticCanaryExfiltration, analyzePreloadLog, TIME_OFFSETS, SAFE_SANDBOX_CMDS, SANDBOX_CONCURRENCY_MAX, acquireSandboxSlot, tryAcquireSandboxSlot, releaseSandboxSlot, resetSandboxLimiter, getSandboxSemaphore, killAllSandboxContainers };

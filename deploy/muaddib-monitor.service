@@ -46,5 +46,20 @@ ProtectHome=read-only
 ReadWritePaths=/opt/muaddib/data /opt/muaddib/logs
 PrivateTmp=true
 
+# Memory limits (OOM fix — belt-and-suspenders with the in-process RSS circuit
+# breaker in src/monitor/daemon.js). The monitor was OOM-killed by the kernel every
+# ~1.5-3.5h (RSS peak 10.3G on the 11.7G box) from an off-heap leak the heap-only
+# breaker was blind to. MemoryHigh (soft) triggers kernel reclaim/throttle so the
+# in-process EMERGENCY handler (kills orphaned sandbox containers + scan workers)
+# gets a window to act; MemoryMax (hard) forces a clean cgroup-scoped restart of
+# THIS service before the box-wide OOM-killer picks a random victim. MemorySwapMax=0
+# keeps a leak from being masked by swap thrash. Keep MemoryHigh < MemoryMax, and
+# co-defined with MUADDIB_RSS_LIMIT_MB (the in-process breaker fires at ~8500MB,
+# just under MemoryHigh).
+Environment=MUADDIB_RSS_LIMIT_MB=8500
+MemoryHigh=8.5G
+MemoryMax=9.5G
+MemorySwapMax=0
+
 [Install]
 WantedBy=multi-user.target

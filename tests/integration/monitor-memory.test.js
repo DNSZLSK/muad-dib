@@ -451,6 +451,221 @@ async function runMonitorMemoryTests() {
     assertIncludes(serviceFile, 'ExecStartPre', 'service should have ExecStartPre for ownership fix');
     assertIncludes(serviceFile, 'chown', 'ExecStartPre should run chown');
   });
+
+  // ════════════════════════════════════════════════════════════════════════
+  // P0 OOM-leak fix (fix/monitor-oom-leak)
+  // The monitor was OOM-killed every ~1.5-3.5h from an off-heap leak (orphaned
+  // gVisor sandbox containers + wedged scan workers) that the heap-only circuit
+  // breaker was structurally blind to (heap sat at ~20% while RSS hit 10.3G).
+  // ════════════════════════════════════════════════════════════════════════
+
+  const os = require('os');
+  const { RSS_LIMIT_MB, MAX_DOWNLOADS_CACHE } = require('../../src/monitor/daemon.js');
+  const { runSingleSandbox, killAllSandboxContainers } = require('../../src/sandbox/index.js');
+  const { terminateAllWorkers, runScanInWorker } = require('../../src/monitor/queue.js');
+
+  // ─── P0b: RSS-aware circuit breaker ───
+
+  test('P0b RSS: RSS_LIMIT_MB exported and a sane MB budget', () => {
+    assert(typeof RSS_LIMIT_MB === 'number', 'RSS_LIMIT_MB should be a number');
+    assert(RSS_LIMIT_MB > 1000 && RSS_LIMIT_MB <= 16000, `RSS_LIMIT_MB should be a sane MB budget, got ${RSS_LIMIT_MB}`);
+  });
+
+  test('P0b RSS: rss drives EMERGENCY even when heap is idle (positive)', () => {
+    const v8 = require('v8');
+    const heapLimit = v8.getHeapStatistics().heap_size_limit;
+    // Tiny heap, rss at 95% of the budget → EMERGENCY via the rss arm (heap alone = NONE).
+    const sample = { heapUsed: Math.round(heapLimit * 0.05), rss: Math.round(RSS_LIMIT_MB * 1024 * 1024 * 0.95) };
+    const { level, ratio, rssRatio } = computeMemoryPressure(sample, RSS_LIMIT_MB);
+    assert(level === MEMORY_PRESSURE_LEVELS.EMERGENCY, `rss at 95% of budget should be EMERGENCY, got level ${level}`);
+    assert(ratio < 0.10, `ratio should stay the (idle) heap ratio, got ${ratio}`);
+    assert(rssRatio > 0.92, `rssRatio should be > 0.92, got ${rssRatio}`);
+  });
+
+  test('P0b RSS: low rss + low heap = NONE (negative)', () => {
+    const sample = { heapUsed: 50 * 1024 * 1024, rss: 500 * 1024 * 1024 };
+    const { level } = computeMemoryPressure(sample, RSS_LIMIT_MB);
+    assert(level === MEMORY_PRESSURE_LEVELS.NONE, `low heap + low rss should be NONE, got ${level}`);
+  });
+
+  test('P0b RSS: heap arm still fires when rss is idle (no regression)', () => {
+    const v8 = require('v8');
+    const heapLimit = v8.getHeapStatistics().heap_size_limit;
+    const sample = { heapUsed: Math.round(heapLimit * 0.96), rss: 100 * 1024 * 1024 };
+    const { level } = computeMemoryPressure(sample, RSS_LIMIT_MB);
+    assert(level === MEMORY_PRESSURE_LEVELS.EMERGENCY, `heap at 96% should still be EMERGENCY, got ${level}`);
+  });
+
+  test('P0b RSS: pressure level is max(heap, rss)', () => {
+    const v8 = require('v8');
+    const heapLimit = v8.getHeapStatistics().heap_size_limit;
+    const r1 = computeMemoryPressure({ heapUsed: Math.round(heapLimit * 0.87), rss: 10 * 1024 * 1024 }, RSS_LIMIT_MB);
+    assert(r1.level === MEMORY_PRESSURE_LEVELS.HIGH, `heap 0.87 + idle rss → HIGH, got ${r1.level}`);
+    const r2 = computeMemoryPressure({ heapUsed: 10 * 1024 * 1024, rss: Math.round(RSS_LIMIT_MB * 1024 * 1024 * 0.91) }, RSS_LIMIT_MB);
+    assert(r2.level === MEMORY_PRESSURE_LEVELS.CRITICAL, `idle heap + rss 0.91 → CRITICAL, got ${r2.level}`);
+  });
+
+  // The two structural greps that used to live here ("daemon reads MUADDIB_RSS_LIMIT_MB",
+  // "EMERGENCY calls killAllSandboxContainers()") were deleted: the first is redundant with
+  // the four sample-driven tests above, and the second only proved a call *string* existed.
+  // Both are replaced by behavioral tests that drive handleMemoryPressure() and assert on the
+  // summary it now returns + the side effects it produces.
+
+  test('P0b EMERGENCY: reclaim truncates to newest, clears caches, and runs the off-heap reclaim', () => {
+    const q = [];
+    for (let i = 0; i < 2000; i++) q.push({ name: `pkg-${i}` });
+    const rs = new Set(['a', 'b']);
+    const dc = new Map([['x', 1]]);
+    const s = handleMemoryPressure(MEMORY_PRESSURE_LEVELS.EMERGENCY, 0.96, rs, dc, q);
+    // queue truncated to the NEWEST EMERGENCY_QUEUE_KEEP items; drop count reported in the summary
+    assert(s.queueDropped === 2000 - EMERGENCY_QUEUE_KEEP, `queueDropped should be ${2000 - EMERGENCY_QUEUE_KEEP}, got ${s.queueDropped}`);
+    assert(q.length === EMERGENCY_QUEUE_KEEP, `queue should hold ${EMERGENCY_QUEUE_KEEP}, got ${q.length}`);
+    assert(q[0].name === `pkg-${2000 - EMERGENCY_QUEUE_KEEP}`, `oldest should be dropped, first kept = ${q[0] && q[0].name}`);
+    // caches cleared (EMERGENCY >= HIGH)
+    assert(s.cachesCleared === true, 'EMERGENCY should clear caches');
+    assert(rs.size === 0 && dc.size === 0, 'recentlyScanned + downloadsCache should be emptied');
+    // off-heap reclaim ACTUALLY RAN: a number (not undefined=deleted, not -1=threw). 0 is the
+    // correct value in CI (empty registries) — the assertion is that the statement executed and
+    // captured a result, which deleting the kill call (→ undefined) or breaking it (→ -1) fails.
+    assert(typeof s.containersKilled === 'number' && s.containersKilled >= 0, `EMERGENCY should run the container reclaim, got ${s.containersKilled}`);
+    assert(typeof s.workersTerminated === 'number' && s.workersTerminated >= 0, `EMERGENCY should run the worker reclaim, got ${s.workersTerminated}`);
+  });
+
+  test('P0b graduated response: HIGH clears caches but does NOT truncate the queue or reclaim off-heap', () => {
+    const q = [];
+    for (let i = 0; i < 2000; i++) q.push({ name: `pkg-${i}` });
+    const rs = new Set(['a']);
+    const dc = new Map([['x', 1]]);
+    // alertedPackageRules is webhook.js's module Map; the breaker bounds it at HIGH too.
+    alertedPackageRules.clear();
+    for (let i = 0; i < 6000; i++) alertedPackageRules.set(`pkg-${i}`, new Set(['R']));
+    const s = handleMemoryPressure(MEMORY_PRESSURE_LEVELS.HIGH, 0.87, rs, dc, q);
+    assert(s.cachesCleared === true, 'HIGH should clear caches');
+    assert(rs.size === 0 && dc.size === 0, 'HIGH should empty recentlyScanned + downloadsCache');
+    assert(alertedPackageRules.size === 0, `HIGH should bound alertedPackageRules, got ${alertedPackageRules.size}`);
+    assert(q.length === 2000 && s.queueDropped === 0, 'HIGH must NOT truncate the queue (graduated response)');
+    // the off-heap reclaim is EMERGENCY-only: at HIGH those summary fields must stay unset.
+    assert(s.containersKilled === undefined && s.workersTerminated === undefined, 'HIGH must NOT run the off-heap reclaim (EMERGENCY-only)');
+  });
+
+  // ─── P0a: real termination on timeout ───
+
+  await asyncTest('P0a SANDBOX: pre-aborted signal → INCONCLUSIVE, never CLEAN (positive)', async () => {
+    const ac = new AbortController();
+    ac.abort();
+    // Early-abort path returns before spawning docker — no docker needed in CI.
+    const res = await runSingleSandbox('left-pad', { signal: ac.signal });
+    assert(res.severity === 'INCONCLUSIVE', `aborted run should be INCONCLUSIVE, got ${res.severity}`);
+    assert(res.score === -1, `aborted run score should be -1, got ${res.score}`);
+    assert(res.inconclusive === true, 'aborted run should set inconclusive=true');
+    assert(res.severity !== 'CLEAN', 'aborted run must NEVER be CLEAN (timeout-evasion guard)');
+  });
+
+  test('P0a SANDBOX: killAllSandboxContainers returns 0 on empty registry (negative)', () => {
+    const n = killAllSandboxContainers();
+    assert(n === 0, `no live containers → 0 removed, got ${n}`);
+  });
+
+  // Source-level, Docker-only. Reproducing these behaviorally needs a wedged gVisor container,
+  // which this CI lane lacks (Docker absent → the repo's ~14.5k sandbox tests skip). They guard
+  // SECURITY properties with no in-CI proxy: gVisor's runsc survives a soft `docker kill`, so
+  // the ladder MUST `rm -f`; and a container that never exits after the kill MUST be
+  // force-resolved INCONCLUSIVE, never left to hang (the multi-hour wedge that leaked slots +
+  // off-heap memory). The behavioral anchor for the abort→INCONCLUSIVE resolution is the
+  // pre-aborted-signal test above; this only pins the two strings whose silent change would
+  // reintroduce the leak. This is the ONE structural assertion I could not make behavioral.
+  test('P0a SANDBOX: kill ladder is `rm -f` (not soft kill) + watchdog force-resolves INCONCLUSIVE [source-level, Docker-only]', () => {
+    const sboxSource = fs.readFileSync(
+      path.join(__dirname, '..', '..', 'src', 'sandbox', 'index.js'), 'utf8'
+    );
+    assertIncludes(sboxSource, "['rm', '-f', containerName]", 'gVisor runsc survives `docker kill` — the ladder must `rm -f`');
+    assertIncludes(sboxSource, 'force-resolving INCONCLUSIVE', 'a wedged container must be force-resolved INCONCLUSIVE, never left to hang');
+  });
+
+  test('P0a QUEUE: terminateAllWorkers returns 0 when no workers live (negative)', () => {
+    const n = terminateAllWorkers();
+    assert(typeof n === 'number', 'terminateAllWorkers should return a number');
+    assert(n === 0, `no live workers → 0 terminated, got ${n}`);
+  });
+
+  // Replaces two source-grep tests ("AbortSignal plumbed", "timeout maps to INCONCLUSIVE") with
+  // a real worker round-trip. We spawn the actual static-scan worker with a 1ms budget: it
+  // cannot bootstrap the 20-scanner pipeline that fast, so the timeout arm must win, reject with
+  // a timeout error, AND reap the worker (done() deletes it from _liveWorkers synchronously) —
+  // the leak this fix closed. The scanPackage relabel of that timeout to INCONCLUSIVE-not-clean
+  // is integration-level (STATIC_SCAN_TIMEOUT_MS is a const, not injectable into scanPackage), so
+  // it is exercised by code path, not unit-forced here.
+  await asyncTest('P0a QUEUE: runScanInWorker enforces its timeout and reaps the worker (behavioral)', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-worktest-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 't', version: '1.0.0' }));
+    fs.writeFileSync(path.join(tmp, 'index.js'), 'module.exports = 1;\n');
+    terminateAllWorkers(); // drain strays so the post-condition is unambiguous
+    let err = null;
+    try {
+      await runScanInWorker(tmp, 1, { name: 't', monitorMode: true }, null);
+    } catch (e) { err = e; }
+    fs.rmSync(tmp, { recursive: true, force: true });
+    assert(err && /static scan timeout/i.test(err.message), `1ms budget should reject with a static-scan-timeout error, got: ${err && err.message}`);
+    assert(terminateAllWorkers() === 0, 'a timed-out worker must already be reaped, not leaked');
+  });
+
+  // ─── P0c: bounded caches (FIFO) ───
+
+  test('P0c CACHE: pruneMemoryCaches enforces downloadsCache size cap (positive)', () => {
+    const testDownloads = new Map();
+    const now = Date.now();
+    for (let i = 0; i < MAX_DOWNLOADS_CACHE + 50; i++) {
+      testDownloads.set(`pkg-${i}`, { downloads: 1, fetchedAt: now }); // fresh → TTL won't evict
+    }
+    assert(testDownloads.size > MAX_DOWNLOADS_CACHE, 'should be over cap before prune');
+    pruneMemoryCaches(new Set(), testDownloads, new Map());
+    assert(testDownloads.size === MAX_DOWNLOADS_CACHE, `downloadsCache should be capped at ${MAX_DOWNLOADS_CACHE}, got ${testDownloads.size}`);
+    assert(!testDownloads.has('pkg-0'), 'oldest entry should be evicted (FIFO)');
+    assert(testDownloads.has(`pkg-${MAX_DOWNLOADS_CACHE + 49}`), 'newest entry should remain');
+  });
+
+  test('P0c CACHE: downloadsCache cap is a no-op when within limits (negative)', () => {
+    const testDownloads = new Map([['a', { downloads: 1, fetchedAt: Date.now() }]]);
+    pruneMemoryCaches(new Set(), testDownloads, new Map());
+    assert(testDownloads.size === 1, 'small downloadsCache should be untouched');
+  });
+
+  // The insert-site FIFO caps (recentlyScanned in queue.js, alertedPackageRules in webhook.js)
+  // are the SAME Map/Set eviction pattern proven behaviorally by the downloadsCache test above,
+  // and alertedPackageRules' bound is additionally asserted by the HIGH-pressure test (it clears
+  // a 6000-entry map to 0). The eviction is inline at the insert sites, not a callable seam, so a
+  // dedicated source-grep here would add nothing the behavioral tests don't already cover — it
+  // was removed rather than restated as a string.
+
+  // ─── P0d: systemd cgroup memory limits ───
+  // A unit file is config, so this asserts its content — but on the cross-config INVARIANT, not
+  // mere presence: the three escalating limits must be strictly ordered so the gentlest reclaim
+  // acts first (in-process RSS breaker → cgroup soft reclaim → cgroup hard restart), and the
+  // in-process budget must match the value the unit injects (single source of truth).
+
+  test('P0d SYSTEMD: rss budget <= MemoryHigh < MemoryMax, swap pinned, env matches RSS_LIMIT_MB', () => {
+    const svc = fs.readFileSync(
+      path.join(__dirname, '..', '..', 'deploy', 'muaddib-monitor.service'), 'utf8'
+    );
+    const gToMb = (re) => { const m = svc.match(re); return m ? Math.round(parseFloat(m[1]) * 1024) : NaN; };
+    const envMb = (() => { const m = svc.match(/MUADDIB_RSS_LIMIT_MB=(\d+)/); return m ? parseInt(m[1], 10) : NaN; })();
+    const highMb = gToMb(/MemoryHigh=([\d.]+)G/);
+    const maxMb = gToMb(/MemoryMax=([\d.]+)G/);
+    assert(!isNaN(envMb) && !isNaN(highMb) && !isNaN(maxMb), 'service must define MUADDIB_RSS_LIMIT_MB + MemoryHigh + MemoryMax');
+    assert(envMb <= highMb, `in-process rss budget (${envMb}MB) should be <= MemoryHigh (${highMb}MB) so it fires first`);
+    assert(highMb < maxMb, `MemoryHigh (${highMb}MB) should be < MemoryMax (${maxMb}MB)`);
+    assertIncludes(svc, 'MemorySwapMax=0', 'swap must be pinned to 0 so a leak cannot hide in swap');
+    // Single source of truth: the unit's env value should match the daemon's compiled default
+    // (both 8500 here). Only checked when the runner itself hasn't overridden the env, so a CI
+    // box that exports MUADDIB_RSS_LIMIT_MB doesn't trip it.
+    if (process.env.MUADDIB_RSS_LIMIT_MB === undefined) {
+      assert(envMb === RSS_LIMIT_MB, `unit MUADDIB_RSS_LIMIT_MB (${envMb}) should equal the daemon default RSS_LIMIT_MB (${RSS_LIMIT_MB})`);
+    }
+  });
+
+  // Reset the module-level pressure level after injecting synthetic samples above,
+  // so later test files reading getMemoryPressureLevel() see the real value.
+  computeMemoryPressure();
 }
 
 module.exports = { runMonitorMemoryTests };
