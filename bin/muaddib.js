@@ -383,7 +383,6 @@ if (command === 'version' || command === '--version' || command === '-v') {
     });
   } else if (isTemporal && isTest && testPkg.length > 0) {
     const { detectSuddenLifecycleChange } = require('../src/temporal-analysis.js');
-    const pkgName = testPkg[testPkg.indexOf('--test') !== -1 ? testPkg.length - 1 : 0] || testPkg[0];
     // Find the package name: it's the non-flag argument
     const actualPkg = options.filter(o => !o.startsWith('-')).pop();
     if (!actualPkg) {
@@ -756,6 +755,7 @@ if (command === 'version' || command === '--version' || command === '-v') {
   const helpCmd = options.filter(o => !o.startsWith('-'))[0];
   showHelp(helpCmd);
 } else {
+  // eslint-disable-next-line no-control-regex -- strips control chars from untrusted command before display
   console.log(`Unknown command: ${String(command).replace(/[\x00-\x1f\x7f-\x9f]/g, '')}`);
   console.log('Type "muaddib help" to see available commands.');
   process.exit(1);

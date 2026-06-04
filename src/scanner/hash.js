@@ -3,7 +3,7 @@ const path = require('path');
 const nodeCrypto = require('crypto');
 const { loadCachedIOCs } = require('../ioc/updater.js');
 const { findFiles } = require('../utils.js');
-const { MAX_FILE_SIZE, getMaxFileSize } = require('../shared/constants.js');
+const { getMaxFileSize } = require('../shared/constants.js');
 
 // Hash cache: filePath -> { hash, mtime }
 const hashCache = new Map();

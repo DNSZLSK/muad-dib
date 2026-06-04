@@ -165,12 +165,12 @@ function atomicWriteFileSync(filePath, data) {
   } catch (err) {
     if (err.code === 'EROFS' || err.code === 'EACCES' || err.code === 'EPERM') {
       console.warn(`[MONITOR] Cannot write ${path.basename(filePath)} (${err.code}) — skipping`);
-      try { fs.unlinkSync(tmpFile); } catch (_) { /* ignore */ }
+      try { fs.unlinkSync(tmpFile); } catch { /* ignore */ }
       return;
     }
     if (err.code === 'ENOSPC') {
       console.warn(`[MONITOR] WARNING: disk full (ENOSPC) — cannot write ${path.basename(filePath)}. Free space in /tmp and data/ immediately.`);
-      try { fs.unlinkSync(tmpFile); } catch (_) { /* ignore */ }
+      try { fs.unlinkSync(tmpFile); } catch { /* ignore */ }
       return;
     }
     throw err;

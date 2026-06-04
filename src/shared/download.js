@@ -360,6 +360,7 @@ function sanitizePackageName(packageName) {
     .replace(/\.\./g, '')
     .replace(/[/\\]/g, '_')          // Both slash types → _
     .replace(/[@:]/g, '')            // @ and : (Windows drive letter)
+    // eslint-disable-next-line no-control-regex -- intentional control-char strip (filename safety net)
     .replace(/[\x00-\x1F]/g, '');   // Control chars (safety net)
 }
 

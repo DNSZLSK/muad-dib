@@ -8,7 +8,7 @@ const { output } = require('./pipeline/outputter.js');
 async function run(targetPath, options = {}) {
   try {
     // Phase 1: Initialization (validate, IOCs, config, Python detection)
-    const { pythonDeps, configApplied, configResult, warnings } = await initialize(targetPath, options);
+    const { pythonDeps, warnings } = await initialize(targetPath, options);
 
     // Phase 2: Execute all scanners
     const { threats, scannerErrors } = await execute(targetPath, options, pythonDeps, warnings);

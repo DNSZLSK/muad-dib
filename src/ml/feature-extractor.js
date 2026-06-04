@@ -602,7 +602,7 @@ const F9_INFRA_KEYS = new Set([
 
 // Credential file paths that a malicious MCP dropper would harvest.
 // Appearance in any threat message disqualifies F9.
-const F9_CREDENTIAL_FILE_RE = /\.npmrc\b|\.aws[\/\\](?:credentials|config)\b|\bid_rsa\b|\bid_ed25519\b|\.ssh[\/\\]|\.kube[\/\\]config\b|\.docker[\/\\]config\b|\.netrc\b|\.git-credentials\b|wallet\.dat\b|\bsecret_token\b/i;
+const F9_CREDENTIAL_FILE_RE = /\.npmrc\b|\.aws[/\\](?:credentials|config)\b|\bid_rsa\b|\bid_ed25519\b|\.ssh[/\\]|\.kube[/\\]config\b|\.docker[/\\]config\b|\.netrc\b|\.git-credentials\b|wallet\.dat\b|\bsecret_token\b/i;
 
 // v2.11.31 F14: split exfil types into HARD (real malware signals) vs
 // SOFT (compound/intent threats that legitimately fire on AI proxies +

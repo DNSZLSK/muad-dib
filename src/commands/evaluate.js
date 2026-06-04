@@ -193,7 +193,7 @@ async function fetchRegistryMeta(pkgName) {
     let unpackedSize = 0;
     try {
       const https = require('https');
-      const regData = await new Promise((resolve, reject) => {
+      const regData = await new Promise((resolve, _reject) => {
         const req = https.get(
           `https://registry.npmjs.org/${encodeURIComponent(pkgName)}/latest`,
           { timeout: 5000, headers: { 'Accept': 'application/json' } },
@@ -1257,7 +1257,7 @@ function clusterFalsePositives(sources) {
     if (!file || typeof file !== 'string') return '<no-file>';
     let p = file.replace(/\\/g, '/');
     // Strip leading "package/" prefix produced by tarball extraction
-    p = p.replace(/^(?:[\w@.\-]+\/)?package\//, '');
+    p = p.replace(/^(?:[\w@.-]+\/)?package\//, '');
     // Replace hex hashes (>=6 chars) with <HASH>
     p = p.replace(/\b[a-f0-9]{6,40}\b/gi, '<HASH>');
     // Replace version-like tokens

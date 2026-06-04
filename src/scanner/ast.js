@@ -1,7 +1,6 @@
 const path = require('path');
-const acorn = require('acorn');
 const walk = require('acorn-walk');
-const { ACORN_OPTIONS, safeParse } = require('../shared/constants.js');
+const { safeParse } = require('../shared/constants.js');
 const { analyzeWithDeobfuscation } = require('../shared/analyze-helper.js');
 const {
   handleVariableDeclarator,
@@ -133,7 +132,7 @@ function analyzeFile(content, filePath, basePath) {
     // `const X = function`, `let X = class`, etc.
     localClassNames: (() => {
       const names = new Set();
-      const re = /\b(?:function|class)\s+(\w+)\s*[(\{]|\b(?:const|let|var)\s+(\w+)\s*=\s*(?:function|class)\b/g;
+      const re = /\b(?:function|class)\s+(\w+)\s*[({]|\b(?:const|let|var)\s+(\w+)\s*=\s*(?:function|class)\b/g;
       let m;
       while ((m = re.exec(content)) !== null) {
         const id = m[1] || m[2];

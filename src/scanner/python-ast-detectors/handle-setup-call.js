@@ -2,7 +2,6 @@
 
 const {
   calleeDottedName,
-  hasKeywordArg,
   stringLiteralValue,
   lineOf
 } = require('./helpers.js');

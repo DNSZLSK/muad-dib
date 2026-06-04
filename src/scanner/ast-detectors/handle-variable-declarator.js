@@ -330,7 +330,7 @@ function handleVariableDeclarator(node, ctx) {
       if (obj?.type === 'Identifier' && obj.name === 'path' &&
           prop?.type === 'Identifier' && (prop.name === 'join' || prop.name === 'resolve')) {
         const joinArgs = node.init.arguments.map(a => extractStringValueDeep(a) || '').join('/');
-        if (/\.github[\\/\/]workflows/i.test(joinArgs) || /\.github[\\/\/]actions/i.test(joinArgs)) {
+        if (/\.github[\\/]workflows/i.test(joinArgs) || /\.github[\\/]actions/i.test(joinArgs)) {
           ctx.workflowPathVars.add(node.id.name);
         }
         // Propagate: path.join(workflowPathVar, ...) inherits tracking
@@ -338,7 +338,7 @@ function handleVariableDeclarator(node, ctx) {
           ctx.workflowPathVars.add(node.id.name);
         }
         // Track path.join that resolves to .git/hooks (concat fragments included)
-        if (/\.git[\\/\/]hooks/i.test(joinArgs) ||
+        if (/\.git[\\/]hooks/i.test(joinArgs) ||
             (GIT_HOOKS.some(h => joinArgs.includes(h)) && joinArgs.includes('.git'))) {
           ctx.gitHooksPathVars.set(node.id.name, joinArgs);
         }

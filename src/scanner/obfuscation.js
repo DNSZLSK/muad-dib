@@ -1,4 +1,3 @@
-const fs = require('fs');
 const path = require('path');
 const { findFiles, forEachSafeFile, debugLog } = require('../utils.js');
 const { countInvisibleUnicode } = require('../shared/unicode-invisibles.js');

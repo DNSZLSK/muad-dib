@@ -206,10 +206,10 @@ function evaluateSandboxTrigger(threats, score, fileSizes) {
     return { shouldRun: false, compound: null, watchpoints: [], reason: 'score above window' };
   }
   for (const trigger of TRIGGERS) {
-    let matched = false;
+    let matched;
     try {
       matched = trigger.matches(threats, fileSizes || {});
-    } catch (e) {
+    } catch {
       matched = false;
     }
     if (matched) {

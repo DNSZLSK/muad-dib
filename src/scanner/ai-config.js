@@ -138,7 +138,7 @@ function scanAIConfig(targetPath) {
 
     const relPath = configFile;
     // Normalize invisible Unicode BEFORE running regex patterns.
-    // Without this, an attacker can split keywords with U+200B (`cu​rl`) to
+    // Without this, an attacker can split keywords with U+200B (`cu<ZWSP>rl`) to
     // evade /curl\s+/ — the exact TrapDoor (mai 2026) .cursorrules vector.
     const invisibleCount = countInvisibleUnicode(content);
     const normalized = invisibleCount > 0 ? stripInvisibleUnicode(content) : content;

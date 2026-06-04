@@ -22,7 +22,7 @@ const { NPM_PACKAGE_REGEX } = require('../shared/constants.js');
 // whitespace, slashes, length > 100. The previous regex required first
 // char in [1-9] after a '0' which broke ALL 0.x.y versions (false negative
 // spam in scraper logs ; ~600 valid PyPI/npm versions wrongly skipped per scrape).
-const VERSION_INVALID_CHARS = /[\s\\/'"`;|&$<>(){}\[\]?]/;
+const VERSION_INVALID_CHARS = /[\s\\/'"`;|&$<>(){}[\]?]/;
 function isValidVersion(version) {
   if (!version || typeof version !== 'string') return false;
   if (version === '*') return true;
@@ -31,7 +31,7 @@ function isValidVersion(version) {
   if (VERSION_INVALID_CHARS.test(version)) return false;
   // Must start with a digit (or 'v' prefix), and contain only word chars / . / + / -
   if (!/^v?\d/.test(version)) return false;
-  return /^[\w.+\-]+$/.test(version);
+  return /^[\w.+-]+$/.test(version);
 }
 // Backwards compat: keep VERSION_RE as a no-op test wrapper for any legacy
 // caller that imports it. Prefer isValidVersion() in new code.
@@ -303,63 +303,6 @@ function fetchText(url, redirectCount = 0) {
   });
 }
 
-function fetchBuffer(url, redirectCount = 0) {
-  return new Promise((resolve, reject) => {
-    const urlObj = new URL(url);
-    const reqOptions = {
-      hostname: urlObj.hostname,
-      path: urlObj.pathname + urlObj.search,
-      method: 'GET',
-      headers: {
-        'User-Agent': 'MUADDIB-Scanner/3.0'
-      }
-    };
-
-    const req = https.request(reqOptions, (res) => {
-      if ([301, 302, 307, 308].includes(res.statusCode)) {
-        res.resume(); // Drain response body before following redirect
-        if (redirectCount >= MAX_REDIRECTS) {
-          reject(new Error('Too many redirects'));
-          return;
-        }
-        const redirectUrl = res.headers.location;
-        if (!isAllowedRedirect(redirectUrl)) {
-          reject(new Error('Unauthorized redirect to: ' + redirectUrl));
-          return;
-        }
-        fetchBuffer(redirectUrl, redirectCount + 1).then(resolve).catch(reject);
-        return;
-      }
-
-      if (res.statusCode !== 200) {
-        res.resume(); // Drain response body on error
-        reject(new Error('HTTP ' + res.statusCode));
-        return;
-      }
-
-      const chunks = [];
-      let received = 0;
-      res.on('data', chunk => {
-        received += chunk.length;
-        if (received > MAX_RESPONSE_SIZE) {
-          req.destroy();
-          reject(new Error('Response exceeded maximum size'));
-          return;
-        }
-        chunks.push(chunk);
-      });
-      res.on('end', () => resolve(Buffer.concat(chunks)));
-    });
-
-    req.on('error', reject);
-    req.setTimeout(120000, () => {
-      req.destroy();
-      reject(new Error('Timeout'));
-    });
-
-    req.end();
-  });
-}
 
 /**
  * Download a large file with spinner progress (npm/ora style).
@@ -367,6 +310,7 @@ function fetchBuffer(url, redirectCount = 0) {
  */
 function fetchBufferWithProgress(url, label, redirectCount = 0) {
   return new Promise((resolve, reject) => {
+    let spinner = null;
     const urlObj = new URL(url);
     const reqOptions = {
       hostname: urlObj.hostname,
@@ -404,7 +348,7 @@ function fetchBufferWithProgress(url, label, redirectCount = 0) {
       const chunks = [];
       let received = 0;
 
-      const spinner = new Spinner();
+      spinner = new Spinner();
       spinner.start('Downloading ' + label + '...');
 
       res.on('data', (chunk) => {
@@ -432,12 +376,12 @@ function fetchBufferWithProgress(url, label, redirectCount = 0) {
     });
 
     req.on('error', (err) => {
-      spinner.fail('Download failed: ' + err.message);
+      if (spinner) spinner.fail('Download failed: ' + err.message);
       reject(err);
     });
     req.setTimeout(300000, () => {
       req.destroy();
-      spinner.fail('Download timed out');
+      if (spinner) spinner.fail('Download timed out');
       reject(new Error('Timeout downloading ' + label));
     });
 
@@ -850,7 +794,7 @@ async function scrapeOSVDataDump() {
             // Track known IDs so OSSF can skip them
             knownIds.add(vuln.id || path.basename(name, '.json'));
             malCount++;
-          } catch (parseErr) {
+          } catch {
             console.warn(`[WARN] Skipping unparseable entry: ${name}`);
           }
         }
@@ -923,7 +867,7 @@ async function scrapeOSVPyPIDataDump() {
             const parsed = parseOSVEntry(vuln, 'osv-malicious-pypi', 'PyPI');
             for (const p of parsed) packages.push(p);
             malCount++;
-          } catch (parseErr) {
+          } catch {
             console.warn(`[WARN] Skipping unparseable entry: ${name}`);
           }
         }
@@ -1143,8 +1087,6 @@ async function runScraper() {
   // (used by `getSourceConfidence` for webhook gating).
   let addedPackages = 0;
   let upgradedPackages = 0;
-  let skippedInvalid = 0;
-  let skippedNeverWildcard = 0;
   function appendSource(target, pkg) {
     if (!Array.isArray(target.sources)) target.sources = [];
     const newSrc = pkg.source || (pkg.freshness && pkg.freshness.source) || 'unknown';
@@ -1166,12 +1108,10 @@ async function runScraper() {
   }
   for (const pkg of allPackages) {
     if (!validateIOCEntry(pkg.name, pkg.version, 'npm')) {
-      skippedInvalid++;
       continue;
     }
     // Skip wildcard entries for packages that must stay version-specific
     if (pkg.version === '*' && NEVER_WILDCARD.has(pkg.name)) {
-      skippedNeverWildcard++;
       continue;
     }
     const key = pkg.name + '@' + pkg.version;
@@ -1218,7 +1158,6 @@ async function runScraper() {
   const allPyPIPackages = pypiPackages.concat(aikidoResult.pypi_packages || [], osmResult.pypi_packages || []);
   for (const pkg of allPyPIPackages) {
     if (!validateIOCEntry(pkg.name, pkg.version, 'pypi')) {
-      skippedInvalid++;
       continue;
     }
     const key = pkg.name + '@' + pkg.version;

@@ -126,7 +126,6 @@ async function detectMaintainerChange(packageName) {
 
   // Build name sets for comparison
   const previousNames = new Set(previousMaint.maintainers.map(m => m.name.toLowerCase()));
-  const currentNames = new Set(newestMaint.maintainers.map(m => m.name.toLowerCase()));
 
   // Detect NEW_MAINTAINER: maintainers in newest that weren't in previous
   for (const m of newestMaint.maintainers) {

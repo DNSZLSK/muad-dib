@@ -1,8 +1,7 @@
 'use strict';
 
-const fs = require('fs');
 const path = require('path');
-const { SINK_CALLEE_NAMES, SINK_MEMBER_METHODS, SINK_INSTANCE_METHODS, ACORN_OPTIONS } = require('./constants.js');
+const { SINK_CALLEE_NAMES, SINK_MEMBER_METHODS, SINK_INSTANCE_METHODS } = require('./constants.js');
 const {
   parseFile, walkAST, isRequireCall, isModuleExportsAssign,
   getExportName, getFunctionBody, getMemberChain

@@ -1,7 +1,7 @@
 'use strict';
 
 const path = require('path');
-const { MAX_FLOWS, SENSITIVE_MODULES, SINK_CALLEE_NAMES, SINK_MEMBER_METHODS } = require('./constants.js');
+const { SENSITIVE_MODULES } = require('./constants.js');
 const { parseFile, walkAST, isRequireCall } = require('./parse-utils.js');
 const { expandTaintThroughReexports, collectImportTaint, propagateLocalTaint, getSinkName, findTaintedArgument } = require('./detect-cross-file.js');
 const { checkNodeTaint } = require('./annotate-tainted.js');

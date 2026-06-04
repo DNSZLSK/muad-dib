@@ -8,7 +8,6 @@ const {
   NODE_HOOKABLE_CLASSES
 } = require('./constants.js');
 const {
-  extractStringValue,
   resolveStringConcat,
   extractStringValueDeep
 } = require('./helpers.js');

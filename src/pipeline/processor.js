@@ -5,7 +5,7 @@ const { getPlaybook } = require('../response/playbooks.js');
 const { computeReachableFiles, computeReachableFunctions } = require('../scanner/reachability.js');
 const { applyFPReductions, applyCompoundBoosts, calculateRiskScore, getSeverityWeights, applyContextualFPCaps, applySingleFireCriticalFloor, applyReputationFactor, applyMatureStableCap, applySandboxVerdict, applyDeltaMultiplier } = require('../scoring.js');
 const { loadPriorVersionSignatures, computeSignatures, saveCachedSignatures } = require('../scoring/delta-multiplier.js');
-const { annotateConfidenceTiers, tierAtLeast } = require('../rules/confidence-tiers.js');
+const { annotateConfidenceTiers } = require('../rules/confidence-tiers.js');
 const { buildIntentPairs } = require('../intent-graph.js');
 const { debugLog } = require('../utils.js');
 const { getPackageMetadata } = require('../scanner/npm-registry.js');
@@ -472,7 +472,7 @@ async function process(threats, targetPath, options, pythonDeps, warnings, scann
   // Per-file max scoring (v2.2.11) with intent graph bonus
   const {
     riskScore, riskLevel, globalRiskScore,
-    maxFileScore, packageScore, intentBonus, mostSuspiciousFile, fileScores,
+    maxFileScore, packageScore, mostSuspiciousFile, fileScores,
     criticalCount, highCount, mediumCount, lowCount
   } = calculateRiskScore(deduped, intentResult);
 

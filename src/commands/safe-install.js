@@ -132,7 +132,6 @@ async function scanPackageRecursive(pkg, depth = 0, maxDepth = 3) {
     }
   }
   
-  const pkgBaseName = pkgName.replace(/^@[^/]+\//, '');
   
   // Avoid infinite loops
   if (scannedPackages.has(pkgName)) {

@@ -1,8 +1,7 @@
 'use strict';
 
-const fs = require('fs');
 const path = require('path');
-const { SENSITIVE_MODULES, ACORN_OPTIONS } = require('./constants.js');
+const { SENSITIVE_MODULES } = require('./constants.js');
 const {
   parseFile, walkAST, isRequireCall, isModuleExportsAssign,
   getExportName, getFunctionBody, getMemberChain, extractLiteralArg

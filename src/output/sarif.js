@@ -99,7 +99,7 @@ function saveSARIF(results, outputPath) {
   try {
     fs.writeFileSync(outputPath, JSON.stringify(sarif, null, 2));
   } catch (e) {
-    throw new Error(`Failed to write SARIF report to ${outputPath}: ${e.message}`);
+    throw new Error(`Failed to write SARIF report to ${outputPath}: ${e.message}`, { cause: e });
   }
   return outputPath;
 }
