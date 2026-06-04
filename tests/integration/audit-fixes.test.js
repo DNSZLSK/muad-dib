@@ -45,13 +45,11 @@ async function runAuditFix1Tests() {
     }
   });
 
-  await asyncTest('FIX1: Promise.allSettled pattern is used in index.js', async () => {
-    // Scanner execution logic moved to pipeline/executor.js in P2 audit refactor
-    const executorSrc = fs.readFileSync(path.join(__dirname, '../../src/pipeline/executor.js'), 'utf8');
-    assert(executorSrc.includes('Promise.allSettled'), 'Should use Promise.allSettled');
-    assert(!executorSrc.includes('Promise.all(['), 'Should NOT use Promise.all for scanners');
-    assert(executorSrc.includes('SCANNER_NAMES'), 'Should have SCANNER_NAMES for error reporting');
-  });
+  // C1: removed the executor.js source-grep (Promise.allSettled / SCANNER_NAMES). Scanner-failure
+  // isolation — the behavior Promise.allSettled provides — is covered behaviorally by the two FIX1
+  // tests above ("Scan succeeds even with malformed JS files", "scannerErrors field present when a
+  // scanner fails"): a thrown scanner is captured per-slot and surfaced in result.scannerErrors
+  // instead of aborting the scan.
 }
 
 // ===================================================================
@@ -264,17 +262,16 @@ fs.promises.readFile('/root/.ssh/id_rsa', 'utf8')
 async function runAuditFix6Tests() {
   console.log('\n=== AUDIT FIX 6: Sandbox hardening ===\n');
 
-  test('FIX6: Sandbox index.js has --cap-drop=ALL', () => {
-    const sandboxSrc = fs.readFileSync(path.join(__dirname, '../../src/sandbox/index.js'), 'utf8');
-    assert(sandboxSrc.includes("'--cap-drop=ALL'"), 'Should have --cap-drop=ALL in docker args');
+  test('FIX6: buildDockerArgs hardens the sandbox with --cap-drop=ALL', () => {
+    // Behavioral replacement for the sandbox/index.js source-grep: the extracted arg builder always
+    // drops all capabilities (then re-adds only the minimal set the entrypoint needs).
+    const { buildDockerArgs } = require('../../src/sandbox/index.js');
+    const args = buildDockerArgs({ containerName: 'c', fakeHostname: 'dev-laptop-0000', packageName: 'p', mode: 'permissive' });
+    assert(args.includes('--cap-drop=ALL'), 'docker args should drop all capabilities');
   });
 
-  test('FIX6: Sandbox blocks /proc/uptime read', () => {
-    const sandboxSrc = fs.readFileSync(path.join(__dirname, '../../src/sandbox/index.js'), 'utf8');
-    // Should mount fake /proc/uptime or block access
-    const hasFakeUptime = sandboxSrc.includes('proc/uptime') || sandboxSrc.includes('fake-uptime');
-    assert(hasFakeUptime, 'Should handle /proc/uptime spoofing');
-  });
+  // C1: removed the index.js "/proc/uptime spoofing" source-grep — the actual spoofing lives in
+  // docker/preload.js and is covered behaviorally in tests/unit/preload.test.js ("spoofs /proc/uptime…").
 }
 
 // ===================================================================
@@ -377,14 +374,10 @@ async function runAuditFix8Tests() {
 async function runAuditFix9Tests() {
   console.log('\n=== AUDIT FIX 9: Scan timeouts ===\n');
 
-  test('FIX9: Module graph timeout exists (SCANNER_TIMEOUT/SCAN_TIMEOUT removed as dead code)', () => {
-    // Module graph execution logic moved to pipeline/executor.js in P2 audit refactor
-    const executorSrc = fs.readFileSync(path.join(__dirname, '../../src/pipeline/executor.js'), 'utf8');
-    // SCANNER_TIMEOUT and SCAN_TIMEOUT were unused dead code, removed in v2.6.6
-    // Module graph has its own timeout via MODULE_GRAPH_TIMEOUT_MS
-    assert(executorSrc.includes('MODULE_GRAPH_TIMEOUT_MS'),
-      'Should define module graph timeout');
-  });
+  // C1: removed the executor.js source-grep (MODULE_GRAPH_TIMEOUT_MS presence). The behavioral
+  // property — scans complete and never hang — is covered by "FIX9: Normal scan completes within
+  // timeout" below and by tests/scanner/module-graph.test.js (which runs the graph with its timeout
+  // active).
 
   await asyncTest('FIX9: Normal scan completes within timeout', async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-fix9-'));
@@ -471,17 +464,11 @@ fs.writeFileSync(wfPath, 'malicious workflow content');
 async function runCritical10Tests() {
   console.log('\n=== CRITICAL #10: Native addon detection + /proc/uptime spoofing ===\n');
 
-  test('C10: preload.js intercepts process.dlopen', () => {
-    const preloadSrc = fs.readFileSync(path.join(__dirname, '../../docker/preload.js'), 'utf8');
-    assert(preloadSrc.includes('process.dlopen'), 'Should patch process.dlopen');
-    assert(preloadSrc.includes('NATIVE_ADDON'), 'Should log NATIVE_ADDON category');
-  });
-
-  test('C10: preload.js intercepts /proc/uptime reads', () => {
-    const preloadSrc = fs.readFileSync(path.join(__dirname, '../../docker/preload.js'), 'utf8');
-    assert(preloadSrc.includes('/proc/uptime'), 'Should handle /proc/uptime reads');
-    assert(preloadSrc.includes('SPOOFED'), 'Should log spoofed uptime');
-  });
+  // C1: removed two source-greps on docker/preload.js (process.dlopen → NATIVE_ADDON, and
+  // /proc/uptime spoofing). Both are covered behaviorally in tests/unit/preload.test.js
+  // ("intercepts process.dlopen…", "spoofs /proc/uptime…") by running preload in a child process
+  // and asserting the forensic-log entries. The analyzer-side tests below remain (they exercise
+  // analyzePreloadLog on synthetic [PRELOAD] lines).
 
   test('C10: analyzer.js handles NATIVE_ADDON log lines', () => {
     const { analyzePreloadLog } = require('../../src/sandbox/analyzer.js');
@@ -781,18 +768,10 @@ async function runHighFix7Tests() {
 async function runHighFix11Tests() {
   console.log('\n=== HIGH #11: Worker threads preload injection ===\n');
 
-  test('H11: preload.js has worker_threads interception', () => {
-    const src = fs.readFileSync(path.join(__dirname, '../../docker/preload.js'), 'utf8');
-    assert(src.includes("require('worker_threads')"), 'Should require worker_threads');
-    assert(src.includes('_OrigWorker'), 'Should store original Worker constructor');
-    assert(src.includes('NODE_TIMING_OFFSET'), 'Should pass time offset to workers');
-    assert(src.includes('--require'), 'Should add --require preload.js to worker execArgv');
-  });
-
-  test('H11: preload.js logs WORKER category', () => {
-    const src = fs.readFileSync(path.join(__dirname, '../../docker/preload.js'), 'utf8');
-    assert(src.includes("log('WORKER'"), 'Should log WORKER category when spawning');
-  });
+  // C1: removed two source-greps on docker/preload.js (worker_threads interception +
+  // log('WORKER')). Covered behaviorally in tests/unit/preload.test.js ("wraps worker_threads.Worker
+  // and logs spawns (WORKER)…"), which spawns a real Worker in a preloaded child and asserts the
+  // WORKER forensic-log entry. The analyzer-side test below (isValidPreloadLine) remains.
 
   test('H11: analyzer.js accepts WORKER as valid category', () => {
     const { isValidPreloadLine } = require('../../src/sandbox/analyzer.js');

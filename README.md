@@ -303,7 +303,7 @@ These are the numbers a user gets when running `muaddib scan` against npm or PyP
 | **FPR PyPI** (v2.11.48, first honest measurement) | **9.68%** (12/124 scanned, 132 total) | **Track D fixed the PyPI downloader** — removed `pip --no-binary :all:` flag (forced compile of wheel-only packages, timed out 38% of the time) + added `.whl` extraction via `extractArchive()`. Brought 42 previously-skipped giants (numpy/pandas/django/matplotlib/scikit-learn/...) into scope. All 12 FPs cluster at score 25-35: this is the cap-PyPI-35 artifact, not new rule misfires. Lifting the cap (Track E) would drop FPR PyPI to ≈0%. 8 residual fails are >500MB packages (torch, tensorflow, scipy, opencv-python, ansible…) hitting the 30s `PACK_TIMEOUT_MS`. |
 | **ADR** (Adversarial + Holdout, v2.11.48) | **96.26%** (103/107) | 67 adversarial + 40 holdout, global threshold=20. Stable vs v2.10.95. |
 
-**3913 tests** across 109 files. **262 rules** (257 RULES + 5 PARANOID — Track D added 3: AST-093, AST-094, COMPOUND-016).
+**3969 tests** across 109 files. **262 rules** (257 RULES + 5 PARANOID — Track D added 3: AST-093, AST-094, COMPOUND-016).
 
 **Known issues (v2.11.48):**
 - *Cap PyPI à 35/100*: Python samples plafonnent à `riskScore=35` even when `globalRiskScore=100`. Confirmed empirically — all 12 PyPI FPs at score 25-35 (flask 32, django 35, tornado 35, bottle 30, pandas 25, matplotlib 25, plotly 25, bokeh 25, pymongo 35, coverage 32, fabric 35, websockets 35). Lifting the cap will simultaneously drop FPR PyPI to ≈0% and unblock PyPI MALWARE detection at higher thresholds. Track E target.

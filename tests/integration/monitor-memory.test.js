@@ -80,13 +80,16 @@ async function runMonitorMemoryTests() {
     assertIncludes(ingestionSource, 'seq not advanced, 0 packages lost', 'ingestion.js should document seq safety');
   });
 
-  test('MEMORY: daemon uses adaptive concurrency', () => {
-    const daemonSource = fs.readFileSync(
-      path.join(__dirname, '..', '..', 'src', 'monitor', 'daemon.js'), 'utf8'
-    );
-    assertIncludes(daemonSource, 'computeTarget', 'daemon.js should use adaptive concurrency');
-    assertIncludes(daemonSource, 'ADAPTIVE:', 'daemon.js should log adaptive concurrency changes');
-    assertIncludes(daemonSource, 'ensureWorkers', 'daemon.js should use non-blocking ensureWorkers');
+  test('MEMORY: computeTarget sheds workers to the floor under heap pressure (adaptive concurrency)', () => {
+    // Behavioral replacement for the daemon.js source-greps (computeTarget / "ADAPTIVE:" / ensureWorkers).
+    // Force the circuit-breaker level HIGH, then the adaptive controller must drop the target to MIN
+    // regardless of a large backlog — an OOM kill loses the in-memory queue, so pressure overrides it.
+    const { computeTarget, MIN_CONCURRENCY } = require('../../src/monitor/adaptive-concurrency.js');
+    computeMemoryPressure({ rss: 4096 * 1024 * 1024, heapUsed: 1024 }, 1); // rssRatio ≫ 1 → EMERGENCY
+    const r = computeTarget(16, 5000, { scanned: 0, errorsByType: {} });
+    assert(r.target === MIN_CONCURRENCY, `under heap pressure target should drop to MIN (${MIN_CONCURRENCY}), got ${r.target}`);
+    assert(/heap/.test(r.reason), `reason should cite heap pressure, got "${r.reason}"`);
+    computeMemoryPressure({ rss: 1024, heapUsed: 1024 }, 1_000_000); // reset shared level → NONE
   });
 
   // ─── Chantier 2: Periodic memory pruning ───
@@ -145,15 +148,18 @@ async function runMonitorMemoryTests() {
 
   // ─── Chantier 3: Memory watchdog ───
 
-  test('MEMORY: daemon main loop has memory watchdog with circuit breaker', () => {
-    const daemonSource = fs.readFileSync(
-      path.join(__dirname, '..', '..', 'src', 'monitor', 'daemon.js'), 'utf8'
-    );
-    assertIncludes(daemonSource, 'MEMORY:', 'daemon.js should log memory usage');
-    assertIncludes(daemonSource, 'process.memoryUsage()', 'daemon.js should call process.memoryUsage()');
-    assertIncludes(daemonSource, 'MEMORY PRESSURE', 'daemon.js should detect memory pressure');
-    assertIncludes(daemonSource, 'computeMemoryPressure', 'daemon.js should use computeMemoryPressure in loop');
-    assertIncludes(daemonSource, 'MEMORY_PRESSURE_LEVELS.HIGH', 'daemon.js should gate workers on pressure level');
+  test('MEMORY: computeMemoryPressure escalates to >= HIGH as RSS approaches the limit (circuit breaker)', () => {
+    // Behavioral replacement for the daemon.js source-greps (MEMORY: / process.memoryUsage() /
+    // MEMORY PRESSURE / computeMemoryPressure / MEMORY_PRESSURE_LEVELS.HIGH). Feed synthetic memory
+    // samples and assert the computed pressure level + that getMemoryPressureLevel reflects it (the
+    // value the daemon loop and ingestion gate on).
+    const low = computeMemoryPressure({ rss: 1024, heapUsed: 1024 }, 1_000_000);
+    assert(low.level === MEMORY_PRESSURE_LEVELS.NONE, `tiny footprint should be NONE, got ${low.level}`);
+    const high = computeMemoryPressure({ rss: 512 * 1024 * 1024, heapUsed: 1024 }, 1); // rssRatio ≫ 1
+    assert(high.level >= MEMORY_PRESSURE_LEVELS.HIGH, `near/over-limit RSS should be >= HIGH, got ${high.level}`);
+    assert(getMemoryPressureLevel() === high.level,
+      'getMemoryPressureLevel should reflect the last computeMemoryPressure result');
+    computeMemoryPressure({ rss: 1024, heapUsed: 1024 }, 1_000_000); // reset shared level → NONE
   });
 
   // ─── Chantier 3b: Memory circuit breaker ───
@@ -263,20 +269,17 @@ async function runMonitorMemoryTests() {
       `Normal interval should be >= 60s, got ${MEMORY_LOG_INTERVAL_NORMAL}`);
   });
 
-  test('MEMORY CIRCUIT BREAKER: ingestion has memory backpressure', () => {
-    const ingestionSource = fs.readFileSync(
-      path.join(__dirname, '..', '..', 'src', 'monitor', 'ingestion.js'), 'utf8'
-    );
-    assertIncludes(ingestionSource, 'getMemoryPressureLevel', 'ingestion.js should check memory pressure');
-    assertIncludes(ingestionSource, 'MEMORY BACKPRESSURE', 'ingestion.js should log memory backpressure');
-  });
-
-  test('MEMORY CIRCUIT BREAKER: daemon gates ensureWorkers on pressure level', () => {
-    const daemonSource = fs.readFileSync(
-      path.join(__dirname, '..', '..', 'src', 'monitor', 'daemon.js'), 'utf8'
-    );
-    assertIncludes(daemonSource, 'pressureLevel < MEMORY_PRESSURE_LEVELS.HIGH',
-      'daemon.js should gate ensureWorkers on pressure level');
+  test('MEMORY CIRCUIT BREAKER: getMemoryPressureLevel exposes the gate ingestion/daemon read', () => {
+    // Behavioral replacement for the ingestion.js source-greps (getMemoryPressureLevel / "MEMORY
+    // BACKPRESSURE") AND the daemon.js "pressureLevel < MEMORY_PRESSURE_LEVELS.HIGH" gate grep:
+    // ingestion skips polling and the daemon stops spawning workers once this level crosses HIGH.
+    // Drive the shared level via computeMemoryPressure and assert the gate value both sides read.
+    computeMemoryPressure({ rss: 1024, heapUsed: 1024 }, 1_000_000); // NONE
+    assert(getMemoryPressureLevel() < MEMORY_PRESSURE_LEVELS.HIGH, 'with low memory the gate is open (poll + spawn allowed)');
+    computeMemoryPressure({ rss: 512 * 1024 * 1024, heapUsed: 1024 }, 1); // EMERGENCY
+    assert(getMemoryPressureLevel() >= MEMORY_PRESSURE_LEVELS.HIGH,
+      'with high memory the gate is closed (ingestion skips poll, daemon stops spawning workers)');
+    computeMemoryPressure({ rss: 1024, heapUsed: 1024 }, 1_000_000); // reset shared level → NONE
   });
 
   test('MEMORY CIRCUIT BREAKER: clearDeferredQueue exported and functional', () => {
@@ -318,13 +321,28 @@ async function runMonitorMemoryTests() {
 
   // ─── Chantier 5: systemd config documented ───
 
-  test('MEMORY: seq/queue atomicity — persistQueue called after each poll', () => {
-    const daemonSource = fs.readFileSync(
-      path.join(__dirname, '..', '..', 'src', 'monitor', 'daemon.js'), 'utf8'
-    );
-    // Verify seq is persisted atomically with queue after each poll
-    assertIncludes(daemonSource, 'persistQueue(scanQueue, state)', 'daemon.js should persist queue after poll');
-    assertIncludes(daemonSource, 'saveNpmSeq(state.npmLastSeq)', 'daemon.js should save seq after queue persist');
+  test('MEMORY: persistQueue/restoreQueue + saveNpmSeq/loadNpmSeq round-trip (crash-safe state after poll)', () => {
+    // Behavioral replacement for the daemon.js source-greps (persistQueue(scanQueue, state) /
+    // saveNpmSeq(state.npmLastSeq)). After each poll the daemon persists the scan queue AND the npm
+    // replication cursor so a crash loses nothing; assert both survive a write → read round-trip.
+    const { saveNpmSeq, loadNpmSeq } = require('../../src/monitor.js');
+    const origSeq = loadNpmSeq();
+    scanQueue.length = 0;
+    scanQueue.push({ name: 'persist-rt-pkg', version: '1.0.0', ecosystem: 'npm', tarballUrl: null });
+    try {
+      persistQueue(scanQueue, { npmLastSeq: 424242 });
+      assert(fs.existsSync(QUEUE_STATE_FILE), 'persistQueue should write the queue state file');
+      scanQueue.length = 0;
+      const restoredCount = restoreQueue(scanQueue);
+      assert(restoredCount >= 1 && scanQueue.some(it => it && it.name === 'persist-rt-pkg'),
+        'restoreQueue should bring back the persisted package (crash recovery)');
+      saveNpmSeq(987654);
+      assert(loadNpmSeq() === 987654, 'saveNpmSeq → loadNpmSeq should round-trip the npm replication cursor');
+    } finally {
+      scanQueue.length = 0;
+      try { fs.unlinkSync(QUEUE_STATE_FILE); } catch {}
+      try { saveNpmSeq(typeof origSeq === 'number' ? origSeq : 0); } catch {}
+    }
   });
 
   // ─── Bug fix: heap pressure uses v8.getHeapStatistics ───

@@ -19,7 +19,7 @@ Priorites :
 ## Commands
 
 ```bash
-npm test          # Run all tests (custom framework, 3902 tests across 108 files)
+npm test          # Run all tests (custom framework, 3969 tests across 109 files)
 npm run lint      # ESLint with security plugin
 npm run scan      # Self-scan: node bin/muaddib.js scan .
 npm run update    # Download latest IOCs
@@ -37,6 +37,8 @@ Tests use a custom framework in `tests/run-tests.js` (no Jest). Test helpers:
 - `assert(cond, msg)` / `assertIncludes(str, substr, msg)`
 
 **Important:** `execSync` throws on non-zero exit codes. When scanning test fixtures that contain threats, wrap in try/catch and read `e.stdout`.
+
+**Source-grep guard (enforced since v2.11.57):** `tests/meta/no-source-grep.test.js` fails the suite if a test reads a `src/`/`bin/`/`docker/`/`deploy/` file and asserts it `.includes()` a string, unless that `file:line` is in the documented C4 allowlist (irreducible Docker/bash/daemon-loop/absence-guard sites). Test behavior, not source text — call the function, run the CLI (`runScan`/`runCommand`), or use the `runWithPreload` subprocess harness in `tests/unit/preload.test.js`. `tests/meta/structural-test-scanner.js` is the detector; set `MUADDIB_META_VERBOSE=1` to list every site. Adding a new source-grep without allowlisting it (with a rationale) will fail CI.
 
 ## Architecture summary
 
@@ -123,6 +125,7 @@ Never skip documentation updates when publishing a new version.
 | ADR | **96.26%** (103/107 available adversarial + holdout) — v2.11.48, stable. |
 
 **Known issues to address before next release:**
+- **Benign FPR drift 1.10% → ~6.6%** (pre-existing, NOT from the v2.11.57 test refactor): a fresh `muaddib evaluate` on the current tree measures benign FPR at **6.61% (36/545)** (`metrics/v2.11.56.json`) vs the documented **1.10% (6/545)** from v2.11.47/48. The drift appeared in v2.11.49–56 (lint-fix + monitor-OOM commits) OR is a current-IOC-drift artifact against the May-26-cached benign tarballs (the eval scan-cache was stale, forcing a re-scan with newer IOCs). The v2.11.57 behavioral-test refactor is detection-neutral (verified: `muaddib replay` byte-identical clean-HEAD vs branch), so this is independent of it. **Investigate before publishing v2.11.57 detection metrics** — re-run `evaluate --refresh-benign` to isolate IOC drift from a scoring regression; if real, bisect v2.11.49–56. (NB: the standalone `evaluate` run also flaked at exit 127 mid-benign-phase, a downloader/spawn flake — re-run to get the full corpus number.)
 - **Cap PyPI à 35/100**: Python samples plafonnent à `riskScore=35` même quand `globalRiskScore=100`. v2.11.48 measurement confirms the impact: all 12 PyPI FPs are exactly at 25–35 (flask 32, django 35, tornado 35, bottle 30, pandas 25, matplotlib 25, plotly 25, bokeh 25, pymongo 35, coverage 32, fabric 35, websockets 35). Lifting the cap to 100 would drop FPR PyPI to ≈0% and also unblock all PyPI MALWARE detection at higher thresholds. **Track E** target.
 - ~~**Direct-IP + linux-fingerprint compound gap**~~: ✅ **closed v2.11.48 (Track D)**. Added `linux_fingerprint_exec` (MUADDIB-AST-093) + `direct_ip_exfil` (MUADDIB-AST-094) + `recon_exfil_direct_ip` compound (MUADDIB-COMPOUND-016, sameFile, CRITICAL). GT-095 risk 3→50, matches human-reviewed score 47. Also boosts GT-091 byvendors (90→100) and GT-092 heloo131313 (89→99). TPR@20 +3.1pp on full GT.
 - ~~**PyPI download fail 38%**~~: ✅ **closed v2.11.48 (Track D PyPI fix)**. `pip download --no-binary :all:` forced compilation of wheels-only packages and timed out. Removed flag + added `.whl` extraction via `extractArchive()`. Scanned 82/132 → 124/132 (94%). 8 residual fails are >500MB packages (torch, tensorflow, ansible…) hitting the 30s `PACK_TIMEOUT_MS` — relax this if PyPI giants are a target.

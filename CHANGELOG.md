@@ -5,6 +5,20 @@ All notable changes to MUAD'DIB will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.11.57] - 2026-06-04
+
+### Changed
+
+- **Behavioral-test refactor (phase 2): drained the structural source-grep worklist 124 → 0 non-allowlisted.** "Structural" tests that read an implementation file and assert it `.includes()` a string give false confidence — they break on a harmless rename and pass when the logic is broken but the string survives. Every site with a behavioral equivalent was converted; the irreducible remainder is documented and allowlisted.
+  - **Production seams extracted (pure refactors, behavior unchanged):**
+    - `buildDockerArgs(opts)` + `generateFakeHostname()` in `src/sandbox/index.js` — the `docker run` argument vector is now built by a pure, exported function, so the isolation flags (`--cap-drop=ALL`, `--read-only`, `--security-opt no-new-privileges`, tmpfs), the anti-fingerprint hostname, the canary env injection, the gVisor runtime selection, and the libfaketime/time-offset wiring are unit-testable without spawning Docker.
+    - `computeWorkersToSpawn(target, active, queueLen)` in `src/monitor/queue.js` — the adaptive worker-pool spawn-count decision is now a pure, exported seam.
+  - **Conversions:** sandbox docker-args / hostname / gVisor (via `buildDockerArgs`); preload `/proc/1/cgroup` + `/proc/uptime` spoofing, `process.dlopen` → `NATIVE_ADDON`, and `worker_threads` → `WORKER` (via the `runWithPreload` subprocess harness, cross-platform); the memory-pressure circuit breaker (`computeMemoryPressure`), adaptive concurrency (`computeTarget`), and worker-pool accessors; queue/seq crash-recovery (`persistQueue`/`restoreQueue` + `saveNpmSeq`/`loadNpmSeq` round-trip); CLI flags (`--auto-sandbox`, `relabel`, `--version`) via real CLI invocation; metadata-cache + tarball-archive wiring via real module load.
+  - **Guard enforced:** `tests/meta/no-source-grep.test.js` now fails the suite on any NEW source-grep outside the documented C4 allowlist (`GUARD_ENFORCED = true`).
+  - **C4 allowlist (51 sites, documented by rationale):** bash scripts (`docker/sandbox-runner.sh`, `deploy/auto-update.sh`) executed only inside Docker/the VPS; the container kill-ladder + timeout control-flow; daemon-loop integration (auto-relabel, ingestion backpressure); cross-module metadata-cache reuse; "must-not-contain" security/cleanup absence guards; debug-gated error-logging hygiene. Each has no behavioral equivalent on a Docker-less host, and the behaviorally-testable side of every contract is converted.
+- **Tests:** 3969 passed, 0 failed (14511 skipped without Docker). **Lint:** 0 errors.
+- **Detection-neutral (verified):** the extracted seams live in the Docker-sandbox and monitor-daemon modules, which are not loaded during a static scan, so they cannot affect detection. Confirmed deterministically with `muaddib replay` — ground-truth detection is byte-identical between clean HEAD and the refactored branch (same 94 in-scope samples, same 12 pre-existing misses, zero new or changed detections). The pre-refactor `evaluate` baseline (v2.11.56) therefore stands.
+
 ## [2.11.41] - 2026-05-25
 
 ### Added

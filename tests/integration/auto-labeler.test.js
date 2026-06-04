@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const {
-  test, asyncTest, assert, assertIncludes
+  test, asyncTest, assert, assertIncludes, runCommand
 } = require('../test-utils');
 
 async function runAutoLabelerTests() {
@@ -179,11 +179,15 @@ async function runAutoLabelerTests() {
 
   // ─── CLI integration ───
 
-  test('RELABEL: CLI command is wired in muaddib.js', () => {
-    const cliSource = fs.readFileSync(path.join(__dirname, '..', '..', 'bin', 'muaddib.js'), 'utf8');
-    assertIncludes(cliSource, "command === 'relabel'", 'CLI should handle relabel command');
-    assertIncludes(cliSource, 'relabelDataset', 'CLI should call relabelDataset');
-    assertIncludes(cliSource, '--dry-run', 'CLI should support --dry-run flag');
+  test('RELABEL: CLI relabel command is wired (--help renders, relabelDataset reachable)', () => {
+    // Behavioral replacement for the bin/muaddib.js source-greps: `relabel --help` is a fast,
+    // offline path that proves the command is dispatched and documents --dry-run. The handler's
+    // target, relabelDataset, is an exported function (destructured above). We exercise the wiring,
+    // not the full run — that hits 2000+ live registry checks; its status logic is unit-tested here.
+    const help = runCommand('relabel --help');
+    assertIncludes(help, 'muaddib relabel', 'relabel --help should render usage');
+    assertIncludes(help, '--dry-run', 'relabel should document the --dry-run flag');
+    assert(typeof relabelDataset === 'function', 'relabelDataset should be an exported function (CLI handler target)');
   });
 
   // ─── Daemon integration ───
