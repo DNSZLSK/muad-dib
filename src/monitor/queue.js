@@ -445,6 +445,24 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
     // ML Phase 2a: Count JS files and detect test presence for enriched features
     const { fileCountTotal, hasTests } = countPackageFiles(extractedDir);
 
+    // Hoisted before the worker spawn (per-worker 429-storm fix): fetch the npm
+    // registry metadata ONCE on the main thread. The shared http-limiter coordinates
+    // it and the temporal cache is warm (npm-registry.js reads it first), so only
+    // weekly_downloads + author hit the network. Passed to the worker via scanContext
+    // so the worker's processor consumes it instead of re-fetching on its OWN module-
+    // level limiter — N worker_threads = N uncoordinated limiters → ~Nx npm throughput
+    // → 429 bursts. Also reused below (ML / first-publish / training records /
+    // reputation) — previously this was a SECOND main-side fetch after the worker.
+    let npmRegistryMeta = null;
+    if (ecosystem === 'npm') {
+      try {
+        const { getPackageMetadata } = require('../scanner/npm-registry.js');
+        npmRegistryMeta = await getPackageMetadata(name);
+      } catch (err) {
+        console.error(`[ML] npm registry fetch failed for ${name}: ${err.message}`);
+      }
+    }
+
     let result;
     try {
       // scanContext: feeds monitor-side info (name/version/ecosystem) and the
@@ -463,6 +481,11 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
         // the full 20-scanner pipeline (unchanged behaviour).
         scanMode: (meta && meta.scanMode) || 'full'
       };
+      // Hand the main-thread-fetched metadata to the worker so its processor skips
+      // the per-worker getPackageMetadata fetch (429-storm fix). npm only; the key
+      // is set even when null ("main already tried, don't refetch"). pypi leaves it
+      // absent so the worker takes the unchanged CLI/else-if path.
+      if (ecosystem === 'npm') scanContext.npmRegistryMeta = npmRegistryMeta;
       result = await runScanInWorker(extractedDir, STATIC_SCAN_TIMEOUT_MS, scanContext, signal);
     } catch (staticErr) {
       if (/static scan timeout/i.test(staticErr.message)) {
@@ -494,22 +517,11 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
     // First-publish detection: used for sandbox priority below
     const isFirstPublish = cacheTrigger && cacheTrigger.reason === 'first_publish';
 
-    // Fetch npm registry metadata for ALL npm packages (not just those with findings).
-    // Needed for: (1) isFirstPublishHighRisk decision, (2) ML classifier features,
-    // (3) JSONL training records — clean packages MUST have metadata to prevent
-    // data leakage (model learning "metadata=0 → clean" instead of behavioral signals).
-    // Cost: near-zero for npm packages because temporal checks (line ~1014) already
-    // pre-fetch registry metadata into temporal-analysis._metadataCache, and
-    // getPackageMetadata() reads this cache first (npm-registry.js:87-95).
-    let npmRegistryMeta = null;
-    if (ecosystem === 'npm') {
-      try {
-        const { getPackageMetadata } = require('../scanner/npm-registry.js');
-        npmRegistryMeta = await getPackageMetadata(name);
-      } catch (err) {
-        console.error(`[ML] npm registry fetch failed for ${name}: ${err.message}`);
-      }
-    }
+    // npm registry metadata was fetched ONCE before the worker spawn (hoisted above
+    // to feed scanContext.npmRegistryMeta) and is reused here for: isFirstPublishHigh-
+    // Risk, ML classifier features, JSONL training records, and reputation scoring.
+    // Clean packages MUST carry metadata to prevent training-data leakage (model
+    // learning "metadata=0 → clean" instead of behavioral signals).
 
     // First-publish sandbox priority: sandbox even with 0 static findings
     // if the package is from a new/unknown maintainer without a linked repository.

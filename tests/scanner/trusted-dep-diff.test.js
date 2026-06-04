@@ -26,6 +26,20 @@ async function runTrustedDepDiffTests() {
       'checkTrustedDepDiff should be the exact same function as checkDepDiff (alias)');
   });
 
+  // --- Phase 2 of the per-worker 429-storm fix: registry I/O now goes through the
+  // shared http-limiter. Placed FIRST among the async tests so no sibling asyncTest
+  // (all fire-and-forget after this awaited call) holds a slot concurrently while we
+  // sample the semaphore. Proves the slot is released in `finally` even when the
+  // registry call rejects (404 / network error) — i.e. no semaphore leak. ---
+  await asyncTest('TRUSTED-DEP-DIFF: releases the shared registry slot on 404 (no leak)', async () => {
+    const lim = require('../../src/shared/http-limiter.js');
+    const before = lim.getActiveSemaphore().active;
+    const findings = await checkDepDiff('__muaddib_test_pkg_does_not_exist__', '0.0.1');
+    assert(Array.isArray(findings) && findings.length === 0, 'returns [] on 404');
+    assert(lim.getActiveSemaphore().active === before,
+      `registry slot must be released in finally (no leak): active=${lim.getActiveSemaphore().active} != baseline=${before}`);
+  });
+
   // --- Gate (FN cases) — opt-in matters ---
 
   asyncTest('TRUSTED-DEP-DIFF: returns [] without opt-in flag', async () => {
