@@ -48,6 +48,7 @@ const {
 // Webhook dedup: track alerted packages by name -> Set<rule_ids> (cleared with daily report).
 // If a new version triggers the same rules, skip the webhook. If new rules appear, let it through.
 const alertedPackageRules = new Map();
+const ALERTED_PACKAGES_MAX = 5_000; // single source of truth for the alerted-packages cap (daemon.js imports this for pruneMemoryCaches)
 
 // Scope grouping: buffer scoped npm packages for grouped webhooks (monorepo noise reduction).
 // @scope -> { packages[], timer, maxScore, ecosystem }
@@ -358,7 +359,7 @@ function triageRisk(item, meta) {
     reasons.push('no_metadata');
   } else if (ecosystem === 'npm') {
     const factor = computeReputationFactor(meta);
-    if (factor >= 1.0) reasons.push(`reputation_factor=${factor.toFixed(2)}`);
+    if (factor >= 1.2) reasons.push(`reputation_factor=${factor.toFixed(2)}`);
   } else if (ecosystem === 'pypi') {
     // PyPI has no weekly_downloads source today, so we cannot reuse
     // computeReputationFactor as-is. Use direct signals instead.
@@ -559,6 +560,11 @@ async function trySendWebhook(name, version, ecosystem, result, sandboxResult, m
     for (const r of currentRules) previousRules.add(r);
   } else {
     alertedPackageRules.set(name, new Set(currentRules));
+    // FIFO size cap (bounded resource): evict the oldest tracked package when over
+    // the cap. A Map preserves insertion order, so the first key is the oldest.
+    if (alertedPackageRules.size > ALERTED_PACKAGES_MAX) {
+      alertedPackageRules.delete(alertedPackageRules.keys().next().value);
+    }
   }
 
   // Scope grouping: buffer scoped npm packages for grouped webhook
@@ -1291,6 +1297,7 @@ module.exports = {
   // Constants
   HIGH_INTENT_TYPES,
   DAILY_REPORT_HOUR,
+  ALERTED_PACKAGES_MAX,
 
   // Functions
   getWebhookUrl,

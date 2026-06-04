@@ -32,6 +32,10 @@ const DEFERRED_STATE_FILE = path.join(__dirname, '..', '..', 'data', 'deferred-q
 // slot. HIGH=10 pts is the intended T1b floor — values below 5 are LOW-only
 // aggregates which carry no actionable sandbox signal.
 const DEFERRED_MIN_SCORE = 5;
+// Hard ceiling on a single deferred sandbox run so the dedicated slot
+// (_deferredSlotBusy) can never wedge. maxRuns=1 self-bounds at ~SINGLE_RUN_TIMEOUT
+// (90s) + the sandbox watchdog grace; this AbortController is belt-and-suspenders.
+const DEFERRED_SANDBOX_TIMEOUT_MS = 150_000;
 
 // ── Mutable state ──
 const _deferredQueue = [];
@@ -190,11 +194,13 @@ async function processDeferredItem(stats) {
   // 4. Run sandbox on dedicated slot (bypasses shared semaphore)
   _deferredSlotBusy = true;
   let sandboxResult;
+  const ac = new AbortController();
+  const deadline = setTimeout(() => ac.abort(), DEFERRED_SANDBOX_TIMEOUT_MS);
   try {
     const canary = isCanaryEnabled();
     // maxRuns=1: deferred items are T1b/T2, time bomb detection (3 runs) is a luxury.
     // 90s instead of 270s per item → 3× faster deferred queue drain.
-    sandboxResult = await runSandbox(item.name, { canary, skipSemaphore: true, maxRuns: 1 });
+    sandboxResult = await runSandbox(item.name, { canary, skipSemaphore: true, maxRuns: 1, signal: ac.signal });
     console.log(`[DEFERRED] SANDBOX COMPLETE: ${key} -> score=${sandboxResult.score}, severity=${sandboxResult.severity}`);
   } catch (err) {
     console.error(`[DEFERRED] SANDBOX ERROR: ${key} — ${err.message}`);
@@ -210,6 +216,7 @@ async function processDeferredItem(stats) {
     }
     return null;
   } finally {
+    clearTimeout(deadline);
     _deferredSlotBusy = false;
   }
 
