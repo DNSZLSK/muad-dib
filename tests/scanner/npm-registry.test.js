@@ -232,6 +232,59 @@ async function runNpmRegistryTests() {
       assert(callCount >= 2, 'Should have retried at least once, got ' + callCount + ' calls');
     });
   });
+
+  // --- 429 coordinated backoff (the rate-limiting fix) ---
+
+  await asyncTest('REGISTRY: 429 drains the shared limiter (coordinated backoff via signal429)', async () => {
+    // A 429 must call the http-limiter's signal429() so EVERY in-flight fetch backs off
+    // together — without this, 20 concurrent requests each retry independently (thundering
+    // herd) and some exhaust their retries → null metadata → FP. We observe it via the
+    // limiter's backoff counter.
+    const limiter = require('../../src/shared/http-limiter.js');
+    limiter.resetLimiter();
+    const before = limiter.getBackoffCount();
+    let callCount = 0;
+    const registryResponse = {
+      time: { created: '2023-01-01T00:00:00Z', '1.0.0': '2023-01-01T00:00:00Z' },
+      'dist-tags': { latest: '1.0.0' }, versions: { '1.0.0': {} }
+    };
+    const mockFetch = async (url) => {
+      callCount++;
+      if (callCount === 1 && url.includes('registry.npmjs.org/') && !url.includes('search') && !url.includes('downloads')) {
+        return { ok: false, status: 429, text: async () => 'Too Many Requests', headers: new Map([['retry-after', '1']]) };
+      }
+      if (url.includes('api.npmjs.org/downloads')) return { ok: true, status: 200, json: async () => ({ downloads: 10 }), headers: new Map() };
+      return { ok: true, status: 200, json: async () => registryResponse, headers: new Map() };
+    };
+    await withMockedFetch(mockFetch, async (getPackageMetadata) => {
+      const result = await getPackageMetadata('rate-limited-pkg-coordinated');
+      assert(result !== null, 'Should recover after the coordinated 429 backoff');
+      assert(limiter.getBackoffCount() > before,
+        'A 429 must call signal429() (backoffCount should increase): before=' + before + ' after=' + limiter.getBackoffCount());
+    });
+    limiter.resetLimiter();
+  });
+
+  await asyncTest('REGISTRY: MUADDIB_REGISTRY_RETRIES caps the retry count', async () => {
+    // Env-tunable retries (constants read at module load; withMockedFetch reloads the module).
+    const orig = process.env.MUADDIB_REGISTRY_RETRIES;
+    process.env.MUADDIB_REGISTRY_RETRIES = '2';
+    let metaCalls = 0;
+    const mockFetch = async (url) => {
+      if (url.includes('registry.npmjs.org/') && !url.includes('search') && !url.includes('downloads')) metaCalls++;
+      throw new Error('network down'); // always fail → exhaust retries
+    };
+    try {
+      await withMockedFetch(mockFetch, async (getPackageMetadata) => {
+        const result = await getPackageMetadata('always-fails-pkg');
+        assert(result === null, 'Should return null when all retries fail');
+        assert(metaCalls === 2, 'Should attempt exactly MUADDIB_REGISTRY_RETRIES (2) registry-meta fetches, got ' + metaCalls);
+      });
+    } finally {
+      if (orig === undefined) delete process.env.MUADDIB_REGISTRY_RETRIES;
+      else process.env.MUADDIB_REGISTRY_RETRIES = orig;
+    }
+  });
 }
 
 module.exports = { runNpmRegistryTests };

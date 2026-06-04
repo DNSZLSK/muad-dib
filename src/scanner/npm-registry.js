@@ -1,14 +1,16 @@
 const { NPM_PACKAGE_REGEX } = require('../shared/constants.js');
 const { debugLog } = require('../utils.js');
-const { acquireRegistrySlot, releaseRegistrySlot } = require('../shared/http-limiter.js');
+const { acquireRegistrySlot, releaseRegistrySlot, signal429 } = require('../shared/http-limiter.js');
 const { computeAdvancedRegistrySignals } = require('../integrations/registry-signals.js');
 
 const REGISTRY_URL = 'https://registry.npmjs.org';
 const DOWNLOADS_URL = 'https://api.npmjs.org/downloads/point/last-week';
 const SEARCH_URL = 'https://registry.npmjs.org/-/v1/search';
 
-const REQUEST_TIMEOUT = 10000; // 10 seconds
-const MAX_RETRIES = 3;
+// Env-tunable; defaults preserve prior behavior except MAX_RETRIES (3 → 5) for more headroom
+// under sustained 429s during a large evaluate burst.
+const REQUEST_TIMEOUT = Math.max(1000, parseInt(process.env.MUADDIB_REGISTRY_TIMEOUT_MS, 10) || 10000); // 10s default
+const MAX_RETRIES = Math.max(1, parseInt(process.env.MUADDIB_REGISTRY_RETRIES, 10) || 5);
 
 /**
  * Create a timeout signal, with fallback for older Node versions.
@@ -31,10 +33,12 @@ async function fetchWithRetry(url) {
       response = await fetch(url, { signal });
     } catch {
       cleanup();
-      // REG-001: Retry on timeout/abort instead of returning null immediately
+      // REG-001: Retry on timeout/abort instead of returning null immediately.
+      // Jittered exponential backoff avoids synchronized retry storms across the
+      // (up to MUADDIB_REGISTRY_CONCURRENCY) concurrent fetches.
       if (attempt < MAX_RETRIES - 1) {
         const backoff = Math.min(1000 * Math.pow(2, attempt), 8000);
-        await new Promise(r => setTimeout(r, backoff));
+        await new Promise(r => setTimeout(r, Math.round(backoff * (0.5 + Math.random() * 0.5))));
       }
       continue;
     }
@@ -48,12 +52,16 @@ async function fetchWithRetry(url) {
       return null;
     }
 
-    // 429 = rate limit, respect Retry-After header (capped at 30s)
+    // 429 = rate limit. Drain the SHARED token bucket so EVERY in-flight request
+    // (not just this one) backs off together — fixes the thundering-herd 429 storm
+    // that left ~17% of packages metadata-less in a local evaluate run. Then honor
+    // Retry-After (capped at 30s) with jitter so retries don't re-synchronize.
     if (response.status === 429) {
       try { await response.text(); } catch (e) { debugLog('response drain failed:', e.message); }
+      try { signal429(); } catch { /* limiter is best-effort */ }
       const retryAfter = parseInt(response.headers.get('retry-after'), 10);
-      const delay = Math.min(retryAfter && retryAfter > 0 ? retryAfter * 1000 : 2000, 30000);
-      await new Promise(r => setTimeout(r, delay));
+      const base = Math.min(retryAfter && retryAfter > 0 ? retryAfter * 1000 : 2000, 30000);
+      await new Promise(r => setTimeout(r, Math.round(base * (0.5 + Math.random() * 0.5))));
       continue;
     }
 
