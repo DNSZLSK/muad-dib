@@ -8269,11 +8269,19 @@ async function runMonitorTests() {
 
   console.log('\n=== ADAPTIVE CONCURRENCY TESTS ===\n');
 
-  // computeTarget now uses os.freemem()/os.totalmem() for memory pressure instead
-  // of process.memoryUsage() heapUsed/heapTotal. The V8 heap ratio is structurally
-  // 75-85% (V8 adjusts heapTotal dynamically) even with 8GB system RAM free.
-  // os.freemem()/os.totalmem() reflects actual system memory — no mocking needed
-  // for non-memory tests since CI/local always have > 15% RAM free.
+  // computeTarget uses os.freemem()/os.totalmem() for system-memory pressure: if free
+  // RAM drops below MEMORY_FREE_THRESHOLD (15%) it takes the memory_pressure branch and
+  // scales DOWN, short-circuiting the backlog/idle/timeout logic these tests exercise.
+  // The original assumption "CI/local always have > 15% RAM free" is false on a host
+  // under memory pressure (e.g. a dev box at 6% free), which made these deterministic
+  // scaling tests environment-dependent and flaky. We pin a healthy-memory baseline for
+  // the whole non-memory block (mirroring the explicit mock in the memory-pressure test
+  // below) and restore the real os functions afterwards.
+  const _adaptiveOs = require('os');
+  const _origAdaptiveFreemem = _adaptiveOs.freemem;
+  const _origAdaptiveTotalmem = _adaptiveOs.totalmem;
+  _adaptiveOs.freemem = () => 8 * 1024 * 1024 * 1024;    // 8GB free
+  _adaptiveOs.totalmem = () => 16 * 1024 * 1024 * 1024;  // 16GB total → 50% free (> 15%)
 
   test('ADAPTIVE: computeTarget scales up on backlog (queue > 1000)', () => {
     const { computeTarget, resetDeltas } = require('../../src/monitor/adaptive-concurrency.js');
@@ -8421,6 +8429,10 @@ async function runMonitorTests() {
     assert(getTargetConcurrency() === MAX_CONCURRENCY, `Should clamp to MAX (${MAX_CONCURRENCY}), got ${getTargetConcurrency()}`);
     setTargetConcurrency(orig); // restore
   });
+
+  // Restore the real os memory functions now that the adaptive block is done.
+  _adaptiveOs.freemem = _origAdaptiveFreemem;
+  _adaptiveOs.totalmem = _origAdaptiveTotalmem;
 
   // ============================================
   // LAYER 1: IOC PRE-ALERT TESTS
