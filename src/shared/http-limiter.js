@@ -4,8 +4,8 @@
  * Centralized HTTP concurrency + rate limiter for npm registry requests.
  *
  * Two layers of protection:
- *   1. Concurrency semaphore (REGISTRY_SEMAPHORE_MAX = 10) — caps in-flight requests
- *   2. Rate limiter (RATE_LIMIT_PER_SEC = 30) — caps requests/second via token bucket
+ *   1. Concurrency semaphore (REGISTRY_SEMAPHORE_MAX, default 20, env MUADDIB_REGISTRY_CONCURRENCY) — caps in-flight requests
+ *   2. Rate limiter (RATE_LIMIT_PER_SEC, default 30, env MUADDIB_REGISTRY_RATE) — caps requests/second via token bucket
  *
  * Without rate limiting, 10 concurrent slots × fast-completing requests = 100+ req/s
  * bursts that trigger npm 429 responses → exponential backoff → scan times 10s→90s.
@@ -14,8 +14,11 @@
  * NOT covered: api.npmjs.org (different server), replicate.npmjs.com (CouchDB changes stream).
  */
 
-const REGISTRY_SEMAPHORE_MAX = 20;
-const RATE_LIMIT_PER_SEC = 30;
+// Env-tunable so a constrained client (e.g. local/Windows `evaluate` runs that hit npm 429s during
+// the ~1644-request metadata burst over 548 packages) can dial the burst down without code edits.
+// Defaults preserve prior behavior (20 in-flight / 30 req/s).
+const REGISTRY_SEMAPHORE_MAX = Math.max(1, parseInt(process.env.MUADDIB_REGISTRY_CONCURRENCY, 10) || 20);
+const RATE_LIMIT_PER_SEC = Math.max(1, parseInt(process.env.MUADDIB_REGISTRY_RATE, 10) || 30);
 
 // --- Concurrency semaphore ---
 
