@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const { MAX_FILE_SIZE, getMaxFileSize } = require('../shared/constants.js');
+const { getMaxFileSize } = require('../shared/constants.js');
 
 const YAML_EXTENSIONS = ['.yml', '.yaml'];
 const MAX_DEPTH = 10;

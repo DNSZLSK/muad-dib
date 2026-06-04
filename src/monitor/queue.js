@@ -10,30 +10,24 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { Worker } = require('worker_threads');
-const { run } = require('../index.js');
-const { runSandbox, isDockerAvailable, tryAcquireSandboxSlot, SANDBOX_CONCURRENCY_MAX } = require('../sandbox/index.js');
+const { runSandbox, tryAcquireSandboxSlot } = require('../sandbox/index.js');
 const { sendWebhook } = require('../webhook.js');
-const { downloadToFile, extractTarGz, extractArchive, sanitizePackageName } = require('../shared/download.js');
+const { downloadToFile, extractArchive, sanitizePackageName } = require('../shared/download.js');
 const { MAX_TARBALL_SIZE } = require('../shared/constants.js');
 const { acquireRegistrySlot, releaseRegistrySlot } = require('../shared/http-limiter.js');
 const { loadCachedIOCs } = require('../ioc/updater.js');
 const { scanPackageJson } = require('../scanner/package.js');
 const { scanShellScripts } = require('../scanner/shell.js');
 const { buildTrainingRecord } = require('../ml/feature-extractor.js');
-const { appendRecord: appendTrainingRecord, relabelRecords, getStats: getTrainingStats } = require('../ml/jsonl-writer.js');
+const { appendRecord: appendTrainingRecord, relabelRecords } = require('../ml/jsonl-writer.js');
 
 // From ./state.js
 const {
   cacheTarball,
   updateScanStats,
   appendDetection,
-  saveScanMemory,
   maybePersistDailyStats,
-  loadNpmSeq,
-  saveNpmSeq,
-  getParisDateString,
   appendTemporalDetection,
-  atomicWriteFileSync,
   tarballCacheKey,
   tarballCachePath,
   appendAlert,
@@ -46,21 +40,11 @@ const {
 const {
   isSuspectClassification,
   hasHighConfidenceThreat,
-  hasIOCMatch,
-  hasTyposquat,
-  hasLifecycleWithIntent,
   isSandboxEnabled,
   isCanaryEnabled,
   recordError,
-  classifyError,
   formatFindings,
-  evaluateCacheTrigger,
-  isFirstPublishHighRisk,
-  DOWNLOADS_CACHE_TTL,
-  HIGH_CONFIDENCE_MALICE_TYPES,
-  IOC_MATCH_TYPES,
-  TIER1_TYPES,
-  hasHighOrCritical
+  isFirstPublishHighRisk
 } = require('./classify.js');
 
 // From ./webhook.js
@@ -74,7 +58,6 @@ const {
   getWebhookUrl,
   computeReputationFactor,
   triageRisk,
-  computeRiskLevel,
   sendDailyReport,
   alertedPackageRules,
   DAILY_REPORT_HOUR
@@ -82,16 +65,11 @@ const {
 
 // From ./temporal.js
 const {
-  isTemporalEnabled,
   runTemporalCheck,
-  isTemporalAstEnabled,
   runTemporalAstCheck,
-  isTemporalPublishEnabled,
   runTemporalPublishCheck,
-  isTemporalMaintainerEnabled,
   runTemporalMaintainerCheck,
   getTemporalMaxSeverity,
-  isPublishAnomalyOnly,
   tryTemporalAlert,
   tryTemporalAstAlert,
   isSafeLifecycleScript
@@ -396,7 +374,6 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
     // Malware payloads are tiny (<1MB); 10MB has 10x safety margin.
     // Quick scan: extract + check package.json + shell scripts for lifecycle threats.
     const unpackedSize = meta.unpackedSize || 0;
-    let alreadyExtracted = false;
     let extractedDir = null;
 
     if (unpackedSize > LARGE_PACKAGE_SIZE || meta.fastTrack) {
@@ -415,7 +392,6 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
         // Validates actual tarball contents (not just registry metadata).
         let bypassQuickScan = false;
         try {
-          alreadyExtracted = true;
           extractedDir = extractArchive(tgzPath, tmpDir);
 
           const [pkgThreats, shellThreats] = await Promise.all([
@@ -438,9 +414,8 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
             updateScanStats('clean');
             return;
           }
-        } catch (extractErr) {
+        } catch {
           // Extract/quick scan failed — fallback to registry metadata check
-          alreadyExtracted = false;
           extractedDir = null;
           const scripts = meta.registryScripts || {};
           const DANGEROUS_LIFECYCLE = ['preinstall', 'install', 'postinstall'];
@@ -714,7 +689,8 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
               // LOG-ONLY: record ML prediction for retraining data but do NOT filter.
               // When model is retrained and validated, remove the 'true ||' guard below.
               console.log(`[MONITOR] ML LOG-ONLY: ${name}@${version} (prediction=${mlResult.prediction}, p=${mlResult.probability}, score=${riskScore})`);
-              if (false && mlResult.prediction === 'clean') {
+              const ML_FILTER_ENABLED = false;
+              if (ML_FILTER_ENABLED && mlResult.prediction === 'clean') {
                 // DISABLED: model collapsed (p≈0.002 for all inputs). Re-enable after retrain.
                 console.log(`[MONITOR] ML CLEAN: ${name}@${version} (p=${mlResult.probability}, score=${riskScore})`);
                 stats.mlFiltered++;

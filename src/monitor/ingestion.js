@@ -11,7 +11,7 @@ const https = require('https');
 const { acquireRegistrySlot, releaseRegistrySlot } = require('../shared/http-limiter.js');
 const { loadCachedIOCs } = require('../ioc/updater.js');
 const {
-  loadNpmSeq, saveNpmSeq, CHANGES_STREAM_URL, CHANGES_LIMIT, CHANGES_CATCHUP_MAX,
+  saveNpmSeq, CHANGES_STREAM_URL, CHANGES_LIMIT, CHANGES_CATCHUP_MAX,
   savePypiSerial, PYPI_XMLRPC_URL, PYPI_CATCHUP_MAX
 } = require('./state.js');
 const { sendIOCPreAlert, sendCampaignPreAlert } = require('./webhook.js');
@@ -31,7 +31,7 @@ function matchCampaignPattern(name) {
   }
   return null;
 }
-const { evaluateCacheTrigger, POPULAR_THRESHOLD, downloadsCache, DOWNLOADS_CACHE_TTL } = require('./classify.js');
+const { evaluateCacheTrigger, downloadsCache, DOWNLOADS_CACHE_TTL } = require('./classify.js');
 
 const SELF_PACKAGE_NAME = require('../../package.json').name;
 
@@ -175,7 +175,7 @@ async function getPyPITarballUrl(packageName, packageVersion = '') {
   try {
     data = JSON.parse(body);
   } catch (e) {
-    throw new Error(`Invalid JSON from PyPI for ${packageName}: ${e.message}`);
+    throw new Error(`Invalid JSON from PyPI for ${packageName}: ${e.message}`, { cause: e });
   }
 
   const latestVersion = (data.info && data.info.version) || '';
@@ -424,7 +424,7 @@ async function getNpmLatestTarball(packageName) {
   try {
     packument = JSON.parse(body);
   } catch (e) {
-    throw new Error(`Invalid JSON from npm registry for ${packageName}: ${e.message}`);
+    throw new Error(`Invalid JSON from npm registry for ${packageName}: ${e.message}`, { cause: e });
   }
   const result = selectMostRecentVersion(packument);
   if (!result) {

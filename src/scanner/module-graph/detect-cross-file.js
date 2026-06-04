@@ -2,7 +2,7 @@
 
 const path = require('path');
 const { debugLog } = require('../../utils');
-const { MAX_FLOWS, MAX_TAINT_DEPTH, SINK_CALLEE_NAMES, SINK_MEMBER_METHODS, SINK_INSTANCE_METHODS } = require('./constants.js');
+const { MAX_FLOWS, SINK_CALLEE_NAMES, SINK_MEMBER_METHODS, SINK_INSTANCE_METHODS } = require('./constants.js');
 const {
   parseFile, walkAST, isRequireCall, isLocalImport, isModuleExportsAssign,
   getExportName, getMemberChain, resolveLocal

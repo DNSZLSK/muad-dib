@@ -29,7 +29,7 @@ const daemonModule = require('./monitor/daemon.js');
 const { pingFail: healthcheckPingFail } = require('./monitor/healthcheck.js');
 
 // Prevent unhandled promise rejections from crashing the monitor process
-process.on('unhandledRejection', (reason, promise) => {
+process.on('unhandledRejection', (reason, _promise) => {
   console.error('[MONITOR] Unhandled rejection:', reason);
   healthcheckPingFail();
 });
@@ -101,9 +101,6 @@ function sendReportNow() { return webhookModule.sendReportNow(stats); }
 // --- Ingestion wrappers ---
 function pollNpmChanges(state) { return ingestionModule.pollNpmChanges(state, scanQueue, stats); }
 function pollNpmRss(state) { return ingestionModule.pollNpmRss(state, scanQueue, stats); }
-function pollNpm(state) { return ingestionModule.pollNpm(state, scanQueue, stats); }
-function pollPyPI(state) { return ingestionModule.pollPyPI(state, scanQueue); }
-function poll(state) { return ingestionModule.poll(state, scanQueue, stats); }
 
 // --- Queue wrappers ---
 function processQueue() { return queueModule.processQueue(scanQueue, stats, dailyAlerts, recentlyScanned, classifyModule.downloadsCache, sandboxAvailable); }

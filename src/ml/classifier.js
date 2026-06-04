@@ -341,8 +341,9 @@ function classifyPackage(result, meta) {
       const bundlerResult = predictBundler(bundlerVec);
       // Log-only: record prediction for retraining validation
       const roundedP = Math.round(bundlerResult.probability * 1000) / 1000;
-      // When retrained and validated, remove the 'false &&' guard below.
-      if (false && bundlerResult.prediction === 'clean') {
+      // When retrained and validated, set BUNDLER_FILTER_ENABLED to true.
+      const BUNDLER_FILTER_ENABLED = false;
+      if (BUNDLER_FILTER_ENABLED && bundlerResult.prediction === 'clean') {
         return {
           prediction: 'fp_bundler',
           probability: roundedP,

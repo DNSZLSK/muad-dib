@@ -13,6 +13,12 @@ export default defineConfig([
     },
     rules: {
       "no-unused-vars": ["error", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }],
+      // builtinGlobals:false is ESLint's historical default. `js/recommended` (ESLint 10)
+      // enables it, which flags legitimate `const crypto = require('crypto')` (Node module,
+      // distinct from the WebCrypto `crypto` global) and the `process` pipeline function.
+      "no-redeclare": ["error", { "builtinGlobals": false }],
+      // Best-effort cleanup catches (unlinkSync of temp files, signal429, etc.) are intentional.
+      "no-empty": ["error", { "allowEmptyCatch": true }],
       "security/detect-buffer-noassert": "warn",
       "security/detect-child-process": "warn",
       "security/detect-disable-mustache-escape": "warn",

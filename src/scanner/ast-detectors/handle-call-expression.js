@@ -36,14 +36,12 @@ const {
   GIT_HOOKS,
   SANDBOX_INDICATORS,
   ETHEREUM_PACKAGES,
-  SOLANA_PACKAGES,
-  SAFE_FETCH_DOMAINS
+  SOLANA_PACKAGES
 } = require('./constants.js');
 const {
   extractStringValue,
   calculateShannonEntropy,
   countConcatOperands,
-  resolveStringConcat,
   resolveStringConcatWithVars,
   extractStringValueDeep,
   hasOnlyStringLiteralArgs,
@@ -1207,8 +1205,7 @@ function handleCallExpression(node, ctx) {
     // Static timer bomb: setTimeout/setInterval with delay > 1 hour (PhantomRaven 48h delay)
     if (node.arguments.length >= 2) {
       const delayArg = node.arguments[1];
-      let delayMs = null;
-      delayMs = resolveNumericExpression(delayArg);
+      const delayMs = resolveNumericExpression(delayArg);
       if (delayMs !== null && delayMs > 3600000) { // > 1 hour
         const hours = (delayMs / 3600000).toFixed(1);
         ctx.threats.push({

@@ -125,7 +125,7 @@ function safeParse(code, extraOptions = {}) {
   if (cached !== undefined) return cached;
 
   const opts = { ...ACORN_OPTIONS, ...extraOptions };
-  let ast = null;
+  let ast;
   try {
     ast = acorn.parse(code, opts);
   } catch {

@@ -1275,7 +1275,7 @@ function applyFPReductions(threats, reachableFiles, packageName, packageDeps, re
  * @param {Map} fileGroups - map of file → threats array
  * @param {Array} packageLevelThreats - package-level threats
  */
-function applyPackageLevelBoosts(deduped, fileScores, fileGroups, packageLevelThreats) {
+function applyPackageLevelBoosts(deduped, fileScores, fileGroups, _packageLevelThreats) {
   const fileNames = Object.keys(fileScores);
   const totalFiles = fileNames.length;
 

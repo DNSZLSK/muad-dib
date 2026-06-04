@@ -107,7 +107,7 @@ async function scanPackageJson(targetPath) {
       // Legitimate postinstall scripts run from the package's own directory, not from node_modules/.
       // Lazarus/DPRK interview attacks hide payloads in node_modules/.cache/ or similar paths.
       if (['preinstall', 'install', 'postinstall'].includes(scriptName) &&
-          /\bnode_modules[\/\\]/.test(scriptContent)) {
+          /\bnode_modules[/\\]/.test(scriptContent)) {
         threats.push({
           type: 'lifecycle_hidden_payload',
           severity: 'CRITICAL',

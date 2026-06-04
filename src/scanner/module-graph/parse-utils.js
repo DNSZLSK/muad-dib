@@ -2,8 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const acorn = require('acorn');
-const { ACORN_OPTIONS, MAX_TAINT_DEPTH } = require('./constants.js');
+const { MAX_TAINT_DEPTH } = require('./constants.js');
 const { safeParse } = require('../../shared/constants.js');
 
 // =============================================================================

@@ -24,17 +24,14 @@ function createTimeoutSignal(ms) {
 }
 
 async function fetchWithRetry(url) {
-  let lastError = null;
-
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     let response;
     const { signal, cleanup } = createTimeoutSignal(REQUEST_TIMEOUT);
     try {
       response = await fetch(url, { signal });
-    } catch (err) {
+    } catch {
       cleanup();
       // REG-001: Retry on timeout/abort instead of returning null immediately
-      lastError = err;
       if (attempt < MAX_RETRIES - 1) {
         const backoff = Math.min(1000 * Math.pow(2, attempt), 8000);
         await new Promise(r => setTimeout(r, backoff));

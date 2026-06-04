@@ -503,9 +503,9 @@ function findDependencyUsages(targetPath, depName) {
 
   // Pre-build matchers — escape regex metacharacters in dep name
   const escaped = depName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const reRequire = new RegExp(`require\\s*\\(\\s*['\"]${escaped}['\"]\\s*\\)`);
-  const reFrom = new RegExp(`from\\s+['\"]${escaped}['\"]`);
-  const reDynamic = new RegExp(`import\\s*\\(\\s*['\"]${escaped}['\"]\\s*\\)`);
+  const reRequire = new RegExp(`require\\s*\\(\\s*['"]${escaped}['"]\\s*\\)`);
+  const reFrom = new RegExp(`from\\s+['"]${escaped}['"]`);
+  const reDynamic = new RegExp(`import\\s*\\(\\s*['"]${escaped}['"]\\s*\\)`);
 
   for (const abs of files) {
     let stat;

@@ -1,8 +1,7 @@
 'use strict';
 
-const acorn = require('acorn');
 const walk = require('acorn-walk');
-const { ACORN_OPTIONS, safeParse } = require('../shared/constants.js');
+const { safeParse } = require('../shared/constants.js');
 
 /**
  * Lightweight static deobfuscation pre-processor.

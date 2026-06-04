@@ -459,7 +459,7 @@ async function callAnthropicAPI(system, messages) {
     } catch (err) {
       clearTimeout(timeout);
       if (err.name === 'AbortError') {
-        throw new Error(`API timeout (${LLM_TIMEOUT_MS}ms)`);
+        throw new Error(`API timeout (${LLM_TIMEOUT_MS}ms)`, { cause: err });
       }
       if (attempt < maxAttempts - 1 && err.message && /ECONNRESET|ETIMEDOUT|ENOTFOUND/.test(err.message)) {
         await new Promise(r => setTimeout(r, 2000));
@@ -553,7 +553,7 @@ function parseResponse(text) {
  * @returns {Promise<Object|null>} verdict object or null on skip/error
  */
 async function investigatePackage(extractedDir, scanResult, options = {}) {
-  const { name, version, ecosystem, npmRegistryMeta, tier } = options;
+  const { name, version, ecosystem, npmRegistryMeta } = options;
 
   // Guard rails
   if (!isLlmEnabled()) {

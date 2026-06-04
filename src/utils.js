@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { MAX_FILE_SIZE, getMaxFileSize, clearASTCache } = require('./shared/constants.js');
+const { getMaxFileSize, clearASTCache } = require('./shared/constants.js');
 
 /**
  * Directories excluded from scanning.

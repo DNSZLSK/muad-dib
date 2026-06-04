@@ -2,14 +2,13 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const acorn = require('acorn');
 const walk = require('acorn-walk');
 const { findJsFiles, forEachSafeFile, debugLog } = require('../utils.js');
 const { fetchPackageMetadata, getLatestVersions } = require('../temporal-analysis.js');
 const { downloadToFile, extractTarGz, sanitizePackageName } = require('../shared/download.js');
 const { acquireRegistrySlot, releaseRegistrySlot } = require('../shared/http-limiter.js');
 
-const { MAX_FILE_SIZE, getMaxFileSize, ACORN_OPTIONS, safeParse } = require('../shared/constants.js');
+const { safeParse } = require('../shared/constants.js');
 
 const REGISTRY_URL = 'https://registry.npmjs.org';
 const METADATA_TIMEOUT = 10_000;

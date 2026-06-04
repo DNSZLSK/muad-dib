@@ -9,8 +9,8 @@ const { loadState, saveState, loadDailyStats, saveDailyStats, purgeTarballCache,
 const { isTemporalEnabled, isTemporalAstEnabled, isTemporalPublishEnabled, isTemporalMaintainerEnabled } = require('./temporal.js');
 const { pendingGrouped, flushScopeGroup, sendDailyReport, DAILY_REPORT_HOUR, alertedPackageRules, ALERTED_PACKAGES_MAX: MAX_ALERTED_PACKAGES } = require('./webhook.js');
 const { poll } = require('./ingestion.js');
-const { processQueue, ensureWorkers, drainWorkers, getTargetConcurrency, setTargetConcurrency, getActiveWorkers, terminateAllWorkers, SCAN_CONCURRENCY } = require('./queue.js');
-const { computeTarget, ADJUST_INTERVAL_MS, BASE_CONCURRENCY, resetDeltas } = require('./adaptive-concurrency.js');
+const { ensureWorkers, drainWorkers, getTargetConcurrency, setTargetConcurrency, getActiveWorkers, terminateAllWorkers } = require('./queue.js');
+const { computeTarget, ADJUST_INTERVAL_MS, BASE_CONCURRENCY } = require('./adaptive-concurrency.js');
 const { startHealthcheck } = require('./healthcheck.js');
 const { startDeferredWorker, stopDeferredWorker, persistDeferredQueue, restoreDeferredQueue, clearDeferredQueue } = require('./deferred-sandbox.js');
 const { cleanupOldArchives, getRetentionDays, startPeriodicCleanup } = require('./tarball-archive.js');
@@ -448,7 +448,7 @@ function handleMemoryPressure(level, ratio, recentlyScanned, downloadsCache, sca
     try { clearFileListCache(); } catch {}
     try { clearASTCache(); } catch {}
     // pendingGrouped webhook buffers
-    for (const [scope, group] of pendingGrouped) {
+    for (const [, group] of pendingGrouped) {
       clearTimeout(group.timer);
     }
     pendingGrouped.clear();

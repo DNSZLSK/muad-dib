@@ -86,7 +86,7 @@ async function sendWebhook(url, results, options = {}) {
     resolvedAddress = ipv4Addresses[0] || null;
   } catch (e) {
     if (e.message.startsWith('Webhook blocked')) throw e;
-    throw new Error(`Webhook blocked: DNS resolution failed for ${urlObj.hostname}`);
+    throw new Error(`Webhook blocked: DNS resolution failed for ${urlObj.hostname}`, { cause: e });
   }
 
   // rawPayload: send the results object directly as the payload (for pre-built embeds)
@@ -403,7 +403,6 @@ function sendOnce(url, payload, resolvedAddress) {
     };
 
     const req = protocol.request(options, (res) => {
-      let data = '';
       let size = 0;
       res.on('data', chunk => {
         size += chunk.length;
@@ -412,7 +411,6 @@ function sendOnce(url, payload, resolvedAddress) {
           reject(new Error('Webhook response exceeded 1MB limit'));
           return;
         }
-        data += chunk;
       });
       res.on('end', () => {
         if (res.statusCode >= 200 && res.statusCode < 300) {

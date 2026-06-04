@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { findFiles, forEachSafeFile, debugLog } = require('../utils.js');
-const { MAX_FILE_SIZE, getMaxFileSize } = require('../shared/constants.js');
+const { getMaxFileSize } = require('../shared/constants.js');
 
 const SHELL_EXCLUDED_DIRS = ['node_modules', '.git', '.muaddib-cache'];
 

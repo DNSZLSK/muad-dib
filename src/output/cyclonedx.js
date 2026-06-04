@@ -189,7 +189,7 @@ function saveCycloneDX(results, outputPath) {
   try {
     fs.writeFileSync(outputPath, JSON.stringify(bom, null, 2));
   } catch (e) {
-    throw new Error('Failed to write CycloneDX report to ' + outputPath + ': ' + e.message);
+    throw new Error('Failed to write CycloneDX report to ' + outputPath + ': ' + e.message, { cause: e });
   }
   return outputPath;
 }

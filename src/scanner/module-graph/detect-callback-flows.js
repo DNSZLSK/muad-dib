@@ -1,7 +1,6 @@
 'use strict';
 
 const path = require('path');
-const { MAX_FLOWS, SINK_CALLEE_NAMES, SINK_MEMBER_METHODS } = require('./constants.js');
 const { parseFile, walkAST, isRequireCall, isLocalImport, resolveLocal } = require('./parse-utils.js');
 const { expandTaintThroughReexports } = require('./detect-cross-file.js');
 

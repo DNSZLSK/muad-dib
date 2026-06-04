@@ -13,12 +13,9 @@
  */
 
 const fs = require('fs');
-const path = require('path');
 
 const {
   DAILY_STATS_FILE,
-  SCAN_STATS_FILE,
-  STATE_FILE,
   LAST_DAILY_REPORT_FILE,
   loadScanStats,
   loadStateRaw,

@@ -428,6 +428,7 @@ async function runSingleSandbox(packageName, options = {}) {
       }
 
       // Forward sandbox progress logs (sanitize ANSI escape sequences)
+      // eslint-disable-next-line no-control-regex -- ESC control byte required to match ANSI sequences
       const text = data.toString().replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
       for (const line of text.split(/\r?\n/)) {
         if (line.includes('[SANDBOX]')) {
@@ -571,8 +572,6 @@ async function runSingleSandbox(packageName, options = {}) {
           findings.push(finding);
         }
         // Add preload score (capped at 100 with the rest)
-        const combinedScore = Math.min(100, score + preloadResult.score);
-        // We'll use combinedScore below instead of score
         report._preloadScore = preloadResult.score;
       }
 

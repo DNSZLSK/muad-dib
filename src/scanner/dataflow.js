@@ -1,9 +1,8 @@
 const fs = require('fs');
 const path = require('path');
-const acorn = require('acorn');
 const walk = require('acorn-walk');
 const { getCallName } = require('../utils.js');
-const { ACORN_OPTIONS, safeParse } = require('../shared/constants.js');
+const { safeParse } = require('../shared/constants.js');
 const { analyzeWithDeobfuscation } = require('../shared/analyze-helper.js');
 
 // Module classification maps for intra-file taint tracking

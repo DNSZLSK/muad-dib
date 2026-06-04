@@ -262,7 +262,7 @@ function saveReport(results, outputPath) {
   try {
     fs.writeFileSync(outputPath, html);
   } catch (e) {
-    throw new Error(`Failed to write HTML report to ${outputPath}: ${e.message}`);
+    throw new Error(`Failed to write HTML report to ${outputPath}: ${e.message}`, { cause: e });
   }
   return outputPath;
 }

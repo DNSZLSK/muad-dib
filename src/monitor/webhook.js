@@ -18,28 +18,20 @@ const {
   getParisHour,
   loadScanStats,
   loadDetections,
-  loadLastDailyReportDate,
   saveLastDailyReportDate,
-  saveDailyStats,
   resetDailyStats,
   saveScanMemory,
   shouldSuppressByMemory,
   recordScanMemory,
-  loadState,
   saveState,
   loadStateRaw,
   getScansSinceLastMemoryPersist,
-  setScansSinceLastMemoryPersist,
-  STATE_FILE
+  setScansSinceLastMemoryPersist
 } = require('./state.js');
 const {
   HIGH_CONFIDENCE_MALICE_TYPES,
   hasIOCMatch,
   hasHighOrCritical,
-  hasHighConfidenceThreat,
-  hasTyposquat,
-  hasLifecycleWithIntent,
-  isSuspectClassification,
   formatErrorBreakdown
 } = require('./classify.js');
 
