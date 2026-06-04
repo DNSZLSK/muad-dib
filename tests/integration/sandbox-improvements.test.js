@@ -9,7 +9,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { test, asyncTest, assert, assertIncludes, runScanDirect } = require('../test-utils');
+const { test, asyncTest, assert, assertIncludes, runScanDirect, runCommand } = require('../test-utils');
 
 function runSandboxImprovementTests() {
   console.log('\n=== SANDBOX IMPROVEMENTS TESTS ===\n');
@@ -151,20 +151,24 @@ function runSandboxImprovementTests() {
   // Chantier 1: Honey environment — sandbox index integration
   // ═══════════════════════════════════════════════════════════════
 
-  test('C1: sandbox/index.js imports enhanced canary-tokens', () => {
-    const sandboxSrc = fs.readFileSync(
-      path.join(__dirname, '..', '..', 'src', 'sandbox', 'index.js'), 'utf8');
-    assertIncludes(sandboxSrc, 'createCanaryAwsCredentials', 'Should import createCanaryAwsCredentials');
-    assertIncludes(sandboxSrc, 'createCanarySshKey', 'Should import createCanarySshKey');
-    assertIncludes(sandboxSrc, 'createCanaryGitconfig', 'Should import createCanaryGitconfig');
-  });
-
-  test('C1: sandbox/index.js passes AWS/SSH/gitconfig content as env vars', () => {
-    const sandboxSrc = fs.readFileSync(
-      path.join(__dirname, '..', '..', 'src', 'sandbox', 'index.js'), 'utf8');
-    assertIncludes(sandboxSrc, 'CANARY_AWS_CONTENT', 'Should inject AWS credentials content');
-    assertIncludes(sandboxSrc, 'CANARY_SSH_KEY', 'Should inject SSH key content');
-    assertIncludes(sandboxSrc, 'CANARY_GITCONFIG', 'Should inject gitconfig content');
+  test('C1: buildDockerArgs injects canary file contents as env vars (AWS/SSH/gitconfig + env/npmrc)', () => {
+    // Behavioral replacement for the two sandbox/index.js source-greps (canary-tokens imports +
+    // CANARY_*_CONTENT injection). Call the extracted arg builder with canary tokens and assert the
+    // canary file contents are injected as -e env vars (which sandbox-runner.sh writes into the
+    // honeypot home). Exercising the builder also exercises the createCanary* imports — a missing
+    // import would throw here, not silently pass a string match.
+    const { buildDockerArgs } = require('../../src/sandbox/index.js');
+    const { generateCanaryTokens } = require('../../src/canary-tokens.js');
+    const args = buildDockerArgs({
+      canaryTokens: generateCanaryTokens(),
+      containerName: 'test-canary', fakeHostname: 'dev-laptop-0000',
+      packageName: 'p', mode: 'permissive'
+    });
+    assert(args.some(a => a.startsWith('CANARY_AWS_CONTENT=')), 'should inject AWS credentials content');
+    assert(args.some(a => a.startsWith('CANARY_SSH_KEY=')), 'should inject SSH key content');
+    assert(args.some(a => a.startsWith('CANARY_GITCONFIG=')), 'should inject gitconfig content');
+    assert(args.some(a => a.startsWith('CANARY_ENV_CONTENT=')) && args.some(a => a.startsWith('CANARY_NPMRC_CONTENT=')),
+      'should also inject .env and .npmrc content');
   });
 
   test('C1: sandbox-runner.sh writes honeypot files', () => {
@@ -228,47 +232,22 @@ function runSandboxImprovementTests() {
   // Chantier 3: Auto-sandbox CLI integration
   // ═══════════════════════════════════════════════════════════════
 
-  test('C3: bin/muaddib.js supports --auto-sandbox flag', () => {
-    const cliSrc = fs.readFileSync(
-      path.join(__dirname, '..', '..', 'bin', 'muaddib.js'), 'utf8');
-    assertIncludes(cliSrc, '--auto-sandbox', 'CLI should support --auto-sandbox flag');
-    assertIncludes(cliSrc, 'autoSandbox', 'Should parse autoSandbox option');
+  test('C3: --help documents the --auto-sandbox flag and its trigger threshold', () => {
+    // Behavioral replacement for the CLI + help.js source-greps: run the CLI and assert the flag
+    // and its description actually surface in help output (the meaningful, rename-proof behavior).
+    const help = runCommand('--help');
+    assertIncludes(help, '--auto-sandbox', '--help should document the --auto-sandbox flag');
+    assertIncludes(help, 'Auto-trigger sandbox when static scan score >= 20',
+      '--help should describe the auto-sandbox trigger threshold');
   });
 
-  test('C3: --auto-sandbox passed to run() options', () => {
-    const cliSrc = fs.readFileSync(
-      path.join(__dirname, '..', '..', 'bin', 'muaddib.js'), 'utf8');
-    assertIncludes(cliSrc, 'autoSandbox: autoSandbox', 'Should pass autoSandbox to run()');
-  });
-
-  test('C3: index.js has auto-sandbox logic', () => {
-    // Auto-sandbox logic moved to pipeline/processor.js in P2 audit refactor
-    const processorSrc = fs.readFileSync(
-      path.join(__dirname, '..', '..', 'src', 'pipeline', 'processor.js'), 'utf8');
-    assertIncludes(processorSrc, 'options.autoSandbox', 'Should check autoSandbox option');
-    assertIncludes(processorSrc, 'isDockerAvailable', 'Should check Docker availability');
-    assertIncludes(processorSrc, 'buildSandboxImage', 'Should build sandbox image');
-    assertIncludes(processorSrc, 'local: true', 'Should run sandbox in local mode');
-  });
-
-  test('C3: auto-sandbox uses preliminary score (compound trigger gate)', () => {
-    // Auto-sandbox logic moved to pipeline/processor.js in P2 audit refactor.
-    // Phase 5 (2026-05-09): the >=20 threshold was replaced by a surgical
-    // compound trigger via evaluateSandboxTrigger (window [15, 35]).
-    const processorSrc = fs.readFileSync(
-      path.join(__dirname, '..', '..', 'src', 'pipeline', 'processor.js'), 'utf8');
-    assertIncludes(processorSrc, 'prelimScore', 'Should compute preliminary score');
-    assertIncludes(processorSrc, 'evaluateSandboxTrigger', 'Should use compound trigger gate');
-    assertIncludes(processorSrc, 'sandboxTrigger.shouldRun', 'Should branch on shouldRun');
-  });
-
-  test('C3: auto-sandbox is graceful when Docker unavailable', () => {
-    // Auto-sandbox logic moved to pipeline/processor.js in P2 audit refactor.
-    const processorSrc = fs.readFileSync(
-      path.join(__dirname, '..', '..', 'src', 'pipeline', 'processor.js'), 'utf8');
-    assertIncludes(processorSrc, 'Docker not available', 'Should log when Docker not available');
-    assertIncludes(processorSrc, 'isDockerAvailable', 'Should check Docker availability before running');
-  });
+  // C1: removed five source-greps that wired the auto-sandbox path (bin/muaddib.js `autoSandbox`
+  // parsing/forwarding, and pipeline/processor.js `options.autoSandbox` / `isDockerAvailable` /
+  // `buildSandboxImage` / `prelimScore` / `evaluateSandboxTrigger` / `sandboxTrigger.shouldRun` /
+  // "Docker not available"). The trigger decision is covered behaviorally by
+  // tests/unit/sandbox-compound-triggers.test.js (evaluateSandboxTrigger), and the end-to-end option
+  // flow + graceful no-Docker handling by the "does not trigger for clean package" test below
+  // (runScanDirect with { autoSandbox: true } completes and returns sandbox === null, no throw).
 
   // Auto-sandbox should NOT trigger for benign packages (score < 20)
   asyncTest('C3: auto-sandbox does not trigger for clean package', async () => {
@@ -284,16 +263,8 @@ function runSandboxImprovementTests() {
     }
   });
 
-  // ═══════════════════════════════════════════════════════════════
-  // Help text verification
-  // ═══════════════════════════════════════════════════════════════
-
-  test('C3: help text includes --auto-sandbox', () => {
-    const helpSrc = fs.readFileSync(
-      path.join(__dirname, '..', '..', 'src', 'commands', 'help.js'), 'utf8');
-    assertIncludes(helpSrc, 'Auto-trigger sandbox when static scan score >= 20',
-      'Help text should describe --auto-sandbox');
-  });
+  // C1: removed the help.js source-grep — the "--help documents the --auto-sandbox flag" behavioral
+  // test above asserts the auto-sandbox description actually renders in CLI output (the real behavior).
 
   // ═══════════════════════════════════════════════════════════════
   // Chantier 4: Docker camouflage — anti-sandbox evasion
@@ -337,55 +308,40 @@ function runSandboxImprovementTests() {
       'Camouflage (Phase 0.5) must run before Phase 1');
   });
 
-  test('C4: preload.js intercepts /proc/1/cgroup', () => {
-    const preloadSrc = fs.readFileSync(
-      path.join(__dirname, '..', '..', 'docker', 'preload.js'), 'utf8');
-    assertIncludes(preloadSrc, '/proc/1/cgroup',
-      'Should intercept /proc/1/cgroup reads');
-    assertIncludes(preloadSrc, 'init.scope',
-      'Should return systemd init.scope (non-Docker content)');
+  // C1: removed three source-greps on docker/preload.js (/proc/1/cgroup interception, the
+  // no-"docker"/"containerd" content check, and /proc/uptime spoofing). All three are now covered
+  // behaviorally in tests/unit/preload.test.js ("spoofs /proc/1/cgroup…", "spoofs /proc/uptime…"),
+  // which load preload in a child process, read those paths through the patched fs, and assert the
+  // spoofed output + forensic-log entries (cross-platform — the interception is a path-string match).
+
+  test('C4: buildDockerArgs passes the anti-fingerprint --hostname to Docker', () => {
+    // Behavioral replacement for the sandbox/index.js source-grep: the extracted arg builder emits a
+    // --hostname flag using the dev-laptop- shape (the default Docker 12-hex hostname is fingerprintable).
+    const { buildDockerArgs, generateFakeHostname } = require('../../src/sandbox/index.js');
+    const args = buildDockerArgs({ containerName: 'c', fakeHostname: generateFakeHostname(), packageName: 'p', mode: 'permissive' });
+    const hostArg = args.find(a => a.startsWith('--hostname='));
+    assert(hostArg, 'should pass a --hostname flag to Docker');
+    assert(/^--hostname=dev-laptop-[0-9a-f]{4}$/.test(hostArg), `hostname should use the dev-laptop- shape, got "${hostArg}"`);
   });
 
-  test('C4: preload.js /proc/1/cgroup does not contain "docker"', () => {
-    const preloadSrc = fs.readFileSync(
-      path.join(__dirname, '..', '..', 'docker', 'preload.js'), 'utf8');
-    // Extract the spoofed return value for /proc/1/cgroup
-    const cgroupMatch = preloadSrc.match(/if \(p === '\/proc\/1\/cgroup'\)[\s\S]*?return '([^']+)'/);
-    assert(cgroupMatch, 'Should have /proc/1/cgroup return statement');
-    assert(!cgroupMatch[1].includes('docker'),
-      'Spoofed cgroup content must NOT contain "docker"');
-    assert(!cgroupMatch[1].includes('containerd'),
-      'Spoofed cgroup content must NOT contain "containerd"');
+  test('C4: generateFakeHostname is randomized per session (not a bare Docker hex hash)', () => {
+    // Behavioral replacement for the source-grep on crypto.randomBytes usage: call the extracted
+    // generator and assert the format + per-call uniqueness directly.
+    const { generateFakeHostname } = require('../../src/sandbox/index.js');
+    const h1 = generateFakeHostname(), h2 = generateFakeHostname();
+    assert(/^dev-laptop-[0-9a-f]{4}$/.test(h1), `format should be dev-laptop-XXXX, got "${h1}"`);
+    assert(h1 !== h2, 'two calls should differ (randomized per session)');
+    assert(!/^[0-9a-f]{12}$/.test(h1), 'must not look like a Docker default 12-char hex hash');
   });
 
-  test('C4: preload.js /proc/uptime interception still works (non-regression)', () => {
-    const preloadSrc = fs.readFileSync(
-      path.join(__dirname, '..', '..', 'docker', 'preload.js'), 'utf8');
-    assertIncludes(preloadSrc, "if (p === '/proc/uptime')",
-      'Should still intercept /proc/uptime');
-    assertIncludes(preloadSrc, 'SPOOFED /proc/uptime',
-      'Should log /proc/uptime spoofing');
-  });
-
-  test('C4: sandbox/index.js passes --hostname to Docker', () => {
-    const sandboxSrc = fs.readFileSync(
-      path.join(__dirname, '..', '..', 'src', 'sandbox', 'index.js'), 'utf8');
-    assertIncludes(sandboxSrc, '--hostname=',
-      'Should pass --hostname flag to Docker');
-    assertIncludes(sandboxSrc, 'dev-laptop-',
-      'Hostname should use dev-laptop- prefix');
-  });
-
-  test('C4: sandbox hostname is randomized per session', () => {
-    const sandboxSrc = fs.readFileSync(
-      path.join(__dirname, '..', '..', 'src', 'sandbox', 'index.js'), 'utf8');
-    assertIncludes(sandboxSrc, 'crypto.randomBytes',
-      'Hostname should use crypto.randomBytes for uniqueness');
-    // Verify hostname format: dev-laptop-XXXX (4 hex chars from 2 random bytes)
-    const hostnameMatch = sandboxSrc.match(/dev-laptop-\$\{crypto\.randomBytes\((\d+)\)/);
-    assert(hostnameMatch, 'Should construct hostname with randomBytes');
-    assert(parseInt(hostnameMatch[1]) >= 2,
-      'Should use at least 2 random bytes for hostname suffix');
+  test('C4: buildDockerArgs selects the gVisor runtime when gvisorMode is set', () => {
+    // Behavioral coverage of the Node-side gVisor wiring (the bash-side handling in
+    // sandbox-runner.sh — reading MUADDIB_GVISOR — is exercised only inside Docker).
+    const { buildDockerArgs } = require('../../src/sandbox/index.js');
+    const args = buildDockerArgs({ gvisorMode: true, containerName: 'c', fakeHostname: 'dev-laptop-0000', packageName: 'p', mode: 'permissive' });
+    assert(args.includes('--runtime=runsc'), 'gvisor mode should select the runsc runtime');
+    assert(args.includes('MUADDIB_GVISOR=1'), 'gvisor mode should set MUADDIB_GVISOR=1 for the entrypoint');
+    assert(!args.includes('--cap-add=NET_RAW'), 'gvisor mode should not add NET_RAW (gVisor captures packets itself)');
   });
 
   test('C4: hostname is not a bare hex hash (anti-fingerprint)', () => {

@@ -274,6 +274,46 @@ function runPreloadTests() {
       'the embedded newline must be escaped — no forged standalone [PRELOAD] log line may appear');
   });
 
+  test('PRELOAD: spoofs /proc/1/cgroup to hide Docker (systemd init.scope, no "docker"/"containerd")', () => {
+    // Malware reads /proc/1/cgroup to detect a container. preload intercepts the read (a pure
+    // path-string match, so it fires on any OS) and returns realistic non-Docker cgroup content.
+    const { stdout, log } = runWithPreload(
+      "process.stdout.write(require('fs').readFileSync('/proc/1/cgroup','utf8'))");
+    assert(stdout.includes('init.scope'),
+      `/proc/1/cgroup should be spoofed to systemd init.scope, got "${stdout.slice(0, 120)}"`);
+    assert(!/docker|containerd/i.test(stdout),
+      `spoofed cgroup must NOT reveal docker/containerd, got "${stdout.slice(0, 120)}"`);
+    assert(/SPOOFED \/proc\/1\/cgroup/.test(log), 'the cgroup spoof should be recorded in the forensic log');
+  });
+
+  test('PRELOAD: spoofs /proc/uptime to a realistic high uptime (fresh-sandbox detection evasion)', () => {
+    const { stdout, log } = runWithPreload(
+      "process.stdout.write(require('fs').readFileSync('/proc/uptime','utf8'))");
+    const seconds = parseFloat(String(stdout).trim().split(/\s+/)[0]);
+    assert(Number.isFinite(seconds) && seconds > 86400,
+      `uptime should be spoofed to > 1 day (not a fresh sandbox), got "${stdout.slice(0, 80)}"`);
+    assert(/SPOOFED \/proc\/uptime/.test(log), 'the uptime spoof should be recorded in the forensic log');
+  });
+
+  test('PRELOAD: intercepts process.dlopen and flags native-addon loads (NATIVE_ADDON)', () => {
+    // Native .node addons bypass JS monkey-patches; preload can't block them but logs the load.
+    // The log is written before the (failing) real dlopen, so even a bogus path is still flagged.
+    const { log } = runWithPreload(
+      "try{process.dlopen({exports:{}}, '/tmp/muaddib-nonexistent.node')}catch(e){}");
+    assert(/NATIVE_ADDON.*dlopen/.test(log),
+      `a process.dlopen call should be flagged NATIVE_ADDON, log head="${log.slice(0, 300)}"`);
+  });
+
+  test('PRELOAD: wraps worker_threads.Worker and logs spawns (WORKER) to propagate the sandbox', () => {
+    // Workers don't inherit NODE_OPTIONS, so preload wraps the Worker constructor to re-inject
+    // itself + the time offset, logging each spawn. We assert the spawn is logged (written
+    // synchronously at construction, before the worker thread runs).
+    const { log } = runWithPreload(
+      "const {Worker}=require('worker_threads'); const w=new Worker('0',{eval:true}); w.on('error',()=>{}); w.on('exit',()=>{});");
+    assert(/WORKER.*spawned/.test(log),
+      `spawning a Worker should be logged as WORKER, log head="${log.slice(0, 300)}"`);
+  });
+
   // ============================================
   // SANDBOX MODULE INTEGRATION TESTS
   // ============================================

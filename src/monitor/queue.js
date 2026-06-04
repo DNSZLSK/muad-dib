@@ -1143,13 +1143,23 @@ async function _spawnWorker(scanQueue, stats, dailyAlerts, recentlyScanned, down
 }
 
 /**
+ * Pure spawn-count decision: how many workers to start given the target concurrency, the number
+ * already active, and the queue depth. Never negative (active can exceed target during scale-down)
+ * and never more than the backlog. Extracted so the adaptive worker-pool math is unit-testable
+ * without spawning real (network-bound) workers.
+ */
+function computeWorkersToSpawn(targetConcurrency, activeWorkers, queueLength) {
+  return Math.max(0, Math.min(targetConcurrency - activeWorkers, queueLength));
+}
+
+/**
  * Ensure the target number of workers are running. Non-blocking: spawns
  * missing workers as background promises. Called from the daemon main loop
  * every PROCESS_LOOP_INTERVAL (2s), and after concurrency adjustments.
  */
 function ensureWorkers(scanQueue, stats, dailyAlerts, recentlyScanned, downloadsCache, sandboxAvailable) {
   if (scanQueue.length === 0) return;
-  const toSpawn = Math.min(_targetConcurrency - _activeWorkers, scanQueue.length);
+  const toSpawn = computeWorkersToSpawn(_targetConcurrency, _activeWorkers, scanQueue.length);
   if (toSpawn <= 0) return;
 
   console.log(`[MONITOR] Spawning ${toSpawn} worker(s) (active: ${_activeWorkers}, target: ${_targetConcurrency}, queue: ${scanQueue.length})`);
@@ -1518,6 +1528,7 @@ module.exports = {
   setTargetConcurrency,
   getActiveWorkers,
   terminateAllWorkers,
+  computeWorkersToSpawn,
   ensureWorkers,
   drainWorkers,
 

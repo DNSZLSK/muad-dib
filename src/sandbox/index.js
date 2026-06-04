@@ -242,6 +242,115 @@ async function buildSandboxImage() {
   });
 }
 
+// ── Docker run argument construction ──
+
+// Build the `docker run` argument vector for a single sandbox execution. Pure: given the run
+// options it returns a string[] with no side effects (the canary helpers it calls are themselves
+// pure), so the isolation flags, the anti-detection hostname, the canary env injection, the gVisor
+// runtime, and the libfaketime/time-offset wiring are all behaviorally testable without spawning
+// Docker. Callers compute containerName + fakeHostname (the kill-ladder needs the former) and pass
+// them in. KEEP IN SYNC with sandbox-runner.sh (caps, tmpfs, env contract).
+function buildDockerArgs(opts = {}) {
+  const {
+    strict = false, canaryTokens = null, timeOffset = 0, gvisorMode = false,
+    containerName, fakeHostname, local = false, localAbsPath = null, packageName, mode
+  } = opts;
+
+  const dockerArgs = [
+    'run',
+    '--rm',
+    `--name=${containerName}`,
+    `--hostname=${fakeHostname}`,
+    '--network=bridge',
+    '--memory=512m',
+    '--cpus=1',
+    '--pids-limit=100',
+    '--cap-drop=ALL'
+  ];
+
+  // gVisor runtime: use runsc instead of default runc.
+  // Performance: configure --directfs and --overlay2=all:memory in daemon.json:
+  //   "runsc": { "path": "/usr/bin/runsc", "runtimeArgs": ["--directfs", "--overlay2=all:memory"] }
+  // --directfs: bypass gofer process for direct filesystem access (fewer RPCs, faster I/O)
+  // --overlay2=all:memory: sandbox writes go to tmpfs instead of host (faster, isolated)
+  // These flags require gVisor >= 2023-06-01.
+  if (gvisorMode) {
+    dockerArgs.push('--runtime=runsc');
+    dockerArgs.push('-e', 'MUADDIB_GVISOR=1');
+  }
+
+  // Inject canary tokens as environment variables
+  if (canaryTokens) {
+    for (const [key, value] of Object.entries(canaryTokens)) {
+      dockerArgs.push('-e', `${key}=${value}`);
+    }
+    // Also inject canary file contents as env vars for the entrypoint to write
+    dockerArgs.push('-e', `CANARY_ENV_CONTENT=${createCanaryEnvFile(canaryTokens).replace(/\r?\n/g, '\\n')}`);
+    dockerArgs.push('-e', `CANARY_NPMRC_CONTENT=${createCanaryNpmrc(canaryTokens).replace(/\r?\n/g, '\\n')}`);
+    dockerArgs.push('-e', `CANARY_AWS_CONTENT=${createCanaryAwsCredentials(canaryTokens).replace(/\r?\n/g, '\\n')}`);
+    dockerArgs.push('-e', `CANARY_SSH_KEY=${createCanarySshKey().replace(/\r?\n/g, '\\n')}`);
+    dockerArgs.push('-e', `CANARY_GITCONFIG=${createCanaryGitconfig().replace(/\r?\n/g, '\\n')}`);
+  }
+
+  // Inject time offset — libfaketime-aware (v2.10.7)
+  // Run 1 (offset=0): no libfaketime, preload.js handles JS-level only
+  // Runs 2+ (offset>0): libfaketime handles C-level time shift for ALL processes
+  //   (Node, Python, bash), preload.js TIME_OFFSET=0 to avoid double acceleration
+  const useFaketime = timeOffset > 0;
+  dockerArgs.push('-e', `NODE_TIMING_OFFSET=${useFaketime ? 0 : timeOffset}`);
+
+  if (useFaketime) {
+    const hours = Math.floor(timeOffset / 3600000);
+    const faketimeStr = hours >= 24
+      ? `+${Math.floor(hours / 24)}d x1000`
+      : `+${hours}h x1000`;
+    dockerArgs.push('-e', `MUADDIB_FAKETIME=${faketimeStr}`);
+    dockerArgs.push('-e', 'MUADDIB_FAKETIME_ACTIVE=1');
+  }
+
+  // Both modes need NET_RAW for tcpdump (runs as root in entrypoint).
+  // gVisor mode: no tcpdump needed — gVisor captures via --strace/--log-packets.
+  // Strict mode also needs NET_ADMIN for iptables network blocking.
+  // SYS_PTRACE is not needed: strace traces its own child (npm install via su).
+  // SETUID + SETGID required for su (privilege drop to sandboxuser).
+  // CHOWN required for chown in sandbox-runner.sh.
+  if (!gvisorMode) {
+    dockerArgs.push('--cap-add=NET_RAW');
+  }
+  dockerArgs.push('--cap-add=SETUID');
+  dockerArgs.push('--cap-add=SETGID');
+  dockerArgs.push('--cap-add=CHOWN');
+  if (strict) {
+    dockerArgs.push('--cap-add=NET_ADMIN');
+  }
+
+  dockerArgs.push('--tmpfs', '/tmp:rw,nosuid,size=64m');
+  dockerArgs.push('--tmpfs', '/sandbox/install:rw,nosuid,size=256m');
+  dockerArgs.push('--tmpfs', '/home/sandboxuser:rw,noexec,nosuid,size=16m');
+  dockerArgs.push('--read-only');
+
+  // /proc/uptime evasion (T1497.003) handled by preload.js monkey-patching
+  // (process.uptime, Date.now, performance.now, process.hrtime)
+
+  dockerArgs.push('--security-opt', 'no-new-privileges');
+
+  if (local && localAbsPath) {
+    dockerArgs.push('-v', `${localAbsPath}:/sandbox/local-pkg:ro`);
+  }
+
+  dockerArgs.push(DOCKER_IMAGE);
+  dockerArgs.push(local ? '/sandbox/local-pkg' : packageName);
+  dockerArgs.push(mode);
+
+  return dockerArgs;
+}
+
+// Realistic hostname to evade sandbox detection (T1497.001). The default Docker hostname is a
+// 12-char hex hash — trivially fingerprinted; we use a dev-laptop-XXXX shape with random hex.
+function generateFakeHostname() {
+  return `dev-laptop-${crypto.randomBytes(2).toString('hex')}`;
+}
+
 // ── Run single sandbox execution ──
 
 async function runSingleSandbox(packageName, options = {}) {
@@ -313,95 +422,12 @@ async function runSingleSandbox(packageName, options = {}) {
       return;
     }
 
-    // Realistic hostname to evade sandbox detection (T1497.001)
-    // Default Docker hostname is a 12-char hex hash — easily fingerprinted.
-    const fakeHostname = `dev-laptop-${crypto.randomBytes(2).toString('hex')}`;
+    const fakeHostname = generateFakeHostname();
 
-    const dockerArgs = [
-      'run',
-      '--rm',
-      `--name=${containerName}`,
-      `--hostname=${fakeHostname}`,
-      '--network=bridge',
-      '--memory=512m',
-      '--cpus=1',
-      '--pids-limit=100',
-      '--cap-drop=ALL'
-    ];
-
-    // gVisor runtime: use runsc instead of default runc.
-    // Performance: configure --directfs and --overlay2=all:memory in daemon.json:
-    //   "runsc": { "path": "/usr/bin/runsc", "runtimeArgs": ["--directfs", "--overlay2=all:memory"] }
-    // --directfs: bypass gofer process for direct filesystem access (fewer RPCs, faster I/O)
-    // --overlay2=all:memory: sandbox writes go to tmpfs instead of host (faster, isolated)
-    // These flags require gVisor >= 2023-06-01.
-    if (gvisorMode) {
-      dockerArgs.push('--runtime=runsc');
-      dockerArgs.push('-e', 'MUADDIB_GVISOR=1');
-    }
-
-    // Inject canary tokens as environment variables
-    if (canaryTokens) {
-      for (const [key, value] of Object.entries(canaryTokens)) {
-        dockerArgs.push('-e', `${key}=${value}`);
-      }
-      // Also inject canary file contents as env vars for the entrypoint to write
-      dockerArgs.push('-e', `CANARY_ENV_CONTENT=${createCanaryEnvFile(canaryTokens).replace(/\r?\n/g, '\\n')}`);
-      dockerArgs.push('-e', `CANARY_NPMRC_CONTENT=${createCanaryNpmrc(canaryTokens).replace(/\r?\n/g, '\\n')}`);
-      dockerArgs.push('-e', `CANARY_AWS_CONTENT=${createCanaryAwsCredentials(canaryTokens).replace(/\r?\n/g, '\\n')}`);
-      dockerArgs.push('-e', `CANARY_SSH_KEY=${createCanarySshKey().replace(/\r?\n/g, '\\n')}`);
-      dockerArgs.push('-e', `CANARY_GITCONFIG=${createCanaryGitconfig().replace(/\r?\n/g, '\\n')}`);
-    }
-
-    // Inject time offset — libfaketime-aware (v2.10.7)
-    // Run 1 (offset=0): no libfaketime, preload.js handles JS-level only
-    // Runs 2+ (offset>0): libfaketime handles C-level time shift for ALL processes
-    //   (Node, Python, bash), preload.js TIME_OFFSET=0 to avoid double acceleration
-    const useFaketime = timeOffset > 0;
-    dockerArgs.push('-e', `NODE_TIMING_OFFSET=${useFaketime ? 0 : timeOffset}`);
-
-    if (useFaketime) {
-      const hours = Math.floor(timeOffset / 3600000);
-      const faketimeStr = hours >= 24
-        ? `+${Math.floor(hours / 24)}d x1000`
-        : `+${hours}h x1000`;
-      dockerArgs.push('-e', `MUADDIB_FAKETIME=${faketimeStr}`);
-      dockerArgs.push('-e', 'MUADDIB_FAKETIME_ACTIVE=1');
-    }
-
-    // Both modes need NET_RAW for tcpdump (runs as root in entrypoint).
-    // gVisor mode: no tcpdump needed — gVisor captures via --strace/--log-packets.
-    // Strict mode also needs NET_ADMIN for iptables network blocking.
-    // SYS_PTRACE is not needed: strace traces its own child (npm install via su).
-    // SETUID + SETGID required for su (privilege drop to sandboxuser).
-    // CHOWN required for chown in sandbox-runner.sh.
-    if (!gvisorMode) {
-      dockerArgs.push('--cap-add=NET_RAW');
-    }
-    dockerArgs.push('--cap-add=SETUID');
-    dockerArgs.push('--cap-add=SETGID');
-    dockerArgs.push('--cap-add=CHOWN');
-    if (strict) {
-      dockerArgs.push('--cap-add=NET_ADMIN');
-    }
-
-    dockerArgs.push('--tmpfs', '/tmp:rw,nosuid,size=64m');
-    dockerArgs.push('--tmpfs', '/sandbox/install:rw,nosuid,size=256m');
-    dockerArgs.push('--tmpfs', '/home/sandboxuser:rw,noexec,nosuid,size=16m');
-    dockerArgs.push('--read-only');
-
-    // /proc/uptime evasion (T1497.003) handled by preload.js monkey-patching
-    // (process.uptime, Date.now, performance.now, process.hrtime)
-
-    dockerArgs.push('--security-opt', 'no-new-privileges');
-
-    if (local && localAbsPath) {
-      dockerArgs.push('-v', `${localAbsPath}:/sandbox/local-pkg:ro`);
-    }
-
-    dockerArgs.push(DOCKER_IMAGE);
-    dockerArgs.push(local ? '/sandbox/local-pkg' : packageName);
-    dockerArgs.push(mode);
+    const dockerArgs = buildDockerArgs({
+      strict, canaryTokens, timeOffset, gvisorMode,
+      containerName, fakeHostname, local, localAbsPath, packageName, mode
+    });
 
     const proc = spawn('docker', dockerArgs);
     _liveContainers.add(containerName);
@@ -1149,4 +1175,4 @@ function displayResults(result) {
   }
 }
 
-module.exports = { buildSandboxImage, runSandbox, runSingleSandbox, scoreFindings, generateNetworkReport, EXFIL_PATTERNS, SAFE_DOMAINS, getSeverity, displayResults, isDockerAvailable, imageExists, isGvisorAvailable, STATIC_CANARY_TOKENS, detectStaticCanaryExfiltration, analyzePreloadLog, TIME_OFFSETS, SAFE_SANDBOX_CMDS, SANDBOX_CONCURRENCY_MAX, acquireSandboxSlot, tryAcquireSandboxSlot, releaseSandboxSlot, resetSandboxLimiter, getSandboxSemaphore, killAllSandboxContainers };
+module.exports = { buildSandboxImage, runSandbox, runSingleSandbox, buildDockerArgs, generateFakeHostname, scoreFindings, generateNetworkReport, EXFIL_PATTERNS, SAFE_DOMAINS, getSeverity, displayResults, isDockerAvailable, imageExists, isGvisorAvailable, STATIC_CANARY_TOKENS, detectStaticCanaryExfiltration, analyzePreloadLog, TIME_OFFSETS, SAFE_SANDBOX_CMDS, SANDBOX_CONCURRENCY_MAX, acquireSandboxSlot, tryAcquireSandboxSlot, releaseSandboxSlot, resetSandboxLimiter, getSandboxSemaphore, killAllSandboxContainers };
