@@ -5,7 +5,7 @@ const os = require('os');
 const v8 = require('v8');
 const { isDockerAvailable, SANDBOX_CONCURRENCY_MAX, killAllSandboxContainers } = require('../sandbox/index.js');
 const { setVerboseMode, isSandboxEnabled, isCanaryEnabled, isLlmDetectiveEnabled, getLlmDetectiveMode, DOWNLOADS_CACHE_TTL } = require('./classify.js');
-const { loadState, saveState, loadDailyStats, saveDailyStats, purgeTarballCache, getParisHour, atomicWriteFileSync, saveNpmSeq, ALERTS_FILE, runStateMigrations } = require('./state.js');
+const { loadState, saveState, loadDailyStats, saveDailyStats, purgeTarballCache, getParisHour, atomicWriteFileSync, saveNpmSeq, ALERTS_FILE, runStateMigrations, loadRecentlyScanned, saveRecentlyScanned } = require('./state.js');
 const { isTemporalEnabled, isTemporalAstEnabled, isTemporalPublishEnabled, isTemporalMaintainerEnabled } = require('./temporal.js');
 const { pendingGrouped, flushScopeGroup, sendDailyReport, DAILY_REPORT_HOUR, alertedPackageRules, ALERTED_PACKAGES_MAX: MAX_ALERTED_PACKAGES } = require('./webhook.js');
 const { poll } = require('./ingestion.js');
@@ -504,6 +504,9 @@ function reportStats(stats) {
   const avg = stats.scanned > 0 ? (stats.totalTimeMs / stats.scanned / 1000).toFixed(1) : '0.0';
   const { t1, t1a, t1b, t2, t3 } = stats.suspectByTier;
   console.log(`[MONITOR] Stats: ${stats.scanned} scanned, ${stats.clean} clean, ${stats.suspect} suspect (T1a:${t1a} T1b:${t1b} T1:${t1} T2:${t2} T3:${t3}), ${stats.errors} error${stats.errors !== 1 ? 's' : ''}, avg ${avg}s/pkg`);
+  if (stats.temporalLoadShed || stats.queueHardDrops || (stats.restartsToday || 0) > 1) {
+    console.log(`[MONITOR]   Stability: restarts(24h)=${stats.restartsToday || 0}, temporal load-shed=${stats.temporalLoadShed || 0}, queue hard-drops=${stats.queueHardDrops || 0}`);
+  }
   if (stats.changesStreamPackages) {
     console.log(`[MONITOR]   Changes stream packages: ${stats.changesStreamPackages}`);
   }
@@ -532,6 +535,99 @@ function isDailyReportDue(stats) {
   return !hasReportBeenSentToday(stats);
 }
 
+// ─── P1.0 — memory-trend instrumentation ───
+// Append one sample per memory-watchdog tick so the off-heap leak can be localised
+// offline: rss climbing while heapUsed stays flat points at external/arrayBuffers
+// (native tarball/AST buffers) vs liveWorkers (worker-isolate heaps) vs runscDirs
+// (gVisor /tmp/runsc state dirs that survive `docker kill`). The heap-only breaker is
+// blind to all three — this is the data needed to choose the P1.2/P1.3 fix.
+const MEM_TREND_FILE = path.join(__dirname, '..', '..', 'data', 'mem-trend.jsonl');
+const MEM_TREND_MAX_BYTES = 5 * 1024 * 1024; // bounded: truncate-rotate past 5MB
+
+function countRunscDirs() {
+  try {
+    const dir = process.env.MUADDIB_GVISOR_LOG_DIR || '/tmp/runsc';
+    return fs.existsSync(dir) ? fs.readdirSync(dir).length : 0;
+  } catch { return 0; }
+}
+
+function appendMemTrend(currentMem, liveWorkers, queueLen) {
+  try {
+    // Bounded resource (CLAUDE.md §2): rotate the JSONL once past the cap.
+    try {
+      const st = fs.statSync(MEM_TREND_FILE);
+      if (st.size > MEM_TREND_MAX_BYTES) fs.renameSync(MEM_TREND_FILE, MEM_TREND_FILE + '.1');
+    } catch { /* no file yet — fine */ }
+    const entry = {
+      ts: new Date().toISOString(),
+      rss: currentMem.rss,
+      heapUsed: currentMem.heapUsed,
+      heapTotal: currentMem.heapTotal,
+      external: currentMem.external || 0,
+      arrayBuffers: currentMem.arrayBuffers || 0,
+      liveWorkers,
+      queueLen,
+      runscDirs: countRunscDirs(),
+    };
+    fs.appendFileSync(MEM_TREND_FILE, JSON.stringify(entry) + '\n', 'utf8');
+  } catch { /* instrumentation must never crash the daemon */ }
+}
+
+// ─── P2.1 / P2.4 — restart tracking + crash-loop alert ───
+// The chronic ~10×/day OOM crash-loop went unnoticed for weeks because NOTHING counted
+// restarts. Record each boot, expose the 24h count for the daily report, and fire an
+// alert (journal + rate-limited webhook) when the daemon is restarting abnormally often.
+const RESTARTS_FILE = path.join(__dirname, '..', '..', 'data', 'restarts.jsonl');
+const RESTARTS_MAX_LINES = 500;               // bounded resource (CLAUDE.md §2)
+const CRASH_LOOP_THRESHOLD_24H = 6;           // restarts/24h above this = alert
+const CRASH_LOOP_ALERT_MARKER = path.join(__dirname, '..', '..', 'data', '.crashloop-alert.json');
+const CRASH_LOOP_ALERT_INTERVAL_MS = 6 * 3600 * 1000; // webhook at most once per 6h
+
+function countRecentRestarts(windowMs = 24 * 3600 * 1000) {
+  try {
+    if (!fs.existsSync(RESTARTS_FILE)) return 0;
+    const cutoff = Date.now() - windowMs;
+    let n = 0;
+    for (const line of fs.readFileSync(RESTARTS_FILE, 'utf8').split('\n')) {
+      if (!line) continue;
+      try { if (new Date(JSON.parse(line).ts).getTime() >= cutoff) n++; } catch { /* skip bad line */ }
+    }
+    return n;
+  } catch { return 0; }
+}
+
+function maybeSendCrashLoopWebhook(count24h) {
+  try {
+    let last = 0;
+    try { last = JSON.parse(fs.readFileSync(CRASH_LOOP_ALERT_MARKER, 'utf8')).ts || 0; } catch { /* no marker */ }
+    if (Date.now() - last < CRASH_LOOP_ALERT_INTERVAL_MS) return; // rate-limited
+    const { getWebhookUrl, sendWebhook } = require('../webhook.js');
+    const url = (typeof getWebhookUrl === 'function' && getWebhookUrl()) || process.env.MUADDIB_WEBHOOK_URL;
+    if (!url) return;
+    atomicWriteFileSync(CRASH_LOOP_ALERT_MARKER, JSON.stringify({ ts: Date.now(), count24h }));
+    const payload = { content: `🚨 MUAD'DIB crash-loop: ${count24h} restarts in the last 24h (threshold ${CRASH_LOOP_THRESHOLD_24H}). Likely OOM — check data/mem-trend.jsonl (rss vs external/arrayBuffers).` };
+    Promise.resolve(sendWebhook(url, payload)).catch(() => { /* best-effort */ });
+  } catch { /* never block boot on alerting */ }
+}
+
+function recordRestart() {
+  try {
+    fs.appendFileSync(RESTARTS_FILE, JSON.stringify({ ts: new Date().toISOString(), pid: process.pid }) + '\n', 'utf8');
+    try {
+      const lines = fs.readFileSync(RESTARTS_FILE, 'utf8').split('\n').filter(Boolean);
+      if (lines.length > RESTARTS_MAX_LINES) fs.writeFileSync(RESTARTS_FILE, lines.slice(-RESTARTS_MAX_LINES).join('\n') + '\n', 'utf8');
+    } catch { /* trim best-effort */ }
+  } catch { /* best-effort: never block boot on telemetry */ }
+  const count24h = countRecentRestarts();
+  if (count24h > CRASH_LOOP_THRESHOLD_24H) {
+    console.error(`[MONITOR] CRASH-LOOP ALERT: ${count24h} restarts in the last 24h (threshold ${CRASH_LOOP_THRESHOLD_24H}) — daemon restarting abnormally often (OOM?). Check data/mem-trend.jsonl.`);
+    maybeSendCrashLoopWebhook(count24h);
+  } else {
+    console.log(`[MONITOR] BOOT: restart #${count24h} in the last 24h (pid ${process.pid})`);
+  }
+  return count24h;
+}
+
 async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downloadsCache, scanQueue, sandboxAvailableRef) {
   if (options && options.verbose) {
     setVerboseMode(true);
@@ -543,8 +639,13 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
   cleanupOrphanTmpDirs();
   // Kill orphan sandbox containers from previous crash (npm-audit-* prefix)
   cleanupOrphanContainers();
-  // Clean up stale gVisor runtime dirs (runsc leak — caused 61GB disk fill in prod)
-  cleanupRunscOrphans();
+  // Clean up stale gVisor runtime dirs (runsc leak — caused 61GB disk fill in prod).
+  // At boot the previous process (often OOM-killed mid-scan in the ~10×/day crash-loop)
+  // owns NO live container, so every runsc dir is an orphan → clear them ALL (age 0),
+  // not just those >1h old. The hourly call below keeps the default age for live runtime.
+  cleanupRunscOrphans(0);
+  // P2.1/P2.4: record this boot, expose the 24h restart count, alert if crash-looping.
+  stats.restartsToday = recordRestart();
   // Layer 3: Purge expired cached tarballs on startup
   purgeTarballCache();
   // Purge archived tarballs older than MUADDIB_ARCHIVE_RETENTION_DAYS (default 7).
@@ -668,6 +769,10 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
     console.log(`[MONITOR] ${restoredCount} packages pre-loaded from previous session`);
   }
 
+  // Restore the dedup Set so the restored backlog isn't re-scanned from scratch
+  // (an empty dedup set after each of ~10 daily restarts = thousands of wasted re-scans).
+  loadRecentlyScanned(recentlyScanned);
+
   // Restore deferred sandbox queue from previous run
   const deferredRestored = restoreDeferredQueue();
   if (deferredRestored > 0) {
@@ -697,6 +802,7 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
     await drainWorkers();
     // Persist remaining queue items so they survive the restart
     persistQueue(scanQueue, state);
+    saveRecentlyScanned(recentlyScanned); // Persist dedup set too (avoid re-scan storm on restart)
     // Stop deferred sandbox worker and persist its queue
     stopDeferredWorker();
     persistDeferredQueue();
@@ -787,6 +893,7 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
   queuePersistHandle = setInterval(() => {
     if (!running) return;
     persistQueue(scanQueue, state);
+    saveRecentlyScanned(recentlyScanned); // Piggyback: persist dedup set on the same 60s interval
     persistDeferredQueue(); // Piggyback: persist deferred sandbox queue on same interval
   }, QUEUE_PERSIST_INTERVAL);
 
@@ -824,6 +931,8 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
       const pctUsed = (heapRatio * 100).toFixed(0);
       const levelName = Object.keys(MEMORY_PRESSURE_LEVELS).find(k => MEMORY_PRESSURE_LEVELS[k] === pressureLevel) || 'UNKNOWN';
       console.log(`[MONITOR] MEMORY: heap=${heapUsedMB}MB/${heapLimitMB}MB (${pctUsed}%), rss=${rssMB}MB (${(rssRatio * 100).toFixed(0)}%/${RSS_LIMIT_MB}MB), queue=${scanQueue.length}, dedup=${recentlyScanned.size}, downloads=${downloadsCache.size}, alerts=${alertedPackageRules.size}, dailyAlerts=${dailyAlerts.length}, pressure=${levelName}`);
+      // P1.0: persist the same sample as a time series for offline leak localisation.
+      appendMemTrend(currentMem, getActiveWorkers(), scanQueue.length);
 
       // Graduated response at HIGH+
       if (pressureLevel >= MEMORY_PRESSURE_LEVELS.HIGH) {
@@ -881,6 +990,10 @@ module.exports = {
   sleep,
   persistQueue,
   restoreQueue,
+  appendMemTrend,
+  countRunscDirs,
+  recordRestart,
+  countRecentRestarts,
   POLL_INTERVAL,
   PROCESS_LOOP_INTERVAL,
   QUEUE_WARNING_THRESHOLD,

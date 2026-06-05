@@ -20,6 +20,8 @@ const {
   loadDetections,
   saveLastDailyReportDate,
   resetDailyStats,
+  reconcileDailyHeadline,
+  captureScanStatsBaseline,
   saveScanMemory,
   shouldSuppressByMemory,
   recordScanMemory,
@@ -1019,6 +1021,7 @@ function buildDailyReportEmbed(stats, dailyAlerts) {
         ...((stats.sandboxDeferred || stats.deferredProcessed || stats.deferredExpired)
           ? [{ name: 'Deferred Sandbox', value: `Enqueued: ${stats.sandboxDeferred || 0} | Processed: ${stats.deferredProcessed || 0} | Expired: ${stats.deferredExpired || 0}`, inline: false }]
           : []),
+        { name: 'Stability', value: `Restarts (24h): ${stats.restartsToday || 0} | Temporal load-shed: ${stats.temporalLoadShed || 0} | Queue hard-drops: ${stats.queueHardDrops || 0}`, inline: false },
         { name: 'System', value: healthText, inline: false }
       ],
       footer: {
@@ -1037,6 +1040,11 @@ function buildDailyReportEmbed(stats, dailyAlerts) {
  * @param {Map} downloadsCache - In-memory downloads cache (will be cleared)
  */
 async function sendDailyReport(stats, dailyAlerts, recentlyScanned, downloadsCache) {
+  // Crash-safe headline: a restart-storm around report time can zero the in-memory
+  // counter (the monitor OOM-restarts ~10×/day). Floor scanned/clean/suspect at the
+  // durable scan-stats delta so we never publish "5" when ~44k were really scanned.
+  reconcileDailyHeadline(stats);
+
   // Never send an empty report (0 scanned — restart with no work done)
   if (stats.scanned === 0) {
     console.log('[MONITOR] Daily report skipped (0 packages scanned)');
@@ -1048,7 +1056,9 @@ async function sendDailyReport(stats, dailyAlerts, recentlyScanned, downloadsCac
   // recorded on disk and prevents duplicate reports on next startup.
   const today = getParisDateString();
   stats.lastDailyReportDate = today;
-  saveLastDailyReportDate(today);
+  // Persist the monotonic scan-stats counter as the baseline for the NEXT report's
+  // delta. Written before the (now last) webhook so a mid-send kill can't double-count.
+  saveLastDailyReportDate(today, captureScanStatsBaseline());
 
   const payload = buildDailyReportEmbed(stats, dailyAlerts);
 
@@ -1068,21 +1078,11 @@ async function sendDailyReport(stats, dailyAlerts, recentlyScanned, downloadsCac
     deferredProcessed: stats.deferredProcessed || 0,
     deferredExpired: stats.deferredExpired || 0,
     changesStreamPackages: stats.changesStreamPackages || 0,
+    restartsToday: stats.restartsToday || 0,
+    temporalLoadShed: stats.temporalLoadShed || 0,
+    queueHardDrops: stats.queueHardDrops || 0,
     topSuspects: dailyAlerts.slice().sort((a, b) => (b.score || 0) - (a.score || 0) || b.findingsCount - a.findingsCount).slice(0, 10)
   });
-
-  // Send webhook only if configured
-  const url = getWebhookUrl();
-  if (url) {
-    try {
-      await sendWebhook(url, payload, { rawPayload: true });
-      console.log('[MONITOR] Daily report sent');
-    } catch (err) {
-      console.error(`[MONITOR] Daily report webhook failed: ${err.message}`);
-    }
-  } else {
-    console.log('[MONITOR] Daily report persisted locally (no webhook URL configured)');
-  }
 
   // Reset daily counters
   stats.scanned = 0;
@@ -1122,6 +1122,8 @@ async function sendDailyReport(stats, dailyAlerts, recentlyScanned, downloadsCac
   stats.pypiCatchupSkips = 0;
   stats.pypiWheelsScanned = 0;
   stats.pypiSkippedNoArchive = 0;
+  stats.temporalLoadShed = 0;
+  stats.queueHardDrops = 0;
   stats.rssFallbackCount = 0;
   dailyAlerts.length = 0;
   recentlyScanned.clear();
@@ -1132,9 +1134,26 @@ async function sendDailyReport(stats, dailyAlerts, recentlyScanned, downloadsCac
   }
   pendingGrouped.clear();
   downloadsCache.clear();
+  // Reset the durable daily-stats counter. Done BEFORE the (now last) webhook so a
+  // SIGKILL during the send can't leave the counter un-reset (which would double-count
+  // into the next day's report). loadDailyStats() treats the absent file as zeros.
   resetDailyStats();
   // C3: Flush scan memory to disk on daily reset (ensures no data loss)
   saveScanMemory();
+
+  // Send webhook LAST (best-effort). The reset + baseline above are already durable,
+  // so a kill during the send loses only the Discord ping — never the accounting.
+  const url = getWebhookUrl();
+  if (url) {
+    try {
+      await sendWebhook(url, payload, { rawPayload: true });
+      console.log('[MONITOR] Daily report sent');
+    } catch (err) {
+      console.error(`[MONITOR] Daily report webhook failed: ${err.message}`);
+    }
+  } else {
+    console.log('[MONITOR] Daily report persisted locally (no webhook URL configured)');
+  }
 }
 
 // --- CLI report helpers (muaddib report --now / --status) ---

@@ -69,6 +69,9 @@ const stats = {
   pypiCatchupSkips: 0,
   pypiWheelsScanned: 0,
   pypiSkippedNoArchive: 0,
+  temporalLoadShed: 0,
+  queueHardDrops: 0,
+  restartsToday: 0,
   lastReportTime: Date.now(),
   lastDailyReportDate: null
 };

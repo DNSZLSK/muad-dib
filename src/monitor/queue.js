@@ -77,6 +77,7 @@ const {
 
 // From ./ingestion.js
 const { getNpmLatestTarball, getPyPITarballUrl } = require('./ingestion.js');
+const { enqueueScan } = require('./scan-queue.js');
 
 // From ./tarball-archive.js
 const { archiveSuspectTarball } = require('./tarball-archive.js');
@@ -1255,7 +1256,7 @@ async function resolveTarballAndScan(item, stats, dailyAlerts, recentlyScanned, 
           if (!recent || !recent.tarball || !recent.version) continue;
           const dedupeKey = `${item.name}@${recent.version}`;
           if (recentlyScanned.has(dedupeKey)) continue;
-          scanQueue.push({
+          enqueueScan(scanQueue, {
             name: item.name,
             version: recent.version,
             ecosystem: 'npm',
@@ -1264,7 +1265,7 @@ async function resolveTarballAndScan(item, stats, dailyAlerts, recentlyScanned, 
             registryScripts: recent.scripts || null,
             atoSignal: item.atoSignal === true,
             isATOBurstExtra: true,
-          });
+          }, stats);
         }
 
         // Fast-track decision: large packages (>15MB) with no lifecycle scripts and no IOC match.
@@ -1377,6 +1378,7 @@ async function resolveTarballAndScan(item, stats, dailyAlerts, recentlyScanned, 
     publishResult = pubRes.status === 'fulfilled' ? pubRes.value : null;
     maintainerResult = maintRes.status === 'fulfilled' ? maintRes.value : null;
   } else if (skipTemporal && item.ecosystem === 'npm' && !item.fastTrack) {
+    stats.temporalLoadShed = (stats.temporalLoadShed || 0) + 1; // P2.2: count the coverage degradation
     console.log(`[MONITOR] TEMPORAL LOAD-SHED: ${item.name}@${item.version} (queue=${scanQueue.length} > ${TEMPORAL_LOAD_SHED_THRESHOLD})`);
   }
 
