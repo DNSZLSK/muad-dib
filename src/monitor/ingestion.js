@@ -10,6 +10,7 @@
 const https = require('https');
 const { acquireRegistrySlot, releaseRegistrySlot } = require('../shared/http-limiter.js');
 const { loadCachedIOCs } = require('../ioc/updater.js');
+const { enqueueScan } = require('./scan-queue.js');
 const {
   saveNpmSeq, CHANGES_STREAM_URL, CHANGES_LIMIT, CHANGES_CATCHUP_MAX,
   savePypiSerial, PYPI_XMLRPC_URL, PYPI_CATCHUP_MAX
@@ -523,7 +524,7 @@ async function preResolveNpmBatch(items, stats, scanQueue) {
     // already done. Items keep their original order because chunks complete
     // sequentially.
     if (scanQueue) {
-      for (const item of chunk) scanQueue.push(item);
+      for (const item of chunk) enqueueScan(scanQueue, item, stats);
     }
   }
   if (stats) {
@@ -566,7 +567,7 @@ async function preResolvePyPIBatch(items, stats, scanQueue) {
       }
     }));
     if (scanQueue) {
-      for (const item of chunk) scanQueue.push(item);
+      for (const item of chunk) enqueueScan(scanQueue, item, stats);
     }
   }
   if (stats) {

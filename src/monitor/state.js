@@ -5,6 +5,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { isMainThread, threadId } = require('worker_threads');
 const { sanitizePackageName } = require('../shared/download.js');
 
 // --- File path constants ---
@@ -19,6 +20,7 @@ const DETECTIONS_FILE_LEGACY = path.join(__dirname, '..', '..', 'data', 'detecti
 const SCAN_STATS_FILE = path.join(__dirname, '..', '..', 'data', 'scan-stats.json');
 const LAST_DAILY_REPORT_FILE = path.join(__dirname, '..', '..', 'data', 'last-daily-report.json');
 const DAILY_STATS_FILE = path.join(__dirname, '..', '..', 'data', 'daily-stats.json');
+const RECENTLY_SCANNED_FILE = path.join(__dirname, '..', '..', 'data', 'recently-scanned.json');
 const TEMPORAL_DETECTIONS_FILE = path.join(__dirname, '..', '..', 'data', 'temporal-detections.jsonl');
 const TEMPORAL_DETECTIONS_FILE_LEGACY = path.join(__dirname, '..', '..', 'data', 'temporal-detections.json');
 
@@ -43,13 +45,21 @@ const FALLBACK_ALERTS_DIR = path.join(require('os').tmpdir(), 'muaddib-alerts');
  * Try to ensure a directory exists and is writable. Returns the usable path
  * or a fallback path if the primary is read-only / permission-denied.
  */
-function resolveWritableDir(primary, fallback) {
+function resolveWritableDir(primary, fallback, isMain = isMainThread) {
   try {
     fs.mkdirSync(primary, { recursive: true });
-    // Verify writability with a probe file
-    const probe = path.join(primary, '.write-test');
-    fs.writeFileSync(probe, '', 'utf8');
-    fs.unlinkSync(probe);
+    // Only the MAIN thread writes reports/alerts. Each of the up-to-16 scan worker
+    // threads also loads this module (via the transitive require chain), so if they
+    // all ran the probe they'd race on the shared path and throw ENOENT on unlink
+    // (8 such errors/day in prod). Workers skip the probe — the main thread's is enough.
+    if (isMain) {
+      // Unique name per process+thread so overlapping processes (restart storms) and
+      // any future multi-thread probing can't collide. force:true on removal tolerates
+      // an already-gone probe (the very race this fixes) instead of throwing ENOENT.
+      const probe = path.join(primary, `.write-test-${process.pid}-${threadId}`);
+      fs.writeFileSync(probe, '', 'utf8');
+      fs.rmSync(probe, { force: true });
+    }
     return primary;
   } catch (err) {
     if (err.code === 'EROFS' || err.code === 'EACCES' || err.code === 'EPERM') {
@@ -1075,6 +1085,66 @@ function maybePersistDailyStats(stats, dailyAlerts) {
   }
 }
 
+// --- Daily report headline reconciliation (crash-safe) ---
+//
+// A restart-storm around the daily-report hour can zero/corrupt the in-memory
+// `stats` counter (the monitor was OOM-restarted ~10×/day in prod), producing a
+// report like "scanned=5" while ~44k packages were actually scanned that day.
+// scan-stats.json's `stats.total_scanned` is a MONOTONIC all-time counter, written
+// atomically on every scan and NEVER reset — so "scans since the last report" is a
+// restart-proof delta. We persist that counter as a per-report baseline and floor
+// the published headline at the delta, so a report can never under-count below what
+// really happened. No-op on healthy days (in-memory counter >= delta).
+
+/**
+ * Snapshot the monotonic all-time scan-stats totals, to persist as a baseline at
+ * report time. The next report computes "since last report" as a delta from it.
+ */
+function captureScanStatsBaseline() {
+  const s = loadScanStats().stats || {};
+  return {
+    total_scanned: s.total_scanned || 0,
+    clean: s.clean || 0,
+    suspect: s.suspect || 0
+  };
+}
+
+/**
+ * Floor the in-memory daily headline (scanned/clean/suspect) at the durable
+ * scan-stats delta since the last report. Mutates `stats` UPWARD only; never lowers
+ * a value. Returns { applied, floor, before } for observability and tests. Safe
+ * no-op when there is no baseline yet (first report ever) or when the in-memory
+ * counter already meets/exceeds the delta.
+ */
+function reconcileDailyHeadline(stats) {
+  const summary = { applied: false, floor: 0, before: stats.scanned };
+  let baseline = null;
+  try {
+    baseline = JSON.parse(fs.readFileSync(LAST_DAILY_REPORT_FILE, 'utf8')).scanStatsBaseline;
+  } catch { /* no file / corrupt — no baseline, treat as first report */ }
+  if (!baseline || typeof baseline.total_scanned !== 'number') return summary;
+  const cur = loadScanStats().stats || {};
+  const dScanned = Math.max(0, (cur.total_scanned || 0) - baseline.total_scanned);
+  const dClean = Math.max(0, (cur.clean || 0) - (baseline.clean || 0));
+  const dSuspect = Math.max(0, (cur.suspect || 0) - (baseline.suspect || 0));
+  summary.floor = dScanned;
+  // Trigger on SIGNIFICANT loss (in-memory below 80% of the durable delta = a
+  // restart-storm dropped counter increments), not on normal drift. The two counters
+  // drift a few percent (in-memory also counts SIZE_REJECT/SKIP-large paths scan-stats
+  // doesn't — so on a healthy day delta <= in-memory, making a false trigger require an
+  // implausible +25% over-count). 0.8 catches half-catastrophes (e.g. 25k in-memory vs
+  // 48k durable) while staying well above the ~5-10% normal-drift band.
+  const LOSS_FLOOR_RATIO = 0.8;
+  if (dScanned > 100 && stats.scanned < dScanned * LOSS_FLOOR_RATIO) {
+    console.warn(`[MONITOR] DAILY RECONCILE: in-memory scanned=${stats.scanned} ≪ durable scan-stats delta=${dScanned} (restart-storm counter loss) — publishing durable count`);
+    stats.scanned = dScanned;
+    if (dClean > stats.clean) stats.clean = dClean;
+    if (dSuspect > stats.suspect) stats.suspect = dSuspect;
+    summary.applied = true;
+  }
+  return summary;
+}
+
 // --- Daily report date persistence ---
 
 /**
@@ -1092,11 +1162,15 @@ function loadLastDailyReportDate() {
 }
 
 /**
- * Persist the date of the last daily report sent (YYYY-MM-DD).
+ * Persist the date of the last daily report sent (YYYY-MM-DD), and optionally the
+ * monotonic scan-stats baseline captured at that moment (used by the next report's
+ * crash-safe headline reconciliation). Baseline is optional for backward compat.
  */
-function saveLastDailyReportDate(dateStr) {
+function saveLastDailyReportDate(dateStr, scanStatsBaseline) {
   try {
-    atomicWriteFileSync(LAST_DAILY_REPORT_FILE, JSON.stringify({ lastReportDate: dateStr }, null, 2));
+    const payload = { lastReportDate: dateStr };
+    if (scanStatsBaseline) payload.scanStatsBaseline = scanStatsBaseline;
+    atomicWriteFileSync(LAST_DAILY_REPORT_FILE, JSON.stringify(payload, null, 2));
   } catch (err) {
     console.error(`[MONITOR] Failed to save last daily report date: ${err.message}`);
   }
@@ -1134,6 +1208,56 @@ function getParisHour() {
 function getParisDateString() {
   const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris' });
   return formatter.format(new Date());
+}
+
+// --- recentlyScanned dedup-set persistence (survives restarts → no re-scan storm) ---
+//
+// The dedup Set is in-memory only, so every restart starts it empty and re-scans the
+// whole restored backlog (wasted work — the monitor OOM-restarts ~10×/day). We persist
+// the keys alongside the queue so the dedup survives. Entries are timestampless (the Set
+// is FIFO-capped and cleared at each daily report, so it holds at most ~24h of keys), so
+// freshness is guarded at the whole-file level with a savedAt — same shape as queue-state.
+const RECENTLY_SCANNED_PERSIST_MAX = 50_000;             // mirrors RECENTLY_SCANNED_MAX (queue.js)
+const RECENTLY_SCANNED_MAX_AGE_MS = 24 * 60 * 60 * 1000; // discard a stale file (monitor down >24h)
+
+function saveRecentlyScanned(recentlyScanned) {
+  try {
+    if (!recentlyScanned || recentlyScanned.size === 0) {
+      try { fs.unlinkSync(RECENTLY_SCANNED_FILE); } catch {}
+      return;
+    }
+    let keys = Array.from(recentlyScanned);
+    if (keys.length > RECENTLY_SCANNED_PERSIST_MAX) keys = keys.slice(-RECENTLY_SCANNED_PERSIST_MAX);
+    atomicWriteFileSync(RECENTLY_SCANNED_FILE, JSON.stringify({ savedAt: new Date().toISOString(), count: keys.length, keys }));
+  } catch (err) {
+    console.error(`[MONITOR] Failed to persist recentlyScanned: ${err.message}`);
+  }
+}
+
+/**
+ * Restore the dedup Set on boot by adding keys into the passed Set in place. Returns
+ * the count restored. Safe no-op on missing / corrupt / stale (>24h) file.
+ */
+function loadRecentlyScanned(recentlyScanned) {
+  try {
+    if (!fs.existsSync(RECENTLY_SCANNED_FILE)) return 0;
+    const data = JSON.parse(fs.readFileSync(RECENTLY_SCANNED_FILE, 'utf8'));
+    if (!data || !Array.isArray(data.keys) || !data.savedAt) return 0;
+    const ageMs = Date.now() - new Date(data.savedAt).getTime();
+    if (ageMs > RECENTLY_SCANNED_MAX_AGE_MS) {
+      console.log(`[MONITOR] recentlyScanned state expired (${Math.round(ageMs / 3600000)}h old) — ignoring`);
+      try { fs.unlinkSync(RECENTLY_SCANNED_FILE); } catch {}
+      return 0;
+    }
+    let keys = data.keys;
+    if (keys.length > RECENTLY_SCANNED_PERSIST_MAX) keys = keys.slice(-RECENTLY_SCANNED_PERSIST_MAX);
+    for (const k of keys) recentlyScanned.add(k);
+    console.log(`[MONITOR] Restored ${keys.length} dedup keys from previous session (no re-scan storm)`);
+    return keys.length;
+  } catch (err) {
+    console.log(`[MONITOR] WARNING: could not restore recentlyScanned: ${err.message}`);
+    return 0;
+  }
 }
 
 // --- Raw state loader (CLI report helpers) ---
@@ -1320,9 +1444,13 @@ module.exports = {
   saveDailyStats,
   resetDailyStats,
   maybePersistDailyStats,
+  captureScanStatsBaseline,
+  reconcileDailyHeadline,
   loadLastDailyReportDate,
   saveLastDailyReportDate,
   hasReportBeenSentToday,
+  saveRecentlyScanned,
+  loadRecentlyScanned,
   getParisHour,
   getParisDateString,
   loadStateRaw

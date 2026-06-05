@@ -9,6 +9,12 @@ Type=simple
 User=muaddib
 Group=muaddib
 WorkingDirectory=/opt/muaddib
+# Self-heal ownership of the runtime dirs the daemon writes as muaddib: state (data/),
+# logs/, and the tarball archive/ (33G/94k files). The leading + runs the chown as root
+# regardless of User=muaddib, so it recovers from an external ownership drift (e.g. a
+# maintenance/test run under another user). archive/ is included after an incident where a
+# broad `chown -R ubuntu /opt/muaddib` left the daemon unable to write package snapshots.
+# chown -R over archive/ is ~0.5s (bound by inode count, not the 33G) — negligible per start.
 ExecStartPre=+/bin/chown -R muaddib:muaddib /opt/muaddib/data /opt/muaddib/logs /opt/muaddib/archive
 ExecStart=/usr/bin/node --expose-gc --max-old-space-size=8192 src/monitor.js
 Restart=always
@@ -60,6 +66,22 @@ Environment=MUADDIB_RSS_LIMIT_MB=8500
 MemoryHigh=8.5G
 MemoryMax=9.5G
 MemorySwapMax=0
+
+# ── Off-heap RSS mitigation (P1) ──
+# The OOM is driven by RSS creep the heap-only breaker can't see (heap ~41% while RSS
+# hits 91%). Scan workers are one-shot worker_threads, so their isolates are freed at
+# exit — the prime remaining suspect is glibc per-thread malloc arenas NOT returning
+# freed memory to the OS (classic RSS creep with a busy thread pool). Cap the arenas to
+# bound it. MUST be set here: glibc reads MALLOC_ARENA_MAX at exec, so it cannot be set
+# from JS. Confirm the effect post-deploy in data/mem-trend.jsonl (rss vs external/
+# arrayBuffers over a few hours).
+Environment=MALLOC_ARENA_MAX=2
+# If MALLOC_ARENA_MAX alone is insufficient, reduce peak concurrent native memory by
+# lowering the scan concurrency (code default 16; the knob already exists, no redeploy
+# of code needed). NOTE: 8 ~halves peak worker memory but also ~halves throughput →
+# risk of an ingestion backlog + temporal load-shed. Tune against mem-trend.jsonl, do
+# not set blindly. Uncomment to apply:
+# Environment=MUADDIB_MAX_CONCURRENCY=8
 
 [Install]
 WantedBy=multi-user.target

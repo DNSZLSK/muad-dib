@@ -87,6 +87,12 @@ const { runSandboxPreloadTests } = require('./integration/sandbox-preload.test')
 // Integration tests (fast subset — CLI, monitor, diff)
 const { runCliTests } = require('./integration/cli.test');
 const { runMonitorTests } = require('./integration/monitor.test');
+const { runDailyReportResilienceTests } = require('./integration/daily-report-resilience.test');
+const { runRecentlyScannedPersistenceTests } = require('./integration/recently-scanned-persistence.test');
+const { runScanQueueCapTests } = require('./integration/scan-queue-cap.test');
+const { runWriteTestRaceTests } = require('./integration/write-test-race.test');
+const { runMemTrendInstrumentationTests } = require('./integration/mem-trend-instrumentation.test');
+const { runRestartTrackingTests } = require('./integration/restart-tracking.test');
 const { runDiffTests } = require('./integration/diff.test');
 const { runOutputFormatterTests } = require('./integration/output-formatter.test');
 const { runSafeInstallTests } = require('./integration/safe-install.test');
@@ -183,6 +189,12 @@ async function timed(name, fn) {
 
   // Monitor + diff
   await timed('monitor', runMonitorTests);
+  await timed('daily-report-resilience', runDailyReportResilienceTests);
+  await timed('recently-scanned-persistence', runRecentlyScannedPersistenceTests);
+  await timed('scan-queue-cap', runScanQueueCapTests);
+  await timed('write-test-race', runWriteTestRaceTests);
+  await timed('mem-trend-instrumentation', runMemTrendInstrumentationTests);
+  await timed('restart-tracking', runRestartTrackingTests);
   await timed('monitor-pre-resolve', runMonitorPreResolveTests);
   await timed('triage', runTriageTests);
   await timed('triage-gt', runTriageGtTests);
