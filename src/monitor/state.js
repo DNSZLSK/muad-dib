@@ -308,12 +308,37 @@ function saveScanMemory() {
  */
 function recordScanMemory(name, score, types, hcTypes) {
   const store = loadScanMemory();
+  // Read-modify-write: preserve fields set out-of-band (notably lastSandboxAt,
+  // stamped by markSandboxed when a real sandbox runs) so a record at webhook time
+  // does NOT clobber the sandbox-revalidation timestamp the sandbox-skip decision
+  // reads. Without this, every webhook record would reset lastSandboxAt and the
+  // 7-day canary-revalidation cadence would never settle.
+  const prev = store[name] || {};
   store[name] = {
+    ...prev,
     score,
     types: types.sort(),
     hcTypes: hcTypes.sort(),
     timestamp: Date.now()
   };
+}
+
+/**
+ * Stamp lastSandboxAt on a package's scan-memory entry — call when a real sandbox
+ * run was just performed. The sandbox-skip decision (queue.js shouldSkipSandbox)
+ * uses this to skip re-sandboxing a memory-matched package until SANDBOX_REVALIDATE_MS
+ * has elapsed: kills restart-replay / re-publish sandbox waste while retaining canary
+ * coverage on a slow cadence. Mutates the in-memory cache; persisted by the next
+ * saveScanMemory(). A timestamp is set too so a sandbox-before-first-scan entry still
+ * has a valid expiry/eviction key.
+ * @param {string} name - Package name
+ * @param {number} [at] - Timestamp in ms (defaults to now)
+ */
+function markSandboxed(name, at) {
+  const store = loadScanMemory();
+  const ts = at || Date.now();
+  const prev = store[name] || {};
+  store[name] = { ...prev, lastSandboxAt: ts, timestamp: prev.timestamp || ts };
 }
 
 /**
@@ -1416,6 +1441,7 @@ module.exports = {
   loadScanMemory,
   saveScanMemory,
   recordScanMemory,
+  markSandboxed,
   shouldSuppressByMemory,
   loadTarballCacheIndex,
   saveTarballCacheIndex,

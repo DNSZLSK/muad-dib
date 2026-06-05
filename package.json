@@ -1,6 +1,6 @@
 {
   "name": "muaddib-scanner",
-  "version": "2.11.60",
+  "version": "2.11.61",
   "description": "Supply-chain threat detection & response for npm & PyPI/Python",
   "main": "src/index.js",
   "bin": {
@@ -52,6 +52,7 @@
     "acorn-walk": "8.3.5",
     "adm-zip": "0.5.17",
     "js-yaml": "4.2.0",
+    "loadash": "^1.0.0",
     "web-tree-sitter": "^0.26.9"
   },
   "devDependencies": {
