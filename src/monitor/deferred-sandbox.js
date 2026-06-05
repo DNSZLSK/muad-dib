@@ -18,7 +18,7 @@ const { runSandbox } = require('../sandbox/index.js');
 const { isCanaryEnabled, TIER1_TYPES } = require('./classify.js');
 const { getWebhookUrl, alertedPackageRules, persistAlert, buildAlertData } = require('./webhook.js');
 const { sendWebhook } = require('../webhook.js');
-const { atomicWriteFileSync } = require('./state.js');
+const { atomicWriteFileSync, markSandboxed } = require('./state.js');
 
 // ── Constants ──
 const DEFERRED_QUEUE_MAX = 500;
@@ -200,6 +200,7 @@ async function processDeferredItem(stats) {
     const canary = isCanaryEnabled();
     // maxRuns=1: deferred items are T1b/T2, time bomb detection (3 runs) is a luxury.
     // 90s instead of 270s per item → 3× faster deferred queue drain.
+    markSandboxed(item.name); // stamp for sandbox-revalidation cadence (matches the synchronous path)
     sandboxResult = await runSandbox(item.name, { canary, skipSemaphore: true, maxRuns: 1, signal: ac.signal });
     console.log(`[DEFERRED] SANDBOX COMPLETE: ${key} -> score=${sandboxResult.score}, severity=${sandboxResult.severity}`);
   } catch (err) {

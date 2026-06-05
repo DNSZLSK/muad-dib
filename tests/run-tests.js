@@ -127,6 +127,7 @@ const { runMonitorPreResolveTests } = require('./integration/monitor-pre-resolve
 const { runTriageTests } = require('./integration/triage.test');
 const { runTriageGtTests } = require('./integration/triage-gt.test');
 const { runSandboxGateTests } = require('./integration/sandbox-gate.test');
+const { runSandboxDecisionTests } = require('./unit/sandbox-decision.test');
 const { runOomDetectionsJsonlTests } = require('./integration/oom-detections-jsonl.test');
 const { runAutoLabelerTests } = require('./integration/auto-labeler.test');
 
@@ -342,6 +343,9 @@ async function timed(name, fn) {
 
   // Deferred sandbox queue tests (v2.10.46)
   await timed('deferred-sandbox', runDeferredSandboxTests);
+
+  // Sandbox waste-cut decision tests (memory-skip + native-binary-shard skip)
+  await timed('sandbox-decision', runSandboxDecisionTests);
 
   // Monitor memory management tests (OOM prevention)
   await timed('monitor-memory', runMonitorMemoryTests);

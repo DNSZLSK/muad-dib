@@ -33,7 +33,10 @@ const {
   appendAlert,
   getParisHour,
   hasReportBeenSentToday,
-  MAX_DAILY_ALERTS
+  MAX_DAILY_ALERTS,
+  loadScanMemory,
+  shouldSuppressByMemory,
+  markSandboxed
 } = require('./state.js');
 
 // From ./classify.js
@@ -142,6 +145,29 @@ function computeSandboxScoreThreshold(envValue) {
 }
 const SANDBOX_SCORE_THRESHOLD = computeSandboxScoreThreshold(process.env.MUADDIB_SANDBOX_SCORE_THRESHOLD);
 
+// --- Sandbox waste-cut (v2.11.6x): skip sandbox time that yields no new verdict ---
+// Two skip paths, both detection-safe, applied BEFORE the tier sandbox decision:
+//  (1) memory match — re-sandboxing a package whose static result is equivalent to a
+//      remembered scan produces nothing the webhook wouldn't already memory-suppress.
+//      The dominant waste source is restart-replay: recentlyScanned is in-memory (lost on
+//      restart) but scan-memory persists 30d, so the changes-stream backlog gets
+//      re-sandboxed then suppressed. We skip, but re-sandbox at most once per
+//      SANDBOX_REVALIDATE_MS so runtime/canary coverage is retained on a slow cadence.
+//  (2) native binary shard — platform-specific prebuilt packages (os/cpu constrained or
+//      name like `*-linux-x64`) with trivial JS hang the sandbox install and always time
+//      out INCONCLUSIVE. Same guard rails as the large-low-signal skip (queue.js ~768):
+//      any lifecycle script, HIGH/CRITICAL finding, or temporal signal → sandbox runs.
+const SANDBOX_REVALIDATE_MS = (() => {
+  const v = parseInt(process.env.MUADDIB_SANDBOX_REVALIDATE_MS, 10);
+  return Number.isFinite(v) && v >= 0 ? v : 7 * 24 * 60 * 60 * 1000; // default 7 days
+})();
+// npm platform-shard naming: <scope>/<pkg>-<os>-<arch>[-<libc/abi>] (esbuild/swc/turbo pattern).
+const NATIVE_SHARD_NAME_RE = /-(linux|darwin|win32|freebsd|openbsd|android|sunos|aix)-(x64|arm64|arm|ia32|ppc64|s390x|riscv64|loong64|mips64el)(-(gnu|gnueabihf|musl|eabi|eabihf|msvc))?$/;
+const LIFECYCLE_SCRIPT_KEYS = ['preinstall', 'install', 'postinstall', 'prepare', 'prepublish', 'prepublishOnly', 'preuninstall', 'uninstall', 'postuninstall'];
+// A genuine prebuilt shard is a thin wrapper around a binary (index.js + index.d.ts at most).
+// More JS than this means real logic → not a pure shard → don't skip.
+const NATIVE_SHARD_MAX_JS_FILES = 3;
+
 // --- Bundled tooling false-positive filter ---
 
 const KNOWN_BUNDLED_FILES = ['yarn.js', 'webpack.js', 'terser.js', 'esbuild.js', 'polyfills.js'];
@@ -230,6 +256,88 @@ function countPackageFiles(dir) {
 
   walk(dir, 0);
   return { fileCountTotal, hasTests };
+}
+
+/**
+ * Pure classifier: is this a prebuilt native-binary platform shard (the kind that
+ * hangs the sandbox install and always times out INCONCLUSIVE)? No I/O — the parsed
+ * package.json manifest is passed in so this is unit-testable. Mirrors the extracted
+ * pure helpers computeWorkersToSpawn / computeTarget.
+ *
+ * A package is a shard when it declares a platform constraint (npm `os`/`cpu`) OR its
+ * name matches the `*-<os>-<arch>` convention, AND it carries only a trivial amount of
+ * JS (a real shard is a thin wrapper around a binary). hasLifecycleScripts is returned
+ * separately so the caller can keep sandboxing shards that DO run install hooks — the
+ * actual supply-chain vector.
+ *
+ * @param {string} name - Package name
+ * @param {number} fileCountTotal - JS/TS file count from countPackageFiles
+ * @param {Object|null} manifest - Parsed package.json (or null if unreadable)
+ * @returns {{ isShard: boolean, hasLifecycleScripts: boolean }}
+ */
+function classifyNativeShard(name, fileCountTotal, manifest) {
+  const m = manifest || {};
+  const scripts = (m.scripts && typeof m.scripts === 'object') ? m.scripts : {};
+  const hasLifecycleScripts = LIFECYCLE_SCRIPT_KEYS.some(
+    k => typeof scripts[k] === 'string' && scripts[k].trim().length > 0
+  );
+  const platformConstrained =
+    (Array.isArray(m.os) && m.os.length > 0) ||
+    (Array.isArray(m.cpu) && m.cpu.length > 0);
+  const nameMatches = NATIVE_SHARD_NAME_RE.test(name || '');
+  const lowJs = (fileCountTotal || 0) <= NATIVE_SHARD_MAX_JS_FILES;
+  return { isShard: (platformConstrained || nameMatches) && lowJs, hasLifecycleScripts };
+}
+
+/**
+ * Pure decision: should the sandbox be skipped entirely for this package, BEFORE the
+ * tier-level run/defer/gate logic? Returns the skip descriptor or null. No I/O — every
+ * input is precomputed, so this is unit-testable without launching a real sandbox.
+ *
+ * Both skip paths are detection-safe:
+ *  - skip-memory: only when shouldSuppressByMemory already holds (the webhook would be
+ *    suppressed anyway → the sandbox produces nothing actionable) AND we re-sandboxed
+ *    this package within revalidateMs. A memory match that is stale (or never sandboxed)
+ *    falls through to run, so canary coverage is revalidated on the revalidateMs cadence.
+ *    New threat types / new HC types / score shift / IOC match all make memorySuppress
+ *    false upstream → never skipped.
+ *  - skip-native: only a native binary shard with NO lifecycle script, NO HIGH/CRITICAL
+ *    finding and NO temporal signal — same guard rails as the large-low-signal skip.
+ *
+ * @param {Object} ctx
+ * @param {boolean} ctx.memorySuppress - shouldSuppressByMemory(name, result).suppress
+ * @param {number} [ctx.lastSandboxAt] - last real sandbox timestamp from scan memory
+ * @param {number} ctx.now - current time (ms)
+ * @param {number} ctx.revalidateMs - SANDBOX_REVALIDATE_MS
+ * @param {boolean} ctx.isNativeShard
+ * @param {boolean} ctx.hasLifecycleScripts
+ * @param {boolean} ctx.hasHighOrCritical
+ * @param {boolean} ctx.hasTemporal
+ * @returns {{ action: 'skip-memory'|'skip-native', reason: string } | null}
+ */
+function shouldSkipSandbox(ctx) {
+  const {
+    memorySuppress, lastSandboxAt, now, revalidateMs,
+    isNativeShard, hasLifecycleScripts, hasHighOrCritical, hasTemporal
+  } = ctx;
+
+  // (1) Memory match — skip only if we sandboxed it recently (else revalidate).
+  if (memorySuppress) {
+    const sandboxedRecently =
+      typeof lastSandboxAt === 'number' && (now - lastSandboxAt) < revalidateMs;
+    if (sandboxedRecently) {
+      const days = ((now - lastSandboxAt) / 86_400_000).toFixed(1);
+      return { action: 'skip-memory', reason: `memory match, last sandbox ${days}d ago` };
+    }
+    // fall through — stale/never-sandboxed memory match revalidates via the normal path
+  }
+
+  // (2) Native binary shard — same guard rails as the large-low-signal skip.
+  if (isNativeShard && !hasLifecycleScripts && !hasHighOrCritical && !hasTemporal) {
+    return { action: 'skip-native', reason: 'native binary shard, no lifecycle' };
+  }
+
+  return null;
 }
 
 /**
@@ -791,7 +899,35 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
           (tier === 2 && riskScore >= SANDBOX_SCORE_THRESHOLD && scanQueue.length < 50)
         );
 
-        if (shouldSandbox) {
+        // Waste-cut: skip the sandbox (run AND defer) when re-running it yields no new
+        // verdict — a memory match the webhook would suppress anyway (dominant cost:
+        // restart-replay of the changes-stream backlog), or a native binary shard that
+        // just hangs the install. Both detection-safe (see shouldSkipSandbox). Cheap:
+        // one package.json read + a scan-memory lookup.
+        let shardManifest = null;
+        try {
+          shardManifest = JSON.parse(fs.readFileSync(path.join(extractedDir, 'package.json'), 'utf8'));
+        } catch { /* unreadable manifest → classifyNativeShard treats it as non-shard */ }
+        const { isShard: isNativeShard, hasLifecycleScripts: shardHasLifecycle } =
+          classifyNativeShard(name, fileCountTotal, shardManifest);
+        const memEntry = loadScanMemory()[name];
+        const sandboxSkip = (isSandboxEnabled() && sandboxAvailable) ? shouldSkipSandbox({
+          memorySuppress: shouldSuppressByMemory(name, result).suppress,
+          lastSandboxAt: memEntry && memEntry.lastSandboxAt,
+          now: Date.now(),
+          revalidateMs: SANDBOX_REVALIDATE_MS,
+          isNativeShard,
+          hasLifecycleScripts: shardHasLifecycle,
+          hasHighOrCritical: hasHighOrCriticalFinding,
+          hasTemporal: hasTemporalSignal
+        }) : null;
+
+        if (sandboxSkip) {
+          console.log(`[MONITOR] SANDBOX SKIP (${sandboxSkip.reason}): ${name}@${version}`);
+          stats.sandboxWasteSkipped = (stats.sandboxWasteSkipped || 0) + 1;
+          if (sandboxSkip.action === 'skip-memory') stats.sandboxSkipMemory = (stats.sandboxSkipMemory || 0) + 1;
+          else stats.sandboxSkipNative = (stats.sandboxSkipNative || 0) + 1;
+        } else if (shouldSandbox) {
           try {
             const canary = isCanaryEnabled();
             const maxRuns = tier === '1a' ? undefined : 1;
@@ -799,11 +935,13 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
             if (tier === '1a') {
               // T1a: mandatory sandbox — block-wait (high-confidence threats MUST get sandbox)
               console.log(`[MONITOR] SANDBOX: launching for ${name}@${version}${canary ? ' (canary: on)' : ''}...`);
+              markSandboxed(name); // stamp before the await: an aborted/inconclusive run still spent the time
               sandboxResult = await runSandbox(name, { canary, maxRuns, signal });
             } else if (tryAcquireSandboxSlot()) {
               // T1b/T2: non-blocking — slot acquired atomically, run with skipSemaphore
               const reason = tier === 2 ? ' (T2, queue low)' : ' (T1b, conditional)';
               console.log(`[MONITOR] SANDBOX${reason}: launching for ${name}@${version}${canary ? ' (canary: on)' : ''}...`);
+              markSandboxed(name); // stamp before the await: an aborted/inconclusive run still spent the time
               sandboxResult = await runSandbox(name, { canary, maxRuns, skipSemaphore: true, signal });
             } else {
               // T1b/T2: all sandbox slots busy — defer instead of blocking worker
@@ -1530,6 +1668,7 @@ module.exports = {
   FIRST_PUBLISH_SANDBOX_ENABLED,
   SANDBOX_SCORE_THRESHOLD,
   computeSandboxScoreThreshold,
+  SANDBOX_REVALIDATE_MS,
   KNOWN_BUNDLED_FILES,
   KNOWN_BUNDLED_PATHS,
   ML_EXCLUDED_DIRS,
@@ -1550,6 +1689,8 @@ module.exports = {
   isBundledToolingOnly,
   recordTrainingSample,
   countPackageFiles,
+  classifyNativeShard,
+  shouldSkipSandbox,
   runScanInWorker,
   scanPackage,
   timeoutPromise,
