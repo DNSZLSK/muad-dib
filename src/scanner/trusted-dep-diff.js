@@ -29,6 +29,7 @@
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
+const { acquireRegistrySlot, releaseRegistrySlot, signal429 } = require('../shared/http-limiter.js');
 
 const TRUSTED_DEP_AGE_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
@@ -80,7 +81,17 @@ function httpsGet(url, timeoutMs = 30_000) {
 async function checkDepDiff(name, newVersion) {
   const findings = [];
   try {
-    const body = await httpsGet(`https://registry.npmjs.org/${encodeURIComponent(name)}`, PACKUMENT_TIMEOUT_MS);
+    // Route through the shared http-limiter (concurrency + token bucket + 429
+    // backoff) instead of a raw uncoordinated httpsGet — this scanner runs inside
+    // the monitor worker_threads, where an unbounded fetch joins the per-worker
+    // 429 storm. finally-release keeps the semaphore balanced even on reject.
+    await acquireRegistrySlot();
+    let body;
+    try {
+      body = await httpsGet(`https://registry.npmjs.org/${encodeURIComponent(name)}`, PACKUMENT_TIMEOUT_MS);
+    } finally {
+      releaseRegistrySlot();
+    }
     const packument = JSON.parse(body);
 
     if (!packument.versions || !packument.time) return findings;
@@ -107,13 +118,20 @@ async function checkDepDiff(name, newVersion) {
     for (const dep of addedDeps) {
       let ageMs = null;
       try {
-        const depBody = await httpsGet(`https://registry.npmjs.org/${encodeURIComponent(dep)}`, DEP_AGE_TIMEOUT_MS);
+        await acquireRegistrySlot();
+        let depBody;
+        try {
+          depBody = await httpsGet(`https://registry.npmjs.org/${encodeURIComponent(dep)}`, DEP_AGE_TIMEOUT_MS);
+        } finally {
+          releaseRegistrySlot();
+        }
         const depData = JSON.parse(depBody);
         const created = depData.time && depData.time.created;
         if (created) {
           ageMs = Date.now() - new Date(created).getTime();
         }
       } catch (err) {
+        if (/HTTP 429/.test(err.message)) { try { signal429(); } catch { /* limiter best-effort */ } }
         console.log(`[SCANNER] trusted-dep-diff: could not check age of dependency ${dep}: ${err.message}`);
       }
 
@@ -152,6 +170,7 @@ async function checkDepDiff(name, newVersion) {
 
     return findings;
   } catch (err) {
+    if (/HTTP 429/.test(err.message)) { try { signal429(); } catch { /* limiter best-effort */ } }
     console.log(`[SCANNER] trusted-dep-diff: check failed for ${name}@${newVersion}: ${err.message}`);
     return findings;
   }

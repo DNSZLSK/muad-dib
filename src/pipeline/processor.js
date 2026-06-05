@@ -193,6 +193,31 @@ async function process(threats, targetPath, options, pythonDeps, warnings, scann
   if (
     packageName &&
     _pkgMeta &&
+    options &&
+    Object.prototype.hasOwnProperty.call(options, 'npmRegistryMeta')
+  ) {
+    // The monitor fetched the registry metadata ONCE on the main thread (shared
+    // http-limiter, warm temporal cache) and passed it via scanContext.npmRegistry-
+    // Meta. Consume it here instead of re-fetching: a per-worker getPackageMetadata()
+    // runs on the worker's OWN module-level limiter, so N worker_threads = N
+    // uncoordinated limiters → ~Nx npm throughput → 429 storms. Strict semantics —
+    // the key being present (even null) means "main already handled it"; a null
+    // value (main fetch failed) leaves the gates to no-op, identical to a failed
+    // fetch (best-effort metadata signals stay silent). CLI / `muaddib replay`
+    // never set the key → the else-if fetch path below is unchanged.
+    const injected = options.npmRegistryMeta;
+    if (injected) {
+      // Attach the scanned version (getPackageMetadata never sets it) so
+      // applyMatureStableCap can require scan_version === latest_version — a
+      // historical compromised version must not inherit live "stable" reputation.
+      if (injected.scan_version == null && packageVersion != null) {
+        injected.scan_version = packageVersion;
+      }
+      _pkgMeta.npmRegistryMeta = injected;
+    }
+  } else if (
+    packageName &&
+    _pkgMeta &&
     globalThis.process.env.MUADDIB_NO_REGISTRY_FETCH !== '1' &&
     (
       globalThis.process.env.MUADDIB_METADATA_FACTOR !== '0' ||
