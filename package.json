@@ -52,7 +52,6 @@
     "acorn-walk": "8.3.5",
     "adm-zip": "0.5.17",
     "js-yaml": "4.2.0",
-    "loadash": "^1.0.0",
     "web-tree-sitter": "^0.26.9"
   },
   "devDependencies": {

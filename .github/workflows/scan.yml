@@ -19,6 +19,8 @@ jobs:
           node-version: '20'
           cache: 'npm'
       - run: npm ci
+      - name: Guard - no typosquat in package.json deps
+        run: node scripts/check-deps-typosquats.js
       - name: Run tests
         run: npm test
 
