@@ -789,6 +789,24 @@ test('INVALIDATE: invalidateCache clears cached result', () => {
   assert(second.packagesMap, 'Should still return valid IOCs after invalidate');
 });
 
+test('INVALIDATE: loadCachedIOCs returns a STABLE singleton across calls (no per-call rebuild — heap-leak fix)', () => {
+  const { loadCachedIOCs, invalidateCache } = require('../../src/ioc/updater.js');
+  invalidateCache();
+  const a = loadCachedIOCs();
+  const b = loadCachedIOCs();
+  assert(a === b, 'consecutive calls must return the SAME object (singleton), not a freshly-rebuilt copy');
+});
+
+test('INVALIDATE: a rebuild happens only after invalidateCache, then re-stabilises', () => {
+  const { loadCachedIOCs, invalidateCache } = require('../../src/ioc/updater.js');
+  const a = loadCachedIOCs();
+  invalidateCache();
+  const c = loadCachedIOCs();
+  assert(a !== c, 'after invalidateCache the next load rebuilds (new object)');
+  assert(c === loadCachedIOCs(), 'further loads return the rebuilt singleton (no extra rebuilds)');
+  assert(c.packagesMap instanceof Map && c.packagesMap.size > 0, 'rebuilt store is intact');
+});
+
 // ============================================
 // EXPAND COMPACT IOCs EDGE CASES
 // ============================================

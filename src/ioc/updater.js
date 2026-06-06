@@ -123,6 +123,11 @@ async function updateIOCs() {
   console.log('[4/4] Saved to cache: ' + CACHE_IOC_FILE);
   console.log('\n[OK] IOCs updated: ' + totalNpm + ' npm + ' + totalPyPI + ' PyPI packages');
 
+  // Fresh IOC files written — drop the in-process singleton so the next
+  // loadCachedIOCs() rebuilds from them (cross-process monitors pick the change
+  // up via the mtime/size source signature within SOURCE_CHECK_INTERVAL).
+  invalidateCache();
+
   return { total: totalNpm, totalPyPI: totalPyPI };
 }
 
@@ -202,16 +207,41 @@ function mergeIOCs(target, source) {
   return added;
 }
 
-// Cache to avoid reloading IOCs on each call
+// IOC store cache. The optimized store is large (~240K entries → hundreds of MB),
+// so it MUST be a stable singleton: rebuilding it duplicates that memory, and any
+// in-flight async scan (sandbox/deferred/network) that captured a prior copy pins
+// it — a periodic rebuild therefore accumulates copies. This was the monitor's
+// old_space → OOM leak: a heap snapshot showed 7+ live copies of the 421K-entry
+// Map retained via loadCachedIOCs closures + suspended Generators/Promises.
+// Fix: rebuild ONLY when a source file actually changes (mtime/size signature) or
+// on invalidateCache(); otherwise return the same object. The signature is
+// re-checked at most every SOURCE_CHECK_INTERVAL so the hot path (called per
+// scan/poll) does zero disk I/O.
+const IOCS_DIR = path.join(__dirname, '..', '..', 'iocs');
+const IOC_SOURCE_FILES = [
+  CACHE_IOC_FILE, LOCAL_IOC_FILE, LOCAL_COMPACT_FILE,
+  path.join(IOCS_DIR, 'packages.yaml'), path.join(IOCS_DIR, 'builtin.yaml'),
+  path.join(IOCS_DIR, 'hashes.yaml'), path.join(IOCS_DIR, 'string-iocs.yaml')
+];
+function iocSourcesSignature() {
+  let sig = '';
+  for (const f of IOC_SOURCE_FILES) { try { const s = fs.statSync(f); sig += s.mtimeMs + ':' + s.size + ';'; } catch { sig += '0;'; } }
+  return sig;
+}
+
 let cachedIOCsResult = null;
-let cachedIOCsTime = 0;
-const CACHE_TTL = 10000; // 10 seconds
+let cachedIOCsSig = null;
+let lastSourceCheck = 0;
+const SOURCE_CHECK_INTERVAL = 10000; // re-stat source files at most every 10s
 
 function loadCachedIOCs() {
-  // Return cache if still valid
   const now = Date.now();
-  if (cachedIOCsResult && (now - cachedIOCsTime) < CACHE_TTL) {
-    return cachedIOCsResult;
+  if (cachedIOCsResult) {
+    // Hot path: within the check window, return the singleton with no disk I/O.
+    if (now - lastSourceCheck < SOURCE_CHECK_INTERVAL) return cachedIOCsResult;
+    lastSourceCheck = now;
+    // Throttled freshness check: keep the singleton unless a source file changed.
+    if (iocSourcesSignature() === cachedIOCsSig) return cachedIOCsResult;
   }
 
   // Priority 1: YAML IOCs
@@ -279,9 +309,11 @@ function loadCachedIOCs() {
   // Create optimized structures for O(1) lookup
   const optimized = createOptimizedIOCs(merged);
 
-  // Store in cache
+  // Store as the shared singleton; record the source signature so we only rebuild
+  // when the IOC files actually change (see loadCachedIOCs header).
   cachedIOCsResult = optimized;
-  cachedIOCsTime = now;
+  cachedIOCsSig = iocSourcesSignature();
+  lastSourceCheck = now;
 
   return optimized;
 }
@@ -560,7 +592,8 @@ function expandCompactIOCs(compact) {
 
 function invalidateCache() {
   cachedIOCsResult = null;
-  cachedIOCsTime = 0;
+  cachedIOCsSig = null;
+  lastSourceCheck = 0;
 }
 
 /**
