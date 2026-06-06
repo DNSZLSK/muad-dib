@@ -673,6 +673,58 @@ async function runTemporalAnalysisTests() {
     assert(typeof _httpSemaphore.active === 'number', 'active should be a number');
     assert(Array.isArray(_httpSemaphore.queue), 'queue should be an array');
   });
+
+  // ─── Heap-leak fix: projectPackument trims cached packuments without regressing consumers ───
+  // (Appended at END of file to avoid shifting line numbers; all behavioral, no source reads.)
+
+  function makeBigPackument(n) {
+    const versions = {}, time = { created: '2020-01-01T00:00:00.000Z' };
+    for (let i = 0; i < n; i++) {
+      const v = '1.0.' + i;
+      versions[v] = {
+        version: v, scripts: {},
+        dist: { tarball: 'https://r/-/p-' + v + '.tgz', integrity: 'sha512-AAA', host: 's3://npm-registry-packages-npm-production' },
+        _npmUser: { name: 'pub', email: 'pub@x.co' }, maintainers: [{ name: 'm', email: 'm@x.co' }]
+      };
+      time[v] = new Date(2020, 0, 1, 0, i).toISOString();
+    }
+    versions['1.0.' + (n - 1)].scripts = { postinstall: 'node evil.js' }; // new dangerous script in latest
+    return { name: 'p', 'dist-tags': { latest: '1.0.' + (n - 1) }, time, maintainers: [{ name: 'root', email: 'r@x.co' }], readme: 'R'.repeat(500000), versions };
+  }
+
+  test('PROJECT: projectPackument slims a giant packument but preserves the version/time timeline', () => {
+    const { projectPackument } = require('../../src/temporal-analysis.js');
+    const N = 3000;
+    const input = makeBigPackument(N);
+    const slim = projectPackument(input);
+    assert(Object.keys(slim.versions).length === N, `all ${N} version keys kept (existence checks), got ${Object.keys(slim.versions).length}`);
+    assert(Object.keys(slim.time).length === Object.keys(input.time).length, 'full publish timeline (time) preserved');
+    assert(typeof slim.versions['1.0.' + (N - 1)] === 'object', 'newest version keeps its full body');
+    assert(slim.versions['1.0.0'] === 1, 'old version replaced by truthy placeholder (1)');
+    assert(slim.readme === undefined, 'readme blob is dropped');
+    const ratio = JSON.stringify(slim).length / JSON.stringify(input).length;
+    assert(ratio < 0.25, `slim should be far smaller than the full packument, ratio=${ratio.toFixed(3)}`);
+  });
+
+  test('PROJECT: consumers still work on the slimmed packument (no regression)', () => {
+    const { projectPackument } = require('../../src/temporal-analysis.js');
+    const N = 3000;
+    const slim = projectPackument(makeBigPackument(N));
+    const latest = getLatestVersions(slim, 2);
+    assert(latest.length === 2 && latest[0].version === '1.0.' + (N - 1) && latest[1].version === '1.0.' + (N - 2),
+      `getLatestVersions must return the true 2 newest, got ${JSON.stringify(latest.map(x => x.version))}`);
+    const diff = compareLifecycleScripts(latest[1].version, latest[0].version, slim);
+    assert(diff.added.some(a => a.script === 'postinstall'), 'lifecycle detection must still fire on the slimmed packument');
+  });
+
+  test('PROJECT: projectPackument is safe on null / tiny packuments', () => {
+    const { projectPackument } = require('../../src/temporal-analysis.js');
+    assert(projectPackument(null) === null, 'null passes through unchanged');
+    const one = { name: 'p', 'dist-tags': { latest: '1.0.0' }, time: { '1.0.0': '2020-01-01T00:00:00.000Z' }, versions: { '1.0.0': { version: '1.0.0', scripts: {} } } };
+    const slim = projectPackument(one);
+    assert(typeof slim.versions['1.0.0'] === 'object', 'the single (latest) version keeps its full body');
+    assert(getLatestVersions(slim, 2).length === 1, 'getLatestVersions handles a 1-version package');
+  });
 }
 
 module.exports = { runTemporalAnalysisTests };
