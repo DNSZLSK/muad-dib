@@ -13,6 +13,54 @@ const _inflightRequests = new Map(); // packageName → Promise
 const METADATA_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 const NEGATIVE_CACHE_TTL = 60 * 1000; // 60 seconds for failed fetches
 const METADATA_CACHE_MAX = 200;
+// Heap-leak fix: how many of the newest versions keep their FULL body in the cached
+// packument. Consumers (lifecycle/ast diff, maintainer-change) only diff the latest 2.
+const META_KEEP_VERSIONS = Math.max(2, parseInt(process.env.MUADDIB_META_KEEP_VERSIONS, 10) || 3);
+
+/**
+ * Shrink a full npm packument to what _metadataCache consumers actually need, so the
+ * cache never retains tens-of-MB packuments (packages with thousands of versions) —
+ * the root cause of the monitor's old_space leak → OOM restarts.
+ *
+ * Kept: every root field (small), the FULL `time` map (publish timeline — required by
+ * getLatestVersions + publish-anomaly), root `dist-tags`/`maintainers`, and the FULL
+ * bodies of the newest META_KEEP_VERSIONS versions (+ dist-tags.latest). Older versions
+ * are replaced by a truthy placeholder (1) so existence checks
+ * (`if (!versions[v]) continue`) and totalVersions counts stay correct without the bulk.
+ * The big optional blobs (`readme`, `_attachments`) are dropped.
+ * @param {object} parsed - full registry packument
+ * @returns {object} slimmed packument (safe drop-in for all current consumers)
+ */
+function projectPackument(parsed) {
+  if (!parsed || typeof parsed !== 'object' || !parsed.versions || typeof parsed.versions !== 'object') {
+    return parsed;
+  }
+  const versions = parsed.versions;
+  const time = (parsed.time && typeof parsed.time === 'object') ? parsed.time : {};
+
+  // Newest META_KEEP_VERSIONS versions by publish date (same ordering as getLatestVersions).
+  const dated = [];
+  for (const [v, t] of Object.entries(time)) {
+    if (v === 'created' || v === 'modified') continue;
+    if (!versions[v]) continue;
+    dated.push([v, t]);
+  }
+  dated.sort((a, b) => new Date(b[1]) - new Date(a[1]));
+  const keep = new Set(dated.slice(0, META_KEEP_VERSIONS).map(e => e[0]));
+  const distTags = parsed['dist-tags'];
+  if (distTags && distTags.latest && versions[distTags.latest]) keep.add(distTags.latest);
+
+  const slimVersions = {};
+  for (const v of Object.keys(versions)) {
+    slimVersions[v] = keep.has(v) ? versions[v] : 1; // truthy placeholder for old versions
+  }
+
+  const slim = { ...parsed, versions: slimVersions };
+  delete slim.readme;
+  delete slim.readmeFilename;
+  delete slim._attachments;
+  return slim;
+}
 
 const LIFECYCLE_SCRIPTS = [
   'preinstall',
@@ -99,14 +147,19 @@ function _fetchPackageMetadataHttp(packageName) {
         if (destroyed) return;
         try {
           const parsed = JSON.parse(data);
+          // Heap-leak fix: project to essentials BEFORE caching. A full packument can be
+          // tens of MB (packages with thousands of versions); retaining it whole bloated
+          // old_space → OOM restarts. Resolve the slim copy too so the full `parsed` is
+          // freed immediately (consumers only need time + the latest few version bodies).
+          const slim = projectPackument(parsed);
           // Store in cache on successful fetch
           if (_metadataCache.size >= METADATA_CACHE_MAX) {
             // Evict oldest entry
             const oldestKey = _metadataCache.keys().next().value;
             _metadataCache.delete(oldestKey);
           }
-          _metadataCache.set(packageName, { data: parsed, fetchedAt: Date.now() });
-          resolve(parsed);
+          _metadataCache.set(packageName, { data: slim, fetchedAt: Date.now() });
+          resolve(slim);
         } catch (e) {
           reject(new Error(`Invalid JSON from registry for ${packageName}: ${e.message}`));
         }
@@ -333,6 +386,7 @@ async function detectSuddenLifecycleChange(packageName) {
 module.exports = {
   fetchPackageMetadata,
   clearMetadataCache,
+  projectPackument,
   getLifecycleScripts,
   compareLifecycleScripts,
   getLatestVersions,
