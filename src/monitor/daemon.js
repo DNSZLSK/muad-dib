@@ -8,7 +8,7 @@ const { setVerboseMode, isSandboxEnabled, isCanaryEnabled, isLlmDetectiveEnabled
 const { loadState, saveState, loadDailyStats, saveDailyStats, purgeTarballCache, getParisHour, atomicWriteFileSync, saveNpmSeq, ALERTS_FILE, runStateMigrations, loadRecentlyScanned, saveRecentlyScanned } = require('./state.js');
 const { isTemporalEnabled, isTemporalAstEnabled, isTemporalPublishEnabled, isTemporalMaintainerEnabled } = require('./temporal.js');
 const { pendingGrouped, flushScopeGroup, sendDailyReport, DAILY_REPORT_HOUR, alertedPackageRules, ALERTED_PACKAGES_MAX: MAX_ALERTED_PACKAGES } = require('./webhook.js');
-const { poll } = require('./ingestion.js');
+const { poll, getPollBackoffMs } = require('./ingestion.js');
 const { ensureWorkers, drainWorkers, getTargetConcurrency, setTargetConcurrency, getActiveWorkers, terminateAllWorkers } = require('./queue.js');
 const { computeTarget, ADJUST_INTERVAL_MS, BASE_CONCURRENCY } = require('./adaptive-concurrency.js');
 const { startHealthcheck } = require('./healthcheck.js');
@@ -30,6 +30,120 @@ const QUEUE_STATE_FILE = path.join(__dirname, '..', '..', 'data', 'queue-state.j
 const QUEUE_STATE_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24h expiry
 const MAX_QUEUE_PERSIST_SIZE = 200_000; // Don't persist if queue > 200K items (OOM guard)
 const MAX_RESTORE_QUEUE_SIZE = 100_000; // Cap restored queue at 100K items
+
+// ─── Poll-loop watchdog ───
+// The decoupled poll runs on a setInterval guarded by a `pollInProgress` flag.
+// If a poll cycle's awaited promise never settles (e.g. an HTTP response whose
+// body trickles forever, so the socket-inactivity timeout in httpsGet never
+// fires and it only resolves on 'end'), `pollInProgress` would stay `true` and
+// every subsequent tick would silently early-return — wedging ingestion at 0
+// scanned until a manual `systemctl restart`. The watchdog bounds every cycle
+// so the flag is ALWAYS released; shouldSkipPoll() adds a stale-flag backstop
+// for any future hang path that bypasses runPollCycle().
+const POLL_WATCHDOG_MS = Math.max(60_000, parseInt(process.env.MUADDIB_POLL_WATCHDOG_MS, 10) || 300_000);
+
+/**
+ * Run ONE poll cycle bounded by a watchdog so the caller's pollInProgress flag
+ * can never stay stuck. On timeout it REJECTS (does not resolve) with a
+ * 'poll watchdog' error, so the caller's existing catch logs it and the finally
+ * resets the flag — the next tick retries. The local timer is cleared on every
+ * settle path, so a fast poll leaves no dangling timer.
+ * @param {Function} pollFn - injectable for tests; defaults to the real poll().
+ * @returns {Promise<void>}
+ */
+async function runPollCycle(state, scanQueue, stats, watchdogMs = POLL_WATCHDOG_MS, pollFn = poll) {
+  let timer;
+  const watchdog = new Promise((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`poll watchdog: poll exceeded ${Math.round(watchdogMs / 1000)}s`)),
+      watchdogMs
+    );
+  });
+  try {
+    await Promise.race([pollFn(state, scanQueue, stats), watchdog]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Decide whether the poll scheduler should skip this tick, and whether the
+ * pollInProgress flag is stale enough to force-reset. Pure — unit-testable
+ * without timers. forceReset fires only when a cycle has been "in flight" for
+ * longer than watchdogMs + one interval, i.e. a hang path that bypassed the
+ * per-cycle watchdog (runPollCycle always settles within watchdogMs).
+ * @returns {{skip: boolean, forceReset: boolean}}
+ */
+function shouldSkipPoll(pollInProgress, pollStartedAt, now, watchdogMs, interval) {
+  if (!pollInProgress) return { skip: false, forceReset: false };
+  if (now - pollStartedAt > watchdogMs + interval) return { skip: false, forceReset: true };
+  return { skip: true, forceReset: false };
+}
+
+// ─── Heap diagnostics (restart root-cause) ───
+// mem-trend shows the main-thread heap balloons to 6-7GB in the worker-starved
+// regime while documented structures sum to <1GB — i.e. ~5GB+ unaccounted. These
+// helpers localise it: a cheap always-on heap-spaces line (retention vs churn)
+// plus an OPT-IN, disk-guarded, one-shot v8 heap snapshot for dominator-tree
+// analysis. Snapshot is OFF unless MUADDIB_HEAPSNAPSHOT_MB is set (writing a
+// multi-GB snapshot blocks the event loop ~10-60s — must be deliberate).
+const HEAPSNAPSHOT_MB = parseInt(process.env.MUADDIB_HEAPSNAPSHOT_MB, 10) || 0; // 0 = disabled
+const HEAPSNAPSHOT_MIN_FREE_GB = Math.max(1, parseInt(process.env.MUADDIB_HEAPSNAPSHOT_MIN_FREE_GB, 10) || 12);
+const HEAPSNAPSHOT_DIR = process.env.MUADDIB_HEAPSNAPSHOT_DIR || path.join(__dirname, '..', '..', 'data');
+let heapSnapshotTaken = false;
+
+/**
+ * Pure decision: write a heap snapshot now? Separated from the I/O so it is
+ * unit-testable without producing a multi-GB file.
+ * @returns {{take: boolean, reason: string}}
+ */
+function shouldSnapshot(heapUsedMB, thresholdMB, alreadyTaken, freeGB, minFreeGB) {
+  if (!thresholdMB || thresholdMB <= 0) return { take: false, reason: 'disabled' };
+  if (alreadyTaken) return { take: false, reason: 'already-taken' };
+  if (heapUsedMB < thresholdMB) return { take: false, reason: 'below-threshold' };
+  if (freeGB < minFreeGB) return { take: false, reason: `low-disk(${Math.round(freeGB)}<${minFreeGB}GB)` };
+  return { take: true, reason: 'ok' };
+}
+
+/**
+ * Compact one-line summary of v8.getHeapSpaceStatistics() used sizes (MB).
+ * old_space high ⇒ retained objects (leak); large_object_space high ⇒ big
+ * strings/arrays; new_space high ⇒ allocation churn. Pure — unit-testable.
+ */
+function formatHeapSpaces(stats) {
+  return (stats || [])
+    .map(s => `${s.space_name}=${(s.space_used_size / 1024 / 1024).toFixed(0)}`)
+    .join(' ');
+}
+
+function getFreeDiskGB(dir) {
+  try {
+    const st = fs.statfsSync(dir);
+    return (st.bavail * st.bsize) / (1024 ** 3);
+  } catch {
+    return Infinity; // statfsSync unavailable (older Node) — don't block on disk
+  }
+}
+
+// Opt-in, one-shot, disk-guarded heap snapshot. BLOCKS the event loop while
+// writing (≈ size of the live heap) — only fires when explicitly enabled.
+function maybeHeapSnapshot(heapUsedMB) {
+  if (!HEAPSNAPSHOT_MB || heapSnapshotTaken || heapUsedMB < HEAPSNAPSHOT_MB) return;
+  const decision = shouldSnapshot(heapUsedMB, HEAPSNAPSHOT_MB, heapSnapshotTaken, getFreeDiskGB(HEAPSNAPSHOT_DIR), HEAPSNAPSHOT_MIN_FREE_GB);
+  if (!decision.take) {
+    console.log(`[MONITOR] HEAP-SNAPSHOT skipped: ${decision.reason} (heap=${heapUsedMB}MB)`);
+    return;
+  }
+  heapSnapshotTaken = true; // set BEFORE writing so a failed/slow write can't loop
+  const file = path.join(HEAPSNAPSHOT_DIR, `heap-${new Date().toISOString().replace(/[:.]/g, '-')}.heapsnapshot`);
+  try {
+    console.log(`[MONITOR] HEAP-SNAPSHOT writing (heap=${heapUsedMB}MB) → ${file} — blocks the event loop`);
+    v8.writeHeapSnapshot(file);
+    console.log(`[MONITOR] HEAP-SNAPSHOT written → ${file} (scp it off + open in Chrome DevTools → dominator tree)`);
+  } catch (err) {
+    console.error(`[MONITOR] HEAP-SNAPSHOT failed: ${err.message}`);
+  }
+}
 
 // ─── Memory pressure circuit breaker ───
 // Graduated response based on V8 heap usage against heap_size_limit.
@@ -869,17 +983,41 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
   // Backpressure: poll() skips when queue >= 30K or memory pressure >= CRITICAL (90%).
   // Adaptive concurrency adjusts scan throughput to match ingestion rate.
   let pollInProgress = false;
+  let pollStartedAt = 0;
+  let backoffUntil = 0;
   pollIntervalHandle = setInterval(async () => {
-    if (!running || pollInProgress) return;
+    if (!running) return;
+    // Backoff window after consecutive total-registry failures. Hoisted out of
+    // poll() (it used to `await sleep(backoff)` while holding pollInProgress, up
+    // to POLL_MAX_BACKOFF=16min) so the watchdog can stay sized to poll *work*.
+    if (Date.now() < backoffUntil) return;
+    // Skip if a cycle is already in flight, unless the flag is stale — a
+    // backstop for any hang path that bypasses runPollCycle()'s watchdog.
+    const { skip, forceReset } = shouldSkipPoll(pollInProgress, pollStartedAt, Date.now(), POLL_WATCHDOG_MS, POLL_INTERVAL);
+    if (forceReset) {
+      console.warn(`[MONITOR] Poll flag stuck for ${((Date.now() - pollStartedAt) / 1000).toFixed(0)}s — force-resetting`);
+      pollInProgress = false;
+    } else if (skip) {
+      return;
+    }
     pollInProgress = true;
+    pollStartedAt = Date.now();
     try {
-      await poll(state, scanQueue, stats);
+      await runPollCycle(state, scanQueue, stats);
       // Atomicity: persist queue + seq together after each poll
       persistQueue(scanQueue, state);
       saveNpmSeq(state.npmLastSeq);
       saveState(state, stats);
       if (scanQueue.length > QUEUE_WARNING_THRESHOLD) {
         console.log(`[MONITOR] WARNING: scan queue depth ${scanQueue.length} — processing may be lagging behind ingestion`);
+      }
+      // Apply hoisted poll backoff (set after consecutive total-registry failures).
+      const backoffMs = getPollBackoffMs();
+      if (backoffMs > 0) {
+        backoffUntil = Date.now() + backoffMs;
+        console.log(`[MONITOR] Poll backoff: skipping ticks for ${(backoffMs / 1000).toFixed(0)}s after consecutive registry failures`);
+      } else {
+        backoffUntil = 0;
       }
     } catch (err) {
       console.error('[MONITOR] Poll error (interval):', err.message);
@@ -933,6 +1071,11 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
       console.log(`[MONITOR] MEMORY: heap=${heapUsedMB}MB/${heapLimitMB}MB (${pctUsed}%), rss=${rssMB}MB (${(rssRatio * 100).toFixed(0)}%/${RSS_LIMIT_MB}MB), queue=${scanQueue.length}, dedup=${recentlyScanned.size}, downloads=${downloadsCache.size}, alerts=${alertedPackageRules.size}, dailyAlerts=${dailyAlerts.length}, pressure=${levelName}`);
       // P1.0: persist the same sample as a time series for offline leak localisation.
       appendMemTrend(currentMem, getActiveWorkers(), scanQueue.length);
+
+      // Heap diagnostics (restart root-cause): cheap heap-spaces breakdown
+      // (retention vs churn) + opt-in one-shot snapshot at MUADDIB_HEAPSNAPSHOT_MB.
+      console.log(`[MONITOR] HEAP-SPACES: ${formatHeapSpaces(v8.getHeapSpaceStatistics())}`);
+      maybeHeapSnapshot(Number(heapUsedMB));
 
       // Graduated response at HIGH+
       if (pressureLevel >= MEMORY_PRESSURE_LEVELS.HIGH) {
@@ -995,6 +1138,11 @@ module.exports = {
   recordRestart,
   countRecentRestarts,
   POLL_INTERVAL,
+  POLL_WATCHDOG_MS,
+  runPollCycle,
+  shouldSkipPoll,
+  shouldSnapshot,
+  formatHeapSpaces,
   PROCESS_LOOP_INTERVAL,
   QUEUE_WARNING_THRESHOLD,
   QUEUE_PERSIST_INTERVAL,

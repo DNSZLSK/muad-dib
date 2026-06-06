@@ -6,6 +6,108 @@ async function runMonitorPreResolveTests() {
   console.log('\n=== MONITOR PRE-RESOLVE TESTS ===\n');
 
   const ingestion = require('../../src/monitor/ingestion.js');
+  const { EventEmitter } = require('events');
+
+  // ── HTTP absolute-deadline (wedge fix) ───────────────────────────────────
+  // Node's `{ timeout }` option is socket-INACTIVITY only. A response whose body
+  // trickles forever (heartbeats, or a feed that never sends 'end') keeps the
+  // socket "active" so that timeout never fires and httpsGet (which resolves
+  // only on 'end') hangs — wedging the poll loop. We inject a fake low-level
+  // client (_deps.https) to exercise the real httpsGet/httpsPost deadline logic
+  // without TLS, asserting it rejects AND destroys the socket.
+
+  // A fake req whose .destroy(err) emits 'error' (mimics Node), tracking the err.
+  function makeFakeReq(track) {
+    const req = new EventEmitter();
+    let destroyed = false;
+    req.write = () => {};
+    req.end = () => {};
+    req.destroy = (err) => {
+      if (destroyed) return;
+      destroyed = true;
+      if (track) track.destroyedWith = err || null, track.destroyed = true;
+      if (req._onDestroy) req._onDestroy();
+      if (err) req.emit('error', err);
+    };
+    return req;
+  }
+
+  await asyncTest('HTTP-DEADLINE: a normal response resolves and does NOT destroy the socket', async () => {
+    const real = ingestion._deps.https;
+    const track = { destroyed: false };
+    const make = (cb) => {
+      const req = makeFakeReq(track);
+      const res = new EventEmitter();
+      res.statusCode = 200;
+      res.resume = () => {};
+      setImmediate(() => { cb(res); res.emit('data', Buffer.from('{"ok":true}')); res.emit('end'); });
+      return req;
+    };
+    ingestion._deps.https = { get: (_u, _o, cb) => make(cb), request: (_o, cb) => make(cb) };
+    try {
+      const body = await ingestion.httpsGet('https://example.test/ok', 1000, 1000);
+      assert(body === '{"ok":true}', `body should round-trip, got ${body}`);
+      assert(track.destroyed === false, 'a clean response must NOT destroy the socket (deadline cleared)');
+    } finally {
+      ingestion._deps.https = real;
+    }
+  });
+
+  await asyncTest('HTTP-DEADLINE: a trickling body that never ends rejects within the absolute deadline', async () => {
+    const real = ingestion._deps.https;
+    const track = { destroyed: false };
+    const make = (cb) => {
+      const req = makeFakeReq(track);
+      const res = new EventEmitter();
+      res.statusCode = 200;
+      res.resume = () => {};
+      let timer;
+      req._onDestroy = () => clearInterval(timer);
+      setImmediate(() => {
+        cb(res);
+        timer = setInterval(() => res.emit('data', Buffer.from('.')), 5); // trickle forever, never 'end'
+      });
+      return req;
+    };
+    ingestion._deps.https = { get: (_u, _o, cb) => make(cb), request: (_o, cb) => make(cb) };
+    const t0 = Date.now();
+    let threw = null;
+    try {
+      await ingestion.httpsGet('https://example.test/trickle', 1000, 40); // 40ms deadline
+    } catch (e) { threw = e; } finally {
+      ingestion._deps.https = real;
+    }
+    const elapsed = Date.now() - t0;
+    assert(threw !== null, 'trickling response should reject, not hang');
+    assert(/deadline/i.test(threw.message), `error should mention deadline, got: ${threw && threw.message}`);
+    assert(track.destroyed === true && track.destroyedWith, 'req.destroy(err) must be called to free the socket');
+    assert(elapsed < 500, `should reject within ~deadline, took ${elapsed}ms`);
+  });
+
+  await asyncTest('HTTP-DEADLINE: a response exceeding MAX_RESPONSE_BYTES rejects and destroys the socket', async () => {
+    const real = ingestion._deps.https;
+    const track = { destroyed: false };
+    const make = (cb) => {
+      const req = makeFakeReq(track);
+      const res = new EventEmitter();
+      res.statusCode = 200;
+      res.resume = () => {};
+      // One oversized "chunk" — only .length matters; the cap branch destroys
+      // before chunks.push, so we never allocate 64MB.
+      setImmediate(() => { cb(res); res.emit('data', { length: ingestion.MAX_RESPONSE_BYTES + 1 }); });
+      return req;
+    };
+    ingestion._deps.https = { get: (_u, _o, cb) => make(cb), request: (_o, cb) => make(cb) };
+    let threw = null;
+    try {
+      await ingestion.httpsGet('https://example.test/huge', 1000, 1000);
+    } catch (e) { threw = e; } finally {
+      ingestion._deps.https = real;
+    }
+    assert(threw !== null, 'oversized response should reject');
+    assert(/exceeded/i.test(threw.message), `error should mention exceeded, got: ${threw && threw.message}`);
+    assert(track.destroyed === true, 'socket must be destroyed on overflow');
+  });
 
   // ── Unit tests on the batch helpers ──────────────────────────────────────
 
