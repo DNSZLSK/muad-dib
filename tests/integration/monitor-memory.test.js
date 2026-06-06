@@ -23,7 +23,7 @@ async function runMonitorMemoryTests() {
     computeMemoryPressure, getMemoryPressureLevel, handleMemoryPressure,
     MEMORY_PRESSURE_LEVELS, MEMORY_THRESHOLD_HIGH, MEMORY_THRESHOLD_CRITICAL,
     MEMORY_THRESHOLD_EMERGENCY, EMERGENCY_QUEUE_KEEP,
-    MEMORY_LOG_INTERVAL_NORMAL, MEMORY_LOG_INTERVAL_PRESSURE
+    MEMORY_LOG_INTERVAL_NORMAL, MEMORY_LOG_INTERVAL_PRESSURE, runPollCycle, shouldSkipPoll, POLL_WATCHDOG_MS, POLL_INTERVAL, shouldSnapshot, formatHeapSpaces
   } = require('../../src/monitor/daemon.js');
   const { DOWNLOADS_CACHE_TTL } = require('../../src/monitor/classify.js');
   const { clearDeferredQueue } = require('../../src/monitor/deferred-sandbox.js');
@@ -711,6 +711,108 @@ async function runMonitorMemoryTests() {
     if (process.env.MUADDIB_RSS_LIMIT_MB === undefined) {
       assert(envMb === RSS_LIMIT_MB, `unit MUADDIB_RSS_LIMIT_MB (${envMb}) should equal the daemon default RSS_LIMIT_MB (${RSS_LIMIT_MB})`);
     }
+  });
+
+  // ─── Poll-loop watchdog + heap diagnostics ───
+  // Appended at the END of the function on purpose: a ~74-line block near the top
+  // would shift the line numbers of the pre-existing source-grep tests above, and
+  // their tests/meta/no-source-grep allowlist entries are keyed by file:line.
+  // All tests below are behavioral (call the fn, assert the return) — no src reads.
+  const {
+    getPollBackoffMs, getConsecutivePollErrors, setConsecutivePollErrors, POLL_MAX_BACKOFF
+  } = require('../../src/monitor/ingestion.js');
+
+  await asyncTest('POLL-WATCHDOG: fast poll resolves and does not throw', async () => {
+    let ran = false;
+    await runPollCycle({}, [], {}, 50, async () => { ran = true; });
+    assert(ran, 'pollFn should have executed');
+  });
+
+  await asyncTest('POLL-WATCHDOG: never-resolving poll is bounded by the watchdog (no hang)', async () => {
+    const t0 = Date.now();
+    let threw = null;
+    try {
+      await runPollCycle({}, [], {}, 30, () => new Promise(() => {})); // never settles
+    } catch (e) { threw = e; }
+    const elapsed = Date.now() - t0;
+    assert(threw !== null, 'watchdog should reject a hung poll');
+    assert(/watchdog/i.test(threw.message), `error should mention watchdog, got: ${threw && threw.message}`);
+    assert(elapsed < 500, `watchdog should fire fast (<500ms), took ${elapsed}ms`);
+  });
+
+  await asyncTest('POLL-WATCHDOG: a subsequent cycle proceeds after a hung+aborted one (no stuck state)', async () => {
+    try { await runPollCycle({}, [], {}, 20, () => new Promise(() => {})); } catch { /* expected */ }
+    let ran2 = false;
+    await runPollCycle({}, [], {}, 20, async () => { ran2 = true; });
+    assert(ran2, 'second cycle proceeds — runPollCycle always settles, so the scheduler finally always resets the flag');
+  });
+
+  test('POLL-SKIP: not in progress → run (no skip, no forceReset)', () => {
+    const r = shouldSkipPoll(false, 0, 1_000_000, POLL_WATCHDOG_MS, POLL_INTERVAL);
+    assert(r.skip === false && r.forceReset === false, `expected run, got ${JSON.stringify(r)}`);
+  });
+
+  test('POLL-SKIP: in progress and fresh → skip this tick', () => {
+    const now = 1_000_000;
+    const r = shouldSkipPoll(true, now - 1000, now, POLL_WATCHDOG_MS, POLL_INTERVAL);
+    assert(r.skip === true && r.forceReset === false, `expected skip, got ${JSON.stringify(r)}`);
+  });
+
+  test('POLL-SKIP: in progress but stale (> watchdog + interval) → force-reset, do not skip', () => {
+    const now = 1_000_000;
+    const stale = now - (POLL_WATCHDOG_MS + POLL_INTERVAL + 1);
+    const r = shouldSkipPoll(true, stale, now, POLL_WATCHDOG_MS, POLL_INTERVAL);
+    assert(r.forceReset === true && r.skip === false, `expected forceReset, got ${JSON.stringify(r)}`);
+  });
+
+  test('POLL-BACKOFF: 0 when healthy or after a single failure', () => {
+    const prev = getConsecutivePollErrors();
+    try {
+      setConsecutivePollErrors(0);
+      assert(getPollBackoffMs() === 0, `backoff should be 0 at 0 errors, got ${getPollBackoffMs()}`);
+      setConsecutivePollErrors(1);
+      assert(getPollBackoffMs() === 0, `backoff should be 0 at 1 error (escalates only >1), got ${getPollBackoffMs()}`);
+    } finally { setConsecutivePollErrors(prev); }
+  });
+
+  test('POLL-BACKOFF: grows exponentially and caps at POLL_MAX_BACKOFF', () => {
+    const prev = getConsecutivePollErrors();
+    try {
+      setConsecutivePollErrors(2);
+      assert(getPollBackoffMs() === POLL_INTERVAL * 2, `n=2 → ${POLL_INTERVAL * 2}, got ${getPollBackoffMs()}`);
+      setConsecutivePollErrors(3);
+      assert(getPollBackoffMs() === POLL_INTERVAL * 4, `n=3 → ${POLL_INTERVAL * 4}, got ${getPollBackoffMs()}`);
+      setConsecutivePollErrors(50);
+      assert(getPollBackoffMs() === POLL_MAX_BACKOFF, `n=50 should cap at ${POLL_MAX_BACKOFF}, got ${getPollBackoffMs()}`);
+    } finally { setConsecutivePollErrors(prev); }
+  });
+
+  // ─── Heap diagnostics (restart root-cause): pure helpers ───
+
+  test('HEAP-SNAPSHOT: shouldSnapshot disabled when threshold unset (0)', () => {
+    const d = shouldSnapshot(9999, 0, false, 100, 12);
+    assert(d.take === false && d.reason === 'disabled', `expected disabled, got ${JSON.stringify(d)}`);
+  });
+
+  test('HEAP-SNAPSHOT: shouldSnapshot takes when over threshold with disk headroom', () => {
+    const d = shouldSnapshot(6001, 6000, false, 50, 12);
+    assert(d.take === true && d.reason === 'ok', `expected take, got ${JSON.stringify(d)}`);
+  });
+
+  test('HEAP-SNAPSHOT: shouldSnapshot skips below-threshold / already-taken / low-disk', () => {
+    assert(shouldSnapshot(5999, 6000, false, 50, 12).take === false, 'below threshold → skip');
+    assert(shouldSnapshot(7000, 6000, true, 50, 12).reason === 'already-taken', 'already taken → skip');
+    const low = shouldSnapshot(7000, 6000, false, 3, 12);
+    assert(low.take === false && /low-disk/.test(low.reason), `low disk → skip, got ${JSON.stringify(low)}`);
+  });
+
+  test('HEAP-SPACES: formatHeapSpaces renders space_name=usedMB pairs', () => {
+    const s = formatHeapSpaces([
+      { space_name: 'old_space', space_used_size: 6 * 1024 * 1024 },
+      { space_name: 'new_space', space_used_size: 2 * 1024 * 1024 }
+    ]);
+    assert(s === 'old_space=6 new_space=2', `unexpected format: ${s}`);
+    assert(formatHeapSpaces([]) === '', 'empty stats → empty string');
   });
 
   // Reset the module-level pressure level after injecting synthetic samples above,

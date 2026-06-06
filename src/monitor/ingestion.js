@@ -38,6 +38,7 @@ const SELF_PACKAGE_NAME = require('../../package.json').name;
 
 const POLL_INTERVAL = 60_000;
 const POLL_MAX_BACKOFF = 960_000; // 16 minutes max backoff
+const MAX_RESPONSE_BYTES = 64 * 1024 * 1024; // OOM guard: cap a single buffered HTTP (JSON/XML metadata) response at 64MB
 
 // --- Mutable state ---
 let consecutivePollErrors = 0;
@@ -48,7 +49,11 @@ let consecutivePollErrors = 0;
 // pollPyPIChangelog. Kept tiny on purpose — only network I/O lives here.
 const _deps = {
   httpsPost: null, // populated below once httpsPost is defined
-  httpsGet: null   // populated below; used by npm pollers so tests can stub
+  httpsGet: null,  // populated below; used by npm pollers so tests can stub
+  // Low-level client (https.get / https.request). Routing through _deps lets a
+  // test inject a fake req/res to exercise the absolute-deadline timer without
+  // real TLS. Production always uses the real `https` module.
+  https
 };
 
 function getConsecutivePollErrors() {
@@ -59,36 +64,71 @@ function setConsecutivePollErrors(val) {
   consecutivePollErrors = val;
 }
 
-// --- Utility ---
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+/**
+ * Backoff (ms) the poll scheduler should wait before its next cycle, derived
+ * from consecutive total-registry failures. Returns 0 when healthy or after a
+ * single failure; otherwise exponential POLL_INTERVAL * 2^(n-1), capped at
+ * POLL_MAX_BACKOFF (16min). Pure read of module state — poll() never sleeps;
+ * the scheduler (daemon.js) owns the wait. See poll() for why the sleep was
+ * hoisted out (it used to hold pollInProgress for up to 16min).
+ * @returns {number}
+ */
+function getPollBackoffMs() {
+  if (consecutivePollErrors <= 1) return 0;
+  return Math.min(POLL_INTERVAL * Math.pow(2, consecutivePollErrors - 1), POLL_MAX_BACKOFF);
 }
 
 // --- HTTP helpers ---
 
-function httpsGet(url, timeoutMs = 30_000) {
+function httpsGet(url, timeoutMs = 30_000, deadlineMs = Math.max(timeoutMs * 2, 90_000)) {
   return new Promise((resolve, reject) => {
-    const req = https.get(url, { timeout: timeoutMs }, (res) => {
+    let settled = false;
+    let req;
+    // Absolute deadline. Node's `{ timeout }` option is a socket-INACTIVITY
+    // timeout, not an overall deadline: a response whose body trickles forever
+    // (heartbeat/keep-alive bytes, or a long-poll feed that never sends 'end')
+    // keeps the socket "active", so the inactivity timeout never fires and this
+    // promise never settles — wedging the poll loop. The deadline bounds the
+    // WHOLE request+body and destroys the socket so it can't leak.
+    const deadline = setTimeout(() => {
+      if (req) req.destroy(new Error(`Overall deadline (${Math.round(deadlineMs / 1000)}s) exceeded for ${url}`));
+    }, deadlineMs);
+    const done = (err, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(deadline);
+      if (err) reject(err); else resolve(value);
+    };
+    req = _deps.https.get(url, { timeout: timeoutMs }, (res) => {
       if (res.statusCode === 301 || res.statusCode === 302) {
         res.resume();
         const location = res.headers.location;
-        if (!location) return reject(new Error(`Redirect without Location for ${url}`));
-        return httpsGet(location, timeoutMs).then(resolve, reject);
+        if (!location) return done(new Error(`Redirect without Location for ${url}`));
+        // Hand the deadline off to the recursive call, which has its own.
+        settled = true;
+        clearTimeout(deadline);
+        return httpsGet(location, timeoutMs, deadlineMs).then(resolve, reject);
       }
       if (res.statusCode < 200 || res.statusCode >= 300) {
         res.resume();
-        return reject(new Error(`HTTP ${res.statusCode} for ${url}`));
+        return done(new Error(`HTTP ${res.statusCode} for ${url}`));
       }
       const chunks = [];
-      res.on('data', (chunk) => chunks.push(chunk));
-      res.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
-      res.on('error', reject);
+      let total = 0;
+      res.on('data', (chunk) => {
+        total += chunk.length;
+        if (total > MAX_RESPONSE_BYTES) {
+          req.destroy(new Error(`Response exceeded ${MAX_RESPONSE_BYTES} bytes for ${url}`));
+          return;
+        }
+        chunks.push(chunk);
+      });
+      res.on('end', () => done(null, Buffer.concat(chunks).toString('utf8')));
+      res.on('error', (err) => done(err));
     });
-    req.on('error', reject);
+    req.on('error', (err) => done(err));
     req.on('timeout', () => {
-      req.destroy();
-      reject(new Error(`Timeout for ${url}`));
+      req.destroy(new Error(`Timeout for ${url}`));
     });
   });
 }
@@ -97,7 +137,7 @@ function httpsGet(url, timeoutMs = 30_000) {
  * Minimal HTTPS POST. Used for PyPI XML-RPC; kept inside the ingestion module
  * (rather than pulled into shared/) because XML-RPC is its only consumer today.
  */
-function httpsPost(url, body, headers = {}, timeoutMs = 30_000) {
+function httpsPost(url, body, headers = {}, timeoutMs = 30_000, deadlineMs = Math.max(timeoutMs * 2, 90_000)) {
   return new Promise((resolve, reject) => {
     const u = new URL(url);
     const options = {
@@ -112,20 +152,40 @@ function httpsPost(url, body, headers = {}, timeoutMs = 30_000) {
         ...headers
       }
     };
-    const req = https.request(options, (res) => {
+    let settled = false;
+    let req;
+    // Absolute deadline — see httpsGet for the rationale (inactivity timeout is
+    // not an overall deadline; a trickling body would hang forever otherwise).
+    const deadline = setTimeout(() => {
+      if (req) req.destroy(new Error(`Overall deadline (${Math.round(deadlineMs / 1000)}s) exceeded for POST ${url}`));
+    }, deadlineMs);
+    const done = (err, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(deadline);
+      if (err) reject(err); else resolve(value);
+    };
+    req = _deps.https.request(options, (res) => {
       if (res.statusCode < 200 || res.statusCode >= 300) {
         res.resume();
-        return reject(new Error(`HTTP ${res.statusCode} for POST ${url}`));
+        return done(new Error(`HTTP ${res.statusCode} for POST ${url}`));
       }
       const chunks = [];
-      res.on('data', (chunk) => chunks.push(chunk));
-      res.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
-      res.on('error', reject);
+      let total = 0;
+      res.on('data', (chunk) => {
+        total += chunk.length;
+        if (total > MAX_RESPONSE_BYTES) {
+          req.destroy(new Error(`Response exceeded ${MAX_RESPONSE_BYTES} bytes for POST ${url}`));
+          return;
+        }
+        chunks.push(chunk);
+      });
+      res.on('end', () => done(null, Buffer.concat(chunks).toString('utf8')));
+      res.on('error', (err) => done(err));
     });
-    req.on('error', reject);
+    req.on('error', (err) => done(err));
     req.on('timeout', () => {
-      req.destroy();
-      reject(new Error(`Timeout for POST ${url}`));
+      req.destroy(new Error(`Timeout for POST ${url}`));
     });
     req.write(body);
     req.end();
@@ -1292,13 +1352,15 @@ async function poll(state, scanQueue, stats) {
     pollPyPI(state, scanQueue, stats)
   ]);
 
-  // Track consecutive poll failures for backoff
+  // Track consecutive poll failures. The backoff WAIT is applied by the
+  // scheduler (daemon.js, via getPollBackoffMs()), NOT here: sleeping inside
+  // poll() used to hold pollInProgress for up to POLL_MAX_BACKOFF (16min),
+  // stalling ingestion and forcing the poll watchdog to be sized above the
+  // backoff. poll() stays sleep-free so the watchdog bounds poll *work* only.
   if (npmCount === -1 && pypiCount === -1) {
     consecutivePollErrors++;
     if (consecutivePollErrors > 1) {
-      const backoff = Math.min(POLL_INTERVAL * Math.pow(2, consecutivePollErrors - 1), POLL_MAX_BACKOFF);
-      console.log(`[MONITOR] Both registries failed (${consecutivePollErrors}x) — backing off ${(backoff / 1000).toFixed(0)}s`);
-      await sleep(backoff);
+      console.log(`[MONITOR] Both registries failed (${consecutivePollErrors}x) — scheduler will back off ${(getPollBackoffMs() / 1000).toFixed(0)}s`);
     }
   } else {
     consecutivePollErrors = 0;
@@ -1314,10 +1376,12 @@ module.exports = {
   SELF_PACKAGE_NAME,
   POLL_INTERVAL,
   POLL_MAX_BACKOFF,
+  MAX_RESPONSE_BYTES,
 
   // Mutable state
   getConsecutivePollErrors,
   setConsecutivePollErrors,
+  getPollBackoffMs,
 
   // HTTP helpers
   httpsGet,
