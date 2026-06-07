@@ -69,7 +69,7 @@ function _httpGetJson(pathName, { token, httpImpl = https, timeoutMs = 20_000 } 
       res.on('end', () => {
         let json = null;
         try { json = JSON.parse(body); } catch { /* leave null */ }
-        resolve({ status: res.statusCode, json });
+        resolve({ status: res.statusCode, json, headers: res.headers || {} });
       });
     });
     req.on('timeout', () => { req.destroy(new Error('GHSA request timeout')); });
@@ -90,9 +90,41 @@ async function _defaultFetch(ecosystem, opts = {}) {
   const p = `/advisories?type=malware&ecosystem=${encodeURIComponent(apiEco)}&per_page=100&sort=updated&direction=desc`;
   const { status, json } = await _httpGetJson(p, { token, httpImpl: opts.httpImpl });
   if (status !== 200 || !Array.isArray(json)) {
-    throw new Error(`GHSA fetch ${ecosystem} failed: HTTP ${status}`);
+    const hint = (status === 403 || status === 429) ? ' (rate-limited — set GITHUB_TOKEN in .env for 5000 req/hr)' : '';
+    throw new Error(`GHSA fetch ${ecosystem} failed: HTTP ${status}${hint}`);
   }
   return json;
+}
+
+/** Extract the rel="next" advisories path from a GitHub Link header, or null. */
+function _nextLink(linkHeader) {
+  if (!linkHeader) return null;
+  const m = /<https:\/\/api\.github\.com(\/advisories[^>]*)>;\s*rel="next"/.exec(linkHeader);
+  return m ? m[1] : null;
+}
+
+/**
+ * Fetch the FULL type=malware advisory list for one ecosystem by following Link
+ * pagination (capped at maxPages). Returns flattened, parsed rows (withdrawn included —
+ * the caller decides). Used by the Phase 5 coverage-audit to build the denominator;
+ * heavier than the incremental poll, so run it on demand, not every 15 min.
+ */
+async function fetchAllGhsaMalware(ecosystem, opts = {}) {
+  const token = opts.token || process.env.GITHUB_TOKEN || process.env.GH_TOKEN || null;
+  const maxPages = Number.isFinite(opts.maxPages) ? opts.maxPages : 30;
+  const apiEco = ecosystem === 'pypi' ? 'pip' : ecosystem;
+  let pathName = `/advisories?type=malware&ecosystem=${encodeURIComponent(apiEco)}&per_page=100&sort=published&direction=desc`;
+  const rows = [];
+  for (let page = 0; page < maxPages && pathName; page++) {
+    const { status, json, headers } = await _httpGetJson(pathName, { token, httpImpl: opts.httpImpl });
+    if (status !== 200 || !Array.isArray(json)) {
+      const hint = (status === 403 || status === 429) ? ' (rate-limited — set GITHUB_TOKEN in .env for 5000 req/hr)' : '';
+      throw new Error(`GHSA list ${ecosystem} failed: HTTP ${status}${hint}`);
+    }
+    for (const adv of json) rows.push(...parseAdvisory(adv, [ecosystem]));
+    pathName = _nextLink(headers && headers.link);
+  }
+  return rows;
 }
 
 // ── parsing (pure) ──
@@ -327,6 +359,7 @@ function stopGhsaPoller() {
 
 module.exports = {
   parseAdvisory,
+  fetchAllGhsaMalware,
   pollGhsaOnce,
   loadGhsaCursor,
   saveGhsaCursor,
