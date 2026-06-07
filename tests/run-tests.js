@@ -78,6 +78,7 @@ const { runRegistrySignalsTests } = require('./unit/registry-signals.test');
 const { runMatureStableCapTests } = require('./unit/mature-stable-cap.test');
 const { runReachabilityFunctionsTests } = require('./unit/reachability-functions.test');
 const { runFeedHealthTests } = require('./unit/feed-health.test');
+const { runGhsaPollerTests } = require('./unit/ghsa-poller.test');
 const { runDeltaMultiplierTests } = require('./unit/delta-multiplier.test');
 const { runConfidenceTiersTests } = require('./unit/confidence-tiers.test');
 const { runCompoundTighteningTests } = require('./unit/compound-tightening.test');
@@ -308,6 +309,7 @@ async function timed(name, fn) {
   // Function-level reachability (FPR Improvement Plan - Chantier 2)
   await timed('reachability-functions', runReachabilityFunctionsTests);
   await timed('feed-health', runFeedHealthTests);
+  await timed('ghsa-poller', runGhsaPollerTests);
 
   // Delta-aware decay multiplier (FPR Improvement Plan - Chantier 3)
   await timed('delta-multiplier', runDeltaMultiplierTests);

@@ -13,6 +13,7 @@ const { ensureWorkers, drainWorkers, getTargetConcurrency, setTargetConcurrency,
 const { computeTarget, ADJUST_INTERVAL_MS, BASE_CONCURRENCY } = require('./adaptive-concurrency.js');
 const { startHealthcheck } = require('./healthcheck.js');
 const { startDeferredWorker, stopDeferredWorker, persistDeferredQueue, restoreDeferredQueue, clearDeferredQueue } = require('./deferred-sandbox.js');
+const { startGhsaPoller, stopGhsaPoller } = require('../ioc/ghsa-poller.js');
 const { cleanupOldArchives, getRetentionDays, startPeriodicCleanup } = require('./tarball-archive.js');
 const { clearMetadataCache } = require('../scanner/temporal-analysis.js');
 // Caches not previously cleared by handleMemoryPressure (OOM fix). These live
@@ -920,6 +921,7 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
     // Stop deferred sandbox worker and persist its queue
     stopDeferredWorker();
     persistDeferredQueue();
+    stopGhsaPoller();
     healthcheck.stop();
     // Flush all pending scope groups before exit
     for (const [scope, group] of pendingGrouped) {
@@ -944,6 +946,12 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
     startDeferredWorker(stats);
     console.log('[MONITOR] Deferred sandbox worker started (30s interval, dedicated slot)');
   }
+
+  // Phase 2c part 2: active GHSA malware-advisory poller (~15 min). Independent of the
+  // sandbox — it surfaces fresh advisories (pre-alert), records withdrawn ones to the
+  // ledger, and accumulates the denominator the Phase 5 coverage-audit joins against.
+  // Best-effort and fire-and-forget; never blocks the daemon.
+  startGhsaPoller(stats);
 
   // ─── Initial poll ───
   // Fills the queue with pending packages. Processing starts in the main loop
