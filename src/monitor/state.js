@@ -1059,6 +1059,116 @@ function loadScanLedger() {
   return entries;
 }
 
+// Bounded distinct-key tracking for the `vanished` cross-reference (CLAUDE.md §2).
+// Sits above the MAX_SCAN_LEDGER file ceiling so it is a pure safety valve: in normal
+// operation the in-window key sets are far smaller than the file, so `exactVanished`
+// stays true. Only an operator setting MUADDIB_SCAN_LEDGER_MAX above this would trip it.
+const MAX_ROLLUP_KEYS = 1_200_000;
+
+/**
+ * Phase 0b: roll up the per-scan ledger into operational-coverage metrics.
+ *
+ * Single streaming pass (never loads the whole file at once — same machinery as
+ * getDetectionStats). It distinguishes:
+ *   - scanned : entries that reached a real verdict (outcome !== 'dropped')
+ *   - dropped : queue-cap evictions (outcome === 'dropped') — never scanned
+ *   - vanished: DISTINCT name@version that were dropped AND never (re)scanned in-window
+ *               = a permanent coverage hole (the "which Miasma versions never ran" case)
+ *
+ * HONEST METRIC NOTE — `alertRate` is (suspect+confirmed) / scanned, i.e. "of what we
+ * scanned, the fraction we flagged". It is NOT a true-positive rate: the ledger carries
+ * no ground truth. The GHSA-denominated operational TPR (the 105/429 audit number) needs
+ * the ledger cross-referenced against the GHSA malware feed — that is the Phase 5
+ * coverage-audit, not this rollup. Do not relabel `alertRate` as TPR (CLAUDE.md: pas
+ * d'embellissement des métriques).
+ *
+ * @param {number|string|null} [sinceTs] window start — ms epoch, ISO string, or null for
+ *        "whole ledger". Entries with ts < sinceTs (or unparseable ts) are skipped.
+ * @param {object} [opts]
+ * @param {string} [opts.file] ledger path override (tests). Defaults to SCAN_LEDGER_FILE.
+ * @returns {{
+ *   generatedAt:string, since:string|null, windowStart:string|null, windowEnd:string|null,
+ *   total:number, scanned:number, dropped:number, vanished:number, exactVanished:boolean,
+ *   alerted:number, alertRate:number|null,
+ *   byOutcome:Object.<string,number>,
+ *   byEcosystem:Object.<string,{total:number,scanned:number,dropped:number,alerted:number}>
+ * }}
+ */
+function computeLedgerRollup(sinceTs, opts = {}) {
+  const file = opts.file || SCAN_LEDGER_FILE;
+
+  let sinceMs = null;
+  if (typeof sinceTs === 'number' && Number.isFinite(sinceTs)) {
+    sinceMs = sinceTs;
+  } else if (typeof sinceTs === 'string') {
+    const p = Date.parse(sinceTs);
+    if (!Number.isNaN(p)) sinceMs = p;
+  }
+
+  const byOutcome = Object.create(null);
+  const byEcosystem = Object.create(null);
+  let total = 0, scanned = 0, dropped = 0, alerted = 0;
+  let earliest = null, latest = null;
+  // Two sets so `vanished` is correct regardless of drop/scan ordering in the file.
+  // droppedKeys is small (drops only happen under queue-cap pressure); scannedKeys is
+  // bounded by the in-window line count (≤ MAX_SCAN_LEDGER), and further by MAX_ROLLUP_KEYS.
+  const scannedKeys = new Set();
+  const droppedKeys = new Set();
+  let exactVanished = true;
+
+  _iterateJsonlSync(file, (e) => {
+    if (!e || !e.name) return;
+    let t = null;
+    if (e.ts) { const p = Date.parse(e.ts); if (!Number.isNaN(p)) t = p; }
+    if (sinceMs !== null && (t === null || t < sinceMs)) return;
+
+    total++;
+    if (t !== null) {
+      if (earliest === null || t < earliest) earliest = t;
+      if (latest === null || t > latest) latest = t;
+    }
+
+    const outcome = (typeof e.outcome === 'string' && e.outcome) ? e.outcome : 'clean';
+    byOutcome[outcome] = (byOutcome[outcome] || 0) + 1;
+
+    const eco = e.ecosystem || 'unknown';
+    let ecoNode = byEcosystem[eco];
+    if (!ecoNode) ecoNode = byEcosystem[eco] = { total: 0, scanned: 0, dropped: 0, alerted: 0 };
+    ecoNode.total++;
+
+    const key = `${e.name}@${e.version || ''}`;
+    const underCap = exactVanished && (scannedKeys.size + droppedKeys.size) < MAX_ROLLUP_KEYS;
+    if (outcome === 'dropped') {
+      dropped++; ecoNode.dropped++;
+      if (underCap) droppedKeys.add(key); else exactVanished = false;
+    } else {
+      scanned++; ecoNode.scanned++;
+      if (outcome === 'suspect' || outcome === 'confirmed') { alerted++; ecoNode.alerted++; }
+      if (underCap) scannedKeys.add(key); else exactVanished = false;
+    }
+  });
+
+  let vanished = 0;
+  for (const k of droppedKeys) { if (!scannedKeys.has(k)) vanished++; }
+
+  return {
+    generatedAt: new Date().toISOString(),
+    since: sinceMs !== null ? new Date(sinceMs).toISOString() : null,
+    windowStart: earliest !== null ? new Date(earliest).toISOString() : null,
+    windowEnd: latest !== null ? new Date(latest).toISOString() : null,
+    total,
+    scanned,
+    dropped,
+    vanished,
+    exactVanished,
+    alerted,
+    // NOT a TPR — see the HONEST METRIC NOTE above. null when nothing was scanned.
+    alertRate: scanned > 0 ? alerted / scanned : null,
+    byOutcome,
+    byEcosystem
+  };
+}
+
 // --- Scan stats (FP rate tracking) ---
 
 function loadScanStats() {
@@ -1568,6 +1678,7 @@ module.exports = {
   appendDetection,
   appendScanLedger,
   loadScanLedger,
+  computeLedgerRollup,
   _compactScanLedgerJsonl,
   getDetectionStats,
   runStateMigrations,

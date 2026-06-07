@@ -190,6 +190,16 @@ function main() {
   const regressions = checks.filter(c => c.regressed);
   const newClusters = findNewClusters(currentReport, baselineReport, 5);
 
+  // Phase 0b: operational coverage from the per-scan ledger. INFORMATIONAL ONLY — it
+  // never enters `regressions` and never changes the exit code. The ledger is a
+  // prod-runtime artifact (absent on CI → null) and operational coverage legitimately
+  // drifts day to day, so it is a dashboard trend, not a hard gate ("Dashboard, pas
+  // gate CI dur"). Rétro-compatible: older snapshots simply have no `operational` node.
+  const operational = {
+    current: currentReport.operational || null,
+    baseline: baselineReport.operational || null
+  };
+
   if (args.json) {
     console.log(JSON.stringify({
       currentVersion: currentReport.version,
@@ -199,6 +209,7 @@ function main() {
       checks,
       regressions,
       newClusters,
+      operational,
       pass: regressions.length === 0
     }, null, 2));
     process.exit(regressions.length === 0 ? 0 : 1);
@@ -221,6 +232,19 @@ function main() {
     for (const c of newClusters) {
       console.log(`    [${c.count}x] ${c.rule_type} on ${c.file_pattern} ${c.is_bundle ? '(bundle)' : '(src)'} - ${c.distinct_packages} pkg(s)`);
     }
+  }
+
+  // Operational coverage (ledger) — informational, never gates CI (see note above).
+  const opHas = (o) => o && typeof o.total === 'number' && o.total > 0;
+  console.log(`\n  Operational coverage (ledger, informational — not gated) :`);
+  if (!opHas(operational.current) && !opHas(operational.baseline)) {
+    console.log('    [SKIP] no ledger rollup in either snapshot');
+  } else {
+    const num = (o, k) => (o && typeof o[k] === 'number') ? String(o[k]) : 'n/a';
+    const rate = (o) => (o && o.alertRate != null) ? (o.alertRate * 100).toFixed(2) + '%' : 'n/a';
+    console.log(`    scanned    : ${num(operational.baseline, 'scanned')} -> ${num(operational.current, 'scanned')}`);
+    console.log(`    alert rate : ${rate(operational.baseline)} -> ${rate(operational.current)}  (NOT a TPR — needs GHSA cross-ref, Phase 5)`);
+    console.log(`    dropped    : ${num(operational.baseline, 'dropped')} -> ${num(operational.current, 'dropped')}  (vanished ${num(operational.baseline, 'vanished')} -> ${num(operational.current, 'vanished')})`);
   }
 
   if (regressions.length === 0) {

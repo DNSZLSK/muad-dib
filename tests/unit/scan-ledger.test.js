@@ -91,6 +91,98 @@ function runScanLedgerTests() {
     } finally { try { fs.unlinkSync(f); } catch {} }
   });
 
+  // --- Phase 0b: computeLedgerRollup (operational coverage) ---
+  // These pass opts.file explicitly so they read the controlled fixture regardless of
+  // env/module-cache state left by the freshState() tests above.
+  const writeLedger = (f, entries) =>
+    fs.writeFileSync(f, entries.map(e => JSON.stringify(e)).join('\n') + '\n', 'utf8');
+
+  test('computeLedgerRollup: aggregates byOutcome / byEcosystem / scanned vs dropped', () => {
+    const f = path.join(os.tmpdir(), `rollup-${Date.now()}-a.jsonl`);
+    try {
+      const s = require('../../src/monitor/state.js');
+      writeLedger(f, [
+        { ts: '2026-06-07T10:00:00.000Z', name: 'a', version: '1', ecosystem: 'npm', outcome: 'clean' },
+        { ts: '2026-06-07T10:01:00.000Z', name: 'b', version: '1', ecosystem: 'npm', outcome: 'suspect' },
+        { ts: '2026-06-07T10:02:00.000Z', name: 'c', version: '1', ecosystem: 'pypi', outcome: 'clean' },
+        { ts: '2026-06-07T10:03:00.000Z', name: 'd', version: '1', ecosystem: 'npm', outcome: 'dropped' }
+      ]);
+      const r = s.computeLedgerRollup(null, { file: f });
+      assert(r.total === 4, `total should be 4, got ${r.total}`);
+      assert(r.scanned === 3, `scanned excludes dropped (expected 3, got ${r.scanned})`);
+      assert(r.dropped === 1, `dropped should be 1, got ${r.dropped}`);
+      assert(r.byOutcome.clean === 2 && r.byOutcome.suspect === 1 && r.byOutcome.dropped === 1, 'byOutcome counts');
+      assert(r.byEcosystem.npm.total === 3 && r.byEcosystem.pypi.total === 1, 'byEcosystem totals');
+      assert(r.byEcosystem.npm.scanned === 2 && r.byEcosystem.npm.dropped === 1, 'byEcosystem npm scanned/dropped split');
+      assert(r.alerted === 1, `suspect counted as alerted (got ${r.alerted})`);
+    } finally { try { fs.unlinkSync(f); } catch {} }
+  });
+
+  test('computeLedgerRollup: vanished = dropped-and-never-rescanned, both orderings', () => {
+    const f = path.join(os.tmpdir(), `rollup-${Date.now()}-b.jsonl`);
+    try {
+      const s = require('../../src/monitor/state.js');
+      writeLedger(f, [
+        { ts: '2026-06-07T10:00:00.000Z', name: 'x', version: '1', ecosystem: 'npm', outcome: 'dropped' }, // never scanned → vanished
+        { ts: '2026-06-07T10:01:00.000Z', name: 'y', version: '1', ecosystem: 'npm', outcome: 'dropped' }, // dropped then...
+        { ts: '2026-06-07T10:02:00.000Z', name: 'y', version: '1', ecosystem: 'npm', outcome: 'clean' },   // ...rescued → not vanished
+        { ts: '2026-06-07T10:03:00.000Z', name: 'z', version: '1', ecosystem: 'npm', outcome: 'dropped' }, // z@1 dropped...
+        { ts: '2026-06-07T10:04:00.000Z', name: 'z', version: '2', ecosystem: 'npm', outcome: 'clean' },   // ...only z@2 scanned → z@1 vanished
+        { ts: '2026-06-07T10:05:00.000Z', name: 'w', version: '1', ecosystem: 'npm', outcome: 'clean' },   // w@1 scanned first...
+        { ts: '2026-06-07T10:06:00.000Z', name: 'w', version: '1', ecosystem: 'npm', outcome: 'dropped' }  // ...then dropped → not vanished (scan-before-drop)
+      ]);
+      const r = s.computeLedgerRollup(null, { file: f });
+      assert(r.dropped === 4, `four drop events (got ${r.dropped})`);
+      assert(r.vanished === 2, `only x@1 and z@1 vanished (got ${r.vanished})`);
+      assert(r.exactVanished === true, 'count is exact below the key cap');
+    } finally { try { fs.unlinkSync(f); } catch {} }
+  });
+
+  test('computeLedgerRollup: sinceTs filters older entries (ms epoch and ISO string)', () => {
+    const f = path.join(os.tmpdir(), `rollup-${Date.now()}-c.jsonl`);
+    try {
+      const s = require('../../src/monitor/state.js');
+      writeLedger(f, [
+        { ts: '2026-06-01T00:00:00.000Z', name: 'old', version: '1', ecosystem: 'npm', outcome: 'clean' },
+        { ts: '2026-06-07T00:00:00.000Z', name: 'new', version: '1', ecosystem: 'npm', outcome: 'suspect' }
+      ]);
+      const since = Date.parse('2026-06-05T00:00:00.000Z');
+      const r = s.computeLedgerRollup(since, { file: f });
+      assert(r.total === 1 && r.scanned === 1, `only the in-window entry counts (got total=${r.total})`);
+      assert(r.byOutcome.suspect === 1 && r.byOutcome.clean === undefined, 'old clean excluded by window');
+      assert(r.alerted === 1, 'in-window suspect counted');
+      const r2 = s.computeLedgerRollup('2026-06-05T00:00:00.000Z', { file: f });
+      assert(r2.total === 1, 'ISO-string sinceTs behaves like the ms form');
+    } finally { try { fs.unlinkSync(f); } catch {} }
+  });
+
+  test('computeLedgerRollup: missing ledger → zero rollup, never throws', () => {
+    const f = path.join(os.tmpdir(), `rollup-missing-${Date.now()}-d.jsonl`); // intentionally not created
+    const s = require('../../src/monitor/state.js');
+    const r = s.computeLedgerRollup(null, { file: f });
+    assert(r.total === 0 && r.scanned === 0 && r.dropped === 0 && r.vanished === 0, 'all-zero rollup');
+    assert(r.alertRate === null, 'alertRate is null when nothing was scanned');
+    assert(r.exactVanished === true && typeof r.generatedAt === 'string', 'shape intact on empty');
+  });
+
+  test('computeLedgerRollup: alertRate = (suspect+confirmed)/scanned, dropped excluded from denom', () => {
+    const f = path.join(os.tmpdir(), `rollup-${Date.now()}-e.jsonl`);
+    try {
+      const s = require('../../src/monitor/state.js');
+      writeLedger(f, [
+        { ts: '2026-06-07T10:00:00.000Z', name: 'a', version: '1', ecosystem: 'npm', outcome: 'clean' },
+        { ts: '2026-06-07T10:01:00.000Z', name: 'b', version: '1', ecosystem: 'npm', outcome: 'clean' },
+        { ts: '2026-06-07T10:02:00.000Z', name: 'c', version: '1', ecosystem: 'npm', outcome: 'suspect' },
+        { ts: '2026-06-07T10:03:00.000Z', name: 'd', version: '1', ecosystem: 'npm', outcome: 'confirmed' },
+        { ts: '2026-06-07T10:04:00.000Z', name: 'e', version: '1', ecosystem: 'npm', outcome: 'dropped' }
+      ]);
+      const r = s.computeLedgerRollup(null, { file: f });
+      assert(r.scanned === 4, `dropped excluded from scanned (got ${r.scanned})`);
+      assert(r.alerted === 2, `suspect + confirmed = 2 (got ${r.alerted})`);
+      assert(Math.abs(r.alertRate - 0.5) < 1e-9, `alertRate = 2/4 = 0.5, dropped not in denom (got ${r.alertRate})`);
+    } finally { try { fs.unlinkSync(f); } catch {} }
+  });
+
   // Reset env + module cache so other suites get production defaults, not the test path.
   delete process.env.MUADDIB_SCAN_LEDGER_FILE;
   delete process.env.MUADDIB_SCAN_LEDGER_MAX;
