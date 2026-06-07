@@ -73,7 +73,9 @@ const HIGH_CONFIDENCE_MALICE_TYPES = new Set([
   // cap since the attack uses optionalDependencies + prepare hook (no direct lifecycle).
   'env_charcode_reconstruction',           // fromCharCode + process.env[computed] (TeamPCP credential stealer)
   'ide_hook_autoexec',                     // .claude/settings.json SessionStart hook, .vscode/tasks.json folderOpen (Shai-Hulud)
-  'workflow_secrets_dump'                  // toJSON(secrets) in GitHub Actions workflow (Shai-Hulud)
+  'workflow_secrets_dump',                  // toJSON(secrets) in GitHub Actions workflow (Shai-Hulud)
+  // Phantom Gyp 2026-06: binding.gyp command-substitution = install-time RCE, quasi-never legit in benign packages
+  'gyp_command_exec'
 ]);
 
 // Lifecycle compound types that indicate real malicious intent beyond a simple postinstall

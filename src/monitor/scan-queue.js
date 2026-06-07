@@ -32,9 +32,20 @@ let _lastHardDropLog = 0;
 function enqueueScan(scanQueue, item, stats, max = MAX_SCAN_QUEUE) {
   let dropped = false;
   if (scanQueue.length >= max) {
-    scanQueue.shift(); // drop oldest
+    const evicted = scanQueue.shift(); // drop oldest
     dropped = true;
     if (stats) stats.queueHardDrops = (stats.queueHardDrops || 0) + 1;
+    // Phase 0a: record the dropped item so a coverage loss keeps an identity — answers
+    // "which versions were never scanned" (e.g. the Miasma 72s/96-version burst). Lazy
+    // require avoids any top-level coupling with state.js; best-effort, never throws.
+    try {
+      if (evicted && evicted.name) {
+        require('./state.js').appendScanLedger({
+          name: evicted.name, version: evicted.version, ecosystem: evicted.ecosystem,
+          outcome: 'dropped', source: 'queue_cap'
+        });
+      }
+    } catch { /* ledger is best-effort */ }
     const now = Date.now();
     if (now - _lastHardDropLog > HARD_DROP_LOG_INTERVAL_MS) {
       _lastHardDropLog = now;

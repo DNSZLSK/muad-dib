@@ -289,6 +289,67 @@ async function runTarballArchiveTests() {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
   });
+
+  // --- Alert-only tarball retention: keep JSON for every suspect, .tgz for alerts only ---
+
+  test('getArchiveTgzMinScore: default 20, env override respected, bounds enforced', () => {
+    const orig = process.env.MUADDIB_ARCHIVE_TGZ_MIN_SCORE;
+    const reload = () => {
+      delete require.cache[require.resolve('../../src/monitor/tarball-archive.js')];
+      return require('../../src/monitor/tarball-archive.js').getArchiveTgzMinScore();
+    };
+    try {
+      delete process.env.MUADDIB_ARCHIVE_TGZ_MIN_SCORE;
+      assert(reload() === 20, 'default should be 20');
+      process.env.MUADDIB_ARCHIVE_TGZ_MIN_SCORE = '50';
+      assert(reload() === 50, 'env override 50 should apply');
+      process.env.MUADDIB_ARCHIVE_TGZ_MIN_SCORE = '999';
+      assert(reload() === 20, 'out-of-range falls back to 20');
+    } finally {
+      if (orig === undefined) delete process.env.MUADDIB_ARCHIVE_TGZ_MIN_SCORE;
+      else process.env.MUADDIB_ARCHIVE_TGZ_MIN_SCORE = orig;
+      delete require.cache[require.resolve('../../src/monitor/tarball-archive.js')];
+    }
+  });
+
+  await asyncTest('archiveSuspectTarball: below threshold keeps JSON only (no .tgz, no network)', async () => {
+    const origDir = process.env.MUADDIB_ARCHIVE_DIR;
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-jsononly-'));
+    process.env.MUADDIB_ARCHIVE_DIR = tmp;
+    delete require.cache[require.resolve('../../src/monitor/tarball-archive.js')];
+    const mod = require('../../src/monitor/tarball-archive.js');
+    try {
+      // score 5 (< 20 default) WITH a triggered rule → suspect but below alert floor.
+      // Must NOT touch the network (the bogus URL would fail) and must NOT write a .tgz.
+      const result = await mod.archiveSuspectTarball(
+        'low-suspect', '1.2.3', 'https://registry.npmjs.org/low-suspect/-/low-suspect-1.2.3.tgz',
+        { score: 5, priority: 'P3', rulesTriggered: ['MUADDIB-AST-001'] }
+      );
+      assert(result === true, `expected true (JSON written), got ${result}`);
+      const dayDir = path.join(tmp, mod.getArchiveDateString());
+      const jsonPath = path.join(dayDir, 'low-suspect-1.2.3.json');
+      const tgzPath = path.join(dayDir, 'low-suspect-1.2.3.tgz');
+      assert(fs.existsSync(jsonPath), 'JSON metadata should be written for below-threshold suspect');
+      assert(!fs.existsSync(tgzPath), '.tgz must NOT be downloaded for below-threshold suspect');
+      const meta = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+      assert(meta.tarball_archived === false, 'tarball_archived should be false');
+      assert(meta.tarball_sha256 === null, 'tarball_sha256 should be null');
+      assert(meta.score === 5, 'score recorded in JSON');
+      assert(Array.isArray(meta.rules_triggered) && meta.rules_triggered.length === 1, 'rules recorded in JSON');
+
+      // Dedup: a second call for the same package@version returns false (no rewrite).
+      const again = await mod.archiveSuspectTarball(
+        'low-suspect', '1.2.3', 'https://registry.npmjs.org/low-suspect/-/low-suspect-1.2.3.tgz',
+        { score: 5, priority: 'P3', rulesTriggered: ['MUADDIB-AST-001'] }
+      );
+      assert(again === false, 'second below-threshold call should dedup to false');
+    } finally {
+      process.env.MUADDIB_ARCHIVE_DIR = origDir || '';
+      if (!origDir) delete process.env.MUADDIB_ARCHIVE_DIR;
+      delete require.cache[require.resolve('../../src/monitor/tarball-archive.js')];
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
 }
 
 module.exports = { runTarballArchiveTests };

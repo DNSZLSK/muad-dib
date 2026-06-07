@@ -2949,6 +2949,19 @@ const RULES = {
     ],
     mitre: 'T1195.002'
   },
+  gyp_command_exec: {
+    id: 'MUADDIB-PKG-023',
+    name: 'GYP Command-Substitution Install Execution',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    domain: 'malware',
+    description: 'binding.gyp utilise la command-substitution GYP <!(...) / <!@(...) — execution de code a l\'installation via node-gyp, sans script lifecycle package.json (pattern Phantom Gyp, juin 2026).',
+    references: [
+      'https://gyp.gsrc.io/docs/InputFormatReference.md',
+      'https://attack.mitre.org/techniques/T1195.002/'
+    ],
+    mitre: 'T1195.002'
+  },
   string_mutation_obfuscation: {
     id: 'MUADDIB-AST-074',
     name: 'String Mutation Obfuscation',

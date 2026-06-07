@@ -951,6 +951,114 @@ function _compactDetectionsJsonl() {
   }
 }
 
+// --- Per-scan ledger (Phase 0a: operational coverage observability) ---
+// Append-only record of EVERY package the monitor dequeues + its terminal outcome,
+// so we can distinguish never-scanned vs scanned-clean vs suspect vs dropped and
+// measure TRUE operational coverage (not just rule-TPR on the static corpus).
+// Mirrors the detections JSONL machinery (chunked iterate + periodic compaction).
+// Differences vs detections: (1) NO dedup — every scan event is a distinct record;
+// (2) higher cap + compaction interval since this logs every scan, not just findings.
+const SCAN_LEDGER_FILE = process.env.MUADDIB_SCAN_LEDGER_FILE || path.join(__dirname, '..', '..', 'data', 'scan-ledger.jsonl');
+const MAX_SCAN_LEDGER = (() => {
+  const raw = process.env.MUADDIB_SCAN_LEDGER_MAX;
+  const n = raw ? parseInt(raw, 10) : NaN;
+  return (Number.isFinite(n) && n >= 10 && n <= 5_000_000) ? n : 500_000;
+})();
+const SCAN_LEDGER_COMPACT_INTERVAL = 2000;
+let _scanLedgerAppendedSinceCompact = 0;
+
+// Terminal outcomes a dequeued package can reach. Unknown values normalize to 'clean'
+// so a typo at a call site can never crash the pipeline.
+const SCAN_LEDGER_OUTCOMES = new Set([
+  'clean', 'clean_low_signal', 'clean_tooling', 'suspect', 'ml_clean', 'llm_benign',
+  'sandbox_inconclusive', 'sandbox_unconfirmed', 'confirmed',
+  'static_timeout', 'size_skip', 'dropped'
+]);
+
+/**
+ * Append one per-scan ledger entry recording the terminal outcome of a dequeued
+ * package. Best-effort: NEVER throws (a ledger failure must not break scanning).
+ * No dedup — repeated scans of the same package are intentionally all recorded.
+ *
+ * @param {object} e
+ * @param {string}  e.name        package name (required)
+ * @param {string} [e.version]
+ * @param {string} [e.ecosystem]  'npm' | 'pypi' | ...
+ * @param {string} [e.outcome]    one of SCAN_LEDGER_OUTCOMES (default 'clean')
+ * @param {number} [e.score]      riskScore at the terminal decision
+ * @param {string} [e.tier]       suspect tier ('1a'|'1b'|2|3) if applicable
+ * @param {string} [e.maxSeverity]
+ * @param {string[]} [e.types]    threat types (capped to 12)
+ * @param {string} [e.sandbox]    'none' | 'run' | 'deferred' | 'skip'
+ * @param {boolean} [e.firstPublish]
+ * @param {string} [e.source]     where the record originated ('scan','queue_cap',...)
+ */
+function appendScanLedger(e) {
+  try {
+    if (!e || !e.name) return;
+    const dir = path.dirname(SCAN_LEDGER_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const entry = {
+      ts: new Date().toISOString(),
+      name: e.name,
+      version: e.version || null,
+      ecosystem: e.ecosystem || null,
+      outcome: SCAN_LEDGER_OUTCOMES.has(e.outcome) ? e.outcome : 'clean',
+      score: (typeof e.score === 'number') ? e.score : null,
+      tier: (e.tier !== undefined && e.tier !== null) ? String(e.tier) : null,
+      maxSeverity: e.maxSeverity || null,
+      types: Array.isArray(e.types) ? e.types.slice(0, 12) : [],
+      sandbox: e.sandbox || 'none',
+      firstPublish: !!e.firstPublish,
+      source: e.source || 'scan'
+    };
+    fs.appendFileSync(SCAN_LEDGER_FILE, JSON.stringify(entry) + '\n', 'utf8');
+    _scanLedgerAppendedSinceCompact++;
+    if (_scanLedgerAppendedSinceCompact >= SCAN_LEDGER_COMPACT_INTERVAL) {
+      _scanLedgerAppendedSinceCompact = 0;
+      _compactScanLedgerJsonl();
+    }
+  } catch (err) {
+    if (err.code === 'EROFS' || err.code === 'EACCES' || err.code === 'EPERM') return;
+    if (err.code === 'ENOSPC') {
+      console.warn('[MONITOR] WARNING: disk full (ENOSPC) — cannot persist scan-ledger.');
+      return;
+    }
+    console.error(`[MONITOR] Failed to write scan-ledger: ${err.message}`);
+  }
+}
+
+/**
+ * Compact the scan-ledger JSONL: keep only the most recent MAX_SCAN_LEDGER entries.
+ * No-op when already under cap. Streams (never loads the whole file at once).
+ */
+function _compactScanLedgerJsonl() {
+  try {
+    const total = _countJsonlLines(SCAN_LEDGER_FILE);
+    if (total <= MAX_SCAN_LEDGER) return;
+    const toDrop = total - MAX_SCAN_LEDGER;
+    let skipped = 0;
+    const kept = [];
+    _iterateJsonlSync(SCAN_LEDGER_FILE, (entry) => {
+      if (skipped < toDrop) { skipped++; return; }
+      kept.push(JSON.stringify(entry));
+    });
+    const tmpFile = SCAN_LEDGER_FILE + '.tmp';
+    fs.writeFileSync(tmpFile, kept.length ? kept.join('\n') + '\n' : '', 'utf8');
+    fs.renameSync(tmpFile, SCAN_LEDGER_FILE);
+    console.log(`[MONITOR] COMPACT scan-ledger: ${total} -> ${kept.length} entries`);
+  } catch (err) {
+    console.error(`[MONITOR] Scan-ledger compaction failed: ${err.message}`);
+  }
+}
+
+/** Stream the scan-ledger into an array (tests + Phase 0b rollup). */
+function loadScanLedger() {
+  const entries = [];
+  try { _iterateJsonlSync(SCAN_LEDGER_FILE, (e) => { entries.push(e); }); } catch { /* ignore */ }
+  return entries;
+}
+
 // --- Scan stats (FP rate tracking) ---
 
 function loadScanStats() {
@@ -1420,6 +1528,8 @@ module.exports = {
   MAX_TEMPORAL_DETECTIONS,
   MAX_DAILY_ALERTS,
   DETECTION_COMPACT_INTERVAL,
+  SCAN_LEDGER_FILE,
+  MAX_SCAN_LEDGER,
 
   // Mutable state getters/setters
   getScanMemoryCache,
@@ -1456,6 +1566,9 @@ module.exports = {
   appendAlert,
   loadDetections,
   appendDetection,
+  appendScanLedger,
+  loadScanLedger,
+  _compactScanLedgerJsonl,
   getDetectionStats,
   runStateMigrations,
   // Internal — exported for tests and for the daemon hourly housekeeping.

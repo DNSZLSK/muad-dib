@@ -6996,9 +6996,9 @@ async function runMonitorTests() {
 
   // ===== v2.7.6 C1: High-confidence malice bypass =====
 
-  test('MONITOR: HIGH_CONFIDENCE_MALICE_TYPES contains 28 threat types', () => {
-    assert(HIGH_CONFIDENCE_MALICE_TYPES.size === 28,
-      `Should have 28 types, got ${HIGH_CONFIDENCE_MALICE_TYPES.size}`);
+  test('MONITOR: HIGH_CONFIDENCE_MALICE_TYPES contains 29 threat types', () => {
+    assert(HIGH_CONFIDENCE_MALICE_TYPES.size === 29,
+      `Should have 29 types, got ${HIGH_CONFIDENCE_MALICE_TYPES.size}`);
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('lifecycle_shell_pipe'), 'Missing lifecycle_shell_pipe');
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('fetch_decrypt_exec'), 'Missing fetch_decrypt_exec');
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('download_exec_binary'), 'Missing download_exec_binary');
