@@ -31,7 +31,7 @@ const path = require('path');
 const https = require('https');
 
 const GHSA_API_HOST = 'api.github.com';
-const GHSA_ECOSYSTEMS = ['npm', 'pypi'];
+const GHSA_ECOSYSTEMS = ['npm', 'pypi', 'crates'];
 const GHSA_CURSOR_FILE = process.env.MUADDIB_GHSA_CURSOR_FILE ||
   path.join(__dirname, '..', '..', 'data', 'ghsa-cursor.json');
 const GHSA_MALWARE_FILE = process.env.MUADDIB_GHSA_MALWARE_FILE ||
@@ -84,9 +84,10 @@ function _httpGetJson(pathName, { token, httpImpl = https, timeoutMs = 20_000 } 
  */
 async function _defaultFetch(ecosystem, opts = {}) {
   const token = opts.token || process.env.GITHUB_TOKEN || process.env.GH_TOKEN || null;
-  // GHSA names the Python ecosystem "pip" (not "pypi") in BOTH the query and the response;
-  // querying ecosystem=pypi returns HTTP 422. Map our internal name to GHSA's for the query.
-  const apiEco = ecosystem === 'pypi' ? 'pip' : ecosystem;
+  // GHSA names the Python ecosystem "pip" (not "pypi") and Rust "rust" (we call it
+  // "crates") in BOTH the query and the response; querying ecosystem=pypi returns HTTP
+  // 422. Map our internal name to GHSA's for the query.
+  const apiEco = ecosystem === 'pypi' ? 'pip' : ecosystem === 'crates' ? 'rust' : ecosystem;
   const p = `/advisories?type=malware&ecosystem=${encodeURIComponent(apiEco)}&per_page=100&sort=updated&direction=desc`;
   const { status, json } = await _httpGetJson(p, { token, httpImpl: opts.httpImpl });
   if (status !== 200 || !Array.isArray(json)) {
@@ -112,7 +113,7 @@ function _nextLink(linkHeader) {
 async function fetchAllGhsaMalware(ecosystem, opts = {}) {
   const token = opts.token || process.env.GITHUB_TOKEN || process.env.GH_TOKEN || null;
   const maxPages = Number.isFinite(opts.maxPages) ? opts.maxPages : 30;
-  const apiEco = ecosystem === 'pypi' ? 'pip' : ecosystem;
+  const apiEco = ecosystem === 'pypi' ? 'pip' : ecosystem === 'crates' ? 'rust' : ecosystem;
   let pathName = `/advisories?type=malware&ecosystem=${encodeURIComponent(apiEco)}&per_page=100&sort=published&direction=desc`;
   const rows = [];
   for (let page = 0; page < maxPages && pathName; page++) {
@@ -141,6 +142,7 @@ function parseAdvisory(adv, ecosystems = GHSA_ECOSYSTEMS) {
     if (!pkg || !pkg.name || !pkg.ecosystem) continue;
     let eco = String(pkg.ecosystem).toLowerCase();
     if (eco === 'pip') eco = 'pypi'; // normalize GHSA's "pip" to our internal "pypi"
+    else if (eco === 'rust') eco = 'crates'; // normalize GHSA's "rust" to our internal "crates"
     if (ecosystems && !ecosystems.includes(eco)) continue;
     out.push({
       ghsa_id: adv.ghsa_id,
@@ -210,17 +212,29 @@ function _maybeCompactMalware(file) {
 function buildGhsaPreAlertEmbed(row) {
   const link = row.ecosystem === 'pypi'
     ? `https://pypi.org/project/${encodeURIComponent(row.name)}/`
-    : `https://www.npmjs.com/package/${encodeURIComponent(row.name)}`;
+    : row.ecosystem === 'crates'
+      ? `https://crates.io/crates/${encodeURIComponent(row.name)}`
+      : `https://www.npmjs.com/package/${encodeURIComponent(row.name)}`;
+  const fields = [
+    { name: 'Package', value: `[${row.ecosystem}/${row.name}](${link})`, inline: true },
+    { name: 'Range', value: String(row.versionRange || '*'), inline: true },
+    { name: 'Advisory', value: `[${row.ghsa_id}](https://github.com/advisories/${row.ghsa_id})`, inline: true },
+    { name: 'Source', value: 'GitHub Advisory DB (type=malware) — active poller', inline: false }
+  ];
+  // crates enrichment: flag if the malicious crate name typosquats a popular crate.
+  // Lazy require keeps the poller light; findCratesTyposquatMatch is pure.
+  if (row.ecosystem === 'crates') {
+    try {
+      const { findCratesTyposquatMatch } = require('../scanner/typosquat.js');
+      const m = findCratesTyposquatMatch(row.name);
+      if (m) fields.push({ name: 'Typosquat', value: `looks like \`${m.original}\` (distance ${m.distance})`, inline: true });
+    } catch { /* enrichment is best-effort */ }
+  }
   return {
     embeds: [{
       title: '⚠️ GHSA PRE-ALERT — Fresh Malware Advisory',
       color: 0xe74c3c,
-      fields: [
-        { name: 'Package', value: `[${row.ecosystem}/${row.name}](${link})`, inline: true },
-        { name: 'Range', value: String(row.versionRange || '*'), inline: true },
-        { name: 'Advisory', value: `[${row.ghsa_id}](https://github.com/advisories/${row.ghsa_id})`, inline: true },
-        { name: 'Source', value: 'GitHub Advisory DB (type=malware) — active poller', inline: false }
-      ],
+      fields,
       footer: { text: `MUAD'DIB GHSA Pre-Alert | ${new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, ' UTC')}` },
       timestamp: new Date().toISOString()
     }]
