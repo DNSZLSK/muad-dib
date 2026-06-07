@@ -1,0 +1,6 @@
+{
+  "name": "phantom-gyp-malicious",
+  "version": "1.0.0",
+  "description": "Fixture: Phantom-Gyp install-time payload via binding.gyp command-substitution, NO lifecycle script.",
+  "gypfile": true
+}

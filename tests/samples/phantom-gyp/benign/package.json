@@ -1,0 +1,6 @@
+{
+  "name": "phantom-gyp-benign",
+  "version": "1.0.0",
+  "description": "Fixture: legitimate native addon using <!(node ./util/has_lib.js) as a build-env query.",
+  "gypfile": true
+}

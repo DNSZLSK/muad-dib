@@ -1005,6 +1005,10 @@ const PLAYBOOKS = {
     'CRITIQUE: binding.gyp utilise la command-substitution GYP <!(...) / <!@(...) — execution de code a l\'installation via node-gyp, sans script lifecycle (pattern Phantom Gyp). ' +
     'Decoder la commande substituee. NE PAS installer : node-gyp l\'execute au build meme avec --ignore-scripts. Verifier la source officielle du package.',
 
+  gyp_phantom_exec:
+    'CRITIQUE (compound Phase 1b): binding.gyp lance <!(node x.js) / <!(python y.py) au configure-time via node-gyp (aucun script lifecycle requis) ET le fichier invoque est juge malveillant de facon independante par les scanners AST/dataflow/module-graph. ' +
+    'Payload install-time confirme — NE PAS installer. Analyser le fichier invoque (nomme dans le message), c\'est lui qui porte la charge. node-gyp l\'execute meme avec --ignore-scripts.',
+
   string_mutation_obfuscation:
     'HAUTE: Chaine de .replace() reconstruisant des noms d\'API dangereuses (leet-speak). ' +
     'Technique d\'evasion par substitution de caracteres. Decoder la chaine finale. Supprimer si malveillant.',
