@@ -371,6 +371,47 @@ async function runWebhookTests() {
     assert(payload.threats[0].type === 'shell_command', 'Threat type preserved');
     assert(payload.threats[0].file === 'install.sh', 'Threat file preserved');
   });
+
+  // --- Phase 0b: daily-report ledger section (formatLedgerField) ---
+
+  test('LEDGER-FIELD: renders scanned / alert rate / dropped+vanished / per-ecosystem', () => {
+    const { formatLedgerField } = require('../../src/monitor/webhook.js');
+    const field = formatLedgerField({
+      total: 1000, scanned: 990, dropped: 10, vanished: 4, exactVanished: true,
+      alerted: 9, alertRate: 9 / 990,
+      byOutcome: { clean: 981, suspect: 9, dropped: 10 },
+      byEcosystem: { npm: { total: 800, scanned: 795, dropped: 5, alerted: 7 },
+                     pypi: { total: 200, scanned: 195, dropped: 5, alerted: 2 } }
+    });
+    assert(field && field.name === 'Ledger (24h)', 'field name should be "Ledger (24h)"');
+    assertIncludes(field.value, 'Scanned 990', 'shows scanned count');
+    assertIncludes(field.value, 'Alerted 9', 'shows alerted count');
+    assertIncludes(field.value, '0.91%', 'shows alert rate (9/990)');
+    assertIncludes(field.value, 'Dropped 10 (4 vanished)', 'shows dropped + vanished');
+    assertIncludes(field.value, 'npm 800', 'shows per-ecosystem npm total');
+    assertIncludes(field.value, 'pypi 200', 'shows per-ecosystem pypi total');
+  });
+
+  test('LEDGER-FIELD: omitted (null) when the ledger is empty', () => {
+    const { formatLedgerField } = require('../../src/monitor/webhook.js');
+    assert(formatLedgerField(null) === null, 'null rollup → no field');
+    assert(formatLedgerField({ total: 0, scanned: 0, dropped: 0, vanished: 0, byEcosystem: {} }) === null,
+      'empty rollup (total 0) → no field, not a zero-noise row');
+  });
+
+  test('LEDGER-FIELD: no Dropped line when nothing was dropped; ≥ marks approximate vanished', () => {
+    const { formatLedgerField } = require('../../src/monitor/webhook.js');
+    const clean = formatLedgerField({
+      total: 50, scanned: 50, dropped: 0, vanished: 0, exactVanished: true,
+      alerted: 0, alertRate: 0, byOutcome: { clean: 50 }, byEcosystem: { npm: { total: 50, scanned: 50, dropped: 0, alerted: 0 } }
+    });
+    assertNotIncludes(clean.value, 'Dropped', 'no Dropped line when dropped=0');
+    const approx = formatLedgerField({
+      total: 20, scanned: 10, dropped: 10, vanished: 7, exactVanished: false,
+      alerted: 0, alertRate: 0, byOutcome: { dropped: 10, clean: 10 }, byEcosystem: { npm: { total: 20, scanned: 10, dropped: 10, alerted: 0 } }
+    });
+    assertIncludes(approx.value, '≥7 vanished', 'approximate vanished marked with ≥ when exactVanished is false');
+  });
 }
 
 module.exports = { runWebhookTests };

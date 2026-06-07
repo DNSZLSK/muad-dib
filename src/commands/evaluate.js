@@ -1435,6 +1435,15 @@ async function evaluate(options = {}) {
     pypi: benignPyPI && benignPyPI.details
   });
 
+  // Phase 0b: embed the operational coverage rollup from the live per-scan ledger
+  // (monitor runtime) so each metrics snapshot carries the operational picture next to
+  // the offline TPR/FPR. Best-effort + lazy require: on CI / a machine with no ledger,
+  // computeLedgerRollup returns a zero rollup and regression-check treats it as a SKIP.
+  let operational = null;
+  try {
+    operational = require('../monitor/state.js').computeLedgerRollup(null);
+  } catch { /* monitor state unavailable — operational stays null (rétro-compatible) */ }
+
   const report = {
     version,
     date: new Date().toISOString(),
@@ -1457,6 +1466,7 @@ async function evaluate(options = {}) {
     ossfTPR,
     mlEvaluation: mlEval || null,
     fprAfterML: fprAfterML || null,
+    operational,
     fpClusters
   };
 

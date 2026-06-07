@@ -28,7 +28,8 @@ const {
   saveState,
   loadStateRaw,
   getScansSinceLastMemoryPersist,
-  setScansSinceLastMemoryPersist
+  setScansSinceLastMemoryPersist,
+  computeLedgerRollup
 } = require('./state.js');
 const {
   HIGH_CONFIDENCE_MALICE_TYPES,
@@ -897,7 +898,52 @@ function formatDelta(current, previous) {
   return '=0';
 }
 
-function buildDailyReportEmbed(stats, dailyAlerts) {
+// Phase 0b: rolling window for the daily report's ledger section. The report runs
+// once/day, so 24h is the natural "what happened today" view and keeps the rollup's
+// distinct-key sets small (one day of scans, far below MAX_ROLLUP_KEYS). Env-tunable.
+const LEDGER_ROLLUP_WINDOW_MS = (() => {
+  const v = parseInt(process.env.MUADDIB_LEDGER_ROLLUP_WINDOW_MS, 10);
+  return Number.isFinite(v) && v > 0 ? v : 24 * 60 * 60 * 1000;
+})();
+
+/**
+ * Compute the per-scan ledger rollup for the daily-report window. Best-effort: a
+ * rollup failure (corrupt ledger, I/O) must NEVER break the daily report, so this
+ * swallows errors and returns null. Also returns null when the ledger is empty so
+ * the report omits the section instead of showing a noise row of zeros.
+ */
+function safeLedgerRollup() {
+  try {
+    const rollup = computeLedgerRollup(Date.now() - LEDGER_ROLLUP_WINDOW_MS);
+    return (rollup && rollup.total > 0) ? rollup : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Format the ledger rollup as a Discord embed field, or null to omit it (no data).
+ * Surfaces operational scan coverage: scanned, alert rate (NOT a TPR — see
+ * computeLedgerRollup's HONEST METRIC NOTE), the dropped/vanished coverage holes,
+ * and a per-ecosystem split. Compact, well under Discord's 1024-char field limit.
+ */
+function formatLedgerField(rollup) {
+  if (!rollup || rollup.total <= 0) return null;
+  const pct = rollup.alertRate != null ? (rollup.alertRate * 100).toFixed(2) : '0.00';
+  const lines = [`Scanned ${rollup.scanned} · Alerted ${rollup.alerted} (${pct}%)`];
+  if (rollup.dropped > 0) {
+    const vanishedNote = rollup.exactVanished ? `${rollup.vanished}` : `≥${rollup.vanished}`;
+    lines.push(`Dropped ${rollup.dropped} (${vanishedNote} vanished)`);
+  }
+  const ecos = Object.keys(rollup.byEcosystem)
+    .sort((a, b) => rollup.byEcosystem[b].total - rollup.byEcosystem[a].total);
+  if (ecos.length > 0) {
+    lines.push(ecos.slice(0, 4).map(e => `${e} ${rollup.byEcosystem[e].total}`).join(' · '));
+  }
+  return { name: 'Ledger (24h)', value: lines.join('\n'), inline: false };
+}
+
+function buildDailyReportEmbed(stats, dailyAlerts, ledgerRollup) {
   // Use in-memory stats (accumulated since last reset, restored from disk on restart)
   // instead of disk-based daily entries which can undercount due to UTC/Paris date mismatch
   const { top3: diskTop3 } = buildReportFromDisk();
@@ -1000,6 +1046,12 @@ function buildDailyReportEmbed(stats, dailyAlerts) {
   } catch { /* non-fatal */ }
   const healthText = `Up ${uptimeH}h${uptimeM}m | Heap ${heapMB}MB${jsonlInfo}`;
 
+  // --- Phase 0b: per-scan ledger rollup (operational coverage) ---
+  // Caller may pass a precomputed rollup (sendDailyReport does, to persist the same
+  // numbers it displays); undefined → compute here; explicit null → omit the section.
+  const ledger = ledgerRollup !== undefined ? ledgerRollup : safeLedgerRollup();
+  const ledgerField = formatLedgerField(ledger);
+
   const now = new Date();
   const readableTime = now.toISOString().replace('T', ' ').replace(/\.\d+Z$/, ' UTC');
 
@@ -1022,6 +1074,7 @@ function buildDailyReportEmbed(stats, dailyAlerts) {
           ? [{ name: 'Deferred Sandbox', value: `Enqueued: ${stats.sandboxDeferred || 0} | Processed: ${stats.deferredProcessed || 0} | Expired: ${stats.deferredExpired || 0}`, inline: false }]
           : []),
         { name: 'Stability', value: `Restarts (24h): ${stats.restartsToday || 0} | Temporal load-shed: ${stats.temporalLoadShed || 0} | Queue hard-drops: ${stats.queueHardDrops || 0}`, inline: false },
+        ...(ledgerField ? [ledgerField] : []),
         { name: 'System', value: healthText, inline: false }
       ],
       footer: {
@@ -1060,7 +1113,10 @@ async function sendDailyReport(stats, dailyAlerts, recentlyScanned, downloadsCac
   // delta. Written before the (now last) webhook so a mid-send kill can't double-count.
   saveLastDailyReportDate(today, captureScanStatsBaseline());
 
-  const payload = buildDailyReportEmbed(stats, dailyAlerts);
+  // Phase 0b: compute the ledger rollup ONCE so the embed shows exactly the numbers
+  // we persist (no double-scan, no drift between Discord and the on-disk metrics).
+  const ledgerRollup = safeLedgerRollup();
+  const payload = buildDailyReportEmbed(stats, dailyAlerts, ledgerRollup);
 
   // Persist locally with full raw metrics (independent of webhook — enables trend analysis)
   persistDailyReport(payload, {
@@ -1081,6 +1137,7 @@ async function sendDailyReport(stats, dailyAlerts, recentlyScanned, downloadsCac
     restartsToday: stats.restartsToday || 0,
     temporalLoadShed: stats.temporalLoadShed || 0,
     queueHardDrops: stats.queueHardDrops || 0,
+    ledger: ledgerRollup || null,
     topSuspects: dailyAlerts.slice().sort((a, b) => (b.score || 0) - (a.score || 0) || b.findingsCount - a.findingsCount).slice(0, 10)
   });
 
@@ -1337,6 +1394,7 @@ module.exports = {
   buildMaintainerChangeWebhookEmbed,
   buildCanaryExfiltrationWebhookEmbed,
   buildDailyReportEmbed,
+  formatLedgerField,
   sendDailyReport,
   buildReportFromDisk,
   buildReportEmbedFromDisk,
