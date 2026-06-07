@@ -5,6 +5,134 @@ All notable changes to MUAD'DIB will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.11.76] - 2026-06-07
+
+### Added
+
+- **Phase 2b - burst pre-alert.** `recentWindowCount` (the uncapped true count of versions published in the recent-publish window, distinct from the capped `recents` list) now drives a burst detector: when a single package crosses 10 versions in the window (account-takeover / Miasma mass-republish pattern), `sendBurstPreAlert()` emits an amber Discord pre-alert (`buildBurstPreAlertEmbed`). Fire-and-forget, deduped per name/window (one ping per burst, not per version). Files: `src/monitor/webhook.js`, `src/monitor/ingestion.js`, `src/monitor.js`.
+
+### Changed
+
+- **Phase 2b - protected queue eviction.** When the scan queue hits its cap, eviction now protects high-signal entries (IOC match, active burst, first-publish, account-takeover) from being dropped, with a strict-oldest fallback when every candidate is protected. Prevents a flood of low-signal packages from evicting the packages most likely to be malicious. Files: `src/monitor/queue.js`, `src/monitor/scan-queue.js`. New test `tests/integration/scan-queue-cap.test.js`.
+
+## [2.11.75] - 2026-06-07
+
+### Added
+
+- **Phase 4 - crates.io light pre-alert.** GHSA poller ecosystem set extended with `crates` (`GHSA_ECOSYSTEMS += crates`, rust/crates mapping). New `POPULAR_CRATES` list (~88 crates: serde, tokio, hyper, reqwest, async-trait, ...) + `findCratesTyposquatMatch()` (Levenshtein, IOC-independent) in `src/scanner/typosquat.js`. Rust GHSA pre-alerts are enriched with the nearest popular-crate typosquat match (e.g. "serde_typo resembles serde"). Light pre-alert only: no crates tarball download / sandbox. Files: `src/scanner/typosquat.js`, `src/ioc/ghsa-poller.js`.
+
+## [2.11.74] - 2026-06-07
+
+### Added
+
+- **Phase 2a - PyPI pre-alert parity.** Pre-alert embeds are now ecosystem-aware: `registryLink()` resolves npm vs PyPI, and `buildIOCPreAlertEmbed` / `buildCampaignPreAlertEmbed` are pure builders reused across ecosystems. PyPI campaign pre-alerts now fire at parity with npm. First-publish detection extended to PyPI (flag + cache). Files: `src/monitor/ingestion.js`, `src/monitor/webhook.js`, `src/monitor/classify.js`, `src/monitor.js`, `src/monitor/queue.js`.
+
+### Changed
+
+- The T1a sandbox gate stays npm-only: PyPI packages take the pre-alert path without the npm sandbox stage.
+
+## [2.11.73] - 2026-06-07
+
+### Added
+
+- **Phase 5 - coverage-audit capstone.** New `scripts/coverage-audit.js` joins the GHSA malware denominator (`data/ghsa-malware.jsonl`) against scan-ledger outcomes + the tarball archive to compute an honest, GHSA-denominated **operational TPR** (`classifyCoverage()` -> alerted / scannedClean / dropped / neverSeen ; `operationalTPR = alerted / total`). Outputs `data/coverage-audit.json` + `data/gt-proposals.json` (scannedClean misses surfaced as ground-truth candidates, human-gated promotion). This is the real operational detection rate, distinct from the static ground-truth TPR and from the ledger alertRate. New test `tests/unit/coverage-audit.test.js`.
+
+## [2.11.72] - 2026-06-07
+
+### Added
+
+- **Phase 2c part 2 - active GHSA poller.** New `src/ioc/ghsa-poller.js` polls the GitHub Advisory Database for `type=malware` advisories every ~15 min (npm + pypi). It persists each advisory's packages to `data/ghsa-malware.jsonl` (the Phase 5 coverage denominator), pre-alerts genuinely fresh names as early warning, records withdrawn advisories (`withdrawn_at`) to the scan-ledger as `outcome:dropped`, and feeds its fetch count into the feed-health alarm. `fetchAllGhsaMalware()` provides the paginated full list. The poller does NOT inject scans into the live queue (GHSA lags downstream vendors). New test `tests/unit/ghsa-poller.test.js`.
+
+## [2.11.71] - 2026-06-07
+
+### Added
+
+- **Phase 2c part 1 - feed-health alarm.** New `src/ioc/feed-health.js` detects silent IOC-feed failures (a feed returning 0 after a healthy baseline = stale data / broken endpoint). One-shot alarm on healthy->dark transition + recovery notice on dark->alive (`evaluateFeedHealth()` pure core, state in `data/feed-health.json`, baseline min 5 IOCs to avoid FPs on small feeds). Best-effort: never breaks the IOC refresh. OSM alert path token-gated. Files: `src/ioc/feed-health.js`, `src/ioc/updater.js`. New test `tests/unit/feed-health.test.js`.
+
+## [2.11.70] - 2026-06-07
+
+### Added
+
+- **Phase 1b - compound Phantom Gyp (the real fix).** New post-processor `src/scanner/phantom-gyp.js` (`correlatePhantomGyp`, called from `src/pipeline/processor.js`) emits **MUADDIB-COMPOUND-017 `gyp_phantom_exec`** (CRITICAL) only when a `binding.gyp` command-substitution sink (`<!(node x.js)` / `<!(python y.py)`) correlates with an independent malice verdict on the invoked file (a CRITICAL verdict or high-confidence-malice type from the AST / dataflow / module-graph scanners). Because the verdict comes from proven detectors, FP is bounded by theirs (~0 by construction). Added to `SINGLE_FIRE_CRITICAL_TYPES` (now 6) and `HIGH_CONFIDENCE_MALICE_TYPES` (now 30). This is the precise compound that closes the gap the Phase 1 marker (PKG-023) only flags. New test `tests/scanner/phantom-gyp.test.js` + benign/malicious fixtures.
+
+## [2.11.69] - 2026-06-07
+
+### Changed
+
+- **Phase 3a - sandbox decoupling.** The deferred T1a sandbox stage now runs via `src/monitor/deferred-sandbox.js` asynchronously, so a slow Docker sandbox no longer holds a scan worker hostage: workers are freed back to the pool immediately. Files: `src/monitor/deferred-sandbox.js`, `src/monitor/queue.js`.
+
+## [2.11.68] - 2026-06-07
+
+### Added
+
+- **Phase 0b - ledger rollup.** `computeLedgerRollup(sinceTs)` in `src/monitor/state.js` streams the scan-ledger and groups outcomes by ecosystem (total / scanned / dropped / alerted / vanished + `alertRate`), with fair-window filtering. Surfaced as a new "Ledger (24h)" section in the daily report and as operational node metrics, with a trend regression-check. Note: `alertRate` is an operational throughput signal, NOT detection TPR (the real operational TPR comes from the Phase 5 coverage-audit). Files: `src/monitor/state.js`, `src/monitor/webhook.js`, `src/commands/evaluate.js`, `scripts/regression-check.js`. New test `tests/report/webhook.test.js`.
+
+## [2.11.67] - 2026-06-07
+
+### Added
+
+- **Phase 0a - per-scan coverage ledger.** New `src/monitor/state.js` with `appendScanLedger()` writing one outcome row per scanned package to `data/scan-ledger.jsonl` (ts, name, version, ecosystem, outcome, score, tier, maxSeverity, types, sandbox, firstPublish, source ; auto-compacted at `MAX_SCAN_LEDGER`). The authoritative per-package record consumed by the Phase 0b rollup and the Phase 5 coverage-audit. New test `tests/unit/scan-ledger.test.js`.
+- **Phase 1 - Phantom Gyp speed-bump.** New rule **MUADDIB-PKG-023 `gyp_command_exec`** (CRITICAL) flags `binding.gyp` GYP command-substitution (`<!(...)` / `<!@(...)`): install-time code execution via node-gyp without a package.json lifecycle script. This is a danger-marker / speed-bump (it surfaces the pattern) ; the precise FP-safe verdict is the Phase 1b compound (COMPOUND-017, v2.11.70).
+- **Phase 4-archive - alert-only retention.** `src/scanner/tarball-archive.js` now persists a package tarball (.tgz) only when its score >= 20, cutting archive disk churn to suspect packages only.
+
+### Changed
+
+- **Phase -1 - ops hardening.** Disk-space guard, POSIX ACL fixes, resurrected IOC feeds, OSM token wiring, and a disk-guard around archive writes (follow-up to the 2026-05-24 disk-fill incident).
+
+## [2.11.66] - 2026-06-06
+
+### Fixed
+
+- IOC store singleton: root cause of the monitor heap leak (the store was re-instantiated per scan instead of shared).
+
+## [2.11.65] - 2026-06-06
+
+### Fixed
+
+- Project npm packuments before caching: stop holding full packuments in memory (heap leak).
+
+## [2.11.64] - 2026-06-06
+
+### Fixed
+
+- Poll watchdog + HTTP deadline to unwedge a stalled monitor poll loop, plus heap diagnostics.
+
+## [2.11.63] - 2026-06-05
+
+### Changed
+
+- Republish (v2.11.62 was already on npm).
+
+## [2.11.62] - 2026-06-05
+
+### Fixed
+
+- Kill the `loadash` typosquat cycle (a stale `package.json` rewrite kept reintroducing the `lodash` typosquat) and arm the PR guard `scripts/check-deps-typosquats.js` so CI fails if `loadash` reappears in `dependencies` / `devDependencies`.
+
+## [2.11.61] - 2026-06-05
+
+### Fixed
+
+- Skip the sandbox on a memory-IOC match + handle native binary shards.
+
+## [2.11.60] - 2026-06-05
+
+### Fixed
+
+- Monitor crash-resilience P0+P1+P2 (partial-work recovery, streaming writes, error summaries logged even on crash).
+
+## [2.11.59] - 2026-06-05
+
+### Fixed
+
+- Eliminate the per-worker npm 429 storm.
+
+## [2.11.58] - 2026-06-04
+
+### Fixed
+
+- Coordinated 429 backoff + env-tunable registry limits. `fetchWithRetry` now honors the limiter's coordinated `signal429()` backoff instead of each worker retrying independently (thundering-herd 429s). This is the fix for the documented "benign FPR drift 1.10% -> 6.6% measurement artifact" (transient npm-registry metadata rate-limiting starving `reputationFactor`).
+
 ## [2.11.57] - 2026-06-04
 
 ### Changed
