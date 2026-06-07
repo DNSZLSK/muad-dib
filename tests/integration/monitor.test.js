@@ -10024,6 +10024,55 @@ async function runMonitorTests() {
     const trig = { shouldCache: true, reason: 'first_publish', retentionDays: 7 };
     assert(isFirstPublishHighRisk(trig, null) === true, 'null meta → precautionary sandbox (hence the gate)');
   });
+
+  // ============================================
+  // PHASE 2b — Burst (Miasma) pre-alert + protected eviction
+  // (local requires, like the ATO block above, to keep no-source-grep line keys stable)
+  // ============================================
+
+  test('PHASE-2b: selectMostRecentVersion reports the TRUE uncapped window count', () => {
+    const { selectMostRecentVersion } = require('../../src/monitor/ingestion.js');
+    // 12 versions of ONE name within minutes (Miasma-shaped). recentVersions stays capped
+    // for enqueue, but recentWindowCount is the real number the burst threshold reads.
+    const base = Date.parse('2026-06-07T00:00:00Z');
+    const packument = { 'dist-tags': { latest: '1.0.0' }, versions: {}, time: {} };
+    for (let i = 0; i < 12; i++) {
+      const v = `1.0.${i}`;
+      packument.versions[v] = { version: v, dist: { tarball: `https://reg/${v}.tgz` } };
+      packument.time[v] = new Date(base - i * 60 * 1000).toISOString(); // 1 min apart
+    }
+    const r = selectMostRecentVersion(packument);
+    assert(r.recentWindowCount === 12, `true window count should be 12, got ${r.recentWindowCount}`);
+    assert(r.recentVersions.length === 5, `enqueue extras stay capped at 5, got ${r.recentVersions.length}`);
+  });
+
+  test('PHASE-2b: a legit 3-version release day stays below the burst threshold', () => {
+    const { selectMostRecentVersion } = require('../../src/monitor/ingestion.js');
+    const base = Date.parse('2026-06-07T00:00:00Z');
+    const packument = { 'dist-tags': { latest: '2.0.2' }, versions: {}, time: {} };
+    for (let i = 0; i < 3; i++) {
+      const v = `2.0.${i}`;
+      packument.versions[v] = { version: v, dist: { tarball: `https://reg/${v}.tgz` } };
+      packument.time[v] = new Date(base - i * 3600 * 1000).toISOString(); // 1h apart
+    }
+    const r = selectMostRecentVersion(packument);
+    assert(r.recentWindowCount === 3, `count should be 3, got ${r.recentWindowCount}`);
+    assert(r.recentWindowCount < 10, 'a 3-version day is provably below the default burst threshold of 10');
+  });
+
+  test('PHASE-2b: buildBurstPreAlertEmbed — amber, count, ecosystem-aware link', () => {
+    const { buildBurstPreAlertEmbed } = require('../../src/monitor.js');
+    const npm = buildBurstPreAlertEmbed('miasma-pkg', 96, 'npm');
+    assert(npm.embeds[0].color === 0xf39c12, 'burst embed is amber (distinct from IOC red / campaign orange)');
+    const pf = npm.embeds[0].fields.find(f => f.name === 'Package');
+    assert(pf.value.includes('https://www.npmjs.com/package/miasma-pkg'), 'npm link');
+    const vf = npm.embeds[0].fields.find(f => f.name === 'Versions');
+    assert(vf.value.includes('96'), `count should appear, got ${vf.value}`);
+    // pypi link variant (ecosystem-aware via registryLink)
+    const pypi = buildBurstPreAlertEmbed('miasma-pkg', 11, 'pypi');
+    const pf2 = pypi.embeds[0].fields.find(f => f.name === 'Package');
+    assert(pf2.value.includes('https://pypi.org/project/miasma-pkg/'), 'pypi link');
+  });
 }
 
 module.exports = { runMonitorTests };

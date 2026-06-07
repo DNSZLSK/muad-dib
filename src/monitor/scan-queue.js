@@ -24,32 +24,58 @@ const MAX_SCAN_QUEUE = (() => {
 const HARD_DROP_LOG_INTERVAL_MS = 10_000;
 let _lastHardDropLog = 0;
 
+// Phase 2b: classes we never want to drop blindly when the queue caps out — the
+// specifically-targeted scans (known-malicious, burst/ATO, first-publish). Eviction drops
+// the oldest UNPROTECTED item instead; only if a bounded head-window is entirely protected
+// do we fall back to strict-oldest (still ledgered, with a distinct source).
+function _isProtected(item) {
+  return !!(item && (item.isIOCMatch || item.isBurst || item.firstPublish || item.atoSignal || item.isATOBurstExtra));
+}
+
+// How far from the head we scan for an unprotected victim. Protected items are a small
+// fraction of the flood, so a victim is almost always found within a few slots; the bound
+// keeps eviction O(window) under sustained overflow (CLAUDE.md §2 bounded resources).
+const PROTECTED_EVICTION_SCAN_MAX = (() => {
+  const v = parseInt(process.env.MUADDIB_PROTECTED_EVICTION_SCAN_MAX, 10);
+  return Number.isFinite(v) && v > 0 ? v : 1024;
+})();
+
 /**
- * Push an item onto the scan queue, enforcing the hard cap by dropping the oldest item
- * when at capacity. `max` defaults to MAX_SCAN_QUEUE (overridable for tests). Returns
- * true iff an item was dropped to make room.
+ * Push an item onto the scan queue, enforcing the hard cap when at capacity. Evicts the
+ * oldest UNPROTECTED item (within a bounded head-window), falling back to strict-oldest if
+ * that window is all-protected. `max` defaults to MAX_SCAN_QUEUE (overridable for tests).
+ * Returns true iff an item was dropped to make room.
  */
 function enqueueScan(scanQueue, item, stats, max = MAX_SCAN_QUEUE) {
   let dropped = false;
   if (scanQueue.length >= max) {
-    const evicted = scanQueue.shift(); // drop oldest
+    // Victim = oldest unprotected item within the bounded head-window; else strict oldest.
+    let victimIdx = -1;
+    const scanLimit = Math.min(scanQueue.length, PROTECTED_EVICTION_SCAN_MAX);
+    for (let i = 0; i < scanLimit; i++) {
+      if (!_isProtected(scanQueue[i])) { victimIdx = i; break; }
+    }
+    const protectedFallback = victimIdx === -1;
+    const evicted = protectedFallback ? scanQueue.shift() : scanQueue.splice(victimIdx, 1)[0];
     dropped = true;
     if (stats) stats.queueHardDrops = (stats.queueHardDrops || 0) + 1;
     // Phase 0a: record the dropped item so a coverage loss keeps an identity — answers
     // "which versions were never scanned" (e.g. the Miasma 72s/96-version burst). Lazy
     // require avoids any top-level coupling with state.js; best-effort, never throws.
+    // A dropped PROTECTED item (all-protected head-window) gets a distinct source so the
+    // rare case stays visible in the 0b ledger rollup.
     try {
       if (evicted && evicted.name) {
         require('./state.js').appendScanLedger({
           name: evicted.name, version: evicted.version, ecosystem: evicted.ecosystem,
-          outcome: 'dropped', source: 'queue_cap'
+          outcome: 'dropped', source: protectedFallback ? 'queue_cap_protected' : 'queue_cap'
         });
       }
     } catch { /* ledger is best-effort */ }
     const now = Date.now();
     if (now - _lastHardDropLog > HARD_DROP_LOG_INTERVAL_MS) {
       _lastHardDropLog = now;
-      console.warn(`[MONITOR] QUEUE_HARD_DROP: scan queue at cap ${max} — dropping oldest item(s) (total dropped this session: ${stats ? stats.queueHardDrops : '?'}). Ingestion is outrunning scanning.`);
+      console.warn(`[MONITOR] QUEUE_HARD_DROP: scan queue at cap ${max} — dropping ${protectedFallback ? 'OLDEST (head-window all protected)' : 'oldest unprotected'} item(s) (total dropped this session: ${stats ? stats.queueHardDrops : '?'}). Ingestion is outrunning scanning.`);
     }
   }
   scanQueue.push(item);
