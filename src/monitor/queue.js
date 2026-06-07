@@ -57,6 +57,7 @@ const {
   buildAlertData,
   persistAlert,
   sendIOCPreAlert,
+  sendBurstPreAlert,
   matchVersionedIOC,
   buildCanaryExfiltrationWebhookEmbed,
   getWebhookUrl,
@@ -129,6 +130,21 @@ const RECENTLY_SCANNED_MAX = 50_000; // FIFO cap for the dedup Set (P0c — boun
 // Prevents starving T1a sandbox capacity when many first-publish packages arrive at once
 const FIRST_PUBLISH_SANDBOX_MAX_QUEUE = parseInt(process.env.MUADDIB_FIRST_PUBLISH_SANDBOX_MAX_QUEUE, 10) || 10;
 const FIRST_PUBLISH_SANDBOX_ENABLED = process.env.MUADDIB_FIRST_PUBLISH_SANDBOX !== '0';
+
+// Phase 2b: burst (Miasma) pre-alert. A burst = >= this many versions of ONE name in the
+// recent-publish window (the TRUE uncapped count, selectMostRecentVersion.recentWindowCount).
+// Default 10: detection is PER-NAME, so legit multi-PLATFORM publishers (different names,
+// e.g. @opencode-ai/cli-*-* binaries) are never caught; legit same-name release days rarely
+// reach 10; Miasma's 96-in-72s clears it easily. Per-name + deduped + non-scoring (Discord
+// heads-up only, no FPR impact). Env-tunable up if a feed proves noisy.
+const BURST_PREALERT_MIN_VERSIONS = (() => {
+  const n = parseInt(process.env.MUADDIB_BURST_MIN_VERSIONS, 10);
+  return Number.isFinite(n) && n >= 2 ? n : 10;
+})();
+// Dedup burst pings: one per name per process window (bounded — cleared at the cap so it
+// can never grow without limit, CLAUDE.md §2).
+const _burstAlerted = new Set();
+const BURST_ALERTED_MAX = 20_000;
 
 // Stage 3 — sandbox gate. Static-score threshold below which T1b/T2 packages
 // are NOT sandboxed (static result alone is authoritative). Tightens the prior
@@ -1429,6 +1445,25 @@ async function resolveTarballAndScan(item, stats, dailyAlerts, recentlyScanned, 
         // only scan whichever version happened to be the most recent at resolution
         // time, racing the publish stream.
         const recents = Array.isArray(npmInfo.recentVersions) ? npmInfo.recentVersions : [];
+        // Phase 2b: burst = TRUE count of versions of this name in the recent window
+        // (uncapped recentWindowCount), NOT the capped extras list — so a 96-version Miasma
+        // burst is distinguishable from a legit multi-version day. At/above the threshold,
+        // flag the item (protects it + its extras from queue-cap eviction) and fire ONE
+        // burst pre-alert per name (deduped, bounded).
+        const burstCount = Number.isFinite(npmInfo.recentWindowCount) ? npmInfo.recentWindowCount : (recents.length + 1);
+        const isBurst = burstCount >= BURST_PREALERT_MIN_VERSIONS;
+        if (isBurst) {
+          item.isBurst = true;
+          if (!_burstAlerted.has(item.name)) {
+            if (_burstAlerted.size >= BURST_ALERTED_MAX) _burstAlerted.clear();
+            _burstAlerted.add(item.name);
+            stats.burstPreAlerts = (stats.burstPreAlerts || 0) + 1;
+            console.log(`[MONITOR] BURST PRE-ALERT: ${item.name} — ${burstCount} versions in the recent window`);
+            sendBurstPreAlert(item.name, burstCount, item.ecosystem).catch(err => {
+              console.error(`[MONITOR] burst pre-alert webhook failed for ${item.name}: ${err.message}`);
+            });
+          }
+        }
         for (const recent of recents) {
           if (!recent || !recent.tarball || !recent.version) continue;
           const dedupeKey = `${item.name}@${recent.version}`;
@@ -1441,6 +1476,7 @@ async function resolveTarballAndScan(item, stats, dailyAlerts, recentlyScanned, 
             unpackedSize: recent.unpackedSize || 0,
             registryScripts: recent.scripts || null,
             atoSignal: item.atoSignal === true,
+            isBurst,
             isATOBurstExtra: true,
           }, stats);
         }

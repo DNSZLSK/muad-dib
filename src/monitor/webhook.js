@@ -241,6 +241,43 @@ async function sendCampaignPreAlert(name, campaign, ecosystem = 'npm') {
 }
 
 /**
+ * Layer 1c: Build the burst pre-alert embed (pure — no network). Exported for tests.
+ * Fires when ≥K versions of one package land in a short window (account-takeover /
+ * "Miasma" burst-publish). Amber to distinguish from IOC (red) and campaign (orange).
+ * @param {string} name - Package name
+ * @param {number} count - Number of versions seen in the burst window
+ * @param {string} [ecosystem='npm'] - 'npm' | 'pypi' | 'crates' (link target)
+ */
+function buildBurstPreAlertEmbed(name, count, ecosystem = 'npm') {
+  return {
+    embeds: [{
+      title: '⚠️ BURST PRE-ALERT — Rapid Multi-Version Publish',
+      color: 0xf39c12,
+      fields: [
+        { name: 'Package', value: `[${ecosystem}/${name}](${registryLink(ecosystem, name)})`, inline: true },
+        { name: 'Versions', value: `${count} in a short window`, inline: true },
+        { name: 'Detection', value: 'Burst-publish (possible ATO / Miasma)', inline: true },
+        { name: 'Status', value: 'Multiple versions published rapidly — every version queued for scan and protected from queue-cap eviction. Treat as suspect until verdicts land.', inline: false }
+      ],
+      footer: {
+        text: `MUAD'DIB Burst Pre-Alert | ${new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, ' UTC')}`
+      },
+      timestamp: new Date().toISOString()
+    }]
+  };
+}
+
+/**
+ * Layer 1c: Send a burst pre-alert webhook. Fire-and-forget; callers dedupe per
+ * name/window so a burst pings once, not once per version.
+ */
+async function sendBurstPreAlert(name, count, ecosystem = 'npm') {
+  const url = getWebhookUrl();
+  if (!url) return;
+  await sendWebhook(url, buildBurstPreAlertEmbed(name, count, ecosystem), { rawPayload: true });
+}
+
+/**
  * Check if a specific package@version matches a versioned IOC entry.
  * Returns the matching IOC entry or null.
  * Wildcard IOCs are NOT checked here (use wildcardPackages.has() separately).
@@ -1399,6 +1436,8 @@ module.exports = {
   sendIOCPreAlert,
   buildCampaignPreAlertEmbed,
   sendCampaignPreAlert,
+  buildBurstPreAlertEmbed,
+  sendBurstPreAlert,
   matchVersionedIOC,
   computeRiskLevel,
   computeRiskScore,

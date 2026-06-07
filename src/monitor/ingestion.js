@@ -370,7 +370,8 @@ const RECENT_PUBLISH_MAX = 5;
  * @returns {Object|null} - {
  *   version, tarball, unpackedSize, scripts, homepage, description,
  *   latestTagVersion,       // dist-tags.latest (may differ from `version` under ATO)
- *   recentVersions: [{ version, tarball, unpackedSize, scripts }, ...]
+ *   recentVersions: [{ version, tarball, unpackedSize, scripts }, ...],  // capped at maxRecent
+ *   recentWindowCount,      // TRUE (uncapped) count of versions in the window (Phase 2b burst)
  * } or null if no usable version found
  */
 function selectMostRecentVersion(packument, options = {}) {
@@ -419,14 +420,19 @@ function selectMostRecentVersion(packument, options = {}) {
     recentVersions: [],
   };
 
-  // Burst extras: other versions published within the recent window, excluding
-  // the most-recent one. Bounded by maxRecent. Each extra carries enough
-  // metadata for the queue to enqueue it directly without re-fetching the packument.
+  // Burst extras: other versions published within the recent window, excluding the
+  // most-recent one. The enqueue list is bounded by maxRecent, but recentWindowCount is
+  // the TRUE (uncapped) number of versions in the window — Phase 2b burst detection uses it
+  // so a 96-version Miasma burst is distinguishable from a legit 3-5 patch-release day (the
+  // capped list alone tops out at maxRecent+1 and can't tell them apart).
+  result.recentWindowCount = 1; // includes the most-recent version itself
   if (versionTimes.length > 1) {
     const cutoff = versionTimes[0][1] - recentWindowMs;
-    for (let i = 1; i < versionTimes.length && result.recentVersions.length < maxRecent; i++) {
+    for (let i = 1; i < versionTimes.length; i++) {
       const [v, ts] = versionTimes[i];
       if (ts < cutoff) break; // sorted desc, so once we cross the cutoff we're done
+      result.recentWindowCount++;
+      if (result.recentVersions.length >= maxRecent) continue; // enqueue list capped; count continues
       const vData = versions[v];
       if (!vData) continue;
       result.recentVersions.push({
@@ -819,6 +825,7 @@ async function pollNpmChanges(state, scanQueue, stats) {
         unpackedSize: docMeta ? docMeta.unpackedSize : 0,
         registryScripts: docMeta ? docMeta.scripts : null,
         _cacheTrigger: cacheTrigger.shouldCache ? cacheTrigger : null,
+        firstPublish: cacheTrigger.shouldCache && cacheTrigger.reason === 'first_publish',
         isIOCMatch: isKnownIOC
       });
       queued++;

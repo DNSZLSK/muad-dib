@@ -331,6 +331,9 @@ module.exports = {
   // Layer 1b: Campaign name-pattern pre-alert
   buildCampaignPreAlertEmbed: webhookModule.buildCampaignPreAlertEmbed,
   sendCampaignPreAlert: webhookModule.sendCampaignPreAlert,
+  // Layer 1c: Burst (Miasma) pre-alert
+  buildBurstPreAlertEmbed: webhookModule.buildBurstPreAlertEmbed,
+  sendBurstPreAlert: webhookModule.sendBurstPreAlert,
   CAMPAIGN_PATTERNS: ingestionModule.CAMPAIGN_PATTERNS,
   matchCampaignPattern: ingestionModule.matchCampaignPattern,
   // Layer 2: CouchDB doc extraction
