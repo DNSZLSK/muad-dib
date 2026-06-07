@@ -173,6 +173,33 @@ async function runTyposquatTests() {
     assert(findTyposquatMatch('@inquirer/prompts') === null, 'scoped packages skipped');
     assert(findTyposquatMatch('fs') === null, 'short names skipped (< 4 chars)');
   });
+
+  // ── Phase 4: crates.io typosquat (POPULAR_CRATES) ──
+
+  test('TYPOSQUAT crates: findCratesTyposquatMatch flags distance-1 squats', () => {
+    const { findCratesTyposquatMatch } = require('../../src/scanner/typosquat.js');
+    const a = findCratesTyposquatMatch('reqwest2');   // extra trailing char
+    assert(a && a.original === 'reqwest' && a.distance === 1, `reqwest2→reqwest d1, got ${JSON.stringify(a)}`);
+    const b = findCratesTyposquatMatch('serdejson');  // '-'/'_' normalized → distance 1 from serde_json
+    assert(b && b.original === 'serde_json' && b.distance === 1, `serdejson→serde_json d1, got ${JSON.stringify(b)}`);
+    const c = findCratesTyposquatMatch('clapp');      // extra char
+    assert(c && c.original === 'clap', `clapp→clap, got ${JSON.stringify(c)}`);
+  });
+
+  test('TYPOSQUAT crates: findCratesTyposquatMatch flags distance-2 on longer crates', () => {
+    const { findCratesTyposquatMatch } = require('../../src/scanner/typosquat.js');
+    const m = findCratesTyposquatMatch('reqwset');    // swapped chars (distance 2), reqwest is len>=5
+    assert(m && m.original === 'reqwest' && m.distance === 2, `reqwset→reqwest d2, got ${JSON.stringify(m)}`);
+  });
+
+  test('TYPOSQUAT crates: findCratesTyposquatMatch returns null for popular/whitelisted/clean/short names', () => {
+    const { findCratesTyposquatMatch } = require('../../src/scanner/typosquat.js');
+    assert(findCratesTyposquatMatch('tokio') === null, 'tokio is itself popular');
+    assert(findCratesTyposquatMatch('serde_json') === null, 'serde_json is itself popular');
+    assert(findCratesTyposquatMatch('mime') === null, 'mime is whitelisted (distance 1 from time)');
+    assert(findCratesTyposquatMatch('totally-unrelated-xyzzy') === null, 'unrelated name → null');
+    assert(findCratesTyposquatMatch('h2') === null, 'short name skipped (< 4 chars)');
+  });
 }
 
 module.exports = { runTyposquatTests };

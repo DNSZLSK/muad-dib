@@ -178,6 +178,46 @@ async function runGhsaPollerTests() {
       assert(loadGhsaCursor(h.cursorFile) === cursorAfterSeed, 'cursor unchanged after a failed poll');
     } finally { h.cleanup(); }
   });
+
+  // ── Phase 4: crates.io (rust) ecosystem ──
+
+  test('parseAdvisory: normalizes GHSA "rust" ecosystem to internal "crates"', () => {
+    const rows = parseAdvisory({
+      ghsa_id: 'GHSA-rust', updated_at: '2026-06-07T00:00:00Z',
+      vulnerabilities: [{ package: { ecosystem: 'rust', name: 'evil-crate' }, vulnerable_version_range: '>= 0' }]
+    }, ['npm', 'pypi', 'crates']);
+    assert(rows.length === 1 && rows[0].ecosystem === 'crates' && rows[0].name === 'evil-crate',
+      'GHSA "rust" must be stored as "crates"');
+  });
+
+  test('buildGhsaPreAlertEmbed: crates link points at crates.io', () => {
+    const e = buildGhsaPreAlertEmbed({ ecosystem: 'crates', name: 'my-unique-clean-crate-xyz', ghsa_id: 'GHSA-c', versionRange: '*' });
+    assert(JSON.stringify(e).includes('crates.io/crates/my-unique-clean-crate-xyz'), 'crates.io link');
+  });
+
+  test('buildGhsaPreAlertEmbed: a crates typosquat is flagged as an enrichment field', () => {
+    const e = buildGhsaPreAlertEmbed({ ecosystem: 'crates', name: 'serdejson', ghsa_id: 'GHSA-c2', versionRange: '*' });
+    const typo = e.embeds[0].fields.find(f => f.name === 'Typosquat');
+    assert(typo && typo.value.includes('serde_json'), `expected Typosquat→serde_json, got ${JSON.stringify(typo)}`);
+    // neg: a clean crate name carries no Typosquat field
+    const clean = buildGhsaPreAlertEmbed({ ecosystem: 'crates', name: 'my-unique-clean-crate-xyz', ghsa_id: 'GHSA-c3', versionRange: '*' });
+    assert(!clean.embeds[0].fields.some(f => f.name === 'Typosquat'), 'no Typosquat field on a clean crate name');
+  });
+
+  await asyncTest('pollGhsaOnce: crates ecosystem pre-alerts a fresh malicious crate (crates.io link + typosquat)', async () => {
+    const h = harness({ npm: [], pypi: [], crates: [adv('GHSA-seed', 'rust', 'seed-crate', '2026-06-01T00:00:00Z')] });
+    try {
+      await pollGhsaOnce({ ecosystems: ['crates'], fetchImpl: h.fetchImpl, dispatch: h.dispatch,
+        appendLedger: h.appendLedger, cursorFile: h.cursorFile, malwareFile: h.malwareFile, feedHealthFile: h.feedHealthFile }); // seed
+      h.fetchImpl = async (eco) => eco === 'crates' ? [adv('GHSA-new', 'rust', 'reqwest2', '2026-06-07T00:00:00Z')] : [];
+      const r = await pollGhsaOnce({ ecosystems: ['crates'], fetchImpl: h.fetchImpl, dispatch: h.dispatch,
+        appendLedger: h.appendLedger, cursorFile: h.cursorFile, malwareFile: h.malwareFile, feedHealthFile: h.feedHealthFile });
+      assert(r.fresh === 1 && r.prealerted === 1, `one fresh crates pre-alert, got fresh=${r.fresh} pre=${r.prealerted}`);
+      const s = JSON.stringify(h.dispatched[0]);
+      assert(s.includes('crates.io/crates/reqwest2'), 'pre-alert carries the crates.io link');
+      assert(s.includes('Typosquat') && s.includes('reqwest'), 'pre-alert enriched with the reqwest typosquat');
+    } finally { h.cleanup(); }
+  });
 }
 
 module.exports = { runGhsaPollerTests };

@@ -764,4 +764,80 @@ function findPyPITyposquatMatch(name) {
   return null;
 }
 
-module.exports = { scanTyposquatting, levenshteinDistance, clearMetadataCache, findPyPITyposquatMatch, findTyposquatMatch };
+// ============================================
+// crates.io (Rust) TYPOSQUATTING — Phase 4
+// ============================================
+// Pre-alert enrichment ONLY: flags when an incoming crate name (from the GHSA rust
+// malware feed) typosquats a popular crate. No crates ingestion / build.rs / scan-time
+// Cargo parsing (non-goal). Mirrors the PyPI block above.
+
+// Top crates.io packages by downloads (typosquat targets). Hardcoded snapshot.
+const POPULAR_CRATES = [
+  'serde', 'serde_json', 'serde_derive', 'serde_yaml', 'syn', 'quote', 'proc-macro2',
+  'libc', 'rand', 'rand_core', 'log', 'cfg-if', 'bitflags', 'itertools', 'once_cell',
+  'lazy_static', 'regex', 'regex-syntax', 'aho-corasick', 'base64', 'num-traits',
+  'unicode-ident', 'tokio', 'tokio-util', 'futures', 'futures-util', 'bytes',
+  'hashbrown', 'smallvec', 'parking_lot', 'anyhow', 'thiserror', 'indexmap', 'memchr',
+  'chrono', 'semver', 'getrandom', 'clap', 'time', 'uuid', 'hyper', 'reqwest',
+  'async-trait', 'tracing', 'tracing-core', 'tracing-subscriber', 'url',
+  'percent-encoding', 'idna', 'socket2', 'httparse', 'tower', 'rayon', 'num_cpus',
+  'either', 'toml', 'winapi', 'windows-sys', 'env_logger', 'generic-array', 'digest',
+  'sha2', 'typenum', 'subtle', 'rustls', 'ring', 'openssl', 'flate2', 'miniz_oxide',
+  'crc32fast', 'walkdir', 'tempfile', 'dirs', 'nix', 'backtrace', 'scopeguard',
+  'pin-project', 'pin-project-lite', 'slab', 'lock_api', 'crossbeam-utils',
+  'crossbeam-channel', 'crossbeam-epoch', 'ahash', 'fnv', 'mio', 'h2', 'http'
+];
+
+// crates.io treats '-' and '_' as equivalent and is case-insensitive for name
+// uniqueness; normalize the same way for typosquat comparison.
+function normalizeCrate(name) {
+  return name.toLowerCase().replace(/[-_]+/g, '-');
+}
+
+const POPULAR_CRATES_NORMALIZED = POPULAR_CRATES.map(normalizeCrate);
+const POPULAR_CRATES_SET = new Set(POPULAR_CRATES_NORMALIZED);
+
+// Legitimate crates within edit-distance of a popular crate but not squats.
+const CRATES_WHITELIST = new Set([
+  'mime',         // distance 1 from 'time' — both real & popular
+  'rand-chacha',  // rand ecosystem sibling (normalized)
+  'serde-with',   // serde ecosystem sibling
+  'futures-core',
+]);
+
+const MIN_CRATE_LENGTH = 4;
+
+/**
+ * Find a crates.io typosquat match (Levenshtein over the popular-crate list).
+ * Pure + IOC-independent. Used by the GHSA rust pre-alert to enrich the embed.
+ *
+ * @param {string} name - crate name
+ * @returns {{original: string, type: string, distance: number}|null}
+ */
+function findCratesTyposquatMatch(name) {
+  if (typeof name !== 'string' || !name) return null;
+  const normalized = normalizeCrate(name);
+
+  if (POPULAR_CRATES_SET.has(normalized)) return null; // it IS a popular crate
+  if (CRATES_WHITELIST.has(normalized)) return null;
+  if (normalized.length < MIN_CRATE_LENGTH) return null;
+
+  for (let i = 0; i < POPULAR_CRATES.length; i++) {
+    const popularNorm = POPULAR_CRATES_NORMALIZED[i];
+    const popular = POPULAR_CRATES[i];
+    if (normalized === popularNorm) continue;
+    if (popularNorm.length < MIN_CRATE_LENGTH) continue;
+    if (Math.abs(normalized.length - popularNorm.length) > 2) continue;
+
+    const distance = levenshteinDistance(normalized, popularNorm);
+    if (distance === 1) {
+      return { original: popular, type: detectTyposquatType(normalized, popularNorm), distance };
+    }
+    if (distance === 2 && popularNorm.length >= 5) {
+      return { original: popular, type: detectTyposquatType(normalized, popularNorm), distance };
+    }
+  }
+  return null;
+}
+
+module.exports = { scanTyposquatting, levenshteinDistance, clearMetadataCache, findPyPITyposquatMatch, findCratesTyposquatMatch, findTyposquatMatch };
