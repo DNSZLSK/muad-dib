@@ -53,11 +53,30 @@ rapport.html
 results.sarif
 index.html
 
-# npm pack extraction residue (CRITICAL: overwrites package.json in tarball)
+# npm pack output/residue (CRITICAL: package/ overwrites package.json in tarball;
+# a stray *.tgz from a local `npm pack` self-includes and inflates the next pack)
 package/
+*.tgz
 
 # Windows / temp artifacts
 nul
 tmp-*
 .gitattributes
 logs/
+
+# Python ML training/retraining (XGBoost path disabled since 2026-04, not used by the
+# CLI at runtime). Their requirements.txt are what Socket/npm audit report as phantom
+# Python deps (xgboost, scikit-learn, shap, pandas, numpy, requests). No .py is executed
+# by the published scanner — the PYAST scanner uses the vendored .wasm grammar, not Python.
+*.py
+ml-retrain/
+tools/
+sbom.json
+
+# Local-only / secret artifacts. CRITICAL: when a .npmignore exists, npm IGNORES .gitignore
+# entirely, so a gitignored .env would still ship if published from a machine where it exists.
+# Exclude explicitly (defense-in-depth; prepublishOnly already blocks non-CI local publishes).
+.env
+.env.example
+.build_dossier.py
+.dockerignore

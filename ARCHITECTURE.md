@@ -33,7 +33,7 @@ bin/muaddib.js (yargs CLI)
         ├─► FP reductions (src/scoring.js — applyFPReductions)
         ├─► Reachability post-processing (src/scanner/reachability.js — file-level + function-level FP downgrade)
         ├─► Intent coherence analysis (src/intent-graph.js — buildIntentPairs)
-        ├─► Rule enrichment (src/rules/index.js — 262 rules)
+        ├─► Rule enrichment (src/rules/index.js — 264 rules)
         ├─► Scoring (src/scoring.js — per-file max + compound boosts)
         └─► Output (CLI / JSON / HTML / SARIF)
 
@@ -43,7 +43,7 @@ bin/muaddib.js (yargs CLI)
     src/monitor/queue.js:628).
 ```
 
-**Core orchestration:** `src/index.js` delegates to `src/pipeline/{initializer,executor,processor,outputter}.js`. `executor.js` runs cross-file module graph analysis first (pre-analysis, 5s timeout), then launches **20 individual scanners** in parallel via `Promise.allSettled` (intel-triage P1: `scanIocStrings` + `scanAntiForensic` + `scanStubPackage`; Sprint 1: `scanMonorepo` audit MR-C2 fix; v2.11.41+: `scanPythonSource` PYSRC + `scanPythonAst` PYAST), then `processor.js` deduplicates, applies FP reductions + reachability post-processing, scores using per-file max (v2.2.11: `riskScore = min(100, max(file_scores) + package_level_score)`, severity weights: CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1), applies intent coherence analysis (intra-file source-sink pairing), enriches with rules/playbooks (262 rules), and `outputter.js` formats CLI/JSON/HTML/SARIF. Result includes `warnings: []` array (v2.6.5) for incomplete scan notifications (module graph timeout/skip, deobfuscation failures). Exports `isPackageLevelThreat` and `computeGroupScore` for testing.
+**Core orchestration:** `src/index.js` delegates to `src/pipeline/{initializer,executor,processor,outputter}.js`. `executor.js` runs cross-file module graph analysis first (pre-analysis, 5s timeout), then launches **20 individual scanners** in parallel via `Promise.allSettled` (intel-triage P1: `scanIocStrings` + `scanAntiForensic` + `scanStubPackage`; Sprint 1: `scanMonorepo` audit MR-C2 fix; v2.11.41+: `scanPythonSource` PYSRC + `scanPythonAst` PYAST), then `processor.js` deduplicates, applies FP reductions + reachability post-processing, scores using per-file max (v2.2.11: `riskScore = min(100, max(file_scores) + package_level_score)`, severity weights: CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1), applies intent coherence analysis (intra-file source-sink pairing), enriches with rules/playbooks (264 rules), and `outputter.js` formats CLI/JSON/HTML/SARIF. Result includes `warnings: []` array (v2.6.5) for incomplete scan notifications (module graph timeout/skip, deobfuscation failures). Exports `isPackageLevelThreat` and `computeGroupScore` for testing.
 
 ## Scanner Modules
 
@@ -52,13 +52,13 @@ bin/muaddib.js (yargs CLI)
 | Phase | Count | Modules | Mechanism |
 |-------|-------|---------|-----------|
 | Pre-analysis | 2 | `module-graph/` (directory, 9 files, 5s timeout), `deobfuscate.js` (passed as arg to AST + dataflow) | Sequential, before parallel phase |
-| Parallel | 17 | AST, dataflow, shell, package, dependencies, obfuscation, entropy, typosquat, python (IOC + PyPI typosquat = 2 functions), ai-config, github-actions, hash, ioc-strings (P1.1), anti-forensic (P1.2), stub-package (P1.3), monorepo | `Promise.allSettled` (executor.js:207-225) |
-| Conditional / post-processing | 5 | `paranoid.js` (--paranoid), `temporal-runner.js` + `temporal-analysis.js` + `temporal-ast-diff.js` (--temporal*), `reachability.js` (post-processor FP downgrade) | Skipped unless flag or post-pipeline |
+| Parallel | 20 | AST, dataflow, shell, package, dependencies, obfuscation, entropy, typosquat, python (IOC + PyPI typosquat = 2 functions), ai-config, github-actions, hash, ioc-strings (P1.1), anti-forensic (P1.2), stub-package (P1.3), monorepo, trusted-dep-diff (opt-in), python-source (PYSRC), python-ast (PYAST tree-sitter) | `Promise.allSettled` (executor.js:221-228, allSettled at :269) |
+| Conditional / post-processing | 6 | `paranoid.js` (--paranoid), `temporal-runner.js` + `temporal-analysis.js` + `temporal-ast-diff.js` (--temporal*), `reachability.js` (post-processor FP downgrade), `phantom-gyp.js` (Phantom Gyp compound correlator, post-processor at `processor.js:451`) | Skipped unless flag or post-pipeline |
 | Metadata fetcher | 1 | `npm-registry.js` | NPM API for age/downloads/maintainers (ML features, monitor, evaluate) |
 
-Total: **23 `.js` files** at `src/scanner/` root + **1 directory** `module-graph/` (9 files). Intent coherence (`src/intent-graph.js`) runs in pipeline processor, not in `src/scanner/`.
+Total: **32 `.js` files** at `src/scanner/` root + **1 directory** `module-graph/` (9 files). Of the 32: 19 files serve the 20 parallel scan functions (`python.js` provides 2 - `matchPythonIOCs` + `checkPyPITyposquatting`), `deobfuscate.js` is pre-analysis, 6 are conditional/post-processing (paranoid, 3× temporal-*, reachability, phantom-gyp), `npm-registry.js` is metadata, and the remaining 5 (`release-zero.js`, `email-domain.js`, `pypi-maintainer.js`, `pypi-registry.js`, `pypi-release-zero.js`) are monitor-side / registry-metadata scanners invoked by the daemon, not the CLI scan path. Intent coherence (`src/intent-graph.js`) runs in pipeline processor, not in `src/scanner/`.
 
-**Scanner pattern:** Each of the 17 individual scanners in `src/scanner/` returns `Array<{type, severity, message, file}>`:
+**Scanner pattern:** Each of the 20 individual scanners in `src/scanner/` returns `Array<{type, severity, message, file}>`:
 - `file` must use `path.relative(targetPath, absolutePath)` for Windows compatibility
 - Sync scanners are wrapped in `Promise.resolve()` in the Promise.all
 - Use `findFiles(dir, { extensions, excludedDirs })` from `src/utils.js` for file walking
@@ -236,13 +236,23 @@ quand un package suspect est surface.
    - **Light path** — `muaddib update` (~5s, JSON/REST only): Shai-Hulud, DataDog, OSV-lightweight API, OpenSourceMalware (`scrapeOSMQueryLatest`, requires `OSM_API_TOKEN`).
    - **Full path** — `muaddib scrape` (~5min, includes heavy zip downloads): all of the above PLUS OSV bulk dump (npm + PyPI), OSSF malicious-packages, GitHub Advisory, Aikido bulk feed.
 
-   On the VPS, two systemd timers drive these automatically:
-   - `muaddib-scrape-light.timer` (every 15 min) → `muaddib update` — fast feeds incl. OSM
-   - `muaddib-scrape.timer` (every 6 h) → `muaddib scrape` — deep refresh
+   On the VPS, systemd units drive these automatically:
+   - `muaddib-monitor.service` - long-running daemon (npm/PyPI poll + scan + in-process GHSA poller + webhooks)
+   - `muaddib-scrape-light.timer` (every 15 min) -> `muaddib update` - fast feeds incl. OSM
+   - `muaddib-scrape.timer` (every 6 h) -> `muaddib scrape` - deep refresh
+   - `muaddib-coverage-audit.timer` (daily 05:00 UTC) -> `scripts/coverage-audit.js` - Phase 5 operational coverage audit
 
    The `OSM_API_TOKEN` for OpenSourceMalware lives in `/opt/muaddib/.env` (loaded via `EnvironmentFile=-` in the unit). Absent token = scraper skips OSM gracefully, no error.
 
 `loadCachedIOCs()` from `src/ioc/updater.js` merges all tiers and returns optimized Maps/Sets. Source attribution is preserved per IOC entry via `sources: [{name, added_at}]` accumulation, exposed by `getSourceConfidence()` for cross-feed confirmation gating.
+
+### Feed-Health Alarm (v2.11.71, Phase 2c)
+
+`src/ioc/feed-health.js` detects silent IOC-feed failures: a feed that returns 0 entries after a healthy baseline signals stale data or a broken endpoint. `evaluateFeedHealth()` (pure decision core) compares per-feed counts against a persisted baseline (`data/feed-health.json`) and fires a ONE-SHOT alarm on a healthy->dark transition + a recovery notice on dark->alive. Baseline minimum 5 IOCs (`MUADDIB_FEED_HEALTH_MIN`) prevents FPs on small/volatile feeds. Best-effort: never breaks the IOC refresh. This closes the blind spot where the OSM feed went dark for weeks without ops notice. The OSM alert path is token-gated.
+
+### Active GHSA Poller (v2.11.72, Phase 2c)
+
+`src/ioc/ghsa-poller.js` polls the GitHub Advisory Database for `type=malware` advisories every ~15 min (`GHSA_POLL_INTERVAL_MS`, started by `src/monitor/daemon.js`). `GHSA_ECOSYSTEMS = ['npm', 'pypi', 'crates']`. It (1) persists each advisory's malicious packages to `data/ghsa-malware.jsonl` - the authoritative "what should we have caught" denominator for the Phase 5 coverage-audit; (2) pre-alerts genuinely fresh names (updated since the cursor) as early warning, capped per poll (`GHSA_PREALERT_CAP`); (3) records withdrawn advisories (`withdrawn_at` set) to the scan-ledger as `outcome:dropped`; (4) feeds its fetch count into the feed-health alarm. `fetchAllGhsaMalware(ecosystem)` returns the paginated full list (used by coverage-audit). The poller does NOT inject scans into the live queue: GHSA lags downstream vendors, so the package is usually already removed or in the IOC store. Honest scope - its value is the denominator + early-warning + withdrawn tracking, not net-new live detection. From v2.11.75 the rust/crates pre-alert is enriched with the nearest `POPULAR_CRATES` typosquat via `findCratesTyposquatMatch()`.
 
 ## Evaluation Framework
 
@@ -275,7 +285,7 @@ The custom test framework (`tests/run-tests.js`) favors **behavioral** tests (ru
 
 ### High-Confidence Malice Bypass (v2.7.6)
 
-`HIGH_CONFIDENCE_MALICE_TYPES` (19 types): `lifecycle_shell_pipe`, `fetch_decrypt_exec`, `download_exec_binary`, `reverse_shell`, `crypto_staged_payload`, `intent_credential_exfil`, `intent_command_exfil`, `cross_file_dataflow`, `canary_exfiltration`, `sandbox_network_after_sensitive_read`, `sandbox_known_exfil_domain`, `detached_credential_exfil`, `node_modules_write`, `npm_publish_worm`, `systemd_persistence`, `npm_token_steal`, `root_filesystem_wipe`, `proc_mem_scan`, `trusted_new_unknown_dependency`. These bypass reputation attenuation — supply-chain compromise of established packages cannot be suppressed.
+`HIGH_CONFIDENCE_MALICE_TYPES` (30 types, in `src/monitor/classify.js`): `lifecycle_shell_pipe`, `fetch_decrypt_exec`, `download_exec_binary`, `reverse_shell`, `crypto_staged_payload`, `intent_credential_exfil`, `intent_command_exfil`, `cross_file_dataflow`, `canary_exfiltration`, `sandbox_network_after_sensitive_read`, `sandbox_known_exfil_domain`, `detached_credential_exfil`, `node_modules_write`, `npm_publish_worm`, `systemd_persistence`, `npm_token_steal`, `root_filesystem_wipe`, `proc_mem_scan`, `trusted_new_unknown_dependency`, `curl_env_exfil`, `function_constructor_require`, `newsletter_auto_follow`, `self_destruct_eval`, `external_tarball_dep`, `function_runtime_args`, `env_charcode_reconstruction`, `ide_hook_autoexec`, `workflow_secrets_dump`, `gyp_command_exec`, `gyp_phantom_exec` (the last two added v2.11.67/70, Phantom Gyp). These bypass reputation attenuation — supply-chain compromise of established packages cannot be suppressed.
 
 **Aggressive reputation tiers:** `computeReputationFactor()` floor lowered from 0.30 to 0.10. New tiers: 5+ years age (-0.5), 200+ versions (-0.3), 1M+ weekly downloads (-0.4).
 
@@ -311,6 +321,32 @@ See [Intent Graph](#intent-graph) section for `isSDKPattern()` details and 22 SD
 
 **Math:** 7 d × 4.5 GB/day ≈ 31 GB archives + ~20 GB base = ~53 % of 96 GB disk in steady state. Even at peak ingestion days (5.8 GB), 14 d would push to 86 % (no margin); 7 d stays at ~63 %.
 
+The tarball archive became alert-only in v2.11.67 (Phase 4-archive): a `.tgz` is persisted only when the package score >= 20, cutting archive disk churn to suspect packages.
+
+### Per-Scan Coverage Ledger (v2.11.67, Phase 0a)
+
+`src/monitor/state.js` `appendScanLedger()` writes one outcome row per scanned package to `data/scan-ledger.jsonl` (fields: ts, name, version, ecosystem, outcome, score, tier, maxSeverity, types capped at 12, sandbox, firstPublish, source). Auto-compacted at `MAX_SCAN_LEDGER` (default 100k, env `MUADDIB_SCAN_LEDGER_MAX`). This is the authoritative per-package record consumed by the Phase 0b rollup and the Phase 5 coverage-audit. Fire-and-forget, never blocks the scan.
+
+### Ledger Rollup + Daily Report (v2.11.68, Phase 0b)
+
+`computeLedgerRollup(sinceTs)` streams the ledger and groups outcomes by ecosystem: total / scanned / dropped / alerted / vanished + `alertRate`, with fair-window filtering. Surfaced as a "Ledger (24h)" section in the daily report + operational node metrics, with a trend regression-check. **`alertRate` is an operational throughput signal, NOT detection TPR** - the real operational TPR comes from the Phase 5 coverage-audit.
+
+### Deferred-Sandbox Decoupling (v2.11.69, Phase 3a)
+
+The T1a sandbox stage runs via `src/monitor/deferred-sandbox.js` asynchronously, so a slow Docker sandbox no longer holds a scan worker hostage - workers return to the pool immediately while the sandbox verdict is reconciled later.
+
+### PyPI Pre-Alert Parity (v2.11.74, Phase 2a)
+
+Pre-alert embeds are ecosystem-aware: `registryLink()` resolves npm vs PyPI, and `buildIOCPreAlertEmbed` / `buildCampaignPreAlertEmbed` are pure builders reused across ecosystems. PyPI campaign pre-alerts now fire at npm parity, and first-publish detection extends to PyPI (flag + cache). The deferred sandbox gate stays npm-only.
+
+### Burst Pre-Alert + Protected Eviction (v2.11.76, Phase 2b)
+
+`recentWindowCount` (the uncapped true count of versions published in the recent window, distinct from the capped `recents` list) drives a burst detector: at >= 10 versions in the window (account-takeover / Miasma mass-republish), `sendBurstPreAlert()` emits an amber pre-alert (`buildBurstPreAlertEmbed`), deduped per name/window (one ping per burst, not per version). When the scan queue hits its cap, eviction protects high-signal entries (IOC match, active burst, first-publish, account-takeover) from being dropped, with a strict-oldest fallback when every candidate is protected.
+
+### Operational Coverage Audit (v2.11.73, Phase 5)
+
+`scripts/coverage-audit.js` (`classifyCoverage()`) joins the GHSA malware denominator (`data/ghsa-malware.jsonl`) against scan-ledger outcomes + the tarball archive to compute an honest GHSA-denominated **operational TPR** (`alerted / total`). Every GHSA malware package is classified alerted / scannedClean (a false negative) / dropped (queue-cap or `ghsa_gone`) / neverSeen. Outputs `data/coverage-audit.json` + `data/gt-proposals.json` (scannedClean misses surfaced as ground-truth candidates, human-gated promotion). Runs daily via `deploy/muaddib-coverage-audit.service` + `.timer` (05:00 UTC; `GITHUB_TOKEN` from `/opt/muaddib/.env` raises the GHSA rate limit for pagination). This is the project's honest production detection rate, distinct from the static GT TPR and from the ledger `alertRate`.
+
 ## Behavioral Anomaly Detection
 
 **Supply Chain Anomaly Detection (v2.0):** 5 behavioral detection features that detect attacks before IOCs exist:
@@ -333,7 +369,7 @@ See [Intent Graph](#intent-graph) section for `isSDKPattern()` details and 22 SD
 
 ## Detection Rules
 
-**Rules & playbooks:** Threat types map to rules in `src/rules/index.js` (**262 rules: 257 RULES + 5 PARANOID** — Track D v2.11.48 added AST-093 `linux_fingerprint_exec`, AST-094 `direct_ip_exfil`, COMPOUND-016 `recon_exfil_direct_ip`; MITRE ATT&CK mapped) and remediation text in `src/response/playbooks.js`. Both keyed by threat `type` string.
+**Rules & playbooks:** Threat types map to rules in `src/rules/index.js` (**264 rules: 259 RULES + 5 PARANOID** — Track D v2.11.48 added AST-093 `linux_fingerprint_exec`, AST-094 `direct_ip_exfil`, COMPOUND-016 `recon_exfil_direct_ip`; v2.11.67/70 Phantom Gyp added PKG-023 `gyp_command_exec` + COMPOUND-017 `gyp_phantom_exec`; MITRE ATT&CK mapped) and remediation text in `src/response/playbooks.js`. Both keyed by threat `type` string.
 
 ### AST Detection Rules (v2.2+)
 
@@ -398,7 +434,7 @@ The following commands are internal infrastructure/dev tools. They work when cal
 
 ## Compound Scoring Rules
 
-`applyCompoundBoosts()` in `src/scoring.js` (array `SCORING_COMPOUNDS` lines 487-657) injects synthetic threats when co-occurring threat types are detected — combinations rarely seen in benign packages. Called after `applyFPReductions`. Currently **16 compound rules** (13 CRITICAL + 3 HIGH).
+`applyCompoundBoosts()` in `src/scoring.js` (array `SCORING_COMPOUNDS` lines 495-679) injects synthetic threats when co-occurring threat types are detected - combinations rarely seen in benign packages. Called after `applyFPReductions`. Currently **17 compound rules** (14 CRITICAL + 3 HIGH) in `SCORING_COMPOUNDS`. A separate post-processor, `phantom-gyp.js` (`correlatePhantomGyp`, NOT part of `SCORING_COMPOUNDS`), emits the Phantom Gyp compound `gyp_phantom_exec` (MUADDIB-COMPOUND-017, CRITICAL) - listed last in the table below.
 
 | # | Type | Required types | Severity | Flags |
 |---|------|----------------|----------|-------|
@@ -418,6 +454,8 @@ The following commands are internal infrastructure/dev tools. They work when cal
 | 14 | `axios_family` | ioc_string_match + lifecycle_script + anti_forensic_partial | CRITICAL | — |
 | 15 | `stub_with_string_ioc` | stub_package_external_dep + ioc_string_match | CRITICAL | — |
 | 16 | `staged_remote_loader` | function_constructor_require + process_variable_shadow | CRITICAL | sameFile |
+| 17 | `recon_exfil_direct_ip` | linux_fingerprint_exec + direct_ip_exfil | CRITICAL | sameFile |
+| - | `gyp_phantom_exec` (via `phantom-gyp.js`, COMPOUND-017) | binding.gyp command-sub sink + independent malice verdict on invoked file | CRITICAL | post-processor, not in SCORING_COMPOUNDS |
 
 ### Flag semantics
 
@@ -437,6 +475,8 @@ The following commands are internal infrastructure/dev tools. They work when cal
 - Compound 16 : security review 2026-05-09 (chai-* / poxios-chain / express-guardrail / justenv pattern).
 - Compound 3 : audit 2026-05 Sprint 5 (RT-C1, Axios UNC1069 boundary-squat).
 - Compounds 4, 5 : audit 2026-05 Sprint 5 (RT-C1-FPR boundary-squat lifecycle + dataflow mirrors).
+- Compound 17 (`recon_exfil_direct_ip`) : Track D (v2.11.48), closes the GT-095 direct-IP recon+exfil gap (was missing from this table until now).
+- `gyp_phantom_exec` (COMPOUND-017, via `phantom-gyp.js`) : v2.11.70 Phase 1b Phantom Gyp. Correlates a `binding.gyp` command-substitution sink with an independent malice verdict on the invoked file (FP~0 by construction). The Phase 1 marker PKG-023 `gyp_command_exec` (v2.11.67) is the speed-bump; this is the precise compound fix.
 
 3 compounds are also in `PACKAGE_LEVEL_TYPES` (lifecycle_typosquat, lifecycle_inline_exec, lifecycle_remote_require). `dangerous_exec` is in `DIST_EXEMPT_TYPES` (curl|bash in `dist/` is always malicious).
 
@@ -463,6 +503,50 @@ GlassWorm campaign (March 2026, 433+ packages): Unicode invisible characters + B
 - **AST-056**: `module_load_bypass` — Module._load() internal loader bypass (CRITICAL, T1059.007)
 
 ## Version History
+
+### v2.11.76 — Phase 2b: burst pre-alert + protected eviction
+
+- `recentWindowCount` (uncapped) drives a burst detector (>= 10 versions/window -> amber `sendBurstPreAlert`); queue-cap eviction now protects IOC/burst/first-publish/ATO entries, with a strict-oldest fallback. Files: `src/monitor/{webhook,queue,scan-queue,ingestion}.js`.
+
+### v2.11.75 — Phase 4: crates.io light pre-alert
+
+- `GHSA_ECOSYSTEMS += crates`; `POPULAR_CRATES` (~88) + `findCratesTyposquatMatch()` in `typosquat.js`; rust GHSA pre-alerts enriched with the nearest-crate typosquat. Light pre-alert only (no crates download/sandbox).
+
+### v2.11.74 — Phase 2a: PyPI pre-alert parity
+
+- Ecosystem-aware `registryLink()` + pure `buildIOCPreAlertEmbed` / `buildCampaignPreAlertEmbed`; PyPI campaign pre-alerts at npm parity; first-publish extended to PyPI; deferred-sandbox gate stays npm-only.
+
+### v2.11.73 — Phase 5: coverage-audit capstone
+
+- `scripts/coverage-audit.js` (`classifyCoverage`) joins the GHSA denominator x scan-ledger x archive -> honest operational TPR (`alerted/total`); `data/coverage-audit.json` + human-gated `data/gt-proposals.json`. systemd `muaddib-coverage-audit.{service,timer}` (daily 05:00 UTC).
+
+### v2.11.72 — Phase 2c.2: active GHSA poller
+
+- `src/ioc/ghsa-poller.js` polls the GitHub Advisory DB (type=malware) every ~15 min (npm/pypi/crates); writes the `ghsa-malware.jsonl` denominator, fresh-name pre-alert, withdrawn -> ledger, `fetchAllGhsaMalware()`. Does not inject scans into the live queue.
+
+### v2.11.71 — Phase 2c.1: feed-health alarm
+
+- `src/ioc/feed-health.js` one-shot healthy->dark alarm + recovery (`evaluateFeedHealth` pure core, `feed-health.json`, baseline min 5). Closes the silent-feed-death blind spot.
+
+### v2.11.70 — Phase 1b: compound Phantom Gyp
+
+- `src/scanner/phantom-gyp.js` post-processor emits COMPOUND-017 `gyp_phantom_exec` (CRITICAL) only when a `binding.gyp` command-substitution sink meets an independent malice verdict on the invoked file (FP~0 by construction). Added to `SINGLE_FIRE_CRITICAL_TYPES` (6) + `HIGH_CONFIDENCE_MALICE_TYPES` (30).
+
+### v2.11.69 — Phase 3a: deferred-sandbox decoupling
+
+- The T1a sandbox runs async via `src/monitor/deferred-sandbox.js`; a slow Docker sandbox no longer holds a scan worker hostage.
+
+### v2.11.68 — Phase 0b: ledger rollup
+
+- `computeLedgerRollup(sinceTs)` -> a 24h daily-report section + operational node metrics + trend regression-check. `alertRate` is throughput, not TPR.
+
+### v2.11.67 — Phase -1 / 0a / 1 / 4-archive
+
+- Phase -1 ops hardening (disk guard, POSIX ACL, resurrected IOC feeds, OSM token). Phase 0a per-scan ledger (`appendScanLedger` -> `data/scan-ledger.jsonl`). Phase 1 Phantom Gyp speed-bump PKG-023 `gyp_command_exec` (CRITICAL marker on `binding.gyp` command-substitution). Phase 4-archive alert-only (.tgz persisted only if score >= 20).
+
+### v2.11.58-66 — monitor stability (429 storms, heap leaks, crash-resilience)
+
+- v2.11.58 coordinated 429 backoff (`signal429`) - fixes the benign-FPR-drift measurement artifact; v2.11.59 per-worker 429-storm fix; v2.11.60 crash-resilience P0-P2; v2.11.61 sandbox skip on memory-match + native binary shards; v2.11.62 `loadash` typosquat-cycle guard + PR gate; v2.11.63 republish; v2.11.64 poll watchdog + HTTP deadline; v2.11.65-66 heap-leak root cause (packument projection + IOC store singleton).
 
 ### v2.11.31 — Contextual FP cap F14: HARD vs SOFT exfil split (F9/F10/F11)
 

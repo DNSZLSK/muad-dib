@@ -68,9 +68,9 @@ Please include the following information in your report:
 - We aim to release fixes before public disclosure
 - We request a 90-day disclosure window for complex issues
 
-## Detection Rules (v2.11.48)
+## Detection Rules (v2.11.76)
 
-MUAD'DIB uses 28 scanner modules (2 pre-analysis: `module-graph/` + `deobfuscate`; 1 async parser bootstrap: `python-ast` WASM init; 20 parallel scanners; 5 conditional/post-processing: paranoid + 3× temporal-* + reachability; 1 metadata: `npm-registry`) + 5 behavioral anomaly detection features + ground truth validation, producing 262 rule IDs (257 RULES + 5 PARANOID — Track D added AST-093 `linux_fingerprint_exec` + AST-094 `direct_ip_exfil` + COMPOUND-016 `recon_exfil_direct_ip`). The 20 parallel scanners include the v2.11 intel-triage trio (`ioc-strings` YARA-style, `anti-forensic` XOR/self-delete compound, `stub-package` tiny main + external dep + lifecycle), the PyPI source-analysis pair (`python-source` PYSRC-001..010 regex, `python-ast` PYAST-001..010 tree-sitter AST + taint tracker), and `monorepo`/`trusted-dep-diff`:
+MUAD'DIB uses 29 scanner modules (2 pre-analysis: `module-graph/` + `deobfuscate`; 1 async parser bootstrap: `python-ast` WASM init; 20 parallel scanners; 6 conditional/post-processing: paranoid + 3× temporal-* + reachability + `phantom-gyp` correlator; 1 metadata: `npm-registry`) + 5 behavioral anomaly detection features + ground truth validation, producing 264 rule IDs (259 RULES + 5 PARANOID - Track D added AST-093 `linux_fingerprint_exec` + AST-094 `direct_ip_exfil` + COMPOUND-016 `recon_exfil_direct_ip` ; v2.11.67/70 Phantom Gyp added PKG-023 `gyp_command_exec` speed-bump + COMPOUND-017 `gyp_phantom_exec` compound). The 20 parallel scanners include the v2.11 intel-triage trio (`ioc-strings` YARA-style, `anti-forensic` XOR/self-delete compound, `stub-package` tiny main + external dep + lifecycle), the PyPI source-analysis pair (`python-source` PYSRC-001..010 regex, `python-ast` PYAST-001..010 tree-sitter AST + taint tracker), and `monorepo`/`trusted-dep-diff`:
 
 ### AST Scanner (core rules)
 
@@ -134,6 +134,9 @@ MUAD'DIB uses 28 scanner modules (2 pre-analysis: `module-graph/` + `deobfuscate
 | MUADDIB-PKG-018 | Curl/Wget Environment Exfiltration | CRITICAL |
 | MUADDIB-PKG-019 | Dependency Confusion Version Indicator | HIGH |
 | MUADDIB-PKG-020 | External Tarball Dependency URL (ltidi pattern, cloud storage non-allowlist) | CRITICAL |
+| MUADDIB-PKG-021 | Monorepo Detected | MEDIUM |
+| MUADDIB-PKG-022 | Release Zero Package (0.0.0 + install scripts or recent publish) | MEDIUM |
+| MUADDIB-PKG-023 | GYP Command-Substitution Install Execution (Phantom Gyp speed-bump / danger-marker) | CRITICAL |
 
 ### AST Scanner (v2.2+)
 
@@ -266,6 +269,8 @@ Co-occurring threat type combinations that never appear in benign packages. Inje
 | MUADDIB-COMPOUND-012 | Staged Remote Loader (Function.constructor + shadowed process) | function_constructor_require + process_variable_shadow (same file) | CRITICAL |
 | MUADDIB-COMPOUND-AXIOS | Axios / csec Family Compound | ioc_string_match + lifecycle_script + anti_forensic_partial | CRITICAL |
 | MUADDIB-COMPOUND-STUB-IOC | Stub Package + Known String IOC | stub_package_external_dep + ioc_string_match | CRITICAL |
+| MUADDIB-COMPOUND-016 | Recon + Exfil to Direct IP | linux_fingerprint_exec + direct_ip_exfil (same file) | CRITICAL |
+| MUADDIB-COMPOUND-017 | Phantom Gyp Install-Time Payload | binding.gyp command-substitution sink + independent malice verdict on invoked file | CRITICAL |
 
 ### Intel-Triage Scanners (v2.11, mai 2026) — Static-First Detection
 
@@ -492,7 +497,7 @@ MUAD'DIB 2.9 uses a **triple detection approach**:
 
 2. **Behavioral anomaly detection** (v2.0): Analyzes changes between package versions to detect supply-chain attacks before they appear in IOC databases. Compares lifecycle scripts, AST, publish frequency, and maintainer metadata across versions. This approach can detect 0-day behavioral anomalies without any prior knowledge of the specific attack.
 
-3. **Ground truth validation** (v2.1–v2.11.48): Validates detection accuracy against **96 real-world attacks** (94 in-scope; 2 out-of-scope: GT-005 colors and GT-009 faker protestware with min_threats=0). The 2026-05-25 enrichment added 22 samples — 16 synthetic for PYSRC/PYAST/AST-092/AICONF-004/PKG-022 (GT-068..083), 6 real-world npm tarballs from VPS archive (GT-084..089: TrapDoor twins, dep-confusion, MCP exfil), 7 reconstructions from `data/all-review-results.json` review reasoning (GT-090..096). Includes **13 PyPI samples** (was 0). Tracks detection lead times vs. public advisories, and monitors false positive rates over time. 3913 tests across 109 files. Current TPR@3: **95.74%** (90/94 in-scope, v2.11.48 full measurement). TPR@20: **88.30%** (83/94, +3.1pp vs v2.11.47 thanks to Track D `recon_exfil_direct_ip` compound). ADR: **96.26%** (103/107). Provides observability into scanner effectiveness.
+3. **Ground truth validation** (v2.1–v2.11.48): Validates detection accuracy against **96 real-world attacks** (94 in-scope; 2 out-of-scope: GT-005 colors and GT-009 faker protestware with min_threats=0). The 2026-05-25 enrichment added 22 samples — 16 synthetic for PYSRC/PYAST/AST-092/AICONF-004/PKG-022 (GT-068..083), 6 real-world npm tarballs from VPS archive (GT-084..089: TrapDoor twins, dep-confusion, MCP exfil), 7 reconstructions from `data/all-review-results.json` review reasoning (GT-090..096). Includes **13 PyPI samples** (was 0). Tracks detection lead times vs. public advisories, and monitors false positive rates over time. 4132 tests across 115 files. Current TPR@3: **95.74%** (90/94 in-scope, v2.11.48 full measurement). TPR@20: **88.30%** (83/94, +3.1pp vs v2.11.47 thanks to Track D `recon_exfil_direct_ip` compound). ADR: **96.26%** (103/107). Provides observability into scanner effectiveness.
 
 The behavioral detection features are opt-in (`--temporal-full`) and query the npm registry at scan time. They are particularly effective against:
 - Account takeover attacks (event-stream pattern)
@@ -511,6 +516,8 @@ MUAD'DIB includes a ground truth dataset of **96 real-world supply-chain attacks
 4 active misses include the 3 browser-only attacks (lottie-player, polyfill-io, trojanized-jquery) plus 1 other.
 
 Run `muaddib evaluate` to re-measure at any time.
+
+**Operational coverage (v2.11.73+):** beyond the static ground-truth TPR above, `scripts/coverage-audit.js` (Phase 5) computes an honest **operational TPR** by joining the GitHub Advisory Database malware denominator (`data/ghsa-malware.jsonl`, refreshed by the active GHSA poller every ~15 min) against real scan-ledger outcomes and the tarball archive (`classifyCoverage()`: alerted / scannedClean / dropped / neverSeen). This GHSA-denominated rate is the true production detection rate. It is distinct from the ledger `alertRate` (an operational throughput signal, NOT TPR). It runs daily on the VPS via `muaddib-coverage-audit.timer` (05:00 UTC), surfacing `scannedClean` misses as human-gated ground-truth candidates (`data/gt-proposals.json`).
 
 ## Evaluation Methodology Caveats (v2.11.48)
 

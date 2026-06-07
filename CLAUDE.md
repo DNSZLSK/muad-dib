@@ -19,7 +19,7 @@ Priorites :
 ## Commands
 
 ```bash
-npm test          # Run all tests (custom framework, 3969 tests across 109 files)
+npm test          # Run all tests (custom framework, 4132 tests across 115 files)
 npm run lint      # ESLint with security plugin
 npm run scan      # Self-scan: node bin/muaddib.js scan .
 npm run update    # Download latest IOCs
@@ -46,14 +46,14 @@ Tests use a custom framework in `tests/run-tests.js` (no Jest). Test helpers:
 
 **Pipeline:** Module graph pre-analysis → tree-sitter-python parser bootstrap (async WASM load, no analysis) → deobfuscation → 20 parallel scanners (Promise.allSettled) → deduplication → FP reductions → intent coherence → rule enrichment → per-file max scoring → contextual FP caps → output (CLI/JSON/HTML/SARIF). **Note:** `muaddib scan` does NOT run the ML classifier — the XGBoost model in `src/ml/` is exercised only by `muaddib evaluate` (offline metric replay) and `muaddib monitor` (LOG-ONLY since 2026-04-08, model collapsed pending retrain — see `src/monitor/queue.js:628`).
 
-**Scanner modules (20 parallel + 2 pre-analysis + 5 conditional/post-processing + 1 metadata):**
+**Scanner modules (20 parallel + 2 pre-analysis + 6 conditional/post-processing + 1 metadata):**
 
 - **20 parallel** via `Promise.allSettled` (`src/pipeline/executor.js`): AST, dataflow, shell, package, dependencies, obfuscation, entropy, typosquat (npm + PyPI from python.js), python (IOC match), ai-config, github-actions, hash, ioc-strings (intel-triage P1.1), anti-forensic (P1.2), stub-package (P1.3), monorepo (Sprint 1 audit MR-C2 fix), trusted-dep-diff (opt-in via flag), python-source (PYSRC-001..008, TrapDoor PyPI gap fix v2.11.41), python-ast (PYAST-001..008, tree-sitter Python AST scanner v2.11.42+).
 - **2 pre-analysis** (before Promise.allSettled): `module-graph/` (directory, 9 files, 5s timeout — builds cross-file flow graph, emits crossFileFlows + moduleGraphThreats), `deobfuscate.js` (transformation helper, passed as arg to AST + dataflow scanners). The `python-ast` scanner additionally requires an async parser bootstrap (`initPythonParser()` loads the WASM grammar once before the parallel batch) — this bootstrap performs no analysis and emits no threats, so it is NOT counted as a pre-analysis scanner.
-- **5 conditional/post-processing**: `paranoid.js` (--paranoid flag), `temporal-runner.js` + `temporal-analysis.js` + `temporal-ast-diff.js` (--temporal* flags), `reachability.js` (post-processor FP downgrade, called from pipeline processor).
+- **6 conditional/post-processing**: `paranoid.js` (--paranoid flag), `temporal-runner.js` + `temporal-analysis.js` + `temporal-ast-diff.js` (--temporal* flags), `reachability.js` (post-processor FP downgrade, called from pipeline processor), `phantom-gyp.js` (Phantom Gyp compound correlator `gyp_phantom_exec`, post-processor at `processor.js:451`).
 - **1 metadata fetcher**: `npm-registry.js` (NPM API for age/downloads/maintainers — ML features, used by monitor/evaluate).
 
-Intent coherence (`src/intent-graph.js`) runs in pipeline processor (not in `src/scanner/`). Total: 25 `.js` files in `src/scanner/` + 1 directory `module-graph/` (9 files) + 1 directory `python-ast-detectors/` (4 files).
+Intent coherence (`src/intent-graph.js`) runs in pipeline processor (not in `src/scanner/`). Total: 32 `.js` files in `src/scanner/` (incl. 5 monitor-side: release-zero, email-domain, pypi-maintainer, pypi-registry, pypi-release-zero) + 1 directory `module-graph/` (9 files) + 1 directory `python-ast-detectors/` (6 files).
 
 **Scoring:** `riskScore = min(100, max(file_scores) + package_level_score)`. Severity weights: CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1 — multiplied by `CONFIDENCE_FACTORS` (`high=1.0`, `medium=0.85`, `low=0.6`) based on `rule.confidence`. Details: ARCHITECTURE.md `### Confidence Factors`.
 
@@ -107,14 +107,14 @@ Never skip documentation updates when publishing a new version.
 - Never commit directly to master
 - Do not create commits automatically — the user handles commits manually
 
-## Current Metrics (v2.11.48)
+## Current Metrics (v2.11.76; detection metrics last fully measured v2.11.48)
 
 | Metric | Value |
 |--------|-------|
-| Version | **2.11.48** |
-| Tests | **3913** passed, 0 failed, across 109 files (14511 skipped when Docker absent) |
-| Rules | **262** (257 RULES + 5 PARANOID — Track D adds 3) |
-| Scanners | **20 parallel** (Promise.allSettled) + **2 pre-analysis** (module-graph/, deobfuscate) + **1 async parser bootstrap** (python-ast WASM init, no analysis emitted) + **5 conditional/post-processing** (paranoid, 3× temporal-*, reachability) + **1 metadata** (npm-registry). 25 fichiers `src/scanner/*.js` + 1 dir `module-graph/` (9 fichiers) + 1 dir `python-ast-detectors/` (6 fichiers, +taint-tracker + handle-assignment depuis Phase 1b). Détails : ARCHITECTURE.md. |
+| Version | **2.11.76** |
+| Tests | **4132** passed, 0 failed, across 115 files (14511 skipped when Docker absent) |
+| Rules | **264** (259 RULES + 5 PARANOID - v2.11.67/70 Phantom Gyp adds PKG-023 `gyp_command_exec` + COMPOUND-017 `gyp_phantom_exec`) |
+| Scanners | **20 parallel** (Promise.allSettled) + **2 pre-analysis** (module-graph/, deobfuscate) + **1 async parser bootstrap** (python-ast WASM init, no analysis emitted) + **6 conditional/post-processing** (paranoid, 3× temporal-*, reachability, phantom-gyp) + **1 metadata** (npm-registry). 32 fichiers `src/scanner/*.js` + 1 dir `module-graph/` (9 fichiers) + 1 dir `python-ast-detectors/` (6 fichiers). Détails : ARCHITECTURE.md. |
 | Ground Truth size | **96 samples** (was 67 in v2.10.95). 22 added 2026-05-25: 16 synthetic for new PYSRC/PYAST/AST-092/AICONF-004/PKG-022 rules (GT-068..083), 6 real-world tarballs from VPS archive (GT-084..089), 7 reconstructions from `data/all-review-results.json` review reasoning (GT-090..096). 13 PyPI samples (was 0). 3 explicit `tpr_tier: tpr3` (HIGH/MEDIUM rules that don't cross 20 in isolation, documented in `attacks.json` schema). |
 | TPR@3 (detection rate) | **95.74%** (90/94 in-scope) — v2.11.48 full re-measurement on enriched GT. 4 misses: same browser-only patterns as historical (lottie-player, polyfill-io, trojanized-jquery) + 1 other. |
 | TPR@20 (alert rate) | **88.30%** (83/94 in-scope) — v2.11.48. **+3.1pp vs v2.11.47** (85.19%) — Track D compound (`recon_exfil_direct_ip`) brought GT-095 from 3 → 50, plus 2 other Track A+B samples crossed 20. |
@@ -123,13 +123,15 @@ Never skip documentation updates when publishing a new version.
 | FPR random (v2.11.48) | **2.50%** (5/200 random npm packages) — unchanged. |
 | FPR PyPI (v2.11.48, first honest measurement) | **9.68%** (12/124 scanned of 132 — 8 download failures on giant packages: torch, tensorflow, scipy, xgboost, catboost, opencv-python, ansible, playwright). Up from biased 6.10% (v2.11.47, 82/132 scanned) because the Track D PyPI-download fix (removed `pip --no-binary :all:` + added `.whl` extraction via `extractArchive()`) brought 42 previously-skipped giants (numpy/pandas/django/matplotlib/...) into scope. **All 12 FPs cluster at score 25-35**: this is the cap-PyPI-35 artifact, not new rule misfires. |
 | ADR | **96.26%** (103/107 available adversarial + holdout) — v2.11.48, stable. |
+| Operational coverage (v2.11.67-76) | Distinct from the static GT above (NOT re-measured since v2.11.48). Phase 0b ledger rollup -> `alertRate` (throughput, **not** TPR). Phase 5 `coverage-audit.js` (daily 05:00 UTC) joins the GHSA `ghsa-malware.jsonl` denominator x scan-ledger x archive -> honest GHSA-denominated operational TPR. GHSA poller: npm/pypi/crates, 15 min. |
 
 **Known issues to address before next release:**
-- **Benign FPR "drift" 1.10% → 6.6% is a MEASUREMENT ARTIFACT, not a regression** (diagnosed 2026-06-04): a fresh local `muaddib evaluate` measured FPR 6.61% (36/545) vs the documented 1.10% (6/545). Root cause: **transient npm-registry metadata rate-limiting** — that run had 94 packages with no metadata (vs 15 in the v2.11.48 run), so `reputationFactor` (the mature/popular 0.1× suppression, which needs npm age/downloads) didn't apply and 30 famous packages (eslint, npm, rollup, cypress, mongoose…) scored at their raw `globalRiskScore`. NOT a scoring/rules/IOC regression: the threat breakdown + `globalRiskScore` are byte-identical v2.11.48↔current for every new FP, the 454 packages with metadata in BOTH runs have identical scores, and `reputationFactor` still works (453 suppressed). Underlying bug: `fetchWithRetry` (`src/scanner/npm-registry.js`) never calls the limiter's `signal429()` coordinated backoff → thundering-herd 429s. Fix: see `fix/evaluate-metadata-resilience`. Operational FPR (`muaddib scan` with metadata available) remains ~1.10%.
+- ~~**Benign FPR "drift" 1.10% -> 6.6% measurement artifact**~~: ✅ **resolved v2.11.58** (coordinated 429 backoff + env-tunable registry limits). Root cause was transient npm-registry metadata rate-limiting: `fetchWithRetry` (`src/scanner/npm-registry.js`) never called the limiter's `signal429()` coordinated backoff -> thundering-herd 429s -> packages with no metadata -> `reputationFactor` (the 0.1x mature/popular suppression) did not apply -> famous packages (eslint, npm, rollup, cypress, mongoose) scored at raw `globalRiskScore`. v2.11.58 wired `signal429()` so `evaluate` no longer starves metadata. Operational FPR (`muaddib scan` with metadata available) was always ~1.10%.
 - **Cap PyPI à 35/100**: Python samples plafonnent à `riskScore=35` même quand `globalRiskScore=100`. v2.11.48 measurement confirms the impact: all 12 PyPI FPs are exactly at 25–35 (flask 32, django 35, tornado 35, bottle 30, pandas 25, matplotlib 25, plotly 25, bokeh 25, pymongo 35, coverage 32, fabric 35, websockets 35). Lifting the cap to 100 would drop FPR PyPI to ≈0% and also unblock all PyPI MALWARE detection at higher thresholds. **Track E** target.
 - ~~**Direct-IP + linux-fingerprint compound gap**~~: ✅ **closed v2.11.48 (Track D)**. Added `linux_fingerprint_exec` (MUADDIB-AST-093) + `direct_ip_exfil` (MUADDIB-AST-094) + `recon_exfil_direct_ip` compound (MUADDIB-COMPOUND-016, sameFile, CRITICAL). GT-095 risk 3→50, matches human-reviewed score 47. Also boosts GT-091 byvendors (90→100) and GT-092 heloo131313 (89→99). TPR@20 +3.1pp on full GT.
 - ~~**PyPI download fail 38%**~~: ✅ **closed v2.11.48 (Track D PyPI fix)**. `pip download --no-binary :all:` forced compilation of wheels-only packages and timed out. Removed flag + added `.whl` extraction via `extractArchive()`. Scanned 82/132 → 124/132 (94%). 8 residual fails are >500MB packages (torch, tensorflow, ansible…) hitting the 30s `PACK_TIMEOUT_MS` — relax this if PyPI giants are a target.
 - ~~**Eval re-measurement on full 96-sample GT**~~: ✅ done v2.11.48 (`metrics/v2.11.48.json`). 94 in-scope, TPR@3 95.74%, TPR@20 88.30%.
+- ~~**Phantom Gyp install-time RCE gap**~~: ✅ closed v2.11.67/70. PKG-023 `gyp_command_exec` speed-bump / danger-marker (v2.11.67, CRITICAL marker on `binding.gyp` command-substitution) + COMPOUND-017 `gyp_phantom_exec` compound (v2.11.70): correlates the `binding.gyp` sink with an independent malice verdict on the invoked file (FP~0 by construction). In `SINGLE_FIRE_CRITICAL_TYPES` (6) + `HIGH_CONFIDENCE_MALICE_TYPES` (30).
 
 ## Interdictions
 
