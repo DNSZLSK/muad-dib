@@ -651,7 +651,11 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
 
     // First-publish sandbox priority: sandbox even with 0 static findings
     // if the package is from a new/unknown maintainer without a linked repository.
+    // First-publish sandbox is npm-only: runSandbox does `npm install <name>` and
+    // cannot install PyPI sdists/wheels. PyPI first-publish items still carry the
+    // flag + cache trigger + ledger firstPublish (Phase 2a) but skip the sandbox.
     const firstPublishSandbox = isFirstPublish &&
+      ecosystem === 'npm' &&
       FIRST_PUBLISH_SANDBOX_ENABLED &&
       isFirstPublishHighRisk(cacheTrigger, npmRegistryMeta) &&
       isSandboxEnabled() && sandboxAvailable &&

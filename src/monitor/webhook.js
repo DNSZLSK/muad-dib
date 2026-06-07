@@ -150,25 +150,30 @@ function buildMonitorWebhookPayload(name, version, ecosystem, result, sandboxRes
 }
 
 /**
- * Layer 1: Send immediate IOC pre-alert webhook when a known malicious package
- * appears in the changes stream, BEFORE tarball download.
- * Safety net for packages that get unpublished before scanning completes.
- * @param {string} name - Package name matching IOC database
- * @param {string} [version] - Version if known (from CouchDB doc)
+ * Build the registry web link for a package, ecosystem-aware. Mirrors the link
+ * logic in ghsa-poller.js so pre-alerts point at the correct registry instead of
+ * always npmjs.com (PyPI IOC pre-alerts previously mislinked to npm).
  */
-async function sendIOCPreAlert(name, version) {
-  const url = getWebhookUrl();
-  if (!url) return;
+function registryLink(ecosystem, name) {
+  if (ecosystem === 'pypi') return `https://pypi.org/project/${encodeURIComponent(name)}/`;
+  if (ecosystem === 'crates') return `https://crates.io/crates/${encodeURIComponent(name)}`;
+  return `https://www.npmjs.com/package/${encodeURIComponent(name)}`;
+}
 
-  const npmLink = `https://www.npmjs.com/package/${encodeURIComponent(name)}`;
+/**
+ * Layer 1: Build the IOC pre-alert embed (pure \u2014 no network). Exported for tests.
+ * @param {string} name - Package name matching IOC database
+ * @param {string} [version] - Version if known
+ * @param {string} [ecosystem='npm'] - 'npm' | 'pypi' (link target)
+ */
+function buildIOCPreAlertEmbed(name, version, ecosystem = 'npm') {
   const versionStr = version ? `@${version}` : '';
-
-  const payload = {
+  return {
     embeds: [{
       title: '\u26a0\ufe0f IOC PRE-ALERT \u2014 Known Malicious Package',
       color: 0xe74c3c,
       fields: [
-        { name: 'Package', value: `[${name}${versionStr}](${npmLink})`, inline: true },
+        { name: 'Package', value: `[${ecosystem}/${name}${versionStr}](${registryLink(ecosystem, name)})`, inline: true },
         { name: 'Source', value: 'IOC Database Match', inline: true },
         { name: 'Detection', value: 'Changes stream pre-scan', inline: true },
         { name: 'Status', value: 'Full scan queued \u2014 this is an early warning. Package may be unpublished before scan completes.', inline: false }
@@ -179,31 +184,35 @@ async function sendIOCPreAlert(name, version) {
       timestamp: new Date().toISOString()
     }]
   };
-
-  await sendWebhook(url, payload, { rawPayload: true });
 }
 
 /**
- * Layer 1b: Send immediate pre-alert webhook when a package name matches an
- * active-campaign pattern (e.g. `did-NNNN` in May 2026). Fires BEFORE tarball
- * download \u2014 IOC lists are eventually-consistent and lag the campaign by
- * hours to days, so name-pattern watch is the only signal available in real
- * time while the campaign is in flight.
- * @param {string} name - Package name that matched the campaign pattern
- * @param {string} campaign - Short campaign label (e.g. 'did-NNNN')
+ * Layer 1: Send immediate IOC pre-alert webhook when a known malicious package
+ * appears in the changes stream, BEFORE tarball download. Safety net for packages
+ * that get unpublished before scanning completes.
+ * @param {string} name - Package name matching IOC database
+ * @param {string} [version] - Version if known (from CouchDB doc)
+ * @param {string} [ecosystem='npm'] - 'npm' | 'pypi'
  */
-async function sendCampaignPreAlert(name, campaign) {
+async function sendIOCPreAlert(name, version, ecosystem = 'npm') {
   const url = getWebhookUrl();
   if (!url) return;
+  await sendWebhook(url, buildIOCPreAlertEmbed(name, version, ecosystem), { rawPayload: true });
+}
 
-  const npmLink = `https://www.npmjs.com/package/${encodeURIComponent(name)}`;
-
-  const payload = {
+/**
+ * Layer 1b: Build the campaign pre-alert embed (pure \u2014 no network). Exported for tests.
+ * @param {string} name - Package name that matched the campaign pattern
+ * @param {string} campaign - Short campaign label (e.g. 'did-NNNN')
+ * @param {string} [ecosystem='npm'] - 'npm' | 'pypi' (link target)
+ */
+function buildCampaignPreAlertEmbed(name, campaign, ecosystem = 'npm') {
+  return {
     embeds: [{
       title: '\u26a0\ufe0f CAMPAIGN PRE-ALERT \u2014 Suspected Active Campaign',
       color: 0xe67e22,
       fields: [
-        { name: 'Package', value: `[${name}](${npmLink})`, inline: true },
+        { name: 'Package', value: `[${ecosystem}/${name}](${registryLink(ecosystem, name)})`, inline: true },
         { name: 'Source', value: `Name pattern: ${campaign}`, inline: true },
         { name: 'Detection', value: 'Changes stream pre-scan', inline: true },
         { name: 'Status', value: 'Suspected campaign publication \u2014 not yet confirmed malicious. Full scan queued; treat as suspect until verdict lands.', inline: false }
@@ -214,8 +223,21 @@ async function sendCampaignPreAlert(name, campaign) {
       timestamp: new Date().toISOString()
     }]
   };
+}
 
-  await sendWebhook(url, payload, { rawPayload: true });
+/**
+ * Layer 1b: Send a campaign pre-alert webhook when a package name matches an
+ * active-campaign pattern (e.g. `did-NNNN`). Fires BEFORE tarball download \u2014 IOC
+ * lists lag the campaign by hours to days, so name-pattern watch is the only
+ * real-time signal while the campaign is in flight.
+ * @param {string} name - Package name that matched the campaign pattern
+ * @param {string} campaign - Short campaign label (e.g. 'did-NNNN')
+ * @param {string} [ecosystem='npm'] - 'npm' | 'pypi'
+ */
+async function sendCampaignPreAlert(name, campaign, ecosystem = 'npm') {
+  const url = getWebhookUrl();
+  if (!url) return;
+  await sendWebhook(url, buildCampaignPreAlertEmbed(name, campaign, ecosystem), { rawPayload: true });
 }
 
 /**
@@ -1372,7 +1394,10 @@ module.exports = {
   getWebhookThreshold,
   shouldSendWebhook,
   buildMonitorWebhookPayload,
+  registryLink,
+  buildIOCPreAlertEmbed,
   sendIOCPreAlert,
+  buildCampaignPreAlertEmbed,
   sendCampaignPreAlert,
   matchVersionedIOC,
   computeRiskLevel,
