@@ -796,6 +796,19 @@ const RULES = {
     ],
     mitre: 'T1082'
   },
+  gyp_phantom_exec: {
+    id: 'MUADDIB-COMPOUND-017',
+    name: 'Phantom Gyp Install-Time Payload',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    domain: 'malware',
+    description: 'binding.gyp exécute <!(node x.js) / <!(python y.py) au configure-time via node-gyp (npm le lance à l\'install dès qu\'un binding.gyp est présent, sans script lifecycle) ET le fichier invoqué (x.js) est jugé malveillant de façon indépendante par les scanners AST/dataflow/module-graph (verdict CRITICAL ou HIGH_CONFIDENCE_MALICE non-LOW sur ce fichier exact). Compound Phase 1b qui ferme le gap du speed-bump gyp_command_exec (MUADDIB-PKG-023) : la forme dominante <!(node setup.js) nu, statiquement indistinguable d\'un build-helper bénin, n\'est flaggée QUE quand le script invoqué porte lui-même un verdict de malice → FPR≈0 par construction.',
+    references: [
+      'https://attack.mitre.org/techniques/T1195/002/',
+      'https://attack.mitre.org/techniques/T1059/'
+    ],
+    mitre: 'T1195.002'
+  },
 
   // Package.json script patterns
   curl_pipe_sh: {

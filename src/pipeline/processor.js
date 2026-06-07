@@ -3,6 +3,7 @@ const path = require('path');
 const { getRule, getRuleDomain } = require('../rules/index.js');
 const { getPlaybook } = require('../response/playbooks.js');
 const { computeReachableFiles, computeReachableFunctions } = require('../scanner/reachability.js');
+const { correlatePhantomGyp } = require('../scanner/phantom-gyp.js');
 const { applyFPReductions, applyCompoundBoosts, calculateRiskScore, getSeverityWeights, applyContextualFPCaps, applySingleFireCriticalFloor, applyReputationFactor, applyMatureStableCap, applySandboxVerdict, applyDeltaMultiplier } = require('../scoring.js');
 const { loadPriorVersionSignatures, computeSignatures, saveCachedSignatures } = require('../scoring/delta-multiplier.js');
 const { annotateConfidenceTiers } = require('../rules/confidence-tiers.js');
@@ -441,6 +442,13 @@ async function process(threats, targetPath, options, pythonDeps, warnings, scann
   // indicate unambiguous malice. Applied AFTER FP reductions to recover signals
   // that were individually downgraded (count-based, dist, reachability, delta).
   applyCompoundBoosts(deduped, targetPath);
+
+  // Phase 1b — Phantom-Gyp compound: a configure-time <!(node x.js) sink in binding.gyp
+  // × the invoked file's INDEPENDENT malice verdict (from the AST/dataflow/module-graph
+  // findings already in `deduped`) → CRITICAL gyp_phantom_exec. Runs here so it sees the
+  // full post-scan, post-FP-reduction verdict set. FP≈0 by construction (it only ever
+  // ADDS a finding when the invoked file is independently judged malicious).
+  correlatePhantomGyp(deduped, targetPath);
 
   // Intent coherence analysis: detect source→sink pairs within files
   // Pass targetPath for destination-aware SDK pattern detection

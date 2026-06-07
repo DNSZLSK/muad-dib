@@ -132,7 +132,9 @@ const PACKAGE_LEVEL_TYPES = new Set([
   // audit MR-C1: informational signal that the scan target is a monorepo root (per-workspace scoring TBD)
   'monorepo_detected',
   // Phantom Gyp: binding.gyp command-substitution is a package-level (manifest) finding
-  'gyp_command_exec'
+  'gyp_command_exec',
+  // Phantom Gyp compound (Phase 1b): configure-time <!(node x.js) × malicious invoked file
+  'gyp_phantom_exec'
 ]);
 
 // ============================================
@@ -160,7 +162,11 @@ const SINGLE_FIRE_CRITICAL_TYPES = new Set([
   'known_malicious_package',
   'pypi_malicious_package',
   'shai_hulud_marker',
-  'lifecycle_shell_pipe'
+  'lifecycle_shell_pipe',
+  // Phantom Gyp compound (Phase 1b): only fires when the invoked configure-time script
+  // is INDEPENDENTLY judged malicious, so it carries the same unambiguous-malware weight
+  // as the IOC/hash matches above — FP≈0 by construction justifies the single-fire floor.
+  'gyp_phantom_exec'
 ]);
 const SINGLE_FIRE_CRITICAL_FLOOR = 75;
 const SINGLE_FIRE_MIN_SEVERITY_RANK = 2; // HIGH
