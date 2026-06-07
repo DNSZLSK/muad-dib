@@ -325,8 +325,11 @@ module.exports = {
   relabelRecords,
   getTrainingStats,
   // Layer 1: IOC pre-alert
+  registryLink: webhookModule.registryLink,
+  buildIOCPreAlertEmbed: webhookModule.buildIOCPreAlertEmbed,
   sendIOCPreAlert: webhookModule.sendIOCPreAlert,
   // Layer 1b: Campaign name-pattern pre-alert
+  buildCampaignPreAlertEmbed: webhookModule.buildCampaignPreAlertEmbed,
   sendCampaignPreAlert: webhookModule.sendCampaignPreAlert,
   CAMPAIGN_PATTERNS: ingestionModule.CAMPAIGN_PATTERNS,
   matchCampaignPattern: ingestionModule.matchCampaignPattern,

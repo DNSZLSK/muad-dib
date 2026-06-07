@@ -1,6 +1,6 @@
 'use strict';
 
-const { levenshteinDistance } = require('../scanner/typosquat.js');
+const { levenshteinDistance, findPyPITyposquatMatch } = require('../scanner/typosquat.js');
 const { loadCachedIOCs } = require('../ioc/updater.js');
 
 // --- Popular npm names (used for quick typosquat check) ---
@@ -351,32 +351,39 @@ function quickTyposquatCheck(name) {
  * Layer 3: Determine if a package should be cached and at what retention level.
  * @param {string} name - Package name
  * @param {Object|null} docMeta - Metadata from extractTarballFromDoc
- * @param {Object|null} doc - Full CouchDB doc
+ * @param {Object|null} doc - Full CouchDB doc (npm; carries `versions` for first-publish)
+ * @param {Object} [opts] - Non-npm ecosystem hints:
+ *   { ecosystem?: 'npm'|'pypi', versionCount?: number }. PyPI has no packument at
+ *   ingest time, so the version count comes from preResolvePyPIBatch via opts.
  * @returns {{ shouldCache: boolean, reason: string, retentionDays: number }}
  */
-function evaluateCacheTrigger(name, docMeta, doc) {
-  // Trigger 1: IOC match -- 30-day retention
+function evaluateCacheTrigger(name, docMeta, doc, opts = {}) {
+  const ecosystem = opts.ecosystem || 'npm';
+
+  // Trigger 1: IOC match -- 30-day retention. PyPI IOCs are namespaced "pypi:<name>".
   try {
     const iocs = loadCachedIOCs();
-    if ((iocs.wildcardPackages && iocs.wildcardPackages.has(name)) ||
-        (iocs.packagesMap && iocs.packagesMap.has(name))) {
+    const inSet = (s) => s && (s.has(name) || (ecosystem === 'pypi' && s.has(`pypi:${name}`)));
+    if (inSet(iocs.wildcardPackages) || inSet(iocs.packagesMap)) {
       return { shouldCache: true, reason: 'ioc_match', retentionDays: TARBALL_CACHE_HIGH_RISK_RETENTION_DAYS };
     }
   } catch { /* non-fatal */ }
 
-  // Trigger 2: Typosquat signal -- 7-day retention
+  // Trigger 2: Typosquat signal -- 7-day retention (ecosystem-specific popular list)
   try {
-    if (quickTyposquatCheck(name)) {
+    const typo = ecosystem === 'pypi' ? !!findPyPITyposquatMatch(name) : quickTyposquatCheck(name);
+    if (typo) {
       return { shouldCache: true, reason: 'typosquat_signal', retentionDays: TARBALL_CACHE_DEFAULT_RETENTION_DAYS };
     }
   } catch { /* non-fatal */ }
 
-  // Trigger 3: First publish (single version in doc) -- 7-day retention
-  if (doc && doc.versions) {
-    const versionCount = Object.keys(doc.versions).length;
-    if (versionCount === 1) {
-      return { shouldCache: true, reason: 'first_publish', retentionDays: TARBALL_CACHE_DEFAULT_RETENTION_DAYS };
-    }
+  // Trigger 3: First publish (single version) -- 7-day retention.
+  // npm: count from the CouchDB doc; pypi: count passed via opts.versionCount.
+  const versionCount = ecosystem === 'pypi'
+    ? (Number.isFinite(opts.versionCount) ? opts.versionCount : null)
+    : (doc && doc.versions ? Object.keys(doc.versions).length : null);
+  if (versionCount === 1) {
+    return { shouldCache: true, reason: 'first_publish', retentionDays: TARBALL_CACHE_DEFAULT_RETENTION_DAYS };
   }
 
   return { shouldCache: false, reason: '', retentionDays: 0 };

@@ -9939,6 +9939,91 @@ async function runMonitorTests() {
     const det = detectSkillMdBundled(null, threats);
     assert(det.bundled, 'Should match Skill.md case-insensitively');
   });
+
+  // ============================================
+  // PHASE 2a — PyPI pre-alert parity
+  // (ecosystem-aware links, PyPI first-publish/typosquat cache trigger)
+  // ============================================
+
+  // Phase 2a symbols required locally (NOT added to the top destructure) so this
+  // change does not shift the no-source-grep allowlist line keys further down the
+  // file (monitor.test.js:9460+). See memory: no-source-grep allowlist is line-keyed.
+  const { registryLink, buildIOCPreAlertEmbed, buildCampaignPreAlertEmbed } = require('../../src/monitor.js');
+
+  test('PHASE-2a: registryLink is ecosystem-aware (pypi vs npm, default npm)', () => {
+    assert(registryLink('npm', 'lodash') === 'https://www.npmjs.com/package/lodash', 'npm link');
+    assert(registryLink('pypi', 'requests') === 'https://pypi.org/project/requests/', 'pypi link');
+    assert(registryLink(undefined, 'x') === 'https://www.npmjs.com/package/x', 'undefined ecosystem → npm');
+  });
+
+  test('PHASE-2a: buildIOCPreAlertEmbed links to pypi.org for pypi, npmjs.com by default', () => {
+    const pypi = buildIOCPreAlertEmbed('evilpkg', '1.2.3', 'pypi');
+    const pf = pypi.embeds[0].fields.find(f => f.name === 'Package');
+    assert(pf.value.includes('https://pypi.org/project/evilpkg/'), `pypi link expected, got ${pf.value}`);
+    assert(pf.value.includes('@1.2.3'), 'version should appear in the package field');
+    assert(!pf.value.includes('npmjs.com'), 'pypi IOC embed must NOT link to npm (the bug this fixes)');
+    // neg: npm default keeps npmjs.com
+    const npm = buildIOCPreAlertEmbed('evilpkg', '1.2.3');
+    const nf = npm.embeds[0].fields.find(f => f.name === 'Package');
+    assert(nf.value.includes('https://www.npmjs.com/package/evilpkg'), 'npm default link');
+    assert(!nf.value.includes('pypi.org'), 'npm embed must not link pypi');
+  });
+
+  test('PHASE-2a: buildCampaignPreAlertEmbed links to pypi.org for pypi, npmjs.com by default', () => {
+    const pypi = buildCampaignPreAlertEmbed('did-0001', 'did-NNNN', 'pypi');
+    const pf = pypi.embeds[0].fields.find(f => f.name === 'Package');
+    assert(pf.value.includes('https://pypi.org/project/did-0001/'), `pypi link expected, got ${pf.value}`);
+    const src = pypi.embeds[0].fields.find(f => f.name === 'Source');
+    assert(src.value.includes('did-NNNN'), 'campaign label should appear in Source');
+    // neg
+    const npm = buildCampaignPreAlertEmbed('did-0001', 'did-NNNN');
+    const nf = npm.embeds[0].fields.find(f => f.name === 'Package');
+    assert(nf.value.includes('https://www.npmjs.com/package/did-0001'), 'npm default link');
+  });
+
+  test('PHASE-2a: evaluateCacheTrigger pypi first_publish via versionCount===1', () => {
+    const r = evaluateCacheTrigger('totally-new-pypi-xyz', null, null, { ecosystem: 'pypi', versionCount: 1 });
+    assert(r.shouldCache === true, 'pypi single-version should cache');
+    assert(r.reason === 'first_publish', `reason should be first_publish, got ${r.reason}`);
+    assert(r.retentionDays === TARBALL_CACHE_DEFAULT_RETENTION_DAYS, 'first_publish retention');
+  });
+
+  test('PHASE-2a: evaluateCacheTrigger pypi multi-version is NOT first_publish', () => {
+    const r = evaluateCacheTrigger('established-pypi-xyz', null, null, { ecosystem: 'pypi', versionCount: 7 });
+    assert(r.shouldCache === false, `multi-version pypi → no cache, got ${JSON.stringify(r)}`);
+  });
+
+  test('PHASE-2a: evaluateCacheTrigger pypi typosquat uses the PyPI popular list', () => {
+    const { findPyPITyposquatMatch } = require('../../src/scanner/typosquat.js');
+    // 'djano' is distance 1 from 'django' (popular on PyPI, absent from the npm list).
+    // Pure detector is deterministic + IOC-independent:
+    const m = findPyPITyposquatMatch('djano');
+    assert(m && m.original === 'django', `findPyPITyposquatMatch('djano') → django, got ${JSON.stringify(m)}`);
+    // Wired into the pypi cache-trigger branch. Trigger 1 (IOC) runs before typosquat,
+    // so accept ioc_match too if the feed ever lists it — both mean shouldCache:
+    const pypi = evaluateCacheTrigger('djano', null, null, { ecosystem: 'pypi', versionCount: 9 });
+    assert(pypi.shouldCache === true && (pypi.reason === 'typosquat_signal' || pypi.reason === 'ioc_match'),
+      `pypi typosquat should cache, got ${JSON.stringify(pypi)}`);
+    // npm/default branch must NOT flag a PyPI-only typosquat (django not in npm list):
+    const npm = evaluateCacheTrigger('djano', null, null);
+    assert(npm.reason !== 'typosquat_signal', `npm branch must not use the pypi list, got ${npm.reason}`);
+  });
+
+  test('PHASE-2a: evaluateCacheTrigger npm behavior unchanged when opts omitted (regression)', () => {
+    const fp = evaluateCacheTrigger('totally-new-npm-xyz-abc', null, { versions: { '1.0.0': {} } });
+    assert(fp.reason === 'first_publish', 'npm first_publish via doc.versions still works');
+    const none = evaluateCacheTrigger('whatever-harmless-xyz', null, null);
+    assert(none.shouldCache === false, 'npm no doc + no signals → no cache');
+  });
+
+  test('PHASE-2a: isFirstPublishHighRisk(trig,null)===true documents why the sandbox is npm-gated', () => {
+    // PyPI carries no npm registry metadata, so isFirstPublishHighRisk returns true
+    // (precautionary). runSandbox is npm-only (`npm install`), so queue.js must gate
+    // the first-publish sandbox by ecosystem==='npm' — otherwise a PyPI first-publish
+    // would be routed into an npm install that 404s. This asserts the precondition.
+    const trig = { shouldCache: true, reason: 'first_publish', retentionDays: 7 };
+    assert(isFirstPublishHighRisk(trig, null) === true, 'null meta → precautionary sandbox (hence the gate)');
+  });
 }
 
 module.exports = { runMonitorTests };

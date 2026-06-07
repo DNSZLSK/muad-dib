@@ -618,6 +618,16 @@ async function preResolvePyPIBatch(items, stats, scanQueue) {
             age_days: pypiInfo.age_days,
             version_count: pypiInfo.version_count,
           };
+          // First-publish parity with npm: derive the cache trigger + flag from the
+          // version count (PyPI has no packument at ingest, so the count comes from
+          // the registry fetch above). Feeds tarball retention, the scan-ledger
+          // firstPublish field, and Phase 2b protected eviction. The first-publish
+          // *sandbox* stays npm-only (runSandbox can't pip-install) — gated in queue.js.
+          const trig = evaluateCacheTrigger(item.name, null, null, {
+            ecosystem: 'pypi', versionCount: pypiInfo.version_count
+          });
+          item._cacheTrigger = trig.shouldCache ? trig : null;
+          item.firstPublish = trig.reason === 'first_publish';
           resolved++;
         } else {
           failed++;
@@ -1186,11 +1196,25 @@ async function pollPyPIChangelog(state, scanQueue, stats) {
         if (isKnownIOC) {
           console.log(`[MONITOR] IOC PRE-ALERT (pypi): ${ev.name} — known malicious package`);
           stats.iocPreAlerts = (stats.iocPreAlerts || 0) + 1;
-          sendIOCPreAlert(ev.name).catch(err => {
+          sendIOCPreAlert(ev.name, ev.version, 'pypi').catch(err => {
             console.error(`[MONITOR] IOC pre-alert webhook failed for ${ev.name}: ${err.message}`);
           });
         }
       } catch { /* IOC load failure is non-fatal */ }
+
+      // Campaign pre-alert (mirror of the npm Layer 1b): fire on name-pattern
+      // matches when the package isn't already a known IOC. Campaigns can target
+      // PyPI too; matchCampaignPattern is a pure name match, ecosystem-agnostic.
+      if (!isKnownIOC) {
+        const campaign = matchCampaignPattern(ev.name);
+        if (campaign) {
+          console.log(`[MONITOR] CAMPAIGN PRE-ALERT (pypi): ${ev.name} — matches ${campaign}`);
+          stats.campaignPreAlerts = (stats.campaignPreAlerts || 0) + 1;
+          sendCampaignPreAlert(ev.name, campaign, 'pypi').catch(err => {
+            console.error(`[MONITOR] campaign pre-alert webhook failed for ${ev.name}: ${err.message}`);
+          });
+        }
+      }
 
       newItems.push({
         name: ev.name,
