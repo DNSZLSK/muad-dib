@@ -258,19 +258,26 @@ async function scanPackageJson(targetPath) {
     // check below. Distinct from <(...) / <@(...) (plain variable expansion, benign) which MUST
     // NOT fire — the required `!` gates command execution.
     //
-    // Exempt the legitimate header-locate idiom real native addons use via <!(...) (e.g.
-    // node -p "require('node-addon-api').include", nan, pkg-config, node-gyp). Flag a
-    // command-sub only when its body is NOT a pure build-tool lookup OR contains shell
-    // chaining/fetch — so an attacker can't hide `node index.js && curl evil` behind a token.
-    const GYP_BUILD_TOOL = /node-addon-api|require\(['"]nan['"]\)|pkg-config|node-gyp|napi/i;
-    const GYP_SHELL_CHAIN = /[;&|`]|\$\(|>\s|>>|\bcurl\b|\bwget\b|\bbash\b|\bsh\b/i;
+    // binding.gyp command-substitution runs a command at *configure* time via node-gyp (no
+    // package.json lifecycle needed). But legit native addons use <!(...) heavily for build-env
+    // queries — `node -p process.versions...`, `node ./util/has_lib.js`, `pkg-config ... | sed`,
+    // `node -p "require('node-addon-api').include"` — and a build-helper `<!(node x.js)` is
+    // statically INDISTINGUISHABLE from a payload `<!(node index.js)`. To honor "FPR must never
+    // increase" we flag ONLY command-subs carrying a malice-specific marker, never the bare
+    // "runs a script" shape:
+    //   - Phantom Gyp's fake-source trick: run something then `; / && / | echo <name>.c` (return
+    //     a fabricated C/C++/ObjC source so node-gyp doesn't error) — quasi-never legit;
+    //   - network fetch (curl/wget), pipe-to-shell (| sh, sh -c), eval/base64//dev/tcp, char-code
+    //     obfuscation (fromCharCode/atob).
+    // Honest limitation: a bare `<!(node payload.js)` with NO marker is not flagged — it cannot be
+    // distinguished from canvas/node-sass build helpers without false positives (validated: bcrypt
+    // `node -p process.versions`, canvas `node ./util/has_lib.js`, `pkg-config | sed` all clean).
+    const GYP_DANGER = /[;&|]\s*echo\s+[^|;&]*\.(?:c|cc|cpp|cxx|m|mm|cs)\b|\bcurl\b|\bwget\b|\|\s*(?:sh|bash|zsh)\b|\b(?:sh|bash|zsh)\s+-c\b|\beval\b|\bbase64\b|\/dev\/tcp|fromCharCode|\batob\b/i;
     let gypCommandExec = false;
-    const gypCmdSubRe = /<!@?\(([^\n]{0,200})/g;
+    const gypCmdSubRe = /<!@?\(([^\n]{0,400})/g;
     let _gm;
     while ((_gm = gypCmdSubRe.exec(gypContent)) !== null) {
-      const body = _gm[1];
-      const benign = GYP_BUILD_TOOL.test(body) && !GYP_SHELL_CHAIN.test(body);
-      if (!benign) { gypCommandExec = true; break; }
+      if (GYP_DANGER.test(_gm[1])) { gypCommandExec = true; break; }
     }
     if (gypCommandExec) {
       threats.push({
