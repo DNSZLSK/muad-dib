@@ -26,6 +26,7 @@ const {
   cacheTarball,
   updateScanStats,
   appendDetection,
+  appendScanLedger,
   maybePersistDailyStats,
   appendTemporalDetection,
   tarballCacheKey,
@@ -221,6 +222,20 @@ function recordTrainingSample(result, params) {
       sandboxResult: params.sandboxResult || null
     });
     appendTrainingRecord(record);
+    // Phase 0a: per-scan coverage ledger — record this terminal outcome (best-effort;
+    // appendScanLedger swallows its own write errors and never throws).
+    appendScanLedger({
+      name: params.name,
+      version: params.version,
+      ecosystem: params.ecosystem,
+      outcome: params.label || 'clean',
+      score: (result.summary && typeof result.summary.riskScore === 'number') ? result.summary.riskScore : null,
+      tier: params.tier,
+      maxSeverity: result.summary ? result.summary.riskLevel : null,
+      types: [...new Set((result.threats || []).map(t => t.type))],
+      sandbox: params.sandboxResult ? 'run' : 'none',
+      source: 'scan'
+    });
   } catch (err) {
     // Non-fatal: ML export must never crash the monitor
     console.error(`[ML] Failed to record training sample for ${params.name}: ${err.message}`);
@@ -521,6 +536,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
             stats.totalTimeMs += Date.now() - startTime;
             stats.clean++;
             updateScanStats('clean');
+            appendScanLedger({ name, version, ecosystem, outcome: 'size_skip', score: 0, source: 'size_skip_quick_clean' });
             return;
           }
         } catch {
@@ -541,6 +557,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
             stats.totalTimeMs += Date.now() - startTime;
             stats.clean++;
             updateScanStats('clean');
+            appendScanLedger({ name, version, ecosystem, outcome: 'size_skip', score: 0, source: 'size_skip_extract_failed' });
             return;
           }
         }

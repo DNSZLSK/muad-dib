@@ -157,12 +157,12 @@ jobs:
     }
   });
 
-  // 3.3b Rule count check (Track D: linux_fingerprint_exec + direct_ip_exfil + recon_exfil_direct_ip → 257 RULES)
-  test('P3: rule count is 262 (257 RULES + 5 PARANOID)', () => {
+  // 3.3b Rule count check (Track D +3, then gyp_command_exec MUADDIB-PKG-023 +1 → 258 RULES)
+  test('P3: rule count is 263 (258 RULES + 5 PARANOID)', () => {
     const { RULES, PARANOID_RULES } = require('../../src/rules/index.js');
     const ruleCount = Object.keys(RULES).length;
     const paranoidCount = Object.keys(PARANOID_RULES).length;
-    assert(ruleCount === 257, `Expected 257 RULES, got ${ruleCount}`);
+    assert(ruleCount === 258, `Expected 258 RULES, got ${ruleCount}`);
     assert(paranoidCount === 5, `Expected 5 PARANOID, got ${paranoidCount}`);
   });
 
