@@ -258,26 +258,35 @@ async function scanPackageJson(targetPath) {
     // check below. Distinct from <(...) / <@(...) (plain variable expansion, benign) which MUST
     // NOT fire — the required `!` gates command execution.
     //
-    // binding.gyp command-substitution runs a command at *configure* time via node-gyp (no
-    // package.json lifecycle needed). But legit native addons use <!(...) heavily for build-env
-    // queries — `node -p process.versions...`, `node ./util/has_lib.js`, `pkg-config ... | sed`,
-    // `node -p "require('node-addon-api').include"` — and a build-helper `<!(node x.js)` is
-    // statically INDISTINGUISHABLE from a payload `<!(node index.js)`. To honor "FPR must never
-    // increase" we flag ONLY command-subs carrying a malice-specific marker, never the bare
-    // "runs a script" shape:
-    //   - Phantom Gyp's fake-source trick: run something then `; / && / | echo <name>.c` (return
-    //     a fabricated C/C++/ObjC source so node-gyp doesn't error) — quasi-never legit;
-    //   - network fetch (curl/wget), pipe-to-shell (| sh, sh -c), eval/base64//dev/tcp, char-code
-    //     obfuscation (fromCharCode/atob).
-    // Honest limitation: a bare `<!(node payload.js)` with NO marker is not flagged — it cannot be
-    // distinguished from canvas/node-sass build helpers without false positives (validated: bcrypt
-    // `node -p process.versions`, canvas `node ./util/has_lib.js`, `pkg-config | sed` all clean).
+    // Legit native addons use <!(...) heavily for build-env queries — `node -p process.versions`,
+    // `node ./util/has_lib.js`, `pkg-config ... | sed`, `node -p "require('node-addon-api').include"`
+    // — and a build-helper `<!(node x.js)` is statically INDISTINGUISHABLE from a payload
+    // `<!(node index.js)`. To honor "FPR must never increase" we flag a command-sub ONLY when it
+    // carries a malice-specific marker, never the bare "runs a script" shape:
+    //   (1) GYP_DANGER — shell-level malice in the command line itself: the Phantom Gyp fake-source
+    //       trick (`; / && / | echo <name>.c`, returning a fabricated source so node-gyp doesn't
+    //       error), network fetch (curl/wget), pipe-to-shell (| sh, sh -c), eval/base64//dev/tcp,
+    //       char-code obfuscation (fromCharCode/atob);
+    //   (2) an inline interpreter payload — node|python|ruby|perl running -e/-c/-p/--eval/--print code
+    //       that reaches the NETWORK (require/import of https|http|net|dgram|dns|tls, optional node:
+    //       prefix; fetch; urllib/requests/httpx/http.client/urlopen; socket). Network at configure
+    //       time is never a legit build query. We deliberately do NOT key on child_process/exec/spawn
+    //       here — legit addons shell out to detect the toolchain (`node -e "...execSync('gcc
+    //       --version')..."`), which would FP; an exec of curl/wget is still caught by GYP_DANGER.
+    //       Catches `<!(node --eval require('node:https')...)`, `<!(python3 -c import requests)`.
+    // Honest limitation: this is a line-by-line SPEED-BUMP, not coverage. A bare `<!(node payload.js)`
+    // and any non-network inline payload are NOT flagged (indistinguishable from canvas/node-sass
+    // build helpers without false positives, FPR-first by design). Real closure needs a compound
+    // (configure-time sink × the run script's AST/dataflow verdict) — a separate effort.
     const GYP_DANGER = /[;&|]\s*echo\s+[^|;&]*\.(?:c|cc|cpp|cxx|m|mm|cs)\b|\bcurl\b|\bwget\b|\|\s*(?:sh|bash|zsh)\b|\b(?:sh|bash|zsh)\s+-c\b|\beval\b|\bbase64\b|\/dev\/tcp|fromCharCode|\batob\b/i;
+    const GYP_INTERP = /\b(?:node|nodejs|python[0-9.]*|ruby|perl)\b[^|;&\n]{0,40}?\s--?(?:eval|print|e|c|p)\b/i;
+    const GYP_PAYLOAD_API = /(?:require|import)\s*\(\s*['"](?:node:)?(?:https?|net|dgram|dns|tls)['"]|\bfetch\s*\(|\burllib\b|\brequests\b|\bhttpx\b|http\.client|\burlopen\b|socket\.(?:socket|create_connection)/i;
     let gypCommandExec = false;
     const gypCmdSubRe = /<!@?\(([^\n]{0,400})/g;
     let _gm;
     while ((_gm = gypCmdSubRe.exec(gypContent)) !== null) {
-      if (GYP_DANGER.test(_gm[1])) { gypCommandExec = true; break; }
+      const body = _gm[1];
+      if (GYP_DANGER.test(body) || (GYP_INTERP.test(body) && GYP_PAYLOAD_API.test(body))) { gypCommandExec = true; break; }
     }
     if (gypCommandExec) {
       threats.push({
