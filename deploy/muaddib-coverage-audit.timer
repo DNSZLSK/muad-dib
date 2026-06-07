@@ -1,0 +1,12 @@
+[Unit]
+Description=MUAD'DIB Operational Coverage Audit Timer (daily)
+
+[Timer]
+# Once a day at 05:00 UTC (after overnight ingestion has accumulated in the scan-ledger,
+# before the 08:00 Paris daily report). Persistent=true runs a missed job after downtime.
+OnCalendar=*-*-* 05:00:00
+Persistent=true
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target
