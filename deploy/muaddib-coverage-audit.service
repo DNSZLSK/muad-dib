@@ -1,0 +1,54 @@
+[Unit]
+Description=MUAD'DIB Operational Coverage Audit (GHSA denominator x scan-ledger x archive -> operational TPR)
+Documentation=https://github.com/DNSZLSK/muad-dib
+After=network-online.target
+Wants=network-online.target
+# Don't run while the auto-update is rewriting code on disk.
+After=muaddib-update.service
+
+[Service]
+Type=oneshot
+User=muaddib
+Group=muaddib
+WorkingDirectory=/opt/muaddib
+ExecStart=/usr/bin/node scripts/coverage-audit.js
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=muaddib-coverage-audit
+
+# Loads GITHUB_TOKEN from /opt/muaddib/.env — raises the GHSA advisories API rate limit
+# 60 -> 5000 req/h, required for the full paginated denominator fetch (the 15-min poller
+# is fine unauth, but this one-shot paginates ~30 pages x 2 ecosystems). Leading dash =
+# optional file (degrades gracefully if absent, just rate-limited).
+EnvironmentFile=-/opt/muaddib/.env
+
+Environment=NODE_ENV=production
+
+# Network- + IO-bound (GHSA pagination + reading the tarball-archive). Stay out of the
+# live monitor's way.
+Nice=10
+CPUWeight=50
+IOWeight=50
+
+# Reads archive/ + scan-ledger; writes only data/ (coverage-audit.json, gt-proposals.json).
+# A healthy run is a couple of minutes; kill anything that drags past 10.
+TimeoutStartSec=10min
+
+# Security hardening (parity with muaddib-scrape.service)
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/opt/muaddib/data
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+RestrictRealtime=true
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target
