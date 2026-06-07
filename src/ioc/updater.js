@@ -62,6 +62,28 @@ async function updateIOCs() {
   mergeIOCs(baseIOCs, githubIOCs);
   console.log('     +' + shaiHulud.packages.length + ' GenSecAI, +' + datadog.packages.length + ' DataDog, +' + osvApi.length + ' OSV API, +' + osmResult.packages.length + ' OSM npm, +' + (osmResult.pypi_packages || []).length + ' OSM PyPI');
 
+  // Phase 2c (feed health): a feed that previously returned data but now returns 0 is the
+  // silent failure mode that froze the OSM feed and collapsed coverage. Raise a one-shot
+  // alarm on the healthy→dark transition. Best-effort — never throws, never blocks the refresh.
+  // Only feeds that were actually ATTEMPTED are health-checked: OSM is token-gated, so without
+  // OSM_API_TOKEN it is SKIPPED (not down) — counting it would raise a false "OSM went dark"
+  // alarm in any no-token context (e.g. an ad-hoc `muaddib update`) against the monitor-seeded
+  // baseline. OSV-API is public and volatile; its small counts rarely cross MIN_HEALTHY_BASELINE,
+  // so the engine naturally never establishes an alarm-able baseline for it.
+  try {
+    const feedCounts = {
+      'GenSecAI': shaiHulud.packages.length,
+      'DataDog': datadog.packages.length,
+      'OSV-API': osvApi.length
+    };
+    if (process.env.OSM_API_TOKEN) {
+      feedCounts['OSM'] = osmResult.packages.length + (osmResult.pypi_packages || []).length;
+    }
+    await require('./feed-health.js').checkFeedHealth(feedCounts);
+  } catch (e) {
+    console.warn('[FEED-HEALTH] skipped: ' + e.message);
+  }
+
   // Step 3b: Load existing cache IOCs (from bootstrap download or previous update)
   if (fs.existsSync(CACHE_IOC_FILE)) {
     try {
