@@ -42,13 +42,78 @@ function runDeferredSandboxTests() {
     _resetDeferredQueue();
   });
 
-  test('enqueueDeferred rejects tier 1a', () => {
+  // Phase 3 (throughput decoupling): T1a's sandbox is routed through the deferred
+  // queue (async) instead of block-waiting a scan worker. T1a is now ACCEPTED and is
+  // the top priority class.
+  test('enqueueDeferred accepts tier 1a (Phase 3) and bypasses the min-score floor', () => {
     const { enqueueDeferred, getDeferredQueue, _resetDeferredQueue } = require('../../src/monitor/deferred-sandbox.js');
     _resetDeferredQueue();
 
-    const result = enqueueDeferred(makeItem({ tier: '1a' }));
-    assert(result === false, 'Should reject T1a items');
-    assert(getDeferredQueue().length === 0, 'Queue should remain empty');
+    const r = enqueueDeferred(makeItem({ name: 'hc-malware', tier: '1a', riskScore: 50 }));
+    assert(r === true, 'Should accept T1a items (Phase 3 routes them here)');
+    assert(getDeferredQueue().length === 1, 'Queue should contain the T1a item');
+
+    // T1a is high-confidence by classification — it bypasses DEFERRED_MIN_SCORE even
+    // with no TIER1 signal, so it can never be dropped before its sandbox runs.
+    const r2 = enqueueDeferred(makeItem({
+      name: 'hc-lowscore', tier: '1a', riskScore: 2,
+      staticResult: { threats: [{ type: 'credential_exfil', severity: 'LOW' }], summary: { critical: 0, high: 0, medium: 0, low: 1 } }
+    }));
+    assert(r2 === true, 'T1a must bypass the min-score floor (no TIER1 signal needed)');
+    assert(getDeferredQueue().length === 2, 'Both T1a items present');
+    _resetDeferredQueue();
+  });
+
+  test('enqueueDeferred prioritizes T1a ahead of higher-score T1b/T2 (tier rank dominates)', () => {
+    const { enqueueDeferred, getDeferredQueue, _resetDeferredQueue } = require('../../src/monitor/deferred-sandbox.js');
+    _resetDeferredQueue();
+
+    enqueueDeferred(makeItem({ name: 'big-t1b', tier: '1b', riskScore: 95 }));
+    enqueueDeferred(makeItem({ name: 'big-t2', tier: 2, riskScore: 99 }));
+    enqueueDeferred(makeItem({ name: 'small-t1a', tier: '1a', riskScore: 30 }));
+
+    const q = getDeferredQueue();
+    assert(q[0].name === 'small-t1a', `T1a must sort first despite the lowest score, got ${q[0].name}`);
+    // Below T1a, T1b/T2 keep their existing score-DESC ordering (unchanged by Phase 3).
+    assert(q[1].name === 'big-t2' && q[2].name === 'big-t1b', `T1b/T2 keep score order, got ${q[1].name},${q[2].name}`);
+    _resetDeferredQueue();
+  });
+
+  test('enqueueDeferred: a T1a evicts a lower-tier item when full even at a lower score; T1a is never evicted', () => {
+    const { enqueueDeferred, getDeferredQueue, _resetDeferredQueue, DEFERRED_QUEUE_MAX } = require('../../src/monitor/deferred-sandbox.js');
+    _resetDeferredQueue();
+
+    // Fill with high-score T2 items.
+    for (let i = 0; i < DEFERRED_QUEUE_MAX; i++) {
+      enqueueDeferred(makeItem({ name: `t2-${i}`, tier: 2, riskScore: 80 }));
+    }
+    assert(getDeferredQueue().length === DEFERRED_QUEUE_MAX, 'Queue full of T2');
+
+    // A low-score T1a must still get in (evicting the lowest-priority T2).
+    const r = enqueueDeferred(makeItem({ name: 'late-t1a', tier: '1a', riskScore: 10 }));
+    assert(r === true, 'Low-score T1a must evict a higher-score T2 when full');
+    assert(getDeferredQueue()[0].name === 'late-t1a', 'T1a sits at the front');
+    assert(getDeferredQueue().length === DEFERRED_QUEUE_MAX, 'Size stays at cap');
+
+    // A subsequent T2 (even high score) cannot evict the T1a — all room is taken by
+    // the protected T1a + remaining high-score T2s, and T2 never outranks T1a.
+    const stillHasT1a = getDeferredQueue().some(i => i.name === 'late-t1a');
+    assert(stillHasT1a, 'T1a remains queued');
+    _resetDeferredQueue();
+  });
+
+  test('getDeferredQueueStats counts T1a in the tier breakdown', () => {
+    const { enqueueDeferred, getDeferredQueueStats, _resetDeferredQueue } = require('../../src/monitor/deferred-sandbox.js');
+    _resetDeferredQueue();
+
+    enqueueDeferred(makeItem({ name: 'a', tier: '1a', riskScore: 40 }));
+    enqueueDeferred(makeItem({ name: 'b', tier: '1b', riskScore: 40 }));
+    enqueueDeferred(makeItem({ name: 'c', tier: 2, riskScore: 40 }));
+
+    const s = getDeferredQueueStats();
+    assert(s.tierBreakdown.t1a === 1, `expected 1 T1a, got ${s.tierBreakdown.t1a}`);
+    assert(s.tierBreakdown.t1b === 1 && s.tierBreakdown.t2 === 1, 'T1b/T2 still counted');
+    assert(s.size === 3, 'size reflects all three');
     _resetDeferredQueue();
   });
 
@@ -453,16 +518,31 @@ function runDeferredSandboxTests() {
     _resetDeferredQueue();
   });
 
-  // ── Integration-level: T1a should never enter deferred queue ──
+  // ── Integration-level: T1a is now routed through the deferred queue (Phase 3) ──
+  // Previously T1a was rejected here (it block-waited in the scan worker). Phase 3
+  // decouples it: T1a is accepted and tops the queue. (Negative coverage for tier
+  // eligibility lives below — a truly unknown tier is still rejected.)
 
-  test('T1a items are never accepted by enqueueDeferred', () => {
+  test('T1a items are accepted by enqueueDeferred (Phase 3 async routing)', () => {
     const { enqueueDeferred, getDeferredQueue, _resetDeferredQueue } = require('../../src/monitor/deferred-sandbox.js');
     _resetDeferredQueue();
 
     const r1 = enqueueDeferred(makeItem({ tier: '1a' }));
     const r2 = enqueueDeferred(makeItem({ name: 'x', tier: '1a', riskScore: 100 }));
-    assert(r1 === false, 'T1a should be rejected');
-    assert(r2 === false, 'T1a should be rejected (high score)');
+    assert(r1 === true, 'T1a should be accepted');
+    assert(r2 === true, 'T1a (high score) should be accepted');
+    assert(getDeferredQueue().length === 2, 'Both T1a items should be queued');
+    _resetDeferredQueue();
+  });
+
+  test('enqueueDeferred still rejects an unknown/ineligible tier (negative)', () => {
+    const { enqueueDeferred, getDeferredQueue, _resetDeferredQueue } = require('../../src/monitor/deferred-sandbox.js');
+    _resetDeferredQueue();
+
+    const r1 = enqueueDeferred(makeItem({ name: 'bogus', tier: 3, riskScore: 100 }));
+    const r2 = enqueueDeferred(makeItem({ name: 'bogus2', tier: 'weird', riskScore: 100 }));
+    assert(r1 === false, 'tier 3 is not eligible');
+    assert(r2 === false, 'unknown tier string is not eligible');
     assert(getDeferredQueue().length === 0, 'Queue should be empty');
     _resetDeferredQueue();
   });

@@ -950,10 +950,23 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
             const maxRuns = tier === '1a' ? undefined : 1;
 
             if (tier === '1a') {
-              // T1a: mandatory sandbox — block-wait (high-confidence threats MUST get sandbox)
-              console.log(`[MONITOR] SANDBOX: launching for ${name}@${version}${canary ? ' (canary: on)' : ''}...`);
-              markSandboxed(name); // stamp before the await: an aborted/inconclusive run still spent the time
-              sandboxResult = await runSandbox(name, { canary, maxRuns, signal });
+              // Phase 3 (throughput decoupling): T1a no longer block-waits a scan
+              // worker. The high-confidence STATIC alert still fires synchronously
+              // below (trySendWebhook, with sandboxResult=null — same as the T1b/T2
+              // defer paths today); the sandbox runs ASYNC on the dedicated deferred
+              // slot at top priority (processed first, never evicted, keeps multi-run
+              // time-bomb detection) and sends a follow-up webhook if it confirms.
+              // Crash-safe: the deferred queue is persisted across restarts, unlike
+              // the old in-worker await which lost the sandbox on an OOM restart.
+              console.log(`[MONITOR] SANDBOX DEFER (T1a, async high-priority): ${name}@${version} (score=${riskScore})`);
+              enqueueDeferred({
+                name, version, ecosystem, tier, riskScore, tarballUrl,
+                enqueuedAt: Date.now(),
+                staticResult: result,
+                npmRegistryMeta,
+                retries: 0
+              });
+              stats.sandboxDeferred = (stats.sandboxDeferred || 0) + 1;
             } else if (tryAcquireSandboxSlot()) {
               // T1b/T2: non-blocking — slot acquired atomically, run with skipSemaphore
               const reason = tier === 2 ? ' (T2, queue low)' : ' (T1b, conditional)';
@@ -1148,8 +1161,13 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
                 // Safety: never suppress packages with high-confidence threats or positive sandbox
                 const hasHC = hasHighConfidenceThreat(result);
                 const hasSandboxEvidence = sandboxResult && sandboxResult.score > 0;
+                // Phase 3: T1a sandboxes are now deferred (async), so sandboxResult is
+                // null here — the sandbox evidence that previously guarded a T1a from
+                // LLM suppression hasn't run yet. Never let the LLM clear a T1a before
+                // its deferred sandbox confirms; T1a is the highest-confidence tier and
+                // MUST get sandbox verification (it can come via the follow-up webhook).
                 if (llmMode === 'active' && llmResult.verdict === 'benign' && llmResult.confidence > 0.85
-                    && !hasHC && !hasSandboxEvidence) {
+                    && !hasHC && !hasSandboxEvidence && tier !== '1a') {
                   console.log(`[LLM] SUPPRESS: ${name}@${version} cleared (benign, confidence=${llmResult.confidence})`);
                   stats.llmSuppressed = (stats.llmSuppressed || 0) + 1;
                   stats.scanned++;

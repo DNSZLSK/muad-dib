@@ -37,6 +37,25 @@ const DEFERRED_MIN_SCORE = 5;
 // (90s) + the sandbox watchdog grace; this AbortController is belt-and-suspenders.
 const DEFERRED_SANDBOX_TIMEOUT_MS = 150_000;
 
+// Tier priority for the deferred queue. Phase 3 routes T1a's sandbox here (async)
+// instead of block-waiting a scan worker, so T1a is the highest-confidence tier and
+// must be processed first and evicted last — it must never sit behind a high-score
+// T1b/T2. Minimal blast radius: ONLY T1a is elevated (rank 0); T1b and T2 keep the
+// same rank (1) so their existing riskScore-DESC ordering between them is unchanged.
+// Map (not a plain object) keeps numeric tier 2 and string tiers distinct and avoids
+// an object-injection sink.
+const _TIER_RANK = new Map([['1a', 0], ['1b', 1], [2, 1]]);
+function _tierRank(tier) {
+  return _TIER_RANK.has(tier) ? _TIER_RANK.get(tier) : 1;
+}
+function _deferredCompare(a, b) {
+  const r = _tierRank(a.tier) - _tierRank(b.tier);
+  return r !== 0 ? r : (b.riskScore - a.riskScore);
+}
+function _tierLabel(tier) {
+  return tier === '1a' ? 'T1a' : tier === 2 ? 'T2' : 'T1b';
+}
+
 // ── Mutable state ──
 const _deferredQueue = [];
 const _deferredSeen = new Set(); // name@version dedup
@@ -55,8 +74,10 @@ let _deferredSlotBusy = false;   // Dedicated slot: true while deferred sandbox 
  * @returns {boolean} true if enqueued, false if rejected
  */
 function enqueueDeferred(item) {
-  // Guard: only T1b and T2 are allowed
-  if (item.tier !== '1b' && item.tier !== 2) {
+  // Guard: T1a (Phase 3 async-routed high-confidence tier), T1b and T2 are eligible.
+  // T1a was previously block-waited in the scan worker; it now runs on the dedicated
+  // deferred slot at top priority (see _deferredCompare).
+  if (item.tier !== '1a' && item.tier !== '1b' && item.tier !== 2) {
     console.error(`[DEFERRED] REJECTED: ${item.name}@${item.version} — tier ${item.tier} not eligible`);
     return false;
   }
@@ -74,9 +95,11 @@ function enqueueDeferred(item) {
   // still warrant sandbox verification — an adversary could otherwise
   // tune their malware to fire only LOW-severity TIER1 patterns to
   // bypass sandbox entirely.
+  // T1a is high-confidence malice by classification — it always bypasses the
+  // min-score floor (it must never be dropped before its sandbox runs).
   const itemThreats = (item.staticResult && item.staticResult.threats) || [];
   const hasTier1Signal = itemThreats.some(t => TIER1_TYPES.has(t.type));
-  if ((item.riskScore || 0) < DEFERRED_MIN_SCORE && !hasTier1Signal) {
+  if (item.tier !== '1a' && (item.riskScore || 0) < DEFERRED_MIN_SCORE && !hasTier1Signal) {
     console.error(`[DEFERRED] REJECTED: ${item.name}@${item.version} — score=${item.riskScore || 0} below minimum ${DEFERRED_MIN_SCORE}, no TIER1 signal (possible classification regression)`);
     return false;
   }
@@ -89,16 +112,18 @@ function enqueueDeferred(item) {
     return false;
   }
 
-  // Queue full — evict lowest or reject
+  // Queue full — evict the lowest-priority item (by tier then score) if the new
+  // item outranks it, else reject. Tier-aware so a T1a can always displace a
+  // lower-tier item even when its score is lower.
   if (_deferredQueue.length >= DEFERRED_QUEUE_MAX) {
     const lowest = _deferredQueue[_deferredQueue.length - 1];
-    if (item.riskScore > lowest.riskScore) {
+    if (_deferredCompare(item, lowest) < 0) {
       const evictKey = `${lowest.name}@${lowest.version}`;
       _deferredQueue.pop();
       _deferredSeen.delete(evictKey);
-      console.log(`[DEFERRED] EVICTED: ${evictKey} (score=${lowest.riskScore}) to make room for ${key} (score=${item.riskScore})`);
+      console.log(`[DEFERRED] EVICTED: ${evictKey} (${_tierLabel(lowest.tier)}, score=${lowest.riskScore}) to make room for ${key} (${_tierLabel(item.tier)}, score=${item.riskScore})`);
     } else {
-      console.log(`[DEFERRED] QUEUE FULL: ${key} (score=${item.riskScore}) rejected — all ${DEFERRED_QUEUE_MAX} items have higher scores`);
+      console.log(`[DEFERRED] QUEUE FULL: ${key} (${_tierLabel(item.tier)}, score=${item.riskScore}) rejected — all ${DEFERRED_QUEUE_MAX} items rank higher`);
       return false;
     }
   }
@@ -122,9 +147,9 @@ function enqueueDeferred(item) {
     };
   }
   delete item.npmRegistryMeta;
-  // Sort by riskScore DESC (highest first)
-  _deferredQueue.sort((a, b) => b.riskScore - a.riskScore);
-  console.log(`[DEFERRED] ENQUEUED: ${key} (tier=${item.tier === 2 ? 'T2' : 'T1b'}, score=${item.riskScore}, queue=${_deferredQueue.length})`);
+  // Sort by tier priority then riskScore DESC (T1a first, then highest score)
+  _deferredQueue.sort(_deferredCompare);
+  console.log(`[DEFERRED] ENQUEUED: ${key} (tier=${_tierLabel(item.tier)}, score=${item.riskScore}, queue=${_deferredQueue.length})`);
   return true;
 }
 
@@ -133,9 +158,10 @@ function getDeferredQueue() {
 }
 
 function getDeferredQueueStats() {
-  const tierBreakdown = { t1b: 0, t2: 0 };
+  const tierBreakdown = { t1a: 0, t1b: 0, t2: 0 };
   for (const item of _deferredQueue) {
-    if (item.tier === '1b') tierBreakdown.t1b++;
+    if (item.tier === '1a') tierBreakdown.t1a++;
+    else if (item.tier === '1b') tierBreakdown.t1b++;
     else if (item.tier === 2) tierBreakdown.t2++;
   }
   return {
@@ -189,7 +215,7 @@ async function processDeferredItem(stats) {
   const key = `${item.name}@${item.version}`;
   _deferredSeen.delete(key);
 
-  console.log(`[DEFERRED] PROCESSING: ${key} (tier=${item.tier === 2 ? 'T2' : 'T1b'}, score=${item.riskScore}, retries=${item.retries})`);
+  console.log(`[DEFERRED] PROCESSING: ${key} (tier=${_tierLabel(item.tier)}, score=${item.riskScore}, retries=${item.retries})`);
 
   // 4. Run sandbox on dedicated slot (bypasses shared semaphore)
   _deferredSlotBusy = true;
@@ -198,10 +224,13 @@ async function processDeferredItem(stats) {
   const deadline = setTimeout(() => ac.abort(), DEFERRED_SANDBOX_TIMEOUT_MS);
   try {
     const canary = isCanaryEnabled();
-    // maxRuns=1: deferred items are T1b/T2, time bomb detection (3 runs) is a luxury.
-    // 90s instead of 270s per item → 3× faster deferred queue drain.
+    // T1a keeps multi-run time-bomb detection (maxRuns=undefined) — that was its
+    // behavior on the old blocking in-worker path, preserved here for detection
+    // parity (Phase 3 only moves WHERE it runs, not how thoroughly). T1b/T2 stay
+    // single-run (maxRuns=1, ~90s vs ~270s) for fast deferred-queue drain.
+    const maxRuns = item.tier === '1a' ? undefined : 1;
     markSandboxed(item.name); // stamp for sandbox-revalidation cadence (matches the synchronous path)
-    sandboxResult = await runSandbox(item.name, { canary, skipSemaphore: true, maxRuns: 1, signal: ac.signal });
+    sandboxResult = await runSandbox(item.name, { canary, skipSemaphore: true, maxRuns, signal: ac.signal });
     console.log(`[DEFERRED] SANDBOX COMPLETE: ${key} -> score=${sandboxResult.score}, severity=${sandboxResult.severity}`);
   } catch (err) {
     console.error(`[DEFERRED] SANDBOX ERROR: ${key} — ${err.message}`);
@@ -212,7 +241,7 @@ async function processDeferredItem(stats) {
       // Re-enqueue for retry
       _deferredQueue.push(item);
       _deferredSeen.add(key);
-      _deferredQueue.sort((a, b) => b.riskScore - a.riskScore);
+      _deferredQueue.sort(_deferredCompare);
       console.log(`[DEFERRED] RE-ENQUEUED: ${key} for retry (attempt ${item.retries + 1}/${DEFERRED_MAX_RETRIES})`);
     }
     return null;
@@ -414,7 +443,7 @@ function restoreDeferredQueue() {
     }
 
     // Sort after bulk insert
-    _deferredQueue.sort((a, b) => b.riskScore - a.riskScore);
+    _deferredQueue.sort(_deferredCompare);
 
     if (restored > 0) {
       console.log(`[DEFERRED] Restored ${restored} items from disk (saved at ${data.savedAt})`);
