@@ -45,6 +45,18 @@ function getMinFreeBytes() {
   return gb * 1024 * 1024 * 1024;
 }
 
+// Tarball download is gated on this score so the heavy .tgz is kept ONLY for
+// alert-threshold packages; the cheap JSON metadata is still written for every
+// suspect. Aligns with the webhook alert floor (20). Bounded to [0, 100], default 20.
+const DEFAULT_TGZ_MIN_SCORE = 20;
+function getArchiveTgzMinScore() {
+  const raw = process.env.MUADDIB_ARCHIVE_TGZ_MIN_SCORE;
+  if (raw === undefined || raw === '') return DEFAULT_TGZ_MIN_SCORE;
+  const n = parseInt(raw, 10);
+  if (!Number.isFinite(n) || n < 0 || n > 100) return DEFAULT_TGZ_MIN_SCORE;
+  return n;
+}
+
 function hasEnoughSpace(targetDir) {
   try {
     if (typeof fs.statfsSync !== 'function') return true; // Node <18.15 — fail-open
@@ -109,13 +121,19 @@ async function archiveSuspectTarball(packageName, version, tarballUrl, scanResul
 
   // Defense-in-depth: never archive packages that are statically clean.
   // Callers in the pipeline already gate on tier 1a/1b/2 classification, but a
-  // numeric score of 0 with no triggered rules is unambiguously CLEAN — those
-  // dominated archive volume in production.
+  // numeric score of 0 with no triggered rules is unambiguously CLEAN.
   const score = (scanResult && typeof scanResult.score === 'number') ? scanResult.score : 0;
   const rules = (scanResult && Array.isArray(scanResult.rulesTriggered)) ? scanResult.rulesTriggered : [];
   if (score === 0 && rules.length === 0) {
     return false;
   }
+
+  // Tarballs dominate archive volume (~439MB/day of .tgz vs ~3.6MB/day of JSON).
+  // Keep the cheap JSON metadata for EVERY suspect (audit trail + GT-promotion index),
+  // but download/retain the heavy .tgz ONLY for packages at/above the alert threshold
+  // (score >= MUADDIB_ARCHIVE_TGZ_MIN_SCORE, default 20 = webhook floor). This shrinks
+  // the archive from tens of GB to hundreds of MB without losing the record of what was seen.
+  const keepTarball = score >= getArchiveTgzMinScore();
 
   const dateStr = getArchiveDateString();
   const dayDir = path.join(ARCHIVE_DIR, dateStr);
@@ -124,32 +142,55 @@ async function archiveSuspectTarball(packageName, version, tarballUrl, scanResul
   const tgzPath = path.join(dayDir, `${basename}.tgz`);
   const jsonPath = path.join(dayDir, `${basename}.json`);
 
-  // Dedup: skip if already archived
-  if (fs.existsSync(tgzPath)) {
-    return false;
+  // At/above the alert threshold: archive the full .tgz (existing behavior, unchanged).
+  // Below it: keep only the cheap JSON metadata (audit trail + GT-promotion index).
+  if (keepTarball) {
+    // Dedup: skip if already archived
+    if (fs.existsSync(tgzPath)) {
+      return false;
+    }
+
+    // Disk-space gate: don't let a burst of suspects run the volume to 100% between
+    // the periodic cleanups. Guards the heavy .tgz download.
+    if (!hasEnoughSpace(ARCHIVE_DIR)) {
+      console.warn(`[Archive] Skip ${packageName}@${version}: free space below ${DEFAULT_MIN_FREE_GB}GB threshold`);
+      return false;
+    }
+
+    // Ensure day directory exists
+    fs.mkdirSync(dayDir, { recursive: true });
+
+    // Download with semaphore (shares concurrency with rest of pipeline). Download
+    // errors propagate to the fire-and-forget .catch() in the caller (queue.js).
+    await acquireRegistrySlot();
+    try {
+      await downloadToFile(tarballUrl, tgzPath, ARCHIVE_TIMEOUT_MS);
+    } finally {
+      releaseRegistrySlot();
+    }
+
+    const tarballSha256 = sha256File(tgzPath);
+    const metadata = {
+      package: packageName,
+      version,
+      timestamp: new Date().toISOString(),
+      score: scanResult.score || 0,
+      priority: scanResult.priority || null,
+      rules_triggered: scanResult.rulesTriggered || [],
+      llm_verdict: scanResult.llmVerdict || null,
+      tarball_archived: true,
+      tarball_sha256: tarballSha256
+    };
+    fs.writeFileSync(jsonPath, JSON.stringify(metadata, null, 2));
+    return true;
   }
 
-  // Defense layer 3: skip if disk is nearly full, even if retention is well-configured.
-  // Prevents a burst of malicious campaigns from blowing past the 7-day budget
-  // before the 6h periodic cleanup tick can catch up.
-  if (!hasEnoughSpace(ARCHIVE_DIR)) {
-    console.warn(`[Archive] Skip ${packageName}@${version}: free space below ${DEFAULT_MIN_FREE_GB}GB threshold`);
+  // Below the alert threshold — record cheap JSON metadata only, skip the tarball.
+  // Dedup on the JSON record so re-scans of the same package@version don't rewrite it.
+  if (fs.existsSync(jsonPath)) {
     return false;
   }
-
-  // Ensure day directory exists
   fs.mkdirSync(dayDir, { recursive: true });
-
-  // Download with semaphore (shares concurrency with rest of pipeline)
-  await acquireRegistrySlot();
-  try {
-    await downloadToFile(tarballUrl, tgzPath, ARCHIVE_TIMEOUT_MS);
-  } finally {
-    releaseRegistrySlot();
-  }
-
-  // Compute hash and write metadata
-  const tarballSha256 = sha256File(tgzPath);
   const metadata = {
     package: packageName,
     version,
@@ -158,9 +199,9 @@ async function archiveSuspectTarball(packageName, version, tarballUrl, scanResul
     priority: scanResult.priority || null,
     rules_triggered: scanResult.rulesTriggered || [],
     llm_verdict: scanResult.llmVerdict || null,
-    tarball_sha256: tarballSha256
+    tarball_archived: false,
+    tarball_sha256: null
   };
-
   fs.writeFileSync(jsonPath, JSON.stringify(metadata, null, 2));
   return true;
 }
@@ -272,5 +313,6 @@ module.exports = {
   getArchiveDateString,
   getRetentionDays,
   getMinFreeBytes,
+  getArchiveTgzMinScore,
   parseArchiveDayDir
 };
