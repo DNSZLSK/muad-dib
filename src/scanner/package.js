@@ -252,6 +252,35 @@ async function scanPackageJson(targetPath) {
     // Check if binding.gyp references C/C++ source files
     const hasNativeSources = /\.(c|cc|cpp|cxx|h|hpp)\b/.test(gypContent);
 
+    // Phantom Gyp (June 2026): GYP command-substitution <!(...) / <!@(...) runs a command at
+    // *configure* time via `node-gyp`, which npm auto-runs on install whenever a binding.gyp is
+    // present — NO package.json lifecycle script required, so it slips past every lifecycle-gated
+    // check below. Distinct from <(...) / <@(...) (plain variable expansion, benign) which MUST
+    // NOT fire — the required `!` gates command execution.
+    //
+    // Exempt the legitimate header-locate idiom real native addons use via <!(...) (e.g.
+    // node -p "require('node-addon-api').include", nan, pkg-config, node-gyp). Flag a
+    // command-sub only when its body is NOT a pure build-tool lookup OR contains shell
+    // chaining/fetch — so an attacker can't hide `node index.js && curl evil` behind a token.
+    const GYP_BUILD_TOOL = /node-addon-api|require\(['"]nan['"]\)|pkg-config|node-gyp|napi/i;
+    const GYP_SHELL_CHAIN = /[;&|`]|\$\(|>\s|>>|\bcurl\b|\bwget\b|\bbash\b|\bsh\b/i;
+    let gypCommandExec = false;
+    const gypCmdSubRe = /<!@?\(([^\n]{0,200})/g;
+    let _gm;
+    while ((_gm = gypCmdSubRe.exec(gypContent)) !== null) {
+      const body = _gm[1];
+      const benign = GYP_BUILD_TOOL.test(body) && !GYP_SHELL_CHAIN.test(body);
+      if (!benign) { gypCommandExec = true; break; }
+    }
+    if (gypCommandExec) {
+      threats.push({
+        type: 'gyp_command_exec',
+        severity: 'CRITICAL',
+        message: `binding.gyp uses GYP command-substitution (<!(...) / <!@(...)) running a non-build command at install time via node-gyp, no lifecycle script required (Phantom Gyp pattern).`,
+        file: 'binding.gyp'
+      });
+    }
+
     if (hasShellActions) {
       threats.push({
         type: 'native_addon_install',

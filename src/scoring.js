@@ -130,7 +130,9 @@ const PACKAGE_LEVEL_TYPES = new Set([
   // audit DF-C1: emitted when MAX_GRAPH_NODES exceeded so cross-file blind spot is visible in scoring
   'large_package_graph_truncated',
   // audit MR-C1: informational signal that the scan target is a monorepo root (per-workspace scoring TBD)
-  'monorepo_detected'
+  'monorepo_detected',
+  // Phantom Gyp: binding.gyp command-substitution is a package-level (manifest) finding
+  'gyp_command_exec'
 ]);
 
 // ============================================

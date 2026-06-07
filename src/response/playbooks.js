@@ -1001,6 +1001,10 @@ const PLAYBOOKS = {
     'HAUTE: binding.gyp avec script lifecycle non-standard. Code natif compile a l\'installation. ' +
     'Verifier le contenu de binding.gyp et les sources C/C++. Installer avec --ignore-scripts si suspect.',
 
+  gyp_command_exec:
+    'CRITIQUE: binding.gyp utilise la command-substitution GYP <!(...) / <!@(...) — execution de code a l\'installation via node-gyp, sans script lifecycle (pattern Phantom Gyp). ' +
+    'Decoder la commande substituee. NE PAS installer : node-gyp l\'execute au build meme avec --ignore-scripts. Verifier la source officielle du package.',
+
   string_mutation_obfuscation:
     'HAUTE: Chaine de .replace() reconstruisant des noms d\'API dangereuses (leet-speak). ' +
     'Technique d\'evasion par substitution de caracteres. Decoder la chaine finale. Supprimer si malveillant.',

