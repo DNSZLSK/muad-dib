@@ -4,6 +4,7 @@ const path = require('path');
 const os = require('os');
 const v8 = require('v8');
 const { isDockerAvailable, SANDBOX_CONCURRENCY_MAX, killAllSandboxContainers } = require('../sandbox/index.js');
+const { banner } = require('../utils.js');
 const { setVerboseMode, isSandboxEnabled, isCanaryEnabled, isLlmDetectiveEnabled, getLlmDetectiveMode, DOWNLOADS_CACHE_TTL } = require('./classify.js');
 const { loadState, saveState, loadDailyStats, saveDailyStats, purgeTarballCache, isDailyReportDue, atomicWriteFileSync, saveNpmSeq, ALERTS_FILE, runStateMigrations, loadRecentlyScanned, saveRecentlyScanned } = require('./state.js');
 const { isTemporalEnabled, isTemporalAstEnabled, isTemporalPublishEnabled, isTemporalMaintainerEnabled } = require('./temporal.js');
@@ -787,12 +788,10 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
     console.warn(`[Archive] Failed to start periodic cleanup: ${err.message}`);
   }
 
-  console.log(`
-╔════════════════════════════════════════════╗
-║     MUAD'DIB - Registry Monitor           ║
-║     Scanning npm + PyPI new packages      ║
-╚════════════════════════════════════════════╝
-  `);
+  console.log('\n' + banner([
+    "MUAD'DIB - Registry Monitor",
+    'Scanning npm + PyPI new packages'
+  ]) + '\n');
 
   // Note: alerts file migrated from .json to .jsonl in v2.10.89
   const oldAlertsJson = ALERTS_FILE.replace('.jsonl', '.json');

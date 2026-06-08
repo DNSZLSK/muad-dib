@@ -31,6 +31,23 @@ const { diff, showRefs } = require('../src/diff.js');
 const { initHooks, removeHooks } = require('../src/hooks-init.js');
 const { showHelp, commandHelp } = require('../src/commands/help.js');
 const { interactiveMenu } = require('../src/commands/interactive.js');
+const { isPromptCancellation } = require('../src/utils.js');
+
+// Global safety net: turn an unhandled async error into a clean one-line message
+// instead of a raw stack trace. Ctrl-C inside an interactive prompt exits 130
+// (POSIX SIGINT convention); any other error exits 1. Set MUADDIB_DEBUG=1 to see
+// the full stack.
+function handleFatal(err) {
+  if (isPromptCancellation(err)) {
+    console.log('\nCancelled.');
+    process.exit(130);
+  }
+  console.error('[ERROR]', err && err.message ? err.message : String(err));
+  if (process.env.MUADDIB_DEBUG && err && err.stack) console.error(err.stack);
+  process.exit(1);
+}
+process.on('unhandledRejection', handleFatal);
+process.on('uncaughtException', handleFatal);
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -274,10 +291,7 @@ if (command === 'version' || command === '--version' || command === '-v') {
   if (command === '--help' || command === '-h') {
     showHelp();
   }
-  interactiveMenu().catch(err => {
-    console.error('[ERROR]', err.message);
-    process.exit(1);
-  });
+  interactiveMenu().catch(handleFatal);
 } else if (command === 'scan') {
   if (wantHelp) showHelp('scan');
   run(target, {

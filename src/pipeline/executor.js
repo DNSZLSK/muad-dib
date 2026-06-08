@@ -121,6 +121,11 @@ async function execute(targetPath, options, pythonDeps, warnings) {
     spinner.start(`[MUADDIB] Scanning ${targetPath}...`);
   }
 
+  // try/finally guarantees the spinner's setInterval is always cleared. A scanner
+  // throwing before the succeed() below would otherwise leave it animating AND keep
+  // the event loop alive (process hang). _stop() is idempotent.
+  try {
+
   // Deobfuscation pre-processor (pass to AST/dataflow scanners unless disabled)
   const deobfuscateFn = options.noDeobfuscate ? null : deobfuscate;
 
@@ -152,7 +157,7 @@ async function execute(targetPath, options, pythonDeps, warnings) {
         moduleGraphThreats.push({
           type: 'large_package_graph_truncated',
           severity: 'MEDIUM',
-          message: `Cross-file analysis désactivée : ${graphMeta.fileCount} fichiers dépassent la limite (${graphMeta.maxNodes}). Risque de blind spot sur monorepo / large package — auditer les sous-modules manuellement.`,
+          message: `Cross-file analysis disabled: ${graphMeta.fileCount} files exceed the limit (${graphMeta.maxNodes}). Risk of a blind spot on a monorepo / large package — audit the sub-modules manually.`,
           file: 'package.json',
           line: 0,
           fileCount: graphMeta.fileCount,
@@ -441,6 +446,9 @@ async function execute(targetPath, options, pythonDeps, warnings) {
   }
 
   return { threats, scannerErrors };
+  } finally {
+    if (spinner) spinner._stop();
+  }
 }
 
 module.exports = { execute, matchPythonIOCs, checkPyPITyposquatting };

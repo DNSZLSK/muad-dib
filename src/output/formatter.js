@@ -3,6 +3,7 @@ const { saveSARIF } = require('../sarif.js');
 const { saveCycloneDX } = require('./cyclonedx.js');
 const { getPlaybook } = require('../response/playbooks.js');
 const { DOMAIN_CODES, getRuleDomain } = require('../rules/index.js');
+const { renderScoreBar } = require('../utils.js');
 
 // P0a — domain tag formatter for CLI text output.
 // Returns a bracketed 3-letter code like "[MAL]" / "[AUT]" / "[ENG]" / "[VUL]"
@@ -63,8 +64,7 @@ function formatOutput(result, options, ctx) {
     if (!spinner) console.log(`\n[MUADDIB] Scanning ${targetPath}\n`);
     else console.log('');
 
-    const explainScoreBar = '█'.repeat(Math.floor(result.summary.riskScore / 5)) + '░'.repeat(20 - Math.floor(result.summary.riskScore / 5));
-    console.log(`[SCORE] ${result.summary.riskScore}/100 [${explainScoreBar}] ${result.summary.riskLevel}`);
+    console.log(`[SCORE] ${result.summary.riskScore}/100 [${renderScoreBar(result.summary.riskScore)}] ${result.summary.riskLevel}`);
     if (mostSuspiciousFile) {
       console.log(`        Max file: ${mostSuspiciousFile} (${maxFileScore} pts)`);
       if (packageScore > 0) {
@@ -140,8 +140,7 @@ function formatOutput(result, options, ctx) {
     if (!spinner) console.log(`\n[MUADDIB] Scanning ${targetPath}\n`);
     else console.log('');
 
-    const scoreBar = '█'.repeat(Math.floor(result.summary.riskScore / 5)) + '░'.repeat(20 - Math.floor(result.summary.riskScore / 5));
-    console.log(`[SCORE] ${result.summary.riskScore}/100 [${scoreBar}] ${result.summary.riskLevel}`);
+    console.log(`[SCORE] ${result.summary.riskScore}/100 [${renderScoreBar(result.summary.riskScore)}] ${result.summary.riskLevel}`);
     if (mostSuspiciousFile) {
       console.log(`        Max file: ${mostSuspiciousFile} (${maxFileScore} pts)`);
       if (packageScore > 0) {

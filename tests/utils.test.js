@@ -237,6 +237,88 @@ async function runUtilsTests() {
     }
   });
 
+  // --- banner ---
+
+  test('UTILS: banner draws an aligned box around a single line', () => {
+    const { banner } = require('../src/utils.js');
+    const lines = banner(['ABC']).split('\n');
+    assert(lines.length === 3, 'Should be 3 lines, got ' + lines.length);
+    assert(lines[0].startsWith('╔') && lines[0].endsWith('╗'), 'Top border');
+    assert(lines[1].startsWith('║') && lines[1].endsWith('║'), 'Body row delimited by ║');
+    assert(lines[2].startsWith('╚') && lines[2].endsWith('╝'), 'Bottom border');
+    assert(lines[1].includes('ABC'), 'Content preserved');
+    const w = lines[0].length;
+    assert(lines.every(l => l.length === w), 'All rows must share the same width');
+  });
+
+  test('UTILS: banner right-aligns borders for lines of different lengths', () => {
+    const { banner } = require('../src/utils.js');
+    const lines = banner(['short', 'a much longer line']).split('\n');
+    const w = lines[0].length;
+    assert(lines.every(l => l.length === w), 'Ragged-border bug: rows differ in width');
+    assert(lines.length === 4, '2 content lines => 4 total rows');
+  });
+
+  test('UTILS: banner handles empty / non-array input without throwing', () => {
+    const { banner } = require('../src/utils.js');
+    const empty = banner([]);
+    assert(typeof empty === 'string' && empty.split('\n').length === 2, 'Empty banner is just top+bottom');
+    assert(banner('hi').includes('hi'), 'Non-array input is coerced to one line');
+  });
+
+  // --- isPromptCancellation ---
+
+  test('UTILS: isPromptCancellation detects inquirer Ctrl-C', () => {
+    const { isPromptCancellation } = require('../src/utils.js');
+    assert(isPromptCancellation({ name: 'ExitPromptError' }) === true, 'ExitPromptError by name');
+    assert(isPromptCancellation(new Error('User force closed the prompt with SIGINT')) === true, 'SIGINT message');
+  });
+
+  test('UTILS: isPromptCancellation is false for ordinary errors', () => {
+    const { isPromptCancellation } = require('../src/utils.js');
+    assert(isPromptCancellation(new Error('boom')) === false, 'Ordinary error is not a cancellation');
+    assert(isPromptCancellation(null) === false, 'null is not a cancellation');
+    assert(isPromptCancellation(undefined) === false, 'undefined is not a cancellation');
+  });
+
+  // --- Spinner._stop idempotency (cleanup-on-throw guarantee) ---
+
+  test('UTILS: Spinner._stop is idempotent and safe without start', () => {
+    const { Spinner } = require('../src/utils.js');
+    const spinner = new Spinner();
+    spinner._stop(); // before start: must not throw
+    const origWrite = process.stdout.write;
+    process.stdout.write = () => true;
+    try {
+      spinner.start('x');
+      spinner._stop();
+      assert(spinner._interval === null, '_stop clears the interval');
+      spinner._stop(); // double stop
+      assert(spinner._interval === null, 'double _stop stays null');
+    } finally {
+      process.stdout.write = origWrite;
+    }
+  });
+
+  // --- renderScoreBar ---
+
+  test('UTILS: renderScoreBar renders a 20-cell bar proportional to score', () => {
+    const { renderScoreBar } = require('../src/utils.js');
+    const bar = renderScoreBar(50);
+    assert(bar.length === 20, '20 cells, got ' + bar.length);
+    assert(bar.split('█').length - 1 === 10, '50/100 => 10 filled cells');
+    assert(renderScoreBar(100).split('█').length - 1 === 20, '100 => all filled');
+    assert(renderScoreBar(0).split('█').length - 1 === 0, '0 => none filled');
+  });
+
+  test('UTILS: renderScoreBar guards undefined/NaN/out-of-range without throwing', () => {
+    const { renderScoreBar } = require('../src/utils.js');
+    assert(renderScoreBar(undefined).length === 20 && renderScoreBar(undefined).indexOf('█') === -1, 'undefined => empty 20-cell bar');
+    assert(renderScoreBar(NaN).length === 20, 'NaN => 20-cell bar');
+    assert(renderScoreBar(999).split('█').length - 1 === 20, 'clamps >100 to full');
+    assert(renderScoreBar(-5).split('█').length - 1 === 0, 'clamps <0 to empty');
+  });
+
   // --- listInstalledPackages ---
 
   test('UTILS: listInstalledPackages finds packages', () => {
