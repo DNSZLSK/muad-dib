@@ -12,6 +12,7 @@ async function runScraperTests() {
     parseCSVLine, parseCSV, extractVersions, parseOSVEntry,
     createFreshness, isAllowedRedirect,
     validateIOCEntry, getNoVersionSkipCount, resetNoVersionSkipCount,
+    getInvalidNameSkipCount, resetInvalidNameSkipCount,
     CONFIDENCE_ORDER, ALLOWED_REDIRECT_DOMAINS,
     MAX_ENTRY_UNCOMPRESSED, MAX_TOTAL_UNCOMPRESSED
   } = require('../../src/ioc/scraper.js');
@@ -169,6 +170,31 @@ async function runScraperTests() {
     extractVersions({ versions: ['1.0.0'] });
     extractVersions({ versions: ['2.0.0', '3.0.0'] });
     assert(getNoVersionSkipCount() === 0, 'Counter should stay 0 when versions are found');
+  });
+
+  // --- invalidNameSkipCount aggregated warning (mirror of version counter) ---
+
+  test('SCRAPER: validateIOCEntry counts invalid npm + PyPI names (no per-line spam)', () => {
+    resetInvalidNameSkipCount();
+    assert(validateIOCEntry('PKG_UPPER', '1.0.0', 'npm') === false, 'uppercase npm name is invalid');
+    assert(validateIOCEntry('pkg/evil', '1.0.0', 'pypi') === false, 'slash in PyPI name is invalid');
+    assert(getInvalidNameSkipCount() === 2, 'Should count 2 invalid-name skips, got ' + getInvalidNameSkipCount());
+  });
+
+  test('SCRAPER: validateIOCEntry does NOT count valid names', () => {
+    resetInvalidNameSkipCount();
+    assert(validateIOCEntry('lodash', '4.17.21', 'npm') === true, 'lodash valid');
+    assert(validateIOCEntry('@scope/pkg', '1.0.0', 'npm') === true, 'scoped pkg valid');
+    assert(validateIOCEntry('requests', '2.28.0', 'pypi') === true, 'requests valid');
+    assert(getInvalidNameSkipCount() === 0, 'Counter should stay 0 for valid names, got ' + getInvalidNameSkipCount());
+  });
+
+  test('SCRAPER: resetInvalidNameSkipCount resets counter to 0', () => {
+    resetInvalidNameSkipCount();
+    validateIOCEntry('Bad Name', '1.0.0', 'npm');
+    assert(getInvalidNameSkipCount() === 1, 'Counter should be 1 after one skip');
+    resetInvalidNameSkipCount();
+    assert(getInvalidNameSkipCount() === 0, 'Counter should be 0 after reset');
   });
 
   // --- parseOSVEntry ---
@@ -2890,16 +2916,10 @@ async function runScraperTests() {
     assert(validateIOCEntry('@scope/pkg', '1.0.0', 'npm') === true, 'scoped package should be valid');
   });
 
-  test('IOC-VALIDATE: package name with path traversal rejected', () => {
-    const origWarn = console.warn;
-    const warnings = [];
-    console.warn = (...args) => warnings.push(args.join(' '));
-    try {
-      assert(validateIOCEntry('../etc/passwd', '1.0.0', 'npm') === false, '../ in name should be rejected');
-      assert(warnings.length > 0, 'Should emit a warning');
-    } finally {
-      console.warn = origWarn;
-    }
+  test('IOC-VALIDATE: package name with path traversal rejected (counted, not logged)', () => {
+    resetInvalidNameSkipCount();
+    assert(validateIOCEntry('../etc/passwd', '1.0.0', 'npm') === false, '../ in name should be rejected');
+    assert(getInvalidNameSkipCount() === 1, 'Rejection should increment the aggregated name-skip counter');
   });
 
   test('IOC-VALIDATE: package name with special characters rejected', () => {

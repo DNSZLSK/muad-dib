@@ -8,16 +8,15 @@ const { safeInstall } = require('../safe-install.js');
 const { buildSandboxImage, runSandbox, generateNetworkReport } = require('../sandbox/index.js');
 const { diff } = require('../diff.js');
 const { initHooks } = require('../hooks-init.js');
+const { banner } = require('../utils.js');
 
 async function interactiveMenu() {
   const { select, input, confirm } = await import('@inquirer/prompts');
 
-  console.log(`
-  ╔═══════════════════════════════════════════════╗
-  ║   MUAD'DIB - npm & PyPI Supply Chain Hunter  ║
-  ║   "The worms must die."                      ║
-  ╚═══════════════════════════════════════════════╝
-  `);
+  console.log('\n' + banner([
+    "MUAD'DIB - npm & PyPI Supply Chain Hunter",
+    '"The worms must die."'
+  ]) + '\n');
 
   const action = await select({
     message: 'What do you want to do?',

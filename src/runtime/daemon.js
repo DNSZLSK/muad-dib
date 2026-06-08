@@ -1,24 +1,23 @@
 const fs = require('fs');
 const path = require('path');
 const { run } = require('../index.js');
+const { banner } = require('../utils.js');
 
 let webhookUrl = null;
 
 async function startDaemon(options = {}) {
   webhookUrl = options.webhook || null;
 
-  console.log(`
-╔════════════════════════════════════════════╗
-║         MUAD'DIB Security Daemon           ║
-║      Surveillance npm install active       ║
-╚════════════════════════════════════════════╝
-  `);
+  console.log('\n' + banner([
+    "MUAD'DIB Security Daemon",
+    'Monitoring npm installs'
+  ]) + '\n');
 
-  console.log('[DAEMON] Demarrage...');
-  console.log(`[DAEMON] Webhook: ${webhookUrl ? 'Configure' : 'Non configure'}`);
-  console.log('[DAEMON] Ctrl+C pour arreter\n');
+  console.log('[DAEMON] Starting...');
+  console.log(`[DAEMON] Webhook: ${webhookUrl ? 'Configured' : 'Not configured'}`);
+  console.log('[DAEMON] Press Ctrl+C to stop\n');
 
-  // Surveille le dossier courant
+  // Watch the current directory
   const cwd = process.cwd();
   const watchers = watchDirectory(cwd);
 
@@ -32,7 +31,7 @@ async function startDaemon(options = {}) {
   // Keep process alive until SIGINT
   await new Promise((resolve) => {
     process.once('SIGINT', () => {
-      console.log('\n[DAEMON] Arret...');
+      console.log('\n[DAEMON] Stopping...');
       cleanup();
       resolve();
     });
@@ -47,26 +46,26 @@ function watchDirectory(dir) {
   const packageLockPath = path.join(dir, 'package-lock.json');
   const yarnLockPath = path.join(dir, 'yarn.lock');
 
-  console.log(`[DAEMON] Surveillance de ${dir}`);
+  console.log(`[DAEMON] Watching ${dir}`);
 
-  // Surveille package-lock.json
+  // Watch package-lock.json
   if (fs.existsSync(packageLockPath)) {
     const w = watchFile(packageLockPath, dir);
     if (w) watchers.push(w);
   }
 
-  // Surveille yarn.lock
+  // Watch yarn.lock
   if (fs.existsSync(yarnLockPath)) {
     const w = watchFile(yarnLockPath, dir);
     if (w) watchers.push(w);
   }
 
-  // Surveille node_modules
+  // Watch node_modules
   if (fs.existsSync(nodeModulesPath)) {
     watchers.push(watchNodeModules(nodeModulesPath, dir));
   }
 
-  // Surveille la creation de node_modules
+  // Watch for node_modules creation
   if (process.platform === 'linux') {
     console.log('[DAEMON] Note: recursive fs.watch may not work on Linux');
   }
@@ -75,12 +74,12 @@ function watchDirectory(dir) {
     if (filename === 'node_modules' && eventType === 'rename') {
       const nmPath = path.join(dir, 'node_modules');
       if (fs.existsSync(nmPath)) {
-        console.log('[DAEMON] node_modules detecte, scan en cours...');
+        console.log('[DAEMON] node_modules detected, scanning...');
         triggerScan(dir);
       }
     }
     if (filename === 'package-lock.json' || filename === 'yarn.lock') {
-      console.log(`[DAEMON] ${filename} modifie, scan en cours...`);
+      console.log(`[DAEMON] ${filename} modified, scanning...`);
       triggerScan(dir);
     }
   });
@@ -106,7 +105,7 @@ function watchFile(filePath, projectDir) {
         const currentMtime = fs.statSync(filePath).mtime.getTime();
         if (currentMtime !== lastMtime) {
           lastMtime = currentMtime;
-          console.log(`[DAEMON] ${path.basename(filePath)} modifie`);
+          console.log(`[DAEMON] ${path.basename(filePath)} modified`);
           triggerScan(projectDir);
         }
       } catch {
@@ -123,7 +122,7 @@ function watchFile(filePath, projectDir) {
 function watchNodeModules(nodeModulesPath, projectDir) {
   const watcher = fs.watch(nodeModulesPath, { recursive: true }, (eventType, filename) => {
     if (filename && filename.includes('package.json')) {
-      console.log(`[DAEMON] Nouveau package detecte: ${filename}`);
+      console.log(`[DAEMON] New package detected: ${filename}`);
       triggerScan(projectDir);
     }
   });
@@ -147,12 +146,12 @@ function triggerScan(dir) {
   const now = Date.now();
   const state = getScanState(dir);
 
-  // Debounce: attend 3 secondes avant de scanner
+  // Debounce: wait 3 seconds before scanning
   if (state.timeout) {
     clearTimeout(state.timeout);
   }
 
-  // Evite les scans trop frequents (minimum 10 secondes entre chaque)
+  // Avoid over-frequent scans (minimum 10 seconds between each)
   if (now - state.lastScanTime < 10000) {
     state.timeout = setTimeout(() => triggerScan(dir), 10000 - (now - state.lastScanTime));
     return;
@@ -160,18 +159,18 @@ function triggerScan(dir) {
 
   state.timeout = setTimeout(async () => {
     state.lastScanTime = Date.now();
-    console.log(`\n[DAEMON] ========== SCAN AUTOMATIQUE ==========`);
-    console.log(`[DAEMON] Cible: ${dir}`);
-    console.log(`[DAEMON] Heure: ${new Date().toLocaleTimeString()}\n`);
+    console.log(`\n[DAEMON] ========== AUTOMATIC SCAN ==========`);
+    console.log(`[DAEMON] Target: ${dir}`);
+    console.log(`[DAEMON] Time: ${new Date().toLocaleTimeString()}\n`);
 
     try {
       await run(dir, { webhook: webhookUrl });
     } catch (err) {
-      console.log(`[DAEMON] Erreur scan: ${err.message}`);
+      console.log(`[DAEMON] Scan error: ${err.message}`);
     }
 
     console.log(`\n[DAEMON] ======================================\n`);
-    console.log('[DAEMON] En attente de modifications...');
+    console.log('[DAEMON] Waiting for changes...');
   }, 3000);
 }
 

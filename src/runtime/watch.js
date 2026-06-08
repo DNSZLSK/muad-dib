@@ -6,13 +6,13 @@ function watch(targetPath) {
   let debounceTimer = null;
   const watchers = [];
 
-  console.log(`[MUADDIB] Surveillance de ${targetPath}\n`);
-  console.log('[INFO] Ctrl+C pour arreter\n');
+  console.log(`[MUADDIB] Watching ${targetPath}\n`);
+  console.log('[INFO] Press Ctrl+C to stop\n');
 
-  // Scan initial
+  // Initial scan
   run(targetPath, { json: false }).catch(err => console.error('[ERROR]', err.message));
 
-  // Surveille les changements
+  // Watch for changes
   const watchPaths = [
     path.join(targetPath, 'package.json'),
     path.join(targetPath, 'package-lock.json'),
@@ -30,7 +30,7 @@ function watch(targetPath) {
         if (debounceTimer) clearTimeout(debounceTimer);
 
         debounceTimer = setTimeout(() => {
-          console.log(`\n[CHANGE] ${filename || 'unknown file'} modifie`);
+          console.log(`\n[CHANGE] ${filename || 'unknown file'} modified`);
           console.log('[MUADDIB] Re-scan...\n');
           run(targetPath, { json: false }).catch(err => console.error('[ERROR]', err.message));
         }, 1000);
@@ -45,7 +45,7 @@ function watch(targetPath) {
 
   // Cleanup on SIGINT
   process.once('SIGINT', () => {
-    console.log('\n[MUADDIB] Arret surveillance...');
+    console.log('\n[MUADDIB] Stopping watch...');
     for (const w of watchers) {
       try { w.close(); } catch { /* ignore */ }
     }

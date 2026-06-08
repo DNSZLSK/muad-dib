@@ -217,7 +217,7 @@ async function runDaemonWatchTests() {
 
       // The watcher should have detected the mtime change and logged
       const logStr = logs.join('\n');
-      const detected = logStr.includes('modifie') || logStr.includes('SCAN');
+      const detected = logStr.includes('modified') || logStr.includes('SCAN');
       assert(detected, 'Should detect file modification via mtime change');
 
       watcher.close();
@@ -402,7 +402,7 @@ async function runDaemonWatchTests() {
       await new Promise(resolve => setTimeout(resolve, 3500));
 
       const logStr = logs.join('\n');
-      assertIncludes(logStr, 'Erreur scan', 'Should log scan error');
+      assertIncludes(logStr, 'Scan error', 'Should log scan error');
       assertIncludes(logStr, 'simulated scan failure', 'Should include error message');
     } finally {
       require(indexPath).run = origRun;
