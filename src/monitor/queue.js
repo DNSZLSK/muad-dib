@@ -32,8 +32,7 @@ const {
   tarballCacheKey,
   tarballCachePath,
   appendAlert,
-  getParisHour,
-  hasReportBeenSentToday,
+  isDailyReportDue,
   MAX_DAILY_ALERTS,
   loadScanMemory,
   shouldSuppressByMemory,
@@ -64,8 +63,7 @@ const {
   computeReputationFactor,
   triageRisk,
   sendDailyReport,
-  alertedPackageRules,
-  DAILY_REPORT_HOUR
+  alertedPackageRules
 } = require('./webhook.js');
 
 // From ./temporal.js
@@ -99,10 +97,11 @@ let _targetConcurrency = BASE_CONCURRENCY;
 const SCAN_CONCURRENCY = BASE_CONCURRENCY; // legacy export — tests check this value
 let _activeWorkers = 0;
 const _workerPromises = new Set();
-// Live static-scan Worker threads — tracked so the daemon's EMERGENCY memory
-// handler can terminate orphaned workers (each retains its isolate heap + parsed
-// ASTs). Bounded by concurrency, so it stays tiny.
-const _liveWorkers = new Set();
+// Live static-scan Worker threads, mapped to the {name,version,ecosystem} of the scan they
+// run — tracked so the daemon's EMERGENCY memory handler can terminate orphaned workers
+// (each retains its isolate heap + parsed ASTs) AND name the in-flight scans it kills.
+// Bounded by concurrency, so it stays tiny.
+const _liveWorkers = new Map();
 
 function getTargetConcurrency() { return _targetConcurrency; }
 function setTargetConcurrency(n) { _targetConcurrency = Math.max(MIN_CONCURRENCY, Math.min(MAX_CONCURRENCY, n)); }
@@ -115,9 +114,19 @@ function getActiveWorkers() { return _activeWorkers; }
  */
 function terminateAllWorkers() {
   let n = 0;
-  for (const w of Array.from(_liveWorkers)) {
-    try { w.terminate(); n++; } catch { /* already gone */ }
+  const dropped = [];
+  for (const [w, item] of Array.from(_liveWorkers.entries())) {
+    try {
+      w.terminate(); n++;
+      if (item && item.name) dropped.push(`${item.name}@${item.version || '?'}`);
+    } catch { /* already gone */ }
     _liveWorkers.delete(w);
+  }
+  if (dropped.length) {
+    // The terminate rejects each scan's worker promise; that reject propagates to
+    // scanPackage's catch, which ledgers it (outcome:'error', source scan_error) — so these
+    // in-flight scans are NOT lost from the scan-ledger. This line names them for the operator.
+    console.error(`[MONITOR] EMERGENCY worker-terminate killed ${dropped.length} in-flight scan(s): ${dropped.slice(0, 20).join(', ')}${dropped.length > 20 ? ` (+${dropped.length - 20} more)` : ''}`);
   }
   return n;
 }
@@ -388,7 +397,8 @@ function runScanInWorker(extractedDir, timeoutMs, scanContext = null, signal = n
     const worker = new Worker(SCAN_WORKER_PATH, {
       workerData: { extractedDir, scanContext: scanContext || {} }
     });
-    _liveWorkers.add(worker);
+    const _sc = scanContext || {};
+    _liveWorkers.set(worker, { name: _sc.name, version: _sc.version, ecosystem: _sc.ecosystem });
 
     let settled = false;
     let timer = null;
@@ -639,6 +649,11 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
         // deliberately hangs the parser to evade analysis would otherwise be relabelled
         // benign. Count as inconclusive (excluded from the FP/TP denominator).
         updateScanStats('sandbox_inconclusive');
+        // Ledger the inconclusive timeout — the 'static_timeout' outcome existed but was
+        // emitted nowhere, so a parser-hang evasion vanished from coverage. Best-effort.
+        try {
+          appendScanLedger({ name, version, ecosystem, outcome: 'static_timeout', source: 'static_timeout' });
+        } catch { /* ledger is best-effort */ }
         return { sandboxResult: null, staticClean: false };
       }
       throw staticErr;
@@ -1215,6 +1230,12 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
     stats.scanned++;
     stats.totalTimeMs += Date.now() - startTime;
     console.error(`[MONITOR] ERROR scanning ${name}@${version}: ${err.message}`);
+    // Ledger the terminal failure so the scan-ledger never over-states coverage (an errored
+    // package is NOT clean). Also captures EMERGENCY worker-terminate losses, whose reject
+    // propagates here (CLAUDE.md "no silent caps"). Best-effort; never throws.
+    try {
+      appendScanLedger({ name, version, ecosystem, outcome: 'error', source: 'scan_error' });
+    } catch { /* ledger is best-effort */ }
     return { sandboxResult: null, staticClean: false };
   } finally {
     // Cleanup temp dir
@@ -1256,15 +1277,9 @@ function timeoutPromise(ms) {
   });
 }
 
-/**
- * Helper: check if a daily report is due (Paris timezone).
- * Extracted here to avoid circular dependency with monitor.js.
- */
-function isDailyReportDue(stats) {
-  const parisHour = getParisHour();
-  if (parisHour < DAILY_REPORT_HOUR) return false;
-  return !hasReportBeenSentToday(stats);
-}
+// isDailyReportDue is the canonical gate in state.js (imported above), called per scan in
+// processQueueItem below. Previously a local `parisHour < 8` copy here diverged from the
+// daemon's `!== 8` copy; unifying in state.js removes the divergence. Still re-exported below.
 
 /**
  * Process a single item from the scan queue.
@@ -1358,6 +1373,37 @@ function computeWorkersToSpawn(targetConcurrency, activeWorkers, queueLength) {
   return Math.max(0, Math.min(targetConcurrency - activeWorkers, queueLength));
 }
 
+// ── RSS-aware worker admission (P1 OOM durable fix) ──
+// The pressure breaker is reactive: it stops spawning at HIGH, but the workers already in
+// flight overshoot RSS by ~2GB (each isolate + gVisor sandbox ~0.55GB, draining up to
+// SCAN_TIMEOUT) before EMERGENCY truncates the queue + kills them. This caps the OVERSHOOT at
+// the source — refuse a new spawn when current RSS + one worker's footprint would breach a
+// soft ceiling (default 80% of the EMERGENCY RSS limit), leaving headroom for in-flight drain.
+const RSS_SOFT_LIMIT_MB = (() => {
+  const parsed = parseInt(process.env.MUADDIB_RSS_SOFT_LIMIT_MB, 10);
+  if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  const hard = parseInt(process.env.MUADDIB_RSS_LIMIT_MB, 10);
+  const base = (Number.isFinite(hard) && hard > 0) ? hard : 8500;
+  return Math.round(base * 0.80);
+})();
+const EST_WORKER_RSS_MB = (() => {
+  const parsed = parseInt(process.env.MUADDIB_EST_WORKER_RSS_MB, 10);
+  return (Number.isFinite(parsed) && parsed > 0) ? parsed : 600;
+})();
+
+/**
+ * Pure: how many NEW scan workers the current RSS headroom allows under the soft ceiling.
+ * `currentRssBytes` already includes the active workers, so this answers "how many MORE fit".
+ * Returns 0 (never negative) once RSS reaches the soft limit — existing workers are NOT killed
+ * here, they drain and free memory; ensureWorkers keeps the queue alive with 1 worker if
+ * nothing is running. softLimitMb / estWorkerMb are injectable for tests.
+ */
+function rssAdmissionCap(currentRssBytes, softLimitMb = RSS_SOFT_LIMIT_MB, estWorkerMb = EST_WORKER_RSS_MB) {
+  const headroomMb = softLimitMb - (currentRssBytes / 1024 / 1024);
+  if (headroomMb <= 0) return 0;
+  return Math.max(0, Math.floor(headroomMb / estWorkerMb));
+}
+
 /**
  * Ensure the target number of workers are running. Non-blocking: spawns
  * missing workers as background promises. Called from the daemon main loop
@@ -1365,7 +1411,23 @@ function computeWorkersToSpawn(targetConcurrency, activeWorkers, queueLength) {
  */
 function ensureWorkers(scanQueue, stats, dailyAlerts, recentlyScanned, downloadsCache, sandboxAvailable) {
   if (scanQueue.length === 0) return;
-  const toSpawn = computeWorkersToSpawn(_targetConcurrency, _activeWorkers, scanQueue.length);
+  let toSpawn = computeWorkersToSpawn(_targetConcurrency, _activeWorkers, scanQueue.length);
+  if (toSpawn <= 0) return;
+
+  // RSS-aware admission (P1 OOM durable fix): cap NEW spawns by memory headroom so the
+  // in-flight worker set can't overshoot the soft RSS ceiling. Never fully deadlock: if
+  // headroom is gone AND nothing is running, allow exactly one so the queue still makes
+  // forward progress (its completion frees memory). Bounds peak RSS BEFORE the reactive breaker.
+  const rssNow = process.memoryUsage().rss;
+  const rssCap = rssAdmissionCap(rssNow);
+  if (toSpawn > rssCap) {
+    if (rssCap === 0 && _activeWorkers === 0) {
+      toSpawn = 1;
+    } else {
+      console.log(`[MONITOR] RSS admission: capping spawn ${toSpawn}->${rssCap} (rss=${Math.round(rssNow / 1024 / 1024)}MB soft=${RSS_SOFT_LIMIT_MB}MB active=${_activeWorkers})`);
+      toSpawn = rssCap;
+    }
+  }
   if (toSpawn <= 0) return;
 
   console.log(`[MONITOR] Spawning ${toSpawn} worker(s) (active: ${_activeWorkers}, target: ${_targetConcurrency}, queue: ${scanQueue.length})`);
@@ -1757,6 +1819,7 @@ module.exports = {
   getActiveWorkers,
   terminateAllWorkers,
   computeWorkersToSpawn,
+  rssAdmissionCap,
   ensureWorkers,
   drainWorkers,
 

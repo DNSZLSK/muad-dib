@@ -224,7 +224,17 @@ async function runSafeInstallTests() {
 
   await asyncTest('SAFE-INSTALL: safeInstall blocks known malicious package', async () => {
     const origLog = console.log;
+    const cp = require('child_process');
+    const origSpawnSync = cp.spawnSync;
+    const origAppend = require('fs').appendFileSync;
     console.log = () => {};
+    // CRITICAL: mock spawnSync so a REAL `npm install loadash` can NEVER run. safeInstall only
+    // blocks loadash when the IOC DB has it loaded; when it doesn't (e.g. the 112MB iocs.json is
+    // absent in CI/test), it falls through to spawnSync('npm', ['install','loadash']) and
+    // contaminates the repo's OWN package.json. That unmocked install was the months-long
+    // "loadash keeps coming back" recurrence — this mock is the root-cause fix.
+    cp.spawnSync = () => ({ status: 1, stdout: '', stderr: 'mocked' });
+    require('fs').appendFileSync = () => {};
     try {
       const result = await safeInstall(['loadash']);
       if (result.blocked) {
@@ -234,6 +244,8 @@ async function runSafeInstallTests() {
       }
     } finally {
       console.log = origLog;
+      cp.spawnSync = origSpawnSync;
+      require('fs').appendFileSync = origAppend;
     }
   });
 

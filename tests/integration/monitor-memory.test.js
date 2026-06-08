@@ -217,8 +217,8 @@ async function runMonitorMemoryTests() {
     const testQueue = [];
 
     handleMemoryPressure(
-      MEMORY_PRESSURE_LEVELS.HIGH, 0.87,
-      testScanned, testDownloads, testQueue
+      MEMORY_PRESSURE_LEVELS.HIGH, 0.87, 0.87,
+      testScanned, testDownloads, testQueue, {}
     );
 
     assert(testScanned.size === 0, 'HIGH should clear recentlyScanned');
@@ -231,19 +231,19 @@ async function runMonitorMemoryTests() {
     const testQueue = [];
     // Fill queue with 2000 items
     for (let i = 0; i < 2000; i++) {
-      testQueue.push({ name: `pkg-${i}`, version: '1.0.0', ecosystem: 'npm' });
+      testQueue.push({ id: i });  // nameless: truncation test only — keeps the (now ledgered) evict off the real scan-ledger
     }
 
     handleMemoryPressure(
-      MEMORY_PRESSURE_LEVELS.EMERGENCY, 0.96,
-      testScanned, testDownloads, testQueue
+      MEMORY_PRESSURE_LEVELS.EMERGENCY, 0.96, 0.96,
+      testScanned, testDownloads, testQueue, {}
     );
 
     assert(testQueue.length === EMERGENCY_QUEUE_KEEP,
       `Queue should be truncated to ${EMERGENCY_QUEUE_KEEP}, got ${testQueue.length}`);
     // Verify the NEWEST items are kept (those at the end of the array)
-    assert(testQueue[0].name === `pkg-${2000 - EMERGENCY_QUEUE_KEEP}`,
-      `First remaining item should be pkg-${2000 - EMERGENCY_QUEUE_KEEP}, got ${testQueue[0].name}`);
+    assert(testQueue[0].id === 2000 - EMERGENCY_QUEUE_KEEP,
+      `First remaining item should be id ${2000 - EMERGENCY_QUEUE_KEEP}, got ${testQueue[0].id}`);
   });
 
   test('MEMORY CIRCUIT BREAKER: handleMemoryPressure EMERGENCY is no-op on small queue', () => {
@@ -253,8 +253,8 @@ async function runMonitorMemoryTests() {
     }
 
     handleMemoryPressure(
-      MEMORY_PRESSURE_LEVELS.EMERGENCY, 0.96,
-      new Set(), new Map(), testQueue
+      MEMORY_PRESSURE_LEVELS.EMERGENCY, 0.96, 0.96,
+      new Set(), new Map(), testQueue, {}
     );
 
     assert(testQueue.length === 100, `Small queue should not be truncated, got ${testQueue.length}`);
@@ -563,14 +563,14 @@ async function runMonitorMemoryTests() {
 
   test('P0b EMERGENCY: reclaim truncates to newest, clears caches, and runs the off-heap reclaim', () => {
     const q = [];
-    for (let i = 0; i < 2000; i++) q.push({ name: `pkg-${i}` });
+    for (let i = 0; i < 2000; i++) q.push({ id: i });  // nameless: truncation/summary test — no real ledger writes
     const rs = new Set(['a', 'b']);
     const dc = new Map([['x', 1]]);
-    const s = handleMemoryPressure(MEMORY_PRESSURE_LEVELS.EMERGENCY, 0.96, rs, dc, q);
+    const s = handleMemoryPressure(MEMORY_PRESSURE_LEVELS.EMERGENCY, 0.96, 0.96, rs, dc, q, {});
     // queue truncated to the NEWEST EMERGENCY_QUEUE_KEEP items; drop count reported in the summary
     assert(s.queueDropped === 2000 - EMERGENCY_QUEUE_KEEP, `queueDropped should be ${2000 - EMERGENCY_QUEUE_KEEP}, got ${s.queueDropped}`);
     assert(q.length === EMERGENCY_QUEUE_KEEP, `queue should hold ${EMERGENCY_QUEUE_KEEP}, got ${q.length}`);
-    assert(q[0].name === `pkg-${2000 - EMERGENCY_QUEUE_KEEP}`, `oldest should be dropped, first kept = ${q[0] && q[0].name}`);
+    assert(q[0].id === 2000 - EMERGENCY_QUEUE_KEEP, `oldest should be dropped, first kept id = ${q[0] && q[0].id}`);
     // caches cleared (EMERGENCY >= HIGH)
     assert(s.cachesCleared === true, 'EMERGENCY should clear caches');
     assert(rs.size === 0 && dc.size === 0, 'recentlyScanned + downloadsCache should be emptied');
@@ -589,7 +589,7 @@ async function runMonitorMemoryTests() {
     // alertedPackageRules is webhook.js's module Map; the breaker bounds it at HIGH too.
     alertedPackageRules.clear();
     for (let i = 0; i < 6000; i++) alertedPackageRules.set(`pkg-${i}`, new Set(['R']));
-    const s = handleMemoryPressure(MEMORY_PRESSURE_LEVELS.HIGH, 0.87, rs, dc, q);
+    const s = handleMemoryPressure(MEMORY_PRESSURE_LEVELS.HIGH, 0.87, 0.87, rs, dc, q, {});
     assert(s.cachesCleared === true, 'HIGH should clear caches');
     assert(rs.size === 0 && dc.size === 0, 'HIGH should empty recentlyScanned + downloadsCache');
     assert(alertedPackageRules.size === 0, `HIGH should bound alertedPackageRules, got ${alertedPackageRules.size}`);
@@ -636,6 +636,27 @@ async function runMonitorMemoryTests() {
     const n = terminateAllWorkers();
     assert(typeof n === 'number', 'terminateAllWorkers should return a number');
     assert(n === 0, `no live workers → 0 terminated, got ${n}`);
+  });
+
+  test('P0b EMERGENCY: keeps PROTECTED scans, drops oldest UNPROTECTED first (no protected starvation)', () => {
+    // Regression for the v2.10.88 raw splice(0,n): an IOC / burst / first-publish / ATO scan
+    // stuck among the OLDEST items must NOT be dropped before plain scans. Nameless {id} items
+    // so the (now protected-aware + ledgered) eviction writes nothing to the real scan-ledger.
+    const KEEP = EMERGENCY_QUEUE_KEEP;
+    const flags = ['isIOCMatch', 'isBurst', 'firstPublish', 'atoSignal', 'isATOBurstExtra'];
+    const q = [];
+    for (let i = 0; i < 50; i++) q.push({ id: `prot-${i}`, [flags[i % flags.length]]: true }); // 50 protected at the HEAD
+    for (let i = 0; i < KEEP; i++) q.push({ id: `plain-${i}` });                                  // KEEP+50 total → drop 50
+    const stats = {};
+    const s = handleMemoryPressure(MEMORY_PRESSURE_LEVELS.EMERGENCY, 0.15, 0.96, new Set(), new Map(), q, stats);
+    assert(q.length === KEEP, `truncated to ${KEEP}, got ${q.length}`);
+    assert(q.filter(x => typeof x.id === 'string' && x.id.startsWith('prot-')).length === 50,
+      'all 50 protected scans must survive the breaker (not starved by the oldest-first drop)');
+    assert(!q.some(x => x.id === 'plain-0'), 'oldest UNPROTECTED (plain-0) must be dropped first');
+    assert(q.some(x => x.id === `plain-${KEEP - 1}`), 'newest unprotected must survive');
+    assert(s.queueDropped === 50 && (s.queueDroppedProtected || 0) === 0,
+      `dropped 50 unprotected + 0 protected, got ${s.queueDropped}/${s.queueDroppedProtected}`);
+    assert(stats.queueEmergencyDrops === 50, `stats.queueEmergencyDrops should be 50, got ${stats.queueEmergencyDrops}`);
   });
 
   // Replaces two source-grep tests ("AbortSignal plumbed", "timeout maps to INCONCLUSIVE") with

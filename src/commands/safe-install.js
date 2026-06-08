@@ -1,6 +1,11 @@
 const fs = require('fs');
 const path = require('path');
-const { spawnSync } = require('child_process');
+// NB: keep the module object (cp.spawnSync), NOT a destructured `spawnSync`. Destructuring
+// captures the original reference at load time, which makes the function impossible to mock
+// from tests (`cp.spawnSync = ...` wouldn't be seen here) — that's exactly how the
+// safe-install test's mock silently failed and a real `npm install loadash` ran every test
+// run, re-contaminating package.json. Property access keeps it interceptable.
+const cp = require('child_process');
 const { loadCachedIOCs } = require('../ioc/updater.js');
 const { REHABILITATED_PACKAGES, NPM_PACKAGE_REGEX } = require('../shared/constants.js');
 
@@ -172,7 +177,7 @@ async function scanPackageRecursive(pkg, depth = 0, maxDepth = 3) {
   // Get the package info (uses spawnSync to avoid injection)
   let pkgInfo;
   try {
-    const result = spawnSync('npm', ['view', pkgName, '--json'], { encoding: 'utf8', shell: false });
+    const result = cp.spawnSync('npm', ['view', pkgName, '--json'], { encoding: 'utf8', shell: false });
     if (result.status !== 0 || !result.stdout) {
       if (depth === 0) console.log(`[!] Package ${pkgName} not found on npm`);
       return { safe: false, package: pkgName, reason: 'npm_unreachable', source: 'npm-registry', description: 'Package not found on npm registry', depth };
@@ -276,7 +281,7 @@ async function safeInstall(packages, options = {}) {
   if (isDev) npmArgs.push('--save-dev');
   if (isGlobal) npmArgs.push('-g');
 
-  const result = spawnSync('npm', npmArgs, { stdio: 'inherit', shell: false });
+  const result = cp.spawnSync('npm', npmArgs, { stdio: 'inherit', shell: false });
 
   if (result.status !== 0) {
     console.log('');

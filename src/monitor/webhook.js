@@ -16,6 +16,7 @@ const {
   DAILY_REPORTS_LOG_DIR,
   getParisDateString,
   getParisHour,
+  DAILY_REPORT_HOUR,
   loadScanStats,
   loadDetections,
   saveLastDailyReportDate,
@@ -60,7 +61,8 @@ const HIGH_INTENT_TYPES = new Set([
   'remote_code_load', 'obfuscation_detected'
 ]);
 
-const DAILY_REPORT_HOUR = 8; // 08:00 Paris time (Europe/Paris)
+// DAILY_REPORT_HOUR (=8) is imported from state.js (single source of truth) and
+// re-exported below for back-compat (monitor.js / tests import it via webhook).
 
 // --- Webhook alerting ---
 
@@ -1152,6 +1154,14 @@ function buildDailyReportEmbed(stats, dailyAlerts, ledgerRollup) {
  * @param {Map} downloadsCache - In-memory downloads cache (will be cleared)
  */
 async function sendDailyReport(stats, dailyAlerts, recentlyScanned, downloadsCache) {
+  // Dead-zone guard (defense in depth): never send or stamp before the 08:00 Paris window.
+  // The scheduled gate (isDailyReportDue) already excludes 00:00–07:59, but an ungated /
+  // manual / test caller firing at e.g. 00:43 would otherwise write-ahead the NEW day's date
+  // (below) and suppress that day's real report. This makes the early stamp impossible.
+  if (getParisHour() < DAILY_REPORT_HOUR) {
+    console.log(`[MONITOR] Daily report suppressed: before ${DAILY_REPORT_HOUR}:00 Paris (hour=${getParisHour()})`);
+    return;
+  }
   // Crash-safe headline: a restart-storm around report time can zero the in-memory
   // counter (the monitor OOM-restarts ~10×/day). Floor scanned/clean/suspect at the
   // durable scan-stats delta so we never publish "5" when ~44k were really scanned.
@@ -1171,6 +1181,10 @@ async function sendDailyReport(stats, dailyAlerts, recentlyScanned, downloadsCac
   // Persist the monotonic scan-stats counter as the baseline for the NEXT report's
   // delta. Written before the (now last) webhook so a mid-send kill can't double-count.
   saveLastDailyReportDate(today, captureScanStatsBaseline());
+  // Observability: the success path previously logged nothing, which made the late-fire bug
+  // invisible in the journal. Log the stamped date + the actual Paris hour (an on-time 08:00
+  // fire vs a catch-up at hour 14 are now distinguishable) + the headline count.
+  console.log(`[MONITOR] Daily report firing for ${today} (hour=${getParisHour()} Paris, scanned=${stats.scanned})`);
 
   // Phase 0b: compute the ledger rollup ONCE so the embed shows exactly the numbers
   // we persist (no double-scan, no drift between Discord and the on-disk metrics).
@@ -1365,16 +1379,23 @@ async function sendReportNow(stats) {
     return { sent: false, message: `Webhook failed: ${err.message}` };
   }
 
-  // Update lastDailyReportDate on disk
-  const today = getParisDateString();
-  const stateRaw = loadStateRaw();
-  const state = {
-    npmLastPackage: stateRaw.npmLastPackage || '',
-    pypiLastPackage: stateRaw.pypiLastPackage || ''
-  };
-  stats.lastDailyReportDate = today;
-  saveState(state, stats);
-  saveLastDailyReportDate(today);
+  // Update lastDailyReportDate on disk — but ONLY at/after 08:00 Paris. A manual report run
+  // before 08:00 is a deliberate operator override (we still SEND it), but it must NOT stamp
+  // today's date: hasReportBeenSentToday() keys off the Paris calendar date, so an early
+  // stamp would suppress that day's scheduled 08:00 report (the exact failure we're fixing).
+  if (getParisHour() >= DAILY_REPORT_HOUR) {
+    const today = getParisDateString();
+    const stateRaw = loadStateRaw();
+    const state = {
+      npmLastPackage: stateRaw.npmLastPackage || '',
+      pypiLastPackage: stateRaw.pypiLastPackage || ''
+    };
+    stats.lastDailyReportDate = today;
+    saveState(state, stats);
+    saveLastDailyReportDate(today);
+  } else {
+    console.log(`[MONITOR] Manual report sent; not stamping (before ${DAILY_REPORT_HOUR}:00 Paris — the scheduled report will still fire today)`);
+  }
 
   return { sent: true, message: 'Daily report sent' };
 }

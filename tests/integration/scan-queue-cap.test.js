@@ -10,7 +10,7 @@
  */
 
 const { test, assert } = require('../test-utils');
-const { enqueueScan, MAX_SCAN_QUEUE } = require('../../src/monitor/scan-queue.js');
+const { enqueueScan, evictFromScanQueueBulk, MAX_SCAN_QUEUE } = require('../../src/monitor/scan-queue.js');
 
 async function runScanQueueCapTests() {
   console.log('\n=== SCAN QUEUE HARD-CAP TESTS (P0c) ===\n');
@@ -103,6 +103,60 @@ async function runScanQueueCapTests() {
       enqueueScan(q, { id: 5 }, stats, 5);
       assert(q[0].id === 1 && q[q.length - 1].id === 5,
         `FIFO preserved, got front=${q[0].id} back=${q[q.length - 1].id}`);
+    });
+
+    // ── Phase 2b retrofit: protected-aware BULK eviction (the daemon EMERGENCY path) ──
+    // Behavioral: drive the real evictFromScanQueueBulk with an injected ledger sink (no file
+    // I/O) and assert queue state + ledger rows. This is the single-source-of-truth the daemon
+    // memory breaker now calls instead of the old raw splice(0,n).
+
+    test('bulk-evict: drops oldest UNPROTECTED first, keeps protected + newest, ledgers each drop', () => {
+      const led = [];
+      const q = [{ name: 'ioc', isIOCMatch: true }, { name: 'ato', atoSignal: true }];
+      for (let i = 0; i < 6; i++) q.push({ name: `p${i}` });   // total 8 → keep 4 → drop 4
+      const r = evictFromScanQueueBulk(q, 4, 'mem_emergency', (e) => led.push(e));
+      assert(q.length === 4, `kept 4, got ${q.length}`);
+      assert(r.dropped === 4 && r.droppedProtected === 0, `dropped 4/0, got ${r.dropped}/${r.droppedProtected}`);
+      assert(q.map(x => x.name).join(',') === 'ioc,ato,p4,p5',
+        `protected head + newest unprotected survive in order, got ${q.map(x => x.name).join(',')}`);
+      assert(led.length === 4 && led.every(e => e.outcome === 'dropped' && e.source === 'mem_emergency'),
+        'every drop ledgered dropped/mem_emergency');
+      assert(led.map(e => e.name).sort().join(',') === 'p0,p1,p2,p3', `ledgered the 4 oldest unprotected, got ${led.map(e => e.name)}`);
+    });
+
+    test('bulk-evict: FALLBACK drops oldest PROTECTED (distinct source) only when keep < protected count', () => {
+      const led = [];
+      const q = [];
+      for (let i = 0; i < 5; i++) q.push({ name: `ioc${i}`, isIOCMatch: true });  // all 5 protected
+      const r = evictFromScanQueueBulk(q, 2, 'mem_emergency', (e) => led.push(e));
+      assert(q.length === 2 && q.map(x => x.name).join(',') === 'ioc3,ioc4', `newest 2 protected kept, got ${q.map(x => x.name)}`);
+      assert(r.dropped === 3 && r.droppedProtected === 3, `dropped 3/3, got ${r.dropped}/${r.droppedProtected}`);
+      assert(led.length === 3 && led.every(e => e.source === 'mem_emergency_protected'),
+        'protected drops carry the _protected source so the rare case stays visible in the rollup');
+    });
+
+    test('bulk-evict: no protected items → plain FIFO drop-oldest (parity with the old splice)', () => {
+      const led = [];
+      const q = [];
+      for (let i = 0; i < 10; i++) q.push({ name: `p${i}` });
+      const r = evictFromScanQueueBulk(q, 4, 'mem_emergency', (e) => led.push(e));
+      assert(q.map(x => x.name).join(',') === 'p6,p7,p8,p9', `newest 4 kept in order, got ${q.map(x => x.name)}`);
+      assert(r.dropped === 6 && r.droppedProtected === 0 && led.length === 6, 'dropped 6 oldest, none protected, all ledgered');
+    });
+
+    test('bulk-evict: no-op when the queue is already at/below target', () => {
+      const led = [];
+      const q = [{ name: 'a' }, { name: 'b' }];
+      const r = evictFromScanQueueBulk(q, 5, 'mem_emergency', (e) => led.push(e));
+      assert(q.length === 2 && r.dropped === 0 && led.length === 0, 'no eviction at/below target');
+    });
+
+    test('bulk-evict: nameless items are dropped but skip the ledger (no crash, no phantom rows)', () => {
+      const led = [];
+      const q = [{ id: 0 }, { id: 1 }, { name: 'n' }, { id: 2 }];   // keep 1 → drop the 3 oldest
+      const r = evictFromScanQueueBulk(q, 1, 'mem_emergency', (e) => led.push(e));
+      assert(q.length === 1 && r.dropped === 3, `truncated to 1, got ${q.length}`);
+      assert(led.length === 1 && led[0].name === 'n', `only the named drop is ledgered, got ${led.length}`);
     });
   } finally {
     console.warn = origWarn;

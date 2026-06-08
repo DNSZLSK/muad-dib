@@ -82,4 +82,71 @@ function enqueueScan(scanQueue, item, stats, max = MAX_SCAN_QUEUE) {
   return dropped;
 }
 
-module.exports = { enqueueScan, MAX_SCAN_QUEUE };
+/**
+ * Bulk-evict the scan queue down to `targetKeep`, honoring the SAME protection predicate
+ * as enqueueScan and ledgering EVERY dropped item — the single-source-of-truth eviction
+ * the daemon's EMERGENCY memory breaker must use instead of a raw `splice(0, n)`.
+ *
+ * Selection: drop the oldest UNPROTECTED items first; only dip into protected items
+ * (oldest-first) if there aren't enough unprotected ones to reach the target. This keeps
+ * IOC-match / burst / first-publish / ATO scans alive through a memory emergency, exactly
+ * like the per-item cap path — closing the gap where the v2.10.88 circuit breaker silently
+ * dropped protected scans (CLAUDE.md "ne jamais perdre de scan" / "no silent caps").
+ *
+ * In-place compaction (write-pointer, O(n), preserves insertion order, no giant spread) so
+ * the daemon (which holds the same array reference) sees the mutation. Best-effort ledger;
+ * never throws. `ledgerFn` is injectable for tests; defaults to state.appendScanLedger.
+ *
+ * @returns {{dropped:number, droppedProtected:number}}
+ */
+function evictFromScanQueueBulk(scanQueue, targetKeep, source = 'bulk_evict', ledgerFn = null) {
+  const before = scanQueue.length;
+  const keep = Math.max(0, targetKeep | 0);
+  if (before <= keep) return { dropped: 0, droppedProtected: 0 };
+  const toDrop = before - keep;
+
+  // Victim set: oldest unprotected first, then (only if short) oldest protected.
+  const dropSet = new Set();
+  for (let i = 0; i < before && dropSet.size < toDrop; i++) {
+    if (!_isProtected(scanQueue[i])) dropSet.add(i);
+  }
+  let droppedProtected = 0;
+  if (dropSet.size < toDrop) {
+    // Not enough unprotected items: every unprotected one is already marked, so the
+    // remaining oldest-first items are protected — drop them as a last resort.
+    for (let i = 0; i < before && dropSet.size < toDrop; i++) {
+      if (!dropSet.has(i)) { dropSet.add(i); droppedProtected++; }
+    }
+  }
+
+  // Resolve the ledger sink once (per-call require would be 500+ lookups under emergency).
+  let appendLedger = ledgerFn;
+  if (!appendLedger) {
+    try { appendLedger = require('./state.js').appendScanLedger; } catch { appendLedger = null; }
+  }
+
+  // Compact survivors in place, ledgering each evicted item with an identity-preserving
+  // source (protected drops get a distinct suffix so the rare case stays visible in the rollup).
+  let w = 0;
+  for (let r = 0; r < before; r++) {
+    if (dropSet.has(r)) {
+      const item = scanQueue[r];
+      if (appendLedger && item && item.name) {
+        try {
+          appendLedger({
+            name: item.name, version: item.version, ecosystem: item.ecosystem,
+            outcome: 'dropped',
+            source: _isProtected(item) ? `${source}_protected` : source
+          });
+        } catch { /* ledger is best-effort — must never break the breaker */ }
+      }
+    } else {
+      scanQueue[w++] = scanQueue[r];
+    }
+  }
+  scanQueue.length = w;
+
+  return { dropped: toDrop, droppedProtected };
+}
+
+module.exports = { enqueueScan, evictFromScanQueueBulk, isProtected: _isProtected, MAX_SCAN_QUEUE };
