@@ -1035,16 +1035,18 @@ function scoreFindings(report) {
 
 // ── Network report (detailed, colored) ──
 
-function generateNetworkReport(report) {
+function generateNetworkReport(report, useColor = process.stdout.isTTY) {
   const lines = [];
-  const RED = '\x1b[31m';
-  const YELLOW = '\x1b[33m';
-  const GREEN = '\x1b[32m';
-  const CYAN = '\x1b[36m';
-  const MAGENTA = '\x1b[35m';
-  const BOLD = '\x1b[1m';
-  const DIM = '\x1b[2m';
-  const RESET = '\x1b[0m';
+  // Gate ANSI on TTY so piping `sandbox-report` to a file yields clean text
+  // (was unconditionally colored — escape codes leaked into redirected output).
+  const RED = useColor ? '\x1b[31m' : '';
+  const YELLOW = useColor ? '\x1b[33m' : '';
+  const GREEN = useColor ? '\x1b[32m' : '';
+  const CYAN = useColor ? '\x1b[36m' : '';
+  const MAGENTA = useColor ? '\x1b[35m' : '';
+  const BOLD = useColor ? '\x1b[1m' : '';
+  const DIM = useColor ? '\x1b[2m' : '';
+  const RESET = useColor ? '\x1b[0m' : '';
 
   lines.push('');
   lines.push(`${BOLD}${MAGENTA}╔══════════════════════════════════════════════════╗${RESET}`);

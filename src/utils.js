@@ -392,6 +392,62 @@ function debugLog(...args) {
   if (process.env.MUADDIB_DEBUG) console.error('[DEBUG]', ...args);
 }
 
+// eslint-disable-next-line no-control-regex -- ESC (\x1b) is required to strip ANSI color sequences before measuring visible width
+const _ANSI_RE = /\x1b\[[0-9;]*m/g;
+
+/**
+ * Draws an aligned box-drawing banner around the given content line(s).
+ * Width auto-fits the widest VISIBLE line (ANSI stripped before measuring),
+ * so the right border is always straight — replacing the hand-padded boxes
+ * that drifted out of alignment. Returns the banner as a string (no leading or
+ * trailing blank lines — callers add spacing as needed).
+ *
+ * @param {string[]|string} lines - content line(s)
+ * @returns {string}
+ */
+function banner(lines) {
+  const content = Array.isArray(lines) ? lines : [String(lines)];
+  const visibleLen = (s) => String(s).replace(_ANSI_RE, '').length;
+  const PAD = 1; // spaces of padding on each side
+  const inner = content.reduce((max, l) => Math.max(max, visibleLen(l)), 0) + PAD * 2;
+  const top = '╔' + '═'.repeat(inner) + '╗';
+  const bottom = '╚' + '═'.repeat(inner) + '╝';
+  const body = content.map((l) => {
+    const trailing = inner - PAD - visibleLen(l);
+    return '║' + ' '.repeat(PAD) + l + ' '.repeat(Math.max(0, trailing)) + '║';
+  });
+  return [top, ...body, bottom].join('\n');
+}
+
+/**
+ * True when an error represents a user-initiated prompt cancellation — Ctrl-C
+ * inside an @inquirer/prompts prompt, which throws an ExitPromptError whose
+ * message contains "force closed the prompt with SIGINT". Lets the CLI exit
+ * cleanly (code 130) instead of dumping an [ERROR] line or a stack trace.
+ *
+ * @param {*} err
+ * @returns {boolean}
+ */
+function isPromptCancellation(err) {
+  if (!err) return false;
+  if (err.name === 'ExitPromptError') return true;
+  return /SIGINT|force closed the prompt/i.test(err.message || '');
+}
+
+/**
+ * Renders a fixed-width 20-cell [██░░] bar for a 0–100 risk score. Clamps and
+ * guards against undefined / NaN / out-of-range so the CLI never throws a
+ * RangeError from String.prototype.repeat on a malformed score.
+ *
+ * @param {number} score
+ * @returns {string} a 20-character bar
+ */
+function renderScoreBar(score) {
+  const s = Number.isFinite(score) ? Math.max(0, Math.min(100, score)) : 0;
+  const filled = Math.floor(s / 5);
+  return '█'.repeat(filled) + '░'.repeat(20 - filled);
+}
+
 module.exports = {
   EXCLUDED_DIRS,
   MAX_SCAN_FILES,
@@ -409,5 +465,8 @@ module.exports = {
   getExtraExcludes,
   forEachSafeFile,
   listInstalledPackages,
-  debugLog
+  debugLog,
+  banner,
+  isPromptCancellation,
+  renderScoreBar
 };

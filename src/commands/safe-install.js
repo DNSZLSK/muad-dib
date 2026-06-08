@@ -8,6 +8,7 @@ const path = require('path');
 const cp = require('child_process');
 const { loadCachedIOCs } = require('../ioc/updater.js');
 const { REHABILITATED_PACKAGES, NPM_PACKAGE_REGEX } = require('../shared/constants.js');
+const { banner } = require('../utils.js');
 
 /**
  * Validates that a package name is safe (no command injection)
@@ -212,12 +213,10 @@ async function scanPackageRecursive(pkg, depth = 0, maxDepth = 3) {
 async function safeInstall(packages, options = {}) {
   const { isDev, isGlobal, force } = options;
   
-  console.log(`
-╔══════════════════════════════════════════╗
-║   MUAD'DIB Safe Install                  ║
-║   Scanning packages + dependencies...    ║
-╚══════════════════════════════════════════╝
-`);
+  console.log('\n' + banner([
+    "MUAD'DIB Safe Install",
+    'Scanning packages + dependencies...'
+  ]) + '\n');
 
   // Reset the cache for each install
   scannedPackages.clear();
@@ -226,11 +225,7 @@ async function safeInstall(packages, options = {}) {
     const result = await scanPackageRecursive(pkg);
     
     if (!result.safe) {
-      console.log(`
-╔══════════════════════════════════════════╗
-║   [!] MALICIOUS PACKAGE DETECTED         ║
-╚══════════════════════════════════════════╝
-`);
+      console.log('\n' + banner(['[!] MALICIOUS PACKAGE DETECTED']) + '\n');
       if (result.depth > 0) {
         console.log(`Requested package: ${pkg}`);
         console.log(`Malicious dependency: ${result.package} (depth: ${result.depth})`);
@@ -245,11 +240,11 @@ async function safeInstall(packages, options = {}) {
         console.log('[!] Installation BLOCKED.');
         return { blocked: true, package: result.package, threats: [{ type: 'known_malicious', severity: 'CRITICAL', message: result.description }] };
       } else {
-        console.log('╔══════════════════════════════════════════╗');
-        console.log('║   [!!!] WARNING: FORCE INSTALL ACTIVE    ║');
-        console.log('║   Known malicious package detected!       ║');
-        console.log('║   Installing despite security threats.    ║');
-        console.log('╚══════════════════════════════════════════╝');
+        console.log(banner([
+          '[!!!] WARNING: FORCE INSTALL ACTIVE',
+          'Known malicious package detected!',
+          'Installing despite security threats.'
+        ]));
         console.log('[AUDIT] Force-install override for malicious package: ' + result.package);
 
         // SFI-004: Write audit log for force-install overrides

@@ -7,9 +7,10 @@ const AdmZip = require('adm-zip');
 const IOC_FILE = path.join(__dirname, 'data/iocs.json');
 const COMPACT_IOC_FILE = path.join(__dirname, 'data/iocs-compact.json');
 const HOME_IOC_FILE = path.join(os.homedir(), '.muaddib', 'data', 'iocs.json');
-const { generateCompactIOCs, NEVER_WILDCARD } = require('./updater.js');
+const { generateCompactIOCs, NEVER_WILDCARD, expandCompactIOCs } = require('./updater.js');
 const { Spinner } = require('../utils.js');
 const { NPM_PACKAGE_REGEX } = require('../shared/constants.js');
+const { version: PKG_VERSION } = require('../../package.json');
 
 // Version format validation (semver-like + wildcard)
 // Permissive version validator — accepts:
@@ -43,6 +44,8 @@ const VERSION_RE = { test: isValidVersion };
 let _noVersionSkipCount = 0;
 let _invalidVersionSkipCount = 0;
 let _invalidVersionSamples = [];  // first 3 samples for context
+let _invalidNameSkipCount = 0;
+let _invalidNameSamples = [];  // first 3 samples for context
 
 /**
  * Validate an IOC package entry before insertion.
@@ -53,14 +56,18 @@ function validateIOCEntry(pkgName, version, ecosystem) {
   // npm: validate with NPM_PACKAGE_REGEX
   if (ecosystem === 'npm' || !ecosystem) {
     if (!NPM_PACKAGE_REGEX.test(pkgName)) {
-      console.warn(`[WARN] Invalid ${ecosystem || 'npm'} package name skipped: ${pkgName}`);
+      // Aggregated counter (summary emitted by runScraper) — was a per-line
+      // console.warn that spammed 100+ lines on feeds carrying non-spec names.
+      _invalidNameSkipCount++;
+      if (_invalidNameSamples.length < 3) _invalidNameSamples.push(pkgName);
       return false;
     }
   }
   // PyPI: basic check — no path traversal, no slashes
   if (ecosystem === 'pypi') {
     if (/[/\\]|\.\./.test(pkgName)) {
-      console.warn(`[WARN] Invalid PyPI package name skipped: ${pkgName}`);
+      _invalidNameSkipCount++;
+      if (_invalidNameSamples.length < 3) _invalidNameSamples.push(pkgName);
       return false;
     }
   }
@@ -955,14 +962,16 @@ async function scrapeGitHubAdvisory() {
 // ============================================
 async function runScraper() {
   console.log('\n' + '='.repeat(60));
-  console.log('  MUAD\'DIB IOC Scraper v4.1');
-  console.log('  OSV + OSSF + GenSecAI + DataDog + Aikido + OSM');
+  console.log('  MUAD\'DIB IOC Scraper v' + PKG_VERSION);
+  console.log('  OSV + OSSF + GitHub Advisory + GenSecAI + DataDog + Aikido + OSM');
   console.log('='.repeat(60) + '\n');
 
   // Reset aggregated warning counters
   _noVersionSkipCount = 0;
   _invalidVersionSkipCount = 0;
   _invalidVersionSamples = [];
+  _invalidNameSkipCount = 0;
+  _invalidNameSamples = [];
 
   // Create data directory if needed
   const dataDir = path.dirname(IOC_FILE);
@@ -997,11 +1006,28 @@ async function runScraper() {
     }
   }
 
+  // Fresh-install fallback: the full iocs.json is gitignored / not shipped in the
+  // npm package, but the compact baseline IS. Seed from it (the same path that
+  // `muaddib update` uses) so a first scrape augments the shipped baseline instead
+  // of appearing to start from zero and re-downloading everything.
+  let seededFromCompact = false;
+  if (existingIOCs.packages.length === 0 && fs.existsSync(COMPACT_IOC_FILE)) {
+    try {
+      const compactData = JSON.parse(fs.readFileSync(COMPACT_IOC_FILE, 'utf8'));
+      existingIOCs = expandCompactIOCs(compactData);
+      if (!existingIOCs.pypi_packages) existingIOCs.pypi_packages = [];
+      seededFromCompact = true;
+    } catch {
+      console.log('[WARN] Compact IOC baseline unreadable, starting fresh');
+    }
+  }
+
   const initialCount = existingIOCs.packages.length;
   const initialPyPICount = existingIOCs.pypi_packages.length;
   const initialHashCount = existingIOCs.hashes ? existingIOCs.hashes.length : 0;
 
-  console.log('[INFO] Existing IOCs: ' + initialCount + ' packages, ' + initialHashCount + ' hashes\n');
+  const baselineLabel = seededFromCompact ? 'Baseline IOCs loaded (shipped compact)' : 'Existing IOCs';
+  console.log('[INFO] ' + baselineLabel + ': ' + initialCount + ' packages, ' + initialHashCount + ' hashes\n');
 
   // Phase 1: OSV data dump first (bulk, primary source)
   // This returns knownIds so OSSF can skip already-known entries
@@ -1036,6 +1062,12 @@ async function runScraper() {
       ? ' (samples: ' + _invalidVersionSamples.join(', ') + ')'
       : '';
     console.log('[SCRAPER] WARN: ' + _invalidVersionSkipCount + ' entries skipped (malformed version)' + samples);
+  }
+  if (_invalidNameSkipCount > 0) {
+    const nameSamples = _invalidNameSamples.length > 0
+      ? ' (samples: ' + _invalidNameSamples.join(', ') + ')'
+      : '';
+    console.log('[SCRAPER] WARN: ' + _invalidNameSkipCount + ' invalid package names skipped' + nameSamples);
   }
 
   // Merge all scraped packages
@@ -1297,12 +1329,13 @@ async function runScraper() {
     console.log('     - ' + source + ': ' + count);
   }
 
-  // Target check
+  // Sanity check: a drop vs the previously-loaded baseline is a real signal of a
+  // feed outage or a corrupted merge — surface that instead of a meaningless target.
   const total = existingIOCs.packages.length;
-  if (total >= 5000) {
-    console.log('\n  [OK] Target reached: ' + total + ' IOCs (>= 5000)');
+  if (total < initialCount) {
+    console.log('\n  [WARN] IOC count decreased: ' + total + ' (was ' + initialCount + ') — possible source outage');
   } else {
-    console.log('\n  [WARN] Target NOT reached: ' + total + ' IOCs (< 5000)');
+    console.log('\n  [OK] IOC database: ' + total + ' npm IOCs');
   }
 
   console.log('\n');
@@ -1606,6 +1639,8 @@ async function queryOSVBatch(packageNames) {
 // Test helpers for aggregated warning counters
 function getNoVersionSkipCount() { return _noVersionSkipCount; }
 function resetNoVersionSkipCount() { _noVersionSkipCount = 0; }
+function getInvalidNameSkipCount() { return _invalidNameSkipCount; }
+function resetInvalidNameSkipCount() { _invalidNameSkipCount = 0; _invalidNameSamples = []; }
 
 /**
  * Source-aware confidence: a package reported by N distinct feeds is more
@@ -1643,6 +1678,7 @@ module.exports = {
   createFreshness, isAllowedRedirect,
   validateIOCEntry,
   getNoVersionSkipCount, resetNoVersionSkipCount,
+  getInvalidNameSkipCount, resetInvalidNameSkipCount,
   CONFIDENCE_ORDER, ALLOWED_REDIRECT_DOMAINS,
   MAX_ENTRY_UNCOMPRESSED, MAX_TOTAL_UNCOMPRESSED
 };

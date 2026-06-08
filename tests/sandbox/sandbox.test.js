@@ -1056,6 +1056,18 @@ async function runSandboxTests() {
     assert(output.includes('SSH key'), 'Should identify SSH key in report');
   });
 
+  test('SANDBOX-COV: generateNetworkReport gates ANSI color on the useColor flag', () => {
+    const report = {
+      package: 'test-pkg', timestamp: '2025-01-01T00:00:00Z', mode: 'permissive', duration_ms: 1,
+      network: { dns_resolutions: [], http_requests: [], tls_connections: [], http_connections: [], blocked_connections: [], http_bodies: [] }
+    };
+    const plain = generateNetworkReport(report, false);
+    assert(!plain.includes('\x1b['), 'No ANSI escapes when useColor=false (clean piped output)');
+    assert(plain.includes('test-pkg'), 'Content still present in plain mode');
+    const colored = generateNetworkReport(report, true);
+    assert(colored.includes('\x1b['), 'ANSI escapes present when useColor=true');
+  });
+
   // ============================================
   // LIBFAKETIME INTEGRATION TESTS (v2.10.7)
   // ============================================
