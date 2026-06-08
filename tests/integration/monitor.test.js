@@ -7439,8 +7439,8 @@ async function runMonitorTests() {
     const result = selectMostRecentVersion(packument);
     assert(result.version === '2.0.0', `expected 2.0.0, got ${result.version}`);
     assert(result.latestTagVersion === '2.0.0', 'latestTagVersion should equal version');
-    assert(result.recentVersions.length === 0,
-      `no other versions within 24h window, got ${result.recentVersions.length} extras`);
+    assert(result.recentVersions.length === 0 && result.droppedBurstVersions.length === 0,
+      `no extras and no burst drops in-window, got ${result.recentVersions.length}/${result.droppedBurstVersions.length}`);
   });
 
   test('ATO: burst publish — 3 versions in 1 hour, returns 2 extras', () => {
@@ -7484,7 +7484,7 @@ async function runMonitorTests() {
     }
     const packument = { 'dist-tags': { latest: '1.0.9' }, versions, time };
     const result = selectMostRecentVersion(packument, { maxRecent: 3 });
-    assert(result.version === '1.0.9', `expected 1.0.9, got ${result.version}`);
+    assert(result.version === '1.0.9' && result.droppedBurstVersions.length === 6, `expected 1.0.9 + 6 burst drops, got ${result.version}/${result.droppedBurstVersions.length}`);
     assert(result.recentVersions.length === 3,
       `expected cap of 3 extras, got ${result.recentVersions.length}`);
   });
@@ -10073,6 +10073,82 @@ async function runMonitorTests() {
     const pf2 = pypi.embeds[0].fields.find(f => f.name === 'Package');
     assert(pf2.value.includes('https://pypi.org/project/miasma-pkg/'), 'pypi link');
   });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // DAILY REPORT: unified gate + dead-zone guard + RSS-aware worker admission
+  // (2026-06-08 fix). The gate was duplicated and divergent (daemon.js `hour !== 8`,
+  // queue.js `parisHour < 8`); unified into ONE canonical isDailyReportDue in state.js.
+  // A fire during the 00:00–07:59 Paris "dead zone" stamps the new day's date before its
+  // 08:00 window and permanently suppresses that day's real report. Tests call the real
+  // functions with a faked clock (behavioral, not source-grep).
+  // ─────────────────────────────────────────────────────────────────────────────
+  {
+    const stateMod = require('../../src/monitor/state.js');
+    const RealDate = Date;
+    const fakeClock = (iso) => {
+      class F extends RealDate {
+        constructor(...a) { if (!a.length) { super(iso); } else { super(...a); } }
+        static now() { return new RealDate(iso).getTime(); }
+      }
+      global.Date = F;
+    };
+
+    test('MONITOR: isDailyReportDue — NEVER due in the 00:00–07:59 Paris dead zone (core fix)', () => {
+      try {
+        fakeClock('2026-06-07T22:43:00Z'); // 00:43 Paris (hour 0) — the exact failure instant
+        assert(stateMod.getParisHour() === 0, 'precondition: faked hour 0, got ' + stateMod.getParisHour());
+        assert(stateMod.isDailyReportDue({ lastDailyReportDate: '2099-01-01' }) === false, 'hour 0 must never be due');
+        fakeClock('2026-06-08T05:30:00Z'); // 07:30 Paris (hour 7) — dead-zone upper edge
+        assert(stateMod.isDailyReportDue({ lastDailyReportDate: '2099-01-01' }) === false, 'hour 7 must never be due');
+      } finally { global.Date = RealDate; }
+    });
+
+    test('MONITOR: isDailyReportDue — catch-up fires at/after 08:00 when not yet sent (no lost day)', () => {
+      try {
+        // Far-future date so the on-disk last-daily-report stamp can never match "today".
+        fakeClock('2030-06-08T06:30:00Z'); // 08:30 Paris (hour 8)
+        assert(stateMod.isDailyReportDue({ lastDailyReportDate: '2000-01-01' }) === true, 'hour 8 not-sent must be due');
+        fakeClock('2030-06-08T12:00:00Z'); // 14:00 Paris (hour 14) — a MISSED 08:00 must still fire later
+        assert(stateMod.isDailyReportDue({ lastDailyReportDate: '2000-01-01' }) === true, 'hour 14 not-sent must catch up (old !==8 gate lost the day)');
+      } finally { global.Date = RealDate; }
+    });
+
+    test('MONITOR: isDailyReportDue — not due when already sent today (post-08:00)', () => {
+      try {
+        fakeClock('2030-06-08T12:00:00Z'); // 14:00 Paris
+        const today = stateMod.getParisDateString();
+        assert(stateMod.isDailyReportDue({ lastDailyReportDate: today }) === false, 'already-sent must not re-fire');
+      } finally { global.Date = RealDate; }
+    });
+
+    await asyncTest('MONITOR: sendDailyReport — dead-zone guard refuses to send/stamp before 08:00 Paris', async () => {
+      const origDate = stats.lastDailyReportDate;
+      const origScanned = stats.scanned;
+      const origEnv = process.env.MUADDIB_WEBHOOK_URL;
+      try {
+        fakeClock('2026-06-07T23:30:00Z'); // 01:30 Paris (hour 1) — dead zone
+        delete process.env.MUADDIB_WEBHOOK_URL; // belt-and-suspenders: no real webhook
+        stats.scanned = 5;                       // would otherwise pass the 0-scanned skip
+        stats.lastDailyReportDate = '2099-01-01';
+        await sendDailyReport();                  // wrapper → webhook.sendDailyReport(monitor stats)
+        assert(stats.lastDailyReportDate === '2099-01-01', 'dead-zone fire must NOT stamp today, got ' + stats.lastDailyReportDate);
+      } finally {
+        global.Date = RealDate;
+        stats.lastDailyReportDate = origDate;
+        stats.scanned = origScanned;
+        if (origEnv !== undefined) process.env.MUADDIB_WEBHOOK_URL = origEnv; else delete process.env.MUADDIB_WEBHOOK_URL;
+      }
+    });
+
+    test('MONITOR: rssAdmissionCap — bounds NEW worker spawns by RSS headroom (OOM durable fix)', () => {
+      const { rssAdmissionCap } = require('../../src/monitor/queue.js');
+      const MB = 1024 * 1024;
+      assert(rssAdmissionCap(2000 * MB, 6800, 600) === 8, 'low RSS allows headroom/est workers');
+      assert(rssAdmissionCap(5000 * MB, 6800, 600) === 3, 'mid RSS = floor(1800/600)=3');
+      assert(rssAdmissionCap(6800 * MB, 6800, 600) === 0, 'at the soft limit = 0 new spawns');
+      assert(rssAdmissionCap(9000 * MB, 6800, 600) === 0, 'over the limit = 0 (never negative)');
+    });
+  }
 }
 
 module.exports = { runMonitorTests };

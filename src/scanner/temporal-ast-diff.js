@@ -71,6 +71,11 @@ function _fetchVersionMetadataHttp(packageName, version) {
         res.resume();
         return reject(new Error(`Version ${version} not found for package ${packageName}`));
       }
+      if (res.statusCode === 429) {
+        res.resume();
+        try { require('../shared/http-limiter.js').signal429(); } catch { /* limiter best-effort */ }
+        return reject(new Error(`Registry rate limited (HTTP 429) for ${packageName}@${version}`));
+      }
       if (res.statusCode < 200 || res.statusCode >= 300) {
         res.resume();
         return reject(new Error(`Registry returned HTTP ${res.statusCode} for ${packageName}@${version}`));

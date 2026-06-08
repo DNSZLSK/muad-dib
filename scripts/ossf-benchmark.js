@@ -31,6 +31,11 @@ const { execSync } = require('child_process');
 
 const ROOT = path.join(__dirname, '..');
 const RESULTS_FILE = path.join(ROOT, 'datasets', 'real-world', 'ossf-benchmark-results.json');
+// Append-only progress log written as each package is scanned (crash-recovery artifact).
+const PROGRESS_JSONL = RESULTS_FILE.replace(/\.json$/, '.progress.jsonl');
+// Runaway guard on the OSV all.zip download (bounded — the daemon caps HTTP at 64MB; this
+// offline tool had none, a slow-burn OOM as the OSV dump grows year over year).
+const MAX_OSV_ZIP_BYTES = 500 * 1024 * 1024;
 const CACHE_DIR = path.join(ROOT, '.muaddib-cache', 'ossf-tarballs');
 const PACK_TIMEOUT_MS = 30000;
 const SCAN_TIMEOUT_MS = 30000;
@@ -90,6 +95,13 @@ function pkgToCacheName(name, version) {
   return (name + '@' + version).replace(/\//g, '_').replace(/@/g, '_');
 }
 
+// Crash-resilience (CLAUDE.md §3): append each entry's outcome to a JSONL as it completes,
+// so a crash/OOM/timeout at package N/5000 keeps the first N results instead of losing the
+// whole multi-hour run (the in-memory saveResults only writes once, at the very end).
+function appendProgress(entry) {
+  try { fs.appendFileSync(PROGRESS_JSONL, JSON.stringify(entry) + '\n'); } catch { /* best-effort */ }
+}
+
 // --- Step 1: Fetch OSV npm MAL-* index via zip dump ---
 async function fetchOSSFIndex() {
   console.log('\n[1/5] Fetching OSV npm malware index...');
@@ -112,6 +124,7 @@ async function fetchOSSFIndex() {
           res2.on('data', function(chunk) {
             chunks.push(chunk);
             totalBytes += chunk.length;
+            if (totalBytes > MAX_OSV_ZIP_BYTES) { res2.destroy(); return reject(new Error('OSV zip exceeded ' + (MAX_OSV_ZIP_BYTES / 1024 / 1024) + 'MB cap')); }
             if (totalBytes % (10 * 1024 * 1024) < chunk.length) {
               process.stdout.write('\r  Downloaded: ' + (totalBytes / 1024 / 1024).toFixed(1) + ' MB');
             }
@@ -128,6 +141,7 @@ async function fetchOSSFIndex() {
       res.on('data', function(chunk) {
         chunks.push(chunk);
         totalBytes += chunk.length;
+        if (totalBytes > MAX_OSV_ZIP_BYTES) { res.destroy(); return reject(new Error('OSV zip exceeded ' + (MAX_OSV_ZIP_BYTES / 1024 / 1024) + 'MB cap')); }
         if (totalBytes % (10 * 1024 * 1024) < chunk.length) {
           process.stdout.write('\r  Downloaded: ' + (totalBytes / 1024 / 1024).toFixed(1) + ' MB');
         }
@@ -341,12 +355,23 @@ async function downloadAndScan(sample) {
   let scanErrors = 0;
   let scanCount = 0;
 
+  // Fresh progress log for this run (crash-recovery artifact — see appendProgress).
+  try {
+    fs.mkdirSync(path.dirname(PROGRESS_JSONL), { recursive: true });
+    fs.writeFileSync(PROGRESS_JSONL, '');
+    console.log('  Streaming per-package results to: ' + PROGRESS_JSONL);
+  } catch (e) { console.log('  [warn] could not open progress log: ' + e.message); }
+
   for (let i = 0; i < scannable.length; i++) {
     const entry = scannable[i];
     const progress = '[' + (i + 1) + '/' + scannable.length + ']';
 
     if (process.stdout.isTTY) {
       process.stdout.write('\r  Scanning ' + progress + ' ' + entry.name + '@' + entry.version + '          ');
+    } else if (i === 0 || (i + 1) % 50 === 0) {
+      // Non-TTY (cron/redirected): the \r line is invisible, so emit a periodic heartbeat —
+      // an operator must be able to tell a wedged run from a slow one (CLAUDE.md §2 observable).
+      console.log('  [progress] ' + progress + ' ' + scanned + ' scanned, ' + detected + ' detected, ' + scanErrors + ' errors');
     }
 
     // Download
@@ -389,6 +414,7 @@ async function downloadAndScan(sample) {
         entry.error = 'extraction failed';
         scanErrors++;
       }
+      appendProgress(entry);  // persist this entry's outcome before skipping (crash-resilient)
       continue;
     }
 
@@ -428,6 +454,7 @@ async function downloadAndScan(sample) {
       const used = Math.round(process.memoryUsage().heapUsed / 1024 / 1024);
       console.log('\n  [Memory] ' + used + ' MB after ' + scanCount + ' scans');
     }
+    appendProgress(entry);  // every scanned/errored entry persisted as it completes
   }
 
   if (process.stdout.isTTY) {

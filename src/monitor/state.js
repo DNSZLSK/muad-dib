@@ -972,7 +972,7 @@ let _scanLedgerAppendedSinceCompact = 0;
 const SCAN_LEDGER_OUTCOMES = new Set([
   'clean', 'clean_low_signal', 'clean_tooling', 'suspect', 'ml_clean', 'llm_benign',
   'sandbox_inconclusive', 'sandbox_unconfirmed', 'confirmed',
-  'static_timeout', 'size_skip', 'dropped'
+  'static_timeout', 'size_skip', 'dropped', 'error'
 ]);
 
 /**
@@ -1453,6 +1453,27 @@ function getParisDateString() {
   return formatter.format(new Date());
 }
 
+// Hour (Europe/Paris) at/after which the once-daily report may fire. Single source of
+// truth — imported by webhook.js, daemon.js and queue.js (each previously redefined it,
+// and webhook.js still re-exports it for back-compat).
+const DAILY_REPORT_HOUR = 8; // 08:00 Paris time (Europe/Paris)
+
+/**
+ * Canonical "is the daily report due?" predicate — the ONE gate, defined here in state.js
+ * (a leaf module that daemon.js and queue.js already import, so no require cycle).
+ *
+ * Catch-up semantics: fire at OR AFTER 08:00 Paris, so a missed 08:00 (e.g. the daemon was
+ * down/OOM-restarting at that minute) still fires later the SAME day — losing a whole day
+ * was the old daemon.js `hour === 8` behaviour. But NEVER fire during the 00:00–07:59 Paris
+ * "dead zone": a fire then stamps the NEW day's date before its 08:00 window and, because
+ * hasReportBeenSentToday() keys off the Paris CALENDAR date, permanently suppresses that
+ * day's real report. Replaces the two divergent copies (daemon.js `!== 8`, queue.js `< 8`).
+ */
+function isDailyReportDue(stats) {
+  if (getParisHour() < DAILY_REPORT_HOUR) return false;
+  return !hasReportBeenSentToday(stats);
+}
+
 // --- recentlyScanned dedup-set persistence (survives restarts → no re-scan storm) ---
 //
 // The dedup Set is in-memory only, so every restart starts it empty and re-scans the
@@ -1703,5 +1724,7 @@ module.exports = {
   loadRecentlyScanned,
   getParisHour,
   getParisDateString,
+  DAILY_REPORT_HOUR,
+  isDailyReportDue,
   loadStateRaw
 };

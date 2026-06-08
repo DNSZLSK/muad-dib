@@ -547,7 +547,7 @@ async function runOomDetectionsJsonlTests() {
 
       // Trigger CRITICAL clearing. The map/queue args are touched only on
       // HIGH; CRITICAL works on module-level caches.
-      handleMemoryPressure(MEMORY_PRESSURE_LEVELS.CRITICAL, 0.92, new Set(), new Map(), []);
+      handleMemoryPressure(MEMORY_PRESSURE_LEVELS.CRITICAL, 0.92, 0.92, new Set(), new Map(), [], {});
 
       // The CRITICAL block clears: temporal _metadataCache, typosquat
       // metadataCache, _fileListCache, _fileContentCache, _astCache,
@@ -576,7 +576,7 @@ async function runOomDetectionsJsonlTests() {
     try {
       // Run without --expose-gc semantics: handleMemoryPressure must not throw.
       delete global.gc;
-      handleMemoryPressure(MEMORY_PRESSURE_LEVELS.CRITICAL, 0.95, new Set(), new Map(), []);
+      handleMemoryPressure(MEMORY_PRESSURE_LEVELS.CRITICAL, 0.95, 0.95, new Set(), new Map(), [], {});
       assert(true, 'No throw without global.gc');
     } finally {
       if (savedGc) global.gc = savedGc;

@@ -24,7 +24,9 @@ function test(name, fn) {
     const ms = Date.now() - t0;
     console.log(`[FAIL] ${name} [${ms}ms]`);
     console.log(`       ${e.message}`);
-    failures.push({ name, error: e.message });
+    const _stk = e.stack ? e.stack.split('\n').slice(1, 5).map(l => '      ' + l.trim()).join('\n') : '';
+    if (_stk) console.log(_stk);
+    failures.push({ name, error: e.message + (_stk ? '\n' + _stk : '') });
     failed++;
   }
 }
@@ -49,7 +51,9 @@ async function asyncTest(name, fn) {
     const ms = Date.now() - t0;
     console.log(`[FAIL] ${name} [${ms}ms]`);
     console.log(`       ${e.message}`);
-    failures.push({ name, error: e.message });
+    const _stk = e.stack ? e.stack.split('\n').slice(1, 5).map(l => '      ' + l.trim()).join('\n') : '';
+    if (_stk) console.log(_stk);
+    failures.push({ name, error: e.message + (_stk ? '\n' + _stk : '') });
     failed++;
   } finally {
     process.removeListener('unhandledRejection', handler);

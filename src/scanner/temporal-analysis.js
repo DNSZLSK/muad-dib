@@ -121,6 +121,14 @@ function _fetchPackageMetadataHttp(packageName) {
         return;
       }
 
+      if (res.statusCode === 429) {
+        res.resume();
+        // Coordinated backoff on the shared registry limiter — the temporal scanners must
+        // signal 429 like the metadata path, not hammer through a rate limit (CLAUDE.md storm).
+        try { require('../shared/http-limiter.js').signal429(); } catch { /* limiter best-effort */ }
+        reject(new Error(`Registry rate limited (HTTP 429) for ${packageName}`));
+        return;
+      }
       if (res.statusCode < 200 || res.statusCode >= 300) {
         res.resume();
         reject(new Error(`Registry returned HTTP ${res.statusCode} for ${packageName}`));

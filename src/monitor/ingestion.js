@@ -13,7 +13,7 @@ const { loadCachedIOCs } = require('../ioc/updater.js');
 const { enqueueScan } = require('./scan-queue.js');
 const {
   saveNpmSeq, CHANGES_STREAM_URL, CHANGES_LIMIT, CHANGES_CATCHUP_MAX,
-  savePypiSerial, PYPI_XMLRPC_URL, PYPI_CATCHUP_MAX
+  savePypiSerial, PYPI_XMLRPC_URL, PYPI_CATCHUP_MAX, appendScanLedger
 } = require('./state.js');
 const { sendIOCPreAlert, sendCampaignPreAlert } = require('./webhook.js');
 
@@ -109,6 +109,14 @@ function httpsGet(url, timeoutMs = 30_000, deadlineMs = Math.max(timeoutMs * 2, 
         clearTimeout(deadline);
         return httpsGet(location, timeoutMs, deadlineMs).then(resolve, reject);
       }
+      if (res.statusCode === 429) {
+        res.resume();
+        // Coordinated backoff: drain the SHARED token bucket so every in-flight registry fetch
+        // slows together. This high-volume packument/changes path must signal 429 like the
+        // metadata path (npm-registry.js) does — not just acquire a slot (CLAUDE.md 429 storm).
+        try { require('../shared/http-limiter.js').signal429(); } catch { /* limiter best-effort */ }
+        return done(new Error(`HTTP 429 rate limited for ${url}`));
+      }
       if (res.statusCode < 200 || res.statusCode >= 300) {
         res.resume();
         return done(new Error(`HTTP ${res.statusCode} for ${url}`));
@@ -166,6 +174,11 @@ function httpsPost(url, body, headers = {}, timeoutMs = 30_000, deadlineMs = Mat
       if (err) reject(err); else resolve(value);
     };
     req = _deps.https.request(options, (res) => {
+      if (res.statusCode === 429) {
+        res.resume();
+        try { require('../shared/http-limiter.js').signal429(); } catch { /* limiter best-effort */ }
+        return done(new Error(`HTTP 429 rate limited for POST ${url}`));
+      }
       if (res.statusCode < 200 || res.statusCode >= 300) {
         res.resume();
         return done(new Error(`HTTP ${res.statusCode} for POST ${url}`));
@@ -418,6 +431,7 @@ function selectMostRecentVersion(packument, options = {}) {
     description: (typeof versionData.description === 'string') ? versionData.description : '',
     latestTagVersion,
     recentVersions: [],
+    droppedBurstVersions: [],
   };
 
   // Burst extras: other versions published within the recent window, excluding the
@@ -432,7 +446,13 @@ function selectMostRecentVersion(packument, options = {}) {
       const [v, ts] = versionTimes[i];
       if (ts < cutoff) break; // sorted desc, so once we cross the cutoff we're done
       result.recentWindowCount++;
-      if (result.recentVersions.length >= maxRecent) continue; // enqueue list capped; count continues
+      if (result.recentVersions.length >= maxRecent) {
+        // Burst beyond the enqueue cap: collect the version so the caller ledgers it as a
+        // coverage loss (it is never enqueued/scanned). Keeps a Miasma-style burst that
+        // outruns maxRecent visible instead of vanishing silently (CLAUDE.md "no silent caps").
+        result.droppedBurstVersions.push(v);
+        continue; // enqueue list capped; count continues
+      }
       const vData = versions[v];
       if (!vData) continue;
       result.recentVersions.push({
@@ -501,6 +521,16 @@ async function getNpmLatestTarball(packageName) {
       latestTagVersion: null, recentVersions: [],
       age_days: null, version_count: 0,
     };
+  }
+  // A3: ledger burst versions dropped by the maxRecent enqueue cap — they are never scanned,
+  // so record each as a 'dropped' coverage loss (source burst_extras_cap) for the coverage
+  // audit. Best-effort; never throws. selectMostRecentVersion stays pure (it only collects).
+  if (result.droppedBurstVersions && result.droppedBurstVersions.length) {
+    for (const v of result.droppedBurstVersions) {
+      try {
+        appendScanLedger({ name: packageName, version: v, ecosystem: 'npm', outcome: 'dropped', source: 'burst_extras_cap' });
+      } catch { /* ledger is best-effort */ }
+    }
   }
   // Stage 2.1 — extract reputation signals from the packument we already have,
   // so triageRisk in queue.js doesn't have to refetch metadata via

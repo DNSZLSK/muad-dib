@@ -109,6 +109,35 @@ async function runMonitorPreResolveTests() {
     assert(track.destroyed === true, 'socket must be destroyed on overflow');
   });
 
+  await asyncTest('HTTP-429: httpsGet signals the shared limiter to back off, then rejects', async () => {
+    // B (CS3): the high-volume ingestion fetch must drain the shared token bucket on a 429
+    // (coordinated backoff), like the metadata path — not just acquire a slot and hammer on.
+    const real = ingestion._deps.https;
+    const limiter = require('../../src/shared/http-limiter.js');
+    const origSignal = limiter.signal429;
+    let signaled = 0;
+    limiter.signal429 = () => { signaled++; };  // the 429 branch lazy-requires this same module
+    const track = { destroyed: false };
+    const make = (cb) => {
+      const req = makeFakeReq(track);
+      const res = new EventEmitter();
+      res.statusCode = 429;
+      res.resume = () => {};
+      setImmediate(() => { cb(res); });
+      return req;
+    };
+    ingestion._deps.https = { get: (_u, _o, cb) => make(cb), request: (_o, cb) => make(cb) };
+    let threw = null;
+    try {
+      await ingestion.httpsGet('https://example.test/ratelimited', 1000, 1000);
+    } catch (e) { threw = e; } finally {
+      ingestion._deps.https = real;
+      limiter.signal429 = origSignal;
+    }
+    assert(threw !== null && /429/.test(threw.message), `429 should reject with a 429 error, got: ${threw && threw.message}`);
+    assert(signaled === 1, `httpsGet must signal429() exactly once on a 429, got ${signaled}`);
+  });
+
   // ── Unit tests on the batch helpers ──────────────────────────────────────
 
   await asyncTest('PRE-RESOLVE npm: happy path sets tarballUrl + _npmInfo + stats', async () => {
@@ -456,6 +485,63 @@ async function runMonitorPreResolveTests() {
     } finally {
       ingestion._deps.httpsGet = realGet;
     }
+  });
+
+  await asyncTest('HTTP-429: httpsPost signals the shared limiter to back off, then rejects', async () => {
+    // B (CS3): the httpsPost path (PyPI XML-RPC / changes POST) must ALSO drain the shared
+    // token bucket on a 429, exactly like httpsGet — not just acquire a slot and hammer on.
+    const real = ingestion._deps.https;
+    const limiter = require('../../src/shared/http-limiter.js');
+    const origSignal = limiter.signal429;
+    let signaled = 0;
+    limiter.signal429 = () => { signaled++; };
+    const track = { destroyed: false };
+    const make = (cb) => {
+      const req = makeFakeReq(track);
+      const res = new EventEmitter();
+      res.statusCode = 429;
+      res.resume = () => {};
+      setImmediate(() => { cb(res); });
+      return req;
+    };
+    ingestion._deps.https = { get: (_u, _o, cb) => make(cb), request: (_o, cb) => make(cb) };
+    let threw = null;
+    try {
+      await ingestion.httpsPost('https://example.test/ratelimited', '{}', {}, 1000, 1000);
+    } catch (e) { threw = e; } finally {
+      ingestion._deps.https = real;
+      limiter.signal429 = origSignal;
+    }
+    assert(threw !== null && /429/.test(threw.message), `429 should reject with a 429 error, got: ${threw && threw.message}`);
+    assert(signaled === 1, `httpsPost must signal429() exactly once on a 429, got ${signaled}`);
+  });
+
+  await asyncTest('HTTP non-429: httpsGet does NOT signal the limiter on a 500 (no false backoff)', async () => {
+    // Negative: ONLY a 429 drains the shared bucket — a 500/404 must not trigger coordinated backoff.
+    const real = ingestion._deps.https;
+    const limiter = require('../../src/shared/http-limiter.js');
+    const origSignal = limiter.signal429;
+    let signaled = 0;
+    limiter.signal429 = () => { signaled++; };
+    const track = { destroyed: false };
+    const make = (cb) => {
+      const req = makeFakeReq(track);
+      const res = new EventEmitter();
+      res.statusCode = 500;
+      res.resume = () => {};
+      setImmediate(() => { cb(res); });
+      return req;
+    };
+    ingestion._deps.https = { get: (_u, _o, cb) => make(cb), request: (_o, cb) => make(cb) };
+    let threw = null;
+    try {
+      await ingestion.httpsGet('https://example.test/servererror', 1000, 1000);
+    } catch (e) { threw = e; } finally {
+      ingestion._deps.https = real;
+      limiter.signal429 = origSignal;
+    }
+    assert(threw !== null && /500/.test(threw.message), `500 should reject, got: ${threw && threw.message}`);
+    assert(signaled === 0, `non-429 must NOT signal429(), got ${signaled}`);
   });
 }
 

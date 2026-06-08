@@ -5,14 +5,15 @@ const os = require('os');
 const v8 = require('v8');
 const { isDockerAvailable, SANDBOX_CONCURRENCY_MAX, killAllSandboxContainers } = require('../sandbox/index.js');
 const { setVerboseMode, isSandboxEnabled, isCanaryEnabled, isLlmDetectiveEnabled, getLlmDetectiveMode, DOWNLOADS_CACHE_TTL } = require('./classify.js');
-const { loadState, saveState, loadDailyStats, saveDailyStats, purgeTarballCache, getParisHour, atomicWriteFileSync, saveNpmSeq, ALERTS_FILE, runStateMigrations, loadRecentlyScanned, saveRecentlyScanned } = require('./state.js');
+const { loadState, saveState, loadDailyStats, saveDailyStats, purgeTarballCache, isDailyReportDue, atomicWriteFileSync, saveNpmSeq, ALERTS_FILE, runStateMigrations, loadRecentlyScanned, saveRecentlyScanned } = require('./state.js');
 const { isTemporalEnabled, isTemporalAstEnabled, isTemporalPublishEnabled, isTemporalMaintainerEnabled } = require('./temporal.js');
-const { pendingGrouped, flushScopeGroup, sendDailyReport, DAILY_REPORT_HOUR, alertedPackageRules, ALERTED_PACKAGES_MAX: MAX_ALERTED_PACKAGES } = require('./webhook.js');
+const { pendingGrouped, flushScopeGroup, sendDailyReport, alertedPackageRules, ALERTED_PACKAGES_MAX: MAX_ALERTED_PACKAGES } = require('./webhook.js');
 const { poll, getPollBackoffMs } = require('./ingestion.js');
 const { ensureWorkers, drainWorkers, getTargetConcurrency, setTargetConcurrency, getActiveWorkers, terminateAllWorkers } = require('./queue.js');
 const { computeTarget, ADJUST_INTERVAL_MS, BASE_CONCURRENCY } = require('./adaptive-concurrency.js');
 const { startHealthcheck } = require('./healthcheck.js');
 const { startDeferredWorker, stopDeferredWorker, persistDeferredQueue, restoreDeferredQueue, clearDeferredQueue } = require('./deferred-sandbox.js');
+const { evictFromScanQueueBulk } = require('./scan-queue.js');
 const { startGhsaPoller, stopGhsaPoller } = require('../ioc/ghsa-poller.js');
 const { cleanupOldArchives, getRetentionDays, startPeriodicCleanup } = require('./tarball-archive.js');
 const { clearMetadataCache } = require('../scanner/temporal-analysis.js');
@@ -532,8 +533,13 @@ function pruneMemoryCaches(recentlyScanned, downloadsCache, alertedPackageRules)
  * Worker spawning is gated separately in the main loop (ensureWorkers skipped at HIGH+).
  * Ingestion is gated in ingestion.js via getMemoryPressureLevel() (skipped at CRITICAL+).
  */
-function handleMemoryPressure(level, ratio, recentlyScanned, downloadsCache, scanQueue) {
+function handleMemoryPressure(level, ratio, rssRatio, recentlyScanned, downloadsCache, scanQueue, stats) {
   const pct = (ratio * 100).toFixed(0);
+  // Show BOTH arms: an EMERGENCY almost always fires on RSS (off-heap — gVisor containers,
+  // tarball buffers) while the heap sits low (~15%). Logging only heap made every breaker
+  // line read "heap at 15%" and hid the real cause; memPctLabel surfaces which arm tripped.
+  const rssPct = (rssRatio != null && isFinite(rssRatio)) ? (rssRatio * 100).toFixed(0) : '?';
+  const memPctLabel = `heap ${pct}% / rss ${rssPct}%`;
   // Structured summary of what the breaker actually did this tick. Returned (the poll loop
   // at the call site ignores it) so the reclaim is observable to callers and tests without
   // scraping console output — CLAUDE.md §3 "Toujours logger un resume". The two kill fields
@@ -543,7 +549,7 @@ function handleMemoryPressure(level, ratio, recentlyScanned, downloadsCache, sca
 
   // HIGH (85%+): clear auxiliary caches — same as old emergency prune
   if (level >= MEMORY_PRESSURE_LEVELS.HIGH) {
-    console.error(`[MONITOR] MEMORY PRESSURE HIGH: heap at ${pct}% — pruning caches, stopping new workers`);
+    console.error(`[MONITOR] MEMORY PRESSURE HIGH: ${memPctLabel} — pruning caches, stopping new workers`);
     recentlyScanned.clear();
     downloadsCache.clear();
     alertedPackageRules.clear();
@@ -552,7 +558,7 @@ function handleMemoryPressure(level, ratio, recentlyScanned, downloadsCache, sca
 
   // CRITICAL (90%+): clear scanner caches, force GC
   if (level >= MEMORY_PRESSURE_LEVELS.CRITICAL) {
-    console.error(`[MONITOR] MEMORY PRESSURE CRITICAL: heap at ${pct}% — stopping ingestion, clearing scanner caches`);
+    console.error(`[MONITOR] MEMORY PRESSURE CRITICAL: ${memPctLabel} — stopping ingestion, clearing scanner caches`);
     // temporal-analysis._metadataCache (200 entries × full npm registry metadata)
     try { clearMetadataCache(); } catch {}
     // typosquat metadataCache (500 entries × npm registry metadata for typosquat scoring)
@@ -578,21 +584,30 @@ function handleMemoryPressure(level, ratio, recentlyScanned, downloadsCache, sca
   if (level >= MEMORY_PRESSURE_LEVELS.EMERGENCY) {
     const queueBefore = scanQueue.length;
     if (queueBefore > EMERGENCY_QUEUE_KEEP) {
-      // Keep the LAST N items (most recently added = newest packages).
-      // These are the packages most likely to still exist on npm for re-scan later.
-      // Dropped items are public packages — they'll appear again on republish or
-      // can be re-fetched from the registry if needed.
-      const dropped = queueBefore - EMERGENCY_QUEUE_KEEP;
-      // splice from the front: older items were pushed first
-      scanQueue.splice(0, dropped);
+      // Protected-aware bulk eviction — SINGLE SOURCE OF TRUTH with the queue-cap path
+      // (scan-queue.js evictFromScanQueueBulk / enqueueScan share _isProtected). Keeps
+      // IOC-match / burst / first-publish / ATO scans, drops the oldest UNPROTECTED items
+      // first (newest survive — most likely to still exist for re-scan), protected only as
+      // a last resort, and LEDGERS every drop. Closes the v2.10.88 gap where the raw
+      // splice(0,n) silently dropped protected scans (CLAUDE.md "ne jamais perdre de scan").
+      const { dropped, droppedProtected } = evictFromScanQueueBulk(scanQueue, EMERGENCY_QUEUE_KEEP, 'mem_emergency');
       summary.queueDropped = dropped;
-      console.error(`[MONITOR] MEMORY EMERGENCY: heap at ${pct}% — truncated queue ${queueBefore} → ${scanQueue.length} (dropped ${dropped} oldest items)`);
+      summary.queueDroppedProtected = droppedProtected;
+      if (stats) {
+        stats.queueEmergencyDrops = (stats.queueEmergencyDrops || 0) + dropped;
+        if (droppedProtected) stats.queueEmergencyProtectedDrops = (stats.queueEmergencyProtectedDrops || 0) + droppedProtected;
+      }
+      console.error(`[MONITOR] MEMORY EMERGENCY: ${memPctLabel} — truncated queue ${queueBefore} → ${scanQueue.length} (dropped ${dropped} oldest UNPROTECTED${droppedProtected ? ` + ${droppedProtected} protected as last resort` : ''}, all ledgered)`);
     }
     // Clear deferred sandbox queue (holds full staticResult objects)
     const deferredDropped = clearDeferredQueue();
     summary.deferredDropped = deferredDropped;
     if (deferredDropped > 0) {
-      console.error(`[MONITOR] MEMORY EMERGENCY: cleared ${deferredDropped} deferred sandbox items`);
+      // Observability only (counter, NOT a ledger 'dropped' entry): the deferred queue holds
+      // post-scan sandbox ENRICHMENT for packages already statically scanned + alerted, so
+      // clearing it is not a coverage loss — ledgering them as 'dropped' would mislabel them.
+      if (stats) stats.deferredDroppedEmergency = (stats.deferredDroppedEmergency || 0) + deferredDropped;
+      console.error(`[MONITOR] MEMORY EMERGENCY: cleared ${deferredDropped} deferred sandbox items (post-scan enrichment only — primary alerts already sent)`);
     }
     // Free the off-heap leak that queue truncation can't touch: orphaned sandbox
     // containers (gVisor runsc survives `docker kill`) and wedged scan workers.
@@ -642,13 +657,10 @@ function reportStats(stats) {
   stats.lastReportTime = Date.now();
 }
 
-function isDailyReportDue(stats) {
-  const hour = getParisHour();
-  if (hour !== DAILY_REPORT_HOUR) return false;
-  // Check if already sent today
-  const { hasReportBeenSentToday } = require('./state.js');
-  return !hasReportBeenSentToday(stats);
-}
+// isDailyReportDue is the canonical gate in state.js (imported above) — re-exported below
+// so monitor.js (daemonModule.isDailyReportDue) keeps resolving. The old local copy used a
+// `hour !== 8` gate that lost a whole day whenever the daemon missed the single 08:00 minute
+// (OOM crash-loop); state.js uses the catch-up `hour >= 8` gate instead.
 
 // ─── P1.0 — memory-trend instrumentation ───
 // Append one sample per memory-watchdog tick so the off-heap leak can be localised
@@ -1087,7 +1099,7 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
 
       // Graduated response at HIGH+
       if (pressureLevel >= MEMORY_PRESSURE_LEVELS.HIGH) {
-        handleMemoryPressure(pressureLevel, heapRatio, recentlyScanned, downloadsCache, scanQueue);
+        handleMemoryPressure(pressureLevel, heapRatio, rssRatio, recentlyScanned, downloadsCache, scanQueue, stats);
       }
       lastMemoryLogTime = Date.now();
     }
