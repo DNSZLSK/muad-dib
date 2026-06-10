@@ -8,7 +8,7 @@ const { banner } = require('../utils.js');
 const { setVerboseMode, isSandboxEnabled, isCanaryEnabled, isLlmDetectiveEnabled, getLlmDetectiveMode, DOWNLOADS_CACHE_TTL } = require('./classify.js');
 const { loadState, saveState, loadDailyStats, saveDailyStats, purgeTarballCache, isDailyReportDue, atomicWriteFileSync, saveNpmSeq, ALERTS_FILE, runStateMigrations, loadRecentlyScanned, saveRecentlyScanned } = require('./state.js');
 const { isTemporalEnabled, isTemporalAstEnabled, isTemporalPublishEnabled, isTemporalMaintainerEnabled } = require('./temporal.js');
-const { pendingGrouped, flushScopeGroup, sendDailyReport, alertedPackageRules, ALERTED_PACKAGES_MAX: MAX_ALERTED_PACKAGES } = require('./webhook.js');
+const { pendingGrouped, flushScopeGroup, sendDailyReport, redeliverPendingReportOnBoot, alertedPackageRules, ALERTED_PACKAGES_MAX: MAX_ALERTED_PACKAGES } = require('./webhook.js');
 const { poll, getPollBackoffMs } = require('./ingestion.js');
 const { ensureWorkers, drainWorkers, getTargetConcurrency, setTargetConcurrency, getActiveWorkers, terminateAllWorkers } = require('./queue.js');
 const { computeTarget, ADJUST_INTERVAL_MS, BASE_CONCURRENCY } = require('./adaptive-concurrency.js');
@@ -963,6 +963,11 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
   // ledger, and accumulates the denominator the Phase 5 coverage-audit joins against.
   // Best-effort and fire-and-forget; never blocks the daemon.
   startGhsaPoller(stats);
+
+  // AUDIT 3: if the last daily report failed to deliver (e.g. a DNS blip at 08:00),
+  // it sits on disk with delivered=false. Redeliver it once now. Fire-and-forget —
+  // never blocks startup, never throws (legacy reports without the flag are skipped).
+  redeliverPendingReportOnBoot().catch(() => { /* logged inside; non-fatal */ });
 
   // ─── Initial poll ───
   // Fills the queue with pending packages. Processing starts in the main loop

@@ -97,9 +97,15 @@ function maybePersistDailyStats() { return stateModule.maybePersistDailyStats(st
 function recordError(err) { return classifyModule.recordError(err, stats); }
 
 // --- Webhook wrappers ---
-function buildDailyReportEmbed() { return webhookModule.buildDailyReportEmbed(stats, dailyAlerts); }
+// Binds the daemon's module-level stats/dailyAlerts so callers don't pass them.
+// Forward an OPTIONAL ledgerRollup (undefined → buildDailyReportEmbed resolves it
+// itself via safeLedgerRollup). Explicit param, NOT ...args: spreading would let a
+// caller positionally override stats/dailyAlerts, which is exactly what the binding
+// exists to prevent.
+function buildDailyReportEmbed(ledgerRollup) { return webhookModule.buildDailyReportEmbed(stats, dailyAlerts, ledgerRollup); }
 function sendDailyReport() { return webhookModule.sendDailyReport(stats, dailyAlerts, recentlyScanned, classifyModule.downloadsCache); }
 function sendReportNow() { return webhookModule.sendReportNow(stats); }
+function resendReport(date) { return webhookModule.resendDailyReport(date); }
 
 // --- Ingestion wrappers ---
 function pollNpmChanges(state) { return ingestionModule.pollNpmChanges(state, scanQueue, stats); }
@@ -262,6 +268,7 @@ module.exports = {
   buildReportFromDisk: webhookModule.buildReportFromDisk,
   buildReportEmbedFromDisk: webhookModule.buildReportEmbedFromDisk,
   sendReportNow,
+  resendReport,
   getReportStatus: webhookModule.getReportStatus,
   cleanupOrphanTmpDirs: daemonModule.cleanupOrphanTmpDirs,
   consecutivePollErrors: {
