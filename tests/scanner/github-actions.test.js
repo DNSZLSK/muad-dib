@@ -326,6 +326,88 @@ jobs:
       assert(!t, 'Should NOT flag toJSON(secrets) inside a YAML comment');
     } finally { cleanupTemp(tmp); }
   });
+
+  // --- GHA-005 / GHA-006: unpinned third-party action ---
+
+  test('GHA-005: third-party action pinned to a mutable tag → unpinned_action (LOW)', () => {
+    const tmp = makeTempWorkflow(`
+jobs:
+  build:
+    steps:
+      - uses: tj-actions/changed-files@v45
+`);
+    try {
+      const threats = scanGitHubActions(tmp);
+      const t = threats.find(t => t.type === 'unpinned_action');
+      assert(t, 'Should flag unpinned third-party action');
+      assert(t.severity === 'LOW', `Should be LOW informational, got ${t && t.severity}`);
+      assert(!threats.some(t => t.type === 'unpinned_action_in_risky_workflow'),
+        'No compound without a risky trigger');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  test('GHA-006: unpinned third-party + pwn-request → CRITICAL compound', () => {
+    const tmp = makeTempWorkflow(`
+on: pull_request_target
+jobs:
+  build:
+    steps:
+      - uses: actions/checkout
+        with:
+          ref: \${{ github.event.pull_request.head.sha }}
+      - uses: tj-actions/changed-files@v45
+`);
+    try {
+      const threats = scanGitHubActions(tmp);
+      const c = threats.find(t => t.type === 'unpinned_action_in_risky_workflow');
+      assert(c, 'Should fire the unpinned-in-risky-workflow compound');
+      assert(c.severity === 'CRITICAL', `Compound should be CRITICAL, got ${c && c.severity}`);
+      assert(c.compound === true, 'Compound flag must be set (bypasses MT-1, counts as confirmed malice)');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  test('GHA-005 (FP guard): SHA-pinned third-party action → no finding', () => {
+    const tmp = makeTempWorkflow(`
+jobs:
+  build:
+    steps:
+      - uses: tj-actions/changed-files@a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0
+`);
+    try {
+      const threats = scanGitHubActions(tmp);
+      assert(!threats.some(t => t.type === 'unpinned_action'),
+        'A 40-hex SHA pin is correct — must not be flagged');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  test('GHA-005 (FP guard): first-party actions/checkout@v4 → no noise', () => {
+    const tmp = makeTempWorkflow(`
+jobs:
+  build:
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/analyze@v3
+`);
+    try {
+      const threats = scanGitHubActions(tmp);
+      assert(!threats.some(t => t.type === 'unpinned_action'),
+        'Official actions/* and github/* orgs are trusted with tag pins — no noise');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  test('GHA-005 (FP guard): local ./ action → no finding', () => {
+    const tmp = makeTempWorkflow(`
+jobs:
+  build:
+    steps:
+      - uses: ./.github/actions/my-local-action
+`);
+    try {
+      const threats = scanGitHubActions(tmp);
+      assert(!threats.some(t => t.type === 'unpinned_action'),
+        'Local first-party actions have no upstream tag to retag');
+    } finally { cleanupTemp(tmp); }
+  });
 }
 
 module.exports = { runGitHubActionsTests };

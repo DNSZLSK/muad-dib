@@ -251,6 +251,16 @@ const PLAYBOOKS = {
     'Technique Shai-Hulud (TeamPCP). Supprimer le workflow immediatement. ' +
     'Si le workflow a ete execute, considerer tous les secrets du repository compromis et les regenerer.',
 
+  unpinned_action:
+    'INFO: Action GitHub tierce epinglee a une ref mutable (tag/branche) au lieu d\'un commit SHA. ' +
+    'Epingler au SHA complet du commit (ex: uses: owner/repo@<40-hex-sha>) pour empecher qu\'une release retaggee ' +
+    'injecte du code malveillant (cf. tj-actions/changed-files CVE-2025-30066).',
+
+  unpinned_action_in_risky_workflow:
+    'CRITIQUE: Action tierce non-epinglee combinee a un workflow controlable par un attaquant (injection ou pwn-request). ' +
+    'Vecteur de livraison supply-chain (pattern tj-actions/Ultralytics). Epingler toutes les actions au SHA, ' +
+    'supprimer le trigger risque (pull_request_target / contexte attaquant), et auditer l\'historique d\'execution du workflow.',
+
   sandbox_sensitive_file_read:
     'CRITIQUE: Package lit des fichiers sensibles (credentials) lors de l\'installation. Ne pas installer. Supprimer immediatement.',
   sandbox_sensitive_file_write:
