@@ -5952,16 +5952,19 @@ async function runMonitorTests() {
 
   // --- Tier 1b: HIGH/CRITICAL without HC type or TIER1_TYPES (bundler FP zone) ---
 
-  test('isSuspectClassification T1b: 1 HIGH finding (no HC type) → tier 1b', () => {
-    const result = { threats: [{ type: 'suspicious_dataflow', severity: 'HIGH' }], summary: { critical: 0, high: 1, medium: 0, low: 0 } };
+  // P1 (FPR audit 2026-06): a LONE non-HC HIGH heuristic at low score no longer flips
+  // a package to suspect — it requires corroboration (score>=20 / compound / 2+ distinct
+  // HIGH types). HC types / IOC matches / lifecycle+intent stay tier 1a above.
+  test('isSuspectClassification: 1 HIGH heuristic at low score → NOT suspect (P1: corroboration required)', () => {
+    const result = { threats: [{ type: 'suspicious_dataflow', severity: 'HIGH' }], summary: { critical: 0, high: 1, medium: 0, low: 0, riskScore: 8 } };
     const r = isSuspectClassification(result);
-    assert(r.suspect === true && r.tier === '1b', 'Single HIGH without HC type should be T1b, got tier=' + r.tier);
+    assert(r.suspect === false, 'a lone non-HC HIGH at score<20 must not flip to suspect, got tier=' + r.tier);
   });
 
-  test('isSuspectClassification T1b: 1 CRITICAL finding (no HC type) → tier 1b', () => {
+  test('isSuspectClassification: known_malicious_package (IOC) → tier 1a (definite malware, unconditional)', () => {
     const result = { threats: [{ type: 'known_malicious_package', severity: 'CRITICAL' }], summary: { critical: 1, high: 0, medium: 0, low: 0 } };
     const r = isSuspectClassification(result);
-    assert(r.suspect === true && r.tier === '1b', 'Single CRITICAL without HC type should be T1b, got tier=' + r.tier);
+    assert(r.suspect === true && r.tier === '1a', 'IOC match must be mandatory-sandbox T1a, got tier=' + r.tier);
   });
 
   // --- Tier 1a: lifecycle scripts, TIER1_TYPES, HC malice types (mandatory sandbox) ---
@@ -6011,16 +6014,17 @@ async function runMonitorTests() {
     assert(r.suspect === true && r.tier === '1a', 'lifecycle + bun_runtime_evasion should be T1a, got tier=' + r.tier);
   });
 
-  test('isSuspectClassification T1b: lifecycle_script + HIGH finding (no HC/TIER1/intent) → tier 1b', () => {
+  test('isSuspectClassification: lifecycle_script + 1 HIGH non-intent at low score → suspect but NOT 1b (P1)', () => {
     const result = {
       threats: [
         { type: 'lifecycle_script', severity: 'MEDIUM' },
         { type: 'dynamic_import', severity: 'HIGH' }
       ],
-      summary: { critical: 0, high: 1, medium: 1, low: 0 }
+      summary: { critical: 0, high: 1, medium: 1, low: 0, riskScore: 9 }
     };
     const r = isSuspectClassification(result);
-    assert(r.suspect === true && r.tier === '1b', 'lifecycle + HIGH non-HC should be T1b, got tier=' + r.tier);
+    // 2 distinct types (one HIGH non-low) → falls through to tier 2; no longer 1b on the lone HIGH.
+    assert(r.suspect === true && r.tier !== '1b', 'lifecycle + lone non-HC HIGH at low score must not be 1b, got tier=' + r.tier);
   });
 
   test('isSuspectClassification: staged_binary_payload (LOW) → not T1a (severity filter)', () => {
@@ -6281,17 +6285,17 @@ async function runMonitorTests() {
 
   // --- Edge: T1a/T1b overrides T2/T3 ---
 
-  test('isSuspectClassification: HIGH + passive types (no HC type) → T1b', () => {
+  test('isSuspectClassification: 1 HIGH heuristic + passive LOWs at low score → not 1b (P1)', () => {
     const result = {
       threats: [
         { type: 'suspicious_dataflow', severity: 'HIGH' },
         { type: 'obfuscation_detected', severity: 'LOW' },
         { type: 'sensitive_string', severity: 'LOW' }
       ],
-      summary: { critical: 0, high: 1, medium: 0, low: 2 }
+      summary: { critical: 0, high: 1, medium: 0, low: 2, riskScore: 10 }
     };
     const r = isSuspectClassification(result);
-    assert(r.suspect === true && r.tier === '1b', 'HIGH severity without HC type overrides to T1b, got tier=' + r.tier);
+    assert(r.tier !== '1b', 'a lone non-HC HIGH must not be 1b; falls through to tier 2/3, got tier=' + r.tier);
   });
 
   test('isSuspectClassification: sandbox_evasion (no HIGH/CRIT in summary) → T1a', () => {
@@ -6402,13 +6406,35 @@ async function runMonitorTests() {
     assert(r.suspect === true && r.tier === '1b', 'HIGH eval+obfuscation without HC should be T1b, got tier=' + r.tier);
   });
 
-  test('isSuspectClassification T1b: credential_regex HIGH (auth code FP) → tier 1b', () => {
+  test('isSuspectClassification: lone credential_regex_harvest HIGH (auth-code FP) → NOT suspect (P1)', () => {
     const result = {
       threats: [{ type: 'credential_regex_harvest', severity: 'HIGH' }],
-      summary: { critical: 0, high: 1, medium: 0, low: 0 }
+      summary: { critical: 0, high: 1, medium: 0, low: 0, riskScore: 7 }
     };
     const r = isSuspectClassification(result);
-    assert(r.suspect === true && r.tier === '1b', 'credential_regex_harvest HIGH should be T1b, got tier=' + r.tier);
+    assert(r.suspect === false, 'a lone credential-regex auth-code FP at low score must not be suspect, got tier=' + r.tier);
+  });
+
+  // P1 corroboration guards — detection preserved when the alert is real.
+  test('isSuspectClassification: 1 HIGH at score>=20 → tier 1b (real alert score)', () => {
+    const result = { threats: [{ type: 'suspicious_dataflow', severity: 'HIGH' }], summary: { critical: 0, high: 1, medium: 0, low: 0, riskScore: 30 } };
+    const r = isSuspectClassification(result);
+    assert(r.suspect === true && r.tier === '1b', 'a HIGH at score>=20 stays 1b, got tier=' + r.tier);
+  });
+
+  test('isSuspectClassification: 2 DISTINCT HIGH types at low score → tier 1b (corroboration)', () => {
+    const result = { threats: [
+      { type: 'suspicious_dataflow', severity: 'HIGH' },
+      { type: 'direct_ip_exfil', severity: 'HIGH' }
+    ], summary: { critical: 0, high: 2, medium: 0, low: 0, riskScore: 12 } };
+    const r = isSuspectClassification(result);
+    assert(r.suspect === true && r.tier === '1b', '2 distinct HIGH types stay 1b, got tier=' + r.tier);
+  });
+
+  test('isSuspectClassification: compound at low score → tier 1b (corroboration)', () => {
+    const result = { threats: [{ type: 'recon_exfil_direct_ip', severity: 'CRITICAL', compound: true }], summary: { critical: 1, high: 0, medium: 0, low: 0, riskScore: 12 } };
+    const r = isSuspectClassification(result);
+    assert(r.suspect === true && r.tier === '1b', 'a compound stays 1b, got tier=' + r.tier);
   });
 
   // ============================================
