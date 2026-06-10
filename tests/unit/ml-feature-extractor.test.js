@@ -21,6 +21,7 @@ function runMLFeatureExtractorTests() {
     placeholderAntiDepConfusion,
     installScriptNoNetworkEgress,
     mcpServerEnvAccess,
+    mcpServerBenignLifecycle,
     vendorCliSdk,
     aiAgentBot,
     vendorMinifiedBundle,
@@ -2305,6 +2306,90 @@ function runMLFeatureExtractorTests() {
     assert(features.mcp_server_env_access === 0, 'no MCP identity -> 0');
     assert(features.vendor_cli_sdk === 0, 'no bin entry -> 0');
     assert(features.ai_agent_bot === 0, 'no agent identity -> 0');
+  });
+
+  // --- Feature 15: mcp_server_benign_lifecycle (AUDIT 2, 2026-06) ---
+  // F15 extends F9 to MCP installers that ship a BENIGN install lifecycle (which
+  // F9's C3 rejects outright). The veto set must still exclude every GT MCP malware.
+  const f15Threats = () => ([
+    { type: 'mcp_config_injection', severity: 'CRITICAL', file: 'index.js',
+      message: 'Writes MCP server entry to ~/.claude/claude_desktop_config.json.' },
+    { type: 'env_access', severity: 'HIGH', file: 'index.js',
+      message: 'Reads process.env.ANTHROPIC_API_KEY and process.env.OPENAI_API_KEY.' },
+    { type: 'suspicious_dataflow', severity: 'CRITICAL', file: 'index.js',
+      message: 'env read + POST to api.anthropic.com (first-party).' },
+    { type: 'lifecycle_script', severity: 'MEDIUM', file: 'package.json',
+      message: 'Script "postinstall" detected: node build.js' }
+  ]);
+  const f15Meta = () => ({
+    name: 'my-mcp-server',
+    registryMeta: { scripts: { postinstall: 'node build.js' },
+      keywords: ['mcp', 'model-context-protocol'], description: 'Model Context Protocol server' }
+  });
+
+  test('F15: TRUE on legit MCP server with a BENIGN postinstall (where F9 is FALSE)', () => {
+    const result = { threats: f15Threats(), summary: { total: 4, critical: 2, high: 1, medium: 1, low: 0, riskScore: 95 } };
+    const meta = f15Meta();
+    assert(mcpServerBenignLifecycle(result, meta) === true,
+      'identity + mcp_config_injection + provider keys + benign lifecycle + no HARD exfil = F15');
+    assert(mcpServerEnvAccess(result, meta) === false,
+      'F9 must reject this (it has a lifecycle hook) — that is exactly the gap F15 fills');
+  });
+
+  test('F15: FALSE when the lifecycle is malicious (lifecycle_file_exec) — protects GT-060', () => {
+    const result = { threats: [
+      ...f15Threats(),
+      { type: 'lifecycle_file_exec', severity: 'CRITICAL', file: 'package.json',
+        message: 'Lifecycle script executes setup.js which contains mcp_config_injection.' }
+    ], summary: { total: 5, critical: 3, high: 1, medium: 1, low: 0, riskScore: 100 } };
+    assert(mcpServerBenignLifecycle(result, f15Meta()) === false,
+      'a postinstall that executes a malicious file must NOT be capped (mcp-config-inject pattern)');
+  });
+
+  test('F15: FALSE when HARD exfil present (suspicious_domain) — protects GT-088', () => {
+    const result = { threats: [
+      ...f15Threats(),
+      { type: 'suspicious_domain', severity: 'HIGH', file: 'index.js', message: 'C2 domain webhook.site found.' }
+    ], summary: { total: 5, critical: 2, high: 2, medium: 1, low: 0, riskScore: 100 } };
+    assert(mcpServerBenignLifecycle(result, f15Meta()) === false,
+      'a real third-party exfil channel disqualifies F15 (same HARD veto as F9)');
+  });
+
+  test('F15: FALSE when env_access cites a credential file (.ssh) not a provider key', () => {
+    const result = { threats: [
+      { type: 'mcp_config_injection', severity: 'CRITICAL', message: 'Writes ~/.claude/mcp.json.' },
+      { type: 'env_access', severity: 'HIGH', message: 'Reads ~/.ssh/id_rsa and process.env.PRIVATE_KEY.' },
+      { type: 'lifecycle_script', severity: 'MEDIUM', message: 'postinstall: node build.js' }
+    ], summary: { total: 3, critical: 1, high: 1, medium: 1, low: 0, riskScore: 90 } };
+    assert(mcpServerBenignLifecycle(result, f15Meta()) === false,
+      'harvesting credential files / non-provider keys is not benign MCP behaviour');
+  });
+
+  test('F15: FALSE without mcp_config_injection (C2) — protects GT-066 ai-agent-exploit', () => {
+    const result = { threats: [
+      { type: 'env_access', severity: 'HIGH', message: 'Reads process.env.ANTHROPIC_API_KEY.' },
+      { type: 'suspicious_dataflow', severity: 'CRITICAL', message: 'cred read + network.' },
+      { type: 'lifecycle_script', severity: 'MEDIUM', message: 'postinstall: node setup.js' }
+    ], summary: { total: 3, critical: 1, high: 1, medium: 1, low: 0, riskScore: 95 } };
+    assert(mcpServerBenignLifecycle(result, f15Meta()) === false,
+      'no mcp_config_injection → not a confirmed MCP package → never capped');
+  });
+
+  test('F15: FALSE without MCP identity (C1) — a generic package writing MCP config is a dropper', () => {
+    const result = { threats: f15Threats(), summary: { total: 4, critical: 2, high: 1, medium: 1, low: 0, riskScore: 95 } };
+    const meta = { name: 'innocent-helper', registryMeta: { scripts: { postinstall: 'node build.js' }, description: 'A utility.' } };
+    assert(mcpServerBenignLifecycle(result, meta) === false,
+      'no MCP self-identity → SANDWORM_MODE config-injection dropper, not a legit MCP');
+  });
+
+  test('F15: FALSE when lifecycle_script itself is HIGH/CRITICAL (not a benign hook)', () => {
+    const result = { threats: [
+      { type: 'mcp_config_injection', severity: 'CRITICAL', message: 'Writes ~/.claude/mcp.json.' },
+      { type: 'env_access', severity: 'HIGH', message: 'Reads process.env.ANTHROPIC_API_KEY.' },
+      { type: 'lifecycle_script', severity: 'HIGH', message: 'postinstall: curl ... (dangerous)' }
+    ], summary: { total: 3, critical: 1, high: 2, medium: 0, low: 0, riskScore: 95 } };
+    assert(mcpServerBenignLifecycle(result, f15Meta()) === false,
+      'a HIGH/CRITICAL lifecycle_script is not a benign build hook');
   });
 
   // Cleanup
