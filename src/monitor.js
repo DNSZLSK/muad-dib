@@ -100,6 +100,7 @@ function recordError(err) { return classifyModule.recordError(err, stats); }
 function buildDailyReportEmbed() { return webhookModule.buildDailyReportEmbed(stats, dailyAlerts); }
 function sendDailyReport() { return webhookModule.sendDailyReport(stats, dailyAlerts, recentlyScanned, classifyModule.downloadsCache); }
 function sendReportNow() { return webhookModule.sendReportNow(stats); }
+function resendReport(date) { return webhookModule.resendDailyReport(date); }
 
 // --- Ingestion wrappers ---
 function pollNpmChanges(state) { return ingestionModule.pollNpmChanges(state, scanQueue, stats); }
@@ -262,6 +263,7 @@ module.exports = {
   buildReportFromDisk: webhookModule.buildReportFromDisk,
   buildReportEmbedFromDisk: webhookModule.buildReportEmbedFromDisk,
   sendReportNow,
+  resendReport,
   getReportStatus: webhookModule.getReportStatus,
   cleanupOrphanTmpDirs: daemonModule.cleanupOrphanTmpDirs,
   consecutivePollErrors: {

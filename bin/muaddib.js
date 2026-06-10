@@ -21,6 +21,15 @@ if (process.argv[2] === 'evaluate') {
   }
 }
 
+// Load /opt/muaddib/.env (project root) if present, BEFORE anything reads env, so
+// one-shot CLI invocations (notably `report --now` / `report --resend`) see
+// MUADDIB_WEBHOOK_URL even when not launched by the systemd unit that sets
+// EnvironmentFile. Real environment variables are never overwritten. Optional file.
+try {
+  const { loadDotEnv } = require('../src/env-loader.js');
+  loadDotEnv(require('path').join(__dirname, '..', '.env'));
+} catch { /* non-fatal: .env is optional */ }
+
 const { run } = require('../src/index.js');
 const { updateIOCs } = require('../src/ioc/updater.js');
 const { watch } = require('../src/watch.js');
@@ -721,6 +730,26 @@ if (command === 'version' || command === '--version' || command === '-v') {
       console.error('[ERROR]', err.message);
       process.exit(1);
     });
+  } else if (options.includes('--resend')) {
+    // Redeliver an already-persisted daily report (default: the latest) to the
+    // webhook — for when the original send failed (e.g. a DNS blip). No stats
+    // reconstruction; the exact persisted embed is re-sent.
+    const { resendReport } = require('../src/monitor.js');
+    const dateArg = options.find(o => !o.startsWith('--')) || null;
+    resendReport(dateArg).then(result => {
+      const color = process.stdout.isTTY;
+      if (result.sent) {
+        const check = color ? '\x1b[32m✓\x1b[0m' : '✓';
+        console.log(`\n  ${check} ${result.message}\n`);
+      } else {
+        const warn = color ? '\x1b[33m!\x1b[0m' : '!';
+        console.log(`\n  ${warn} ${result.message}\n`);
+      }
+      process.exit(result.sent ? 0 : 1);
+    }).catch(err => {
+      console.error('[ERROR]', err.message);
+      process.exit(1);
+    });
   } else if (options.includes('--status')) {
     const { getReportStatus } = require('../src/monitor.js');
     const status = getReportStatus();
@@ -731,7 +760,7 @@ if (command === 'version' || command === '--version' || command === '-v') {
     console.log('');
     process.exit(0);
   } else {
-    console.log('Usage: muaddib report --now | --status');
+    console.log('Usage: muaddib report --now | --resend [YYYY-MM-DD] | --status');
     process.exit(1);
   }
 } else if (command === 'relabel') {
