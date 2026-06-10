@@ -1010,6 +1010,10 @@ function appendScanLedger(e) {
       types: Array.isArray(e.types) ? e.types.slice(0, 12) : [],
       sandbox: e.sandbox || 'none',
       firstPublish: !!e.firstPublish,
+      // AUDIT-A1: version-spam marker on dropped burst-extras — lets the coverage
+      // rollup separate "first-publish lost" from "spam extra dropped (expected)".
+      // Only written when true to keep the 127MB ledger lean.
+      ...(e.isBurstExtra ? { isBurstExtra: true } : {}),
       source: e.source || 'scan'
     };
     fs.appendFileSync(SCAN_LEDGER_FILE, JSON.stringify(entry) + '\n', 'utf8');

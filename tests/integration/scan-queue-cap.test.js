@@ -10,7 +10,7 @@
  */
 
 const { test, assert } = require('../test-utils');
-const { enqueueScan, evictFromScanQueueBulk, MAX_SCAN_QUEUE } = require('../../src/monitor/scan-queue.js');
+const { enqueueScan, evictFromScanQueueBulk, dequeueScan, MAX_SCAN_QUEUE } = require('../../src/monitor/scan-queue.js');
 
 async function runScanQueueCapTests() {
   console.log('\n=== SCAN QUEUE HARD-CAP TESTS (P0c) ===\n');
@@ -162,7 +162,37 @@ async function runScanQueueCapTests() {
     console.warn = origWarn;
   }
 
-  console.log('  ✓ scan queue hard-cap (P0c) tests passed');
+  // --- AUDIT A2: priority dequeue (gated; tested via opts override) ---
+  test('dequeueScan: default is strict FIFO (oldest first)', () => {
+    const q = [{ name: 'a' }, { name: 'b', firstPublish: true }, { name: 'c' }];
+    assert(dequeueScan(q).name === 'a', 'FIFO returns oldest regardless of firstPublish');
+    assert(q.length === 2 && q[0].name === 'b', 'queue shifted from head');
+  });
+
+  test('dequeueScan: priority mode pulls oldest first-publish before older FIFO items', () => {
+    const q = [{ name: 'old1' }, { name: 'old2' }, { name: 'fp', firstPublish: true }, { name: 'old3' }];
+    const got = dequeueScan(q, { priority: true });
+    assert(got.name === 'fp', `should pull the first-publish, got ${got.name}`);
+    assert(q.length === 3 && !q.find(x => x.name === 'fp'), 'fp spliced out, others intact');
+  });
+
+  test('dequeueScan: priority covers IOC + burst-MAIN but NOT burst-extras', () => {
+    const ioc = dequeueScan([{ name: 'x' }, { name: 'i', isIOCMatch: true }], { priority: true });
+    assert(ioc.name === 'i', 'IOC match prioritized');
+    const main = dequeueScan([{ name: 'x' }, { name: 'm', isBurst: true }], { priority: true });
+    assert(main.name === 'm', 'burst-MAIN prioritized');
+    // a burst EXTRA is NOT priority → FIFO returns the oldest regular item
+    const extra = dequeueScan([{ name: 'x' }, { name: 'e', isBurst: true, isATOBurstExtra: true }], { priority: true });
+    assert(extra.name === 'x', 'burst-extra is not prioritized (stays FIFO)');
+  });
+
+  test('dequeueScan: priority falls back to FIFO when no priority item in window', () => {
+    const q = [{ name: 'a' }, { name: 'b' }, { name: 'fp', firstPublish: true }];
+    const got = dequeueScan(q, { priority: true, window: 2 }); // fp is beyond the window
+    assert(got.name === 'a', `window-bounded scan must fall back to FIFO, got ${got.name}`);
+  });
+
+  console.log('  ✓ scan queue hard-cap (P0c) + priority-dequeue (A2) tests passed');
 }
 
 module.exports = { runScanQueueCapTests };

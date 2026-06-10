@@ -10230,6 +10230,28 @@ async function runMonitorTests() {
         stats.totalTimeMs = orig.time;
       }
     });
+
+    test('AUDIT-C: daily report tags MCP top-suspects with their signals, not non-MCP', () => {
+      const webhookModule = require('../../src/monitor/webhook.js');
+      const orig = { scanned: stats.scanned, errors: stats.errors, time: stats.totalTimeMs };
+      try {
+        stats.scanned = 100; stats.errors = 0; stats.totalTimeMs = 0;
+        dailyAlerts.length = 0;
+        dailyAlerts.push({ name: '@foo/mcp-server', version: '1.0.0', ecosystem: 'npm', findingsCount: 9, score: 100, tier: '1b',
+          signals: ['credential_tampering', 'lifecycle_inline_exec', 'suspicious_dataflow'] });
+        dailyAlerts.push({ name: 'left-pad-clone', version: '2.0.0', ecosystem: 'npm', findingsCount: 4, score: 80, tier: '1b',
+          signals: ['obfuscation_detected'] });
+        const embed = webhookModule.buildDailyReportEmbed(stats, dailyAlerts, null);
+        const top = embed.embeds[0].fields.find(f => f.name === 'Top Suspects');
+        assert(top, 'Top Suspects field exists');
+        assertIncludes(top.value, '🔌 [MCP: credential_tampering, lifecycle_inline_exec, suspicious_dataflow]',
+          `MCP suspect must be tagged with its signals, got "${top.value}"`);
+        assert(!/left-pad-clone.*🔌/.test(top.value), 'non-MCP suspect must NOT get the MCP tag');
+      } finally {
+        stats.scanned = orig.scanned; stats.errors = orig.errors; stats.totalTimeMs = orig.time;
+        dailyAlerts.length = 0;
+      }
+    });
   }
 }
 

@@ -80,7 +80,7 @@ const {
 
 // From ./ingestion.js
 const { getNpmLatestTarball, getPyPITarballUrl } = require('./ingestion.js');
-const { enqueueScan } = require('./scan-queue.js');
+const { enqueueScan, dequeueScan } = require('./scan-queue.js');
 
 // From ./tarball-archive.js
 const { archiveSuspectTarball } = require('./tarball-archive.js');
@@ -259,7 +259,9 @@ function recordTrainingSample(result, params) {
       maxSeverity: result.summary ? result.summary.riskLevel : null,
       types: [...new Set((result.threats || []).map(t => t.type))],
       sandbox: params.sandboxResult ? 'run' : 'none',
-      source: 'scan'
+      source: 'scan',
+      // AUDIT-A1: stamped on `result` in scanPackage (single source of truth)
+      firstPublish: !!(result && result._firstPublish)
     });
   } catch (err) {
     // Non-fatal: ML export must never crash the monitor
@@ -673,6 +675,12 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
 
     // First-publish detection: used for sandbox priority below
     const isFirstPublish = cacheTrigger && cacheTrigger.reason === 'first_publish';
+    // AUDIT-A1 observability: stamp once so every recordTrainingSample(result, …) call
+    // below carries firstPublish into the scan-ledger (all ~10 call sites share this
+    // `result`). Pairs with the firstPublish flag on the eviction-drop ledger entries so
+    // first-publish coverage (scanned vs dropped) becomes measurable. The "Phase 2a"
+    // comment below promised this; the threading was missing until now.
+    result._firstPublish = isFirstPublish;
 
     // npm registry metadata was fetched ONCE before the worker spawn (hoisted above
     // to feed scanContext.npmRegistryMeta) and is reused here for: isFirstPublishHigh-
@@ -1171,9 +1179,14 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
           console.log(`[MONITOR] REPUTATION BYPASS: ${name} has high-confidence threat — using raw score`);
         }
 
-        // Record daily alert with post-reputation score for top suspects ranking
+        // Record daily alert with post-reputation score for top suspects ranking.
+        // AUDIT-C: carry the distinct CRITICAL/HIGH threat types so the daily report
+        // can annotate MCP suspects with their signals (visual triage, no scoring change).
         if (dailyAlerts.length < MAX_DAILY_ALERTS) {
-          dailyAlerts.push({ name, version, ecosystem, findingsCount: result.summary.total, score: adjustedResult.summary.riskScore || 0, tier });
+          const signals = [...new Set((result.threats || [])
+            .filter(t => t.severity === 'CRITICAL' || t.severity === 'HIGH')
+            .map(t => t.type))].slice(0, 6);
+          dailyAlerts.push({ name, version, ecosystem, findingsCount: result.summary.total, score: adjustedResult.summary.riskScore || 0, tier, signals });
         }
         // LLM Detective: AI-powered analysis for T1a/T1b suspects
         // Skip for fast-track (large boring packages — LLM analysis adds 10-30s for no value)
@@ -1354,7 +1367,8 @@ async function _spawnWorker(scanQueue, stats, dailyAlerts, recentlyScanned, down
   _activeWorkers++;
   try {
     while (scanQueue.length > 0 && _activeWorkers <= _targetConcurrency) {
-      const item = scanQueue.shift();
+      // AUDIT A2: FIFO by default; priority dequeue when MUADDIB_PRIORITY_DEQUEUE=1.
+      const item = dequeueScan(scanQueue);
       if (!item) break;
       await processQueueItem(item, stats, dailyAlerts, recentlyScanned, downloadsCache, scanQueue, sandboxAvailable);
     }
