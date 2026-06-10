@@ -183,6 +183,39 @@ function runScanLedgerTests() {
     } finally { try { fs.unlinkSync(f); } catch {} }
   });
 
+  // --- AUDIT 4: honest version-collapsed coverage (distinct package names) ---
+  test('computeLedgerRollup: distinct coverage collapses versions; covered = ≥1 version scanned', () => {
+    const f = path.join(os.tmpdir(), `rollup-${Date.now()}-distinct.jsonl`);
+    try {
+      const s = require('../../src/monitor/state.js');
+      writeLedger(f, [
+        // pkg "a": two versions, both scanned → one distinct name, covered
+        { ts: '2026-06-07T10:00:00.000Z', name: 'a', version: '1', ecosystem: 'npm', outcome: 'clean' },
+        { ts: '2026-06-07T10:01:00.000Z', name: 'a', version: '2', ecosystem: 'npm', outcome: 'clean' },
+        // pkg "b": one version dropped, another scanned → covered (≥1 scanned)
+        { ts: '2026-06-07T10:02:00.000Z', name: 'b', version: '1', ecosystem: 'npm', outcome: 'dropped' },
+        { ts: '2026-06-07T10:03:00.000Z', name: 'b', version: '2', ecosystem: 'npm', outcome: 'suspect' },
+        // pkg "c": only ever dropped → seen but NOT covered
+        { ts: '2026-06-07T10:04:00.000Z', name: 'c', version: '1', ecosystem: 'npm', outcome: 'dropped' },
+        // pkg "d": single scanned version → covered
+        { ts: '2026-06-07T10:05:00.000Z', name: 'd', version: '1', ecosystem: 'pypi', outcome: 'clean' }
+      ]);
+      const r = s.computeLedgerRollup(null, { file: f });
+      assert(r.total === 6, `6 raw events (got ${r.total})`);
+      assert(r.distinctPackages === 4, `distinct names a,b,c,d = 4 (got ${r.distinctPackages})`);
+      assert(r.distinctScanned === 3, `a,b,d covered; c never scanned = 3 (got ${r.distinctScanned})`);
+      assert(Math.abs(r.distinctCoverage - 0.75) < 1e-9, `coverage = 3/4 = 0.75 (got ${r.distinctCoverage})`);
+    } finally { try { fs.unlinkSync(f); } catch {} }
+  });
+
+  test('computeLedgerRollup: distinctCoverage is null on an empty ledger', () => {
+    const f = path.join(os.tmpdir(), `rollup-empty-distinct-${Date.now()}.jsonl`); // not created
+    const s = require('../../src/monitor/state.js');
+    const r = s.computeLedgerRollup(null, { file: f });
+    assert(r.distinctPackages === 0 && r.distinctScanned === 0, 'zero distinct on empty');
+    assert(r.distinctCoverage === null, 'distinctCoverage null when nothing seen (no divide-by-zero)');
+  });
+
   // Reset env + module cache so other suites get production defaults, not the test path.
   delete process.env.MUADDIB_SCAN_LEDGER_FILE;
   delete process.env.MUADDIB_SCAN_LEDGER_MAX;
