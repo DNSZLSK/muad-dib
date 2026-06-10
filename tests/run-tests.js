@@ -116,6 +116,7 @@ const { runSingleFireCriticalFloorTests } = require('./integration/single-fire-c
 const { runDecayAggregationTests } = require('./integration/decay-aggregation.test');
 const { runCompoundReplacementTests } = require('./integration/compound-replacement.test');
 const { runReputationFactorTests } = require('./integration/reputation-factor.test');
+const { runFprLiveTests } = require('./integration/fpr-live.test');
 const { runGapRemediationTests } = require('./integration/gap-remediation.test');
 const { runConfigTests } = require('./integration/config.test');
 const { runBenignRandomTests } = require('./integration/benign-random.test');
@@ -279,6 +280,8 @@ async function timed(name, fn) {
 
   // Hybrid v3 Phase 4: metadata-first reputation factor
   await timed('reputation-factor', runReputationFactorTests);
+  // FPR programme: live operational alert-rate / FPR measurement
+  await timed('fpr-live', runFprLiveTests);
 
   // GAP remediation tests (v2.9.6)
   await timed('gap-remediation', runGapRemediationTests);

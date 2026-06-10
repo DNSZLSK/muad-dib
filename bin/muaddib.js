@@ -646,6 +646,19 @@ if (command === 'version' || command === '--version' || command === '-v') {
   console.log(`  FP rate:            ${globalFpRate}`);
   console.log('');
   process.exit(0);
+} else if (command === 'fpr-live') {
+  const { runFprLive } = require('../src/commands/fpr-live.js');
+  const fprOpts = { json: jsonOutput };
+  for (let i = 0; i < options.length; i++) {
+    if (options[i] === '--since' && options[i + 1]) { fprOpts.since = options[i + 1]; i++; }
+    else if (options[i] === '--trend-days' && options[i + 1]) { fprOpts.trendDays = parseInt(options[i + 1], 10); i++; }
+  }
+  runFprLive(fprOpts).then(() => {
+    process.exit(0);
+  }).catch(err => {
+    console.error('[ERROR]', err.message);
+    process.exit(1);
+  });
 } else if (command === 'evaluate') {
   if (wantHelp) showHelp('evaluate');
   const { evaluate } = require('../src/commands/evaluate.js');
