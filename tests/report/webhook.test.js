@@ -3,7 +3,7 @@ const path = require('path');
 const { execSync } = require('child_process');
 const {
   test, asyncTest, assert, assertIncludes, assertNotIncludes,
-  runScan, runCommand, BIN, TESTS_DIR, addSkipped
+  runScan, runCommand, BIN, TESTS_DIR, addSkipped, spyOn
 } = require('../test-utils');
 
 async function runWebhookTests() {
@@ -411,6 +411,168 @@ async function runWebhookTests() {
       alerted: 0, alertRate: 0, byOutcome: { dropped: 10, clean: 10 }, byEcosystem: { npm: { total: 20, scanned: 10, dropped: 10, alerted: 0 } }
     });
     assertIncludes(approx.value, '≥7 vanished', 'approximate vanished marked with ≥ when exactVanished is false');
+  });
+
+  // ============================================
+  // AUDIT 3: transient DNS resilience (resolveHostWithRetry)
+  // ============================================
+  const dns = require('dns');
+
+  await asyncTest('DNS-RETRY: empty answer then success → resolves, retried exactly once', async () => {
+    const { resolveHostWithRetry } = require('../../src/webhook.js');
+    let call = 0;
+    const s4 = spyOn(dns.promises, 'resolve4', async () => (++call === 1 ? [] : ['1.2.3.4']));
+    const s6 = spyOn(dns.promises, 'resolve6', async () => []);
+    try {
+      const r = await resolveHostWithRetry('discord.com', { backoffMs: 1 });
+      assert(r.all.includes('1.2.3.4'), `should resolve after retry, got ${JSON.stringify(r.all)}`);
+      assert(s4.callCount === 2, `resolve4 should be called twice (1 empty + 1 success), got ${s4.callCount}`);
+    } finally { s4.restore(); s6.restore(); }
+  });
+
+  await asyncTest('DNS-RETRY: persistent empty answer → throws "no DNS records" after exhausting retries', async () => {
+    const { resolveHostWithRetry } = require('../../src/webhook.js');
+    const s4 = spyOn(dns.promises, 'resolve4', async () => []);
+    const s6 = spyOn(dns.promises, 'resolve6', async () => []);
+    try {
+      let threw = null;
+      try { await resolveHostWithRetry('discord.com', { maxRetries: 2, backoffMs: 1 }); }
+      catch (e) { threw = e; }
+      assert(threw && /no DNS records/.test(threw.message), `should throw no-DNS-records, got ${threw && threw.message}`);
+      assert(s4.callCount === 3, `resolve4 = 1 initial + 2 retries = 3 attempts, got ${s4.callCount}`);
+    } finally { s4.restore(); s6.restore(); }
+  });
+
+  await asyncTest('DNS-RETRY: a transient blip does NOT bypass the SSRF private-IP block', async () => {
+    // After the resolver recovers, a private IP must still be rejected (no retry softening).
+    const { sendWebhook } = require('../../src/webhook.js');
+    const s4 = spyOn(dns.promises, 'resolve4', async () => ['127.0.0.1']);
+    const s6 = spyOn(dns.promises, 'resolve6', async () => []);
+    try {
+      let threw = null;
+      try {
+        await sendWebhook('https://discord.com/api/webhooks/x/y', { embeds: [] }, { rawPayload: true });
+      } catch (e) { threw = e; }
+      assert(threw && /private IP/.test(threw.message), `private IP must be blocked, got ${threw && threw.message}`);
+    } finally { s4.restore(); s6.restore(); }
+  });
+
+  // ============================================
+  // AUDIT 3: .env auto-loader (env-loader.js)
+  // ============================================
+  const os = require('os');
+
+  test('ENV-LOADER: parseDotEnv handles comments, quotes, export prefix, malformed keys', () => {
+    const { parseDotEnv } = require('../../src/env-loader.js');
+    const p = parseDotEnv([
+      '# a comment',
+      '',
+      'MUADDIB_WEBHOOK_URL=https://discord.com/api/webhooks/abc',
+      'export FOO="quoted value"',
+      "BAR='single'",
+      '1INVALID=nope',     // key may not start with a digit
+      'NO_EQUALS_LINE',
+      'BAZ=trailing  '     // trimmed
+    ].join('\n'));
+    assert(p.MUADDIB_WEBHOOK_URL === 'https://discord.com/api/webhooks/abc', 'plain value');
+    assert(p.FOO === 'quoted value', 'double quotes stripped + export prefix handled');
+    assert(p.BAR === 'single', 'single quotes stripped');
+    assert(p.BAZ === 'trailing', 'value trimmed');
+    assert(!('1INVALID' in p), 'malformed key skipped');
+    assert(!('NO_EQUALS_LINE' in p), 'line without = skipped');
+  });
+
+  test('ENV-LOADER: loadDotEnv never overwrites an existing env var; missing file is a no-op', () => {
+    const { loadDotEnv } = require('../../src/env-loader.js');
+    const f = path.join(os.tmpdir(), `dotenv-${Date.now()}.env`);
+    const KEY_EXISTING = '__MUADDIB_TEST_EXISTING__';
+    const KEY_NEW = '__MUADDIB_TEST_NEW__';
+    try {
+      process.env[KEY_EXISTING] = 'from-real-env';
+      delete process.env[KEY_NEW];
+      fs.writeFileSync(f, `${KEY_EXISTING}=from-file\n${KEY_NEW}=file-only\n`);
+      const res = loadDotEnv(f);
+      assert(res.loaded === true, 'file loaded');
+      assert(process.env[KEY_EXISTING] === 'from-real-env', 'existing real env var NOT overwritten');
+      assert(process.env[KEY_NEW] === 'file-only', 'new var applied from file');
+      assert(res.keys.includes(KEY_NEW) && !res.keys.includes(KEY_EXISTING), 'only the new key reported as applied');
+      // missing file → no throw, loaded:false
+      const miss = loadDotEnv(path.join(os.tmpdir(), `nope-${Date.now()}.env`));
+      assert(miss.loaded === false && miss.keys.length === 0, 'missing file is a silent no-op');
+    } finally {
+      delete process.env[KEY_EXISTING];
+      delete process.env[KEY_NEW];
+      try { fs.unlinkSync(f); } catch {}
+    }
+  });
+
+  // ============================================
+  // AUDIT 3: persisted-report resend + boot redelivery
+  // ============================================
+  const stateMod = require('../../src/monitor/state.js');
+  const webhookMod = require('../../src/monitor/webhook.js');
+  const REPORTS_DIR = stateMod.DAILY_REPORTS_LOG_DIR;
+  const TEST_DATE = '2099-12-31'; // always the "latest" persisted report → picked by boot redelivery
+  const writeFixtureReport = (date, delivered) => {
+    const fp = path.join(REPORTS_DIR, `${date}.json`);
+    fs.writeFileSync(fp, JSON.stringify({
+      date, timestamp: '2099-12-31T06:00:00.000Z', delivered,
+      embed: { embeds: [{ title: 'fixture', fields: [] }] }, metrics: { scanned: 1 }
+    }, null, 2));
+    return fp;
+  };
+  const cleanupFixture = () => { try { fs.unlinkSync(path.join(REPORTS_DIR, `${TEST_DATE}.json`)); } catch {} };
+
+  test('RESEND: loadPersistedReport + markReportDelivered round-trip', () => {
+    const fp = writeFixtureReport(TEST_DATE, false);
+    try {
+      const r = webhookMod.loadPersistedReport(TEST_DATE);
+      assert(r && r.date === TEST_DATE && r.data.delivered === false, 'loads the fixture (delivered=false)');
+      webhookMod.markReportDelivered(r.filePath, r.data);
+      const after = JSON.parse(fs.readFileSync(fp, 'utf8'));
+      assert(after.delivered === true && typeof after.deliveredAt === 'string', 'marked delivered with timestamp');
+    } finally { cleanupFixture(); }
+  });
+
+  await asyncTest('RESEND: resendDailyReport with no webhook URL → {sent:false}, never sends', async () => {
+    const orig = process.env.MUADDIB_WEBHOOK_URL;
+    delete process.env.MUADDIB_WEBHOOK_URL;
+    writeFixtureReport(TEST_DATE, false);
+    try {
+      const res = await webhookMod.resendDailyReport(TEST_DATE);
+      assert(res.sent === false && /not configured/.test(res.message), `no-URL must short-circuit, got ${JSON.stringify(res)}`);
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
+      cleanupFixture();
+    }
+  });
+
+  await asyncTest('BOOT-REDELIVER: skips when latest report already delivered', async () => {
+    const orig = process.env.MUADDIB_WEBHOOK_URL;
+    process.env.MUADDIB_WEBHOOK_URL = 'https://discord.com/api/webhooks/x/y';
+    writeFixtureReport(TEST_DATE, true); // delivered=true
+    try {
+      const res = await webhookMod.redeliverPendingReportOnBoot();
+      assert(res.attempted === false && res.reason === 'already_delivered_or_legacy',
+        `delivered report must not be resent, got ${JSON.stringify(res)}`);
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig; else delete process.env.MUADDIB_WEBHOOK_URL;
+      cleanupFixture();
+    }
+  });
+
+  await asyncTest('BOOT-REDELIVER: undelivered report but no webhook URL → attempted:false (no_webhook_url)', async () => {
+    const orig = process.env.MUADDIB_WEBHOOK_URL;
+    delete process.env.MUADDIB_WEBHOOK_URL;
+    writeFixtureReport(TEST_DATE, false); // delivered=false
+    try {
+      const res = await webhookMod.redeliverPendingReportOnBoot();
+      assert(res.attempted === false && res.reason === 'no_webhook_url',
+        `must not attempt without a URL, got ${JSON.stringify(res)}`);
+    } finally {
+      if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
+      cleanupFixture();
+    }
   });
 }
 

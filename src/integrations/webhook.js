@@ -70,20 +70,15 @@ async function sendWebhook(url, results, options = {}) {
   const urlObj = new URL(url);
   let resolvedAddress;
   try {
-    const [ipv4Addresses, ipv6Addresses] = await Promise.all([
-      dns.promises.resolve4(urlObj.hostname).catch(() => []),
-      dns.promises.resolve6(urlObj.hostname).catch(() => [])
-    ]);
-    const allAddresses = [...ipv4Addresses, ...ipv6Addresses];
-    if (allAddresses.length === 0) {
-      throw new Error(`Webhook blocked: no DNS records found for ${urlObj.hostname}`);
-    }
+    // Retries transient resolver failures (the 2026-06-10 DNS blip). The SSRF
+    // private-IP check below runs on the resolved addresses and is NOT retried.
+    const { ipv4, all: allAddresses } = await resolveHostWithRetry(urlObj.hostname);
     for (const address of allAddresses) {
       if (PRIVATE_IP_PATTERNS.some(pattern => pattern.test(address))) {
         throw new Error(`Webhook blocked: hostname ${urlObj.hostname} resolves to private IP ${address}`);
       }
     }
-    resolvedAddress = ipv4Addresses[0] || null;
+    resolvedAddress = ipv4[0] || null;
   } catch (e) {
     if (e.message.startsWith('Webhook blocked')) throw e;
     throw new Error(`Webhook blocked: DNS resolution failed for ${urlObj.hostname}`, { cause: e });
@@ -365,6 +360,17 @@ const MAX_RESPONSE_SIZE = 1024 * 1024; // 1MB
 const MAX_RETRIES = 3;
 const BACKOFF_BASE_MS = 1000; // 1s, 2s, 4s exponential backoff
 const RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
+// Transient socket/DNS errors worth retrying — a flaky resolver or reset connection
+// is exactly the 2026-06-10 "no DNS records for discord.com" failure mode. NEVER
+// includes SSRF blocks (private IP / disallowed domain) — those are hard rejects.
+const RETRYABLE_ERROR_CODES = new Set([
+  'ECONNRESET', 'ETIMEDOUT', 'ENETUNREACH', 'EHOSTUNREACH',
+  'EAI_AGAIN', 'ENOTFOUND', 'ECONNREFUSED', 'EPIPE'
+]);
+// DNS resolution retry (separate from HTTP retry — a name that won't resolve never
+// reaches the request). 3 retries → 4 attempts, backoff 0.5s/1s/2s ≈ 3.5s worst case.
+const DNS_MAX_RETRIES = 3;
+const DNS_BACKOFF_BASE_MS = 500;
 
 // Rate limiting: max 1 webhook per second (Discord limit is 30/min)
 const RATE_LIMIT_MS = 1000;
@@ -381,6 +387,36 @@ function rateLimitDelay() {
 
 function sleepMs(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Resolve a hostname to IPv4+IPv6, retrying on transient DNS failures (empty
+ * answer / EAI_AGAIN). Returns { ipv4, ipv6, all } on success. Throws after the
+ * retry budget is exhausted. Does NOT perform the SSRF private-IP check — the
+ * caller does that on the returned addresses so a hard block is never retried.
+ */
+async function resolveHostWithRetry(hostname, opts = {}) {
+  const maxRetries = opts.maxRetries != null ? opts.maxRetries : DNS_MAX_RETRIES;
+  const backoffBase = opts.backoffMs != null ? opts.backoffMs : DNS_BACKOFF_BASE_MS;
+  let lastErr;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    let ipv4 = [], ipv6 = [];
+    try {
+      [ipv4, ipv6] = await Promise.all([
+        dns.promises.resolve4(hostname).catch(() => []),
+        dns.promises.resolve6(hostname).catch(() => [])
+      ]);
+    } catch (e) { lastErr = e; }
+    const all = [...ipv4, ...ipv6];
+    if (all.length > 0) return { ipv4, ipv6, all };
+    lastErr = new Error(`Webhook blocked: no DNS records found for ${hostname}`);
+    if (attempt < maxRetries) {
+      const backoff = backoffBase * Math.pow(2, attempt);
+      console.error(`[WEBHOOK] DNS for ${hostname} returned no records, retrying in ${backoff}ms (attempt ${attempt + 1}/${maxRetries})...`);
+      await sleepMs(backoff);
+    }
+  }
+  throw lastErr;
 }
 
 function sendOnce(url, payload, resolvedAddress) {
@@ -449,7 +485,13 @@ async function send(url, payload, resolvedAddress) {
       return result;
     } catch (err) {
       lastError = err;
-      const isRetryable = err.statusCode && RETRYABLE_STATUS_CODES.has(err.statusCode);
+      // Retry on retryable HTTP status, transient socket errors, OR a request
+      // timeout (no statusCode/code, identified by message). A 1MB-overflow or
+      // any other non-transient error falls through and throws immediately.
+      const isRetryable =
+        (err.statusCode && RETRYABLE_STATUS_CODES.has(err.statusCode)) ||
+        (err.code && RETRYABLE_ERROR_CODES.has(err.code)) ||
+        /timeout/i.test(err.message || '');
       if (!isRetryable || attempt >= MAX_RETRIES) {
         throw err;
       }
@@ -461,7 +503,8 @@ async function send(url, payload, resolvedAddress) {
       } else {
         backoffMs = BACKOFF_BASE_MS * Math.pow(2, attempt);
       }
-      console.error(`[WEBHOOK] HTTP ${err.statusCode}, retrying in ${backoffMs}ms (attempt ${attempt + 1}/${MAX_RETRIES})...`);
+      const reason = err.statusCode ? `HTTP ${err.statusCode}` : (err.code || err.message);
+      console.error(`[WEBHOOK] ${reason}, retrying in ${backoffMs}ms (attempt ${attempt + 1}/${MAX_RETRIES})...`);
       await sleepMs(backoffMs);
     }
   }
@@ -470,5 +513,7 @@ async function send(url, payload, resolvedAddress) {
 
 module.exports = {
   sendWebhook, validateWebhookUrl, formatDiscord, formatSlack, formatGeneric,
-  MAX_RETRIES, BACKOFF_BASE_MS, RETRYABLE_STATUS_CODES, RATE_LIMIT_MS
+  resolveHostWithRetry,
+  MAX_RETRIES, BACKOFF_BASE_MS, RETRYABLE_STATUS_CODES, RATE_LIMIT_MS,
+  RETRYABLE_ERROR_CODES, DNS_MAX_RETRIES, DNS_BACKOFF_BASE_MS
 };

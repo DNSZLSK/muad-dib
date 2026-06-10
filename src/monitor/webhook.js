@@ -455,6 +455,10 @@ function persistDailyReport(reportPayload, rawMetrics) {
     const data = {
       date: today,
       timestamp: new Date().toISOString(),
+      // delivered=false until the webhook confirms — markReportDelivered() flips it
+      // after a successful send. The boot redelivery path keys off this (AUDIT 3).
+      delivered: false,
+      deliveredAt: null,
       embed: reportPayload,
       metrics: rawMetrics
     };
@@ -462,6 +466,92 @@ function persistDailyReport(reportPayload, rawMetrics) {
     console.log(`[MONITOR] Daily report persisted to ${filePath}`);
   } catch (err) {
     console.error(`[MONITOR] Failed to persist daily report: ${err.message}`);
+  }
+}
+
+// --- AUDIT 3: persisted-report redelivery (resend + boot recovery) ---
+
+/** List persisted daily-report dates (YYYY-MM-DD), sorted ascending. */
+function listPersistedReportDates() {
+  try {
+    return fs.readdirSync(DAILY_REPORTS_LOG_DIR)
+      .filter(f => /^\d{4}-\d{2}-\d{2}\.json$/.test(f))
+      .map(f => f.slice(0, -5))
+      .sort();
+  } catch { return []; }
+}
+
+/**
+ * Load a persisted daily report by date (default: latest). Returns
+ * { date, filePath, data } or null if none / unreadable.
+ */
+function loadPersistedReport(date) {
+  let d = date;
+  if (!d) {
+    const all = listPersistedReportDates();
+    if (all.length === 0) return null;
+    d = all[all.length - 1];
+  }
+  const filePath = path.join(DAILY_REPORTS_LOG_DIR, `${d}.json`);
+  try {
+    return { date: d, filePath, data: JSON.parse(fs.readFileSync(filePath, 'utf8')) };
+  } catch { return null; }
+}
+
+/** Mark a persisted report file as delivered (idempotent, best-effort). */
+function markReportDelivered(filePath, data) {
+  try {
+    data.delivered = true;
+    data.deliveredAt = new Date().toISOString();
+    atomicWriteFileSync(filePath, JSON.stringify(data, null, 2));
+  } catch (err) {
+    console.error(`[MONITOR] Failed to mark report delivered: ${err.message}`);
+  }
+}
+
+/**
+ * Resend a persisted daily report's EXACT embed to the webhook — faithful
+ * redelivery, no stats reconstruction. Used by `report --resend [date]` and the
+ * boot redelivery path. Returns { sent, message, date }.
+ */
+async function resendDailyReport(date) {
+  const url = getWebhookUrl();
+  if (!url) return { sent: false, message: 'MUADDIB_WEBHOOK_URL not configured' };
+  const report = loadPersistedReport(date);
+  if (!report) {
+    return { sent: false, message: date ? `No persisted report for ${date}` : 'No persisted reports found' };
+  }
+  const payload = report.data && report.data.embed;
+  if (!payload) return { sent: false, message: `Report ${report.date} has no embed payload`, date: report.date };
+  try {
+    await sendWebhook(url, payload, { rawPayload: true });
+  } catch (err) {
+    return { sent: false, message: `Webhook failed: ${err.message}`, date: report.date };
+  }
+  markReportDelivered(report.filePath, report.data);
+  return { sent: true, message: `Daily report ${report.date} resent`, date: report.date };
+}
+
+/**
+ * Boot redelivery: if the most recent persisted report was never confirmed
+ * delivered (last webhook failed — e.g. the 2026-06-10 DNS blip) AND a webhook URL
+ * is configured, attempt exactly one resend. Best-effort; never throws. Reports
+ * with delivered === undefined (written before this feature) are treated as
+ * delivered, so upgrading never spams historical reports.
+ */
+async function redeliverPendingReportOnBoot() {
+  try {
+    const report = loadPersistedReport(null); // latest
+    if (!report) return { attempted: false, reason: 'no_reports' };
+    if (report.data.delivered !== false) return { attempted: false, reason: 'already_delivered_or_legacy' };
+    if (!getWebhookUrl()) return { attempted: false, reason: 'no_webhook_url' };
+    console.log(`[MONITOR] Last daily report (${report.date}) was not delivered — attempting boot redelivery...`);
+    const res = await resendDailyReport(report.date);
+    console.log(`[MONITOR] Boot redelivery of ${report.date}: ${res.sent ? 'sent' : 'failed — ' + res.message}`);
+    return { attempted: true, sent: res.sent, date: report.date };
+  } catch (err) {
+    console.error(`[MONITOR] Boot redelivery error (non-fatal): ${err.message}`);
+    return { attempted: false, reason: 'error' };
   }
 }
 
@@ -1298,8 +1388,13 @@ async function sendDailyReport(stats, dailyAlerts, recentlyScanned, downloadsCac
     try {
       await sendWebhook(url, payload, { rawPayload: true });
       console.log('[MONITOR] Daily report sent');
+      // Confirm delivery on the just-persisted file so boot redelivery won't resend it.
+      const persisted = loadPersistedReport(today);
+      if (persisted) markReportDelivered(persisted.filePath, persisted.data);
     } catch (err) {
-      console.error(`[MONITOR] Daily report webhook failed: ${err.message}`);
+      // Webhook failed (DNS/network/5xx after retries). The report stays on disk with
+      // delivered=false → it will be redelivered on the next daemon boot (AUDIT 3).
+      console.error(`[MONITOR] Daily report webhook failed: ${err.message} — left undelivered for boot redelivery`);
     }
   } else {
     console.log('[MONITOR] Daily report persisted locally (no webhook URL configured)');
@@ -1487,6 +1582,11 @@ module.exports = {
   triageRisk,
   persistAlert,
   persistDailyReport,
+  listPersistedReportDates,
+  loadPersistedReport,
+  markReportDelivered,
+  resendDailyReport,
+  redeliverPendingReportOnBoot,
   computeAlertPriority,
   buildAlertData,
   trySendWebhook,
