@@ -1115,6 +1115,12 @@ function computeLedgerRollup(sinceTs, opts = {}) {
   const scannedKeys = new Set();
   const droppedKeys = new Set();
   let exactVanished = true;
+  // Distinct package NAMES (version-collapsed) for honest coverage. A package is
+  // "covered" if at least one of its versions reached a real scan (non-dropped).
+  // Bounded: names are only added while underCap, so |names| ≤ |keys| ≤ MAX_ROLLUP_KEYS.
+  // Exactness mirrors exactVanished (false iff the cap was hit mid-window).
+  const allNames = new Set();
+  const scannedNames = new Set();
 
   _iterateJsonlSync(file, (e) => {
     if (!e || !e.name) return;
@@ -1140,11 +1146,11 @@ function computeLedgerRollup(sinceTs, opts = {}) {
     const underCap = exactVanished && (scannedKeys.size + droppedKeys.size) < MAX_ROLLUP_KEYS;
     if (outcome === 'dropped') {
       dropped++; ecoNode.dropped++;
-      if (underCap) droppedKeys.add(key); else exactVanished = false;
+      if (underCap) { droppedKeys.add(key); allNames.add(e.name); } else exactVanished = false;
     } else {
       scanned++; ecoNode.scanned++;
       if (outcome === 'suspect' || outcome === 'confirmed') { alerted++; ecoNode.alerted++; }
-      if (underCap) scannedKeys.add(key); else exactVanished = false;
+      if (underCap) { scannedKeys.add(key); allNames.add(e.name); scannedNames.add(e.name); } else exactVanished = false;
     }
   });
 
@@ -1164,6 +1170,13 @@ function computeLedgerRollup(sinceTs, opts = {}) {
     alerted,
     // NOT a TPR — see the HONEST METRIC NOTE above. null when nothing was scanned.
     alertRate: scanned > 0 ? alerted / scanned : null,
+    // Honest, version-collapsed coverage: distinct package names seen vs scanned.
+    // Bounded ≤100% by construction (scannedNames ⊆ allNames). Unlike the raw
+    // event-count coverage in the embed, this is immune to version-spam inflation
+    // (e.g. a package publishing thousands of versions counts once).
+    distinctPackages: allNames.size,
+    distinctScanned: scannedNames.size,
+    distinctCoverage: allNames.size > 0 ? scannedNames.size / allNames.size : null,
     byOutcome,
     byEcosystem
   };
