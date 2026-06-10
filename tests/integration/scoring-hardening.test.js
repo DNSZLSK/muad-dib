@@ -2,7 +2,7 @@
 
 const path = require('path');
 const { test, asyncTest, assert, runScanDirect } = require('../test-utils');
-const { applyFPReductions, calculateRiskScore, computeGroupScore, CONFIDENCE_FACTORS } = require('../../src/scoring.js');
+const { applyFPReductions, calculateRiskScore, computeGroupScore, CONFIDENCE_FACTORS, applyContextualFPCaps } = require('../../src/scoring.js');
 
 async function runScoringHardeningTests() {
   console.log('\n=== SCORING HARDENING TESTS (v2.5.13) ===\n');
@@ -944,6 +944,45 @@ async function runScoringHardeningTests() {
       `LOW-only score should naturally be under 35, got ${result.riskScore}`);
     assert(result.riskScore > 0,
       `Should have some score, got ${result.riskScore}`);
+  });
+
+  // ===================================================================
+  // AUDIT 2 — F15 wiring: applyContextualFPCaps caps a legit MCP server
+  // (mcp_config_injection + provider-key env + benign lifecycle) to 30,
+  // and does NOT cap one whose lifecycle is malicious.
+  // ===================================================================
+  test('F15 wiring: applyContextualFPCaps caps a benign-lifecycle MCP server to 30', () => {
+    const result = {
+      threats: [
+        { type: 'mcp_config_injection', severity: 'CRITICAL', file: 'index.js', message: 'Writes ~/.claude/claude_desktop_config.json (mcpServers).' },
+        { type: 'env_access', severity: 'HIGH', file: 'index.js', message: 'Reads process.env.ANTHROPIC_API_KEY.' },
+        { type: 'lifecycle_script', severity: 'MEDIUM', file: 'package.json', message: 'Script "postinstall": node build.js' }
+      ],
+      summary: { total: 3, critical: 1, high: 1, medium: 1, low: 0, riskScore: 48, riskLevel: 'MEDIUM' }
+    };
+    const pkgMeta = { name: 'my-mcp-server', scripts: { postinstall: 'node build.js' },
+      keywords: ['mcp', 'model-context-protocol'], description: 'Model Context Protocol server' };
+    const applied = applyContextualFPCaps(result, pkgMeta);
+    assert(applied.some(a => a.feature === 'mcp_server_benign_lifecycle' && a.cap === 30),
+      `F15 cap should be applied, got ${JSON.stringify(applied)}`);
+    assert(result.summary.riskScore === 30, `score should be capped to 30, got ${result.summary.riskScore}`);
+  });
+
+  test('F15 wiring: applyContextualFPCaps does NOT cap an MCP with a malicious lifecycle', () => {
+    const result = {
+      threats: [
+        { type: 'mcp_config_injection', severity: 'CRITICAL', file: 'index.js', message: 'Writes ~/.claude/mcp.json.' },
+        { type: 'env_access', severity: 'HIGH', file: 'index.js', message: 'Reads process.env.ANTHROPIC_API_KEY.' },
+        { type: 'lifecycle_file_exec', severity: 'CRITICAL', file: 'package.json', message: 'postinstall executes setup.js (mcp_config_injection).' }
+      ],
+      summary: { total: 3, critical: 2, high: 1, medium: 0, low: 0, riskScore: 85, riskLevel: 'CRITICAL' }
+    };
+    const pkgMeta = { name: 'mcp-config-inject', scripts: { postinstall: 'node setup.js' },
+      keywords: ['mcp'], description: 'MCP config injection' };
+    const applied = applyContextualFPCaps(result, pkgMeta);
+    assert(!applied.some(a => a.feature === 'mcp_server_benign_lifecycle'),
+      `F15 must NOT fire on a malicious-lifecycle MCP, got ${JSON.stringify(applied)}`);
+    assert(result.summary.riskScore === 85, `malicious MCP score must stay 85, got ${result.summary.riskScore}`);
   });
 }
 

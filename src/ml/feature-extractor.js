@@ -752,6 +752,75 @@ function mcpServerEnvAccess(result, meta) {
 }
 
 // ============================================================================
+// Feature 15 — mcp_server_benign_lifecycle (AUDIT 2, 2026-06)
+// ============================================================================
+//
+// Like F9 (mcpServerEnvAccess) but TOLERATES a benign install lifecycle. F9
+// vetoes on ANY preinstall/install/postinstall (its C3), which makes it
+// inoperative for the ~77% of legitimate MCP installers that ship a build/setup
+// hook (`husky install`, `node build.js`, `tsc`). Those packages stack
+// mcp_config_injection (CRIT) + suspicious_dataflow (CRIT, env→first-party POST)
+// + env_access (HIGH) + lifecycle_script (MEDIUM) and score ~150 on `muaddib
+// scan` — the recurring @recapp/mcp-style false positives in the daily report.
+//
+// F15 instead allows a lifecycle that is only flagged as a plain MEDIUM/LOW
+// `lifecycle_script`, and vetoes the moment the lifecycle does anything
+// malicious. Ground-truth safety (verified by replay before/after):
+//   GT-060 mcp-config-inject  → vetoed by lifecycle_file_exec (malicious postinstall)
+//   GT-088 defi-threat-scanner → vetoed by HARD exfil (suspicious_domain) + cred files
+//   GT-066 ai-agent-exploit    → never emits mcp_config_injection (C2 excludes it)
+//   GT-097 / GT-099            → HARD exfil / not an mcp_config_injection JS package
+// Same cap (30 = MEDIUM) and identity/provider-key machinery as F9.
+const F15_LIFECYCLE_MALICE_TYPES = new Set([
+  'lifecycle_file_exec',        // postinstall executes a file containing HIGH/CRIT threats
+  'lifecycle_dataflow',         // install-time credential read + network send (compound)
+  'lifecycle_shell_pipe',       // curl | sh during install
+  'lifecycle_missing_script',   // phantom install script (payload injected later)
+  'intent_credential_exfil',    // multi-file credential→network intent
+  'intent_command_exfil',
+  'detached_credential_exfil',
+  'staged_payload'
+]);
+
+function mcpServerBenignLifecycle(result, meta) {
+  // C1 — MCP identity (same as F9)
+  if (!_f9HasMcpIdentity(meta)) return false;
+  const threats = (result && result.threats) || [];
+  if (threats.length === 0) return false;
+  // C2 — mcp_config_injection present (proves real MCP work, not just a name claim)
+  if (!threats.some(t => t.type === 'mcp_config_injection')) return false;
+  // C3' (relaxed) — a lifecycle MAY exist, but it must be benign: no malicious
+  // lifecycle compound, and a plain lifecycle_script (if any) must not itself be
+  // HIGH/CRITICAL (a benign husky/build hook is MEDIUM/LOW).
+  for (const t of threats) {
+    if (F15_LIFECYCLE_MALICE_TYPES.has(t.type)) return false;
+    if (t.type === 'lifecycle_script' && (t.severity === 'HIGH' || t.severity === 'CRITICAL')) return false;
+  }
+  // C4 — env_access / credential threats cite ONLY known provider keys or infra
+  // vars; never credential file paths (same machinery as F9).
+  for (const t of threats) {
+    if (t.type !== 'env_access' && t.type !== 'credential_regex_harvest' &&
+        t.type !== 'env_charcode_reconstruction') continue;
+    const msg = String(t.message || '');
+    if (F9_CREDENTIAL_FILE_RE.test(msg)) return false;
+    const candidates = msg.match(/\b[A-Z][A-Z0-9_]{2,}\b/g);
+    if (!candidates) continue;
+    for (const v of candidates) {
+      if (KNOWN_PROVIDER_KEYS_LITERAL.has(v)) continue;
+      if (PROVIDER_KEY_SUFFIX_RE.test(v)) continue;
+      if (F9_INFRA_KEYS.has(v)) continue;
+      return false;
+    }
+  }
+  // C5 — no HARD third-party exfil capability (SOFT suspicious_dataflow to a
+  // first-party endpoint is intrinsic to MCP installers — see F9/F14)
+  for (const t of threats) {
+    if (HARD_EXFIL_TYPES.has(t.type)) return false;
+  }
+  return true;
+}
+
+// ============================================================================
 // Feature 10 — vendor_cli_sdk (v2.11.23, audit week3 cluster, 96 FP)
 // ============================================================================
 //
@@ -1426,6 +1495,7 @@ module.exports = {
   placeholderAntiDepConfusion,
   installScriptNoNetworkEgress,
   mcpServerEnvAccess,
+  mcpServerBenignLifecycle,
   vendorCliSdk,
   aiAgentBot,
   vendorMinifiedBundle,

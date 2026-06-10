@@ -1506,6 +1506,7 @@ const {
   obfuscationWithoutVector,
   placeholderAntiDepConfusion,
   mcpServerEnvAccess,
+  mcpServerBenignLifecycle,
   vendorCliSdk,
   aiAgentBot,
   vendorMinifiedBundle,
@@ -1558,6 +1559,13 @@ function applyContextualFPCaps(result, pkgMeta) {
   // F9: legit MCP installer/server with env_access on provider keys → MAX 30
   if (mcpServerEnvAccess(result, meta)) {
     applied.push({ feature: 'mcp_server_env_access', cap: 30 });
+  }
+  // F15: legit MCP installer/server WITH a benign install lifecycle (AUDIT 2) →
+  // MAX 30. Extends F9 to the ~77% of MCP installers that ship a build/setup hook
+  // (husky install, node build.js). Vetoes on malicious lifecycle (lifecycle_file_exec
+  // etc.), HARD exfil, or credential-file access — so GT MCP malware stays uncapped.
+  if (mcpServerBenignLifecycle(result, meta)) {
+    applied.push({ feature: 'mcp_server_benign_lifecycle', cap: 30 });
   }
   // F2: binary installer from GitHub Releases → MAX 35
   if (installUrlGithubReleases(result)) {
