@@ -468,13 +468,20 @@ function findDependencyBoundarySquat(name) {
       if (!extra.includes('-') && LEGIT_BOUNDARY_TOKENS.has(extra)) continue;
       return { original: POPULAR_PACKAGES[i], type: 'boundary_squat', distance: extra.length, extra };
     } else {
-      // Single-token popular: must appear as a full hyphen-bounded token in name
+      // Single-token popular. A SQUAT impersonates by putting the popular name as the
+      // TRAILING token (`<deceptive-prefix>-<popular>`, e.g. evil-lodash). The
+      // npm-dominant `<popular>-<feature>` convention (react-native-gesture-handler,
+      // redux-thunk, glob-parent, async-mutex) is legitimate and must NOT be flagged.
+      // FPR audit (2026-06, 200-pkg adjudication): matching the popular token in PREFIX
+      // or MIDDLE position made dependency_typosquat ~100% FP on the React-Native and
+      // Redux ecosystems — so we only match the SUFFIX position. A genuinely malicious
+      // `<popular>-<evil>` is caught by its code (exfil/RCE) + the Track-R malice floor,
+      // not by name shape. Supersedes the earlier react-prefix heuristic.
       const tokens = lower.split('-');
-      const idx = tokens.indexOf(popular);
-      if (idx === -1) continue;
       if (tokens.length === 1) continue;
-      const siblings = tokens.filter((_, j) => j !== idx);
-      // If all siblings are legit boundary tokens → benign variant (e.g. react-router)
+      if (tokens[tokens.length - 1] !== popular) continue;     // popular must be the trailing token
+      const siblings = tokens.slice(0, -1);
+      // Benign ecosystem variant if every prefix token is a legit qualifier (ts-jest, babel-jest).
       if (siblings.every(t => LEGIT_BOUNDARY_TOKENS.has(t) || isLegitimateVariant(t))) continue;
       const extra = siblings.join('-');
       return { original: POPULAR_PACKAGES[i], type: 'boundary_squat', distance: extra.length, extra };

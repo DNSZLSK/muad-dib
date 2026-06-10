@@ -123,9 +123,10 @@ async function runTyposquatTests() {
     }
   });
 
-  await asyncTest('RT-C1-FPR.c (guard): real boundary-squat still detected (plain-crypto-js, react-token-exfil)', async () => {
-    // Verifie qu'Axe 1 ne masque pas des squats sans prefixe d'ecosysteme.
-    const realSquats = ['plain-crypto-js', 'react-token-exfil'];
+  await asyncTest('RT-C1-FPR.c (guard): SUFFIX boundary-squats still detected (plain-crypto-js, secure-axios)', async () => {
+    // A genuine squat impersonates by putting the popular name as the TRAILING token
+    // (`<deceptive>-<popular>`). These must still fire.
+    const realSquats = ['plain-crypto-js', 'secure-axios'];
     for (const dep of realSquats) {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-rt-c1-fpr-'));
       fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
@@ -137,7 +138,29 @@ async function runTyposquatTests() {
         const result = await runScanDirect(tmp);
         const t = (result.threats || []).find(tt =>
           tt.type === 'dependency_typosquat' && tt.message.includes(dep));
-        assert(t, `GUARD: ${dep} doit toujours firer dependency_typosquat (no over-suppression by ecosystem prefix)`);
+        assert(t, `GUARD: ${dep} (suffix squat) doit toujours firer dependency_typosquat`);
+      } finally { cleanupTemp(tmp); }
+    }
+  });
+
+  await asyncTest('RT-C1-FPR.c2 (FPR): PREFIX `<popular>-<feature>` is legit — must NOT fire', async () => {
+    // FPR audit (2026-06, 200-pkg blind adjudication): matching the popular token in
+    // prefix/middle position made dependency_typosquat ~100% FP on the React-Native /
+    // Redux ecosystems. `<popular>-<feature>` is the dominant npm naming convention,
+    // not a squat. Real malice in such a package is caught by its code, not its name.
+    const legitPrefix = ['react-native-gesture-handler', 'redux-thunk', 'glob-parent'];
+    for (const dep of legitPrefix) {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-rt-c1-fpr2-'));
+      fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
+        name: 'legit-app', version: '1.0.0',
+        dependencies: { [dep]: '*' }
+      }));
+      fs.writeFileSync(path.join(tmp, 'index.js'), 'module.exports = {};');
+      try {
+        const result = await runScanDirect(tmp);
+        const t = (result.threats || []).find(tt =>
+          tt.type === 'dependency_typosquat' && tt.message.includes(dep));
+        assert(!t, `FPR: ${dep} (popular-as-prefix) must NOT fire dependency_typosquat`);
       } finally { cleanupTemp(tmp); }
     }
   });

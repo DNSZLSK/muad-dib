@@ -4703,6 +4703,22 @@ async function runMonitorTests() {
 
   // --- sendDailyReport test ---
 
+  // Clock pin for the sendDailyReport tests. sendDailyReport has a dead-zone guard
+  // (src/monitor/webhook.js): it suppresses the report AND the counter reset before
+  // 08:00 Paris. When the suite runs during 00:00–07:59 Paris (as CI sometimes does),
+  // these tests would fail with no code change. Pin a daytime Paris clock around each
+  // such test so they are time-of-day independent. The fake stays active through the
+  // assertions so the lastDailyReportDate stamp and getParisDateString() agree.
+  const _REPORT_REAL_DATE = Date;
+  function _fakeReportClock() {
+    const iso = '2026-06-09T10:00:00Z'; // 12:00 Paris — safely past the 08:00 dead zone
+    global.Date = class extends _REPORT_REAL_DATE {
+      constructor(...a) { if (a.length) super(...a); else super(iso); }
+      static now() { return new _REPORT_REAL_DATE(iso).getTime(); }
+    };
+  }
+  function _unfakeReportClock() { global.Date = _REPORT_REAL_DATE; }
+
   await asyncTest('MONITOR-COV: sendDailyReport resets counters when webhook set', async () => {
     const origEnv = process.env.MUADDIB_WEBHOOK_URL;
     const origLog = console.log;
@@ -4737,6 +4753,7 @@ async function runMonitorTests() {
     recentlyScanned.add('npm/daily-report-test@1.0.0');
 
     try {
+      _fakeReportClock();
       await sendDailyReport();
       // After sendDailyReport, counters should be reset
       assert(stats.scanned === 0, 'scanned should be reset to 0, got ' + stats.scanned);
@@ -4749,6 +4766,7 @@ async function runMonitorTests() {
       assert(recentlyScanned.size === 0, 'recentlyScanned should be cleared');
       assert(stats.lastDailyReportDate === getParisDateString(), 'lastDailyReportDate should be today');
     } finally {
+      _unfakeReportClock();
       webhookModule.sendWebhook = origSendWebhook;
       console.log = origLog;
       console.error = origErr;
@@ -4790,12 +4808,14 @@ async function runMonitorTests() {
     stats.scanned = 1;
 
     try {
+      _fakeReportClock();
       await sendDailyReport();
       const errLog = errors.find(l => l.includes('Daily report webhook failed'));
       assert(errLog !== undefined, 'Should log webhook failure');
       // Counters should still be reset even on webhook failure
       assert(stats.scanned === 0, 'scanned should be reset even on failure');
     } finally {
+      _unfakeReportClock();
       webhookModule.sendWebhook = origSendWebhook;
       console.log = origLog;
       console.error = origErr;
@@ -5122,12 +5142,14 @@ async function runMonitorTests() {
     stats.scanned = 42;
 
     try {
+      _fakeReportClock();
       await sendDailyReport();
       // sendDailyReport now persists locally and resets counters even without webhook
       assert(stats.scanned === 0, 'Stats should be reset after daily report (no webhook still persists)');
       const noWebhookLog = logs.some(l => typeof l === 'string' && l.includes('no webhook URL configured'));
       assert(noWebhookLog, 'Should log that no webhook URL is configured');
     } finally {
+      _unfakeReportClock();
       console.log = origLog;
       console.error = origErr;
       stats.scanned = origScanned;
@@ -5513,9 +5535,11 @@ async function runMonitorTests() {
     downloadsCache.set('cached-pkg', { downloads: 999999, fetchedAt: Date.now() });
 
     try {
+      _fakeReportClock();
       await sendDailyReport();
       assert(downloadsCache.size === 0, 'downloadsCache should be cleared after sendDailyReport, got size ' + downloadsCache.size);
     } finally {
+      _unfakeReportClock();
       webhookModule.sendWebhook = origSendWebhook;
       console.log = origLog;
       console.error = origErr;
@@ -5561,11 +5585,13 @@ async function runMonitorTests() {
     stats.errors = 0;
 
     try {
+      _fakeReportClock();
       await sendDailyReport();
       assert(webhookCalled === false, 'Webhook should NOT be called when 0 packages scanned');
       const skipLog = logs.find(l => l.includes('skipped (0 packages scanned)'));
       assert(skipLog !== undefined, 'Should log that report was skipped due to 0 scanned');
     } finally {
+      _unfakeReportClock();
       webhookModule.sendWebhook = origSendWebhook;
       console.log = origLog;
       console.error = origErr;
@@ -5598,6 +5624,7 @@ async function runMonitorTests() {
     } catch {}
 
     try {
+      _fakeReportClock();
       try { fs.unlinkSync(LAST_DAILY_REPORT_FILE); } catch {}
       await sendDailyReport();
       // Even though webhook failed, date should be saved (write-ahead)
@@ -5606,6 +5633,7 @@ async function runMonitorTests() {
       assert(savedDate === today, 'Date should be saved to disk even on webhook failure, got ' + savedDate);
       assert(hasReportBeenSentToday() === true, 'Should mark today as sent');
     } finally {
+      _unfakeReportClock();
       console.log = origLog;
       console.error = origErr;
       stats.scanned = origScanned;
@@ -5849,9 +5877,11 @@ async function runMonitorTests() {
     assert(fs.existsSync(DAILY_STATS_FILE), 'daily-stats.json should exist before sendDailyReport');
 
     try {
+      _fakeReportClock();
       await sendDailyReport();
       assert(!fs.existsSync(DAILY_STATS_FILE), 'daily-stats.json should be deleted after sendDailyReport');
     } finally {
+      _unfakeReportClock();
       console.log = origLog;
       console.error = origErr;
       stats.scanned = origScanned;
