@@ -1117,25 +1117,41 @@ function buildDailyReportEmbed(stats, dailyAlerts, ledgerRollup) {
   // Avg scan time from in-memory stats
   const avg = stats.scanned > 0 ? (stats.totalTimeMs / stats.scanned / 1000).toFixed(1) : '0.0';
 
-  // --- Coverage estimation ---
-  // Numerator: unique (ecosystem, name, version) tuples that reached a scan
-  // attempt (post-dedup). Denominator: raw publish events seen on either
-  // changes stream BEFORE per-package filtering, plus npm catch-up gaps and
-  // PyPI publish events that survived per-(name,version) dedup. This stays
-  // bounded near 100% — old "scanned/changesStreamPackages" was racing PyPI
-  // scans and ATO burst extras against an npm-only denominator.
+  // --- Phase 0b: per-scan ledger rollup (resolved early so Coverage can use it) ---
+  // Caller may pass a precomputed rollup (sendDailyReport does, to persist the same
+  // numbers it displays); undefined → compute here; explicit null → omit the section.
+  const ledger = ledgerRollup !== undefined ? ledgerRollup : safeLedgerRollup();
+
+  // --- Coverage ---
+  // HEADLINE: honest, version-collapsed coverage from the scan-ledger — distinct
+  // package NAMES actually scanned vs distinct names seen (scanned + dropped) in
+  // the window. Bounded ≤100% by construction and immune to version-spam (a
+  // package publishing thousands of versions counts once). The raw publish-event
+  // ratio is kept as a SECONDARY line for continuity but is no longer the headline:
+  // it races re-scans / PyPI / burst extras against an npm-only event denominator
+  // and routinely exceeds 100% (see AUDIT 4 — daily-reports-analysis.md).
   const attempted = stats.uniqueScanAttempts || 0;
   const npmPub = stats.npmPublishEventsSeen || 0;
   const pypiPub = stats.pypiChangelogPackages || 0;
   const published = npmPub + pypiPub;
-  const coverageRatio = published > 0 ? (attempted / published * 100).toFixed(0) : '0';
   const catchupSkipped = (stats.npmCatchupSkippedSeqs || 0) + (stats.pypiCatchupSkippedEvents || 0);
   const opsSuffix = catchupSkipped > 0
     ? `\nOps: ${stats.scanned} | Catch-up skip: ${catchupSkipped}`
     : `\nOps: ${stats.scanned}`;
-  const coverageText = published > 0
-    ? `${attempted}/${published} (${coverageRatio}%)${opsSuffix}`
-    : `${attempted} attempted${opsSuffix}`;
+  let coverageText;
+  if (ledger && ledger.distinctPackages > 0 && ledger.distinctCoverage != null) {
+    const pct = (ledger.distinctCoverage * 100).toFixed(0);
+    const approx = ledger.exactVanished === false ? '~' : '';
+    coverageText = `${ledger.distinctScanned}/${ledger.distinctPackages} pkgs (${approx}${pct}%)`;
+    if (published > 0) coverageText += `\nRaw events: ${attempted}/${published}`;
+    coverageText += opsSuffix;
+  } else if (published > 0) {
+    // Fallback: ledger unavailable (first boot / empty ledger) → legacy event ratio.
+    const coverageRatio = (attempted / published * 100).toFixed(0);
+    coverageText = `${attempted}/${published} (${coverageRatio}%)${opsSuffix}`;
+  } else {
+    coverageText = `${attempted} attempted${opsSuffix}`;
+  }
 
   // --- Timeouts ---
   const staticTimeouts = (stats.errorsByType && stats.errorsByType.static_timeout) || 0;
@@ -1198,9 +1214,7 @@ function buildDailyReportEmbed(stats, dailyAlerts, ledgerRollup) {
   const healthText = `Up ${uptimeH}h${uptimeM}m | Heap ${heapMB}MB${jsonlInfo}`;
 
   // --- Phase 0b: per-scan ledger rollup (operational coverage) ---
-  // Caller may pass a precomputed rollup (sendDailyReport does, to persist the same
-  // numbers it displays); undefined → compute here; explicit null → omit the section.
-  const ledger = ledgerRollup !== undefined ? ledgerRollup : safeLedgerRollup();
+  // `ledger` was resolved above (Coverage uses it). explicit null → omit the section.
   const ledgerField = formatLedgerField(ledger);
 
   const now = new Date();
@@ -1297,6 +1311,12 @@ async function sendDailyReport(stats, dailyAlerts, recentlyScanned, downloadsCac
     deferredProcessed: stats.deferredProcessed || 0,
     deferredExpired: stats.deferredExpired || 0,
     changesStreamPackages: stats.changesStreamPackages || 0,
+    // Honest version-collapsed coverage (AUDIT 4): top-level mirror of the
+    // ledger fields so trend analysis can read them without descending into
+    // metrics.ledger. null when the ledger window was empty.
+    distinctPackages: ledgerRollup ? (ledgerRollup.distinctPackages ?? null) : null,
+    distinctScanned: ledgerRollup ? (ledgerRollup.distinctScanned ?? null) : null,
+    distinctCoverage: ledgerRollup ? (ledgerRollup.distinctCoverage ?? null) : null,
     restartsToday: stats.restartsToday || 0,
     temporalLoadShed: stats.temporalLoadShed || 0,
     queueHardDrops: stats.queueHardDrops || 0,

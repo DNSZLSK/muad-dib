@@ -10148,6 +10148,88 @@ async function runMonitorTests() {
       assert(rssAdmissionCap(6800 * MB, 6800, 600) === 0, 'at the soft limit = 0 new spawns');
       assert(rssAdmissionCap(9000 * MB, 6800, 600) === 0, 'over the limit = 0 (never negative)');
     });
+
+    // --- AUDIT 4: honest distinct-package coverage in the daily report ---
+    // Appended at end-of-file on purpose: inserting earlier would shift the
+    // line-keyed no-source-grep allowlist. These call webhook.buildDailyReportEmbed
+    // DIRECTLY (not the monitor.js wrapper, which hardcodes 2 args) so the ledger
+    // rollup is injected explicitly and the assertion is environment-independent.
+    test('COVERAGE: buildDailyReportEmbed headlines honest distinct-package coverage from explicit ledger (AUDIT 4)', () => {
+      const webhookModule = require('../../src/monitor/webhook.js');
+      const orig = {
+        scanned: stats.scanned, attempts: stats.uniqueScanAttempts,
+        npmPub: stats.npmPublishEventsSeen, pypiPub: stats.pypiChangelogPackages,
+        errors: stats.errors, time: stats.totalTimeMs
+      };
+      try {
+        stats.scanned = 9999;
+        stats.uniqueScanAttempts = 7200;
+        stats.npmPublishEventsSeen = 6000;
+        stats.pypiChangelogPackages = 2000;
+        stats.errors = 0;
+        stats.totalTimeMs = 0;
+        dailyAlerts.length = 0;
+        // 40 distinct scanned / 100 distinct seen = 40% honest coverage.
+        const ledger = {
+          total: 5000, scanned: 40, dropped: 60, vanished: 50, exactVanished: true,
+          alerted: 5, alertRate: 0.125,
+          distinctPackages: 100, distinctScanned: 40, distinctCoverage: 0.4,
+          byOutcome: { clean: 40, dropped: 60 },
+          byEcosystem: { npm: { total: 5000, scanned: 40, dropped: 60, alerted: 5 } }
+        };
+        const embed = webhookModule.buildDailyReportEmbed(stats, dailyAlerts, ledger);
+        const coverageField = embed.embeds[0].fields.find(f => f.name === 'Coverage');
+        assert(coverageField, 'Coverage field must exist');
+        assertIncludes(coverageField.value, '40/100 pkgs',
+          `Headline must be distinct scanned/seen packages, got "${coverageField.value}"`);
+        assertIncludes(coverageField.value, '(40%)',
+          `Headline % must be distinct coverage 40%, got "${coverageField.value}"`);
+        assertIncludes(coverageField.value, 'Raw events: 7200/8000',
+          `Raw event ratio must be demoted to a secondary line, got "${coverageField.value}"`);
+        assertIncludes(coverageField.value, 'Ops: 9999',
+          `Ops sub-line must remain, got "${coverageField.value}"`);
+      } finally {
+        stats.scanned = orig.scanned;
+        stats.uniqueScanAttempts = orig.attempts;
+        stats.npmPublishEventsSeen = orig.npmPub;
+        stats.pypiChangelogPackages = orig.pypiPub;
+        stats.errors = orig.errors;
+        stats.totalTimeMs = orig.time;
+      }
+    });
+
+    test('COVERAGE: buildDailyReportEmbed falls back to raw-event ratio when ledger is null (AUDIT 4)', () => {
+      const webhookModule = require('../../src/monitor/webhook.js');
+      const orig = {
+        scanned: stats.scanned, attempts: stats.uniqueScanAttempts,
+        npmPub: stats.npmPublishEventsSeen, pypiPub: stats.pypiChangelogPackages,
+        errors: stats.errors, time: stats.totalTimeMs
+      };
+      try {
+        stats.scanned = 9999;
+        stats.uniqueScanAttempts = 7200;
+        stats.npmPublishEventsSeen = 6000;
+        stats.pypiChangelogPackages = 2000;
+        stats.errors = 0;
+        stats.totalTimeMs = 0;
+        dailyAlerts.length = 0;
+        // Explicit null ledger → legacy raw-event ratio is the headline.
+        const embed = webhookModule.buildDailyReportEmbed(stats, dailyAlerts, null);
+        const coverageField = embed.embeds[0].fields.find(f => f.name === 'Coverage');
+        assert(coverageField, 'Coverage field must exist');
+        assertIncludes(coverageField.value, '7200/8000 (90%)',
+          `Fallback must show attempted/published ratio, got "${coverageField.value}"`);
+        assert(!/pkgs/.test(coverageField.value),
+          `Fallback must NOT claim distinct-package coverage, got "${coverageField.value}"`);
+      } finally {
+        stats.scanned = orig.scanned;
+        stats.uniqueScanAttempts = orig.attempts;
+        stats.npmPublishEventsSeen = orig.npmPub;
+        stats.pypiChangelogPackages = orig.pypiPub;
+        stats.errors = orig.errors;
+        stats.totalTimeMs = orig.time;
+      }
+    });
   }
 }
 
