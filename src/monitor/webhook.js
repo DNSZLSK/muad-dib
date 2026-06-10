@@ -1094,6 +1094,22 @@ function formatLedgerField(rollup) {
   return { name: 'Ledger (24h)', value: lines.join('\n'), inline: false };
 }
 
+// AUDIT-C: MCP self-identity by package name (matches the F9/F15 MCP_NAME_RE family in
+// feature-extractor.js — kept local to avoid importing the ML module into the embed path).
+const _MCP_TRIAGE_NAME_RE = /(?:^|[/_-])mcp(?:[_-]|$)|mcp[_-](?:server|init|bridge|installer|memory|plugin|core|router|host|client|gateway|relay|stdio|transport|orchestrator)/i;
+
+/**
+ * Triage tag for a daily-report top-suspect. Returns ' 🔌 [MCP: sig1, sig2]' when the
+ * package self-identifies as an MCP server/installer, else ''. Signals come from the
+ * alert's recorded CRITICAL/HIGH threat types (AUDIT-C). Presentation only.
+ */
+function mcpTriageTag(a) {
+  const name = (a && (a.name || a.package)) || '';
+  if (!_MCP_TRIAGE_NAME_RE.test(name)) return '';
+  const sigs = Array.isArray(a.signals) ? a.signals.slice(0, 3) : [];
+  return sigs.length ? ` 🔌 [MCP: ${sigs.join(', ')}]` : ' 🔌 [MCP]';
+}
+
 function buildDailyReportEmbed(stats, dailyAlerts, ledgerRollup) {
   // Use in-memory stats (accumulated since last reset, restored from disk on restart)
   // instead of disk-based daily entries which can undercount due to UTC/Paris date mismatch
@@ -1110,7 +1126,10 @@ function buildDailyReportEmbed(stats, dailyAlerts, ledgerRollup) {
         const version = a.version || 'N/A';
         const count = a.findingsCount || (a.findings ? a.findings.length : 0);
         const scoreText = a.score != null ? `score ${a.score}, ` : '';
-        return `${i + 1}. **${name}@${version}** — ${scoreText}${count} finding(s)`;
+        // AUDIT-C: annotate MCP suspects (identity + signals) for visual triage — MCP
+        // servers score high but are statically ambiguous vs MCP-malware (see AUDIT 2).
+        // Pure presentation, no scoring change.
+        return `${i + 1}. **${name}@${version}** — ${scoreText}${count} finding(s)${mcpTriageTag(a)}`;
       }).join('\n')
     : 'None';
 

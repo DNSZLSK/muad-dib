@@ -68,7 +68,9 @@ function enqueueScan(scanQueue, item, stats, max = MAX_SCAN_QUEUE) {
       if (evicted && evicted.name) {
         require('./state.js').appendScanLedger({
           name: evicted.name, version: evicted.version, ecosystem: evicted.ecosystem,
-          outcome: 'dropped', source: protectedFallback ? 'queue_cap_protected' : 'queue_cap'
+          outcome: 'dropped', source: protectedFallback ? 'queue_cap_protected' : 'queue_cap',
+          // AUDIT-A1 observability (see evictFromScanQueueBulk)
+          firstPublish: !!evicted.firstPublish, isBurstExtra: !!evicted.isATOBurstExtra
         });
       }
     } catch { /* ledger is best-effort */ }
@@ -136,7 +138,12 @@ function evictFromScanQueueBulk(scanQueue, targetKeep, source = 'bulk_evict', le
           appendLedger({
             name: item.name, version: item.version, ecosystem: item.ecosystem,
             outcome: 'dropped',
-            source: _isProtected(item) ? `${source}_protected` : source
+            source: _isProtected(item) ? `${source}_protected` : source,
+            // AUDIT-A1 observability: record whether a DROPPED item was a first-publish
+            // (real coverage loss) vs a burst-extra (version-spam, expected). Lets us
+            // measure if the memory breaker is evicting genuine new packages.
+            firstPublish: !!item.firstPublish,
+            isBurstExtra: !!item.isATOBurstExtra
           });
         } catch { /* ledger is best-effort — must never break the breaker */ }
       }
@@ -149,4 +156,41 @@ function evictFromScanQueueBulk(scanQueue, targetKeep, source = 'bulk_evict', le
   return { dropped: toDrop, droppedProtected };
 }
 
-module.exports = { enqueueScan, evictFromScanQueueBulk, isProtected: _isProtected, MAX_SCAN_QUEUE };
+// ── AUDIT A2: optional priority dequeue (gated OFF by default) ──────────────
+// Default dequeue is strict FIFO (scanQueue.shift()). When enabled, the worker pulls
+// the OLDEST high-value item (first-publish / known-malicious / burst-MAIN) within a
+// bounded head-window before falling back to FIFO — so a genuine new package never
+// ages out behind a deep version-spam backlog. Gated behind an env flag so deploying
+// the code is INERT until ops flips it on (tune on the AUDIT-A1 first-publish-coverage
+// data first — see brief). Burst EXTRAS (isATOBurstExtra) and regular items stay FIFO.
+const PRIORITY_DEQUEUE = (() => {
+  const v = process.env.MUADDIB_PRIORITY_DEQUEUE;
+  return v === '1' || v === 'true';
+})();
+const PRIORITY_DEQUEUE_WINDOW = (() => {
+  const v = parseInt(process.env.MUADDIB_PRIORITY_DEQUEUE_WINDOW, 10);
+  return Number.isFinite(v) && v > 0 ? v : 2048;
+})();
+
+function _isPriority(item) {
+  return !!(item && (item.firstPublish || item.isIOCMatch || (item.isBurst && !item.isATOBurstExtra)));
+}
+
+/**
+ * Remove and return the next item to scan. Strict FIFO by default (unchanged). With
+ * MUADDIB_PRIORITY_DEQUEUE=1: oldest priority item within a bounded head-window, else
+ * FIFO. Single-threaded → splice/shift are atomic w.r.t. other workers.
+ * @param {Array} scanQueue
+ * @param {{priority?: boolean, window?: number}} [opts] test overrides
+ */
+function dequeueScan(scanQueue, opts = {}) {
+  const priority = opts.priority !== undefined ? opts.priority : PRIORITY_DEQUEUE;
+  if (!priority || scanQueue.length === 0) return scanQueue.shift();
+  const win = Math.min(scanQueue.length, opts.window || PRIORITY_DEQUEUE_WINDOW);
+  for (let i = 0; i < win; i++) {
+    if (_isPriority(scanQueue[i])) return i === 0 ? scanQueue.shift() : scanQueue.splice(i, 1)[0];
+  }
+  return scanQueue.shift();
+}
+
+module.exports = { enqueueScan, evictFromScanQueueBulk, dequeueScan, isProtected: _isProtected, MAX_SCAN_QUEUE };

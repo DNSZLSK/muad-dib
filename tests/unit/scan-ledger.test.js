@@ -216,6 +216,20 @@ function runScanLedgerTests() {
     assert(r.distinctCoverage === null, 'distinctCoverage null when nothing seen (no divide-by-zero)');
   });
 
+  // --- AUDIT-A1: first-publish + burst-extra observability in the ledger ---
+  test('appendScanLedger: persists firstPublish; isBurstExtra only when true', () => {
+    const f = path.join(os.tmpdir(), `ledger-a1-${Date.now()}.jsonl`);
+    try {
+      const s = freshState(f);
+      s.appendScanLedger({ name: 'newpkg', version: '1.0.0', ecosystem: 'npm', outcome: 'clean', source: 'scan', firstPublish: true });
+      s.appendScanLedger({ name: 'tseven', version: '0.0.1', ecosystem: 'npm', outcome: 'dropped', source: 'burst_extras_cap', firstPublish: false, isBurstExtra: true });
+      const e = s.loadScanLedger();
+      assert(e[0].firstPublish === true, 'scanned first-publish recorded as firstPublish:true');
+      assert(e[0].isBurstExtra === undefined, 'isBurstExtra omitted on non-burst entries (keeps ledger lean)');
+      assert(e[1].firstPublish === false && e[1].isBurstExtra === true, 'dropped burst-extra carries isBurstExtra:true');
+    } finally { try { fs.unlinkSync(f); } catch {} }
+  });
+
   // Reset env + module cache so other suites get production defaults, not the test path.
   delete process.env.MUADDIB_SCAN_LEDGER_FILE;
   delete process.env.MUADDIB_SCAN_LEDGER_MAX;
