@@ -142,6 +142,21 @@ async function getPackageMetadata(packageName) {
 
   const hasRepository = !!(latestMeta?.repository || meta.repository);
 
+  // P3 (provenance): npm publish provenance / attestations (npm `--provenance`,
+  // Sigstore-backed, GA since 2023) appear as `dist.attestations` on the version.
+  // Presence on the live latest version is a trust signal (downweight, fewer FP);
+  // a mature package whose latest version LOST the provenance that earlier versions
+  // carried is a build-divergence / takeover signal (Ultralytics shape — upweight).
+  const latestHasProvenance = !!(latestMeta?.dist?.attestations);
+  let anyPriorHadProvenance = false;
+  if (!latestHasProvenance && meta.versions) {
+    for (const [v, vm] of Object.entries(meta.versions)) {
+      if (v === latestVersion) continue;
+      if (vm?.dist?.attestations) { anyPriorHadProvenance = true; break; }
+    }
+  }
+  const provenanceRegressed = !latestHasProvenance && anyPriorHadProvenance;
+
   // 2. Weekly downloads + author search (parallel)
   const downloadsUrl = DOWNLOADS_URL + '/' + encodeURIComponent(packageName);
   const authorUrl = maintainer
@@ -207,6 +222,10 @@ async function getPackageMetadata(packageName) {
     maintainer_emails: maintainerEmails,
     // C3 : per-version publish timestamps for delta-mode selectPriorVersions.
     time: versionTimes,
+    // P3 : Sigstore-backed publish provenance on the live latest version, and
+    // whether it regressed (earlier versions had it, latest does not).
+    has_provenance: latestHasProvenance,
+    provenance_regressed: provenanceRegressed,
     ...advancedSignals
   };
 }

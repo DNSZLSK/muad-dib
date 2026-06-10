@@ -206,6 +206,22 @@ async function getPyPIPackageMetadata(packageName) {
     yanked = releases[latestVersion].every(f => f && f.yanked === true);
   }
 
+  // P3 (provenance): PEP 740 digital attestations (Trusted Publishing, supported
+  // since Nov 2024) surface as a `provenance` field on a release file. Same dual
+  // signal as npm: present on the latest version → trust (downweight); regressed
+  // from earlier versions → build-divergence / takeover suspicion (upweight).
+  let latestHasProvenance = false;
+  if (latestVersion && Array.isArray(releases[latestVersion])) {
+    latestHasProvenance = releases[latestVersion].some(f => f && f.provenance);
+  }
+  let anyPriorHadProvenance = false;
+  if (!latestHasProvenance) {
+    for (const [v, files] of Object.entries(releases)) {
+      if (v === latestVersion || !Array.isArray(files)) continue;
+      if (files.some(f => f && f.provenance)) { anyPriorHadProvenance = true; break; }
+    }
+  }
+
   const data = {
     created_at: createdAt,
     latest_release_at: latestReleaseAt,
@@ -218,7 +234,9 @@ async function getPyPIPackageMetadata(packageName) {
       : (typeof info.description === 'string' ? info.description.slice(0, 1000) : ''),
     home_page: typeof info.home_page === 'string' && info.home_page ? info.home_page : null,
     project_urls: (info.project_urls && typeof info.project_urls === 'object') ? info.project_urls : null,
-    releases: releaseTimes
+    releases: releaseTimes,
+    has_provenance: latestHasProvenance,
+    provenance_regressed: !latestHasProvenance && anyPriorHadProvenance
   };
 
   _pypiMetadataCache.set(normalized, { fetchedAt: Date.now(), data });

@@ -1592,6 +1592,32 @@ const RULES = {
     ],
     mitre: 'T1552.001'
   },
+  unpinned_action: {
+    id: 'MUADDIB-GHA-005',
+    name: 'Unpinned Third-Party GitHub Action',
+    severity: 'LOW',
+    confidence: 'low',
+    domain: 'engineering',
+    description: 'Action GitHub tierce epinglee a une ref mutable (tag/branche) au lieu d\'un commit SHA. Une release retaggee livre du code malveillant a tous les consommateurs — cause racine de tj-actions/changed-files (CVE-2025-30066) et reviewdog (CVE-2025-30154). Informatif seul ; le signal fort est le compound MUADDIB-GHA-006.',
+    references: [
+      'https://www.cisa.gov/news-events/alerts/2025/03/18/supply-chain-compromise-third-party-tj-actionschanged-files-cve-2025-30066-and-reviewdogaction',
+      'https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#using-third-party-actions'
+    ],
+    mitre: 'T1195.002'
+  },
+  unpinned_action_in_risky_workflow: {
+    id: 'MUADDIB-GHA-006',
+    name: 'Unpinned Action in Attacker-Controllable Workflow',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    domain: 'malware',
+    description: 'Compound: action tierce non-epinglee (ref mutable) dans un workflow egalement controlable par un attaquant (injection de contexte ou pwn-request). La ref mutable est le vecteur de livraison, le trigger risque est la portee — pattern tj-actions/Ultralytics. FP~0 par construction (requiert les deux moities independantes).',
+    references: [
+      'https://www.cisa.gov/news-events/alerts/2025/03/18/supply-chain-compromise-third-party-tj-actionschanged-files-cve-2025-30066-and-reviewdogaction',
+      'https://orca.security/resources/blog/pull-request-nightmare-part-2-exploits/'
+    ],
+    mitre: 'T1195.002'
+  },
 
   // Sandbox detections
   sandbox_sensitive_file_read: {

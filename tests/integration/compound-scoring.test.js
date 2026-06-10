@@ -1,5 +1,8 @@
 'use strict';
 
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const { test, assert } = require('../test-utils');
 const { applyFPReductions, applyCompoundBoosts } = require('../../src/scoring.js');
 const { getRule } = require('../../src/rules/index.js');
@@ -929,6 +932,63 @@ async function runCompoundScoringTests() {
     ];
     applyCompoundBoosts(threats);
     assert(!threats.find(t => t.type === 'typosquat_dataflow'), 'Should NOT fire without dataflow');
+  });
+
+  // ── P2c: sameModule anti-fragmentation on recon_exfil_direct_ip ──────────────
+  // The two halves of the payload split across two files no longer evade the
+  // sameFile compound when the files are linked by a 1-hop static import.
+
+  const _modDir = (files) => {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-mod-'));
+    for (const [n, c] of Object.entries(files)) fs.writeFileSync(path.join(d, n), c);
+    return d;
+  };
+  const _reconHalves = () => ([
+    { type: 'linux_fingerprint_exec', severity: 'CRITICAL', file: 'a.js', message: 'execSync(id)' },
+    { type: 'direct_ip_exfil', severity: 'CRITICAL', file: 'b.js', message: 'http to 1.2.3.4' }
+  ]);
+
+  test('P2c: split recon payload across statically-import-linked files → compound fires', () => {
+    const d = _modDir({ 'a.js': "const b = require('./b');", 'b.js': 'module.exports = {};' });
+    try {
+      const threats = _reconHalves();
+      applyCompoundBoosts(threats, d);
+      assert(threats.some(t => t.type === 'recon_exfil_direct_ip'),
+        'sameModule fallback should fire when a.js statically imports b.js');
+    } finally { fs.rmSync(d, { recursive: true, force: true }); }
+  });
+
+  test('P2c (FP guard): unlinked files → compound does NOT fire', () => {
+    const d = _modDir({ 'a.js': 'const x = 1;', 'b.js': 'const y = 2;' });
+    try {
+      const threats = _reconHalves();
+      applyCompoundBoosts(threats, d);
+      assert(!threats.some(t => t.type === 'recon_exfil_direct_ip'),
+        'two unrelated files must not be treated as one module');
+    } finally { fs.rmSync(d, { recursive: true, force: true }); }
+  });
+
+  test('P2c (FP guard): dynamic require() only → compound does NOT fire', () => {
+    const d = _modDir({ 'a.js': "const n = './b'; const b = require(n);", 'b.js': 'module.exports = {};' });
+    try {
+      const threats = _reconHalves();
+      applyCompoundBoosts(threats, d);
+      assert(!threats.some(t => t.type === 'recon_exfil_direct_ip'),
+        'dynamic require must not link modules (mirrors module-graph, bounds FP)');
+    } finally { fs.rmSync(d, { recursive: true, force: true }); }
+  });
+
+  test('P2c: legacy sameFile path still fires (both halves in one file)', () => {
+    const d = _modDir({ 'a.js': 'const x = 1;' });
+    try {
+      const threats = [
+        { type: 'linux_fingerprint_exec', severity: 'CRITICAL', file: 'a.js', message: 'execSync(id)' },
+        { type: 'direct_ip_exfil', severity: 'CRITICAL', file: 'a.js', message: 'http to 1.2.3.4' }
+      ];
+      applyCompoundBoosts(threats, d);
+      assert(threats.some(t => t.type === 'recon_exfil_direct_ip'),
+        'sameFile behaviour must be preserved');
+    } finally { fs.rmSync(d, { recursive: true, force: true }); }
   });
 }
 

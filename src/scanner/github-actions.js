@@ -62,6 +62,10 @@ function scanDirRecursive(dirPath, targetPath, threats, depth = 0) {
       const activeLines = yamlLines.filter(l => !l.trim().startsWith('#'));
       const activeContent = activeLines.join('\n');
 
+      // Per-file risk flags, consumed by the GHA-006 compound below.
+      let fileHasInjection = false;
+      let fileHasPwn = false;
+
       // Détection du backdoor Shai-Hulud discussion.yaml
       if (file === 'discussion.yaml' || file === 'discussion.yml') {
         if (activeContent.includes('github.event.discussion.body')) {
@@ -82,6 +86,7 @@ function scanDirRecursive(dirPath, targetPath, threats, depth = 0) {
 
       for (const { regex, msg } of injectionPatterns) {
         if (regex.test(activeContent)) {
+          fileHasInjection = true;
           threats.push({
             type: 'workflow_injection',
             severity: 'HIGH',
@@ -95,6 +100,7 @@ function scanDirRecursive(dirPath, targetPath, threats, depth = 0) {
       const hasPRTarget = /pull_request_target/m.test(activeContent);
       const hasCheckoutPRHead = /actions\/checkout[\s\S]*?ref:\s*\$\{\{\s*github\.event\.pull_request\.head\.(ref|sha)\s*\}\}/m.test(activeContent);
       if (hasPRTarget && hasCheckoutPRHead) {
+        fileHasPwn = true;
         threats.push({
           type: 'workflow_pwn_request',
           severity: 'CRITICAL',
@@ -111,6 +117,52 @@ function scanDirRecursive(dirPath, targetPath, threats, depth = 0) {
           type: 'workflow_secrets_dump',
           severity: 'CRITICAL',
           message: 'GitHub Actions secrets dump: toJSON(secrets) exfiltrates all repository secrets',
+          file: relFile
+        });
+      }
+
+      // GHA-005: Unpinned THIRD-PARTY action — pinned to a mutable tag/branch ref
+      // instead of an immutable commit SHA. Root cause of the tj-actions/changed-files
+      // (CVE-2025-30066) and reviewdog (CVE-2025-30154) compromises: a retagged release
+      // silently ships malicious code to every consumer. LOW/informational on its own —
+      // pinning to a major tag is ubiquitous and usually benign — and restricted to
+      // third-party orgs (official actions/* and github/* are conventionally trusted) to
+      // avoid noise on the near-universal `actions/checkout@v4`. The real signal is the
+      // GHA-006 compound below.
+      let fileHasUnpinnedThirdParty = false;
+      const usesRe = /^\s*-?\s*uses:\s*['"]?([^'"\s#]+)/gm;
+      let um;
+      while ((um = usesRe.exec(activeContent)) !== null) {
+        const ref = um[1];
+        // Local actions (./, ../) and docker refs carry no upstream tag to retag.
+        if (ref.startsWith('./') || ref.startsWith('../') || ref.startsWith('.\\') || ref.startsWith('docker://')) continue;
+        const at = ref.lastIndexOf('@');
+        if (at === -1) continue;
+        const repo = ref.slice(0, at);
+        const pin = ref.slice(at + 1);
+        if (/^[0-9a-f]{40}$/i.test(pin)) continue; // immutable SHA — correctly pinned
+        const org = repo.split('/')[0].toLowerCase();
+        if (org === 'actions' || org === 'github') continue; // first-party trusted orgs
+        fileHasUnpinnedThirdParty = true;
+        threats.push({
+          type: 'unpinned_action',
+          severity: 'LOW',
+          confidence: 'low',
+          message: `Third-party GitHub Action "${ref}" is pinned to a mutable ref ("${pin}") instead of a commit SHA — a retagged release (cf. tj-actions CVE-2025-30066) would execute attacker-controlled code.`,
+          file: relFile
+        });
+      }
+
+      // GHA-006 compound: an unpinned third-party action in a workflow that is ALSO
+      // attacker-controllable (context injection or pwn-request). This is the
+      // tj-actions / Ultralytics shape — the mutable ref is the delivery vector and the
+      // risky trigger is the reach. FP≈0 by construction: requires both independent halves.
+      if (fileHasUnpinnedThirdParty && (fileHasInjection || fileHasPwn)) {
+        threats.push({
+          type: 'unpinned_action_in_risky_workflow',
+          severity: 'CRITICAL',
+          compound: true,
+          message: 'Unpinned third-party action combined with an attacker-controllable workflow trigger (injection/pwn-request) — supply-chain delivery vector (tj-actions/Ultralytics pattern).',
           file: relFile
         });
       }

@@ -170,6 +170,34 @@ const SINGLE_FIRE_CRITICAL_TYPES = new Set([
 ]);
 const SINGLE_FIRE_CRITICAL_FLOOR = 75;
 const SINGLE_FIRE_MIN_SEVERITY_RANK = 2; // HIGH
+
+// MT-1 / PyPI unblock: import-time RCE on PyPI is the lifecycle-equivalent of an
+// npm install hook — code that runs at `pip install` time via __init__.py / setup.py.
+// PyPI packages emit no `lifecycle_script` (an npm-only signal), so confirmed
+// import-time RCE would otherwise be capped at 35 and buried in the benign 25-35
+// cluster. These types are emitted ONLY by the Python scanners (python-source.js /
+// python-ast-detectors) on .py files, so their presence is itself the PyPI signal —
+// no ecosystem flag needed, and npm packages are unaffected (they never emit them).
+const PYPI_IMPORT_TIME_RCE_TYPES = new Set([
+  'import_time_exec',
+  'import_time_subprocess',
+  'import_time_os_system',
+  'import_time_deserialization',
+  'import_time_fetch_exec',
+  'fetch_to_fork_exec_inline',
+  'pyast_module_level_exec',
+  'pyast_module_level_subprocess_shell',
+  'pyast_module_level_unsafe_deserialization',
+  'pyast_setup_cmdclass_override',
+  'pyast_ctypes_shellcode_load'
+]);
+
+// Track R: the reputation multiplier (applyReputationFactor) may suppress noise on
+// mature/popular packages down to ×0.10, but it must never pull a CONFIRMED malice
+// detection below the operational alert threshold. Account-takeover of a popular
+// package (Shai-Hulud / event-stream shape) is the #1 real-world vector and would
+// otherwise inherit the victim package's reputation and be silently dropped.
+const REPUTATION_MALICE_FLOOR = 20;
 const _SEV_RANK = { LOW: 0, MEDIUM: 1, HIGH: 2, CRITICAL: 3 };
 
 /**
@@ -672,9 +700,13 @@ const SCORING_COMPOUNDS = [
     type: 'recon_exfil_direct_ip',
     requires: ['linux_fingerprint_exec', 'direct_ip_exfil'],
     severity: 'CRITICAL',
-    message: 'Linux system fingerprint (id/uname/lsb_release/hostname/whoami) + direct-IP exfil in same file — targeted device fingerprinting for C2 grouping (scoring compound).',
+    message: 'Linux system fingerprint (id/uname/lsb_release/hostname/whoami) + direct-IP exfil in the same module — targeted device fingerprinting for C2 grouping (scoring compound).',
     fileFrom: 'direct_ip_exfil',
-    sameFile: true
+    sameFile: true,
+    // P2c: also fire when the two halves are split across statically-import-linked
+    // files (anti-fragmentation). Both components are individually high-signal, so
+    // extending from sameFile to sameModule keeps FP≈0 while closing the evasion.
+    sameModule: true
   },
 ];
 
@@ -705,6 +737,50 @@ function _extractStaticImports(filePath) {
     });
   } catch { /* parse failure — return empty set */ }
   return imports;
+}
+
+// P2c (anti-fragmentation): resolve a file's 1-hop static import targets to
+// normalized relative paths (forward slashes), matching the threat.file format.
+// Mirrors the resolution inside _resolveLifecycleScopeGate so sameModule and
+// lifecycleScoped agree on what "linked by import" means.
+function _resolveImports1Hop(relFile, targetPath) {
+  const fs = require('fs');
+  const pathMod = require('path');
+  const out = new Set();
+  if (!relFile || relFile === 'package.json' || relFile === '(unknown)') return out;
+  const absFile = pathMod.resolve(targetPath, relFile);
+  const imports = _extractStaticImports(absFile);
+  const impDir = pathMod.dirname(absFile);
+  for (const imp of imports) {
+    let resolved = pathMod.relative(targetPath, pathMod.resolve(impDir, imp)).replace(/\\/g, '/');
+    if (!resolved.match(/\.(js|mjs|cjs)$/)) {
+      if (fs.existsSync(pathMod.resolve(targetPath, resolved + '.js'))) {
+        resolved += '.js';
+      } else if (fs.existsSync(pathMod.resolve(targetPath, resolved, 'index.js'))) {
+        resolved = resolved + '/index.js';
+      }
+    }
+    out.add(resolved);
+  }
+  return out;
+}
+
+// P2c: two files are "in the same module" if they are the same file or linked by a
+// 1-hop static import in either direction. Closes the fragmentation evasion where an
+// attacker splits the two halves of a payload across an importing file and its helper
+// to break a sameFile compound. Dynamic require() is intentionally NOT resolved
+// (mirrors the module-graph) — linkage must be a literal static import.
+function _filesSameModule(fileA, fileB, targetPath) {
+  if (!fileA || !fileB) return false;
+  if (fileA === 'package.json' || fileB === 'package.json') return false;
+  if (fileA === '(unknown)' || fileB === '(unknown)') return false;
+  const a = fileA.replace(/\\/g, '/');
+  const b = fileB.replace(/\\/g, '/');
+  if (a === b) return true;
+  if (!targetPath) return false;
+  if (_resolveImports1Hop(a, targetPath).has(b)) return true;
+  if (_resolveImports1Hop(b, targetPath).has(a)) return true;
+  return false;
 }
 
 // v2.11.11: Lifecycle scope resolution. Determines if a lifecycleScoped compound
@@ -889,7 +965,22 @@ function applyCompoundBoosts(threats, targetPath) {
       const commonFiles = [...filesByType[0]].filter(f =>
         filesByType.every(s => s.has(f))
       );
-      if (commonFiles.length === 0) continue;
+      if (commonFiles.length === 0) {
+        // P2c (anti-fragmentation): sameModule fallback — accept two component files
+        // linked by a 1-hop static import, so splitting the payload across an importer
+        // and its helper no longer evades the compound. Opt-in per compound and limited
+        // to the two-type case to bound the FP surface to the highest-confidence rules.
+        let linked = false;
+        if (compound.sameModule && filesByType.length === 2 && targetPath) {
+          for (const fa of filesByType[0]) {
+            for (const fb of filesByType[1]) {
+              if (_filesSameModule(fa, fb, targetPath)) { linked = true; break; }
+            }
+            if (linked) break;
+          }
+        }
+        if (!linked) continue;
+      }
     }
 
     if (!compoundAlreadyPresent) {
@@ -1464,7 +1555,11 @@ function calculateRiskScore(deduped, intentResult) {
   // json-spacer, reactvora: eval(data.content) from jsonkeeper.com is always malicious
   const _hasStagedC2 = deduped.some(t => t.type === 'staged_payload') &&
     deduped.some(t => t.type === 'suspicious_domain' && t.severity === 'HIGH');
-  if (!_hasLifecycle && !_hasHC && !_hasCompound && !_hasStagedC2) {
+  // PyPI unblock: import-time RCE is the PyPI lifecycle-equivalent — bypass the cap so
+  // confirmed Python install-time malware reaches its true score and separates from the
+  // benign 25-35 cluster (which carries no import-time-exec signal).
+  const _hasPyPIImportRCE = deduped.some(t => PYPI_IMPORT_TIME_RCE_TYPES.has(t.type));
+  if (!_hasLifecycle && !_hasHC && !_hasCompound && !_hasStagedC2 && !_hasPyPIImportRCE) {
     riskScore = Math.min(riskScore, 35);
   }
 
@@ -1652,7 +1747,8 @@ const REPUTATION_FACTOR_BOUNDS = { min: 0.10, max: 1.5 };
 
 function _hasNumeric(v) { return typeof v === 'number' && !Number.isNaN(v); }
 
-function _factorFromMetadata(meta) {
+function _factorFromMetadata(meta, opts) {
+  const allowProvenanceBonus = !opts || opts.allowProvenanceBonus !== false;
   let factor = 1.0;
   let signalsApplied = 0;
   // Age (AUC 0.81 — strongest single discriminator). Old packages = benign.
@@ -1725,11 +1821,57 @@ function _factorFromMetadata(meta) {
     factor -= 0.15;
     signalsApplied++;
   }
+  // P3 (provenance) : Sigstore-backed publish provenance (npm --provenance / PyPI
+  // PEP 740). Two ASYMMETRIC signals:
+  //   - regressed (earlier versions attested, latest is not) → build divergence /
+  //     takeover suspicion (Ultralytics shape) → upweight. Always applies.
+  //   - present on the live latest version → mild downweight, BUT only when the
+  //     package shows no malice signal. A valid attestation proves WHICH pipeline
+  //     built the package, NOT that the code is safe: the TeamPCP / "Mini Shai-Hulud"
+  //     campaign (May 2026, 84 malicious TanStack versions) shipped VALID SLSA L3
+  //     Sigstore attestations by hijacking the legitimate release runner's OIDC
+  //     identity. Granting a trust bonus to an attested-but-malicious package would
+  //     actively help the attacker, so the bonus is suppressed whenever malice is
+  //     present (allowProvenanceBonus=false, set by applyReputationFactor).
+  if (meta.provenance_regressed === true) {
+    factor += 0.20;
+    signalsApplied++;
+  } else if (meta.has_provenance === true && allowProvenanceBonus) {
+    factor -= 0.10;
+    signalsApplied++;
+  }
   // If no signals applied (metadata fully absent), return neutral 1.0 rather
   // than the default-shaped factor — avoid spurious adjustments on rows where
   // the registry data is simply missing.
   if (signalsApplied === 0) return 1.0;
   return Math.max(REPUTATION_FACTOR_BOUNDS.min, Math.min(REPUTATION_FACTOR_BOUNDS.max, factor));
+}
+
+// Track R: "confirmed malice" predicate, kept identical to the MT-1 ceiling bypass
+// (HIGH_CONFIDENCE_MALICE_TYPES / compound / staged-C2). These are the signals the
+// pipeline already trusts as never-benign-regardless-of-context; reusing the exact
+// same definition keeps the reputation floor symmetric with the cap and bounds the
+// FP cost to zero (a benign popular package carries none of these).
+function _hasConfirmedMalice(threats) {
+  if (!Array.isArray(threats)) return false;
+  const hasHC = threats.some(t => HIGH_CONFIDENCE_MALICE_TYPES.has(t.type));
+  const hasCompound = threats.some(t => t.compound === true);
+  const hasStagedC2 = threats.some(t => t.type === 'staged_payload') &&
+    threats.some(t => t.type === 'suspicious_domain' && t.severity === 'HIGH');
+  return hasHC || hasCompound || hasStagedC2;
+}
+
+// P3 (TeamPCP / Mini Shai-Hulud hardening): broader malice predicate used to
+// SUPPRESS the provenance-presence trust bonus. A valid Sigstore/PEP-740 attestation
+// only proves the build pipeline's identity, not code safety — a compromised pipeline
+// emits valid attestations for malicious code. So any HIGH/CRITICAL signal (not just
+// the confirmed-malice set) must veto the provenance bonus, denying the attacker a
+// confidence boost. Broader than _hasConfirmedMalice on purpose: the bonus is a
+// trust grant, so we withhold it on weaker suspicion too.
+function _hasMaliceSignal(threats) {
+  if (!Array.isArray(threats)) return false;
+  if (_hasConfirmedMalice(threats)) return true;
+  return threats.some(t => t.severity === 'HIGH' || t.severity === 'CRITICAL');
 }
 
 function applyReputationFactor(result, metadata) {
@@ -1755,13 +1897,24 @@ function applyReputationFactor(result, metadata) {
   ) {
     return null;
   }
-  const factor = _factorFromMetadata(metadata);
+  // P3 hardening: a valid attestation must NOT earn a trust bonus on a package that
+  // also shows malice (TeamPCP attested-malware scenario). Withhold it here, where
+  // the threat list is available.
+  const factor = _factorFromMetadata(metadata, {
+    allowProvenanceBonus: !_hasMaliceSignal(result.threats)
+  });
   if (factor === 1.0) {
     result.summary.reputationFactor = 1.0;
     return null;
   }
   const oldScore = result.summary.riskScore;
-  const newScore = Math.max(0, Math.min(MAX_RISK_SCORE, Math.round(oldScore * factor)));
+  let newScore = Math.max(0, Math.min(MAX_RISK_SCORE, Math.round(oldScore * factor)));
+  // Track R: malice-aware floor. Only raises the score when the reputation multiplier
+  // would otherwise bury a confirmed-malice detection under the alert threshold; never
+  // touches benign packages (no confirmed-malice signal) so FPR is unaffected.
+  if (newScore < REPUTATION_MALICE_FLOOR && _hasConfirmedMalice(result.threats)) {
+    newScore = REPUTATION_MALICE_FLOOR;
+  }
   result.summary.riskScore = newScore;
   result.summary.reputationFactor = factor;
   const rs = newScore;
@@ -2058,7 +2211,7 @@ const { applyDeltaMultiplier } = require('./scoring/delta-multiplier.js');
 module.exports = {
   SEVERITY_WEIGHTS, RISK_THRESHOLDS, MAX_RISK_SCORE, CONFIDENCE_FACTORS,
   SINGLE_FIRE_CRITICAL_TYPES, SINGLE_FIRE_CRITICAL_FLOOR, DECAY_ALPHA,
-  REPUTATION_FACTOR_BOUNDS,
+  REPUTATION_FACTOR_BOUNDS, REPUTATION_MALICE_FLOOR,
   MATURE_CAP_SCORE, MATURE_MIN_AGE_DAYS, MATURE_MIN_VERSION_COUNT, MATURE_MIN_WEEKLY_DOWNLOADS,
   SANDBOX_VERDICT_CONFIRMED_FLOOR, SANDBOX_VERDICT_CHAIN_FLOOR, SANDBOX_VERDICT_CLEAN_DELTA,
   applyMatureStableCap, applySandboxVerdict, applyDeltaMultiplier,

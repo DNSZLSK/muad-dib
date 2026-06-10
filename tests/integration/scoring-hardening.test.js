@@ -984,6 +984,51 @@ async function runScoringHardeningTests() {
       `F15 must NOT fire on a malicious-lifecycle MCP, got ${JSON.stringify(applied)}`);
     assert(result.summary.riskScore === 85, `malicious MCP score must stay 85, got ${result.summary.riskScore}`);
   });
+
+  // ===================================================================
+  // PyPI unblock: MT-1 ceiling bypass for import-time RCE
+  // PyPI packages emit no lifecycle_script, so confirmed import-time RCE
+  // would be capped at 35 and buried in the benign cluster. The bypass lets
+  // it reach its true score. npm is unaffected (these types only fire on .py).
+  // ===================================================================
+  // Control: four distinct non-bypass CRITICAL types (no lifecycle / HC / compound)
+  // raise the raw score above 35, so the MT-1 cap genuinely clamps to 35.
+  const _noLifecycleBase = () => ([
+    { type: 'prototype_pollution', severity: 'CRITICAL', file: '__init__.py', message: 'a' },
+    { type: 'suspicious_eval', severity: 'CRITICAL', file: '__init__.py', message: 'b' },
+    { type: 'minified_code', severity: 'CRITICAL', file: '__init__.py', message: 'c' },
+    { type: 'dynamic_code_gen', severity: 'CRITICAL', file: '__init__.py', message: 'd' }
+  ]);
+
+  test('PyPI unblock (control): no-lifecycle CRITICAL cluster is still capped at 35', () => {
+    const result = calculateRiskScore(_noLifecycleBase());
+    assert(result.riskScore === 35, `MT-1 cap must still clamp non-PyPI to 35, got ${result.riskScore}`);
+  });
+
+  test('PyPI unblock: import-time RCE (pyast_module_level_exec) bypasses the 35 cap', () => {
+    const threats = _noLifecycleBase().concat([
+      { type: 'pyast_module_level_exec', severity: 'CRITICAL', file: '__init__.py', message: 'exec(payload)' }
+    ]);
+    const result = calculateRiskScore(threats);
+    assert(result.riskScore > 35, `confirmed PyPI import-time RCE must exceed 35, got ${result.riskScore}`);
+  });
+
+  test('PyPI unblock: import_time_os_system also bypasses the 35 cap', () => {
+    const threats = _noLifecycleBase().concat([
+      { type: 'import_time_os_system', severity: 'CRITICAL', file: 'setup.py', message: 'os.system(curl|sh)' }
+    ]);
+    const result = calculateRiskScore(threats);
+    assert(result.riskScore > 35, `setup.py import-time os.system must exceed 35, got ${result.riskScore}`);
+  });
+
+  test('PyPI unblock (FP guard): a benign import-time type is NOT in the bypass set', () => {
+    // env_access at module level is ambiguous, not import-time RCE → must stay capped.
+    const threats = _noLifecycleBase().concat([
+      { type: 'env_access', severity: 'CRITICAL', file: '__init__.py', message: 'os.environ' }
+    ]);
+    const result = calculateRiskScore(threats);
+    assert(result.riskScore === 35, `non-RCE module-level signal must stay capped at 35, got ${result.riskScore}`);
+  });
 }
 
 module.exports = { runScoringHardeningTests };

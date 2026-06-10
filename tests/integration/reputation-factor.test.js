@@ -1,11 +1,25 @@
 'use strict';
 
 const { test, assert } = require('../test-utils');
-const { applyReputationFactor, REPUTATION_FACTOR_BOUNDS } = require('../../src/scoring.js');
+const { applyReputationFactor, REPUTATION_FACTOR_BOUNDS, REPUTATION_MALICE_FLOOR } = require('../../src/scoring.js');
+const { HIGH_CONFIDENCE_MALICE_TYPES } = require('../../src/monitor/classify.js');
 
 function makeResult(score) {
   return { summary: { riskScore: score, riskLevel: score >= 75 ? 'CRITICAL' : score >= 50 ? 'HIGH' : score >= 25 ? 'MEDIUM' : score > 0 ? 'LOW' : 'SAFE' } };
 }
+
+function makeResultWithThreats(score, threats) {
+  const r = makeResult(score);
+  r.threats = threats;
+  return r;
+}
+
+// Reputation metadata that drives the factor to its floor (0.10): a mature, very
+// popular package — exactly the profile an account-takeover hides behind.
+const ESTABLISHED_META = {
+  package_age_days: 2500, version_count: 250, weekly_downloads: 5_000_000,
+  has_repository: true, author_package_count: 100
+};
 
 async function runReputationFactorTests() {
   console.log('\n=== REPUTATION FACTOR TESTS (Hybrid v3 Phase 4) ===\n');
@@ -107,6 +121,129 @@ async function runReputationFactorTests() {
   test('Phase 4: bounds constants are { min: 0.10, max: 1.5 }', () => {
     assert(REPUTATION_FACTOR_BOUNDS.min === 0.10, 'min should be 0.10');
     assert(REPUTATION_FACTOR_BOUNDS.max === 1.5, 'max should be 1.5');
+  });
+
+  // ── Track R: malice-aware floor on the reputation multiplier ──────────────
+  // The ×0.10 suppression must not bury a confirmed-malice detection (account
+  // takeover of a popular package) below the alert threshold, while leaving the
+  // suppression of benign popular packages fully intact (zero FP cost).
+
+  test('Track R: HC-type detection is floored at the alert threshold despite ×0.10', () => {
+    const hcType = [...HIGH_CONFIDENCE_MALICE_TYPES][0];
+    const r = makeResultWithThreats(80, [{ type: hcType, severity: 'CRITICAL' }]);
+    const out = applyReputationFactor(r, ESTABLISHED_META);
+    assert(out !== null);
+    assert(out.factor === REPUTATION_FACTOR_BOUNDS.min, `expected min factor, got ${out.factor}`);
+    // 80 * 0.10 = 8 → would be a FN; floor lifts it to REPUTATION_MALICE_FLOOR.
+    assert(r.summary.riskScore === REPUTATION_MALICE_FLOOR,
+      `confirmed malice must not fall below ${REPUTATION_MALICE_FLOOR}, got ${r.summary.riskScore}`);
+  });
+
+  test('Track R: compound detection (compound:true) also triggers the floor', () => {
+    const r = makeResultWithThreats(90, [{ type: 'lifecycle_dataflow', severity: 'CRITICAL', compound: true }]);
+    applyReputationFactor(r, ESTABLISHED_META);
+    assert(r.summary.riskScore === REPUTATION_MALICE_FLOOR,
+      `compound must be floored, got ${r.summary.riskScore}`);
+  });
+
+  test('Track R: staged_payload + suspicious_domain(HIGH) triggers the floor', () => {
+    const r = makeResultWithThreats(70, [
+      { type: 'staged_payload', severity: 'HIGH' },
+      { type: 'suspicious_domain', severity: 'HIGH' }
+    ]);
+    applyReputationFactor(r, ESTABLISHED_META);
+    assert(r.summary.riskScore === REPUTATION_MALICE_FLOOR,
+      `staged-C2 must be floored, got ${r.summary.riskScore}`);
+  });
+
+  test('Track R (FP guard): benign popular package WITHOUT confirmed malice keeps full ×0.10', () => {
+    // env_access is not a HIGH_CONFIDENCE_MALICE_TYPE → no floor → suppression preserved.
+    assert(!HIGH_CONFIDENCE_MALICE_TYPES.has('env_access'), 'precondition: env_access not HC');
+    const r = makeResultWithThreats(80, [{ type: 'env_access', severity: 'LOW' }]);
+    applyReputationFactor(r, ESTABLISHED_META);
+    assert(r.summary.riskScore === 8, `benign suppression must be preserved (80×0.10=8), got ${r.summary.riskScore}`);
+  });
+
+  test('Track R: floor only raises — never lowers a score already above threshold', () => {
+    const hcType = [...HIGH_CONFIDENCE_MALICE_TYPES][0];
+    const r = makeResultWithThreats(80, [{ type: hcType, severity: 'CRITICAL' }]);
+    // has_repository alone → mild factor (~0.95): 80×0.95=76, already >20, untouched.
+    applyReputationFactor(r, { has_repository: true });
+    assert(r.summary.riskScore > REPUTATION_MALICE_FLOOR && r.summary.riskScore < 80,
+      `mild factor with malice should stay between floor and original, got ${r.summary.riskScore}`);
+  });
+
+  test('Track R: result without a threats array is unaffected by the floor', () => {
+    const r = makeResult(80); // no .threats field
+    applyReputationFactor(r, ESTABLISHED_META);
+    assert(r.summary.riskScore === 8, `no threats → plain ×0.10 (=8), got ${r.summary.riskScore}`);
+  });
+
+  test('Track R: floor constant is the alert threshold (20)', () => {
+    assert(REPUTATION_MALICE_FLOOR === 20, `expected 20, got ${REPUTATION_MALICE_FLOOR}`);
+  });
+
+  // ── P3: provenance signals feed the reputation factor ──────────────────────
+
+  test('P3: has_provenance true → mild downweight (fewer FP on attested packages)', () => {
+    const r = makeResult(60);
+    const out = applyReputationFactor(r, { has_provenance: true });
+    assert(out !== null, 'provenance presence is a signal → factor applied');
+    assert(out.factor < 1.0 && out.factor >= 0.85, `expected ~0.90 downweight, got ${out.factor}`);
+    assert(r.summary.riskScore < 60, `attested package should be downweighted, got ${r.summary.riskScore}`);
+  });
+
+  test('P3: provenance_regressed true → upweight (Ultralytics build-divergence suspicion)', () => {
+    const r = makeResult(40);
+    const out = applyReputationFactor(r, { provenance_regressed: true });
+    assert(out !== null);
+    assert(out.factor > 1.0, `regression must raise the factor, got ${out.factor}`);
+    assert(r.summary.riskScore > 40, `lost-provenance package should be upweighted, got ${r.summary.riskScore}`);
+  });
+
+  test('P3: regression dominates presence (mutually exclusive branch)', () => {
+    // provenance_regressed implies the latest lacks provenance, so has_provenance is
+    // false in practice; assert the suspicion branch wins regardless.
+    const r = makeResult(50);
+    const out = applyReputationFactor(r, { has_provenance: false, provenance_regressed: true });
+    assert(out.factor > 1.0, `regression branch must dominate, got ${out.factor}`);
+  });
+
+  test('P3 (FP guard): a young unattested package is NOT penalised for missing provenance', () => {
+    // has_provenance:false alone (no regression) applies no provenance signal — new
+    // legitimate packages without CI attestation must not be upweighted.
+    const r = makeResult(50);
+    const out = applyReputationFactor(r, { has_provenance: false });
+    assert(out === null, 'absence-without-regression is not a signal → no factor change');
+    assert(r.summary.riskScore === 50, `score must be unchanged, got ${r.summary.riskScore}`);
+  });
+
+  // ── P3 hardening (TeamPCP / Mini Shai-Hulud): a VALID attestation must never earn
+  // a trust bonus on a package that also shows malice. The May-2026 campaign shipped
+  // 84 malicious TanStack versions with valid SLSA L3 Sigstore attestations by
+  // hijacking the legitimate runner's OIDC identity — provenance proved the pipeline,
+  // not the code. The presence bonus is withheld whenever a malice signal is present.
+
+  test('P3 (TeamPCP guard): attested + confirmed-malice (HC type) → provenance bonus withheld', () => {
+    const hcType = [...HIGH_CONFIDENCE_MALICE_TYPES][0];
+    const r = makeResultWithThreats(60, [{ type: hcType, severity: 'CRITICAL' }]);
+    const out = applyReputationFactor(r, { has_provenance: true });
+    assert(out === null, 'attested-but-malicious → no provenance downweight applied');
+    assert(r.summary.riskScore === 60, `provenance must not reduce a malware score, got ${r.summary.riskScore}`);
+  });
+
+  test('P3 (TeamPCP guard): any HIGH/CRITICAL signal (not just HC) withholds the bonus', () => {
+    const r = makeResultWithThreats(60, [{ type: 'some_high_finding', severity: 'HIGH' }]);
+    const out = applyReputationFactor(r, { has_provenance: true });
+    assert(out === null, 'a HIGH severity signal alone suppresses the provenance trust bonus');
+    assert(r.summary.riskScore === 60, `score must be unchanged, got ${r.summary.riskScore}`);
+  });
+
+  test('P3 (TeamPCP guard): clean attested package STILL gets the downweight (no malice)', () => {
+    // Only LOW/MEDIUM noise present → not a malice signal → bonus still applies (FP win kept).
+    const r = makeResultWithThreats(60, [{ type: 'env_access', severity: 'LOW' }]);
+    const out = applyReputationFactor(r, { has_provenance: true });
+    assert(out !== null && out.factor < 1.0, `clean attested package keeps the downweight, got ${out && out.factor}`);
   });
 }
 
