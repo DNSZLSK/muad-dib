@@ -1090,7 +1090,11 @@ const CASCADE_TYPES = new Set([
   'proxy_data_intercept',         // MUADDIB-AST-043
   'remote_code_load',             // MUADDIB-AST-040
   'obfuscation_detected',         // src/scanner/obfuscation.js
-  'js_obfuscation_pattern'
+  'js_obfuscation_pattern',
+  // FPR audit 2026-06: these two also fire on legitimate minified vendor bundles
+  // (string-rewrite tables, base64 blobs) and were escaping the bundle cap.
+  'string_mutation_obfuscation',
+  'high_entropy_string'
 ]);
 const CASCADE_MIN_TYPES = 3;
 const CASCADE_MIN_FILE_BYTES = 20 * 1024;

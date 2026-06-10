@@ -3348,7 +3348,7 @@ const RULES = {
   trusted_new_dependency: {
     id: 'MUADDIB-TRUSTED-002',
     name: 'Trusted Package Added New Dependency',
-    severity: 'HIGH',
+    severity: 'MEDIUM',
     confidence: 'medium',
     domain: 'malware',
     description: 'Un package TRUSTED (>50k downloads/semaine) a ajoute une nouvelle dependance connue (>7 jours) dans un bump de version — changement de surface d\'attaque a verifier.',

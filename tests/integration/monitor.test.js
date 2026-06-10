@@ -9593,12 +9593,15 @@ async function runMonitorTests() {
     assert(rule.confidence === 'high', `Confidence should be high, got ${rule.confidence}`);
   });
 
-  test('MONITOR: trusted_new_dependency rule exists with HIGH severity', () => {
+  test('MONITOR: trusted_new_dependency rule exists with MEDIUM severity (FPR 2026-06 downgrade)', () => {
     const { RULES } = require('../../src/rules/index.js');
     const rule = RULES.trusted_new_dependency;
     assert(rule, 'Rule should exist');
     assert(rule.id === 'MUADDIB-TRUSTED-002', `ID should be MUADDIB-TRUSTED-002, got ${rule.id}`);
-    assert(rule.severity === 'HIGH', `Severity should be HIGH, got ${rule.severity}`);
+    // Downgraded HIGH->MEDIUM: a trusted package adding an established (>=7d) dep is an
+    // audit/surface signal, not malice. The account-takeover case stays CRITICAL
+    // (trusted_new_unknown_dependency, HC type).
+    assert(rule.severity === 'MEDIUM', `Severity should be MEDIUM, got ${rule.severity}`);
     assert(rule.confidence === 'medium', `Confidence should be medium, got ${rule.confidence}`);
   });
 

@@ -154,7 +154,12 @@ async function checkDepDiff(name, newVersion) {
         const ageDays = Math.floor(ageMs / 86400000);
         findings.push({
           type: 'trusted_new_dependency',
-          severity: 'HIGH',
+          // FPR audit 2026-06: a trusted package adding an ESTABLISHED (>=7d) dependency
+          // is an audit/surface-change signal ("a verifier"), not malice — it produced
+          // ~169 FPs. Downgraded HIGH->MEDIUM so it no longer alone meets the tier-1b
+          // corroboration bar. The real account-takeover case (new/unknown dep <7d) is
+          // the separate CRITICAL `trusted_new_unknown_dependency` (HC type) and is intact.
+          severity: 'MEDIUM',
           confidence: 'medium',
           file: 'package.json',
           message: `TRUSTED package ${name} added new dependency ${dep} (age: ${ageDays}d) in version ${prevVersion} → ${newVersion}`,
