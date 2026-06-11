@@ -59,6 +59,19 @@ function enqueueScan(scanQueue, item, stats, max = MAX_SCAN_QUEUE) {
     const evicted = protectedFallback ? scanQueue.shift() : scanQueue.splice(victimIdx, 1)[0];
     dropped = true;
     if (stats) stats.queueHardDrops = (stats.queueHardDrops || 0) + 1;
+    // Spill-to-disk waiting list (MUADDIB_QUEUE_SPILL=1): the evicted item goes to
+    // data/scan-backlog.jsonl for re-ingestion during calm periods instead of being
+    // lost. Lazy require (same pattern as state.js below) — spill.js requires this
+    // module for isProtected, so a top-level import would be a cycle. On spill
+    // failure (or flag off) the behavior degrades to the pre-spill drop, ledgered.
+    let spilled = false;
+    try {
+      const spillMod = require('./spill.js');
+      if (spillMod.isSpillEnabled() && evicted && evicted.name) {
+        spilled = spillMod.spillItems([evicted]) === 1;
+        if (spilled && stats) stats.spilled = (stats.spilled || 0) + 1;
+      }
+    } catch { /* spill is best-effort — fall through to the drop ledger */ }
     // Phase 0a: record the dropped item so a coverage loss keeps an identity — answers
     // "which versions were never scanned" (e.g. the Miasma 72s/96-version burst). Lazy
     // require avoids any top-level coupling with state.js; best-effort, never throws.
@@ -68,7 +81,8 @@ function enqueueScan(scanQueue, item, stats, max = MAX_SCAN_QUEUE) {
       if (evicted && evicted.name) {
         require('./state.js').appendScanLedger({
           name: evicted.name, version: evicted.version, ecosystem: evicted.ecosystem,
-          outcome: 'dropped', source: protectedFallback ? 'queue_cap_protected' : 'queue_cap',
+          outcome: spilled ? 'spilled' : 'dropped',
+          source: (protectedFallback ? 'queue_cap_protected' : 'queue_cap') + (spilled ? '_spill' : ''),
           // AUDIT-A1 observability (see evictFromScanQueueBulk)
           firstPublish: !!evicted.firstPublish, isBurstExtra: !!evicted.isATOBurstExtra
         });
@@ -127,33 +141,48 @@ function evictFromScanQueueBulk(scanQueue, targetKeep, source = 'bulk_evict', le
     try { appendLedger = require('./state.js').appendScanLedger; } catch { appendLedger = null; }
   }
 
-  // Compact survivors in place, ledgering each evicted item with an identity-preserving
-  // source (protected drops get a distinct suffix so the rare case stays visible in the rollup).
+  // Compact survivors in place, collecting the evicted items for the spill below.
+  const evictedItems = [];
   let w = 0;
   for (let r = 0; r < before; r++) {
-    if (dropSet.has(r)) {
-      const item = scanQueue[r];
-      if (appendLedger && item && item.name) {
-        try {
-          appendLedger({
-            name: item.name, version: item.version, ecosystem: item.ecosystem,
-            outcome: 'dropped',
-            source: _isProtected(item) ? `${source}_protected` : source,
-            // AUDIT-A1 observability: record whether a DROPPED item was a first-publish
-            // (real coverage loss) vs a burst-extra (version-spam, expected). Lets us
-            // measure if the memory breaker is evicting genuine new packages.
-            firstPublish: !!item.firstPublish,
-            isBurstExtra: !!item.isATOBurstExtra
-          });
-        } catch { /* ledger is best-effort — must never break the breaker */ }
-      }
-    } else {
-      scanQueue[w++] = scanQueue[r];
-    }
+    if (dropSet.has(r)) evictedItems.push(scanQueue[r]);
+    else scanQueue[w++] = scanQueue[r];
   }
   scanQueue.length = w;
 
-  return { dropped: toDrop, droppedProtected };
+  // Spill-to-disk waiting list (MUADDIB_QUEUE_SPILL=1): ONE batched append for the
+  // whole eviction (an EMERGENCY evicts thousands — per-item appends would thrash).
+  // spillItems is all-or-nothing per call (single buffered write), so `spilled`
+  // cleanly selects the ledger outcome for the batch. Lazy require: spill.js
+  // imports isProtected from this module — a top-level import would be a cycle.
+  // On spill failure (or flag off) the behavior degrades to the pre-spill drop.
+  let spilled = false;
+  try {
+    const spillMod = require('./spill.js');
+    if (spillMod.isSpillEnabled() && evictedItems.length > 0) {
+      spilled = spillMod.spillItems(evictedItems) > 0;
+    }
+  } catch { /* spill is best-effort */ }
+
+  // Ledger each evicted item with an identity-preserving source (protected drops get
+  // a distinct suffix so the rare case stays visible in the rollup).
+  for (const item of evictedItems) {
+    if (!appendLedger || !item || !item.name) continue;
+    try {
+      appendLedger({
+        name: item.name, version: item.version, ecosystem: item.ecosystem,
+        outcome: spilled ? 'spilled' : 'dropped',
+        source: (_isProtected(item) ? `${source}_protected` : source) + (spilled ? '_spill' : ''),
+        // AUDIT-A1 observability: record whether a DROPPED item was a first-publish
+        // (real coverage loss) vs a burst-extra (version-spam, expected). Lets us
+        // measure if the memory breaker is evicting genuine new packages.
+        firstPublish: !!item.firstPublish,
+        isBurstExtra: !!item.isATOBurstExtra
+      });
+    } catch { /* ledger is best-effort — must never break the breaker */ }
+  }
+
+  return { dropped: toDrop, droppedProtected, spilled: spilled ? evictedItems.length : 0 };
 }
 
 // ── AUDIT A2: optional priority dequeue (gated OFF by default) ──────────────
