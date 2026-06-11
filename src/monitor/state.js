@@ -81,7 +81,10 @@ const ALERTS_LOG_DIR = resolveWritableDir(PRIMARY_ALERTS_DIR, FALLBACK_ALERTS_DI
 
 // --- npm seq constants ---
 
-const NPM_SEQ_FILE = path.join(__dirname, '..', '..', 'data', 'npm-seq.json');
+// Env-overridable — same prod-state-pollution guard as PYPI_SERIAL_FILE below
+// (the npm-seq roundtrip test used to unlink the REAL file).
+const NPM_SEQ_FILE = process.env.MUADDIB_NPM_SEQ_FILE
+  || path.join(__dirname, '..', '..', 'data', 'npm-seq.json');
 const CHANGES_STREAM_URL = 'https://replicate.npmjs.com/registry/_changes';
 const CHANGES_LIMIT = 1000;
 const CHANGES_CATCHUP_MAX = 500000; // If behind by more than 500k seqs, skip to "now"
@@ -96,7 +99,13 @@ const CHANGES_CATCHUP_MAX = 500000; // If behind by more than 500k seqs, skip to
 // PYPI_CATCHUP_MAX is the staleness cap: if we are behind by more than this many
 // serials (≈ days of activity at ~30k events/day in 2026), skip to "now" rather
 // than fetch a monster batch. Mirrors CHANGES_CATCHUP_MAX for npm.
-const PYPI_SERIAL_FILE = path.join(__dirname, '..', '..', 'data', 'pypi-serial.json');
+// Env-overridable (2026-06-11 incident): integration tests exercise the real
+// pollPyPIChangelog with stubbed HTTP but the real savePypiSerial — a fixture
+// serial (1002) leaked into prod state, and the next daemon boot replayed the
+// PyPI changelog from 2011 (~15K ancient packages queued per poll). The test
+// harness points this at a tmp file so NO test can touch prod state.
+const PYPI_SERIAL_FILE = process.env.MUADDIB_PYPI_SERIAL_FILE
+  || path.join(__dirname, '..', '..', 'data', 'pypi-serial.json');
 const PYPI_XMLRPC_URL = 'https://pypi.org/pypi';
 const PYPI_CATCHUP_MAX = 100000;
 

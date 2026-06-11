@@ -7896,9 +7896,9 @@ async function runMonitorTests() {
     assert(CHANGES_CATCHUP_MAX === 500000, `CHANGES_CATCHUP_MAX should be 500000, got ${CHANGES_CATCHUP_MAX}`);
   });
 
-  test('CHANGES: NPM_SEQ_FILE points to data directory', () => {
-    assert(NPM_SEQ_FILE.includes('data'), `NPM_SEQ_FILE should be in data dir: ${NPM_SEQ_FILE}`);
-    assert(NPM_SEQ_FILE.endsWith('npm-seq.json'), `NPM_SEQ_FILE should end with npm-seq.json: ${NPM_SEQ_FILE}`);
+  test('CHANGES: NPM_SEQ_FILE honors the harness override (prod-state isolation, 2026-06-11 pypi-serial incident — this suite unlinks NPM_SEQ_FILE below)', () => {
+    assert(NPM_SEQ_FILE === process.env.MUADDIB_NPM_SEQ_FILE, `NPM_SEQ_FILE must be the harness tmp override, never prod data/: ${NPM_SEQ_FILE}`);
+    assert(NPM_SEQ_FILE.endsWith('.json'), `NPM_SEQ_FILE should be a .json path: ${NPM_SEQ_FILE}`);
   });
 
   test('CHANGES: loadState includes npmLastSeq from seq file', () => {
