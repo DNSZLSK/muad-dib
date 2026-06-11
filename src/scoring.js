@@ -1874,6 +1874,23 @@ function _hasMaliceSignal(threats) {
   return threats.some(t => t.severity === 'HIGH' || t.severity === 'CRITICAL');
 }
 
+// P4 (pre-release reputation): known maintainer-controlled pre-release dist-tag names.
+const _PRERELEASE_TAG_RE = /^(next|canary|nightly|rc|beta|alpha|dev|experimental|preview|snapshot|edge|insider|insiders)$/i;
+
+// True when the scanned version is published on a NON-latest pre-release dist-tag
+// (e.g. dist-tags = { latest: "3.19.1", next: "3.19.0-nightly-..." } and we scan the
+// nightly). Maintainer-controlled, so an attacker cannot put a payload on `next`
+// without the account — and Track R still floors confirmed malice regardless.
+function _isPrereleaseChannelVersion(metadata) {
+  const dt = metadata && metadata.dist_tags;
+  const sv = metadata && metadata.scan_version;
+  if (!dt || typeof dt !== 'object' || typeof sv !== 'string') return false;
+  for (const [tag, ver] of Object.entries(dt)) {
+    if (ver === sv && tag !== 'latest' && _PRERELEASE_TAG_RE.test(tag)) return true;
+  }
+  return false;
+}
+
 function applyReputationFactor(result, metadata) {
   if (!result || !result.summary || !metadata) return null;
   // FPR plan : the reputation factor describes "how trustworthy this package
@@ -1884,12 +1901,21 @@ function applyReputationFactor(result, metadata) {
   // scan version is unknown (CLI scanning a directory without version field),
   // we fail open : skip the factor entirely rather than apply a multiplier
   // we cannot situate in time.
+  // P4 (pre-release reputation): a canary/nightly/rc of an established package is a NEW
+  // (not historical) version on a maintainer-controlled pre-release dist-tag, so it should
+  // inherit the package's reputation — but only PARTIALLY (it is not the verified latest).
+  // Any OTHER non-latest version (historical / pinned-old / vendored) keeps the full skip.
+  let _prereleaseAttenuation = 1.0;
   if (
     typeof metadata.latest_version === 'string' &&
     typeof metadata.scan_version === 'string' &&
     metadata.latest_version !== metadata.scan_version
   ) {
-    return null;
+    if (_isPrereleaseChannelVersion(metadata)) {
+      _prereleaseAttenuation = 0.85;
+    } else {
+      return null;
+    }
   }
   if (
     typeof metadata.latest_version === 'string' &&
@@ -1900,9 +1926,14 @@ function applyReputationFactor(result, metadata) {
   // P3 hardening: a valid attestation must NOT earn a trust bonus on a package that
   // also shows malice (TeamPCP attested-malware scenario). Withhold it here, where
   // the threat list is available.
-  const factor = _factorFromMetadata(metadata, {
+  let factor = _factorFromMetadata(metadata, {
     allowProvenanceBonus: !_hasMaliceSignal(result.threats)
   });
+  // P4: blend the factor toward neutral (1.0) for pre-release channel versions — they
+  // get most of the reputation suppression but not 100% (they are not the verified latest).
+  if (_prereleaseAttenuation !== 1.0) {
+    factor = 1.0 + (factor - 1.0) * _prereleaseAttenuation;
+  }
   if (factor === 1.0) {
     result.summary.reputationFactor = 1.0;
     return null;
