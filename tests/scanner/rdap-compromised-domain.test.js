@@ -211,77 +211,54 @@ async function runRdapCompromisedDomainTests() {
     assert(isCompromisedDomainV2('not-a-date', PACKAGE_PUBLISH, 'x.test') === false);
   });
 
-  // ── Shadow hook: divergence logged, V1 threats UNCHANGED ──
-  function withShadow(file, fn) {
-    const save = { on: process.env.MUADDIB_SHADOW, f: process.env.MUADDIB_SHADOW_FILE };
-    process.env.MUADDIB_SHADOW = '1';
-    process.env.MUADDIB_SHADOW_FILE = file;
-    return Promise.resolve()
-      .then(fn)
-      .finally(() => {
-        if (save.on !== undefined) process.env.MUADDIB_SHADOW = save.on; else delete process.env.MUADDIB_SHADOW;
-        if (save.f !== undefined) process.env.MUADDIB_SHADOW_FILE = save.f; else delete process.env.MUADDIB_SHADOW_FILE;
-      });
-  }
+  // ── V2 is the LIVE emitter (2026-06-11 flip) ──
+  // checkCompromisedDomain now emits via isCompromisedDomainV2. The former V1
+  // margin shadow hook is retired (V2 ⊂ V1 per backtest → no net needed). These
+  // pin the live emission semantics — no MUADDIB_SHADOW anywhere.
 
-  await asyncTest('F1-V2: V1-only case → V1 threat STILL emitted + divergence logged with package ctx', async () => {
-    const f = path.join(os.tmpdir(), `rdap-shadow-${Date.now()}-a.jsonl`);
-    try {
-      await withShadow(f, async () => {
-        _resetRdapCache();
-        // Domain created 14d before first publish: V1 true (margin), V2 false.
-        const creation = isoOffsetDays(PACKAGE_PUBLISH, -14);
-        const meta = makeMeta(['dev@fresh-domain.test'], PACKAGE_PUBLISH);
-        const r = await checkCompromisedDomain(meta, {
-          fetchRdap: async () => ({ creationDate: creation }),
-          shadowCtx: { name: 'fresh-pkg', version: '1.0.0', ecosystem: 'npm' }
-        });
-        // ZERO-REGRESSION CONTRACT: the live V1 verdict still emits the threat.
-        assert(r.length === 1 && r[0].type === 'compromised_email_domain', 'V1 threat unchanged under shadow');
-        const { readShadowDivergences } = require('../../src/shared/shadow.js');
-        const div = readShadowDivergences({ detector: 'compromised_email_domain' });
-        assert(div.length === 1, `one divergence logged, got ${div.length}`);
-        assert(div[0].package === 'fresh-pkg' && div[0].ecosystem === 'npm', 'package ctx threaded');
-        assert(div[0].oldVerdict === true && div[0].newVerdict === false, 'V1-only divergence shape');
-        assert(div[0].evidence.domain === 'fresh-domain.test' && div[0].evidence.oldMarginDays === 30, 'evidence complete');
-      });
-    } finally { try { fs.unlinkSync(f); } catch {} }
+  await asyncTest('F1-V2 LIVE: node-ipc shape (creation ≫ first publish) → emits compromised_email_domain', async () => {
+    _resetRdapCache();
+    const creation = isoOffsetDays(PACKAGE_PUBLISH, 365); // domain re-registered well after first publish
+    const meta = makeMeta(['attacker@takeover.test'], PACKAGE_PUBLISH);
+    const r = await checkCompromisedDomain(meta, { fetchRdap: async () => ({ creationDate: creation }) });
+    assert(r.length === 1 && r[0].type === 'compromised_email_domain' && r[0].severity === 'HIGH',
+      `takeover shape must still fire, got ${JSON.stringify(r)}`);
   });
 
-  await asyncTest('F1-V2: agreement (both true) → NO divergence logged', async () => {
-    const f = path.join(os.tmpdir(), `rdap-shadow-${Date.now()}-b.jsonl`);
-    try {
-      await withShadow(f, async () => {
-        _resetRdapCache();
-        const creation = isoOffsetDays(PACKAGE_PUBLISH, 365); // both V1 and V2 flag
-        const meta = makeMeta(['x@agreed-takeover.test'], PACKAGE_PUBLISH);
-        const r = await checkCompromisedDomain(meta, {
-          fetchRdap: async () => ({ creationDate: creation }),
-          shadowCtx: { name: 'agreed-pkg', ecosystem: 'npm' }
-        });
-        assert(r.length === 1, 'V1 threat emitted');
-        assert(!fs.existsSync(f), 'agreements are not logged (divergence-only contract)');
-      });
-    } finally { try { fs.unlinkSync(f); } catch {} }
+  // THE regression-killer: the old V1 margin FP (domain bought shortly BEFORE
+  // the first publish) must NO LONGER emit under the live V2 semantics.
+  await asyncTest('F1-V2 LIVE: domain registered 14d BEFORE first publish → NO threat (old margin FP killed)', async () => {
+    _resetRdapCache();
+    const creation = isoOffsetDays(PACKAGE_PUBLISH, -14);
+    // Precondition: the retired V1 WOULD have flagged this (the FP).
+    assert(isCompromisedDomain(creation, PACKAGE_PUBLISH) === true, 'V1 (retired) flagged the pre-publish acquisition');
+    const meta = makeMeta(['dev@fresh-domain.test'], PACKAGE_PUBLISH);
+    const r = await checkCompromisedDomain(meta, { fetchRdap: async () => ({ creationDate: creation }) });
+    assert(r.length === 0, `V2 live must NOT emit on pre-publish domain acquisition, got ${JSON.stringify(r)}`);
   });
 
-  await asyncTest('F1-V2: shadow OFF → no divergence file, identical V1 behavior', async () => {
-    const f = path.join(os.tmpdir(), `rdap-shadow-${Date.now()}-c.jsonl`);
-    const save = { on: process.env.MUADDIB_SHADOW, f: process.env.MUADDIB_SHADOW_FILE };
-    delete process.env.MUADDIB_SHADOW;
-    process.env.MUADDIB_SHADOW_FILE = f;
-    try {
-      _resetRdapCache();
-      const creation = isoOffsetDays(PACKAGE_PUBLISH, -14); // the divergent case
-      const meta = makeMeta(['dev@off-domain.test'], PACKAGE_PUBLISH);
-      const r = await checkCompromisedDomain(meta, { fetchRdap: async () => ({ creationDate: creation }) });
-      assert(r.length === 1, 'V1 threat emitted exactly as before');
-      assert(!fs.existsSync(f), 'shadow off → nothing written');
-    } finally {
-      if (save.on !== undefined) process.env.MUADDIB_SHADOW = save.on;
-      if (save.f !== undefined) process.env.MUADDIB_SHADOW_FILE = save.f; else delete process.env.MUADDIB_SHADOW_FILE;
-      try { fs.unlinkSync(f); } catch {}
-    }
+  await asyncTest('F1-V2 LIVE: public email provider → NO threat even with creation after publish', async () => {
+    _resetRdapCache();
+    const creation = isoOffsetDays(PACKAGE_PUBLISH, 365);
+    const meta = makeMeta(['maintainer@gmail.com'], PACKAGE_PUBLISH);
+    const r = await checkCompromisedDomain(meta, { fetchRdap: async () => ({ creationDate: creation }) });
+    assert(r.length === 0, `public provider must be excluded from the live verdict, got ${JSON.stringify(r)}`);
+  });
+
+  await asyncTest('F1-V2 LIVE: multiple maintainers — only the genuine takeover domain fires', async () => {
+    _resetRdapCache();
+    const meta = makeMeta(['safe@oldlegit.test', 'attacker@new-acquired.test', 'dev@gmail.com'], PACKAGE_PUBLISH);
+    const oldCreation = isoOffsetDays(PACKAGE_PUBLISH, -3000); // legit, predates publish
+    const newCreation = isoOffsetDays(PACKAGE_PUBLISH, 500);   // re-registered after publish
+    const fetchRdap = async (domain) => {
+      if (domain === 'oldlegit.test') return { creationDate: oldCreation };
+      if (domain === 'new-acquired.test') return { creationDate: newCreation };
+      if (domain === 'gmail.com') return { creationDate: isoOffsetDays(PACKAGE_PUBLISH, 800) };
+      return null;
+    };
+    const r = await checkCompromisedDomain(meta, { fetchRdap });
+    assert(r.length === 1 && r[0].domain === 'new-acquired.test',
+      `only the post-publish non-provider domain fires, got ${JSON.stringify(r.map(x => x.domain))}`);
   });
 }
 
