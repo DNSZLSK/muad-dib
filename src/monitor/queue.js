@@ -13,13 +13,14 @@ const { Worker } = require('worker_threads');
 const { runSandbox, tryAcquireSandboxSlot } = require('../sandbox/index.js');
 const { sendWebhook } = require('../webhook.js');
 const { downloadToFile, extractArchive, sanitizePackageName } = require('../shared/download.js');
-const { MAX_TARBALL_SIZE } = require('../shared/constants.js');
+const { MAX_TARBALL_SIZE, getMaxFileSize } = require('../shared/constants.js');
 const { acquireRegistrySlot, releaseRegistrySlot } = require('../shared/http-limiter.js');
 const { loadCachedIOCs } = require('../ioc/updater.js');
 const { scanPackageJson } = require('../scanner/package.js');
 const { scanShellScripts } = require('../scanner/shell.js');
 const { buildTrainingRecord } = require('../ml/feature-extractor.js');
 const { appendWorkerMem } = require('./worker-mem.js');
+const { acquireHeavySlot, releaseHeavySlot, isHeavyScan, getHeavyLaneState, heavyWaitMaxMs, HEAVY_REQUEUE_MAX } = require('./heavy-lane.js');
 const { appendRecord: appendTrainingRecord, relabelRecords } = require('../ml/jsonl-writer.js');
 
 // From ./state.js
@@ -305,6 +306,60 @@ function countPackageFiles(dir) {
   return { fileCountTotal, hasTests };
 }
 
+// C2 heavy-lane measurement bounds. Distinct from countPackageFiles (whose
+// depth cap of 5 is an ML-feature contract — do not touch it).
+const JS_WEIGHT_MAX_DEPTH = 8;
+const JS_WEIGHT_MAX_FILES = 2000;
+const JS_WEIGHT_FILE_PATTERN = /\.(?:[cm]?js|[jt]sx?)$/i;
+
+/**
+ * Measure how much parsable JS a package carries — the heavy-lane
+ * classification signal. The per-worker isolate heap is driven by the SUM of
+ * AST-parsed JS bytes (executor.js skips files > getMaxFileSize()
+ * individually, but the AST cache accumulates across files), so we sum the
+ * on-disk sizes of parsable JS files, skipping the ones the executor will
+ * skip anyway. NEVER use meta.unpackedSize for this — it is absent for PyPI
+ * and part of npm (the `|| 0` hole that lets giant bundles bypass the C1
+ * size-cap in the first place).
+ *
+ * Bounded walk; an overflow (depth/file caps) returns truncated:true, which
+ * isHeavyScan classifies heavy by default.
+ *
+ * @param {string} dir - extracted package directory
+ * @returns {{ totalJsBytes: number, maxJsFileBytes: number, truncated: boolean }}
+ */
+function measureJsWeight(dir) {
+  let totalJsBytes = 0;
+  let maxJsFileBytes = 0;
+  let seen = 0;
+  let truncated = false;
+  const perFileCap = getMaxFileSize();
+
+  function walk(current, depth) {
+    if (truncated) return;
+    if (depth > JS_WEIGHT_MAX_DEPTH) { truncated = true; return; }
+    let entries;
+    try { entries = fs.readdirSync(current, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      if (truncated) return;
+      if (entry.isDirectory()) {
+        if (ML_EXCLUDED_DIRS.has(entry.name)) continue;
+        walk(path.join(current, entry.name), depth + 1);
+      } else if (entry.isFile() && JS_WEIGHT_FILE_PATTERN.test(entry.name)) {
+        if (++seen > JS_WEIGHT_MAX_FILES) { truncated = true; return; }
+        let size;
+        try { size = fs.statSync(path.join(current, entry.name)).size; } catch { continue; }
+        if (size > perFileCap) continue; // executor skips these — they never reach the AST
+        totalJsBytes += size;
+        if (size > maxJsFileBytes) maxJsFileBytes = size;
+      }
+    }
+  }
+
+  walk(dir, 0);
+  return { totalJsBytes, maxJsFileBytes, truncated };
+}
+
 /**
  * Pure classifier: is this a prebuilt native-binary platform shard (the kind that
  * hangs the sandbox install and always times out INCONCLUSIVE)? No I/O — the parsed
@@ -435,6 +490,7 @@ function runScanInWorker(extractedDir, timeoutMs, scanContext = null, signal = n
     appendWorkerMem({
       ev: 'spawn', tid: _wmTid,
       name: _sc.name, version: _sc.version, ecosystem: _sc.ecosystem,
+      lane: _sc._lane, jsBytes: _sc._jsBytes,
       rss: process.memoryUsage().rss
     });
 
@@ -645,6 +701,18 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
     // ML Phase 2a: Count JS files and detect test presence for enriched features
     const { fileCountTotal, hasTests } = countPackageFiles(extractedDir);
 
+    // C2 heavy-lane classification (see heavy-lane.js header): measured on
+    // disk, after extraction — registry metadata is not trustworthy here.
+    // Measurement failure falls back to the compressed tarball size
+    // (conservative: never silently far under the real JS weight).
+    let jsWeight;
+    try {
+      jsWeight = measureJsWeight(extractedDir);
+    } catch {
+      jsWeight = { totalJsBytes: fileSize, maxJsFileBytes: 0, truncated: false };
+    }
+    const lane = isHeavyScan(jsWeight) ? 'heavy' : 'light';
+
     // Hoisted before the worker spawn (per-worker 429-storm fix): fetch the npm
     // registry metadata ONCE on the main thread. The shared http-limiter coordinates
     // it and the temporal cache is warm (npm-registry.js reads it first), so only
@@ -663,6 +731,28 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
       }
     }
 
+    // C2 heavy-lane: serialize the memory-heavy scans. Acquired AFTER the
+    // registry fetch above (never hold the slot during network I/O); released
+    // in the finally right after the static scan — the slot covers ONLY the
+    // worker's lifetime (≤ STATIC_SCAN_TIMEOUT_MS), not the sandbox (which
+    // has its own semaphore and runs outside the daemon's heap).
+    let heavySlotHeld = false;
+    if (lane === 'heavy') {
+      stats.heavyScans = (stats.heavyScans || 0) + 1;
+      const laneState = getHeavyLaneState();
+      if (laneState.max > 0 && laneState.active >= laneState.max) {
+        stats.heavyLaneWaits = (stats.heavyLaneWaits || 0) + 1;
+        console.log(`[MONITOR] HEAVY_LANE: ${name}@${version} waiting for a slot (${(jsWeight.totalJsBytes / 1024 / 1024).toFixed(1)}MB JS, active=${laneState.active}, waiting=${laneState.waiting})`);
+      }
+      // After HEAVY_REQUEUE_MAX requeues the final pass waits unbounded
+      // (abort-aware only, still under the outer SCAN_TIMEOUT_MS) so an item
+      // cannot loop in the queue forever.
+      const lastPass = (meta._heavyRetries || 0) >= HEAVY_REQUEUE_MAX;
+      const waitStart = Date.now();
+      heavySlotHeld = await acquireHeavySlot({ signal, maxWaitMs: lastPass ? 0 : heavyWaitMaxMs() });
+      stats.heavyLaneWaitMsTotal = (stats.heavyLaneWaitMsTotal || 0) + (Date.now() - waitStart);
+    }
+
     let result;
     try {
       // scanContext: feeds monitor-side info (name/version/ecosystem) and the
@@ -679,7 +769,12 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
         // Stage 2: set by processQueueItem when MUADDIB_TRIAGE_MODE=enforce.
         // Defaults to 'full' so any CLI/test caller that bypasses triage gets
         // the full 20-scanner pipeline (unchanged behaviour).
-        scanMode: (meta && meta.scanMode) || 'full'
+        scanMode: (meta && meta.scanMode) || 'full',
+        // C2 observability: lane + JS weight flow into the worker-mem spawn
+        // event (runScanInWorker) so lane×heap-peak cross-checks are possible
+        // post-rollout (hard criterion: zero 'light' scans peaking >512MB).
+        _lane: lane,
+        _jsBytes: jsWeight.totalJsBytes
       };
       // Hand the main-thread-fetched metadata to the worker so its processor skips
       // the per-worker getPackageMetadata fetch (429-storm fix). npm only; the key
@@ -705,6 +800,10 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
         return { sandboxResult: null, staticClean: false };
       }
       throw staticErr;
+    } finally {
+      // Single release point — success, static timeout, EMERGENCY terminate
+      // and abort all funnel through here exactly once (heavySlotHeld guard).
+      if (heavySlotHeld) { releaseHeavySlot(); heavySlotHeld = false; }
     }
 
     // Phase 3 signal — agent-supply-chain lens. Pure observability, no scoring impact.
@@ -1285,6 +1384,11 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
       }
     }
   } catch (err) {
+    // C2 heavy-lane: a wait-timeout is NOT a scan failure — processQueueItem
+    // requeues the item (bounded by HEAVY_REQUEUE_MAX). Re-throw BEFORE any
+    // error accounting: this catch otherwise swallows everything into the
+    // 'scan_error' ledger path and the requeue would never happen.
+    if (err && err.code === 'HEAVY_LANE_WAIT_TIMEOUT') throw err;
     recordError(err, stats);
     stats.scanned++;
     stats.totalTimeMs += Date.now() - startTime;
@@ -1376,6 +1480,22 @@ async function processQueueItem(item, stats, dailyAlerts, recentlyScanned, downl
       })
     ]);
   } catch (err) {
+    // C2 heavy-lane: the bounded wait expired while the heavy slots were
+    // saturated (typical under a spill-drain burst). Not a failure — put the
+    // item back at the queue tail (natural backoff) up to HEAVY_REQUEUE_MAX
+    // passes; scanPackage runs the final pass without the wait bound. Note:
+    // _heavyRetries does not survive a spill (spillItems strips non-re-enqueue
+    // fields) — acceptable, the spill drain runs in calm windows anyway.
+    if (err && err.code === 'HEAVY_LANE_WAIT_TIMEOUT') {
+      const decision = computeHeavyRequeue(item);
+      if (decision.requeue) {
+        stats.heavyLaneRequeues = (stats.heavyLaneRequeues || 0) + 1;
+        console.log(`[MONITOR] HEAVY_LANE: requeued ${item.name}@${item.version || '?'} (wait-timeout pass ${decision.retries}/${HEAVY_REQUEUE_MAX})`);
+        enqueueScan(scanQueue, item, stats);
+        return;
+      }
+      // Safety net — should be unreachable (the last pass waits unbounded).
+    }
     recordError(err, stats);
     console.error(`[MONITOR] Queue error for ${item.name}: ${err.message}`);
     // IOC fallback: if scan failed for a known malicious package, send P1 alert.
@@ -1448,6 +1568,18 @@ async function _spawnWorker(scanQueue, stats, dailyAlerts, recentlyScanned, down
  */
 function computeWorkersToSpawn(targetConcurrency, activeWorkers, queueLength) {
   return Math.max(0, Math.min(targetConcurrency - activeWorkers, queueLength));
+}
+
+/**
+ * Pure requeue decision for a heavy-lane wait-timeout (same extraction
+ * rationale as computeWorkersToSpawn). Mutates item._heavyRetries; once the
+ * counter passes HEAVY_REQUEUE_MAX the item is NOT requeued again — its next
+ * pass through scanPackage waits unbounded instead.
+ */
+function computeHeavyRequeue(item) {
+  const retries = (item._heavyRetries || 0) + 1;
+  item._heavyRetries = retries;
+  return { requeue: retries <= HEAVY_REQUEUE_MAX, retries };
 }
 
 // ── RSS-aware worker admission (P1 OOM durable fix) ──
@@ -1795,7 +1927,10 @@ async function resolveTarballAndScan(item, stats, dailyAlerts, recentlyScanned, 
     registryScripts: item.registryScripts || null,
     _cacheTrigger: item._cacheTrigger || null,
     fastTrack: item.fastTrack || false,
-    scanMode: effectiveScanMode
+    scanMode: effectiveScanMode,
+    // C2 heavy-lane: pass count set by computeHeavyRequeue — at
+    // HEAVY_REQUEUE_MAX the final pass waits for its slot unbounded.
+    _heavyRetries: item._heavyRetries || 0
   }, stats, dailyAlerts, recentlyScanned, downloadsCache, scanQueue, sandboxAvailable, signal);
   const sandboxResult = scanResult && scanResult.sandboxResult;
   const staticClean = scanResult && scanResult.staticClean;
@@ -1917,6 +2052,8 @@ module.exports = {
   isBundledToolingOnly,
   recordTrainingSample,
   countPackageFiles,
+  measureJsWeight,
+  computeHeavyRequeue,
   classifyNativeShard,
   shouldSkipSandbox,
   runScanInWorker,
