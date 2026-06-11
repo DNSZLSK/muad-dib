@@ -1537,6 +1537,65 @@ test('UPDATER: generateCompactIOCs deduplicates split comma versions', () => {
   assert(count511 === 1, '5.11.3 should appear exactly once, got: ' + count511);
 });
 
+// ============================================
+// LEAN IOC PROJECTION (C2 RSS fix)
+// ============================================
+console.log('\n=== LEAN IOC TESTS ===\n');
+
+test('LEAN: createLeanIOCs keeps only matcher/alert fields, drops enrichment', () => {
+  const { createLeanIOCs } = require('../../src/ioc/updater.js');
+  const full = {
+    packages: [{
+      name: 'lodahs', version: '*', severity: 'critical', source: 'osv-malicious',
+      id: 'MAL-1', confidence: 'high', description: 'x'.repeat(500), references: ['a', 'b'],
+      mitre: 'T1195.002', published: '2025-08-14', freshness: { added_at: 'z' }, sources: [{ name: 'n' }]
+    }],
+    pypi_packages: [{ name: 'q', version: '1.0', severity: 'high', source: 'osm', description: 'y'.repeat(900) }],
+    hashes: ['h1'], markers: ['m1'], files: ['f1'],
+    stringIocs: [{ string: 's', campaign: 'c', severity: 'high', description: 'd' }],
+    updated: 't', sources: { a: 1 }
+  };
+  const lean = createLeanIOCs(full);
+  // npm entry projected to exactly the four read fields
+  assert(Object.keys(lean.packages[0]).sort().join(',') === 'name,severity,source,version',
+    'npm entry must keep only {name,version,severity,source}, got: ' + Object.keys(lean.packages[0]).join(','));
+  assert(lean.packages[0].name === 'lodahs' && lean.packages[0].source === 'osv-malicious', 'values preserved');
+  for (const dropped of ['id', 'description', 'references', 'mitre', 'published', 'freshness', 'sources', 'confidence']) {
+    assert(!(dropped in lean.packages[0]), `enrichment field '${dropped}' must be dropped`);
+  }
+  // pypi projected the same way
+  assert(lean.pypi_packages.length === 1 && !('description' in lean.pypi_packages[0]), 'pypi entry projected + enrichment dropped');
+  // simple/small collections preserved verbatim
+  assert(lean.hashes.length === 1 && lean.markers.length === 1 && lean.files.length === 1, 'hashes/markers/files preserved');
+  assert(lean.stringIocs.length === 1 && lean.stringIocs[0].description === 'd', 'stringIocs preserved verbatim (alert needs them)');
+  assert(lean.updated === 't' && lean.sources.a === 1, 'updated/sources metadata preserved');
+  // the projection must actually be smaller
+  assert(JSON.stringify(lean).length < JSON.stringify(full).length, 'lean must be smaller than full');
+});
+
+test('LEAN: createLeanIOCs is robust to missing collections', () => {
+  const { createLeanIOCs } = require('../../src/ioc/updater.js');
+  const lean = createLeanIOCs({ packages: [{ name: 'p', version: '*', severity: 'high' }] });
+  assert(lean.pypi_packages.length === 0 && lean.hashes.length === 0 && lean.stringIocs.length === 0, 'absent collections default to []');
+  assert(lean.packages[0].source === undefined, 'missing source stays undefined (no throw)');
+});
+
+test('LEAN: lean entries merge into the matcher exactly like full entries', () => {
+  const { createLeanIOCs, createOptimizedIOCs } = require('../../src/ioc/updater.js');
+  // a lean projection must still produce a working packagesMap / wildcard set
+  const lean = createLeanIOCs({ packages: [{ name: 'evilpkg', version: '*', severity: 'critical', source: 's' }] });
+  const opt = createOptimizedIOCs(lean);
+  assert(opt.packagesMap.get('evilpkg'), 'lean entry indexed in packagesMap');
+  assert(opt.wildcardPackages.has('evilpkg'), 'lean wildcard entry indexed in wildcardPackages');
+});
+
+test('LEAN: ensureLeanIOCFile / writeLeanIOCFile are exported functions', () => {
+  const u = require('../../src/ioc/updater.js');
+  assert(typeof u.ensureLeanIOCFile === 'function', 'ensureLeanIOCFile exported');
+  assert(typeof u.writeLeanIOCFile === 'function', 'writeLeanIOCFile exported');
+  assert(typeof u.LOCAL_LEAN_FILE === 'string' && u.LOCAL_LEAN_FILE.endsWith('iocs-lean.json'), 'LOCAL_LEAN_FILE exported');
+});
+
 }
 
 module.exports = { runUpdaterTests };
