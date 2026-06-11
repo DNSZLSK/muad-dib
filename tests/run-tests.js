@@ -14,6 +14,24 @@ if (!process.env.MUADDIB_NO_REGISTRY_FETCH) {
   process.env.MUADDIB_NO_REGISTRY_FETCH = '1';
 }
 
+// Prod-state isolation — MUST be set BEFORE any monitor module is required.
+// Reason (2026-06-11 incident): the pollPyPIChangelog integration tests stub
+// the HTTP seam but run the REAL savePypiSerial, which wrote a fixture serial
+// (1002) into data/pypi-serial.json. The next daemon restart loaded it and
+// replayed the PyPI changelog from 2011 — ~15K ancient packages queued every
+// poll, queue 45K, EMERGENCY evictions all afternoon. Point the daemon state
+// files at tmp so no test, present or future, can clobber prod state.
+{
+  const os = require('os');
+  const path = require('path');
+  if (!process.env.MUADDIB_PYPI_SERIAL_FILE) {
+    process.env.MUADDIB_PYPI_SERIAL_FILE = path.join(os.tmpdir(), `muaddib-test-pypi-serial-${process.pid}.json`);
+  }
+  if (!process.env.MUADDIB_NPM_SEQ_FILE) {
+    process.env.MUADDIB_NPM_SEQ_FILE = path.join(os.tmpdir(), `muaddib-test-npm-seq-${process.pid}.json`);
+  }
+}
+
 const { getCounters } = require('./test-utils');
 
 // Scanner tests (fast — pure unit tests, no process spawns)
@@ -91,6 +109,7 @@ const { runScanLedgerTests } = require('./unit/scan-ledger.test');
 const { runShadowTests } = require('./unit/shadow.test');
 const { runSpillTests } = require('./unit/spill.test');
 const { runWorkerMemTests } = require('./unit/worker-mem.test');
+const { runPypiCatchupTests } = require('./integration/pypi-catchup.test');
 const { runSandboxPreloadTests } = require('./integration/sandbox-preload.test');
 
 // Integration tests (fast subset — CLI, monitor, diff)
@@ -343,6 +362,7 @@ async function timed(name, fn) {
   await timed('shadow', runShadowTests);
   await timed('spill', runSpillTests);
   await timed('worker-mem', runWorkerMemTests);
+  await timed('pypi-catchup', runPypiCatchupTests);
 
   // ML pipeline integration tests (v2.10.0)
   await timed('ml-pipeline', runMLPipelineTests);

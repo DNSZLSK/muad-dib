@@ -32,14 +32,21 @@ const { appendWorkerMem, sampleIntervalMs } = require('../monitor/worker-mem.js'
   const everyMs = sampleIntervalMs();
   let sampler = null;
   if (everyMs > 0) {
-    sampler = setInterval(() => {
+    const sampleNow = () => {
       const m = process.memoryUsage();
       appendWorkerMem({
         ev: 'sample', tid: threadId,
         name: scanContext.name, version: scanContext.version,
         heapUsed: m.heapUsed, external: m.external, arrayBuffers: m.arrayBuffers, rss: m.rss
       });
-    }, everyMs);
+    };
+    // One immediate baseline sample, deterministically: a mostly-synchronous
+    // scan (small package, sync AST walks, microtask-only awaits) can starve
+    // the event loop for its whole lifetime, so the interval alone may never
+    // fire (bit CI on 2026-06-11). The baseline also gives the per-package
+    // delta a clean starting point.
+    sampleNow();
+    sampler = setInterval(sampleNow, everyMs);
     sampler.unref();
   }
   try {
