@@ -975,6 +975,14 @@ const SCAN_LEDGER_OUTCOMES = new Set([
   'static_timeout', 'size_skip', 'dropped', 'error'
 ]);
 
+// Benign terminal verdicts — the ledger-headline "clean" bucket. Mirrors the
+// in-memory stats.clean semantics (every path that increments stats.clean writes
+// one of these outcomes). sandbox_inconclusive/unconfirmed and size_skip are
+// deliberately in neither bucket: scanned but not vouched-for.
+const CLEAN_LEDGER_OUTCOMES = new Set([
+  'clean', 'clean_low_signal', 'clean_tooling', 'ml_clean', 'llm_benign'
+]);
+
 /**
  * Append one per-scan ledger entry recording the terminal outcome of a dequeued
  * package. Best-effort: NEVER throws (a ledger failure must not break scanning).
@@ -1112,6 +1120,12 @@ function computeLedgerRollup(sinceTs, opts = {}) {
   const byOutcome = Object.create(null);
   const byEcosystem = Object.create(null);
   let total = 0, scanned = 0, dropped = 0, alerted = 0;
+  // Headline counters (ledger-derived daily-report headline — restart-proof, unlike
+  // the in-memory stats counters). clean buckets all the benign terminal verdicts;
+  // errors only the ledgerized failure outcomes (HTTP/tar failures live in the
+  // in-memory errorsByType breakdown, not the ledger).
+  let hClean = 0, hErrors = 0;
+  const hByTier = { t1: 0, t1a: 0, t1b: 0, t2: 0, t3: 0 };
   let earliest = null, latest = null;
   // Two sets so `vanished` is correct regardless of drop/scan ordering in the file.
   // droppedKeys is small (drops only happen under queue-cap pressure); scannedKeys is
@@ -1153,10 +1167,24 @@ function computeLedgerRollup(sinceTs, opts = {}) {
       if (underCap) { droppedKeys.add(key); allNames.add(e.name); } else exactVanished = false;
     } else {
       scanned++; ecoNode.scanned++;
-      if (outcome === 'suspect' || outcome === 'confirmed') { alerted++; ecoNode.alerted++; }
+      if (outcome === 'suspect' || outcome === 'confirmed') {
+        alerted++; ecoNode.alerted++;
+        const t = e.tier !== undefined && e.tier !== null ? String(e.tier) : null;
+        if (t === '1a') hByTier.t1a++;
+        else if (t === '1b') hByTier.t1b++;
+        else if (t === '1') hByTier.t1++;
+        else if (t === '2') hByTier.t2++;
+        else if (t === '3') hByTier.t3++;
+      } else if (CLEAN_LEDGER_OUTCOMES.has(outcome)) {
+        hClean++;
+      } else if (outcome === 'error' || outcome === 'static_timeout') {
+        hErrors++;
+      }
       if (underCap) { scannedKeys.add(key); allNames.add(e.name); scannedNames.add(e.name); } else exactVanished = false;
     }
   });
+  // Match the in-memory suspectByTier semantics where t1 = t1a + t1b (+ legacy '1').
+  hByTier.t1 += hByTier.t1a + hByTier.t1b;
 
   let vanished = 0;
   for (const k of droppedKeys) { if (!scannedKeys.has(k)) vanished++; }
@@ -1181,6 +1209,16 @@ function computeLedgerRollup(sinceTs, opts = {}) {
     distinctPackages: allNames.size,
     distinctScanned: scannedNames.size,
     distinctCoverage: allNames.size > 0 ? scannedNames.size / allNames.size : null,
+    // Ledger-derived daily-report headline (window-exact, restart-proof). `suspect`
+    // mirrors `alerted` (suspect+confirmed); `scanned` mirrors the non-dropped count
+    // above. The in-memory counters remain the fallback when the ledger is unavailable.
+    headline: {
+      scanned,
+      clean: hClean,
+      suspect: alerted,
+      errors: hErrors,
+      byTier: hByTier
+    },
     byOutcome,
     byEcosystem
   };
@@ -1422,6 +1460,21 @@ function loadLastDailyReportDate() {
 }
 
 /**
+ * Load the exact ISO timestamp of the last daily report send (the start of the
+ * current reporting window). Returns null when absent (pre-upgrade file, first
+ * report ever, corrupt file) — callers fall back to a fixed 24h window.
+ */
+function loadLastDailyReportTs() {
+  try {
+    const raw = fs.readFileSync(LAST_DAILY_REPORT_FILE, 'utf8');
+    const data = JSON.parse(raw);
+    return typeof data.lastReportTs === 'string' ? data.lastReportTs : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Persist the date of the last daily report sent (YYYY-MM-DD), and optionally the
  * monotonic scan-stats baseline captured at that moment (used by the next report's
  * crash-safe headline reconciliation). Baseline is optional for backward compat.
@@ -1430,6 +1483,10 @@ function saveLastDailyReportDate(dateStr, scanStatsBaseline) {
   try {
     const payload = { lastReportDate: dateStr };
     if (scanStatsBaseline) payload.scanStatsBaseline = scanStatsBaseline;
+    // Exact send timestamp = start of the NEXT report's ledger window (8h→8h
+    // semantics, restart-proof). Written in the same write-ahead as the date
+    // stamp, so a mid-send kill can neither hole nor double-count the window.
+    payload.lastReportTs = new Date().toISOString();
     atomicWriteFileSync(LAST_DAILY_REPORT_FILE, JSON.stringify(payload, null, 2));
   } catch (err) {
     console.error(`[MONITOR] Failed to save last daily report date: ${err.message}`);
@@ -1735,6 +1792,7 @@ module.exports = {
   captureScanStatsBaseline,
   reconcileDailyHeadline,
   loadLastDailyReportDate,
+  loadLastDailyReportTs,
   saveLastDailyReportDate,
   hasReportBeenSentToday,
   saveRecentlyScanned,
