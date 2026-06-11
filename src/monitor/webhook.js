@@ -1110,6 +1110,27 @@ function mcpTriageTag(a) {
   return sigs.length ? ` 🔌 [MCP: ${sigs.join(', ')}]` : ' 🔌 [MCP]';
 }
 
+/**
+ * Stability field for the daily report. The spill segment (spilled / drained /
+ * backlog size) only appears when the disk waiting list is enabled — backlog
+ * size is THE convergence signal of the spill rollout (must oscillate around
+ * 0 across days; monotonic growth = drain capacity too low, raise concurrency).
+ * Best-effort: a spill read failure must never break the report.
+ */
+function _stabilityFieldValue(stats) {
+  let v = `Restarts (24h): ${stats.restartsToday || 0} | Temporal load-shed: ${stats.temporalLoadShed || 0} | Queue hard-drops: ${stats.queueHardDrops || 0}`;
+  try {
+    const { isSpillEnabled, getBacklogSize } = require('./spill.js');
+    if (isSpillEnabled()) {
+      v += `\nSpill: ${stats.spilled || 0} spilled | ${stats.spillDrained || 0} drained | backlog ${getBacklogSize()}`;
+      if (stats.workerOom) v += ` | worker OOM: ${stats.workerOom}`;
+    } else if (stats.workerOom) {
+      v += ` | worker OOM: ${stats.workerOom}`;
+    }
+  } catch { /* best-effort */ }
+  return v;
+}
+
 function buildDailyReportEmbed(stats, dailyAlerts, ledgerRollup) {
   // Use in-memory stats (accumulated since last reset, restored from disk on restart)
   // instead of disk-based daily entries which can undercount due to UTC/Paris date mismatch
@@ -1257,7 +1278,7 @@ function buildDailyReportEmbed(stats, dailyAlerts, ledgerRollup) {
         ...((stats.sandboxDeferred || stats.deferredProcessed || stats.deferredExpired)
           ? [{ name: 'Deferred Sandbox', value: `Enqueued: ${stats.sandboxDeferred || 0} | Processed: ${stats.deferredProcessed || 0} | Expired: ${stats.deferredExpired || 0}`, inline: false }]
           : []),
-        { name: 'Stability', value: `Restarts (24h): ${stats.restartsToday || 0} | Temporal load-shed: ${stats.temporalLoadShed || 0} | Queue hard-drops: ${stats.queueHardDrops || 0}`, inline: false },
+        { name: 'Stability', value: _stabilityFieldValue(stats), inline: false },
         ...(ledgerField ? [ledgerField] : []),
         { name: 'System', value: healthText, inline: false }
       ],

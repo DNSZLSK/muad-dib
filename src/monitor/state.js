@@ -972,7 +972,11 @@ let _scanLedgerAppendedSinceCompact = 0;
 const SCAN_LEDGER_OUTCOMES = new Set([
   'clean', 'clean_low_signal', 'clean_tooling', 'suspect', 'ml_clean', 'llm_benign',
   'sandbox_inconclusive', 'sandbox_unconfirmed', 'confirmed',
-  'static_timeout', 'size_skip', 'dropped', 'error'
+  // 'spilled' = evicted to the disk waiting list (data/scan-backlog.jsonl) instead
+  // of dropped — NOT scanned. A later drain + scan writes a normal scan entry; a
+  // spilled item that never drains stays an honest coverage hole (counted with
+  // dropped in the rollup).
+  'static_timeout', 'size_skip', 'dropped', 'spilled', 'error'
 ]);
 
 /**
@@ -1148,7 +1152,10 @@ function computeLedgerRollup(sinceTs, opts = {}) {
 
     const key = `${e.name}@${e.version || ''}`;
     const underCap = exactVanished && (scannedKeys.size + droppedKeys.size) < MAX_ROLLUP_KEYS;
-    if (outcome === 'dropped') {
+    // 'spilled' (disk waiting list, not yet rescanned) counts with 'dropped' on the
+    // non-scanned side — honest coverage: a spilled item only becomes "covered" when
+    // its drained re-scan writes a real verdict entry. byOutcome keeps them distinct.
+    if (outcome === 'dropped' || outcome === 'spilled') {
       dropped++; ecoNode.dropped++;
       if (underCap) { droppedKeys.add(key); allNames.add(e.name); } else exactVanished = false;
     } else {
