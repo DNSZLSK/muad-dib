@@ -175,11 +175,29 @@ function isSuspectClassification(result) {
   if (hasLifecycleWithIntent(result)) {
     return { suspect: true, tier: '1a' };
   }
+  // IOC / known-malicious matches (known_malicious_package/hash, pypi_malicious_package,
+  // shai_hulud_marker/backdoor) are definite malware → mandatory sandbox, unconditionally.
+  // Promotes them out of the (now corroboration-gated) tier-1b zone so the tightening
+  // below can never drop a confirmed IOC hit, regardless of score.
+  if (hasIOCMatch(result)) {
+    return { suspect: true, tier: '1a' };
+  }
 
-  // Tier 1b: HIGH/CRITICAL severity without HC type or TIER1_TYPES
-  // Typical bundler FP zone (eval in webpack, minification as obfuscation, etc.)
-  // Sandbox conditional on score >= 25 or low queue pressure
-  if (result.summary.critical > 0 || result.summary.high > 0) {
+  // Tier 1b: HIGH/CRITICAL severity without HC type or TIER1_TYPES — the heuristic
+  // FP zone (a lone non-HC HIGH heuristic like compromised_email_domain /
+  // prototype_pollution / trusted_new_dependency flips a package to suspect even at
+  // score ~3). FPR audit 2026-06 (200-pkg blind adjudication, ~99% FP): a SINGLE
+  // non-HC HIGH finding made ~half of all "suspect" packages, almost all FP. It is
+  // no longer sufficient on its own — require corroboration: a real alert score
+  // (>=20), a compound, or >=2 DISTINCT HIGH/CRITICAL types. HC types / TIER1_TYPES /
+  // lifecycle+intent already returned tier 1a above, and Track R floors confirmed
+  // malice at 20, so detection is preserved; lone-heuristic packages fall through to
+  // the 2+-distinct-type tier 2/3 logic (and to CLEAN when they carry one finding).
+  const _hcSevere = result.threats.filter(t => t.severity === 'HIGH' || t.severity === 'CRITICAL');
+  const _highCritTypes = new Set(_hcSevere.map(t => t.type));
+  const _hasCompound = result.threats.some(t => t.compound === true);
+  const _score = (result.summary && typeof result.summary.riskScore === 'number') ? result.summary.riskScore : 0;
+  if (_hcSevere.length > 0 && (_score >= 20 || _hasCompound || _highCritTypes.size >= 2)) {
     return { suspect: true, tier: '1b' };
   }
 
