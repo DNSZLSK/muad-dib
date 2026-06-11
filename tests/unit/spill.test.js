@@ -46,6 +46,47 @@ async function runSpillTests() {
     } finally { try { fs.unlinkSync(f); } catch {} }
   });
 
+  // REGRESSION (2026-06-11 prod freeze): the EMERGENCY spill path must be
+  // append-only — NO whole-file read/parse — or it allocates inside the reclaim
+  // stall and wedges the handler. Below the byte budget, spillItems must not
+  // read the backlog back; above it, compaction (read+rewrite) is allowed.
+  test('SPILL: hot-path spill is append-only below cap (no whole-file read) — EMERGENCY-safe', () => {
+    const f = path.join(os.tmpdir(), `spill-${Date.now()}-hot.jsonl`);
+    try {
+      withSpillEnv(f, () => {
+        // Seed a realistic mid-size backlog, then spill more — far below the
+        // 200k-line byte budget. A read of `f` here would be the regression.
+        spill.spillItems(Array.from({ length: 500 }, (_, i) => item(`seed-${i}`)));
+        let readHits = 0;
+        const realRead = fs.readFileSync;
+        const spy = spyOn(fs, 'readFileSync', (p, ...a) => {
+          if (String(p) === f) readHits++;
+          return realRead(p, ...a);
+        });
+        try {
+          const n = spill.spillItems(Array.from({ length: 2000 }, (_, i) => item(`burst-${i}`)));
+          assert(n === 2000, `appended 2000, got ${n}`);
+          assert(readHits === 0, `EMERGENCY-path spill must NOT read the backlog back, got ${readHits} read(s)`);
+        } finally { spy.restore(); }
+        assert(readBacklog(f).length === 2500, 'all items appended (seed + burst)');
+      });
+    } finally { try { fs.unlinkSync(f); } catch {} }
+  });
+
+  test('SPILL: compaction DOES fire once the file exceeds the byte budget (cap still enforced)', () => {
+    const f = path.join(os.tmpdir(), `spill-${Date.now()}-budget.jsonl`);
+    try {
+      // Tiny cap (10) → byte budget = 10 × 256 = 2560 bytes. A few hundred
+      // lines blows past it, so the stat-gate must trigger compaction → file
+      // capped to 10. (Proves the gate isn't "never compact".)
+      withSpillEnv(f, () => {
+        spill.spillItems(Array.from({ length: 300 }, (_, i) => item(`x-${i}`)));
+        const kept = readBacklog(f);
+        assert(kept.length === 10, `over-budget file must compact to the cap of 10, got ${kept.length}`);
+      }, { max: 10 });
+    } finally { try { fs.unlinkSync(f); } catch {} }
+  });
+
   test('SPILL: write failure (EROFS) → returns 0, never throws (caller degrades to drop)', () => {
     const f = path.join(os.tmpdir(), `spill-${Date.now()}-rofs.jsonl`);
     withSpillEnv(f, () => {
