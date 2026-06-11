@@ -400,9 +400,29 @@ function shouldSkipSandbox(ctx) {
  */
 function runScanInWorker(extractedDir, timeoutMs, scanContext = null, signal = null) {
   return new Promise((resolve, reject) => {
-    const worker = new Worker(SCAN_WORKER_PATH, {
+    const workerOpts = {
       workerData: { extractedDir, scanContext: scanContext || {} }
-    });
+    };
+    // Per-worker V8 memory limits (OOM durable fix): the 2026-06 RSS spikes
+    // (8.2-8.8GB with heap ~550MB) are off-heap allocations inside scan workers —
+    // one pathological package could blow the WHOLE process toward the EMERGENCY
+    // breaker (queue purge + worker kills). With a per-worker cap, that package
+    // OOMs ITS worker only: ERR_WORKER_OUT_OF_MEMORY → rejected → ledgered
+    // `worker_oom` (never counted clean) while the daemon and its siblings keep
+    // running. This is also what allows raising MUADDIB_SCAN_CONCURRENCY back
+    // up (it was clamped 12-16 → 8 on 2026-06-08 as the OOM mitigation).
+    // OFF unless MUADDIB_WORKER_MAX_OLD_MB is set (staged rollout; suggested 1024).
+    const maxOldMb = parseInt(globalThis.process.env.MUADDIB_WORKER_MAX_OLD_MB, 10);
+    if (Number.isFinite(maxOldMb) && maxOldMb > 0) {
+      const maxYoungMb = parseInt(globalThis.process.env.MUADDIB_WORKER_MAX_YOUNG_MB, 10);
+      workerOpts.resourceLimits = {
+        maxOldGenerationSizeMb: maxOldMb,
+        maxYoungGenerationSizeMb: Number.isFinite(maxYoungMb) && maxYoungMb > 0 ? maxYoungMb : 128,
+        codeRangeSizeMb: 64,
+        stackSizeMb: 8
+      };
+    }
+    const worker = new Worker(SCAN_WORKER_PATH, workerOpts);
     const _sc = scanContext || {};
     _liveWorkers.set(worker, { name: _sc.name, version: _sc.version, ecosystem: _sc.ecosystem });
 
@@ -1246,6 +1266,23 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
     recordError(err, stats);
     stats.scanned++;
     stats.totalTimeMs += Date.now() - startTime;
+    // Per-worker resourceLimits breach: the worker died on ITS V8 cap
+    // (ERR_WORKER_OUT_OF_MEMORY) instead of blowing the process RSS. Same
+    // garde-fou as static_timeout: a package that OOMs the scanner must NOT
+    // count clean — inconclusive, distinct ledger source, distinct log line
+    // (the live-validation metric for the limits rollout). No retry: an OOM
+    // re-OOMs deterministically.
+    const isWorkerOom = err && (err.code === 'ERR_WORKER_OUT_OF_MEMORY' ||
+      /ERR_WORKER_OUT_OF_MEMORY|reached its memory limit/i.test(err.message || ''));
+    if (isWorkerOom) {
+      console.error(`[MONITOR] WORKER_OOM: ${name}@${version} — scan worker hit its resourceLimits cap (kept INCONCLUSIVE, not clean)`);
+      stats.workerOom = (stats.workerOom || 0) + 1;
+      updateScanStats('sandbox_inconclusive');
+      try {
+        appendScanLedger({ name, version, ecosystem, outcome: 'error', source: 'worker_oom' });
+      } catch { /* ledger is best-effort */ }
+      return { sandboxResult: null, staticClean: false };
+    }
     console.error(`[MONITOR] ERROR scanning ${name}@${version}: ${err.message}`);
     // Ledger the terminal failure so the scan-ledger never over-states coverage (an errored
     // package is NOT clean). Also captures EMERGENCY worker-terminate losses, whose reject

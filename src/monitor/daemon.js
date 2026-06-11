@@ -14,7 +14,8 @@ const { ensureWorkers, drainWorkers, getTargetConcurrency, setTargetConcurrency,
 const { computeTarget, ADJUST_INTERVAL_MS, BASE_CONCURRENCY } = require('./adaptive-concurrency.js');
 const { startHealthcheck } = require('./healthcheck.js');
 const { startDeferredWorker, stopDeferredWorker, persistDeferredQueue, restoreDeferredQueue, clearDeferredQueue } = require('./deferred-sandbox.js');
-const { evictFromScanQueueBulk } = require('./scan-queue.js');
+const { evictFromScanQueueBulk, enqueueScan } = require('./scan-queue.js');
+const { isSpillEnabled, shouldDrain, drainBacklog, getBacklogSize } = require('./spill.js');
 const { startGhsaPoller, stopGhsaPoller } = require('../ioc/ghsa-poller.js');
 const { cleanupOldArchives, getRetentionDays, startPeriodicCleanup } = require('./tarball-archive.js');
 const { clearMetadataCache } = require('../scanner/temporal-analysis.js');
@@ -27,6 +28,24 @@ const { clearASTCache } = require('../shared/constants.js');
 
 const POLL_INTERVAL = 60_000;
 const PROCESS_LOOP_INTERVAL = 2_000;    // Queue check interval when empty
+
+// ── Spill drain (disk waiting list re-ingestion) ──
+// Drain only when pressure is fully cleared AND the live queue has headroom; the
+// 12 calm hours/day do the catch-up of burst-time evictions. Rate-limited to one
+// batch per interval (the main loop ticks every 2s — unthrottled it would re-spike
+// the queue in seconds). All env-tunable for the staged rollout.
+const SPILL_DRAIN_THRESHOLD = (() => {
+  const v = parseInt(process.env.MUADDIB_SPILL_DRAIN_THRESHOLD, 10);
+  return Number.isFinite(v) && v > 0 ? v : 500;
+})();
+const SPILL_DRAIN_BATCH = (() => {
+  const v = parseInt(process.env.MUADDIB_SPILL_DRAIN_BATCH, 10);
+  return Number.isFinite(v) && v > 0 ? v : 200;
+})();
+const SPILL_DRAIN_INTERVAL_MS = (() => {
+  const v = parseInt(process.env.MUADDIB_SPILL_DRAIN_INTERVAL_MS, 10);
+  return Number.isFinite(v) && v > 0 ? v : 30_000;
+})();
 const QUEUE_WARNING_THRESHOLD = 5_000;  // Warn if queue depth exceeds this
 const QUEUE_PERSIST_INTERVAL = 60_000;  // Persist queue to disk every 60s
 const QUEUE_STATE_FILE = path.join(__dirname, '..', '..', 'data', 'queue-state.json');
@@ -591,14 +610,16 @@ function handleMemoryPressure(level, ratio, rssRatio, recentlyScanned, downloads
       // first (newest survive — most likely to still exist for re-scan), protected only as
       // a last resort, and LEDGERS every drop. Closes the v2.10.88 gap where the raw
       // splice(0,n) silently dropped protected scans (CLAUDE.md "ne jamais perdre de scan").
-      const { dropped, droppedProtected } = evictFromScanQueueBulk(scanQueue, EMERGENCY_QUEUE_KEEP, 'mem_emergency');
+      const { dropped, droppedProtected, spilled } = evictFromScanQueueBulk(scanQueue, EMERGENCY_QUEUE_KEEP, 'mem_emergency');
       summary.queueDropped = dropped;
       summary.queueDroppedProtected = droppedProtected;
+      summary.queueSpilled = spilled || 0;
       if (stats) {
         stats.queueEmergencyDrops = (stats.queueEmergencyDrops || 0) + dropped;
         if (droppedProtected) stats.queueEmergencyProtectedDrops = (stats.queueEmergencyProtectedDrops || 0) + droppedProtected;
+        if (spilled) stats.spilled = (stats.spilled || 0) + spilled;
       }
-      console.error(`[MONITOR] MEMORY EMERGENCY: ${memPctLabel} — truncated queue ${queueBefore} → ${scanQueue.length} (dropped ${dropped} oldest UNPROTECTED${droppedProtected ? ` + ${droppedProtected} protected as last resort` : ''}, all ledgered)`);
+      console.error(`[MONITOR] MEMORY EMERGENCY: ${memPctLabel} — truncated queue ${queueBefore} → ${scanQueue.length} (${spilled ? `SPILLED ${spilled} to disk backlog` : `dropped ${dropped} oldest UNPROTECTED${droppedProtected ? ` + ${droppedProtected} protected as last resort` : ''}`}, all ledgered)`);
     }
     // Clear deferred sandbox queue (holds full staticResult objects)
     const deferredDropped = clearDeferredQueue();
@@ -635,8 +656,12 @@ function reportStats(stats) {
   const avg = stats.scanned > 0 ? (stats.totalTimeMs / stats.scanned / 1000).toFixed(1) : '0.0';
   const { t1, t1a, t1b, t2, t3 } = stats.suspectByTier;
   console.log(`[MONITOR] Stats: ${stats.scanned} scanned, ${stats.clean} clean, ${stats.suspect} suspect (T1a:${t1a} T1b:${t1b} T1:${t1} T2:${t2} T3:${t3}), ${stats.errors} error${stats.errors !== 1 ? 's' : ''}, avg ${avg}s/pkg`);
-  if (stats.temporalLoadShed || stats.queueHardDrops || (stats.restartsToday || 0) > 1) {
-    console.log(`[MONITOR]   Stability: restarts(24h)=${stats.restartsToday || 0}, temporal load-shed=${stats.temporalLoadShed || 0}, queue hard-drops=${stats.queueHardDrops || 0}`);
+  if (stats.temporalLoadShed || stats.queueHardDrops || (stats.restartsToday || 0) > 1 || stats.spilled || stats.workerOom) {
+    // Backlog size read best-effort: the convergence signal for the spill rollout
+    // (must oscillate, not grow monotonically — see plan validation step 4).
+    let backlog = 0;
+    try { if (isSpillEnabled()) backlog = getBacklogSize(); } catch { /* best-effort */ }
+    console.log(`[MONITOR]   Stability: restarts(24h)=${stats.restartsToday || 0}, temporal load-shed=${stats.temporalLoadShed || 0}, queue hard-drops=${stats.queueHardDrops || 0}, spilled=${stats.spilled || 0}, drained=${stats.spillDrained || 0}, backlog=${backlog}, workerOom=${stats.workerOom || 0}`);
   }
   if (stats.changesStreamPackages) {
     console.log(`[MONITOR]   Changes stream packages: ${stats.changesStreamPackages}`);
@@ -1064,6 +1089,7 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
   // This loop tops up workers every 2s AND runs housekeeping (memory, daily report)
   // without being blocked by long-running scans.
   let lastMemoryLogTime = Date.now();
+  let lastSpillDrainTime = 0;
 
   while (running) {
     // ─── Memory circuit breaker (every iteration) ───
@@ -1078,6 +1104,35 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
     // memory (AST trees, scan results, extracted files) before starting new ones.
     if (pressureLevel < MEMORY_PRESSURE_LEVELS.HIGH) {
       ensureWorkers(scanQueue, stats, dailyAlerts, recentlyScanned, downloadsCache, sandboxAvailableRef.value);
+    }
+
+    // ─── Spill drain (MUADDIB_QUEUE_SPILL=1) ───
+    // Re-ingest evicted scans from the disk backlog during calm windows: pressure
+    // fully NONE + queue headroom, one bounded batch per SPILL_DRAIN_INTERVAL_MS.
+    // Protected items (IOC/burst/first-publish/ATO) drain first — a malicious
+    // package is often unpublished quickly, late drains lose the tarball.
+    if (isSpillEnabled() &&
+        Date.now() - lastSpillDrainTime >= SPILL_DRAIN_INTERVAL_MS &&
+        shouldDrain(pressureLevel, scanQueue.length, SPILL_DRAIN_THRESHOLD)) {
+      lastSpillDrainTime = Date.now();
+      try {
+        // Dedup against recentlyScanned (same key format as processQueueItem) AND
+        // the live queue (small here by the shouldDrain threshold).
+        const inQueue = new Set(scanQueue.map(it => `${it.ecosystem}/${it.name}@${it.version}`));
+        const r = drainBacklog(scanQueue, stats, {
+          maxItems: Math.min(SPILL_DRAIN_BATCH, Math.max(1, SPILL_DRAIN_THRESHOLD - scanQueue.length)),
+          enqueueFn: enqueueScan,
+          isDuplicate: (e) => {
+            const key = `${e.ecosystem}/${e.name}@${e.version}`;
+            return recentlyScanned.has(key) || inQueue.has(key);
+          }
+        });
+        if (r.drained > 0 || r.deduped > 0) {
+          console.log(`[MONITOR] SPILL_DRAIN: re-ingested ${r.drained} (${r.deduped} deduped, backlog ${r.remaining} remaining)`);
+        }
+      } catch (err) {
+        console.error(`[MONITOR] SPILL_DRAIN failed: ${err.message}`);
+      }
     }
 
     // ─── Memory watchdog (adaptive interval) ───
