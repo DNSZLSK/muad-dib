@@ -7,7 +7,7 @@ const AdmZip = require('adm-zip');
 const IOC_FILE = path.join(__dirname, 'data/iocs.json');
 const COMPACT_IOC_FILE = path.join(__dirname, 'data/iocs-compact.json');
 const HOME_IOC_FILE = path.join(os.homedir(), '.muaddib', 'data', 'iocs.json');
-const { generateCompactIOCs, NEVER_WILDCARD, expandCompactIOCs } = require('./updater.js');
+const { generateCompactIOCs, NEVER_WILDCARD, expandCompactIOCs, writeLeanIOCFile } = require('./updater.js');
 const { Spinner } = require('../utils.js');
 const { NPM_PACKAGE_REGEX } = require('../shared/constants.js');
 const { version: PKG_VERSION } = require('../../package.json');
@@ -1273,6 +1273,11 @@ async function runScraper() {
   const tmpCompactFile = COMPACT_IOC_FILE + '.tmp';
   fs.writeFileSync(tmpCompactFile, JSON.stringify(compactIOCs));
   fs.renameSync(tmpCompactFile, COMPACT_IOC_FILE);
+
+  // Save the lean projection in lock-step with the full file (~24MB) — what
+  // scan workers load instead of the 223MB full (RSS fix). Built from the
+  // in-memory object, so no extra parse peak. See updater.js:createLeanIOCs.
+  writeLeanIOCFile(existingIOCs);
 
   // Persist to ~/.muaddib/data/ (survives npm update)
   saveSpinner.update('Persisting to home directory...');

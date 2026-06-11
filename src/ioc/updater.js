@@ -6,6 +6,14 @@ const crypto = require('crypto');
 const HOME_DATA_PATH = path.join(os.homedir(), '.muaddib', 'data');
 const CACHE_IOC_FILE = path.join(HOME_DATA_PATH, 'iocs.json');
 const LOCAL_IOC_FILE = path.join(__dirname, 'data/iocs.json');
+// Lean projection of LOCAL_IOC_FILE — only the fields the matcher/alert read
+// ({name,version,severity,source} + hashes/markers/files/stringIocs). The full
+// file is ~223MB → 447MB string during JSON.parse, reloaded by every one-shot
+// worker that touches IOC matching (heap-snapshot-confirmed ~900MB peak). The
+// lean is ~24MB → ~50MB peak. Workers READ this; only the daemon/scraper write
+// it (a worker must never re-read the 223MB full to regenerate — that is the
+// very peak we are removing). See ensureLeanIOCFile + createLeanIOCs below.
+const LOCAL_LEAN_FILE = path.join(__dirname, 'data/iocs-lean.json');
 const LOCAL_COMPACT_FILE = path.join(__dirname, 'data/iocs-compact.json');
 const { loadYAMLIOCs } = require('./yaml-loader.js');
 
@@ -241,7 +249,7 @@ function mergeIOCs(target, source) {
 // scan/poll) does zero disk I/O.
 const IOCS_DIR = path.join(__dirname, '..', '..', 'iocs');
 const IOC_SOURCE_FILES = [
-  CACHE_IOC_FILE, LOCAL_IOC_FILE, LOCAL_COMPACT_FILE,
+  CACHE_IOC_FILE, LOCAL_IOC_FILE, LOCAL_LEAN_FILE, LOCAL_COMPACT_FILE,
   path.join(IOCS_DIR, 'packages.yaml'), path.join(IOCS_DIR, 'builtin.yaml'),
   path.join(IOCS_DIR, 'hashes.yaml'), path.join(IOCS_DIR, 'string-iocs.yaml')
 ];
@@ -279,8 +287,19 @@ function loadCachedIOCs() {
     stringIocs: Array.isArray(yamlIOCs.stringIocs) ? [...yamlIOCs.stringIocs] : []
   };
 
-  // Priority 2a: Local scraped IOCs (full enriched file)
-  if (fs.existsSync(LOCAL_IOC_FILE)) {
+  // Priority 2a: Local scraped IOCs. Prefer the lean projection (~24MB) — it
+  // carries every field the matcher/alert read. Only fall back to the full
+  // ~223MB file when the lean is absent (backward-compat / before the daemon
+  // has generated it), which costs the ~450MB parse peak. ensureLeanIOCFile()
+  // (called at daemon boot + after each scrape) keeps the lean present & fresh.
+  if (fs.existsSync(LOCAL_LEAN_FILE)) {
+    try {
+      const leanIOCs = JSON.parse(fs.readFileSync(LOCAL_LEAN_FILE, 'utf8'));
+      mergeIOCs(merged, leanIOCs);
+    } catch (e) {
+      console.log('[WARN] Failed to load lean IOC database (iocs-lean.json): ' + e.message);
+    }
+  } else if (fs.existsSync(LOCAL_IOC_FILE)) {
     try {
       const localIOCs = JSON.parse(fs.readFileSync(LOCAL_IOC_FILE, 'utf8'));
       mergeIOCs(merged, localIOCs);
@@ -470,6 +489,67 @@ const NEVER_WILDCARD_PYPI = new Set([
   'flask', 'django', 'requests', 'numpy', 'pandas',
   'scipy', 'tensorflow', 'torch', 'fastapi', 'uvicorn'
 ]);
+
+// Lean projection of a full IOC object: keep only the fields the matcher and
+// the alert message read on package entries ({name,version,severity,source}),
+// drop the enrichment (id/description/references/mitre/published/freshness/
+// sources/confidence — never read after load; profiled). hashes/markers/files/
+// stringIocs are simple values / small (YAML-sourced) and kept verbatim.
+// Pure: no I/O. Used to write LOCAL_LEAN_FILE from an in-memory full object
+// (zero extra parse peak) and by ensureLeanIOCFile.
+function createLeanIOCs(fullIOCs) {
+  const leanPkg = p => ({ name: p.name, version: p.version, severity: p.severity, source: p.source });
+  return {
+    packages: (fullIOCs.packages || []).map(leanPkg),
+    pypi_packages: (fullIOCs.pypi_packages || []).map(leanPkg),
+    hashes: fullIOCs.hashes || [],
+    markers: fullIOCs.markers || [],
+    files: fullIOCs.files || [],
+    stringIocs: fullIOCs.stringIocs || [],
+    updated: fullIOCs.updated,
+    sources: fullIOCs.sources
+  };
+}
+
+// Ensure LOCAL_LEAN_FILE exists and is at least as fresh as LOCAL_IOC_FILE.
+// Reads the 223MB full ONCE (the ~450MB parse peak) — acceptable only in a
+// long-lived process (daemon boot); NEVER call from a one-shot scan worker.
+// Atomic write (.tmp → rename). Returns {generated:boolean, bytes:number}.
+function ensureLeanIOCFile() {
+  try {
+    if (!fs.existsSync(LOCAL_IOC_FILE)) return { generated: false, bytes: 0 };
+    let fresh = false;
+    if (fs.existsSync(LOCAL_LEAN_FILE)) {
+      try { fresh = fs.statSync(LOCAL_LEAN_FILE).mtimeMs >= fs.statSync(LOCAL_IOC_FILE).mtimeMs; } catch { fresh = false; }
+    }
+    if (fresh) return { generated: false, bytes: fs.statSync(LOCAL_LEAN_FILE).size };
+    const full = JSON.parse(fs.readFileSync(LOCAL_IOC_FILE, 'utf8'));
+    const lean = createLeanIOCs(full);
+    const tmp = LOCAL_LEAN_FILE + '.tmp';
+    const data = JSON.stringify(lean);
+    fs.writeFileSync(tmp, data);
+    fs.renameSync(tmp, LOCAL_LEAN_FILE);
+    return { generated: true, bytes: Buffer.byteLength(data) };
+  } catch (e) {
+    console.log('[WARN] ensureLeanIOCFile failed: ' + e.message);
+    return { generated: false, bytes: 0 };
+  }
+}
+
+// Write the lean file from an already-in-memory full object (zero extra parse
+// peak). Called by the scraper right after it writes LOCAL_IOC_FILE so the
+// lean stays in lock-step with the full after every deep scrape.
+function writeLeanIOCFile(fullIOCs) {
+  try {
+    const tmp = LOCAL_LEAN_FILE + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(createLeanIOCs(fullIOCs)));
+    fs.renameSync(tmp, LOCAL_LEAN_FILE);
+    return true;
+  } catch (e) {
+    console.log('[WARN] writeLeanIOCFile failed: ' + e.message);
+    return false;
+  }
+}
 
 function generateCompactIOCs(fullIOCs) {
   const wildcards = [];
@@ -693,4 +773,4 @@ function verifyIOCHMAC(data, hmac) {
   }
 }
 
-module.exports = { updateIOCs, loadCachedIOCs, invalidateCache, generateCompactIOCs, expandCompactIOCs, mergeIOCs, createOptimizedIOCs, generateIOCHMAC, verifyIOCHMAC, checkIOCStaleness, NEVER_WILDCARD, NEVER_WILDCARD_PYPI };
+module.exports = { updateIOCs, loadCachedIOCs, invalidateCache, generateCompactIOCs, expandCompactIOCs, createLeanIOCs, ensureLeanIOCFile, writeLeanIOCFile, LOCAL_LEAN_FILE, LOCAL_IOC_FILE, mergeIOCs, createOptimizedIOCs, generateIOCHMAC, verifyIOCHMAC, checkIOCStaleness, NEVER_WILDCARD, NEVER_WILDCARD_PYPI };
