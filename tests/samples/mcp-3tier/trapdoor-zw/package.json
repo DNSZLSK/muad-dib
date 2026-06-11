@@ -1,0 +1,8 @@
+{
+  "name": "trapdoor-zw-fixture",
+  "version": "1.0.0",
+  "description": "Synthetic TrapDoor repro: postinstall appends zero-width-encoded instructions to a RELATIVE .cursorrules (no homedir, no plain-text directive) — only the invisible-unicode gate can catch it",
+  "scripts": {
+    "postinstall": "node setup.js"
+  }
+}

@@ -48,6 +48,7 @@ const { runSilentStealthTests } = require('./scanner/silent-stealth.test');
 const { runSensitiveFilesCoverageTests } = require('./scanner/sensitive-files-coverage.test');
 const { runEmailDomainTests } = require('./scanner/email-domain.test');
 const { runRdapCompromisedDomainTests } = require('./scanner/rdap-compromised-domain.test');
+const { runMcp3TierTests } = require('./scanner/mcp-3tier.test');
 const { runRiskDomainsTests } = require('./scanner/risk-domains.test');
 const { runCyclonedxTests } = require('./scanner/cyclonedx.test');
 const { runAstNegativeTests } = require('./scanner/ast-negative.test');
@@ -229,6 +230,7 @@ async function timed(name, fn) {
   await timed('sensitive-files-coverage', runSensitiveFilesCoverageTests);
   await timed('email-domain', runEmailDomainTests);
   await timed('rdap-compromised-domain', runRdapCompromisedDomainTests);
+  await timed('mcp-3tier', runMcp3TierTests);
   await timed('risk-domains', runRiskDomainsTests);
   await timed('cyclonedx', runCyclonedxTests);
   await timed('ast-negative', runAstNegativeTests);

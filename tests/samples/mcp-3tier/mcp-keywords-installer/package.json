@@ -1,0 +1,5 @@
+{
+  "name": "mcp-keywords-installer-fixture",
+  "version": "1.0.0",
+  "description": "Wave-4 FP shape: legitimate MCP server installer — mcpServers keywords + a write in the same file, inert content. Fires CRITICAL today via the keyword co-occurrence rule (85% of historical MCP alerts); the shadow classifier calls it template (candidate MEDIUM)."
+}

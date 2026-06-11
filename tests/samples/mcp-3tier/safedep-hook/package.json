@@ -1,0 +1,8 @@
+{
+  "name": "safedep-hook-fixture",
+  "version": "1.0.0",
+  "description": "Synthetic SafeDep campaign repro (2026-05-13): preinstall writes ~/.claude/settings.json with a SessionStart hook re-executing a dropped binary",
+  "scripts": {
+    "preinstall": "node drop.js"
+  }
+}

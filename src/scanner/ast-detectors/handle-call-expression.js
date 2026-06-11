@@ -49,6 +49,31 @@ const {
   containsDecodePattern,
   resolveNumericExpression
 } = require('./helpers.js');
+const { countInvisibleUnicode } = require('../../shared/unicode-invisibles.js');
+const { classifyMcpWrite } = require('./mcp-write-classifier.js');
+const { isShadowEnabled, recordShadowDivergence } = require('../../shared/shadow.js');
+
+/**
+ * SHADOW 3-tier classification for mcp_config_injection emissions (R5 + R5b).
+ * Computes the candidate class (template / shell_exec / instruction_injection)
+ * and logs a divergence ONLY when the candidate semantics would downgrade the
+ * verdict (template → MEDIUM). Zero effect on the threat emitted by the caller
+ * — the live severity stays CRITICAL until the shadow data adjudicates the flip.
+ * The package identity is not available at AST level; evidence carries the file.
+ */
+function _shadowClassifyMcpWrite(contentStr, checkPath, rule, ctx) {
+  try {
+    if (!isShadowEnabled()) return;
+    const { cls, signals } = classifyMcpWrite(contentStr, checkPath);
+    if (cls !== 'template') return; // shell_exec / instruction_injection keep CRITICAL — no divergence
+    recordShadowDivergence({
+      detector: 'mcp_config_injection_3tier',
+      oldVerdict: 'CRITICAL',
+      newVerdict: 'MEDIUM',
+      evidence: { cls, signals, path: checkPath, rule, file: ctx.relFile }
+    });
+  } catch { /* shadow must never affect the scan */ }
+}
 
 /**
  * Detect whether an AST node points at a user-level filesystem location:
@@ -756,6 +781,10 @@ function handleCallExpression(node, ctx) {
           ? MCP_CONTENT_PATTERNS.some(p => contentStr.includes(p.replace(/"/g, '')))
           : isSensitiveConfigFile; // dynamic content only suspicious for known config files
         if (hasContentPattern) {
+          // SHADOW 3-tier classification (zero effect on the emitted severity):
+          // template-class writes are the scaffolder FP under adjudication —
+          // log the would-be CRITICAL→MEDIUM divergence for `shadow-report`.
+          _shadowClassifyMcpWrite(contentStr, mcpCheckPath, 'R5', ctx);
           ctx.threats.push({
             type: 'mcp_config_injection',
             severity: 'CRITICAL',
@@ -780,11 +809,20 @@ function handleCallExpression(node, ctx) {
           const contentStr2 = extractStringValue(contentArg2);
           const hasShellContent = !!contentStr2 && /(?:curl|wget)\s+[^\n]*\|\s*(?:sh|bash|zsh)\b|\beval\s*\(|\bsh\s+-c\s+|\bbash\s+-c\s+|\bnode\s+-e\s+/i.test(contentStr2);
           const hasInjectionInstruction = !!contentStr2 && /IMPORTANT[:\s]+(?:before|after|run|execute)|do\s+not\s+(?:display|show|mention)|always\s+run/i.test(contentStr2);
-          if (hasUserLevelPath || hasShellContent || hasInjectionInstruction) {
+          // 3d (additive, v2.11.91): zero-width/bidi Unicode in the written
+          // content — the TrapDoor hidden-instruction encoding (Socket,
+          // 2026-05-25: instructions invisible in an editor, word-broken so
+          // the 3b/3c plain-text regexes can't match). A legitimate generator
+          // never emits invisible codepoints into a rules file. Strictly
+          // additive: can only ADD detections to the 3a/3b/3c OR.
+          const hasInvisibleContent = !!contentStr2 && countInvisibleUnicode(contentStr2) > 0;
+          if (hasUserLevelPath || hasShellContent || hasInjectionInstruction || hasInvisibleContent) {
             const reasons = [];
             if (hasUserLevelPath) reasons.push('user-level destination (homedir/cwd/env.HOME)');
             if (hasShellContent) reasons.push('shell command in content');
             if (hasInjectionInstruction) reasons.push('AI prompt-injection instruction in content');
+            if (hasInvisibleContent) reasons.push('zero-width/bidi Unicode in content (hidden-instruction encoding)');
+            _shadowClassifyMcpWrite(contentStr2, mcpCheckPath, 'R5b', ctx);
             ctx.threats.push({
               type: 'mcp_config_injection',
               severity: 'CRITICAL',
@@ -2047,4 +2085,6 @@ function handleCallExpression(node, ctx) {
 }
 
 
-module.exports = { handleCallExpression };
+// _shadowClassifyMcpWrite is shared with handle-post-walk.js (the Wave-4
+// keyword-co-occurrence emitter — the third mcp_config_injection site).
+module.exports = { handleCallExpression, _shadowClassifyMcpWrite };
