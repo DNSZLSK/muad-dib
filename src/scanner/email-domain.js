@@ -17,7 +17,6 @@
 
 const dns = require('dns');
 const { debugLog } = require('../utils.js');
-const { isShadowEnabled, recordShadowDivergence } = require('../shared/shadow.js');
 
 const MX_TIMEOUT_MS = 3000;
 const MX_CACHE_TTL = 30 * 24 * 60 * 60 * 1000; // 30 days
@@ -226,8 +225,11 @@ async function fetchRdap(domain, options = {}) {
 }
 
 /**
- * Returns true if the domain registration came AFTER the package was first
- * published (with a 30-day margin to absorb timing edges).
+ * @deprecated Retired from the production emission path by the 2026-06-11 V2
+ * flip — `checkCompromisedDomain` now emits via `isCompromisedDomainV2`. Kept
+ * (exported + unit-tested) as the documented former semantics: creation AFTER
+ * first publish with a 30-day pre-publish margin. The margin was the source of
+ * ~23% of historical FPs (a dev buying a domain weeks before shipping v1).
  */
 function isCompromisedDomain(creationDateISO, packageCreatedAtISO) {
   if (!creationDateISO || !packageCreatedAtISO) return false;
@@ -292,12 +294,16 @@ function isCompromisedDomainV2(creationDateISO, firstPublishISO, domain) {
 }
 
 /**
- * F1 entry point.
+ * F1 entry point — emits `compromised_email_domain` (HIGH×high = 10, composite-only:
+ * sub-T1, and the tier-1b corroboration gate requires ≥2 distinct signals). LIVE
+ * semantics since 2026-06-11 = `isCompromisedDomainV2` (strict creation > first
+ * publish, public email providers excluded). The former V1 30-day-margin
+ * semantics is retired (see isCompromisedDomain @deprecated).
  * @param {object|null} meta - Digested metadata. Reads maintainer_emails + created_at
  *   (= the package's FIRST publish date, both npm and PyPI sides).
  * @param {object} options - { fetchRdap } for tests to inject a mock.
- *   { shadowCtx: {name, version, ecosystem} } identifies the scanned package in
- *   shadow-divergence records (optional — without it divergences log package:null).
+ *   { shadowCtx } is accepted but ignored since the flip (kept so existing callers
+ *   in processor.js / pypi-maintainer.js need no change).
  * @returns {Promise<Array>} threats array
  */
 async function checkCompromisedDomain(meta, options = {}) {
@@ -321,25 +327,12 @@ async function checkCompromisedDomain(meta, options = {}) {
       continue;
     }
     if (!rdap || !rdap.creationDate) continue;
-    // SHADOW (zero effect on the threats emitted below): compare the live V1
-    // verdict with the V2 candidate and log only disagreements. Adjudication =
-    // scripts/backtest-email-domain.js replay + `muaddib shadow-report`.
-    try {
-      if (isShadowEnabled()) {
-        const v1 = isCompromisedDomain(rdap.creationDate, meta.created_at);
-        const v2 = isCompromisedDomainV2(rdap.creationDate, meta.created_at, domain);
-        if (v1 !== v2) {
-          const ctx = options.shadowCtx || {};
-          recordShadowDivergence({
-            detector: 'compromised_email_domain',
-            package: ctx.name, version: ctx.version, ecosystem: ctx.ecosystem,
-            oldVerdict: v1, newVerdict: v2,
-            evidence: { domain, creationDate: rdap.creationDate, firstPublish: meta.created_at, oldMarginDays: 30 }
-          });
-        }
-      }
-    } catch { /* shadow must never affect the scan */ }
-    if (isCompromisedDomain(rdap.creationDate, meta.created_at)) {
+    // V2 is the LIVE semantics since the 2026-06-11 flip (backtest #545 era:
+    // V2 strict-creation + public-provider exclusion killed 307/1346 historical
+    // FP alerts — the @tronweb3/* wallet-adapter monorepo flood — and added 0
+    // new flags / 0 FN; V2 ⊂ V1, so no shadow net is needed). The old V1 margin
+    // shadow hook is retired with the flip.
+    if (isCompromisedDomainV2(rdap.creationDate, meta.created_at, domain)) {
       const cd = rdap.creationDate.slice(0, 10);
       const pd = meta.created_at.slice(0, 10);
       threats.push({
