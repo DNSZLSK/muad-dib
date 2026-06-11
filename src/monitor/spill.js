@@ -83,9 +83,24 @@ function _writeEntries(file, entries) {
   fs.renameSync(tmp, file);
 }
 
+// Conservative upper bound on a spilled line's byte size (the SPILL_FIELDS
+// record + ts + newline run ~150-250 bytes). Used for the O(1) stat-gated
+// compaction trigger below — overestimating only makes compaction fire a bit
+// late, never early, so the file ceiling stays ~MUADDIB_SPILL_MAX.
+const SPILL_LINE_BYTES_EST = 256;
+
 /**
  * Append evicted queue items to the backlog. Never throws; on write failure the
  * caller's fallback is the pre-spill behavior (drop, ledgered).
+ *
+ * HOT PATH — runs INSIDE the EMERGENCY memory handler (evictFromScanQueueBulk),
+ * so it MUST be append-only and allocation-free beyond the write buffer. The
+ * 2026-06-11 freeze was caused by calling _compactBacklog (which reads + parses
+ * the WHOLE backlog) on every spill: a large allocation during a reclaim stall
+ * that wedged the handler before it could free RSS. Compaction now fires ONLY
+ * when a cheap statSync shows the file is genuinely near the cap (normally
+ * never during an EMERGENCY — the backlog is far below the byte budget there),
+ * and the calm-time drain also keeps it bounded.
  * @param {Array<object>} items evicted scan-queue items
  * @returns {number} how many items were actually persisted
  */
@@ -107,7 +122,11 @@ function spillItems(items) {
       written++;
     }
     if (buf) fs.appendFileSync(file, buf, 'utf8');
-    _compactBacklog(file);
+    // O(1) stat-gated compaction: only read+rewrite the file when it is actually
+    // near the cap. NO whole-file read on the normal EMERGENCY spill path.
+    let size = 0;
+    try { size = fs.statSync(file).size; } catch { /* fresh file */ }
+    if (size > _maxEntries() * SPILL_LINE_BYTES_EST) _compactBacklog(file);
   } catch {
     return 0; // degrade to drop-with-ledger at the call site
   }
