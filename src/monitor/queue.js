@@ -311,6 +311,36 @@ function countPackageFiles(dir) {
 const JS_WEIGHT_MAX_DEPTH = 8;
 const JS_WEIGHT_MAX_FILES = 2000;
 const JS_WEIGHT_FILE_PATTERN = /\.(?:[cm]?js|[jt]sx?)$/i;
+// Minified JS expands SUPER-linearly in the worker (live counter-examples
+// from the 16:18 rollout, 2026-06-11: powerlines = 517KB JS of which 449KB
+// minified → 1151MB heap, ~2300×; @lethevimlet/sshift = ~1.9MB minified →
+// 1.38GB — both sailed under the raw-bytes threshold as 'light'). Plain
+// source stays roughly linear (the 12MB-heap mode of the bimodal
+// distribution). So minified bytes count ×12 toward the heavy threshold —
+// ≥~256KB of minified JS crosses the 3MiB default. Detection: average line
+// length over the first 4KB; plain code sits at 40-120 chars, minified
+// bundles at 800+ (often a single line). 250 splits cleanly even when a
+// license header pads the probe window.
+const JS_MINIFIED_WEIGHT = 12;
+const JS_MINIFIED_AVG_LINE = 250;
+const JS_MINIFIED_PROBE_BYTES = 4096;
+
+/** Probe the first 4KB of a file (never loads the rest) for minification. */
+function probeIsMinified(filePath) {
+  let fd = null;
+  try {
+    fd = fs.openSync(filePath, 'r');
+    const buf = Buffer.alloc(JS_MINIFIED_PROBE_BYTES);
+    const n = fs.readSync(fd, buf, 0, JS_MINIFIED_PROBE_BYTES, 0);
+    if (n <= 0) return false;
+    const head = buf.toString('utf8', 0, n);
+    return (head.length / head.split('\n').length) > JS_MINIFIED_AVG_LINE;
+  } catch {
+    return false;
+  } finally {
+    if (fd !== null) { try { fs.closeSync(fd); } catch { /* best-effort */ } }
+  }
+}
 
 /**
  * Measure how much parsable JS a package carries — the heavy-lane
@@ -325,11 +355,16 @@ const JS_WEIGHT_FILE_PATTERN = /\.(?:[cm]?js|[jt]sx?)$/i;
  * Bounded walk; an overflow (depth/file caps) returns truncated:true, which
  * isHeavyScan classifies heavy by default.
  *
+ * weightedJsBytes = plain bytes + JS_MINIFIED_WEIGHT × minified bytes — the
+ * value isHeavyScan compares against the threshold (raw bytes alone missed
+ * the minified explosions, see JS_MINIFIED_WEIGHT above).
+ *
  * @param {string} dir - extracted package directory
- * @returns {{ totalJsBytes: number, maxJsFileBytes: number, truncated: boolean }}
+ * @returns {{ totalJsBytes: number, minifiedJsBytes: number, weightedJsBytes: number, maxJsFileBytes: number, truncated: boolean }}
  */
 function measureJsWeight(dir) {
   let totalJsBytes = 0;
+  let minifiedJsBytes = 0;
   let maxJsFileBytes = 0;
   let seen = 0;
   let truncated = false;
@@ -347,17 +382,20 @@ function measureJsWeight(dir) {
         walk(path.join(current, entry.name), depth + 1);
       } else if (entry.isFile() && JS_WEIGHT_FILE_PATTERN.test(entry.name)) {
         if (++seen > JS_WEIGHT_MAX_FILES) { truncated = true; return; }
+        const filePath = path.join(current, entry.name);
         let size;
-        try { size = fs.statSync(path.join(current, entry.name)).size; } catch { continue; }
+        try { size = fs.statSync(filePath).size; } catch { continue; }
         if (size > perFileCap) continue; // executor skips these — they never reach the AST
         totalJsBytes += size;
+        if (probeIsMinified(filePath)) minifiedJsBytes += size;
         if (size > maxJsFileBytes) maxJsFileBytes = size;
       }
     }
   }
 
   walk(dir, 0);
-  return { totalJsBytes, maxJsFileBytes, truncated };
+  const weightedJsBytes = (totalJsBytes - minifiedJsBytes) + JS_MINIFIED_WEIGHT * minifiedJsBytes;
+  return { totalJsBytes, minifiedJsBytes, weightedJsBytes, maxJsFileBytes, truncated };
 }
 
 /**
@@ -490,7 +528,7 @@ function runScanInWorker(extractedDir, timeoutMs, scanContext = null, signal = n
     appendWorkerMem({
       ev: 'spawn', tid: _wmTid,
       name: _sc.name, version: _sc.version, ecosystem: _sc.ecosystem,
-      lane: _sc._lane, jsBytes: _sc._jsBytes,
+      lane: _sc._lane, jsBytes: _sc._jsBytes, jsMin: _sc._jsMin,
       rss: process.memoryUsage().rss
     });
 
@@ -774,7 +812,8 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
         // event (runScanInWorker) so lane×heap-peak cross-checks are possible
         // post-rollout (hard criterion: zero 'light' scans peaking >512MB).
         _lane: lane,
-        _jsBytes: jsWeight.totalJsBytes
+        _jsBytes: jsWeight.totalJsBytes,
+        _jsMin: jsWeight.minifiedJsBytes || 0
       };
       // Hand the main-thread-fetched metadata to the worker so its processor skips
       // the per-worker getPackageMetadata fetch (429-storm fix). npm only; the key

@@ -56,14 +56,18 @@ const _lane = { active: 0, queue: [] };
 /**
  * Pure classifier. `truncated` (the bounded measurement walk overflowed its
  * depth/file caps) classifies heavy by default — defensive: an unmeasurable
- * package is exactly the kind that blows a worker.
- * @param {{totalJsBytes: number, truncated: boolean}|null} weight
+ * package is exactly the kind that blows a worker. Compares weightedJsBytes
+ * (plain + ×12 minified — see measureJsWeight in queue.js: raw bytes alone
+ * missed the minified explosions, powerlines 517KB → 1151MB heap) and falls
+ * back to totalJsBytes for callers that don't weight.
+ * @param {{totalJsBytes: number, weightedJsBytes?: number, truncated: boolean}|null} weight
  * @param {number} [thresholdBytes]
  */
 function isHeavyScan(weight, thresholdBytes = heavyScanBytesThreshold()) {
   if (!weight) return false;
   if (weight.truncated) return true;
-  return (weight.totalJsBytes || 0) >= thresholdBytes;
+  const effective = Number.isFinite(weight.weightedJsBytes) ? weight.weightedJsBytes : (weight.totalJsBytes || 0);
+  return effective >= thresholdBytes;
 }
 
 /**
