@@ -168,6 +168,44 @@ async function runMcp3TierTests() {
     const out = runScan(path.join(SAMPLES, 'trapdoor-zw'), '--explain');
     assert(/mcp_config_injection/.test(out), 'explain output mentions the rule');
   });
+
+  // ── Wave-4 (keyword co-occurrence) shadow coverage ──
+  // The 2026-06-11 backtest showed this third emitter (handle-post-walk.js)
+  // produces ~85% of historical mcp_config_injection alerts (100/118 packages)
+  // — every real MCP server installer matches the keyword+write shape. The
+  // shadow adjudication must cover it, not just the R5/R5b path detectors.
+
+  await asyncTest('MCP3T-W4: inert MCP installer fires (keyword rule) AND logs the W4 template divergence', async () => {
+    const shadowFile = path.join(os.tmpdir(), `mcp3t-w4-${Date.now()}.jsonl`);
+    try {
+      const r = scanJsonRaw(path.join(SAMPLES, 'mcp-keywords-installer'),
+        { MUADDIB_SHADOW: '1', MUADDIB_SHADOW_FILE: shadowFile });
+      const t = (r.threats || []).find(x => x.type === 'mcp_config_injection');
+      assert(t, `keyword co-occurrence rule must fire today, got: ${typesOf(r).join(', ')}`);
+      assert(/configuration keywords/.test(t.message), `must be the Wave-4 emitter, got: ${t.message}`);
+      assert(t.severity === 'CRITICAL', 'live severity unchanged under shadow');
+      const div = fs.readFileSync(shadowFile, 'utf8').split('\n').filter(l => l.trim()).map(l => JSON.parse(l))
+        .filter(e => e.detector === 'mcp_config_injection_3tier' && e.evidence && e.evidence.rule === 'W4');
+      assert(div.length >= 1, 'inert installer must log the W4 CRITICAL→MEDIUM divergence');
+      assert(div[0].newVerdict === 'MEDIUM' && div[0].evidence.cls === 'template',
+        `divergence shape, got ${JSON.stringify(div[0])}`);
+    } finally { try { fs.unlinkSync(shadowFile); } catch {} }
+  });
+
+  await asyncTest('MCP3T-W4: MCP-themed shell dropper keeps CRITICAL silently (no W4 divergence)', async () => {
+    const shadowFile = path.join(os.tmpdir(), `mcp3t-w4-${Date.now()}-b.jsonl`);
+    try {
+      const r = scanJsonRaw(path.join(SAMPLES, 'mcp-keywords-dropper'),
+        { MUADDIB_SHADOW: '1', MUADDIB_SHADOW_FILE: shadowFile });
+      assert(typesOf(r).includes('mcp_config_injection'), 'dropper still fires the keyword rule');
+      let div = [];
+      try {
+        div = fs.readFileSync(shadowFile, 'utf8').split('\n').filter(l => l.trim()).map(l => JSON.parse(l))
+          .filter(e => e.detector === 'mcp_config_injection_3tier' && e.evidence && e.evidence.rule === 'W4');
+      } catch { /* no file = no divergence */ }
+      assert(div.length === 0, `shell-class file must NOT log a W4 divergence, got ${JSON.stringify(div)}`);
+    } finally { try { fs.unlinkSync(shadowFile); } catch {} }
+  });
 }
 
 module.exports = { runMcp3TierTests };

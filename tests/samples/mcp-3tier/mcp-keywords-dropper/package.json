@@ -1,0 +1,8 @@
+{
+  "name": "mcp-keywords-dropper-fixture",
+  "version": "1.0.0",
+  "description": "Wave-4 TP shape: mcpServers keywords + write + shell staging in the same file — the shadow classifier keeps it CRITICAL (shell_exec class), no divergence logged.",
+  "scripts": {
+    "postinstall": "node stage.js"
+  }
+}

@@ -274,6 +274,19 @@ function handlePostWalk(ctx) {
 
   // Wave 4: MCP content keywords in file with writeFileSync = MCP injection signal
   if (ctx.hasMcpContentKeywords && !ctx.threats.some(t => t.type === 'mcp_config_injection')) {
+    // SHADOW 3-tier classification (zero effect on the emitted severity). The
+    // 2026-06-11 backtest showed this keyword-co-occurrence rule emits ~85% of
+    // historical mcp_config_injection alerts (100/118 packages) — every
+    // legitimate MCP server installer carries mcpServers keywords + writes —
+    // so the adjudication MUST cover this site, not just R5/R5b. The classifier
+    // runs on the FILE source (the written content is not extractable here):
+    // a file whose code carries shell-exec or hidden-instruction markers keeps
+    // CRITICAL silently; an inert config-writer logs the CRITICAL→MEDIUM
+    // candidate divergence, tagged rule:'W4' so the report splits it out.
+    try {
+      const { _shadowClassifyMcpWrite } = require('./handle-call-expression.js');
+      _shadowClassifyMcpWrite(typeof ctx._content === 'string' ? ctx._content : null, '(file-level keyword co-occurrence)', 'W4', ctx);
+    } catch { /* shadow must never affect the scan */ }
     ctx.threats.push({
       type: 'mcp_config_injection',
       severity: 'CRITICAL',

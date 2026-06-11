@@ -2085,4 +2085,6 @@ function handleCallExpression(node, ctx) {
 }
 
 
-module.exports = { handleCallExpression };
+// _shadowClassifyMcpWrite is shared with handle-post-walk.js (the Wave-4
+// keyword-co-occurrence emitter — the third mcp_config_injection site).
+module.exports = { handleCallExpression, _shadowClassifyMcpWrite };
