@@ -110,6 +110,7 @@ const { runShadowTests } = require('./unit/shadow.test');
 const { runSpillTests } = require('./unit/spill.test');
 const { runWorkerMemTests } = require('./unit/worker-mem.test');
 const { runPypiCatchupTests } = require('./integration/pypi-catchup.test');
+const { runHeavyLaneTests } = require('./unit/heavy-lane.test');
 const { runSandboxPreloadTests } = require('./integration/sandbox-preload.test');
 
 // Integration tests (fast subset — CLI, monitor, diff)
@@ -363,6 +364,7 @@ async function timed(name, fn) {
   await timed('spill', runSpillTests);
   await timed('worker-mem', runWorkerMemTests);
   await timed('pypi-catchup', runPypiCatchupTests);
+  await timed('heavy-lane', runHeavyLaneTests);
 
   // ML pipeline integration tests (v2.10.0)
   await timed('ml-pipeline', runMLPipelineTests);
