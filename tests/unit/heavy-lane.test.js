@@ -106,6 +106,37 @@ async function runHeavyLaneTests() {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 
+  test('HEAVY-LANE: an oversize JS file (>10MB) forces heavy even with tiny total JS (omnius regression)', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hl-oversize-'));
+    try {
+      // omnius: a 30MB dist/index.js + 39KB of other JS → classified light →
+      // 1347MB heap (content scanners load the 30MB file whole). The big file
+      // is skipped for the AST but must still flip the package to heavy.
+      fs.writeFileSync(path.join(dir, 'index.js'), plainJs(2000));
+      fs.writeFileSync(path.join(dir, 'dist.js'), plainJs(11 * 1024 * 1024)); // > 10MB cap
+      const w = measureJsWeight(dir);
+      assert(w.oversize === true, 'a >10MB JS file must set oversize');
+      assert(w.totalJsBytes < 1024 * 1024, `oversize file is excluded from totalJsBytes (got ${w.totalJsBytes})`);
+      assert(isHeavyScan(w) === true, 'oversize forces heavy regardless of total/weighted bytes');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  test('HEAVY-LANE: minification probe skips a banner header — minified body after the offset is detected', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hl-banner-'));
+    try {
+      // A license banner can pad the first 4KB (plain, multi-line) so the old
+      // 4KB probe called a minified bundle light. The 64KB offset probe reads
+      // past the banner. (Distinct from bike4mind, which turned out to be
+      // genuinely non-minified — see the prediction-limit note in the PR.)
+      const banner = '// SPDX-License-Identifier: MIT\n'.repeat(120); // ~3.8KB multi-line
+      const minBody = 'function x(a,b){return a+b;};'.repeat(40000); // ~1.1MB single line
+      fs.writeFileSync(path.join(dir, 'bundle.mjs'), banner + minBody);
+      const w = measureJsWeight(dir);
+      assert(w.minifiedJsBytes > 0, 'minified body past the banner must be detected by the 64KB offset probe');
+      assert(isHeavyScan(w) === true, 'banner-prefixed minified bundle classifies heavy');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
   test('HEAVY-LANE: measureJsWeight — depth overflow flags truncated (→ heavy by default)', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hl-deep-'));
     try {

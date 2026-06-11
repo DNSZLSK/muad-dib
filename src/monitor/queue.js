@@ -323,15 +323,21 @@ const JS_WEIGHT_FILE_PATTERN = /\.(?:[cm]?js|[jt]sx?)$/i;
 // license header pads the probe window.
 const JS_MINIFIED_WEIGHT = 12;
 const JS_MINIFIED_AVG_LINE = 250;
-const JS_MINIFIED_PROBE_BYTES = 4096;
+// 64KB, not 4KB: bike4mind sailed under the 4KB probe (a license/banner header
+// padded the window; the minified body started later) → mis-classified light →
+// 890MB heap. Probe a 64KB window from ~2KB in to skip any header and still
+// never load a 30MB file. Cheap (one readSync) at JS_WEIGHT_MAX_FILES files.
+const JS_MINIFIED_PROBE_OFFSET = 2048;
+const JS_MINIFIED_PROBE_BYTES = 64 * 1024;
 
-/** Probe the first 4KB of a file (never loads the rest) for minification. */
-function probeIsMinified(filePath) {
+/** Probe a 64KB window of a file (never loads the rest) for minification. */
+function probeIsMinified(filePath, size) {
   let fd = null;
   try {
     fd = fs.openSync(filePath, 'r');
+    const offset = size > JS_MINIFIED_PROBE_OFFSET + JS_MINIFIED_PROBE_BYTES ? JS_MINIFIED_PROBE_OFFSET : 0;
     const buf = Buffer.alloc(JS_MINIFIED_PROBE_BYTES);
-    const n = fs.readSync(fd, buf, 0, JS_MINIFIED_PROBE_BYTES, 0);
+    const n = fs.readSync(fd, buf, 0, JS_MINIFIED_PROBE_BYTES, offset);
     if (n <= 0) return false;
     const head = buf.toString('utf8', 0, n);
     return (head.length / head.split('\n').length) > JS_MINIFIED_AVG_LINE;
@@ -359,13 +365,20 @@ function probeIsMinified(filePath) {
  * value isHeavyScan compares against the threshold (raw bytes alone missed
  * the minified explosions, see JS_MINIFIED_WEIGHT above).
  *
+ * `oversize` (any single JS file > getMaxFileSize) forces heavy: the AST
+ * executor skips such files, but the content scanners (entropy/hash/
+ * ioc-strings/deobfuscate) still readFileSync the whole thing — omnius
+ * (a 30MB dist/index.js, 39KB of other JS) blew a 'light' worker to 1347MB.
+ * So an oversize JS file is the STRONGEST heavy signal, not something to skip.
+ *
  * @param {string} dir - extracted package directory
- * @returns {{ totalJsBytes: number, minifiedJsBytes: number, weightedJsBytes: number, maxJsFileBytes: number, truncated: boolean }}
+ * @returns {{ totalJsBytes: number, minifiedJsBytes: number, weightedJsBytes: number, maxJsFileBytes: number, oversize: boolean, truncated: boolean }}
  */
 function measureJsWeight(dir) {
   let totalJsBytes = 0;
   let minifiedJsBytes = 0;
   let maxJsFileBytes = 0;
+  let oversize = false;
   let seen = 0;
   let truncated = false;
   const perFileCap = getMaxFileSize();
@@ -385,17 +398,21 @@ function measureJsWeight(dir) {
         const filePath = path.join(current, entry.name);
         let size;
         try { size = fs.statSync(filePath).size; } catch { continue; }
-        if (size > perFileCap) continue; // executor skips these — they never reach the AST
-        totalJsBytes += size;
-        if (probeIsMinified(filePath)) minifiedJsBytes += size;
         if (size > maxJsFileBytes) maxJsFileBytes = size;
+        if (size > perFileCap) {
+          // The AST skips it, but content scanners load it whole → heap blow-up.
+          oversize = true;
+          continue;
+        }
+        totalJsBytes += size;
+        if (probeIsMinified(filePath, size)) minifiedJsBytes += size;
       }
     }
   }
 
   walk(dir, 0);
   const weightedJsBytes = (totalJsBytes - minifiedJsBytes) + JS_MINIFIED_WEIGHT * minifiedJsBytes;
-  return { totalJsBytes, minifiedJsBytes, weightedJsBytes, maxJsFileBytes, truncated };
+  return { totalJsBytes, minifiedJsBytes, weightedJsBytes, maxJsFileBytes, oversize, truncated };
 }
 
 /**
@@ -1431,6 +1448,27 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
     recordError(err, stats);
     stats.scanned++;
     stats.totalTimeMs += Date.now() - startTime;
+    // Per-worker resourceLimits breach: the worker died on ITS V8 cap
+    // (ERR_WORKER_OUT_OF_MEMORY) instead of blowing the process RSS. Same
+    // garde-fou as static_timeout: a package that OOMs the scanner must NOT
+    // count clean — inconclusive, distinct ledger source, distinct log line
+    // (the live-validation metric for the limits rollout). No retry: an OOM
+    // re-OOMs deterministically.
+    // Reactive heap watermark (C2 volet B): the worker self-terminated before
+    // blowing the process RSS. Same disposition as a resourceLimits OOM —
+    // inconclusive, NOT clean, no retry (a re-scan re-explodes the same way) —
+    // but a distinct ledger source so the watchdog's catch rate is measurable
+    // separately from the V8 hard-cap OOMs.
+    const isHeapWatermark = err && /WORKER_HEAP_WATERMARK/.test(err.message || '');
+    if (isHeapWatermark) {
+      console.error(`[MONITOR] WORKER_HEAP_WATERMARK: ${name}@${version} — scan worker self-terminated over the heap watermark (kept INCONCLUSIVE, not clean)`);
+      stats.workerHeapWatermark = (stats.workerHeapWatermark || 0) + 1;
+      updateScanStats('sandbox_inconclusive');
+      try {
+        appendScanLedger({ name, version, ecosystem, outcome: 'error', source: 'worker_heap_watermark' });
+      } catch { /* ledger is best-effort */ }
+      return { sandboxResult: null, staticClean: false };
+    }
     // Per-worker resourceLimits breach: the worker died on ITS V8 cap
     // (ERR_WORKER_OUT_OF_MEMORY) instead of blowing the process RSS. Same
     // garde-fou as static_timeout: a package that OOMs the scanner must NOT
