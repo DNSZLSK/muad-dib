@@ -61,20 +61,48 @@ async function runHeavyLaneTests() {
     });
   });
 
+  // Plain-source fixture content: short lines (~25 chars) like real code —
+  // single-line repeat() strings would trip the minification probe.
+  const plainJs = bytes => 'const someVariable = 12;\n'.repeat(Math.ceil(bytes / 25)).slice(0, bytes);
+
   test('HEAVY-LANE: measureJsWeight — sums parsable JS, excludes node_modules, skips oversize files', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hl-weight-'));
     try {
-      fs.writeFileSync(path.join(dir, 'index.js'), 'x'.repeat(1000));
-      fs.writeFileSync(path.join(dir, 'lib.mjs'), 'y'.repeat(500));
+      fs.writeFileSync(path.join(dir, 'index.js'), plainJs(1000));
+      fs.writeFileSync(path.join(dir, 'lib.mjs'), plainJs(500));
       fs.writeFileSync(path.join(dir, 'README.md'), 'z'.repeat(9000)); // not JS — ignored
       fs.mkdirSync(path.join(dir, 'node_modules', 'dep'), { recursive: true });
-      fs.writeFileSync(path.join(dir, 'node_modules', 'dep', 'big.js'), 'w'.repeat(50000)); // excluded dir
+      fs.writeFileSync(path.join(dir, 'node_modules', 'dep', 'big.js'), plainJs(50000)); // excluded dir
       fs.mkdirSync(path.join(dir, 'src'));
-      fs.writeFileSync(path.join(dir, 'src', 'app.tsx'), 't'.repeat(300));
+      fs.writeFileSync(path.join(dir, 'src', 'app.tsx'), plainJs(300));
       const w = measureJsWeight(dir);
       assert(w.totalJsBytes === 1800, `total = 1000+500+300 = 1800, got ${w.totalJsBytes}`);
       assert(w.maxJsFileBytes === 1000, `max file = 1000, got ${w.maxJsFileBytes}`);
+      assert(w.minifiedJsBytes === 0, `plain source carries no minified bytes, got ${w.minifiedJsBytes}`);
+      assert(w.weightedJsBytes === 1800, `weighted = total when nothing is minified, got ${w.weightedJsBytes}`);
       assert(w.truncated === false, 'small tree is not truncated');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  test('HEAVY-LANE: minified JS weighs ×12 — a small minified bundle classifies heavy (powerlines/sshift regression)', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hl-min-'));
+    try {
+      // 400KB single-line bundle (like powerlines: 449KB minified → 1151MB heap
+      // while a raw-bytes threshold called it light) + a little plain source.
+      fs.writeFileSync(path.join(dir, 'bundle.min.js'), 'var a=1;'.repeat(50000));
+      fs.writeFileSync(path.join(dir, 'index.js'), plainJs(2000));
+      const w = measureJsWeight(dir);
+      assert(w.minifiedJsBytes === 400000, `minified bytes detected, got ${w.minifiedJsBytes}`);
+      assert(w.weightedJsBytes === 2000 + 12 * 400000, `weighted = plain + 12×minified, got ${w.weightedJsBytes}`);
+      assert(isHeavyScan(w) === true, '400KB minified must classify heavy at the 3MiB default');
+      // Same raw volume as plain source stays light:
+      const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'hl-min2-'));
+      try {
+        fs.writeFileSync(path.join(dir2, 'big-source.js'), plainJs(402000));
+        const w2 = measureJsWeight(dir2);
+        assert(w2.minifiedJsBytes === 0, 'multi-line source is not minified');
+        assert(isHeavyScan(w2) === false, '400KB of PLAIN source stays light');
+      } finally { fs.rmSync(dir2, { recursive: true, force: true }); }
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 
