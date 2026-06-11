@@ -813,6 +813,18 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
     console.warn(`[Archive] Failed to start periodic cleanup: ${err.message}`);
   }
 
+  // RSS fix (C2): make sure the lean IOC projection exists & is fresh BEFORE any
+  // scan worker spawns. Workers load the ~24MB lean instead of the ~223MB full
+  // (heap-snapshot-confirmed ~900MB→~50MB per IOC-matching scan). The full read
+  // here is paid ONCE by this long-lived daemon (never by a one-shot worker).
+  try {
+    const { ensureLeanIOCFile } = require('../ioc/updater.js');
+    const r = ensureLeanIOCFile();
+    if (r.generated) console.log(`[MONITOR] IOC lean projection regenerated (${(r.bytes / 1024 / 1024).toFixed(1)}MB) — workers avoid the 223MB full load`);
+  } catch (err) {
+    console.warn(`[MONITOR] IOC lean bootstrap failed (workers fall back to full file): ${err.message}`);
+  }
+
   console.log('\n' + banner([
     "MUAD'DIB - Registry Monitor",
     'Scanning npm + PyPI new packages'
