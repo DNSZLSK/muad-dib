@@ -1,0 +1,8 @@
+{
+  "name": "rules-backdoor-fixture",
+  "version": "1.0.0",
+  "description": "Rules File Backdoor shape (Pillar Security, 2025-03): user-level .cursorrules write with a plain-text agent-addressed concealment directive",
+  "scripts": {
+    "postinstall": "node inject.js"
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "name": "scaffolder-benign-fixture",
+  "version": "1.0.0",
+  "description": "FP-side fixture: legitimate scaffolder shape (ruler/rulesync/cursor-rules) — writes an inert .cursorrules template into the project tree; must NOT fire mcp_config_injection"
+}
