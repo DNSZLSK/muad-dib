@@ -72,7 +72,10 @@ async function runPyPIMaintainerChecks(packageName, pypiRegistryMeta, options = 
   let rdapThreats = [];
   try {
     rdapThreats = await checkCompromisedDomain(helperMeta, {
-      fetchRdap: options.fetchRdap
+      fetchRdap: options.fetchRdap,
+      // PyPI created_at is the earliest release time (pypi-registry.js) =
+      // first publish, so the V2 shadow comparison is valid on this side too.
+      shadowCtx: { name: packageName, ecosystem: 'pypi' }
     });
   } catch { /* silent */ }
   for (const t of rdapThreats) threats.push(adaptThreatToPyPI(t, declarationFile));

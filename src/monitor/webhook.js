@@ -30,7 +30,8 @@ const {
   loadStateRaw,
   getScansSinceLastMemoryPersist,
   setScansSinceLastMemoryPersist,
-  computeLedgerRollup
+  computeLedgerRollup,
+  loadLastDailyReportTs
 } = require('./state.js');
 const {
   HIGH_CONFIDENCE_MALICE_TYPES,
@@ -1049,24 +1050,59 @@ function formatDelta(current, previous) {
   return '=0';
 }
 
-// Phase 0b: rolling window for the daily report's ledger section. The report runs
-// once/day, so 24h is the natural "what happened today" view and keeps the rollup's
-// distinct-key sets small (one day of scans, far below MAX_ROLLUP_KEYS). Env-tunable.
+// Phase 0b: fallback window for the daily report's ledger section when no
+// last-report timestamp exists yet (first report ever / pre-upgrade stamp file).
+// Normal operation derives the window from lastReportTs instead (8h→8h Paris,
+// restart-proof). Env-tunable.
 const LEDGER_ROLLUP_WINDOW_MS = (() => {
   const v = parseInt(process.env.MUADDIB_LEDGER_ROLLUP_WINDOW_MS, 10);
   return Number.isFinite(v) && v > 0 ? v : 24 * 60 * 60 * 1000;
 })();
 
+// Hard ceiling on the report window. A multi-day daemon outage would otherwise make
+// the next report's window (and the rollup's distinct-key sets) span the whole gap;
+// clamp to 48h and flag it so the report stays honest about the truncation.
+const LEDGER_ROLLUP_MAX_WINDOW_MS = 48 * 60 * 60 * 1000;
+
 /**
- * Compute the per-scan ledger rollup for the daily-report window. Best-effort: a
- * rollup failure (corrupt ledger, I/O) must NEVER break the daily report, so this
- * swallows errors and returns null. Also returns null when the ledger is empty so
- * the report omits the section instead of showing a noise row of zeros.
+ * Compute the per-scan ledger rollup for the daily-report window. The window is
+ * [last report send → now] (8h→8h Paris semantics, exact across restarts) when the
+ * lastReportTs stamp exists, else the fixed fallback window. Best-effort: a rollup
+ * failure (corrupt ledger, I/O) must NEVER break the daily report, so this swallows
+ * errors and returns null. Also returns null when the ledger is empty so the report
+ * omits the section instead of showing a noise row of zeros.
  */
 function safeLedgerRollup() {
   try {
-    const rollup = computeLedgerRollup(Date.now() - LEDGER_ROLLUP_WINDOW_MS);
-    return (rollup && rollup.total > 0) ? rollup : null;
+    const now = Date.now();
+    let sinceMs = now - LEDGER_ROLLUP_WINDOW_MS;
+    let windowClamped = false;
+    let windowSource = 'fallback_24h';
+    const lastTs = loadLastDailyReportTs();
+    if (lastTs) {
+      const p = Date.parse(lastTs);
+      // Guard against clock skew (stamp in the future) — fall back to 24h.
+      if (!Number.isNaN(p) && p <= now) {
+        if (p < now - LEDGER_ROLLUP_MAX_WINDOW_MS) {
+          sinceMs = now - LEDGER_ROLLUP_MAX_WINDOW_MS;
+          windowClamped = true;
+        } else {
+          sinceMs = p;
+        }
+        windowSource = 'last_report';
+      }
+    }
+    // Ledger source resolved at CALL time (not module load) so tests can point the
+    // rollup at a synthetic/empty ledger after the module graph is already loaded.
+    // Unset env → computeLedgerRollup falls back to its SCAN_LEDGER_FILE default.
+    const fileOverride = process.env.MUADDIB_SCAN_LEDGER_FILE;
+    const rollup = computeLedgerRollup(sinceMs, fileOverride ? { file: fileOverride } : {});
+    if (rollup && rollup.total > 0) {
+      rollup.windowClamped = windowClamped;
+      rollup.windowSource = windowSource;
+      return rollup;
+    }
+    return null;
   } catch {
     return null;
   }
@@ -1091,7 +1127,10 @@ function formatLedgerField(rollup) {
   if (ecos.length > 0) {
     lines.push(ecos.slice(0, 4).map(e => `${e} ${rollup.byEcosystem[e].total}`).join(' · '));
   }
-  return { name: 'Ledger (24h)', value: lines.join('\n'), inline: false };
+  const label = rollup.windowSource === 'last_report'
+    ? `Ledger (since last report${rollup.windowClamped ? ', clamped 48h' : ''})`
+    : 'Ledger (24h)';
+  return { name: label, value: lines.join('\n'), inline: false };
 }
 
 // AUDIT-C: MCP self-identity by package name (matches the F9/F15 MCP_NAME_RE family in
@@ -1136,6 +1175,22 @@ function buildDailyReportEmbed(stats, dailyAlerts, ledgerRollup) {
   // instead of disk-based daily entries which can undercount due to UTC/Paris date mismatch
   const { top3: diskTop3 } = buildReportFromDisk();
 
+  // --- Phase 0b: per-scan ledger rollup (resolved early so the headline can use it) ---
+  // Caller may pass a precomputed rollup (sendDailyReport does, to persist the same
+  // numbers it displays); undefined → compute here; explicit null → omit the section.
+  const ledger = ledgerRollup !== undefined ? ledgerRollup : safeLedgerRollup();
+
+  // HEADLINE BOUNDARY — scanned/clean/suspect come from the ledger window
+  // [last report → now] when available: window-exact and restart-proof, unlike the
+  // in-memory counters (reset-restore cycles can under-count after a restart storm).
+  // Everything NOT in the ledger (errorsByType breakdown, changes-stream/publish-event
+  // counts, pypi*, avg scan time) stays on the in-memory counters + daily-stats.json:
+  // best-effort since the last reset, may under-count after a restart.
+  const headline = (ledger && ledger.headline && ledger.headline.scanned > 0) ? ledger.headline : null;
+  const hScanned = headline ? headline.scanned : stats.scanned;
+  const hClean = headline ? headline.clean : stats.clean;
+  const hSuspect = headline ? headline.suspect : stats.suspect;
+
   // Prefer in-memory dailyAlerts for top suspects (richer data), fallback to disk
   const top3 = dailyAlerts.length > 0
     ? dailyAlerts.slice().sort((a, b) => (b.score || 0) - (a.score || 0) || b.findingsCount - a.findingsCount).slice(0, 3)
@@ -1154,13 +1209,8 @@ function buildDailyReportEmbed(stats, dailyAlerts, ledgerRollup) {
       }).join('\n')
     : 'None';
 
-  // Avg scan time from in-memory stats
+  // Avg scan time from in-memory stats (totalTimeMs is not ledgerized — best-effort)
   const avg = stats.scanned > 0 ? (stats.totalTimeMs / stats.scanned / 1000).toFixed(1) : '0.0';
-
-  // --- Phase 0b: per-scan ledger rollup (resolved early so Coverage can use it) ---
-  // Caller may pass a precomputed rollup (sendDailyReport does, to persist the same
-  // numbers it displays); undefined → compute here; explicit null → omit the section.
-  const ledger = ledgerRollup !== undefined ? ledgerRollup : safeLedgerRollup();
 
   // --- Coverage ---
   // HEADLINE: honest, version-collapsed coverage from the scan-ledger — distinct
@@ -1176,8 +1226,8 @@ function buildDailyReportEmbed(stats, dailyAlerts, ledgerRollup) {
   const published = npmPub + pypiPub;
   const catchupSkipped = (stats.npmCatchupSkippedSeqs || 0) + (stats.pypiCatchupSkippedEvents || 0);
   const opsSuffix = catchupSkipped > 0
-    ? `\nOps: ${stats.scanned} | Catch-up skip: ${catchupSkipped}`
-    : `\nOps: ${stats.scanned}`;
+    ? `\nOps: ${hScanned} | Catch-up skip: ${catchupSkipped}`
+    : `\nOps: ${hScanned}`;
   let coverageText;
   if (ledger && ledger.distinctPackages > 0 && ledger.distinctCoverage != null) {
     const pct = (ledger.distinctCoverage * 100).toFixed(0);
@@ -1204,8 +1254,8 @@ function buildDailyReportEmbed(stats, dailyAlerts, ledgerRollup) {
   const yesterday = loadYesterdayMetrics();
   let trendsText = 'No data (first day or missing)';
   if (yesterday) {
-    const dScanned = formatDelta(stats.scanned, yesterday.scanned || 0);
-    const dSuspect = formatDelta(stats.suspect, yesterday.suspect || 0);
+    const dScanned = formatDelta(hScanned, yesterday.scanned || 0);
+    const dSuspect = formatDelta(hSuspect, yesterday.suspect || 0);
     const dErrors = formatDelta(stats.errors, yesterday.errors || 0);
     trendsText = `${dScanned} scanned, ${dSuspect} suspects, ${dErrors} errors`;
   }
@@ -1266,8 +1316,8 @@ function buildDailyReportEmbed(stats, dailyAlerts, ledgerRollup) {
       color: 0x3498db,
       fields: [
         { name: 'Coverage', value: coverageText, inline: true },
-        { name: 'Clean', value: `${stats.clean}`, inline: true },
-        { name: 'Suspects', value: `${stats.suspect}`, inline: true },
+        { name: 'Clean', value: `${hClean}`, inline: true },
+        { name: 'Suspects', value: `${hSuspect}`, inline: true },
         { name: 'Errors', value: formatErrorBreakdown(stats.errors, stats.errorsByType), inline: true },
         { name: 'Avg Scan Time', value: `${avg}s/pkg`, inline: true },
         { name: 'Timeouts', value: timeoutText, inline: true },
@@ -1283,7 +1333,9 @@ function buildDailyReportEmbed(stats, dailyAlerts, ledgerRollup) {
         { name: 'System', value: healthText, inline: false }
       ],
       footer: {
-        text: `MUAD'DIB - Daily summary | ${readableTime}`
+        // Headline-source annotation: 'ledger' = window-exact [last report → now],
+        // 'counters' = in-memory fallback (ledger unavailable — pre-upgrade behavior).
+        text: `MUAD'DIB - Daily summary | headline: ${headline ? 'ledger (since last report)' : 'counters'} | ${readableTime}`
       },
       timestamp: now.toISOString()
     }]
@@ -1306,20 +1358,34 @@ async function sendDailyReport(stats, dailyAlerts, recentlyScanned, downloadsCac
     console.log(`[MONITOR] Daily report suppressed: before ${DAILY_REPORT_HOUR}:00 Paris (hour=${getParisHour()})`);
     return;
   }
-  // Crash-safe headline: a restart-storm around report time can zero the in-memory
-  // counter (the monitor OOM-restarts ~10×/day). Floor scanned/clean/suspect at the
-  // durable scan-stats delta so we never publish "5" when ~44k were really scanned.
-  reconcileDailyHeadline(stats);
+  // Phase 0b: compute the ledger rollup ONCE so the embed shows exactly the numbers
+  // we persist (no double-scan, no drift between Discord and the on-disk metrics).
+  // Resolved BEFORE the empty-skip and the reconcile: when the ledger headline is
+  // available it IS the published number (window [last report → now], restart-proof),
+  // and the counter-based machinery below only runs as fallback.
+  const ledgerRollup = safeLedgerRollup();
+  const headline = (ledgerRollup && ledgerRollup.headline && ledgerRollup.headline.scanned > 0)
+    ? ledgerRollup.headline : null;
+
+  if (!headline) {
+    // Crash-safe FALLBACK headline: a restart-storm around report time can zero the
+    // in-memory counter (the monitor OOM-restarts ~10×/day). Floor scanned/clean/suspect
+    // at the durable scan-stats delta so we never publish "5" when ~44k were really
+    // scanned. Not applied when the ledger headline is used — that one is window-exact.
+    reconcileDailyHeadline(stats);
+  }
 
   // Never send an empty report (0 scanned — restart with no work done)
-  if (stats.scanned === 0) {
+  const publishedScanned = headline ? headline.scanned : stats.scanned;
+  if (publishedScanned === 0) {
     console.log('[MONITOR] Daily report skipped (0 packages scanned)');
     return;
   }
 
   // Write-ahead: mark today's report as sent BEFORE the webhook HTTP request.
   // If the process is killed (SIGKILL) during sendWebhook, the date is already
-  // recorded on disk and prevents duplicate reports on next startup.
+  // recorded on disk and prevents duplicate reports on next startup. The same
+  // write-ahead stamps lastReportTs = start of the next report's ledger window.
   const today = getParisDateString();
   stats.lastDailyReportDate = today;
   // Persist the monotonic scan-stats counter as the baseline for the NEXT report's
@@ -1327,23 +1393,23 @@ async function sendDailyReport(stats, dailyAlerts, recentlyScanned, downloadsCac
   saveLastDailyReportDate(today, captureScanStatsBaseline());
   // Observability: the success path previously logged nothing, which made the late-fire bug
   // invisible in the journal. Log the stamped date + the actual Paris hour (an on-time 08:00
-  // fire vs a catch-up at hour 14 are now distinguishable) + the headline count.
-  console.log(`[MONITOR] Daily report firing for ${today} (hour=${getParisHour()} Paris, scanned=${stats.scanned})`);
+  // fire vs a catch-up at hour 14 are now distinguishable) + the headline count + source.
+  console.log(`[MONITOR] Daily report firing for ${today} (hour=${getParisHour()} Paris, scanned=${publishedScanned}, headline=${headline ? 'ledger' : 'counters'})`);
 
-  // Phase 0b: compute the ledger rollup ONCE so the embed shows exactly the numbers
-  // we persist (no double-scan, no drift between Discord and the on-disk metrics).
-  const ledgerRollup = safeLedgerRollup();
   const payload = buildDailyReportEmbed(stats, dailyAlerts, ledgerRollup);
 
-  // Persist locally with full raw metrics (independent of webhook — enables trend analysis)
+  // Persist locally with full raw metrics (independent of webhook — enables trend analysis).
+  // Headline (scanned/clean/suspect/byTier) follows the same source as the embed: ledger
+  // window when available, in-memory counters otherwise. headlineSource records which.
   persistDailyReport(payload, {
-    scanned: stats.scanned,
-    clean: stats.clean,
-    suspect: stats.suspect,
+    headlineSource: headline ? 'ledger' : 'counters',
+    scanned: publishedScanned,
+    clean: headline ? headline.clean : stats.clean,
+    suspect: headline ? headline.suspect : stats.suspect,
     errors: stats.errors,
     errorsByType: { ...stats.errorsByType },
     avgScanTimeMs: stats.scanned > 0 ? Math.round(stats.totalTimeMs / stats.scanned) : 0,
-    suspectByTier: { ...stats.suspectByTier },
+    suspectByTier: headline ? { ...headline.byTier } : { ...stats.suspectByTier },
     mlFiltered: stats.mlFiltered || 0,
     llmAnalyzed: stats.llmAnalyzed || 0,
     llmSuppressed: stats.llmSuppressed || 0,

@@ -48,6 +48,7 @@ const { runSilentStealthTests } = require('./scanner/silent-stealth.test');
 const { runSensitiveFilesCoverageTests } = require('./scanner/sensitive-files-coverage.test');
 const { runEmailDomainTests } = require('./scanner/email-domain.test');
 const { runRdapCompromisedDomainTests } = require('./scanner/rdap-compromised-domain.test');
+const { runMcp3TierTests } = require('./scanner/mcp-3tier.test');
 const { runRiskDomainsTests } = require('./scanner/risk-domains.test');
 const { runCyclonedxTests } = require('./scanner/cyclonedx.test');
 const { runAstNegativeTests } = require('./scanner/ast-negative.test');
@@ -87,7 +88,7 @@ const { runStagedRemoteLoaderTests } = require('./unit/staged-remote-loader.test
 const { runLlmDetectiveTests } = require('./unit/llm-detective.test');
 const { runTarballArchiveTests } = require('./unit/tarball-archive.test');
 const { runScanLedgerTests } = require('./unit/scan-ledger.test');
-const { runSpillTests } = require('./unit/spill.test');
+const { runShadowTests } = require('./unit/shadow.test');
 const { runSandboxPreloadTests } = require('./integration/sandbox-preload.test');
 
 // Integration tests (fast subset — CLI, monitor, diff)
@@ -229,6 +230,7 @@ async function timed(name, fn) {
   await timed('sensitive-files-coverage', runSensitiveFilesCoverageTests);
   await timed('email-domain', runEmailDomainTests);
   await timed('rdap-compromised-domain', runRdapCompromisedDomainTests);
+  await timed('mcp-3tier', runMcp3TierTests);
   await timed('risk-domains', runRiskDomainsTests);
   await timed('cyclonedx', runCyclonedxTests);
   await timed('ast-negative', runAstNegativeTests);
@@ -336,7 +338,7 @@ async function timed(name, fn) {
   // Tarball archive tests
   await timed('tarball-archive', runTarballArchiveTests);
   await timed('scan-ledger', runScanLedgerTests);
-  await timed('spill', runSpillTests);
+  await timed('shadow', runShadowTests);
 
   // ML pipeline integration tests (v2.10.0)
   await timed('ml-pipeline', runMLPipelineTests);

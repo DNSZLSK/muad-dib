@@ -111,6 +111,10 @@ function analyzeFile(content, filePath, basePath) {
   const ctx = {
     threats,
     relFile: path.relative(basePath, filePath),
+    // File source reference for the post-walk shadow classifier (Wave-4 MCP
+    // site has no extractable written-content string — it classifies the file).
+    // A reference to the already-held string: no copy, freed with the ctx.
+    _content: content,
     dynamicRequireVars: new Set(),
     staticAssignments: new Set(),
     // v2.10.73 P2: AST-006 source qualification — tracks WHERE a variable's value came from.

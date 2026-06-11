@@ -659,6 +659,19 @@ if (command === 'version' || command === '--version' || command === '-v') {
     console.error('[ERROR]', err.message);
     process.exit(1);
   });
+} else if (command === 'shadow-report') {
+  const { runShadowReport } = require('../src/commands/shadow-report.js');
+  const shOpts = { json: jsonOutput };
+  for (let i = 0; i < options.length; i++) {
+    if (options[i] === '--since' && options[i + 1]) { shOpts.since = options[i + 1]; i++; }
+    else if (options[i] === '--detector' && options[i + 1]) { shOpts.detector = options[i + 1]; i++; }
+  }
+  runShadowReport(shOpts).then(() => {
+    process.exit(0);
+  }).catch(err => {
+    console.error('[ERROR]', err.message);
+    process.exit(1);
+  });
 } else if (command === 'evaluate') {
   if (wantHelp) showHelp('evaluate');
   const { evaluate } = require('../src/commands/evaluate.js');

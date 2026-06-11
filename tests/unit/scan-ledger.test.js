@@ -230,6 +230,82 @@ function runScanLedgerTests() {
     } finally { try { fs.unlinkSync(f); } catch {} }
   });
 
+  // --- Daily-report ledger headline (8h→8h window source) ---
+  test('computeLedgerRollup: headline clean-bucket mapping is exhaustive over outcomes', () => {
+    const f = path.join(os.tmpdir(), `rollup-headline-${Date.now()}-a.jsonl`);
+    try {
+      const s = require('../../src/monitor/state.js');
+      writeLedger(f, [
+        // clean bucket — all five benign terminal verdicts
+        { ts: '2026-06-07T10:00:00.000Z', name: 'c1', version: '1', ecosystem: 'npm', outcome: 'clean' },
+        { ts: '2026-06-07T10:01:00.000Z', name: 'c2', version: '1', ecosystem: 'npm', outcome: 'clean_low_signal' },
+        { ts: '2026-06-07T10:02:00.000Z', name: 'c3', version: '1', ecosystem: 'npm', outcome: 'clean_tooling' },
+        { ts: '2026-06-07T10:03:00.000Z', name: 'c4', version: '1', ecosystem: 'npm', outcome: 'ml_clean' },
+        { ts: '2026-06-07T10:04:00.000Z', name: 'c5', version: '1', ecosystem: 'npm', outcome: 'llm_benign' },
+        // suspect bucket
+        { ts: '2026-06-07T10:05:00.000Z', name: 's1', version: '1', ecosystem: 'npm', outcome: 'suspect', tier: '1b' },
+        { ts: '2026-06-07T10:06:00.000Z', name: 's2', version: '1', ecosystem: 'npm', outcome: 'confirmed', tier: '1a' },
+        // errors bucket — only the ledgerized failure outcomes
+        { ts: '2026-06-07T10:07:00.000Z', name: 'e1', version: '1', ecosystem: 'npm', outcome: 'error' },
+        { ts: '2026-06-07T10:08:00.000Z', name: 'e2', version: '1', ecosystem: 'npm', outcome: 'static_timeout' },
+        // in NO bucket: scanned but neither vouched-for nor failed
+        { ts: '2026-06-07T10:09:00.000Z', name: 'n1', version: '1', ecosystem: 'npm', outcome: 'sandbox_inconclusive' },
+        { ts: '2026-06-07T10:10:00.000Z', name: 'n2', version: '1', ecosystem: 'npm', outcome: 'size_skip' },
+        // dropped: not scanned at all
+        { ts: '2026-06-07T10:11:00.000Z', name: 'd1', version: '1', ecosystem: 'npm', outcome: 'dropped' }
+      ]);
+      const r = s.computeLedgerRollup(null, { file: f });
+      assert(r.headline && typeof r.headline === 'object', 'headline present on rollup');
+      assert(r.headline.scanned === 11, `headline.scanned = non-dropped count (expected 11, got ${r.headline.scanned})`);
+      assert(r.headline.clean === 5, `all five clean outcomes bucketed (got ${r.headline.clean})`);
+      assert(r.headline.suspect === 2, `suspect+confirmed = 2 (got ${r.headline.suspect})`);
+      assert(r.headline.errors === 2, `error+static_timeout = 2 (got ${r.headline.errors})`);
+      // clean + suspect + errors + neither-bucket = scanned (nothing double-counted or lost)
+      assert(r.headline.clean + r.headline.suspect + r.headline.errors + 2 === r.headline.scanned,
+        'buckets partition scanned (with 2 in no bucket)');
+    } finally { try { fs.unlinkSync(f); } catch {} }
+  });
+
+  test('computeLedgerRollup: headline byTier maps ledger tiers; t1 = t1a + t1b + legacy "1"', () => {
+    const f = path.join(os.tmpdir(), `rollup-headline-${Date.now()}-b.jsonl`);
+    try {
+      const s = require('../../src/monitor/state.js');
+      writeLedger(f, [
+        { ts: '2026-06-07T10:00:00.000Z', name: 'a', version: '1', ecosystem: 'npm', outcome: 'suspect', tier: '1a' },
+        { ts: '2026-06-07T10:01:00.000Z', name: 'b', version: '1', ecosystem: 'npm', outcome: 'suspect', tier: '1a' },
+        { ts: '2026-06-07T10:02:00.000Z', name: 'c', version: '1', ecosystem: 'npm', outcome: 'suspect', tier: '1b' },
+        { ts: '2026-06-07T10:03:00.000Z', name: 'd', version: '1', ecosystem: 'npm', outcome: 'confirmed', tier: '1' },
+        { ts: '2026-06-07T10:04:00.000Z', name: 'e', version: '1', ecosystem: 'npm', outcome: 'suspect', tier: '2' },
+        { ts: '2026-06-07T10:05:00.000Z', name: 'f', version: '1', ecosystem: 'npm', outcome: 'suspect', tier: '3' },
+        { ts: '2026-06-07T10:06:00.000Z', name: 'g', version: '1', ecosystem: 'npm', outcome: 'suspect' }, // no tier → counted in suspect, no tier bucket
+        { ts: '2026-06-07T10:07:00.000Z', name: 'h', version: '1', ecosystem: 'npm', outcome: 'clean', tier: '1a' } // tier on a clean entry is ignored
+      ]);
+      const r = s.computeLedgerRollup(null, { file: f });
+      const bt = r.headline.byTier;
+      assert(bt.t1a === 2 && bt.t1b === 1, `t1a=2/t1b=1 (got t1a=${bt.t1a}, t1b=${bt.t1b})`);
+      assert(bt.t2 === 1 && bt.t3 === 1, `t2=1/t3=1 (got t2=${bt.t2}, t3=${bt.t3})`);
+      assert(bt.t1 === 4, `t1 = t1a(2) + t1b(1) + legacy '1'(1) = 4 — in-memory suspectByTier semantics (got ${bt.t1})`);
+      assert(r.headline.suspect === 7, `all 7 suspect/confirmed counted regardless of tier (got ${r.headline.suspect})`);
+    } finally { try { fs.unlinkSync(f); } catch {} }
+  });
+
+  test('computeLedgerRollup: headline respects the sinceTs window (the 8h→8h contract)', () => {
+    const f = path.join(os.tmpdir(), `rollup-headline-${Date.now()}-c.jsonl`);
+    try {
+      const s = require('../../src/monitor/state.js');
+      writeLedger(f, [
+        { ts: '2026-06-08T07:00:00.000Z', name: 'before', version: '1', ecosystem: 'npm', outcome: 'clean' },
+        { ts: '2026-06-08T09:00:00.000Z', name: 'inA', version: '1', ecosystem: 'npm', outcome: 'clean' },
+        { ts: '2026-06-09T05:00:00.000Z', name: 'inB', version: '1', ecosystem: 'npm', outcome: 'suspect', tier: '1b' }
+      ]);
+      // ms-epoch sinceTs — the prod shape (safeLedgerRollup always passes Date.parse output).
+      // The ISO-string form of the API is covered by the dedicated both-forms test above.
+      const r = s.computeLedgerRollup(Date.parse('2026-06-08T08:00:00.000Z'), { file: f });
+      assert(r.headline.scanned === 2, `only in-window entries (expected 2, got ${r.headline.scanned})`);
+      assert(r.headline.clean === 1 && r.headline.suspect === 1, 'window split clean/suspect');
+    } finally { try { fs.unlinkSync(f); } catch {} }
+  });
+
   // Reset env + module cache so other suites get production defaults, not the test path.
   delete process.env.MUADDIB_SCAN_LEDGER_FILE;
   delete process.env.MUADDIB_SCAN_LEDGER_MAX;
