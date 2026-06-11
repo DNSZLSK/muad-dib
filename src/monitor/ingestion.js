@@ -1017,6 +1017,12 @@ async function pollNpm(state, scanQueue, stats) {
 
 const PYPI_USER_AGENT = `${SELF_PACKAGE_NAME} (security-monitor; +https://github.com/DNSZLSK/muaddib)`;
 
+// A normal 15-min poll is a few dozen events; a changelog_since_serial batch
+// caps around ~50K. Anything this large means we are far behind — worth one
+// extra changelog_last_serial call to measure the GLOBAL lag (see the global
+// catch-up protection in pollPyPIChangelog).
+const PYPI_CATCHUP_PROBE_MIN_EVENTS = 10000;
+
 /**
  * Build an XML-RPC methodCall envelope. PyPI accepts only <int> and <string>
  * params for the methods we use (changelog_last_serial, changelog_since_serial),
@@ -1186,6 +1192,38 @@ async function pollPyPIChangelog(state, scanQueue, stats) {
         return -1;
       }
       return 0;
+    }
+
+    // GLOBAL catch-up protection (2026-06-11 incident): the per-batch gap
+    // below is bounded by one changelog_since_serial response (~50K events,
+    // observed 33-43K), so it can NEVER exceed PYPI_CATCHUP_MAX (100K) — a
+    // poller resumed from an ancient serial (a test-fixture serial leaked
+    // into prod state) replayed YEARS of history, ~15K ancient packages per
+    // poll, without ever tripping the skip. A full batch is the tell: probe
+    // the registry's current serial and skip to it when the global lag is
+    // beyond the cap. Costs one extra XML-RPC call only on full batches.
+    if (events.length >= PYPI_CATCHUP_PROBE_MIN_EVENTS) {
+      await acquireRegistrySlot();
+      let curBody;
+      try {
+        curBody = await _deps.httpsPost(
+          PYPI_XMLRPC_URL,
+          buildXmlRpcCall('changelog_last_serial', []),
+          { 'User-Agent': PYPI_USER_AGENT },
+          10_000
+        );
+      } finally {
+        releaseRegistrySlot();
+      }
+      const currentSerial = parseXmlRpcInt(curBody);
+      if (currentSerial != null && currentSerial - lastSerial > PYPI_CATCHUP_MAX) {
+        console.warn(`[MONITOR] PyPI changelog globally behind (${currentSerial - lastSerial} serials) — skipping to current ${currentSerial}`);
+        stats.pypiCatchupSkips = (stats.pypiCatchupSkips || 0) + 1;
+        stats.pypiCatchupSkippedEvents = (stats.pypiCatchupSkippedEvents || 0) + (currentSerial - lastSerial);
+        state.pypiLastSerial = currentSerial;
+        savePypiSerial(currentSerial);
+        return 0;
+      }
     }
 
     // Catch-up protection: if events span more than PYPI_CATCHUP_MAX serials,
