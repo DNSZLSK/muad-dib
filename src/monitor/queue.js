@@ -150,10 +150,14 @@ const BURST_PREALERT_MIN_VERSIONS = (() => {
   const n = parseInt(process.env.MUADDIB_BURST_MIN_VERSIONS, 10);
   return Number.isFinite(n) && n >= 2 ? n : 10;
 })();
-// Dedup burst pings: one per name per process window (bounded — cleared at the cap so it
-// can never grow without limit, CLAUDE.md §2).
-const _burstAlerted = new Set();
+// Burst ping throttle (FPR/notif audit 2026-06): name -> last burst-alert timestamp.
+// Was a lifetime Set (dedup once per process), which both (a) silenced a genuine
+// re-burst days later and (b) on a process that runs for weeks accumulated spam from
+// every monorepo/CI nightly that re-bursts. Now a 24h-cooldown Map: one alert per
+// package per day max. Bounded — cleared at the cap so it can never grow without limit.
+const _burstAlerted = new Map();
 const BURST_ALERTED_MAX = 20_000;
+const BURST_ALERT_COOLDOWN_MS = 24 * 60 * 60 * 1000; // 24h
 
 // Stage 3 — sandbox gate. Static-score threshold below which T1b/T2 packages
 // are NOT sandboxed (static result alone is authoritative). Tightens the prior
@@ -1530,9 +1534,22 @@ async function resolveTarballAndScan(item, stats, dailyAlerts, recentlyScanned, 
         const isBurst = burstCount >= BURST_PREALERT_MIN_VERSIONS;
         if (isBurst) {
           item.isBurst = true;
-          if (!_burstAlerted.has(item.name)) {
+          // Anti-flood (notification only — the burst versions are STILL queued and scanned
+          // below regardless; muting the heads-up never weakens detection):
+          //  1) Established packages (mature + many versions) bursting are monorepo / CI
+          //     nightly churn, not the Shai-Hulud account-takeover signal (that is a NEW /
+          //     low-reputation package suddenly bursting). A real takeover of an established
+          //     package is still caught by the per-version scan + the atoSignal above.
+          //  2) 24h cooldown per package so a package re-bursting all day pings at most once.
+          const _np = item._npmInfo || npmInfo || {};
+          const _established = Number.isFinite(_np.age_days) && _np.age_days > 730 &&
+            Number.isFinite(_np.version_count) && _np.version_count > 100;
+          const _now = Date.now();
+          const _last = _burstAlerted.get(item.name);
+          const _onCooldown = _last && (_now - _last) < BURST_ALERT_COOLDOWN_MS;
+          if (!_established && !_onCooldown) {
             if (_burstAlerted.size >= BURST_ALERTED_MAX) _burstAlerted.clear();
-            _burstAlerted.add(item.name);
+            _burstAlerted.set(item.name, _now);
             stats.burstPreAlerts = (stats.burstPreAlerts || 0) + 1;
             console.log(`[MONITOR] BURST PRE-ALERT: ${item.name} — ${burstCount} versions in the recent window`);
             sendBurstPreAlert(item.name, burstCount, item.ecosystem).catch(err => {
