@@ -217,6 +217,10 @@ async function getPackageMetadata(packageName) {
     // / pinned-old / vendored versions bypass the cap so we don't mask attacks
     // captured in static fixtures (e.g. eslint-scope 3.7.2, chalk 5.6.1).
     latest_version: latestVersion || null,
+    // P4 : full dist-tags map ({ latest, next, canary, ... }) so scoring can tell a
+    // maintainer-controlled pre-release channel version (inherits partial reputation)
+    // from a historical / pinned-old version (no reputation).
+    dist_tags: (meta['dist-tags'] && typeof meta['dist-tags'] === 'object') ? meta['dist-tags'] : null,
     // F3 : list of maintainer email addresses (lowercased, unique) for DNS
     // MX / RDAP downstream checks. Empty array if no emails published.
     maintainer_emails: maintainerEmails,

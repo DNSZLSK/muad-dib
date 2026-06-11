@@ -245,6 +245,38 @@ async function runReputationFactorTests() {
     const out = applyReputationFactor(r, { has_provenance: true });
     assert(out !== null && out.factor < 1.0, `clean attested package keeps the downweight, got ${out && out.factor}`);
   });
+
+  // ── P4: pre-release channel versions inherit (partial) reputation ──────────────
+  const ESTABLISHED = { package_age_days: 2500, version_count: 250, weekly_downloads: 5_000_000, has_repository: true, author_package_count: 100 };
+
+  test('P4: canary on a non-latest pre-release dist-tag → partial reputation (not skipped)', () => {
+    const r = makeResult(60);
+    const out = applyReputationFactor(r, { ...ESTABLISHED, latest_version: '3.19.1', scan_version: '3.19.0-nightly-x', dist_tags: { latest: '3.19.1', next: '3.19.0-nightly-x' } });
+    assert(out !== null, 'a canary on a maintainer pre-release tag must NOT be skipped');
+    // attenuated: between the full min factor (0.10) and neutral (1.0).
+    assert(out.factor > REPUTATION_FACTOR_BOUNDS.min && out.factor < 1.0, `expected attenuated factor, got ${out.factor}`);
+    assert(r.summary.riskScore < 60, `score should be suppressed, got ${r.summary.riskScore}`);
+  });
+
+  test('P4 (anti-ATO guard): a historical non-latest version (no pre-release tag) is still SKIPPED', () => {
+    const r = makeResult(60);
+    const out = applyReputationFactor(r, { ...ESTABLISHED, latest_version: '3.19.1', scan_version: '3.10.0', dist_tags: { latest: '3.19.1' } });
+    assert(out === null, 'historical/pinned-old versions must not inherit reputation');
+    assert(r.summary.riskScore === 60, `score must be unchanged, got ${r.summary.riskScore}`);
+  });
+
+  test('P4: the latest version still gets the FULL reputation (unchanged)', () => {
+    const r = makeResult(60);
+    const out = applyReputationFactor(r, { ...ESTABLISHED, latest_version: '3.19.1', scan_version: '3.19.1', dist_tags: { latest: '3.19.1' } });
+    assert(out !== null && out.factor === REPUTATION_FACTOR_BOUNDS.min, `latest gets full min factor, got ${out && out.factor}`);
+  });
+
+  test('P4: a malicious canary is still floored by Track R (reputation cannot bury it)', () => {
+    const hcType = [...HIGH_CONFIDENCE_MALICE_TYPES][0];
+    const r = makeResultWithThreats(80, [{ type: hcType, severity: 'CRITICAL' }]);
+    applyReputationFactor(r, { ...ESTABLISHED, latest_version: '3.19.1', scan_version: '3.19.0-nightly-x', dist_tags: { latest: '3.19.1', next: '3.19.0-nightly-x' } });
+    assert(r.summary.riskScore >= REPUTATION_MALICE_FLOOR, `confirmed malice on a canary must stay >= ${REPUTATION_MALICE_FLOOR}, got ${r.summary.riskScore}`);
+  });
 }
 
 module.exports = { runReputationFactorTests };
