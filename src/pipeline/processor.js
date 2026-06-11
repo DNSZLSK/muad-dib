@@ -270,7 +270,11 @@ async function process(threats, targetPath, options, pythonDeps, warnings, scann
       debugLog('[EMAIL-DOMAIN] check failed: ' + err.message);
     }
     try {
-      const rdapThreats = await checkCompromisedDomain(_pkgMeta.npmRegistryMeta);
+      // shadowCtx identifies the package in shadow-divergence records (V2
+      // candidate semantics logged alongside V1 — zero effect on threats).
+      const rdapThreats = await checkCompromisedDomain(_pkgMeta.npmRegistryMeta, {
+        shadowCtx: { name: packageName, version: packageVersion, ecosystem: 'npm' }
+      });
       for (const t of rdapThreats) deduped.push(t);
     } catch (err) {
       debugLog('[RDAP] check failed: ' + err.message);

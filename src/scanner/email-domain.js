@@ -17,6 +17,7 @@
 
 const dns = require('dns');
 const { debugLog } = require('../utils.js');
+const { isShadowEnabled, recordShadowDivergence } = require('../shared/shadow.js');
 
 const MX_TIMEOUT_MS = 3000;
 const MX_CACHE_TTL = 30 * 24 * 60 * 60 * 1000; // 30 days
@@ -236,10 +237,67 @@ function isCompromisedDomain(creationDateISO, packageCreatedAtISO) {
   return cDate > (rDate - COMPROMISE_MARGIN_MS);
 }
 
+// =============================================================================
+// V2 candidate semantics (SHADOW-ONLY until adjudicated — V1 above still emits
+// every threat). Two changes vs V1, both validated by the node-ipc takeover
+// (May 2026: domain atlantis-software.net re-registered 2026-05-07, malicious
+// 9.2.3/12.0.1 published 05-14, FIRST publish years earlier):
+//
+//  1. STRICT comparison — creation > first_publish, the 30-day pre-publish
+//     margin removed. A dev who buys their domain a few weeks before shipping
+//     v1 is the NORMAL case (the margin was the main source of the 850+ FP);
+//     a dev cannot have published with an email on a domain that did not
+//     exist yet, so creation strictly after first publish stays a hard signal.
+//     RDAP caveat that makes this work: many registries RESET the creation
+//     date on re-registration (.net/Namecheap do — node-ipc's signal).
+//  2. Public email providers excluded — gmail.com etc. can never be "taken
+//     over" by re-registration; any weird RDAP answer for them is noise.
+//     This is a domain-CLASS exclusion, not a package whitelist.
+// =============================================================================
+
+// Consumer email providers — domain takeover does not apply (the provider
+// owns the domain; accounts are compromised via other vectors, out of scope
+// for this RDAP signal).
+const PUBLIC_EMAIL_PROVIDERS = new Set([
+  'gmail.com', 'googlemail.com',
+  'outlook.com', 'hotmail.com', 'live.com', 'msn.com',
+  'yahoo.com', 'ymail.com', 'rocketmail.com',
+  'proton.me', 'protonmail.com', 'pm.me',
+  'icloud.com', 'me.com', 'mac.com',
+  'aol.com',
+  'gmx.com', 'gmx.de', 'gmx.net',
+  'mail.ru', 'inbox.ru', 'list.ru', 'bk.ru',
+  'qq.com', 'foxmail.com', '163.com', '126.com', 'yeah.net', 'sina.com',
+  'yandex.ru', 'yandex.com',
+  'zoho.com', 'fastmail.com', 'hey.com',
+  'tutanota.com', 'tuta.com', 'tuta.io',
+  'web.de', 't-online.de', 'freenet.de',
+  'free.fr', 'orange.fr', 'laposte.net', 'wanadoo.fr', 'sfr.fr',
+  'naver.com', 'daum.net', 'hanmail.net',
+  'rediffmail.com', 'seznam.cz', 'wp.pl', 'o2.pl', 'interia.pl',
+  'duck.com', 'pobox.com', 'hushmail.com', 'mailbox.org', 'posteo.de'
+]);
+
+/**
+ * V2: strict creation-after-first-publish, public providers excluded.
+ * Pure — used by the shadow hook below and by scripts/backtest-email-domain.js.
+ */
+function isCompromisedDomainV2(creationDateISO, firstPublishISO, domain) {
+  if (!creationDateISO || !firstPublishISO) return false;
+  if (domain && PUBLIC_EMAIL_PROVIDERS.has(String(domain).toLowerCase())) return false;
+  const cDate = new Date(creationDateISO).getTime();
+  const rDate = new Date(firstPublishISO).getTime();
+  if (isNaN(cDate) || isNaN(rDate)) return false;
+  return cDate > rDate;
+}
+
 /**
  * F1 entry point.
- * @param {object|null} meta - Digested metadata. Reads maintainer_emails + created_at.
+ * @param {object|null} meta - Digested metadata. Reads maintainer_emails + created_at
+ *   (= the package's FIRST publish date, both npm and PyPI sides).
  * @param {object} options - { fetchRdap } for tests to inject a mock.
+ *   { shadowCtx: {name, version, ecosystem} } identifies the scanned package in
+ *   shadow-divergence records (optional — without it divergences log package:null).
  * @returns {Promise<Array>} threats array
  */
 async function checkCompromisedDomain(meta, options = {}) {
@@ -263,6 +321,24 @@ async function checkCompromisedDomain(meta, options = {}) {
       continue;
     }
     if (!rdap || !rdap.creationDate) continue;
+    // SHADOW (zero effect on the threats emitted below): compare the live V1
+    // verdict with the V2 candidate and log only disagreements. Adjudication =
+    // scripts/backtest-email-domain.js replay + `muaddib shadow-report`.
+    try {
+      if (isShadowEnabled()) {
+        const v1 = isCompromisedDomain(rdap.creationDate, meta.created_at);
+        const v2 = isCompromisedDomainV2(rdap.creationDate, meta.created_at, domain);
+        if (v1 !== v2) {
+          const ctx = options.shadowCtx || {};
+          recordShadowDivergence({
+            detector: 'compromised_email_domain',
+            package: ctx.name, version: ctx.version, ecosystem: ctx.ecosystem,
+            oldVerdict: v1, newVerdict: v2,
+            evidence: { domain, creationDate: rdap.creationDate, firstPublish: meta.created_at, oldMarginDays: 30 }
+          });
+        }
+      }
+    } catch { /* shadow must never affect the scan */ }
     if (isCompromisedDomain(rdap.creationDate, meta.created_at)) {
       const cd = rdap.creationDate.slice(0, 10);
       const pd = meta.created_at.slice(0, 10);
@@ -297,6 +373,9 @@ module.exports = {
   checkCompromisedDomain,
   fetchRdap,
   isCompromisedDomain,
+  // V2 candidate (shadow-only until adjudicated; used by the backtest script)
+  isCompromisedDomainV2,
+  PUBLIC_EMAIL_PROVIDERS,
   _resetRdapCache,
   RDAP_TIMEOUT_MS,
   RDAP_CACHE_TTL,
