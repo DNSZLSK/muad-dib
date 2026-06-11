@@ -19,6 +19,7 @@ const { loadCachedIOCs } = require('../ioc/updater.js');
 const { scanPackageJson } = require('../scanner/package.js');
 const { scanShellScripts } = require('../scanner/shell.js');
 const { buildTrainingRecord } = require('../ml/feature-extractor.js');
+const { appendWorkerMem } = require('./worker-mem.js');
 const { appendRecord: appendTrainingRecord, relabelRecords } = require('../ml/jsonl-writer.js');
 
 // From ./state.js
@@ -426,6 +427,17 @@ function runScanInWorker(extractedDir, timeoutMs, scanContext = null, signal = n
     const _sc = scanContext || {};
     _liveWorkers.set(worker, { name: _sc.name, version: _sc.version, ecosystem: _sc.ecosystem });
 
+    // Off-heap attribution (worker-mem.jsonl, gated MUADDIB_WORKER_MEM=1):
+    // process RSS around each worker's lifetime. tid captured now — after
+    // 'exit' worker.threadId becomes -1.
+    const _wmTid = worker.threadId;
+    const _wmSpawnedAt = Date.now();
+    appendWorkerMem({
+      ev: 'spawn', tid: _wmTid,
+      name: _sc.name, version: _sc.version, ecosystem: _sc.ecosystem,
+      rss: process.memoryUsage().rss
+    });
+
     let settled = false;
     let timer = null;
     const done = (fn) => {
@@ -462,9 +474,19 @@ function runScanInWorker(extractedDir, timeoutMs, scanContext = null, signal = n
 
     worker.on('error', (err) => done(() => reject(err)));
 
-    worker.on('exit', (code) => done(() => {
-      if (code !== 0) reject(new Error(`Worker exited with code ${code}`));
-    }));
+    worker.on('exit', (code) => {
+      // 'exit' fires exactly once per worker (even after terminate/error), so
+      // it is the one reliable place to close the spawn/exit RSS pair.
+      appendWorkerMem({
+        ev: 'exit', tid: _wmTid,
+        name: _sc.name, version: _sc.version, code,
+        durMs: Date.now() - _wmSpawnedAt,
+        rss: process.memoryUsage().rss
+      });
+      done(() => {
+        if (code !== 0) reject(new Error(`Worker exited with code ${code}`));
+      });
+    });
   });
 }
 

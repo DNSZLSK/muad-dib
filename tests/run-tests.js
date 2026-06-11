@@ -90,6 +90,7 @@ const { runTarballArchiveTests } = require('./unit/tarball-archive.test');
 const { runScanLedgerTests } = require('./unit/scan-ledger.test');
 const { runShadowTests } = require('./unit/shadow.test');
 const { runSpillTests } = require('./unit/spill.test');
+const { runWorkerMemTests } = require('./unit/worker-mem.test');
 const { runSandboxPreloadTests } = require('./integration/sandbox-preload.test');
 
 // Integration tests (fast subset — CLI, monitor, diff)
@@ -341,6 +342,7 @@ async function timed(name, fn) {
   await timed('scan-ledger', runScanLedgerTests);
   await timed('shadow', runShadowTests);
   await timed('spill', runSpillTests);
+  await timed('worker-mem', runWorkerMemTests);
 
   // ML pipeline integration tests (v2.10.0)
   await timed('ml-pipeline', runMLPipelineTests);
