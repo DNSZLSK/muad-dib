@@ -165,6 +165,124 @@ async function runRdapCompromisedDomainTests() {
   test('F1: COMPROMISE_MARGIN_MS is 30 days', () => {
     assert(COMPROMISE_MARGIN_MS === 30 * 24 * 60 * 60 * 1000);
   });
+
+  // ============================================================
+  // F1-V2 — candidate semantics (SHADOW-ONLY until adjudicated).
+  // V1 above keeps emitting every threat; V2 is computed alongside and only
+  // divergences are logged. These tests pin BOTH sides of that contract.
+  // ============================================================
+
+  const { isCompromisedDomainV2, PUBLIC_EMAIL_PROVIDERS } = require('../../src/scanner/email-domain.js');
+  const fs = require('fs');
+  const os = require('os');
+  const path = require('path');
+
+  // POSITIVE — the node-ipc shape (May 2026): domain re-registered YEARS after
+  // the package's first publish. V2 must flag it (no FN regression vs V1).
+  test('F1-V2: node-ipc shape — creation years after first publish → true', () => {
+    assert(isCompromisedDomainV2('2026-05-07T00:00:00.000Z', '2019-03-01T00:00:00.000Z', 'atlantis-software.net') === true);
+  });
+
+  // NEGATIVE — the V1 FP source: domain bought shortly BEFORE the first publish
+  // (normal dev behavior). V1 flags it (30d margin); V2 must not.
+  test('F1-V2: domain registered 14d BEFORE first publish → false (V1 margin FP killed)', () => {
+    const creation = isoOffsetDays(PACKAGE_PUBLISH, -14);
+    assert(isCompromisedDomain(creation, PACKAGE_PUBLISH) === true, 'precondition: V1 flags this (the FP)');
+    assert(isCompromisedDomainV2(creation, PACKAGE_PUBLISH, 'newdev.example') === false, 'V2 must not flag pre-publish acquisition');
+  });
+
+  // NEGATIVE — public email providers are a domain CLASS exclusion.
+  test('F1-V2: public provider → false even with creation after publish', () => {
+    const creation = isoOffsetDays(PACKAGE_PUBLISH, 365);
+    assert(PUBLIC_EMAIL_PROVIDERS.has('gmail.com'), 'gmail.com in the provider set');
+    assert(isCompromisedDomainV2(creation, PACKAGE_PUBLISH, 'gmail.com') === false, 'provider excluded');
+    assert(isCompromisedDomainV2(creation, PACKAGE_PUBLISH, 'GMAIL.COM') === false, 'case-insensitive');
+    assert(isCompromisedDomainV2(creation, PACKAGE_PUBLISH, 'evil-takeover.test') === true, 'non-provider still flagged');
+  });
+
+  // EDGE — strict comparison: creation exactly at first publish → false.
+  test('F1-V2: creation == first publish → false (strict >)', () => {
+    assert(isCompromisedDomainV2(PACKAGE_PUBLISH, PACKAGE_PUBLISH, 'edge.test') === false);
+  });
+
+  test('F1-V2: null/malformed inputs → false (no crash)', () => {
+    assert(isCompromisedDomainV2(null, PACKAGE_PUBLISH, 'x.test') === false);
+    assert(isCompromisedDomainV2(PACKAGE_PUBLISH, null, 'x.test') === false);
+    assert(isCompromisedDomainV2('not-a-date', PACKAGE_PUBLISH, 'x.test') === false);
+  });
+
+  // ── Shadow hook: divergence logged, V1 threats UNCHANGED ──
+  function withShadow(file, fn) {
+    const save = { on: process.env.MUADDIB_SHADOW, f: process.env.MUADDIB_SHADOW_FILE };
+    process.env.MUADDIB_SHADOW = '1';
+    process.env.MUADDIB_SHADOW_FILE = file;
+    return Promise.resolve()
+      .then(fn)
+      .finally(() => {
+        if (save.on !== undefined) process.env.MUADDIB_SHADOW = save.on; else delete process.env.MUADDIB_SHADOW;
+        if (save.f !== undefined) process.env.MUADDIB_SHADOW_FILE = save.f; else delete process.env.MUADDIB_SHADOW_FILE;
+      });
+  }
+
+  await asyncTest('F1-V2: V1-only case → V1 threat STILL emitted + divergence logged with package ctx', async () => {
+    const f = path.join(os.tmpdir(), `rdap-shadow-${Date.now()}-a.jsonl`);
+    try {
+      await withShadow(f, async () => {
+        _resetRdapCache();
+        // Domain created 14d before first publish: V1 true (margin), V2 false.
+        const creation = isoOffsetDays(PACKAGE_PUBLISH, -14);
+        const meta = makeMeta(['dev@fresh-domain.test'], PACKAGE_PUBLISH);
+        const r = await checkCompromisedDomain(meta, {
+          fetchRdap: async () => ({ creationDate: creation }),
+          shadowCtx: { name: 'fresh-pkg', version: '1.0.0', ecosystem: 'npm' }
+        });
+        // ZERO-REGRESSION CONTRACT: the live V1 verdict still emits the threat.
+        assert(r.length === 1 && r[0].type === 'compromised_email_domain', 'V1 threat unchanged under shadow');
+        const { readShadowDivergences } = require('../../src/shared/shadow.js');
+        const div = readShadowDivergences({ detector: 'compromised_email_domain' });
+        assert(div.length === 1, `one divergence logged, got ${div.length}`);
+        assert(div[0].package === 'fresh-pkg' && div[0].ecosystem === 'npm', 'package ctx threaded');
+        assert(div[0].oldVerdict === true && div[0].newVerdict === false, 'V1-only divergence shape');
+        assert(div[0].evidence.domain === 'fresh-domain.test' && div[0].evidence.oldMarginDays === 30, 'evidence complete');
+      });
+    } finally { try { fs.unlinkSync(f); } catch {} }
+  });
+
+  await asyncTest('F1-V2: agreement (both true) → NO divergence logged', async () => {
+    const f = path.join(os.tmpdir(), `rdap-shadow-${Date.now()}-b.jsonl`);
+    try {
+      await withShadow(f, async () => {
+        _resetRdapCache();
+        const creation = isoOffsetDays(PACKAGE_PUBLISH, 365); // both V1 and V2 flag
+        const meta = makeMeta(['x@agreed-takeover.test'], PACKAGE_PUBLISH);
+        const r = await checkCompromisedDomain(meta, {
+          fetchRdap: async () => ({ creationDate: creation }),
+          shadowCtx: { name: 'agreed-pkg', ecosystem: 'npm' }
+        });
+        assert(r.length === 1, 'V1 threat emitted');
+        assert(!fs.existsSync(f), 'agreements are not logged (divergence-only contract)');
+      });
+    } finally { try { fs.unlinkSync(f); } catch {} }
+  });
+
+  await asyncTest('F1-V2: shadow OFF → no divergence file, identical V1 behavior', async () => {
+    const f = path.join(os.tmpdir(), `rdap-shadow-${Date.now()}-c.jsonl`);
+    const save = { on: process.env.MUADDIB_SHADOW, f: process.env.MUADDIB_SHADOW_FILE };
+    delete process.env.MUADDIB_SHADOW;
+    process.env.MUADDIB_SHADOW_FILE = f;
+    try {
+      _resetRdapCache();
+      const creation = isoOffsetDays(PACKAGE_PUBLISH, -14); // the divergent case
+      const meta = makeMeta(['dev@off-domain.test'], PACKAGE_PUBLISH);
+      const r = await checkCompromisedDomain(meta, { fetchRdap: async () => ({ creationDate: creation }) });
+      assert(r.length === 1, 'V1 threat emitted exactly as before');
+      assert(!fs.existsSync(f), 'shadow off → nothing written');
+    } finally {
+      if (save.on !== undefined) process.env.MUADDIB_SHADOW = save.on;
+      if (save.f !== undefined) process.env.MUADDIB_SHADOW_FILE = save.f; else delete process.env.MUADDIB_SHADOW_FILE;
+      try { fs.unlinkSync(f); } catch {}
+    }
+  });
 }
 
 module.exports = { runRdapCompromisedDomainTests };
