@@ -13,8 +13,10 @@
  */
 
 const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const { test, assert } = require('../test-utils');
-const { reconcileDailyHeadline, captureScanStatsBaseline, saveLastDailyReportDate } = require('../../src/monitor/state.js');
+const { reconcileDailyHeadline, captureScanStatsBaseline, saveLastDailyReportDate, loadLastDailyReportTs } = require('../../src/monitor/state.js');
 
 // Stub fs.readFileSync so loadScanStats() (reads scan-stats.json) and
 // reconcileDailyHeadline() (reads last-daily-report.json) see controlled content.
@@ -169,7 +171,136 @@ async function runDailyReportResilienceTests() {
     assert(baseline.suspect === 200000, `suspect wrong, got ${baseline.suspect}`);
   });
 
-  console.log('  ✓ daily report resilience (P0a) tests passed');
+  // ============================================================
+  // W8 — Daily-report 8h→8h ledger window (headline source = scan-ledger)
+  // The report headline must cover [last report → now] regardless of restarts;
+  // the in-memory counters are only the fallback when the ledger is unavailable.
+  // ============================================================
+
+  const webhookMod = require('../../src/monitor/webhook.js');
+
+  // Minimal stats shape for buildDailyReportEmbed (all counters zero = "restarted
+  // just before report time" — the case the ledger headline exists to fix).
+  const zeroStats = () => ({
+    scanned: 0, clean: 0, suspect: 0, errors: 0, errorsByType: {}, totalTimeMs: 0,
+    suspectByTier: { t1: 0, t1a: 0, t1b: 0, t2: 0, t3: 0 },
+    mlFiltered: 0, llmAnalyzed: 0, llmSuppressed: 0,
+    sandboxDeferred: 0, deferredProcessed: 0, deferredExpired: 0,
+    uniqueScanAttempts: 0, npmPublishEventsSeen: 0, pypiChangelogPackages: 0,
+    npmCatchupSkippedSeqs: 0, pypiCatchupSkippedEvents: 0,
+    restartsToday: 0, temporalLoadShed: 0, queueHardDrops: 0
+  });
+
+  const writeLedgerFile = (f, entries) =>
+    fs.writeFileSync(f, entries.map(e => JSON.stringify(e)).join('\n') + '\n', 'utf8');
+  const agoIso = (ms) => new Date(Date.now() - ms).toISOString();
+  const H = 3600 * 1000;
+  const field = (payload, name) => payload.embeds[0].fields.find(x => x.name === name);
+  const ledgerFieldOf = (payload) => payload.embeds[0].fields.find(x => x.name.startsWith('Ledger ('));
+
+  // Run fn with the ledger env pinned to `f` (call-time seam in safeLedgerRollup).
+  function withLedgerEnv(f, fn) {
+    const save = process.env.MUADDIB_SCAN_LEDGER_FILE;
+    process.env.MUADDIB_SCAN_LEDGER_FILE = f;
+    try { return fn(); }
+    finally {
+      if (save !== undefined) process.env.MUADDIB_SCAN_LEDGER_FILE = save;
+      else delete process.env.MUADDIB_SCAN_LEDGER_FILE;
+    }
+  }
+
+  // POSITIVE: saveLastDailyReportDate stamps lastReportTs in the same write-ahead;
+  // loadLastDailyReportTs round-trips it (= the start of the next report window).
+  test('W8: lastReportTs is stamped at report time and round-trips', () => {
+    withMemFs({}, (store) => {
+      saveLastDailyReportDate('2026-06-10', { total_scanned: 1 });
+      const persisted = JSON.parse(store['last-daily-report.json']);
+      assert(typeof persisted.lastReportTs === 'string' && !Number.isNaN(Date.parse(persisted.lastReportTs)),
+        'lastReportTs must be a valid ISO timestamp in the stamp file');
+      assert(persisted.lastReportDate === '2026-06-10', 'date stamp preserved alongside lastReportTs');
+      const ts = loadLastDailyReportTs();
+      assert(ts === persisted.lastReportTs, 'loadLastDailyReportTs round-trips the stamped value');
+    });
+  });
+
+  // NEGATIVE: pre-upgrade stamp file (no lastReportTs) and missing file → null.
+  test('W8: loadLastDailyReportTs → null on pre-upgrade or missing stamp file', () => {
+    const oldFormat = withFiles({ 'last-daily-report.json': JSON.stringify({ lastReportDate: '2026-06-04' }) },
+      () => loadLastDailyReportTs());
+    assert(oldFormat === null, 'old-format file (no lastReportTs) must yield null');
+    const missing = withFiles({ 'last-daily-report.json': null }, () => loadLastDailyReportTs());
+    assert(missing === null, 'missing file must yield null');
+  });
+
+  // POSITIVE (the core W8 case): counters zeroed by a restart + populated ledger →
+  // the embed headline comes from the ledger window, not the dead counters.
+  test('W8: embed headline from ledger window when in-memory counters are zero', () => {
+    const f = path.join(os.tmpdir(), `w8-ledger-${Date.now()}-a.jsonl`);
+    try {
+      writeLedgerFile(f, [
+        { ts: agoIso(1 * H), name: 'p1', version: '1', ecosystem: 'npm', outcome: 'clean' },
+        { ts: agoIso(50 * 60 * 1000), name: 'p2', version: '1', ecosystem: 'npm', outcome: 'clean' },
+        { ts: agoIso(30 * 60 * 1000), name: 'p3', version: '1', ecosystem: 'npm', outcome: 'suspect', tier: '1b' }
+      ]);
+      const payload = withLedgerEnv(f, () =>
+        withFiles({ 'last-daily-report.json': JSON.stringify({ lastReportDate: 'x', lastReportTs: agoIso(2 * H) }) },
+          () => webhookMod.buildDailyReportEmbed(zeroStats(), [])));
+      assert(field(payload, 'Clean').value === '2', `Clean from ledger (expected "2", got "${field(payload, 'Clean').value}")`);
+      assert(field(payload, 'Suspects').value === '1', `Suspects from ledger (got "${field(payload, 'Suspects').value}")`);
+      const lf = ledgerFieldOf(payload);
+      assert(lf && lf.name === 'Ledger (since last report)', `window source labeled (got "${lf && lf.name}")`);
+      assert(payload.embeds[0].footer.text.includes('headline: ledger'), 'footer annotates the ledger headline source');
+    } finally { try { fs.unlinkSync(f); } catch {} }
+  });
+
+  // BACKWARD COMPAT: no lastReportTs stamp → fixed 24h fallback window, old label.
+  test('W8: pre-upgrade stamp → 24h fallback window excludes older entries', () => {
+    const f = path.join(os.tmpdir(), `w8-ledger-${Date.now()}-b.jsonl`);
+    try {
+      writeLedgerFile(f, [
+        { ts: agoIso(30 * H), name: 'old', version: '1', ecosystem: 'npm', outcome: 'clean' },  // outside 24h
+        { ts: agoIso(1 * H), name: 'new', version: '1', ecosystem: 'npm', outcome: 'clean' }
+      ]);
+      const payload = withLedgerEnv(f, () =>
+        withFiles({ 'last-daily-report.json': JSON.stringify({ lastReportDate: '2026-06-04' }) },
+          () => webhookMod.buildDailyReportEmbed(zeroStats(), [])));
+      assert(field(payload, 'Clean').value === '1', `24h fallback excludes the 30h-old entry (got "${field(payload, 'Clean').value}")`);
+      const lf = ledgerFieldOf(payload);
+      assert(lf && lf.name === 'Ledger (24h)', `fallback window keeps the legacy label (got "${lf && lf.name}")`);
+    } finally { try { fs.unlinkSync(f); } catch {} }
+  });
+
+  // BOUNDED: a stale stamp (multi-day outage) clamps the window to 48h and says so.
+  test('W8: stale lastReportTs (>48h) clamps the window and flags it', () => {
+    const f = path.join(os.tmpdir(), `w8-ledger-${Date.now()}-c.jsonl`);
+    try {
+      writeLedgerFile(f, [
+        { ts: agoIso(72 * H), name: 'tooOld', version: '1', ecosystem: 'npm', outcome: 'clean' },  // inside the 5d stamp, outside 48h
+        { ts: agoIso(1 * H), name: 'fresh', version: '1', ecosystem: 'npm', outcome: 'clean' }
+      ]);
+      const payload = withLedgerEnv(f, () =>
+        withFiles({ 'last-daily-report.json': JSON.stringify({ lastReportDate: 'x', lastReportTs: agoIso(5 * 24 * H) }) },
+          () => webhookMod.buildDailyReportEmbed(zeroStats(), [])));
+      assert(field(payload, 'Clean').value === '1', `clamped window excludes the 72h-old entry (got "${field(payload, 'Clean').value}")`);
+      const lf = ledgerFieldOf(payload);
+      assert(lf && lf.name === 'Ledger (since last report, clamped 48h)', `clamp is labeled (got "${lf && lf.name}")`);
+    } finally { try { fs.unlinkSync(f); } catch {} }
+  });
+
+  // FALLBACK: ledger absent → counters headline, footer says so (pre-W8 behavior intact).
+  test('W8: missing ledger → counters fallback, annotated', () => {
+    const f = path.join(os.tmpdir(), `w8-ledger-missing-${Date.now()}.jsonl`); // never created
+    const stats = Object.assign(zeroStats(), { scanned: 7, clean: 5, suspect: 2 });
+    const payload = withLedgerEnv(f, () =>
+      withFiles({ 'last-daily-report.json': JSON.stringify({ lastReportDate: 'x', lastReportTs: agoIso(2 * H) }) },
+        () => webhookMod.buildDailyReportEmbed(stats, [])));
+    assert(field(payload, 'Clean').value === '5', `counters fallback for Clean (got "${field(payload, 'Clean').value}")`);
+    assert(field(payload, 'Suspects').value === '2', `counters fallback for Suspects (got "${field(payload, 'Suspects').value}")`);
+    assert(ledgerFieldOf(payload) === undefined, 'no Ledger section without ledger data');
+    assert(payload.embeds[0].footer.text.includes('headline: counters'), 'footer annotates the counters fallback');
+  });
+
+  console.log('  ✓ daily report resilience (P0a + W8) tests passed');
 }
 
 module.exports = { runDailyReportResilienceTests };

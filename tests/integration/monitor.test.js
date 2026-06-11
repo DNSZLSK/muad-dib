@@ -4710,14 +4710,24 @@ async function runMonitorTests() {
   // such test so they are time-of-day independent. The fake stays active through the
   // assertions so the lastDailyReportDate stamp and getParisDateString() agree.
   const _REPORT_REAL_DATE = Date;
+  let _reportLedgerEnvSave;
   function _fakeReportClock() {
     const iso = '2026-06-09T10:00:00Z'; // 12:00 Paris — safely past the 08:00 dead zone
     global.Date = class extends _REPORT_REAL_DATE {
       constructor(...a) { if (a.length) super(...a); else super(iso); }
       static now() { return new _REPORT_REAL_DATE(iso).getTime(); }
     };
+    // Pin the ledger source to a nonexistent file. These tests assert the legacy
+    // counter-based headline semantics; a live data/scan-ledger.jsonl would otherwise
+    // feed the ledger headline (window-exact source) and make them data-dependent.
+    _reportLedgerEnvSave = process.env.MUADDIB_SCAN_LEDGER_FILE;
+    process.env.MUADDIB_SCAN_LEDGER_FILE = path.join(os.tmpdir(), `muaddib-test-empty-ledger-${process.pid}.jsonl`);
   }
-  function _unfakeReportClock() { global.Date = _REPORT_REAL_DATE; }
+  function _unfakeReportClock() {
+    global.Date = _REPORT_REAL_DATE;
+    if (_reportLedgerEnvSave !== undefined) process.env.MUADDIB_SCAN_LEDGER_FILE = _reportLedgerEnvSave;
+    else delete process.env.MUADDIB_SCAN_LEDGER_FILE;
+  }
 
   await asyncTest('MONITOR-COV: sendDailyReport resets counters when webhook set', async () => {
     const origEnv = process.env.MUADDIB_WEBHOOK_URL;
@@ -10309,6 +10319,69 @@ async function runMonitorTests() {
       } finally {
         stats.scanned = orig.scanned; stats.errors = orig.errors; stats.totalTimeMs = orig.time;
         dailyAlerts.length = 0;
+      }
+    });
+
+    // --- W8: sendDailyReport fires from the ledger headline when counters are zero ---
+    // The restart-just-before-08:00 case: in-memory counters at 0 but the scan-ledger
+    // holds the night's work. Pre-W8 behavior skipped the report ("0 packages scanned");
+    // the ledger headline must now fire it with the window-exact numbers, and the
+    // counter-based reconcile path must not touch the published figure.
+    await asyncTest('W8: sendDailyReport publishes from ledger headline when counters are 0', async () => {
+      const origEnv = process.env.MUADDIB_WEBHOOK_URL;
+      const origLog = console.log;
+      const origErr = console.error;
+      const logs = [];
+      console.log = (...args) => logs.push(args.join(' '));
+      console.error = () => {};
+      delete process.env.MUADDIB_WEBHOOK_URL; // persist-locally path; no network
+
+      const origScanned = stats.scanned, origClean = stats.clean, origSuspect = stats.suspect;
+      const origLastDate = stats.lastDailyReportDate;
+      stats.scanned = 0; stats.clean = 0; stats.suspect = 0;
+
+      let backupStamp = null;
+      try { backupStamp = fs.readFileSync(LAST_DAILY_REPORT_FILE, 'utf8'); } catch {}
+      let backupDaily = null;
+      try { backupDaily = fs.readFileSync(DAILY_STATS_FILE, 'utf8'); } catch {}
+
+      const ledgerFile = path.join(os.tmpdir(), `w8-fire-ledger-${process.pid}.jsonl`);
+      try {
+        _fakeReportClock(); // pins clock to 2026-06-09T10:00Z AND the ledger env to an empty path...
+        // ...then point the ledger at a synthetic file inside the fake clock's 24h window.
+        process.env.MUADDIB_SCAN_LEDGER_FILE = ledgerFile;
+        // Control the window start: earlier tests in this run may have stamped
+        // lastReportTs at the fake now (10:00), which would make [10:00 → 10:00] empty.
+        fs.writeFileSync(LAST_DAILY_REPORT_FILE, JSON.stringify({
+          lastReportDate: '2026-06-08', lastReportTs: '2026-06-09T07:00:00.000Z'
+        }));
+        fs.writeFileSync(ledgerFile, [
+          { ts: '2026-06-09T08:30:00.000Z', name: 'w8a', version: '1', ecosystem: 'npm', outcome: 'clean' },
+          { ts: '2026-06-09T09:00:00.000Z', name: 'w8b', version: '1', ecosystem: 'npm', outcome: 'clean' },
+          { ts: '2026-06-09T09:30:00.000Z', name: 'w8c', version: '1', ecosystem: 'npm', outcome: 'suspect', tier: '1b' }
+        ].map(e => JSON.stringify(e)).join('\n') + '\n', 'utf8');
+
+        await sendDailyReport();
+
+        const skipLog = logs.find(l => l.includes('skipped (0 packages scanned)'));
+        assert(skipLog === undefined, 'must NOT skip: the ledger window has scans');
+        const fireLog = logs.find(l => l.includes('Daily report firing'));
+        assert(fireLog !== undefined, 'report must fire from the ledger headline');
+        assert(fireLog.includes('scanned=3') && fireLog.includes('headline=ledger'),
+          `published count must be the ledger window's 3 with ledger source, got "${fireLog}"`);
+        const savedDate = loadLastDailyReportDate();
+        assert(savedDate === getParisDateString(), 'write-ahead stamp recorded for the fake today');
+      } finally {
+        _unfakeReportClock();
+        try { fs.unlinkSync(ledgerFile); } catch {}
+        if (backupStamp !== null) fs.writeFileSync(LAST_DAILY_REPORT_FILE, backupStamp);
+        else { try { fs.unlinkSync(LAST_DAILY_REPORT_FILE); } catch {} }
+        if (backupDaily !== null) fs.writeFileSync(DAILY_STATS_FILE, backupDaily);
+        console.log = origLog;
+        console.error = origErr;
+        stats.scanned = origScanned; stats.clean = origClean; stats.suspect = origSuspect;
+        stats.lastDailyReportDate = origLastDate;
+        if (origEnv !== undefined) process.env.MUADDIB_WEBHOOK_URL = origEnv;
       }
     });
   }
