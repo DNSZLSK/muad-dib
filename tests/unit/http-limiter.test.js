@@ -17,8 +17,11 @@ const { asyncTest, assert } = require('../test-utils');
 const LIMITER_PATH = require.resolve('../../src/shared/http-limiter.js');
 
 function freshLimiter(env) {
+  // Bucket-contract tests assume a full bucket at load: disable the boot
+  // slow start (phase A) unless a test opts into it explicitly.
+  const effective = { MUADDIB_REGISTRY_BOOT_SLOWSTART_MS: 0, ...env };
   const saved = {};
-  for (const [k, v] of Object.entries(env)) {
+  for (const [k, v] of Object.entries(effective)) {
     saved[k] = process.env[k];
     process.env[k] = String(v);
   }
@@ -242,7 +245,8 @@ async function runHttpLimiterTests() {
     for (const [k, v] of Object.entries({
       MUADDIB_REGISTRY_RATE: '100',
       MUADDIB_REGISTRY_BACKOFF_BASE_MS: '3000',
-      MUADDIB_REGISTRY_BACKOFF_MAX_MS: '60000'
+      MUADDIB_REGISTRY_BACKOFF_MAX_MS: '60000',
+      MUADDIB_REGISTRY_BOOT_SLOWSTART_MS: '0'
     })) { savedEnv[k] = process.env[k]; process.env[k] = v; }
     const REGISTRY_PATH = require.resolve('../../src/scanner/npm-registry.js');
     const originalFetch = globalThis.fetch;

@@ -14,7 +14,7 @@ const { runSandbox, tryAcquireSandboxSlot } = require('../sandbox/index.js');
 const { sendWebhook } = require('../webhook.js');
 const { downloadToFile, extractArchive, sanitizePackageName } = require('../shared/download.js');
 const { MAX_TARBALL_SIZE, getMaxFileSize } = require('../shared/constants.js');
-const { acquireRegistrySlot, releaseRegistrySlot } = require('../shared/http-limiter.js');
+const { acquireRegistrySlot, releaseRegistrySlot, awaitRateToken: awaitRateTokenForWorker, signal429: signal429ForWorker } = require('../shared/http-limiter.js');
 const { loadCachedIOCs } = require('../ioc/updater.js');
 const { scanPackageJson } = require('../scanner/package.js');
 const { scanShellScripts } = require('../scanner/shell.js');
@@ -116,6 +116,23 @@ const _workerMessageHandlers = new Map();
 function registerWorkerMessageHandler(type, fn) {
   _workerMessageHandlers.set(type, fn);
 }
+
+// ─── Network-brain glue (governors phase A) ───
+// Workers proxy token acquisition and 429 signals to the main thread so the
+// whole process shares ONE budget + ONE backoff state per host. Stateless per
+// worker by design: a grant racing a worker's death is a caught postMessage
+// (one token lost, self-healing) — nothing to purge on 'exit'.
+registerWorkerMessageHandler('rate-token-request', (worker, msg) => {
+  awaitRateTokenForWorker(msg.host, { maxWaitMs: msg.maxWaitMs })
+    .then(({ granted }) => {
+      try {
+        worker.postMessage({ type: granted ? 'rate-token-grant' : 'rate-token-denied', id: msg.id });
+      } catch { /* worker already terminated — token self-heals at next refill */ }
+    });
+});
+registerWorkerMessageHandler('rate-429', (worker, msg) => {
+  signal429ForWorker(msg.host);
+});
 
 function getTargetConcurrency() { return _targetConcurrency; }
 function setTargetConcurrency(n) { _targetConcurrency = Math.max(MIN_CONCURRENCY, Math.min(MAX_CONCURRENCY, n)); }
@@ -524,7 +541,10 @@ function shouldSkipSandbox(ctx) {
 function runScanInWorker(extractedDir, timeoutMs, scanContext = null, signal = null) {
   return new Promise((resolve, reject) => {
     const workerOpts = {
-      workerData: { extractedDir, scanContext: scanContext || {} }
+      // rateBrain: opts the worker's http-limiter into proxy mode (tokens and
+      // 429s flow through the main-thread brain). ONLY scan workers get this —
+      // any other Worker keeps a local bucket and can never hang on a missing brain.
+      workerData: { extractedDir, scanContext: scanContext || {}, rateBrain: true }
     };
     // Per-worker V8 memory limits (OOM durable fix): the 2026-06 RSS spikes
     // (8.2-8.8GB with heap ~550MB) are off-heap allocations inside scan workers —
