@@ -21,6 +21,7 @@ const { scanShellScripts } = require('../scanner/shell.js');
 const { buildTrainingRecord } = require('../ml/feature-extractor.js');
 const { appendWorkerMem } = require('./worker-mem.js');
 const { acquireHeavySlot, releaseHeavySlot, isHeavyScan, getHeavyLaneState, heavyWaitMaxMs, HEAVY_REQUEUE_MAX } = require('./heavy-lane.js');
+const { isGovernorEnabled, classifyWeight, acquireMemoryTicket, releaseMemoryTicket, isFrozen: isGovernorFrozen, getGovernorState } = require('./memory-governor.js');
 const { appendRecord: appendTrainingRecord, relabelRecords } = require('../ml/jsonl-writer.js');
 
 // From ./state.js
@@ -838,7 +839,27 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
     // worker's lifetime (≤ STATIC_SCAN_TIMEOUT_MS), not the sandbox (which
     // has its own semaphore and runs outside the daemon's heap).
     let heavySlotHeld = false;
-    if (lane === 'heavy') {
+    let memTicket = null;
+    if (isGovernorEnabled()) {
+      // Phase B: the memory governor REPLACES the heavy lane at admission —
+      // a heavy is simply a big ticket (2 heavies ≈ the whole heavy budget,
+      // which reproduces HEAVY_SCAN_MAX=2 by arithmetic instead of by a
+      // dedicated semaphore) and the aggregate of mediums is bounded too
+      // (the 09:43 ATO-burst shape: 12 sub-threshold scans = 8GB off-heap).
+      const t = classifyWeight(jsWeight);
+      if (t.cls === 'heavy') stats.heavyScans = (stats.heavyScans || 0) + 1;
+      const gov = getGovernorState();
+      if (t.cls !== 'light' && (gov.frozen || gov.waiting > 0)) {
+        stats.ticketWaits = (stats.ticketWaits || 0) + 1;
+        console.log(`[MONITOR] MEM_GOVERNOR: ${name}@${version} waiting for a ${t.cls} ticket (${t.mb}MB; outstanding=${gov.outstandingMb}MB/${gov.budgetMb}MB, frozen=${gov.frozen})`);
+      }
+      // Same requeue contract as the heavy lane: bounded waits, final pass
+      // unbounded (abort-aware only) so an item cannot loop forever.
+      const lastPass = (meta._heavyRetries || 0) >= HEAVY_REQUEUE_MAX;
+      const waitStart = Date.now();
+      memTicket = await acquireMemoryTicket(t.cls, { signal, maxWaitMs: lastPass ? 0 : heavyWaitMaxMs() });
+      stats.ticketWaitMsTotal = (stats.ticketWaitMsTotal || 0) + (Date.now() - waitStart);
+    } else if (lane === 'heavy') {
       stats.heavyScans = (stats.heavyScans || 0) + 1;
       const laneState = getHeavyLaneState();
       if (laneState.max > 0 && laneState.active >= laneState.max) {
@@ -905,6 +926,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
     } finally {
       // Single release point — success, static timeout, EMERGENCY terminate
       // and abort all funnel through here exactly once (heavySlotHeld guard).
+      if (memTicket) { releaseMemoryTicket(memTicket); memTicket = null; }
       if (heavySlotHeld) { releaseHeavySlot(); heavySlotHeld = false; }
     }
 
@@ -1490,7 +1512,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
     // requeues the item (bounded by HEAVY_REQUEUE_MAX). Re-throw BEFORE any
     // error accounting: this catch otherwise swallows everything into the
     // 'scan_error' ledger path and the requeue would never happen.
-    if (err && err.code === 'HEAVY_LANE_WAIT_TIMEOUT') throw err;
+    if (err && (err.code === 'HEAVY_LANE_WAIT_TIMEOUT' || err.code === 'TICKET_WAIT_TIMEOUT')) throw err;
     recordError(err, stats);
     stats.scanned++;
     stats.totalTimeMs += Date.now() - startTime;
@@ -1609,7 +1631,7 @@ async function processQueueItem(item, stats, dailyAlerts, recentlyScanned, downl
     // passes; scanPackage runs the final pass without the wait bound. Note:
     // _heavyRetries does not survive a spill (spillItems strips non-re-enqueue
     // fields) — acceptable, the spill drain runs in calm windows anyway.
-    if (err && err.code === 'HEAVY_LANE_WAIT_TIMEOUT') {
+    if (err && (err.code === 'HEAVY_LANE_WAIT_TIMEOUT' || err.code === 'TICKET_WAIT_TIMEOUT')) {
       const decision = computeHeavyRequeue(item);
       if (decision.requeue) {
         stats.heavyLaneRequeues = (stats.heavyLaneRequeues || 0) + 1;
@@ -1673,6 +1695,12 @@ async function _spawnWorker(scanQueue, stats, dailyAlerts, recentlyScanned, down
   _activeWorkers++;
   try {
     while (scanQueue.length > 0 && _activeWorkers <= _targetConcurrency) {
+      // Phase B (F-B4): during a governor freeze, do NOT dequeue — a dequeued
+      // item gets downloaded+extracted before the ticket gate, so pumping
+      // while frozen burns network/disk/tmpdirs on scans that cannot be
+      // admitted. One pump lane stays open so the governor's liveness
+      // admission (1 scan when nothing is in flight) can still flow.
+      if (isGovernorFrozen() && (getGovernorState().outstandingCount > 0 || _activeWorkers > 1)) break;
       // AUDIT A2: FIFO by default; priority dequeue when MUADDIB_PRIORITY_DEQUEUE=1.
       const item = dequeueScan(scanQueue);
       if (!item) break;

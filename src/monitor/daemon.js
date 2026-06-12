@@ -1122,6 +1122,11 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
     // every 5min is too slow (250 packages ingested between checks).
     const { level: pressureLevel, mem: currentMem, ratio: heapRatio, rssRatio } = computeMemoryPressure();
 
+    // Phase B (memory governor): feed the admission gate the REAL process RSS
+    // from this same 2s breaker loop — the governor's freeze keys on it (the
+    // worker-mem disk samples are 10s-cadence and starve during sync parses).
+    try { require('./memory-governor.js').updateGovernorRss(currentMem.rss); } catch { /* governor optional */ }
+
     // Top up workers ONLY when memory pressure is below HIGH.
     // At HIGH+, existing workers continue (they'll finish or timeout) but no new
     // ones are spawned. This is the core mechanism: let running scans release their
