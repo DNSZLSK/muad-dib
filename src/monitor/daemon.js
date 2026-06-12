@@ -10,7 +10,7 @@ const { loadState, saveState, loadDailyStats, saveDailyStats, purgeTarballCache,
 const { isTemporalEnabled, isTemporalAstEnabled, isTemporalPublishEnabled, isTemporalMaintainerEnabled } = require('./temporal.js');
 const { pendingGrouped, flushScopeGroup, sendDailyReport, redeliverPendingReportOnBoot, alertedPackageRules, ALERTED_PACKAGES_MAX: MAX_ALERTED_PACKAGES } = require('./webhook.js');
 const { poll, getPollBackoffMs } = require('./ingestion.js');
-const { ensureWorkers, drainWorkers, getTargetConcurrency, setTargetConcurrency, getActiveWorkers, terminateAllWorkers } = require('./queue.js');
+const { ensureWorkers, drainWorkers, getTargetConcurrency, setTargetConcurrency, getActiveWorkers, terminateAllWorkers, getInFlightItems, computeInterruptDisposition } = require('./queue.js');
 const { computeTarget, ADJUST_INTERVAL_MS, BASE_CONCURRENCY } = require('./adaptive-concurrency.js');
 const { startHealthcheck } = require('./healthcheck.js');
 const { startDeferredWorker, stopDeferredWorker, persistDeferredQueue, restoreDeferredQueue, clearDeferredQueue } = require('./deferred-sandbox.js');
@@ -34,6 +34,14 @@ const PROCESS_LOOP_INTERVAL = 2_000;    // Queue check interval when empty
 // 12 calm hours/day do the catch-up of burst-time evictions. Rate-limited to one
 // batch per interval (the main loop ticks every 2s — unthrottled it would re-spike
 // the queue in seconds). All env-tunable for the staged rollout.
+// C7: how long the shutdown waits for in-flight scans before spilling them.
+// Must stay well under systemd TimeoutStopSec (default 90s) so the ledger,
+// spill and queue persist ALWAYS run before any SIGKILL.
+const SHUTDOWN_DRAIN_MAX_MS = (() => {
+  const v = parseInt(process.env.MUADDIB_SHUTDOWN_DRAIN_MAX_MS, 10);
+  return Number.isFinite(v) && v > 0 ? v : 20_000;
+})();
+
 const SPILL_DRAIN_THRESHOLD = (() => {
   const v = parseInt(process.env.MUADDIB_SPILL_DRAIN_THRESHOLD, 10);
   return Number.isFinite(v) && v > 0 ? v : 500;
@@ -972,9 +980,39 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
       clearInterval(concurrencyAdjustHandle);
       concurrencyAdjustHandle = null;
     }
-    // Wait for in-flight scans to complete (soft drain)
-    console.log(`[MONITOR] Draining ${getActiveWorkers()} active worker(s)...`);
-    await drainWorkers();
+    // Bounded drain (phase C, C7). The old unbounded `await drainWorkers()`
+    // could outlive systemd's TimeoutStopSec (scans run up to 300s): SIGKILL
+    // then landed MID-drain, persistQueue never ran, and every in-flight scan
+    // plus up to 60s of queue mutations were lost UNLEDGERED on each manual
+    // restart — the exact deployment mode of this program. Drain for up to
+    // SHUTDOWN_DRAIN_MAX_MS, then spill the survivors (protected, bounded
+    // retries) so the next boot re-scans them.
+    console.log(`[MONITOR] Draining ${getActiveWorkers()} active worker(s) (bounded ${SHUTDOWN_DRAIN_MAX_MS / 1000}s)...`);
+    await Promise.race([
+      drainWorkers(),
+      new Promise(resolve => setTimeout(resolve, SHUTDOWN_DRAIN_MAX_MS).unref())
+    ]);
+    try {
+      const leftovers = getInFlightItems();
+      if (leftovers.length > 0) {
+        const { isSpillEnabled: spillOn, spillItems } = require('./spill.js');
+        const { appendScanLedger } = require('./state.js');
+        let spilledN = 0;
+        for (const it of leftovers) {
+          const { retries, giveUp } = computeInterruptDisposition(it);
+          recentlyScanned.delete(`${it.ecosystem}/${it.name}@${it.version}`);
+          if (giveUp) {
+            appendScanLedger({ name: it.name, version: it.version, ecosystem: it.ecosystem, outcome: 'dropped', source: 'interrupted_max' });
+            continue;
+          }
+          appendScanLedger({ name: it.name, version: it.version, ecosystem: it.ecosystem, outcome: 'interrupted', source: 'shutdown_drain' });
+          if (spillOn() && spillItems([{ ...it, interrupted: true, interruptRetries: retries }]) === 1) spilledN++;
+        }
+        console.log(`[MONITOR] Shutdown: ${leftovers.length} in-flight scan(s) did not finish in time — ${spilledN} spilled for re-scan, all ledgered`);
+      }
+    } catch (e) {
+      console.error(`[MONITOR] Shutdown in-flight spill failed: ${e.message}`);
+    }
     // Persist remaining queue items so they survive the restart
     persistQueue(scanQueue, state);
     saveRecentlyScanned(recentlyScanned); // Persist dedup set too (avoid re-scan storm on restart)

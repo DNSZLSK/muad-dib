@@ -84,7 +84,7 @@ function classifyCoverage(denomRows, ledgerEntries, archivedNames) {
     let cls;
     if (archived.has(r.name) || outArr.some(o => ALERT_OUTCOMES.has(o))) cls = 'alerted';
     else if (outArr.some(o => CLEAN_OUTCOMES.has(o))) cls = 'scannedClean';
-    else if (outcomes && outcomes.has('dropped')) cls = 'dropped';
+    else if (outcomes && (outcomes.has('dropped') || outcomes.has('interrupted'))) cls = 'dropped';
     else cls = 'neverSeen';
 
     if (cls === 'alerted') { alerted++; node.alerted++; }

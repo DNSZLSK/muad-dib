@@ -12,7 +12,11 @@ const mode = (workerData && workerData.scanContext && workerData.scanContext._st
 const RESULT = { threats: [], summary: { total: 0, riskScore: 0 } };
 
 if (mode === 'side-then-result') {
-  parentPort.postMessage({ type: 'rate-token-request', id: 1, host: 'registry.npmjs.org' });
+  // 'test-side-channel' (NOT a production type): registering a test handler
+  // for a production type would CLOBBER the real one — the handler table is
+  // one-per-type, and doing so silently killed all token grants for the rest
+  // of the process (bit the network-brain suite when ordered after this one).
+  parentPort.postMessage({ type: 'test-side-channel', id: 1, host: 'registry.npmjs.org' });
   parentPort.postMessage({ type: 'totally-unknown-type', blob: 'x' });
   setTimeout(() => parentPort.postMessage({ type: 'result', data: RESULT }), 50);
 } else if (mode === 'side-only') {

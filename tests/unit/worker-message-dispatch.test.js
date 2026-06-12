@@ -35,7 +35,9 @@ async function runWorkerMessageDispatchTests() {
   await asyncTest('A0: side-channel messages reach their registered handler and the scan still resolves', async () => {
     await withStub(async () => {
       const seen = [];
-      queue.registerWorkerMessageHandler('rate-token-request', (worker, msg) => {
+      // Own test type: registering over a PRODUCTION type (rate-token-request)
+      // would replace the network-brain grant handler for the whole process.
+      queue.registerWorkerMessageHandler('test-side-channel', (worker, msg) => {
         seen.push(msg);
       });
       const result = await queue.runScanInWorker('/tmp/does-not-matter', 5000,
