@@ -40,10 +40,14 @@ const HEAP_WATERMARK_CHECK_MS = 1000;
 
 (async () => {
   // Off-heap attribution samples (worker-mem.jsonl): heapUsed/external/
-  // arrayBuffers are isolate-local here, rss is process-wide. The samples MUST
-  // NOT go through parentPort — the parent settles the scan promise on the
-  // first message it receives (queue.js done()), so a sample message would
-  // hang the scan forever. unref() so the timer never keeps the worker alive.
+  // arrayBuffers are isolate-local here, rss is process-wide. The samples go
+  // to DISK, not through parentPort — historically because the parent settled
+  // the scan promise on the first message of ANY type; the parent now
+  // dispatches by msg.type (queue.js _workerMessageHandlers) and ignores
+  // unknown types, but the samples stay on disk by design: they are offline
+  // attribution data, and this sampler starves during long synchronous parses
+  // anyway (exactly the moments that matter live) — the admission freeze keys
+  // on process RSS instead. unref() so the timer never keeps the worker alive.
   const scanContext = workerData.scanContext || {};
   const everyMs = sampleIntervalMs();
   let sampler = null;
