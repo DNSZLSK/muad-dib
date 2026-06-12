@@ -174,6 +174,7 @@ const { runTemporalRunnerTests } = require('./temporal/temporal-runner.test');
 const { runHttpLimiterTests } = require('./unit/http-limiter.test');
 const { runWorkerMessageDispatchTests } = require('./unit/worker-message-dispatch.test');
 const { runNetworkBrainTests } = require('./unit/network-brain.test');
+const { runMemoryGovernorTests } = require('./unit/memory-governor.test');
 
 // NOTE: ground-truth.test.js and evaluate.test.js are EXCLUDED from npm test
 // because they scan 51+ real samples (takes 20+ minutes).
@@ -407,6 +408,7 @@ async function timed(name, fn) {
   await timed('http-limiter', runHttpLimiterTests);
   await timed('worker-message-dispatch', runWorkerMessageDispatchTests);
   await timed('network-brain', runNetworkBrainTests);
+  await timed('memory-governor', runMemoryGovernorTests);
 
   // Meta tests (test-suite quality guards — runs last, fast, no fixtures)
   await timed('meta-no-source-grep', runNoSourceGrepTests);
