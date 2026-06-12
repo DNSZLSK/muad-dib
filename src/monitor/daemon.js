@@ -674,6 +674,11 @@ function reportStats(stats) {
   if (stats.changesStreamPackages) {
     console.log(`[MONITOR]   Changes stream packages: ${stats.changesStreamPackages}`);
   }
+  // Phase D: active degradations in the hourly Stability block.
+  try {
+    const active = require('./degradation.js').getActiveDegradations();
+    if (active.length > 0) console.warn(`[MONITOR]   Degradations: ${active.join(', ')}`);
+  } catch { /* observability only */ }
   // Network-brain state (governors phase A): one line per host that has seen
   // any backoff — the observation signal for the A deployment gate (AIMD
   // de-escalations visible, no sustained max-level) and phase D's input.
@@ -1093,6 +1098,7 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
   // This ensures new packages are ingested even while a large batch is being scanned.
   // Backpressure: poll() skips when queue >= 30K or memory pressure >= CRITICAL (90%).
   // Adaptive concurrency adjusts scan throughput to match ingestion rate.
+  let _lastTemporalShedCount = 0; // phase D: temporal-shed delta tracking
   let pollInProgress = false;
   let pollStartedAt = 0;
   let backoffUntil = 0;
@@ -1164,6 +1170,29 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
     // from this same 2s breaker loop — the governor's freeze keys on it (the
     // worker-mem disk samples are 10s-cadence and starve during sync parses).
     try { require('./memory-governor.js').updateGovernorRss(currentMem.rss); } catch { /* governor optional */ }
+
+    // Phase D (degradation registry): evaluate the raw degradation signals.
+    // Cheap (two statSync + counters); alarms only fire on sustained
+    // transitions inside tickDegradation. Fire-and-forget — the registry must
+    // never block the breaker loop.
+    try {
+      const { getLeanStatus } = require('../ioc/updater.js');
+      const { getBrainState } = require('../shared/http-limiter.js');
+      const { isFrozen: govFrozen, isGovernorEnabled: govEnabled } = require('./memory-governor.js');
+      const lean = getLeanStatus();
+      const brain = getBrainState();
+      const shedNow = stats.temporalLoadShed || 0;
+      const shedActive = shedNow > _lastTemporalShedCount;
+      _lastTemporalShedCount = shedNow;
+      const signals = {
+        'ioc:full-fallback': lean.missing || lean.stale,
+        'ioc:lean-parse-failed': lean.parseFailed,
+        'registry:max-backoff': Object.values(brain).some(b => b.atMaxBackoff),
+        'temporal:shed': shedActive,
+        'workers:memory-floored': govEnabled() && govFrozen()
+      };
+      require('./degradation.js').tickDegradation(signals).catch(() => { /* best-effort */ });
+    } catch { /* observability only */ }
 
     // Top up workers ONLY when memory pressure is below HIGH.
     // At HIGH+, existing workers continue (they'll finish or timeout) but no new
