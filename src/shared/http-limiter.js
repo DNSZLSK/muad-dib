@@ -140,6 +140,18 @@ function _acquireRateToken() {
   });
 }
 
+/**
+ * Wait for a rate token WITHOUT touching the concurrency semaphore. For retry
+ * loops that already hold a slot (acquireRegistrySlot pays the token for the
+ * FIRST attempt only): each subsequent network attempt must pay its own token,
+ * otherwise retries bypass the bucket and keep hammering a 429ing server
+ * (observed 2026-06-12: ~50 req/min reaching npm during a full backoff pause,
+ * prolonging the IP penalty).
+ */
+function awaitRateToken() {
+  return _acquireRateToken();
+}
+
 // --- 429 backoff helper ---
 // Call this when a 429 response is received. Suspends ALL token grants for an
 // escalating pause so every in-flight caller backs off together.
@@ -217,6 +229,7 @@ module.exports = {
   RATE_LIMIT_PER_SEC,
   acquireRegistrySlot,
   releaseRegistrySlot,
+  awaitRateToken,
   signal429,
   getBackoffCount,
   getRateLimiterState,
