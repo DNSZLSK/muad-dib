@@ -30,20 +30,28 @@ const { appendWorkerMem, sampleIntervalMs } = require('../monitor/worker-mem.js'
 // catches PROGRESSIVE (multi-file, async-between-files) growth; a single
 // synchronous 30MB parse never yields and is caught only by the V8 hard cap
 // (MUADDIB_WORKER_MAX_OLD_MB resourceLimits). The two are complementary.
-// Default 2200MB: above the ~1.3GB legitimate scans that finish CLEAN, below
-// the 3072MB resourceLimits cap. 0 disables.
-const HEAP_WATERMARK_MB = (() => {
-  const v = parseInt(process.env.MUADDIB_WORKER_HEAP_WATERMARK_MB, 10);
-  return Number.isFinite(v) && v >= 0 ? v : 2200;
-})();
+// Phase B (governors): the metric is COMBINED — heapUsed + external +
+// arrayBuffers (watermark.js). heapUsed alone was blind to extraction
+// Buffers/external strings: the 2026-06-12 RSS emergencies ran at heap 4% /
+// RSS 96% and this watchdog stayed silent. Default 2600MB (above the old
+// heap-only 2200: legitimate ~1.3GB-heap scans also carry external buffers —
+// a too-tight combined threshold converts them into watermark-inconclusive).
+// Legacy MUADDIB_WORKER_HEAP_WATERMARK_MB is honored as a VALUE if the new
+// env is unset, but always applied to the combined metric. 0 disables.
+const { watermarkLimitMb, watermarkBreached, combinedWorkerMemBytes } = require('./watermark.js');
+const HEAP_WATERMARK_MB = watermarkLimitMb();
 const HEAP_WATERMARK_CHECK_MS = 1000;
 
 (async () => {
   // Off-heap attribution samples (worker-mem.jsonl): heapUsed/external/
-  // arrayBuffers are isolate-local here, rss is process-wide. The samples MUST
-  // NOT go through parentPort — the parent settles the scan promise on the
-  // first message it receives (queue.js done()), so a sample message would
-  // hang the scan forever. unref() so the timer never keeps the worker alive.
+  // arrayBuffers are isolate-local here, rss is process-wide. The samples go
+  // to DISK, not through parentPort — historically because the parent settled
+  // the scan promise on the first message of ANY type; the parent now
+  // dispatches by msg.type (queue.js _workerMessageHandlers) and ignores
+  // unknown types, but the samples stay on disk by design: they are offline
+  // attribution data, and this sampler starves during long synchronous parses
+  // anyway (exactly the moments that matter live) — the admission freeze keys
+  // on process RSS instead. unref() so the timer never keeps the worker alive.
   const scanContext = workerData.scanContext || {};
   const everyMs = sampleIntervalMs();
   let sampler = null;
@@ -72,15 +80,18 @@ const HEAP_WATERMARK_CHECK_MS = 1000;
   // scan is in flight this watchdog must stay live to fire.
   let watchdog = null;
   if (HEAP_WATERMARK_MB > 0) {
-    const limitBytes = HEAP_WATERMARK_MB * 1024 * 1024;
     watchdog = setInterval(() => {
-      if (process.memoryUsage().heapUsed > limitBytes) {
+      const m = process.memoryUsage();
+      if (watermarkBreached(m, HEAP_WATERMARK_MB)) {
         clearInterval(watchdog); watchdog = null;
         if (sampler) clearInterval(sampler);
         try {
+          const usedMb = Math.round(combinedWorkerMemBytes(m) / 1024 / 1024);
           parentPort.postMessage({
             type: 'error',
-            message: `WORKER_HEAP_WATERMARK: isolate heap exceeded ${HEAP_WATERMARK_MB}MB (${scanContext.name}@${scanContext.version})`
+            // Keep the WORKER_HEAP_WATERMARK tag: the parent's worker_oom
+            // mapping (queue.js) matches on it.
+            message: `WORKER_HEAP_WATERMARK: isolate memory (heap+external+arrayBuffers=${usedMb}MB) exceeded ${HEAP_WATERMARK_MB}MB (${scanContext.name}@${scanContext.version})`
           });
         } catch { /* parent gone */ }
         // Exit NON-ZERO so the parent settles even if the message above is lost

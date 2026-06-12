@@ -10,7 +10,7 @@ const { loadState, saveState, loadDailyStats, saveDailyStats, purgeTarballCache,
 const { isTemporalEnabled, isTemporalAstEnabled, isTemporalPublishEnabled, isTemporalMaintainerEnabled } = require('./temporal.js');
 const { pendingGrouped, flushScopeGroup, sendDailyReport, redeliverPendingReportOnBoot, alertedPackageRules, ALERTED_PACKAGES_MAX: MAX_ALERTED_PACKAGES } = require('./webhook.js');
 const { poll, getPollBackoffMs } = require('./ingestion.js');
-const { ensureWorkers, drainWorkers, getTargetConcurrency, setTargetConcurrency, getActiveWorkers, terminateAllWorkers } = require('./queue.js');
+const { ensureWorkers, drainWorkers, getTargetConcurrency, setTargetConcurrency, getActiveWorkers, terminateAllWorkers, getInFlightItems, computeInterruptDisposition } = require('./queue.js');
 const { computeTarget, ADJUST_INTERVAL_MS, BASE_CONCURRENCY } = require('./adaptive-concurrency.js');
 const { startHealthcheck } = require('./healthcheck.js');
 const { startDeferredWorker, stopDeferredWorker, persistDeferredQueue, restoreDeferredQueue, clearDeferredQueue } = require('./deferred-sandbox.js');
@@ -34,6 +34,14 @@ const PROCESS_LOOP_INTERVAL = 2_000;    // Queue check interval when empty
 // 12 calm hours/day do the catch-up of burst-time evictions. Rate-limited to one
 // batch per interval (the main loop ticks every 2s — unthrottled it would re-spike
 // the queue in seconds). All env-tunable for the staged rollout.
+// C7: how long the shutdown waits for in-flight scans before spilling them.
+// Must stay well under systemd TimeoutStopSec (default 90s) so the ledger,
+// spill and queue persist ALWAYS run before any SIGKILL.
+const SHUTDOWN_DRAIN_MAX_MS = (() => {
+  const v = parseInt(process.env.MUADDIB_SHUTDOWN_DRAIN_MAX_MS, 10);
+  return Number.isFinite(v) && v > 0 ? v : 20_000;
+})();
+
 const SPILL_DRAIN_THRESHOLD = (() => {
   const v = parseInt(process.env.MUADDIB_SPILL_DRAIN_THRESHOLD, 10);
   return Number.isFinite(v) && v > 0 ? v : 500;
@@ -666,6 +674,23 @@ function reportStats(stats) {
   if (stats.changesStreamPackages) {
     console.log(`[MONITOR]   Changes stream packages: ${stats.changesStreamPackages}`);
   }
+  // Phase D: active degradations in the hourly Stability block.
+  try {
+    const active = require('./degradation.js').getActiveDegradations();
+    if (active.length > 0) console.warn(`[MONITOR]   Degradations: ${active.join(', ')}`);
+  } catch { /* observability only */ }
+  // Network-brain state (governors phase A): one line per host that has seen
+  // any backoff — the observation signal for the A deployment gate (AIMD
+  // de-escalations visible, no sustained max-level) and phase D's input.
+  try {
+    const { getBrainState } = require('../shared/http-limiter.js');
+    const brain = getBrainState();
+    const noisy = Object.entries(brain).filter(([, s]) => s.backoffCount > 0 || s.level > 0 || s.pendingWaiters > 0);
+    if (noisy.length > 0) {
+      const line = noisy.map(([h, s]) => `${h}: level=${s.level} pause=${s.pauseRemainingMs}ms 429s=${s.backoffCount} waiters=${s.pendingWaiters}`).join(' | ');
+      console.log(`[MONITOR]   Brain: ${line}`);
+    }
+  } catch { /* observability only */ }
   if (stats.rssFallbackCount) {
     console.log(`[MONITOR]   RSS fallback activations: ${stats.rssFallbackCount}`);
   }
@@ -960,9 +985,39 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
       clearInterval(concurrencyAdjustHandle);
       concurrencyAdjustHandle = null;
     }
-    // Wait for in-flight scans to complete (soft drain)
-    console.log(`[MONITOR] Draining ${getActiveWorkers()} active worker(s)...`);
-    await drainWorkers();
+    // Bounded drain (phase C, C7). The old unbounded `await drainWorkers()`
+    // could outlive systemd's TimeoutStopSec (scans run up to 300s): SIGKILL
+    // then landed MID-drain, persistQueue never ran, and every in-flight scan
+    // plus up to 60s of queue mutations were lost UNLEDGERED on each manual
+    // restart — the exact deployment mode of this program. Drain for up to
+    // SHUTDOWN_DRAIN_MAX_MS, then spill the survivors (protected, bounded
+    // retries) so the next boot re-scans them.
+    console.log(`[MONITOR] Draining ${getActiveWorkers()} active worker(s) (bounded ${SHUTDOWN_DRAIN_MAX_MS / 1000}s)...`);
+    await Promise.race([
+      drainWorkers(),
+      new Promise(resolve => setTimeout(resolve, SHUTDOWN_DRAIN_MAX_MS).unref())
+    ]);
+    try {
+      const leftovers = getInFlightItems();
+      if (leftovers.length > 0) {
+        const { isSpillEnabled: spillOn, spillItems } = require('./spill.js');
+        const { appendScanLedger } = require('./state.js');
+        let spilledN = 0;
+        for (const it of leftovers) {
+          const { retries, giveUp } = computeInterruptDisposition(it);
+          recentlyScanned.delete(`${it.ecosystem}/${it.name}@${it.version}`);
+          if (giveUp) {
+            appendScanLedger({ name: it.name, version: it.version, ecosystem: it.ecosystem, outcome: 'dropped', source: 'interrupted_max' });
+            continue;
+          }
+          appendScanLedger({ name: it.name, version: it.version, ecosystem: it.ecosystem, outcome: 'interrupted', source: 'shutdown_drain' });
+          if (spillOn() && spillItems([{ ...it, interrupted: true, interruptRetries: retries }]) === 1) spilledN++;
+        }
+        console.log(`[MONITOR] Shutdown: ${leftovers.length} in-flight scan(s) did not finish in time — ${spilledN} spilled for re-scan, all ledgered`);
+      }
+    } catch (e) {
+      console.error(`[MONITOR] Shutdown in-flight spill failed: ${e.message}`);
+    }
     // Persist remaining queue items so they survive the restart
     persistQueue(scanQueue, state);
     saveRecentlyScanned(recentlyScanned); // Persist dedup set too (avoid re-scan storm on restart)
@@ -1043,6 +1098,7 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
   // This ensures new packages are ingested even while a large batch is being scanned.
   // Backpressure: poll() skips when queue >= 30K or memory pressure >= CRITICAL (90%).
   // Adaptive concurrency adjusts scan throughput to match ingestion rate.
+  let _lastTemporalShedCount = 0; // phase D: temporal-shed delta tracking
   let pollInProgress = false;
   let pollStartedAt = 0;
   let backoffUntil = 0;
@@ -1109,6 +1165,34 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
     // reaction to memory spikes — the 2026-04-13 incident showed that checking
     // every 5min is too slow (250 packages ingested between checks).
     const { level: pressureLevel, mem: currentMem, ratio: heapRatio, rssRatio } = computeMemoryPressure();
+
+    // Phase B (memory governor): feed the admission gate the REAL process RSS
+    // from this same 2s breaker loop — the governor's freeze keys on it (the
+    // worker-mem disk samples are 10s-cadence and starve during sync parses).
+    try { require('./memory-governor.js').updateGovernorRss(currentMem.rss); } catch { /* governor optional */ }
+
+    // Phase D (degradation registry): evaluate the raw degradation signals.
+    // Cheap (two statSync + counters); alarms only fire on sustained
+    // transitions inside tickDegradation. Fire-and-forget — the registry must
+    // never block the breaker loop.
+    try {
+      const { getLeanStatus } = require('../ioc/updater.js');
+      const { getBrainState } = require('../shared/http-limiter.js');
+      const { isFrozen: govFrozen, isGovernorEnabled: govEnabled } = require('./memory-governor.js');
+      const lean = getLeanStatus();
+      const brain = getBrainState();
+      const shedNow = stats.temporalLoadShed || 0;
+      const shedActive = shedNow > _lastTemporalShedCount;
+      _lastTemporalShedCount = shedNow;
+      const signals = {
+        'ioc:full-fallback': lean.missing || lean.stale,
+        'ioc:lean-parse-failed': lean.parseFailed,
+        'registry:max-backoff': Object.values(brain).some(b => b.atMaxBackoff),
+        'temporal:shed': shedActive,
+        'workers:memory-floored': govEnabled() && govFrozen()
+      };
+      require('./degradation.js').tickDegradation(signals).catch(() => { /* best-effort */ });
+    } catch { /* observability only */ }
 
     // Top up workers ONLY when memory pressure is below HIGH.
     // At HIGH+, existing workers continue (they'll finish or timeout) but no new

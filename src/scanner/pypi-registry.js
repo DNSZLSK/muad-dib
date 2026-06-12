@@ -169,11 +169,11 @@ async function getPyPIPackageMetadata(packageName) {
 
   const url = PYPI_REGISTRY_URL + '/' + encodeURIComponent(packageName) + '/json';
   let raw;
-  await acquireRegistrySlot();
+  await acquireRegistrySlot('pypi.org');
   try {
     raw = await fetchWithRetry(url);
   } finally {
-    releaseRegistrySlot();
+    releaseRegistrySlot('pypi.org');
   }
 
   if (!raw || typeof raw !== 'object') {

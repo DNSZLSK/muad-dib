@@ -14,13 +14,14 @@ const { runSandbox, tryAcquireSandboxSlot } = require('../sandbox/index.js');
 const { sendWebhook } = require('../webhook.js');
 const { downloadToFile, extractArchive, sanitizePackageName } = require('../shared/download.js');
 const { MAX_TARBALL_SIZE, getMaxFileSize } = require('../shared/constants.js');
-const { acquireRegistrySlot, releaseRegistrySlot } = require('../shared/http-limiter.js');
+const { acquireRegistrySlot, releaseRegistrySlot, awaitRateToken: awaitRateTokenForWorker, signal429: signal429ForWorker } = require('../shared/http-limiter.js');
 const { loadCachedIOCs } = require('../ioc/updater.js');
 const { scanPackageJson } = require('../scanner/package.js');
 const { scanShellScripts } = require('../scanner/shell.js');
 const { buildTrainingRecord } = require('../ml/feature-extractor.js');
 const { appendWorkerMem } = require('./worker-mem.js');
 const { acquireHeavySlot, releaseHeavySlot, isHeavyScan, getHeavyLaneState, heavyWaitMaxMs, HEAVY_REQUEUE_MAX } = require('./heavy-lane.js');
+const { isGovernorEnabled, classifyWeight, acquireMemoryTicket, releaseMemoryTicket, isFrozen: isGovernorFrozen, getGovernorState } = require('./memory-governor.js');
 const { appendRecord: appendTrainingRecord, relabelRecords } = require('../ml/jsonl-writer.js');
 
 // From ./state.js
@@ -105,6 +106,40 @@ const _workerPromises = new Set();
 // Bounded by concurrency, so it stays tiny.
 const _liveWorkers = new Map();
 
+// Side-channel worker→main messages: anything that is not the scan's terminal
+// 'result'/'error'. The dispatch in runScanInWorker NEVER settles the scan
+// promise for these types — the handler it replaced called done() on EVERY
+// message, so a single non-result message disarmed the static timeout, removed
+// the worker from _liveWorkers (invisible to terminateAllWorkers) and left the
+// scan pending until the outer 300s abort. Governors register here (phase A:
+// 'rate-token-request'/'rate-429'). Handler signature: (worker, msg) => void.
+const _workerMessageHandlers = new Map();
+function registerWorkerMessageHandler(type, fn) {
+  if (_workerMessageHandlers.has(type)) {
+    // One handler per type: silently replacing a live handler killed every
+    // token grant in-process when a test registered over 'rate-token-request'.
+    console.warn(`[MONITOR] registerWorkerMessageHandler: OVERWRITING existing handler for '${type}'`);
+  }
+  _workerMessageHandlers.set(type, fn);
+}
+
+// ─── Network-brain glue (governors phase A) ───
+// Workers proxy token acquisition and 429 signals to the main thread so the
+// whole process shares ONE budget + ONE backoff state per host. Stateless per
+// worker by design: a grant racing a worker's death is a caught postMessage
+// (one token lost, self-healing) — nothing to purge on 'exit'.
+registerWorkerMessageHandler('rate-token-request', (worker, msg) => {
+  awaitRateTokenForWorker(msg.host, { maxWaitMs: msg.maxWaitMs })
+    .then(({ granted }) => {
+      try {
+        worker.postMessage({ type: granted ? 'rate-token-grant' : 'rate-token-denied', id: msg.id });
+      } catch { /* worker already terminated — token self-heals at next refill */ }
+    });
+});
+registerWorkerMessageHandler('rate-429', (worker, msg) => {
+  signal429ForWorker(msg.host);
+});
+
 function getTargetConcurrency() { return _targetConcurrency; }
 function setTargetConcurrency(n) { _targetConcurrency = Math.max(MIN_CONCURRENCY, Math.min(MAX_CONCURRENCY, n)); }
 function getActiveWorkers() { return _activeWorkers; }
@@ -119,6 +154,11 @@ function terminateAllWorkers() {
   const dropped = [];
   for (const [w, item] of Array.from(_liveWorkers.entries())) {
     try {
+      // Phase C: mark BEFORE terminate so the exit handler rejects with
+      // code='SCAN_INTERRUPTED' — processQueueItem then ledgers 'interrupted'
+      // and spills the item for a bounded re-scan instead of a terminal
+      // scan_error (the killed scans of 2026-06-12 09:43 were never retried).
+      w._muaddibInterrupted = true;
       w.terminate(); n++;
       if (item && item.name) dropped.push(`${item.name}@${item.version || '?'}`);
     } catch { /* already gone */ }
@@ -512,7 +552,10 @@ function shouldSkipSandbox(ctx) {
 function runScanInWorker(extractedDir, timeoutMs, scanContext = null, signal = null) {
   return new Promise((resolve, reject) => {
     const workerOpts = {
-      workerData: { extractedDir, scanContext: scanContext || {} }
+      // rateBrain: opts the worker's http-limiter into proxy mode (tokens and
+      // 429s flow through the main-thread brain). ONLY scan workers get this —
+      // any other Worker keeps a local bucket and can never hang on a missing brain.
+      workerData: { extractedDir, scanContext: scanContext || {}, rateBrain: true }
     };
     // Per-worker V8 memory limits (OOM durable fix): the 2026-06 RSS spikes
     // (8.2-8.8GB with heap ~550MB) are off-heap allocations inside scan workers —
@@ -533,7 +576,10 @@ function runScanInWorker(extractedDir, timeoutMs, scanContext = null, signal = n
         stackSizeMb: 8
       };
     }
-    const worker = new Worker(SCAN_WORKER_PATH, workerOpts);
+    // MUADDIB_SCAN_WORKER_PATH: test seam (read at call time, same spirit as
+    // MUADDIB_SPILL_FILE) — lets the message-dispatch tests spawn a stub worker
+    // that emits side-channel message types the real scan-worker never sends.
+    const worker = new Worker(process.env.MUADDIB_SCAN_WORKER_PATH || SCAN_WORKER_PATH, workerOpts);
     const _sc = scanContext || {};
     _liveWorkers.set(worker, { name: _sc.name, version: _sc.version, ecosystem: _sc.ecosystem });
 
@@ -578,10 +624,21 @@ function runScanInWorker(extractedDir, timeoutMs, scanContext = null, signal = n
       else signal.addEventListener('abort', onAbort, { once: true });
     }
 
-    worker.on('message', (msg) => done(() => {
-      if (msg.type === 'result') resolve(msg.data);
-      else if (msg.type === 'error') reject(new Error(msg.message));
-    }));
+    worker.on('message', (msg) => {
+      // Terminal types settle the scan promise. Every other type is a
+      // side-channel message dispatched to its registered handler WITHOUT
+      // touching done() — calling done() here for non-terminal messages would
+      // disarm the static timeout, hide the worker from terminateAllWorkers
+      // and leave the scan pending until the outer abort (the trap this
+      // dispatch replaced). Unknown types are deliberately ignored.
+      if (!msg || typeof msg.type !== 'string') return;
+      if (msg.type === 'result') { done(() => resolve(msg.data)); return; }
+      if (msg.type === 'error') { done(() => reject(new Error(msg.message))); return; }
+      const handler = _workerMessageHandlers.get(msg.type);
+      if (handler) {
+        try { handler(worker, msg); } catch { /* a side-channel handler must never break the scan */ }
+      }
+    });
 
     worker.on('error', (err) => done(() => reject(err)));
 
@@ -595,7 +652,13 @@ function runScanInWorker(extractedDir, timeoutMs, scanContext = null, signal = n
         rss: process.memoryUsage().rss
       });
       done(() => {
-        if (code !== 0) reject(new Error(`Worker exited with code ${code}`));
+        if (code !== 0) {
+          const e = new Error(worker._muaddibInterrupted
+            ? 'Scan interrupted (EMERGENCY worker terminate)'
+            : `Worker exited with code ${code}`);
+          if (worker._muaddibInterrupted) e.code = 'SCAN_INTERRUPTED';
+          reject(e);
+        }
       });
     });
   });
@@ -792,7 +855,27 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
     // worker's lifetime (≤ STATIC_SCAN_TIMEOUT_MS), not the sandbox (which
     // has its own semaphore and runs outside the daemon's heap).
     let heavySlotHeld = false;
-    if (lane === 'heavy') {
+    let memTicket = null;
+    if (isGovernorEnabled()) {
+      // Phase B: the memory governor REPLACES the heavy lane at admission —
+      // a heavy is simply a big ticket (2 heavies ≈ the whole heavy budget,
+      // which reproduces HEAVY_SCAN_MAX=2 by arithmetic instead of by a
+      // dedicated semaphore) and the aggregate of mediums is bounded too
+      // (the 09:43 ATO-burst shape: 12 sub-threshold scans = 8GB off-heap).
+      const t = classifyWeight(jsWeight);
+      if (t.cls === 'heavy') stats.heavyScans = (stats.heavyScans || 0) + 1;
+      const gov = getGovernorState();
+      if (t.cls !== 'light' && (gov.frozen || gov.waiting > 0)) {
+        stats.ticketWaits = (stats.ticketWaits || 0) + 1;
+        console.log(`[MONITOR] MEM_GOVERNOR: ${name}@${version} waiting for a ${t.cls} ticket (${t.mb}MB; outstanding=${gov.outstandingMb}MB/${gov.budgetMb}MB, frozen=${gov.frozen})`);
+      }
+      // Same requeue contract as the heavy lane: bounded waits, final pass
+      // unbounded (abort-aware only) so an item cannot loop forever.
+      const lastPass = (meta._heavyRetries || 0) >= HEAVY_REQUEUE_MAX;
+      const waitStart = Date.now();
+      memTicket = await acquireMemoryTicket(t.cls, { signal, maxWaitMs: lastPass ? 0 : heavyWaitMaxMs() });
+      stats.ticketWaitMsTotal = (stats.ticketWaitMsTotal || 0) + (Date.now() - waitStart);
+    } else if (lane === 'heavy') {
       stats.heavyScans = (stats.heavyScans || 0) + 1;
       const laneState = getHeavyLaneState();
       if (laneState.max > 0 && laneState.active >= laneState.max) {
@@ -859,6 +942,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
     } finally {
       // Single release point — success, static timeout, EMERGENCY terminate
       // and abort all funnel through here exactly once (heavySlotHeld guard).
+      if (memTicket) { releaseMemoryTicket(memTicket); memTicket = null; }
       if (heavySlotHeld) { releaseHeavySlot(); heavySlotHeld = false; }
     }
 
@@ -1444,7 +1528,12 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
     // requeues the item (bounded by HEAVY_REQUEUE_MAX). Re-throw BEFORE any
     // error accounting: this catch otherwise swallows everything into the
     // 'scan_error' ledger path and the requeue would never happen.
-    if (err && err.code === 'HEAVY_LANE_WAIT_TIMEOUT') throw err;
+    if (err && (err.code === 'HEAVY_LANE_WAIT_TIMEOUT' || err.code === 'TICKET_WAIT_TIMEOUT')) throw err;
+    // Phase C: an EMERGENCY-interrupted scan is NOT a scan failure — rethrow
+    // so processQueueItem (the only writer for this path) ledgers
+    // 'interrupted' + spills for a bounded re-scan. Ledgering scan_error here
+    // would double-count and bury the interruption as a terminal error.
+    if (err && err.code === 'SCAN_INTERRUPTED') throw err;
     recordError(err, stats);
     stats.scanned++;
     stats.totalTimeMs += Date.now() - startTime;
@@ -1563,7 +1652,34 @@ async function processQueueItem(item, stats, dailyAlerts, recentlyScanned, downl
     // passes; scanPackage runs the final pass without the wait bound. Note:
     // _heavyRetries does not survive a spill (spillItems strips non-re-enqueue
     // fields) — acceptable, the spill drain runs in calm windows anyway.
-    if (err && err.code === 'HEAVY_LANE_WAIT_TIMEOUT') {
+    if (err && err.code === 'SCAN_INTERRUPTED') {
+      // Phase C (work conservation): a protective interruption (EMERGENCY
+      // worker terminate) must never silently kill coverage. Exogenous
+      // interruptions ONLY — worker_oom/watermark stay no-retry ("an OOM
+      // re-OOMs deterministically"). Bounded: 2 reprises, then an explicit
+      // dropped/interrupted_max (never 'clean', never an infinite respill —
+      // a package engineered to spike RSS gets exactly 2 extra chances).
+      const key = `${item.ecosystem}/${item.name}@${item.version}`;
+      recentlyScanned.delete(key); // else the drain dedups the re-scan away (F-C1)
+      const { retries, giveUp } = computeInterruptDisposition(item);
+      stats.interrupted = (stats.interrupted || 0) + 1;
+      if (giveUp) {
+        appendScanLedger({ name: item.name, version: item.version, ecosystem: item.ecosystem, outcome: 'dropped', source: 'interrupted_max' });
+        console.warn(`[MONITOR] INTERRUPTED_MAX: ${item.name}@${item.version || '?'} — 3rd interruption, dropped for good (ledgered)`);
+        return;
+      }
+      appendScanLedger({ name: item.name, version: item.version, ecosystem: item.ecosystem, outcome: 'interrupted', source: 'emergency_terminate' });
+      let spilled = false;
+      try {
+        const sp = require('./spill.js');
+        if (sp.isSpillEnabled()) {
+          spilled = sp.spillItems([{ ...item, interrupted: true, interruptRetries: retries }]) === 1; // retries === item.interruptRetries (computeInterruptDisposition)
+        }
+      } catch { /* spill best-effort — the ledger entry stays the honest record */ }
+      console.warn(`[MONITOR] INTERRUPTED: ${item.name}@${item.version || '?'} — ${spilled ? `spilled for re-scan (pass ${retries}/2, protected)` : 'ledgered only (spill disabled)'}`);
+      return;
+    }
+    if (err && (err.code === 'HEAVY_LANE_WAIT_TIMEOUT' || err.code === 'TICKET_WAIT_TIMEOUT')) {
       const decision = computeHeavyRequeue(item);
       if (decision.requeue) {
         stats.heavyLaneRequeues = (stats.heavyLaneRequeues || 0) + 1;
@@ -1623,14 +1739,33 @@ async function processQueueItem(item, stats, dailyAlerts, recentlyScanned, downl
  * in _workerPromises. Node.js is single-threaded so scanQueue.shift()
  * is atomic — no race conditions between workers.
  */
+// Items currently being processed (dequeued, possibly still in download/
+// extract — a superset of _liveWorkers' scan phase). Read by the daemon's
+// bounded-drain shutdown (C7) to spill what a SIGKILL would otherwise lose.
+const _inFlightItems = new Set();
+function getInFlightItems() {
+  return Array.from(_inFlightItems);
+}
+
 async function _spawnWorker(scanQueue, stats, dailyAlerts, recentlyScanned, downloadsCache, sandboxAvailable) {
   _activeWorkers++;
   try {
     while (scanQueue.length > 0 && _activeWorkers <= _targetConcurrency) {
+      // Phase B (F-B4): during a governor freeze, do NOT dequeue — a dequeued
+      // item gets downloaded+extracted before the ticket gate, so pumping
+      // while frozen burns network/disk/tmpdirs on scans that cannot be
+      // admitted. One pump lane stays open so the governor's liveness
+      // admission (1 scan when nothing is in flight) can still flow.
+      if (isGovernorFrozen() && (getGovernorState().outstandingCount > 0 || _activeWorkers > 1)) break;
       // AUDIT A2: FIFO by default; priority dequeue when MUADDIB_PRIORITY_DEQUEUE=1.
       const item = dequeueScan(scanQueue);
       if (!item) break;
-      await processQueueItem(item, stats, dailyAlerts, recentlyScanned, downloadsCache, scanQueue, sandboxAvailable);
+      _inFlightItems.add(item);
+      try {
+        await processQueueItem(item, stats, dailyAlerts, recentlyScanned, downloadsCache, scanQueue, sandboxAvailable);
+      } finally {
+        _inFlightItems.delete(item);
+      }
     }
   } finally {
     _activeWorkers--;
@@ -1643,6 +1778,18 @@ async function _spawnWorker(scanQueue, stats, dailyAlerts, recentlyScanned, down
  * and never more than the backlog. Extracted so the adaptive worker-pool math is unit-testable
  * without spawning real (network-bound) workers.
  */
+/**
+ * Phase D coupling: cap NEW spawns while the IOC lean projection is in full
+ * fallback — every worker spawned in that mode parses the full 223MB
+ * iocs.json (~450MB peak EACH); a 12-worker pool in fallback is the exact
+ * RSS bomb the lean projection removed. Pure for tests.
+ */
+const FALLBACK_WORKER_CAP = 4;
+function capWorkersForDegradation(toSpawn, activeWorkers, fullFallbackActive) {
+  if (!fullFallbackActive) return toSpawn;
+  return Math.max(0, Math.min(toSpawn, FALLBACK_WORKER_CAP - activeWorkers));
+}
+
 function computeWorkersToSpawn(targetConcurrency, activeWorkers, queueLength) {
   return Math.max(0, Math.min(targetConcurrency - activeWorkers, queueLength));
 }
@@ -1653,6 +1800,19 @@ function computeWorkersToSpawn(targetConcurrency, activeWorkers, queueLength) {
  * counter passes HEAVY_REQUEUE_MAX the item is NOT requeued again — its next
  * pass through scanPackage waits unbounded instead.
  */
+/**
+ * Pure disposition for an interrupted scan (phase C). Mutates
+ * item.interruptRetries like computeHeavyRequeue does. Bounded at 2 reprises:
+ * an attacker whose package triggers a protective interruption on every scan
+ * gets exactly two extra chances, then an explicit dropped/interrupted_max —
+ * never an infinite respill loop, never 'clean'.
+ */
+function computeInterruptDisposition(item) {
+  const retries = (item.interruptRetries || 0) + 1;
+  item.interruptRetries = retries;
+  return { retries, giveUp: retries > 2 };
+}
+
 function computeHeavyRequeue(item) {
   const retries = (item._heavyRetries || 0) + 1;
   item._heavyRetries = retries;
@@ -1714,6 +1874,17 @@ function ensureWorkers(scanQueue, stats, dailyAlerts, recentlyScanned, downloads
       toSpawn = rssCap;
     }
   }
+  if (toSpawn <= 0) return;
+
+  // Phase D: ioc:full-fallback caps the pool (see capWorkersForDegradation).
+  try {
+    const { isDegraded } = require('./degradation.js');
+    const capped = capWorkersForDegradation(toSpawn, _activeWorkers, isDegraded('ioc:full-fallback'));
+    if (capped < toSpawn) {
+      console.warn(`[MONITOR] DEGRADATION cap: spawning ${capped} instead of ${toSpawn} (ioc:full-fallback active — each fallback worker costs ~450MB parse)`);
+      toSpawn = capped;
+    }
+  } catch { /* registry optional */ }
   if (toSpawn <= 0) return;
 
   console.log(`[MONITOR] Spawning ${toSpawn} worker(s) (active: ${_activeWorkers}, target: ${_targetConcurrency}, queue: ${scanQueue.length})`);
@@ -2134,6 +2305,10 @@ module.exports = {
   classifyNativeShard,
   shouldSkipSandbox,
   runScanInWorker,
+  registerWorkerMessageHandler,
+  getInFlightItems,
+  computeInterruptDisposition,
+  capWorkersForDegradation,
   scanPackage,
   timeoutPromise,
   detectSkillMdBundled,

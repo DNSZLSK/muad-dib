@@ -1,6 +1,6 @@
 const { NPM_PACKAGE_REGEX } = require('../shared/constants.js');
 const { debugLog } = require('../utils.js');
-const { acquireRegistrySlot, releaseRegistrySlot, signal429 } = require('../shared/http-limiter.js');
+const { acquireRegistrySlot, releaseRegistrySlot, awaitRateToken, signal429, hostForUrl } = require('../shared/http-limiter.js');
 const { computeAdvancedRegistrySignals } = require('../integrations/registry-signals.js');
 
 const REGISTRY_URL = 'https://registry.npmjs.org';
@@ -27,6 +27,19 @@ function createTimeoutSignal(ms) {
 
 async function fetchWithRetry(url) {
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    // The caller's acquireRegistrySlot paid the rate token for the FIRST
+    // attempt only. Every retry is a new network request and must pay its own
+    // token — otherwise retries bypass the bucket entirely, and during a 429
+    // backoff pause they keep hammering the registry the limiter is trying to
+    // back away from (the token wait also parks the retry until the pause ends).
+    if (attempt > 0) {
+      let granted = true;
+      try { ({ granted } = await awaitRateToken(hostForUrl(url))); } catch { /* limiter is best-effort */ }
+      // Denied (deadline elapsed — deep backoff pause or blocked main): treat
+      // as retries exhausted. A missing metadata enrichment beats hammering a
+      // registry that is telling us to back off.
+      if (!granted) return null;
+    }
     let response;
     const { signal, cleanup } = createTimeoutSignal(REQUEST_TIMEOUT);
     try {
