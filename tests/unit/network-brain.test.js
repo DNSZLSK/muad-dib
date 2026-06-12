@@ -165,6 +165,79 @@ async function runNetworkBrainTests() {
     });
   });
 
+  // ─── Rate-by-level + probe-of-one (partial-throttle convergence fix) ───
+
+  test('BRAIN: the level caps at 12 — pause and rate are both saturated beyond it', () => {
+    let st = freshBo();
+    let now = 10_000;
+    for (let i = 0; i < 20; i++) {
+      const r = limiter.computeBackoffTransition(st, { type: '429', now }, C);
+      st = r.state;
+      now = st.pauseUntil + 10;
+    }
+    assert(st.level === 12, `level must cap at 12 (got ${st.level})`);
+    assert(st.lastPauseMs === C.max, 'pause stays at max under the cap');
+  });
+
+  await asyncTest('BRAIN: post-pause restart is a probe of ONE, then the level-reduced rate — never a burst', async () => {
+    const savedEnv = {};
+    for (const [k, v] of Object.entries({
+      MUADDIB_REGISTRY_RATE: '20',
+      MUADDIB_REGISTRY_BACKOFF_BASE_MS: '150',
+      MUADDIB_REGISTRY_BOOT_SLOWSTART_MS: '0'
+    })) { savedEnv[k] = process.env[k]; process.env[k] = String(v); }
+    const LIM = require.resolve('../../src/shared/http-limiter.js');
+    delete require.cache[LIM];
+    try {
+      const lim = require(LIM);
+      lim.signal429('registry.npmjs.org'); // level 1 → pause 150ms, rate halves to 10
+      await new Promise(r => setTimeout(r, 180)); // pause expired
+      const t0 = Date.now();
+      const g1 = await lim.awaitRateToken('registry.npmjs.org', { maxWaitMs: 3000 });
+      const t1 = Date.now();
+      const g2 = await lim.awaitRateToken('registry.npmjs.org', { maxWaitMs: 3000 });
+      const t2 = Date.now();
+      assert(g1.granted && t1 - t0 < 120, `the single probe token is immediate (took ${t1 - t0}ms)`);
+      assert(g2.granted && t2 - t1 >= 700, `the SECOND request must wait for the next refill — a post-pause burst is the bug (waited ${t2 - t1}ms)`);
+      lim.resetLimiter();
+    } finally {
+      for (const [k, v] of Object.entries(savedEnv)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+      delete require.cache[LIM];
+    }
+  });
+
+  await asyncTest('BRAIN: at high level the send rate floors at ~1/s — spaced probes, the clean window becomes reachable', async () => {
+    const savedEnv = {};
+    for (const [k, v] of Object.entries({
+      MUADDIB_REGISTRY_RATE: '16',
+      MUADDIB_REGISTRY_BACKOFF_BASE_MS: '80',
+      MUADDIB_REGISTRY_BOOT_SLOWSTART_MS: '0'
+    })) { savedEnv[k] = process.env[k]; process.env[k] = String(v); }
+    const LIM = require.resolve('../../src/shared/http-limiter.js');
+    delete require.cache[LIM];
+    try {
+      const lim = require(LIM);
+      // Drive to level 4 (rate 16/2^4 = 1/s): one spaced 429 per expired pause.
+      for (let i = 0; i < 4; i++) {
+        lim.signal429('registry.npmjs.org');
+        const st = lim.getRateLimiterState('registry.npmjs.org');
+        await new Promise(r => setTimeout(r, st.pauseRemainingMs + 30));
+      }
+      assert(lim.getRateLimiterState('registry.npmjs.org').consecutive429 === 4, 'level 4 armed');
+      // Probe-of-one, then 1/s pacing: 3 grants must span ≥ ~2s (NOT a burst of 16).
+      const t0 = Date.now();
+      await lim.awaitRateToken('registry.npmjs.org', { maxWaitMs: 6000 });
+      await lim.awaitRateToken('registry.npmjs.org', { maxWaitMs: 6000 });
+      await lim.awaitRateToken('registry.npmjs.org', { maxWaitMs: 6000 });
+      const span = Date.now() - t0;
+      assert(span >= 1600, `3 grants at level 4 must be paced ~1/s, not burst (span ${span}ms)`);
+      lim.resetLimiter();
+    } finally {
+      for (const [k, v] of Object.entries(savedEnv)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+      delete require.cache[LIM];
+    }
+  });
+
   await asyncTest('BRAIN: a worker WITHOUT rateBrain uses a local bucket and never hangs', async () => {
     const { Worker } = require('worker_threads');
     const result = await new Promise((resolve, reject) => {

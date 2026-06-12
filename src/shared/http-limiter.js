@@ -98,7 +98,10 @@ function computeBackoffTransition(state, event, consts = {}) {
     // Full-quiet reset (the incident is over, restart at base).
     const quietResetMs = s.lastPauseMs * 2 + base * 5;
     if (s.last429At && now - s.last429At > quietResetMs) s.level = 0;
-    s.level += 1;
+    // Cap: beyond ~12 both the pause (60s) and the rate (1/s floor) are
+    // saturated — an unbounded counter only makes operators read "level 25"
+    // as an emergency when it carries no additional behavior.
+    s.level = Math.min(s.level + 1, 12);
     const pause = Math.min(max, base * 2 ** (s.level - 1));
     s.lastPauseMs = pause;
     s.last429At = now;
@@ -159,20 +162,37 @@ function hostForUrl(url) {
   try { return new URL(url).hostname || DEFAULT_HOST; } catch { return DEFAULT_HOST; }
 }
 
-function _effectiveRate() {
+function _effectiveRate(level = 0) {
+  let rate = RATE_LIMIT_PER_SEC;
   if (BOOT_SLOWSTART_MS > 0 && Date.now() - _bootAt < BOOT_SLOWSTART_MS) {
-    return Math.max(1, Math.floor(RATE_LIMIT_PER_SEC / 4));
+    rate = Math.max(1, Math.floor(rate / 4));
   }
-  return RATE_LIMIT_PER_SEC;
+  // Rate-by-level (the partial-throttle fix, 2026-06-12 evening): the pause
+  // alone cannot converge against a registry that PERMANENTLY rejects a
+  // fraction of requests — every post-pause burst guarantees a 429, every
+  // window stays dirty, the level ratchets to the cap and throughput pins at
+  // ~10 req/min forever (observed: level 25, zero de-escalations, while
+  // tarball downloads flowed fine). Halving the SEND RATE per level (floor
+  // 1 req/s) makes a clean 30s window reachable — 30 spaced probes instead of
+  // one burst — so the AIMD de-escalation actually fires and the brain
+  // CONVERGES on the registry's real granted budget instead of oscillating
+  // burst→reject at the cap.
+  if (level > 0) rate = Math.max(1, Math.floor(rate / 2 ** Math.min(level, 5)));
+  return rate;
 }
 
 function _refillTokens(b) {
   const now = Date.now();
   if (now < b.bo.pauseUntil) return; // backoff pause: no refills, no grants
-  const rate = _effectiveRate();
+  const rate = _effectiveRate(b.bo.level);
   if (b.bo.pauseUntil > b.lastRefill) {
-    // First refill after a backoff pause: slow start at half budget.
-    b.tokens = Math.max(1, Math.floor(rate / 2));
+    // First refill after a backoff pause: PROBE OF ONE. The previous half-
+    // budget restart fired a 10-request burst the instant the pause expired —
+    // against a partially-throttling registry that burst GUARANTEED a 429 and
+    // re-armed the next pause. One spaced probe at a time is how the level's
+    // reduced rate (see _effectiveRate) gets a chance to produce the clean
+    // window that de-escalates.
+    b.tokens = 1;
     b.lastRefill = now;
     return;
   }
