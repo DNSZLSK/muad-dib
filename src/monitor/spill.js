@@ -46,7 +46,12 @@ const DEFAULT_MAX_ENTRIES = 200_000;
 // else (bounded line size ≈ 150-250 bytes).
 const SPILL_FIELDS = [
   'name', 'version', 'ecosystem', 'tarballUrl',
-  'firstPublish', 'isIOCMatch', 'isBurst', 'atoSignal', 'isATOBurstExtra'
+  'firstPublish', 'isIOCMatch', 'isBurst', 'atoSignal', 'isATOBurstExtra',
+  // Phase C: without persisting the retry counter, every re-spill restarted
+  // at 0 — an attacker whose package triggers an EMERGENCY on every scan
+  // would loop forever (amplification). 'interrupted' marks the item
+  // protected (drain re-ingests protected-first).
+  'interrupted', 'interruptRetries'
 ];
 
 function isSpillEnabled() {
@@ -198,6 +203,14 @@ function shouldDrain(pressureLevel, queueLen, threshold) {
  * @param {Function} [opts.isDuplicate] (key "name@version") => boolean
  * @returns {{drained:number, deduped:number, remaining:number}}
  */
+// ─── SYNCHRONICITY INVARIANT (F-C5, do not break) ───
+// drainBacklog does a read→rewrite (tmp+rename) of the backlog file while
+// spillItems does append-one-line writes. An append landing BETWEEN the read
+// and the rename would be silently LOST. This is safe today ONLY because both
+// run synchronously on the main thread's event loop AND their triggers exclude
+// each other in time (drain requires pressure NONE; the bulk spill paths run
+// at EMERGENCY / shutdown). If drainBacklog ever becomes async, or spillItems
+// ever becomes buffered/async, add real file locking first.
 function drainBacklog(scanQueue, stats, opts = {}) {
   const res = { drained: 0, deduped: 0, remaining: 0 };
   try {

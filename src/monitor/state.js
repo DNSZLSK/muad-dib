@@ -985,7 +985,11 @@ const SCAN_LEDGER_OUTCOMES = new Set([
   // of dropped — NOT scanned. A later drain + scan writes a normal scan entry; a
   // spilled item that never drains stays an honest coverage hole (counted with
   // dropped in the rollup).
-  'static_timeout', 'size_skip', 'dropped', 'spilled', 'error'
+  // 'interrupted' = the scan was killed by a protective action (EMERGENCY
+  // terminate / bounded-drain shutdown) and respilled for a bounded re-scan —
+  // NOT scanned, NOT clean (an unknown outcome coerces to 'clean' below:
+  // registering it here is what keeps killed scans out of the clean bucket).
+  'static_timeout', 'size_skip', 'dropped', 'spilled', 'error', 'interrupted'
 ]);
 
 // Benign terminal verdicts — the ledger-headline "clean" bucket. Mirrors the
@@ -1178,7 +1182,7 @@ function computeLedgerRollup(sinceTs, opts = {}) {
     // 'spilled' (disk waiting list, not yet rescanned) counts with 'dropped' on the
     // non-scanned side — honest coverage: a spilled item only becomes "covered" when
     // its drained re-scan writes a real verdict entry. byOutcome keeps them distinct.
-    if (outcome === 'dropped' || outcome === 'spilled') {
+    if (outcome === 'dropped' || outcome === 'spilled' || outcome === 'interrupted') {
       dropped++; ecoNode.dropped++;
       if (underCap) { droppedKeys.add(key); allNames.add(e.name); } else exactVanished = false;
     } else {
