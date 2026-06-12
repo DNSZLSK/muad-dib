@@ -29,7 +29,7 @@ let _lastHardDropLog = 0;
 // the oldest UNPROTECTED item instead; only if a bounded head-window is entirely protected
 // do we fall back to strict-oldest (still ledgered, with a distinct source).
 function _isProtected(item) {
-  return !!(item && (item.isIOCMatch || item.isBurst || item.firstPublish || item.atoSignal || item.isATOBurstExtra));
+  return !!(item && (item.isIOCMatch || item.isBurst || item.firstPublish || item.atoSignal || item.isATOBurstExtra || item.interrupted));
 }
 
 // How far from the head we scan for an unprotected victim. Protected items are a small

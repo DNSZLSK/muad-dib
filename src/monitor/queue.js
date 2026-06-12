@@ -115,6 +115,11 @@ const _liveWorkers = new Map();
 // 'rate-token-request'/'rate-429'). Handler signature: (worker, msg) => void.
 const _workerMessageHandlers = new Map();
 function registerWorkerMessageHandler(type, fn) {
+  if (_workerMessageHandlers.has(type)) {
+    // One handler per type: silently replacing a live handler killed every
+    // token grant in-process when a test registered over 'rate-token-request'.
+    console.warn(`[MONITOR] registerWorkerMessageHandler: OVERWRITING existing handler for '${type}'`);
+  }
   _workerMessageHandlers.set(type, fn);
 }
 
@@ -149,6 +154,11 @@ function terminateAllWorkers() {
   const dropped = [];
   for (const [w, item] of Array.from(_liveWorkers.entries())) {
     try {
+      // Phase C: mark BEFORE terminate so the exit handler rejects with
+      // code='SCAN_INTERRUPTED' — processQueueItem then ledgers 'interrupted'
+      // and spills the item for a bounded re-scan instead of a terminal
+      // scan_error (the killed scans of 2026-06-12 09:43 were never retried).
+      w._muaddibInterrupted = true;
       w.terminate(); n++;
       if (item && item.name) dropped.push(`${item.name}@${item.version || '?'}`);
     } catch { /* already gone */ }
@@ -642,7 +652,13 @@ function runScanInWorker(extractedDir, timeoutMs, scanContext = null, signal = n
         rss: process.memoryUsage().rss
       });
       done(() => {
-        if (code !== 0) reject(new Error(`Worker exited with code ${code}`));
+        if (code !== 0) {
+          const e = new Error(worker._muaddibInterrupted
+            ? 'Scan interrupted (EMERGENCY worker terminate)'
+            : `Worker exited with code ${code}`);
+          if (worker._muaddibInterrupted) e.code = 'SCAN_INTERRUPTED';
+          reject(e);
+        }
       });
     });
   });
@@ -1513,6 +1529,11 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
     // error accounting: this catch otherwise swallows everything into the
     // 'scan_error' ledger path and the requeue would never happen.
     if (err && (err.code === 'HEAVY_LANE_WAIT_TIMEOUT' || err.code === 'TICKET_WAIT_TIMEOUT')) throw err;
+    // Phase C: an EMERGENCY-interrupted scan is NOT a scan failure — rethrow
+    // so processQueueItem (the only writer for this path) ledgers
+    // 'interrupted' + spills for a bounded re-scan. Ledgering scan_error here
+    // would double-count and bury the interruption as a terminal error.
+    if (err && err.code === 'SCAN_INTERRUPTED') throw err;
     recordError(err, stats);
     stats.scanned++;
     stats.totalTimeMs += Date.now() - startTime;
@@ -1631,6 +1652,33 @@ async function processQueueItem(item, stats, dailyAlerts, recentlyScanned, downl
     // passes; scanPackage runs the final pass without the wait bound. Note:
     // _heavyRetries does not survive a spill (spillItems strips non-re-enqueue
     // fields) — acceptable, the spill drain runs in calm windows anyway.
+    if (err && err.code === 'SCAN_INTERRUPTED') {
+      // Phase C (work conservation): a protective interruption (EMERGENCY
+      // worker terminate) must never silently kill coverage. Exogenous
+      // interruptions ONLY — worker_oom/watermark stay no-retry ("an OOM
+      // re-OOMs deterministically"). Bounded: 2 reprises, then an explicit
+      // dropped/interrupted_max (never 'clean', never an infinite respill —
+      // a package engineered to spike RSS gets exactly 2 extra chances).
+      const key = `${item.ecosystem}/${item.name}@${item.version}`;
+      recentlyScanned.delete(key); // else the drain dedups the re-scan away (F-C1)
+      const { retries, giveUp } = computeInterruptDisposition(item);
+      stats.interrupted = (stats.interrupted || 0) + 1;
+      if (giveUp) {
+        appendScanLedger({ name: item.name, version: item.version, ecosystem: item.ecosystem, outcome: 'dropped', source: 'interrupted_max' });
+        console.warn(`[MONITOR] INTERRUPTED_MAX: ${item.name}@${item.version || '?'} — 3rd interruption, dropped for good (ledgered)`);
+        return;
+      }
+      appendScanLedger({ name: item.name, version: item.version, ecosystem: item.ecosystem, outcome: 'interrupted', source: 'emergency_terminate' });
+      let spilled = false;
+      try {
+        const sp = require('./spill.js');
+        if (sp.isSpillEnabled()) {
+          spilled = sp.spillItems([{ ...item, interrupted: true, interruptRetries: retries }]) === 1; // retries === item.interruptRetries (computeInterruptDisposition)
+        }
+      } catch { /* spill best-effort — the ledger entry stays the honest record */ }
+      console.warn(`[MONITOR] INTERRUPTED: ${item.name}@${item.version || '?'} — ${spilled ? `spilled for re-scan (pass ${retries}/2, protected)` : 'ledgered only (spill disabled)'}`);
+      return;
+    }
     if (err && (err.code === 'HEAVY_LANE_WAIT_TIMEOUT' || err.code === 'TICKET_WAIT_TIMEOUT')) {
       const decision = computeHeavyRequeue(item);
       if (decision.requeue) {
@@ -1691,6 +1739,14 @@ async function processQueueItem(item, stats, dailyAlerts, recentlyScanned, downl
  * in _workerPromises. Node.js is single-threaded so scanQueue.shift()
  * is atomic — no race conditions between workers.
  */
+// Items currently being processed (dequeued, possibly still in download/
+// extract — a superset of _liveWorkers' scan phase). Read by the daemon's
+// bounded-drain shutdown (C7) to spill what a SIGKILL would otherwise lose.
+const _inFlightItems = new Set();
+function getInFlightItems() {
+  return Array.from(_inFlightItems);
+}
+
 async function _spawnWorker(scanQueue, stats, dailyAlerts, recentlyScanned, downloadsCache, sandboxAvailable) {
   _activeWorkers++;
   try {
@@ -1704,7 +1760,12 @@ async function _spawnWorker(scanQueue, stats, dailyAlerts, recentlyScanned, down
       // AUDIT A2: FIFO by default; priority dequeue when MUADDIB_PRIORITY_DEQUEUE=1.
       const item = dequeueScan(scanQueue);
       if (!item) break;
-      await processQueueItem(item, stats, dailyAlerts, recentlyScanned, downloadsCache, scanQueue, sandboxAvailable);
+      _inFlightItems.add(item);
+      try {
+        await processQueueItem(item, stats, dailyAlerts, recentlyScanned, downloadsCache, scanQueue, sandboxAvailable);
+      } finally {
+        _inFlightItems.delete(item);
+      }
     }
   } finally {
     _activeWorkers--;
@@ -1727,6 +1788,19 @@ function computeWorkersToSpawn(targetConcurrency, activeWorkers, queueLength) {
  * counter passes HEAVY_REQUEUE_MAX the item is NOT requeued again — its next
  * pass through scanPackage waits unbounded instead.
  */
+/**
+ * Pure disposition for an interrupted scan (phase C). Mutates
+ * item.interruptRetries like computeHeavyRequeue does. Bounded at 2 reprises:
+ * an attacker whose package triggers a protective interruption on every scan
+ * gets exactly two extra chances, then an explicit dropped/interrupted_max —
+ * never an infinite respill loop, never 'clean'.
+ */
+function computeInterruptDisposition(item) {
+  const retries = (item.interruptRetries || 0) + 1;
+  item.interruptRetries = retries;
+  return { retries, giveUp: retries > 2 };
+}
+
 function computeHeavyRequeue(item) {
   const retries = (item._heavyRetries || 0) + 1;
   item._heavyRetries = retries;
@@ -2209,6 +2283,8 @@ module.exports = {
   shouldSkipSandbox,
   runScanInWorker,
   registerWorkerMessageHandler,
+  getInFlightItems,
+  computeInterruptDisposition,
   scanPackage,
   timeoutPromise,
   detectSkillMdBundled,
