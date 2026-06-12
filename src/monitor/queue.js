@@ -105,6 +105,18 @@ const _workerPromises = new Set();
 // Bounded by concurrency, so it stays tiny.
 const _liveWorkers = new Map();
 
+// Side-channel worker→main messages: anything that is not the scan's terminal
+// 'result'/'error'. The dispatch in runScanInWorker NEVER settles the scan
+// promise for these types — the handler it replaced called done() on EVERY
+// message, so a single non-result message disarmed the static timeout, removed
+// the worker from _liveWorkers (invisible to terminateAllWorkers) and left the
+// scan pending until the outer 300s abort. Governors register here (phase A:
+// 'rate-token-request'/'rate-429'). Handler signature: (worker, msg) => void.
+const _workerMessageHandlers = new Map();
+function registerWorkerMessageHandler(type, fn) {
+  _workerMessageHandlers.set(type, fn);
+}
+
 function getTargetConcurrency() { return _targetConcurrency; }
 function setTargetConcurrency(n) { _targetConcurrency = Math.max(MIN_CONCURRENCY, Math.min(MAX_CONCURRENCY, n)); }
 function getActiveWorkers() { return _activeWorkers; }
@@ -533,7 +545,10 @@ function runScanInWorker(extractedDir, timeoutMs, scanContext = null, signal = n
         stackSizeMb: 8
       };
     }
-    const worker = new Worker(SCAN_WORKER_PATH, workerOpts);
+    // MUADDIB_SCAN_WORKER_PATH: test seam (read at call time, same spirit as
+    // MUADDIB_SPILL_FILE) — lets the message-dispatch tests spawn a stub worker
+    // that emits side-channel message types the real scan-worker never sends.
+    const worker = new Worker(process.env.MUADDIB_SCAN_WORKER_PATH || SCAN_WORKER_PATH, workerOpts);
     const _sc = scanContext || {};
     _liveWorkers.set(worker, { name: _sc.name, version: _sc.version, ecosystem: _sc.ecosystem });
 
@@ -578,10 +593,21 @@ function runScanInWorker(extractedDir, timeoutMs, scanContext = null, signal = n
       else signal.addEventListener('abort', onAbort, { once: true });
     }
 
-    worker.on('message', (msg) => done(() => {
-      if (msg.type === 'result') resolve(msg.data);
-      else if (msg.type === 'error') reject(new Error(msg.message));
-    }));
+    worker.on('message', (msg) => {
+      // Terminal types settle the scan promise. Every other type is a
+      // side-channel message dispatched to its registered handler WITHOUT
+      // touching done() — calling done() here for non-terminal messages would
+      // disarm the static timeout, hide the worker from terminateAllWorkers
+      // and leave the scan pending until the outer abort (the trap this
+      // dispatch replaced). Unknown types are deliberately ignored.
+      if (!msg || typeof msg.type !== 'string') return;
+      if (msg.type === 'result') { done(() => resolve(msg.data)); return; }
+      if (msg.type === 'error') { done(() => reject(new Error(msg.message))); return; }
+      const handler = _workerMessageHandlers.get(msg.type);
+      if (handler) {
+        try { handler(worker, msg); } catch { /* a side-channel handler must never break the scan */ }
+      }
+    });
 
     worker.on('error', (err) => done(() => reject(err)));
 
@@ -2134,6 +2160,7 @@ module.exports = {
   classifyNativeShard,
   shouldSkipSandbox,
   runScanInWorker,
+  registerWorkerMessageHandler,
   scanPackage,
   timeoutPromise,
   detectSkillMdBundled,
