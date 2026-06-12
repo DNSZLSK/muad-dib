@@ -1778,6 +1778,18 @@ async function _spawnWorker(scanQueue, stats, dailyAlerts, recentlyScanned, down
  * and never more than the backlog. Extracted so the adaptive worker-pool math is unit-testable
  * without spawning real (network-bound) workers.
  */
+/**
+ * Phase D coupling: cap NEW spawns while the IOC lean projection is in full
+ * fallback — every worker spawned in that mode parses the full 223MB
+ * iocs.json (~450MB peak EACH); a 12-worker pool in fallback is the exact
+ * RSS bomb the lean projection removed. Pure for tests.
+ */
+const FALLBACK_WORKER_CAP = 4;
+function capWorkersForDegradation(toSpawn, activeWorkers, fullFallbackActive) {
+  if (!fullFallbackActive) return toSpawn;
+  return Math.max(0, Math.min(toSpawn, FALLBACK_WORKER_CAP - activeWorkers));
+}
+
 function computeWorkersToSpawn(targetConcurrency, activeWorkers, queueLength) {
   return Math.max(0, Math.min(targetConcurrency - activeWorkers, queueLength));
 }
@@ -1862,6 +1874,17 @@ function ensureWorkers(scanQueue, stats, dailyAlerts, recentlyScanned, downloads
       toSpawn = rssCap;
     }
   }
+  if (toSpawn <= 0) return;
+
+  // Phase D: ioc:full-fallback caps the pool (see capWorkersForDegradation).
+  try {
+    const { isDegraded } = require('./degradation.js');
+    const capped = capWorkersForDegradation(toSpawn, _activeWorkers, isDegraded('ioc:full-fallback'));
+    if (capped < toSpawn) {
+      console.warn(`[MONITOR] DEGRADATION cap: spawning ${capped} instead of ${toSpawn} (ioc:full-fallback active — each fallback worker costs ~450MB parse)`);
+      toSpawn = capped;
+    }
+  } catch { /* registry optional */ }
   if (toSpawn <= 0) return;
 
   console.log(`[MONITOR] Spawning ${toSpawn} worker(s) (active: ${_activeWorkers}, target: ${_targetConcurrency}, queue: ${scanQueue.length})`);
@@ -2285,6 +2308,7 @@ module.exports = {
   registerWorkerMessageHandler,
   getInFlightItems,
   computeInterruptDisposition,
+  capWorkersForDegradation,
   scanPackage,
   timeoutPromise,
   detectSkillMdBundled,

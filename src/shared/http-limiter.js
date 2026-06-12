@@ -387,6 +387,11 @@ function getBrainState(host) {
     all[h] = {
       level: b.bo.level,
       pauseRemainingMs: Math.max(0, b.bo.pauseUntil - Date.now()),
+      lastPauseMs: b.bo.lastPauseMs,
+      // True while the host sits at the cap pause and the level has not been
+      // de-escalated/quiet-reset — stays true BETWEEN probe pauses, so the
+      // degradation registry's sustain timer does not flap on every probe.
+      atMaxBackoff: b.bo.level > 0 && b.bo.lastPauseMs >= BACKOFF_MAX_MS,
       backoffCount: b.backoffCount,
       pendingWaiters: b.rateWaiters.length
     };

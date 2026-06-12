@@ -296,7 +296,12 @@ function loadCachedIOCs() {
     try {
       const leanIOCs = JSON.parse(fs.readFileSync(LOCAL_LEAN_FILE, 'utf8'));
       mergeIOCs(merged, leanIOCs);
+      _leanParseFailedAt = 0; // healthy again
     } catch (e) {
+      // Phase D: a corrupted lean does NOT fall back to the full file — the
+      // scan continues with FEWER IOCs. Flag it so the degradation registry
+      // can alarm (ioc:lean-parse-failed) instead of one buried WARN line.
+      _leanParseFailedAt = Date.now();
       console.log('[WARN] Failed to load lean IOC database (iocs-lean.json): ' + e.message);
     }
   } else if (fs.existsSync(LOCAL_IOC_FILE)) {
@@ -509,6 +514,24 @@ function createLeanIOCs(fullIOCs) {
     updated: fullIOCs.updated,
     sources: fullIOCs.sources
   };
+}
+
+// Phase D (degradation registry): main-thread observable status of the lean
+// projection. `missing`/`stale` re-arm the full-223MB-per-worker fallback;
+// `parseFailed` means scans run with FEWER IOCs. Read by the daemon's
+// degradation tick (cheap: two statSync).
+let _leanParseFailedAt = 0;
+function getLeanStatus() {
+  let missing = false, stale = false;
+  try {
+    const fullExists = fs.existsSync(LOCAL_IOC_FILE);
+    const leanExists = fs.existsSync(LOCAL_LEAN_FILE);
+    if (fullExists && !leanExists) missing = true;
+    else if (fullExists && leanExists) {
+      try { stale = fs.statSync(LOCAL_LEAN_FILE).mtimeMs < fs.statSync(LOCAL_IOC_FILE).mtimeMs; } catch { stale = false; }
+    }
+  } catch { /* status is best-effort */ }
+  return { missing, stale, parseFailed: _leanParseFailedAt > 0, parseFailedAt: _leanParseFailedAt || null };
 }
 
 // Ensure LOCAL_LEAN_FILE exists and is at least as fresh as LOCAL_IOC_FILE.
@@ -773,4 +796,4 @@ function verifyIOCHMAC(data, hmac) {
   }
 }
 
-module.exports = { updateIOCs, loadCachedIOCs, invalidateCache, generateCompactIOCs, expandCompactIOCs, createLeanIOCs, ensureLeanIOCFile, writeLeanIOCFile, LOCAL_LEAN_FILE, LOCAL_IOC_FILE, mergeIOCs, createOptimizedIOCs, generateIOCHMAC, verifyIOCHMAC, checkIOCStaleness, NEVER_WILDCARD, NEVER_WILDCARD_PYPI };
+module.exports = { updateIOCs, loadCachedIOCs, invalidateCache, generateCompactIOCs, expandCompactIOCs, createLeanIOCs, ensureLeanIOCFile, writeLeanIOCFile, getLeanStatus, LOCAL_LEAN_FILE, LOCAL_IOC_FILE, mergeIOCs, createOptimizedIOCs, generateIOCHMAC, verifyIOCHMAC, checkIOCStaleness, NEVER_WILDCARD, NEVER_WILDCARD_PYPI };

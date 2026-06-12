@@ -1170,6 +1170,16 @@ function _stabilityFieldValue(stats) {
   return v;
 }
 
+// Phase D: currently-active degradation states for the daily report. The
+// registry lives in the daemon process (same instance); CLI callers that
+// build a report without it just show the em-dash.
+function _degradationsFieldValue() {
+  try {
+    const active = require('./degradation.js').getActiveDegradations();
+    return active.length > 0 ? `⚠️ ${active.join(', ')}` : '—';
+  } catch { return '—'; }
+}
+
 function buildDailyReportEmbed(stats, dailyAlerts, ledgerRollup) {
   // Use in-memory stats (accumulated since last reset, restored from disk on restart)
   // instead of disk-based daily entries which can undercount due to UTC/Paris date mismatch
@@ -1329,6 +1339,7 @@ function buildDailyReportEmbed(stats, dailyAlerts, ledgerRollup) {
           ? [{ name: 'Deferred Sandbox', value: `Enqueued: ${stats.sandboxDeferred || 0} | Processed: ${stats.deferredProcessed || 0} | Expired: ${stats.deferredExpired || 0}`, inline: false }]
           : []),
         { name: 'Stability', value: _stabilityFieldValue(stats), inline: false },
+        { name: 'Degradations', value: _degradationsFieldValue(), inline: false },
         ...(ledgerField ? [ledgerField] : []),
         { name: 'System', value: healthText, inline: false }
       ],
