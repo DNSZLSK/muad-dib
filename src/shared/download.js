@@ -174,8 +174,9 @@ function downloadToFile(url, destPath, timeoutMs = DOWNLOAD_TIMEOUT) {
           }
           if (res.statusCode === 429) {
             res.resume();
-            // Signal rate limiter to back off — drains tokens, forces ~1s pause
-            try { require('./http-limiter.js').signal429(); } catch {}
+            // Signal the host's brain to back off (escalating pause). Host is
+            // URL-derived: this path downloads npm tarballs AND pypi wheels.
+            try { const lim = require('./http-limiter.js'); lim.signal429(lim.hostForUrl(requestUrl)); } catch {}
             return reject(new Error(`HTTP 429 rate limited for ${requestUrl}`));
           }
           if (res.statusCode < 200 || res.statusCode >= 300) {

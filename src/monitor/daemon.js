@@ -666,6 +666,18 @@ function reportStats(stats) {
   if (stats.changesStreamPackages) {
     console.log(`[MONITOR]   Changes stream packages: ${stats.changesStreamPackages}`);
   }
+  // Network-brain state (governors phase A): one line per host that has seen
+  // any backoff — the observation signal for the A deployment gate (AIMD
+  // de-escalations visible, no sustained max-level) and phase D's input.
+  try {
+    const { getBrainState } = require('../shared/http-limiter.js');
+    const brain = getBrainState();
+    const noisy = Object.entries(brain).filter(([, s]) => s.backoffCount > 0 || s.level > 0 || s.pendingWaiters > 0);
+    if (noisy.length > 0) {
+      const line = noisy.map(([h, s]) => `${h}: level=${s.level} pause=${s.pauseRemainingMs}ms 429s=${s.backoffCount} waiters=${s.pendingWaiters}`).join(' | ');
+      console.log(`[MONITOR]   Brain: ${line}`);
+    }
+  } catch { /* observability only */ }
   if (stats.rssFallbackCount) {
     console.log(`[MONITOR]   RSS fallback activations: ${stats.rssFallbackCount}`);
   }
