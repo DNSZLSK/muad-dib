@@ -395,17 +395,25 @@ function getBrainState(host) {
 }
 
 function resetLimiter() {
+  // Reset IN PLACE — never drop the bucket objects. Consumers capture live
+  // references at module load (temporal-analysis exports its bucket's sem as
+  // _httpSemaphore); clearing the map would orphan those references and a
+  // reset would silently stop being observable through them (bit PR CI:
+  // 'clearMetadataCache resets semaphore').
+  _bootAt = Date.now() - BOOT_SLOWSTART_MS; // tests get full rate unless they opt into slow start
   for (const b of _buckets.values()) {
     if (b.grantTimer) { clearTimeout(b.grantTimer); b.grantTimer = null; }
     // Release anything queued so a reset between tests can never hang the suite.
     while (b.rateWaiters.length > 0) b.rateWaiters.shift().grant(true);
     b.sem.active = 0;
     b.sem.queue.length = 0;
+    b.tokens = _effectiveRate();
+    b.lastRefill = Date.now();
+    b.backoffCount = 0;
+    b.bo = { level: 0, pauseUntil: 0, lastPauseMs: 0, last429At: 0, windowStart: 0, grantsInWindow: 0, saw429InWindow: false };
   }
-  _buckets.clear();
   _pendingTokenReqs.clear();
   _localProxyBackoffCount = 0;
-  _bootAt = Date.now() - BOOT_SLOWSTART_MS; // tests get full rate unless they opt into slow start
 }
 
 /** Test seam: re-arm the boot slow-start window as if the process just booted. */
