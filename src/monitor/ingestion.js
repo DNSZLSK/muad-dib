@@ -564,6 +564,34 @@ async function getNpmLatestTarball(packageName) {
 // holds ~10KB of state; 1000 of them is a needless heap spike).
 const PRE_RESOLVE_CHUNK_SIZE = 50;
 
+// --- Load-aware pre-resolve shedding (2026-06-13) ---
+// Under catch-up (deep scan queue) or active npm throttle (elevated brain
+// level), prefetching up to CHANGES_LIMIT (1000) packuments per poll cycle
+// through the SHARED registry rate budget starves the per-scan metadata fetches
+// the workers actually need — and most prefetched items get spilled/shed before
+// any worker scans them, so the fetch is wasted budget that also keeps npm
+// 429-ing. When shedding, the batch skips the prefetch and enqueues items with
+// tarballUrl=null; resolveTarballAndScan() lazily resolves ONLY the items a
+// worker actually scans (the existing zero-scan-loss fallback path).
+const PRE_RESOLVE_SHED_QUEUE = Math.max(0, parseInt(process.env.MUADDIB_PRERESOLVE_SHED_QUEUE, 10) || 2000);
+const PRE_RESOLVE_SHED_LEVEL = Math.max(1, parseInt(process.env.MUADDIB_PRERESOLVE_SHED_LEVEL, 10) || 3);
+
+function preResolveShouldShed(scanQueue) {
+  // Kill-switch read live so it can be flipped via the systemd EnvironmentFile
+  // + restart without a code change/rebuild.
+  if (process.env.MUADDIB_PRERESOLVE_NO_SHED === '1') return false;
+  if (scanQueue && scanQueue.length > PRE_RESOLVE_SHED_QUEUE) return true;
+  try {
+    // Lazy-require so the brain accessor is stubbable in tests (a top-level
+    // destructure captures a frozen reference) and to dodge load-order cycles.
+    // require() is cached — negligible on this per-chunk check.
+    const { getBrainState, DEFAULT_HOST } = require('../shared/http-limiter.js');
+    const brain = getBrainState(DEFAULT_HOST);
+    if (brain && (brain.level || 0) >= PRE_RESOLVE_SHED_LEVEL) return true;
+  } catch { /* observability seam — must never block ingestion */ }
+  return false;
+}
+
 // If a scanQueue is provided, items are pushed onto it as soon as their chunk
 // finishes resolution — so a crash mid-batch only loses the current chunk's
 // in-flight work, not all the chunks that already completed. When scanQueue
@@ -575,8 +603,18 @@ async function preResolveNpmBatch(items, stats, scanQueue) {
   let resolved = 0;
   let alreadyResolved = 0;
   let failed = 0;
+  let shed = 0;
   for (let i = 0; i < items.length; i += PRE_RESOLVE_CHUNK_SIZE) {
     const chunk = items.slice(i, i + PRE_RESOLVE_CHUNK_SIZE);
+    if (preResolveShouldShed(scanQueue)) {
+      // Load-aware shed: skip the packument prefetch; enqueue as-is so workers
+      // lazy-resolve ONLY what they actually scan (resolveTarballAndScan handles
+      // tarballUrl=null — zero scan loss). Re-checked per chunk so prefetch
+      // resumes mid-batch the moment the queue drains below the threshold.
+      shed += chunk.length;
+      if (scanQueue) { for (const item of chunk) enqueueScan(scanQueue, item, stats); }
+      continue;
+    }
     await Promise.all(chunk.map(async (item) => {
       if (item.tarballUrl) { alreadyResolved++; return; }
       try {
@@ -626,10 +664,12 @@ async function preResolveNpmBatch(items, stats, scanQueue) {
   if (stats) {
     stats.npmPreResolved = (stats.npmPreResolved || 0) + resolved;
     stats.npmPreResolveFailed = (stats.npmPreResolveFailed || 0) + failed;
+    if (shed) stats.npmPreResolveShed = (stats.npmPreResolveShed || 0) + shed;
   }
   if (items.length >= 5) {
     const elapsed = Date.now() - start;
-    console.log(`[MONITOR] PRE-RESOLVE npm: ${resolved}/${items.length} in ${elapsed}ms (${failed} → lazy fallback${alreadyResolved ? `, ${alreadyResolved} already resolved` : ''})`);
+    const shedNote = shed ? `, ${shed} shed (load-aware)` : '';
+    console.log(`[MONITOR] PRE-RESOLVE npm: ${resolved}/${items.length} in ${elapsed}ms (${failed} → lazy fallback${alreadyResolved ? `, ${alreadyResolved} already resolved` : ''}${shedNote})`);
   }
 }
 
@@ -639,8 +679,17 @@ async function preResolvePyPIBatch(items, stats, scanQueue) {
   let resolved = 0;
   let alreadyResolved = 0;
   let failed = 0;
+  let shed = 0;
   for (let i = 0; i < items.length; i += PRE_RESOLVE_CHUNK_SIZE) {
     const chunk = items.slice(i, i + PRE_RESOLVE_CHUNK_SIZE);
+    if (preResolveShouldShed(scanQueue)) {
+      // Load-aware shed (shared gate): queue-depth dominates here; the prefetched
+      // PyPI metadata would mostly be for items shed before any worker scans them.
+      // Enqueue as-is — resolveTarballAndScan lazily resolves PyPI URLs too.
+      shed += chunk.length;
+      if (scanQueue) { for (const item of chunk) enqueueScan(scanQueue, item, stats); }
+      continue;
+    }
     await Promise.all(chunk.map(async (item) => {
       if (item.tarballUrl) { alreadyResolved++; return; }
       try {
@@ -679,10 +728,12 @@ async function preResolvePyPIBatch(items, stats, scanQueue) {
   if (stats) {
     stats.pypiPreResolved = (stats.pypiPreResolved || 0) + resolved;
     stats.pypiPreResolveFailed = (stats.pypiPreResolveFailed || 0) + failed;
+    if (shed) stats.pypiPreResolveShed = (stats.pypiPreResolveShed || 0) + shed;
   }
   if (items.length >= 5) {
     const elapsed = Date.now() - start;
-    console.log(`[MONITOR] PRE-RESOLVE pypi: ${resolved}/${items.length} in ${elapsed}ms (${failed} → lazy fallback${alreadyResolved ? `, ${alreadyResolved} already resolved` : ''})`);
+    const shedNote = shed ? `, ${shed} shed (load-aware)` : '';
+    console.log(`[MONITOR] PRE-RESOLVE pypi: ${resolved}/${items.length} in ${elapsed}ms (${failed} → lazy fallback${alreadyResolved ? `, ${alreadyResolved} already resolved` : ''}${shedNote})`);
   }
 }
 
@@ -1493,6 +1544,7 @@ module.exports = {
   getNpmLatestTarball,
   preResolveNpmBatch,
   preResolvePyPIBatch,
+  preResolveShouldShed,
 
   // RSS parsing
   parseNpmRss,
