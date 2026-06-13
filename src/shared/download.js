@@ -4,6 +4,7 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 const AdmZip = require('adm-zip');
 const { MAX_TARBALL_SIZE, DOWNLOAD_TIMEOUT } = require('./constants.js');
+const { registryAuthHeaders } = require('./registry-auth.js');
 
 // Allowed redirect domains for tarball downloads (SSRF protection)
 const ALLOWED_DOWNLOAD_DOMAINS = [
@@ -159,7 +160,7 @@ function downloadToFile(url, destPath, timeoutMs = DOWNLOAD_TIMEOUT) {
         if (redirectCount >= MAX_REDIRECTS) {
           return reject(new Error(`Too many redirects (${MAX_REDIRECTS}) for ${url}`));
         }
-        const req = https.get(requestUrl, { timeout: timeoutMs }, (res) => {
+        const req = https.get(requestUrl, { timeout: timeoutMs, headers: registryAuthHeaders(requestUrl) }, (res) => {
           if (res.statusCode === 301 || res.statusCode === 302) {
             res.resume();
             const location = res.headers.location;

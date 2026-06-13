@@ -287,6 +287,92 @@ async function runHttpLimiterTests() {
       }
     }
   });
+
+  // ── REGISTRY author-search cache (npm-registry.js) ───────────────────────
+  // /-/v1/search?text=maintainer: is the only dynamic, rate-limited per-scan
+  // registry call (it drove the monitor's 429 storm). A per-maintainer TTL cache
+  // must collapse repeat lookups, and the kill-switch must drop them — both
+  // WITHOUT changing author_package_count.
+  await asyncTest('REGISTRY-CACHE: same-maintainer author search fetched once (cache hit); kill-switch drops it', async () => {
+    const REGISTRY_PATH = require.resolve('../../src/scanner/npm-registry.js');
+    const originalFetch = globalThis.fetch;
+    const savedKill = process.env.MUADDIB_NPM_AUTHOR_SEARCH;
+    const meta = (maint) => ({
+      maintainers: [{ name: maint }],
+      time: { created: '2020-01-01T00:00:00Z', '1.0.0': '2020-01-01T00:00:00Z' },
+      'dist-tags': { latest: '1.0.0' },
+      versions: { '1.0.0': { maintainers: [{ name: maint }] } }
+    });
+    const stub = (c) => async (url) => {
+      if (url.includes('api.npmjs.org/downloads')) return { ok: true, status: 200, json: async () => ({ downloads: 5 }), headers: new Map() };
+      if (url.includes('/-/v1/search')) { c.search++; return { ok: true, status: 200, json: async () => ({ total: 7 }), headers: new Map() }; }
+      c.packument++; return { ok: true, status: 200, json: async () => meta('acme-bot'), headers: new Map() };
+    };
+    try {
+      // (a) cache ON: two packages, SAME maintainer → exactly ONE search, count preserved
+      delete process.env.MUADDIB_NPM_AUTHOR_SEARCH;
+      delete require.cache[REGISTRY_PATH];
+      const reg = require(REGISTRY_PATH);
+      const c = { search: 0, packument: 0 };
+      globalThis.fetch = stub(c);
+      const m1 = await reg.getPackageMetadata('cache-pkg-a');
+      const m2 = await reg.getPackageMetadata('cache-pkg-b'); // same maintainer acme-bot
+      assert(c.search === 1, `same-maintainer search must hit cache (1 fetch), got ${c.search}`);
+      assert(m1 && m2 && m1.author_package_count === 7 && m2.author_package_count === 7,
+        `author_package_count preserved from cache, got ${m1 && m1.author_package_count}/${m2 && m2.author_package_count}`);
+
+      // (b) kill-switch: no search at all, count defaults to 0
+      process.env.MUADDIB_NPM_AUTHOR_SEARCH = '0';
+      delete require.cache[REGISTRY_PATH];
+      const reg2 = require(REGISTRY_PATH);
+      const c2 = { search: 0, packument: 0 };
+      globalThis.fetch = stub(c2);
+      const m3 = await reg2.getPackageMetadata('killswitch-pkg');
+      assert(c2.search === 0, `kill-switch must drop the search call, got ${c2.search}`);
+      assert(m3 && m3.author_package_count === 0, `author_package_count defaults to 0 under kill-switch, got ${m3 && m3.author_package_count}`);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (savedKill === undefined) delete process.env.MUADDIB_NPM_AUTHOR_SEARCH; else process.env.MUADDIB_NPM_AUTHOR_SEARCH = savedKill;
+      delete require.cache[REGISTRY_PATH];
+    }
+  });
+
+  // ── REGISTRY-AUTH (src/shared/registry-auth.js) ──────────────────────────
+  // Authenticated registry reads raise npm's per-account limit; anonymous
+  // new-package scanning was getting ~500/h of per-IP 429s. Header must apply to
+  // registry.npmjs.org ONLY (never leak the token to pypi / api / replicate),
+  // and be a no-op when no token is configured.
+  await asyncTest('REGISTRY-AUTH: Bearer on registry.npmjs.org only when token set; never leaks to other hosts', async () => {
+    const AUTH_PATH = require.resolve('../../src/shared/registry-auth.js');
+    const saved = process.env.MUADDIB_NPM_TOKEN;
+    const savedNpm = process.env.NPM_TOKEN;
+    delete require.cache[AUTH_PATH];
+    const auth = require(AUTH_PATH);
+    try {
+      // No token → empty headers (anonymous — unchanged behaviour)
+      delete process.env.MUADDIB_NPM_TOKEN; delete process.env.NPM_TOKEN; auth._resetForTests();
+      assert(Object.keys(auth.registryAuthHeaders('https://registry.npmjs.org/lodash')).length === 0,
+        'no token → empty headers');
+
+      // Token set → Bearer on registry.npmjs.org
+      process.env.MUADDIB_NPM_TOKEN = 'npm_testtoken1234'; auth._resetForTests();
+      const h = auth.registryAuthHeaders('https://registry.npmjs.org/lodash');
+      assert(h.Authorization === 'Bearer npm_testtoken1234', `Bearer on registry, got ${JSON.stringify(h)}`);
+
+      // Never leak the token to other hosts
+      assert(!auth.registryAuthHeaders('https://pypi.org/pypi/requests/json').Authorization, 'no auth for pypi.org');
+      assert(!auth.registryAuthHeaders('https://api.npmjs.org/downloads/point/last-week/lodash').Authorization, 'no auth for api.npmjs.org');
+      assert(!auth.registryAuthHeaders('https://replicate.npmjs.com/registry/_changes').Authorization, 'no auth for replicate.npmjs.com');
+
+      // Status reports last4 only — never the token itself
+      const st = auth.npmAuthStatus();
+      assert(st.enabled === true && st.last4 === '1234' && !('token' in st), `status exposes only last4, got ${JSON.stringify(st)}`);
+    } finally {
+      if (saved === undefined) delete process.env.MUADDIB_NPM_TOKEN; else process.env.MUADDIB_NPM_TOKEN = saved;
+      if (savedNpm === undefined) delete process.env.NPM_TOKEN; else process.env.NPM_TOKEN = savedNpm;
+      delete require.cache[AUTH_PATH];
+    }
+  });
 }
 
 module.exports = { runHttpLimiterTests };
