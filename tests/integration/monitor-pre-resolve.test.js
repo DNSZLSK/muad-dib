@@ -487,6 +487,100 @@ async function runMonitorPreResolveTests() {
     }
   });
 
+  // ── Load-aware pre-resolve shedding (2026-06-13) ─────────────────────────
+  // Under catch-up (deep queue) or npm throttle (brain level), the per-cycle
+  // packument prefetch starves the per-scan metadata fetches and mostly fetches
+  // items that get spilled before scanning. Shedding skips the prefetch but
+  // still enqueues every item (workers lazy-resolve only what they scan).
+
+  await asyncTest('PRE-RESOLVE SHED: gate fires on deep queue + brain level, honors kill-switch', async () => {
+    const limiter = require('../../src/shared/http-limiter.js');
+    const origBrain = limiter.getBrainState;
+    try {
+      limiter.getBrainState = () => ({ level: 0 });
+      assert(ingestion.preResolveShouldShed([]) === false, 'shallow queue + brain level 0 → no shed');
+      assert(ingestion.preResolveShouldShed({ length: 2001 }) === true, 'queue depth > 2000 → shed');
+
+      limiter.getBrainState = () => ({ level: 4 });
+      assert(ingestion.preResolveShouldShed([]) === true, 'brain level 4 (shallow queue) → shed');
+      limiter.getBrainState = () => ({ level: 2 });
+      assert(ingestion.preResolveShouldShed([]) === false, 'brain level 2 < threshold 3 → no shed');
+
+      process.env.MUADDIB_PRERESOLVE_NO_SHED = '1';
+      limiter.getBrainState = () => ({ level: 12 });
+      assert(ingestion.preResolveShouldShed({ length: 999999 }) === false, 'kill-switch overrides everything');
+    } finally {
+      delete process.env.MUADDIB_PRERESOLVE_NO_SHED;
+      limiter.getBrainState = origBrain;
+    }
+  });
+
+  await asyncTest('PRE-RESOLVE SHED: npm batch on a deep queue enqueues every item WITHOUT a registry fetch', async () => {
+    const realGet = ingestion._deps.httpsGet;
+    let fetches = 0;
+    ingestion._deps.httpsGet = async () => { fetches++; return '{}'; };
+    // Prefill past the default shed threshold (2000). Distinct names → no dedup collision.
+    const queue = Array.from({ length: 2001 }, (_, i) => ({ name: `filler-${i}`, version: '1.0.0', ecosystem: 'npm', tarballUrl: 'https://x/filler.tgz' }));
+    const before = queue.length;
+    const items = [
+      { name: 'shed-a', version: '', ecosystem: 'npm', tarballUrl: null },
+      { name: 'shed-b', version: '', ecosystem: 'npm', tarballUrl: null }
+    ];
+    const stats = {};
+    try {
+      await ingestion.preResolveNpmBatch(items, stats, queue);
+      assert(fetches === 0, `shed must NOT hit the registry, got ${fetches} fetch(es)`);
+      assert(stats.npmPreResolveShed === 2, `npmPreResolveShed should be 2, got ${stats.npmPreResolveShed}`);
+      assert(!stats.npmPreResolved, `nothing pre-resolved while shedding, got ${stats.npmPreResolved}`);
+      assert(queue.length === before + 2, `both items must still be enqueued (zero ingestion loss), got +${queue.length - before}`);
+      assert(items[0].tarballUrl === null && !items[0]._npmInfo, 'shed items keep tarballUrl=null + no _npmInfo → workers lazy-resolve');
+    } finally {
+      ingestion._deps.httpsGet = realGet;
+    }
+  });
+
+  await asyncTest('PRE-RESOLVE SHED: kill-switch forces prefetch even on a deep queue', async () => {
+    const realGet = ingestion._deps.httpsGet;
+    let fetches = 0;
+    ingestion._deps.httpsGet = async () => {
+      fetches++;
+      return JSON.stringify({
+        name: 'noshed', 'dist-tags': { latest: '1.0.0' },
+        versions: { '1.0.0': { version: '1.0.0', dist: { tarball: 'https://x/noshed-1.0.0.tgz' }, scripts: {} } },
+        time: { '1.0.0': new Date().toISOString() }
+      });
+    };
+    const queue = Array.from({ length: 2001 }, (_, i) => ({ name: `filler-${i}`, ecosystem: 'npm', tarballUrl: 'https://x/f.tgz' }));
+    const items = [{ name: 'noshed', version: '', ecosystem: 'npm', tarballUrl: null }];
+    process.env.MUADDIB_PRERESOLVE_NO_SHED = '1';
+    try {
+      await ingestion.preResolveNpmBatch(items, {}, queue);
+      assert(fetches >= 1, `kill-switch must keep prefetching, got ${fetches} fetch(es)`);
+      assert(items[0].tarballUrl && items[0].tarballUrl.includes('noshed'), 'prefetch should resolve the item despite the deep queue');
+    } finally {
+      delete process.env.MUADDIB_PRERESOLVE_NO_SHED;
+      ingestion._deps.httpsGet = realGet;
+    }
+  });
+
+  await asyncTest('PRE-RESOLVE SHED: pypi batch on a deep queue enqueues without a registry fetch', async () => {
+    const realGet = ingestion._deps.httpsGet;
+    let fetches = 0;
+    ingestion._deps.httpsGet = async () => { fetches++; return '{}'; };
+    const queue = Array.from({ length: 2001 }, (_, i) => ({ name: `filler-${i}`, ecosystem: 'npm', tarballUrl: 'https://x/f.tgz' }));
+    const before = queue.length;
+    const items = [{ name: 'pypi-shed', version: '1.0.0', ecosystem: 'pypi', tarballUrl: null }];
+    const stats = {};
+    try {
+      await ingestion.preResolvePyPIBatch(items, stats, queue);
+      assert(fetches === 0, `pypi shed must NOT hit the registry, got ${fetches} fetch(es)`);
+      assert(stats.pypiPreResolveShed === 1, `pypiPreResolveShed should be 1, got ${stats.pypiPreResolveShed}`);
+      assert(queue.length === before + 1, `pypi item must still be enqueued, got +${queue.length - before}`);
+    } finally {
+      ingestion._deps.httpsGet = realGet;
+    }
+  });
+
   await asyncTest('HTTP-429: httpsPost signals the shared limiter to back off, then rejects', async () => {
     // B (CS3): the httpsPost path (PyPI XML-RPC / changes POST) must ALSO drain the shared
     // token bucket on a 429, exactly like httpsGet — not just acquire a slot and hammer on.

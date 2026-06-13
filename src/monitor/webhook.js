@@ -1235,9 +1235,18 @@ function buildDailyReportEmbed(stats, dailyAlerts, ledgerRollup) {
   const pypiPub = stats.pypiChangelogPackages || 0;
   const published = npmPub + pypiPub;
   const catchupSkipped = (stats.npmCatchupSkippedSeqs || 0) + (stats.pypiCatchupSkippedEvents || 0);
+  // Clarify the Ops headline so it isn't read as an overnight drop: it counts
+  // COMPLETED scans in the exact ledger window [last report → now], version/
+  // dedup-collapsed — intentionally lower than the in-memory counter (stats.scanned),
+  // which also tallies retries, burst extras and size-cap rejections
+  // (cf. queue.js uniqueScanAttempts). Surface the raw counter when it diverges.
+  const opsQualifier = headline ? ' (completed, deduped, 24h)' : '';
+  const rawCounter = (headline && typeof stats.scanned === 'number' && stats.scanned > hScanned)
+    ? ` · counter ${stats.scanned} (incl. retries/burst)`
+    : '';
   const opsSuffix = catchupSkipped > 0
-    ? `\nOps: ${hScanned} | Catch-up skip: ${catchupSkipped}`
-    : `\nOps: ${hScanned}`;
+    ? `\nOps: ${hScanned}${opsQualifier}${rawCounter} | Catch-up skip: ${catchupSkipped}`
+    : `\nOps: ${hScanned}${opsQualifier}${rawCounter}`;
   let coverageText;
   if (ledger && ledger.distinctPackages > 0 && ledger.distinctCoverage != null) {
     const pct = (ledger.distinctCoverage * 100).toFixed(0);
@@ -1344,9 +1353,10 @@ function buildDailyReportEmbed(stats, dailyAlerts, ledgerRollup) {
         { name: 'System', value: healthText, inline: false }
       ],
       footer: {
-        // Headline-source annotation: 'ledger' = window-exact [last report → now],
-        // 'counters' = in-memory fallback (ledger unavailable — pre-upgrade behavior).
-        text: `MUAD'DIB - Daily summary | headline: ${headline ? 'ledger (since last report)' : 'counters'} | ${readableTime}`
+        // Headline-source annotation: 'ledger' = window-exact [last report → now]
+        // (completed/deduped scans), 'counters' = in-memory fallback (ledger
+        // unavailable — pre-upgrade behavior).
+        text: `MUAD'DIB - Daily summary | headline: ${headline ? 'ledger — completed/deduped, exact 24h window' : 'counters (in-memory fallback)'} | ${readableTime}`
       },
       timestamp: now.toISOString()
     }]
