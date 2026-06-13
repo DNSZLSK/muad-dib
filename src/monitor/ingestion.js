@@ -9,6 +9,7 @@
 
 const https = require('https');
 const { acquireRegistrySlot, releaseRegistrySlot } = require('../shared/http-limiter.js');
+const { registryAuthHeaders } = require('../shared/registry-auth.js');
 const { loadCachedIOCs } = require('../ioc/updater.js');
 const { enqueueScan } = require('./scan-queue.js');
 const {
@@ -99,7 +100,7 @@ function httpsGet(url, timeoutMs = 30_000, deadlineMs = Math.max(timeoutMs * 2, 
       clearTimeout(deadline);
       if (err) reject(err); else resolve(value);
     };
-    req = _deps.https.get(url, { timeout: timeoutMs }, (res) => {
+    req = _deps.https.get(url, { timeout: timeoutMs, headers: registryAuthHeaders(url) }, (res) => {
       if (res.statusCode === 301 || res.statusCode === 302) {
         res.resume();
         const location = res.headers.location;

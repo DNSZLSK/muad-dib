@@ -1,6 +1,7 @@
 const { NPM_PACKAGE_REGEX } = require('../shared/constants.js');
 const { debugLog } = require('../utils.js');
 const { acquireRegistrySlot, releaseRegistrySlot, awaitRateToken, signal429, hostForUrl } = require('../shared/http-limiter.js');
+const { registryAuthHeaders } = require('../shared/registry-auth.js');
 const { computeAdvancedRegistrySignals } = require('../integrations/registry-signals.js');
 
 const REGISTRY_URL = 'https://registry.npmjs.org';
@@ -11,6 +12,16 @@ const SEARCH_URL = 'https://registry.npmjs.org/-/v1/search';
 // under sustained 429s during a large evaluate burst.
 const REQUEST_TIMEOUT = Math.max(1000, parseInt(process.env.MUADDIB_REGISTRY_TIMEOUT_MS, 10) || 10000); // 10s default
 const MAX_RETRIES = Math.max(1, parseInt(process.env.MUADDIB_REGISTRY_RETRIES, 10) || 5);
+
+// Per-maintainer cache for the /-/v1/search author-count lookup — the only
+// DYNAMIC (non-CDN), rate-limited registry endpoint we hit per scan. Without it,
+// firing the search on every scan generated the bulk of the monitor's 429s and
+// the shared brain then throttled the (healthy, CDN-served) packument reads too.
+// See getPackageMetadata. Env-tunable; defaults preserve the signal.
+const _authorCountCache = new Map(); // maintainer → { count, at }
+const AUTHOR_CACHE_TTL_MS = Math.max(0, parseInt(process.env.MUADDIB_AUTHOR_CACHE_TTL_MS, 10) || 3_600_000); // 1h
+const AUTHOR_CACHE_MAX = Math.max(100, parseInt(process.env.MUADDIB_AUTHOR_CACHE_MAX, 10) || 5000);
+const AUTHOR_SEARCH_ENABLED = process.env.MUADDIB_NPM_AUTHOR_SEARCH !== '0'; // kill-switch
 
 /**
  * Create a timeout signal, with fallback for older Node versions.
@@ -43,7 +54,7 @@ async function fetchWithRetry(url) {
     let response;
     const { signal, cleanup } = createTimeoutSignal(REQUEST_TIMEOUT);
     try {
-      response = await fetch(url, { signal });
+      response = await fetch(url, { signal, headers: registryAuthHeaders(url) });
     } catch {
       cleanup();
       // REG-001: Retry on timeout/abort instead of returning null immediately.
@@ -170,26 +181,45 @@ async function getPackageMetadata(packageName) {
   }
   const provenanceRegressed = !latestHasProvenance && anyPriorHadProvenance;
 
-  // 2. Weekly downloads + author search (parallel)
+  // 2. Weekly downloads + author package count (parallel).
+  // The author count comes from /-/v1/search?text=maintainer: which — unlike the
+  // CDN-served packument — is DYNAMIC, slow (~300-950ms) and the one per-scan call
+  // npm aggressively rate-limits. A TTL cache keyed on the maintainer collapses
+  // the search volume (maintainers repeat heavily: scopes / bots / monorepos)
+  // while keeping author_package_count byte-identical. MUADDIB_NPM_AUTHOR_SEARCH=0
+  // drops the call entirely — the count then stays absent, exactly as the
+  // pre-resolve fast path already leaves it.
   const downloadsUrl = DOWNLOADS_URL + '/' + encodeURIComponent(packageName);
-  const authorUrl = maintainer
+  const authorUrl = (AUTHOR_SEARCH_ENABLED && maintainer)
     ? SEARCH_URL + '?text=maintainer:' + encodeURIComponent(maintainer) + '&size=1'
     : null;
 
-  async function fetchAuthorWithSlot() {
-    if (!authorUrl) return null;
+  async function getAuthorPackageCount() {
+    if (!authorUrl) return 0;
+    const hit = _authorCountCache.get(maintainer);
+    if (hit && (Date.now() - hit.at) < AUTHOR_CACHE_TTL_MS) return hit.count;
     await acquireRegistrySlot();
-    try { return await fetchWithRetry(authorUrl); }
+    let data;
+    try { data = await fetchWithRetry(authorUrl); }
     finally { releaseRegistrySlot(); }
+    // 429-exhausted / error → fetchWithRetry returns null: reuse a stale entry if
+    // present and do NOT cache the miss (a transient 0 would poison the typosquat
+    // "author has ≤1 package" signal).
+    if (!data) return hit ? hit.count : 0;
+    const count = data.total ?? 0;
+    if (_authorCountCache.size >= AUTHOR_CACHE_MAX) {
+      _authorCountCache.delete(_authorCountCache.keys().next().value); // FIFO evict (bounded)
+    }
+    _authorCountCache.set(maintainer, { count, at: Date.now() });
+    return count;
   }
 
-  const [downloadsData, authorData] = await Promise.all([
+  const [downloadsData, authorPackageCount] = await Promise.all([
     fetchWithRetry(downloadsUrl),    // api.npmjs.org — no semaphore needed
-    fetchAuthorWithSlot()            // registry.npmjs.org — semaphore protected
+    getAuthorPackageCount()          // registry.npmjs.org search — cached + kill-switchable
   ]);
 
   const weeklyDownloads = downloadsData?.downloads ?? 0;
-  const authorPackageCount = authorData?.total ?? 0;
   const versionCount = meta.versions ? Object.keys(meta.versions).length : 0;
   const description = (typeof latestMeta?.description === 'string' ? latestMeta.description
     : (typeof meta.description === 'string' ? meta.description : ''));
