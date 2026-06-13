@@ -36,7 +36,7 @@ function createTimeoutSignal(ms) {
   return { signal: controller.signal, cleanup: () => clearTimeout(timer) };
 }
 
-async function fetchWithRetry(url) {
+async function fetchWithRetry(url, opts = {}) {
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     // The caller's acquireRegistrySlot paid the rate token for the FIRST
     // attempt only. Every retry is a new network request and must pay its own
@@ -82,7 +82,16 @@ async function fetchWithRetry(url) {
     // Retry-After (capped at 30s) with jitter so retries don't re-synchronize.
     if (response.status === 429) {
       try { await response.text(); } catch (e) { debugLog('response drain failed:', e.message); }
-      try { signal429(); } catch { /* limiter is best-effort */ }
+      // Back off the CORRECT host's bucket. This previously defaulted to
+      // registry.npmjs.org, so a 429 from api.npmjs.org/downloads (a SEPARATE,
+      // aggressively rate-limited host that 429s ~every request) poisoned the
+      // registry brain and stalled the tarball/packument fetches that were
+      // themselves healthy — the measured ~20s/scan throughput wall.
+      try { signal429(hostForUrl(url)); } catch { /* limiter is best-effort */ }
+      // Best-effort callers (the weekly-downloads reputation signal, whose
+      // endpoint 429s on essentially every request) opt out of the retry storm:
+      // retrying 5× with ~2s sleeps just burns ~10s/scan to still return null.
+      if (opts.noRetryOn429) return null;
       const retryAfter = parseInt(response.headers.get('retry-after'), 10);
       const base = Math.min(retryAfter && retryAfter > 0 ? retryAfter * 1000 : 2000, 30000);
       await new Promise(r => setTimeout(r, Math.round(base * (0.5 + Math.random() * 0.5))));
@@ -215,7 +224,7 @@ async function getPackageMetadata(packageName) {
   }
 
   const [downloadsData, authorPackageCount] = await Promise.all([
-    fetchWithRetry(downloadsUrl),    // api.npmjs.org — no semaphore needed
+    fetchWithRetry(downloadsUrl, { noRetryOn429: true }),    // api.npmjs.org — rate-limited; best-effort single shot (no retry storm, correct-host backoff)
     getAuthorPackageCount()          // registry.npmjs.org search — cached + kill-switchable
   ]);
 
