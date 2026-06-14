@@ -26,8 +26,17 @@ const SINK_MEMBER_METHODS = new Set([
 ]);
 const SINK_INSTANCE_METHODS = new Set(['connect', 'write', 'send']);
 
+// Receiver roots that make connect/write/send LOCAL I/O or IPC, never external-network
+// exfil: `process.stdout/stderr.write`, `process.send` (child IPC to the parent), and any
+// `console.*`. SINK_INSTANCE_METHODS matches by method name alone, so without this a
+// console/stderr write of a tainted value reads as a cross-file network sink (segment-A FP
+// driver: contextdevkit, amicus). Real socket/ws/req sinks (receivers `socket`/`ws`/`req`/
+// `net.connect()`…) are unaffected. Globals are trusted here as they are everywhere else.
+const NON_NETWORK_SINK_RECEIVER_ROOTS = new Set(['process', 'console']);
+
 
 module.exports = {
   MAX_GRAPH_NODES, MAX_GRAPH_EDGES, MAX_FLOWS, MAX_TAINT_DEPTH,
-  SENSITIVE_MODULES, ACORN_OPTIONS, SINK_CALLEE_NAMES, SINK_MEMBER_METHODS, SINK_INSTANCE_METHODS
+  SENSITIVE_MODULES, ACORN_OPTIONS, SINK_CALLEE_NAMES, SINK_MEMBER_METHODS, SINK_INSTANCE_METHODS,
+  NON_NETWORK_SINK_RECEIVER_ROOTS
 };

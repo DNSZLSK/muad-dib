@@ -1488,6 +1488,103 @@ async function runModuleGraphTests() {
       cleanup(tmp);
     }
   });
+
+  // === Option 2 (segment A): process.*/console.* receivers are local I/O, not network sinks ===
+  // SINK_INSTANCE_METHODS (connect/write/send) matched by method name alone, so
+  // process.stdout/stderr.write, process.send (IPC) and console.* read as "cross-file network
+  // exfil" sinks (FP drivers: contextdevkit, amicus). getReceiverRootName + the
+  // NON_NETWORK_SINK_RECEIVER_ROOTS gate reject those while keeping real socket/ws/req sinks.
+  test('module-graph: process.stdout/stderr.write is console I/O, not a network sink (segment-A FP)', () => {
+    const tmp = makeTmpDir();
+    try {
+      writeFile(tmp, 'reader.js', `
+        const fs = require('fs');
+        module.exports = { read() { return fs.readFileSync('.npmrc', 'utf8'); } };
+      `);
+      writeFile(tmp, 'writer.js', `
+        module.exports = { emit(d) { process.stdout.write(d); process.stderr.write(d); } };
+      `);
+      writeFile(tmp, 'index.js', `
+        const reader = require('./reader');
+        const writer = require('./writer');
+        writer.emit(reader.read());
+      `);
+      const graph = buildModuleGraph(tmp);
+      const tainted = annotateTaintedExports(graph, tmp);
+      const sinks = annotateSinkExports(graph, tmp);
+      const flows = detectCrossFileFlows(graph, tainted, sinks, tmp);
+      assert(flows.length === 0, `process.stdout/stderr.write is console I/O, expected 0 flows, got ${flows.length}`);
+    } finally {
+      cleanup(tmp);
+    }
+  });
+
+  test('module-graph: process.send (child IPC) is not a network sink', () => {
+    const tmp = makeTmpDir();
+    try {
+      writeFile(tmp, 'reader.js', `
+        const fs = require('fs');
+        module.exports = { read() { return fs.readFileSync('.env', 'utf8'); } };
+      `);
+      writeFile(tmp, 'writer.js', `
+        module.exports = { emit(d) { process.send(d); } };
+      `);
+      writeFile(tmp, 'index.js', `
+        const reader = require('./reader');
+        const writer = require('./writer');
+        writer.emit(reader.read());
+      `);
+      const graph = buildModuleGraph(tmp);
+      const tainted = annotateTaintedExports(graph, tmp);
+      const sinks = annotateSinkExports(graph, tmp);
+      const flows = detectCrossFileFlows(graph, tainted, sinks, tmp);
+      assert(flows.length === 0, `process.send is IPC to the parent, expected 0 flows, got ${flows.length}`);
+    } finally {
+      cleanup(tmp);
+    }
+  });
+
+  test('module-graph: getSinkName keeps real socket/ws/net sinks, drops process/console (FN guard)', () => {
+    const acorn = require('acorn');
+    const { getSinkName } = require('../../src/scanner/module-graph/detect-cross-file.js');
+    const sinkOf = (code) => {
+      const ast = acorn.parse(code, { ecmaVersion: 2022 });
+      let res = null;
+      (function w(n) {
+        if (!n || res || typeof n !== 'object') return;
+        if (n.type === 'CallExpression') { const s = getSinkName(n); if (s) { res = s; return; } }
+        for (const k in n) { const v = n[k]; if (Array.isArray(v)) v.forEach(w); else if (v && typeof v === 'object') w(v); }
+      })(ast);
+      return res;
+    };
+    // Real network sinks on non-process/console receivers must STILL be classified as sinks:
+    assert(sinkOf('socket.write(d)') === 'write()', 'socket.write must stay a sink');
+    assert(sinkOf('ws.send(d)') === 'send()', 'ws.send must stay a sink');
+    assert(sinkOf('conn.connect(o)') === 'connect()', 'conn.connect must stay a sink');
+    assert(sinkOf('this.sender.send(d)') === 'send()', 'this.sender.send must stay a sink (non-Identifier root)');
+    assert(sinkOf('net.connect(1234, h)') === 'connect()', 'net.connect must stay a sink');
+    assert(sinkOf('http.request({ hostname: h }, cb)') === 'http.request()', 'http.request must stay a sink');
+    // Local I/O receivers must NOT be classified as network sinks:
+    assert(sinkOf('process.stdout.write(d)') === null, 'process.stdout.write is not a network sink');
+    assert(sinkOf('process.stderr.write(d)') === null, 'process.stderr.write is not a network sink');
+    assert(sinkOf('process.send(d)') === null, 'process.send (IPC) is not a network sink');
+    assert(sinkOf('console.write(d)') === null, 'console.write is not a network sink');
+  });
+
+  test('module-graph: getReceiverRootName resolves the receiver root for sink gating', () => {
+    const acorn = require('acorn');
+    const { getReceiverRootName } = require('../../src/scanner/module-graph/parse-utils.js');
+    const rootOf = (code) => {
+      const ast = acorn.parse(code, { ecmaVersion: 2022 });
+      return getReceiverRootName(ast.body[0].expression.callee);
+    };
+    assert(rootOf('process.stdout.write(x)') === 'process', 'process.stdout.write -> process');
+    assert(rootOf('process.send(x)') === 'process', 'process.send -> process');
+    assert(rootOf('console.error(x)') === 'console', 'console.error -> console');
+    assert(rootOf('socket.write(x)') === 'socket', 'socket.write -> socket');
+    assert(rootOf('net.connect(p, h)') === 'net', 'net.connect -> net');
+    assert(rootOf('this.sender.send(x)') === null, 'this.sender.send -> null (non-Identifier root)');
+  });
 }
 
 module.exports = { runModuleGraphTests };

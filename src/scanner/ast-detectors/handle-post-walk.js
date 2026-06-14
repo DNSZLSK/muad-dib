@@ -1,5 +1,7 @@
 'use strict';
 
+const { networkDestinationsAllBenign } = require('../../sdk-destination.js');
+
 function handlePostWalk(ctx) {
   // SANDWORM_MODE: zlib inflate + base64 decode + eval/Function/Module._compile = obfuscated payload
   if (ctx.hasZlibInflate && ctx.hasBase64Decode && ctx.hasDynamicExec) {
@@ -322,7 +324,12 @@ function handlePostWalk(ctx) {
   const hasSensitiveEnvInFile = ctx.threats.some(t =>
     t.file === ctx.relFile && t.type === 'env_access' && t.severity === 'HIGH'
   );
-  if (hasDetachedInFile && hasSensitiveEnvInFile && ctx.hasNetworkCallInFile) {
+  // FP gate (segment A): suppress this credential→network compound when EVERY network
+  // destination in the file is first-party/local/provider (e.g. an otel collector on
+  // localhost, an SDK POST to its own API). A suspicious/unknown/public-IP host — or no
+  // literal host at all — leaves it firing (conservative: confirmed-benign only).
+  const destAllBenign = ctx._content ? networkDestinationsAllBenign(ctx._content) : false;
+  if (hasDetachedInFile && hasSensitiveEnvInFile && ctx.hasNetworkCallInFile && !destAllBenign) {
     ctx.threats.push({
       type: 'detached_credential_exfil',
       severity: 'CRITICAL',
@@ -334,7 +341,7 @@ function handlePostWalk(ctx) {
   // Audit v3 bypass fix: uncaughtException + env access + network = silent exfiltration
   // Pattern: process.on('uncaughtException', handler) that reads env vars and sends to network.
   // Never legitimate — error handlers don't need to send credentials to external servers.
-  if (ctx.hasUncaughtExceptionHandler && hasSensitiveEnvInFile && ctx.hasNetworkCallInFile) {
+  if (ctx.hasUncaughtExceptionHandler && hasSensitiveEnvInFile && ctx.hasNetworkCallInFile && !destAllBenign) {
     ctx.threats.push({
       type: 'uncaught_exception_exfil',
       severity: 'CRITICAL',

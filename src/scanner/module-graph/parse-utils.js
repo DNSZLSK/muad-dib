@@ -107,6 +107,18 @@ function getMemberChain(node, depth) {
   return '';
 }
 
+// Root identifier of a call's receiver, e.g. `process` for (process.stdout).write(),
+// `process` for process.send(), `console` for console.error(), `sender` for sender.send().
+// Returns null when the receiver root is not a plain Identifier (e.g. this.x.write(),
+// foo().bar()). Used to reject local-IO/IPC receivers (process/console) from the
+// write/send/connect instance-method sink set, which matches by method name alone.
+function getReceiverRootName(callee) {
+  if (!callee || callee.type !== 'MemberExpression') return null;
+  let obj = callee.object;
+  while (obj && obj.type === 'MemberExpression') obj = obj.object;
+  return obj && obj.type === 'Identifier' ? obj.name : null;
+}
+
 function extractLiteralArg(args) {
   if (!args || args.length === 0) return '';
   const first = args[0];
@@ -136,6 +148,6 @@ function toRel(abs, packagePath) {
 
 module.exports = {
   parseFile, walkAST, isRequireCall, isLocalImport, isModuleExportsAssign,
-  getExportName, getFunctionBody, getMemberChain, extractLiteralArg,
+  getExportName, getFunctionBody, getMemberChain, getReceiverRootName, extractLiteralArg,
   resolveLocal, isFileExists, toRel
 };
