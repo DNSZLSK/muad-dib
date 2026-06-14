@@ -4,10 +4,10 @@ const path = require('path');
 const fs = require('fs');
 const { debugLog } = require('../../utils');
 const { networkDestinationsAllBenign } = require('../../sdk-destination.js');
-const { MAX_FLOWS, SINK_CALLEE_NAMES, SINK_MEMBER_METHODS, SINK_INSTANCE_METHODS } = require('./constants.js');
+const { MAX_FLOWS, SINK_CALLEE_NAMES, SINK_MEMBER_METHODS, SINK_INSTANCE_METHODS, NON_NETWORK_SINK_RECEIVER_ROOTS } = require('./constants.js');
 const {
   parseFile, walkAST, isRequireCall, isLocalImport, isModuleExportsAssign,
-  getExportName, getMemberChain, resolveLocal
+  getExportName, getMemberChain, getReceiverRootName, resolveLocal
 } = require('./parse-utils.js');
 
 /**
@@ -598,7 +598,12 @@ function getSinkName(callNode) {
     // instance.connect(), socket.write(), ws.send()
     const method = callee.property.name || callee.property.value;
     if (SINK_INSTANCE_METHODS.has(method)) {
-      return `${method}()`;
+      // Reject process.*/console.* receivers: process.stdout/stderr.write,
+      // process.send (IPC), console.* are local I/O, never external-network exfil.
+      const root = getReceiverRootName(callee);
+      if (!(root && NON_NETWORK_SINK_RECEIVER_ROOTS.has(root))) {
+        return `${method}()`;
+      }
     }
   }
 
