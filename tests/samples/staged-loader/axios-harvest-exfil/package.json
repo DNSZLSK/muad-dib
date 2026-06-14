@@ -1,0 +1,6 @@
+{
+  "name": "axios-harvest-exfil",
+  "version": "1.0.0",
+  "description": "Malicious: credential-harvesting regex + exfiltration to a paste-site C2 via AXIOS (not https.request). Guards the axios extension to the network-call set — credential_regex_harvest must stay HIGH because a real exfil sink (suspicious paste host) is present. Mirrors credential-harvest-exfil but with axios as the transport.",
+  "main": "index.js"
+}

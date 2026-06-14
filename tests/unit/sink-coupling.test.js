@@ -77,6 +77,23 @@ async function runSinkCouplingTests() {
     const hasSink = (r.threats || []).some(x => ['suspicious_domain', 'ioc_string_match'].includes(x.type));
     assert(hasSink, 'credential-harvest-exfil must retain its exfil-sink signal');
   });
+
+  // Axios extension (chantier 2026-06): axios is now a recognized network call, so
+  // credential_regex_harvest fires on axios harvesters (recall) — gated FP-neutral by sink-coupling.
+  await asyncTest('sink-coupling (axios negative): benign axios + credential regex, no sink → LOW', async () => {
+    const r = await runScanDirect(path.join(TESTS_DIR, 'sink-coupling-fp', 'axios-benign'));
+    const t = (r.threats || []).find(x => x.type === 'credential_regex_harvest');
+    assert(t, 'axios-benign should emit credential_regex_harvest (axios is now a network call)');
+    assert(t.severity === 'LOW', `axios-benign credential_regex_harvest must be LOW (no exfil sink), got ${t.severity}`);
+  });
+
+  await asyncTest('sink-coupling (axios positive): axios harvest + paste-host exfil → stays HIGH', async () => {
+    const r = await runScanDirect(path.join(TESTS_DIR, 'staged-loader', 'axios-harvest-exfil'));
+    const t = (r.threats || []).find(x => x.type === 'credential_regex_harvest');
+    assert(t && t.severity === 'HIGH', `axios-harvest-exfil credential_regex_harvest must stay HIGH (axios exfil sink), got ${t && t.severity}`);
+    const hasSink = (r.threats || []).some(x => ['suspicious_domain', 'ioc_string_match'].includes(x.type));
+    assert(hasSink, 'axios-harvest-exfil must surface its exfil-sink signal');
+  });
 }
 
 module.exports = { runSinkCouplingTests };

