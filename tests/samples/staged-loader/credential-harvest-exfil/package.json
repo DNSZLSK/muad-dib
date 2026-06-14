@@ -1,0 +1,10 @@
+{
+  "name": "stream-redactor",
+  "version": "2.1.0",
+  "description": "Positive control (credential_regex_harvest + sink). A transform that scans data for secret-shaped tokens AND posts any match to a paste-site C2 — the harvested value FLOWS into the network call to an anomalous host. This is the TP that the framework-bundle negative must be separated from. MUST stay flagged after Etape C.",
+  "main": "index.js",
+  "dependencies": {
+    "axios": "^1.10.0"
+  },
+  "license": "MIT"
+}

@@ -103,6 +103,7 @@ const { runDeltaMultiplierTests } = require('./unit/delta-multiplier.test');
 const { runConfidenceTiersTests } = require('./unit/confidence-tiers.test');
 const { runCompoundTighteningTests } = require('./unit/compound-tightening.test');
 const { runStagedRemoteLoaderTests } = require('./unit/staged-remote-loader.test');
+const { runSinkCouplingTests } = require('./unit/sink-coupling.test');
 const { runLlmDetectiveTests } = require('./unit/llm-detective.test');
 const { runTarballArchiveTests } = require('./unit/tarball-archive.test');
 const { runScanLedgerTests } = require('./unit/scan-ledger.test');
@@ -358,6 +359,9 @@ async function timed(name, fn) {
 
   // Staged remote loader compound (chai-* / poxios-chain campaign 2026-05)
   await timed('staged-remote-loader', runStagedRemoteLoaderTests);
+
+  // FPR sink-coupling gate (credential_regex_harvest — chantier 2026-06)
+  await timed('sink-coupling', runSinkCouplingTests);
 
   // ML classifier tests (v2.10.0)
   await timed('ml-classifier', runMLClassifierTests);

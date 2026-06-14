@@ -269,6 +269,8 @@ async function runScoringHardeningTests() {
     for (let i = 0; i < 10; i++) {
       threats.push({ type: 'env_access', severity: 'MEDIUM', file: `f${i}.js`, message: `env${i}` });
     }
+    // FPR sink-coupling (2026-06): the floor protects a REAL exfil regex, always paired with a sink.
+    threats.push({ type: 'ioc_string_match', severity: 'CRITICAL', file: 'lib/http.js', message: 'known C2' });
     applyFPReductions(threats, null, null);
     const credThreats = threats.filter(t => t.type === 'credential_regex_harvest');
     const highOnes = credThreats.filter(t => t.severity === 'HIGH');
@@ -284,7 +286,9 @@ async function runScoringHardeningTests() {
     const threats = [
       { type: 'credential_regex_harvest', severity: 'HIGH', file: 'steal.js', message: 'regex1' },
       { type: 'credential_regex_harvest', severity: 'HIGH', file: 'steal.js', message: 'regex2' },
-      { type: 'env_access', severity: 'MEDIUM', file: 'a.js', message: 'env' }
+      { type: 'env_access', severity: 'MEDIUM', file: 'a.js', message: 'env' },
+      // FPR sink-coupling: a real stealer exfils — pair with a sink (see sink-coupling.test.js)
+      { type: 'suspicious_domain', severity: 'HIGH', file: 'steal.js', message: 'exfil host' }
     ];
     applyFPReductions(threats, null, null);
     assert(threats[0].severity === 'HIGH',
@@ -433,11 +437,14 @@ async function runScoringHardeningTests() {
 
   test('FP-P7: credential_regex_harvest in dist/ gets one-notch downgrade (not bundler artifact)', () => {
     const threats = [
-      { type: 'credential_regex_harvest', severity: 'HIGH', file: 'dist/http-client.js', message: 'Bearer regex' }
+      { type: 'credential_regex_harvest', severity: 'HIGH', file: 'dist/http-client.js', message: 'Bearer regex' },
+      // FPR sink-coupling: with an exfil sink present the dist/ one-notch downgrade applies
+      // (HIGH→MEDIUM); WITHOUT a sink credential_regex_harvest → LOW (see sink-coupling.test.js).
+      { type: 'suspicious_domain', severity: 'HIGH', file: 'lib/exfil.js', message: 'exfil host' }
     ];
     applyFPReductions(threats, null, null);
     assert(threats[0].severity === 'MEDIUM',
-      `credential_regex_harvest in dist/ should be MEDIUM (1-notch, not bundler artifact), got ${threats[0].severity}`);
+      `credential_regex_harvest in dist/ (with sink) should be MEDIUM (1-notch, not bundler artifact), got ${threats[0].severity}`);
   });
 
   // ==========================================================================

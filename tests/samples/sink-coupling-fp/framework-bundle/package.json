@@ -1,0 +1,7 @@
+{
+  "name": "ui-kit-bundle",
+  "version": "4.2.0",
+  "description": "Negative control (sink-coupling-fp). Vendored/minified UI-framework bundle. credential_regex_harvest matches token-SHAPED strings (redaction regexes + placeholder example keys) inside the bundle; there is NO install hook and NO exfil sink. Models the react-markup / @sveltejs/kit bundle FP. Must NOT escalate to suspect after Etape C.",
+  "main": "cjs/index.js",
+  "license": "MIT"
+}
