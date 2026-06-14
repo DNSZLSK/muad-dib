@@ -88,7 +88,7 @@ function extractDomain(url) {
     // Capture only valid hostname characters so a path-less URL immediately followed by
     // a quote/paren (e.g. fetch('https://api.openai.com')) does not absorb the trailing
     // ')" into the host. Stops at /, :, ?, #, quotes, parens, etc.
-    const match = url.match(/^https?:\/\/([a-zA-Z0-9.\-]+)/i);
+    const match = url.match(/^https?:\/\/([a-zA-Z0-9.-]+)/i);
     return match ? match[1].toLowerCase() : null;
   } catch {
     return null;

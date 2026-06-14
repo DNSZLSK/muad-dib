@@ -1,6 +1,6 @@
 'use strict';
 
-// Destination-awareness gate (chantier FPR segment A — FPR-segment-A-diagnosis-2026-06-14.md).
+// Destination-awareness gate (chantier FPR segment A, 2026-06).
 // A credential→network taint flow (intent_credential_exfil / cross_file_dataflow /
 // detached_credential_exfil) is a FALSE POSITIVE when EVERY network destination is provably
 // non-exfil: loopback/private/reserved IP, or a curated SaaS/cloud/AI provider API. Any

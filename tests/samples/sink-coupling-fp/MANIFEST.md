@@ -1,6 +1,6 @@
 # sink-coupling-fp — fixtures de gate pour le chantier FPR (Étape A → C)
 
-Fixtures issues de l'adjudication aveugle du 2026-06-14 (`FPR-adjudication-2026-06-14.md`).
+Fixtures issues de l'adjudication aveugle du 2026-06-14 (chantier FPR).
 Elles encodent le **discriminant du rubric** : un signal d'install/exec/harvest n'est un TP que
 s'il est **couplé à un sink** (exec de code distant / exfil vers un host anormal). Sans sink = FP.
 

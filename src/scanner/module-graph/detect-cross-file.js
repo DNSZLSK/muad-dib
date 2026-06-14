@@ -978,7 +978,7 @@ function isNetworkSinkDescriptor(sink) {
  * file references a suspicious/paste host, a public IP, or any unknown domain (so a real
  * exfil like ecto — webhook.site + direct-IP — keeps firing). The package stays visible
  * via its other (lower-severity) signals, the same way intent-graph skips SDK pairs.
- * Rationale + corpus: FPR-segment-A-diagnosis-2026-06-14.md.
+ * Rationale + corpus: chantier FPR segment A (2026-06).
  *
  * @param {Array} flows - assembled cross-file flows (main + callback + emitter)
  * @param {string} packagePath - package root, to resolve sink file content

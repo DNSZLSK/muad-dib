@@ -5,6 +5,45 @@ All notable changes to MUAD'DIB will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Repo hygiene + documentation resync (2026-06-14).** Removed the leftover `data/alerts-sample.tar.gz` fixture from git tracking (the rest of `data/` was already gitignored); moved the 2026-06-14 FPR audit working documents (adjudication, baseline, segment-A diagnosis, typosquat/lifecycle measurement) and the `audit-data/` directory out of the repo root into the gitignored `data/` store; removed the dead `src/ml/model-trees-backup.js` (byte-identical duplicate of `model-trees.js`). Regenerated `sbom.json` (CycloneDX) for 2.11.117. Made the registry-auth http-limiter test hermetic (it no longer depends on the dev machine's `~/.npmrc`). Resynced all docs to current counts: **266 rules** (261 RULES + 5 PARANOID), **33** scanner root files + **3** detector subdirectories (`ast-detectors/`, `module-graph/`, `python-ast-detectors/`), and **141** test files.
+
+## [2.11.117] - 2026-06-14
+
+Consolidated entry for the **2.11.77 → 2.11.117** span (41 patch releases, 2026-06-07 → 2026-06-14): a monitor-daemon production-hardening sprint plus a focused false-positive-reduction pass. Grouped by theme rather than per-version.
+
+### Added
+
+- **Process-wide network "brain" (phase A).** Host-keyed token buckets with a worker token proxy and AIMD backoff, so all monitor workers share one coordinated rate limit against registry.npmjs.org instead of each storming it independently.
+- **Memory governor (phase B).** Global admission by ticket + combined RSS/heap watermark, plus a **heavy-lane** that serializes memory-heavy scans (minified-JS weighting, oversize-file routing, reactive heap watermark).
+- **Work conservation (phase C).** Interrupted scans are ledgered and respilled (bounded), so partial work survives worker restarts.
+- **Degradation registry (phase D).** Named degradation states with sustained-entry alarms and daily visibility.
+- **npm registry authentication** (`src/shared/registry-auth.js`). An optional `MUADDIB_NPM_TOKEN` / `NPM_TOKEN` / `~/.npmrc` token raises the per-account rate limit; applied to registry.npmjs.org only, never leaked to other hosts.
+- **`muaddib fpr-live`** — operational alert-rate dashboard.
+- **Shadow-mode framework** + `compromised_email_domain` V2 + an MCP **zero-width gate** (R5b) with 3-tier shadow classification and an adversarial corpus.
+- **F15** `mcp_server_benign_lifecycle` contextual FP cap.
+
+### Changed
+
+- **Reporting / webhook.** Daily report split into Daily (24h) + Ops embeds; unified gate; honest distinct-package coverage; resilience (retry, resend, boot redeliver, env-loader); publish-burst pre-alerts throttled (24h cooldown + reputation filter).
+- **IOC loading.** Lean projection of `iocs.json` — workers stop loading the full 223 MB.
+- **HTTP limiter.** Token-bucket FIFO + 429 exponential backoff; retries pay their own rate token.
+- **Scoring.** Pre-release channel versions inherit partial reputation; tier-1b classification now requires corroboration (IOC matches → tier-1a).
+- **CLI.** Professionalized output, rendering-bug fixes, IOC-scraper output cleanup.
+
+### Fixed — false-positive reduction (segment A)
+
+- **`credential_regex_harvest` sink-coupling gate.** A credential-shaped regex co-located with a network call is downgraded unless an independent exfil sink to an anomalous destination co-occurs (blind baseline measured 94.4% FP on the rule alone).
+- **Destination-benignness gate** for credential→network taint flows: a flow whose every network destination is loopback/private/reserved IP or a curated SaaS/cloud/AI provider API is a false positive.
+- **Source precision.** Config/URL env vars are no longer treated as credential taint sources; write/send/connect sinks are gated on the receiver (process/console are local IO).
+- **`axios`** is now recognized as a network call (credential-regex + cross-file sink coverage).
+- **Typosquat.** Suffix-only matching collapses the 100% FP band ≥50; boundary-squat gated on generic-word + own-extension deps (TYPO-002).
+- **`trusted_new_dependency`** downgraded HIGH→MEDIUM; F12 bundle cap widened.
+- **Stability.** OOM / worker-RSS admission fixes; reputation floor; PyPI unblock; GitHub Actions SHA pinning; anti-fragmentation; provenance.
+
 ## [2.11.76] - 2026-06-07
 
 ### Added

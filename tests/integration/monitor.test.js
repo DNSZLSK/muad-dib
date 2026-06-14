@@ -8065,6 +8065,15 @@ async function runMonitorTests() {
     const origPypiPub = stats.pypiChangelogPackages;
     const origErrors = stats.errors;
     const origTime = stats.totalTimeMs;
+    // Isolate from any real/contaminated scan-ledger so the empty-ledger fallback
+    // (the raw attempted/published ratio this test asserts) is what runs. Without it,
+    // a prior test's ledger rollup makes buildDailyReportEmbed show the distinct-package
+    // headline (e.g. "0/290 pkgs") instead of "7200/8000 (90%)" — the historical flake.
+    // Same pattern as the report-block setup/teardown above (MUADDIB_SCAN_LEDGER_FILE).
+    const origLedgerFile = process.env.MUADDIB_SCAN_LEDGER_FILE;
+    const emptyLedger = path.join(os.tmpdir(), `muaddib-test-empty-ledger-cov-${process.pid}.jsonl`);
+    try { fs.unlinkSync(emptyLedger); } catch { /* absent → empty rollup, which is the point */ }
+    process.env.MUADDIB_SCAN_LEDGER_FILE = emptyLedger;
     try {
       stats.scanned = 9999; // must NOT appear in numerator anymore
       stats.uniqueScanAttempts = 7200;
@@ -8090,6 +8099,8 @@ async function runMonitorTests() {
       stats.pypiChangelogPackages = origPypiPub;
       stats.errors = origErrors;
       stats.totalTimeMs = origTime;
+      if (origLedgerFile !== undefined) process.env.MUADDIB_SCAN_LEDGER_FILE = origLedgerFile;
+      else delete process.env.MUADDIB_SCAN_LEDGER_FILE;
     }
   });
 

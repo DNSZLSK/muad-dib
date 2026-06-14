@@ -1,4 +1,6 @@
 const { asyncTest, assert } = require('../test-utils');
+const os = require('os');
+const path = require('path');
 
 /**
  * HTTP limiter tests (src/shared/http-limiter.js).
@@ -346,11 +348,18 @@ async function runHttpLimiterTests() {
     const AUTH_PATH = require.resolve('../../src/shared/registry-auth.js');
     const saved = process.env.MUADDIB_NPM_TOKEN;
     const savedNpm = process.env.NPM_TOKEN;
+    const savedHome = process.env.HOME;
+    const savedNpmrc = process.env.MUADDIB_NPMRC;
     delete require.cache[AUTH_PATH];
     const auth = require(AUTH_PATH);
     try {
-      // No token → empty headers (anonymous — unchanged behaviour)
-      delete process.env.MUADDIB_NPM_TOKEN; delete process.env.NPM_TOKEN; auth._resetForTests();
+      // No token → empty headers (anonymous — unchanged behaviour). Isolate from any ambient
+      // ~/.npmrc //registry.npmjs.org/:_authToken on the dev machine — registry-auth.js _fromNpmrc
+      // also resolves a token from $HOME/.npmrc, which otherwise makes this assertion non-hermetic.
+      delete process.env.MUADDIB_NPM_TOKEN; delete process.env.NPM_TOKEN;
+      process.env.HOME = path.join(os.tmpdir(), 'muaddib-no-home');
+      process.env.MUADDIB_NPMRC = path.join(os.tmpdir(), 'muaddib-no-npmrc');
+      auth._resetForTests();
       assert(Object.keys(auth.registryAuthHeaders('https://registry.npmjs.org/lodash')).length === 0,
         'no token → empty headers');
 
@@ -370,6 +379,8 @@ async function runHttpLimiterTests() {
     } finally {
       if (saved === undefined) delete process.env.MUADDIB_NPM_TOKEN; else process.env.MUADDIB_NPM_TOKEN = saved;
       if (savedNpm === undefined) delete process.env.NPM_TOKEN; else process.env.NPM_TOKEN = savedNpm;
+      if (savedHome === undefined) delete process.env.HOME; else process.env.HOME = savedHome;
+      if (savedNpmrc === undefined) delete process.env.MUADDIB_NPMRC; else process.env.MUADDIB_NPMRC = savedNpmrc;
       delete require.cache[AUTH_PATH];
     }
   });
