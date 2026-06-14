@@ -2,6 +2,7 @@
 
 const path = require('path');
 const { SENSITIVE_MODULES } = require('./constants.js');
+const { isSensitiveEnv } = require('../env-var-classification.js');
 const {
   parseFile, walkAST, isRequireCall, isModuleExportsAssign,
   getExportName, getFunctionBody, getMemberChain, extractLiteralArg
@@ -272,6 +273,11 @@ function checkNodeTaint(node, moduleVars) {
     const chain = getMemberChain(node);
     if (chain.startsWith('process.env')) {
       const detail = chain.length > 'process.env'.length ? chain.slice('process.env.'.length) : '';
+      // Source-precision (segment A): a SPECIFIC non-credential config var (URL/HOST/PORT/
+      // NODE_ENV/...) is not a credential taint source — consistent with dataflow.js's
+      // isSensitiveEnv (DF-C4). Whole-object `process.env` (detail '') stays tainted: an env
+      // dump exfiltrates every secret. System-identity vars (HOME/USER) stay tainted too.
+      if (detail && !isSensitiveEnv(detail)) return null;
       return { source: 'process.env', detail };
     }
   }
@@ -332,9 +338,21 @@ function scanBodyForTaint(body, moduleVars, taintedVars) {
   // Collect local tainted vars within this function scope too
   const localTainted = Object.assign(Object.create(null), taintedVars);
 
+  // A `process.env.X` read is matched as a unit by checkNodeTaint (gated on isSensitiveEnv).
+  // Record the inner bare `process.env` node of each so the pre-order walker does not RE-match
+  // it standalone (detail '' = whole-env dump), which would defeat the per-var gate for config
+  // vars. A genuinely standalone `process.env` (a different node) still taints as a dump.
+  const innerEnvNodes = new WeakSet();
+
   let found = null;
   walkAST({ type: 'Program', body }, (node) => {
     if (found) return;
+    if (innerEnvNodes.has(node)) return;
+
+    if (node.type === 'MemberExpression' && node.object &&
+        node.object.type === 'MemberExpression' && getMemberChain(node.object) === 'process.env') {
+      innerEnvNodes.add(node.object);
+    }
 
     // Variable assignment inside function
     if (node.type === 'VariableDeclaration') {
