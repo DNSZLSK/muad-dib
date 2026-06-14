@@ -196,7 +196,7 @@ async function runDailyReportResilienceTests() {
   const agoIso = (ms) => new Date(Date.now() - ms).toISOString();
   const H = 3600 * 1000;
   const field = (payload, name) => payload.embeds[0].fields.find(x => x.name === name);
-  const ledgerFieldOf = (payload) => payload.embeds[0].fields.find(x => x.name.startsWith('Ledger ('));
+  const ledgerFieldOf = (payload) => payload.embeds.flatMap(e => e.fields).find(x => x.name.startsWith('Ledger ('));
 
   // Run fn with the ledger env pinned to `f` (call-time seam in safeLedgerRollup).
   function withLedgerEnv(f, fn) {
