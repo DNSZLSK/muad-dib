@@ -73,6 +73,23 @@ const LEGIT_BOUNDARY_TOKENS = new Set([
   'v2', 'v3', 'v4', 'next', 'latest', 'stable', 'lts', 'legacy', 'beta', 'alpha'
 ]);
 
+// RT-C1-FPR (2026-06, n=61 blind adjudication → boundary-squat measured 100% FP): popular
+// packages whose names are GENERIC tech/English words appear as a legitimate TRAILING token
+// in countless real packages — class-validator, graphile-config, ansi-colors, sinon-chai,
+// react-helmet-async, swagger-ui-express, short-uuid, react-router-redux, openapi-typescript,
+// tree-sitter-c-sharp, agent-commander. Suffix boundary-squat on these is unreliable, so they
+// are NOT matched. Distinctive brand names (axios, lodash, chalk, crypto-js — incl. the
+// plain-crypto-js / secure-axios FN-guards) stay matchable. A genuine `<x>-<generic>` squat is
+// caught by its CODE (exfil/RCE + the Track-R malice floor), not by name shape (see below).
+const GENERIC_POPULAR_NAMES = new Set([
+  'validator', 'config', 'colors', 'async', 'chai', 'typescript', 'request', 'uuid',
+  'redux', 'express', 'sharp', 'commander', 'debug', 'glob', 'yaml', 'cors', 'helmet',
+  'canvas', 'immutable', 'classnames',
+  // Infra/framework brands that are also common legit trailing tokens (rate-limit-redis,
+  // connect-redis, shadcn-svelte, authentikt-svelte) — same measured-FP class, same FN floor.
+  'redis', 'svelte',
+]);
+
 // Packages legitimes courts ou qui ressemblent a des populaires
 const WHITELIST = new Set([
   // Packages tres courts legitimes
@@ -456,14 +473,13 @@ function findDependencyBoundarySquat(name) {
     if (lower === popular) continue;
 
     if (popular.includes('-')) {
-      // Multi-token popular (e.g. crypto-js): match prefix or suffix at hyphen boundary
-      let extra = null;
-      if (lower.endsWith('-' + popular)) {
-        extra = lower.slice(0, lower.length - popular.length - 1);
-      } else if (lower.startsWith(popular + '-')) {
-        extra = lower.slice(popular.length + 1);
-      }
-      if (extra === null || extra.length === 0) continue;
+      // Multi-token popular (e.g. crypto-js): a squat PREPENDS a deceptive qualifier
+      // (plain-crypto-js → endsWith). The reverse `<popular>-<suffix>` (date-fns-tz,
+      // aws-sdk-client-mock, core-js-compat) is the popular package's OWN ecosystem extension —
+      // never a squat — so the prefix-position match is dropped (2026-06 FPR fix, 100% FP).
+      if (!lower.endsWith('-' + popular)) continue;
+      const extra = lower.slice(0, lower.length - popular.length - 1);
+      if (extra.length === 0) continue;
       // Reject if extra is a legit boundary token (single token only)
       if (!extra.includes('-') && LEGIT_BOUNDARY_TOKENS.has(extra)) continue;
       return { original: POPULAR_PACKAGES[i], type: 'boundary_squat', distance: extra.length, extra };
@@ -480,6 +496,10 @@ function findDependencyBoundarySquat(name) {
       const tokens = lower.split('-');
       if (tokens.length === 1) continue;
       if (tokens[tokens.length - 1] !== popular) continue;     // popular must be the trailing token
+      // Generic-word popular (validator/config/colors/async/chai/typescript/...) is a common
+      // legitimate trailing token (class-validator, graphile-config, ansi-colors) — 100% FP in
+      // the 2026-06 measurement. Distinctive brands (axios → secure-axios FN-guard) still match.
+      if (GENERIC_POPULAR_NAMES.has(popular)) continue;
       const siblings = tokens.slice(0, -1);
       // Benign ecosystem variant if every prefix token is a legit qualifier (ts-jest, babel-jest).
       if (siblings.every(t => LEGIT_BOUNDARY_TOKENS.has(t) || isLegitimateVariant(t))) continue;
