@@ -1196,7 +1196,7 @@ function applyFPReductions(threats, reachableFiles, packageName, packageDeps, re
     }
   }
 
-  // FPR sink-coupling gate (chantier 2026-06 — FPR-baseline-2026-06-14.md). credential_regex_harvest
+  // FPR sink-coupling gate (chantier FPR 2026-06). credential_regex_harvest
   // is a weak signal alone: a credential-shaped regex co-located with a network call, with NO proof
   // the matched secret flows out and NO host-reputation check (ast.js:hasCredentialInsideRegex +
   // hasNetworkCallInFile). The blind FPR baseline measured 94.4% FP on it — it fires on nodemailer
