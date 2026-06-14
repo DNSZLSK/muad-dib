@@ -1252,6 +1252,13 @@ function buildDailyReportEmbed(stats, dailyAlerts, ledgerRollup) {
     const pct = (ledger.distinctCoverage * 100).toFixed(0);
     const approx = ledger.exactVanished === false ? '~' : '';
     coverageText = `${ledger.distinctScanned}/${ledger.distinctPackages} pkgs (${approx}${pct}%)`;
+    // Honest 24h coverage loss surfaced next to coverage: `vanished` = distinct names
+    // dropped and never re-scanned in the window — the real miss count. The raw
+    // `dropped` aggregate (which also folds in recoverable spill + retries, so it
+    // OVERSTATES loss) is relegated to the Ops embed's Ledger field, not the headline.
+    if (ledger.vanished > 0) {
+      coverageText += ` · ${ledger.exactVanished ? '' : '≥'}${ledger.vanished} vanished`;
+    }
     if (published > 0) coverageText += `\nRaw events: ${attempted}/${published}`;
     coverageText += opsSuffix;
   } else if (published > 0) {
@@ -1343,14 +1350,7 @@ function buildDailyReportEmbed(stats, dailyAlerts, ledgerRollup) {
         { name: 'vs Yesterday', value: trendsText, inline: false },
         { name: 'ML', value: mlText, inline: true },
         { name: 'LLM Detective', value: llmText, inline: true },
-        { name: 'Top Suspects', value: top3Text, inline: false },
-        ...((stats.sandboxDeferred || stats.deferredProcessed || stats.deferredExpired)
-          ? [{ name: 'Deferred Sandbox', value: `Enqueued: ${stats.sandboxDeferred || 0} | Processed: ${stats.deferredProcessed || 0} | Expired: ${stats.deferredExpired || 0}`, inline: false }]
-          : []),
-        { name: 'Stability', value: _stabilityFieldValue(stats), inline: false },
-        { name: 'Degradations', value: _degradationsFieldValue(), inline: false },
-        ...(ledgerField ? [ledgerField] : []),
-        { name: 'System', value: healthText, inline: false }
+        { name: 'Top Suspects', value: top3Text, inline: false }
       ],
       footer: {
         // Headline-source annotation: 'ledger' = window-exact [last report → now]
@@ -1358,6 +1358,30 @@ function buildDailyReportEmbed(stats, dailyAlerts, ledgerRollup) {
         // unavailable — pre-upgrade behavior).
         text: `MUAD'DIB - Daily summary | headline: ${headline ? 'ledger — completed/deduped, exact 24h window' : 'counters (in-memory fallback)'} | ${readableTime}`
       },
+      timestamp: now.toISOString()
+    }, {
+      // --- Embed 2: Ops / system state (kept OUT of the daily headline) ---
+      // Operator feedback: a daily that mixes 24h outcome with multi-day system state
+      // reads as failure when it isn't. Each line here carries its own clock:
+      //   • Ledger      → 24h window. Its `dropped` folds in recoverable spill + retries,
+      //                   so it OVERSTATES loss — `vanished` (in the Coverage field) is the
+      //                   honest miss count, which is why dropped sits here, not the headline.
+      //   • Stability   → cumulative since the 08:00 reset (backlog = point-in-time depth
+      //                   of the persistent spill file, the one snapshot in this field).
+      //   • Degradations / System → instantaneous snapshot (degradations have no TTL: if
+      //                   shown, the condition is active right now, not earlier in the window).
+      title: '⚙️ Ops / état système',
+      color: 0x95a5a6,
+      description: 'Ledger = fenêtre 24h (dropped inclut le spill récupérable — voir « vanished » pour la perte réelle) · Stability = cumulé depuis 08:00 (backlog = instantané) · Degradations/System = instantané',
+      fields: [
+        ...((stats.sandboxDeferred || stats.deferredProcessed || stats.deferredExpired)
+          ? [{ name: 'Deferred Sandbox', value: `Enqueued: ${stats.sandboxDeferred || 0} | Processed: ${stats.deferredProcessed || 0} | Expired: ${stats.deferredExpired || 0}`, inline: false }]
+          : []),
+        { name: 'Stability (cumulé depuis 08:00)', value: _stabilityFieldValue(stats), inline: false },
+        { name: 'Degradations (actif maintenant)', value: _degradationsFieldValue(), inline: false },
+        ...(ledgerField ? [ledgerField] : []),
+        { name: 'System', value: healthText, inline: false }
+      ],
       timestamp: now.toISOString()
     }]
   };
