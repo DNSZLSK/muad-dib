@@ -17,7 +17,7 @@ const { scanGitHubActions } = require('../scanner/github-actions.js');
 const { scanEntropy } = require('../scanner/entropy.js');
 const { scanAIConfig } = require('../scanner/ai-config.js');
 const { deobfuscate } = require('../scanner/deobfuscate.js');
-const { buildModuleGraph, annotateTaintedExports, detectCrossFileFlows, annotateSinkExports, detectCallbackCrossFileFlows, detectEventEmitterFlows } = require('../scanner/module-graph');
+const { buildModuleGraph, annotateTaintedExports, detectCrossFileFlows, filterFirstPartyNetworkFlows, annotateSinkExports, detectCallbackCrossFileFlows, detectEventEmitterFlows } = require('../scanner/module-graph');
 const { loadCachedIOCs } = require('../ioc/updater.js');
 const { normalizePythonName } = require('../scanner/python.js');
 const { scanPythonSource } = require('../scanner/python-source.js');
@@ -173,6 +173,10 @@ async function execute(targetPath, options, pythonDeps, warnings) {
       // EventEmitter cross-module flow detection
       const emitterFlows = await yieldThen(() => detectEventEmitterFlows(graph, tainted, sinkAnnotations, targetPath));
       crossFileFlows = crossFileFlows.concat(emitterFlows);
+      // FP gate (segment A): drop cross_file_dataflow flows whose network sink targets
+      // only first-party/local/provider destinations — legit SDK calls, not exfil.
+      // Suspicious/unknown/public-IP destinations and exec sinks are kept (ecto stays).
+      crossFileFlows = filterFirstPartyNetworkFlows(crossFileFlows, targetPath);
     };
     let graphTimerId;
     const timeout = new Promise((_, reject) => {

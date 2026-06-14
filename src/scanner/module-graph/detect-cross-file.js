@@ -1,7 +1,9 @@
 'use strict';
 
 const path = require('path');
+const fs = require('fs');
 const { debugLog } = require('../../utils');
+const { networkDestinationsAllBenign } = require('../../sdk-destination.js');
 const { MAX_FLOWS, SINK_CALLEE_NAMES, SINK_MEMBER_METHODS, SINK_INSTANCE_METHODS } = require('./constants.js');
 const {
   parseFile, walkAST, isRequireCall, isLocalImport, isModuleExportsAssign,
@@ -954,4 +956,49 @@ function findPipeChainCrossFileFlows(ast, relFile, graph, taintedExports, sinkEx
 }
 
 
-module.exports = { detectCrossFileFlows, expandTaintThroughReexports, collectImportTaint, propagateLocalTaint, getSinkName, findTaintedArgument };
+// A network sink carries a destination host we can judge; exec/command sinks
+// (eval, Function, child_process.*) do not, and are never destination-gated.
+function isNetworkSinkDescriptor(sink) {
+  const s = String(sink || '');
+  if (/^(eval|Function)\(\)$/.test(s)) return false;   // exec sink
+  if (/^child_process\./.test(s)) return false;        // command sink
+  return true; // fetch / http(s).request|get / WebSocket / XMLHttpRequest / connect|write|send
+}
+
+/**
+ * FP gate (segment A — destination-aware). Drop a cross_file_dataflow whose NETWORK
+ * sink targets ONLY benign destinations (loopback/private/reserved IP or a curated
+ * provider API) — a legitimate SDK that reads a key and POSTs to its provider is not
+ * exfiltration. Untouched (kept CRITICAL): exec/command sinks, and any flow whose sink
+ * file references a suspicious/paste host, a public IP, or any unknown domain (so a real
+ * exfil like ecto — webhook.site + direct-IP — keeps firing). The package stays visible
+ * via its other (lower-severity) signals, the same way intent-graph skips SDK pairs.
+ * Rationale + corpus: FPR-segment-A-diagnosis-2026-06-14.md.
+ *
+ * @param {Array} flows - assembled cross-file flows (main + callback + emitter)
+ * @param {string} packagePath - package root, to resolve sink file content
+ * @returns {Array} flows with first-party network FPs removed
+ */
+function filterFirstPartyNetworkFlows(flows, packagePath) {
+  if (!Array.isArray(flows) || flows.length === 0) return flows;
+  const contentCache = new Map();
+  const kept = [];
+  for (const flow of flows) {
+    if (flow && flow.type === 'cross_file_dataflow' && flow.sinkFile && isNetworkSinkDescriptor(flow.sink)) {
+      let content = contentCache.get(flow.sinkFile);
+      if (content === undefined) {
+        try { content = fs.readFileSync(path.resolve(packagePath, flow.sinkFile), 'utf8'); }
+        catch { content = ''; }
+        contentCache.set(flow.sinkFile, content);
+      }
+      if (content && networkDestinationsAllBenign(content)) {
+        debugLog(`[MODULE-GRAPH] cross_file_dataflow suppressed (first-party/local dest): ${flow.sourceFile} -> ${flow.sink} in ${flow.sinkFile}`);
+        continue; // first-party/local network destination → FP, drop
+      }
+    }
+    kept.push(flow);
+  }
+  return kept;
+}
+
+module.exports = { detectCrossFileFlows, expandTaintThroughReexports, collectImportTaint, propagateLocalTaint, getSinkName, findTaintedArgument, isNetworkSinkDescriptor, filterFirstPartyNetworkFlows };
