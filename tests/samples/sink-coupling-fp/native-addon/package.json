@@ -1,0 +1,13 @@
+{
+  "name": "fast-bignum",
+  "version": "1.5.2",
+  "description": "Negative control (sink-coupling-fp). Legitimate C++ native addon installed via node-pre-gyp. The install lifecycle execs a LOCAL build/prebuilt-fetch (node-pre-gyp), there is NO network/credential exfil sink. Models the @lordofdestiny/mynumber FP. Must NOT escalate to suspect after Etape C sink-coupling fix.",
+  "main": "index.js",
+  "scripts": {
+    "install": "node scripts/install.js"
+  },
+  "dependencies": {
+    "@mapbox/node-pre-gyp": "^2.0.0"
+  },
+  "license": "MIT"
+}

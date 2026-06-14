@@ -1,0 +1,13 @@
+{
+  "name": "color-pro-utils",
+  "version": "7.0.4",
+  "description": "Positive control (staged-loader). Masquerade name + a postinstall hook that spawns a DETACHED, fully-silenced node process which fetches and exec's remote code from a paste-site (jsonkeeper) via Function.constructor. Replicates the reach of chalk-pro / richtext-editor-ui (jsonkeeper campaign, 2026-06). MUST stay flagged (TP) after Etape C — the sink (remote-code exec from an anomalous host) is the discriminant.",
+  "main": "index.js",
+  "scripts": {
+    "postinstall": "node scripts/setup.js"
+  },
+  "dependencies": {
+    "axios": "^1.10.0"
+  },
+  "license": "MIT"
+}

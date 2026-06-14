@@ -509,6 +509,10 @@ async function runCompoundScoringTests() {
     for (let i = 0; i < 5; i++) {
       threats.push({ type: 'credential_regex_harvest', severity: 'HIGH', file: `lib/auth${i}.js`, message: 'regex' });
     }
+    // FPR sink-coupling (2026-06): the dilution floor protects a REAL exfil regex, which always
+    // co-occurs with an exfil sink. Add one so the floor restores an instance; WITHOUT a sink,
+    // credential_regex_harvest is downgraded to LOW regardless of count (see sink-coupling.test.js).
+    threats.push({ type: 'suspicious_domain', severity: 'HIGH', file: 'lib/auth0.js', message: 'exfil host' });
     applyFPReductions(threats);
     const highInstances = threats.filter(t => t.type === 'credential_regex_harvest' && t.severity === 'HIGH');
     assert(highInstances.length === 1, `Expected 1 HIGH credential_regex_harvest restored by dilution floor, got ${highInstances.length}`);
@@ -519,7 +523,9 @@ async function runCompoundScoringTests() {
   test('FP-B3-1: credential_regex_harvest ≤2 instances → stays at original severity', () => {
     const threats = [
       { type: 'credential_regex_harvest', severity: 'HIGH', file: 'index.js', message: 'regex' },
-      { type: 'credential_regex_harvest', severity: 'HIGH', file: 'lib.js', message: 'regex' }
+      { type: 'credential_regex_harvest', severity: 'HIGH', file: 'lib.js', message: 'regex' },
+      // FPR sink-coupling: a real exfil regex co-occurs with a sink (see sink-coupling.test.js)
+      { type: 'suspicious_domain', severity: 'HIGH', file: 'lib.js', message: 'exfil host' }
     ];
     applyFPReductions(threats);
     const highCount = threats.filter(t => t.type === 'credential_regex_harvest' && t.severity === 'HIGH').length;
@@ -686,6 +692,8 @@ async function runCompoundScoringTests() {
     for (let i = 0; i < 10; i++) {
       threats.push({ type: 'env_access', severity: 'MEDIUM', file: `cfg${i}.js`, message: `env ${i}` });
     }
+    // FPR sink-coupling: the dilution floor protects a REAL exfil regex (always paired with a sink).
+    threats.push({ type: 'suspicious_domain', severity: 'HIGH', file: 'f0.js', message: 'exfil host' });
     applyFPReductions(threats);
     const crh = threats.filter(t => t.type === 'credential_regex_harvest');
     const highCount = crh.filter(t => t.severity === 'HIGH').length;
@@ -695,7 +703,9 @@ async function runCompoundScoringTests() {
   test('FP-B3-5: credential_regex_harvest count ≤ 2 → stays HIGH', () => {
     const threats = [
       { type: 'credential_regex_harvest', severity: 'HIGH', file: 'a.js', message: 'Regex 1' },
-      { type: 'credential_regex_harvest', severity: 'HIGH', file: 'b.js', message: 'Regex 2' }
+      { type: 'credential_regex_harvest', severity: 'HIGH', file: 'b.js', message: 'Regex 2' },
+      // FPR sink-coupling: a real exfil regex co-occurs with a sink (see sink-coupling.test.js)
+      { type: 'suspicious_domain', severity: 'HIGH', file: 'b.js', message: 'exfil host' }
     ];
     applyFPReductions(threats);
     const highCount = threats.filter(t => t.type === 'credential_regex_harvest' && t.severity === 'HIGH').length;

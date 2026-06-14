@@ -1,0 +1,2648 @@
+{
+  "meta": {
+    "period": "2026-06-14",
+    "method": "blind adjudication via deterministic sink-extraction (evidence.js) + deep-read of every anomalous-sink candidate + spot-checks; archive-only tarballs; do not trust scanner labels",
+    "sample": {
+      "credential_distinct_with_tarball": 801,
+      "lifecycle_distinct_with_tarball": 403,
+      "sampled_credential": 54,
+      "sampled_lifecycle": 54,
+      "union": 105,
+      "ecosystem": "npm"
+    },
+    "interpretation": "per-rule ALERT precision = FP rate among SUSPECTS where the rule fired (NOT full-population FPR; benign denominator needs corpus, absent)",
+    "result": {
+      "overall": {
+        "n": 105,
+        "TP": 2,
+        "FP": 102,
+        "UNCERTAIN": 1,
+        "fp_rate": "97.1%"
+      },
+      "credential": {
+        "n": 54,
+        "fp_rate": "94.4%",
+        "low": "100%",
+        "mid": "100%",
+        "high": "83.3%"
+      },
+      "lifecycle": {
+        "n": 54,
+        "fp_rate": "98.1%",
+        "low": "100%",
+        "mid": "100%",
+        "high": "94.4%"
+      }
+    }
+  },
+  "results": [
+    {
+      "name": "polygram",
+      "version": "0.12.0-rc.38",
+      "score": 22,
+      "band": "low",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "string_mutation_obfuscation",
+        "credential_regex_harvest",
+        "env_access",
+        "ai_agent_abuse",
+        "mcp_config_injection",
+        "suspicious_dataflow",
+        "high_entropy_string"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "code.claude.com",
+        "api.telegram.org",
+        "...'",
+        ","
+      ],
+      "note": null
+    },
+    {
+      "name": "@vtex/gatsby-theme-vtex",
+      "version": "0.202.2",
+      "score": 34,
+      "band": "low",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "credential_regex_harvest",
+        "dependency_typosquat",
+        "dependency_typosquat_used",
+        "high_entropy_string",
+        "dependency_typosquat_require",
+        "typosquat_lifecycle"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "www.w3.org",
+        "www.facebook.com",
+        "storecomponents.vtexassets.com",
+        "www.instagram.com"
+      ],
+      "note": null
+    },
+    {
+      "name": "@aion0/forge",
+      "version": "0.10.69",
+      "score": 33,
+      "band": "low",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "dynamic_import",
+        "env_access",
+        "crypto_decipher",
+        "detached_process",
+        "credential_regex_harvest",
+        "suspicious_dataflow",
+        "lifecycle_dataflow"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "...",
+        "raw.githubusercontent.com",
+        "api.telegram.org",
+        "api.github.com"
+      ],
+      "note": null
+    },
+    {
+      "name": "phewsh",
+      "version": "0.14.5",
+      "score": 24,
+      "band": "low",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "credential_regex_harvest",
+        "env_access",
+        "string_mutation_obfuscation",
+        "ollama_local_llm",
+        "suspicious_dataflow"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "www.youtube.com",
+        "api.github.com",
+        "news.ycombinator.com",
+        "youtube.com"
+      ],
+      "note": null
+    },
+    {
+      "name": "claude-code-memory-explorer",
+      "version": "0.6.0",
+      "score": 33,
+      "band": "low",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "string_mutation_obfuscation",
+        "credential_regex_harvest",
+        "suspicious_dataflow",
+        "lifecycle_dataflow"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "code.claude.com"
+      ],
+      "note": null
+    },
+    {
+      "name": "powerdevbox-admin",
+      "version": "0.1.2",
+      "score": 20,
+      "band": "low",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "credential_regex_harvest",
+        "dynamic_import"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "make.powerautomate.com",
+        "make.powerapps.com",
+        "copilotstudio.microsoft.com",
+        "service.powerapps.com"
+      ],
+      "note": null
+    },
+    {
+      "name": "windmill-cli",
+      "version": "1.723.0",
+      "score": 20,
+      "band": "low",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "dynamic_import",
+        "sandbox_evasion",
+        "env_charcode_reconstruction",
+        "env_access",
+        "prototype_pollution",
+        "prototype_hook",
+        "string_mutation_obfuscation",
+        "dangerous_call_function",
+        "remote_code_load",
+        "credential_regex_harvest",
+        "stream_credential_intercept",
+        "proxy_data_intercept"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "$",
+        "localhost:8000",
+        "www.windmill.dev",
+        "app.windmill.dev"
+      ],
+      "note": null
+    },
+    {
+      "name": "coc-tsserver-dev",
+      "version": "2.3.2",
+      "score": 22,
+      "band": "low",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "env_charcode_reconstruction",
+        "env_access",
+        "credential_regex_harvest",
+        "suspicious_dataflow"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "go.microsoft.com",
+        "code.visualstudio.com",
+        "www.typescriptlang.org"
+      ],
+      "note": null
+    },
+    {
+      "name": "@pushchain/core",
+      "version": "6.0.18",
+      "score": 21,
+      "band": "low",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "blockchain_rpc_endpoint",
+        "blockchain_c2_resolution",
+        "credential_regex_harvest"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "push.org",
+        "chainagnostic.org",
+        "namespaces.chainagnostic.org",
+        "explorer.push.org',"
+      ],
+      "note": null
+    },
+    {
+      "name": "@tdic/vibe-cloud",
+      "version": "0.2.0",
+      "score": 25,
+      "band": "low",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "env_access",
+        "credential_regex_harvest",
+        "proxy_data_intercept"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "proxy.test",
+        "llm.test"
+      ],
+      "note": null
+    },
+    {
+      "name": "@msssystems/mss-crypto-wasm",
+      "version": "0.1.21",
+      "score": 22,
+      "band": "low",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "credential_regex_harvest"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [],
+      "note": null
+    },
+    {
+      "name": "@steedos/objectql",
+      "version": "3.0.15-beta.10",
+      "score": 33,
+      "band": "low",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "credential_regex_harvest",
+        "env_access",
+        "dangerous_call_function",
+        "vm_code_execution",
+        "vm_dynamic_code",
+        "dangerous_call_eval",
+        "string_mutation_obfuscation",
+        "dynamic_require",
+        "require_cache_poison",
+        "suspicious_dataflow",
+        "typosquat_detected",
+        "intent_credential_exfil"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "developer.steedos.com",
+        "127.0.0.1$1"
+      ],
+      "note": null
+    },
+    {
+      "name": "@arcgis/core",
+      "version": "5.1.0-next.129",
+      "score": 25,
+      "band": "low",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "dangerous_call_function",
+        "possible_obfuscation",
+        "wasm_standalone",
+        "credential_regex_harvest",
+        "remote_code_load",
+        "finalization_registry_exec",
+        "prototype_pollution",
+        "dangerous_exec",
+        "obfuscation_detected",
+        "high_entropy_string",
+        "large_package_graph_truncated"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "js.arcgis.com",
+        "developers.arcgis.com",
+        "www.arcgis.com",
+        "www.esri.com"
+      ],
+      "note": null
+    },
+    {
+      "name": "amis-rev-core",
+      "version": "6.13.0",
+      "score": 34,
+      "band": "low",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "prototype_pollution",
+        "dangerous_call_eval",
+        "dangerous_call_function",
+        "credential_regex_harvest",
+        "dangerous_exec"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "developer.mozilla.org",
+        "stackoverflow.com",
+        "aisuda.bce.baidu.com",
+        "tc39.es"
+      ],
+      "note": null
+    },
+    {
+      "name": "@peopl-health/nexus",
+      "version": "4.5.28",
+      "score": 22,
+      "band": "low",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "env_access",
+        "credential_regex_harvest",
+        "crypto_decipher",
+        "possible_obfuscation",
+        "suspicious_dataflow"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "www.w3.org",
+        "picsum.photos",
+        "messaging.twilio.com",
+        "$"
+      ],
+      "note": null
+    },
+    {
+      "name": "@psifi/sdk-node",
+      "version": "1.126.1",
+      "score": 24,
+      "band": "low",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "blockchain_rpc_endpoint",
+        "credential_regex_harvest",
+        "env_access",
+        "string_mutation_obfuscation",
+        "crypto_decipher",
+        "blockchain_c2_resolution",
+        "suspicious_dataflow"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "psifi.app",
+        "api.mainnet-beta.solana.com';",
+        "api.mainnet-beta.solana.com',",
+        "test.solana.com',"
+      ],
+      "note": null
+    },
+    {
+      "name": "aicq-chat-plugin",
+      "version": "3.9.1",
+      "score": 28,
+      "band": "low",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "credential_regex_harvest",
+        "suspicious_dataflow",
+        "high_entropy_string"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "aicq.online';",
+        "aicq.online)",
+        "aicq.online",
+        "aicq.online')"
+      ],
+      "note": null
+    },
+    {
+      "name": "github-repo-manager-mcp",
+      "version": "1.0.0",
+      "score": 26,
+      "band": "low",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "env_access",
+        "credential_regex_harvest"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [],
+      "note": null
+    },
+    {
+      "name": "@nextblock-cms/editor",
+      "version": "0.8.11",
+      "score": 36,
+      "band": "mid",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "prototype_pollution",
+        "dangerous_call_eval",
+        "string_mutation_obfuscation",
+        "env_charcode_reconstruction",
+        "env_access",
+        "remote_code_load",
+        "credential_regex_harvest",
+        "proxy_data_intercept",
+        "suspicious_dataflow",
+        "high_entropy_string"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "react.dev",
+        "prosemirror.net",
+        "www.w3.org",
+        "w3c.github.io"
+      ],
+      "note": null
+    },
+    {
+      "name": "litectx",
+      "version": "0.5.0",
+      "score": 36,
+      "band": "mid",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "dynamic_import",
+        "credential_regex_harvest"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [],
+      "note": null
+    },
+    {
+      "name": "@zcouncil/cli",
+      "version": "0.5.1",
+      "score": 35,
+      "band": "mid",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "env_access",
+        "dynamic_import",
+        "credential_regex_harvest",
+        "string_mutation_obfuscation",
+        "prototype_hook",
+        "suspicious_dataflow",
+        "cross_file_dataflow"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "api.openai.com",
+        "api.zcouncil.com",
+        "zcouncil.com",
+        "localhost:4321"
+      ],
+      "note": null
+    },
+    {
+      "name": "bansosdev",
+      "version": "0.1.0",
+      "score": 35,
+      "band": "mid",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "env_access",
+        "credential_regex_harvest",
+        "suspicious_dataflow"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "example.com",
+        "api.github.com"
+      ],
+      "note": null
+    },
+    {
+      "name": "@mokoconsulting/mcp-mokossh",
+      "version": "3.4.0",
+      "score": 40,
+      "band": "mid",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "ssh_access",
+        "env_access",
+        "dangerous_call_exec",
+        "sensitive_string",
+        "dynamic_import",
+        "credential_regex_harvest",
+        "credential_tampering"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "git-scm.com",
+        "git.mokoconsulting.tech",
+        "localhost:2586"
+      ],
+      "note": null
+    },
+    {
+      "name": "claude-rpc",
+      "version": "0.15.0",
+      "score": 35,
+      "band": "mid",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "string_mutation_obfuscation",
+        "detached_process",
+        "silent_stealth_process",
+        "credential_regex_harvest",
+        "env_access",
+        "dangerous_call_exec",
+        "suspicious_dataflow",
+        "detached_credential_exfil"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "www.w3.org",
+        "claude-rpc.vercel.app",
+        "claude-rpc-totals.claude-rpc.workers.dev",
+        "claude.com"
+      ],
+      "note": null
+    },
+    {
+      "name": "@eldwin-ai/extension-teamcity",
+      "version": "0.1.1",
+      "score": 69,
+      "band": "mid",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "credential_regex_harvest",
+        "trusted_new_unknown_dependency"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "company.okta.com",
+        "toolcity.megaleo.com"
+      ],
+      "note": null
+    },
+    {
+      "name": "@jintonyc/workq-mcp",
+      "version": "0.1.0",
+      "score": 47,
+      "band": "mid",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "env_access",
+        "credential_regex_harvest",
+        "suspicious_dataflow"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "work-q.nado.ai.kr"
+      ],
+      "note": null
+    },
+    {
+      "name": "@quasar/app-vite",
+      "version": "3.0.0-rc.1",
+      "score": 35,
+      "band": "mid",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "dynamic_import",
+        "credential_regex_harvest",
+        "sensitive_string",
+        "string_mutation_obfuscation",
+        "env_access",
+        "dangerous_call_function",
+        "high_entropy_string"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "www.electron.build",
+        "v2.quasar.dev",
+        "gist.github.com",
+        "quasar.dev"
+      ],
+      "note": null
+    },
+    {
+      "name": "abmp-npm",
+      "version": "10.3.9",
+      "score": 70,
+      "band": "mid",
+      "clusters": [
+        "credential",
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "credential_regex_harvest",
+        "string_mutation_obfuscation",
+        "suspicious_dataflow",
+        "typosquat_detected",
+        "trusted_new_dependency",
+        "lifecycle_typosquat",
+        "lifecycle_dataflow"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "members.abmp.com",
+        "members-test.abmp.com",
+        "psdevteamenterpris.wixstudio.com",
+        "members.professionalassistcorp.com"
+      ],
+      "note": null
+    },
+    {
+      "name": "nowsecure-mcp-server",
+      "version": "1.0.1",
+      "score": 44,
+      "band": "mid",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "env_access",
+        "string_mutation_obfuscation",
+        "credential_regex_harvest",
+        "suspicious_dataflow"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "api.nowsecure.com).",
+        "www.linkedin.com",
+        "api.nowsecure.com"
+      ],
+      "note": null
+    },
+    {
+      "name": "contextdevkit",
+      "version": "2.6.3",
+      "score": 43,
+      "band": "mid",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "string_mutation_obfuscation",
+        "sensitive_string",
+        "env_access",
+        "credential_regex_harvest",
+        "dynamic_import",
+        "suspicious_dataflow",
+        "cross_file_dataflow"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "json.schemastore.org",
+        "aistudio.google.com",
+        "ai.google.dev",
+        "generativelanguage.googleapis.com"
+      ],
+      "note": null
+    },
+    {
+      "name": "@shadegpt/connect",
+      "version": "0.2.6",
+      "score": 53,
+      "band": "mid",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "credential_regex_harvest",
+        "detached_process",
+        "silent_stealth_process"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "my-mcp.example.com",
+        "shadegpt.app"
+      ],
+      "note": null
+    },
+    {
+      "name": "future-lang",
+      "version": "0.3.2",
+      "score": 38,
+      "band": "mid",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "dangerous_call_function",
+        "ollama_local_llm",
+        "credential_regex_harvest",
+        "env_access",
+        "detached_process",
+        "silent_stealth_process",
+        "dynamic_import"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "api.venice.ai",
+        "api.anthropic.com',",
+        "api.openai.com",
+        "generativelanguage.googleapis.com"
+      ],
+      "note": null
+    },
+    {
+      "name": "@nubjs/nub-linux-x64-musl",
+      "version": "0.0.32",
+      "score": 35,
+      "band": "mid",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "dynamic_require",
+        "dynamic_import",
+        "module_internals_hijack",
+        "credential_regex_harvest"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "www.typescriptlang.org"
+      ],
+      "note": null
+    },
+    {
+      "name": "@riddledc/riddle-proof",
+      "version": "0.8.62",
+      "score": 65,
+      "band": "mid",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "env_access",
+        "credential_regex_harvest",
+        "string_mutation_obfuscation",
+        "dynamic_import",
+        "dangerous_constructor",
+        "detached_process",
+        "remote_code_load",
+        "detached_credential_exfil",
+        "stego_binary_exec",
+        "suspicious_dataflow"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "riddle-proof.local",
+        "api.riddledc.com",
+        "example.com",
+        "riddledc.com"
+      ],
+      "note": null
+    },
+    {
+      "name": "@ntl-team/ntl-lang",
+      "version": "4.1.0",
+      "score": 42,
+      "band": "mid",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "dynamic_require",
+        "vm_dynamic_code",
+        "remote_code_load",
+        "env_access",
+        "ollama_local_llm",
+        "credential_regex_harvest",
+        "crypto_decipher",
+        "string_mutation_obfuscation",
+        "dangerous_call_function",
+        "vm_code_execution",
+        "require_cache_poison",
+        "suspicious_dataflow"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "raw.githubusercontent.com",
+        "api.openai.com';",
+        "api.anthropic.com';"
+      ],
+      "note": null
+    },
+    {
+      "name": "geowiki-cli",
+      "version": "3.0.43",
+      "score": 45,
+      "band": "mid",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "dynamic_import",
+        "string_mutation_obfuscation",
+        "credential_regex_harvest",
+        "suspicious_dataflow"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "')",
+        "your-site:9002"
+      ],
+      "note": null
+    },
+    {
+      "name": "chalk-plus-js",
+      "version": "7.0.4",
+      "score": 100,
+      "band": "high",
+      "clusters": [
+        "credential",
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "string_mutation_obfuscation",
+        "credential_regex_harvest",
+        "env_access",
+        "detached_process",
+        "silent_stealth_process",
+        "crypto_decipher",
+        "suspicious_dataflow",
+        "high_entropy_string",
+        "fragmented_high_entropy_cluster",
+        "lifecycle_file_exec"
+      ],
+      "verdict": "TP",
+      "sink": true,
+      "hosts": [
+        "tools.ietf.org",
+        "domain",
+        "'",
+        "www.w3.org"
+      ],
+      "note": "nodemailer published as \"chalk-plus-js\" + postinstall lib/utils/index.js detached-spawns smtp-connection -> jsonkeeper loader (chalk-pro campaign)"
+    },
+    {
+      "name": "ecto-corsair-whisper-6f3b9",
+      "version": "1.0.14",
+      "score": 100,
+      "band": "high",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "suspicious_domain",
+        "direct_ip_exfil",
+        "dangerous_call_exec",
+        "credential_regex_harvest",
+        "suspicious_dataflow",
+        "lifecycle_file_exec",
+        "lifecycle_dataflow",
+        "intent_credential_exfil"
+      ],
+      "verdict": "TP",
+      "sink": true,
+      "hosts": [
+        "webhook.site",
+        "127.0.0.1:31250",
+        "127.0.0.1:31289",
+        "127.0.0.1:30569"
+      ],
+      "note": "postinstall: HTB-flag hunt + AWS secretsmanager dump + exfil to webhook.site + C2 154.57.164.x (gated to target container)"
+    },
+    {
+      "name": "@policysynth/agents",
+      "version": "1.3.187",
+      "score": 100,
+      "band": "high",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "env_access",
+        "credential_regex_harvest",
+        "dangerous_call_eval",
+        "llm_api_key_harvesting",
+        "string_mutation_obfuscation",
+        "crypto_decipher",
+        "suspicious_dataflow",
+        "credential_tampering",
+        "intent_credential_exfil"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "aoi-storage-production.citizens.is",
+        "cognitiveservices.azure.com",
+        "bedrock-runtime.$",
+        "eu.api.openai.com"
+      ],
+      "note": null
+    },
+    {
+      "name": "@raysonmeng/agentbridge",
+      "version": "0.1.14",
+      "score": 100,
+      "band": "high",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "dangerous_call_function",
+        "env_charcode_reconstruction",
+        "env_access",
+        "detached_process",
+        "silent_stealth_process",
+        "remote_code_load",
+        "credential_regex_harvest",
+        "proxy_data_intercept",
+        "websocket_c2",
+        "ai_agent_abuse",
+        "obfuscation_detected"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "bun.sh",
+        "raw.githubusercontent.com",
+        "json-schema.org"
+      ],
+      "note": null
+    },
+    {
+      "name": "@nuiisweety/baileys",
+      "version": "0.1.13",
+      "score": 87,
+      "band": "high",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "credential_regex_harvest",
+        "crypto_decipher",
+        "dynamic_import",
+        "newsletter_auto_follow",
+        "credential_tampering",
+        "suspicious_dataflow",
+        "lifecycle_newsletter_hijack"
+      ],
+      "verdict": "UNCERTAIN",
+      "sink": false,
+      "hosts": [
+        "web.whatsapp.com",
+        "call.whatsapp.com",
+        "stackoverflow.com",
+        "saweria.co"
+      ],
+      "note": "Baileys fork; benign preinstall version-check; stock newsletter code; saweria.co reference -> needs upstream diff"
+    },
+    {
+      "name": "amicus",
+      "version": "1.1.0",
+      "score": 100,
+      "band": "high",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "credential_regex_harvest",
+        "string_mutation_obfuscation",
+        "ai_agent_abuse",
+        "mcp_config_injection",
+        "env_access",
+        "dynamic_require",
+        "suspicious_dataflow",
+        "cross_file_dataflow",
+        "lifecycle_file_exec",
+        "lifecycle_dataflow"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "www.w3.org",
+        "'))",
+        "aistudio.google.com",
+        "platform.openai.com"
+      ],
+      "note": null
+    },
+    {
+      "name": "scratch-mcp",
+      "version": "1.1.2",
+      "score": 79,
+      "band": "high",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "git_dependency_rce",
+        "dynamic_require",
+        "credential_regex_harvest",
+        "trusted_new_unknown_dependency"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "localhost');",
+        "www.npmjs.com"
+      ],
+      "note": null
+    },
+    {
+      "name": "proxypro-harness",
+      "version": "0.2.1",
+      "score": 100,
+      "band": "high",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "dangerous_call_function",
+        "vm_code_execution",
+        "env_charcode_reconstruction",
+        "env_access",
+        "remote_code_load",
+        "credential_regex_harvest",
+        "proxy_data_intercept",
+        "obfuscation_detected",
+        "suspicious_dataflow",
+        "intent_credential_exfil"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "grpc.io",
+        "$",
+        "example.com",
+        "tools.ietf.org"
+      ],
+      "note": null
+    },
+    {
+      "name": "agent-systems",
+      "version": "1.1.1",
+      "score": 100,
+      "band": "high",
+      "clusters": [
+        "credential",
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "env_access",
+        "credential_regex_harvest",
+        "suspicious_dataflow",
+        "lifecycle_file_exec",
+        "lifecycle_dataflow",
+        "intent_credential_exfil"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "raw.githubusercontent.com",
+        "generativelanguage.googleapis.com",
+        "api.anthropic.com"
+      ],
+      "note": null
+    },
+    {
+      "name": "wtt-connect",
+      "version": "0.2.61",
+      "score": 93,
+      "band": "high",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "systemd_persistence",
+        "ai_agent_abuse",
+        "env_access",
+        "credential_regex_harvest",
+        "string_mutation_obfuscation",
+        "download_exec_binary",
+        "dangerous_call_exec",
+        "dynamic_require",
+        "dynamic_import",
+        "suspicious_dataflow",
+        "credential_tampering"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "www.apple.com",
+        "www.waxbyte.com)",
+        "www.waxbyte.com",
+        "www.waxbyte.com';"
+      ],
+      "note": null
+    },
+    {
+      "name": "@remnic/plugin-codex",
+      "version": "9.3.634",
+      "score": 75,
+      "band": "high",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "env_access",
+        "detached_process",
+        "silent_stealth_process",
+        "binary_dropper",
+        "download_exec_binary",
+        "credential_regex_harvest",
+        "detached_credential_exfil",
+        "suspicious_dataflow",
+        "intent_credential_exfil"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "localhost:4318"
+      ],
+      "note": null
+    },
+    {
+      "name": "@central-icons-react/round-filled-radius-2-stroke-1",
+      "version": "1.1.264",
+      "score": 100,
+      "band": "high",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "env_access",
+        "credential_regex_harvest",
+        "suspicious_dataflow",
+        "lifecycle_file_exec",
+        "lifecycle_dataflow"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "www.w3.org",
+        "centralicons.com",
+        "iconists.co"
+      ],
+      "note": null
+    },
+    {
+      "name": "@central-icons-react/square-outlined-radius-0-stroke-1",
+      "version": "1.1.264",
+      "score": 100,
+      "band": "high",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "env_access",
+        "credential_regex_harvest",
+        "suspicious_dataflow",
+        "lifecycle_file_exec",
+        "lifecycle_dataflow"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "www.w3.org",
+        "centralicons.com",
+        "iconists.co"
+      ],
+      "note": null
+    },
+    {
+      "name": "@central-icons-react-native/round-outlined-radius-1-stroke-1.5",
+      "version": "1.1.264",
+      "score": 100,
+      "band": "high",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "env_access",
+        "credential_regex_harvest",
+        "suspicious_dataflow",
+        "lifecycle_file_exec",
+        "lifecycle_dataflow"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "centralicons.com",
+        "iconists.co"
+      ],
+      "note": null
+    },
+    {
+      "name": "@central-icons-react-native/round-filled-radius-0-stroke-2",
+      "version": "1.1.264",
+      "score": 100,
+      "band": "high",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "env_access",
+        "credential_regex_harvest",
+        "suspicious_dataflow",
+        "lifecycle_file_exec",
+        "lifecycle_dataflow"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "centralicons.com",
+        "iconists.co"
+      ],
+      "note": null
+    },
+    {
+      "name": "@central-icons-react-native/square-filled-radius-0-stroke-1.5",
+      "version": "1.1.263",
+      "score": 100,
+      "band": "high",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "env_access",
+        "credential_regex_harvest",
+        "suspicious_dataflow",
+        "lifecycle_file_exec",
+        "lifecycle_dataflow"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "centralicons.com",
+        "iconists.co"
+      ],
+      "note": null
+    },
+    {
+      "name": "@dfosco/storyboard",
+      "version": "0.11.0-beta.2",
+      "score": 76,
+      "band": "high",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "dynamic_import",
+        "credential_regex_harvest",
+        "detached_process",
+        "silent_stealth_process",
+        "string_mutation_obfuscation",
+        "builtin_override_exfil",
+        "sensitive_string",
+        "suspicious_dataflow",
+        "credential_tampering",
+        "cross_file_dataflow"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "tailwindcss.com",
+        "v3.tailwindcss.com",
+        "base-ui.com",
+        "www.w3.org"
+      ],
+      "note": null
+    },
+    {
+      "name": "free-mcp-core",
+      "version": "0.1.0-rc.7",
+      "score": 100,
+      "band": "high",
+      "clusters": [
+        "credential"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "bun_runtime_evasion",
+        "env_access",
+        "string_mutation_obfuscation",
+        "env_charcode_reconstruction",
+        "credential_regex_harvest",
+        "proxy_data_intercept",
+        "mcp_config_injection",
+        "prototype_hook",
+        "suspicious_dataflow",
+        "dependency_typosquat",
+        "dependency_typosquat_used"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "api.freee.co.jp",
+        "accounts.secure.freee.co.jp",
+        "localhost",
+        "127.0.0.1"
+      ],
+      "note": null
+    },
+    {
+      "name": "@redocly/cli",
+      "version": "2.32.2",
+      "score": 20,
+      "band": "low",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "crypto_decipher",
+        "credential_regex_harvest",
+        "dynamic_import",
+        "typosquat_detected",
+        "dependency_typosquat",
+        "dependency_typosquat_used",
+        "lifecycle_typosquat",
+        "dependency_typosquat_require",
+        "typosquat_lifecycle"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "www.thespanner.co.uk",
+        "spec.openapis.org",
+        "redocly.com",
+        "app.cloud.redocly.com"
+      ],
+      "note": null
+    },
+    {
+      "name": "web-manager",
+      "version": "4.3.2",
+      "score": 20,
+      "band": "low",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "node_inline_exec",
+        "credential_regex_harvest",
+        "dynamic_require",
+        "suspicious_dataflow",
+        "lifecycle_inline_exec",
+        "lifecycle_dataflow"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "developer.mozilla.org",
+        "gomakethings.com",
+        "jonathancreamer.com",
+        "makandracards.com"
+      ],
+      "note": null
+    },
+    {
+      "name": "@unabridged/midwest",
+      "version": "0.20.1",
+      "score": 28,
+      "band": "low",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "credential_regex_harvest",
+        "dependency_typosquat",
+        "typosquat_lifecycle"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "www.w3.org",
+        "floating-ui.com",
+        "developer.mozilla.org",
+        "drafts.csswg.org"
+      ],
+      "note": null
+    },
+    {
+      "name": "another-meet",
+      "version": "1.0.9",
+      "score": 20,
+      "band": "low",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "suspicious_dataflow",
+        "lifecycle_dataflow"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [],
+      "note": null
+    },
+    {
+      "name": "@ucropit/unit-system",
+      "version": "1.0.23",
+      "score": 20,
+      "band": "low",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "typosquat_detected",
+        "dependency_typosquat",
+        "lifecycle_typosquat",
+        "typosquat_lifecycle"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [],
+      "note": null
+    },
+    {
+      "name": "fullstacked",
+      "version": "1.0.0-alpha.1676",
+      "score": 25,
+      "band": "low",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "proxy_data_intercept",
+        "suspicious_dataflow",
+        "high_entropy_string",
+        "trusted_new_dependency",
+        "lifecycle_dataflow"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "fullstacked.org"
+      ],
+      "note": null
+    },
+    {
+      "name": "@vived/host",
+      "version": "5.2.4",
+      "score": 20,
+      "band": "low",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "typosquat_detected",
+        "dependency_typosquat",
+        "lifecycle_typosquat",
+        "typosquat_lifecycle"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "bitbucket.org"
+      ],
+      "note": null
+    },
+    {
+      "name": "@itwin/certa",
+      "version": "5.10.2",
+      "score": 20,
+      "band": "low",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "dynamic_require",
+        "suspicious_dataflow",
+        "lifecycle_dataflow"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "json-schema.org",
+        "dev.bentley.com",
+        "localhost:3000",
+        "chromium.googlesource.com"
+      ],
+      "note": null
+    },
+    {
+      "name": "@plurnk/plurnk-mimetypes",
+      "version": "0.15.5",
+      "score": 28,
+      "band": "low",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "dependency_typosquat",
+        "typosquat_lifecycle"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "plurnk.dev"
+      ],
+      "note": null
+    },
+    {
+      "name": "@company-semantics/contracts",
+      "version": "13.5.0",
+      "score": 30,
+      "band": "low",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "dependency_typosquat",
+        "typosquat_lifecycle"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "json-schema.org",
+        "company-semantics.dev",
+        "example.com",
+        "..."
+      ],
+      "note": null
+    },
+    {
+      "name": "@adobe/aio-cli-plugin-aem-edge-functions",
+      "version": "0.9.1",
+      "score": 33,
+      "band": "low",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "env_access",
+        "credential_regex_harvest",
+        "suspicious_dataflow",
+        "lifecycle_dataflow"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "www.apache.org",
+        "developer.adobe.com",
+        "$",
+        "experienceleague.adobe.com"
+      ],
+      "note": null
+    },
+    {
+      "name": "openfin-fdc3",
+      "version": "0.2.5-alpha.10",
+      "score": 22,
+      "band": "low",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "dependency_typosquat",
+        "typosquat_lifecycle"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "fdc3.finos.org",
+        "www.isin.org",
+        "www.cusip.com",
+        "www.londonstockexchange.com"
+      ],
+      "note": null
+    },
+    {
+      "name": "@shgysk8zer0/jwk-utils",
+      "version": "1.2.0",
+      "score": 20,
+      "band": "low",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "credential_regex_harvest",
+        "suspicious_dataflow",
+        "lifecycle_dataflow"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "www.googleapis.com",
+        "securetoken.google.com",
+        "example.com').",
+        "liberapay.com"
+      ],
+      "note": null
+    },
+    {
+      "name": "neonctl",
+      "version": "2.26.1",
+      "score": 22,
+      "band": "low",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "detached_process",
+        "string_mutation_obfuscation",
+        "dynamic_import",
+        "env_access",
+        "dangerous_call_exec",
+        "credential_regex_harvest",
+        "unicode_variation_decoder",
+        "suspicious_dataflow",
+        "lifecycle_dataflow"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "track.neon.tech',",
+        "datatracker.ietf.org",
+        "console.neon.tech",
+        "$"
+      ],
+      "note": null
+    },
+    {
+      "name": "@pmxt/cli",
+      "version": "2.49.11",
+      "score": 20,
+      "band": "low",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "credential_regex_harvest",
+        "detached_process",
+        "silent_stealth_process",
+        "suspicious_dataflow",
+        "lifecycle_dataflow"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "api.pmxt.dev",
+        "localhost:3847"
+      ],
+      "note": null
+    },
+    {
+      "name": "stream-chat-react-native-core",
+      "version": "9.4.0-beta.1",
+      "score": 21,
+      "band": "low",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "dangerous_exec",
+        "lifecycle_dangerous_exec"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "'",
+        "www.getstream.io',",
+        "www.getstream.io",
+        "www.getstream.io)'"
+      ],
+      "note": null
+    },
+    {
+      "name": "run402",
+      "version": "2.47.1",
+      "score": 20,
+      "band": "low",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "credential_regex_harvest",
+        "env_access",
+        "dynamic_import",
+        "detached_process",
+        "silent_stealth_process",
+        "suspicious_dataflow",
+        "credential_tampering",
+        "lifecycle_dataflow"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "run402.com",
+        "api.run402.com",
+        "api.run402.com.",
+        "example.com"
+      ],
+      "note": null
+    },
+    {
+      "name": "@salesforce/cli",
+      "version": "2.140.3",
+      "score": 20,
+      "band": "low",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "dynamic_import",
+        "lifecycle_file_exec"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "opensource.org",
+        "opencollective.com",
+        "www.patreon.com",
+        "feross.org"
+      ],
+      "note": null
+    },
+    {
+      "name": "@agntdev/cli",
+      "version": "0.9.0",
+      "score": 55,
+      "band": "mid",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "dependency_typosquat",
+        "typosquat_lifecycle"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "api.agnt-gm.ai",
+        "...)",
+        "agnt-gm.ai",
+        "snake-game.agnt-gm.ai"
+      ],
+      "note": null
+    },
+    {
+      "name": "@sdsrs/code-graph",
+      "version": "0.48.0",
+      "score": 68,
+      "band": "mid",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "detached_process",
+        "silent_stealth_process",
+        "suspicious_dataflow",
+        "high_entropy_string",
+        "cross_file_dataflow",
+        "lifecycle_dataflow"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "api.github.com",
+        "example.com",
+        "example"
+      ],
+      "note": null
+    },
+    {
+      "name": "@amos.com/node",
+      "version": "0.1.10",
+      "score": 48,
+      "band": "mid",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "dependency_typosquat",
+        "typosquat_lifecycle"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "pay.amos.com",
+        "pay-sandbox.amos.com"
+      ],
+      "note": null
+    },
+    {
+      "name": "@loczer/storefront-sdk",
+      "version": "0.154.0",
+      "score": 55,
+      "band": "mid",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "dependency_typosquat",
+        "typosquat_lifecycle"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "www.w3.org",
+        "api.mapbox.com",
+        "www.google.com",
+        "loczer.com"
+      ],
+      "note": null
+    },
+    {
+      "name": "auditor-lambda",
+      "version": "0.17.0",
+      "score": 66,
+      "band": "mid",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "dynamic_import",
+        "credential_tampering",
+        "lifecycle_file_exec"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "opencode.ai",
+        "json-schema.org",
+        "example.invalid"
+      ],
+      "note": null
+    },
+    {
+      "name": "su7",
+      "version": "0.1.7",
+      "score": 69,
+      "band": "mid",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "dependency_typosquat",
+        "high_entropy_string",
+        "typosquat_lifecycle"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [],
+      "note": null
+    },
+    {
+      "name": "@signa-app/dto",
+      "version": "0.3.7",
+      "score": 50,
+      "band": "mid",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "dependency_typosquat",
+        "typosquat_lifecycle"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "example.com"
+      ],
+      "note": null
+    },
+    {
+      "name": "muonroi-cli",
+      "version": "1.4.1",
+      "score": 48,
+      "band": "mid",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "dependency_typosquat",
+        "monorepo_detected",
+        "typosquat_lifecycle"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "localhost",
+        "discord.com",
+        "bitwarden.com",
+        "example"
+      ],
+      "note": null
+    },
+    {
+      "name": "@nulib/dc-api-mcp",
+      "version": "2.11.5",
+      "score": 48,
+      "band": "mid",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "bun_runtime_evasion",
+        "dependency_typosquat",
+        "typosquat_lifecycle"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "raw.githubusercontent.com",
+        "json-schema.org",
+        "api.dc.library.northwestern.edu",
+        "iiif.dc.library.northwestern.edu"
+      ],
+      "note": null
+    },
+    {
+      "name": "encode-ai-cli",
+      "version": "0.1.2",
+      "score": 63,
+      "band": "mid",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "bun_runtime_evasion",
+        "wasm_standalone",
+        "dangerous_exec",
+        "typosquat_detected",
+        "lifecycle_typosquat",
+        "lifecycle_dangerous_exec"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "json.schemastore.org",
+        "$",
+        "docs.github.com",
+        "opencode.ai"
+      ],
+      "note": null
+    },
+    {
+      "name": "paddle-checkout-accelerator",
+      "version": "3.7.0",
+      "score": 35,
+      "band": "mid",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "string_mutation_obfuscation",
+        "credential_regex_harvest",
+        "suspicious_dataflow",
+        "credential_tampering",
+        "lifecycle_dataflow"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "api.paddle.com$",
+        "localhost:3000",
+        "api.paddle.com"
+      ],
+      "note": null
+    },
+    {
+      "name": "doc-detective",
+      "version": "4.7.0",
+      "score": 35,
+      "band": "mid",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "lifecycle_missing_script",
+        "env_access",
+        "credential_regex_harvest",
+        "dynamic_import",
+        "suspicious_dataflow",
+        "dependency_typosquat",
+        "typosquat_lifecycle",
+        "typosquat_dataflow",
+        "lifecycle_dataflow"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "raw.githubusercontent.com",
+        "codeload.github.com",
+        "example.com",
+        "doc-detective.com"
+      ],
+      "note": null
+    },
+    {
+      "name": "ultravisor",
+      "version": "1.3.21",
+      "score": 35,
+      "band": "mid",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "dynamic_require",
+        "env_access",
+        "credential_regex_harvest",
+        "string_mutation_obfuscation",
+        "suspicious_dataflow",
+        "credential_tampering",
+        "lifecycle_dataflow"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "www.w3.org",
+        "console.anthropic.com",
+        "ollama.com",
+        "platform.openai.com"
+      ],
+      "note": null
+    },
+    {
+      "name": "hubspot-cms-sync",
+      "version": "0.5.0",
+      "score": 45,
+      "band": "mid",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "credential_regex_harvest",
+        "env_access",
+        "dynamic_import",
+        "string_mutation_obfuscation",
+        "suspicious_dataflow",
+        "lifecycle_dataflow"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "api.hubapi.com';",
+        "cdn2.hubspot.net",
+        "www2.7thsense.io).",
+        "cta-redirect.hubspot.com"
+      ],
+      "note": null
+    },
+    {
+      "name": "graphile-realtime-test",
+      "version": "0.8.5",
+      "score": 48,
+      "band": "mid",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "dependency_typosquat",
+        "typosquat_lifecycle"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [],
+      "note": null
+    },
+    {
+      "name": "@seemseam/archi",
+      "version": "0.2.17",
+      "score": 56,
+      "band": "mid",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "env_access",
+        "suspicious_dataflow",
+        "lifecycle_dataflow"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "your-llm-endpoint",
+        "api.github.com"
+      ],
+      "note": null
+    },
+    {
+      "name": "@react-native-ohos/rn-tourguide",
+      "version": "3.4.0-beta.3",
+      "score": 42,
+      "band": "mid",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "typosquat_detected",
+        "dependency_typosquat",
+        "lifecycle_typosquat",
+        "typosquat_lifecycle"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "gitcode.com"
+      ],
+      "note": null
+    },
+    {
+      "name": "@railway/cli",
+      "version": "5.11.0",
+      "score": 85,
+      "band": "high",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "suspicious_dataflow",
+        "compromised_email_domain",
+        "lifecycle_file_exec",
+        "lifecycle_dataflow"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [],
+      "note": null
+    },
+    {
+      "name": "@vita-mojo/aggregator",
+      "version": "1.436.0-8264",
+      "score": 86,
+      "band": "high",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "env_access",
+        "crypto_decipher",
+        "dependency_typosquat",
+        "lifecycle_file_exec",
+        "typosquat_lifecycle"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [],
+      "note": null
+    },
+    {
+      "name": "chai-check-error",
+      "version": "2.1.6",
+      "score": 84,
+      "band": "high",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "crypto_decipher",
+        "dangerous_call_function",
+        "lifecycle_file_exec"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "alogicalparadox.com)"
+      ],
+      "note": null
+    },
+    {
+      "name": "koishi-plugin-live-monitor",
+      "version": "0.1.10",
+      "score": 78,
+      "band": "high",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "string_mutation_obfuscation",
+        "credential_regex_harvest",
+        "dependency_typosquat",
+        "high_entropy_string",
+        "typosquat_lifecycle"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "www.w3.org"
+      ],
+      "note": null
+    },
+    {
+      "name": "hellyeah",
+      "version": "1.1.0",
+      "score": 100,
+      "band": "high",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "curl_pipe_shell",
+        "credential_regex_harvest",
+        "suspicious_dataflow",
+        "lifecycle_file_exec",
+        "lifecycle_dataflow"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "us.i.posthog.com",
+        "releases.hellyeahai.com",
+        "hellyeah.sh",
+        "docs.hellyeahai.com"
+      ],
+      "note": null
+    },
+    {
+      "name": "@ladybugdb/core",
+      "version": "0.18.0-dev.20260612",
+      "score": 100,
+      "band": "high",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "dynamic_require",
+        "env_access",
+        "process_binding_abuse",
+        "suspicious_dataflow",
+        "lifecycle_file_exec",
+        "lifecycle_dataflow"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "ladybugdb.com"
+      ],
+      "note": null
+    },
+    {
+      "name": "@muuktest/amikoo-reporter",
+      "version": "1.2.2",
+      "score": 81,
+      "band": "high",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "credential_tampering",
+        "lifecycle_file_exec"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "prgm4fborb.execute-api.us-east-2.amazonaws.com",
+        "localhost:3000",
+        "app.amikoo.ai'",
+        "app.amikoo.ai';"
+      ],
+      "note": null
+    },
+    {
+      "name": "loadninja-shared",
+      "version": "9.9.99",
+      "score": 100,
+      "band": "high",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "suspicious_domain",
+        "credential_regex_harvest",
+        "suspicious_dataflow",
+        "lifecycle_file_exec",
+        "lifecycle_dataflow",
+        "intent_credential_exfil"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [],
+      "note": null
+    },
+    {
+      "name": "obsidian-agent-fleet",
+      "version": "0.11.0",
+      "score": 100,
+      "band": "high",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "string_mutation_obfuscation",
+        "dangerous_call_eval",
+        "env_access",
+        "suspicious_domain",
+        "staged_binary_payload",
+        "credential_regex_harvest",
+        "stego_binary_exec",
+        "obfuscation_detected",
+        "suspicious_dataflow",
+        "lifecycle_file_exec",
+        "lifecycle_dataflow"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "example.com",
+        "api.example.com",
+        "cdnjs.cloudflare.com",
+        "fonts.googleapis.com"
+      ],
+      "note": null
+    },
+    {
+      "name": "@central-icons-react/round-filled-radius-0-stroke-2",
+      "version": "1.1.264",
+      "score": 100,
+      "band": "high",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "env_access",
+        "credential_regex_harvest",
+        "suspicious_dataflow",
+        "lifecycle_file_exec",
+        "lifecycle_dataflow"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "www.w3.org",
+        "centralicons.com",
+        "iconists.co"
+      ],
+      "note": null
+    },
+    {
+      "name": "@central-icons-react/round-filled-radius-3-stroke-1.5",
+      "version": "1.1.262",
+      "score": 100,
+      "band": "high",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "env_access",
+        "credential_regex_harvest",
+        "suspicious_dataflow",
+        "lifecycle_file_exec",
+        "lifecycle_dataflow"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "www.w3.org",
+        "centralicons.com",
+        "iconists.co"
+      ],
+      "note": null
+    },
+    {
+      "name": "@central-icons-react/square-outlined-radius-0-stroke-1.5",
+      "version": "1.1.264",
+      "score": 100,
+      "band": "high",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "env_access",
+        "credential_regex_harvest",
+        "suspicious_dataflow",
+        "lifecycle_file_exec",
+        "lifecycle_dataflow"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "www.w3.org",
+        "centralicons.com",
+        "iconists.co"
+      ],
+      "note": null
+    },
+    {
+      "name": "@central-icons-react-native/round-filled-radius-0-stroke-1",
+      "version": "1.1.264",
+      "score": 100,
+      "band": "high",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "env_access",
+        "credential_regex_harvest",
+        "suspicious_dataflow",
+        "lifecycle_file_exec",
+        "lifecycle_dataflow"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "centralicons.com",
+        "iconists.co"
+      ],
+      "note": null
+    },
+    {
+      "name": "@central-icons-react-native/round-outlined-radius-0-stroke-1",
+      "version": "1.1.264",
+      "score": 100,
+      "band": "high",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "env_access",
+        "credential_regex_harvest",
+        "suspicious_dataflow",
+        "lifecycle_file_exec",
+        "lifecycle_dataflow"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "centralicons.com",
+        "iconists.co"
+      ],
+      "note": null
+    },
+    {
+      "name": "@central-icons-react-native/square-outlined-radius-0-stroke-2",
+      "version": "1.1.264",
+      "score": 100,
+      "band": "high",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "env_access",
+        "credential_regex_harvest",
+        "suspicious_dataflow",
+        "lifecycle_file_exec",
+        "lifecycle_dataflow"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "centralicons.com",
+        "iconists.co"
+      ],
+      "note": null
+    },
+    {
+      "name": "lystn-cli",
+      "version": "0.1.5",
+      "score": 100,
+      "band": "high",
+      "clusters": [
+        "lifecycle"
+      ],
+      "flagged_rules": [
+        "lifecycle_script",
+        "dynamic_require",
+        "lifecycle_file_exec"
+      ],
+      "verdict": "FP",
+      "sink": false,
+      "hosts": [
+        "www.python.org"
+      ],
+      "note": null
+    }
+  ]
+}
