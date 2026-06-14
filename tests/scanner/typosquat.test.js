@@ -223,6 +223,31 @@ async function runTyposquatTests() {
     assert(findCratesTyposquatMatch('totally-unrelated-xyzzy') === null, 'unrelated name → null');
     assert(findCratesTyposquatMatch('h2') === null, 'short name skipped (< 4 chars)');
   });
+
+  // Chantier 4 (2026-06, n=61 blind → boundary-squat 100% FP): legit `<token>-<generic-popular>`
+  // and `<popular>-<suffix>` deps must NOT fire dependency_typosquat; distinctive-brand suffix
+  // squats (plain-crypto-js, secure-axios) still must (also covered by RT-C1-FPR.c guard).
+  await asyncTest('RT-C1-FPR.d: generic-word + own-extension boundary deps are NOT typosquats', async () => {
+    const benign = [
+      'class-validator', 'graphile-config', 'ansi-colors', 'sinon-chai', 'react-helmet-async',
+      'swagger-ui-express', 'short-uuid', 'react-router-redux', 'openapi-typescript',
+      'tree-sitter-c-sharp', 'agent-commander', 'rate-limit-redis', 'shadcn-svelte', // <token>-<generic-popular>
+      'date-fns-tz', 'aws-sdk-client-mock', 'core-js-compat', // <popular>-<suffix> own extension
+    ];
+    for (const dep of benign) {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-rt-c1-fpr-d-'));
+      fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
+        name: 'legit-app', version: '1.0.0', dependencies: { [dep]: '^1.0.0' }
+      }));
+      fs.writeFileSync(path.join(tmp, 'index.js'), `require('${dep}');`);
+      try {
+        const result = await runScanDirect(tmp);
+        const t = (result.threats || []).find(tt =>
+          tt.type === 'dependency_typosquat' && tt.message && tt.message.includes(dep));
+        assert(!t, `FP: ${dep} must NOT fire dependency_typosquat (legit boundary token), got ${t && t.message}`);
+      } finally { cleanupTemp(tmp); }
+    }
+  });
 }
 
 module.exports = { runTyposquatTests };
