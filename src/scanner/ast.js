@@ -17,6 +17,13 @@ const {
 // Check if credential keywords appear INSIDE regex literals or new RegExp() patterns.
 // Only true when the keyword is part of the regex pattern itself, not just a string elsewhere in the file.
 const CREDENTIAL_REGEX_KEYWORDS = /bearer|password|secret|token|credential|api.?key/i;
+// axios call shapes — a network call the legacy regexes miss (caught only by ioc_string_match).
+// Covers BOTH the identifier form (axios(...) / axios.get|post|...(...)) and the inline-require
+// form (require('axios').get(...) — the chalk-pro/jsonkeeper staged-loader shape). Call-shaped
+// only, so it never matches a bare `require('axios')` import, `import axios`, `myaxios.get`, or
+// `axios` in a comment/string. Bare instance-var calls (const c = axios.create(); c.get()) are a
+// known follow-up gap; the create() verb catches the create site itself.
+const AXIOS_NETWORK_CALL_RE = /(?:\baxios|require\s*\(\s*['"]axios['"]\s*\))\s*(?:\(|\.\s*(?:get|post|put|patch|delete|request|head|options|create)\s*\()/;
 function hasCredentialInsideRegex(content) {
   // Check regex literals: /...pattern.../flags
   const regexLiteralRe = /\/(?!\*)(?:[^/\\]|\\.)+\/[gimsuy]*/g;
@@ -172,9 +179,9 @@ function analyzeFile(content, filePath, basePath) {
     // SANDWORM_MODE P2: env harvesting co-occurrence
     hasEnvEnumeration: false,  // Object.entries/keys/values(process.env)
     hasEnvHarvestPattern: /\b(KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL|NPM|AWS|SSH|WEBHOOK)\b/.test(content),
-    hasNetworkCallInFile: /\b(fetch|https?\.request|https?\.get|dns\.resolve)\b/.test(content),
-    // C5: Non-fetch network calls indicate independent network channel (NOT WASM loading)
-    hasNonFetchNetworkCall: /\bhttps?\.request\b|\bhttps?\.get\b|\bdns\.resolve\b/.test(content),
+    hasNetworkCallInFile: /\b(fetch|https?\.request|https?\.get|dns\.resolve)\b/.test(content) || AXIOS_NETWORK_CALL_RE.test(content),
+    // C5: Non-fetch network calls indicate independent network channel (NOT WASM loading). axios is non-fetch.
+    hasNonFetchNetworkCall: /\bhttps?\.request\b|\bhttps?\.get\b|\bdns\.resolve\b/.test(content) || AXIOS_NETWORK_CALL_RE.test(content),
     // Credential regex harvesting: regex literals or new RegExp() whose PATTERN contains credential keywords
     // Must check that the keyword is inside the regex, not just anywhere in the file
     hasCredentialRegex: hasCredentialInsideRegex(content),
@@ -197,7 +204,7 @@ function analyzeFile(content, filePath, basePath) {
     gitHooksPathVars: new Map(),
     ideConfigPathVars: new Map(),
     // Wave 4: compound detection — fetch + decrypt + eval chain
-    hasRemoteFetch: /\bhttps?\.(get|request)\b/.test(content) || /\bfetch\s*\(/.test(content),
+    hasRemoteFetch: /\bhttps?\.(get|request)\b/.test(content) || /\bfetch\s*\(/.test(content) || AXIOS_NETWORK_CALL_RE.test(content),
     // Safe domain exclusion: if ALL URLs in file are from known registries, suppress download_exec_binary
     fetchOnlySafeDomains: false, // computed below after URL extraction
     hasCryptoDecipher: /\bcreateDecipher(iv)?\s*\(/.test(content),

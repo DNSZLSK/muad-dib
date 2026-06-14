@@ -18,11 +18,15 @@ const ACORN_OPTIONS = {
 };
 
 // --- Sink patterns for cross-file detection ---
-const SINK_CALLEE_NAMES = new Set(['fetch', 'eval', 'Function', 'WebSocket', 'XMLHttpRequest']);
+const SINK_CALLEE_NAMES = new Set(['fetch', 'eval', 'Function', 'WebSocket', 'XMLHttpRequest', 'axios']);
 const SINK_MEMBER_METHODS = new Set([
   'https.request', 'https.get', 'http.request', 'http.get',
   'child_process.exec', 'child_process.execSync', 'child_process.spawn',
   'dns.resolveTxt', 'dns.resolve', 'dns.resolve4', 'dns.resolve6',
+  // axios as a cross-file network sink (axios.get(taintedData) etc.). Instance form
+  // (const c = axios.create(); c.get(...)) is NOT added to SINK_INSTANCE_METHODS — that
+  // would match every .get/.post receiver and explode FPs; it's a known follow-up gap.
+  'axios.get', 'axios.post', 'axios.put', 'axios.patch', 'axios.delete', 'axios.request',
 ]);
 const SINK_INSTANCE_METHODS = new Set(['connect', 'write', 'send']);
 

@@ -1,0 +1,6 @@
+{
+  "name": "axios-benign-sdk",
+  "version": "1.0.0",
+  "description": "Benign SDK: credential-shaped redaction regex + axios call to the provider's own API. credential_regex_harvest fires (regex keyword + axios network call) but MUST be downgraded to LOW — no exfil sink (benign provider host, no secret flows out). Guards the axios extension to the network-call set against an FP spike.",
+  "main": "index.js"
+}
