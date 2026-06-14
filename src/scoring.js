@@ -1029,6 +1029,28 @@ const FRAMEWORK_PROTO_RE = new RegExp(
   '^(' + FRAMEWORK_PROTOTYPES.join('|') + ')\\.prototype\\.'
 );
 
+// FPR sink-coupling (chantier 2026-06): independent exfil / remote-exec sink signals pointing at
+// an ANOMALOUS destination. A credential_regex_harvest signal is only a true positive when one of
+// these co-occurs in the package. Deliberately EXCLUDES benign network capability — a bare
+// fetch/http.get, remote_code_load to a first-party CDN/model host, a local server, or a native
+// build are NOT sinks. Dataflow-PROVEN harvest signals (intent_credential_exfil, cross_file_dataflow)
+// are included so a genuine read→exfil taint keeps the signal HIGH regardless of host reputation
+// (anti-FN floor). See _hasExfilSink + the credential_regex_harvest gate in applyFPReductions.
+const EXFIL_SINK_TYPES = new Set([
+  'suspicious_domain', 'direct_ip_exfil', 'ioc_string_match', 'ioc_match',
+  'known_malicious_package', 'pypi_malicious_package', 'shai_hulud_marker',
+  'detached_credential_exfil', 'silent_stealth_process',
+  'curl_pipe_shell', 'curl_env_exfil', 'reverse_shell', 'dns_exfil', 'oast_callback',
+  'function_constructor_require', 'staged_remote_loader', 'staged_eval_decode',
+  'fetch_decrypt_exec', 'download_exec_binary', 'self_destruct_eval',
+  'newsletter_auto_follow', 'cross_file_dataflow', 'intent_credential_exfil',
+  'intent_command_exfil', 'sandbox_known_exfil_domain', 'sandbox_network_after_sensitive_read'
+]);
+function _hasExfilSink(threats) {
+  if (!Array.isArray(threats)) return false;
+  return threats.some(t => EXFIL_SINK_TYPES.has(t.type) && t.severity !== 'LOW');
+}
+
 function applyFPReductions(threats, reachableFiles, packageName, packageDeps, reachableFunctions) {
   // Initialize reductions audit trail on each threat
   // Store original severity before any FP reductions, so compound
@@ -1170,6 +1192,25 @@ function applyFPReductions(threats, reachableFiles, packageName, packageDeps, re
         t.reductions = t.reductions.filter(r => r.rule !== 'count_threshold');
         t.reductions.push({ rule: 'count_threshold_floor', note: 'retained one instance at original severity' });
         restoredTypes.add(t.type);
+      }
+    }
+  }
+
+  // FPR sink-coupling gate (chantier 2026-06 — FPR-baseline-2026-06-14.md). credential_regex_harvest
+  // is a weak signal alone: a credential-shaped regex co-located with a network call, with NO proof
+  // the matched secret flows out and NO host-reputation check (ast.js:hasCredentialInsideRegex +
+  // hasNetworkCallInFile). The blind FPR baseline measured 94.4% FP on it — it fires on nodemailer
+  // SMTP code, redaction utilities in framework bundles, and SDKs that parse Authorization headers.
+  // It is a real harvester ONLY when an independent exfil sink to an anomalous destination co-occurs
+  // (suspicious_domain / direct_ip / ioc / detached-exfil / staged loader / curl exfil / dataflow-proven
+  // taint ...). When no such sink is present, downgrade HIGH/CRITICAL → LOW. Runs after the dilution
+  // floor so the floor's restored instance is also gated (the floor protects real exfil; with no sink
+  // there is nothing to protect). No GT sample relies on credential_regex_harvest (verified).
+  if (!_hasExfilSink(threats)) {
+    for (const t of threats) {
+      if (t.type === 'credential_regex_harvest' && (t.severity === 'HIGH' || t.severity === 'CRITICAL')) {
+        t.reductions.push({ rule: 'sink_coupling', from: t.severity, to: 'LOW' });
+        t.severity = 'LOW';
       }
     }
   }

@@ -1,0 +1,17 @@
+{
+  "name": "cryptokit-asymmetric",
+  "version": "1.0.0",
+  "description": "Negative control (sink-coupling-fp). Vendor package family (cryptokit-*) whose postinstall prints a cosmetic banner and points the user at a key-gen command. The boundary-squat-looking sibling deps (cryptokit-logger, cryptokit-env-access) are the author's OWN family, and the lifecycle hook has NO exfil sink. Models the opticore-asymmetric-cryption FP (typosquat-compound misfire). Must NOT escalate after Etape C.",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "postinstall": "node scripts/postinstall.mjs"
+  },
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "cryptokit-logger": "^1.0.0",
+    "cryptokit-env-access": "^1.0.0",
+    "secure-chalk": "^1.0.0"
+  },
+  "license": "MIT"
+}
