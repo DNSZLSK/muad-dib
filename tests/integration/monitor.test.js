@@ -1773,7 +1773,7 @@ async function runMonitorTests() {
     assert(timeoutField, 'Should have Timeouts field');
     const trendsField = embed.embeds[0].fields.find(f => f.name === 'vs Yesterday');
     assert(trendsField, 'Should have vs Yesterday field');
-    const systemField = embed.embeds[0].fields.find(f => f.name === 'System');
+    const systemField = embed.embeds[1].fields.find(f => f.name === 'System');
     assert(systemField, 'Should have System field');
     const mlField = embed.embeds[0].fields.find(f => f.name === 'ML');
     assert(mlField, 'Should have ML field');
@@ -3690,7 +3690,7 @@ async function runMonitorTests() {
     try {
       const embed = buildDailyReportEmbed();
       assert(embed.embeds, 'Should have embeds');
-      assert(embed.embeds.length === 1, 'Should have one embed');
+      assert(embed.embeds.length === 2, 'Should have two embeds (Daily + Ops)');
       const e = embed.embeds[0];
       assertIncludes(e.title, 'Daily Report', 'Title should mention Daily Report');
       assert(e.color === 0x3498db, 'Color should be blue');
