@@ -1,10 +1,10 @@
 'use strict';
 
 const path = require('path');
-const { SINK_CALLEE_NAMES, SINK_MEMBER_METHODS, SINK_INSTANCE_METHODS } = require('./constants.js');
+const { SINK_CALLEE_NAMES, SINK_MEMBER_METHODS, SINK_INSTANCE_METHODS, NON_NETWORK_SINK_RECEIVER_ROOTS } = require('./constants.js');
 const {
   parseFile, walkAST, isRequireCall, isModuleExportsAssign,
-  getExportName, getFunctionBody, getMemberChain
+  getExportName, getFunctionBody, getMemberChain, getReceiverRootName
 } = require('./parse-utils.js');
 
 /**
@@ -87,11 +87,14 @@ function analyzeSinkExports(filePath) {
               return;
             }
           }
-          // .write(), .send(), .connect()
+          // .write(), .send(), .connect() — but not process.*/console.* (local I/O, not network)
           const method = node.callee.property.name || node.callee.property.value;
           if (SINK_INSTANCE_METHODS.has(method)) {
-            found = method + '()';
-            return;
+            const root = getReceiverRootName(node.callee);
+            if (!(root && NON_NETWORK_SINK_RECEIVER_ROOTS.has(root))) {
+              found = method + '()';
+              return;
+            }
           }
         }
       }

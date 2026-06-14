@@ -8,6 +8,7 @@ const { applyFPReductions, applyCompoundBoosts, calculateRiskScore, getSeverityW
 const { loadPriorVersionSignatures, computeSignatures, saveCachedSignatures } = require('../scoring/delta-multiplier.js');
 const { annotateConfidenceTiers } = require('../rules/confidence-tiers.js');
 const { buildIntentPairs } = require('../intent-graph.js');
+const { networkDestinationsAllBenign } = require('../sdk-destination.js');
 const { debugLog } = require('../utils.js');
 const { getPackageMetadata } = require('../scanner/npm-registry.js');
 const { checkReleaseZero } = require('../scanner/release-zero.js');
@@ -351,13 +352,20 @@ async function process(threats, targetPath, options, pythonDeps, warnings, scann
       const hasCredFlow = fileThreats.some(t => t.type === 'suspicious_dataflow');
       const alreadyCompound = fileThreats.some(t => t.type === 'detached_credential_exfil');
       if (hasDetached && hasCredFlow && !alreadyCompound) {
-        deduped.push({
-          type: 'detached_credential_exfil',
-          severity: 'CRITICAL',
-          message: 'Detached process + credential dataflow — background exfiltration (cross-scanner compound).',
-          file,
-          count: 1
-        });
+        // FP gate (segment A): skip when the file's network destinations are ALL
+        // first-party/local/provider (legit SDK/agent), not exfil. Unknown/suspicious/
+        // public-IP host — or unreadable file — keeps it firing (confirmed-benign only).
+        let destAllBenign = false;
+        try { destAllBenign = networkDestinationsAllBenign(fs.readFileSync(path.join(targetPath, file), 'utf8')); } catch { /* unreadable → not benign */ }
+        if (!destAllBenign) {
+          deduped.push({
+            type: 'detached_credential_exfil',
+            severity: 'CRITICAL',
+            message: 'Detached process + credential dataflow — background exfiltration (cross-scanner compound).',
+            file,
+            count: 1
+          });
+        }
       }
     }
   }
