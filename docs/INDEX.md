@@ -6,7 +6,7 @@
 |----------|-------------|
 | [README](../README.md) | Project overview, installation, usage |
 | [README.fr.md](README.fr.md) | French version of the README |
-| [SECURITY.md](../SECURITY.md) | Security policy, 264 detection rules reference (canonical source) |
+| [SECURITY.md](../SECURITY.md) | Security policy, 266 detection rules reference (canonical source) |
 | [CHANGELOG.md](../CHANGELOG.md) | Version history and release notes |
 
 ## Technical Documentation
@@ -24,12 +24,12 @@
 |----------|-------------|
 | [Carnet de Bord](CARNET_DE_BORD_MUADDIB.md) | Development journal (French) — project history and decisions |
 
-## Current Metrics (v2.11.76; detection metrics last measured v2.11.48)
+## Current Metrics (v2.11.117; detection metrics last measured v2.11.48)
 
 | Metric | Value |
 |--------|-------|
-| Tests | **4132** across 115 files |
-| Rules | **264** (259 RULES + 5 PARANOID - v2.11.67/70 Phantom Gyp added PKG-023 + COMPOUND-017) |
+| Tests | **4414** across 141 files |
+| Rules | **266** (261 RULES + 5 PARANOID - v2.11.67/70 Phantom Gyp added PKG-023 + COMPOUND-017) |
 | Scanners | **20 parallel** + 2 pre-analysis (module-graph, deobfuscate) + 1 async parser bootstrap (python-ast WASM) + 6 conditional/post-processing (paranoid, 3× temporal-*, reachability, phantom-gyp) + 1 metadata (npm-registry) |
 | TPR@3 (Ground Truth, v2.11.48 measure) | **95.74%** (90/94 in-scope) — full re-measurement on enriched GT |
 | TPR@20 (Ground Truth, v2.11.48 measure) | **88.30%** (83/94 in-scope) — **+3.1pp vs v2.11.47** via Track D `recon_exfil_direct_ip` compound (closes GT-095 gap, boosts GT-091/GT-092) |
@@ -67,7 +67,7 @@ src/
 │   ├── trusted-dep-diff.js # Diff against trusted dep tarballs (opt-in)
 │   └── ...                # package, shell, typosquat, dependencies, hash, gh-actions
 ├── ml/                    # ML classifier (T1 filter, Phase 2)
-├── rules/index.js         # 264 threat rules (259 RULES + 5 PARANOID, MITRE mapped)
+├── rules/index.js         # 266 threat rules (261 RULES + 5 PARANOID, MITRE mapped)
 ├── response/playbooks.js  # Remediation playbooks
 ├── sandbox/               # Docker dynamic analysis
 │   ├── index.js           # Multi-run orchestration [0h, 72h, 7d]

@@ -30,7 +30,7 @@
 
 npm and PyPI supply-chain attacks are exploding. Shai-Hulud compromised 25K+ repos in 2025. Existing tools detect threats but don't help you respond.
 
-MUAD'DIB combines **20 parallel scanners** (264 detection rules), a **deobfuscation engine**, **inter-module dataflow analysis**, **compound scoring** (17 compound rules), and a gVisor/Docker sandbox to detect known threats and suspicious behavioral patterns in npm and PyPI packages. An XGBoost classifier exists in the codebase but is **currently inactive** (see [Evaluation Metrics](#evaluation-metrics) → ML Classifier section).
+MUAD'DIB combines **20 parallel scanners** (266 detection rules), a **deobfuscation engine**, **inter-module dataflow analysis**, **compound scoring** (17 compound rules), and a gVisor/Docker sandbox to detect known threats and suspicious behavioral patterns in npm and PyPI packages. An XGBoost classifier exists in the codebase but is **currently inactive** (see [Evaluation Metrics](#evaluation-metrics) → ML Classifier section).
 
 ---
 
@@ -202,9 +202,9 @@ muaddib replay                     # Ground truth validation (90/94 TPR@3, v2.11
 | Python Source (PYSRC) | Import-time / install-time RCE patterns in `__init__.py` / `setup.py` (v2.11.41 — closes TrapDoor PyPI gap) |
 | Python AST (PYAST) | Tree-sitter-Python AST with taint-aware detectors (v2.11.42+) |
 
-### 264 detection rules
+### 266 detection rules
 
-All rules (259 RULES + 5 PARANOID) are mapped to MITRE ATT&CK techniques. See [SECURITY.md](SECURITY.md#detection-rules-v21176) for the complete rules reference.
+All rules (261 RULES + 5 PARANOID) are mapped to MITRE ATT&CK techniques. See [SECURITY.md](SECURITY.md#detection-rules-v211117) for the complete rules reference.
 
 ### Detected campaigns
 
@@ -278,7 +278,7 @@ With pre-commit framework:
 ```yaml
 repos:
   - repo: https://github.com/DNSZLSK/muad-dib
-    rev: v2.11.76
+    rev: v2.11.117
     hooks:
       - id: muaddib-scan
 ```
@@ -303,7 +303,7 @@ These are the numbers a user gets when running `muaddib scan` against npm or PyP
 | **FPR PyPI** (v2.11.48, first honest measurement) | **9.68%** (12/124 scanned, 132 total) | **Track D fixed the PyPI downloader** — removed `pip --no-binary :all:` flag (forced compile of wheel-only packages, timed out 38% of the time) + added `.whl` extraction via `extractArchive()`. Brought 42 previously-skipped giants (numpy/pandas/django/matplotlib/scikit-learn/...) into scope. All 12 FPs cluster at score 25-35: this is the cap-PyPI-35 artifact, not new rule misfires. Lifting the cap (Track E) would drop FPR PyPI to ≈0%. 8 residual fails are >500MB packages (torch, tensorflow, scipy, opencv-python, ansible…) hitting the 30s `PACK_TIMEOUT_MS`. |
 | **ADR** (Adversarial + Holdout, v2.11.48) | **96.26%** (103/107) | 67 adversarial + 40 holdout, global threshold=20. Stable vs v2.10.95. |
 
-**4132 tests** across 115 files. **264 rules** (259 RULES + 5 PARANOID; v2.11.67/70 Phantom Gyp added PKG-023 + COMPOUND-017).
+**4414 tests** across 141 files. **266 rules** (261 RULES + 5 PARANOID; v2.11.67/70 Phantom Gyp added PKG-023 + COMPOUND-017).
 
 **Known issues (v2.11.48):**
 - *Cap PyPI à 35/100*: Python samples plafonnent à `riskScore=35` even when `globalRiskScore=100`. Confirmed empirically — all 12 PyPI FPs at score 25-35 (flask 32, django 35, tornado 35, bottle 30, pandas 25, matplotlib 25, plotly 25, bokeh 25, pymongo 35, coverage 32, fabric 35, websockets 35). Lifting the cap will simultaneously drop FPR PyPI to ≈0% and unblock PyPI MALWARE detection at higher thresholds. Track E target.
@@ -380,7 +380,7 @@ npm test
 
 ### Testing
 
-- **4132 tests** across 115 modular test files
+- **4414 tests** across 141 modular test files
 - **56 fuzz tests** - Malformed inputs, ReDoS, unicode, binary
 - **Datadog 17K benchmark** - 14,587 confirmed malware samples (in-scope)
 - **Ground truth validation** - 96 real-world attacks (95.74% TPR@3, 88.30% TPR@20 — v2.11.48 full measure on 94 in-scope)
@@ -401,7 +401,7 @@ npm test
 - [Documentation Index](docs/INDEX.md) - All documentation in one place
 - [Evaluation Methodology](docs/EVALUATION_METHODOLOGY.md) - Experimental protocol, holdout scores
 - [Threat Model](docs/threat-model.md) - What MUAD'DIB detects and doesn't detect
-- [Security Policy](SECURITY.md) - Detection rules reference (259 rules)
+- [Security Policy](SECURITY.md) - Detection rules reference (261 rules)
 - [Security Audit](docs/SECURITY_AUDIT.md) - Bypass validation report
 - [FP Analysis](docs/EVALUATION.md) - Historical false positive analysis
 

@@ -19,7 +19,7 @@ Priorites :
 ## Commands
 
 ```bash
-npm test          # Run all tests (custom framework, 4132 tests across 115 files)
+npm test          # Run all tests (custom framework, 4414 tests across 141 files)
 npm run lint      # ESLint with security plugin
 npm run scan      # Self-scan: node bin/muaddib.js scan .
 npm run update    # Download latest IOCs
@@ -53,7 +53,7 @@ Tests use a custom framework in `tests/run-tests.js` (no Jest). Test helpers:
 - **6 conditional/post-processing**: `paranoid.js` (--paranoid flag), `temporal-runner.js` + `temporal-analysis.js` + `temporal-ast-diff.js` (--temporal* flags), `reachability.js` (post-processor FP downgrade, called from pipeline processor), `phantom-gyp.js` (Phantom Gyp compound correlator `gyp_phantom_exec`, post-processor at `processor.js:451`).
 - **1 metadata fetcher**: `npm-registry.js` (NPM API for age/downloads/maintainers — ML features, used by monitor/evaluate).
 
-Intent coherence (`src/intent-graph.js`) runs in pipeline processor (not in `src/scanner/`). Total: 32 `.js` files in `src/scanner/` (incl. 5 monitor-side: release-zero, email-domain, pypi-maintainer, pypi-registry, pypi-release-zero) + 1 directory `module-graph/` (9 files) + 1 directory `python-ast-detectors/` (6 files).
+Intent coherence (`src/intent-graph.js`) runs in pipeline processor (not in `src/scanner/`). Total: 33 `.js` files in `src/scanner/` (incl. 5 monitor-side: release-zero, email-domain, pypi-maintainer, pypi-registry, pypi-release-zero; and the `env-var-classification.js` taint-source helper) + 3 directories: `ast-detectors/` (13 files, AST scanner detector modules split out of `ast.js`), `module-graph/` (9 files), `python-ast-detectors/` (6 files).
 
 **Scoring:** `riskScore = min(100, max(file_scores) + package_level_score)`. Severity weights: CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1 — multiplied by `CONFIDENCE_FACTORS` (`high=1.0`, `medium=0.85`, `low=0.6`) based on `rule.confidence`. Details: ARCHITECTURE.md `### Confidence Factors`.
 
@@ -107,14 +107,14 @@ Never skip documentation updates when publishing a new version.
 - Never commit directly to master
 - Do not create commits automatically — the user handles commits manually
 
-## Current Metrics (v2.11.76; detection metrics last fully measured v2.11.48)
+## Current Metrics (v2.11.117; detection metrics last fully measured v2.11.48)
 
 | Metric | Value |
 |--------|-------|
-| Version | **2.11.76** |
-| Tests | **4132** passed, 0 failed, across 115 files (14511 skipped when Docker absent) |
-| Rules | **264** (259 RULES + 5 PARANOID - v2.11.67/70 Phantom Gyp adds PKG-023 `gyp_command_exec` + COMPOUND-017 `gyp_phantom_exec`) |
-| Scanners | **20 parallel** (Promise.allSettled) + **2 pre-analysis** (module-graph/, deobfuscate) + **1 async parser bootstrap** (python-ast WASM init, no analysis emitted) + **6 conditional/post-processing** (paranoid, 3× temporal-*, reachability, phantom-gyp) + **1 metadata** (npm-registry). 32 fichiers `src/scanner/*.js` + 1 dir `module-graph/` (9 fichiers) + 1 dir `python-ast-detectors/` (6 fichiers). Détails : ARCHITECTURE.md. |
+| Version | **2.11.117** |
+| Tests | **4414** passed, 0 failed, across 141 files (14511 skipped when Docker absent) |
+| Rules | **266** (261 RULES + 5 PARANOID - v2.11.67/70 Phantom Gyp adds PKG-023 `gyp_command_exec` + COMPOUND-017 `gyp_phantom_exec`) |
+| Scanners | **20 parallel** (Promise.allSettled) + **2 pre-analysis** (module-graph/, deobfuscate) + **1 async parser bootstrap** (python-ast WASM init, no analysis emitted) + **6 conditional/post-processing** (paranoid, 3× temporal-*, reachability, phantom-gyp) + **1 metadata** (npm-registry). 33 fichiers `src/scanner/*.js` + 3 dirs : `ast-detectors/` (13), `module-graph/` (9), `python-ast-detectors/` (6 fichiers). Détails : ARCHITECTURE.md. |
 | Ground Truth size | **96 samples** (was 67 in v2.10.95). 22 added 2026-05-25: 16 synthetic for new PYSRC/PYAST/AST-092/AICONF-004/PKG-022 rules (GT-068..083), 6 real-world tarballs from VPS archive (GT-084..089), 7 reconstructions from `data/all-review-results.json` review reasoning (GT-090..096). 13 PyPI samples (was 0). 3 explicit `tpr_tier: tpr3` (HIGH/MEDIUM rules that don't cross 20 in isolation, documented in `attacks.json` schema). |
 | TPR@3 (detection rate) | **95.74%** (90/94 in-scope) — v2.11.48 full re-measurement on enriched GT. 4 misses: same browser-only patterns as historical (lottie-player, polyfill-io, trojanized-jquery) + 1 other. |
 | TPR@20 (alert rate) | **88.30%** (83/94 in-scope) — v2.11.48. **+3.1pp vs v2.11.47** (85.19%) — Track D compound (`recon_exfil_direct_ip`) brought GT-095 from 3 → 50, plus 2 other Track A+B samples crossed 20. |

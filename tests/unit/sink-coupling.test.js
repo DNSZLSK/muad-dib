@@ -1,6 +1,6 @@
 'use strict';
 
-// FPR sink-coupling gate (chantier 2026-06 — FPR-baseline-2026-06-14.md).
+// FPR sink-coupling gate (chantier FPR 2026-06).
 // credential_regex_harvest is a true positive ONLY when an independent exfil sink to an
 // anomalous destination co-occurs. Without a sink it is downgraded HIGH/CRITICAL → LOW
 // (blind FPR baseline: 94.4% FP on this rule). These tests LOCK that behavior AND the TPR

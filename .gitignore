@@ -43,9 +43,7 @@ nul
 # Covers data/auto-labels.json (101 MB), data/ml-training-*.jsonl, data/tarball-cache/,
 # data/daily-stats.json, data/detections.json, etc. Uses leading slash to restrict
 # the pattern to the top-level data/ directory only (src/ioc/data/ has its own rule).
-# Exception: data/alerts-sample.tar.gz remains tracked (sample fixture committed pre-merge).
 /data/
-!/data/alerts-sample.tar.gz
 
 # --- Datasets (training corpora, benchmark results) ---
 # Covers datasets/adversarial/, datasets/real-world/*.json, datasets/benign/, etc.

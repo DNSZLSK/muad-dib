@@ -146,9 +146,9 @@ Parsers tested with malformed inputs:
 
 Result: **56/56 pass**. No crashes, no uncaught exceptions.
 
-### 4132 unit and integration tests
+### 4414 unit and integration tests
 
-Full coverage of scanners, parsers, IOC matching, typosquatting, CLI integrations, diff, temporal analysis, ground truth, canary tokens, and security (SSRF, injection). Tests grew from 3529 (v2.10.x) to 4132 alongside the PYSRC/PYAST scanner additions, F1-F14 contextual FP caps, the Track D recon-exfil compound (v2.11.48), and the v2.11.67-76 operational sprint (per-scan ledger, GHSA poller, coverage-audit, Phantom Gyp compound).
+Full coverage of scanners, parsers, IOC matching, typosquatting, CLI integrations, diff, temporal analysis, ground truth, canary tokens, and security (SSRF, injection). Tests grew from 3529 (v2.10.x) to 4414 alongside the PYSRC/PYAST scanner additions, F1-F14 contextual FP caps, the Track D recon-exfil compound (v2.11.48), the v2.11.67-76 operational sprint (per-scan ledger, GHSA poller, coverage-audit, Phantom Gyp compound), and the v2.11.77-117 monitor-hardening + FPR-reduction sprint.
 
 ### Ground Truth Validation
 
@@ -174,7 +174,7 @@ Validated against 17,922 real npm malware samples. Wild TPR: **92.8%** (13,538/1
 | Ingress Tool Transfer | T1105 | Pattern matching |
 | Data Destruction | T1485 | Pattern matching |
 
-See [SECURITY.md](../SECURITY.md#detection-rules-v21097) for the complete 209-rule reference.
+See [SECURITY.md](../SECURITY.md#detection-rules-v211117) for the complete 266-rule reference.
 
 ## Assumptions
 
