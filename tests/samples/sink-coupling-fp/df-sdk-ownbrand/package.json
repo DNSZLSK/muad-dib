@@ -1,0 +1,6 @@
+{
+  "name": "acme-sdk",
+  "version": "1.0.0",
+  "description": "Acme API client",
+  "main": "index.js"
+}

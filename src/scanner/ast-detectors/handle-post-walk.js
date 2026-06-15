@@ -216,6 +216,11 @@ function handlePostWalk(ctx) {
     });
   }
 
+  // Per-file network-destination verdict (decoy-safe): true iff every literal host is
+  // local/reserved or a curated provider; any public-IP/suspicious/unknown host — or no host —
+  // ⇒ false. Reused by the detached/uncaught-exfil compounds below.
+  const destAllBenign = ctx._content ? networkDestinationsAllBenign(ctx._content) : false;
+
   // Credential regex harvesting: credential-matching regex + network call in same file
   // Real-world pattern: Transform/stream that scans data for tokens/passwords and exfiltrates
   if (ctx.hasCredentialRegex && ctx.hasNetworkCallInFile) {
@@ -328,7 +333,7 @@ function handlePostWalk(ctx) {
   // destination in the file is first-party/local/provider (e.g. an otel collector on
   // localhost, an SDK POST to its own API). A suspicious/unknown/public-IP host — or no
   // literal host at all — leaves it firing (conservative: confirmed-benign only).
-  const destAllBenign = ctx._content ? networkDestinationsAllBenign(ctx._content) : false;
+  // (destAllBenign is computed once above, at the credential_regex_harvest emission site.)
   if (hasDetachedInFile && hasSensitiveEnvInFile && ctx.hasNetworkCallInFile && !destAllBenign) {
     ctx.threats.push({
       type: 'detached_credential_exfil',

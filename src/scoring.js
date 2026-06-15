@@ -1051,6 +1051,25 @@ function _hasExfilSink(threats) {
   return threats.some(t => EXFIL_SINK_TYPES.has(t.type) && t.severity !== 'LOW');
 }
 
+// Sink-coupling (chantier 2026-06-15): the subset of EXFIL_SINK_TYPES that PROVES taint or
+// unambiguous structural malice — NOT mere host-reputation string presence. When one of these
+// co-occurs with credential_regex_harvest it stays HIGH (anti-FN floor: protects cross-file
+// read→exfil and the intent/detached/staged compounds). The complement (suspicious_domain,
+// direct_ip_exfil, ioc_string_match, ioc_match) is host-reputation-only.
+const PROVEN_EXFIL_SINK_TYPES = new Set([
+  'known_malicious_package', 'pypi_malicious_package', 'shai_hulud_marker',
+  'detached_credential_exfil', 'silent_stealth_process',
+  'curl_pipe_shell', 'curl_env_exfil', 'reverse_shell', 'dns_exfil', 'oast_callback',
+  'function_constructor_require', 'staged_remote_loader', 'staged_eval_decode',
+  'fetch_decrypt_exec', 'download_exec_binary', 'self_destruct_eval',
+  'newsletter_auto_follow', 'cross_file_dataflow', 'intent_credential_exfil',
+  'intent_command_exfil', 'sandbox_known_exfil_domain', 'sandbox_network_after_sensitive_read'
+]);
+function _hasProvenExfilSink(threats) {
+  if (!Array.isArray(threats)) return false;
+  return threats.some(t => PROVEN_EXFIL_SINK_TYPES.has(t.type) && t.severity !== 'LOW');
+}
+
 function applyFPReductions(threats, reachableFiles, packageName, packageDeps, reachableFunctions) {
   // Initialize reductions audit trail on each threat
   // Store original severity before any FP reductions, so compound
@@ -1206,13 +1225,23 @@ function applyFPReductions(threats, reachableFiles, packageName, packageDeps, re
   // taint ...). When no such sink is present, downgrade HIGH/CRITICAL → LOW. Runs after the dilution
   // floor so the floor's restored instance is also gated (the floor protects real exfil; with no sink
   // there is nothing to protect). No GT sample relies on credential_regex_harvest (verified).
-  if (!_hasExfilSink(threats)) {
-    for (const t of threats) {
-      if (t.type === 'credential_regex_harvest' && (t.severity === 'HIGH' || t.severity === 'CRITICAL')) {
-        t.reductions.push({ rule: 'sink_coupling', from: t.severity, to: 'LOW' });
-        t.severity = 'LOW';
-      }
+  // Sink-coupling for credential_regex_harvest (per-instance, two-way): a proven taint /
+  // structural-malice sink ⇒ keep HIGH (anti-FN floor); no exfil sink at all ⇒ LOW.
+  const _crhProvenSink = _hasProvenExfilSink(threats);
+  const _crhAnySink = _hasExfilSink(threats);
+  for (const t of threats) {
+    if (t.type !== 'credential_regex_harvest') continue;
+    if (t.severity !== 'HIGH' && t.severity !== 'CRITICAL') continue;
+    // (1) anti-FN floor: a proven taint / structural-malice sink ⇒ keep HIGH (host/flag irrelevant).
+    if (_crhProvenSink) continue;
+    // (2) no exfil sink at all ⇒ LOW (legacy behavior, flag-independent).
+    if (!_crhAnySink) {
+      t.reductions.push({ rule: 'sink_coupling', from: t.severity, to: 'LOW' });
+      t.severity = 'LOW';
+      continue;
     }
+    // (3) only host-reputation sink(s) co-occur ⇒ keep HIGH (fall-through). A host-coupling
+    //     downgrade here (gate #3, MUADDIB_CRH_HOST_GATE) was measured inert and removed 2026-06-15.
   }
 
   for (const t of threats) {

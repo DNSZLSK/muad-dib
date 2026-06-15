@@ -1,0 +1,6 @@
+{
+  "name": "df-sdk-docdomain",
+  "version": "1.0.0",
+  "description": "doc-domain exfil control fixture",
+  "main": "index.js"
+}

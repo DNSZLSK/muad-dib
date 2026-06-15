@@ -406,7 +406,7 @@ async function resolveHostWithRetry(hostname, opts = {}) {
         dns.promises.resolve4(hostname).catch(() => []),
         dns.promises.resolve6(hostname).catch(() => [])
       ]);
-    } catch (e) { lastErr = e; }
+    } catch { /* resolve4/6 each .catch(()=>[]) above, so this is unreachable; the no-records error below is authoritative */ }
     const all = [...ipv4, ...ipv6];
     if (all.length > 0) return { ipv4, ipv6, all };
     lastErr = new Error(`Webhook blocked: no DNS records found for ${hostname}`);
