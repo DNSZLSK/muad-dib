@@ -1,0 +1,6 @@
+{
+  "name": "df-sdk-exfil",
+  "version": "1.0.0",
+  "description": "harvester control fixture",
+  "main": "index.js"
+}

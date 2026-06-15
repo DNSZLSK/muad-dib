@@ -1,0 +1,7 @@
+{
+  "name": "dynimport-bounded",
+  "version": "1.0.0",
+  "description": "CLI dispatcher with bounded/local dynamic imports",
+  "type": "module",
+  "main": "index.mjs"
+}

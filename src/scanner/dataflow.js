@@ -1043,6 +1043,40 @@ function analyzeFile(content, filePath, basePath) {
       }
     }
 
+    // Gate #1 (FPR 2026-06-15 — Étape 0 adjudication): the C7 block above only covers pure
+    // env_read sources; the dominant live FP cluster (~25% of band 20-49, 0 TP) is a
+    // credential_env_read API key (OPENAI_API_KEY, YINGDAO_ACCESS_TOKEN, …) flowing to the
+    // package's OWN first-party API or a curated provider. The decoy-safe discriminant is
+    // brand coherence (env-var brand ↔ host label) + curated providers + local hosts, applied
+    // to EVERY destination. Limited to env-like sources (a credential_read FILE, command_output,
+    // or fingerprint_read source stays CRITICAL — those are genuinely higher-risk). Downgrade to
+    // MEDIUM so the signal survives; residual = compromised first-party domain, the same risk the
+    // mature/MT-1 cap already accepts. Flag-gated (default off) for measure-then-flip rollout.
+    if (process.env.MUADDIB_DF_SDK_GATE === '1' &&
+        (severity === 'CRITICAL' || severity === 'HIGH')) {
+      const envLike = sources.filter(s => s.type === 'env_read' || s.type === 'credential_env_read');
+      const onlyEnvLike = sources.every(s =>
+        s.type === 'env_read' || s.type === 'credential_env_read' || s.type === 'telemetry_read');
+      if (envLike.length > 0 && onlyEnvLike) {
+        try {
+          const { extractBrandFromEnvVar, networkDestinationsAllBenignOrBrand } = require('../sdk-destination.js');
+          const gateContent = fs.readFileSync(filePath, 'utf8');
+          const brands = envLike.map(s => {
+            const envVar = s.name
+              .replace(/^process\.env\./, '')
+              .replace(/^process\.env\[['"]/, '')
+              .replace(/['"]\]$/, '');
+            return extractBrandFromEnvVar(envVar);
+          }).filter(Boolean);
+          if (networkDestinationsAllBenignOrBrand(gateContent, brands)) {
+            severity = 'MEDIUM';
+          }
+        } catch {
+          // sdk-destination / file read unavailable — keep severity
+        }
+      }
+    }
+
     const sourceDesc = hasCommandOutput ? 'command output' : 'credentials read';
     threats.push({
       type: 'suspicious_dataflow',

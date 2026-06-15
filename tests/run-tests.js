@@ -104,6 +104,7 @@ const { runConfidenceTiersTests } = require('./unit/confidence-tiers.test');
 const { runCompoundTighteningTests } = require('./unit/compound-tightening.test');
 const { runStagedRemoteLoaderTests } = require('./unit/staged-remote-loader.test');
 const { runSinkCouplingTests } = require('./unit/sink-coupling.test');
+const { runFprBandGatesTests } = require('./unit/fpr-band-gates.test');
 const { runSdkDestinationTests } = require('./unit/sdk-destination.test');
 const { runLlmDetectiveTests } = require('./unit/llm-detective.test');
 const { runTarballArchiveTests } = require('./unit/tarball-archive.test');
@@ -363,6 +364,8 @@ async function timed(name, fn) {
 
   // FPR sink-coupling gate (credential_regex_harvest — chantier 2026-06)
   await timed('sink-coupling', runSinkCouplingTests);
+  // FPR band-20-49 precision gates (dataflow-SDK + dynimport-bounded — chantier 2026-06-15)
+  await timed('fpr-band-gates', runFprBandGatesTests);
   // FPR destination-awareness gate (segment A taint FPs — chantier 2026-06)
   await timed('sdk-destination', runSdkDestinationTests);
 

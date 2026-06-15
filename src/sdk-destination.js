@@ -308,6 +308,45 @@ function networkDestinationsAllBenign(fileContent) {
   return true;
 }
 
+/**
+ * Gate #1 variant of networkDestinationsAllBenign: a host ALSO passes if one of its labels
+ * matches a credential env-var BRAND (e.g. YINGDAO_ACCESS_TOKEN → api.yingdao.com). This covers
+ * the dominant credential→own-API FP cluster (Étape 0 2026-06-15: ~25% of band 20-49, 0 TP) that
+ * networkDestinationsAllBenign rejects because a package's own domain is not a curated provider.
+ * Decoy-safe by construction: EVERY host must be local/reserved OR a curated provider OR
+ * brand-coherent; any unknown / public-IP / suspicious-tunnel host ⇒ false. No hosts ⇒ false.
+ * Brand coherence is not attacker-spoofable for the credential-theft case: stealing a VICTIM's
+ * OTHER-service key (OPENAI_API_KEY) and sending it to attacker.com yields brand "openai" vs label
+ * "attacker" ⇒ mismatch ⇒ keeps firing.
+ *
+ * @param {string} fileContent - source of the file containing the network sink
+ * @param {string[]} brands - brand tokens extracted from the credential env-var names
+ * @returns {boolean}
+ */
+function networkDestinationsAllBenignOrBrand(fileContent, brands) {
+  const hosts = extractHostsFromContent(fileContent);
+  if (hosts.length === 0) return false;
+  // RFC 2606 / 6761 documentation & test placeholders (example.com/.net/.org, *.test, *.invalid)
+  // are NOT real SDK destinations — no benign SDK ships a live credential flow to example.com.
+  // A credential→placeholder flow is either a synthetic exfil sample or an evasion stand-in, so it
+  // must keep firing (it is deliberately NOT in the local-IPC benign class, unlike loopback/RFC1918).
+  const DOC_DOMAIN_RE = /(^|\.)example\.(?:com|net|org)$|\.(?:test|example|invalid)$/i;
+  const brandSet = (brands || [])
+    .map(b => String(b || '').toLowerCase())
+    .filter(b => b.length >= 3);
+  for (const h of hosts) {
+    if (SUSPICIOUS_DOMAIN_PATTERNS.test(h)) return false;
+    if (isPublicIpHost(h)) return false;
+    if (DOC_DOMAIN_RE.test(h)) return false;
+    if (isLocalOrReservedHost(h)) continue;
+    if (PROVIDER_DOMAIN_SUFFIXES.some(s => domainMatchesSuffix(h, [s]))) continue;
+    const labels = String(h).toLowerCase().split('.');
+    if (brandSet.length && labels.some(l => brandSet.includes(l))) continue;
+    return false; // unknown / unrecognised destination → keep firing
+  }
+  return true;
+}
+
 module.exports = {
   SDK_ENV_DOMAIN_MAP,
   ENV_NOISE_TOKENS,
@@ -320,6 +359,7 @@ module.exports = {
   extractDomain,
   domainMatchesSuffix,
   isSDKPattern,
+  networkDestinationsAllBenignOrBrand,
   stripPort,
   isLocalOrReservedHost,
   isPublicIpHost,
