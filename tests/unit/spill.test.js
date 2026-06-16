@@ -209,6 +209,17 @@ async function runSpillTests() {
     assert(spill.shouldDrain(4, 0, 500) === false, 'EMERGENCY → no drain');
   });
 
+  test('SPILL: shouldDrain — marge ceiling makes a steady-state queue drainable', () => {
+    // Regression guard for the one-way-street bug: with a marge ceiling (a margin
+    // below the 30K backpressure point, e.g. 25K), a live queue sitting in the
+    // thousands — where the old 500/5000 ceiling was unreachable — must drain.
+    const CEILING = 25_000; // SOFT_BACKPRESSURE_THRESHOLD(30K) - margin(5K)
+    assert(spill.shouldDrain(0, 6663, CEILING) === true, 'NONE + steady-state queue (6663) below marge ceiling → drain');
+    assert(spill.shouldDrain(0, 6663, 5000) === false, 'same queue under the OLD 5000 ceiling → never drains (the bug)');
+    assert(spill.shouldDrain(0, 25_000, CEILING) === false, 'queue at the marge ceiling → no drain (leaves backpressure headroom)');
+    assert(spill.shouldDrain(1, 100, CEILING) === false, 'pressure ELEVATED → no drain even with deep headroom (self-throttle)');
+  });
+
   test('SPILL: isSpillEnabled reads the master switch at call time', () => {
     const save = process.env.MUADDIB_QUEUE_SPILL;
     try {

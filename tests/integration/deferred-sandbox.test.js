@@ -21,7 +21,7 @@ function makeItem(overrides = {}) {
   };
 }
 
-function runDeferredSandboxTests() {
+async function runDeferredSandboxTests() {
   console.log('\n=== Deferred Sandbox Queue Tests ===\n');
 
   // ── Queue management tests ──
@@ -411,6 +411,73 @@ function runDeferredSandboxTests() {
       assert(isDeferredSlotBusy() === false, 'Deferred slot is decoupled from semaphore count');
     } finally {
       sem.active = origActive;
+      _resetDeferredQueue();
+    }
+  });
+
+  await asyncTest('processDeferredBatch runs up to DEFERRED_SANDBOX_SLOTS concurrently, never more', async () => {
+    const mod = require('../../src/monitor/deferred-sandbox.js');
+    const {
+      enqueueDeferred, processDeferredBatch, getDeferredSlotsActive, getDeferredQueue,
+      _resetDeferredQueue, _setRunSandboxForTest, DEFERRED_SANDBOX_SLOTS
+    } = mod;
+    _resetDeferredQueue();
+    const SLOTS = DEFERRED_SANDBOX_SLOTS;
+
+    try {
+      // Injected sandbox stays in flight until we fire its gate — lets us observe
+      // the concurrent count while runs are "running".
+      const resolvers = [];
+      _setRunSandboxForTest(() => new Promise((resolve) => {
+        resolvers.push(() => resolve({ score: 0, severity: 'NONE' })); // score 0 → CLEAN branch, no webhook
+      }));
+
+      const total = SLOTS + 3;
+      for (let i = 0; i < total; i++) {
+        enqueueDeferred(makeItem({ name: `conc-${i}`, version: '1.0.0', tier: '1a', riskScore: 50 }));
+      }
+
+      const stats = {};
+      const launched = processDeferredBatch(stats);
+      // The synchronous acquire (shift + increment) ran for each launch before its
+      // first await, so the cap is observable synchronously here.
+      assert(launched === SLOTS, `should launch exactly SLOTS (${SLOTS}), got ${launched}`);
+      assert(getDeferredSlotsActive() === SLOTS, `active should cap at ${SLOTS}, got ${getDeferredSlotsActive()}`);
+      assert(getDeferredQueue().length === total - SLOTS, `remaining queue should be ${total - SLOTS}, got ${getDeferredQueue().length}`);
+
+      // A second dispatch while the pool is full launches nothing — no over-subscription.
+      const launched2 = processDeferredBatch(stats);
+      assert(launched2 === 0, `no launches while pool full, got ${launched2}`);
+      assert(getDeferredSlotsActive() === SLOTS, 'still capped after a second dispatch');
+
+      // Complete the in-flight runs; slots must all be released.
+      resolvers.forEach((r) => r());
+      await new Promise((r) => setImmediate(r));
+      await new Promise((r) => setImmediate(r));
+      assert(getDeferredSlotsActive() === 0, `slots should return to 0 after completion, got ${getDeferredSlotsActive()}`);
+    } finally {
+      _resetDeferredQueue();
+    }
+  });
+
+  await asyncTest('deferred pool slot is released even when the sandbox run rejects', async () => {
+    const {
+      enqueueDeferred, processDeferredBatch, getDeferredSlotsActive,
+      _resetDeferredQueue, _setRunSandboxForTest
+    } = require('../../src/monitor/deferred-sandbox.js');
+    _resetDeferredQueue();
+    try {
+      _setRunSandboxForTest(() => Promise.reject(new Error('sandbox boom')));
+      enqueueDeferred(makeItem({ name: 'rej-1', tier: '1a', riskScore: 50 }));
+
+      const launched = processDeferredBatch({});
+      assert(launched === 1, `one launch, got ${launched}`);
+      assert(getDeferredSlotsActive() === 1, 'slot held while in flight');
+
+      await new Promise((r) => setImmediate(r));
+      await new Promise((r) => setImmediate(r));
+      assert(getDeferredSlotsActive() === 0, `slot released after rejection, got ${getDeferredSlotsActive()}`);
+    } finally {
       _resetDeferredQueue();
     }
   });

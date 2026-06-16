@@ -9,7 +9,7 @@ const { setVerboseMode, isSandboxEnabled, isCanaryEnabled, isLlmDetectiveEnabled
 const { loadState, saveState, loadDailyStats, saveDailyStats, purgeTarballCache, isDailyReportDue, atomicWriteFileSync, saveNpmSeq, ALERTS_FILE, runStateMigrations, loadRecentlyScanned, saveRecentlyScanned } = require('./state.js');
 const { isTemporalEnabled, isTemporalAstEnabled, isTemporalPublishEnabled, isTemporalMaintainerEnabled } = require('./temporal.js');
 const { pendingGrouped, flushScopeGroup, sendDailyReport, redeliverPendingReportOnBoot, alertedPackageRules, ALERTED_PACKAGES_MAX: MAX_ALERTED_PACKAGES } = require('./webhook.js');
-const { poll, getPollBackoffMs } = require('./ingestion.js');
+const { poll, getPollBackoffMs, SOFT_BACKPRESSURE_THRESHOLD } = require('./ingestion.js');
 const { ensureWorkers, drainWorkers, getTargetConcurrency, setTargetConcurrency, getActiveWorkers, terminateAllWorkers, getInFlightItems, computeInterruptDisposition } = require('./queue.js');
 const { computeTarget, ADJUST_INTERVAL_MS, BASE_CONCURRENCY } = require('./adaptive-concurrency.js');
 const { startHealthcheck } = require('./healthcheck.js');
@@ -42,9 +42,25 @@ const SHUTDOWN_DRAIN_MAX_MS = (() => {
   return Number.isFinite(v) && v > 0 ? v : 20_000;
 })();
 
+// Drain ceiling (marge): re-ingest from the spill backlog as long as the live
+// queue stays a safe margin BELOW the ingestion backpressure point. The old
+// default (500) was unreachable in steady state — the live queue structurally
+// sits in the thousands (μ scan ≈ λ ingest in active hours), so the backlog
+// drained ~never and grew toward its cap (a one-way street). Tying the ceiling
+// to SOFT_BACKPRESSURE_THRESHOLD makes the drain a self-throttling trickle: it
+// fires during any non-congested window (pressure NONE + headroom) and stops as
+// the queue approaches the point where ingestion would pause anyway, so the
+// backlog never starves fresh ingestion. Env-tunable for live ops.
+const SPILL_DRAIN_MARGIN = (() => {
+  const v = parseInt(process.env.MUADDIB_SPILL_DRAIN_MARGIN, 10);
+  return Number.isFinite(v) && v > 0 ? v : 5_000;
+})();
 const SPILL_DRAIN_THRESHOLD = (() => {
   const v = parseInt(process.env.MUADDIB_SPILL_DRAIN_THRESHOLD, 10);
-  return Number.isFinite(v) && v > 0 ? v : 500;
+  if (Number.isFinite(v) && v > 0) return v;
+  // Default: a fixed margin below backpressure (30K - 5K = 25K). Clamp to >= 1
+  // in case a future backpressure value is smaller than the margin.
+  return Math.max(1, SOFT_BACKPRESSURE_THRESHOLD - SPILL_DRAIN_MARGIN);
 })();
 const SPILL_DRAIN_BATCH = (() => {
   const v = parseInt(process.env.MUADDIB_SPILL_DRAIN_BATCH, 10);
