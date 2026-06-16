@@ -182,7 +182,13 @@ function _compactBacklog(file, ledgerFn = null) {
 
 /**
  * Pure drain predicate (exported for tests + the daemon main loop): drain only
- * when memory pressure is fully cleared AND the live queue has headroom.
+ * when memory pressure is fully cleared AND the live queue is below the drain
+ * ceiling. `threshold` is a MARGE ceiling (a margin below the ingestion
+ * backpressure point — see daemon.js SPILL_DRAIN_THRESHOLD), NOT a "queue nearly
+ * empty" low-water mark: the latter (the old 500/5000) was unreachable in steady
+ * state, so the backlog never drained. With the marge ceiling the drain is a
+ * self-throttling trickle — it auto-stops the moment pressure rises (≥ ELEVATED)
+ * or the queue climbs toward backpressure, so it never starves fresh ingestion.
  */
 function shouldDrain(pressureLevel, queueLen, threshold) {
   return pressureLevel === 0 && queueLen < threshold;

@@ -1528,6 +1528,7 @@ module.exports = {
   POLL_INTERVAL,
   POLL_MAX_BACKOFF,
   MAX_RESPONSE_BYTES,
+  SOFT_BACKPRESSURE_THRESHOLD,
 
   // Mutable state
   getConsecutivePollErrors,

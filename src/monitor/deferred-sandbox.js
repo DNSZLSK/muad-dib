@@ -6,11 +6,12 @@
  * Items are sorted by riskScore DESC (highest-risk first) to defend
  * against queue-poisoning attacks.
  *
- * The worker owns a dedicated sandbox slot (_deferredSlotBusy) that is
- * completely independent from the shared semaphore used by T1a/T1b/T2.
- * This guarantees the deferred worker can always process, regardless of
- * how many main-path sandboxes are running. The VPS supports N+1
- * concurrent gVisor containers (3 main + 1 deferred).
+ * The worker owns a dedicated POOL of sandbox slots (DEFERRED_SANDBOX_SLOTS,
+ * _deferredSlotsActive) that is completely independent from the shared semaphore
+ * used by the synchronous path. This guarantees the deferred worker can always
+ * process, regardless of how many main-path sandboxes are running, and runs
+ * several items concurrently so the queue actually drains (a single slot
+ * serialized all T1a deep sandboxes and the queue stayed permanently full).
  */
 const fs = require('fs');
 const path = require('path');
@@ -32,10 +33,23 @@ const DEFERRED_STATE_FILE = path.join(__dirname, '..', '..', 'data', 'deferred-q
 // slot. HIGH=10 pts is the intended T1b floor — values below 5 are LOW-only
 // aggregates which carry no actionable sandbox signal.
 const DEFERRED_MIN_SCORE = 5;
-// Hard ceiling on a single deferred sandbox run so the dedicated slot
-// (_deferredSlotBusy) can never wedge. maxRuns=1 self-bounds at ~SINGLE_RUN_TIMEOUT
-// (90s) + the sandbox watchdog grace; this AbortController is belt-and-suspenders.
+// Hard ceiling on a single deferred sandbox run so a deferred slot can never
+// wedge. maxRuns=1 self-bounds at ~SINGLE_RUN_TIMEOUT (90s) + the sandbox
+// watchdog grace; this AbortController is belt-and-suspenders.
 const DEFERRED_SANDBOX_TIMEOUT_MS = 150_000;
+// Number of CONCURRENT deferred sandbox runs. The old design used a single
+// boolean slot (1 at a time), which serialized ALL deferred T1a deep sandboxes
+// — measured at ~1 run / several minutes, so the queue (cap DEFERRED_QUEUE_MAX)
+// sat permanently full with items aging out at TTL. Phase 3 routed T1a's sandbox
+// here AND bypasses the shared semaphore, so the main pool (MUADDIB_SANDBOX_CONCURRENCY)
+// was sitting idle while everything queued behind one deferred slot. This pool
+// uses that idle capacity. Default 3 (conservative under the typical 4-slot main
+// pool); each gVisor container is ~512 MB, so 3 ≈ 1.5 GB — keep an eye on host
+// RSS if raised. Env-tunable for live ops.
+const DEFERRED_SANDBOX_SLOTS = (() => {
+  const v = parseInt(process.env.MUADDIB_DEFERRED_SANDBOX_SLOTS, 10);
+  return Number.isFinite(v) && v >= 1 ? v : 3;
+})();
 
 // Tier priority for the deferred queue. Phase 3 routes T1a's sandbox here (async)
 // instead of block-waiting a scan worker, so T1a is the highest-confidence tier and
@@ -61,7 +75,10 @@ const _deferredQueue = [];
 const _deferredSeen = new Set(); // name@version dedup
 let _workerHandle = null;
 let _stats = null; // reference to shared stats object
-let _deferredSlotBusy = false;   // Dedicated slot: true while deferred sandbox is running
+let _deferredSlotsActive = 0;    // Concurrent deferred sandbox runs in flight (0..DEFERRED_SANDBOX_SLOTS)
+// Indirection so tests can inject a controllable async sandbox without Docker
+// (the concurrency contract is verified behaviorally, not by source-grep).
+let _runSandboxFn = runSandbox;
 
 // ── Queue management ──
 
@@ -204,8 +221,11 @@ async function processDeferredItem(stats) {
 
   if (_deferredQueue.length === 0) return null;
 
-  // 2. Dedicated slot check — completely independent from main semaphore
-  if (_deferredSlotBusy) {
+  // 2. Pool slot check — completely independent from main semaphore. The
+  // synchronous prefix below (shift + increment) runs before the first await,
+  // so processDeferredBatch can launch several of these in a tight loop without
+  // over-subscribing: each increment is visible to the next iteration.
+  if (_deferredSlotsActive >= DEFERRED_SANDBOX_SLOTS) {
     if (stats) stats.deferredSkipped = (stats.deferredSkipped || 0) + 1;
     return null;
   }
@@ -215,10 +235,10 @@ async function processDeferredItem(stats) {
   const key = `${item.name}@${item.version}`;
   _deferredSeen.delete(key);
 
-  console.log(`[DEFERRED] PROCESSING: ${key} (tier=${_tierLabel(item.tier)}, score=${item.riskScore}, retries=${item.retries})`);
+  console.log(`[DEFERRED] PROCESSING: ${key} (tier=${_tierLabel(item.tier)}, score=${item.riskScore}, retries=${item.retries}, slots=${_deferredSlotsActive + 1}/${DEFERRED_SANDBOX_SLOTS})`);
 
-  // 4. Run sandbox on dedicated slot (bypasses shared semaphore)
-  _deferredSlotBusy = true;
+  // 4. Run sandbox on a pool slot (bypasses shared semaphore)
+  _deferredSlotsActive++;
   let sandboxResult;
   const ac = new AbortController();
   const deadline = setTimeout(() => ac.abort(), DEFERRED_SANDBOX_TIMEOUT_MS);
@@ -230,7 +250,7 @@ async function processDeferredItem(stats) {
     // single-run (maxRuns=1, ~90s vs ~270s) for fast deferred-queue drain.
     const maxRuns = item.tier === '1a' ? undefined : 1;
     markSandboxed(item.name); // stamp for sandbox-revalidation cadence (matches the synchronous path)
-    sandboxResult = await runSandbox(item.name, { canary, skipSemaphore: true, maxRuns, signal: ac.signal });
+    sandboxResult = await _runSandboxFn(item.name, { canary, skipSemaphore: true, maxRuns, signal: ac.signal });
     console.log(`[DEFERRED] SANDBOX COMPLETE: ${key} -> score=${sandboxResult.score}, severity=${sandboxResult.severity}`);
   } catch (err) {
     console.error(`[DEFERRED] SANDBOX ERROR: ${key} — ${err.message}`);
@@ -247,7 +267,7 @@ async function processDeferredItem(stats) {
     return null;
   } finally {
     clearTimeout(deadline);
-    _deferredSlotBusy = false;
+    _deferredSlotsActive--;
   }
 
   // 5. Follow-up webhook if sandbox found something
@@ -303,6 +323,31 @@ async function processDeferredItem(stats) {
 }
 
 /**
+ * Tick dispatcher: launch deferred items CONCURRENTLY up to the free pool slots.
+ * processDeferredItem runs its slot-acquire (shift + increment) synchronously
+ * before its first await, so each launch is visible to the next loop iteration —
+ * no over-subscription past DEFERRED_SANDBOX_SLOTS. Calls are fire-and-forget:
+ * processDeferredItem is fully self-contained (its try/catch/finally swallows
+ * sandbox errors and always releases the slot), so a launched run never rejects
+ * the dispatcher. Returns the number launched this tick (for tests/observability).
+ * @returns {number}
+ */
+function processDeferredBatch(stats) {
+  let launched = 0;
+  // Bound the loop by the free slot count so a transient queue can't spin it.
+  while (_deferredSlotsActive < DEFERRED_SANDBOX_SLOTS && _deferredQueue.length > 0) {
+    const before = _deferredSlotsActive;
+    const p = processDeferredItem(stats);
+    // If the slot wasn't acquired (e.g. queue emptied by pruning inside the call),
+    // stop — otherwise the guard above could loop without progress.
+    if (_deferredSlotsActive === before) break;
+    launched++;
+    if (p && typeof p.catch === 'function') p.catch(() => { /* self-handled */ });
+  }
+  return launched;
+}
+
+/**
  * Build Discord embed for deferred sandbox follow-up.
  */
 function buildDeferredFollowUpEmbed(name, version, ecosystem, sandboxResult, staticScore) {
@@ -348,10 +393,14 @@ function buildDeferredFollowUpEmbed(name, version, ecosystem, sandboxResult, sta
 function startDeferredWorker(stats) {
   _stats = stats;
   if (_workerHandle) return _workerHandle;
-  console.log(`[DEFERRED] Worker started (interval=${DEFERRED_WORKER_INTERVAL_MS / 1000}s, max=${DEFERRED_QUEUE_MAX}, ttl=${DEFERRED_TTL_MS / 3600000}h)`);
-  _workerHandle = setInterval(async () => {
+  console.log(`[DEFERRED] Worker started (interval=${DEFERRED_WORKER_INTERVAL_MS / 1000}s, max=${DEFERRED_QUEUE_MAX}, slots=${DEFERRED_SANDBOX_SLOTS}, ttl=${DEFERRED_TTL_MS / 3600000}h)`);
+  _workerHandle = setInterval(() => {
     try {
-      await processDeferredItem(_stats);
+      // Fill free pool slots each tick. The dispatcher launches concurrent runs
+      // (fire-and-forget); long-running sandboxes keep their slots across ticks,
+      // so steady state is DEFERRED_SANDBOX_SLOTS in flight while the queue drains.
+      pruneExpired(_stats);
+      processDeferredBatch(_stats);
     } catch (err) {
       console.error(`[DEFERRED] Worker tick error: ${err.message}`);
     }
@@ -465,12 +514,25 @@ function _resetDeferredQueue() {
   _deferredQueue.length = 0;
   _deferredSeen.clear();
   _stats = null;
-  _deferredSlotBusy = false;
+  _deferredSlotsActive = 0;
+  _runSandboxFn = runSandbox;
   stopDeferredWorker();
 }
 
+// Test seam: inject a controllable sandbox runner (restored by _resetDeferredQueue).
+function _setRunSandboxForTest(fn) {
+  _runSandboxFn = fn || runSandbox;
+}
+
+// True while at least one deferred sandbox is in flight. Kept for back-compat
+// (callers/tests that only care "is the deferred path active"); use
+// getDeferredSlotsActive() for the concurrent count.
 function isDeferredSlotBusy() {
-  return _deferredSlotBusy;
+  return _deferredSlotsActive > 0;
+}
+
+function getDeferredSlotsActive() {
+  return _deferredSlotsActive;
 }
 
 /**
@@ -492,14 +554,18 @@ module.exports = {
   startDeferredWorker,
   stopDeferredWorker,
   processDeferredItem,
+  processDeferredBatch,
   persistDeferredQueue,
   restoreDeferredQueue,
   buildDeferredFollowUpEmbed,
   pruneExpired,
   isDeferredSlotBusy,
+  getDeferredSlotsActive,
   clearDeferredQueue,
   _resetDeferredQueue,
+  _setRunSandboxForTest,
   DEFERRED_QUEUE_MAX,
+  DEFERRED_SANDBOX_SLOTS,
   DEFERRED_TTL_MS,
   DEFERRED_MAX_RETRIES,
   DEFERRED_WORKER_INTERVAL_MS,
