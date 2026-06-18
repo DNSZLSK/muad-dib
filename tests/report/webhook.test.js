@@ -384,10 +384,10 @@ async function runWebhookTests() {
                      pypi: { total: 200, scanned: 195, dropped: 5, alerted: 2 } }
     });
     assert(field && field.name === 'Ledger (24h)', 'field name should be "Ledger (24h)"');
-    assertIncludes(field.value, 'Scanned 990', 'shows scanned count');
-    assertIncludes(field.value, 'Alerted 9', 'shows alerted count');
+    assertIncludes(field.value, 'Scans: 990 events', 'shows scanned count (events unit)');
+    assertIncludes(field.value, 'alertés 9', 'shows alerted count');
     assertIncludes(field.value, '0.91%', 'shows alert rate (9/990)');
-    assertIncludes(field.value, 'Dropped 10 (4 vanished)', 'shows dropped + vanished');
+    assertIncludes(field.value, 'Non scannés: 10 events (4 name@ver jamais (re)scannés)', 'shows dropped + vanished, both labeled as name@version events');
     assertIncludes(field.value, 'npm 800', 'shows per-ecosystem npm total');
     assertIncludes(field.value, 'pypi 200', 'shows per-ecosystem pypi total');
   });
@@ -405,12 +405,12 @@ async function runWebhookTests() {
       total: 50, scanned: 50, dropped: 0, vanished: 0, exactVanished: true,
       alerted: 0, alertRate: 0, byOutcome: { clean: 50 }, byEcosystem: { npm: { total: 50, scanned: 50, dropped: 0, alerted: 0 } }
     });
-    assertNotIncludes(clean.value, 'Dropped', 'no Dropped line when dropped=0');
+    assertNotIncludes(clean.value, 'Non scannés', 'no Non scannés line when dropped=0');
     const approx = formatLedgerField({
       total: 20, scanned: 10, dropped: 10, vanished: 7, exactVanished: false,
       alerted: 0, alertRate: 0, byOutcome: { dropped: 10, clean: 10 }, byEcosystem: { npm: { total: 20, scanned: 10, dropped: 10, alerted: 0 } }
     });
-    assertIncludes(approx.value, '≥7 vanished', 'approximate vanished marked with ≥ when exactVanished is false');
+    assertIncludes(approx.value, '≥7 name@ver', 'approximate vanished marked with ≥ when exactVanished is false');
   });
 
   // ============================================

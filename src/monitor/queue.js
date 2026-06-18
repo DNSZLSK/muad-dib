@@ -22,6 +22,7 @@ const { buildTrainingRecord } = require('../ml/feature-extractor.js');
 const { appendWorkerMem } = require('./worker-mem.js');
 const { acquireHeavySlot, releaseHeavySlot, isHeavyScan, getHeavyLaneState, heavyWaitMaxMs, HEAVY_REQUEUE_MAX } = require('./heavy-lane.js');
 const { isGovernorEnabled, classifyWeight, acquireMemoryTicket, releaseMemoryTicket, isFrozen: isGovernorFrozen, getGovernorState } = require('./memory-governor.js');
+const { beginOp, endOp } = require('./event-loop-monitor.js');
 const { appendRecord: appendTrainingRecord, relabelRecords } = require('../ml/jsonl-writer.js');
 
 // From ./state.js
@@ -764,7 +765,8 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
         // Validates actual tarball contents (not just registry metadata).
         let bypassQuickScan = false;
         try {
-          extractedDir = extractArchive(tgzPath, tmpDir);
+          const _crumb = beginOp('extract:quickscan', { name, version, unpackedSizeMb: Math.round(unpackedSize / 1024 / 1024) });
+          try { extractedDir = extractArchive(tgzPath, tmpDir); } finally { endOp(_crumb); }
 
           const [pkgThreats, shellThreats] = await Promise.all([
             scanPackageJson(extractedDir),
@@ -813,7 +815,8 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
     }
 
     if (!extractedDir) {
-      extractedDir = extractArchive(tgzPath, tmpDir);
+      const _crumb = beginOp('extract:prework', { name, version, unpackedSizeMb: Math.round((meta.unpackedSize || 0) / 1024 / 1024) });
+      try { extractedDir = extractArchive(tgzPath, tmpDir); } finally { endOp(_crumb); }
     }
 
     // ML Phase 2a: Count JS files and detect test presence for enriched features

@@ -13,6 +13,7 @@ const { poll, getPollBackoffMs, SOFT_BACKPRESSURE_THRESHOLD } = require('./inges
 const { ensureWorkers, drainWorkers, getTargetConcurrency, setTargetConcurrency, getActiveWorkers, terminateAllWorkers, getInFlightItems, computeInterruptDisposition } = require('./queue.js');
 const { computeTarget, ADJUST_INTERVAL_MS, BASE_CONCURRENCY } = require('./adaptive-concurrency.js');
 const { startHealthcheck } = require('./healthcheck.js');
+const { startLagSampler } = require('./event-loop-monitor.js');
 const { startDeferredWorker, stopDeferredWorker, persistDeferredQueue, restoreDeferredQueue, clearDeferredQueue } = require('./deferred-sandbox.js');
 const { evictFromScanQueueBulk, enqueueScan } = require('./scan-queue.js');
 const { isSpillEnabled, shouldDrain, drainBacklog, getBacklogSize } = require('./spill.js');
@@ -966,6 +967,7 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
   let pollIntervalHandle = null;   // Decoupled poll timer — set after initial poll
   let queuePersistHandle = null;   // Queue persistence timer
   let concurrencyAdjustHandle = null; // Adaptive concurrency timer
+  let loopLagSamplerStop = null;   // Event-loop stall attribution (instrumentation)
 
   // Restore queue from previous run (if file exists and is < 24h old)
   const restoredCount = restoreQueue(scanQueue);
@@ -1000,6 +1002,10 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
     if (concurrencyAdjustHandle) {
       clearInterval(concurrencyAdjustHandle);
       concurrencyAdjustHandle = null;
+    }
+    if (loopLagSamplerStop) {
+      loopLagSamplerStop();
+      loopLagSamplerStop = null;
     }
     // Bounded drain (phase C, C7). The old unbounded `await drainWorkers()`
     // could outlive systemd's TimeoutStopSec (scans run up to 300s): SIGKILL
@@ -1108,6 +1114,24 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
       }
     }
   }, ADJUST_INTERVAL_MS);
+
+  // ─── Event-loop stall attribution (instrumentation only — see event-loop-monitor.js) ───
+  // The RSS breaker, governor RSS feed and EMERGENCY purge all live on these
+  // main-thread timers; a long SYNC op (extractAllTo) that wedges the loop
+  // disables them silently → unchecked RSS climb → cgroup OOM (4-6 min of zero
+  // completions/logs before every kill, 2026-06-17/18). NAME the culprit op so the
+  // real fix targets it. Off-switch: MUADDIB_LOOP_MONITOR=0.
+  if (process.env.MUADDIB_LOOP_MONITOR !== '0') {
+    loopLagSamplerStop = startLagSampler({
+      onStall: (r) => {
+        const o = r.op;
+        const where = o
+          ? ` during op=${o.label}${o.meta && o.meta.name ? ` ${o.meta.name}@${o.meta.version || '?'}${o.meta.unpackedSizeMb != null ? ` (${o.meta.unpackedSizeMb}MB)` : ''}` : ''}${o.running ? ', STILL RUNNING' : ''}`
+          : ' (no op breadcrumb — widen instrumentation)';
+        console.warn(`[MONITOR] LOOP-STALL: event loop blocked ${r.blockedSec}s${where} | rss=${r.rssMb}MB`);
+      }
+    });
+  }
 
   // ─── Decoupled polling ───
   // Poll runs on its own interval, independent of processing.
