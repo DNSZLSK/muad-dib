@@ -8090,8 +8090,8 @@ async function runMonitorTests() {
         `Coverage must show attempted/published, got "${coverageField.value}"`);
       assertIncludes(coverageField.value, '90%',
         `Coverage must show 90% ratio (7200/8000), got "${coverageField.value}"`);
-      assertIncludes(coverageField.value, 'Ops: 9999',
-        `Ops sub-line must expose stats.scanned, got "${coverageField.value}"`);
+      assertIncludes(coverageField.value, 'Scans: 9999',
+        `Scans sub-line must expose stats.scanned, got "${coverageField.value}"`);
     } finally {
       stats.scanned = origScanned;
       stats.uniqueScanAttempts = origAttempts;
@@ -10260,14 +10260,14 @@ async function runMonitorTests() {
         const embed = webhookModule.buildDailyReportEmbed(stats, dailyAlerts, ledger);
         const coverageField = embed.embeds[0].fields.find(f => f.name === 'Coverage');
         assert(coverageField, 'Coverage field must exist');
-        assertIncludes(coverageField.value, '40/100 pkgs',
-          `Headline must be distinct scanned/seen packages, got "${coverageField.value}"`);
+        assertIncludes(coverageField.value, 'Noms uniques: 40/100',
+          `Headline must be distinct scanned/seen package NAMES, got "${coverageField.value}"`);
         assertIncludes(coverageField.value, '(40%)',
           `Headline % must be distinct coverage 40%, got "${coverageField.value}"`);
-        assertIncludes(coverageField.value, 'Raw events: 7200/8000',
-          `Raw event ratio must be demoted to a secondary line, got "${coverageField.value}"`);
-        assertIncludes(coverageField.value, 'Ops: 9999',
-          `Ops sub-line must remain, got "${coverageField.value}"`);
+        assertIncludes(coverageField.value, 'Publiés: 7200/8000',
+          `Raw event ratio must be demoted to a labeled secondary line, got "${coverageField.value}"`);
+        assertIncludes(coverageField.value, 'Scans: 9999',
+          `Scans sub-line must remain, got "${coverageField.value}"`);
       } finally {
         stats.scanned = orig.scanned;
         stats.uniqueScanAttempts = orig.attempts;
