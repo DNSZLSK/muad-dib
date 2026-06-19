@@ -115,7 +115,7 @@ function httpsGet(url, timeoutMs = 30_000, deadlineMs = Math.max(timeoutMs * 2, 
         // Coordinated backoff: drain the SHARED token bucket so every in-flight registry fetch
         // slows together. This high-volume packument/changes path must signal 429 like the
         // metadata path (npm-registry.js) does — not just acquire a slot (CLAUDE.md 429 storm).
-        try { require('../shared/http-limiter.js').signal429(); } catch { /* limiter best-effort */ }
+        try { const _l = require('../shared/http-limiter.js'); _l.signal429(_l.hostForUrl(url)); } catch { /* limiter best-effort */ }
         return done(new Error(`HTTP 429 rate limited for ${url}`));
       }
       if (res.statusCode < 200 || res.statusCode >= 300) {
@@ -177,7 +177,7 @@ function httpsPost(url, body, headers = {}, timeoutMs = 30_000, deadlineMs = Mat
     req = _deps.https.request(options, (res) => {
       if (res.statusCode === 429) {
         res.resume();
-        try { require('../shared/http-limiter.js').signal429(); } catch { /* limiter best-effort */ }
+        try { const _l = require('../shared/http-limiter.js'); _l.signal429(_l.hostForUrl(url)); } catch { /* limiter best-effort */ }
         return done(new Error(`HTTP 429 rate limited for POST ${url}`));
       }
       if (res.statusCode < 200 || res.statusCode >= 300) {

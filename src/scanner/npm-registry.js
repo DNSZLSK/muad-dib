@@ -1,6 +1,6 @@
 const { NPM_PACKAGE_REGEX } = require('../shared/constants.js');
 const { debugLog } = require('../utils.js');
-const { acquireRegistrySlot, releaseRegistrySlot, awaitRateToken, signal429, hostForUrl } = require('../shared/http-limiter.js');
+const { acquireRegistrySlot, releaseRegistrySlot, awaitRateToken, signal429, hostForUrl, isHostBackedOff } = require('../shared/http-limiter.js');
 const { registryAuthHeaders } = require('../shared/registry-auth.js');
 const { computeAdvancedRegistrySignals } = require('../integrations/registry-signals.js');
 
@@ -223,8 +223,30 @@ async function getPackageMetadata(packageName) {
     return count;
   }
 
+  // Downloads-count (api.npmjs.org) is a SEPARATE, aggressively rate-limited host and
+  // is OFF the detection path — it only feeds the reputation/ML weekly_downloads
+  // feature. The ingest pre-resolve already fetches + 24h-caches it (classify.js
+  // downloadsCache). So prefer the warm cache; if cold AND api.npmjs.org is in 429
+  // backoff, SKIP rather than park the scan on the token gate (a level-12 60s pause
+  // was stalling every cold scan ~20s). Same graceful degradation as the author-count
+  // kill-switch: weekly_downloads stays absent, never blocks throughput.
+  let cachedDownloads;
+  try {
+    const { downloadsCache, DOWNLOADS_CACHE_TTL } = require('../monitor/classify.js');
+    const hit = downloadsCache.get(packageName);
+    if (hit && (Date.now() - hit.fetchedAt) < DOWNLOADS_CACHE_TTL && hit.downloads >= 0) {
+      cachedDownloads = hit.downloads;
+    }
+  } catch { /* classify unavailable (scanner-only context) — fall through to a guarded fetch */ }
+
+  const downloadsPromise = (typeof cachedDownloads === 'number')
+    ? Promise.resolve({ downloads: cachedDownloads })
+    : (isHostBackedOff(hostForUrl(downloadsUrl))
+        ? Promise.resolve(null)            // host hammered → skip; do not stall the scan
+        : fetchWithRetry(downloadsUrl, { noRetryOn429: true }));
+
   const [downloadsData, authorPackageCount] = await Promise.all([
-    fetchWithRetry(downloadsUrl, { noRetryOn429: true }),    // api.npmjs.org — rate-limited; best-effort single shot (no retry storm, correct-host backoff)
+    downloadsPromise,                // api.npmjs.org — cached / skipped-under-backoff / best-effort
     getAuthorPackageCount()          // registry.npmjs.org search — cached + kill-switchable
   ]);
 
