@@ -12,7 +12,7 @@ const os = require('os');
 const { Worker } = require('worker_threads');
 const { runSandbox, tryAcquireSandboxSlot } = require('../sandbox/index.js');
 const { sendWebhook } = require('../webhook.js');
-const { downloadToFile, extractArchive, sanitizePackageName } = require('../shared/download.js');
+const { downloadToFile, extractArchive, extractArchiveOffThread, sanitizePackageName } = require('../shared/download.js');
 const { MAX_TARBALL_SIZE, getMaxFileSize } = require('../shared/constants.js');
 const { acquireRegistrySlot, releaseRegistrySlot, awaitRateToken: awaitRateTokenForWorker, signal429: signal429ForWorker } = require('../shared/http-limiter.js');
 const { loadCachedIOCs } = require('../ioc/updater.js');
@@ -177,6 +177,25 @@ const SCAN_TIMEOUT_MS = 300_000; // 5 minutes per package (3 sandbox runs × 90s
 const STATIC_SCAN_TIMEOUT_MS = 45_000; // 45s for static analysis only
 const LARGE_PACKAGE_SIZE = 10 * 1024 * 1024; // 10MB
 const RECENTLY_SCANNED_MAX = 50_000; // FIFO cap for the dedup Set (P0c — bounded resource)
+
+// OOM fix (2026-06-19): archives larger than this (COMPRESSED, on-disk size) are
+// extracted off the main thread in a worker, so the synchronous extractor
+// (adm-zip extractAllTo / execFileSync tar) can no longer wedge the event loop and
+// starve the RSS breaker / memory governor / EMERGENCY purge (all main-thread
+// timers) → cgroup OOM. Confirmed culprit: data/loop-stalls.jsonl (extract:* up to
+// 148s). Small archives extract inline — a worker spawn costs more than their
+// sub-100ms extraction. Env-tunable via MUADDIB_INLINE_EXTRACT_MB.
+const INLINE_EXTRACT_MAX_BYTES = (parseInt(process.env.MUADDIB_INLINE_EXTRACT_MB, 10) || 4) * 1024 * 1024;
+
+// Extract inline for small archives, off-thread for large ones. compressedSize is
+// the on-disk tarball size (reliable, unlike the registry unpackedSize metadata).
+// Always returns a Promise so the call sites can uniformly `await`.
+function extractGated(archivePath, destDir, compressedSize) {
+  if (compressedSize > INLINE_EXTRACT_MAX_BYTES) {
+    return extractArchiveOffThread(archivePath, destDir);
+  }
+  return Promise.resolve(extractArchive(archivePath, destDir));
+}
 
 // First-publish sandbox: max pending sandbox items before deferring first-publish clean scans
 // Prevents starving T1a sandbox capacity when many first-publish packages arrive at once
@@ -766,7 +785,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
         let bypassQuickScan = false;
         try {
           const _crumb = beginOp('extract:quickscan', { name, version, unpackedSizeMb: Math.round(unpackedSize / 1024 / 1024) });
-          try { extractedDir = extractArchive(tgzPath, tmpDir); } finally { endOp(_crumb); }
+          try { extractedDir = await extractGated(tgzPath, tmpDir, fileSize); } finally { endOp(_crumb); }
 
           const [pkgThreats, shellThreats] = await Promise.all([
             scanPackageJson(extractedDir),
@@ -816,7 +835,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
 
     if (!extractedDir) {
       const _crumb = beginOp('extract:prework', { name, version, unpackedSizeMb: Math.round((meta.unpackedSize || 0) / 1024 / 1024) });
-      try { extractedDir = extractArchive(tgzPath, tmpDir); } finally { endOp(_crumb); }
+      try { extractedDir = await extractGated(tgzPath, tmpDir, fileSize); } finally { endOp(_crumb); }
     }
 
     // ML Phase 2a: Count JS files and detect test presence for enriched features
