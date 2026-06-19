@@ -71,6 +71,42 @@ async function runCompoundScoringTests() {
     assert(compound.file === 'package.json', `File should come from typosquat_detected`);
   });
 
+  // ===================================================================
+  // lifecycle_version99 — version_99_preinstall + lifecycle_script (COMPOUND-018, 2026-06-19)
+  // Gate-FPR-tested: repdigit-major + install hook = 0/3901 benign FP, 22/42 GT MALWARE.
+  // ===================================================================
+  test('Compound: lifecycle_version99 — positive (depconf version + install hook)', () => {
+    const threats = [
+      { type: 'version_99_preinstall', severity: 'HIGH', file: 'package.json', message: 'Version 99.99.99 repdigit major' },
+      { type: 'lifecycle_script', severity: 'MEDIUM', file: 'package.json', message: 'preinstall: node index.js' }
+    ];
+    applyCompoundBoosts(threats);
+    const compound = threats.find(t => t.type === 'lifecycle_version99');
+    assert(compound, 'lifecycle_version99 compound should be added');
+    assert(compound.severity === 'CRITICAL', `Should be CRITICAL, got ${compound.severity}`);
+    assert(compound.file === 'package.json', `File should come from version_99_preinstall`);
+    assert(getRule('lifecycle_version99'), 'lifecycle_version99 must have a rule entry');
+    assert(getPlaybook('lifecycle_version99'), 'lifecycle_version99 must have a playbook');
+  });
+
+  test('Compound: lifecycle_version99 — negative (lifecycle_script only, no depconf version)', () => {
+    const threats = [
+      { type: 'lifecycle_script', severity: 'MEDIUM', file: 'package.json', message: 'preinstall' }
+    ];
+    applyCompoundBoosts(threats);
+    assert(!threats.find(t => t.type === 'lifecycle_version99'),
+      'Should NOT fire without version_99_preinstall (a lone install hook is benign)');
+  });
+
+  test('Compound: lifecycle_version99 — negative (version_99 only, no lifecycle_script)', () => {
+    const threats = [
+      { type: 'version_99_preinstall', severity: 'HIGH', file: 'package.json', message: 'Version 99.99.99' }
+    ];
+    applyCompoundBoosts(threats);
+    assert(!threats.find(t => t.type === 'lifecycle_version99'),
+      'Should NOT fire without lifecycle_script');
+  });
+
   test('Compound: lifecycle_typosquat — negative (only lifecycle_script)', () => {
     const threats = [
       { type: 'lifecycle_script', severity: 'MEDIUM', file: 'package.json', message: 'preinstall' }

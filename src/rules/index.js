@@ -2699,6 +2699,19 @@ const RULES = {
     ],
     mitre: 'T1195.002'
   },
+  lifecycle_version99: {
+    id: 'MUADDIB-COMPOUND-018',
+    name: 'Lifecycle Hook + Dependency-Confusion Version',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    domain: 'malware',
+    description: 'Version a major repdigit "win-semver" (99/999/9999) AVEC hook lifecycle (preinstall/install/postinstall). Chaine complete de dependency confusion: la version elevee force la resolution npm vers le package public malveillant au lieu du package interne prive, et le hook execute le payload a l\'installation. Compound: version_99_preinstall + lifecycle_script (gate-FPR-test 2026-06-19: 0/3901 FP).',
+    references: [
+      'https://medium.com/@alex.birsan/dependency-confusion-4a5d60fec610',
+      'https://attack.mitre.org/techniques/T1195.002/'
+    ],
+    mitre: 'T1195.002'
+  },
   lifecycle_inline_exec: {
     id: 'MUADDIB-COMPOUND-004',
     name: 'Lifecycle Hook + Inline Node Execution',

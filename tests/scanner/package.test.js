@@ -724,6 +724,50 @@ async function runPackageTests() {
       assert(!threat, 'Should NOT detect version_99 on normal version');
     } finally { cleanupTemp(tmp); }
   });
+
+  // --- version_99_preinstall tightening (2026-06-19 gate-FPR-test): repdigit-major only ---
+  await asyncTest('PACKAGE: version_99_preinstall — does NOT fire on calendar version (2026.x)', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pkg-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
+      name: 'calendar-versioned', version: '2026.6.1',
+      scripts: { postinstall: 'node setup.js' }
+    }));
+    fs.writeFileSync(path.join(tmp, 'setup.js'), 'console.log("setup")');
+    try {
+      const result = await runScanDirect(tmp);
+      assert(!result.threats.find(t => t.type === 'version_99_preinstall'),
+        'Calendar version 2026.x must NOT trip the dep-confusion version indicator');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('PACKAGE: version_99_preinstall — does NOT fire on legit high major (148.x)', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pkg-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
+      name: 'chromedriver-like', version: '148.0.4',
+      scripts: { postinstall: 'node install.js' }
+    }));
+    fs.writeFileSync(path.join(tmp, 'install.js'), 'console.log("install")');
+    try {
+      const result = await runScanDirect(tmp);
+      assert(!result.threats.find(t => t.type === 'version_99_preinstall'),
+        'Sequential high major (148) must NOT trip the dep-confusion version indicator');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('PACKAGE: version_99_preinstall — still fires on repdigit 999/9999', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pkg-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
+      name: '@corp/internal-lib', version: '9999.0.0',
+      scripts: { preinstall: 'node setup.js' }
+    }));
+    fs.writeFileSync(path.join(tmp, 'setup.js'), 'console.log("setup")');
+    try {
+      const result = await runScanDirect(tmp);
+      const threat = result.threats.find(t => t.type === 'version_99_preinstall');
+      assert(threat, 'Repdigit major 9999 with install hook should still fire');
+      assert(threat.severity === 'HIGH', 'Should be HIGH severity');
+    } finally { cleanupTemp(tmp); }
+  });
 }
 
 module.exports = { runPackageTests };

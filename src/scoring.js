@@ -537,6 +537,23 @@ const SCORING_COMPOUNDS = [
     fileFrom: 'typosquat_detected'
   },
   {
+    // 2026-06-19 detection-gap (GHSA-2026 misses): a repdigit "win-semver" version
+    // (version_99_preinstall: major 99/999/9999) + an install lifecycle hook is the full
+    // dependency-confusion RCE chain. version_99_preinstall alone is HIGH (10), below the
+    // 20 alert threshold, so these scored ~13 and were missed (e.g. @doaction/* @99.99.99).
+    // Gate-FPR-tested on the confirmed corpus: repdigit-major + lifecycle_script = 0/3901
+    // benign FP (the 3 repdigit-version FPs have no install hook), 22/42 GT MALWARE.
+    // Both signals are package.json-level (no sameFile / excludeIfBundled needed).
+    // requireOriginalSeverityHigh anchors on version_99_preinstall (HIGH) so a lone
+    // lifecycle_script (MEDIUM, fires on every install hook) can never trip this alone.
+    type: 'lifecycle_version99',
+    requires: ['version_99_preinstall', 'lifecycle_script'],
+    severity: 'CRITICAL',
+    message: 'Dependency-confusion version (repdigit major 99/999/9999) + install lifecycle hook — install-time RCE via dependency confusion (scoring compound).',
+    fileFrom: 'version_99_preinstall',
+    requireOriginalSeverityHigh: true
+  },
+  {
     // RT-C1: Boundary-squat dep declared AND require()d in code → CRITICAL.
     // Pattern Axios UNC1069 (March 2026): wrapper looks benign, payload is in the dep.
     type: 'dependency_typosquat_require',
