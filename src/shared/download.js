@@ -340,6 +340,52 @@ function extractArchive(archivePath, destDir, options = {}) {
   throw new Error(`Unsupported archive format for ${path.basename(archivePath)}`);
 }
 
+// Hard cap for off-thread extraction (OOM fix). Large legit packages can take
+// 10-30s; 120s leaves headroom while still bounding a pathological extraction
+// (the worker is terminated past this so a runaway cannot pin RSS forever).
+const EXTRACT_OFFTHREAD_TIMEOUT_MS = parseInt(process.env.MUADDIB_EXTRACT_OFFTHREAD_TIMEOUT_MS, 10) || 120_000;
+
+/**
+ * Off-main-thread variant of extractArchive: runs the SAME synchronous extractor
+ * in a worker thread (src/shared/extract-worker.js) so the caller's event loop
+ * stays responsive during extraction. See extract-worker.js header for why this
+ * is the OOM fix. Same return contract as extractArchive (resolves to the
+ * extracted package root); rejects on extraction error, worker crash, or timeout.
+ * Callers gate on archive size — small archives extract inline (cheaper than a
+ * worker spawn), large ones offload here.
+ *
+ * @param {string} archivePath
+ * @param {string} destDir   - must already exist
+ * @param {Object} [options]
+ * @param {'targz'|'zip'} [options.format] - override auto-detection
+ * @param {number} [options.timeoutMs]     - hard cap; worker terminated past it
+ * @returns {Promise<string>} extracted package root
+ */
+function extractArchiveOffThread(archivePath, destDir, options = {}) {
+  const { Worker } = require('worker_threads');
+  const timeoutMs = Number.isFinite(options.timeoutMs) ? options.timeoutMs : EXTRACT_OFFTHREAD_TIMEOUT_MS;
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const worker = new Worker(path.join(__dirname, 'extract-worker.js'), {
+      workerData: { archivePath, destDir, format: options.format || null }
+    });
+    const finish = (fn) => { if (settled) return; settled = true; clearTimeout(timer); fn(); };
+    const timer = setTimeout(() => finish(() => {
+      worker.terminate().finally(() =>
+        reject(new Error(`extractArchiveOffThread timeout after ${timeoutMs}ms: ${path.basename(archivePath)}`)));
+    }), timeoutMs);
+    if (timer && typeof timer.unref === 'function') timer.unref();
+    worker.once('message', (msg) => finish(() => {
+      worker.terminate();
+      if (msg && msg.ok) resolve(msg.dir);
+      else reject(new Error((msg && msg.error) || 'extractArchiveOffThread: worker reported failure'));
+    }));
+    worker.once('error', (err) => finish(() => { worker.terminate(); reject(err); }));
+    worker.once('exit', (code) => finish(() =>
+      reject(new Error(`extractArchiveOffThread: worker exited (${code}) without a result`))));
+  });
+}
+
 /**
  * Backwards-compatible wrapper for the original tar.gz-only extractor.
  * Kept because src/scanner/temporal-ast-diff.js and existing tests still
@@ -370,6 +416,7 @@ module.exports = {
   downloadToFile,
   extractTarGz,
   extractArchive,
+  extractArchiveOffThread,
   detectArchiveFormat,
   sanitizePackageName,
   isAllowedDownloadRedirect,

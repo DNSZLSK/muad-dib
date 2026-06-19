@@ -202,6 +202,43 @@ async function runDownloadTests() {
     const medScore = computeRiskScore({ critical: 0, high: 0, medium: 1, low: 0 });
     assert(medScore === SEVERITY_WEIGHTS.MEDIUM, `1 MEDIUM should give ${SEVERITY_WEIGHTS.MEDIUM}, got ${medScore}`);
   });
+
+  // --- extractArchiveOffThread (OOM fix 2026-06-19) ---
+
+  await asyncTest('DOWNLOAD: extractArchiveOffThread matches inline extraction', async () => {
+    const os = require('os');
+    const fs = require('fs');
+    const path = require('path');
+    const AdmZip = require('adm-zip');
+    const { extractArchive, extractArchiveOffThread } = require('../../src/shared/download.js');
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-extract-'));
+    try {
+      const zipPath = path.join(tmp, 'pkg.zip');
+      const zip = new AdmZip();
+      zip.addFile('package/package.json', Buffer.from('{"name":"x","version":"1.0.0"}'));
+      zip.addFile('package/index.js', Buffer.from('module.exports = 42;'));
+      zip.writeZip(zipPath);
+      const dIn = path.join(tmp, 'in'); const dOff = path.join(tmp, 'off');
+      fs.mkdirSync(dIn); fs.mkdirSync(dOff);
+      const rootIn = extractArchive(zipPath, dIn);
+      const rootOff = await extractArchiveOffThread(zipPath, dOff);
+      for (const f of ['package.json', 'index.js']) {
+        const a = fs.readFileSync(path.join(rootIn, f), 'utf8');
+        const b = fs.readFileSync(path.join(rootOff, f), 'utf8');
+        assert(a === b, `offthread ${f} content must match inline extraction`);
+      }
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  await asyncTest('DOWNLOAD: extractArchiveOffThread rejects on a missing archive', async () => {
+    const { extractArchiveOffThread } = require('../../src/shared/download.js');
+    let threw = false;
+    try { await extractArchiveOffThread('/no/such/muaddib-archive.zip', '/tmp'); }
+    catch { threw = true; }
+    assert(threw, 'must reject when the archive does not exist (callers then fall back to metadata)');
+  });
 }
 
 module.exports = { runDownloadTests };
