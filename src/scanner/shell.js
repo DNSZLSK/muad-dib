@@ -8,7 +8,7 @@ const SHELL_EXCLUDED_DIRS = ['node_modules', '.git', '.muaddib-cache'];
 const MALICIOUS_PATTERNS = [
   { pattern: /curl[^\n]{0,5000}\|[^\n]{0,5000}sh/m, name: 'curl_pipe_shell', severity: 'HIGH' },
   { pattern: /wget[^\n]{0,5000}&&[^\n]{0,5000}chmod[^\n]{0,5000}\+x/m, name: 'wget_chmod_exec', severity: 'HIGH' },
-  { pattern: /bash\s+-i\s+>&\s+\/dev\/tcp/m, name: 'reverse_shell', severity: 'CRITICAL' },
+  { pattern: /(?:ba)?sh\s+-i\s+>&\s*\/dev\/tcp/m, name: 'reverse_shell', severity: 'CRITICAL' },
   { pattern: /nc\s+-e\s+\/bin\/(ba)?sh/m, name: 'netcat_shell', severity: 'CRITICAL' },
   { pattern: /rm\s+-rf\s+(~\/|\$HOME|\/home)/m, name: 'home_deletion', severity: 'CRITICAL' },
   { pattern: /shred.*\$HOME/m, name: 'shred_home', severity: 'CRITICAL' },
@@ -40,13 +40,26 @@ const MALICIOUS_PATTERNS = [
 
 const SHEBANG_RE = /^#!.*\b(?:ba)?sh\b/;
 
-function scanFileContent(file, content, targetPath, threats) {
+// Source files (.js/.ts/...) can embed shell reverse-shell commands inside
+// child_process exec/execSync/spawn string args. shell.js historically scanned only
+// .sh/shebang files, so `execSync("bash -i >& /dev/tcp/...")` in index.js was invisible
+// (missed npx-whoami-demo, 2026-06 — a revshell that scored grs 25 with type_reverse_shell=0).
+// Apply ONLY the unambiguous reverse-shell command patterns to source files — NOT the
+// context-dependent ones (curl|sh, systemctl, rm -rf, base64|sh) which would false-positive
+// on JS string literals / build tooling. FPR-gate (2026-06-19): these 4 matched 0 port-check
+// idioms (</dev/tcp, echo >/dev/tcp, nc -z) and 0 node_modules .js files.
+const SOURCE_SCAN_PATTERN_NAMES = new Set([
+  'reverse_shell', 'netcat_shell', 'fifo_reverse_shell', 'fifo_nc_reverse_shell'
+]);
+const SOURCE_SCAN_EXTENSIONS = ['.js', '.cjs', '.mjs', '.ts', '.jsx', '.tsx'];
+
+function scanFileContent(file, content, targetPath, threats, patterns = MALICIOUS_PATTERNS) {
   // Strip comment lines to avoid false positives on documentation
   const activeContent = content.split(/\r?\n/)
     .filter(line => !line.trimStart().startsWith('#'))
     .join('\n');
 
-  for (const { pattern, name, severity } of MALICIOUS_PATTERNS) {
+  for (const { pattern, name, severity } of patterns) {
     if (pattern.test(activeContent)) {
       threats.push({
         type: name,
@@ -105,6 +118,14 @@ async function scanShellScripts(targetPath) {
       }
     } catch (e) { debugLog('[SHELL] readFile error:', e?.message); }
   }
+
+  // Pass 3: source files (.js/.ts/...) — only the unambiguous reverse-shell command
+  // patterns (revshell commands embedded in child_process exec/spawn string args).
+  const sourcePatterns = MALICIOUS_PATTERNS.filter(p => SOURCE_SCAN_PATTERN_NAMES.has(p.name));
+  const sourceFiles = findFiles(targetPath, { extensions: SOURCE_SCAN_EXTENSIONS, excludedDirs: SHELL_EXCLUDED_DIRS });
+  forEachSafeFile(sourceFiles, (file, content) => {
+    scanFileContent(file, content, targetPath, threats, sourcePatterns);
+  });
 
   return threats;
 }

