@@ -84,7 +84,7 @@ const {
 
 // From ./ingestion.js
 const { getNpmLatestTarball, getPyPITarballUrl } = require('./ingestion.js');
-const { enqueueScan, dequeueScan } = require('./scan-queue.js');
+const { enqueueScan, dequeueScan, shouldPullNewest } = require('./scan-queue.js');
 
 // From ./tarball-archive.js
 const { archiveSuspectTarball } = require('./tarball-archive.js');
@@ -98,6 +98,7 @@ const { BASE_CONCURRENCY, MIN_CONCURRENCY, MAX_CONCURRENCY } = require('./adapti
 
 // SCAN_CONCURRENCY kept as getter for backward compatibility (tests, logging)
 let _targetConcurrency = BASE_CONCURRENCY;
+let _dequeueSeq = 0; // shared monotonic cursor for fresh-first round-robin (Phase 2)
 const SCAN_CONCURRENCY = BASE_CONCURRENCY; // legacy export — tests check this value
 let _activeWorkers = 0;
 const _workerPromises = new Set();
@@ -1780,7 +1781,10 @@ async function _spawnWorker(scanQueue, stats, dailyAlerts, recentlyScanned, down
       // admission (1 scan when nothing is in flight) can still flow.
       if (isGovernorFrozen() && (getGovernorState().outstandingCount > 0 || _activeWorkers > 1)) break;
       // AUDIT A2: FIFO by default; priority dequeue when MUADDIB_PRIORITY_DEQUEUE=1.
-      const item = dequeueScan(scanQueue);
+      // Phase 2: when MUADDIB_FRESH_FIRST=1 and a backlog exists, most lanes take the
+      // newest item (fresh-first) while a reserved few keep draining the oldest.
+      const newest = shouldPullNewest(_dequeueSeq++, scanQueue.length, _targetConcurrency);
+      const item = dequeueScan(scanQueue, { newest });
       if (!item) break;
       _inFlightItems.add(item);
       try {

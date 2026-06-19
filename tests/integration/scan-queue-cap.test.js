@@ -10,7 +10,7 @@
  */
 
 const { test, assert } = require('../test-utils');
-const { enqueueScan, evictFromScanQueueBulk, dequeueScan, MAX_SCAN_QUEUE } = require('../../src/monitor/scan-queue.js');
+const { enqueueScan, evictFromScanQueueBulk, dequeueScan, shouldPullNewest, MAX_SCAN_QUEUE } = require('../../src/monitor/scan-queue.js');
 
 async function runScanQueueCapTests() {
   console.log('\n=== SCAN QUEUE HARD-CAP TESTS (P0c) ===\n');
@@ -192,7 +192,36 @@ async function runScanQueueCapTests() {
     assert(got.name === 'a', `window-bounded scan must fall back to FIFO, got ${got.name}`);
   });
 
-  console.log('  ✓ scan queue hard-cap (P0c) + priority-dequeue (A2) tests passed');
+  // --- Phase 2: fresh-first scheduling (gated; tested via opts override) ---
+  test('dequeueScan: newest mode pulls the TAIL (most recent)', () => {
+    const q = [{ name: 'a' }, { name: 'b' }, { name: 'c' }];
+    assert(dequeueScan(q, { newest: true }).name === 'c', 'newest returns the tail');
+    assert(q.length === 2 && q[q.length - 1].name === 'b', 'popped from the tail');
+  });
+
+  test('shouldPullNewest: disabled or no backlog → FIFO (oldest)', () => {
+    assert(shouldPullNewest(0, 50000, 12, { enabled: false }) === false, 'disabled → false');
+    assert(shouldPullNewest(0, 100, 12, { enabled: true, threshold: 5000 }) === false, 'below threshold → false');
+  });
+
+  test('shouldPullNewest: backlog → drainLanes pull oldest, the rest go fresh', () => {
+    const opts = { enabled: true, threshold: 5000, drainLanes: 2 };
+    const target = 12, q = 30000;
+    let oldest = 0, newest = 0;
+    for (let seq = 0; seq < target; seq++) (shouldPullNewest(seq, q, target, opts) ? newest++ : oldest++);
+    assert(oldest === 2, `exactly drainLanes(2) pull oldest, got ${oldest}`);
+    assert(newest === 10, `the rest (10) go fresh, got ${newest}`);
+    assert(shouldPullNewest(0, q, target, opts) === false, 'seq 0 → oldest (drain lane)');
+    assert(shouldPullNewest(2, q, target, opts) === true, 'seq 2 → newest (fresh lane)');
+  });
+
+  test('shouldPullNewest: clamps drainLanes to always leave ≥1 fresh lane', () => {
+    const opts = { enabled: true, threshold: 0, drainLanes: 99 };
+    assert(shouldPullNewest(0, 100, 2, opts) === false, 'lane 0 drains (oldest)');
+    assert(shouldPullNewest(1, 100, 2, opts) === true, 'lane 1 stays fresh (clamp leaves ≥1)');
+  });
+
+  console.log('  ✓ scan queue hard-cap (P0c) + priority-dequeue (A2) + fresh-first (Phase 2) tests passed');
 }
 
 module.exports = { runScanQueueCapTests };

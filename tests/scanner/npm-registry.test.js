@@ -285,6 +285,58 @@ async function runNpmRegistryTests() {
       else process.env.MUADDIB_REGISTRY_RETRIES = orig;
     }
   });
+
+  // --- Phase 1: downloads-count off the scan critical path (throughput plan) ---
+
+  const _miniPackument = {
+    time: { created: '2020-01-15T00:00:00Z', '1.0.0': '2020-01-15T00:00:00Z' },
+    'dist-tags': { latest: '1.0.0' },
+    versions: { '1.0.0': { maintainers: [{ name: 'a' }] } },
+    maintainers: [{ name: 'a' }]
+  };
+  function _mockFetchTrackingDownloads(state, downloadsValue) {
+    return async (url) => {
+      if (url.includes('api.npmjs.org/downloads')) {
+        state.downloadsHit = true;
+        return { ok: true, status: 200, json: async () => ({ downloads: downloadsValue }), headers: new Map() };
+      }
+      if (url.includes('/-/v1/search')) return { ok: true, status: 200, json: async () => ({ total: 1 }), headers: new Map() };
+      return { ok: true, status: 200, json: async () => _miniPackument, headers: new Map() };
+    };
+  }
+
+  await asyncTest('REGISTRY: warm downloadsCache is used — api.npmjs.org NOT fetched', async () => {
+    const { downloadsCache } = require('../../src/monitor/classify.js');
+    const state = { downloadsHit: false };
+    downloadsCache.set('cache-warm-pkg', { downloads: 777, fetchedAt: Date.now() });
+    try {
+      await withMockedFetch(_mockFetchTrackingDownloads(state, 999999), async (getPackageMetadata) => {
+        const result = await getPackageMetadata('cache-warm-pkg');
+        assert(result !== null, 'metadata returned');
+        assert(result.weekly_downloads === 777, `weekly_downloads from cache (777), got ${result.weekly_downloads}`);
+        assert(state.downloadsHit === false, 'api.npmjs.org/downloads must NOT be fetched when cache is warm');
+      });
+    } finally {
+      downloadsCache.delete('cache-warm-pkg');
+    }
+  });
+
+  await asyncTest('REGISTRY: api.npmjs.org in 429 backoff → downloads skipped, scan not stalled', async () => {
+    const limiter = require('../../src/shared/http-limiter.js');
+    const state = { downloadsHit: false };
+    limiter.resetLimiter();
+    limiter.signal429('api.npmjs.org');   // host in an active 429 pause
+    assert(limiter.isHostBackedOff('api.npmjs.org'), 'precondition: api.npmjs.org backed off');
+    try {
+      await withMockedFetch(_mockFetchTrackingDownloads(state, 5), async (getPackageMetadata) => {
+        const result = await getPackageMetadata('backed-off-pkg');
+        assert(result !== null, 'metadata still returned (packument host not backed off)');
+        assert(state.downloadsHit === false, 'downloads fetch skipped while api.npmjs.org is backed off');
+      });
+    } finally {
+      limiter.resetLimiter();
+    }
+  });
 }
 
 module.exports = { runNpmRegistryTests };

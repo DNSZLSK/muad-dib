@@ -201,6 +201,26 @@ const PRIORITY_DEQUEUE_WINDOW = (() => {
   return Number.isFinite(v) && v > 0 ? v : 2048;
 })();
 
+// ── Fresh-first scheduling (throughput plan Phase 2; gated OFF by default) ───
+// When MUADDIB_FRESH_FIRST=1 AND a real backlog exists (queue > split threshold),
+// most worker lanes dequeue the NEWEST item (tail) so a freshly-published package
+// is scanned in minutes instead of aging ~hours behind a FIFO backlog, while a
+// reserved `drainLanes` keep draining the OLDEST (anti-starvation). Below the
+// threshold all lanes stay strict FIFO ("back to the normal flow" once drained).
+// Pure ordering change — every item is still scanned; inert until the flag is on.
+const FRESH_FIRST = (() => {
+  const v = process.env.MUADDIB_FRESH_FIRST;
+  return v === '1' || v === 'true';
+})();
+const BACKLOG_DRAIN_LANES = (() => {
+  const v = parseInt(process.env.MUADDIB_BACKLOG_DRAIN_LANES, 10);
+  return Number.isFinite(v) && v > 0 ? v : 2;
+})();
+const BACKLOG_SPLIT_THRESHOLD = (() => {
+  const v = parseInt(process.env.MUADDIB_BACKLOG_SPLIT_THRESHOLD, 10);
+  return Number.isFinite(v) && v > 0 ? v : 5000;
+})();
+
 function _isPriority(item) {
   return !!(item && (item.firstPublish || item.isIOCMatch || (item.isBurst && !item.isATOBurstExtra)));
 }
@@ -213,8 +233,12 @@ function _isPriority(item) {
  * @param {{priority?: boolean, window?: number}} [opts] test overrides
  */
 function dequeueScan(scanQueue, opts = {}) {
+  if (scanQueue.length === 0) return scanQueue.shift();
+  // Fresh-first lanes take the NEWEST item (tail). Takes precedence over priority:
+  // the freshest publish is the one we most want to be first on.
+  if (opts.newest) return scanQueue.pop();
   const priority = opts.priority !== undefined ? opts.priority : PRIORITY_DEQUEUE;
-  if (!priority || scanQueue.length === 0) return scanQueue.shift();
+  if (!priority) return scanQueue.shift();
   const win = Math.min(scanQueue.length, opts.window || PRIORITY_DEQUEUE_WINDOW);
   for (let i = 0; i < win; i++) {
     if (_isPriority(scanQueue[i])) return i === 0 ? scanQueue.shift() : scanQueue.splice(i, 1)[0];
@@ -222,4 +246,23 @@ function dequeueScan(scanQueue, opts = {}) {
   return scanQueue.shift();
 }
 
-module.exports = { enqueueScan, evictFromScanQueueBulk, dequeueScan, isProtected: _isProtected, MAX_SCAN_QUEUE };
+/**
+ * Fresh-first dequeue decision (Phase 2, gated by MUADDIB_FRESH_FIRST). True → this
+ * dequeue should take the NEWEST item (tail); false → oldest (FIFO/priority head).
+ * Splits only above BACKLOG_SPLIT_THRESHOLD; below it everything stays FIFO. Of
+ * `target` concurrent lanes, `drainLanes` keep pulling oldest (anti-starvation), the
+ * rest go fresh. `seq` is a shared monotonic dequeue counter (single-threaded →
+ * consistent). Pure; `opts` override the env gates for tests.
+ */
+function shouldPullNewest(seq, queueLen, target, opts = {}) {
+  const enabled = opts.enabled !== undefined ? opts.enabled : FRESH_FIRST;
+  if (!enabled) return false;
+  const threshold = opts.threshold !== undefined ? opts.threshold : BACKLOG_SPLIT_THRESHOLD;
+  if (queueLen <= threshold) return false;
+  const drainLanes = opts.drainLanes !== undefined ? opts.drainLanes : BACKLOG_DRAIN_LANES;
+  const lanes = Math.max(2, target || 2);
+  const drain = Math.min(drainLanes, lanes - 1);   // always leave ≥1 fresh lane
+  return (seq % lanes) >= drain;                    // first `drain` slots → oldest; rest → newest
+}
+
+module.exports = { enqueueScan, evictFromScanQueueBulk, dequeueScan, shouldPullNewest, isProtected: _isProtected, MAX_SCAN_QUEUE };

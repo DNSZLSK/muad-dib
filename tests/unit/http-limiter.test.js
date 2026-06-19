@@ -384,6 +384,20 @@ async function runHttpLimiterTests() {
       delete require.cache[AUTH_PATH];
     }
   });
+
+  await asyncTest('LIMITER: isHostBackedOff reflects per-host 429 backoff', async () => {
+    const { limiter, restore } = freshLimiter({ MUADDIB_REGISTRY_BACKOFF_BASE_MS: 1000 });
+    try {
+      assert(!limiter.isHostBackedOff('api.npmjs.org'), 'unseen host is not backed off');
+      limiter.signal429('api.npmjs.org');                        // arms an active pause for that host
+      assert(limiter.isHostBackedOff('api.npmjs.org'), 'host in a 429 pause is backed off');
+      assert(!limiter.isHostBackedOff('registry.npmjs.org'), 'a different host is unaffected (per-host scoping)');
+      limiter.resetLimiter();
+      assert(!limiter.isHostBackedOff('api.npmjs.org'), 'resetLimiter clears backoff');
+    } finally {
+      restore();
+    }
+  });
 }
 
 module.exports = { runHttpLimiterTests };

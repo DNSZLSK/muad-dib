@@ -162,6 +162,19 @@ function hostForUrl(url) {
   try { return new URL(url).hostname || DEFAULT_HOST; } catch { return DEFAULT_HOST; }
 }
 
+/**
+ * True when a host is in (or near) a 429 backoff — fetching it now would park on
+ * the token gate. Lets best-effort callers (downloads-count) SKIP the fetch under a
+ * storm instead of stalling the scan. "Near" = an active pause OR a high backoff
+ * level (the host is 429ing essentially every probe). Pure read: never allocates a
+ * bucket (an unseen host is, by definition, not backed off).
+ */
+function isHostBackedOff(host, levelThreshold = 6) {
+  const b = _buckets.get(host || DEFAULT_HOST);
+  if (!b) return false;
+  return Date.now() < b.bo.pauseUntil || b.bo.level >= levelThreshold;
+}
+
 function _effectiveRate(level = 0) {
   let rate = RATE_LIMIT_PER_SEC;
   if (BOOT_SLOWSTART_MS > 0 && Date.now() - _bootAt < BOOT_SLOWSTART_MS) {
@@ -463,6 +476,7 @@ module.exports = {
   getBrainState,
   computeBackoffTransition,
   hostForUrl,
+  isHostBackedOff,
   resetLimiter,
   _restartBootSlowStartForTests,
   getActiveSemaphore
