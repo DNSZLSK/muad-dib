@@ -178,6 +178,7 @@ const { runHttpLimiterTests } = require('./unit/http-limiter.test');
 const { runWorkerMessageDispatchTests } = require('./unit/worker-message-dispatch.test');
 const { runNetworkBrainTests } = require('./unit/network-brain.test');
 const { runMemoryGovernorTests } = require('./unit/memory-governor.test');
+const { runEventLoopMonitorTests } = require('./unit/event-loop-monitor.test');
 const { runInterruptedRecoveryTests } = require('./unit/interrupted-recovery.test');
 const { runDegradationTests } = require('./unit/degradation.test');
 
@@ -421,6 +422,7 @@ async function timed(name, fn) {
   await timed('worker-message-dispatch', runWorkerMessageDispatchTests);
   await timed('network-brain', runNetworkBrainTests);
   await timed('memory-governor', runMemoryGovernorTests);
+  await timed('event-loop-monitor', runEventLoopMonitorTests);
   await timed('interrupted-recovery', runInterruptedRecoveryTests);
   await timed('degradation', runDegradationTests);
 

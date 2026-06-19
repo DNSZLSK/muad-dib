@@ -165,17 +165,24 @@ async function scanPackageJson(targetPath) {
     }
   }
 
-  // v2.10.89: Dependency confusion indicator — version >= 99 with install hooks
+  // v2.10.89: Dependency confusion indicator — repdigit "win-semver" major with install hooks.
   // Catches: @corpweb-ui/wmkt-library, @toprank/partner, @adac-fahrzeugplattform/ui
+  // v2.11.118 (2026-06-19, gate-FPR-test on the GHSA-2026 miss corpus): tightened from a
+  // plain `major >= 99` to the repdigit set {99, 999, 9999}. `>= 99` also fired on calendar
+  // versions (2026.x — 51 in the FP corpus) and legit high-version packages (chromedriver@148,
+  // taskcluster@100, @jetbrains/junie@1966, salt@3008) — masked only because the lone signal
+  // stayed HIGH (<20). Restricting to repdigit majors keeps 27/27 corpus dep-conf MALWARE at
+  // ZERO benign hits, and unblocks the lifecycle_version99 compound below (which would
+  // otherwise inherit the calendar FPs once escalated to CRITICAL).
   const versionStr = pkg.version || '';
   const majorVersion = parseInt(versionStr.split('.')[0], 10);
-  if (majorVersion >= 99) {
+  if ([99, 999, 9999].includes(majorVersion)) {
     const hasInstallHook = ['preinstall', 'install', 'postinstall'].some(s => scripts[s]);
     if (hasInstallHook) {
       threats.push({
         type: 'version_99_preinstall',
         severity: 'HIGH',
-        message: `Version ${versionStr} (major >= 99) with lifecycle hook — dependency confusion attack pattern.`,
+        message: `Version ${versionStr} (repdigit win-semver major ${majorVersion}) with lifecycle hook — dependency confusion attack pattern.`,
         file: 'package.json'
       });
     }

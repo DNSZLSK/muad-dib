@@ -807,6 +807,13 @@ const PLAYBOOKS = {
     'Vecteur classique de dependency confusion: le code s\'execute a l\'installation. ' +
     'NE PAS installer. Verifier le nom exact du package. Signaler sur npm.',
 
+  lifecycle_version99:
+    'CRITIQUE: Version a major repdigit "win-semver" (99/999/9999) + hook lifecycle = ' +
+    'dependency confusion complete. La version elevee force npm a resoudre vers ce package ' +
+    'public au lieu du package interne prive, et le hook execute le payload a l\'installation. ' +
+    'NE PAS installer. Verifier si un package interne du meme nom existe. Regenerer les secrets ' +
+    'exposes. Signaler sur npm.',
+
   lifecycle_inline_exec:
     'CRITIQUE: Script lifecycle avec node -e (execution inline). Le code s\'execute automatiquement a npm install. ' +
     'NE PAS installer. Si deja installe: considerer la machine compromise. ' +
