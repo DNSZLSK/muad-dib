@@ -379,7 +379,7 @@ async function runWebhookTests() {
     const field = formatLedgerField({
       total: 1000, scanned: 990, dropped: 10, vanished: 4, exactVanished: true,
       alerted: 9, alertRate: 9 / 990,
-      byOutcome: { clean: 981, suspect: 9, dropped: 10 },
+      byOutcome: { clean: 981, suspect: 9, dropped: 6, spilled: 4 },
       byEcosystem: { npm: { total: 800, scanned: 795, dropped: 5, alerted: 7 },
                      pypi: { total: 200, scanned: 195, dropped: 5, alerted: 2 } }
     });
@@ -387,7 +387,8 @@ async function runWebhookTests() {
     assertIncludes(field.value, 'Scans: 990 events', 'shows scanned count (events unit)');
     assertIncludes(field.value, 'alertés 9', 'shows alerted count');
     assertIncludes(field.value, '0.91%', 'shows alert rate (9/990)');
-    assertIncludes(field.value, 'Non scannés: 10 events (4 name@ver jamais (re)scannés)', 'shows dropped + vanished, both labeled as name@version events');
+    // Honest split: aggregate dropped=10 = spill 4 (recoverable) + 6 evicted (gone).
+    assertIncludes(field.value, 'Non scannés: 10 events — spill 4 (récup.) + 6 évincés · 4 name@ver jamais (re)scannés', 'splits dropped into recoverable spill vs hard evictions; vanished still name@version');
     assertIncludes(field.value, 'npm 800', 'shows per-ecosystem npm total');
     assertIncludes(field.value, 'pypi 200', 'shows per-ecosystem pypi total');
   });
