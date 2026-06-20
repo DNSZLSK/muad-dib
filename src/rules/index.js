@@ -1288,6 +1288,66 @@ const RULES = {
     mitre: 'T1027.013'
   },
 
+  antiscanner_analyzer_directive: {
+    id: 'MUADDIB-ASI-001',
+    name: 'Anti-Scanner Prompt Injection (Analyzer Directive)',
+    severity: 'HIGH',
+    confidence: 'high',
+    domain: 'malware',
+    description: 'Le code source du paquet (commentaire, litteral, docstring) contient une directive en langage naturel adressee a un analyseur LLM, lui ordonnant d\'oublier ses consignes ou de changer de role. Technique anti-scanner : detourner un analyseur de securite base sur un LLM vers un faux negatif. MUAD\'DIB est purement a base de regles (aucun LLM dans le chemin de scan) donc immunise ; il signale la directive elle-meme comme signal de malveillance. Campagnes Hades (juin 2026) et TrapDoor/eth-security-auditor (mai 2026).',
+    references: [
+      'https://www.stepsecurity.io/blog/the-hades-campaign-pypi-packages',
+      'https://snyk.io/blog/toxicskills-prompt-injection-ai-agents/',
+      'https://attack.mitre.org/techniques/T1027/'
+    ],
+    mitre: 'T1027'
+  },
+
+  antiscanner_verdict_coercion: {
+    id: 'MUADDIB-ASI-002',
+    name: 'Anti-Scanner Prompt Injection (Verdict Coercion)',
+    severity: 'HIGH',
+    confidence: 'high',
+    domain: 'malware',
+    description: 'Le code source contient une instruction en langage naturel demandant a un analyseur LLM de declarer le paquet sain/propre/verifie afin d\'obtenir un faux negatif. Forme imperative visant le paquet lui-meme (et non une narration descriptive). Distinctif de la campagne Hades (juin 2026).',
+    references: [
+      'https://www.stepsecurity.io/blog/the-hades-campaign-pypi-packages',
+      'https://www.zscaler.com/blogs/security-research/shai-hulud-campaign-evolution-miasma-hades-and-ai-scanner-evasion',
+      'https://attack.mitre.org/techniques/T1027/'
+    ],
+    mitre: 'T1027'
+  },
+
+  antiscanner_analysis_suppression: {
+    id: 'MUADDIB-ASI-003',
+    name: 'Anti-Scanner Prompt Injection (Analysis Suppression)',
+    severity: 'HIGH',
+    confidence: 'high',
+    domain: 'malware',
+    description: 'Le code source ordonne a un analyseur LLM de ne pas inspecter/decoder/signaler le code voisin (souvent la charge obfusquee qui suit), ou presente le bloc obfusque comme une infrastructure de confiance a ignorer. Si le MEME fichier porte aussi une charge obfusquee (base64/eval/vm) ou un fort taux de caracteres invisibles, l\'evenement est escalade en CRITICAL (antiscanner_injection_with_payload). Forme Hades (juin 2026).',
+    references: [
+      'https://www.stepsecurity.io/blog/the-hades-campaign-pypi-packages',
+      'https://www.aikido.dev/blog/glassworm-returns-unicode-attack-github-npm-vscode',
+      'https://attack.mitre.org/techniques/T1027/'
+    ],
+    mitre: 'T1027'
+  },
+
+  antiscanner_injection_with_payload: {
+    id: 'MUADDIB-ASI-004',
+    name: 'Anti-Scanner Injection Guarding an Obfuscated Payload',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    domain: 'malware',
+    description: 'Le MEME fichier contient a la fois une injection anti-scanner en langage naturel ET un signal de charge utile (blob base64 d\'au moins 200 caracteres, eval/Function/atob/vm, ou au moins 8 caracteres Unicode invisibles). Combinaison auto-suffisante (meme fichier, sans dependance inter-scanner) correspondant a la forme Hades : une injection qui protege un payload obfusque (juin 2026).',
+    references: [
+      'https://www.stepsecurity.io/blog/the-hades-campaign-pypi-packages',
+      'https://www.zscaler.com/blogs/security-research/shai-hulud-campaign-evolution-miasma-hades-and-ai-scanner-evasion',
+      'https://attack.mitre.org/techniques/T1027/'
+    ],
+    mitre: 'T1027'
+  },
+
   require_cache_poison: {
     id: 'MUADDIB-AST-019',
     name: 'Require Cache Poisoning',

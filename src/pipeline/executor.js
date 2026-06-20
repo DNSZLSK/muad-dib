@@ -22,6 +22,7 @@ const { loadCachedIOCs } = require('../ioc/updater.js');
 const { normalizePythonName } = require('../scanner/python.js');
 const { scanPythonSource } = require('../scanner/python-source.js');
 const { initPythonParser, scanPythonAST } = require('../scanner/python-ast.js');
+const { scanAntiScannerInjection } = require('../scanner/anti-scanner-injection.js');
 const { Spinner, listInstalledPackages, wasFilesCapped, getOverflowFiles, debugLog } = require('../utils.js');
 const { getMaxFileSize } = require('../shared/constants.js');
 const { scanParanoid } = require('../scanner/paranoid.js');
@@ -233,7 +234,7 @@ async function execute(targetPath, options, pythonDeps, warnings) {
     'scanGitHubActions', 'matchPythonIOCs', 'checkPyPITyposquatting',
     'scanEntropy', 'scanAIConfig', 'scanIocStrings', 'scanAntiForensic',
     'scanStubPackage', 'scanMonorepo', 'scanTrustedDepDiff', 'scanPythonSource',
-    'scanPythonAST'
+    'scanPythonAST', 'scanAntiScannerInjection'
   ];
 
   // Stage 2 quick_scan subset (monitor-only, set via options.scanMode='quick'
@@ -263,7 +264,8 @@ async function execute(targetPath, options, pythonDeps, warnings) {
     'scanIocStrings',
     'scanPythonSource',
     'scanPythonAST',
-    'scanAIConfig'
+    'scanAIConfig',
+    'scanAntiScannerInjection'
   ]);
   const isQuick = options.scanMode === 'quick';
   function ifEnabled(name, fn) {
@@ -309,7 +311,10 @@ async function execute(targetPath, options, pythonDeps, warnings) {
     // of cmdclass override, exec, subprocess shell=True, pickle.loads,
     // __import__ dangerous, entry_points. Parser init happens at pre-analysis
     // stage above; this call is sync from the caller's POV.
-    ifEnabled('scanPythonAST', () => yieldThen(() => scanPythonAST(targetPath)))
+    ifEnabled('scanPythonAST', () => yieldThen(() => scanPythonAST(targetPath))),
+    // ASI-001..004 (chantier 2026-06-20). Anti-scanner prompt injection in source text
+    // (comments/strings). Regex-only, cheap; the attack lives in root entry files.
+    ifEnabled('scanAntiScannerInjection', () => yieldThen(() => scanAntiScannerInjection(targetPath)))
   ]);
 
   // Extract results: use empty array for rejected scanners, log errors
@@ -341,7 +346,8 @@ async function execute(targetPath, options, pythonDeps, warnings) {
     monorepoThreats,
     trustedDepDiffThreats,
     pythonSourceThreats,
-    pythonAstThreats
+    pythonAstThreats,
+    antiScannerThreats
   ] = scanResult;
 
   // Emit warning if file count cap was hit + quick-scan overflow files
@@ -424,6 +430,7 @@ async function execute(targetPath, options, pythonDeps, warnings) {
     ...trustedDepDiffThreats,
     ...pythonSourceThreats,
     ...pythonAstThreats,
+    ...antiScannerThreats,
     ...crossFileFlows.filter(f => f && f.sourceFile && f.sinkFile).map(f => ({
       type: f.type,
       severity: f.severity,
