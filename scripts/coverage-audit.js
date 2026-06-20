@@ -9,8 +9,13 @@
  *
  *   alerted      — we flagged it (ledger outcome suspect/confirmed, or it's in the archive)
  *   scannedClean — we SCANNED it but returned clean  → a detection MISS (false negative)
- *   dropped      — only ever queue-cap-evicted / ghsa_gone → a throughput/coverage hole
- *   neverSeen    — never appeared in the ledger at all → an ingestion gap
+ *   spilled      — only ever spill-deferred to the disk waiting list (data/scan-backlog.jsonl),
+ *                  not yet drained → a throughput/backlog hole, RECOVERABLE once the drain
+ *                  catches up. NOT an ingestion gap: it WAS ingested + ledgered (state.js
+ *                  SCAN_LEDGER_OUTCOMES — "counted with dropped in the rollup").
+ *   dropped      — queue-cap-evicted / ghsa_gone / killed / errored — seen but no verdict and
+ *                  not on the waiting list → a throughput/coverage hole (not recoverable)
+ *   neverSeen    — never appeared in the ledger at all → a TRUE ingestion gap
  *
  * operationalTPR = alerted / total.
  *
@@ -64,8 +69,8 @@ function classifyCoverage(denomRows, ledgerEntries, archivedNames) {
   const archived = archivedNames || new Set();
 
   const byEcosystem = Object.create(null);
-  const misses = { scannedClean: [], neverSeen: [] };
-  let total = 0, alerted = 0, scannedClean = 0, dropped = 0, neverSeen = 0;
+  const misses = { scannedClean: [], spilled: [], neverSeen: [] };
+  let total = 0, alerted = 0, scannedClean = 0, spilled = 0, dropped = 0, neverSeen = 0;
   const seen = new Set();
 
   for (const r of (denomRows || [])) {
@@ -76,25 +81,34 @@ function classifyCoverage(denomRows, ledgerEntries, archivedNames) {
     seen.add(key);
     total++;
     let node = byEcosystem[eco];
-    if (!node) node = byEcosystem[eco] = { total: 0, alerted: 0, scannedClean: 0, dropped: 0, neverSeen: 0 };
+    if (!node) node = byEcosystem[eco] = { total: 0, alerted: 0, scannedClean: 0, spilled: 0, dropped: 0, neverSeen: 0 };
     node.total++;
 
     const outcomes = led.get(key);
     const outArr = outcomes ? [...outcomes] : [];
     let cls;
+    // Order matters. A terminal scan verdict (alerted / clean) always wins over a
+    // not-yet-scanned state. Among not-scanned states, 'dropped'/'interrupted'/'error'
+    // (gone, no verdict) take precedence over 'spilled' (still on the disk waiting list) so
+    // a package that was spilled then later evicted/errored is never reported as recoverable.
+    // 'spilled' is its OWN bucket — emphatically NOT neverSeen: it WAS ingested + ledgered,
+    // just deferred to the backlog. Lumping it into neverSeen (the pre-fix bug) turned a
+    // throughput/drain hole into a phantom ingestion gap (~150k spilled ledger rows).
     if (archived.has(r.name) || outArr.some(o => ALERT_OUTCOMES.has(o))) cls = 'alerted';
     else if (outArr.some(o => CLEAN_OUTCOMES.has(o))) cls = 'scannedClean';
-    else if (outcomes && (outcomes.has('dropped') || outcomes.has('interrupted'))) cls = 'dropped';
+    else if (outcomes && (outcomes.has('dropped') || outcomes.has('interrupted') || outcomes.has('error'))) cls = 'dropped';
+    else if (outcomes && outcomes.has('spilled')) cls = 'spilled';
     else cls = 'neverSeen';
 
     if (cls === 'alerted') { alerted++; node.alerted++; }
     else if (cls === 'scannedClean') { scannedClean++; node.scannedClean++; misses.scannedClean.push(key); }
+    else if (cls === 'spilled') { spilled++; node.spilled++; misses.spilled.push(key); }
     else if (cls === 'dropped') { dropped++; node.dropped++; }
     else { neverSeen++; node.neverSeen++; misses.neverSeen.push(key); }
   }
 
   return {
-    total, alerted, scannedClean, dropped, neverSeen,
+    total, alerted, scannedClean, spilled, dropped, neverSeen,
     operationalTPR: total > 0 ? alerted / total : null,
     byEcosystem, misses
   };
@@ -198,10 +212,11 @@ async function main() {
   console.log(`  Operational TPR : ${result.alerted}/${result.total}  ${fmtPct(result.operationalTPR)}   ← headline (alerted / GHSA malware in window)`);
   console.log(`    alerted       : ${result.alerted}   (ledger suspect/confirmed or archived)`);
   console.log(`    scanned-clean : ${result.scannedClean}   ← MISSES (we scanned a known-malware pkg and cleared it)`);
-  console.log(`    dropped       : ${result.dropped}   (queue-cap / ghsa_gone, never scanned)`);
-  console.log(`    never-seen    : ${result.neverSeen}   (ingestion never processed it in-window)`);
+  console.log(`    spilled       : ${result.spilled}   (spill-deferred on the disk waiting list — RECOVERABLE on drain, not yet scanned)`);
+  console.log(`    dropped       : ${result.dropped}   (queue-cap / ghsa_gone / killed / errored, no verdict)`);
+  console.log(`    never-seen    : ${result.neverSeen}   (a TRUE ingestion gap — never appeared in the ledger in-window)`);
   for (const [eco, n] of Object.entries(result.byEcosystem)) {
-    console.log(`    ${eco.padEnd(5)} : ${n.alerted}/${n.total} alerted · ${n.scannedClean} miss · ${n.dropped} dropped · ${n.neverSeen} never-seen`);
+    console.log(`    ${eco.padEnd(5)} : ${n.alerted}/${n.total} alerted · ${n.scannedClean} miss · ${n.spilled} spilled · ${n.dropped} dropped · ${n.neverSeen} never-seen`);
   }
   if (result.misses.scannedClean.length) {
     console.log(`\n  Top detection misses (scanned-clean — GT candidates, written to ${path.relative(ROOT, GT_PROPOSALS_FILE)}):`);

@@ -40,6 +40,27 @@ function runCoverageAuditTests() {
     assert(Math.abs(r.operationalTPR - 0) < 1e-9, 'TPR = 0/3');
   });
 
+  test('classifyCoverage: spilled is its OWN bucket, not neverSeen (regression: spill→ingestion-gap misclassification)', () => {
+    const denom = [
+      { ecosystem: 'npm', name: 'on-waiting-list' },      // only spilled    → spilled (recoverable)
+      { ecosystem: 'npm', name: 'errored' },              // only error      → dropped (seen, no verdict)
+      { ecosystem: 'npm', name: 'spilled-then-evicted' }, // spilled+dropped → dropped wins (not recoverable)
+      { ecosystem: 'npm', name: 'truly-absent' }          // no ledger entry → the ONLY real neverSeen
+    ];
+    const ledger = [
+      { ecosystem: 'npm', name: 'on-waiting-list', outcome: 'spilled' },
+      { ecosystem: 'npm', name: 'errored', outcome: 'error' },
+      { ecosystem: 'npm', name: 'spilled-then-evicted', outcome: 'spilled' },
+      { ecosystem: 'npm', name: 'spilled-then-evicted', outcome: 'dropped' }
+    ];
+    const r = classifyCoverage(denom, ledger, new Set());
+    assert(r.spilled === 1 && r.misses.spilled[0] === 'npm/on-waiting-list', `spilled bucket = 1, got ${r.spilled}`);
+    assert(r.dropped === 2, `error + spilled-then-evicted → dropped, got ${r.dropped}`);
+    assert(r.neverSeen === 1 && r.misses.neverSeen[0] === 'npm/truly-absent', `only the absent pkg is neverSeen, got ${r.neverSeen}`);
+    assert(r.byEcosystem.npm.spilled === 1, 'per-ecosystem spilled tracked');
+    assert(r.total === 4, `total 4, got ${r.total}`);
+  });
+
   test('classifyCoverage: a scanned-clean THEN suspect (re-scan) counts as alerted', () => {
     const denom = [{ ecosystem: 'npm', name: 'p' }];
     const ledger = [
