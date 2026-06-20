@@ -1122,12 +1122,16 @@ function formatLedgerField(rollup) {
   // (NOT a TPR — see computeLedgerRollup's HONEST METRIC NOTE).
   const lines = [`Scans: ${rollup.scanned} events · alertés ${rollup.alerted} (${pct}%)`];
   if (rollup.dropped > 0) {
+    const bo = rollup.byOutcome || {};
+    const spill = bo.spilled || 0;
+    const evicted = (bo.dropped || 0) + (bo.interrupted || 0);
     const vanishedNote = rollup.exactVanished ? `${rollup.vanished}` : `≥${rollup.vanished}`;
-    // `dropped` folds in recoverable spill (backlog awaiting drain) + queue-cap evictions
-    // + burst-extras; `vanished` is the distinct name@version subset never (re)scanned
-    // in-window — still version-granular (a name with 50 dropped versions = 50 here) and
-    // it too still includes not-yet-drained spill, so it is NOT a registry-removal count.
-    lines.push(`Non scannés: ${rollup.dropped} events (${vanishedNote} name@ver jamais (re)scannés)`);
+    // Honest split (2026-06-20): the aggregate `dropped` folds RECOVERABLE spill (disk
+    // waiting list, drains later) with HARD evictions (queue-cap / killed, gone). byOutcome
+    // keeps them distinct so the report stops reading a drain backlog as permanent loss.
+    // `vanished` is the distinct name@version subset never (re)scanned in-window — still
+    // version-granular and still includes not-yet-drained spill, so NOT a removal count.
+    lines.push(`Non scannés: ${rollup.dropped} events — spill ${spill} (récup.) + ${evicted} évincés · ${vanishedNote} name@ver jamais (re)scannés`);
   }
   const ecos = Object.keys(rollup.byEcosystem)
     .sort((a, b) => rollup.byEcosystem[b].total - rollup.byEcosystem[a].total);
@@ -1229,50 +1233,50 @@ function buildDailyReportEmbed(stats, dailyAlerts, ledgerRollup) {
   // Avg scan time from in-memory stats (totalTimeMs is not ledgerized — best-effort)
   const avg = stats.scanned > 0 ? (stats.totalTimeMs / stats.scanned / 1000).toFixed(1) : '0.0';
 
-  // --- Coverage ---
-  // HEADLINE: honest, version-collapsed coverage from the scan-ledger — distinct
-  // package NAMES actually scanned vs distinct names seen (scanned + dropped) in
-  // the window. Bounded ≤100% by construction and immune to version-spam (a
-  // package publishing thousands of versions counts once). The raw publish-event
-  // ratio is kept as a SECONDARY line for continuity but is no longer the headline:
-  // it races re-scans / PyPI / burst extras against an npm-only event denominator
-  // and routinely exceeds 100% (see AUDIT 4 — daily-reports-analysis.md).
+  // --- 3 sections, une unité chacune (refonte 2026-06-20) ---
+  // Le 2026-06-18 a étiqueté les unités ; ce passage les SÉPARE en champs distincts pour
+  // qu'un humain lise « combien vu / combien scanné / combien couvert » en 5 secondes,
+  // sans empiler trois unités dans un seul champ "Coverage" (le piège des comparaisons
+  // inter-unités absurdes, cf daily-reports-analysis.md) :
+  //   • Flux     → events bruts du changes-stream (1 pkg × N versions = N events)
+  //   • Scanned  → packages traités (events terminés, fenêtre ledger) + avg + catch-up
+  //   • Coverage → noms de paquets DISTINCTS scannés/vus (version-collapsed, ≤100%)
   const attempted = stats.uniqueScanAttempts || 0;
   const npmPub = stats.npmPublishEventsSeen || 0;
   const pypiPub = stats.pypiChangelogPackages || 0;
   const published = npmPub + pypiPub;
   const catchupSkipped = (stats.npmCatchupSkippedSeqs || 0) + (stats.pypiCatchupSkippedEvents || 0);
-  // UNIT DISCIPLINE (2026-06-18): the Coverage field stacked three counting units
-  // with no labels, so the headline read as self-contradictory — e.g.
-  // "30K/90K pkgs · 112K vanished" looks like 112K > 90K packages (impossible), but
-  // `vanished` counts name@VERSION events while the ratio counts distinct NAMES.
-  // Each line below now states its unit; the version-granular drop/vanished detail
-  // lives in the Ops embed's Ledger field, NOT next to a name ratio.
-  //   • "Noms uniques" → distinct package NAMES (version-collapsed) — the honest headline
-  //   • "Scans"        → name@version scan events (same unit as Clean/Suspects/Errors)
-  //   • "compteur"     → in-memory stats.scanned (events + retries + burst + size-cap)
+
+  // Flux: raw stream events seen — NOT distinct packages, NOT scans.
+  const fluxText = `${published} events vus · npm ${npmPub} · pypi ${pypiPub}`;
+
+  // Scanned: packages actually processed. Prefers the ledger headline window (restart-proof)
+  // over the in-memory counter; `compteur` exposes the raw stats.scanned when it exceeds the
+  // deduped headline (retries/burst). Catch-up skip = events the catch-up fast-forwarded.
   const opsQualifier = headline ? ' (events terminés)' : '';
   const rawCounter = (headline && typeof stats.scanned === 'number' && stats.scanned > hScanned)
-    ? ` · compteur ${stats.scanned} (retries/burst inclus)`
+    ? ` · compteur ${stats.scanned} (retries/burst)`
     : '';
-  const opsSuffix = catchupSkipped > 0
-    ? `\nScans: ${hScanned}${opsQualifier}${rawCounter} | Catch-up skip: ${catchupSkipped}`
-    : `\nScans: ${hScanned}${opsQualifier}${rawCounter}`;
+  let scannedText = `${hScanned}${opsQualifier}${rawCounter} · ${avg}s/pkg`;
+  if (catchupSkipped > 0) scannedText += ` · Catch-up skip: ${catchupSkipped}`;
+
+  // Coverage: distinct package NAMES scanned vs seen (version-collapsed, bounded ≤100%,
+  // immune to version-spam). A low % is usually a throughput symptom (the drain floods the
+  // window with backlog names), NOT a detection miss — the `non couverts` gap is mostly
+  // spill awaiting drain, split spill-vs-evicted in the Ops/Ledger field. Fallback to the
+  // raw event ratio only when the ledger is unavailable (first boot / empty ledger).
   let coverageText;
   if (ledger && ledger.distinctPackages > 0 && ledger.distinctCoverage != null) {
     const pct = (ledger.distinctCoverage * 100).toFixed(0);
     const approx = ledger.exactVanished === false ? '~' : '';
-    // Headline = distinct package NAMES scanned vs seen (version-collapsed, immune to
-    // version-spam). The name@version drop/vanished detail is in the Ledger field below.
+    const gap = ledger.distinctPackages - ledger.distinctScanned;
     coverageText = `Noms uniques: ${ledger.distinctScanned}/${ledger.distinctPackages} (${approx}${pct}%)`;
-    if (published > 0) coverageText += `\nPubliés: ${attempted}/${published}`;
-    coverageText += opsSuffix;
+    if (gap > 0) coverageText += ` · ${gap} non couverts (backlog/drain)`;
   } else if (published > 0) {
-    // Fallback: ledger unavailable (first boot / empty ledger) → legacy event ratio.
     const coverageRatio = (attempted / published * 100).toFixed(0);
-    coverageText = `Publiés: ${attempted}/${published} (${coverageRatio}%)${opsSuffix}`;
+    coverageText = `${attempted}/${published} (${coverageRatio}%)`;
   } else {
-    coverageText = `${attempted} attempted${opsSuffix}`;
+    coverageText = `${attempted} attempted`;
   }
 
   // --- Timeouts ---
@@ -1347,11 +1351,12 @@ function buildDailyReportEmbed(stats, dailyAlerts, ledgerRollup) {
       title: '\uD83D\uDCCA MUAD\'DIB Daily Report',
       color: 0x3498db,
       fields: [
-        { name: 'Coverage', value: coverageText, inline: true },
+        { name: 'Flux', value: fluxText, inline: false },
+        { name: 'Scanned', value: scannedText, inline: true },
         { name: 'Clean', value: `${hClean}`, inline: true },
         { name: 'Suspects', value: `${hSuspect}`, inline: true },
         { name: 'Errors', value: formatErrorBreakdown(stats.errors, stats.errorsByType), inline: true },
-        { name: 'Avg Scan Time', value: `${avg}s/pkg`, inline: true },
+        { name: 'Coverage', value: coverageText, inline: true },
         { name: 'Timeouts', value: timeoutText, inline: true },
         { name: 'vs Yesterday', value: trendsText, inline: false },
         { name: 'ML', value: mlText, inline: true },
@@ -1381,7 +1386,7 @@ function buildDailyReportEmbed(stats, dailyAlerts, ledgerRollup) {
       //                   shown, the condition is active right now, not earlier in the window).
       title: '⚙️ Ops / état système',
       color: 0x95a5a6,
-      description: 'Ledger = fenêtre 24h en events name@version (pas des noms de paquets — voir « Noms uniques » dans le headline) · « Non scannés » inclut le spill récupérable en attente de drain · Stability = cumulé depuis 08:00 (backlog = instantané) · Degradations/System = instantané',
+      description: 'Ledger = fenêtre 24h en events name@version (pas des noms de paquets — voir « Coverage » dans le headline) · « Non scannés » sépare spill récupérable (drainable) et évincés (perdus) · Stability = cumulé depuis 08:00 (backlog = instantané) · Degradations/System = instantané',
       fields: [
         ...((stats.sandboxDeferred || stats.deferredProcessed || stats.deferredExpired)
           ? [{ name: 'Deferred Sandbox', value: `Enqueued: ${stats.sandboxDeferred || 0} | Processed: ${stats.deferredProcessed || 0} | Expired: ${stats.deferredExpired || 0}`, inline: false }]
