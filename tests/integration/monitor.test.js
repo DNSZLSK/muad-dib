@@ -8090,8 +8090,10 @@ async function runMonitorTests() {
         `Coverage must show attempted/published, got "${coverageField.value}"`);
       assertIncludes(coverageField.value, '90%',
         `Coverage must show 90% ratio (7200/8000), got "${coverageField.value}"`);
-      assertIncludes(coverageField.value, 'Scans: 9999',
-        `Scans sub-line must expose stats.scanned, got "${coverageField.value}"`);
+      const scannedField = embed.embeds[0].fields.find(f => f.name === 'Scanned');
+      assert(scannedField, 'Scanned field must exist');
+      assertIncludes(scannedField.value, '9999',
+        `Scanned field must expose stats.scanned, got "${scannedField.value}"`);
     } finally {
       stats.scanned = origScanned;
       stats.uniqueScanAttempts = origAttempts;
@@ -8119,9 +8121,9 @@ async function runMonitorTests() {
       stats.npmCatchupSkippedSeqs = 800;
       stats.pypiCatchupSkippedEvents = 200;
       const embed = buildDailyReportEmbed();
-      const coverageField = embed.embeds[0].fields.find(f => f.name === 'Coverage');
-      assertIncludes(coverageField.value, 'Catch-up skip: 1000',
-        `Catch-up skip total must be 800+200=1000, got "${coverageField.value}"`);
+      const scannedField = embed.embeds[0].fields.find(f => f.name === 'Scanned');
+      assertIncludes(scannedField.value, 'Catch-up skip: 1000',
+        `Catch-up skip total must be 800+200=1000, got "${scannedField.value}"`);
     } finally {
       stats.uniqueScanAttempts = orig.attempts;
       stats.npmPublishEventsSeen = orig.npmPub;
@@ -10264,10 +10266,13 @@ async function runMonitorTests() {
           `Headline must be distinct scanned/seen package NAMES, got "${coverageField.value}"`);
         assertIncludes(coverageField.value, '(40%)',
           `Headline % must be distinct coverage 40%, got "${coverageField.value}"`);
-        assertIncludes(coverageField.value, 'Publiés: 7200/8000',
-          `Raw event ratio must be demoted to a labeled secondary line, got "${coverageField.value}"`);
-        assertIncludes(coverageField.value, 'Scans: 9999',
-          `Scans sub-line must remain, got "${coverageField.value}"`);
+        // Publiés secondary line removed in the 3-section refonte — Coverage is names-only now.
+        assertIncludes(coverageField.value, '60 non couverts',
+          `Coverage must show the uncovered-names gap (100-40=60), got "${coverageField.value}"`);
+        // Scans moved out of Coverage into the dedicated Scanned field.
+        const scannedField = embed.embeds[0].fields.find(f => f.name === 'Scanned');
+        assertIncludes(scannedField.value, '9999',
+          `Scanned field must expose stats.scanned, got "${scannedField && scannedField.value}"`);
       } finally {
         stats.scanned = orig.scanned;
         stats.uniqueScanAttempts = orig.attempts;
