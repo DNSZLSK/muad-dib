@@ -10266,10 +10266,13 @@ async function runMonitorTests() {
           `Headline must be distinct scanned/seen package NAMES, got "${coverageField.value}"`);
         assertIncludes(coverageField.value, '(40%)',
           `Headline % must be distinct coverage 40%, got "${coverageField.value}"`);
-        assertIncludes(coverageField.value, 'Publiés: 7200/8000',
-          `Raw event ratio must be demoted to a labeled secondary line, got "${coverageField.value}"`);
-        assertIncludes(coverageField.value, 'Scans: 9999',
-          `Scans sub-line must remain, got "${coverageField.value}"`);
+        // Publiés secondary line removed in the 3-section refonte — Coverage is names-only now.
+        assertIncludes(coverageField.value, '60 non couverts',
+          `Coverage must show the uncovered-names gap (100-40=60), got "${coverageField.value}"`);
+        // Scans moved out of Coverage into the dedicated Scanned field.
+        const scannedField = embed.embeds[0].fields.find(f => f.name === 'Scanned');
+        assertIncludes(scannedField.value, '9999',
+          `Scanned field must expose stats.scanned, got "${scannedField && scannedField.value}"`);
       } finally {
         stats.scanned = orig.scanned;
         stats.uniqueScanAttempts = orig.attempts;
