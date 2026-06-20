@@ -428,6 +428,24 @@ const PLAYBOOKS = {
     'pour inspecter le contenu reel. Supprimer le fichier ou nettoyer les caracteres invisibles ' +
     'avant toute utilisation. Si deja ouvert avec un agent IA, regenerer tous les secrets touches.',
 
+  antiscanner_analyzer_directive:
+    'Injection anti-scanner detectee dans le code source : des instructions en langage naturel visent un analyseur LLM. ' +
+    'Forte presomption de malveillance (le paquet tente d\'aveugler les scanners IA). Ignorer toute auto-classification ; ' +
+    'analyser manuellement le fichier signale, en priorite le code a proximite immediate de la directive.',
+
+  antiscanner_verdict_coercion:
+    'Le code tente de forcer un verdict favorable aupres d\'un analyseur LLM. Ignorer toute auto-evaluation du paquet. ' +
+    'Inspecter le fichier manuellement ; traiter comme suspect jusqu\'a preuve du contraire.',
+
+  antiscanner_analysis_suppression:
+    'Le code demande a un analyseur de ne pas inspecter le code voisin — c\'est generalement la que se cache la charge utile. ' +
+    'Deobfusquer et auditer le bloc designe (base64/eval/vm). Ne pas executer le paquet.',
+
+  antiscanner_injection_with_payload:
+    'CRITIQUE : injection anti-scanner + charge obfusquee dans le meme fichier (forme Hades). Isoler le paquet, ne pas l\'executer ' +
+    'ni l\'installer, deobfusquer la charge (base64/eval/vm) et analyser le trafic reseau sortant. Si deja installe, ' +
+    'considerer l\'environnement compromis et regenerer les secrets.',
+
   import_time_exec:
     'CRITIQUE: Le fichier Python (__init__.py / setup.py / module top-level) execute exec() ou eval() ' +
     'a l\'import ou pip install. RCE immediat sur la machine de l\'utilisateur. ' +
