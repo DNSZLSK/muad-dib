@@ -208,6 +208,17 @@ function analyzeFile(content, filePath, basePath) {
     // Safe domain exclusion: if ALL URLs in file are from known registries, suppress download_exec_binary
     fetchOnlySafeDomains: false, // computed below after URL extraction
     hasCryptoDecipher: /\bcreateDecipher(iv)?\s*\(/.test(content),
+    // crypto_exfil (RSA+AES hybrid exfil — litellm/Hades 2026): encrypt-side mirror of
+    // hasCryptoDecipher. Set TRUE in handle-call-expression.js on a REAL call to an encryption
+    // primitive (createCipher(iv) = AES, publicEncrypt = RSA pubkey-wrap, subtle.encrypt =
+    // WebCrypto). AST-based on purpose, NOT a content regex: a detector/linter/doc that merely
+    // contains the STRING "createCipheriv(" must not trip it (self-scan & meta-tooling FP).
+    // Feeds the same-file crypto_exfil compound in handle-post-walk.js.
+    hasCryptoEncipher: false,
+    // Embedded RSA/EC public key (PEM SPKI/PKCS1) — an attacker's hardcoded recipient key for
+    // the exfil envelope. Enrichment signal only (a PEM public key alone — JWT/JWK verify,
+    // signature checks — is benign and extremely common, so it is never flagged on its own).
+    hasEmbeddedPublicKey: /-----BEGIN (?:RSA |EC )?PUBLIC KEY-----/.test(content),
     // Wave 4: native addon camouflage signals
     hasRequireNodeFile: false,
     hasExecSyncCall: false,
