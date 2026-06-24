@@ -809,6 +809,20 @@ const RULES = {
     ],
     mitre: 'T1195.002'
   },
+  crypto_exfil: {
+    id: 'MUADDIB-COMPOUND-019',
+    name: 'Hybrid-Crypto Credential Exfiltration',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    domain: 'malware',
+    description: 'Harvesting de secrets (env/credentials) + primitive de chiffrement (RSA publicEncrypt / AES createCipheriv) + envoi reseau dans le MEME fichier, vers une destination qui n\'est PAS entierement first-party/de confiance (destAllBenign faux). Les secrets voles sont chiffres AVANT exfil pour echapper a l\'inspection DLP et au taint statique — pattern litellm / Hades (juin 2026). Les libs E2E/licence/telemetry legitimes chiffrent+envoient mais n\'aspirent pas des credentials dans le blob et ne postent que vers leur propre provider (supprime par destAllBenign). Miroir cote chiffrement de fetch_decrypt_exec.',
+    references: [
+      'https://attack.mitre.org/techniques/T1560/',
+      'https://attack.mitre.org/techniques/T1041/',
+      'https://attack.mitre.org/techniques/T1552/'
+    ],
+    mitre: 'T1560'
+  },
 
   // Package.json script patterns
   curl_pipe_sh: {

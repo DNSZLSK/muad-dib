@@ -366,6 +366,35 @@ function handlePostWalk(ctx) {
     }
   }
 
+  // crypto_exfil (RSA+AES hybrid exfil — litellm/Hades 2026): secret harvesting + an encryption
+  // primitive (RSA publicEncrypt / AES createCipheriv) + a network send, in the SAME file, to a
+  // destination that is NOT entirely first-party/trusted. The encrypt step wraps the stolen
+  // secrets so DLP and static taint miss the payload. Legit E2E/license/telemetry SDKs encrypt
+  // and send, but do not also harvest credentials/env into the blob, and the benign ones post
+  // only to their own provider (suppressed by destAllBenign). Requires a non-LOW harvest threat
+  // already emitted in this file — mirror of fetch_decrypt_exec (decrypt-side loader).
+  // destAllBenign is computed once above, at the credential_regex_harvest emission site.
+  const CRYPTO_EXFIL_HARVEST_TYPES = new Set([
+    'env_access', 'env_charcode_reconstruction', 'env_harvesting_dynamic',
+    'sensitive_string', 'suspicious_dataflow', 'credential_regex_harvest',
+    'credential_command_exec', 'npm_token_steal'
+  ]);
+  if (ctx.hasCryptoEncipher && ctx.hasNetworkCallInFile && !destAllBenign) {
+    const cryptoExfilHarvest = ctx.threats.some(t =>
+      t.file === ctx.relFile && t.severity !== 'LOW' && CRYPTO_EXFIL_HARVEST_TYPES.has(t.type)
+    );
+    if (cryptoExfilHarvest) {
+      ctx.threats.push({
+        type: 'crypto_exfil',
+        severity: 'CRITICAL',
+        message: 'Hybrid-crypto exfiltration: secret harvesting + ' +
+          (ctx.hasEmbeddedPublicKey ? 'embedded RSA/EC public key + ' : '') +
+          'encryption (RSA/AES) + network send in same file — harvested secrets are encrypted before exfil to evade DLP/taint inspection (litellm/Hades pattern).',
+        file: ctx.relFile
+      });
+    }
+  }
+
   // GlassWorm: Unicode variation selector decoder = .codePointAt + variation selector constants
   // CRITICAL if combined with eval/exec (GlassWorm always uses dynamic execution),
   // MEDIUM otherwise (.codePointAt + 0xFE00 is legitimate Unicode processing in fonts/text libs)
