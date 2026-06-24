@@ -693,6 +693,12 @@ const PLAYBOOKS = {
     'puis execute le resultat via eval/Function. Pattern buildrunner-dev: payload malveillant cache dans une image PNG. ' +
     'Isoler immediatement. Analyser le payload dechiffre. Supprimer le package.',
 
+  crypto_exfil:
+    'CRITIQUE: Exfiltration chiffree de secrets. Le code aspire des credentials/env, les chiffre (RSA publicEncrypt / AES createCipheriv, ' +
+    'souvent une enveloppe hybride avec cle publique embarquee) puis les envoie sur le reseau vers une destination non first-party. ' +
+    'Le chiffrement masque le payload aux inspections DLP/taint (pattern litellm/Hades). Isoler immediatement. Identifier la cle publique ' +
+    'et le host de destination (C2). Revoquer les secrets potentiellement exposes. Supprimer le package.',
+
   download_exec_binary:
     'CRITIQUE: Pattern download-execute detecte. Le code telecharge un binaire, le rend executable (chmod 755), ' +
     'puis l\'execute via execSync. Dropper deguise en compilation native addon (NeoShadow pattern). ' +

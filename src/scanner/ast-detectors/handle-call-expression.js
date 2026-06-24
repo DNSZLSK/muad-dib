@@ -1502,6 +1502,20 @@ function handleCallExpression(node, ctx) {
         file: ctx.relFile
       });
     }
+    // crypto_exfil (encrypt side): a REAL call to an encryption primitive sets the file flag
+    // consumed by the same-file crypto_exfil compound (handle-post-walk.js). AST-based — a string
+    // or regex literal that merely contains "createCipheriv(" is not a CallExpression and won't trip it.
+    if (propName === 'createCipher' || propName === 'createCipheriv' || propName === 'publicEncrypt') {
+      ctx.hasCryptoEncipher = true;
+    } else if (propName === 'encrypt') {
+      // WebCrypto: crypto.subtle.encrypt(...) — gate on the `.subtle.` receiver so a generic
+      // foo.encrypt() (ORMs, mailers, many libs expose .encrypt) does not set the flag.
+      const obj = node.callee.object;
+      if (obj && obj.type === 'MemberExpression' && obj.property &&
+          (obj.property.name === 'subtle' || obj.property.value === 'subtle')) {
+        ctx.hasCryptoEncipher = true;
+      }
+    }
     if (propName === '_compile') {
       // Context-aware gating: only flag _compile when the Module API is plausibly in scope.
       // Custom class methods (e.g. blessed's Tput.prototype._compile) are not malware.

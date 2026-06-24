@@ -44,6 +44,7 @@ const HIGH_CONFIDENCE_MALICE_TYPES = new Set([
   'download_exec_binary',                  // download+chmod+exec
   'reverse_shell',                         // reverse shell (always malicious)
   'crypto_staged_payload',                 // decrypt->eval staged payload chain
+  'crypto_exfil',                          // harvest + encrypt(RSA/AES) + network to non-benign dest (litellm/Hades)
   'intent_credential_exfil',               // intra-file credential->network
   'intent_command_exfil',                  // intra-file command->network
   'cross_file_dataflow',                   // proven taint cross-modules
