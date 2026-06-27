@@ -97,6 +97,7 @@ const { runFpClustersTests } = require('./unit/fp-clusters.test');
 const { runRegressionCheckTests } = require('./unit/regression-check.test');
 const { runRegistrySignalsTests } = require('./unit/registry-signals.test');
 const { runMatureStableCapTests } = require('./unit/mature-stable-cap.test');
+const { runTarballPrefetchTests } = require('./unit/tarball-prefetch.test');
 const { runReachabilityFunctionsTests } = require('./unit/reachability-functions.test');
 const { runFeedHealthTests } = require('./unit/feed-health.test');
 const { runGhsaPollerTests } = require('./unit/ghsa-poller.test');
@@ -348,6 +349,7 @@ async function timed(name, fn) {
 
   // Mature stable cap (FPR Improvement Plan - Chantier 5)
   await timed('mature-stable-cap', runMatureStableCapTests);
+  await timed('tarball-prefetch', runTarballPrefetchTests);
 
   // Function-level reachability (FPR Improvement Plan - Chantier 2)
   await timed('reachability-functions', runReachabilityFunctionsTests);
