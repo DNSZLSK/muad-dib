@@ -918,6 +918,18 @@ async function pollNpmChanges(state, scanQueue, stats) {
     // resolveTarballAndScan() picks up the slack — zero scan loss.
     await preResolveNpmBatch(newItems, stats, scanQueue);
 
+    // Capture-at-publish (Miasma / Leo, June 2026): prefetch the high-value
+    // subset's tarballs into the local cache NOW — before the (often backlogged)
+    // scan downloads them — so we win the race against fast-takedown unpublishes.
+    // Best-effort, bounded, non-blocking; the scan path consumes the cache
+    // transparently (scanPackage cache-hit) or falls back to its own download.
+    // See src/monitor/tarball-prefetch.js.
+    try {
+      require('./tarball-prefetch.js').schedulePrefetch(newItems, { stats });
+    } catch (err) {
+      console.warn(`[MONITOR] prefetch schedule failed: ${err.message}`);
+    }
+
     // Update seq in memory only — disk persistence is handled by daemon.js
     // after both queue and seq are saved atomically (prevents data loss on crash).
     if (data.last_seq != null) {
