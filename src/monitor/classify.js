@@ -405,6 +405,17 @@ function evaluateCacheTrigger(name, docMeta, doc, opts = {}) {
     return { shouldCache: true, reason: 'first_publish', retentionDays: TARBALL_CACHE_DEFAULT_RETENTION_DAYS };
   }
 
+  // Trigger 4: account-takeover / burst -- 30-day retention (high-risk fast-takedown class).
+  // These are batch/registry-derived (published version vs dist-tags.latest; per-name recent
+  // version count), NOT knowable from name+docMeta at ingestion, so the caller
+  // (preResolveNpmBatch) computes them from _npmInfo and passes opts.{atoSignal,isBurst}.
+  // Closes the Leo Platform gap (June 2026): 20 existing packages re-published at non-latest
+  // versions matched neither typosquat nor first_publish -> never prefetched -> the malicious
+  // tarballs were 404'd before scan. ATO catches that class; burst catches Miasma-style floods.
+  if (opts.atoSignal || opts.isBurst) {
+    return { shouldCache: true, reason: opts.atoSignal ? 'ato' : 'burst', retentionDays: TARBALL_CACHE_HIGH_RISK_RETENTION_DAYS };
+  }
+
   return { shouldCache: false, reason: '', retentionDays: 0 };
 }
 
