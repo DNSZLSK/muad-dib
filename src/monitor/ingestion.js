@@ -622,6 +622,100 @@ function isPrereleaseVersion(v) {
   return /-/.test(String(v == null ? '' : v).split('+')[0]);
 }
 
+// Derive the capture-at-publish trigger for the fast-takedown class (Leo/Miasma)
+// from a registry packument. Shared by preResolveNpmBatch (Stage 2.1) and the
+// real-time capture lane so both compute the SAME signal: ATO = published version
+// != dist-tags.latest, excluding prereleases (isPrereleaseVersion); burst =
+// >= BURST_MIN_VERSIONS_PREFETCH versions in the recent window. Returns the cache
+// trigger object (shouldCache:true) or null. `name` is passed through so a package
+// that is ALSO an ioc/typosquat match still gets the right (higher-priority) reason.
+function evaluateBurstAtoTrigger(name, npmInfo, version) {
+  if (!npmInfo) return null;
+  const atoSignal = !!(npmInfo.latestTagVersion && version &&
+    version !== npmInfo.latestTagVersion && !isPrereleaseVersion(version));
+  const burstCount = Number.isFinite(npmInfo.recentWindowCount)
+    ? npmInfo.recentWindowCount
+    : ((Array.isArray(npmInfo.recentVersions) ? npmInfo.recentVersions.length : 0) + 1);
+  const isBurst = burstCount >= BURST_MIN_VERSIONS_PREFETCH;
+  if (!atoSignal && !isBurst) return null;
+  const trig = evaluateCacheTrigger(name, null, null, { atoSignal, isBurst });
+  return trig.shouldCache ? trig : null;
+}
+
+// Fix C — real-time capture lane. preResolveNpmBatch sheds the packument prefetch
+// when the scan queue is deep (queue > PRE_RESOLVE_SHED_QUEUE — the chronic backlog
+// state). Under shed nothing is prefetched AT ALL: schedulePrefetch needs a resolved
+// tarballUrl, which the shed never fetched — so even ioc/typosquat/first_publish items
+// (flagged name-only at ingestion) are not captured, and burst/ATO is never even
+// computed. The fast-takedown tarballs then 404 before the backlogged scan reaches
+// them (the Leo/Miasma gap Fix A meant to close). This lane resolves a BOUNDED subset
+// of the still-unresolved items REGARDLESS of the shed — prioritizing the already
+// name-flagged (known high-risk, FP-free), then filling the budget to DISCOVER
+// burst/ATO — and enriches each item (version/tarballUrl/_npmInfo/_cacheTrigger) IN
+// PLACE so (a) the schedulePrefetch pass that immediately follows captures the tarball
+// at publish, and (b) the already-enqueued item (enqueueScan pushes by reference)
+// carries the real version so scanPackage's cache-hit (keyed by name@version) finds it.
+//
+// Bounded + rate-limited + flag-gated so it can be turned on only once throughput /
+// OOM headroom allows: OFF unless MUADDIB_REALTIME_PREFETCH=1; at most
+// MUADDIB_REALTIME_PREFETCH_MAX items/cycle (default 30); registry calls go through
+// getNpmLatestTarball's shared semaphore (honors the 429 brain). npm-only for now.
+const REALTIME_PREFETCH_CONCURRENCY = 4;
+function realtimePrefetchEnabled() {
+  return process.env.MUADDIB_REALTIME_PREFETCH === '1';
+}
+function realtimePrefetchMax() {
+  const n = parseInt(process.env.MUADDIB_REALTIME_PREFETCH_MAX, 10);
+  return Number.isFinite(n) && n >= 0 ? n : 30;
+}
+async function realtimePrefetchHighRisk(items, stats) {
+  if (!realtimePrefetchEnabled()) return;
+  const cap = realtimePrefetchMax();
+  if (!cap || !Array.isArray(items) || items.length === 0) return;
+  // Act only on items the shed (or a resolve failure) left UNRESOLVED (no _npmInfo).
+  // When preResolveNpmBatch did NOT shed, every item already has _npmInfo and this
+  // selects nothing (no duplicate fetch). Flagged first (ioc/typo/first_publish —
+  // known high-risk, just needs its tarballUrl resolved to be prefetched), then
+  // unflagged (candidates for burst/ATO discovery).
+  const flagged = [];
+  const unflagged = [];
+  for (const it of items) {
+    if (!it || it.ecosystem !== 'npm' || !it.name || it._npmInfo) continue;
+    (it._cacheTrigger ? flagged : unflagged).push(it);
+  }
+  const selected = flagged.concat(unflagged).slice(0, cap);
+  if (selected.length === 0) return;
+  const overflow = (flagged.length + unflagged.length) - selected.length;
+  if (overflow > 0) {
+    // No silent caps (CLAUDE.md): a burst wider than the budget is only partially captured.
+    console.warn(`[MONITOR] REALTIME PREFETCH: ${flagged.length + unflagged.length} unresolved high-risk candidates, capped at ${cap} this cycle (${overflow} deferred to lazy scan)`);
+    if (stats) stats.realtimePrefetchCapped = (stats.realtimePrefetchCapped || 0) + overflow;
+  }
+  let idx = 0;
+  const worker = async () => {
+    while (idx < selected.length) {
+      const it = selected[idx++];
+      try {
+        const npmInfo = await getNpmLatestTarball(it.name);
+        if (!npmInfo || !npmInfo.tarball) continue;
+        // Enrich in place — the item is already enqueued by reference (shed path), so
+        // this also lets the eventual scan reuse the URL + hit the prefetch cache.
+        it.tarballUrl = it.tarballUrl || npmInfo.tarball;
+        if (!it.version) it.version = npmInfo.version || '';
+        it._npmInfo = npmInfo;
+        if (!it._cacheTrigger) {
+          const trig = evaluateBurstAtoTrigger(it.name, npmInfo, it.version);
+          if (trig) it._cacheTrigger = trig;
+        }
+        if (it._cacheTrigger && stats) stats.realtimePrefetchFlagged = (stats.realtimePrefetchFlagged || 0) + 1;
+      } catch {
+        if (stats) stats.realtimePrefetchFailed = (stats.realtimePrefetchFailed || 0) + 1;
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(REALTIME_PREFETCH_CONCURRENCY, selected.length) }, worker));
+}
+
 async function preResolveNpmBatch(items, stats, scanQueue) {
   if (!items || items.length === 0) return;
   const start = Date.now();
@@ -676,17 +770,8 @@ async function preResolveNpmBatch(items, stats, scanQueue) {
           // higher-priority (ioc/typosquat) trigger already fired. queue.js still computes
           // the same signals later for scan-queue protection + extras enqueue (idempotent).
           if (!item._cacheTrigger) {
-            const atoSignal = !!(npmInfo.latestTagVersion && item.version &&
-              item.version !== npmInfo.latestTagVersion &&
-              !isPrereleaseVersion(item.version));
-            const burstCount = Number.isFinite(npmInfo.recentWindowCount)
-              ? npmInfo.recentWindowCount
-              : ((Array.isArray(npmInfo.recentVersions) ? npmInfo.recentVersions.length : 0) + 1);
-            const isBurst = burstCount >= BURST_MIN_VERSIONS_PREFETCH;
-            if (atoSignal || isBurst) {
-              const trig = evaluateCacheTrigger(item.name, null, null, { atoSignal, isBurst });
-              if (trig.shouldCache) item._cacheTrigger = trig;
-            }
+            const trig = evaluateBurstAtoTrigger(item.name, npmInfo, item.version);
+            if (trig) item._cacheTrigger = trig;
           }
           resolved++;
         } else {
@@ -961,6 +1046,12 @@ async function pollNpmChanges(state, scanQueue, stats) {
     // Failures leave tarballUrl=null so the existing lazy-resolution path in
     // resolveTarballAndScan() picks up the slack — zero scan loss.
     await preResolveNpmBatch(newItems, stats, scanQueue);
+
+    // Fix C — real-time capture lane: when preResolveNpmBatch shed under backlog,
+    // resolve+flag a bounded high-risk subset anyway so the schedulePrefetch below
+    // still captures them. No-op when not shedding or when MUADDIB_REALTIME_PREFETCH
+    // is off (default). See realtimePrefetchHighRisk.
+    await realtimePrefetchHighRisk(newItems, stats);
 
     // Capture-at-publish (Miasma / Leo, June 2026): prefetch the high-value
     // subset's tarballs into the local cache NOW — before the (often backlogged)
@@ -1604,6 +1695,8 @@ module.exports = {
   preResolvePyPIBatch,
   preResolveShouldShed,
   isPrereleaseVersion,
+  evaluateBurstAtoTrigger,
+  realtimePrefetchHighRisk,
 
   // RSS parsing
   parseNpmRss,

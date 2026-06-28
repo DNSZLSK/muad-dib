@@ -750,6 +750,113 @@ async function runMonitorPreResolveTests() {
     assert(isPrereleaseVersion(null) === false && isPrereleaseVersion(undefined) === false && isPrereleaseVersion('') === false,
       'null/undefined/empty must be safe and non-prerelease');
   });
+
+  // ── Fix C: real-time capture lane (bounded, flag-gated, default off) ──────
+
+  await asyncTest('REALTIME PREFETCH: off by default → no fetch, no mutation', async () => {
+    const realGet = ingestion._deps.httpsGet;
+    let fetches = 0;
+    ingestion._deps.httpsGet = async () => { fetches++; return '{}'; };
+    delete process.env.MUADDIB_REALTIME_PREFETCH;
+    const items = [{ name: 'rt-off', version: '', ecosystem: 'npm', tarballUrl: null }];
+    try {
+      await ingestion.realtimePrefetchHighRisk(items, {});
+      assert(fetches === 0, `disabled lane must not fetch, got ${fetches}`);
+      assert(!items[0]._cacheTrigger && !items[0]._npmInfo, 'disabled lane must not mutate items');
+    } finally {
+      ingestion._deps.httpsGet = realGet;
+    }
+  });
+
+  await asyncTest('REALTIME PREFETCH: on → resolves a shed ATO item and sets _cacheTrigger=ato', async () => {
+    const realGet = ingestion._deps.httpsGet;
+    ingestion._deps.httpsGet = async () => JSON.stringify({
+      name: 'rt-ato',
+      'dist-tags': { latest: '7.1.21' },
+      versions: {
+        '7.1.21': { version: '7.1.21', dist: { tarball: 'https://r/rt-ato-7.1.21.tgz' }, scripts: {} },
+        '6.0.19': { version: '6.0.19', dist: { tarball: 'https://r/rt-ato-6.0.19.tgz' }, scripts: {} }
+      },
+      time: { '7.1.21': '2025-06-01T00:00:00.000Z', '6.0.19': '2026-06-24T23:04:55.000Z' }
+    });
+    process.env.MUADDIB_REALTIME_PREFETCH = '1';
+    // Shed state: item enqueued unresolved (no _npmInfo, no tarballUrl, version '').
+    const items = [{ name: 'rt-ato', version: '', ecosystem: 'npm', tarballUrl: null }];
+    const stats = {};
+    try {
+      await ingestion.realtimePrefetchHighRisk(items, stats);
+      assert(items[0]._npmInfo, 'lane must resolve _npmInfo');
+      assert(items[0].version === '6.0.19', `lane must set the real published version for the cache key, got ${items[0].version}`);
+      assert(items[0].tarballUrl && items[0].tarballUrl.includes('6.0.19'), `lane must set tarballUrl, got ${items[0].tarballUrl}`);
+      assert(items[0]._cacheTrigger && items[0]._cacheTrigger.reason === 'ato', `should flag ato, got ${JSON.stringify(items[0]._cacheTrigger)}`);
+      assert(stats.realtimePrefetchFlagged === 1, `flagged count should be 1, got ${stats.realtimePrefetchFlagged}`);
+    } finally {
+      ingestion._deps.httpsGet = realGet;
+      delete process.env.MUADDIB_REALTIME_PREFETCH;
+    }
+  });
+
+  await asyncTest('REALTIME PREFETCH: on → resolves an already-flagged (first_publish) shed item so it becomes prefetch-eligible', async () => {
+    const realGet = ingestion._deps.httpsGet;
+    ingestion._deps.httpsGet = async () => JSON.stringify({
+      name: 'rt-flagged', 'dist-tags': { latest: '1.0.0' },
+      versions: { '1.0.0': { version: '1.0.0', dist: { tarball: 'https://r/rt-flagged-1.0.0.tgz' }, scripts: {} } },
+      time: { '1.0.0': new Date().toISOString() }
+    });
+    process.env.MUADDIB_REALTIME_PREFETCH = '1';
+    // Shed: item already name-flagged (first_publish) but UNRESOLVED (no tarballUrl) →
+    // schedulePrefetch cannot capture it until the lane resolves the URL + version.
+    const items = [{ name: 'rt-flagged', version: '', ecosystem: 'npm', tarballUrl: null,
+      _cacheTrigger: { shouldCache: true, reason: 'first_publish', retentionDays: 7 } }];
+    try {
+      await ingestion.realtimePrefetchHighRisk(items, {});
+      assert(items[0].tarballUrl && items[0].tarballUrl.includes('rt-flagged'), `lane must resolve the flagged item's tarballUrl, got ${items[0].tarballUrl}`);
+      assert(items[0].version === '1.0.0', `version must be set for the cache key, got ${items[0].version}`);
+      assert(items[0]._cacheTrigger.reason === 'first_publish', 'existing higher-priority trigger must be preserved');
+    } finally {
+      ingestion._deps.httpsGet = realGet;
+      delete process.env.MUADDIB_REALTIME_PREFETCH;
+    }
+  });
+
+  await asyncTest('REALTIME PREFETCH: on → skips already-resolved items (no duplicate fetch)', async () => {
+    const realGet = ingestion._deps.httpsGet;
+    let fetches = 0;
+    ingestion._deps.httpsGet = async () => { fetches++; return '{}'; };
+    process.env.MUADDIB_REALTIME_PREFETCH = '1';
+    // _npmInfo present → preResolve already handled it (no shed) → lane must skip.
+    const items = [{ name: 'rt-done', version: '1.0.0', ecosystem: 'npm', tarballUrl: 'https://r/rt-done-1.0.0.tgz', _npmInfo: { version: '1.0.0' } }];
+    try {
+      await ingestion.realtimePrefetchHighRisk(items, {});
+      assert(fetches === 0, `resolved items must be skipped, got ${fetches} fetch(es)`);
+    } finally {
+      ingestion._deps.httpsGet = realGet;
+      delete process.env.MUADDIB_REALTIME_PREFETCH;
+    }
+  });
+
+  await asyncTest('REALTIME PREFETCH: honors the per-cycle cap (no silent over-fetch)', async () => {
+    const realGet = ingestion._deps.httpsGet;
+    let fetches = 0;
+    ingestion._deps.httpsGet = async () => { fetches++; return JSON.stringify({
+      name: 'x', 'dist-tags': { latest: '1.0.0' },
+      versions: { '1.0.0': { version: '1.0.0', dist: { tarball: 'https://r/x-1.0.0.tgz' }, scripts: {} } },
+      time: { '1.0.0': new Date().toISOString() }
+    }); };
+    process.env.MUADDIB_REALTIME_PREFETCH = '1';
+    process.env.MUADDIB_REALTIME_PREFETCH_MAX = '2';
+    const items = Array.from({ length: 5 }, (_, i) => ({ name: `rt-cap-${i}`, version: '', ecosystem: 'npm', tarballUrl: null }));
+    const stats = {};
+    try {
+      await ingestion.realtimePrefetchHighRisk(items, stats);
+      assert(fetches === 2, `cap=2 must limit to 2 fetches, got ${fetches}`);
+      assert(stats.realtimePrefetchCapped === 3, `3 candidates over the cap must be counted as deferred, got ${stats.realtimePrefetchCapped}`);
+    } finally {
+      ingestion._deps.httpsGet = realGet;
+      delete process.env.MUADDIB_REALTIME_PREFETCH;
+      delete process.env.MUADDIB_REALTIME_PREFETCH_MAX;
+    }
+  });
 }
 
 module.exports = { runMonitorPreResolveTests };
