@@ -606,6 +606,22 @@ const BURST_MIN_VERSIONS_PREFETCH = (() => {
   return Number.isFinite(n) && n >= 2 ? n : 10;
 })();
 
+// A prerelease publish (1.2.0-rc.1, 2.0.0-beta, ...-dev) is EXPECTED to differ
+// from dist-tags.latest: npm semver resolution (^/~/x.y ranges) never selects a
+// prerelease unless it is requested explicitly, so an account-takeover that wants
+// victims to auto-resolve to the malicious version cannot use one. Excluding
+// prereleases from the ATO *prefetch* signal drops the dominant false positive
+// (CI/dev/rc/beta churn — ~17% of npm publishes per the 2026-06-28 backtest, which
+// would otherwise balloon the bounded tarball cache) WITHOUT weakening the
+// release-version ATO catch (Leo Platform: malicious leo-sdk@6.0.19, a plain
+// release, still fires). Prefetch-only: queue.js keeps its own (more inclusive)
+// atoSignal for fast-track / anti-eviction, and this never touches scoring.
+function isPrereleaseVersion(v) {
+  // semver: the prerelease lives after '-' in the version core, before any '+'
+  // build metadata. Strip build metadata first so '1.0.0+build-7' is NOT flagged.
+  return /-/.test(String(v == null ? '' : v).split('+')[0]);
+}
+
 async function preResolveNpmBatch(items, stats, scanQueue) {
   if (!items || items.length === 0) return;
   const start = Date.now();
@@ -661,7 +677,8 @@ async function preResolveNpmBatch(items, stats, scanQueue) {
           // the same signals later for scan-queue protection + extras enqueue (idempotent).
           if (!item._cacheTrigger) {
             const atoSignal = !!(npmInfo.latestTagVersion && item.version &&
-              item.version !== npmInfo.latestTagVersion);
+              item.version !== npmInfo.latestTagVersion &&
+              !isPrereleaseVersion(item.version));
             const burstCount = Number.isFinite(npmInfo.recentWindowCount)
               ? npmInfo.recentWindowCount
               : ((Array.isArray(npmInfo.recentVersions) ? npmInfo.recentVersions.length : 0) + 1);
@@ -1586,6 +1603,7 @@ module.exports = {
   preResolveNpmBatch,
   preResolvePyPIBatch,
   preResolveShouldShed,
+  isPrereleaseVersion,
 
   // RSS parsing
   parseNpmRss,

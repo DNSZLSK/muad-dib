@@ -702,6 +702,54 @@ async function runMonitorPreResolveTests() {
       ingestion._deps.httpsGet = realGet;
     }
   });
+
+  await asyncTest('CAPTURE-AT-PUBLISH: prerelease published != latest does NOT set ato (npm never auto-resolves prereleases)', async () => {
+    const realGet = ingestion._deps.httpsGet;
+    ingestion._deps.httpsGet = async (url) => {
+      if (url.includes('_changes')) {
+        return JSON.stringify({ last_seq: 910, results: [{ id: 'prerelease-probe-pkg', deleted: false }] });
+      }
+      // most-recent-by-time is a PRERELEASE (1.2.0-beta.2); dist-tags.latest is the
+      // stable 1.1.0. version != latest, but a prerelease ATO is self-defeating
+      // (^/~ ranges never resolve to it) → must NOT be prefetch-eligible via ato.
+      // The two publishes are >1y apart so recentWindowCount stays 1 (no burst either).
+      return JSON.stringify({
+        name: 'prerelease-probe-pkg',
+        'dist-tags': { latest: '1.1.0' },
+        versions: {
+          '1.1.0': { version: '1.1.0', dist: { tarball: 'https://r/prerelease-probe-pkg-1.1.0.tgz' }, scripts: {} },
+          '1.2.0-beta.2': { version: '1.2.0-beta.2', dist: { tarball: 'https://r/prerelease-probe-pkg-1.2.0-beta.2.tgz' }, scripts: {} }
+        },
+        time: {
+          '1.1.0': '2025-01-01T00:00:00.000Z',
+          '1.2.0-beta.2': '2026-06-24T23:04:55.000Z'
+        }
+      });
+    };
+    const state = { npmLastSeq: 100 };
+    const queue = [];
+    const stats = {};
+    try {
+      await ingestion.pollNpmChanges(state, queue, stats);
+      assert(queue.length === 1, `should queue 1 item, got ${queue.length}`);
+      assert(queue[0].version === '1.2.0-beta.2', `most-recent published should be the prerelease, got ${queue[0].version}`);
+      assert(!queue[0]._cacheTrigger, `prerelease non-latest must NOT be prefetch-eligible via ato, got ${JSON.stringify(queue[0]._cacheTrigger)}`);
+    } finally {
+      ingestion._deps.httpsGet = realGet;
+    }
+  });
+
+  test('PRERELEASE FILTER: isPrereleaseVersion flags rc/beta/dev/alpha, not plain or build-metadata releases', () => {
+    const { isPrereleaseVersion } = ingestion;
+    for (const v of ['1.2.0-beta.2', '0.9.82-rc.414', '1.2.0-beta', '2.0.0-alpha.1', '0.10.3-dev.202606281138.e89180c']) {
+      assert(isPrereleaseVersion(v) === true, `${v} should be a prerelease`);
+    }
+    for (const v of ['1.1.0', '6.0.19', '7.1.21', '10.20.30', '1.0.0+build-7']) {
+      assert(isPrereleaseVersion(v) === false, `${v} should NOT be a prerelease`);
+    }
+    assert(isPrereleaseVersion(null) === false && isPrereleaseVersion(undefined) === false && isPrereleaseVersion('') === false,
+      'null/undefined/empty must be safe and non-prerelease');
+  });
 }
 
 module.exports = { runMonitorPreResolveTests };
