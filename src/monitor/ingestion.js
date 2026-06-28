@@ -598,6 +598,14 @@ function preResolveShouldShed(scanQueue) {
 // in-flight work, not all the chunks that already completed. When scanQueue
 // is omitted (unit tests, lib usage), items are only mutated in place and the
 // caller decides when to push.
+// Burst threshold for the capture-at-publish prefetch trigger. Mirrors
+// BURST_PREALERT_MIN_VERSIONS (queue.js:212) and reads the SAME env var so ops tunes
+// one knob. Per-name version count in the recent-publish window.
+const BURST_MIN_VERSIONS_PREFETCH = (() => {
+  const n = parseInt(process.env.MUADDIB_BURST_MIN_VERSIONS, 10);
+  return Number.isFinite(n) && n >= 2 ? n : 10;
+})();
+
 async function preResolveNpmBatch(items, stats, scanQueue) {
   if (!items || items.length === 0) return;
   const start = Date.now();
@@ -644,6 +652,25 @@ async function preResolveNpmBatch(items, stats, scanQueue) {
           // weekly_downloads (from getWeeklyDownloads) so the triage block in
           // queue.js can read meta directly without re-fetching.
           item._npmInfo = npmInfo;
+          // Capture-at-publish trigger for the fast-takedown class (Leo Platform / Miasma,
+          // June 2026). ATO (published version != dist-tags.latest) and per-name burst are
+          // only knowable from the registry data fetched here, so the name-only
+          // evaluateCacheTrigger at ingestion (change.doc is null post-2025) cannot set them.
+          // Feed them in now so the burst/ATO subset is prefetched too — only when no
+          // higher-priority (ioc/typosquat) trigger already fired. queue.js still computes
+          // the same signals later for scan-queue protection + extras enqueue (idempotent).
+          if (!item._cacheTrigger) {
+            const atoSignal = !!(npmInfo.latestTagVersion && item.version &&
+              item.version !== npmInfo.latestTagVersion);
+            const burstCount = Number.isFinite(npmInfo.recentWindowCount)
+              ? npmInfo.recentWindowCount
+              : ((Array.isArray(npmInfo.recentVersions) ? npmInfo.recentVersions.length : 0) + 1);
+            const isBurst = burstCount >= BURST_MIN_VERSIONS_PREFETCH;
+            if (atoSignal || isBurst) {
+              const trig = evaluateCacheTrigger(item.name, null, null, { atoSignal, isBurst });
+              if (trig.shouldCache) item._cacheTrigger = trig;
+            }
+          }
           resolved++;
         } else {
           failed++;

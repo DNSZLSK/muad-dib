@@ -637,6 +637,71 @@ async function runMonitorPreResolveTests() {
     assert(threw !== null && /500/.test(threw.message), `500 should reject, got: ${threw && threw.message}`);
     assert(signaled === 0, `non-429 must NOT signal429(), got ${signaled}`);
   });
+
+  // ── Capture-at-publish: burst/ATO prefetch trigger (Leo Platform / Miasma, June 2026) ──
+  // Closes the ingestion gap where version-bump bursts of EXISTING packages (Leo: 20 pkgs,
+  // non-latest versions, in 3s) matched neither typosquat nor first_publish, so they were
+  // never prefetched and the malicious tarballs 404'd before scan.
+
+  test('CACHE-TRIGGER A4: atoSignal opt → shouldCache reason=ato (high retention)', () => {
+    const { evaluateCacheTrigger } = require('../../src/monitor/classify.js');
+    const t = evaluateCacheTrigger('zzz-unlikely-pkg-name-7f3a', null, null, { atoSignal: true });
+    assert(t.shouldCache === true, `atoSignal should cache, got ${JSON.stringify(t)}`);
+    assert(t.reason === 'ato', `reason should be ato, got ${t.reason}`);
+    assert(t.retentionDays > 0, `ato should have positive retention, got ${t.retentionDays}`);
+  });
+
+  test('CACHE-TRIGGER A4: isBurst opt → shouldCache reason=burst', () => {
+    const { evaluateCacheTrigger } = require('../../src/monitor/classify.js');
+    const t = evaluateCacheTrigger('zzz-unlikely-pkg-name-7f3a', null, null, { isBurst: true });
+    assert(t.shouldCache === true && t.reason === 'burst', `expected burst, got ${JSON.stringify(t)}`);
+  });
+
+  test('CACHE-TRIGGER A4: atoSignal takes precedence over isBurst', () => {
+    const { evaluateCacheTrigger } = require('../../src/monitor/classify.js');
+    const t = evaluateCacheTrigger('zzz-unlikely-pkg-name-7f3a', null, null, { atoSignal: true, isBurst: true });
+    assert(t.reason === 'ato', `ato should win over burst, got ${t.reason}`);
+  });
+
+  test('CACHE-TRIGGER A4: no opts and no name/version signal → not cached', () => {
+    const { evaluateCacheTrigger } = require('../../src/monitor/classify.js');
+    const t = evaluateCacheTrigger('zzz-unlikely-pkg-name-7f3a', null, null, {});
+    assert(t.shouldCache === false, `unknown pkg with no signal must not cache, got ${JSON.stringify(t)}`);
+  });
+
+  await asyncTest('CAPTURE-AT-PUBLISH: ATO (published version != dist-tags.latest) sets _cacheTrigger=ato (Leo class)', async () => {
+    const realGet = ingestion._deps.httpsGet;
+    ingestion._deps.httpsGet = async (url) => {
+      if (url.includes('_changes')) {
+        return JSON.stringify({ last_seq: 909, results: [{ id: 'ato-probe-pkg', deleted: false }] });
+      }
+      // packument: most-recent-by-time is 6.0.19, but dist-tags.latest is 7.1.21 → ATO
+      return JSON.stringify({
+        name: 'ato-probe-pkg',
+        'dist-tags': { latest: '7.1.21' },
+        versions: {
+          '7.1.21': { version: '7.1.21', dist: { tarball: 'https://r/ato-probe-pkg-7.1.21.tgz' }, scripts: {} },
+          '6.0.19': { version: '6.0.19', dist: { tarball: 'https://r/ato-probe-pkg-6.0.19.tgz' }, scripts: {} }
+        },
+        time: {
+          '7.1.21': '2025-06-01T00:00:00.000Z',
+          '6.0.19': '2026-06-24T23:04:55.000Z'
+        }
+      });
+    };
+    const state = { npmLastSeq: 100 };
+    const queue = [];
+    const stats = {};
+    try {
+      await ingestion.pollNpmChanges(state, queue, stats);
+      assert(queue.length === 1, `should queue 1 item, got ${queue.length}`);
+      assert(queue[0].version === '6.0.19', `most-recent published should be 6.0.19, got ${queue[0].version}`);
+      assert(queue[0]._cacheTrigger, `ATO item must carry a cache trigger (prefetch-eligible), got ${JSON.stringify(queue[0]._cacheTrigger)}`);
+      assert(queue[0]._cacheTrigger.reason === 'ato', `reason should be ato, got ${queue[0]._cacheTrigger.reason}`);
+    } finally {
+      ingestion._deps.httpsGet = realGet;
+    }
+  });
 }
 
 module.exports = { runMonitorPreResolveTests };
