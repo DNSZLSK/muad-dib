@@ -9540,6 +9540,39 @@ async function runMonitorTests() {
     assertIncludes(npmRegSrc, '_metadataCache', 'npm-registry.js should read _metadataCache directly');
   });
 
+  test('MONITOR L3: gcOrphanTarballFiles reclaims stale untracked .tgz, keeps fresh + indexed', () => {
+    const { gcOrphanTarballFiles } = require('../../src/monitor/state.js');
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-gc-orphan-'));
+    try {
+      const mk = (name, ageDays) => {
+        const p = path.join(tmp, name);
+        fs.writeFileSync(p, 'x'.repeat(100));
+        const t = new Date(Date.now() - ageDays * 24 * 60 * 60 * 1000);
+        fs.utimesSync(p, t, t);
+        return p;
+      };
+      const staleOrphan = mk('stale-orphan-1.0.0.tgz', 40);   // untracked, older than the 30d cutoff
+      const freshOrphan = mk('fresh-orphan-1.0.0.tgz', 2);    // untracked, within cutoff (maybe in-flight)
+      const trackedOld = mk('tracked-pkg-1.0.0.tgz', 99);     // tracked: Phase 1/2 owns it, GC must skip
+      fs.writeFileSync(path.join(tmp, 'cache-index.json'), '{}'); // non-.tgz must be ignored
+      const entries = { 'tracked-pkg-1.0.0': { name: 'tracked-pkg', version: '1.0.0' } };
+
+      const res = gcOrphanTarballFiles(tmp, entries, Date.now(), 30 * 24 * 60 * 60 * 1000);
+
+      assert(!fs.existsSync(staleOrphan), 'stale untracked .tgz should be deleted');
+      assert(fs.existsSync(freshOrphan), 'fresh untracked .tgz should be kept (may be in-flight)');
+      assert(fs.existsSync(trackedOld), 'tracked .tgz should be kept even if old (Phase 1/2 owns it)');
+      assert(fs.existsSync(path.join(tmp, 'cache-index.json')), 'non-.tgz files must be untouched');
+      assert(res.files === 1 && res.bytes === 100, `should report 1 file / 100 bytes reclaimed, got ${res.files}/${res.bytes}`);
+
+      // A missing directory must degrade to {0,0} without throwing (defensive-by-default).
+      const r2 = gcOrphanTarballFiles(path.join(tmp, 'nope'), {}, Date.now(), 0);
+      assert(r2.files === 0 && r2.bytes === 0, 'missing dir should return {0,0} without throwing');
+    } finally {
+      try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
+    }
+  });
+
   // ============================================
   // FIRST-PUBLISH SANDBOX PRIORITY TESTS
   // ============================================

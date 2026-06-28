@@ -30,6 +30,14 @@ if (!process.env.MUADDIB_NO_REGISTRY_FETCH) {
   if (!process.env.MUADDIB_NPM_SEQ_FILE) {
     process.env.MUADDIB_NPM_SEQ_FILE = path.join(os.tmpdir(), `muaddib-test-npm-seq-${process.pid}.json`);
   }
+  // Same isolation rationale for the tarball cache: purgeTarballCache now has an
+  // orphan-file GC pass (state.js Phase 3) that unlinks untracked .tgz on disk. The
+  // existing purge tests call purgeTarballCache() against the real TARBALL_CACHE_DIR,
+  // so without this redirect a `npm test` on a host with a populated cache would
+  // reclaim production tarballs as a side effect. Point it at a per-pid tmp dir.
+  if (!process.env.MUADDIB_TARBALL_CACHE_DIR) {
+    process.env.MUADDIB_TARBALL_CACHE_DIR = path.join(os.tmpdir(), `muaddib-test-tarball-cache-${process.pid}`);
+  }
 }
 
 const { getCounters } = require('./test-utils');

@@ -118,7 +118,7 @@ const MEMORY_SCORE_TOLERANCE = 0.15; // ±15% score tolerance
 
 // --- Tarball cache constants ---
 
-const TARBALL_CACHE_DIR = path.join(__dirname, '..', '..', 'data', 'tarball-cache');
+const TARBALL_CACHE_DIR = process.env.MUADDIB_TARBALL_CACHE_DIR || path.join(__dirname, '..', '..', 'data', 'tarball-cache');
 const TARBALL_CACHE_INDEX_FILE = path.join(TARBALL_CACHE_DIR, 'cache-index.json');
 const TARBALL_CACHE_DEFAULT_RETENTION_DAYS = 7;
 const TARBALL_CACHE_HIGH_RISK_RETENTION_DAYS = 30;
@@ -496,6 +496,34 @@ function cacheTarball(name, version, sourcePath, reason, retentionDays) {
 }
 
 /**
+ * Reclaim orphaned tarball-cache files: `.tgz` present in `dir` with no entry in
+ * `entries` and an mtime older than `cutoffMs`. Returns { files, bytes } reclaimed.
+ * Pure w.r.t. the index (orphans are untracked) so callers need not re-save it.
+ * Extracted as a seam so it is unit-testable against a temp dir without touching the
+ * production cache. See purgeTarballCache Phase 3 for the leak this addresses.
+ */
+function gcOrphanTarballFiles(dir, entries, now, cutoffMs) {
+  let files = 0;
+  let bytes = 0;
+  let names;
+  try { names = fs.readdirSync(dir); } catch { return { files, bytes }; }
+  for (const file of names) {
+    if (!file.endsWith('.tgz')) continue;
+    const key = file.slice(0, -4);
+    if (entries && entries[key]) continue; // tracked -> Phase 1/2 owns it
+    const filePath = path.join(dir, file);
+    try {
+      const st = fs.statSync(filePath);
+      if (now - st.mtimeMs <= cutoffMs) continue; // too fresh -> may be in-flight / cache-hittable
+      fs.unlinkSync(filePath);
+      files++;
+      bytes += st.size || 0;
+    } catch { /* per-file stat/unlink errors non-fatal */ }
+  }
+  return { files, bytes };
+}
+
+/**
  * Purge expired entries and enforce size budget.
  * Called at startup and hourly.
  */
@@ -538,10 +566,23 @@ function purgeTarballCache() {
     }
   }
 
-  if (purgedExpired > 0 || purgedBudget > 0) {
-    saveTarballCacheIndex();
+  // Phase 3: orphan-file GC — reclaim .tgz on disk with no index entry. The index is a
+  // process singleton rebuilt from cache-index.json; a single corrupt/truncated index
+  // (crash mid-atomicWriteFileSync, OOM) makes loadTarballCacheIndex fall back to an empty
+  // index, then saveTarballCacheIndex persists it — orphaning every .tgz already cached.
+  // Phase 1/2 are index-driven and can NEVER reclaim those files -> unbounded disk leak
+  // (measured 5.4GB / 8905 files, 2026-06-28). The mtime>retention bound keeps an in-flight
+  // cacheTarball (copyFileSync precedes the index save) and any still-cache-hittable recent
+  // file safe; only clearly-stale orphans are removed.
+  const orphan = gcOrphanTarballFiles(
+    TARBALL_CACHE_DIR, index.entries, now,
+    TARBALL_CACHE_HIGH_RISK_RETENTION_DAYS * 24 * 60 * 60 * 1000
+  );
+
+  if (purgedExpired > 0 || purgedBudget > 0 || orphan.files > 0) {
+    if (purgedExpired > 0 || purgedBudget > 0) saveTarballCacheIndex();
     const remaining = Object.keys(index.entries).length;
-    console.log(`[MONITOR] TARBALL CACHE: purged ${purgedExpired} expired + ${purgedBudget} budget entries (${remaining} remaining, ${(totalSize / 1024 / 1024).toFixed(1)}MB)`);
+    console.log(`[MONITOR] TARBALL CACHE: purged ${purgedExpired} expired + ${purgedBudget} budget entries + ${orphan.files} orphan files (${(orphan.bytes / 1024 / 1024).toFixed(1)}MB reclaimed, ${remaining} remaining, ${(totalSize / 1024 / 1024).toFixed(1)}MB)`);
   }
 }
 
@@ -1784,6 +1825,7 @@ module.exports = {
   tarballCachePath,
   cacheTarball,
   purgeTarballCache,
+  gcOrphanTarballFiles,
   appendTemporalDetection,
   loadTemporalDetections,
   loadState,
