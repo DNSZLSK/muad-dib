@@ -140,6 +140,7 @@ const { runDiffTests } = require('./integration/diff.test');
 const { runOutputFormatterTests } = require('./integration/output-formatter.test');
 const { runSafeInstallTests } = require('./integration/safe-install.test');
 const { runDownloadTests } = require('./integration/download.test');
+const { runExtractPoolTests } = require('./integration/extract-pool.test');
 const { runDaemonWatchTests } = require('./integration/daemon-watch.test');
 const { runReportTests } = require('./integration/report.test');
 const { runHooksInitTests } = require('./integration/hooks-init.test');
@@ -290,6 +291,7 @@ async function timed(name, fn) {
   await timed('output-formatter', runOutputFormatterTests);
   await timed('safe-install', runSafeInstallTests);
   await timed('download', runDownloadTests);
+  await timed('extract-pool', runExtractPoolTests);
   await timed('temporal-runner', runTemporalRunnerTests);
   await timed('daemon-watch', runDaemonWatchTests);
   await timed('report', runReportTests);

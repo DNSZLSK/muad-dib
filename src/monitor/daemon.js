@@ -1040,6 +1040,8 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
     } catch (e) {
       console.error(`[MONITOR] Shutdown in-flight spill failed: ${e.message}`);
     }
+    // Terminate the off-thread extraction worker pool (bounded-resource teardown).
+    try { await require('../shared/extract-pool.js').destroyExtractPool(); } catch { /* best-effort */ }
     // Persist remaining queue items so they survive the restart
     persistQueue(scanQueue, state);
     saveRecentlyScanned(recentlyScanned); // Persist dedup set too (avoid re-scan storm on restart)
