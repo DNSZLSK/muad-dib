@@ -12,7 +12,8 @@ const os = require('os');
 const { Worker } = require('worker_threads');
 const { runSandbox, tryAcquireSandboxSlot } = require('../sandbox/index.js');
 const { sendWebhook } = require('../webhook.js');
-const { downloadToFile, extractArchive, extractArchiveOffThread, sanitizePackageName } = require('../shared/download.js');
+const { downloadToFile, extractArchive, sanitizePackageName } = require('../shared/download.js');
+const { extractInPool } = require('../shared/extract-pool.js');
 const { MAX_TARBALL_SIZE, getMaxFileSize } = require('../shared/constants.js');
 const { acquireRegistrySlot, releaseRegistrySlot, awaitRateToken: awaitRateTokenForWorker, signal429: signal429ForWorker } = require('../shared/http-limiter.js');
 const { loadCachedIOCs } = require('../ioc/updater.js');
@@ -179,21 +180,25 @@ const STATIC_SCAN_TIMEOUT_MS = 45_000; // 45s for static analysis only
 const LARGE_PACKAGE_SIZE = 10 * 1024 * 1024; // 10MB
 const RECENTLY_SCANNED_MAX = 50_000; // FIFO cap for the dedup Set (P0c — bounded resource)
 
-// OOM fix (2026-06-19): archives larger than this (COMPRESSED, on-disk size) are
-// extracted off the main thread in a worker, so the synchronous extractor
-// (adm-zip extractAllTo / execFileSync tar) can no longer wedge the event loop and
-// starve the RSS breaker / memory governor / EMERGENCY purge (all main-thread
-// timers) → cgroup OOM. Confirmed culprit: data/loop-stalls.jsonl (extract:* up to
-// 148s). Small archives extract inline — a worker spawn costs more than their
-// sub-100ms extraction. Env-tunable via MUADDIB_INLINE_EXTRACT_MB.
-const INLINE_EXTRACT_MAX_BYTES = (parseInt(process.env.MUADDIB_INLINE_EXTRACT_MB, 10) || 4) * 1024 * 1024;
+// Event-loop-stall fix (2026-06-30): ALL archive extraction runs off the main
+// thread via a persistent worker pool (src/shared/extract-pool.js). The previous
+// OOM fix only offloaded archives > 4MB (spawn-per-call) and extracted everything
+// smaller INLINE — but adm-zip extractAllTo is fully synchronous and slow on
+// many-file trees regardless of size, so those inline extractions still wedged the
+// loop for seconds-to-minutes (data/loop-stalls.jsonl: extract:prework up to 229s;
+// a 2MB many-file package blocked 5s+), starving the RSS breaker / memory governor
+// / EMERGENCY purge (all main-thread timers) → restart. The pool's reusable workers
+// pay no per-package spawn cost, so there is no longer a reason to extract inline.
+// MUADDIB_INLINE_EXTRACT_MB keeps a small inline escape hatch (default 0 = always
+// pool). compressedSize is the on-disk tarball size (reliable, unlike registry
+// unpackedSize metadata).
+const INLINE_EXTRACT_MAX_BYTES = (parseInt(process.env.MUADDIB_INLINE_EXTRACT_MB, 10) || 0) * 1024 * 1024;
 
-// Extract inline for small archives, off-thread for large ones. compressedSize is
-// the on-disk tarball size (reliable, unlike the registry unpackedSize metadata).
-// Always returns a Promise so the call sites can uniformly `await`.
+// Always returns a Promise so call sites uniformly `await`. Pool for anything above
+// the (default 0) inline window; the tiny inline path stays available for operators.
 function extractGated(archivePath, destDir, compressedSize) {
   if (compressedSize > INLINE_EXTRACT_MAX_BYTES) {
-    return extractArchiveOffThread(archivePath, destDir);
+    return extractInPool(archivePath, destDir);
   }
   return Promise.resolve(extractArchive(archivePath, destDir));
 }
