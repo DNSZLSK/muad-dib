@@ -74,6 +74,25 @@ function handleMemberExpression(node, ctx) {
       }
     }
   }
+
+  // AST-018 alias fix (@longzy): `var env = process.env; env[_decode([...])]` reaches env via
+  // an alias, so the direct `process.env[x]` match above misses it. Close ONLY the
+  // charcode-reconstruction signal for aliases (computed access + String.fromCharCode in the
+  // file) — we deliberately do NOT emit the generic env_access MEDIUM for aliases, keeping FPR
+  // flat; the HIGH signal fires only on the malicious obfuscated-key shape.
+  if (
+    node.computed &&
+    ctx.hasFromCharCode &&
+    node.object?.type === 'Identifier' &&
+    ctx.envAliases && ctx.envAliases.has(node.object.name)
+  ) {
+    ctx.threats.push({
+      type: 'env_charcode_reconstruction',
+      severity: 'HIGH',
+      message: 'process.env (accessed via an alias) reads a dynamically reconstructed key (String.fromCharCode obfuscation).',
+      file: ctx.relFile
+    });
+  }
 }
 
 

@@ -33,7 +33,7 @@ bin/muaddib.js (yargs CLI)
         ├─► FP reductions (src/scoring.js — applyFPReductions)
         ├─► Reachability post-processing (src/scanner/reachability.js — file-level + function-level FP downgrade)
         ├─► Intent coherence analysis (src/intent-graph.js — buildIntentPairs)
-        ├─► Rule enrichment (src/rules/index.js — 266 rules)
+        ├─► Rule enrichment (src/rules/index.js — 274 rules)
         ├─► Scoring (src/scoring.js — per-file max + compound boosts)
         └─► Output (CLI / JSON / HTML / SARIF)
 

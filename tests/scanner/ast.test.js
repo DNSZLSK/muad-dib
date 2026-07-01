@@ -3953,6 +3953,89 @@ module.exports = { subscribe };
       assert(!t, 'Email newsletter module should NOT trigger (no Baileys context)');
     } finally { cleanupTemp(tmp); }
   });
+
+  // ── Anti-analysis / sandbox evasion (2026, @longzy DPRK "Contagious Interview") ──
+  await asyncTest('AST: analyzer_honeytoken_reference — fires on a charcode-hidden MUADDIB_GVISOR check', async () => {
+    // [77,85,65,68,68,73,66,95,71,86,73,83,79,82] === "MUADDIB_GVISOR", encoded exactly as the
+    // @longzy payload hides it. Weaponises our own sandbox marker as a honeytoken.
+    const tmp = makeTempPkg(`
+var _decode = function (c) { var r = ""; for (var i = 0; i < c.length; i++) r += String.fromCharCode(c[i]); return r; };
+if (process.env[_decode([77,85,65,68,68,73,66,95,71,86,73,83,79,82])]) process.exit(0);
+console.log("payload");
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'analyzer_honeytoken_reference');
+      assert(t, 'charcode-hidden MUADDIB_GVISOR check must fire analyzer_honeytoken_reference');
+      assert(t.severity === 'CRITICAL', 'analyzer honeytoken reference is CRITICAL');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: anti_analysis_evasion — fires on the structural detonation-gate wall (marker-agnostic)', async () => {
+    // 6 env-gated silent process.exit() guards + charcode obfuscation, but the checked names
+    // are INVENTED (never a known marker) — the structural shape must still fire.
+    const tmp = makeTempPkg(`
+var d = function (c) { var r = ""; for (var i = 0; i < c.length; i++) r += String.fromCharCode(c[i]); return r; };
+var e = process.env;
+if (e[d([90,49])]) process.exit(0);
+if (e[d([90,50])]) process.exit(0);
+if (e[d([90,51])]) process.exit(0);
+if (e[d([90,52])]) process.exit(0);
+if (e[d([90,53])]) process.exit(0);
+if (e[d([90,54])]) process.exit(0);
+require("https").request({});
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'anti_analysis_evasion');
+      assert(t, 'a wall of env-gated process.exit guards must fire anti_analysis_evasion');
+      assert(t.severity === 'HIGH', 'detonation gate is HIGH');
+      assert(!result.threats.find(t => t.type === 'analyzer_honeytoken_reference'), 'no known marker → no honeytoken finding');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: anti-evasion — does NOT fire on a benign CLI (no FP)', async () => {
+    // Reads an env var for config + exits on error twice. No obfuscation, no host recon,
+    // <5 exits → neither anti-evasion signal may fire.
+    const tmp = makeTempPkg(`
+if (!process.env.API_URL) { console.error("missing API_URL"); process.exit(1); }
+function main() { if (process.argv.length < 3) process.exit(1); return process.env.API_URL; }
+module.exports = { main };
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      assert(!result.threats.find(t => t.type === 'analyzer_honeytoken_reference'), 'no honeytoken FP on benign CLI');
+      assert(!result.threats.find(t => t.type === 'anti_analysis_evasion'), 'no detonation-gate FP on benign CLI');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  // AST-018 alias fix: `var env = process.env; env[charcode]` used to evade the direct
+  // `process.env[x]` match. The alias must now resolve.
+  await asyncTest('AST: env_charcode_reconstruction — resolves a process.env alias (var env = process.env)', async () => {
+    const tmp = makeTempPkg(`
+var env = process.env;
+var d = function (c) { var r = ""; for (var i = 0; i < c.length; i++) r += String.fromCharCode(c[i]); return r; };
+var secret = env[d([65,87,83,95,83,69,67,82,69,84])];
+console.log(secret);
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'env_charcode_reconstruction');
+      assert(t, 'aliased env + charcode-reconstructed key must fire env_charcode_reconstruction');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST: env alias WITHOUT obfuscation does NOT fire env_charcode_reconstruction (FPR flat)', async () => {
+    const tmp = makeTempPkg(`
+const env = process.env;
+const url = env["API_URL"] || env.DEFAULT_URL;
+module.exports = url;
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      assert(!result.threats.find(t => t.type === 'env_charcode_reconstruction'), 'no charcode → no reconstruction finding');
+    } finally { cleanupTemp(tmp); }
+  });
 }
 
 module.exports = { runAstTests };
