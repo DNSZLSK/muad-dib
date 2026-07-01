@@ -65,6 +65,17 @@ else
   useradd --system --shell /usr/sbin/nologin --home-dir "$INSTALL_DIR" "$SERVICE_USER"
   echo "  User '${SERVICE_USER}' created."
 fi
+# SECURITY (E2) — root-equivalence warning. Membership of the `docker` group is equivalent to
+# root: any member can `docker run -v /:/host …` and read/write the host root FS. The monitor
+# needs to launch the analysis sandbox (`docker run`), which is why this is here — but it means
+# a compromise of the muaddib process (e.g. a parser/scanner exploit on a hostile package)
+# escalates to host root. There is no safe one-line fix:
+#   - Proper remediation: run the sandbox under ROOTLESS Docker or Podman as muaddib (containers
+#     in a user namespace cannot map host root). Needs subuid/subgid, linger, DOCKER_HOST rewrite,
+#     and re-testing the sandbox (gVisor/runsc, canaries, network).
+#   - Interim: a docker authz plugin (e.g. opa-docker-authz) denying host bind-mounts.
+# Until one of those is set up and TESTED on the VPS, this line stays (removing it breaks the
+# sandbox). Tracked as infra tech debt — do NOT silently drop it.
 usermod -aG docker "$SERVICE_USER"
 
 # --- 4. Clone repository ---

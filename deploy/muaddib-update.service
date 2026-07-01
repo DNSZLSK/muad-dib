@@ -8,3 +8,20 @@ Type=oneshot
 ExecStart=/opt/muaddib/deploy/auto-update.sh
 User=root
 WorkingDirectory=/opt/muaddib
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=muaddib-update
+
+# Security hardening (E1). Deliberately conservative: this unit must git-pull, run `npm ci`
+# and `systemctl restart`, so the aggressive filesystem locks are NOT enabled here —
+# ProtectHome=read-only breaks npm's ~/.npm cache, and ProtectSystem=strict needs a vetted
+# ReadWritePaths set — both must be VPS-tested before adding.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+SystemCallArchitectures=native
