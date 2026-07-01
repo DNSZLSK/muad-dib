@@ -1,6 +1,6 @@
 'use strict';
 
-const { classifyTaintSource } = require('./taint-tracker.js');
+const { classifyTaintSource, isHarvestEnv } = require('./taint-tracker.js');
 
 /**
  * Visit `assignment` nodes at module level (scope_depth === 0) and populate
@@ -13,6 +13,18 @@ const { classifyTaintSource } = require('./taint-tracker.js');
  *  - reassignment to a non-source value CLEARS the taint
  */
 function handleAssignment(node, ctx, scopeDepth) {
+  // crypto_exfil harvest leg (PyPI, file-level — runs at ANY scope, unlike moduleTaint):
+  // `secret = os.environ['AWS_SECRET']` even inside a function sets the harvest flag.
+  if (!ctx.hasSensitiveHarvestPy) {
+    const rhs = node.childForFieldName('right');
+    if (rhs) {
+      const t = classifyTaintSource(rhs);
+      if (t && t.sourceType === 'env' && isHarvestEnv(t.envVarName)) {
+        ctx.hasSensitiveHarvestPy = true;
+      }
+    }
+  }
+
   if (scopeDepth !== 0) return;
   if (!ctx.moduleTaint) return; // defensive — should always be initialised per-file
 

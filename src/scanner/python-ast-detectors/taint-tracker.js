@@ -169,6 +169,83 @@ function classifyEnvSource(node) {
 }
 
 // ---------------------------------------------------------------------------
+// CRYPTO-ENCRYPT detection (crypto_exfil PyPI mirror of MUADDIB-COMPOUND-019)
+// ---------------------------------------------------------------------------
+
+// Construction / encrypt-function callees of the major Python crypto libs. AST
+// dotted-name match (NOT a content regex): a string or comment that merely
+// contains "AES.new(" is not a `call` node, so it cannot trip this (the JS-side
+// self-FP lesson — see scanner/ast.js hasCryptoEncipher). Matching the
+// constructor/load call is sufficient as a file-level "encryption happens here"
+// flag; the generic `.encrypt()` method is deliberately NOT matched (too many
+// non-crypto libs expose .encrypt and it would FP).
+const CRYPTO_ENCRYPT_CALLEES = new Set([
+  // pycryptodome / PyCrypto — symmetric .new() + RSA padding .new()
+  'AES.new', 'DES.new', 'DES3.new', 'ARC4.new', 'ChaCha20.new', 'Salsa20.new',
+  'Blowfish.new', 'ChaCha20_Poly1305.new',
+  'Crypto.Cipher.AES.new', 'Cryptodome.Cipher.AES.new',
+  'PKCS1_OAEP.new', 'PKCS1_v1_5.new',
+  'Crypto.Cipher.PKCS1_OAEP.new', 'Cryptodome.Cipher.PKCS1_OAEP.new',
+  // rsa library
+  'rsa.encrypt',
+  // cryptography — hazmat ciphers + fernet + attacker pubkey load
+  'Cipher', 'cryptography.hazmat.primitives.ciphers.Cipher',
+  'Fernet', 'MultiFernet', 'cryptography.fernet.Fernet',
+  'load_pem_public_key', 'serialization.load_pem_public_key',
+  // PyNaCl
+  'SealedBox', 'SecretBox', 'nacl.public.SealedBox', 'nacl.secret.SecretBox'
+]);
+
+function isCryptoEncryptCall(callNode) {
+  if (!callNode || callNode.type !== 'call') return false;
+  const name = dottedName(callNode.childForFieldName('function'));
+  return !!(name && CRYPTO_ENCRYPT_CALLEES.has(name));
+}
+
+// ---------------------------------------------------------------------------
+// Sensitive-file open detection (crypto_exfil harvest leg, beyond env vars)
+// ---------------------------------------------------------------------------
+
+// Mirror of dataflow.js SENSITIVE_PATH_PATTERNS — credential/secret stores.
+const SENSITIVE_FILE_RE = /(\.aws[/\\]credentials|\.ssh[/\\]|id_rsa|id_ed25519|\.npmrc|\.netrc|\.git-credentials|\.config[/\\]gcloud|\.docker[/\\]config|\.kube[/\\]config|\.pgpass|wallet\.dat|\.metamask|\.electrum|\.exodus|\.gnupg|\/etc\/passwd|\/etc\/shadow)/i;
+const FILE_OPEN_CALLEES = new Set(['open', 'io.open', 'codecs.open']);
+
+function isSensitiveFileOpen(callNode) {
+  if (!callNode || callNode.type !== 'call') return false;
+  const name = dottedName(callNode.childForFieldName('function'));
+  if (!name || !FILE_OPEN_CALLEES.has(name)) return false;
+  const args = callNode.childForFieldName('arguments');
+  if (!args) return false;
+  for (const child of args.children) {
+    if (['(', ')', ',', 'keyword_argument'].includes(child.type)) continue;
+    const lit = stringLiteralValue(child); // first positional arg
+    return lit !== null && SENSITIVE_FILE_RE.test(lit);
+  }
+  return false;
+}
+
+// Env names that denote a CRYPTO KEY read in order to ENCRYPT (transport config),
+// NOT a credential to be stolen. A legit Fernet/cryptography transport wrapper loads
+// its own symmetric key from env (FERNET_KEY, ENCRYPTION_KEY, APP_CIPHER_KEY, ...) then
+// encrypts+sends — without this exclusion that env read would (via the bare "KEY"
+// substring in SENSITIVE_ENV_RE) look like harvesting and FP the crypto_exfil compound.
+// The attacker gains nothing: real stolen creds use names like AWS_SECRET_ACCESS_KEY /
+// *_TOKEN which are NOT crypto-config names, so they still count as harvest.
+const CRYPTO_CONFIG_ENV_RE = /^(FERNET|ENCRYPTION|ENCRYPT|DECRYPT|CIPHER|CRYPTO|AES|MASTER|SIGNING|HMAC)_?KEY$|_(ENCRYPTION|FERNET|CIPHER|AES|CRYPTO)_KEY$/i;
+
+// Harvest = a sensitive credential name, EXCLUDING crypto-key config (above).
+function isHarvestEnv(name) {
+  return isEnvSensitive(name) && !CRYPTO_CONFIG_ENV_RE.test(name);
+}
+
+// True iff `node` reads a HARVESTABLE credential env var (os.environ['X'] /
+// os.getenv('X') / os.environ.get('X')) — sensitive name, not crypto-key config.
+function nodeReadsSensitiveEnv(node) {
+  const name = classifyEnvSource(node);
+  return name !== null && isHarvestEnv(name);
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -200,11 +277,19 @@ module.exports = {
   classifyTaintSource,
   lookupTaint,
   isEnvSensitive,
+  // crypto_exfil (PyPI mirror of COMPOUND-019) — file-flag classifiers
+  isCryptoEncryptCall,
+  isSensitiveFileOpen,
+  nodeReadsSensitiveEnv,
+  isHarvestEnv,
   // Exposed for unit tests
   _internal: {
     isFetchSource,
     isBase64Source,
     classifyEnvSource,
-    SENSITIVE_ENV_RE
+    SENSITIVE_ENV_RE,
+    CRYPTO_ENCRYPT_CALLEES,
+    SENSITIVE_FILE_RE,
+    CRYPTO_CONFIG_ENV_RE
   }
 };

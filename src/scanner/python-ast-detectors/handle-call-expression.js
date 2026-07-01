@@ -8,7 +8,7 @@ const {
   isTruthyLiteral,
   lineOf
 } = require('./helpers.js');
-const { lookupTaint, isEnvSensitive } = require('./taint-tracker.js');
+const { lookupTaint, isEnvSensitive, isCryptoEncryptCall, isSensitiveFileOpen, nodeReadsSensitiveEnv } = require('./taint-tracker.js');
 
 /**
  * Visitor for `call` nodes. Emits PYAST-003, PYAST-004, PYAST-005, PYAST-006,
@@ -121,12 +121,40 @@ function getKwargValue(callNode, kwName) {
   return null;
 }
 
+// crypto_exfil harvest helper: true if any argument (positional or kwarg value)
+// reads a sensitive env var, e.g. requests.post(url, data=os.environ['AWS_SECRET']).
+function _callHasSensitiveEnvArg(callNode) {
+  const args = callNode.childForFieldName('arguments');
+  if (!args) return false;
+  for (const child of args.children) {
+    if (child.type === 'keyword_argument') {
+      const v = child.childForFieldName('value');
+      if (v && nodeReadsSensitiveEnv(v)) return true;
+    } else if (nodeReadsSensitiveEnv(child)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // ---------------------------------------------------------------------------
 // Main visitor
 // ---------------------------------------------------------------------------
 
 function handleCallExpression(node, ctx, scopeDepth) {
   const callee = calleeDottedName(node);
+
+  // crypto_exfil (PyPI mirror of MUADDIB-COMPOUND-019): accumulate file-level flags consumed by
+  // the post-walk same-file compound in python-ast.js. Runs for EVERY call (before the !callee
+  // early return) and at ANY scope — the compound is file-level, like the JS handle-post-walk one.
+  // AST-call based, so a string/comment that merely contains "AES.new(" cannot trip it (JS self-FP lesson).
+  if (isCryptoEncryptCall(node)) ctx.hasCryptoEncryptPy = true;
+  if (callee && NETWORK_WRITE_CALLEES.has(callee)) ctx.hasNetworkWritePy = true;
+  if (!ctx.hasSensitiveHarvestPy &&
+      (nodeReadsSensitiveEnv(node) || isSensitiveFileOpen(node) || _callHasSensitiveEnvArg(node))) {
+    ctx.hasSensitiveHarvestPy = true;
+  }
+
   if (!callee) return;
 
   // PYAST-003: exec()/eval() at module level — direct RCE on import.

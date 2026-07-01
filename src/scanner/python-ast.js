@@ -49,6 +49,7 @@ const WASM_PATH = path.join(__dirname, '..', 'vendor', 'tree-sitter-python.wasm'
 // findTargetPythonFiles() from python-source.js below.
 const { _internal: pysrcInternal } = require('./python-source.js');
 const { findTargetPythonFiles } = pysrcInternal;
+const { networkDestinationsAllBenign } = require('../sdk-destination.js');
 
 // ---------------------------------------------------------------------------
 // Async tree-sitter init (lazy, cached).
@@ -151,10 +152,30 @@ function scanPythonAST(targetPath) {
       // Per-file taint map populated by handle-assignment.js at scope_depth==0
       // and read by handle-call-expression.js for compound detections
       // (PYAST-005/006/009/010). See python-ast-detectors/taint-tracker.js.
-      moduleTaint: new Map()
+      moduleTaint: new Map(),
+      // crypto_exfil (PyPI mirror of MUADDIB-COMPOUND-019) file-level flags, set during the
+      // walk by handle-call-expression.js / handle-assignment.js, read in the finalize below.
+      hasCryptoEncryptPy: false,
+      hasNetworkWritePy: false,
+      hasSensitiveHarvestPy: false
     };
 
     walk(tree.rootNode, ctx, visitors);
+
+    // crypto_exfil finalize (same-file compound): secret harvest + encryption (RSA/AES) +
+    // network write, to a destination that is NOT entirely first-party/trusted. Mirror of the
+    // JS handle-post-walk compound; emits the SAME 'crypto_exfil' type (MUADDIB-COMPOUND-019),
+    // inheriting its rule/playbook/HIGH_CONFIDENCE_MALICE plumbing. destAllBenign reuses the
+    // shared host-reputation engine on the .py source (suppresses SDKs posting to their own API).
+    if (ctx.hasCryptoEncryptPy && ctx.hasNetworkWritePy && ctx.hasSensitiveHarvestPy &&
+        !networkDestinationsAllBenign(source)) {
+      threats.push({
+        type: 'crypto_exfil',
+        severity: 'CRITICAL',
+        message: `${ctx.relFile}: hybrid-crypto exfiltration (PyPI) — secret harvesting (env var / credential file) + encryption (RSA/AES via pycryptodome/cryptography/rsa/nacl) + network write in the same file, to a non-first-party destination. Stolen secrets are encrypted before exfil to evade DLP/taint inspection (litellm/Hades pattern).`,
+        file: ctx.relFile
+      });
+    }
   }
 
   return threats;
