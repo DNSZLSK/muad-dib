@@ -38,6 +38,51 @@ const {
   ETHEREUM_PACKAGES,
   SOLANA_PACKAGES
 } = require('./constants.js');
+
+// -----------------------------------------------------------------------------
+// SECURITY (E3 — audit 2026-07): ReDoS mitigation for static `.replace()`-chain resolution.
+// The resolver (Blue Team v8, below) statically re-applies `.replace(/regex/, str)` calls
+// taken from the SCANNED package to reconstruct obfuscated strings. On the CLI path this
+// runs synchronously on the main thread, so executing an attacker-authored regex that
+// catastrophically backtracks would wedge it. Note: the subject-length cap does NOT bound
+// this — exponential backtracking blows up on ~30 chars regardless of cap.
+//
+// Defense in depth (this is layer 1 of 2):
+//   Layer 1 (here): a BLOCKLIST of common catastrophic shapes + length caps, so the
+//     frequent cases fast-fail without running the regex. It is NOT exhaustive — a crafted
+//     pattern (e.g. nested groups like `((a+)x)+`) can slip past it.
+//   Layer 2 (hard bound): the monitor runs every scan in a Worker with a 45s
+//     STATIC_SCAN_TIMEOUT_MS -> worker.terminate() (src/monitor/queue.js). V8 TerminateExecution
+//     interrupts even a running regex (verified on Node 24 / V8 13.6: terminate returns ~6ms
+//     mid-backtrack) — TO CONFIRM on the VPS Node version: interruptible regexps have been in
+//     V8 since ~Node 16, but this was only tested on Node 24. On that basis a layer-1 bypass
+//     is bounded to <=45s and the worker is killed.
+//     The CLI runs the pipeline inline (src/index.js) and has no such backstop — one-shot,
+//     Ctrl-C-able, lower severity.
+//
+// A refused pattern only leaves the chain "unresolved" (still flagged by the depth>=4
+// fallback) — never a false negative by crash.
+// -----------------------------------------------------------------------------
+const MAX_REPLACE_REGEX_LEN = 200;    // reject absurdly long attacker regex sources
+const MAX_REPLACE_SUBJECT_LEN = 4000; // caps LINEAR/polynomial blowup on huge subjects (not exponential)
+
+// BLOCKLIST (non-exhaustive) of common catastrophic-backtracking regex shapes. Allows any
+// pattern that does not match a known-bad shape — the hard guarantee is layer 2 above, not
+// this heuristic. Its OWN patterns are linear (negated char classes only), so it introduces
+// no ReDoS of its own.
+function isCatastrophicReplaceRegex(src) {
+  if (typeof src !== 'string') return true;
+  // Quantifier applied to a group whose body already contains a quantifier:
+  //   (a+)+  (a*)*  (a+)*  ([ab]+)+  (\w+)*
+  if (/\([^()]*[+*][^()]*\)\s*[*+]/.test(src)) return true;
+  // Quantified group whose body contains a {n,m} repetition:  (\d{1,3})+
+  if (/\([^()]*\{\d+(?:,\d*)?\}[^()]*\)\s*[*+]/.test(src)) return true;
+  // Quantified group containing alternation (possible overlap):  (a|a)*  (ab|a)+
+  if (/\([^()]*\|[^()]*\)\s*[*+]/.test(src)) return true;
+  // Unbounded {n,} repetition applied to a group:  (...)+{2,}
+  if (/\)[*+?]?\{\d+,\}/.test(src)) return true;
+  return false;
+}
 const {
   extractStringValue,
   calculateShannonEntropy,
@@ -1919,14 +1964,20 @@ function handleCallExpression(node, ctx) {
             let replacement = null;
             // Extract regex or string pattern
             if (args[0].type === 'Literal' && args[0].regex) {
-              try { pattern = new RegExp(args[0].regex.pattern, args[0].regex.flags); } catch { /* skip */ }
+              // SECURITY (E3): the pattern is attacker-controlled. Refuse catastrophic
+              // shapes / over-long sources so a ReDoS can't wedge this synchronous scanner.
+              if (args[0].regex.pattern.length <= MAX_REPLACE_REGEX_LEN &&
+                  !isCatastrophicReplaceRegex(args[0].regex.pattern)) {
+                try { pattern = new RegExp(args[0].regex.pattern, args[0].regex.flags); } catch { /* skip */ }
+              }
             } else if (args[0].type === 'Literal' && typeof args[0].value === 'string') {
               pattern = args[0].value;
             }
             if (args[1].type === 'Literal' && typeof args[1].value === 'string') {
               replacement = args[1].value;
             }
-            if (pattern !== null && replacement !== null) {
+            // SECURITY (E3): also refuse to run any pattern against an oversized subject.
+            if (pattern !== null && replacement !== null && resolved.length <= MAX_REPLACE_SUBJECT_LEN) {
               resolved = resolved.replace(pattern, replacement);
             } else {
               resolved = null;
@@ -2101,4 +2152,4 @@ function handleCallExpression(node, ctx) {
 
 // _shadowClassifyMcpWrite is shared with handle-post-walk.js (the Wave-4
 // keyword-co-occurrence emitter — the third mcp_config_injection site).
-module.exports = { handleCallExpression, _shadowClassifyMcpWrite };
+module.exports = { handleCallExpression, _shadowClassifyMcpWrite, _isCatastrophicReplaceRegex: isCatastrophicReplaceRegex };
