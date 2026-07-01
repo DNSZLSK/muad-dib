@@ -1129,6 +1129,32 @@ const RULES = {
     references: ['https://attack.mitre.org/techniques/T1497/001/'],
     mitre: 'T1497.001'
   },
+  anti_analysis_evasion: {
+    id: 'MUADDIB-AST-095',
+    name: 'Anti-Analysis Detonation Gate',
+    severity: 'HIGH',
+    confidence: 'high',
+    domain: 'malware',
+    description: 'Mur de gardes process.exit() silencieuses (>=5) couplees a de la lecture d\'environnement (process.env) et a de l\'obfuscation charcode OU de la reconnaissance hote (hostname/userInfo/networkInterfaces) — le payload refuse de s\'executer sous analyse (sandbox/CI/honeypot). Detection STRUCTURELLE (la forme du mur), agnostique aux marqueurs, donc robuste aux marqueurs inedits. Contre-mesure durable a l\'evasion : evader => detecte en statique ; ne pas evader => detone en sandbox.',
+    references: [
+      'https://attack.mitre.org/techniques/T1497/',
+      'https://attack.mitre.org/techniques/T1497/001/'
+    ],
+    mitre: 'T1497'
+  },
+  analyzer_honeytoken_reference: {
+    id: 'MUADDIB-AST-096',
+    name: 'Analyzer Honeytoken Reference',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    domain: 'malware',
+    description: 'Reference DISSIMULEE en charcodes a un marqueur d\'environnement d\'analyse — marqueur de sandbox MUAD\'DIB (MUADDIB_GVISOR), marqueur d\'un analyseur pair, ou nom de poison-token. Seule la forme obfusquee est matchee : le code de sandbox de MUAD\'DIB lui-meme et l\'outillage securite legitime referencent ces marqueurs en clair sans risque. Aucun package legitime n\'encode un check pour ces tripwires. Le marqueur est un honeytoken plante : garde public et stable pour que tout verificateur s\'auto-incrimine.',
+    references: [
+      'https://attack.mitre.org/techniques/T1497/',
+      'https://attack.mitre.org/techniques/T1480/'
+    ],
+    mitre: 'T1497'
+  },
   detached_process: {
     id: 'MUADDIB-AST-012',
     name: 'Detached Background Process',

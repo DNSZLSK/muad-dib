@@ -1,6 +1,6 @@
 {
   "name": "muaddib-scanner",
-  "version": "2.11.137",
+  "version": "2.11.138",
   "description": "Supply-chain threat detection & response for npm & PyPI/Python",
   "main": "src/index.js",
   "bin": {

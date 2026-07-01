@@ -3,6 +3,41 @@
 const { networkDestinationsAllBenign } = require('../../sdk-destination.js');
 
 function handlePostWalk(ctx) {
+  // ── Anti-analysis / sandbox evasion (2026, @longzy DPRK "Contagious Interview") ──
+  // We detect the EVASION rather than trying to hide the sandbox (an unwinnable arms race).
+  //  (1) analyzer_honeytoken_reference (CRITICAL, FP~0): the file hides — behind charcode
+  //      encoding — a check for a known analysis-environment tripwire (our own MUADDIB_GVISOR,
+  //      a peer analyzer marker, a poison-token name). Only the OBFUSCATED form is matched, so
+  //      MUAD'DIB's own sandbox code (plaintext) and legit security tooling never trip it. The
+  //      marker is a planted honeytoken: kept public+stable so any checker self-incriminates.
+  //  (2) anti_analysis_evasion (HIGH): the structural "detonation-gate wall" — >=5 silent
+  //      process.exit() guards that read the environment, plus charcode obfuscation OR host
+  //      reconnaissance. Marker-AGNOSTIC (keys on the shape → catches novel markers). FP-safe
+  //      by coupling: no benign package stacks 5+ process.exit guards with obfuscated env/host
+  //      recon. Suppressed in dist/build (minified bundles can inflate the raw counts).
+  if (ctx.analyzerHoneytokenHit) {
+    ctx.threats.push({
+      type: 'analyzer_honeytoken_reference',
+      severity: 'CRITICAL',
+      message: `Charcode-hidden reference to an analysis-environment marker ("${ctx.analyzerHoneytokenHit}") — sandbox/analyzer evasion. No legitimate package obfuscates a check for this tripwire.`,
+      file: ctx.relFile
+    });
+  } else if (
+    ctx.antiAnalysisExitCount >= 5 &&
+    ctx.hasProcessEnvRead &&
+    (ctx.hasFromCharCode || ctx.hasHostRecon)
+  ) {
+    const isDistFile = /^(?:dist|build|out|output)[/\\]/i.test(ctx.relFile) || /\.(?:bundle|min)\.js$/i.test(ctx.relFile);
+    if (!isDistFile) {
+      ctx.threats.push({
+        type: 'anti_analysis_evasion',
+        severity: 'HIGH',
+        message: `Anti-analysis detonation-gate: ${ctx.antiAnalysisExitCount} silent process.exit() guards reading the environment${ctx.hasFromCharCode ? ', charcode-obfuscated' : ''}${ctx.hasHostRecon ? ', with host reconnaissance' : ''} — payload refuses to run under analysis (sandbox/CI/honeypot evasion).`,
+        file: ctx.relFile
+      });
+    }
+  }
+
   // SANDWORM_MODE: zlib inflate + base64 decode + eval/Function/Module._compile = obfuscated payload
   if (ctx.hasZlibInflate && ctx.hasBase64Decode && ctx.hasDynamicExec) {
     // FIX 4: dist/build files get LOW severity (bundlers legitimately use zlib+base64+eval)

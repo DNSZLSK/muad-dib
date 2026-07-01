@@ -13,6 +13,7 @@ const {
   handleWithStatement,
   handlePostWalk
 } = require('./ast-detectors');
+const { detectAnalyzerHoneytoken, countExitGuards, hasHostRecon } = require('./ast-detectors/anti-evasion.js');
 
 // Check if credential keywords appear INSIDE regex literals or new RegExp() patterns.
 // Only true when the keyword is part of the regex pattern itself, not just a string elsewhere in the file.
@@ -152,11 +153,19 @@ function analyzeFile(content, filePath, basePath) {
       return names;
     })(),
     evalAliases: new Map(),           // B1: variable name → 'eval'|'Function'
+    envAliases: new Set(),            // AST-018 alias fix: names bound to process.env (`var env = process.env`)
     moduleLoadDirectAliases: new Set(), // B3: destructured _load from require('module')
     objectPropertyMap: new Map(),     // B5: objName → Map<propName, stringValue>
     concatValues: new Map(),          // B2: varName → { value, operands } for concat strings with ≥3 operands
     stringVarValues: new Map(),       // Variable reassignment tracking: varName → string value
     hasFromCharCode: content.includes('fromCharCode'),
+    // Anti-analysis / sandbox evasion (2026, @longzy DPRK). Structural "detonation-gate wall"
+    // magnitude + host recon + a charcode-hidden analyzer-honeytoken reference. Aggregated in
+    // handlePostWalk. See ast-detectors/anti-evasion.js.
+    antiAnalysisExitCount: countExitGuards(content),
+    hasHostRecon: hasHostRecon(content),
+    hasProcessEnvRead: /process\s*\.\s*env\b/.test(content),
+    analyzerHoneytokenHit: detectAnalyzerHoneytoken(content),
     hasJsReverseShell: /\bnet\.Socket\b/.test(content) &&
       /\.connect\s*\(/.test(content) &&
       /\.pipe\b/.test(content) &&

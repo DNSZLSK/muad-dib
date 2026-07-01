@@ -30,7 +30,7 @@
 
 npm and PyPI supply-chain attacks are exploding. Shai-Hulud compromised 25K+ repos in 2025. Existing tools detect threats but don't help you respond.
 
-MUAD'DIB combines **20 parallel scanners** (266 detection rules), a **deobfuscation engine**, **inter-module dataflow analysis**, **compound scoring** (17 compound rules), and a gVisor/Docker sandbox to detect known threats and suspicious behavioral patterns in npm and PyPI packages. An XGBoost classifier exists in the codebase but is **currently inactive** (see [Evaluation Metrics](#evaluation-metrics) → ML Classifier section).
+MUAD'DIB combines **20 parallel scanners** (274 detection rules), a **deobfuscation engine**, **inter-module dataflow analysis**, **compound scoring** (17 compound rules), and a gVisor/Docker sandbox to detect known threats and suspicious behavioral patterns in npm and PyPI packages. An XGBoost classifier exists in the codebase but is **currently inactive** (see [Evaluation Metrics](#evaluation-metrics) → ML Classifier section).
 
 ---
 
@@ -202,9 +202,9 @@ muaddib replay                     # Ground truth validation (90/94 TPR@3, v2.11
 | Python Source (PYSRC) | Import-time / install-time RCE patterns in `__init__.py` / `setup.py` (v2.11.41 — closes TrapDoor PyPI gap) |
 | Python AST (PYAST) | Tree-sitter-Python AST with taint-aware detectors (v2.11.42+) |
 
-### 266 detection rules
+### 274 detection rules
 
-All rules (261 RULES + 5 PARANOID) are mapped to MITRE ATT&CK techniques. See [SECURITY.md](SECURITY.md#detection-rules-v211117) for the complete rules reference.
+All rules (269 RULES + 5 PARANOID) are mapped to MITRE ATT&CK techniques. See [SECURITY.md](SECURITY.md#detection-rules-v211117) for the complete rules reference.
 
 ### Detected campaigns
 
@@ -401,7 +401,7 @@ npm test
 - [Documentation Index](docs/INDEX.md) - All documentation in one place
 - [Evaluation Methodology](docs/EVALUATION_METHODOLOGY.md) - Experimental protocol, holdout scores
 - [Threat Model](docs/threat-model.md) - What MUAD'DIB detects and doesn't detect
-- [Security Policy](SECURITY.md) - Detection rules reference (261 rules)
+- [Security Policy](SECURITY.md) - Detection rules reference (269 rules)
 - [Security Audit](docs/SECURITY_AUDIT.md) - Bypass validation report
 - [FP Analysis](docs/EVALUATION.md) - Historical false positive analysis
 

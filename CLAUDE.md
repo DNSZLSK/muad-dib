@@ -113,7 +113,7 @@ Never skip documentation updates when publishing a new version.
 |--------|-------|
 | Version | **2.11.117** |
 | Tests | **4414** passed, 0 failed, across 141 files (14511 skipped when Docker absent) |
-| Rules | **266** (261 RULES + 5 PARANOID - v2.11.67/70 Phantom Gyp adds PKG-023 `gyp_command_exec` + COMPOUND-017 `gyp_phantom_exec`) |
+| Rules | **274** (269 RULES + 5 PARANOID - v2.11.67/70 Phantom Gyp adds PKG-023 `gyp_command_exec` + COMPOUND-017 `gyp_phantom_exec`; 2026-07 anti-evasion adds AST-095 `anti_analysis_evasion` + AST-096 `analyzer_honeytoken_reference`) |
 | Scanners | **20 parallel** (Promise.allSettled) + **2 pre-analysis** (module-graph/, deobfuscate) + **1 async parser bootstrap** (python-ast WASM init, no analysis emitted) + **6 conditional/post-processing** (paranoid, 3× temporal-*, reachability, phantom-gyp) + **1 metadata** (npm-registry). 33 fichiers `src/scanner/*.js` + 3 dirs : `ast-detectors/` (13), `module-graph/` (9), `python-ast-detectors/` (6 fichiers). Détails : ARCHITECTURE.md. |
 | Ground Truth size | **96 samples** (was 67 in v2.10.95). 22 added 2026-05-25: 16 synthetic for new PYSRC/PYAST/AST-092/AICONF-004/PKG-022 rules (GT-068..083), 6 real-world tarballs from VPS archive (GT-084..089), 7 reconstructions from `data/all-review-results.json` review reasoning (GT-090..096). 13 PyPI samples (was 0). 3 explicit `tpr_tier: tpr3` (HIGH/MEDIUM rules that don't cross 20 in isolation, documented in `attacks.json` schema). |
 | TPR@3 (detection rate) | **95.74%** (90/94 in-scope) — v2.11.48 full re-measurement on enriched GT. 4 misses: same browser-only patterns as historical (lottie-player, polyfill-io, trojanized-jquery) + 1 other. |

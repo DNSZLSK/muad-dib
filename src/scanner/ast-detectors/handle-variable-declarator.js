@@ -24,6 +24,14 @@ function handleVariableDeclarator(node, ctx) {
       ctx.staticAssignments.add(node.id.name);
     }
 
+    // AST-018 alias capture (@longzy): `var env = process.env` — record the alias so a later
+    // `env[String.fromCharCode(...)]` access resolves back to process.env in the member handler.
+    if (ctx.envAliases && node.init?.type === 'MemberExpression' && !node.init.computed &&
+        node.init.object?.type === 'Identifier' && node.init.object.name === 'process' &&
+        node.init.property?.type === 'Identifier' && node.init.property.name === 'env') {
+      ctx.envAliases.add(node.id.name);
+    }
+
     // v2.10.73 P2: Track WHERE the variable's value originated — used by AST-006
     // to distinguish plugin loaders (LOW) from real obfuscation (HIGH) from
     // credential exfil vectors (CRITICAL). See src/scanner/ast-detectors/handle-call-expression.js
