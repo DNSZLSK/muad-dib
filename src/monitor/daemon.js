@@ -635,7 +635,13 @@ function handleMemoryPressure(level, ratio, rssRatio, recentlyScanned, downloads
       // first (newest survive — most likely to still exist for re-scan), protected only as
       // a last resort, and LEDGERS every drop. Closes the v2.10.88 gap where the raw
       // splice(0,n) silently dropped protected scans (CLAUDE.md "ne jamais perdre de scan").
-      const { dropped, droppedProtected, spilled } = evictFromScanQueueBulk(scanQueue, EMERGENCY_QUEUE_KEEP, 'mem_emergency');
+      // IOC-aware anti-spill: never shed a queued name already known-malicious in the IOC DB.
+      // loadCachedIOCs() is a 10s-throttled singleton the daemon keeps warm (queue.js calls it
+      // per scan), so this is a ref-return — not a fresh alloc — even inside the reclaim path.
+      // Best-effort: on any failure the index is null and eviction falls back to prior behavior.
+      let _iocIndex = null;
+      try { _iocIndex = require('../ioc/updater.js').loadCachedIOCs(); } catch { /* degrade to prior behavior */ }
+      const { dropped, droppedProtected, spilled } = evictFromScanQueueBulk(scanQueue, EMERGENCY_QUEUE_KEEP, 'mem_emergency', null, { iocIndex: _iocIndex });
       summary.queueDropped = dropped;
       summary.queueDroppedProtected = droppedProtected;
       summary.queueSpilled = spilled || 0;
