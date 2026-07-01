@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const AdmZip = require('adm-zip');
-const { MAX_TARBALL_SIZE, DOWNLOAD_TIMEOUT } = require('./constants.js');
+const { MAX_TARBALL_SIZE, DOWNLOAD_TIMEOUT, MAX_EXTRACTED_SIZE } = require('./constants.js');
 const { registryAuthHeaders } = require('./registry-auth.js');
 
 // Allowed redirect domains for tarball downloads (SSRF protection)
@@ -241,6 +241,34 @@ function detectArchiveFormat(archivePath) {
   return 'unknown';
 }
 
+// SECURITY (M4 — audit 2026-07): PARTIAL tar-bomb mitigation.
+// Reads the gzip ISIZE trailer (last 4 bytes = uncompressed size mod 2^32) in O(1) memory,
+// synchronously, so _extractTarGzImpl can reject a declared-oversize archive BEFORE spawning
+// `tar` (rejecting pre-spawn matters: worker.terminate() can orphan a running tar child that
+// keeps writing to disk). LIMITATION — this is a PARTIAL mitigation, NOT a hard cap: because
+// ISIZE is mod 2^32, a bomb forged to a multiple of 4GB + (<1GB) wraps under the cap and evades
+// this hint; that narrow residual falls back to the 60s tar timeout. A complete cap requires
+// streaming decompression, which would make extraction async and ripple to all sync callers —
+// tracked as separate tech debt, deliberately not done here.
+function readGzipUncompressedHint(tgzPath) {
+  let fd;
+  try {
+    fd = fs.openSync(tgzPath, 'r');
+    const { size } = fs.fstatSync(fd);
+    if (size < 18) return null; // too small to be a valid gzip member
+    const magic = Buffer.alloc(2);
+    fs.readSync(fd, magic, 0, 2, 0);
+    if (magic[0] !== 0x1f || magic[1] !== 0x8b) return null; // not gzip — let tar error naturally
+    const isize = Buffer.alloc(4);
+    fs.readSync(fd, isize, 0, 4, size - 4);
+    return isize.readUInt32LE(0);
+  } catch {
+    return null; // unreadable hint — never block extraction on a hint failure
+  } finally {
+    if (fd !== undefined) { try { fs.closeSync(fd); } catch { /* ignore */ } }
+  }
+}
+
 /**
  * Extract a tar.gz tarball with the system `tar` binary. Used for npm
  * tarballs and PyPI sdists. Internal implementation — call extractArchive
@@ -248,6 +276,14 @@ function detectArchiveFormat(archivePath) {
  * scanner/temporal-ast-diff.js callsite.
  */
 function _extractTarGzImpl(tgzPath, destDir) {
+  // SECURITY (M4): reject a declared-oversize gzip before `tar` ever runs. PARTIAL mitigation
+  // (bypassable by a 4GB-multiple + <1GB forged bomb) — see readGzipUncompressedHint.
+  const uncompressedHint = readGzipUncompressedHint(tgzPath);
+  if (uncompressedHint !== null && uncompressedHint > MAX_EXTRACTED_SIZE) {
+    throw new Error(
+      `Tar extract refused: declared uncompressed size ${uncompressedHint} exceeds ${MAX_EXTRACTED_SIZE} (possible decompression bomb)`
+    );
+  }
   // Use cwd + relative paths so C: never appears in tar arguments
   // (GNU tar treats C: as remote host, bsdtar doesn't support --force-local)
   const tgzDir = path.dirname(path.resolve(tgzPath));
@@ -418,6 +454,7 @@ module.exports = {
   extractArchive,
   extractArchiveOffThread,
   detectArchiveFormat,
+  _readGzipUncompressedHint: readGzipUncompressedHint,
   sanitizePackageName,
   isAllowedDownloadRedirect,
   normalizeHostname,

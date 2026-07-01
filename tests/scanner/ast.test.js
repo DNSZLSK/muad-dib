@@ -53,6 +53,45 @@ async function runAstTests() {
     assertIncludes(output, 'Function', 'Should detect Function');
   });
 
+  // --- E3 (audit 2026-07): ReDoS guard for the .replace()-chain resolver ---
+  const { _isCatastrophicReplaceRegex } = require('../../src/scanner/ast-detectors/handle-call-expression.js');
+
+  test('AST/E3: catastrophic regex shapes are recognised; safe ones are not', () => {
+    for (const bad of ['(a+)+$', '(a*)*', '(a+)*b', '([ab]+)+', '(\\d{1,3})+', '(a|a)*', '(ab|a)+', 'x{2,}(a+)+']) {
+      assert(_isCatastrophicReplaceRegex(bad), `should flag catastrophic regex: ${bad}`);
+    }
+    for (const ok of ['1', '0', '3', '[013]', '\\d', 'abc', '(abc)', 'foo|bar', 'a.b']) {
+      assert(!_isCatastrophicReplaceRegex(ok), `should NOT flag safe regex: ${ok}`);
+    }
+  });
+
+  await asyncTest('AST/E3: safe leet-speak .replace() chain resolving to child_process is still detected', async () => {
+    const code = 'const x = "ch1ld_pr0c3ss".replace(/1/g,"i").replace(/0/g,"o").replace(/3/g,"e"); module.exports = x;';
+    const tmp = makeTempPkg(code);
+    try {
+      const result = await runScanDirect(tmp);
+      const hit = result.threats.find(t => t.type === 'string_mutation_obfuscation');
+      assert(hit, 'safe leet-speak .replace() chain must still be flagged as string_mutation_obfuscation');
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  await asyncTest('AST/E3: a ReDoS-shaped regex in a .replace() chain does not hang the scanner', async () => {
+    const code = 'const x = "' + 'a'.repeat(28) + '!".replace(/(a+)+$/, "z").replace(/b/g,"c").replace(/d/g,"e"); module.exports = x;';
+    const tmp = makeTempPkg(code);
+    try {
+      const start = Date.now();
+      await runScanDirect(tmp);
+      const elapsed = Date.now() - start;
+      // Fixed: the pattern is refused instantly (~baseline scan time). Un-guarded, this
+      // same regex takes ~35s on 28 chars. 15s cleanly separates the two on any machine.
+      assert(elapsed < 15000, `scan must not hang on a ReDoS-shaped .replace() chain (took ${elapsed}ms)`);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   await asyncTest('AST: Dynamic env access flagged as MEDIUM (fast)', async () => {
     const result = await runScanCached(path.join(TESTS_DIR, 'ast'));
     const dynamicEnv = result.threats.find(t => t.type === 'env_access' && t.severity === 'MEDIUM');

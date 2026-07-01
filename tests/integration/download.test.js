@@ -5,6 +5,48 @@ async function runDownloadTests() {
 
   const { isAllowedDownloadRedirect, sanitizePackageName, MAX_REDIRECTS } = require('../../src/shared/download.js');
 
+  // --- M4 (audit 2026-07): partial tar-bomb mitigation via gzip ISIZE pre-check ---
+  {
+    const zlib = require('zlib');
+    const fsx = require('fs');
+    const osx = require('os');
+    const pathx = require('path');
+    const { extractArchive, _readGzipUncompressedHint } = require('../../src/shared/download.js');
+    const { MAX_EXTRACTED_SIZE } = require('../../src/shared/constants.js');
+
+    test('M4: readGzipUncompressedHint reads the gzip ISIZE (small = not flagged), null for non-gzip', () => {
+      const tmp = fsx.mkdtempSync(pathx.join(osx.tmpdir(), 'm4u-'));
+      try {
+        const gz = pathx.join(tmp, 'small.tgz');
+        fsx.writeFileSync(gz, zlib.gzipSync(Buffer.alloc(1000, 0x41)));
+        const hint = _readGzipUncompressedHint(gz);
+        assert(hint === 1000, `ISIZE should equal 1000, got ${hint}`);
+        assert(hint < MAX_EXTRACTED_SIZE, 'a normal small tarball must not be flagged by the size cap');
+        const notgz = pathx.join(tmp, 'plain.tgz');
+        fsx.writeFileSync(notgz, Buffer.from('plain text, not a gzip stream'));
+        assert(_readGzipUncompressedHint(notgz) === null, 'non-gzip input must yield null (no false size gate)');
+      } finally {
+        fsx.rmSync(tmp, { recursive: true, force: true });
+      }
+    });
+
+    test('M4: extraction refused before tar when the gzip declares an oversize uncompressed length', () => {
+      const tmp = fsx.mkdtempSync(pathx.join(osx.tmpdir(), 'm4i-'));
+      try {
+        const buf = zlib.gzipSync(Buffer.from('content is irrelevant — the size check runs first'));
+        buf.writeUInt32LE(2 * 1024 * 1024 * 1024, buf.length - 4); // forge ISIZE = 2GB (> 1GB cap)
+        const tgz = pathx.join(tmp, 'bomb.tgz');
+        fsx.writeFileSync(tgz, buf);
+        let threw = null;
+        try { extractArchive(tgz, tmp); } catch (e) { threw = e; }
+        assert(threw, 'extraction must throw on a declared-oversize archive');
+        assert(/refused|exceeds/i.test(threw.message), `must be the size-refusal error, got: ${threw && threw.message}`);
+      } finally {
+        fsx.rmSync(tmp, { recursive: true, force: true });
+      }
+    });
+  }
+
   // --- isAllowedDownloadRedirect ---
 
   test('DOWNLOAD: Allows HTTPS to registry.npmjs.org', () => {

@@ -85,6 +85,10 @@ const NPM_PACKAGE_REGEX = /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*
 // Download/extraction limits
 const MAX_TARBALL_SIZE = 50 * 1024 * 1024; // 50MB
 const DOWNLOAD_TIMEOUT = 30_000; // 30 seconds
+// Decompressed-size cap for tar.gz extraction (M4). PARTIAL tar-bomb mitigation only —
+// bypassable by a bomb forged to a multiple of 4GB + (<1GB), because the gzip ISIZE trailer
+// this is checked against is mod 2^32. A hard cap needs streaming decompression (separate tech debt).
+const MAX_EXTRACTED_SIZE = 1024 * 1024 * 1024; // 1GB
 
 // Shared scanner constants
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB — skip files larger than this to avoid memory issues
@@ -146,4 +150,4 @@ function clearASTCache() {
   _astCache.clear();
 }
 
-module.exports = { REHABILITATED_PACKAGES, NPM_PACKAGE_REGEX, MAX_TARBALL_SIZE, DOWNLOAD_TIMEOUT, MAX_FILE_SIZE, ACORN_OPTIONS, safeParse, clearASTCache, getMaxFileSize, setMaxFileSize, resetMaxFileSize };
+module.exports = { REHABILITATED_PACKAGES, NPM_PACKAGE_REGEX, MAX_TARBALL_SIZE, DOWNLOAD_TIMEOUT, MAX_EXTRACTED_SIZE, MAX_FILE_SIZE, ACORN_OPTIONS, safeParse, clearASTCache, getMaxFileSize, setMaxFileSize, resetMaxFileSize };
