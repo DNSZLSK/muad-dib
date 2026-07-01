@@ -166,7 +166,12 @@ const SINGLE_FIRE_CRITICAL_TYPES = new Set([
   // Phantom Gyp compound (Phase 1b): only fires when the invoked configure-time script
   // is INDEPENDENTLY judged malicious, so it carries the same unambiguous-malware weight
   // as the IOC/hash matches above — FP≈0 by construction justifies the single-fire floor.
-  'gyp_phantom_exec'
+  'gyp_phantom_exec',
+  // crypto_exfil (COMPOUND-019): harvest + RSA/AES encryption + network to a non-benign
+  // dest in the same file (FP≈0 by construction). Floors a lone CRITICAL to 75 so it is
+  // not buried at 25 on PyPI, where a single CRITICAL does not stack co-signals the way
+  // the npm side does (env_access + credential_regex_harvest + ... → 100).
+  'crypto_exfil'
 ]);
 const SINGLE_FIRE_CRITICAL_FLOOR = 75;
 const SINGLE_FIRE_MIN_SEVERITY_RANK = 2; // HIGH

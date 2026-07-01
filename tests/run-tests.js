@@ -81,6 +81,7 @@ const { runCyclonedxTests } = require('./scanner/cyclonedx.test');
 const { runAstNegativeTests } = require('./scanner/ast-negative.test');
 const { runAstReconTests } = require('./scanner/ast-recon.test');
 const { runCryptoExfilTests } = require('./scanner/crypto-exfil.test');
+const { runCryptoExfilPythonTests } = require('./scanner/crypto-exfil-python.test');
 const { runAstBypassRegressionTests } = require('./scanner/ast-bypass-regression.test');
 const { runIntentGraphTests } = require('./scanner/intent-graph.test');
 const { runTrustedDepDiffTests } = require('./scanner/trusted-dep-diff.test');
@@ -281,6 +282,7 @@ async function timed(name, fn) {
   await timed('ast-negative', runAstNegativeTests);
   await timed('ast-recon', runAstReconTests);
   await timed('crypto-exfil', runCryptoExfilTests);
+  await timed('crypto-exfil-python', runCryptoExfilPythonTests);
   await timed('ast-bypass-regression', runAstBypassRegressionTests);
   await timed('trusted-dep-diff', runTrustedDepDiffTests);
 
