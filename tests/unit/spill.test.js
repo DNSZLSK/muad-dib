@@ -262,6 +262,50 @@ async function runSpillTests() {
     } finally { try { fs.unlinkSync(f); } catch {} }
   });
 
+  // IOC-aware anti-spill (@longzy DPRK post-mortem): an item can carry NO isIOCMatch flag
+  // (its enqueue-time lookup missed, was version-gated, or the IOC DB was refreshed while it
+  // sat in the backlog) yet its NAME is known-malicious NOW. The injected iocIndex must keep
+  // it in the live queue instead of shedding it. Covers BOTH index branches: wildcard
+  // (all-versions) and packagesMap (specific-version entries present).
+  test('SPILL: evictFromScanQueueBulk keeps IOC-known NAMES in the live queue (name-level, no isIOCMatch flag)', () => {
+    const f = path.join(os.tmpdir(), `spill-${Date.now()}-ioc-name.jsonl`);
+    try {
+      withSpillOn(f, () => {
+        const iocIndex = {
+          wildcardPackages: new Set(['evil-wild']),
+          packagesMap: new Map([['evil-map', [{ version: '1.0.0' }]]])
+        };
+        // evil-wild + evil-map are the OLDEST → first victims WITHOUT the guard.
+        const q = [item('evil-wild'), item('evil-map'), item('b'), item('c'), item('d')];
+        const ledgered = [];
+        const r = evictFromScanQueueBulk(q, 2, 'mem_emergency', e => ledgered.push(e), { iocIndex });
+        assert(r.dropped === 3, `3 evicted (got ${JSON.stringify(r)})`);
+        const survivors = q.map(it => it.name).sort();
+        assert(JSON.stringify(survivors) === JSON.stringify(['evil-map', 'evil-wild']),
+          `both IOC-known names survived, plain items evicted (live queue: ${survivors.join(',')})`);
+        const backlog = readBacklog(f).map(e => e.name).sort();
+        assert(JSON.stringify(backlog) === JSON.stringify(['b', 'c', 'd']), `only plain items spilled (backlog: ${backlog.join(',')})`);
+        assert(!ledgered.some(l => l.name === 'evil-wild' || l.name === 'evil-map'), 'IOC-known names never ledgered as evicted');
+      });
+    } finally { try { fs.unlinkSync(f); } catch {} }
+  });
+
+  test('SPILL: evictFromScanQueueBulk still spills a name NOT in the IOC DB (guard is targeted, not a blanket keep)', () => {
+    const f = path.join(os.tmpdir(), `spill-${Date.now()}-ioc-neg.jsonl`);
+    try {
+      withSpillOn(f, () => {
+        const iocIndex = { wildcardPackages: new Set(['some-other-malware']), packagesMap: new Map() };
+        const q = [item('plain-old'), item('plain-new')];
+        const ledgered = [];
+        const r = evictFromScanQueueBulk(q, 1, 'mem_emergency', e => ledgered.push(e), { iocIndex });
+        assert(r.dropped === 1, `one unknown item evicted (got ${JSON.stringify(r)})`);
+        const backlog = readBacklog(f).map(e => e.name);
+        assert(JSON.stringify(backlog) === JSON.stringify(['plain-old']), `unknown oldest spilled (backlog: ${backlog.join(',')})`);
+        assert(q.length === 1 && q[0].name === 'plain-new', 'newest unknown kept');
+      });
+    } finally { try { fs.unlinkSync(f); } catch {} }
+  });
+
   test('SPILL: evictFromScanQueueBulk degrades to dropped when the spill write fails', () => {
     const f = path.join(os.tmpdir(), `spill-${Date.now()}-bulkfail.jsonl`);
     withSpillOn(f, () => {

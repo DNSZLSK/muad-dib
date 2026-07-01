@@ -32,6 +32,20 @@ function _isProtected(item) {
   return !!(item && (item.isIOCMatch || item.isBurst || item.firstPublish || item.atoSignal || item.isATOBurstExtra || item.interrupted));
 }
 
+// IOC-aware anti-spill (2026-07, @longzy DPRK campaign post-mortem): a queued package whose
+// NAME is already in the IOC database is known-malicious, and confirming it is a cheap name
+// lookup — so it must never be shed under memory pressure, even when its enqueue-time
+// `isIOCMatch` flag is stale (the IOC DB refreshed while the item sat in the backlog) or was
+// version-gated. Name-level: a wildcard (all-versions-malicious) OR any specific-version entry
+// counts. Best-effort — a missing/malformed index yields false (the exact prior behavior).
+function _isIOCKnownByName(item, iocIndex) {
+  if (!item || !item.name || !iocIndex) return false;
+  const wild = iocIndex.wildcardPackages;
+  const pkgs = iocIndex.packagesMap;
+  return !!((wild && typeof wild.has === 'function' && wild.has(item.name)) ||
+            (pkgs && typeof pkgs.has === 'function' && pkgs.has(item.name)));
+}
+
 // How far from the head we scan for an unprotected victim. Protected items are a small
 // fraction of the flood, so a victim is almost always found within a few slots; the bound
 // keeps eviction O(window) under sustained overflow (CLAUDE.md §2 bounded resources).
@@ -113,18 +127,32 @@ function enqueueScan(scanQueue, item, stats, max = MAX_SCAN_QUEUE) {
  * the daemon (which holds the same array reference) sees the mutation. Best-effort ledger;
  * never throws. `ledgerFn` is injectable for tests; defaults to state.appendScanLedger.
  *
+ * `opts.iocIndex` (optional {packagesMap, wildcardPackages}) additionally protects any queued
+ * NAME already in the IOC DB from being shed — a known-malicious package must never be lost to
+ * memory pressure (IOC-aware anti-spill). Injected by the daemon (the live 10s-singleton), not
+ * auto-loaded here, so callers that omit it keep the exact prior behavior.
+ *
  * @returns {{dropped:number, droppedProtected:number}}
  */
-function evictFromScanQueueBulk(scanQueue, targetKeep, source = 'bulk_evict', ledgerFn = null) {
+function evictFromScanQueueBulk(scanQueue, targetKeep, source = 'bulk_evict', ledgerFn = null, opts = {}) {
   const before = scanQueue.length;
   const keep = Math.max(0, targetKeep | 0);
   if (before <= keep) return { dropped: 0, droppedProtected: 0 };
   const toDrop = before - keep;
 
-  // Victim set: oldest unprotected first, then (only if short) oldest protected.
+  // IOC-aware anti-spill: on top of the standard _isProtected classes, protect any queued
+  // NAME already in the IOC DB. The index is INJECTED (daemon passes the live 10s-singleton;
+  // tests pass a fabricated one) — no auto-load here, so callers that omit it keep the exact
+  // prior behavior (and unit paths don't drag in the 237MB DB).
+  const iocIndex = opts.iocIndex || null;
+  const isKept = iocIndex
+    ? (item) => _isProtected(item) || _isIOCKnownByName(item, iocIndex)
+    : _isProtected;
+
+  // Victim set: oldest unkept first, then (only if short) oldest kept item.
   const dropSet = new Set();
   for (let i = 0; i < before && dropSet.size < toDrop; i++) {
-    if (!_isProtected(scanQueue[i])) dropSet.add(i);
+    if (!isKept(scanQueue[i])) dropSet.add(i);
   }
   let droppedProtected = 0;
   if (dropSet.size < toDrop) {
@@ -172,7 +200,7 @@ function evictFromScanQueueBulk(scanQueue, targetKeep, source = 'bulk_evict', le
       appendLedger({
         name: item.name, version: item.version, ecosystem: item.ecosystem,
         outcome: spilled ? 'spilled' : 'dropped',
-        source: (_isProtected(item) ? `${source}_protected` : source) + (spilled ? '_spill' : ''),
+        source: (isKept(item) ? `${source}_protected` : source) + (spilled ? '_spill' : ''),
         // AUDIT-A1 observability: record whether a DROPPED item was a first-publish
         // (real coverage loss) vs a burst-extra (version-spam, expected). Lets us
         // measure if the memory breaker is evicting genuine new packages.
