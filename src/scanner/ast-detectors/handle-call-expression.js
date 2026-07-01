@@ -53,10 +53,9 @@ const {
 //     pattern (e.g. nested groups like `((a+)x)+`) can slip past it.
 //   Layer 2 (hard bound): the monitor runs every scan in a Worker with a 45s
 //     STATIC_SCAN_TIMEOUT_MS -> worker.terminate() (src/monitor/queue.js). V8 TerminateExecution
-//     interrupts even a running regex (verified on Node 24 / V8 13.6: terminate returns ~6ms
-//     mid-backtrack) — TO CONFIRM on the VPS Node version: interruptible regexps have been in
-//     V8 since ~Node 16, but this was only tested on Node 24. On that basis a layer-1 bypass
-//     is bounded to <=45s and the worker is killed.
+//     interrupts even a running regex — verified empirically that terminate() returns
+//     mid-backtrack on BOTH the dev box (Node 24 / V8 13.6: ~6ms) and the production VPS
+//     (Node 20.20.0: ~8ms). So a layer-1 bypass is bounded to <=45s and the worker is killed.
 //     The CLI runs the pipeline inline (src/index.js) and has no such backstop — one-shot,
 //     Ctrl-C-able, lower severity.
 //
