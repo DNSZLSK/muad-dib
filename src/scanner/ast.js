@@ -13,7 +13,7 @@ const {
   handleWithStatement,
   handlePostWalk
 } = require('./ast-detectors');
-const { detectAnalyzerHoneytoken, countExitGuards, hasHostRecon } = require('./ast-detectors/anti-evasion.js');
+const { detectAnalyzerHoneytoken, detectEnvMarkerEnumeration, countExitGuards, hasHostRecon } = require('./ast-detectors/anti-evasion.js');
 
 // Check if credential keywords appear INSIDE regex literals or new RegExp() patterns.
 // Only true when the keyword is part of the regex pattern itself, not just a string elsewhere in the file.
@@ -166,6 +166,7 @@ function analyzeFile(content, filePath, basePath) {
     hasHostRecon: hasHostRecon(content),
     hasProcessEnvRead: /process\s*\.\s*env\b/.test(content),
     analyzerHoneytokenHit: detectAnalyzerHoneytoken(content),
+    envMarkerEnumHit: detectEnvMarkerEnumeration(content),
     hasJsReverseShell: /\bnet\.Socket\b/.test(content) &&
       /\.connect\s*\(/.test(content) &&
       /\.pipe\b/.test(content) &&

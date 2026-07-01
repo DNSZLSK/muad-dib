@@ -5,8 +5,8 @@ const { networkDestinationsAllBenign } = require('../../sdk-destination.js');
 function handlePostWalk(ctx) {
   // ── Anti-analysis / sandbox evasion (2026, @longzy DPRK "Contagious Interview") ──
   // We detect the EVASION rather than trying to hide the sandbox (an unwinnable arms race).
-  //  (1) analyzer_honeytoken_reference (CRITICAL, FP~0): the file hides — behind charcode
-  //      encoding — a check for a known analysis-environment tripwire (our own MUADDIB_GVISOR,
+  //  (1) analyzer_honeytoken_reference (CRITICAL, FP~0): the file hides — behind charcode/base64/hex
+  //      encoding, OR via process.env key-enumeration — a check for a known tripwire (our own MUADDIB_GVISOR,
   //      a peer analyzer marker, a poison-token name). Only the OBFUSCATED form is matched, so
   //      MUAD'DIB's own sandbox code (plaintext) and legit security tooling never trip it. The
   //      marker is a planted honeytoken: kept public+stable so any checker self-incriminates.
@@ -19,7 +19,14 @@ function handlePostWalk(ctx) {
     ctx.threats.push({
       type: 'analyzer_honeytoken_reference',
       severity: 'CRITICAL',
-      message: `Charcode-hidden reference to an analysis-environment marker ("${ctx.analyzerHoneytokenHit}") — sandbox/analyzer evasion. No legitimate package obfuscates a check for this tripwire.`,
+      message: `Obfuscated (charcode/base64/hex-encoded) reference to an analysis-environment marker ("${ctx.analyzerHoneytokenHit}") — sandbox/analyzer evasion. No legitimate package encodes a check for this tripwire.`,
+      file: ctx.relFile
+    });
+  } else if (ctx.envMarkerEnumHit) {
+    ctx.threats.push({
+      type: 'analyzer_honeytoken_reference',
+      severity: 'CRITICAL',
+      message: `Enumerates process.env keys and tests them against an analyzer-marker prefix (${ctx.envMarkerEnumHit}) — marker-agnostic sandbox/analyzer evasion (matches any MUADDIB_* var, not a fixed name). No legitimate package scans the environment for this tripwire.`,
       file: ctx.relFile
     });
   } else if (
