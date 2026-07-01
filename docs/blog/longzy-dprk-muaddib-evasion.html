@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Quand les attaquants codent l'évasion contre MUAD'DIB - MUAD'DIB</title>
+  <meta name="description" content="Analyse d'une campagne npm (mode opératoire DPRK « Contagious Interview ») dont le payload teste le marqueur de sandbox MUADDIB_GVISOR. Détection statique, analyse du payload, délestage mémoire, traitement du marqueur.">
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="article">
+  <meta property="og:title" content="Quand les attaquants codent l'évasion contre MUAD'DIB">
+  <meta property="og:description" content="Analyse d'une campagne npm (mode opératoire DPRK « Contagious Interview ») dont le payload teste le marqueur de sandbox MUADDIB_GVISOR. Détection statique, analyse du payload, délestage mémoire, traitement du marqueur.">
+  <meta property="og:image" content="../img/og-default.png">
+  <meta property="og:site_name" content="MUAD'DIB">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="../img/og-default.png">
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="../vendor/github-dark.min.css">
+  <script src="../vendor/highlight.min.js"></script>
+  <script>hljs.highlightAll();</script>
+</head>
+<body>
+
+<nav>
+  <a href="../" class="site-name">muad-dib</a>
+  <a href="../">accueil</a>
+  <a href="./">blog</a>
+  <a href="https://github.com/DNSZLSK/muad-dib" target="_blank" rel="noopener">github</a>
+  <a href="https://www.npmjs.com/package/muaddib-scanner" target="_blank" rel="noopener">npm</a>
+</nav>
+
+<main>
+  <a href="./" class="back-link">&larr; Blog</a>
+
+  <article>
+    <div class="article-meta">
+      <h1>Quand les attaquants codent l'évasion contre MUAD'DIB</h1>
+      <span class="date">2026-07-01</span>
+      <div class="tags">
+        <span class="tag">détection</span>
+        <span class="tag">dprk</span>
+        <span class="tag">npm</span>
+        <span class="tag">évasion</span>
+        <span class="tag">sandbox</span>
+        <span class="tag">live</span>
+      </div>
+    </div>
+
+    <div class="article-content">
+
+      <p>Le 28 juin 2026, le monitor MUAD'DIB a détecté le package npm <code>longzy-basic-ui@2.0.3</code> (score 100/100, sévérité CRITICAL). Son script postinstall (<code>.prepare.cjs</code>) implémente une vingtaine de gardes anti-analyse. L'une d'elles teste la variable d'environnement <code>MUADDIB_GVISOR</code> — marqueur injecté par la sandbox de MUAD'DIB — dont le nom est reconstruit par <code>String.fromCharCode(...)</code> pour ne pas apparaître en clair dans le source.</p>
+
+      <p>Le package appartient à une campagne attribuée au mode opératoire nord-coréen « Contagious Interview », comprenant 5 packages répartis sur 3 scopes npm. Ce rapport documente la détection, l'analyse du payload, une perte de couverture liée au délestage mémoire du monitor, et le traitement retenu pour le marqueur <code>MUADDIB_GVISOR</code>.</p>
+
+      <h2>OpenSourceMalware (OSM)</h2>
+
+      <p><a href="https://opensourcemalware.com" target="_blank" rel="noopener">OpenSourceMalware</a> (OSM) est une base communautaire de menaces de la supply chain logicielle : packages (npm, PyPI…), dépôts, extensions, domaines et IP malveillants confirmés, documentés avec leurs indicateurs de compromission et vérifiés par la communauté avant publication. Elle est maintenue par Paul McCarty (Head of Research chez Safety, fondateur de SecureStack de 2017 à 2023). MUAD'DIB l'utilise comme source d'IOC, avec Aikido et le feed OSV <code>osv-malicious</code>.</p>
+
+      <p>L'API publique d'OSM expose un unique endpoint <code>query-latest</code> renvoyant les ~100 dernières menaces d'un écosystème, soit une fenêtre glissante d'environ deux jours, sans recherche par package ni backfill. L'ingestion se limite au contenu de cette fenêtre au moment de la collecte ; un package catalogué hors fenêtre n'est pas récupéré par ce canal. Ce point intervient dans la section sur le délestage.</p>
+
+      <p>La liste complète des scopes de l'opérateur a été communiquée par Paul McCarty, ce qui a permis de rattacher les packages à une même campagne.</p>
+
+      <h2>La campagne et son opérateur</h2>
+
+      <p>Le <code>package.json</code> de <code>longzy-basic-ui@2.0.3</code> contient les métadonnées suivantes :</p>
+
+      <pre><code class="language-json">"author": "yangguisheng &lt;yangguisheng@szlongzy.com&gt;",
+"homepage": "http://192.168.100.4:9088/app/lzy-basic-module.git",
+"repository": { "url": "http://192.168.100.4:9088/app/lzy-basic-module.git" }</code></pre>
+
+      <p>Elles indiquent un host de build interne (<code>192.168.100.4:9088</code>, instance Git privée) et un domaine d'auteur <code>szlongzy.com</code>. Selon l'intel communiquée par Paul McCarty (OSM), la même adresse <code>192.168.100.4</code> figure dans les indicateurs de <code>@longzy/react-native-polyfill</code>, ce qui rattache les scopes à un même opérateur.</p>
+
+      <p>L'opérateur répartit les packages sur plusieurs namespaces afin qu'un takedown d'un scope n'interrompe pas l'ensemble. Les 5 packages (3 scopes), tous catalogués par OSM, OSV ou Aikido :</p>
+
+      <table>
+        <tr><th>Package</th><th>Version</th><th>Catalogué par</th></tr>
+        <tr><td><code>longzy-basic-ui</code></td><td>2.0.3</td><td>Aikido + OSM</td></tr>
+        <tr><td><code>@longzy/react-native-polyfill</code></td><td>1.0.1</td><td>OSV (<code>osv-malicious</code>)</td></tr>
+        <tr><td><code>@digitalcnzz/embedded-sdk</code></td><td>1.0.7</td><td>OSM (infostealer, install-hook)</td></tr>
+        <tr><td><code>@digitalcnzz/commonmodule</code></td><td>1.0.3</td><td>OSM + Aikido</td></tr>
+        <tr><td><code>@sailing-package/core</code></td><td>10.0.18</td><td>OSM + Aikido</td></tr>
+      </table>
+
+      <p>Les noms imitent des packages react-native courants, ce qui correspond au mode opératoire « Contagious Interview » (dépendances piégées présentées lors de faux entretiens techniques).</p>
+
+      <h2>Détection de longzy-basic-ui</h2>
+
+      <p>Le 28 juin à 19:42 UTC, MUAD'DIB attribue au package un score de 100/100 (CRITICAL). Règles déclenchées :</p>
+
+      <table>
+        <tr><th>Règle</th><th>Sévérité</th><th>Objet</th></tr>
+        <tr><td><code>MUADDIB-FLOW-001</code></td><td>CRITICAL</td><td>Flux credential&rarr;réseau dans <code>.prepare.cjs</code></td></tr>
+        <tr><td><code>MUADDIB-COMPOUND-007</code></td><td>CRITICAL</td><td>Hook de cycle de vie exécutant un fichier malveillant (<code>lifecycle_file_exec</code>)</td></tr>
+        <tr><td><code>MUADDIB-COMPOUND-009</code></td><td>HIGH</td><td>Hook de cycle de vie + flux de données suspect (<code>lifecycle_dataflow</code>)</td></tr>
+        <tr><td><code>MUADDIB-PKG-001</code></td><td>MEDIUM</td><td>Script de cycle de vie suspect (<code>lifecycle_script</code>)</td></tr>
+      </table>
+
+      <p><code>FLOW-001</code> détecte un flux reliant une lecture de données sensibles (<code>process.env</code>, <code>os.hostname</code>, <code>os.userInfo</code>, <code>os.networkInterfaces</code>) à un envoi réseau (<code>https.request</code>). La détection est comportementale et ne dépend d'aucune signature. Le ledger du scan indique <code>sandbox: none</code> : la sandbox dynamique n'a pas été exécutée, le score provient uniquement de l'analyse statique.</p>
+
+      <p>Les quatre règles sont comportementales (flux de données, hooks de cycle de vie) et ne dépendent d'aucune base d'IOC. Le package n'est entré dans notre base d'IOC que le 29 juin (05:32, via OSM), soit après ce scan : la détection du 28 juin repose entièrement sur le comportement.</p>
+
+      <h2>Analyse du payload (.prepare.cjs)</h2>
+
+      <p>Le fichier est un script <code>prepare</code>/postinstall obfusqué par <code>String.fromCharCode</code>. Déobfusqué, il présente la structure d'un infostealer à exécution différée.</p>
+
+      <h3>1. Gardes anti-analyse</h3>
+
+      <p>Le script exécute une vingtaine de <code>process.exit(0)</code> conditionnels destinés à interrompre l'exécution en environnement d'analyse. Conditions observées : credentials AWS égaux aux exemples de la documentation AWS (<code>AKIAIOSFODNN7EXAMPLE</code>) ; token correspondant à <code>/honey|dummy|F4k3/i</code> ; <code>NODE_OPTIONS</code> contenant <code>--require</code> ; hostname de type <code>detonat|cuckoo|sandbox</code> ; présence de variables d'environnement propres à divers outils d'analyse.</p>
+
+      <figure style="margin: 1.5rem 0;">
+        <img src="../img/longzy-evasion-table.png" alt="Liste des variables d'environnement de solutions d'analyse testées par le payload : DetonationLogFilePath, PYPI_POISON_HONEY_TOKEN, PYPI_POISON_AUDIT_LOG_NODE, PP_ARTIFACT_SHA256, THREAT_ANALYZER_MODEL, ASPECT_TLOG, MUADDIB_GVISOR, préfixes SANDYCLAW_/OPENCLAW_/PERMISO_/CHAINRADAR_." style="max-width: 100%; height: auto; border: 1px solid #1a1a1a;">
+        <figcaption style="font-size: 12px; color: #555; margin-top: 0.4rem; font-family: Consolas, monospace;">
+          Marqueurs d'environnement d'analyse testés par le payload, dont <code>MUADDIB_GVISOR</code>, avec les outils auxquels ils sont attribués. Table de déobfuscation communiquée par Paul McCarty (OpenSourceMalware).
+        </figcaption>
+      </figure>
+
+      <p>La ligne 60 teste <code>env['MUADDIB_GVISOR']</code>, nom reconstruit par charcode :</p>
+
+      <pre><code class="language-javascript">// .prepare.cjs, ligne 60 — déobfusquée
+if (env['MUADDIB_GVISOR']) process.exit(0);</code></pre>
+
+      <p>L'obfuscation par <code>String.fromCharCode</code> vise une recherche textuelle (<code>grep</code>) et reste sans effet sur une détection comportementale : c'est le flux credential&rarr;réseau (<code>FLOW-001</code>) qui déclenche l'alerte, indépendamment de la forme du marqueur.</p>
+
+      <h3>2. Exécution différée</h3>
+
+      <p>Le payload est armé par <code>setTimeout(..., 15000 + random*30000)</code>, soit un délai de 15 à 45 secondes destiné à dépasser les timeouts des sandbox d'analyse.</p>
+
+      <h3>3. Reconnaissance et exfiltration</h3>
+
+      <p>Après les gardes et le délai, le script collecte les interfaces réseau non internes (<code>os.networkInterfaces()</code>), le hostname, l'utilisateur, la plateforme, la version Node et le registry, puis sérialise l'intégralité de <code>process.env</code>. Le rapport utilise des libellés en chinois (包名 / 主机 / 用户 / 平台 / 时间).</p>
+
+      <h3>4. Command &amp; control</h3>
+
+      <p>Le host et le path sont encodés séparément (host : tableau inversé puis soustraction de 7 sur chaque code de caractère ; path : XOR avec la clé <code>Zk9x</code>). Valeur décodée :</p>
+
+      <pre><code class="language-text">https://open.larksuite.com/open-apis/bot/v2/hook/813ab7c8-27fc-4df5-8704-74bd504c47c3</code></pre>
+
+      <p>Il s'agit d'un webhook de bot Lark/Feishu : infrastructure légitime utilisée comme canal d'exfiltration (pas de domaine dédié à bloquer, TLS valide).</p>
+
+      <h2>Perte de couverture : délestage mémoire</h2>
+
+      <p>Le 28 juin entre 22:06:34 et 22:06:37 UTC, deux packages de la campagne — <code>@longzy/react-native-polyfill</code> et <code>@digitalcnzz/embedded-sdk</code> — sont entrés dans la file de scan du monitor et en ont été retirés par le mécanisme de délestage mémoire (<code>mem_emergency_spill</code>), sans être scannés. Un troisième nom présent dans la même rafale, <code>@longzy/react-native-audio-recorder-player</code>, est un artefact de file (détaillé plus bas), non un package publié.</p>
+
+      <p>La cause n'est pas un délestage insensible aux IOC. Au moment du délestage, aucun de ces noms n'était référencé dans un feed : <code>react-native-polyfill</code> apparaît dans les feeds le 29 juin, <code>embedded-sdk</code> est catalogué par OSM le 29 juin à 07:20, et l'ensemble n'entre dans notre base d'IOC que le 1<sup>er</sup> juillet — soit 9 heures à 3 jours après le délestage. Les packages retirés étaient alors inconnus. Il s'agit d'une limite de débit, non de détection.</p>
+
+      <blockquote>Ce troisième nom, <code>@longzy/react-native-audio-recorder-player</code>, n'apparaît que dans la file du monitor (champ <code>version</code> vide, sans tarball) et dans aucun catalogue (OSM ne référence que 2 packages sous <code>longzy*</code>). Il correspond à un artefact de file, non à un package publié. La campagne compte 5 packages.</blockquote>
+
+      <p>En l'absence des archives (aujourd'hui en 404), les packages retirés ne peuvent pas être scannés a posteriori. Ils relèvent du même opérateur et du même scope, et ont été confirmés par les feeds après coup (OSM classe <code>embedded-sdk</code> en infostealer / install-hook). Aucun score par-package ne peut toutefois être produit sans les fichiers.</p>
+
+      <h2>Correctif : anti-spill IOC-aware</h2>
+
+      <p>Le délestage protège déjà les items marqués <code>isIOCMatch</code>. Ce marquage est effectué à l'enqueue et devient obsolète si le package n'était pas connu à ce moment, ou si la base d'IOC est rafraîchie pendant l'attente en file.</p>
+
+      <p>Le correctif ajoute une vérification au moment du délestage : le nom de l'item est comparé à la base d'IOC courante (lookup de nom, sans chargement de l'AST ni de la sandbox). Un nom présent est protégé et conservé dans la file.</p>
+
+      <p>Portée : ce correctif n'aurait pas protégé les packages du 28 juin, alors inconnus. Il couvre les cas où le package est déjà référencé (republication, campagne active, IOC wildcard, rafraîchissement de la base pendant l'attente). La couverture des 0-day relève du débit (scan avant délestage, prefetch), traitée séparément.</p>
+
+      <h2>Traitement du marqueur MUADDIB_GVISOR</h2>
+
+      <p>Le renommage, la rotation ou le masquage de cette variable ont été envisagés puis écartés.</p>
+
+      <p><strong>Rôle.</strong> <code>MUADDIB_GVISOR</code> est un flag fonctionnel. Il est injecté par la sandbox (<code>src/sandbox/index.js:279</code>) et lu par l'entrypoint du conteneur (<code>docker/sandbox-runner.sh</code>) pour sélectionner l'instrumentation : sous gVisor, <code>strace</code> et <code>tcpdump</code> sont désactivés, le runtime capturant syscalls et réseau au niveau kernel. La variable ne peut donc pas être simplement supprimée.</p>
+
+      <p><strong>Limites du masquage.</strong></p>
+      <ul>
+        <li>Le script est copié dans l'image Docker ; une rotation implique un rebuild périodique, et le nom doit rester connu des deux côtés.</li>
+        <li>La présence de gVisor est détectable par d'autres moyens (<code>/proc</code>, comportement de syscalls, timing). Le marqueur n'est qu'un test parmi une vingtaine.</li>
+        <li>La sandbox dynamique est secondaire : en CLI, son déclenchement automatique est borné à une fenêtre de score intermédiaire [15–35] (au-delà, le verdict statique est déjà définitif) ; dans le monitor, elle alimente l'alerte et la classification « dormant » sans modifier le score statique. <code>longzy-basic-ui</code> a été traité avec <code>sandbox: none</code>.</li>
+        <li>Les credentials-canaris injectés par la sandbox, s'ils correspondent aux motifs <code>AKIAIOSFODNN7EXAMPLE</code> / <code>honey</code> / <code>dummy</code>, provoquent une sortie du payload en amont du test <code>MUADDIB_GVISOR</code>.</li>
+      </ul>
+
+      <p><strong>Approche retenue.</strong> La variable est conservée et traitée comme honeytoken : publique et stable, elle n'est significative que sous forme obfusquée. L'effort porte sur la détection de l'évasion elle-même, en analyse statique. Deux règles ont été ajoutées :</p>
+      <ul>
+        <li><code>MUADDIB-AST-096</code> — <code>analyzer_honeytoken_reference</code> (CRITICAL) : référence dissimulée en charcode à un marqueur d'environnement d'analyse (dont <code>MUADDIB_GVISOR</code>). Seule la forme obfusquée est détectée ; le code de sandbox de MUAD'DIB et l'outillage de sécurité légitime, qui référencent ces marqueurs en clair, ne déclenchent pas la règle. Le re-scan de <code>longzy-basic-ui</code> la déclenche.</li>
+        <li><code>MUADDIB-AST-095</code> — <code>anti_analysis_evasion</code> (HIGH) : détection structurelle du « mur de gardes » — au moins cinq <code>process.exit()</code> silencieux couplés à une lecture d'environnement et à de l'obfuscation charcode ou de la reconnaissance hôte. Elle repose sur la structure (comptage des gardes et signaux couplés), non sur un suivi de flux ; agnostique au marqueur testé, donc robuste aux marqueurs inédits.</li>
+      </ul>
+      <p>La récupération de payload distant à l'exécution (dead-drop) est en grande partie déjà couverte : la variante fetch&rarr;<code>eval</code>/<code>Function</code> déclenche <code>remote_code_load</code> et <code>staged_payload</code> (CRITICAL). Le résidu identifié — staging via disque (fetch&rarr;<code>writeFileSync</code>&rarr;<code>require</code>, actuellement sous-scoré) — n'est pas encore traité.</p>
+
+      <h2>Indicateurs de compromission (IOC)</h2>
+
+      <table>
+        <tr><th>Type</th><th>Valeur</th></tr>
+        <tr><td>Package</td><td><code>longzy-basic-ui@2.0.3</code></td></tr>
+        <tr><td>Package</td><td><code>@longzy/react-native-polyfill@1.0.1</code></td></tr>
+        <tr><td>Package</td><td><code>@digitalcnzz/embedded-sdk@1.0.7</code></td></tr>
+        <tr><td>Package</td><td><code>@digitalcnzz/commonmodule@1.0.3</code></td></tr>
+        <tr><td>Package</td><td><code>@sailing-package/core@10.0.18</code></td></tr>
+        <tr><td>C2</td><td><code>open.larksuite.com/open-apis/bot/v2/hook/813ab7c8-27fc-4df5-8704-74bd504c47c3</code></td></tr>
+        <tr><td>Build host</td><td><code>192.168.100.4:9088</code> (<code>/app/lzy-basic-module.git</code>)</td></tr>
+        <tr><td>Auteur</td><td><code>yangguisheng@szlongzy.com</code></td></tr>
+        <tr><td>ATT&amp;CK</td><td>T1195.002 (supply chain), T1041 (exfiltration C2), T1552 (credentials)</td></tr>
+        <tr><td>Signal MUAD'DIB</td><td><code>MUADDIB-FLOW-001</code> (credential&rarr;réseau, CRITICAL, comportemental)</td></tr>
+      </table>
+
+      <h2>Synthèse</h2>
+
+      <ul>
+        <li>La détection de <code>longzy-basic-ui</code> repose sur l'analyse comportementale (<code>FLOW-001</code>) et a fonctionné sur un package 0-day, inconnu des feeds au moment du scan.</li>
+        <li>La perte de couverture (deux packages de campagne non scannés) provient du délestage mémoire, non de la détection. Le correctif IOC-aware couvre les packages déjà référencés ; les 0-day relèvent du débit.</li>
+        <li>Le marqueur <code>MUADDIB_GVISOR</code> est conservé et traité comme honeytoken. Le masquage n'apporte pas de gain défensif ; deux règles de détection statique de l'évasion ont été ajoutées (<code>AST-095</code>, <code>AST-096</code>). La récupération de payload distant est déjà couverte, hors un résidu (staging via disque).</li>
+      </ul>
+
+      <p style="margin-top: 2rem; color: #555;">Sources : liste des scopes et table des marqueurs anti-analyse communiquées par Paul McCarty (<a href="https://opensourcemalware.com" target="_blank" rel="noopener">OpenSourceMalware</a>). IOC : OpenSourceMalware, OSV (<code>osv-malicious</code>), Aikido.</p>
+
+    </div>
+  </article>
+</main>
+
+<footer>
+  MUAD'DIB / DNSZLSK / <a href="https://github.com/DNSZLSK/muad-dib" target="_blank" rel="noopener">source</a>
+</footer>
+
+</body>
+</html>
