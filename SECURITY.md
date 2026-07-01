@@ -4,6 +4,7 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
+| 2.11.x  | :white_check_mark: |
 | 2.10.x  | :white_check_mark: |
 | 2.9.x   | :white_check_mark: |
 | 2.8.x   | :white_check_mark: |
@@ -68,9 +69,9 @@ Please include the following information in your report:
 - We aim to release fixes before public disclosure
 - We request a 90-day disclosure window for complex issues
 
-## Detection Rules (v2.11.117)
+## Detection Rules (v2.11.139)
 
-MUAD'DIB uses 29 scanner modules (2 pre-analysis: `module-graph/` + `deobfuscate`; 1 async parser bootstrap: `python-ast` WASM init; 20 parallel scanners; 6 conditional/post-processing: paranoid + 3× temporal-* + reachability + `phantom-gyp` correlator; 1 metadata: `npm-registry`) + 5 behavioral anomaly detection features + ground truth validation, producing 274 rule IDs (269 RULES + 5 PARANOID - Track D added AST-093 `linux_fingerprint_exec` + AST-094 `direct_ip_exfil` + COMPOUND-016 `recon_exfil_direct_ip` ; v2.11.67/70 Phantom Gyp added PKG-023 `gyp_command_exec` speed-bump + COMPOUND-017 `gyp_phantom_exec` compound ; 2026-07 anti-evasion added AST-095 `anti_analysis_evasion` + AST-096 `analyzer_honeytoken_reference`). The 20 parallel scanners include the v2.11 intel-triage trio (`ioc-strings` YARA-style, `anti-forensic` XOR/self-delete compound, `stub-package` tiny main + external dep + lifecycle), the PyPI source-analysis pair (`python-source` PYSRC-001..010 regex, `python-ast` PYAST-001..010 tree-sitter AST + taint tracker), and `monorepo`/`trusted-dep-diff`:
+MUAD'DIB uses 30 scanner modules (2 pre-analysis: `module-graph/` + `deobfuscate`; 1 async parser bootstrap: `python-ast` WASM init; 21 parallel scanners; 6 conditional/post-processing: paranoid + 3× temporal-* + reachability + `phantom-gyp` correlator; 1 metadata: `npm-registry`) + 5 behavioral anomaly detection features + ground truth validation, producing 274 rule IDs (269 RULES + 5 PARANOID - Track D added AST-093 `linux_fingerprint_exec` + AST-094 `direct_ip_exfil` + COMPOUND-016 `recon_exfil_direct_ip` ; v2.11.67/70 Phantom Gyp added PKG-023 `gyp_command_exec` speed-bump + COMPOUND-017 `gyp_phantom_exec` compound ; 2026-07 anti-evasion added AST-095 `anti_analysis_evasion` + AST-096 `analyzer_honeytoken_reference`). The 21 parallel scanners include the v2.11 intel-triage trio (`ioc-strings` YARA-style, `anti-forensic` XOR/self-delete compound, `stub-package` tiny main + external dep + lifecycle), the PyPI source-analysis pair (`python-source` PYSRC-001..010 regex, `python-ast` PYAST-001..010 tree-sitter AST + taint tracker), `monorepo`/`trusted-dep-diff`, and `anti-scanner-injection` (ASI-001..004, anti-scanner prompt injection targeting LLM reviewers, Hades campaign 2026-06):
 
 ### AST Scanner (core rules)
 
@@ -497,7 +498,7 @@ MUAD'DIB 2.9 uses a **triple detection approach**:
 
 2. **Behavioral anomaly detection** (v2.0): Analyzes changes between package versions to detect supply-chain attacks before they appear in IOC databases. Compares lifecycle scripts, AST, publish frequency, and maintainer metadata across versions. This approach can detect 0-day behavioral anomalies without any prior knowledge of the specific attack.
 
-3. **Ground truth validation** (v2.1–v2.11.48): Validates detection accuracy against **96 real-world attacks** (94 in-scope; 2 out-of-scope: GT-005 colors and GT-009 faker protestware with min_threats=0). The 2026-05-25 enrichment added 22 samples — 16 synthetic for PYSRC/PYAST/AST-092/AICONF-004/PKG-022 (GT-068..083), 6 real-world npm tarballs from VPS archive (GT-084..089: TrapDoor twins, dep-confusion, MCP exfil), 7 reconstructions from `data/all-review-results.json` review reasoning (GT-090..096). Includes **13 PyPI samples** (was 0). Tracks detection lead times vs. public advisories, and monitors false positive rates over time. 4414 tests across 141 files. Current TPR@3: **95.74%** (90/94 in-scope, v2.11.48 full measurement). TPR@20: **88.30%** (83/94, +3.1pp vs v2.11.47 thanks to Track D `recon_exfil_direct_ip` compound). ADR: **96.26%** (103/107). Provides observability into scanner effectiveness.
+3. **Ground truth validation** (v2.1–v2.11.48): Validates detection accuracy against **96 real-world attacks** (94 in-scope; 2 out-of-scope: GT-005 colors and GT-009 faker protestware with min_threats=0). The 2026-05-25 enrichment added 22 samples — 16 synthetic for PYSRC/PYAST/AST-092/AICONF-004/PKG-022 (GT-068..083), 6 real-world npm tarballs from VPS archive (GT-084..089: TrapDoor twins, dep-confusion, MCP exfil), 7 reconstructions from `data/all-review-results.json` review reasoning (GT-090..096). Includes **13 PyPI samples** (was 0). Tracks detection lead times vs. public advisories, and monitors false positive rates over time. 4500 tests across 147 files. Current TPR@3: **95.74%** (90/94 in-scope, v2.11.48 full measurement). TPR@20: **88.30%** (83/94, +3.1pp vs v2.11.47 thanks to Track D `recon_exfil_direct_ip` compound). ADR: **96.26%** (103/107). Provides observability into scanner effectiveness.
 
 The behavioral detection features are opt-in (`--temporal-full`) and query the npm registry at scan time. They are particularly effective against:
 - Account takeover attacks (event-stream pattern)
