@@ -805,3 +805,29 @@ Packages with no JavaScript files (native binaries, phishing HTML pages) cannot 
 ### Transparency
 
 The Wild TPR of 92.5% reflects detection on in-scope packages only (those containing JS files). The 3,335 out-of-scope packages and 1,101 in-scope misses are reported transparently. The in-scope misses are not hidden or excused — they are genuine gaps where the scanner has room for improvement.
+
+## 16. ML Classifier — Status & Retrain (offline only; moved from README 2026-07-01)
+
+The XGBoost classifier (`src/ml/classifier.js`) is **not wired into `muaddib scan`** and has never affected an operator's scan result. In `muaddib monitor` it runs **LOG-ONLY since 2026-04-08** (`src/monitor/queue.js:1154`): the trained model collapsed — it predicts p≈0.002 for every input, including clearly malicious lifecycle+exec+staged-payload patterns — and was disabled pending retrain on balanced JSONL data. The published operational FPR/TPR are therefore **rules-only**.
+
+The numbers below come from offline `muaddib evaluate` replay against a frozen bench. They describe what the model *would* contribute if it worked, not what an operator gets today.
+
+| Metric (offline `evaluate` replay) | Result | Details |
+|--------|--------|---------|
+| ML FPR | 2.85% (239/8,393 holdout) | XGBoost, 56,564 samples, 64 features, threshold=0.710 |
+| ML TPR | 99.93% (2,918/2,920 holdout) | 377 confirmed_malicious via OSSF/GHSA/npm correlation |
+| FPR after ML T1 (v2.11.48) | 1.10% (6/545) | Classifier filters 0/6 raw FPs — never applied during real scans |
+
+**Retrain methodology (v2.10.51):** ground truth = 377 confirmed_malicious via auto-labeler (OSSF malicious-packages, GitHub Advisory Database, npm takedown correlation); dataset = 56,564 samples (14,602 malicious / 41,962 clean), stratified 80/20; grid search depth=4, estimators=300, lr=0.05, AUC-ROC=0.999, F1=0.960; 23 leaky/dead features removed. When a retrained model passes shadow validation, the LOG-ONLY guard at `src/monitor/queue.js:1187` is flipped and these numbers move back into the operational table.
+
+## 17. Operational Coverage (v2.11.67+) & Known Caveats (moved from README 2026-07-01)
+
+The static ground-truth TPR in section 14 is measured offline. Since v2.11.67 the monitor also tracks **operational** coverage on live npm/PyPI ingestion:
+
+- A per-scan **ledger** (`data/scan-ledger.jsonl`) records every scanned package's outcome; `computeLedgerRollup()` produces a 24h rollup (`alertRate`, per-ecosystem) — a throughput signal, **not** detection TPR.
+- An active **GHSA poller** (~15 min; npm, pypi, crates) builds an authoritative "what should we have caught" denominator (`data/ghsa-malware.jsonl`) plus a feed-health alarm that fires when an IOC feed silently goes dark.
+- **coverage-audit** (`scripts/coverage-audit.js`, daily 05:00 UTC) joins that denominator against ledger outcomes + the tarball archive to compute an honest GHSA-denominated **operational TPR** (`alerted / total`), surfacing `scannedClean` misses as human-gated ground-truth candidates.
+
+**Cap PyPI at 35/100:** Python samples are capped at `riskScore=35` even when `globalRiskScore=100`. All 12 PyPI FPs (v2.11.48) cluster at 25-35 (flask 32, django 35, tornado 35, bottle 30, pandas 25, matplotlib 25, plotly 25, bokeh 25, pymongo 35, coverage 32, fabric 35, websockets 35) — the cap artifact, not new rule misfires. Lifting it would drop FPR PyPI toward 0% and unblock PyPI malware detection at higher thresholds (Track E).
+
+**Static evaluation caveats:** TPR measured on 94 in-scope samples (2 out-of-scope protestware GT-005/GT-009 with `min_threats=0`); TPR@3 = any signal, TPR@20 = operational alert threshold; FPR rules on 548 curated popular npm packages (not a random sample); FPR PyPI on 124/132 (8 packages >500MB time out); ADR at global threshold score >= 20.

@@ -30,7 +30,7 @@
 
 npm and PyPI supply-chain attacks are exploding. Shai-Hulud compromised 25K+ repos in 2025. Existing tools detect threats but don't help you respond.
 
-MUAD'DIB combines **20 parallel scanners** (274 detection rules), a **deobfuscation engine**, **inter-module dataflow analysis**, **compound scoring** (17 compound rules), and a gVisor/Docker sandbox to detect known threats and suspicious behavioral patterns in npm and PyPI packages. An XGBoost classifier exists in the codebase but is **currently inactive** (see [Evaluation Metrics](#evaluation-metrics) → ML Classifier section).
+MUAD'DIB combines **21 parallel scanners** (274 detection rules), a **deobfuscation engine**, **inter-module dataflow analysis**, **compound scoring** (20 compound rules), and a gVisor/Docker sandbox to detect known threats and suspicious behavioral patterns in npm and PyPI packages. An XGBoost classifier exists in the codebase but is **currently inactive** (see [Evaluation](#evaluation)).
 
 ---
 
@@ -42,6 +42,16 @@ MUAD'DIB is an educational tool and a free first line of defense. It detects **k
 - [Socket.dev](https://socket.dev) - ML behavioral analysis, cloud sandboxing
 - [Snyk](https://snyk.io) - Massive vulnerability database, CI/CD integrations
 - [Opengrep](https://opengrep.dev) - Advanced dataflow analysis, Semgrep rules
+
+---
+
+## Scope
+
+**Detects** (npm & PyPI): known-malicious packages (name + SHA256 IOC match), typosquats, install-time RCE (lifecycle `preinstall`/`postinstall`, `curl | sh`, Python import-time, `binding.gyp`), credential read then network exfiltration (intra- and cross-file), obfuscated / high-entropy / stub-loader payloads, binary droppers (`chmod +x` + exec/spawn), and anti-analysis evasion markers.
+
+**Out of scope**: browser-only attacks (DOM/`window`, no Node.js API), the *contents* of native binaries / WASM (no binary analysis), zero-day unknown packages (the IOC feed is reactive), and non-npm/PyPI ecosystems (RubyGems, Maven, Go). Determined anti-sandbox fingerprinting and multi-stage remote payloads are known false-negative risks. Full detail: [Threat Model](docs/threat-model.md).
+
+**No telemetry.** Your code and scan results never leave your machine — MUAD'DIB only *downloads* threat-intel feeds (`muaddib update`) and, for scoring, reads public npm registry metadata. Webhook alerts are opt-in.
 
 ---
 
@@ -176,7 +186,7 @@ muaddib replay                     # Ground truth validation (90/94 TPR@3, v2.11
 
 ## Features
 
-### 20 parallel scanners
+### 21 parallel scanners
 
 | Scanner | Detection |
 |---------|-----------|
@@ -201,10 +211,11 @@ muaddib replay                     # Ground truth validation (90/94 TPR@3, v2.11
 | Trusted-Dep-Diff (opt-in) | Diff against trusted dep tarballs from registry (v2.10.x) |
 | Python Source (PYSRC) | Import-time / install-time RCE patterns in `__init__.py` / `setup.py` (v2.11.41 — closes TrapDoor PyPI gap) |
 | Python AST (PYAST) | Tree-sitter-Python AST with taint-aware detectors (v2.11.42+) |
+| Anti-Scanner Injection (ASI) | Prompt-injection text in comments/strings that coerces an LLM code reviewer into a clean verdict or into skipping an obfuscated payload (ASI-001..004, Hades campaign 2026-06) |
 
 ### 274 detection rules
 
-All rules (269 RULES + 5 PARANOID) are mapped to MITRE ATT&CK techniques. See [SECURITY.md](SECURITY.md#detection-rules-v211117) for the complete rules reference.
+All rules (269 RULES + 5 PARANOID) are mapped to MITRE ATT&CK techniques. See [SECURITY.md](SECURITY.md#detection-rules-v211139) for the complete rules reference.
 
 ### Detected campaigns
 
@@ -278,75 +289,30 @@ With pre-commit framework:
 ```yaml
 repos:
   - repo: https://github.com/DNSZLSK/muad-dib
-    rev: v2.11.117
+    rev: v2.11.139
     hooks:
       - id: muaddib-scan
 ```
 
 ---
 
-## Evaluation Metrics
+## Evaluation
 
-Latest measurement: **v2.11.48** (2026-05-26, Track D + PyPI download fix). Ground truth holds 96 samples (94 in-scope, 2 out-of-scope protestware). This run measures the full 94 in-scope set after the 2026-05-25 enrichment (Track C synthetic for the new PYSRC/PYAST/AST-092/AICONF-004/PKG-022 rules, Track A real-world tarballs recovered from VPS archive, Track B reconstructions from the in-house security-review benchmark).
+Last measured **v2.11.48** (2026-05-26), **rules-only** (the ML classifier is inactive — see below). Ground truth: 94 in-scope real-world attacks + 200 random npm + 124 PyPI + 107 adversarial/holdout.
 
-### Operational metrics (what an operator actually gets)
+| Metric | Result |
+|--------|--------|
+| Detection rate (TPR@3) | **95.74%** (90/94) |
+| Alert rate (TPR@20) | **88.30%** (83/94) |
+| FPR — curated npm (548) | **1.10%** (6/545) |
+| FPR — random npm (200) | **2.50%** (5/200) |
+| FPR — PyPI (132) | **9.68%** (12/124) |
+| ADR — adversarial + holdout | **96.26%** (103/107) |
+| Wild TPR (Datadog 17K) | **92.8%** (13,538/14,587) |
 
-These are the numbers a user gets when running `muaddib scan` against npm or PyPI packages. The pipeline executes scanners + FP caps only — no ML filter is applied (see ML Classifier note below).
+**ML classifier: inactive.** An XGBoost model lives in `src/ml/` but is never wired into `muaddib scan`, and runs LOG-ONLY in the monitor since 2026-04-08 (the trained model collapsed, pending retrain). All numbers above are rules-only.
 
-| Metric | Result | Details |
-|--------|--------|---------|
-| **Wild TPR** (Datadog 17K) | **92.8%** (13,538/14,587 in-scope) | 17,922 packages. 3,335 skipped (no JS). By category: compromised_lib 97.8%, malicious_intent 92.1% — last measurement v2.9.4, independent of GT. |
-| **TPR@3** (detection rate, v2.11.48) | **95.74%** (90/94 in-scope) | Full GT re-measurement. Threshold=3: any signal. 13 PyPI samples (was 0). 4 misses incl. 3 browser-only (lottie-player, polyfill-io, trojanized-jquery). |
-| **TPR@20** (alert rate, v2.11.48) | **88.30%** (83/94 in-scope) | Operational alert threshold=20. **+3.1pp vs v2.11.47** — Track D `recon_exfil_direct_ip` compound (MUADDIB-COMPOUND-016) closed the GT-095 gap (risk 3→50) and boosted GT-091 byvendors / GT-092 heloo131313 through `linux_fingerprint_exec`. |
-| **FPR rules** (Benign curated, v2.11.48 measure) | **1.10%** (6/545 scanned, 548 total) | **Unchanged after Track D** — the new compound + types created zero new FPs (sameFile gate + public-IP-only filter). Drop from 15.6% (v2.10.95) is attributable to FP caps F1-F14 (v2.10.97 → v2.11.31). 6 remaining FPs are real (meteor, prisma, @prisma/client, drizzle-orm, scrypt, liquid). |
-| **FPR** (Benign random, v2.11.48) | **2.50%** (5/200) | 200 random npm packages, unchanged. |
-| **FPR PyPI** (v2.11.48, first honest measurement) | **9.68%** (12/124 scanned, 132 total) | **Track D fixed the PyPI downloader** — removed `pip --no-binary :all:` flag (forced compile of wheel-only packages, timed out 38% of the time) + added `.whl` extraction via `extractArchive()`. Brought 42 previously-skipped giants (numpy/pandas/django/matplotlib/scikit-learn/...) into scope. All 12 FPs cluster at score 25-35: this is the cap-PyPI-35 artifact, not new rule misfires. Lifting the cap (Track E) would drop FPR PyPI to ≈0%. 8 residual fails are >500MB packages (torch, tensorflow, scipy, opencv-python, ansible…) hitting the 30s `PACK_TIMEOUT_MS`. |
-| **ADR** (Adversarial + Holdout, v2.11.48) | **96.26%** (103/107) | 67 adversarial + 40 holdout, global threshold=20. Stable vs v2.10.95. |
-
-**4414 tests** across 141 files. **266 rules** (261 RULES + 5 PARANOID; v2.11.67/70 Phantom Gyp added PKG-023 + COMPOUND-017).
-
-**Known issues (v2.11.48):**
-- *Cap PyPI à 35/100*: Python samples plafonnent à `riskScore=35` even when `globalRiskScore=100`. Confirmed empirically — all 12 PyPI FPs at score 25-35 (flask 32, django 35, tornado 35, bottle 30, pandas 25, matplotlib 25, plotly 25, bokeh 25, pymongo 35, coverage 32, fabric 35, websockets 35). Lifting the cap will simultaneously drop FPR PyPI to ≈0% and unblock PyPI MALWARE detection at higher thresholds. Track E target.
-
-### Operational coverage (v2.11.67-76)
-
-The static ground-truth TPR above is measured offline. Since v2.11.67 the monitor also tracks **operational** coverage on live npm/PyPI ingestion:
-- A per-scan **ledger** (`data/scan-ledger.jsonl`) records every scanned package's outcome; `computeLedgerRollup()` produces a 24h rollup (`alertRate`, per-ecosystem). Note: `alertRate` is a throughput signal, **not** detection TPR.
-- An active **GHSA poller** (~15 min; npm, pypi, crates) builds an authoritative "what should we have caught" denominator (`data/ghsa-malware.jsonl`), plus a **feed-health** alarm that fires when an IOC feed silently goes dark.
-- The Phase 5 **coverage-audit** (`scripts/coverage-audit.js`, daily 05:00 UTC) joins that denominator against ledger outcomes + the tarball archive to compute an honest GHSA-denominated **operational TPR** (`alerted / total`), and surfaces `scannedClean` misses as human-gated ground-truth candidates.
-
-This operational TPR is the real production detection rate, distinct from the static GT TPR (which has not been re-measured since v2.11.48).
-
-### ML Classifier (offline only)
-
-`src/ml/classifier.js` is **not wired into `muaddib scan`**. The XGBoost model is currently exercised only by `muaddib evaluate` (offline metric replay) and `muaddib monitor` (LOG-ONLY since 2026-04-08, model collapsed pending retrain — see `src/monitor/queue.js:628`). The v2.11.48 evaluate-time replay shows the same 1.10% FPR (no additional FPs filtered) — kept as a reference for retrain validation, but the published operational FPR is the rules-only number above.
-
-> **Static evaluation caveats:**
-> - TPR measured on the full 94 in-scope samples from the 96-sample ground truth (2 out-of-scope protestware GT-005/GT-009 with `min_threats=0`)
-> - TPR@3 = detection rate (any signal); TPR@20 = operational alert threshold
-> - FPR rules measured on 548 curated popular npm packages (not a random sample)
-> - FPR PyPI: 124/132 scanned (8 download fails on >500MB giants — torch/tensorflow/ansible/…). Smaller N than npm.
-> - ADR measured with global threshold (score >= 20) as of v2.6.5
-
-See [Evaluation Methodology](docs/EVALUATION_METHODOLOGY.md) for the full experimental protocol, holdout history, and Datadog benchmark details.
-
-### ML Classifier — R&D, currently inactive
-
-> **Status (2026-04-08 → present):** The XGBoost classifier (`src/ml/classifier.js`) is **not wired into `muaddib scan`** at all, and in `muaddib monitor` it runs in **LOG-ONLY mode** since 2026-04-08 — the trained model collapsed (predicts p≈0.002 for every input, including clearly malicious lifecycle+exec+staged_payload patterns) and was disabled pending retrain on balanced JSONL data. The metrics below come from offline `muaddib evaluate` replay against a frozen bench. They describe what the model *would* contribute if it worked, **not** what an operator gets today.
-
-| Metric (offline `evaluate` replay) | Result | Details |
-|--------|--------|---------|
-| **ML FPR** | **2.85%** (239/8,393 holdout) | XGBoost retrained on 56,564 samples, 64 features, threshold=0.710 |
-| **ML TPR** | **99.93%** (2,918/2,920 holdout) | 377 confirmed_malicious via OSSF/GHSA/npm correlation |
-| **FPR after ML T1** (offline replay, v2.11.48) | **1.10%** (6/545 scanned) | Classifier filters 0/6 raw FPs in this run (filtered 1 at v2.11.47). Not applied during real scans — `muaddib scan` never invokes the classifier. |
-
-> **Retrain methodology (v2.10.51):**
-> - Ground truth: 377 confirmed_malicious via auto-labeler (OSSF malicious-packages, GitHub Advisory Database, npm registry takedown correlation)
-> - Dataset: 56,564 samples (14,602 malicious, 41,962 clean). Stratified 80/20 split
-> - Grid search: depth=4, estimators=300, lr=0.05. AUC-ROC=0.999, F1=0.960
-> - Leaky feature filter: 23 dead/leaky features removed (source-identity proxies)
->
-> The shadow model continues to log predictions in `muaddib monitor` for retraining validation. When the next model passes shadow validation, the LOG-ONLY guard in `src/monitor/queue.js:660` will be flipped and the metrics above will move back into the operational table.
+Full protocol, per-track history, the PyPI cap-35 caveat, operational (GHSA-denominated) coverage, and the ML retrain methodology: [Evaluation Methodology](docs/EVALUATION_METHODOLOGY.md).
 
 ---
 
@@ -380,7 +346,7 @@ npm test
 
 ### Testing
 
-- **4414 tests** across 141 modular test files
+- **4500 tests** across 147 modular test files
 - **56 fuzz tests** - Malformed inputs, ReDoS, unicode, binary
 - **Datadog 17K benchmark** - 14,587 confirmed malware samples (in-scope)
 - **Ground truth validation** - 96 real-world attacks (95.74% TPR@3, 88.30% TPR@20 — v2.11.48 full measure on 94 in-scope)
