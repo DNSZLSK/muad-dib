@@ -39,6 +39,12 @@
 <ul class="post-list">
 
   <li>
+    <span class="post-title"><a href="longzy-dprk-muaddib-evasion.html">Quand les attaquants codent l'évasion contre MUAD'DIB</a></span>
+    <br><span class="post-date">2026-07-01</span> <span class="tags"><span class="tag">détection</span> <span class="tag">dprk</span> <span class="tag">npm</span> <span class="tag">évasion</span> <span class="tag">sandbox</span> <span class="tag">live</span></span>
+    <p class="post-summary">Analyse d'une campagne npm attribuée au mode opératoire DPRK « Contagious Interview » : 5 packages sur 3 scopes, dont le payload teste le marqueur de sandbox MUADDIB_GVISOR (reconstruit par charcode). Détection statique de longzy-basic-ui (100/100, sandbox: none), analyse du .prepare.cjs (C2 Lark, sérialisation de process.env, exécution différée), perte de couverture par délestage mémoire et correctif anti-spill IOC-aware. Traitement retenu pour le marqueur.</p>
+  </li>
+
+  <li>
     <span class="post-title"><a href="ground-truth-track-d.html">Ground truth +29 samples : pourquoi un TPR figé à 93,85% mesurait surtout l'IOC matching</a></span>
     <br><span class="post-date">2026-05-26</span> <span class="tags"><span class="tag">ground-truth</span> <span class="tag">métriques</span> <span class="tag">pypi</span> <span class="tag">compound</span> <span class="tag">méthodologie</span></span>
     <p class="post-summary">60 samples sur 67 attendaient juste MUADDIB-PKG-001. Le TPR mesurait l'IOC database, pas les 250+ règles comportementales. Track C (16 fixtures synthétiques), Track A (6 tarballs réels), Track B (7 reconstructions), Track D (compound direct-IP+linux-fingerprint), fix download PyPI 38% fail rate. TPR@20 +3,1pp (85,19% → 88,30%), FPR npm stable, FPR PyPI honnête à 9,68% sur 124/132 (was 6,10% sur 82/132 biaisé).</p>
