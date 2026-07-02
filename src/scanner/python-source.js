@@ -31,6 +31,7 @@
 const fs = require('fs');
 const path = require('path');
 const { countInvisibleUnicode, stripInvisibleUnicode } = require('../shared/unicode-invisibles.js');
+const { detectAnalyzerHoneytoken } = require('./ast-detectors/anti-evasion.js');
 
 const MAX_FILE_SIZE = 1024 * 1024; // 1 MB cap, cohérent avec ai-config.js
 
@@ -216,6 +217,38 @@ function detectForkExecInlineInterpreter(content) {
   return FORK_EXEC_INLINE_INTERPRETER_RE.test(content);
 }
 
+// ── Python anti-evasion (M2 follow-up, 2026-07): PyPI parity for AST-096 ──
+// analyzer_honeytoken_reference. Two FP-safe forms mirroring the JS side
+// (ast-detectors/anti-evasion.js), BOTH reusing the existing CRITICAL AST-096
+// rule (no new rule → rule count unchanged):
+//   1. os.environ ENUMERATION (for-in / .keys() / .items()) coupled with a
+//      MUADDIB-prefix key test (.startswith / == / in). NOT a direct read:
+//      MUAD'DIB tooling reads specific MUADDIB_* config vars directly (verified
+//      across the repo), while evasion enumerates the whole env looking for our
+//      sandbox tripwire prefix. FP-safe by the distinctive marker + enumeration.
+//   2. base64 / hex / charcode-encoded analyzer marker — handled by REUSING the
+//      shared detectAnalyzerHoneytoken() (language-agnostic decoder; it already
+//      matches Python byte-array, base64 and hex-escape encodings of the marker).
+// Deliberately NOT covered (honest blind spots): plaintext direct reads of the
+// honeytoken (legit security tooling references markers in the clear — same
+// stance as the JS side); /proc fingerprinting such as reading the kernel
+// version file (legit container-detection reads it — the Python equivalent of
+// the gVisor FP); and shell/bash install hooks (this scanner only reads .py).
+const PY_ENV_ENUM_RE = /\bfor\s+\w+\s+in\s+os\.environ\b|\bos\.environ\.(?:keys|items)\s*\(\s*\)/;
+const PY_ENV_MARKER_TEST_RE = /\.startswith\s*\(\s*['"]MUADDIB|['"]MUADDIB\w*['"]\s*(?:==|!=)|(?:==|!=)\s*['"]MUADDIB|['"]MUADDIB\w*['"]\s+in\b/;
+
+/**
+ * Python parity for the JS detectEnvMarkerEnumeration. Returns 'MUADDIB' if the
+ * file enumerates os.environ AND tests keys against the distinctive MUADDIB
+ * prefix, else null. FP-safe: MUAD'DIB reads its own MUADDIB_* vars directly
+ * (os.environ.get), never via enumerate+startswith (verified across the repo).
+ */
+function detectPythonEnvMarkerEnumeration(content) {
+  if (!content || content.indexOf('os.environ') === -1) return null;
+  if (!PY_ENV_ENUM_RE.test(content)) return null;
+  return PY_ENV_MARKER_TEST_RE.test(content) ? 'MUADDIB' : null;
+}
+
 /**
  * Scan Python source files under targetPath for import-time / install-time RCE.
  *
@@ -347,6 +380,21 @@ function scanPythonSource(targetPath) {
         file: relPath
       });
     }
+
+    // Anti-evasion (AST-096 reused) — Python parity. Runs on cleaned content so
+    // a base64 example inside a stripped docstring/comment cannot fire.
+    const honeytokenMarker = detectAnalyzerHoneytoken(cleaned);
+    const envEnumMarker = honeytokenMarker ? null : detectPythonEnvMarkerEnumeration(cleaned);
+    if (honeytokenMarker || envEnumMarker) {
+      threats.push({
+        type: 'analyzer_honeytoken_reference',
+        severity: 'CRITICAL',
+        message: honeytokenMarker
+          ? `${relPath}: obfuscated (base64/hex/charcode) reference to the analysis-environment honeytoken '${honeytokenMarker}' — sandbox-evasion reconnaissance. No legitimate PyPI package encodes a check for this tripwire.`
+          : `${relPath}: os.environ enumeration testing keys against a MUADDIB prefix (marker-agnostic) — sandbox/analyzer evasion. No legitimate package scans the environment for this tripwire.`,
+        file: relPath
+      });
+    }
   }
 
   return threats;
@@ -366,6 +414,7 @@ module.exports = {
     detectBase64Decode,
     detectDeserialization,
     detectDynamicDangerousImport,
-    detectForkExecInlineInterpreter
+    detectForkExecInlineInterpreter,
+    detectPythonEnvMarkerEnumeration
   }
 };
