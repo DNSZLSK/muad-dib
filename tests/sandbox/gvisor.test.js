@@ -417,6 +417,53 @@ async function runGvisorTests() {
     assertIncludes(content, '--runtime=runsc', 'Should verify with docker run');
     assertIncludes(content, 'MUADDIB_SANDBOX_RUNTIME', 'Should mention env var');
   });
+
+  // ── M3 (2026-07): runtime-selection decision — visible fallback WARNING + fail-closed flag ──
+
+  test('GVISOR M3: resolveSandboxRuntime is exported', () => {
+    const sandbox = require('../../src/sandbox/index.js');
+    assert(typeof sandbox.resolveSandboxRuntime === 'function', 'Should export resolveSandboxRuntime');
+  });
+
+  test('GVISOR M3: default (no env vars) → runc, no warn, no refuse (unchanged default)', () => {
+    const { resolveSandboxRuntime } = require('../../src/sandbox/index.js');
+    const r = resolveSandboxRuntime({}, false);
+    assert(r.useGvisor === false && r.refuse === false && r.warn === false,
+      'default must stay runc with no warning and no refusal');
+  });
+
+  test('GVISOR M3: requested + runsc available → gvisor', () => {
+    const { resolveSandboxRuntime } = require('../../src/sandbox/index.js');
+    const r = resolveSandboxRuntime({ MUADDIB_SANDBOX_RUNTIME: 'gvisor' }, true);
+    assert(r.useGvisor === true && r.refuse === false && r.warn === false, 'requested + available → gvisor');
+  });
+
+  test('GVISOR M3: requested + runsc UNavailable (not required) → runc fallback WITH warn=true (before: silent info log)', () => {
+    const { resolveSandboxRuntime } = require('../../src/sandbox/index.js');
+    const r = resolveSandboxRuntime({ MUADDIB_SANDBOX_RUNTIME: 'gvisor' }, false);
+    assert(r.useGvisor === false && r.refuse === false && r.warn === true,
+      'fallback to runc must now surface warn=true (a visible downgrade WARNING), not a silent console.log');
+  });
+
+  test('GVISOR M3: REQUIRED + runsc UNavailable → refuse (fail closed, no runc downgrade)', () => {
+    const { resolveSandboxRuntime } = require('../../src/sandbox/index.js');
+    const r = resolveSandboxRuntime({ MUADDIB_SANDBOX_RUNTIME: 'gvisor', MUADDIB_REQUIRE_GVISOR: '1' }, false);
+    assert(r.refuse === true && r.useGvisor === false,
+      'MUADDIB_REQUIRE_GVISOR=1 + unavailable must refuse (fail closed), never downgrade to runc');
+  });
+
+  test('GVISOR M3: MUADDIB_REQUIRE_GVISOR alone (implies want) + available → gvisor', () => {
+    const { resolveSandboxRuntime } = require('../../src/sandbox/index.js');
+    const r = resolveSandboxRuntime({ MUADDIB_REQUIRE_GVISOR: '1' }, true);
+    assert(r.useGvisor === true && r.refuse === false, 'require alone + available → gvisor');
+  });
+
+  test('GVISOR M3: NOT requested but runsc IS available → runc WITH warn=true (VPS installed-but-unused gap)', () => {
+    const { resolveSandboxRuntime } = require('../../src/sandbox/index.js');
+    const r = resolveSandboxRuntime({}, true);
+    assert(r.useGvisor === false && r.refuse === false && r.warn === true,
+      'runsc available but env var unset must still WARN (detectable in prod that gVisor is installed yet unused) while running runc');
+  });
 }
 
 module.exports = { runGvisorTests };

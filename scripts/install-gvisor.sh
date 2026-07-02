@@ -8,7 +8,10 @@
 # or tcpdump inside the container.
 #
 # Usage: sudo bash scripts/install-gvisor.sh
-# After install: set MUADDIB_SANDBOX_RUNTIME=gvisor in .env
+# After install: set MUADDIB_SANDBOX_RUNTIME=gvisor in .env to enable gVisor.
+# Optionally set MUADDIB_REQUIRE_GVISOR=1 to FAIL CLOSED: the sandbox then refuses to run
+# (returns INCONCLUSIVE) rather than silently downgrading to runc when runsc is missing.
+# Default (var unset): fall back to runc but log a visible WARNING. No mandatory mode by default.
 # ══════════════════════════════════════════════════════════════
 set -e
 
@@ -71,7 +74,10 @@ fi
 echo ""
 echo "gVisor installed and configured."
 echo "To activate for MUAD'DIB sandbox:"
-echo "  export MUADDIB_SANDBOX_RUNTIME=gvisor"
+echo "  export MUADDIB_SANDBOX_RUNTIME=gvisor      # use gVisor (runsc) when available"
+echo ""
+echo "Optional — refuse to run on weaker runc if gVisor is missing (fail closed):"
+echo "  export MUADDIB_REQUIRE_GVISOR=1            # default: unset = fall back to runc with a WARNING"
 echo ""
 echo "Log directory: ${GVISOR_LOG_DIR}"
 echo "Runtime flags: --strace --log-packets --debug-log=${GVISOR_LOG_DIR}/%ID%/"
