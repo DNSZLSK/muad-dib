@@ -26,12 +26,12 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 
-# --- 1. Install Node.js 20 ---
-echo "[1/6] Installing Node.js 20..."
+# --- 1. Install Node.js 24 ---
+echo "[1/6] Installing Node.js 24..."
 if command -v node &>/dev/null && node -v | grep -q "^v2[0-9]"; then
   echo "  Node.js $(node -v) already installed, skipping."
 else
-  curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+  curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
   apt-get install -y nodejs
   echo "  Installed Node.js $(node -v)"
 fi

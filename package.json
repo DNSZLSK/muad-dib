@@ -1,6 +1,6 @@
 {
   "name": "muaddib-scanner",
-  "version": "2.11.151",
+  "version": "2.11.152",
   "description": "Supply-chain threat detection & response for npm & PyPI/Python",
   "main": "src/index.js",
   "bin": {
@@ -44,7 +44,7 @@
     "url": "https://github.com/DNSZLSK/muad-dib/issues"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0"
   },
   "dependencies": {
     "@inquirer/prompts": "8.5.2",
