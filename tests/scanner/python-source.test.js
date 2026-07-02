@@ -284,6 +284,61 @@ async function runPythonSourceTests() {
     assert(!detectForkExecInlineInterpreter('subprocess.run(["unknown_tool", "-e", "x"])\n'),
       'unknown interpreter should NOT fire');
   });
+
+  // ---------- Anti-evasion — PyPI parity for AST-096 (M2 follow-up, 2026-07) ----------
+
+  test('PYSRC anti-evasion: detectPythonEnvMarkerEnumeration — enum + MUADDIB prefix fires, direct read does not', () => {
+    const { _internal } = require('../../src/scanner/python-source.js');
+    const { detectPythonEnvMarkerEnumeration } = _internal;
+    assert(detectPythonEnvMarkerEnumeration("for k in os.environ:\n  if k.startswith('MUADDIB'): raise SystemExit"),
+      'enum (for-in) + startswith(MUADDIB) should fire');
+    assert(detectPythonEnvMarkerEnumeration("bad = [k for k in os.environ if 'MUADDIB_GVISOR' in k]"),
+      'comprehension enum + MUADDIB membership should fire');
+    assert(!detectPythonEnvMarkerEnumeration("DATA = os.environ.get('MUADDIB_DATA', '/opt/muaddib/data')"),
+      "direct config read of a MUADDIB_* var (no enumeration) must NOT fire — MUAD'DIB tooling does exactly this");
+    assert(!detectPythonEnvMarkerEnumeration("for k in os.environ:\n  print(k)"),
+      'env enumeration without a MUADDIB marker test must NOT fire');
+  });
+
+  test('PYSRC anti-evasion: base64-encoded MUADDIB_GVISOR in __init__.py → analyzer_honeytoken_reference (CRITICAL)', () => {
+    const tmp = createTempDir();
+    try {
+      const b64 = Buffer.from('MUADDIB_GVISOR').toString('base64');
+      fs.writeFileSync(path.join(tmp, '__init__.py'), "import base64\np = base64.b64decode('" + b64 + "')\n");
+      const t = scanPythonSource(tmp).find(x => x.type === 'analyzer_honeytoken_reference');
+      assert(t && t.severity === 'CRITICAL', 'should emit CRITICAL analyzer_honeytoken_reference for the encoded marker');
+    } finally { cleanup(tmp); }
+  });
+
+  test('PYSRC anti-evasion: os.environ enum for MUADDIB in setup.py → analyzer_honeytoken_reference', () => {
+    const tmp = createTempDir();
+    try {
+      fs.writeFileSync(path.join(tmp, 'setup.py'),
+        'import os, sys\nif any(k.startswith("MUADDIB") for k in os.environ):\n    sys.exit(0)\n');
+      const t = scanPythonSource(tmp).find(x => x.type === 'analyzer_honeytoken_reference');
+      assert(t, 'should emit analyzer_honeytoken_reference for os.environ enumeration testing a MUADDIB prefix');
+    } finally { cleanup(tmp); }
+  });
+
+  test('PYSRC anti-evasion: legit MUADDIB_DATA config read → NO analyzer_honeytoken_reference (self-FP guard)', () => {
+    const tmp = createTempDir();
+    try {
+      fs.writeFileSync(path.join(tmp, '__init__.py'),
+        'import os\nMUADDIB_DATA = os.environ.get("MUADDIB_DATA", "/opt/muaddib/data")\nprint(MUADDIB_DATA)\n');
+      const t = scanPythonSource(tmp).find(x => x.type === 'analyzer_honeytoken_reference');
+      assert(!t, "a direct os.environ.get(MUADDIB_DATA) config read must NOT be flagged — this is exactly what MUAD'DIB's own tooling does");
+    } finally { cleanup(tmp); }
+  });
+
+  test('PYSRC anti-evasion: legit container detection via /proc → NO analyzer_honeytoken_reference (gVisor-FP class blind spot)', () => {
+    const tmp = createTempDir();
+    try {
+      fs.writeFileSync(path.join(tmp, '__init__.py'),
+        'IS_CT = False\ntry:\n    with open("/proc/1/cgroup") as f:\n        data = f.read()\n        IS_CT = "docker" in data or "gvisor" in data\nexcept OSError:\n    pass\n');
+      const t = scanPythonSource(tmp).find(x => x.type === 'analyzer_honeytoken_reference');
+      assert(!t, 'legit container detection reading /proc + checking docker/gvisor must NOT fire — documented blind spot (the Python gVisor-FP class)');
+    } finally { cleanup(tmp); }
+  });
 }
 
 module.exports = { runPythonSourceTests };
