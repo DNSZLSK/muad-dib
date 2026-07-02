@@ -21,6 +21,13 @@ jobs:
       - run: npm ci
       - name: Guard - no typosquat in package.json deps
         run: node scripts/check-deps-typosquats.js
+      - name: Guard - no HIGH/CRITICAL CVE in dependencies (synchronous CVE gate, F2)
+        # Fails the PR on HIGH/CRITICAL advisories (passes today: lone vuln is moderate).
+        # npm's built-in fetch-retries=2 (10-60s backoff) absorbs transient endpoint blips;
+        # timeout-minutes bounds a sustained outage to a fast fail-closed block (better to
+        # block than merge un-audited). Normal audit runs in seconds, so 5 min is ample.
+        timeout-minutes: 5
+        run: npm audit --audit-level=high
       - name: Run tests
         run: npm test
 
