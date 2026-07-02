@@ -195,13 +195,51 @@ function imageExists() {
 
 // ── gVisor availability check ──
 
+let _gvisorAvailableCache;          // memoized host capability (runsc does not appear mid-process)
+let _sandboxRuntimeWarned = false;  // throttle the runtime warning/refusal log to once per process
+
 function isGvisorAvailable() {
+  if (_gvisorAvailableCache !== undefined) return _gvisorAvailableCache;
   try {
     const info = execSync('docker info', { encoding: 'utf8', stdio: 'pipe', timeout: 10000 });
-    return /\brunsc\b/.test(info);
+    _gvisorAvailableCache = /\brunsc\b/.test(info);
   } catch {
-    return false;
+    _gvisorAvailableCache = false;
   }
+  return _gvisorAvailableCache;
+}
+
+// Pure runtime-selection decision (no I/O) — unit-testable without Docker, unlike
+// runSandbox() which early-returns before this point when Docker is absent.
+// Inputs: the env object + whether runsc is actually available (isGvisorAvailable()).
+// Returns { useGvisor, refuse, warn, reason }:
+//   - useGvisor: run under runsc (stronger isolation)
+//   - refuse:    caller MUST NOT run — gVisor was REQUIRED but runsc is unavailable
+//                (fail CLOSED, opt-in via MUADDIB_REQUIRE_GVISOR). Do not downgrade.
+//   - warn:      caller should emit a prominent isolation-downgrade WARNING because
+//                gVisor was requested, is unavailable, but was not required (fail OPEN).
+// Default (neither env var set) → runc, no warn, no refuse (unchanged behavior).
+// MUADDIB_REQUIRE_GVISOR implies wanting gVisor (you cannot require what you don't want).
+function resolveSandboxRuntime(env, gvisorAvailable) {
+  const wantGvisor = env.MUADDIB_SANDBOX_RUNTIME === 'gvisor';
+  const requireGvisor = env.MUADDIB_REQUIRE_GVISOR === '1' || env.MUADDIB_REQUIRE_GVISOR === 'true';
+  if (!wantGvisor && !requireGvisor) {
+    // gVisor not requested. If runsc IS available on this host, still warn: the operator
+    // installed gVisor but this scan is running on weaker runc (the exact VPS gap — runsc
+    // present, Docker default runtime is runc, env var never set). Detectable in prod.
+    if (gvisorAvailable) {
+      return { useGvisor: false, refuse: false, warn: true,
+        reason: 'sandbox running under runc although gVisor (runsc) IS available on this host — set MUADDIB_SANDBOX_RUNTIME=gvisor to use the stronger isolation' };
+    }
+    return { useGvisor: false, refuse: false, warn: false, reason: 'runc (default — gVisor neither requested nor available)' };
+  }
+  if (gvisorAvailable) {
+    return { useGvisor: true, refuse: false, warn: false, reason: 'gvisor (runsc)' };
+  }
+  if (requireGvisor) {
+    return { useGvisor: false, refuse: true, warn: false, reason: 'gVisor REQUIRED (MUADDIB_REQUIRE_GVISOR) but runsc is not available' };
+  }
+  return { useGvisor: false, refuse: false, warn: true, reason: 'gVisor requested but runsc unavailable — falling back to weaker runc isolation' };
 }
 
 // ── Build image (with cache) ──
@@ -725,15 +763,37 @@ async function runSandbox(packageName, options = {}) {
     return cleanResult;
   }
 
-  // Detect sandbox runtime (gVisor or default Docker/runc)
-  let useGvisor = process.env.MUADDIB_SANDBOX_RUNTIME === 'gvisor';
-  if (useGvisor) {
-    if (isGvisorAvailable()) {
-      console.log('[SANDBOX] Runtime: gvisor (runsc)');
-    } else {
-      console.log('[SANDBOX] Runtime: gvisor requested but runsc not configured in Docker. Falling back to Docker standard.');
-      useGvisor = false;
+  // Detect sandbox runtime (gVisor or default Docker/runc). The decision is a pure,
+  // unit-tested function (resolveSandboxRuntime); here we act on it. isGvisorAvailable()
+  // is memoized, so this is a per-process `docker info`, not a per-scan one.
+  const rt = resolveSandboxRuntime(process.env, isGvisorAvailable());
+  const useGvisor = rt.useGvisor;
+  if (rt.refuse) {
+    // Fail CLOSED: operator set MUADDIB_REQUIRE_GVISOR but runsc is unavailable. Do NOT
+    // silently downgrade to weaker runc isolation — return INCONCLUSIVE (score -1) so the
+    // package is never cleared on weaker isolation than was demanded. Each blocked scan is
+    // ledgered (sandbox_inconclusive); the console warning is throttled to once/process.
+    if (!_sandboxRuntimeWarned) {
+      _sandboxRuntimeWarned = true;
+      console.warn(`[SANDBOX] SECURITY: refusing to run — ${rt.reason}. Install gVisor (scripts/install-gvisor.sh) or unset MUADDIB_REQUIRE_GVISOR to allow runc.`);
     }
+    return {
+      score: -1,
+      severity: 'INCONCLUSIVE',
+      findings: [{ type: 'gvisor_required_unavailable', severity: 'MEDIUM', detail: rt.reason, evidence: rt.reason }],
+      raw_report: null,
+      suspicious: false,
+      inconclusive: true
+    };
+  }
+  if (rt.warn && !_sandboxRuntimeWarned) {
+    // Fail OPEN but LOUD (was a plain console.log before, or nothing when the env var was
+    // simply unset on a gVisor-capable host): surface the weaker-than-possible isolation
+    // once per process so it is detectable in production logs.
+    _sandboxRuntimeWarned = true;
+    console.warn(`[SANDBOX] WARNING: ${rt.reason}. Set MUADDIB_REQUIRE_GVISOR=1 to fail closed instead of running on runc.`);
+  } else if (useGvisor) {
+    console.log('[SANDBOX] Runtime: gvisor (runsc)');
   }
 
   // Generate canary tokens for this sandbox session
@@ -1177,4 +1237,4 @@ function displayResults(result) {
   }
 }
 
-module.exports = { buildSandboxImage, runSandbox, runSingleSandbox, buildDockerArgs, generateFakeHostname, scoreFindings, generateNetworkReport, EXFIL_PATTERNS, SAFE_DOMAINS, getSeverity, displayResults, isDockerAvailable, imageExists, isGvisorAvailable, STATIC_CANARY_TOKENS, detectStaticCanaryExfiltration, analyzePreloadLog, TIME_OFFSETS, SAFE_SANDBOX_CMDS, SANDBOX_CONCURRENCY_MAX, acquireSandboxSlot, tryAcquireSandboxSlot, releaseSandboxSlot, resetSandboxLimiter, getSandboxSemaphore, killAllSandboxContainers };
+module.exports = { buildSandboxImage, runSandbox, runSingleSandbox, buildDockerArgs, generateFakeHostname, scoreFindings, generateNetworkReport, EXFIL_PATTERNS, SAFE_DOMAINS, getSeverity, displayResults, isDockerAvailable, imageExists, isGvisorAvailable, resolveSandboxRuntime, STATIC_CANARY_TOKENS, detectStaticCanaryExfiltration, analyzePreloadLog, TIME_OFFSETS, SAFE_SANDBOX_CMDS, SANDBOX_CONCURRENCY_MAX, acquireSandboxSlot, tryAcquireSandboxSlot, releaseSandboxSlot, resetSandboxLimiter, getSandboxSemaphore, killAllSandboxContainers };
