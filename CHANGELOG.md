@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Node.js pinned to 24 across build, CI and deploy.** Follows the production VPS migration to Node 24, already validated in real conditions (full test suite + gVisor sandbox run). Updated: `docker/Dockerfile` base image (`node:20-alpine` → `node:24-alpine`); **six** `actions/setup-node` version pins (`node-version: '20'` → `'24'`) — five across `.github/workflows/` (`scan.yml` ×3, `publish.yml`, `regression-check.yml`) plus **a sixth found outside that set**, in the root composite Action `action.yml` (consumer-facing via `uses: DNSZLSK/muad-dib@…`); and `deploy/setup.sh` (NodeSource `setup_20.x` → `setup_24.x`, plus the step's comment/echo). The `setup.sh` install-skip guard (`node -v | grep -q "^v2[0-9]"`) already accepts v22/24 and is left unchanged. No detection or behavioral change.
+- **`package.json` `engines.node` raised `>=18.0.0` → `>=20.0.0`.** `engines` is the consumer contract of the published `muaddib-scanner` package (the Node an installing consumer may use) and is kept decoupled from the runtime pins above, which are the build/CI/deploy environment we control. It is deliberately **not** raised to 24: the scanner uses no Node-24-only API, so a `>=24` floor would `EBADENGINE`-reject working Node 20/22 installs. The floor is lifted only off end-of-life Node 18 (EOL 2025-04-30).
+
 ### Security
 
 - **E3 — ReDoS guard on the `.replace()`-chain resolver (audit 2026-07).** `src/scanner/ast-detectors/handle-call-expression.js` statically re-applied `.replace(/regex/, str)` chains taken from scanned packages, compiling and executing attacker-authored regexes; a catastrophic pattern (e.g. `(a+)+$`) wedged the synchronous scanner (~35s on 28 chars, measured). Added a non-exhaustive blocklist of catastrophic shapes + length caps (layer 1); the hard bound remains the monitor's existing 45s worker-terminate (layer 2, verified to interrupt a running V8 regex mid-backtrack on both Node 24 and the production VPS's Node 20.20.0). Refused patterns leave the chain unresolved (still flagged at depth>=4), never a crash. Tests in `tests/scanner/ast.test.js`.

@@ -1,4 +1,4 @@
-FROM node:20-alpine
+FROM node:24-alpine
 
 # Outils de monitoring
 RUN apk add --no-cache strace curl tcpdump coreutils findutils jq iptables libfaketime openssl

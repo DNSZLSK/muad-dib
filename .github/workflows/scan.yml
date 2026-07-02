@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-node@54045abd5dcd3b0fee9ca02fa24c57545834c9cc # v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
       - run: npm ci
       - name: Guard - no typosquat in package.json deps
@@ -38,7 +38,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-node@54045abd5dcd3b0fee9ca02fa24c57545834c9cc # v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
       - run: npm ci
       - run: npm install -g c8@11.0.0
@@ -61,7 +61,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-node@54045abd5dcd3b0fee9ca02fa24c57545834c9cc # v4
         with:
-          node-version: '20'
+          node-version: '24'
       - run: npm ci
       - name: MUAD'DIB self-scan
         run: node bin/muaddib.js scan . --sarif results.sarif --fail-on none --exclude tests --exclude docker --exclude node_modules --exclude deploy --exclude datasets --exclude src/scanner --exclude src/ioc --exclude vscode-extension
