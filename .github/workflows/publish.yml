@@ -34,6 +34,11 @@ jobs:
       - run: npm ci
       - name: Verify dep provenance attestations (SLSA gate)
         run: npm audit signatures
+      - name: Verify no HIGH/CRITICAL CVE in dependencies (F2 — defense-in-depth at release)
+        # Same gate as the PR CI. Release path, so fail-closed on a sustained outage is even
+        # more justified. Passes today (lone vuln is moderate, below the threshold).
+        timeout-minutes: 5
+        run: npm audit --audit-level=high
       - run: npm test
       - name: Validate tag matches package.json version
         run: |
