@@ -52,6 +52,27 @@ ProtectHome=read-only
 ReadWritePaths=/opt/muaddib/data /opt/muaddib/logs
 PrivateTmp=true
 
+# ── Hardening parity with muaddib-scrape.service (M5, audit 2026-07) ──
+# Applied + validated on the production VPS tier-by-tier (a full sandbox run + gVisor +
+# a registry fetch were confirmed working after each tier's restart). Unlike the oneshot
+# scraper, the monitor launches the Docker sandbox (docker run → /var/run/docker.sock);
+# container isolation is dockerd's, so these restrict only the node + docker-CLI
+# processes, not the containers. None of these touches the memory limits below.
+# Tier A — node + docker-CLI never exercise these:
+LockPersonality=true
+RestrictRealtime=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+PrivateDevices=true
+SystemCallArchitectures=native
+# Tier B — docker socket = AF_UNIX, registry = AF_INET/6 (monitor does not use netlink);
+# cgroup RO does NOT weaken MemoryMax (systemd enforces it on the cgroup, not the process):
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ProtectControlGroups=true
+# Tier C — the docker CLI does not create namespaces (dockerd does); a full sandbox cycle
+# was verified after adding this:
+RestrictNamespaces=true
+
 # Memory limits (OOM fix — belt-and-suspenders with the in-process RSS circuit
 # breaker in src/monitor/daemon.js). The monitor was OOM-killed by the kernel every
 # ~1.5-3.5h (RSS peak 10.3G on the 11.7G box) from an off-heap leak the heap-only
