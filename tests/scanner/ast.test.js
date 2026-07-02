@@ -4048,6 +4048,47 @@ module.exports = { main };
     } finally { cleanupTemp(tmp); }
   });
 
+  // ── M1 extension (2026-07): base64/hex-encoded markers + generic env-prefix enumeration ──
+  await asyncTest('AST/M1: analyzer_honeytoken_reference — fires on a BASE64-encoded MUADDIB_GVISOR check', async () => {
+    const b64 = Buffer.from('MUADDIB_GVISOR').toString('base64');
+    const tmp = makeTempPkg(`
+if (Buffer.from("${b64}", "base64").toString() === process.env.NODE_ENV) process.exit(0);
+console.log("payload");
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'analyzer_honeytoken_reference');
+      assert(t, 'base64-encoded MUADDIB_GVISOR must fire analyzer_honeytoken_reference');
+      assert(t.severity === 'CRITICAL', 'analyzer honeytoken reference is CRITICAL');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST/M1: analyzer_honeytoken_reference — fires on generic process.env enumeration for a MUADDIB prefix', async () => {
+    const tmp = makeTempPkg(`
+if (Object.keys(process.env).some(function (k) { return k.startsWith("MUADDIB"); })) process.exit(0);
+console.log("payload");
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'analyzer_honeytoken_reference');
+      assert(t, 'env-enumeration testing keys for a MUADDIB prefix must fire analyzer_honeytoken_reference');
+      assert(t.severity === 'CRITICAL', 'marker-agnostic env-enumeration honeytoken is CRITICAL');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('AST/M1: anti-evasion — no FP on legit base64 config + legit env enumeration', async () => {
+    const tmp = makeTempPkg(`
+const cfg = Buffer.from("aGVsbG8gd29ybGQgc29tZSBjb25maWc=", "base64").toString();
+const npmVars = Object.keys(process.env).filter(function (k) { return k.startsWith("npm_"); });
+module.exports = { cfg, npmVars };
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      assert(!result.threats.find(t => t.type === 'analyzer_honeytoken_reference'), 'no honeytoken FP on legit base64/env code');
+      assert(!result.threats.find(t => t.type === 'anti_analysis_evasion'), 'no detonation-gate FP on legit base64/env code');
+    } finally { cleanupTemp(tmp); }
+  });
+
   // AST-018 alias fix: `var env = process.env; env[charcode]` used to evade the direct
   // `process.env[x]` match. The alias must now resolve.
   await asyncTest('AST: env_charcode_reconstruction — resolves a process.env alias (var env = process.env)', async () => {

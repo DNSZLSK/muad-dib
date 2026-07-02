@@ -1148,7 +1148,7 @@ const RULES = {
     severity: 'CRITICAL',
     confidence: 'high',
     domain: 'malware',
-    description: 'Reference DISSIMULEE en charcodes a un marqueur d\'environnement d\'analyse — marqueur de sandbox MUAD\'DIB (MUADDIB_GVISOR), marqueur d\'un analyseur pair, ou nom de poison-token. Seule la forme obfusquee est matchee : le code de sandbox de MUAD\'DIB lui-meme et l\'outillage securite legitime referencent ces marqueurs en clair sans risque. Aucun package legitime n\'encode un check pour ces tripwires. Le marqueur est un honeytoken plante : garde public et stable pour que tout verificateur s\'auto-incrimine.',
+    description: 'Reference dissimulee (charcode/base64/hex) OU enumeration de process.env cherchant un prefix marqueur MUADDIB (marker-agnostique), vers un marqueur d\'environnement d\'analyse — marqueur de sandbox MUAD\'DIB (MUADDIB_GVISOR), marqueur d\'un analyseur pair, ou nom de poison-token. Seules les formes obfusquees/enumerees sont matchees : le code de sandbox de MUAD\'DIB lui-meme et l\'outillage securite legitime referencent ces marqueurs en clair sans risque. Aucun package legitime n\'encode ni n\'enumere un check pour ces tripwires. Le marqueur est un honeytoken plante : garde public et stable pour que tout verificateur s\'auto-incrimine.',
     references: [
       'https://attack.mitre.org/techniques/T1497/',
       'https://attack.mitre.org/techniques/T1480/'
