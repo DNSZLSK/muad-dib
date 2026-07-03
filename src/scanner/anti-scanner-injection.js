@@ -54,8 +54,13 @@ const FAMILIES = [
       // directives + an instruction/prompt noun. Pathognomonic; legitimate source never
       // carries it. (Deliberately excludes the rule/guideline noun to avoid lint-config FPs.)
       /\b(?:ignore|disregard|forget|override|bypass)\b[\s\S]{0,40}\b(?:all\s+|any\s+)?(?:previous|prior|above|earlier|preceding|the\s+(?:above|following))\b[\s\S]{0,30}\b(?:instruction|prompt|system[\s-]?prompt)s?\b/i,
-      // Explicitly addressing the AI/scanner/reviewer + a command verb.
-      /\b(?:as\s+(?:an?\s+)?(?:ai|a\.i\.|llm|language\s+model|gpt|claude|copilot|security\s+(?:scanner|analyzer|analyst|auditor|reviewer|model)|automated\s+(?:scanner|analyzer|reviewer)|code[\s-]review(?:er)?)|attention[,:!\s]+(?:ai|llm|scanner|analyzer|reviewer)|(?:dear|hello|hey|note\s+to|message\s+to|to)\s+(?:the\s+)?(?:ai|llm|scanner|analyzer|reviewer|model|assistant|auditor)\b)[\s\S]{0,100}\b(?:you\s+(?:must|should|are|will|need\s+to)|do\s+not|please\s+(?:do|treat|classify|mark|report|ignore|skip)|classify|treat|mark|report|consider|ignore|skip|disregard)\b/i
+      // Explicitly addressing the AI/scanner/reviewer + a command verb. Bare "to <target>" is
+      // restricted to REVIEW-SPECIFIC targets (scanner/analyzer/reviewer/auditor); the generic
+      // "to ai|llm|model|assistant" branch was dropped 2026-07-03 — it collided with agent-skill
+      // runtime prose like "move to AI <status> … Do NOT <step>" (see asi-fp-agent-skills). Full
+      // salutations (dear/hello/hey/note to/message to) keep all targets; a real "to the AI: mark
+      // safe / ignore previous" attack still trips family 2 / family-1-pattern-0 independently.
+      /\b(?:as\s+(?:an?\s+)?(?:ai|a\.i\.|llm|language\s+model|gpt|claude|copilot|security\s+(?:scanner|analyzer|analyst|auditor|reviewer|model)|automated\s+(?:scanner|analyzer|reviewer)|code[\s-]review(?:er)?)|attention[,:!\s]+(?:ai|llm|scanner|analyzer|reviewer)|(?:dear|hello|hey|note\s+to|message\s+to)\s+(?:the\s+)?(?:ai|llm|scanner|analyzer|reviewer|model|assistant|auditor)\b|to\s+(?:the\s+)?(?:scanner|analyzer|reviewer|auditor)\b)[\s\S]{0,100}\b(?:you\s+(?:must|should|are|will|need\s+to)|do\s+not|please\s+(?:do|treat|classify|mark|report|ignore|skip)|classify|treat|mark|report|consider|ignore|skip|disregard)\b/i
     ]
   },
   {
@@ -86,14 +91,20 @@ const FAMILIES = [
 
 // Same-file payload signal → escalates a directive to CRITICAL (the Hades shape: the directive
 // and the payload it guards are co-located). Computed locally — NO cross-scanner dependency.
+// Each signal must indicate an OBFUSCATED and/or DYNAMICALLY-EXECUTED payload — NOT a bare data
+// decode. The decode-only signals `atob(` and `Buffer.from(x,'base64')` were removed 2026-07-03:
+// decoding an API field / attachment (e.g. GitHub/Jira `content`, `Buffer.from(a.content,'base64')`)
+// is ubiquitous benign data handling, not an obfuscated payload — it was the sole "payload" behind
+// a false antiscanner_injection_with_payload on @zibby/skills 0.1.60 (see asi-fp-agent-skills).
+// When a decode genuinely guards malware it is accompanied by an execution sink (eval/Function/vm)
+// or a long encoded blob — both still matched below, so no real Hades / ToxicSkills / TrapDoor
+// payload is lost.
 const PAYLOAD_SIGNALS = [
-  /[A-Za-z0-9+/]{200,}={0,2}/,                                  // long base64 blob
-  /\beval\s*\(/i,
+  /[A-Za-z0-9+/]{200,}={0,2}/,                                  // long base64 blob (the payload itself)
+  /\beval\s*\(/i,                                               // dynamic-code execution sink
   /\bnew\s+Function\s*\(/i,
-  /\batob\s*\(/i,
-  /\bBuffer\.from\s*\([^)]*['"]base64['"]/i,
   /\bvm\.(?:runInContext|runInNewContext|compileFunction)\s*\(/i,
-  /\bbase64\s+(?:--decode|-d)\b/i
+  /\bbase64\s+(?:--decode|-d)\b/i                               // shell base64 decode (typically piped to sh)
 ];
 const INVISIBLE_UNICODE_PAYLOAD_THRESHOLD = 8;
 
