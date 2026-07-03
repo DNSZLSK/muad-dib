@@ -1,4 +1,6 @@
-FROM node:24-alpine
+# Base image pinned by digest (Scorecard: pinned-dependencies). node:24-alpine @ 2026-07-03.
+# To bump: update tag AND digest together — re-verify with `docker buildx imagetools inspect node:24-alpine`.
+FROM node:24-alpine@sha256:a0b9bf06e4e6193cf7a0f58816cc935ff8c2a908f81e6f1a95432d679c54fbfd
 
 # Outils de monitoring
 RUN apk add --no-cache strace curl tcpdump coreutils findutils jq iptables libfaketime openssl

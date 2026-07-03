@@ -31,7 +31,20 @@ echo "[1/6] Installing Node.js 24..."
 if command -v node &>/dev/null && node -v | grep -q "^v2[0-9]"; then
   echo "  Node.js $(node -v) already installed, skipping."
 else
-  curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
+  # NodeSource publishes no checksum/signature for setup_24.x, so the piped-to-bash
+  # installer cannot be integrity-verified. Instead we configure NodeSource's APT repo
+  # directly, pinned to their GPG key — APT then verifies every package (incl. nodejs)
+  # against that key. Same keyring pattern as the Docker repo block below.
+  # (Scorecard: downloadThenRun not pinned by hash.)
+  apt-get update -y
+  apt-get install -y ca-certificates curl gnupg
+  install -m 0755 -d /etc/apt/keyrings
+  curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+    | gpg --dearmor --batch --yes -o /etc/apt/keyrings/nodesource.gpg
+  chmod a+r /etc/apt/keyrings/nodesource.gpg
+  echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_24.x nodistro main" \
+    > /etc/apt/sources.list.d/nodesource.list
+  apt-get update -y
   apt-get install -y nodejs
   echo "  Installed Node.js $(node -v)"
 fi
