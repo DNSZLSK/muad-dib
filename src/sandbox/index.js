@@ -18,6 +18,28 @@ const { analyzePreloadLog } = require('./analyzer.js');
 const { classifyDomain } = require('./network-allowlist.js');
 const { parseGvisorLogs, cleanupGvisorLogs } = require('./gvisor-parser.js');
 
+// ── Event-loop stall attribution for the sandbox's SYNCHRONOUS docker CLI calls ──
+// (2026-07-03) These execFileSync/execSync 'docker' calls run on the MAIN thread.
+// When dockerd/runsc is slow or a gVisor container is wedged, they can block the
+// daemon's memory-breaker loop (daemon.js) — the suspected source of the un-attributed
+// (`op:null`) multi-minute loop-stalls that precede the cgroup OOM kills. Breadcrumb
+// each one with the SAME beginOp/endOp mechanism as the extraction sites (queue.js) so
+// the next stall NAMES the docker op instead of guessing. Pure observability: no change
+// to args, timeouts, return values, or error paths. The require is GUARDED so the shared
+// sandbox module stays usable from the CLI one-shot (and any context without the monitor);
+// beginOp/endOp are cheap module-var writes that never throw and no-op when the lag
+// sampler isn't running.
+let _beginOp = () => null;
+let _endOp = () => {};
+try {
+  ({ beginOp: _beginOp, endOp: _endOp } = require('../monitor/event-loop-monitor.js'));
+} catch { /* monitor module unavailable (e.g. CLI) — breadcrumbs stay no-op */ }
+
+function dockerSync(label, meta, fn) {
+  const _crumb = _beginOp(`docker:${label}`, meta || null);
+  try { return fn(); } finally { _endOp(_crumb); }
+}
+
 const DOCKER_IMAGE = 'muaddib-sandbox';
 const CONTAINER_TIMEOUT = 120000; // 120 seconds
 const SINGLE_RUN_TIMEOUT = 90000; // 90 seconds per run in multi-run mode (gVisor ~30% I/O overhead)
@@ -88,7 +110,7 @@ const _liveContainers = new Set();
 function killAllSandboxContainers() {
   const names = Array.from(_liveContainers);
   for (const name of names) {
-    try { execFileSync('docker', ['rm', '-f', name], { stdio: 'pipe', timeout: 5000 }); } catch { /* already gone */ }
+    try { dockerSync('rm', { container: name }, () => execFileSync('docker', ['rm', '-f', name], { stdio: 'pipe', timeout: 5000 })); } catch { /* already gone */ }
     _liveContainers.delete(name);
   }
   if (names.length > 0) {
@@ -177,7 +199,7 @@ const EXFIL_PATTERNS = [
 
 function isDockerAvailable() {
   try {
-    execSync('docker info', { stdio: 'pipe', timeout: 10000 });
+    dockerSync('info', null, () => execSync('docker info', { stdio: 'pipe', timeout: 10000 }));
     return true;
   } catch {
     return false;
@@ -186,7 +208,7 @@ function isDockerAvailable() {
 
 function imageExists() {
   try {
-    execFileSync('docker', ['image', 'inspect', DOCKER_IMAGE], { stdio: 'pipe', timeout: 10000 });
+    dockerSync('image-inspect', null, () => execFileSync('docker', ['image', 'inspect', DOCKER_IMAGE], { stdio: 'pipe', timeout: 10000 }));
     return true;
   } catch {
     return false;
@@ -201,7 +223,7 @@ let _sandboxRuntimeWarned = false;  // throttle the runtime warning/refusal log 
 function isGvisorAvailable() {
   if (_gvisorAvailableCache !== undefined) return _gvisorAvailableCache;
   try {
-    const info = execSync('docker info', { encoding: 'utf8', stdio: 'pipe', timeout: 10000 });
+    const info = dockerSync('info', null, () => execSync('docker info', { encoding: 'utf8', stdio: 'pipe', timeout: 10000 }));
     _gvisorAvailableCache = /\brunsc\b/.test(info);
   } catch {
     _gvisorAvailableCache = false;
@@ -430,8 +452,8 @@ async function runSingleSandbox(packageName, options = {}) {
     // `docker kill` alone leaves the container record, and under gVisor the runsc
     // sandbox can survive it — rm -f reaps both. --rm makes this a no-op on clean exit.
     const killContainer = () => {
-      try { execFileSync('docker', ['kill', containerName], { stdio: 'pipe', timeout: 5000 }); } catch { /* may be gone */ }
-      try { execFileSync('docker', ['rm', '-f', containerName], { stdio: 'pipe', timeout: 5000 }); } catch { /* already removed */ }
+      try { dockerSync('kill', { container: containerName }, () => execFileSync('docker', ['kill', containerName], { stdio: 'pipe', timeout: 5000 })); } catch { /* may be gone */ }
+      try { dockerSync('rm', { container: containerName }, () => execFileSync('docker', ['rm', '-f', containerName], { stdio: 'pipe', timeout: 5000 })); } catch { /* already removed */ }
     };
 
     // Kill + arm a watchdog that force-resolves INCONCLUSIVE if the docker client
@@ -485,9 +507,9 @@ async function runSingleSandbox(packageName, options = {}) {
       // Capture container ID for gVisor log retrieval (once, while container is running)
       if (gvisorMode && !gvisorContainerId) {
         try {
-          gvisorContainerId = execFileSync('docker', ['inspect', '--format={{.Id}}', containerName], {
+          gvisorContainerId = dockerSync('inspect', { container: containerName }, () => execFileSync('docker', ['inspect', '--format={{.Id}}', containerName], {
             encoding: 'utf8', stdio: 'pipe', timeout: 5000
-          }).trim();
+          })).trim();
         } catch { /* container not yet ready, will retry on next data event */ }
       }
 
