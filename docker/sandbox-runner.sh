@@ -18,7 +18,7 @@ START_MS=$(date +%s%3N 2>/dev/null || echo 0)
 # ══════════════════════════════════════════════════════════════
 
 # ── 0.5a. Remove Docker fingerprint files ──
-rm -f /.dockerenv
+rm -f /.dockerenv 2>/dev/null || true
 
 # ── 0.5b. Realistic bash_history (credible developer activity) ──
 cat > /home/sandboxuser/.bash_history << 'HIST'
