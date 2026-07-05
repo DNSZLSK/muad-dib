@@ -188,6 +188,7 @@ const { runMaintainerChangeTests } = require('./temporal/maintainer-change.test'
 const { runCanaryTokensTests } = require('./temporal/canary-tokens.test');
 const { runTemporalRunnerTests } = require('./temporal/temporal-runner.test');
 const { runHttpLimiterTests } = require('./unit/http-limiter.test');
+const { runBurstPreAlertWebhookTests } = require('./unit/burst-prealert-webhook.test');
 const { runWorkerMessageDispatchTests } = require('./unit/worker-message-dispatch.test');
 const { runNetworkBrainTests } = require('./unit/network-brain.test');
 const { runMemoryGovernorTests } = require('./unit/memory-governor.test');
@@ -437,6 +438,7 @@ async function timed(name, fn) {
   // Utility tests
   await timed('utils', runUtilsTests);
   await timed('http-limiter', runHttpLimiterTests);
+  await timed('burst-prealert-webhook', runBurstPreAlertWebhookTests);
   await timed('worker-message-dispatch', runWorkerMessageDispatchTests);
   await timed('network-brain', runNetworkBrainTests);
   await timed('memory-governor', runMemoryGovernorTests);
