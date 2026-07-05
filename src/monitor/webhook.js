@@ -271,10 +271,29 @@ function buildBurstPreAlertEmbed(name, count, ecosystem = 'npm') {
 }
 
 /**
+ * Burst pre-alert Discord toggle — OFF by default. Measured 2026-07: the burst
+ * heads-up fires ~700×/day and is anti-correlated with real kills/incidents, so it is
+ * pure #alerts noise. This gates ONLY the Discord POST in sendBurstPreAlert(): the
+ * burst versions are still queued + scanned (queue.js), and the `[MONITOR] BURST
+ * PRE-ALERT` console.log + the `stats.burstPreAlerts` counter (used by the daily
+ * summary) are emitted BEFORE the send at the call site, so they are unaffected.
+ * Opt back in with MUADDIB_BURST_PREALERT_WEBHOOK=1 (also accepts true/yes/on).
+ * Read at call time so a restart re-toggles it without a code change (and tests can flip it).
+ */
+function burstPreAlertWebhookEnabled() {
+  const v = (process.env.MUADDIB_BURST_PREALERT_WEBHOOK || '').trim().toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes' || v === 'on';
+}
+
+/**
  * Layer 1c: Send a burst pre-alert webhook. Fire-and-forget; callers dedupe per
- * name/window so a burst pings once, not once per version.
+ * name/window so a burst pings once, not once per version. Discord POST is muted by
+ * default — see burstPreAlertWebhookEnabled(). Scoped to this sender only; the shared
+ * sendWebhook() and every other alert type (IOC/campaign pre-alerts, scan results,
+ * DEGRADED, daily report) are untouched.
  */
 async function sendBurstPreAlert(name, count, ecosystem = 'npm') {
+  if (!burstPreAlertWebhookEnabled()) return;
   const url = getWebhookUrl();
   if (!url) return;
   await sendWebhook(url, buildBurstPreAlertEmbed(name, count, ecosystem), { rawPayload: true });
@@ -1739,6 +1758,7 @@ module.exports = {
   sendCampaignPreAlert,
   buildBurstPreAlertEmbed,
   sendBurstPreAlert,
+  burstPreAlertWebhookEnabled,
   matchVersionedIOC,
   computeRiskLevel,
   computeRiskScore,
