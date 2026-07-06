@@ -16,12 +16,31 @@ const {
   extractStringValueDeep,
   isStaticValue
 } = require('./helpers.js');
+const { carriesInjectedPayload, resolveElectronTarget } = require('./electron-injection.js');
 
 function handleVariableDeclarator(node, ctx) {
   if (node.id?.type === 'Identifier') {
     // Track statically-assigned variables for dynamic_require qualification
     if (node.init && isStaticValue(node.init)) {
       ctx.staticAssignments.add(node.id.name);
+    }
+
+    // MUADDIB-AST-097: track variables whose value is injected Electron code (the write payload).
+    // Covers `var injectedPayload = [ "...BrowserWindow...", ... ].join("\n")` and any concat /
+    // template / literal carrying payload markers. Consumed by the write-sink check + post-walk.
+    if (node.init && carriesInjectedPayload(node.init, ctx)) {
+      ctx.injectedCodeVars.add(node.id.name);
+    }
+
+    // MUADDIB-AST-097: track variables bound to a path.join/resolve that builds an Electron app
+    // file path (for the HIGH-tier bare-.asar-target write, where the write target is a variable,
+    // e.g. `const target = path.join(os.homedir(), '.config', 'discord', 'app.asar')`).
+    if (node.init && node.init.type === 'CallExpression' && node.init.callee?.type === 'MemberExpression' &&
+        node.init.callee.object?.type === 'Identifier' && node.init.callee.object.name === 'path' &&
+        node.init.callee.property?.type === 'Identifier' &&
+        (node.init.callee.property.name === 'join' || node.init.callee.property.name === 'resolve')) {
+      const eaiTgt = resolveElectronTarget(node.init);
+      if (eaiTgt.sig) ctx.electronTargetVars.set(node.id.name, eaiTgt);
     }
 
     // AST-018 alias capture (@longzy): `var env = process.env` — record the alias so a later

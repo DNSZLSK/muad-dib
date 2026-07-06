@@ -78,7 +78,11 @@ const HIGH_CONFIDENCE_MALICE_TYPES = new Set([
   // Phantom Gyp 2026-06: binding.gyp command-substitution = install-time RCE, quasi-never legit in benign packages
   'gyp_command_exec',
   // Phantom Gyp compound (Phase 1b): configure-time <!(node x.js) × independently-malicious invoked file
-  'gyp_phantom_exec'
+  'gyp_phantom_exec',
+  // electron_app_injection (MUADDIB-AST-097): install hook overwrites a THIRD-PARTY Electron app's
+  // core/.asar with injected code (payload-in-write coupling ⇒ FP≈0). Bypasses MT-1 cap like the
+  // other install-time RCE/injection markers above (node_modules_write, systemd_persistence).
+  'electron_app_injection'
 ]);
 
 // Lifecycle compound types that indicate real malicious intent beyond a simple postinstall

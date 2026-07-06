@@ -668,6 +668,15 @@ const PLAYBOOKS = {
     'ou modifie git config init.templateDir pour la persistence globale. ' +
     'Verifier .git/hooks/ et git config --global --list. Supprimer les hooks non reconnus.',
 
+  electron_app_injection:
+    'CRITIQUE: Injection dans une application Electron tierce. Le package localise une app Electron installee ' +
+    '(Discord, Atomic Wallet, Slack, ...) via os.homedir()+.asar/discord_desktop_core+existsSync, puis ecrase ' +
+    'son code (index.js du core module / app.asar) avec un payload injecte (hook webContents.debugger, override ' +
+    'XMLHttpRequest.prototype.send, BrowserWindow) — le payload s\'execute avec l\'identite de l\'app cible pour ' +
+    'intercepter credentials/MFA ou detourner des adresses crypto. Verifier l\'integrite de l\'app ciblee ' +
+    '(reinstaller depuis la source officielle), rechercher le code injecte dans son core/.asar, revoquer tout ' +
+    'credential saisi dans l\'app compromise, et supprimer le package. Considerer le poste comme compromis si le hook a tourne.',
+
   env_harvesting_dynamic:
     'Collecte dynamique de variables d\'environnement via Object.entries/keys/values(process.env) ' +
     'avec filtrage par patterns sensibles. Technique de vol de credentials a grande echelle. ' +
