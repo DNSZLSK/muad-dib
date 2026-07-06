@@ -1155,6 +1155,20 @@ const RULES = {
     ],
     mitre: 'T1497'
   },
+  electron_app_injection: {
+    id: 'MUADDIB-AST-097',
+    name: 'Electron App Injection',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    domain: 'malware',
+    description: 'Un hook d\'installation localise une application Electron tierce deja installee chez la victime (Discord, Atomic Wallet, Slack, ...) — via os.homedir() + un chemin de signature Electron (.asar / discord_desktop_core / module core) + une sonde fs.existsSync — puis ecrase son code avec une charge utile JavaScript injectee, de sorte que le payload s\'execute avec l\'identite et les permissions de l\'application cible. Discriminant AST (vs proxy file-level): l\'ecriture (writeFileSync/appendFileSync) ecrit un CONTENU qui EST du code Electron injecte (BrowserWindow / webContents.debugger / *.prototype.X= / require(\'electron\')). Une app Electron legitime ecrit sa propre config JSON, jamais du code hookant les internals d\'une autre app. CRITICAL quand corrobore par le contexte de decouverte foreign-app; HIGH pour une ecriture nue ciblant un fichier .asar/core sous le home (GT-036 discord-electron-inject, GT-044 atomic-wallet-patch).',
+    references: [
+      'https://research.jfrog.com/post/duer-js-malicious-package/',
+      'https://thehackernews.com/2025/04/malicious-npm-package-targets-atomic.html',
+      'https://attack.mitre.org/techniques/T1554/'
+    ],
+    mitre: 'T1554'
+  },
   detached_process: {
     id: 'MUADDIB-AST-012',
     name: 'Detached Background Process',

@@ -7062,11 +7062,11 @@ async function runMonitorTests() {
 
   // ===== v2.7.6 C1: High-confidence malice bypass =====
 
-  test('MONITOR: HIGH_CONFIDENCE_MALICE_TYPES contains 30 threat types', () => {
-    // 30 = 29 + gyp_phantom_exec (Phase 1b Phantom-Gyp compound).
-    assert(HIGH_CONFIDENCE_MALICE_TYPES.size === 31,
-      `Should have 30 types, got ${HIGH_CONFIDENCE_MALICE_TYPES.size}`);
-    assert(HIGH_CONFIDENCE_MALICE_TYPES.has('gyp_phantom_exec'), 'Missing gyp_phantom_exec');
+  test('MONITOR: HIGH_CONFIDENCE_MALICE_TYPES contains 32 threat types', () => {
+    // 32 = 31 + electron_app_injection (MUADDIB-AST-097, third-party Electron app code injection).
+    assert(HIGH_CONFIDENCE_MALICE_TYPES.size === 32,
+      `Should have 32 types, got ${HIGH_CONFIDENCE_MALICE_TYPES.size}`);
+    assert(HIGH_CONFIDENCE_MALICE_TYPES.has('electron_app_injection') && HIGH_CONFIDENCE_MALICE_TYPES.has('gyp_phantom_exec'), 'Missing electron_app_injection/gyp_phantom_exec');
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('lifecycle_shell_pipe'), 'Missing lifecycle_shell_pipe');
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('fetch_decrypt_exec'), 'Missing fetch_decrypt_exec');
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('download_exec_binary'), 'Missing download_exec_binary');

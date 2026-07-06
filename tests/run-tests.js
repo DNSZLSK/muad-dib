@@ -65,6 +65,7 @@ const { runPyPIMaintainerTests } = require('./scanner/pypi-maintainer.test');
 const { runPyPIReleaseZeroTests } = require('./scanner/pypi-release-zero.test');
 const { runAIConfigTests } = require('./scanner/ai-config.test');
 const { runAntiScannerInjectionTests } = require('./scanner/anti-scanner-injection.test');
+const { runElectronInjectionTests } = require('./scanner/electron-injection.test');
 const { runDeobfuscateTests } = require('./scanner/deobfuscate.test');
 const { runModuleGraphTests } = require('./scanner/module-graph.test');
 const { runReachabilityTests } = require('./scanner/reachability.test');
@@ -267,6 +268,7 @@ async function timed(name, fn) {
   // Scanner unit tests (continued)
   await timed('ai-config', runAIConfigTests);
   await timed('anti-scanner-injection', runAntiScannerInjectionTests);
+  await timed('electron-injection', runElectronInjectionTests);
   await timed('deobfuscate', runDeobfuscateTests);
   await timed('module-graph', runModuleGraphTests);
   await timed('reachability', runReachabilityTests);

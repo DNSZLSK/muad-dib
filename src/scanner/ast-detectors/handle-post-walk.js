@@ -640,6 +640,39 @@ function handlePostWalk(ctx) {
       });
     }
   }
+
+  // MUADDIB-AST-097: electron_app_injection — an install hook overwrites a THIRD-PARTY Electron
+  // app's core/.asar with injected code (GT-036 Discord debugger-hook stealer → bada-stealer.com;
+  // GT-044 Atomic Wallet XMLHttpRequest.prototype.send address-swap). The discriminating AST
+  // coupling (assembled here from facts collected during the walk): a writeFileSync whose CONTENT
+  // resolves to injected Electron code (electronPayloadWrites), corroborated by the foreign-app
+  // discovery context — os.homedir() + a .asar/electron-core signature path + an existsSync probe.
+  // A legit Electron app writes JSON *config*, never source that hooks another app's internals, so
+  // the payload-in-write coupling is what separates injection from an app writing its own settings
+  // (no need for the evadable "is this file itself an Electron main?" exclusion). dist/bundled
+  // files are suppressed: an app's own minified main naturally carries these tokens.
+  const _eaiDist = /^(?:dist|build|out|output|vendor)[/\\]/i.test(ctx.relFile) ||
+                   /\.(?:bundle|min)\.js$/i.test(ctx.relFile);
+  if (!_eaiDist) {
+    const foreignAppDiscovery = ctx.hasHomedirResolve && ctx.hasElectronAppSig && ctx.hasFsExistsProbe;
+    if ((ctx.electronPayloadWrites?.length || 0) > 0 && foreignAppDiscovery) {
+      const w = ctx.electronPayloadWrites[0];
+      ctx.threats.push({
+        type: 'electron_app_injection',
+        severity: 'CRITICAL',
+        message: `Electron app injection: ${w.method}() overwrites a foreign Electron app — located via os.homedir()+.asar/electron-core+existsSync — with injected code (BrowserWindow/webContents-debugger/prototype-override/require('electron')). Third-party desktop-app code injection (Discord/Atomic-Wallet class): the payload runs with the target app's identity.`,
+        file: ctx.relFile
+      });
+    } else if ((ctx.electronAsarTargetWrites?.length || 0) > 0 && !ctx.hasOwnElectronMain) {
+      const w = ctx.electronAsarTargetWrites[0];
+      ctx.threats.push({
+        type: 'electron_app_injection',
+        severity: 'HIGH',
+        message: `Electron app tampering: ${w.method}() overwrites a user-home Electron app file "${w.pathStr}" (.asar/electron-core). Writing into an installed desktop app is an injection/patching technique; the injected payload was not statically resolvable.`,
+        file: ctx.relFile
+      });
+    }
+  }
 }
 
 

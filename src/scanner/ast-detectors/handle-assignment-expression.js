@@ -11,10 +11,18 @@ const {
   resolveStringConcat,
   extractStringValueDeep
 } = require('./helpers.js');
+const { carriesInjectedPayload } = require('./electron-injection.js');
 
 function handleAssignmentExpression(node, ctx) {
   // Variable reassignment: x += 'process' or x = x + 'process'
   if (node.left?.type === 'Identifier') {
+    // MUADDIB-AST-097: propagate injected-Electron-code taint across reassignment. Covers
+    // `content = hook + "\n" + content` where `hook` is a payload array-join, so the subsequent
+    // writeFileSync(target, content) is recognised as writing an injected payload.
+    if ((node.operator === '=' || node.operator === '+=') &&
+        carriesInjectedPayload(node.right, ctx)) {
+      ctx.injectedCodeVars.add(node.left.name);
+    }
     if (node.operator === '+=' && ctx.stringVarValues.has(node.left.name)) {
       const rightVal = extractStringValueDeep(node.right);
       if (rightVal !== null) {

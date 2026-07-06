@@ -158,6 +158,16 @@ function analyzeFile(content, filePath, basePath) {
     objectPropertyMap: new Map(),     // B5: objName → Map<propName, stringValue>
     concatValues: new Map(),          // B2: varName → { value, operands } for concat strings with ≥3 operands
     stringVarValues: new Map(),       // Variable reassignment tracking: varName → string value
+    // MUADDIB-AST-097 electron_app_injection: injected-code variable taint + write-sink records +
+    // foreign-Electron-app-discovery facts (os.homedir + .asar/electron-core sig + existsSync probe).
+    injectedCodeVars: new Set(),      // vars whose value is injected Electron code (write payload)
+    electronTargetVars: new Map(),    // varName → {sig,home,pathStr} for a path.join Electron target
+    electronPayloadWrites: [],        // writeFile* calls whose CONTENT is an injected payload
+    electronAsarTargetWrites: [],     // writeFile* calls whose TARGET is a home-rooted .asar/core file
+    hasHomedirResolve: false,         // os.homedir() / process.env.{HOME,APPDATA,...} resolved
+    hasElectronAppSig: false,         // a .asar / *_desktop_core / electron-core path constructed
+    hasFsExistsProbe: false,          // fs.existsSync/accessSync/statSync (probe the victim install)
+    hasOwnElectronMain: false,        // file IS an Electron main (app.whenReady/loadURL/...) — gates HIGH
     hasFromCharCode: content.includes('fromCharCode'),
     // Anti-analysis / sandbox evasion (2026, @longzy DPRK). Structural "detonation-gate wall"
     // magnitude + host recon + a charcode-hidden analyzer-honeytoken reference. Aggregated in

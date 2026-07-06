@@ -96,6 +96,11 @@ const {
 const { countInvisibleUnicode } = require('../../shared/unicode-invisibles.js');
 const { classifyMcpWrite } = require('./mcp-write-classifier.js');
 const { isShadowEnabled, recordShadowDivergence } = require('../../shared/shadow.js');
+const {
+  carriesInjectedPayload,
+  scanElectronFacts,
+  resolveElectronTarget
+} = require('./electron-injection.js');
 
 /**
  * SHADOW 3-tier classification for mcp_config_injection emissions (R5 + R5b).
@@ -171,6 +176,11 @@ function _isUserLevelPathArg(node, depth = 0) {
 
 function handleCallExpression(node, ctx) {
   const callName = getCallName(node);
+
+  // MUADDIB-AST-097: collect foreign-Electron-app-discovery facts (os.homedir / existsSync /
+  // .asar-electron-core path.join / own-app markers). Correlated with the payload-write in
+  // handlePostWalk to emit electron_app_injection.
+  scanElectronFacts(node, ctx);
 
   // Detect require() with non-literal argument (obfuscation)
   if (callName === 'require' && node.arguments.length > 0) {
@@ -966,6 +976,28 @@ function handleCallExpression(node, ctx) {
     }
   }
 
+
+  // MUADDIB-AST-097: electron_app_injection — a filesystem write whose CONTENT resolves to
+  // injected Electron code (BrowserWindow / webContents-debugger hook / prototype override /
+  // require('electron')). The payload-in-write coupling is the AST discriminator vs a legit
+  // Electron app writing JSON config. The foreign-app-discovery corroboration (os.homedir +
+  // .asar/electron-core sig + existsSync) and the final verdict are assembled in handlePostWalk.
+  // A home-rooted .asar/electron-core *target* write (payload not statically resolvable) is
+  // recorded separately for the HIGH tier.
+  if (node.callee.type === 'MemberExpression' && node.callee.property?.type === 'Identifier') {
+    const eaiMethod = node.callee.property.name;
+    if (['writeFileSync', 'writeFile', 'appendFileSync', 'appendFile'].includes(eaiMethod) &&
+        node.arguments.length >= 2) {
+      if (carriesInjectedPayload(node.arguments[1], ctx)) {
+        ctx.electronPayloadWrites.push({ method: eaiMethod });
+      } else {
+        const tgt = resolveElectronTarget(node.arguments[0], ctx);
+        if (tgt.sig && tgt.home) {
+          ctx.electronAsarTargetWrites.push({ method: eaiMethod, pathStr: tgt.pathStr });
+        }
+      }
+    }
+  }
 
   // Detect fs.chmodSync with executable permissions (deferred to postWalk for compound check)
   if (node.callee.type === 'MemberExpression' && node.callee.property?.type === 'Identifier') {
