@@ -21,6 +21,8 @@ jobs:
       - run: npm ci
       - name: Guard - no typosquat in package.json deps
         run: node scripts/check-deps-typosquats.js
+      - name: Guard - node_modules not tracked in git
+        run: node scripts/check-no-tracked-node-modules.js
       - name: Guard - no HIGH/CRITICAL CVE in dependencies (synchronous CVE gate, F2)
         # Fails the PR on HIGH/CRITICAL advisories (passes today: lone vuln is moderate).
         # npm's built-in fetch-retries=2 (10-60s backoff) absorbs transient endpoint blips;
