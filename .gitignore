@@ -5,7 +5,11 @@
 # ============================================================================
 
 # --- Dependencies (node_modules must never be committed) ---
-node_modules/
+# Slash-less on purpose: a trailing-slash pattern is directory-only and does NOT
+# ignore a *symlink* named node_modules. A stray `git add` of a self-referential
+# node_modules symlink (ELOOP) got re-tracked once (commit 07d45dc8) precisely
+# because `node_modules/` did not match it. Slash-less covers dir AND symlink.
+node_modules
 
 # --- Environment & secrets (SECURITY: never commit) ---
 .env
