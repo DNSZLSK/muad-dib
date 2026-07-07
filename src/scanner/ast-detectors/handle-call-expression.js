@@ -219,9 +219,18 @@ function handleCallExpression(node, ctx) {
         file: ctx.relFile
       });
     } else if (arg.type === 'CallExpression') {
-      const argCallName = getCallName(arg);
-      // Skip safe patterns: require(path.join(...)), require(path.resolve(...))
-      if (argCallName !== 'path.join' && argCallName !== 'path.resolve') {
+      // Skip safe path-builder patterns: require(path.join(...)), require(path.resolve(...)).
+      // NB: getCallName(arg) returns the bare method name ('join'/'resolve'), NOT 'path.join', so
+      // the previous `argCallName !== 'path.join'` guard never matched — a dead check that let the
+      // standard require(path.join(...)) idiom raise a HIGH dynamic_require FP. Inspect the
+      // MemberExpression object directly instead. Real obfuscation still fires: require(atob(...)),
+      // require(decoder.decode(...)), require(Buffer.from(...).toString()) all have object!=='path'.
+      const callee = arg.callee;
+      const isPathBuilder =
+        callee.type === 'MemberExpression' &&
+        callee.object && callee.object.name === 'path' &&
+        callee.property && (callee.property.name === 'join' || callee.property.name === 'resolve');
+      if (!isPathBuilder) {
         const hasDecode = containsDecodePattern(arg);
         ctx.threats.push({
           type: 'dynamic_require',
