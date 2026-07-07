@@ -7,7 +7,7 @@
   <a href="https://github.com/DNSZLSK/muad-dib/actions/workflows/scan.yml"><img src="https://github.com/DNSZLSK/muad-dib/actions/workflows/scan.yml/badge.svg" alt="CI"></a>
   <a href="https://codecov.io/gh/DNSZLSK/muad-dib"><img src="https://codecov.io/gh/DNSZLSK/muad-dib/branch/master/graph/badge.svg" alt="Coverage"></a>
   <a href="https://scorecard.dev/viewer/?uri=github.com/DNSZLSK/muad-dib"><img src="https://api.scorecard.dev/projects/github.com/DNSZLSK/muad-dib/badge" alt="OpenSSF Scorecard"></a>
-  <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
+  <img src="https://img.shields.io/badge/license-AGPL--3.0--only-blue" alt="License">
   <img src="https://img.shields.io/badge/node-%3E%3D18-brightgreen" alt="Node">
   <img src="https://img.shields.io/badge/IOCs-225%2C000%2B-red" alt="IOCs">
 </p>
@@ -30,18 +30,17 @@
 
 npm and PyPI supply-chain attacks are exploding. Shai-Hulud compromised 25K+ repos in 2025. Existing tools detect threats but don't help you respond.
 
-MUAD'DIB combines **21 parallel scanners** (274 detection rules), a **deobfuscation engine**, **inter-module dataflow analysis**, **compound scoring** (20 compound rules), and a gVisor/Docker sandbox to detect known threats and suspicious behavioral patterns in npm and PyPI packages. An XGBoost classifier exists in the codebase but is **currently inactive** (see [Evaluation](#evaluation)).
+MUAD'DIB combines **<!--stat:scanners-->21<!--/stat:scanners--> parallel scanners** (<!--stat:rulesTotal-->275<!--/stat:rulesTotal--> detection rules), a **deobfuscation engine**, **inter-module dataflow analysis**, **compound scoring** (<!--stat:compound-->20<!--/stat:compound--> compound rules), and a gVisor/Docker sandbox to detect known threats and suspicious behavioral patterns in npm and PyPI packages. An XGBoost classifier exists in the codebase but is **currently inactive** (see [Evaluation](#evaluation)).
 
 ---
 
 ## Positioning
 
-MUAD'DIB is an educational tool and a free first line of defense. It detects **known** npm and PyPI threats (225,000+ IOCs) and suspicious behavioral patterns.
+MUAD'DIB is a free, open, and fully auditable supply-chain scanner for npm and PyPI. It detects **known** threats (225,000+ IOCs), install-time RCE, credential-then-exfiltration flows, obfuscated payloads, and other suspicious behavioral patterns — locally, with no telemetry.
 
-**For enterprise protection**, use:
-- [Socket.dev](https://socket.dev) - ML behavioral analysis, cloud sandboxing
-- [Snyk](https://snyk.io) - Massive vulnerability database, CI/CD integrations
-- [Opengrep](https://opengrep.dev) - Advanced dataflow analysis, Semgrep rules
+It is licensed under the **AGPL-3.0**; a **commercial license** is available for organizations that need to embed it in a proprietary product or run it as a closed hosted service (see [License](#license)).
+
+It deliberately does not try to do everything — see [Scope](#scope) for exactly what it catches and what it does not.
 
 ---
 
@@ -186,7 +185,7 @@ muaddib replay                     # Ground truth validation (90/94 TPR@3, v2.11
 
 ## Features
 
-### 21 parallel scanners
+### <!--stat:scanners-->21<!--/stat:scanners--> parallel scanners
 
 | Scanner | Detection |
 |---------|-----------|
@@ -213,9 +212,9 @@ muaddib replay                     # Ground truth validation (90/94 TPR@3, v2.11
 | Python AST (PYAST) | Tree-sitter-Python AST with taint-aware detectors (v2.11.42+) |
 | Anti-Scanner Injection (ASI) | Prompt-injection text in comments/strings that coerces an LLM code reviewer into a clean verdict or into skipping an obfuscated payload (ASI-001..004, Hades campaign 2026-06) |
 
-### 274 detection rules
+### <!--stat:rulesTotal-->275<!--/stat:rulesTotal--> detection rules
 
-All rules (269 RULES + 5 PARANOID) are mapped to MITRE ATT&CK techniques. See [SECURITY.md](SECURITY.md#detection-rules-v211139) for the complete rules reference.
+All rules (<!--stat:rulesCore-->270<!--/stat:rulesCore--> RULES + <!--stat:rulesParanoid-->5<!--/stat:rulesParanoid--> PARANOID) are mapped to MITRE ATT&CK techniques. See [SECURITY.md](SECURITY.md#detection-rules-v211139) for the complete rules reference.
 
 ### Detected campaigns
 
@@ -346,7 +345,7 @@ npm test
 
 ### Testing
 
-- **4500 tests** across 147 modular test files
+- **<!--stat:tests-->4540<!--/stat:tests--> tests** across <!--stat:testFiles-->150<!--/stat:testFiles--> modular test files
 - **56 fuzz tests** - Malformed inputs, ReDoS, unicode, binary
 - **Datadog 17K benchmark** - 14,587 confirmed malware samples (in-scope)
 - **Ground truth validation** - 96 real-world attacks (95.74% TPR@3, 88.30% TPR@20 — v2.11.48 full measure on 94 in-scope)
@@ -367,7 +366,7 @@ npm test
 - [Documentation Index](docs/INDEX.md) - All documentation in one place
 - [Evaluation Methodology](docs/EVALUATION_METHODOLOGY.md) - Experimental protocol, holdout scores
 - [Threat Model](docs/threat-model.md) - What MUAD'DIB detects and doesn't detect
-- [Security Policy](SECURITY.md) - Detection rules reference (269 rules)
+- [Security Policy](SECURITY.md) - Detection rules reference (<!--stat:rulesTotal-->275<!--/stat:rulesTotal--> rules)
 - [Security Audit](docs/SECURITY_AUDIT.md) - Bypass validation report
 - [FP Analysis](docs/EVALUATION.md) - Historical false positive analysis
 
@@ -375,7 +374,13 @@ npm test
 
 ## License
 
-MIT
+MUAD'DIB is licensed under the **GNU Affero General Public License v3.0 only** (`AGPL-3.0-only`) — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+You are free to use, study, modify, and redistribute it — including over a network — provided that derivative works and network-deployed modifications are released under the same license.
+
+**Commercial licensing:** to embed MUAD'DIB in a proprietary / closed-source product, or to offer it as a hosted service without the AGPL's source-disclosure obligations, a separate commercial license is available. Open an issue or contact the author ([DNSZLSK](https://github.com/DNSZLSK)).
+
+Copyright (C) 2026 DNSZLSK.
 
 ---
 

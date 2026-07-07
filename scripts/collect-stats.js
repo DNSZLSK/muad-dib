@@ -1,0 +1,123 @@
+'use strict';
+/*
+ * MUAD'DIB — Supply-chain threat detection for npm & PyPI
+ * Copyright (C) 2026 DNSZLSK
+ * SPDX-License-Identifier: AGPL-3.0-only
+ *
+ * collect-stats.js — measure the project's STRUCTURAL counts from SOURCE and write
+ * stats.json (the single source of truth that sync-stats.js injects into the docs).
+ * Nothing here is hand-typed: every number is derived from code so the docs cannot drift.
+ *
+ *   node scripts/collect-stats.js               refresh static fields in stats.json (keeps prior `tests`)
+ *   node scripts/collect-stats.js --with-tests  also run the suite and refresh the runtime `tests` count
+ *   node scripts/collect-stats.js --check        verify stats.json's static fields still match the code
+ *                                                (fast, no test run) — exit 1 on drift. CI gate.
+ *
+ * SCOPE: structural counts only (scanners, rules, compound, scanner/test files, version).
+ * Detection metrics (TPR/FPR/ADR) are deliberately NOT collected — they require a full
+ * `muaddib evaluate` run and must never be auto-injected (see CLAUDE.md "Interdictions").
+ */
+const fs = require('fs');
+const path = require('path');
+const { execFileSync } = require('child_process');
+
+const ROOT = path.resolve(__dirname, '..');
+const STATS_PATH = path.join(ROOT, 'stats.json');
+
+function countJsFiles(relDir) {
+  const abs = path.join(ROOT, relDir);
+  if (!fs.existsSync(abs)) return 0;
+  return fs.readdirSync(abs, { withFileTypes: true })
+    .filter(e => e.isFile() && e.name.endsWith('.js')).length;
+}
+
+function countTestFiles(relDir) {
+  const abs = path.join(ROOT, relDir);
+  if (!fs.existsSync(abs)) return 0;
+  let n = 0;
+  for (const e of fs.readdirSync(abs, { withFileTypes: true })) {
+    if (e.isDirectory()) n += countTestFiles(path.join(relDir, e.name));
+    else if (e.isFile() && e.name.endsWith('.test.js')) n++;
+  }
+  return n;
+}
+
+// Every static field is measured directly from source — no literals to keep in sync.
+function measureStatic() {
+  const pkg = require(path.join(ROOT, 'package.json'));
+  const rulesMod = require(path.join(ROOT, 'src/rules'));
+  const RULES = rulesMod.RULES || {};
+  const PARANOID = rulesMod.PARANOID_RULES || {};
+  const ruleKeys = Object.keys(RULES);
+  const compound = ruleKeys.filter(k => /COMPOUND/i.test((RULES[k] && RULES[k].id) || k)).length;
+  const astRules = ruleKeys.filter(k => /^MUADDIB-AST-\d/.test((RULES[k] && RULES[k].id) || '')).length; // anchored ^MUADDIB-AST-: excludes TEMPORAL-AST / PYAST
+
+  // Parallel scanner count = the authoritative SCANNER_NAMES array in the pipeline executor.
+  const execSrc = fs.readFileSync(path.join(ROOT, 'src/pipeline/executor.js'), 'utf8');
+  const m = execSrc.match(/const\s+SCANNER_NAMES\s*=\s*\[([\s\S]*?)\]/);
+  if (!m) throw new Error('SCANNER_NAMES array not found in src/pipeline/executor.js');
+  const scanners = (m[1].match(/'[^']+'|"[^"]+"/g) || []).length;
+
+  return {
+    version: pkg.version,
+    scanners,
+    rulesTotal: ruleKeys.length + Object.keys(PARANOID).length,
+    rulesCore: ruleKeys.length,
+    rulesParanoid: Object.keys(PARANOID).length,
+    compound,
+    astRules,
+    scannerFiles: countJsFiles('src/scanner'),
+    astDetectors: countJsFiles('src/scanner/ast-detectors'),
+    moduleGraph: countJsFiles('src/scanner/module-graph'),
+    pythonAstDetectors: countJsFiles('src/scanner/python-ast-detectors'),
+    testFiles: countTestFiles('tests'),
+  };
+}
+
+// Runtime value: the only number that cannot be derived statically. Runs the suite (~5 min)
+// and parses the framework's RESULTS line. The runner exits non-zero on the Windows-only
+// flakes, so read stdout off the thrown error too (see CLAUDE.md note on execSync).
+function measureTests() {
+  let out;
+  try {
+    out = execFileSync('node', ['tests/run-tests.js'], { cwd: ROOT, encoding: 'utf8', maxBuffer: 128 * 1024 * 1024 });
+  } catch (e) {
+    out = `${e.stdout || ''}${e.stderr || ''}`;
+  }
+  const m = out.match(/RESULTS:\s*(\d+)\s*passed,\s*(\d+)\s*failed/);
+  if (!m) throw new Error('collect-stats: could not parse the RESULTS line from the test run');
+  return parseInt(m[1], 10) + parseInt(m[2], 10);
+}
+
+function loadStats() {
+  try { return JSON.parse(fs.readFileSync(STATS_PATH, 'utf8')); } catch { return {}; }
+}
+
+function main() {
+  const args = process.argv.slice(2);
+  const stat = measureStatic();
+
+  if (args.includes('--check')) {
+    const prior = loadStats();
+    const drift = Object.keys(stat).filter(k => String(prior[k]) !== String(stat[k]));
+    if (drift.length) {
+      console.error('[collect-stats] stats.json is STALE vs source — run `npm run docs:stats`:');
+      for (const k of drift) console.error(`    ${k}: stats.json=${prior[k]}  source=${stat[k]}`);
+      process.exit(1);
+    }
+    console.log('[collect-stats] stats.json static fields match the source. OK');
+    return;
+  }
+
+  const prior = loadStats();
+  const tests = args.includes('--with-tests') ? measureTests() : (prior.tests ?? null);
+  const out = {
+    _comment: 'GENERATED by scripts/collect-stats.js — do not edit by hand. Run `npm run docs:stats`.',
+    ...stat,
+    tests,
+  };
+  fs.writeFileSync(STATS_PATH, `${JSON.stringify(out, null, 2)}\n`);
+  console.log('[collect-stats] wrote stats.json:\n' + JSON.stringify(out, null, 2));
+}
+
+main();
