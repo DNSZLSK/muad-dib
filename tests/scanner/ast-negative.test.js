@@ -108,6 +108,22 @@ module.exports = utils;
     }
   });
 
+  await asyncTest('NEG: require(path.join(...)) / require(path.resolve(...)) not flagged as dynamic_require (AST-006 FP fix)', async () => {
+    const tmp = makeTempPkg(`
+const path = require('path');
+const cfg = require(path.join(__dirname, 'config.json'));
+const helper = require(path.resolve(__dirname, 'lib', 'helper.js'));
+module.exports = { cfg, helper };
+`);
+    try {
+      const result = await runScanDirect(tmp);
+      const types = threatTypes(result);
+      assert(!types.includes('dynamic_require'), `require(path.join/resolve(...)) is the standard Node idiom and must not trigger dynamic_require, got: ${types.join(', ')}`);
+    } finally {
+      cleanupTemp(tmp);
+    }
+  });
+
   await asyncTest('NEG: crypto.createHash("sha256") not flagged as crypto_decipher', async () => {
     const tmp = makeTempPkg(`
 const crypto = require('crypto');
