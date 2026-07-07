@@ -1,0 +1,33 @@
+MUAD'DIB — Supply-chain threat detection for npm & PyPI
+Copyright (C) 2026 DNSZLSK
+
+This product is licensed under the GNU Affero General Public License,
+version 3.0 only (AGPL-3.0-only). A full copy of the license is provided in
+the LICENSE file and at <https://www.gnu.org/licenses/agpl-3.0.txt>.
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU Affero General Public License, version 3,
+    as published by the Free Software Foundation.
+
+    This program is distributed in the hope that it will be useful, but
+    WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+    Affero General Public License for more details.
+
+
+COMMERCIAL LICENSING
+--------------------
+MUAD'DIB is also available under a separate commercial license for
+organizations that cannot, or do not wish to, comply with the terms of the
+AGPL-3.0 — for example, embedding it in a proprietary product or offering it
+as a hosted service without disclosing source. For inquiries, open an issue
+at <https://github.com/DNSZLSK/muad-dib/issues> or contact the author
+(DNSZLSK).
+
+
+THIRD-PARTY COMPONENTS
+----------------------
+This software depends on third-party packages distributed under their own
+(permissive) licenses; see package.json and the LICENSE files under
+node_modules/. It also vendors the tree-sitter Python grammar
+(src/vendor/tree-sitter-python.wasm), licensed under the MIT License.

@@ -30,6 +30,8 @@ jobs:
         # block than merge un-audited). Normal audit runs in seconds, so 5 min is ample.
         timeout-minutes: 5
         run: npm audit --audit-level=high
+      - name: Guard - doc counts in sync with source (stats markers)
+        run: npm run docs:stats:check
       - name: Run tests
         run: npm test
 

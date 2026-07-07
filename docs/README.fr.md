@@ -7,7 +7,7 @@
   <a href="https://github.com/DNSZLSK/muad-dib/actions/workflows/scan.yml"><img src="https://github.com/DNSZLSK/muad-dib/actions/workflows/scan.yml/badge.svg" alt="CI"></a>
   <a href="https://codecov.io/gh/DNSZLSK/muad-dib"><img src="https://codecov.io/gh/DNSZLSK/muad-dib/branch/master/graph/badge.svg" alt="Coverage"></a>
   <a href="https://scorecard.dev/viewer/?uri=github.com/DNSZLSK/muad-dib"><img src="https://api.scorecard.dev/projects/github.com/DNSZLSK/muad-dib/badge" alt="OpenSSF Scorecard"></a>
-  <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
+  <img src="https://img.shields.io/badge/license-AGPL--3.0--only-blue" alt="License">
   <img src="https://img.shields.io/badge/node-%3E%3D18-brightgreen" alt="Node">
   <img src="https://img.shields.io/badge/IOCs-225%2C000%2B-red" alt="IOCs">
 </p>
@@ -30,20 +30,17 @@
 
 Les attaques supply-chain npm et PyPI explosent. Shai-Hulud a compromis 25K+ repos en 2025. Les outils existants détectent, mais n'aident pas à répondre.
 
-MUAD'DIB combine **20 scanners paralleles** (266 regles de detection), un **moteur de desobfuscation**, une **analyse dataflow inter-module**, du **scoring compose** (17 regles compound), et un sandbox gVisor/Docker pour detecter les menaces connues et les patterns comportementaux suspects dans les packages npm et PyPI. Un classifier XGBoost existe dans le code mais est **actuellement inactif** (modele effondre, en attente de re-entrainement — voir section ML Classifier ci-dessous).
+MUAD'DIB combine **<!--stat:scanners-->21<!--/stat:scanners--> scanners paralleles** (<!--stat:rulesTotal-->275<!--/stat:rulesTotal--> regles de detection), un **moteur de desobfuscation**, une **analyse dataflow inter-module**, du **scoring compose** (<!--stat:compound-->20<!--/stat:compound--> regles compound), et un sandbox gVisor/Docker pour detecter les menaces connues et les patterns comportementaux suspects dans les packages npm et PyPI. Un classifier XGBoost existe dans le code mais est **actuellement inactif** (modele effondre, en attente de re-entrainement — voir section ML Classifier ci-dessous).
 
 ---
 
 ## Positionnement
 
-MUAD'DIB est un outil éducatif et une première ligne de défense gratuite. Il détecte les menaces npm et PyPI **connues** (225 000+ IOCs) et les patterns suspects basiques.
+MUAD'DIB est un scanner supply-chain npm et PyPI **libre, ouvert et entièrement auditable**. Il détecte les menaces **connues** (225 000+ IOCs), le RCE à l'installation, les flux credential-puis-exfiltration, les payloads obfusqués et d'autres patterns comportementaux suspects — en local, sans télémétrie.
 
-**Pour une protection enterprise**, utilisez :
-- [Socket.dev](https://socket.dev) - Analyse comportementale ML, sandboxing cloud
-- [Snyk](https://snyk.io) - Base de vulnérabilités massive, intégrations CI/CD
-- [Opengrep](https://opengrep.dev) - Analyse dataflow avancée, règles Semgrep
+Il est distribué sous licence **AGPL-3.0** ; une **licence commerciale** est disponible pour les organisations qui doivent l'intégrer dans un produit propriétaire ou l'exécuter en service hébergé fermé (voir [Licence](#licence)).
 
-MUAD'DIB ne remplace pas ces outils. Il les complète pour les devs qui veulent une vérification rapide et gratuite avant d'installer un package inconnu.
+Il ne cherche volontairement pas à tout couvrir — voir le [Threat Model](threat-model.md) pour ce qu'il détecte et ce qu'il ne détecte pas.
 
 ---
 
@@ -642,7 +639,7 @@ Les alertes apparaissent dans Security > Code scanning alerts.
 ## Architecture
 
 ```
-MUAD'DIB 2.11.117 Scanner
+MUAD'DIB 2.11.159 Scanner
 |
 +-- IOC Match (225 000+ packages, JSON DB)
 |   +-- OSV.dev npm dump (200K+ entrées MAL-*)
@@ -669,7 +666,7 @@ MUAD'DIB 2.11.117 Scanner
 |   +-- Corrélation entre signaux faibles de multiples scanners
 |   +-- Élévation de sévérité sur combinaisons suspectes
 |
-+-- 20 Scanners Parallèles (266 règles)
++-- 21 Scanners Parallèles (275 règles)
 |   +-- AST Parse (acorn) — eval/Function, credential CLI theft, binary droppers, prototype hooks
 |   +-- Pattern Matching (shell, scripts)
 |   +-- Typosquat Detection (npm + PyPI, Levenshtein)
@@ -804,7 +801,7 @@ Voir [Evaluation Methodology](docs/EVALUATION_METHODOLOGY.md#14-datadog-17k-benc
 - **ADR** (Adversarial Detection Rate) : taux de detection sur 107 samples malveillants evasifs — 67 adversariaux (7 vagues red team) + 40 holdouts (4 batches de 10). 107 disponibles sur disque, seuil global=20.
 - **Holdout** (pre-tuning) : taux de detection sur 10 samples jamais vus avec regles gelees (mesure de generalisation)
 
-Datasets : 14 587 samples Datadog in-scope, 548 npm curated + 200 npm random + 132 PyPI packages benins, 107 samples adversariaux/holdout, **96 attaques ground-truth** (94 in-scope + 2 hors-scope : GT-005 colors, GT-009 faker, protestware min_threats=0; 13 samples PyPI added 2026-05-25). **4414 tests**, 141 fichiers.
+Datasets : 14 587 samples Datadog in-scope, 548 npm curated + 200 npm random + 132 PyPI packages benins, 107 samples adversariaux/holdout, **96 attaques ground-truth** (94 in-scope + 2 hors-scope : GT-005 colors, GT-009 faker, protestware min_threats=0; 13 samples PyPI added 2026-05-25). **<!--stat:tests-->4540<!--/stat:tests--> tests**, <!--stat:testFiles-->150<!--/stat:testFiles--> fichiers.
 
 Voir [Evaluation Methodology](docs/EVALUATION_METHODOLOGY.md) pour le protocole experimental complet.
 
@@ -867,7 +864,7 @@ npm test
 
 ### Tests
 
-- **4414 tests unitaires/integration** sur 141 fichiers modulaires via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
+- **<!--stat:tests-->4540<!--/stat:tests--> tests unitaires/integration** sur <!--stat:testFiles-->150<!--/stat:testFiles--> fichiers modulaires via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
 - **56 tests de fuzzing** - YAML malforme, JSON invalide, fichiers binaires, ReDoS, unicode, inputs 10MB
 - **Benchmark Datadog 17K** - 14 587 packages malveillants in-scope, 92.8% Wild TPR (13 538/14 587 in-scope, 3 335 hors scope sans JS). compromised_lib 97.8%, malicious_intent 92.1%
 - **107 samples adversariaux/holdout** - 67 adversariaux + 40 holdouts, 103/107 taux de detection sur samples disponibles (96.3% ADR, seuil global=20)
@@ -895,7 +892,13 @@ npm test
 
 ## Licence
 
-MIT
+MUAD'DIB est distribue sous licence **GNU Affero General Public License v3.0 only** (`AGPL-3.0-only`) — voir [LICENSE](../LICENSE) et [NOTICE](../NOTICE).
+
+Vous etes libre de l'utiliser, l'etudier, le modifier et le redistribuer — y compris via un reseau — a condition que les travaux derives et les versions deployees en service soient publies sous la meme licence.
+
+**Licence commerciale :** pour integrer MUAD'DIB dans un produit proprietaire / ferme, ou le proposer en service heberge sans les obligations de divulgation du code de l'AGPL, une licence commerciale separee est disponible. Ouvrez une issue ou contactez l'auteur ([DNSZLSK](https://github.com/DNSZLSK)).
+
+Copyright (C) 2026 DNSZLSK.
 
 ---
 

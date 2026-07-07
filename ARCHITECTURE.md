@@ -11,7 +11,7 @@ bin/muaddib.js (yargs CLI)
   └─► src/index.js — run(targetPath, options)
         ├─► Module Graph pre-analysis (src/scanner/module-graph/, directory of 9 files, 5s timeout)
         ├─► Deobfuscation pre-processing (src/scanner/deobfuscate.js)
-        ├─► 20 parallel scanners (Promise.allSettled)
+        ├─► 21 parallel scanners (Promise.allSettled)
         │     ├── AST scanner (src/scanner/ast.js)                          [timeout 45s]
         │     ├── Dataflow scanner (src/scanner/dataflow.js)                [timeout 45s]
         │     ├── Shell scanner (src/scanner/shell.js)
@@ -33,7 +33,7 @@ bin/muaddib.js (yargs CLI)
         ├─► FP reductions (src/scoring.js — applyFPReductions)
         ├─► Reachability post-processing (src/scanner/reachability.js — file-level + function-level FP downgrade)
         ├─► Intent coherence analysis (src/intent-graph.js — buildIntentPairs)
-        ├─► Rule enrichment (src/rules/index.js — 274 rules)
+        ├─► Rule enrichment (src/rules/index.js — 275 rules)
         ├─► Scoring (src/scoring.js — per-file max + compound boosts)
         └─► Output (CLI / JSON / HTML / SARIF)
 
@@ -43,7 +43,7 @@ bin/muaddib.js (yargs CLI)
     src/monitor/queue.js:628).
 ```
 
-**Core orchestration:** `src/index.js` delegates to `src/pipeline/{initializer,executor,processor,outputter}.js`. `executor.js` runs cross-file module graph analysis first (pre-analysis, 5s timeout), then launches **20 individual scanners** in parallel via `Promise.allSettled` (intel-triage P1: `scanIocStrings` + `scanAntiForensic` + `scanStubPackage`; Sprint 1: `scanMonorepo` audit MR-C2 fix; v2.11.41+: `scanPythonSource` PYSRC + `scanPythonAst` PYAST), then `processor.js` deduplicates, applies FP reductions + reachability post-processing, scores using per-file max (v2.2.11: `riskScore = min(100, max(file_scores) + package_level_score)`, severity weights: CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1), applies intent coherence analysis (intra-file source-sink pairing), enriches with rules/playbooks (266 rules), and `outputter.js` formats CLI/JSON/HTML/SARIF. Result includes `warnings: []` array (v2.6.5) for incomplete scan notifications (module graph timeout/skip, deobfuscation failures). Exports `isPackageLevelThreat` and `computeGroupScore` for testing.
+**Core orchestration:** `src/index.js` delegates to `src/pipeline/{initializer,executor,processor,outputter}.js`. `executor.js` runs cross-file module graph analysis first (pre-analysis, 5s timeout), then launches **<!--stat:scanners-->21<!--/stat:scanners--> individual scanners** in parallel via `Promise.allSettled` (intel-triage P1: `scanIocStrings` + `scanAntiForensic` + `scanStubPackage`; Sprint 1: `scanMonorepo` audit MR-C2 fix; v2.11.41+: `scanPythonSource` PYSRC + `scanPythonAst` PYAST), then `processor.js` deduplicates, applies FP reductions + reachability post-processing, scores using per-file max (v2.2.11: `riskScore = min(100, max(file_scores) + package_level_score)`, severity weights: CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1), applies intent coherence analysis (intra-file source-sink pairing), enriches with rules/playbooks (<!--stat:rulesTotal-->275<!--/stat:rulesTotal--> rules), and `outputter.js` formats CLI/JSON/HTML/SARIF. Result includes `warnings: []` array (v2.6.5) for incomplete scan notifications (module graph timeout/skip, deobfuscation failures). Exports `isPackageLevelThreat` and `computeGroupScore` for testing.
 
 ## Scanner Modules
 
@@ -52,13 +52,13 @@ bin/muaddib.js (yargs CLI)
 | Phase | Count | Modules | Mechanism |
 |-------|-------|---------|-----------|
 | Pre-analysis | 2 | `module-graph/` (directory, 9 files, 5s timeout), `deobfuscate.js` (passed as arg to AST + dataflow) | Sequential, before parallel phase |
-| Parallel | 20 | AST, dataflow, shell, package, dependencies, obfuscation, entropy, typosquat, python (IOC + PyPI typosquat = 2 functions), ai-config, github-actions, hash, ioc-strings (P1.1), anti-forensic (P1.2), stub-package (P1.3), monorepo, trusted-dep-diff (opt-in), python-source (PYSRC), python-ast (PYAST tree-sitter) | `Promise.allSettled` (executor.js:221-228, allSettled at :269) |
+| Parallel | <!--stat:scanners-->21<!--/stat:scanners--> | AST, dataflow, shell, package, dependencies, obfuscation, entropy, typosquat, python (IOC + PyPI typosquat = 2 functions), ai-config, github-actions, hash, ioc-strings (P1.1), anti-forensic (P1.2), stub-package (P1.3), monorepo, trusted-dep-diff (opt-in), python-source (PYSRC), python-ast (PYAST tree-sitter), anti-scanner-injection (ASI-001..004) | `Promise.allSettled` (executor.js) |
 | Conditional / post-processing | 6 | `paranoid.js` (--paranoid), `temporal-runner.js` + `temporal-analysis.js` + `temporal-ast-diff.js` (--temporal*), `reachability.js` (post-processor FP downgrade), `phantom-gyp.js` (Phantom Gyp compound correlator, post-processor at `processor.js:451`) | Skipped unless flag or post-pipeline |
 | Metadata fetcher | 1 | `npm-registry.js` | NPM API for age/downloads/maintainers (ML features, monitor, evaluate) |
 
-Total: **33 `.js` files** at `src/scanner/` root + **3 directories**: `ast-detectors/` (13 files — the AST scanner's detector modules, split out of `ast.js`), `module-graph/` (9 files), and `python-ast-detectors/` (6 files). Of the 33: 19 files serve the 20 parallel scan functions (`python.js` provides 2 - `matchPythonIOCs` + `checkPyPITyposquatting`), `deobfuscate.js` is pre-analysis, 6 are conditional/post-processing (paranoid, 3× temporal-*, reachability, phantom-gyp), `npm-registry.js` is metadata, `env-var-classification.js` is a taint-source helper (used by `dataflow.js` + `module-graph/`), and the remaining 5 (`release-zero.js`, `email-domain.js`, `pypi-maintainer.js`, `pypi-registry.js`, `pypi-release-zero.js`) are monitor-side / registry-metadata scanners invoked by the daemon, not the CLI scan path. Intent coherence (`src/intent-graph.js`) runs in pipeline processor, not in `src/scanner/`.
+Total: **<!--stat:scannerFiles-->34<!--/stat:scannerFiles--> `.js` files** at `src/scanner/` root + **3 directories**: `ast-detectors/` (<!--stat:astDetectors-->15<!--/stat:astDetectors--> files — the AST scanner's detector modules, split out of `ast.js`), `module-graph/` (<!--stat:moduleGraph-->9<!--/stat:moduleGraph--> files), and `python-ast-detectors/` (<!--stat:pythonAstDetectors-->6<!--/stat:pythonAstDetectors--> files). Of the <!--stat:scannerFiles-->34<!--/stat:scannerFiles-->: 20 files serve the <!--stat:scanners-->21<!--/stat:scanners--> parallel scan functions (`python.js` provides 2 - `matchPythonIOCs` + `checkPyPITyposquatting`), `deobfuscate.js` is pre-analysis, 6 are conditional/post-processing (paranoid, 3× temporal-*, reachability, phantom-gyp), `npm-registry.js` is metadata, `env-var-classification.js` is a taint-source helper (used by `dataflow.js` + `module-graph/`), and the remaining 5 (`release-zero.js`, `email-domain.js`, `pypi-maintainer.js`, `pypi-registry.js`, `pypi-release-zero.js`) are monitor-side / registry-metadata scanners invoked by the daemon, not the CLI scan path. Intent coherence (`src/intent-graph.js`) runs in pipeline processor, not in `src/scanner/`.
 
-**Scanner pattern:** Each of the 20 individual scanners in `src/scanner/` returns `Array<{type, severity, message, file}>`:
+**Scanner pattern:** Each of the <!--stat:scanners-->21<!--/stat:scanners--> individual scanners in `src/scanner/` returns `Array<{type, severity, message, file}>`:
 - `file` must use `path.relative(targetPath, absolutePath)` for Windows compatibility
 - Sync scanners are wrapped in `Promise.resolve()` in the Promise.all
 - Use `findFiles(dir, { extensions, excludedDirs })` from `src/utils.js` for file walking
@@ -369,7 +369,7 @@ Pre-alert embeds are ecosystem-aware: `registryLink()` resolves npm vs PyPI, and
 
 ## Detection Rules
 
-**Rules & playbooks:** Threat types map to rules in `src/rules/index.js` (**266 rules: 261 RULES + 5 PARANOID** — Track D v2.11.48 added AST-093 `linux_fingerprint_exec`, AST-094 `direct_ip_exfil`, COMPOUND-016 `recon_exfil_direct_ip`; v2.11.67/70 Phantom Gyp added PKG-023 `gyp_command_exec` + COMPOUND-017 `gyp_phantom_exec`; MITRE ATT&CK mapped) and remediation text in `src/response/playbooks.js`. Both keyed by threat `type` string.
+**Rules & playbooks:** Threat types map to rules in `src/rules/index.js` (**<!--stat:rulesTotal-->275<!--/stat:rulesTotal--> rules: <!--stat:rulesCore-->270<!--/stat:rulesCore--> RULES + <!--stat:rulesParanoid-->5<!--/stat:rulesParanoid--> PARANOID** — Track D v2.11.48 added AST-093 `linux_fingerprint_exec`, AST-094 `direct_ip_exfil`, COMPOUND-016 `recon_exfil_direct_ip`; v2.11.67/70 Phantom Gyp added PKG-023 `gyp_command_exec` + COMPOUND-017 `gyp_phantom_exec`; MITRE ATT&CK mapped) and remediation text in `src/response/playbooks.js`. Both keyed by threat `type` string.
 
 ### AST Detection Rules (v2.2+)
 

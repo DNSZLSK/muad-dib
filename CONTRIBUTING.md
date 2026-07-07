@@ -2,6 +2,18 @@
 
 Thanks for your interest in improving MUAD'DIB!
 
+## License and Contributor License Agreement (CLA)
+
+MUAD'DIB is licensed under the **GNU Affero General Public License v3.0 only**
+(`AGPL-3.0-only`). By contributing, you agree that your contribution is provided
+under that same license (inbound = outbound) **and** you accept the
+[Contributor License Agreement](CLA.md), which lets the project be dual-licensed
+(AGPL for the community, commercial licenses for organizations that need them).
+
+Practically: sign off on your commits with `git commit -s` (Developer Certificate
+of Origin), and state in your first pull request that you have read and agree to
+the CLA. See [CLA.md](CLA.md) for the full text.
+
 ## Ways to contribute
 
 ### 1. Add new IOCs (Indicators of Compromise)
@@ -117,7 +129,7 @@ node bin/muaddib.js evaluate --benign          # FPR on 545 scanned npm packages
 3. Make your changes
 4. Run tests (`npm test`)
 5. Run `node bin/muaddib.js evaluate --ground-truth --adversarial` to check for regressions
-6. Commit (`git commit -m "Add my feature"`)
+6. Commit with sign-off (`git commit -s -m "Add my feature"`)
 7. Push (`git push origin feature/my-feature`)
 8. Open a Pull Request
 
