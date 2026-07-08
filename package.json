@@ -53,13 +53,13 @@
     "@inquirer/prompts": "8.5.2",
     "acorn": "8.17.0",
     "acorn-walk": "8.3.5",
-    "adm-zip": "0.5.17",
-    "js-yaml": "5.2.1",
+    "adm-zip": "0.5.18",
+    "js-yaml": "5.1.0",
     "web-tree-sitter": "^0.26.9"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
-    "eslint": "10.5.0",
+    "eslint": "10.6.0",
     "eslint-plugin-security": "^4.0.0",
     "globals": "17.7.0"
   }
