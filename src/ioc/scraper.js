@@ -201,7 +201,12 @@ function parseCSV(csvContent, hasHeader = true) {
 }
 
 const MAX_REDIRECTS = 5;
-const MAX_RESPONSE_SIZE = 200 * 1024 * 1024; // 200MB
+// Env-tunable (idiom: parseInt(env) || default). Default 512MB — the OSV npm all.zip
+// crossed the old 200MB cap on 2026-07 (measured 200.04MB), which silently dropped the
+// entire OSV npm dump AND emptied knownIds (→ OSSF re-fetched all ~31k entries one-by-one).
+// Bump gives headroom for growth; lower it via MUADDIB_MAX_RESPONSE_MB on RAM-constrained
+// hosts (the whole response is buffered in memory — streaming-to-disk is the long-term fix).
+const MAX_RESPONSE_SIZE = (parseInt(process.env.MUADDIB_MAX_RESPONSE_MB, 10) || 512) * 1024 * 1024;
 const MAX_ENTRY_UNCOMPRESSED = 50 * 1024 * 1024;   // 50MB per zip entry
 const MAX_TOTAL_UNCOMPRESSED = 500 * 1024 * 1024;   // 500MB total budget per zip
 
