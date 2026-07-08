@@ -37,6 +37,20 @@ const DEFAULT_TRAINING_FILE = path.join(__dirname, '..', '..', 'data', 'ml-train
 let TRAINING_FILE = DEFAULT_TRAINING_FILE;
 const MAX_JSONL_SIZE = 100 * 1024 * 1024; // 100MB rotation threshold
 
+// Benign down-sampling: 'clean' records are ~88% of the stream and near-identical
+// (the same popular packages re-scanned on every backlog replay / monitor restart).
+// They balloon the file without adding ML signal — negatives are re-derived from
+// GHSA/GT at retrain time, not from these self-labels. Keep 1 in CLEAN_SAMPLE_RATE
+// clean records; every non-clean outcome (suspect/confirmed/unconfirmed/…) is always
+// written. Gating here (the single write chokepoint) rather than in the monitor's
+// recordTrainingSample keeps the separate scan-ledger (coverage/throughput) complete.
+const CLEAN_SAMPLE_RATE = 100; // 1% of 'clean' records are persisted
+let _cleanCounter = 0;
+
+// Rotation retention: keep only the MAX_ROTATED_SNAPSHOTS most recent rotated files
+// on disk; prune the rest at each rotation (see pruneOldSnapshots).
+const MAX_ROTATED_SNAPSHOTS = 7;
+
 // In-memory line counter. null = needs recompute (cold boot, file rewrite, or
 // path swap). Maintained incrementally by appendRecord and invalidated by
 // relabelRecords and setTrainingFile. Prior to this cache, getStats read the
@@ -50,6 +64,7 @@ let _cachedLineCount = null;
 function setTrainingFile(filePath) {
   TRAINING_FILE = filePath;
   _cachedLineCount = null; // different file → recompute on next getStats
+  _cleanCounter = 0;       // reset benign-sampling counter for test isolation
 }
 
 /**
@@ -58,6 +73,7 @@ function setTrainingFile(filePath) {
 function resetTrainingFile() {
   TRAINING_FILE = DEFAULT_TRAINING_FILE;
   _cachedLineCount = null;
+  _cleanCounter = 0;       // reset benign-sampling counter for test isolation
 }
 
 /**
@@ -66,6 +82,12 @@ function resetTrainingFile() {
  */
 function appendRecord(record) {
   try {
+    // Down-sample benign records (see CLEAN_SAMPLE_RATE). Every non-clean outcome
+    // is always persisted; only 1 in CLEAN_SAMPLE_RATE 'clean' records is kept.
+    if (record && record.label === 'clean' && (_cleanCounter++ % CLEAN_SAMPLE_RATE) !== 0) {
+      return;
+    }
+
     const dir = path.dirname(TRAINING_FILE);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
@@ -103,8 +125,46 @@ function maybeRotate() {
     fs.renameSync(TRAINING_FILE, rotatedName);
     _cachedLineCount = 0; // fresh file starts empty
     console.log(`[ML] Rotated training file → ${path.basename(rotatedName)} (${(stat.size / 1024 / 1024).toFixed(1)}MB)`);
+    pruneOldSnapshots();
   } catch (err) {
     console.error(`[ML] Rotation failed: ${err.message}`);
+  }
+}
+
+/**
+ * Delete rotated snapshots beyond the MAX_ROTATED_SNAPSHOTS most recent.
+ * Matches ONLY timestamped rotation files (`<base>-<ISO>.jsonl`, e.g.
+ * ml-training-2026-07-08T08-28-49-263Z.jsonl) so the live file and sibling data
+ * files (ml-training-datadog.jsonl, ml-training-relabeled.jsonl,
+ * ml-corpus-consolidated.jsonl, …) are never touched.
+ */
+function pruneOldSnapshots() {
+  try {
+    const dir = path.dirname(TRAINING_FILE);
+    const base = path.basename(TRAINING_FILE, '.jsonl'); // e.g. 'ml-training'
+    const escBase = base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const rotatedRe = new RegExp(`^${escBase}-\\d{4}-\\d{2}-\\d{2}T[0-9-]+Z\\.jsonl$`);
+
+    const rotated = fs.readdirSync(dir)
+      .filter(f => rotatedRe.test(f))
+      .map(f => {
+        const full = path.join(dir, f);
+        try { return { full, mtime: fs.statSync(full).mtimeMs }; }
+        catch { return null; }
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.mtime - a.mtime); // most recent first
+
+    for (const { full } of rotated.slice(MAX_ROTATED_SNAPSHOTS)) {
+      try {
+        fs.unlinkSync(full);
+        console.log(`[ML] Pruned old snapshot → ${path.basename(full)}`);
+      } catch (e) {
+        console.warn(`[ML] Prune failed for ${path.basename(full)}: ${e.message}`);
+      }
+    }
+  } catch (err) {
+    console.error(`[ML] Snapshot prune failed: ${err.message}`);
   }
 }
 
