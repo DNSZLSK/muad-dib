@@ -1,0 +1,18 @@
+# zizmor configuration — https://docs.zizmor.sh/configuration/
+#
+# Suppress a finding ONLY when it is a confirmed false positive, and keep the
+# rationale on the same line. Schema:
+#
+#   rules:
+#     <audit-id>:                 # e.g. template-injection, artipacked, cache-poisoning
+#       ignore:
+#         - <workflow>.yml         # ignore the whole file
+#         - <workflow>.yml:LINE    # ignore one line
+#         - <workflow>.yml:LINE:COL# ignore one exact finding
+#
+# Policy for this repo: prefer FIXING findings over ignoring them. As of the first
+# run every finding is real (template-injection in publish.yml, artipacked on the
+# checkout steps, cache-poisoning, adhoc-packages), so nothing is suppressed here.
+# Add an entry below only after confirming a genuine false positive.
+
+rules: {}
