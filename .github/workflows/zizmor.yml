@@ -1,0 +1,60 @@
+name: zizmor GitHub Actions audit
+
+# Static analysis of this repository's OWN GitHub Actions workflows and composite
+# actions (template-injection, artipacked, cache-poisoning, dangerous-triggers,
+# unpinned-uses, ...). Findings are uploaded as SARIF and surface in the
+# repository Security tab. The job does NOT fail on findings: in --format=sarif
+# mode zizmor deliberately suppresses its exit codes, so triage happens in the
+# Security tab rather than by breaking CI.
+#
+# Rationale for the manual (pipx) invocation instead of `zizmorcore/zizmor-action`:
+# it adds ZERO new third-party actions to the trust surface — it reuses the two
+# actions this repo already pins (checkout + codeql-action/upload-sarif) and runs
+# a version-pinned zizmor from PyPI via pipx (preinstalled on the runner). For a
+# supply-chain tool, minimising the pinned-action surface is itself the point.
+# Official docs: https://docs.zizmor.sh/integrations/
+
+on:
+  push:
+    branches: [master, main]
+    paths:
+      - '.github/**'
+      - 'action.yml'
+      - 'zizmor.yml'
+  pull_request:
+    paths:
+      - '.github/**'
+      - 'action.yml'
+      - 'zizmor.yml'
+  schedule:
+    - cron: '0 6 * * 1'  # weekly, Monday 06:00 UTC (matches scorecard.yml cadence)
+
+permissions: {}
+
+jobs:
+  zizmor:
+    name: zizmor
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write  # upload SARIF to code scanning
+      contents: read          # clone the repo
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Run zizmor
+        # pipx is preinstalled on ubuntu-latest; zizmor is pinned to an exact
+        # PyPI version so the analyzer can't silently change under us.
+        run: pipx run --spec zizmor==1.26.1 zizmor --format=sarif . > results.sarif
+        env:
+          # Online audits (e.g. unpinned-uses stale-ref checks) query the GitHub
+          # API. GITHUB_TOKEN is not attacker-controllable, so this is safe.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload SARIF to code scanning
+        uses: github/codeql-action/upload-sarif@54f647b7e1bb85c95cddabcd46b0c578ec92bc1a # v4.36.3
+        with:
+          sarif_file: results.sarif
+          category: zizmor

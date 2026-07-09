@@ -24,7 +24,7 @@
 |----------|-------------|
 | [Carnet de Bord](CARNET_DE_BORD_MUADDIB.md) | Development journal (French) — project history and decisions |
 
-## Current Metrics (v<!--stat:version-->2.11.161<!--/stat:version-->; detection metrics last measured v2.11.48)
+## Current Metrics (v<!--stat:version-->2.11.162<!--/stat:version-->; detection metrics last measured v2.11.48)
 
 | Metric | Value |
 |--------|-------|
