@@ -85,6 +85,23 @@ function endOp(token) {
 }
 
 /**
+ * Run a synchronous, potentially-blocking main-thread op UNDER a breadcrumb so a
+ * concurrent lag-sampler stall attributes itself to THIS op instead of reporting
+ * `op:null`. Mirrors the sandbox `dockerSync` wrapper (sandbox/index.js). Passes
+ * fn's return value through; the breadcrumb is cleared in `finally` even when fn
+ * throws (and the error re-thrown). Single-slot model (see file header) — the
+ * wrapped fn must NOT itself call beginOp/endOp/runInstrumented (no nesting).
+ */
+function runInstrumented(label, meta, fn) {
+  const token = beginOp(label, meta);
+  try {
+    return fn();
+  } finally {
+    endOp(token);
+  }
+}
+
+/**
  * The op whose lifetime overlaps [windowStartMs, windowEndMs] — i.e. the op on
  * the thread during the blocked window. Prefers the still-running op, else the
  * one that ended inside the window. Null when nothing was instrumented (a real
@@ -191,6 +208,7 @@ function _reset(clockFn) {
 module.exports = {
   beginOp,
   endOp,
+  runInstrumented,
   opOverlapping,
   configure,
   observeTick,

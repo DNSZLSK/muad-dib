@@ -1,6 +1,6 @@
 {
   "name": "muaddib-scanner",
-  "version": "2.11.160",
+  "version": "2.11.161",
   "description": "Supply-chain threat detection & response for npm & PyPI/Python",
   "main": "src/index.js",
   "bin": {
@@ -17,6 +17,7 @@
     "docs:stats": "node scripts/collect-stats.js && node scripts/sync-stats.js",
     "docs:stats:tests": "node scripts/collect-stats.js --with-tests && node scripts/sync-stats.js",
     "docs:stats:check": "node scripts/collect-stats.js --check && node scripts/sync-stats.js --check",
+    "version": "npm run docs:stats && git diff --name-only | xargs -r git add",
     "compress-iocs": "node -e \"const fs=require('fs');const zlib=require('zlib');zlib.gzip(fs.readFileSync('src/ioc/data/iocs.json'),(e,b)=>{if(e)throw e;fs.writeFileSync('iocs.json.gz',b);console.log('Compressed: '+b.length+' bytes')})\"",
     "prepublishOnly": "node -e \"if(!process.env.CI){console.error('ERR: Publish via CI workflow (tag v* push). Local publishes are disabled.');process.exit(1)}\""
   },

@@ -32,7 +32,7 @@ const { poll, getPollBackoffMs, SOFT_BACKPRESSURE_THRESHOLD } = require('./inges
 const { ensureWorkers, drainWorkers, getTargetConcurrency, setTargetConcurrency, getActiveWorkers, terminateAllWorkers, getInFlightItems, computeInterruptDisposition } = require('./queue.js');
 const { computeTarget, ADJUST_INTERVAL_MS, BASE_CONCURRENCY } = require('./adaptive-concurrency.js');
 const { startHealthcheck } = require('./healthcheck.js');
-const { startLagSampler } = require('./event-loop-monitor.js');
+const { startLagSampler, runInstrumented } = require('./event-loop-monitor.js');
 const { startDeferredWorker, stopDeferredWorker, persistDeferredQueue, restoreDeferredQueue, clearDeferredQueue } = require('./deferred-sandbox.js');
 const { evictFromScanQueueBulk, enqueueScan } = require('./scan-queue.js');
 const { isSpillEnabled, shouldDrain, drainBacklog, getBacklogSize } = require('./spill.js');
@@ -373,23 +373,28 @@ function cleanupOrphanTmpDirs() {
 }
 
 function cleanupOrphanContainers() {
-  try {
-    // List running containers with the sandbox name prefix (npm-audit-*)
-    const output = execFileSync('docker', ['ps', '-q', '--filter', 'name=npm-audit-'], {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: 10000
-    }).toString().trim();
-    if (!output) return;
-    const ids = output.split(/\s+/).filter(Boolean);
-    for (const id of ids) {
-      try {
-        execFileSync('docker', ['rm', '-f', id], { stdio: 'pipe', timeout: 10000 });
-      } catch {}
+  // Instrumented (2026-07-09): `docker ps` + a sequential `docker rm -f` per orphan
+  // (10s timeout EACH, count unbounded) is a synchronous main-thread op. Name it so a
+  // concurrent lag stall attributes here instead of op:null (event-loop-monitor.js).
+  return runInstrumented('maint:orphan-containers', null, () => {
+    try {
+      // List running containers with the sandbox name prefix (npm-audit-*)
+      const output = execFileSync('docker', ['ps', '-q', '--filter', 'name=npm-audit-'], {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        timeout: 10000
+      }).toString().trim();
+      if (!output) return;
+      const ids = output.split(/\s+/).filter(Boolean);
+      for (const id of ids) {
+        try {
+          execFileSync('docker', ['rm', '-f', id], { stdio: 'pipe', timeout: 10000 });
+        } catch {}
+      }
+      console.log(`[MONITOR] Cleaned up ${ids.length} orphan sandbox container(s)`);
+    } catch {
+      // Docker not available or command failed — skip silently
     }
-    console.log(`[MONITOR] Cleaned up ${ids.length} orphan sandbox container(s)`);
-  } catch {
-    // Docker not available or command failed — skip silently
-  }
+  });
 }
 
 /**
@@ -401,28 +406,34 @@ function cleanupOrphanContainers() {
  */
 function cleanupRunscOrphans(maxAgeMs = 3600_000) {
   const runscDir = process.env.MUADDIB_GVISOR_LOG_DIR || '/tmp/runsc';
-  try {
-    if (!fs.existsSync(runscDir)) return 0;
-    const entries = fs.readdirSync(runscDir);
-    const now = Date.now();
-    let cleaned = 0;
-    for (const entry of entries) {
-      const fullPath = path.join(runscDir, entry);
-      try {
-        const stat = fs.statSync(fullPath);
-        if (now - stat.mtimeMs > maxAgeMs) {
-          fs.rmSync(fullPath, { recursive: true, force: true });
-          cleaned++;
-        }
-      } catch { /* skip unreadable entries */ }
+  // Instrumented (2026-07-09): readdir + per-entry statSync + recursive rmSync over
+  // /tmp/runsc is a synchronous main-thread op that blocks the poll loop (RSS breaker,
+  // governor feed) for as long as it runs — the prime suspect for the op:null
+  // multi-minute stalls in loop-stalls.jsonl. Name it (also covers the boot call).
+  return runInstrumented('maint:runsc-cleanup', { dir: runscDir }, () => {
+    try {
+      if (!fs.existsSync(runscDir)) return 0;
+      const entries = fs.readdirSync(runscDir);
+      const now = Date.now();
+      let cleaned = 0;
+      for (const entry of entries) {
+        const fullPath = path.join(runscDir, entry);
+        try {
+          const stat = fs.statSync(fullPath);
+          if (now - stat.mtimeMs > maxAgeMs) {
+            fs.rmSync(fullPath, { recursive: true, force: true });
+            cleaned++;
+          }
+        } catch { /* skip unreadable entries */ }
+      }
+      if (cleaned > 0) {
+        console.log(`[MONITOR] Cleaned up ${cleaned} orphan runsc dir(s) in ${runscDir}`);
+      }
+      return cleaned;
+    } catch {
+      return 0;
     }
-    if (cleaned > 0) {
-      console.log(`[MONITOR] Cleaned up ${cleaned} orphan runsc dir(s) in ${runscDir}`);
-    }
-    return cleaned;
-  } catch {
-    return 0;
-  }
+  });
 }
 
 /**
@@ -445,9 +456,9 @@ function checkDiskSpace() {
 
     // Top consumers in /tmp/
     try {
-      const tmpDu = execFileSync('du', ['-sh', '--max-depth=1', '/tmp/'], {
+      const tmpDu = runInstrumented('maint:disk-du-tmp', null, () => execFileSync('du', ['-sh', '--max-depth=1', '/tmp/'], {
         encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 10000
-      });
+      }));
       const lines = tmpDu.trim().split('\n')
         .map(l => { const m = l.match(/^([\d.]+[KMGT]?)\s+(.+)/); return m ? { size: m[1], path: m[2] } : null; })
         .filter(Boolean)
@@ -462,9 +473,9 @@ function checkDiskSpace() {
     // Top consumers in data/
     const dataDir = path.join(__dirname, '..', '..', 'data');
     try {
-      const dataDu = execFileSync('du', ['-sh', '--max-depth=1', dataDir], {
+      const dataDu = runInstrumented('maint:disk-du-data', null, () => execFileSync('du', ['-sh', '--max-depth=1', dataDir], {
         encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 10000
-      });
+      }));
       const lines = dataDu.trim().split('\n')
         .map(l => { const m = l.match(/^([\d.]+[KMGT]?)\s+(.+)/); return m ? { size: m[1], path: m[2] } : null; })
         .filter(Boolean)
@@ -1328,10 +1339,13 @@ async function startMonitor(options, stats, dailyAlerts, recentlyScanned, downlo
 
     // Hourly stats report + cache purge + runsc cleanup + memory pruning
     if (Date.now() - stats.lastReportTime >= 3600_000) {
-      reportStats(stats);
-      purgeTarballCache();
+      // Hourly maintenance runs synchronously on the poll loop; instrument each step so
+      // a concurrent lag stall names the culprit (was op:null). cleanupRunscOrphans
+      // self-wraps in its own body (that also covers the boot call at startup).
+      runInstrumented('maint:report-stats', null, () => reportStats(stats));
+      runInstrumented('maint:tarball-purge', null, () => purgeTarballCache());
       cleanupRunscOrphans();
-      pruneMemoryCaches(recentlyScanned, downloadsCache, alertedPackageRules);
+      runInstrumented('maint:prune-caches', null, () => pruneMemoryCaches(recentlyScanned, downloadsCache, alertedPackageRules));
     }
 
     // Daily webhook report at 08:00 Paris time

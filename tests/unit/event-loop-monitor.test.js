@@ -141,6 +141,89 @@ async function runEventLoopMonitorTests() {
       delete require.cache[modPath];
     }
   });
+
+  // ── runInstrumented wrapper (the helper the daemon maintenance sites use) ──
+  test('LOOP-MON: runInstrumented names the op WHILE fn runs and passes the return through', () => {
+    let t = 100;
+    elm._reset(() => t);
+    let seenDuring = null;
+    const ret = elm.runInstrumented('maint:runsc-cleanup', { dir: '/tmp/runsc' }, () => {
+      t = 300100; // fn "blocks" ~300s of wall-clock
+      seenDuring = elm.opOverlapping(100, 300100); // what a concurrent stall would attribute
+      return 42;
+    });
+    assert(ret === 42, 'fn return value is passed through');
+    assert(seenDuring && seenDuring.label === 'maint:runsc-cleanup' && seenDuring.running === true,
+      `a stall during fn attributes to the wrapper op, got ${JSON.stringify(seenDuring)}`);
+    assert(seenDuring.meta && seenDuring.meta.dir === '/tmp/runsc' && seenDuring.elapsedMs === 300000, 'carries meta + elapsed');
+    elm._reset();
+  });
+
+  test('LOOP-MON: runInstrumented clears the breadcrumb after fn returns (no stale running op)', () => {
+    let t = 100;
+    elm._reset(() => t);
+    elm.runInstrumented('maint:tarball-purge', null, () => { t = 200; });
+    t = 5000;
+    // _current is cleared → a window opening AFTER the op ended finds nothing running.
+    assert(elm.opOverlapping(4000, 5000) === null, 'no running op after the wrapper returns');
+    elm._reset();
+  });
+
+  test('LOOP-MON: runInstrumented clears the breadcrumb even when fn throws, and re-throws', () => {
+    let t = 100;
+    elm._reset(() => t);
+    let threw = false;
+    try {
+      elm.runInstrumented('maint:disk-du-tmp', null, () => { throw new Error('du failed'); });
+    } catch (e) { threw = true; assert(e.message === 'du failed', 're-throws the fn error verbatim'); }
+    assert(threw, 'error propagates out of runInstrumented');
+    t = 9000;
+    assert(elm.opOverlapping(8000, 9000) === null, 'breadcrumb cleared in finally even on throw');
+    elm._reset();
+  });
+
+  // ── Daemon wiring: the maintenance function actually runs UNDER a breadcrumb ──
+  // Behavioral (not source-grep): call the real daemon fn, observe the live breadcrumb
+  // from inside its first fs.statSync, and assert the stale dir is still removed.
+  // NB: the sampler tests above delete event-loop-monitor from require.cache, so the
+  // top-level `elm` can be a DIFFERENT module instance than the one daemon captures.
+  // Reset both and re-require in order so the observed instance IS daemon's instance.
+  test('LOOP-MON: daemon.cleanupRunscOrphans runs under maint:runsc-cleanup (wiring + behavior)', () => {
+    const fsM = require('fs'); const osM = require('os'); const pathM = require('path');
+    const { spyOn } = require('../test-utils');
+    const elmPath = require.resolve('../../src/monitor/event-loop-monitor.js');
+    const daemonPath = require.resolve('../../src/monitor/daemon.js');
+    delete require.cache[daemonPath];
+    delete require.cache[elmPath];
+    const daemon = require(daemonPath);   // loads event-loop-monitor fresh; daemon captures it
+    const elmLive = require(elmPath);     // same instance daemon just cached
+    elmLive._reset(); // real clock — daemon uses Date.now via runInstrumented
+    const tmp = fsM.mkdtempSync(pathM.join(osM.tmpdir(), 'runsc-wire-'));
+    const stale = pathM.join(tmp, 'stale-container');
+    fsM.mkdirSync(stale);
+    const old = new Date(Date.now() - 2 * 3600 * 1000);
+    fsM.utimesSync(stale, old, old);
+    const savedDir = process.env.MUADDIB_GVISOR_LOG_DIR;
+    process.env.MUADDIB_GVISOR_LOG_DIR = tmp;
+    let labelDuring = null;
+    const spy = spyOn(fsM, 'statSync', function (...args) {
+      if (labelDuring === null) {
+        const op = elmLive.opOverlapping(0, Date.now() + 1000);
+        labelDuring = op ? op.label : 'NONE';
+      }
+      return spy.original.apply(fsM, args);
+    });
+    try {
+      const cleaned = daemon.cleanupRunscOrphans(3600_000);
+      assert(labelDuring === 'maint:runsc-cleanup', `cleanup must run under the breadcrumb, saw ${labelDuring}`);
+      assert(cleaned === 1, `stale dir removed (return preserved), got ${cleaned}`);
+      assert(!fsM.existsSync(stale), 'stale runsc dir actually removed (behavior preserved through the wrapper)');
+    } finally {
+      spy.restore();
+      if (savedDir === undefined) delete process.env.MUADDIB_GVISOR_LOG_DIR; else process.env.MUADDIB_GVISOR_LOG_DIR = savedDir;
+      fsM.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
 }
 
 module.exports = { runEventLoopMonitorTests };
