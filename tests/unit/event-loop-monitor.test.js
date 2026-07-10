@@ -224,6 +224,53 @@ async function runEventLoopMonitorTests() {
       fsM.rmSync(tmp, { recursive: true, force: true });
     }
   });
+
+  // Prove the state.js scan-ledger compaction — the leading multi-minute loop-stall
+  // suspect (O(file) synchronous rewrite of ~500K entries) — now runs UNDER a
+  // 'compact:scan-ledger' breadcrumb, so a sampler firing mid-compaction names IT
+  // (durationMs ~ lagMs) instead of the stale docker:rm crumb. Behavior preserved: the
+  // rewrite still drops to cap. Same require-fresh trick as the maint test so the
+  // observed elm instance IS the one state.js captured (env is read at load time).
+  test('LOOP-MON: state.appendScanLedger compaction runs under compact:scan-ledger (wiring + behavior)', () => {
+    const fsM = require('fs'); const osM = require('os'); const pathM = require('path');
+    const { spyOn } = require('../test-utils');
+    const elmPath = require.resolve('../../src/monitor/event-loop-monitor.js');
+    const statePath = require.resolve('../../src/monitor/state.js');
+    const savedFile = process.env.MUADDIB_SCAN_LEDGER_FILE;
+    const savedMax = process.env.MUADDIB_SCAN_LEDGER_MAX;
+    const tmpDir = fsM.mkdtempSync(pathM.join(osM.tmpdir(), 'scanledger-'));
+    const tmpLedger = pathM.join(tmpDir, 'scan-ledger.jsonl');
+    process.env.MUADDIB_SCAN_LEDGER_FILE = tmpLedger;
+    process.env.MUADDIB_SCAN_LEDGER_MAX = '10'; // min cap so a 2000-append burst really compacts
+    delete require.cache[statePath];
+    delete require.cache[elmPath];
+    const state = require(statePath); // loads event-loop-monitor fresh; state captures it + reads env
+    const elmLive = require(elmPath);  // same fresh instance state just cached
+    elmLive._reset(); // real clock — state uses Date.now via runInstrumented
+    let labelDuring = null;
+    const spy = spyOn(fsM, 'renameSync', function (...args) {
+      if (labelDuring === null) {
+        const op = elmLive.opOverlapping(0, Date.now() + 1000);
+        labelDuring = op ? op.label : 'NONE';
+      }
+      return spy.original.apply(fsM, args);
+    });
+    try {
+      for (let i = 0; i < 2000; i++) { // SCAN_LEDGER_COMPACT_INTERVAL — trips exactly one compaction
+        state.appendScanLedger({ name: 'p' + i, version: '1.0.0', ecosystem: 'npm', outcome: 'clean' });
+      }
+      assert(labelDuring === 'compact:scan-ledger', `compaction must run under the breadcrumb, saw ${labelDuring}`);
+      const kept = fsM.readFileSync(tmpLedger, 'utf8').trim().split('\n').filter(Boolean).length;
+      assert(kept === 10, `compaction still drops to cap (behavior preserved through the wrapper), kept ${kept}`);
+    } finally {
+      spy.restore();
+      delete require.cache[statePath];
+      delete require.cache[elmPath];
+      if (savedFile === undefined) delete process.env.MUADDIB_SCAN_LEDGER_FILE; else process.env.MUADDIB_SCAN_LEDGER_FILE = savedFile;
+      if (savedMax === undefined) delete process.env.MUADDIB_SCAN_LEDGER_MAX; else process.env.MUADDIB_SCAN_LEDGER_MAX = savedMax;
+      fsM.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
 }
 
 module.exports = { runEventLoopMonitorTests };

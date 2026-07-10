@@ -27,6 +27,18 @@ const path = require('path');
 const { isMainThread, threadId } = require('worker_threads');
 const { sanitizePackageName } = require('../shared/download.js');
 
+// Event-loop stall attribution (event-loop-monitor.js): the periodic JSONL
+// compactions below are O(file-size) SYNCHRONOUS rewrites that run on the monitor
+// main thread. At the 500K-entry scan-ledger steady state this is the leading
+// suspect for the multi-minute loop stalls that blind the RSS breaker — yet it was
+// uninstrumented, so a stall in it mis-attributed to a stale prior breadcrumb
+// (docker:rm with durationMs << lagMs). Wrapping each compaction NAMES it: a stall
+// now logs op.label='compact:*' with durationMs ~ lagMs. Guarded require so state.js
+// stays usable from the CLI / scan-worker where the sampler isn't running
+// (runInstrumented is then a transparent passthrough). Never throws.
+let _runInstrumented = (label, meta, fn) => fn();
+try { ({ runInstrumented: _runInstrumented } = require('./event-loop-monitor.js')); } catch { /* sampler unavailable — passthrough */ }
+
 // --- File path constants ---
 
 const STATE_FILE = path.join(__dirname, '..', '..', 'data', 'monitor-state.json');
@@ -761,23 +773,26 @@ function loadTemporalDetections() {
  * runStateMigrations to enforce caps after migration.
  */
 function _compactTemporalDetectionsJsonl() {
-  try {
-    const total = _countJsonlLines(TEMPORAL_DETECTIONS_FILE);
-    if (total <= MAX_TEMPORAL_DETECTIONS) return;
-    const toDrop = total - MAX_TEMPORAL_DETECTIONS;
-    let skipped = 0;
-    const kept = [];
-    _iterateJsonlSync(TEMPORAL_DETECTIONS_FILE, (entry) => {
-      if (skipped < toDrop) { skipped++; return; }
-      kept.push(JSON.stringify(entry));
-    });
-    const tmpFile = TEMPORAL_DETECTIONS_FILE + '.tmp';
-    fs.writeFileSync(tmpFile, kept.length ? kept.join('\n') + '\n' : '', 'utf8');
-    fs.renameSync(tmpFile, TEMPORAL_DETECTIONS_FILE);
-    console.log(`[MONITOR] COMPACT temporal-detections: ${total} -> ${kept.length} entries`);
-  } catch (err) {
-    console.error(`[MONITOR] Temporal detections compaction failed: ${err.message}`);
-  }
+  // Same O(file) synchronous rewrite shape as the scan-ledger/detections compactions.
+  _runInstrumented('compact:temporal-detections', { cap: MAX_TEMPORAL_DETECTIONS }, () => {
+    try {
+      const total = _countJsonlLines(TEMPORAL_DETECTIONS_FILE);
+      if (total <= MAX_TEMPORAL_DETECTIONS) return;
+      const toDrop = total - MAX_TEMPORAL_DETECTIONS;
+      let skipped = 0;
+      const kept = [];
+      _iterateJsonlSync(TEMPORAL_DETECTIONS_FILE, (entry) => {
+        if (skipped < toDrop) { skipped++; return; }
+        kept.push(JSON.stringify(entry));
+      });
+      const tmpFile = TEMPORAL_DETECTIONS_FILE + '.tmp';
+      fs.writeFileSync(tmpFile, kept.length ? kept.join('\n') + '\n' : '', 'utf8');
+      fs.renameSync(tmpFile, TEMPORAL_DETECTIONS_FILE);
+      console.log(`[MONITOR] COMPACT temporal-detections: ${total} -> ${kept.length} entries`);
+    } catch (err) {
+      console.error(`[MONITOR] Temporal detections compaction failed: ${err.message}`);
+    }
+  });
 }
 
 // --- State persistence ---
@@ -996,28 +1011,32 @@ function getDetectionStats() {
  * stays consistent. No-op when the file is already under cap.
  */
 function _compactDetectionsJsonl() {
-  try {
-    const total = _countJsonlLines(DETECTIONS_FILE);
-    if (total <= MAX_DETECTIONS) return;
-    const toDrop = total - MAX_DETECTIONS;
-    let skipped = 0;
-    const kept = [];
-    const newDedup = new Set();
-    _iterateJsonlSync(DETECTIONS_FILE, (entry) => {
-      if (skipped < toDrop) { skipped++; return; }
-      kept.push(JSON.stringify(entry));
-      if (entry && entry.package && entry.version) {
-        newDedup.add(`${entry.package}@${entry.version}`);
-      }
-    });
-    const tmpFile = DETECTIONS_FILE + '.tmp';
-    fs.writeFileSync(tmpFile, kept.length ? kept.join('\n') + '\n' : '', 'utf8');
-    fs.renameSync(tmpFile, DETECTIONS_FILE);
-    _detectionDedupSet = newDedup;
-    console.log(`[MONITOR] COMPACT detections: ${total} -> ${kept.length} entries`);
-  } catch (err) {
-    console.error(`[MONITOR] Detections compaction failed: ${err.message}`);
-  }
+  // Same O(file) synchronous rewrite as the scan-ledger (smaller cap, but same
+  // main-thread blocking shape). Named so a stall here can't hide behind a stale crumb.
+  _runInstrumented('compact:detections', { cap: MAX_DETECTIONS }, () => {
+    try {
+      const total = _countJsonlLines(DETECTIONS_FILE);
+      if (total <= MAX_DETECTIONS) return;
+      const toDrop = total - MAX_DETECTIONS;
+      let skipped = 0;
+      const kept = [];
+      const newDedup = new Set();
+      _iterateJsonlSync(DETECTIONS_FILE, (entry) => {
+        if (skipped < toDrop) { skipped++; return; }
+        kept.push(JSON.stringify(entry));
+        if (entry && entry.package && entry.version) {
+          newDedup.add(`${entry.package}@${entry.version}`);
+        }
+      });
+      const tmpFile = DETECTIONS_FILE + '.tmp';
+      fs.writeFileSync(tmpFile, kept.length ? kept.join('\n') + '\n' : '', 'utf8');
+      fs.renameSync(tmpFile, DETECTIONS_FILE);
+      _detectionDedupSet = newDedup;
+      console.log(`[MONITOR] COMPACT detections: ${total} -> ${kept.length} entries`);
+    } catch (err) {
+      console.error(`[MONITOR] Detections compaction failed: ${err.message}`);
+    }
+  });
 }
 
 // --- Per-scan ledger (Phase 0a: operational coverage observability) ---
@@ -1122,23 +1141,28 @@ function appendScanLedger(e) {
  * No-op when already under cap. Streams (never loads the whole file at once).
  */
 function _compactScanLedgerJsonl() {
-  try {
-    const total = _countJsonlLines(SCAN_LEDGER_FILE);
-    if (total <= MAX_SCAN_LEDGER) return;
-    const toDrop = total - MAX_SCAN_LEDGER;
-    let skipped = 0;
-    const kept = [];
-    _iterateJsonlSync(SCAN_LEDGER_FILE, (entry) => {
-      if (skipped < toDrop) { skipped++; return; }
-      kept.push(JSON.stringify(entry));
-    });
-    const tmpFile = SCAN_LEDGER_FILE + '.tmp';
-    fs.writeFileSync(tmpFile, kept.length ? kept.join('\n') + '\n' : '', 'utf8');
-    fs.renameSync(tmpFile, SCAN_LEDGER_FILE);
-    console.log(`[MONITOR] COMPACT scan-ledger: ${total} -> ${kept.length} entries`);
-  } catch (err) {
-    console.error(`[MONITOR] Scan-ledger compaction failed: ${err.message}`);
-  }
+  // Leading loop-stall suspect (see require note above): count + parse + re-stringify
+  // + join + 127MB write + rename, all synchronous over ~500K entries. Instrument the
+  // whole body (the count pass can block too) so a stall NAMES 'compact:scan-ledger'.
+  _runInstrumented('compact:scan-ledger', { cap: MAX_SCAN_LEDGER }, () => {
+    try {
+      const total = _countJsonlLines(SCAN_LEDGER_FILE);
+      if (total <= MAX_SCAN_LEDGER) return;
+      const toDrop = total - MAX_SCAN_LEDGER;
+      let skipped = 0;
+      const kept = [];
+      _iterateJsonlSync(SCAN_LEDGER_FILE, (entry) => {
+        if (skipped < toDrop) { skipped++; return; }
+        kept.push(JSON.stringify(entry));
+      });
+      const tmpFile = SCAN_LEDGER_FILE + '.tmp';
+      fs.writeFileSync(tmpFile, kept.length ? kept.join('\n') + '\n' : '', 'utf8');
+      fs.renameSync(tmpFile, SCAN_LEDGER_FILE);
+      console.log(`[MONITOR] COMPACT scan-ledger: ${total} -> ${kept.length} entries`);
+    } catch (err) {
+      console.error(`[MONITOR] Scan-ledger compaction failed: ${err.message}`);
+    }
+  });
 }
 
 /** Stream the scan-ledger into an array (tests + Phase 0b rollup). */

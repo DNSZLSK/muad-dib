@@ -59,6 +59,18 @@ function dockerSync(label, meta, fn) {
   try { return fn(); } finally { _endOp(_crumb); }
 }
 
+// Same breadcrumb mechanism as dockerSync, for the SYNCHRONOUS post-container
+// result-handling that also runs on the main thread (the deferred sandbox worker is a
+// setInterval on the main loop — deferred-sandbox.js): JSON.parse of container stdout,
+// gVisor kernel-log parse/cleanup, preload-log analysis. Uninstrumented today, so a
+// multi-minute stall in any of them mis-attributes to the last docker:* crumb (the
+// docker:rm-leurre seen in data/loop-stalls.jsonl with durationMs << lagMs). Leaf-only:
+// the wrapped fn must NOT nest another beginOp/dockerSync (single-slot model).
+function syncStep(label, meta, fn) {
+  const _crumb = _beginOp(label, meta || null);
+  try { return fn(); } finally { _endOp(_crumb); }
+}
+
 const DOCKER_IMAGE = 'muaddib-sandbox';
 const CONTAINER_TIMEOUT = 120000; // 120 seconds
 const SINGLE_RUN_TIMEOUT = 90000; // 90 seconds per run in multi-run mode (gVisor ~30% I/O overhead)
@@ -595,7 +607,7 @@ async function runSingleSandbox(packageName, options = {}) {
           }
           jsonStr = stdout.substring(jsonStart, jsonEnd + 1);
         }
-        report = JSON.parse(jsonStr);
+        report = syncStep('sandbox:parse-report', { bytes: jsonStr.length }, () => JSON.parse(jsonStr));
         if (local && report) {
           report.package = displayName;
         }
@@ -636,7 +648,7 @@ async function runSingleSandbox(packageName, options = {}) {
       // connections, and process data come from gVisor's kernel-level tracing.
       if (gvisorMode && gvisorContainerId) {
         const gvisorLogDir = process.env.MUADDIB_GVISOR_LOG_DIR || '/tmp/runsc';
-        const gvisorData = parseGvisorLogs(gvisorContainerId, gvisorLogDir);
+        const gvisorData = syncStep('sandbox:gvisor-parse', { container: gvisorContainerId }, () => parseGvisorLogs(gvisorContainerId, gvisorLogDir));
 
         // Merge gVisor findings into report without duplicating
         if (!report.sensitive_files) report.sensitive_files = { read: [], written: [] };
@@ -665,14 +677,14 @@ async function runSingleSandbox(packageName, options = {}) {
         }
 
         // Cleanup gVisor logs to prevent disk fill
-        cleanupGvisorLogs(gvisorContainerId, gvisorLogDir);
+        syncStep('sandbox:gvisor-cleanup', { container: gvisorContainerId }, () => cleanupGvisorLogs(gvisorContainerId, gvisorLogDir));
       }
 
       const { score, findings } = scoreFindings(report);
 
       // Analyze preload log for behavioral findings
       if (report.preload_log) {
-        const preloadResult = analyzePreloadLog(report.preload_log);
+        const preloadResult = syncStep('sandbox:preload-analyze', null, () => analyzePreloadLog(report.preload_log));
         for (const finding of preloadResult.findings) {
           findings.push(finding);
         }
