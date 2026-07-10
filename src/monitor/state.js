@@ -24,6 +24,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const readline = require('readline');
 const { isMainThread, threadId } = require('worker_threads');
 const { sanitizePackageName } = require('../shared/download.js');
 
@@ -1054,6 +1055,12 @@ const MAX_SCAN_LEDGER = (() => {
 })();
 const SCAN_LEDGER_COMPACT_INTERVAL = 2000;
 let _scanLedgerAppendedSinceCompact = 0;
+// Async-compaction coordination. `_scanLedgerCompacting` guards re-entrancy (a second
+// trigger while a compaction is in flight is skipped — the cap is soft, the next
+// interval retries). The promise lets tests + graceful shutdown await an in-flight
+// compaction settling. See _compactScanLedgerJsonl (async, streaming, race-safe).
+let _scanLedgerCompacting = false;
+let _scanLedgerCompactionPromise = Promise.resolve();
 
 // Terminal outcomes a dequeued package can reach. Unknown values normalize to 'clean'
 // so a typo at a call site can never crash the pipeline.
@@ -1124,7 +1131,10 @@ function appendScanLedger(e) {
     _scanLedgerAppendedSinceCompact++;
     if (_scanLedgerAppendedSinceCompact >= SCAN_LEDGER_COMPACT_INTERVAL) {
       _scanLedgerAppendedSinceCompact = 0;
-      _compactScanLedgerJsonl();
+      // Fire the async compaction (non-blocking — keeps the RSS-breaker poll loop
+      // reactive). Guarded + fully caught internally so it never rejects; stored so
+      // tests and graceful shutdown can await an in-flight compaction settling.
+      _scanLedgerCompactionPromise = _compactScanLedgerJsonl();
     }
   } catch (err) {
     if (err.code === 'EROFS' || err.code === 'EACCES' || err.code === 'EPERM') return;
@@ -1140,29 +1150,97 @@ function appendScanLedger(e) {
  * Compact the scan-ledger JSONL: keep only the most recent MAX_SCAN_LEDGER entries.
  * No-op when already under cap. Streams (never loads the whole file at once).
  */
-function _compactScanLedgerJsonl() {
-  // Leading loop-stall suspect (see require note above): count + parse + re-stringify
-  // + join + 127MB write + rename, all synchronous over ~500K entries. Instrument the
-  // whole body (the count pass can block too) so a stall NAMES 'compact:scan-ledger'.
-  _runInstrumented('compact:scan-ledger', { cap: MAX_SCAN_LEDGER }, () => {
-    try {
-      const total = _countJsonlLines(SCAN_LEDGER_FILE);
-      if (total <= MAX_SCAN_LEDGER) return;
-      const toDrop = total - MAX_SCAN_LEDGER;
-      let skipped = 0;
-      const kept = [];
-      _iterateJsonlSync(SCAN_LEDGER_FILE, (entry) => {
-        if (skipped < toDrop) { skipped++; return; }
-        kept.push(JSON.stringify(entry));
-      });
-      const tmpFile = SCAN_LEDGER_FILE + '.tmp';
-      fs.writeFileSync(tmpFile, kept.length ? kept.join('\n') + '\n' : '', 'utf8');
-      fs.renameSync(tmpFile, SCAN_LEDGER_FILE);
-      console.log(`[MONITOR] COMPACT scan-ledger: ${total} -> ${kept.length} entries`);
-    } catch (err) {
-      console.error(`[MONITOR] Scan-ledger compaction failed: ${err.message}`);
-    }
+// Stream-count newline-terminated lines in [0, endByte) without loading the file or
+// parsing JSON. Async — yields between 64KB chunks so it never wedges the poll loop.
+function _streamCountLines(filePath, endByte) {
+  return new Promise((resolve, reject) => {
+    if (!endByte || endByte <= 0) { resolve(0); return; }
+    let count = 0;
+    const rs = fs.createReadStream(filePath, { start: 0, end: endByte - 1 });
+    rs.on('error', (e) => ((e && e.code === 'ENOENT') ? resolve(0) : reject(e)));
+    rs.on('data', (buf) => { for (let i = 0; i < buf.length; i++) if (buf[i] === 0x0a) count++; });
+    rs.on('end', () => resolve(count));
   });
+}
+
+// Stream [0, endByte): skip the first `skip` lines, copy the rest VERBATIM (no parse,
+// no re-stringify) to tmp. Bounded memory: one line at a time + write backpressure
+// (pause the reader until the write buffer drains). Returns the kept line count.
+function _streamKeepTailToTmp(filePath, skip, endByte, tmpFile) {
+  return new Promise((resolve, reject) => {
+    let seen = 0, kept = 0, failed = false, draining = false;
+    const rs = fs.createReadStream(filePath, { encoding: 'utf8', start: 0, end: endByte - 1 });
+    const ws = fs.createWriteStream(tmpFile, { encoding: 'utf8' }); // truncates any orphan tmp
+    const rl = readline.createInterface({ input: rs, crlfDelay: Infinity });
+    const fail = (e) => { if (failed) return; failed = true; try { rl.close(); } catch { /* */ } try { rs.destroy(); } catch { /* */ } try { ws.destroy(); } catch { /* */ } reject(e); };
+    rs.on('error', fail); ws.on('error', fail);
+    rl.on('line', (line) => {
+      if (seen++ < skip) return;
+      if (!line) return;
+      const ok = ws.write(line + '\n');
+      kept++;
+      // Backpressure: pause the reader until the write buffer drains. The `draining`
+      // guard is required — readline emits lines ALREADY buffered from the current
+      // chunk synchronously even after pause(), so without it each such line would
+      // stack another 'drain' listener (MaxListenersExceededWarning + redundant resumes).
+      if (!ok && !draining) {
+        draining = true;
+        rl.pause();
+        ws.once('drain', () => { draining = false; rl.resume(); });
+      }
+    });
+    rl.on('close', () => { if (!failed) ws.end(() => resolve(kept)); });
+  });
+}
+
+// Async, streaming, race-safe compaction of the scan-ledger. Replaces the old
+// SYNCHRONOUS 127MB rewrite that wedged the main-thread poll loop for minutes — and
+// because the RSS circuit breaker runs on that same loop, a wedged loop is a BLIND
+// breaker → RSS climbs unchecked → cgroup OOM. Design (why it can't lose appends):
+//   • two async streaming passes over the immutable snapshot [0, preSize): count, then
+//     copy the last MAX lines to a .tmp. Bounded memory (no 500K-entry array / 127MB
+//     join). Non-blocking: appends keep flowing to the LIVE file during these passes.
+//   • the ONLY destructive step — fold the live tail [preSize, nowSize) onto .tmp, then
+//     rename .tmp over the ledger — runs with NO `await` between the tail read and the
+//     rename, so it is ATOMIC w.r.t. the single-threaded event loop: no concurrent
+//     appendScanLedger can interleave, hence the rename can never clobber an un-folded
+//     append. (appendFileSync writes whole lines, so preSize is always line-aligned.)
+//   • crash-safe: the live ledger is untouched until the atomic rename; a crash leaves
+//     it intact plus a stale .tmp (overwritten next run). No sidecar, no recovery hook.
+// Never throws (fire-and-forget from appendScanLedger).
+async function _compactScanLedgerJsonl() {
+  if (_scanLedgerCompacting) return;              // re-entrancy guard
+  _scanLedgerCompacting = true;
+  const tmpFile = SCAN_LEDGER_FILE + '.tmp';
+  try {
+    if (!fs.existsSync(SCAN_LEDGER_FILE)) return;
+    const preSize = fs.statSync(SCAN_LEDGER_FILE).size; // immutable snapshot boundary
+    if (preSize === 0) return;
+    const total = await _streamCountLines(SCAN_LEDGER_FILE, preSize);
+    if (total <= MAX_SCAN_LEDGER) return;
+    const toDrop = total - MAX_SCAN_LEDGER;
+    const t0 = Date.now();
+    const kept = await _streamKeepTailToTmp(SCAN_LEDGER_FILE, toDrop, preSize, tmpFile);
+    // ── SYNCHRONOUS finalize (atomic w.r.t. the event loop — no await below) ──
+    const nowSize = fs.statSync(SCAN_LEDGER_FILE).size;
+    let foldedBytes = 0;
+    if (nowSize > preSize) {                        // appends landed during the async passes
+      const fd = fs.openSync(SCAN_LEDGER_FILE, 'r');
+      try {
+        foldedBytes = nowSize - preSize;
+        const tail = Buffer.allocUnsafe(foldedBytes);
+        fs.readSync(fd, tail, 0, foldedBytes, preSize);
+        fs.appendFileSync(tmpFile, tail);           // preserve concurrent appends (whole lines)
+      } finally { fs.closeSync(fd); }
+    }
+    fs.renameSync(tmpFile, SCAN_LEDGER_FILE);        // atomic swap
+    console.log(`[MONITOR] COMPACT scan-ledger: ${total} -> ${kept} entries (async, ${Date.now() - t0}ms, +${foldedBytes}B live tail)`);
+  } catch (err) {
+    console.error(`[MONITOR] Scan-ledger compaction failed: ${err.message}`);
+    try { fs.unlinkSync(tmpFile); } catch { /* nothing to clean */ }
+  } finally {
+    _scanLedgerCompacting = false;
+  }
 }
 
 /** Stream the scan-ledger into an array (tests + Phase 0b rollup). */
@@ -1880,6 +1958,7 @@ module.exports = {
   loadScanLedger,
   computeLedgerRollup,
   _compactScanLedgerJsonl,
+  _whenScanLedgerCompactionSettles: () => _scanLedgerCompactionPromise,
   getDetectionStats,
   runStateMigrations,
   // Internal — exported for tests and for the daemon hourly housekeeping.

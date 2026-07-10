@@ -3,7 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { test, assert, spyOn } = require('../test-utils');
+const { test, asyncTest, assert, spyOn } = require('../test-utils');
 
 // Load state.js with the per-scan ledger pointed at a fresh temp file. Re-require
 // after setting env so SCAN_LEDGER_FILE / MAX_SCAN_LEDGER pick up the test values
@@ -16,7 +16,7 @@ function freshState(ledgerFile, max) {
   return require('../../src/monitor/state.js');
 }
 
-function runScanLedgerTests() {
+async function runScanLedgerTests() {
   console.log('\n=== Scan Ledger Tests ===\n');
 
   test('appendScanLedger: writes a normalized entry (round-trip)', () => {
@@ -48,16 +48,37 @@ function runScanLedgerTests() {
     } finally { try { fs.unlinkSync(f); } catch {} }
   });
 
-  test('scan-ledger: compaction keeps only the most-recent MAX entries (bounded)', () => {
+  await asyncTest('scan-ledger: compaction keeps only the most-recent MAX entries (bounded)', async () => {
     const f = path.join(os.tmpdir(), `ledger-${Date.now()}-c.jsonl`);
     try {
       const s = freshState(f, 10);
       for (let i = 0; i < 14; i++) s.appendScanLedger({ name: `p${i}`, outcome: 'clean' });
       assert(s.loadScanLedger().length === 14, 'no auto-compact below the compaction interval');
-      s._compactScanLedgerJsonl();
+      await s._compactScanLedgerJsonl(); // now async (streaming, non-blocking)
       const e = s.loadScanLedger();
       assert(e.length === 10, `compaction should cap at 10, got ${e.length}`);
       assert(e[0].name === 'p4' && e[e.length - 1].name === 'p13', 'keeps the most-recent (p4..p13)');
+    } finally { try { fs.unlinkSync(f); } catch {} }
+  });
+
+  // Race-safety of the async compaction: appends that arrive WHILE the compaction is
+  // in flight (after it snapshots preSize, before its atomic rename) must be preserved,
+  // not clobbered by the rename. The compaction suspends at its first `await`, so the
+  // synchronous appends below interleave exactly in that window.
+  await asyncTest('scan-ledger: async compaction preserves appends arriving mid-compaction (no loss)', async () => {
+    const f = path.join(os.tmpdir(), `ledger-${Date.now()}-race.jsonl`);
+    try {
+      const s = freshState(f, 10);
+      for (let i = 0; i < 30; i++) s.appendScanLedger({ name: `old${i}`, outcome: 'clean' });
+      const p = s._compactScanLedgerJsonl();                    // starts; suspends at first await (snapshot taken)
+      s.appendScanLedger({ name: 'during1', outcome: 'clean' }); // lands in the live tail [preSize, nowSize)
+      s.appendScanLedger({ name: 'during2', outcome: 'clean' });
+      await p;
+      const names = s.loadScanLedger().map(r => r.name);
+      assert(names.includes('during1') && names.includes('during2'),
+        `concurrent appends must survive the rename, got [${names.join(', ')}]`);
+      assert(names[names.length - 1] === 'during2', 'live-tail appends preserved in order at the end');
+      assert(names.length <= 12, `still bounded near cap (10 + live tail), got ${names.length}`);
     } finally { try { fs.unlinkSync(f); } catch {} }
   });
 
