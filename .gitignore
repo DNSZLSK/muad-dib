@@ -84,3 +84,32 @@ review-queue/
 
 # --- Local-only scripts (project pro dossier generator, throwaway helpers) ---
 .build_dossier.py
+
+# --- Local work artifacts (SECURITY + hygiene: keep `git add -A` safe) ---
+# Added 2026-07-11: dozens of per-session working dirs, patches, audit dumps and
+# snapshots were untracked, making a blind `git add -A` liable to sweep in gigabytes
+# of scan data (archive/) or half-finished patches. All local-only scratch.
+.venv/
+archive/
+.adjwork/
+.muaddib/
+.npm/
+.sec-review-*/
+.suite-data-snapshot/
+*.patch
+
+# --- Ephemeral dated reports / audit dumps / batch-scripts (throwaway) ---
+# ROOT-ANCHORED (leading /) on purpose: a bare `audit-*` / `security-review-*` would
+# shadow TRACKED paths (tests/audit-2026-05/, scripts/audit-archive.sh, the audit-*.test.js
+# suites) and hide any new file added under them. Anchoring restricts to the root-level
+# scratch. Kept trackable on purpose: analysis tooling (scripts/ml-*, ghsa-*, build-*),
+# the remediation spec, ml-retrain/model-trees-*, osv-reports/, docs/campaigns/.
+/security-review-*.md
+/audit-*
+/FPR-overnight-*
+/fp-analysis-*
+/livraison-*
+/npm-reports-*
+/strategic-positioning-*
+scripts/append-*
+scripts/auto-*

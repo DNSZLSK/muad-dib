@@ -458,7 +458,11 @@ const DIST_EXEMPT_TYPES = new Set([
   'lifecycle_file_exec',  // B6: lifecycle → malicious file compound
   'lifecycle_dataflow', 'lifecycle_dangerous_exec', 'obfuscated_lifecycle_env',
   // RT-C1: Boundary-squat compound is never coincidental (dep declared AND require()d)
-  'dependency_typosquat_require'
+  'dependency_typosquat_require',
+  // BINSRC-001: a binary file disguised as .js SPECIFICALLY hides in dist/ (that is why the
+  // scanner descends there). The dist/ downgrade assumes benign bundler output — a genuinely
+  // binary file never is, so it must never be reduced.
+  'binary_masquerading_as_source'
   // P6: remote_code_load and proxy_data_intercept removed — in bundled dist/ files,
   // fetch + eval co-occurrence is coincidental (bundler combines HTTP client + template compilation).
   // fetch_decrypt_exec (fetch+decrypt+eval triple) remains exempt — never coincidental.
@@ -541,7 +545,10 @@ const REACHABILITY_EXEMPT_TYPES = new Set([
   // no legitimate code reconstructs env var names from character codes. Injected files
   // (router_init.js) are unreachable via require/import but execute via lifecycle hooks
   // or optionalDependencies with prepare scripts.
-  'env_charcode_reconstruction'    // AST-018 — fromCharCode + process.env[computed]
+  'env_charcode_reconstruction',   // AST-018 — fromCharCode + process.env[computed]
+  // BINSRC-001: a binary blob disguised as .js is read as bytes, never require()d, so it is
+  // always "unreachable" via the import graph — the wrong lens for a non-JS carrier.
+  'binary_masquerading_as_source'
 ]);
 
 // ============================================

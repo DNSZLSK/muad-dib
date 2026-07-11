@@ -19,6 +19,7 @@
 
 const path = require('path');
 const { isDevFile, findJsFiles, forEachSafeFile } = require('../utils.js');
+const { looksBinaryString } = require('./binary-sniff.js');
 
 /**
  * Shared scanner wrapper: iterates JS files, runs analyzeFileFn on original + deobfuscated code,
@@ -55,6 +56,12 @@ function analyzeWithDeobfuscation(targetPath, analyzeFileFn, options = {}) {
         return line;
       }).join('\n');
     }
+
+    // Ingestion guard: a source-extension file whose bytes are actually binary (a payload
+    // carrier disguised as source) is not JS — skip the parse instead of handing acorn
+    // megabytes of binary that yield no AST and burn the parse budget. binary-source.js
+    // reports the finding (it also reaches dist/ where this shared path does not).
+    if (looksBinaryString(effectiveContent)) return;
 
     // Analyze original code first (preserves obfuscation-detection rules)
     const fileThreats = analyzeFileFn(effectiveContent, file, targetPath);

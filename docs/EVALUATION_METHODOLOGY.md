@@ -304,7 +304,7 @@ This was discovered when comparing the evaluation approach for benign packages v
 In v2.2.7, `evaluateBenign()` was rewritten to:
 1. Download real tarballs via `npm pack <pkg>` (executed with `cwd` to avoid Windows path issues)
 2. Extract tarballs using native Node.js (`zlib.gunzipSync` + tar header parsing — no shell `tar` dependency)
-3. Scan the extracted source code with all <!--stat:scanners-->21<!--/stat:scanners--> parallel scanners (+ 2 pre-analysis modules + 1 async parser bootstrap for python-ast)
+3. Scan the extracted source code with all <!--stat:scanners-->22<!--/stat:scanners--> parallel scanners (+ 2 pre-analysis modules + 1 async parser bootstrap for python-ast)
 4. Cache tarballs in `.muaddib-cache/benign-tarballs/` to avoid re-downloading
 5. Support `--benign-limit N` to test a subset and `--refresh-benign` to force re-download
 

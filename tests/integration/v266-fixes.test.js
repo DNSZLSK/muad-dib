@@ -160,11 +160,11 @@ jobs:
   // 3.3b Rule count check (Track D +3, gyp_command_exec MUADDIB-PKG-023 +1,
   // gyp_phantom_exec MUADDIB-COMPOUND-017 +1 → 259 RULES; P2b GHA-005 unpinned_action
   // + GHA-006 unpinned_action_in_risky_workflow +2 → 261 RULES)
-  test('P3: rule count is 271 RULES + 5 PARANOID (lifecycle_version99 COMPOUND-018 +1, anti_analysis_evasion + analyzer_honeytoken_reference AST-095/096 +2, electron_app_injection AST-097 +1, install_native_drop_exec COMPOUND-020 +1)', () => {
+  test('P3: rule count is 272 RULES + 5 PARANOID (lifecycle_version99 COMPOUND-018 +1, anti_analysis_evasion + analyzer_honeytoken_reference AST-095/096 +2, electron_app_injection AST-097 +1, install_native_drop_exec COMPOUND-020 +1, binary_masquerading_as_source BINSRC-001 +1)', () => {
     const { RULES, PARANOID_RULES } = require('../../src/rules/index.js');
     const ruleCount = Object.keys(RULES).length;
     const paranoidCount = Object.keys(PARANOID_RULES).length;
-    assert(ruleCount === 271, `Expected 271 RULES, got ${ruleCount}`);
+    assert(ruleCount === 272, `Expected 272 RULES, got ${ruleCount}`);
     assert(paranoidCount === 5, `Expected 5 PARANOID, got ${paranoidCount}`);
   });
 

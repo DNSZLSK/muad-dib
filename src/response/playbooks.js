@@ -1082,6 +1082,10 @@ const PLAYBOOKS = {
     'CRITIQUE (compound COMPOUND-020): un hook preinstall/install/postinstall lance `node x.js` qui depaquette un binaire natif EMBARQUE dans le package (lecture locale / gunzip / base64), l\'ecrit executable et le spawn — au moment de npm install, sans reseau, sans import (pattern jscrambler@8.14.0, infostealer natif). ' +
     'NE PAS installer : --ignore-scripts ne protege pas si deja installe. Le fichier nomme dans le message porte la charge. Roter les credentials accessibles aux environnements dev/CI ayant installe la version, verifier les logs d\'install pour l\'execution du loader, revenir a une version verifiee saine.',
 
+  binary_masquerading_as_source:
+    'HAUTE: un fichier a extension source (.js/.ts/.cjs/.mjs) a un contenu BINAIRE (executable / archive / conteneur custom), souvent cache dans dist/ ou l\'analyse texte ne regarde pas — porteur de charge utile deguise en source (pattern jscrambler@8.14.0 dist/intro.js, 7.8 Mo). ' +
+    'Ouvrir le fichier en hexdump, identifier le format (ELF/PE/Mach-O/gzip/CSI). Verifier quel script d\'install ou loader le lit+execute (cf. install_native_drop_exec). NE PAS installer si couple a un hook d\'install.',
+
   string_mutation_obfuscation:
     'HAUTE: Chaine de .replace() reconstruisant des noms d\'API dangereuses (leet-speak). ' +
     'Technique d\'evasion par substitution de caracteres. Decoder la chaine finale. Supprimer si malveillant.',
