@@ -6,7 +6,7 @@
 |----------|-------------|
 | [README](../README.md) | Project overview, installation, usage |
 | [README.fr.md](README.fr.md) | French version of the README |
-| [SECURITY.md](../SECURITY.md) | Security policy, <!--stat:rulesTotal-->276<!--/stat:rulesTotal--> detection rules reference (canonical source) |
+| [SECURITY.md](../SECURITY.md) | Security policy, <!--stat:rulesTotal-->277<!--/stat:rulesTotal--> detection rules reference (canonical source) |
 | [CHANGELOG.md](../CHANGELOG.md) | Version history and release notes |
 
 ## Technical Documentation
@@ -24,13 +24,13 @@
 |----------|-------------|
 | [Carnet de Bord](CARNET_DE_BORD_MUADDIB.md) | Development journal (French) — project history and decisions |
 
-## Current Metrics (v<!--stat:version-->2.11.166<!--/stat:version-->; detection metrics last measured v2.11.48)
+## Current Metrics (v<!--stat:version-->2.11.167<!--/stat:version-->; detection metrics last measured v2.11.48)
 
 | Metric | Value |
 |--------|-------|
-| Tests | **<!--stat:tests-->4550<!--/stat:tests-->** across <!--stat:testFiles-->151<!--/stat:testFiles--> files |
-| Rules | **<!--stat:rulesTotal-->276<!--/stat:rulesTotal-->** (<!--stat:rulesCore-->271<!--/stat:rulesCore--> RULES + <!--stat:rulesParanoid-->5<!--/stat:rulesParanoid--> PARANOID - v2.11.67/70 Phantom Gyp added PKG-023 + COMPOUND-017) |
-| Scanners | **<!--stat:scanners-->21<!--/stat:scanners--> parallel** + 2 pre-analysis (module-graph, deobfuscate) + 1 async parser bootstrap (python-ast WASM) + 6 conditional/post-processing (paranoid, 3× temporal-*, reachability, phantom-gyp) + 1 metadata (npm-registry) |
+| Tests | **<!--stat:tests-->4559<!--/stat:tests-->** across <!--stat:testFiles-->152<!--/stat:testFiles--> files |
+| Rules | **<!--stat:rulesTotal-->277<!--/stat:rulesTotal-->** (<!--stat:rulesCore-->272<!--/stat:rulesCore--> RULES + <!--stat:rulesParanoid-->5<!--/stat:rulesParanoid--> PARANOID - v2.11.67/70 Phantom Gyp added PKG-023 + COMPOUND-017) |
+| Scanners | **<!--stat:scanners-->22<!--/stat:scanners--> parallel** + 2 pre-analysis (module-graph, deobfuscate) + 1 async parser bootstrap (python-ast WASM) + 6 conditional/post-processing (paranoid, 3× temporal-*, reachability, phantom-gyp) + 1 metadata (npm-registry) |
 | TPR@3 (Ground Truth, v2.11.48 measure) | **95.74%** (90/94 in-scope) — full re-measurement on enriched GT |
 | TPR@20 (Ground Truth, v2.11.48 measure) | **88.30%** (83/94 in-scope) — **+3.1pp vs v2.11.47** via Track D `recon_exfil_direct_ip` compound (closes GT-095 gap, boosts GT-091/GT-092) |
 | FPR rules (Benign curated, v2.11.48 measure) | **1.10%** (6/545 scanned of 548) — **unchanged after Track D** (sameFile gate + public-IP-only filter prevent new FPs). Drop from 15.6% (v2.10.95) attributable to F1-F14 contextual caps. 6 remaining FPs are real: meteor, prisma, @prisma/client, drizzle-orm, scrypt, liquid |
@@ -46,10 +46,10 @@
 ```
 src/
 ├── index.js              # Main scan orchestration (delegates to src/pipeline/)
-├── pipeline/              # Pipeline stages: initializer, executor (21 scanners), processor, outputter
+├── pipeline/              # Pipeline stages: initializer, executor (22 scanners), processor, outputter
 ├── scoring.js             # Per-file max scoring + FP reductions + contextual FP caps (F1-F14)
 ├── intent-graph.js        # Intra-file source-sink coherence analysis
-├── scanner/               # 21 parallel scanners + 2 pre-analysis modules + python-ast bootstrap
+├── scanner/               # 22 parallel scanners + 2 pre-analysis modules + python-ast bootstrap
 │   ├── ast.js             # AST-based detection (acorn) — 97 rules
 │   ├── dataflow.js        # Credential read -> network send
 │   ├── module-graph/      # Cross-file taint propagation (pre-analysis)
@@ -67,7 +67,7 @@ src/
 │   ├── trusted-dep-diff.js # Diff against trusted dep tarballs (opt-in)
 │   └── ...                # package, shell, typosquat, dependencies, hash, gh-actions
 ├── ml/                    # ML classifier (T1 filter, Phase 2)
-├── rules/index.js         # 276 threat rules (271 RULES + 5 PARANOID, MITRE mapped)
+├── rules/index.js         # 277 threat rules (272 RULES + 5 PARANOID, MITRE mapped)
 ├── response/playbooks.js  # Remediation playbooks
 ├── sandbox/               # Docker dynamic analysis
 │   ├── index.js           # Multi-run orchestration [0h, 72h, 7d]

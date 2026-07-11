@@ -42,6 +42,7 @@ const { normalizePythonName } = require('../scanner/python.js');
 const { scanPythonSource } = require('../scanner/python-source.js');
 const { initPythonParser, scanPythonAST } = require('../scanner/python-ast.js');
 const { scanAntiScannerInjection } = require('../scanner/anti-scanner-injection.js');
+const { scanBinarySource } = require('../scanner/binary-source.js');
 const { Spinner, listInstalledPackages, wasFilesCapped, getOverflowFiles, debugLog } = require('../utils.js');
 const { getMaxFileSize } = require('../shared/constants.js');
 const { scanParanoid } = require('../scanner/paranoid.js');
@@ -253,7 +254,7 @@ async function execute(targetPath, options, pythonDeps, warnings) {
     'scanGitHubActions', 'matchPythonIOCs', 'checkPyPITyposquatting',
     'scanEntropy', 'scanAIConfig', 'scanIocStrings', 'scanAntiForensic',
     'scanStubPackage', 'scanMonorepo', 'scanTrustedDepDiff', 'scanPythonSource',
-    'scanPythonAST', 'scanAntiScannerInjection'
+    'scanPythonAST', 'scanAntiScannerInjection', 'scanBinarySource'
   ];
 
   // Stage 2 quick_scan subset (monitor-only, set via options.scanMode='quick'
@@ -284,7 +285,8 @@ async function execute(targetPath, options, pythonDeps, warnings) {
     'scanPythonSource',
     'scanPythonAST',
     'scanAIConfig',
-    'scanAntiScannerInjection'
+    'scanAntiScannerInjection',
+    'scanBinarySource'
   ]);
   const isQuick = options.scanMode === 'quick';
   function ifEnabled(name, fn) {
@@ -333,7 +335,10 @@ async function execute(targetPath, options, pythonDeps, warnings) {
     ifEnabled('scanPythonAST', () => yieldThen(() => scanPythonAST(targetPath))),
     // ASI-001..004 (chantier 2026-06-20). Anti-scanner prompt injection in source text
     // (comments/strings). Regex-only, cheap; the attack lives in root entry files.
-    ifEnabled('scanAntiScannerInjection', () => yieldThen(() => scanAntiScannerInjection(targetPath)))
+    ifEnabled('scanAntiScannerInjection', () => yieldThen(() => scanAntiScannerInjection(targetPath))),
+    // BINSRC-001 (Layer 2): binary masquerading as a .js/.ts source file. Scans dist/build/out
+    // (which the other text scanners exclude) reading an 8 KB prefix — catches multi-MB carriers.
+    ifEnabled('scanBinarySource', () => yieldThen(() => scanBinarySource(targetPath)))
   ]);
 
   // Extract results: use empty array for rejected scanners, log errors
@@ -366,7 +371,8 @@ async function execute(targetPath, options, pythonDeps, warnings) {
     trustedDepDiffThreats,
     pythonSourceThreats,
     pythonAstThreats,
-    antiScannerThreats
+    antiScannerThreats,
+    binarySourceThreats
   ] = scanResult;
 
   // Emit warning if file count cap was hit + quick-scan overflow files
@@ -450,6 +456,7 @@ async function execute(targetPath, options, pythonDeps, warnings) {
     ...pythonSourceThreats,
     ...pythonAstThreats,
     ...antiScannerThreats,
+    ...binarySourceThreats,
     ...crossFileFlows.filter(f => f && f.sourceFile && f.sinkFile).map(f => ({
       type: f.type,
       severity: f.severity,

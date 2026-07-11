@@ -12,8 +12,8 @@ Supply-chain threat detection for npm and PyPI projects, directly in VS Code.
 - **Detailed report** -- Panel with color-coded severity table and clickable file links
 - **Webhook alerts** -- Optional alert forwarding to Discord or Slack
 - **Cancellable scan** -- Ability to cancel a running scan from the notification
-- **<!--stat:scanners-->21<!--/stat:scanners--> specialized scanners** -- AST, dataflow, obfuscation, typosquatting, IOC strings, AI config, anti-forensic, stub-package, Python source/AST, etc.
-- **<!--stat:rulesTotal-->276<!--/stat:rulesTotal--> detection rules** -- Mapped to the MITRE ATT&CK framework
+- **<!--stat:scanners-->22<!--/stat:scanners--> specialized scanners** -- AST, dataflow, obfuscation, typosquatting, IOC strings, AI config, anti-forensic, stub-package, Python source/AST, etc.
+- **<!--stat:rulesTotal-->277<!--/stat:rulesTotal--> detection rules** -- Mapped to the MITRE ATT&CK framework
 
 ## Prerequisites
 

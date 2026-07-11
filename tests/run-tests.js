@@ -51,6 +51,7 @@ const { runDataflowTests } = require('./scanner/dataflow.test');
 const { runPackageTests } = require('./scanner/package.test');
 const { runPhantomGypTests } = require('./scanner/phantom-gyp.test');
 const { runNativeDropExecTests } = require('./scanner/native-drop-exec.test');
+const { runBinarySourceTests } = require('./scanner/binary-source.test');
 const { runTyposquatTests } = require('./scanner/typosquat.test');
 const { runDependencyTests } = require('./scanner/dependency.test');
 const { runIocStringsTests } = require('./scanner/ioc-strings.test');
@@ -221,6 +222,7 @@ async function timed(name, fn) {
   await timed('package', runPackageTests);
   await timed('phantom-gyp', runPhantomGypTests);
   await timed('native-drop-exec', runNativeDropExecTests);
+  await timed('binary-source', runBinarySourceTests);
   await timed('typosquat', runTyposquatTests);
 
   // Integration tests (CLI spawns processes but uses small fixtures)

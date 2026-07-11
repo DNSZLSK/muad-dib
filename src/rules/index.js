@@ -842,6 +842,19 @@ const RULES = {
     ],
     mitre: 'T1195.002'
   },
+  binary_masquerading_as_source: {
+    id: 'MUADDIB-BINSRC-001',
+    name: 'Binary Masquerading as Source',
+    severity: 'HIGH',
+    confidence: 'high',
+    domain: 'malware',
+    description: 'Un fichier avec une extension source (.js/.mjs/.cjs/.jsx/.ts/.tsx) dont le CONTENU est binaire — executable (ELF/PE/Mach-O), archive (zip/gzip/xz/7z/rar), module WebAssembly, ou conteneur custom (octet de controle en tete, ex. le header \\x1bCSI de jscrambler@8.14.0). Un fichier source est du texte par definition ; un contenu binaire = charge utile deguisee en source. Le scanner descend VOLONTAIREMENT dans dist/build/out/output (que les scanners texte AST/dataflow/entropie excluent via EXCLUDED_DIRS) et ne lit qu\'un prefixe de 8 Ko, donc il attrape un porteur de plusieurs Mo (jscrambler dist/intro.js = 7.8 Mo) que tout le reste ignore. Magic-agnostique : renommer le fichier ou changer le magic ne contourne pas (regles octet-NUL + octet de controle en tete). FP≈0 : un bundle minifie dist/*.js reste du texte imprimable. Severite HIGH (ne franchit pas seul le seuil d\'alerte) : se cumule avec le hook d\'install que COMPOUND-020 install_native_drop_exec eleve en CRITICAL.',
+    references: [
+      'https://github.com/jscrambler/jscrambler/issues/322',
+      'https://attack.mitre.org/techniques/T1027/002/'
+    ],
+    mitre: 'T1027.002'
+  },
   crypto_exfil: {
     id: 'MUADDIB-COMPOUND-019',
     name: 'Hybrid-Crypto Credential Exfiltration',

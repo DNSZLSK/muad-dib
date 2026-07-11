@@ -30,7 +30,7 @@
 
 Les attaques supply-chain npm et PyPI explosent. Shai-Hulud a compromis 25K+ repos en 2025. Les outils existants détectent, mais n'aident pas à répondre.
 
-MUAD'DIB combine **<!--stat:scanners-->21<!--/stat:scanners--> scanners paralleles** (<!--stat:rulesTotal-->276<!--/stat:rulesTotal--> regles de detection), un **moteur de desobfuscation**, une **analyse dataflow inter-module**, du **scoring compose** (<!--stat:compound-->21<!--/stat:compound--> regles compound), et un sandbox gVisor/Docker pour detecter les menaces connues et les patterns comportementaux suspects dans les packages npm et PyPI. Un classifier XGBoost existe dans le code mais est **actuellement inactif** (modele effondre, en attente de re-entrainement — voir section ML Classifier ci-dessous).
+MUAD'DIB combine **<!--stat:scanners-->22<!--/stat:scanners--> scanners paralleles** (<!--stat:rulesTotal-->277<!--/stat:rulesTotal--> regles de detection), un **moteur de desobfuscation**, une **analyse dataflow inter-module**, du **scoring compose** (<!--stat:compound-->21<!--/stat:compound--> regles compound), et un sandbox gVisor/Docker pour detecter les menaces connues et les patterns comportementaux suspects dans les packages npm et PyPI. Un classifier XGBoost existe dans le code mais est **actuellement inactif** (modele effondre, en attente de re-entrainement — voir section ML Classifier ci-dessous).
 
 ---
 
@@ -639,7 +639,7 @@ Les alertes apparaissent dans Security > Code scanning alerts.
 ## Architecture
 
 ```
-MUAD'DIB 2.11.166 Scanner
+MUAD'DIB 2.11.167 Scanner
 |
 +-- IOC Match (225 000+ packages, JSON DB)
 |   +-- OSV.dev npm dump (200K+ entrées MAL-*)
@@ -666,7 +666,7 @@ MUAD'DIB 2.11.166 Scanner
 |   +-- Corrélation entre signaux faibles de multiples scanners
 |   +-- Élévation de sévérité sur combinaisons suspectes
 |
-+-- 21 Scanners Parallèles (276 règles)
++-- 22 Scanners Parallèles (277 règles)
 |   +-- AST Parse (acorn) — eval/Function, credential CLI theft, binary droppers, prototype hooks
 |   +-- Pattern Matching (shell, scripts)
 |   +-- Typosquat Detection (npm + PyPI, Levenshtein)
@@ -801,7 +801,7 @@ Voir [Evaluation Methodology](docs/EVALUATION_METHODOLOGY.md#14-datadog-17k-benc
 - **ADR** (Adversarial Detection Rate) : taux de detection sur 107 samples malveillants evasifs — 67 adversariaux (7 vagues red team) + 40 holdouts (4 batches de 10). 107 disponibles sur disque, seuil global=20.
 - **Holdout** (pre-tuning) : taux de detection sur 10 samples jamais vus avec regles gelees (mesure de generalisation)
 
-Datasets : 14 587 samples Datadog in-scope, 548 npm curated + 200 npm random + 132 PyPI packages benins, 107 samples adversariaux/holdout, **96 attaques ground-truth** (94 in-scope + 2 hors-scope : GT-005 colors, GT-009 faker, protestware min_threats=0; 13 samples PyPI added 2026-05-25). **<!--stat:tests-->4550<!--/stat:tests--> tests**, <!--stat:testFiles-->151<!--/stat:testFiles--> fichiers.
+Datasets : 14 587 samples Datadog in-scope, 548 npm curated + 200 npm random + 132 PyPI packages benins, 107 samples adversariaux/holdout, **96 attaques ground-truth** (94 in-scope + 2 hors-scope : GT-005 colors, GT-009 faker, protestware min_threats=0; 13 samples PyPI added 2026-05-25). **<!--stat:tests-->4559<!--/stat:tests--> tests**, <!--stat:testFiles-->152<!--/stat:testFiles--> fichiers.
 
 Voir [Evaluation Methodology](docs/EVALUATION_METHODOLOGY.md) pour le protocole experimental complet.
 
@@ -864,7 +864,7 @@ npm test
 
 ### Tests
 
-- **<!--stat:tests-->4550<!--/stat:tests--> tests unitaires/integration** sur <!--stat:testFiles-->151<!--/stat:testFiles--> fichiers modulaires via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
+- **<!--stat:tests-->4559<!--/stat:tests--> tests unitaires/integration** sur <!--stat:testFiles-->152<!--/stat:testFiles--> fichiers modulaires via [Codecov](https://codecov.io/gh/DNSZLSK/muad-dib)
 - **56 tests de fuzzing** - YAML malforme, JSON invalide, fichiers binaires, ReDoS, unicode, inputs 10MB
 - **Benchmark Datadog 17K** - 14 587 packages malveillants in-scope, 92.8% Wild TPR (13 538/14 587 in-scope, 3 335 hors scope sans JS). compromised_lib 97.8%, malicious_intent 92.1%
 - **107 samples adversariaux/holdout** - 67 adversariaux + 40 holdouts, 103/107 taux de detection sur samples disponibles (96.3% ADR, seuil global=20)
