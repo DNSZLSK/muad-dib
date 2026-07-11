@@ -10433,6 +10433,47 @@ async function runMonitorTests() {
         if (origEnv !== undefined) process.env.MUADDIB_WEBHOOK_URL = origEnv;
       }
     });
+
+    // --- Burst-cap install-hook delta (2026-07-11): a buried burst version that ADDS an
+    // install hook the latest lacks must be scanned, not dropped as recency noise. Appended
+    // at end-of-file on purpose (line-keyed no-source-grep allowlist). ---
+    test('BURST: a buried burst version that ADDS an install hook the latest lacks is kept, not dropped (jscrambler-in-a-burst)', () => {
+      const { selectMostRecentVersion } = require('../../src/monitor/ingestion.js');
+      const base = Date.parse('2026-07-11T12:00:00Z');
+      const versions = {};
+      const time = {};
+      // 8 in-window versions; latest (1.0.8) is clean. maxRecent=5 → 1.0.2 and 1.0.1 fall past
+      // the recency cap. Bury a NEW preinstall in 1.0.1 (absent from latest); 1.0.2 stays plain.
+      for (let i = 8; i >= 1; i--) {
+        const v = `1.0.${i}`;
+        versions[v] = { version: v, dist: { tarball: `https://reg/${v}.tgz` }, scripts: {} };
+        time[v] = new Date(base - (8 - i) * 60 * 1000).toISOString();
+      }
+      versions['1.0.1'].scripts = { preinstall: 'node dist/setup.js' };
+      const result = selectMostRecentVersion({ 'dist-tags': { latest: '1.0.8' }, versions, time });
+      const kept = result.recentVersions.find(r => r.version === '1.0.1');
+      assert(kept && kept.keptForSignal, '1.0.1 (buried +preinstall) must be kept for scan, not dropped');
+      assert(!result.droppedBurstVersions.includes('1.0.1'), '1.0.1 must NOT be ledgered as a burst drop');
+      assert(result.droppedBurstVersions.includes('1.0.2'), '1.0.2 (no hook delta) must still be dropped as noise');
+    });
+
+    test('BURST: hook-delta rescue is bounded — an adversarial burst cannot blow the enqueue list', () => {
+      const { selectMostRecentVersion } = require('../../src/monitor/ingestion.js');
+      const base = Date.parse('2026-07-11T12:00:00Z');
+      const versions = {};
+      const time = {};
+      // 40 in-window versions, each (except the clean latest 2.0.40) adds a distinct preinstall.
+      // The rescue must cap (BURST_SIGNAL_KEEP_MAX=10) so it can't enqueue the whole burst.
+      for (let i = 40; i >= 1; i--) {
+        const v = `2.0.${i}`;
+        versions[v] = { version: v, dist: { tarball: `https://reg/${v}.tgz` }, scripts: i === 40 ? {} : { preinstall: `node evil${i}.js` } };
+        time[v] = new Date(base - (40 - i) * 60 * 1000).toISOString();
+      }
+      const result = selectMostRecentVersion({ 'dist-tags': { latest: '2.0.40' }, versions, time });
+      const signalKept = result.recentVersions.filter(r => r.keptForSignal).length;
+      assert(signalKept <= 10, `hook-delta rescue must be bounded ≤10, got ${signalKept}`);
+      assert(result.droppedBurstVersions.length > 0, 'excess burst versions beyond the cap must still be dropped');
+    });
   }
 }
 
