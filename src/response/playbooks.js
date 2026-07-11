@@ -1078,6 +1078,10 @@ const PLAYBOOKS = {
     'CRITIQUE (compound Phase 1b): binding.gyp lance <!(node x.js) / <!(python y.py) au configure-time via node-gyp (aucun script lifecycle requis) ET le fichier invoque est juge malveillant de facon independante par les scanners AST/dataflow/module-graph. ' +
     'Payload install-time confirme — NE PAS installer. Analyser le fichier invoque (nomme dans le message), c\'est lui qui porte la charge. node-gyp l\'execute meme avec --ignore-scripts.',
 
+  install_native_drop_exec:
+    'CRITIQUE (compound COMPOUND-020): un hook preinstall/install/postinstall lance `node x.js` qui depaquette un binaire natif EMBARQUE dans le package (lecture locale / gunzip / base64), l\'ecrit executable et le spawn — au moment de npm install, sans reseau, sans import (pattern jscrambler@8.14.0, infostealer natif). ' +
+    'NE PAS installer : --ignore-scripts ne protege pas si deja installe. Le fichier nomme dans le message porte la charge. Roter les credentials accessibles aux environnements dev/CI ayant installe la version, verifier les logs d\'install pour l\'execution du loader, revenir a une version verifiee saine.',
+
   string_mutation_obfuscation:
     'HAUTE: Chaine de .replace() reconstruisant des noms d\'API dangereuses (leet-speak). ' +
     'Technique d\'evasion par substitution de caracteres. Decoder la chaine finale. Supprimer si malveillant.',

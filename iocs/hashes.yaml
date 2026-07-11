@@ -104,6 +104,66 @@ hashes:
     references:
       - https://snyk.io/blog/peacenotwar-malicious-npm-node-ipc-package-vulnerability/
 
+  # ============================================
+  # jscrambler@8.14.0 infostealer (Juillet 2026)
+  # ============================================
+  # Fichiers du package npm — matchent le scan statique du package
+  - id: HASH-JSCRAMBLER-SETUP
+    sha256: "a742de963f14a92d24ebcbc7b44ac867e23a20d31d1b0094a13a4f83287f4e60"
+    file: "setup.js"
+    source: socket
+    severity: critical
+    confidence: high
+    description: "jscrambler@8.14.0 dist/setup.js — loader preinstall qui depaquette+execute le binaire natif"
+    references:
+      - https://github.com/jscrambler/jscrambler/issues/322
+  - id: HASH-JSCRAMBLER-INTRO
+    sha256: "a41a523ef9517aab37ed6eea0ec881821bdcb7aefcb5c5f603adc7907f868c86"
+    file: "intro.js"
+    source: socket
+    severity: critical
+    confidence: high
+    description: "jscrambler@8.14.0 dist/intro.js — conteneur binaire CSI ~7.8MB (3 payloads gzip ELF/PE/Mach-O)"
+    references:
+      - https://github.com/jscrambler/jscrambler/issues/322
+  - id: HASH-JSCRAMBLER-PKGJSON
+    sha256: "bba32ddeab075a5e5015eec50f5d2af364c95b848732c714aea6b6baf78f49f0"
+    file: "package.json"
+    source: socket
+    severity: critical
+    confidence: high
+    description: "jscrambler@8.14.0 package.json — manifeste avec le hook preinstall injecte"
+    references:
+      - https://github.com/jscrambler/jscrambler/issues/322
+  # Payloads natifs decompresses — contexte endpoint/IR (ne matchent PAS le scan statique du package: gzip a l'interieur d'intro.js)
+  - id: HASH-JSCRAMBLER-ELF
+    sha256: "fbbcf4d8f98168f78f5c0c47a9ae56d59ec8ac84a7c9ca6b797fedfb8d62d2bd"
+    file: "jscrambler-payload-linux-x64.elf"
+    source: socket
+    severity: critical
+    confidence: high
+    description: "jscrambler@8.14.0 payload Linux x86-64 ELF (infostealer Rust) apres decompression"
+    references:
+      - https://github.com/jscrambler/jscrambler/issues/322
+  - id: HASH-JSCRAMBLER-PE
+    sha256: "b7ca95d1b23c8e67416a25cedf741de0917c2096bbc9d24649eea7853d054903"
+    file: "jscrambler-payload-win-x64.exe"
+    source: socket
+    severity: critical
+    confidence: high
+    description: "jscrambler@8.14.0 payload Windows x86-64 PE32+ (infostealer Rust) apres decompression"
+    references:
+      - https://github.com/jscrambler/jscrambler/issues/322
+  - id: HASH-JSCRAMBLER-MACHO
+    sha256: "c8fd47d36bdf7c825378593ab82ed8c24d1dc52e26b507812393e24e1d5201fd"
+    file: "jscrambler-payload-macos-arm64.macho"
+    source: socket
+    severity: critical
+    confidence: high
+    description: "jscrambler@8.14.0 payload macOS arm64 Mach-O (infostealer Rust) apres decompression"
+    references:
+      - https://github.com/jscrambler/jscrambler/issues/322
+
 markers:
   # ============================================
   # SHAI-HULUD MARKERS

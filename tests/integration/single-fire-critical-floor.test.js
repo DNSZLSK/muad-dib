@@ -108,7 +108,7 @@ async function runSingleFireCriticalFloorTests() {
     assert(applySingleFireCriticalFloor({ threats: [], summary: { riskScore: 10 } }).length === 0);
   });
 
-  test('SINGLE_FIRE_CRITICAL_TYPES set composition is the validated 7-type list', () => {
+  test('SINGLE_FIRE_CRITICAL_TYPES set composition is the validated 8-type list', () => {
     const expected = new Set([
       'known_malicious_hash',
       'known_malicious_package',
@@ -116,7 +116,8 @@ async function runSingleFireCriticalFloorTests() {
       'shai_hulud_marker',
       'lifecycle_shell_pipe',
       'gyp_phantom_exec',
-      'crypto_exfil'
+      'crypto_exfil',
+      'install_native_drop_exec'
     ]);
     assert(SINGLE_FIRE_CRITICAL_TYPES.size === expected.size,
       `Expected ${expected.size} types, got ${SINGLE_FIRE_CRITICAL_TYPES.size}`);

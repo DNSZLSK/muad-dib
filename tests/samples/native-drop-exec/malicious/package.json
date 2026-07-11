@@ -1,0 +1,8 @@
+{
+  "name": "native-drop-exec-malicious",
+  "version": "1.0.0",
+  "description": "Fixture: install-time native-binary drop-and-execute via preinstall (jscrambler@8.14.0 shape). Loader is inert test code; the scanner is static and never runs it.",
+  "scripts": {
+    "preinstall": "node dist/setup.js"
+  }
+}
