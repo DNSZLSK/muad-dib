@@ -383,6 +383,31 @@ function parsePyPIRss(xml) {
 const RECENT_PUBLISH_WINDOW_MS = 24 * 60 * 60 * 1000;
 const RECENT_PUBLISH_MAX = 5;
 
+// Burst versions beyond RECENT_PUBLISH_MAX are dropped by recency. But a buried burst
+// version that ADDS an install hook the latest lacks is exactly the "bury the payload in a
+// publish burst" evasion (jscrambler@8.14.0 added a preinstall absent from 8.13.0). We keep
+// such signal-bearing versions for scanning instead of dropping them — bounded by
+// BURST_SIGNAL_KEEP_MAX so an adversarial 1000-version burst can't blow the enqueue list.
+const INSTALL_HOOK_KEYS = ['preinstall', 'install', 'postinstall'];
+const BURST_SIGNAL_KEEP_MAX = 10;
+
+/**
+ * True when `scripts` carries an install hook (preinstall/install/postinstall) that the
+ * baseline (latest) manifest lacks or defines differently — a cheap manifest-level delta
+ * that flags a burst version worth scanning even past the recency cap.
+ * @param {Object} scripts - candidate version's package.json scripts
+ * @param {Object} baseScripts - the latest (baseline) version's scripts
+ * @returns {boolean}
+ */
+function _hasInstallHookDelta(scripts, baseScripts) {
+  const s = scripts || {};
+  const b = baseScripts || {};
+  for (const h of INSTALL_HOOK_KEYS) {
+    if (s[h] && s[h] !== b[h]) return true;
+  }
+  return false;
+}
+
 /**
  * Pure function: pick the most-recently-published version from a packument and
  * return its metadata, plus context useful for ATO detection.
@@ -460,20 +485,35 @@ function selectMostRecentVersion(packument, options = {}) {
   // so a 96-version Miasma burst is distinguishable from a legit 3-5 patch-release day (the
   // capped list alone tops out at maxRecent+1 and can't tell them apart).
   result.recentWindowCount = 1; // includes the most-recent version itself
+  let signalKeeps = 0; // burst versions kept past the recency cap for an install-hook delta
   if (versionTimes.length > 1) {
     const cutoff = versionTimes[0][1] - recentWindowMs;
     for (let i = 1; i < versionTimes.length; i++) {
       const [v, ts] = versionTimes[i];
       if (ts < cutoff) break; // sorted desc, so once we cross the cutoff we're done
       result.recentWindowCount++;
+      const vData = versions[v];
       if (result.recentVersions.length >= maxRecent) {
+        // Past the recency cap → normally a coverage loss. But KEEP a version that adds an
+        // install hook the latest lacks (the "bury the payload in a publish burst" evasion,
+        // jscrambler shape), bounded by BURST_SIGNAL_KEEP_MAX so a burst can't blow the list.
+        if (vData && signalKeeps < BURST_SIGNAL_KEEP_MAX && _hasInstallHookDelta(vData.scripts, result.scripts)) {
+          signalKeeps++;
+          result.recentVersions.push({
+            version: vData.version || v,
+            tarball: (vData.dist && vData.dist.tarball) || null,
+            unpackedSize: (vData.dist && vData.dist.unpackedSize) || 0,
+            scripts: vData.scripts || {},
+            keptForSignal: true,
+          });
+          continue;
+        }
         // Burst beyond the enqueue cap: collect the version so the caller ledgers it as a
         // coverage loss (it is never enqueued/scanned). Keeps a Miasma-style burst that
         // outruns maxRecent visible instead of vanishing silently (CLAUDE.md "no silent caps").
         result.droppedBurstVersions.push(v);
         continue; // enqueue list capped; count continues
       }
-      const vData = versions[v];
       if (!vData) continue;
       result.recentVersions.push({
         version: vData.version || v,
