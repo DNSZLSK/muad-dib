@@ -101,7 +101,11 @@ const HIGH_CONFIDENCE_MALICE_TYPES = new Set([
   // electron_app_injection (MUADDIB-AST-097): install hook overwrites a THIRD-PARTY Electron app's
   // core/.asar with injected code (payload-in-write coupling ⇒ FP≈0). Bypasses MT-1 cap like the
   // other install-time RCE/injection markers above (node_modules_write, systemd_persistence).
-  'electron_app_injection'
+  'electron_app_injection',
+  // install_native_drop_exec (COMPOUND-020): install-time drop-and-execute of a package-
+  // BUNDLED native binary with no network fetch (jscrambler@8.14.0). Quasi-never legit;
+  // bypasses MT-1 cap + reputation attenuation like the other install-time RCE markers.
+  'install_native_drop_exec'
 ]);
 
 // Lifecycle compound types that indicate real malicious intent beyond a simple postinstall

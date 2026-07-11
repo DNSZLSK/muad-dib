@@ -479,3 +479,18 @@ packages:
     references:
       - https://snyk.io/blog/malicious-code-found-in-npm-package-event-stream/
     mitre: T1195.002
+
+  # ============================================
+  # jscrambler infostealer (Juillet 2026)
+  # ============================================
+  - id: JSCRAMBLER-INFOSTEALER-001
+    name: "jscrambler"
+    version: "8.14.0"
+    severity: critical
+    confidence: high
+    source: socket
+    introduced: "2026-07-11"
+    description: "Release compromise: hook preinstall (node dist/setup.js) qui lit dist/intro.js (conteneur binaire, magic bytes 1b 43 53 49 01, ~7.8MB), gunzip le payload correspondant a process.platform, l'ecrit en fichier cache dans tmpdir avec bit executable puis le spawn detache — infostealer natif Rust (Linux/macOS/Windows). Fichiers absents de 8.13.0. SEULE 8.14.0 est malveillante (8.13.0 et 8.15.0+ saines) — ne jamais mettre en wildcard."
+    references:
+      - https://github.com/jscrambler/jscrambler/issues/322
+    mitre: T1195.002

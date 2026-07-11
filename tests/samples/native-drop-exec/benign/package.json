@@ -1,0 +1,8 @@
+{
+  "name": "native-drop-exec-benign",
+  "version": "1.0.0",
+  "description": "Fixture (FPR guard): legitimate native-binary installer that DOWNLOADS from a URL (network) then chmod+spawns it — must NOT trigger install_native_drop_exec (that is the download-and-execute pattern, handled elsewhere).",
+  "scripts": {
+    "postinstall": "node install.js"
+  }
+}

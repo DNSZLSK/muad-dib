@@ -40,6 +40,7 @@ const DOC_FILES = [
   'docs/INDEX.md',
   'docs/threat-model.md',
   'docs/EVALUATION_METHODOLOGY.md',
+  'docs/index.html',
   'vscode-extension/README.md',
   'CLAUDE.md',
 ];

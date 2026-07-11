@@ -7062,11 +7062,11 @@ async function runMonitorTests() {
 
   // ===== v2.7.6 C1: High-confidence malice bypass =====
 
-  test('MONITOR: HIGH_CONFIDENCE_MALICE_TYPES contains 32 threat types', () => {
-    // 32 = 31 + electron_app_injection (MUADDIB-AST-097, third-party Electron app code injection).
-    assert(HIGH_CONFIDENCE_MALICE_TYPES.size === 32,
-      `Should have 32 types, got ${HIGH_CONFIDENCE_MALICE_TYPES.size}`);
-    assert(HIGH_CONFIDENCE_MALICE_TYPES.has('electron_app_injection') && HIGH_CONFIDENCE_MALICE_TYPES.has('gyp_phantom_exec'), 'Missing electron_app_injection/gyp_phantom_exec');
+  test('MONITOR: HIGH_CONFIDENCE_MALICE_TYPES contains 33 threat types', () => {
+    // 33 = 32 + install_native_drop_exec (MUADDIB-COMPOUND-020, install-time bundled native-binary drop-and-execute).
+    assert(HIGH_CONFIDENCE_MALICE_TYPES.size === 33,
+      `Should have 33 types, got ${HIGH_CONFIDENCE_MALICE_TYPES.size}`);
+    assert(HIGH_CONFIDENCE_MALICE_TYPES.has('install_native_drop_exec') && HIGH_CONFIDENCE_MALICE_TYPES.has('electron_app_injection') && HIGH_CONFIDENCE_MALICE_TYPES.has('gyp_phantom_exec'), 'Missing install_native_drop_exec/electron_app_injection/gyp_phantom_exec');
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('lifecycle_shell_pipe'), 'Missing lifecycle_shell_pipe');
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('fetch_decrypt_exec'), 'Missing fetch_decrypt_exec');
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('download_exec_binary'), 'Missing download_exec_binary');

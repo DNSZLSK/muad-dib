@@ -828,6 +828,20 @@ const RULES = {
     ],
     mitre: 'T1195.002'
   },
+  install_native_drop_exec: {
+    id: 'MUADDIB-COMPOUND-020',
+    name: 'Install-Time Native Binary Drop-and-Execute',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    domain: 'malware',
+    description: 'Un hook preinstall/install/postinstall lance `node x.js`, et x.js lit des octets EMBARQUES dans le package (lecture fichier locale / decompression zlib-brotli / base64-hex inline), les ecrit dans un fichier executable (bit exec via mode 0o7xx, chmod +x, ou extension .exe) puis SPAWN ce chemin ecrit (child_process spawn/exec/execFile/fork sur un chemin calcule, pas une commande litterale) — SANS fetch reseau. Pattern jscrambler@8.14.0 (Socket, 2026-07-11): le loader depaquette un binaire natif (infostealer Rust) et l\'execute au moment de npm install, avant tout code applicatif, sans import requis. Le loader ne declenche AUCUNE regle AST/dataflow par fichier (seul lifecycle_script, cape). Compound FPR≈0 par construction: les installeurs legitimes de binaires natifs TELECHARGENT depuis une URL (reseau), COMPILENT via node-gyp/make/cc invoques par NOM (commande litterale), ou chargent un .node prebuild via require() (jamais spawn) — aucun ne depaquette+chmod+spawn un blob embarque sans reseau. Variante furtive (sans signature reseau) volontairement scopee ici; la variante download-and-execute est couverte ailleurs.',
+    references: [
+      'https://github.com/jscrambler/jscrambler/issues/322',
+      'https://attack.mitre.org/techniques/T1195/002/',
+      'https://attack.mitre.org/techniques/T1059/'
+    ],
+    mitre: 'T1195.002'
+  },
   crypto_exfil: {
     id: 'MUADDIB-COMPOUND-019',
     name: 'Hybrid-Crypto Credential Exfiltration',

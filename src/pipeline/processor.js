@@ -23,6 +23,7 @@ const { getRule, getRuleDomain } = require('../rules/index.js');
 const { getPlaybook } = require('../response/playbooks.js');
 const { computeReachableFiles, computeReachableFunctions } = require('../scanner/reachability.js');
 const { correlatePhantomGyp } = require('../scanner/phantom-gyp.js');
+const { correlateInstallNativeDropExec } = require('../scanner/native-drop-exec.js');
 const { applyFPReductions, applyCompoundBoosts, calculateRiskScore, getSeverityWeights, applyContextualFPCaps, applySingleFireCriticalFloor, applyReputationFactor, applyMatureStableCap, applySandboxVerdict, applyDeltaMultiplier } = require('../scoring.js');
 const { loadPriorVersionSignatures, computeSignatures, saveCachedSignatures } = require('../scoring/delta-multiplier.js');
 const { annotateConfidenceTiers } = require('../rules/confidence-tiers.js');
@@ -480,6 +481,14 @@ async function process(threats, targetPath, options, pythonDeps, warnings, scann
   // full post-scan, post-FP-reduction verdict set. FP≈0 by construction (it only ever
   // ADDS a finding when the invoked file is independently judged malicious).
   correlatePhantomGyp(deduped, targetPath);
+
+  // install_native_drop_exec compound (COMPOUND-020): a preinstall/install/postinstall
+  // hook running `node x.js`, where x.js reads package-BUNDLED bytes (local read /
+  // decompress / inline base64), writes them to an executable file, and spawns that
+  // written path — with NO network fetch (the stealthy bundled variant, distinct from
+  // download-and-execute). The jscrambler@8.14.0 shape (Socket 2026-07-11), which trips
+  // zero per-file rules. FP≈0 by construction. Runs here on the full post-FP verdict set.
+  correlateInstallNativeDropExec(deduped, targetPath);
 
   // Intent coherence analysis: detect source→sink pairs within files
   // Pass targetPath for destination-aware SDK pattern detection

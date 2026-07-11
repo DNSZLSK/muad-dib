@@ -190,7 +190,13 @@ const SINGLE_FIRE_CRITICAL_TYPES = new Set([
   // dest in the same file (FP≈0 by construction). Floors a lone CRITICAL to 75 so it is
   // not buried at 25 on PyPI, where a single CRITICAL does not stack co-signals the way
   // the npm side does (env_access + credential_regex_harvest + ... → 100).
-  'crypto_exfil'
+  'crypto_exfil',
+  // install_native_drop_exec (COMPOUND-020): an install hook drops a package-bundled
+  // native binary (exec-bit write / chmod +x) and spawns it, with no network fetch
+  // (jscrambler@8.14.0). FP≈0 by construction, so it carries the same single-fire weight
+  // as the IOC/hash matches and gyp_phantom_exec above — a lone verdict must not be
+  // buried at 25 (the loader trips no other rule to stack with).
+  'install_native_drop_exec'
 ]);
 const SINGLE_FIRE_CRITICAL_FLOOR = 75;
 const SINGLE_FIRE_MIN_SEVERITY_RANK = 2; // HIGH
