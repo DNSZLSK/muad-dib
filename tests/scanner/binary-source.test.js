@@ -45,9 +45,17 @@ function runBinarySourceTests() {
     assert(v.binary && /control byte 0x1b/.test(v.reason), 'CSI header must be flagged, got ' + JSON.stringify(v));
   });
 
-  test('sniff: NUL byte in the middle → binary', () => {
-    const v = sniffBinaryBuffer(Buffer.concat([Buffer.from('function f(){'), buf(0x00, 1, 2), Buffer.from('}')]));
-    assert(v.binary && /NUL byte/.test(v.reason), 'NUL must be flagged');
+  test('sniff: lone/sparse NUL delimiter in valid source → NOT binary (BINSRC-001 FP fix)', () => {
+    // `${a}\x00${b}` NUL-delimited dedup keys are a legit source idiom; one NUL among text must NOT flag.
+    // Regression guard: rule #3 (NUL-anywhere) used to over-fire on gavio/baldart/turtle etc.
+    const src = 'const sep = "\x00"; const key = (a, b) => a + sep + b;\n' + 'let pad = 0;\n'.repeat(20);
+    const v = sniffBinaryBuffer(Buffer.from(src, 'latin1'));
+    assert(!v.binary, 'lone NUL delimiter must NOT be flagged, got ' + JSON.stringify(v));
+  });
+
+  test('sniff: NUL-dense blob → binary (NUL still counts toward the density ratio)', () => {
+    const b = Buffer.alloc(256); for (let i = 0; i < 256; i++) b[i] = i % 4 === 0 ? 0x41 : 0x00;
+    assert(sniffBinaryBuffer(b).binary, 'a NUL-dense prefix must be binary via the density rule');
   });
 
   test('sniff: high ratio of control bytes → binary', () => {

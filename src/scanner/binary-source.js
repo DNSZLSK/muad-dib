@@ -29,8 +29,9 @@
  * into those dirs and reads only an 8 KB prefix per file, so it catches a multi-MB carrier
  * regardless of the 10 MB parse cap.
  *
- * FP≈0: minified/bundled `dist/*.js` is still printable text (no NUL, no leading control
- * byte) — only genuinely binary content trips it. Severity HIGH (not single-fire): on its
+ * FP≈0: minified/bundled `dist/*.js` is still printable text (low control-byte ratio, no leading
+ * control byte); a lone NUL delimiter is tolerated — only dense binary content trips it. Severity
+ * HIGH (not single-fire): on its
  * own it does not cross the alert threshold; it stacks with the install-hook signal, which
  * the COMPOUND-020 `install_native_drop_exec` correlator escalates to CRITICAL.
  */
