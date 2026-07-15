@@ -174,7 +174,7 @@ Validated against 17,922 real npm malware samples. Wild TPR: **92.8%** (13,538/1
 | Ingress Tool Transfer | T1105 | Pattern matching |
 | Data Destruction | T1485 | Pattern matching |
 
-See [SECURITY.md](../SECURITY.md#detection-rules-v211139) for the complete <!--stat:rulesTotal-->277<!--/stat:rulesTotal-->-rule reference.
+See [SECURITY.md](../SECURITY.md#detection-rules-v211139) for the complete <!--stat:rulesTotal-->279<!--/stat:rulesTotal-->-rule reference.
 
 ## Assumptions
 

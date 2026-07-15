@@ -30,7 +30,7 @@
 
 Les attaques supply-chain npm et PyPI explosent. Shai-Hulud a compromis 25K+ repos en 2025. Les outils existants détectent, mais n'aident pas à répondre.
 
-MUAD'DIB combine **<!--stat:scanners-->22<!--/stat:scanners--> scanners paralleles** (<!--stat:rulesTotal-->277<!--/stat:rulesTotal--> regles de detection), un **moteur de desobfuscation**, une **analyse dataflow inter-module**, du **scoring compose** (<!--stat:compound-->21<!--/stat:compound--> regles compound), et un sandbox gVisor/Docker pour detecter les menaces connues et les patterns comportementaux suspects dans les packages npm et PyPI. Un classifier XGBoost existe dans le code mais est **actuellement inactif** (modele effondre, en attente de re-entrainement — voir section ML Classifier ci-dessous).
+MUAD'DIB combine **<!--stat:scanners-->22<!--/stat:scanners--> scanners paralleles** (<!--stat:rulesTotal-->279<!--/stat:rulesTotal--> regles de detection), un **moteur de desobfuscation**, une **analyse dataflow inter-module**, du **scoring compose** (<!--stat:compound-->23<!--/stat:compound--> regles compound), et un sandbox gVisor/Docker pour detecter les menaces connues et les patterns comportementaux suspects dans les packages npm et PyPI. Un classifier XGBoost existe dans le code mais est **actuellement inactif** (modele effondre, en attente de re-entrainement — voir section ML Classifier ci-dessous).
 
 ---
 
@@ -639,7 +639,7 @@ Les alertes apparaissent dans Security > Code scanning alerts.
 ## Architecture
 
 ```
-MUAD'DIB 2.11.170 Scanner
+MUAD'DIB 2.11.171 Scanner
 |
 +-- IOC Match (225 000+ packages, JSON DB)
 |   +-- OSV.dev npm dump (200K+ entrées MAL-*)
@@ -666,7 +666,7 @@ MUAD'DIB 2.11.170 Scanner
 |   +-- Corrélation entre signaux faibles de multiples scanners
 |   +-- Élévation de sévérité sur combinaisons suspectes
 |
-+-- 22 Scanners Parallèles (277 règles)
++-- 22 Scanners Parallèles (279 règles)
 |   +-- AST Parse (acorn) — eval/Function, credential CLI theft, binary droppers, prototype hooks
 |   +-- Pattern Matching (shell, scripts)
 |   +-- Typosquat Detection (npm + PyPI, Levenshtein)

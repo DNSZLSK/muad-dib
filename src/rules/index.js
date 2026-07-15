@@ -842,6 +842,32 @@ const RULES = {
     ],
     mitre: 'T1195.002'
   },
+  lifecycle_newsletter_hijack: {
+    id: 'MUADDIB-COMPOUND-021',
+    name: 'Install-Time WhatsApp Channel Hijack',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    domain: 'malware',
+    description: 'Compound de synthèse (SCORING_COMPOUNDS): un hook lifecycle (preinstall/install/postinstall) co-occurre avec newsletter_auto_follow (MUADDIB-AST-088 — auto-abonnement/suivi de channels WhatsApp via l\'API Baileys), de sorte que le détournement de channel WhatsApp s\'exécute au moment de npm install plutôt qu\'au runtime applicatif. newsletter_auto_follow est structurellement unique au malware Baileys ; le coupler à un hook d\'installation ne se produit pas dans du code légitime → FPR≈0 par construction. (Auparavant non enregistré → résolu en MUADDIB-UNK-001/MEDIUM/low, scoré 15 au lieu de 25 : sous-scoring de 40% corrigé ici.)',
+    references: [
+      'https://attack.mitre.org/techniques/T1195/002/',
+      'https://attack.mitre.org/techniques/T1059/'
+    ],
+    mitre: 'T1195.002'
+  },
+  lifecycle_env_exfil: {
+    id: 'MUADDIB-COMPOUND-022',
+    name: 'Install-Time Environment Exfiltration',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    domain: 'malware',
+    description: 'Compound de synthèse (SCORING_COMPOUNDS): un hook lifecycle (preinstall/install/postinstall) co-occurre avec curl_env_exfil (curl/wget qui exfiltre des variables d\'environnement, souvent base64), de sorte que le vol de secrets d\'environnement s\'exécute au moment de npm install. curl_env_exfil est déjà dans HIGH_CONFIDENCE_MALICE_TYPES ; le coupler à un hook d\'installation prouve l\'exfiltration credential install-time → aucune raison légitime de piper l\'environnement vers le réseau depuis un hook. (Auparavant non enregistré → MUADDIB-UNK-001/MEDIUM/low, scoré 15 au lieu de 25 : corrigé.)',
+    references: [
+      'https://attack.mitre.org/techniques/T1195/002/',
+      'https://attack.mitre.org/techniques/T1552/001/'
+    ],
+    mitre: 'T1195.002'
+  },
   binary_masquerading_as_source: {
     id: 'MUADDIB-BINSRC-001',
     name: 'Binary Masquerading as Source',

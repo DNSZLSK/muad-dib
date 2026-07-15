@@ -4,7 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { test, assert } = require('../test-utils');
-const { applyFPReductions, applyCompoundBoosts } = require('../../src/scoring.js');
+const { applyFPReductions, applyCompoundBoosts, SCORING_COMPOUNDS } = require('../../src/scoring.js');
 const { getRule } = require('../../src/rules/index.js');
 const { getPlaybook } = require('../../src/response/playbooks.js');
 
@@ -1035,6 +1035,29 @@ async function runCompoundScoringTests() {
       assert(threats.some(t => t.type === 'recon_exfil_direct_ip'),
         'sameFile behaviour must be preserved');
     } finally { fs.rmSync(d, { recursive: true, force: true }); }
+  });
+
+  // ===================================================================
+  // Regression guard (2026-07-15): every SCORING_COMPOUNDS type MUST have a
+  // RULES entry. An unregistered compound falls through getRule() to
+  // MUADDIB-UNK-001 (MEDIUM/low); processor.js:521 then applies a 0.6× confidence
+  // factor, so a CRITICAL 25-pt compound is silently scored 15 (below the 20 alert
+  // floor) and shown as "Unknown Threat". This caught lifecycle_newsletter_hijack
+  // (fired 27×) + lifecycle_env_exfil → now MUADDIB-COMPOUND-021/022.
+  // ===================================================================
+  test('Compound integrity: every SCORING_COMPOUNDS type is registered (no MUADDIB-UNK-001 de-rate)', () => {
+    const unregistered = SCORING_COMPOUNDS
+      .map(c => c.type)
+      .filter(type => getRule(type).id === 'MUADDIB-UNK-001');
+    assert(unregistered.length === 0,
+      `Unregistered compound(s) fall through to MUADDIB-UNK-001 (0.6× confidence de-rate, silent under-scoring): ${unregistered.join(', ')}`);
+  });
+
+  test('Compound: lifecycle_newsletter_hijack is registered CRITICAL (COMPOUND-021, was UNK/15pts)', () => {
+    const r = getRule('lifecycle_newsletter_hijack');
+    assert(r.id === 'MUADDIB-COMPOUND-021', `expected MUADDIB-COMPOUND-021, got ${r.id}`);
+    assert(r.severity === 'CRITICAL' && r.confidence === 'high' && r.domain === 'malware',
+      `expected CRITICAL/high/malware, got ${r.severity}/${r.confidence}/${r.domain}`);
   });
 }
 

@@ -1076,6 +1076,36 @@ async function runScoringHardeningTests() {
     applyReputationFactor(result, _matureMeta);
     assert(result.summary.riskScore < 20, `stealth process without js_obfuscation_pattern must not floor (pm2/wattpm/mongodb), got ${result.summary.riskScore}`);
   });
+
+  // ===================================================================
+  // F17 passive-informational-only cap (rule-audit 2026-07-15). A package whose
+  // EVERY threat is a TIER3_PASSIVE_TYPES signal is capped below the 20 alert floor.
+  // Measured: 164 corpus FP / 0 MALWARE passive-only; 0 GT samples passive-only;
+  // 121 ledger alerts (0.87%) de-alerted, 0 TP loss.
+  // ===================================================================
+  test('F17: passive-informational-only package is capped below the alert floor', () => {
+    const result = { summary: { riskScore: 32, riskLevel: 'MEDIUM' }, threats: [
+      { type: 'dynamic_import' }, { type: 'env_access' }, { type: 'high_entropy_string' }, { type: 'obfuscation_detected' }
+    ] };
+    applyContextualFPCaps(result, {});
+    assert(result.summary.riskScore < 20, `passive-only must cap below the 20 alert floor, got ${result.summary.riskScore}`);
+  });
+
+  test('F17: passive + one ACTIVE/malware signal is NOT capped (veto)', () => {
+    const result = { summary: { riskScore: 32, riskLevel: 'MEDIUM' }, threats: [
+      { type: 'dynamic_import' }, { type: 'env_access' }, { type: 'reverse_shell' }
+    ] };
+    applyContextualFPCaps(result, {});
+    assert(result.summary.riskScore === 32, `passive + active must NOT be F17-capped, got ${result.summary.riskScore}`);
+  });
+
+  test('F17: passive + a compound signal is NOT capped (veto)', () => {
+    const result = { summary: { riskScore: 32, riskLevel: 'MEDIUM' }, threats: [
+      { type: 'env_access' }, { type: 'crypto_exfil' }
+    ] };
+    applyContextualFPCaps(result, {});
+    assert(result.summary.riskScore === 32, `passive + compound must NOT be F17-capped, got ${result.summary.riskScore}`);
+  });
 }
 
 module.exports = { runScoringHardeningTests };

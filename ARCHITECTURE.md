@@ -33,7 +33,7 @@ bin/muaddib.js (yargs CLI)
         ├─► FP reductions (src/scoring.js — applyFPReductions)
         ├─► Reachability post-processing (src/scanner/reachability.js — file-level + function-level FP downgrade)
         ├─► Intent coherence analysis (src/intent-graph.js — buildIntentPairs)
-        ├─► Rule enrichment (src/rules/index.js — 277 rules)
+        ├─► Rule enrichment (src/rules/index.js — 279 rules)
         ├─► Scoring (src/scoring.js — per-file max + compound boosts)
         └─► Output (CLI / JSON / HTML / SARIF)
 
@@ -43,7 +43,7 @@ bin/muaddib.js (yargs CLI)
     src/monitor/queue.js:628).
 ```
 
-**Core orchestration:** `src/index.js` delegates to `src/pipeline/{initializer,executor,processor,outputter}.js`. `executor.js` runs cross-file module graph analysis first (pre-analysis, 5s timeout), then launches **<!--stat:scanners-->22<!--/stat:scanners--> individual scanners** in parallel via `Promise.allSettled` (intel-triage P1: `scanIocStrings` + `scanAntiForensic` + `scanStubPackage`; Sprint 1: `scanMonorepo` audit MR-C2 fix; v2.11.41+: `scanPythonSource` PYSRC + `scanPythonAst` PYAST), then `processor.js` deduplicates, applies FP reductions + reachability post-processing, scores using per-file max (v2.2.11: `riskScore = min(100, max(file_scores) + package_level_score)`, severity weights: CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1), applies intent coherence analysis (intra-file source-sink pairing), enriches with rules/playbooks (<!--stat:rulesTotal-->277<!--/stat:rulesTotal--> rules), and `outputter.js` formats CLI/JSON/HTML/SARIF. Result includes `warnings: []` array (v2.6.5) for incomplete scan notifications (module graph timeout/skip, deobfuscation failures). Exports `isPackageLevelThreat` and `computeGroupScore` for testing.
+**Core orchestration:** `src/index.js` delegates to `src/pipeline/{initializer,executor,processor,outputter}.js`. `executor.js` runs cross-file module graph analysis first (pre-analysis, 5s timeout), then launches **<!--stat:scanners-->22<!--/stat:scanners--> individual scanners** in parallel via `Promise.allSettled` (intel-triage P1: `scanIocStrings` + `scanAntiForensic` + `scanStubPackage`; Sprint 1: `scanMonorepo` audit MR-C2 fix; v2.11.41+: `scanPythonSource` PYSRC + `scanPythonAst` PYAST), then `processor.js` deduplicates, applies FP reductions + reachability post-processing, scores using per-file max (v2.2.11: `riskScore = min(100, max(file_scores) + package_level_score)`, severity weights: CRITICAL=25, HIGH=10, MEDIUM=3, LOW=1), applies intent coherence analysis (intra-file source-sink pairing), enriches with rules/playbooks (<!--stat:rulesTotal-->279<!--/stat:rulesTotal--> rules), and `outputter.js` formats CLI/JSON/HTML/SARIF. Result includes `warnings: []` array (v2.6.5) for incomplete scan notifications (module graph timeout/skip, deobfuscation failures). Exports `isPackageLevelThreat` and `computeGroupScore` for testing.
 
 ## Scanner Modules
 
@@ -369,7 +369,7 @@ Pre-alert embeds are ecosystem-aware: `registryLink()` resolves npm vs PyPI, and
 
 ## Detection Rules
 
-**Rules & playbooks:** Threat types map to rules in `src/rules/index.js` (**<!--stat:rulesTotal-->277<!--/stat:rulesTotal--> rules: <!--stat:rulesCore-->272<!--/stat:rulesCore--> RULES + <!--stat:rulesParanoid-->5<!--/stat:rulesParanoid--> PARANOID** — Track D v2.11.48 added AST-093 `linux_fingerprint_exec`, AST-094 `direct_ip_exfil`, COMPOUND-016 `recon_exfil_direct_ip`; v2.11.67/70 Phantom Gyp added PKG-023 `gyp_command_exec` + COMPOUND-017 `gyp_phantom_exec`; MITRE ATT&CK mapped) and remediation text in `src/response/playbooks.js`. Both keyed by threat `type` string.
+**Rules & playbooks:** Threat types map to rules in `src/rules/index.js` (**<!--stat:rulesTotal-->279<!--/stat:rulesTotal--> rules: <!--stat:rulesCore-->274<!--/stat:rulesCore--> RULES + <!--stat:rulesParanoid-->5<!--/stat:rulesParanoid--> PARANOID** — Track D v2.11.48 added AST-093 `linux_fingerprint_exec`, AST-094 `direct_ip_exfil`, COMPOUND-016 `recon_exfil_direct_ip`; v2.11.67/70 Phantom Gyp added PKG-023 `gyp_command_exec` + COMPOUND-017 `gyp_phantom_exec`; MITRE ATT&CK mapped) and remediation text in `src/response/playbooks.js`. Both keyed by threat `type` string.
 
 ### AST Detection Rules (v2.2+)
 

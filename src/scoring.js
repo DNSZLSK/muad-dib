@@ -18,7 +18,7 @@
  */
 
 const { getRule } = require('./rules/index.js');
-const { HIGH_CONFIDENCE_MALICE_TYPES, hasStealthObfuscationCompound } = require('./monitor/classify.js');
+const { HIGH_CONFIDENCE_MALICE_TYPES, hasStealthObfuscationCompound, TIER3_PASSIVE_TYPES } = require('./monitor/classify.js');
 // v2.10.73 P1: bundle detection helpers — extended bundle path regex + veto check
 const { BUNDLE_PATH_RE, hasBundleVetoSignal } = require('./shared/bundle-detect.js');
 
@@ -1818,6 +1818,20 @@ function applyContextualFPCaps(result, pkgMeta) {
   if (typosquatBenignLifecycle(result, meta)) {
     applied.push({ feature: 'typosquat_benign_lifecycle', cap: 30 });
   }
+  // F17: passive-informational-only (rule-audit 2026-07-15). EVERY threat is a
+  // TIER3_PASSIVE_TYPES signal (dynamic_import/dynamic_require, env_access,
+  // obfuscation_detected, high_entropy_string, sensitive_string, suspicious_domain,
+  // prototype_hook) — informational by design (the classifier already tiers these
+  // tier-3, no sandbox). A package whose ONLY signals are passive carries no
+  // corroborating active/malware type. Measured on the human-labelled corpus
+  // (data/corpus/confirmed-corpus.jsonl): 164 FP / 0 MALWARE are passive-only. Cap
+  // below the 20 alert floor so informational-only packages stop surfacing as alerts
+  // (0 measured TP loss). Vetoed automatically by any non-passive threat (compound,
+  // lifecycle, exfil, IOC) since `every` then returns false.
+  if (result.threats && result.threats.length > 0 &&
+      result.threats.every(t => TIER3_PASSIVE_TYPES.has(t.type))) {
+    applied.push({ feature: 'passive_informational_only', cap: 19 });
+  }
 
   if (applied.length === 0) return applied;
 
@@ -2381,5 +2395,6 @@ module.exports = {
   isPackageLevelThreat, computeGroupScore, computeGroupScoreDecay,
   applyFPReductions, applyCompoundBoosts, calculateRiskScore,
   applyConfigOverrides, resetConfigOverrides, getSeverityWeights, getRiskThresholds,
-  applyContextualFPCaps, applySingleFireCriticalFloor, applyReputationFactor
+  applyContextualFPCaps, applySingleFireCriticalFloor, applyReputationFactor,
+  SCORING_COMPOUNDS
 };
