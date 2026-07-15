@@ -2,7 +2,7 @@
 
 const path = require('path');
 const { test, asyncTest, assert, runScanDirect } = require('../test-utils');
-const { applyFPReductions, calculateRiskScore, computeGroupScore, CONFIDENCE_FACTORS, applyContextualFPCaps } = require('../../src/scoring.js');
+const { applyFPReductions, calculateRiskScore, computeGroupScore, CONFIDENCE_FACTORS, applyContextualFPCaps, applyReputationFactor } = require('../../src/scoring.js');
 
 async function runScoringHardeningTests() {
   console.log('\n=== SCORING HARDENING TESTS (v2.5.13) ===\n');
@@ -1035,6 +1035,46 @@ async function runScoringHardeningTests() {
     ]);
     const result = calculateRiskScore(threats);
     assert(result.riskScore === 35, `non-RCE module-level signal must stay capped at 35, got ${result.riskScore}`);
+  });
+
+  // ===================================================================
+  // Track R malice floor — stealth-exec + obfuscation compound (asyncapi/specs
+  // Miasma ATO 2026-07-14). reputationFactor (0.1x on a mature/popular package)
+  // must NOT crush the combo below the alert floor; benign + process-manager
+  // shapes on the SAME mature metadata must still attenuate. Measured ΔFPR=0 on
+  // the 130K-scan production ledger; 0 GT regression (before/after replay identical).
+  // ===================================================================
+  const _matureMeta = { age_days: 3000, version_count: 300, weekly_downloads: 2100000, has_repository: true };
+
+  test('Track R floor: stealth+obfuscation combo floors at 20 despite reputation 0.1 (asyncapi Miasma)', () => {
+    const result = { summary: { riskScore: 49 }, threats: [
+      { type: 'silent_stealth_process', severity: 'CRITICAL' },
+      { type: 'detached_process', severity: 'HIGH' },
+      { type: 'js_obfuscation_pattern', severity: 'HIGH' },
+      { type: 'high_entropy_string', severity: 'MEDIUM' }
+    ] };
+    applyReputationFactor(result, _matureMeta);
+    assert(result.summary.riskScore === 20, `stealth+obf combo must floor at 20, got ${result.summary.riskScore}`);
+  });
+
+  test('Track R floor: benign heuristic-only package still attenuates on mature metadata (no FPR regression)', () => {
+    const result = { summary: { riskScore: 49 }, threats: [
+      { type: 'credential_regex_harvest', severity: 'HIGH' },
+      { type: 'prototype_pollution', severity: 'MEDIUM' },
+      { type: 'env_access', severity: 'LOW' }
+    ] };
+    applyReputationFactor(result, _matureMeta);
+    assert(result.summary.riskScore < 20, `benign heuristic package must stay attenuated below the floor, got ${result.summary.riskScore}`);
+  });
+
+  test('Track R floor: detached/silent process WITHOUT obfuscation still attenuates (process-manager FP guard)', () => {
+    const result = { summary: { riskScore: 30 }, threats: [
+      { type: 'detached_process', severity: 'HIGH' },
+      { type: 'silent_stealth_process', severity: 'CRITICAL' },
+      { type: 'dynamic_import', severity: 'LOW' }
+    ] };
+    applyReputationFactor(result, _matureMeta);
+    assert(result.summary.riskScore < 20, `stealth process without js_obfuscation_pattern must not floor (pm2/wattpm/mongodb), got ${result.summary.riskScore}`);
   });
 }
 

@@ -67,6 +67,7 @@ const {
 const {
   isSuspectClassification,
   hasHighConfidenceThreat,
+  hasStealthObfuscationCompound,
   isSandboxEnabled,
   isCanaryEnabled,
   recordError,
@@ -1491,8 +1492,15 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
         // Adjusts score for webhook decision without mutating persisted alert data.
         // High-confidence malice types BYPASS reputation — supply-chain compromise protection.
         // Reuses npmRegistryMeta fetched earlier (ML Phase 2a) — no duplicate HTTP call.
+        // Malice bypass: don't let reputation attenuation re-crush a confirmed-malice
+        // detection (the scoring.js Track R floor already lifted it). The stealth+obf
+        // compound is included here for the SAME reason as _hasConfirmedMalice — its
+        // component types aren't individually high-confidence, so hasHighConfidenceThreat
+        // alone misses the asyncapi/specs Miasma ATO and would re-attenuate 20 → 2 for the
+        // webhook/ranking decision.
+        const _maliceBypass = hasHighConfidenceThreat(result) || hasStealthObfuscationCompound(result);
         let adjustedResult = result;
-        if (ecosystem === 'npm' && !hasHighConfidenceThreat(result)) {
+        if (ecosystem === 'npm' && !_maliceBypass) {
           try {
             const reputationFactor = computeReputationFactor(npmRegistryMeta);
             if (reputationFactor !== 1.0) {
@@ -1507,8 +1515,8 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
           } catch (err) {
             console.error(`[MONITOR] Reputation error for ${name}: ${err.message}`);
           }
-        } else if (ecosystem === 'npm' && hasHighConfidenceThreat(result)) {
-          console.log(`[MONITOR] REPUTATION BYPASS: ${name} has high-confidence threat — using raw score`);
+        } else if (ecosystem === 'npm' && _maliceBypass) {
+          console.log(`[MONITOR] REPUTATION BYPASS: ${name} has confirmed-malice signal — using raw score`);
         }
 
         // Record daily alert with post-reputation score for top suspects ranking.
