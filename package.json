@@ -54,7 +54,7 @@
     "@inquirer/prompts": "8.5.2",
     "acorn": "8.17.0",
     "acorn-walk": "8.3.5",
-    "adm-zip": "0.5.18",
+    "adm-zip": "0.6.0",
     "js-yaml": "5.1.0",
     "web-tree-sitter": "^0.26.9"
   },
