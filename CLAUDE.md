@@ -108,11 +108,11 @@ Never skip documentation updates when publishing a new version.
 - Never commit directly to master
 - Do not create commits automatically — the user handles commits manually
 
-## Current Metrics (v<!--stat:version-->2.11.171<!--/stat:version-->; detection metrics last fully measured v2.11.48)
+## Current Metrics (v<!--stat:version-->2.11.172<!--/stat:version-->; detection metrics last fully measured v2.11.48)
 
 | Metric | Value |
 |--------|-------|
-| Version | **<!--stat:version-->2.11.171<!--/stat:version-->** |
+| Version | **<!--stat:version-->2.11.172<!--/stat:version-->** |
 | Tests | **4535** passed, **5 failed** locally (Windows-only env flakes — `tar --force-local` ×3 EXTRACT-POOL, temp-file `UNKNOWN` ×2 PACKAGE; **0 failed on Linux/CI**), across **<!--stat:testFiles-->152<!--/stat:testFiles-->** files (14511 skipped when Docker absent). Total non-skipped: <!--stat:tests-->4561<!--/stat:tests-->. |
 | Rules | **<!--stat:rulesTotal-->277<!--/stat:rulesTotal-->** (<!--stat:rulesCore-->272<!--/stat:rulesCore--> RULES + <!--stat:rulesParanoid-->5<!--/stat:rulesParanoid--> PARANOID - v2.11.67/70 Phantom Gyp adds PKG-023 `gyp_command_exec` + COMPOUND-017 `gyp_phantom_exec`; 2026-07 anti-evasion adds AST-095 `anti_analysis_evasion` + AST-096 `analyzer_honeytoken_reference`) |
 | Scanners | **<!--stat:scanners-->22<!--/stat:scanners--> parallel** (Promise.allSettled) + **2 pre-analysis** (module-graph/, deobfuscate) + **1 async parser bootstrap** (python-ast WASM init, no analysis emitted) + **7 conditional/post-processing** (paranoid, 3× temporal-*, reachability, phantom-gyp, native-drop-exec) + **1 metadata** (npm-registry). <!--stat:scannerFiles-->36<!--/stat:scannerFiles--> fichiers `src/scanner/*.js` + 3 dirs : `ast-detectors/` (<!--stat:astDetectors-->15<!--/stat:astDetectors-->), `module-graph/` (<!--stat:moduleGraph-->9<!--/stat:moduleGraph-->), `python-ast-detectors/` (<!--stat:pythonAstDetectors-->6<!--/stat:pythonAstDetectors--> fichiers). Détails : ARCHITECTURE.md. |
