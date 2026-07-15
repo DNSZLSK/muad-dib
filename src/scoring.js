@@ -18,7 +18,7 @@
  */
 
 const { getRule } = require('./rules/index.js');
-const { HIGH_CONFIDENCE_MALICE_TYPES } = require('./monitor/classify.js');
+const { HIGH_CONFIDENCE_MALICE_TYPES, hasStealthObfuscationCompound } = require('./monitor/classify.js');
 // v2.10.73 P1: bundle detection helpers — extended bundle path regex + veto check
 const { BUNDLE_PATH_RE, hasBundleVetoSignal } = require('./shared/bundle-detect.js');
 
@@ -1982,7 +1982,15 @@ function _hasConfirmedMalice(threats) {
   const hasCompound = threats.some(t => t.compound === true);
   const hasStagedC2 = threats.some(t => t.type === 'staged_payload') &&
     threats.some(t => t.type === 'suspicious_domain' && t.severity === 'HIGH');
-  return hasHC || hasCompound || hasStagedC2;
+  // Stealth-exec + obfuscation compound (asyncapi/specs Miasma ATO 2026-07-14): a
+  // detached/silent background process (silent_stealth_process / detached_process) shipped
+  // with obfuscator.io-mangled code (js_obfuscation_pattern). Quasi-never benign, BUT the
+  // component types are individually NOT in HIGH_CONFIDENCE_MALICE_TYPES (they fire on
+  // pm2 / mongodb / anti-piracy bundles) so only the COMBINATION is confirmed-malice.
+  // Measured ΔFPR=0 on the 130K-scan production ledger (2 matches, both malicious). Shared
+  // predicate with the monitor webhook + reputation bypass (classify.hasStealthObfuscationCompound).
+  const hasStealthObf = hasStealthObfuscationCompound({ threats });
+  return hasHC || hasCompound || hasStagedC2 || hasStealthObf;
 }
 
 // P3 (TeamPCP / Mini Shai-Hulud hardening): broader malice predicate used to

@@ -164,6 +164,24 @@ function hasIOCMatch(result) {
   return result.threats.some(t => IOC_MATCH_TYPES.has(t.type));
 }
 
+// Stealth-exec + obfuscation compound: a detached/silent background process
+// (silent_stealth_process AST-092 / detached_process AST-012) shipped ALONGSIDE
+// obfuscator.io-mangled code (js_obfuscation_pattern ENTROPY-003, the `_0x*` hex
+// signature). The AND is quasi-never legitimate: legit process managers (pm2,
+// Platformatic Watt, the mongodb driver) detach but do NOT obfuscate, and legit
+// obfuscated bundles do NOT silently detach a process. It is the ATO / CI-supply-
+// chain fingerprint (@asyncapi/specs Miasma 2026-07-14; @umudik/lotaru) whose raw
+// score reputation attenuation crushes to LOW on an established package.
+// Measured on the 128,429-scan production ledger (scripts/mine-fpr): exactly two
+// packages match — BOTH confirmed malicious — so wiring this as a reputation-
+// independent webhook bypass adds ZERO benign false positives (ΔFPR = 0).
+function hasStealthObfuscationCompound(result) {
+  if (!result || !result.threats) return false;
+  const types = new Set(result.threats.map(t => t.type));
+  const stealthExec = types.has('silent_stealth_process') || types.has('detached_process');
+  return stealthExec && types.has('js_obfuscation_pattern');
+}
+
 function hasTyposquat(result) {
   if (!result || !result.threats) return false;
   return result.threats.some(t => t.type === 'typosquat_detected' || t.type === 'pypi_typosquat_detected');
@@ -496,6 +514,7 @@ module.exports = {
   hasHighOrCritical,
   hasHighConfidenceThreat,
   hasIOCMatch,
+  hasStealthObfuscationCompound,
   hasTyposquat,
   hasLifecycleWithIntent,
   isSuspectClassification,

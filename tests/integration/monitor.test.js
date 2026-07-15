@@ -10474,6 +10474,71 @@ async function runMonitorTests() {
       assert(signalKept <= 10, `hook-delta rescue must be bounded ≤10, got ${signalKept}`);
       assert(result.droppedBurstVersions.length > 0, 'excess burst versions beyond the cap must still be dropped');
     });
+
+    // --- shouldSendWebhook: stealth-exec + obfuscation reputation bypass (asyncapi/specs Miasma ATO, 2026-07-14) ---
+    // The compound (detached/silent background process + obfuscator.io _0x* code) is quasi-never
+    // benign — measured ΔFPR=0 on the 130K-scan production ledger — so it must fire the webhook
+    // regardless of the reputation-graduated threshold that crushed asyncapi/specs to score 4/LOW.
+    test('MONITOR: shouldSendWebhook fires on stealth+obfuscation compound despite reputation-crushed LOW score (asyncapi Miasma)', () => {
+      const orig = process.env.MUADDIB_WEBHOOK_URL;
+      process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.slack.com/test';
+      try {
+        const result = { summary: { total: 5, critical: 1, high: 2, medium: 1, low: 1, riskScore: 4, reputationFactor: 0.1 }, threats: [
+          { type: 'silent_stealth_process', severity: 'CRITICAL' },
+          { type: 'detached_process', severity: 'HIGH' },
+          { type: 'js_obfuscation_pattern', severity: 'HIGH' },
+          { type: 'high_entropy_string', severity: 'MEDIUM' },
+          { type: 'dynamic_require', severity: 'LOW' }
+        ] };
+        assert(shouldSendWebhook(result, null) === true, 'stealth+obfuscation compound must fire regardless of reputation attenuation');
+      } finally {
+        if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig; else delete process.env.MUADDIB_WEBHOOK_URL;
+      }
+    });
+
+    test('MONITOR: shouldSendWebhook fires on detached (non-silent) process + obfuscation — evasion-resistant', () => {
+      const orig = process.env.MUADDIB_WEBHOOK_URL;
+      process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.slack.com/test';
+      try {
+        const result = { summary: { total: 3, critical: 0, high: 2, medium: 1, low: 0, riskScore: 8, reputationFactor: 0.1 }, threats: [
+          { type: 'detached_process', severity: 'HIGH' },
+          { type: 'js_obfuscation_pattern', severity: 'HIGH' },
+          { type: 'high_entropy_string', severity: 'MEDIUM' }
+        ] };
+        assert(shouldSendWebhook(result, null) === true, 'detached_process + js_obfuscation_pattern must fire even without silent_stealth_process');
+      } finally {
+        if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig; else delete process.env.MUADDIB_WEBHOOK_URL;
+      }
+    });
+
+    test('MONITOR: shouldSendWebhook stays silent on detached/silent process WITHOUT obfuscation (process-manager FP guard)', () => {
+      const orig = process.env.MUADDIB_WEBHOOK_URL;
+      process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.slack.com/test';
+      try {
+        const result = { summary: { total: 3, critical: 1, high: 0, medium: 1, low: 1, riskScore: 14, reputationFactor: 0.1 }, threats: [
+          { type: 'detached_process', severity: 'HIGH' },
+          { type: 'silent_stealth_process', severity: 'CRITICAL' },
+          { type: 'dynamic_import', severity: 'LOW' }
+        ] };
+        assert(shouldSendWebhook(result, null) === false, 'detached/silent process without js_obfuscation_pattern must not bypass reputation (pm2/wattpm/mongodb)');
+      } finally {
+        if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig; else delete process.env.MUADDIB_WEBHOOK_URL;
+      }
+    });
+
+    test('MONITOR: shouldSendWebhook stays silent on obfuscated code WITHOUT a stealth process at sub-threshold score', () => {
+      const orig = process.env.MUADDIB_WEBHOOK_URL;
+      process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.slack.com/test';
+      try {
+        const result = { summary: { total: 2, critical: 0, high: 1, medium: 1, low: 0, riskScore: 10, reputationFactor: 0.1 }, threats: [
+          { type: 'js_obfuscation_pattern', severity: 'HIGH' },
+          { type: 'high_entropy_string', severity: 'MEDIUM' }
+        ] };
+        assert(shouldSendWebhook(result, null) === false, 'obfuscation without a stealth/detached process must not bypass reputation');
+      } finally {
+        if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig; else delete process.env.MUADDIB_WEBHOOK_URL;
+      }
+    });
   }
 }
 

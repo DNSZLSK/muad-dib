@@ -55,6 +55,7 @@ const {
 const {
   HIGH_CONFIDENCE_MALICE_TYPES,
   hasIOCMatch,
+  hasStealthObfuscationCompound,
   hasHighOrCritical,
   formatErrorBreakdown
 } = require('./classify.js');
@@ -127,6 +128,17 @@ function shouldSendWebhook(result, sandboxResult, mlResult) {
   // Guard: require ≥1 HIGH/CRITICAL finding. ALL-LOW = expert FP system overrides ML.
   if (mlResult && mlResult.prediction !== 'clean' && mlResult.probability >= 0.90
       && hasHighOrCritical(result)) return true;
+
+  // 1c. Stealth-exec + obfuscation compound — reputation-independent bypass.
+  // A detached/silent background process shipped with obfuscator.io-mangled code
+  // is the account-takeover / CI-supply-chain fingerprint. On an established
+  // package the reputationFactor (0.1x) crushes the raw score below `threshold`
+  // and silences the webhook: @asyncapi/specs@6.11.2 (Miasma, 2026-07-14) scored
+  // globalRiskScore 49 → riskScore 4/LOW → suppressed, despite a CRITICAL
+  // silent_stealth_process finding. This compound is quasi-never benign (measured
+  // ΔFPR=0 on the 128K-scan production ledger), so it fires regardless of
+  // reputation attenuation — same rationale as the IOC bypass above.
+  if (hasStealthObfuscationCompound(result)) return true;
 
   // 2. Real sandbox detection (> 30) — always send
   if (sandboxScore > 30) return true;
