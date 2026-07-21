@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { asyncTest, assert, runScanDirect } = require('../test-utils');
+const { asyncTest, assert, runScanDirect, addSkipped } = require('../test-utils');
 const { test } = require('../test-utils');
 
 function createTempDir() {
@@ -143,7 +143,8 @@ async function runAIConfigTests() {
   await asyncTest('AI-CONFIG: detects adversarial ai-config-injection sample', async () => {
     const sampleDir = path.join(__dirname, '..', '..', 'datasets', 'adversarial', 'ai-config-injection');
     if (!fs.existsSync(sampleDir)) {
-      console.log('[SKIP] ai-config-injection sample not found');
+      console.log('[SKIP] ai-config-injection sample not found (datasets/ is gitignored)');
+      addSkipped(1);
       return;
     }
     const result = await runScanDirect(sampleDir);
@@ -156,7 +157,8 @@ async function runAIConfigTests() {
   await asyncTest('AI-CONFIG: AST detects ai-agent-weaponization sample', async () => {
     const sampleDir = path.join(__dirname, '..', '..', 'datasets', 'adversarial', 'ai-agent-weaponization');
     if (!fs.existsSync(sampleDir)) {
-      console.log('[SKIP] ai-agent-weaponization sample not found');
+      console.log('[SKIP] ai-agent-weaponization sample not found (datasets/ is gitignored)');
+      addSkipped(1);
       return;
     }
     const result = await runScanDirect(sampleDir);

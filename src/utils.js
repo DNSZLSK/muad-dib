@@ -25,7 +25,14 @@ const { getMaxFileSize, clearASTCache } = require('./shared/constants.js');
  * Directories excluded from scanning.
  * Skips dependency/VCS/cache dirs and bundled output (dist/build/out).
  * Bundled output is minified, huge, and produces FPs without security value.
- * Obfuscation scanner uses its own OBF_EXCLUDED_DIRS to intentionally scan these.
+ *
+ * Per-scanner deviations are intentional (do NOT unify blindly — each is FPR-gated):
+ *  - obfuscation.js OBF_EXCLUDED_DIRS: also excludes dist/build/out but does NOT exclude
+ *    node_modules (it deliberately scans dependencies for obfuscation).
+ *  - binary-source.js / shell.js / anti-scanner-injection.js: deliberately DO scan dist/
+ *    (bundled payloads — jscrambler dist/intro.js gap, revshells in bundles, Hades directive
+ *    atop a bundle).
+ *  - paranoid.js: opt-in maximal coverage, scans dist/build/out and .json/.sh.
  */
 const EXCLUDED_DIRS = ['node_modules', '.git', '.muaddib-cache', 'dist', 'build', 'out', 'output'];
 

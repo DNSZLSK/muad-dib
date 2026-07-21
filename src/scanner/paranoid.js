@@ -213,6 +213,10 @@ function scanParanoid(targetPath) {
     }
   }
 
+  // Paranoid mode is opt-in maximal coverage: this walker deliberately does NOT use
+  // utils.EXCLUDED_DIRS — it scans dist/build/out (bundled payloads) and .json/.sh in addition
+  // to JS. Do not "align" it on findFiles/EXCLUDED_DIRS: that would drop coverage this mode
+  // exists to provide. Symlink-safe (lstat skip) + depth guard 50 (IDX-06).
   function walkDir(dir, depth) {
     if (depth > 50) return; // Max depth guard (IDX-06)
     const excluded = ['node_modules', '.git', '.muaddib-cache', ...getExtraExcludes()];

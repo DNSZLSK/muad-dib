@@ -46,7 +46,10 @@ const LLM_CONCURRENCY_MAX = 2; // max simultaneous API calls
 const LLM_DAILY_LIMIT_DEFAULT = 100;
 const MAX_SINGLE_FILE_BYTES = 512 * 1024; // skip individual files > 512KB
 
-// Extensions to collect from packages
+// Extensions to collect from packages for LLM context (NOT a detection scanner — this feeds
+// the monitor's opt-in LLM investigation). `.json` is intentionally included (manifest/config
+// context for the model); `.jsx/.tsx` are out of scope here by design. Deliberately distinct
+// from the scanner source-extension lists — do not sync.
 const SOURCE_EXTENSIONS = ['.js', '.mjs', '.cjs', '.ts', '.json', '.py'];
 
 // ── Semaphore (pattern: src/shared/http-limiter.js) ──
