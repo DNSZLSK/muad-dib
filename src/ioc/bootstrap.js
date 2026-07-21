@@ -51,6 +51,13 @@ const DOWNLOAD_TIMEOUT = 60_000;
 // Max redirects to follow
 const MAX_REDIRECTS = 5;
 
+// Decompression bomb guard: cap the DECOMPRESSED byte count streamed to disk. A compromised
+// release asset (exactly this project's threat model — maintainer account takeover) could
+// otherwise fill the disk: this was the only unbounded decompressor in the repo (download.js
+// has the M4 gzip hint, scraper.js has MAX_ENTRY/TOTAL_UNCOMPRESSED). Env-tunable like the
+// scraper caps; default leaves ample headroom over the ~112-223MB iocs.json.
+const MAX_DECOMPRESSED_SIZE = parseInt(process.env.MUADDIB_BOOTSTRAP_MAX_DECOMPRESSED || '', 10) || 1024 * 1024 * 1024; // 1 GB
+
 // Allowed redirect domains (SSRF protection)
 const ALLOWED_REDIRECT_DOMAINS = [
   'github.com',
@@ -114,6 +121,19 @@ function downloadAndDecompress(url, destPath) {
         const tmpPath = destPath + '.tmp';
         const gunzip = zlib.createGunzip();
         const fileStream = fs.createWriteStream(tmpPath);
+
+        // Decompression bomb guard: count decompressed bytes, abort past the cap.
+        let decompressedBytes = 0;
+        gunzip.on('data', (chunk) => {
+          decompressedBytes += chunk.length;
+          if (decompressedBytes > MAX_DECOMPRESSED_SIZE) {
+            res.destroy();
+            gunzip.destroy();
+            fileStream.destroy();
+            try { fs.unlinkSync(tmpPath); } catch (e) { debugLog('cleanup failed:', e.message); }
+            reject(new Error('Decompressed size exceeds cap (' + MAX_DECOMPRESSED_SIZE + ' bytes) — aborting'));
+          }
+        });
 
         gunzip.on('error', (err) => {
           fileStream.destroy();

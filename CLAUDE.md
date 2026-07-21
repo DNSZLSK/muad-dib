@@ -108,15 +108,26 @@ Never skip documentation updates when publishing a new version.
 - Never commit directly to master
 - Do not create commits automatically — the user handles commits manually
 
-## Current Metrics (v<!--stat:version-->2.11.174<!--/stat:version-->; detection metrics last fully measured v2.11.48)
+### Pre-push checklist (mirrors the CI `test` job gate)
+
+Run `npm run ci:local` before every push. It replays the exact PR gate from `.github/workflows/scan.yml` in order:
+1. `node scripts/check-deps-typosquats.js` (loadash guard)
+2. `node scripts/check-no-tracked-node-modules.js`
+3. `npm audit --audit-level=high` (needs network; advisories can appear between pushes without any code change)
+4. `npm run docs:stats:check` (stats.json + doc markers vs source)
+5. `npm test`
+
+**Version bump rule:** a version change must land in the SAME commit as ALL files rewritten by `npm run docs:stats` — `stats.json` plus every marker-bearing doc (`CLAUDE.md`, `README.md`, `SECURITY.md`, `ARCHITECTURE.md`, `docs/INDEX.md`, `docs/README.fr.md`, `docs/threat-model.md`). Committing a subset makes `docs:stats:check` fail in CI even when it passes locally, because the local working tree is coherent but the pushed tree is not. After any bump: `npm run docs:stats`, then `git add` everything it touched (`git diff --name-only` to list), then commit.
+
+## Current Metrics (v<!--stat:version-->2.11.175<!--/stat:version-->; detection metrics last fully measured v2.11.48)
 
 | Metric | Value |
 |--------|-------|
-| Version | **<!--stat:version-->2.11.174<!--/stat:version-->** |
+| Version | **<!--stat:version-->2.11.175<!--/stat:version-->** |
 | Tests | **4535** passed, **5 failed** locally (Windows-only env flakes — `tar --force-local` ×3 EXTRACT-POOL, temp-file `UNKNOWN` ×2 PACKAGE; **0 failed on Linux/CI**), across **<!--stat:testFiles-->152<!--/stat:testFiles-->** files (14511 skipped when Docker absent). Total non-skipped: <!--stat:tests-->4561<!--/stat:tests-->. |
 | Rules | **<!--stat:rulesTotal-->277<!--/stat:rulesTotal-->** (<!--stat:rulesCore-->272<!--/stat:rulesCore--> RULES + <!--stat:rulesParanoid-->5<!--/stat:rulesParanoid--> PARANOID - v2.11.67/70 Phantom Gyp adds PKG-023 `gyp_command_exec` + COMPOUND-017 `gyp_phantom_exec`; 2026-07 anti-evasion adds AST-095 `anti_analysis_evasion` + AST-096 `analyzer_honeytoken_reference`) |
 | Scanners | **<!--stat:scanners-->22<!--/stat:scanners--> parallel** (Promise.allSettled) + **2 pre-analysis** (module-graph/, deobfuscate) + **1 async parser bootstrap** (python-ast WASM init, no analysis emitted) + **7 conditional/post-processing** (paranoid, 3× temporal-*, reachability, phantom-gyp, native-drop-exec) + **1 metadata** (npm-registry). <!--stat:scannerFiles-->36<!--/stat:scannerFiles--> fichiers `src/scanner/*.js` + 3 dirs : `ast-detectors/` (<!--stat:astDetectors-->15<!--/stat:astDetectors-->), `module-graph/` (<!--stat:moduleGraph-->9<!--/stat:moduleGraph-->), `python-ast-detectors/` (<!--stat:pythonAstDetectors-->6<!--/stat:pythonAstDetectors--> fichiers). Détails : ARCHITECTURE.md. |
-| Ground Truth size | **96 samples** (was 67 in v2.10.95). 22 added 2026-05-25: 16 synthetic for new PYSRC/PYAST/AST-092/AICONF-004/PKG-022 rules (GT-068..083), 6 real-world tarballs from VPS archive (GT-084..089), 7 reconstructions from `data/all-review-results.json` review reasoning (GT-090..096). 13 PyPI samples (was 0). 3 explicit `tpr_tier: tpr3` (HIGH/MEDIUM rules that don't cross 20 in isolation, documented in `attacks.json` schema). |
+| Ground Truth size | **96 samples** (was 67 in v2.10.95). 29 added 2026-05-25: 16 synthetic for new PYSRC/PYAST/AST-092/AICONF-004/PKG-022 rules (GT-068..083), 6 real-world tarballs from VPS archive (GT-084..089), 7 reconstructions from `data/all-review-results.json` review reasoning (GT-090..096). 13 PyPI samples (was 0). 3 explicit `tpr_tier: tpr3` (HIGH/MEDIUM rules that don't cross 20 in isolation, documented in `attacks.json` schema). |
 | TPR@3 (detection rate) | **95.74%** (90/94 in-scope) — v2.11.48 full re-measurement on enriched GT. 4 misses: same browser-only patterns as historical (lottie-player, polyfill-io, trojanized-jquery) + 1 other. |
 | TPR@20 (alert rate) | **88.30%** (83/94 in-scope) — v2.11.48. **+3.1pp vs v2.11.47** (85.19%) — Track D compound (`recon_exfil_direct_ip`) brought GT-095 from 3 → 50, plus 2 other Track A+B samples crossed 20. |
 | FPR rules (curated, v2.11.48 measure) | **1.10%** (6/545 scanned of 548 benign packages) — **unchanged** after Track D. Major drop from 15.6% (v2.10.95) is attributable to FP caps F1-F14 (v2.10.97 → v2.11.31). The 6 remaining FPs are real (meteor, prisma, @prisma/client, drizzle-orm, scrypt, liquid) — not whitelist artifacts. **This is the operational number** — what an operator gets from `muaddib scan` (rules + FP caps, no ML). |

@@ -24,7 +24,10 @@ test('UPDATE: updateIOCs is a function', () => {
   assert(typeof updateIOCs === 'function', 'updateIOCs should be a function');
 });
 
-// SKIPPED: updateIOCs does real network downloads (36s) — run via npm run test:integration
+// SKIPPED: updateIOCs does real network downloads (~36s). No harness currently covers it
+// (run-tests-integration.js only runs ground-truth + evaluate). To exercise it, invoke the
+// updater manually or add a mocked-https unit test (see the downloadAndDecompress bootstrap
+// tests below for the EventEmitter/Readable mock pattern).
 console.log('[SKIP] UPDATE: updateIOCs does not reduce IOC count (network)');
 addSkipped(1);
 
@@ -661,6 +664,10 @@ asyncTest('BOOTSTRAP: ensureIOCs skips download when cache file exists and is la
 });
 
 await asyncTest('BOOTSTRAP-COV: downloadAndDecompress rejects on connection error', async () => {
+  // Local require: the top-level destructure lives after this test in file order (TDZ) —
+  // a bare `downloadAndDecompress` here throws ReferenceError, which `instanceof Error`
+  // silently accepted, making this test vacuous.
+  const { downloadAndDecompress } = require('../../src/ioc/bootstrap.js');
   const https = require('https');
   const origHttpsGet = https.get;
   https.get = function(_url, _opts, _cb) {
@@ -674,9 +681,76 @@ await asyncTest('BOOTSTRAP-COV: downloadAndDecompress rejects on connection erro
     await downloadAndDecompress('https://fake-host/nonexistent', path.join(os.tmpdir(), 'test-iocs-' + Date.now() + '.json'));
     assert(false, 'Should have thrown');
   } catch (err) {
-    assert(err instanceof Error, 'Should throw an Error');
+    assertIncludes(err.message, 'ECONNREFUSED', 'Should propagate the connection error, got: ' + err.message);
   } finally {
     https.get = origHttpsGet;
+  }
+});
+
+await asyncTest('BOOTSTRAP-COV: downloadAndDecompress rejects decompression bombs past the cap', async () => {
+  const https = require('https');
+  const zlibMod = require('zlib');
+  const { Readable } = require('stream');
+  const origHttpsGet = https.get;
+  const origEnv = process.env.MUADDIB_BOOTSTRAP_MAX_DECOMPRESSED;
+  const bootstrapPath = require.resolve('../../src/ioc/bootstrap.js');
+  // Reload bootstrap with a tiny cap (the cap is read at module load)
+  process.env.MUADDIB_BOOTSTRAP_MAX_DECOMPRESSED = '1000';
+  delete require.cache[bootstrapPath];
+  const { downloadAndDecompress: dadSmallCap } = require(bootstrapPath);
+  // 100KB decompressed >> 1000-byte cap, but only a few gzipped bytes on the wire
+  const gzBomb = zlibMod.gzipSync(Buffer.alloc(100000, 0x61));
+  https.get = function(_url, _opts, cb) {
+    const req = new (require('events').EventEmitter)();
+    req.destroy = () => {};
+    const res = Readable.from([gzBomb]);
+    res.statusCode = 200;
+    res.headers = {};
+    setImmediate(() => cb(res));
+    return req;
+  };
+  const dest = path.join(os.tmpdir(), 'test-bomb-' + Date.now() + '.json');
+  try {
+    await dadSmallCap('https://fake-host/iocs.json.gz', dest);
+    assert(false, 'Should have rejected past the decompressed-size cap');
+  } catch (err) {
+    assertIncludes(err.message, 'exceeds cap', 'Should reject with the cap error, got: ' + err.message);
+    assert(!fs.existsSync(dest), 'No output file must be left behind');
+  } finally {
+    https.get = origHttpsGet;
+    if (origEnv === undefined) delete process.env.MUADDIB_BOOTSTRAP_MAX_DECOMPRESSED;
+    else process.env.MUADDIB_BOOTSTRAP_MAX_DECOMPRESSED = origEnv;
+    delete require.cache[bootstrapPath];
+    require(bootstrapPath); // restore module with default cap for subsequent tests
+  }
+});
+
+await asyncTest('BOOTSTRAP-COV: downloadAndDecompress accepts payloads under the cap', async () => {
+  // Local require (not the top-level destructure — declared later in file order, TDZ).
+  const { downloadAndDecompress } = require('../../src/ioc/bootstrap.js');
+  const https = require('https');
+  const zlibMod = require('zlib');
+  const { Readable } = require('stream');
+  const origHttpsGet = https.get;
+  const payload = JSON.stringify({ packages: [{ name: 'ok', version: '*' }] });
+  const gzOk = zlibMod.gzipSync(Buffer.from(payload));
+  https.get = function(_url, _opts, cb) {
+    const req = new (require('events').EventEmitter)();
+    req.destroy = () => {};
+    const res = Readable.from([gzOk]);
+    res.statusCode = 200;
+    res.headers = {};
+    setImmediate(() => cb(res));
+    return req;
+  };
+  const dest = path.join(os.tmpdir(), 'test-ok-' + Date.now() + '.json');
+  try {
+    await downloadAndDecompress('https://fake-host/iocs.json.gz', dest);
+    assert(fs.existsSync(dest), 'Output file must exist');
+    assert(fs.readFileSync(dest, 'utf8') === payload, 'Decompressed content must be intact');
+  } finally {
+    https.get = origHttpsGet;
+    try { fs.unlinkSync(dest); } catch {}
   }
 });
 

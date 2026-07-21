@@ -214,7 +214,7 @@ muaddib replay                     # Ground truth validation (90/94 TPR@3, v2.11
 
 ### <!--stat:rulesTotal-->277<!--/stat:rulesTotal--> detection rules
 
-All rules (<!--stat:rulesCore-->272<!--/stat:rulesCore--> RULES + <!--stat:rulesParanoid-->5<!--/stat:rulesParanoid--> PARANOID) are mapped to MITRE ATT&CK techniques. See [SECURITY.md](SECURITY.md#detection-rules-v211139) for the complete rules reference.
+All rules (<!--stat:rulesCore-->272<!--/stat:rulesCore--> RULES + <!--stat:rulesParanoid-->5<!--/stat:rulesParanoid--> PARANOID) are mapped to MITRE ATT&CK techniques. See [SECURITY.md](SECURITY.md#detection-rules) for the complete rules reference.
 
 ### Detected campaigns
 

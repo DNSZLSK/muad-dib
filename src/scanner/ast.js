@@ -33,6 +33,7 @@ const {
   handlePostWalk
 } = require('./ast-detectors');
 const { detectAnalyzerHoneytoken, detectEnvMarkerEnumeration, countExitGuards, hasHostRecon } = require('./ast-detectors/anti-evasion.js');
+const { SAFE_FETCH_DOMAINS } = require('./ast-detectors/constants.js');
 
 // Check if credential keywords appear INSIDE regex literals or new RegExp() patterns.
 // Only true when the keyword is part of the regex pattern itself, not just a string elsewhere in the file.
@@ -349,12 +350,6 @@ function analyzeFile(content, filePath, basePath) {
   // Compute fetchOnlySafeDomains: check if ALL URLs in file point to known registries
   if (ctx.hasRemoteFetch) {
     const urlMatches = content.match(/https?:\/\/[^\s'"`)]+/g) || [];
-    const SAFE_FETCH_DOMAINS = [
-      'registry.npmjs.org', 'npmjs.com',
-      'github.com', 'objects.githubusercontent.com', 'raw.githubusercontent.com',
-      'nodejs.org', 'yarnpkg.com',
-      'pypi.org', 'files.pythonhosted.org'
-    ];
     if (urlMatches.length > 0 && urlMatches.every(u => {
       try {
         const hostname = new URL(u).hostname;

@@ -97,6 +97,59 @@ async function runPythonTests() {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
+  test('PYTHON: parseRequirementsTxt survives -r pointing at a directory (EISDIR)', () => {
+    // Attacker-controlled requirements.txt with `-r <dir>`: existsSync is true but the read
+    // throws EISDIR — this must not abort the scan, and valid lines must still be parsed.
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pytest-'));
+    const reqFile = path.join(tmpDir, 'requirements.txt');
+    fs.mkdirSync(path.join(tmpDir, 'sub'));
+    fs.writeFileSync(reqFile, 'flask==2.0\n-r sub\nrequests==2.31\n');
+    let deps;
+    try {
+      deps = parseRequirementsTxt(reqFile);
+    } catch (e) {
+      assert(false, 'Must not throw on -r <directory>: ' + e.message);
+    }
+    const names = deps.map(function(d) { return d.name; });
+    assert(names.includes('flask') && names.includes('requests'),
+      'Valid deps around the bad include must survive, got ' + JSON.stringify(names));
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('PYTHON: parseRequirementsTxt blocks sibling dirs sharing a name prefix', () => {
+    // Boundary check: /scan/pkg-evil must NOT be treated as inside /scan/pkg
+    // (raw startsWith prefix comparison allowed it).
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pytest-'));
+    const pkgDir = path.join(tmpDir, 'pkg');
+    const evilDir = path.join(tmpDir, 'pkg-evil');
+    fs.mkdirSync(pkgDir);
+    fs.mkdirSync(evilDir);
+    fs.writeFileSync(path.join(evilDir, 'creds.txt'), 'stolen-marker==1.0\n');
+    fs.writeFileSync(path.join(pkgDir, 'requirements.txt'), 'flask==2.0\n-r ../pkg-evil/creds.txt\n');
+    const deps = parseRequirementsTxt(path.join(pkgDir, 'requirements.txt'));
+    const names = deps.map(function(d) { return d.name; });
+    assert(!names.includes('stolen-marker'),
+      'Sibling dir with shared prefix must be outside the boundary, got ' + JSON.stringify(names));
+    assert(names.includes('flask'), 'Legitimate dep must still parse');
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('PYTHON: parseRequirementsTxt still allows legitimate nested includes', () => {
+    // Positive twin of the boundary test: sub/extra.txt including back up to a file
+    // that is still inside the project root must keep working with path.relative.
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pytest-'));
+    const subDir = path.join(tmpDir, 'sub');
+    fs.mkdirSync(subDir);
+    fs.writeFileSync(path.join(tmpDir, 'common.txt'), 'pytest==7.0\n');
+    fs.writeFileSync(path.join(subDir, 'extra.txt'), '-r ../common.txt\nblack==23.0\n');
+    fs.writeFileSync(path.join(tmpDir, 'requirements.txt'), 'flask==2.0\n-r sub/extra.txt\n');
+    const deps = parseRequirementsTxt(path.join(tmpDir, 'requirements.txt'));
+    const names = deps.map(function(d) { return d.name; });
+    assert(names.includes('flask') && names.includes('black') && names.includes('pytest'),
+      'Nested include chain within root must resolve, got ' + JSON.stringify(names));
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
   test('PYTHON: parseRequirementsTxt skips option lines', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pytest-'));
     const reqFile = path.join(tmpDir, 'requirements.txt');

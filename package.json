@@ -1,6 +1,6 @@
 {
   "name": "muaddib-scanner",
-  "version": "2.11.174",
+  "version": "2.11.175",
   "description": "Supply-chain threat detection & response for npm & PyPI/Python",
   "main": "src/index.js",
   "bin": {
@@ -14,6 +14,7 @@
     "scan": "node bin/muaddib.js scan .",
     "update": "node bin/muaddib.js update",
     "lint": "eslint src bin --ext .js",
+    "ci:local": "node scripts/check-deps-typosquats.js && node scripts/check-no-tracked-node-modules.js && npm audit --audit-level=high && npm run docs:stats:check && npm test",
     "docs:stats": "node scripts/collect-stats.js && node scripts/sync-stats.js",
     "docs:stats:tests": "node scripts/collect-stats.js --with-tests && node scripts/sync-stats.js",
     "docs:stats:check": "node scripts/collect-stats.js --check && node scripts/sync-stats.js --check",
@@ -54,8 +55,8 @@
     "@inquirer/prompts": "8.5.2",
     "acorn": "8.17.0",
     "acorn-walk": "8.3.5",
-    "adm-zip": "0.5.18",
-    "js-yaml": "5.1.0",
+    "adm-zip": "0.6.0",
+    "js-yaml": "5.2.1",
     "web-tree-sitter": "^0.26.9"
   },
   "devDependencies": {

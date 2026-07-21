@@ -78,31 +78,9 @@ function isWhitelistedString(str, filePath) {
   return false;
 }
 
-/**
- * Calculate Shannon entropy of a string.
- * @param {string} str - Input string
- * @returns {number} Entropy in bits (0-8)
- */
-function calculateShannonEntropy(str) {
-  if (!str || str.length === 0) return 0;
-
-  const freq = {};
-  for (let i = 0; i < str.length; i++) {
-    const ch = str[i];
-    freq[ch] = (freq[ch] || 0) + 1;
-  }
-
-  const len = str.length;
-  let entropy = 0;
-  for (const ch in freq) {
-    const p = freq[ch] / len;
-    if (p > 0) {
-      entropy -= p * Math.log2(p);
-    }
-  }
-
-  return entropy;
-}
+// Shannon entropy: single implementation in src/shared/entropy.js (re-exported below —
+// tests and callers import it from this module).
+const { calculateShannonEntropy } = require('../shared/entropy.js');
 
 /**
  * Extract string literals from JS source code via regex.
@@ -219,6 +197,12 @@ function detectObfuscationPatterns(content, relativePath) {
   return threats;
 }
 
+// Bounded resources: cap high_entropy_string emissions per file. A dense ≤10MB file could
+// otherwise emit thousands of threat objects (distinct messages survive dedup). Must stay
+// well above the FP_COUNT_THRESHOLDS maxCount=5 for high_entropy_string (scoring.js) so the
+// anti-flood downgrade still triggers; scoring decay saturates long before 50.
+const MAX_ENTROPY_THREATS_PER_FILE = 50;
+
 /**
  * Scan JavaScript files for high-entropy strings and JS obfuscation patterns.
  * @param {string} targetPath - Directory to scan
@@ -244,7 +228,9 @@ function scanEntropy(targetPath, options = {}) {
 
     // String-level entropy check (MUADDIB-ENTROPY-001)
     const strings = extractStringLiterals(content);
+    let entropyThreatCount = 0;
     for (const str of strings) {
+      if (entropyThreatCount >= MAX_ENTROPY_THREATS_PER_FILE) break;
       if (str.length < MIN_STRING_LENGTH) continue;
 
       // B12: Windowed analysis for strings > MAX_STRING_LENGTH
@@ -261,6 +247,7 @@ function scanEntropy(targetPath, options = {}) {
               message: `High entropy window in long string (${str.length} chars, offset ${i}) — possible padded payload`,
               file: relativePath
             });
+            entropyThreatCount++;
             break;
           }
         }
@@ -280,6 +267,7 @@ function scanEntropy(targetPath, options = {}) {
           message: `High entropy string (${strEntropy.toFixed(2)} bits, ${str.length} chars) — possible base64/hex/encrypted payload`,
           file: relativePath
         });
+        entropyThreatCount++;
       }
     }
 

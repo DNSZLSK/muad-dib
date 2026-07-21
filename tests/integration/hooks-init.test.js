@@ -203,6 +203,52 @@ async function runHooksInitTests() {
     }
   });
 
+  await asyncTest('HOOKS: initHooks (husky) backs up an existing pre-commit hook', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hooks-husky-backup-'));
+    const huskyDir = path.join(tmpDir, '.husky');
+    fs.mkdirSync(huskyDir);
+    const hookPath = path.join(huskyDir, 'pre-commit');
+    // Pre-existing user hook (e.g. lint-staged) that must not be silently clobbered.
+    fs.writeFileSync(hookPath, '#!/bin/sh\nnpx lint-staged\n');
+    const origLog = console.log;
+    console.log = () => {};
+    try {
+      await initHooks(tmpDir, { type: 'husky' });
+      const backups = fs.readdirSync(huskyDir).filter(f => f.startsWith('pre-commit.backup.'));
+      assert(backups.length === 1, 'Existing husky hook should be backed up, got ' + backups.length);
+      const backupContent = fs.readFileSync(path.join(huskyDir, backups[0]), 'utf8');
+      assert(backupContent.includes('lint-staged'), 'Backup must preserve the original hook content');
+      const newContent = fs.readFileSync(hookPath, 'utf8');
+      assert(newContent.includes('MUADDIB'), 'New hook should be the MUADDIB hook');
+    } finally {
+      console.log = origLog;
+      try {
+        for (const f of fs.readdirSync(huskyDir)) fs.unlinkSync(path.join(huskyDir, f));
+        fs.rmdirSync(huskyDir); fs.rmdirSync(tmpDir);
+      } catch {}
+    }
+  });
+
+  await asyncTest('HOOKS: initHooks (husky) writes directly when no hook exists (no spurious backup)', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hooks-husky-nobackup-'));
+    const huskyDir = path.join(tmpDir, '.husky');
+    fs.mkdirSync(huskyDir);
+    const origLog = console.log;
+    console.log = () => {};
+    try {
+      await initHooks(tmpDir, { type: 'husky' });
+      const backups = fs.readdirSync(huskyDir).filter(f => f.startsWith('pre-commit.backup.'));
+      assert(backups.length === 0, 'No backup should be created on a fresh hook, got ' + backups.length);
+      assert(fs.existsSync(path.join(huskyDir, 'pre-commit')), 'Hook should still be created');
+    } finally {
+      console.log = origLog;
+      try {
+        for (const f of fs.readdirSync(huskyDir)) fs.unlinkSync(path.join(huskyDir, f));
+        fs.rmdirSync(huskyDir); fs.rmdirSync(tmpDir);
+      } catch {}
+    }
+  });
+
   // --- removeHooks ---
 
   await asyncTest('HOOKS: removeHooks removes git pre-commit hook', async () => {
