@@ -904,6 +904,36 @@ async function runHighFix16Tests() {
     assert(result.remaining === 0, 'Remaining should be 0');
     rateLimitMap.clear();
   });
+
+  test('H16: checkAuth handles a different-length token without throwing (constant-time compare)', () => {
+    const { checkAuth } = require('../../src/serve.js');
+    const origToken = process.env.MUADDIB_FEED_TOKEN;
+    process.env.MUADDIB_FEED_TOKEN = 'correct-token';
+    try {
+      // A wrong token of a different length must still return {ok:false}, never throw
+      // (timingSafeEqual would throw on mismatched buffer lengths — the SHA-256 digests
+      // normalize length, so this must be safe).
+      const result = checkAuth({ headers: { authorization: 'Bearer x' } });
+      assert(result.ok === false, 'Different-length wrong token should be rejected, not throw');
+    } finally {
+      if (origToken !== undefined) process.env.MUADDIB_FEED_TOKEN = origToken;
+      else delete process.env.MUADDIB_FEED_TOKEN;
+    }
+  });
+
+  test('H16: checkRateLimit sweeps expired keys when the map grows oversized', () => {
+    const { checkRateLimit, rateLimitMap } = require('../../src/serve.js');
+    rateLimitMap.clear();
+    // Seed >10k stale keys with an expired timestamp far in the past.
+    const stale = Date.now() - 10 * 60_000;
+    for (let i = 0; i < 10_001; i++) rateLimitMap.set('10.0.' + (i >> 8) + '.' + (i & 255), [stale]);
+    const before = rateLimitMap.size;
+    assert(before > 10_000, 'Precondition: map is oversized, got ' + before);
+    // A fresh request triggers the opportunistic sweep of expired entries.
+    checkRateLimit('192.168.42.42');
+    assert(rateLimitMap.size < before, 'Sweep should evict expired keys, size went ' + before + ' -> ' + rateLimitMap.size);
+    rateLimitMap.clear();
+  });
 }
 
 // ===================================================================

@@ -54,6 +54,32 @@ const HOOK_COMMANDS = {
   diff: 'npx muaddib diff HEAD --fail-on high'
 };
 
+/**
+ * Back up an existing pre-commit hook before overwriting it, keeping the 3 most recent
+ * timestamped backups. Shared by the husky and native-git hook writers so neither silently
+ * destroys a user's existing hook (lint-staged, tests, etc.).
+ * @param {string} hookPath - Absolute path to the pre-commit hook to be written
+ */
+function backupExistingHook(hookPath) {
+  if (!fs.existsSync(hookPath)) return;
+  const backup = `${hookPath}.backup.${Date.now()}`;
+  fs.copyFileSync(hookPath, backup);
+  console.log(`[INFO] Backed up existing hook to ${backup}`);
+
+  // Cleanup old backups, keep only 3 most recent
+  try {
+    const hooksDir = path.dirname(hookPath);
+    const base = path.basename(hookPath);
+    const backups = fs.readdirSync(hooksDir)
+      .filter(f => f.startsWith(base + '.backup.'))
+      .sort()
+      .reverse();
+    for (const old of backups.slice(3)) {
+      fs.unlinkSync(path.join(hooksDir, old));
+    }
+  } catch { /* ignore cleanup errors */ }
+}
+
 async function initHooks(targetPath, options = {}) {
   const resolvedPath = path.resolve(targetPath);
   const hookType = options.type || 'auto';
@@ -138,6 +164,9 @@ echo "[MUADDIB] Running security check..."
 ${command}
 `;
 
+  // Back up any existing hook before overwriting (same policy as initGitHook): a project may
+  // already have a husky pre-commit (lint-staged, tests…) — clobbering it silently loses config.
+  backupExistingHook(preCommitPath);
   fs.writeFileSync(preCommitPath, hookContent, { mode: 0o755 });
   if (process.platform !== 'win32') {
     fs.chmodSync(preCommitPath, 0o755);
@@ -219,23 +248,7 @@ exit 0
 `;
 
   // Backup existing hook (limit to 3 backups)
-  if (fs.existsSync(preCommitPath)) {
-    const backup = `${preCommitPath}.backup.${Date.now()}`;
-    fs.copyFileSync(preCommitPath, backup);
-    console.log(`[INFO] Backed up existing hook to ${backup}`);
-
-    // Cleanup old backups, keep only 3 most recent
-    try {
-      const hooksDir = path.dirname(preCommitPath);
-      const backups = fs.readdirSync(hooksDir)
-        .filter(f => f.startsWith('pre-commit.backup.'))
-        .sort()
-        .reverse();
-      for (const old of backups.slice(3)) {
-        fs.unlinkSync(path.join(hooksDir, old));
-      }
-    } catch { /* ignore cleanup errors */ }
-  }
+  backupExistingHook(preCommitPath);
 
   fs.writeFileSync(preCommitPath, hookContent, { mode: 0o755 });
   if (process.platform !== 'win32') {

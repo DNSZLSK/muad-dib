@@ -218,6 +218,63 @@ async function runSafeInstallTests() {
     }
   });
 
+  // --- parsePackageSpec ---
+  // Transitive deps arrive as `name@^1.2.3`: the name must be split off the range spec,
+  // otherwise the IOC map lookup (keyed on bare names) never matches — wildcard included.
+
+  test('SAFE-INSTALL: parsePackageSpec splits range specs off the name (transitive deps)', () => {
+    const { parsePackageSpec } = require('../../src/safe-install.js');
+    let r = parsePackageSpec('lodash@^4.17.21');
+    assert(r.pkgName === 'lodash', `caret range: name should be lodash, got ${r.pkgName}`);
+    assert(r.pkgVersion === null, 'caret range: version should be null (wildcard-only IOC match)');
+    r = parsePackageSpec('lodash@~4.17.21');
+    assert(r.pkgName === 'lodash', `tilde range: name should be lodash, got ${r.pkgName}`);
+    assert(r.pkgVersion === null, 'tilde range: version should be null');
+    r = parsePackageSpec('@scope/pkg@>=2.0.0');
+    assert(r.pkgName === '@scope/pkg', `scoped range: name should be @scope/pkg, got ${r.pkgName}`);
+    assert(r.pkgVersion === null, 'scoped range: version should be null');
+    r = parsePackageSpec('pkg@latest');
+    assert(r.pkgName === 'pkg', `dist-tag: name should be pkg, got ${r.pkgName}`);
+    assert(r.pkgVersion === null, 'dist-tag: version should be null');
+  });
+
+  test('SAFE-INSTALL: parsePackageSpec keeps exact versions and bare names', () => {
+    const { parsePackageSpec } = require('../../src/safe-install.js');
+    let r = parsePackageSpec('lodash@4.17.21');
+    assert(r.pkgName === 'lodash', 'exact: name should be lodash');
+    assert(r.pkgVersion === '4.17.21', `exact: version should be 4.17.21, got ${r.pkgVersion}`);
+    r = parsePackageSpec('@babel/core@7.0.0');
+    assert(r.pkgName === '@babel/core', 'scoped exact: name should be @babel/core');
+    assert(r.pkgVersion === '7.0.0', 'scoped exact: version should be 7.0.0');
+    r = parsePackageSpec('express');
+    assert(r.pkgName === 'express', 'bare: name unchanged');
+    assert(r.pkgVersion === null, 'bare: no version');
+    r = parsePackageSpec('@scope/pkg');
+    assert(r.pkgName === '@scope/pkg', 'bare scoped: name unchanged');
+    assert(r.pkgVersion === null, 'bare scoped: no version');
+  });
+
+  await asyncTest('SAFE-INSTALL: scanPackageRecursive dedups ranged spec against bare name (no rescan)', async () => {
+    const origLog = console.log;
+    const cp = require('child_process');
+    const origSpawnSync = cp.spawnSync;
+    console.log = () => {};
+    let npmViewCalls = 0;
+    try {
+      // First scan marks the bare name as seen (depth>maxDepth path, no network).
+      await scanPackageRecursive('dedup-probe-pkg', 5, 3);
+      // Mock npm view: if the ranged spec were NOT parsed down to the bare name, the
+      // dedup check would miss and scanPackageRecursive would call npm view.
+      cp.spawnSync = () => { npmViewCalls++; return { status: 1, stdout: '' }; };
+      const result = await scanPackageRecursive('dedup-probe-pkg@^1.0.0', 0, 3);
+      assert(result.safe === true, 'Already-scanned bare name should short-circuit to safe');
+      assert(npmViewCalls === 0, `Ranged spec must dedup against bare name without npm view (got ${npmViewCalls} calls)`);
+    } finally {
+      cp.spawnSync = origSpawnSync;
+      console.log = origLog;
+    }
+  });
+
   // --- safeInstall ---
 
   console.log('\n=== SAFE INSTALL FLOW TESTS ===\n');

@@ -21,6 +21,7 @@
 
 const http = require('http');
 const url = require('url');
+const crypto = require('crypto');
 const { getFeed } = require('../threat-feed.js');
 // Monitor-feed routes : optional out-of-tree dependency. Lazy-load so the
 // /feed and /health routes still work when the file is absent. Missing-file
@@ -68,6 +69,19 @@ const SECURITY_HEADERS = {
 const RATE_LIMIT_MAX = 60;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const rateLimitMap = new Map();
+// Sweep the map when it grows past this many keys, evicting entries whose window has fully
+// expired. Bind is localhost-only so this is bounded in practice, but without a sweep the Map
+// grows unbounded if the server is ever bound wider (one dead key per distinct client IP).
+const RATE_LIMIT_MAX_KEYS = 10_000;
+
+function sweepRateLimitMap(now) {
+  const windowStart = now - RATE_LIMIT_WINDOW_MS;
+  for (const [ip, timestamps] of rateLimitMap) {
+    if (timestamps.length === 0 || timestamps[timestamps.length - 1] < windowStart) {
+      rateLimitMap.delete(ip);
+    }
+  }
+}
 
 function sendJson(res, statusCode, data) {
   res.writeHead(statusCode, SECURITY_HEADERS);
@@ -92,7 +106,12 @@ function checkAuth(req) {
   if (parts.length !== 2 || parts[0] !== 'Bearer') {
     return { ok: false, error: 'Invalid Authorization format. Use: Bearer <token>' };
   }
-  if (parts[1] !== token) {
+  // Constant-time comparison to avoid a timing oracle on the token. Compare fixed-length
+  // SHA-256 digests so timingSafeEqual never sees mismatched buffer lengths (which would
+  // throw and leak length via the exception path).
+  const a = crypto.createHash('sha256').update(parts[1]).digest();
+  const b = crypto.createHash('sha256').update(token).digest();
+  if (!crypto.timingSafeEqual(a, b)) {
     return { ok: false, error: 'Invalid token' };
   }
   return { ok: true };
@@ -105,6 +124,10 @@ function checkAuth(req) {
  */
 function checkRateLimit(ip) {
   const now = Date.now();
+  // Opportunistic bounded sweep: only when the map is oversized, so the common path stays O(1).
+  if (rateLimitMap.size > RATE_LIMIT_MAX_KEYS) {
+    sweepRateLimitMap(now);
+  }
   if (!rateLimitMap.has(ip)) {
     rateLimitMap.set(ip, [now]);
     return { ok: true, remaining: RATE_LIMIT_MAX - 1 };
@@ -165,7 +188,10 @@ function startServer(options = {}) {
       try {
         sendJson(res, 200, buildMonitorDaily());
       } catch (err) {
-        sendJson(res, 500, { error: 'monitor_daily_failed', message: err.message });
+        // Don't leak err.message to the client — it can expose internal filesystem paths.
+        // Log server-side, return a generic error.
+        console.error('[SERVE] /monitor/daily failed:', err.message);
+        sendJson(res, 500, { error: 'monitor_daily_failed' });
       }
     } else if (pathname === '/monitor/window') {
       const range = (parsed.query && parsed.query.range) ? String(parsed.query.range) : '7d';
@@ -176,13 +202,15 @@ function startServer(options = {}) {
       try {
         sendJson(res, 200, buildMonitorWindow(range));
       } catch (err) {
-        sendJson(res, 500, { error: 'monitor_window_failed', message: err.message });
+        console.error('[SERVE] /monitor/window failed:', err.message);
+        sendJson(res, 500, { error: 'monitor_window_failed' });
       }
     } else if (pathname === '/monitor/stats') {
       try {
         sendJson(res, 200, buildMonitorAll());
       } catch (err) {
-        sendJson(res, 500, { error: 'monitor_stats_failed', message: err.message });
+        console.error('[SERVE] /monitor/stats failed:', err.message);
+        sendJson(res, 500, { error: 'monitor_stats_failed' });
       }
     } else if (pathname === '/health') {
       sendJson(res, 200, { status: 'ok', version: pkg.version });

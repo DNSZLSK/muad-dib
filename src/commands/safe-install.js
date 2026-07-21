@@ -133,31 +133,42 @@ function checkIOCs(pkg, pkgName, pkgVersion) {
   return malicious || null;
 }
 
+// Split a package spec into { pkgName, pkgVersion }.
+// Handles scoped packages (@scope/name) and version specs (@scope/name@spec or name@spec).
+// Transitive deps arrive as `name@^1.2.3` (range specs from dependency maps): the spec must
+// be split off the name even when it is not an exact version, otherwise pkgName keeps the
+// full spec and the IOC map lookup (keyed on bare names) never matches — wildcard IOCs
+// included. Range/tag specs leave pkgVersion null so only wildcard IOCs match (SFI-003).
+function parsePackageSpec(pkg) {
+  let pkgName = pkg;
+  let pkgVersion = null;
+  if (pkg.startsWith('@')) {
+    // Scoped package
+    const parts = pkg.slice(1).split('@');
+    if (parts.length >= 2) {
+      const spec = parts.pop();
+      pkgName = '@' + parts.join('@');
+      if (spec.match(/^\d/)) pkgVersion = spec;
+    }
+  } else {
+    const parts = pkg.split('@');
+    if (parts.length >= 2) {
+      const spec = parts.pop();
+      pkgName = parts.join('@');
+      if (spec.match(/^\d/)) pkgVersion = spec;
+    }
+  }
+  return { pkgName, pkgVersion };
+}
+
 // Scan a package and its dependencies recursively
 async function scanPackageRecursive(pkg, depth = 0, maxDepth = 3) {
   const indent = '  '.repeat(depth);
 
   // Extract name and version of the package
-  let pkgName = pkg;
-  let pkgVersion = null;
+  const { pkgName, pkgVersion } = parsePackageSpec(pkg);
 
-  // Handle scoped packages (@scope/name) and versions (@scope/name@version or name@version)
-  if (pkg.startsWith('@')) {
-    // Scoped package
-    const parts = pkg.slice(1).split('@');
-    if (parts.length >= 2 && parts[parts.length - 1].match(/^\d/)) {
-      pkgVersion = parts.pop();
-      pkgName = '@' + parts.join('@');
-    }
-  } else {
-    const parts = pkg.split('@');
-    if (parts.length >= 2 && parts[parts.length - 1].match(/^\d/)) {
-      pkgVersion = parts.pop();
-      pkgName = parts.join('@');
-    }
-  }
-  
-  
+
   // Avoid infinite loops
   if (scannedPackages.has(pkgName)) {
     return { safe: true };
@@ -309,4 +320,4 @@ async function safeInstall(packages, options = {}) {
   return { blocked: false };
 }
 
-module.exports = { safeInstall, scanPackageRecursive, REHABILITATED_PACKAGES, checkRehabilitated, isValidPackageName, checkIOCs };
+module.exports = { safeInstall, scanPackageRecursive, parsePackageSpec, REHABILITATED_PACKAGES, checkRehabilitated, isValidPackageName, checkIOCs };

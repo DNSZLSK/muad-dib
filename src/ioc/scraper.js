@@ -733,6 +733,7 @@ async function scrapeOSSFMaliciousPackages(knownIds) {
       fetchSpinner.start('Fetching OSSF entries... 0/' + toFetch.length);
     }
 
+    let failedFetches = 0;
     for (let i = 0; i < toFetch.length; i += BATCH_SIZE) {
       const batch = toFetch.slice(i, i + BATCH_SIZE);
       const results = await Promise.all(batch.map(function(entry) {
@@ -741,7 +742,7 @@ async function scrapeOSSFMaliciousPackages(knownIds) {
       }));
 
       for (const result of results) {
-        if (!result || result.status !== 200 || !result.data) continue;
+        if (!result || result.status !== 200 || !result.data) { failedFetches++; continue; }
         const parsed = parseOSVEntry(result.data, 'ossf-malicious');
         for (const p of parsed) packages.push(p);
       }
@@ -760,8 +761,16 @@ async function scrapeOSSFMaliciousPackages(knownIds) {
       fetchSpinner.succeed('Fetched OSSF entries: ' + packages.length + ' packages');
     }
 
-    // Save tree SHA for next incremental run
-    try { fs.writeFileSync(shaFile, treeSha); } catch {}
+    // Save tree SHA for next incremental run — only if every entry was fetched.
+    // Persisting the SHA after partial fetches (e.g. GitHub rate-limiting the raw batches)
+    // marks the failed entries as "done": subsequent runs skip everything until the next
+    // OSSF commit, silently losing IOCs. On partial failure, keep the old SHA so the next
+    // run retries the delta.
+    if (failedFetches === 0) {
+      try { fs.writeFileSync(shaFile, treeSha); } catch {}
+    } else {
+      console.log('[SCRAPER]   ' + failedFetches + ' OSSF fetches failed — tree SHA not persisted, next run will retry');
+    }
   } catch (e) {
     console.log('[SCRAPER]   Error: ' + e.message);
   }
@@ -1284,11 +1293,21 @@ async function runScraper() {
     'npm-removed'
   ];
 
-  // Save enriched (full) IOCs — atomic write via .tmp + rename
+  // Save enriched (full) IOCs — atomic write via .tmp + rename.
+  // Stringify ONCE: the pretty-printed DB is a giant string (~2x the 112MB+ file); a second
+  // stringify for the home copy used to double the peak on top of the zip buffers already in
+  // flight. The HMAC is computed here from the same string, then the string is released and
+  // the home copy reuses the file on disk (copyFileSync — no second serialization).
   const saveSpinner = new Spinner();
   saveSpinner.start('Saving IOCs...');
   const tmpIOCFile = IOC_FILE + '.tmp';
-  fs.writeFileSync(tmpIOCFile, JSON.stringify(existingIOCs, null, 2));
+  let iocHmac;
+  {
+    const iocJsonData = JSON.stringify(existingIOCs, null, 2);
+    fs.writeFileSync(tmpIOCFile, iocJsonData);
+    const { generateIOCHMAC } = require('./updater.js');
+    iocHmac = generateIOCHMAC(iocJsonData);
+  }
   fs.renameSync(tmpIOCFile, IOC_FILE);
 
   // Save compact IOCs (lightweight, shipped in npm) — atomic write
@@ -1311,12 +1330,11 @@ async function runScraper() {
   }
   try {
     const tmpHomeFile = HOME_IOC_FILE + '.tmp';
-    const homeJsonData = JSON.stringify(existingIOCs, null, 2);
-    fs.writeFileSync(tmpHomeFile, homeJsonData);
-    // Write HMAC before rename for consistency with updater.js
-    const { generateIOCHMAC } = require('./updater.js');
-    const homeHmac = generateIOCHMAC(homeJsonData);
-    fs.writeFileSync(HOME_IOC_FILE + '.hmac', homeHmac);
+    // Byte-identical copy of the file already written locally — no second stringify peak.
+    fs.copyFileSync(IOC_FILE, tmpHomeFile);
+    // Write HMAC before rename for consistency with updater.js (computed once above from
+    // the same serialized string the local file was written from).
+    fs.writeFileSync(HOME_IOC_FILE + '.hmac', iocHmac);
     fs.renameSync(tmpHomeFile, HOME_IOC_FILE);
     // Mark HMAC as initialized
     const hmacMarker = path.join(homeDir, '.hmac-initialized');

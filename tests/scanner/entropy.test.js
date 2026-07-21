@@ -51,6 +51,52 @@ async function runEntropyTests() {
     assert(normalStringThreats.length === 0, 'Short strings should not trigger, got ' + normalStringThreats.length);
   });
 
+  test('ENTROPY: shared implementation is the single source (D1 dedup lock-in)', () => {
+    const shared = require('../../src/shared/entropy.js').calculateShannonEntropy;
+    const viaHelpers = require('../../src/scanner/ast-detectors/helpers.js').calculateShannonEntropy;
+    assert(calculateShannonEntropy === shared, 'entropy.js must re-export src/shared/entropy.js');
+    assert(viaHelpers === shared, 'ast-detectors/helpers.js must re-export src/shared/entropy.js');
+  });
+
+  test('ENTROPY: high_entropy_string emissions are capped at 50 per file', () => {
+    // Bounded resources: a dense file must not emit unbounded threat objects.
+    const fs = require('fs');
+    const os = require('os');
+    // Deterministic distinct high-entropy strings: rotations of the base64 alphabet
+    // (64 distinct chars => entropy = 6.0 bits > 5.5 threshold), length 64 >= MIN_STRING_LENGTH.
+    const alpha = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    const makeStr = (i) => alpha.slice(i % 64) + alpha.slice(0, i % 64);
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-entropy-cap-'));
+    try {
+      const dense = [];
+      for (let i = 0; i < 60; i++) dense.push(`var s${i} = "${makeStr(i)}";`);
+      fs.writeFileSync(path.join(tmpDir, 'payload.js'), dense.join('\n'));
+      const threats = scanEntropy(tmpDir).filter(t => t.type === 'high_entropy_string');
+      assert(threats.length === 50,
+        `60 qualifying strings must cap at 50 threats, got ${threats.length}`);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  test('ENTROPY: cap does not affect files below the limit', () => {
+    const fs = require('fs');
+    const os = require('os');
+    const alpha = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    const makeStr = (i) => alpha.slice(i % 64) + alpha.slice(0, i % 64);
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-entropy-few-'));
+    try {
+      const few = [];
+      for (let i = 0; i < 3; i++) few.push(`var s${i} = "${makeStr(i)}";`);
+      fs.writeFileSync(path.join(tmpDir, 'payload.js'), few.join('\n'));
+      const threats = scanEntropy(tmpDir).filter(t => t.type === 'high_entropy_string');
+      assert(threats.length === 3,
+        `3 qualifying strings must emit 3 threats unchanged, got ${threats.length}`);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
   test('ENTROPY: No file-level entropy scanning (removed)', () => {
     const entropyDir = path.join(__dirname, '..', 'samples', 'entropy');
     const threats = scanEntropy(entropyDir);

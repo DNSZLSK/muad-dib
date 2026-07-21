@@ -19,6 +19,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { getMaxFileSize } = require('../shared/constants.js');
 
 // ============================================
 // REQUIREMENTS.TXT PARSER
@@ -41,7 +42,17 @@ function parseRequirementsTxt(filePath, visited, projectRoot) {
   if (visited.has(resolved)) return [];
   visited.add(resolved);
 
-  const content = fs.readFileSync(filePath, 'utf8');
+  // Guarded read (aligned on parseSetupPy/parsePyprojectToml): attacker-controlled input —
+  // a `-r <dir>` include resolves to a directory (EISDIR) and would otherwise abort the
+  // whole scan (denial-of-detection); oversized files are skipped like everywhere else.
+  let content;
+  try {
+    const stat = fs.statSync(filePath);
+    if (!stat.isFile() || stat.size > getMaxFileSize()) return [];
+    content = fs.readFileSync(filePath, 'utf8');
+  } catch {
+    return [];
+  }
   const lines = content.split(/\r?\n/);
   const deps = [];
   const relFile = filePath;
@@ -56,13 +67,13 @@ function parseRequirementsTxt(filePath, visited, projectRoot) {
     const includeMatch = line.match(/^(?:-r|--requirement)\s+(.+)$/);
     if (includeMatch) {
       const includePath = path.resolve(path.dirname(filePath), includeMatch[1].trim());
-      // Path traversal guard: ensure included file stays within the project root
-      // Use case-insensitive comparison on Windows (PY-01)
-      // PY-001: Derive rootDir once at top-level, pass it down for all recursive calls
+      // Path traversal guard: ensure included file stays within the project root.
+      // PY-001: Derive rootDir once at top-level, pass it down for all recursive calls.
+      // path.relative enforces a separator boundary (a raw startsWith prefix check let
+      // /scan/pkg-evil pass as "within" /scan/pkg) and handles per-OS case/separator rules.
       const rootDir = projectRoot || path.resolve(path.dirname(filePath));
-      const isWithin = process.platform === 'win32'
-        ? includePath.toLowerCase().startsWith(rootDir.toLowerCase())
-        : includePath.startsWith(rootDir);
+      const rel = path.relative(rootDir, includePath);
+      const isWithin = rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
       if (!isWithin) continue;
       const included = parseRequirementsTxt(includePath, visited, rootDir);
       deps.push(...included);

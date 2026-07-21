@@ -75,7 +75,7 @@ MUAD'DIB is a Node.js static analyzer. Attacks using exclusively browser APIs (D
 | **polyfill-io** | Script injection via browser CDN | Client-side resource modification, no Node.js code |
 | **trojanized-jquery** | jQuery DOM manipulation | jQuery/DOM browser API, no Node.js API |
 
-Impact on TPR: **90/94 in-scope = 95.74%** (v2.11.48 full measurement). 4 misses include the 3 browser-only attacks above plus 1 other. Ground truth expanded to **96 samples 2026-05-25** (94 active, 2 out-of-scope: GT-005 colors and GT-009 faker, both protestware with min_threats=0). The enrichment added 22 samples — 16 synthetic for the new PYSRC/PYAST/AST-092/AICONF-004/PKG-022 rules (GT-068..083), 6 real-world npm tarballs from VPS archive (GT-084..089: TrapDoor twins, dep-confusion, MCP exfil), 7 reconstructions from the in-house security-review benchmark (GT-090..096). First PyPI coverage: 13 samples.
+Impact on TPR: **90/94 in-scope = 95.74%** (v2.11.48 full measurement). 4 misses include the 3 browser-only attacks above plus 1 other. Ground truth expanded to **96 samples 2026-05-25** (94 active, 2 out-of-scope: GT-005 colors and GT-009 faker, both protestware with min_threats=0). The enrichment added 29 samples — 16 synthetic for the new PYSRC/PYAST/AST-092/AICONF-004/PKG-022 rules (GT-068..083), 6 real-world npm tarballs from VPS archive (GT-084..089: TrapDoor twins, dep-confusion, MCP exfil), 7 reconstructions from the in-house security-review benchmark (GT-090..096). First PyPI coverage: 13 samples.
 
 ### Known Limitations
 
@@ -174,7 +174,7 @@ Validated against 17,922 real npm malware samples. Wild TPR: **92.8%** (13,538/1
 | Ingress Tool Transfer | T1105 | Pattern matching |
 | Data Destruction | T1485 | Pattern matching |
 
-See [SECURITY.md](../SECURITY.md#detection-rules-v211139) for the complete <!--stat:rulesTotal-->277<!--/stat:rulesTotal-->-rule reference.
+See [SECURITY.md](../SECURITY.md#detection-rules) for the complete <!--stat:rulesTotal-->277<!--/stat:rulesTotal-->-rule reference.
 
 ## Assumptions
 

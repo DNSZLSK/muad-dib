@@ -63,8 +63,14 @@ const BENIGN_THRESHOLD = 20;
 const ADR_THRESHOLD = 20;  // v2.6.5: global threshold (aligned with BENIGN_THRESHOLD, no per-sample overfitting)
 const PACK_TIMEOUT_MS = 30000;
 
-// Validate npm package name to prevent shell injection (names come from our own datasets)
+// Validate npm package name to prevent shell injection (names come from our own datasets).
+// The character class blocks every shell metacharacter (space ; | & $ ` quotes <> = \n);
+// isSafePkgName additionally rejects argument injection (leading '-') and path specs
+// ('.'/'..') — npm names legally cannot start with '-', '.' or '_', so no corpus regression.
 const SAFE_PKG_RE = /^(@[\w._-]+\/)?[\w._-]+$/;
+function isSafePkgName(pkg) {
+  return SAFE_PKG_RE.test(pkg) && !pkg.startsWith('-') && pkg !== '.' && pkg !== '..';
+}
 
 // =========================================================================
 // Scan result cache — avoids re-scanning when src/ hasn't changed
@@ -508,7 +514,7 @@ function downloadAndExtract(pkg, options = {}) {
 
   let tgzFilename;
   try {
-    if (!SAFE_PKG_RE.test(pkg)) throw new Error('invalid package name');
+    if (!isSafePkgName(pkg)) throw new Error('invalid package name');
     const output = execSync(`npm pack ${pkg}`, {
       cwd: pkgCacheDir,
       encoding: 'utf8',
@@ -905,7 +911,7 @@ async function evaluateBenignRandom(options = {}) {
       fs.mkdirSync(pkgCacheDir, { recursive: true });
       let tgzFilename;
       try {
-        if (!SAFE_PKG_RE.test(pkg)) throw new Error('invalid package name');
+        if (!isSafePkgName(pkg)) throw new Error('invalid package name');
         tgzFilename = execSync(`npm pack ${pkg}`, {
           cwd: pkgCacheDir,
           encoding: 'utf8',
@@ -1784,6 +1790,7 @@ function classifyDetectionSource(threat) {
 
 module.exports = {
   evaluate,
+  isSafePkgName,
   evaluateGroundTruth,
   evaluateBenign,
   evaluateBenignPyPI,

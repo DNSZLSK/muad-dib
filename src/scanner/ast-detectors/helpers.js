@@ -63,25 +63,9 @@ function extractStringValue(node) {
   return null;
 }
 
-/**
- * Audit v3 B2: Shannon entropy calculation for split-entropy detection.
- * Replicates the algorithm from entropy.js for inline use in AST scanner.
- */
-function calculateShannonEntropy(str) {
-  if (!str || str.length === 0) return 0;
-  const freq = Object.create(null);
-  for (let i = 0; i < str.length; i++) {
-    const ch = str[i];
-    freq[ch] = (freq[ch] || 0) + 1;
-  }
-  let entropy = 0;
-  const len = str.length;
-  for (const ch in freq) {
-    const p = freq[ch] / len;
-    entropy -= p * Math.log2(p);
-  }
-  return entropy;
-}
+// Audit v3 B2: Shannon entropy for split-entropy detection — single implementation in
+// src/shared/entropy.js (re-exported below for handle-call-expression.js).
+const { calculateShannonEntropy } = require('../../shared/entropy.js');
 
 /**
  * Audit v3 B2: Count the number of leaf string operands in a BinaryExpression chain.
