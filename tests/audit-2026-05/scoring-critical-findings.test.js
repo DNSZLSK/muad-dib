@@ -134,15 +134,9 @@ test('SC-C1.c: double-count des compounds en computeGroupScore (env_access + web
 // ──────────────────────────────────────────────────────────────────────────
 console.log('\n--- SC-C2: credential_regex_harvest no dilution floor ---');
 
-test('SC-C2.a: FP_COUNT_THRESHOLDS["credential_regex_harvest"] n\'a pas de field "from"', () => {
-  // Lecture directe du module pour confirmer la structure
-  // Note: FP_COUNT_THRESHOLDS n'est pas exporté, on assert via le behavior
-  // En lisant scoring.js:320, la rule est : { maxCount: 2, to: 'LOW' } — sans `from`.
-  // Le floor logic (:1010) : `if (rule && rule.from && rule.maxCount <= 3)` → exige `from`.
-  // Donc credential_regex_harvest est EXCLU du dilution floor.
-  // Cette assertion est documentaire — la vraie preuve est dans SC-C2.b.
-  assert(true, 'Confirmé par lecture src/scoring.js:320 (FP_COUNT_THRESHOLDS table)');
-});
+// SC-C2.a removed: it was a documentary assert(true) with no behavioral check. The dilution-
+// floor exclusion of credential_regex_harvest (no `from` field → not restored) is proven
+// behaviorally by SC-C2.b below, which is the real test.
 
 test('SC-C2.b: 4 credential_regex_harvest tous downgraded LOW (pas de floor)', () => {
   // Scénario : malware avec 1 vrai pattern d'exfil + 3 patterns benign de header parsing.

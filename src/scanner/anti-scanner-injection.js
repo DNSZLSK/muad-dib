@@ -46,6 +46,10 @@ const { countInvisibleUnicode, stripInvisibleUnicode } = require('../shared/unic
  * the self-scan canary (`npm run scan .`) must stay at 0 antiscanner_* findings.
  */
 
+// Intentional deviations from utils.EXCLUDED_DIRS / the common source-extension lists:
+//  - `.py` is included: TrapDoor/eth-security-auditor PyPI campaigns target Python reviewers.
+//  - dist/build/out are NOT excluded: the Hades prompt-injection sits atop a bundle, so the
+//    bundled output in dist/ must be scanned. Do not align on the common lists.
 const SCAN_EXTENSIONS = ['.js', '.cjs', '.mjs', '.ts', '.tsx', '.jsx', '.py'];
 const EXCLUDED_DIRS = ['node_modules', '.git', '.muaddib-cache'];
 

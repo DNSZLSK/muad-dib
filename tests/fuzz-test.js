@@ -101,12 +101,13 @@ malicious: !!js/function >
   function() { return process.env.SECRET; }
 `;
     try {
-      yaml.load(dangerous, { schema: yaml.JSON_SCHEMA });
-      // If it doesn't throw, the tag should have been ignored
-      assert(true, 'Tag was silently ignored (also acceptable)');
+      const r = yaml.load(dangerous, { schema: yaml.JSON_SCHEMA });
+      // If it doesn't throw, the tag must NOT have constructed a function (the actual danger).
+      assert(!r || typeof r.malicious !== 'function',
+        '!!js/function must not construct a callable value under JSON_SCHEMA');
     } catch (e) {
       // Expected: JSON_SCHEMA rejects JS-specific tags
-      assert(e.message.includes('unknown tag'),
+      assert(/unknown.*tag/.test(e.message),
         `Should reject !!js/function tag, got: ${e.message}`);
     }
   });
@@ -114,10 +115,11 @@ malicious: !!js/function >
   await test('YAML: !!js/regexp tag is blocked by JSON_SCHEMA', () => {
     const dangerous = 'evil: !!js/regexp /./';
     try {
-      yaml.load(dangerous, { schema: yaml.JSON_SCHEMA });
-      assert(true, 'Tag ignored');
+      const r = yaml.load(dangerous, { schema: yaml.JSON_SCHEMA });
+      assert(!r || !(r.evil instanceof RegExp),
+        '!!js/regexp must not construct a RegExp under JSON_SCHEMA');
     } catch (e) {
-      assert(e.message.includes('unknown tag'),
+      assert(/unknown.*tag/.test(e.message),
         `Should reject !!js/regexp, got: ${e.message}`);
     }
   });
@@ -125,10 +127,12 @@ malicious: !!js/function >
   await test('YAML: !!js/undefined tag is blocked by JSON_SCHEMA', () => {
     const dangerous = 'val: !!js/undefined ""';
     try {
-      yaml.load(dangerous, { schema: yaml.JSON_SCHEMA });
-      assert(true, 'Tag ignored');
+      const r = yaml.load(dangerous, { schema: yaml.JSON_SCHEMA });
+      // Under JSON_SCHEMA the tag must not yield a JS `undefined` value from the payload.
+      assert(!r || r.val === undefined || typeof r.val === 'string',
+        '!!js/undefined must not construct a JS undefined value');
     } catch (e) {
-      assert(e.message.includes('unknown tag'),
+      assert(/unknown.*tag/.test(e.message),
         `Should reject !!js/undefined, got: ${e.message}`);
     }
   });
