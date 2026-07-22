@@ -1,7 +1,0 @@
-{
-  "name": "clean-pino-fork",
-  "version": "9.6.0",
-  "description": "Negative-control fixture: real pino caller.js (stack trace utility) — must NOT trigger staged_remote_loader.",
-  "main": "lib/index.js",
-  "license": "MIT"
-}

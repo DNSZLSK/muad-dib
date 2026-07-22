@@ -1155,15 +1155,15 @@ async function runScraperTests() {
     const origLog = console.log;
     console.log = () => {};
 
-    let callCount = 0;
     const consolidatedCSV = 'package_name,versions,vendors\nonly-consolidated,1.0.0,dd\n';
 
+    // Route by URL, not by call order — resilient to request reordering/parallelization
     https.request = (options, callback) => {
-      callCount++;
+      const url = 'https://' + options.hostname + options.path;
       const req = createMockRequest();
       req.end = () => {
         process.nextTick(() => {
-          if (callCount === 1) {
+          if (url.includes('consolidated_iocs.csv')) {
             // Consolidated returns OK
             const res = createMockResponse(200, null, {});
             callback(res);
@@ -1202,20 +1202,20 @@ async function runScraperTests() {
     const origLog = console.log;
     console.log = () => {};
 
-    let callCount = 0;
     // Consolidated empty, direct has a row with only 1 field (less than 2)
     const consolidatedCSV = 'package_name,versions,vendors\n';
     const directCSV = 'package_name,version\nshort-row\ngood-pkg,1.0.0\n';
 
+    // Route by URL, not by call order — resilient to request reordering/parallelization
     https.request = (options, callback) => {
-      callCount++;
+      const url = 'https://' + options.hostname + options.path;
       const req = createMockRequest();
       req.end = () => {
         process.nextTick(() => {
           const res = createMockResponse(200, null, {});
           callback(res);
           process.nextTick(() => {
-            const body = callCount === 1 ? consolidatedCSV : directCSV;
+            const body = url.includes('consolidated_iocs.csv') ? consolidatedCSV : directCSV;
             res.emit('data', Buffer.from(body));
             res.emit('end');
           });
@@ -1287,19 +1287,20 @@ async function runScraperTests() {
     const origLog = console.log;
     console.log = () => {};
 
-    let callCount = 0;
     const consolidatedCSV = 'package_name,versions,vendors\n';
     const directCSV = 'package_name,version\n@scope/pkg-name,1.0.0\n';
 
     https.request = (options, callback) => {
-      callCount++;
+      const url = 'https://' + options.hostname + options.path;
       const req = createMockRequest();
       req.end = () => {
         process.nextTick(() => {
           const res = createMockResponse(200, null, {});
           callback(res);
           process.nextTick(() => {
-            const body = callCount === 1 ? consolidatedCSV : directCSV;
+            // Route by URL, not request order — a reorder/parallelization of the
+            // two fetches must not change which CSV each endpoint returns.
+            const body = url.includes('consolidated_iocs.csv') ? consolidatedCSV : directCSV;
             res.emit('data', Buffer.from(body));
             res.emit('end');
           });

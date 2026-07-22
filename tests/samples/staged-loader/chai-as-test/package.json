@@ -1,7 +1,0 @@
-{
-  "name": "chai-as-test",
-  "version": "1.2.9",
-  "description": "Test fixture replicating the chai-as-test malicious payload (security review 2026-05-04 to 2026-05-09).",
-  "main": "lib/index.js",
-  "license": "MIT"
-}

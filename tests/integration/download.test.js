@@ -197,11 +197,39 @@ async function runDownloadTests() {
     assert(isPrivateIP('::ffff:127.0.0.1') === true, '::ffff:127.0.0.1 should be private');
   });
 
-  await asyncTest('DOWNLOAD: safeDnsResolve resolves both IPv4 and IPv6', async () => {
+  await asyncTest('DOWNLOAD: safeDnsResolve passes a public direct IP but blocks a private direct IP', async () => {
     const { safeDnsResolve } = require('../../src/shared/download.js');
-    // Direct IP addresses bypass DNS resolution
-    const result = await safeDnsResolve('8.8.8.8');
-    assert(result === '8.8.8.8', 'Direct IP should pass through');
+    const pub = await safeDnsResolve('8.8.8.8');
+    assert(pub === '8.8.8.8', 'a public direct IP passes through');
+    let blocked = false;
+    try { await safeDnsResolve('127.0.0.1'); } catch (e) { blocked = /rebinding|private/i.test(e.message); }
+    assert(blocked, 'a private direct IP (127.0.0.1) must be rejected');
+  });
+
+  await asyncTest('DOWNLOAD: safeDnsResolve rejects a hostname that resolves to a private IP (anti-rebinding core)', async () => {
+    const { safeDnsResolve } = require('../../src/shared/download.js');
+    // Mock the DNS layer (no real network) to drive the resolution path: the whole
+    // point of safeDnsResolve is to re-check the RESOLVED address, defeating DNS
+    // rebinding. The old test only exercised the direct-IP passthrough.
+    const dns = require('dns');
+    const origV4 = dns.promises.resolve4;
+    const origV6 = dns.promises.resolve6;
+    dns.promises.resolve6 = async () => { throw new Error('no AAAA'); };
+    try {
+      // Case 1: hostname resolves to a private IP → must be blocked.
+      dns.promises.resolve4 = async () => ['10.0.0.5'];
+      let blocked = false;
+      try { await safeDnsResolve('rebind.evil.test'); } catch (e) { blocked = /private IP/i.test(e.message); }
+      assert(blocked, 'a hostname resolving to a private IP must be blocked (rebinding defense)');
+
+      // Case 2: hostname resolves to a public IP → returns it.
+      dns.promises.resolve4 = async () => ['93.184.216.34'];
+      const addr = await safeDnsResolve('example.test');
+      assert(addr === '93.184.216.34', 'a hostname resolving to a public IP resolves normally');
+    } finally {
+      dns.promises.resolve4 = origV4;
+      dns.promises.resolve6 = origV6;
+    }
   });
 
   // --- IPv6 special ranges (v2.7.9) ---

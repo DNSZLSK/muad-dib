@@ -176,20 +176,41 @@ async function runEvaluateTests() {
     assert(fp1 === fp2, 'fingerprint should be deterministic');
   });
 
-  test('EVALUATE: loadScanCache returns 0 when no cache file', () => {
-    const count = loadScanCache();
-    // Either 0 (no cache) or a number (cached results exist) — both valid
-    assert(typeof count === 'number' || count === undefined, 'loadScanCache should return number or undefined');
+  test('EVALUATE: loadScanCache — absent→undefined, matching fingerprint→count, stale→0', () => {
+    // The old assertion (typeof number || undefined) accepted every possible
+    // return, so it could never fail. Drive the three real branches by controlling
+    // the cache file (backed up + restored so a real dev cache is never lost).
+    const root = path.join(__dirname, '..', '..');
+    const cacheFile = path.join(root, '.muaddib-cache', 'evaluate-scan-cache.json');
+    const backup = fs.existsSync(cacheFile) ? fs.readFileSync(cacheFile) : null;
+    try {
+      if (fs.existsSync(cacheFile)) fs.unlinkSync(cacheFile);
+      assert(loadScanCache() === undefined, 'no cache file → undefined');
+
+      fs.mkdirSync(path.dirname(cacheFile), { recursive: true });
+      fs.writeFileSync(cacheFile, JSON.stringify({ fingerprint: computeSrcFingerprint(), results: { a: {}, b: {} } }));
+      assert(loadScanCache() === 2, 'matching fingerprint → number of cached entries');
+
+      fs.writeFileSync(cacheFile, JSON.stringify({ fingerprint: 'stale-fingerprint', results: { a: {} } }));
+      assert(loadScanCache() === 0, 'stale fingerprint → 0 (cache invalidated)');
+    } finally {
+      if (backup !== null) fs.writeFileSync(cacheFile, backup);
+      else if (fs.existsSync(cacheFile)) fs.unlinkSync(cacheFile);
+    }
   });
 
-  await asyncTest('EVALUATE: silentScan uses cache on second call', async () => {
+  await asyncTest('EVALUATE: silentScan returns the cached object on repeat (no rescan)', async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-eval-cache-'));
     try {
       fs.writeFileSync(path.join(tmpDir, 'package.json'), JSON.stringify({ name: 'cache-test', version: '1.0.0' }));
       fs.writeFileSync(path.join(tmpDir, 'index.js'), 'module.exports = {};');
-      const result1 = await silentScan(tmpDir);
-      const result2 = await silentScan(tmpDir);
-      assert(result1.summary.riskScore === result2.summary.riskScore, 'Cached result should have same score');
+      const result1 = await silentScan(tmpDir); // miss → real scan, populates cache
+      const result2 = await silentScan(tmpDir); // hit → returns the stored object
+      const result3 = await silentScan(tmpDir); // hit → returns the SAME stored object
+      // Two consecutive cache hits return the identical object reference — a fresh
+      // rescan would build a new object each time, so this proves the cache is used.
+      assert(result2 === result3, 'consecutive cache hits must return the identical stored object');
+      assert(result1.summary.riskScore === result2.summary.riskScore, 'cached score matches the original scan');
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }

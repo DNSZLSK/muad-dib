@@ -94,6 +94,44 @@ async function runSinkCouplingTests() {
     const hasSink = (r.threats || []).some(x => ['suspicious_domain', 'ioc_string_match'].includes(x.type));
     assert(hasSink, 'axios-harvest-exfil must surface its exfil-sink signal');
   });
+
+  // ---- MANIFEST gate-pairs previously specified but never wired (sink-coupling-fp/MANIFEST.md) ----
+
+  await asyncTest('MANIFEST gate (negative): native-addon install without a sink stays below the alert floor', async () => {
+    // @lordofdestiny/mynumber model: binding.gyp + C++ sources + node-pre-gyp is a
+    // LOCAL build, not exfil. The install signals fire but, with no sink, the
+    // package must not escalate to suspect (riskScore < 20 alert floor).
+    const r = await runScanDirect(path.join(TESTS_DIR, 'sink-coupling-fp', 'native-addon'));
+    assert((r.threats || []).some(x => x.type === 'native_addon_install'),
+      'native-addon must still emit native_addon_install (the signal is real)');
+    const hasSink = (r.threats || []).some(x => ['suspicious_domain', 'ioc_string_match', 'remote_code_load'].includes(x.type));
+    assert(!hasSink, 'native-addon has no exfil/remote-exec sink');
+    assert(r.summary.riskScore < 20, `no sink → below alert floor, got riskScore ${r.summary.riskScore}`);
+  });
+
+  await asyncTest('MANIFEST gate (negative): vendor-banner has no exfil sink; it is flagged only by the residual typosquat compound', async () => {
+    // opticore-asymmetric-cryption model: a suffix-squat dep (secure-chalk) + a
+    // cosmetic postinstall banner — NO sink. It still surfaces because the
+    // typosquat compound is a genuine signal, NOT because of a sink. Lock both
+    // facts: no exfil sink, and the flag traces to typosquat, not sink-coupling.
+    const r = await runScanDirect(path.join(TESTS_DIR, 'sink-coupling-fp', 'vendor-banner'));
+    const hasSink = (r.threats || []).some(x => ['suspicious_domain', 'ioc_string_match', 'remote_code_load'].includes(x.type));
+    assert(!hasSink, 'vendor-banner must have no exfil/remote-exec sink (cosmetic banner only)');
+    assert((r.threats || []).some(x => x.type === 'typosquat_lifecycle'),
+      'vendor-banner stays flagged via the residual typosquat compound, not a sink');
+  });
+
+  await asyncTest('MANIFEST gate (positive): postinstall-detached-loader stays suspect (real detached-exec + exfil sink)', async () => {
+    // chalk-pro reach model: postinstall → detached stealth node → axios(jsonkeeper)
+    // → new Function(require,…). A real sink chain, so it must stay well above the
+    // alert floor and retain both the stealth-exec and exfil-sink signals.
+    const r = await runScanDirect(path.join(TESTS_DIR, 'staged-loader', 'postinstall-detached-loader'));
+    assert(r.summary.riskScore >= 20, `real sink chain → suspect, got riskScore ${r.summary.riskScore}`);
+    const hasSink = (r.threats || []).some(x => ['suspicious_domain', 'ioc_string_match', 'remote_code_load'].includes(x.type));
+    assert(hasSink, 'postinstall-detached-loader must retain its exfil/remote-exec sink');
+    assert((r.threats || []).some(x => ['detached_process', 'silent_stealth_process'].includes(x.type)),
+      'postinstall-detached-loader must retain its stealth detached-process signal');
+  });
 }
 
 module.exports = { runSinkCouplingTests };

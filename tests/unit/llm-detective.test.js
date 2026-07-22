@@ -585,15 +585,12 @@ async function runLlmDetectiveTests() {
     assert(isCreditExhausted() === false, 'Should not be exhausted by default');
   });
 
-  test('LLM: isLlmEnabled returns false when credits exhausted', () => {
-    resetCreditExhausted();
-    withEnv({ ANTHROPIC_API_KEY: 'test-key', MUADDIB_LLM_ENABLED: undefined }, () => {
-      assert(isLlmEnabled() === true, 'Should be enabled with key');
-      // Simulate credit exhaustion
-      // We can't directly set _creditExhausted, but we can test via investigatePackage
-    });
-    resetCreditExhausted();
-  });
+  // NOTE: the exhausted-credit path of isLlmEnabled() is exercised end-to-end by
+  // the asyncTest below ("credit exhaustion disables LLM for session"), which
+  // drives a real 400 credit-balance response through investigatePackage and then
+  // asserts isLlmEnabled() === false. A separate sync test here could not reach the
+  // exhausted state (the _creditExhausted flag is module-private), so it would only
+  // re-assert the "enabled with key" case already covered above at l.74 — removed.
 
   await asyncTest('LLM: credit exhaustion disables LLM for session', async () => {
     resetStats();

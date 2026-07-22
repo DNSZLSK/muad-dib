@@ -1,8 +1,11 @@
 // Audit interne 2026-05-17 - Phase 1c reachability.js - Tests reproducteurs.
 //
-// CONVENTION : chaque test asserts le comportement BUGGUÉ actuel.
-// - Test PASSE aujourd'hui = bug confirmé existant
-// - Test ÉCHOUERA après le fix prévu = correction validable
+// CONVENTION (mixte depuis la remédiation 2026-07) :
+// - RC-C1.a/b/c : CONVERTIS en gardes de non-régression (FIXED). Le fix est en
+//   place (getEntryPoints énumère prepublishOnly/prepack/postuninstall,
+//   reachability.js:952-957) → ces tests PASSENT et échoueront si le fix régresse.
+// - RC-C2 / H1 / H2 / H3 : gaps ENCORE ouverts — convention d'origine (PASSE =
+//   bug confirmé existant, ÉCHOUERA quand le fix arrivera).
 //
 // Standalone - pas intégré au run-tests.js master pour respecter la discipline
 // "0 code change pendant l'audit". Lancement :
@@ -96,8 +99,8 @@ test('RC-C1.a: pkg.scripts.prepublishOnly référençant un fichier → NON reac
   );
   const eps = getEntryPoints(tmp);
   assert(
-    !eps.includes('evil.js'),
-    `BUG-CONFIRMED : evil.js référencé par prepublishOnly est absent des entry points. Entry points trouvés : ${JSON.stringify(eps)}`
+    eps.includes('evil.js'),
+    `FIXED : evil.js référencé par prepublishOnly DOIT être un entry point (reachability.js:952-957). Entry points trouvés : ${JSON.stringify(eps)}`
   );
 });
 
@@ -116,8 +119,8 @@ test('RC-C1.b: pkg.scripts.prepack référençant un fichier → NON reachable',
   );
   const eps = getEntryPoints(tmp);
   assert(
-    !eps.includes('pack-evil.js'),
-    `BUG-CONFIRMED : pack-evil.js référencé par prepack est absent des entry points. Entry points : ${JSON.stringify(eps)}`
+    eps.includes('pack-evil.js'),
+    `FIXED : pack-evil.js référencé par prepack DOIT être un entry point. Entry points : ${JSON.stringify(eps)}`
   );
 });
 
@@ -136,8 +139,8 @@ test('RC-C1.c: pkg.scripts.postuninstall référençant un fichier → NON reach
   );
   const eps = getEntryPoints(tmp);
   assert(
-    !eps.includes('unhook.js'),
-    `BUG-CONFIRMED : unhook.js référencé par postuninstall absent des entry points. Entry points : ${JSON.stringify(eps)}`
+    eps.includes('unhook.js'),
+    `FIXED : unhook.js référencé par postuninstall DOIT être un entry point. Entry points : ${JSON.stringify(eps)}`
   );
 });
 

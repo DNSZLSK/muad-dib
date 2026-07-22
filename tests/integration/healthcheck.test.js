@@ -60,11 +60,21 @@ async function runHealthcheckTests() {
 
   // --- ping: empty URL does not crash ---
 
-  test('HEALTHCHECK: ping with null URL does not crash', () => {
-    ping(null);
-    ping(undefined);
-    ping('');
-    // No assertion needed — test passes if no exception thrown
+  test('HEALTHCHECK: ping with an empty URL sends no request', () => {
+    // Spy https.get to prove the early `if (!url) return` short-circuits BEFORE any
+    // network call — not just that it doesn't throw.
+    const https = require('https');
+    const orig = https.get;
+    let calls = 0;
+    https.get = (...args) => { calls++; return orig(...args); };
+    try {
+      ping(null);
+      ping(undefined);
+      ping('');
+      assert(calls === 0, `empty URLs must not issue any request, got ${calls}`);
+    } finally {
+      https.get = orig;
+    }
   });
 
   test('HEALTHCHECK: ping with HTTP URL is blocked (no request sent)', () => {
@@ -82,31 +92,66 @@ async function runHealthcheckTests() {
 
   // --- ping: timeout respected (mock server that never responds) ---
 
-  await asyncTest('HEALTHCHECK: ping times out after 5s without crashing', async () => {
-    // Create a server that accepts connections but never responds
-    const server = http.createServer((req, res) => {
-      // Intentionally never respond — simulate timeout
-    });
-
-    await new Promise((resolve, reject) => {
-      server.listen(0, '127.0.0.1', () => resolve());
-      server.on('error', reject);
-    });
-
-    const port = server.address().port;
-    // Use the real ping function but with a localhost URL
-    // Since it's HTTP (not HTTPS), validateHealthcheckUrl will block it.
-    // So we test the timeout behavior by directly calling https.get against
-    // a non-responsive target. The ping function wraps this safely.
-    // Instead, verify that ping() with an unreachable HTTPS URL doesn't crash.
+  test('HEALTHCHECK: ping arms a 5s timeout and destroys the request when it fires', () => {
+    // The old test built a mock server it never used and only checked no-throw.
+    // ping resolves DNS first, then calls https.get INSIDE the dns.resolve4
+    // callback (healthcheck.js:91/101). Mock both — dns to return a public IP
+    // synchronously, https.get to capture — proving the real timeout wiring
+    // ({ timeout: 5000 } + destroy on 'timeout') with no network and no 5s wait.
+    const https = require('https');
+    const dns = require('dns');
+    const origGet = https.get;
+    const origResolve4 = dns.resolve4;
+    let capturedOpts = null;
+    let destroyed = false;
+    const handlers = {};
+    dns.resolve4 = (host, cb) => cb(null, ['1.2.3.4']); // public IP, resolved synchronously
+    https.get = (url, opts) => {
+      capturedOpts = opts;
+      const req = {
+        on: (ev, cb) => { handlers[ev] = cb; return req; },
+        destroy: () => { destroyed = true; }
+      };
+      return req;
+    };
     try {
-      // This will fail DNS or connection, but must NOT throw
+      ping('https://hc-ping.com/abc-123'); // valid HTTPS → passes validation
+      assert(capturedOpts && capturedOpts.timeout === 5000, `ping must arm a 5s timeout, got ${JSON.stringify(capturedOpts)}`);
+      assert(typeof handlers.timeout === 'function', 'ping must register a timeout handler');
+      handlers.timeout(); // simulate the socket timing out
+      assert(destroyed, 'on timeout, ping must destroy the request (no leaked socket)');
+    } finally {
+      https.get = origGet;
+      dns.resolve4 = origResolve4;
+    }
+  });
+
+  test('HEALTHCHECK: ping blocks a host that resolves to a private IP (DNS-rebinding defense)', () => {
+    // Negative counterpart on the same DNS path: a public-looking hostname that
+    // resolves to a private IP must be blocked before https.get is reached.
+    const https = require('https');
+    const dns = require('dns');
+    const origGet = https.get;
+    const origResolve4 = dns.resolve4;
+    let getCalls = 0;
+    dns.resolve4 = (host, cb) => cb(null, ['10.0.0.9']); // private IP
+    https.get = (...args) => { getCalls++; return origGet(...args); };
+    try {
+      ping('https://hc-ping.com/abc-123');
+      assert(getCalls === 0, 'a host resolving to a private IP must be blocked before any request');
+    } finally {
+      https.get = origGet;
+      dns.resolve4 = origResolve4;
+    }
+  });
+
+  await asyncTest('HEALTHCHECK: ping with an unreachable host never throws', async () => {
+    // .invalid is a reserved TLD that always fails DNS locally (no real network).
+    try {
       ping('https://healthcheck-test-nonexistent-domain-12345.invalid/ping');
     } catch (e) {
-      assert(false, 'ping() should never throw: ' + e.message);
+      assert(false, 'ping() must never throw: ' + e.message);
     }
-
-    server.close();
   });
 
   // --- startHealthcheck: no URL = no crash, returns noop stop ---

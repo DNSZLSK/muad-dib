@@ -65,19 +65,15 @@ console.log('');
 // ──────────────────────────────────────────────────────────────────────────
 console.log('\n--- SC-C1: Compound replace gate default OFF ---');
 
-test('SC-C1.a: env var MUADDIB_COMPOUND_REPLACE non-défini par défaut', () => {
-  // Pre-condition for this whole test category : env var must NOT be set.
-  assert(
-    process.env.MUADDIB_COMPOUND_REPLACE === undefined || process.env.MUADDIB_COMPOUND_REPLACE !== '1',
-    'BUG-CONFIRMED: MUADDIB_COMPOUND_REPLACE non set par défaut → constituents pas suppressed'
-  );
-});
+// SC-C1.a removed (remédiation 2026-07): it asserted `MUADDIB_COMPOUND_REPLACE !== '1'`
+// right after the harness `delete process.env.MUADDIB_COMPOUND_REPLACE` — a tautology on
+// its own setup, AND the env-var gate itself is gone (scoring.js:252-256: the compound tag
+// is now honored unconditionally). Nothing left to assert.
 
-test('SC-C1.b: applyCompoundBoosts MARQUE les constituents mais le tag est ignoré par le scoring', () => {
-  // CORRECTION (après 1ère run du test) : la fonction applyCompoundBoosts DOES tag
-  // les constituents (scoring.js:849-858). Le bug réel est que _isReplacedByCompound
-  // (utilisé dans computeGroupScore/Decay) gate sur env var MUADDIB_COMPOUND_REPLACE.
-  // Si pas set, le tag est posé MAIS ignoré → double-count quand même.
+test('SC-C1.b: applyCompoundBoosts marque les constituents et le tag est honoré par le scoring (FIXED)', () => {
+  // Le tag replacedByCompound est désormais honoré INCONDITIONNELLEMENT par le
+  // scoring (scoring.js:252-256, l'ancien gate env-var MUADDIB_COMPOUND_REPLACE est
+  // supprimé). SC-C1.c le prouve : plus de double-count.
   const threats = [
     { type: 'lifecycle_script', severity: 'MEDIUM', file: 'package.json', message: 'postinstall: node hook.js' },
     { type: 'typosquat_detected', severity: 'CRITICAL', file: 'package.json', message: 'Package "expres" resembles "express" (distance 1)' }
@@ -99,11 +95,10 @@ test('SC-C1.b: applyCompoundBoosts MARQUE les constituents mais le tag est ignor
     'Lifecycle (MEDIUM) doit être tagué avec replacedByCompound (compound CRITICAL > MEDIUM)'
   );
 
-  // MAIS le tag est ignoré par le scoring (_isReplacedByCompound gate).
-  // SC-C1.c démontre que computeGroupScore double-compte malgré le tag.
+  // Le tag est honoré par le scoring ; SC-C1.c prouve l'absence de double-count.
 });
 
-test('SC-C1.c: double-count des compounds en computeGroupScore (env_access + websocket_credential_exfil)', () => {
+test('SC-C1.c: computeGroupScore ne double-compte plus les constituents d\'un compound (FIXED)', () => {
   // Cas concret : un fichier émet env_access + suspicious_module_sink
   // → compound websocket_credential_exfil (CRITICAL) injecté
   // Score buggué : compound (25) + env_access (10 si HIGH) + suspicious_module_sink (10 si HIGH) = 45
@@ -120,12 +115,12 @@ test('SC-C1.c: double-count des compounds en computeGroupScore (env_access + web
   const score = computeGroupScore(threats);
   delete process.env.MUADDIB_DECAY;
 
-  // BUG: score doit être ~45 (compound + 2 constituents HIGH) au lieu de ~25 (compound seul)
-  // Note : confidence factor applied. dangerous types are typically 'medium' confidence (0.85).
-  // We assert score > 25 (compound only) to prove double-count
+  // FIXED : les constituents (env_access + suspicious_module_sink) sont supprimés
+  // par le tag replacedByCompound, donc le score reflète le compound SEUL (≈25),
+  // pas la somme buggée ~45. On borne à <=25 pour prouver l'absence de double-count.
   assert(
-    score > 25,
-    `BUG-CONFIRMED: score=${score}, attendu >25 (double-count). Après fix avec replacedByCompound suppression, score doit être ~21-25 (compound seul après confidence factor).`
+    score <= 25 && score >= 15,
+    `FIXED : score=${score}, attendu ≈25 (compound seul, constituents supprimés). Un score >25 signifierait un double-count régressé.`
   );
 });
 
@@ -160,9 +155,10 @@ test('SC-C2.b: 4 credential_regex_harvest tous downgraded LOW (pas de floor)', (
   assertEq(highs.length, 0, `Aucun HIGH restored (count_threshold_floor exige rule.from, manque ici)`);
 });
 
-test('SC-C2.c: Comparison — suspicious_dataflow (no `from` non plus) — même bug ?', () => {
-  // Note : suspicious_dataflow a aussi `{ maxCount: 3, to: 'LOW' }` sans `from`.
-  // Vérifier que c'est le même bug — confirme que c'est systémique pour les types sans `from`.
+test('SC-C2.c: suspicious_dataflow — le dilution floor restaure 1 instance à MEDIUM (FIXED)', () => {
+  // suspicious_dataflow a `{ maxCount: 3, to: 'LOW' }`. Le dilution floor restaure
+  // désormais UNE instance à sa sévérité d'origine (MEDIUM) au lieu de tout écraser
+  // en LOW — 4 LOW + 1 MEDIUM.
   const threats = Array.from({ length: 5 }, (_, i) => ({
     type: 'suspicious_dataflow',
     severity: 'MEDIUM',
@@ -173,9 +169,9 @@ test('SC-C2.c: Comparison — suspicious_dataflow (no `from` non plus) — même
   applyFPReductions(threats, null, 'test-pkg', {});
 
   const lows = threats.filter(t => t.severity === 'LOW');
-  // Note : suspicious_dataflow a un ratio bypass (count > maxCount → bypass) et est MEDIUM dans DATAFLOW_MEDIUM_CAP.
-  // Tous downgraded LOW → si fix dilution floor, 1 reste MEDIUM (severity originale).
-  assertEq(lows.length, 5, `BUG-CONFIRMED: tous 5 suspicious_dataflow sont LOW. Pattern same as credential_regex_harvest.`);
+  const meds = threats.filter(t => t.severity === 'MEDIUM');
+  assertEq(lows.length, 4, `FIXED : 4 des 5 suspicious_dataflow en LOW (1 restauré par le floor).`);
+  assertEq(meds.length, 1, `FIXED : 1 suspicious_dataflow restauré à MEDIUM (dilution floor).`);
 });
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -227,9 +223,10 @@ test('SC-C3.b: env_access count > 4 AVEC lifecycle_script → lifecycle_guard NE
   const envLows = envAccessThreats.filter(t => t.severity === 'LOW');
   const envHighOrMed = envAccessThreats.filter(t => t.severity === 'HIGH' || t.severity === 'MEDIUM');
 
-  // BUG: tous env_access restent LOW malgré lifecycle présent
-  assertEq(envLows.length, 5, `BUG-CONFIRMED: 5 env_access HIGH downgraded LOW malgré lifecycle_script présent (LIFECYCLE_GUARD_TYPES n'inclut pas env_access). Après fix : 1 doit être restored à MEDIUM/HIGH.`);
-  assertEq(envHighOrMed.length, 0, `0 env_access restored. Should be 1 if env_access added to LIFECYCLE_GUARD_TYPES.`);
+  // FIXED : env_access est désormais dans LIFECYCLE_GUARD_TYPES (scoring.js:1469-1471),
+  // donc 1 instance est restaurée quand un lifecycle_script est présent → 4 LOW + 1 restauré.
+  assertEq(envLows.length, 4, `FIXED : 4 des 5 env_access en LOW (1 restauré par le lifecycle_guard).`);
+  assertEq(envHighOrMed.length, 1, `FIXED : 1 env_access restauré (MEDIUM/HIGH) car env_access ∈ LIFECYCLE_GUARD_TYPES.`);
 });
 
 test('SC-C3.c: networkSinkFiles immunity échoue si POST direct sans pattern dataflow', () => {
