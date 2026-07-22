@@ -167,6 +167,10 @@ async function runMcp3TierTests() {
   await asyncTest('MCP3T: --explain output names the gate on trapdoor-zw (operator-visible reason)', async () => {
     const out = runScan(path.join(SAMPLES, 'trapdoor-zw'), '--explain');
     assert(/mcp_config_injection/.test(out), 'explain output mentions the rule');
+    // The test's whole point ("names the gate") is that the operator sees WHY it
+    // fired — the invisible-unicode gate, not just the rule id. Assert the reason.
+    assert(/zero-width|bidi/i.test(out),
+      'explain output must state the zero-width/bidi Unicode gate reason, not just the rule name');
   });
 
   // ── Wave-4 (keyword co-occurrence) shadow coverage ──

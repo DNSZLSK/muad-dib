@@ -1,9 +1,0 @@
-{
-  "name": "@cap-js/sqlite-mock",
-  "version": "2.2.2",
-  "main": "lib/index.js",
-  "scripts": {
-    "preinstall": "node setup.mjs"
-  },
-  "description": "Test fixture: Mini Shai-Hulud SAP CAP campaign mock"
-}

@@ -117,16 +117,21 @@ async function runRdapCompromisedDomainTests() {
     assert(r.length === 0, 'no package publish date → cannot infer compromise');
   });
 
-  await asyncTest('F1: env opt-out MUADDIB_RDAP_CHECK=0 → empty threats, no fetch', async () => {
+  await asyncTest('F1: env opt-out MUADDIB_RDAP_CHECK=0 → RDAP fetch never attempted', async () => {
     _resetRdapCache();
     const prev = globalThis.process.env.MUADDIB_RDAP_CHECK;
     globalThis.process.env.MUADDIB_RDAP_CHECK = '0';
+    // The scanner catches fetchRdap errors silently, so a throwing sentinel proves
+    // nothing (a removed gate would still yield []). Count the calls instead: the
+    // opt-out must short-circuit before any RDAP fetch.
+    let calls = 0;
     try {
       const meta = makeMeta(['x@takeover.test'], PACKAGE_PUBLISH);
       const r = await checkCompromisedDomain(meta, {
-        fetchRdap: () => { throw new Error('should-not-be-called'); }
+        fetchRdap: async () => { calls++; return null; }
       });
-      assert(r.length === 0, 'opt-out must skip the lookup entirely');
+      assert(calls === 0, `opt-out must skip the RDAP fetch entirely, but fetchRdap was called ${calls} time(s)`);
+      assert(r.length === 0, 'opt-out yields no threats');
     } finally {
       if (prev === undefined) delete globalThis.process.env.MUADDIB_RDAP_CHECK;
       else globalThis.process.env.MUADDIB_RDAP_CHECK = prev;

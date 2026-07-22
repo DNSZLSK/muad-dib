@@ -269,10 +269,47 @@ function runReachabilityFunctionsTests() {
     assert(out instanceof Map && out.size === 0, 'empty input -> empty map');
   });
 
-  test('computeReachableFunctions: caps at MAX_FN_REACH_FILES', () => {
-    // Sanity check: the constant is reasonable to bound runtime
-    assert(_internals.MAX_FN_REACH_FILES >= 100 && _internals.MAX_FN_REACH_FILES <= 10000,
-      'MAX_FN_REACH_FILES sanity: ' + _internals.MAX_FN_REACH_FILES);
+  test('computeReachableFunctions: hard-caps processed files at MAX_FN_REACH_FILES', () => {
+    // Behavioral test of the Bounded-resources guard: feed MORE reachable JS files
+    // than the cap and prove computeReachableFunctions stops at exactly the cap
+    // (no crash, result strictly bounded). Each file is tiny and individually
+    // parseable, so every one would be processed if the cap were absent.
+    const cap = _internals.MAX_FN_REACH_FILES;
+    const files = {};
+    for (let i = 0; i < cap + 5; i++) {
+      files['f' + i + '.js'] = 'function fn' + i + '() { return ' + i + '; }\nmodule.exports.fn' + i + ' = fn' + i + ';\n';
+    }
+    const dir = _writePackage(files);
+    try {
+      const out = computeReachableFunctions(dir, new Set(Object.keys(files)));
+      // processed increments only on a successful parse; the loop breaks once it
+      // reaches the cap, so exactly `cap` entries are returned — never cap+5.
+      assert(out.size === cap,
+        'expected exactly ' + cap + ' entries (capped from ' + (cap + 5) + '), got ' + out.size);
+    } finally { _cleanup(dir); }
+  });
+
+  test('computeReachableFunctions: processes every file when under the cap', () => {
+    // Negative counterpart: below the cap, nothing is dropped — the returned map
+    // has one entry per supplied JS file, so the cap above is a real ceiling and
+    // not an unconditional truncation.
+    const cap = _internals.MAX_FN_REACH_FILES;
+    const n = Math.min(12, cap - 1);
+    const files = {};
+    for (let i = 0; i < n; i++) {
+      files['g' + i + '.js'] = 'function gn' + i + '() { return ' + i + '; }\nmodule.exports.gn' + i + ' = gn' + i + ';\n';
+    }
+    const dir = _writePackage(files);
+    try {
+      const out = computeReachableFunctions(dir, new Set(Object.keys(files)));
+      assert(out.size === n, 'expected all ' + n + ' files processed (under cap), got ' + out.size);
+    } finally { _cleanup(dir); }
+  });
+
+  test('computeReachableFunctions: MAX_FN_REACH_BYTES per-file cap is bounded', () => {
+    // The byte cap is a documented Bounded-resources constraint; keep a light
+    // sanity floor so an accidental zeroing is caught. Behavioral coverage of the
+    // size skip lives in the "skips non-JS extensions"/parse-skip paths above.
     assert(_internals.MAX_FN_REACH_BYTES >= 64 * 1024,
       'MAX_FN_REACH_BYTES sanity: ' + _internals.MAX_FN_REACH_BYTES);
   });

@@ -551,19 +551,23 @@ async function runScoringHardeningTests() {
   await asyncTest('PARANOID: detects eval alias (const e = eval; e(code))', async () => {
     const result = await runScanDirect(PARANOID_DIR, { paranoid: true });
     const evalThreats = result.threats.filter(t =>
-      t.type === 'MUADDIB-PARANOID-003' && t.message && t.message.includes('alias')
+      t.type === 'MUADDIB-PARANOID-003' && t.message && t.message.includes('alias of eval')
     );
     assert(evalThreats.length > 0,
       `Should detect eval alias in paranoid mode, got ${evalThreats.length} threats`);
   });
 
   await asyncTest('PARANOID: detects Function alias (const F = Function; new F(code))', async () => {
+    // The eval and Function aliases used to share one fixture file; per-file dedup
+    // collapsed both PARANOID-003 threats into one (the eval one), so this test
+    // passed purely on the eval detection and never verified the Function alias.
+    // They now live in separate fixtures — assert the Function-specific message.
     const result = await runScanDirect(PARANOID_DIR, { paranoid: true });
     const fnThreats = result.threats.filter(t =>
-      t.type === 'MUADDIB-PARANOID-003'
+      t.type === 'MUADDIB-PARANOID-003' && t.message && t.message.includes('alias of Function')
     );
     assert(fnThreats.length > 0,
-      `Should detect Function alias in paranoid mode, got ${fnThreats.length} threats`);
+      `Should detect Function-constructor alias in paranoid mode, got ${fnThreats.length} threats`);
   });
 
   // ===================================================================

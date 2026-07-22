@@ -72,16 +72,22 @@ async function runEmailDomainTests() {
     assert(r1.length === 0 && r2.length === 0);
   });
 
-  await asyncTest('F3: env opt-out MUADDIB_EMAIL_DOMAIN_CHECK=0 → empty threats', async () => {
+  await asyncTest('F3: env opt-out MUADDIB_EMAIL_DOMAIN_CHECK=0 → lookup never attempted', async () => {
     _resetCache();
     const prev = globalThis.process.env.MUADDIB_EMAIL_DOMAIN_CHECK;
     globalThis.process.env.MUADDIB_EMAIL_DOMAIN_CHECK = '0';
+    // A throwing sentinel is useless here: the scanner catches resolver errors
+    // silently (network-failures-silent policy), so a removed opt-out gate would
+    // produce the same empty []. Count invocations instead — the opt-out must
+    // short-circuit BEFORE any MX lookup.
+    let calls = 0;
     try {
       const meta = makeMeta(['alice@unclaimed.test']);
       const r = await checkUnclaimedMaintainerEmail(meta, {
-        resolveMx: () => { throw new Error('should-not-be-called'); }
+        resolveMx: () => { calls++; return Promise.resolve([]); }
       });
-      assert(r.length === 0, 'opt-out must skip the lookup entirely');
+      assert(calls === 0, `opt-out must skip the MX lookup entirely, but resolveMx was called ${calls} time(s)`);
+      assert(r.length === 0, 'opt-out yields no threats');
     } finally {
       if (prev === undefined) delete globalThis.process.env.MUADDIB_EMAIL_DOMAIN_CHECK;
       else globalThis.process.env.MUADDIB_EMAIL_DOMAIN_CHECK = prev;

@@ -37,9 +37,14 @@ async function runEvaluationSmokeTests() {
   });
 
   test('EVAL-SMOKE: Sample lists have no duplicates', () => {
+    // A duplicate in either list silently inflates the ADR/holdout denominator,
+    // biasing the metric. Assert BOTH lists are duplicate-free (the old test built
+    // advSet but never checked it — and the "fn-return-eval appears twice" note was
+    // stale: ADVERSARIAL_SAMPLES currently has zero duplicates).
     const advSet = new Set(ADVERSARIAL_SAMPLES);
-    // Note: fn-return-eval appears twice (Vague 6 Group B), deduplicate check is on unique entries
     const holdSet = new Set(HOLDOUT_SAMPLES);
+    assert(advSet.size === ADVERSARIAL_SAMPLES.length,
+      `ADVERSARIAL_SAMPLES has duplicates: ${ADVERSARIAL_SAMPLES.length} entries, ${advSet.size} unique`);
     assert(holdSet.size === HOLDOUT_SAMPLES.length,
       `HOLDOUT_SAMPLES has duplicates: ${HOLDOUT_SAMPLES.length} entries, ${holdSet.size} unique`);
   });

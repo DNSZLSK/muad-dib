@@ -230,23 +230,44 @@ function runMLClassifierTests() {
     resetModel();
   }
 
-  test('classifyPackage: synthetic model returns clean or malicious (not bypass)', () => {
+  test('classifyPackage: synthetic model returns deterministic clean verdict (score 22)', () => {
     injectSyntheticModel();
     try {
-      // score=22 (in T1 zone), no HC threats → model should decide
+      // score=22 is in the T1 zone (20-34) and 22 < 25 (the tree split), so the
+      // single tree returns leaf -1.5 → sigmoid(-1.5) ≈ 0.182 < 0.5 threshold.
+      // The verdict is therefore DETERMINISTICALLY clean — an inverted (malicious)
+      // verdict here would mean the tree traversal or sigmoid is broken, so we
+      // pin the exact prediction/reason/probability rather than accepting an OR.
       const result = {
         threats: [{ type: 'env_access', severity: 'HIGH', file: 'x.js' }],
         summary: { riskScore: 22, total: 1 }
       };
       const ml = classifyPackage(result, {});
-      assert(
-        ml.prediction === 'clean' || ml.prediction === 'malicious',
-        `expected clean or malicious, got ${ml.prediction} (reason: ${ml.reason})`
-      );
-      assert(
-        ml.reason === 'ml_clean' || ml.reason === 'ml_malicious',
-        `expected ml_clean or ml_malicious, got ${ml.reason}`
-      );
+      assert(ml.prediction === 'clean', `expected clean, got ${ml.prediction} (reason: ${ml.reason})`);
+      assert(ml.reason === 'ml_clean', `expected ml_clean, got ${ml.reason}`);
+      assert(Math.abs(ml.probability - 0.182) < 0.02,
+        `expected probability ≈ 0.182 (sigmoid(-1.5)), got ${ml.probability}`);
+    } finally {
+      restoreNullModel();
+    }
+  });
+
+  test('classifyPackage: synthetic model returns deterministic malicious verdict (score 30)', () => {
+    injectSyntheticModel();
+    try {
+      // Symmetric negative case: score=30 is still in the T1 zone (< 35, so no
+      // score_above_threshold bypass) but 30 >= 25, so the tree returns leaf 1.5
+      // → sigmoid(1.5) ≈ 0.818 >= 0.5 → DETERMINISTICALLY malicious. env_access is
+      // not a HC type, so guard rails don't short-circuit; the model decides.
+      const result = {
+        threats: [{ type: 'env_access', severity: 'HIGH', file: 'x.js' }],
+        summary: { riskScore: 30, total: 1 }
+      };
+      const ml = classifyPackage(result, {});
+      assert(ml.prediction === 'malicious', `expected malicious, got ${ml.prediction} (reason: ${ml.reason})`);
+      assert(ml.reason === 'ml_malicious', `expected ml_malicious, got ${ml.reason}`);
+      assert(Math.abs(ml.probability - 0.818) < 0.02,
+        `expected probability ≈ 0.818 (sigmoid(1.5)), got ${ml.probability}`);
     } finally {
       restoreNullModel();
     }
