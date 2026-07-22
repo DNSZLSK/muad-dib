@@ -243,11 +243,20 @@ function runPreloadTests() {
       `setTimeout/setInterval must stay functions after a reassignment attempt, got "${stdout}"`);
   });
 
-  test('PRELOAD: hides sandbox-revealing env vars (LD_PRELOAD etc.) from process.env', () => {
+  test('PRELOAD: hides sandbox-revealing env vars (LD_PRELOAD) via the real get/has/ownKeys env Proxy traps', () => {
+    // Exercises the REAL process.env Proxy installed by preload.js (section 9): not just the
+    // `get` trap (=== undefined) but also `has` ('LD_PRELOAD' in process.env) and `ownKeys`
+    // (Object.keys(process.env)). Malware probes all three to fingerprint the sandbox; a leak
+    // via any one of them defeats the hiding. This is the longzy anti-evasion contract.
     const { stdout } = runWithPreload(
-      "process.stdout.write('ld='+(process.env.LD_PRELOAD===undefined?'hidden':'LEAKED'))",
+      "const g=process.env.LD_PRELOAD===undefined?'hidden':'LEAKED';" +
+      "const h=('LD_PRELOAD' in process.env)?'LEAKED':'hidden';" +
+      "const k=Object.keys(process.env).includes('LD_PRELOAD')?'LEAKED':'hidden';" +
+      "process.stdout.write('get='+g+',has='+h+',keys='+k)",
       { LD_PRELOAD: '/x/evil.so' });
-    assert(stdout.includes('ld=hidden'), `LD_PRELOAD should be hidden from process.env, got "${stdout}"`);
+    assert(stdout.includes('get=hidden'), `LD_PRELOAD should be hidden via the get trap, got "${stdout}"`);
+    assert(stdout.includes('has=hidden'), `LD_PRELOAD should be hidden via the has trap ('in' operator), got "${stdout}"`);
+    assert(stdout.includes('keys=hidden'), `LD_PRELOAD should be hidden via the ownKeys trap (Object.keys), got "${stdout}"`);
   });
 
   test('PRELOAD: logs sensitive file reads to the forensic log with the [PRELOAD] prefix', () => {
@@ -379,95 +388,70 @@ function runPreloadTests() {
 
   console.log('\n=== PRELOAD LIBFAKETIME TESTS ===\n');
 
-  test('PRELOAD-FAKETIME: HIDDEN_ENV_VARS contains all libfaketime vars', () => {
-    // Verify the HIDDEN_ENV_VARS set defined in preload.js covers all necessary vars
-    const expectedVars = ['LD_PRELOAD', 'FAKETIME', 'DONT_FAKE_MONOTONIC', 'FAKETIME_NO_CACHE', 'MUADDIB_FAKETIME', 'MUADDIB_FAKETIME_ACTIVE'];
-    const hiddenSet = new Set(expectedVars);
-    for (const v of expectedVars) {
-      assert(hiddenSet.has(v), `HIDDEN_ENV_VARS should contain ${v}`);
+  // The full HIDDEN_ENV_VARS set from docker/preload.js (section 1). Kept in one place so the
+  // behavioral tests below cover EVERY var the real preload strips — not a stale subset. If
+  // preload.js adds a hidden var, add it here and the child-process test will exercise it.
+  const REAL_HIDDEN_ENV_VARS = [
+    'LD_PRELOAD', 'FAKETIME', 'DONT_FAKE_MONOTONIC', 'FAKETIME_NO_CACHE',
+    'MUADDIB_FAKETIME', 'MUADDIB_FAKETIME_ACTIVE',
+    'SSL_CERT_FILE', 'NODE_EXTRA_CA_CERTS', 'MUADDIB_UPSTREAM_DNS'
+  ];
+
+  test('PRELOAD-FAKETIME: every HIDDEN_ENV_VARS entry is invisible in the child (real deletion + Proxy)', () => {
+    // Set each hidden var in the child env, then read them all from inside the process where
+    // preload.js is active. Every one must come back undefined — proving the real preload both
+    // deletes them AND masks them via the process.env Proxy. This is what stops longzy-style
+    // malware from reading process.env.LD_PRELOAD / process.env.MUADDIB_FAKETIME to detect us.
+    const childEnv = {};
+    for (const v of REAL_HIDDEN_ENV_VARS) childEnv[v] = 'SENTINEL_' + v;
+    const child =
+      'const vars=' + JSON.stringify(REAL_HIDDEN_ENV_VARS) + ';' +
+      "const leaked=vars.filter(v=>process.env[v]!==undefined);" +
+      "process.stdout.write('leaked='+JSON.stringify(leaked))";
+    const { stdout } = runWithPreload(child, childEnv);
+    assert(/leaked=\[\]/.test(stdout),
+      `no hidden sandbox var may be readable from process.env, got "${stdout.slice(0, 300)}"`);
+    // Negative control: a NON-hidden var passed the same way must still be visible (proves the
+    // test actually plumbs env into the child and isn't trivially green).
+    const { stdout: ctrl } = runWithPreload(
+      "process.stdout.write('marker='+(process.env.MUADDIB_NOT_HIDDEN||'MISSING'))",
+      { MUADDIB_NOT_HIDDEN: 'visible' });
+    assert(ctrl.includes('marker=visible'), `a non-hidden env var must remain visible, got "${ctrl}"`);
+  });
+
+  test('PRELOAD-FAKETIME: MUADDIB_FAKETIME_ACTIVE=1 forces TIME_OFFSET to 0 (no JS-level double acceleration)', () => {
+    // libfaketime already shifts the clock at the C level; when MUADDIB_FAKETIME_ACTIVE=1 the
+    // preload MUST set its own TIME_OFFSET to 0 so Date.now() is NOT shifted a second time.
+    // We observe the real effect: Date.now() stays ~ the real wall clock despite a 72h
+    // NODE_TIMING_OFFSET that would otherwise push it +72h (compare with the l.220 test which
+    // proves the offset IS applied when FAKETIME_ACTIVE is absent).
+    const { stdout } = runWithPreload('process.stdout.write(String(Date.now()))',
+      { MUADDIB_FAKETIME_ACTIVE: '1', NODE_TIMING_OFFSET: '259200000' });
+    const reported = parseInt(stdout.trim(), 10);
+    assert(Number.isFinite(reported), `should print a Date.now, got "${stdout.slice(0, 120)}"`);
+    const delta = reported - Date.now();
+    assert(Math.abs(delta) < 60_000,
+      `Date.now must stay ~real (offset forced to 0) when FAKETIME_ACTIVE, got delta ${delta}ms (a ~+259200000ms delta means double-acceleration)`);
+  });
+
+  test('PRELOAD-FAKETIME: /proc/self/environ read strips hidden sandbox vars (real fs spoof hook)', () => {
+    // Linux-only: /proc/self/environ is the kernel snapshot of the exec-time env, so it still
+    // holds LD_PRELOAD even after preload deletes it from process.env. preload.js section 11d
+    // intercepts this read and filters HIDDEN_ENV_VARS. This is the exact vector longzy used
+    // (read /proc/self/environ to spot libfaketime). Skip off-Linux — no procfs.
+    if (process.platform !== 'linux') {
+      addSkipped(1, 'PRELOAD /proc/self/environ: Linux-only (needs procfs)');
+      return;
     }
-    assert(hiddenSet.size === 6, `Should have exactly 6 hidden vars, got ${hiddenSet.size}`);
-  });
-
-  test('PRELOAD-FAKETIME: FAKETIME_ACTIVE=1 forces TIME_OFFSET to 0', () => {
-    // Simulate the preload.js logic
-    const env = { MUADDIB_FAKETIME_ACTIVE: '1', NODE_TIMING_OFFSET: '259200000' };
-    const FAKETIME_ACTIVE = env.MUADDIB_FAKETIME_ACTIVE === '1';
-    const TIME_OFFSET = FAKETIME_ACTIVE ? 0 : parseInt(env.NODE_TIMING_OFFSET || '0', 10);
-    assert(FAKETIME_ACTIVE === true, 'FAKETIME_ACTIVE should be true');
-    assert(TIME_OFFSET === 0, 'TIME_OFFSET must be 0 when FAKETIME_ACTIVE (prevents double acceleration)');
-  });
-
-  test('PRELOAD-FAKETIME: FAKETIME_ACTIVE absent → normal TIME_OFFSET', () => {
-    const env = { NODE_TIMING_OFFSET: '259200000' };
-    const FAKETIME_ACTIVE = env.MUADDIB_FAKETIME_ACTIVE === '1';
-    const TIME_OFFSET = FAKETIME_ACTIVE ? 0 : parseInt(env.NODE_TIMING_OFFSET || '0', 10);
-    assert(FAKETIME_ACTIVE === false, 'FAKETIME_ACTIVE should be false');
-    assert(TIME_OFFSET === 259200000, 'TIME_OFFSET should be 259200000 when FAKETIME not active');
-  });
-
-  test('PRELOAD-FAKETIME: /proc/self/environ filter logic strips hidden vars', () => {
-    // Simulate the /proc/self/environ filtering logic from preload.js
-    const HIDDEN_ENV_VARS = new Set([
-      'LD_PRELOAD', 'FAKETIME', 'DONT_FAKE_MONOTONIC',
-      'FAKETIME_NO_CACHE', 'MUADDIB_FAKETIME', 'MUADDIB_FAKETIME_ACTIVE'
-    ]);
-    const rawEnv = [
-      'HOME=/home/sandboxuser',
-      'LD_PRELOAD=/usr/lib/faketime/libfaketime.so.1',
-      'FAKETIME=+3d x1000',
-      'DONT_FAKE_MONOTONIC=1',
-      'FAKETIME_NO_CACHE=1',
-      'PATH=/usr/bin:/bin',
-      'NODE_OPTIONS=--require /opt/node_setup.js'
-    ].join('\0');
-    const filtered = rawEnv.split('\0')
-      .filter(function (e) { return !HIDDEN_ENV_VARS.has(e.split('=')[0]); })
-      .join('\0');
-    assert(!filtered.includes('LD_PRELOAD'), 'LD_PRELOAD should be stripped');
-    assert(!filtered.includes('FAKETIME'), 'FAKETIME should be stripped');
-    assert(!filtered.includes('DONT_FAKE_MONOTONIC'), 'DONT_FAKE_MONOTONIC should be stripped');
-    assert(filtered.includes('HOME=/home/sandboxuser'), 'HOME should be preserved');
-    assert(filtered.includes('PATH=/usr/bin:/bin'), 'PATH should be preserved');
-    assert(filtered.includes('NODE_OPTIONS'), 'NODE_OPTIONS should be preserved');
-  });
-
-  test('PRELOAD-FAKETIME: Proxy env traps hide sandbox vars', () => {
-    // Simulate the env Proxy traps from preload.js
-    const HIDDEN_ENV_VARS = new Set(['LD_PRELOAD', 'FAKETIME']);
-    const fakeEnv = {
-      HOME: '/home/user',
-      LD_PRELOAD: '/usr/lib/faketime/libfaketime.so.1',
-      FAKETIME: '+3d x1000',
-      PATH: '/usr/bin'
-    };
-    const proxy = new Proxy(fakeEnv, {
-      get: function (target, prop) {
-        if (typeof prop === 'string' && HIDDEN_ENV_VARS.has(prop)) return undefined;
-        return target[prop];
-      },
-      has: function (target, prop) {
-        if (typeof prop === 'string' && HIDDEN_ENV_VARS.has(prop)) return false;
-        return prop in target;
-      },
-      ownKeys: function (target) {
-        return Reflect.ownKeys(target).filter(k => !HIDDEN_ENV_VARS.has(k));
-      },
-      getOwnPropertyDescriptor: function (target, prop) {
-        if (typeof prop === 'string' && HIDDEN_ENV_VARS.has(prop)) return undefined;
-        return Object.getOwnPropertyDescriptor(target, prop);
-      }
-    });
-    assert(proxy.LD_PRELOAD === undefined, 'LD_PRELOAD should be hidden via get trap');
-    assert(proxy.FAKETIME === undefined, 'FAKETIME should be hidden via get trap');
-    assert(proxy.HOME === '/home/user', 'HOME should be accessible');
-    assert(!('LD_PRELOAD' in proxy), 'LD_PRELOAD should be hidden via has trap');
-    assert(('HOME' in proxy), 'HOME should be visible via has trap');
-    const keys = Object.keys(proxy);
-    assert(!keys.includes('LD_PRELOAD'), 'LD_PRELOAD should be hidden from ownKeys');
-    assert(!keys.includes('FAKETIME'), 'FAKETIME should be hidden from ownKeys');
-    assert(keys.includes('HOME'), 'HOME should be in ownKeys');
-    assert(keys.includes('PATH'), 'PATH should be in ownKeys');
+    const { stdout } = runWithPreload(
+      "process.stdout.write(require('fs').readFileSync('/proc/self/environ','utf8'))",
+      { LD_PRELOAD: '/usr/lib/faketime/libfaketime.so.1', FAKETIME: '+3d x1000', MUADDIB_FAKETIME: '1' });
+    assert(!stdout.includes('LD_PRELOAD'), 'LD_PRELOAD must be stripped from /proc/self/environ');
+    assert(!stdout.includes('libfaketime'), 'the libfaketime .so path must not leak via /proc/self/environ');
+    assert(!stdout.includes('FAKETIME=+3d'), 'FAKETIME value must be stripped from /proc/self/environ');
+    // Negative control: a non-hidden var (PATH always present on Linux) must survive the filter,
+    // proving the spoof returns the real (filtered) environ, not an empty buffer.
+    assert(stdout.includes('PATH'), 'non-hidden vars (PATH) must be preserved in the spoofed environ');
   });
 }
 

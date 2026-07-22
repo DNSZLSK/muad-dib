@@ -15,7 +15,18 @@ const failures = [];
 function test(name, fn) {
   const t0 = Date.now();
   try {
-    fn();
+    // Harness guard: test() runs fn synchronously and never awaits. An async
+    // fn (or a returned Promise) would be marked PASS before its assertions
+    // execute — the test could never fail. Fail loudly instead (audit 2026-07:
+    // fpr-live.test.js had 7 always-green tests this way).
+    if (fn.constructor.name === 'AsyncFunction') {
+      throw new Error('async callback passed to test() — use "await asyncTest(...)" instead');
+    }
+    const ret = fn();
+    if (ret && typeof ret.then === 'function') {
+      ret.catch(() => {}); // avoid a stray unhandledRejection on top of the failure
+      throw new Error('test() callback returned a Promise — use "await asyncTest(...)" instead');
+    }
     const ms = Date.now() - t0;
     const tag = ms > 5000 ? ` [SLOW ${(ms/1000).toFixed(1)}s]` : ms > 1000 ? ` [${(ms/1000).toFixed(1)}s]` : '';
     console.log(`[PASS] ${name}${tag}`);
@@ -31,7 +42,31 @@ function test(name, fn) {
   }
 }
 
+// Every asyncTest invocation registers its promise here until it settles.
+// run-tests.js drains this set before the final tally so a floating
+// `asyncTest(...)` call (missing `await`) can never have its failure
+// silently killed by the runner's synchronous process.exit.
+const _pendingAsync = new Set();
+
 async function asyncTest(name, fn) {
+  const promise = _asyncTestBody(name, fn);
+  _pendingAsync.add(promise);
+  try {
+    return await promise;
+  } finally {
+    _pendingAsync.delete(promise);
+  }
+}
+
+async function drainPendingAsync() {
+  const pending = [..._pendingAsync];
+  if (pending.length > 0) {
+    await Promise.allSettled(pending);
+  }
+  return pending.length;
+}
+
+async function _asyncTestBody(name, fn) {
   const t0 = Date.now();
   let unhandled = null;
   const handler = (reason) => { unhandled = reason; };
@@ -192,7 +227,13 @@ function getCounters() {
   return { passed, failed, skipped, failures };
 }
 
-function addSkipped(n) {
+function addSkipped(n, reason) {
+  // Harness guard: a string here silently corrupts the skipped counter into
+  // a concatenated string ("2Docker not available…"), mangling the final tally.
+  if (typeof n !== 'number' || !Number.isFinite(n)) {
+    throw new Error(`addSkipped(n, reason?) requires a numeric count, got ${typeof n}`);
+  }
+  if (reason) console.log(`[SKIP] ${reason}`);
   skipped += n;
 }
 
@@ -249,6 +290,7 @@ module.exports = {
   BIN,
   test,
   asyncTest,
+  drainPendingAsync,
   assert,
   assertIncludes,
   assertNotIncludes,

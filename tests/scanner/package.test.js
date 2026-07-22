@@ -2,6 +2,32 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { test, asyncTest, assert, assertIncludes, assertNotIncludes, runScan, runScanDirect, runScanFast, cleanupTemp, TESTS_DIR } = require('../test-utils');
+const { loadCachedIOCs } = require('../../src/ioc/updater.js');
+
+// Inject fake wildcard-malicious package names into the live IOC singleton so
+// the package scanner (dependency_ioc_match) actually has something to match on
+// declared deps — otherwise the dep-scanning tests are vacuous in CI (no IOC DB).
+async function withInjectedIocPackages(names, fn) {
+  const iocs = loadCachedIOCs();
+  const origWildcard = iocs.wildcardPackages;
+  const origMap = iocs.packagesMap;
+  const wildcard = origWildcard instanceof Set ? origWildcard : new Set();
+  const map = origMap instanceof Map ? origMap : new Map();
+  iocs.wildcardPackages = wildcard;
+  iocs.packagesMap = map;
+  const added = [];
+  for (const n of names) {
+    if (!wildcard.has(n)) { wildcard.add(n); added.push(n); }
+    if (!map.has(n)) map.set(n, [{ version: '*', source: 'test-injected' }]);
+  }
+  try {
+    return await fn();
+  } finally {
+    for (const n of added) { wildcard.delete(n); map.delete(n); }
+    iocs.wildcardPackages = origWildcard;
+    iocs.packagesMap = origMap;
+  }
+}
 
 async function runPackageTests() {
   console.log('\n=== PACKAGE.JSON TESTS ===\n');
@@ -26,8 +52,10 @@ async function runPackageTests() {
     }));
     try {
       const result = await runScanDirect(tmp);
-      // Should not crash, bundledDependencies should be processed
-      assert(result && typeof result === 'object', 'Should return valid result');
+      // A benign bundledDependencies array must be processed without inventing a
+      // threat for the bundled name (it's a string array, not a version map).
+      const bundledThreat = result.threats.find(t => t.message && t.message.includes('safe-pkg'));
+      assert(!bundledThreat, 'A benign bundledDependencies entry must not be flagged');
     } finally { cleanupTemp(tmp); }
   });
 
@@ -56,8 +84,12 @@ async function runPackageTests() {
     }));
     try {
       const result = await runScanDirect(tmp);
-      // Should not crash on git URL
-      assert(result && typeof result === 'object', 'Should handle git URL dependency');
+      // A git+https dependency spec must be skipped in the IOC check (it has no
+      // resolvable registry version), so it must not be flagged as a known IOC.
+      const gitThreat = result.threats.find(t =>
+        t.message && t.message.includes('some-pkg') &&
+        (t.type === 'known_malicious_package' || t.type === 'dependency_ioc_match'));
+      assert(!gitThreat, 'A git URL dependency must be skipped in the IOC check');
     } finally { cleanupTemp(tmp); }
   });
 
@@ -243,28 +275,33 @@ async function runPackageTests() {
 
   // --- No package.json ---
 
-  await asyncTest('PACKAGE: Returns empty threats for missing package.json', async () => {
+  await asyncTest('PACKAGE: Emits no threats for a directory with a lone benign file and no package.json', async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pkg-'));
     fs.writeFileSync(path.join(tmp, 'index.js'), '// nothing');
     try {
       const result = await runScanDirect(tmp);
-      // No package.json, should not crash
-      assert(result && typeof result === 'object', 'Should handle missing package.json');
+      assert(result.threats.length === 0,
+        `A benign file with no package.json must yield zero threats, got ${result.threats.length}: ${result.threats.map(t => t.type).join(',')}`);
     } finally { cleanupTemp(tmp); }
   });
 
   // --- devDependencies / optionalDependencies scanning ---
 
-  await asyncTest('PACKAGE: Scans devDependencies and optionalDependencies', async () => {
+  await asyncTest('PACKAGE: Scans devDependencies AND optionalDependencies against IOCs', async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pkg-'));
     fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
       name: 'test-pkg', version: '1.0.0',
-      devDependencies: { 'safe-dev': '1.0.0' },
-      optionalDependencies: { 'safe-opt': '1.0.0' }
+      devDependencies: { 'evil-dev-dep': '1.0.0', 'safe-dev': '1.0.0' },
+      optionalDependencies: { 'evil-opt-dep': '1.0.0' }
     }));
     try {
-      const result = await runScanDirect(tmp);
-      assert(result && typeof result === 'object', 'Should scan dev and optional deps without error');
+      const result = await withInjectedIocPackages(['evil-dev-dep', 'evil-opt-dep'], () => runScanDirect(tmp));
+      const devHit = result.threats.find(t => t.type === 'dependency_ioc_match' && t.matchedDep === 'evil-dev-dep');
+      const optHit = result.threats.find(t => t.type === 'dependency_ioc_match' && t.matchedDep === 'evil-opt-dep');
+      assert(devHit, 'A malicious devDependency must be flagged (devDependencies are scanned)');
+      assert(optHit, 'A malicious optionalDependency must be flagged (optionalDependencies are scanned)');
+      const safeHit = result.threats.find(t => t.type === 'dependency_ioc_match' && t.matchedDep === 'safe-dev');
+      assert(!safeHit, 'The benign devDependency must not be flagged');
     } finally { cleanupTemp(tmp); }
   });
 

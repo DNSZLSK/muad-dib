@@ -474,9 +474,10 @@ function runMLFeatureExtractorTests() {
     };
     const features = extractFeatures(result, {});
     const keys = Object.keys(features);
-    // Core: 4 + Severity: 5 + Distinct: 1 + Per-type: 32 + Booleans: 10
-    // + File dist: 3 + Ratios: 3 + Meta: 3 + Reputation: 1 + Enriched: 9 = 71
-    assert(keys.length >= 64, `Feature vector should have 64+ keys, got ${keys.length}`);
+    // Exact contract: the vector always has the same keys (metadata-derived ones
+    // default to 0 when absent, they are not omitted). A `>=` floor let features
+    // silently vanish. Update this number only on a deliberate feature change.
+    assert(keys.length === 99, `Feature vector must have exactly 99 keys, got ${keys.length}`);
   });
 
   // --- Enriched features (Phase 2a) ---
@@ -539,7 +540,7 @@ function runMLFeatureExtractorTests() {
     assert(features.threat_density === 1.5, `threat_density should be 1.5, got ${features.threat_density}`);
   });
 
-  test('buildTrainingRecord: enriched features key count >= 64', () => {
+  test('buildTrainingRecord: enriched record key count is exact', () => {
     const result = {
       threats: [{ type: 'env_access', severity: 'HIGH', file: 'x.js' }],
       summary: { total: 1, critical: 0, high: 1, medium: 0, low: 0, riskScore: 10 }
@@ -553,8 +554,8 @@ function runMLFeatureExtractorTests() {
       hasTests: false
     });
     const keys = Object.keys(record);
-    // Identity (4) + label (2) + features (71) + sandbox (2) = 79
-    assert(keys.length >= 70, `Record should have 70+ keys, got ${keys.length}`);
+    // Exact contract: identity + label + full feature vector + sandbox fields.
+    assert(keys.length === 107, `Training record must have exactly 107 keys, got ${keys.length}`);
     assert(typeof record.package_age_days === 'number', 'should have package_age_days');
     assert(typeof record.threat_density === 'number', 'should have threat_density');
   });

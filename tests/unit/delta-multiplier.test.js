@@ -17,18 +17,28 @@ const {
   MIN_PRIOR_VERSIONS_FOR_DECAY
 } = dm;
 
-function _withTempCacheDir(fn) {
-  // Tests use the same cache as production but with synthetic package names
-  // so collisions are impossible. The cache is a key/value store on disk.
-  return fn();
-}
-
 function _uniquePackage() {
   return 'muaddib-test-' + Math.random().toString(36).slice(2, 10);
 }
 
+// The cache dir is the real one (CACHE_DIR is captured at module load, before
+// this file runs, so an env redirect would be too late). Instead we snapshot it
+// and delete only the files this suite creates — test packages have unique
+// random names, so a new file after the run is always our litter.
+function _snapshotCacheDir() {
+  try { return new Set(fs.readdirSync(dm.CACHE_DIR)); } catch { return new Set(); }
+}
+function _cleanupNewCacheFiles(before) {
+  let after;
+  try { after = fs.readdirSync(dm.CACHE_DIR); } catch { return; }
+  for (const f of after) {
+    if (!before.has(f)) { try { fs.unlinkSync(path.join(dm.CACHE_DIR, f)); } catch { /* ignore */ } }
+  }
+}
+
 function runDeltaMultiplierTests() {
   console.log('\n=== DELTA MULTIPLIER TESTS (Chantier 3) ===\n');
+  const _cacheSnapshot = _snapshotCacheDir();
 
   // ---------------------------------------------------------------------------
   // buildThreatSignature
@@ -351,6 +361,10 @@ function runDeltaMultiplierTests() {
     assert(out instanceof Map, 'returns a Map');
     assert(out.size === 0, 'no cache entries to load');
   });
+
+  // Remove the cache files this suite wrote so it does not pollute the repo's
+  // .muaddib-cache between runs (or interfere with the cache-eviction logic).
+  _cleanupNewCacheFiles(_cacheSnapshot);
 }
 
 module.exports = { runDeltaMultiplierTests };

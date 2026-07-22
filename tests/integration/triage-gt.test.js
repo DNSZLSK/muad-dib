@@ -7,25 +7,11 @@ const { test, assert } = require('../test-utils');
 async function runTriageGtTests() {
   console.log('\n=== TRIAGE GT COVERAGE TESTS ===\n');
 
-  // The QUICK_SCAN_ALLOWLIST lives in src/pipeline/executor.js. We re-declare
-  // it here on purpose so the test fails if either side drifts — the test is
-  // the contract that documents which scanners must keep the GT covered.
-  const QUICK_SCAN_ALLOWLIST = new Set([
-    'scanPackageJson',
-    'scanShellScripts',
-    'analyzeAST',
-    'detectObfuscation',
-    'scanDependencies',
-    'analyzeDataFlow',
-    'scanTyposquatting',
-    'scanGitHubActions',
-    'matchPythonIOCs',
-    'scanEntropy',
-    'scanIocStrings',
-    'scanPythonSource',
-    'scanPythonAST',
-    'scanAIConfig',
-  ]);
+  // The REAL allowlist, imported from the executor. The previous local replica
+  // had already drifted (14 entries vs 16 in executor.js — scanAntiScannerInjection
+  // and scanBinarySource were missing) while its comment claimed "the test fails
+  // if either side drifts". Coverage below is computed against the true set.
+  const { QUICK_SCAN_ALLOWLIST, SCANNER_NAMES } = require('../../src/pipeline/executor.js');
 
   // Maps the short scanner names used in attacks.json's `expected.scanners`
   // to the module-level names used in executor.js's SCANNER_NAMES.
@@ -67,16 +53,27 @@ async function runTriageGtTests() {
 
   // ── Coverage analysis ──────────────────────────────────────────────────
 
-  test('TRIAGE-GT: QUICK_SCAN_ALLOWLIST contract matches executor.js (14 scanners)', () => {
-    const expected = [
+  test('TRIAGE-GT: quick allowlist keeps the non-negotiable GT anchors and stays inside SCANNER_NAMES', () => {
+    // TPR anchors (analyzeAST covers 70/96 GT, analyzeDataFlow 31/96) plus the
+    // cheap high-signal scanners quick mode cannot lose. Membership assertions
+    // on the REAL set — additions to the allowlist are allowed, removals of
+    // these anchors are not.
+    const anchors = [
       'scanPackageJson', 'scanShellScripts', 'analyzeAST', 'detectObfuscation',
       'scanDependencies', 'analyzeDataFlow', 'scanTyposquatting', 'scanGitHubActions',
       'matchPythonIOCs', 'scanEntropy', 'scanIocStrings', 'scanPythonSource', 'scanPythonAST',
       'scanAIConfig'
     ];
-    assert(QUICK_SCAN_ALLOWLIST.size === expected.length,
-      `allowlist size ${QUICK_SCAN_ALLOWLIST.size} vs expected ${expected.length}`);
-    for (const s of expected) assert(QUICK_SCAN_ALLOWLIST.has(s), `${s} missing from allowlist`);
+    for (const s of anchors) assert(QUICK_SCAN_ALLOWLIST.has(s), `${s} missing from allowlist`);
+    // Every allowlist entry must be a real scanner name — a typo here would
+    // silently disable the scanner in quick mode (ifEnabled would never match).
+    for (const s of QUICK_SCAN_ALLOWLIST) {
+      assert(SCANNER_NAMES.includes(s), `allowlist entry ${s} is not in SCANNER_NAMES — typo would silently drop it in quick mode`);
+    }
+    // Deliberate exclusions (documented in executor.js) must stay excluded —
+    // re-adding scanAntiForensic would reintroduce its 45s timeout in quick mode.
+    assert(!QUICK_SCAN_ALLOWLIST.has('scanAntiForensic'), 'scanAntiForensic is excluded by design (45s timeout)');
+    assert(!QUICK_SCAN_ALLOWLIST.has('scanTrustedDepDiff'), 'scanTrustedDepDiff is opt-in only');
   });
 
   test('TRIAGE-GT: every GT attack with declared scanners has AT LEAST ONE in quick allowlist', () => {

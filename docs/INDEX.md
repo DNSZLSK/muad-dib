@@ -24,11 +24,11 @@
 |----------|-------------|
 | [Carnet de Bord](CARNET_DE_BORD_MUADDIB.md) | Development journal (French) — project history and decisions |
 
-## Current Metrics (v<!--stat:version-->2.11.175<!--/stat:version-->; detection metrics last measured v2.11.48)
+## Current Metrics (v<!--stat:version-->2.11.176<!--/stat:version-->; detection metrics last measured v2.11.48)
 
 | Metric | Value |
 |--------|-------|
-| Tests | **<!--stat:tests-->4561<!--/stat:tests-->** across <!--stat:testFiles-->152<!--/stat:testFiles--> files |
+| Tests | **<!--stat:tests-->4534<!--/stat:tests-->** across <!--stat:testFiles-->152<!--/stat:testFiles--> files |
 | Rules | **<!--stat:rulesTotal-->277<!--/stat:rulesTotal-->** (<!--stat:rulesCore-->272<!--/stat:rulesCore--> RULES + <!--stat:rulesParanoid-->5<!--/stat:rulesParanoid--> PARANOID - v2.11.67/70 Phantom Gyp added PKG-023 + COMPOUND-017) |
 | Scanners | **<!--stat:scanners-->22<!--/stat:scanners--> parallel** + 2 pre-analysis (module-graph, deobfuscate) + 1 async parser bootstrap (python-ast WASM) + 6 conditional/post-processing (paranoid, 3× temporal-*, reachability, phantom-gyp) + 1 metadata (npm-registry) |
 | TPR@3 (Ground Truth, v2.11.48 measure) | **95.74%** (90/94 in-scope) — full re-measurement on enriched GT |

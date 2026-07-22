@@ -4,7 +4,9 @@ const os = require('os');
 const { test, asyncTest, assert, createTempPkg, cleanupTemp } = require('../test-utils');
 const {
   scanDependencies,
-  checkRehabilitatedPackage
+  checkRehabilitatedPackage,
+  listPackages,
+  getPackageVersion
 } = require('../../src/scanner/dependencies.js');
 const { safeInstall } = require('../../src/safe-install.js');
 
@@ -131,58 +133,73 @@ async function runDependencyTests() {
     }
   });
 
-  await asyncTest('DEPS: listPackages handles scoped packages', async () => {
-    const tmpDir = createTempPkg([{ name: '@test-scope/test-pkg', version: '1.0.0' }]);
-    try {
-      const threats = await scanDependencies(tmpDir);
-      assert(Array.isArray(threats), 'Should handle scoped packages');
-    } finally {
-      cleanupTemp(tmpDir);
-    }
-  });
-
-  await asyncTest('DEPS: listPackages skips hidden directories', async () => {
+  test('DEPS: listPackages resolves scoped packages to "@scope/name" with version', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-test-'));
-    fs.mkdirSync(path.join(tmpDir, 'node_modules', '.cache'), { recursive: true });
+    const nmDir = path.join(tmpDir, 'node_modules');
+    const scopedDir = path.join(nmDir, '@test-scope', 'test-pkg');
+    fs.mkdirSync(scopedDir, { recursive: true });
+    fs.writeFileSync(path.join(scopedDir, 'package.json'), JSON.stringify({ name: '@test-scope/test-pkg', version: '2.1.0' }));
     try {
-      const threats = await scanDependencies(tmpDir);
-      assert(Array.isArray(threats), 'Should skip hidden dirs');
+      const pkgs = listPackages(nmDir);
+      const scoped = pkgs.find(p => p.name === '@test-scope/test-pkg');
+      assert(scoped, 'Scoped package must be listed under its full @scope/name');
+      assert(scoped.version === '2.1.0', `Should read the scoped version, got ${scoped.version}`);
     } finally {
       cleanupTemp(tmpDir);
     }
   });
 
-  await asyncTest('DEPS: listPackages skips non-directory items', async () => {
+  test('DEPS: listPackages skips hidden directories (.cache is not a package)', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-test-'));
+    const nmDir = path.join(tmpDir, 'node_modules');
+    fs.mkdirSync(path.join(nmDir, '.cache'), { recursive: true });
+    fs.mkdirSync(path.join(nmDir, 'real-pkg'), { recursive: true });
+    try {
+      const pkgs = listPackages(nmDir);
+      assert(!pkgs.some(p => p.name === '.cache'), 'Hidden .cache dir must be skipped');
+      assert(pkgs.some(p => p.name === 'real-pkg'), 'Non-hidden package must still be listed');
+    } finally {
+      cleanupTemp(tmpDir);
+    }
+  });
+
+  test('DEPS: listPackages skips non-directory items (a stray file is not a package)', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-test-'));
     const nmDir = path.join(tmpDir, 'node_modules');
     fs.mkdirSync(nmDir, { recursive: true });
     fs.writeFileSync(path.join(nmDir, 'README.md'), 'hello');
+    fs.mkdirSync(path.join(nmDir, 'real-pkg'), { recursive: true });
     try {
-      const threats = await scanDependencies(tmpDir);
-      assert(Array.isArray(threats), 'Should skip files');
+      const pkgs = listPackages(nmDir);
+      assert(!pkgs.some(p => p.name === 'README.md'), 'A plain file must not be listed as a package');
+      assert(pkgs.some(p => p.name === 'real-pkg'), 'The real package dir must still be listed');
     } finally {
       cleanupTemp(tmpDir);
     }
   });
 
-  await asyncTest('DEPS: getPackageVersion returns * without package.json', async () => {
+  test('DEPS: getPackageVersion returns "*" when package.json is absent', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-test-'));
-    fs.mkdirSync(path.join(tmpDir, 'node_modules', 'no-pkg-json'), { recursive: true });
+    const pkgDir = path.join(tmpDir, 'no-pkg-json');
+    fs.mkdirSync(pkgDir, { recursive: true });
     try {
-      const threats = await scanDependencies(tmpDir);
-      assert(Array.isArray(threats), 'Should not crash');
+      assert(getPackageVersion(pkgDir) === '*', 'Missing package.json → version "*"');
     } finally {
       cleanupTemp(tmpDir);
     }
   });
 
-  await asyncTest('DEPS: getPackageVersion returns * for missing version field', async () => {
-    const tmpDir = createTempPkg([
-      { name: 'no-version-pkg', rawPkgJson: JSON.stringify({ name: 'no-version-pkg' }) }
-    ]);
+  test('DEPS: getPackageVersion returns "*" when the version field is missing, else the version', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-test-'));
+    const noVer = path.join(tmpDir, 'no-version');
+    const withVer = path.join(tmpDir, 'with-version');
+    fs.mkdirSync(noVer, { recursive: true });
+    fs.mkdirSync(withVer, { recursive: true });
+    fs.writeFileSync(path.join(noVer, 'package.json'), JSON.stringify({ name: 'no-version' }));
+    fs.writeFileSync(path.join(withVer, 'package.json'), JSON.stringify({ name: 'with-version', version: '3.4.5' }));
     try {
-      const threats = await scanDependencies(tmpDir);
-      assert(Array.isArray(threats), 'Should handle missing version');
+      assert(getPackageVersion(noVer) === '*', 'Missing version field → "*"');
+      assert(getPackageVersion(withVer) === '3.4.5', 'Present version field → its value');
     } finally {
       cleanupTemp(tmpDir);
     }
@@ -214,25 +231,39 @@ async function runDependencyTests() {
     assert(result.package === 'coa', 'Should identify coa');
   });
 
-  await asyncTest('SAFE-INSTALL: cache prevents rescan, IOC catches malicious', async () => {
-    const result = await quietSafeInstall(['lodahs']);
-    assert(result.blocked === true, 'Should be blocked by lodahs');
-    assert(result.package === 'lodahs', 'Should identify lodahs');
-  });
-
   await asyncTest('SAFE-INSTALL: scoped package version parsing + invalid name', async () => {
     const result = await quietSafeInstall(['@evil/foo;bar@1.0.0']);
     assert(result.blocked === true, 'Should be blocked');
   });
 
-  await asyncTest('SAFE-INSTALL: force mode continues then name validation blocks', async () => {
+  await asyncTest('SAFE-INSTALL: force mode bypasses IOC block, name validation still blocks the bad name', async () => {
+    // With force:true the lodahs IOC block is bypassed (install continues), so
+    // the block must come from the invalid name 'foo;rm' — not from lodahs.
     const result = await quietSafeInstall(['lodahs', 'foo;rm'], { force: true });
     assert(result.blocked === true, 'Should be blocked by name validation');
+    assert(result.package === 'foo;rm', `The blocker must be the invalid name, not lodahs — got ${result.package}`);
   });
 
-  await asyncTest('SAFE-INSTALL: rehabilitated safe package passes checkIOCs', async () => {
-    const result = await quietSafeInstall(['chalk', 'lodahs']);
-    assert(result.blocked === true, 'Should be blocked');
+  await asyncTest('SAFE-INSTALL: a non-IOC package passes the IOC check; the real IOC (lodahs) is the blocker', async () => {
+    // Mock `npm view` to succeed so chalk clears the registry check offline —
+    // otherwise fail-closed blocks chalk first and we never reach lodahs. This
+    // isolates the IOC-check discrimination: chalk (not in IOC) must pass, and
+    // lodahs (wildcard IOC, caught before npm view) must be the blocker.
+    const cp = require('child_process');
+    const origSpawn = cp.spawnSync;
+    cp.spawnSync = (cmd, args, opts) => {
+      if (Array.isArray(args) && args[0] === 'view') {
+        return { status: 0, stdout: JSON.stringify({ name: args[1], version: '5.0.0' }), stderr: '', error: null };
+      }
+      return origSpawn(cmd, args, opts);
+    };
+    try {
+      const result = await quietSafeInstall(['chalk', 'lodahs']);
+      assert(result.blocked === true, 'Should be blocked');
+      assert(result.package === 'lodahs', `chalk must pass the IOC check — the blocker is lodahs, got ${result.package}`);
+    } finally {
+      cp.spawnSync = origSpawn;
+    }
   });
 
   await asyncTest('SAFE-INSTALL: non-scoped package with version parsing', async () => {
@@ -240,9 +271,25 @@ async function runDependencyTests() {
     assert(result.blocked === true, 'Should be blocked');
   });
 
-  await asyncTest('SAFE-INSTALL: depth=0 unknown pkg blocked by npm view fail', async () => {
-    const result = await quietSafeInstall(['zzz-nonexistent-pkg-99999', 'lodahs']);
-    assert(result.blocked === true, 'Should be blocked');
+  await asyncTest('SAFE-INSTALL: an unknown package is blocked when npm view fails (fail-closed)', async () => {
+    // Mock `npm view` to fail deterministically (offline-hermetic). safe-install
+    // keeps cp.spawnSync mockable on purpose (see its module header comment).
+    const cp = require('child_process');
+    const origSpawn = cp.spawnSync;
+    cp.spawnSync = (cmd, args, opts) => {
+      if (Array.isArray(args) && args[0] === 'view') {
+        return { status: 1, stdout: '', stderr: 'npm ERR! 404 Not found', error: null };
+      }
+      return origSpawn(cmd, args, opts);
+    };
+    try {
+      const result = await quietSafeInstall(['zzz-nonexistent-pkg-99999']);
+      assert(result.blocked === true, 'Unknown package with a failing npm view must be blocked (fail-closed)');
+      assert(result.package === 'zzz-nonexistent-pkg-99999',
+        `The blocked package must be the unknown one, got ${result.package}`);
+    } finally {
+      cp.spawnSync = origSpawn;
+    }
   });
 }
 

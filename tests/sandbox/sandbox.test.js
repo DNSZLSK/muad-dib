@@ -16,6 +16,7 @@ async function runSandboxTests() {
   const {
     scoreFindings,
     generateNetworkReport,
+    buildDockerArgs,
     EXFIL_PATTERNS,
     SAFE_DOMAINS,
     TIME_OFFSETS
@@ -212,9 +213,14 @@ async function runSandboxTests() {
     assertIncludes(output, 'Usage', 'Should show sandbox-report usage');
   });
 
-  test('SANDBOX-NET: CLI sandbox-report with package runs', () => {
+  test('SANDBOX-NET: CLI sandbox-report with package runs the sandbox subsystem', () => {
     const output = runCommand('sandbox-report nonexistent-pkg-test');
-    assert(output.length > 0, 'Should produce output');
+    // The sandbox subsystem always emits a [SANDBOX]-prefixed line on every path: the
+    // Docker-absent skip ("[SANDBOX] Docker is not installed..."), or the build/cache line
+    // ("[SANDBOX] Building..." / "[SANDBOX] Using cached Docker image.") when Docker is up.
+    // Asserting the prefix proves the command actually reached buildSandboxImage/runSandbox
+    // rather than erroring at argument parsing.
+    assertIncludes(output, '[SANDBOX]', 'sandbox-report should invoke the sandbox subsystem');
   });
 
   // ============================================
@@ -495,17 +501,27 @@ async function runSandboxTests() {
     assert(logs.some(l => l.includes('2 finding(s)')), 'Should count actionable (non-INFO) findings');
   });
 
-  test('SANDBOX-COV: imageExists returns boolean', () => {
+  // Smoke tests: imageExists/isDockerAvailable each run a real `docker ...` probe and return a
+  // boolean either way (true with Docker, false via the catch without it). There is no injectable
+  // seam, so we can only assert the type contract — deliberately kept as documented smoke.
+  test('SANDBOX-COV: imageExists returns boolean (smoke — real docker probe, no seam)', () => {
     const result = imageExists();
     assert(typeof result === 'boolean', 'imageExists should return a boolean, got ' + typeof result);
   });
 
-  test('SANDBOX-COV: isDockerAvailable returns boolean', () => {
+  test('SANDBOX-COV: isDockerAvailable returns boolean (smoke — real docker probe, no seam)', () => {
     const result = isDockerAvailable();
     assert(typeof result === 'boolean', 'isDockerAvailable should return a boolean, got ' + typeof result);
   });
 
-  await asyncTest('SANDBOX-COV: buildSandboxImage returns boolean', async () => {
+  await asyncTest('SANDBOX-COV: buildSandboxImage returns boolean (no real docker build triggered)', async () => {
+    // buildSandboxImage() runs a real, multi-minute `docker build` when Docker is up AND the
+    // image is missing. Only exercise it when that build cannot fire: Docker absent (returns
+    // false), or the image already cached (returns true). Otherwise skip.
+    if (isDockerAvailable() && !imageExists()) {
+      addSkipped(1, 'SANDBOX-COV buildSandboxImage: Docker up + image missing — would trigger a real docker build');
+      return;
+    }
     const origLog = console.log;
     console.log = () => {};
     try {
@@ -731,22 +747,22 @@ async function runSandboxTests() {
     assert(tokenNames.includes('AWS_SECRET_ACCESS_KEY'), 'Should include AWS_SECRET_ACCESS_KEY');
   });
 
-  test('STATIC-CANARY: canary_exfiltration finding adds +50 to score', () => {
-    // Verify the scoring logic: scoreFindings returns base score,
-    // then canary_exfiltration findings add +50 each in runSandbox
+  test('STATIC-CANARY: canary token detection is the real +50 trigger (exported path)', () => {
+    // The +50-per-canary aggregation itself lives in runSingleSandbox (src/sandbox/index.js:728),
+    // inside proc.on('close') — not exported and not runnable offline (it needs a live Docker run
+    // + report). We test the two REAL exported inputs that feed it: the base score, and the canary
+    // detection that turns a report into a canary_exfiltration finding (the +50 trigger).
     const baseReport = { network: { dns_queries: ['evil.com'] } };
     const { score: baseScore } = scoreFindings(baseReport);
     assert(baseScore === 20, 'Base DNS score should be 20, got ' + baseScore);
-    // In runSandbox, if a canary is also found, finalScore = baseScore + 50 = 70
-    const mockFindings = [
-      { type: 'sandbox_network_outlier', severity: 'HIGH', detail: 'DNS to evil.com', evidence: 'evil.com' },
-      { type: 'canary_exfiltration', severity: 'CRITICAL', detail: 'Token stolen', evidence: 'ghp_mD9kX3pL7vR1wN5qT8yB2cF4hJ6sA0eU3iO9gK' }
-    ];
-    const finalScore = Math.min(100, mockFindings.reduce((s, f) => {
-      if (f.type === 'canary_exfiltration') return s + 50;
-      return s;
-    }, baseScore));
-    assert(finalScore === 70, 'Final score should be base(20) + canary(50) = 70, got ' + finalScore);
+    // Positive: a report carrying a static canary yields a real detection → runSingleSandbox +50.
+    const exfilReport = { network: { http_bodies: ['stolen=' + STATIC_CANARY_TOKENS.GITHUB_TOKEN] } };
+    const detected = detectStaticCanaryExfiltration(exfilReport);
+    assert(detected.length >= 1 && detected[0].token === 'GITHUB_TOKEN',
+      'canary token must be detected — this finding is what adds +50 at src/sandbox/index.js:728');
+    // Negative: a plain network report (no canary) must NOT trigger the +50.
+    assert(detectStaticCanaryExfiltration(baseReport).length === 0,
+      'a non-canary report must produce no canary_exfiltration (no +50)');
   });
 
   // ============================================
@@ -785,28 +801,9 @@ async function runSandboxTests() {
     }
   });
 
-  test('SANDBOX-LOCAL: displayName extraction from package.json', () => {
-    const os = require('os');
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-local-test-'));
-    try {
-      fs.writeFileSync(path.join(tmpDir, 'package.json'), JSON.stringify({ name: 'my-local-pkg', version: '1.0.0' }));
-      // Verify the path exists and package.json is readable
-      const pkgJsonPath = path.join(tmpDir, 'package.json');
-      assert(fs.existsSync(pkgJsonPath), 'package.json should exist');
-      const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'));
-      assert(pkg.name === 'my-local-pkg', 'Should read package name from package.json');
-
-      // Verify fallback to basename when no package.json name
-      const tmpDir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-local-test2-'));
-      fs.writeFileSync(path.join(tmpDir2, 'package.json'), JSON.stringify({ version: '1.0.0' }));
-      const pkg2 = JSON.parse(fs.readFileSync(path.join(tmpDir2, 'package.json'), 'utf8'));
-      const fallbackName = pkg2.name || path.basename(tmpDir2);
-      assert(fallbackName === path.basename(tmpDir2), 'Should fall back to directory basename when name is missing');
-      fs.rmSync(tmpDir2, { recursive: true, force: true });
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
+  // (Removed 'displayName extraction from package.json' — it re-implemented the `pkg.name ||
+  // path.basename()` fallback on its own temp fixtures and asserted on its own copy; runSandbox's
+  // real displayName logic is internal and not exported, so nothing under test was exercised.)
 
   // ============================================
   // SANDBOX ENTRY POINT EXECUTION TESTS
@@ -965,19 +962,24 @@ async function runSandboxTests() {
     assert(result.length === 0, 'Clean report with all fields should return empty');
   });
 
-  await asyncTest('SANDBOX-COV: runSandbox returns clean result when Docker unavailable', async () => {
-    const { runSandbox } = require('../../src/sandbox/index.js');
-    const { execSync: origExecSync } = require('child_process');
+  await asyncTest('SANDBOX-COV: runSandbox returns CLEAN score 0 when Docker unavailable', async () => {
+    const sandbox = require('../../src/sandbox/index.js');
+    // runSandbox checks isDockerAvailable() internally (a module-local, non-injectable call).
+    // We can only exercise the Docker-unavailable branch when Docker is actually absent; if
+    // Docker is up, runSandbox('lodash') would launch a real container — skip instead of
+    // asserting a shape that a real (or partial) run could also satisfy.
+    if (sandbox.isDockerAvailable()) {
+      addSkipped(1, 'SANDBOX-COV runSandbox-no-docker: Docker present — cannot exercise the unavailable branch offline');
+      return;
+    }
     const origLog = console.log;
     console.log = () => {};
     try {
-      // runSandbox checks isDockerAvailable internally via execSync('docker info')
-      // On machines without Docker, this naturally returns clean result
-      const result = await runSandbox('lodash', {});
-      assert(typeof result === 'object', 'Should return an object');
-      assert(typeof result.score === 'number', 'Should have a numeric score');
-      assert(typeof result.severity === 'string', 'Should have a severity string');
-      assert(Array.isArray(result.findings), 'Should have findings array');
+      const result = await sandbox.runSandbox('lodash', {});
+      assert(result.score === 0, 'Docker-unavailable must return score 0, got ' + result.score);
+      assert(result.severity === 'CLEAN', 'Docker-unavailable must be CLEAN, got ' + result.severity);
+      assert(Array.isArray(result.findings) && result.findings.length === 0,
+        'Docker-unavailable must return an empty findings array');
     } finally {
       console.log = origLog;
     }
@@ -1003,38 +1005,10 @@ async function runSandboxTests() {
       'otherwise docker kill exit code 137 returns CLEAN instead of INCONCLUSIVE');
   });
 
-  test('SANDBOX-TIMEOUT: timeout result has score -1 and INCONCLUSIVE severity', () => {
-    // Verify the expected shape of timeout results
-    // This mirrors the timeout result constructed in proc.on('close')
-    // Timeout = INCONCLUSIVE: cannot determine if package is malicious or just slow
-    const timeoutResult = {
-      score: -1,
-      severity: 'INCONCLUSIVE',
-      findings: [{
-        type: 'timeout',
-        severity: 'MEDIUM',
-        detail: 'Container exceeded 120s timeout — package too large or slow install',
-        evidence: 'Killed after 120000ms'
-      }],
-      raw_report: null,
-      suspicious: false,
-      inconclusive: true
-    };
-    assert(timeoutResult.score === -1, 'Timeout result must have score -1 (INCONCLUSIVE)');
-    assert(timeoutResult.severity === 'INCONCLUSIVE', 'Timeout result must be INCONCLUSIVE');
-    assert(timeoutResult.findings[0].type === 'timeout', 'Timeout finding type must be timeout');
-    assert(timeoutResult.suspicious === false, 'Timeout result must NOT be suspicious');
-    assert(timeoutResult.inconclusive === true, 'Timeout result must have inconclusive flag');
-  });
-
-  test('SANDBOX-TIMEOUT: clean result has score 0 (Docker error, NOT timeout)', () => {
-    // The clean result should only be returned for non-timeout Docker failures
-    // (e.g. OOM, image pull error) — never for timeout kills
-    const cleanResult = { score: 0, severity: 'CLEAN', findings: [], raw_report: null, suspicious: false };
-    assert(cleanResult.score === 0, 'Clean result must have score 0');
-    assert(cleanResult.severity === 'CLEAN', 'Clean result must be CLEAN');
-    assert(cleanResult.suspicious === false, 'Clean result must not be suspicious');
-  });
+  // (Removed two tests that asserted on locally-constructed literal result objects — they
+  // exercised no source. The timedOut-before-Docker-error ordering is covered by the sanctioned
+  // source-grep test above; the real timeout/clean shapes are produced by runSingleSandbox,
+  // which needs a live Docker run to reach.)
 
   test('SANDBOX-COV: generateNetworkReport with ssh-ed25519 exfil pattern', () => {
     const report = {
@@ -1086,47 +1060,35 @@ async function runSandboxTests() {
     assert(TIME_OFFSETS[2].offset === 604800000, 'Third run should have 7d offset');
   });
 
-  test('SANDBOX-FAKETIME: FAKETIME string format for 72h → "+3d x1000"', () => {
-    const timeOffset = 259200000; // 72h
-    const hours = Math.floor(timeOffset / 3600000);
-    const faketimeStr = hours >= 24
-      ? `+${Math.floor(hours / 24)}d x1000`
-      : `+${hours}h x1000`;
-    assert(faketimeStr === '+3d x1000', `Expected "+3d x1000", got "${faketimeStr}"`);
+  // These exercise the REAL docker-run arg vector built by buildDockerArgs() (pure, no Docker
+  // spawn) instead of re-deriving the FAKETIME string inline. They pin the exact env contract
+  // the container receives: the libfaketime string, the active flag, and NODE_TIMING_OFFSET=0
+  // (the anti double-acceleration invariant). buildDockerArgs is KEEP-IN-SYNC with sandbox-runner.sh.
+  test('SANDBOX-FAKETIME: buildDockerArgs 72h → MUADDIB_FAKETIME=+3d x1000 + ACTIVE + NODE_TIMING_OFFSET=0', () => {
+    const args = buildDockerArgs({ timeOffset: 259200000, containerName: 't', fakeHostname: 'h' });
+    assert(args.includes('MUADDIB_FAKETIME=+3d x1000'), 'should inject the +3d x1000 libfaketime string, args=' + JSON.stringify(args));
+    assert(args.includes('MUADDIB_FAKETIME_ACTIVE=1'), 'should mark libfaketime active');
+    assert(args.includes('NODE_TIMING_OFFSET=0'), 'NODE_TIMING_OFFSET must be 0 when libfaketime active (no double acceleration)');
   });
 
-  test('SANDBOX-FAKETIME: FAKETIME string format for 7d → "+7d x1000"', () => {
-    const timeOffset = 604800000; // 7d
-    const hours = Math.floor(timeOffset / 3600000);
-    const faketimeStr = hours >= 24
-      ? `+${Math.floor(hours / 24)}d x1000`
-      : `+${hours}h x1000`;
-    assert(faketimeStr === '+7d x1000', `Expected "+7d x1000", got "${faketimeStr}"`);
+  test('SANDBOX-FAKETIME: buildDockerArgs 12h → MUADDIB_FAKETIME=+12h x1000 (sub-24h uses hours)', () => {
+    const args = buildDockerArgs({ timeOffset: 43200000, containerName: 't', fakeHostname: 'h' });
+    assert(args.includes('MUADDIB_FAKETIME=+12h x1000'), 'sub-24h offset must use the hours format, args=' + JSON.stringify(args));
+    assert(args.includes('MUADDIB_FAKETIME_ACTIVE=1'), 'should mark libfaketime active');
   });
 
-  test('SANDBOX-FAKETIME: FAKETIME string format for 12h → "+12h x1000"', () => {
-    const timeOffset = 43200000; // 12h
-    const hours = Math.floor(timeOffset / 3600000);
-    const faketimeStr = hours >= 24
-      ? `+${Math.floor(hours / 24)}d x1000`
-      : `+${hours}h x1000`;
-    assert(faketimeStr === '+12h x1000', `Expected "+12h x1000", got "${faketimeStr}"`);
+  test('SANDBOX-FAKETIME: buildDockerArgs 7d → MUADDIB_FAKETIME=+7d x1000 (days format)', () => {
+    const args = buildDockerArgs({ timeOffset: 604800000, containerName: 't', fakeHostname: 'h' });
+    assert(args.includes('MUADDIB_FAKETIME=+7d x1000'), '7d offset must use the days format, args=' + JSON.stringify(args));
   });
 
-  test('SANDBOX-FAKETIME: offset=0 → useFaketime=false, NODE_TIMING_OFFSET=0', () => {
-    const timeOffset = 0;
-    const useFaketime = timeOffset > 0;
-    assert(useFaketime === false, 'offset=0 should not use faketime');
-    const nodeTimingOffset = useFaketime ? 0 : timeOffset;
-    assert(nodeTimingOffset === 0, 'NODE_TIMING_OFFSET should be 0');
-  });
-
-  test('SANDBOX-FAKETIME: offset>0 → useFaketime=true, NODE_TIMING_OFFSET=0 (anti double-accel)', () => {
-    const timeOffset = 259200000;
-    const useFaketime = timeOffset > 0;
-    assert(useFaketime === true, 'offset>0 should use faketime');
-    const nodeTimingOffset = useFaketime ? 0 : timeOffset;
-    assert(nodeTimingOffset === 0, 'NODE_TIMING_OFFSET must be 0 when faketime active (prevents double acceleration)');
+  test('SANDBOX-FAKETIME: buildDockerArgs offset=0 → NODE_TIMING_OFFSET=0, NO libfaketime env (run 1 = JS-level only)', () => {
+    const args = buildDockerArgs({ timeOffset: 0, containerName: 't', fakeHostname: 'h' });
+    assert(args.includes('NODE_TIMING_OFFSET=0'), 'offset=0 must still set NODE_TIMING_OFFSET=0');
+    assert(!args.some(a => /^MUADDIB_FAKETIME=/.test(a)),
+      'offset=0 must NOT inject MUADDIB_FAKETIME — run 1 has no libfaketime, preload handles JS-level only');
+    assert(!args.includes('MUADDIB_FAKETIME_ACTIVE=1'),
+      'offset=0 must NOT mark libfaketime active');
   });
 
   // ============================================

@@ -177,7 +177,12 @@ test('IOC: loadCachedIOCs returns packages', () => {
 test('IOC: loadCachedIOCs returns hashes', () => {
   const { loadCachedIOCs } = require('../../src/ioc/updater.js');
   const iocs = loadCachedIOCs();
-  assert(iocs.hashes, 'Should have hashes');
+  assert(Array.isArray(iocs.hashes), 'hashes should be an array');
+  // Floor guaranteed without any runtime/gitignored file: loadCachedIOCs always merges
+  // the committed iocs/hashes.yaml (loadYAMLIOCs → merged.hashes), which ships sha256 entries.
+  assert(iocs.hashes.length > 0, 'YAML-embedded hashes (iocs/hashes.yaml) guarantee a non-empty floor');
+  assert(iocs.hashesSet instanceof Set && iocs.hashesSet.size === new Set(iocs.hashes).size,
+    'hashesSet must mirror the hashes array for O(1) lookup');
 });
 
 test('IOC: loadCachedIOCs returns markers', () => {
@@ -329,14 +334,38 @@ test('COMPACT: does NOT have enriched package objects', () => {
   assert(typeof compact.versioned[firstVersionedKey][0] === 'string', 'Versions should be plain strings');
 });
 
-test('COMPACT: is significantly smaller than full IOCs', () => {
-  const compactPath = path.join(__dirname, '..', '..', 'src', 'ioc', 'data', 'iocs-compact.json');
-  const fullPath = path.join(__dirname, '..', '..', 'src', 'ioc', 'data', 'iocs.json');
-  if (fs.existsSync(fullPath)) {
-    const compactSize = fs.statSync(compactPath).size;
-    const fullSize = fs.statSync(fullPath).size;
-    assert(compactSize < fullSize / 5, `Compact (${compactSize}) should be at least 5x smaller than full (${fullSize})`);
+test('COMPACT: is significantly smaller than full IOCs (in-memory, no gitignored files)', () => {
+  // The on-disk iocs.json/iocs-compact.json are gitignored (absent in CI), so build a
+  // representative full DB in memory: realistic enriched entries the way the scraper
+  // writes them, then compare serialized sizes of full vs generateCompactIOCs output.
+  const { generateCompactIOCs, expandCompactIOCs } = require('../../src/ioc/updater.js');
+  const packages = [];
+  for (let i = 0; i < 300; i++) {
+    packages.push({
+      id: 'MAL-2026-' + i,
+      name: 'evil-pkg-' + i,
+      version: '1.0.' + (i % 10),
+      severity: 'critical',
+      confidence: 'high',
+      source: 'osv-malicious',
+      description: 'Malicious package pushed via compromised maintainer account, exfiltrates env + npm token (#' + i + ')',
+      references: ['https://osv.dev/vulnerability/MAL-2026-' + i, 'https://github.com/advisories/GHSA-' + i],
+      mitre: 'T1195.002',
+      published: '2026-01-01T00:00:00.000Z',
+      freshness: { added_at: '2026-01-01T00:00:00.000Z', source: 'osv-malicious', confidence: 'high' },
+      sources: [{ name: 'osv-malicious', added_at: '2026-01-01T00:00:00.000Z' }]
+    });
   }
+  const full = { packages, pypi_packages: [], hashes: [], markers: [], files: [], updated: '2026-01-01T00:00:00.000Z', sources: ['test'] };
+  const compact = generateCompactIOCs(full);
+  const fullSize = JSON.stringify(full).length;
+  const compactSize = JSON.stringify(compact).length;
+  assert(compactSize < fullSize, `Compact (${compactSize}) must be smaller than full (${fullSize})`);
+  assert(compactSize < fullSize / 5, `Compact (${compactSize}) should be at least 5x smaller than full (${fullSize})`);
+  // Size reduction must not lose entries: every name@version survives the round trip
+  const expanded = expandCompactIOCs(compact);
+  assert(expanded.packages.length === packages.length,
+    `Round trip must preserve all ${packages.length} entries, got ${expanded.packages.length}`);
 });
 
 test('COMPACT: generateCompactIOCs strips enriched data', () => {
@@ -642,24 +671,40 @@ test('BOOTSTRAP: isAllowedRedirect rejects invalid URLs', () => {
   assert(isAllowedRedirect('not-a-url') === false, 'Invalid URL should be rejected');
 });
 
-asyncTest('BOOTSTRAP: ensureIOCs skips download when cache file exists and is large enough', async () => {
-  const { ensureIOCs, IOCS_PATH, MIN_IOCS_SIZE, _resetEnsureIocsForTests } = require('../../src/ioc/bootstrap.js');
+await asyncTest('BOOTSTRAP: ensureIOCs skips download when cache file exists and is large enough (no network)', async () => {
+  // Deterministic in every environment: fs is mocked to present a large-enough cache,
+  // ensureIOCs is REALLY called, and https.get is spied to prove the skip path never
+  // touches the network (the complementary check the mocked-fs test at BOOTSTRAP-COV
+  // 'returns true when IOC file exists' does not make).
+  const { ensureIOCs, IOCS_PATH, HOME_DATA_DIR, MIN_IOCS_SIZE, _resetEnsureIocsForTests } = require('../../src/ioc/bootstrap.js');
+  const https = require('https');
   _resetEnsureIocsForTests();
-  // Only test skip behavior if the cache file already exists (from a previous update/scrape)
-  if (fs.existsSync(IOCS_PATH) && fs.statSync(IOCS_PATH).size >= MIN_IOCS_SIZE) {
+  const origExists = fs.existsSync;
+  const origStat = fs.statSync;
+  const origHttpsGet = https.get;
+  let downloadAttempts = 0;
+  fs.existsSync = (p) => {
+    if (p === HOME_DATA_DIR) return true;
+    if (p === IOCS_PATH) return true;
+    return origExists(p);
+  };
+  fs.statSync = (p) => {
+    if (p === IOCS_PATH) return { size: MIN_IOCS_SIZE }; // exactly at the threshold (>= passes)
+    return origStat(p);
+  };
+  https.get = () => {
+    downloadAttempts++;
+    throw new Error('the skip path must never open a network connection');
+  };
+  try {
     const result = await ensureIOCs();
-    assert(result === true, 'Should return true when cache exists');
-  } else {
-    // Create a temp large file to test skip logic (need >1MB, each entry is ~30 bytes)
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-bootstrap-test-'));
-    const tmpFile = path.join(tmpDir, 'test-iocs.json');
-    // Write a file larger than MIN_IOCS_SIZE (40000 entries ≈ 1.2MB)
-    const bigData = JSON.stringify({ packages: new Array(40000).fill({ name: 'test', version: '*' }) });
-    fs.writeFileSync(tmpFile, bigData);
-    const stat = fs.statSync(tmpFile);
-    assert(stat.size >= MIN_IOCS_SIZE, 'Test file should be >= 1MB, got ' + stat.size);
-    // Cleanup
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    assert(result === true, 'Should return true when a large-enough cache exists');
+    assert(downloadAttempts === 0, 'Skip path must not attempt any download, got ' + downloadAttempts);
+  } finally {
+    fs.existsSync = origExists;
+    fs.statSync = origStat;
+    https.get = origHttpsGet;
+    _resetEnsureIocsForTests(); // don't leak the memoized true into later bootstrap tests
   }
 });
 
@@ -1036,25 +1081,9 @@ await asyncTest('BOOTSTRAP-COV: ensureIOCs handles download failure gracefully',
   }
 });
 
-await asyncTest('BOOTSTRAP-COV: downloadAndDecompress rejects on invalid URL', async () => {
-  const https = require('https');
-  const origHttpsGet = https.get;
-  https.get = (_url, _opts, _cb) => {
-    const EventEmitter = require('events');
-    const req = new EventEmitter();
-    req.destroy = () => {};
-    process.nextTick(() => req.emit('error', new Error('connect ECONNREFUSED 127.0.0.1:1')));
-    return req;
-  };
-  try {
-    await downloadAndDecompress('https://localhost:1/nonexistent', path.join(os.tmpdir(), 'test-iocs-' + Date.now() + '.json'));
-    assert(false, 'Should have thrown');
-  } catch (err) {
-    assert(err instanceof Error, 'Should throw an Error');
-  } finally {
-    https.get = origHttpsGet;
-  }
-});
+// (removed) 'BOOTSTRAP-COV: downloadAndDecompress rejects on invalid URL' — strictly weaker
+// duplicate of 'BOOTSTRAP-COV: downloadAndDecompress rejects on connection error' above,
+// which pins the propagated ECONNREFUSED message instead of just `instanceof Error`.
 
 // ============================================
 // UPDATER COVERAGE TESTS
@@ -1280,15 +1309,27 @@ test('STALENESS: checkIOCStaleness returns null for fresh files', () => {
   }
 });
 
-test('STALENESS: checkIOCStaleness returns warning for old files', () => {
+test('STALENESS: checkIOCStaleness returns warning for old files (mocked mtime — deterministic in CI)', () => {
   const { checkIOCStaleness } = require('../../src/ioc/updater.js');
-  // With maxAge=0, any existing file should trigger a warning
-  const compactPath = path.join(__dirname, '..', '..', 'src', 'ioc', 'data', 'iocs-compact.json');
-  if (fs.existsSync(compactPath)) {
-    const result = checkIOCStaleness(0);
-    assert(typeof result === 'string', 'Should return a warning when maxAge=0');
+  const origStatSync = fs.statSync;
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  // Old files: newest mtime 45 days ago → must warn with the floored age
+  fs.statSync = () => ({ mtimeMs: Date.now() - 45 * DAY_MS });
+  try {
+    const result = checkIOCStaleness(30);
+    assert(typeof result === 'string', 'Should return a warning string for 45-day-old files, got ' + result);
+    assert(result.includes('45 days old'), 'Warning should carry the floored age (45), got: ' + result);
+    assert(result.includes('threshold: 30d'), 'Warning should mention the threshold, got: ' + result);
     assert(result.includes('muaddib update'), 'Warning should suggest muaddib update');
-    assert(result.includes('days old'), 'Warning should mention age in days');
+  } finally {
+    fs.statSync = origStatSync;
+  }
+  // Fresh files: newest mtime 1 day ago → no warning (negative case)
+  fs.statSync = () => ({ mtimeMs: Date.now() - 1 * DAY_MS });
+  try {
+    assert(checkIOCStaleness(30) === null, 'Fresh (1-day-old) files must not warn');
+  } finally {
+    fs.statSync = origStatSync;
   }
 });
 

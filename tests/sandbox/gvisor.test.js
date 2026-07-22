@@ -346,25 +346,17 @@ async function runGvisorTests() {
 
   // ── Docker args verification (env var detection) ──
 
-  test('GVISOR: MUADDIB_SANDBOX_RUNTIME env var detection', () => {
-    const saved = process.env.MUADDIB_SANDBOX_RUNTIME;
-    try {
-      process.env.MUADDIB_SANDBOX_RUNTIME = 'gvisor';
-      assert(process.env.MUADDIB_SANDBOX_RUNTIME === 'gvisor', 'Should read gvisor');
+  // (Removed 'MUADDIB_SANDBOX_RUNTIME env var detection' — it set and read process.env, testing
+  // Node's own env object, not any MUAD'DIB code. The real runtime decision is covered by the
+  // GVISOR M3 resolveSandboxRuntime tests below, which pass the env in as a pure input.)
 
-      delete process.env.MUADDIB_SANDBOX_RUNTIME;
-      assert(process.env.MUADDIB_SANDBOX_RUNTIME === undefined, 'Should be undefined when not set');
-    } finally {
-      if (saved) process.env.MUADDIB_SANDBOX_RUNTIME = saved;
-      else delete process.env.MUADDIB_SANDBOX_RUNTIME;
-    }
-  });
-
-  test('GVISOR: isGvisorAvailable returns boolean', () => {
+  test('GVISOR: isGvisorAvailable returns boolean (smoke — real docker info probe, memoized, no seam)', () => {
+    // isGvisorAvailable parses `docker info` for /runsc/ and memoizes the result. The exec is
+    // internal and non-injectable, and the cache means it cannot be re-driven per test — so we
+    // assert only the type contract. The env-driven decision logic is fully tested via
+    // resolveSandboxRuntime (pure, below). In CI without Docker/gVisor this returns false.
     const result = isGvisorAvailable();
     assert(typeof result === 'boolean', 'Should return boolean');
-    // Can't assert true/false since it depends on the test environment
-    // In CI without Docker/gVisor, this returns false — which is correct
   });
 
   // ── Strace NOT launched in gVisor mode (sandbox-runner.sh logic) ──
@@ -387,21 +379,10 @@ async function runGvisorTests() {
     assertIncludes(content, 'log-packets', 'Should mention --log-packets as alternative');
   });
 
-  // ── index.js gVisor integration ──
-
-  test('GVISOR: index.js exports isGvisorAvailable', () => {
-    const sandbox = require('../../src/sandbox/index.js');
-    assert(typeof sandbox.isGvisorAvailable === 'function', 'Should export isGvisorAvailable');
-  });
-
-  test('GVISOR: gvisor-parser.js exports all required functions', () => {
-    const parser = require('../../src/sandbox/gvisor-parser.js');
-    assert(typeof parser.parseGvisorLog === 'function', 'Should export parseGvisorLog');
-    assert(typeof parser.parseGvisorLogs === 'function', 'Should export parseGvisorLogs');
-    assert(typeof parser.parseGvisorStrace === 'function', 'Should export parseGvisorStrace');
-    assert(typeof parser.findGvisorLogs === 'function', 'Should export findGvisorLogs');
-    assert(typeof parser.cleanupGvisorLogs === 'function', 'Should export cleanupGvisorLogs');
-  });
+  // (Removed two export-only tests — 'index.js exports isGvisorAvailable' and 'gvisor-parser.js
+  // exports all required functions'. Every one of those symbols is destructured at the top of
+  // this file (lines 10-22) and behaviorally exercised by the tests above; a missing export
+  // would already throw at import time, so the assertions could never independently fail.)
 
   // ── install-gvisor.sh exists and has correct content ──
 

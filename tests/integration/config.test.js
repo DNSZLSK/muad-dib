@@ -22,7 +22,7 @@ function cleanup(dir) {
   try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ok */ }
 }
 
-function runConfigTests() {
+async function runConfigTests() {
   console.log('\n=== CONFIG TESTS ===\n');
 
   // =============================================
@@ -294,7 +294,7 @@ function runConfigTests() {
   });
 
   // CONFIG-20: Integration - scan with config does not leak state
-  asyncTest('CONFIG-20: Scan with configPath does not leak state to next scan', async () => {
+  await asyncTest('CONFIG-20: Scan with configPath does not leak state to next scan', async () => {
     const tmpDir = createTempDir();
     try {
       // Create a minimal scannable project

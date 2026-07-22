@@ -385,6 +385,10 @@ function analyzeAIConfigFile(content, relPath, invisibleCount) {
     threats.push({
       type: 'ai_config_injection_critical',
       severity: 'CRITICAL',
+      // Structural marker (like GHA-006): the compound escalation shares its type
+      // with single-pattern criticals — tests and consumers must not have to
+      // sniff the message wording to tell them apart.
+      compound: true,
       message: `AI config compound attack: shell commands + ${hasExfiltration ? 'exfiltration' : 'credential access'} in ${relPath} — ToxicSkills/Clinejection pattern.`,
       file: relPath
     });

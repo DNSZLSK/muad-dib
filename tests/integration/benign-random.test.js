@@ -17,20 +17,10 @@ function runBenignRandomTests() {
   console.log('\n=== BENIGN RANDOM CORPUS TESTS ===\n');
 
   if (!DATASETS_AVAILABLE) {
-    console.log('[SKIP] BENIGN-RANDOM-01: datasets not available, skipping');
-    console.log('[SKIP] BENIGN-RANDOM-03: datasets not available, skipping');
-    console.log('[SKIP] BENIGN-RANDOM-04: datasets not available, skipping');
-    addSkipped(3);
+    addSkipped(3, 'BENIGN-RANDOM-01/03/04: datasets not available, skipping');
   }
 
   const { evaluateBenignRandom } = require('../../src/commands/evaluate.js');
-
-  if (!DATASETS_AVAILABLE) {
-    console.log('[SKIP] BENIGN-RANDOM-01: datasets not available, skipping');
-    console.log('[SKIP] BENIGN-RANDOM-03: datasets not available, skipping');
-    console.log('[SKIP] BENIGN-RANDOM-04: datasets not available, skipping');
-    addSkipped(3);
-  }
 
   if (DATASETS_AVAILABLE) {
     test('BENIGN-RANDOM-01: packages-npm-random.txt exists and contains >= 200 package names', () => {
@@ -47,7 +37,9 @@ function runBenignRandomTests() {
     });
   }
 
-  test('BENIGN-RANDOM-02: evaluateBenignRandom() returns correct shape', () => {
+  test('BENIGN-RANDOM-02: evaluateBenignRandom is exported (invoking it needs the corpus + network)', () => {
+    // Honest name: a full shape check would scan 200 packages (corpus + network),
+    // out of scope for a unit test. The corpus-shape contract is covered by 01/03/04.
     assert(typeof evaluateBenignRandom === 'function', 'evaluateBenignRandom should be a function');
   });
 

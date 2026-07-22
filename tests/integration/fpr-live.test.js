@@ -3,7 +3,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { test, assert } = require('../test-utils');
+const { asyncTest, assert } = require('../test-utils');
 const { buildFprLiveReport } = require('../../src/commands/fpr-live.js');
 
 function writeLedger(entries) {
@@ -27,21 +27,21 @@ function ledgerFixture() {
 async function runFprLiveTests() {
   console.log('\n=== FPR-LIVE TESTS (live alert-rate measurement) ===\n');
 
-  test('fpr-live: dropped entries are excluded from the scanned denominator', async () => {
+  await asyncTest('fpr-live: dropped entries are excluded from the scanned denominator', async () => {
     const r = await buildFprLiveReport({ ledgerFile: ledgerFixture() });
     // 6 entries, 1 dropped → 5 scanned
     assert(r.recentWindow.scanned === 5, `expected 5 scanned, got ${r.recentWindow.scanned}`);
     assert(r.recentWindow.dropped === 1, `expected 1 dropped, got ${r.recentWindow.dropped}`);
   });
 
-  test('fpr-live: alertRate = (suspect+confirmed) / scanned', async () => {
+  await asyncTest('fpr-live: alertRate = (suspect+confirmed) / scanned', async () => {
     const r = await buildFprLiveReport({ ledgerFile: ledgerFixture() });
     // alerted = c,d (suspect) + e (confirmed) + f (suspect) = 4 ; scanned = 5
     assert(r.recentWindow.alerted === 4, `expected 4 alerted, got ${r.recentWindow.alerted}`);
     assert(Math.abs(r.recentWindow.alertRate - 0.8) < 1e-9, `expected 0.8, got ${r.recentWindow.alertRate}`);
   });
 
-  test('fpr-live: score buckets classify alerts by score', async () => {
+  await asyncTest('fpr-live: score buckets classify alerts by score', async () => {
     const r = await buildFprLiveReport({ ledgerFile: ledgerFixture() });
     const b = r.recentWindow.scoreBuckets;
     // 25→20-29, 35→30-49, 80→75-100, 90→75-100
@@ -51,7 +51,7 @@ async function runFprLiveTests() {
     assert(b['75-100'] === 2, `75-100 expected 2, got ${b['75-100']}`);
   });
 
-  test('fpr-live: top firing rules are tallied from alert entries only', async () => {
+  await asyncTest('fpr-live: top firing rules are tallied from alert entries only', async () => {
     const r = await buildFprLiveReport({ ledgerFile: ledgerFixture() });
     const byType = Object.fromEntries(r.recentWindow.topFiringRules.map(x => [x.type, x.count]));
     assert(byType['dependency_typosquat'] === 1, 'dependency_typosquat should be counted');
@@ -60,19 +60,19 @@ async function runFprLiveTests() {
     assert(!('__clean__' in byType), 'no phantom types');
   });
 
-  test('fpr-live: per-ecosystem alert rates are split', async () => {
+  await asyncTest('fpr-live: per-ecosystem alert rates are split', async () => {
     const r = await buildFprLiveReport({ ledgerFile: ledgerFixture() });
     const eco = r.recentWindow.byEcosystem;
     assert(eco.npm && eco.npm.scanned === 4 && eco.npm.alerted === 3, `npm: ${JSON.stringify(eco.npm)}`);
     assert(eco.pypi && eco.pypi.scanned === 1 && eco.pypi.alerted === 1, `pypi: ${JSON.stringify(eco.pypi)}`);
   });
 
-  test('fpr-live: report carries the honest "upper bound on FPR" note', async () => {
+  await asyncTest('fpr-live: report carries the honest "upper bound on FPR" note', async () => {
     const r = await buildFprLiveReport({ ledgerFile: ledgerFixture() });
     assert(/UPPER BOUND/.test(r.note), 'note must state alertRate is an FPR upper bound, not the curated 1.10%');
   });
 
-  test('fpr-live: missing ledger file degrades gracefully (no throw)', async () => {
+  await asyncTest('fpr-live: missing ledger file degrades gracefully (no throw)', async () => {
     const r = await buildFprLiveReport({ ledgerFile: '/nonexistent/ledger.jsonl' });
     assert(r.recentWindow.scanned === 0, 'absent ledger → zero scanned, no crash');
     assert(Array.isArray(r.recentWindow.topFiringRules), 'still returns a shaped report');

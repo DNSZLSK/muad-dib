@@ -49,8 +49,11 @@ let _token = null;
 let _source = null;
 
 function _fromNpmrc() {
-  const files = [
-    process.env.MUADDIB_NPMRC,
+  // An explicit MUADDIB_NPMRC wins EXCLUSIVELY — no fallback to cwd/HOME/VPS
+  // paths. Explicit config falling through to ambient files was surprising in
+  // prod and made tests non-hermetic (a token in the runner's cwd .npmrc
+  // leaked into "no token" assertions).
+  const files = process.env.MUADDIB_NPMRC ? [process.env.MUADDIB_NPMRC] : [
     path.join(process.cwd(), '.npmrc'),
     process.env.HOME ? path.join(process.env.HOME, '.npmrc') : null,
     '/home/muaddib/.npmrc',

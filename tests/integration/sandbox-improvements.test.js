@@ -11,7 +11,7 @@ const os = require('os');
 const path = require('path');
 const { test, asyncTest, assert, assertIncludes, runScanDirect, runCommand } = require('../test-utils');
 
-function runSandboxImprovementTests() {
+async function runSandboxImprovementTests() {
   console.log('\n=== SANDBOX IMPROVEMENTS TESTS ===\n');
 
   // ═══════════════════════════════════════════════════════════════
@@ -250,7 +250,7 @@ function runSandboxImprovementTests() {
   // (runScanDirect with { autoSandbox: true } completes and returns sandbox === null, no throw).
 
   // Auto-sandbox should NOT trigger for benign packages (score < 20)
-  asyncTest('C3: auto-sandbox does not trigger for clean package', async () => {
+  await asyncTest('C3: auto-sandbox does not trigger for clean package', async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-sb-clean-'));
     fs.writeFileSync(path.join(tmpDir, 'package.json'), JSON.stringify({ name: 'clean-pkg', version: '1.0.0' }));
     fs.writeFileSync(path.join(tmpDir, 'index.js'), 'console.log("hello world");\n');

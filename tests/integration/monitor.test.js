@@ -270,12 +270,20 @@ async function runMonitorTests() {
   // ── PyPI serial persistence ──────────────────────────────────────────────
 
   test('MONITOR: PyPI serial round-trip (save + load)', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-pypi-serial-'));
-    const tmpFile = path.join(tmpDir, 'pypi-serial.json');
-    fs.writeFileSync(tmpFile, JSON.stringify({ lastSerial: 12345, updatedAt: new Date().toISOString() }), 'utf8');
-    const data = JSON.parse(fs.readFileSync(tmpFile, 'utf8'));
-    assert(data.lastSerial === 12345, 'Serial must round-trip via JSON');
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    // Audit 2026-07: was a manual JSON write/read that never called the imported
+    // save/loadPypiSerial. Now exercises the real functions (PYPI_SERIAL_FILE is
+    // tmp-isolated by tests/run-tests.js, so prod state is untouched).
+    let backup = null;
+    try { backup = fs.readFileSync(PYPI_SERIAL_FILE, 'utf8'); } catch {}
+    try {
+      savePypiSerial(12345);
+      assert(loadPypiSerial() === 12345, 'Serial must round-trip through save/loadPypiSerial');
+      savePypiSerial(99999);
+      assert(loadPypiSerial() === 99999, 'A later save must overwrite the serial');
+    } finally {
+      if (backup !== null) fs.writeFileSync(PYPI_SERIAL_FILE, backup, 'utf8');
+      else { try { fs.unlinkSync(PYPI_SERIAL_FILE); } catch {} }
+    }
   });
 
   // (Dropped: loadPypiSerial returns null when file missing — that path is trivial
@@ -285,46 +293,10 @@ async function runMonitorTests() {
 
   // ── pollPyPIChangelog batch behavior (dedup + scannable filter) ──────────
 
-  test('MONITOR: pollPyPIChangelog dedupes (name,version) across events', () => {
-    // A single release emits multiple events: "new release" + sdist + wheel.
-    // The poll loop must collapse those into one queue entry per (name, version).
-    const xml = `<methodResponse><params><param><value><array><data>
-      ${[
-        ['burst-pkg', '1.0.0', 1700000000, 'new release', 2001],
-        ['burst-pkg', '1.0.0', 1700000001, 'add source file burst_pkg-1.0.0.tar.gz', 2002],
-        ['burst-pkg', '1.0.0', 1700000002, 'add py3 file burst_pkg-1.0.0-py3-none-any.whl', 2003],
-        ['burst-pkg', '1.0.0', 1700000003, 'add Owner bob', 2004],
-        ['other-pkg', '0.1.0', 1700000010, 'add source file other_pkg-0.1.0.tar.gz', 2005]
-      ].map(([n, v, ts, a, s]) =>
-        `<value><array><data>
-          <value><string>${n}</string></value>
-          <value><string>${v}</string></value>
-          <value><int>${ts}</int></value>
-          <value><string>${a}</string></value>
-          <value><int>${s}</int></value>
-        </data></array></value>`
-      ).join('\n')}
-    </data></array></value></param></params></methodResponse>`;
-
-    const events = parseXmlRpcChangelog(xml);
-    assert(events.length === 5, `Expected 5 events parsed, got ${events.length}`);
-
-    // Mirror the dedup + filter logic in pollPyPIChangelog
-    const seen = new Set();
-    const queued = [];
-    let maxSerial = 0;
-    for (const ev of events) {
-      if (ev.serial > maxSerial) maxSerial = ev.serial;
-      if (!isPypiScannableAction(ev.action, ev.version)) continue;
-      const key = `${ev.name}@${ev.version}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      queued.push(key);
-    }
-    assert(queued.length === 2, `Expected 2 unique queued items after dedup, got ${queued.length}: ${queued.join(',')}`);
-    assert(queued.includes('burst-pkg@1.0.0') && queued.includes('other-pkg@0.1.0'), 'Both releases must be queued exactly once');
-    assert(maxSerial === 2005, `Max serial must advance to highest event (2005), got ${maxSerial}`);
-  });
+  // (Audit 2026-07: removed "pollPyPIChangelog dedupes (name,version) across events" — it
+  // re-implemented the dedup + scannable-filter loop inline and asserted on its own Set.
+  // The real pollPyPIChangelog dedup is exercised by the httpsPost-seam test below
+  // ("queues deduped releases and advances serial on a normal poll").)
 
   // ── pollPyPIChangelog wiring (uses the _deps.httpsPost test seam) ────────
   //
@@ -432,24 +404,10 @@ async function runMonitorTests() {
     }
   });
 
-  test('MONITOR: state save and restore round-trip', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-monitor-'));
-    const tmpState = path.join(tmpDir, 'monitor-state.json');
-    const origFile = STATE_FILE;
-
-    // Write state to temp file
-    const testState = { npmLastPackage: 'test-npm-pkg', pypiLastPackage: 'test-pkg' };
-    fs.writeFileSync(tmpState, JSON.stringify(testState), 'utf8');
-
-    // Read it back manually (loadState uses STATE_FILE, so we test the format)
-    const raw = fs.readFileSync(tmpState, 'utf8');
-    const restored = JSON.parse(raw);
-    assert(restored.npmLastPackage === 'test-npm-pkg', 'npmLastPackage should round-trip');
-    assert(restored.pypiLastPackage === 'test-pkg', 'pypiLastPackage should round-trip');
-
-    // Cleanup
-    try { fs.unlinkSync(tmpState); fs.rmdirSync(tmpDir); } catch {}
-  });
+  // (Audit 2026-07: removed "state save and restore round-trip" — it wrote/read its own
+  // temp JSON without calling saveState/loadState. The real save/load round-trip is
+  // covered by "saveState persists lastDailyReportDate from stats" and
+  // "loadState restores lastDailyReportDate into stats".)
 
   test('MONITOR: loadState returns defaults when file missing', () => {
     // loadState reads STATE_FILE which may not exist in test env
@@ -469,21 +427,8 @@ async function runMonitorTests() {
     assert(typeof getNpmLatestTarball === 'function', 'getNpmLatestTarball should be a function');
   });
 
-  test('MONITOR: scanQueue FIFO ordering', () => {
-    // Clear queue first
-    scanQueue.length = 0;
-    scanQueue.push({ name: 'first', version: '1.0.0', ecosystem: 'npm', tarballUrl: 'a' });
-    scanQueue.push({ name: 'second', version: '2.0.0', ecosystem: 'npm', tarballUrl: 'b' });
-    scanQueue.push({ name: 'third', version: '3.0.0', ecosystem: 'pypi', tarballUrl: 'c' });
-    assert(scanQueue.length === 3, 'Queue should have 3 items');
-    const item1 = scanQueue.shift();
-    assert(item1.name === 'first', 'First shifted should be "first", got ' + item1.name);
-    const item2 = scanQueue.shift();
-    assert(item2.name === 'second', 'Second shifted should be "second", got ' + item2.name);
-    const item3 = scanQueue.shift();
-    assert(item3.name === 'third', 'Third shifted should be "third", got ' + item3.name);
-    assert(scanQueue.length === 0, 'Queue should be empty');
-  });
+  // (Audit 2026-07: removed "scanQueue FIFO ordering" — it push/shift-ed a plain array and
+  // asserted on Array.prototype behavior, exercising no monitor code.)
 
   test('MONITOR: getNpmTarballUrl extracts URL from pkg data', () => {
     const withDist = { dist: { tarball: 'https://example.com/pkg.tgz' } };
@@ -854,75 +799,14 @@ async function runMonitorTests() {
     assert(!r2.includes('..'), 'Should strip all .. sequences, got: ' + r2);
   });
 
-  test('MONITOR: appendAlert writes to file', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-alert-test-'));
-    const tmpAlerts = path.join(tmpDir, 'alerts.json');
-    try {
-      // Manually test alert format (appendAlert uses ALERTS_FILE, so we test the logic)
-      const alert1 = {
-        timestamp: '2025-01-01T00:00:00.000Z',
-        name: 'evil-pkg',
-        version: '1.0.0',
-        ecosystem: 'npm',
-        findings: [{ rule: 'ast_dangerous_call', severity: 'HIGH', file: 'index.js' }]
-      };
-      const alert2 = {
-        timestamp: '2025-01-01T00:01:00.000Z',
-        name: 'bad-lib',
-        version: '0.1.0',
-        ecosystem: 'pypi',
-        findings: [{ rule: 'shell_exec', severity: 'CRITICAL', file: 'setup.py' }]
-      };
-      // Write first alert
-      fs.writeFileSync(tmpAlerts, JSON.stringify([alert1], null, 2), 'utf8');
-      // Append second
-      const existing = JSON.parse(fs.readFileSync(tmpAlerts, 'utf8'));
-      existing.push(alert2);
-      fs.writeFileSync(tmpAlerts, JSON.stringify(existing, null, 2), 'utf8');
-      // Verify
-      const result = JSON.parse(fs.readFileSync(tmpAlerts, 'utf8'));
-      assert(result.length === 2, 'Should have 2 alerts, got ' + result.length);
-      assert(result[0].name === 'evil-pkg', 'First alert should be evil-pkg');
-      assert(result[1].name === 'bad-lib', 'Second alert should be bad-lib');
-      assert(result[0].findings[0].rule === 'ast_dangerous_call', 'Should have rule field');
-      assert(result[1].ecosystem === 'pypi', 'Should have ecosystem field');
-    } finally {
-      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
-    }
-  });
+  // (Audit 2026-07: removed "appendAlert writes to file" — it wrote/read its own temp JSON
+  // and never called appendAlert. The real appendAlert is exercised by "MONITOR: appendAlert
+  // writes to alerts file" (reads back ALERTS_FILE).)
 
-  test('MONITOR: getPyPITarballUrl parses JSON response', () => {
-    // Test the parsing logic directly using the same structure getPyPITarballUrl expects
-    const mockData = {
-      info: { version: '3.2.1' },
-      urls: [
-        { packagetype: 'bdist_wheel', url: 'https://files.pythonhosted.org/pkg-3.2.1.whl' },
-        { packagetype: 'sdist', url: 'https://files.pythonhosted.org/pkg-3.2.1.tar.gz' }
-      ]
-    };
-    // Simulate the logic in getPyPITarballUrl
-    const version = (mockData.info && mockData.info.version) || '';
-    const urls = mockData.urls || [];
-    const sdist = urls.find(u => u.packagetype === 'sdist' && u.url);
-    assert(version === '3.2.1', 'Should extract version');
-    assert(sdist, 'Should find sdist entry');
-    assert(sdist.url === 'https://files.pythonhosted.org/pkg-3.2.1.tar.gz', 'Should get sdist URL');
-
-    // Test fallback: no sdist, find .tar.gz
-    const noSdist = {
-      info: { version: '1.0.0' },
-      urls: [
-        { packagetype: 'bdist_wheel', url: 'https://example.com/pkg.whl' },
-        { packagetype: 'bdist_egg', url: 'https://example.com/pkg.tar.gz' }
-      ]
-    };
-    const noSdistUrls = noSdist.urls;
-    const sdist2 = noSdistUrls.find(u => u.packagetype === 'sdist' && u.url);
-    assert(!sdist2, 'Should not find sdist');
-    const tarGz = noSdistUrls.find(u => u.url && u.url.endsWith('.tar.gz'));
-    assert(tarGz, 'Should find .tar.gz fallback');
-    assert(tarGz.url === 'https://example.com/pkg.tar.gz', 'Should get .tar.gz URL');
-  });
+  // (Audit 2026-07: removed "getPyPITarballUrl parses JSON response" — it re-implemented the
+  // sdist-selection logic inline. The real getPyPITarballUrl is covered by the three
+  // httpsGet-seam tests above: "prefers sdist over wheel", "falls back to wheel", "returns
+  // null when only legacy formats exist".)
 
   await asyncTest('MONITOR: timeoutPromise rejects after delay', async () => {
     const start = Date.now();
@@ -1010,36 +894,46 @@ async function runMonitorTests() {
     }
   });
 
-  test('MONITOR: sandbox condition requires all three flags', () => {
-    // Simulate the condition: hasHighOrCritical && isSandboxEnabled && sandboxAvailable
+  test('MONITOR: sandbox availability preconditions require all three flags', () => {
+    // Audit 2026-07: this used to leave monitor.sandboxAvailable = false, disabling the
+    // sandbox gate for every later test in the suite. Now the mutation is restored in a
+    // finally, and the tier-policy half is asserted against the REAL computeSandboxGate.
     const monitor = require('../../src/monitor.js');
+    const { computeSandboxGate } = require('../../src/monitor/queue.js');
     const highResult = { summary: { total: 1, critical: 1, high: 0, medium: 0, low: 0 } };
     const lowResult = { summary: { total: 2, critical: 0, high: 0, medium: 1, low: 1 } };
 
-    // Case 1: HIGH findings, sandbox enabled, docker available -> should sandbox
     const origEnv = process.env.MUADDIB_MONITOR_SANDBOX;
-    delete process.env.MUADDIB_MONITOR_SANDBOX;
-    monitor.sandboxAvailable = true;
-    const shouldSandbox1 = hasHighOrCritical(highResult) && isSandboxEnabled() && monitor.sandboxAvailable;
-    assert(shouldSandbox1 === true, 'Should sandbox with HIGH + enabled + docker');
+    const origSandboxAvailable = monitor.sandboxAvailable;
+    try {
+      // Availability preconditions (environment, not tier policy — these stay at the call site).
+      delete process.env.MUADDIB_MONITOR_SANDBOX;
+      monitor.sandboxAvailable = true;
+      assert(hasHighOrCritical(highResult) && isSandboxEnabled() && monitor.sandboxAvailable,
+        'Should sandbox with HIGH + enabled + docker');
+      assert(!(hasHighOrCritical(lowResult) && isSandboxEnabled() && monitor.sandboxAvailable),
+        'Should NOT sandbox with LOW/MEDIUM only');
+      process.env.MUADDIB_MONITOR_SANDBOX = 'false';
+      assert(!(hasHighOrCritical(highResult) && isSandboxEnabled() && monitor.sandboxAvailable),
+        'Should NOT sandbox when env=false');
+      delete process.env.MUADDIB_MONITOR_SANDBOX;
+      monitor.sandboxAvailable = false;
+      assert(!(hasHighOrCritical(highResult) && isSandboxEnabled() && monitor.sandboxAvailable),
+        'Should NOT sandbox when docker unavailable');
 
-    // Case 2: LOW only findings -> no sandbox
-    const shouldSandbox2 = hasHighOrCritical(lowResult) && isSandboxEnabled() && monitor.sandboxAvailable;
-    assert(shouldSandbox2 === false, 'Should NOT sandbox with LOW/MEDIUM only');
-
-    // Case 3: HIGH findings, sandbox disabled via env -> no sandbox
-    process.env.MUADDIB_MONITOR_SANDBOX = 'false';
-    const shouldSandbox3 = hasHighOrCritical(highResult) && isSandboxEnabled() && monitor.sandboxAvailable;
-    assert(shouldSandbox3 === false, 'Should NOT sandbox when env=false');
-
-    // Case 4: HIGH findings, sandbox enabled, docker unavailable -> no sandbox
-    delete process.env.MUADDIB_MONITOR_SANDBOX;
-    monitor.sandboxAvailable = false;
-    const shouldSandbox4 = hasHighOrCritical(highResult) && isSandboxEnabled() && monitor.sandboxAvailable;
-    assert(shouldSandbox4 === false, 'Should NOT sandbox when docker unavailable');
-
-    // Restore
-    if (origEnv !== undefined) process.env.MUADDIB_MONITOR_SANDBOX = origEnv;
+      // Tier policy (the real gate, exported): T1a always sandboxes; T1b/T2 are score-gated;
+      // T2 additionally requires a short queue.
+      const THRESH = 40;
+      assert(computeSandboxGate('1a', 0, 999, THRESH) === true, 'T1a is mandatory regardless of score/queue');
+      assert(computeSandboxGate('1b', 52, 10, THRESH) === true, 'T1b sandboxes at score >= threshold');
+      assert(computeSandboxGate('1b', 20, 10, THRESH) === false, 'T1b skips below threshold');
+      assert(computeSandboxGate(2, 52, 10, THRESH) === true, 'T2 sandboxes at score >= threshold with a short queue');
+      assert(computeSandboxGate(2, 52, 60, THRESH) === false, 'T2 skips when the queue is long (>= 50)');
+    } finally {
+      monitor.sandboxAvailable = origSandboxAvailable;
+      if (origEnv !== undefined) process.env.MUADDIB_MONITOR_SANDBOX = origEnv;
+      else delete process.env.MUADDIB_MONITOR_SANDBOX;
+    }
   });
 
   test('MONITOR: alert includes sandbox field when sandbox result has score > 0', () => {
@@ -1094,66 +988,53 @@ async function runMonitorTests() {
 
   console.log('\n=== SANDBOX CONFIRMATION BUG TESTS ===\n');
 
-  test('MONITOR: sandbox score=100 + 0 findings → sandbox_inconclusive, NOT confirmed', () => {
-    // Simulate sandbox install error: score > 0 but no actual findings
-    const sandboxResult = { score: 100, severity: 'CRITICAL', findings: [] };
-    const hasSandboxFindings = sandboxResult.findings && sandboxResult.findings.length > 0;
-    assert(!hasSandboxFindings, 'Empty findings array should NOT count as findings');
-    // The key assertion: score > 0 but 0 findings = inconclusive
-    assert(sandboxResult.score > 0, 'Score should be > 0');
-    assert(sandboxResult.findings.length === 0, 'Findings should be empty');
-    assert(!hasSandboxFindings, 'hasSandboxFindings should be false');
+  // Audit 2026-07: these four tests asserted on their own object literals (the sandbox
+  // classification logic in queue.js was never invoked). They now drive the REAL
+  // classifySandboxOutcome seam extracted from processQueueItem.
+  const { classifySandboxOutcome: _classifySandboxOutcome } = require('../../src/monitor/queue.js');
+
+  test('MONITOR: sandbox score=100 + 0 findings → inconclusive_install_error, NOT confirmed', () => {
+    const outcome = _classifySandboxOutcome({
+      staticClean: false,
+      sandboxResult: { score: 100, severity: 'CRITICAL', findings: [] },
+      hasHCThreats: false, isDormant: false, staticScore: 30
+    });
+    assert(outcome === 'inconclusive_install_error',
+      `score>0 + 0 findings must be an install-error, got '${outcome}'`);
+    assert(outcome !== 'confirmed', 'An empty findings array must NEVER confirm');
   });
 
-  test('MONITOR: sandbox timeout (inconclusive) → no relabeling, keeps suspect label', () => {
-    // Sandbox timeout produces score=-1, inconclusive=true
-    // This must NOT relabel to fp (package could be malicious)
-    // and must NOT relabel to confirmed (package could be legitimate)
-    const sandboxResult = {
-      score: -1,
-      severity: 'INCONCLUSIVE',
-      findings: [{ type: 'timeout', severity: 'MEDIUM', detail: 'Container exceeded 60s timeout' }],
-      suspicious: false,
-      inconclusive: true
-    };
-
-    // Verify the inconclusive guard fires first
-    assert(sandboxResult.inconclusive === true, 'Timeout sandbox must have inconclusive flag');
-    assert(sandboxResult.score === -1, 'Timeout sandbox must have score -1');
-
-    // Verify it does NOT match the score===0 (FP relabeling) path
-    const wouldMatchFP = sandboxResult.score === 0;
-    assert(!wouldMatchFP, 'Score -1 must NOT match the score===0 FP relabeling path');
-
-    // Verify it does NOT match the score>0 (confirmed) path
-    const wouldMatchConfirmed = sandboxResult.score > 0;
-    assert(!wouldMatchConfirmed, 'Score -1 must NOT match the score>0 confirmed path');
-
-    // The inconclusive guard catches it: no relabeling occurs
-    const isInconclusive = sandboxResult && sandboxResult.inconclusive;
-    assert(isInconclusive, 'Inconclusive flag should be detected — stat=sandbox_inconclusive, label unchanged');
+  test('MONITOR: sandbox timeout (inconclusive) → inconclusive_timeout, keeps suspect label', () => {
+    const outcome = _classifySandboxOutcome({
+      staticClean: false,
+      sandboxResult: { score: -1, severity: 'INCONCLUSIVE', findings: [{ type: 'timeout' }], inconclusive: true },
+      hasHCThreats: false, isDormant: false, staticScore: 30
+    });
+    assert(outcome === 'inconclusive_timeout',
+      `A timeout sandbox must classify inconclusive_timeout, got '${outcome}'`);
+    assert(outcome !== 'unconfirmed' && outcome !== 'confirmed',
+      'A timeout must relabel neither to fp nor to confirmed');
   });
 
   test('MONITOR: sandbox score=80 + 2 findings → confirmed', () => {
-    const sandboxResult = {
-      score: 80,
-      severity: 'HIGH',
-      findings: [
-        { type: 'suspicious_dns', severity: 'HIGH', detail: 'DNS to evil.com' },
-        { type: 'file_write', severity: 'MEDIUM', detail: 'Wrote to /etc/shadow' }
-      ]
-    };
-    const hasSandboxFindings = sandboxResult.findings && sandboxResult.findings.length > 0;
-    assert(hasSandboxFindings, 'Should have sandbox findings');
-    assert(sandboxResult.score > 0, 'Score should be > 0');
+    const outcome = _classifySandboxOutcome({
+      staticClean: false,
+      sandboxResult: {
+        score: 80, severity: 'HIGH',
+        findings: [{ type: 'suspicious_dns' }, { type: 'file_write' }]
+      },
+      hasHCThreats: false, isDormant: false, staticScore: 40
+    });
+    assert(outcome === 'confirmed', `score>0 with real findings must confirm, got '${outcome}'`);
   });
 
-  test('MONITOR: sandbox score=0 → false_positive (unchanged behavior)', () => {
-    const sandboxResult = { score: 0, severity: 'CLEAN', findings: [] };
-    assert(sandboxResult.score === 0, 'Score should be 0');
-    // Original behavior: score === 0 means false_positive
-    const isFP = sandboxResult.score === 0;
-    assert(isFP, 'Score 0 should still result in false_positive classification');
+  test('MONITOR: sandbox score=0 (low static, no HC, not dormant) → unconfirmed FP relabel', () => {
+    const outcome = _classifySandboxOutcome({
+      staticClean: false,
+      sandboxResult: { score: 0, severity: 'CLEAN', findings: [] },
+      hasHCThreats: false, isDormant: false, staticScore: 10
+    });
+    assert(outcome === 'unconfirmed', `sandbox-clean low-signal package must relabel unconfirmed, got '${outcome}'`);
   });
 
   test('MONITOR: relabelRecords blocks confirmed with 0 findings', () => {
@@ -1180,19 +1061,27 @@ async function runMonitorTests() {
   });
 
   test('MONITOR: updateScanStats handles sandbox_inconclusive', () => {
-    const statsFile = path.join(os.tmpdir(), `muaddib-stats-si-${Date.now()}.json`);
+    // Audit 2026-07: was a manual `data.stats.sandbox_inconclusive++` on a hand-written
+    // file. Now calls the REAL updateScanStats (same pattern as the 'clean'/'false_positive'
+    // tests below) and reads it back via loadScanStats.
+    const backupExists = fs.existsSync(SCAN_STATS_FILE);
+    let backup = null;
+    if (backupExists) backup = fs.readFileSync(SCAN_STATS_FILE, 'utf8');
     try {
-      fs.writeFileSync(statsFile, JSON.stringify({
-        stats: { total_scanned: 10, clean: 5, suspect: 3, false_positive: 1, confirmed_malicious: 1, sandbox_inconclusive: 0 },
-        daily: []
-      }));
-      const data = JSON.parse(fs.readFileSync(statsFile, 'utf8'));
-      assert(data.stats.sandbox_inconclusive === 0, 'Initial sandbox_inconclusive should be 0');
-      // Simulate what updateScanStats does for sandbox_inconclusive
-      data.stats.sandbox_inconclusive++;
-      assert(data.stats.sandbox_inconclusive === 1, 'sandbox_inconclusive should increment to 1');
+      const dir = path.dirname(SCAN_STATS_FILE);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(SCAN_STATS_FILE, JSON.stringify({ stats: { total_scanned: 0, clean: 0, suspect: 0, false_positive: 0, confirmed_malicious: 0, sandbox_inconclusive: 0 }, daily: [] }), 'utf8');
+
+      updateScanStats('sandbox_inconclusive');
+      const data = loadScanStats();
+      assert(data.stats.total_scanned === 1, 'total_scanned should be 1, got ' + data.stats.total_scanned);
+      assert(data.stats.sandbox_inconclusive === 1, 'sandbox_inconclusive should increment to 1, got ' + data.stats.sandbox_inconclusive);
+      // Negative: an inconclusive verdict must NOT count as clean/suspect/fp/confirmed
+      assert(data.stats.clean === 0 && data.stats.suspect === 0 && data.stats.false_positive === 0 && data.stats.confirmed_malicious === 0,
+        'sandbox_inconclusive must not touch clean/suspect/false_positive/confirmed');
     } finally {
-      try { fs.unlinkSync(statsFile); } catch {}
+      if (backup !== null) fs.writeFileSync(SCAN_STATS_FILE, backup, 'utf8');
+      else { try { fs.unlinkSync(SCAN_STATS_FILE); } catch {} }
     }
   });
 
@@ -1607,23 +1496,9 @@ async function runMonitorTests() {
     assert(!IOC_MATCH_TYPES.has('dangerous_call_eval'), 'Should NOT include dangerous_call_eval');
   });
 
-  test('MONITOR: isVerboseMode defaults to false', () => {
-    const origEnv = process.env.MUADDIB_MONITOR_VERBOSE;
-    delete process.env.MUADDIB_MONITOR_VERBOSE;
-    setVerboseMode(false);
-    try {
-      assert(isVerboseMode() === false, 'Should default to false');
-    } finally {
-      if (origEnv !== undefined) process.env.MUADDIB_MONITOR_VERBOSE = origEnv;
-    }
-  });
-
-  test('MONITOR: setVerboseMode enables verbose', () => {
-    setVerboseMode(true);
-    assert(isVerboseMode() === true, 'Should be true after setVerboseMode(true)');
-    setVerboseMode(false);
-    assert(isVerboseMode() === false, 'Should be false after setVerboseMode(false)');
-  });
+  // (Audit 2026-07: verboseMode round-trip is kept as a single test in the COV block below
+  // ("setVerboseMode and isVerboseMode round-trip"). Removed the duplicate default/enable
+  // checks here. The setter/getter remain in use by daemon.js.)
 
   test('MONITOR: buildMonitorWebhookPayload has correct structure', () => {
     const result = {
@@ -1713,7 +1588,8 @@ async function runMonitorTests() {
     assert(KNOWN_BUNDLED_FILES.includes('terser.js'), 'Should include terser.js');
     assert(KNOWN_BUNDLED_FILES.includes('esbuild.js'), 'Should include esbuild.js');
     assert(KNOWN_BUNDLED_FILES.includes('polyfills.js'), 'Should include polyfills.js');
-    assert(KNOWN_BUNDLED_FILES.length === 5, 'Should have 5 entries');
+    // Floor, not exact pin (audit 2026-07) — the membership checks above are the contract.
+    assert(KNOWN_BUNDLED_FILES.length >= 5, 'Should have at least 5 entries');
   });
 
   test('MONITOR: isBundledToolingOnly returns true when all threats from bundled files', () => {
@@ -2390,42 +2266,11 @@ async function runMonitorTests() {
     }
   });
 
-  test('MONITOR: temporal webhook suppressed when static scan is CLEAN and no sandbox (MEDIUM/LOW)', () => {
-    // Simulate the decision logic from resolveTarballAndScan:
-    // If staticClean=true and sandboxResult=null AND temporal is MEDIUM/LOW → no webhook (false positive)
-    // If staticClean=false and sandboxResult=null → send webhook (static found threats)
-    // If staticClean=true and sandboxResult.score=0 → no webhook (sandbox confirms clean)
-    // If staticClean=true and temporal is CRITICAL/HIGH → SUSPECT (send webhook)
-
-    function shouldSendTemporalWebhook(staticClean, sandboxResult, temporalMaxSev) {
-      if (sandboxResult && sandboxResult.score === 0) return false;
-      if (staticClean && !sandboxResult) {
-        // CRITICAL/HIGH temporal cannot be downgraded
-        if (temporalMaxSev === 'CRITICAL' || temporalMaxSev === 'HIGH') return true;
-        return false;
-      }
-      return true;
-    }
-
-    assert(shouldSendTemporalWebhook(true, null, 'MEDIUM') === false,
-      'Static CLEAN + no sandbox + temporal MEDIUM → no temporal webhook');
-    assert(shouldSendTemporalWebhook(true, null, 'LOW') === false,
-      'Static CLEAN + no sandbox + temporal LOW → no temporal webhook');
-    assert(shouldSendTemporalWebhook(true, null, 'CRITICAL') === true,
-      'Static CLEAN + no sandbox + temporal CRITICAL → SUSPECT, send webhook');
-    assert(shouldSendTemporalWebhook(true, null, 'HIGH') === true,
-      'Static CLEAN + no sandbox + temporal HIGH → SUSPECT, send webhook');
-    assert(shouldSendTemporalWebhook(true, { score: 0 }, 'CRITICAL') === false,
-      'Static CLEAN + sandbox CLEAN → no temporal webhook (even if CRITICAL)');
-    assert(shouldSendTemporalWebhook(false, null, 'MEDIUM') === true,
-      'Static SUSPECT + no sandbox → send temporal webhook');
-    assert(shouldSendTemporalWebhook(false, { score: 60 }, 'HIGH') === true,
-      'Static SUSPECT + sandbox SUSPECT → send temporal webhook');
-    assert(shouldSendTemporalWebhook(false, { score: 0 }, 'CRITICAL') === false,
-      'Static SUSPECT + sandbox CLEAN → no temporal webhook');
-    assert(shouldSendTemporalWebhook(true, { score: 60 }, 'HIGH') === true,
-      'Static CLEAN + sandbox SUSPECT → send temporal webhook');
-  });
+  // (Audit 2026-07: removed "temporal webhook suppressed when static scan is CLEAN" — it
+  // defined a local shouldSendTemporalWebhook() and asserted 9 cases against its own copy.
+  // The real decision is inline in processQueueItem (queue.js ~2347-2373: sandbox-0 →
+  // FALSE POSITIVE log; staticClean+no-sandbox → getTemporalMaxSeverity gate) with no
+  // exported predicate to target, so there is nothing behavioral to assert here.)
 
   // ============================================
   // TEMPORAL MAX SEVERITY HELPER TESTS
@@ -2549,36 +2394,9 @@ async function runMonitorTests() {
 
   console.log('\n=== DETECTION TIME LOGGING TESTS ===\n');
 
-  test('MONITOR: appendDetection creates file and adds entry', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-detect-'));
-    const tmpFile = path.join(tmpDir, 'detections.json');
-    // Temporarily override DETECTIONS_FILE by writing directly
-    try {
-      // Simulate appendDetection logic with a temp file
-      const data = { detections: [] };
-      data.detections.push({
-        package: 'evil-pkg',
-        version: '1.0.0',
-        ecosystem: 'npm',
-        first_seen_at: new Date().toISOString(),
-        findings: ['shell_exec', 'obfuscation'],
-        severity: 'CRITICAL',
-        advisory_at: null,
-        lead_time_hours: null
-      });
-      fs.writeFileSync(tmpFile, JSON.stringify(data, null, 2), 'utf8');
-
-      const result = JSON.parse(fs.readFileSync(tmpFile, 'utf8'));
-      assert(result.detections.length === 1, 'Should have 1 detection');
-      assert(result.detections[0].package === 'evil-pkg', 'Package should be evil-pkg');
-      assert(result.detections[0].severity === 'CRITICAL', 'Severity should be CRITICAL');
-      assert(result.detections[0].findings.length === 2, 'Should have 2 findings');
-      assert(result.detections[0].advisory_at === null, 'advisory_at should be null');
-      assert(result.detections[0].lead_time_hours === null, 'lead_time_hours should be null');
-    } finally {
-      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
-    }
-  });
+  // (Audit 2026-07: removed "appendDetection creates file and adds entry" — it wrote and
+  // read its own temp JSON without ever calling appendDetection. The real function is
+  // exercised by the dedup test just below and by "MONITOR: appendDetection deduplicates".)
 
   test('MONITOR: appendDetection deduplicates same name@version', () => {
     // Use the actual appendDetection function — it writes to DETECTIONS_FILE.
@@ -2907,54 +2725,10 @@ async function runMonitorTests() {
 
   console.log('\n=== MONITOR ADDITIONAL COVERAGE TESTS ===\n');
 
-  test('MONITOR: reportStats logs formatted output without error', () => {
-    const monitor = require('../../src/monitor.js');
-    const origScanned = stats.scanned;
-    const origClean = stats.clean;
-    const origSuspect = stats.suspect;
-    const origErrors = stats.errors;
-    const origTotalTimeMs = stats.totalTimeMs;
-
-    stats.scanned = 50;
-    stats.clean = 40;
-    stats.suspect = 8;
-    stats.errors = 2;
-    stats.totalTimeMs = 25000;
-
-    let threw = false;
-    try {
-      monitor.reportStats();
-    } catch {
-      threw = true;
-    }
-    assert(!threw, 'reportStats should not throw');
-
-    stats.scanned = origScanned;
-    stats.clean = origClean;
-    stats.suspect = origSuspect;
-    stats.errors = origErrors;
-    stats.totalTimeMs = origTotalTimeMs;
-  });
-
-  test('MONITOR: reportStats handles zero scanned (no division error)', () => {
-    const monitor = require('../../src/monitor.js');
-    const origScanned = stats.scanned;
-    const origTotalTimeMs = stats.totalTimeMs;
-
-    stats.scanned = 0;
-    stats.totalTimeMs = 0;
-
-    let threw = false;
-    try {
-      monitor.reportStats();
-    } catch {
-      threw = true;
-    }
-    assert(!threw, 'reportStats should not throw with zero scanned');
-
-    stats.scanned = origScanned;
-    stats.totalTimeMs = origTotalTimeMs;
-  });
+  // (Audit 2026-07: removed two weak reportStats no-throw tests here — they are superseded
+  // by the value-asserting "MONITOR-COV: reportStats logs formatted stats with correct
+  // values" and "MONITOR-COV: reportStats handles zero scanned (no division error)" below,
+  // which check the actual formatted output rather than merely that no exception is thrown.)
 
   test('MONITOR: buildDailyReportEmbed with zero stats shows 0 values', () => {
     const origErrors = stats.errors;
@@ -3310,9 +3084,8 @@ async function runMonitorTests() {
     assert(isBundledToolingOnly(threats) === true, 'Next.js chunks should be bundled');
   });
 
-  test('MONITOR: isBundledToolingOnly returns false for empty threats', () => {
-    assert(isBundledToolingOnly([]) === false, 'Empty threats should return false');
-  });
+  // (Audit 2026-07: removed duplicate "isBundledToolingOnly returns false for empty threats"
+  // — exact dupe of the PHASE 6 test above.)
 
   test('MONITOR: isBundledToolingOnly returns false when file is null', () => {
     const threats = [{ type: 'dangerous_call_eval', severity: 'HIGH' }];
@@ -3327,10 +3100,7 @@ async function runMonitorTests() {
     assert(computeRiskLevel({ critical: 0, high: 0, medium: 0, low: 0 }) === 'CLEAN');
   });
 
-  test('MONITOR: computeRiskScore caps at 100', () => {
-    const score = computeRiskScore({ critical: 10, high: 10, medium: 10, low: 10 });
-    assert(score === 100, 'Score should be capped at 100, got ' + score);
-  });
+  // (Audit 2026-07: removed duplicate "computeRiskScore caps at 100" — exact dupe above.)
 
   test('MONITOR: computeRiskScore calculates correctly', () => {
     const score = computeRiskScore({ critical: 1, high: 1, medium: 1, low: 1 });
@@ -3354,26 +3124,8 @@ async function runMonitorTests() {
     assert(isPublishAnomalyOnly(null, null, { suspicious: false }, null) === false);
   });
 
-  test('MONITOR: isCanaryEnabled defaults to true', () => {
-    const orig = process.env.MUADDIB_MONITOR_CANARY;
-    delete process.env.MUADDIB_MONITOR_CANARY;
-    try {
-      assert(isCanaryEnabled() === true, 'Should default to true');
-    } finally {
-      if (orig !== undefined) process.env.MUADDIB_MONITOR_CANARY = orig;
-    }
-  });
-
-  test('MONITOR: isCanaryEnabled returns false when env=false', () => {
-    const orig = process.env.MUADDIB_MONITOR_CANARY;
-    process.env.MUADDIB_MONITOR_CANARY = 'false';
-    try {
-      assert(isCanaryEnabled() === false, 'Should return false');
-    } finally {
-      if (orig !== undefined) process.env.MUADDIB_MONITOR_CANARY = orig;
-      else delete process.env.MUADDIB_MONITOR_CANARY;
-    }
-  });
+  // (Audit 2026-07: removed duplicate isCanaryEnabled defaults/false-when-env-false tests —
+  // exact dupes of the pair in the CANARY TOKEN block above.)
 
   test('MONITOR: buildCanaryExfiltrationWebhookEmbed has correct structure', () => {
     const embed = buildCanaryExfiltrationWebhookEmbed('evil-pkg', '1.0.0', [
@@ -3525,17 +3277,22 @@ async function runMonitorTests() {
   // --- trySendWebhook ---
 
   await asyncTest('MONITOR: trySendWebhook does nothing when shouldSendWebhook returns false', async () => {
-    // No webhook URL set = shouldSendWebhook returns false
+    // Audit 2026-07: had NO assertion. Now proves the send is not attempted by capturing
+    // the real delivery seam. No webhook URL → shouldSendWebhook false → 0 sends.
     const origEnv = process.env.MUADDIB_WEBHOOK_URL;
     delete process.env.MUADDIB_WEBHOOK_URL;
     const origLog = console.log;
-    let logOutput = '';
-    console.log = (...args) => { logOutput += args.join(' '); };
+    console.log = () => {};
+    const monitorWebhook = require('../../src/monitor/webhook.js');
+    const origSendWebhook = monitorWebhook._deps.sendWebhook;
+    const calls = [];
+    monitorWebhook._deps.sendWebhook = async (...args) => { calls.push(args); };
     try {
       const result = { summary: { critical: 0, high: 0, medium: 1, low: 0, total: 1 }, threats: [] };
       await trySendWebhook('test-pkg', '1.0.0', 'npm', result, null);
-      // Should return without sending (no webhook URL)
+      assert(calls.length === 0, `Should NOT send a webhook when no URL / shouldSendWebhook false, got ${calls.length} calls`);
     } finally {
+      monitorWebhook._deps.sendWebhook = origSendWebhook;
       console.log = origLog;
       if (origEnv !== undefined) process.env.MUADDIB_WEBHOOK_URL = origEnv;
     }
@@ -3654,30 +3411,43 @@ async function runMonitorTests() {
 
   // --- sendDailyReport ---
 
-  await asyncTest('MONITOR: sendDailyReport does nothing when no webhook URL', async () => {
+  await asyncTest('MONITOR: sendDailyReport does not send a webhook when no URL is configured', async () => {
+    // Audit 2026-07: had NO assertion. Now proves no send happens on the no-URL path
+    // (the report is persisted locally instead). Uses the real delivery seam.
     const origEnv = process.env.MUADDIB_WEBHOOK_URL;
     delete process.env.MUADDIB_WEBHOOK_URL;
     const origLog = console.log;
     const origErr = console.error;
     console.log = () => {};
     console.error = () => {};
-    // Save stats state
+    const monitorWebhook = require('../../src/monitor/webhook.js');
+    const origSendWebhook = monitorWebhook._deps.sendWebhook;
+    const calls = [];
+    monitorWebhook._deps.sendWebhook = async (...args) => { calls.push(args); };
     const origScanned = stats.scanned;
     const origClean = stats.clean;
     const origSuspect = stats.suspect;
     const origErrors = stats.errors;
+    const origLastDate = stats.lastDailyReportDate;
+    stats.scanned = 1; // non-zero so it doesn't skip on the 0-scanned guard
+    // NOTE: no _fakeReportClock here — that helper is declared later in the suite (TDZ).
+    // The assertion (0 sends) holds whether sendDailyReport persists-locally (past 08:00
+    // Paris) or is dead-zone-suppressed (before 08:00) — neither path sends a webhook.
     try {
       await sendDailyReport();
-      // sendDailyReport resets counters even when no URL (after the check)
-      // The function checks url first, returns if not set, so counters remain unchanged
+      assert(calls.length === 0, `No URL configured → must not attempt a webhook, got ${calls.length} calls`);
     } finally {
+      monitorWebhook._deps.sendWebhook = origSendWebhook;
       console.log = origLog;
       console.error = origErr;
-      // Restore stats
       stats.scanned = origScanned;
       stats.clean = origClean;
       stats.suspect = origSuspect;
       stats.errors = origErrors;
+      stats.lastDailyReportDate = origLastDate;
+      dailyAlerts.length = 0;
+      recentlyScanned.clear();
+      downloadsCache.clear();
       if (origEnv !== undefined) process.env.MUADDIB_WEBHOOK_URL = origEnv;
     }
   });
@@ -3709,20 +3479,25 @@ async function runMonitorTests() {
   // --- trySendWebhook with webhook URL but no IOC match and no sandbox ---
 
   await asyncTest('MONITOR: trySendWebhook skips when no IOC match and no sandbox', async () => {
+    // Audit 2026-07: had NO assertion. Now captures the real delivery seam and proves
+    // no send happens (HIGH static finding, but no sandbox + no IOC → shouldSendWebhook false).
     const origEnv = process.env.MUADDIB_WEBHOOK_URL;
-    process.env.MUADDIB_WEBHOOK_URL = 'https://example.com/webhook';
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.slack.com/services/T00/B00/xxx';
     const origLog = console.log;
-    let logOutput = '';
-    console.log = (...args) => { logOutput += args.join(' '); };
+    console.log = () => {};
+    const monitorWebhook = require('../../src/monitor/webhook.js');
+    const origSendWebhook = monitorWebhook._deps.sendWebhook;
+    const calls = [];
+    monitorWebhook._deps.sendWebhook = async (...args) => { calls.push(args); };
     try {
       const result = {
         summary: { critical: 0, high: 1, medium: 0, low: 0, total: 1 },
         threats: [{ type: 'suspicious_pattern', severity: 'HIGH' }]
       };
-      // No sandbox result, no IOC match => shouldSendWebhook returns false
       await trySendWebhook('test-pkg', '1.0.0', 'npm', result, null);
-      // Should not have sent a webhook
+      assert(calls.length === 0, `No sandbox + no IOC → must not send, got ${calls.length} calls`);
     } finally {
+      monitorWebhook._deps.sendWebhook = origSendWebhook;
       console.log = origLog;
       if (origEnv !== undefined) {
         process.env.MUADDIB_WEBHOOK_URL = origEnv;
@@ -3818,20 +3593,13 @@ async function runMonitorTests() {
     assert(IOC_MATCH_TYPES.has('pypi_malicious_package'), 'Should have pypi_malicious_package');
     assert(IOC_MATCH_TYPES.has('shai_hulud_marker'), 'Should have shai_hulud_marker');
     assert(IOC_MATCH_TYPES.has('shai_hulud_backdoor'), 'Should have shai_hulud_backdoor');
-    assert(IOC_MATCH_TYPES.size === 5, 'Should have exactly 5 types, got ' + IOC_MATCH_TYPES.size);
+    // Floor, not exact pin (audit 2026-07) — membership above is the contract.
+    assert(IOC_MATCH_TYPES.size >= 5, 'Should have at least 5 types, got ' + IOC_MATCH_TYPES.size);
   });
 
   // --- computeRiskScore extended ---
-
-  test('MONITOR: computeRiskScore caps at 100', () => {
-    const score = computeRiskScore({ critical: 10, high: 10, medium: 10, low: 10 });
-    assert(score === 100, 'Should cap at 100, got ' + score);
-  });
-
-  test('MONITOR: computeRiskScore returns 0 for clean', () => {
-    const score = computeRiskScore({ critical: 0, high: 0, medium: 0, low: 0 });
-    assert(score === 0, 'Should be 0 for clean');
-  });
+  // (Audit 2026-07: removed duplicate "caps at 100" and "returns 0 for clean" — both are
+  // exact dupes of the PHASE 6 computeRiskScore tests above.)
 
   test('MONITOR: computeRiskScore computes correct value for single critical', () => {
     const score = computeRiskScore({ critical: 1, high: 0, medium: 0, low: 0 });
@@ -4222,9 +3990,8 @@ async function runMonitorTests() {
     assert(isBundledToolingOnly(threats) === false, 'Should return false when not all threats are bundled');
   });
 
-  test('MONITOR: isBundledToolingOnly returns false for empty threats', () => {
-    assert(isBundledToolingOnly([]) === false, 'Should return false for empty array');
-  });
+  // (Audit 2026-07: removed the third duplicate "isBundledToolingOnly returns false for
+  // empty threats" — exact dupe of the PHASE 6 test.)
 
   // --- hasHighOrCritical extended ---
 
@@ -4237,6 +4004,7 @@ async function runMonitorTests() {
   });
 
   // --- isVerboseMode / setVerboseMode ---
+  // The sole verboseMode round-trip test (setter/getter still consumed by daemon.js:864).
 
   test('MONITOR: setVerboseMode and isVerboseMode round-trip', () => {
     const origVerbose = isVerboseMode();
@@ -4250,21 +4018,6 @@ async function runMonitorTests() {
     } finally {
       setVerboseMode(origVerbose);
       if (origEnv !== undefined) process.env.MUADDIB_MONITOR_VERBOSE = origEnv;
-    }
-  });
-
-  test('MONITOR: isVerboseMode reads from env', () => {
-    const origEnv = process.env.MUADDIB_MONITOR_VERBOSE;
-    setVerboseMode(false);
-    process.env.MUADDIB_MONITOR_VERBOSE = 'true';
-    try {
-      assert(isVerboseMode() === true, 'Should return true when env is true');
-    } finally {
-      if (origEnv !== undefined) {
-        process.env.MUADDIB_MONITOR_VERBOSE = origEnv;
-      } else {
-        delete process.env.MUADDIB_MONITOR_VERBOSE;
-      }
     }
   });
 
@@ -4738,9 +4491,10 @@ async function runMonitorTests() {
 
     process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.example.com/test';
 
-    const webhookModule = require('../../src/webhook.js');
-    const origSendWebhook = webhookModule.sendWebhook;
-    webhookModule.sendWebhook = async () => {};
+    // Live delivery seam (audit 2026-07): real interception, no network.
+    const monitorWebhook = require('../../src/monitor/webhook.js');
+    const origSendWebhook = monitorWebhook._deps.sendWebhook;
+    monitorWebhook._deps.sendWebhook = async () => {};
 
     // Save original values
     const origScanned = stats.scanned;
@@ -4777,7 +4531,7 @@ async function runMonitorTests() {
       assert(stats.lastDailyReportDate === getParisDateString(), 'lastDailyReportDate should be today');
     } finally {
       _unfakeReportClock();
-      webhookModule.sendWebhook = origSendWebhook;
+      monitorWebhook._deps.sendWebhook = origSendWebhook;
       console.log = origLog;
       console.error = origErr;
       // Restore stats
@@ -4805,9 +4559,12 @@ async function runMonitorTests() {
 
     process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.example.com/test';
 
-    const webhookModule = require('../../src/webhook.js');
-    const origSendWebhook = webhookModule.sendWebhook;
-    webhookModule.sendWebhook = async () => { throw new Error('webhook failure test'); };
+    // Live delivery seam (audit 2026-07): OUR stub throws, so the 'Daily report
+    // webhook failed' log is driven by our injected failure — not by an incidental
+    // NXDOMAIN/domain-block. No network is touched.
+    const monitorWebhook = require('../../src/monitor/webhook.js');
+    const origSendWebhook = monitorWebhook._deps.sendWebhook;
+    monitorWebhook._deps.sendWebhook = async () => { throw new Error('webhook failure test'); };
 
     const origScanned = stats.scanned;
     const origClean = stats.clean;
@@ -4820,13 +4577,13 @@ async function runMonitorTests() {
     try {
       _fakeReportClock();
       await sendDailyReport();
-      const errLog = errors.find(l => l.includes('Daily report webhook failed'));
-      assert(errLog !== undefined, 'Should log webhook failure');
+      const errLog = errors.find(l => l.includes('Daily report webhook failed') && l.includes('webhook failure test'));
+      assert(errLog !== undefined, 'Should log webhook failure triggered by our injected throw');
       // Counters should still be reset even on webhook failure
       assert(stats.scanned === 0, 'scanned should be reset even on failure');
     } finally {
       _unfakeReportClock();
-      webhookModule.sendWebhook = origSendWebhook;
+      monitorWebhook._deps.sendWebhook = origSendWebhook;
       console.log = origLog;
       console.error = origErr;
       stats.scanned = origScanned;
@@ -4849,28 +4606,26 @@ async function runMonitorTests() {
   });
 
   await asyncTest('MONITOR-COV: processQueue handles errors in resolveTarballAndScan', async () => {
+    // Audit 2026-07: was a real registry call on a synthetic name. Now the resolution
+    // failure is injected via ingestion._deps.httpsGet (throw) so processQueue drains
+    // deterministically without touching the network.
+    const ingestion = require('../../src/monitor/ingestion.js');
+    const realGet = ingestion._deps.httpsGet;
     const origLog = console.log;
     const origErr = console.error;
-    const errors = [];
     console.log = () => {};
-    console.error = (...args) => errors.push(args.join(' '));
+    console.error = () => {};
+    ingestion._deps.httpsGet = async () => { throw new Error('test: simulated npm failure'); };
 
     const origErrors2 = stats.errors;
-
-    // Push an item that will fail (invalid ecosystem/tarball)
     scanQueue.length = 0;
-    scanQueue.push({
-      name: 'processqueue-test-nonexistent-pkg-' + Date.now(),
-      version: '0.0.1',
-      ecosystem: 'npm',
-      tarballUrl: null
-    });
+    scanQueue.push({ name: 'processqueue-error-pkg', version: '0.0.1', ecosystem: 'npm', tarballUrl: null });
 
     try {
       await processQueue();
-      // processQueue should have caught errors, not thrown
-      assert(scanQueue.length === 0, 'Queue should be drained after processing');
+      assert(scanQueue.length === 0, 'Queue should be drained after processing (errors caught, not thrown)');
     } finally {
+      ingestion._deps.httpsGet = realGet;
       console.log = origLog;
       console.error = origErr;
       stats.errors = origErrors2;
@@ -4922,35 +4677,50 @@ async function runMonitorTests() {
   // --- resolveTarballAndScan extended ---
 
   await asyncTest('MONITOR-COV: resolveTarballAndScan handles npm package with no tarball', async () => {
+    // Audit 2026-07: was a real registry round-trip on a synthetic name (404 → assertion
+    // accepting error OR skip). Now deterministic via ingestion._deps.httpsGet: an empty
+    // packument makes getNpmLatestTarball return tarball:null → the SKIP branch.
+    const ingestion = require('../../src/monitor/ingestion.js');
+    const realGet = ingestion._deps.httpsGet;
     const origLog = console.log;
     const origErr = console.error;
     const logs = [];
-    const errors = [];
     console.log = (...args) => logs.push(args.join(' '));
-    console.error = (...args) => errors.push(args.join(' '));
-
-    const origErrors2 = stats.errors;
+    console.error = () => {};
+    ingestion._deps.httpsGet = async () => '{}'; // empty packument → no versions → null selection
 
     try {
-      // Use a non-existent package name so getNpmLatestTarball fails
-      const item = {
-        name: 'muaddib-nonexistent-test-pkg-' + Date.now(),
-        version: '',
-        ecosystem: 'npm',
-        tarballUrl: null
-      };
-      // Clear dedup so it doesn't skip
+      const item = { name: 'no-tarball-npm-pkg', version: '', ecosystem: 'npm', tarballUrl: null };
       recentlyScanned.delete(`npm/${item.name}@`);
-      recentlyScanned.delete(`npm/${item.name}@${item.version}`);
-
       await resolveTarballAndScan(item);
-      // Should log error resolving tarball
-      const errorLog = errors.find(l => l.includes('ERROR resolving npm tarball'));
-      const skipLog = logs.find(l => l.includes('SKIP') && l.includes('no tarball'));
-      // Either an error or a skip is expected
-      assert(errorLog !== undefined || skipLog !== undefined,
-        'Should log error or skip for non-existent npm package');
+      const skipLog = logs.find(l => l.includes('SKIP') && l.includes('no tarball URL found on npm'));
+      assert(skipLog !== undefined, 'Empty packument must hit the "no tarball URL found on npm" skip');
     } finally {
+      ingestion._deps.httpsGet = realGet;
+      console.log = origLog;
+      console.error = origErr;
+    }
+  });
+
+  await asyncTest('MONITOR-COV: resolveTarballAndScan logs ERROR on npm resolution failure', async () => {
+    // Negative counterpart: an httpsGet throw drives the ERROR branch (not the skip).
+    const ingestion = require('../../src/monitor/ingestion.js');
+    const realGet = ingestion._deps.httpsGet;
+    const origLog = console.log;
+    const origErr = console.error;
+    const errors = [];
+    console.log = () => {};
+    console.error = (...args) => errors.push(args.join(' '));
+    ingestion._deps.httpsGet = async () => { throw new Error('test: simulated npm 500'); };
+    const origErrors2 = stats.errors;
+    try {
+      const item = { name: 'error-npm-pkg', version: '', ecosystem: 'npm', tarballUrl: null };
+      recentlyScanned.delete(`npm/${item.name}@`);
+      await resolveTarballAndScan(item);
+      const errorLog = errors.find(l => l.includes('ERROR resolving npm tarball for error-npm-pkg'));
+      assert(errorLog !== undefined, 'A resolution throw must log "ERROR resolving npm tarball"');
+    } finally {
+      ingestion._deps.httpsGet = realGet;
       console.log = origLog;
       console.error = origErr;
       stats.errors = origErrors2;
@@ -4958,35 +4728,26 @@ async function runMonitorTests() {
   });
 
   await asyncTest('MONITOR-COV: resolveTarballAndScan handles pypi package with no tarball', async () => {
+    // Deterministic: a PyPI JSON with no sdist/wheel → pypiInfo.url null → SKIP branch.
+    const ingestion = require('../../src/monitor/ingestion.js');
+    const realGet = ingestion._deps.httpsGet;
     const origLog = console.log;
     const origErr = console.error;
     const logs = [];
-    const errors = [];
     console.log = (...args) => logs.push(args.join(' '));
-    console.error = (...args) => errors.push(args.join(' '));
-
-    const origErrors2 = stats.errors;
+    console.error = () => {};
+    ingestion._deps.httpsGet = async () => JSON.stringify({ info: { version: '1.0.0' }, urls: [], releases: {} });
 
     try {
-      const item = {
-        name: 'muaddib-nonexistent-pypi-test-' + Date.now(),
-        version: '',
-        ecosystem: 'pypi',
-        tarballUrl: null
-      };
+      const item = { name: 'no-tarball-pypi-pkg', version: '', ecosystem: 'pypi', tarballUrl: null };
       recentlyScanned.delete(`pypi/${item.name}@`);
-      recentlyScanned.delete(`pypi/${item.name}@${item.version}`);
-
       await resolveTarballAndScan(item);
-      // Should log error resolving tarball
-      const errorLog = errors.find(l => l.includes('ERROR resolving PyPI tarball'));
-      const skipLog = logs.find(l => l.includes('SKIP') && l.includes('no tarball'));
-      assert(errorLog !== undefined || skipLog !== undefined,
-        'Should log error or skip for non-existent PyPI package');
+      const skipLog = logs.find(l => l.includes('SKIP') && l.includes('no tarball URL found on PyPI'));
+      assert(skipLog !== undefined, 'A releaseless PyPI JSON must hit the "no tarball URL found on PyPI" skip');
     } finally {
+      ingestion._deps.httpsGet = realGet;
       console.log = origLog;
       console.error = origErr;
-      stats.errors = origErrors2;
     }
   });
 
@@ -5108,28 +4869,27 @@ async function runMonitorTests() {
 
   // --- processQueue with timeout ---
 
-  await asyncTest('MONITOR-COV: processQueue handles scan timeout', async () => {
+  await asyncTest('MONITOR-COV: processQueue drains item whose resolution yields no tarball', async () => {
+    // Audit 2026-07: was a real registry call (misnamed "scan timeout" — it never
+    // triggered a timeout). Now an empty packument makes resolution a clean SKIP, and
+    // we assert the real processQueue loop drains the queue. No network.
+    const ingestion = require('../../src/monitor/ingestion.js');
+    const realGet = ingestion._deps.httpsGet;
     const origLog = console.log;
     const origErr = console.error;
-    const errors = [];
     console.log = () => {};
-    console.error = (...args) => errors.push(args.join(' '));
+    console.error = () => {};
+    ingestion._deps.httpsGet = async () => '{}'; // empty packument → SKIP branch
 
     const origErrors2 = stats.errors;
-
-    // Push an item and verify queue is drained
     scanQueue.length = 0;
-    scanQueue.push({
-      name: 'timeout-test-pkg-' + Date.now(),
-      version: '0.0.1',
-      ecosystem: 'npm',
-      tarballUrl: null
-    });
+    scanQueue.push({ name: 'no-tarball-drain-pkg', version: '0.0.1', ecosystem: 'npm', tarballUrl: null });
 
     try {
       await processQueue();
-      assert(scanQueue.length === 0, 'Queue should be drained even with errors');
+      assert(scanQueue.length === 0, 'Queue should be drained after a no-tarball skip');
     } finally {
+      ingestion._deps.httpsGet = realGet;
       console.log = origLog;
       console.error = origErr;
       stats.errors = origErrors2;
@@ -5203,28 +4963,8 @@ async function runMonitorTests() {
     }
   });
 
-  // --- isCanaryEnabled extended ---
-
-  test('MONITOR-COV: isCanaryEnabled returns true by default', () => {
-    const origEnv = process.env.MUADDIB_MONITOR_CANARY;
-    delete process.env.MUADDIB_MONITOR_CANARY;
-    try {
-      assert(isCanaryEnabled() === true, 'Should be true by default');
-    } finally {
-      if (origEnv !== undefined) process.env.MUADDIB_MONITOR_CANARY = origEnv;
-    }
-  });
-
-  test('MONITOR-COV: isCanaryEnabled returns false when disabled', () => {
-    const origEnv = process.env.MUADDIB_MONITOR_CANARY;
-    process.env.MUADDIB_MONITOR_CANARY = 'false';
-    try {
-      assert(isCanaryEnabled() === false, 'Should be false when env is false');
-    } finally {
-      if (origEnv !== undefined) process.env.MUADDIB_MONITOR_CANARY = origEnv;
-      else delete process.env.MUADDIB_MONITOR_CANARY;
-    }
-  });
+  // (Audit 2026-07: removed the third isCanaryEnabled defaults/false pair — exact dupes
+  // of the CANARY TOKEN block; a single pair is retained there.)
 
   // --- isSandboxEnabled extended ---
 
@@ -5458,23 +5198,8 @@ async function runMonitorTests() {
   //  constants are retained because they are still consumed by the daemon
   //  pruning + daily-report path; they no longer gate any pipeline skip.)
 
-  test('MONITOR: downloadsCache stores and returns cached value', () => {
-    downloadsCache.clear();
-    downloadsCache.set('test-pkg', { downloads: 100000, fetchedAt: Date.now() });
-    const cached = downloadsCache.get('test-pkg');
-    assert(cached.downloads === 100000, 'Cached downloads should be 100000');
-    downloadsCache.clear();
-  });
-
-  test('MONITOR: downloadsCache entry expires after TTL', () => {
-    downloadsCache.clear();
-    const expiredTime = Date.now() - DOWNLOADS_CACHE_TTL - 1000;
-    downloadsCache.set('expired-pkg', { downloads: 200000, fetchedAt: expiredTime });
-    const cached = downloadsCache.get('expired-pkg');
-    assert(cached !== undefined, 'Entry should exist in map');
-    assert((Date.now() - cached.fetchedAt) >= DOWNLOADS_CACHE_TTL, 'Entry should be past TTL');
-    downloadsCache.clear();
-  });
+  // (Audit 2026-07: removed two downloadsCache tests that only did Map.set/get and
+  // recomputed the TTL arithmetic inline — they exercised the JS Map, not monitor code.)
 
   test('MONITOR: hasTyposquat detects typosquat_detected', () => {
     const result = { threats: [{ type: 'typosquat_detected', severity: 'HIGH' }] };
@@ -5526,9 +5251,10 @@ async function runMonitorTests() {
 
     process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.example.com/test';
 
-    const webhookModule = require('../../src/webhook.js');
-    const origSendWebhook = webhookModule.sendWebhook;
-    webhookModule.sendWebhook = async () => {};
+    // Live seam so the send is a real no-op (not a domain-blocked throw); see 0-scanned test.
+    const monitorWebhook = require('../../src/monitor/webhook.js');
+    const origSendWebhook = monitorWebhook._deps.sendWebhook;
+    monitorWebhook._deps.sendWebhook = async () => {};
 
     const origScanned = stats.scanned;
     const origClean = stats.clean;
@@ -5550,7 +5276,7 @@ async function runMonitorTests() {
       assert(downloadsCache.size === 0, 'downloadsCache should be cleared after sendDailyReport, got size ' + downloadsCache.size);
     } finally {
       _unfakeReportClock();
-      webhookModule.sendWebhook = origSendWebhook;
+      monitorWebhook._deps.sendWebhook = origSendWebhook;
       console.log = origLog;
       console.error = origErr;
       stats.scanned = origScanned;
@@ -5579,10 +5305,14 @@ async function runMonitorTests() {
 
     process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.example.com/test';
 
-    const webhookModule = require('../../src/webhook.js');
-    const origSendWebhook = webhookModule.sendWebhook;
+    // Live delivery seam (audit 2026-07): the old patch of require('../../src/webhook.js')
+    // .sendWebhook was dead — sendDailyReport captured the reference by destructuring at
+    // load. monitorWebhook._deps.sendWebhook is the real interception point, so
+    // webhookCalled now genuinely proves the send was (not) attempted.
+    const monitorWebhook = require('../../src/monitor/webhook.js');
+    const origSendWebhook = monitorWebhook._deps.sendWebhook;
     let webhookCalled = false;
-    webhookModule.sendWebhook = async () => { webhookCalled = true; };
+    monitorWebhook._deps.sendWebhook = async () => { webhookCalled = true; };
 
     const origScanned = stats.scanned;
     const origClean = stats.clean;
@@ -5602,7 +5332,7 @@ async function runMonitorTests() {
       assert(skipLog !== undefined, 'Should log that report was skipped due to 0 scanned');
     } finally {
       _unfakeReportClock();
-      webhookModule.sendWebhook = origSendWebhook;
+      monitorWebhook._deps.sendWebhook = origSendWebhook;
       console.log = origLog;
       console.error = origErr;
       stats.scanned = origScanned;
@@ -6064,7 +5794,9 @@ async function runMonitorTests() {
     assert(LIFECYCLE_INTENT_TYPES.has('obfuscated_lifecycle_env'), 'obfuscated_lifecycle_env in LIFECYCLE_INTENT_TYPES');
     assert(LIFECYCLE_INTENT_TYPES.has('bun_runtime_evasion'), 'bun_runtime_evasion in LIFECYCLE_INTENT_TYPES');
     assert(LIFECYCLE_INTENT_TYPES.has('lifecycle_shell_pipe'), 'lifecycle_shell_pipe in LIFECYCLE_INTENT_TYPES');
-    assert(LIFECYCLE_INTENT_TYPES.size === 8, 'LIFECYCLE_INTENT_TYPES should have 8 entries, got ' + LIFECYCLE_INTENT_TYPES.size);
+    // Floor, not exact pin (audit 2026-07): the .has() membership above is the contract;
+    // adding a lifecycle-intent type must not break this test. 8 = count at floor time.
+    assert(LIFECYCLE_INTENT_TYPES.size >= 8, 'LIFECYCLE_INTENT_TYPES should have at least 8 entries, got ' + LIFECYCLE_INTENT_TYPES.size);
   });
 
   test('isSuspectClassification T1a: sandbox_evasion type → tier 1a', () => {
@@ -6271,14 +6003,16 @@ async function runMonitorTests() {
     assert(TIER1_TYPES.has('mcp_config_injection'), 'mcp_config_injection in TIER1');
     assert(TIER1_TYPES.has('ai_agent_abuse'), 'ai_agent_abuse in TIER1');
     assert(TIER1_TYPES.has('crypto_miner'), 'crypto_miner in TIER1');
-    assert(TIER1_TYPES.size === 7, 'TIER1 should have 7 types, got ' + TIER1_TYPES.size);
+    // Floor, not exact pin (audit 2026-07) — membership above is the contract.
+    assert(TIER1_TYPES.size >= 7, 'TIER1 should have at least 7 types, got ' + TIER1_TYPES.size);
   });
 
   test('isSuspectClassification: TIER2_ACTIVE_TYPES contains expected types', () => {
     assert(TIER2_ACTIVE_TYPES.has('suspicious_dataflow'), 'suspicious_dataflow in TIER2');
     assert(TIER2_ACTIVE_TYPES.has('dangerous_call_eval'), 'dangerous_call_eval in TIER2');
     assert(TIER2_ACTIVE_TYPES.has('dangerous_call_function'), 'dangerous_call_function in TIER2');
-    assert(TIER2_ACTIVE_TYPES.size === 3, 'TIER2 should have 3 types, got ' + TIER2_ACTIVE_TYPES.size);
+    // Floor, not exact pin (audit 2026-07) — membership above is the contract.
+    assert(TIER2_ACTIVE_TYPES.size >= 3, 'TIER2 should have at least 3 types, got ' + TIER2_ACTIVE_TYPES.size);
   });
 
   test('isSuspectClassification: TIER3_PASSIVE_TYPES contains expected types', () => {
@@ -6290,7 +6024,8 @@ async function runMonitorTests() {
     assert(TIER3_PASSIVE_TYPES.has('dynamic_import'), 'dynamic_import in TIER3');
     assert(TIER3_PASSIVE_TYPES.has('dynamic_require'), 'dynamic_require in TIER3');
     assert(TIER3_PASSIVE_TYPES.has('high_entropy_string'), 'high_entropy_string in TIER3');
-    assert(TIER3_PASSIVE_TYPES.size === 8, 'TIER3 should have 8 types, got ' + TIER3_PASSIVE_TYPES.size);
+    // Floor, not exact pin (audit 2026-07) — membership above is the contract.
+    assert(TIER3_PASSIVE_TYPES.size >= 8, 'TIER3 should have at least 8 types, got ' + TIER3_PASSIVE_TYPES.size);
   });
 
   // --- Edge: T1a/T1b overrides T2/T3 ---
@@ -6781,12 +6516,41 @@ async function runMonitorTests() {
     }
   });
 
-  test('MONITOR: sendDailyReport clears alertedPackageRules', () => {
+  await asyncTest('MONITOR: sendDailyReport clears alertedPackageRules', async () => {
+    // Audit 2026-07: was a self-test (the test called .clear() itself). Now drives the
+    // REAL sendDailyReport (via the _deps seam) and proves it clears the map.
+    const origEnv = process.env.MUADDIB_WEBHOOK_URL;
+    const origLog = console.log;
+    const origErr = console.error;
+    console.log = () => {};
+    console.error = () => {};
+    process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.example.com/test';
+    const monitorWebhook = require('../../src/monitor/webhook.js');
+    const origSendWebhook = monitorWebhook._deps.sendWebhook;
+    monitorWebhook._deps.sendWebhook = async () => {};
+    const origScanned = stats.scanned;
+    const origLastDate = stats.lastDailyReportDate;
+    stats.scanned = 1;
     alertedPackageRules.set('test-pkg', new Set(['RULE-001']));
-    assert(alertedPackageRules.size > 0, 'Should have entries before clear');
-    // Simulate the clearing that happens in sendDailyReport
-    alertedPackageRules.clear();
-    assert(alertedPackageRules.size === 0, 'Should be empty after clear');
+    try {
+      _fakeReportClock();
+      assert(alertedPackageRules.size > 0, 'precondition: entries present before the report');
+      await sendDailyReport();
+      assert(alertedPackageRules.size === 0, 'sendDailyReport must clear alertedPackageRules');
+    } finally {
+      _unfakeReportClock();
+      monitorWebhook._deps.sendWebhook = origSendWebhook;
+      console.log = origLog;
+      console.error = origErr;
+      stats.scanned = origScanned;
+      stats.lastDailyReportDate = origLastDate;
+      dailyAlerts.length = 0;
+      recentlyScanned.clear();
+      downloadsCache.clear();
+      alertedPackageRules.clear();
+      if (origEnv !== undefined) process.env.MUADDIB_WEBHOOK_URL = origEnv;
+      else delete process.env.MUADDIB_WEBHOOK_URL;
+    }
   });
 
   // ===== C1: Self-exclude tests =====
@@ -6796,22 +6560,56 @@ async function runMonitorTests() {
       `SELF_PACKAGE_NAME should be muaddib-scanner, got ${SELF_PACKAGE_NAME}`);
   });
 
-  test('MONITOR: Self-exclude skips muaddib-scanner in RSS', () => {
-    // Simulate what pollNpm does: filter out SELF_PACKAGE_NAME from newPackages
-    const newPackages = ['some-pkg', 'muaddib-scanner', 'another-pkg'];
-    const filtered = newPackages.filter(name => name !== SELF_PACKAGE_NAME);
-    assert(filtered.length === 2, `Should filter to 2 packages, got ${filtered.length}`);
-    assert(!filtered.includes('muaddib-scanner'), 'muaddib-scanner should be excluded');
-    assert(filtered.includes('some-pkg'), 'some-pkg should remain');
-    assert(filtered.includes('another-pkg'), 'another-pkg should remain');
+  await asyncTest('MONITOR: Self-exclude skips muaddib-scanner in RSS', async () => {
+    // Audit 2026-07: was a local Array.filter replica. Now drives the REAL pollNpmRss
+    // (ingestion.js) via the httpsGet seam. SELF_PACKAGE_NAME must never be queued;
+    // a normal package alongside it must be.
+    const ingestion = require('../../src/monitor/ingestion.js');
+    const realGet = ingestion._deps.httpsGet;
+    const origLog = console.log;
+    console.log = () => {};
+    const fakeRss = `<?xml version="1.0"?><rss><channel>
+      <item><title>${SELF_PACKAGE_NAME} 9.9.9</title></item>
+      <item><title>normal-neighbour-pkg 1.0.0</title></item>
+    </channel></rss>`;
+    ingestion._deps.httpsGet = async () => fakeRss;
+    const state = { npmLastPackage: '' };
+    const queue = [];
+    const localStats = {};
+    try {
+      await ingestion.pollNpmRss(state, queue, localStats);
+      const names = queue.map(i => i.name);
+      assert(!names.includes(SELF_PACKAGE_NAME), `${SELF_PACKAGE_NAME} must be self-excluded from the queue`);
+      assert(names.includes('normal-neighbour-pkg'), 'the normal package must be queued');
+    } finally {
+      ingestion._deps.httpsGet = realGet;
+      console.log = origLog;
+    }
   });
 
-  test('MONITOR: Self-exclude does NOT skip muaddib-scanner-utils', () => {
-    const newPackages = ['muaddib-scanner-utils', 'muaddib-scanner-cli'];
-    const filtered = newPackages.filter(name => name !== SELF_PACKAGE_NAME);
-    assert(filtered.length === 2, `Should keep both packages, got ${filtered.length}`);
-    assert(filtered.includes('muaddib-scanner-utils'), 'muaddib-scanner-utils should remain');
-    assert(filtered.includes('muaddib-scanner-cli'), 'muaddib-scanner-cli should remain');
+  await asyncTest('MONITOR: Self-exclude does NOT skip muaddib-scanner-utils (exact-name match only)', async () => {
+    const ingestion = require('../../src/monitor/ingestion.js');
+    const realGet = ingestion._deps.httpsGet;
+    const origLog = console.log;
+    console.log = () => {};
+    // Sibling names that merely share the prefix must NOT be excluded.
+    const fakeRss = `<?xml version="1.0"?><rss><channel>
+      <item><title>${SELF_PACKAGE_NAME}-utils 1.0.0</title></item>
+      <item><title>${SELF_PACKAGE_NAME}-cli 2.0.0</title></item>
+    </channel></rss>`;
+    ingestion._deps.httpsGet = async () => fakeRss;
+    const state = { npmLastPackage: '' };
+    const queue = [];
+    const localStats = {};
+    try {
+      await ingestion.pollNpmRss(state, queue, localStats);
+      const names = queue.map(i => i.name);
+      assert(names.includes(`${SELF_PACKAGE_NAME}-utils`), 'prefix-sibling -utils must remain');
+      assert(names.includes(`${SELF_PACKAGE_NAME}-cli`), 'prefix-sibling -cli must remain');
+    } finally {
+      ingestion._deps.httpsGet = realGet;
+      console.log = origLog;
+    }
   });
 
   // ===== C4: Reputation scoring tests =====
@@ -6934,7 +6732,7 @@ async function runMonitorTests() {
       `Should be 300000ms, got ${SCOPE_GROUP_WINDOW_MS}`);
   });
 
-  asyncTest('MONITOR: bufferScopedWebhook groups packages by scope', async () => {
+  await asyncTest('MONITOR: bufferScopedWebhook groups packages by scope', async () => {
     // Clean up any pending groups
     for (const [, group] of pendingGrouped) clearTimeout(group.timer);
     pendingGrouped.clear();
@@ -6967,7 +6765,7 @@ async function runMonitorTests() {
     }
   });
 
-  asyncTest('MONITOR: different scopes create independent groups', async () => {
+  await asyncTest('MONITOR: different scopes create independent groups', async () => {
     for (const [, group] of pendingGrouped) clearTimeout(group.timer);
     pendingGrouped.clear();
 
@@ -6989,7 +6787,7 @@ async function runMonitorTests() {
     }
   });
 
-  asyncTest('MONITOR: flushScopeGroup single package sends normal webhook', async () => {
+  await asyncTest('MONITOR: flushScopeGroup single package sends normal webhook', async () => {
     for (const [, group] of pendingGrouped) clearTimeout(group.timer);
     pendingGrouped.clear();
 
@@ -7062,10 +6860,12 @@ async function runMonitorTests() {
 
   // ===== v2.7.6 C1: High-confidence malice bypass =====
 
-  test('MONITOR: HIGH_CONFIDENCE_MALICE_TYPES contains 33 threat types', () => {
-    // 33 = 32 + install_native_drop_exec (MUADDIB-COMPOUND-020, install-time bundled native-binary drop-and-execute).
-    assert(HIGH_CONFIDENCE_MALICE_TYPES.size === 33,
-      `Should have 33 types, got ${HIGH_CONFIDENCE_MALICE_TYPES.size}`);
+  test('MONITOR: HIGH_CONFIDENCE_MALICE_TYPES contains the expected threat types', () => {
+    // Floor rather than an exact pin: adding an HC type is a detection improvement and
+    // must not break this test (audit 2026-07). The critical-membership .has() checks
+    // below are the real contract; 33 was the count at the time of this floor.
+    assert(HIGH_CONFIDENCE_MALICE_TYPES.size >= 33,
+      `Should have at least 33 types, got ${HIGH_CONFIDENCE_MALICE_TYPES.size}`);
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('install_native_drop_exec') && HIGH_CONFIDENCE_MALICE_TYPES.has('electron_app_injection') && HIGH_CONFIDENCE_MALICE_TYPES.has('gyp_phantom_exec'), 'Missing install_native_drop_exec/electron_app_injection/gyp_phantom_exec');
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('lifecycle_shell_pipe'), 'Missing lifecycle_shell_pipe');
     assert(HIGH_CONFIDENCE_MALICE_TYPES.has('fetch_decrypt_exec'), 'Missing fetch_decrypt_exec');
@@ -7321,7 +7121,7 @@ async function runMonitorTests() {
 
   // ===== v2.7.7 C1: Webhook embed bug fix =====
 
-  asyncTest('MONITOR: flushScopeGroup single package has severity counts in summary', async () => {
+  await asyncTest('MONITOR: flushScopeGroup single package has severity counts in summary', async () => {
     for (const [, group] of pendingGrouped) clearTimeout(group.timer);
     pendingGrouped.clear();
 
@@ -7914,60 +7714,15 @@ async function runMonitorTests() {
     try { fs.unlinkSync(NPM_SEQ_FILE); } catch {}
   });
 
-  asyncTest('CHANGES: pollNpmChanges filters deleted packages', async () => {
-    if (process.env.CI) {
-      // Skip real network call in CI — pollNpmChanges hits replicate.npmjs.com
-      assert(typeof pollNpmChanges === 'function', 'pollNpmChanges should be a function');
-      return;
-    }
-    const state = { npmLastSeq: 100 };
-    const result = await pollNpmChanges(state);
-    assert(typeof result === 'number', `pollNpmChanges should return a number, got ${typeof result}`);
-  });
+  // (Audit 2026-07: removed the three pollNpmChanges/pollNpmRss tests that made a REAL
+  // network call outside CI then only asserted `typeof result === 'number'` (true on
+  // success AND on the -1 network-error path — vacuous). The mocked COVERAGE tests below
+  // (pollNpmChanges/pollNpmRss via ingestion._deps.httpsGet) exercise the same functions
+  // deterministically and assert the real event/queue counters.)
 
-  asyncTest('CHANGES: pollNpmChanges initial run (no seq)', async () => {
-    if (process.env.CI) {
-      assert(typeof pollNpmChanges === 'function', 'pollNpmChanges should be a function');
-      return;
-    }
-    const state = { npmLastSeq: null };
-    const result = await pollNpmChanges(state);
-    assert(result === 0 || result === -1, `Initial run should return 0 (success) or -1 (network error), got ${result}`);
-    if (result === 0) {
-      assert(state.npmLastSeq != null, 'State should have npmLastSeq after successful init');
-    }
-  });
-
-  asyncTest('CHANGES: pollNpmRss still works (RSS fallback)', async () => {
-    if (process.env.CI) {
-      // Skip real network call in CI — pollNpmRss hits registry.npmjs.org
-      assert(typeof pollNpmRss === 'function', 'pollNpmRss should be a function');
-      return;
-    }
-    const state = { npmLastPackage: '' };
-    const result = await pollNpmRss(state);
-    // In test env: either succeeds with packages or fails with -1
-    assert(typeof result === 'number', `pollNpmRss should return a number, got ${typeof result}`);
-  });
-
-  test('CHANGES: stats tracks changesStreamPackages metric', () => {
-    // Verify the metric can be set and read
-    const prevVal = stats.changesStreamPackages || 0;
-    stats.changesStreamPackages = prevVal + 5;
-    assert(stats.changesStreamPackages === prevVal + 5,
-      `changesStreamPackages should be incrementable, got ${stats.changesStreamPackages}`);
-    // Reset
-    stats.changesStreamPackages = prevVal;
-  });
-
-  test('CHANGES: stats tracks rssFallbackCount metric', () => {
-    const prevVal = stats.rssFallbackCount || 0;
-    stats.rssFallbackCount = prevVal + 1;
-    assert(stats.rssFallbackCount === prevVal + 1,
-      `rssFallbackCount should be incrementable, got ${stats.rssFallbackCount}`);
-    // Reset
-    stats.rssFallbackCount = prevVal;
-  });
+  // (Audit 2026-07: removed two "stats tracks <metric>" tests that only assigned a
+  // property on the stats object and read it back — they tested JS assignment. The real
+  // metric wiring is asserted by the mocked COVERAGE pollNpmChanges/pollNpmRss tests below.)
 
   // ============================================
   // COVERAGE COUNTER TESTS (fix/daily-metrics-accuracy)
@@ -8266,60 +8021,18 @@ async function runMonitorTests() {
       'the worker-pool entry points (ensureWorkers/drainWorkers/getTargetConcurrency) should be wired');
   });
 
-  await asyncTest('CONCURRENCY: processQueue handles empty queue', async () => {
-    scanQueue.length = 0;
-    await processQueue();
-    assert(scanQueue.length === 0, 'Queue should remain empty');
-  });
+  // (Audit 2026-07: removed duplicate "processQueue handles empty queue" — exact dupe of
+  // "MONITOR-COV: processQueue processes empty queue without error" above.)
 
-  await asyncTest('CONCURRENCY: worker pool drains queue and runs concurrently', async () => {
-    // Mock test: simulate the worker pool pattern without real network calls.
-    // We replicate the exact processQueue logic with a mock scan function
-    // to verify concurrency behavior.
-    const processed = [];
-    let maxConcurrent = 0;
-    let currentConcurrent = 0;
-
-    async function mockScan(item) {
-      currentConcurrent++;
-      if (currentConcurrent > maxConcurrent) maxConcurrent = currentConcurrent;
-      // Simulate async work (10ms)
-      await new Promise(r => setTimeout(r, 10));
-      processed.push(item.name);
-      currentConcurrent--;
-    }
-
-    // Build a mock queue
-    const mockQueue = [];
-    for (let i = 0; i < 6; i++) {
-      mockQueue.push({ name: `mock-pkg-${i}`, version: '1.0.0', ecosystem: 'npm', tarballUrl: null });
-    }
-
-    // Replicate the worker pool pattern from processQueue
-    const concurrency = 3;
-    async function mockWorker() {
-      while (mockQueue.length > 0) {
-        const item = mockQueue.shift();
-        await mockScan(item);
-      }
-    }
-    const workers = [];
-    for (let i = 0; i < Math.min(concurrency, mockQueue.length); i++) {
-      workers.push(mockWorker());
-    }
-    await Promise.all(workers);
-
-    assert(mockQueue.length === 0, `Mock queue should be drained, ${mockQueue.length} remaining`);
-    assert(processed.length === 6, `All 6 items should be processed, got ${processed.length}`);
-    assert(maxConcurrent > 1, `Should have run concurrently (max concurrent: ${maxConcurrent})`);
-    assert(maxConcurrent <= concurrency, `Should not exceed concurrency limit (max: ${maxConcurrent}, limit: ${concurrency})`);
-  });
+  // (Audit 2026-07: removed "worker pool drains queue and runs concurrently" — it
+  // built a local mockQueue + mockWorker and asserted on that replica, exercising no
+  // queue.js code. The real spawn-count policy is covered by computeWorkersToSpawn above.)
 
   test('CONCURRENCY: target concurrency is a settable knob and active workers are observable', () => {
     // Behavioral replacement for the queue.js self-drain source-grep (_activeWorkers <= _targetConcurrency).
-    // The adaptive target is settable and the active count observable; the actual self-drain-on-scale-down
-    // and concurrency-cap behavior is exercised by the mock worker-pool tests in this file (which assert
-    // max concurrency is respected and a 1-item queue runs only a single worker).
+    // The adaptive target is settable and the active count observable; the actual spawn-count
+    // policy (never over-spawn past target, never exceed the backlog) is exercised by the
+    // computeWorkersToSpawn test above.
     const { getTargetConcurrency, setTargetConcurrency, getActiveWorkers } = require('../../src/monitor/queue.js');
     const orig = getTargetConcurrency();
     try {
@@ -8331,28 +8044,10 @@ async function runMonitorTests() {
     }
   });
 
-  await asyncTest('CONCURRENCY: mock worker pool with 1 item does not run multiple workers', async () => {
-    const workerCount = [];
-    const mockQueue = [{ name: 'solo-pkg' }];
-    const concurrency = 3;
-
-    async function mockWorker(id) {
-      workerCount.push(id);
-      while (mockQueue.length > 0) {
-        mockQueue.shift();
-        await new Promise(r => setTimeout(r, 5));
-      }
-    }
-
-    const workers = [];
-    for (let i = 0; i < Math.min(concurrency, mockQueue.length); i++) {
-      workers.push(mockWorker(i));
-    }
-    await Promise.all(workers);
-
-    assert(workerCount.length === 1, `Should spawn only 1 worker for 1 item, got ${workerCount.length}`);
-    assert(mockQueue.length === 0, 'Queue should be drained');
-  });
+  // (Audit 2026-07: removed "mock worker pool with 1 item does not run multiple workers" —
+  // it asserted Math.min(concurrency, queueLen) on a local array. The equivalent real
+  // policy is computeWorkersToSpawn(8, 0, 2) === 2 (never more workers than queued items),
+  // asserted in the computeWorkersToSpawn test above.)
 
   // ============================================
   // ADAPTIVE CONCURRENCY TESTS
@@ -8531,7 +8226,7 @@ async function runMonitorTests() {
 
   console.log('\n--- Layer 1: IOC Pre-Alert Tests ---\n');
 
-  asyncTest('MONITOR L1: sendIOCPreAlert returns without error when no webhook URL', async () => {
+  await asyncTest('MONITOR L1: sendIOCPreAlert returns without error when no webhook URL', async () => {
     const origEnv = process.env.MUADDIB_WEBHOOK_URL;
     delete process.env.MUADDIB_WEBHOOK_URL;
     try {
@@ -8547,12 +8242,7 @@ async function runMonitorTests() {
     assert(typeof sendIOCPreAlert === 'function', 'sendIOCPreAlert should be a function');
   });
 
-  test('MONITOR L1: stats.iocPreAlerts can be incremented', () => {
-    const prev = stats.iocPreAlerts || 0;
-    stats.iocPreAlerts = (stats.iocPreAlerts || 0) + 1;
-    assert(stats.iocPreAlerts === prev + 1, `Expected ${prev + 1}, got ${stats.iocPreAlerts}`);
-    stats.iocPreAlerts = prev; // restore
-  });
+  // (Audit 2026-07: removed "stats.iocPreAlerts can be incremented" — JS assignment test.)
 
   test('MONITOR L1: PRE-ALERT skips versioned IOC when version does not match', () => {
     const mockIOCs = {
@@ -8653,7 +8343,7 @@ async function runMonitorTests() {
     assert(didEntry.re instanceof RegExp, 'entry must carry a RegExp');
   });
 
-  asyncTest('MONITOR L1b: sendCampaignPreAlert returns without error when no webhook URL', async () => {
+  await asyncTest('MONITOR L1b: sendCampaignPreAlert returns without error when no webhook URL', async () => {
     const origEnv = process.env.MUADDIB_WEBHOOK_URL;
     delete process.env.MUADDIB_WEBHOOK_URL;
     try {
@@ -8668,12 +8358,7 @@ async function runMonitorTests() {
     assert(typeof sendCampaignPreAlert === 'function', 'sendCampaignPreAlert should be a function');
   });
 
-  test('MONITOR L1b: stats.campaignPreAlerts can be incremented', () => {
-    const prev = stats.campaignPreAlerts || 0;
-    stats.campaignPreAlerts = (stats.campaignPreAlerts || 0) + 1;
-    assert(stats.campaignPreAlerts === prev + 1, `Expected ${prev + 1}, got ${stats.campaignPreAlerts}`);
-    stats.campaignPreAlerts = prev; // restore
-  });
+  // (Audit 2026-07: removed "stats.campaignPreAlerts can be incremented" — JS assignment test.)
 
   // ============================================
   // LAYER 2: COUCHDB DOC EXTRACTION TESTS
@@ -9048,106 +8733,105 @@ async function runMonitorTests() {
   });
 
   // --- Relabeling guard integration tests ---
-  // These test the logic in resolveTarballAndScan that prevents blind FP relabeling
+  // Audit 2026-07 rewrite: these previously duplicated the shouldRelabel formula
+  // inline (protecting nothing). They now exercise classifySandboxOutcome — the
+  // REAL post-sandbox classifier extracted pure from processQueueItem (queue.js).
+  const { classifySandboxOutcome } = require('../../src/monitor/queue.js');
 
-  test('MONITOR-RELABEL: HC threats + sandbox 0 → should NOT relabel as FP', () => {
-    // Simulates the scanResult returned by scanPackage with HC threats
-    const scanResult = {
-      sandboxResult: { score: 0, severity: 'CLEAN', findings: [] },
+  test('MONITOR-RELABEL: HC threats + sandbox 0 → relabel_blocked_hc (NOT unconfirmed)', () => {
+    const outcome = classifySandboxOutcome({
       staticClean: false,
-      tier: 'T1',
-      staticScore: 100,
+      sandboxResult: { score: 0, severity: 'CLEAN', findings: [] },
       hasHCThreats: true,
-      isDormant: false
-    };
-    const sandboxResult = scanResult.sandboxResult;
-    const hasHC = scanResult.hasHCThreats || false;
-    const isDormant = scanResult.isDormant || false;
-    const staticScore = scanResult.staticScore || 0;
-
-    // The guard should block relabeling
-    assert(sandboxResult && sandboxResult.score === 0, 'Sandbox should be clean (score 0)');
-    assert(hasHC === true, 'Should have HC threats');
-    // With HC threats, relabeling should be blocked
-    const shouldRelabel = !hasHC && !isDormant && staticScore < 70;
-    assert(shouldRelabel === false, 'Must NOT relabel as FP when HC threats present');
+      isDormant: false,
+      staticScore: 100
+    });
+    assert(outcome === 'relabel_blocked_hc',
+      `HC threats must block the FP relabel, got '${outcome}'`);
   });
 
-  test('MONITOR-RELABEL: dormant suspect (score 50) + sandbox 0 → should NOT relabel as FP', () => {
-    const scanResult = {
-      sandboxResult: { score: 0, severity: 'CLEAN', findings: [] },
+  test('MONITOR-RELABEL: dormant suspect (score 50) + sandbox 0 → relabel_blocked_static', () => {
+    const outcome = classifySandboxOutcome({
       staticClean: false,
-      tier: 'T2',
-      staticScore: 50,
+      sandboxResult: { score: 0, severity: 'CLEAN', findings: [] },
       hasHCThreats: false,
-      isDormant: true  // score >= 20 + sandbox 0
-    };
-    const hasHC = scanResult.hasHCThreats || false;
-    const isDormant = scanResult.isDormant || false;
-    const staticScore = scanResult.staticScore || 0;
-
-    const shouldRelabel = !hasHC && !isDormant && staticScore < 70;
-    assert(shouldRelabel === false, 'Must NOT relabel as FP when dormant suspect');
+      isDormant: true, // score >= 20 + sandbox 0
+      staticScore: 50
+    });
+    assert(outcome === 'relabel_blocked_static',
+      `Dormant suspect must block the FP relabel, got '${outcome}'`);
   });
 
-  test('MONITOR-RELABEL: static score >= 70 + sandbox 0 → should NOT relabel as FP', () => {
-    const scanResult = {
-      sandboxResult: { score: 0, severity: 'CLEAN', findings: [] },
+  test('MONITOR-RELABEL: static score >= 70 + sandbox 0 → relabel_blocked_static', () => {
+    const outcome = classifySandboxOutcome({
       staticClean: false,
-      tier: 'T1',
-      staticScore: 75,
+      sandboxResult: { score: 0, severity: 'CLEAN', findings: [] },
       hasHCThreats: false,
-      isDormant: false
-    };
-    const hasHC = scanResult.hasHCThreats || false;
-    const isDormant = scanResult.isDormant || false;
-    const staticScore = scanResult.staticScore || 0;
-
-    const shouldRelabel = !hasHC && !isDormant && staticScore < 70;
-    assert(shouldRelabel === false, 'Must NOT relabel as FP when static score >= 70');
-  });
-
-  test('MONITOR-RELABEL: score 25, no HC, not dormant + sandbox 0 → SHOULD relabel as FP', () => {
-    // Normal FP case: low-scoring package, no HC types, sandbox confirmed clean
-    const scanResult = {
-      sandboxResult: { score: 0, severity: 'CLEAN', findings: [] },
+      isDormant: false,
+      staticScore: 75
+    });
+    assert(outcome === 'relabel_blocked_static',
+      `Static score >= 70 must block the FP relabel, got '${outcome}'`);
+    // Boundary: 69 (< 70, non-dormant, non-HC) falls through to unconfirmed
+    const below = classifySandboxOutcome({
       staticClean: false,
-      tier: 'T3',
-      staticScore: 25,
+      sandboxResult: { score: 0, severity: 'CLEAN', findings: [] },
       hasHCThreats: false,
-      isDormant: false
-    };
-    const hasHC = scanResult.hasHCThreats || false;
-    const isDormant = scanResult.isDormant || false;
-    const staticScore = scanResult.staticScore || 0;
-
-    const shouldRelabel = !hasHC && !isDormant && staticScore < 70;
-    assert(shouldRelabel === true, 'Should relabel as FP for low-scoring non-HC non-dormant package');
+      isDormant: false,
+      staticScore: 69
+    });
+    assert(below === 'unconfirmed', `staticScore 69 must relabel unconfirmed, got '${below}'`);
   });
 
-  test('MONITOR-RELABEL REGRESSION: @cloudbase/cloudbase-mcp scenario (score 100, HC, sandbox 0) → NEVER relabel FP', () => {
-    // Exact regression scenario: real malware with score 100, 6 CRITICAL threats
-    // including reverse_shell + fetch_decrypt_exec + crypto_staged_payload
-    // Sandbox returned CLEAN (score 0) due to timeout→CLEAN bug
-    const scanResult = {
-      sandboxResult: { score: 0, severity: 'CLEAN', findings: [] },
+  test('MONITOR-RELABEL: score 25, no HC, not dormant + sandbox 0 → unconfirmed (FP relabel path)', () => {
+    const outcome = classifySandboxOutcome({
       staticClean: false,
-      tier: 'T1',
-      staticScore: 100,
-      hasHCThreats: true,  // reverse_shell, fetch_decrypt_exec, crypto_staged_payload all HC
-      isDormant: true       // score 100 >= 20 + sandbox 0
-    };
-    const hasHC = scanResult.hasHCThreats || false;
-    const isDormant = scanResult.isDormant || false;
-    const staticScore = scanResult.staticScore || 0;
+      sandboxResult: { score: 0, severity: 'CLEAN', findings: [] },
+      hasHCThreats: false,
+      isDormant: false,
+      staticScore: 25
+    });
+    assert(outcome === 'unconfirmed',
+      `Low-scoring non-HC non-dormant package must relabel unconfirmed, got '${outcome}'`);
+    // Static-clean packages produce no classification at all
+    const clean = classifySandboxOutcome({
+      staticClean: true,
+      sandboxResult: { score: 0, severity: 'CLEAN', findings: [] },
+      hasHCThreats: false,
+      isDormant: false,
+      staticScore: 0
+    });
+    assert(clean === null, `Static-clean package must classify to null, got '${clean}'`);
+  });
 
-    // Multiple guards should block relabeling
-    assert(hasHC === true, 'Should have HC threats (reverse_shell etc.)');
-    assert(isDormant === true, 'Should be dormant suspect (score 100 + sandbox 0)');
-    assert(staticScore >= 70, 'Static score 100 should trigger high-static guard');
-
-    const shouldRelabel = !hasHC && !isDormant && staticScore < 70;
-    assert(shouldRelabel === false, '@cloudbase/cloudbase-mcp must NEVER be relabeled as FP');
+  test('MONITOR-RELABEL REGRESSION: @cloudbase/cloudbase-mcp (score 100, HC) → never fp, never confirmed-by-install-error', () => {
+    // Real malware, static score 100, HC types (reverse_shell, fetch_decrypt_exec,
+    // crypto_staged_payload). Two historical failure modes are pinned here on the
+    // REAL classifier:
+    //  (a) timeout→CLEAN bug: sandbox score 0 must NOT relabel to unconfirmed/fp
+    const cleanBug = classifySandboxOutcome({
+      staticClean: false,
+      sandboxResult: { score: 0, severity: 'CLEAN', findings: [] },
+      hasHCThreats: true,
+      isDormant: true,
+      staticScore: 100
+    });
+    assert(cleanBug === 'relabel_blocked_hc',
+      `@cloudbase sandbox-0 must be blocked by the HC guard, got '${cleanBug}'`);
+    assert(cleanBug !== 'unconfirmed' && cleanBug !== 'confirmed',
+      '@cloudbase must NEVER be relabeled fp or confirmed on a clean sandbox');
+    //  (b) install-error bug: sandbox score 100 with 0 findings must NOT confirm
+    const installError = classifySandboxOutcome({
+      staticClean: false,
+      sandboxResult: { score: 100, severity: 'CRITICAL', findings: [] },
+      hasHCThreats: true,
+      isDormant: false,
+      staticScore: 100
+    });
+    assert(installError === 'inconclusive_install_error',
+      `sandbox score 100 + 0 findings must classify inconclusive_install_error, got '${installError}'`);
+    assert(installError !== 'confirmed',
+      'A sandbox install error must NEVER produce a confirmed label');
   });
 
   // ===================================================================
@@ -9452,45 +9136,91 @@ async function runMonitorTests() {
   });
 
   // --- Bug fix: processQueueItem IOC fallback (v2.10.6) ---
+  //
+  // Audit 2026-07 rewrite: the old tests passed tarballUrl:null which made
+  // resolveTarballAndScan swallow the (real-network) resolution failure and
+  // return — the IOC fallback catch in processQueueItem never ran, and the
+  // final assert(true) was vacuous. We now call queue.processQueueItem
+  // directly with an injected fault (recentlyScanned=null → TypeError at the
+  // dedup check, standing in for any mid-pipeline error) so the REAL catch
+  // block executes. No network: the send attempt goes through the real
+  // sendWebhook, whose domain allowlist rejects hooks.example.com BEFORE any
+  // DNS/socket ('Webhook blocked'), which the fallback catch logs.
+  // NOTE (seam gap): queue.js:33 destructures sendWebhook from ../webhook.js,
+  // so monitorWebhook._deps does NOT intercept the IOC-fallback send — we
+  // assert on the real log lines instead.
 
-  asyncTest('MONITOR: processQueueItem sends IOC fallback webhook on scan failure', async () => {
+  function _iocFallbackLocalStats() {
+    return {
+      scanned: 0, clean: 0, suspect: 0, errors: 0,
+      suspectByTier: { t1: 0, t1a: 0, t1b: 0, t2: 0, t3: 0 },
+      errorsByType: { too_large: 0, tar_failed: 0, archive_failed: 0, unsupported_format: 0, http_error: 0, timeout: 0, static_timeout: 0, other: 0 },
+      totalTimeMs: 0, mlFiltered: 0, lastReportTime: Date.now(),
+      // Today's Paris date → isDailyReportDue()===false → no daily-report side effects
+      lastDailyReportDate: getParisDateString()
+    };
+  }
+
+  await asyncTest('MONITOR: processQueueItem sends IOC fallback webhook on scan failure', async () => {
+    const queueMod = require('../../src/monitor/queue.js');
     const orig = process.env.MUADDIB_WEBHOOK_URL;
     process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.example.com/test';
+    const origLog = console.log;
+    const origErr = console.error;
+    const logs = [];
+    console.log = (...args) => logs.push(args.join(' '));
+    console.error = (...args) => logs.push(args.join(' '));
     try {
-      // Create a fake item that will fail in resolveTarballAndScan (no tarball URL, no valid package)
       const item = {
         name: 'malicious-ioc-pkg',
         version: '1.0.0',
         ecosystem: 'npm',
-        tarballUrl: null,
+        tarballUrl: 'https://registry.npmjs.org/malicious-ioc-pkg/-/malicious-ioc-pkg-1.0.0.tgz',
         isIOCMatch: true
       };
-      // processQueueItem should not throw — errors are caught internally
-      // The IOC fallback path is exercised when resolveTarballAndScan fails
-      await processQueueItem(item);
-      // If we get here without throwing, the catch block handled the error gracefully
-      assert(true, 'processQueueItem should handle IOC fallback without throwing');
+      // recentlyScanned=null → deterministic TypeError inside resolveTarballAndScan
+      await queueMod.processQueueItem(item, _iocFallbackLocalStats(), [], null, new Map(), [], false);
+      assert(logs.some(l => l.includes('Queue error for malicious-ioc-pkg')),
+        'The injected fault must reach the processQueueItem catch (Queue error log)');
+      assert(logs.some(l => l.includes('IOC FALLBACK: scan failed for malicious-ioc-pkg@1.0.0')),
+        'IOC item must trigger the IOC fallback path');
+      assert(logs.some(l => l.includes('IOC fallback webhook failed') && l.includes('Webhook blocked')),
+        'The fallback send must be ATTEMPTED (blocked pre-network by the domain allowlist)');
     } finally {
+      console.log = origLog;
+      console.error = origErr;
       if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
       else delete process.env.MUADDIB_WEBHOOK_URL;
     }
   });
 
-  asyncTest('MONITOR: processQueueItem does not send IOC fallback for non-IOC items', async () => {
+  await asyncTest('MONITOR: processQueueItem does not send IOC fallback for non-IOC items', async () => {
+    const queueMod = require('../../src/monitor/queue.js');
     const orig = process.env.MUADDIB_WEBHOOK_URL;
     process.env.MUADDIB_WEBHOOK_URL = 'https://hooks.example.com/test';
+    const origLog = console.log;
+    const origErr = console.error;
+    const logs = [];
+    console.log = (...args) => logs.push(args.join(' '));
+    console.error = (...args) => logs.push(args.join(' '));
     try {
       const item = {
         name: 'normal-failing-pkg',
         version: '1.0.0',
         ecosystem: 'npm',
-        tarballUrl: null,
+        tarballUrl: 'https://registry.npmjs.org/normal-failing-pkg/-/normal-failing-pkg-1.0.0.tgz',
         isIOCMatch: false
       };
-      // Should not throw and should not attempt IOC fallback webhook
-      await processQueueItem(item);
-      assert(true, 'processQueueItem should handle non-IOC failure without IOC fallback');
+      await queueMod.processQueueItem(item, _iocFallbackLocalStats(), [], null, new Map(), [], false);
+      assert(logs.some(l => l.includes('Queue error for normal-failing-pkg')),
+        'The injected fault must reach the processQueueItem catch (error path exercised)');
+      assert(!logs.some(l => l.includes('IOC FALLBACK')),
+        'Non-IOC item must NOT trigger the IOC fallback');
+      assert(!logs.some(l => l.includes('IOC fallback webhook failed')),
+        'Non-IOC item must NOT attempt the fallback webhook');
     } finally {
+      console.log = origLog;
+      console.error = origErr;
       if (orig !== undefined) process.env.MUADDIB_WEBHOOK_URL = orig;
       else delete process.env.MUADDIB_WEBHOOK_URL;
     }
@@ -9502,29 +9232,10 @@ async function runMonitorTests() {
 
   console.log('\n=== MONITOR PARALLEL TEMPORAL + CACHE TESTS ===\n');
 
-  // C1: removed the queue.js source-grep (Promise.allSettled). The behavior that allSettled provides
-  // — one rejected temporal check (timeout / network error) must not cancel the others, each
-  // fulfilled/rejected result mapped to value-or-null — is validated by the unit test directly below
-  // ("temporal check results handle rejected promises gracefully").
-
-  test('MONITOR-PARALLEL: temporal check results handle rejected promises gracefully', () => {
-    // Simulate what Promise.allSettled returns for mixed fulfilled/rejected
-    const results = [
-      { status: 'fulfilled', value: { suspicious: true } },
-      { status: 'rejected', reason: new Error('Timeout') },
-      { status: 'fulfilled', value: null },
-      { status: 'rejected', reason: new Error('Network error') }
-    ];
-    const temporalResult = results[0].status === 'fulfilled' ? results[0].value : null;
-    const astResult = results[1].status === 'fulfilled' ? results[1].value : null;
-    const publishResult = results[2].status === 'fulfilled' ? results[2].value : null;
-    const maintainerResult = results[3].status === 'fulfilled' ? results[3].value : null;
-
-    assert(temporalResult !== null && temporalResult.suspicious === true, 'Fulfilled result should be preserved');
-    assert(astResult === null, 'Rejected result should become null');
-    assert(publishResult === null, 'Fulfilled null should stay null');
-    assert(maintainerResult === null, 'Rejected result should become null');
-  });
+  // (Audit 2026-07: removed "temporal check results handle rejected promises gracefully" —
+  // it built the allSettled results array by hand and asserted on its own ternaries; no
+  // queue.js code was executed. The real fulfilled/rejected→value-or-null mapping lives
+  // inline in processQueueItem (queue.js) and has no exported seam yet.)
 
   test('MONITOR-CACHE: temporal-analysis exports clearMetadataCache', () => {
     const { clearMetadataCache } = require('../../src/temporal-analysis.js');
@@ -9671,7 +9382,7 @@ async function runMonitorTests() {
 
   // --- Functional tests using mock httpsGet ---
 
-  asyncTest('MONITOR: checkTrustedDepDiff returns empty for same deps', async () => {
+  await asyncTest('MONITOR: checkTrustedDepDiff returns empty for same deps', async () => {
     // The function catches all errors gracefully, so passing a fake package name
     // that returns 404 should return empty findings.
     const findings = await checkTrustedDepDiff('__nonexistent_test_pkg__', '1.0.0');
@@ -9679,36 +9390,14 @@ async function runMonitorTests() {
     assert(findings.length === 0, `Should return empty on HTTP error (graceful fallback), got ${findings.length}`);
   });
 
-  asyncTest('MONITOR: checkTrustedDepDiff returns empty on network error (graceful fallback)', async () => {
+  await asyncTest('MONITOR: checkTrustedDepDiff returns empty on network error (graceful fallback)', async () => {
     const findings = await checkTrustedDepDiff('__network_error_test_pkg_xyz__', '99.99.99');
     assert(Array.isArray(findings), 'Should return an array');
     assert(findings.length === 0, `Should return empty findings on error, got ${findings.length}`);
   });
 
-  // --- Unit tests for finding structure ---
-
-  test('MONITOR: checkTrustedDepDiff finding structure is correct', () => {
-    // Validate the finding object shape matches what scanPackage expects
-    const finding = {
-      type: 'trusted_new_unknown_dependency',
-      severity: 'CRITICAL',
-      confidence: 'high',
-      file: 'package.json',
-      message: 'test message',
-      rule_id: 'MUADDIB-TRUSTED-001',
-      mitre: 'T1195.002',
-      dep: 'evil-pkg',
-      depAgeDays: 2,
-      prevVersion: '1.0.0',
-      newVersion: '1.0.1'
-    };
-    assert(finding.type === 'trusted_new_unknown_dependency', 'Type should match');
-    assert(finding.severity === 'CRITICAL', 'Severity should be CRITICAL');
-    assert(finding.rule_id === 'MUADDIB-TRUSTED-001', 'Rule ID should match');
-    assert(finding.mitre === 'T1195.002', 'MITRE should be T1195.002');
-    assert(finding.dep === 'evil-pkg', 'dep field should be set');
-    assert(finding.prevVersion === '1.0.0', 'prevVersion should be set');
-  });
+  // (Audit 2026-07: removed "checkTrustedDepDiff finding structure is correct" —
+  // it asserted on a locally-built object literal; checkTrustedDepDiff was never called.)
 
   test('MONITOR: isSuspectClassification catches CRITICAL trusted findings (Tier 1a via HC)', () => {
     // Simulate a result with a trusted_new_unknown_dependency finding
@@ -9746,20 +9435,20 @@ async function runMonitorTests() {
       'TRUSTED_DEP_AGE_THRESHOLD_MS should be exported');
   });
 
-  asyncTest('MONITOR: scanTrustedDepDiff is opt-in (returns [] without flag)', async () => {
+  await asyncTest('MONITOR: scanTrustedDepDiff is opt-in (returns [] without flag)', async () => {
     const { scanTrustedDepDiff } = require('../../src/scanner/trusted-dep-diff.js');
     const findings = await scanTrustedDepDiff('.', {});
     assert(Array.isArray(findings), 'Should return an array');
     assert(findings.length === 0, 'Should return empty without trustedDepDiff/monitorMode flag');
   });
 
-  asyncTest('MONITOR: scanTrustedDepDiff skips non-npm ecosystems', async () => {
+  await asyncTest('MONITOR: scanTrustedDepDiff skips non-npm ecosystems', async () => {
     const { scanTrustedDepDiff } = require('../../src/scanner/trusted-dep-diff.js');
     const findings = await scanTrustedDepDiff('.', { monitorMode: true, ecosystem: 'pypi', name: 'foo', version: '1.0.0' });
     assert(findings.length === 0, 'Should return empty for non-npm ecosystem');
   });
 
-  asyncTest('MONITOR: scanTrustedDepDiff skips when package.json missing and no overrides', async () => {
+  await asyncTest('MONITOR: scanTrustedDepDiff skips when package.json missing and no overrides', async () => {
     const { scanTrustedDepDiff } = require('../../src/scanner/trusted-dep-diff.js');
     const findings = await scanTrustedDepDiff('/nonexistent_dir_for_test_only', { trustedDepDiff: true });
     assert(findings.length === 0, 'Should return empty when package.json is unreadable');
@@ -9947,54 +9636,9 @@ async function runMonitorTests() {
       `PROCESS_LOOP_INTERVAL (${PROCESS_LOOP_INTERVAL}) should be less than POLL_INTERVAL (${POLL_INTERVAL})`);
   });
 
-  asyncTest('MONITOR: processQueue picks up items added during processing (simulates concurrent poll)', async () => {
-    // Simulate the decoupled architecture: items arrive in scanQueue while workers are running.
-    // This works because workers loop on `while (scanQueue.length > 0)` and each `await`
-    // yields the event loop, allowing the poll interval to push new items.
-    const testQueue = [];
-    const processed = [];
-
-    // Minimal stats object
-    const testStats = {
-      scanned: 0, clean: 0, suspect: 0, errors: 0,
-      suspectByTier: { t1: 0, t1a: 0, t1b: 0, t2: 0, t3: 0 },
-      errorsByType: { too_large: 0, tar_failed: 0, http_error: 0, timeout: 0, static_timeout: 0, other: 0 },
-      totalTimeMs: 0, mlFiltered: 0, lastReportTime: Date.now(), lastDailyReportDate: null
-    };
-
-    // Push 2 initial items
-    testQueue.push(
-      { name: 'pkg-a', version: '1.0.0', ecosystem: 'npm' },
-      { name: 'pkg-b', version: '1.0.0', ecosystem: 'npm' }
-    );
-
-    // Schedule a "concurrent poll" that adds items while workers are processing
-    const pollTimer = setTimeout(() => {
-      testQueue.push(
-        { name: 'pkg-c', version: '1.0.0', ecosystem: 'npm' },
-        { name: 'pkg-d', version: '1.0.0', ecosystem: 'npm' }
-      );
-    }, 50);
-
-    // Simple worker that mimics processQueue's pattern
-    async function worker() {
-      while (testQueue.length > 0) {
-        const item = testQueue.shift();
-        // Simulate async scan work — yields event loop so setTimeout can fire
-        await new Promise(r => setTimeout(r, 30));
-        processed.push(item.name);
-      }
-    }
-
-    await worker();
-    clearTimeout(pollTimer);
-
-    // The worker should have picked up all 4 items, including the 2 added mid-processing
-    assert(processed.length === 4,
-      `Worker should process all 4 items (including mid-flight additions), got ${processed.length}: [${processed.join(', ')}]`);
-    assert(processed.includes('pkg-c') && processed.includes('pkg-d'),
-      'Worker should have picked up items added by concurrent "poll"');
-  });
+  // (Audit 2026-07: removed "processQueue picks up items added during processing" —
+  // it replicated the worker loop inline on a local array and never called processQueue.
+  // The real spawn-count policy is covered by the computeWorkersToSpawn test above.)
 
   // ============================================
   // PHASE 3 SIGNAL — skill_md_bundled observability
