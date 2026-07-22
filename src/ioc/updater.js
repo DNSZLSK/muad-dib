@@ -66,28 +66,29 @@ async function updateIOCs() {
   mergeIOCs(baseIOCs, yamlStandard);
   console.log('[2/4] YAML IOCs: ' + yamlStandard.packages.length + ' packages, ' + yamlStandard.hashes.length + ' hashes');
 
-  // Step 3: Download additional IOCs from GitHub + OSV API (GenSecAI + DataDog + OSV lightweight + OSM)
+  // Step 3: Download additional IOCs (GenSecAI + DataDog + OSM)
   // Light path: JSON/REST only, NO heavy zip dumps. Designed to be safe at 15min cadence.
-  // For the deep refresh (OSV zip dumps + OSSF + Aikido + GitHub Advisory), use `muaddib scrape` (~5min).
-  const { scrapeShaiHuludDetector, scrapeDatadogIOCs, scrapeOSVLightweightAPI, scrapeOSMQueryLatest } = require('./scraper.js');
-  console.log('[3/4] Downloading GitHub + OSV API + OSM IOCs...');
+  // The OSV MAL- set comes from the deep refresh (`muaddib scrape`, OSV zip dumps + OSSF +
+  // Aikido). The former OSV lightweight source was removed 2026-07 (GAP-2): it POSTed a
+  // nameless OSV /v1/query (HTTP 400 → always 0) and was redundant with the OSV zip dump.
+  const { scrapeShaiHuludDetector, scrapeDatadogIOCs, scrapeOSMQueryLatest } = require('./scraper.js');
+  console.log('[3/4] Downloading GenSecAI + DataDog + OSM IOCs...');
 
-  const [shaiHulud, datadog, osvApi, osmResult] = await Promise.all([
+  const [shaiHulud, datadog, osmResult] = await Promise.all([
     scrapeShaiHuludDetector(),
     scrapeDatadogIOCs(),
-    scrapeOSVLightweightAPI(),
     scrapeOSMQueryLatest()
   ]);
 
   const githubIOCs = {
-    packages: [].concat(shaiHulud.packages, datadog.packages, osvApi, osmResult.packages),
+    packages: [].concat(shaiHulud.packages, datadog.packages, osmResult.packages),
     pypi_packages: (osmResult.pypi_packages || []).slice(),
     hashes: [].concat(shaiHulud.hashes || [], datadog.hashes || []),
     markers: [],
     files: []
   };
   mergeIOCs(baseIOCs, githubIOCs);
-  console.log('     +' + shaiHulud.packages.length + ' GenSecAI, +' + datadog.packages.length + ' DataDog, +' + osvApi.length + ' OSV API, +' + osmResult.packages.length + ' OSM npm, +' + (osmResult.pypi_packages || []).length + ' OSM PyPI');
+  console.log('     +' + shaiHulud.packages.length + ' GenSecAI, +' + datadog.packages.length + ' DataDog, +' + osmResult.packages.length + ' OSM npm, +' + (osmResult.pypi_packages || []).length + ' OSM PyPI');
 
   // Phase 2c (feed health): a feed that previously returned data but now returns 0 is the
   // silent failure mode that froze the OSM feed and collapsed coverage. Raise a one-shot
@@ -95,13 +96,11 @@ async function updateIOCs() {
   // Only feeds that were actually ATTEMPTED are health-checked: OSM is token-gated, so without
   // OSM_API_TOKEN it is SKIPPED (not down) — counting it would raise a false "OSM went dark"
   // alarm in any no-token context (e.g. an ad-hoc `muaddib update`) against the monitor-seeded
-  // baseline. OSV-API is public and volatile; its small counts rarely cross MIN_HEALTHY_BASELINE,
-  // so the engine naturally never establishes an alarm-able baseline for it.
+  // baseline.
   try {
     const feedCounts = {
       'GenSecAI': shaiHulud.packages.length,
-      'DataDog': datadog.packages.length,
-      'OSV-API': osvApi.length
+      'DataDog': datadog.packages.length
     };
     if (process.env.OSM_API_TOKEN) {
       feedCounts['OSM'] = osmResult.packages.length + (osmResult.pypi_packages || []).length;

@@ -146,9 +146,9 @@ Parsers tested with malformed inputs:
 
 Result: **56/56 pass**. No crashes, no uncaught exceptions.
 
-### <!--stat:tests-->4542<!--/stat:tests--> unit and integration tests
+### <!--stat:tests-->4539<!--/stat:tests--> unit and integration tests
 
-Full coverage of scanners, parsers, IOC matching, typosquatting, CLI integrations, diff, temporal analysis, ground truth, canary tokens, and security (SSRF, injection). Tests grew from 3529 (v2.10.x) to <!--stat:tests-->4542<!--/stat:tests--> alongside the PYSRC/PYAST scanner additions, F1-F14 contextual FP caps, the Track D recon-exfil compound (v2.11.48), the v2.11.67-76 operational sprint (per-scan ledger, GHSA poller, coverage-audit, Phantom Gyp compound), and the v2.11.77-117 monitor-hardening + FPR-reduction sprint.
+Full coverage of scanners, parsers, IOC matching, typosquatting, CLI integrations, diff, temporal analysis, ground truth, canary tokens, and security (SSRF, injection). Tests grew from 3529 (v2.10.x) to <!--stat:tests-->4539<!--/stat:tests--> alongside the PYSRC/PYAST scanner additions, F1-F14 contextual FP caps, the Track D recon-exfil compound (v2.11.48), the v2.11.67-76 operational sprint (per-scan ledger, GHSA poller, coverage-audit, Phantom Gyp compound), and the v2.11.77-117 monitor-hardening + FPR-reduction sprint.
 
 ### Ground Truth Validation
 

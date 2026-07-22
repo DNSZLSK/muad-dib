@@ -8,7 +8,7 @@ async function runScraperTests() {
   const {
     runScraper, scrapeShaiHuludDetector, scrapeDatadogIOCs,
     scrapeOSMQueryLatest,
-    scrapeOSVLightweightAPI, queryOSVBatch,
+    queryOSVBatch,
     parseCSVLine, parseCSV, extractVersions, parseOSVEntry,
     createFreshness, isAllowedRedirect,
     validateIOCEntry, getNoVersionSkipCount, resetNoVersionSkipCount,
@@ -1726,9 +1726,10 @@ async function runScraperTests() {
       const ossfRequested = requestedUrls.some(u => u.includes('api.github.com') && u.includes('git/trees'));
       assert(ossfRequested, 'Should have requested OSSF tree API');
 
-      // Verify GitHub Advisory (osv.dev POST) was requested
-      const ghsaRequested = requestedUrls.some(u => u.includes('api.osv.dev'));
-      assert(ghsaRequested, 'Should have requested GitHub Advisory via osv.dev');
+      // (The former GitHub-Advisory-via-osv.dev/v1/query POST assertion was removed
+      // 2026-07 / GAP-2: that nameless query 400'd permanently and the source was
+      // deleted. runScraper no longer hits api.osv.dev — the OSV MAL- set comes
+      // from the storage-bucket zip dump asserted above.)
 
       // Verify files were written (atomic write: tmp + rename, captured by the fs mock)
       const writtenPaths = Object.keys(mockFiles);
@@ -2325,170 +2326,9 @@ async function runScraperTests() {
     }
   });
 
-  await asyncTest('SCRAPER: runScraper scrapeGitHubAdvisory filters non-malware GHSA entries', async () => {
-    const origRequest = https.request;
-    const origLog = console.log;
-    const origWrite = process.stdout.write;
-    const origFs = {
-      existsSync: fs.existsSync,
-      readFileSync: fs.readFileSync,
-      writeFileSync: fs.writeFileSync,
-      mkdirSync: fs.mkdirSync,
-      statSync: fs.statSync,
-      renameSync: fs.renameSync,
-      accessSync: fs.accessSync
-    };
-
-    console.log = () => {};
-    process.stdout.write = () => true;
-
-    https.request = (options, callback) => {
-      const url = 'https://' + options.hostname + options.path;
-      const req = new EventEmitter();
-      req.write = () => {};
-      req.setTimeout = () => {};
-      req.destroy = () => {};
-
-      req.end = () => {
-        process.nextTick(() => {
-          const res = new EventEmitter();
-          res.headers = { 'content-length': '100' };
-          res.resume = () => {};
-
-          if (url.includes('npm/all.zip') || url.includes('PyPI/all.zip')) {
-            res.statusCode = 200;
-            callback(res);
-            const zip = new AdmZip();
-            zip.addFile('SKIP.json', Buffer.from('{}'));
-            res.emit('data', zip.toBuffer());
-            res.emit('end');
-          }
-          // GitHub Advisory — mix of malware and non-malware entries
-          else if (url.includes('api.osv.dev')) {
-            res.statusCode = 200;
-            callback(res);
-            res.emit('data', Buffer.from(JSON.stringify({
-              vulns: [
-                {
-                  id: 'GHSA-malware-test-001',
-                  summary: 'Malicious package - credential stealer',
-                  affected: [{ package: { ecosystem: 'npm', name: 'ghsa-malware-pkg' },
-                    versions: ['1.0.0'] }]
-                },
-                {
-                  id: 'GHSA-normal-vuln-002',
-                  summary: 'XSS vulnerability in template engine',
-                  affected: [{ package: { ecosystem: 'npm', name: 'ghsa-normal-pkg' } }]
-                },
-                {
-                  id: 'GHSA-backdoor-003',
-                  summary: 'Package contains backdoor code',
-                  affected: [{ package: { ecosystem: 'npm', name: 'ghsa-backdoor-pkg' },
-                    versions: ['1.2.3', '1.2.4'] }]
-                },
-                {
-                  id: 'CVE-2024-9999',
-                  summary: 'Malicious code in package',
-                  affected: [{ package: { ecosystem: 'npm', name: 'cve-not-ghsa' } }]
-                },
-                {
-                  id: 'GHSA-trojan-004',
-                  summary: 'This is a trojan package',
-                  affected: [{ package: { ecosystem: 'npm', name: 'ghsa-trojan-pkg' },
-                    versions: ['3.0.0'] }]
-                }
-              ]
-            })));
-            res.emit('end');
-          }
-          else if (url.includes('gensecaihq')) {
-            res.statusCode = 200;
-            callback(res);
-            res.emit('data', Buffer.from(JSON.stringify({ packages: [] })));
-            res.emit('end');
-          }
-          else if (url.includes('api.github.com')) {
-            res.statusCode = 200;
-            callback(res);
-            res.emit('data', Buffer.from(JSON.stringify({ sha: 'sha-ghsa-test', tree: [] })));
-            res.emit('end');
-          }
-          else {
-            res.statusCode = 200;
-            callback(res);
-            res.emit('data', Buffer.from('h,v\n'));
-            res.emit('end');
-          }
-        });
-      };
-      return req;
-    };
-
-    const mockFiles = {};
-    let savedIocs = null;
-    fs.existsSync = (p) => {
-      if (typeof p === 'string' && p.includes('static-iocs')) return origFs.existsSync(p);
-      return true;
-    };
-    fs.readFileSync = (p, enc) => {
-      if (typeof p === 'string' && p.includes('static-iocs')) return origFs.readFileSync(p, enc);
-      if (typeof p === 'string' && p.includes('.ossf-tree-sha')) return 'sha-ghsa-test';
-      return JSON.stringify({ packages: [], pypi_packages: [], hashes: [], markers: [], files: [] });
-    };
-    fs.writeFileSync = (p, data) => { mockFiles[path.resolve(p)] = data; };
-    fs.mkdirSync = () => {};
-    fs.accessSync = () => {};
-    fs.statSync = (p) => {
-      const resolved = path.resolve(p);
-      if (mockFiles[resolved]) return { size: Buffer.byteLength(mockFiles[resolved]) };
-      return origFs.statSync(p);
-    };
-    fs.renameSync = (from, to) => {
-      const rf = path.resolve(from); const rt = path.resolve(to);
-      if (mockFiles[rf]) { mockFiles[rt] = mockFiles[rf]; delete mockFiles[rf]; }
-      if (typeof to === 'string' && to.includes('iocs.json') && !to.includes('compact') && mockFiles[rt]) {
-        try { savedIocs = JSON.parse(mockFiles[rt]); } catch {}
-      }
-    };
-
-    try {
-      const result = await runScraper();
-
-      assert(savedIocs, 'IOC file must have been written and captured');
-      if (savedIocs) {
-        const ghsaPkgs = savedIocs.packages.filter(p => p.source === 'github-advisory');
-        const ghsaNames = ghsaPkgs.map(p => p.name);
-
-        // Malware, backdoor, trojan entries should be included
-        assert(ghsaNames.includes('ghsa-malware-pkg'), 'Should include malware GHSA entry');
-        assert(ghsaNames.includes('ghsa-backdoor-pkg'), 'Should include backdoor GHSA entry');
-        assert(ghsaNames.includes('ghsa-trojan-pkg'), 'Should include trojan GHSA entry');
-
-        // Normal XSS vuln should be filtered out (not malware/malicious/backdoor/trojan)
-        assert(!ghsaNames.includes('ghsa-normal-pkg'), 'Should filter out non-malware GHSA entries');
-
-        // CVE- prefixed entries should be filtered out (only GHSA- accepted)
-        assert(!ghsaNames.includes('cve-not-ghsa'), 'Should filter out non-GHSA entries');
-
-        // GHSA-backdoor-003 has versions: ['1.2.3', '1.2.4'] — should produce versioned entries, not wildcard
-        const backdoorEntries = ghsaPkgs.filter(p => p.name === 'ghsa-backdoor-pkg');
-        assert(backdoorEntries.length === 2, 'Backdoor pkg with 2 versions should produce 2 entries, got ' + backdoorEntries.length);
-        const bdVersions = backdoorEntries.map(p => p.version).sort();
-        assert(bdVersions[0] === '1.2.3', 'First backdoor version should be 1.2.3, got ' + bdVersions[0]);
-        assert(bdVersions[1] === '1.2.4', 'Second backdoor version should be 1.2.4, got ' + bdVersions[1]);
-
-        // GHSA entries with explicit versions should produce versioned entries (C2: no wildcard fallback)
-        const malwarePkg = ghsaPkgs.filter(p => p.name === 'ghsa-malware-pkg');
-        assert(malwarePkg.length === 1, 'Malware pkg with 1 version should produce 1 entry');
-        assert(malwarePkg[0].version === '1.0.0', 'Malware pkg version should be 1.0.0, got ' + malwarePkg[0].version);
-      }
-    } finally {
-      https.request = origRequest;
-      console.log = origLog;
-      process.stdout.write = origWrite;
-      Object.assign(fs, origFs);
-    }
-  });
+  // (runScraper GHSA-advisory test removed 2026-07 / GAP-2: scrapeGitHubAdvisory was
+  // deleted — it POSTed a nameless OSV /v1/query, HTTP 400 → 0 packages, and the
+  // GHSA-malware it targeted is already covered by the OSV MAL- dump.)
 
   await asyncTest('SCRAPER: runScraper merges with existing IOCs and preserves markers', async () => {
     const origRequest = https.request;
@@ -3559,89 +3399,10 @@ async function runScraperTests() {
     assert(MAX_ENTRY_UNCOMPRESSED < MAX_TOTAL_UNCOMPRESSED, 'Per-entry limit should be less than total budget');
   });
 
-  // --- scrapeOSVLightweightAPI ---
-
-  await asyncTest('SCRAPER: scrapeOSVLightweightAPI returns MAL-* entries only', async () => {
-    const origRequest = https.request;
-    const origLog = console.log;
-    console.log = () => {};
-
-    const mockResponse = {
-      vulns: [
-        {
-          id: 'MAL-2025-1234',
-          summary: 'Malicious code in evil-pkg',
-          affected: [{ package: { ecosystem: 'npm', name: 'evil-pkg' }, versions: ['1.0.0'] }]
-        },
-        {
-          id: 'GHSA-xxxx-yyyy',
-          summary: 'Some advisory',
-          affected: [{ package: { ecosystem: 'npm', name: 'safe-pkg' }, versions: ['2.0.0'] }]
-        },
-        {
-          id: 'MAL-2025-5678',
-          summary: 'Malicious code in bad-pkg',
-          affected: [{ package: { ecosystem: 'npm', name: 'bad-pkg' }, versions: ['3.0.0', '3.0.1'] }]
-        }
-      ]
-    };
-
-    https.request = (options, callback) => {
-      const req = createMockRequest();
-      req.end = () => {
-        process.nextTick(() => {
-          const res = createMockResponse(200, null, {});
-          callback(res);
-          process.nextTick(() => {
-            res.emit('data', Buffer.from(JSON.stringify(mockResponse)));
-            res.emit('end');
-          });
-        });
-      };
-      return req;
-    };
-
-    try {
-      const result = await scrapeOSVLightweightAPI();
-      assert(Array.isArray(result), 'Should return array');
-      // MAL-2025-1234 (1 version) + MAL-2025-5678 (2 versions) = 3 entries
-      assert(result.length === 3, 'Should have 3 entries (MAL only, not GHSA), got ' + result.length);
-      assert(result.every(p => p.source === 'osv-api'), 'All entries should have source osv-api');
-      assert(result[0].name === 'evil-pkg', 'First should be evil-pkg');
-      assert(result[1].name === 'bad-pkg', 'Second should be bad-pkg');
-    } finally {
-      https.request = origRequest;
-      console.log = origLog;
-    }
-  });
-
-  await asyncTest('SCRAPER: scrapeOSVLightweightAPI handles API error gracefully', async () => {
-    const origRequest = https.request;
-    const origLog = console.log;
-    const logs = [];
-    console.log = (...args) => logs.push(args.join(' '));
-
-    https.request = (options, callback) => {
-      const req = createMockRequest();
-      req.end = () => {
-        process.nextTick(() => {
-          req.emit('error', new Error('connection refused'));
-        });
-      };
-      return req;
-    };
-
-    try {
-      const result = await scrapeOSVLightweightAPI();
-      assert(Array.isArray(result), 'Should return empty array on error');
-      assert(result.length === 0, 'Should have 0 entries on error');
-      const errorLog = logs.find(l => l.includes('OSV API error'));
-      assert(errorLog, 'Should log the error');
-    } finally {
-      https.request = origRequest;
-      console.log = origLog;
-    }
-  });
+  // (scrapeOSVLightweightAPI tests removed 2026-07 / GAP-2: the function POSTed a
+  // nameless OSV /v1/query that always 400s in production; these tests mocked a 200
+  // response that never arrives, validating parsing of data the source never returns.
+  // The source was redundant with the OSV MAL- zip dump and has been deleted.)
 
   // --- queryOSVBatch ---
 
