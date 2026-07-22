@@ -61,31 +61,34 @@ async function runWebhookTests() {
 
   console.log('\n=== WEBHOOK EXTENDED TESTS ===\n');
 
-  const httpModule = require('http');
+  const { EventEmitter } = require('events');
+  const httpsMod = require('https');
+  const dnsMod = require('dns');
   const { sendWebhook: sendWebhookFn, validateWebhookUrl: valUrl } = require('../../src/webhook.js');
 
-  // Mock HTTP server on localhost (allowed by validateWebhookUrl)
-  const mockWebhookServer = await new Promise((resolve) => {
-    let lastPayload = null;
-    const srv = httpModule.createServer((req, res) => {
+  // Fake https.request factory: answers every request with the next status in
+  // `statuses` (last one repeats) and records {options, body} into `captured`.
+  // The 'retry-after: 0' header makes the REAL retry loop in send() run with
+  // zero backoff, so retry behavior is exercised without slowing the suite.
+  function fakeHttpsRequest(statuses, captured) {
+    let call = 0;
+    return (options, cb) => {
+      const req = new EventEmitter();
       let body = '';
-      req.on('data', chunk => body += chunk);
-      req.on('end', () => {
-        try { lastPayload = JSON.parse(body); } catch { lastPayload = body; }
-        if (req.url.includes('/error')) {
-          res.writeHead(500);
-          res.end('error');
-        } else {
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end('{"ok":true}');
-        }
-      });
-    });
-    srv.listen(0, 'localhost', () => {
-      resolve({ server: srv, port: srv.address().port, getPayload: () => lastPayload });
-    });
-  });
-  const webhookBase = `http://localhost:${mockWebhookServer.port}`;
+      req.setTimeout = () => {};
+      req.destroy = () => {};
+      req.write = (chunk) => { body += chunk; };
+      req.end = () => {
+        captured.push({ options, body });
+        const res = new EventEmitter();
+        res.statusCode = statuses[Math.min(call++, statuses.length - 1)];
+        res.headers = { 'retry-after': '0' };
+        res.destroy = () => {};
+        process.nextTick(() => { cb(res); process.nextTick(() => res.emit('end')); });
+      };
+      return req;
+    };
+  }
 
   const mockResults = {
     target: '/test/project',
@@ -110,7 +113,7 @@ async function runWebhookTests() {
 
   await asyncTest('WEBHOOK-EXT: sendWebhook rejects HTTP localhost (no exemption)', async () => {
     try {
-      await sendWebhookFn(`${webhookBase}/discord.com/api/webhooks/t`, mockResults);
+      await sendWebhookFn('http://localhost:9/discord.com/api/webhooks/t', mockResults);
       assert(false, 'Should throw');
     } catch (e) {
       assert(e.message.includes('HTTPS required'), 'Should require HTTPS');
@@ -135,7 +138,76 @@ async function runWebhookTests() {
     }
   });
 
-  mockWebhookServer.server.close();
+  await asyncTest('WEBHOOK-EXT: sendWebhook success — POSTs Discord payload to the pinned IP and resolves 200', async () => {
+    const captured = [];
+    const s4 = spyOn(dnsMod.promises, 'resolve4', async () => ['203.0.113.10']);
+    const s6 = spyOn(dnsMod.promises, 'resolve6', async () => []);
+    const sReq = spyOn(httpsMod, 'request', fakeHttpsRequest([200], captured));
+    try {
+      const result = await sendWebhookFn('https://discord.com/api/webhooks/123/tok', mockResults);
+      assert(result && result.success === true && result.status === 200,
+        'Should resolve {success:true, status:200}, got ' + JSON.stringify(result));
+      assert(sReq.callCount === 1, 'Exactly one HTTP request on success, got ' + sReq.callCount);
+      const { options, body } = captured[0];
+      assert(options.method === 'POST', 'Should POST, got ' + options.method);
+      assert(options.hostname === '203.0.113.10', 'Connection must be pinned to the resolved IPv4 (WHK-001), got ' + options.hostname);
+      assert(options.headers.Host === 'discord.com', 'Host header keeps the original hostname');
+      assert(options.servername === 'discord.com', 'TLS SNI keeps the original hostname');
+      assert(options.path === '/api/webhooks/123/tok', 'Webhook path preserved, got ' + options.path);
+      assert(options.headers['Content-Type'] === 'application/json', 'JSON content type');
+      assert(options.headers['Content-Length'] === Buffer.byteLength(body), 'Content-Length matches the serialized body');
+      // The serialized payload is the real formatDiscord output for mockResults
+      const payload = JSON.parse(body);
+      assert(Array.isArray(payload.embeds) && payload.embeds.length === 1, 'Discord payload has one embed');
+      assert(payload.embeds[0].title.includes('MUAD'), 'Embed title mentions MUAD\'DIB');
+      assert(payload.embeds[0].description.includes('/test/project'), 'Embed describes the scanned target');
+      const riskField = payload.embeds[0].fields.find(f => f.name === 'Risk Score');
+      assert(riskField && riskField.value.includes('75/100'), 'Risk score serialized from results, got ' + (riskField && riskField.value));
+      const critField = payload.embeds[0].fields.find(f => f.name === 'Critical Threats');
+      assert(critField && critField.value.includes('Critical threat found'), 'Critical threats listed in payload');
+    } finally {
+      sReq.restore(); s4.restore(); s6.restore();
+    }
+  });
+
+  await asyncTest('WEBHOOK-EXT: sendWebhook retries retryable HTTP 500 then throws after MAX_RETRIES', async () => {
+    const { MAX_RETRIES } = require('../../src/webhook.js');
+    const captured = [];
+    const retryLogs = [];
+    const s4 = spyOn(dnsMod.promises, 'resolve4', async () => ['203.0.113.10']);
+    const s6 = spyOn(dnsMod.promises, 'resolve6', async () => []);
+    const sReq = spyOn(httpsMod, 'request', fakeHttpsRequest([500], captured));
+    const sErr = spyOn(console, 'error', (...a) => retryLogs.push(a.join(' ')));
+    try {
+      let threw = null;
+      try { await sendWebhookFn('https://discord.com/api/webhooks/123/tok', mockResults); }
+      catch (e) { threw = e; }
+      assert(threw && threw.message === 'Webhook failed: HTTP 500',
+        'Should throw the HTTP 500 error after exhausting retries, got ' + (threw && threw.message));
+      assert(sReq.callCount === MAX_RETRIES + 1,
+        `500 is retryable: 1 initial + ${MAX_RETRIES} retries = ${MAX_RETRIES + 1} requests, got ` + sReq.callCount);
+      assert(retryLogs.some(l => l.includes('HTTP 500') && l.includes('retrying')), 'Retry attempts are logged');
+    } finally {
+      sErr.restore(); sReq.restore(); s4.restore(); s6.restore();
+    }
+  });
+
+  await asyncTest('WEBHOOK-EXT: sendWebhook does NOT retry a non-retryable HTTP 400', async () => {
+    const captured = [];
+    const s4 = spyOn(dnsMod.promises, 'resolve4', async () => ['203.0.113.10']);
+    const s6 = spyOn(dnsMod.promises, 'resolve6', async () => []);
+    const sReq = spyOn(httpsMod, 'request', fakeHttpsRequest([400], captured));
+    try {
+      let threw = null;
+      try { await sendWebhookFn('https://discord.com/api/webhooks/123/tok', mockResults); }
+      catch (e) { threw = e; }
+      assert(threw && threw.message === 'Webhook failed: HTTP 400',
+        'Should throw immediately on HTTP 400, got ' + (threw && threw.message));
+      assert(sReq.callCount === 1, '400 is not retryable: exactly 1 request, got ' + sReq.callCount);
+    } finally {
+      sReq.restore(); s4.restore(); s6.restore();
+    }
+  });
 
   // ============================================
   // WEBHOOK COVERAGE TESTS (webhook.js)
@@ -168,18 +240,9 @@ async function runWebhookTests() {
     assert(!r.valid, 'Should reject 0.0.0.0');
   });
 
-  test('WEBHOOK-COV: formatDiscord generates correct embed structure', () => {
-    // Access formatDiscord indirectly via module internals
-    // We test by calling the webhook module's format functions
-    const webhookModule = require('../../src/webhook.js');
-    // formatDiscord is not exported, so we test via the validate path
-    // Instead test the payload structure expected by Discord
-    const r1 = valUrl('https://discord.com/api/webhooks/12345/token');
-    assert(r1.valid, 'Discord webhook URL should be valid');
-
-    const r2 = valUrl('https://hooks.slack.com/services/T/B/X');
-    assert(r2.valid, 'Slack webhook URL should be valid');
-  });
+  // (removed) 'formatDiscord generates correct embed structure' — the test never called
+  // formatDiscord (stale comment claimed it was unexported); formatDiscord IS exported and
+  // is really tested below ('formatDiscord returns embed with correct structure').
 
   test('WEBHOOK-COV: validateWebhookUrl accepts subdomain of allowed domain', () => {
     const r = valUrl('https://ptb.discord.com/api/webhooks/test');

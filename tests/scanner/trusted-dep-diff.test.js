@@ -42,7 +42,7 @@ async function runTrustedDepDiffTests() {
 
   // --- Gate (FN cases) — opt-in matters ---
 
-  asyncTest('TRUSTED-DEP-DIFF: returns [] without opt-in flag', async () => {
+  await asyncTest('TRUSTED-DEP-DIFF: returns [] without opt-in flag', async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-tdd-'));
     fs.writeFileSync(path.join(tmpDir, 'package.json'),
       JSON.stringify({ name: 'lodash', version: '4.17.21' }));
@@ -56,7 +56,7 @@ async function runTrustedDepDiffTests() {
     }
   });
 
-  asyncTest('TRUSTED-DEP-DIFF: returns [] for non-npm ecosystem even when opt-in', async () => {
+  await asyncTest('TRUSTED-DEP-DIFF: returns [] for non-npm ecosystem even when opt-in', async () => {
     const findings = await scanTrustedDepDiff('.', {
       monitorMode: true,
       ecosystem: 'pypi',
@@ -67,7 +67,7 @@ async function runTrustedDepDiffTests() {
       'PyPI ecosystem must short-circuit — this scanner is npm-only by design');
   });
 
-  asyncTest('TRUSTED-DEP-DIFF: returns [] when package.json is missing and no name/version override', async () => {
+  await asyncTest('TRUSTED-DEP-DIFF: returns [] when package.json is missing and no name/version override', async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-tdd-empty-'));
     try {
       const findings = await scanTrustedDepDiff(tmpDir, { trustedDepDiff: true });
@@ -78,7 +78,7 @@ async function runTrustedDepDiffTests() {
     }
   });
 
-  asyncTest('TRUSTED-DEP-DIFF: returns [] when package.json is malformed', async () => {
+  await asyncTest('TRUSTED-DEP-DIFF: returns [] when package.json is malformed', async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-tdd-bad-'));
     fs.writeFileSync(path.join(tmpDir, 'package.json'), '{ not valid json');
     try {
@@ -90,7 +90,7 @@ async function runTrustedDepDiffTests() {
     }
   });
 
-  asyncTest('TRUSTED-DEP-DIFF: returns [] when name or version cannot be resolved', async () => {
+  await asyncTest('TRUSTED-DEP-DIFF: returns [] when name or version cannot be resolved', async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-tdd-nameless-'));
     fs.writeFileSync(path.join(tmpDir, 'package.json'),
       JSON.stringify({ description: 'no name no version' }));
@@ -105,7 +105,7 @@ async function runTrustedDepDiffTests() {
 
   // --- Graceful failure (FN cases) — registry unreachable ---
 
-  asyncTest('TRUSTED-DEP-DIFF: returns [] gracefully on registry 404 / network error', async () => {
+  await asyncTest('TRUSTED-DEP-DIFF: returns [] gracefully on registry 404 / network error', async () => {
     // The nonexistent name returns HTTP 404 from npm; the function must catch and return []
     const findings = await checkDepDiff('__muaddib_nonexistent_test_pkg_xyz__', '1.0.0');
     assert(Array.isArray(findings), 'Should return an array');
@@ -119,7 +119,7 @@ async function runTrustedDepDiffTests() {
   // finding shape itself is identical to the pre-refactor function and is
   // already covered by tests/integration/monitor.test.js #checkTrustedDepDiff*).
 
-  asyncTest('TRUSTED-DEP-DIFF: opt-in + name/version override triggers checkDepDiff path', async () => {
+  await asyncTest('TRUSTED-DEP-DIFF: opt-in + name/version override triggers checkDepDiff path', async () => {
     // muaddib_test_ scope is reserved; npm always returns 404. The scanner must
     // not crash, must return [], and must NOT pre-empt itself before reaching
     // checkDepDiff (we test that by passing override values — no package.json

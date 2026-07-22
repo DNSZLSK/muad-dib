@@ -455,8 +455,19 @@ async function runIntentGraphTests() {
   // Unit tests: SDK_ENV_DOMAIN_MAP coverage
   // =========================================================================
 
-  test('INTENT: SDK_ENV_DOMAIN_MAP has 22 entries', () => {
-    assert(SDK_ENV_DOMAIN_MAP.length === 22, `Expected 22 SDK mappings, got ${SDK_ENV_DOMAIN_MAP.length}`);
+  test('INTENT: SDK_ENV_DOMAIN_MAP entries are well-formed and its brands stay covered', () => {
+    // A floor, not an exact count — adding a legitimate SDK brand is an anti-FP
+    // improvement and must not break this test. What matters structurally is that
+    // every entry is well-formed and the known brands remain mapped.
+    assert(SDK_ENV_DOMAIN_MAP.length >= 22, `Expected at least 22 SDK mappings, got ${SDK_ENV_DOMAIN_MAP.length}`);
+    for (const entry of SDK_ENV_DOMAIN_MAP) {
+      assert(entry.envPattern instanceof RegExp, `Each entry needs a RegExp envPattern, got ${entry.envPattern}`);
+      assert(Array.isArray(entry.domains) && entry.domains.length > 0, 'Each entry needs a non-empty domains array');
+    }
+    // Anchor brands that anchor the anti-FP behaviour must remain present.
+    for (const brand of ['AWS_KEY', 'STRIPE_SECRET', 'MAILGUN_API_KEY', 'SALESFORCE_TOKEN']) {
+      assert(SDK_ENV_DOMAIN_MAP.some(e => e.envPattern.test(brand)), `${brand} must still map to an SDK domain`);
+    }
   });
 
   // =========================================================================

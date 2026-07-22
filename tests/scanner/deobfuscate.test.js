@@ -1,5 +1,6 @@
 const { test, assert, assertIncludes } = require('../test-utils');
 const { deobfuscate } = require('../../src/scanner/deobfuscate.js');
+const acorn = require('acorn');
 
 async function runDeobfuscateTests() {
   console.log('\n=== DEOBFUSCATE TESTS ===\n');
@@ -134,13 +135,15 @@ async function runDeobfuscateTests() {
     assert(transforms.length === 0, `Expected 0 transforms without .join(''), got ${transforms.length}`);
   });
 
-  test('DEOBFUSCATE: Hex escaped strings — already resolved by parser', () => {
-    // Acorn resolves \x hex escapes in string literals automatically
-    const { code } = deobfuscate(`const x = '\\x68\\x65\\x6c\\x6c\\x6f';`);
-    // Acorn parses \x68\x65\x6c\x6c\x6f as "hello" in the Literal.value
-    // The source stays the same but the AST contains the resolved value
-    // Our module doesn't need to transform these — Acorn handles it
-    assert(typeof code === 'string', 'Should return valid string');
+  test('DEOBFUSCATE: Hex escaped strings — resolved by the parser, so deobfuscate is a no-op', () => {
+    const src = `const x = '\\x68\\x65\\x6c\\x6c\\x6f';`;
+    const { transforms } = deobfuscate(src);
+    // The module intentionally does NOT transform \x escapes — Acorn already
+    // resolves them, so downstream AST detectors see the decoded value. Prove
+    // both facts: no transform is claimed, and the parsed literal really is 'hello'.
+    assert(transforms.length === 0, `\\x escapes need no transform (Acorn resolves them), got ${transforms.length}`);
+    const literalValue = acorn.parse(src, { ecmaVersion: 2022 }).body[0].declarations[0].init.value;
+    assert(literalValue === 'hello', `Acorn must resolve the \\x escapes to "hello", got ${JSON.stringify(literalValue)}`);
   });
 
   // =====================================================
@@ -333,11 +336,15 @@ async function runDeobfuscateTests() {
     assertIncludes(code, "'child_process'", 'Should propagate array destructured consts and fold');
   });
 
-  test('DEOBFUSCATE: Array destructuring — partial elements', () => {
+  test('DEOBFUSCATE: Array destructuring — partial elements (hole skipped, x propagated)', () => {
     const src = `const trigger = 'he' + 'llo';\nconst [x, , z] = ['eval', 42, 'safe'];\nconsole.log(x);`;
     const { code, transforms } = deobfuscate(src);
-    // x should be propagated, the hole (,) skipped, z propagated
-    assert(transforms.length > 0, 'Should have transforms');
+    // x (='eval') must be propagated into the console.log despite the hole in the
+    // destructuring pattern. Asserting transforms.length>0 was satisfied by the
+    // 'he'+'llo' trigger alone; assert the actual propagation instead.
+    assertIncludes(code, "console.log('eval')", 'x must be propagated past the array hole');
+    assert(transforms.some(t => t.type === 'const_propagation'),
+      'The propagation itself (not just the trigger concat) must be recorded as a const_propagation transform');
   });
 
   test('DEOBFUSCATE: Array destructuring — non-string elements skipped', () => {

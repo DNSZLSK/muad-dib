@@ -184,7 +184,7 @@ async function runMonitorWiringTests() {
   // 4. processQueue with empty queue — smoke test
   // ─────────────────────────────────────────────
 
-  asyncTest('WIRING: processQueue with empty queue returns immediately (no crash)', async () => {
+  await asyncTest('WIRING: processQueue with empty queue returns immediately (no crash)', async () => {
     const testStats = {
       scanned: 0, clean: 0, suspect: 0, errors: 0,
       suspectByTier: { t1: 0, t1a: 0, t1b: 0, t2: 0, t3: 0 },
@@ -202,7 +202,7 @@ async function runMonitorWiringTests() {
   // 5. Pipeline: resetAll called even on error
   // ─────────────────────────────────────────────
 
-  asyncTest('WIRING: run() calls resetAll even when a phase throws', async () => {
+  await asyncTest('WIRING: run() calls resetAll even when a phase throws', async () => {
     const { applyConfigOverrides, getSeverityWeights } = require('../../src/scoring.js');
 
     // applyConfigOverrides expects lowercase keys

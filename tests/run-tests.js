@@ -455,6 +455,14 @@ async function timed(name, fn) {
   // Meta tests (test-suite quality guards — runs last, fast, no fixtures)
   await timed('meta-no-source-grep', runNoSourceGrepTests);
 
+  // Drain any still-pending asyncTest promises before the tally — a floating
+  // asyncTest (missing await) must never have its result killed by process.exit.
+  const { drainPendingAsync } = require('./test-utils.js');
+  const drained = await drainPendingAsync();
+  if (drained > 0) {
+    console.log(`\n[WARN] ${drained} asyncTest promise(s) were still pending at the end of the run — a test file is missing an "await asyncTest(...)". Fix the call site.`);
+  }
+
   // Results
   const elapsed = ((Date.now() - start) / 1000).toFixed(1);
   const { passed, failed, skipped, failures } = getCounters();

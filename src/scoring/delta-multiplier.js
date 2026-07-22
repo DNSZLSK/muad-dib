@@ -46,7 +46,10 @@ const crypto = require('crypto');
 
 const { HIGH_CONFIDENCE_MALICE_TYPES } = require('../monitor/classify.js');
 
-const CACHE_DIR = path.join(process.cwd(), '.muaddib-cache', 'version-deltas');
+// Env override so tests write to a mkdtemp instead of littering the
+// production cache (unset in prod → unchanged behavior).
+const CACHE_DIR = process.env.MUADDIB_DELTA_CACHE_DIR
+  || path.join(process.cwd(), '.muaddib-cache', 'version-deltas');
 const CACHE_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 const CACHE_MAX_ENTRIES = 50000;
 const MIN_PRIOR_VERSIONS_FOR_DECAY = 3;

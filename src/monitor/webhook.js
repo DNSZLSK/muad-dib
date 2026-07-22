@@ -29,6 +29,14 @@ const path = require('path');
 
 const { sendWebhook } = require('../webhook.js');
 const { sendIngest, isIngestConfigured } = require('../integrations/api-ingest.js');
+
+// Outbound-delivery seam. Destructuring `sendWebhook` above captures the
+// reference at load time, so a test that patches `require('../webhook.js').exports`
+// afterwards never intercepts anything (audit 2026-07: four monitor tests were
+// doing real HTTPS POSTs through a "stubbed" sendWebhook). All call sites below
+// go through `_deps.*` so tests can swap the delivery function directly —
+// same pattern as ingestion._deps.
+const _deps = { sendWebhook, sendIngest };
 const {
   atomicWriteFileSync,
   ALERTS_LOG_DIR,
@@ -231,7 +239,7 @@ function buildIOCPreAlertEmbed(name, version, ecosystem = 'npm') {
 async function sendIOCPreAlert(name, version, ecosystem = 'npm') {
   const url = getWebhookUrl();
   if (!url) return;
-  await sendWebhook(url, buildIOCPreAlertEmbed(name, version, ecosystem), { rawPayload: true });
+  await _deps.sendWebhook(url, buildIOCPreAlertEmbed(name, version, ecosystem), { rawPayload: true });
 }
 
 /**
@@ -271,7 +279,7 @@ function buildCampaignPreAlertEmbed(name, campaign, ecosystem = 'npm') {
 async function sendCampaignPreAlert(name, campaign, ecosystem = 'npm') {
   const url = getWebhookUrl();
   if (!url) return;
-  await sendWebhook(url, buildCampaignPreAlertEmbed(name, campaign, ecosystem), { rawPayload: true });
+  await _deps.sendWebhook(url, buildCampaignPreAlertEmbed(name, campaign, ecosystem), { rawPayload: true });
 }
 
 /**
@@ -327,7 +335,7 @@ async function sendBurstPreAlert(name, count, ecosystem = 'npm') {
   if (!burstPreAlertWebhookEnabled()) return;
   const url = getWebhookUrl();
   if (!url) return;
-  await sendWebhook(url, buildBurstPreAlertEmbed(name, count, ecosystem), { rawPayload: true });
+  await _deps.sendWebhook(url, buildBurstPreAlertEmbed(name, count, ecosystem), { rawPayload: true });
 }
 
 /**
@@ -575,7 +583,7 @@ async function resendDailyReport(date) {
   const payload = report.data && report.data.embed;
   if (!payload) return { sent: false, message: `Report ${report.date} has no embed payload`, date: report.date };
   try {
-    await sendWebhook(url, payload, { rawPayload: true });
+    await _deps.sendWebhook(url, payload, { rawPayload: true });
   } catch (err) {
     return { sent: false, message: `Webhook failed: ${err.message}`, date: report.date };
   }
@@ -724,7 +732,7 @@ async function trySendWebhook(name, version, ecosystem, result, sandboxResult, m
   // independent of Discord dedup. The API's ON CONFLICT DO UPDATE absorbs duplicates;
   // dedup downstream is a Discord noise filter, not a data filter.
   if (isIngestConfigured()) {
-    sendIngest(name, version, result).catch(() => {});
+    _deps.sendIngest(name, version, result).catch(() => {});
   }
 
   // Persist periodically (throttled to every 10 scans to avoid disk I/O overhead)
@@ -775,7 +783,7 @@ async function trySendWebhook(name, version, ecosystem, result, sandboxResult, m
   const url = getWebhookUrl();
   const webhookData = buildAlertData(name, version, ecosystem, result, sandboxResult, llmResult);
   try {
-    await sendWebhook(url, webhookData);
+    await _deps.sendWebhook(url, webhookData);
     console.log(`[MONITOR] Webhook sent for ${name}@${version}`);
   } catch (err) {
     console.error(`[MONITOR] Webhook failed for ${name}@${version}: ${err.message}`);
@@ -848,7 +856,7 @@ async function flushScopeGroup(scope) {
     };
     const webhookData = buildAlertData(pkg.name, pkg.version, group.ecosystem, result, pkg.sandboxResult, pkg.llmResult);
     try {
-      await sendWebhook(url, webhookData);
+      await _deps.sendWebhook(url, webhookData);
       console.log(`[MONITOR] Webhook sent for ${pkg.name}@${pkg.version} (scope group flush, single)`);
     } catch (err) {
       console.error(`[MONITOR] Webhook failed for ${pkg.name}@${pkg.version}: ${err.message}`);
@@ -892,7 +900,7 @@ async function flushScopeGroup(scope) {
   };
 
   try {
-    await sendWebhook(url, payload, { rawPayload: true });
+    await _deps.sendWebhook(url, payload, { rawPayload: true });
     console.log(`[MONITOR] Grouped webhook sent for ${scope} (${group.packages.length} packages, max=${group.maxScore})`);
   } catch (err) {
     console.error(`[MONITOR] Grouped webhook failed for ${scope}: ${err.message}`);
@@ -1601,7 +1609,7 @@ async function sendDailyReport(stats, dailyAlerts, recentlyScanned, downloadsCac
   const url = getWebhookUrl();
   if (url) {
     try {
-      await sendWebhook(url, payload, { rawPayload: true });
+      await _deps.sendWebhook(url, payload, { rawPayload: true });
       console.log('[MONITOR] Daily report sent');
       // Confirm delivery on the just-persisted file so boot redelivery won't resend it.
       const persisted = loadPersistedReport(today);
@@ -1704,7 +1712,7 @@ async function sendReportNow(stats) {
   }
 
   try {
-    await sendWebhook(url, payload, { rawPayload: true });
+    await _deps.sendWebhook(url, payload, { rawPayload: true });
   } catch (err) {
     return { sent: false, message: `Webhook failed: ${err.message}` };
   }
@@ -1767,6 +1775,9 @@ function getReportStatus() {
 }
 
 module.exports = {
+  // Test seam — swap _deps.sendWebhook/_deps.sendIngest to intercept outbound delivery
+  _deps,
+
   // Mutable state
   alertedPackageRules,
   SCOPE_GROUP_WINDOW_MS,

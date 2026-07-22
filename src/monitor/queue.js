@@ -31,6 +31,11 @@ const os = require('os');
 const { Worker } = require('worker_threads');
 const { runSandbox, tryAcquireSandboxSlot } = require('../sandbox/index.js');
 const { sendWebhook } = require('../webhook.js');
+// queue.js has its own destructured sendWebhook reference (IOC-fallback + temporal
+// alert sends), distinct from monitor/webhook.js. Route those sends through a
+// mutable seam so tests can intercept them, same as ingestion._deps — otherwise
+// the destructured ref is captured at load and a test stub never fires.
+const _deps = { sendWebhook };
 const { downloadToFile, extractArchive, sanitizePackageName } = require('../shared/download.js');
 const { extractInPool } = require('../shared/extract-pool.js');
 const { MAX_TARBALL_SIZE, getMaxFileSize } = require('../shared/constants.js');
@@ -144,6 +149,11 @@ function registerWorkerMessageHandler(type, fn) {
     console.warn(`[MONITOR] registerWorkerMessageHandler: OVERWRITING existing handler for '${type}'`);
   }
   _workerMessageHandlers.set(type, fn);
+}
+function unregisterWorkerMessageHandler(type) {
+  // Inverse of registerWorkerMessageHandler — lets tests (and future governors)
+  // remove their handler instead of leaking it into the process-global registry.
+  return _workerMessageHandlers.delete(type);
 }
 
 // ─── Network-brain glue (governors phase A) ───
@@ -262,6 +272,46 @@ function computeSandboxScoreThreshold(envValue) {
   return Math.max(0, Math.min(100, value));
 }
 const SANDBOX_SCORE_THRESHOLD = computeSandboxScoreThreshold(process.env.MUADDIB_SANDBOX_SCORE_THRESHOLD);
+
+// Tier-based sandbox gate, extracted pure so tests exercise THIS function and
+// not a hand-maintained replica (audit 2026-07: sandbox-gate.test.js asserted
+// on a local copy that nothing kept in lockstep with the inline condition).
+// T1a: mandatory. T1b: score-gated. T2: score-gated AND queue must be short.
+// Availability preconditions (isSandboxEnabled, sandboxAvailable, large-package
+// skip) remain at the call site — they are environment, not tier policy.
+function computeSandboxGate(tier, riskScore, queueLen, threshold) {
+  return tier === '1a' ||
+    (tier === '1b' && riskScore >= threshold) ||
+    (tier === 2 && riskScore >= threshold && queueLen < 50);
+}
+
+// Post-sandbox label classifier, extracted pure from processQueueItem for the
+// same reason (the RELABEL tests — including the @cloudbase/cloudbase-mcp
+// regression — re-implemented this formula inline and protected nothing).
+// Returns the stat/label decision; the caller performs the side effects.
+//   'inconclusive_timeout'       sandbox timed out — keep original label
+//   'relabel_blocked_hc'         sandbox clean BUT high-confidence malice types
+//   'relabel_blocked_static'     sandbox clean BUT dormant or static score >= 70
+//   'unconfirmed'                sandbox clean, low static → relabel to unconfirmed
+//   'confirmed'                  sandbox found live behavior → confirm
+//   'inconclusive_install_error' sandbox score > 0 with 0 findings (install error)
+//   'suspect'                    no usable sandbox verdict — keep suspect
+//   null                         static-clean package: nothing to classify
+function classifySandboxOutcome({ staticClean, sandboxResult, hasHCThreats, isDormant, staticScore }) {
+  if (staticClean) return null;
+  if (sandboxResult && sandboxResult.inconclusive) return 'inconclusive_timeout';
+  if (sandboxResult && sandboxResult.score === 0) {
+    if (hasHCThreats) return 'relabel_blocked_hc';
+    if (isDormant || staticScore >= 70) return 'relabel_blocked_static';
+    return 'unconfirmed';
+  }
+  if (sandboxResult && sandboxResult.score > 0) {
+    return (sandboxResult.findings && sandboxResult.findings.length > 0)
+      ? 'confirmed'
+      : 'inconclusive_install_error';
+  }
+  return 'suspect';
+}
 
 // --- Sandbox waste-cut (v2.11.6x): skip sandbox time that yields no new verdict ---
 // Two skip paths, both detection-safe, applied BEFORE the tier sandbox decision:
@@ -1286,11 +1336,8 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
         //       findings in 4 months of prod data (axon-enterprise was at 52).
         // T2:  conditional sandbox — same score gate AND queue < 50.
         let sandboxResult = null;
-        const shouldSandbox = !skipSandboxLargePackage && isSandboxEnabled() && sandboxAvailable && (
-          tier === '1a' ||
-          (tier === '1b' && riskScore >= SANDBOX_SCORE_THRESHOLD) ||
-          (tier === 2 && riskScore >= SANDBOX_SCORE_THRESHOLD && scanQueue.length < 50)
-        );
+        const shouldSandbox = !skipSandboxLargePackage && isSandboxEnabled() && sandboxAvailable &&
+          computeSandboxGate(tier, riskScore, scanQueue.length, SANDBOX_SCORE_THRESHOLD);
 
         // Waste-cut: skip the sandbox (run AND defer) when re-running it yields no new
         // verdict — a memory match the webhook would suppress anyway (dominant cost:
@@ -1383,7 +1430,7 @@ async function scanPackage(name, version, ecosystem, tarballUrl, registryMeta, s
                     }));
                     const payload = buildCanaryExfiltrationWebhookEmbed(name, version, exfiltrations);
                     try {
-                      await sendWebhook(url, payload, { rawPayload: true });
+                      await _deps.sendWebhook(url, payload, { rawPayload: true });
                       console.log(`[MONITOR] Canary exfiltration webhook sent for ${name}@${version}`);
                       if (previousRules) {
                         previousRules.add(canaryRuleId);
@@ -1767,7 +1814,7 @@ async function processQueueItem(item, stats, dailyAlerts, recentlyScanned, downl
               timestamp: new Date().toISOString()
             }]
           };
-          await sendWebhook(url, payload, { rawPayload: true });
+          await _deps.sendWebhook(url, payload, { rawPayload: true });
         }
       } catch (webhookErr) {
         console.error(`[MONITOR] IOC fallback webhook failed: ${webhookErr.message}`);
@@ -2241,41 +2288,47 @@ async function resolveTarballAndScan(item, stats, dailyAlerts, recentlyScanned, 
   const sandboxResult = scanResult && scanResult.sandboxResult;
   const staticClean = scanResult && scanResult.staticClean;
 
-  // FP rate tracking + ML label refinement
+  // FP rate tracking + ML label refinement — the decision itself lives in
+  // classifySandboxOutcome (pure, exported); this block performs the side effects.
   if (scanResult) {
-    if (!staticClean) {
-      if (sandboxResult && sandboxResult.inconclusive) {
+    const outcome = classifySandboxOutcome({
+      staticClean,
+      sandboxResult,
+      hasHCThreats: scanResult.hasHCThreats || false,
+      isDormant: scanResult.isDormant || false,
+      staticScore: scanResult.staticScore || 0
+    });
+    switch (outcome) {
+      case 'inconclusive_timeout':
         // Sandbox timeout: cannot conclude — do NOT relabel (neither fp nor confirmed)
         updateScanStats('sandbox_inconclusive');
         console.log(`[MONITOR] SANDBOX INCONCLUSIVE (timeout): ${item.name} — keeping original label`);
-      } else if (sandboxResult && sandboxResult.score === 0) {
-        const hasHC = scanResult.hasHCThreats || false;
-        const isDormant = scanResult.isDormant || false;
-        const staticScore = scanResult.staticScore || 0;
-
-        if (hasHC) {
-          updateScanStats('sandbox_inconclusive');
-          console.log(`[MONITOR] RELABEL BLOCKED (HC threats): ${item.name} — sandbox clean but has high-confidence malice types, keeping suspect label`);
-        } else if (isDormant || staticScore >= 70) {
-          updateScanStats('sandbox_inconclusive');
-          console.log(`[MONITOR] RELABEL BLOCKED (high static): ${item.name} — static score=${staticScore}, keeping suspect label`);
-        } else {
-          updateScanStats('sandbox_unconfirmed');
-          relabelRecords(item.name, 'unconfirmed');
-        }
-      } else if (sandboxResult && sandboxResult.score > 0) {
-        const hasSandboxFindings = sandboxResult.findings && sandboxResult.findings.length > 0;
-        if (hasSandboxFindings) {
-          updateScanStats('confirmed');
-          relabelRecords(item.name, 'confirmed', sandboxResult.findings.length);
-        } else {
-          // Sandbox score > 0 but no detailed findings = install error
-          updateScanStats('sandbox_inconclusive');
-          console.log(`[MONITOR] SANDBOX INCONCLUSIVE: ${item.name} score=${sandboxResult.score} but 0 findings — probable install error`);
-        }
-      } else {
+        break;
+      case 'relabel_blocked_hc':
+        updateScanStats('sandbox_inconclusive');
+        console.log(`[MONITOR] RELABEL BLOCKED (HC threats): ${item.name} — sandbox clean but has high-confidence malice types, keeping suspect label`);
+        break;
+      case 'relabel_blocked_static':
+        updateScanStats('sandbox_inconclusive');
+        console.log(`[MONITOR] RELABEL BLOCKED (high static): ${item.name} — static score=${scanResult.staticScore || 0}, keeping suspect label`);
+        break;
+      case 'unconfirmed':
+        updateScanStats('sandbox_unconfirmed');
+        relabelRecords(item.name, 'unconfirmed');
+        break;
+      case 'confirmed':
+        updateScanStats('confirmed');
+        relabelRecords(item.name, 'confirmed', sandboxResult.findings.length);
+        break;
+      case 'inconclusive_install_error':
+        // Sandbox score > 0 but no detailed findings = install error
+        updateScanStats('sandbox_inconclusive');
+        console.log(`[MONITOR] SANDBOX INCONCLUSIVE: ${item.name} score=${sandboxResult.score} but 0 findings — probable install error`);
+        break;
+      case 'suspect':
         updateScanStats('suspect');
-      }
+        break;
+      // null: static-clean package — nothing to classify
     }
   }
 
@@ -2363,7 +2416,11 @@ module.exports = {
   classifyNativeShard,
   shouldSkipSandbox,
   runScanInWorker,
+  _deps,
   registerWorkerMessageHandler,
+  unregisterWorkerMessageHandler,
+  computeSandboxGate,
+  classifySandboxOutcome,
   getInFlightItems,
   computeInterruptDisposition,
   capWorkersForDegradation,

@@ -12,7 +12,6 @@ async function runSandboxPreloadTests() {
     isDockerAvailable,
     imageExists,
     runSandbox,
-    runSingleSandbox,
     scoreFindings,
     analyzePreloadLog,
     TIME_OFFSETS
@@ -20,17 +19,23 @@ async function runSandboxPreloadTests() {
 
   // ── Non-Docker tests (always run) ──
 
-  test('SANDBOX-PRELOAD: runSandbox returns all_runs array when Docker unavailable', () => {
-    // When Docker is unavailable, runSandbox returns cleanResult without all_runs
-    // This is expected — all_runs is only set when multi-run actually executes
-    const dockerAvailable = isDockerAvailable();
-    if (!dockerAvailable) {
-      addSkipped('Docker not available — skipping multi-run structure test');
+  await asyncTest('SANDBOX-PRELOAD: cleanResult without Docker has no all_runs (score 0, CLEAN)', async () => {
+    // When Docker is unavailable, runSandbox returns cleanResult without all_runs —
+    // all_runs is only set when multi-run actually executes.
+    if (isDockerAvailable()) {
+      addSkipped(1, 'Docker available — the no-Docker cleanResult branch cannot be reached (covered by the all_runs test below)');
       return;
     }
-    // If Docker IS available, we just verify the types exist
-    assert(typeof runSandbox === 'function', 'runSandbox should be a function');
-    assert(typeof runSingleSandbox === 'function', 'runSingleSandbox should be a function');
+    const origLog = console.log;
+    console.log = () => {};
+    try {
+      const result = await runSandbox('lodash', {});
+      assert(result.score === 0, 'cleanResult should have score 0, got ' + result.score);
+      assert(result.severity === 'CLEAN', 'cleanResult should be CLEAN, got ' + result.severity);
+      assert(result.all_runs === undefined, 'cleanResult must NOT carry all_runs (multi-run never executed)');
+    } finally {
+      console.log = origLog;
+    }
   });
 
   test('SANDBOX-PRELOAD: analyzePreloadLog scores combined timer + network attack', () => {
@@ -100,17 +105,17 @@ async function runSandboxPreloadTests() {
   // ── Docker-dependent tests (skip if unavailable or in CI) ──
 
   if (process.env.CI && !process.env.MUADDIB_TEST_DOCKER) {
-    addSkipped('CI environment — skipping Docker sandbox tests (set MUADDIB_TEST_DOCKER=1 to enable)');
+    addSkipped(1, 'CI environment — skipping Docker sandbox tests (set MUADDIB_TEST_DOCKER=1 to enable)');
     return;
   }
 
   if (!isDockerAvailable()) {
-    addSkipped('Docker not available — skipping Docker-dependent sandbox preload tests');
+    addSkipped(1, 'Docker not available — skipping Docker-dependent sandbox preload tests');
     return;
   }
 
   if (!imageExists()) {
-    addSkipped('Sandbox Docker image not built — skipping Docker-dependent sandbox preload tests');
+    addSkipped(1, 'Sandbox Docker image not built — skipping Docker-dependent sandbox preload tests');
     return;
   }
 
@@ -123,14 +128,14 @@ async function runSandboxPreloadTests() {
       const result = await runSandbox('is-number', { canary: false });
       assert(typeof result === 'object', 'Should return an object');
       assert(typeof result.score === 'number', 'Should have a score');
-      if (result.all_runs) {
-        assert(Array.isArray(result.all_runs), 'all_runs should be an array');
-        assert(result.all_runs.length >= 1, 'Should have at least 1 run');
-        for (const run of result.all_runs) {
-          assert(typeof run.run === 'number', 'Run should have run number');
-          assert(typeof run.label === 'string', 'Run should have label');
-          assert(typeof run.score === 'number', 'Run should have score');
-        }
+      // all_runs must be present after a real multi-run Docker execution — a
+      // conditional check here would silently pass if the field disappeared.
+      assert(Array.isArray(result.all_runs), 'all_runs must be an array after a successful Docker run');
+      assert(result.all_runs.length >= 1, 'Should have at least 1 run');
+      for (const run of result.all_runs) {
+        assert(typeof run.run === 'number', 'Run should have run number');
+        assert(typeof run.label === 'string', 'Run should have label');
+        assert(typeof run.score === 'number', 'Run should have score');
       }
     } finally {
       console.log = origLog;

@@ -245,19 +245,9 @@ async function runTemporalAnalysisTests() {
     assert(diff.added[0].value === 'node malicious.js', 'Should have correct value');
   });
 
-  test('TEMPORAL: detectSuddenLifecycleChange single version → not suspicious (mock)', () => {
-    const mockSingle = {
-      versions: { '1.0.0': { scripts: { test: 'jest' } } },
-      time: {
-        created: '2020-01-01T00:00:00.000Z',
-        modified: '2020-01-01T00:00:00.000Z',
-        '1.0.0': '2020-01-01T00:00:00.000Z'
-      },
-      maintainers: []
-    };
-    const latest = getLatestVersions(mockSingle, 2);
-    assert(latest.length === 1, 'Should have only 1 version');
-  });
+  // NOTE (audit 2026-07): the former « single version → not suspicious (mock) » test
+  // never called detectSuddenLifecycleChange; the scenario is covered by the mocked
+  // « single version → correct structure » asyncTest below.
 
   // --- detectSuddenLifecycleChange (mocked https via Module._load) ---
 
@@ -450,10 +440,50 @@ async function runTemporalAnalysisTests() {
     assert(p3 && p3.length > 10, 'Playbook for lifecycle_modified');
   });
 
-  await asyncTest('TEMPORAL: --temporal flag is accepted (direct)', async () => {
-    const { runScanCached } = require('../test-utils');
-    const result = await runScanCached(path.join(TESTS_DIR, 'clean'), { temporal: true });
-    assert(result.summary !== undefined, 'Should produce valid scan result with --temporal');
+  await asyncTest('TEMPORAL: --temporal flag routes the scan through runTemporalAnalyses (spy)', async () => {
+    // Audit 2026-07 rewrite: the old assertion (`summary !== undefined`) was true for
+    // ANY scan — an ignored flag produced the same result. The only offline-observable
+    // effect of the flag is that src/pipeline/executor.js calls runTemporalAnalyses
+    // (gated on options.temporal). Spy on the runner exports and re-require the
+    // executor→index chain so the fresh destructure picks up the spy.
+    const runnerScannerPath = require.resolve('../../src/scanner/temporal-runner.js');
+    const executorPath = require.resolve('../../src/pipeline/executor.js');
+    const indexPath = require.resolve('../../src/index.js');
+
+    const runnerExports = require(runnerScannerPath); // shim src/temporal-runner.js shares this exports object
+    const origRun = runnerExports.runTemporalAnalyses;
+    const savedExecutor = require.cache[executorPath];
+    const savedIndex = require.cache[indexPath];
+
+    const calls = [];
+    runnerExports.runTemporalAnalyses = async (targetPath, options, pkgNames) => {
+      calls.push({ targetPath, options, pkgNames });
+      return [];
+    };
+    delete require.cache[executorPath];
+    delete require.cache[indexPath];
+    try {
+      const { run } = require(indexPath);
+      const target = path.join(TESTS_DIR, 'clean');
+
+      // Negative: without the flag the runner must NOT be invoked
+      const baseline = await run(target, { _capture: true });
+      assert(baseline.summary !== undefined, 'Baseline scan should produce a result');
+      assert(calls.length === 0, 'Runner must not be called without a temporal flag');
+
+      // Positive: with --temporal the executor must invoke the runner with the flag
+      const result = await run(target, { temporal: true, _capture: true });
+      assert(result.summary !== undefined, 'Should produce valid scan result with --temporal');
+      assert(calls.length === 1, 'Runner must be called exactly once with --temporal, got ' + calls.length);
+      assert(calls[0].options.temporal === true, 'options.temporal must be forwarded');
+      assert(Array.isArray(calls[0].pkgNames), 'pkgNames (listInstalledPackages) must be forwarded');
+    } finally {
+      runnerExports.runTemporalAnalyses = origRun;
+      delete require.cache[executorPath];
+      delete require.cache[indexPath];
+      if (savedExecutor) require.cache[executorPath] = savedExecutor;
+      if (savedIndex) require.cache[indexPath] = savedIndex;
+    }
   });
 
   // --- fetchPackageMetadata / detectSuddenLifecycleChange (integration, may be skipped in CI) ---
@@ -596,14 +626,29 @@ async function runTemporalAnalysisTests() {
     });
   });
 
-  test('CACHE: eviction when cache exceeds METADATA_CACHE_MAX', () => {
-    clearMetadataCache();
-    // Fill cache to max
-    for (let i = 0; i < METADATA_CACHE_MAX; i++) {
-      _metadataCache.set(`pkg-${i}`, { data: { i }, fetchedAt: Date.now() });
-    }
-    assert(_metadataCache.size === METADATA_CACHE_MAX, 'Cache should be at max');
-    assert(_metadataCache.has('pkg-0'), 'First entry should exist before eviction');
+  await asyncTest('CACHE: fetch at METADATA_CACHE_MAX evicts the oldest entry (mocked)', async () => {
+    // Audit 2026-07 rewrite: the old test filled the Map to exactly MAX and stopped —
+    // the eviction branch (src/scanner/temporal-analysis.js:183-187: when size >= MAX,
+    // delete the oldest insertion-order key before inserting) was never invoked.
+    // Now the (MAX+1)-th package is fetched through the real fetchPackageMetadata.
+    const mockData = { name: 'evict-new-pkg', versions: { '1.0.0': {} } };
+    await withMockedHttps(mockData, async (mod) => {
+      mod.clearMetadataCache();
+      for (let i = 0; i < mod.METADATA_CACHE_MAX; i++) {
+        mod._metadataCache.set(`pkg-${i}`, { data: { i }, fetchedAt: Date.now() });
+      }
+      assert(mod._metadataCache.size === mod.METADATA_CACHE_MAX, 'Cache should be at max before the fetch');
+      assert(mod._metadataCache.has('pkg-0'), 'Oldest entry should exist before eviction');
+
+      const result = await mod.fetchPackageMetadata('evict-new-pkg');
+      assert(result.name === 'evict-new-pkg', 'Fetch should resolve with mocked data');
+      assert(!mod._metadataCache.has('pkg-0'), 'Oldest entry (pkg-0) must be evicted');
+      assert(mod._metadataCache.has('pkg-1'), 'Second-oldest entry must survive');
+      assert(mod._metadataCache.has('evict-new-pkg'), 'New entry must be cached');
+      assert(mod._metadataCache.size <= mod.METADATA_CACHE_MAX,
+        'Cache must stay bounded, got ' + mod._metadataCache.size);
+      mod.clearMetadataCache();
+    });
   });
 
   // ============================================
@@ -618,7 +663,7 @@ async function runTemporalAnalysisTests() {
     assert(NEGATIVE_CACHE_TTL === 60 * 1000, 'Negative TTL should be 60s, got ' + NEGATIVE_CACHE_TTL);
   });
 
-  test('NEGATIVE-CACHE: negative cache entry is respected', async () => {
+  await asyncTest('NEGATIVE-CACHE: negative cache entry is respected', async () => {
     clearMetadataCache();
     // Manually insert a negative cache entry
     _metadataCache.set('failed-pkg', { data: null, error: true, fetchedAt: Date.now() });
@@ -635,18 +680,25 @@ async function runTemporalAnalysisTests() {
     clearMetadataCache();
   });
 
-  test('NEGATIVE-CACHE: expired negative cache entry is ignored', () => {
-    clearMetadataCache();
-    // Insert an expired negative cache entry
-    _metadataCache.set('expired-fail-pkg', { data: null, error: true, fetchedAt: Date.now() - (NEGATIVE_CACHE_TTL + 1000) });
-
-    // The cache check in fetchPackageMetadata should skip the expired entry
-    // (it will try to fetch, but we just verify the cache entry is treated as expired)
-    const cached = _metadataCache.get('expired-fail-pkg');
-    assert(cached.error === true, 'Should be an error entry');
-    const isExpired = (Date.now() - cached.fetchedAt) >= NEGATIVE_CACHE_TTL;
-    assert(isExpired, 'Entry should be expired');
-    clearMetadataCache();
+  await asyncTest('NEGATIVE-CACHE: expired negative cache entry is ignored and re-fetch succeeds (mocked)', async () => {
+    // Audit 2026-07 rewrite: the old test recomputed the expiry arithmetic itself and
+    // never called fetchPackageMetadata. Now: insert an EXPIRED negative entry, then
+    // call the real fetchPackageMetadata with a mocked 200 response — it must resolve
+    // (expired negative entry skipped, re-fetch happens) instead of rejecting.
+    const mockData = { name: 'expired-fail-pkg', versions: { '1.0.0': {} } };
+    await withMockedHttps(mockData, async (mod) => {
+      mod.clearMetadataCache();
+      mod._metadataCache.set('expired-fail-pkg', {
+        data: null, error: true,
+        fetchedAt: Date.now() - (mod.NEGATIVE_CACHE_TTL + 60_000) // relative offset, no wall-clock dependency
+      });
+      const result = await mod.fetchPackageMetadata('expired-fail-pkg');
+      assert(result.name === 'expired-fail-pkg', 'Expired negative entry must be ignored: fetch should resolve');
+      const refreshed = mod._metadataCache.get('expired-fail-pkg');
+      assert(refreshed && refreshed.error !== true, 'Cache entry should be replaced by a positive entry');
+      assert(refreshed.data && refreshed.data.name === 'expired-fail-pkg', 'Positive entry should hold the fetched data');
+      mod.clearMetadataCache();
+    });
   });
 
   // ============================================

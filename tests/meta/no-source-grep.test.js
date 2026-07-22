@@ -57,11 +57,11 @@ const ALLOWLIST = new Set([
   'tests/integration/sandbox-improvements.test.js:377',
   'tests/integration/sandbox-improvements.test.js:379',
   'tests/integration/sandbox-improvements.test.js:381',
-  'tests/sandbox/gvisor.test.js:376',
-  'tests/sandbox/gvisor.test.js:377',
+  'tests/sandbox/gvisor.test.js:368',
+  'tests/sandbox/gvisor.test.js:369',
+  'tests/sandbox/gvisor.test.js:371',
+  'tests/sandbox/gvisor.test.js:378',
   'tests/sandbox/gvisor.test.js:379',
-  'tests/sandbox/gvisor.test.js:386',
-  'tests/sandbox/gvisor.test.js:387',
   'tests/integration/monitor-memory.test.js:487',
   'tests/integration/monitor-memory.test.js:488',
   'tests/integration/monitor-memory.test.js:490',
@@ -72,8 +72,8 @@ const ALLOWLIST = new Set([
   // force-resolve INCONCLUSIVE) and the timeout branch only execute against a live container.
   'tests/integration/monitor-memory.test.js:631',
   'tests/integration/monitor-memory.test.js:632',
-  'tests/sandbox/sandbox.test.js:997',
-  'tests/sandbox/sandbox.test.js:998',
+  'tests/sandbox/sandbox.test.js:999',
+  'tests/sandbox/sandbox.test.js:1000',
 
   // ── Sandbox report parsing: sandbox/index.js parses real container stdout (lastIndexOf the report
   // delimiter); the report only exists from a Docker run. (Docker-args side is buildDockerArgs-tested.)
@@ -92,8 +92,8 @@ const ALLOWLIST = new Set([
   // ── Cross-module metadata-cache reuse: npm-registry reuses temporal-analysis's _metadataCache to
   // avoid duplicate registry fetches (perf). A behavioral test is network-coupled/flaky because
   // getPackageMetadata still fetches downloads/author; the cache lifecycle is tested via clearMetadataCache.
-  'tests/integration/monitor.test.js:9539',
-  'tests/integration/monitor.test.js:9540',
+  'tests/integration/monitor.test.js:9250',
+  'tests/integration/monitor.test.js:9251',
 
   // ── "Must-not-contain" security/cleanup absence guards: no behavioral way to observe the absence
   // of a never-taken code path. Complements eslint-plugin-security. (No shell exec in the version

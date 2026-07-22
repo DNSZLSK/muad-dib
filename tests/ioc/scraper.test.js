@@ -620,21 +620,20 @@ async function runScraperTests() {
     const origLog = console.log;
     console.log = () => {};
 
-    let callCount = 0;
     // C2: wildcard versions ('*') are now skipped — use specific versions only
     const consolidatedCSV = 'package_name,versions,vendors\nevil-dd-pkg,1.0.0,datadog\nevil-dd-pkg2,2.3.4,"datadog,socket"\n';
     const directCSV = 'package_name,version\nevil-dd-pkg,1.0.0\nevil-dd-new,2.0.0\n';
 
+    // Route by URL, not by call order — resilient to request reordering/parallelization
     https.request = (options, callback) => {
-      callCount++;
+      const url = 'https://' + options.hostname + options.path;
       const req = createMockRequest();
       req.end = () => {
         process.nextTick(() => {
           const res = createMockResponse(200, null, {});
           callback(res);
           process.nextTick(() => {
-            // First call is consolidated, second is direct
-            const body = callCount === 1 ? consolidatedCSV : directCSV;
+            const body = url.includes('consolidated_iocs.csv') ? consolidatedCSV : directCSV;
             res.emit('data', Buffer.from(body));
             res.emit('end');
           });
@@ -725,20 +724,20 @@ async function runScraperTests() {
     const origLog = console.log;
     console.log = () => {};
 
-    let callCount = 0;
     // CSV where "name" appears as a header value that should be filtered
     const consolidatedCSV = 'package_name,versions,vendors\nname,1.0.0,test\nreal-pkg,2.0.0,dd\n';
     const directCSV = 'package_name,version\npackage_name,1.0.0\nreal-direct-pkg,3.0.0\n';
 
+    // Route by URL, not by call order
     https.request = (options, callback) => {
-      callCount++;
+      const url = 'https://' + options.hostname + options.path;
       const req = createMockRequest();
       req.end = () => {
         process.nextTick(() => {
           const res = createMockResponse(200, null, {});
           callback(res);
           process.nextTick(() => {
-            const body = callCount === 1 ? consolidatedCSV : directCSV;
+            const body = url.includes('consolidated_iocs.csv') ? consolidatedCSV : directCSV;
             res.emit('data', Buffer.from(body));
             res.emit('end');
           });
@@ -765,19 +764,19 @@ async function runScraperTests() {
     const origLog = console.log;
     console.log = () => {};
 
-    let callCount = 0;
     const consolidatedCSV = 'package_name,versions,vendors\nduped-pkg,1.0.0,datadog\n';
     const directCSV = 'package_name,version\nduped-pkg,1.0.0\n';
 
+    // Route by URL, not by call order
     https.request = (options, callback) => {
-      callCount++;
+      const url = 'https://' + options.hostname + options.path;
       const req = createMockRequest();
       req.end = () => {
         process.nextTick(() => {
           const res = createMockResponse(200, null, {});
           callback(res);
           process.nextTick(() => {
-            const body = callCount === 1 ? consolidatedCSV : directCSV;
+            const body = url.includes('consolidated_iocs.csv') ? consolidatedCSV : directCSV;
             res.emit('data', Buffer.from(body));
             res.emit('end');
           });
@@ -801,20 +800,20 @@ async function runScraperTests() {
     const origLog = console.log;
     console.log = () => {};
 
-    let callCount = 0;
     // Multi-version string: "1.0.0, 2.0.0, 3.0.0" should produce 3 entries
     const consolidatedCSV = 'package_name,versions,vendors\nmulti-ver-pkg,"1.0.0, 2.0.0, 3.0.0",datadog\n';
     const directCSV = 'package_name,version\n';
 
+    // Route by URL, not by call order
     https.request = (options, callback) => {
-      callCount++;
+      const url = 'https://' + options.hostname + options.path;
       const req = createMockRequest();
       req.end = () => {
         process.nextTick(() => {
           const res = createMockResponse(200, null, {});
           callback(res);
           process.nextTick(() => {
-            const body = callCount === 1 ? consolidatedCSV : directCSV;
+            const body = url.includes('consolidated_iocs.csv') ? consolidatedCSV : directCSV;
             res.emit('data', Buffer.from(body));
             res.emit('end');
           });
@@ -842,19 +841,19 @@ async function runScraperTests() {
     const origLog = console.log;
     console.log = () => {};
 
-    let callCount = 0;
     const consolidatedCSV = 'package_name,versions,vendors\nsingle-ver-pkg,1.0.0,datadog\n';
     const directCSV = 'package_name,version\n';
 
+    // Route by URL, not by call order
     https.request = (options, callback) => {
-      callCount++;
+      const url = 'https://' + options.hostname + options.path;
       const req = createMockRequest();
       req.end = () => {
         process.nextTick(() => {
           const res = createMockResponse(200, null, {});
           callback(res);
           process.nextTick(() => {
-            const body = callCount === 1 ? consolidatedCSV : directCSV;
+            const body = url.includes('consolidated_iocs.csv') ? consolidatedCSV : directCSV;
             res.emit('data', Buffer.from(body));
             res.emit('end');
           });
@@ -879,19 +878,19 @@ async function runScraperTests() {
     const origLog = console.log;
     console.log = () => {};
 
-    let callCount = 0;
     const consolidatedCSV = 'package_name,versions,vendors\nwildcard-pkg,*,datadog\n';
     const directCSV = 'package_name,version\n';
 
+    // Route by URL, not by call order
     https.request = (options, callback) => {
-      callCount++;
+      const url = 'https://' + options.hostname + options.path;
       const req = createMockRequest();
       req.end = () => {
         process.nextTick(() => {
           const res = createMockResponse(200, null, {});
           callback(res);
           process.nextTick(() => {
-            const body = callCount === 1 ? consolidatedCSV : directCSV;
+            const body = url.includes('consolidated_iocs.csv') ? consolidatedCSV : directCSV;
             res.emit('data', Buffer.from(body));
             res.emit('end');
           });
@@ -1056,21 +1055,22 @@ async function runScraperTests() {
     const origLog = console.log;
     console.log = () => {};
 
-    let callCount = 0;
     const csvData = 'package_name,versions,vendors\nredirect-pkg,1.0.0,dd\n';
 
+    // Route by URL, not by call order: the consolidated CSV redirects to a distinct
+    // target path; the redirect target and the direct CSV are matched by their own URLs.
     https.request = (options, callback) => {
-      callCount++;
+      const url = 'https://' + options.hostname + options.path;
       const req = createMockRequest();
       req.end = () => {
         process.nextTick(() => {
-          if (callCount === 1) {
-            // First call (consolidated) redirects
+          if (url.includes('consolidated_iocs.csv')) {
+            // Consolidated CSV redirects
             const res = createMockResponse(301, null, {
               location: 'https://raw.githubusercontent.com/DataDog/iocs/main/consolidated.csv'
             });
             callback(res);
-          } else if (callCount === 2) {
+          } else if (url.includes('/DataDog/iocs/main/consolidated.csv')) {
             // Redirect target
             const res = createMockResponse(200, null, {});
             callback(res);
@@ -1079,7 +1079,7 @@ async function runScraperTests() {
               res.emit('end');
             });
           } else {
-            // Direct CSV call (3rd call)
+            // Direct CSV (shai-hulud-2.0.csv)
             const res = createMockResponse(200, null, {});
             callback(res);
             process.nextTick(() => {
@@ -1329,20 +1329,20 @@ async function runScraperTests() {
     const origLog = console.log;
     console.log = () => {};
 
-    let callCount = 0;
     const csvData = 'package_name,versions,vendors\nredirect307-pkg,1.0.0,dd\n';
 
+    // Route by URL, not by call order
     https.request = (options, callback) => {
-      callCount++;
+      const url = 'https://' + options.hostname + options.path;
       const req = createMockRequest();
       req.end = () => {
         process.nextTick(() => {
-          if (callCount === 1) {
+          if (url.includes('consolidated_iocs.csv')) {
             const res = createMockResponse(307, null, {
               location: 'https://raw.githubusercontent.com/redirect/target'
             });
             callback(res);
-          } else if (callCount === 2) {
+          } else if (url.includes('/redirect/target')) {
             const res = createMockResponse(200, null, {});
             callback(res);
             process.nextTick(() => {
@@ -1350,7 +1350,7 @@ async function runScraperTests() {
               res.emit('end');
             });
           } else {
-            // Direct CSV
+            // Direct CSV (shai-hulud-2.0.csv)
             const res = createMockResponse(200, null, {});
             callback(res);
             process.nextTick(() => {
@@ -1729,10 +1729,10 @@ async function runScraperTests() {
       const ghsaRequested = requestedUrls.some(u => u.includes('api.osv.dev'));
       assert(ghsaRequested, 'Should have requested GitHub Advisory via osv.dev');
 
-      // Verify files were written (atomic write: tmp + rename)
+      // Verify files were written (atomic write: tmp + rename, captured by the fs mock)
       const writtenPaths = Object.keys(mockFiles);
-      assert(writtenPaths.length > 0 || Object.keys(mockFiles).length === 0,
-        'Should have attempted file writes');
+      assert(writtenPaths.some(p => p.includes('iocs')),
+        'Should have written IOC files (full/compact/lean), wrote: ' + writtenPaths.join(', '));
 
     } finally {
       https.request = origRequest;
@@ -1759,9 +1759,10 @@ async function runScraperTests() {
     console.log = () => {};
     process.stdout.write = () => true;
 
-    // All requests return HTTP 500 (server error)
-    // Note: we use HTTP errors instead of req.emit('error') because fetchBufferWithProgress
-    // has a scoping issue where spinner is not defined in the req error handler
+    // All requests return HTTP 500 (server error). The req.emit('error') network-error
+    // path (historically avoided because of a spinner scoping bug, fixed in
+    // scraper.js fetchBufferWithProgress — spinner declared at promise scope + null-guarded)
+    // is exercised by the dedicated test right below.
     https.request = (options, callback) => {
       const req = new EventEmitter();
       req.write = () => {};
@@ -1807,10 +1808,107 @@ async function runScraperTests() {
     try {
       const result = await runScraper();
       assert(typeof result === 'object', 'Should return result even when all network sources fail');
-      assert(typeof result.total === 'number', 'Should have total count');
-      assert(typeof result.added === 'number', 'Should have added count');
-      // Static IOCs + Snyk known malware should still be present since they are local
-      assert(result.total >= 0, 'Total should be non-negative');
+      // Real behavior: runScraper has NO local static/Snyk source — the baseline comes
+      // entirely from the seeded IOC files. With an empty seed and every feed on HTTP 500,
+      // the run completes with exactly 0 packages and 0 additions.
+      assert(result.added === 0, 'No packages can be added when every source fails, got ' + result.added);
+      assert(result.total === 0, 'Empty seed + all sources down must yield total 0, got ' + result.total);
+      assert(result.addedPyPI === 0 && result.totalPyPI === 0, 'PyPI counts must also be 0');
+      // The (empty) IOC database is still written — partial work has value
+      assert(Object.keys(mockFiles).some(p => p.includes('iocs')),
+        'IOC files must still be written when all sources fail');
+    } finally {
+      https.request = origRequest;
+      console.log = origLog;
+      process.stdout.write = origWrite;
+      Object.assign(fs, origFs);
+    }
+  });
+
+  await asyncTest('SCRAPER: runScraper survives req.emit(error) on every source and preserves the seeded baseline', async () => {
+    // True network-error path (socket error, not HTTP status): every request emits
+    // 'error'. This walks the fetchBufferWithProgress req-error handler whose old
+    // spinner-scoping bug used to crash the scraper (fixed: spinner is declared at
+    // promise scope and null-guarded before .fail()).
+    const origRequest = https.request;
+    const origLog = console.log;
+    const origWrite = process.stdout.write;
+    const origFs = {
+      existsSync: fs.existsSync,
+      readFileSync: fs.readFileSync,
+      writeFileSync: fs.writeFileSync,
+      mkdirSync: fs.mkdirSync,
+      statSync: fs.statSync,
+      renameSync: fs.renameSync,
+      accessSync: fs.accessSync,
+      copyFileSync: fs.copyFileSync
+    };
+
+    console.log = () => {};
+    process.stdout.write = () => true;
+
+    https.request = (options, callback) => {
+      const req = new EventEmitter();
+      req.write = () => {};
+      req.setTimeout = () => {};
+      req.destroy = () => {};
+      req.end = () => {
+        process.nextTick(() => req.emit('error', new Error('ECONNRESET (simulated network error)')));
+      };
+      return req;
+    };
+
+    // Local baseline: a seeded IOC file — the only non-network source runScraper has
+    const seededHash = 'deadbeef'.repeat(8); // 64 hex chars
+    const existingIOCData = {
+      packages: [
+        {
+          id: 'LOCAL-001', name: 'seeded-local-pkg', version: '1.0.0',
+          severity: 'critical', confidence: 'high', source: 'manual', mitre: 'T1195.002',
+          freshness: { source: 'manual', confidence: 'high', added_at: '2026-01-01T00:00:00.000Z' }
+        }
+      ],
+      pypi_packages: [], hashes: [seededHash], markers: [], files: []
+    };
+
+    const mockFiles = {};
+    let savedIocs = null;
+    fs.existsSync = (p) => {
+      if (typeof p === 'string' && p.includes('static-iocs')) return origFs.existsSync(p);
+      return true;
+    };
+    fs.readFileSync = (p, enc) => {
+      if (typeof p === 'string' && p.includes('static-iocs')) return origFs.readFileSync(p, enc);
+      if (typeof p === 'string' && p.includes('.ossf-tree-sha')) return 'some-sha';
+      if (typeof p === 'string' && p.includes('iocs.json')) return JSON.stringify(existingIOCData);
+      return origFs.readFileSync(p, enc);
+    };
+    fs.writeFileSync = (p, data) => { mockFiles[path.resolve(p)] = data; };
+    fs.mkdirSync = () => {};
+    fs.accessSync = () => {};
+    fs.copyFileSync = () => {}; // avoid copying the real (potentially 200MB+) local IOC DB
+    fs.statSync = (p) => {
+      const resolved = path.resolve(p);
+      if (mockFiles[resolved]) return { size: Buffer.byteLength(mockFiles[resolved]) };
+      return origFs.statSync(p);
+    };
+    fs.renameSync = (from, to) => {
+      const rf = path.resolve(from); const rt = path.resolve(to);
+      if (mockFiles[rf]) { mockFiles[rt] = mockFiles[rf]; delete mockFiles[rf]; }
+      if (typeof to === 'string' && to.includes('iocs.json') && !to.includes('compact') && mockFiles[rt]) {
+        try { savedIocs = JSON.parse(mockFiles[rt]); } catch {}
+      }
+    };
+
+    try {
+      const result = await runScraper();
+      assert(typeof result === 'object', 'Should survive req error on every source (spinner-null guard path)');
+      assert(result.added === 0, 'Nothing can be added when every feed errors out, got ' + result.added);
+      assert(result.total === 1, 'The seeded baseline must be preserved (total 1), got ' + result.total);
+      assert(savedIocs, 'IOC file must have been written and captured');
+      const seeded = savedIocs.packages.find(p => p.name === 'seeded-local-pkg' && p.version === '1.0.0');
+      assert(seeded, 'Seeded baseline package must survive an all-sources-down scrape');
+      assert(savedIocs.hashes.includes(seededHash), 'Seeded hashes must be preserved');
     } finally {
       https.request = origRequest;
       console.log = origLog;
@@ -2355,6 +2453,7 @@ async function runScraperTests() {
     try {
       const result = await runScraper();
 
+      assert(savedIocs, 'IOC file must have been written and captured');
       if (savedIocs) {
         const ghsaPkgs = savedIocs.packages.filter(p => p.source === 'github-advisory');
         const ghsaNames = ghsaPkgs.map(p => p.name);
@@ -2500,6 +2599,7 @@ async function runScraperTests() {
     try {
       const result = await runScraper();
 
+      assert(savedIocs, 'IOC file must have been written and captured');
       // Pre-existing package should be preserved
       if (savedIocs) {
         const preExisting = savedIocs.packages.find(p => p.name === 'pre-existing-pkg');
@@ -2953,88 +3053,325 @@ async function runScraperTests() {
 
   // --- NEVER_WILDCARD guard in scraper ---
 
-  test('SCRAPER: NEVER_WILDCARD packages with version=* are skipped during dedup', () => {
+  test('SCRAPER: NEVER_WILDCARD set contains the version-specific-compromise packages', () => {
     const { NEVER_WILDCARD } = require('../../src/ioc/updater.js');
-    // Verify NEVER_WILDCARD is imported and used in scraper
     assert(NEVER_WILDCARD instanceof Set, 'NEVER_WILDCARD should be a Set');
     assert(NEVER_WILDCARD.has('posthog-node'), 'posthog-node should be in NEVER_WILDCARD');
     assert(NEVER_WILDCARD.has('event-stream'), 'event-stream should be in NEVER_WILDCARD');
+  });
 
-    // Simulate: a wildcard entry for a NEVER_WILDCARD package should be blocked
-    // The scraper checks: if (pkg.version === '*' && NEVER_WILDCARD.has(pkg.name)) → skip
-    const testPkg = { name: 'posthog-node', version: '*' };
-    const shouldSkip = testPkg.version === '*' && NEVER_WILDCARD.has(testPkg.name);
-    assert(shouldSkip === true, 'posthog-node@* should be skipped by NEVER_WILDCARD');
+  await asyncTest('SCRAPER: runScraper skips NEVER_WILDCARD wildcard entries during merge (real dedup guard)', async () => {
+    // Feed a NEVER_WILDCARD package as '*' through a real source (Shai-Hulud mock):
+    // the merge guard in runScraper must drop it, while a VERSIONED entry of a
+    // NEVER_WILDCARD package and a non-protected wildcard both survive.
+    const origRequest = https.request;
+    const origLog = console.log;
+    const origWrite = process.stdout.write;
+    const origFs = {
+      existsSync: fs.existsSync,
+      readFileSync: fs.readFileSync,
+      writeFileSync: fs.writeFileSync,
+      mkdirSync: fs.mkdirSync,
+      statSync: fs.statSync,
+      renameSync: fs.renameSync,
+      accessSync: fs.accessSync,
+      copyFileSync: fs.copyFileSync
+    };
 
-    // Versioned entry for NEVER_WILDCARD package should NOT be skipped
-    const versionedPkg = { name: 'event-stream', version: '3.3.6' };
-    const shouldNotSkip = versionedPkg.version === '*' && NEVER_WILDCARD.has(versionedPkg.name);
-    assert(shouldNotSkip === false, 'event-stream@3.3.6 should NOT be skipped');
+    console.log = () => {};
+    process.stdout.write = () => true;
 
-    // Non-NEVER_WILDCARD package with wildcard should NOT be skipped
-    const normalPkg = { name: 'totally-malicious-pkg', version: '*' };
-    const normalShouldNotSkip = normalPkg.version === '*' && NEVER_WILDCARD.has(normalPkg.name);
-    assert(normalShouldNotSkip === false, 'Non-NEVER_WILDCARD package@* should NOT be skipped');
+    https.request = (options, callback) => {
+      const url = 'https://' + options.hostname + options.path;
+      const req = new EventEmitter();
+      req.write = () => {};
+      req.setTimeout = () => {};
+      req.destroy = () => {};
+      req.end = () => {
+        process.nextTick(() => {
+          const res = new EventEmitter();
+          res.headers = { 'content-length': '100' };
+          res.resume = () => {};
+          if (url.includes('npm/all.zip') || url.includes('PyPI/all.zip')) {
+            res.statusCode = 200;
+            callback(res);
+            const zip = new AdmZip();
+            zip.addFile('SKIP.json', Buffer.from('{}'));
+            res.emit('data', zip.toBuffer());
+            res.emit('end');
+          } else if (url.includes('gensecaihq')) {
+            res.statusCode = 200;
+            callback(res);
+            res.emit('data', Buffer.from(JSON.stringify({
+              packages: [
+                { name: 'posthog-node', affectedVersions: ['*'] },          // must be DROPPED (NEVER_WILDCARD + wildcard)
+                { name: 'event-stream', affectedVersions: ['3.3.6'] },      // must be KEPT (versioned)
+                { name: 'totally-malicious-pkg', affectedVersions: ['*'] }  // must be KEPT (not protected)
+              ]
+            })));
+            res.emit('end');
+          } else if (url.includes('api.osv.dev')) {
+            res.statusCode = 200;
+            callback(res);
+            res.emit('data', Buffer.from(JSON.stringify({ vulns: [] })));
+            res.emit('end');
+          } else if (url.includes('api.github.com')) {
+            res.statusCode = 200;
+            callback(res);
+            res.emit('data', Buffer.from(JSON.stringify({ sha: 'sha-nw-guard-test', tree: [] })));
+            res.emit('end');
+          } else {
+            res.statusCode = 200;
+            callback(res);
+            res.emit('data', Buffer.from('h,v\n'));
+            res.emit('end');
+          }
+        });
+      };
+      return req;
+    };
+
+    const mockFiles = {};
+    let savedIocs = null;
+    fs.existsSync = (p) => {
+      if (typeof p === 'string' && p.includes('static-iocs')) return origFs.existsSync(p);
+      return true;
+    };
+    fs.readFileSync = (p, enc) => {
+      if (typeof p === 'string' && p.includes('static-iocs')) return origFs.readFileSync(p, enc);
+      if (typeof p === 'string' && p.includes('.ossf-tree-sha')) return 'sha-nw-guard-test';
+      return JSON.stringify({ packages: [], pypi_packages: [], hashes: [], markers: [], files: [] });
+    };
+    fs.writeFileSync = (p, data) => { mockFiles[path.resolve(p)] = data; };
+    fs.mkdirSync = () => {};
+    fs.accessSync = () => {};
+    fs.copyFileSync = () => {}; // avoid copying the real (potentially 200MB+) local IOC DB
+    fs.statSync = (p) => {
+      const resolved = path.resolve(p);
+      if (mockFiles[resolved]) return { size: Buffer.byteLength(mockFiles[resolved]) };
+      return origFs.statSync(p);
+    };
+    fs.renameSync = (from, to) => {
+      const rf = path.resolve(from); const rt = path.resolve(to);
+      if (mockFiles[rf]) { mockFiles[rt] = mockFiles[rf]; delete mockFiles[rf]; }
+      if (typeof to === 'string' && to.includes('iocs.json') && !to.includes('compact') && mockFiles[rt]) {
+        try { savedIocs = JSON.parse(mockFiles[rt]); } catch {}
+      }
+    };
+
+    try {
+      await runScraper();
+      assert(savedIocs, 'IOC file must have been written and captured');
+
+      // The NEVER_WILDCARD wildcard must NOT appear in the saved IOCs
+      const ph = savedIocs.packages.filter(p => p.name === 'posthog-node');
+      assert(ph.length === 0, 'posthog-node@* must be skipped by the NEVER_WILDCARD merge guard, got ' +
+        ph.map(p => p.version).join(','));
+
+      // Versioned NEVER_WILDCARD entry is kept
+      const es = savedIocs.packages.find(p => p.name === 'event-stream' && p.version === '3.3.6');
+      assert(es, 'event-stream@3.3.6 (versioned) must be kept despite NEVER_WILDCARD membership');
+
+      // Non-protected wildcard is kept
+      const evil = savedIocs.packages.find(p => p.name === 'totally-malicious-pkg' && p.version === '*');
+      assert(evil, 'totally-malicious-pkg@* (not in NEVER_WILDCARD) must be kept');
+    } finally {
+      https.request = origRequest;
+      console.log = origLog;
+      process.stdout.write = origWrite;
+      Object.assign(fs, origFs);
+    }
   });
 
   // --- Comma-in-version sanitization in GenSecAI scraper ---
 
-  test('SCRAPER: GenSecAI comma-separated affectedVersions are split into individual entries', () => {
-    // Simulate what scrapeShaiHuludDetector does with comma-separated versions
-    const rawVersions = ['4.18.1, 5.11.3, 5.13.3'];
-    const result = [];
-    for (const rawVer of rawVersions) {
-      const splitVersions = rawVer && rawVer.includes(',')
-        ? rawVer.split(',').map(v => v.trim()).filter(Boolean)
-        : [rawVer];
-      for (const ver of splitVersions) {
-        if (!ver) continue;
-        result.push(ver);
+  await asyncTest('SCRAPER: GenSecAI comma-separated affectedVersions are split into individual IOC entries', async () => {
+    // Exercises the REAL scrapeShaiHuludDetector split (scraper.js sanitization),
+    // not a re-implementation: the mocked feed carries a comma string.
+    const origRequest = https.request;
+    const origLog = console.log;
+    console.log = () => {};
+
+    const mockData = {
+      packages: [
+        { name: 'posthog-node', affectedVersions: ['4.18.1, 5.11.3'], severity: 'critical' }
+      ]
+    };
+
+    https.request = (options, callback) => {
+      const req = createMockRequest();
+      req.end = () => {
+        process.nextTick(() => {
+          const res = createMockResponse(200, null, {});
+          callback(res);
+          process.nextTick(() => {
+            res.emit('data', Buffer.from(JSON.stringify(mockData)));
+            res.emit('end');
+          });
+        });
+      };
+      return req;
+    };
+
+    try {
+      const result = await scrapeShaiHuludDetector();
+      assert(result.packages.length === 2, 'Comma string must split into 2 IOC entries, got ' + result.packages.length);
+      const versions = result.packages.map(p => p.version).sort();
+      assert(versions[0] === '4.18.1', 'Should include 4.18.1, got ' + versions.join(','));
+      assert(versions[1] === '5.11.3', 'Should include 5.11.3, got ' + versions.join(','));
+      for (const p of result.packages) {
+        assert(!p.version.includes(','), 'Version must not contain commas: ' + p.version);
+        assert(p.name === 'posthog-node', 'Package name preserved on each split entry');
+        assert(p.id === 'SHAI-HULUD-posthog-node-' + p.version, 'Per-version IOC id, got ' + p.id);
       }
-    }
-    assert(result.length === 3, 'Should split into 3 versions, got: ' + result.length);
-    assert(result.includes('4.18.1'), 'Should include 4.18.1');
-    assert(result.includes('5.11.3'), 'Should include 5.11.3');
-    assert(result.includes('5.13.3'), 'Should include 5.13.3');
-    for (const v of result) {
-      assert(!v.includes(','), 'Version must not contain commas: ' + v);
+    } finally {
+      https.request = origRequest;
+      console.log = origLog;
     }
   });
 
-  test('SCRAPER: existing IOC seed with comma-in-version is split during dedup', () => {
-    const { NEVER_WILDCARD } = require('../../src/ioc/updater.js');
-    // Simulate scraper seed logic
-    const existingPackages = [
-      { name: 'posthog-node', version: '4.18.1, 5.11.3, 5.13.3', source: 'old' },
-      { name: 'posthog-node', version: '4.18.1', source: 'yaml' },
-      { name: 'posthog-node', version: '*', source: 'bad' }
-    ];
-    const dedupMap = new Map();
-    for (const pkg of existingPackages) {
-      if (pkg.version && pkg.version.includes(',')) {
-        const parts = pkg.version.split(',').map(v => v.trim()).filter(Boolean);
-        for (const v of parts) {
-          const key = pkg.name + '@' + v;
-          if (!dedupMap.has(key)) {
-            dedupMap.set(key, Object.assign({}, pkg, { version: v }));
+  await asyncTest('SCRAPER: runScraper splits comma-in-version seed entries during dedup (real seed path)', async () => {
+    const origRequest = https.request;
+    const origLog = console.log;
+    const origWrite = process.stdout.write;
+    const origFs = {
+      existsSync: fs.existsSync,
+      readFileSync: fs.readFileSync,
+      writeFileSync: fs.writeFileSync,
+      mkdirSync: fs.mkdirSync,
+      statSync: fs.statSync,
+      renameSync: fs.renameSync,
+      accessSync: fs.accessSync,
+      copyFileSync: fs.copyFileSync
+    };
+
+    console.log = () => {};
+    process.stdout.write = () => true;
+
+    // All network sources return empty — the seed sanitization is what we exercise
+    https.request = (options, callback) => {
+      const url = 'https://' + options.hostname + options.path;
+      const req = new EventEmitter();
+      req.write = () => {};
+      req.setTimeout = () => {};
+      req.destroy = () => {};
+      req.end = () => {
+        process.nextTick(() => {
+          const res = new EventEmitter();
+          res.headers = { 'content-length': '100' };
+          res.resume = () => {};
+          if (url.includes('npm/all.zip') || url.includes('PyPI/all.zip')) {
+            res.statusCode = 200;
+            callback(res);
+            const zip = new AdmZip();
+            zip.addFile('SKIP.json', Buffer.from('{}'));
+            res.emit('data', zip.toBuffer());
+            res.emit('end');
+          } else if (url.includes('gensecaihq')) {
+            res.statusCode = 200;
+            callback(res);
+            res.emit('data', Buffer.from(JSON.stringify({ packages: [] })));
+            res.emit('end');
+          } else if (url.includes('api.osv.dev')) {
+            res.statusCode = 200;
+            callback(res);
+            res.emit('data', Buffer.from(JSON.stringify({ vulns: [] })));
+            res.emit('end');
+          } else if (url.includes('api.github.com')) {
+            res.statusCode = 200;
+            callback(res);
+            res.emit('data', Buffer.from(JSON.stringify({ sha: 'sha-seed-split-test', tree: [] })));
+            res.emit('end');
+          } else {
+            res.statusCode = 200;
+            callback(res);
+            res.emit('data', Buffer.from('h,v\n'));
+            res.emit('end');
           }
+        });
+      };
+      return req;
+    };
+
+    // Stale legacy seed: one comma-in-version entry, one NEVER_WILDCARD wildcard
+    // (must be dropped, scraper.js seed guard), one regular wildcard (must be kept)
+    const existingIOCData = {
+      packages: [
+        {
+          id: 'OLD-COMMA-001', name: 'posthog-node', version: '4.18.1, 5.11.3, 5.13.3',
+          severity: 'critical', confidence: 'high', source: 'old-feed', mitre: 'T1195.002',
+          freshness: { source: 'old-feed', confidence: 'high', added_at: '2024-01-01T00:00:00.000Z' }
+        },
+        {
+          id: 'OLD-WILD-002', name: 'posthog-node', version: '*',
+          severity: 'critical', confidence: 'high', source: 'bad-feed', mitre: 'T1195.002',
+          freshness: { source: 'bad-feed', confidence: 'high', added_at: '2024-01-01T00:00:00.000Z' }
+        },
+        {
+          id: 'OLD-OK-003', name: 'regular-malware', version: '*',
+          severity: 'critical', confidence: 'high', source: 'old-feed', mitre: 'T1195.002',
+          freshness: { source: 'old-feed', confidence: 'high', added_at: '2024-01-01T00:00:00.000Z' }
         }
-        continue;
+      ],
+      pypi_packages: [], hashes: [], markers: [], files: []
+    };
+
+    const mockFiles = {};
+    let savedIocs = null;
+    fs.existsSync = (p) => {
+      if (typeof p === 'string' && p.includes('static-iocs')) return origFs.existsSync(p);
+      return true;
+    };
+    fs.readFileSync = (p, enc) => {
+      if (typeof p === 'string' && p.includes('static-iocs')) return origFs.readFileSync(p, enc);
+      if (typeof p === 'string' && p.includes('.ossf-tree-sha')) return 'sha-seed-split-test';
+      if (typeof p === 'string' && p.includes('iocs.json')) return JSON.stringify(existingIOCData);
+      return origFs.readFileSync(p, enc);
+    };
+    fs.writeFileSync = (p, data) => { mockFiles[path.resolve(p)] = data; };
+    fs.mkdirSync = () => {};
+    fs.accessSync = () => {};
+    fs.copyFileSync = () => {}; // avoid copying the real (potentially 200MB+) local IOC DB
+    fs.statSync = (p) => {
+      const resolved = path.resolve(p);
+      if (mockFiles[resolved]) return { size: Buffer.byteLength(mockFiles[resolved]) };
+      return origFs.statSync(p);
+    };
+    fs.renameSync = (from, to) => {
+      const rf = path.resolve(from); const rt = path.resolve(to);
+      if (mockFiles[rf]) { mockFiles[rt] = mockFiles[rf]; delete mockFiles[rf]; }
+      if (typeof to === 'string' && to.includes('iocs.json') && !to.includes('compact') && mockFiles[rt]) {
+        try { savedIocs = JSON.parse(mockFiles[rt]); } catch {}
       }
-      if (pkg.version === '*' && NEVER_WILDCARD.has(pkg.name)) continue;
-      const key = pkg.name + '@' + pkg.version;
-      dedupMap.set(key, pkg);
-    }
-    const result = [...dedupMap.values()];
-    // Should have 3 individual versions, no commas, no wildcards
-    assert(result.length === 3, 'Should have 3 entries, got: ' + result.length);
-    const versions = result.map(p => p.version);
-    assert(versions.includes('4.18.1'), 'Should have 4.18.1');
-    assert(versions.includes('5.11.3'), 'Should have 5.11.3');
-    assert(versions.includes('5.13.3'), 'Should have 5.13.3');
-    assert(!versions.includes('*'), 'Should not have wildcard');
-    for (const v of versions) {
-      assert(!v.includes(','), 'Version must not contain commas: ' + v);
+    };
+
+    try {
+      const result = await runScraper();
+      assert(savedIocs, 'IOC file must have been written and captured');
+
+      // Comma seed split into 3 individual entries; NEVER_WILDCARD wildcard dropped
+      const ph = savedIocs.packages.filter(p => p.name === 'posthog-node');
+      const phVersions = ph.map(p => p.version).sort();
+      assert(ph.length === 3, 'posthog-node comma seed should yield exactly 3 split entries, got ' + ph.length + ' (' + phVersions.join(' | ') + ')');
+      assert(phVersions.includes('4.18.1'), 'Should have 4.18.1');
+      assert(phVersions.includes('5.11.3'), 'Should have 5.11.3');
+      assert(phVersions.includes('5.13.3'), 'Should have 5.13.3');
+      for (const v of phVersions) {
+        assert(!v.includes(','), 'Saved version must not contain commas: ' + v);
+        assert(v !== '*', 'posthog-node@* (NEVER_WILDCARD) must have been dropped from the seed');
+      }
+
+      // Non-protected wildcard seed entry survives
+      const regular = savedIocs.packages.find(p => p.name === 'regular-malware' && p.version === '*');
+      assert(regular, 'regular-malware@* (not NEVER_WILDCARD) must be preserved');
+
+      // Totals reflect the sanitized seed: 3 split + 1 wildcard = 4
+      assert(result.total === 4, 'Total should be 4 sanitized entries, got ' + result.total);
+    } finally {
+      https.request = origRequest;
+      console.log = origLog;
+      process.stdout.write = origWrite;
+      Object.assign(fs, origFs);
     }
   });
 

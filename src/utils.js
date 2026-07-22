@@ -258,6 +258,12 @@ function clearFileListCache() {
   _overflowFiles = [];
 }
 
+// Test-only introspection: the _FILE_CONTENT_CACHE_MAX bound (Bounded resources
+// contract) is unobservable from outside, so its eviction was untestable.
+function _getFileContentCacheSize() {
+  return _fileContentCache.size;
+}
+
 function wasFilesCapped() {
   return _filesCapped;
 }
@@ -482,6 +488,7 @@ module.exports = {
   findFiles,
   findJsFiles,
   clearFileListCache,
+  _getFileContentCacheSize,
   wasFilesCapped,
   getOverflowFiles,
   escapeHtml,

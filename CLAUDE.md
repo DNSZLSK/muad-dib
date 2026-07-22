@@ -19,7 +19,7 @@ Priorites :
 ## Commands
 
 ```bash
-npm test          # Run all tests (custom framework, 4561 tests across 152 files)
+npm test          # Run all tests (custom framework, 4534 tests across 152 files)
 npm run lint      # ESLint with security plugin
 npm run scan      # Self-scan: node bin/muaddib.js scan .
 npm run update    # Download latest IOCs
@@ -119,12 +119,12 @@ Run `npm run ci:local` before every push. It replays the exact PR gate from `.gi
 
 **Version bump rule:** a version change must land in the SAME commit as ALL files rewritten by `npm run docs:stats` — `stats.json` plus every marker-bearing doc (`CLAUDE.md`, `README.md`, `SECURITY.md`, `ARCHITECTURE.md`, `docs/INDEX.md`, `docs/README.fr.md`, `docs/threat-model.md`). Committing a subset makes `docs:stats:check` fail in CI even when it passes locally, because the local working tree is coherent but the pushed tree is not. After any bump: `npm run docs:stats`, then `git add` everything it touched (`git diff --name-only` to list), then commit.
 
-## Current Metrics (v<!--stat:version-->2.11.175<!--/stat:version-->; detection metrics last fully measured v2.11.48)
+## Current Metrics (v<!--stat:version-->2.11.176<!--/stat:version-->; detection metrics last fully measured v2.11.48)
 
 | Metric | Value |
 |--------|-------|
-| Version | **<!--stat:version-->2.11.175<!--/stat:version-->** |
-| Tests | **4535** passed, **5 failed** locally (Windows-only env flakes — `tar --force-local` ×3 EXTRACT-POOL, temp-file `UNKNOWN` ×2 PACKAGE; **0 failed on Linux/CI**), across **<!--stat:testFiles-->152<!--/stat:testFiles-->** files (14511 skipped when Docker absent). Total non-skipped: <!--stat:tests-->4561<!--/stat:tests-->. |
+| Version | **<!--stat:version-->2.11.176<!--/stat:version-->** |
+| Tests | **4535** passed, **5 failed** locally (Windows-only env flakes — `tar --force-local` ×3 EXTRACT-POOL, temp-file `UNKNOWN` ×2 PACKAGE; **0 failed on Linux/CI**), across **<!--stat:testFiles-->152<!--/stat:testFiles-->** files (14511 skipped when Docker absent). Total non-skipped: <!--stat:tests-->4534<!--/stat:tests-->. |
 | Rules | **<!--stat:rulesTotal-->277<!--/stat:rulesTotal-->** (<!--stat:rulesCore-->272<!--/stat:rulesCore--> RULES + <!--stat:rulesParanoid-->5<!--/stat:rulesParanoid--> PARANOID - v2.11.67/70 Phantom Gyp adds PKG-023 `gyp_command_exec` + COMPOUND-017 `gyp_phantom_exec`; 2026-07 anti-evasion adds AST-095 `anti_analysis_evasion` + AST-096 `analyzer_honeytoken_reference`) |
 | Scanners | **<!--stat:scanners-->22<!--/stat:scanners--> parallel** (Promise.allSettled) + **2 pre-analysis** (module-graph/, deobfuscate) + **1 async parser bootstrap** (python-ast WASM init, no analysis emitted) + **7 conditional/post-processing** (paranoid, 3× temporal-*, reachability, phantom-gyp, native-drop-exec) + **1 metadata** (npm-registry). <!--stat:scannerFiles-->36<!--/stat:scannerFiles--> fichiers `src/scanner/*.js` + 3 dirs : `ast-detectors/` (<!--stat:astDetectors-->15<!--/stat:astDetectors-->), `module-graph/` (<!--stat:moduleGraph-->9<!--/stat:moduleGraph-->), `python-ast-detectors/` (<!--stat:pythonAstDetectors-->6<!--/stat:pythonAstDetectors--> fichiers). Détails : ARCHITECTURE.md. |
 | Ground Truth size | **96 samples** (was 67 in v2.10.95). 29 added 2026-05-25: 16 synthetic for new PYSRC/PYAST/AST-092/AICONF-004/PKG-022 rules (GT-068..083), 6 real-world tarballs from VPS archive (GT-084..089), 7 reconstructions from `data/all-review-results.json` review reasoning (GT-090..096). 13 PyPI samples (was 0). 3 explicit `tpr_tier: tpr3` (HIGH/MEDIUM rules that don't cross 20 in isolation, documented in `attacks.json` schema). |

@@ -238,6 +238,11 @@ function getPackageVersion(pkgPath) {
 module.exports = {
   scanDependencies,
   checkRehabilitatedPackage,
+  // Pure fs helpers, exported so tests assert their actual behaviour (scoped
+  // name resolution, hidden/non-dir skipping, version fallback) instead of
+  // only Array.isArray on scanDependencies' output.
+  listPackages,
+  getPackageVersion,
   TRUSTED_PACKAGES,
   SAFE_FILES
 };

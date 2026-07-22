@@ -136,24 +136,57 @@ async function runCliTests() {
 
   test('CLI-EXT: interactive mode errors without TTY', () => {
     // Running muaddib with no command + piped stdin triggers interactiveMenu -> catch
+    let threw = false;
     try {
       execSync(`node "${BIN}"`, { encoding: 'utf8', timeout: 15000, input: '\n', stdio: ['pipe', 'pipe', 'pipe'] });
     } catch (e) {
+      threw = true;
       const output = (e.stdout || '') + (e.stderr || '');
-      assert(output.length > 0, 'Should produce output');
-      return;
+      assert(output.length > 0, 'Should produce error output without a TTY');
     }
+    assert(threw, 'The interactive menu must exit non-zero when stdin is not a TTY');
   });
 
-  test('CLI-EXT: diff with ref HEAD~1', () => {
-    // Use a small fixture dir instead of '.' to avoid scanning the entire project
-    const output = runCommand(`diff HEAD~1 "${path.join(TESTS_DIR, 'clean')}"`);
-    assert(output !== undefined, 'Should not crash');
+  test('CLI-EXT: diff between two refs produces a diff report', () => {
+    // Build a self-contained 2-commit git repo so HEAD~1 always resolves — the
+    // muaddib repo checkout on CI is a shallow (depth-1) clone where HEAD~1 does
+    // NOT exist, so `diff HEAD~1 <repo path>` there errors with "Cannot resolve
+    // reference" instead of producing a report. This fixture is environment-independent.
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-diff-'));
+    const git = (args) => execSync(`git ${args}`, { cwd: tmp, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+    try {
+      git('init -q');
+      git('config user.email test@example.com');
+      git('config user.name test');
+      fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ name: 'diff-fixture', version: '1.0.0' }));
+      fs.writeFileSync(path.join(tmp, 'index.js'), 'module.exports = 1;\n');
+      git('add -A');
+      git('commit -q -m first');
+      // Second commit introduces a detectable change.
+      fs.writeFileSync(path.join(tmp, 'index.js'), "const cp = require('child_process');\ncp.execSync(process.argv[2]);\n");
+      git('add -A');
+      git('commit -q -m second');
+      let out = '';
+      try {
+        out = execSync(`node "${BIN}" diff HEAD~1 "${tmp}"`, { cwd: tmp, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 60000 });
+      } catch (e) { out = (e.stdout || '') + (e.stderr || ''); }
+      assertIncludes(out, '[MUADDIB DIFF]', 'diff between two real refs must produce a diff report');
+      assertIncludes(out, 'DIFF SUMMARY', 'the report must include the summary section');
+    } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
   });
 
-  test('CLI-EXT: init-hooks with --type and --mode', () => {
-    const output = runCommand('init-hooks --type git --mode scan');
-    assert(output !== undefined, 'Should not crash');
+  test('CLI-EXT: init-hooks reports a clear error outside a git repo (no side effect on the dev repo)', () => {
+    // Run in a fresh non-git temp dir: init-hooks writes to .git/hooks, so running
+    // it in the repo cwd (as runCommand does) would install a real pre-commit hook.
+    // The non-git dir exercises the graceful error path safely.
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-hooks-'));
+    try {
+      let out = '';
+      try {
+        out = execSync(`node "${BIN}" init-hooks --type git --mode scan`, { encoding: 'utf8', cwd: tmp, stdio: ['pipe', 'pipe', 'pipe'], timeout: 15000 });
+      } catch (e) { out = (e.stdout || '') + (e.stderr || ''); }
+      assertIncludes(out, 'Not a git repository', 'init-hooks must fail cleanly outside a git repo');
+    } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
   });
 
   test('CLI-EXT: install without packages shows usage', () => {
@@ -176,9 +209,9 @@ async function runCliTests() {
     assertIncludes(output, 'Usage', 'Should show sandbox usage');
   });
 
-  test('CLI-EXT: sandbox with package errors without Docker', () => {
+  test('CLI-EXT: sandbox with package produces sandbox output (Docker-skip message when absent)', () => {
     const output = runCommand('sandbox nonexistent-pkg-test');
-    assert(output.length > 0, 'Should produce output');
+    assertIncludes(output, '[SANDBOX]', 'The sandbox command must emit sandbox output, not just any text');
   });
 
   // SKIPPED: scrape does real network downloads (15s) — run via npm run test:integration
@@ -196,19 +229,32 @@ async function runCliTests() {
     assert(result && result.summary, 'Should not crash with --exclude');
   });
 
-  await asyncTest('CLI-COV: --fail-on with invalid value defaults gracefully (direct)', async () => {
-    const result = await runScanCached(path.join(TESTS_DIR, 'clean'));
-    assert(result && result.summary, 'Should not crash');
+  test('CLI-COV: --fail-on with an invalid value is rejected with a clear error', () => {
+    // The flag was never actually passed before (three identical cached clean
+    // scans). Exercise it via subprocess: an invalid value must error, not
+    // "default gracefully" as the old name claimed.
+    let out = '', status = 0;
+    try {
+      execSync(`node "${BIN}" scan "${path.join(TESTS_DIR, 'clean')}" --fail-on notarealvalue`, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 30000 });
+    } catch (e) { out = (e.stdout || '') + (e.stderr || ''); status = e.status; }
+    assert(status >= 1, 'An invalid --fail-on value must exit non-zero');
+    assertIncludes(out, 'must be one of', 'Should explain the valid --fail-on values');
   });
 
-  await asyncTest('CLI-COV: --fail-on low works (direct)', async () => {
-    const result = await runScanCached(path.join(TESTS_DIR, 'clean'));
-    assert(result && result.summary, 'Should handle scan');
+  test('CLI-COV: --fail-on low exits non-zero on a fixture with findings', () => {
+    let status = 0;
+    try {
+      execSync(`node "${BIN}" scan "${path.join(TESTS_DIR, 'ast')}" --fail-on low`, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 60000 });
+    } catch (e) { status = e.status; }
+    assert(status >= 1, 'A fixture with findings must fail the --fail-on low gate');
   });
 
-  await asyncTest('CLI-COV: --fail-on medium works (direct)', async () => {
-    const result = await runScanCached(path.join(TESTS_DIR, 'clean'));
-    assert(result && result.summary, 'Should handle scan');
+  test('CLI-COV: --fail-on medium exits non-zero on a fixture with medium+ findings', () => {
+    let status = 0;
+    try {
+      execSync(`node "${BIN}" scan "${path.join(TESTS_DIR, 'ast')}" --fail-on medium`, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 60000 });
+    } catch (e) { status = e.status; }
+    assert(status >= 1, 'A fixture with medium+ findings must fail the --fail-on medium gate');
   });
 
   test('CLI-COV: --html with path traversal is blocked', () => {
@@ -276,9 +322,17 @@ async function runCliTests() {
     assert(result && result.threats, 'Should produce result');
   });
 
-  test('CLI-COV: remove-hooks command runs', () => {
-    const output = runCommand('remove-hooks .');
-    assert(output !== undefined, 'Should not crash');
+  test('CLI-COV: remove-hooks runs and reports removal (in a temp dir, not the dev repo)', () => {
+    // runCommand would target '.' = the repo root and could strip a real hook.
+    // Run in an isolated temp dir and assert the command actually executed.
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-rmhooks-'));
+    try {
+      let out = '';
+      try {
+        out = execSync(`node "${BIN}" remove-hooks .`, { encoding: 'utf8', cwd: tmp, stdio: ['pipe', 'pipe', 'pipe'], timeout: 15000 });
+      } catch (e) { out = (e.stdout || '') + (e.stderr || ''); }
+      assertIncludes(out, 'Removing git hooks', 'remove-hooks must actually run its removal routine');
+    } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
   });
 
   await asyncTest('CLI-COV: --paranoid flag is parsed correctly (direct)', async () => {
@@ -296,9 +350,9 @@ async function runCliTests() {
     assert(result.summary.total === 0, 'Clean project should have 0 threats');
   });
 
-  test('CLI-COV: scan nonexistent directory handles error', () => {
+  test('CLI-COV: scan nonexistent directory reports a clear error', () => {
     const output = runScan('/nonexistent/path/12345');
-    assert(output !== undefined, 'Should not crash on nonexistent dir');
+    assertIncludes(output, 'does not exist', 'A missing target must produce an explicit error, not a silent/empty result');
   });
 
   test('CLI-COV: --webhook with localhost is blocked', () => {
@@ -374,11 +428,6 @@ async function runCliTests() {
     assertIncludes(output, '--no-canary', 'Help should show --no-canary flag');
   });
 
-  test('CLI-COV: --no-canary flag is parsed without error', () => {
-    // --no-canary is for sandbox commands, but parsing should not crash
-    const output = runCommand('--help');
-    assertIncludes(output, '--no-canary', 'Help should mention --no-canary');
-  });
 
   // ============================================
   // DIFF MODULE TESTS

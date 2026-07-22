@@ -44,9 +44,13 @@ async function runObfuscationTests() {
     const tmp = makeTempPkg(code);
     try {
       const result = await runScanDirect(tmp);
-      // Deobfuscation should resolve this to require('child_process')
+      // This fixture does require(str) without exec, so the specific type is
+      // dynamic_require (module-name obfuscation via a computed variable). Pinning
+      // the type keeps the test from passing on any unrelated fire. (Resolution of
+      // the hex array to 'child_process' itself is locked in deobfuscate.test.js.)
       const threats = result.threats || [];
-      assert(threats.length > 0, 'Should detect something from hex array obfuscation');
+      assert(threats.some(t => t.type === 'dynamic_require'),
+        'Should flag dynamic_require for the computed require target, got: ' + JSON.stringify(threats.map(t => t.type)));
     } finally { cleanupTemp(tmp); }
   });
 
@@ -56,7 +60,8 @@ async function runObfuscationTests() {
     try {
       const result = await runScanDirect(tmp);
       const threats = result.threats || [];
-      assert(threats.length > 0, 'Should detect string concat obfuscation');
+      assert(threats.some(t => t.type === 'dynamic_require_exec'),
+        'Should fold the concat to child_process and flag dynamic_require_exec, got: ' + JSON.stringify(threats.map(t => t.type)));
     } finally { cleanupTemp(tmp); }
   });
 
@@ -79,7 +84,8 @@ async function runObfuscationTests() {
     try {
       const result = await runScanDirect(tmp);
       const threats = result.threats || [];
-      assert(threats.length > 0, 'Should detect base64 obfuscated require');
+      assert(threats.some(t => t.type === 'dynamic_require_exec'),
+        'Should decode the base64 require target and flag dynamic_require_exec, got: ' + JSON.stringify(threats.map(t => t.type)));
     } finally { cleanupTemp(tmp); }
   });
 
@@ -89,7 +95,8 @@ async function runObfuscationTests() {
     try {
       const result = await runScanDirect(tmp);
       const threats = result.threats || [];
-      assert(threats.length > 0, 'Should detect charcode reconstruction obfuscation');
+      assert(threats.some(t => t.type === 'dynamic_require_exec'),
+        'Should reconstruct child_process from charCodes and flag dynamic_require_exec, got: ' + JSON.stringify(threats.map(t => t.type)));
     } finally { cleanupTemp(tmp); }
   });
 

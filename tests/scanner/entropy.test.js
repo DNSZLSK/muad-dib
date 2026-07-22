@@ -39,16 +39,31 @@ async function runEntropyTests() {
     assert(highThreats.length > 0, 'High-entropy strings should trigger findings, got ' + highThreats.length);
   });
 
-  test('ENTROPY: Short high-entropy string (<50 chars) does NOT trigger', () => {
-    const shortStr = 'xK9mQ2pLwR7vN5tY';
-    const entropy = calculateShannonEntropy(shortStr);
-    assert(entropy > 3.5, 'Short string should still have high entropy: ' + entropy.toFixed(2));
-    const entropyDir = path.join(__dirname, '..', 'samples', 'entropy');
-    const threats = scanEntropy(entropyDir);
-    const normalStringThreats = threats.filter(function(t) {
-      return t.file === 'normal.js' && t.type === 'high_entropy_string';
-    });
-    assert(normalStringThreats.length === 0, 'Short strings should not trigger, got ' + normalStringThreats.length);
+  test('ENTROPY: MIN_STRING_LENGTH gate — a <50-char high-entropy string is written and does NOT trigger, a 60-char one does', () => {
+    // The length gate (MIN_STRING_LENGTH = 50) is the discriminator here, not the
+    // entropy: both strings are drawn from the same 64-char base64 alphabet
+    // (entropy ~6.0). Only the length differs, so we exercise the gate directly by
+    // actually scanning each — the old test never wrote the short string anywhere.
+    const fs = require('fs');
+    const os = require('os');
+    const alpha = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    const shortStr = alpha.slice(0, 40);   // 40 < 50 → gated out
+    const longStr = alpha;                 // 64 >= 50 → passes the gate
+    assert(calculateShannonEntropy(shortStr) > 5.0, 'short string is genuinely high-entropy: ' + calculateShannonEntropy(shortStr).toFixed(2));
+
+    const shortDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-entropy-short-'));
+    const longDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-entropy-long-'));
+    try {
+      fs.writeFileSync(path.join(shortDir, 'index.js'), `var s = "${shortStr}";`);
+      fs.writeFileSync(path.join(longDir, 'index.js'), `var s = "${longStr}";`);
+      const shortHits = scanEntropy(shortDir).filter(t => t.type === 'high_entropy_string');
+      const longHits = scanEntropy(longDir).filter(t => t.type === 'high_entropy_string');
+      assert(shortHits.length === 0, `A 40-char high-entropy string must be gated out by MIN_STRING_LENGTH, got ${shortHits.length}`);
+      assert(longHits.length > 0, `A 64-char high-entropy string (same alphabet) must trigger, got ${longHits.length} — proves the length gate is the discriminator`);
+    } finally {
+      fs.rmSync(shortDir, { recursive: true, force: true });
+      fs.rmSync(longDir, { recursive: true, force: true });
+    }
   });
 
   test('ENTROPY: shared implementation is the single source (D1 dedup lock-in)', () => {

@@ -133,6 +133,50 @@ function checkPyPITyposquatting(deps, targetPath) {
  * @param {string[]} warnings - Warnings array (mutated: may push module graph warnings)
  * @returns {Promise<{threats: Array, scannerErrors: Array}>}
  */
+
+const SCANNER_NAMES = [
+  'scanPackageJson', 'scanShellScripts', 'analyzeAST', 'detectObfuscation',
+  'scanDependencies', 'scanHashes', 'analyzeDataFlow', 'scanTyposquatting',
+  'scanGitHubActions', 'matchPythonIOCs', 'checkPyPITyposquatting',
+  'scanEntropy', 'scanAIConfig', 'scanIocStrings', 'scanAntiForensic',
+  'scanStubPackage', 'scanMonorepo', 'scanTrustedDepDiff', 'scanPythonSource',
+  'scanPythonAST', 'scanAntiScannerInjection', 'scanBinarySource'
+];
+
+// Stage 2 quick_scan subset (monitor-only, set via options.scanMode='quick'
+// by queue.js when MUADDIB_TRIAGE_MODE=enforce). The subset keeps the heavy
+// detectors that anchor TPR on the 96-sample GT (analyzeAST covers 70/96,
+// analyzeDataFlow covers 31/96 — non-negotiable), the cheap high-signal
+// lifecycle/IOC scanners, and the Python detectors (PyPI samples need them;
+// npm exit immediately on a depth-1 readdir, so the cost is negligible).
+// Excluded: scanAntiForensic (45s timeout, never the unique trigger on GT),
+// scanHashes (cheap but GT samples are rebuilt — hashes drift), scanAIConfig,
+// scanStubPackage, scanMonorepo, scanTrustedDepDiff (opt-in registry diff),
+// checkPyPITyposquatting (subsumed by scanTyposquatting for npm; PyPI
+// typosquats already get full via triage signals). CLI mode and shadow mode
+// never set scanMode so the default branch runs all 20 scanners — fully
+// backwards-compatible.
+// Module-level + exported so tests assert THIS set, not a copy (audit 2026-07:
+// triage-gt.test.js compared two hand-maintained replicas of it).
+const QUICK_SCAN_ALLOWLIST = new Set([
+  'scanPackageJson',
+  'scanShellScripts',
+  'analyzeAST',
+  'detectObfuscation',
+  'scanDependencies',
+  'analyzeDataFlow',
+  'scanTyposquatting',
+  'scanGitHubActions',
+  'matchPythonIOCs',
+  'scanEntropy',
+  'scanIocStrings',
+  'scanPythonSource',
+  'scanPythonAST',
+  'scanAIConfig',
+  'scanAntiScannerInjection',
+  'scanBinarySource'
+]);
+
 async function execute(targetPath, options, pythonDeps, warnings) {
   // Show spinner during scan (TTY only; piped/CI output keeps static message)
   const useTTYSpinner = !options._capture && process.stdout.isTTY;
@@ -248,46 +292,6 @@ async function execute(targetPath, options, pythonDeps, warnings) {
     });
   }
 
-  const SCANNER_NAMES = [
-    'scanPackageJson', 'scanShellScripts', 'analyzeAST', 'detectObfuscation',
-    'scanDependencies', 'scanHashes', 'analyzeDataFlow', 'scanTyposquatting',
-    'scanGitHubActions', 'matchPythonIOCs', 'checkPyPITyposquatting',
-    'scanEntropy', 'scanAIConfig', 'scanIocStrings', 'scanAntiForensic',
-    'scanStubPackage', 'scanMonorepo', 'scanTrustedDepDiff', 'scanPythonSource',
-    'scanPythonAST', 'scanAntiScannerInjection', 'scanBinarySource'
-  ];
-
-  // Stage 2 quick_scan subset (monitor-only, set via options.scanMode='quick'
-  // by queue.js when MUADDIB_TRIAGE_MODE=enforce). The subset keeps the heavy
-  // detectors that anchor TPR on the 96-sample GT (analyzeAST covers 70/96,
-  // analyzeDataFlow covers 31/96 — non-negotiable), the cheap high-signal
-  // lifecycle/IOC scanners, and the Python detectors (PyPI samples need them;
-  // npm exit immediately on a depth-1 readdir, so the cost is negligible).
-  // Excluded: scanAntiForensic (45s timeout, never the unique trigger on GT),
-  // scanHashes (cheap but GT samples are rebuilt — hashes drift), scanAIConfig,
-  // scanStubPackage, scanMonorepo, scanTrustedDepDiff (opt-in registry diff),
-  // checkPyPITyposquatting (subsumed by scanTyposquatting for npm; PyPI
-  // typosquats already get full via triage signals). CLI mode and shadow mode
-  // never set scanMode so the default branch runs all 20 scanners — fully
-  // backwards-compatible.
-  const QUICK_SCAN_ALLOWLIST = new Set([
-    'scanPackageJson',
-    'scanShellScripts',
-    'analyzeAST',
-    'detectObfuscation',
-    'scanDependencies',
-    'analyzeDataFlow',
-    'scanTyposquatting',
-    'scanGitHubActions',
-    'matchPythonIOCs',
-    'scanEntropy',
-    'scanIocStrings',
-    'scanPythonSource',
-    'scanPythonAST',
-    'scanAIConfig',
-    'scanAntiScannerInjection',
-    'scanBinarySource'
-  ]);
   const isQuick = options.scanMode === 'quick';
   function ifEnabled(name, fn) {
     if (isQuick && !QUICK_SCAN_ALLOWLIST.has(name)) return Promise.resolve([]);
@@ -488,4 +492,4 @@ async function execute(targetPath, options, pythonDeps, warnings) {
   }
 }
 
-module.exports = { execute, matchPythonIOCs, checkPyPITyposquatting };
+module.exports = { execute, matchPythonIOCs, checkPyPITyposquatting, QUICK_SCAN_ALLOWLIST, SCANNER_NAMES };

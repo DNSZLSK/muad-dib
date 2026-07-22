@@ -40,12 +40,18 @@ async function runWorkerMessageDispatchTests() {
       queue.registerWorkerMessageHandler('test-side-channel', (worker, msg) => {
         seen.push(msg);
       });
-      const result = await queue.runScanInWorker('/tmp/does-not-matter', 5000,
-        { name: 'stub-pkg', version: '1.0.0', _stub: 'side-then-result' });
-      assert(result && result.summary && result.summary.total === 0,
-        'scan resolves with the stub result despite earlier side-channel messages');
-      assert(seen.length === 1 && seen[0].id === 1 && seen[0].host === 'registry.npmjs.org',
-        `registered handler received the side-channel message exactly once (got ${seen.length})`);
+      try {
+        const result = await queue.runScanInWorker('/tmp/does-not-matter', 5000,
+          { name: 'stub-pkg', version: '1.0.0', _stub: 'side-then-result' });
+        assert(result && result.summary && result.summary.total === 0,
+          'scan resolves with the stub result despite earlier side-channel messages');
+        assert(seen.length === 1 && seen[0].id === 1 && seen[0].host === 'registry.npmjs.org',
+          `registered handler received the side-channel message exactly once (got ${seen.length})`);
+      } finally {
+        // Do not leak the test handler into the process-global registry (it would
+        // outlive this test and affect later suites sharing queue.js).
+        queue.unregisterWorkerMessageHandler('test-side-channel');
+      }
     });
   });
 
@@ -86,10 +92,15 @@ async function runWorkerMessageDispatchTests() {
       queue.registerWorkerMessageHandler('totally-unknown-type', () => {
         throw new Error('handler bug');
       });
-      const result = await queue.runScanInWorker('/tmp/does-not-matter', 5000,
-        { name: 'stub-pkg-4', version: '1.0.0', _stub: 'side-then-result' });
-      assert(result && result.summary,
-        'a throwing side-channel handler must not reject or hang the scan');
+      try {
+        const result = await queue.runScanInWorker('/tmp/does-not-matter', 5000,
+          { name: 'stub-pkg-4', version: '1.0.0', _stub: 'side-then-result' });
+        assert(result && result.summary,
+          'a throwing side-channel handler must not reject or hang the scan');
+      } finally {
+        // A throwing handler must not persist into other suites.
+        queue.unregisterWorkerMessageHandler('totally-unknown-type');
+      }
     });
   });
 }

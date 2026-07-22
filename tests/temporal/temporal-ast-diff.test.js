@@ -213,70 +213,9 @@ async function runTemporalAstDiffTests() {
     } finally { cleanTempDir(dir); }
   });
 
-  // --- compareAstPatterns (mock: simulate the diff logic locally) ---
-
-  test('AST-DIFF: compare mock — versionB adds child_process → added contains it', () => {
-    const dirA = makeTempDir({ 'index.js': 'console.log("safe v1");' });
-    const dirB = makeTempDir({ 'index.js': 'const cp = require("child_process"); cp.exec("whoami");' });
-    try {
-      const patternsA = extractDangerousPatterns(dirA);
-      const patternsB = extractDangerousPatterns(dirB);
-      const added = [...patternsB].filter(p => !patternsA.has(p));
-      const removed = [...patternsA].filter(p => !patternsB.has(p));
-      assert(added.length === 1, 'Should have 1 added, got ' + added.length);
-      assert(added[0] === 'child_process', 'Added should be child_process, got ' + added[0]);
-      assert(removed.length === 0, 'Should have 0 removed');
-    } finally { cleanTempDir(dirA); cleanTempDir(dirB); }
-  });
-
-  test('AST-DIFF: compare mock — versionB removes eval → removed contains it', () => {
-    const dirA = makeTempDir({ 'index.js': 'eval("x"); console.log(1);' });
-    const dirB = makeTempDir({ 'index.js': 'console.log(1);' });
-    try {
-      const patternsA = extractDangerousPatterns(dirA);
-      const patternsB = extractDangerousPatterns(dirB);
-      const added = [...patternsB].filter(p => !patternsA.has(p));
-      const removed = [...patternsA].filter(p => !patternsB.has(p));
-      assert(removed.length === 1, 'Should have 1 removed, got ' + removed.length);
-      assert(removed[0] === 'eval', 'Removed should be eval, got ' + removed[0]);
-      assert(added.length === 0, 'Should have 0 added');
-    } finally { cleanTempDir(dirA); cleanTempDir(dirB); }
-  });
-
-  test('AST-DIFF: compare mock — identical versions → both empty', () => {
-    const dirA = makeTempDir({ 'index.js': 'const http = require("http"); http.get("url", cb);' });
-    const dirB = makeTempDir({ 'index.js': 'const http = require("http"); http.get("url", cb);' });
-    try {
-      const patternsA = extractDangerousPatterns(dirA);
-      const patternsB = extractDangerousPatterns(dirB);
-      const added = [...patternsB].filter(p => !patternsA.has(p));
-      const removed = [...patternsA].filter(p => !patternsB.has(p));
-      assert(added.length === 0, 'Should have 0 added, got ' + added.length);
-      assert(removed.length === 0, 'Should have 0 removed, got ' + removed.length);
-    } finally { cleanTempDir(dirA); cleanTempDir(dirB); }
-  });
-
-  test('AST-DIFF: compare mock — multiple added and removed patterns', () => {
-    const dirA = makeTempDir({
-      'index.js': 'eval("x"); const dns = require("dns"); dns.resolve("a");'
-    });
-    const dirB = makeTempDir({
-      'index.js': 'const cp = require("child_process"); fetch("url"); const secret = process.env.KEY;'
-    });
-    try {
-      const patternsA = extractDangerousPatterns(dirA);
-      const patternsB = extractDangerousPatterns(dirB);
-      const added = [...patternsB].filter(p => !patternsA.has(p)).sort();
-      const removed = [...patternsA].filter(p => !patternsB.has(p)).sort();
-      assert(added.length === 3, 'Should have 3 added, got ' + added.length);
-      assert(added.includes('child_process'), 'Added should include child_process');
-      assert(added.includes('fetch'), 'Added should include fetch');
-      assert(added.includes('process.env'), 'Added should include process.env');
-      assert(removed.length === 2, 'Should have 2 removed, got ' + removed.length);
-      assert(removed.includes('eval'), 'Removed should include eval');
-      assert(removed.includes('dns.lookup'), 'Removed should include dns.lookup');
-    } finally { cleanTempDir(dirA); cleanTempDir(dirB); }
-  });
+  // NOTE (audit 2026-07): the former « compare mock » tests re-implemented the
+  // set-diff inline (extractDangerousPatterns + local filter). The diff itself is
+  // now exercised against the REAL compareAstPatterns via the offline harness below.
 
   // --- SENSITIVE_PATHS ---
 
@@ -309,78 +248,223 @@ async function runTemporalAstDiffTests() {
     assert(PATTERN_SEVERITY['fs.readFile_sensitive'] === 'MEDIUM', 'fs.readFile_sensitive should be MEDIUM');
   });
 
-  // --- detectSuddenAstChanges (mock logic) ---
+  // --- Offline harness: run the REAL compareAstPatterns / detectSuddenAstChanges ---
+  //
+  // Audit 2026-07: these two functions were previously only exercised by the opt-in
+  // network tests (MUADDIB_TEST_NETWORK) — i.e. NEVER in CI. This harness routes
+  // their network boundaries to local temp dirs so the real diff + severity mapping
+  // run offline:
+  //   - fetchPackageMetadata (src/scanner/temporal-analysis.js exports, destructured
+  //     at load by temporal-ast-diff) → fake packument
+  //   - https.request (used by the module-internal fetchVersionMetadata) → fake 200
+  //     JSON with a dist.tarball URL (Module._load interception, scoped to the
+  //     re-required scanner module)
+  //   - downloadToFile / extractTarGz (src/shared/download.js exports) → no-op /
+  //     returns the prepared local dir for the version encoded in the temp-dir name
+  // All patched state (module exports, require.cache, Module._load) restored in finally.
 
-  test('AST-DIFF: detectSuddenAstChanges mock — added child_process yields CRITICAL finding', () => {
-    // Simulate the logic: two dirs, extract patterns, build findings
-    const dirA = makeTempDir({ 'index.js': 'console.log("v1");' });
-    const dirB = makeTempDir({ 'index.js': 'const cp = require("child_process"); cp.exec("id");' });
+  const Module = require('module');
+  const EventEmitter = require('events');
+  const taScannerPath = require.resolve('../../src/scanner/temporal-analysis.js');
+  const dlPath = require.resolve('../../src/shared/download.js');
+  const astScannerPath = require.resolve('../../src/scanner/temporal-ast-diff.js');
+  const astShimPath = require.resolve('../../src/temporal-ast-diff.js');
+
+  async function withMockedAstDiff({ metadata, versionDirs = {} }, testFn) {
+    const taExports = require.cache[taScannerPath].exports;
+    const dlExports = require.cache[dlPath].exports;
+    const origFetchMeta = taExports.fetchPackageMetadata;
+    const origDownload = dlExports.downloadToFile;
+    const origExtract = dlExports.extractTarGz;
+    const savedAstScanner = require.cache[astScannerPath];
+    const savedAstShim = require.cache[astShimPath];
+
+    taExports.fetchPackageMetadata = async () => metadata;
+    dlExports.downloadToFile = async () => 0;
+    dlExports.extractTarGz = (tgzPath) => {
+      // fetchPackageTarball extracts inside a mkdtemp dir named `${safeName}-${version}-XXXXXX`
+      const base = path.basename(path.dirname(tgzPath));
+      const m = base.match(/-(\d+\.\d+\.\d+)-[^-]*$/);
+      const dir = m && versionDirs[m[1]];
+      if (!dir) throw new Error('withMockedAstDiff: no prepared dir for temp dir ' + base);
+      return dir;
+    };
+
+    const mockHttps = {
+      request: (options, callback) => {
+        const res = new EventEmitter();
+        res.statusCode = 200;
+        res.resume = () => {};
+        const req = new EventEmitter();
+        req.setTimeout = () => {};
+        req.destroy = () => {};
+        req.end = () => {
+          process.nextTick(() => {
+            callback(res);
+            process.nextTick(() => {
+              const segs = String(options.path || '').split('/').filter(Boolean);
+              const version = decodeURIComponent(segs[segs.length - 1] || '0.0.0');
+              const name = decodeURIComponent(segs.slice(0, -1).join('/') || 'mock-pkg');
+              res.emit('data', Buffer.from(JSON.stringify({
+                name, version,
+                dist: { tarball: `https://registry.npmjs.org/${name}/-/${name}-${version}.tgz` }
+              })));
+              res.emit('end');
+            });
+          });
+        };
+        return req;
+      }
+    };
+
+    const originalLoad = Module._load;
+    Module._load = function (request, parent) {
+      if (request === 'https' && parent && parent.filename === astScannerPath) return mockHttps;
+      return originalLoad.apply(this, arguments);
+    };
+
+    delete require.cache[astScannerPath];
+    delete require.cache[astShimPath];
     try {
-      const patternsA = extractDangerousPatterns(dirA);
-      const patternsB = extractDangerousPatterns(dirB);
-      const added = [...patternsB].filter(p => !patternsA.has(p));
-      const findings = added.map(pattern => ({
-        type: 'dangerous_api_added',
-        pattern,
-        severity: PATTERN_SEVERITY[pattern] || 'MEDIUM',
-        description: `Package now uses ${pattern} (not present in previous version)`
-      }));
-      assert(findings.length === 1, 'Should have 1 finding, got ' + findings.length);
-      assert(findings[0].pattern === 'child_process', 'Pattern should be child_process');
-      assert(findings[0].severity === 'CRITICAL', 'Severity should be CRITICAL');
-      assert(findings[0].type === 'dangerous_api_added', 'Type should be dangerous_api_added');
-      assertIncludes(findings[0].description, 'child_process', 'Description should mention child_process');
+      const mod = require(astShimPath);
+      await testFn(mod);
+    } finally {
+      Module._load = originalLoad;
+      taExports.fetchPackageMetadata = origFetchMeta;
+      dlExports.downloadToFile = origDownload;
+      dlExports.extractTarGz = origExtract;
+      delete require.cache[astScannerPath];
+      delete require.cache[astShimPath];
+      if (savedAstScanner) require.cache[astScannerPath] = savedAstScanner;
+      if (savedAstShim) require.cache[astShimPath] = savedAstShim;
+    }
+  }
+
+  function makeTwoVersionMetadata(name) {
+    return {
+      name,
+      time: {
+        created: '2025-12-01T00:00:00.000Z',
+        modified: '2026-02-01T00:00:00.000Z',
+        '1.0.0': '2026-01-01T00:00:00.000Z',
+        '1.1.0': '2026-02-01T00:00:00.000Z'
+      },
+      versions: { '1.0.0': {}, '1.1.0': {} }
+    };
+  }
+
+  await asyncTest('AST-DIFF: REAL compareAstPatterns — added/removed computed by src code (offline)', async () => {
+    const dirA = makeTempDir({ 'index.js': 'eval("legacy");' });
+    const dirB = makeTempDir({ 'index.js': 'const cp = require("child_process"); fetch("https://x.example");' });
+    try {
+      await withMockedAstDiff({
+        metadata: makeTwoVersionMetadata('fake-pkg'),
+        versionDirs: { '1.0.0': dirA, '1.1.0': dirB }
+      }, async (mod) => {
+        const diff = await mod.compareAstPatterns('fake-pkg', '1.0.0', '1.1.0');
+        assert(Array.isArray(diff.added) && Array.isArray(diff.removed), 'Should return added/removed arrays');
+        assert(diff.added.length === 2, 'Should have 2 added, got ' + JSON.stringify(diff.added));
+        assert(diff.added.includes('child_process'), 'added should include child_process');
+        assert(diff.added.includes('fetch'), 'added should include fetch');
+        assert(diff.removed.length === 1 && diff.removed[0] === 'eval',
+          'removed should be [eval], got ' + JSON.stringify(diff.removed));
+      });
     } finally { cleanTempDir(dirA); cleanTempDir(dirB); }
   });
 
-  test('AST-DIFF: detectSuddenAstChanges mock — added fetch yields HIGH finding', () => {
-    const dirA = makeTempDir({ 'index.js': 'console.log("v1");' });
-    const dirB = makeTempDir({ 'index.js': 'fetch("https://evil.com");' });
+  await asyncTest('AST-DIFF: REAL compareAstPatterns — identical versions → empty diff (offline)', async () => {
+    const src = 'const http = require("http"); http.get("url", cb);';
+    const dirA = makeTempDir({ 'index.js': src });
+    const dirB = makeTempDir({ 'index.js': src });
     try {
-      const patternsA = extractDangerousPatterns(dirA);
-      const patternsB = extractDangerousPatterns(dirB);
-      const added = [...patternsB].filter(p => !patternsA.has(p));
-      const findings = added.map(pattern => ({
-        type: 'dangerous_api_added',
-        pattern,
-        severity: PATTERN_SEVERITY[pattern] || 'MEDIUM'
-      }));
-      assert(findings.length === 1, 'Should have 1 finding');
-      assert(findings[0].severity === 'HIGH', 'fetch should be HIGH, got ' + findings[0].severity);
+      await withMockedAstDiff({
+        metadata: makeTwoVersionMetadata('fake-pkg'),
+        versionDirs: { '1.0.0': dirA, '1.1.0': dirB }
+      }, async (mod) => {
+        const diff = await mod.compareAstPatterns('fake-pkg', '1.0.0', '1.1.0');
+        assert(diff.added.length === 0, 'Should have 0 added, got ' + JSON.stringify(diff.added));
+        assert(diff.removed.length === 0, 'Should have 0 removed, got ' + JSON.stringify(diff.removed));
+      });
     } finally { cleanTempDir(dirA); cleanTempDir(dirB); }
   });
 
-  test('AST-DIFF: detectSuddenAstChanges mock — no new patterns → not suspicious', () => {
-    const dirA = makeTempDir({ 'index.js': 'eval("x");' });
-    const dirB = makeTempDir({ 'index.js': 'eval("y");' });
-    try {
-      const patternsA = extractDangerousPatterns(dirA);
-      const patternsB = extractDangerousPatterns(dirB);
-      const added = [...patternsB].filter(p => !patternsA.has(p));
-      assert(added.length === 0, 'No new patterns should mean not suspicious');
-    } finally { cleanTempDir(dirA); cleanTempDir(dirB); }
-  });
-
-  test('AST-DIFF: detectSuddenAstChanges mock — multiple patterns with mixed severities', () => {
-    const dirA = makeTempDir({ 'index.js': 'console.log(1);' });
-    const dirB = makeTempDir({
-      'index.js': 'const cp = require("child_process"); fetch("url"); const dns = require("dns"); dns.resolve("x");'
+  await asyncTest('AST-DIFF: REAL detectSuddenAstChanges — added APIs → suspicious with code-derived severities (offline)', async () => {
+    const dirV1 = makeTempDir({ 'index.js': 'module.exports = 41;' });
+    const dirV2 = makeTempDir({
+      'index.js': 'const cp = require("child_process"); fetch("https://evil.example"); const dns = require("dns");'
     });
     try {
-      const patternsA = extractDangerousPatterns(dirA);
-      const patternsB = extractDangerousPatterns(dirB);
-      const added = [...patternsB].filter(p => !patternsA.has(p));
-      const findings = added.map(pattern => ({
-        type: 'dangerous_api_added',
-        pattern,
-        severity: PATTERN_SEVERITY[pattern] || 'MEDIUM'
-      }));
-      assert(findings.length === 3, 'Should have 3 findings, got ' + findings.length);
-      const severities = findings.map(f => f.severity).sort();
-      assert(severities.includes('CRITICAL'), 'Should include CRITICAL (child_process)');
-      assert(severities.includes('HIGH'), 'Should include HIGH (fetch)');
-      assert(severities.includes('MEDIUM'), 'Should include MEDIUM (dns.lookup)');
-    } finally { cleanTempDir(dirA); cleanTempDir(dirB); }
+      await withMockedAstDiff({
+        metadata: makeTwoVersionMetadata('fake-pkg'),
+        versionDirs: { '1.0.0': dirV1, '1.1.0': dirV2 }
+      }, async (mod) => {
+        const result = await mod.detectSuddenAstChanges('fake-pkg');
+        assert(result.packageName === 'fake-pkg', 'packageName should match');
+        assert(result.suspicious === true, 'Should be suspicious');
+        assert(result.latestVersion === '1.1.0', 'latestVersion from real getLatestVersions, got ' + result.latestVersion);
+        assert(result.previousVersion === '1.0.0', 'previousVersion, got ' + result.previousVersion);
+        assert(result.findings.length === 3, 'Should have 3 findings, got ' + result.findings.length);
+        for (const f of result.findings) {
+          assert(f.type === 'dangerous_api_added', 'type should be dangerous_api_added');
+          assertIncludes(f.description, f.pattern, 'description should mention the pattern');
+        }
+        // Severities below are applied by detectSuddenAstChanges (PATTERN_SEVERITY in src),
+        // NOT recomputed here — this is the assertion the old mock tests could never make.
+        const bySeverity = {};
+        for (const f of result.findings) bySeverity[f.pattern] = f.severity;
+        assert(bySeverity['child_process'] === 'CRITICAL', 'child_process should be CRITICAL, got ' + bySeverity['child_process']);
+        assert(bySeverity['fetch'] === 'HIGH', 'fetch should be HIGH, got ' + bySeverity['fetch']);
+        assert(bySeverity['dns.lookup'] === 'MEDIUM', 'dns.lookup should be MEDIUM, got ' + bySeverity['dns.lookup']);
+        assert(result.metadata.latestPublishedAt === '2026-02-01T00:00:00.000Z', 'latestPublishedAt');
+        assert(result.metadata.previousPublishedAt === '2026-01-01T00:00:00.000Z', 'previousPublishedAt');
+      });
+    } finally { cleanTempDir(dirV1); cleanTempDir(dirV2); }
+  });
+
+  await asyncTest('AST-DIFF: REAL detectSuddenAstChanges — identical versions → not suspicious (offline)', async () => {
+    const src = 'eval("same-in-both-versions");';
+    const dirV1 = makeTempDir({ 'index.js': src });
+    const dirV2 = makeTempDir({ 'index.js': src });
+    try {
+      await withMockedAstDiff({
+        metadata: makeTwoVersionMetadata('fake-pkg'),
+        versionDirs: { '1.0.0': dirV1, '1.1.0': dirV2 }
+      }, async (mod) => {
+        const result = await mod.detectSuddenAstChanges('fake-pkg');
+        assert(result.suspicious === false, 'No new patterns → not suspicious');
+        assert(result.findings.length === 0, 'Should have no findings');
+        assert(result.latestVersion === '1.1.0' && result.previousVersion === '1.0.0', 'versions still reported');
+      });
+    } finally { cleanTempDir(dirV1); cleanTempDir(dirV2); }
+  });
+
+  await asyncTest('AST-DIFF: REAL detectSuddenAstChanges — single published version → not suspicious (offline)', async () => {
+    const metadata = {
+      name: 'single-version-pkg',
+      time: { created: '2026-01-01T00:00:00.000Z', '1.0.0': '2026-01-01T00:00:00.000Z' },
+      versions: { '1.0.0': {} }
+    };
+    await withMockedAstDiff({ metadata }, async (mod) => {
+      const result = await mod.detectSuddenAstChanges('single-version-pkg');
+      assert(result.suspicious === false, 'Single version should not be suspicious');
+      assert(result.findings.length === 0, 'Single version should have no findings');
+      assert(result.latestVersion === '1.0.0', 'latestVersion should be set');
+      assert(result.previousVersion === null, 'previousVersion should be null');
+      assert(result.metadata.latestPublishedAt === '2026-01-01T00:00:00.000Z', 'latestPublishedAt from real code');
+      assert(result.metadata.previousPublishedAt === null, 'previousPublishedAt should be null');
+    });
+  });
+
+  await asyncTest('AST-DIFF: REAL detectSuddenAstChanges — zero published versions → not suspicious (offline)', async () => {
+    const metadata = { name: 'no-version-pkg', time: { created: '2026-01-01T00:00:00.000Z' }, versions: {} };
+    await withMockedAstDiff({ metadata }, async (mod) => {
+      const result = await mod.detectSuddenAstChanges('no-version-pkg');
+      assert(result.suspicious === false, 'Zero versions should not be suspicious');
+      assert(result.findings.length === 0, 'Zero versions should have no findings');
+      assert(result.latestVersion === null, 'latestVersion should be null');
+      assert(result.previousVersion === null, 'previousVersion should be null');
+      assert(result.metadata.latestPublishedAt === null, 'latestPublishedAt should be null');
+    });
   });
 
   // --- Rules and playbooks integration ---
@@ -490,16 +574,22 @@ async function runTemporalAstDiffTests() {
 
   // --- extractDangerousPatterns edge cases ---
 
-  test('AST-DIFF: extractDangerousPatterns skips oversized files', () => {
-    const dir = makeTempDir({});
+  test('AST-DIFF: extractDangerousPatterns skips files over MAX_FILE_SIZE (10MB)', () => {
+    const dir = makeTempDir({ 'small.js': 'fetch("https://example.com");' });
     try {
-      // Create a file that looks oversized by writing a large file
-      // MAX_FILE_SIZE is 10MB, but we can't create a 10MB file in tests
-      // Instead, test that small files work and the function runs without error
-      const bigContent = 'eval("test");\n'.repeat(100);
-      fs.writeFileSync(path.join(dir, 'big.js'), bigContent, 'utf8');
+      // big.js is VALID JS made entirely of eval() calls and strictly larger than
+      // MAX_FILE_SIZE (10MB, src/shared/constants.js:113 — forEachSafeFile skips
+      // files with stat.size > getMaxFileSize()). If the size guard ever breaks,
+      // 'eval' WOULD be extracted and this test fails.
+      const line = 'eval("x");\n';
+      const oversized = line.repeat(Math.ceil((10 * 1024 * 1024 + 4096) / line.length));
+      const bigPath = path.join(dir, 'big.js');
+      fs.writeFileSync(bigPath, oversized, 'utf8');
+      assert(fs.statSync(bigPath).size > 10 * 1024 * 1024, 'fixture must exceed 10MB');
       const patterns = extractDangerousPatterns(dir);
-      assert(patterns.has('eval'), 'Should still detect eval in normal-sized file');
+      assert(!patterns.has('eval'), 'Oversized file must be skipped (eval must NOT be extracted)');
+      assert(patterns.has('fetch'), 'Normal-sized sibling file must still be scanned');
+      assert(patterns.size === 1, 'Only patterns from small.js expected, got ' + patterns.size);
     } finally { cleanTempDir(dir); }
   });
 
@@ -523,52 +613,6 @@ async function runTemporalAstDiffTests() {
       const patterns = extractDangerousPatterns(dir);
       assert(patterns.has('child_process'), 'Should detect patterns in deeply nested files');
     } finally { cleanTempDir(dir); }
-  });
-
-  // --- PATTERN_SEVERITY unknown fallback ---
-
-  test('AST-DIFF: Unknown pattern name falls back to MEDIUM severity', () => {
-    const unknownSeverity = PATTERN_SEVERITY['unknown_pattern'] || 'MEDIUM';
-    assert(unknownSeverity === 'MEDIUM', 'Unknown pattern should fall back to MEDIUM');
-  });
-
-  // --- detectSuddenAstChanges mock: single version (less than 2) ---
-
-  test('AST-DIFF: detectSuddenAstChanges mock — single version returns not suspicious', () => {
-    // Simulate what detectSuddenAstChanges does when latest.length < 2
-    const latest = [{ version: '1.0.0', publishedAt: '2026-01-01T00:00:00.000Z' }];
-    const result = {
-      packageName: 'single-version-pkg',
-      latestVersion: latest.length > 0 ? latest[0].version : null,
-      previousVersion: null,
-      suspicious: false,
-      findings: [],
-      metadata: {
-        latestPublishedAt: latest.length > 0 ? latest[0].publishedAt : null,
-        previousPublishedAt: null
-      }
-    };
-    assert(result.suspicious === false, 'Single version should not be suspicious');
-    assert(result.findings.length === 0, 'Single version should have no findings');
-    assert(result.previousVersion === null, 'previousVersion should be null');
-    assert(result.latestVersion === '1.0.0', 'latestVersion should be set');
-  });
-
-  test('AST-DIFF: detectSuddenAstChanges mock — zero versions returns not suspicious', () => {
-    const latest = [];
-    const result = {
-      packageName: 'no-version-pkg',
-      latestVersion: latest.length > 0 ? latest[0].version : null,
-      previousVersion: null,
-      suspicious: false,
-      findings: [],
-      metadata: {
-        latestPublishedAt: latest.length > 0 ? latest[0].publishedAt : null,
-        previousPublishedAt: null
-      }
-    };
-    assert(result.latestVersion === null, 'latestVersion should be null');
-    assert(result.metadata.latestPublishedAt === null, 'latestPublishedAt should be null');
   });
 
   // --- Integration tests (network-dependent) ---

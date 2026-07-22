@@ -88,7 +88,13 @@ async function runReputationFactorTests() {
     const out = applyReputationFactor(r, { package_age_days: 1, has_repository: false });
     assert(out !== null);
     assert(r.summary.riskScore > 50, `Score should have risen, got ${r.summary.riskScore}`);
-    assert(r.summary.riskLevel === r.summary.riskScore >= 75 ? 'CRITICAL' : r.summary.riskLevel);
+    // Operator-precedence bug in the old assertion (=== bound tighter than the
+    // ternary) made it always true. Assert the level/score coherence explicitly.
+    if (r.summary.riskScore >= 75) {
+      assert(r.summary.riskLevel === 'CRITICAL', `score ${r.summary.riskScore} ≥ 75 must be CRITICAL, got ${r.summary.riskLevel}`);
+    } else {
+      assert(r.summary.riskLevel !== 'CRITICAL', `score ${r.summary.riskScore} < 75 must not be CRITICAL, got ${r.summary.riskLevel}`);
+    }
   });
 
   test('Phase 4: factor caps at 100 (no overflow)', () => {

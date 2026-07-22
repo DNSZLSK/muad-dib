@@ -142,7 +142,7 @@ function runMLPipelineTests() {
 
   // --- Feature vector key count ---
 
-  test('ML pipeline: feature vector has 71 keys (62 + 9 enriched)', () => {
+  test('ML pipeline: feature vector key count is exact (model contract — silent feature loss must fail)', () => {
     const result = {
       threats: [{ type: 'env_access', severity: 'HIGH', file: 'x.js' }],
       summary: { total: 1, critical: 0, high: 1, medium: 0, low: 0, riskScore: 10 }
@@ -153,8 +153,10 @@ function runMLPipelineTests() {
       hasTests: false
     });
     const keys = Object.keys(features);
-    // 62 original + 9 new = 71
-    assert(keys.length >= 64, `Feature vector should have 64+ keys, got ${keys.length}`);
+    // Exact count for this fixed input (threats + full npmRegistryMeta). The vector
+    // size is a contract of the XGBoost model — a `>=` floor let features silently
+    // disappear. If a feature is intentionally added/removed, update this number.
+    assert(keys.length === 99, `Feature vector must have exactly 99 keys for this input, got ${keys.length}`);
   });
 
   // --- Synthetic model end-to-end tests ---

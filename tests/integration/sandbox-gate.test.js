@@ -13,6 +13,7 @@ async function runSandboxGateTests() {
   const {
     SANDBOX_SCORE_THRESHOLD,
     computeSandboxScoreThreshold,
+    computeSandboxGate,
   } = require('../../src/monitor/queue.js');
 
   // ── Default & clamping ───────────────────────────────────────────────────
@@ -57,55 +58,53 @@ async function runSandboxGateTests() {
       `"NaN" → 40, got ${computeSandboxScoreThreshold('NaN')}`);
   });
 
-  // ── Behaviour: gate semantics (pure conditional, exercised offline) ──────
+  // ── Behaviour: gate semantics (real exported gate, exercised offline) ────
   //
-  // The actual scanPackage gate is:
-  //   shouldSandbox = (tier === '1a')
-  //                 || (tier === '1b' && riskScore >= SANDBOX_SCORE_THRESHOLD)
-  //                 || (tier === 2  && riskScore >= SANDBOX_SCORE_THRESHOLD && queue < 50)
-  // We replicate that here so a regression in either side (constant vs.
-  // conditional) trips the test. Keep them in lockstep.
-
-  function gateDecision(tier, riskScore, queueLen, threshold) {
-    if (tier === '1a') return true;
-    if (tier === '1b' && riskScore >= threshold) return true;
-    if (tier === 2 && riskScore >= threshold && queueLen < 50) return true;
-    return false;
-  }
+  // computeSandboxGate IS the tier gate used by scanPackage (queue.js) — no
+  // replica to keep in lockstep. The environment preconditions
+  // (isSandboxEnabled, sandboxAvailable, large-package skip) stay at the call
+  // site; this covers the tier/score/queue policy itself.
 
   test('SANDBOX-GATE: T1a always sandboxes regardless of score (HC malice mandatory)', () => {
-    assert(gateDecision('1a', 0, 100, 40) === true, 'T1a score=0 → true');
-    assert(gateDecision('1a', 5, 5_000, 40) === true, 'T1a score=5 with huge queue → true');
-    assert(gateDecision('1a', 99, 0, 80) === true, 'T1a score=99 high threshold → true');
+    assert(computeSandboxGate('1a', 0, 100, 40) === true, 'T1a score=0 → true');
+    assert(computeSandboxGate('1a', 5, 5_000, 40) === true, 'T1a score=5 with huge queue → true');
+    assert(computeSandboxGate('1a', 99, 0, 80) === true, 'T1a score=99 high threshold → true');
   });
 
   test('SANDBOX-GATE: T1b score < threshold → NO sandbox (gates out the 25-39 noise band)', () => {
-    assert(gateDecision('1b', 24, 0, 40) === false, 'T1b score=24 < 40 → false');
-    assert(gateDecision('1b', 39, 0, 40) === false, 'T1b score=39 < 40 → false');
-    assert(gateDecision('1b', 25, 0, 40) === false,
+    assert(computeSandboxGate('1b', 24, 0, 40) === false, 'T1b score=24 < 40 → false');
+    assert(computeSandboxGate('1b', 39, 0, 40) === false, 'T1b score=39 < 40 → false');
+    assert(computeSandboxGate('1b', 25, 0, 40) === false,
       'T1b score=25 (old threshold) now gated out → false');
   });
 
   test('SANDBOX-GATE: T1b score >= threshold → sandbox eligible', () => {
-    assert(gateDecision('1b', 40, 5_000, 40) === true,
+    assert(computeSandboxGate('1b', 40, 5_000, 40) === true,
       'T1b score=40 (axon-enterprise was 52) → true regardless of queue depth');
-    assert(gateDecision('1b', 100, 0, 40) === true, 'T1b score=100 → true');
+    assert(computeSandboxGate('1b', 100, 0, 40) === true, 'T1b score=100 → true');
   });
 
   test('SANDBOX-GATE: T2 requires BOTH score gate AND queue < 50', () => {
-    assert(gateDecision(2, 40, 49, 40) === true,  'T2 score=40 + queue=49 → true');
-    assert(gateDecision(2, 40, 50, 40) === false, 'T2 score=40 + queue=50 → false (queue cap)');
-    assert(gateDecision(2, 30, 0, 40) === false,  'T2 score=30 + queue=0 → false (score gate)');
+    assert(computeSandboxGate(2, 40, 49, 40) === true,  'T2 score=40 + queue=49 → true');
+    assert(computeSandboxGate(2, 40, 50, 40) === false, 'T2 score=40 + queue=50 → false (queue cap)');
+    assert(computeSandboxGate(2, 30, 0, 40) === false,  'T2 score=30 + queue=0 → false (score gate)');
+  });
+
+  test('SANDBOX-GATE: unknown tier never sandboxes (no accidental default-true)', () => {
+    assert(computeSandboxGate(3, 100, 0, 40) === false, 'tier 3 → false even at score 100');
+    assert(computeSandboxGate(undefined, 100, 0, 40) === false, 'undefined tier → false');
+    assert(computeSandboxGate('2', 100, 0, 40) === false,
+      'string "2" is not tier 2 — the gate compares strictly (T1 tiers are strings, T2 is a number)');
   });
 
   test('SANDBOX-GATE: env var override widens or tightens the gate', () => {
     // Operators can lower the threshold during a rollback if Stage 3 turns out
     // to drop a real signal somewhere — e.g. set MUADDIB_SANDBOX_SCORE_THRESHOLD=25.
     const widened = computeSandboxScoreThreshold('25');
-    assert(gateDecision('1b', 25, 0, widened) === true,
+    assert(computeSandboxGate('1b', 25, 0, widened) === true,
       'T1b score=25 with threshold=25 → true (operator lowered the gate)');
     const tightened = computeSandboxScoreThreshold('60');
-    assert(gateDecision('1b', 52, 0, tightened) === false,
+    assert(computeSandboxGate('1b', 52, 0, tightened) === false,
       'T1b score=52 with threshold=60 → false (axon-enterprise would now miss — illustrates the 40 default is the right floor)');
   });
 }
