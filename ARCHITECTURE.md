@@ -233,8 +233,8 @@ quand un package suspect est surface.
 1. `src/ioc/data/iocs-compact.json` (~5MB, ships with npm) — wildcards[] + versioned{} Maps for O(1) lookup
 2. YAML files in `iocs/` — builtin rules
 3. External sources, two refresh paths:
-   - **Light path** — `muaddib update` (~5s, JSON/REST only): Shai-Hulud, DataDog, OSV-lightweight API, OpenSourceMalware (`scrapeOSMQueryLatest`, requires `OSM_API_TOKEN`).
-   - **Full path** — `muaddib scrape` (~5min, includes heavy zip downloads): all of the above PLUS OSV bulk dump (npm + PyPI), OSSF malicious-packages, GitHub Advisory, Aikido bulk feed.
+   - **Light path** — `muaddib update` (~5s, JSON/REST only): Shai-Hulud, DataDog, OpenSourceMalware (`scrapeOSMQueryLatest`, requires `OSM_API_TOKEN`).
+   - **Full path** — `muaddib scrape` (~5min, includes heavy zip downloads): all of the above PLUS OSV bulk dump (npm + PyPI, incl. GHSA malware — MAL- entries), OSSF malicious-packages, Aikido bulk feed.
 
    On the VPS, systemd units drive these automatically:
    - `muaddib-monitor.service` - long-running daemon (npm/PyPI poll + scan + in-process GHSA poller + webhooks)

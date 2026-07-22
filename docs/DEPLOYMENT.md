@@ -71,11 +71,10 @@ journalctl -u muaddib-scrape-light -f
 
 `muaddib-scrape.timer` triggers `muaddib-scrape.service`, which runs `muaddib scrape` (~5 min). Adds the heavy bulk feeds on top of the light path:
 
-- OSV.dev npm bulk dump (zip)
+- OSV.dev npm bulk dump (zip; includes GHSA malware as MAL- entries)
 - OSV.dev PyPI bulk dump (zip)
 - OSSF malicious-packages (GitHub trees)
 - Aikido OSS Malware Feed (~12 MB JSON)
-- GitHub Advisory Database
 
 ```bash
 systemctl list-timers muaddib-scrape

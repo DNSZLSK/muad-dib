@@ -930,65 +930,14 @@ async function scrapeOSVPyPIDataDump() {
   return packages;
 }
 
-// ============================================
-// SOURCE 4: GitHub Advisory Database (Malware)
-// ============================================
-async function scrapeGitHubAdvisory() {
-  console.log('[SCRAPER] GitHub Advisory Database (malware)...');
-  const packages = [];
-  
-  try {
-    const resp = await fetchJSON('https://api.osv.dev/v1/query', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: { package: { ecosystem: 'npm' } }
-    });
-    
-    if (resp.status === 200 && resp.data && resp.data.vulns) {
-      for (const vuln of resp.data.vulns) {
-        // Filter GHSA with malware mention
-        if (vuln.id && vuln.id.startsWith('GHSA-')) {
-          const summary = (vuln.summary || '').toLowerCase();
-          const details = (vuln.details || '').toLowerCase();
-          const isMalware = summary.includes('malware') || 
-                          summary.includes('malicious') ||
-                          details.includes('malware') ||
-                          details.includes('malicious') ||
-                          summary.includes('backdoor') ||
-                          summary.includes('trojan');
-          
-          if (isMalware) {
-            for (const affected of vuln.affected || []) {
-              if (affected.package && affected.package.ecosystem === 'npm') {
-                const versions = extractVersions(affected);
-                for (const ver of versions) {
-                  packages.push({
-                    id: vuln.id,
-                    name: affected.package.name,
-                    version: ver,
-                    severity: 'critical',
-                    confidence: 'high',
-                    source: 'github-advisory',
-                    description: (vuln.summary || 'Malicious package').slice(0, 200),
-                    references: ['https://github.com/advisories/' + vuln.id],
-                    mitre: 'T1195.002',
-                    freshness: createFreshness('github-advisory', 'high')
-                  });
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-    
-    console.log(`[SCRAPER]   ${packages.length} packages`);
-  } catch (e) {
-    console.log(`[SCRAPER]   Error: ${e.message}`);
-  }
-  
-  return packages;
-}
+// SOURCE 4 (GitHub Advisory Database) removed 2026-07 (GAP-2): it POSTed
+// api.osv.dev/v1/query with `{ package: { ecosystem: 'npm' } }` — no package name,
+// which the OSV /v1/query API rejects with HTTP 400 on every call. It therefore
+// returned 0 packages permanently while logging as a normal completion (fictional
+// coverage). Empirically verified that the GHSA-malware it targeted is already
+// 100% covered by the OSV MAL- dump (153/153 pre-snapshot npm GHSA advisories
+// present in the IOC store), so its removal loses no coverage. The GHSA poller
+// (src/ioc/ghsa-poller.js) tracks the coverage denominator independently.
 
 // ============================================
 // MAIN SCRAPER
@@ -1072,7 +1021,6 @@ async function runScraper() {
     scrapeShaiHuludDetector(),
     scrapeDatadogIOCs(),
     scrapeOSSFMaliciousPackages(osvResult.knownIds),
-    scrapeGitHubAdvisory(),
     scrapeOSVPyPIDataDump(),
     scrapeAikidoMalwareFeed(),
     scrapeOSMQueryLatest()
@@ -1081,10 +1029,9 @@ async function runScraper() {
   const shaiHuludResult = results[0];
   const datadogResult = results[1];
   const ossfPackages = results[2];
-  const githubPackages = results[3];
-  const pypiPackages = results[4];
-  const aikidoResult = results[5];
-  const osmResult = results[6];
+  const pypiPackages = results[3];
+  const aikidoResult = results[4];
+  const osmResult = results[5];
 
   // Log aggregated warnings
   if (_noVersionSkipCount > 0) {
@@ -1109,7 +1056,6 @@ async function runScraper() {
     ...shaiHuludResult.packages,
     ...datadogResult.packages,
     ...ossfPackages,
-    ...githubPackages,
     ...aikidoResult.packages,
     ...osmResult.packages
   ];
@@ -1597,43 +1543,14 @@ async function scrapeOSMQueryLatest() {
   return { packages: npmPackages, pypi_packages: pypiPackages };
 }
 
-// ============================================
-// SOURCE 5: OSV.dev Lightweight API
-// Used by `muaddib update` (fast, no zip download)
-// ============================================
-
-/**
- * Lightweight OSV.dev query — fetches recent npm MAL-* entries via REST API.
- * Used by `muaddib update` as a fast complement to the full zip scrape.
- * @returns {Promise<Array>} Parsed IOC package entries
- */
-async function scrapeOSVLightweightAPI() {
-  console.log('[SCRAPER] OSV.dev lightweight API...');
-  const packages = [];
-
-  try {
-    const resp = await fetchJSON('https://api.osv.dev/v1/query', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: { package: { ecosystem: 'npm' } }
-    });
-
-    if (resp.status === 200 && resp.data && resp.data.vulns) {
-      for (const vuln of resp.data.vulns) {
-        if (vuln.id && vuln.id.startsWith('MAL-')) {
-          const parsed = parseOSVEntry(vuln, 'osv-api');
-          for (const p of parsed) packages.push(p);
-        }
-      }
-    }
-
-    console.log('[SCRAPER]   ' + packages.length + ' MAL-* packages from OSV API');
-  } catch (e) {
-    console.log('[SCRAPER]   OSV API error: ' + e.message);
-  }
-
-  return packages;
-}
+// SOURCE 5 (OSV.dev Lightweight API) removed 2026-07 (GAP-2): same defect as
+// SOURCE 4 — it POSTed api.osv.dev/v1/query with no package name (`{ package:
+// { ecosystem: 'npm' } }`), which OSV rejects with HTTP 400, so it returned 0
+// MAL-* packages permanently while `muaddib update` logged "+0 OSV API" as normal.
+// It was also 100% redundant with the OSV MAL- zip dump (scrapeOSVDataDump), which
+// pulls the same MAL- npm set. The `muaddib update` light path keeps its recent-
+// malware coverage via GenSecAI + DataDog + OSM; the authoritative OSV MAL- set
+// comes from the deep `muaddib scrape`.
 
 /**
  * Batch query OSV.dev for specific package names.
@@ -1718,7 +1635,7 @@ module.exports = {
   runScraper, scrapeShaiHuludDetector, scrapeDatadogIOCs,
   scrapeAikidoMalwareFeed,
   scrapeOSMQueryLatest,
-  scrapeOSVLightweightAPI, queryOSVBatch,
+  queryOSVBatch,
   getSourceConfidence,
   // Pure utility functions (exported for testing)
   parseCSVLine, parseCSV, extractVersions, parseOSVEntry,
