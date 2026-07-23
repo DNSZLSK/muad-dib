@@ -474,6 +474,29 @@ function analyzeFile(content, filePath, basePath) {
         }
       }
 
+      // Stream-based credential read: fs.createReadStream(<sensitive path>) is the
+      // stream equivalent of readFileSync. Registering it as a credential_read source
+      // closes the .pipe() exfil gap — createReadStream('/.ssh/id_rsa').pipe(net.connect(...))
+      // now scores the same as the readFileSync + socket.write form (the co-occurring
+      // network sink from the .pipe() argument — net.connect/http.request — is already
+      // detected by the MemberExpression sink handler below). Strictly gated on
+      // isCredentialPath: FP-measured 0/745 benign packages (createReadStream of a
+      // sensitive path is absent from legitimate code; the benign servers'
+      // createReadStream('public/index.html').pipe(res) is not sensitive-sourced, and
+      // the .pipe(res)/.pipe(createWriteStream) sinks are not network sinks). Deliberately
+      // NOT added to MODULE_SOURCE_METHODS to avoid the alias path, which does not
+      // re-check the path and would flag a non-sensitive aliased read.
+      if (callName === 'createReadStream' || callName === 'fs.createReadStream') {
+        const arg = node.arguments[0];
+        if (arg && isCredentialPath(arg, sensitivePathVars)) {
+          sources.push({
+            type: 'credential_read',
+            name: callName,
+            line: node.loc?.start?.line
+          });
+        }
+      }
+
       // fs.promises.readFile(path) — 3-level member chain
       if (node.callee.type === 'MemberExpression' &&
           node.callee.object?.type === 'MemberExpression') {

