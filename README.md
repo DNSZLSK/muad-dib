@@ -345,7 +345,7 @@ npm test
 
 ### Testing
 
-- **<!--stat:tests-->4543<!--/stat:tests--> tests** across <!--stat:testFiles-->152<!--/stat:testFiles--> modular test files
+- **<!--stat:tests-->4545<!--/stat:tests--> tests** across <!--stat:testFiles-->152<!--/stat:testFiles--> modular test files
 - **56 fuzz tests** - Malformed inputs, ReDoS, unicode, binary
 - **Datadog 17K benchmark** - 14,587 confirmed malware samples (in-scope)
 - **Ground truth validation** - 96 real-world attacks (95.74% TPR@3, 88.30% TPR@20 — v2.11.48 full measure on 94 in-scope)

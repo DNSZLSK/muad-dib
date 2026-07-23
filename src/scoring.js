@@ -1683,7 +1683,20 @@ function calculateRiskScore(deduped, intentResult) {
   // confirmed Python install-time malware reaches its true score and separates from the
   // benign 25-35 cluster (which carries no import-time-exec signal).
   const _hasPyPIImportRCE = deduped.some(t => PYPI_IMPORT_TIME_RCE_TYPES.has(t.type));
-  if (!_hasLifecycle && !_hasHC && !_hasCompound && !_hasStagedC2 && !_hasPyPIImportRCE) {
+  // Track E (PyPI unblock, phase 2): a CRITICAL string-IOC match is a campaign-unique
+  // artifact (inclusion criteria in iocs/string-iocs.yaml — unique stagers / XOR keys /
+  // C2 markers; single match = decisive by construction). The hash/name IOC matches
+  // already escape this ceiling via applySingleFireCriticalFloor, but ioc_string_match
+  // is not single-fire, so a lifecycle-less package (the PyPI shape: recon/trapdoor
+  // libs with no npm install hook) was buried at 35 even at globalRiskScore 100
+  // (GT-099 eth-security-auditor). Measured 0 ioc_string_match across 869 benign
+  // packages (545 curated + 200 random npm + 124 PyPI) — zero corpus FP cost.
+  // HIGH-severity strings (weaker, shared artifacts) deliberately do NOT void the cap.
+  const _hasCriticalStringIOC = deduped.some(t =>
+    t.type === 'ioc_string_match' && t.severity === 'CRITICAL'
+  );
+  if (!_hasLifecycle && !_hasHC && !_hasCompound && !_hasStagedC2 && !_hasPyPIImportRCE &&
+      !_hasCriticalStringIOC) {
     riskScore = Math.min(riskScore, 35);
   }
 

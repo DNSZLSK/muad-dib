@@ -1041,6 +1041,25 @@ async function runScoringHardeningTests() {
     assert(result.riskScore === 35, `non-RCE module-level signal must stay capped at 35, got ${result.riskScore}`);
   });
 
+  test('Track E: CRITICAL ioc_string_match bypasses the 35 cap (GT-099 shape)', () => {
+    // A campaign-unique string IOC in a lifecycle-less package (PyPI recon/trapdoor
+    // shape — eth-security-auditor) must reach its computed score, not be buried at 35.
+    const threats = _noLifecycleBase().concat([
+      { type: 'ioc_string_match', severity: 'CRITICAL', file: '__init__.py', message: 'String IOC match: "c2.example" (campaign: recon-trapdoor-2026-07)' }
+    ]);
+    const result = calculateRiskScore(threats);
+    assert(result.riskScore > 35, `CRITICAL string IOC must exceed 35, got ${result.riskScore}`);
+  });
+
+  test('Track E (FP guard): HIGH-severity ioc_string_match does NOT void the cap', () => {
+    // HIGH string IOCs are weaker, shared artifacts — they must not lift the ceiling.
+    const threats = _noLifecycleBase().concat([
+      { type: 'ioc_string_match', severity: 'HIGH', file: '__init__.py', message: 'String IOC match: "shared-artifact" (campaign: unknown)' }
+    ]);
+    const result = calculateRiskScore(threats);
+    assert(result.riskScore === 35, `HIGH string IOC must stay capped at 35, got ${result.riskScore}`);
+  });
+
   // ===================================================================
   // Track R malice floor — stealth-exec + obfuscation compound (asyncapi/specs
   // Miasma ATO 2026-07-14). reputationFactor (0.1x on a mature/popular package)
