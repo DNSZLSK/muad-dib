@@ -319,3 +319,21 @@ strings:
   # The remaining 2/7 PyPI names are too generic to add as string-IOCs without FP risk:
   # `env-loader-cli` and `git-config-sync` would match legit advisories or unrelated
   # tools. They stay covered via the PyPI IOC base (matched by name in python.js).
+
+  # ── NullReceiver (DPRK "Contagious Interview" / XORIndex loader, 2026-07..08) ──
+  # Sources: thehackernews.com/2026/08/trojanized-npm-packages-decode-c2-ip.html
+  #          sonatype.com/blog/six-npm-packages-use-ethereum-transactions-to-retrieve-malicious-payloads
+  # Blockchain-C2 evolution of EtherHiding: the loader reads a hard-coded attacker
+  # wallet's most recent outbound tx and decodes the C2 IPv4 out of the recipient
+  # address bytes (zero-value / zero-data transfer = no smart contract, no calldata
+  # signal), then fetches+runs BeaverTail. The wallet is the ONE artifact that lives
+  # in the package source itself — the C2 IP (166.88.134.62) and the dead-drop
+  # recipient (0xa658863ea658863e68656c6c6f6970626f742121 → "helloipbot!!") resolve
+  # on-chain at runtime, so they stay as network/intel markers (iocs-compact) rather
+  # than source string-IOCs. Package names are covered by the npm IOC base (wildcards
+  # + versioned for the hijacked @kolbo/mcp, agentgui, godot-kit).
+  - string: "0xa322e5f3d311d3080e6f0121063e9adc2490ef1a"
+    campaign: "nullreceiver-2026-08"
+    severity: CRITICAL
+    source: "https://thehackernews.com/2026/08/trojanized-npm-packages-decode-c2-ip.html"
+    description: "Hard-coded attacker Ethereum wallet whose latest outbound tx encodes the C2 IP in its recipient address (NullReceiver blockchain-C2 dead-drop resolver)"
