@@ -3,9 +3,13 @@
 const { test, assert } = require('../test-utils');
 const {
   classifyDifferentiator,
+  passesGate,
   leadStats,
   buildGhsaMap,
-  earliestDetectionTs,
+  detectionsFromLedger,
+  tierRank,
+  maxSeverity,
+  earliestTs,
   backfillDetections
 } = require('../../scripts/differentiator-audit.js');
 
@@ -107,13 +111,87 @@ function runDifferentiatorAuditTests() {
     assert(!m.has('npm/y') && !m.has('npm/z'), 'withdrawn + undated excluded');
   });
 
-  test('earliestDetectionTs: min first_seen_at, null on empty', () => {
-    const t = earliestDetectionTs([
+  test('earliestTs: min of a field, null on empty', () => {
+    const t = earliestTs([
       { first_seen_at: '2026-07-05T00:00:00Z' },
       { first_seen_at: '2026-07-01T00:00:00Z' }
-    ]);
+    ], 'first_seen_at');
     assert(t === Date.parse('2026-07-01T00:00:00Z'), 'earliest picked');
-    assert(earliestDetectionTs([]) === null, 'empty → null');
+    assert(earliestTs([], 'first_seen_at') === null, 'empty → null');
+  });
+
+  // ── ledger source ──────────────────────────────────────────────────────
+
+  test('detectionsFromLedger: keeps only suspect/confirmed, earliest ts, union types, max score, best tier', () => {
+    const ledger = [
+      { name: 'p', ecosystem: 'npm', ts: '2026-07-05T00:00:00Z', outcome: 'suspect', score: 30, tier: '2', maxSeverity: 'MEDIUM', types: ['obfuscation'] },
+      { name: 'p', ecosystem: 'npm', ts: '2026-07-01T00:00:00Z', outcome: 'confirmed', score: 80, tier: '1a', maxSeverity: 'CRITICAL', types: ['shell_exec'] }, // earlier + stronger
+      { name: 'q', ecosystem: 'npm', ts: '2026-07-02T00:00:00Z', outcome: 'clean', score: 0, types: [] } // filtered out
+    ];
+    const recs = detectionsFromLedger(ledger);
+    assert(recs.length === 1, `only suspect/confirmed pkg kept, got ${recs.length}`);
+    const p = recs[0];
+    assert(p.first_seen_at === '2026-07-01T00:00:00Z', 'earliest suspect ts wins');
+    assert(p.score === 80 && p.tier === '1a' && p.severity === 'CRITICAL', 'max score / best tier / max severity');
+    assert(p.findings.sort().join(',') === 'obfuscation,shell_exec', 'union of types across scans');
+  });
+
+  test('detectionsFromLedger: empty / no-alert ledger → empty', () => {
+    assert(detectionsFromLedger([]).length === 0, 'empty in → empty out');
+    assert(detectionsFromLedger([{ name: 'x', outcome: 'dropped', ts: '2026-07-01T00:00:00Z' }]).length === 0, 'no alert outcome → empty');
+  });
+
+  test('tierRank / maxSeverity helpers', () => {
+    assert(tierRank('1a') > tierRank('1b') && tierRank('1b') > tierRank('2') && tierRank('2') > tierRank('3'), 'tier ordering');
+    assert(tierRank('nonsense') === 0, 'unknown tier → 0');
+    assert(maxSeverity('MEDIUM', 'CRITICAL') === 'CRITICAL' && maxSeverity('HIGH', 'LOW') === 'HIGH', 'severity max');
+  });
+
+  // ── confidence gate ────────────────────────────────────────────────────
+
+  test('classifyDifferentiator gate: --min-score sets low-score detections aside (gatedOut)', () => {
+    const dets = [
+      { package: 'strong', version: '1', ecosystem: 'npm', first_seen_at: '2026-07-01T00:00:00Z', findings: ['fetch_decrypt_exec'], score: 80 },
+      { package: 'weak', version: '1', ecosystem: 'npm', first_seen_at: '2026-07-01T00:00:00Z', findings: ['prototype_pollution'], score: 22 } // FP-shaped
+    ];
+    const r = classifyDifferentiator(dets, new Map(), IOC, { gate: { minScore: 50 } });
+    assert(r.counts.gatedOut === 1, `weak gated out, got ${r.counts.gatedOut}`);
+    assert(r.counts.netNew === 1 && r.differentiatorCount === 1, 'only the strong one counts');
+    assert(r.total === 1, 'gatedOut not counted in total');
+  });
+
+  test('classifyDifferentiator gate: --min-tier keeps tier>=bar only', () => {
+    const dets = [
+      { package: 'a', version: '1', ecosystem: 'npm', first_seen_at: '2026-07-01T00:00:00Z', findings: ['x'], tier: '1a' },
+      { package: 'b', version: '1', ecosystem: 'npm', first_seen_at: '2026-07-01T00:00:00Z', findings: ['x'], tier: '3' }
+    ];
+    const r = classifyDifferentiator(dets, new Map(), IOC, { gate: { minTier: '1b' } });
+    assert(r.counts.netNew === 1 && r.counts.gatedOut === 1, '1a passes tier>=1b, tier 3 gated');
+  });
+
+  test('classifyDifferentiator gate: --high-confidence requires an HC type (AND-combined)', () => {
+    const hc = new Set(['fetch_decrypt_exec']);
+    const dets = [
+      { package: 'hc', version: '1', ecosystem: 'npm', first_seen_at: '2026-07-01T00:00:00Z', findings: ['fetch_decrypt_exec'], score: 90 },
+      { package: 'nohc', version: '1', ecosystem: 'npm', first_seen_at: '2026-07-01T00:00:00Z', findings: ['high_entropy_string'], score: 90 }
+    ];
+    const r = classifyDifferentiator(dets, new Map(), IOC, { gate: { highConfidence: true, hcTypes: hc } });
+    assert(r.counts.netNew === 1 && r.counts.gatedOut === 1, 'only the HC-typed detection passes');
+    // negative: passesGate honors AND when multiple criteria given
+    assert(passesGate({ score: 90, tier: '3', findings: ['fetch_decrypt_exec'] }, { minScore: 50, minTier: '1a', hcTypes: hc, highConfidence: true }) === false, 'tier 3 fails the AND even with score+HC');
+  });
+
+  test('classifyDifferentiator: no gate → nothing gated (backward compatible)', () => {
+    const dets = [{ package: 'p', version: '1', ecosystem: 'npm', first_seen_at: '2026-07-01T00:00:00Z', findings: ['x'], score: 1, tier: '3' }];
+    const r = classifyDifferentiator(dets, new Map(), IOC);
+    assert(r.counts.gatedOut === 0 && r.counts.netNew === 1, 'no gate flags → raw behavior');
+  });
+
+  test('classifyDifferentiator: dependency_ioc_match is treated as ioc-only when the audit extends the set', () => {
+    const iocExt = new Set([...IOC, 'dependency_ioc_match']);
+    const dets = [{ package: 'dep', version: '1', ecosystem: 'npm', first_seen_at: '2026-07-01T00:00:00Z', findings: ['dependency_ioc_match'], severity: 'HIGH' }];
+    const r = classifyDifferentiator(dets, new Map(), iocExt);
+    assert(r.counts.iocOnly === 1 && r.counts.netNew === 0, 'dependency_ioc_match excluded');
   });
 
   test('backfillDetections: stamps advisory_at + lead_time_hours only on matched lines', () => {
