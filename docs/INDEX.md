@@ -28,7 +28,7 @@
 
 | Metric | Value |
 |--------|-------|
-| Tests | **<!--stat:tests-->4545<!--/stat:tests-->** across <!--stat:testFiles-->152<!--/stat:testFiles--> files |
+| Tests | **<!--stat:tests-->4545<!--/stat:tests-->** across <!--stat:testFiles-->153<!--/stat:testFiles--> files |
 | Rules | **<!--stat:rulesTotal-->277<!--/stat:rulesTotal-->** (<!--stat:rulesCore-->272<!--/stat:rulesCore--> RULES + <!--stat:rulesParanoid-->5<!--/stat:rulesParanoid--> PARANOID - v2.11.67/70 Phantom Gyp added PKG-023 + COMPOUND-017) |
 | Scanners | **<!--stat:scanners-->22<!--/stat:scanners--> parallel** + 2 pre-analysis (module-graph, deobfuscate) + 1 async parser bootstrap (python-ast WASM) + 6 conditional/post-processing (paranoid, 3× temporal-*, reachability, phantom-gyp) + 1 metadata (npm-registry) |
 | TPR@3 (Ground Truth, v2.11.48 measure) | **95.74%** (90/94 in-scope) — full re-measurement on enriched GT |

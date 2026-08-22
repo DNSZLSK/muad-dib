@@ -114,6 +114,7 @@ const { runReachabilityFunctionsTests } = require('./unit/reachability-functions
 const { runFeedHealthTests } = require('./unit/feed-health.test');
 const { runGhsaPollerTests } = require('./unit/ghsa-poller.test');
 const { runCoverageAuditTests } = require('./unit/coverage-audit.test');
+const { runDifferentiatorAuditTests } = require('./unit/differentiator-audit.test');
 const { runDeltaMultiplierTests } = require('./unit/delta-multiplier.test');
 const { runConfidenceTiersTests } = require('./unit/confidence-tiers.test');
 const { runCompoundTighteningTests } = require('./unit/compound-tightening.test');
@@ -375,6 +376,7 @@ async function timed(name, fn) {
   await timed('feed-health', runFeedHealthTests);
   await timed('ghsa-poller', runGhsaPollerTests);
   await timed('coverage-audit', runCoverageAuditTests);
+  await timed('differentiator-audit', runDifferentiatorAuditTests);
 
   // Delta-aware decay multiplier (FPR Improvement Plan - Chantier 3)
   await timed('delta-multiplier', runDeltaMultiplierTests);
