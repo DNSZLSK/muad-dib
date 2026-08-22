@@ -42,7 +42,7 @@ runs:
   using: 'composite'
   steps:
     - name: Setup Node.js
-      uses: actions/setup-node@v6
+      uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6
       with:
         node-version: '24'
 
@@ -53,19 +53,24 @@ runs:
     - name: Run MUAD'DIB scan
       id: scan
       shell: bash
+      env:
+        INPUT_PATH: ${{ inputs.path }}
+        INPUT_FAIL_ON: ${{ inputs.fail-on }}
+        INPUT_SARIF: ${{ inputs.sarif }}
+        INPUT_PARANOID: ${{ inputs.paranoid }}
       run: |
         # Build command
-        CMD="muaddib scan ${{ inputs.path }} --fail-on ${{ inputs.fail-on }}"
+        CMD="muaddib scan $INPUT_PATH --fail-on $INPUT_FAIL_ON"
 
         # Add SARIF output if requested
-        SARIF_PATH="${{ inputs.sarif }}"
+        SARIF_PATH="$INPUT_SARIF"
         if [ -n "$SARIF_PATH" ]; then
           CMD="$CMD --sarif $SARIF_PATH"
           echo "sarif_file=$SARIF_PATH" >> $GITHUB_OUTPUT
         fi
 
         # Add paranoid mode if enabled
-        if [ "${{ inputs.paranoid }}" = "true" ]; then
+        if [ "$INPUT_PARANOID" = "true" ]; then
           CMD="$CMD --paranoid"
         fi
 
@@ -91,7 +96,7 @@ runs:
 
     - name: Upload SARIF to GitHub Security
       if: inputs.sarif != '' && always()
-      uses: github/codeql-action/upload-sarif@v4.36.3
+      uses: github/codeql-action/upload-sarif@54f647b7e1bb85c95cddabcd46b0c578ec92bc1a  # v4.36.3
       with:
         sarif_file: ${{ inputs.sarif }}
       continue-on-error: true
