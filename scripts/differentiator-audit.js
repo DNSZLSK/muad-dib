@@ -57,16 +57,25 @@ const REPORT_FILE = path.join(ROOT, 'data', 'differentiator-audit.json');
  * @param {Array<{package:string,version?:string,ecosystem?:string,first_seen_at?:string,findings?:string[],severity?:string}>} detections
  * @param {Map<string,string>} ghsaMap   key "eco/name" -> earliest published_at ISO
  * @param {Set<string>} iocTypes         finding types that mean "ingested-IOC match"
- * @param {{sinceMs?:number|null}} [opts]
+ * @param {{sinceMs?:number|null, maliceTypes?:Set<string>}} [opts]
+ *        maliceTypes — finding types that constitute CONFIRMED malice (the exact set
+ *        the monitor uses to bypass reputation attenuation and fire a webhook:
+ *        HIGH_CONFIDENCE_MALICE_TYPES ∪ LIFECYCLE_INTENT_TYPES). A net-new/ahead
+ *        detection whose findings intersect this set is a *confirmed* differentiator;
+ *        one carrying only heuristic-noise findings (prototype_pollution,
+ *        credential_regex_harvest, high_entropy_string, …) is a WEAK differentiator —
+ *        counted separately so the headline can't be inflated by benign-vendor FPs.
  */
 function classifyDifferentiator(detections, ghsaMap, iocTypes, opts = {}) {
   const since = (opts.sinceMs === undefined) ? null : opts.sinceMs;
   const ioc = iocTypes || new Set();
+  const malice = opts.maliceTypes || new Set();
   const gh = ghsaMap || new Map();
 
   const buckets = { netNew: [], ahead: [], tiedOrBehind: [], iocOnly: [], skipped: [] };
   const byEcosystem = Object.create(null);
   const leadHours = [];
+  const confirmedLeadHours = [];
   const seen = new Set();
   let total = 0;
 
@@ -85,13 +94,15 @@ function classifyDifferentiator(detections, ghsaMap, iocTypes, opts = {}) {
     total++;
 
     let node = byEcosystem[eco];
-    if (!node) node = byEcosystem[eco] = { total: 0, netNew: 0, ahead: 0, tiedOrBehind: 0, iocOnly: 0 };
+    if (!node) node = byEcosystem[eco] = { total: 0, netNew: 0, netNewConfirmed: 0, ahead: 0, aheadConfirmed: 0, tiedOrBehind: 0, iocOnly: 0 };
     node.total++;
 
     const findings = Array.isArray(d.findings) ? d.findings : [];
+    const confirmed = findings.some(t => malice.has(t));
     const rec = {
       key: dedupKey, name: d.package, version: d.version || null, ecosystem: eco,
-      findings, severity: d.severity || null, first_seen_at: d.first_seen_at || null
+      findings, severity: d.severity || null, first_seen_at: d.first_seen_at || null,
+      confirmed
     };
 
     // ioc-only: has findings AND every finding is an ingested-IOC type → downstream, excluded.
@@ -101,7 +112,11 @@ function classifyDifferentiator(detections, ghsaMap, iocTypes, opts = {}) {
     }
 
     const pub = gh.get(`${eco}/${d.package}`);
-    if (!pub) { buckets.netNew.push(rec); node.netNew++; continue; }
+    if (!pub) {
+      buckets.netNew.push(rec); node.netNew++;
+      if (confirmed) node.netNewConfirmed++;
+      continue;
+    }
 
     const pubMs = Date.parse(pub);
     rec.advisory_at = pub;
@@ -110,25 +125,39 @@ function classifyDifferentiator(detections, ghsaMap, iocTypes, opts = {}) {
       rec.lead_time_hours = lead;
       buckets.ahead.push(rec); node.ahead++;
       leadHours.push(lead);
+      if (confirmed) { node.aheadConfirmed++; confirmedLeadHours.push(lead); }
     } else {
       buckets.tiedOrBehind.push(rec); node.tiedOrBehind++;
     }
   }
 
+  // Raw headline (backward-compatible): every heuristic net-new/ahead, FP or not.
   const differentiatorCount = buckets.netNew.length + buckets.ahead.length;
+  // Confirmed headline (the sellable number): gated on findings that constitute
+  // real malice — survives a prospect spot-check. netNew FPs on benign vendors
+  // (@everymatrix &co.) carry only heuristic-noise findings → excluded here.
+  const netNewConfirmed = buckets.netNew.filter(r => r.confirmed);
+  const aheadConfirmed = buckets.ahead.filter(r => r.confirmed);
+  const confirmedDifferentiatorCount = netNewConfirmed.length + aheadConfirmed.length;
   return {
     total,
     differentiatorCount,
+    confirmedDifferentiatorCount,
     counts: {
       netNew: buckets.netNew.length,
+      netNewConfirmed: netNewConfirmed.length,
+      netNewWeak: buckets.netNew.length - netNewConfirmed.length,
       ahead: buckets.ahead.length,
+      aheadConfirmed: aheadConfirmed.length,
       tiedOrBehind: buckets.tiedOrBehind.length,
       iocOnly: buckets.iocOnly.length,
       skipped: buckets.skipped.length
     },
     leadTime: leadStats(leadHours),
+    confirmedLeadTime: leadStats(confirmedLeadHours),
     byEcosystem,
-    buckets
+    buckets,
+    confirmedBuckets: { netNew: netNewConfirmed, ahead: aheadConfirmed }
   };
 }
 
@@ -222,7 +251,10 @@ async function main() {
   if (args.file) process.env.MUADDIB_DETECTIONS_FILE = args.file;
   const { loadDetections } = require('../src/monitor/state.js');
   const { fetchAllGhsaMalware } = require('../src/ioc/ghsa-poller.js');
-  const { IOC_MATCH_TYPES } = require('../src/monitor/classify.js');
+  const { IOC_MATCH_TYPES, HIGH_CONFIDENCE_MALICE_TYPES, LIFECYCLE_INTENT_TYPES } = require('../src/monitor/classify.js');
+  // CONFIRMED-malice gate = the exact set the monitor uses to bypass reputation and
+  // fire a webhook. Sourced from classify.js so it never drifts from production.
+  const MALICE_TYPES = new Set([...HIGH_CONFIDENCE_MALICE_TYPES, ...LIFECYCLE_INTENT_TYPES]);
 
   const detections = loadDetections().detections || [];
 
@@ -241,7 +273,7 @@ async function main() {
   }
   const ghsaMap = buildGhsaMap(ghsaRows);
 
-  const result = classifyDifferentiator(detections, ghsaMap, IOC_MATCH_TYPES, { sinceMs });
+  const result = classifyDifferentiator(detections, ghsaMap, IOC_MATCH_TYPES, { sinceMs, maliceTypes: MALICE_TYPES });
   const windowStr = sinceMs !== null ? new Date(sinceMs).toISOString() : '(all history)';
 
   const report = {
@@ -251,11 +283,17 @@ async function main() {
     detectionsTotal: detections.length,
     ghsaDenominator: ghsaMap.size,
     total: result.total,
-    differentiatorCount: result.differentiatorCount,
+    differentiatorCount: result.differentiatorCount,                 // raw (FP-inflated)
+    confirmedDifferentiatorCount: result.confirmedDifferentiatorCount, // sellable headline
     counts: result.counts,
     leadTime: result.leadTime,
+    confirmedLeadTime: result.confirmedLeadTime,
     byEcosystem: result.byEcosystem,
-    // top net-new heuristic catches — the list that "proves" the feed
+    // top CONFIRMED net-new catches — the list that survives a prospect spot-check
+    topNetNewConfirmed: result.confirmedBuckets.netNew
+      .slice(0, args.top)
+      .map(r => ({ key: r.key, severity: r.severity, findings: r.findings })),
+    // top raw net-new — kept for triage/debugging (dominated by benign-vendor FPs)
     topNetNew: result.buckets.netNew
       .slice(0, args.top)
       .map(r => ({ key: r.key, severity: r.severity, findings: r.findings }))
@@ -279,22 +317,31 @@ async function main() {
   const c = result.counts;
   console.log(`\n  MUAD'DIB differentiator audit`);
   console.log(`  window: detections first_seen since ${windowStr}  |  detections: ${detections.length}, GHSA malware denom: ${ghsaMap.size}\n`);
-  console.log(`  DIFFERENTIATOR : ${result.differentiatorCount}   ← headline (heuristic net-new + ahead of GHSA)`);
-  console.log(`    net-new       : ${c.netNew}   (heuristic catch, NOT in GHSA malware — independent detection)`);
-  console.log(`    ahead         : ${c.ahead}   (heuristic catch BEFORE the GHSA advisory)`);
-  if (result.leadTime) {
-    console.log(`      lead time   : median ${fmtH(result.leadTime.median)} · avg ${fmtH(result.leadTime.avg)} · min ${fmtH(result.leadTime.min)} · max ${fmtH(result.leadTime.max)} (${result.leadTime.count})`);
+  console.log(`  DIFFERENTIATOR (confirmed) : ${result.confirmedDifferentiatorCount}   ← sellable headline (net-new+ahead carrying a CONFIRMED-malice finding)`);
+  console.log(`    net-new confirmed        : ${c.netNewConfirmed}   (heuristic catch NOT in GHSA, real malice — survives a spot-check)`);
+  console.log(`    ahead confirmed          : ${c.aheadConfirmed}   (confirmed malice caught BEFORE the GHSA advisory)`);
+  if (result.confirmedLeadTime) {
+    console.log(`      lead time (confirmed)  : median ${fmtH(result.confirmedLeadTime.median)} · avg ${fmtH(result.confirmedLeadTime.avg)} · min ${fmtH(result.confirmedLeadTime.min)} · max ${fmtH(result.confirmedLeadTime.max)} (${result.confirmedLeadTime.count})`);
   }
-  console.log(`    tied/behind   : ${c.tiedOrBehind}   (heuristic, but at/after the advisory — no lead, downstream value)`);
-  console.log(`    ioc-only      : ${c.iocOnly}   (ingested-IOC match only — downstream of public feeds, EXCLUDED from value)`);
-  if (c.skipped) console.log(`    skipped       : ${c.skipped}   (first_seen before the window)`);
+  console.log('');
+  console.log(`  raw net-new + ahead        : ${result.differentiatorCount}   ⚠ FP-inflated — DO NOT put in a pitch (${c.netNewWeak} weak/heuristic-noise net-new)`);
+  console.log(`    net-new (raw)            : ${c.netNew}   (in GHSA-absent, incl. benign-vendor FPs — prototype_pollution/credential_regex_harvest/high_entropy_string)`);
+  console.log(`    ahead (raw)              : ${c.ahead}`);
+  if (result.leadTime) {
+    console.log(`      lead time (raw)        : median ${fmtH(result.leadTime.median)} · avg ${fmtH(result.leadTime.avg)} (${result.leadTime.count})`);
+  }
+  console.log(`    tied/behind              : ${c.tiedOrBehind}   (heuristic, but at/after the advisory — no lead)`);
+  console.log(`    ioc-only                 : ${c.iocOnly}   (ingested-IOC match only — downstream of public feeds, EXCLUDED)`);
+  if (c.skipped) console.log(`    skipped                  : ${c.skipped}   (first_seen before the window)`);
   console.log('');
   for (const [eco, n] of Object.entries(result.byEcosystem)) {
-    console.log(`    ${eco.padEnd(5)} : ${n.netNew} net-new · ${n.ahead} ahead · ${n.tiedOrBehind} tied/behind · ${n.iocOnly} ioc-only  (of ${n.total})`);
+    console.log(`    ${eco.padEnd(5)} : ${n.netNewConfirmed}/${n.netNew} net-new confirmed · ${n.aheadConfirmed}/${n.ahead} ahead confirmed · ${n.tiedOrBehind} tied/behind · ${n.iocOnly} ioc-only  (of ${n.total})`);
   }
-  if (report.topNetNew.length) {
-    console.log(`\n  Top net-new heuristic catches (the feed's proof, written to ${path.relative(ROOT, REPORT_FILE)}):`);
-    for (const r of report.topNetNew) console.log(`    - [${r.severity}] ${r.key} — ${r.findings.join(', ')}`);
+  if (report.topNetNewConfirmed.length) {
+    console.log(`\n  Top CONFIRMED net-new catches (the pitch-safe proof, written to ${path.relative(ROOT, REPORT_FILE)}):`);
+    for (const r of report.topNetNewConfirmed) console.log(`    - [${r.severity}] ${r.key} — ${r.findings.join(', ')}`);
+  } else {
+    console.log(`\n  ⚠ ZERO confirmed net-new catches in this window — the raw ${result.differentiatorCount} is entirely heuristic-noise/FP. Nothing pitch-safe here yet.`);
   }
   console.log('');
   return 0;
