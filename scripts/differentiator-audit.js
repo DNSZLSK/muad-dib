@@ -350,7 +350,17 @@ async function main() {
   // fire a webhook. Sourced from classify.js so it never drifts from production.
   const MALICE_TYPES = new Set([...HIGH_CONFIDENCE_MALICE_TYPES, ...LIFECYCLE_INTENT_TYPES]);
 
-  const detections = loadDetections().detections || [];
+  // Source selection. Default = scan-ledger (multi-week window, carries score/tier for
+  // the gate). --source detections uses the rolling ~28h buffer (needed for --write).
+  const records = (args.source === 'detections')
+    ? (loadDetections().detections || [])
+    : detectionsFromLedger(loadScanLedger());
+
+  // Confidence gate — built only if at least one gate flag is present; otherwise the
+  // raw (noisy) number is reported, as before. hcTypes sourced from classify.js.
+  const gate = (args.minScore != null || args.minTier != null || args.highConfidence)
+    ? { minScore: args.minScore, minTier: args.minTier, highConfidence: args.highConfidence, hcTypes: HIGH_CONFIDENCE_MALICE_TYPES }
+    : null;
 
   let sinceMs = null;
   if (!args.all) sinceMs = args.since ? Date.parse(args.since) : earliestTs(records, 'first_seen_at');
@@ -367,7 +377,7 @@ async function main() {
   }
   const ghsaMap = buildGhsaMap(ghsaRows);
 
-  const result = classifyDifferentiator(detections, ghsaMap, IOC_MATCH_TYPES, { sinceMs, maliceTypes: MALICE_TYPES });
+  const result = classifyDifferentiator(records, ghsaMap, IOC_MATCH_TYPES, { sinceMs, maliceTypes: MALICE_TYPES, gate });
   const windowStr = sinceMs !== null ? new Date(sinceMs).toISOString() : '(all history)';
   const gateStr = gate
     ? [gate.minScore != null ? `score>=${gate.minScore}` : null, gate.minTier ? `tier>=${gate.minTier}` : null, gate.highConfidence ? 'high-confidence' : null].filter(Boolean).join(' & ')
@@ -418,7 +428,8 @@ async function main() {
 
   const c = result.counts;
   console.log(`\n  MUAD'DIB differentiator audit`);
-  console.log(`  window: detections first_seen since ${windowStr}  |  detections: ${detections.length}, GHSA malware denom: ${ghsaMap.size}\n`);
+  console.log(`  source: ${args.source}  |  window: first_seen since ${windowStr}  |  records: ${records.length}, GHSA malware denom: ${ghsaMap.size}`);
+  console.log(`  gate: ${gateStr}${c.gatedOut ? `  (${c.gatedOut} gated out)` : ''}\n`);
   console.log(`  DIFFERENTIATOR (confirmed) : ${result.confirmedDifferentiatorCount}   ← sellable headline (net-new+ahead carrying a CONFIRMED-malice finding)`);
   console.log(`    net-new confirmed        : ${c.netNewConfirmed}   (heuristic catch NOT in GHSA, real malice — survives a spot-check)`);
   console.log(`    ahead confirmed          : ${c.aheadConfirmed}   (confirmed malice caught BEFORE the GHSA advisory)`);
