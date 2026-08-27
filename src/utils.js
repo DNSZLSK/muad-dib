@@ -131,13 +131,19 @@ function findFiles(dir, options = {}) {
     depth = 0
   } = options;
 
+  // Case-insensitive matching: lowercase the extension list ONCE here so the impl's
+  // `item.toLowerCase().endsWith(ext)` compares lowercase-to-lowercase. Callers pass
+  // extensions in any case (`.woff2`, but also `SKILL.md`), and a payload can be dropped
+  // as `fa-solid-400.WOFF2` on a case-insensitive filesystem — neither side may drive case.
+  const extensionsLower = extensions.map(e => e.toLowerCase());
+
   // Top-level memoization: identical (dir, extensions, excludedDirs) → cached result
   if (depth === 0) {
-    const cacheKey = dir + '|' + extensions.slice().sort().join(',') + '|' +
+    const cacheKey = dir + '|' + extensionsLower.slice().sort().join(',') + '|' +
       [...excludedDirs, ..._extraExcludedDirs].sort().join(',');
     const cached = _fileListCache.get(cacheKey);
     if (cached) return [...cached]; // return copy to prevent mutation
-    const result = _findFilesImpl(dir, { extensions, excludedDirs, maxDepth, results, visitedInodes, visitedPaths, depth });
+    const result = _findFilesImpl(dir, { extensions: extensionsLower, excludedDirs, maxDepth, results, visitedInodes, visitedPaths, depth });
 
     // Apply file count cap: sort by depth (shallowest first) so root-level files
     // (most likely to contain malicious entry points) are prioritized.
@@ -158,7 +164,7 @@ function findFiles(dir, options = {}) {
     return result;
   }
 
-  return _findFilesImpl(dir, { extensions, excludedDirs, maxDepth, results, visitedInodes, visitedPaths, depth });
+  return _findFilesImpl(dir, { extensions: extensionsLower, excludedDirs, maxDepth, results, visitedInodes, visitedPaths, depth });
 }
 
 function _findFilesImpl(dir, { extensions, excludedDirs, maxDepth, results, visitedInodes, visitedPaths, depth }) {
@@ -205,7 +211,10 @@ function _findFilesImpl(dir, { extensions, excludedDirs, maxDepth, results, visi
           }
           if (realStat.isDirectory()) {
             _findFilesImpl(realPath, { extensions, excludedDirs, maxDepth, results, visitedInodes, visitedPaths, depth: depth + 1 });
-          } else if (extensions.some(ext => item.endsWith(ext))) {
+          } else if (extensions.some(ext => item.toLowerCase().endsWith(ext))) {
+            // Case-insensitive: a payload dropped as fa-solid-400.WOFF2 / icon.PNG resolves on
+            // case-insensitive filesystems (Windows/macOS) yet a case-sensitive endsWith would
+            // miss it — a trivial rename must not evade extension-gated scanners (BINSRC-002).
             results.push(realPath);
           }
         } catch {
@@ -227,7 +236,8 @@ function _findFilesImpl(dir, { extensions, excludedDirs, maxDepth, results, visi
 
       if (lstat.isDirectory()) {
         _findFilesImpl(fullPath, { extensions, excludedDirs, maxDepth, results, visitedInodes, visitedPaths, depth: depth + 1 });
-      } else if (extensions.some(ext => item.endsWith(ext))) {
+      } else if (extensions.some(ext => item.toLowerCase().endsWith(ext))) {
+        // Case-insensitive (see the realPath branch above): .WOFF2 / .PNG must not evade.
         results.push(fullPath);
       }
     } catch {

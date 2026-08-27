@@ -30,7 +30,7 @@
 
 npm and PyPI supply-chain attacks are exploding. Shai-Hulud compromised 25K+ repos in 2025. Existing tools detect threats but don't help you respond.
 
-MUAD'DIB combines **<!--stat:scanners-->22<!--/stat:scanners--> parallel scanners** (<!--stat:rulesTotal-->277<!--/stat:rulesTotal--> detection rules), a **deobfuscation engine**, **inter-module dataflow analysis**, **compound scoring** (<!--stat:compound-->21<!--/stat:compound--> compound rules), and a gVisor/Docker sandbox to detect known threats and suspicious behavioral patterns in npm and PyPI packages. An XGBoost classifier exists in the codebase but is **currently inactive** (see [Evaluation](#evaluation)).
+MUAD'DIB combines **<!--stat:scanners-->22<!--/stat:scanners--> parallel scanners** (<!--stat:rulesTotal-->278<!--/stat:rulesTotal--> detection rules), a **deobfuscation engine**, **inter-module dataflow analysis**, **compound scoring** (<!--stat:compound-->21<!--/stat:compound--> compound rules), and a gVisor/Docker sandbox to detect known threats and suspicious behavioral patterns in npm and PyPI packages. An XGBoost classifier exists in the codebase but is **currently inactive** (see [Evaluation](#evaluation)).
 
 ---
 
@@ -212,9 +212,9 @@ muaddib replay                     # Ground truth validation (90/94 TPR@3, v2.11
 | Python AST (PYAST) | Tree-sitter-Python AST with taint-aware detectors (v2.11.42+) |
 | Anti-Scanner Injection (ASI) | Prompt-injection text in comments/strings that coerces an LLM code reviewer into a clean verdict or into skipping an obfuscated payload (ASI-001..004, Hades campaign 2026-06) |
 
-### <!--stat:rulesTotal-->277<!--/stat:rulesTotal--> detection rules
+### <!--stat:rulesTotal-->278<!--/stat:rulesTotal--> detection rules
 
-All rules (<!--stat:rulesCore-->272<!--/stat:rulesCore--> RULES + <!--stat:rulesParanoid-->5<!--/stat:rulesParanoid--> PARANOID) are mapped to MITRE ATT&CK techniques. See [SECURITY.md](SECURITY.md#detection-rules) for the complete rules reference.
+All rules (<!--stat:rulesCore-->273<!--/stat:rulesCore--> RULES + <!--stat:rulesParanoid-->5<!--/stat:rulesParanoid--> PARANOID) are mapped to MITRE ATT&CK techniques. See [SECURITY.md](SECURITY.md#detection-rules) for the complete rules reference.
 
 ### Detected campaigns
 
@@ -366,7 +366,7 @@ npm test
 - [Documentation Index](docs/INDEX.md) - All documentation in one place
 - [Evaluation Methodology](docs/EVALUATION_METHODOLOGY.md) - Experimental protocol, holdout scores
 - [Threat Model](docs/threat-model.md) - What MUAD'DIB detects and doesn't detect
-- [Security Policy](SECURITY.md) - Detection rules reference (<!--stat:rulesTotal-->277<!--/stat:rulesTotal--> rules)
+- [Security Policy](SECURITY.md) - Detection rules reference (<!--stat:rulesTotal-->278<!--/stat:rulesTotal--> rules)
 - [Security Audit](docs/SECURITY_AUDIT.md) - Bypass validation report
 - [FP Analysis](docs/EVALUATION.md) - Historical false positive analysis
 
