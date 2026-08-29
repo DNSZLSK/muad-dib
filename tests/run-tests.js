@@ -114,6 +114,7 @@ const { runReachabilityFunctionsTests } = require('./unit/reachability-functions
 const { runFeedHealthTests } = require('./unit/feed-health.test');
 const { runGhsaPollerTests } = require('./unit/ghsa-poller.test');
 const { runCoverageAuditTests } = require('./unit/coverage-audit.test');
+const { runDifferentiatorAuditTests } = require('./unit/differentiator-audit.test');
 const { runDeltaMultiplierTests } = require('./unit/delta-multiplier.test');
 const { runConfidenceTiersTests } = require('./unit/confidence-tiers.test');
 const { runCompoundTighteningTests } = require('./unit/compound-tightening.test');
@@ -162,6 +163,8 @@ const { runReputationFactorTests } = require('./integration/reputation-factor.te
 const { runFprLiveTests } = require('./integration/fpr-live.test');
 const { runGapRemediationTests } = require('./integration/gap-remediation.test');
 const { runConfigTests } = require('./integration/config.test');
+const { runActionReportTests } = require('./integration/action-report.test');
+const { runEvaluateCorpusDirTests } = require('./integration/evaluate-corpus-dir.test');
 const { runBenignRandomTests } = require('./integration/benign-random.test');
 const { runAuditV2RemediationTests } = require('./integration/audit-v2-remediation.test');
 const { runMLPipelineTests } = require('./integration/ml-pipeline.test');
@@ -348,6 +351,12 @@ async function timed(name, fn) {
   // Config system tests (v2.9.7)
   await timed('config', runConfigTests);
 
+  // GitHub Action reporter tests (scripts/action-report.cjs)
+  await timed('action-report', runActionReportTests);
+
+  // evaluate --corpus-dir tests (offline re-scan of a local archive)
+  await timed('evaluate-corpus-dir', runEvaluateCorpusDirTests);
+
   // Benign random corpus tests (v2.9.7)
   await timed('benign-random', runBenignRandomTests);
 
@@ -375,6 +384,7 @@ async function timed(name, fn) {
   await timed('feed-health', runFeedHealthTests);
   await timed('ghsa-poller', runGhsaPollerTests);
   await timed('coverage-audit', runCoverageAuditTests);
+  await timed('differentiator-audit', runDifferentiatorAuditTests);
 
   // Delta-aware decay multiplier (FPR Improvement Plan - Chantier 3)
   await timed('delta-multiplier', runDeltaMultiplierTests);

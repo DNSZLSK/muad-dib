@@ -196,7 +196,20 @@ const SINGLE_FIRE_CRITICAL_TYPES = new Set([
   // (jscrambler@8.14.0). FP≈0 by construction, so it carries the same single-fire weight
   // as the IOC/hash matches and gyp_phantom_exec above — a lone verdict must not be
   // buried at 25 (the loader trips no other rule to stack with).
-  'install_native_drop_exec'
+  'install_native_drop_exec',
+  // ioc_string_match (CRITICAL only — see SINGLE_FIRE_TYPE_MIN_RANK below): a curated
+  // campaign-unique string / wallet / hash is a deterministic equality match against
+  // iocs/string-iocs.yaml. The CRITICAL tier holds the unique artifacts (attacker Ethereum
+  // wallets, campaign markers like the NullReceiver 0xa322… dead-drop) — measured 0 matches
+  // across 869 benign packages (CLAUDE.md Track E), so flooring a lone match to 75 costs 0 FP.
+  // GATED TO CRITICAL: the 10 HIGH string IOCs are deliberately non-unique (getSignaturesForAddress
+  // is a real Solana web3.js method, huggingface.co/api/models a legit URL) and must NOT floor —
+  // otherwise every Solana/HuggingFace package would false-lift to 75.
+  'ioc_string_match',
+  // text_payload_as_font_asset (BINSRC-002): a font-extension file whose content is plaintext JS
+  // is unambiguous malware — a font is never printable source code (FP≈0 by construction). The
+  // lone verdict (the PolinRider .woff2 loader body) must not sit at 25 when it IS the DPRK payload.
+  'text_payload_as_font_asset'
 ]);
 const SINGLE_FIRE_CRITICAL_FLOOR = 75;
 const SINGLE_FIRE_MIN_SEVERITY_RANK = 2; // HIGH
@@ -229,6 +242,11 @@ const PYPI_IMPORT_TIME_RCE_TYPES = new Set([
 // otherwise inherit the victim package's reputation and be silently dropped.
 const REPUTATION_MALICE_FLOOR = 20;
 const _SEV_RANK = { LOW: 0, MEDIUM: 1, HIGH: 2, CRITICAL: 3 };
+// Per-type tightening of SINGLE_FIRE_MIN_SEVERITY_RANK. A type listed here floors ONLY at or
+// above the given rank, overriding the global HIGH gate. ioc_string_match must be CRITICAL: its
+// HIGH string IOCs are intentionally non-unique (FP-bearing) and would false-lift benign
+// Solana/HuggingFace packages to 75 if the global HIGH gate applied.
+const SINGLE_FIRE_TYPE_MIN_RANK = { ioc_string_match: _SEV_RANK.CRITICAL };
 
 /**
  * Classify a threat as package-level or file-level.
@@ -462,7 +480,11 @@ const DIST_EXEMPT_TYPES = new Set([
   // BINSRC-001: a binary file disguised as .js SPECIFICALLY hides in dist/ (that is why the
   // scanner descends there). The dist/ downgrade assumes benign bundler output — a genuinely
   // binary file never is, so it must never be reduced.
-  'binary_masquerading_as_source'
+  'binary_masquerading_as_source',
+  // BINSRC-002: a font-extension file whose content is plaintext JS is never benign bundler
+  // output — a font is binary by definition. PolinRider drops it in public/fonts/ (and could in
+  // dist/); the dist/ downgrade must never reduce it.
+  'text_payload_as_font_asset'
   // P6: remote_code_load and proxy_data_intercept removed — in bundled dist/ files,
   // fetch + eval co-occurrence is coincidental (bundler combines HTTP client + template compilation).
   // fetch_decrypt_exec (fetch+decrypt+eval triple) remains exempt — never coincidental.
@@ -548,7 +570,11 @@ const REACHABILITY_EXEMPT_TYPES = new Set([
   'env_charcode_reconstruction',   // AST-018 — fromCharCode + process.env[computed]
   // BINSRC-001: a binary blob disguised as .js is read as bytes, never require()d, so it is
   // always "unreachable" via the import graph — the wrong lens for a non-JS carrier.
-  'binary_masquerading_as_source'
+  'binary_masquerading_as_source',
+  // BINSRC-002: a .woff2/.ttf loader is invoked out-of-band (a tasks.json folderOpen task, or a
+  // require() of the font PATH), never through the JS import graph — reachability would wrongly
+  // mark the carrier unreachable and downgrade it.
+  'text_payload_as_font_asset'
 ]);
 
 // ============================================
@@ -2230,7 +2256,10 @@ function applySingleFireCriticalFloor(result) {
   for (const t of result.threats) {
     if (!SINGLE_FIRE_CRITICAL_TYPES.has(t.type)) continue;
     const rank = _SEV_RANK[t.severity];
-    if (rank === undefined || rank < SINGLE_FIRE_MIN_SEVERITY_RANK) continue;
+    const minRank = SINGLE_FIRE_TYPE_MIN_RANK[t.type] !== undefined
+      ? SINGLE_FIRE_TYPE_MIN_RANK[t.type]
+      : SINGLE_FIRE_MIN_SEVERITY_RANK;
+    if (rank === undefined || rank < minRank) continue;
     triggers.push({ type: t.type, severity: t.severity, file: t.file });
   }
   if (triggers.length === 0) return [];

@@ -1,5 +1,5 @@
 version: "1.0.0"
-updated: "2026-05-01"
+updated: "2026-08-27"
 # String IOCs (YARA-style) — high-precision unique malware artifacts.
 # Each entry is a literal string searched in source files (.js, .cjs, .mjs,
 # .ts, .tsx, .py). Match in any source file fires the rule with score 100.
@@ -337,3 +337,25 @@ strings:
     severity: CRITICAL
     source: "https://thehackernews.com/2026/08/trojanized-npm-packages-decode-c2-ip.html"
     description: "Hard-coded attacker Ethereum wallet whose latest outbound tx encodes the C2 IP in its recipient address (NullReceiver blockchain-C2 dead-drop resolver)"
+
+  # ── PolinRider case study (DiogoAngelim / fetch-page-assets, 2026-08) ──
+  # Source: opensourcemalware.com/blog/polinrider-npm-case-study-dprk-attack
+  # DPRK farms compromised legitimate maintainers and reproduces the NullReceiver
+  # loader in every new release (fetch-page-assets v1.2.9..1.2.14, html-to-gutenberg).
+  # The loader tags every build with a campaign marker assigned to a global var:
+  #   global.i="A8-3292-1"  (babel.config.cjs, v1.2.12)
+  #   global.i="A8-3292-2"  (babel.config.cjs, v1.2.13/1.2.14)
+  #   global.i="A8-*#"      (fake-font .woff2 variant, all releases)
+  # The anchored prefix `global.i="A8-` catches all three variants and is decisive:
+  # a global var named `i` assigned a string starting "A8-" has no benign meaning.
+  # This fires on the config-file injection point (babel.config.cjs is a .cjs → in
+  # SCAN_EXTENSIONS); the .woff2 body is covered structurally by BINSRC-002 instead
+  # (ioc-strings does not read font extensions). The wallet/RPC/C2-IP are NOT added
+  # here: the public Ethereum RPC endpoints (1rpc.io, eth.drpc.org, publicnode.com,
+  # blastapi.io, blockscout.com) are legitimate dApp infrastructure — a substring
+  # match would false-positive on any benign web3 package (fails inclusion criterion #4).
+  - string: 'global.i="A8-'
+    campaign: "polinrider-2026-08"
+    severity: CRITICAL
+    source: "https://opensourcemalware.com/blog/polinrider-npm-case-study-dprk-attack"
+    description: "PolinRider/NullReceiver loader campaign marker (global.i=\"A8-...\") injected into config files (babel.config.cjs) and fake .woff2 fonts across every release of a compromised maintainer's packages"

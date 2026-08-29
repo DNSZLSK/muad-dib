@@ -350,6 +350,77 @@ async function runTarballArchiveTests() {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
   });
+
+  // --- Safe-delete: never drop un-pulled irreplaceable captures on the soft timer ---
+
+  // Build a day-dir named `daysAgo` days before now, optionally with a .tgz and a
+  // .pulled sentinel. Returns its absolute path.
+  function makeAgedDayDir(root, daysAgo, { tgz = true, pulled = false } = {}) {
+    const d = new Date(Date.now() - daysAgo * 86400000);
+    const name = d.toISOString().slice(0, 10);
+    const dir = path.join(root, name);
+    fs.mkdirSync(dir, { recursive: true });
+    if (tgz) fs.writeFileSync(path.join(dir, 'evil-1.0.0.tgz'), 'x');
+    fs.writeFileSync(path.join(dir, 'evil-1.0.0.json'), '{}');
+    if (pulled) fs.writeFileSync(path.join(dir, '.pulled'), new Date().toISOString());
+    return dir;
+  }
+
+  function withArchive(fn) {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-safedelete-'));
+    const origDir = process.env.MUADDIB_ARCHIVE_DIR;
+    const origMax = process.env.MUADDIB_ARCHIVE_MAX_RETENTION_DAYS;
+    process.env.MUADDIB_ARCHIVE_DIR = tmp;
+    delete require.cache[require.resolve('../../src/monitor/tarball-archive.js')];
+    const mod = require('../../src/monitor/tarball-archive.js');
+    try { return fn(tmp, mod); }
+    finally {
+      process.env.MUADDIB_ARCHIVE_DIR = origDir || '';
+      if (!origDir) delete process.env.MUADDIB_ARCHIVE_DIR;
+      if (origMax === undefined) delete process.env.MUADDIB_ARCHIVE_MAX_RETENTION_DAYS;
+      else process.env.MUADDIB_ARCHIVE_MAX_RETENTION_DAYS = origMax;
+      delete require.cache[require.resolve('../../src/monitor/tarball-archive.js')];
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  }
+
+  test('cleanupOldArchives: aged + un-pulled + has .tgz is KEPT (not dropped on soft timer)', () => {
+    withArchive((tmp, mod) => {
+      const dir = makeAgedDayDir(tmp, 10, { tgz: true, pulled: false }); // 10d > 7d soft, < 30d hard
+      const s = mod.cleanupOldArchives(7);
+      assert(fs.existsSync(dir), 'un-pulled aged dir with a tarball must be retained for the PC pull');
+      assert(s.retainedUnpulled === 1, `expected retainedUnpulled=1, got ${s.retainedUnpulled}`);
+      assert(s.purged === 0, `expected purged=0, got ${s.purged}`);
+    });
+  });
+
+  test('cleanupOldArchives: aged + PULLED is purged (PC confirmed a copy)', () => {
+    withArchive((tmp, mod) => {
+      const dir = makeAgedDayDir(tmp, 10, { tgz: true, pulled: true });
+      const s = mod.cleanupOldArchives(7);
+      assert(!fs.existsSync(dir), 'pulled aged dir should be purged');
+      assert(s.purged === 1 && s.unpulledPurged === 0, `expected purged=1/unpulled=0, got ${s.purged}/${s.unpulledPurged}`);
+    });
+  });
+
+  test('cleanupOldArchives: aged + JSON-only (no .tgz) is purged (benign, re-derivable)', () => {
+    withArchive((tmp, mod) => {
+      const dir = makeAgedDayDir(tmp, 10, { tgz: false, pulled: false });
+      const s = mod.cleanupOldArchives(7);
+      assert(!fs.existsSync(dir), 'JSON-only aged dir should be purged');
+      assert(s.purged === 1, `expected purged=1, got ${s.purged}`);
+    });
+  });
+
+  test('cleanupOldArchives: un-pulled past the HARD ceiling IS dropped (bounded disk)', () => {
+    withArchive((tmp, mod) => {
+      process.env.MUADDIB_ARCHIVE_MAX_RETENTION_DAYS = '30';
+      const dir = makeAgedDayDir(tmp, 40, { tgz: true, pulled: false }); // 40d > 30d hard ceiling
+      const s = mod.cleanupOldArchives(7);
+      assert(!fs.existsSync(dir), 'un-pulled dir older than the hard ceiling must be dropped');
+      assert(s.unpulledPurged === 1, `expected unpulledPurged=1, got ${s.unpulledPurged}`);
+    });
+  });
 }
 
 module.exports = { runTarballArchiveTests };

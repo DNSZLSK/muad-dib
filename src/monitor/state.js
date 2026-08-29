@@ -47,7 +47,13 @@ const ALERTS_FILE = path.join(__dirname, '..', '..', 'data', 'monitor-alerts.jso
 // Detections + temporal detections are append-only JSONL since the OOM fix.
 // Legacy *.json files are migrated once at boot via runStateMigrations() and
 // kept as *.json.migrated for forensic recovery (no longer read by the monitor).
-const DETECTIONS_FILE = path.join(__dirname, '..', '..', 'data', 'detections.jsonl');
+// Env-overridable (MUADDIB_DETECTIONS_FILE) so read-only offline tooling — the
+// differentiator-audit (scripts/differentiator-audit.js) — can point loadDetections
+// at an exported prod copy without touching the live file. Mirrors SCAN_LEDGER_FILE.
+// The constant is resolved once at module load, so tests that don't set the env var
+// keep the default path unchanged.
+const DETECTIONS_FILE = process.env.MUADDIB_DETECTIONS_FILE
+  || path.join(__dirname, '..', '..', 'data', 'detections.jsonl');
 const DETECTIONS_FILE_LEGACY = path.join(__dirname, '..', '..', 'data', 'detections.json');
 const SCAN_STATS_FILE = path.join(__dirname, '..', '..', 'data', 'scan-stats.json');
 const LAST_DAILY_REPORT_FILE = path.join(__dirname, '..', '..', 'data', 'last-daily-report.json');
