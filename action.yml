@@ -61,17 +61,23 @@ runs:
 
     - name: Install MUAD'DIB
       shell: bash
-      run: npm install -g "muaddib-scanner@${{ inputs.version }}"
+      env:
+        INPUT_VERSION: ${{ inputs.version }}
+      run: npm install -g "muaddib-scanner@${INPUT_VERSION}"
 
     - name: Run MUAD'DIB scan
       id: scan
       shell: bash
+      env:
+        INPUT_PATH: ${{ inputs.path }}
+        INPUT_FAIL_ON: ${{ inputs.fail-on }}
+        INPUT_PARANOID: ${{ inputs.paranoid }}
       run: |
         set -o pipefail
         RESULT_FILE="$RUNNER_TEMP/muaddib-result.json"
 
-        CMD=(muaddib scan "${{ inputs.path }}" --fail-on "${{ inputs.fail-on }}" --json)
-        if [ "${{ inputs.paranoid }}" = "true" ]; then
+        CMD=(muaddib scan "$INPUT_PATH" --fail-on "$INPUT_FAIL_ON" --json)
+        if [ "$INPUT_PARANOID" = "true" ]; then
           CMD+=(--paranoid)
         fi
 
@@ -88,23 +94,29 @@ runs:
     - name: Report results
       id: report
       shell: bash
-      run: node "${{ github.action_path }}/scripts/action-report.cjs" "${{ steps.scan.outputs.result_file }}"
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        RESULT_FILE: ${{ steps.scan.outputs.result_file }}
+      run: node "${ACTION_PATH}/scripts/action-report.cjs" "${RESULT_FILE}"
 
     - name: Generate SARIF
       id: sarif
       if: inputs.sarif != ''
       shell: bash
+      env:
+        INPUT_PATH: ${{ inputs.path }}
+        INPUT_SARIF: ${{ inputs.sarif }}
+        INPUT_PARANOID: ${{ inputs.paranoid }}
       run: |
         # SARIF is a separate output format from --json (the CLI emits one
         # format per run), so producing it needs a second pass. Only runs when
         # a SARIF path is requested; the common CI case above is a single scan.
-        SARIF_PATH="${{ inputs.sarif }}"
-        CMD=(muaddib scan "${{ inputs.path }}" --fail-on none --sarif "$SARIF_PATH")
-        if [ "${{ inputs.paranoid }}" = "true" ]; then
+        CMD=(muaddib scan "$INPUT_PATH" --fail-on none --sarif "$INPUT_SARIF")
+        if [ "$INPUT_PARANOID" = "true" ]; then
           CMD+=(--paranoid)
         fi
         "${CMD[@]}" || true
-        echo "sarif_file=$SARIF_PATH" >> "$GITHUB_OUTPUT"
+        echo "sarif_file=$INPUT_SARIF" >> "$GITHUB_OUTPUT"
 
     - name: Upload SARIF to GitHub Security
       if: inputs.sarif != '' && always()
@@ -115,4 +127,6 @@ runs:
 
     - name: Enforce fail-on gate
       shell: bash
-      run: exit ${{ steps.scan.outputs.exit_code }}
+      env:
+        EXIT_CODE: ${{ steps.scan.outputs.exit_code }}
+      run: exit "$EXIT_CODE"
