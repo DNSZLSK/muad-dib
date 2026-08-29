@@ -120,7 +120,7 @@ runs:
 
     - name: Upload SARIF to GitHub Security
       if: inputs.sarif != '' && always()
-      uses: github/codeql-action/upload-sarif@v4.36.3
+      uses: github/codeql-action/upload-sarif@v4.37.9
       with:
         sarif_file: ${{ inputs.sarif }}
       continue-on-error: true
