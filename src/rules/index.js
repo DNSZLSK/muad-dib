@@ -855,6 +855,19 @@ const RULES = {
     ],
     mitre: 'T1027.002'
   },
+  text_payload_as_font_asset: {
+    id: 'MUADDIB-BINSRC-002',
+    name: 'JavaScript Payload Disguised as Font/Asset',
+    severity: 'CRITICAL',
+    confidence: 'high',
+    domain: 'malware',
+    description: 'Un fichier avec une extension de police/asset binaire (.woff2/.woff/.ttf/.otf/.eot) dont le CONTENU est du JavaScript en clair. Une police est binaire par definition ; les scanners texte (AST/dataflow/obfuscation/entropie/ioc-strings) sont limites aux extensions de code (.js/.cjs/.mjs/.ts…) et ne lisent JAMAIS un .woff2 — un loader depose en public/fonts/fa-solid-400.woff2 est donc totalement invisible. C\'est le porteur de charge de la campagne PolinRider (DPRK / NullReceiver) : la tache malveillante de .vscode/tasks.json execute `node ./public/fonts/fa-solid-400.woff2`, mais seul le declencheur (ide_hook_autoexec) etait attrape — le corps du payload n\'etait jamais scanne. Detection STRUCTURELLE (pas de signature) : extension de police + PAS une vraie police (aucun magic wOF2/wOFF/OTTO/0x00010000, contenu detecte comme texte) + tokens JS d\'execution (require/child_process/eval/spawn/_0x…). FP≈0 par construction : une police legitime n\'est jamais du code source imprimable. Miroir inverse de BINSRC-001 (binaire sous extension source).',
+    references: [
+      'https://opensourcemalware.com/blog/polinrider-npm-case-study-dprk-attack',
+      'https://attack.mitre.org/techniques/T1027/009/'
+    ],
+    mitre: 'T1027.009'
+  },
   crypto_exfil: {
     id: 'MUADDIB-COMPOUND-019',
     name: 'Hybrid-Crypto Credential Exfiltration',

@@ -1381,6 +1381,295 @@ function saveMetrics(report) {
   return filepath;
 }
 
+// --- Corpus-dir evaluation (offline, re-scan at HEAD) -----------------------
+
+const CORPUS_ARCHIVE_EXT = /\.(tgz|tar\.gz|tar|whl|zip)$/i;
+
+function _corpusMaxSamples() {
+  const raw = process.env.MUADDIB_CORPUS_MAX;
+  const n = raw ? parseInt(raw, 10) : NaN;
+  return (Number.isFinite(n) && n >= 1 && n <= 200_000) ? n : 5000;
+}
+
+// Derive "name@version" + first_seen for a sample from its sidecar metadata
+// (src/monitor/tarball-archive.js writes `<name>-<version>.json`) or, failing
+// that, from the filename and the file mtime.
+function _corpusSampleMeta(archivePath, sidecar) {
+  let name = null, version = null, firstSeen = null, label = null;
+  if (sidecar) {
+    name = sidecar.package || null;
+    version = sidecar.version || null;
+    firstSeen = sidecar.timestamp || sidecar.first_seen || null;
+    if (sidecar.label === 'malicious' || sidecar.label === 'clean') label = sidecar.label;
+  }
+  if (!name || !version) {
+    // "<sanitized-name>-<version>.<ext>" → split on the LAST hyphen group that
+    // looks like a version. Best-effort; the sidecar is the authoritative source.
+    const base = path.basename(archivePath).replace(CORPUS_ARCHIVE_EXT, '');
+    const m = /^(.*)-(\d[\w.\-+]*)$/.exec(base);
+    if (m) { name = name || m[1]; version = version || m[2]; }
+    else { name = name || base; version = version || '0.0.0'; }
+  }
+  if (!firstSeen) {
+    try { firstSeen = fs.statSync(archivePath).mtime.toISOString(); } catch { firstSeen = null; }
+  }
+  return { name, version, firstSeen, label };
+}
+
+// Three honest time buckets (relative to now): fresh (last 60d — never
+// rule-tuned, the generalization proxy), current (2025-01-01 .. -60d), and
+// historical (older). Unknown dates fall into "undated".
+function _corpusTimeBucket(firstSeenISO) {
+  if (!firstSeenISO) return 'undated';
+  const t = Date.parse(firstSeenISO);
+  if (!Number.isFinite(t)) return 'undated';
+  const ageDays = (Date.now() - t) / 86_400_000;
+  if (ageDays <= 60) return 'fresh';
+  if (t >= Date.parse('2025-01-01T00:00:00Z')) return 'current';
+  return 'historical';
+}
+
+/**
+ * Evaluate an arbitrary local corpus of archived tarballs (e.g. the monitor
+ * archive rsync'd to a workstation) by RE-SCANNING each at HEAD. Never a replay
+ * of stored scores — this is the real, current counterpart the frozen
+ * Datadog/OSSF benchmarks are not.
+ *
+ * Accepted layout (matches src/monitor/tarball-archive.js):
+ *   <corpusDir>/ ** /<name>-<version>.tgz     ← re-scanned at HEAD
+ *   <corpusDir>/ ** /<name>-<version>.json    ← optional sidecar {package,version,timestamp,score,label?}
+ *   <corpusDir>/labels.json                   ← optional { "name@version": "malicious"|"clean" }
+ *
+ * Labels are OPTIONAL and honest: the archive stores a *score*, not a verdict.
+ *   - With labels → TPR (malicious flagged ≥ threshold) + FPR (clean flagged),
+ *     each time-stratified and with a Wilson CI.
+ *   - Without → score distribution + flagged rate only.
+ *
+ * Bounded (CLAUDE.md): ≤ MUADDIB_CORPUS_MAX samples (default 5000); each archive
+ * is extracted to a scratch dir and removed right after its scan, so the run
+ * cannot itself fill the disk.
+ */
+async function evaluateCorpusDir(corpusDir, options = {}) {
+  const jsonMode = options.json || false;
+  if (!corpusDir || !fs.existsSync(corpusDir)) {
+    throw new Error(`--corpus-dir not found: ${corpusDir}`);
+  }
+  const threshold = BENIGN_THRESHOLD;
+  const maxSamples = _corpusMaxSamples();
+
+  // Optional external label map (the review-loop output).
+  let labelMap = Object.create(null);
+  try {
+    const lf = path.join(corpusDir, 'labels.json');
+    if (fs.existsSync(lf)) labelMap = JSON.parse(fs.readFileSync(lf, 'utf8')) || Object.create(null);
+  } catch { /* malformed labels.json — proceed unlabeled */ }
+
+  // Discover archives (bounded, symlink-free, depth-capped).
+  const archives = [];
+  (function walk(dir, depth) {
+    if (depth > 12 || archives.length >= maxSamples) return;
+    let ents;
+    try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of ents) {
+      if (archives.length >= maxSamples) return;
+      if (e.isSymbolicLink && e.isSymbolicLink()) continue;
+      const fp = path.join(dir, e.name);
+      if (e.isDirectory()) { walk(fp, depth + 1); continue; }
+      if (CORPUS_ARCHIVE_EXT.test(e.name)) archives.push(fp);
+    }
+  })(corpusDir, 0);
+
+  // Unique work root per invocation — a deterministic path would collide across
+  // back-to-back runs (and concurrent processes) when a prior extraction's
+  // cleanup lags (Windows), corrupting the next scan. mkdtemp guarantees isolation.
+  const cacheBase = path.join(ROOT, '.muaddib-cache');
+  fs.mkdirSync(cacheBase, { recursive: true });
+  const workRoot = fs.mkdtempSync(path.join(cacheBase, 'corpus-work-'));
+
+  const details = [];
+  let skipped = 0;
+  const total = archives.length;
+
+  for (let i = 0; i < archives.length; i++) {
+    const archivePath = archives[i];
+    if (!jsonMode && process.stdout.isTTY) {
+      process.stdout.write(`\r  [corpus] [${i + 1}/${total}] ${path.basename(archivePath)}${''.padEnd(30)}`);
+    }
+
+    // Sidecar metadata (same basename, .json).
+    let sidecar = null;
+    try {
+      const sc = archivePath.replace(CORPUS_ARCHIVE_EXT, '.json');
+      if (sc !== archivePath && fs.existsSync(sc)) sidecar = JSON.parse(fs.readFileSync(sc, 'utf8'));
+    } catch { /* ignore malformed sidecar */ }
+
+    const meta = _corpusSampleMeta(archivePath, sidecar);
+    const key = `${meta.name}@${meta.version}`;
+    const label = meta.label || (labelMap[key] === 'malicious' || labelMap[key] === 'clean' ? labelMap[key] : null);
+    const bucket = _corpusTimeBucket(meta.firstSeen);
+
+    const scratch = path.join(workRoot, `s${i}-${sanitizeCorpusName(meta.name)}`);
+    let extractedDir = null;
+    try {
+      fs.mkdirSync(scratch, { recursive: true });
+      extractedDir = extractArchive(archivePath, scratch);
+    } catch (err) {
+      details.push({ name: meta.name, version: meta.version, key, label, bucket, firstSeen: meta.firstSeen, score: 0, flagged: false, skipped: true, error: `extract failed: ${err.code || err.message}` });
+      skipped++;
+      try { fs.rmSync(scratch, { recursive: true, force: true }); } catch { /* best-effort */ }
+      continue;
+    }
+
+    let result;
+    try {
+      result = await silentScan(extractedDir || scratch);
+    } catch (err) {
+      details.push({ name: meta.name, version: meta.version, key, label, bucket, firstSeen: meta.firstSeen, score: 0, flagged: false, skipped: true, error: `scan failed: ${err.code || err.message}` });
+      skipped++;
+      try { fs.rmSync(scratch, { recursive: true, force: true }); } catch { /* best-effort */ }
+      continue;
+    }
+
+    const score = (result && result.summary && Number.isFinite(result.summary.riskScore)) ? result.summary.riskScore : 0;
+    const flagged = score >= threshold;
+    const entry = { name: meta.name, version: meta.version, key, label, bucket, firstSeen: meta.firstSeen, score, flagged };
+    if (flagged && result.threats) {
+      entry.threats = result.threats.slice(0, 20).map(t => ({ type: t.type, severity: t.severity, file: t.file }));
+    }
+    details.push(entry);
+
+    // Scratch cleanup — do NOT accumulate extracted trees across the corpus.
+    try { fs.rmSync(scratch, { recursive: true, force: true }); } catch { /* best-effort */ }
+  }
+
+  if (!jsonMode && process.stdout.isTTY) process.stdout.write('\r' + ''.padEnd(80) + '\r');
+
+  // Remove the per-invocation work root (per-sample scratch was already cleaned).
+  try { fs.rmSync(workRoot, { recursive: true, force: true }); } catch { /* best-effort */ }
+
+  const summary = _summarizeCorpus(details, threshold);
+  const report = {
+    version: require('../../package.json').version,
+    date: new Date().toISOString(),
+    mode: 'corpus-dir',
+    corpusDir: path.resolve(corpusDir),
+    threshold,
+    total,
+    scanned: total - skipped,
+    skipped,
+    ...summary
+  };
+
+  const stamp = report.date.replace(/[:.]/g, '-');
+  const outDir = process.env.MUADDIB_CORPUS_OUT_DIR || METRICS_DIR;
+  const outPath = path.join(outDir, `corpus-${stamp}.json`);
+  try {
+    fs.mkdirSync(outDir, { recursive: true });
+    fs.writeFileSync(outPath, JSON.stringify(report, null, 2));
+  } catch { /* metrics write is best-effort */ }
+
+  if (jsonMode) {
+    console.log(JSON.stringify(report, null, 2));
+  } else {
+    _printCorpusReport(report, outPath);
+  }
+  return report;
+}
+
+function sanitizeCorpusName(name) {
+  return String(name || 'pkg').replace(/^@/, '').replace(/\//g, '__').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80);
+}
+
+// Roll up score distribution, flagged rate, and (when labels exist) TPR/FPR —
+// overall and per time bucket.
+function _summarizeCorpus(details, threshold) {
+  const scored = details.filter(d => !d.skipped);
+  const dist = { '0': 0, '1-9': 0, '10-19': 0, '20-49': 0, '50+': 0 };
+  for (const d of scored) {
+    const s = d.score;
+    if (s === 0) dist['0']++;
+    else if (s <= 9) dist['1-9']++;
+    else if (s <= 19) dist['10-19']++;
+    else if (s <= 49) dist['20-49']++;
+    else dist['50+']++;
+  }
+  const flagged = scored.filter(d => d.flagged).length;
+  const flaggedRate = scored.length ? flagged / scored.length : 0;
+
+  function labelStats(set) {
+    const mal = set.filter(d => d.label === 'malicious');
+    const clean = set.filter(d => d.label === 'clean');
+    const detected = mal.filter(d => d.flagged).length;
+    const falsePos = clean.filter(d => d.flagged).length;
+    return {
+      malicious: mal.length,
+      detected,
+      tpr: mal.length ? detected / mal.length : null,
+      tprCI: mal.length ? wilsonCI(detected, mal.length) : null,
+      clean: clean.length,
+      falsePositives: falsePos,
+      fpr: clean.length ? falsePos / clean.length : null,
+      fprCI: clean.length ? wilsonCI(falsePos, clean.length) : null
+    };
+  }
+
+  const byBucket = {};
+  for (const b of ['fresh', 'current', 'historical', 'undated']) {
+    const set = scored.filter(d => d.bucket === b);
+    if (set.length === 0) continue;
+    byBucket[b] = {
+      total: set.length,
+      flagged: set.filter(d => d.flagged).length,
+      labeled: labelStats(set)
+    };
+  }
+
+  const hasLabels = scored.some(d => d.label);
+  return {
+    scoreDistribution: dist,
+    flagged,
+    flaggedRate,
+    labeled: hasLabels ? labelStats(scored) : null,
+    byTimeBucket: byBucket,
+    samples: details.slice(0, 500)
+  };
+}
+
+function _printCorpusReport(r, outPath) {
+  const bar = '='.repeat(56);
+  console.log('');
+  console.log(bar);
+  console.log(`  MUAD'DIB corpus evaluation (re-scanned at HEAD, v${r.version})`);
+  console.log(bar);
+  console.log(`  Corpus     : ${r.corpusDir}`);
+  console.log(`  Samples    : ${r.scanned} scanned, ${r.skipped} skipped (of ${r.total})`);
+  console.log(`  Threshold  : score ≥ ${r.threshold}`);
+  console.log(`  Flagged    : ${r.flagged}/${r.scanned}  (${(r.flaggedRate * 100).toFixed(1)}%)`);
+  const d = r.scoreDistribution;
+  console.log(`  Scores     : 0=${d['0']}  1-9=${d['1-9']}  10-19=${d['10-19']}  20-49=${d['20-49']}  50+=${d['50+']}`);
+  if (r.labeled) {
+    const L = r.labeled;
+    if (L.tpr != null) console.log(`  TPR        : ${L.detected}/${L.malicious}  ${(L.tpr * 100).toFixed(1)}%  [${(L.tprCI.lower * 100).toFixed(1)}-${(L.tprCI.upper * 100).toFixed(1)}%]`);
+    if (L.fpr != null) console.log(`  FPR        : ${L.falsePositives}/${L.clean}  ${(L.fpr * 100).toFixed(1)}%  [${(L.fprCI.lower * 100).toFixed(1)}-${(L.fprCI.upper * 100).toFixed(1)}%]`);
+  } else {
+    console.log(`  (no labels — provide labels.json or sidecar .label for TPR/FPR)`);
+  }
+  const buckets = Object.keys(r.byTimeBucket);
+  if (buckets.length) {
+    console.log(`  ${'-'.repeat(52)}`);
+    for (const b of buckets) {
+      const bk = r.byTimeBucket[b];
+      let line = `  ${b.padEnd(10)} n=${bk.total}  flagged=${bk.flagged}`;
+      if (bk.labeled && bk.labeled.tpr != null) line += `  TPR=${(bk.labeled.tpr * 100).toFixed(0)}%`;
+      if (bk.labeled && bk.labeled.fpr != null) line += `  FPR=${(bk.labeled.fpr * 100).toFixed(0)}%`;
+      console.log(line);
+    }
+  }
+  console.log(bar);
+  console.log(`  Saved: ${path.relative(ROOT, outPath)}`);
+  console.log('');
+}
+
 /**
  * Main evaluate function
  *
@@ -1392,6 +1681,13 @@ function saveMetrics(report) {
 async function evaluate(options = {}) {
   const version = require('../../package.json').version;
   const jsonMode = options.json || false;
+
+  // Corpus-dir mode: re-scan an arbitrary local archive at HEAD and return.
+  // Skips the 8 static-corpus phases entirely — this is the measurement on YOUR
+  // rapatriated captures, not the built-in benchmark set.
+  if (options.corpusDir) {
+    return evaluateCorpusDir(options.corpusDir, options);
+  }
 
   // Load scan result cache (auto-invalidates when src/ changes)
   const cachedCount = options.refreshBenign ? 0 : loadScanCache();
@@ -1790,6 +2086,7 @@ function classifyDetectionSource(threat) {
 
 module.exports = {
   evaluate,
+  evaluateCorpusDir,
   isSafePkgName,
   evaluateGroundTruth,
   evaluateBenign,

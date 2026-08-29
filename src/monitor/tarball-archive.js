@@ -255,17 +255,70 @@ function rmDirRecursiveSafe(dirPath) {
   }
 }
 
+// Hard ceiling: even UN-PULLED captures are dropped past this age, so a PC that
+// stays off for weeks cannot fill the archive volume forever (bounded resources).
+// Must be >= the soft retention window. Bounded to [soft, 3650] days, default 30.
+const DEFAULT_MAX_RETENTION_DAYS = 30;
+function getMaxRetentionDays() {
+  const soft = getRetentionDays();
+  const raw = process.env.MUADDIB_ARCHIVE_MAX_RETENTION_DAYS;
+  const fallback = Math.max(DEFAULT_MAX_RETENTION_DAYS, soft);
+  if (raw === undefined || raw === '') return fallback;
+  const n = parseInt(raw, 10);
+  if (!Number.isFinite(n) || n < soft || n > 3650) return fallback;
+  return n;
+}
+
+// A day-dir is "pulled" once the workstation's rsync step has confirmed it holds
+// an intact copy (hash-verified) and dropped a `.pulled` sentinel. Only then is
+// the day's irreplaceable .tgz safe to purge on the soft timer.
+function dayDirIsPulled(fullPath) {
+  try { return fs.existsSync(path.join(fullPath, '.pulled')); } catch { return false; }
+}
+
+// Does the day-dir hold any irreplaceable tarball? (JSON-only days are benign
+// metadata — re-derivable, safe to purge on the timer.)
+function dayDirHasTarball(fullPath) {
+  try { return fs.readdirSync(fullPath).some(f => f.endsWith('.tgz')); } catch { return false; }
+}
+
+function _dirBytes(fullPath) {
+  let bytes = 0;
+  try {
+    for (const f of fs.readdirSync(fullPath)) {
+      try { bytes += fs.statSync(path.join(fullPath, f)).size; } catch { /* ignore */ }
+    }
+  } catch { /* ignore */ }
+  return bytes;
+}
+
 /**
- * Purge archived tarballs older than the retention window. Runs at monitor
- * startup so no external cron is needed.
+ * Purge archived tarballs older than the retention window — SAFELY. Runs at
+ * monitor startup and every 6h so no external cron is needed.
  *
- * Streams stats: { kept, purged, freedBytes }. Errors are logged, never thrown.
+ * Safe-delete contract (the archive is the ONLY copy of malware npm has since
+ * unpublished — a blind timer purge destroys irreplaceable captures):
+ *   1. Aged + PULLED (workstation confirmed a hash-verified copy) → purge.
+ *   2. Aged + JSON-only (no .tgz — benign metadata, re-derivable)  → purge.
+ *   3. Aged + un-pulled + holds .tgz → KEEP, awaiting the PC pull, UNLESS:
+ *        a. older than the HARD ceiling (getMaxRetentionDays) → purge (bounded
+ *           disk wins; loud), or
+ *        b. free space is below the min-free floor → purge OLDEST-first until the
+ *           floor clears (losing old suspect beats a full disk that blocks
+ *           capture of NEW suspect). Everything here is score>=tgz-min (benign is
+ *           already JSON-only and gone in step 2), so oldest-first is the honest
+ *           order.
+ *
+ * Stats: { kept, purged, freedBytes, retainedUnpulled, unpulledPurged }.
+ * Errors are logged, never thrown.
  */
 function cleanupOldArchives(retentionDays = getRetentionDays()) {
-  const stats = { kept: 0, purged: 0, freedBytes: 0 };
+  const stats = { kept: 0, purged: 0, freedBytes: 0, retainedUnpulled: 0, unpulledPurged: 0 };
   if (!fs.existsSync(ARCHIVE_DIR)) return stats;
 
-  const cutoff = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
+  const now = Date.now();
+  const softCutoff = now - retentionDays * 24 * 60 * 60 * 1000;
+  const hardCutoff = now - getMaxRetentionDays() * 24 * 60 * 60 * 1000;
   let entries;
   try {
     entries = fs.readdirSync(ARCHIVE_DIR, { withFileTypes: true });
@@ -274,30 +327,46 @@ function cleanupOldArchives(retentionDays = getRetentionDays()) {
     return stats;
   }
 
+  const retained = []; // un-pulled aged dirs kept — candidates for disk-pressure eviction
+
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
     const date = parseArchiveDayDir(entry.name);
     if (!date) continue; // ignore unrelated subdirs
-    if (date.getTime() >= cutoff) {
-      stats.kept++;
+    const fullPath = path.join(ARCHIVE_DIR, entry.name);
+    if (date.getTime() >= softCutoff) { stats.kept++; continue; }
+
+    // Aged past the soft retention window.
+    if (dayDirIsPulled(fullPath) || !dayDirHasTarball(fullPath)) {
+      const bytes = _dirBytes(fullPath);
+      if (rmDirRecursiveSafe(fullPath)) { stats.purged++; stats.freedBytes += bytes; }
       continue;
     }
-    const fullPath = path.join(ARCHIVE_DIR, entry.name);
-    let bytes = 0;
-    try {
-      for (const f of fs.readdirSync(fullPath)) {
-        try { bytes += fs.statSync(path.join(fullPath, f)).size; } catch { /* ignore */ }
-      }
-    } catch { /* ignore */ }
-    if (rmDirRecursiveSafe(fullPath)) {
-      stats.purged++;
-      stats.freedBytes += bytes;
+
+    // Un-pulled AND holds irreplaceable tarballs.
+    const bytes = _dirBytes(fullPath);
+    if (date.getTime() < hardCutoff) {
+      console.warn(`[Archive] HARD-CEILING purge of UN-PULLED ${entry.name} (~${(bytes / 1048576).toFixed(0)}MB) — older than ${getMaxRetentionDays()}d and never pulled. Irreplaceable captures LOST.`);
+      if (rmDirRecursiveSafe(fullPath)) { stats.purged++; stats.unpulledPurged++; stats.freedBytes += bytes; }
+      continue;
+    }
+    stats.retainedUnpulled++;
+    retained.push({ path: fullPath, name: entry.name, date: date.getTime(), bytes });
+  }
+
+  // Disk-pressure override: reclaim oldest un-pulled first, only while below the floor.
+  if (retained.length && !hasEnoughSpace(ARCHIVE_DIR)) {
+    retained.sort((a, b) => a.date - b.date);
+    for (const r of retained) {
+      if (hasEnoughSpace(ARCHIVE_DIR)) break;
+      console.warn(`[Archive] DISK-PRESSURE purge of UN-PULLED ${r.name} (~${(r.bytes / 1048576).toFixed(0)}MB) — free space below floor, reclaiming oldest suspect. LOST.`);
+      if (rmDirRecursiveSafe(r.path)) { stats.purged++; stats.unpulledPurged++; stats.freedBytes += r.bytes; stats.retainedUnpulled--; }
     }
   }
 
-  if (stats.purged > 0) {
+  if (stats.purged > 0 || stats.retainedUnpulled > 0) {
     const mb = (stats.freedBytes / 1024 / 1024).toFixed(0);
-    console.log(`[Archive] Purged ${stats.purged} day(s) older than ${retentionDays}d (~${mb}MB freed). Kept ${stats.kept}.`);
+    console.log(`[Archive] Cleanup: purged ${stats.purged} day(s) (~${mb}MB), kept ${stats.kept} recent, retained ${stats.retainedUnpulled} un-pulled aged (awaiting PC pull), un-pulled dropped ${stats.unpulledPurged}.`);
   }
   return stats;
 }
@@ -331,7 +400,10 @@ module.exports = {
   sha256File,
   getArchiveDateString,
   getRetentionDays,
+  getMaxRetentionDays,
   getMinFreeBytes,
   getArchiveTgzMinScore,
-  parseArchiveDayDir
+  parseArchiveDayDir,
+  dayDirIsPulled,
+  dayDirHasTarball
 };

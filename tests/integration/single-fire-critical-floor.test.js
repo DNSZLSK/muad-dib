@@ -108,7 +108,7 @@ async function runSingleFireCriticalFloorTests() {
     assert(applySingleFireCriticalFloor({ threats: [], summary: { riskScore: 10 } }).length === 0);
   });
 
-  test('SINGLE_FIRE_CRITICAL_TYPES set composition is the validated 8-type list', () => {
+  test('SINGLE_FIRE_CRITICAL_TYPES set composition is the validated 10-type list', () => {
     const expected = new Set([
       'known_malicious_hash',
       'known_malicious_package',
@@ -117,13 +117,50 @@ async function runSingleFireCriticalFloorTests() {
       'lifecycle_shell_pipe',
       'gyp_phantom_exec',
       'crypto_exfil',
-      'install_native_drop_exec'
+      'install_native_drop_exec',
+      'ioc_string_match',
+      'text_payload_as_font_asset'
     ]);
     assert(SINGLE_FIRE_CRITICAL_TYPES.size === expected.size,
       `Expected ${expected.size} types, got ${SINGLE_FIRE_CRITICAL_TYPES.size}`);
     for (const t of expected) {
       assert(SINGLE_FIRE_CRITICAL_TYPES.has(t), `Missing expected type: ${t}`);
     }
+  });
+
+  // ── ioc_string_match: CRITICAL floors, HIGH does NOT (per-type severity gate) ──
+  // The HIGH string IOCs are deliberately non-unique (getSignaturesForAddress = a real Solana
+  // web3.js method, huggingface.co/api/models = a legit URL). Flooring HIGH would false-lift
+  // every benign Solana/HuggingFace package to 75 — the gate MUST hold at CRITICAL.
+  test('Floor lifts a lone CRITICAL ioc_string_match (campaign-unique wallet) to 75', () => {
+    const result = makeResult([
+      { type: 'ioc_string_match', severity: 'CRITICAL', file: 'babel.config.cjs',
+        message: 'wallet 0xa322… (nullreceiver-2026-08)' }
+    ], 20);
+    const triggers = applySingleFireCriticalFloor(result);
+    assert(triggers.length === 1, `Expected 1 trigger, got ${triggers.length}`);
+    assert(result.summary.riskScore === SINGLE_FIRE_CRITICAL_FLOOR,
+      `Expected ${SINGLE_FIRE_CRITICAL_FLOOR}, got ${result.summary.riskScore}`);
+  });
+
+  test('Floor does NOT lift a HIGH ioc_string_match (non-unique string, FPR guard)', () => {
+    const result = makeResult([
+      { type: 'ioc_string_match', severity: 'HIGH', file: 'client.js',
+        message: 'getSignaturesForAddress (glassworm-2026) — also a real Solana web3.js method' }
+    ], 10);
+    const triggers = applySingleFireCriticalFloor(result);
+    assert(triggers.length === 0, `HIGH string IOC must NOT floor (per-type CRITICAL gate), got ${triggers.length}`);
+    assert(result.summary.riskScore === 10, `Score must stay 10, got ${result.summary.riskScore}`);
+  });
+
+  test('Floor lifts a lone CRITICAL text_payload_as_font_asset (.woff2 loader) to 75', () => {
+    const result = makeResult([
+      { type: 'text_payload_as_font_asset', severity: 'CRITICAL', file: 'public/fonts/fa-solid-400.woff2',
+        message: 'plaintext JS shipped as a font (PolinRider)' }
+    ], 25);
+    applySingleFireCriticalFloor(result);
+    assert(result.summary.riskScore === SINGLE_FIRE_CRITICAL_FLOOR,
+      `Expected ${SINGLE_FIRE_CRITICAL_FLOOR}, got ${result.summary.riskScore}`);
   });
 
   test('Floor preserves riskLevel string consistency with new score', () => {

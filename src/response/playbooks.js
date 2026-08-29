@@ -1086,6 +1086,10 @@ const PLAYBOOKS = {
     'HAUTE: un fichier a extension source (.js/.ts/.cjs/.mjs) a un contenu BINAIRE (executable / archive / conteneur custom), souvent cache dans dist/ ou l\'analyse texte ne regarde pas — porteur de charge utile deguise en source (pattern jscrambler@8.14.0 dist/intro.js, 7.8 Mo). ' +
     'Ouvrir le fichier en hexdump, identifier le format (ELF/PE/Mach-O/gzip/CSI). Verifier quel script d\'install ou loader le lit+execute (cf. install_native_drop_exec). NE PAS installer si couple a un hook d\'install.',
 
+  text_payload_as_font_asset:
+    'CRITIQUE: un fichier a extension de police/asset (.woff2/.woff/.ttf/.otf/.eot) contient du JavaScript EN CLAIR — une police est binaire par definition, jamais du code source. Porteur de charge de la campagne PolinRider (DPRK/NullReceiver) : le loader est depose en public/fonts/*.woff2 et invisible aux scanners texte (extension non-code). ' +
+    'Ouvrir le fichier, confirmer le code (require/child_process/spawn/variables _0x*). Chercher le declencheur : une tache .vscode/tasks.json en runOn:folderOpen ou un require()/spawn vers ce fichier (cf. ide_hook_autoexec). NE PAS ouvrir le projet dans un IDE, NE PAS installer. Supprimer le fichier ET son declencheur, roter les credentials dev/CI.',
+
   string_mutation_obfuscation:
     'HAUTE: Chaine de .replace() reconstruisant des noms d\'API dangereuses (leet-speak). ' +
     'Technique d\'evasion par substitution de caracteres. Decoder la chaine finale. Supprimer si malveillant.',

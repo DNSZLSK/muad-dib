@@ -163,6 +163,8 @@ const { runReputationFactorTests } = require('./integration/reputation-factor.te
 const { runFprLiveTests } = require('./integration/fpr-live.test');
 const { runGapRemediationTests } = require('./integration/gap-remediation.test');
 const { runConfigTests } = require('./integration/config.test');
+const { runActionReportTests } = require('./integration/action-report.test');
+const { runEvaluateCorpusDirTests } = require('./integration/evaluate-corpus-dir.test');
 const { runBenignRandomTests } = require('./integration/benign-random.test');
 const { runAuditV2RemediationTests } = require('./integration/audit-v2-remediation.test');
 const { runMLPipelineTests } = require('./integration/ml-pipeline.test');
@@ -348,6 +350,12 @@ async function timed(name, fn) {
 
   // Config system tests (v2.9.7)
   await timed('config', runConfigTests);
+
+  // GitHub Action reporter tests (scripts/action-report.cjs)
+  await timed('action-report', runActionReportTests);
+
+  // evaluate --corpus-dir tests (offline re-scan of a local archive)
+  await timed('evaluate-corpus-dir', runEvaluateCorpusDirTests);
 
   // Benign random corpus tests (v2.9.7)
   await timed('benign-random', runBenignRandomTests);
