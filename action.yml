@@ -1,5 +1,5 @@
 name: 'MUAD''DIB Scanner'
-description: 'Supply-chain threat detection and response for npm. Detects malicious packages, typosquatting, credential theft, and more.'
+description: 'Supply-chain threat detection for npm & PyPI. Detects malicious packages, typosquatting, credential theft, install-time RCE, and more.'
 author: 'DNSZLSK'
 
 branding:
@@ -12,31 +12,44 @@ inputs:
     required: false
     default: '.'
   fail-on:
-    description: 'Minimum severity to fail the workflow (critical, high, medium, low)'
+    description: 'Minimum severity that fails the workflow (critical, high, medium, low, none)'
     required: false
     default: 'high'
   sarif:
-    description: 'Generate SARIF output file at this path'
+    description: 'If set to a file path, generate SARIF and upload it to the GitHub Security tab (requires security-events: write). Empty = no SARIF (single scan).'
     required: false
     default: ''
   paranoid:
-    description: 'Enable paranoid mode for ultra-strict detection'
+    description: 'Enable paranoid mode (ultra-strict detection, higher false-positive rate)'
     required: false
     default: 'false'
+  version:
+    description: 'Version of muaddib-scanner to install from npm (e.g. 2.11.180). Default: latest.'
+    required: false
+    default: 'latest'
 
 outputs:
-  sarif-file:
-    description: 'Path to the generated SARIF file (if sarif input was provided)'
-    value: ${{ steps.scan.outputs.sarif_file }}
   risk-score:
     description: 'Risk score from 0 to 100'
-    value: ${{ steps.scan.outputs.risk_score }}
+    value: ${{ steps.report.outputs.risk_score }}
+  risk-level:
+    description: 'Risk level (SAFE / LOW / MEDIUM / HIGH / CRITICAL)'
+    value: ${{ steps.report.outputs.risk_level }}
   threats-count:
-    description: 'Number of threats detected'
-    value: ${{ steps.scan.outputs.threats_count }}
+    description: 'Total number of threats detected'
+    value: ${{ steps.report.outputs.threats_count }}
+  critical-count:
+    description: 'Number of CRITICAL threats detected'
+    value: ${{ steps.report.outputs.critical_count }}
+  high-count:
+    description: 'Number of HIGH threats detected'
+    value: ${{ steps.report.outputs.high_count }}
   exit-code:
-    description: 'Exit code of the scan (0 = clean, 1+ = threats found)'
+    description: 'Scan exit code (0 = passed fail-on gate, non-zero = threats at/above fail-on)'
     value: ${{ steps.scan.outputs.exit_code }}
+  sarif-file:
+    description: 'Path to the generated SARIF file (empty if sarif input was not set)'
+    value: ${{ steps.sarif.outputs.sarif_file }}
 
 runs:
   using: 'composite'
@@ -44,50 +57,54 @@ runs:
     - name: Setup Node.js
       uses: actions/setup-node@v6
       with:
-        node-version: '24'
+        node-version: '20'
 
     - name: Install MUAD'DIB
       shell: bash
-      run: npm install -g muaddib-scanner
+      run: npm install -g "muaddib-scanner@${{ inputs.version }}"
 
     - name: Run MUAD'DIB scan
       id: scan
       shell: bash
       run: |
-        # Build command
-        CMD="muaddib scan ${{ inputs.path }} --fail-on ${{ inputs.fail-on }}"
+        set -o pipefail
+        RESULT_FILE="$RUNNER_TEMP/muaddib-result.json"
 
-        # Add SARIF output if requested
-        SARIF_PATH="${{ inputs.sarif }}"
-        if [ -n "$SARIF_PATH" ]; then
-          CMD="$CMD --sarif $SARIF_PATH"
-          echo "sarif_file=$SARIF_PATH" >> $GITHUB_OUTPUT
-        fi
-
-        # Add paranoid mode if enabled
+        CMD=(muaddib scan "${{ inputs.path }}" --fail-on "${{ inputs.fail-on }}" --json)
         if [ "${{ inputs.paranoid }}" = "true" ]; then
-          CMD="$CMD --paranoid"
+          CMD+=(--paranoid)
         fi
 
-        # Run scan and capture output
+        # Authoritative scan: --json gives us BOTH the machine-readable result
+        # (parsed by the reporter) AND the pass/fail exit code. One scan.
         set +e
-        OUTPUT=$($CMD --json 2>&1)
+        "${CMD[@]}" > "$RESULT_FILE"
         EXIT_CODE=$?
         set -e
 
-        # Extract metrics from JSON output
-        RISK_SCORE=$(echo "$OUTPUT" | grep -o '"score":[0-9]*' | head -1 | cut -d':' -f2 || echo "0")
-        THREATS_COUNT=$(echo "$OUTPUT" | grep -o '"threats":\[' | wc -l || echo "0")
+        echo "result_file=$RESULT_FILE" >> "$GITHUB_OUTPUT"
+        echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
 
-        echo "risk_score=$RISK_SCORE" >> $GITHUB_OUTPUT
-        echo "threats_count=$THREATS_COUNT" >> $GITHUB_OUTPUT
-        echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
+    - name: Report results
+      id: report
+      shell: bash
+      run: node "${{ github.action_path }}/scripts/action-report.cjs" "${{ steps.scan.outputs.result_file }}"
 
-        # Re-run without --json for human-readable output
-        $CMD || true
-
-        # Exit with the original code
-        exit $EXIT_CODE
+    - name: Generate SARIF
+      id: sarif
+      if: inputs.sarif != ''
+      shell: bash
+      run: |
+        # SARIF is a separate output format from --json (the CLI emits one
+        # format per run), so producing it needs a second pass. Only runs when
+        # a SARIF path is requested; the common CI case above is a single scan.
+        SARIF_PATH="${{ inputs.sarif }}"
+        CMD=(muaddib scan "${{ inputs.path }}" --fail-on none --sarif "$SARIF_PATH")
+        if [ "${{ inputs.paranoid }}" = "true" ]; then
+          CMD+=(--paranoid)
+        fi
+        "${CMD[@]}" || true
+        echo "sarif_file=$SARIF_PATH" >> "$GITHUB_OUTPUT"
 
     - name: Upload SARIF to GitHub Security
       if: inputs.sarif != '' && always()
@@ -95,3 +112,7 @@ runs:
       with:
         sarif_file: ${{ inputs.sarif }}
       continue-on-error: true
+
+    - name: Enforce fail-on gate
+      shell: bash
+      run: exit ${{ steps.scan.outputs.exit_code }}

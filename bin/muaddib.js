@@ -700,6 +700,9 @@ if (command === 'version' || command === '--version' || command === '-v') {
       i++;
     } else if (options[i] === '--refresh-benign') {
       evalOpts.refreshBenign = true;
+    } else if (options[i] === '--corpus-dir' && options[i + 1]) {
+      evalOpts.corpusDir = options[i + 1];
+      i++;
     }
   }
   evaluate(evalOpts).then(() => {

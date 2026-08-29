@@ -249,6 +249,8 @@ See [vscode-extension/README.md](vscode-extension/README.md) for full documentat
 
 ### GitHub Actions (Marketplace)
 
+Minimal (fail the build on HIGH+ threats, single scan):
+
 ```yaml
 name: Security Scan
 
@@ -257,24 +259,51 @@ on: [push, pull_request]
 jobs:
   scan:
     runs-on: ubuntu-latest
-    permissions:
-      security-events: write
-      contents: read
     steps:
       - uses: actions/checkout@v4
-      - uses: DNSZLSK/muad-dib@v1
+      - uses: DNSZLSK/muad-dib@v2.11.180   # pin to a released tag
+        with:
+          fail-on: 'high'
+```
+
+With SARIF uploaded to the **Security** tab (needs `security-events: write`; runs a second pass to emit SARIF):
+
+```yaml
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DNSZLSK/muad-dib@v2.11.180
         with:
           path: '.'
           fail-on: 'high'
           sarif: 'results.sarif'
 ```
 
+**Inputs**
+
 | Input | Description | Default |
 |-------|-------------|---------|
 | `path` | Path to scan | `.` |
-| `fail-on` | Minimum severity to fail | `high` |
-| `sarif` | SARIF output file path | |
-| `paranoid` | Ultra-strict detection | `false` |
+| `fail-on` | Minimum severity to fail (`critical`/`high`/`medium`/`low`/`none`) | `high` |
+| `sarif` | SARIF output file path — set to also upload to the Security tab | |
+| `paranoid` | Ultra-strict detection (higher FPR) | `false` |
+| `version` | `muaddib-scanner` npm version to install | `latest` |
+
+**Outputs** (consume in later steps via `steps.<id>.outputs.*`)
+
+| Output | Description |
+|--------|-------------|
+| `risk-score` | Risk score 0–100 |
+| `risk-level` | `SAFE` / `LOW` / `MEDIUM` / `HIGH` / `CRITICAL` |
+| `threats-count` | Total threats detected |
+| `critical-count` / `high-count` | Threats by severity |
+| `exit-code` | `0` = passed the `fail-on` gate, non-zero otherwise |
+| `sarif-file` | Path to the SARIF file (empty if `sarif` not set) |
 
 ### Pre-commit hooks
 
@@ -345,7 +374,7 @@ npm test
 
 ### Testing
 
-- **<!--stat:tests-->4545<!--/stat:tests--> tests** across <!--stat:testFiles-->153<!--/stat:testFiles--> modular test files
+- **<!--stat:tests-->4545<!--/stat:tests--> tests** across <!--stat:testFiles-->155<!--/stat:testFiles--> modular test files
 - **56 fuzz tests** - Malformed inputs, ReDoS, unicode, binary
 - **Datadog 17K benchmark** - 14,587 confirmed malware samples (in-scope)
 - **Ground truth validation** - 96 real-world attacks (95.74% TPR@3, 88.30% TPR@20 — v2.11.48 full measure on 94 in-scope)
