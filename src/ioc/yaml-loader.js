@@ -109,9 +109,14 @@ function loadStringIocsYAML(filePath, iocs, seenStrings) {
       iocs.stringIocs.push({
         string: literal,
         campaign: typeof s.campaign === 'string' ? s.campaign : 'unknown',
-        severity: (s.severity === 'HIGH' || s.severity === 'MEDIUM') ? s.severity : 'CRITICAL',
+        // Unknown values default to CRITICAL; LOW is accepted for generic,
+        // composite-only strings (previously any LOW silently became CRITICAL).
+        severity: (s.severity === 'HIGH' || s.severity === 'MEDIUM' || s.severity === 'LOW') ? s.severity : 'CRITICAL',
         source: typeof s.source === 'string' ? s.source : '',
-        description: typeof s.description === 'string' ? s.description : ''
+        description: typeof s.description === 'string' ? s.description : '',
+        // Optional lineage grouping (e.g. the Shai-Hulud worm builds); ioc-strings
+        // derives it from the campaign id when absent.
+        ...(typeof s.family === 'string' && s.family ? { family: s.family } : {})
       });
     }
     if (dropped > 0) {

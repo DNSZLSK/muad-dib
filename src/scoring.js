@@ -1150,6 +1150,80 @@ function _hasProvenExfilSink(threats) {
   return threats.some(t => PROVEN_EXFIL_SINK_TYPES.has(t.type) && t.severity !== 'LOW');
 }
 
+// ── String-IOC corroboration (corpus audit 2026-11-03) ──
+// A curated string IOC is decisive only when the package gives a second,
+// independent reason to believe it. Measured on 30 582 corpus tarballs: of ~55
+// with a CRITICAL ioc_string_match, ~53 were benign, almost all security tools
+// quoting IOCs in their detectors / pattern lists / test fixtures
+// (@hasna/shield, @lateos/npm-scan, sunglasses, prismor, llm-safe-haven,
+// ansible-security-scanner, unsloth-zoo, skilltotal, buzur) plus a generic
+// string matching invoice numbers. A lone match floored each of them to 75.
+//
+// Independent evidence, decided at PACKAGE level (an IOC in a.js with the
+// exfiltration in b.js is still corroborated):
+//   - behavioral: any non-LOW finding whose type is in this fixed list, or a
+//     compound. The string IOC itself never counts.
+//   - multiplicity: >= 2 distinct CRITICAL strings of ONE campaign family (a
+//     build carries several artifacts of its own campaign; GT-099 has three).
+// Outcomes:
+//   - >= 2 unrelated families and no behavioral evidence: an IOC catalog. Every
+//     ioc_string_match is reported LOW (iocCatalog), visible but not scored.
+//   - otherwise, without evidence: CRITICAL matches keep their severity but are
+//     marked iocUncorroborated and no longer trigger the single-fire floor nor
+//     the MT-1 ceiling bypass (a lone CRITICAL still scores and alerts).
+// Attacker view: a payload that carries any behavior we detect stays
+// corroborated however many other campaigns' strings it embeds. Only a sample
+// with no detected behavior at all loses the floor, and that sample still
+// crosses the alert threshold on the CRITICAL weight alone.
+const STRING_IOC_CORROBORATION_TYPES = new Set([
+  ...HIGH_CONFIDENCE_MALICE_TYPES,
+  ...PROVEN_EXFIL_SINK_TYPES,
+  'known_malicious_hash', 'ioc_match', 'dependency_ioc_match'
+]);
+STRING_IOC_CORROBORATION_TYPES.delete('ioc_string_match');
+const STRING_IOC_CATALOG_MIN_FAMILIES = 2;
+
+function _stringIocFamily(t) {
+  if (typeof t.family === 'string' && t.family) return t.family;
+  const c = typeof t.campaign === 'string' && t.campaign ? t.campaign : 'unknown';
+  return c.replace(/-\d{4}(-\d{2})?$/, '');
+}
+
+function applyStringIocCorroboration(threats) {
+  if (!Array.isArray(threats)) return { outcome: 'none' };
+  const critical = threats.filter(t => t && t.type === 'ioc_string_match' && t.severity === 'CRITICAL');
+  if (critical.length === 0) return { outcome: 'none' };
+
+  const behavioral = threats.some(t => t && t.type !== 'ioc_string_match' && t.severity !== 'LOW' &&
+    (t.compound === true || STRING_IOC_CORROBORATION_TYPES.has(t.type)));
+  const families = new Map();
+  for (const t of critical) {
+    const f = _stringIocFamily(t);
+    if (!families.has(f)) families.set(f, new Set());
+    families.get(f).add(t.evidence);
+  }
+
+  if (families.size >= STRING_IOC_CATALOG_MIN_FAMILIES && !behavioral) {
+    const list = [...families.keys()].sort().join(', ');
+    for (const t of threats) {
+      if (!t || t.type !== 'ioc_string_match') continue;
+      t.severity = 'LOW';
+      t.iocCatalog = true;
+      t.message += ` [IOC catalog: CRITICAL string IOCs of ${families.size} unrelated campaign families (${list}) and no behavioral evidence, reported LOW]`;
+    }
+    return { outcome: 'catalog', families: [...families.keys()] };
+  }
+
+  const multiplicity = families.size === 1 && [...families.values()][0].size >= 2;
+  if (behavioral || multiplicity) return { outcome: 'corroborated', behavioral, multiplicity };
+
+  for (const t of critical) {
+    t.iocUncorroborated = true;
+    t.message += ' [uncorroborated: no independent malice evidence in the package, no score floor]';
+  }
+  return { outcome: 'uncorroborated' };
+}
+
 function applyFPReductions(threats, reachableFiles, packageName, packageDeps, reachableFunctions) {
   // Initialize reductions audit trail on each threat
   // Store original severity before any FP reductions, so compound
@@ -1718,8 +1792,9 @@ function calculateRiskScore(deduped, intentResult) {
   // (GT-099 eth-security-auditor). Measured 0 ioc_string_match across 869 benign
   // packages (545 curated + 200 random npm + 124 PyPI) — zero corpus FP cost.
   // HIGH-severity strings (weaker, shared artifacts) deliberately do NOT void the cap.
+  // Uncorroborated matches (applyStringIocCorroboration) do not void the cap.
   const _hasCriticalStringIOC = deduped.some(t =>
-    t.type === 'ioc_string_match' && t.severity === 'CRITICAL'
+    t.type === 'ioc_string_match' && t.severity === 'CRITICAL' && !t.iocUncorroborated
   );
   if (!_hasLifecycle && !_hasHC && !_hasCompound && !_hasStagedC2 && !_hasPyPIImportRCE &&
       !_hasCriticalStringIOC) {
@@ -2255,6 +2330,8 @@ function applySingleFireCriticalFloor(result) {
   const triggers = [];
   for (const t of result.threats) {
     if (!SINGLE_FIRE_CRITICAL_TYPES.has(t.type)) continue;
+    // Uncorroborated string IOC (applyStringIocCorroboration): no floor.
+    if (t.type === 'ioc_string_match' && t.iocUncorroborated) continue;
     const rank = _SEV_RANK[t.severity];
     const minRank = SINGLE_FIRE_TYPE_MIN_RANK[t.type] !== undefined
       ? SINGLE_FIRE_TYPE_MIN_RANK[t.type]
@@ -2423,5 +2500,6 @@ module.exports = {
   isPackageLevelThreat, computeGroupScore, computeGroupScoreDecay,
   applyFPReductions, applyCompoundBoosts, calculateRiskScore,
   applyConfigOverrides, resetConfigOverrides, getSeverityWeights, getRiskThresholds,
-  applyContextualFPCaps, applySingleFireCriticalFloor, applyReputationFactor
+  applyContextualFPCaps, applySingleFireCriticalFloor, applyReputationFactor,
+  applyStringIocCorroboration, STRING_IOC_CORROBORATION_TYPES
 };

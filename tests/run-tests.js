@@ -105,6 +105,7 @@ const { runWebhookTests } = require('./report/webhook.test');
 const { runSandboxTests } = require('./sandbox/sandbox.test');
 const { runGvisorTests } = require('./sandbox/gvisor.test');
 const { runPreloadTests } = require('./unit/preload.test');
+const { runStringIocCorroborationTests } = require('./unit/string-ioc-corroboration.test');
 const { runMLFeatureExtractorTests } = require('./unit/ml-feature-extractor.test');
 const { runMLClassifierTests } = require('./unit/ml-classifier.test');
 const { runFpClustersTests } = require('./unit/fp-clusters.test');
@@ -256,6 +257,7 @@ async function timed(name, fn) {
   await timed('sandbox', runSandboxTests);
   await timed('gvisor', runGvisorTests);
   await timed('preload', runPreloadTests);
+  await timed('string-ioc-corroboration', runStringIocCorroborationTests);
   await timed('sandbox-preload', runSandboxPreloadTests);
   await timed('entropy', runEntropyTests);
 

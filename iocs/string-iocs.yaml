@@ -90,7 +90,9 @@ strings:
   # Source: builtin.yaml v2.9.1
   - string: "getSignaturesForAddress"
     campaign: "glassworm-2026"
-    severity: HIGH
+    severity: LOW
+    # LOW (composite-only) since 2026-11-03: a real Solana web3.js method,
+    # 18 benign packages in the 30 582-tarball corpus audit (wallet SDKs, agents).
     source: "ARCHITECTURE.md v2.9.1"
     description: "Solana RPC method used by GlassWorm to read C2 commands from blockchain"
 
@@ -113,7 +115,9 @@ strings:
   # Specific HF API endpoints abused by malware for payload hosting.
   - string: "huggingface.co/api/models"
     campaign: "huggingface-cdn-2026"
-    severity: HIGH
+    severity: LOW
+    # LOW (composite-only) since 2026-11-03: a legitimate public API endpoint,
+    # 41 benign packages in the 30 582-tarball corpus audit (model downloaders, AI agents).
     source: "https://cybersecuritynews.com/malicious-npm-package-turns-hugging-face/"
     description: "Hugging Face API endpoint used by malware to host binary payloads (C2/CDN abuse)"
 
@@ -131,31 +135,37 @@ strings:
   # GitHub repos. Self-propagation via stolen tokens (worm characteristic).
   - string: "OhNoWhatsGoingOnWithGitHub"
     campaign: "mini-shai-hulud-2026-04"
+    family: "shai-hulud"
     severity: CRITICAL
     source: "https://www.wiz.io/blog/mini-shai-hulud-supply-chain-sap-npm"
     description: "Commit message signature used by Mini Shai-Hulud for fallback exfil to attacker GitHub repos"
   - string: "beautifulcastle"
     campaign: "mini-shai-hulud-2026-04"
+    family: "shai-hulud"
     severity: CRITICAL
     source: "https://www.wiz.io/blog/mini-shai-hulud-supply-chain-sap-npm"
     description: "GitHub commit search keyword used by Mini Shai-Hulud to retrieve dynamic config"
   - string: "Checkmarx Configuration Storage"
     campaign: "mini-shai-hulud-2026-04"
+    family: "shai-hulud"
     severity: CRITICAL
     source: "https://www.wiz.io/blog/mini-shai-hulud-supply-chain-sap-npm"
     description: "Repository description string used by Mini Shai-Hulud to disguise exfil repos as Checkmarx infra"
   - string: "zero.masscan.cloud"
     campaign: "mini-shai-hulud-2026-04"
+    family: "shai-hulud"
     severity: CRITICAL
     source: "https://www.wiz.io/blog/mini-shai-hulud-supply-chain-sap-npm"
     description: "Primary exfiltration domain for Mini Shai-Hulud"
   - string: "94.154.172.43"
     campaign: "mini-shai-hulud-2026-04"
+    family: "shai-hulud"
     severity: CRITICAL
     source: "https://www.wiz.io/blog/mini-shai-hulud-supply-chain-sap-npm"
     description: "Fallback C2 IP for Mini Shai-Hulud (with /v1/telemetry endpoint)"
   - string: ".claude/execution.js"
     campaign: "mini-shai-hulud-2026-04"
+    family: "shai-hulud"
     severity: CRITICAL
     source: "https://www.wiz.io/blog/mini-shai-hulud-supply-chain-sap-npm"
     description: "Dropped payload path inside .claude/ — Mini Shai-Hulud hides in IDE config dir"
@@ -220,26 +230,31 @@ strings:
   # IDE infection (.claude/settings.json, .vscode/tasks.json).
   - string: "git-tanstack.com"
     campaign: "shai-hulud-2026-05"
+    family: "shai-hulud"
     severity: CRITICAL
     source: "https://github.com/g00dfe11ow/Shai-Hulud-Open-Source"
     description: "Primary C2 domain for Shai-Hulud (typosquat of tanstack.com)"
   - string: "IfYouRevokeThisTokenItWillWipeTheComputerOfTheOwner"
     campaign: "shai-hulud-2026-05"
+    family: "shai-hulud"
     severity: CRITICAL
     source: "https://github.com/g00dfe11ow/Shai-Hulud-Open-Source"
     description: "GitHub commit search string used by Shai-Hulud to locate exfil repos + deadman switch threat"
   - string: "Shai-Hulud: Here We Go Again"
     campaign: "shai-hulud-2026-05"
+    family: "shai-hulud"
     severity: CRITICAL
     source: "https://github.com/g00dfe11ow/Shai-Hulud-Open-Source"
     description: "Repository description string used by Shai-Hulud exfil repos"
   - string: "opensearch_init.js"
     campaign: "shai-hulud-2026-05"
+    family: "shai-hulud"
     severity: CRITICAL
     source: "https://github.com/g00dfe11ow/Shai-Hulud-Open-Source"
     description: "Payload entry point filename used by Shai-Hulud dropper"
   - string: "router_runtime.js"
     campaign: "shai-hulud-2026-05"
+    family: "shai-hulud"
     severity: HIGH
     source: "https://github.com/g00dfe11ow/Shai-Hulud-Open-Source"
     description: "Alternative payload entry point filename used by Shai-Hulud Python dropper"
@@ -253,11 +268,12 @@ strings:
   #  - Crates.io: build.rs auto-execute pendant cargo build
   #  - Empoisonnement des .cursorrules / CLAUDE.md (zero-width Unicode) pour
   #    abuser Cursor / Claude Code (couvert par AICONF-004 v2.11.40 + PYSRC-008).
-  - string: "P-2024-001"
-    campaign: "trapdoor-2026-05"
-    severity: CRITICAL
-    source: "https://socket.dev/blog/trapdoor-crypto-stealer-npm-pypi-crates"
-    description: "TrapDoor campaign identifier embedded in AUDIT-MATRIX.md and poisoned AI config files"
+  #  - "P-2024-001" (campaign identifier) was REMOVED 2026-11-03: it fails
+  #    criterion #4. It reads as an invoice / document serial and matched three
+  #    unrelated benign packages in the 30 582-tarball corpus audit:
+  #    @accounter/server (src/__tests__/factories/document.ts, ~40 versions
+  #    scored 75), fiedler-compress (benchmarks/quality.py), stickler-eval
+  #    (comparators/exact.py). GT-099 keeps two other CRITICAL TrapDoor strings.
   - string: "cargo-build-helper-2026"
     campaign: "trapdoor-2026-05"
     severity: CRITICAL
@@ -334,6 +350,7 @@ strings:
   # + versioned for the hijacked @kolbo/mcp, agentgui, godot-kit).
   - string: "0xa322e5f3d311d3080e6f0121063e9adc2490ef1a"
     campaign: "nullreceiver-2026-08"
+    family: "dprk-nullreceiver"
     severity: CRITICAL
     source: "https://thehackernews.com/2026/08/trojanized-npm-packages-decode-c2-ip.html"
     description: "Hard-coded attacker Ethereum wallet whose latest outbound tx encodes the C2 IP in its recipient address (NullReceiver blockchain-C2 dead-drop resolver)"
@@ -356,6 +373,7 @@ strings:
   # match would false-positive on any benign web3 package (fails inclusion criterion #4).
   - string: 'global.i="A8-'
     campaign: "polinrider-2026-08"
+    family: "dprk-nullreceiver"
     severity: CRITICAL
     source: "https://opensourcemalware.com/blog/polinrider-npm-case-study-dprk-attack"
     description: "PolinRider/NullReceiver loader campaign marker (global.i=\"A8-...\") injected into config files (babel.config.cjs) and fake .woff2 fonts across every release of a compromised maintainer's packages"
