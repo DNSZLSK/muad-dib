@@ -386,51 +386,61 @@ strings:
   # payload may carry either form.
   - string: "thebeautifulmarchoftime"
     campaign: "chaindrop-2026-08"
+    family: "shai-hulud"
     severity: CRITICAL
     source: "https://www.elastic.co/security-labs/threat-command/shai-hulud-chaindrop-npm-supply-chain"
     description: "C2 validation marker shared by CHAINDROP and the tensorlake Mini Shai-Hulud build"
   - string: "IfYouBlockThisAPIKeyItWillCrashTheLiveProductionServersOfAllThirdPartyClients"
     campaign: "chaindrop-2026-08"
+    family: "shai-hulud"
     severity: CRITICAL
     source: "https://www.elastic.co/security-labs/threat-command/shai-hulud-chaindrop-npm-supply-chain"
     description: "Intimidation string embedded by the CHAINDROP worm"
   - string: "awqhnjewqjkl.icu"
     campaign: "chaindrop-2026-08"
+    family: "shai-hulud"
     severity: CRITICAL
     source: "https://www.elastic.co/security-labs/threat-command/shai-hulud-chaindrop-npm-supply-chain"
     description: "CHAINDROP dead-drop domain"
   - string: "npm-cache.com"
     campaign: "chaindrop-2026-08"
+    family: "shai-hulud"
     severity: HIGH
     source: "https://www.elastic.co/security-labs/threat-command/shai-hulud-chaindrop-npm-supply-chain"
     description: "CHAINDROP dead-drop domain (HIGH rather than CRITICAL: npm-cache is a common token, so a substring collision is less implausible than for the other entries)"
   - string: "0xE1f2395ee43e45A1556EC6438a88c31B83493103"
     campaign: "chaindrop-2026-08"
+    family: "shai-hulud"
     severity: CRITICAL
     source: "https://www.elastic.co/security-labs/threat-command/shai-hulud-chaindrop-npm-supply-chain"
     description: "CHAINDROP C2 resolver Ethereum contract (checksummed)"
   - string: "0xe1f2395ee43e45a1556ec6438a88c31b83493103"
     campaign: "chaindrop-2026-08"
+    family: "shai-hulud"
     severity: CRITICAL
     source: "https://www.elastic.co/security-labs/threat-command/shai-hulud-chaindrop-npm-supply-chain"
     description: "CHAINDROP C2 resolver Ethereum contract (lowercase)"
   - string: "iseekaigogo.com"
     campaign: "tensorlake-2026-10"
+    family: "shai-hulud"
     severity: CRITICAL
     source: "https://safedep.io/tensorlake-npm-compromise-mini-shai-hulud/"
     description: "Hard-coded C2 domain of the tensorlake Mini Shai-Hulud build (/router, /hbd/)"
   - string: "0xb614155Fd88114d40549b259457Bcf921Df091B9"
     campaign: "tensorlake-2026-10"
+    family: "shai-hulud"
     severity: CRITICAL
     source: "https://safedep.io/tensorlake-npm-compromise-mini-shai-hulud/"
     description: "tensorlake Mini Shai-Hulud C2 resolver Ethereum contract (checksummed)"
   - string: "0xb614155fd88114d40549b259457bcf921df091b9"
     campaign: "tensorlake-2026-10"
+    family: "shai-hulud"
     severity: CRITICAL
     source: "https://safedep.io/tensorlake-npm-compromise-mini-shai-hulud/"
     description: "tensorlake Mini Shai-Hulud C2 resolver Ethereum contract (lowercase)"
   - string: "WORMTAG"
     campaign: "tensorlake-2026-10"
+    family: "shai-hulud"
     severity: CRITICAL
     source: "https://safedep.io/tensorlake-npm-compromise-mini-shai-hulud/"
     description: "Build-tag variable of the Mini Shai-Hulud worm (WORMTAG='tensrlake')"
