@@ -1,5 +1,5 @@
 version: "1.0.0"
-updated: "2026-08-27"
+updated: "2026-11-03"
 # String IOCs (YARA-style) — high-precision unique malware artifacts.
 # Each entry is a literal string searched in source files (.js, .cjs, .mjs,
 # .ts, .tsx, .py). Match in any source file fires the rule with score 100.
@@ -377,3 +377,146 @@ strings:
     severity: CRITICAL
     source: "https://opensourcemalware.com/blog/polinrider-npm-case-study-dprk-attack"
     description: "PolinRider/NullReceiver loader campaign marker (global.i=\"A8-...\") injected into config files (babel.config.cjs) and fake .woff2 fonts across every release of a compromised maintainer's packages"
+
+  # ── CHAINDROP / Mini Shai-Hulud worm family (keyv 2026-08, tensorlake 2026-10) ──
+  # Sources: Elastic Security Labs (CHAINDROP), SafeDep (tensorlake@0.5.144).
+  # Both builds validate their C2 against the same marker and resolve it from an
+  # Ethereum contract. Contract addresses are listed in the checksummed form the
+  # researchers published and in lowercase: matching is case-sensitive and a
+  # payload may carry either form.
+  - string: "thebeautifulmarchoftime"
+    campaign: "chaindrop-2026-08"
+    severity: CRITICAL
+    source: "https://www.elastic.co/security-labs/threat-command/shai-hulud-chaindrop-npm-supply-chain"
+    description: "C2 validation marker shared by CHAINDROP and the tensorlake Mini Shai-Hulud build"
+  - string: "IfYouBlockThisAPIKeyItWillCrashTheLiveProductionServersOfAllThirdPartyClients"
+    campaign: "chaindrop-2026-08"
+    severity: CRITICAL
+    source: "https://www.elastic.co/security-labs/threat-command/shai-hulud-chaindrop-npm-supply-chain"
+    description: "Intimidation string embedded by the CHAINDROP worm"
+  - string: "awqhnjewqjkl.icu"
+    campaign: "chaindrop-2026-08"
+    severity: CRITICAL
+    source: "https://www.elastic.co/security-labs/threat-command/shai-hulud-chaindrop-npm-supply-chain"
+    description: "CHAINDROP dead-drop domain"
+  - string: "npm-cache.com"
+    campaign: "chaindrop-2026-08"
+    severity: HIGH
+    source: "https://www.elastic.co/security-labs/threat-command/shai-hulud-chaindrop-npm-supply-chain"
+    description: "CHAINDROP dead-drop domain (HIGH rather than CRITICAL: npm-cache is a common token, so a substring collision is less implausible than for the other entries)"
+  - string: "0xE1f2395ee43e45A1556EC6438a88c31B83493103"
+    campaign: "chaindrop-2026-08"
+    severity: CRITICAL
+    source: "https://www.elastic.co/security-labs/threat-command/shai-hulud-chaindrop-npm-supply-chain"
+    description: "CHAINDROP C2 resolver Ethereum contract (checksummed)"
+  - string: "0xe1f2395ee43e45a1556ec6438a88c31b83493103"
+    campaign: "chaindrop-2026-08"
+    severity: CRITICAL
+    source: "https://www.elastic.co/security-labs/threat-command/shai-hulud-chaindrop-npm-supply-chain"
+    description: "CHAINDROP C2 resolver Ethereum contract (lowercase)"
+  - string: "iseekaigogo.com"
+    campaign: "tensorlake-2026-10"
+    severity: CRITICAL
+    source: "https://safedep.io/tensorlake-npm-compromise-mini-shai-hulud/"
+    description: "Hard-coded C2 domain of the tensorlake Mini Shai-Hulud build (/router, /hbd/)"
+  - string: "0xb614155Fd88114d40549b259457Bcf921Df091B9"
+    campaign: "tensorlake-2026-10"
+    severity: CRITICAL
+    source: "https://safedep.io/tensorlake-npm-compromise-mini-shai-hulud/"
+    description: "tensorlake Mini Shai-Hulud C2 resolver Ethereum contract (checksummed)"
+  - string: "0xb614155fd88114d40549b259457bcf921df091b9"
+    campaign: "tensorlake-2026-10"
+    severity: CRITICAL
+    source: "https://safedep.io/tensorlake-npm-compromise-mini-shai-hulud/"
+    description: "tensorlake Mini Shai-Hulud C2 resolver Ethereum contract (lowercase)"
+  - string: "WORMTAG"
+    campaign: "tensorlake-2026-10"
+    severity: CRITICAL
+    source: "https://safedep.io/tensorlake-npm-compromise-mini-shai-hulud/"
+    description: "Build-tag variable of the Mini Shai-Hulud worm (WORMTAG='tensrlake')"
+
+  # ── SubQuery @subql/common@5.8.3 (2026-10-05) ──
+  # Source: StepSecurity. Published through the project's own OIDC trusted
+  # publisher after a workflow tamper; payload in dist/, run on install and on import.
+  - string: "ci-artifacts.dev"
+    campaign: "subql-2026-10"
+    severity: CRITICAL
+    source: "https://www.stepsecurity.io/blog/subql-ecosystem-compromised"
+    description: "SubQuery payload delivery, exfiltration and remote-command domain"
+  - string: "tmp.ts018051808.lock"
+    campaign: "subql-2026-10"
+    severity: CRITICAL
+    source: "https://www.stepsecurity.io/blog/subql-ecosystem-compromised"
+    description: "Single-instance lock file name written by the SubQuery payload"
+
+  # ── LiteLLM 1.107.0 PyPI wheels (2026-10-21) ──
+  # Source: BleepingComputer. cook.pth + sitecustomize.py run at every interpreter start.
+  - string: "litellm.dev/healthcheck"
+    campaign: "litellm-2026-10"
+    severity: CRITICAL
+    source: "https://www.bleepingcomputer.com/news/security/litellm-release-pipeline-hacked-to-distribute-info-stealer-malware/"
+    description: "LiteLLM 1.107.0 exfiltration endpoint (AES-256-CBC + RSA-4096 encrypted bundle)"
+
+  # ── Trojanized Claude Code extension 2.1.312/2.1.313 (Cursor marketplace, 2026-10-29) ──
+  # Source: OpenSourceMalware. The fake LaunchAgent label com.apple.sysmond is NOT
+  # listed: it is also the label of a real macOS daemon (fails criterion #4).
+  - string: "134.209.82.225"
+    campaign: "claude-code-ext-2026-10"
+    severity: CRITICAL
+    source: "https://opensourcemalware.com/blog/trojanized-claude-code-extension-plants-persistent-ssh-backdoor"
+    description: "SSH reverse-tunnel host and HTTP beacon (:8099/beacon) of the trojanized extension"
+
+  # ── GHSA malware wave 2026-10-26..28 ──
+  # Source: Safeguard digest of the GitHub advisory records.
+  - string: "185.158.107.175"
+    campaign: "depconf-beacon-2026-10"
+    severity: CRITICAL
+    source: "https://safeguard.sh/resources/blog/106-malicious-npm-and-pypi-packages-october-2026-what-they-did-and-how-to-block-the-next-batch"
+    description: "Dependency-confusion beacon collector (:8787/_ah/dc) of @greenlake/* and @drone-js-ext/*"
+  - string: "13.140.137.222"
+    campaign: "depconf-beacon-2026-10"
+    severity: CRITICAL
+    source: "https://safeguard.sh/resources/blog/106-malicious-npm-and-pypi-packages-october-2026-what-they-did-and-how-to-block-the-next-batch"
+    description: "Dependency-confusion beacon collector (:8787/_ah/dc), second host"
+  - string: "networkservicesupp.flashhub.net"
+    campaign: "xmrig-npm-2026-10"
+    severity: CRITICAL
+    source: "https://safeguard.sh/resources/blog/106-malicious-npm-and-pypi-packages-october-2026-what-they-did-and-how-to-block-the-next-batch"
+    description: "Monero mining pool (TLS :8443) of dsh-plugin-blender-3d and @walknpm/todo-cli"
+  - string: "amplify-gursha-dev-121835-deployment"
+    campaign: "xmrig-npm-2026-10"
+    severity: CRITICAL
+    source: "https://safeguard.sh/resources/blog/106-malicious-npm-and-pypi-packages-october-2026-what-they-did-and-how-to-block-the-next-batch"
+    description: "S3 bucket hosting the XMRig carrier archive"
+  - string: "cdn-status.mulderitsme.net"
+    campaign: "csvflow-2026-10"
+    severity: CRITICAL
+    source: "https://safeguard.sh/resources/blog/106-malicious-npm-and-pypi-packages-october-2026-what-they-did-and-how-to-block-the-next-batch"
+    description: "Install beacon of csvflow-schema@1.0.0"
+  - string: "0x9c0a507300fd902787bb193d80fca5ce6e1bff9a"
+    campaign: "claudeopus-stego-2026-10"
+    severity: CRITICAL
+    source: "https://safeguard.sh/resources/blog/106-malicious-npm-and-pypi-packages-october-2026-what-they-did-and-how-to-block-the-next-batch"
+    description: "Polygon address whose transaction history yields the C2 of the claudeopus* steganographic infostealer (lowercase only: no checksummed form was published)"
+
+  # ── GhostAction (2026-10) ──
+  # Source: The Hacker News. The collector lives in .github/workflows/security-audit.yml,
+  # which ioc-strings does not read; kept for JS/Python re-uses of the same collector.
+  - string: "193.32.204.199"
+    campaign: "ghostaction-2026-10"
+    severity: CRITICAL
+    source: "https://thehackernews.com/2026/10/ghostaction-compromises-about-1900.html"
+    description: "GhostAction secret collector (HTTP POST target of the fake security-audit workflow)"
+
+  # ── node-ipc 9.1.6 / 9.2.3 / 12.0.1 (2026-05) ──
+  # Source: StepSecurity. Import-time stealer in node-ipc.cjs, DNS + HTTPS exfiltration.
+  - string: "sh.azurestaticprovider.net"
+    campaign: "node-ipc-2026-05"
+    severity: CRITICAL
+    source: "https://www.stepsecurity.io/blog/node-ipc-npm-supply-chain-attack"
+    description: "node-ipc 2026 exfiltration domain (Azure typosquat)"
+  - string: "qZ8pL3vNxR9wKmTyHbVcFgDsJaEoUi"
+    campaign: "node-ipc-2026-05"
+    severity: CRITICAL
+    source: "https://www.stepsecurity.io/blog/node-ipc-npm-supply-chain-attack"
+    description: "HMAC key hard-coded in the node-ipc 2026 stealer"
