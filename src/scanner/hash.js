@@ -28,6 +28,21 @@ const { getMaxFileSize } = require('../shared/constants.js');
 const hashCache = new Map();
 const MAX_CACHE_SIZE = 10000;
 
+// Extensions a published payload actually ships as. Worm builds copy the same
+// file verbatim into every package they infect (CHAINDROP Math_Symbol.js,
+// tensorlake lib/setup.mjs), which is exactly where an exact hash is decisive.
+// .py/.pth cover import and interpreter start-up hooks (LiteLLM 1.107.0
+// cook.pth), .node covers prebuilt native addons, .sh lifecycle shell droppers,
+// .dat/.bin staged second-stage blobs (keypairs.dat, identical across 9+ packages).
+const HASH_EXTENSIONS = ['.js', '.mjs', '.cjs', '.ts', '.py', '.pth', '.sh', '.node', '.dat', '.bin'];
+
+// Unlike the heuristic scanners, nothing is excluded for false-positive reasons:
+// an exact SHA-256 match on a known payload cannot be a coincidence. The
+// package's own files, dist/ build/ out/ (where @subql/common@5.8.3 hid its
+// loader) and node_modules/ (transitive dependencies) are all hashed; only the
+// VCS directory and our own cache are skipped.
+const HASH_EXCLUDED_DIRS = ['.git', '.muaddib-cache'];
+
 async function scanHashes(targetPath) {
   const threats = [];
   hashCache.clear(); // Clear stale cache between scans
@@ -38,20 +53,15 @@ async function scanHashes(targetPath) {
     ? iocs.hashesSet
     : new Set(iocs.hashes || []);
 
-  if (knownHashes.size === 0) {
+  if (knownHashes.size === 0 || !fs.existsSync(targetPath)) {
     return threats;
   }
 
-  const nodeModulesPath = path.join(targetPath, 'node_modules');
+  // Shared findFiles: symlink protection, depth limit, and a file-count cap that
+  // keeps the shallowest files first (entry points over deep dependency trees).
+  const files = findFiles(targetPath, { extensions: HASH_EXTENSIONS, excludedDirs: HASH_EXCLUDED_DIRS, maxDepth: 100 });
 
-  if (!fs.existsSync(nodeModulesPath)) {
-    return threats;
-  }
-
-  // Use shared findFiles utility (with symlink protection and depth limit)
-  const jsFiles = findFiles(nodeModulesPath, { extensions: ['.js'], excludedDirs: [], maxDepth: 100 });
-
-  for (const file of jsFiles) {
+  for (const file of files) {
     const hash = computeHashCached(file);
 
     if (hash && knownHashes.has(hash)) {

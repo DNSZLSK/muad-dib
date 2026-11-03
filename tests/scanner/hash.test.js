@@ -164,6 +164,74 @@ async function runHashTests() {
       clearHashCache();
     }
   });
+
+  // ── Blind spot: the scanned package's OWN files ──
+  // Threat model: the monitor and `muaddib scan <pkg>` scan the published package
+  // itself, not a project that depends on it. Worm builds copy the same payload
+  // verbatim into every infected package (CHAINDROP Math_Symbol.js, tensorlake
+  // lib/setup.mjs), so a published payload hash must match wherever the file
+  // sits in the package, including dist/ (@subql/common@5.8.3 loader) and with
+  // the extensions payloads actually use (.mjs, .cjs, .py, .pth).
+  async function hashHits(layout) {
+    clearHashCache();
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'muaddib-hash-'));
+    fs.writeFileSync(path.join(tmpDir, 'package.json'), '{"name":"sample","version":"1.0.0"}');
+    for (const [rel, body] of Object.entries(layout)) {
+      fs.mkdirSync(path.dirname(path.join(tmpDir, rel)), { recursive: true });
+      fs.writeFileSync(path.join(tmpDir, rel), body);
+    }
+    try {
+      const threats = await withInjectedHash(EVIL_HASH, () => scanHashes(tmpDir));
+      return threats.filter(t => t.type === 'known_malicious_hash').map(t => t.file.replace(/\\/g, '/')).sort();
+    } finally {
+      cleanupTemp(tmpDir);
+      clearHashCache();
+    }
+  }
+
+  const OWN_FILE_LAYOUTS = [
+    ['package root entry point', 'index.js'],
+    ['tensorlake shape lib/setup.mjs', 'lib/setup.mjs'],
+    ['CommonJS bundle .cjs', 'node-ipc.cjs'],
+    ['SubQuery shape dist/project/readers/manifest-cache.js', 'dist/project/readers/manifest-cache.js'],
+    ['build/ output', 'build/install.js'],
+    ['Python module', 'pkg/__init__.py'],
+    ['LiteLLM shape start-up hook .pth', 'cook.pth'],
+    ['.mjs inside node_modules (was .js-only)', 'node_modules/dep/lib/loader.mjs'],
+    ['staged second-stage blob .dat', 'assets/keypairs.dat'],
+  ];
+  for (const [label, rel] of OWN_FILE_LAYOUTS) {
+    await asyncTest(`HASH: known payload hash fires on ${label}`, async () => {
+      const hits = await hashHits({ [rel]: EVIL_CONTENT, 'README.md': '# readme' });
+      assert(hits.length === 1 && hits[0] === rel, `expected exactly [${rel}], got [${hits.join(', ')}]`);
+    });
+  }
+
+  await asyncTest('HASH: extension match is case-insensitive (SETUP.MJS)', async () => {
+    const hits = await hashHits({ 'lib/SETUP.MJS': EVIL_CONTENT });
+    assert(hits.length === 1 && hits[0] === 'lib/SETUP.MJS', `expected [lib/SETUP.MJS], got [${hits.join(', ')}]`);
+  });
+
+  await asyncTest('HASH: a one-byte variant of the payload does not fire (exact match only)', async () => {
+    const hits = await hashHits({ 'lib/setup.mjs': EVIL_CONTENT + ' ', 'dist/a.js': EVIL_CONTENT.replace('id', 'ls') });
+    assert(hits.length === 0, `mutated payloads must not match, got [${hits.join(', ')}]`);
+  });
+
+  await asyncTest('HASH: own non-code files with the payload content do not fire', async () => {
+    const hits = await hashHits({ 'docs/payload.txt': EVIL_CONTENT, 'data.json': EVIL_CONTENT, 'notes.md': EVIL_CONTENT });
+    assert(hits.length === 0, `non-code files are out of scope, got [${hits.join(', ')}]`);
+  });
+
+  await asyncTest('HASH: .git contents are not scanned', async () => {
+    const hits = await hashHits({ '.git/hooks/post-checkout.js': EVIL_CONTENT });
+    assert(hits.length === 0, `.git is not package content, got [${hits.join(', ')}]`);
+  });
+
+  await asyncTest('HASH: each matching file is reported once (own file + dependency)', async () => {
+    const hits = await hashHits({ 'index.js': EVIL_CONTENT, 'node_modules/dep/index.js': EVIL_CONTENT });
+    assert(hits.length === 2 && hits[0] === 'index.js' && hits[1] === 'node_modules/dep/index.js',
+      `expected [index.js, node_modules/dep/index.js], got [${hits.join(', ')}]`);
+  });
 }
 
 module.exports = { runHashTests };

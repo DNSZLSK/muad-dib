@@ -183,6 +183,41 @@ async function runIocStringsTests() {
       assert(hits.length === 0, `benign sysmond reference must not fire, got ${hits.map(h => h.evidence).join(',')}`);
     } finally { rmrf(dir); }
   });
+
+  // ── Blind spot: dist/ build/ out/ ──
+  // The heuristic scanners skip these directories to avoid bundle false
+  // positives, but a string IOC is decisive by construction and published
+  // payloads live there: @subql/common@5.8.3 shipped its loader as
+  // dist/project/readers/manifest-cache.js, run by postinstall and on import.
+  for (const rel of ['dist/project/readers/manifest-cache.js', 'build/index.cjs', 'out/main.mjs', 'output/run.js']) {
+    await asyncTest(`IOC-STR: scans ${rel.split('/')[0]}/ (${rel})`, async () => {
+      const dir = mkPkg('bundled', { [rel]: 'const k = "OrDeR_7077";\nmodule.exports = k;' });
+      try {
+        const m = (await scanIocStrings(dir)).filter(t => t.evidence === 'OrDeR_7077');
+        assert(m.length === 1, `expected 1 finding in ${rel}, got ${m.length}`);
+        assert(m[0].file.replace(/\\/g, '/') === rel, `file: expected ${rel}, got ${m[0].file}`);
+      } finally { rmrf(dir); }
+    });
+  }
+
+  await asyncTest('IOC-STR: a dependency file is reported once, not by both passes', async () => {
+    const dir = mkPkg('host', { 'index.js': '// clean' });
+    const depDir = path.join(dir, 'node_modules', 'evil-dep', 'dist');
+    fs.mkdirSync(depDir, { recursive: true });
+    fs.writeFileSync(path.join(depDir, 'index.js'), 'const k = "OrDeR_7077";');
+    try {
+      const m = (await scanIocStrings(dir)).filter(t => t.evidence === 'OrDeR_7077');
+      assert(m.length === 1, `node_modules file must be reported exactly once, got ${m.length}`);
+    } finally { rmrf(dir); }
+  });
+
+  await asyncTest('IOC-STR: .git contents are not scanned', async () => {
+    const dir = mkPkg('vcs', { '.git/hooks/pre-commit.js': 'const k = "OrDeR_7077";' });
+    try {
+      const m = (await scanIocStrings(dir)).filter(t => t.type === 'ioc_string_match');
+      assert(m.length === 0, `.git is not package content, got ${m.length}`);
+    } finally { rmrf(dir); }
+  });
 }
 
 module.exports = { runIocStringsTests };
