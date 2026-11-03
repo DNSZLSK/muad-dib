@@ -9,8 +9,9 @@ const {
 // Spec (src/scoring.js, "String-IOC corroboration"): a CRITICAL ioc_string_match is
 // decisive (single-fire floor, MT-1 bypass) only with independent evidence at
 // PACKAGE level: a non-LOW finding of a fixed behavioral type list (or a compound),
-// or >= 2 distinct CRITICAL strings of one campaign family. >= 2 unrelated families
-// without behavioral evidence = IOC catalog, every string match reported LOW.
+// or >= 2 distinct CRITICAL strings all of one campaign family. Without evidence
+// the CRITICAL severity and weight are kept, only the floor / bypass are lost:
+// no path lowers a severity (a decoy string must not buy anything).
 
 const ioc = (evidence, campaign, file = 'index.js', extra = {}) =>
   ({ type: 'ioc_string_match', severity: 'CRITICAL', evidence, campaign, file, message: 'm', ...extra });
@@ -24,7 +25,7 @@ function runStringIocCorroborationTests() {
       ioc('trap-core.js', 'trapdoor-2026-05', 'c.py')];
     const r = applyStringIocCorroboration(t);
     assert(r.outcome === 'corroborated' && r.multiplicity === true, JSON.stringify(r));
-    assert(t.every(x => x.severity === 'CRITICAL' && !x.iocUncorroborated && !x.iocCatalog), 'nothing may be downgraded');
+    assert(t.every(x => x.severity === 'CRITICAL' && !x.iocUncorroborated), 'nothing may be downgraded');
   });
 
   test('STRIOC-CORR: a lone CRITICAL string with no other evidence is uncorroborated, still CRITICAL', () => {
@@ -46,25 +47,36 @@ function runStringIocCorroborationTests() {
       ioc('checkmarx.zone', 'teampcp-2026', 'pad.js'), ioc('ci-artifacts.dev', 'subql-2026-10', 'pad.js'),
       finding('reverse_shell', 'CRITICAL', 'lib/run.js')];
     const r = applyStringIocCorroboration(t);
-    assert(r.outcome === 'corroborated', 'padding must not buy a catalog downgrade: ' + JSON.stringify(r));
-    assert(t.filter(x => x.type === 'ioc_string_match').every(x => x.severity === 'CRITICAL' && !x.iocCatalog), 'all IOC matches stay CRITICAL');
+    assert(r.outcome === 'corroborated', 'padding must not weaken a corroborated sample: ' + JSON.stringify(r));
+    assert(t.filter(x => x.type === 'ioc_string_match').every(x => x.severity === 'CRITICAL' && !x.iocUncorroborated), 'all IOC matches stay CRITICAL and decisive');
   });
 
-  test('STRIOC-CORR: two unrelated families without behavior is an IOC catalog (all LOW)', () => {
-    // @hasna/shield shape
+  test('STRIOC-CORR: unrelated families without behavior (IOC catalog shape) are uncorroborated, never lowered', () => {
+    // @hasna/shield shape: strings of several campaigns do not corroborate each other
     const t = [ioc('sfrclak.com', 'axios-2026-03', 'dist/index.js'), ioc('/tmp/ld.py', 'axios-2026-03', 'dist/index.js'),
       ioc('checkmarx.zone', 'teampcp-2026', 'dist/index.js'),
       { ...ioc('ddjidd564', 'trapdoor-2026-05', 'dist/index.js'), severity: 'HIGH' }];
     const r = applyStringIocCorroboration(t);
-    assert(r.outcome === 'catalog', JSON.stringify(r));
-    assert(t.every(x => x.severity === 'LOW' && x.iocCatalog === true), JSON.stringify(t.map(x => [x.evidence, x.severity])));
+    assert(r.outcome === 'uncorroborated', JSON.stringify(r));
+    assert(t.slice(0, 3).every(x => x.severity === 'CRITICAL' && x.iocUncorroborated === true), JSON.stringify(t.map(x => [x.evidence, x.severity])));
+    assert(t[3].severity === 'HIGH', 'HIGH entries are left as they are');
   });
 
-  test('STRIOC-CORR: a compound finding blocks the catalog downgrade', () => {
+  test('STRIOC-CORR adversarial: an IOC-only sample plus a decoy string of another family never drops below CRITICAL', () => {
+    // GT-099 (3 TrapDoor strings, no behavior) + one decoy Axios string
+    const t = [ioc('cargo-build-helper-2026', 'trapdoor-2026-05', 'a.py'), ioc('ddjidd564.github.io', 'trapdoor-2026-05', 'a.py'),
+      ioc('trap-core.js', 'trapdoor-2026-05', 'a.py'), ioc('sfrclak.com', 'axios-2026-03', 'decoy.py')];
+    applyStringIocCorroboration(t);
+    assert(t.every(x => x.severity === 'CRITICAL'), 'a decoy must not lower any severity: ' + JSON.stringify(t.map(x => x.severity)));
+    const r = calculateRiskScore(t, null);
+    assert(r.riskScore >= 20, `the decoyed sample must stay above the alert threshold, got ${r.riskScore}`);
+  });
+
+  test('STRIOC-CORR: a compound finding corroborates IOCs of several families', () => {
     const t = [ioc('sfrclak.com', 'axios-2026-03'), ioc('checkmarx.zone', 'teampcp-2026'),
       { ...finding('crypto_staged_payload_compound', 'CRITICAL', 'x.js'), compound: true }];
     assert(applyStringIocCorroboration(t).outcome === 'corroborated', 'compound = independent evidence');
-    assert(t.slice(0, 2).every(x => x.severity === 'CRITICAL'), 'stays CRITICAL');
+    assert(t.slice(0, 2).every(x => x.severity === 'CRITICAL' && !x.iocUncorroborated), 'stays decisive');
   });
 
   test('STRIOC-CORR: a LOW (downgraded) behavioral finding does not corroborate', () => {

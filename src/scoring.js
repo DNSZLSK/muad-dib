@@ -1163,25 +1163,23 @@ function _hasProvenExfilSink(threats) {
 // exfiltration in b.js is still corroborated):
 //   - behavioral: any non-LOW finding whose type is in this fixed list, or a
 //     compound. The string IOC itself never counts.
-//   - multiplicity: >= 2 distinct CRITICAL strings of ONE campaign family (a
-//     build carries several artifacts of its own campaign; GT-099 has three).
-// Outcomes:
-//   - >= 2 unrelated families and no behavioral evidence: an IOC catalog. Every
-//     ioc_string_match is reported LOW (iocCatalog), visible but not scored.
-//   - otherwise, without evidence: CRITICAL matches keep their severity but are
-//     marked iocUncorroborated and no longer trigger the single-fire floor nor
-//     the MT-1 ceiling bypass (a lone CRITICAL still scores and alerts).
-// Attacker view: a payload that carries any behavior we detect stays
-// corroborated however many other campaigns' strings it embeds. Only a sample
-// with no detected behavior at all loses the floor, and that sample still
-// crosses the alert threshold on the CRITICAL weight alone.
+//   - multiplicity: >= 2 distinct CRITICAL strings, all of ONE campaign family
+//     (a build carries several artifacts of its own campaign; GT-099 has three).
+//     Strings of several unrelated families are what an IOC catalog looks like,
+//     so they do not corroborate each other.
+// Without evidence, CRITICAL matches keep their severity and their weight but are
+// marked iocUncorroborated: no single-fire floor, no MT-1 ceiling bypass. There
+// is deliberately NO path that lowers the severity: without behavioral evidence
+// an IOC-only sample and a defender's IOC catalog are structurally alike, and any
+// downgrade rule (e.g. "N unrelated families -> LOW") is bought by adding decoy
+// strings of other campaigns. The worst an attacker can obtain here is losing
+// the floor; the CRITICAL weight alone keeps the package above the alert threshold.
 const STRING_IOC_CORROBORATION_TYPES = new Set([
   ...HIGH_CONFIDENCE_MALICE_TYPES,
   ...PROVEN_EXFIL_SINK_TYPES,
   'known_malicious_hash', 'ioc_match', 'dependency_ioc_match'
 ]);
 STRING_IOC_CORROBORATION_TYPES.delete('ioc_string_match');
-const STRING_IOC_CATALOG_MIN_FAMILIES = 2;
 
 function _stringIocFamily(t) {
   if (typeof t.family === 'string' && t.family) return t.family;
@@ -1201,17 +1199,6 @@ function applyStringIocCorroboration(threats) {
     const f = _stringIocFamily(t);
     if (!families.has(f)) families.set(f, new Set());
     families.get(f).add(t.evidence);
-  }
-
-  if (families.size >= STRING_IOC_CATALOG_MIN_FAMILIES && !behavioral) {
-    const list = [...families.keys()].sort().join(', ');
-    for (const t of threats) {
-      if (!t || t.type !== 'ioc_string_match') continue;
-      t.severity = 'LOW';
-      t.iocCatalog = true;
-      t.message += ` [IOC catalog: CRITICAL string IOCs of ${families.size} unrelated campaign families (${list}) and no behavioral evidence, reported LOW]`;
-    }
-    return { outcome: 'catalog', families: [...families.keys()] };
   }
 
   const multiplicity = families.size === 1 && [...families.values()][0].size >= 2;
